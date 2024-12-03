@@ -1,0 +1,137 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name to use for the release'
+        required: false
+
+jobs:
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        os: [linux, windows]
+        arch: [amd64, arm64]
+
+    outputs:
+      TAG_NAME: ${{ steps.set_tag_name.outputs.TAG_NAME }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.23.1
+
+      - name: Determine TAG_NAME
+        id: set_tag_name
+        run: |
+          TAG_NAME="${{ github.event.inputs.tag_name || (github.ref_type == 'tag' && github.ref_name) || 'v0.0.0-test' }}"
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Print TAG_NAME
+        run: echo "TAG_NAME is ${{ steps.set_tag_name.outputs.TAG_NAME }}"
+
+      - name: Build Binary
+        run: |
+          TAG=${{ steps.set_tag_name.outputs.TAG_NAME }}
+          echo "Building for OS: ${{ matrix.os }}, Arch: ${{ matrix.arch }}, Tag: ${TAG}"
+          mkdir -p dist
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            GOOS=windows GOARCH=${{ matrix.arch }} go build -ldflags="-s -w" -o dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}.exe .
+          else
+            GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -ldflags="-s -w" -o dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }} .
+          fi
+
+          # Download and set up upx
+          wget https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz
+          tar -Jxf upx*.tar.xz
+          cp upx*/upx ./
+
+          # Compress binary
+          if [ "${{ matrix.os }}" != "windows" ]; then
+            ./upx dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+
+          du -sm dist/*
+        shell: bash
+
+      - name: Package Binary
+        run: |
+          TAG=${{ steps.set_tag_name.outputs.TAG_NAME }}
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            zip -j dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${TAG}.zip dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}.exe
+          else
+            tar -czvf dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${TAG}.tar.gz -C dist pt-tools-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+        shell: bash
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${{ steps.set_tag_name.outputs.TAG_NAME }}.*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    if: needs.build.outputs.TAG_NAME != 'v0.0.0-test'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Binaries
+        uses: actions/download-artifact@v3
+
+      - name: Move files to dist/
+        run: |
+          mkdir -p dist
+          find . -type f -name 'pt-tools-*' -exec mv {} dist/ \;
+
+      - name: List Downloaded Files
+        run: ls -l dist/
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: dist/*
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ needs.build.outputs.TAG_NAME }}
+          name: Release ${{ needs.build.outputs.TAG_NAME }}
+          prerelease: false
+
+  # docker:
+  #   name: Build and Publish Docker Image
+  #   runs-on: ubuntu-latest
+  #   needs: build
+
+  #   steps:
+  #     # Checkout the repository
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v3
+
+  #     # Log in to DockerHub
+  #     - name: Log in to DockerHub
+  #       uses: docker/login-action@v2
+  #       with:
+  #         username: ${{ secrets.DOCKER_USERNAME }}
+  #         password: ${{ secrets.DOCKER_PASSWORD }}
+
+  #     # Build and push the Docker image
+  #     - name: Build and Push Docker Image
+  #       uses: docker/build-push-action@v4
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: |
+  #           username/pt-tools:latest
+  #           username/pt-tools:${{ github.ref_name }}
