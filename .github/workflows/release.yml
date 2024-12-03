@@ -39,9 +39,7 @@ jobs:
           cp upx*/upx ./
 
           # 压缩二进制文件
-          if [ "${{ matrix.os }}" == "windows" ]; then
-            ./upx dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}.exe
-          else
+          if [ "${{ matrix.os }}" != "windows" ]; then
             ./upx dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}
           fi
 
