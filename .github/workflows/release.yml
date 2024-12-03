@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -88,26 +89,31 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const { data: releases } = await github.repos.listReleases({
+            const tag = '${{ github.ref_name }}';
+
+            // 获取现有的 Releases
+            const { data: releases } = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo,
             });
 
-            const tag = '${{ github.ref_name }}';
+            // 查找是否存在对应标签的 Release
             let release = releases.find(r => r.tag_name === tag);
 
+            // 如果不存在，则创建新的 Release
             if (!release) {
-              const { data } = await github.repos.createRelease({
+              const response = await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: tag,
                 name: `Release ${tag}`,
                 prerelease: false,
               });
-              release = data;
+              release = response.data;
             }
 
             core.setOutput('upload_url', release.upload_url);
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Asset
         uses: actions/upload-release-asset@v1
@@ -117,7 +123,6 @@ jobs:
             dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.*
           asset_name: pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.${{ matrix.os == 'windows' && 'zip' || 'tar.gz' }}
           asset_content_type: application/octet-stream
-
 
   # docker:
   #   name: Build and Publish Docker Image
