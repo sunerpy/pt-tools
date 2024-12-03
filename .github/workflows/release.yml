@@ -3,11 +3,11 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*' # 仅在推送标签时触发，例如 v1.0.0
+      - 'v*'
 
 jobs:
   build:
-    name: Build and Release Binaries
+    name: Build Binaries
     runs-on: ubuntu-latest
 
     strategy:
@@ -16,53 +16,110 @@ jobs:
         arch: [amd64, arm64]
 
     steps:
-      # Checkout the repository
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Set up Go environment
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: 1.23.1
 
-      # Build the binaries
       - name: Build Binary
         run: |
           mkdir -p dist
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }} .
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            GOOS=windows GOARCH=${{ matrix.arch }} go build -o dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}.exe .
+          else
+            GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }} .
+          fi
 
-      # Upload binaries as artifacts
+          # 下载并设置 upx
+          wget https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz
+          tar -Jxf upx*.tar.xz
+          cp upx*/upx ./
+
+          # 压缩二进制文件
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            ./upx dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}.exe
+          else
+            ./upx dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+
+          du -sm dist/*
+        shell: bash
+
+      - name: Package Binary
+        run: |
+          TAG=${{ github.ref_name }}
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            zip -j dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${TAG}.zip dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}.exe
+          else
+            tar -czvf dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${TAG}.tar.gz -C dist pt-tools-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+        shell: bash
+
       - name: Upload Binaries
         uses: actions/upload-artifact@v3
         with:
-          name: pt-tools-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}
+          name: binaries-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.*
 
   release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        os: [linux, windows]
+        arch: [amd64, arm64]
+
     steps:
       - name: Download Binaries
         uses: actions/download-artifact@v3
         with:
-          name: pt-tools-linux-amd64
+          name: binaries-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/
 
-      - name: Create Release
-        uses: ncipollo/release-action@v1
+      - name: List Downloaded Files
+        run: ls -l dist/
+
+      - name: Create or Update Release
+        id: create_release
+        uses: actions/github-script@v6
         with:
-          artifacts: |
-            dist/pt-tools-linux-amd64
-            dist/pt-tools-linux-arm64
-            dist/pt-tools-windows-amd64.exe
-            dist/pt-tools-windows-arm64.exe
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          prerelease: false
+          script: |
+            const { data: releases } = await github.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const tag = '${{ github.ref_name }}';
+            let release = releases.find(r => r.tag_name === tag);
+
+            if (!release) {
+              const { data } = await github.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `Release ${tag}`,
+                prerelease: false,
+              });
+              release = data;
+            }
+
+            core.setOutput('upload_url', release.upload_url);
+
+      - name: Upload Asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: |
+            dist/pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.*
+          asset_name: pt-tools-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.${{ matrix.os == 'windows' && 'zip' || 'tar.gz' }}
+          asset_content_type: application/octet-stream
+
 
   # docker:
   #   name: Build and Publish Docker Image
