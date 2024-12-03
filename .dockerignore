@@ -1,0 +1,21 @@
+# 忽略所有文件和文件夹
+*
+# 保留 Go 源文件
+!*.go
+
+# 保留主目录下的 go.mod 文件
+!go.*
+
+# 保留 main.go 文件
+!main.go
+
+# 保留所有子目录
+!*/
+
+# 其他需要忽略的文件或目录
+Dockerfile
+Makefile
+.*
+.git
+.gitignore
+jsons
