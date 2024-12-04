@@ -29,8 +29,82 @@
 3. 将二进制文件移动到系统 `PATH`：
 
     ```bash
+    mv pt-tools /usr/local/bin/pt-tools
+    ```
+
+### 一键部署
+
+提供了一个自动化脚本，帮助用户快速下载和安装` pt-tools`。
+
+```json
+curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/download.sh | bash
+```
+
+### 下载最新 Release
+
+1. 前往 [pt-tools Release 页面](https://github.com/sunerpy/pt-tools/releases)，下载适合你系统的最新版本二进制文件。
+2. 解压下载的压缩包：
+
+    ```bash
+    tar -xvzf pt-tools-linux-amd64.tar.gz
+    ```
+
+    或：
+
+    ```bash
+    unzip pt-tools-windows-amd64.exe.zip
+    ```
+3. 将解压后的二进制文件移动到系统 `PATH`：
+
+    ```bash
     mv pt-tools /usr/local/bin/
     ```
+4. 验证安装：
+
+    ```bash
+    pt-tools version
+    ```
+
+---
+
+## 快速开始
+
+### 初始化配置
+
+1. 初始化默认配置文件：
+
+    ```bash
+    pt-tools config init
+    ```
+
+    运行此命令后，将生成默认配置文件，路径为 `$HOME/.pt-tools/config.toml`。
+2. 打开配置文件修改选项：
+
+    ```bash
+    vim $HOME/.pt-tools/config.toml
+    ```
+
+    或使用其他文本编辑器。根据实际需求调整配置选项。
+
+### 单次运行
+
+使用以下命令进行一次性任务运行：
+
+```bash
+pt-tools run
+```
+
+### 持续运行
+
+如果需要持续执行任务，可以使用 `-m persistent` 模式：
+
+```bash
+pt-tools run -m persistent
+```
+
+---
+
+通过以上简单步骤，你可以快速配置并运行 `pt-tools`。
 
 ---
 
@@ -322,10 +396,10 @@ download_sub_path = "mteam/tvs"
 
 ## 贡献
 
-欢迎贡献代码！请通过 [GitHub 仓库](https://github.com/your-repo/pt-tools) 提交问题或拉取请求。
+欢迎贡献代码！请通过 [GitHub 仓库](https://github.com/sunerpy/pt-tools) 提交问题或拉取请求。
 
 ---
 
 ## 许可证
 
-本项目基于 [MIT 许可证](LICENSE) 进行许可。
+本项目基于 [MIT 许可证](https://github.com/sunerpy/pt-tools?tab=MIT-1-ov-file) 进行许可。
