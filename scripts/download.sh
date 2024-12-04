@@ -41,7 +41,7 @@ install_pt_tools() {
     tar -xvzf pt-tools-$PLATFORM.tar.gz
 
     echo "Installing pt-tools to $INSTALL_DIR..."
-    sudo mv pt-tools-$PLATFORM "$INSTALL_DIR/pt-tools"
+    sudo mv pt-tools "$INSTALL_DIR/pt-tools"
     sudo chmod +x "$INSTALL_DIR/pt-tools"
 
     echo "Cleaning up..."

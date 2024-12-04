@@ -62,6 +62,7 @@ default_enabled = true        # 默认是否启用站点任务，true 为启用�
 download_dir = "downloads"    # 默认的种子下载目录。
 download_limit_enabled = true # 是否启用下载限速，true 为启用，false 为禁用。
 download_speed_limit = 20     # 下载速度限制（单位：MB/s）。
+torrent_size_gb = 500         # 默认的下载种子大小（单位：GB）。
 [qbit]
 enabled = true                  # 是否启用 qBittorrent 客户端，true 为启用，false 为禁用。
 url = "http://xxx.xxx.xxx:8080" # qBittorrent Web UI 的 URL 地址。
@@ -69,7 +70,6 @@ user = "admin"                  # qBittorrent 的登录用户名。
 password = "adminadmin"         # qBittorrent 的登录密码。
 [sites]
     [sites.mteam] # 定义 MTeam 站点的配置信息。
-    name = "MTeam"                         # 站点名称。
     enabled = false                        # 是否启用 MTeam 站点任务，true 为启用，false 为禁用。
     auth_method = "api_key"                # 认证方式，MT站点支持 "api_key"。
     api_key = "xxx"                        # 如果使用 API 认证，此处填写 API 密钥。
@@ -82,7 +82,6 @@ password = "adminadmin"         # qBittorrent 的登录密码。
         interval_minutes = 10                      # RSS 任务执行间隔时间（单位：分钟）。
         download_sub_path = "mteam/tvs"            # 下载的种子存储的子目录。
     [sites.hdsky] # 定义 HDSky 站点的配置信息。
-    name = "HDSky"         # 站点名称。
     enabled = true         # 是否启用 HDSky 站点任务，true 为启用，false 为禁用。
     auth_method = "cookie" # 认证方式，支持 "api_key" 和 "cookie"。
     cookie = "xxx"         # 如果使用 Cookie 认证，此处填写 Cookie。
@@ -93,6 +92,17 @@ password = "adminadmin"         # qBittorrent 的登录密码。
         tag = "HDSKY"                                # 为任务添加的标记（用于区分）。
         interval_minutes = 5                         # RSS 任务执行间隔时间（单位：分钟）。
         download_sub_path = "hdsky/"                 # 下载的种子存储的子目录。
+    [sites.cmct] # 定义 CMCT 站点的配置信息。
+    enabled = true         # 是否启用 CMCT 站点任务，true 为启用，false 为禁用。
+    auth_method = "cookie" # 认证方式，"cookie"。
+    cookie = "xxx"         # 如果使用 Cookie 认证，此处填写 Cookie。
+        [[sites.cmct.rss]] # 定义 CMCT 站点的 RSS 订阅信息。
+        name = "CMCT"                 # RSS 订阅的名称。
+        url = "https://springxxx.xxx" # RSS 订阅链接。
+        category = "Tv"               # RSS 订阅分类。
+        tag = "CMCT"                  # 为任务添加的标记（用于区分）。
+        interval_minutes = 5          # RSS 任务执行间隔时间（单位：分钟）。
+        download_sub_path = "cmct/"   # 下载的种子存储的子目录。
 `
 
 // 创建默认配置文件

@@ -21,6 +21,7 @@ type GlobalConfig struct {
 	DownloadDir          string        `mapstructure:"download_dir"`
 	DownloadLimitEnabled bool          `mapstructure:"download_limit_enabled"`
 	DownloadSpeedLimit   int           `mapstructure:"download_speed_limit"`
+	TorrentSizeGB        int           `mapstructure:"torrent_size_gb"`
 }
 
 // qBittorrent 配置
@@ -44,7 +45,6 @@ type RSSConfig struct {
 // 单个站点的配置
 type SiteConfig struct {
 	Enabled    *bool       `mapstructure:"enabled"`     // 是否启用，优先级高于全局默认值
-	Name       string      `mapstructure:"name"`        // 站点名称
 	AuthMethod string      `mapstructure:"auth_method"` // 认证方式: "cookie" 或 "api_key"
 	Cookie     string      `mapstructure:"cookie"`      // 登录 Cookie
 	APIKey     string      `mapstructure:"api_key"`     // API Token（如果需要）

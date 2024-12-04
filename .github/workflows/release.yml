@@ -82,8 +82,23 @@ jobs:
       - name: Organize Files
         run: |
           mkdir -p artifacts
-          mv *.tar.gz artifacts/
-          mv *.zip artifacts/
+          for file in *.tar.gz; do
+            new_file_name="artifacts/${file}"
+            mkdir temp && tar -xzf "$file" -C temp && rm -f ${file}
+            mv temp/pt-tools-* temp/pt-tools
+            # 重新打包并避免多余的 ./ 路径
+            (cd temp && tar -czf "../$new_file_name" *)
+            rm -rf temp
+          done
+          # 处理 .zip 文件
+          for file in *.zip; do
+            new_file_name="artifacts/${file}"
+            mkdir temp && unzip -q "$file" -d temp && rm -f ${file}
+            mv temp/pt-tools-* temp/pt-tools
+            # 重新打包为 .zip 文件
+            (cd temp && zip -rq "../$new_file_name" *)
+            rm -rf temp
+          done
 
       - name: List Downloaded Files
         run: ls -l artifacts/

@@ -40,10 +40,14 @@ func (p PHPTorrentInfo) IsFree() bool {
 	return false
 }
 
-func (p PHPTorrentInfo) CanbeFinished(logger *zap.Logger, enabled bool, speedLimit int) bool {
+func (p PHPTorrentInfo) CanbeFinished(logger *zap.Logger, enabled bool, speedLimit, sizeLimitGB int) bool {
 	if !enabled {
 		return true
 	} else {
+		if p.SizeMB >= float64(sizeLimitGB*1024) {
+			logger.Warn("种子大小超过设定值,跳过...")
+			return false
+		}
 		duration := p.EndTime.Sub(time.Now())
 		secondsDiff := int(duration.Seconds())
 		if float64(secondsDiff)*float64(speedLimit) < (p.SizeMB / 1024 / 1024) {

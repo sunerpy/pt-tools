@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,25 +17,32 @@ func genTorrentsWithRSSOnce(ctx context.Context) error {
 	// 在上下文中设置模式
 	ctx = context.WithValue(ctx, "mode", "single")
 	var wg sync.WaitGroup // 定义 WaitGroup，用于等待所有 goroutine 结束
-	for _, cfg := range global.GlobalCfg.Sites {
+	for k, cfg := range global.GlobalCfg.Sites {
 		if cfg.Enabled != nil && *cfg.Enabled {
-			switch strings.ToLower(cfg.Name) {
-			case "mteam":
+			switch k {
+			case models.MTEAM:
 				siteImpl := internal.NewMteamImpl(ctx)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					runSiteJobs(ctx, cfg, siteImpl)
+					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
-			case "hdsky":
+			case models.HDSKY:
 				siteImpl := internal.NewHdskyImpl(ctx)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					runSiteJobs(ctx, cfg, siteImpl)
+					runSiteJobs(ctx, k, cfg, siteImpl)
+				}()
+			case models.CMCT:
+				siteImpl := internal.NewCmctImpl(ctx)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
 			default:
-				global.GlobalLogger.Warn("未找到站点配置,跳过任务", zap.String("site_name", cfg.Name))
+				global.GlobalLogger.Warn("未找到站点配置,跳过任务", zap.String("site_name", string(k)))
 			}
 		}
 	}
@@ -50,25 +56,32 @@ func genTorrentsWithRSS(ctx context.Context) error {
 	// 在上下文中设置模式
 	ctx = context.WithValue(ctx, "mode", "persistent")
 	var wg sync.WaitGroup // 定义 WaitGroup，用于等待所有 goroutine 结束
-	for _, cfg := range global.GlobalCfg.Sites {
+	for k, cfg := range global.GlobalCfg.Sites {
 		if cfg.Enabled != nil && *cfg.Enabled {
-			switch strings.ToLower(cfg.Name) {
-			case "mteam":
+			switch k {
+			case models.MTEAM:
 				siteImpl := internal.NewMteamImpl(ctx)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					runSiteJobs(ctx, cfg, siteImpl)
+					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
-			case "hdsky":
+			case models.HDSKY:
 				siteImpl := internal.NewHdskyImpl(ctx)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					runSiteJobs(ctx, cfg, siteImpl)
+					runSiteJobs(ctx, k, cfg, siteImpl)
+				}()
+			case models.CMCT:
+				siteImpl := internal.NewCmctImpl(ctx)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
 			default:
-				global.GlobalLogger.Warn("未找到站点配置,跳过任务", zap.String("site_name", cfg.Name))
+				global.GlobalLogger.Warn("未找到站点配置,跳过任务", zap.String("site_name", string(k)))
 			}
 		}
 	}
@@ -80,20 +93,20 @@ func genTorrentsWithRSS(ctx context.Context) error {
 }
 
 // 站点任务
-func runSiteJobs[T models.ResType](ctx context.Context, siteCfg config.SiteConfig, siteImpl internal.PTSiteInter[T]) {
+func runSiteJobs[T models.ResType](ctx context.Context, siteName models.SiteGroup, siteCfg config.SiteConfig, siteImpl internal.PTSiteInter[T]) {
 	var siteWg sync.WaitGroup // 用于等待该站点的所有 RSS 任务结束
 	for _, rss := range siteCfg.RSS {
 		siteWg.Add(1)
 		go func(rss config.RSSConfig) {
 			defer siteWg.Done()
-			runRSSJob(ctx, siteCfg.Name, rss, siteImpl)
+			runRSSJob(ctx, siteName, rss, siteImpl)
 		}(rss)
 	}
 	siteWg.Wait() // 等待该站点的所有 RSS 任务结束
 }
 
 // RSS 任务
-func runRSSJob[T models.ResType](ctx context.Context, siteName string, cfg config.RSSConfig, siteImpl internal.PTSiteInter[T]) {
+func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg config.RSSConfig, siteImpl internal.PTSiteInter[T]) {
 	ticker := time.NewTicker(time.Duration(cfg.IntervalMinutes) * time.Minute)
 	defer ticker.Stop()
 	executeTask(ctx, siteName, cfg, siteImpl)
@@ -115,7 +128,7 @@ func runRSSJob[T models.ResType](ctx context.Context, siteName string, cfg confi
 }
 
 // 执行单次任务
-func executeTask[T models.ResType](ctx context.Context, siteName string, cfg config.RSSConfig, siteImpl internal.PTSiteInter[T]) {
+func executeTask[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg config.RSSConfig, siteImpl internal.PTSiteInter[T]) {
 	global.GlobalLogger.Info("开始任务", zap.String("site_name", cfg.Name))
 	if err := processRSS(ctx, siteName, cfg, siteImpl); err != nil {
 		global.GlobalLogger.Error("任务执行失败", zap.String("site_name", cfg.Name), zap.Error(err))
@@ -125,7 +138,7 @@ func executeTask[T models.ResType](ctx context.Context, siteName string, cfg con
 }
 
 // 处理单个 RSS 配置
-func processRSS[T models.ResType](ctx context.Context, siteName string, cfg config.RSSConfig, ptSite internal.PTSiteInter[T]) error {
+func processRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg config.RSSConfig, ptSite internal.PTSiteInter[T]) error {
 	if err := internal.FetchAndDownloadFreeRSS(ctx, siteName, ptSite, cfg); err != nil {
 		return err
 	}

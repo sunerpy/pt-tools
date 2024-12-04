@@ -131,7 +131,7 @@ func (m *MteamImpl) RetryDelay() time.Duration {
 
 func (m *MteamImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error {
 	dirPath := filepath.Join(global.GlobalDirCfg.DownloadDir, rssCfg.DownloadSubPath)
-	err := ProcessTorrentsWithDBUpdate(ctx, m.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, global.GetGlobalConfig().Sites[models.MTEAM].Name)
+	err := ProcessTorrentsWithDBUpdate(ctx, m.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.MTEAM)
 	if err != nil {
 		global.GlobalLogger.Fatal("发送种子到 qBittorrent 失败", zap.Error(err))
 		return err

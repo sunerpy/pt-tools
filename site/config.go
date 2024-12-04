@@ -2,6 +2,7 @@ package site
 
 import (
 	"github.com/sunerpy/pt-tools/config"
+	"github.com/sunerpy/pt-tools/models"
 )
 
 type SiteMapConfig struct {
@@ -34,11 +35,11 @@ func newSharedSiteConfig(cookie string, refererProvider RefererProvider) *Shared
 }
 
 // 单个 URL 创建单个 SiteMapConfig
-func NewSiteMapConfig(name, cookie string, conf config.SiteConfig, parser SiteParser) *SiteMapConfig {
+func NewSiteMapConfig(name models.SiteGroup, cookie string, conf config.SiteConfig, parser SiteParser) *SiteMapConfig {
 	refererProvider := NewDefaultReferer(name)
 	sharedCfg := newSharedSiteConfig(cookie, refererProvider)
 	return &SiteMapConfig{
-		Name:         name,
+		Name:         string(name),
 		Config:       conf,
 		SharedConfig: sharedCfg,
 		Parser:       parser,

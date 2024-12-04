@@ -16,7 +16,7 @@ type ResType interface {
 }
 type FreeDownChecker interface {
 	IsFree() bool
-	CanbeFinished(logger *zap.Logger, enabled bool, speedLimit int) bool
+	CanbeFinished(logger *zap.Logger, enabled bool, speedLimit, sizeLimitGB int) bool
 	GetFreeEndTime() *time.Time
 }
 type APIResponse[T ResType] struct {
@@ -154,7 +154,7 @@ func (t MTTorrentDetail) IsFree() bool {
 	return false
 }
 
-func (t MTTorrentDetail) CanbeFinished(logger *zap.Logger, enabled bool, speedLimit int) bool {
+func (t MTTorrentDetail) CanbeFinished(logger *zap.Logger, enabled bool, speedLimit, sizeLimitGB int) bool {
 	if !enabled {
 		return true
 	} else {
@@ -174,6 +174,10 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.Logger, enabled bool, speedLi
 		torrentSizeMB, err := strconv.Atoi(t.Size)
 		if err != nil {
 			logger.Error("解析种子大小失败", zap.Error(err))
+			return false
+		}
+		if torrentSizeMB > sizeLimitGB*1024 {
+			logger.Warn("种子大小超过设定值,跳过...")
 			return false
 		}
 		duration := timeEnd.Sub(time.Now())

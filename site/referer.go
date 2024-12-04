@@ -1,8 +1,8 @@
 package site
 
 import (
-	"strings"
-
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
 	"go.uber.org/zap"
 )
 
@@ -10,26 +10,26 @@ type RefererProvider interface {
 	GetReferer() string
 }
 type DefaultReferer struct {
-	siteName   string
-	refererMap map[string]string
+	siteName   models.SiteGroup
+	refererMap map[models.SiteGroup]string
 }
 
 // NewDefaultReferer 构造函数，用于初始化 refererMap
-func NewDefaultReferer(siteName string) *DefaultReferer {
+func NewDefaultReferer(siteName models.SiteGroup) *DefaultReferer {
 	return &DefaultReferer{
 		siteName: siteName,
-		refererMap: map[string]string{
-			"hdsky":   "https://hdsky.me/",
-			"example": "https://example.com/",
+		refererMap: map[models.SiteGroup]string{
+			models.HDSKY: "https://hdsky.me/",
+			models.CMCT:  "https://springsunday.net/",
 		},
 	}
 }
 
 // GetReferer 实现 RefererProvider 接口
 func (d *DefaultReferer) GetReferer() string {
-	if referer, ok := d.refererMap[strings.ToLower(d.siteName)]; ok {
+	if referer, ok := d.refererMap[d.siteName]; ok {
 		return referer
 	}
-	logger.Fatal("无法找到默认 Referer", zap.String("siteName", d.siteName))
+	global.GlobalLogger.Fatal("无法找到默认 Referer", zap.String("siteName", string(d.siteName)))
 	return ""
 }

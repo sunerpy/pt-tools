@@ -91,7 +91,7 @@ func downloadTorrent(url, title, downloadDir string, maxRetries int, retryDelay 
 
 func downloadWorker[T models.ResType](
 	ctx context.Context,
-	siteName string,
+	siteName models.SiteGroup,
 	wg *sync.WaitGroup,
 	site PTSiteInter[T],
 	torrentChan <-chan *gofeed.Item,
@@ -110,7 +110,7 @@ func downloadWorker[T models.ResType](
 			torrentURL := item.Enclosures[0].URL
 			title := item.Title
 			// 查询数据库记录
-			torrent, err := global.GlobalDB.GetTorrentBySiteAndID(siteName, item.GUID)
+			torrent, err := global.GlobalDB.GetTorrentBySiteAndID(string(siteName), item.GUID)
 			if err != nil {
 				global.GlobalLogger.Error("获取种子详情失败", zap.String("title", title), zap.Error(err))
 				continue
@@ -127,12 +127,12 @@ func downloadWorker[T models.ResType](
 				continue
 			}
 			detail := resDetail.Data
-			canFinished := detail.CanbeFinished(global.GlobalLogger, global.GetGlobalConfig().Global.DownloadLimitEnabled, global.GetGlobalConfig().Global.DownloadSpeedLimit)
+			canFinished := detail.CanbeFinished(global.GlobalLogger, global.GetGlobalConfig().Global.DownloadLimitEnabled, global.GetGlobalConfig().Global.DownloadSpeedLimit, global.GetGlobalConfig().Global.TorrentSizeGB)
 			isFree := detail.IsFree()
 			// 更新种子状态（标记跳过或继续下载）
 			if torrent == nil {
 				torrent = &models.TorrentInfo{
-					SiteName:    siteName,
+					SiteName:    string(siteName),
 					TorrentID:   item.GUID,
 					FreeLevel:   "free",
 					FreeEndTime: detail.GetFreeEndTime(),
@@ -192,7 +192,8 @@ func downloadWorker[T models.ResType](
 func ProcessTorrentsWithDBUpdate(
 	ctx context.Context,
 	qbitClient *qbit.QbitClient,
-	dirPath, category, tags, siteName string,
+	dirPath, category, tags string,
+	siteName models.SiteGroup,
 ) error {
 	// 使用事务处理目录和更新数据库
 	return global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
@@ -209,7 +210,7 @@ func ProcessTorrentsWithDBUpdate(
 				return fmt.Errorf("计算种子哈希失败: %w", err)
 			}
 			// 查询数据库中的种子信息
-			torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(siteName, torrentHash)
+			torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(string(siteName), torrentHash)
 			if err != nil {
 				return fmt.Errorf("查询种子信息失败: %w", err)
 			}
@@ -282,7 +283,7 @@ func sanitizeTitle(title string) string {
 	return strings.TrimSpace(sanitized)
 }
 
-func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName string, m PTSiteInter[T], rssCfg config.RSSConfig) error {
+func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup, m PTSiteInter[T], rssCfg config.RSSConfig) error {
 	if !m.IsEnabled() {
 		return fmt.Errorf(enableError)
 	}

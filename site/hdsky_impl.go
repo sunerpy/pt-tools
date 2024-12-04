@@ -9,6 +9,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/fatih/color"
 	"github.com/gocolly/colly"
+	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"go.uber.org/zap"
 )
@@ -72,7 +73,7 @@ func (p *HDSkyParser) ParseDiscount(e *colly.HTMLElement, info *models.PHPTorren
 		if err == nil {
 			info.EndTime = t
 		} else {
-			logger.Error("解析结束时间出错:", zap.Error(err))
+			global.GlobalLogger.Error("解析结束时间出错:", zap.Error(err))
 		}
 	}
 }
@@ -99,7 +100,7 @@ func (p *HDSkyParser) ParseTorrentSizeMB(e *colly.HTMLElement, info *models.PHPT
 		sizeRe := regexp.MustCompile(`大小：[^\d]*([\d.]+)\s*(GB|MB|KB)`)
 		matches := sizeRe.FindStringSubmatch(text)
 		if len(matches) < 3 {
-			logger.Error("无法解析大小信息")
+			global.GlobalLogger.Error("无法解析大小信息")
 			return
 		}
 		// 提取大小和单位
@@ -108,7 +109,7 @@ func (p *HDSkyParser) ParseTorrentSizeMB(e *colly.HTMLElement, info *models.PHPT
 		// 转换大小为浮点数
 		size, err := strconv.ParseFloat(sizeValue, 64)
 		if err != nil {
-			logger.Error("无法解析大小", zap.Error(err))
+			global.GlobalLogger.Error("无法解析大小", zap.Error(err))
 			return
 		}
 		// 根据单位换算为 MB
