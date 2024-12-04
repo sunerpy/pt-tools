@@ -36,7 +36,7 @@
 
 提供了一个自动化脚本，帮助用户快速下载和安装` pt-tools`。
 
-```json
+```bash
 curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/download.sh | bash
 ```
 
