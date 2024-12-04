@@ -14,6 +14,20 @@ const (
 	WorkDir = ".pt-tools"
 )
 
+var DefaultZapConfig = Zap{
+	Directory:     "logs",
+	MaxSize:       10,
+	MaxAge:        30,
+	MaxBackups:    10,
+	Compress:      true,
+	Level:         "info",
+	Format:        "json",
+	ShowLine:      false,
+	EncodeLevel:   "LowercaseLevelEncoder",
+	StacktraceKey: "stacktrace",
+	LogInConsole:  true,
+}
+
 type Zap struct {
 	Directory     string `mapstructure:"directory" json:"directory"  yaml:"directory"`
 	MaxSize       int    `mapstructure:"max_size" json:"max_size" yaml:"max_size"`

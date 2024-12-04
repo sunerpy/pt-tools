@@ -56,18 +56,43 @@ func init() {
 }
 
 const defaultConfigContent = `
-[pt_sites.mteam]
-name = "mteam"
-rss_url = "https://rss.m-team.cc/api/rss/xxxx"
-download_dir = "./downloads/mteam"
-interval_minutes = 5
-enabled = true
-[pt_sites.ptsite2]
-name = "ptsite2"
-rss_url = "https://rss.ptsite2.com/api/rss/yyyy"
-download_dir = "./downloads/ptsite2"
-interval_minutes = 5
-enabled = false
+[global]
+default_interval = "5m"       # 默认的任务间隔时间（单位：分钟），例如 "5m" 表示每 5 分钟运行一次任务。
+default_enabled = true        # 默认是否启用站点任务，true 为启用，false 为禁用。
+download_dir = "downloads"    # 默认的种子下载目录。
+download_limit_enabled = true # 是否启用下载限速，true 为启用，false 为禁用。
+download_speed_limit = 20     # 下载速度限制（单位：MB/s）。
+[qbit]
+enabled = true                  # 是否启用 qBittorrent 客户端，true 为启用，false 为禁用。
+url = "http://xxx.xxx.xxx:8080" # qBittorrent Web UI 的 URL 地址。
+user = "admin"                  # qBittorrent 的登录用户名。
+password = "adminadmin"         # qBittorrent 的登录密码。
+[sites]
+    [sites.mteam] # 定义 MTeam 站点的配置信息。
+    name = "MTeam"                         # 站点名称。
+    enabled = false                        # 是否启用 MTeam 站点任务，true 为启用，false 为禁用。
+    auth_method = "api_key"                # 认证方式，MT站点支持 "api_key"。
+    api_key = "xxx"                        # 如果使用 API 认证，此处填写 API 密钥。
+    api_url = "https://api.m-team.xxx/api" # API 地址。
+        [[sites.mteam.rss]] # 定义 MTeam 站点的 RSS 订阅信息。
+        name = "TMP2"                              # RSS 订阅的名称。
+        url = "https://rss.m-team.xxx/api/rss/xxx" # RSS 订阅链接。
+        category = "Tv"                            # RSS 订阅分类。
+        tag = "MT"                                 # 为任务添加的标记（用于区分）。
+        interval_minutes = 10                      # RSS 任务执行间隔时间（单位：分钟）。
+        download_sub_path = "mteam/tvs"            # 下载的种子存储的子目录。
+    [sites.hdsky] # 定义 HDSky 站点的配置信息。
+    name = "HDSky"         # 站点名称。
+    enabled = true         # 是否启用 HDSky 站点任务，true 为启用，false 为禁用。
+    auth_method = "cookie" # 认证方式，支持 "api_key" 和 "cookie"。
+    cookie = "xxx"         # 如果使用 Cookie 认证，此处填写 Cookie。
+        [[sites.hdsky.rss]] # 定义 HDSky 站点的 RSS 订阅信息。
+        name = "HDSky"                               # RSS 订阅的名称。
+        url = "https://hdsky.xxx/torrentrss.php?xxx" # RSS 订阅链接。
+        category = "Mv"                              # RSS 订阅分类。
+        tag = "HDSKY"                                # 为任务添加的标记（用于区分）。
+        interval_minutes = 5                         # RSS 任务执行间隔时间（单位：分钟）。
+        download_sub_path = "hdsky/"                 # 下载的种子存储的子目录。
 `
 
 // 创建默认配置文件

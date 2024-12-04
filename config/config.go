@@ -54,10 +54,10 @@ type SiteConfig struct {
 
 // 完整配置
 type Config struct {
-	Global GlobalConfig                    `mapstructure:"global"` // 全局默认配置
-	Zap    Zap                             `mapstructure:"zap"`
-	Qbit   QbitConfig                      `mapstructure:"qbit"`  // 全局 qBittorrent 配置
-	Sites  map[models.SiteGroup]SiteConfig `mapstructure:"sites"` // 多个站点配置
+	Global GlobalConfig `mapstructure:"global"` // 全局默认配置
+	// Zap    Zap                             `mapstructure:"zap"`
+	Qbit  QbitConfig                      `mapstructure:"qbit"`  // 全局 qBittorrent 配置
+	Sites map[models.SiteGroup]SiteConfig `mapstructure:"sites"` // 多个站点配置
 }
 
 // Mteam  SiteConfig   `mapstructure:"mteam"`  // 多站点配置

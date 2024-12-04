@@ -1,17 +1,19 @@
 SHELL=/bin/bash
-ENV?=dev
-CONFIG_FILE = $(ENV).yaml
-NAMESPACE?=default
-# ! 注意：如果修改镜像名，需要同时修改 deploy/xxx/values.yaml 文件中的镜像名
+CONFIG_FILE = config.toml
 IMAGE_NAME = pt-tools
-export ENV
-export CONFIG_FILE
-# 根路径
+UPX_VERSION=4.2.4
+UPX_DIR=upx-$(UPX_VERSION)-amd64_linux
+UPX_BIN=$(UPX_DIR)/upx
 PROJECT_ROOT=$(abspath .)
-# 获取当前的 Git tag 或手动设置的版本
 GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 NEW_TAG=$(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
-# 判断目标名称，如果是 prod-new 则使用新 tag，否则使用现有 tag
+
+# Docker 镜像仓库
+DOCKER_REPO = sunerpys
+DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
+TAG ?= $(GIT_TAG)
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+COMMIT_ID := $(shell git rev-parse HEAD)
 ifeq ($(MAKECMDGOALS), prod-new)
     TAG=$(NEW_TAG)
 else ifeq ($(MAKECMDGOALS), test-new)
@@ -20,60 +22,140 @@ else
     TAG=$(GIT_TAG)
 endif
 
-# Dockerfile路径
-DOCKERFILE_PATH=$(strip $(PROJECT_ROOT))/Dockerfile
-REPOSITORY = 107255705363.dkr.ecr.cn-northwest-1.amazonaws.com.cn/sunerpy/${IMAGE_NAME}
-IMAGE_FULL_NAME = $(REPOSITORY):$(TAG)-$(ENV)
-BUILD_IMAGE_SERVER = golang:1.23.1
-.PHONY: test prod build-local code-format
+# 定义多平台
+PLATFORMS=linux/amd64 linux/arm64 windows/amd64 windows/arm64
+DOCKERPLATFORMS=linux/amd64
+DIST_DIR = dist
 
-dev: ENV = dev
-dev: CONFIG_FILE = $(ENV).yaml
-dev: NAMESPACE = dev-opsx
-dev: unit-test build-local push-image clean
-	@echo "Running build dev with unit tests : $(CONFIG_FILE)"
+HTTP_PROXY ?=
+HTTPS_PROXY ?=
+NO_PROXY ?=
 
-test: ENV = test
-test: CONFIG_FILE = $(ENV).yaml
-test: NAMESPACE = test-opsx
-test: build-local push-image clean
-	@echo "Running build test unit tests : $(CONFIG_FILE)"
+# 默认基础镜像
+BUILD_IMAGE ?= golang:1.23.1
+BASE_IMAGE ?= alpine:3.20.3
+BUILD_ENV ?= remote
 
-test-new: ENV = test
-test-new: CONFIG_FILE = $(ENV).yaml
-test-new: NAMESPACE = test-opsx
-test-new: build-local push-image clean
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean code-format
 
+# 本地构建二进制
+build-local: code-format
+	@echo "Building binary for local environment"
+	mkdir -p $(DIST_DIR)
+	GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
+		go build -ldflags="-s -w \
+		-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
+		-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
+		-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+		-o $(DIST_DIR)/$(IMAGE_NAME) .
 
-prod: ENV = prod
-prod: CONFIG_FILE = $(ENV).yaml
-prod: NAMESPACE = prod-opsx
-prod: build-local push-image clean
+# 多平台二进制构建
+build-binaries:
+	@echo "Building binaries for platforms: $(PLATFORMS)"
+	for platform in $(PLATFORMS); do \
+		GOOS=$$(echo $$platform | cut -d/ -f1); \
+		GOARCH=$$(echo $$platform | cut -d/ -f2); \
+		OUTPUT=$(DIST_DIR)/$(IMAGE_NAME)-$$GOOS-$$GOARCH; \
+		if [ "$$GOOS" = "windows" ]; then OUTPUT=$$OUTPUT.exe; fi; \
+		echo "Building for $$platform -> $$OUTPUT"; \
+		GOOS=$$GOOS GOARCH=$$GOARCH go build -ldflags="-s -w \
+		-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
+		-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
+		-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+		-o $$OUTPUT . || exit 1; \
+	done
 
-prod-new: ENV = prod
-prod-new: CONFIG_FILE = $(ENV).yaml
-prod-new: NAMESPACE = prod-opsx
-prod-new: build-local push-image clean
+# 检测并安装 UPX
+install-upx: build-binaries
+	@echo "Checking for UPX..."
+	if [ ! -f "$(UPX_BIN)" ]; then \
+		echo "UPX not found. Downloading UPX $(UPX_VERSION)..."; \
+		curl -sL -o upx.tar.xz https://github.com/upx/upx/releases/download/v$(UPX_VERSION)/upx-$(UPX_VERSION)-amd64_linux.tar.xz; \
+		mkdir -p $(UPX_DIR); \
+		tar -Jxf upx.tar.xz --strip-components=1 -C $(UPX_DIR); \
+		chmod +x $(UPX_BIN); \
+		rm upx.tdu ar.xz; \
+		echo "UPX installed successfully."; \
+	else \
+		echo "UPX already installed at $(UPX_BIN)."; \
+	fi
 
+upx-binaries: install-upx
+	@echo "Compressing binaries with UPX"
+	for file in $(DIST_DIR)/$(IMAGE_NAME)-*; do \
+		if [[ $$file == *windows-arm64.exe ]]; then \
+			echo "Skipping compression for $$file (not supported by UPX)"; \
+		elif $(UPX_BIN) -t $$file >/dev/null 2>&1; then \
+			echo "Skipping $$file (already packed by UPX)"; \
+		else \
+			echo "Compressing $$file"; \
+			$(UPX_BIN) -9 $$file || echo "Failed to compress $$file"; \
+		fi; \
+	done
+
+# 压缩二进制文件
+package-binaries: upx-binaries
+	@echo "Packaging binaries into tar.gz/zip archives"
+	for file in $(DIST_DIR)/$(IMAGE_NAME)-*; do \
+		if [[ $$file == *.exe ]]; then \
+			zip -j $(DIST_DIR)/$$(basename $$file)-$(TAG).zip $$file; \
+		else \
+			tar -czvf $(DIST_DIR)/$$(basename $$file)-$(TAG).tar.gz -C $(DIST_DIR) $$(basename $$file); \
+		fi; \
+	done
+
+# Docker 镜像本地构建
+build-local-docker: BUILD_ENV = local
+build-local-docker:
+	@echo "Preparing dependencies"
+	@mkdir -p dist
+	@echo "Building local Docker image"
+	docker buildx build \
+		--progress=plain \
+		--platform $(DOCKERPLATFORMS) \
+		--build-arg CONFIG_FILE=$(CONFIG_FILE) \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+		--build-arg BUILD_ENV=$(BUILD_ENV) \
+		--build-arg TAG=$(TAG) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		--build-arg COMMIT_ID=$(COMMIT_ID) \
+		-t $(DOCKER_IMAGE_FULL):$(TAG) \
+		-t $(DOCKER_IMAGE_FULL):latest .
+
+# Docker 镜像远程构建
+build-remote-docker: BUILD_ENV = remote
+build-remote-docker:
+	@echo "Preparing dependencies"
+	@mkdir -p dist
+	@echo "Preparing dependencies"
+	go mod vendor
+	@echo "Building remote Docker image"
+	docker buildx build \
+		--progress=plain \
+		--platform $(DOCKERPLATFORMS) \
+		--build-arg CONFIG_FILE=$(CONFIG_FILE) \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+		--build-arg BUILD_ENV=$(BUILD_ENV) \
+		--build-arg TAG=$(TAG) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		--build-arg COMMIT_ID=$(COMMIT_ID) \
+		-t $(DOCKER_IMAGE_FULL):$(TAG) \
+		-t $(DOCKER_IMAGE_FULL):latest \
+		--push .
+
+# 清理构建文件
+clean:
+	@echo "Cleaning up"
+	rm -rf $(DIST_DIR) || true
+	rm -rf $(UPX_DIR) || true
+
+clean-docker:
+	@echo "Cleaning Docker cache"
+	docker builder prune -f
+
+# 代码格式化
 code-format:
 	@echo "Formatting code"
 	bash style.sh
-
-build-local: code-format
-	@echo "Building Docker image with context: $(PROJECT_ROOT)"
-	docker build \
-		-f $(DOCKERFILE_PATH) \
-		--build-arg CONFIG_FILE=$(CONFIG_FILE) \
-		--build-arg CONFIG_ENV=$(ENV) \
-		-t $(IMAGE_FULL_NAME) $(PROJECT_ROOT)
-
-push-image: build-local
-	docker push $(IMAGE_FULL_NAME)
-
-unit-test:
-	@echo "Running unit tests"
-	go test -p 1 -cover -v -gcflags=all=-l -coverprofile=coverage.out ./... || exit 1
-
-# 清理构建镜像
-clean:
-	docker rmi $(IMAGE_FULL_NAME)

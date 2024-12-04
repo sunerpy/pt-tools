@@ -1,5 +1,9 @@
 .pt-tools
-config/*.toml
 downloads
 jsons
 vendor
+
+upx*
+dist
+
+Dockerfile-*

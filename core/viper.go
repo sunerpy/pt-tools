@@ -70,7 +70,7 @@ func InitViper(cfgFile string) *config.Config {
 	once.Do(func() {
 		initViper(cfgFile)
 		var err error
-		global.GlobalLogger, err = global.GlobalCfg.Zap.InitLogger()
+		global.GlobalLogger, err = config.DefaultZapConfig.InitLogger()
 		if err != nil {
 			color.Red("初始化日志失败: %v", err)
 			panic(err)
