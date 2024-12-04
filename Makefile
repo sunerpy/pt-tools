@@ -83,7 +83,7 @@ install-upx: build-binaries
 upx-binaries: install-upx
 	@echo "Compressing binaries with UPX"
 	for file in $(DIST_DIR)/$(IMAGE_NAME)-*; do \
-		if [[ $$file == *windows-arm64.exe ]]; then \
+		if [[ $$file == *windows-*.exe ]]; then \
 			echo "Skipping compression for $$file (not supported by UPX)"; \
 		elif $(UPX_BIN) -t $$file >/dev/null 2>&1; then \
 			echo "Skipping $$file (already packed by UPX)"; \

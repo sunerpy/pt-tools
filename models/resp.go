@@ -158,9 +158,17 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.Logger, enabled bool, speedLi
 	if !enabled {
 		return true
 	} else {
+		if t.Status == nil {
+			logger.Error("种子状态为空,跳过...")
+			return false
+		}
+		if t.Status.DiscountEndTime == "" {
+			logger.Warn("种子免费时间为空,跳过...")
+			return false
+		}
 		timeEnd, err := time.Parse("2006-01-02 15:04:05", t.Status.DiscountEndTime)
 		if err != nil {
-			logger.Error("解析时间失败", zap.Error(err))
+			logger.Error("解析时间失败", zap.String("tid", t.Status.ID), zap.Error(err))
 			return false
 		}
 		torrentSizeMB, err := strconv.Atoi(t.Size)
