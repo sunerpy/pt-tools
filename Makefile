@@ -41,8 +41,8 @@ BUILD_ENV ?= remote
 # 本地构建二进制
 build-local: code-format
 	@echo "Building binary for local environment"
-	mkdir -p $(DIST_DIR)
-	GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
+	mkdir -p $(DIST_DIR) && \
+	GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) CGO_ENABLED=0 \
 		go build -ldflags="-s -w \
 		-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
 		-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
@@ -58,7 +58,7 @@ build-binaries:
 		OUTPUT=$(DIST_DIR)/$(IMAGE_NAME)-$$GOOS-$$GOARCH; \
 		if [ "$$GOOS" = "windows" ]; then OUTPUT=$$OUTPUT.exe; fi; \
 		echo "Building for $$platform -> $$OUTPUT"; \
-		GOOS=$$GOOS GOARCH=$$GOARCH go build -ldflags="-s -w \
+		GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -ldflags="-s -w \
 		-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
 		-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
 		-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \

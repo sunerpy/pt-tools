@@ -68,7 +68,7 @@ func Execute() {
 }
 
 func init() {
-	initTools()
+	// initTools()
 	cobra.OnInitialize(initTools)
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
@@ -83,9 +83,10 @@ func initTools() {
 	if global.GlobalViper == nil {
 		global.GlobalViper = viper.New()
 	}
-	if len(os.Args) > 1 && os.Args[1] == "config" && os.Args[2] == "init" {
-		color.Yellow("Skipping configuration loading for 'config init' command")
-		return
+	if len(os.Args) > 1 {
+		if (os.Args[1] == "config" && os.Args[2] == "init") || os.Args[1] == "version" {
+			return
+		}
 	}
 	// 尝试加载配置文件
 	if cfg := core.InitViper(cfgFile); cfg == nil {
