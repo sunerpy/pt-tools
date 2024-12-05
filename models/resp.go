@@ -16,8 +16,9 @@ type ResType interface {
 }
 type FreeDownChecker interface {
 	IsFree() bool
-	CanbeFinished(logger *zap.Logger, enabled bool, speedLimit, sizeLimitGB int) bool
+	CanbeFinished(logger *zap.SugaredLogger, enabled bool, speedLimit, sizeLimitGB int) bool
 	GetFreeEndTime() *time.Time
+	GetFreeLevel() string
 }
 type APIResponse[T ResType] struct {
 	Message string `json:"message"`
@@ -154,7 +155,7 @@ func (t MTTorrentDetail) IsFree() bool {
 	return false
 }
 
-func (t MTTorrentDetail) CanbeFinished(logger *zap.Logger, enabled bool, speedLimit, sizeLimitGB int) bool {
+func (t MTTorrentDetail) CanbeFinished(logger *zap.SugaredLogger, enabled bool, speedLimit, sizeLimitGB int) bool {
 	if !enabled {
 		return true
 	} else {
@@ -163,27 +164,28 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.Logger, enabled bool, speedLi
 			return false
 		}
 		if t.Status.DiscountEndTime == "" {
-			logger.Warn("种子免费时间为空,跳过...")
+			logger.Warnf("种子: %s 免费时间为空,跳过...", t.Status.ID)
 			return false
 		}
 		timeEnd, err := time.Parse("2006-01-02 15:04:05", t.Status.DiscountEndTime)
 		if err != nil {
-			logger.Error("解析时间失败", zap.String("tid", t.Status.ID), zap.Error(err))
+			logger.Error("torrent: %s 解析时间失败, %v", t.Status.ID, err)
 			return false
 		}
-		torrentSizeMB, err := strconv.Atoi(t.Size)
+		torrentSizeBytes, err := strconv.Atoi(t.Size)
 		if err != nil {
-			logger.Error("解析种子大小失败", zap.Error(err))
+			logger.Error("torrent: %s 解析种子大小失败, %v", t.Status.ID, err)
 			return false
 		}
+		torrentSizeMB := torrentSizeBytes / 1024 / 1024
 		if torrentSizeMB > sizeLimitGB*1024 {
-			logger.Warn("种子大小超过设定值,跳过...")
+			logger.Warn("种子: %s 大小超过设定值,跳过...", t.Status.ID)
 			return false
 		}
 		duration := timeEnd.Sub(time.Now())
 		secondsDiff := int(duration.Seconds())
 		if secondsDiff*speedLimit < (torrentSizeMB / 1024 / 1024) {
-			logger.Warn("种子免费时间不足以完成下载,跳过...")
+			logger.Warnf("种子: %s 免费时间不足以完成下载,跳过...", t.Status.ID)
 			return false
 		}
 		return true
@@ -196,4 +198,11 @@ func (t MTTorrentDetail) GetFreeEndTime() *time.Time {
 		return nil
 	}
 	return &timeEnd
+}
+
+func (t MTTorrentDetail) GetFreeLevel() string {
+	if t.Status != nil && t.Status.Discount != "" {
+		return t.Status.Discount
+	}
+	return "failed"
 }

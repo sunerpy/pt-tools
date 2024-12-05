@@ -40,7 +40,7 @@ func (p PHPTorrentInfo) IsFree() bool {
 	return false
 }
 
-func (p PHPTorrentInfo) CanbeFinished(logger *zap.Logger, enabled bool, speedLimit, sizeLimitGB int) bool {
+func (p PHPTorrentInfo) CanbeFinished(logger *zap.SugaredLogger, enabled bool, speedLimit, sizeLimitGB int) bool {
 	if !enabled {
 		return true
 	} else {
@@ -61,4 +61,11 @@ func (p PHPTorrentInfo) CanbeFinished(logger *zap.Logger, enabled bool, speedLim
 func (p PHPTorrentInfo) GetFreeEndTime() *time.Time {
 	time := p.EndTime
 	return &time
+}
+
+func (p PHPTorrentInfo) GetFreeLevel() string {
+	if p.Discount != "" {
+		return string(p.Discount)
+	}
+	return "failed"
 }

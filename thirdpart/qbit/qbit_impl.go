@@ -17,9 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/zeebo/bencode"
-	"go.uber.org/zap"
 )
 
 type QbitClient struct {
@@ -70,17 +68,17 @@ func (q *QbitClient) authenticate() error {
 		return fmt.Errorf("读取响应失败: %v", err)
 	}
 	if string(body) != "Ok." {
-		global.GlobalLogger.Error("登录失败")
+		sLogger().Error("登录失败")
 		return fmt.Errorf("登录失败，响应: %s", string(body))
 	}
 	// 获取 Set-Cookie 信息
 	cookies := resp.Cookies()
 	for _, cookie := range cookies {
 		if cookie.Name == "SID" {
-			global.GlobalLogger.Debug("获取到 SID")
+			sLogger().Debug("获取到 SID")
 		}
 	}
-	global.GlobalLogger.Info("登录qbittorrent成功")
+	sLogger().Info("登录qbittorrent成功")
 	return nil
 }
 
@@ -225,7 +223,7 @@ func (q *QbitClient) CanAddTorrent(ctx context.Context, fileSize int64) (bool, e
 	if fileSize > freeSpace {
 		availableSize := float64(freeSpace) / (1024 * 1024 * 1024)
 		needSize := float64(fileSize) / (1024 * 1024 * 1024)
-		global.GlobalLogger.Error("空间不足，无法添加种子", zap.Float64("needSizeGB", needSize), zap.Float64("availableSizeGB", availableSize))
+		sLogger().Errorf("空间不足，无法添加种子，所需空间: %.2fGB，当前可用空间: %.2fGB", needSize, availableSize)
 		return false, nil
 	}
 	return true, nil
@@ -244,7 +242,7 @@ func (q *QbitClient) CheckTorrentExists(torrentHash string) (bool, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		global.GlobalLogger.Info("种子不在qbit中,准备添加...", zap.String("torrentHash", torrentHash))
+		sLogger().Infof("种子: %s 不在qbit中,准备添加...", torrentHash)
 		return false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -254,7 +252,7 @@ func (q *QbitClient) CheckTorrentExists(torrentHash string) (bool, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&props); err != nil {
 		return false, fmt.Errorf("解析种子信息失败: %v", err)
 	}
-	global.GlobalLogger.Info("种子信息", zap.String("savePath", props.SavePath))
+	sLogger().Info("种子保存路径: ", props.SavePath)
 	return true, nil
 }
 
@@ -264,13 +262,13 @@ func (q *QbitClient) ProcessSingleTorrentFile(ctx context.Context, filePath, cat
 	if err != nil {
 		return fmt.Errorf("检查磁盘空间失败: %v", err)
 	}
-	global.GlobalLogger.Info("可用磁盘空间", zap.Float64("freeSpaceGB", float64(freeSpace)/(1024*1024*1024)))
+	sLogger().Info("可用磁盘空间: ", float64(freeSpace)/(1024*1024*1024))
 	// 处理单个种子文件
 	err = q.processTorrentFile(ctx, filePath, category, tags)
 	if err != nil {
 		return fmt.Errorf("处理种子文件失败: %v", err)
 	}
-	global.GlobalLogger.Info("处理单个种子文件完成", zap.String("filePath", filePath))
+	sLogger().Infof("处理单个种子文件完成: %s", filePath)
 	return nil
 }
 
@@ -280,7 +278,7 @@ func (q *QbitClient) ProcessTorrentDirectory(ctx context.Context, directory stri
 	if err != nil {
 		return fmt.Errorf("检查磁盘空间失败: %v", err)
 	}
-	global.GlobalLogger.Info("可用磁盘空间", zap.Float64("freeSpaceGB", float64(freeSpace)/(1024*1024*1024)))
+	sLogger().Info("可用磁盘空间: ", float64(freeSpace)/(1024*1024*1024))
 	// 获取种子文件列表
 	torrentFiles, err := GetTorrentFilesPath(directory)
 	if err != nil {
@@ -289,7 +287,7 @@ func (q *QbitClient) ProcessTorrentDirectory(ctx context.Context, directory stri
 	// 处理种子文件
 	for _, file := range torrentFiles {
 		if err := q.processTorrentFile(ctx, file, category, tags); err != nil {
-			global.GlobalLogger.Error("处理种子文件失败", zap.String("file", file), zap.Error(err))
+			sLogger().Error("处理种子文件失败", file, err)
 		}
 	}
 	return nil
@@ -311,7 +309,7 @@ func GetTorrentFilesPath(directory string) ([]string, error) {
 }
 
 func (q *QbitClient) processTorrentFile(ctx context.Context, filePath, category, tags string) error {
-	global.GlobalLogger.Info("开始处理种子文件", zap.String("filePath", filePath))
+	sLogger().Info("开始处理种子文件", filePath)
 	torrentData, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("无法读取种子文件: %v", err)
@@ -328,7 +326,7 @@ func (q *QbitClient) processTorrentFile(ctx context.Context, filePath, category,
 		if err := os.Remove(filePath); err != nil {
 			return fmt.Errorf("种子已存在，但删除本地文件失败: %v", err)
 		}
-		global.GlobalLogger.Info("种子已存在,本地文件删除成功", zap.String("filePath", filePath))
+		sLogger().Info("种子已存在,本地文件删除成功", filePath)
 		return nil
 	}
 	canAdd, err := q.CanAddTorrent(ctx, int64(len(torrentData)))
@@ -336,14 +334,14 @@ func (q *QbitClient) processTorrentFile(ctx context.Context, filePath, category,
 		return fmt.Errorf("无法判断是否可以添加种子: %v", err)
 	}
 	if !canAdd {
-		global.GlobalLogger.Error("磁盘空间不足，跳过种子", zap.String("filePath", filePath))
+		sLogger().Error("磁盘空间不足，跳过种子", filePath)
 		return nil
 	}
 	// 添加种子
 	if err := q.AddTorrent(torrentData, category, tags); err != nil {
 		return fmt.Errorf("添加种子失败: %v", err)
 	}
-	global.GlobalLogger.Info("种子添加成功", zap.String("filePath", filePath))
+	sLogger().Info("种子添加成功", filePath)
 	return nil
 }
 

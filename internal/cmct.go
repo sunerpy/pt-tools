@@ -12,6 +12,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/site"
 	"github.com/sunerpy/pt-tools/thirdpart/qbit"
+	"github.com/sunerpy/pt-tools/utils"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +28,7 @@ type CmctImpl struct {
 func NewCmctImpl(ctx context.Context) *CmctImpl {
 	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
 	if err != nil {
-		global.GlobalLogger.Fatal("认证失败", zap.Error(err))
+		sLogger().Fatal("qbit认证失败", err)
 	}
 	co := site.NewCollectorWithTransport()
 	parser := site.NewCMCTParser()
@@ -72,7 +73,7 @@ func (h *CmctImpl) CanbeFinished(detail models.PHPTorrentInfo) bool {
 		duration := detail.EndTime.Sub(time.Now())
 		secondsDiff := int(duration.Seconds())
 		if float64(secondsDiff)*float64(global.GetGlobalConfig().Global.DownloadSpeedLimit) < (detail.SizeMB / 1024 / 1024) {
-			global.GlobalLogger.Warn("种子免费时间不足以完成下载,跳过...", zap.String("torrent_id", detail.TorrentID))
+			sLogger().Warn("种子免费时间不足以完成下载,跳过...", zap.String("torrent_id", detail.TorrentID))
 			return false
 		}
 		return true
@@ -93,15 +94,30 @@ func (h *CmctImpl) RetryDelay() time.Duration {
 
 func (h *CmctImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error {
 	if h.qbitClient == nil {
-		global.GlobalLogger.Fatal("qbit client is nil")
+		sLogger().Fatal("qbit client is nil")
 	}
 	dirPath := filepath.Join(global.GlobalDirCfg.DownloadDir, rssCfg.DownloadSubPath)
-	err := ProcessTorrentsWithDBUpdate(ctx, h.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.CMCT)
+	// 检查目录
+	exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
-		global.GlobalLogger.Fatal("发送种子到 qBittorrent 失败", zap.Error(err))
+		sLogger().Errorf("检查目录失败: %v", err)
 		return err
 	}
-	global.GlobalLogger.Info("种子处理完成并更新数据库记录")
+	if !exists {
+		sLogger().Infof("下载目录不存在(未下载种子,跳过): %s", dirPath)
+		return nil
+	}
+	if empty {
+		sLogger().Infof("下载目录为空(未下载种子,跳过): %s", dirPath)
+		return nil
+	}
+	// 处理种子并更新数据库
+	err = ProcessTorrentsWithDBUpdate(ctx, h.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.CMCT)
+	if err != nil {
+		sLogger().Errorf("发送种子到 qBittorrent 失败: %v", err)
+		return err
+	}
+	sLogger().Infof("种子处理完成并更新数据库记录, 路径: %s, 分类: %s, 标签: %s", dirPath, rssCfg.Category, rssCfg.Tag)
 	return nil
 }
 

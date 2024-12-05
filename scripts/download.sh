@@ -41,6 +41,7 @@ install_pt_tools() {
     tar -xvzf pt-tools-$PLATFORM.tar.gz
 
     echo "Installing pt-tools to $INSTALL_DIR..."
+    # todo 判断文件 文件夹  避免覆盖
     sudo mv pt-tools "$INSTALL_DIR/pt-tools"
     sudo chmod +x "$INSTALL_DIR/pt-tools"
 

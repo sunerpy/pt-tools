@@ -28,7 +28,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/sunerpy/pt-tools/global"
 )
 
 var (
@@ -45,51 +44,7 @@ Examples:
 2. Persistent mode:
    pt-tools run --mode=persistent
 `,
-		Run: func(cmd *cobra.Command, args []string) {
-			// 读取 mode 标志值
-			mode, _ := cmd.Flags().GetString("mode")
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			// 信号监听
-			go func() {
-				ch := make(chan os.Signal, 1)
-				signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-				<-ch
-				global.GlobalLogger.Warn("收到退出信号，正在退出...")
-				cancel()
-			}()
-			switch mode {
-			case "single":
-				global.GlobalLogger.Info("运行模式: 单次运行")
-				if err := genTorrentsWithRSSOnce(ctx); err != nil {
-					color.Red("Error: %v", err)
-					os.Exit(1)
-				}
-				color.Green("程序已成功完成单次运行！")
-			case "persistent":
-				global.GlobalLogger.Info("运行模式: 持续运行")
-				if err := genTorrentsWithRSS(ctx); err != nil {
-					color.Red("Error: %v", err)
-					os.Exit(1)
-				}
-				color.Green("程序已成功退出！")
-			default:
-				color.Red("Error: 无效的运行模式 '%s'，仅支持 'single' 或 'persistent'", mode)
-				cmd.Usage()
-				os.Exit(1)
-			}
-			// switch modeFlag {
-			// case "single":
-			// 	fmt.Println("Running in single mode...")
-			// 	executeSingleRun()
-			// case "persistent":
-			// 	fmt.Println("Running in persistent mode...")
-			// 	executePersistentRun(60) // 默认间隔为 60 秒
-			// default:
-			// 	fmt.Println("Error: Invalid mode specified. Use '--mode=single' or '--mode=persistent'.")
-			// 	cmd.Usage() // 显示帮助信息
-			// }
-		},
+		Run:       runCmdFunc,
 		PreRun:    PersistentCheckCfg, // 检查配置文件是否存在
 		ValidArgs: []string{"single", "persistent"},
 	}
@@ -122,5 +77,40 @@ func executePersistentRun(interval int) {
 		fmt.Println("Executing task...")
 		// 这里添加持续运行的业务逻辑
 		time.Sleep(time.Duration(interval) * time.Second)
+	}
+}
+
+func runCmdFunc(cmd *cobra.Command, args []string) {
+	// 读取 mode 标志值
+	mode, _ := cmd.Flags().GetString("mode")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// 信号监听
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		<-ch
+		sLogger().Warn("收到退出信号，正在退出...")
+		cancel()
+	}()
+	switch mode {
+	case "single":
+		sLogger().Info("运行模式: 单次运行")
+		if err := genTorrentsWithRSSOnce(ctx); err != nil {
+			color.Red("Error: %v", err)
+			os.Exit(1)
+		}
+		color.Green("程序已成功完成单次运行！")
+	case "persistent":
+		sLogger().Info("运行模式: 持续运行")
+		if err := genTorrentsWithRSS(ctx); err != nil {
+			color.Red("Error: %v", err)
+			os.Exit(1)
+		}
+		color.Green("程序已成功退出！")
+	default:
+		color.Red("Error: 无效的运行模式 '%s'，仅支持 'single' 或 'persistent'", mode)
+		cmd.Usage()
+		os.Exit(1)
 	}
 }

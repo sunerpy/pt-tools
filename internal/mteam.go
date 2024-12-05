@@ -16,7 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/qbit"
-	"go.uber.org/zap"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 type MteamImpl struct {
@@ -29,7 +29,7 @@ type MteamImpl struct {
 func NewMteamImpl(ctx context.Context) *MteamImpl {
 	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
 	if err != nil {
-		global.GlobalLogger.Fatal("认证失败", zap.Error(err))
+		sLogger().Fatal("认证失败", err)
 	}
 	return &MteamImpl{
 		ctx:        ctx,
@@ -60,18 +60,18 @@ func (m *MteamImpl) CanbeFinished(detail models.MTTorrentDetail) bool {
 	} else {
 		timeEnd, err := time.Parse("2006-01-02 15:04:05", detail.Status.DiscountEndTime)
 		if err != nil {
-			global.GlobalLogger.Error("解析时间失败", zap.Error(err))
+			sLogger().Error("解析时间失败", err)
 			return false
 		}
 		torrentSizeMB, err := strconv.Atoi(detail.Size)
 		if err != nil {
-			global.GlobalLogger.Error("解析种子大小失败", zap.Error(err))
+			sLogger().Error("解析种子大小失败", err)
 			return false
 		}
 		duration := timeEnd.Sub(time.Now())
 		secondsDiff := int(duration.Seconds())
 		if secondsDiff*global.GetGlobalConfig().Global.DownloadSpeedLimit < (torrentSizeMB / 1024 / 1024) {
-			global.GlobalLogger.Warn("种子免费时间不足以完成下载,跳过...", zap.String("torrent_id", detail.ID))
+			sLogger().Warn("种子免费时间不足以完成下载,跳过...", detail.ID)
 			return false
 		}
 		return true
@@ -131,11 +131,24 @@ func (m *MteamImpl) RetryDelay() time.Duration {
 
 func (m *MteamImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error {
 	dirPath := filepath.Join(global.GlobalDirCfg.DownloadDir, rssCfg.DownloadSubPath)
-	err := ProcessTorrentsWithDBUpdate(ctx, m.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.MTEAM)
+	exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
-		global.GlobalLogger.Fatal("发送种子到 qBittorrent 失败", zap.Error(err))
+		sLogger().Error("检查目录失败", err)
 		return err
 	}
-	global.GlobalLogger.Info("种子处理完成并更新数据库记录")
+	if !exists {
+		sLogger().Info("下载目录不存在(未下载种子,跳过)", dirPath)
+		return nil
+	}
+	if empty {
+		sLogger().Info("下载目录为空(未下载种子,跳过)", dirPath)
+		return nil
+	}
+	err = ProcessTorrentsWithDBUpdate(ctx, m.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.MTEAM)
+	if err != nil {
+		sLogger().Fatal("发送种子到 qBittorrent 失败", err)
+		return err
+	}
+	sLogger().Info("种子处理完成并更新数据库记录")
 	return nil
 }

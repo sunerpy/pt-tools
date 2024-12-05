@@ -77,6 +77,10 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	if err := initTools(); err != nil {
+		color.Red("Failed to load configuration\n")
+		panic(err)
+	}
 }
 
 func initTools() error {
@@ -84,9 +88,11 @@ func initTools() error {
 		global.GlobalViper = viper.New()
 	}
 	// 尝试加载配置文件
-	if _, err := core.InitViper(cfgFile); err != nil {
+	logger, err := core.InitViper(cfgFile)
+	if err != nil {
 		color.Red("Failed to load configuration\n")
 		return err
 	}
+	global.InitLogger(logger)
 	return nil
 }

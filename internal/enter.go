@@ -2,6 +2,9 @@ package internal
 
 import (
 	"time"
+
+	"github.com/sunerpy/pt-tools/global"
+	"go.uber.org/zap"
 )
 
 const (
@@ -12,3 +15,7 @@ const (
 	retryDelay        = 5 * time.Second
 	maxGoroutine      = 3
 )
+
+func sLogger() *zap.SugaredLogger {
+	return global.GetSlogger()
+}

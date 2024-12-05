@@ -66,7 +66,7 @@ func initViper(cfgFile string) error {
 	return nil
 }
 
-func InitViper(cfgFile string) (*config.Config, error) {
+func InitViper(cfgFile string) (*zap.Logger, error) {
 	var initErr error // 用于捕获 `once.Do` 内部的错误
 	once.Do(func() {
 		// 调用 initViper，并捕获可能的错误
@@ -95,7 +95,7 @@ func InitViper(cfgFile string) (*config.Config, error) {
 		}
 	})
 	// 返回捕获的错误
-	return global.GlobalCfg, initErr
+	return global.GlobalLogger, initErr
 }
 
 func GetLogger() *zap.Logger {

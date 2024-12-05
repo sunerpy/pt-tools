@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/gocolly/colly"
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -84,7 +83,7 @@ func CommonFetchMultiTorrents(ctx context.Context, c *colly.Collector, conf *Sit
 	var combinedErr error                                   // 单一错误
 	for _, url := range urls {
 		if ctx.Err() != nil {
-			global.GlobalLogger.Warn("fetchMultipleTorrents 循环已取消，跳过剩余任务")
+			sLogger().Warn("fetchMultipleTorrents 循环已取消，跳过剩余任务")
 			combinedErr = ctx.Err()
 			break
 		}

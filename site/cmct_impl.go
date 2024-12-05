@@ -9,9 +9,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/fatih/color"
 	"github.com/gocolly/colly"
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
 )
 
 // CMCTParser 实现了 SiteParser 接口
@@ -67,7 +65,7 @@ func (p *CMCTParser) ParseDiscount(e *colly.HTMLElement, info *models.PHPTorrent
 		if err == nil {
 			info.EndTime = t
 		} else {
-			global.GlobalLogger.Error("解析结束时间出错:", zap.Error(err), zap.String("endTimeAttr", endTimeAttr))
+			sLogger().Error("解析结束时间出错:", err, endTimeAttr)
 		}
 	} else {
 		// 如果优惠类型是 "免费"，设置为长期默认值
@@ -95,14 +93,14 @@ func (p *CMCTParser) ParseTorrentSizeMB(e *colly.HTMLElement, info *models.PHPTo
 	// 查找 <span title="大小"> 并提取文本内容
 	sizeText := e.DOM.Find("span[title='大小']").Text()
 	if sizeText == "" {
-		global.GlobalLogger.Error("未找到大小信息")
+		sLogger().Error("未找到大小信息")
 		return
 	}
 	// 使用正则表达式提取大小和单位
 	sizeRe := regexp.MustCompile(`([\d.]+)\s*(GB|MB|KB)`)
 	matches := sizeRe.FindStringSubmatch(sizeText)
 	if len(matches) < 3 {
-		global.GlobalLogger.Error("无法解析大小信息", zap.String("原始文本", sizeText))
+		sLogger().Error("无法解析大小信息", sizeText)
 		return
 	}
 	// 提取大小和单位
@@ -111,7 +109,7 @@ func (p *CMCTParser) ParseTorrentSizeMB(e *colly.HTMLElement, info *models.PHPTo
 	// 转换大小为浮点数
 	size, err := strconv.ParseFloat(sizeValue, 64)
 	if err != nil {
-		global.GlobalLogger.Error("无法解析大小值", zap.String("大小值", sizeValue), zap.Error(err))
+		sLogger().Error("无法解析大小值", sizeValue, err)
 		return
 	}
 	// 根据单位换算为 MB
@@ -123,14 +121,14 @@ func (p *CMCTParser) ParseTorrentSizeMB(e *colly.HTMLElement, info *models.PHPTo
 	case "MB":
 		// 原值直接是 MB，不需要处理
 	default:
-		global.GlobalLogger.Warn("未知单位", zap.String("单位", unit))
+		sLogger().Warn("未知单位", unit)
 	}
 	// 存储大小到 TorrentInfo
 	info.SizeMB = size
 	// 检查是否成功解析大小
 	if info.SizeMB == 0 {
 		color.Red("无法解析种子大小")
-		global.GlobalLogger.Error("种子大小为 0", zap.String("原始文本", sizeText))
+		sLogger().Error("种子大小为 0", sizeText)
 	}
 }
 

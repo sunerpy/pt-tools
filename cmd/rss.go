@@ -9,7 +9,6 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
 )
 
 // 单次运行模式
@@ -42,12 +41,12 @@ func genTorrentsWithRSSOnce(ctx context.Context) error {
 					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
 			default:
-				global.GlobalLogger.Warn("未找到站点配置,跳过任务", zap.String("site_name", string(k)))
+				sLogger().Warnf("未找到站点: %s 配置,跳过任务", string(k))
 			}
 		}
 	}
 	wg.Wait() // 等待所有 Goroutine 完成
-	global.GlobalLogger.Info("genTorrentsWithRSSOnce: 所有任务已完成")
+	sLogger().Info("genTorrentsWithRSSOnce: 所有任务已完成")
 	return nil
 }
 
@@ -81,14 +80,14 @@ func genTorrentsWithRSS(ctx context.Context) error {
 					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
 			default:
-				global.GlobalLogger.Warn("未找到站点配置,跳过任务", zap.String("site_name", string(k)))
+				sLogger().Warnf("未找到站点: %s 配置,跳过任务", string(k))
 			}
 		}
 	}
 	<-ctx.Done() // 等待取消信号
-	global.GlobalLogger.Info("genTorrentsWithRSS: 收到取消信号，等待所有任务结束")
+	sLogger().Warn("genTorrentsWithRSS: 收到取消信号，开始清理资源")
 	wg.Wait() // 等待所有 Goroutine 完成
-	global.GlobalLogger.Warn("genTorrentsWithRSS: 所有任务已取消")
+	sLogger().Warn("genTorrentsWithRSS: 所有任务已取消")
 	return nil
 }
 
@@ -113,13 +112,13 @@ func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup,
 	// 判断运行模式
 	mode, _ := ctx.Value("mode").(string)
 	if mode == "single" {
-		global.GlobalLogger.Info("单次任务执行完成", zap.String("site_name", cfg.Name))
+		sLogger().Infof("站点:%s 单次任务执行完成", cfg.Name)
 		return
 	}
 	for {
 		select {
 		case <-ctx.Done(): // 上下文取消时退出
-			global.GlobalLogger.Warn("任务取消", zap.String("site_name", cfg.Name))
+			sLogger().Infof("站点:%s 任务取消", cfg.Name)
 			return
 		case <-ticker.C: // 持续运行模式下的定时任务
 			executeTask(ctx, siteName, cfg, siteImpl)
@@ -129,11 +128,11 @@ func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup,
 
 // 执行单次任务
 func executeTask[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg config.RSSConfig, siteImpl internal.PTSiteInter[T]) {
-	global.GlobalLogger.Info("开始任务", zap.String("site_name", cfg.Name))
+	sLogger().Infof("开始任务: %s", cfg.Name)
 	if err := processRSS(ctx, siteName, cfg, siteImpl); err != nil {
-		global.GlobalLogger.Error("任务执行失败", zap.String("site_name", cfg.Name), zap.Error(err))
+		sLogger().Errorf("站点: %s 任务执行失败, %v", cfg.Name, err)
 	} else {
-		global.GlobalLogger.Info("任务执行完成", zap.String("site_name", cfg.Name))
+		sLogger().Infof("站点: %s 任务执行完成", cfg.Name)
 	}
 }
 

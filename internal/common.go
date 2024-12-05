@@ -18,7 +18,6 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/qbit"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -81,7 +80,7 @@ func downloadTorrent(url, title, downloadDir string, maxRetries int, retryDelay 
 		}
 		lastError = err
 		if attempt < maxRetries {
-			global.GlobalLogger.Info("下载失败,重试中...", zap.Int("attempt", attempt), zap.Int("max_retries", maxRetries), zap.Error(lastError))
+			sLogger().Infof("下载失败,重试中... (attempt: %d/%d), 错误: %v", attempt, maxRetries, lastError)
 			time.Sleep(retryDelay)
 		}
 	}
@@ -101,7 +100,7 @@ func downloadWorker[T models.ResType](
 	for {
 		select {
 		case <-ctx.Done():
-			global.GlobalLogger.Info("下载任务取消")
+			sLogger().Warn("下载任务取消")
 			return
 		case item, ok := <-torrentChan:
 			if !ok {
@@ -112,35 +111,36 @@ func downloadWorker[T models.ResType](
 			// 查询数据库记录
 			torrent, err := global.GlobalDB.GetTorrentBySiteAndID(string(siteName), item.GUID)
 			if err != nil {
-				global.GlobalLogger.Error("获取种子详情失败", zap.String("title", title), zap.Error(err))
+				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
 				continue
 			}
 			// 如果种子已跳过或已推送，直接跳过
 			if torrent != nil && (torrent.IsSkipped || torrent.IsPushed != nil) {
-				global.GlobalLogger.Info("种子已跳过或已推送，直接跳过", zap.String("title", title))
+				sLogger().Infof("%s: 种子已跳过或已推送，直接跳过", title)
 				continue
 			}
 			// 获取种子详情
 			resDetail, err := site.GetTorrentDetails(item)
 			if err != nil {
-				global.GlobalLogger.Error("获取种子详情失败", zap.String("title", title), zap.Error(err))
+				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
 				continue
 			}
 			detail := resDetail.Data
-			canFinished := detail.CanbeFinished(global.GlobalLogger, global.GetGlobalConfig().Global.DownloadLimitEnabled, global.GetGlobalConfig().Global.DownloadSpeedLimit, global.GetGlobalConfig().Global.TorrentSizeGB)
+			canFinished := detail.CanbeFinished(global.GetSlogger(), global.GetGlobalConfig().Global.DownloadLimitEnabled, global.GetGlobalConfig().Global.DownloadSpeedLimit, global.GetGlobalConfig().Global.TorrentSizeGB)
 			isFree := detail.IsFree()
 			// 更新种子状态（标记跳过或继续下载）
 			if torrent == nil {
 				torrent = &models.TorrentInfo{
 					SiteName:    string(siteName),
 					TorrentID:   item.GUID,
-					FreeLevel:   "free",
+					FreeLevel:   detail.GetFreeLevel(),
 					FreeEndTime: detail.GetFreeEndTime(),
 				}
 			}
 			err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
 				// 标记跳过或更新状态
 				if !isFree || !canFinished {
+					sLogger().Infof("种子: %s, ID: %s, free: %v, canbefinish: %v 为收费或无法完成，跳过", title, item.GUID, isFree, canFinished)
 					torrent.IsSkipped = true
 				} else {
 					torrent.IsSkipped = false
@@ -153,12 +153,12 @@ func downloadWorker[T models.ResType](
 				return err
 			})
 			if err != nil {
-				global.GlobalLogger.Error("更新种子状态失败", zap.String("title", title), zap.Error(err))
+				sLogger().Errorf("更新种子:%s 状态失败, %v", title, err)
 				continue
 			}
 			// 如果标记为跳过，直接跳过
 			if torrent.IsSkipped {
-				global.GlobalLogger.Info("种子为收费或无法完成，跳过", zap.String("title", title))
+				sLogger().Infof("种子: %s 为收费或无法完成，跳过", title)
 				continue
 			}
 			// 下载种子并更新哈希值
@@ -181,9 +181,9 @@ func downloadWorker[T models.ResType](
 				return err
 			})
 			if err != nil {
-				global.GlobalLogger.Error("事务执行失败", zap.String("title", title), zap.Error(err))
+				sLogger().Errorf("%s: 事务执行失败, %v", title, err)
 			} else {
-				global.GlobalLogger.Info("种子下载成功并记录到数据库", zap.String("title", title))
+				sLogger().Info("种子下载成功并记录到数据库 ", title)
 			}
 		}
 	}
@@ -200,7 +200,7 @@ func ProcessTorrentsWithDBUpdate(
 		// 获取目录下的所有种子文件
 		filePaths, err := qbit.GetTorrentFilesPath(dirPath)
 		if err != nil {
-			global.GlobalLogger.Error("无法读取目录", zap.String("directory", dirPath))
+			sLogger().Error("无法读取目录", dirPath)
 			return fmt.Errorf("无法读取目录: %v", err)
 		}
 		for _, file := range filePaths {
@@ -217,9 +217,9 @@ func ProcessTorrentsWithDBUpdate(
 			// 如果种子已推送，跳过并删除本地文件
 			if torrent != nil && (torrent.IsPushed != nil && *torrent.IsPushed) {
 				if err := os.Remove(file); err != nil {
-					global.GlobalLogger.Error("种子已推送，删除本地文件失败", zap.String("filePath", file), zap.Error(err))
+					sLogger().Error("种子已推送，删除本地文件失败", file, err)
 				} else {
-					global.GlobalLogger.Info("种子已推送,本地文件删除成功", zap.String("filePath", file))
+					sLogger().Info("种子已推送,本地文件删除成功", file)
 				}
 				continue
 			}
@@ -243,7 +243,7 @@ func ProcessTorrentsWithDBUpdate(
 				if err := os.Remove(file); err != nil {
 					return fmt.Errorf("种子已存在，但删除本地文件失败: %w", err)
 				}
-				global.GlobalLogger.Info("种子已存在于 qBittorrent,本地文件删除成功", zap.String("filePath", file))
+				sLogger().Info("种子已存在于 qBittorrent,本地文件删除成功", file)
 				continue
 			}
 			// 推送种子到 qBittorrent
@@ -254,7 +254,7 @@ func ProcessTorrentsWithDBUpdate(
 					Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
 					Update("is_pushed", false).Error
 				if err != nil {
-					global.GlobalLogger.Error("更新数据库失败", zap.String("torrent_hash", torrentHash), zap.Error(err))
+					sLogger().Error("更新数据库失败", torrentHash, err)
 				}
 				return fmt.Errorf("处理种子文件失败: %w", err)
 			}
@@ -315,7 +315,7 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 		if item.Enclosures != nil && len(item.Enclosures) > 0 {
 			select {
 			case <-ctxWithTimeout.Done():
-				global.GlobalLogger.Info("任务被取消")
+				sLogger().Info("任务被取消")
 				close(torrentChan)
 				wg.Wait()
 				return ctxWithTimeout.Err()

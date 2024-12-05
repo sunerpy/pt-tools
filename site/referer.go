@@ -1,7 +1,6 @@
 package site
 
 import (
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"go.uber.org/zap"
 )
@@ -30,6 +29,6 @@ func (d *DefaultReferer) GetReferer() string {
 	if referer, ok := d.refererMap[d.siteName]; ok {
 		return referer
 	}
-	global.GlobalLogger.Fatal("无法找到默认 Referer", zap.String("siteName", string(d.siteName)))
+	sLogger().Fatal("无法找到默认 Referer", zap.String("siteName", string(d.siteName)))
 	return ""
 }

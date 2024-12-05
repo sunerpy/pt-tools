@@ -55,6 +55,10 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("无法初始化 GORM: %w", err)
 	}
+	// 启用 WAL 模式
+	if err := db.Exec("PRAGMA journal_mode=WAL;").Error; err != nil {
+		return nil, fmt.Errorf("无法启用 WAL 模式: %w", err)
+	}
 	// 自动迁移表结构
 	if err := db.AutoMigrate(&TorrentInfo{}); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)

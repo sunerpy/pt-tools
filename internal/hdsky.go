@@ -12,7 +12,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/site"
 	"github.com/sunerpy/pt-tools/thirdpart/qbit"
-	"go.uber.org/zap"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 type HdskyImpl struct {
@@ -27,7 +27,7 @@ type HdskyImpl struct {
 func NewHdskyImpl(ctx context.Context) *HdskyImpl {
 	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
 	if err != nil {
-		global.GlobalLogger.Fatal("认证失败", zap.Error(err))
+		sLogger().Fatal("认证失败", err)
 	}
 	co := site.NewCollectorWithTransport()
 	parser := site.NewHDSkyParser()
@@ -72,7 +72,7 @@ func (h *HdskyImpl) CanbeFinished(detail models.PHPTorrentInfo) bool {
 		duration := detail.EndTime.Sub(time.Now())
 		secondsDiff := int(duration.Seconds())
 		if float64(secondsDiff)*float64(global.GetGlobalConfig().Global.DownloadSpeedLimit) < (detail.SizeMB / 1024 / 1024) {
-			global.GlobalLogger.Warn("种子免费时间不足以完成下载,跳过...", zap.String("torrent_id", detail.TorrentID))
+			sLogger().Warn("种子免费时间不足以完成下载,跳过...", detail.TorrentID)
 			return false
 		}
 		return true
@@ -93,15 +93,28 @@ func (h *HdskyImpl) RetryDelay() time.Duration {
 
 func (h *HdskyImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error {
 	if h.qbitClient == nil {
-		global.GlobalLogger.Fatal("qbit client is nil")
+		sLogger().Fatal("qbit client is nil")
 	}
 	dirPath := filepath.Join(global.GlobalDirCfg.DownloadDir, rssCfg.DownloadSubPath)
-	err := ProcessTorrentsWithDBUpdate(ctx, h.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.HDSKY)
+	exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
-		global.GlobalLogger.Fatal("发送种子到 qBittorrent 失败", zap.Error(err))
+		sLogger().Error("检查目录失败", err)
 		return err
 	}
-	global.GlobalLogger.Info("种子处理完成并更新数据库记录")
+	if !exists {
+		sLogger().Info("下载目录不存在(未下载种子,跳过)", dirPath)
+		return nil
+	}
+	if empty {
+		sLogger().Info("下载目录为空(未下载种子,跳过)", dirPath)
+		return nil
+	}
+	err = ProcessTorrentsWithDBUpdate(ctx, h.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.HDSKY)
+	if err != nil {
+		sLogger().Fatal("发送种子到 qBittorrent 失败", err)
+		return err
+	}
+	sLogger().Info("种子处理完成并更新数据库记录")
 	return nil
 }
 
