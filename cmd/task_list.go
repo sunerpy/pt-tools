@@ -20,6 +20,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -27,14 +28,28 @@ import (
 // listCmd represents the list command
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Display daily task details (not implemented)",
+	Long: `The 'list' subcommand displays detailed information about the tasks processed
+today, including pushed torrents, skipped torrents, and other task-related statistics.`,
+	Example: `  pt-tools task list
+  pt-tools task list --date 2024-12-05`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("list called")
+		date, _ := cmd.Flags().GetString("date")
+		if date == "" {
+			date = time.Now().Format("2006-01-02")
+		}
+		fmt.Printf("Fetching task details for date: %s...\n", date)
+		// 模拟展示任务信息
+		pushedTorrents := []string{"Torrent1", "Torrent2"}
+		skippedTorrents := []string{"Torrent3", "Torrent4"}
+		fmt.Println("Pushed Torrents:")
+		for _, torrent := range pushedTorrents {
+			fmt.Printf("  - %s\n", torrent)
+		}
+		fmt.Println("Skipped Torrents:")
+		for _, torrent := range skippedTorrents {
+			fmt.Printf("  - %s\n", torrent)
+		}
 	},
 }
 

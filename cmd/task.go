@@ -27,15 +27,16 @@ import (
 // taskCmd represents the task command
 var taskCmd = &cobra.Command{
 	Use:   "task",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Manage and track tasks",
+	Long: `The 'task' command provides tools to manage and view tasks related to the
+application. Use this command to view the tasks processed during the day, including
+pushed torrents, skipped torrents, and other related information.`,
+	Example: `  pt-tools task list`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("task called")
+		fmt.Println("Please specify a subcommand. Use 'pt-tools task --help' for more information.")
+		cmd.Usage()
 	},
+	PersistentPreRun: PersistentCheckCfg, // 确保在执行所有子命令前进行配置检查
 }
 
 func init() {

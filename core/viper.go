@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/global"
@@ -25,68 +23,79 @@ const (
 
 var once sync.Once
 
-func initViper(cfgFile string) {
+func initViper(cfgFile string) error {
 	if global.GlobalViper == nil {
 		global.GlobalViper = viper.New()
 	}
 	v := global.GlobalViper
+	// 获取用户主目录
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("无法获取用户主目录: %w", err)
+	}
+	// 初始化目录配置
 	global.GlobalDirCfg = &config.DirConf{
 		HomeDir: home,
 		WorkDir: filepath.Join(home, configDir),
 	}
-	cobra.CheckErr(err)
+	// 设置配置文件路径
 	if cfgFile != "" {
-		// Use config file from the flag.
 		v.SetConfigFile(cfgFile)
 	} else {
-		// Find home directory.
-		// Search config in home directory with name ".pt-tools" (without extension).
 		v.SetConfigType("toml")
 		confDir := filepath.Join(home, configDir)
 		v.AddConfigPath(confDir)
 		v.SetConfigName(configName)
 	}
-	v.AutomaticEnv() // read in environment variables that match
-	// If a config file is found, read it in.
+	// 读取环境变量
+	v.AutomaticEnv()
+	// 读取配置文件
 	if err := v.ReadInConfig(); err != nil {
-		// color.Blue("使用配置文件: %s", v.ConfigFileUsed())
-		// } else {
-		fmt.Fprintln(os.Stderr, "Error reading config file:", err)
-		panic(err)
+		return fmt.Errorf("读取配置文件失败: %w", err)
 	}
 	// 将配置解析到结构体
 	if err := v.Unmarshal(&global.GlobalCfg); err != nil {
-		panic("配置解析失败")
+		return fmt.Errorf("配置解析失败: %w", err)
 	}
+	// 验证配置文件
 	if err := global.GlobalCfg.ValidateSites(); err != nil {
-		color.Red("配置文件验证失败: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("配置文件验证失败: %w", err)
 	}
+	// 初始化下载目录
 	global.GlobalDirCfg.DownloadDir = filepath.Join(global.GlobalDirCfg.WorkDir, global.GlobalCfg.Global.DownloadDir)
+	return nil
 }
 
-func InitViper(cfgFile string) *config.Config {
+func InitViper(cfgFile string) (*config.Config, error) {
+	var initErr error // 用于捕获 `once.Do` 内部的错误
 	once.Do(func() {
-		initViper(cfgFile)
+		// 调用 initViper，并捕获可能的错误
+		if err := initViper(cfgFile); err != nil {
+			initErr = fmt.Errorf("初始化配置失败: %w", err)
+			return
+		}
+		// 初始化日志
 		var err error
 		global.GlobalLogger, err = config.DefaultZapConfig.InitLogger()
 		if err != nil {
-			color.Red("初始化日志失败: %v", err)
-			panic(err)
+			initErr = fmt.Errorf("初始化日志失败: %w", err)
+			return // 直接返回，避免继续执行
 		}
+		// 配置 GORM 日志
 		gormLg := zapgorm2.Logger{
 			ZapLogger:     global.GlobalLogger,
 			LogLevel:      glogger.Silent,
 			SlowThreshold: 0,
 		}
+		// 初始化数据库
 		global.GlobalDB, err = models.NewDB(gormLg)
 		if err != nil {
-			color.Red("初始化数据库失败: %v", err)
-			panic(err)
+			initErr = fmt.Errorf("初始化数据库失败: %w", err)
+			return
 		}
 	})
-	return global.GlobalCfg
+	// 返回捕获的错误
+	return global.GlobalCfg, initErr
 }
 
 func GetLogger() *zap.Logger {

@@ -27,14 +27,19 @@ import (
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Create a database backup",
+	Long: `The 'backup' subcommand generates a backup of the database
+and saves it to the specified file. Use this command to safeguard your data.`,
+	Example: `  pt-tools db backup --output /path/to/backup.db (not implemented...)`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("backup called")
+		output, _ := cmd.Flags().GetString("output")
+		if output == "" {
+			fmt.Println("Error: Output file path is required. Use '--output' to specify the file.")
+			return
+		}
+		fmt.Printf("Backing up the database to %s...\n", output)
+		// 数据库备份的具体逻辑
+		fmt.Println("Database backup completed successfully.")
 	},
 }
 

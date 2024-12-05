@@ -11,6 +11,12 @@ import (
 )
 
 func PersistentCheckCfg(cmd *cobra.Command, args []string) {
+	if err := initTools(); err != nil {
+		color.Red("Load Config Error: %v", err)
+		color.Yellow("Try to run 'pt-tools config init' to initialize the configuration file.")
+		cmd.Usage()
+		os.Exit(1)
+	}
 	configFilePath := global.GlobalViper.ConfigFileUsed()
 	if configFilePath == "" {
 		color.Red("Error: Configuration file not found.")

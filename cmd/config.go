@@ -27,14 +27,15 @@ import (
 // configCmd represents the config command
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Manage configuration for pt-tools",
+	Long: `The config command allows you to manage configuration files
+and settings for pt-tools. You can use subcommands like 'init' to initialize
+a new configuration, or other commands for specific tasks.`,
+	Example: `  pt-tools config [flags]
+  pt-tools config [command]`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("config called")
+		fmt.Println("Please specify a subcommand. Use 'pt-tools config --help' for more information.")
+		cmd.Usage()
 	},
 }
 

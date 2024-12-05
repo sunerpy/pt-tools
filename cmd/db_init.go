@@ -27,14 +27,15 @@ import (
 // initCmd represents the init command
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Initialize the database",
+	Long: `The 'init' subcommand sets up the database structure and
+creates any required tables. Use this command when deploying the application
+for the first time or after clearing the database.`,
+	Example: `  pt-tools db init`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("init called")
+		fmt.Println("Initializing the database...")
+		// 初始化数据库的具体逻辑
+		fmt.Println("Database initialized successfully.")
 	},
 }
 

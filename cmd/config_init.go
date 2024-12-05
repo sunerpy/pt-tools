@@ -35,12 +35,12 @@ const (
 // initCmd represents the init command
 var configInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Initialize a new configuration file",
+	Long: `The 'init' command generates a default configuration file
+and sets up the necessary database file if they do not already exist.
+This command ensures the application has the required settings to run.`,
+	Example: `  pt-tools config init
+  pt-tools config init --config /path/to/config.toml`,
 	Run: initConfigAndDBFile,
 }
 

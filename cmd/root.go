@@ -69,7 +69,7 @@ func Execute() {
 
 func init() {
 	// initTools()
-	cobra.OnInitialize(initTools)
+	// cobra.OnInitialize(initTools)
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
@@ -79,19 +79,14 @@ func init() {
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
 
-func initTools() {
+func initTools() error {
 	if global.GlobalViper == nil {
 		global.GlobalViper = viper.New()
 	}
-	if len(os.Args) > 1 {
-		if (os.Args[1] == "config" && os.Args[2] == "init") || os.Args[1] == "version" {
-			return
-		}
-	}
 	// 尝试加载配置文件
-	if cfg := core.InitViper(cfgFile); cfg == nil {
+	if _, err := core.InitViper(cfgFile); err != nil {
 		color.Red("Failed to load configuration\n")
-		os.Exit(1) // 对于其他命令，加载失败仍然终止程序
+		return err
 	}
-	core.InitViper(cfgFile)
+	return nil
 }
