@@ -104,9 +104,20 @@ func runSiteJobs[T models.ResType](ctx context.Context, siteName models.SiteGrou
 	siteWg.Wait() // 等待该站点的所有 RSS 任务结束
 }
 
+func getInterval(cfg config.RSSConfig) time.Duration {
+	if cfg.IntervalMinutes <= 0 {
+		if global.GlobalCfg.Global.DefaultInterval > 0 {
+			return global.GlobalCfg.Global.DefaultInterval
+		}
+		return 10 * time.Minute
+	}
+	// 如果 cfg.IntervalMinutes 大于 0，则使用 cfg.IntervalMinutes 转换为 time.Duration
+	return time.Duration(cfg.IntervalMinutes) * time.Minute
+}
+
 // RSS 任务
 func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg config.RSSConfig, siteImpl internal.PTSiteInter[T]) {
-	ticker := time.NewTicker(time.Duration(cfg.IntervalMinutes) * time.Minute)
+	ticker := time.NewTicker(getInterval(cfg))
 	defer ticker.Stop()
 	executeTask(ctx, siteName, cfg, siteImpl)
 	// 判断运行模式

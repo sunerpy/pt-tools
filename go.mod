@@ -12,6 +12,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/zeebo/bencode v1.0.0
 	go.uber.org/zap v1.21.0
+	golang.org/x/sync v0.8.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/gorm v1.25.12
 	moul.io/zapgorm2 v1.3.0

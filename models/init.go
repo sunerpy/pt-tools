@@ -1,12 +1,14 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"golang.org/x/sync/semaphore"
 	"gorm.io/gorm"
 	"moul.io/zapgorm2"
 )
@@ -119,6 +121,16 @@ func (t *TorrentDB) UpdateTorrentStatus(torrentHash string, isDownloaded, isPush
 }
 
 // WithTransaction 使用事务
+// 创建一个全局的信号量，限制同时只有一个事务执行
+var globalSemaphore = semaphore.NewWeighted(1) // 只有一个令牌，最多一个 Goroutine 可以获取
 func (t *TorrentDB) WithTransaction(fn func(tx *gorm.DB) error) error {
+	// 尝试获取信号量
+	if err := globalSemaphore.Acquire(context.Background(), 1); err != nil {
+		// 获取信号量失败，表示已经有事务在执行
+		fmt.Println("无法获取信号量，事务已被其他 Goroutine 占用")
+		return err
+	}
+	defer globalSemaphore.Release(1) // 执行完事务后释放信号量
+	// 执行事务
 	return t.DB.Transaction(fn)
 }

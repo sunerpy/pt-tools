@@ -111,7 +111,7 @@ func (h *HdskyImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConf
 	}
 	err = ProcessTorrentsWithDBUpdate(ctx, h.qbitClient, dirPath, rssCfg.Category, rssCfg.Tag, models.HDSKY)
 	if err != nil {
-		sLogger().Fatal("发送种子到 qBittorrent 失败", err)
+		sLogger().Error("发送种子到 qBittorrent 失败", err)
 		return err
 	}
 	sLogger().Info("种子处理完成并更新数据库记录")
