@@ -44,6 +44,29 @@ func NewQbitClient(baseURL, username, password string, rateLimit time.Duration) 
 	return client, nil
 }
 
+func (q *QbitClient) DoRequestWithRetry(req *http.Request) (*http.Response, error) {
+	<-q.RateLimiter.C
+	resp, err := q.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		resp.Body.Close()
+		// 尝试重新登录
+		if err := q.authenticate(); err != nil {
+			return nil, fmt.Errorf("re-authentication failed: %w", err)
+		}
+		// 重新发起请求（复制原始请求）
+		newReq := req.Clone(req.Context())
+		if req.Body != nil {
+			// 如果有请求体，需要支持再次读取（推荐用 bytes.Buffer）
+			return nil, fmt.Errorf("cannot retry request with non-rewindable body")
+		}
+		return q.Client.Do(newReq)
+	}
+	return resp, nil
+}
+
 func (q *QbitClient) authenticate() error {
 	loginURL := fmt.Sprintf("%s/api/v2/auth/login", q.BaseURL)
 	data := url.Values{}
@@ -236,7 +259,7 @@ func (q *QbitClient) CheckTorrentExists(torrentHash string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("创建检查请求失败: %v", err)
 	}
-	resp, err := q.Client.Do(req)
+	resp, err := q.DoRequestWithRetry(req)
 	if err != nil {
 		return false, fmt.Errorf("检查请求失败: %v", err)
 	}
