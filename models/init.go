@@ -49,6 +49,7 @@ func (t *TorrentInfo) GetExpired() bool {
 	buffer := 5 * time.Minute
 	return time.Now().Add(buffer).After(*t.FreeEndTime)
 }
+
 // TorrentDB 封装数据库操作
 type TorrentDB struct {
 	DB *gorm.DB

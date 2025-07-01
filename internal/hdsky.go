@@ -27,7 +27,7 @@ type HdskyImpl struct {
 func NewHdskyImpl(ctx context.Context) *HdskyImpl {
 	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
 	if err != nil {
-		sLogger().Fatal("认证失败", err)
+		sLogger().Fatal("HDSKY认证失败", err)
 	}
 	co := site.NewCollectorWithTransport()
 	parser := site.NewHDSkyParser()

@@ -23,7 +23,7 @@ type FreeDownChecker interface {
 type APIResponse[T ResType] struct {
 	Message string `json:"message"`
 	Data    T      `json:"data"`
-	Code    string `json:"code"`
+	Code    any    `json:"code"`
 }
 type MTTorrentDetail struct {
 	ID               string        `json:"id"`

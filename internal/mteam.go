@@ -29,7 +29,7 @@ type MteamImpl struct {
 func NewMteamImpl(ctx context.Context) *MteamImpl {
 	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
 	if err != nil {
-		sLogger().Fatal("认证失败", err)
+		sLogger().Fatal("MTEAM-qbit认证失败", err)
 	}
 	return &MteamImpl{
 		ctx:        ctx,
