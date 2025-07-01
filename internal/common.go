@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -168,6 +169,16 @@ func downloadWorker[T models.ResType](
 				if err != nil {
 					return fmt.Errorf("种子下载失败: %w", err)
 				}
+				torrentFile := filepath.Join(downloadPath, title+".torrent")
+				if _, err := os.Stat(torrentFile); os.IsNotExist(err) {
+					sLogger().Warnf("种子文件不存在但标记已下载: %s", title)
+					// 修正数据库状态
+					torrent.IsDownloaded = false
+					torrent.TorrentHash = nil
+					tx.Save(torrent)
+					sLogger().Infof("已更新数据库记录: %s", title)
+					return nil
+				}
 				// 更新数据库记录
 				torrent.IsDownloaded = true
 				torrent.TorrentHash = &hash
@@ -195,80 +206,116 @@ func ProcessTorrentsWithDBUpdate(
 	dirPath, category, tags string,
 	siteName models.SiteGroup,
 ) error {
-	// 使用事务处理目录和更新数据库
-	return global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
-		// 获取目录下的所有种子文件
-		filePaths, err := qbit.GetTorrentFilesPath(dirPath)
+	// 获取目录下的所有种子文件（移出事务）
+	filePaths, err := qbit.GetTorrentFilesPath(dirPath)
+	if err != nil {
+		sLogger().Error("无法读取目录", dirPath, err)
+		return fmt.Errorf("无法读取目录: %v", err)
+	}
+	// 为每个种子创建独立处理
+	for _, file := range filePaths {
+		// 使用独立事务处理每个种子
+		err := processSingleTorrent(ctx, qbitClient, file, category, tags, siteName)
 		if err != nil {
-			sLogger().Error("无法读取目录", dirPath)
-			return fmt.Errorf("无法读取目录: %v", err)
+			sLogger().Errorf("处理种子失败: %s, %v", file, err)
+			// 记录错误但继续处理其他种子
 		}
-		for _, file := range filePaths {
-			// 计算种子哈希
-			torrentHash, err := qbit.ComputeTorrentHashWithPath(file)
-			if err != nil {
-				return fmt.Errorf("计算种子哈希失败: %w", err)
+	}
+	sLogger().Info("所有种子处理完成")
+	return nil
+}
+
+func processSingleTorrent(
+	ctx context.Context,
+	qbitClient *qbit.QbitClient,
+	filePath, category, tags string,
+	siteName models.SiteGroup,
+) error {
+	// 每个种子使用独立事务
+	return global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
+		// 计算种子哈希
+		torrentHash, err := qbit.ComputeTorrentHashWithPath(filePath)
+		if err != nil {
+			sLogger().Errorf("计算种子哈希失败: %s, %v", filePath, err)
+			return fmt.Errorf("计算种子哈希失败: %w", err)
+		}
+		// 查询数据库中的种子信息
+		torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(string(siteName), torrentHash)
+		if err != nil {
+			sLogger().Errorf("查询种子信息失败: %s, %v", filePath, err)
+			return fmt.Errorf("查询种子信息失败: %w", err)
+		}
+		// 0. 处理过期种子
+		if torrent != nil && torrent.GetExpired() {
+			sLogger().Warnf("种子免费期已过期，标记并删除: %s", filePath)
+			// 更新数据库标记过期
+			if err := tx.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
+				Update("is_expired", true).Error; err != nil {
+				return fmt.Errorf("标记过期状态失败: %w", err)
 			}
-			// 查询数据库中的种子信息
-			torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(string(siteName), torrentHash)
-			if err != nil {
-				return fmt.Errorf("查询种子信息失败: %w", err)
+			sLogger().Warnf("种子已过免费期，删除本地文件: %s", filePath)
+			if err := os.Remove(filePath); err != nil {
+				sLogger().Errorf("删除过期种子失败: %s, %v", filePath, err)
 			}
-			// 如果种子已推送，跳过并删除本地文件
-			if torrent != nil && (torrent.IsPushed != nil && *torrent.IsPushed) {
-				if err := os.Remove(file); err != nil {
-					sLogger().Error("种子已推送，删除本地文件失败", file, err)
-				} else {
-					sLogger().Info("种子已推送,本地文件删除成功", file)
-				}
-				continue
+			// 直接返回不进行后续处理
+			return nil
+		}
+		// 2. 已推送种子的处理
+		if torrent != nil && torrent.IsPushed != nil && *torrent.IsPushed {
+			sLogger().Infof("种子已推送，删除本地文件: %s", filePath)
+			if err := os.Remove(filePath); err != nil {
+				return fmt.Errorf("删除已推送种子失败: %w", err)
 			}
-			// 检查种子是否已存在于 qBittorrent 中
-			exists, err := qbitClient.CheckTorrentExists(torrentHash)
-			if err != nil {
-				return fmt.Errorf("检查种子失败: %w", err)
-			}
-			if exists {
-				// 更新数据库为已推送
-				err := tx.Model(&models.TorrentInfo{}).
-					Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
-					Updates(map[string]interface{}{
-						"is_pushed": true,
-						"push_time": time.Now(),
-					}).Error
-				if err != nil {
-					return fmt.Errorf("更新数据库记录失败: %w", err)
-				}
-				// 删除本地文件
-				if err := os.Remove(file); err != nil {
-					return fmt.Errorf("种子已存在，但删除本地文件失败: %w", err)
-				}
-				sLogger().Info("种子已存在于 qBittorrent,本地文件删除成功", file)
-				continue
-			}
-			// 推送种子到 qBittorrent
-			err = qbitClient.ProcessSingleTorrentFile(ctx, file, category, tags)
-			if err != nil {
-				// 更新数据库为失败状态
-				err := tx.Model(&models.TorrentInfo{}).
-					Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
-					Update("is_pushed", false).Error
-				if err != nil {
-					sLogger().Error("更新数据库失败", torrentHash, err)
-				}
-				return fmt.Errorf("处理种子文件失败: %w", err)
-			}
-			// 更新数据库为成功状态
-			err = tx.Model(&models.TorrentInfo{}).
+			return nil
+		}
+		// 3. 检查是否已在 qBittorrent 中存在
+		exists, err := qbitClient.CheckTorrentExists(torrentHash)
+		if err != nil {
+			return fmt.Errorf("检查种子存在失败: %w", err)
+		}
+		if exists {
+			sLogger().Infof("种子已存在于 qBittorrent: %s", filePath)
+			// 更新数据库状态
+			if err := tx.Model(&models.TorrentInfo{}).
 				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
 				Updates(map[string]interface{}{
 					"is_pushed": true,
 					"push_time": time.Now(),
-				}).Error
-			if err != nil {
-				return fmt.Errorf("更新数据库记录失败 (torrent_hash: %s): %w", torrentHash, err)
+				}).Error; err != nil {
+				return fmt.Errorf("更新数据库状态失败: %w", err)
 			}
+			// 删除本地文件
+			if err := os.Remove(filePath); err != nil {
+				return fmt.Errorf("删除已存在种子失败: %w", err)
+			}
+			return nil
 		}
+		// 4. 新种子推送处理
+		sLogger().Infof("推送新种子到 qBittorrent: %s", filePath)
+		if err := qbitClient.ProcessSingleTorrentFile(ctx, filePath, category, tags); err != nil {
+			// 推送失败只更新状态不删除文件
+			if updateErr := tx.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
+				Update("is_pushed", false).Error; updateErr != nil {
+				sLogger().Errorf("更新推送失败状态出错: %s, %v", filePath, updateErr)
+			}
+			return fmt.Errorf("推送种子失败: %w", err)
+		}
+		// 5. 推送成功处理
+		if err := tx.Model(&models.TorrentInfo{}).
+			Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
+			Updates(map[string]interface{}{
+				"is_pushed": true,
+				"push_time": time.Now(),
+			}).Error; err != nil {
+			return fmt.Errorf("更新推送状态失败: %w", err)
+		}
+		// 推送成功后删除本地文件
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("删除已推送种子失败: %w", err)
+		}
+		sLogger().Infof("种子推送成功并删除: %s", filePath)
 		return nil
 	})
 }
@@ -285,7 +332,7 @@ func sanitizeTitle(title string) string {
 
 func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup, m PTSiteInter[T], rssCfg config.RSSConfig) error {
 	if !m.IsEnabled() {
-		return fmt.Errorf(enableError)
+		return errors.New(enableError)
 	}
 	if rssCfg.DownloadSubPath == "" {
 		return fmt.Errorf("下载目录为空")
