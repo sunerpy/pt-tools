@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/allegro/bigcache/v3 v3.1.0
 	github.com/fatih/color v1.18.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/gocolly/colly v1.2.0

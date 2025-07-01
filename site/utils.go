@@ -2,13 +2,39 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/allegro/bigcache/v3"
 	"github.com/gocolly/colly"
 	"github.com/sunerpy/pt-tools/models"
 )
+
+var (
+	cacheOnce    sync.Once
+	torrentCache *bigcache.BigCache
+)
+
+func GetSeedCache(ctx context.Context) *bigcache.BigCache {
+	cacheOnce.Do(func() {
+		var err error
+		torrentCache, err = bigcache.New(ctx, bigcache.Config{
+			Shards:             1024,
+			LifeWindow:         10 * time.Minute, // 全局 TTL
+			CleanWindow:        5 * time.Minute,
+			MaxEntriesInWindow: 10000,
+			MaxEntrySize:       1024,
+			HardMaxCacheSize:   64, // 单位 MB
+		})
+		if err != nil {
+			panic(err)
+		}
+	})
+	return torrentCache
+}
 
 // mergeHeaders 合并 headers 和 customHeaders，customHeaders 优先覆盖
 func mergeHeaders(headers, customHeaders map[string]string) map[string]string {
@@ -26,6 +52,13 @@ func mergeHeaders(headers, customHeaders map[string]string) map[string]string {
 
 // CommonFetchTorrentInfo 获取种子信息
 func CommonFetchTorrentInfo(ctx context.Context, c *colly.Collector, conf *SiteMapConfig, url string) (*models.PHPTorrentInfo, error) {
+	cache := GetSeedCache(ctx)
+	if data, err := cache.Get(url); err == nil {
+		var cachedInfo models.PHPTorrentInfo
+		if err := json.Unmarshal(data, &cachedInfo); err == nil {
+			return &cachedInfo, nil
+		}
+	}
 	// 设置请求头
 	c.OnRequest(func(r *colly.Request) {
 		select {
@@ -70,6 +103,9 @@ func CommonFetchTorrentInfo(ctx context.Context, c *colly.Collector, conf *SiteM
 	}
 	if fetchErr != nil {
 		return nil, fetchErr
+	}
+	if b, err := json.Marshal(torrentInfo); err == nil {
+		_ = cache.Set(url, b)
 	}
 	return &torrentInfo, nil
 }

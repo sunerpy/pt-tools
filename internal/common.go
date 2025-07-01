@@ -112,7 +112,7 @@ func downloadWorker[T models.ResType](
 			// 查询数据库记录
 			torrent, err := global.GlobalDB.GetTorrentBySiteAndID(string(siteName), item.GUID)
 			if err != nil {
-				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
+				sLogger().Errorf("从数据库获取种子: %s 详情失败, %v", title, err)
 				continue
 			}
 			// 如果种子已跳过或已推送，直接跳过
@@ -170,7 +170,8 @@ func downloadWorker[T models.ResType](
 					if err != nil {
 						return fmt.Errorf("种子下载失败: %w", err)
 					}
-					torrentFile := filepath.Join(downloadPath, title+".torrent")
+					cleanTitle := sanitizeTitle(title)
+					torrentFile := filepath.Join(downloadPath, cleanTitle+".torrent")
 					if _, err := os.Stat(torrentFile); os.IsNotExist(err) {
 						sLogger().Warnf("种子文件不存在但标记已下载: %s", title)
 						// 修正数据库状态

@@ -11,6 +11,7 @@ func NewCollectorWithTransport() *colly.Collector {
 	// 创建并配置 Collector
 	// colly.AllowURLRevisit()
 	c := colly.NewCollector()
+	c.AllowURLRevisit = true
 	c.SetRequestTimeout(30 * time.Second)
 	c.WithTransport(&http.Transport{
 		MaxIdleConns:        10,
