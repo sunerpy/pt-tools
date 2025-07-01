@@ -1,5 +1,5 @@
 # 参数区分构建环境与基础镜像来源
-ARG BUILD_IMAGE=golang:1.23.1
+ARG BUILD_IMAGE=golang:1.24.3
 ARG BASE_IMAGE=alpine:3.20.3
 ARG BUILD_ENV=local
 
