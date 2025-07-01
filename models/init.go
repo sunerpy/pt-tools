@@ -20,20 +20,35 @@ const (
 
 // TorrentInfo 表示种子信息
 type TorrentInfo struct {
-	ID           uint       `gorm:"primaryKey"`                   // 主键
-	SiteName     string     `gorm:"uniqueIndex:idx_site_torrent"` // 与 TorrentID 组合唯一约束
-	TorrentID    string     `gorm:"uniqueIndex:idx_site_torrent"` // 与 SiteName 组合唯一约束
-	TorrentHash  *string    `gorm:"index"`                        // 允许为 NULL 且添加普通索引
-	IsDownloaded bool       `gorm:"default:false"`                // 默认值
-	IsPushed     *bool      `gorm:"default:null"`                 // 默认值
-	IsSkipped    bool       `gorm:"default:false"`                // 默认值
-	FreeLevel    string     `gorm:"default:'normal'"`             // 默认值
-	FreeEndTime  *time.Time `gorm:"default:null"`                 // 允许为空
-	PushTime     *time.Time `gorm:"default:null"`                 // 允许为空
-	CreatedAt    time.Time  // GORM 自动管理
-	UpdatedAt    time.Time  // GORM 自动管理
+	ID            uint       `gorm:"primaryKey"`                   // 主键
+	SiteName      string     `gorm:"uniqueIndex:idx_site_torrent"` // 与 TorrentID 组合唯一约束
+	TorrentID     string     `gorm:"uniqueIndex:idx_site_torrent"` // 与 SiteName 组合唯一约束
+	TorrentHash   *string    `gorm:"index"`                        // 允许为 NULL 且添加普通索引
+	IsDownloaded  bool       `gorm:"default:false"`                // 默认值
+	IsPushed      *bool      `gorm:"default:null"`                 // 默认值
+	IsSkipped     bool       `gorm:"default:false"`                // 默认值
+	FreeLevel     string     `gorm:"default:'normal'"`             // 默认值
+	FreeEndTime   *time.Time `gorm:"default:null"`                 // 允许为空
+	PushTime      *time.Time `gorm:"default:null"`                 // 允许为空
+	CreatedAt     time.Time  // GORM 自动管理
+	UpdatedAt     time.Time  // GORM 自动管理
+	IsExpired     bool       `gorm:"default:false"`
+	LastCheckTime *time.Time `gorm:"default:null"`
 }
 
+func (t *TorrentInfo) GetExpired() bool {
+	// 如果已标记为过期，直接返回 true
+	if t.IsExpired {
+		return true
+	}
+	// 处理免费结束时间为 nil 的情况
+	if t.FreeEndTime == nil {
+		return true
+	}
+	// 正常计算过期时间（带缓冲）
+	buffer := 5 * time.Minute
+	return time.Now().Add(buffer).After(*t.FreeEndTime)
+}
 // TorrentDB 封装数据库操作
 type TorrentDB struct {
 	DB *gorm.DB
