@@ -54,6 +54,24 @@ checkEnv() {
         logger error "❌ 配置文件 /app/config/config.toml 不存在，请通过挂载 config.toml 传入配置。"
     fi
 }
+# 设置默认 UID 和 GID（从环境变量读取）
+PUID=${PUID:-1000}
+PGID=${PGID:-1000}
+APP_USER=appuser
+APP_GROUP=appgroup
+
+# 创建用户组
+if ! getent group "$APP_GROUP" >/dev/null; then
+    addgroup -g "$PGID" "$APP_GROUP"
+fi
+
+# 创建用户（检查 UID 是否被占用）
+if ! getent passwd "$APP_USER" >/dev/null; then
+    adduser -u "$PUID" -G "$APP_GROUP" -D "$APP_USER"
+fi
+
+# 修改/app 权限
+chown -R "$APP_USER":"$APP_GROUP" /app
 
 mainRunServer() {
     checkEnv
@@ -62,7 +80,9 @@ mainRunServer() {
     #     find . \! -user appuser -exec chown appuser '{}' +
     #     exec gosu django "$0" "$@"
     # fi
-    exec "$@" -c /app/config/config.toml run -m persistent
+    # exec "$@" -c /app/config/config.toml run -m persistent
+    # 以目标用户运行应用（使用 exec 切换，避免启动残留 PID 1）
+    exec gosu "$APP_USER" "$@" -c /app/config/config.toml run -m persistent
 }
 if [ "$#" -ne 1 ] && [ "$#" -ne 0 ]; then
     logger error "参数个数有误，请检查"

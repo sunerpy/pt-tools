@@ -112,6 +112,7 @@ build-local-docker:
 	@echo "Building local Docker image"
 	docker buildx build \
 		--progress=plain \
+		--network host \
 		--platform $(DOCKERPLATFORMS) \
 		--build-arg CONFIG_FILE=$(CONFIG_FILE) \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
