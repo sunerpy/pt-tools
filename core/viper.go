@@ -42,6 +42,7 @@ func initViper(cfgFile string) error {
 	if cfgFile != "" {
 		v.SetConfigFile(cfgFile)
 	} else {
+		fmt.Println("使用默认配置文件")
 		v.SetConfigType("toml")
 		confDir := filepath.Join(home, configDir)
 		v.AddConfigPath(confDir)

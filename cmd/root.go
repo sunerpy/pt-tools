@@ -77,10 +77,10 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-	if err := initTools(); err != nil {
-		color.Red("Failed to load configuration\n")
-		panic(err)
-	}
+	// if err := initTools(); err != nil {
+	// 	color.Red("Failed to load configuration: %s\n",cfgFile)
+	// 	panic(err)
+	// }
 }
 
 func initTools() error {

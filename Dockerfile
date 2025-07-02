@@ -13,6 +13,7 @@ ARG CONFIG_FILE
 ARG TAG=unknown
 ARG BUILD_TIME=unknown
 ARG COMMIT_ID=unknown
+ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 
 # 仅在远程构建时执行 go mod vendor
 COPY go.* /app/
@@ -55,22 +56,26 @@ RUN if [ -f /app/dist/pt-tools-linux-amd64 ]; then \
     fi
 
 # 拷贝配置文件
-COPY "config/${CONFIG_FILE}" /app/config.toml
+# COPY "config/${CONFIG_FILE}" /app/config.toml
 
 # 阶段2：运行阶段
 FROM ${BASE_IMAGE}
 LABEL MAINTAINER="nkuzhangshn@gmail.com"
-ENV TZ=Asia/Shanghai
+ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 WORKDIR /app
-
-# 创建用户
-RUN addgroup -S appgroup && adduser -S -u 1000 -G appgroup appuser && chown -R appuser:appgroup /app
-
-USER appuser
+ENV TZ=Asia/Shanghai PATH=$PATH:/app/bin HOME=/app
 
 # 从构建阶段拷贝二进制文件
-COPY --from=builder /app/pt-tools ./pt-tools
-COPY --from=builder /app/config.toml ./config.toml
+COPY --from=builder /app/pt-tools /app/bin/pt-tools
+COPY --chown=1000:1000 --chmod=755 docker/docker-entrypoint.sh /app/bin/
+
+# 创建用户
+RUN mkdir -p /app/config && addgroup -S appgroup && adduser -S -u 1000 -G appgroup appuser && \
+    chown -R appuser:appgroup /app &&\
+    ls /app/bin -l && ls /app/config -l
+USER appuser
+
 
 # 设置启动命令
-ENTRYPOINT ["./pt-tools","-c","/app/config.toml"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["pt-tools"]

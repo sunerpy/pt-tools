@@ -31,6 +31,12 @@ func PersistentCheckCfg(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	// 检查downloadDir
+	home, err := os.UserHomeDir()
+	if err != nil {
+		color.Red("无法获取用户主目录: %v", err)
+		os.Exit(1)
+	}
+	chekcAndInitDownloadPath(filepath.Join(home, defaultWorkdir))
 	if _, err := os.Stat(global.GlobalDirCfg.DownloadDir); os.IsNotExist(err) {
 		color.Red("Error: Download directory not found.")
 		fmt.Println("Please run 'pt-tools config init' to initialize the database.")

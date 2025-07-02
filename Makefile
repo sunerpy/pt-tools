@@ -9,7 +9,7 @@ GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 NEW_TAG=$(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
 
 # Docker 镜像仓库
-DOCKER_REPO = sunerpys
+DOCKER_REPO = sunerpy
 DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
 TAG ?= $(GIT_TAG)
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -120,6 +120,10 @@ build-local-docker:
 		--build-arg TAG=$(TAG) \
 		--build-arg BUILD_TIME=$(BUILD_TIME) \
 		--build-arg COMMIT_ID=$(COMMIT_ID) \
+		--build-arg HTTP_PROXY=$(HTTP_PROXY) \
+		--build-arg HTTPS_PROXY=$(HTTPS_PROXY) \
+		--build-arg NO_PROXY=$(NO_PROXY) \
+		--no-cache \
 		-t $(DOCKER_IMAGE_FULL):$(TAG) \
 		-t $(DOCKER_IMAGE_FULL):latest .
 

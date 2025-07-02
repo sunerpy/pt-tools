@@ -21,11 +21,13 @@
    git clone https://github.com/sunerpy/pt-tools.git
    cd pt-tools
    ```
+
 2. 构建二进制文件：
 
    ```bash
    go build -o pt-tools .
    ```
+
 3. 将二进制文件移动到系统 `PATH`：
 
    ```bash
@@ -34,7 +36,7 @@
 
 ### 一键部署
 
-提供了一个自动化脚本，帮助用户快速下载和安装 ` pt-tools`。
+提供了一个自动化脚本，帮助用户快速下载和安装 `pt-tools`。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/download.sh | bash
@@ -54,16 +56,22 @@ curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/downl
    ```bash
    unzip pt-tools-windows-amd64.exe.zip
    ```
+
 3. 将解压后的二进制文件移动到系统 `PATH`：
 
    ```bash
    mv pt-tools /usr/local/bin/
    ```
+
 4. 验证安装：
 
    ```bash
    pt-tools version
    ```
+
+### 使用Docker运行
+
+请参阅docker运行说明 [README](./docker/README.md)。
 
 ---
 
@@ -197,7 +205,7 @@ pt-tools db init
 
 ---
 
-## 配置说明
+## 配置优先级
 
 `pt-tools` 的配置优先级从高到低如下：
 
@@ -210,6 +218,7 @@ pt-tools db init
      ```bash
      export DEFAULT_INTERVAL=10
      ```
+
 2. 指定的配置文件
 
    * 如果使用 `-c` 或者 `--config` 显式指定配置文件路径，`pt-tools` 将读取该文件，并使用文件中的值。
@@ -218,6 +227,7 @@ pt-tools db init
      ```bash
      pt-tools --config /path/to/config.toml
      ```
+
 3. 默认的配置文件
 
    * 如果未显式指定 `--config`，工具会在默认路径（如 `$HOME/.pt-tools/config.toml`）查找配置文件，并使用文件中的值。
@@ -343,6 +353,7 @@ download_sub_path = "mteam/tvs"
    ```bash
    pt-tools completion bash > /etc/bash_completion.d/pt-tools
    ```
+
 2. 重新加载 Shell 或直接加载补全脚本：
 
    ```bash
@@ -356,11 +367,13 @@ download_sub_path = "mteam/tvs"
    ```bash
    echo "autoload -U compinit; compinit" >> ~/.zshrc
    ```
+
 2. 生成 Zsh 补全脚本：
 
    ```bash
    pt-tools completion zsh > "${fpath[1]}/_pt-tools"
    ```
+
 3. 启动新 Shell 会话。
 
 ---

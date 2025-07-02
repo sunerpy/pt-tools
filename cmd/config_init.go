@@ -118,8 +118,7 @@ func createDefaultConfigFile(path string) error {
 	return nil
 }
 
-// 检查并初始化配置目录
-func checkAndInitConfigDir(dir, configFileName string, force bool) error {
+func chekcAndInitDownloadPath(dir string) error {
 	// 检查目录是否存在
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		// 创建目录
@@ -135,6 +134,15 @@ func checkAndInitConfigDir(dir, configFileName string, force bool) error {
 			return fmt.Errorf("无法创建下载目录: %v", err)
 		}
 		color.Green("创建下载目录: %s", downDir)
+	}
+	return nil
+}
+
+// 检查并初始化配置目录
+func checkAndInitConfigDir(dir, configFileName string, force bool) error {
+	// 检查目录是否存在
+	if err := chekcAndInitDownloadPath(dir); err != nil {
+		return err
 	}
 	// 生成配置文件路径
 	configFilePath := filepath.Join(dir, configFileName)
