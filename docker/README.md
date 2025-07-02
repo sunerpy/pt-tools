@@ -55,7 +55,7 @@ docker rm pt-tools
 ## 进入容器
 
 ```bash
-docker exec -it pt-tools -- /bin/bash
+docker exec -it pt-tools -- /bin/sh
 ```
 
 更多使用细节请参阅项目 [README](../README.md)。
