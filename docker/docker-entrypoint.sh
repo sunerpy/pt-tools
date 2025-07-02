@@ -70,8 +70,8 @@ if ! getent passwd "$APP_USER" >/dev/null; then
     adduser -u "$PUID" -G "$APP_GROUP" -D "$APP_USER"
 fi
 
-# 修改/app 权限
-chown -R "$APP_USER":"$APP_GROUP" /app
+# 修改/app 权限 忽略挂载的只读目录报错
+chown -R "$APP_USER":"$APP_GROUP" /app 2>/dev/null || true
 
 mainRunServer() {
     checkEnv
