@@ -28,6 +28,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -65,6 +66,20 @@ func init() {
 	})
 }
 
+func acquireLockOrExit(lockFilePath string) *os.File {
+	lockFile, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		color.Red("无法创建锁文件: %v", err)
+		os.Exit(1)
+	}
+	// 尝试加锁
+	if err := unix.Flock(int(lockFile.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		color.Red("已有实例正在运行，请勿重复启动")
+		os.Exit(1)
+	}
+	return lockFile
+}
+
 // 单次运行
 func executeSingleRun() {
 	fmt.Println("Executing task once...")
@@ -93,6 +108,9 @@ func runCmdFunc(cmd *cobra.Command, args []string) {
 		sLogger().Warn("收到退出信号，正在退出...")
 		cancel()
 	}()
+	lockFile := acquireLockOrExit("/tmp/pt-tools.lock")
+	defer lockFile.Close()
+	defer unix.Flock(int(lockFile.Fd()), unix.LOCK_UN)
 	switch mode {
 	case "single":
 		sLogger().Info("运行模式: 单次运行")
