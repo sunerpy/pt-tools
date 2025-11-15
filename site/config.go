@@ -1,14 +1,13 @@
 package site
 
 import (
-	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/models"
 )
 
 type SiteMapConfig struct {
 	Name          string            // 站点名称
 	SharedConfig  *SharedSiteConfig // 共享配置
-	Config        config.SiteConfig
+	Config        models.SiteConfig
 	Parser        SiteParser        // 站点特定解析器
 	CustomHeaders map[string]string // 特定站点覆盖的请求头
 }
@@ -35,7 +34,7 @@ func newSharedSiteConfig(cookie string, refererProvider RefererProvider) *Shared
 }
 
 // 单个 URL 创建单个 SiteMapConfig
-func NewSiteMapConfig(name models.SiteGroup, cookie string, conf config.SiteConfig, parser SiteParser) *SiteMapConfig {
+func NewSiteMapConfig(name models.SiteGroup, cookie string, conf models.SiteConfig, parser SiteParser) *SiteMapConfig {
 	refererProvider := NewDefaultReferer(name)
 	sharedCfg := newSharedSiteConfig(cookie, refererProvider)
 	return &SiteMapConfig{

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -15,6 +14,6 @@ type PTSiteInter[T models.ResType] interface {
 	DownloadTorrent(url, title, downloadDir string) (string, error)
 	MaxRetries() int
 	RetryDelay() time.Duration
-	SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error
+	SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error
 	Context() context.Context
 }

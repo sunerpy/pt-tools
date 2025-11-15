@@ -47,12 +47,7 @@ suCmd() {
     su - "${osuser}" -c "${cmd}"
 }
 checkEnv() {
-    # 必要的配置文件检查
-    ls /app/config -al
-    cat /app/config/config.toml
-    if [ ! -f "/app/config/config.toml" ]; then
-        logger error "❌ 配置文件 /app/config/config.toml 不存在，请通过挂载 config.toml 传入配置。"
-    fi
+    :
 }
 # 设置默认 UID 和 GID（从环境变量读取）
 PUID=${PUID:-1000}
@@ -74,15 +69,15 @@ fi
 chown -R "$APP_USER":"$APP_GROUP" /app 2>/dev/null || true
 
 mainRunServer() {
-    checkEnv
-
     # if [ "$1" = 'pt-tools' ] && [ "$(id -u)" = '0' ]; then
     #     find . \! -user appuser -exec chown appuser '{}' +
     #     exec gosu django "$0" "$@"
     # fi
-    # exec "$@" -c /app/config/config.toml run -m persistent
+    # exec "$@" run -m persistent
     # 以目标用户运行应用（使用 exec 切换，避免启动残留 PID 1）
-    exec gosu "$APP_USER" "$@" -c /app/config/config.toml run -m persistent
+    HOST=${PT_HOST:-0.0.0.0}
+    PORT=${PT_PORT:-8080}
+    exec gosu "$APP_USER" "$@" web --host "$HOST" --port "$PORT"
 }
 if [ "$#" -ne 1 ] && [ "$#" -ne 0 ]; then
     logger error "参数个数有误，请检查"

@@ -1,18 +1,20 @@
 package internal
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"path/filepath"
-	"strconv"
-	"time"
+    "bytes"
+    "context"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "net/http"
+    "os"
+    "path/filepath"
+    "strconv"
+    "time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/sunerpy/pt-tools/config"
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/qbit"
@@ -27,7 +29,8 @@ type MteamImpl struct {
 }
 
 func NewMteamImpl(ctx context.Context) *MteamImpl {
-	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
+	qbc, _ := core.NewConfigStore(global.GlobalDB).GetQbitOnly()
+	client, err := qbit.NewQbitClient(qbc.URL, qbc.User, qbc.Password, time.Second*10)
 	if err != nil {
 		sLogger().Fatal("MTEAM-qbit认证失败", err)
 	}
@@ -44,8 +47,9 @@ func (m *MteamImpl) Context() context.Context {
 }
 
 func (m *MteamImpl) IsEnabled() bool {
-	if global.GetGlobalConfig().Sites[models.MTEAM].Enabled != nil {
-		return *global.GetGlobalConfig().Sites[models.MTEAM].Enabled
+	scMap, _ := core.NewConfigStore(global.GlobalDB).ListSites()
+	if scMap[models.MTEAM].Enabled != nil {
+		return *scMap[models.MTEAM].Enabled
 	}
 	return false
 }
@@ -55,7 +59,8 @@ func (m *MteamImpl) DownloadTorrent(url, title, downloadDir string) (string, err
 }
 
 func (m *MteamImpl) CanbeFinished(detail models.MTTorrentDetail) bool {
-	if !global.GetGlobalConfig().Global.DownloadLimitEnabled {
+	gl, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+	if !gl.DownloadLimitEnabled {
 		return true
 	} else {
 		timeEnd, err := time.Parse("2006-01-02 15:04:05", detail.Status.DiscountEndTime)
@@ -68,9 +73,9 @@ func (m *MteamImpl) CanbeFinished(detail models.MTTorrentDetail) bool {
 			sLogger().Error("解析种子大小失败", err)
 			return false
 		}
-		duration := timeEnd.Sub(time.Now())
+		duration := time.Until(timeEnd)
 		secondsDiff := int(duration.Seconds())
-		if secondsDiff*global.GetGlobalConfig().Global.DownloadSpeedLimit < (torrentSizeMB / 1024 / 1024) {
+		if secondsDiff*gl.DownloadSpeedLimit < (torrentSizeMB / 1024 / 1024) {
 			sLogger().Warn("种子免费时间不足以完成下载,跳过...", detail.ID)
 			return false
 		}
@@ -80,15 +85,23 @@ func (m *MteamImpl) CanbeFinished(detail models.MTTorrentDetail) bool {
 
 func (m *MteamImpl) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[models.MTTorrentDetail], error) {
 	if !m.IsEnabled() {
-		return nil, fmt.Errorf(enableError)
+		return nil, errors.New(enableError)
 	}
-	data := []byte(fmt.Sprintf("id=%s", item.GUID))
-	apiPath := fmt.Sprintf("%s%s", global.GetGlobalConfig().Sites[models.MTEAM].APIUrl, torrentDetailPath)
+	if item == nil {
+		return nil, fmt.Errorf("RSS item 为空")
+	}
+	data := fmt.Appendf(nil, "id=%s", item.GUID)
+	cfg, _ := core.NewConfigStore(global.GlobalDB).Load()
+	sc := cfg.Sites[models.MTEAM]
+	if sc.APIUrl == "" || sc.APIKey == "" {
+		return nil, fmt.Errorf("站点 API 未配置")
+	}
+	apiPath := fmt.Sprintf("%s%s", sc.APIUrl, torrentDetailPath)
 	req, err := http.NewRequest("POST", apiPath, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
-	req.Header.Set("x-api-key", global.GetGlobalConfig().Sites[models.MTEAM].APIKey)
+	req.Header.Set("x-api-key", sc.APIKey)
 	req.Header.Set("Content-Type", mteamContentType)
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -129,9 +142,13 @@ func (m *MteamImpl) RetryDelay() time.Duration {
 	return m.retryDelay
 }
 
-func (m *MteamImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error {
-	dirPath := filepath.Join(global.GlobalDirCfg.DownloadDir, rssCfg.DownloadSubPath)
-	exists, empty, err := utils.CheckDirectory(dirPath)
+func (m *MteamImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+    homeDir, _ := os.UserHomeDir()
+    store := core.NewConfigStore(global.GlobalDB)
+    gl, _ := store.GetGlobalOnly()
+    dirPath := filepath.Join(homeDir, models.WorkDir, gl.DownloadDir, rssCfg.DownloadSubPath)
+    if _, err := os.Stat(dirPath); os.IsNotExist(err) { _ = os.MkdirAll(dirPath, 0o755) }
+    exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
 		sLogger().Error("检查目录失败", err)
 		return err

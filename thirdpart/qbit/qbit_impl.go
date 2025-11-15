@@ -28,6 +28,13 @@ type QbitClient struct {
 	RateLimiter *time.Ticker
 	mu          sync.Mutex
 }
+type DownloadTaskInfo struct {
+	Name          string
+	Hash          string
+	SizeLeft      int64
+	DownloadSpeed int64
+	ETA           time.Duration
+}
 
 func NewQbitClient(baseURL, username, password string, rateLimit time.Duration) (*QbitClient, error) {
 	jar, _ := cookiejar.New(nil)
@@ -194,16 +201,16 @@ func (q *QbitClient) AddTorrent(fileData []byte, category, tags string) error {
 	if err != nil {
 		return fmt.Errorf("创建 torrent 文件表单失败: %v", err)
 	}
-	if _, err := part.Write(fileData); err != nil {
+	if _, err = part.Write(fileData); err != nil {
 		return fmt.Errorf("写入 torrent 文件数据失败: %v", err)
 	}
 	if category != "" {
-		if err := writer.WriteField("category", category); err != nil {
+		if err = writer.WriteField("category", category); err != nil {
 			return fmt.Errorf("写入 category 失败: %v", err)
 		}
 	}
 	if tags != "" {
-		if err := writer.WriteField("tags", tags); err != nil {
+		if err = writer.WriteField("tags", tags); err != nil {
 			return fmt.Errorf("写入 tags 失败: %v", err)
 		}
 	}
@@ -212,13 +219,13 @@ func (q *QbitClient) AddTorrent(fileData []byte, category, tags string) error {
 	// 		return fmt.Errorf("写入 savepath 失败: %v", err)
 	// 	}
 	// }
-	if err := writer.WriteField("skip_checking", fmt.Sprintf("%t", skipChecking)); err != nil {
+	if err = writer.WriteField("skip_checking", fmt.Sprintf("%t", skipChecking)); err != nil {
 		return fmt.Errorf("写入 skip_checking 失败: %v", err)
 	}
-	if err := writer.WriteField("paused", fmt.Sprintf("%t", paused)); err != nil {
+	if err = writer.WriteField("paused", fmt.Sprintf("%t", paused)); err != nil {
 		return fmt.Errorf("写入 paused 失败: %v", err)
 	}
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		return fmt.Errorf("关闭 multipart writer 失败: %v", err)
 	}
 	req, err := http.NewRequest("POST", uploadURL, body)
@@ -346,7 +353,7 @@ func (q *QbitClient) processTorrentFile(ctx context.Context, filePath, category,
 		return fmt.Errorf("检查种子失败: %v", err)
 	}
 	if exists {
-		if err := os.Remove(filePath); err != nil {
+		if err = os.Remove(filePath); err != nil {
 			return fmt.Errorf("种子已存在，但删除本地文件失败: %v", err)
 		}
 		sLogger().Info("种子已存在,本地文件删除成功", filePath)
@@ -366,6 +373,79 @@ func (q *QbitClient) processTorrentFile(ctx context.Context, filePath, category,
 	}
 	sLogger().Info("种子添加成功", filePath)
 	return nil
+}
+
+//	func (q *QbitClient) GetActiveDownloadTasks(ctx context.Context) ([]DownloadTaskInfo, int64, error) {
+//		url := fmt.Sprintf("%s/api/v2/sync/maindata", q.BaseURL)
+//		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+//		if err != nil {
+//			return nil, 0, err
+//		}
+//		resp, err := q.Client.Do(req)
+//		if err != nil {
+//			return nil, 0, err
+//		}
+//		defer resp.Body.Close()
+//		var data struct {
+//			ServerState struct {
+//				DownloadRate int64 `json:"dl_info_speed"`
+//			} `json:"server_state"`
+//			Torrents map[string]struct {
+//				Name          string `json:"name"`
+//				AmountLeft    int64  `json:"amount_left"`
+//				DownloadSpeed int64  `json:"dlspeed"`
+//				State         string `json:"state"`
+//			} `json:"torrents"`
+//		}
+//		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+//			return nil, 0, err
+//		}
+//		var tasks []DownloadTaskInfo
+//		for hash, t := range data.Torrents {
+//			if t.AmountLeft > 0 && t.DownloadSpeed > 0 && strings.HasPrefix(t.State, "downloading") {
+//				eta := time.Duration(float64(t.AmountLeft)/float64(t.DownloadSpeed)) * time.Second
+//				tasks = append(tasks, DownloadTaskInfo{
+//					Name:          t.Name,
+//					Hash:          hash,
+//					SizeLeft:      t.AmountLeft,
+//					DownloadSpeed: t.DownloadSpeed,
+//					ETA:           eta,
+//				})
+//			}
+//		}
+//		return tasks, data.ServerState.DownloadRate, nil
+//	}
+func (q *QbitClient) WaitAndAddTorrentSmart(ctx context.Context, fileData []byte, category, tags string, maxDuration time.Duration, sharedStats []DownloadTaskInfo, sharedRate int64) error {
+	newSize := int64(len(fileData))
+	taskCount := len(sharedStats)
+	// 平均速度预估（最保守按任务数 + 1）
+	estimatedSpeed := float64(sharedRate) / float64(taskCount+1)
+	estDuration := time.Duration(float64(newSize)/estimatedSpeed) * time.Second
+	if estDuration <= maxDuration {
+		sLogger().Infof("种子可以直接添加，预估下载时长: %v", estDuration)
+		return q.AddTorrent(fileData, category, tags)
+	}
+	// 找出 ETA 最小的任务
+	var soonestTask *DownloadTaskInfo
+	for i := range sharedStats {
+		if soonestTask == nil || sharedStats[i].ETA < soonestTask.ETA {
+			soonestTask = &sharedStats[i]
+		}
+	}
+	if soonestTask == nil {
+		return fmt.Errorf("无法找到 ETA 最短的任务")
+	}
+	sLogger().Warnf("种子将等待任务 [%s] 完成后再添加，预计等待: %v", soonestTask.Name, soonestTask.ETA)
+	// 等待最短 ETA 的任务完成
+	timer := time.NewTimer(soonestTask.ETA + 10*time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("等待任务完成被取消: %v", ctx.Err())
+	case <-timer.C:
+	}
+	// 尝试添加
+	return q.AddTorrent(fileData, category, tags)
 }
 
 // ComputeTorrentHash 计算种子的 SHA1 哈希值

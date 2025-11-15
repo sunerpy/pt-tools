@@ -13,7 +13,6 @@
 ```bash
 docker run -d \
   --name=pt-tools \
-  -v /path/to/config.toml:/app/config/config.toml:ro \
   -v /path/to/pt-data:/app/.pt-tools:rw \
   -e TZ=Asia/Shanghai \
   sunerpy/pt-tools:latest
@@ -30,7 +29,6 @@ services:
     environment:
       - TZ=Asia/Shanghai
     volumes:
-      - /path/to/config.toml:/app/config/config.toml:ro
       - /path/to/pt-data:/app/.pt-tools
     restart: unless-stopped
 ```
@@ -49,7 +47,6 @@ services:
 
 | 参数/挂载点 | 作用 |
 |-------------|------|
-| `/app/config/config.toml` | 程序配置文件，需在宿主机创建并挂载到该路径 |
 | `/app/.pt-tools` | 程序工作目录，存放数据库等数据 |
 
 ## 更新镜像

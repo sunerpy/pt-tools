@@ -1,0 +1,20 @@
+version: "3.8"
+services:
+  pt-tools:
+    image: sunerpy/pt-tools:latest
+    container_name: pt-tools
+    environment:
+      PT_WEB: "1"
+      PT_HOST: "0.0.0.0"
+      PT_PORT: "8080"
+      PUID: "1000"
+      PGID: "1000"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/.pt-tools
+    restart: unless-stopped
+
+# 说明：
+# - 将 ./data 挂载到 /app/.pt-tools 以持久化数据库与下载目录
+# - 首次启动后打开浏览器访问 http://localhost:8080 完成 Web 内的初始化

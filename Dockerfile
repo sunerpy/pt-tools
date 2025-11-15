@@ -1,5 +1,5 @@
 # 参数区分构建环境与基础镜像来源
-ARG BUILD_IMAGE=golang:1.24.3
+ARG BUILD_IMAGE=golang:1.25.2
 ARG BASE_IMAGE=alpine:3.20.3
 ARG BUILD_ENV=local
 
@@ -9,7 +9,6 @@ WORKDIR /app
 
 # 构建参数
 ARG BUILD_ENV
-ARG CONFIG_FILE
 ARG TAG=unknown
 ARG BUILD_TIME=unknown
 ARG COMMIT_ID=unknown
@@ -28,6 +27,8 @@ COPY core /app/core
 COPY global /app/global
 COPY internal /app/internal
 COPY models /app/models
+COPY scheduler /app/scheduler
+COPY web /app/web
 COPY site /app/site
 COPY thirdpart /app/thirdpart
 COPY utils /app/utils
@@ -36,27 +37,29 @@ COPY version /app/version
 COPY *.go /app/
 COPY dist /app/dist
 
-# 构建二进制文件
-RUN if [ -f /app/dist/pt-tools-linux-amd64 ]; then \
-	echo "Binary already exists. Skipping build and moving the file."; \
-	mv /app/dist/pt-tools-linux-amd64 /app/pt-tools && chmod +x /app/pt-tools; \
-	else \
-	if [ "$BUILD_ENV" = "local" ]; then \
-	go env -w GOPROXY=https://goproxy.cn,direct; \
-	fi && \
-	go env -w CGO_ENABLED=0 && \
-	go env && \
-	go mod tidy && \
-	go mod vendor && \
-	go build -ldflags="-s -w \
-	-X github.com/sunerpy/pt-tools/version.Version=${TAG} \
-	-X github.com/sunerpy/pt-tools/version.BuildTime=${BUILD_TIME} \
-	-X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID}" \
-	-mod=vendor -o pt-tools; \
-	fi
-
-# 拷贝配置文件
-# COPY "config/${CONFIG_FILE}" /app/config.toml
+# 构建或接受外部二进制，并统一执行 upx 压缩
+RUN set -eux; \
+  if [ -f /app/dist/pt-tools-linux-amd64 ]; then \
+    echo "Using provided binary from dist"; \
+    mv /app/dist/pt-tools-linux-amd64 /app/pt-tools && chmod +x /app/pt-tools; \
+  else \
+    if [ "$BUILD_ENV" = "local" ]; then \
+      go env -w GOPROXY=https://goproxy.cn,direct; \
+    fi; \
+    go env -w CGO_ENABLED=0; \
+    go env; \
+    go mod tidy; \
+    go mod vendor; \
+    go build -ldflags="-s -w \
+      -X github.com/sunerpy/pt-tools/version.Version=${TAG} \
+      -X github.com/sunerpy/pt-tools/version.BuildTime=${BUILD_TIME} \
+      -X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID}" \
+      -mod=vendor -o pt-tools; \
+  fi; \
+  if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends upx-ucl || true; fi; \
+  if command -v apk >/dev/null 2>&1; then apk add --no-cache upx || true; fi; \
+  if command -v yum >/dev/null 2>&1; then yum install -y upx || true; fi; \
+  upx -9 /app/pt-tools || true
 
 # 阶段2：运行阶段
 FROM ${BASE_IMAGE}
@@ -65,6 +68,7 @@ ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 WORKDIR /app
 ENV PUID=1000 PGUID=1000
 ENV TZ=Asia/Shanghai PATH=$PATH:/app/bin HOME=/app
+ENV PT_HOST=0.0.0.0 PT_PORT=8080
 
 # 从构建阶段拷贝二进制文件
 COPY --from=builder /app/pt-tools /app/bin/pt-tools

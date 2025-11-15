@@ -1,13 +1,14 @@
 package internal
 
 import (
-	"context"
-	"path/filepath"
-	"time"
+    "context"
+    "os"
+    "path/filepath"
+    "time"
 
 	"github.com/gocolly/colly"
 	"github.com/mmcdole/gofeed"
-	"github.com/sunerpy/pt-tools/config"
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/site"
@@ -25,13 +26,16 @@ type HdskyImpl struct {
 }
 
 func NewHdskyImpl(ctx context.Context) *HdskyImpl {
-	client, err := qbit.NewQbitClient(global.GetGlobalConfig().Qbit.URL, global.GetGlobalConfig().Qbit.User, global.GetGlobalConfig().Qbit.Password, time.Second*10)
+	store := core.NewConfigStore(global.GlobalDB)
+	qbc, _ := store.GetQbitOnly()
+	client, err := qbit.NewQbitClient(qbc.URL, qbc.User, qbc.Password, time.Second*10)
 	if err != nil {
 		sLogger().Fatal("HDSKY认证失败", err)
 	}
 	co := site.NewCollectorWithTransport()
 	parser := site.NewHDSkyParser()
-	siteCfg := site.NewSiteMapConfig(models.HDSKY, global.GetGlobalConfig().Sites[models.HDSKY].Cookie, global.GetGlobalConfig().Sites[models.HDSKY], parser)
+	cfg, _ := store.Load()
+	siteCfg := site.NewSiteMapConfig(models.HDSKY, cfg.Sites[models.HDSKY].Cookie, cfg.Sites[models.HDSKY], parser)
 	return &HdskyImpl{
 		ctx:        ctx,
 		maxRetries: maxRetries,
@@ -46,7 +50,9 @@ func (h *HdskyImpl) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[mo
 	url := item.Link
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	info, err := site.CommonFetchTorrentInfo(ctx, h.Collector, h.SiteConf, url)
+	cfg, _ := core.NewConfigStore(global.GlobalDB).Load()
+	siteCfg := site.NewSiteMapConfig(models.HDSKY, cfg.Sites[models.HDSKY].Cookie, cfg.Sites[models.HDSKY], site.NewHDSkyParser())
+	info, err := site.CommonFetchTorrentInfo(ctx, h.Collector, siteCfg, url)
 	if err != nil {
 		return nil, err
 	}
@@ -59,19 +65,21 @@ func (h *HdskyImpl) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[mo
 }
 
 func (h *HdskyImpl) IsEnabled() bool {
-	if global.GetGlobalConfig().Sites[models.HDSKY].Enabled != nil {
-		return *global.GetGlobalConfig().Sites[models.HDSKY].Enabled
+	cfg, _ := core.NewConfigStore(global.GlobalDB).Load()
+	if cfg.Sites[models.HDSKY].Enabled != nil {
+		return *cfg.Sites[models.HDSKY].Enabled
 	}
 	return false
 }
 
 func (h *HdskyImpl) CanbeFinished(detail models.PHPTorrentInfo) bool {
-	if !global.GetGlobalConfig().Global.DownloadLimitEnabled {
+	gl, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+	if !gl.DownloadLimitEnabled {
 		return true
 	} else {
-		duration := detail.EndTime.Sub(time.Now())
+		duration := time.Until(detail.EndTime)
 		secondsDiff := int(duration.Seconds())
-		if float64(secondsDiff)*float64(global.GetGlobalConfig().Global.DownloadSpeedLimit) < (detail.SizeMB / 1024 / 1024) {
+		if float64(secondsDiff)*float64(gl.DownloadSpeedLimit) < (detail.SizeMB / 1024 / 1024) {
 			sLogger().Warn("种子免费时间不足以完成下载,跳过...", detail.TorrentID)
 			return false
 		}
@@ -91,12 +99,16 @@ func (h *HdskyImpl) RetryDelay() time.Duration {
 	return h.retryDelay
 }
 
-func (h *HdskyImpl) SendTorrentToQbit(ctx context.Context, rssCfg config.RSSConfig) error {
+func (h *HdskyImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
 	if h.qbitClient == nil {
 		sLogger().Fatal("qbit client is nil")
 	}
-	dirPath := filepath.Join(global.GlobalDirCfg.DownloadDir, rssCfg.DownloadSubPath)
-	exists, empty, err := utils.CheckDirectory(dirPath)
+    homeDir, _ := os.UserHomeDir()
+    store := core.NewConfigStore(global.GlobalDB)
+    gl, _ := store.GetGlobalOnly()
+    dirPath := filepath.Join(homeDir, models.WorkDir, gl.DownloadDir, rssCfg.DownloadSubPath)
+    if _, err := os.Stat(dirPath); os.IsNotExist(err) { _ = os.MkdirAll(dirPath, 0o755) }
+    exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
 		sLogger().Error("检查目录失败", err)
 		return err

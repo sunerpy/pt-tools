@@ -19,24 +19,17 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
 // dbCmd represents the db command
 var dbCmd = &cobra.Command{
-	Use:   "db",
-	Short: "Manage database operations",
-	Long: `The 'db' command allows you to manage database-related operations
-such as initializing the database or creating backups. Use the available
-subcommands to perform specific actions.`,
-	Example: `  pt-tools db init
-  pt-tools db backup --output /path/to/backup.sql`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Please specify a subcommand. Use 'pt-tools db --help' for more information.")
-		cmd.Usage()
-	},
+	Use:              "db",
+	Short:            "Database ops (deprecated)",
+	Long:             "数据库相关命令已通过 Web 管理与自动迁移实现，此命令废弃",
+	Example:          `  （已废弃）`,
+	Run:              func(cmd *cobra.Command, args []string) {},
+	Hidden:           true,
 	PersistentPreRun: PersistentCheckCfg, // 确保在执行所有子命令前进行配置检查
 }
 

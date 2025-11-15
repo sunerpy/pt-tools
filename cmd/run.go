@@ -24,7 +24,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -35,24 +34,24 @@ var (
 	modeFlag string // 用于存储运行模式的标志值
 	runCmd   = &cobra.Command{
 		Use:   "run",
-		Short: "Run the tool in a specific mode",
-		Long: `The run command allows you to execute the tool in different modes:
-- single: Run the tool once and exit.
-- persistent: Keep running the tool continuously with a specific interval.
-Examples:
-1. Single mode:
-   pt-tools run --mode=single
-2. Persistent mode:
-   pt-tools run --mode=persistent
+		Short: "以脚本模式运行（建议使用 Web）",
+		Long: `优先推荐通过 'pt-tools web' 进行管理与启动。
+在需要脚本化或后台执行的场景下，可使用 run：
+- single: 单次运行并退出
+- persistent: 持续运行（按配置间隔执行任务）
+示例：
+  pt-tools run --mode=single
+  pt-tools run --mode=persistent
 `,
 		Run:       runCmdFunc,
-		PreRun:    PersistentCheckCfg, // 检查配置文件是否存在
+		PreRun:    PersistentCheckCfg,
 		ValidArgs: []string{"single", "persistent"},
+		Hidden:    true,
 	}
 )
 
 func init() {
-	rootCmd.AddCommand(runCmd)
+	// run 子命令已废弃，仅保留 Web 方式运行
 	// 定义 mode 标志
 	runCmd.Flags().StringVarP(&modeFlag, "mode", "m", "single", "Mode to run: single or persistent")
 	runCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
@@ -64,21 +63,6 @@ func init() {
 		}
 		return err
 	})
-}
-
-// 单次运行
-func executeSingleRun() {
-	fmt.Println("Executing task once...")
-	// 这里添加单次运行的业务逻辑
-}
-
-// 持续运行
-func executePersistentRun(interval int) {
-	for {
-		fmt.Println("Executing task...")
-		// 这里添加持续运行的业务逻辑
-		time.Sleep(time.Duration(interval) * time.Second)
-	}
 }
 
 func runCmdFunc(cmd *cobra.Command, args []string) {

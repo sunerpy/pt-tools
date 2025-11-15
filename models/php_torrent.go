@@ -48,7 +48,7 @@ func (p PHPTorrentInfo) CanbeFinished(logger *zap.SugaredLogger, enabled bool, s
 			logger.Warn("种子大小超过设定值,跳过...")
 			return false
 		}
-		duration := p.EndTime.Sub(time.Now())
+		duration := time.Until(p.EndTime)
 		secondsDiff := int(duration.Seconds())
 		if float64(secondsDiff)*float64(speedLimit) < (p.SizeMB / 1024 / 1024) {
 			logger.Warn("种子免费时间不足以完成下载,跳过...")

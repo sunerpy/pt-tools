@@ -1,5 +1,4 @@
 SHELL=/bin/bash
-CONFIG_FILE = config.toml
 IMAGE_NAME = pt-tools
 UPX_VERSION=4.2.4
 UPX_DIR=upx-$(UPX_VERSION)-amd64_linux
@@ -32,7 +31,7 @@ HTTPS_PROXY ?=
 NO_PROXY ?=
 
 # 默认基础镜像
-BUILD_IMAGE ?= golang:1.24.3
+BUILD_IMAGE ?= golang:1.25.2
 BASE_IMAGE ?= alpine:3.20.3
 BUILD_ENV ?= remote
 
@@ -114,7 +113,6 @@ build-local-docker:
 		--progress=plain \
 		--network host \
 		--platform $(DOCKERPLATFORMS) \
-		--build-arg CONFIG_FILE=$(CONFIG_FILE) \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
 		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
 		--build-arg BUILD_ENV=$(BUILD_ENV) \
@@ -139,7 +137,6 @@ build-remote-docker:
 	docker buildx build \
 		--progress=plain \
 		--platform $(DOCKERPLATFORMS) \
-		--build-arg CONFIG_FILE=$(CONFIG_FILE) \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
 		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
 		--build-arg BUILD_ENV=$(BUILD_ENV) \

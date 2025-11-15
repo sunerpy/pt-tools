@@ -23,40 +23,30 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 )
 
 const (
-	configDir  = ".pt-tools"
-	configName = "config.toml"
-	dbFile     = "torrents.db"
+	dbFile = "torrents.db"
 )
 
-var (
-	cfgFile string
-	// rootCmd represents the base command when called without any subcommands
-	rootCmd = &cobra.Command{
-		Use:   "pt-tools",
-		Short: "pt-tools: A CLI tool for managing and automating PT site tasks",
-		Long: `pt-tools is a powerful and flexible command-line tool designed for managing tasks related to private tracker (PT) sites.
-It supports running in single execution or continuous monitoring modes, database management, and configuration customization.`,
-		Example: `  # Run in single execution mode
-  pt-tools run --mode=single
-  # Run in persistent mode
-  pt-tools run --mode=persistent
-  # Generate shell completion for Bash
-  pt-tools completion bash
-  # Generate shell completion for Zsh
-  pt-tools completion zsh
-  # Initialize a configuration file
-  pt-tools config init
-  # Manage database operations
-  pt-tools db --help`,
-		PreRun: PersistentCheckCfg,
-	}
-)
+// rootCmd represents the base command when called without any subcommands
+var rootCmd = &cobra.Command{
+	Use:   "pt-tools",
+	Short: "pt-tools: Web 管理与任务自动化",
+	Long:  `pt-tools 提供 Web 管理界面与命令行工具，支持任务运行、数据库管理与配置；直接运行将启动 Web 服务。`,
+	Example: `  直接启动 Web
+  pt-tools
+  指定地址与端口
+  pt-tools web --host=0.0.0.0 --port=8080
+  文档
+  https://github.com/sunerpy/pt-tools#readme
+  https://raw.githubusercontent.com/sunerpy/pt-tools/main/examples/binary-run.md`,
+	Run: func(cmd *cobra.Command, args []string) {
+		webCmd.Run(cmd, args)
+	},
+}
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
@@ -73,10 +63,9 @@ func init() {
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is $HOME/.pt-tools/config.toml)")
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// 无需根级 toggle
 	// if err := initTools(); err != nil {
 	// 	color.Red("Failed to load configuration: %s\n",cfgFile)
 	// 	panic(err)
@@ -84,11 +73,7 @@ func init() {
 }
 
 func initTools() error {
-	if global.GlobalViper == nil {
-		global.GlobalViper = viper.New()
-	}
-	// 尝试加载配置文件
-	logger, err := core.InitViper(cfgFile)
+	logger, err := core.InitRuntime()
 	if err != nil {
 		color.Red("Failed to load configuration\n")
 		return err

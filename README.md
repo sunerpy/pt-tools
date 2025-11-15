@@ -6,12 +6,21 @@
 
 * **灵活的运行模式**：支持单次执行和持续监控模式。
 * **Shell 补全支持**：提供 Bash 和 Zsh 的补全功能。
-* **可定制的配置**：轻松初始化和自定义配置文件。
+* **Web 配置管理**：通过 Web 页面统一管理与保存配置。
 * **数据库管理**：支持数据库初始化、备份和查询等操作。
 
 ---
 
 ## 安装方法
+
+### 推荐：使用 Docker 运行（不推荐二进制运行）
+
+查看示例：
+
+- [examples/docker-run.md](examples/docker-run.md)：单容器运行、环境变量说明与数据持久化挂载（推荐）
+- [examples/docker-compose.yml](examples/docker-compose.yml)：使用 Compose 编排，持久化数据库与下载目录（推荐）
+
+默认 Web 启动监听：`PT_HOST=0.0.0.0`、`PT_PORT=8080`，外部可通过端口映射访问。
 
 ### 从源码构建
 
@@ -69,46 +78,32 @@ curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/downl
    pt-tools version
    ```
 
-### 使用Docker运行
-
-请参阅docker运行说明 [README](./docker/README.md)。
-
----
 
 ## 快速开始
 
-### 初始化配置
+### 初始化配置（Web）
 
-1. 初始化默认配置文件：
+  首次运行进入 Web 页面，根据提示完成数据库与全局配置初始化。
+  默认登录账号：`admin` / `adminadmin`
 
-   ```bash
-   pt-tools config init
-   ```
+#### 重置管理员密码（忘记密码）
 
-   运行此命令后，将生成默认配置文件，路径为 `$HOME/.pt-tools/config.toml`。
-2. 打开配置文件修改选项：
-
-   ```bash
-   vim $HOME/.pt-tools/config.toml
-   ```
-
-   或使用其他文本编辑器。根据实际需求调整配置选项。
-
-### 单次运行
-
-使用以下命令进行一次性任务运行：
+推荐通过环境变量在启动时重置：
 
 ```bash
-pt-tools run
+docker run -d \
+  -e PT_HOST=0.0.0.0 -e PT_PORT=8080 \
+  -e PT_ADMIN_RESET=1 \
+  -e PT_ADMIN_USER=admin \
+  -e PT_ADMIN_PASS='你的新密码' \
+  -v ~/pt-data:/app/.pt-tools \
+  -p 8080:8080 \
+  --name pt-tools sunerpy/pt-tools:latest
 ```
 
-### 持续运行
-
-如果需要持续执行任务，可以使用 `-m persistent` 模式：
-
-```bash
-pt-tools run -m persistent
-```
+说明：
+- 仅当 `PT_ADMIN_RESET=1` 时执行一次重置；完成后建议移除 `PT_ADMIN_RESET/PT_ADMIN_PASS`，避免下次重启再次重置。
+- 若未设置 `PT_ADMIN_USER/PT_ADMIN_PASS`，默认使用 `admin/adminadmin`。
 
 ---
 
@@ -118,122 +113,52 @@ pt-tools run -m persistent
 
 ## 使用说明
 
-### 基本命令结构
-
-```plaintext
-pt-tools [命令] [选项]
-```
-
 ### 可用命令
 
-| 命令           | 描述                        |
-| -------------- | --------------------------- |
-| `completion` | 生成 Bash 和 Zsh 的补全脚本 |
-| `config`     | 管理配置文件                |
-| `db`         | 执行数据库相关操作          |
-| `run`        | 以单次或持续模式运行工具    |
-| `task`       | 管理计划任务（开发中）      |
-| `help`       | 显示帮助信息                |
+- `web`：启动 Web 管理界面（默认）
+- `completion`：生成 Bash/Zsh 补全脚本
+- `help`：显示帮助信息
 
 ### 全局选项
 
-| 选项             | 描述                                                 |
-| ---------------- | ---------------------------------------------------- |
-| `-c, --config` | 配置文件路径（默认:`$HOME/.pt-tools/config.toml`） |
-| `-h, --help`   | 显示命令的帮助信息                                   |
-| `-t, --toggle` | 切换某些功能（占位符）                               |
+- `-h, --help`：显示命令的帮助信息
 
 ---
 
-## 命令详解
+## Web 页面配置项说明
 
-### `run`
+通过 Web 页面进行配置，保存后立即生效并持久化到数据库。
 
-`run` 命令允许用户以不同的模式运行工具。
+- 全局设置（`/api/global`）
+  - `download_dir`：下载根目录（默认 `~/.pt-tools/downloads`）
+  - `default_interval_minutes`：默认任务间隔（分钟）
+  - `default_enabled`：默认是否启用各站点任务
+  - `download_limit_enabled`：启用限速
+  - `download_speed_limit`：下载限速（MB/s）
+  - `torrent_size_gb`：最大种子大小（GB）
+  - `auto_start`：自动启动任务（开：启动时自动运行；关：需手动启动）
+  - `retain_hours`：本地 `.torrent` 保留时长（小时），超过未推送则清理
+  - `max_retry`：推送失败最大重试次数，超过后不再重试并记录错误
 
-**示例**：
+- qBittorrent 设置（`/api/qbit`）
+  - `enabled`：是否启用 qBit 客户端
+  - `url`：qBittorrent WebUI 地址（如 `http://192.168.1.10:8080`）
+  - `user`：登录用户名
+  - `password`：登录密码
 
-1. 单次运行模式：
-
-   ```bash
-   pt-tools run --mode=single
-   ```
-
-   工具运行一次后退出。
-2. 持续运行模式：
-
-   ```bash
-   pt-tools run --mode=persistent
-   ```
-
-   工具持续运行，按设定的时间间隔重复执行任务。
-
-**用法**：
-
-```plaintext
-pt-tools run [选项]
-```
-
-| 选项           | 描述                                                       |
-| -------------- | ---------------------------------------------------------- |
-| `-m, --mode` | 运行模式：`single` 或 `persistent`（默认: `single`） |
-| `-h, --help` | 显示 `run` 命令的帮助信息                                |
-
-### `config`
-
-管理工具的配置文件。
-
-**示例**：
-
-```bash
-pt-tools config init
-```
-
-在 `$HOME/.pt-tools/config.toml` 路径下初始化默认配置文件。
-
----
-
-### `db`
-
-执行数据库相关操作，例如初始化、备份或查询。
-
-**示例**：
-
-```bash
-pt-tools db init
-```
-
----
-
-## 配置优先级
-
-`pt-tools` 的配置优先级从高到低如下：
-
-1. 环境变量
-
-   * 环境变量的优先级高于配置文件。即使使用了 `--config` 指定配置文件，环境变量的值仍然会覆盖文件中的相应配置项。
-   * 环境变量的名称需与配置键名一致（不区分大小写）。
-   * 示例：
-
-     ```bash
-     export DEFAULT_INTERVAL=10
-     ```
-
-2. 指定的配置文件
-
-   * 如果使用 `-c` 或者 `--config` 显式指定配置文件路径，`pt-tools` 将读取该文件，并使用文件中的值。
-   * 示例：
-
-     ```bash
-     pt-tools --config /path/to/config.toml
-     ```
-
-3. 默认的配置文件
-
-   * 如果未显式指定 `--config`，工具会在默认路径（如 `$HOME/.pt-tools/config.toml`）查找配置文件，并使用文件中的值。
-4. 程序内置默认值
-
-   * 如果命令行参数、环境变量和配置文件中均未提供某项配置，且不存在 `$HOME/.pt-tools/config.toml`， `pt-tools` 将创建初始化的默认配置文件。
+- 站点与 RSS（`/api/sites`、`/api/sites/{name}`）
+  - 站点设置：
+    - `enabled`：是否启用该站点任务
+    - `auth_method`：认证方式（`api_key` 或 `cookie`）
+    - `api_key` / `api_url`：当 `auth_method=api_key` 时必填
+    - `cookie`：当 `auth_method=cookie` 时必填
+  - RSS 订阅：
+    - `name`：订阅名
+    - `url`：RSS 链接
+    - `category`：分类（如 `Tv`/`Mv` 等）
+    - `tag`：标签（用于任务列表区分来源）
+    - `interval_minutes`：执行间隔（分钟）
+    - `download_sub_path`：下载子目录（相对 `download_dir`，例如 `mteam/avs`）
 
 ---
 
@@ -241,15 +166,11 @@ pt-tools db init
 
 ### 注意事项
 
-> 1. 环境变量优先级高于配置文件：
->
->    * 即使显式指定了 `--config`，环境变量中设置的值仍然会覆盖配置文件中的值。
->    * 如果不希望环境变量覆盖配置文件，请确保未设置对应的环境变量。
-> 2. 命令行标志始终优先于环境变量和配置文件，用于动态覆盖配置项。
+- 通过 Web 页面进行配置，保存后立即生效并持久化到数据库。
 
-### 配置说明
+### 配置说明（Web 页面）
 
-#### 全局配置 `[global]`
+#### 全局设置
 
 | 配置项                     | 类型   | 默认值          | 描述                                                 |
 | -------------------------- | ------ | --------------- | ---------------------------------------------------- |
@@ -260,7 +181,7 @@ pt-tools db init
 | `download_speed_limit`   | 整数   | `20`          | 下载速度限制，单位为 MB/s。                          |
 | torrent_size_gb            | 整数   |                 | 限制下载种子的最大大小，单位GB                       |
 
-#### qBittorrent 配置 `[qbit]`
+#### qBittorrent 设置
 
 | 配置项       | 类型   | 默认值                        | 描述                             |
 | ------------ | ------ | ----------------------------- | -------------------------------- |
@@ -269,11 +190,9 @@ pt-tools db init
 | `user`     | 字符串 | `"admin"`                   | qBittorrent 登录用户名。         |
 | `password` | 字符串 | `"adminadmin"`              | qBittorrent 登录密码。           |
 
-#### 站点配置 `[sites]`
+#### 站点与 RSS 设置
 
-每个站点通过 `[sites.<站点名>]` 配置，支持多个站点。
-
-##### 站点通用配置
+##### 站点通用设置
 
 | 配置项          | 类型   | 默认值                                       | 描述                                          |
 | --------------- | ------ | -------------------------------------------- | --------------------------------------------- |
@@ -283,7 +202,7 @@ pt-tools db init
 | `api_url`     | 字符串 | 必填（如果 `auth_method`为 `"api_key"`） | API 地址。                                    |
 | `cookie`      | 字符串 | 必填（如果 `auth_method`为 `"cookie"`）  | Cookie 值。                                   |
 
-##### RSS 配置
+##### RSS 设置
 
 每个站点的 RSS 配置通过 `[[sites.<站点名>.rss]]` 定义，支持多个 RSS 配置。
 
@@ -298,47 +217,13 @@ pt-tools db init
 
 ---
 
-### 示例
+## 数据持久化与示例引用
 
-#### 全局配置
-
-```toml
-[global]
-default_interval = "5m"
-default_enabled = true
-download_dir = "downloads"
-download_limit_enabled = true
-download_speed_limit = 20
-torrent_size_gb = 500
-```
-
-#### qBittorrent 配置
-
-```toml
-[qbit]
-enabled = true
-url = "http://127.0.0.1:8080"
-user = "admin"
-password = "adminadmin"
-```
-
-#### 站点配置
-
-```toml
-[sites.mteam]
-enabled = true
-auth_method = "api_key"
-api_key = "your_api_key"
-api_url = "https://api.m-team.xxx/api"
-
-[[sites.mteam.rss]]
-name = "RSS1"
-url = "https://rss.m-team.xxx/api/rss/xxx"
-category = "Tv"
-tag = "MT"
-interval_minutes = 15
-download_sub_path = "mteam/tvs"
-```
+- 配置与任务记录统一保存在 SQLite（`~/.pt-tools/torrents.db`）
+- 下载目录默认 `~/.pt-tools/downloads`，可通过 Web 全局设置修改
+- 示例文档：
+  - `examples/docker-run.md`：容器运行（单目录挂载到 `/app/.pt-tools`）
+  - `examples/docker-compose.yml`：Compose 编排（单目录挂载到 `/app/.pt-tools`）
 
 ---
 

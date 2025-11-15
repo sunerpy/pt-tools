@@ -182,7 +182,7 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.SugaredLogger, enabled bool, 
 			logger.Warn("种子: %s 大小超过设定值,跳过...", t.Status.ID)
 			return false
 		}
-		duration := timeEnd.Sub(time.Now())
+		duration := time.Until(timeEnd)
 		secondsDiff := int(duration.Seconds())
 		if secondsDiff*speedLimit < (torrentSizeMB / 1024 / 1024) {
 			logger.Warnf("种子: %s 免费时间不足以完成下载,跳过...", t.Status.ID)

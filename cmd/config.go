@@ -19,24 +19,19 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
 // configCmd represents the config command
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Manage configuration for pt-tools",
-	Long: `The config command allows you to manage configuration files
-and settings for pt-tools. You can use subcommands like 'init' to initialize
-a new configuration, or other commands for specific tasks.`,
-	Example: `  pt-tools config [flags]
-  pt-tools config [command]`,
+	Use:     "config",
+	Short:   "运行目录管理",
+	Long:    "管理运行所需的本地目录（如 ~/.pt-tools 与 downloads）",
+	Example: `  pt-tools config init`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Please specify a subcommand. Use 'pt-tools config --help' for more information.")
 		cmd.Usage()
 	},
+	Hidden: true,
 }
 
 func init() {

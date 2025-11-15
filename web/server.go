@@ -1,0 +1,667 @@
+package web
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io"
+	"io/fs"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/sunerpy/pt-tools/config"
+	"github.com/sunerpy/pt-tools/core"
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/scheduler"
+)
+
+type Server struct {
+	store    *core.ConfigStore
+	mgr      *scheduler.Manager
+	tpl      *template.Template
+	sessions map[string]string // sessionID -> username
+}
+
+func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
+	t := template.Must(template.New("login").Parse(loginHTML))
+	t = template.Must(t.Parse(configIndexHTML))
+	t = template.Must(t.Parse(globalHTML))
+	t = template.Must(t.Parse(qbitHTML))
+	t = template.Must(t.Parse(sitesHTML))
+	return &Server{store: store, mgr: mgr, tpl: t, sessions: map[string]string{}}
+}
+
+func (s *Server) ensureAdminFromEnv() {
+    user := strings.TrimSpace(os.Getenv("PT_ADMIN_USER"))
+    pass := strings.TrimSpace(os.Getenv("PT_ADMIN_PASS"))
+    if user == "" {
+        user = "admin"
+    }
+    if pass == "" {
+        pass = "adminadmin"
+    }
+    hash := hashPassword(pass)
+    _ = s.store.EnsureAdmin(user, hash)
+    // 启动时重置密码（一次性）
+    if strings.TrimSpace(os.Getenv("PT_ADMIN_RESET")) == "1" {
+        if err := s.store.UpdateAdminPassword(user, hash); err == nil {
+            global.GetSlogger().Infow("admin_reset", "user", user)
+        } else {
+            global.GetSlogger().Warnw("admin_reset_failed", "user", user, "err", err)
+        }
+    }
+}
+
+func (s *Server) Serve(addr string) error {
+	mux := http.NewServeMux()
+	s.ensureAdminFromEnv()
+	mux.HandleFunc("/login", s.loginHandler)
+	mux.HandleFunc("/logout", s.logoutHandler)
+	// JSON APIs
+	mux.HandleFunc("/api/global", s.auth(s.apiGlobal))
+	mux.HandleFunc("/api/qbit", s.auth(s.apiQbit))
+	mux.HandleFunc("/api/sites", s.auth(s.apiSites))
+	mux.HandleFunc("/api/sites/", s.auth(s.apiSiteDetail))
+	mux.HandleFunc("/api/password", s.auth(s.apiPassword))
+	mux.HandleFunc("/api/tasks", s.auth(s.apiTasks))
+	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
+	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
+	mux.HandleFunc("/api/control/start", s.auth(s.apiStartAll))
+	// Static UI
+	fileServer := http.FileServer(http.FS(mustSub(staticFS, "static")))
+	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		sid, err := r.Cookie("session")
+		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		http.ServeFileFS(w, r, mustSub(staticFS, "static"), "index.html")
+	})
+	mux.HandleFunc("/tasks", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, mustSub(staticFS, "static"), "tasks.html")
+	}))
+	handler := logMiddleware(mux)
+	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	return srv.ListenAndServe()
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
+func logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sr := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(sr, r)
+		global.GetSlogger().Infow("http", "method", r.Method, "path", r.URL.Path, "status", sr.status, "duration_ms", time.Since(start).Milliseconds(), "remote", r.RemoteAddr)
+	})
+}
+
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sid, err := r.Cookie("session")
+		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.tpl.ExecuteTemplate(w, "login", nil)
+	case http.MethodPost:
+		user, pass, err := readLogin(r)
+		if err != nil {
+			http.Error(w, "请求体错误", http.StatusBadRequest)
+			return
+		}
+		if user == "" || pass == "" {
+			http.Error(w, "用户名或密码为空", http.StatusBadRequest)
+			return
+		}
+		global.GetSlogger().Infow("login_attempt", "username", user)
+		// 若管理员不存在则自动创建默认账户
+		cnt, _ := s.store.AdminCount()
+		if cnt == 0 {
+			_ = s.store.EnsureAdmin("admin", hashPassword("adminadmin"))
+		}
+		u, err := s.store.GetAdmin(user)
+		global.GetSlogger().Infow("login_admin_lookup", "username", user, "found", u != nil, "err", err)
+		if err != nil {
+			if strings.Contains(err.Error(), "record not found") {
+				http.Error(w, "用户不存在", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if u == nil {
+			http.Error(w, "用户不存在", http.StatusUnauthorized)
+			return
+		}
+		if !verifyPassword(u.PasswordHash, pass) {
+			http.Error(w, "密码错误", http.StatusUnauthorized)
+			return
+		}
+		sid := randomID()
+		s.sessions[sid] = u.Username
+		cookie := &http.Cookie{Name: "session", Value: sid, HttpOnly: true, SameSite: http.SameSiteLaxMode, Path: "/"}
+		http.SetCookie(w, cookie)
+		http.Redirect(w, r, "/", http.StatusFound)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func readLogin(r *http.Request) (string, string, error) {
+	ct := r.Header.Get("Content-Type")
+	mt, _, _ := mime.ParseMediaType(ct)
+	global.GetSlogger().Infow("login_ct", "ct", ct, "mt", mt)
+	switch mt {
+	case "application/json":
+		var body struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return "", "", err
+		}
+		return strings.TrimSpace(body.Username), strings.TrimSpace(body.Password), nil
+	case "multipart/form-data":
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			return "", "", err
+		}
+		return strings.TrimSpace(r.FormValue("username")), strings.TrimSpace(r.FormValue("password")), nil
+	default:
+		if err := r.ParseForm(); err != nil {
+			return "", "", err
+		}
+		return strings.TrimSpace(r.FormValue("username")), strings.TrimSpace(r.FormValue("password")), nil
+	}
+}
+
+func (s *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie("session"); err == nil {
+		delete(s.sessions, c.Value)
+		c.MaxAge = -1
+		http.SetCookie(w, c)
+	}
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func randomID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// 轻量级口令哈希：salt + 多轮 sha256（避免引入新依赖以兼容 vendor）
+func hashPassword(pw string) string {
+	salt := make([]byte, 16)
+	_, _ = rand.Read(salt)
+	iterations := 100000
+	var sum []byte
+	data := append([]byte{}, salt...)
+	data = append(data, []byte(pw)...)
+	h := sha256.Sum256(data)
+	sum = h[:]
+	for range iterations {
+		h = sha256.Sum256(sum)
+		sum = h[:]
+	}
+	return fmt.Sprintf("%s|%s|%d", hex.EncodeToString(salt), hex.EncodeToString(sum), iterations)
+}
+
+func verifyPassword(stored, pw string) bool {
+	parts := strings.Split(stored, "|")
+	if len(parts) != 3 {
+		return false
+	}
+	saltHex, sumHex, itStr := parts[0], parts[1], parts[2]
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return false
+	}
+	iterations, err := strconv.Atoi(itStr)
+	if err != nil || iterations <= 0 {
+		return false
+	}
+	data := append([]byte{}, salt...)
+	data = append(data, []byte(pw)...)
+	h := sha256.Sum256(data)
+	sum := h[:]
+	for i := 0; i < iterations; i++ {
+		h = sha256.Sum256(sum)
+		sum = h[:]
+	}
+	expect, err := hex.DecodeString(sumHex)
+	if err != nil {
+		return false
+	}
+	if len(expect) != len(sum) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(expect, sum) == 1
+}
+
+const loginHTML = `{{define "login"}}
+<!doctype html><html><head><meta charset="utf-8"><title>登录</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<main style="display:flex;justify-content:center;align-items:center;height:100vh;">
+  <div class="card" style="width:360px;">
+    <h2 style="text-align:center;">pt-tools 登录</h2>
+    <form id="loginForm" method="post">
+      <label>用户名</label>
+      <input name="username" placeholder="用户名" value="admin"/>
+      <label>密码</label>
+      <input name="password" type="password" placeholder="密码"/>
+      <div style="margin-top:12px;text-align:center;">
+        <button type="submit">登录</button>
+      </div>
+    </form>
+  </div>
+</main>
+<script>
+  const form = document.getElementById('loginForm');
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(form);
+    try{
+      const r = await fetch('/login', {method:'POST', body: fd});
+      if(!r.ok){ const msg = await r.text(); alert(msg || '密码错误'); return; }
+      location.href = '/';
+    }catch(err){ alert('登录失败: '+(err?.message||'未知错误')); }
+  });
+</script>
+</body></html>{{end}}`
+
+const configIndexHTML = `{{define "configIndex"}}
+<!doctype html><html><head><meta charset="utf-8"><title>配置</title></head>
+<body>
+<h2>配置</h2>
+<ul>
+<li><a href="/config/global">全局</a></li>
+<li><a href="/config/qbit">qBittorrent</a></li>
+<li><a href="/config/sites">站点与RSS</a></li>
+<li><a href="/config/password">修改密码</a></li>
+<li><a href="/logout">退出</a></li>
+</ul>
+</body></html>{{end}}`
+
+const globalHTML = `{{define "global"}}
+<!doctype html><html><head><meta charset="utf-8"><title>全局</title></head>
+<body>
+<h3>全局设置</h3>
+<form method="post">
+默认间隔(分钟): <input name="default_interval_minutes" value="{{.Global.DefaultInterval.Minutes}}"/><br/>
+下载目录: <input name="download_dir" value="{{.Global.DownloadDir}}"/><br/>
+启用限速: <input type="checkbox" name="download_limit_enabled" {{if .Global.DownloadLimitEnabled}}checked{{end}}/><br/>
+下载限速(MB/s): <input name="download_speed_limit" value="{{.Global.DownloadSpeedLimit}}"/><br/>
+最大种子大小(GB): <input name="torrent_size_gb" value="{{.Global.TorrentSizeGB}}"/><br/>
+自动启动任务: <input type="checkbox" name="auto_start" {{if .Global.AutoStart}}checked{{end}}/><br/>
+<button type="submit">保存</button></form>
+<a href="/config">返回</a>
+</body></html>{{end}}`
+
+const qbitHTML = `{{define "qbit"}}
+<!doctype html><html><head><meta charset="utf-8"><title>qBittorrent</title></head>
+<body>
+<h3>qBittorrent</h3>
+<form method="post">
+启用: <input type="checkbox" name="enabled" {{if .Qbit.Enabled}}checked{{end}}/><br/>
+URL: <input name="url" value="{{.Qbit.URL}}"/><br/>
+用户: <input name="user" value="{{.Qbit.User}}"/><br/>
+密码: <input name="password" type="password" value="{{.Qbit.Password}}"/><br/>
+<button type="submit">保存</button></form>
+<a href="/config">返回</a>
+</body></html>{{end}}`
+
+const sitesHTML = `{{define "sites"}}
+<!doctype html><html><head><meta charset="utf-8"><title>站点</title></head>
+<body>
+<h3>站点</h3>
+<ul>
+<li><a href="/config/sites/cmct">CMCT</a></li>
+<li><a href="/config/sites/hdsky">HDSKY</a></li>
+<li><a href="/config/sites/mteam">MTEAM</a></li>
+</ul>
+<a href="/config">返回</a>
+</body></html>{{end}}`
+
+// JSON APIs
+func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		store := core.NewConfigStore(global.GlobalDB)
+		gs, err := store.GetGlobalSettings()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, gs)
+	case http.MethodPost:
+		var gs models.SettingsGlobal
+		if err := json.NewDecoder(r.Body).Decode(&gs); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(gs.DownloadDir) == "" {
+			http.Error(w, "下载目录不能为空", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.SaveGlobalSettings(gs); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// 重新加载并触发任务重启
+		cfg, _ := s.store.Load()
+		if cfg != nil {
+			s.mgr.Reload(cfg)
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		store := core.NewConfigStore(global.GlobalDB)
+		qb, err := store.GetQbitSettings()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, qb)
+	case http.MethodPost:
+		var qb models.QbitSettings
+		if err := json.NewDecoder(r.Body).Decode(&qb); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.store.SaveQbitSettings(qb); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cfg, _ := s.store.Load()
+		if cfg != nil {
+			s.mgr.Reload(cfg)
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// 直接从 DB 读取，确保初始三站点展示
+		sites, err := s.store.ListSites()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, sites)
+	case http.MethodDelete:
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			http.Error(w, "缺少站点名称", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.DeleteSite(name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cfg, _ := s.store.Load()
+		if cfg != nil {
+			s.mgr.Reload(cfg)
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/sites/")
+	sg, err := models.ValidateSiteName(name)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		sc, err := s.store.GetSiteConf(sg)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, sc)
+    case http.MethodPost:
+        var sc models.SiteConfig
+        if err := json.NewDecoder(r.Body).Decode(&sc); err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+            return
+        }
+        if err := s.store.UpsertSiteWithRSS(sg, sc); err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+            return
+        }
+        cfg, _ := s.store.Load()
+        if cfg != nil {
+            s.mgr.Reload(cfg)
+        }
+        writeJSON(w, map[string]string{"status": "ok"})
+    case http.MethodDelete:
+        // 删除单条 RSS：通过查询参数 id 指定
+        idStr := r.URL.Query().Get("id")
+        if strings.TrimSpace(idStr) == "" {
+            http.Error(w, "缺少 RSS id", http.StatusBadRequest)
+            return
+        }
+        rid, convErr := strconv.ParseUint(idStr, 10, 64)
+        if convErr != nil {
+            http.Error(w, "RSS id 非法", http.StatusBadRequest)
+            return
+        }
+        // 查找站点
+        db := global.GlobalDB.DB
+        var site models.SiteSetting
+        if err := db.Where("name = ?", string(sg)).First(&site).Error; err != nil {
+            http.Error(w, "站点不存在", http.StatusBadRequest)
+            return
+        }
+        if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{}).Error; err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+        cfg, _ := s.store.Load()
+        if cfg != nil { s.mgr.Reload(cfg) }
+        writeJSON(w, map[string]string{"status":"deleted"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct{ Username, Old, New string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	u, err := s.store.GetAdmin(body.Username)
+	if err != nil || u == nil || !verifyPassword(u.PasswordHash, body.Old) {
+		http.Error(w, "原密码错误", http.StatusUnauthorized)
+		return
+	}
+	u.PasswordHash = hashPassword(body.New)
+	if err := s.store.UpdateAdmin(u); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// 控制接口：一键停止/启动任务
+func (s *Server) apiStopAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	s.mgr.StopAll()
+	writeJSON(w, map[string]string{"status": "stopped"})
+}
+
+func (s *Server) apiStartAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	cfg, _ := s.store.Load()
+	if cfg == nil || strings.TrimSpace(cfg.Global.DownloadDir) == "" {
+		http.Error(w, "配置未就绪", http.StatusBadRequest)
+		return
+	}
+	if !cfg.Global.AutoStart {
+		// manual start: allow request to control start
+	}
+	s.mgr.StartAll(cfg)
+	writeJSON(w, map[string]string{"status": "started"})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// static assets
+//
+//go:embed static/*
+var staticFS embed.FS
+
+func mustSub(fsys embed.FS, dir string) fs.FS {
+	sub, err := fs.Sub(fsys, dir)
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}
+
+// 任务列表 API：分页、过滤、搜索、排序
+func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
+    q := r.URL.Query().Get("q")
+    site := r.URL.Query().Get("site")
+    sort := r.URL.Query().Get("sort")
+    downloaded := r.URL.Query().Get("downloaded") == "1"
+    pushed := r.URL.Query().Get("pushed") == "1"
+    expired := r.URL.Query().Get("expired") == "1"
+    page := 1
+    size := 20
+    if p := r.URL.Query().Get("page"); p != "" {
+        if v, err := strconv.Atoi(p); err == nil && v > 0 { page = v }
+    }
+    if ssz := r.URL.Query().Get("page_size"); ssz != "" {
+        if v, err := strconv.Atoi(ssz); err == nil && v > 0 && v <= 500 { size = v }
+    }
+    // 简化：第一页，固定 50 条
+    db := global.GlobalDB.DB
+    tx := db.Model(&models.TorrentInfo{})
+    if site != "" {
+        tx = tx.Where("site_name = ?", site)
+    }
+    if q != "" {
+        like := "%" + q + "%"
+        tx = tx.Where("title LIKE ? OR torrent_hash LIKE ?", like, like)
+    }
+    if downloaded {
+        tx = tx.Where("is_downloaded = ?", true)
+    }
+    if pushed {
+        tx = tx.Where("is_pushed = ?", true)
+    }
+    if expired {
+        tx = tx.Where("is_expired = ?", true)
+    }
+    var total int64
+    if err := tx.Count(&total).Error; err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    switch sort {
+    case "created_at_asc":
+        tx = tx.Order("created_at ASC")
+    default:
+        tx = tx.Order("created_at DESC")
+    }
+    var items []models.TorrentInfo
+    if err := tx.Limit(size).Offset((page-1)*size).Find(&items).Error; err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    writeJSON(w, struct{
+        Items []models.TorrentInfo `json:"items"`
+        Total int64               `json:"total"`
+        Page  int                 `json:"page"`
+        Size  int                 `json:"page_size"`
+    }{Items: items, Total: total, Page: page, Size: size})
+}
+
+// 日志查看接口：最多返回 5000 行，实时读取当前日志文件
+func (s *Server) apiLogs(w http.ResponseWriter, r *http.Request) {
+    homeDir, _ := os.UserHomeDir()
+    logPath := filepath.Join(homeDir, models.WorkDir, config.DefaultZapConfig.Directory, "info.log")
+	f, err := os.Open(logPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	// 读取最后 5000 行（简化：读取整个文件并截取末尾）
+	b, err := io.ReadAll(f)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	content := string(b)
+	linesAll := strings.Split(content, "\n")
+	truncated := false
+	lines := linesAll
+	if len(linesAll) > 5000 {
+		truncated = true
+		lines = linesAll[len(linesAll)-5000:]
+	}
+	type out struct {
+		Lines     []string `json:"lines"`
+		Path      string   `json:"path"`
+		Truncated bool     `json:"truncated"`
+	}
+	writeJSON(w, out{Lines: lines, Path: logPath, Truncated: truncated})
+}
+
+// 已弃用：服务端模板 password，改为单页前端表单
