@@ -85,6 +85,9 @@ curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/downl
 
   首次运行进入 Web 页面，根据提示完成数据库与全局配置初始化。
   默认登录账号：`admin` / `adminadmin`
+  
+<img width="507" height="396" alt="image" src="https://github.com/user-attachments/assets/b964e5d4-8847-472b-9d10-338aa35313a2" />
+<img width="1674" height="593" alt="image" src="https://github.com/user-attachments/assets/7c738bc7-2cb0-4094-9b7d-862ee0ee938f" />
 
 #### 重置管理员密码（忘记密码）
 
