@@ -20,6 +20,14 @@
 - [examples/docker-run.md](examples/docker-run.md)：单容器运行、环境变量说明与数据持久化挂载（推荐）
 - [examples/docker-compose.yml](examples/docker-compose.yml)：使用 Compose 编排，持久化数据库与下载目录（推荐）
 
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v ~/pt-data:/app/.pt-tools \
+  --name pt-tools \
+  sunerpy/pt-tools:latest
+```
+
 默认 Web 启动监听：`PT_HOST=0.0.0.0`、`PT_PORT=8080`，外部可通过端口映射访问。
 
 ### 从源码构建
