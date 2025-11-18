@@ -15,6 +15,10 @@
 
 ### 推荐：使用 Docker 运行（不推荐二进制运行）
 
+镜像地址： [Docker镜像](https://hub.docker.com/r/sunerpy/pt-tools)
+
+> Docker镜像由github action 自动构建，如需手动构建，可参考[Makefile](Makefile) 中的`build-remote-docker`阶段由源码自行构建
+
 查看示例：
 
 - [examples/docker-run.md](examples/docker-run.md)：单容器运行、环境变量说明与数据持久化挂载（推荐）
