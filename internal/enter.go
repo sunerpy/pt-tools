@@ -17,5 +17,8 @@ const (
 )
 
 func sLogger() *zap.SugaredLogger {
+	if global.GetLogger() == nil {
+		return zap.NewNop().Sugar()
+	}
 	return global.GetSlogger()
 }

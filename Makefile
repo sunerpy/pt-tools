@@ -35,7 +35,7 @@ BUILD_IMAGE ?= golang:1.25.2
 BASE_IMAGE ?= alpine:3.20.3
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean code-format
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean code-format unit-test coverage-summary
 
 # 本地构建二进制
 build-local: code-format
@@ -161,3 +161,14 @@ clean-docker:
 code-format:
 	@echo "Formatting code"
 	bash style.sh
+
+unit-test:
+	@mkdir -p $(DIST_DIR)
+	go test ./... -count=1 -cover -covermode=atomic -coverprofile=$(DIST_DIR)/coverage.out
+	go tool cover -html=$(DIST_DIR)/coverage.out -o $(DIST_DIR)/coverage.html
+	@echo "Coverage report: $(DIST_DIR)/coverage.html"
+
+coverage-summary:
+	@mkdir -p $(DIST_DIR)
+	@test -f $(DIST_DIR)/coverage.out || (echo "Run make unit-test first"; exit 1)
+	go tool cover -func=$(DIST_DIR)/coverage.out | tee $(DIST_DIR)/coverage.txt

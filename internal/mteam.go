@@ -1,17 +1,17 @@
 package internal
 
 import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "io"
-    "net/http"
-    "os"
-    "path/filepath"
-    "strconv"
-    "time"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/mmcdole/gofeed"
 	"github.com/sunerpy/pt-tools/core"
@@ -143,12 +143,19 @@ func (m *MteamImpl) RetryDelay() time.Duration {
 }
 
 func (m *MteamImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
-    homeDir, _ := os.UserHomeDir()
-    store := core.NewConfigStore(global.GlobalDB)
-    gl, _ := store.GetGlobalOnly()
-    dirPath := filepath.Join(homeDir, models.WorkDir, gl.DownloadDir, rssCfg.DownloadSubPath)
-    if _, err := os.Stat(dirPath); os.IsNotExist(err) { _ = os.MkdirAll(dirPath, 0o755) }
-    exists, empty, err := utils.CheckDirectory(dirPath)
+	homeDir, _ := os.UserHomeDir()
+	store := core.NewConfigStore(global.GlobalDB)
+	gl, _ := store.GetGlobalOnly()
+	base, berr := utils.ResolveDownloadBase(homeDir, models.WorkDir, gl.DownloadDir)
+	if berr != nil {
+		return berr
+	}
+	sub := utils.SubPathFromTag(rssCfg.Tag)
+	dirPath := filepath.Join(base, sub)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		_ = os.MkdirAll(dirPath, 0o755)
+	}
+	exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
 		sLogger().Error("检查目录失败", err)
 		return err

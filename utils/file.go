@@ -3,6 +3,8 @@ package utils
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // CheckDirectory 检查目录是否存在且为空
@@ -47,4 +49,29 @@ func IsDirectoryEmpty(path string) (bool, error) {
 		return false, err // 读取目录失败
 	}
 	return len(files) == 0, nil // 如果文件数为0，则目录为空
+}
+
+func ResolveDownloadBase(home, work, dir string) (string, error) {
+	d := strings.TrimSpace(dir)
+	if d == "" {
+		return "", fmt.Errorf("下载目录不能为空")
+	}
+	var base string
+	if filepath.IsAbs(d) {
+		base = d
+	} else {
+		base = filepath.Join(home, work, d)
+	}
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		if err = os.MkdirAll(base, 0o755); err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
+	}
+	return base, nil
+}
+
+func SubPathFromTag(tag string) string {
+	return strings.TrimSpace(tag)
 }

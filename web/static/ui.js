@@ -29,11 +29,15 @@ async function renderGlobal(){
   const form = el('form');
   const warn = el('div',{class:'card'}); warn.style.background='#ef4444'; warn.style.color='#0b1220'; warn.style.display='none'; warn.append(el('strong',{},['警告：未设置下载目录，后台任务不会启动，请先设置并保存'])); s.append(warn);
   form.append(el('label',{},['默认间隔(分钟)']));
-  const mins = el('input',{value: (g.default_interval? Math.round(g.default_interval/60000000000):20) });
+    const mins = el('input',{value: (g.default_interval_minutes? Math.max(5, parseInt(g.default_interval_minutes)):5) }); mins.type='number'; mins.min=String(5); mins.step='1';
   form.append(mins);
   form.append(el('label',{},['种子下载目录']));
-  const dl = el('input',{value: g.download_dir||''});
+  const dl = el('input',{value: g.download_dir||'', placeholder:'保存 .torrent 种子文件的目录(绝对路径或相对 ~/.pt-tools)'});
+  const tip = el('div',{class:'muted'},['绝对路径将直接使用；相对路径会拼接为 ', (function(){ const span=document.createElement('code'); span.textContent='~/.pt-tools/<输入值>'; return span; })(), ' 并自动创建目录']);
+  const tip2 = el('div',{class:'muted'},['此目录用于保存已下载的 ', (function(){ const code=document.createElement('code'); code.textContent='.torrent'; return code; })(), ' 种子文件；并非 qBittorrent 中文件数据的保存路径']);
   form.append(dl);
+  form.append(tip);
+  form.append(tip2);
   const row = el('div',{class:'row'});
   const colChk = el('div',{class:'card'});
   const chk = el('input',{type:'checkbox'}); chk.checked = !!g.download_limit_enabled;
@@ -50,7 +54,7 @@ async function renderGlobal(){
   form.append(row);
   const btn = el('button',{},['保存']); btn.onclick = async (e)=>{e.preventDefault(); btn.disabled=true;
     const payload = {
-      default_interval: (parseInt(mins.value)||10)*60000000000,
+      default_interval_minutes: Math.max(5, parseInt(mins.value)||10),
       download_dir: dl.value,
       download_limit_enabled: chk.checked,
       download_speed_limit: parseInt(speed.value)||20,
@@ -113,7 +117,10 @@ async function renderSites(){
   const add = el('button',{class:'btn btn-secondary'},['新增站点']); add.onclick = async ()=>{
     const name = prompt('站点标识(cmct/hdsky/mteam或自定义)'); if(!name) return;
     if(sites[name]){ toast('站点已存在', false); return; }
-    try { await api('/api/sites/'+name,{method:'POST',body:JSON.stringify({enabled:false,rss:[],auth_method:'cookie',cookie:'',api_key:'',api_url:''})}); toast('已新增站点', true); renderSites(); }
+    const lower = name.toLowerCase();
+    let payload = {enabled:false,rss:[],auth_method:'cookie',cookie:'',api_key:'',api_url:''};
+    if(lower==='mteam'){ payload.auth_method='api_key'; payload.api_url='https://api.m-team.cc/api'; }
+    try { await api('/api/sites/'+lower,{method:'POST',body:JSON.stringify(payload)}); toast('已新增站点', true); renderSites(); }
     catch(err){ toast(err.message||'新增失败', false); }
   };
   s.append(add);
@@ -125,10 +132,25 @@ async function renderSite(name){
   const en = el('input',{type:'checkbox'}); en.checked=!!(sc.enabled||false);
   const sw = el('label',{class:'switch'}); sw.append(en, el('span',{class:'slider'}));
   f.append(el('label',{},['启用'])); f.append(sw);
-  const am = el('input',{value:sc.auth_method||''}); f.append(el('label',{},['认证方式'])); f.append(am);
-  const ck = el('input',{value:sc.cookie||''}); f.append(el('label',{},['Cookie'])); f.append(ck);
-  const ak = el('input',{value:sc.api_key||''}); f.append(el('label',{},['API Key'])); f.append(ak);
-  const au = el('input',{value:sc.api_url||''}); f.append(el('label',{},['API Url'])); f.append(au);
+  const am = el('input',{value:sc.auth_method||'', readonly:''}); am.readOnly = true; f.append(el('label',{},['认证方式'])); f.append(am);
+  const ck = el('input',{value:sc.cookie||''});
+  const ak = el('input',{value:sc.api_key||''});
+  const au = el('input',{value:sc.api_url||'', readonly:''}); au.readOnly = true;
+  const rowAuth = el('div',{class:'row'});
+  const colCookie = el('div',{class:'card'}); colCookie.append(el('label',{},['Cookie']), ck);
+  const colApiKey = el('div',{class:'card'}); colApiKey.append(el('label',{},['API Key']), ak);
+  const colApiUrl = el('div',{class:'card'}); colApiUrl.append(el('label',{},['API Url']), au);
+  function applyAuthVisibility(){
+    const method = (sc.auth_method||'').toLowerCase();
+    // 按默认认证方式展示字段
+    const isCookie = method==='cookie';
+    colCookie.style.display = isCookie? '' : 'none';
+    colApiKey.style.display = isCookie? 'none' : '';
+    colApiUrl.style.display = isCookie? 'none' : '';
+  }
+  applyAuthVisibility();
+  rowAuth.append(colCookie, colApiKey, colApiUrl);
+  f.append(rowAuth);
   f.append(el('h3',{},['RSS 列表']));
   const rssTable = el('table',{class:'list'});
   const rthead = el('thead');
@@ -139,14 +161,6 @@ async function renderSite(name){
     el('th',{},['分类']),
     el('th',{},['标签']),
     el('th',{},['间隔(分钟)']),
-    (function(){
-      const th = el('th',{});
-      const lbl = document.createTextNode('下载子目录');
-      const tip = el('span',{class:'tip'},['?']);
-      tip.append(el('span',{class:'tiptext'},['该目录为种子文件存放位置（非实际下载数据路径），推荐按 站点/分类 组织，如 cmct/mv 或 mteam/tvs']));
-      th.append(lbl, tip);
-      return th;
-    })(),
     el('th',{},['操作'])
   );
   rthead.append(hrow); rssTable.append(rthead);
@@ -159,11 +173,10 @@ async function renderSite(name){
     const tip = el('span',{class:'tip'},[el('span',{class:'tiptext'},[''])]);
     const catI = el('input',{value:r.category||'', placeholder:'如：Tv/Mv'});
     const tagI = el('input',{value:r.tag||'', placeholder:'如：CMCT/HDSKY'});
-    const minI = el('input',{value:r.interval_minutes||10, placeholder:'1-1440'}); minI.type='number'; minI.min='1'; minI.max='1440'; minI.step='1';
-    const pathI = el('input',{value:r.download_sub_path||'', placeholder:'如：cmct/mv'});
+    const minI = el('input',{value: Math.max(5, r.interval_minutes||5), placeholder:'5-1440'}); minI.type='number'; minI.min=String(5); minI.max='1440'; minI.step='1';
     const urlCell = el('td',{class:'col-url'});
     urlCell.append(urlI, tip);
-    tr.append(el('td',{class:'col-name'},[nameI]), urlCell, el('td',{class:'col-category'},[catI]), el('td',{class:'col-tag'},[tagI]), el('td',{class:'col-interval'},[minI]), el('td',{class:'col-path'},[pathI]));
+    tr.append(el('td',{class:'col-name'},[nameI]), urlCell, el('td',{class:'col-category'},[catI]), el('td',{class:'col-tag'},[tagI]), el('td',{class:'col-interval'},[minI]));
     const del = el('button',{class:'btn btn-danger'},['删除']);
     del.onclick = async (e)=>{
       e.preventDefault();
@@ -180,14 +193,14 @@ async function renderSite(name){
       return ok;
     }
     urlI.addEventListener('blur', validateUrl);
-    minI.addEventListener('input', ()=>{ if(parseInt(minI.value)<1||parseInt(minI.value)>1440){ minI.classList.add('input-error'); } else { minI.classList.remove('input-error'); } });
+    minI.addEventListener('input', ()=>{ if(parseInt(minI.value)<5||parseInt(minI.value)>1440){ minI.classList.add('input-error'); } else { minI.classList.remove('input-error'); } });
     tr.append(el('td',{class:'actions'},[del])); rtbody.append(tr);
   };
   sc.rss = sc.rss||[]; sc.rss.forEach((r,i)=>drawRow(r,i));
-  const addRow = el('button',{class:'btn btn-secondary'},['新增 RSS']); addRow.onclick = (e)=>{ e.preventDefault(); sc.rss = sc.rss||[]; const idx = sc.rss.push({id:'',name:'',url:'',category:'',tag:'',interval_minutes:10,download_sub_path:''}) - 1; drawRow(sc.rss[idx], idx); };
+  const addRow = el('button',{class:'btn btn-secondary'},['新增 RSS']); addRow.onclick = (e)=>{ e.preventDefault(); sc.rss = sc.rss||[]; const idx = sc.rss.push({id:'',name:'',url:'',category:'',tag:'',interval_minutes:10}) - 1; drawRow(sc.rss[idx], idx); };
   rssTable.append(rtbody); f.append(rssTable); f.append(addRow);
   const btn = el('button',{},['保存']); btn.onclick = async (e)=>{e.preventDefault(); btn.disabled=true;
-    const scPost = {enabled:en.checked, auth_method:am.value.trim(), cookie:ck.value, api_key:ak.value, api_url:au.value, rss:[]};
+    const scPost = {enabled:en.checked, auth_method:sc.auth_method, cookie:ck.value, api_key:ak.value, api_url:sc.api_url, rss:[]};
     const rows = Array.from(rtbody.querySelectorAll('tr'));
     scPost.rss = rows.map(tr=>{
       const ins = tr.querySelectorAll('input');
@@ -196,12 +209,13 @@ async function renderSite(name){
       const category = ins[2]?.value||'';
       const tag = ins[3]?.value||'';
       const mins = parseInt(ins[4]?.value||'10')||10;
-      const path = ins[5]?.value||'';
-      return {name, url, category, tag, interval_minutes: mins, download_sub_path: path};
+      return {name, url, category, tag, interval_minutes: mins};
     }).filter(r=> (r.name && r.url));
     if(scPost.enabled){
-      const hasAuth = (scPost.api_key && scPost.api_key.trim()) || (scPost.cookie && scPost.cookie.trim());
-      if(!hasAuth){ toast('启用站点时必须设置 API Key 或 Cookie', false); btn.disabled=false; return; }
+      const method = (sc.auth_method||'').toLowerCase();
+      const needApi = method==='api_key';
+      const hasAuth = needApi? (scPost.api_key && scPost.api_key.trim()) : (scPost.cookie && scPost.cookie.trim());
+      if(!hasAuth){ toast(needApi? '启用站点时必须设置 API Key' : '启用站点时必须设置 Cookie', false); btn.disabled=false; return; }
       if(!scPost.rss || scPost.rss.length===0){ toast('启用站点时 RSS 列表不能为空', false); btn.disabled=false; return; }
     }
     try { await api('/api/sites/'+name,{method:'POST',body:JSON.stringify(scPost)}); toast('已保存', true); }

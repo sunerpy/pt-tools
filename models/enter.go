@@ -11,6 +11,10 @@ const (
 	MTEAM SiteGroup = "mteam"
 )
 
+const (
+	DefaultAPIUrlMTeam = "https://api.m-team.cc/api"
+)
+
 var allowedGroups = map[SiteGroup]struct{}{
 	CMCT:  {},
 	HDSKY: {},

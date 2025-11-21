@@ -35,12 +35,12 @@ func InitRuntime() (*zap.Logger, error) {
 			LogLevel:      glogger.Silent,
 			SlowThreshold: 0,
 		}
-        global.GlobalDB, err = models.NewDB(gormLg)
-        if err != nil {
-            initErr = fmt.Errorf("初始化数据库失败: %w", err)
-            return
-        }
-        // 禁用默认预设的自动写入，防止与用户 DB 配置冲突
+		global.GlobalDB, err = models.NewDB(gormLg)
+		if err != nil {
+			initErr = fmt.Errorf("初始化数据库失败: %w", err)
+			return
+		}
+		// 禁用默认预设的自动写入，防止与用户 DB 配置冲突
 		// 优先从 DB 加载配置：仅设置目录缓存
 		// removed dir cache update
 	})

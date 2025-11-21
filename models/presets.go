@@ -1,8 +1,9 @@
 package models
 
 import (
-    "strings"
-    "gorm.io/gorm"
+	"strings"
+
+	"gorm.io/gorm"
 )
 
 type RSSPreset struct {
@@ -17,6 +18,7 @@ type SitePreset struct {
 	Name       string
 	AuthMethod string
 	Enabled    bool
+	APIUrl     string
 	RSS        []RSSPreset
 }
 
@@ -25,6 +27,7 @@ var DefaultSitePresets = []SitePreset{
 		Name:       string(CMCT),
 		AuthMethod: "cookie",
 		Enabled:    false,
+		APIUrl:     "",
 		RSS: []RSSPreset{{
 			Name:            "CMCT",
 			URL:             "https://springxxx.xxx",
@@ -38,6 +41,7 @@ var DefaultSitePresets = []SitePreset{
 		Name:       string(HDSKY),
 		AuthMethod: "cookie",
 		Enabled:    false,
+		APIUrl:     "",
 		RSS: []RSSPreset{{
 			Name:            "HDSky",
 			URL:             "https://hdsky.xxx/torrentrss.php?xxx",
@@ -51,6 +55,7 @@ var DefaultSitePresets = []SitePreset{
 		Name:       string(MTEAM),
 		AuthMethod: "api_key",
 		Enabled:    false,
+		APIUrl:     DefaultAPIUrlMTeam,
 		RSS: []RSSPreset{{
 			Name:            "TMP2",
 			URL:             "https://rss.m-team.xxx/api/rss/xxx",
@@ -63,17 +68,25 @@ var DefaultSitePresets = []SitePreset{
 }
 
 func SeedDefaultSites(db *gorm.DB) error {
-    var cnt int64
-    if err := db.Model(&SiteSetting{}).Count(&cnt).Error; err != nil { return err }
-    if cnt > 0 { return nil }
-    for _, p := range DefaultSitePresets {
-        name := strings.ToLower(p.Name)
-        site := SiteSetting{Name: name, AuthMethod: p.AuthMethod, Enabled: p.Enabled}
-        if err := db.Create(&site).Error; err != nil { return err }
-        for _, r := range p.RSS {
-            rr := RSSSubscription{SiteID: site.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloadSubPath: r.DownloadSubPath}
-            if err := db.Create(&rr).Error; err != nil { return err }
-        }
-    }
-    return nil
+	var cnt int64
+	if err := db.Model(&SiteSetting{}).Count(&cnt).Error; err != nil {
+		return err
+	}
+	if cnt > 0 {
+		return nil
+	}
+	for _, p := range DefaultSitePresets {
+		name := strings.ToLower(p.Name)
+		site := SiteSetting{Name: name, AuthMethod: p.AuthMethod, Enabled: p.Enabled, APIUrl: p.APIUrl}
+		if err := db.Create(&site).Error; err != nil {
+			return err
+		}
+		for _, r := range p.RSS {
+			rr := RSSSubscription{SiteID: site.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloadSubPath: r.DownloadSubPath}
+			if err := db.Create(&rr).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

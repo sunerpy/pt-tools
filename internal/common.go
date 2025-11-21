@@ -19,6 +19,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/qbit"
+	"github.com/sunerpy/pt-tools/utils"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -89,7 +90,6 @@ func downloadWorker[T models.ResType](
 	wg *sync.WaitGroup,
 	site PTSiteInter[T],
 	torrentChan <-chan *gofeed.Item,
-	downloadSubPath string,
 	rssCfg models.RSSConfig,
 ) {
 	defer wg.Done()
@@ -154,22 +154,22 @@ func downloadWorker[T models.ResType](
 					LastCheckTime: &now,
 				}
 			}
-            err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
-                // 标记跳过或更新状态
-                if !isFree || !canFinished {
-                    sLogger().Infof("种子: %s, ID: %s, free: %v, canbefinish: %v 为收费或无法完成，跳过", title, item.GUID, isFree, canFinished)
-                    torrent.IsSkipped = true
-                } else {
-                    torrent.IsSkipped = false
-                }
-                torrent.IsFree = isFree
-                // 使用 GORM 的 upsert 功能
-                err = tx.Clauses(clause.OnConflict{
-                    Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
-                    DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free"}),
-                }).Create(torrent).Error
-                return err
-            })
+			err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
+				// 标记跳过或更新状态
+				if !isFree || !canFinished {
+					sLogger().Infof("种子: %s, ID: %s, free: %v, canbefinish: %v 为收费或无法完成，跳过", title, item.GUID, isFree, canFinished)
+					torrent.IsSkipped = true
+				} else {
+					torrent.IsSkipped = false
+				}
+				torrent.IsFree = isFree
+				// 使用 GORM 的 upsert 功能
+				err = tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
+					DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free"}),
+				}).Create(torrent).Error
+				return err
+			})
 			if err != nil {
 				sLogger().Errorf("更新种子:%s 状态失败, %v", title, err)
 				continue
@@ -182,20 +182,24 @@ func downloadWorker[T models.ResType](
 			// 下载种子并更新哈希值
 			if isFree {
 				err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
-                    homeDir, _ := os.UserHomeDir()
-                    base := filepath.Join(homeDir, models.WorkDir, gl.DownloadDir)
-                    downloadPath := filepath.Join(base, downloadSubPath)
-                    if _, mkErr := os.Stat(downloadPath); os.IsNotExist(mkErr) {
-                        sLogger().Infof("创建下载目录: %s", downloadPath)
-                        _ = os.MkdirAll(downloadPath, 0o755)
-                    }
+					homeDir, _ := os.UserHomeDir()
+					base, berr := utils.ResolveDownloadBase(homeDir, models.WorkDir, gl.DownloadDir)
+					if berr != nil {
+						return berr
+					}
+					sub := utils.SubPathFromTag(rssCfg.Tag)
+					downloadPath := filepath.Join(base, sub)
+					if _, mkErr := os.Stat(downloadPath); os.IsNotExist(mkErr) {
+						sLogger().Infof("创建下载目录: %s", downloadPath)
+						_ = os.MkdirAll(downloadPath, 0o755)
+					}
 					// 文件命名统一为 siteName-torrentID.torrent，避免重复与歧义
 					fileBase := fmt.Sprintf("%s-%s", strings.ToLower(string(siteName)), item.GUID)
 					hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
 					if downloadErr != nil {
 						return fmt.Errorf("种子下载失败: %w", downloadErr)
 					}
-                    torrentFile := filepath.Join(downloadPath, fileBase+".torrent")
+					torrentFile := filepath.Join(downloadPath, fileBase+".torrent")
 					if _, err = os.Stat(torrentFile); os.IsNotExist(err) {
 						sLogger().Warnf("种子文件不存在但标记已下载: %s", title)
 						// 修正数据库状态
@@ -210,16 +214,16 @@ func downloadWorker[T models.ResType](
 					torrent.TorrentHash = &hash
 					// 更新指定字段
 					now := time.Now()
-                    err = tx.Model(&models.TorrentInfo{}).
-                        Where("site_name = ? AND torrent_id = ?", torrent.SiteName, torrent.TorrentID).
-                        Updates(map[string]any{
-                            "torrent_hash":    torrent.TorrentHash,
-                            "is_downloaded":   torrent.IsDownloaded,
-                            "is_free":         torrent.IsFree,
-                            "last_check_time": &now,
-                        }).Error
-                    return err
-                })
+					err = tx.Model(&models.TorrentInfo{}).
+						Where("site_name = ? AND torrent_id = ?", torrent.SiteName, torrent.TorrentID).
+						Updates(map[string]any{
+							"torrent_hash":    torrent.TorrentHash,
+							"is_downloaded":   torrent.IsDownloaded,
+							"is_free":         torrent.IsFree,
+							"last_check_time": &now,
+						}).Error
+					return err
+				})
 				if err != nil {
 					sLogger().Errorf("%s: 事务执行失败, %v", title, err)
 				} else {
@@ -237,7 +241,7 @@ func ProcessTorrentsWithDBUpdate(
 	siteName models.SiteGroup,
 ) error {
 	// 获取目录下的所有种子文件（移出事务）
-    filePaths, err := qbit.GetTorrentFilesPath(dirPath)
+	filePaths, err := qbit.GetTorrentFilesPath(dirPath)
 	if err != nil {
 		sLogger().Error("无法读取目录", dirPath, err)
 		return fmt.Errorf("无法读取目录: %v", err)
@@ -334,10 +338,11 @@ func processSingleTorrent(
 		if exists {
 			sLogger().Infof("种子已存在于 qBittorrent: %s", filePath)
 			// 更新数据库状态
+			pushed := true
 			if err := tx.Model(&models.TorrentInfo{}).
-				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
-				Updates(map[string]interface{}{
-					"is_pushed": true,
+				Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
+				Updates(map[string]any{
+					"is_pushed": &pushed,
 					"push_time": time.Now(),
 				}).Error; err != nil {
 				return fmt.Errorf("更新数据库状态失败: %w", err)
@@ -359,10 +364,11 @@ func processSingleTorrent(
 		}
 		if pushErr := qbitClient.ProcessSingleTorrentFile(ctx, filePath, category, tags); pushErr != nil {
 			// 推送失败只更新状态不删除文件
+			np := false
 			if updateErr := tx.Model(&models.TorrentInfo{}).
-				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
+				Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
 				Updates(map[string]any{
-					"is_pushed":   false,
+					"is_pushed":   &np,
 					"retry_count": gorm.Expr("retry_count + 1"),
 					"last_error":  pushErr.Error(),
 				}).Error; updateErr != nil {
@@ -371,10 +377,11 @@ func processSingleTorrent(
 			return fmt.Errorf("推送种子失败: %w", pushErr)
 		}
 		// 5. 推送成功处理
+		pushed2 := true
 		if err := tx.Model(&models.TorrentInfo{}).
-			Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
+			Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
 			Updates(map[string]interface{}{
-				"is_pushed": true,
+				"is_pushed": &pushed2,
 				"push_time": time.Now(),
 			}).Error; err != nil {
 			return fmt.Errorf("更新推送状态失败: %w", err)
@@ -415,9 +422,7 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 	if !m.IsEnabled() {
 		return errors.New(enableError)
 	}
-	if rssCfg.DownloadSubPath == "" {
-		return fmt.Errorf("下载目录为空")
-	}
+	// DownloadSubPath 前端移除，允许为空；使用 Tag 作为子目录
 	feed, err := fetchRSSFeed(rssCfg.URL)
 	if err != nil {
 		return err
@@ -435,7 +440,6 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 			&wg,
 			m,
 			torrentChan,
-			rssCfg.DownloadSubPath,
 			rssCfg,
 		)
 	}

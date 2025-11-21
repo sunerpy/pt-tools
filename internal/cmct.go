@@ -1,10 +1,10 @@
 package internal
 
 import (
-    "context"
-    "os"
-    "path/filepath"
-    "time"
+	"context"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/gocolly/colly"
 	"github.com/mmcdole/gofeed"
@@ -104,16 +104,21 @@ func (h *CmctImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfi
 	if h.qbitClient == nil {
 		sLogger().Fatal("qbit client is nil")
 	}
-    homeDir, _ := os.UserHomeDir()
-    store := core.NewConfigStore(global.GlobalDB)
-    gl, _ := store.GetGlobalOnly()
-    dirPath := filepath.Join(homeDir, models.WorkDir, gl.DownloadDir, rssCfg.DownloadSubPath)
+	homeDir, _ := os.UserHomeDir()
+	store := core.NewConfigStore(global.GlobalDB)
+	gl, _ := store.GetGlobalOnly()
+	base, berr := utils.ResolveDownloadBase(homeDir, models.WorkDir, gl.DownloadDir)
+	if berr != nil {
+		return berr
+	}
+	sub := utils.SubPathFromTag(rssCfg.Tag)
+	dirPath := filepath.Join(base, sub)
 	// 检查目录
-    // 启动时若目录不存在则尝试创建，以免误判为空
-    if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-        _ = os.MkdirAll(dirPath, 0o755)
-    }
-    exists, empty, err := utils.CheckDirectory(dirPath)
+	// 启动时若目录不存在则尝试创建，以免误判为空
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		_ = os.MkdirAll(dirPath, 0o755)
+	}
+	exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
 		sLogger().Errorf("检查目录失败: %v", err)
 		return err

@@ -1,15 +1,17 @@
 package core
 
 import (
-    "errors"
-    "fmt"
-    "strings"
-    "time"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
-    "github.com/sunerpy/pt-tools/global"
-    "github.com/sunerpy/pt-tools/internal/events"
-    "github.com/sunerpy/pt-tools/models"
-    "gorm.io/gorm"
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/utils"
+	"gorm.io/gorm"
 )
 
 type ConfigStore struct {
@@ -68,7 +70,16 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloadSubPath: r.DownloadSubPath})
+				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes})
+			}
+			// 应用默认站点认证方式与 API URL（只读快照层，不写库）
+			switch sg {
+			case models.MTEAM:
+				sc.AuthMethod = "api_key"
+				sc.APIUrl = models.DefaultAPIUrlMTeam
+			case models.CMCT, models.HDSKY:
+				sc.AuthMethod = "cookie"
+				sc.APIUrl = ""
 			}
 			out.Sites[sg] = sc
 		}
@@ -87,6 +98,9 @@ func (s *ConfigStore) SaveGlobal(gl models.SettingsGlobal) error {
 	if err := db.First(&gs).Error; err != nil {
 		gs = models.SettingsGlobal{}
 	}
+	if gl.DefaultIntervalMinutes < models.MinIntervalMinutes {
+		gl.DefaultIntervalMinutes = models.MinIntervalMinutes
+	}
 	gs.DefaultIntervalMinutes = gl.DefaultIntervalMinutes
 	gs.DefaultEnabled = gl.DefaultEnabled
 	gs.DownloadDir = gl.DownloadDir
@@ -96,6 +110,11 @@ func (s *ConfigStore) SaveGlobal(gl models.SettingsGlobal) error {
 	gs.AutoStart = gl.AutoStart
 	if strings.TrimSpace(gs.DownloadDir) == "" {
 		return errors.New("下载目录不能为空")
+	}
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if _, rerr := utils.ResolveDownloadBase(home, models.WorkDir, gs.DownloadDir); rerr != nil {
+			return rerr
+		}
 	}
 	if err := db.Save(&gs).Error; err != nil {
 		return err
@@ -141,6 +160,14 @@ func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 	if strings.TrimSpace(gs.DownloadDir) == "" {
 		return errors.New("下载目录不能为空")
+	}
+	if gs.DefaultIntervalMinutes < models.MinIntervalMinutes {
+		gs.DefaultIntervalMinutes = models.MinIntervalMinutes
+	}
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if _, rerr := utils.ResolveDownloadBase(home, models.WorkDir, gs.DownloadDir); rerr != nil {
+			return rerr
+		}
 	}
 	// upsert single row
 	var cur models.SettingsGlobal
@@ -257,7 +284,6 @@ func (s *ConfigStore) ReplaceSiteRSS(siteID uint, rss []models.RSSConfig) error 
 			Category:        r.Category,
 			Tag:             r.Tag,
 			IntervalMinutes: r.IntervalMinutes,
-			DownloadSubPath: r.DownloadSubPath,
 		}
 		if err := db.Create(&row).Error; err != nil {
 			return err
@@ -288,16 +314,16 @@ func (s *ConfigStore) GetAdmin(username string) (*models.AdminUser, error) {
 }
 
 func (s *ConfigStore) UpdateAdmin(u *models.AdminUser) error {
-    return s.db.DB.Save(u).Error
+	return s.db.DB.Save(u).Error
 }
 
 func (s *ConfigStore) UpdateAdminPassword(username, newHash string) error {
-    var u models.AdminUser
-    if err := s.db.DB.Where("username = ?", strings.TrimSpace(username)).First(&u).Error; err != nil {
-        return err
-    }
-    u.PasswordHash = newHash
-    return s.db.DB.Save(&u).Error
+	var u models.AdminUser
+	if err := s.db.DB.Where("username = ?", strings.TrimSpace(username)).First(&u).Error; err != nil {
+		return err
+	}
+	u.PasswordHash = newHash
+	return s.db.DB.Save(&u).Error
 }
 
 func (s *ConfigStore) AdminCount() (int64, error) {
@@ -307,7 +333,7 @@ func (s *ConfigStore) AdminCount() (int64, error) {
 	for _, u := range users {
 		names = append(names, u.Username)
 	}
-	global.GetSlogger().Infow("admin_users", "users", names, "count", len(users))
+	global.GetSlogger().Infof("admin_users users=%v count=%d", names, len(users))
 	var cnt int64
 	err := s.db.DB.Model(&models.AdminUser{}).Count(&cnt).Error
 	return cnt, err
@@ -315,58 +341,52 @@ func (s *ConfigStore) AdminCount() (int64, error) {
 
 // UpsertSiteWithRSS 原子性保存站点与 RSS，并进行严格校验
 func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteConfig) error {
-    // 严格校验：
-    // 1) 认证方式必填且合法；
-    // 2) 根据认证方式二选一且对应字段不为空（api_key 或 cookie），另一项必须为空；
-    // 3) API URL 必填；
-    // 4) RSS 列表至少一条，且各项字段合法。
-    am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
-    if am != "cookie" && am != "api_key" {
-        return errors.New("认证方式必须为 'cookie' 或 'api_key'")
-    }
-    if strings.TrimSpace(sc.APIUrl) == "" {
-        return errors.New("API 地址不能为空")
-    }
-    apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
-    cookieEmpty := strings.TrimSpace(sc.Cookie) == ""
-    if am == "api_key" {
-        if apiKeyEmpty {
-            return errors.New("API Key 不能为空")
-        }
-        if !cookieEmpty {
-            return errors.New("认证方式为 api_key 时 Cookie 必须留空")
-        }
-    } else { // cookie
-        if cookieEmpty {
-            return errors.New("Cookie 不能为空")
-        }
-        if !apiKeyEmpty {
-            return errors.New("认证方式为 cookie 时 API Key 必须留空")
-        }
-    }
-    if len(sc.RSS) == 0 {
-        return errors.New("RSS 列表不能为空")
-    }
-    for i, r := range sc.RSS {
-        if strings.TrimSpace(r.Name) == "" {
-            return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 name 不能为空")
-        }
-        if strings.TrimSpace(r.URL) == "" {
-            return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 url 不能为空")
-        }
-        if strings.TrimSpace(r.Category) == "" {
-            return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 category 不能为空")
-        }
-        if strings.TrimSpace(r.Tag) == "" {
-            return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 tag 不能为空")
-        }
-        if r.IntervalMinutes < 1 {
-            return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 interval_minutes 必须 ≥ 1")
-        }
-        if strings.TrimSpace(r.DownloadSubPath) == "" {
-            return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 download_sub_path 不能为空")
-        }
-    }
+	// 严格校验：
+	// 1) 认证方式必填且合法；
+	// 2) 根据认证方式二选一且对应字段不为空（api_key 或 cookie），另一项必须为空；
+	// 3) API URL 必填；
+	// 4) RSS 列表至少一条，且各项字段合法。
+	am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
+	if am != "cookie" && am != "api_key" {
+		return errors.New("认证方式必须为 'cookie' 或 'api_key'")
+	}
+	if strings.TrimSpace(sc.APIUrl) == "" {
+		return errors.New("API 地址不能为空")
+	}
+	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
+	cookieEmpty := strings.TrimSpace(sc.Cookie) == ""
+	if am == "api_key" {
+		if apiKeyEmpty {
+			return errors.New("API Key 不能为空")
+		}
+		if !cookieEmpty {
+			return errors.New("认证方式为 api_key 时 Cookie 必须留空")
+		}
+	} else { // cookie
+		if cookieEmpty {
+			return errors.New("cookie 不能为空")
+		}
+		if !apiKeyEmpty {
+			return errors.New("认证方式为 cookie 时 API Key 必须留空")
+		}
+	}
+	if len(sc.RSS) == 0 {
+		return errors.New("RSS 列表不能为空")
+	}
+	for i, r := range sc.RSS {
+		if strings.TrimSpace(r.Name) == "" {
+			return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 name 不能为空")
+		}
+		if strings.TrimSpace(r.URL) == "" {
+			return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 url 不能为空")
+		}
+		// category 允许为空
+		// Tag 允许为空，后端将使用父目录作为下载子路径
+		if r.IntervalMinutes < models.MinIntervalMinutes {
+			r.IntervalMinutes = models.MinIntervalMinutes
+		}
+		// DownloadSubPath 前端已移除，后端使用 Tag 作为子目录；允许为空
+	}
 	// 事务保存站点与 RSS
 	return s.db.DB.Transaction(func(tx *gorm.DB) error {
 		var row models.SiteSetting
@@ -388,7 +408,10 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			return err
 		}
 		for _, r := range sc.RSS {
-			rr := models.RSSSubscription{SiteID: row.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloadSubPath: r.DownloadSubPath}
+			if r.IntervalMinutes < models.MinIntervalMinutes {
+				r.IntervalMinutes = models.MinIntervalMinutes
+			}
+			rr := models.RSSSubscription{SiteID: row.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes}
 			if err := tx.Create(&rr).Error; err != nil {
 				return err
 			}
@@ -426,9 +449,9 @@ func (s *ConfigStore) DeleteSite(name string) error {
 }
 
 // 工具函数
-func minutesToDuration(m int32) (d time.Duration) { return time.Duration(m) * time.Minute }
-func durationToMinutes(d time.Duration) int32     { return int32(d / time.Minute) }
-func boolPtr(b bool) *bool                        { return &b }
+// func minutesToDuration(m int32) (d time.Duration) { return time.Duration(m) * time.Minute }
+func durationToMinutes(d time.Duration) int32 { return int32(d / time.Minute) }
+func boolPtr(b bool) *bool                    { return &b }
 
 // ReloadGlobal 从 DB 加载并刷新全局配置与目录缓存
 // 已弃用：由各业务按需读取 DB 并更新目录缓存
@@ -447,7 +470,15 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloadSubPath: r.DownloadSubPath})
+			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes})
+		}
+		switch sg {
+		case models.MTEAM:
+			sc.AuthMethod = "api_key"
+			sc.APIUrl = models.DefaultAPIUrlMTeam
+		case models.CMCT, models.HDSKY:
+			sc.AuthMethod = "cookie"
+			sc.APIUrl = ""
 		}
 		out[sg] = sc
 	}
@@ -466,7 +497,16 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 		return models.SiteConfig{}, err
 	}
 	for _, r := range rss {
-		sc.RSS = append(sc.RSS, models.RSSConfig{Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloadSubPath: r.DownloadSubPath})
+		sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes})
+	}
+	// 读取单站点时也应用默认认证方式与 API URL
+	switch name {
+	case models.MTEAM:
+		sc.AuthMethod = "api_key"
+		sc.APIUrl = models.DefaultAPIUrlMTeam
+	case models.CMCT, models.HDSKY:
+		sc.AuthMethod = "cookie"
+		sc.APIUrl = ""
 	}
 	return sc, nil
 }

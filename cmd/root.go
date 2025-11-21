@@ -24,11 +24,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/sunerpy/pt-tools/core"
-	"github.com/sunerpy/pt-tools/global"
-)
-
-const (
-	dbFile = "torrents.db"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -73,11 +68,10 @@ func init() {
 }
 
 func initTools() error {
-	logger, err := core.InitRuntime()
+	_, err := core.InitRuntime()
 	if err != nil {
 		color.Red("Failed to load configuration\n")
 		return err
 	}
-	global.InitLogger(logger)
 	return nil
 }

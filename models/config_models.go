@@ -4,6 +4,8 @@ import (
 	"time"
 )
 
+const MinIntervalMinutes int32 = 5
+
 // Admin 用户（单用户登录）
 type AdminUser struct {
 	ID           uint   `gorm:"primaryKey"`
@@ -69,6 +71,7 @@ type RSSSubscription struct {
 
 // Runtime-friendly structures for API usage and scheduler/config load
 type RSSConfig struct {
+	ID              uint   `json:"id"`
 	Name            string `json:"name"`
 	URL             string `json:"url"`
 	Category        string `json:"category"`

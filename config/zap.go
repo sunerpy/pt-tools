@@ -134,7 +134,9 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 	core := zapcore.NewTee(cores...)
 	options := []zap.Option{}
 	podName := os.Getenv("POD_NAME")
-	options = append(options, zap.Fields(zap.String("pod", podName)))
+	if podName != "" {
+		options = append(options, zap.Fields(zap.String("pod", podName)))
+	}
 	if z.ShowLine {
 		options = append(options, zap.AddCaller())
 	}

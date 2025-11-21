@@ -1,10 +1,10 @@
 package scheduler
 
 import (
-    "context"
-    "net/url"
-    "sync"
-    "time"
+	"context"
+	"net/url"
+	"sync"
+	"time"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
@@ -89,6 +89,10 @@ func (m *Manager) Stop(site models.SiteGroup, rssName string) {
 }
 
 func (m *Manager) Reload(cfg *models.Config) {
+	if global.GlobalDB == nil {
+		global.GetSlogger().Warn("配置未就绪：数据库未初始化，任务不启动")
+		return
+	}
 	if cfg == nil || cfg.Global.DownloadDir == "" {
 		global.GetSlogger().Warn("配置未就绪：下载目录为空，任务不启动")
 		return
@@ -113,55 +117,79 @@ func (m *Manager) Reload(cfg *models.Config) {
 	m.jobs = map[string]*job{}
 	m.mu.Unlock()
 	// 重新启动：每次启动任务时从 DB 读取最新配置，保证一致性
-    for site, sc := range cfg.Sites {
-        if sc.Enabled != nil && *sc.Enabled {
-            switch site {
-            case models.MTEAM:
-                impl := internal.NewMteamImpl(context.Background())
-                for _, r := range sc.RSS {
-                    if !validRSS(r.URL) {
-                        global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
-                        continue
-                    }
-                    rr := r
-                    m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-                }
-            case models.HDSKY:
-                impl := internal.NewHdskyImpl(context.Background())
-                for _, r := range sc.RSS {
-                    if !validRSS(r.URL) {
-                        global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
-                        continue
-                    }
-                    rr := r
-                    m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-                }
-            case models.CMCT:
-                impl := internal.NewCmctImpl(context.Background())
-                for _, r := range sc.RSS {
-                    if !validRSS(r.URL) {
-                        global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
-                        continue
-                    }
-                    rr := r
-                    m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-                }
-            default:
-                global.GetSlogger().Warnf("未知站点: %s", string(site))
-            }
-        }
-    }
+	store := core.NewConfigStore(global.GlobalDB)
+	qb, _ := store.GetQbitOnly()
+	for site, sc := range cfg.Sites {
+		if sc.Enabled != nil && *sc.Enabled {
+			switch site {
+			case models.MTEAM:
+				if qb.URL == "" || qb.User == "" || qb.Password == "" {
+					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
+					continue
+				}
+				impl := internal.NewMteamImpl(context.Background())
+				for _, r := range sc.RSS {
+					if !validRSS(r.URL) {
+						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
+						continue
+					}
+					rr := r
+					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
+				}
+			case models.HDSKY:
+				if qb.URL == "" || qb.User == "" || qb.Password == "" {
+					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
+					continue
+				}
+				impl := internal.NewHdskyImpl(context.Background())
+				for _, r := range sc.RSS {
+					if !validRSS(r.URL) {
+						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
+						continue
+					}
+					rr := r
+					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
+				}
+			case models.CMCT:
+				if qb.URL == "" || qb.User == "" || qb.Password == "" {
+					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
+					continue
+				}
+				impl := internal.NewCmctImpl(context.Background())
+				for _, r := range sc.RSS {
+					if !validRSS(r.URL) {
+						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
+						continue
+					}
+					rr := r
+					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
+				}
+			default:
+				global.GetSlogger().Warnf("未知站点: %s", string(site))
+			}
+		}
+	}
 }
 
 func validRSS(raw string) bool {
-    if raw == "" { return false }
-    u, err := url.Parse(raw)
-    if err != nil { return false }
-    if u.Scheme != "http" && u.Scheme != "https" { return false }
-    host := u.Hostname()
-    if host == "" { return false }
-    if host == "rss.m-team.xxx" { return false }
-    return true
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if host == "rss.m-team.xxx" {
+		return false
+	}
+	return true
 }
 
 // StopAll 取消所有任务并等待当前执行结束

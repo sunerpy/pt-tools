@@ -106,7 +106,7 @@ func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup,
 	defer ticker.Stop()
 	executeTask(ctx, siteName, cfg, siteImpl)
 	// 判断运行模式
-	mode, _ := ctx.Value("mode").(string)
+	mode, _ := ctx.Value(modeKey).(string)
 	if mode == "single" {
 		sLogger().Infof("站点:%s 单次任务执行完成", cfg.Name)
 		return

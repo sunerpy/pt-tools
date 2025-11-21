@@ -20,26 +20,26 @@ const (
 
 // TorrentInfo 表示种子信息
 type TorrentInfo struct {
-    ID            uint       `gorm:"primaryKey" json:"id"`
-    SiteName      string     `gorm:"uniqueIndex:idx_site_torrent" json:"siteName"`
-    TorrentID     string     `gorm:"uniqueIndex:idx_site_torrent" json:"torrentId"`
-    TorrentHash   *string    `gorm:"index" json:"torrentHash"`
-    IsFree        bool       `gorm:"default:false" json:"isFree"`
-    IsDownloaded  bool       `gorm:"default:false" json:"isDownloaded"`
-    IsPushed      *bool      `gorm:"default:null" json:"isPushed"`
-    IsSkipped     bool       `gorm:"default:false" json:"isSkipped"`
-    FreeLevel     string     `gorm:"default:'normal'" json:"freeLevel"`
-    FreeEndTime   *time.Time `gorm:"default:null" json:"freeEndTime"`
-    PushTime      *time.Time `gorm:"default:null" json:"pushTime"`
-    Title         string     `gorm:"default:''" json:"title"`
-    Category      string     `gorm:"default:''" json:"category"`
-    Tag           string     `gorm:"default:''" json:"tag"`
-    CreatedAt     time.Time  `json:"createdAt"`
-    UpdatedAt     time.Time  `json:"updatedAt"`
-    IsExpired     bool       `gorm:"default:false" json:"isExpired"`
-    LastCheckTime *time.Time `gorm:"default:null" json:"lastCheckTime"`
-    RetryCount    int        `gorm:"default:0" json:"retryCount"`
-    LastError     string     `gorm:"default:''" json:"lastError"`
+	ID            uint       `gorm:"primaryKey" json:"id"`
+	SiteName      string     `gorm:"uniqueIndex:idx_site_torrent" json:"siteName"`
+	TorrentID     string     `gorm:"uniqueIndex:idx_site_torrent" json:"torrentId"`
+	TorrentHash   *string    `gorm:"index" json:"torrentHash"`
+	IsFree        bool       `gorm:"default:false" json:"isFree"`
+	IsDownloaded  bool       `gorm:"default:false" json:"isDownloaded"`
+	IsPushed      *bool      `gorm:"default:null" json:"isPushed"`
+	IsSkipped     bool       `gorm:"default:false" json:"isSkipped"`
+	FreeLevel     string     `gorm:"default:'normal'" json:"freeLevel"`
+	FreeEndTime   *time.Time `gorm:"default:null" json:"freeEndTime"`
+	PushTime      *time.Time `gorm:"default:null" json:"pushTime"`
+	Title         string     `gorm:"default:''" json:"title"`
+	Category      string     `gorm:"default:''" json:"category"`
+	Tag           string     `gorm:"default:''" json:"tag"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+	IsExpired     bool       `gorm:"default:false" json:"isExpired"`
+	LastCheckTime *time.Time `gorm:"default:null" json:"lastCheckTime"`
+	RetryCount    int        `gorm:"default:0" json:"retryCount"`
+	LastError     string     `gorm:"default:''" json:"lastError"`
 }
 
 func (t *TorrentInfo) GetExpired() bool {
@@ -83,41 +83,41 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 	if err := db.Exec("PRAGMA journal_mode=WAL;").Error; err != nil {
 		return nil, fmt.Errorf("无法启用 WAL 模式: %w", err)
 	}
-    if err := db.AutoMigrate(
-        &TorrentInfo{},
-        &AdminUser{},
-        &SettingsGlobal{},
-        &QbitSettings{},
-        &SiteSetting{},
-        &RSSSubscription{},
-    ); err != nil {
-        return nil, fmt.Errorf("自动迁移失败: %w", err)
-    }
-    // 保证存在全局设置条目（仅在空时写入默认）
-    var glCnt int64
-    if err := db.Model(&SettingsGlobal{}).Count(&glCnt).Error; err != nil {
-        return nil, fmt.Errorf("统计全局设置失败: %w", err)
-    }
-    if glCnt == 0 {
-        def := SettingsGlobal{
-            DownloadDir:            "downloads",
-            DefaultIntervalMinutes: 10,
-            DefaultEnabled:         false,
-            DownloadLimitEnabled:   false,
-            DownloadSpeedLimit:     0,
-            TorrentSizeGB:          0,
-            AutoStart:              false,
-            RetainHours:            24,
-            MaxRetry:               3,
-        }
-        if err := db.Create(&def).Error; err != nil {
-            return nil, fmt.Errorf("写入默认全局设置失败: %w", err)
-        }
-    }
-    // 预置站点与 RSS 仅在空库时写入一次
-    if err := SeedDefaultSites(db); err != nil {
-        return nil, fmt.Errorf("初始化默认站点失败: %w", err)
-    }
+	if err := db.AutoMigrate(
+		&TorrentInfo{},
+		&AdminUser{},
+		&SettingsGlobal{},
+		&QbitSettings{},
+		&SiteSetting{},
+		&RSSSubscription{},
+	); err != nil {
+		return nil, fmt.Errorf("自动迁移失败: %w", err)
+	}
+	// 保证存在全局设置条目（仅在空时写入默认）
+	var glCnt int64
+	if err := db.Model(&SettingsGlobal{}).Count(&glCnt).Error; err != nil {
+		return nil, fmt.Errorf("统计全局设置失败: %w", err)
+	}
+	if glCnt == 0 {
+		def := SettingsGlobal{
+			DownloadDir:            "downloads",
+			DefaultIntervalMinutes: 10,
+			DefaultEnabled:         false,
+			DownloadLimitEnabled:   false,
+			DownloadSpeedLimit:     0,
+			TorrentSizeGB:          0,
+			AutoStart:              false,
+			RetainHours:            24,
+			MaxRetry:               3,
+		}
+		if err := db.Create(&def).Error; err != nil {
+			return nil, fmt.Errorf("写入默认全局设置失败: %w", err)
+		}
+	}
+	// 预置站点与 RSS 仅在空库时写入一次
+	if err := SeedDefaultSites(db); err != nil {
+		return nil, fmt.Errorf("初始化默认站点失败: %w", err)
+	}
 	var mode string
 	if err := db.Raw("PRAGMA journal_mode;").Scan(&mode).Error; err != nil {
 		return nil, fmt.Errorf("无法验证 WAL 模式: %w", err)

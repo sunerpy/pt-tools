@@ -32,22 +32,22 @@ var webCmd = &cobra.Command{
 		if strings.TrimSpace(gl.DownloadDir) == "" {
 			color.Yellow("当前未检测到 DB 配置，可通过 Web 进行初始化")
 		}
-        addr := fmt.Sprintf("%s:%d", host, port)
-        mgr := scheduler.NewManager()
-        srv := web.NewServer(store, mgr)
-        if cfg, _ := store.Load(); cfg != nil {
-            if cfg.Global.AutoStart && strings.TrimSpace(cfg.Global.DownloadDir) != "" {
-                global.GetSlogger().Info("检测到自动启动配置，加载并启动任务")
-                mgr.Reload(cfg)
-            } else {
-                global.GetSlogger().Info("自动启动未开启或下载目录为空，等待手动启动")
-            }
-        }
-        global.GetSlogger().Infof("Web 服务启动于 %s", addr)
-        if err := srv.Serve(addr); err != nil {
-            color.Red("Web 启动失败: %v", err)
-        }
-    },
+		addr := fmt.Sprintf("%s:%d", host, port)
+		mgr := scheduler.NewManager()
+		srv := web.NewServer(store, mgr)
+		if cfg, _ := store.Load(); cfg != nil {
+			if cfg.Global.AutoStart && strings.TrimSpace(cfg.Global.DownloadDir) != "" {
+				global.GetSlogger().Info("检测到自动启动配置，加载并启动任务")
+				mgr.Reload(cfg)
+			} else {
+				global.GetSlogger().Info("自动启动未开启或下载目录为空，等待手动启动")
+			}
+		}
+		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
+		if err := srv.Serve(addr); err != nil {
+			color.Red("Web 启动失败: %v", err)
+		}
+	},
 }
 
 func init() {

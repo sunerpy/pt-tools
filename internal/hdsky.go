@@ -1,10 +1,10 @@
 package internal
 
 import (
-    "context"
-    "os"
-    "path/filepath"
-    "time"
+	"context"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/gocolly/colly"
 	"github.com/mmcdole/gofeed"
@@ -103,12 +103,19 @@ func (h *HdskyImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConf
 	if h.qbitClient == nil {
 		sLogger().Fatal("qbit client is nil")
 	}
-    homeDir, _ := os.UserHomeDir()
-    store := core.NewConfigStore(global.GlobalDB)
-    gl, _ := store.GetGlobalOnly()
-    dirPath := filepath.Join(homeDir, models.WorkDir, gl.DownloadDir, rssCfg.DownloadSubPath)
-    if _, err := os.Stat(dirPath); os.IsNotExist(err) { _ = os.MkdirAll(dirPath, 0o755) }
-    exists, empty, err := utils.CheckDirectory(dirPath)
+	homeDir, _ := os.UserHomeDir()
+	store := core.NewConfigStore(global.GlobalDB)
+	gl, _ := store.GetGlobalOnly()
+	base, berr := utils.ResolveDownloadBase(homeDir, models.WorkDir, gl.DownloadDir)
+	if berr != nil {
+		return berr
+	}
+	sub := utils.SubPathFromTag(rssCfg.Tag)
+	dirPath := filepath.Join(base, sub)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		_ = os.MkdirAll(dirPath, 0o755)
+	}
+	exists, empty, err := utils.CheckDirectory(dirPath)
 	if err != nil {
 		sLogger().Error("检查目录失败", err)
 		return err
