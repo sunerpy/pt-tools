@@ -29,6 +29,6 @@ func (d *DefaultReferer) GetReferer() string {
 	if referer, ok := d.refererMap[d.siteName]; ok {
 		return referer
 	}
-	sLogger().Fatal("无法找到默认 Referer", zap.String("siteName", string(d.siteName)))
+	sLogger().Error("无法找到默认 Referer", zap.String("siteName", string(d.siteName)))
 	return ""
 }

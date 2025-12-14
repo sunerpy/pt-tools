@@ -28,18 +28,19 @@ type MteamImpl struct {
 	qbitClient *qbit.QbitClient
 }
 
-func NewMteamImpl(ctx context.Context) *MteamImpl {
+func NewMteamImpl(ctx context.Context) (*MteamImpl, error) {
 	qbc, _ := core.NewConfigStore(global.GlobalDB).GetQbitOnly()
 	client, err := qbit.NewQbitClient(qbc.URL, qbc.User, qbc.Password, time.Second*10)
 	if err != nil {
-		sLogger().Fatal("MTEAM-qbit认证失败", err)
+		sLogger().Error("MTEAM-qbit认证失败", err)
+		return nil, fmt.Errorf("MTEAM-qbit认证失败: %w", err)
 	}
 	return &MteamImpl{
 		ctx:        ctx,
 		maxRetries: maxRetries,
 		retryDelay: retryDelay,
 		qbitClient: client,
-	}
+	}, nil
 }
 
 func (m *MteamImpl) Context() context.Context {

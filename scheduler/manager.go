@@ -127,7 +127,11 @@ func (m *Manager) Reload(cfg *models.Config) {
 					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
 					continue
 				}
-				impl := internal.NewMteamImpl(context.Background())
+				impl, err := internal.NewMteamImpl(context.Background())
+				if err != nil {
+					global.GetSlogger().Errorf("初始化MTEAM站点失败，跳过该站点: %v", err)
+					continue
+				}
 				for _, r := range sc.RSS {
 					if !validRSS(r.URL) {
 						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
@@ -141,7 +145,11 @@ func (m *Manager) Reload(cfg *models.Config) {
 					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
 					continue
 				}
-				impl := internal.NewHdskyImpl(context.Background())
+				impl, err := internal.NewHdskyImpl(context.Background())
+				if err != nil {
+					global.GetSlogger().Errorf("初始化HDSKY站点失败，跳过该站点: %v", err)
+					continue
+				}
 				for _, r := range sc.RSS {
 					if !validRSS(r.URL) {
 						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
@@ -155,7 +163,11 @@ func (m *Manager) Reload(cfg *models.Config) {
 					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
 					continue
 				}
-				impl := internal.NewCmctImpl(context.Background())
+				impl, err := internal.NewCmctImpl(context.Background())
+				if err != nil {
+					global.GetSlogger().Errorf("初始化CMCT站点失败，跳过该站点: %v", err)
+					continue
+				}
 				for _, r := range sc.RSS {
 					if !validRSS(r.URL) {
 						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
@@ -216,19 +228,31 @@ func (m *Manager) StartAll(cfg *models.Config) {
 		if sc.Enabled != nil && *sc.Enabled {
 			switch site {
 			case models.MTEAM:
-				impl := internal.NewMteamImpl(context.Background())
+				impl, err := internal.NewMteamImpl(context.Background())
+				if err != nil {
+					global.GetSlogger().Errorf("初始化MTEAM站点失败，跳过该站点: %v", err)
+					continue
+				}
 				for _, r := range sc.RSS {
 					rr := r
 					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
 				}
 			case models.HDSKY:
-				impl := internal.NewHdskyImpl(context.Background())
+				impl, err := internal.NewHdskyImpl(context.Background())
+				if err != nil {
+					global.GetSlogger().Errorf("初始化HDSKY站点失败，跳过该站点: %v", err)
+					continue
+				}
 				for _, r := range sc.RSS {
 					rr := r
 					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
 				}
 			case models.CMCT:
-				impl := internal.NewCmctImpl(context.Background())
+				impl, err := internal.NewCmctImpl(context.Background())
+				if err != nil {
+					global.GetSlogger().Errorf("初始化CMCT站点失败，跳过该站点: %v", err)
+					continue
+				}
 				for _, r := range sc.RSS {
 					rr := r
 					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })

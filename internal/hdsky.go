@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -25,12 +26,13 @@ type HdskyImpl struct {
 	qbitClient *qbit.QbitClient
 }
 
-func NewHdskyImpl(ctx context.Context) *HdskyImpl {
+func NewHdskyImpl(ctx context.Context) (*HdskyImpl, error) {
 	store := core.NewConfigStore(global.GlobalDB)
 	qbc, _ := store.GetQbitOnly()
 	client, err := qbit.NewQbitClient(qbc.URL, qbc.User, qbc.Password, time.Second*10)
 	if err != nil {
-		sLogger().Fatal("HDSKY认证失败", err)
+		sLogger().Error("HDSKY-qbit认证失败", err)
+		return nil, fmt.Errorf("HDSKY-qbit认证失败: %w", err)
 	}
 	co := site.NewCollectorWithTransport()
 	parser := site.NewHDSkyParser()
@@ -43,7 +45,7 @@ func NewHdskyImpl(ctx context.Context) *HdskyImpl {
 		Collector:  co,
 		SiteConf:   siteCfg,
 		qbitClient: client,
-	}
+	}, nil
 }
 
 func (h *HdskyImpl) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[models.PHPTorrentInfo], error) {
@@ -101,7 +103,8 @@ func (h *HdskyImpl) RetryDelay() time.Duration {
 
 func (h *HdskyImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
 	if h.qbitClient == nil {
-		sLogger().Fatal("qbit client is nil")
+		sLogger().Error("HDSKY qbit client is nil")
+		return fmt.Errorf("HDSKY qbit client is nil")
 	}
 	homeDir, _ := os.UserHomeDir()
 	store := core.NewConfigStore(global.GlobalDB)

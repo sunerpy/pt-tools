@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -26,12 +27,13 @@ type CmctImpl struct {
 	qbitClient *qbit.QbitClient
 }
 
-func NewCmctImpl(ctx context.Context) *CmctImpl {
+func NewCmctImpl(ctx context.Context) (*CmctImpl, error) {
 	store := core.NewConfigStore(global.GlobalDB)
 	qbc, _ := store.GetQbitOnly()
 	client, err := qbit.NewQbitClient(qbc.URL, qbc.User, qbc.Password, time.Second*10)
 	if err != nil {
-		sLogger().Fatal("qbit认证失败", err)
+		sLogger().Error("CMCT-qbit认证失败", err)
+		return nil, fmt.Errorf("CMCT-qbit认证失败: %w", err)
 	}
 	co := site.NewCollectorWithTransport()
 	parser := site.NewCMCTParser()
@@ -44,7 +46,7 @@ func NewCmctImpl(ctx context.Context) *CmctImpl {
 		Collector:  co,
 		SiteConf:   siteCfg,
 		qbitClient: client,
-	}
+	}, nil
 }
 
 func (h *CmctImpl) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[models.PHPTorrentInfo], error) {
@@ -102,7 +104,8 @@ func (h *CmctImpl) RetryDelay() time.Duration {
 
 func (h *CmctImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
 	if h.qbitClient == nil {
-		sLogger().Fatal("qbit client is nil")
+		sLogger().Error("CMCT qbit client is nil")
+		return fmt.Errorf("CMCT qbit client is nil")
 	}
 	homeDir, _ := os.UserHomeDir()
 	store := core.NewConfigStore(global.GlobalDB)

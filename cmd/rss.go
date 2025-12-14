@@ -27,21 +27,33 @@ func genTorrentsWithRSSOnce(ctx context.Context) error {
 		if cfg.Enabled != nil && *cfg.Enabled {
 			switch k {
 			case models.MTEAM:
-				siteImpl := internal.NewMteamImpl(ctx)
+				siteImpl, err := internal.NewMteamImpl(ctx)
+				if err != nil {
+					sLogger().Errorf("初始化MTEAM站点失败，跳过该站点: %v", err)
+					continue
+				}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
 			case models.HDSKY:
-				siteImpl := internal.NewHdskyImpl(ctx)
+				siteImpl, err := internal.NewHdskyImpl(ctx)
+				if err != nil {
+					sLogger().Errorf("初始化HDSKY站点失败，跳过该站点: %v", err)
+					continue
+				}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					runSiteJobs(ctx, k, cfg, siteImpl)
 				}()
 			case models.CMCT:
-				siteImpl := internal.NewCmctImpl(ctx)
+				siteImpl, err := internal.NewCmctImpl(ctx)
+				if err != nil {
+					sLogger().Errorf("初始化CMCT站点失败，跳过该站点: %v", err)
+					continue
+				}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
