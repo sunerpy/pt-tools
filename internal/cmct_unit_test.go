@@ -39,7 +39,8 @@ func TestCmctImpl_IsEnabledAndFields(t *testing.T) {
 	_ = s.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: ts.URL, User: "u", Password: "p"})
 	e := true
 	_, _ = s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	c := NewCmctImpl(context.Background())
+	c, err := NewCmctImpl(context.Background())
+	require.NoError(t, err)
 	if !c.IsEnabled() {
 		t.Fatalf("expected enabled")
 	}

@@ -40,7 +40,10 @@ func TestHdskyImpl_IsEnabledAndFields(t *testing.T) {
 	_ = s.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: ts.URL, User: "u", Password: "p"})
 	e := true
 	_, _ = s.UpsertSite(models.HDSKY, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	h := NewHdskyImpl(context.Background())
+	h, err := NewHdskyImpl(context.Background())
+	if err != nil {
+		t.Fatalf("NewHdskyImpl: %v", err)
+	}
 	// basic getters
 	if !h.IsEnabled() {
 		t.Fatalf("expected enabled")
