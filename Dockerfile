@@ -1,9 +1,19 @@
 # 参数区分构建环境与基础镜像来源
 ARG BUILD_IMAGE=golang:1.25.2
 ARG BASE_IMAGE=alpine:3.20.3
+ARG NODE_IMAGE=node:22.13.0-alpine
 ARG BUILD_ENV=local
 
-# 阶段1：构建阶段
+# 阶段0：前端构建阶段
+FROM ${NODE_IMAGE} AS frontend-builder
+WORKDIR /app/web/frontend
+RUN npm install -g pnpm
+COPY web/frontend/package.json web/frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web/frontend/ ./
+RUN pnpm build
+
+# 阶段1：Go 构建阶段
 FROM ${BUILD_IMAGE} AS builder
 WORKDIR /app
 
@@ -36,6 +46,9 @@ COPY vendor /app/vendor
 COPY version /app/version
 COPY *.go /app/
 COPY dist /app/dist
+
+# 从前端构建阶段拷贝构建产物
+COPY --from=frontend-builder /app/web/static/dist /app/web/static/dist
 
 # 构建或接受外部二进制，并统一执行 upx 压缩
 RUN set -eux; \

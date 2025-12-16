@@ -33,6 +33,7 @@ NO_PROXY ?=
 # 默认基础镜像
 BUILD_IMAGE ?= golang:1.25.2
 BASE_IMAGE ?= alpine:3.20.3
+NODE_IMAGE ?= node:22.13.0-alpine
 BUILD_ENV ?= remote
 
 .PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean code-format unit-test coverage-summary
@@ -82,9 +83,7 @@ install-upx: build-binaries
 upx-binaries: install-upx
 	@echo "Compressing binaries with UPX"
 	for file in $(DIST_DIR)/$(IMAGE_NAME)-*; do \
-		if [[ $$file == *windows-*.exe ]]; then \
-			echo "Skipping compression for $$file (not supported by UPX)"; \
-		elif $(UPX_BIN) -t $$file >/dev/null 2>&1; then \
+		if $(UPX_BIN) -t $$file >/dev/null 2>&1; then \
 			echo "Skipping $$file (already packed by UPX)"; \
 		else \
 			echo "Compressing $$file"; \
@@ -115,6 +114,7 @@ build-local-docker:
 		--platform $(DOCKERPLATFORMS) \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
 		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+		--build-arg NODE_IMAGE=$(NODE_IMAGE) \
 		--build-arg BUILD_ENV=$(BUILD_ENV) \
 		--build-arg TAG=$(TAG) \
 		--build-arg BUILD_TIME=$(BUILD_TIME) \
@@ -139,6 +139,7 @@ build-remote-docker:
 		--platform $(DOCKERPLATFORMS) \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
 		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+		--build-arg NODE_IMAGE=$(NODE_IMAGE) \
 		--build-arg BUILD_ENV=$(BUILD_ENV) \
 		--build-arg TAG=$(TAG) \
 		--build-arg BUILD_TIME=$(BUILD_TIME) \

@@ -74,20 +74,32 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
 	mux.HandleFunc("/api/control/start", s.auth(s.apiStartAll))
-	// Static UI
-	fileServer := http.FileServer(http.FS(mustSub(staticFS, "static")))
-	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	// Static UI - Vue 3 SPA
+	distFS := mustSub(staticFS, "static/dist")
+	assetsServer := http.FileServer(http.FS(distFS))
+	mux.Handle("/assets/", assetsServer)
+	// Legacy static files (for login page CSS) with proper MIME types
+	legacyFS := mustSub(staticFS, "static")
+	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/static/")
+		// Set proper Content-Type for CSS files
+		if strings.HasSuffix(path, ".css") {
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		} else if strings.HasSuffix(path, ".js") {
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		}
+		http.ServeFileFS(w, r, legacyFS, path)
+	})
+	// SPA fallback - serve index.html for all routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
 		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
-		http.ServeFileFS(w, r, mustSub(staticFS, "static"), "index.html")
+		// Serve Vue SPA index.html
+		http.ServeFileFS(w, r, distFS, "index.html")
 	})
-	mux.HandleFunc("/tasks", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFileFS(w, r, mustSub(staticFS, "static"), "tasks.html")
-	}))
 	handler := logMiddleware(mux)
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	return srv.ListenAndServe()
@@ -530,7 +542,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 // static assets
 //
-//go:embed static/*
+//go:embed static/* static/dist/* static/dist/assets/*
 var staticFS embed.FS
 
 func mustSub(fsys embed.FS, dir string) fs.FS {
