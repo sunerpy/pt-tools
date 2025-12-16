@@ -27,6 +27,20 @@ jobs:
         with:
           go-version: 1.25.2
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Build Frontend
+        run: |
+          cd web/frontend
+          pnpm install --frozen-lockfile
+          pnpm build
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
