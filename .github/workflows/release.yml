@@ -11,8 +11,37 @@ on:
         required: false
 
 jobs:
+  check-trigger:
+    name: Check Release Trigger
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag_name: ${{ steps.check.outputs.tag_name }}
+    steps:
+      - name: Check trigger type
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.tag_name }}" ]]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "tag_name=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Print trigger info
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Should release: ${{ steps.check.outputs.should_release }}"
+          echo "Tag name: ${{ steps.check.outputs.tag_name }}"
+
   build:
     name: Build Binaries and Docker Images
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -54,10 +83,7 @@ jobs:
 
       - name: Build Compress And Package Binaries
         run: |
-          TAG=${{ github.event.inputs.tag_name }}
-          if [ -z "$TAG" ]; then
-            TAG=${{ github.ref_name }}
-          fi
+          TAG=${{ needs.check-trigger.outputs.tag_name }}
           make package-binaries TAG=$TAG
 
       - name: Upload Binaries
@@ -73,10 +99,7 @@ jobs:
 
       - name: Build and Push Docker Images
         run: |
-          TAG=${{ github.event.inputs.tag_name }}
-          if [ -z "$TAG" ]; then
-            TAG=${{ github.ref_name }}
-          fi
+          TAG=${{ needs.check-trigger.outputs.tag_name }}
           echo "Building and pushing Docker images with tag $TAG"
           make build-remote-docker TAG=$TAG
         env:
@@ -84,44 +107,105 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [check-trigger, build]
+    if: needs.check-trigger.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-trigger.outputs.tag_name }}
+
       - name: Download Binaries
         uses: actions/download-artifact@v4
         with:
           name: binaries
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
 
       - name: Organize Files
         run: |
-          mkdir -p artifacts
+          cd artifacts
           for file in *.tar.gz; do
-            new_file_name="artifacts/${file}"
-            mkdir temp && tar -xzf "$file" -C temp && rm -f ${file}
-            mv temp/pt-tools-* temp/pt-tools
-            # 重新打包并避免多余的 ./ 路径
-            (cd temp && tar -czf "../$new_file_name" *)
-            rm -rf temp
+            if [ -f "$file" ]; then
+              new_file_name="${file}"
+              mkdir -p temp && tar -xzf "$file" -C temp && rm -f "$file"
+              if ls temp/pt-tools-* 1> /dev/null 2>&1; then
+                mv temp/pt-tools-* temp/pt-tools
+              fi
+              # 重新打包并避免多余的 ./ 路径
+              (cd temp && tar -czf "../$new_file_name" *)
+              rm -rf temp
+            fi
           done
           # 处理 .zip 文件
           for file in *.zip; do
-            new_file_name="artifacts/${file}"
-            mkdir temp && unzip -q "$file" -d temp && rm -f ${file}
-            mv temp/pt-tools-* temp/pt-tools
-            # 重新打包为 .zip 文件
-            (cd temp && zip -rq "../$new_file_name" *)
-            rm -rf temp
+            if [ -f "$file" ]; then
+              new_file_name="${file}"
+              mkdir -p temp && unzip -q "$file" -d temp && rm -f "$file"
+              if ls temp/pt-tools-* 1> /dev/null 2>&1; then
+                mv temp/pt-tools-* temp/pt-tools
+              fi
+              # 重新打包为 .zip 文件
+              (cd temp && zip -rq "../$new_file_name" *)
+              rm -rf temp
+            fi
           done
 
-      - name: List Downloaded Files
-        run: ls -l artifacts/
+      - name: List organized files
+        run: ls -la artifacts/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG_NAME="${{ needs.check-trigger.outputs.tag_name }}"
+          VERSION=${TAG_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          cat > CHANGELOG.md << EOF
+          ## What's Changed
+
+          Release version ${TAG_NAME}
+
+          ### Installation
+
+          #### Using Docker (Recommended)
+          \`\`\`bash
+          docker pull sunerpy/pt-tools:${TAG_NAME}
+          \`\`\`
+
+          #### From Binary
+          Download the appropriate binary for your platform from the assets below.
+
+          | Platform | Architecture | File |
+          |----------|--------------|------|
+          | Linux | x86_64 | \`pt-tools-linux-amd64-${TAG_NAME}.tar.gz\` |
+          | Linux | aarch64 | \`pt-tools-linux-arm64-${TAG_NAME}.tar.gz\` |
+          | Windows | x86_64 | \`pt-tools-windows-amd64.exe-${TAG_NAME}.zip\` |
+          | Windows | aarch64 | \`pt-tools-windows-arm64.exe-${TAG_NAME}.zip\` |
+
+          ### Docker Images
+
+          - \`sunerpy/pt-tools:${TAG_NAME}\`
+          - \`sunerpy/pt-tools:latest\`
+
+          EOF
 
       - name: Create Release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v2
         with:
-          artifacts: artifacts/*
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          prerelease: false
+          tag_name: ${{ needs.check-trigger.outputs.tag_name }}
+          name: Release ${{ steps.changelog.outputs.version }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: ${{ contains(needs.check-trigger.outputs.tag_name, 'alpha') || contains(needs.check-trigger.outputs.tag_name, 'beta') || contains(needs.check-trigger.outputs.tag_name, 'rc') }}
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
