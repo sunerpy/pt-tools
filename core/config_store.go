@@ -373,6 +373,15 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	if len(sc.RSS) == 0 {
 		return errors.New("RSS 列表不能为空")
 	}
+	// 检查重复 RSS URL
+	urlSet := make(map[string]bool)
+	for i, r := range sc.RSS {
+		normalizedURL := strings.TrimSpace(strings.ToLower(r.URL))
+		if urlSet[normalizedURL] {
+			return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, r.URL)
+		}
+		urlSet[normalizedURL] = true
+	}
 	for i, r := range sc.RSS {
 		if strings.TrimSpace(r.Name) == "" {
 			return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 name 不能为空")

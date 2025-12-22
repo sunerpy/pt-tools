@@ -351,11 +351,15 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// 重新加载并触发任务重启
-		cfg, _ := s.store.Load()
-		if cfg != nil {
-			s.mgr.Reload(cfg)
-		}
+		// 异步重新加载并触发任务重启，让 API 快速返回
+		go func() {
+			cfg, _ := s.store.Load()
+			if cfg != nil {
+				global.GetSlogger().Info("[Config] 异步重载配置...")
+				s.mgr.Reload(cfg)
+				global.GetSlogger().Info("[Config] 配置重载完成")
+			}
+		}()
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -382,10 +386,15 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		cfg, _ := s.store.Load()
-		if cfg != nil {
-			s.mgr.Reload(cfg)
-		}
+		// 异步重新加载并触发任务重启，让 API 快速返回
+		go func() {
+			cfg, _ := s.store.Load()
+			if cfg != nil {
+				global.GetSlogger().Info("[Qbit] 异步重载配置...")
+				s.mgr.Reload(cfg)
+				global.GetSlogger().Info("[Qbit] 配置重载完成")
+			}
+		}()
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -408,14 +417,22 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "缺少站点名称", http.StatusBadRequest)
 			return
 		}
+		global.GetSlogger().Infof("[Site] 删除站点: name=%s", name)
 		if err := s.store.DeleteSite(name); err != nil {
+			global.GetSlogger().Errorf("[Site] 删除站点失败: name=%s, err=%v", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		cfg, _ := s.store.Load()
-		if cfg != nil {
-			s.mgr.Reload(cfg)
-		}
+		global.GetSlogger().Infof("[Site] 站点删除成功: name=%s", name)
+		// 异步重新加载并触发任务重启，让 API 快速返回
+		go func() {
+			cfg, _ := s.store.Load()
+			if cfg != nil {
+				global.GetSlogger().Info("[Site] 异步重载配置...")
+				s.mgr.Reload(cfg)
+				global.GetSlogger().Info("[Site] 配置重载完成")
+			}
+		}()
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -443,14 +460,25 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		global.GetSlogger().Infof("[RSS] 保存站点配置: site=%s, rss_count=%d", name, len(sc.RSS))
+		for i, r := range sc.RSS {
+			global.GetSlogger().Infof("[RSS] RSS[%d]: name=%s, url=%s", i, r.Name, r.URL)
+		}
 		if err := s.store.UpsertSiteWithRSS(sg, sc); err != nil {
+			global.GetSlogger().Errorf("[RSS] 保存站点配置失败: site=%s, err=%v", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		cfg, _ := s.store.Load()
-		if cfg != nil {
-			s.mgr.Reload(cfg)
-		}
+		global.GetSlogger().Infof("[RSS] 站点配置保存成功: site=%s", name)
+		// 异步重新加载并触发任务重启，让 API 快速返回
+		go func() {
+			cfg, _ := s.store.Load()
+			if cfg != nil {
+				global.GetSlogger().Info("[RSS] 异步重载配置...")
+				s.mgr.Reload(cfg)
+				global.GetSlogger().Info("[RSS] 配置重载完成")
+			}
+		}()
 		writeJSON(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
 		// 删除单条 RSS：通过查询参数 id 指定
@@ -464,21 +492,35 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "RSS id 非法", http.StatusBadRequest)
 			return
 		}
+		global.GetSlogger().Infof("[RSS] 删除 RSS: site=%s, rss_id=%d", name, rid)
 		// 查找站点
 		db := global.GlobalDB.DB
 		var site models.SiteSetting
 		if err := db.Where("name = ?", string(sg)).First(&site).Error; err != nil {
+			global.GetSlogger().Errorf("[RSS] 删除 RSS 失败，站点不存在: site=%s", name)
 			http.Error(w, "站点不存在", http.StatusBadRequest)
 			return
 		}
+		// 先查询要删除的 RSS 信息用于日志
+		var rssToDelete models.RSSSubscription
+		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).First(&rssToDelete).Error; err == nil {
+			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, rssToDelete.URL)
+		}
 		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{}).Error; err != nil {
+			global.GetSlogger().Errorf("[RSS] 删除 RSS 失败: site=%s, rss_id=%d, err=%v", name, rid, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		cfg, _ := s.store.Load()
-		if cfg != nil {
-			s.mgr.Reload(cfg)
-		}
+		global.GetSlogger().Infof("[RSS] RSS 删除成功: site=%s, rss_id=%d", name, rid)
+		// 异步重新加载并触发任务重启，让 API 快速返回
+		go func() {
+			cfg, _ := s.store.Load()
+			if cfg != nil {
+				global.GetSlogger().Info("[RSS] 异步重载配置...")
+				s.mgr.Reload(cfg)
+				global.GetSlogger().Info("[RSS] 配置重载完成")
+			}
+		}()
 		writeJSON(w, map[string]string{"status": "deleted"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)

@@ -68,17 +68,29 @@ async function addRss() {
     return
   }
 
+  // 检查重复 RSS URL
+  const normalizedUrl = newRss.url.trim().toLowerCase()
+  const isDuplicate = form.value.rss.some(r => r.url.trim().toLowerCase() === normalizedUrl)
+  if (isDuplicate) {
+    ElMessage.error('该 RSS 链接已存在，请勿重复添加')
+    return
+  }
+
   addingRss.value = true
+  console.log('[RSS] 开始添加 RSS:', newRss.name, newRss.url)
   try {
     form.value.rss.push({
       ...newRss,
-      id: Date.now().toString(),
       interval_minutes: Math.max(5, Math.min(1440, newRss.interval_minutes || 10))
     })
     await sitesApi.save(siteName.value, form.value)
+    // 重新加载数据以获取数据库中的真实 ID
+    form.value = await sitesApi.get(siteName.value)
     ElMessage.success('RSS 添加成功')
     rssDialogVisible.value = false
   } catch (e: unknown) {
+    // 添加失败时，移除刚添加的 RSS
+    form.value.rss.pop()
     ElMessage.error((e as Error).message || '添加失败')
   } finally {
     addingRss.value = false
@@ -96,13 +108,21 @@ async function deleteRss(index: number) {
       type: 'warning'
     })
 
+    console.log('[RSS] 开始删除 RSS:', rss.name, 'id:', rss.id)
     if (rss.id) {
       await sitesApi.deleteRss(siteName.value, rss.id)
+      console.log('[RSS] 删除 RSS 成功:', rss.name)
+      // 重新加载数据以确保数据一致性
+      form.value = await sitesApi.get(siteName.value)
+    } else {
+      // 没有 ID 的 RSS（未保存到数据库），直接从前端列表移除
+      console.log('[RSS] RSS 无 ID，仅从前端移除:', rss.name)
+      form.value.rss.splice(index, 1)
     }
-    form.value.rss.splice(index, 1)
     ElMessage.success('已删除')
   } catch (e: unknown) {
     if ((e as string) !== 'cancel') {
+      console.error('[RSS] 删除 RSS 失败:', e)
       ElMessage.error((e as Error).message || '删除失败')
     }
   }

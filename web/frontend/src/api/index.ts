@@ -66,7 +66,7 @@ export interface QbitSettings {
 }
 
 export interface RSSConfig {
-  id?: string
+  id?: number
   name: string
   url: string
   category: string
@@ -131,8 +131,8 @@ export const sitesApi = {
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
   delete: (name: string) => api.delete<void>(`/api/sites?name=${encodeURIComponent(name)}`),
-  deleteRss: (name: string, id: string) =>
-    api.delete<void>(`/api/sites/${name}?id=${encodeURIComponent(id)}`)
+  deleteRss: (name: string, id: number) =>
+    api.delete<void>(`/api/sites/${name}?id=${encodeURIComponent(id.toString())}`)
 }
 
 export const tasksApi = {
