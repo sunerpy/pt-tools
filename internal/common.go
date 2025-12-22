@@ -280,27 +280,32 @@ func processSingleTorrent(
 			return fmt.Errorf("查询种子信息失败: %w", err)
 		}
 		if torrent == nil {
+			sLogger().Warnf("数据库不存在记录，删除孤立种子文件: %s, hash: %s", filePath, torrentHash)
 			if err = os.Remove(filePath); err != nil {
-				sLogger().Errorf("删除过期种子失败: %s, %v", filePath, err)
-				return fmt.Errorf("删除过期种子失败: %w", err)
+				sLogger().Errorf("删除孤立种子失败: %s, %v", filePath, err)
+				return fmt.Errorf("删除孤立种子失败: %w", err)
 			}
-			sLogger().Infof("数据库不存在记录,删除过期种子成功: %s", filePath)
 			return nil
 		}
-		// 0. 处理过期种子（含保留时长）
-		if torrent.GetExpired() {
-			sLogger().Warnf("种子免费期已过期，标记并删除: %s", filePath)
-			// 更新数据库标记过期
+		isExpired := torrent.GetExpired()
+		sLogger().Infof("[过期检查] 种子: %s, hash: %s, FreeEndTime: %v, IsExpired(DB): %v, GetExpired(): %v",
+			torrent.Title, torrentHash,
+			torrent.FreeEndTime, torrent.IsExpired, isExpired)
+		if isExpired {
+			sLogger().Warnf("[过期] 种子免费期已过期，标记并删除: %s, FreeEndTime: %v", filePath, torrent.FreeEndTime)
 			if err = tx.Model(&models.TorrentInfo{}).
 				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
-				Update("is_expired", true).Error; err != nil {
+				Updates(map[string]any{
+					"is_expired": true,
+					"last_error": "种子已过期，未推送",
+				}).Error; err != nil {
 				return fmt.Errorf("标记过期状态失败: %w", err)
 			}
-			sLogger().Warnf("种子已过免费期，删除本地文件: %s", filePath)
 			if err = os.Remove(filePath); err != nil {
-				sLogger().Errorf("删除过期种子失败: %s, %v", filePath, err)
+				sLogger().Errorf("[过期] 删除过期种子失败: %s, %v", filePath, err)
+			} else {
+				sLogger().Infof("[过期] 已删除过期种子: %s", filePath)
 			}
-			// 直接返回不进行后续处理
 			return nil
 		}
 		// 保留时长: 超过 retain_hours 且未推送也删除
