@@ -109,12 +109,14 @@ function getRssCount(site: SiteConfig): number {
       <template #header>
         <div class="card-header">
           <span>站点与 RSS</span>
-          <el-button type="primary" :icon="'Plus'" @click="addSite">新增站点</el-button>
+          <el-button type="primary" :icon="'Plus'" @click="addSite" disabled>新增站点</el-button>
         </div>
       </template>
 
       <el-table :data="Object.entries(sites)" style="width: 100%">
-        <el-table-column label="站点" width="150">
+        <el-table-column type="index" label="序号" width="60" align="center" />
+
+        <el-table-column label="站点" min-width="120">
           <template #default="{ row }">
             <div class="site-name">
               <el-icon><Connection /></el-icon>
@@ -123,7 +125,7 @@ function getRssCount(site: SiteConfig): number {
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" min-width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row[1].enabled ? 'success' : 'info'" size="small">
               {{ row[1].enabled ? '已启用' : '未启用' }}
@@ -131,7 +133,7 @@ function getRssCount(site: SiteConfig): number {
           </template>
         </el-table-column>
 
-        <el-table-column label="认证方式" width="120">
+        <el-table-column label="认证方式" min-width="100" align="center">
           <template #default="{ row }">
             <el-tag type="warning" size="small" effect="plain">
               {{ row[1].auth_method === 'api_key' ? 'API Key' : 'Cookie' }}
@@ -139,7 +141,7 @@ function getRssCount(site: SiteConfig): number {
           </template>
         </el-table-column>
 
-        <el-table-column label="RSS 数量" width="100">
+        <el-table-column label="RSS 数量" min-width="100" align="center">
           <template #default="{ row }">
             <el-badge
               :value="getRssCount(row[1])"
@@ -148,7 +150,7 @@ function getRssCount(site: SiteConfig): number {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" min-width="200">
+        <el-table-column label="操作" min-width="220" align="center">
           <template #default="{ row }">
             <el-space>
               <el-switch

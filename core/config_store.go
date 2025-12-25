@@ -64,7 +64,8 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 		}
 		for _, sitem := range sites {
 			sg := models.SiteGroup(strings.ToLower(sitem.Name))
-			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl}
+			// 初始化 RSS 为空数组，确保 JSON 序列化时返回 [] 而不是 null
+			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
 				return e
@@ -473,7 +474,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
-		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl}
+		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, RSS: []models.RSSConfig{}}
 		var rss []models.RSSSubscription
 		if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 			return nil, err
@@ -500,7 +501,8 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	if err := s.db.DB.Where("name = ?", string(name)).First(&ss).Error; err != nil {
 		return models.SiteConfig{}, err
 	}
-	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl}
+	// 初始化 RSS 为空数组，确保 JSON 序列化时返回 [] 而不是 null
+	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, RSS: []models.RSSConfig{}}
 	var rss []models.RSSSubscription
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err
