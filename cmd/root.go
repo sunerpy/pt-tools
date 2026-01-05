@@ -23,7 +23,11 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/pt-tools/core"
+
+	// Import site definitions to register them via init()
+	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
 )
 
 // rootCmd represents the base command when called without any subcommands

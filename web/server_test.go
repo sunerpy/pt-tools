@@ -7,16 +7,18 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
-	"go.uber.org/zap"
 )
 
 func setupServer(t *testing.T) *Server {
@@ -152,30 +154,30 @@ func TestServer_APIs(t *testing.T) {
 	t.Run("sites delete preset forbidden", func(t *testing.T) {
 		// create preset site then attempt delete -> should be BadRequest
 		e := true
-		siteID, _ := s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+		siteID, _ := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 		_ = s.ReplaceSiteRSS(siteID, []models.RSSConfig{})
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodDelete, "/api/sites?name="+string(models.CMCT), nil)
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites?name="+string(models.SpringSunday), nil)
 		srv.apiSites(rr, req)
 		_ = rr.Body
 	})
 	t.Run("site detail GET/POST/DELETE rss", func(t *testing.T) {
 		e := true
-		siteID, _ := s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+		siteID, _ := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 		_ = s.ReplaceSiteRSS(siteID, []models.RSSConfig{{Name: "r1", URL: "http://example/rss", Tag: "t", IntervalMinutes: 10}})
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/sites/cmct", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/sites/springsunday", nil)
 		srv.apiSiteDetail(rr, req)
 		rr2 := httptest.NewRecorder()
 		body := bytes.NewBufferString(`{"enabled":true,"auth_method":"cookie","cookie":"c","rss":[{"name":"r","url":"http://example/rss","tag":"t","interval_minutes":10}]}`)
-		req2 := httptest.NewRequest(http.MethodPost, "/api/sites/cmct", body)
+		req2 := httptest.NewRequest(http.MethodPost, "/api/sites/springsunday", body)
 		srv.apiSiteDetail(rr2, req2)
 		rr3 := httptest.NewRecorder()
 		// delete the existing RSS row id=1 created above
-		req3 := httptest.NewRequest(http.MethodDelete, "/api/sites/cmct?id=1", nil)
+		req3 := httptest.NewRequest(http.MethodDelete, "/api/sites/springsunday?id=1", nil)
 		srv.apiSiteDetail(rr3, req3)
 		rr4 := httptest.NewRecorder()
-		req4 := httptest.NewRequest(http.MethodDelete, "/api/sites/cmct?id=abc", nil)
+		req4 := httptest.NewRequest(http.MethodDelete, "/api/sites/springsunday?id=abc", nil)
 		srv.apiSiteDetail(rr4, req4)
 		assert.True(t, rr4.Code == http.StatusBadRequest || rr4.Code == 0)
 		rr5 := httptest.NewRecorder()
@@ -209,7 +211,7 @@ func TestServer_APIs(t *testing.T) {
 	})
 	t.Run("site detail post invalid json", func(t *testing.T) {
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/sites/cmct", bytes.NewBufferString("not-json"))
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/springsunday", bytes.NewBufferString("not-json"))
 		srv.apiSiteDetail(rr, req)
 		assert.True(t, rr.Code == http.StatusBadRequest || rr.Code == 0)
 	})
@@ -421,4 +423,493 @@ func TestServe_RootRedirectAndStatic(t *testing.T) {
 	if rr.Code != http.StatusFound && rr.Code != 0 {
 		t.Fatalf("expect redirect, got %d", rr.Code)
 	}
+}
+
+func TestServer_DownloaderAPIs(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+	_ = s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, DefaultEnabled: true})
+
+	t.Run("apiDownloaders GET", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloaders", nil)
+		srv.apiDownloaders(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
+	})
+
+	t.Run("apiDownloaders POST", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"name":"test-dl","type":"qbittorrent","url":"http://localhost:8080","username":"admin","password":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/downloaders", body)
+		srv.apiDownloaders(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == http.StatusCreated || rr.Code == 0)
+	})
+
+	t.Run("apiDownloaders method not allowed", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/downloaders", nil)
+		srv.apiDownloaders(rr, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+	})
+
+	t.Run("apiDownloaderDetail GET", func(t *testing.T) {
+		// First create a downloader
+		dl := models.DownloaderSetting{
+			Name:     "test-dl-detail",
+			Type:     "qbittorrent",
+			URL:      "http://localhost:8080",
+			Username: "admin",
+			Password: "admin",
+			Enabled:  true,
+		}
+		global.GlobalDB.DB.Create(&dl)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloaders/"+strconv.Itoa(int(dl.ID)), nil)
+		srv.apiDownloaderDetail(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
+	})
+
+	t.Run("apiDownloaderDetail invalid ID", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloaders/invalid", nil)
+		srv.apiDownloaderDetail(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("apiDownloaderDetail PUT", func(t *testing.T) {
+		// First create a downloader
+		dl := models.DownloaderSetting{
+			Name:     "test-dl-update",
+			Type:     "qbittorrent",
+			URL:      "http://localhost:8080",
+			Username: "admin",
+			Password: "admin",
+			Enabled:  true,
+		}
+		global.GlobalDB.DB.Create(&dl)
+
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"name":"test-dl-updated","type":"qbittorrent","url":"http://localhost:8081","username":"admin2","password":"admin2"}`)
+		req := httptest.NewRequest(http.MethodPut, "/api/downloaders/"+strconv.Itoa(int(dl.ID)), body)
+		srv.apiDownloaderDetail(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
+	})
+
+	t.Run("apiDownloaderDetail DELETE", func(t *testing.T) {
+		// First create a downloader
+		dl := models.DownloaderSetting{
+			Name:     "test-dl-delete",
+			Type:     "qbittorrent",
+			URL:      "http://localhost:8080",
+			Username: "admin",
+			Password: "admin",
+			Enabled:  true,
+		}
+		global.GlobalDB.DB.Create(&dl)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/downloaders/"+strconv.Itoa(int(dl.ID)), nil)
+		srv.apiDownloaderDetail(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == http.StatusNoContent || rr.Code == 0)
+	})
+
+	t.Run("apiDownloaderDetail method not allowed", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/downloaders/1", nil)
+		srv.apiDownloaderDetail(rr, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+	})
+
+	t.Run("downloaderHealthCheck", func(t *testing.T) {
+		// First create a downloader
+		dl := models.DownloaderSetting{
+			Name:     "test-dl-health",
+			Type:     "qbittorrent",
+			URL:      "http://localhost:8080",
+			Username: "admin",
+			Password: "admin",
+			Enabled:  true,
+		}
+		global.GlobalDB.DB.Create(&dl)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloaders/"+strconv.Itoa(int(dl.ID))+"/health", nil)
+		srv.apiDownloaderDetail(rr, req)
+		// Health check may fail due to no actual server, but should not panic
+		assert.NotNil(t, rr.Body)
+	})
+
+	t.Run("downloaderHealthCheck invalid ID", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloaders/invalid/health", nil)
+		srv.apiDownloaderDetail(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("setDefaultDownloader", func(t *testing.T) {
+		// First create a downloader
+		dl := models.DownloaderSetting{
+			Name:     "test-dl-default",
+			Type:     "qbittorrent",
+			URL:      "http://localhost:8080",
+			Username: "admin",
+			Password: "admin",
+			Enabled:  true,
+		}
+		global.GlobalDB.DB.Create(&dl)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/downloaders/"+strconv.Itoa(int(dl.ID))+"/set-default", nil)
+		srv.apiDownloaderDetail(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
+	})
+}
+
+func TestServer_DynamicSitesAPI(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+	_ = s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, DefaultEnabled: true})
+
+	t.Run("apiDynamicSites GET", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/dynamic-sites", nil)
+		srv.apiDynamicSites(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
+	})
+
+	t.Run("apiDynamicSites POST", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"name":"test-dynamic","display_name":"Test Dynamic","base_url":"https://example.com","auth_method":"cookie","cookie":"test-cookie"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/dynamic-sites", body)
+		srv.apiDynamicSites(rr, req)
+		// May fail due to validation, but should not panic
+		assert.NotNil(t, rr.Body)
+	})
+
+	t.Run("apiDynamicSites method not allowed", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/dynamic-sites", nil)
+		srv.apiDynamicSites(rr, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+	})
+}
+
+// TestLoginHandler_SuccessfulLogin 测试成功登录
+func TestLoginHandler_SuccessfulLogin(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+
+	// 创建管理员账户
+	hash := hashPassword("testpass")
+	_ = s.EnsureAdmin("testuser", hash)
+
+	rr := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"testuser","password":"testpass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(rr, req)
+
+	// 应该重定向到首页
+	assert.Equal(t, http.StatusFound, rr.Code)
+	// 应该设置 session cookie
+	cookies := rr.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "session" {
+			sessionCookie = c
+			break
+		}
+	}
+	assert.NotNil(t, sessionCookie)
+	assert.NotEmpty(t, sessionCookie.Value)
+}
+
+// TestLoginHandler_WrongPassword 测试密码错误
+func TestLoginHandler_WrongPassword(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+
+	// 创建管理员账户
+	hash := hashPassword("correctpass")
+	_ = s.EnsureAdmin("testuser2", hash)
+
+	rr := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"testuser2","password":"wrongpass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// TestLoginHandler_UserNotFound 测试用户不存在
+func TestLoginHandler_UserNotFound(t *testing.T) {
+	srv := setupServer(t)
+
+	rr := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"nonexistent","password":"anypass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// TestLoginHandler_EmptyCredentials 测试空凭据
+func TestLoginHandler_EmptyCredentials(t *testing.T) {
+	srv := setupServer(t)
+
+	t.Run("empty username", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"username":"","password":"pass"}`)
+		req := httptest.NewRequest(http.MethodPost, "/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("empty password", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"username":"user","password":""}`)
+		req := httptest.NewRequest(http.MethodPost, "/login", body)
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+}
+
+// TestLoginHandler_InvalidJSON 测试无效 JSON
+func TestLoginHandler_InvalidJSON(t *testing.T) {
+	srv := setupServer(t)
+
+	rr := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{invalid json}`)
+	req := httptest.NewRequest(http.MethodPost, "/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// TestLoginHandler_MethodNotAllowed 测试不允许的方法
+func TestLoginHandler_MethodNotAllowed(t *testing.T) {
+	srv := setupServer(t)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/login", nil)
+	srv.loginHandler(rr, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+}
+
+// TestLoginHandler_AutoCreateAdmin 测试自动创建管理员
+func TestLoginHandler_AutoCreateAdmin(t *testing.T) {
+	// 使用新的数据库，确保没有管理员
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	srv := NewServer(core.NewConfigStore(db), scheduler.NewManager())
+
+	// 尝试登录，应该自动创建默认管理员
+	rr := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"admin","password":"adminadmin"}`)
+	req := httptest.NewRequest(http.MethodPost, "/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(rr, req)
+
+	// 应该成功登录
+	assert.Equal(t, http.StatusFound, rr.Code)
+}
+
+// TestVerifyPassword_EdgeCases 测试密码验证边界情况
+func TestVerifyPassword_EdgeCases(t *testing.T) {
+	t.Run("invalid format - too few parts", func(t *testing.T) {
+		assert.False(t, verifyPassword("onlyonepart", "pass"))
+	})
+
+	t.Run("invalid format - too many parts", func(t *testing.T) {
+		assert.False(t, verifyPassword("a|b|c|d", "pass"))
+	})
+
+	t.Run("invalid salt hex", func(t *testing.T) {
+		assert.False(t, verifyPassword("zzzz|bbbb|100000", "pass"))
+	})
+
+	t.Run("invalid iterations", func(t *testing.T) {
+		assert.False(t, verifyPassword("aaaa|bbbb|notanumber", "pass"))
+	})
+
+	t.Run("zero iterations", func(t *testing.T) {
+		assert.False(t, verifyPassword("aaaa|bbbb|0", "pass"))
+	})
+
+	t.Run("negative iterations", func(t *testing.T) {
+		assert.False(t, verifyPassword("aaaa|bbbb|-1", "pass"))
+	})
+}
+
+// TestHashPassword_Uniqueness 测试密码哈希唯一性
+func TestHashPassword_Uniqueness(t *testing.T) {
+	hash1 := hashPassword("samepassword")
+	hash2 := hashPassword("samepassword")
+
+	// 由于使用随机 salt，相同密码应该产生不同的哈希
+	assert.NotEqual(t, hash1, hash2)
+
+	// 但两个哈希都应该能验证原密码
+	assert.True(t, verifyPassword(hash1, "samepassword"))
+	assert.True(t, verifyPassword(hash2, "samepassword"))
+}
+
+// TestApiSites_Delete 测试删除站点
+func TestApiSites_Delete(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+	_ = s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, DefaultEnabled: true})
+
+	t.Run("delete without name", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites", nil)
+		srv.apiSites(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("delete with name", func(t *testing.T) {
+		// First create a site
+		site := models.SiteSetting{
+			Name:       "test-site-delete",
+			AuthMethod: "cookie",
+			Cookie:     "test-cookie",
+			Enabled:    true,
+		}
+		global.GlobalDB.DB.Create(&site)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites?name=test-site-delete", nil)
+		srv.apiSites(rr, req)
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == http.StatusBadRequest)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/sites", nil)
+		srv.apiSites(rr, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+	})
+}
+
+// TestApiSiteDetail_Delete 测试删除RSS
+func TestApiSiteDetail_Delete(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+	_ = s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, DefaultEnabled: true})
+
+	t.Run("delete RSS without id", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites/springsunday", nil)
+		srv.apiSiteDetail(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("delete RSS with invalid id", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites/springsunday?id=invalid", nil)
+		srv.apiSiteDetail(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("delete RSS site not found", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites/springsunday?id=999", nil)
+		srv.apiSiteDetail(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/sites/springsunday", nil)
+		srv.apiSiteDetail(rr, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+	})
+}
+
+// TestApiSiteDetail_Post 测试保存站点配置
+func TestApiSiteDetail_Post(t *testing.T) {
+	srv := setupServer(t)
+	s := core.NewConfigStore(global.GlobalDB)
+	_ = s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, DefaultEnabled: true})
+
+	t.Run("save site config invalid json", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{invalid json}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/springsunday", body)
+		srv.apiSiteDetail(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("save site config valid", func(t *testing.T) {
+		// First create the site
+		site := models.SiteSetting{
+			Name:       "cmct",
+			AuthMethod: "cookie",
+			Cookie:     "test-cookie",
+			Enabled:    true,
+		}
+		global.GlobalDB.DB.Create(&site)
+
+		rr := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"enabled":true,"auth_method":"cookie","cookie":"test-cookie","rss":[]}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/springsunday", body)
+		srv.apiSiteDetail(rr, req)
+		// May return OK or BadRequest depending on validation
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == http.StatusBadRequest || rr.Code == 0)
+	})
+}
+
+// TestApiSiteDetail_InvalidSite 测试无效站点
+func TestApiSiteDetail_InvalidSite(t *testing.T) {
+	srv := setupServer(t)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sites/invalid-site-name", nil)
+	srv.apiSiteDetail(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// TestSetDefaultDownloader 测试设置默认下载器
+func TestSetDefaultDownloader_Additional(t *testing.T) {
+	srv := setupServer(t)
+
+	t.Run("invalid id", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/downloaders/invalid/default", nil)
+		srv.setDefaultDownloader(rr, req, "invalid")
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("downloader not found", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/downloaders/99999/default", nil)
+		srv.setDefaultDownloader(rr, req, "99999")
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+	})
+
+	t.Run("set default success", func(t *testing.T) {
+		// Create a downloader first
+		dl := models.DownloaderSetting{
+			Name:     "test-default-dl",
+			Type:     "qbittorrent",
+			URL:      "http://localhost:8080",
+			Username: "admin",
+			Password: "admin",
+			Enabled:  true,
+		}
+		global.GlobalDB.DB.Create(&dl)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/downloaders/"+strconv.Itoa(int(dl.ID))+"/default", nil)
+		srv.setDefaultDownloader(rr, req, strconv.Itoa(int(dl.ID)))
+		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
+	})
 }

@@ -6,19 +6,21 @@ type SiteGroup string
 
 // 允许的值
 const (
-	CMCT  SiteGroup = "cmct"
-	HDSKY SiteGroup = "hdsky"
-	MTEAM SiteGroup = "mteam"
+	SpringSunday SiteGroup = "springsunday"
+	HDSKY        SiteGroup = "hdsky"
+	MTEAM        SiteGroup = "mteam"
+	HDDOLBY      SiteGroup = "hddolby"
 )
 
 const (
-	DefaultAPIUrlMTeam = "https://api.m-team.cc/api"
+	DefaultAPIUrlMTeam = "https://api.m-team.cc"
 )
 
 var allowedGroups = map[SiteGroup]struct{}{
-	CMCT:  {},
-	HDSKY: {},
-	MTEAM: {},
+	SpringSunday: {},
+	HDSKY:        {},
+	MTEAM:        {},
+	HDDOLBY:      {},
 }
 
 func ValidateSiteName(value string) (SiteGroup, error) {

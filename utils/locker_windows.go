@@ -1,7 +1,6 @@
 //go:build windows
 // +build windows
 
-//
 package utils
 
 import (

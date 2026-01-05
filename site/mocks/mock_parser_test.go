@@ -6,6 +6,7 @@ import (
 	"github.com/gocolly/colly"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
+
 	"github.com/sunerpy/pt-tools/models"
 )
 

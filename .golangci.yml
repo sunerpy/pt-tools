@@ -1,0 +1,122 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/sunerpy/pt-tools
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - bodyclose
+    - noctx  # TODO: 需要重构所有 HTTP 请求使用 context，暂时禁用
+    # - prealloc  # 建议性优化，暂时禁用
+
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+
+    govet:
+      disable:
+        - fieldalignment
+      enable:
+        - shadow
+
+    misspell:
+      locale: US
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Exclude some linters from running on tests files
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+          - noctx
+
+      # Exclude unused in test files (test helpers/mocks)
+      - path: _test\.go
+        linters:
+          - unused
+
+      # Exclude staticcheck SA1019 (deprecated) in test files
+      - path: _test\.go
+        text: "SA1019"
+        linters:
+          - staticcheck
+
+      # Exclude staticcheck SA1029 (context key type) in test files
+      - path: _test\.go
+        text: "SA1029"
+        linters:
+          - staticcheck
+
+      # Exclude staticcheck S1008 (simplify return) in test files
+      - path: _test\.go
+        text: "S1008"
+        linters:
+          - staticcheck
+
+      # Exclude staticcheck ST1023 (omit type) - style preference
+      - text: "ST1023"
+        linters:
+          - staticcheck
+
+      # Exclude misspell in test function names (Cancelled is common)
+      - path: _test\.go
+        linters:
+          - misspell
+
+      # Exclude example directory
+      - path: examples/
+        linters:
+          - errcheck
+
+      # Exclude vendor directory
+      - path: vendor/
+        linters:
+          - all
+
+      # Exclude staticcheck SA9003 (empty branch) - sometimes intentional
+      - text: "SA9003"
+        linters:
+          - staticcheck
+
+      # Exclude staticcheck ST1005 (error strings should not be capitalized)
+      # Chinese error messages are intentional
+      - text: "ST1005"
+        linters:
+          - staticcheck
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10

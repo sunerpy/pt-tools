@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -74,6 +75,46 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
 	mux.HandleFunc("/api/control/start", s.auth(s.apiStartAll))
+	// Downloader management APIs
+	mux.HandleFunc("/api/downloaders", s.auth(s.apiDownloaders))
+	mux.HandleFunc("/api/downloaders/all-directories", s.auth(s.apiAllDownloaderDirectories))
+	mux.HandleFunc("/api/downloaders/", s.auth(s.apiDownloaderRouter))
+	// Site management APIs
+	mux.HandleFunc("/api/sites/validate", s.auth(s.apiSiteValidate))
+	mux.HandleFunc("/api/sites/dynamic", s.auth(s.apiDynamicSites))
+	mux.HandleFunc("/api/sites/templates", s.auth(s.apiSiteTemplates))
+	mux.HandleFunc("/api/sites/templates/import", s.auth(s.apiSiteTemplateImport))
+	mux.HandleFunc("/api/sites/templates/", s.auth(s.apiSiteTemplateExport))
+	// Filter rules API
+	mux.HandleFunc("/api/filter-rules", s.auth(s.apiFilterRules))
+	mux.HandleFunc("/api/filter-rules/", s.auth(s.apiFilterRuleDetail))
+	// RSS-Filter association API
+	mux.HandleFunc("/api/rss/", s.auth(s.apiRSSFilterAssociation))
+	// Log level API
+	mux.HandleFunc("/api/log-level", s.auth(s.apiLogLevel))
+	// User info v2 APIs
+	mux.HandleFunc("/api/v2/userinfo/aggregated", s.auth(s.apiUserInfoAggregated))
+	mux.HandleFunc("/api/v2/userinfo/sites", s.auth(s.apiUserInfoSites))
+	mux.HandleFunc("/api/v2/userinfo/sites/", s.auth(s.apiUserInfoSiteDetail))
+	mux.HandleFunc("/api/v2/userinfo/sync", s.auth(s.apiUserInfoSync))
+	mux.HandleFunc("/api/v2/userinfo/registered", s.auth(s.apiUserInfoRegisteredSites))
+	mux.HandleFunc("/api/v2/userinfo/cache/clear", s.auth(s.apiUserInfoClearCache))
+	// Site levels API
+	mux.HandleFunc("/api/v2/sites/", s.auth(s.apiSiteLevelsRouter))
+	// Site favicon API (with caching)
+	mux.HandleFunc("/api/favicons", s.auth(s.apiFaviconList))
+	mux.HandleFunc("/api/favicon/", s.auth(s.apiFavicon))
+	// Search v2 APIs
+	mux.HandleFunc("/api/v2/search/multi", s.auth(s.apiMultiSiteSearch))
+	mux.HandleFunc("/api/v2/search/sites", s.auth(s.apiSearchSites))
+	mux.HandleFunc("/api/v2/search/cache/clear", s.auth(s.apiSearchCacheClear))
+	mux.HandleFunc("/api/v2/search/cache/stats", s.auth(s.apiSearchCacheStats))
+	// Torrent push v2 APIs
+	mux.HandleFunc("/api/v2/torrents/push", s.auth(s.apiTorrentPush))
+	mux.HandleFunc("/api/v2/torrents/batch-push", s.auth(s.apiTorrentBatchPush))
+	mux.HandleFunc("/api/v2/torrents/batch-download", s.auth(s.apiBatchTorrentDownload))
+	// Torrent download proxy API
+	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
 	// Static UI - Vue 3 SPA
 	distFS := mustSub(staticFS, "static/dist")
 	assetsServer := http.FileServer(http.FS(distFS))
@@ -135,7 +176,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		s.tpl.ExecuteTemplate(w, "login", nil)
+		_ = s.tpl.ExecuteTemplate(w, "login", nil)
 	case http.MethodPost:
 		user, pass, err := readLogin(r)
 		if err != nil {
@@ -174,6 +215,17 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		s.sessions[sid] = u.Username
 		cookie := &http.Cookie{Name: "session", Value: sid, HttpOnly: true, SameSite: http.SameSiteLaxMode, Path: "/"}
 		http.SetCookie(w, cookie)
+
+		// 登录成功后异步触发用户数据同步
+		if userInfoService != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				results, errors := userInfoService.FetchAndSaveAllWithConcurrency(ctx, 3, 30*time.Second)
+				global.GetSlogger().Infof("[Login] Async sync completed: %d success, %d failed", len(results), len(errors))
+			}()
+		}
+
 		http.Redirect(w, r, "/", http.StatusFound)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -426,6 +478,10 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 		global.GetSlogger().Infof("[Site] 站点删除成功: name=%s", name)
 		// 异步重新加载并触发任务重启，让 API 快速返回
 		go func() {
+			// 刷新 UserInfoService 站点注册
+			if err := RefreshSiteRegistrations(s.store); err != nil {
+				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
+			}
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[Site] 异步重载配置...")
@@ -472,6 +528,10 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		global.GetSlogger().Infof("[RSS] 站点配置保存成功: site=%s", name)
 		// 异步重新加载并触发任务重启，让 API 快速返回
 		go func() {
+			// 刷新 UserInfoService 站点注册
+			if err := RefreshSiteRegistrations(s.store); err != nil {
+				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
+			}
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[RSS] 异步重载配置...")

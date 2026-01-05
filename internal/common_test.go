@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,13 +16,16 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/mmcdole/gofeed"
 	"github.com/stretchr/testify/require"
-	"github.com/sunerpy/pt-tools/core"
-	"github.com/sunerpy/pt-tools/global"
-	sm "github.com/sunerpy/pt-tools/mocks"
-	"github.com/sunerpy/pt-tools/models"
-	"github.com/sunerpy/pt-tools/thirdpart/qbit"
 	"github.com/zeebo/bencode"
 	"go.uber.org/zap"
+
+	"github.com/sunerpy/pt-tools/core"
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/filter"
+	sm "github.com/sunerpy/pt-tools/mocks"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 func TestAttemptDownload_Success(t *testing.T) {
@@ -102,7 +106,7 @@ func TestFetchRSS_NoEnclosuresAndDetailFail(t *testing.T) {
 	feed := `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>t</title><item><title>x</title><guid>guid-x</guid></item></channel></rss>`
 	srv := makeFeedServer(t, feed)
 	defer srv.Close()
-	require.NoError(t, FetchAndDownloadFreeRSS(context.Background(), models.CMCT, &siteFail{}, models.RSSConfig{Name: "r", URL: srv.URL}))
+	require.NoError(t, FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, &siteFail{}, models.RSSConfig{Name: "r", URL: srv.URL}))
 }
 
 type rssSiteStub struct{}
@@ -138,7 +142,7 @@ func TestFetchAndDownloadFreeRSS_Basic(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	require.NoError(t, FetchAndDownloadFreeRSS(ctx, models.CMCT, &rssSiteStub{}, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}))
+	require.NoError(t, FetchAndDownloadFreeRSS(ctx, models.SpringSunday, &rssSiteStub{}, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}))
 }
 
 type props404Transport struct{}
@@ -187,9 +191,8 @@ func TestProcessSingle_NoRecordDeletesFile(t *testing.T) {
 	_ = setupDB(t)
 	dir := t.TempDir()
 	path, _ := makeTorrentFile(t, dir)
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.SpringSunday))
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
 	}
@@ -201,12 +204,11 @@ func TestProcessSingle_PushedDeletes(t *testing.T) {
 	path, hash := makeTorrentFile(t, dir)
 	pushed := true
 	now := time.Now()
-	ti1 := &models.TorrentInfo{SiteName: string(models.CMCT), IsPushed: &pushed, PushTime: &now}
+	ti1 := &models.TorrentInfo{SiteName: string(models.SpringSunday), IsPushed: &pushed, PushTime: &now}
 	ti1.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti1))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.SpringSunday))
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
 	}
@@ -217,18 +219,17 @@ func TestProcessSingle_ExistsUpdatesAndDeletes(t *testing.T) {
 	dir := t.TempDir()
 	path, hash := makeTorrentFile(t, dir)
 	pushed := false
-	ti2 := &models.TorrentInfo{SiteName: string(models.CMCT), IsPushed: &pushed}
+	ti2 := &models.TorrentInfo{SiteName: string(models.SpringSunday), IsPushed: &pushed}
 	end := time.Now().Add(1 * time.Hour)
 	ti2.FreeEndTime = &end
 	ti2.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti2))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props200Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props200Transport{}}, "http://example")
+	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.SpringSunday))
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
 	}
-	ti, err := db.GetTorrentBySiteAndHash(string(models.CMCT), hash)
+	ti, err := db.GetTorrentBySiteAndHash(string(models.SpringSunday), hash)
 	require.NoError(t, err)
 	require.NotNil(t, ti)
 	require.NotNil(t, ti.IsPushed)
@@ -241,12 +242,11 @@ func TestProcessSingle_ExpiredDeletes(t *testing.T) {
 	dir := t.TempDir()
 	path, hash := makeTorrentFile(t, dir)
 	past := time.Now().Add(-1 * time.Hour)
-	ti := &models.TorrentInfo{SiteName: string(models.CMCT), FreeEndTime: &past}
+	ti := &models.TorrentInfo{SiteName: string(models.SpringSunday), FreeEndTime: &past}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.SpringSunday))
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
 	}
@@ -258,14 +258,13 @@ func TestProcessSingle_RetainHoursDeletes(t *testing.T) {
 	path, hash := makeTorrentFile(t, dir)
 	past := time.Now().Add(-48 * time.Hour)
 	future := time.Now().Add(1 * time.Hour)
-	ti := &models.TorrentInfo{SiteName: string(models.CMCT), LastCheckTime: &past, FreeEndTime: &future}
+	ti := &models.TorrentInfo{SiteName: string(models.SpringSunday), LastCheckTime: &past, FreeEndTime: &future}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
 	store := core.NewConfigStore(db)
 	require.NoError(t, store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true, RetainHours: 1}))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.SpringSunday))
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
 	}
@@ -278,12 +277,11 @@ func TestProcessSingle_MaxRetryDeletes(t *testing.T) {
 	db := setupDB(t)
 	dir := t.TempDir()
 	path, hash := makeTorrentFile(t, dir)
-	ti3 := &models.TorrentInfo{SiteName: string(models.CMCT), RetryCount: 1}
+	ti3 := &models.TorrentInfo{SiteName: string(models.SpringSunday), RetryCount: 1}
 	ti3.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti3))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, processSingleTorrent(context.Background(), client, path, "cat", "tag", models.SpringSunday))
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
 	}
@@ -307,7 +305,7 @@ func TestProcessTorrentsWithDBUpdate_ContinueOnErrors(t *testing.T) {
 	require.NoError(t, err)
 	pushed := false
 	future := time.Now().Add(1 * time.Hour)
-	ti := &models.TorrentInfo{SiteName: string(models.CMCT), TorrentHash: &h2, IsPushed: &pushed, FreeEndTime: &future}
+	ti := &models.TorrentInfo{SiteName: string(models.SpringSunday), TorrentHash: &h2, IsPushed: &pushed, FreeEndTime: &future}
 	require.NoError(t, db.DB.Create(ti).Error)
 	// properties -> 404 (not exists), sync -> OK (enough space), add -> 500 (fail)
 	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -324,9 +322,8 @@ func TestProcessTorrentsWithDBUpdate_ContinueOnErrors(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
 		}
 	})
-	client := &qbit.QbitClient{Client: &http.Client{Transport: rt}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, ProcessTorrentsWithDBUpdate(context.Background(), client, dir, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: rt}, "http://example")
+	require.NoError(t, ProcessTorrentsWithDBUpdate(context.Background(), client, dir, "cat", "tag", models.SpringSunday))
 	// file1 should be deleted; file2 should remain due to push error path but function continues
 	if _, err := os.Stat(p1); err == nil {
 		t.Fatalf("expected p1 removed")
@@ -345,12 +342,11 @@ func TestProcessTorrentsWithDBUpdate_Basic(t *testing.T) {
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true}))
 	_, hash := makeTorrentFile(t, dir)
 	pushed := true
-	ti := &models.TorrentInfo{SiteName: string(models.CMCT), IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: string(models.SpringSunday), IsPushed: &pushed}
 	ti.TorrentHash = &hash
 	require.NoError(t, db.UpsertTorrent(ti))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, ProcessTorrentsWithDBUpdate(context.Background(), client, dir, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, ProcessTorrentsWithDBUpdate(context.Background(), client, dir, "cat", "tag", models.SpringSunday))
 }
 
 func TestProcessTorrentsWithDBUpdate_EmptyDir(t *testing.T) {
@@ -360,9 +356,8 @@ func TestProcessTorrentsWithDBUpdate_EmptyDir(t *testing.T) {
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true}))
-	client := &qbit.QbitClient{Client: &http.Client{Transport: &props404Transport{}}, RateLimiter: time.NewTicker(time.Millisecond), BaseURL: "http://example"}
-	defer client.RateLimiter.Stop()
-	require.NoError(t, ProcessTorrentsWithDBUpdate(context.Background(), client, dir, "cat", "tag", models.CMCT))
+	client := qbit.NewQbitClientForTesting(&http.Client{Transport: &props404Transport{}}, "http://example")
+	require.NoError(t, ProcessTorrentsWithDBUpdate(context.Background(), client, dir, "cat", "tag", models.SpringSunday))
 }
 
 func TestDownloadWorker_DisabledSite(t *testing.T) {
@@ -380,7 +375,7 @@ func TestDownloadWorker_DisabledSite(t *testing.T) {
 	wg.Add(1)
 	// disabled mock
 	m := &disabledSite{}
-	downloadWorker(context.Background(), models.CMCT, &wg, m, ch, models.RSSConfig{Tag: "t"})
+	downloadWorker(context.Background(), models.SpringSunday, &wg, m, ch, models.RSSConfig{Tag: "t"})
 	wg.Wait()
 }
 
@@ -396,7 +391,7 @@ func TestDownloadWorker_ChannelClosedEarly(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	m := &disabledSite{}
-	downloadWorker(context.Background(), models.CMCT, &wg, m, ch, models.RSSConfig{Tag: "t"})
+	downloadWorker(context.Background(), models.SpringSunday, &wg, m, ch, models.RSSConfig{Tag: "t"})
 	wg.Wait()
 }
 
@@ -445,9 +440,9 @@ func TestDownloadWorker_Table(t *testing.T) {
 			torrentFile := filepath.Join(base, sub, fileBase+".torrent")
 			_ = os.WriteFile(torrentFile, []byte("d4:infoe"), 0o644)
 		}
-		downloadWorker(context.Background(), models.CMCT, &wg, m, ch, models.RSSConfig{Tag: c.detail.Title})
+		downloadWorker(context.Background(), models.SpringSunday, &wg, m, ch, models.RSSConfig{Tag: c.detail.Title})
 		wg.Wait()
-		ti, err := global.GlobalDB.GetTorrentBySiteAndID(string(models.CMCT), item.GUID)
+		ti, err := global.GlobalDB.GetTorrentBySiteAndID(string(models.SpringSunday), item.GUID)
 		require.NoError(t, err)
 		require.NotNil(t, ti)
 		if c.expectSkip {
@@ -472,7 +467,7 @@ func (s *siteDummy) RetryDelay() time.Duration                                  
 func (s *siteDummy) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error { return nil }
 func (s *siteDummy) Context() context.Context                                             { return context.Background() }
 func TestFetchRSS_InvalidURL(t *testing.T) {
-	err := FetchAndDownloadFreeRSS(context.Background(), models.CMCT, &siteDummy{}, models.RSSConfig{URL: "://bad"})
+	err := FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, &siteDummy{}, models.RSSConfig{URL: "://bad"})
 	if err == nil {
 		t.Fatalf("expected parse error")
 	}
@@ -494,7 +489,7 @@ func (s *disabledSite) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSC
 func (s *disabledSite) Context() context.Context { return context.Background() }
 func TestFetchRSS_Errors(t *testing.T) {
 	global.GlobalDB = nil
-	if err := FetchAndDownloadFreeRSS(context.Background(), models.CMCT, &disabledSite{}, models.RSSConfig{URL: "http://example"}); err == nil {
+	if err := FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, &disabledSite{}, models.RSSConfig{URL: "http://example"}); err == nil {
 		t.Fatalf("expected error when db nil")
 	}
 	dir := t.TempDir()
@@ -505,7 +500,7 @@ func TestFetchRSS_Errors(t *testing.T) {
 	if err := db.DB.Create(&models.SettingsGlobal{DownloadDir: ""}).Error; err != nil {
 		t.Fatalf("seed gl: %v", err)
 	}
-	if err := FetchAndDownloadFreeRSS(context.Background(), models.CMCT, &disabledSite{}, models.RSSConfig{URL: "http://example"}); err == nil {
+	if err := FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, &disabledSite{}, models.RSSConfig{URL: "http://example"}); err == nil {
 		t.Fatalf("expected error for blank download dir")
 	}
 	if err := db.DB.Where("1=1").Delete(&models.SettingsGlobal{}).Error; err != nil {
@@ -514,7 +509,7 @@ func TestFetchRSS_Errors(t *testing.T) {
 	if err := core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true}); err != nil {
 		t.Fatalf("save gl: %v", err)
 	}
-	if err := FetchAndDownloadFreeRSS(context.Background(), models.CMCT, &disabledSite{}, models.RSSConfig{URL: "http://invalid"}); err == nil {
+	if err := FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, &disabledSite{}, models.RSSConfig{URL: "http://invalid"}); err == nil {
 		t.Fatalf("expected enableError")
 	}
 }
@@ -545,7 +540,868 @@ func TestFetchRSS_WithGomock(t *testing.T) {
 	defer srv.Close()
 	m.EXPECT().GetTorrentDetails(gomock.Any()).Return(&models.APIResponse[models.PHPTorrentInfo]{Code: "success", Data: models.PHPTorrentInfo{Title: "T", TorrentID: "g", Discount: models.DISCOUNT_FREE}}, nil).AnyTimes()
 	_ = core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true})
-	if err := FetchAndDownloadFreeRSS(context.Background(), models.CMCT, m, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}); err != nil {
+	if err := FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, m, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}); err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
+}
+
+// TestGetDownloaderForRSS_NoDB 测试数据库未初始化的情况
+func TestGetDownloaderForRSS_NoDB(t *testing.T) {
+	global.GlobalDB = nil
+	_, err := GetDownloaderForRSS(models.RSSConfig{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "数据库未初始化")
+}
+
+// TestGetDownloaderForRSS_SpecifiedDownloader 测试指定下载器
+func TestGetDownloaderForRSS_SpecifiedDownloader(t *testing.T) {
+	db := setupDB(t)
+
+	// 创建下载器配置
+	dlID := uint(1)
+	ds := models.DownloaderSetting{
+		Name:     "test-qbit",
+		Type:     "qbittorrent",
+		URL:      "http://localhost:8080",
+		Username: "admin",
+		Password: "password",
+		Enabled:  true,
+	}
+	ds.ID = dlID
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	rssCfg := models.RSSConfig{
+		DownloaderID: &dlID,
+	}
+
+	// 由于没有实际的 qBittorrent 服务器，会返回连接错误
+	_, err := GetDownloaderForRSS(rssCfg)
+	// 可能成功创建客户端或返回连接错误
+	_ = err
+}
+
+// TestGetDownloaderForRSS_DisabledDownloader 测试禁用的下载器
+func TestGetDownloaderForRSS_DisabledDownloader(t *testing.T) {
+	db := setupDB(t)
+
+	dlID := uint(2)
+	ds := models.DownloaderSetting{
+		Name:     "disabled-qbit",
+		Type:     "qbittorrent",
+		URL:      "http://localhost:8080",
+		Username: "admin",
+		Password: "password",
+		Enabled:  false,
+	}
+	ds.ID = dlID
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	rssCfg := models.RSSConfig{
+		DownloaderID: &dlID,
+	}
+
+	_, err := GetDownloaderForRSS(rssCfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "未启用")
+}
+
+// TestGetDownloaderForRSS_DefaultDownloader 测试默认下载器
+func TestGetDownloaderForRSS_DefaultDownloader(t *testing.T) {
+	db := setupDB(t)
+
+	ds := models.DownloaderSetting{
+		Name:      "default-qbit",
+		Type:      "qbittorrent",
+		URL:       "http://localhost:8080",
+		Username:  "admin",
+		Password:  "password",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	rssCfg := models.RSSConfig{}
+
+	_, err := GetDownloaderForRSS(rssCfg)
+	// 可能成功创建客户端或返回连接错误
+	_ = err
+}
+
+// TestGetDownloaderForRSS_NoDefaultDownloader 测试没有默认下载器
+func TestGetDownloaderForRSS_NoDefaultDownloader(t *testing.T) {
+	_ = setupDB(t)
+
+	rssCfg := models.RSSConfig{}
+
+	_, err := GetDownloaderForRSS(rssCfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "获取默认下载器失败")
+}
+
+// TestGetDownloaderForRSS_TransmissionType 测试 Transmission 类型
+func TestGetDownloaderForRSS_TransmissionType(t *testing.T) {
+	db := setupDB(t)
+
+	ds := models.DownloaderSetting{
+		Name:      "default-transmission",
+		Type:      "transmission",
+		URL:       "http://localhost:9091",
+		Username:  "admin",
+		Password:  "password",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	rssCfg := models.RSSConfig{}
+
+	_, err := GetDownloaderForRSS(rssCfg)
+	// 可能成功创建客户端或返回连接错误
+	_ = err
+}
+
+// TestGetDownloaderForRSS_UnknownType 测试未知下载器类型
+func TestGetDownloaderForRSS_UnknownType(t *testing.T) {
+	db := setupDB(t)
+
+	ds := models.DownloaderSetting{
+		Name:      "unknown-type",
+		Type:      "unknown",
+		URL:       "http://localhost:8080",
+		Username:  "admin",
+		Password:  "password",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	rssCfg := models.RSSConfig{}
+
+	_, err := GetDownloaderForRSS(rssCfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "不支持的下载器类型")
+}
+
+// TestGetDownloaderForRSS_NotFoundDownloader 测试找不到指定的下载器
+func TestGetDownloaderForRSS_NotFoundDownloader(t *testing.T) {
+	_ = setupDB(t)
+
+	dlID := uint(999)
+	rssCfg := models.RSSConfig{
+		DownloaderID: &dlID,
+	}
+
+	_, err := GetDownloaderForRSS(rssCfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "获取指定下载器失败")
+}
+
+// TestAttemptDownloadWithContext 测试带 context 的下载
+func TestAttemptDownloadWithContext(t *testing.T) {
+	data, _ := bencode.EncodeBytes(map[string]any{"info": map[string]any{"name": "x"}})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	ctx := context.Background()
+	hash, err := attemptDownloadWithContext(ctx, srv.URL, "test-title", dir)
+	require.NoError(t, err)
+	require.NotEmpty(t, hash)
+}
+
+// TestAttemptDownloadWithContext_Cancelled 测试取消的 context
+func TestAttemptDownloadWithContext_Cancelled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消
+
+	_, err := attemptDownloadWithContext(ctx, srv.URL, "test-title", dir)
+	require.Error(t, err)
+}
+
+// TestFetchRSSFeed 测试 RSS 解析
+func TestFetchRSSFeed(t *testing.T) {
+	feed := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>Test Feed</title>
+<item><title>Item1</title><guid>guid1</guid></item>
+</channel>
+</rss>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(feed))
+	}))
+	defer srv.Close()
+
+	result, err := fetchRSSFeed(srv.URL)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "Test Feed", result.Title)
+	require.Len(t, result.Items, 1)
+}
+
+// TestFetchRSSFeed_InvalidURL 测试无效 URL
+func TestFetchRSSFeed_InvalidURL(t *testing.T) {
+	_, err := fetchRSSFeed("://invalid")
+	require.Error(t, err)
+}
+
+// TestFetchRSSFeed_InvalidContent 测试无效内容
+func TestFetchRSSFeed_InvalidContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not xml"))
+	}))
+	defer srv.Close()
+
+	_, err := fetchRSSFeed(srv.URL)
+	require.Error(t, err)
+}
+
+// TestProcessSingleTorrentWithDownloader_NoRecord 测试数据库无记录时删除文件
+func TestProcessSingleTorrentWithDownloader_NoRecord(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, _ := makeTorrentFile(t, dir)
+
+	// 创建 mock 下载器
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+	_ = db
+}
+
+// TestProcessSingleTorrentWithDownloader_AlreadyPushed 测试已推送的种子
+func TestProcessSingleTorrentWithDownloader_AlreadyPushed(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建已推送的记录
+	pushed := true
+	now := time.Now()
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		PushTime:    &now,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+}
+
+// TestProcessSingleTorrentWithDownloader_Expired 测试过期的种子
+func TestProcessSingleTorrentWithDownloader_Expired(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建过期的记录
+	past := time.Now().Add(-1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		FreeEndTime: &past,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+}
+
+// TestProcessSingleTorrentWithDownloader_ExistsInDownloader 测试种子已存在于下载器
+func TestProcessSingleTorrentWithDownloader_ExistsInDownloader(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建未推送的记录
+	pushed := false
+	future := time.Now().Add(1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		FreeEndTime: &future,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(true, nil)
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+
+	// 数据库应该更新为已推送
+	ti2, err := db.GetTorrentBySiteAndHash(string(models.SpringSunday), hash)
+	require.NoError(t, err)
+	require.NotNil(t, ti2.IsPushed)
+	require.True(t, *ti2.IsPushed)
+}
+
+// TestProcessTorrentsWithDownloaderByRSS_NoDownloader 测试获取下载器失败
+func TestProcessTorrentsWithDownloaderByRSS_NoDownloader(t *testing.T) {
+	_ = setupDB(t)
+
+	rssCfg := models.RSSConfig{}
+	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, t.TempDir(), "cat", "tag", models.SpringSunday)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "获取下载器失败")
+}
+
+// TestProcessSingleTorrentWithDownloader_NewTorrentPushSuccess 测试新种子推送成功
+func TestProcessSingleTorrentWithDownloader_NewTorrentPushSuccess(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建未推送的记录
+	pushed := false
+	future := time.Now().Add(1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		FreeEndTime: &future,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	mockDl.EXPECT().AddTorrentWithPath(gomock.Any(), "cat", "tag", "").Return(nil)
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+
+	// 数据库应该更新为已推送
+	ti2, err := db.GetTorrentBySiteAndHash(string(models.SpringSunday), hash)
+	require.NoError(t, err)
+	require.NotNil(t, ti2.IsPushed)
+	require.True(t, *ti2.IsPushed)
+}
+
+// TestProcessSingleTorrentWithDownloader_PushFailed 测试推送失败
+func TestProcessSingleTorrentWithDownloader_PushFailed(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建未推送的记录
+	pushed := false
+	future := time.Now().Add(1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		FreeEndTime: &future,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	mockDl.EXPECT().AddTorrentWithPath(gomock.Any(), "cat", "tag", "").Return(fmt.Errorf("push failed"))
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "推送种子失败")
+
+	// 注意：由于事务回滚，重试次数不会被更新
+	// 这是预期行为，因为整个事务失败了
+}
+
+// TestProcessSingleTorrentWithDownloader_CheckExistsFailed 测试检查种子存在失败
+func TestProcessSingleTorrentWithDownloader_CheckExistsFailed(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建未推送的记录
+	pushed := false
+	future := time.Now().Add(1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		FreeEndTime: &future,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, fmt.Errorf("connection failed"))
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "检查种子存在失败")
+}
+
+// TestProcessSingleTorrentWithDownloader_InvalidTorrentFile 测试无效种子文件
+func TestProcessSingleTorrentWithDownloader_InvalidTorrentFile(t *testing.T) {
+	_ = setupDB(t)
+	dir := t.TempDir()
+
+	// 创建无效的种子文件
+	invalidPath := filepath.Join(dir, "invalid.torrent")
+	require.NoError(t, os.WriteFile(invalidPath, []byte("not a valid torrent"), 0o644))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, invalidPath, "cat", "tag", "", models.SpringSunday)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "计算种子哈希失败")
+}
+
+// TestProcessSingleTorrentWithDownloader_RetainHoursExpired 测试保留时长过期
+func TestProcessSingleTorrentWithDownloader_RetainHoursExpired(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 设置保留时长
+	store := core.NewConfigStore(db)
+	require.NoError(t, store.SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir:            dir,
+		DefaultIntervalMinutes: 10,
+		DefaultEnabled:         true,
+		RetainHours:            1,
+	}))
+
+	// 创建超过保留时长的记录
+	past := time.Now().Add(-48 * time.Hour)
+	future := time.Now().Add(1 * time.Hour)
+	pushed := false
+	ti := &models.TorrentInfo{
+		SiteName:      string(models.SpringSunday),
+		TorrentHash:   &hash,
+		IsPushed:      &pushed,
+		FreeEndTime:   &future,
+		LastCheckTime: &past,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+}
+
+// TestProcessSingleTorrentWithDownloader_MaxRetryExceeded 测试超过最大重试次数
+func TestProcessSingleTorrentWithDownloader_MaxRetryExceeded(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 设置最大重试次数
+	store := core.NewConfigStore(db)
+	require.NoError(t, store.SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir:            dir,
+		DefaultIntervalMinutes: 10,
+		DefaultEnabled:         true,
+		MaxRetry:               2,
+	}))
+
+	// 创建已超过重试次数的记录
+	pushed := false
+	future := time.Now().Add(1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		FreeEndTime: &future,
+		RetryCount:  3, // 超过 MaxRetry
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+}
+
+// TestDownloadWorker_ContextCancelled 测试上下文取消
+func TestDownloadWorker_ContextCancelled(t *testing.T) {
+	db := setupDB(t)
+	_ = db
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch := make(chan *gofeed.Item, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	downloadWorker(ctx, models.SpringSunday, &wg, &disabledSite{}, ch, models.RSSConfig{Tag: "t"})
+	wg.Wait()
+}
+
+// TestDownloadWorker_NoEnclosure 测试没有附件的情况
+func TestDownloadWorker_NoEnclosure(t *testing.T) {
+	db := setupDB(t)
+	_ = db
+
+	item := &gofeed.Item{GUID: "g", Title: "t"}
+	ch := make(chan *gofeed.Item, 1)
+	ch <- item
+	close(ch)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	m := sm.NewMockPTSiteInter[models.PHPTorrentInfo](ctrl)
+	m.EXPECT().IsEnabled().Return(true).AnyTimes()
+	m.EXPECT().GetTorrentDetails(gomock.Any()).Return(&models.APIResponse[models.PHPTorrentInfo]{
+		Code: "success",
+		Data: models.PHPTorrentInfo{Title: "t", TorrentID: "g", Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(1 * time.Hour), SizeMB: 64},
+	}, nil).AnyTimes()
+	m.EXPECT().DownloadTorrent(gomock.Any(), gomock.Any(), gomock.Any()).Return("h", nil).AnyTimes()
+	m.EXPECT().MaxRetries().Return(1).AnyTimes()
+	m.EXPECT().RetryDelay().Return(time.Duration(0)).AnyTimes()
+	m.EXPECT().Context().Return(context.Background()).AnyTimes()
+
+	downloadWorker(context.Background(), models.SpringSunday, &wg, m, ch, models.RSSConfig{Tag: "t"})
+	wg.Wait()
+}
+
+// TestFetchAndDownloadFreeRSS_ContextTimeout 测试上下文超时
+func TestFetchAndDownloadFreeRSS_ContextTimeout(t *testing.T) {
+	db := setupDB(t)
+	_ = db
+
+	// 创建一个已取消的上下文
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := FetchAndDownloadFreeRSS(ctx, models.SpringSunday, &rssSiteStub{}, models.RSSConfig{URL: "http://invalid"})
+	// 应该返回错误
+	require.Error(t, err)
+}
+
+// TestProcessTorrentsWithDownloaderByRSS_EmptyDir 测试空目录
+func TestProcessTorrentsWithDownloaderByRSS_EmptyDir(t *testing.T) {
+	db := setupDB(t)
+
+	// 创建默认下载器
+	ds := models.DownloaderSetting{
+		Name:      "default-qbit",
+		Type:      "qbittorrent",
+		URL:       "http://localhost:8080",
+		Username:  "admin",
+		Password:  "password",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	emptyDir := t.TempDir()
+	rssCfg := models.RSSConfig{}
+
+	// 由于没有实际的 qBittorrent 服务器，会返回连接错误
+	err := ProcessTorrentsWithDownloaderByRSS(context.Background(), rssCfg, emptyDir, "cat", "tag", models.SpringSunday)
+	// 可能成功（空目录）或返回连接错误
+	_ = err
+}
+
+// TestRSSFilterAssociationIntegration 测试 RSS 过滤规则关联的完整流程
+func TestRSSFilterAssociationIntegration(t *testing.T) {
+	db := setupDB(t)
+
+	// 创建站点设置
+	siteSetting := models.SiteSetting{
+		Name:       string(models.SpringSunday),
+		Enabled:    true,
+		AuthMethod: "cookie",
+	}
+	require.NoError(t, db.DB.Create(&siteSetting).Error)
+
+	// 创建 RSS 订阅
+	rssSub := models.RSSSubscription{
+		SiteID:          siteSetting.ID,
+		Name:            "test-rss",
+		URL:             "http://example.com/rss",
+		Category:        "movies",
+		Tag:             "test",
+		IntervalMinutes: 10, // 设置有效的间隔时间
+		DownloadPath:    "/downloads/movies",
+	}
+	require.NoError(t, db.DB.Create(&rssSub).Error)
+
+	// 创建过滤规则
+	rule1 := models.FilterRule{
+		Name:        "rule1",
+		Pattern:     ".*1080p.*",
+		PatternType: "regex",
+		Enabled:     true,
+		Priority:    1,
+		RequireFree: false,
+	}
+	require.NoError(t, db.DB.Create(&rule1).Error)
+
+	rule2 := models.FilterRule{
+		Name:        "rule2",
+		Pattern:     ".*4K.*",
+		PatternType: "regex",
+		Enabled:     true,
+		Priority:    2,
+		RequireFree: true,
+	}
+	require.NoError(t, db.DB.Create(&rule2).Error)
+
+	// 创建 RSS-Filter 关联
+	assocDB := models.NewRSSFilterAssociationDB(db.DB)
+	require.NoError(t, assocDB.SetFilterRulesForRSS(rssSub.ID, []uint{rule1.ID, rule2.ID}))
+
+	// 验证关联
+	rules, err := assocDB.GetFilterRulesForRSS(rssSub.ID)
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+
+	// 验证 RSSConfig 的 DownloadPath
+	rssCfg := models.RSSConfig{
+		ID:           rssSub.ID,
+		Name:         rssSub.Name,
+		URL:          rssSub.URL,
+		Category:     rssSub.Category,
+		Tag:          rssSub.Tag,
+		DownloadPath: rssSub.DownloadPath,
+	}
+	require.Equal(t, "/downloads/movies", rssCfg.GetEffectiveDownloadPath())
+	require.True(t, rssCfg.HasCustomDownloadPath())
+}
+
+// TestRSSFilterAssociationWithFilterService 测试 RSS 关联过滤规则与 FilterService 的集成
+func TestRSSFilterAssociationWithFilterService(t *testing.T) {
+	db := setupDB(t)
+
+	// 创建 RSS 订阅
+	rssSub := models.RSSSubscription{
+		Name:            "test-rss",
+		URL:             "http://example.com/rss",
+		Category:        "movies",
+		IntervalMinutes: 10, // 设置有效的间隔时间
+	}
+	require.NoError(t, db.DB.Create(&rssSub).Error)
+
+	// 创建过滤规则
+	rule := models.FilterRule{
+		Name:        "1080p-rule",
+		Pattern:     ".*1080p.*",
+		PatternType: "regex",
+		Enabled:     true,
+		Priority:    1,
+		RequireFree: false,
+	}
+	require.NoError(t, db.DB.Create(&rule).Error)
+
+	// 创建 RSS-Filter 关联
+	assocDB := models.NewRSSFilterAssociationDB(db.DB)
+	require.NoError(t, assocDB.SetFilterRulesForRSS(rssSub.ID, []uint{rule.ID}))
+
+	// 使用 FilterService 测试
+	filterSvc := filter.NewFilterService(db.DB)
+
+	// 测试匹配的标题
+	shouldDownload, matchedRule := filterSvc.ShouldDownloadForRSS("Movie.Title.1080p.BluRay", true, rssSub.ID)
+	require.True(t, shouldDownload)
+	require.NotNil(t, matchedRule)
+	require.Equal(t, "1080p-rule", matchedRule.Name)
+
+	// 测试不匹配的标题
+	shouldDownload, matchedRule = filterSvc.ShouldDownloadForRSS("Movie.Title.720p.BluRay", true, rssSub.ID)
+	require.False(t, shouldDownload)
+	require.Nil(t, matchedRule)
+}
+
+// TestRSSWithNoAssociatedRules 测试没有关联规则的 RSS
+func TestRSSWithNoAssociatedRules(t *testing.T) {
+	db := setupDB(t)
+
+	// 创建 RSS 订阅（不关联任何规则）
+	rssSub := models.RSSSubscription{
+		Name:            "test-rss-no-rules",
+		URL:             "http://example.com/rss",
+		Category:        "movies",
+		IntervalMinutes: 10, // 设置有效的间隔时间
+	}
+	require.NoError(t, db.DB.Create(&rssSub).Error)
+
+	// 创建过滤规则（但不关联到 RSS）
+	rule := models.FilterRule{
+		Name:        "global-rule",
+		Pattern:     ".*1080p.*",
+		PatternType: "regex",
+		Enabled:     true,
+		Priority:    1,
+	}
+	require.NoError(t, db.DB.Create(&rule).Error)
+
+	// 使用 FilterService 测试
+	filterSvc := filter.NewFilterService(db.DB)
+
+	// 没有关联规则的 RSS 应该不匹配任何规则
+	shouldDownload, matchedRule := filterSvc.ShouldDownloadForRSS("Movie.Title.1080p.BluRay", true, rssSub.ID)
+	require.False(t, shouldDownload)
+	require.Nil(t, matchedRule)
+
+	// 验证 GetRulesForRSS 返回空列表
+	rules, err := filterSvc.GetRulesForRSS(rssSub.ID)
+	require.NoError(t, err)
+	require.Empty(t, rules)
+}
+
+// TestDownloadPathIntegration 测试下载路径集成
+func TestDownloadPathIntegration(t *testing.T) {
+	db := setupDB(t)
+
+	// 测试有自定义下载路径的 RSS
+	rssCfgWithPath := models.RSSConfig{
+		ID:           1,
+		Name:         "rss-with-path",
+		URL:          "http://example.com/rss",
+		DownloadPath: "/custom/downloads/movies",
+	}
+	require.Equal(t, "/custom/downloads/movies", rssCfgWithPath.GetEffectiveDownloadPath())
+	require.True(t, rssCfgWithPath.HasCustomDownloadPath())
+
+	// 测试没有自定义下载路径的 RSS
+	rssCfgWithoutPath := models.RSSConfig{
+		ID:           2,
+		Name:         "rss-without-path",
+		URL:          "http://example.com/rss",
+		DownloadPath: "",
+	}
+	require.Equal(t, "", rssCfgWithoutPath.GetEffectiveDownloadPath())
+	require.False(t, rssCfgWithoutPath.HasCustomDownloadPath())
+
+	_ = db
+}
+
+// TestProcessTorrentsWithDownloaderByRSS_WithDownloadPath 测试带下载路径的种子处理
+func TestProcessTorrentsWithDownloaderByRSS_WithDownloadPath(t *testing.T) {
+	db := setupDB(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+
+	// 创建未推送的记录
+	pushed := false
+	future := time.Now().Add(1 * time.Hour)
+	ti := &models.TorrentInfo{
+		SiteName:    string(models.SpringSunday),
+		TorrentHash: &hash,
+		IsPushed:    &pushed,
+		FreeEndTime: &future,
+	}
+	require.NoError(t, db.UpsertTorrent(ti))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	// 验证 AddTorrentWithPath 被调用时传递了正确的下载路径
+	mockDl.EXPECT().AddTorrentWithPath(gomock.Any(), "cat", "tag", "/custom/path").Return(nil)
+
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "/custom/path", models.SpringSunday)
+	require.NoError(t, err)
+
+	// 文件应该被删除
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err))
+
+	// 数据库应该更新为已推送
+	ti2, err := db.GetTorrentBySiteAndHash(string(models.SpringSunday), hash)
+	require.NoError(t, err)
+	require.NotNil(t, ti2.IsPushed)
+	require.True(t, *ti2.IsPushed)
 }

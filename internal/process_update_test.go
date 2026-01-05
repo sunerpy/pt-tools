@@ -7,10 +7,11 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
 )
 
 type noopPT struct{}
@@ -31,6 +32,6 @@ func TestProcessTorrentsWithDBUpdate_NoFail(t *testing.T) {
 	global.GlobalDB = db
 	// minimal call ensures not panic (details of processing covered elsewhere)
 	require.NotPanics(t, func() {
-		_ = ProcessTorrentsWithDBUpdate(context.Background(), nil, t.TempDir(), "cat", "tag", models.CMCT)
+		_ = ProcessTorrentsWithDBUpdate(context.Background(), nil, t.TempDir(), "cat", "tag", models.SpringSunday)
 	})
 }

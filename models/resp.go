@@ -13,6 +13,16 @@ var freeSet = []string{"free", "_2x_free"}
 type ResType interface {
 	MTTorrentDetail | PHPTorrentInfo
 	FreeDownChecker
+	TorrentMetadata
+}
+
+// TorrentMetadata 统一的种子元数据接口
+// 用于获取种子的标题、副标题等信息，便于过滤规则匹配
+type TorrentMetadata interface {
+	// GetName 获取种子名称（优先返回中文名）
+	GetName() string
+	// GetSubTitle 获取副标题/标签信息
+	GetSubTitle() string
 }
 type FreeDownChecker interface {
 	IsFree() bool
@@ -26,53 +36,53 @@ type APIResponse[T ResType] struct {
 	Code    any    `json:"code"`
 }
 type MTTorrentDetail struct {
-	ID               string        `json:"id"`
-	CreatedDate      string        `json:"createdDate"`
-	LastModifiedDate string        `json:"lastModifiedDate"`
-	Name             string        `json:"name"`
-	SmallDescr       string        `json:"smallDescr"`
-	IMDb             string        `json:"imdb"`
-	IMDbRating       *string       `json:"imdbRating"`
-	Douban           string        `json:"douban"`
-	DoubanRating     *string       `json:"doubanRating"`
-	DmmCode          string        `json:"dmmCode"`
-	Author           interface{}   `json:"author"`
-	Category         string        `json:"category"`
-	Source           string        `json:"source"`
-	Medium           interface{}   `json:"medium"`
-	Standard         string        `json:"standard"`
-	VideoCodec       string        `json:"videoCodec"`
-	AudioCodec       string        `json:"audioCodec"`
-	Team             string        `json:"team"`
-	Processing       interface{}   `json:"processing"`
-	Countries        []string      `json:"countries"`
-	NumFiles         string        `json:"numfiles"`
-	Size             string        `json:"size"`
-	Tags             string        `json:"tags"`
-	Labels           string        `json:"labels"`
-	MsUp             string        `json:"msUp"`
-	Anonymous        bool          `json:"anonymous"`
-	InfoHash         interface{}   `json:"infoHash"`
-	Status           *Status       `json:"status"`
-	EditedBy         interface{}   `json:"editedBy"`
-	EditDate         interface{}   `json:"editDate"`
-	Collection       bool          `json:"collection"`
-	InRss            bool          `json:"inRss"`
-	CanVote          bool          `json:"canVote"`
-	ImageList        interface{}   `json:"imageList"`
-	ResetBox         interface{}   `json:"resetBox"`
-	OriginFileName   string        `json:"originFileName"`
-	Descr            string        `json:"descr"`
-	Nfo              interface{}   `json:"nfo"`
-	MediaInfo        string        `json:"mediainfo"`
-	CIDs             interface{}   `json:"cids"`
-	AIDs             interface{}   `json:"aids"`
-	ShowcaseList     []Showcase    `json:"showcaseList"`
-	TagList          []interface{} `json:"tagList"`
-	Scope            string        `json:"scope"`
-	ScopeTeams       []interface{} `json:"scopeTeams"`
-	Thanked          bool          `json:"thanked"`
-	Rewarded         bool          `json:"rewarded"`
+	ID               string     `json:"id"`
+	CreatedDate      string     `json:"createdDate"`
+	LastModifiedDate string     `json:"lastModifiedDate"`
+	Name             string     `json:"name"`
+	SmallDescr       string     `json:"smallDescr"`
+	IMDb             string     `json:"imdb"`
+	IMDbRating       *string    `json:"imdbRating"`
+	Douban           string     `json:"douban"`
+	DoubanRating     *string    `json:"doubanRating"`
+	DmmCode          string     `json:"dmmCode"`
+	Author           any        `json:"author"`
+	Category         string     `json:"category"`
+	Source           string     `json:"source"`
+	Medium           any        `json:"medium"`
+	Standard         string     `json:"standard"`
+	VideoCodec       string     `json:"videoCodec"`
+	AudioCodec       string     `json:"audioCodec"`
+	Team             string     `json:"team"`
+	Processing       any        `json:"processing"`
+	Countries        []string   `json:"countries"`
+	NumFiles         string     `json:"numfiles"`
+	Size             string     `json:"size"`
+	Tags             string     `json:"tags"`
+	Labels           string     `json:"labels"`
+	MsUp             string     `json:"msUp"`
+	Anonymous        bool       `json:"anonymous"`
+	InfoHash         any        `json:"infoHash"`
+	Status           *Status    `json:"status"`
+	EditedBy         any        `json:"editedBy"`
+	EditDate         any        `json:"editDate"`
+	Collection       bool       `json:"collection"`
+	InRss            bool       `json:"inRss"`
+	CanVote          bool       `json:"canVote"`
+	ImageList        any        `json:"imageList"`
+	ResetBox         any        `json:"resetBox"`
+	OriginFileName   string     `json:"originFileName"`
+	Descr            string     `json:"descr"`
+	Nfo              any        `json:"nfo"`
+	MediaInfo        string     `json:"mediainfo"`
+	CIDs             any        `json:"cids"`
+	AIDs             any        `json:"aids"`
+	ShowcaseList     []Showcase `json:"showcaseList"`
+	TagList          []any      `json:"tagList"`
+	Scope            string     `json:"scope"`
+	ScopeTeams       []any      `json:"scopeTeams"`
+	Thanked          bool       `json:"thanked"`
+	Rewarded         bool       `json:"rewarded"`
 }
 type Status struct {
 	ID               string         `json:"id"`
@@ -97,7 +107,7 @@ type Status struct {
 	Banned           bool           `json:"banned"`
 	Visible          bool           `json:"visible"`
 	PromotionRule    *PromotionRule `json:"promotionRule"`
-	MallSingleFree   interface{}    `json:"mallSingleFree"`
+	MallSingleFree   any            `json:"mallSingleFree"`
 }
 type PromotionRule struct {
 	Categories  []string `json:"categories"`
@@ -205,4 +215,14 @@ func (t MTTorrentDetail) GetFreeLevel() string {
 		return t.Status.Discount
 	}
 	return "failed"
+}
+
+// GetName 获取种子名称（返回中文名 Name）
+func (t MTTorrentDetail) GetName() string {
+	return t.Name
+}
+
+// GetSubTitle 获取副标题（返回 SmallDescr）
+func (t MTTorrentDetail) GetSubTitle() string {
+	return t.SmallDescr
 }

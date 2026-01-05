@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+
 	"github.com/sunerpy/pt-tools/models"
 )
 

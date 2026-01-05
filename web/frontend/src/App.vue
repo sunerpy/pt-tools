@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from './stores/theme'
+import { useLogLevelStore } from './stores/logLevel'
 import { controlApi } from './api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
+const logLevelStore = useLogLevelStore()
 
 const isCollapse = ref(false)
 const stopLoading = ref(false)
@@ -17,6 +19,10 @@ const activeMenu = computed(() => {
   const name = route.name as string
   if (name === 'site-detail') return 'sites'
   return name || 'global'
+})
+
+onMounted(() => {
+  logLevelStore.fetchLogLevel()
 })
 
 // 监听主题变化，切换 Element Plus 暗色模式
@@ -93,17 +99,29 @@ function logout() {
         active-text-color="var(--el-color-primary)"
         @select="handleMenuSelect"
       >
+        <el-menu-item index="userinfo">
+          <el-icon><DataAnalysis /></el-icon>
+          <template #title>用户统计</template>
+        </el-menu-item>
         <el-menu-item index="global">
           <el-icon><Setting /></el-icon>
           <template #title>全局设置</template>
         </el-menu-item>
-        <el-menu-item index="qbit">
+        <el-menu-item index="downloaders">
           <el-icon><Download /></el-icon>
-          <template #title>qBittorrent</template>
+          <template #title>下载器管理</template>
         </el-menu-item>
         <el-menu-item index="sites">
           <el-icon><Connection /></el-icon>
           <template #title>站点与RSS</template>
+        </el-menu-item>
+        <el-menu-item index="search">
+          <el-icon><Search /></el-icon>
+          <template #title>种子搜索</template>
+        </el-menu-item>
+        <el-menu-item index="filter-rules">
+          <el-icon><Filter /></el-icon>
+          <template #title>过滤规则</template>
         </el-menu-item>
         <el-menu-item index="tasks">
           <el-icon><List /></el-icon>
@@ -154,6 +172,23 @@ function logout() {
             inline-prompt
             @change="themeStore.toggle"
           />
+
+          <el-divider direction="vertical" />
+
+          <el-select
+            v-model="logLevelStore.currentLevel"
+            :loading="logLevelStore.loading"
+            size="default"
+            style="width: 110px"
+            @change="logLevelStore.setLogLevel"
+          >
+            <el-option
+              v-for="level in logLevelStore.availableLevels"
+              :key="level"
+              :label="level"
+              :value="level"
+            />
+          </el-select>
 
           <el-divider direction="vertical" />
 

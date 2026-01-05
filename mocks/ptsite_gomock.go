@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/mmcdole/gofeed"
+
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -38,7 +39,7 @@ func (m *MockPTSiteInter[T]) GetTorrentDetails(item *gofeed.Item) (*models.APIRe
 	return r0, r1
 }
 
-func (r *MockPTSiteInterMockRecorder[T]) GetTorrentDetails(item interface{}) *gomock.Call {
+func (r *MockPTSiteInterMockRecorder[T]) GetTorrentDetails(item any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "GetTorrentDetails", reflect.TypeOf((*MockPTSiteInter[T])(nil).GetTorrentDetails), item)
 }
@@ -68,7 +69,7 @@ func (m *MockPTSiteInter[T]) DownloadTorrent(url, title, dir string) (string, er
 	return r0, r1
 }
 
-func (r *MockPTSiteInterMockRecorder[T]) DownloadTorrent(url, title, dir interface{}) *gomock.Call {
+func (r *MockPTSiteInterMockRecorder[T]) DownloadTorrent(url, title, dir any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "DownloadTorrent", reflect.TypeOf((*MockPTSiteInter[T])(nil).DownloadTorrent), url, title, dir)
 }
@@ -105,7 +106,7 @@ func (m *MockPTSiteInter[T]) SendTorrentToQbit(ctx context.Context, rssCfg model
 	return r0
 }
 
-func (r *MockPTSiteInterMockRecorder[T]) SendTorrentToQbit(ctx, rssCfg interface{}) *gomock.Call {
+func (r *MockPTSiteInterMockRecorder[T]) SendTorrentToQbit(ctx, rssCfg any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "SendTorrentToQbit", reflect.TypeOf((*MockPTSiteInter[T])(nil).SendTorrentToQbit), ctx, rssCfg)
 }

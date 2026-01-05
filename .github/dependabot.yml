@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(go)"
+    labels:
+      - "dependencies"
+      - "go"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # npm (Vue frontend)
+  - package-ecosystem: "npm"
+    directory: "/web/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(pnpm)"
+    labels:
+      - "dependencies"
+      - "javascript"
+      - "pnpm"
