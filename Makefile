@@ -11,7 +11,7 @@ NEW_TAG = $(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
 TAG ?= $(GIT_TAG)
 DOCKER_REPO = sunerpy
 DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
-BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H: %M:%SZ")
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT_ID := $(shell git rev-parse HEAD)
 ifeq ($(MAKECMDGOALS), prod-new)
   TAG = $(NEW_TAG)
@@ -31,9 +31,9 @@ HTTPS_PROXY ?=
 NO_PROXY ?=
 
 # 默认基础镜像
-BUILD_IMAGE ?= golang:1.25.2
+BUILD_IMAGE ?= golang:1.25.5
 BASE_IMAGE ?= alpine:3.20.3
-NODE_IMAGE ?= node:22.13.0-alpine
+NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
 .PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt lint unit-test coverage-summary
@@ -159,7 +159,7 @@ clean-docker:
 	docker builder prune -f
 
 lint: ## Run linters
-	@echo "Running linters..."
+	@echo "Running Go linters..."
 	@if command -v golangci-lint > /dev/null 2>&1; then \
 		golangci-lint run ./...; \
 	else \
@@ -169,6 +169,16 @@ lint: ## Run linters
 		echo "Running go vet instead..."; \
 		go vet ./...; \
 	fi
+	@echo ""
+	@echo "Running frontend linters..."
+	@cd web/frontend && if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		pnpm install; \
+	fi && \
+	pnpm lint:check && \
+	echo "" && \
+	echo "Running Vue type check..." && \
+	pnpm vue-tsc --noEmit
 
 # 代码格式化
 fmt:

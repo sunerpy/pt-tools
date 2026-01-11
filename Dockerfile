@@ -1,13 +1,13 @@
 # 参数区分构建环境与基础镜像来源
-ARG BUILD_IMAGE=golang:1.25.2
+ARG BUILD_IMAGE=golang:1.25.5
 ARG BASE_IMAGE=alpine:3.20.3
-ARG NODE_IMAGE=node:22.13.0-alpine
+ARG NODE_IMAGE=node:25.2.0-alpine
 ARG BUILD_ENV=local
 
 # 阶段0：前端构建阶段
 FROM ${NODE_IMAGE} AS frontend-builder
 WORKDIR /app/web/frontend
-RUN npm install -g pnpm
+RUN npm install -g pnpm@10.25.0
 COPY web/frontend/package.json web/frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/frontend/ ./
