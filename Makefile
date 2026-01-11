@@ -11,7 +11,7 @@ NEW_TAG = $(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
 TAG ?= $(GIT_TAG)
 DOCKER_REPO = sunerpy
 DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
-BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H: %M:%SZ")
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT_ID := $(shell git rev-parse HEAD)
 ifeq ($(MAKECMDGOALS), prod-new)
   TAG = $(NEW_TAG)
