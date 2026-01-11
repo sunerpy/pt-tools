@@ -367,6 +367,20 @@ function goBack() {
   router.push('/sites')
 }
 
+function toggleNewRssCustomPath() {
+  newRssUseCustomPath.value = !newRssUseCustomPath.value
+  if (!newRssUseCustomPath.value) {
+    newRss.download_path = ''
+  }
+}
+
+function toggleEditRssCustomPath() {
+  editRssUseCustomPath.value = !editRssUseCustomPath.value
+  if (!editRssUseCustomPath.value) {
+    editingRss.download_path = ''
+  }
+}
+
 function getRowClassName({ row }: { row: RSSConfig }) {
   return row.is_example ? 'example-row' : ''
 }
@@ -646,10 +660,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             <el-button
               :type="newRssUseCustomPath ? 'primary' : 'default'"
               :icon="newRssUseCustomPath ? 'Select' : 'Edit'"
-              @click="
-                newRssUseCustomPath = !newRssUseCustomPath
-                if (!newRssUseCustomPath) newRss.download_path = ''
-              "
+              @click="toggleNewRssCustomPath"
             >
               {{ newRssUseCustomPath ? '选择预设' : '自定义' }}
             </el-button>
@@ -749,10 +760,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             <el-button
               :type="editRssUseCustomPath ? 'primary' : 'default'"
               :icon="editRssUseCustomPath ? 'Select' : 'Edit'"
-              @click="
-                editRssUseCustomPath = !editRssUseCustomPath
-                if (!editRssUseCustomPath) editingRss.download_path = ''
-              "
+              @click="toggleEditRssCustomPath"
             >
               {{ editRssUseCustomPath ? '选择预设' : '自定义' }}
             </el-button>

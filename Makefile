@@ -159,7 +159,7 @@ clean-docker:
 	docker builder prune -f
 
 lint: ## Run linters
-	@echo "Running linters..."
+	@echo "Running Go linters..."
 	@if command -v golangci-lint > /dev/null 2>&1; then \
 		golangci-lint run ./...; \
 	else \
@@ -169,6 +169,16 @@ lint: ## Run linters
 		echo "Running go vet instead..."; \
 		go vet ./...; \
 	fi
+	@echo ""
+	@echo "Running frontend linters..."
+	@cd web/frontend && if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		pnpm install; \
+	fi && \
+	pnpm lint:check && \
+	echo "" && \
+	echo "Running Vue type check..." && \
+	pnpm vue-tsc --noEmit
 
 # 代码格式化
 fmt:

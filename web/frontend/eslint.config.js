@@ -37,10 +37,16 @@ export default [
       vue: pluginVue
     },
     rules: {
-      ...pluginVue.configs['flat/essential'].rules,
+      ...pluginVue.configs['flat/recommended'].rules,
+      // 检测模板中的解析错误
+      'vue/no-parsing-error': 'error',
       'no-unused-vars': 'off',
       'no-undef': 'off',
-      'no-control-regex': 'off'
+      'no-control-regex': 'off',
+      // 关闭一些与 Prettier 冲突或过于严格的规则
+      'vue/max-attributes-per-line': 'off',
+      'vue/singleline-html-element-content-newline': 'off',
+      'vue/html-self-closing': 'off'
     }
   },
 
