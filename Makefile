@@ -31,9 +31,9 @@ HTTPS_PROXY ?=
 NO_PROXY ?=
 
 # 默认基础镜像
-BUILD_IMAGE ?= golang:1.25.2
+BUILD_IMAGE ?= golang:1.25.5
 BASE_IMAGE ?= alpine:3.20.3
-NODE_IMAGE ?= node:22.13.0-alpine
+NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
 .PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt lint unit-test coverage-summary
