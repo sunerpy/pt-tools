@@ -20,26 +20,28 @@ const (
 
 // TorrentInfo 表示种子信息
 type TorrentInfo struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
-	SiteName      string     `gorm:"uniqueIndex:idx_site_torrent" json:"siteName"`
-	TorrentID     string     `gorm:"uniqueIndex:idx_site_torrent" json:"torrentId"`
-	TorrentHash   *string    `gorm:"index" json:"torrentHash"`
-	IsFree        bool       `gorm:"default:false" json:"isFree"`
-	IsDownloaded  bool       `gorm:"default:false" json:"isDownloaded"`
-	IsPushed      *bool      `gorm:"default:null" json:"isPushed"`
-	IsSkipped     bool       `gorm:"default:false" json:"isSkipped"`
-	FreeLevel     string     `gorm:"default:'normal'" json:"freeLevel"`
-	FreeEndTime   *time.Time `gorm:"default:null" json:"freeEndTime"`
-	PushTime      *time.Time `gorm:"default:null" json:"pushTime"`
-	Title         string     `gorm:"default:''" json:"title"`
-	Category      string     `gorm:"default:''" json:"category"`
-	Tag           string     `gorm:"default:''" json:"tag"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
-	IsExpired     bool       `gorm:"default:false" json:"isExpired"`
-	LastCheckTime *time.Time `gorm:"default:null" json:"lastCheckTime"`
-	RetryCount    int        `gorm:"default:0" json:"retryCount"`
-	LastError     string     `gorm:"default:''" json:"lastError"`
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	SiteName       string     `gorm:"uniqueIndex:idx_site_torrent" json:"siteName"`
+	TorrentID      string     `gorm:"uniqueIndex:idx_site_torrent" json:"torrentId"`
+	TorrentHash    *string    `gorm:"index" json:"torrentHash"`
+	IsFree         bool       `gorm:"default:false" json:"isFree"`
+	IsDownloaded   bool       `gorm:"default:false" json:"isDownloaded"`
+	IsPushed       *bool      `gorm:"default:null" json:"isPushed"`
+	IsSkipped      bool       `gorm:"default:false" json:"isSkipped"`
+	FreeLevel      string     `gorm:"default:'normal'" json:"freeLevel"`
+	FreeEndTime    *time.Time `gorm:"default:null" json:"freeEndTime"`
+	PushTime       *time.Time `gorm:"default:null" json:"pushTime"`
+	Title          string     `gorm:"default:''" json:"title"`
+	Category       string     `gorm:"default:''" json:"category"`
+	Tag            string     `gorm:"default:''" json:"tag"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	IsExpired      bool       `gorm:"default:false" json:"isExpired"`
+	LastCheckTime  *time.Time `gorm:"default:null" json:"lastCheckTime"`
+	RetryCount     int        `gorm:"default:0" json:"retryCount"`
+	LastError      string     `gorm:"default:''" json:"lastError"`
+	DownloadSource string     `gorm:"size:32;default:'free_download'" json:"downloadSource"` // free_download or filter_rule
+	FilterRuleID   *uint      `gorm:"index" json:"filterRuleId"`                             // ID of the matched filter rule
 }
 
 func (t *TorrentInfo) GetExpired() bool {
@@ -63,6 +65,11 @@ type TorrentDB struct {
 
 // NewDB 初始化并返回 TorrentDB
 func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
+	return NewDBWithVersion(gormLg, "unknown")
+}
+
+// NewDBWithVersion 初始化并返回 TorrentDB（带应用版本）
+func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, error) {
 	// 确保工作目录存在
 	homeDir, _ := os.UserHomeDir()
 	dbDir := filepath.Join(homeDir, WorkDir)
@@ -83,16 +90,36 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 	if err := db.Exec("PRAGMA journal_mode=WAL;").Error; err != nil {
 		return nil, fmt.Errorf("无法启用 WAL 模式: %w", err)
 	}
+	// 自动迁移表结构（包括版本表）
 	if err := db.AutoMigrate(
+		&SchemaVersion{}, // 版本表必须最先迁移
 		&TorrentInfo{},
 		&AdminUser{},
 		&SettingsGlobal{},
 		&QbitSettings{},
 		&SiteSetting{},
 		&RSSSubscription{},
+		// New tables for downloader and site extensibility
+		&DownloaderSetting{},
+		&DownloaderDirectory{}, // 下载器目录配置
+		&DynamicSiteSetting{},
+		&SiteTemplate{},
+		// Filter rules for RSS filtering
+		&FilterRule{},
+		// RSS-Filter association table for many-to-many relationship
+		&RSSFilterAssociation{},
+		// Favicon cache for site icons
+		&FaviconCache{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
+
+	// 运行架构版本迁移
+	schemaManager := NewSchemaManager(db, appVersion)
+	if err := schemaManager.RunMigrations(); err != nil {
+		return nil, fmt.Errorf("架构迁移失败: %w", err)
+	}
+
 	// 保证存在全局设置条目（仅在空时写入默认）
 	var glCnt int64
 	if err := db.Model(&SettingsGlobal{}).Count(&glCnt).Error; err != nil {
@@ -101,7 +128,8 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 	if glCnt == 0 {
 		def := SettingsGlobal{
 			DownloadDir:            "downloads",
-			DefaultIntervalMinutes: 10,
+			DefaultIntervalMinutes: DefaultIntervalMinutes,
+			DefaultConcurrency:     DefaultConcurrency,
 			DefaultEnabled:         false,
 			DownloadLimitEnabled:   false,
 			DownloadSpeedLimit:     0,
@@ -114,10 +142,8 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 			return nil, fmt.Errorf("写入默认全局设置失败: %w", err)
 		}
 	}
-	// 预置站点与 RSS 仅在空库时写入一次
-	if err := SeedDefaultSites(db); err != nil {
-		return nil, fmt.Errorf("初始化默认站点失败: %w", err)
-	}
+	// 站点同步由 core.ConfigStore.SyncSites() 在应用启动时处理
+
 	var mode string
 	if err := db.Raw("PRAGMA journal_mode;").Scan(&mode).Error; err != nil {
 		return nil, fmt.Errorf("无法验证 WAL 模式: %w", err)
@@ -166,7 +192,7 @@ func (t *TorrentDB) DeleteTorrent(torrentHash string) error {
 func (t *TorrentDB) UpdateTorrentStatus(torrentHash string, isDownloaded, isPushed bool, pushTime *time.Time) error {
 	return t.DB.Model(&TorrentInfo{}).
 		Where("torrent_hash = ?", torrentHash).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"is_downloaded": isDownloaded,
 			"is_pushed":     isPushed,
 			"push_time":     pushTime,

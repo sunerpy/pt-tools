@@ -11,20 +11,28 @@ import (
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/transmission"
 )
 
 type job struct {
 	cancel context.CancelFunc
 }
 type Manager struct {
-	mu          sync.Mutex
-	jobs        map[string]*job // key: site|rss.name
-	wg          sync.WaitGroup
-	lastVersion int64
+	mu                sync.Mutex
+	jobs              map[string]*job // key: site|rss.name
+	wg                sync.WaitGroup
+	lastVersion       int64
+	downloaderManager *downloader.DownloaderManager
 }
 
 func NewManager() *Manager {
-	m := &Manager{jobs: map[string]*job{}}
+	m := &Manager{
+		jobs:              map[string]*job{},
+		downloaderManager: downloader.NewDownloaderManager(),
+	}
+
 	id, ch, cancel := events.Subscribe(64)
 	_ = id
 	go func() {
@@ -61,6 +69,12 @@ func NewManager() *Manager {
 	}()
 	return m
 }
+
+// GetDownloaderManager 获取下载器管理器
+func (m *Manager) GetDownloaderManager() *downloader.DownloaderManager {
+	return m.downloaderManager
+}
+
 func (m *Manager) LastVersion() int64 { return m.lastVersion }
 func key(site models.SiteGroup, rssName string) string {
 	return string(site) + "|" + rssName
@@ -116,70 +130,167 @@ func (m *Manager) Reload(cfg *models.Config) {
 	m.mu.Lock()
 	m.jobs = map[string]*job{}
 	m.mu.Unlock()
+
+	// 初始化下载器管理器
+	m.initDownloaderManager()
+
 	// 重新启动：每次启动任务时从 DB 读取最新配置，保证一致性
 	store := core.NewConfigStore(global.GlobalDB)
 	qb, _ := store.GetQbitOnly()
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {
-			switch site {
-			case models.MTEAM:
-				if qb.URL == "" || qb.User == "" || qb.Password == "" {
-					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
+			// 使用统一的工厂函数创建站点实现
+			impl, err := internal.NewUnifiedSiteImpl(context.Background(), site)
+			if err != nil {
+				global.GetSlogger().Warnf("站点 %s 未注册或不支持，跳过: %v", string(site), err)
+				continue
+			}
+			// 检查下载器配置
+			if qb.URL == "" || qb.User == "" || qb.Password == "" {
+				global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
+				continue
+			}
+			for _, r := range sc.RSS {
+				if r.ShouldSkip() {
+					global.GetSlogger().Debugf("跳过RSS配置: %s %s (示例或空URL)", string(site), r.Name)
 					continue
 				}
-				impl, err := internal.NewMteamImpl(context.Background())
-				if err != nil {
-					global.GetSlogger().Errorf("初始化MTEAM站点失败，跳过该站点: %v", err)
+				if !validRSS(r.URL) {
+					global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
 					continue
 				}
-				for _, r := range sc.RSS {
-					if !validRSS(r.URL) {
-						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
-						continue
-					}
-					rr := r
-					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-				}
-			case models.HDSKY:
-				if qb.URL == "" || qb.User == "" || qb.Password == "" {
-					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
-					continue
-				}
-				impl, err := internal.NewHdskyImpl(context.Background())
-				if err != nil {
-					global.GetSlogger().Errorf("初始化HDSKY站点失败，跳过该站点: %v", err)
-					continue
-				}
-				for _, r := range sc.RSS {
-					if !validRSS(r.URL) {
-						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
-						continue
-					}
-					rr := r
-					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-				}
-			case models.CMCT:
-				if qb.URL == "" || qb.User == "" || qb.Password == "" {
-					global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
-					continue
-				}
-				impl, err := internal.NewCmctImpl(context.Background())
-				if err != nil {
-					global.GetSlogger().Errorf("初始化CMCT站点失败，跳过该站点: %v", err)
-					continue
-				}
-				for _, r := range sc.RSS {
-					if !validRSS(r.URL) {
-						global.GetSlogger().Warnf("跳过无效RSS: %s %s", string(site), r.Name)
-						continue
-					}
-					rr := r
-					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-				}
-			default:
-				global.GetSlogger().Warnf("未知站点: %s", string(site))
+				rr := r
+				m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJobUnified(ctx, rr, impl) })
 			}
 		}
+	}
+}
+
+// initDownloaderManager 从数据库初始化下载器管理器
+func (m *Manager) initDownloaderManager() {
+	if global.GlobalDB == nil {
+		return
+	}
+
+	// 注册下载器工厂
+	m.downloaderManager.RegisterFactory(downloader.DownloaderQBittorrent, createQBitFactory())
+	m.downloaderManager.RegisterFactory(downloader.DownloaderTransmission, createTransmissionFactory())
+
+	// 从数据库加载下载器配置
+	var downloaderSettings []models.DownloaderSetting
+	if err := global.GlobalDB.DB.Find(&downloaderSettings).Error; err != nil {
+		global.GetSlogger().Errorf("加载下载器配置失败: %v", err)
+		return
+	}
+
+	for _, ds := range downloaderSettings {
+		if !ds.Enabled {
+			continue
+		}
+
+		var config downloader.DownloaderConfig
+		switch ds.Type {
+		case "qbittorrent":
+			config = &qbitDownloaderConfig{
+				url:       ds.URL,
+				username:  ds.Username,
+				password:  ds.Password,
+				autoStart: ds.AutoStart,
+			}
+		case "transmission":
+			config = &transmissionDownloaderConfig{
+				url:       ds.URL,
+				username:  ds.Username,
+				password:  ds.Password,
+				autoStart: ds.AutoStart,
+			}
+		default:
+			global.GetSlogger().Warnf("未知下载器类型: %s", ds.Type)
+			continue
+		}
+
+		if err := m.downloaderManager.RegisterConfig(ds.Name, config, ds.IsDefault); err != nil {
+			global.GetSlogger().Errorf("注册下载器配置失败: %s, %v", ds.Name, err)
+		}
+	}
+
+	// 加载站点-下载器映射
+	var dynamicSites []models.DynamicSiteSetting
+	if err := global.GlobalDB.DB.Find(&dynamicSites).Error; err != nil {
+		global.GetSlogger().Errorf("加载动态站点配置失败: %v", err)
+		return
+	}
+
+	for _, ds := range dynamicSites {
+		if ds.DownloaderID != nil {
+			// 查找下载器名称
+			var dlSetting models.DownloaderSetting
+			if err := global.GlobalDB.DB.First(&dlSetting, *ds.DownloaderID).Error; err == nil {
+				m.downloaderManager.SetSiteDownloader(ds.Name, dlSetting.Name)
+			}
+		}
+	}
+
+	global.GetSlogger().Info("下载器管理器初始化完成")
+}
+
+// qbitDownloaderConfig qBittorrent 下载器配置
+type qbitDownloaderConfig struct {
+	url       string
+	username  string
+	password  string
+	autoStart bool
+}
+
+func (c *qbitDownloaderConfig) GetType() downloader.DownloaderType {
+	return downloader.DownloaderQBittorrent
+}
+func (c *qbitDownloaderConfig) GetURL() string      { return c.url }
+func (c *qbitDownloaderConfig) GetUsername() string { return c.username }
+func (c *qbitDownloaderConfig) GetPassword() string { return c.password }
+func (c *qbitDownloaderConfig) GetAutoStart() bool  { return c.autoStart }
+func (c *qbitDownloaderConfig) Validate() error {
+	if c.url == "" {
+		return downloader.ErrInvalidConfig
+	}
+	return nil
+}
+
+// transmissionDownloaderConfig Transmission 下载器配置
+type transmissionDownloaderConfig struct {
+	url       string
+	username  string
+	password  string
+	autoStart bool
+}
+
+func (c *transmissionDownloaderConfig) GetType() downloader.DownloaderType {
+	return downloader.DownloaderTransmission
+}
+func (c *transmissionDownloaderConfig) GetURL() string      { return c.url }
+func (c *transmissionDownloaderConfig) GetUsername() string { return c.username }
+func (c *transmissionDownloaderConfig) GetPassword() string { return c.password }
+func (c *transmissionDownloaderConfig) GetAutoStart() bool  { return c.autoStart }
+func (c *transmissionDownloaderConfig) Validate() error {
+	if c.url == "" {
+		return downloader.ErrInvalidConfig
+	}
+	return nil
+}
+
+// createQBitFactory 创建 qBittorrent 工厂
+func createQBitFactory() downloader.DownloaderFactory {
+	return func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		qbitConfig := qbit.NewQBitConfigWithAutoStart(config.GetURL(), config.GetUsername(), config.GetPassword(), config.GetAutoStart())
+		return qbit.NewQbitClient(qbitConfig, name)
+	}
+}
+
+// createTransmissionFactory 创建 Transmission 工厂
+func createTransmissionFactory() downloader.DownloaderFactory {
+	return func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		transConfig := transmission.NewTransmissionConfigWithAutoStart(config.GetURL(), config.GetUsername(), config.GetPassword(), config.GetAutoStart())
+		return transmission.NewTransmissionClient(transConfig, name)
 	}
 }
 
@@ -226,45 +337,70 @@ func (m *Manager) StopAll() {
 func (m *Manager) StartAll(cfg *models.Config) {
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {
-			switch site {
-			case models.MTEAM:
-				impl, err := internal.NewMteamImpl(context.Background())
-				if err != nil {
-					global.GetSlogger().Errorf("初始化MTEAM站点失败，跳过该站点: %v", err)
+			// 使用统一的工厂函数创建站点实现
+			impl, err := internal.NewUnifiedSiteImpl(context.Background(), site)
+			if err != nil {
+				global.GetSlogger().Warnf("站点 %s 未注册或不支持，跳过: %v", string(site), err)
+				continue
+			}
+			for _, r := range sc.RSS {
+				if r.ShouldSkip() {
+					global.GetSlogger().Debugf("跳过RSS配置: %s %s (示例或空URL)", string(site), r.Name)
 					continue
 				}
-				for _, r := range sc.RSS {
-					rr := r
-					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-				}
-			case models.HDSKY:
-				impl, err := internal.NewHdskyImpl(context.Background())
-				if err != nil {
-					global.GetSlogger().Errorf("初始化HDSKY站点失败，跳过该站点: %v", err)
-					continue
-				}
-				for _, r := range sc.RSS {
-					rr := r
-					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-				}
-			case models.CMCT:
-				impl, err := internal.NewCmctImpl(context.Background())
-				if err != nil {
-					global.GetSlogger().Errorf("初始化CMCT站点失败，跳过该站点: %v", err)
-					continue
-				}
-				for _, r := range sc.RSS {
-					rr := r
-					m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJob(ctx, site, rr, impl) })
-				}
-			default:
-				global.GetSlogger().Warnf("未知站点: %s", string(site))
+				rr := r
+				m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJobUnified(ctx, rr, impl) })
 			}
 		}
 	}
 }
 
-// 本地复制 runRSSJob 以便独立运行（与 cmd/rss.go 同步逻辑）
+// runRSSJobUnified 使用 UnifiedPTSite 接口运行 RSS 任务
+func runRSSJobUnified(ctx context.Context, cfg models.RSSConfig, siteImpl internal.UnifiedPTSite) {
+	ticker := time.NewTicker(getInterval(cfg))
+	defer ticker.Stop()
+	executeTaskUnified(ctx, cfg, siteImpl)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			executeTaskUnified(ctx, cfg, siteImpl)
+		}
+	}
+}
+
+func getInterval(cfg models.RSSConfig) time.Duration {
+	var gl *models.SettingsGlobal
+	if global.GlobalDB != nil {
+		store := core.NewConfigStore(global.GlobalDB)
+		if g, err := store.GetGlobalOnly(); err == nil {
+			gl = &g
+		}
+	}
+	// 使用 RSSConfig 的方法获取有效间隔时间
+	intervalMinutes := cfg.GetEffectiveIntervalMinutes(gl)
+	return time.Duration(intervalMinutes) * time.Minute
+}
+
+func executeTaskUnified(ctx context.Context, cfg models.RSSConfig, siteImpl internal.UnifiedPTSite) {
+	if err := processRSSUnified(ctx, cfg, siteImpl); err != nil {
+		global.GetSlogger().Errorf("站点: %s 任务执行失败, %v", cfg.Name, err)
+	}
+}
+
+func processRSSUnified(ctx context.Context, cfg models.RSSConfig, ptSite internal.UnifiedPTSite) error {
+	if err := internal.FetchAndDownloadFreeRSSUnified(ctx, ptSite, cfg); err != nil {
+		return err
+	}
+	if err := ptSite.SendTorrentToQbit(ctx, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// runRSSJob 旧的泛型版本（已废弃，请使用 runRSSJobUnified）
+// Deprecated: Use runRSSJobUnified instead for new implementations
 func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg models.RSSConfig, siteImpl internal.PTSiteInter[T]) {
 	ticker := time.NewTicker(getInterval(cfg))
 	defer ticker.Stop()
@@ -277,21 +413,6 @@ func runRSSJob[T models.ResType](ctx context.Context, siteName models.SiteGroup,
 			executeTask(ctx, siteName, cfg, siteImpl)
 		}
 	}
-}
-
-func getInterval(cfg models.RSSConfig) time.Duration {
-	if cfg.IntervalMinutes <= 0 {
-		// 从 DB 读取默认间隔
-		if global.GlobalDB != nil {
-			store := core.NewConfigStore(global.GlobalDB)
-			gl, err := store.GetGlobalOnly()
-			if err == nil && gl.DefaultIntervalMinutes > 0 {
-				return time.Duration(gl.DefaultIntervalMinutes) * time.Minute
-			}
-		}
-		return 10 * time.Minute
-	}
-	return time.Duration(cfg.IntervalMinutes) * time.Minute
 }
 
 func executeTask[T models.ResType](ctx context.Context, siteName models.SiteGroup, cfg models.RSSConfig, siteImpl internal.PTSiteInter[T]) {

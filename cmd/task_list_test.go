@@ -4,9 +4,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
-	"go.uber.org/zap"
 )
 
 func TestTaskListCmd_PrintsForDate(t *testing.T) {

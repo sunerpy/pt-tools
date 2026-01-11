@@ -23,6 +23,7 @@ const (
 // PHPTorrentInfo 定义种子信息结构
 type PHPTorrentInfo struct {
 	Title     string       // 种子标题
+	SubTitle  string       // 副标题/标签
 	TorrentID string       // 种子 ID
 	Discount  DiscountType // 优惠类型
 	EndTime   time.Time    // 优惠结束时间
@@ -68,4 +69,14 @@ func (p PHPTorrentInfo) GetFreeLevel() string {
 		return string(p.Discount)
 	}
 	return "failed"
+}
+
+// GetName 获取种子名称
+func (p PHPTorrentInfo) GetName() string {
+	return p.Title
+}
+
+// GetSubTitle 获取副标题
+func (p PHPTorrentInfo) GetSubTitle() string {
+	return p.SubTitle
 }

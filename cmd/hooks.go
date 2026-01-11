@@ -6,6 +6,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 )
@@ -13,7 +14,7 @@ import (
 func PersistentCheckCfg(cmd *cobra.Command, args []string) {
 	if err := initTools(); err != nil {
 		color.Red("初始化失败: %v", err)
-		cmd.Usage()
+		_ = cmd.Usage()
 		os.Exit(1)
 	}
 	store := core.NewConfigStore(global.GlobalDB)

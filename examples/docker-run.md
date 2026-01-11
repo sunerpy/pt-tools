@@ -1,33 +1,104 @@
-# 使用 Docker 运行 pt-tools（Web 默认）
+# 使用 Docker 运行 pt-tools
 
-- 默认环境变量：`PT_WEB=1`、`PT_HOST=0.0.0.0`、`PT_PORT=8080`
-- 首次运行无需提供任何配置文件，进入 Web 页面完成初始化。
+## 功能特性
 
-## 直接运行
+- RSS 自动订阅下载免费种子
+- 多站点种子搜索（HDSky、SpringSunday、M-Team、HDDolby）
+- 用户信息统计和等级进度追踪
+- 支持 qBittorrent 和 Transmission 下载器
+- 过滤规则精细化筛选
 
-```bash
-docker run -dit \
-  -p 8080:8080 \
-  --name pt-tools \
-  sunerpy/pt-tools:latest
-```
-
-访问 `http://localhost:8080/` 进行 Web 初始化。
-
-## 指定数据持久化目录
-
-推荐将数据目录挂载到本机（数据库与下载目录均位于其中）。
+## 快速启动
 
 ```bash
 docker run -d \
-  -e PT_HOST=0.0.0.0 \
-  -e PT_PORT=8080 \
-  -p 8080:8080 \
-  -v ~/pt-data:/app/.pt-tools \
   --name pt-tools \
+  -p 8080:8080 \
   sunerpy/pt-tools:latest
 ```
 
-> 数据库存放在 `~/.pt-tools/torrents.db`（容器内 `/app/.pt-tools/torrents.db`）；下载目录默认位于 `~/.pt-tools/downloads`（容器内 `/app/.pt-tools/downloads`）。统一挂载 `/app/.pt-tools` 可持久化所有数据。
+访问 `http://localhost:8080` 进入 Web 管理界面。
 
-容器默认启动 Web 管理界面，无需 `config.toml`。
+**默认登录账号**：`admin` / `adminadmin`
+
+## 推荐配置（数据持久化）
+
+```bash
+docker run -d \
+  --name pt-tools \
+  -p 8080:8080 \
+  -v ~/pt-data:/app/.pt-tools \
+  -e PT_HOST=0.0.0.0 \
+  -e PT_PORT=8080 \
+  -e TZ=Asia/Shanghai \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  sunerpy/pt-tools:latest
+```
+
+## 数据目录说明
+
+挂载 `/app/.pt-tools` 目录以持久化所有数据：
+
+```
+~/pt-data/
+├── torrents.db      # SQLite 数据库（配置、任务记录、用户信息缓存）
+└── downloads/       # 种子文件下载目录
+```
+
+## 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `PT_HOST` | 监听地址 | `0.0.0.0` |
+| `PT_PORT` | 监听端口 | `8080` |
+| `PT_ADMIN_USER` | 管理员用户名 | `admin` |
+| `PT_ADMIN_PASS` | 管理员密码 | `adminadmin` |
+| `PT_ADMIN_RESET` | 重置密码（设为 `1`） | - |
+| `PUID` | 用户 ID | `1000` |
+| `PGID` | 组 ID | `1000` |
+| `TZ` | 时区 | `Asia/Shanghai` |
+
+## 重置管理员密码
+
+```bash
+docker run -d \
+  --name pt-tools \
+  -p 8080:8080 \
+  -v ~/pt-data:/app/.pt-tools \
+  -e PT_ADMIN_RESET=1 \
+  -e PT_ADMIN_USER=admin \
+  -e PT_ADMIN_PASS='新密码' \
+  sunerpy/pt-tools:latest
+```
+
+重置完成后，停止容器并移除 `PT_ADMIN_RESET` 环境变量重新启动：
+
+```bash
+docker stop pt-tools && docker rm pt-tools
+
+docker run -d \
+  --name pt-tools \
+  -p 8080:8080 \
+  -v ~/pt-data:/app/.pt-tools \
+  -e TZ=Asia/Shanghai \
+  sunerpy/pt-tools:latest
+```
+
+## Web 界面功能
+
+1. **用户信息仪表盘**：查看所有站点的上传量、下载量、魔力值、等级进度等
+2. **种子搜索**：跨站点搜索种子，支持批量下载和推送到下载器
+3. **下载器管理**：配置 qBittorrent/Transmission，设置下载目录
+4. **站点管理**：配置站点认证信息和 RSS 订阅
+5. **过滤规则**：对 RSS 进行精细化筛选
+6. **任务列表**：查看所有下载任务记录
+
+## 内置支持站点
+
+- HDSky（Cookie 认证）
+- SpringSunday（Cookie 认证）
+- M-Team（API Key 认证）
+- HDDolby（Cookie 认证）
+
+> 如需支持其他站点，欢迎提交 Issue 或 PR。

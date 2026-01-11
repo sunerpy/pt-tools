@@ -5,10 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sunerpy/pt-tools/models"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/sunerpy/pt-tools/models"
 )
 
 var DefaultZapConfig = Zap{
@@ -23,6 +24,13 @@ var DefaultZapConfig = Zap{
 	EncodeLevel:   "CapitalColorLevelEncoder",
 	StacktraceKey: "",
 	LogInConsole:  true,
+}
+
+// AtomicLogLevel 全局动态日志级别，用于运行时调整
+var AtomicLogLevel zap.AtomicLevel
+
+func init() {
+	AtomicLogLevel = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 }
 
 type Zap struct {
@@ -60,10 +68,14 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 	if err := os.MkdirAll(zapPath, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("创建日志目录失败: %w", err)
 	}
+
+	// 解析初始日志级别并设置到 AtomicLogLevel
 	var level zapcore.Level
 	if err := level.UnmarshalText([]byte(z.Level)); err != nil {
 		return nil, fmt.Errorf("解析日志级别失败: %w", err)
 	}
+	AtomicLogLevel.SetLevel(level)
+
 	encCfg := zapcore.EncoderConfig{
 		TimeKey:        "time",
 		LevelKey:       "level",
@@ -99,15 +111,18 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 		MaxAge:     z.MaxAge,
 		Compress:   z.Compress,
 	})
+
+	// 使用 AtomicLogLevel 实现动态日志级别
 	debugPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-		return lvl <= zapcore.DebugLevel && lvl >= level
+		return lvl == zapcore.DebugLevel && lvl >= AtomicLogLevel.Level()
 	})
 	highPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-		return lvl >= zapcore.ErrorLevel && lvl >= level
+		return lvl >= zapcore.ErrorLevel && lvl >= AtomicLogLevel.Level()
 	})
 	lowPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-		return lvl > zapcore.DebugLevel && lvl < zapcore.ErrorLevel && lvl >= level
+		return lvl > zapcore.DebugLevel && lvl < zapcore.ErrorLevel && lvl >= AtomicLogLevel.Level()
 	})
+
 	cores := []zapcore.Core{
 		zapcore.NewCore(fileEncoder, debugWriter, debugPriority),
 		zapcore.NewCore(fileEncoder, infoWriter, lowPriority),
@@ -128,7 +143,8 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		}
 		consoleEncoder := zapcore.NewConsoleEncoder(consoleCfg)
-		consoleCore := zapcore.NewCore(consoleEncoder, zapcore.Lock(os.Stdout), zap.LevelEnablerFunc(func(lvl zapcore.Level) bool { return lvl >= level }))
+		// 控制台也使用动态日志级别
+		consoleCore := zapcore.NewCore(consoleEncoder, zapcore.Lock(os.Stdout), AtomicLogLevel)
 		cores = append(cores, consoleCore)
 	}
 	core := zapcore.NewTee(cores...)
@@ -147,4 +163,17 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 	return logger, nil
 }
 
-// 保留编码器级别选择方法
+// SetLogLevel 动态设置日志级别
+func SetLogLevel(level string) error {
+	var zapLevel zapcore.Level
+	if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
+		return fmt.Errorf("无效的日志级别: %s", level)
+	}
+	AtomicLogLevel.SetLevel(zapLevel)
+	return nil
+}
+
+// GetLogLevel 获取当前日志级别
+func GetLogLevel() string {
+	return AtomicLogLevel.Level().String()
+}

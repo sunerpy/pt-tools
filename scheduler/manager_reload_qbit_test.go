@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
 )
 
 func TestReload_QbitNotConfiguredWarnPaths(t *testing.T) {
@@ -20,7 +21,7 @@ func TestReload_QbitNotConfiguredWarnPaths(t *testing.T) {
 	cfg := &models.Config{Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true}, Sites: map[models.SiteGroup]models.SiteConfig{}}
 	// add three sites with enabled=true and invalid rss to hit qbit not configured warnings
 	e := true
-	cfg.Sites[models.CMCT] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}}
+	cfg.Sites[models.SpringSunday] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}}
 	cfg.Sites[models.HDSKY] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r2", URL: "http://"}}}
 	cfg.Sites[models.MTEAM] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r3", URL: "http://"}}}
 	m := NewManager()

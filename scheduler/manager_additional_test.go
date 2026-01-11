@@ -4,9 +4,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
 )
 
 func TestStartAll_UnknownSiteHandled(t *testing.T) {

@@ -29,7 +29,7 @@ var configCmd = &cobra.Command{
 	Long:    "管理运行所需的本地目录（如 ~/.pt-tools 与 downloads）",
 	Example: `  pt-tools config init`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Usage()
+		_ = cmd.Usage()
 	},
 	Hidden: true,
 }

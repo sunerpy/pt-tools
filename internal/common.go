@@ -1,11 +1,9 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,22 +13,285 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/sunerpy/pt-tools/core"
-	"github.com/sunerpy/pt-tools/global"
-	"github.com/sunerpy/pt-tools/models"
-	"github.com/sunerpy/pt-tools/thirdpart/qbit"
-	"github.com/sunerpy/pt-tools/utils"
+	"github.com/sunerpy/requests"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/sunerpy/pt-tools/core"
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/filter"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/transmission"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
+// GetDownloaderForRSS 根据 RSS 配置获取下载器
+// 优先级：RSS 指定的下载器 > 默认下载器
+func GetDownloaderForRSS(rssCfg models.RSSConfig) (downloader.Downloader, error) {
+	if global.GlobalDB == nil {
+		return nil, errors.New("数据库未初始化")
+	}
+
+	var dlSetting models.DownloaderSetting
+
+	if rssCfg.DownloaderID != nil {
+		// 使用 RSS 指定的下载器
+		if err := global.GlobalDB.DB.First(&dlSetting, *rssCfg.DownloaderID).Error; err != nil {
+			return nil, fmt.Errorf("获取指定下载器失败: %w", err)
+		}
+		if !dlSetting.Enabled {
+			return nil, fmt.Errorf("指定的下载器 %s 未启用", dlSetting.Name)
+		}
+	} else {
+		// 使用默认下载器
+		if err := global.GlobalDB.DB.Where("is_default = ?", true).First(&dlSetting).Error; err != nil {
+			return nil, fmt.Errorf("获取默认下载器失败: %w", err)
+		}
+		if !dlSetting.Enabled {
+			return nil, fmt.Errorf("默认下载器 %s 未启用", dlSetting.Name)
+		}
+	}
+
+	// 根据类型创建下载器实例
+	switch dlSetting.Type {
+	case "qbittorrent":
+		config := qbit.NewQBitConfig(dlSetting.URL, dlSetting.Username, dlSetting.Password)
+		return qbit.NewQbitClient(config, dlSetting.Name)
+	case "transmission":
+		config := transmission.NewTransmissionConfigWithAutoStart(dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
+		return transmission.NewTransmissionClient(config, dlSetting.Name)
+	default:
+		return nil, fmt.Errorf("不支持的下载器类型: %s", dlSetting.Type)
+	}
+}
+
+// ProcessTorrentsWithDownloaderByRSS 根据 RSS 配置选择下载器并处理种子
+func ProcessTorrentsWithDownloaderByRSS(
+	ctx context.Context,
+	rssCfg models.RSSConfig,
+	dirPath, category, tags string,
+	siteName models.SiteGroup,
+) error {
+	dl, err := GetDownloaderForRSS(rssCfg)
+	if err != nil {
+		return fmt.Errorf("获取下载器失败: %w", err)
+	}
+	defer dl.Close()
+
+	sLogger().Infof("使用下载器: %s (%s) 处理种子", dl.GetName(), dl.GetType())
+
+	// 获取 RSS 配置的自定义下载路径
+	downloadPath := rssCfg.GetEffectiveDownloadPath()
+	if downloadPath != "" {
+		sLogger().Infof("使用自定义下载路径: %s", downloadPath)
+	}
+
+	// 获取目录下的所有种子文件
+	filePaths, err := qbit.GetTorrentFilesPath(dirPath)
+	if err != nil {
+		sLogger().Error("无法读取目录", dirPath, err)
+		return fmt.Errorf("无法读取目录: %v", err)
+	}
+
+	// 为每个种子创建独立处理
+	for _, file := range filePaths {
+		err := processSingleTorrentWithDownloader(ctx, dl, file, category, tags, downloadPath, siteName)
+		if err != nil {
+			sLogger().Errorf("处理种子失败: %s, %v", file, err)
+			// 记录错误但继续处理其他种子
+		}
+	}
+
+	sLogger().Info("所有种子处理完成")
+	return nil
+}
+
+// processSingleTorrentWithDownloader 使用指定下载器处理单个种子
+func processSingleTorrentWithDownloader(
+	ctx context.Context,
+	dl downloader.Downloader,
+	filePath, category, tags, downloadPath string,
+	siteName models.SiteGroup,
+) error {
+	return global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
+		// 计算种子哈希
+		torrentHash, err := qbit.ComputeTorrentHashWithPath(filePath)
+		if err != nil {
+			sLogger().Errorf("计算种子哈希失败: %s, %v", filePath, err)
+			return fmt.Errorf("计算种子哈希失败: %w", err)
+		}
+
+		// 查询数据库中的种子信息
+		torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(string(siteName), torrentHash)
+		if err != nil {
+			sLogger().Errorf("查询种子信息失败: %s, %v", filePath, err)
+			return fmt.Errorf("查询种子信息失败: %w", err)
+		}
+
+		if torrent == nil {
+			sLogger().Warnf("数据库不存在记录，删除孤立种子文件: %s, hash: %s", filePath, torrentHash)
+			if err = os.Remove(filePath); err != nil {
+				sLogger().Errorf("删除孤立种子失败: %s, %v", filePath, err)
+				return fmt.Errorf("删除孤立种子失败: %w", err)
+			}
+			return nil
+		}
+
+		// 检查是否是通过过滤规则匹配的非免费种子（不需要过期检查）
+		skipExpireCheck := false
+		if torrent.DownloadSource == "filter_rule" && torrent.FilterRuleID != nil {
+			// 查询关联的过滤规则
+			var filterRule models.FilterRule
+			if txErr := tx.First(&filterRule, *torrent.FilterRuleID).Error; txErr == nil {
+				// 如果过滤规则不要求免费，则跳过过期检查
+				if !filterRule.RequireFree {
+					skipExpireCheck = true
+					sLogger().Infof("[过期检查] 种子 %s 通过过滤规则匹配且不要求免费，跳过过期检查", torrent.Title)
+				}
+			}
+		}
+
+		isExpired := torrent.GetExpired()
+		sLogger().Infof("[过期检查] 种子: %s, hash: %s, FreeEndTime: %v, IsExpired(DB): %v, GetExpired(): %v, SkipExpireCheck: %v",
+			torrent.Title, torrentHash,
+			torrent.FreeEndTime, torrent.IsExpired, isExpired, skipExpireCheck)
+
+		if isExpired && !skipExpireCheck {
+			sLogger().Warnf("[过期] 种子免费期已过期，标记并删除: %s, FreeEndTime: %v", filePath, torrent.FreeEndTime)
+			if err = tx.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_hash = ?", siteName, torrentHash).
+				Updates(map[string]any{
+					"is_expired": true,
+					"last_error": "种子已过期，未推送",
+				}).Error; err != nil {
+				return fmt.Errorf("标记过期状态失败: %w", err)
+			}
+			if err = os.Remove(filePath); err != nil {
+				sLogger().Errorf("[过期] 删除过期种子失败: %s, %v", filePath, err)
+			} else {
+				sLogger().Infof("[过期] 已删除过期种子: %s", filePath)
+			}
+			return nil
+		}
+
+		// 保留时长检查
+		gl, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+		if gl.RetainHours > 0 && torrent.LastCheckTime != nil {
+			cutoff := time.Now().Add(-time.Duration(gl.RetainHours) * time.Hour)
+			if torrent.IsPushed == nil || !*torrent.IsPushed {
+				if torrent.LastCheckTime.Before(cutoff) {
+					sLogger().Infof("超过保留时长(%dh)，删除未推送种子: %s", gl.RetainHours, filePath)
+					_ = os.Remove(filePath)
+					return nil
+				}
+			}
+		}
+
+		// 已推送种子的处理
+		if torrent.IsPushed != nil && *torrent.IsPushed {
+			sLogger().Infof("种子已推送，删除本地文件: %s", filePath)
+			if err = os.Remove(filePath); err != nil {
+				return fmt.Errorf("删除已推送种子失败: %w", err)
+			}
+			return nil
+		}
+
+		// 若已过期则删除（但如果是过滤规则匹配的非免费种子，跳过此检查）
+		if torrent.GetExpired() && !skipExpireCheck {
+			sLogger().Infof("种子已过期，删除: %s", filePath)
+			_ = os.Remove(filePath)
+			return nil
+		}
+
+		// 检查是否已在下载器中存在
+		exists, err := dl.CheckTorrentExists(torrentHash)
+		if err != nil {
+			return fmt.Errorf("检查种子存在失败: %w", err)
+		}
+
+		if exists {
+			sLogger().Infof("种子已存在于下载器 %s: %s", dl.GetName(), filePath)
+			pushed := true
+			if err := tx.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
+				Updates(map[string]any{
+					"is_pushed": &pushed,
+					"push_time": time.Now(),
+				}).Error; err != nil {
+				return fmt.Errorf("更新数据库状态失败: %w", err)
+			}
+			if err := os.Remove(filePath); err != nil {
+				return fmt.Errorf("删除已存在种子失败: %w", err)
+			}
+			return nil
+		}
+
+		// 新种子推送处理
+		sLogger().Infof("推送新种子到下载器 %s: %s", dl.GetName(), filePath)
+
+		glOnly, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+		if torrent.RetryCount >= glOnly.MaxRetry {
+			sLogger().Warnf("超过最大重试次数(%d)，删除文件: %s", glOnly.MaxRetry, filePath)
+			_ = os.Remove(filePath)
+			return nil
+		}
+
+		// 读取种子文件数据
+		torrentData, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return fmt.Errorf("读取种子文件失败: %w", readErr)
+		}
+
+		// 使用 AddTorrentWithPath 推送种子，支持自定义下载路径
+		if downloadPath != "" {
+			sLogger().Infof("使用自定义下载路径推送种子: %s -> %s", filePath, downloadPath)
+		}
+		if pushErr := dl.AddTorrentWithPath(torrentData, category, tags, downloadPath); pushErr != nil {
+			np := false
+			if updateErr := tx.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
+				Updates(map[string]any{
+					"is_pushed":   &np,
+					"retry_count": gorm.Expr("retry_count + 1"),
+					"last_error":  pushErr.Error(),
+				}).Error; updateErr != nil {
+				sLogger().Errorf("更新推送失败状态出错: %s, %v", filePath, updateErr)
+			}
+			return fmt.Errorf("推送种子失败: %w", pushErr)
+		}
+
+		// 推送成功处理
+		pushed2 := true
+		if err := tx.Model(&models.TorrentInfo{}).
+			Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
+			Updates(map[string]any{
+				"is_pushed": &pushed2,
+				"push_time": time.Now(),
+			}).Error; err != nil {
+			return fmt.Errorf("更新推送状态失败: %w", err)
+		}
+
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("删除已推送种子失败: %w; torrentHash: %s", err, torrentHash)
+		}
+
+		sLogger().Infof("种子推送成功并删除: %s, torrentHash: %s, 下载器: %s", filePath, torrentHash, dl.GetName())
+		return nil
+	})
+}
+
 func attemptDownload(url, title, downloadDir string) (string, error) {
-	// 尝试下载
-	resp, err := http.Get(url)
+	return attemptDownloadWithContext(context.Background(), url, title, downloadDir)
+}
+
+func attemptDownloadWithContext(ctx context.Context, url, title, downloadDir string) (string, error) {
+	// 使用 requests 库下载，支持 context
+	resp, err := requests.Get(url, requests.WithContext(ctx), requests.WithTimeout(30*time.Second))
 	if err != nil {
 		return "", fmt.Errorf("下载种子失败: %v", err)
 	}
-	defer resp.Body.Close()
 	// 检查 HTTP 状态码
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP 状态码错误: %d", resp.StatusCode)
@@ -46,16 +307,15 @@ func attemptDownload(url, title, downloadDir string) (string, error) {
 		return "", fmt.Errorf("创建种子文件失败: %v", err)
 	}
 	defer file.Close()
-	// 创建一个多写入器，同时写入文件和内存缓冲区
-	var buffer bytes.Buffer
-	multiWriter := io.MultiWriter(file, &buffer)
-	// 下载并保存种子文件
-	_, err = io.Copy(multiWriter, resp.Body)
+	// 获取响应体字节
+	bodyBytes := resp.Bytes()
+	// 写入文件
+	_, err = file.Write(bodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("写入种子文件失败: %v", err)
 	}
 	// 计算种子的 torrentHash
-	torrentHash, err := qbit.ComputeTorrentHash(buffer.Bytes())
+	torrentHash, err := qbit.ComputeTorrentHash(bodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("计算种子哈希失败: %v", err)
 	}
@@ -84,15 +344,16 @@ func downloadTorrent(url, title, downloadDir string, maxRetries int, retryDelay 
 	return "", fmt.Errorf("下载失败: %v", lastError)
 }
 
-func downloadWorker[T models.ResType](
+// downloadWorkerUnified 使用 UnifiedPTSite 接口的下载 Worker
+func downloadWorkerUnified(
 	ctx context.Context,
-	siteName models.SiteGroup,
 	wg *sync.WaitGroup,
-	site PTSiteInter[T],
+	site UnifiedPTSite,
 	torrentChan <-chan *gofeed.Item,
 	rssCfg models.RSSConfig,
 ) {
 	defer wg.Done()
+	siteName := site.SiteGroup()
 	// 读取一次全局限制配置，用于 CanbeFinished
 	var gl models.SettingsGlobal
 	if global.GlobalDB != nil {
@@ -100,6 +361,23 @@ func downloadWorker[T models.ResType](
 			gl = g
 		}
 	}
+
+	// 初始化过滤服务
+	var filterSvc filter.FilterService
+	if global.GlobalDB != nil {
+		filterSvc = filter.NewFilterService(global.GlobalDB.DB)
+	}
+
+	// 检查 RSS 是否有关联的过滤规则
+	hasAssociatedRules := false
+	if filterSvc != nil && rssCfg.ID != 0 {
+		rules, err := filterSvc.GetRulesForRSS(rssCfg.ID)
+		if err == nil && len(rules) > 0 {
+			hasAssociatedRules = true
+			sLogger().Infof("RSS %s 关联了 %d 个过滤规则", rssCfg.Name, len(rules))
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,15 +405,56 @@ func downloadWorker[T models.ResType](
 				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
 				continue
 			}
-			// 获取种子详情
-			resDetail, err := site.GetTorrentDetails(item)
+			// 获取种子详情 (使用 UnifiedPTSite 接口，返回 *v2.TorrentItem)
+			detail, err := site.GetTorrentDetails(item)
 			if err != nil {
 				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
 				continue
 			}
-			detail := resDetail.Data
-			canFinished := detail.CanbeFinished(global.GetSlogger(), gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
+			// 使用 v2.TorrentItem 的方法
+			canFinished := detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
 			isFree := detail.IsFree()
+
+			// 获取种子的标签/副标题用于过滤匹配
+			detailTag := detail.GetSubTitle()
+
+			// 检查过滤规则匹配
+			var matchedRule *models.FilterRule
+			var shouldDownloadByFilter bool
+			downloadSource := "free_download"
+
+			if filterSvc != nil && rssCfg.ID != 0 {
+				// 构建匹配输入，包含标题和标签
+				matchInput := filter.MatchInput{
+					Title: title,
+					Tag:   detailTag,
+				}
+
+				// 优先使用 RSS 关联的过滤规则（多对多关联）
+				if hasAssociatedRules {
+					shouldDownloadByFilter, matchedRule = filterSvc.ShouldDownloadForRSSWithInput(matchInput, isFree, rssCfg.ID)
+					if matchedRule != nil {
+						downloadSource = "filter_rule"
+						sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v)", title, detailTag, matchedRule.Name, matchedRule.RequireFree)
+					}
+				} else {
+					// 如果 RSS 没有关联规则，使用旧的全局匹配逻辑（向后兼容）
+					var siteID *uint
+					// 获取站点 ID
+					var siteSetting models.SiteSetting
+					if siteErr := global.GlobalDB.DB.Where("name = ?", string(siteName)).First(&siteSetting).Error; siteErr == nil {
+						siteID = &siteSetting.ID
+					}
+
+					rssID := &rssCfg.ID
+					shouldDownloadByFilter, matchedRule = filterSvc.ShouldDownloadWithInput(matchInput, isFree, siteID, rssID)
+					if matchedRule != nil {
+						downloadSource = "filter_rule"
+						sLogger().Infof("种子 %s (tag: %s) 匹配过滤规则: %s (require_free=%v)", title, detailTag, matchedRule.Name, matchedRule.RequireFree)
+					}
+				}
+			}
+
 			// 更新种子状态（标记跳过或继续下载）
 			if torrent == nil {
 				now := time.Now()
@@ -143,21 +462,36 @@ func downloadWorker[T models.ResType](
 				if len(item.Categories) > 0 {
 					cat = strings.Join(item.Categories, "/")
 				}
+				// 使用 v2.TorrentItem 的方法获取 FreeLevel 和 FreeEndTime
+				freeLevel := detail.GetFreeLevel()
+				freeEndTime := detail.GetFreeEndTime()
 				torrent = &models.TorrentInfo{
-					SiteName:      string(siteName),
-					TorrentID:     item.GUID,
-					FreeLevel:     detail.GetFreeLevel(),
-					FreeEndTime:   detail.GetFreeEndTime(),
-					Title:         title,
-					Category:      cat,
-					Tag:           rssCfg.Tag,
-					LastCheckTime: &now,
+					SiteName:       string(siteName),
+					TorrentID:      item.GUID,
+					FreeLevel:      freeLevel,
+					FreeEndTime:    freeEndTime,
+					Title:          title,
+					Category:       cat,
+					Tag:            rssCfg.Tag,
+					LastCheckTime:  &now,
+					DownloadSource: downloadSource,
+				}
+				if matchedRule != nil {
+					torrent.FilterRuleID = &matchedRule.ID
 				}
 			}
+
+			// 决定是否下载：
+			// 1. 通过过滤规则匹配且满足条件
+			// 2. 或者通过免费下载逻辑（免费且可完成）
+			shouldDownloadByFree := isFree && canFinished
+			shouldDownload := shouldDownloadByFilter || shouldDownloadByFree
+
 			err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
 				// 标记跳过或更新状态
-				if !isFree || !canFinished {
-					sLogger().Infof("种子: %s, ID: %s, free: %v, canbefinish: %v 为收费或无法完成，跳过", title, item.GUID, isFree, canFinished)
+				if !shouldDownload {
+					sLogger().Infof("种子: %s, ID: %s, free: %v, canbefinish: %v, filter_match: %v 不满足下载条件，跳过",
+						title, item.GUID, isFree, canFinished, shouldDownloadByFilter)
 					torrent.IsSkipped = true
 				} else {
 					torrent.IsSkipped = false
@@ -166,7 +500,7 @@ func downloadWorker[T models.ResType](
 				// 使用 GORM 的 upsert 功能
 				err = tx.Clauses(clause.OnConflict{
 					Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
-					DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free"}),
+					DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free", "download_source", "filter_rule_id"}),
 				}).Create(torrent).Error
 				return err
 			})
@@ -176,11 +510,11 @@ func downloadWorker[T models.ResType](
 			}
 			// 如果标记为跳过，直接跳过
 			if torrent.IsSkipped {
-				sLogger().Infof("种子: %s 为收费或无法完成，跳过", title)
+				sLogger().Infof("种子: %s 不满足下载条件，跳过", title)
 				continue
 			}
 			// 下载种子并更新哈希值
-			if isFree {
+			if shouldDownload {
 				err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
 					homeDir, _ := os.UserHomeDir()
 					base, berr := utils.ResolveDownloadBase(homeDir, models.WorkDir, gl.DownloadDir)
@@ -221,6 +555,8 @@ func downloadWorker[T models.ResType](
 							"is_downloaded":   torrent.IsDownloaded,
 							"is_free":         torrent.IsFree,
 							"last_check_time": &now,
+							"download_source": downloadSource,
+							"filter_rule_id":  torrent.FilterRuleID,
 						}).Error
 					return err
 				})
@@ -385,7 +721,7 @@ func processSingleTorrent(
 		pushed2 := true
 		if err := tx.Model(&models.TorrentInfo{}).
 			Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"is_pushed": &pushed2,
 				"push_time": time.Now(),
 			}).Error; err != nil {
@@ -410,7 +746,8 @@ func sanitizeTitle(title string) string {
 	return strings.TrimSpace(sanitized)
 }
 
-func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup, m PTSiteInter[T], rssCfg models.RSSConfig) error {
+// FetchAndDownloadFreeRSSUnified 使用 UnifiedPTSite 接口获取并下载免费 RSS 种子
+func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg models.RSSConfig) error {
 	// 每次运行从 DB 读取最新配置并更新目录缓存（以 DB 为唯一配置源）
 	if global.GlobalDB == nil {
 		return errors.New("配置未就绪: DB 不可用")
@@ -436,12 +773,16 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 	defer cancel()
 	var wg sync.WaitGroup
 	torrentChan := make(chan *gofeed.Item, len(feed.Items))
-	// 启动多个下载 Worker
-	for range maxGoroutine {
+
+	// 获取有效的并发数（RSS 配置优先，否则使用全局配置）
+	concurrency := rssCfg.GetEffectiveConcurrency(&gl)
+	sLogger().Infof("RSS %s 使用并发数: %d", rssCfg.Name, concurrency)
+
+	// 启动多个下载 Worker (使用新的 UnifiedPTSite 接口)
+	for range concurrency {
 		wg.Add(1)
-		go downloadWorker(
+		go downloadWorkerUnified(
 			ctxWithTimeout,
-			siteName,
 			&wg,
 			m,
 			torrentChan,
@@ -473,4 +814,291 @@ func fetchRSSFeed(url string) (*gofeed.Feed, error) {
 		return nil, fmt.Errorf("解析 RSS 失败: %v", err)
 	}
 	return feed, nil
+}
+
+// FetchAndDownloadFreeRSS 旧的泛型版本（已废弃，请使用 FetchAndDownloadFreeRSSUnified）
+// Deprecated: Use FetchAndDownloadFreeRSSUnified instead for new implementations
+func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup, m PTSiteInter[T], rssCfg models.RSSConfig) error {
+	// 每次运行从 DB 读取最新配置并更新目录缓存（以 DB 为唯一配置源）
+	if global.GlobalDB == nil {
+		return errors.New("配置未就绪: DB 不可用")
+	}
+	store := core.NewConfigStore(global.GlobalDB)
+	gl, err := store.GetGlobalOnly()
+	if err != nil {
+		return fmt.Errorf("加载配置失败: %w", err)
+	}
+	base := gl.DownloadDir
+	if strings.TrimSpace(base) == "" {
+		return errors.New("配置未就绪: 下载目录为空")
+	}
+	if !m.IsEnabled() {
+		return errors.New(enableError)
+	}
+	// DownloadSubPath 前端移除，允许为空；使用 Tag 作为子目录
+	feed, err := fetchRSSFeed(rssCfg.URL)
+	if err != nil {
+		return err
+	}
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	var wg sync.WaitGroup
+	torrentChan := make(chan *gofeed.Item, len(feed.Items))
+
+	// 获取有效的并发数（RSS 配置优先，否则使用全局配置）
+	concurrency := rssCfg.GetEffectiveConcurrency(&gl)
+	sLogger().Infof("RSS %s 使用并发数: %d", rssCfg.Name, concurrency)
+
+	// 启动多个下载 Worker
+	for range concurrency {
+		wg.Add(1)
+		go downloadWorker(
+			ctxWithTimeout,
+			siteName,
+			&wg,
+			m,
+			torrentChan,
+			rssCfg,
+		)
+	}
+	// 将种子发送到下载队列
+	for _, item := range feed.Items {
+		if len(item.Enclosures) > 0 {
+			select {
+			case <-ctxWithTimeout.Done():
+				sLogger().Info("任务被取消")
+				close(torrentChan)
+				wg.Wait()
+				return ctxWithTimeout.Err()
+			case torrentChan <- item:
+			}
+		}
+	}
+	close(torrentChan)
+	wg.Wait()
+	return nil
+}
+
+// downloadWorker 旧的泛型版本（已废弃，请使用 downloadWorkerUnified）
+// Deprecated: Use downloadWorkerUnified instead for new implementations
+func downloadWorker[T models.ResType](
+	ctx context.Context,
+	siteName models.SiteGroup,
+	wg *sync.WaitGroup,
+	site PTSiteInter[T],
+	torrentChan <-chan *gofeed.Item,
+	rssCfg models.RSSConfig,
+) {
+	defer wg.Done()
+	// 读取一次全局限制配置，用于 CanbeFinished
+	var gl models.SettingsGlobal
+	if global.GlobalDB != nil {
+		if g, err := core.NewConfigStore(global.GlobalDB).GetGlobalOnly(); err == nil {
+			gl = g
+		}
+	}
+
+	// 初始化过滤服务
+	var filterSvc filter.FilterService
+	if global.GlobalDB != nil {
+		filterSvc = filter.NewFilterService(global.GlobalDB.DB)
+	}
+
+	// 检查 RSS 是否有关联的过滤规则
+	hasAssociatedRules := false
+	if filterSvc != nil && rssCfg.ID != 0 {
+		rules, err := filterSvc.GetRulesForRSS(rssCfg.ID)
+		if err == nil && len(rules) > 0 {
+			hasAssociatedRules = true
+			sLogger().Infof("RSS %s 关联了 %d 个过滤规则", rssCfg.Name, len(rules))
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			sLogger().Warn("下载任务取消")
+			return
+		case item, ok := <-torrentChan:
+			if !ok {
+				return
+			}
+			var torrentURL string
+			if len(item.Enclosures) > 0 {
+				torrentURL = item.Enclosures[0].URL
+			} else {
+				torrentURL = ""
+			}
+			title := item.Title
+			// 查询数据库记录
+			torrent, err := global.GlobalDB.GetTorrentBySiteAndID(string(siteName), item.GUID)
+			if err != nil {
+				sLogger().Errorf("从数据库获取种子: %s 详情失败, %v", title, err)
+				continue
+			}
+			// 如果种子已跳过或已推送，直接跳过
+			if torrent != nil && (torrent.IsSkipped || torrent.IsPushed != nil) {
+				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
+				continue
+			}
+			// 获取种子详情
+			resDetail, err := site.GetTorrentDetails(item)
+			if err != nil {
+				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
+				continue
+			}
+			detail := resDetail.Data
+			canFinished := detail.CanbeFinished(global.GetSlogger(), gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
+			isFree := detail.IsFree()
+
+			// 获取种子的标签/副标题用于过滤匹配
+			detailTag := detail.GetSubTitle()
+
+			// 检查过滤规则匹配
+			var matchedRule *models.FilterRule
+			var shouldDownloadByFilter bool
+			downloadSource := "free_download"
+
+			if filterSvc != nil && rssCfg.ID != 0 {
+				// 构建匹配输入，包含标题和标签
+				matchInput := filter.MatchInput{
+					Title: title,
+					Tag:   detailTag,
+				}
+
+				// 优先使用 RSS 关联的过滤规则（多对多关联）
+				if hasAssociatedRules {
+					shouldDownloadByFilter, matchedRule = filterSvc.ShouldDownloadForRSSWithInput(matchInput, isFree, rssCfg.ID)
+					if matchedRule != nil {
+						downloadSource = "filter_rule"
+						sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v)", title, detailTag, matchedRule.Name, matchedRule.RequireFree)
+					}
+				} else {
+					// 如果 RSS 没有关联规则，使用旧的全局匹配逻辑（向后兼容）
+					var siteID *uint
+					// 获取站点 ID
+					var siteSetting models.SiteSetting
+					if siteErr := global.GlobalDB.DB.Where("name = ?", string(siteName)).First(&siteSetting).Error; siteErr == nil {
+						siteID = &siteSetting.ID
+					}
+
+					rssID := &rssCfg.ID
+					shouldDownloadByFilter, matchedRule = filterSvc.ShouldDownloadWithInput(matchInput, isFree, siteID, rssID)
+					if matchedRule != nil {
+						downloadSource = "filter_rule"
+						sLogger().Infof("种子 %s (tag: %s) 匹配过滤规则: %s (require_free=%v)", title, detailTag, matchedRule.Name, matchedRule.RequireFree)
+					}
+				}
+			}
+
+			// 更新种子状态（标记跳过或继续下载）
+			if torrent == nil {
+				now := time.Now()
+				cat := ""
+				if len(item.Categories) > 0 {
+					cat = strings.Join(item.Categories, "/")
+				}
+				torrent = &models.TorrentInfo{
+					SiteName:       string(siteName),
+					TorrentID:      item.GUID,
+					FreeLevel:      detail.GetFreeLevel(),
+					FreeEndTime:    detail.GetFreeEndTime(),
+					Title:          title,
+					Category:       cat,
+					Tag:            rssCfg.Tag,
+					LastCheckTime:  &now,
+					DownloadSource: downloadSource,
+				}
+				if matchedRule != nil {
+					torrent.FilterRuleID = &matchedRule.ID
+				}
+			}
+
+			// 决定是否下载：
+			// 1. 通过过滤规则匹配且满足条件
+			// 2. 或者通过免费下载逻辑（免费且可完成）
+			shouldDownloadByFree := isFree && canFinished
+			shouldDownload := shouldDownloadByFilter || shouldDownloadByFree
+
+			err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
+				// 标记跳过或更新状态
+				if !shouldDownload {
+					sLogger().Infof("种子: %s, ID: %s, free: %v, canbefinish: %v, filter_match: %v 不满足下载条件，跳过",
+						title, item.GUID, isFree, canFinished, shouldDownloadByFilter)
+					torrent.IsSkipped = true
+				} else {
+					torrent.IsSkipped = false
+				}
+				torrent.IsFree = isFree
+				// 使用 GORM 的 upsert 功能
+				err = tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
+					DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free", "download_source", "filter_rule_id"}),
+				}).Create(torrent).Error
+				return err
+			})
+			if err != nil {
+				sLogger().Errorf("更新种子:%s 状态失败, %v", title, err)
+				continue
+			}
+			// 如果标记为跳过，直接跳过
+			if torrent.IsSkipped {
+				sLogger().Infof("种子: %s 不满足下载条件，跳过", title)
+				continue
+			}
+			// 下载种子并更新哈希值
+			if shouldDownload {
+				err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
+					homeDir, _ := os.UserHomeDir()
+					base, berr := utils.ResolveDownloadBase(homeDir, models.WorkDir, gl.DownloadDir)
+					if berr != nil {
+						return berr
+					}
+					sub := utils.SubPathFromTag(rssCfg.Tag)
+					downloadPath := filepath.Join(base, sub)
+					if _, mkErr := os.Stat(downloadPath); os.IsNotExist(mkErr) {
+						sLogger().Infof("创建下载目录: %s", downloadPath)
+						_ = os.MkdirAll(downloadPath, 0o755)
+					}
+					// 文件命名统一为 siteName-torrentID.torrent，避免重复与歧义
+					fileBase := fmt.Sprintf("%s-%s", strings.ToLower(string(siteName)), item.GUID)
+					hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
+					if downloadErr != nil {
+						return fmt.Errorf("种子下载失败: %w", downloadErr)
+					}
+					torrentFile := filepath.Join(downloadPath, fileBase+".torrent")
+					if _, err = os.Stat(torrentFile); os.IsNotExist(err) {
+						sLogger().Warnf("种子文件不存在但标记已下载: %s", title)
+						// 修正数据库状态
+						torrent.IsDownloaded = false
+						torrent.TorrentHash = nil
+						tx.Save(torrent)
+						sLogger().Infof("已更新数据库记录: %s", title)
+						return nil
+					}
+					// 更新数据库记录
+					torrent.IsDownloaded = true
+					torrent.TorrentHash = &hash
+					// 更新指定字段
+					now := time.Now()
+					err = tx.Model(&models.TorrentInfo{}).
+						Where("site_name = ? AND torrent_id = ?", torrent.SiteName, torrent.TorrentID).
+						Updates(map[string]any{
+							"torrent_hash":    torrent.TorrentHash,
+							"is_downloaded":   torrent.IsDownloaded,
+							"is_free":         torrent.IsFree,
+							"last_check_time": &now,
+							"download_source": downloadSource,
+							"filter_rule_id":  torrent.FilterRuleID,
+						}).Error
+					return err
+				})
+				if err != nil {
+					sLogger().Errorf("%s: 事务执行失败, %v", title, err)
+				} else {
+					sLogger().Info("种子下载成功并记录到数据库 ", title)
+				}
+			}
+		}
+	}
 }

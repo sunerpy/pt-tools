@@ -12,7 +12,7 @@ import (
 // - exists: 目录是否存在
 // - empty: 目录是否为空（如果存在）
 // - err: 错误信息（如果存在）
-func CheckDirectory(path string) (exists bool, empty bool, err error) {
+func CheckDirectory(path string) (exists, empty bool, err error) {
 	// 判断目录是否存在
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {

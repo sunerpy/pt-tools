@@ -4,17 +4,48 @@ services:
     image: sunerpy/pt-tools:latest
     container_name: pt-tools
     environment:
-      PT_WEB: "1"
       PT_HOST: "0.0.0.0"
       PT_PORT: "8080"
+      TZ: "Asia/Shanghai"
       PUID: "1000"
       PGID: "1000"
+      # 如需重置管理员密码，取消下面注释
+      # PT_ADMIN_RESET: "1"
+      # PT_ADMIN_USER: "admin"
+      # PT_ADMIN_PASS: "your_new_password"
     ports:
       - "8080:8080"
     volumes:
+      # 数据持久化（数据库和种子文件）
       - ./data:/app/.pt-tools
     restart: unless-stopped
 
-# 说明：
-# - 将 ./data 挂载到 /app/.pt-tools 以持久化数据库与下载目录
-# - 首次启动后打开浏览器访问 http://localhost:8080 完成 Web 内的初始化
+# ===========================================
+# 使用说明
+# ===========================================
+#
+# 1. 启动服务：
+#    docker-compose up -d
+#
+# 2. 访问 Web 界面：
+#    http://localhost:8080
+#
+# 3. 默认登录账号：
+#    用户名: admin
+#    密码: adminadmin
+#
+# 4. 数据持久化：
+#    - 数据库: ./data/torrents.db
+#    - 种子文件: ./data/downloads/
+#
+# 5. 功能特性：
+#    - RSS 自动订阅下载免费种子
+#    - 多站点种子搜索（HDSky、SpringSunday、M-Team、HDDolby）
+#    - 用户信息统计和等级进度追踪
+#    - 支持 qBittorrent 和 Transmission 下载器
+#    - 过滤规则精细化筛选
+#
+# 6. 重置管理员密码：
+#    取消上方 PT_ADMIN_RESET 相关环境变量的注释，
+#    执行 docker-compose up -d 重启容器，
+#    重置完成后重新注释这些变量并重启。

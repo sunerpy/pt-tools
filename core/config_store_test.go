@@ -8,11 +8,12 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 func newTempDB(t *testing.T) *models.TorrentDB {
@@ -64,7 +65,7 @@ func TestLoadSnapshotConsistency(t *testing.T) {
 	}
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "ck", APIUrl: "http://api"}
 	sc.RSS = []models.RSSConfig{{Name: "cmct", URL: "https://rss", IntervalMinutes: 10}}
-	if err := store.UpsertSiteWithRSS(models.CMCT, sc); err != nil {
+	if err := store.UpsertSiteWithRSS(models.SpringSunday, sc); err != nil {
 		t.Fatalf("save site: %v", err)
 	}
 	// load snapshot
@@ -78,7 +79,7 @@ func TestLoadSnapshotConsistency(t *testing.T) {
 	if cfg.Qbit.URL == "" {
 		t.Fatalf("qbit url empty")
 	}
-	if len(cfg.Sites[models.CMCT].RSS) != 1 {
+	if len(cfg.Sites[models.SpringSunday].RSS) != 1 {
 		t.Fatalf("rss count mismatch")
 	}
 }
@@ -181,9 +182,9 @@ func TestUpsertSiteWithRSS_Validations(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	s := NewConfigStore(db)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "invalid", APIUrl: "http://x", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "invalid", APIUrl: "http://x", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "cookie", APIUrl: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.Error(t, err)
 	err = s.UpsertSiteWithRSS(models.MTEAM, models.SiteConfig{AuthMethod: "api_key", APIUrl: models.DefaultAPIUrlMTeam, APIKey: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.Error(t, err)
@@ -197,11 +198,11 @@ func TestUpsertSiteWithRSS_SaveAndList(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}}}
-	require.NoError(t, s.UpsertSiteWithRSS(models.CMCT, sc))
+	require.NoError(t, s.UpsertSiteWithRSS(models.SpringSunday, sc))
 	out, err := s.ListSites()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(out))
-	require.Equal(t, "cookie", out[models.CMCT].AuthMethod)
+	require.Equal(t, "cookie", out[models.SpringSunday].AuthMethod)
 }
 
 func TestConfigStore_GlobalCRUD(t *testing.T) {
@@ -236,7 +237,7 @@ func TestConfigStore_SiteCRUD(t *testing.T) {
 	}
 	s := NewConfigStore(db)
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c"}
-	id, err := s.UpsertSite(models.CMCT, sc)
+	id, err := s.UpsertSite(models.SpringSunday, sc)
 	if err != nil || id == 0 {
 		t.Fatalf("upsert: %v %d", err, id)
 	}
@@ -323,14 +324,14 @@ func TestConfigStore_QbitOnlyAndSiteConf(t *testing.T) {
 		t.Fatalf("qbit empty fields")
 	}
 	e := true
-	siteID, err := s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	siteID, err := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	if err != nil {
 		t.Fatalf("upsert site: %v", err)
 	}
 	if err = s.ReplaceSiteRSS(siteID, []models.RSSConfig{{Name: "r1", URL: "http://example/rss", Tag: "tag", IntervalMinutes: 10}}); err != nil {
 		t.Fatalf("rss: %v", err)
 	}
-	sc, err := s.GetSiteConf(models.CMCT)
+	sc, err := s.GetSiteConf(models.SpringSunday)
 	if err != nil {
 		t.Fatalf("get site conf: %v", err)
 	}
@@ -363,7 +364,7 @@ func TestDeleteSite_ValidateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
-	_, _ = s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	assert.Error(t, s.DeleteSite("cmct"))
 	_, _ = s.UpsertSite(models.SiteGroup("custom"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	assert.NoError(t, s.DeleteSite("custom"))
@@ -373,17 +374,19 @@ func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	s := NewConfigStore(db)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "bad", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "bad", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
-	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	// 预置站点（SpringSunday）不需要 APIUrl，由后端常量提供
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	assert.NoError(t, err) // 预置站点允许空 APIUrl
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
 	err = s.UpsertSiteWithRSS(models.MTEAM, models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
-	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.CMCT, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
+	// RSS 列表允许为空
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
+	assert.NoError(t, err)
+	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
 	assert.NoError(t, err)
 }
 
@@ -393,14 +396,14 @@ func TestListSites_ApplyDefaults(t *testing.T) {
 	s := NewConfigStore(db)
 	e := true
 	_, _ = s.UpsertSite(models.MTEAM, models.SiteConfig{Enabled: &e, AuthMethod: "api_key", APIUrl: models.DefaultAPIUrlMTeam})
-	_, _ = s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	_, _ = s.UpsertSite(models.HDSKY, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	out, err := s.ListSites()
 	require.NoError(t, err)
 	if out[models.MTEAM].AuthMethod != "api_key" {
 		t.Fatalf("mteam auth default")
 	}
-	if out[models.CMCT].AuthMethod != "cookie" {
+	if out[models.SpringSunday].AuthMethod != "cookie" {
 		t.Fatalf("cmct auth default")
 	}
 	if out[models.HDSKY].AuthMethod != "cookie" {
@@ -417,4 +420,176 @@ func TestReplaceSiteRSS_DeleteSite(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.DeleteSite("custom"))
 	require.Error(t, store.DeleteSite("cmct"))
+}
+
+func TestGetGlobalOnly_NotFound(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	// Don't save any global settings, so GetGlobalOnly should return default values
+	out, err := s.GetGlobalOnly()
+	// GetGlobalOnly returns default values when no record exists
+	assert.NoError(t, err)
+	assert.NotNil(t, out)
+}
+
+func TestSaveGlobalSettings_AllValidations(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	tests := []struct {
+		name      string
+		settings  models.SettingsGlobal
+		wantError bool
+	}{
+		{
+			name:      "empty download dir",
+			settings:  models.SettingsGlobal{DownloadDir: "", DefaultIntervalMinutes: 10},
+			wantError: true,
+		},
+		{
+			name:      "valid settings",
+			settings:  models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10},
+			wantError: false,
+		},
+		{
+			name:      "interval below minimum gets coerced",
+			settings:  models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := s.SaveGlobalSettings(tt.settings)
+			if tt.wantError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSaveQbitSettings_AllValidations(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	tests := []struct {
+		name      string
+		settings  models.QbitSettings
+		wantError bool
+	}{
+		{
+			name:      "enabled but missing URL",
+			settings:  models.QbitSettings{Enabled: true, URL: "", User: "u", Password: "p"},
+			wantError: true,
+		},
+		{
+			name:      "enabled but missing user",
+			settings:  models.QbitSettings{Enabled: true, URL: "http://localhost", User: "", Password: "p"},
+			wantError: true,
+		},
+		{
+			name:      "enabled but missing password",
+			settings:  models.QbitSettings{Enabled: true, URL: "http://localhost", User: "u", Password: ""},
+			wantError: true,
+		},
+		{
+			name:      "disabled with missing fields still requires validation",
+			settings:  models.QbitSettings{Enabled: false, URL: "", User: "", Password: ""},
+			wantError: true,
+		},
+		{
+			name:      "valid enabled settings",
+			settings:  models.QbitSettings{Enabled: true, URL: "http://localhost", User: "u", Password: "p"},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := s.SaveQbitSettings(tt.settings)
+			if tt.wantError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDeleteSite_AllCases(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	// Test deleting non-existent site
+	err = s.DeleteSite("non-existent")
+	assert.Error(t, err)
+
+	// Test deleting preset site (should fail)
+	e := true
+	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	err = s.DeleteSite("cmct")
+	assert.Error(t, err)
+
+	// Test deleting custom site (should succeed)
+	_, _ = s.UpsertSite(models.SiteGroup("custom-site"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	err = s.DeleteSite("custom-site")
+	assert.NoError(t, err)
+}
+
+func TestGetQbitSettings_NotFound(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	// Don't save any qbit settings
+	out, err := s.GetQbitSettings()
+	// Should return default/empty settings without error
+	assert.NoError(t, err)
+	assert.NotNil(t, out)
+}
+
+func TestReplaceSiteRSS_EmptyRSS(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	e := true
+	id, err := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	require.NoError(t, err)
+	// Replace with empty RSS list
+	err = s.ReplaceSiteRSS(id, []models.RSSConfig{})
+	assert.NoError(t, err)
+}
+
+func TestGetSiteConf_NotFound(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	// Try to get non-existent site
+	_, err = s.GetSiteConf(models.SiteGroup("non-existent"))
+	assert.Error(t, err)
+}
+
+func TestUpdateAdminPassword_NotFound(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.InitLogger(zap.NewNop())
+	s := NewConfigStore(db)
+	// Try to update password for non-existent user
+	err = s.UpdateAdminPassword("non-existent", "newhash")
+	assert.Error(t, err)
+}
+
+func TestGetAdmin_NotFound(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.InitLogger(zap.NewNop())
+	s := NewConfigStore(db)
+	// Try to get non-existent admin
+	_, err = s.GetAdmin("non-existent")
+	assert.Error(t, err)
 }

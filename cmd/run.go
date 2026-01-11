@@ -27,6 +27,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
 	"github.com/sunerpy/pt-tools/utils"
 )
 
@@ -58,7 +59,7 @@ func init() {
 		if err.Error() == "flag needs an argument: 'm' in -m" {
 			fmt.Println("Error: The '-m' flag requires a value. Use '--mode=single' or '--mode=persistent'.")
 			fmt.Println()
-			cmd.Usage() // 显示帮助信息
+			_ = cmd.Usage() // 显示帮助信息
 			os.Exit(1)
 		}
 		return err
@@ -88,7 +89,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) {
 		color.Red("已有实例正在运行，请勿重复启动")
 		os.Exit(1)
 	}
-	defer locker.Unlock()
+	defer func() { _ = locker.Unlock() }()
 	switch mode {
 	case "single":
 		sLogger().Info("运行模式: 单次运行")
@@ -106,7 +107,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) {
 		color.Green("程序已成功退出！")
 	default:
 		color.Red("Error: 无效的运行模式 '%s'，仅支持 'single' 或 'persistent'", mode)
-		cmd.Usage()
+		_ = cmd.Usage()
 		os.Exit(1)
 	}
 }

@@ -5,17 +5,29 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/global'
+      redirect: '/userinfo'
+    },
+    {
+      path: '/userinfo',
+      name: 'userinfo',
+      component: () => import('@/views/UserInfoDashboard.vue'),
+      meta: { title: '用户统计' }
     },
     {
       path: '/global',
       name: 'global',
       component: () => import('@/views/GlobalSettings.vue')
     },
+    // 旧的 qBittorrent 设置页面（已隐藏）
+    // {
+    //   path: '/qbit',
+    //   name: 'qbit',
+    //   component: () => import('@/views/QbitSettings.vue')
+    // },
     {
-      path: '/qbit',
-      name: 'qbit',
-      component: () => import('@/views/QbitSettings.vue')
+      path: '/downloaders',
+      name: 'downloaders',
+      component: () => import('@/views/DownloaderSettings.vue')
     },
     {
       path: '/sites',
@@ -23,9 +35,26 @@ const router = createRouter({
       component: () => import('@/views/SiteList.vue')
     },
     {
+      path: '/search',
+      name: 'search',
+      component: () => import('@/views/TorrentSearch.vue'),
+      meta: { title: '种子搜索' }
+    },
+    // 动态站点页面（已隐藏）
+    // {
+    //   path: '/sites/dynamic',
+    //   name: 'dynamic-sites',
+    //   component: () => import('@/views/DynamicSiteSettings.vue')
+    // },
+    {
       path: '/sites/:name',
       name: 'site-detail',
       component: () => import('@/views/SiteDetail.vue')
+    },
+    {
+      path: '/filter-rules',
+      name: 'filter-rules',
+      component: () => import('@/views/FilterRules.vue')
     },
     {
       path: '/tasks',

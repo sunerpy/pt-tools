@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/models"
-	"gorm.io/gorm"
 )
 
 func TestWithTransaction_Success(t *testing.T) {

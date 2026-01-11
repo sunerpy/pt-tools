@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/utils"
-	"gorm.io/gorm"
 )
 
 type ConfigStore struct {
@@ -20,6 +21,12 @@ type ConfigStore struct {
 
 func NewConfigStore(db *models.TorrentDB) *ConfigStore {
 	return &ConfigStore{db: db}
+}
+
+// SyncSites 从注册的站点列表同步到数据库
+// 应在应用启动时调用，确保内存中注册的站点都存在于数据库中
+func (s *ConfigStore) SyncSites(registeredSites []models.RegisteredSite) error {
+	return models.SyncSitesFromRegistry(s.db.DB, registeredSites)
 }
 
 // Load 将 SQLite 中的配置组装为运行时 Config
@@ -71,17 +78,9 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes})
+				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample})
 			}
-			// 应用默认站点认证方式与 API URL（只读快照层，不写库）
-			switch sg {
-			case models.MTEAM:
-				sc.AuthMethod = "api_key"
-				sc.APIUrl = models.DefaultAPIUrlMTeam
-			case models.CMCT, models.HDSKY:
-				sc.AuthMethod = "cookie"
-				sc.APIUrl = ""
-			}
+			// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 			out.Sites[sg] = sc
 		}
 		return nil
@@ -146,7 +145,7 @@ func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 	var gs models.SettingsGlobal
 	if err := s.db.DB.First(&gs).Error; err != nil {
 		// provide defaults
-		gs.DefaultIntervalMinutes = int32(durationToMinutes(20 * time.Minute))
+		gs.DefaultIntervalMinutes = durationToMinutes(20 * time.Minute)
 		gs.DefaultEnabled = true
 		gs.DownloadDir = "download"
 		gs.DownloadLimitEnabled = false
@@ -285,6 +284,7 @@ func (s *ConfigStore) ReplaceSiteRSS(siteID uint, rss []models.RSSConfig) error 
 			Category:        r.Category,
 			Tag:             r.Tag,
 			IntervalMinutes: r.IntervalMinutes,
+			DownloaderID:    r.DownloaderID,
 		}
 		if err := db.Create(&row).Error; err != nil {
 			return err
@@ -345,13 +345,16 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	// 严格校验：
 	// 1) 认证方式必填且合法；
 	// 2) 根据认证方式二选一且对应字段不为空（api_key 或 cookie），另一项必须为空；
-	// 3) API URL 必填；
-	// 4) RSS 列表至少一条，且各项字段合法。
+	// 3) 对于非预置站点，API URL 必填；预置站点使用常量
+	// 4) RSS 列表可以为空，但如果有则各项字段需合法。
 	am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
 	if am != "cookie" && am != "api_key" {
 		return errors.New("认证方式必须为 'cookie' 或 'api_key'")
 	}
-	if strings.TrimSpace(sc.APIUrl) == "" {
+
+	// 预置站点使用常量 URL，不需要用户提供
+	isBuiltinSite := site == models.MTEAM || site == models.SpringSunday || site == models.HDSKY
+	if !isBuiltinSite && strings.TrimSpace(sc.APIUrl) == "" {
 		return errors.New("API 地址不能为空")
 	}
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
@@ -371,31 +374,31 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			return errors.New("认证方式为 cookie 时 API Key 必须留空")
 		}
 	}
-	if len(sc.RSS) == 0 {
-		return errors.New("RSS 列表不能为空")
-	}
-	// 检查重复 RSS URL
-	urlSet := make(map[string]bool)
-	for i, r := range sc.RSS {
-		normalizedURL := strings.TrimSpace(strings.ToLower(r.URL))
-		if urlSet[normalizedURL] {
-			return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, r.URL)
+	// RSS 列表允许为空，只在有内容时进行校验
+	if len(sc.RSS) > 0 {
+		// 检查重复 RSS URL
+		urlSet := make(map[string]bool)
+		for i, r := range sc.RSS {
+			normalizedURL := strings.TrimSpace(strings.ToLower(r.URL))
+			if urlSet[normalizedURL] {
+				return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, r.URL)
+			}
+			urlSet[normalizedURL] = true
 		}
-		urlSet[normalizedURL] = true
-	}
-	for i, r := range sc.RSS {
-		if strings.TrimSpace(r.Name) == "" {
-			return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 name 不能为空")
+		for i, r := range sc.RSS {
+			if strings.TrimSpace(r.Name) == "" {
+				return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 name 不能为空")
+			}
+			if strings.TrimSpace(r.URL) == "" {
+				return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 url 不能为空")
+			}
+			// category 允许为空
+			// Tag 允许为空，后端将使用父目录作为下载子路径
+			if r.IntervalMinutes < models.MinIntervalMinutes {
+				r.IntervalMinutes = models.MinIntervalMinutes
+			}
+			// DownloadSubPath 前端已移除，后端使用 Tag 作为子目录；允许为空
 		}
-		if strings.TrimSpace(r.URL) == "" {
-			return errors.New("第 " + fmt.Sprint(i+1) + " 条 RSS 的 url 不能为空")
-		}
-		// category 允许为空
-		// Tag 允许为空，后端将使用父目录作为下载子路径
-		if r.IntervalMinutes < models.MinIntervalMinutes {
-			r.IntervalMinutes = models.MinIntervalMinutes
-		}
-		// DownloadSubPath 前端已移除，后端使用 Tag 作为子目录；允许为空
 	}
 	// 事务保存站点与 RSS
 	return s.db.DB.Transaction(func(tx *gorm.DB) error {
@@ -417,13 +420,32 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		if err := tx.Where("site_id = ?", row.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
 			return err
 		}
+
+		assocDB := models.NewRSSFilterAssociationDB(tx)
+
 		for _, r := range sc.RSS {
 			if r.IntervalMinutes < models.MinIntervalMinutes {
 				r.IntervalMinutes = models.MinIntervalMinutes
 			}
-			rr := models.RSSSubscription{SiteID: row.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes}
+			rr := models.RSSSubscription{
+				SiteID:          row.ID,
+				Name:            r.Name,
+				URL:             r.URL,
+				Category:        r.Category,
+				Tag:             r.Tag,
+				IntervalMinutes: r.IntervalMinutes,
+				DownloaderID:    r.DownloaderID,
+				DownloadPath:    r.DownloadPath,
+			}
 			if err := tx.Create(&rr).Error; err != nil {
 				return err
+			}
+
+			// 保存 RSS-Filter 关联
+			if len(r.FilterRuleIDs) > 0 {
+				if err := assocDB.SetFilterRulesForRSS(rr.ID, r.FilterRuleIDs); err != nil {
+					return err
+				}
 			}
 		}
 		events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
@@ -434,7 +456,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 // DeleteSite 删除站点（预置站点禁止删除）
 func (s *ConfigStore) DeleteSite(name string) error {
 	lower := strings.ToLower(name)
-	if lower == "cmct" || lower == "hdsky" || lower == "mteam" {
+	if lower == "springsunday" || lower == "hdsky" || lower == "mteam" {
 		return errors.New("预置站点不可删除")
 	}
 	tx := s.db.DB.Begin()
@@ -480,16 +502,9 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes})
+			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample})
 		}
-		switch sg {
-		case models.MTEAM:
-			sc.AuthMethod = "api_key"
-			sc.APIUrl = models.DefaultAPIUrlMTeam
-		case models.CMCT, models.HDSKY:
-			sc.AuthMethod = "cookie"
-			sc.APIUrl = ""
-		}
+		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
 	}
 	return out, nil
@@ -507,17 +522,31 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err
 	}
+
+	// 获取 RSS-Filter 关联
+	assocDB := models.NewRSSFilterAssociationDB(s.db.DB)
+
 	for _, r := range rss {
-		sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes})
+		rssCfg := models.RSSConfig{
+			ID:              r.ID,
+			Name:            r.Name,
+			URL:             r.URL,
+			Category:        r.Category,
+			Tag:             r.Tag,
+			IntervalMinutes: r.IntervalMinutes,
+			DownloaderID:    r.DownloaderID,
+			DownloadPath:    r.DownloadPath,
+			IsExample:       r.IsExample,
+		}
+
+		// 获取关联的过滤规则 ID
+		ruleIDs, err := assocDB.GetFilterRuleIDsForRSS(r.ID)
+		if err == nil {
+			rssCfg.FilterRuleIDs = ruleIDs
+		}
+
+		sc.RSS = append(sc.RSS, rssCfg)
 	}
-	// 读取单站点时也应用默认认证方式与 API URL
-	switch name {
-	case models.MTEAM:
-		sc.AuthMethod = "api_key"
-		sc.APIUrl = models.DefaultAPIUrlMTeam
-	case models.CMCT, models.HDSKY:
-		sc.AuthMethod = "cookie"
-		sc.APIUrl = ""
-	}
+	// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 	return sc, nil
 }

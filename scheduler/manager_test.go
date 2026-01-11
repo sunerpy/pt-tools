@@ -11,10 +11,11 @@ import (
 	"github.com/mmcdole/gofeed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"go.uber.org/zap"
 )
 
 func TestManager_StartStopAll(t *testing.T) {
@@ -81,9 +82,9 @@ func TestReload_InvalidRSSNotStarted(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: "/tmp", AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.CMCT:  {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}},
-			models.HDSKY: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://rss.m-team.xxx/path"}}},
-			models.MTEAM: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example/rss"}}},
+			models.SpringSunday: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}},
+			models.HDSKY:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://rss.m-team.xxx/path"}}},
+			models.MTEAM:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example/rss"}}},
 		},
 	}
 	require.NotPanics(t, func() { m.Reload(cfg) })
@@ -170,9 +171,9 @@ func TestManager_Reload_StartAllBranches(t *testing.T) {
 	defer srv.Close()
 	_ = store.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: srv.URL, User: "u", Password: "p"})
 	cfg := &models.Config{Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true}, Sites: map[models.SiteGroup]models.SiteConfig{
-		models.CMCT:  {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "https://example.com/rss", IntervalMinutes: 1}}},
-		models.HDSKY: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://example.com/rss", IntervalMinutes: 1}}},
-		models.MTEAM: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example.com/rss", IntervalMinutes: 1}}},
+		models.SpringSunday: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "https://example.com/rss", IntervalMinutes: 1}}},
+		models.HDSKY:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://example.com/rss", IntervalMinutes: 1}}},
+		models.MTEAM:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example.com/rss", IntervalMinutes: 1}}},
 	}}
 	m := NewManager()
 	m.Reload(cfg)
@@ -215,7 +216,7 @@ func TestRunRSSJob_WithStub(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfg := models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag", IntervalMinutes: 1}
-	go runRSSJob(ctx, models.CMCT, cfg, &rssSiteStub{})
+	go runRSSJob(ctx, models.SpringSunday, cfg, &rssSiteStub{})
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 	time.Sleep(100 * time.Millisecond)
@@ -225,12 +226,12 @@ func TestManager_StartStop(t *testing.T) {
 	m := NewManager()
 	r := models.RSSConfig{Name: "r1", URL: "http://example", IntervalMinutes: 1}
 	ran := make(chan struct{}, 1)
-	m.Start(models.CMCT, r, func(ctx context.Context) { ran <- struct{}{} })
-	m.Start(models.CMCT, r, func(ctx context.Context) { ran <- struct{}{} })
+	m.Start(models.SpringSunday, r, func(ctx context.Context) { ran <- struct{}{} })
+	m.Start(models.SpringSunday, r, func(ctx context.Context) { ran <- struct{}{} })
 	if _, ok := <-ran; !ok {
 		t.Fatalf("runner not invoked")
 	}
-	m.Stop(models.CMCT, r.Name)
+	m.Stop(models.SpringSunday, r.Name)
 }
 
 func TestKeyFormat(t *testing.T) {
@@ -243,4 +244,452 @@ func TestValidRSS_MoreBranches(t *testing.T) {
 	assert.False(t, validRSS("https://"))
 	assert.True(t, validRSS("http://host/path"))
 	assert.True(t, validRSS("https://host/path"))
+}
+
+// TestQbitDownloaderConfig 测试 qBittorrent 下载器配置
+func TestQbitDownloaderConfig(t *testing.T) {
+	config := &qbitDownloaderConfig{
+		url:      "http://localhost:8080",
+		username: "admin",
+		password: "adminadmin",
+	}
+
+	assert.Equal(t, "http://localhost:8080", config.GetURL())
+	assert.Equal(t, "admin", config.GetUsername())
+	assert.Equal(t, "adminadmin", config.GetPassword())
+	assert.NoError(t, config.Validate())
+
+	// 测试空 URL 验证失败
+	emptyConfig := &qbitDownloaderConfig{url: ""}
+	assert.Error(t, emptyConfig.Validate())
+}
+
+// TestTransmissionDownloaderConfig 测试 Transmission 下载器配置
+func TestTransmissionDownloaderConfig(t *testing.T) {
+	config := &transmissionDownloaderConfig{
+		url:      "http://localhost:9091",
+		username: "admin",
+		password: "password",
+	}
+
+	assert.Equal(t, "http://localhost:9091", config.GetURL())
+	assert.Equal(t, "admin", config.GetUsername())
+	assert.Equal(t, "password", config.GetPassword())
+	assert.NoError(t, config.Validate())
+
+	// 测试空 URL 验证失败
+	emptyConfig := &transmissionDownloaderConfig{url: ""}
+	assert.Error(t, emptyConfig.Validate())
+}
+
+// TestGetDownloaderManager 测试获取下载器管理器
+func TestGetDownloaderManager(t *testing.T) {
+	m := NewManager()
+	dm := m.GetDownloaderManager()
+	// 可能为 nil，取决于初始化状态
+	_ = dm
+}
+
+// TestInitDownloaderManager 测试下载器管理器初始化
+func TestInitDownloaderManager(t *testing.T) {
+	// 测试 GlobalDB 为 nil 的情况
+	global.GlobalDB = nil
+	m := &Manager{
+		jobs:              map[string]*job{},
+		downloaderManager: nil,
+	}
+	m.initDownloaderManager()
+	// 不应该 panic
+
+	// 测试有 GlobalDB 的情况
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m2 := NewManager()
+	m2.initDownloaderManager()
+	// 验证下载器管理器已初始化
+	assert.NotNil(t, m2.downloaderManager)
+}
+
+// TestInitDownloaderManager_WithDownloaderSettings 测试带下载器配置的初始化
+func TestInitDownloaderManager_WithDownloaderSettings(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	// 创建下载器配置
+	ds := models.DownloaderSetting{
+		Name:     "test-qbit",
+		Type:     "qbittorrent",
+		URL:      "http://localhost:8080",
+		Username: "admin",
+		Password: "password",
+		Enabled:  true,
+	}
+	err = db.DB.Create(&ds).Error
+	require.NoError(t, err)
+
+	m := NewManager()
+	m.initDownloaderManager()
+	assert.NotNil(t, m.downloaderManager)
+}
+
+// TestInitDownloaderManager_WithTransmissionSettings 测试 Transmission 配置
+func TestInitDownloaderManager_WithTransmissionSettings(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	// 创建 Transmission 下载器配置
+	ds := models.DownloaderSetting{
+		Name:     "test-transmission",
+		Type:     "transmission",
+		URL:      "http://localhost:9091",
+		Username: "admin",
+		Password: "password",
+		Enabled:  true,
+	}
+	err = db.DB.Create(&ds).Error
+	require.NoError(t, err)
+
+	m := NewManager()
+	m.initDownloaderManager()
+	assert.NotNil(t, m.downloaderManager)
+}
+
+// TestInitDownloaderManager_WithUnknownType 测试未知下载器类型
+func TestInitDownloaderManager_WithUnknownType(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	// 创建未知类型的下载器配置
+	ds := models.DownloaderSetting{
+		Name:     "test-unknown",
+		Type:     "unknown",
+		URL:      "http://localhost:8080",
+		Username: "admin",
+		Password: "password",
+		Enabled:  true,
+	}
+	err = db.DB.Create(&ds).Error
+	require.NoError(t, err)
+
+	m := NewManager()
+	require.NotPanics(t, func() {
+		m.initDownloaderManager()
+	})
+}
+
+// TestInitDownloaderManager_DisabledDownloader 测试禁用的下载器
+func TestInitDownloaderManager_DisabledDownloader(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	// 创建禁用的下载器配置
+	ds := models.DownloaderSetting{
+		Name:     "test-disabled",
+		Type:     "qbittorrent",
+		URL:      "http://localhost:8080",
+		Username: "admin",
+		Password: "password",
+		Enabled:  false,
+	}
+	err = db.DB.Create(&ds).Error
+	require.NoError(t, err)
+
+	m := NewManager()
+	m.initDownloaderManager()
+	assert.NotNil(t, m.downloaderManager)
+}
+
+// TestCreateQBitFactory 测试 qBittorrent 工厂创建
+func TestCreateQBitFactory(t *testing.T) {
+	factory := createQBitFactory()
+	assert.NotNil(t, factory)
+
+	// 创建一个 mock 配置
+	config := &qbitDownloaderConfig{
+		url:      "http://localhost:8080",
+		username: "admin",
+		password: "adminadmin",
+	}
+
+	// 工厂应该能创建下载器（即使连接失败）
+	_, err := factory(config, "test-qbit")
+	// 由于没有实际的 qBittorrent 服务器，可能会返回错误
+	// 但工厂函数本身应该能正常调用
+	_ = err
+}
+
+// TestCreateTransmissionFactory 测试 Transmission 工厂创建
+func TestCreateTransmissionFactory(t *testing.T) {
+	factory := createTransmissionFactory()
+	assert.NotNil(t, factory)
+
+	// 创建一个 mock 配置
+	config := &transmissionDownloaderConfig{
+		url:      "http://localhost:9091",
+		username: "admin",
+		password: "password",
+	}
+
+	// 工厂应该能创建下载器
+	_, err := factory(config, "test-transmission")
+	_ = err
+}
+
+// TestQbitDownloaderConfig_GetType 测试 GetType 方法
+func TestQbitDownloaderConfig_GetType(t *testing.T) {
+	config := &qbitDownloaderConfig{
+		url:      "http://localhost:8080",
+		username: "admin",
+		password: "adminadmin",
+	}
+	assert.Equal(t, "qbittorrent", string(config.GetType()))
+}
+
+// TestTransmissionDownloaderConfig_GetType 测试 GetType 方法
+func TestTransmissionDownloaderConfig_GetType(t *testing.T) {
+	config := &transmissionDownloaderConfig{
+		url:      "http://localhost:9091",
+		username: "admin",
+		password: "password",
+	}
+	assert.Equal(t, "transmission", string(config.GetType()))
+}
+
+// TestStartAll_WithMTEAM 测试 StartAll 处理 MTEAM 站点
+func TestStartAll_WithMTEAM(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.MTEAM: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
+				},
+			},
+		},
+	}
+
+	// StartAll 应该不会 panic
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+	time.Sleep(50 * time.Millisecond)
+	m.StopAll()
+}
+
+// TestStartAll_WithHDSKY 测试 StartAll 处理 HDSKY 站点
+func TestStartAll_WithHDSKY(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.HDSKY: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
+				},
+			},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+	time.Sleep(50 * time.Millisecond)
+	m.StopAll()
+}
+
+// TestStartAll_WithCMCT 测试 StartAll 处理 CMCT 站点
+func TestStartAll_WithCMCT(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.SpringSunday: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
+				},
+			},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+	time.Sleep(50 * time.Millisecond)
+	m.StopAll()
+}
+
+// TestStartAll_WithUnknownSite 测试 StartAll 处理未知站点
+func TestStartAll_WithUnknownSite(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.SiteGroup("unknown"): {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
+				},
+			},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+}
+
+// TestStartAll_WithSkippedRSS 测试 StartAll 跳过应该跳过的 RSS
+func TestStartAll_WithSkippedRSS(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.MTEAM: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "test-rss", URL: "", IntervalMinutes: 1}, // 空 URL 应该被跳过
+				},
+			},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+}
+
+// TestStartAll_WithDisabledSite 测试 StartAll 跳过禁用的站点
+func TestStartAll_WithDisabledSite(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.MTEAM: {
+				Enabled: ptr(false), // 禁用
+				RSS: []models.RSSConfig{
+					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
+				},
+			},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+}
+
+// TestStartAll_AllSiteTypes 测试 StartAll 处理所有站点类型
+func TestStartAll_AllSiteTypes(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	m := NewManager()
+	cfg := &models.Config{
+		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
+		Sites: map[models.SiteGroup]models.SiteConfig{
+			models.MTEAM: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "mteam-rss", URL: "https://example.com/mteam", IntervalMinutes: 1},
+				},
+			},
+			models.HDSKY: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "hdsky-rss", URL: "https://example.com/hdsky", IntervalMinutes: 1},
+				},
+			},
+			models.SpringSunday: {
+				Enabled: ptr(true),
+				RSS: []models.RSSConfig{
+					{Name: "cmct-rss", URL: "https://example.com/cmct", IntervalMinutes: 1},
+				},
+			},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		m.StartAll(cfg)
+	})
+	time.Sleep(100 * time.Millisecond)
+	m.StopAll()
+}
+
+// TestExecuteTask 测试 executeTask 函数
+func TestExecuteTask(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	ctx := context.Background()
+	cfg := models.RSSConfig{Name: "test", URL: "http://invalid-url", IntervalMinutes: 1}
+
+	// 使用 stub 测试
+	stub := &rssSiteStub{}
+	require.NotPanics(t, func() {
+		executeTask(ctx, models.SpringSunday, cfg, stub)
+	})
+}
+
+// TestProcessRSS 测试 processRSS 函数
+func TestProcessRSS(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+
+	ctx := context.Background()
+	cfg := models.RSSConfig{Name: "test", URL: "http://invalid-url", IntervalMinutes: 1}
+
+	stub := &rssSiteStub{}
+	// processRSS 可能返回错误，但不应该 panic
+	_ = processRSS(ctx, models.SpringSunday, cfg, stub)
 }

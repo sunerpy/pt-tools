@@ -34,7 +34,7 @@ pushed torrents, skipped torrents, and other related information.`,
 	Example: `  pt-tools task list`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("Please specify a subcommand. Use 'pt-tools task --help' for more information.")
-		cmd.Usage()
+		_ = cmd.Usage()
 	},
 	PersistentPreRun: PersistentCheckCfg, // 确保在执行所有子命令前进行配置检查
 }

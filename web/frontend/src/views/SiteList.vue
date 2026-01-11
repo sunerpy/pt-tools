@@ -38,7 +38,7 @@ async function toggleEnabled(name: string) {
 }
 
 async function deleteSite(name: string) {
-  if (['cmct', 'hdsky', 'mteam'].includes(name.toLowerCase())) {
+  if (['springsunday', 'hdsky', 'mteam'].includes(name.toLowerCase())) {
     ElMessage.warning('预置站点不可删除')
     return
   }
@@ -64,7 +64,7 @@ async function addSite() {
     const { value: name } = await ElMessageBox.prompt('请输入站点标识', '新增站点', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
-      inputPlaceholder: 'cmct / hdsky / mteam 或自定义',
+      inputPlaceholder: 'springsunday / hdsky / mteam 或自定义',
       inputValidator: val => {
         if (!val || !val.trim()) return '站点标识不能为空'
         if (sites.value[val.toLowerCase()]) return '站点已存在'
@@ -81,7 +81,7 @@ async function addSite() {
       auth_method: lower === 'mteam' ? 'api_key' : 'cookie',
       cookie: '',
       api_key: '',
-      api_url: lower === 'mteam' ? 'https://api.m-team.cc/api' : ''
+      api_url: '' // 预置站点的 API URL 由后端常量提供
     }
 
     await sitesApi.save(lower, payload)
@@ -162,7 +162,7 @@ function getRssCount(site: SiteConfig): number {
               <el-button
                 type="danger"
                 size="small"
-                :disabled="['cmct', 'hdsky', 'mteam'].includes(row[0].toLowerCase())"
+                :disabled="['springsunday', 'hdsky', 'mteam'].includes(row[0].toLowerCase())"
                 @click="deleteSite(row[0])"
               >
                 删除

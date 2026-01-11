@@ -1,7 +1,11 @@
+.kiro
 .pt-tools
 .trae
+AGENTS.md
 coverage.out
 downloads
+examples/docs
+examples/*.ts
 jsons
 vendor
 

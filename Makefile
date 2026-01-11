@@ -1,29 +1,29 @@
-SHELL=/bin/bash
+SHELL = /bin/bash
 IMAGE_NAME = pt-tools
-UPX_VERSION=4.2.4
-UPX_DIR=upx-$(UPX_VERSION)-amd64_linux
-UPX_BIN=$(UPX_DIR)/upx
-PROJECT_ROOT=$(abspath .)
-GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-NEW_TAG=$(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
+UPX_VERSION = 4.2.4
+UPX_DIR = upx-$(UPX_VERSION)-amd64_linux
+UPX_BIN = $(UPX_DIR)/upx
+PROJECT_ROOT = $(abspath .)
+GIT_TAG = $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+NEW_TAG = $(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
 
 # Docker 镜像仓库
+TAG ?= $(GIT_TAG)
 DOCKER_REPO = sunerpy
 DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
-TAG ?= $(GIT_TAG)
-BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H: %M:%SZ")
 COMMIT_ID := $(shell git rev-parse HEAD)
 ifeq ($(MAKECMDGOALS), prod-new)
-    TAG=$(NEW_TAG)
+  TAG = $(NEW_TAG)
 else ifeq ($(MAKECMDGOALS), test-new)
-    TAG=$(NEW_TAG)
+  TAG = $(NEW_TAG)
 else
-    TAG=$(GIT_TAG)
+  TAG = $(GIT_TAG)
 endif
 
 # 定义多平台
-PLATFORMS=linux/amd64 linux/arm64 windows/amd64 windows/arm64
-DOCKERPLATFORMS=linux/amd64
+PLATFORMS = linux/amd64 linux/arm64 windows/amd64 windows/arm64
+DOCKERPLATFORMS = linux/amd64
 DIST_DIR = dist
 
 HTTP_PROXY ?=
@@ -36,18 +36,18 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:22.13.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean code-format unit-test coverage-summary
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt lint unit-test coverage-summary
 
 # 本地构建二进制
-build-local: code-format
+build-local: fmt
 	@echo "Building binary for local environment"
 	mkdir -p $(DIST_DIR) && \
 	GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) CGO_ENABLED=0 \
-		go build -ldflags="-s -w \
-		-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
-		-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
-		-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
-		-o $(DIST_DIR)/$(IMAGE_NAME) .
+	go build -ldflags="-s -w \
+	-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
+	-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
+	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+	-o $(DIST_DIR)/$(IMAGE_NAME) .
 
 # 多平台二进制构建
 build-binaries:
@@ -57,13 +57,13 @@ build-binaries:
 		GOARCH=$$(echo $$platform | cut -d/ -f2); \
 		OUTPUT=$(DIST_DIR)/$(IMAGE_NAME)-$$GOOS-$$GOARCH; \
 		if [ "$$GOOS" = "windows" ]; then OUTPUT=$$OUTPUT.exe; fi; \
-		echo "Building for $$platform -> $$OUTPUT"; \
-		GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -ldflags="-s -w \
-		-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
-		-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
-		-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
-		-o $$OUTPUT . || exit 1; \
-	done
+			echo "Building for $$platform -> $$OUTPUT"; \
+			GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -ldflags="-s -w \
+			-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
+			-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
+			-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+			-o $$OUTPUT . || exit 1; \
+		done
 
 # 检测并安装 UPX
 install-upx: build-binaries
@@ -109,22 +109,22 @@ build-local-docker:
 	@mkdir -p dist
 	@echo "Building local Docker image"
 	docker buildx build \
-		--progress=plain \
-		--network host \
-		--platform $(DOCKERPLATFORMS) \
-		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
-		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
-		--build-arg NODE_IMAGE=$(NODE_IMAGE) \
-		--build-arg BUILD_ENV=$(BUILD_ENV) \
-		--build-arg TAG=$(TAG) \
-		--build-arg BUILD_TIME=$(BUILD_TIME) \
-		--build-arg COMMIT_ID=$(COMMIT_ID) \
-		--build-arg HTTP_PROXY=$(HTTP_PROXY) \
-		--build-arg HTTPS_PROXY=$(HTTPS_PROXY) \
-		--build-arg NO_PROXY=$(NO_PROXY) \
-		--no-cache \
-		-t $(DOCKER_IMAGE_FULL):$(TAG) \
-		-t $(DOCKER_IMAGE_FULL):latest .
+	--progress=plain \
+	--network host \
+	--platform $(DOCKERPLATFORMS) \
+	--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+	--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
+	--build-arg BUILD_ENV=$(BUILD_ENV) \
+	--build-arg TAG=$(TAG) \
+	--build-arg BUILD_TIME=$(BUILD_TIME) \
+	--build-arg COMMIT_ID=$(COMMIT_ID) \
+	--build-arg HTTP_PROXY=$(HTTP_PROXY) \
+	--build-arg HTTPS_PROXY=$(HTTPS_PROXY) \
+	--build-arg NO_PROXY=$(NO_PROXY) \
+	--no-cache \
+	-t $(DOCKER_IMAGE_FULL):$(TAG) \
+	-t $(DOCKER_IMAGE_FULL):latest .
 
 # Docker 镜像远程构建
 build-remote-docker: BUILD_ENV = remote
@@ -135,18 +135,18 @@ build-remote-docker:
 	go mod vendor
 	@echo "Building remote Docker image"
 	docker buildx build \
-		--progress=plain \
-		--platform $(DOCKERPLATFORMS) \
-		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
-		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
-		--build-arg NODE_IMAGE=$(NODE_IMAGE) \
-		--build-arg BUILD_ENV=$(BUILD_ENV) \
-		--build-arg TAG=$(TAG) \
-		--build-arg BUILD_TIME=$(BUILD_TIME) \
-		--build-arg COMMIT_ID=$(COMMIT_ID) \
-		-t $(DOCKER_IMAGE_FULL):$(TAG) \
-		-t $(DOCKER_IMAGE_FULL):latest \
-		--push .
+	--progress=plain \
+	--platform $(DOCKERPLATFORMS) \
+	--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+	--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
+	--build-arg BUILD_ENV=$(BUILD_ENV) \
+	--build-arg TAG=$(TAG) \
+	--build-arg BUILD_TIME=$(BUILD_TIME) \
+	--build-arg COMMIT_ID=$(COMMIT_ID) \
+	-t $(DOCKER_IMAGE_FULL):$(TAG) \
+	-t $(DOCKER_IMAGE_FULL):latest \
+	--push .
 
 # 清理构建文件
 clean:
@@ -158,10 +158,42 @@ clean-docker:
 	@echo "Cleaning Docker cache"
 	docker builder prune -f
 
+lint: ## Run linters
+	@echo "Running linters..."
+	@if command -v golangci-lint > /dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not found. Install with:"; \
+		echo "  go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		echo ""; \
+		echo "Running go vet instead..."; \
+		go vet ./...; \
+	fi
+
 # 代码格式化
-code-format:
-	@echo "Formatting code"
-	bash style.sh
+fmt:
+	@echo "Formatting code..."
+	@echo "Formatting web code ..."
+	@cd web/frontend && if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		pnpm install; \
+	fi && \
+	pnpm format
+	@echo "Formatting web code finished."
+	@echo "Formatting go code ..."
+	@if command -v goimports > /dev/null 2>&1; then \
+		goimports -w -local github.com/sunerpy/pt-tools .; \
+	else \
+		echo "goimports not found. Install with:"; \
+		echo "  go install golang.org/x/tools/cmd/goimports@latest"; \
+	fi
+	@if command -v gofumpt > /dev/null 2>&1; then \
+	gofumpt -extra -w .; \
+	else \
+	echo "gofumpt not found. Install with:"; \
+	echo "  go install mvdan.cc/gofumpt@latest"; \
+	fi
+	@echo "Formatting code complete."
 
 unit-test:
 	@mkdir -p $(DIST_DIR)
@@ -169,7 +201,25 @@ unit-test:
 	go tool cover -html=$(DIST_DIR)/coverage.out -o $(DIST_DIR)/coverage.html
 	@echo "Coverage report: $(DIST_DIR)/coverage.html"
 
-coverage-summary:
+coverage-summary: unit-test
 	@mkdir -p $(DIST_DIR)
 	@test -f $(DIST_DIR)/coverage.out || (echo "Run make unit-test first"; exit 1)
-	go tool cover -func=$(DIST_DIR)/coverage.out | tee $(DIST_DIR)/coverage.txt
+	@echo "Filtering coverage data (excluding test files and mocks)..."
+	@grep -v "_test.go" $(DIST_DIR)/coverage.out | grep -v "/mocks/" > $(DIST_DIR)/filtered_coverage.out
+	@echo ""
+	@echo "=== Coverage Summary (excluding test and mock files) ==="
+	@go tool cover -func=$(DIST_DIR)/filtered_coverage.out | tee $(DIST_DIR)/coverage.txt
+	@echo ""
+	@echo "Filtered coverage saved to: $(DIST_DIR)/coverage.txt"
+
+# 前端构建
+build-frontend:
+	@echo "Building frontend..."
+	pnpm --dir web/frontend install
+	pnpm --dir web/frontend build
+	@echo "Frontend built to web/static/dist"
+
+# 开发运行（先构建前端，再运行后端）
+run-dev: build-frontend
+	@echo "Starting development server..."
+	go run main.go web

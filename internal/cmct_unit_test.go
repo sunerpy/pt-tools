@@ -8,20 +8,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/mmcdole/gofeed"
 	"github.com/stretchr/testify/require"
+	"github.com/zeebo/bencode"
+	"go.uber.org/zap"
+
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"github.com/sunerpy/pt-tools/site"
-	"github.com/sunerpy/pt-tools/thirdpart/qbit"
-	"github.com/zeebo/bencode"
-	"go.uber.org/zap"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
-func TestCmctImpl_IsEnabledAndFields(t *testing.T) {
+func TestUnifiedSiteImpl_CMCT_IsEnabledAndFields(t *testing.T) {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
@@ -38,21 +36,28 @@ func TestCmctImpl_IsEnabledAndFields(t *testing.T) {
 	s := core.NewConfigStore(db)
 	_ = s.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: ts.URL, User: "u", Password: "p"})
 	e := true
-	_, _ = s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	c, err := NewCmctImpl(context.Background())
+	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
 	require.NoError(t, err)
 	if !c.IsEnabled() {
 		t.Fatalf("expected enabled")
 	}
-	if c.MaxRetries() != c.maxRetries {
+	if c.MaxRetries() != maxRetries {
 		t.Fatalf("max retries mismatch")
 	}
-	if c.RetryDelay() != c.retryDelay {
+	if c.RetryDelay() != retryDelay {
 		t.Fatalf("retry delay mismatch")
+	}
+	if c.SiteGroup() != models.SpringSunday {
+		t.Fatalf("site group mismatch")
 	}
 }
 
-func TestCmctImpl_DownloadTorrentAndContext(t *testing.T) {
+func TestUnifiedSiteImpl_CMCT_DownloadTorrentAndContext(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	global.InitLogger(zap.NewNop())
+	global.GlobalDB = db
 	// serve minimal bencoded torrent
 	var buf bytes.Buffer
 	_ = bencode.NewEncoder(&buf).Encode(map[string]any{"info": map[string]any{"name": "x"}})
@@ -62,7 +67,8 @@ func TestCmctImpl_DownloadTorrentAndContext(t *testing.T) {
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	c := &CmctImpl{ctx: context.Background(), maxRetries: 1, retryDelay: 0}
+	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
+	require.NoError(t, err)
 	if _, err := c.DownloadTorrent(srv.URL, "t", dir); err != nil {
 		t.Fatalf("download: %v", err)
 	}
@@ -71,32 +77,7 @@ func TestCmctImpl_DownloadTorrentAndContext(t *testing.T) {
 	}
 }
 
-func TestCmctImpl_GetTorrentDetails(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
-	require.NoError(t, err)
-	global.InitLogger(zap.NewNop())
-	global.GlobalDB = db
-	s := core.NewConfigStore(db)
-	e := true
-	_, _ = s.UpsertSite(models.CMCT, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`<html><body>
-            <input name='torrent_name' value='T1'>
-            <input name='detail_torrent_id' value='ID1'>
-            <h1><font class='free'></font><span title='2025-01-01 00:00:00'></span></h1>
-        </body></html>`))
-	}))
-	defer srv.Close()
-	c := &CmctImpl{Collector: site.NewCollectorWithTransport()}
-	item := &gofeed.Item{Link: srv.URL}
-	out, err := c.GetTorrentDetails(item)
-	require.NoError(t, err)
-	require.NotNil(t, out)
-	require.Equal(t, "success", out.Code)
-}
-
-func TestCmct_SendTorrentToQbit(t *testing.T) {
+func TestUnifiedSiteImpl_CMCT_SendTorrentToQbit(t *testing.T) {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	global.GlobalDB = db
@@ -107,14 +88,14 @@ func TestCmct_SendTorrentToQbit(t *testing.T) {
 	sub := filepath.Join(abs, tag)
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 	var buf bytes.Buffer
-	_ = bencode.NewEncoder(&buf).Encode(map[string]interface{}{"info": map[string]interface{}{"name": "x"}})
+	_ = bencode.NewEncoder(&buf).Encode(map[string]any{"info": map[string]any{"name": "x"}})
 	data := buf.Bytes()
 	p := filepath.Join(sub, "a.torrent")
 	require.NoError(t, os.WriteFile(p, data, 0o644))
 	h, err := qbit.ComputeTorrentHashWithPath(p)
 	require.NoError(t, err)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: string(models.CMCT), TorrentHash: &h, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: string(models.SpringSunday), TorrentHash: &h, IsPushed: &pushed}
 	require.NoError(t, db.UpsertTorrent(ti))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -134,28 +115,21 @@ func TestCmct_SendTorrentToQbit(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	client, err := qbit.NewQbitClient(srv.URL, "u", "p", time.Millisecond*10)
+	// Create a default downloader setting in the database
+	dlSetting := models.DownloaderSetting{
+		Name:      "test-qbit",
+		Type:      "qbittorrent",
+		URL:       srv.URL,
+		Username:  "u",
+		Password:  "p",
+		Enabled:   true,
+		IsDefault: true,
+	}
+	require.NoError(t, db.DB.Create(&dlSetting).Error)
+	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
 	require.NoError(t, err)
-	c := &CmctImpl{qbitClient: client}
 	require.NoError(t, c.SendTorrentToQbit(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 	if _, err := os.Stat(p); err == nil {
 		t.Fatalf("expected file removed")
-	}
-}
-
-func TestCmct_CanbeFinished_Branches(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
-	require.NoError(t, err)
-	global.GlobalDB = db
-	global.InitLogger(zap.NewNop())
-	_ = core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DownloadLimitEnabled: false})
-	c := &CmctImpl{}
-	d := models.PHPTorrentInfo{EndTime: time.Now().Add(1 * time.Hour), SizeMB: 1024}
-	if !c.CanbeFinished(d) {
-		t.Fatalf("should finish when disabled")
-	}
-	_ = core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DownloadLimitEnabled: true, DownloadSpeedLimit: 0})
-	if c.CanbeFinished(models.PHPTorrentInfo{EndTime: time.Now().Add(1 * time.Hour), SizeMB: 1024}) {
-		t.Fatalf("expected false")
 	}
 }

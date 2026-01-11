@@ -5,6 +5,7 @@ import (
 
 	"github.com/gocolly/colly"
 	"github.com/golang/mock/gomock"
+
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -25,7 +26,7 @@ func (m *MockSiteParser) ParseTitleAndID(e *colly.HTMLElement, info *models.PHPT
 	m.ctrl.Call(m, "ParseTitleAndID", e, info)
 }
 
-func (r *MockSiteParserMockRecorder) ParseTitleAndID(e, info interface{}) *gomock.Call {
+func (r *MockSiteParserMockRecorder) ParseTitleAndID(e, info any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "ParseTitleAndID", reflect.TypeOf((*MockSiteParser)(nil).ParseTitleAndID), e, info)
 }
@@ -35,7 +36,7 @@ func (m *MockSiteParser) ParseDiscount(e *colly.HTMLElement, info *models.PHPTor
 	m.ctrl.Call(m, "ParseDiscount", e, info)
 }
 
-func (r *MockSiteParserMockRecorder) ParseDiscount(e, info interface{}) *gomock.Call {
+func (r *MockSiteParserMockRecorder) ParseDiscount(e, info any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "ParseDiscount", reflect.TypeOf((*MockSiteParser)(nil).ParseDiscount), e, info)
 }
@@ -45,7 +46,7 @@ func (m *MockSiteParser) ParseHR(e *colly.HTMLElement, info *models.PHPTorrentIn
 	m.ctrl.Call(m, "ParseHR", e, info)
 }
 
-func (r *MockSiteParserMockRecorder) ParseHR(e, info interface{}) *gomock.Call {
+func (r *MockSiteParserMockRecorder) ParseHR(e, info any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "ParseHR", reflect.TypeOf((*MockSiteParser)(nil).ParseHR), e, info)
 }
@@ -55,7 +56,7 @@ func (m *MockSiteParser) ParseTorrentSizeMB(e *colly.HTMLElement, info *models.P
 	m.ctrl.Call(m, "ParseTorrentSizeMB", e, info)
 }
 
-func (r *MockSiteParserMockRecorder) ParseTorrentSizeMB(e, info interface{}) *gomock.Call {
+func (r *MockSiteParserMockRecorder) ParseTorrentSizeMB(e, info any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "ParseTorrentSizeMB", reflect.TypeOf((*MockSiteParser)(nil).ParseTorrentSizeMB), e, info)
 }
