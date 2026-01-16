@@ -436,6 +436,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 				IntervalMinutes: r.IntervalMinutes,
 				DownloaderID:    r.DownloaderID,
 				DownloadPath:    r.DownloadPath,
+				PauseOnFreeEnd:  r.PauseOnFreeEnd,
 			}
 			if err := tx.Create(&rr).Error; err != nil {
 				return err
@@ -502,7 +503,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample})
+			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd})
 		}
 		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
@@ -537,6 +538,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 			DownloaderID:    r.DownloaderID,
 			DownloadPath:    r.DownloadPath,
 			IsExample:       r.IsExample,
+			PauseOnFreeEnd:  r.PauseOnFreeEnd,
 		}
 
 		// 获取关联的过滤规则 ID

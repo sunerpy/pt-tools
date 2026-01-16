@@ -111,7 +111,7 @@ func (p *HDSkyParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, time
 	var endTime time.Time
 	endTimeAttr := doc.Find("h1 span[title]").First().AttrOr("title", "")
 	if endTimeAttr != "" {
-		if t, err := time.ParseInLocation(p.Config.TimeLayout, endTimeAttr, time.Local); err == nil {
+		if t, err := ParseTimeInCST(p.Config.TimeLayout, endTimeAttr); err == nil {
 			endTime = t
 		}
 	}
@@ -230,7 +230,7 @@ func (p *SpringSundayParser) ParseDiscount(doc *goquery.Selection) (DiscountLeve
 	var endTime time.Time
 	endTimeAttr := doc.Find("h1 span[title]").First().AttrOr("title", "")
 	if endTimeAttr != "" {
-		if t, err := time.ParseInLocation(p.Config.TimeLayout, endTimeAttr, time.Local); err == nil {
+		if t, err := ParseTimeInCST(p.Config.TimeLayout, endTimeAttr); err == nil {
 			endTime = t
 		}
 	}

@@ -55,6 +55,7 @@ func genTorrentsWithRSS(ctx context.Context) error {
 		return nil
 	}
 	m := scheduler.NewManager()
+	m.InitFreeEndMonitor()
 	scMap2, _ := store.ListSites()
 	cfg := &models.Config{Global: gl, Sites: scMap2}
 	m.Reload(cfg)

@@ -375,7 +375,7 @@ func CalculateSiteLevelProgress(info *UserInfo, requirements []SiteLevelRequirem
 	progress := &SiteLevelProgressInfo{
 		CurrentLevel:      currentLevel,
 		NextLevel:         nextLevel,
-		UnmetRequirements: make(map[string]interface{}),
+		UnmetRequirements: make(map[string]any),
 		ProgressPercent:   100,
 	}
 
@@ -431,8 +431,8 @@ func CalculateSiteLevelProgress(info *UserInfo, requirements []SiteLevelRequirem
 }
 
 // GetSiteNextLevelUnmet returns unmet requirements for next level
-func GetSiteNextLevelUnmet(info *UserInfo, requirements []SiteLevelRequirement) map[string]interface{} {
-	unmet := make(map[string]interface{})
+func GetSiteNextLevelUnmet(info *UserInfo, requirements []SiteLevelRequirement) map[string]any {
+	unmet := make(map[string]any)
 
 	currentLevelID := info.LevelID
 	if currentLevelID == 0 {

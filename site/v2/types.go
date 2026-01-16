@@ -7,7 +7,19 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
+
+// CSTLocation is the China Standard Time timezone (UTC+8).
+// Re-exported from utils for convenience within this package.
+var CSTLocation = utils.CSTLocation
+
+// ParseTimeInCST parses a time string in CST timezone.
+// Re-exported from utils for convenience within this package.
+func ParseTimeInCST(layout, value string) (time.Time, error) {
+	return utils.ParseTimeInCST(layout, value)
+}
 
 // Common errors for site operations
 var (

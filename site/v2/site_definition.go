@@ -69,7 +69,7 @@ type RequestConfig struct {
 	// Params are query parameters
 	Params map[string]string `json:"params,omitempty"`
 	// Data is the request body for POST requests
-	Data map[string]interface{} `json:"data,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
 	// ResponseType is "document" for HTML or "json" for JSON
 	ResponseType string `json:"responseType,omitempty"`
 	// Headers are additional HTTP headers
@@ -97,5 +97,5 @@ type Filter struct {
 	// Name is the filter function name
 	Name string `json:"name"`
 	// Args are optional arguments
-	Args []interface{} `json:"args,omitempty"`
+	Args []any `json:"args,omitempty"`
 }

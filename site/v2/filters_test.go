@@ -7,7 +7,7 @@ import (
 func TestParseNumberFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected float64
 	}{
 		{"simple integer", "123", 123},
@@ -34,7 +34,7 @@ func TestParseNumberFilter(t *testing.T) {
 func TestParseSizeFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected int64
 	}{
 		{"bytes", "100", 100},
@@ -63,7 +63,7 @@ func TestParseSizeFilter(t *testing.T) {
 func TestParseTimeFilter(t *testing.T) {
 	tests := []struct {
 		name        string
-		input       interface{}
+		input       any
 		expectZero  bool
 		expectValid bool
 	}{
@@ -97,15 +97,15 @@ func TestParseTimeFilter(t *testing.T) {
 func TestQuerystringFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"full URL", "https://example.com/page?id=123&name=test", []interface{}{"id"}, "123"},
-		{"query string only", "?id=123&name=test", []interface{}{"id"}, "123"},
-		{"missing param", "https://example.com/page?id=123", []interface{}{"name"}, ""},
-		{"no args", "https://example.com/page?id=123", []interface{}{}, ""},
-		{"relative URL", "/userdetails.php?id=456", []interface{}{"id"}, "456"},
+		{"full URL", "https://example.com/page?id=123&name=test", []any{"id"}, "123"},
+		{"query string only", "?id=123&name=test", []any{"id"}, "123"},
+		{"missing param", "https://example.com/page?id=123", []any{"name"}, ""},
+		{"no args", "https://example.com/page?id=123", []any{}, ""},
+		{"relative URL", "/userdetails.php?id=456", []any{"id"}, "456"},
 	}
 
 	for _, tt := range tests {
@@ -121,17 +121,17 @@ func TestQuerystringFilter(t *testing.T) {
 func TestSplitFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"split by space", "hello world", []interface{}{" ", 0}, "hello"},
-		{"split by space second", "hello world", []interface{}{" ", 1}, "world"},
-		{"split by comma", "a,b,c", []interface{}{",", 1}, "b"},
-		{"negative index", "a,b,c", []interface{}{",", -1}, "c"},
-		{"out of bounds", "a,b", []interface{}{",", 5}, ""},
-		{"no args", "hello world", []interface{}{}, "hello world"},
-		{"split with trim", "  hello  ,  world  ", []interface{}{",", 1}, "world"},
+		{"split by space", "hello world", []any{" ", 0}, "hello"},
+		{"split by space second", "hello world", []any{" ", 1}, "world"},
+		{"split by comma", "a,b,c", []any{",", 1}, "b"},
+		{"negative index", "a,b,c", []any{",", -1}, "c"},
+		{"out of bounds", "a,b", []any{",", 5}, ""},
+		{"no args", "hello world", []any{}, "hello world"},
+		{"split with trim", "  hello  ,  world  ", []any{",", 1}, "world"},
 	}
 
 	for _, tt := range tests {
@@ -147,13 +147,13 @@ func TestSplitFilter(t *testing.T) {
 func TestPrependFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"prepend string", "world", []interface{}{"hello "}, "hello world"},
-		{"prepend empty", "world", []interface{}{""}, "world"},
-		{"no args", "world", []interface{}{}, "world"},
+		{"prepend string", "world", []any{"hello "}, "hello world"},
+		{"prepend empty", "world", []any{""}, "world"},
+		{"no args", "world", []any{}, "world"},
 	}
 
 	for _, tt := range tests {
@@ -169,13 +169,13 @@ func TestPrependFilter(t *testing.T) {
 func TestAppendFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"append string", "hello", []interface{}{" world"}, "hello world"},
-		{"append empty", "hello", []interface{}{""}, "hello"},
-		{"no args", "hello", []interface{}{}, "hello"},
+		{"append string", "hello", []any{" world"}, "hello world"},
+		{"append empty", "hello", []any{""}, "hello"},
+		{"no args", "hello", []any{}, "hello"},
 	}
 
 	for _, tt := range tests {
@@ -191,14 +191,14 @@ func TestAppendFilter(t *testing.T) {
 func TestReplaceFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"replace substring", "hello world", []interface{}{"world", "go"}, "hello go"},
-		{"replace multiple", "aaa", []interface{}{"a", "b"}, "bbb"},
-		{"no match", "hello", []interface{}{"x", "y"}, "hello"},
-		{"insufficient args", "hello", []interface{}{"x"}, "hello"},
+		{"replace substring", "hello world", []any{"world", "go"}, "hello go"},
+		{"replace multiple", "aaa", []any{"a", "b"}, "bbb"},
+		{"no match", "hello", []any{"x", "y"}, "hello"},
+		{"insufficient args", "hello", []any{"x"}, "hello"},
 	}
 
 	for _, tt := range tests {
@@ -214,13 +214,13 @@ func TestReplaceFilter(t *testing.T) {
 func TestTrimFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"trim whitespace", "  hello  ", []interface{}{}, "hello"},
-		{"trim custom chars", "###hello###", []interface{}{"#"}, "hello"},
-		{"no trim needed", "hello", []interface{}{}, "hello"},
+		{"trim whitespace", "  hello  ", []any{}, "hello"},
+		{"trim custom chars", "###hello###", []any{"#"}, "hello"},
+		{"no trim needed", "hello", []any{}, "hello"},
 	}
 
 	for _, tt := range tests {
@@ -236,7 +236,7 @@ func TestTrimFilter(t *testing.T) {
 func TestExtDoubanIdFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected string
 	}{
 		{"douban URL", "https://movie.douban.com/subject/1234567/", "1234567"},
@@ -258,7 +258,7 @@ func TestExtDoubanIdFilter(t *testing.T) {
 func TestExtImdbIdFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected string
 	}{
 		{"imdb URL", "https://www.imdb.com/title/tt1234567/", "tt1234567"},
@@ -280,14 +280,14 @@ func TestExtImdbIdFilter(t *testing.T) {
 func TestRegexFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"capture group", "Size: 123 MB", []interface{}{`Size:\s*(\d+)`}, "123"},
-		{"full match", "abc123def", []interface{}{`\d+`}, "123"},
-		{"no match", "hello", []interface{}{`\d+`}, ""},
-		{"no args", "hello", []interface{}{}, "hello"},
+		{"capture group", "Size: 123 MB", []any{`Size:\s*(\d+)`}, "123"},
+		{"full match", "abc123def", []any{`\d+`}, "123"},
+		{"no match", "hello", []any{`\d+`}, ""},
+		{"no args", "hello", []any{}, "hello"},
 	}
 
 	for _, tt := range tests {
@@ -303,14 +303,14 @@ func TestRegexFilter(t *testing.T) {
 func TestRegexReplaceFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected string
 	}{
-		{"replace digits", "abc123def", []interface{}{`\d+`, "XXX"}, "abcXXXdef"},
-		{"replace with capture", "hello world", []interface{}{`(\w+) (\w+)`, "$2 $1"}, "world hello"},
-		{"no match", "hello", []interface{}{`\d+`, "X"}, "hello"},
-		{"insufficient args", "hello", []interface{}{`\d+`}, "hello"},
+		{"replace digits", "abc123def", []any{`\d+`, "XXX"}, "abcXXXdef"},
+		{"replace with capture", "hello world", []any{`(\w+) (\w+)`, "$2 $1"}, "world hello"},
+		{"no match", "hello", []any{`\d+`, "X"}, "hello"},
+		{"insufficient args", "hello", []any{`\d+`}, "hello"},
 	}
 
 	for _, tt := range tests {
@@ -326,13 +326,13 @@ func TestRegexReplaceFilter(t *testing.T) {
 func TestDefaultFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
-		expected interface{}
+		input    any
+		args     []any
+		expected any
 	}{
-		{"empty string with default", "", []interface{}{"default"}, "default"},
-		{"non-empty string", "hello", []interface{}{"default"}, "hello"},
-		{"no args", "", []interface{}{}, ""},
+		{"empty string with default", "", []any{"default"}, "default"},
+		{"non-empty string", "hello", []any{"default"}, "hello"},
+		{"no args", "", []any{}, ""},
 	}
 
 	for _, tt := range tests {
@@ -348,14 +348,14 @@ func TestDefaultFilter(t *testing.T) {
 func TestMultiplyFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected float64
 	}{
-		{"multiply int", 10, []interface{}{2}, 20},
-		{"multiply float", 10.5, []interface{}{2}, 21},
-		{"multiply string", "10", []interface{}{2}, 20},
-		{"no args", 10, []interface{}{}, 10},
+		{"multiply int", 10, []any{2}, 20},
+		{"multiply float", 10.5, []any{2}, 21},
+		{"multiply string", "10", []any{2}, 20},
+		{"no args", 10, []any{}, 10},
 	}
 
 	for _, tt := range tests {
@@ -371,14 +371,14 @@ func TestMultiplyFilter(t *testing.T) {
 func TestDivideFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected float64
 	}{
-		{"divide int", 10, []interface{}{2}, 5},
-		{"divide float", 10.5, []interface{}{2}, 5.25},
-		{"divide by zero", 10, []interface{}{0}, 10},
-		{"no args", 10, []interface{}{}, 10},
+		{"divide int", 10, []any{2}, 5},
+		{"divide float", 10.5, []any{2}, 5.25},
+		{"divide by zero", 10, []any{0}, 10},
+		{"no args", 10, []any{}, 10},
 	}
 
 	for _, tt := range tests {
@@ -394,16 +394,16 @@ func TestDivideFilter(t *testing.T) {
 func TestApplyFilters(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		filters  []Filter
-		expected interface{}
+		expected any
 	}{
 		{
 			name:  "chain parseNumber and multiply",
 			input: "100",
 			filters: []Filter{
 				{Name: "parseNumber"},
-				{Name: "multiply", Args: []interface{}{2}},
+				{Name: "multiply", Args: []any{2}},
 			},
 			expected: float64(200),
 		},
@@ -411,7 +411,7 @@ func TestApplyFilters(t *testing.T) {
 			name:  "chain split and trim",
 			input: "hello , world",
 			filters: []Filter{
-				{Name: "split", Args: []interface{}{",", 1}},
+				{Name: "split", Args: []any{",", 1}},
 				{Name: "trim"},
 			},
 			expected: "world",
@@ -445,44 +445,44 @@ func TestApplyFilters(t *testing.T) {
 func TestSumRegexMatchesFilter(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
-		args     []interface{}
+		input    any
+		args     []any
 		expected int
 	}{
 		{
 			name:     "SpringSunday single message",
 			input:    `你有1条新私人短讯！点击查看`,
-			args:     []interface{}{`你有(\d+)条新`},
+			args:     []any{`你有(\d+)条新`},
 			expected: 1,
 		},
 		{
 			name:     "SpringSunday multiple messages",
 			input:    `你有2条新系统短讯！你有3条新私人短讯！`,
-			args:     []interface{}{`你有(\d+)条新`},
+			args:     []any{`你有(\d+)条新`},
 			expected: 5, // 2 + 3
 		},
 		{
 			name:     "SpringSunday full HTML",
 			input:    `<b style="background: darkorange;">你有1条新系统短讯！点击查看</b><b style="background: red;">你有2条新私人短讯！点击查看</b>`,
-			args:     []interface{}{`你有(\d+)条新`},
+			args:     []any{`你有(\d+)条新`},
 			expected: 3, // 1 + 2
 		},
 		{
 			name:     "no match",
 			input:    `无新短讯`,
-			args:     []interface{}{`你有(\d+)条新`},
+			args:     []any{`你有(\d+)条新`},
 			expected: 0,
 		},
 		{
 			name:     "no args",
 			input:    `你有1条新私人短讯！`,
-			args:     []interface{}{},
+			args:     []any{},
 			expected: 0,
 		},
 		{
 			name:     "invalid regex",
 			input:    `你有1条新私人短讯！`,
-			args:     []interface{}{`[invalid`},
+			args:     []any{`[invalid`},
 			expected: 0,
 		},
 	}
@@ -499,7 +499,7 @@ func TestSumRegexMatchesFilter(t *testing.T) {
 
 func TestRegisterFilter(t *testing.T) {
 	// Register a custom filter
-	RegisterFilter("double", func(value interface{}, args ...interface{}) interface{} {
+	RegisterFilter("double", func(value any, args ...any) any {
 		return toFloat64(value) * 2
 	})
 
@@ -518,7 +518,7 @@ func TestRegisterFilter(t *testing.T) {
 func TestToString(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected string
 	}{
 		{"string", "hello", "hello"},
@@ -543,7 +543,7 @@ func TestToString(t *testing.T) {
 func TestToInt(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected int
 	}{
 		{"int", 123, 123},
@@ -566,7 +566,7 @@ func TestToInt(t *testing.T) {
 func TestToFloat64(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected float64
 	}{
 		{"float64", 123.45, 123.45},

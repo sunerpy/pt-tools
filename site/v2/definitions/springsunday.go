@@ -87,7 +87,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 					"a[href*='userdetails.php']",
 				},
 				Attr:    "href",
-				Filters: []v2.Filter{{Name: "querystring", Args: []interface{}{"id"}}},
+				Filters: []v2.Filter{{Name: "querystring", Args: []any{"id"}}},
 			},
 			// Username from the link text
 			"name": {
@@ -104,7 +104,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`<strong>上传量</strong>[：:\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "regex", Args: []any{`<strong>上传量</strong>[：:\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
 					{Name: "parseSize"},
 				},
 			},
@@ -116,7 +116,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`<strong>下载量</strong>[：:\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "regex", Args: []any{`<strong>下载量</strong>[：:\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
 					{Name: "parseSize"},
 				},
 			},
@@ -128,7 +128,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`<strong>分享率</strong>[：:\s]*(?:<font[^>]*>)?([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`<strong>分享率</strong>[：:\s]*(?:<font[^>]*>)?([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -148,7 +148,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "title",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`茉莉[：:\s]*([\d.,]+)`}},
+					{Name: "regex", Args: []any{`茉莉[：:\s]*([\d.,]+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -164,7 +164,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				Attr: "html",
 				Filters: []v2.Filter{
 					// Match: 我的数据</b></td> then skip 9 <td>...</td> cells, then capture last <td>value</td>
-					{Name: "regex", Args: []interface{}{`我的数据</b></td>(?:<td[^>]*>[\d.,]*</td>){9}<td[^>]*>([\d.,]+)</td>`}},
+					{Name: "regex", Args: []any{`我的数据</b></td>(?:<td[^>]*>[\d.,]*</td>){9}<td[^>]*>([\d.,]+)</td>`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -176,7 +176,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`class="arrowup"[^>]*/>\s*(\d+)`}},
+					{Name: "regex", Args: []any{`class="arrowup"[^>]*/>\s*(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -188,7 +188,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`class="arrowdown"[^>]*/>\s*(\d+)`}},
+					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -200,7 +200,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`做种积分[：:</b>\s]*([\d.,]+)`}},
+					{Name: "regex", Args: []any{`做种积分[：:</b>\s]*([\d.,]+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -211,7 +211,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 					"td.rowhead:contains('加入日期') + td",
 				},
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+					{Name: "regex", Args: []any{`^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
 					{Name: "parseTime"},
 				},
 			},
@@ -229,7 +229,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				Attr: "html",
 				Filters: []v2.Filter{
 					// Sum all numbers from "你有X条新" patterns (both system and private messages)
-					{Name: "sumRegexMatches", Args: []interface{}{`你有(\d+)条新`}},
+					{Name: "sumRegexMatches", Args: []any{`你有(\d+)条新`}},
 				},
 			},
 		},

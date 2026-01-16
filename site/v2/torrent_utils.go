@@ -90,7 +90,7 @@ func ComputeTorrentHash(data []byte) (string, error) {
 	}
 
 	// Decode the torrent to extract the info dictionary
-	var metainfo map[string]interface{}
+	var metainfo map[string]any
 	if err := bencode.DecodeBytes(data, &metainfo); err != nil {
 		return "", fmt.Errorf("decode torrent: %w", err)
 	}

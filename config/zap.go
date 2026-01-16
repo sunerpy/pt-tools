@@ -90,6 +90,14 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
 	fileEncoder := zapcore.NewJSONEncoder(encCfg)
+
+	allWriter := zapcore.AddSync(&lumberjack.Logger{
+		Filename:   filepath.Join(zapPath, "all.log"),
+		MaxSize:    z.MaxSize,
+		MaxBackups: z.MaxBackups,
+		MaxAge:     z.MaxAge,
+		Compress:   z.Compress,
+	})
 	debugWriter := zapcore.AddSync(&lumberjack.Logger{
 		Filename:   filepath.Join(zapPath, "debug.log"),
 		MaxSize:    z.MaxSize,
@@ -112,7 +120,9 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 		Compress:   z.Compress,
 	})
 
-	// 使用 AtomicLogLevel 实现动态日志级别
+	allPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl >= AtomicLogLevel.Level()
+	})
 	debugPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 		return lvl == zapcore.DebugLevel && lvl >= AtomicLogLevel.Level()
 	})
@@ -124,6 +134,7 @@ func (z *Zap) InitLogger() (*zap.Logger, error) {
 	})
 
 	cores := []zapcore.Core{
+		zapcore.NewCore(fileEncoder, allWriter, allPriority),
 		zapcore.NewCore(fileEncoder, debugWriter, debugPriority),
 		zapcore.NewCore(fileEncoder, infoWriter, lowPriority),
 		zapcore.NewCore(fileEncoder, errorWriter, highPriority),

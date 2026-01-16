@@ -1,97 +1,97 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, shallowRef } from 'vue'
 import { logsApi, type LogsResponse } from '@/api'
 import { ElMessage } from 'element-plus'
+import { Refresh, Top, Bottom } from '@element-plus/icons-vue'
 
 const loading = ref(false)
-const logs = ref<string[]>([])
+const logs = shallowRef<string[]>([])
 const logPath = ref('')
 const truncated = ref(false)
 const logContainer = ref<HTMLElement | null>(null)
 const autoScroll = ref(true)
+const renderedHtml = shallowRef('')
 
-// ANSI 颜色代码映射
-const ansiColors: Record<string, string> = {
-  '30': '#000000', // 黑色
-  '31': '#e74c3c', // 红色
-  '32': '#2ecc71', // 绿色
-  '33': '#f39c12', // 黄色
-  '34': '#3498db', // 蓝色
-  '35': '#9b59b6', // 紫色
-  '36': '#1abc9c', // 青色
-  '37': '#ecf0f1', // 白色
-  '90': '#7f8c8d', // 亮黑色（灰色）
-  '91': '#e74c3c', // 亮红色
-  '92': '#2ecc71', // 亮绿色
-  '93': '#f1c40f', // 亮黄色
-  '94': '#3498db', // 亮蓝色
-  '95': '#9b59b6', // 亮紫色
-  '96': '#1abc9c', // 亮青色
-  '97': '#ffffff' // 亮白色
-}
-
-// 解析 ANSI 转义序列并转换为 HTML
-function parseAnsi(text: string): string {
-  // 匹配 ANSI 转义序列
-  const ansiRegex = /\u001b\[(\d+)m/g
-  let result = ''
-  let lastIndex = 0
-  let currentColor: string | null = null
-  let match: RegExpExecArray | null
-
-  while ((match = ansiRegex.exec(text)) !== null) {
-    // 添加匹配前的文本
-    if (match.index > lastIndex) {
-      const textBefore = text.slice(lastIndex, match.index)
-      result += escapeHtml(textBefore)
-    }
-
-    const code = match[1]
-    if (code === '0') {
-      // 重置
-      if (currentColor) {
-        result += '</span>'
-        currentColor = null
-      }
-    } else if (code && ansiColors[code]) {
-      // 关闭之前的颜色
-      if (currentColor) {
-        result += '</span>'
-      }
-      currentColor = ansiColors[code]
-      result += `<span style="color: ${currentColor}">`
-    }
-
-    lastIndex = match.index + match[0].length
-  }
-
-  // 添加剩余文本
-  if (lastIndex < text.length) {
-    result += escapeHtml(text.slice(lastIndex))
-  }
-
-  // 关闭未关闭的标签
-  if (currentColor) {
-    result += '</span>'
-  }
-
-  return result
-}
-
-// HTML 转义
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-// 计算渲染后的日志 HTML
-const renderedLogs = computed(() => {
-  return logs.value.map(line => parseAnsi(line)).join('\n')
-})
+function getLevelClass(level: string): string {
+  switch (level?.toLowerCase()) {
+    case 'debug':
+      return 'log-debug'
+    case 'info':
+      return 'log-info'
+    case 'warn':
+    case 'warning':
+      return 'log-warn'
+    case 'error':
+      return 'log-error'
+    case 'fatal':
+    case 'panic':
+      return 'log-fatal'
+    default:
+      return 'json-string'
+  }
+}
+
+function formatValue(value: unknown, key?: string): string {
+  if (value === null) {
+    return '<span class="json-null">null</span>'
+  }
+  if (typeof value === 'boolean') {
+    return `<span class="json-boolean">${value}</span>`
+  }
+  if (typeof value === 'number') {
+    return `<span class="json-number">${value}</span>`
+  }
+  if (typeof value === 'string') {
+    const escaped = escapeHtml(value)
+    if (key === 'level') {
+      return `"<span class="${getLevelClass(value)}">${escaped}</span>"`
+    }
+    if (key === 'time') {
+      return `"<span class="json-time">${escaped}</span>"`
+    }
+    if (key === 'msg') {
+      return `"<span class="json-msg">${escaped}</span>"`
+    }
+    return `"<span class="json-string">${escaped}</span>"`
+  }
+  if (Array.isArray(value)) {
+    const items = value.map(v => formatValue(v)).join('<span class="json-punct">,</span> ')
+    return `<span class="json-punct">[</span>${items}<span class="json-punct">]</span>`
+  }
+  if (typeof value === 'object') {
+    return formatObject(value as Record<string, unknown>)
+  }
+  return escapeHtml(String(value))
+}
+
+function formatObject(obj: Record<string, unknown>): string {
+  const entries = Object.entries(obj)
+  if (entries.length === 0) {
+    return '<span class="json-punct">{}</span>'
+  }
+  const parts = entries.map(([k, v]) => {
+    return `"<span class="json-key">${escapeHtml(k)}</span>": ${formatValue(v, k)}`
+  })
+  return `<span class="json-punct">{</span>${parts.join('<span class="json-punct">,</span> ')}<span class="json-punct">}</span>`
+}
+
+function highlightLine(line: string): string {
+  if (!line.trim()) return ''
+  try {
+    const obj = JSON.parse(line)
+    return formatObject(obj)
+  } catch {
+    return escapeHtml(line)
+  }
+}
+
+function processLogs(lines: string[]): string {
+  return lines.map(highlightLine).join('\n')
+}
 
 onMounted(async () => {
   await loadLogs()
@@ -101,11 +101,14 @@ async function loadLogs() {
   loading.value = true
   try {
     const data: LogsResponse = await logsApi.get()
-    logs.value = data.lines || []
+    const lines = data.lines || []
+    logs.value = lines
     logPath.value = data.path || ''
     truncated.value = data.truncated || false
 
-    // 自动滚动到底部
+    await nextTick()
+    renderedHtml.value = processLogs(lines)
+
     if (autoScroll.value) {
       await nextTick()
       scrollToBottom()
@@ -131,132 +134,242 @@ function scrollToTop() {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-card v-loading="loading" shadow="never" class="log-card">
-      <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <span>日志查看</span>
-            <el-tag v-if="truncated" type="warning" size="small" style="margin-left: 8px">
-              已截断（最近 5000 行）
-            </el-tag>
-            <el-tag type="info" size="small" style="margin-left: 8px">{{ logs.length }} 行</el-tag>
-          </div>
-          <div class="header-right">
-            <el-checkbox v-model="autoScroll" label="自动滚动" size="small" />
-            <el-button-group>
-              <el-button size="small" :icon="'Top'" @click="scrollToTop">顶部</el-button>
-              <el-button size="small" :icon="'Bottom'" @click="scrollToBottom">底部</el-button>
-            </el-button-group>
-            <el-button type="primary" :icon="'Refresh'" :loading="loading" @click="loadLogs">
-              刷新
-            </el-button>
-          </div>
+  <div class="page-container log-viewer-page">
+    <div class="page-header">
+      <div class="header-left">
+        <h1 class="page-title">日志查看</h1>
+        <div class="page-subtitle" style="display: flex; gap: 8px; align-items: center">
+          <el-tag
+            v-if="truncated"
+            type="warning"
+            size="small"
+            effect="plain"
+            class="status-badge status-badge--warning"
+          >
+            已截断（最近 5000 行）
+          </el-tag>
+          <el-tag type="info" size="small" effect="plain" class="status-badge status-badge--info">
+            {{ logs.length }} 行
+          </el-tag>
+          <span v-if="logPath" class="log-path-text">{{ logPath }}</span>
         </div>
-      </template>
-
-      <el-alert
-        v-if="logPath"
-        :title="`日志路径: ${logPath}`"
-        type="info"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 16px"
-      />
-
-      <div ref="logContainer" class="log-container terminal">
-        <pre class="log-content"><code v-html="renderedLogs || '暂无日志'"></code></pre>
       </div>
-    </el-card>
+      <div class="page-actions">
+        <el-checkbox v-model="autoScroll" label="自动滚动" size="default" />
+        <el-button-group>
+          <el-button :icon="Top" @click="scrollToTop">顶部</el-button>
+          <el-button :icon="Bottom" @click="scrollToBottom">底部</el-button>
+        </el-button-group>
+        <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadLogs">
+          刷新
+        </el-button>
+      </div>
+    </div>
+
+    <div class="log-card">
+      <div ref="logContainer" class="log-container">
+        <pre class="log-content"><code v-html="renderedHtml || '暂无日志'"></code></pre>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page-container {
-  height: 100%;
+.log-viewer-page {
+  height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
 }
 
 .log-card {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.log-card :deep(.el-card__body) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
+  background: var(--pt-bg-surface);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-xl);
+  box-shadow: var(--pt-shadow-sm);
   overflow: hidden;
 }
 
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.log-path-text {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: var(--pt-text-xs);
+  color: var(--pt-text-tertiary);
+  margin-left: var(--pt-space-2);
 }
 
 .log-container {
-  flex: 1;
-  min-height: 400px;
-  max-height: calc(100vh - 300px);
+  height: 100%;
   overflow: auto;
-  border-radius: 8px;
-}
-
-/* 终端样式 */
-.terminal {
-  background: #1e1e1e;
-  padding: 16px;
-  border: 1px solid #333;
+  padding: 16px 20px;
+  background-color: #fafbfc;
+  color: #24292f;
 }
 
 .log-content {
   margin: 0;
-  font-family: 'Consolas', 'Monaco', 'Courier New', 'Menlo', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #d4d4d4;
 }
 
 .log-content code {
   background: transparent;
   padding: 0;
   font-family: inherit;
+  border: none;
+  color: inherit;
 }
 
-/* 滚动条样式 */
-.terminal::-webkit-scrollbar {
+.log-container::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-.terminal::-webkit-scrollbar-track {
-  background: #2d2d2d;
+.log-container::-webkit-scrollbar-track {
+  background: #f6f8fa;
 }
 
-.terminal::-webkit-scrollbar-thumb {
-  background: #555;
+.log-container::-webkit-scrollbar-thumb {
+  background-color: #d0d7de;
   border-radius: 5px;
+  border: 2px solid #f6f8fa;
 }
 
-.terminal::-webkit-scrollbar-thumb:hover {
-  background: #666;
+.log-container::-webkit-scrollbar-thumb:hover {
+  background-color: #afb8c1;
+}
+
+@media (max-width: 768px) {
+  .log-viewer-page {
+    height: auto;
+  }
+  .log-container {
+    height: 60vh;
+  }
+  .log-content {
+    font-size: 12px;
+  }
+}
+</style>
+
+<style>
+/* Light theme - JSON syntax */
+.json-key {
+  color: #0550ae;
+}
+.json-string {
+  color: #0a3069;
+}
+.json-number {
+  color: #0550ae;
+}
+.json-boolean {
+  color: #cf222e;
+}
+.json-null {
+  color: #6e7781;
+  font-style: italic;
+}
+.json-punct {
+  color: #6e7781;
+}
+.json-time {
+  color: #8250df;
+}
+.json-msg {
+  color: #24292f;
+}
+
+/* Light theme - Log levels */
+.log-debug {
+  color: #6e7781;
+}
+.log-info {
+  color: #1a7f37;
+  font-weight: 600;
+}
+.log-warn {
+  color: #9a6700;
+  font-weight: 600;
+}
+.log-error {
+  color: #cf222e;
+  font-weight: 600;
+}
+.log-fatal {
+  color: #fff;
+  background: #cf222e;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+/* Dark theme - Container */
+html.dark .log-container {
+  background-color: #1a1b26;
+  color: #a9b1d6;
+}
+
+/* Dark theme - JSON syntax (Tokyo Night Storm palette) */
+html.dark .json-key {
+  color: #73daca;
+}
+html.dark .json-string {
+  color: #9ece6a;
+}
+html.dark .json-number {
+  color: #ff9e64;
+}
+html.dark .json-boolean {
+  color: #f7768e;
+}
+html.dark .json-null {
+  color: #565f89;
+  font-style: italic;
+}
+html.dark .json-punct {
+  color: #565f89;
+}
+html.dark .json-time {
+  color: #7dcfff;
+}
+html.dark .json-msg {
+  color: #c0caf5;
+}
+
+/* Dark theme - Log levels */
+html.dark .log-debug {
+  color: #565f89;
+}
+html.dark .log-info {
+  color: #9ece6a;
+  font-weight: 600;
+}
+html.dark .log-warn {
+  color: #e0af68;
+  font-weight: 600;
+}
+html.dark .log-error {
+  color: #f7768e;
+  font-weight: 600;
+}
+html.dark .log-fatal {
+  color: #1a1b26;
+  background: #f7768e;
+}
+
+/* Dark theme - Scrollbar */
+html.dark .log-container::-webkit-scrollbar-track {
+  background: #16161e;
+}
+html.dark .log-container::-webkit-scrollbar-thumb {
+  background-color: #3b4261;
+  border-color: #16161e;
+}
+html.dark .log-container::-webkit-scrollbar-thumb:hover {
+  background-color: #565f89;
 }
 </style>

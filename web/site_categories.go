@@ -5,8 +5,8 @@ package web
 
 // SiteCategoryOption 分类选项
 type SiteCategoryOption struct {
-	Value interface{} `json:"value"`
-	Name  string      `json:"name"`
+	Value any    `json:"value"`
+	Name  string `json:"name"`
 }
 
 // SiteCategory 站点分类配置

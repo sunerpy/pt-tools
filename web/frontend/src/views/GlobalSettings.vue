@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { globalApi, type GlobalSettings } from '@/api'
 import { ElMessage } from 'element-plus'
+import { Setting, Folder, Timer } from '@element-plus/icons-vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -57,105 +58,167 @@ async function save() {
 
 <template>
   <div class="page-container">
+    <div class="page-header">
+      <div class="page-title-group">
+        <h2 class="page-title">系统设置</h2>
+        <p class="page-subtitle">配置程序运行的全局参数和默认行为</p>
+      </div>
+      <div class="page-actions">
+        <el-button type="primary" :loading="saving" @click="save">
+          <el-icon><Setting /></el-icon>
+          保存设置
+        </el-button>
+      </div>
+    </div>
+
     <el-alert
       v-if="showWarning"
       title="警告：未设置下载目录，后台任务不会启动，请先设置并保存"
       type="warning"
       show-icon
       :closable="false"
-      style="margin-bottom: 20px"
+      class="mb-6"
     />
 
-    <el-card v-loading="loading" shadow="never">
+    <el-card v-loading="loading" shadow="never" class="common-card">
       <template #header>
-        <div class="card-header">
-          <span>全局设置</span>
+        <div class="form-card-header">
+          <h3>
+            <el-icon><Setting /></el-icon>
+            全局配置
+          </h3>
         </div>
       </template>
 
-      <el-form :model="form" label-width="140px" label-position="right">
-        <el-form-item label="默认间隔(分钟)">
-          <el-input-number v-model="form.default_interval_minutes" :min="5" :max="1440" :step="1" />
-          <div class="form-tip">RSS 检查的默认时间间隔，最小 5 分钟</div>
-        </el-form-item>
-
-        <el-form-item label="种子下载目录">
-          <el-input v-model="form.download_dir" placeholder="保存 .torrent 种子文件的目录" />
-          <div class="form-tip">
-            绝对路径将直接使用；相对路径会拼接为
-            <code>~/.pt-tools/&lt;输入值&gt;</code>
-            并自动创建目录
+      <el-form :model="form" label-width="160px" label-position="top">
+        <!-- 基础运行设置 -->
+        <div class="form-section">
+          <div class="form-section-title">
+            <el-icon><Timer /></el-icon>
+            运行频率
           </div>
-          <div class="form-tip">
-            此目录用于保存已下载的
-            <code>.torrent</code>
-            种子文件；并非 qBittorrent 中文件数据的保存路径
+          <el-form-item label="默认间隔(分钟)">
+            <el-input-number
+              v-model="form.default_interval_minutes"
+              :min="5"
+              :max="1440"
+              :step="1"
+            />
+            <div class="form-tip">所有 RSS 任务的默认检查时间间隔，最小 5 分钟</div>
+          </el-form-item>
+        </div>
+
+        <!-- 目录设置 -->
+        <div class="form-section">
+          <div class="form-section-title">
+            <el-icon><Folder /></el-icon>
+            存储路径
           </div>
-        </el-form-item>
+          <el-form-item label="种子下载目录">
+            <el-input v-model="form.download_dir" placeholder="保存 .torrent 种子文件的目录" />
+            <div class="form-tip">
+              绝对路径将直接使用；相对路径会拼接为
+              <code>~/.pt-tools/&lt;输入值&gt;</code>
+              并自动创建目录
+            </div>
+            <div class="form-tip">
+              注意：此目录仅用于备份下载的
+              <code>.torrent</code>
+              文件，不是下载器的数据保存路径
+            </div>
+          </el-form-item>
+        </div>
 
-        <el-divider />
+        <!-- 限制与自动化 -->
+        <div class="form-section">
+          <div class="form-section-title">
+            <el-icon><Speedometer /></el-icon>
+            下载策略与限制
+          </div>
+          <el-row :gutter="40">
+            <el-col :md="12" :sm="24">
+              <el-form-item label="最大种子大小(GB)">
+                <el-input-number
+                  v-model="form.torrent_size_gb"
+                  :min="1"
+                  :max="10000"
+                  class="w-full"
+                />
+                <div class="form-tip">超过此大小的种子将被自动忽略，防止磁盘撑爆</div>
+              </el-form-item>
+            </el-col>
+            <el-col :md="12" :sm="24">
+              <el-form-item label="自动启动任务">
+                <el-switch v-model="form.auto_start" />
+                <div class="form-tip">程序启动时立即开启已启用的 RSS 检查任务</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
 
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="启用限速">
-              <el-switch v-model="form.download_limit_enabled" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="下载限速(MB/s)">
-              <el-input-number
-                v-model="form.download_speed_limit"
-                :min="1"
-                :max="1000"
-                :disabled="!form.download_limit_enabled"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="最大种子大小(GB)">
-              <el-input-number v-model="form.torrent_size_gb" :min="1" :max="10000" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="自动启动任务">
-              <el-switch v-model="form.auto_start" />
-              <div class="form-tip">启动时自动开始 RSS 检查任务</div>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item>
-          <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
-        </el-form-item>
+          <el-row :gutter="40" class="mt-4">
+            <el-col :md="12" :sm="24">
+              <el-form-item label="启用下载限速判断">
+                <el-switch v-model="form.download_limit_enabled" />
+                <div class="form-tip">用于评估种子是否能在免费期内下载完成</div>
+              </el-form-item>
+            </el-col>
+            <el-col :md="12" :sm="24">
+              <el-form-item label="预估下载速度(MB/s)">
+                <el-input-number
+                  v-model="form.download_speed_limit"
+                  :min="1"
+                  :max="1000"
+                  :disabled="!form.download_limit_enabled"
+                  class="w-full"
+                />
+                <div class="form-tip">根据您的网络环境填写实际平均下载速度</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
+
+      <div class="form-actions">
+        <el-button type="primary" :loading="saving" @click="save" size="large">
+          保存所有设置
+        </el-button>
+      </div>
     </el-card>
   </div>
 </template>
 
 <style scoped>
-.page-container {
+.mb-6 {
+  margin-bottom: 1.5rem;
+}
+.mt-4 {
+  margin-top: 1rem;
+}
+.w-full {
   width: 100%;
 }
 
-.card-header {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.form-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-  line-height: 1.5;
-}
-
+/* Custom tip code styling compatible with the new theme */
 .form-tip code {
-  background: var(--el-fill-color-light);
+  background: var(--pt-bg-tertiary);
   padding: 2px 6px;
-  border-radius: 4px;
-  font-family: monospace;
+  border-radius: var(--pt-radius-sm);
+  font-family: var(--pt-font-mono, monospace);
+  color: var(--pt-color-primary);
+  font-size: 0.9em;
+}
+
+:deep(.el-form-item__label) {
+  font-weight: 600;
+  color: var(--pt-text-primary);
+  margin-bottom: 8px !important;
+}
+
+:deep(.el-input-number.w-full) {
+  width: 100%;
+}
+
+:deep(.el-input-number.w-full .el-input__inner) {
+  text-align: left;
 }
 </style>

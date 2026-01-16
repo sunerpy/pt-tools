@@ -111,7 +111,7 @@ func TestHDSkyParser(t *testing.T) {
 		doc := parseHTML(t, html)
 		_, endTime := parser.ParseDiscount(doc)
 
-		expected := time.Date(2024, 12, 31, 23, 59, 59, 0, time.Local)
+		expected := time.Date(2024, 12, 31, 23, 59, 59, 0, CSTLocation)
 		assert.Equal(t, expected, endTime)
 	})
 

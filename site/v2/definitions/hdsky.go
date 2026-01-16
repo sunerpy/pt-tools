@@ -228,7 +228,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 					"a[href*='userdetails.php']",
 				},
 				Attr:    "href",
-				Filters: []v2.Filter{{Name: "querystring", Args: []interface{}{"id"}}},
+				Filters: []v2.Filter{{Name: "querystring", Args: []any{"id"}}},
 			},
 			"name": {
 				Selector: []string{
@@ -251,7 +251,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Attr: "html", // Get HTML to preserve structure
 				Filters: []v2.Filter{
 					// HDSky format: <strong>上传量</strong>:  17.020 TB
-					{Name: "regex", Args: []interface{}{`上[传傳][量]?</strong>[：:\s]*\s*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "regex", Args: []any{`上[传傳][量]?</strong>[：:\s]*\s*([\d.,]+\s*[KMGTP]?i?B)`}},
 					{Name: "parseSize"},
 				},
 			},
@@ -269,7 +269,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Attr: "html", // Get HTML to preserve structure
 				Filters: []v2.Filter{
 					// HDSky format: <strong>下载量</strong>:  1.499 TB
-					{Name: "regex", Args: []interface{}{`下[载載][量]?</strong>[：:\s]*\s*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "regex", Args: []any{`下[载載][量]?</strong>[：:\s]*\s*([\d.,]+\s*[KMGTP]?i?B)`}},
 					{Name: "parseSize"},
 				},
 			},
@@ -289,7 +289,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Attr: "html", // Get HTML to preserve structure
 				Filters: []v2.Filter{
 					// HDSky format: <strong>分享率</strong>:  <font color="">11.356</font>
-					{Name: "regex", Args: []interface{}{`分享率</strong>[：:\s]*\s*(?:<font[^>]*>)?([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`分享率</strong>[：:\s]*\s*(?:<font[^>]*>)?([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -338,7 +338,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 					"td.rowhead:contains('Join') + td",
 				},
 				Filters: []v2.Filter{
-					{Name: "split", Args: []interface{}{" (", 0}},
+					{Name: "split", Args: []any{" (", 0}},
 					{Name: "parseTime"},
 				},
 			},
@@ -349,7 +349,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html", // Get HTML to match against img tags
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`class="arrowup"[^>]*/>(\d+)`}},
+					{Name: "regex", Args: []any{`class="arrowup"[^>]*/>(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -360,7 +360,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html", // Get HTML to match against img tags
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`class="arrowdown"[^>]*/>(\d+)`}},
+					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -368,7 +368,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Text:     "0",
 				Selector: []string{"#info_block a[href*='myhr.php']"},
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`\d+\s*/\s*(\d+)`}},
+					{Name: "regex", Args: []any{`\d+\s*/\s*(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -376,7 +376,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Text:     "0",
 				Selector: []string{"#info_block a[href*='myhr.php']"},
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`^(\d+)`}},
+					{Name: "regex", Args: []any{`^(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},

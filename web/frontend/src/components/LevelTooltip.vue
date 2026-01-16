@@ -42,11 +42,6 @@ function isCurrentLevel(level: SiteLevelRequirement): boolean {
       return true
     }
 
-    // 包含匹配（处理可能的前缀/后缀差异）
-    if (currentName.includes(levelName) || levelName.includes(currentName)) {
-      return true
-    }
-
     // 检查别名
     if (level.nameAka) {
       for (const aka of level.nameAka) {

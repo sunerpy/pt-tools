@@ -113,6 +113,11 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/torrents/push", s.auth(s.apiTorrentPush))
 	mux.HandleFunc("/api/v2/torrents/batch-push", s.auth(s.apiTorrentBatchPush))
 	mux.HandleFunc("/api/v2/torrents/batch-download", s.auth(s.apiBatchTorrentDownload))
+	// Torrent management APIs (paused torrents, archive)
+	mux.HandleFunc("/api/torrents/paused", s.auth(s.apiPausedTorrents))
+	mux.HandleFunc("/api/torrents/delete-paused", s.auth(s.apiDeletePausedTorrents))
+	mux.HandleFunc("/api/torrents/archive", s.auth(s.apiArchiveTorrents))
+	mux.HandleFunc("/api/torrents/", s.auth(s.apiTorrentManagementRouter))
 	// Torrent download proxy API
 	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
 	// Static UI - Vue 3 SPA
@@ -721,7 +726,7 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 // 日志查看接口：最多返回 5000 行，实时读取当前日志文件
 func (s *Server) apiLogs(w http.ResponseWriter, r *http.Request) {
 	homeDir, _ := os.UserHomeDir()
-	logPath := filepath.Join(homeDir, models.WorkDir, config.DefaultZapConfig.Directory, "info.log")
+	logPath := filepath.Join(homeDir, models.WorkDir, config.DefaultZapConfig.Directory, "all.log")
 	f, err := os.Open(logPath)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -62,6 +62,12 @@ const router = createRouter({
       component: () => import('@/views/TaskList.vue')
     },
     {
+      path: '/paused',
+      name: 'paused',
+      component: () => import('@/views/PausedTorrents.vue'),
+      meta: { title: '暂停任务' }
+    },
+    {
       path: '/logs',
       name: 'logs',
       component: () => import('@/views/LogViewer.vue')

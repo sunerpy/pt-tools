@@ -755,373 +755,404 @@ function toggleAllSites() {
 
 <template>
   <div class="page-container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">种子搜索</h1>
+        <p class="page-subtitle">跨站点并发搜索，支持批量推送和下载</p>
+      </div>
+    </div>
+
     <!-- 搜索工具栏 -->
-    <el-card shadow="never" class="search-card">
-      <el-form :inline="true" class="search-form" @submit.prevent="doSearch">
-        <el-form-item label="关键词">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="输入搜索关键词"
-            clearable
-            style="width: 280px"
-            @keyup.enter="doSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-        </el-form-item>
-
-        <el-form-item label="站点">
-          <div class="site-selector-wrapper">
-            <el-tooltip
-              :content="
-                selectedSites.length === 0
-                  ? '未选择站点，将搜索所有可用站点'
-                  : `已选择 ${selectedSites.length} 个站点`
-              "
-              placement="top"
+    <div class="common-card search-card">
+      <div class="common-card-body">
+        <el-form :inline="true" class="search-form" @submit.prevent="doSearch">
+          <el-form-item label="关键词">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="输入搜索关键词"
+              clearable
+              style="width: 280px"
+              @keyup.enter="doSearch"
             >
-              <el-select
-                v-model="selectedSites"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-                :placeholder="
-                  availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
+
+          <el-form-item label="站点">
+            <div class="site-selector-wrapper">
+              <el-tooltip
+                :content="
+                  selectedSites.length === 0
+                    ? '未选择站点，将搜索所有可用站点'
+                    : `已选择 ${selectedSites.length} 个站点`
                 "
-                style="width: 300px"
-                :class="{ 'all-sites-selected': selectedSites.length === 0 }"
+                placement="top"
               >
-                <template #header>
-                  <div class="site-select-header">
-                    <el-checkbox
-                      :model-value="selectedSites.length === availableSites.length"
-                      :indeterminate="
-                        selectedSites.length > 0 && selectedSites.length < availableSites.length
-                      "
-                      @change="toggleAllSites"
-                    >
-                      全选
-                    </el-checkbox>
-                    <span class="site-count-hint">
-                      {{ selectedSites.length === 0 ? '(未选择 = 搜索全部)' : '' }}
-                    </span>
-                  </div>
-                </template>
-                <el-option v-for="site in availableSites" :key="site" :label="site" :value="site">
-                  <div class="site-option-item">
-                    <span>{{ site }}</span>
-                    <el-tag v-if="siteHasCategories(site)" type="info" size="small" effect="plain">
-                      可筛选
-                    </el-tag>
-                  </div>
-                </el-option>
-              </el-select>
-            </el-tooltip>
-          </div>
-        </el-form-item>
-
-        <!-- 已选站点的分类筛选按钮 -->
-        <el-form-item v-if="selectedSites.length > 0">
-          <div class="selected-sites-filters">
-            <template v-for="siteId in selectedSites" :key="siteId">
-              <el-popover
-                v-if="siteHasCategories(siteId)"
-                placement="bottom-start"
-                :width="400"
-                trigger="click"
-              >
-                <template #reference>
-                  <el-badge
-                    :value="getSiteFilterCount(siteId)"
-                    :hidden="getSiteFilterCount(siteId) === 0"
-                    type="primary"
-                    class="site-filter-badge"
-                  >
-                    <el-button
-                      size="small"
-                      :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'"
-                    >
-                      <el-icon style="margin-right: 4px"><Filter /></el-icon>
-                      {{ siteId }}
-                    </el-button>
-                  </el-badge>
-                </template>
-                <div class="site-filter-popover">
-                  <div class="site-filter-header">
-                    <span class="filter-title">
-                      {{ getSiteCategoriesConfig(siteId)?.site_name || siteId }} 分类筛选
-                    </span>
-                    <el-button
-                      v-if="getSiteFilterCount(siteId) > 0"
-                      type="danger"
-                      size="small"
-                      text
-                      @click="clearSiteCategoryFilters(siteId)"
-                    >
-                      清除
-                    </el-button>
-                  </div>
-                  <el-form label-position="top" class="site-filter-form">
-                    <el-form-item
-                      v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
-                      :key="category.key"
-                      :label="category.name"
-                    >
-                      <el-select
-                        :model-value="selectedCategoryFilters[siteId]?.[category.key]"
-                        placeholder="全部"
-                        clearable
-                        style="width: 100%"
-                        @update:model-value="updateSiteCategoryFilter(siteId, category.key, $event)"
+                <el-select
+                  v-model="selectedSites"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  :placeholder="
+                    availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'
+                  "
+                  style="width: 300px"
+                  :class="{ 'all-sites-selected': selectedSites.length === 0 }"
+                >
+                  <template #header>
+                    <div class="site-select-header">
+                      <el-checkbox
+                        :model-value="selectedSites.length === availableSites.length"
+                        :indeterminate="
+                          selectedSites.length > 0 && selectedSites.length < availableSites.length
+                        "
+                        @change="toggleAllSites"
                       >
-                        <el-option
-                          v-for="opt in category.options"
-                          :key="opt.value"
-                          :label="opt.name"
-                          :value="opt.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-                  </el-form>
-                </div>
-              </el-popover>
-            </template>
-          </div>
-        </el-form-item>
+                        全选
+                      </el-checkbox>
+                      <span class="site-count-hint">
+                        {{ selectedSites.length === 0 ? '(未选择 = 搜索全部)' : '' }}
+                      </span>
+                    </div>
+                  </template>
+                  <el-option v-for="site in availableSites" :key="site" :label="site" :value="site">
+                    <div class="site-option-item">
+                      <span>{{ site }}</span>
+                      <el-tag
+                        v-if="siteHasCategories(site)"
+                        type="info"
+                        size="small"
+                        effect="plain"
+                      >
+                        可筛选
+                      </el-tag>
+                    </div>
+                  </el-option>
+                </el-select>
+              </el-tooltip>
+            </div>
+          </el-form-item>
 
-        <el-form-item label="排序">
-          <el-select v-model="sortBy" style="width: 120px">
-            <el-option label="站点" value="sourceSite" />
-            <el-option label="发布时间" value="publishTime" />
-            <el-option label="大小" value="size" />
-            <el-option label="做种数" value="seeders" />
-            <el-option label="下载数" value="leechers" />
-            <el-option label="完成数" value="snatched" />
-          </el-select>
-        </el-form-item>
+          <!-- 已选站点的分类筛选按钮 -->
+          <el-form-item v-if="selectedSites.length > 0">
+            <div class="selected-sites-filters">
+              <template v-for="siteId in selectedSites" :key="siteId">
+                <el-popover
+                  v-if="siteHasCategories(siteId)"
+                  placement="bottom-start"
+                  :width="400"
+                  trigger="click"
+                >
+                  <template #reference>
+                    <el-badge
+                      :value="getSiteFilterCount(siteId)"
+                      :hidden="getSiteFilterCount(siteId) === 0"
+                      type="primary"
+                      class="site-filter-badge"
+                    >
+                      <el-button
+                        size="small"
+                        :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'"
+                      >
+                        <el-icon style="margin-right: 4px"><Filter /></el-icon>
+                        {{ siteId }}
+                      </el-button>
+                    </el-badge>
+                  </template>
+                  <div class="site-filter-popover">
+                    <div class="site-filter-header">
+                      <span class="filter-title">
+                        {{ getSiteCategoriesConfig(siteId)?.site_name || siteId }} 分类筛选
+                      </span>
+                      <el-button
+                        v-if="getSiteFilterCount(siteId) > 0"
+                        type="danger"
+                        size="small"
+                        text
+                        @click="clearSiteCategoryFilters(siteId)"
+                      >
+                        清除
+                      </el-button>
+                    </div>
+                    <el-form label-position="top" class="site-filter-form">
+                      <el-form-item
+                        v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
+                        :key="category.key"
+                        :label="category.name"
+                      >
+                        <el-select
+                          :model-value="selectedCategoryFilters[siteId]?.[category.key]"
+                          placeholder="全部"
+                          clearable
+                          style="width: 100%"
+                          @update:model-value="
+                            updateSiteCategoryFilter(siteId, category.key, $event)
+                          "
+                        >
+                          <el-option
+                            v-for="opt in category.options"
+                            :key="opt.value"
+                            :label="opt.name"
+                            :value="opt.value"
+                          />
+                        </el-select>
+                      </el-form-item>
+                    </el-form>
+                  </div>
+                </el-popover>
+              </template>
+            </div>
+          </el-form-item>
 
-        <el-form-item>
-          <el-switch v-model="orderDesc" active-text="降序" inactive-text="升序" />
-        </el-form-item>
+          <el-form-item label="排序">
+            <el-select v-model="sortBy" style="width: 120px">
+              <el-option label="站点" value="sourceSite" />
+              <el-option label="发布时间" value="publishTime" />
+              <el-option label="大小" value="size" />
+              <el-option label="做种数" value="seeders" />
+              <el-option label="下载数" value="leechers" />
+              <el-option label="完成数" value="snatched" />
+            </el-select>
+          </el-form-item>
 
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="doSearch">搜索</el-button>
-          <el-button @click="clearCache">清除缓存</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+          <el-form-item>
+            <el-switch v-model="orderDesc" active-text="降序" inactive-text="升序" />
+          </el-form-item>
+
+          <el-form-item>
+            <el-button type="primary" :loading="loading" @click="doSearch">搜索</el-button>
+            <el-button @click="clearCache">清除缓存</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+    </div>
 
     <!-- 搜索结果 -->
-    <el-card v-loading="loading" shadow="never" class="result-card">
-      <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <span>搜索结果</span>
-            <template v-if="totalResults > 0">
-              <el-tag type="info" size="small" style="margin-left: 8px">
-                共 {{ totalResults }} 条
-              </el-tag>
-              <el-tag type="success" size="small" style="margin-left: 4px">
-                耗时 {{ searchTime }}ms
-              </el-tag>
-            </template>
-          </div>
-          <div class="header-right">
-            <el-button
-              v-if="selectedTorrents.length > 0"
-              size="small"
-              :loading="batchDownloading"
-              @click="batchDownloadTorrents"
-            >
-              批量下载 ({{ selectedTorrents.length }})
-            </el-button>
-            <el-button
-              v-if="selectedTorrents.length > 0"
-              type="primary"
-              size="small"
-              @click="openBatchPushDialog"
-            >
-              批量推送 ({{ selectedTorrents.length }})
-            </el-button>
-          </div>
-        </div>
-      </template>
-
-      <!-- 站点状态摘要 -->
-      <div v-if="Object.keys(siteResultCounts).length > 0" class="site-summary">
-        <el-tag
-          v-for="(count, site) in siteResultCounts"
-          :key="site"
-          type="success"
-          size="small"
-          effect="plain"
-          style="margin-right: 8px; margin-bottom: 8px"
-        >
-          {{ site }}: {{ count }}
-        </el-tag>
-        <el-tag
-          v-for="err in searchErrors"
-          :key="err.site"
-          type="danger"
-          size="small"
-          effect="plain"
-          style="margin-right: 8px; margin-bottom: 8px"
-        >
-          {{ err.site }}: 失败
-        </el-tag>
-      </div>
-
-      <!-- 种子列表表格 -->
-      <el-table
-        :data="pagedTorrents"
-        style="width: 100%"
-        stripe
-        border
-        :header-cell-style="{ background: 'var(--el-fill-color-light)', fontWeight: 600 }"
-        :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
-        @selection-change="handleSelectionChange"
-        @sort-change="handleSortChange"
-      >
-        <el-table-column type="selection" width="45" align="center" />
-
-        <el-table-column label="站点" prop="sourceSite" width="90" align="center" sortable="custom">
-          <template #default="{ row }">
-            <el-tag size="small" type="primary">{{ row.sourceSite }}</el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="标题" min-width="400">
-          <template #default="{ row }">
-            <div class="title-cell">
-              <el-tooltip :content="row.title" placement="top" :show-after="500">
-                <a v-if="row.url" :href="row.url" target="_blank" rel="noopener" class="title-link">
-                  {{ row.title }}
-                </a>
-                <span v-else class="title-text">{{ row.title }}</span>
-              </el-tooltip>
-              <div
-                v-if="row.subtitle || (row.tags && row.tags.length > 0)"
-                class="title-subtitle-row"
-              >
-                <span v-if="row.subtitle" class="subtitle">{{ row.subtitle }}</span>
-                <span v-if="row.tags && row.tags.length > 0" class="title-tags">
-                  <el-tag
-                    v-for="tag in row.tags"
-                    :key="tag"
-                    size="small"
-                    type="info"
-                    effect="plain"
-                  >
-                    {{ tag }}
-                  </el-tag>
-                </span>
-              </div>
-              <div class="title-meta">
-                <el-tag v-if="row.category" size="small" type="info">{{ row.category }}</el-tag>
-                <el-tag v-if="row.hasHR" size="small" type="danger">H&R</el-tag>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="大小" prop="sizeBytes" width="95" align="center" sortable="custom">
-          <template #default="{ row }">
-            {{ formatSize(row.sizeBytes) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="优惠" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag :type="getDiscountTag(row).type" size="small">
-              {{ getDiscountTag(row).text }}
+    <div v-loading="loading" class="table-card result-card">
+      <div class="table-card-header">
+        <div class="table-card-header-title">
+          <span>搜索结果</span>
+          <template v-if="totalResults > 0">
+            <el-tag type="info" size="small" effect="plain" style="margin-left: 8px">
+              共 {{ totalResults }} 条
+            </el-tag>
+            <el-tag type="success" size="small" effect="plain" style="margin-left: 4px">
+              耗时 {{ searchTime }}ms
             </el-tag>
           </template>
-        </el-table-column>
-
-        <el-table-column label="上传" prop="seeders" width="65" align="center" sortable="custom">
-          <template #default="{ row }">
-            <span class="seeders">{{ row.seeders }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="下载" prop="leechers" width="65" align="center" sortable="custom">
-          <template #default="{ row }">
-            <span class="leechers">{{ row.leechers }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="完成" prop="snatched" width="65" align="center" sortable="custom">
-          <template #default="{ row }">
-            {{ row.snatched }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="发布时间" prop="uploadedAt" width="150" sortable="custom">
-          <template #default="{ row }">
-            {{ formatTime(row.uploadedAt) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="操作" width="180" align="center" fixed="right">
-          <template #default="{ row }">
-            <div class="action-buttons">
-              <el-tooltip content="下载种子" placement="top">
-                <el-button
-                  type="success"
-                  size="small"
-                  circle
-                  :disabled="!row.downloadUrl"
-                  @click="downloadTorrent(row)"
-                >
-                  <el-icon><Download /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="复制链接" placement="top">
-                <el-button
-                  type="info"
-                  size="small"
-                  circle
-                  :disabled="!row.downloadUrl && !row.magnetLink"
-                  @click="copyDownloadLink(row)"
-                >
-                  <el-icon><CopyDocument /></el-icon>
-                </el-button>
-              </el-tooltip>
-              <el-tooltip content="推送到下载器" placement="top">
-                <el-button type="primary" size="small" circle @click="openPushDialog(row)">
-                  <el-icon><Upload /></el-icon>
-                </el-button>
-              </el-tooltip>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div v-if="sortedResults.length > 0" class="pagination-container">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :page-sizes="pageSizeOptions"
-          :total="sortedResults.length"
-          layout="total, sizes, prev, pager, next, jumper"
-          @current-change="handlePageChange"
-          @size-change="handleSizeChange"
-        />
+        </div>
+        <div class="table-card-header-actions">
+          <el-button
+            v-if="selectedTorrents.length > 0"
+            size="small"
+            :loading="batchDownloading"
+            @click="batchDownloadTorrents"
+          >
+            批量下载 ({{ selectedTorrents.length }})
+          </el-button>
+          <el-button
+            v-if="selectedTorrents.length > 0"
+            type="primary"
+            size="small"
+            @click="openBatchPushDialog"
+          >
+            批量推送 ({{ selectedTorrents.length }})
+          </el-button>
+        </div>
       </div>
 
-      <!-- 空状态 -->
-      <el-empty
-        v-if="!loading && sortedResults.length === 0 && searchKeyword"
-        description="没有找到结果"
-      />
-      <el-empty
-        v-if="!loading && sortedResults.length === 0 && !searchKeyword"
-        description="输入关键词开始搜索"
-      />
-    </el-card>
+      <div class="table-wrapper">
+        <!-- 站点状态摘要 -->
+        <div v-if="Object.keys(siteResultCounts).length > 0" class="filter-bar site-summary-bar">
+          <el-tag
+            v-for="(count, site) in siteResultCounts"
+            :key="site"
+            type="success"
+            size="small"
+            effect="plain"
+          >
+            {{ site }}: {{ count }}
+          </el-tag>
+          <el-tag
+            v-for="err in searchErrors"
+            :key="err.site"
+            type="danger"
+            size="small"
+            effect="plain"
+          >
+            {{ err.site }}: 失败
+          </el-tag>
+        </div>
+
+        <!-- 种子列表表格 -->
+        <el-table
+          :data="pagedTorrents"
+          style="width: 100%"
+          stripe
+          :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }"
+          :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
+          @selection-change="handleSelectionChange"
+          @sort-change="handleSortChange"
+        >
+          <el-table-column type="selection" width="45" align="center" />
+
+          <el-table-column
+            label="站点"
+            prop="sourceSite"
+            width="90"
+            align="center"
+            sortable="custom"
+          >
+            <template #default="{ row }">
+              <el-tag size="small" type="primary" effect="light">{{ row.sourceSite }}</el-tag>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="标题" min-width="400">
+            <template #default="{ row }">
+              <div class="title-cell">
+                <el-tooltip :content="row.title" placement="top" :show-after="500">
+                  <a
+                    v-if="row.url"
+                    :href="row.url"
+                    target="_blank"
+                    rel="noopener"
+                    class="title-link"
+                  >
+                    {{ row.title }}
+                  </a>
+                  <span v-else class="title-text">{{ row.title }}</span>
+                </el-tooltip>
+                <div
+                  v-if="row.subtitle || (row.tags && row.tags.length > 0)"
+                  class="title-subtitle-row"
+                >
+                  <span v-if="row.subtitle" class="subtitle">{{ row.subtitle }}</span>
+                  <span v-if="row.tags && row.tags.length > 0" class="title-tags">
+                    <el-tag
+                      v-for="tag in row.tags"
+                      :key="tag"
+                      size="small"
+                      type="info"
+                      effect="plain"
+                    >
+                      {{ tag }}
+                    </el-tag>
+                  </span>
+                </div>
+                <div class="title-meta">
+                  <el-tag v-if="row.category" size="small" type="info">{{ row.category }}</el-tag>
+                  <el-tag v-if="row.hasHR" size="small" type="danger">H&R</el-tag>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="大小"
+            prop="sizeBytes"
+            width="95"
+            align="center"
+            sortable="custom"
+          >
+            <template #default="{ row }">
+              <span class="table-cell-secondary">{{ formatSize(row.sizeBytes) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="优惠" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag :type="getDiscountTag(row).type" size="small" effect="dark">
+                {{ getDiscountTag(row).text }}
+              </el-tag>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="上传" prop="seeders" width="65" align="center" sortable="custom">
+            <template #default="{ row }">
+              <span class="seeders">{{ row.seeders }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="下载" prop="leechers" width="65" align="center" sortable="custom">
+            <template #default="{ row }">
+              <span class="leechers">{{ row.leechers }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="完成" prop="snatched" width="65" align="center" sortable="custom">
+            <template #default="{ row }">
+              <span class="table-cell-secondary">{{ row.snatched }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="发布时间" prop="uploadedAt" width="150" sortable="custom">
+            <template #default="{ row }">
+              <span class="table-cell-secondary">{{ formatTime(row.uploadedAt) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="操作" width="160" align="center" fixed="right">
+            <template #default="{ row }">
+              <div class="table-cell-actions">
+                <el-tooltip content="下载种子" placement="top">
+                  <el-button
+                    type="success"
+                    size="small"
+                    circle
+                    plain
+                    :disabled="!row.downloadUrl"
+                    @click="downloadTorrent(row)"
+                  >
+                    <el-icon><Download /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip content="复制链接" placement="top">
+                  <el-button
+                    type="info"
+                    size="small"
+                    circle
+                    plain
+                    :disabled="!row.downloadUrl && !row.magnetLink"
+                    @click="copyDownloadLink(row)"
+                  >
+                    <el-icon><CopyDocument /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip content="推送到下载器" placement="top">
+                  <el-button type="primary" size="small" circle plain @click="openPushDialog(row)">
+                    <el-icon><Upload /></el-icon>
+                  </el-button>
+                </el-tooltip>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 分页 -->
+        <div v-if="sortedResults.length > 0" class="pagination-container">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="pageSizeOptions"
+            :total="sortedResults.length"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handlePageChange"
+            @size-change="handleSizeChange"
+          />
+        </div>
+
+        <!-- 空状态 -->
+        <div v-if="!loading && sortedResults.length === 0" class="table-empty">
+          <el-icon class="table-empty-icon"><Search /></el-icon>
+          <p class="table-empty-text">
+            {{ searchKeyword ? '没有找到结果' : '输入关键词开始搜索' }}
+          </p>
+        </div>
+      </div>
+    </div>
 
     <!-- 单个推送对话框 -->
     <el-dialog v-model="pushDialogVisible" title="推送到下载器" width="500px">
@@ -1250,14 +1281,8 @@ function toggleAllSites() {
 </template>
 
 <style scoped>
-.page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.search-card :deep(.el-card__body) {
-  padding-bottom: 8px;
+.search-card {
+  margin-bottom: var(--pt-space-4);
 }
 
 .search-form {
@@ -1266,34 +1291,22 @@ function toggleAllSites() {
   align-items: center;
 }
 
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
+.search-form :deep(.el-form-item) {
+  margin-bottom: 8px;
+  margin-top: 8px;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.site-summary {
-  margin-bottom: 16px;
+.site-summary-bar {
+  margin: var(--pt-space-4);
+  gap: var(--pt-space-2);
 }
 
 .title-cell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px; /* Increased gap */
   width: 100%;
+  padding: 8px 0; /* Increased padding */
 }
 
 .title-link {
@@ -1301,12 +1314,16 @@ function toggleAllSites() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
-  color: var(--el-color-primary);
+  font-weight: 700; /* Bolder */
+  color: var(--pt-color-primary-600); /* Darker blue for light mode */
   text-decoration: none;
+  font-size: 15px; /* Slightly larger */
+  line-height: 1.4;
+  transition: color var(--pt-transition-fast);
 }
 
 .title-link:hover {
+  color: var(--pt-color-primary-700);
   text-decoration: underline;
 }
 
@@ -1315,29 +1332,31 @@ function toggleAllSites() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--pt-text-primary);
 }
 
 .title-subtitle-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
-  margin-top: 2px;
 }
 
 .subtitle {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-size: 13px; /* Larger subtitle */
+  color: var(--pt-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 400px;
+  max-width: 600px;
 }
 
 .title-meta {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -1348,38 +1367,39 @@ function toggleAllSites() {
 }
 
 .seeders {
-  color: var(--el-color-success);
-  font-weight: 600;
+  color: var(--pt-color-success-600);
+  font-weight: 700;
 }
 
 .leechers {
-  color: var(--el-color-danger);
-  font-weight: 600;
+  color: var(--pt-color-danger-600);
+  font-weight: 700;
 }
 
 .site-select-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pt-border-color);
 }
 
 .site-count-hint {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--pt-text-secondary);
 }
 
 .all-sites-selected :deep(.el-select__placeholder) {
-  color: var(--el-color-primary);
+  color: var(--pt-color-primary);
+  font-weight: 600;
 }
 
-/* 站点选择器包装 */
 .site-selector-wrapper {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* 站点选项带标签 */
 .site-option-item {
   display: flex;
   align-items: center;
@@ -1387,7 +1407,6 @@ function toggleAllSites() {
   width: 100%;
 }
 
-/* 已选站点筛选按钮组 */
 .selected-sites-filters {
   display: flex;
   flex-wrap: wrap;
@@ -1398,7 +1417,6 @@ function toggleAllSites() {
   display: inline-flex;
 }
 
-/* 站点筛选弹出框 */
 .site-filter-popover {
   max-height: 400px;
   overflow-y: auto;
@@ -1410,7 +1428,12 @@ function toggleAllSites() {
   justify-content: space-between;
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--pt-border-color);
+}
+
+.filter-title {
+  font-weight: 600;
+  color: var(--pt-text-primary);
 }
 
 .site-filter-form :deep(.el-form-item) {
@@ -1419,27 +1442,35 @@ function toggleAllSites() {
 
 .site-filter-form :deep(.el-form-item__label) {
   font-size: 13px;
-  color: var(--el-text-color-secondary);
+  color: var(--pt-text-secondary);
   padding-bottom: 4px;
 }
 
-/* 操作按钮 */
-.action-buttons {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-}
-
-/* 分页 */
-.pagination-container {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-/* 对话框中的文本 */
 .dialog-text {
   word-break: break-all;
   line-height: 1.5;
+  color: var(--pt-text-primary);
+  font-weight: 500;
+}
+
+:deep(.el-table__fixed-right) {
+  height: 100% !important;
+}
+
+/* Dark mode adjustments */
+html.dark .title-link {
+  color: var(--pt-color-primary-400); /* Lighter blue for dark mode */
+}
+
+html.dark .title-link:hover {
+  color: var(--pt-color-primary-300);
+}
+
+html.dark .seeders {
+  color: var(--pt-color-success-400); /* Lighter green */
+}
+
+html.dark .leechers {
+  color: var(--pt-color-danger-400); /* Lighter red */
 }
 </style>

@@ -12,15 +12,15 @@ import (
 
 // SiteSearchParams represents site-specific search parameters
 type SiteSearchParams struct {
-	Cat        interface{} `json:"cat,omitempty"`        // 类别
-	Medium     interface{} `json:"medium,omitempty"`     // 媒介
-	Codec      interface{} `json:"codec,omitempty"`      // 编码
-	AudioCodec interface{} `json:"audiocodec,omitempty"` // 音频编码
-	Standard   interface{} `json:"standard,omitempty"`   // 分辨率
-	Team       interface{} `json:"team,omitempty"`       // 制作组
-	Source     interface{} `json:"source,omitempty"`     // 地区（某些站点）
-	Incldead   interface{} `json:"incldead,omitempty"`   // 断种/活种
-	Spstate    interface{} `json:"spstate,omitempty"`    // 促销状态
+	Cat        any `json:"cat,omitempty"`        // 类别
+	Medium     any `json:"medium,omitempty"`     // 媒介
+	Codec      any `json:"codec,omitempty"`      // 编码
+	AudioCodec any `json:"audiocodec,omitempty"` // 音频编码
+	Standard   any `json:"standard,omitempty"`   // 分辨率
+	Team       any `json:"team,omitempty"`       // 制作组
+	Source     any `json:"source,omitempty"`     // 地区（某些站点）
+	Incldead   any `json:"incldead,omitempty"`   // 断种/活种
+	Spstate    any `json:"spstate,omitempty"`    // 促销状态
 }
 
 // MultiSiteSearchRequest represents a multi-site search request

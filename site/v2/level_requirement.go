@@ -77,7 +77,7 @@ type SiteLevelProgressInfo struct {
 	// NextLevel is the next level requirement
 	NextLevel *SiteLevelRequirement `json:"nextLevel,omitempty"`
 	// UnmetRequirements contains what's still needed
-	UnmetRequirements map[string]interface{} `json:"unmetRequirements,omitempty"`
+	UnmetRequirements map[string]any `json:"unmetRequirements,omitempty"`
 	// ProgressPercent is the overall progress percentage (0-100)
 	ProgressPercent float64 `json:"progressPercent"`
 }

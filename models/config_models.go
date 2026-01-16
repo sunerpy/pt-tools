@@ -110,6 +110,7 @@ type RSSSubscription struct {
 	DownloadPath    string    `gorm:"size:512" json:"download_path"` // 下载器中下载任务的目标下载路径（可选）
 	DownloaderID    *uint     `gorm:"index" json:"downloader_id"`    // 指定下载器，nil 表示使用默认下载器
 	IsExample       bool      `json:"is_example"`                    // 是否为示例配置，示例配置不会被执行
+	PauseOnFreeEnd  bool      `gorm:"default:false" json:"pause_on_free_end"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -128,6 +129,7 @@ type RSSConfig struct {
 	DownloaderID    *uint  `json:"downloader_id"`   // 指定下载器，nil 表示使用默认下载器
 	FilterRuleIDs   []uint `json:"filter_rule_ids"` // 关联的过滤规则 ID 列表
 	IsExample       bool   `json:"is_example"`      // 是否为示例配置，示例配置不会被执行
+	PauseOnFreeEnd  bool   `json:"pause_on_free_end"`
 }
 
 // ShouldSkip 判断是否应该跳过此 RSS 配置

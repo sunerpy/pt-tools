@@ -25,6 +25,7 @@ type Manager struct {
 	wg                sync.WaitGroup
 	lastVersion       int64
 	downloaderManager *downloader.DownloaderManager
+	freeEndMonitor    *FreeEndMonitor
 }
 
 func NewManager() *Manager {
@@ -70,9 +71,21 @@ func NewManager() *Manager {
 	return m
 }
 
+func (m *Manager) InitFreeEndMonitor() {
+	m.initDownloaderManager()
+	m.initFreeEndMonitor()
+}
+
 // GetDownloaderManager 获取下载器管理器
 func (m *Manager) GetDownloaderManager() *downloader.DownloaderManager {
 	return m.downloaderManager
+}
+
+// GetFreeEndMonitor 获取免费结束监控器
+func (m *Manager) GetFreeEndMonitor() *FreeEndMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.freeEndMonitor
 }
 
 func (m *Manager) LastVersion() int64 { return m.lastVersion }
@@ -133,6 +146,9 @@ func (m *Manager) Reload(cfg *models.Config) {
 
 	// 初始化下载器管理器
 	m.initDownloaderManager()
+
+	// 初始化并启动免费结束监控器
+	m.initFreeEndMonitor()
 
 	// 重新启动：每次启动任务时从 DB 读取最新配置，保证一致性
 	store := core.NewConfigStore(global.GlobalDB)
@@ -234,6 +250,34 @@ func (m *Manager) initDownloaderManager() {
 	global.GetSlogger().Info("下载器管理器初始化完成")
 }
 
+func (m *Manager) initFreeEndMonitor() {
+	if global.GlobalDB == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.freeEndMonitor != nil {
+		m.freeEndMonitor.Stop()
+	}
+
+	m.freeEndMonitor = NewFreeEndMonitor(global.GlobalDB.DB, m.downloaderManager)
+	if err := m.freeEndMonitor.Start(); err != nil {
+		global.GetSlogger().Errorf("启动免费结束监控器失败: %v", err)
+		return
+	}
+
+	internal.RegisterTorrentScheduler(func(torrent models.TorrentInfo) {
+		m.mu.Lock()
+		monitor := m.freeEndMonitor
+		m.mu.Unlock()
+		if monitor != nil {
+			monitor.ScheduleTorrent(torrent)
+		}
+	})
+}
+
 // qbitDownloaderConfig qBittorrent 下载器配置
 type qbitDownloaderConfig struct {
 	url       string
@@ -330,6 +374,10 @@ func (m *Manager) StopAll() {
 	}
 	m.mu.Lock()
 	m.jobs = map[string]*job{}
+	if m.freeEndMonitor != nil {
+		m.freeEndMonitor.Stop()
+		m.freeEndMonitor = nil
+	}
 	m.mu.Unlock()
 }
 

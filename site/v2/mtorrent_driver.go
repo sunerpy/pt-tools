@@ -472,14 +472,14 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 
 		// Parse upload time
 		if t.CreatedDate != "" {
-			if uploadTime, err := time.Parse("2006-01-02 15:04:05", t.CreatedDate); err == nil {
+			if uploadTime, err := ParseTimeInCST("2006-01-02 15:04:05", t.CreatedDate); err == nil {
 				item.UploadedAt = uploadTime.Unix()
 			}
 		}
 
 		// Parse discount end time
 		if t.Status.DiscountEndTime != "" {
-			if endTime, err := time.Parse("2006-01-02 15:04:05", t.Status.DiscountEndTime); err == nil {
+			if endTime, err := ParseTimeInCST("2006-01-02 15:04:05", t.Status.DiscountEndTime); err == nil {
 				item.DiscountEndTime = endTime
 			}
 		}
@@ -555,14 +555,14 @@ func (d *MTorrentDriver) ParseUserInfo(res MTorrentResponse) (UserInfo, error) {
 
 	// Parse join date
 	if userData.CreatedDate != "" {
-		if joinTime, err := time.Parse("2006-01-02 15:04:05", userData.CreatedDate); err == nil {
+		if joinTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.CreatedDate); err == nil {
 			info.JoinDate = joinTime.Unix()
 		}
 	}
 
 	// Parse last access from lastBrowse
 	if userData.MemberStatus.LastBrowse != "" {
-		if accessTime, err := time.Parse("2006-01-02 15:04:05", userData.MemberStatus.LastBrowse); err == nil {
+		if accessTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastBrowse); err == nil {
 			info.LastAccess = accessTime.Unix()
 		}
 	}

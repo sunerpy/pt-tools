@@ -75,6 +75,7 @@ export interface RSSConfig {
   downloader_id?: number // 指定下载器，undefined 表示使用默认下载器
   download_path?: string // 下载器中下载任务的目标下载路径（可选）
   filter_rule_ids?: number[] // 关联的过滤规则 ID 列表
+  pause_on_free_end?: boolean // 免费结束时是否暂停未完成的下载
   is_example?: boolean // 是否为示例配置
 }
 
@@ -104,6 +105,8 @@ export interface TaskItem {
   retryCount: number
   lastError: string
   pushTime: string
+  progress: number // 下载进度 0-100
+  torrentSize: number // 种子大小（字节）
 }
 
 export interface TaskListResponse {
@@ -706,4 +709,89 @@ export const torrentPushApi = {
   push: (req: TorrentPushRequest) => api.post<TorrentPushResponse>('/api/v2/torrents/push', req),
   batchPush: (req: BatchTorrentPushRequest) =>
     api.post<BatchTorrentPushResponse>('/api/v2/torrents/batch-push', req)
+}
+
+// ============== 暂停种子管理相关 ==============
+
+export interface PausedTorrent {
+  id: number
+  site_name: string
+  title: string
+  torrent_hash?: string
+  progress: number
+  torrent_size: number
+  downloader_name: string
+  downloader_task_id: string
+  paused_at?: string
+  pause_reason: string
+  free_end_time?: string
+  created_at: string
+}
+
+export interface PausedTorrentsResponse {
+  items: PausedTorrent[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface DeletePausedRequest {
+  ids?: number[]
+  remove_data: boolean
+}
+
+export interface DeletePausedResponse {
+  success: number
+  failed: number
+  failed_ids?: number[]
+  failed_errors?: string[]
+}
+
+export interface ResumeTorrentResponse {
+  success: boolean
+  message?: string
+}
+
+export interface ArchiveTorrent {
+  id: number
+  original_id: number
+  site_name: string
+  title: string
+  torrent_hash?: string
+  is_free: boolean
+  free_end_time?: string
+  is_completed: boolean
+  progress: number
+  is_paused_by_system: boolean
+  pause_reason?: string
+  downloader_name?: string
+  original_created_at: string
+  archived_at: string
+}
+
+export interface ArchiveTorrentsResponse {
+  items: ArchiveTorrent[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export const pausedTorrentsApi = {
+  list: (page = 1, pageSize = 50, site?: string) => {
+    const params = new URLSearchParams()
+    params.set('page', page.toString())
+    params.set('page_size', pageSize.toString())
+    if (site) params.set('site', site)
+    return api.get<PausedTorrentsResponse>(`/api/torrents/paused?${params.toString()}`)
+  },
+  delete: (req: DeletePausedRequest) =>
+    api.post<DeletePausedResponse>('/api/torrents/delete-paused', req),
+  resume: (id: number) => api.post<ResumeTorrentResponse>(`/api/torrents/${id}/resume`),
+  listArchive: (page = 1, pageSize = 50, site?: string) => {
+    const params = new URLSearchParams()
+    params.set('page', page.toString())
+    params.set('page_size', pageSize.toString())
+    if (site) params.set('site', site)
+    return api.get<ArchiveTorrentsResponse>(`/api/torrents/archive?${params.toString()}`)
+  }
 }

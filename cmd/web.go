@@ -48,6 +48,7 @@ var webCmd = &cobra.Command{
 		}
 		addr := fmt.Sprintf("%s:%d", host, port)
 		mgr := scheduler.NewManager()
+		mgr.InitFreeEndMonitor()
 
 		// 初始化 UserInfoService
 		userInfoRepo, err := v2.NewDBUserInfoRepo(global.GlobalDB.DB)

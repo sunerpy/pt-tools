@@ -426,7 +426,7 @@ func (s *Server) apiFaviconRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	global.GetSlogger().Infof("[Favicon] 刷新图标成功: site=%s", siteID)
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"status":    "ok",
 		"site_id":   siteID,
 		"has_cache": true,

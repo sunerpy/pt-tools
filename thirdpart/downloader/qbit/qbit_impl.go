@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sunerpy/requests"
 	"github.com/zeebo/bencode"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -24,14 +25,15 @@ import (
 
 // QbitClient qBittorrent 客户端实现
 type QbitClient struct {
-	name      string
-	baseURL   string
-	username  string
-	password  string
-	autoStart bool
-	client    *http.Client
-	mu        sync.Mutex
-	healthy   bool
+	name         string
+	baseURL      string
+	username     string
+	password     string
+	autoStart    bool
+	client       *http.Client
+	mu           sync.Mutex
+	healthy      bool
+	lastActivity time.Time
 }
 
 // QbitTorrentProperties qBittorrent 种子属性
@@ -49,13 +51,14 @@ func NewQbitClient(config downloader.DownloaderConfig, name string) (downloader.
 	}
 
 	jar, _ := cookiejar.New(nil)
+	transport := requests.GetTransport(false)
 	client := &QbitClient{
 		name:      name,
 		baseURL:   config.GetURL(),
 		username:  config.GetUsername(),
 		password:  config.GetPassword(),
 		autoStart: config.GetAutoStart(),
-		client:    &http.Client{Jar: jar},
+		client:    &http.Client{Jar: jar, Transport: transport, Timeout: 30 * time.Second},
 		healthy:   false,
 	}
 
@@ -78,12 +81,22 @@ func (q *QbitClient) GetName() string {
 
 // IsHealthy 检查下载器是否健康可用
 func (q *QbitClient) IsHealthy() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	return q.healthy
 }
 
 // Close 关闭下载器连接
 func (q *QbitClient) Close() error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.healthy = false
+	if q.client != nil && q.client.Transport != nil {
+		if tr, ok := q.client.Transport.(*http.Transport); ok {
+			requests.PutTransport(tr)
+			q.client.Transport = nil
+		}
+	}
 	return nil
 }
 
@@ -130,12 +143,16 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 	}
 
 	q.healthy = true
+	q.lastActivity = time.Now()
 	sLogger().Info("Successfully logged in to qBittorrent")
 	return nil
 }
 
 // doRequestWithRetry 执行请求并在需要时重试
 func (q *QbitClient) doRequestWithRetry(req *http.Request) (*http.Response, error) {
+	if q.client == nil {
+		return nil, fmt.Errorf("client is closed")
+	}
 	resp, err := q.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -150,7 +167,16 @@ func (q *QbitClient) doRequestWithRetry(req *http.Request) (*http.Response, erro
 		if req.Body != nil {
 			return nil, fmt.Errorf("cannot retry request with non-rewindable body")
 		}
-		return q.client.Do(newReq)
+		resp, err = q.client.Do(newReq)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		q.mu.Lock()
+		q.lastActivity = time.Now()
+		q.mu.Unlock()
 	}
 	return resp, nil
 }
@@ -442,10 +468,11 @@ func GetTorrentFilesPath(directory string) ([]string, error) {
 // 允许注入自定义 HTTP 客户端
 func NewQbitClientForTesting(httpClient *http.Client, baseURL string) *QbitClient {
 	return &QbitClient{
-		name:    "test-client",
-		baseURL: baseURL,
-		client:  httpClient,
-		healthy: true,
+		name:         "test-client",
+		baseURL:      baseURL,
+		client:       httpClient,
+		healthy:      true,
+		lastActivity: time.Now(),
 	}
 }
 
@@ -498,7 +525,7 @@ func (q *QbitClient) EnsureTorrentStarted(torrentHash string) error {
 		return fmt.Errorf("info request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var torrents []map[string]interface{}
+	var torrents []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&torrents); err != nil {
 		return fmt.Errorf("failed to parse torrent info: %w", err)
 	}
@@ -572,6 +599,7 @@ func (q *QbitClient) Ping() (bool, error) {
 	}
 
 	q.healthy = true
+	q.lastActivity = time.Now()
 	return true, nil
 }
 
@@ -994,66 +1022,118 @@ func (q *QbitClient) writeAddTorrentOptions(writer *multipart.Writer, opt downlo
 }
 
 // PauseTorrent 暂停种子
+// qBittorrent 5.0+ 使用 /api/v2/torrents/stop，旧版本使用 /api/v2/torrents/pause
 func (q *QbitClient) PauseTorrent(id string) error {
 	sLogger().Infof("[qBittorrent] PauseTorrent called: hash=%s", id)
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	pauseURL := fmt.Sprintf("%s/api/v2/torrents/pause", q.baseURL)
 	data := url.Values{}
 	data.Set("hashes", id)
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", pauseURL, bytes.NewBufferString(data.Encode()))
+	// 优先尝试 qBittorrent 5.x 的 stop 端点
+	stopURL := fmt.Sprintf("%s/api/v2/torrents/stop", q.baseURL)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", stopURL, bytes.NewBufferString(data.Encode()))
 	if err != nil {
-		return fmt.Errorf("failed to create pause request: %w", err)
+		return fmt.Errorf("failed to create stop request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := q.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("pause request failed: %w", err)
+		return fmt.Errorf("stop request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("pause request failed with status %d: %s", resp.StatusCode, string(body))
+	// 如果 stop 端点返回 404，尝试旧版本的 pause 端点
+	if resp.StatusCode == http.StatusNotFound {
+		sLogger().Debugf("[qBittorrent] stop endpoint not found, trying pause endpoint for older version")
+		pauseURL := fmt.Sprintf("%s/api/v2/torrents/pause", q.baseURL)
+		req2, err := http.NewRequestWithContext(context.Background(), "POST", pauseURL, bytes.NewBufferString(data.Encode()))
+		if err != nil {
+			return fmt.Errorf("failed to create pause request: %w", err)
+		}
+		req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		resp2, err := q.client.Do(req2)
+		if err != nil {
+			return fmt.Errorf("pause request failed: %w", err)
+		}
+		defer resp2.Body.Close()
+
+		if resp2.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp2.Body)
+			return fmt.Errorf("pause request failed with status %d: %s", resp2.StatusCode, string(body))
+		}
+
+		sLogger().Infof("[qBittorrent] Torrent paused successfully (legacy API): hash=%s", id)
+		return nil
 	}
 
-	sLogger().Infof("[qBittorrent] Torrent paused successfully: hash=%s", id)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("stop request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	sLogger().Infof("[qBittorrent] Torrent stopped successfully: hash=%s", id)
 	return nil
 }
 
 // ResumeTorrent 恢复种子
+// qBittorrent 5.0+ 使用 /api/v2/torrents/start，旧版本使用 /api/v2/torrents/resume
 func (q *QbitClient) ResumeTorrent(id string) error {
 	sLogger().Infof("[qBittorrent] ResumeTorrent called: hash=%s", id)
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	resumeURL := fmt.Sprintf("%s/api/v2/torrents/resume", q.baseURL)
 	data := url.Values{}
 	data.Set("hashes", id)
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", resumeURL, bytes.NewBufferString(data.Encode()))
+	startURL := fmt.Sprintf("%s/api/v2/torrents/start", q.baseURL)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", startURL, bytes.NewBufferString(data.Encode()))
 	if err != nil {
-		return fmt.Errorf("failed to create resume request: %w", err)
+		return fmt.Errorf("failed to create start request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := q.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("resume request failed: %w", err)
+		return fmt.Errorf("start request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("resume request failed with status %d: %s", resp.StatusCode, string(body))
+	if resp.StatusCode == http.StatusNotFound {
+		sLogger().Debugf("[qBittorrent] start endpoint not found, trying resume endpoint for older version")
+		resumeURL := fmt.Sprintf("%s/api/v2/torrents/resume", q.baseURL)
+		req2, err := http.NewRequestWithContext(context.Background(), "POST", resumeURL, bytes.NewBufferString(data.Encode()))
+		if err != nil {
+			return fmt.Errorf("failed to create resume request: %w", err)
+		}
+		req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		resp2, err := q.client.Do(req2)
+		if err != nil {
+			return fmt.Errorf("resume request failed: %w", err)
+		}
+		defer resp2.Body.Close()
+
+		if resp2.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp2.Body)
+			return fmt.Errorf("resume request failed with status %d: %s", resp2.StatusCode, string(body))
+		}
+
+		sLogger().Infof("[qBittorrent] Torrent resumed successfully (legacy API): hash=%s", id)
+		return nil
 	}
 
-	sLogger().Infof("[qBittorrent] Torrent resumed successfully: hash=%s", id)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	sLogger().Infof("[qBittorrent] Torrent started successfully: hash=%s", id)
 	return nil
 }
 

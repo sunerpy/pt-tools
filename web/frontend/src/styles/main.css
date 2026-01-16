@@ -17,44 +17,59 @@ body,
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--el-fill-color-light);
-  border-radius: 4px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--el-border-color);
-  border-radius: 4px;
+  background: var(--pt-color-neutral-200);
+  border-radius: 20px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  transition: background var(--pt-transition-normal);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--el-border-color-darker);
+  background: var(--pt-color-neutral-300);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: var(--pt-color-neutral-700);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--pt-color-neutral-600);
 }
 
 /* 链接样式 */
 a {
-  color: var(--el-color-primary);
+  color: var(--pt-color-primary);
   text-decoration: none;
+  transition: color var(--pt-transition-fast);
 }
 
 a:hover {
-  color: var(--el-color-primary-light-3);
+  color: var(--pt-color-primary-hover);
 }
 
 /* 代码样式 */
 code {
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  background: var(--el-fill-color-light);
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  background: var(--pt-bg-tertiary);
+  padding: 0.2em 0.4em;
+  border-radius: var(--pt-radius-sm);
   font-size: 0.9em;
+  color: var(--pt-color-primary-700);
+  border: 1px solid var(--pt-border-color);
 }
 
-/* 暗色模式下的代码样式 */
 html.dark code {
-  background: var(--el-fill-color-darker);
+  color: var(--pt-color-primary-300);
+  background: rgba(255, 255, 255, 0.05);
 }

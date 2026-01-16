@@ -119,8 +119,14 @@ func (dm *DownloaderManager) GetDownloader(name string) (Downloader, error) {
 			dm.lastHealthCheck[name] = time.Now()
 			return dl, nil
 		}
-		// 实例不健康，尝试重新创建
-		sLogger().Warnf("Downloader %s is unhealthy, recreating...", name)
+		// Ping to confirm before recreating
+		if ok, pingErr := dl.Ping(); ok {
+			dm.errorCounts[name] = 0
+			dm.lastHealthCheck[name] = time.Now()
+			return dl, nil
+		} else {
+			sLogger().Warnf("Downloader %s is unhealthy (ping failed: %v), recreating...", name, pingErr)
+		}
 		dl.Close()
 		delete(dm.downloaders, name)
 	}

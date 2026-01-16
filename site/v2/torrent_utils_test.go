@@ -13,9 +13,9 @@ import (
 
 // createTestTorrent creates a minimal valid torrent file for testing
 func createTestTorrent(name string) []byte {
-	metainfo := map[string]interface{}{
+	metainfo := map[string]any{
 		"announce": "http://tracker.example.com/announce",
-		"info": map[string]interface{}{
+		"info": map[string]any{
 			"name":         name,
 			"piece length": int64(262144),
 			"pieces":       string(make([]byte, 20)), // One piece hash
@@ -29,9 +29,9 @@ func createTestTorrent(name string) []byte {
 
 // createMultiFileTorrent creates a multi-file torrent for testing
 func createMultiFileTorrent(name string, files []torrentFileInfo) []byte {
-	metainfo := map[string]interface{}{
+	metainfo := map[string]any{
 		"announce": "http://tracker.example.com/announce",
-		"info": map[string]interface{}{
+		"info": map[string]any{
 			"name":         name,
 			"piece length": int64(262144),
 			"pieces":       string(make([]byte, 20)),

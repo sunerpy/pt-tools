@@ -218,7 +218,7 @@ func (p *HDSkyParser) ParseDiscount(e *colly.HTMLElement, info *models.PHPTorren
 	}
 	endTimeAttr := e.DOM.Find("h1 span[title]").First().AttrOr("title", "")
 	if endTimeAttr != "" {
-		t, err := time.ParseInLocation(p.Config.TimeLayout, endTimeAttr, time.Local)
+		t, err := v2.ParseTimeInCST(p.Config.TimeLayout, endTimeAttr)
 		if err == nil {
 			info.EndTime = t
 		} else {
@@ -322,7 +322,7 @@ func (p *SpringSundayParser) ParseDiscount(e *colly.HTMLElement, info *models.PH
 	}
 	endTimeAttr := e.DOM.Find("h1 span[title]").First().AttrOr("title", "")
 	if endTimeAttr != "" {
-		t, err := time.ParseInLocation(p.Config.TimeLayout, endTimeAttr, time.Local)
+		t, err := v2.ParseTimeInCST(p.Config.TimeLayout, endTimeAttr)
 		if err == nil {
 			info.EndTime = t
 		} else {

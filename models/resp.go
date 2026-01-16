@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 var freeSet = []string{"free", "_2x_free"}
@@ -177,7 +179,7 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.SugaredLogger, enabled bool, 
 			logger.Warnf("种子: %s 免费时间为空,跳过...", t.Status.ID)
 			return false
 		}
-		timeEnd, err := time.Parse("2006-01-02 15:04:05", t.Status.DiscountEndTime)
+		timeEnd, err := utils.ParseTimeInCST("2006-01-02 15:04:05", t.Status.DiscountEndTime)
 		if err != nil {
 			logger.Error("torrent: %s 解析时间失败, %v", t.Status.ID, err)
 			return false
@@ -203,7 +205,7 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.SugaredLogger, enabled bool, 
 }
 
 func (t MTTorrentDetail) GetFreeEndTime() *time.Time {
-	timeEnd, err := time.Parse("2006-01-02 15:04:05", t.Status.DiscountEndTime)
+	timeEnd, err := utils.ParseTimeInCST("2006-01-02 15:04:05", t.Status.DiscountEndTime)
 	if err != nil {
 		return nil
 	}

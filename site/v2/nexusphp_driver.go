@@ -880,7 +880,7 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 	}
 
 	// Store parsed values for use in subsequent requests
-	parsedValues := make(map[string]interface{})
+	parsedValues := make(map[string]any)
 	var mu sync.Mutex // Protect parsedValues and info
 
 	// First pass: identify which processes have dependencies
@@ -1031,7 +1031,7 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 }
 
 // executeProcess executes a single process and returns the parsed values
-func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoConfig, process UserInfoProcess, parsedValues map[string]interface{}) (map[string]string, error) {
+func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoConfig, process UserInfoProcess, parsedValues map[string]any) (map[string]string, error) {
 	result := make(map[string]string)
 
 	// Build request URL

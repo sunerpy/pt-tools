@@ -1,11 +1,13 @@
 package internal
 
 import (
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
 )
 
 const (
@@ -21,4 +23,26 @@ func sLogger() *zap.SugaredLogger {
 		return zap.NewNop().Sugar()
 	}
 	return global.GetSlogger()
+}
+
+type TorrentScheduleFunc func(torrent models.TorrentInfo)
+
+var (
+	scheduleFuncMu   sync.RWMutex
+	scheduleTorrentF TorrentScheduleFunc
+)
+
+func RegisterTorrentScheduler(f TorrentScheduleFunc) {
+	scheduleFuncMu.Lock()
+	defer scheduleFuncMu.Unlock()
+	scheduleTorrentF = f
+}
+
+func ScheduleTorrentForMonitoring(torrent models.TorrentInfo) {
+	scheduleFuncMu.RLock()
+	f := scheduleTorrentF
+	scheduleFuncMu.RUnlock()
+	if f != nil {
+		f(torrent)
+	}
 }

@@ -103,7 +103,8 @@ const newRss = reactive<RSSConfig>({
   interval_minutes: 10,
   downloader_id: undefined,
   download_path: '',
-  filter_rule_ids: []
+  filter_rule_ids: [],
+  pause_on_free_end: false
 })
 
 const editRssDialogVisible = ref(false)
@@ -116,7 +117,8 @@ const editingRss = reactive<RSSConfig>({
   interval_minutes: 10,
   downloader_id: undefined,
   download_path: '',
-  filter_rule_ids: []
+  filter_rule_ids: [],
+  pause_on_free_end: false
 })
 const editingRssIndex = ref(-1)
 const updatingRss = ref(false)
@@ -194,7 +196,8 @@ function openAddRssDialog() {
     interval_minutes: 10,
     downloader_id: undefined,
     download_path: '',
-    filter_rule_ids: []
+    filter_rule_ids: [],
+    pause_on_free_end: true
   })
   newRssUseCustomPath.value = false
   rssDialogVisible.value = true
@@ -230,7 +233,8 @@ async function addRss() {
       interval_minutes: Math.max(5, Math.min(1440, newRss.interval_minutes || 10)),
       downloader_id: newRss.downloader_id || undefined,
       download_path: newRss.download_path || '',
-      filter_rule_ids: newRss.filter_rule_ids || []
+      filter_rule_ids: newRss.filter_rule_ids || [],
+      pause_on_free_end: newRss.pause_on_free_end || false
     })
     await sitesApi.save(siteName.value, form.value)
     // 重新加载数据以获取数据库中的真实 ID
@@ -299,7 +303,8 @@ function openEditRssDialog(index: number) {
     interval_minutes: rss.interval_minutes || 10,
     downloader_id: rss.downloader_id || undefined,
     download_path: rss.download_path || '',
-    filter_rule_ids: rss.filter_rule_ids || []
+    filter_rule_ids: rss.filter_rule_ids || [],
+    pause_on_free_end: rss.pause_on_free_end || false
   })
   // 检查当前路径是否为预设目录，如果不是则启用自定义输入
   editRssUseCustomPath.value = rss.download_path
@@ -342,7 +347,8 @@ async function updateRss() {
       interval_minutes: Math.max(5, Math.min(1440, editingRss.interval_minutes || 10)),
       downloader_id: editingRss.downloader_id || undefined,
       download_path: editingRss.download_path || '',
-      filter_rule_ids: editingRss.filter_rule_ids || []
+      filter_rule_ids: editingRss.filter_rule_ids || [],
+      pause_on_free_end: editingRss.pause_on_free_end || false
     }
 
     // 保存到服务器
@@ -634,6 +640,10 @@ function getRowClassName({ row }: { row: RSSConfig }) {
           </el-select>
           <div class="form-tip">选择要应用于此 RSS 订阅的过滤规则，不选择则不进行过滤下载</div>
         </el-form-item>
+        <el-form-item label="免费结束暂停">
+          <el-switch v-model="newRss.pause_on_free_end" />
+          <div class="form-tip">启用后，免费期结束时如果下载未完成，系统将自动暂停任务</div>
+        </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">
             <el-select
@@ -733,6 +743,10 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             />
           </el-select>
           <div class="form-tip">选择要应用于此 RSS 订阅的过滤规则，不选择则不进行过滤下载</div>
+        </el-form-item>
+        <el-form-item label="免费结束暂停">
+          <el-switch v-model="editingRss.pause_on_free_end" />
+          <div class="form-tip">启用后，免费期结束时如果下载未完成，系统将自动暂停任务</div>
         </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">

@@ -295,12 +295,12 @@ func TestServer_APIs(t *testing.T) {
 		assert.True(t, rr.Code == http.StatusInternalServerError || rr.Code == 0)
 	})
 	t.Run("logs truncate large", func(t *testing.T) {
-		// prepare large log file under HOME/pt-tools/logs/info.log
+		// prepare large log file under HOME/pt-tools/logs/all.log
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		p := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 		require.NoError(t, os.MkdirAll(p, 0o755))
-		f := filepath.Join(p, "info.log")
+		f := filepath.Join(p, "all.log")
 		var b bytes.Buffer
 		for i := 0; i < 6000; i++ {
 			b.WriteString("line\n")

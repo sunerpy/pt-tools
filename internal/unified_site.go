@@ -224,7 +224,7 @@ func (u *UnifiedSiteImpl) convertMTTorrentToItem(detail *models.MTTorrentDetail)
 
 		// 解析优惠结束时间
 		if detail.Status.DiscountEndTime != "" {
-			if endTime, err := time.Parse("2006-01-02 15:04:05", detail.Status.DiscountEndTime); err == nil {
+			if endTime, err := v2.ParseTimeInCST("2006-01-02 15:04:05", detail.Status.DiscountEndTime); err == nil {
 				item.DiscountEndTime = endTime
 			}
 		}

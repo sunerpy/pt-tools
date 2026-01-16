@@ -42,6 +42,60 @@ type TorrentInfo struct {
 	LastError      string     `gorm:"default:''" json:"lastError"`
 	DownloadSource string     `gorm:"size:32;default:'free_download'" json:"downloadSource"` // free_download or filter_rule
 	FilterRuleID   *uint      `gorm:"index" json:"filterRuleId"`                             // ID of the matched filter rule
+
+	// 免费结束管理相关字段
+	DownloaderID     *uint      `gorm:"index" json:"downloaderId"`                   // 推送到的下载器 ID
+	DownloaderName   string     `gorm:"size:64;default:''" json:"downloaderName"`    // 下载器名称（冗余存储便于查询）
+	CompletedAt      *time.Time `gorm:"default:null" json:"completedAt"`             // 下载完成时间
+	IsPausedBySystem bool       `gorm:"default:false" json:"isPausedBySystem"`       // 是否被系统自动暂停
+	PauseOnFreeEnd   bool       `gorm:"default:false" json:"pauseOnFreeEnd"`         // 免费结束时是否暂停（来自 RSS 配置）
+	PausedAt         *time.Time `gorm:"default:null" json:"pausedAt"`                // 系统暂停时间
+	PauseReason      string     `gorm:"size:256;default:''" json:"pauseReason"`      // 暂停原因
+	IsCompleted      bool       `gorm:"default:false;index" json:"isCompleted"`      // 下载是否已完成
+	Progress         float64    `gorm:"default:0" json:"progress"`                   // 下载进度 (0-100)
+	TorrentSize      int64      `gorm:"default:0" json:"torrentSize"`                // 种子大小（字节）
+	DownloaderTaskID string     `gorm:"size:128;default:''" json:"downloaderTaskId"` // 下载器中的任务 ID（用于暂停/删除操作）
+	CheckCount       int        `gorm:"default:0" json:"checkCount"`                 // 进度检查次数
+}
+
+// TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）
+type TorrentInfoArchive struct {
+	ID                uint       `gorm:"primaryKey" json:"id"`
+	OriginalID        uint       `gorm:"index" json:"originalId"`
+	SiteName          string     `gorm:"index" json:"siteName"`
+	TorrentID         string     `gorm:"index" json:"torrentId"`
+	TorrentHash       *string    `gorm:"index" json:"torrentHash"`
+	IsFree            bool       `json:"isFree"`
+	IsDownloaded      bool       `json:"isDownloaded"`
+	IsPushed          *bool      `json:"isPushed"`
+	IsSkipped         bool       `json:"isSkipped"`
+	FreeLevel         string     `json:"freeLevel"`
+	FreeEndTime       *time.Time `json:"freeEndTime"`
+	PushTime          *time.Time `json:"pushTime"`
+	Title             string     `json:"title"`
+	Category          string     `json:"category"`
+	Tag               string     `json:"tag"`
+	OriginalCreatedAt time.Time  `json:"originalCreatedAt"`
+	OriginalUpdatedAt time.Time  `json:"originalUpdatedAt"`
+	IsExpired         bool       `json:"isExpired"`
+	LastCheckTime     *time.Time `json:"lastCheckTime"`
+	RetryCount        int        `json:"retryCount"`
+	LastError         string     `json:"lastError"`
+	DownloadSource    string     `json:"downloadSource"`
+	FilterRuleID      *uint      `json:"filterRuleId"`
+	DownloaderID      *uint      `json:"downloaderId"`
+	DownloaderName    string     `json:"downloaderName"`
+	CompletedAt       *time.Time `json:"completedAt"`
+	IsPausedBySystem  bool       `json:"isPausedBySystem"`
+	PauseOnFreeEnd    bool       `json:"pauseOnFreeEnd"`
+	PausedAt          *time.Time `json:"pausedAt"`
+	PauseReason       string     `json:"pauseReason"`
+	IsCompleted       bool       `json:"isCompleted"`
+	Progress          float64    `json:"progress"`
+	TorrentSize       int64      `json:"torrentSize"`
+	DownloaderTaskID  string     `json:"downloaderTaskId"`
+	CheckCount        int        `json:"checkCount"`
+	ArchivedAt        time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
 }
 
 func (t *TorrentInfo) GetExpired() bool {
@@ -94,6 +148,7 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 	if err := db.AutoMigrate(
 		&SchemaVersion{}, // 版本表必须最先迁移
 		&TorrentInfo{},
+		&TorrentInfoArchive{},
 		&AdminUser{},
 		&SettingsGlobal{},
 		&QbitSettings{},

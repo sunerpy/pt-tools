@@ -5,9 +5,9 @@ package v2
 
 // CategoryOption 分类选项
 type CategoryOption struct {
-	Value interface{} `json:"value"`
-	Name  string      `json:"name"`
-	Type  string      `json:"type,omitempty"` // e.g., "normal", "adult" for mteam
+	Value any    `json:"value"`
+	Name  string `json:"name"`
+	Type  string `json:"type,omitempty"` // e.g., "normal", "adult" for mteam
 }
 
 // CategoryDefinition 分类定义

@@ -2,6 +2,7 @@
 import { ref, reactive } from 'vue'
 import { passwordApi } from '@/api'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { User, Lock, Key } from '@element-plus/icons-vue'
 
 const formRef = ref<FormInstance>()
 const saving = ref(false)
@@ -63,78 +64,97 @@ async function submit() {
 
 <template>
   <div class="page-container">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>修改密码</span>
-        </div>
-      </template>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">修改密码</h1>
+        <p class="page-subtitle">定期更换密码可以提高账户安全性</p>
+      </div>
+    </div>
 
-      <el-form
-        ref="formRef"
-        :model="form"
-        :rules="rules"
-        label-width="100px"
-        label-position="right"
-        style="max-width: 400px"
-      >
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" placeholder="当前登录用户名">
-            <template #prepend>
-              <el-icon><User /></el-icon>
-            </template>
-          </el-input>
-        </el-form-item>
+    <div class="form-card" style="max-width: 600px">
+      <div class="form-card-header">
+        <h3>账号信息</h3>
+      </div>
 
-        <el-form-item label="旧密码" prop="oldPassword">
-          <el-input v-model="form.oldPassword" type="password" show-password placeholder="当前密码">
-            <template #prepend>
-              <el-icon><Lock /></el-icon>
-            </template>
-          </el-input>
-        </el-form-item>
+      <div class="form-section">
+        <el-form
+          ref="formRef"
+          :model="form"
+          :rules="rules"
+          label-width="100px"
+          label-position="top"
+        >
+          <el-form-item label="用户名" prop="username">
+            <el-input v-model="form.username" placeholder="请输入当前登录用户名">
+              <template #prefix>
+                <el-icon><User /></el-icon>
+              </template>
+            </el-input>
+            <div class="form-tip">出于安全考虑，请再次输入您的用户名以验证身份。</div>
+          </el-form-item>
 
-        <el-form-item label="新密码" prop="newPassword">
-          <el-input
-            v-model="form.newPassword"
-            type="password"
-            show-password
-            placeholder="至少 6 位"
-          >
-            <template #prepend>
-              <el-icon><Key /></el-icon>
-            </template>
-          </el-input>
-        </el-form-item>
+          <el-form-item label="旧密码" prop="oldPassword">
+            <el-input
+              v-model="form.oldPassword"
+              type="password"
+              show-password
+              placeholder="请输入当前密码"
+            >
+              <template #prefix>
+                <el-icon><Lock /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
 
-        <el-form-item label="确认密码" prop="confirmPassword">
-          <el-input
-            v-model="form.confirmPassword"
-            type="password"
-            show-password
-            placeholder="再次输入新密码"
-          >
-            <template #prepend>
-              <el-icon><Key /></el-icon>
-            </template>
-          </el-input>
-        </el-form-item>
+          <div
+            style="margin: var(--pt-space-6) 0; border-top: 1px dashed var(--pt-border-color)"
+          ></div>
 
-        <el-form-item>
-          <el-button type="primary" :loading="saving" @click="submit">修改密码</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+          <el-form-item label="新密码" prop="newPassword">
+            <el-input
+              v-model="form.newPassword"
+              type="password"
+              show-password
+              placeholder="请输入新密码（至少 6 位）"
+            >
+              <template #prefix>
+                <el-icon><Key /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
+
+          <el-form-item label="确认新密码" prop="confirmPassword">
+            <el-input
+              v-model="form.confirmPassword"
+              type="password"
+              show-password
+              placeholder="请再次输入新密码"
+            >
+              <template #prefix>
+                <el-icon><Key /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div class="form-actions">
+        <el-button type="primary" :loading="saving" size="large" @click="submit">
+          保存修改
+        </el-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page-container {
-  width: 100%;
+/* Component specific overrides if any */
+:deep(.el-form-item__label) {
+  font-weight: 600;
+  padding-bottom: 8px !important;
 }
 
-.card-header {
-  font-size: 16px;
-  font-weight: 600;
+:deep(.el-input__wrapper) {
+  padding: 4px 12px;
 }
 </style>

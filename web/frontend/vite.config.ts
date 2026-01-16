@@ -12,7 +12,26 @@ export default defineConfig(({ command }) => ({
   },
   build: {
     outDir: '../static/dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('element-plus')) {
+              return 'element-plus'
+            }
+            if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
+              return 'vue-vendor'
+            }
+            if (id.includes('@element-plus/icons-vue')) {
+              return 'element-plus-icons'
+            }
+            return 'vendor'
+          }
+        }
+      }
+    }
   },
   esbuild: {
     drop: command === 'build' ? ['console', 'debugger'] : [],

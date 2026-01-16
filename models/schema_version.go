@@ -18,12 +18,13 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
 // v2: 添加 IsExample 字段到 RSS 订阅，添加 DefaultConcurrency 到全局设置
 // v3: 添加 user_info 表用于存储用户统计信息
+// v4: 添加免费结束管理功能 - TorrentInfo 新增下载器追踪字段，RSSSubscription 新增 PauseOnFreeEnd，添加 TorrentInfoArchive 归档表
 
 // MigrationFunc 迁移函数类型
 type MigrationFunc func(db *gorm.DB) error
@@ -67,6 +68,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     3,
 		Description: "添加 user_info 表用于存储用户统计信息",
 		Up:          migrateV2ToV3,
+	})
+
+	// v3 -> v4: 添加免费结束管理功能
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     4,
+		Description: "添加免费结束管理功能",
+		Up:          migrateV3ToV4,
 	})
 }
 
@@ -235,4 +243,8 @@ func migrateV2ToV3(db *gorm.DB) error {
 	}
 
 	return db.Migrator().CreateTable(&UserInfoRecord{})
+}
+
+func migrateV3ToV4(db *gorm.DB) error {
+	return nil
 }

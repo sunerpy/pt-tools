@@ -545,7 +545,6 @@ func TestFetchRSS_WithGomock(t *testing.T) {
 	}
 }
 
-// TestGetDownloaderForRSS_NoDB 测试数据库未初始化的情况
 func TestGetDownloaderForRSS_NoDB(t *testing.T) {
 	global.GlobalDB = nil
 	_, err := GetDownloaderForRSS(models.RSSConfig{})
@@ -574,9 +573,7 @@ func TestGetDownloaderForRSS_SpecifiedDownloader(t *testing.T) {
 		DownloaderID: &dlID,
 	}
 
-	// 由于没有实际的 qBittorrent 服务器，会返回连接错误
 	_, err := GetDownloaderForRSS(rssCfg)
-	// 可能成功创建客户端或返回连接错误
 	_ = err
 }
 
@@ -768,35 +765,31 @@ func TestFetchRSSFeed_InvalidContent(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestProcessSingleTorrentWithDownloader_NoRecord 测试数据库无记录时删除文件
 func TestProcessSingleTorrentWithDownloader_NoRecord(t *testing.T) {
 	db := setupDB(t)
 	dir := t.TempDir()
 	path, _ := makeTorrentFile(t, dir)
 
-	// 创建 mock 下载器
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mockDl := sm.NewMockDownloader(ctrl)
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
-	// 文件应该被删除
 	_, err = os.Stat(path)
 	require.True(t, os.IsNotExist(err))
 	_ = db
 }
 
-// TestProcessSingleTorrentWithDownloader_AlreadyPushed 测试已推送的种子
 func TestProcessSingleTorrentWithDownloader_AlreadyPushed(t *testing.T) {
 	db := setupDB(t)
 	dir := t.TempDir()
 	path, hash := makeTorrentFile(t, dir)
 
-	// 创建已推送的记录
 	pushed := true
 	now := time.Now()
 	ti := &models.TorrentInfo{
@@ -813,10 +806,10 @@ func TestProcessSingleTorrentWithDownloader_AlreadyPushed(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
-	// 文件应该被删除
 	_, err = os.Stat(path)
 	require.True(t, os.IsNotExist(err))
 }
@@ -842,7 +835,8 @@ func TestProcessSingleTorrentWithDownloader_Expired(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
 	// 文件应该被删除
@@ -874,7 +868,8 @@ func TestProcessSingleTorrentWithDownloader_ExistsInDownloader(t *testing.T) {
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(true, nil)
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
 	// 文件应该被删除
@@ -921,9 +916,10 @@ func TestProcessSingleTorrentWithDownloader_NewTorrentPushSuccess(t *testing.T) 
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().AddTorrentWithPath(gomock.Any(), "cat", "tag", "").Return(nil)
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
 	// 文件应该被删除
@@ -960,9 +956,10 @@ func TestProcessSingleTorrentWithDownloader_PushFailed(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().AddTorrentWithPath(gomock.Any(), "cat", "tag", "").Return(fmt.Errorf("push failed"))
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: false, Message: "push failed"}, fmt.Errorf("push failed"))
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "推送种子失败")
 
@@ -994,7 +991,8 @@ func TestProcessSingleTorrentWithDownloader_CheckExistsFailed(t *testing.T) {
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, fmt.Errorf("connection failed"))
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "检查种子存在失败")
 }
@@ -1014,7 +1012,8 @@ func TestProcessSingleTorrentWithDownloader_InvalidTorrentFile(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, invalidPath, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, invalidPath, "cat", "tag", "", models.SpringSunday, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "计算种子哈希失败")
 }
@@ -1053,7 +1052,8 @@ func TestProcessSingleTorrentWithDownloader_RetainHoursExpired(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
 	// 文件应该被删除
@@ -1095,7 +1095,8 @@ func TestProcessSingleTorrentWithDownloader_MaxRetryExceeded(t *testing.T) {
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "", models.SpringSunday, false)
 	require.NoError(t, err)
 
 	// 文件应该被删除
@@ -1389,10 +1390,11 @@ func TestProcessTorrentsWithDownloaderByRSS_WithDownloadPath(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	// 验证 AddTorrentWithPath 被调用时传递了正确的下载路径
-	mockDl.EXPECT().AddTorrentWithPath(gomock.Any(), "cat", "tag", "/custom/path").Return(nil)
+	// 验证 AddTorrentFileEx 被调用时传递了正确的下载路径
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
 
-	err := processSingleTorrentWithDownloader(context.Background(), mockDl, path, "cat", "tag", "/custom/path", models.SpringSunday)
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo, path, "cat", "tag", "/custom/path", models.SpringSunday, false)
 	require.NoError(t, err)
 
 	// 文件应该被删除

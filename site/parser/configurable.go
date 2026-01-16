@@ -5,10 +5,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // ConfigurableParser 可配置的站点解析器
@@ -139,7 +140,7 @@ func (p *ConfigurableParser) parseDiscount(doc *goquery.Selection, info *ParsedT
 func (p *ConfigurableParser) parseFreeEndTime(doc *goquery.Selection, info *ParsedTorrentInfo) {
 	endTimeAttr := doc.Find(p.config.Selectors.FreeEndTimeSelector).First().AttrOr("title", "")
 	if endTimeAttr != "" {
-		t, err := time.ParseInLocation(p.config.TimeLayout, endTimeAttr, time.Local)
+		t, err := utils.ParseTimeInCST(p.config.TimeLayout, endTimeAttr)
 		if err == nil {
 			info.FreeEndTime = t
 		}

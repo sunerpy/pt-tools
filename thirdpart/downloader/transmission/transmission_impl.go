@@ -12,21 +12,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sunerpy/requests"
+
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 // TransmissionClient Transmission 客户端实现
 type TransmissionClient struct {
-	name      string
-	baseURL   string
-	username  string
-	password  string
-	autoStart bool
-	client    *http.Client
-	sessionID string
-	mu        sync.Mutex
-	healthy   bool
+	name         string
+	baseURL      string
+	username     string
+	password     string
+	autoStart    bool
+	client       *http.Client
+	sessionID    string
+	mu           sync.Mutex
+	healthy      bool
+	lastActivity time.Time
 }
 
 // 确保 TransmissionClient 实现 Downloader 接口
@@ -102,12 +105,7 @@ func NewTransmissionClient(config downloader.DownloaderConfig, name string) (dow
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// 创建带有连接管理的 HTTP 客户端
-	transport := &http.Transport{
-		DisableKeepAlives: true, // 禁用 keep-alive 以避免连接泄漏
-		MaxIdleConns:      10,
-		IdleConnTimeout:   10 * time.Second,
-	}
+	transport := requests.GetTransport(false)
 
 	client := &TransmissionClient{
 		name:      name,
@@ -138,16 +136,20 @@ func (t *TransmissionClient) GetName() string {
 
 // IsHealthy 检查下载器是否健康可用
 func (t *TransmissionClient) IsHealthy() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.healthy
 }
 
 // Close 关闭下载器连接
 func (t *TransmissionClient) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.healthy = false
-	// 关闭 HTTP 客户端的空闲连接
 	if t.client != nil && t.client.Transport != nil {
-		if transport, ok := t.client.Transport.(*http.Transport); ok {
-			transport.CloseIdleConnections()
+		if tr, ok := t.client.Transport.(*http.Transport); ok {
+			requests.PutTransport(tr)
+			t.client.Transport = nil
 		}
 	}
 	return nil
@@ -191,6 +193,7 @@ func (t *TransmissionClient) Authenticate() error {
 	}
 
 	t.healthy = true
+	t.lastActivity = time.Now()
 	sLogger().Info("Successfully connected to Transmission")
 	return nil
 }
@@ -220,6 +223,7 @@ func (t *TransmissionClient) verifyConnection() error {
 	}
 
 	t.healthy = true
+	t.lastActivity = time.Now()
 	sLogger().Info("Successfully authenticated with Transmission")
 	return nil
 }
@@ -264,6 +268,10 @@ func (t *TransmissionClient) doRequest(method string, args any) (*rpcResponse, e
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.client == nil {
+		return nil, fmt.Errorf("client is closed")
+	}
+
 	req, err := t.createRequest(method, args)
 	if err != nil {
 		return nil, err
@@ -303,6 +311,8 @@ func (t *TransmissionClient) doRequest(method string, args any) (*rpcResponse, e
 	if rpcResp.Result != "success" {
 		return nil, fmt.Errorf("RPC error: %s", rpcResp.Result)
 	}
+
+	t.lastActivity = time.Now()
 
 	return &rpcResp, nil
 }
@@ -525,7 +535,10 @@ func (t *TransmissionClient) Ping() (bool, error) {
 		t.healthy = false
 		return false, nil
 	}
+	t.mu.Lock()
 	t.healthy = true
+	t.lastActivity = time.Now()
+	t.mu.Unlock()
 	return true, nil
 }
 

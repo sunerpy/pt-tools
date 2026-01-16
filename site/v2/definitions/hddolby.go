@@ -56,7 +56,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 					"a[href*='userdetails.php'][class*='_Name']",
 				},
 				Attr:    "href",
-				Filters: []v2.Filter{{Name: "querystring", Args: []interface{}{"id"}}},
+				Filters: []v2.Filter{{Name: "querystring", Args: []any{"id"}}},
 			},
 			// Username from index.php
 			"name": {
@@ -74,7 +74,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`上传量[：:</font>\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "regex", Args: []any{`上传量[：:</font>\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
 					{Name: "parseSize"},
 				},
 			},
@@ -86,7 +86,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`下载量[：:</font>\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "regex", Args: []any{`下载量[：:</font>\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
 					{Name: "parseSize"},
 				},
 			},
@@ -98,7 +98,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`分享率[：:</font>\s]*([\d.,]+|∞|Inf)`}},
+					{Name: "regex", Args: []any{`分享率[：:</font>\s]*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -111,7 +111,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "class",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`^(\w+)_Name$`}},
+					{Name: "regex", Args: []any{`^(\w+)_Name$`}},
 				},
 			},
 			// Bonus (鲸币) from index.php info_block
@@ -122,7 +122,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`鲸币[^:：]*[：:]\s*([\d,]+\.?\d*)`}},
+					{Name: "regex", Args: []any{`鲸币[^:：]*[：:]\s*([\d,]+\.?\d*)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -134,7 +134,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`做种积分[：:\s</font>]*([\d,]+\.?\d*)`}},
+					{Name: "regex", Args: []any{`做种积分[：:\s</font>]*([\d,]+\.?\d*)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -145,7 +145,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 					"tr:contains('合计') td:last-child",
 				},
 				Filters: []v2.Filter{
-					{Name: "split", Args: []interface{}{"/", 0}},
+					{Name: "split", Args: []any{"/", 0}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -157,7 +157,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`title="当前做种"[^>]*/>(\d+)`}},
+					{Name: "regex", Args: []any{`title="当前做种"[^>]*/>(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -169,7 +169,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`title="当前下载"[^>]*/>(\d+)`}},
+					{Name: "regex", Args: []any{`title="当前下载"[^>]*/>(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -181,7 +181,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 					"td.rowhead.nowrap:contains('加入日期') + td",
 				},
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+					{Name: "regex", Args: []any{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
 					{Name: "parseTime"},
 				},
 			},
@@ -193,7 +193,7 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 				},
 				Attr: "title",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []interface{}{`\((\d+)\s*新\)`}},
+					{Name: "regex", Args: []any{`\((\d+)\s*新\)`}},
 					{Name: "parseNumber"},
 				},
 			},

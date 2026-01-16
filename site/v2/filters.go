@@ -11,7 +11,7 @@ import (
 )
 
 // FilterFunc is a function that transforms a value
-type FilterFunc func(value interface{}, args ...interface{}) interface{}
+type FilterFunc func(value any, args ...any) any
 
 var (
 	filtersMu       sync.RWMutex
@@ -75,7 +75,7 @@ func GetFilter(name string) (FilterFunc, bool) {
 }
 
 // ApplyFilters applies a chain of filters to a value
-func ApplyFilters(value interface{}, filters []Filter) interface{} {
+func ApplyFilters(value any, filters []Filter) any {
 	initFilters()
 	for _, filter := range filters {
 		fn, ok := GetFilter(filter.Name)
@@ -88,7 +88,7 @@ func ApplyFilters(value interface{}, filters []Filter) interface{} {
 }
 
 // parseNumberFilter extracts a number from a string
-func parseNumberFilter(value interface{}, args ...interface{}) interface{} {
+func parseNumberFilter(value any, args ...any) any {
 	str := toString(value)
 	str = strings.ReplaceAll(str, ",", "")
 	str = strings.ReplaceAll(str, " ", "")
@@ -115,13 +115,13 @@ func parseNumberFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // parseSizeFilter parses a size string to bytes
-func parseSizeFilter(value interface{}, args ...interface{}) interface{} {
+func parseSizeFilter(value any, args ...any) any {
 	str := toString(value)
 	return parseSize(str)
 }
 
 // parseTimeFilter parses a time string to Unix timestamp
-func parseTimeFilter(value interface{}, args ...interface{}) interface{} {
+func parseTimeFilter(value any, args ...any) any {
 	str := toString(value)
 	t := parseTimeString(str)
 	if t.IsZero() {
@@ -131,7 +131,7 @@ func parseTimeFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // querystringFilter extracts a query parameter from a URL
-func querystringFilter(value interface{}, args ...interface{}) interface{} {
+func querystringFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) == 0 {
 		return ""
@@ -154,7 +154,7 @@ func querystringFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // splitFilter splits a string and returns the element at index
-func splitFilter(value interface{}, args ...interface{}) interface{} {
+func splitFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) < 2 {
 		return str
@@ -173,7 +173,7 @@ func splitFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // prependFilter prepends a string
-func prependFilter(value interface{}, args ...interface{}) interface{} {
+func prependFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) == 0 {
 		return str
@@ -183,7 +183,7 @@ func prependFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // appendFilter appends a string
-func appendFilter(value interface{}, args ...interface{}) interface{} {
+func appendFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) == 0 {
 		return str
@@ -193,7 +193,7 @@ func appendFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // replaceFilter replaces a substring
-func replaceFilter(value interface{}, args ...interface{}) interface{} {
+func replaceFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) < 2 {
 		return str
@@ -204,7 +204,7 @@ func replaceFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // trimFilter trims whitespace
-func trimFilter(value interface{}, args ...interface{}) interface{} {
+func trimFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) > 0 {
 		cutset := toString(args[0])
@@ -214,7 +214,7 @@ func trimFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // extDoubanIdFilter extracts Douban ID from URL or string
-func extDoubanIdFilter(value interface{}, args ...interface{}) interface{} {
+func extDoubanIdFilter(value any, args ...any) any {
 	str := toString(value)
 	re := regexp.MustCompile(`(?:douban\.com/subject/|douban=)(\d+)`)
 	matches := re.FindStringSubmatch(str)
@@ -230,7 +230,7 @@ func extDoubanIdFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // extImdbIdFilter extracts IMDB ID from URL or string
-func extImdbIdFilter(value interface{}, args ...interface{}) interface{} {
+func extImdbIdFilter(value any, args ...any) any {
 	str := toString(value)
 	re := regexp.MustCompile(`(?:imdb\.com/title/|imdb=)(tt\d+)`)
 	matches := re.FindStringSubmatch(str)
@@ -246,7 +246,7 @@ func extImdbIdFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // parseIntFilter parses string to int
-func parseIntFilter(value interface{}, args ...interface{}) interface{} {
+func parseIntFilter(value any, args ...any) any {
 	str := toString(value)
 	str = strings.ReplaceAll(str, ",", "")
 	i, _ := strconv.ParseInt(str, 10, 64)
@@ -254,7 +254,7 @@ func parseIntFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // parseFloatFilter parses string to float
-func parseFloatFilter(value interface{}, args ...interface{}) interface{} {
+func parseFloatFilter(value any, args ...any) any {
 	str := toString(value)
 	str = strings.ReplaceAll(str, ",", "")
 	f, _ := strconv.ParseFloat(str, 64)
@@ -262,17 +262,17 @@ func parseFloatFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // toLowerCaseFilter converts to lowercase
-func toLowerCaseFilter(value interface{}, args ...interface{}) interface{} {
+func toLowerCaseFilter(value any, args ...any) any {
 	return strings.ToLower(toString(value))
 }
 
 // toUpperCaseFilter converts to uppercase
-func toUpperCaseFilter(value interface{}, args ...interface{}) interface{} {
+func toUpperCaseFilter(value any, args ...any) any {
 	return strings.ToUpper(toString(value))
 }
 
 // regexFilter extracts using regex
-func regexFilter(value interface{}, args ...interface{}) interface{} {
+func regexFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) == 0 {
 		return str
@@ -293,7 +293,7 @@ func regexFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // regexReplaceFilter replaces using regex
-func regexReplaceFilter(value interface{}, args ...interface{}) interface{} {
+func regexReplaceFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) < 2 {
 		return str
@@ -308,9 +308,9 @@ func regexReplaceFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // sumRegexMatchesFilter finds all regex matches and sums the captured numbers
-// Usage: {Name: "sumRegexMatches", Args: []interface{}{`你有(\d+)条新`}}
+// Usage: {Name: "sumRegexMatches", Args: []any{`你有(\d+)条新`}}
 // This will find all occurrences like "你有1条新" and "你有2条新" and return 3
-func sumRegexMatchesFilter(value interface{}, args ...interface{}) interface{} {
+func sumRegexMatchesFilter(value any, args ...any) any {
 	str := toString(value)
 	if len(args) == 0 {
 		return 0
@@ -335,7 +335,7 @@ func sumRegexMatchesFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // defaultFilter returns default value if empty
-func defaultFilter(value interface{}, args ...interface{}) interface{} {
+func defaultFilter(value any, args ...any) any {
 	str := toString(value)
 	if str == "" && len(args) > 0 {
 		return args[0]
@@ -344,7 +344,7 @@ func defaultFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // multiplyFilter multiplies a number
-func multiplyFilter(value interface{}, args ...interface{}) interface{} {
+func multiplyFilter(value any, args ...any) any {
 	num := toFloat64(value)
 	if len(args) > 0 {
 		multiplier := toFloat64(args[0])
@@ -354,7 +354,7 @@ func multiplyFilter(value interface{}, args ...interface{}) interface{} {
 }
 
 // divideFilter divides a number
-func divideFilter(value interface{}, args ...interface{}) interface{} {
+func divideFilter(value any, args ...any) any {
 	num := toFloat64(value)
 	if len(args) > 0 {
 		divisor := toFloat64(args[0])
@@ -367,7 +367,7 @@ func divideFilter(value interface{}, args ...interface{}) interface{} {
 
 // Helper functions for type conversion
 
-func toString(v interface{}) string {
+func toString(v any) string {
 	if v == nil {
 		return ""
 	}
@@ -389,7 +389,7 @@ func toString(v interface{}) string {
 	}
 }
 
-func toInt(v interface{}) int {
+func toInt(v any) int {
 	if v == nil {
 		return 0
 	}
@@ -408,7 +408,7 @@ func toInt(v interface{}) int {
 	}
 }
 
-func toFloat64(v interface{}) float64 {
+func toFloat64(v any) float64 {
 	if v == nil {
 		return 0
 	}
