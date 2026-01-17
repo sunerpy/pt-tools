@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-01-17
 
 
 ### CI/CD
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous
 
-- **frontend**: 更新 pnpm 锁定文件中的依赖版本和 libc 支持
+- **frontend**: 更新 pnpm 锁定文件中的依赖版本和 libc 支持- **build**: 调整 GitHub Actions 触发条件为仅标签推送时更新 CHANGELOG.md
 ## [0.2.0] - 2026-01-11
 
 
