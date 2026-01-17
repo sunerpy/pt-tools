@@ -2,10 +2,8 @@ name: Update Changelog
 
 on:
   push:
-    branches:
-      - main
-    paths-ignore:
-      - 'CHANGELOG.md'
+    tags:
+      - 'v*'
 
 jobs:
   changelog:
