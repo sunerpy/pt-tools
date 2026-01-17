@@ -111,6 +111,7 @@ function formatProgress(progress: number): string {
 }
 
 function getStatusType(task: TaskItem): 'success' | 'warning' | 'danger' | 'info' {
+  if (task.lastError === '种子已从下载器中删除') return 'info'
   if (task.isExpired) return 'danger'
   if (task.isPushed) return 'success'
   if (task.isDownloaded) return 'warning'
@@ -118,6 +119,7 @@ function getStatusType(task: TaskItem): 'success' | 'warning' | 'danger' | 'info
 }
 
 function getStatusText(task: TaskItem): string {
+  if (task.lastError === '种子已从下载器中删除') return '已删除'
   if (task.isExpired) return '已过期'
   if (task.isPushed) return '已推送'
   if (task.isDownloaded) return '已下载'

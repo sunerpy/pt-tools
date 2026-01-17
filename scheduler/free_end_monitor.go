@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -276,6 +277,11 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 
 		info, err := dl.GetTorrent(t.DownloaderTaskID)
 		if err != nil {
+			if errors.Is(err, downloader.ErrTorrentNotFound) {
+				global.GetSlogger().Warnf("种子已从下载器删除，标记任务状态 (种子:%s, TaskID:%s)", t.Title, t.DownloaderTaskID)
+				m.markRemovedFromDownloader(t)
+				continue
+			}
 			global.GetSlogger().Warnf("获取种子信息失败 (种子:%s, TaskID:%s): %v", t.Title, t.DownloaderTaskID, err)
 			continue
 		}
@@ -505,6 +511,21 @@ func (m *FreeEndMonitor) markRetry(torrent models.TorrentInfo, errMsg string) {
 	}
 }
 
+func (m *FreeEndMonitor) markRemovedFromDownloader(torrent models.TorrentInfo) {
+	now := time.Now()
+	updates := map[string]any{
+		"is_completed":       true,
+		"completed_at":       now,
+		"last_check_time":    now,
+		"last_error":         "种子已从下载器中删除",
+		"downloader_task_id": "",
+	}
+	if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", torrent.ID).Updates(updates).Error; err != nil {
+		global.GetSlogger().Errorf("更新种子删除状态失败 (种子:%s): %v", torrent.Title, err)
+	}
+	m.CancelTorrent(torrent.ID)
+}
+
 func (m *FreeEndMonitor) periodicArchive() {
 	defer m.wg.Done()
 
@@ -670,6 +691,13 @@ func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 
 		info, err := dl.GetTorrent(t.DownloaderTaskID)
 		if err != nil {
+			if errors.Is(err, downloader.ErrTorrentNotFound) {
+				// 种子已从下载器中删除，更新数据库状态
+				global.GetSlogger().Warnf("种子已从下载器删除，标记任务状态 (ID:%d, Title:%s, TaskID:%s)", t.ID, t.Title, t.DownloaderTaskID)
+				m.markRemovedFromDownloader(t)
+				updated++
+				continue
+			}
 			global.GetSlogger().Warnf("获取种子信息失败 (ID:%d, Title:%s, TaskID:%s): %v", t.ID, t.Title, t.DownloaderTaskID, err)
 			skipped++
 			continue
