@@ -1,0 +1,310 @@
+# 开发指南
+
+本文档面向希望参与 pt-tools 开发或从源码构建的开发者。
+
+[返回首页](../README.md)
+
+## 目录
+
+- [环境要求](#环境要求)
+- [从源码构建](#从源码构建)
+    - [克隆仓库](#克隆仓库)
+    - [构建前端](#构建前端)
+    - [构建后端](#构建后端)
+    - [使用 Makefile](#使用-makefile)
+- [开发模式](#开发模式)
+- [技术架构](#技术架构)
+    - [技术栈](#技术栈)
+    - [项目结构](#项目结构)
+    - [性能优化](#性能优化)
+- [贡献指南](#贡献指南)
+    - [提交 Issue](#提交-issue)
+    - [提交 Pull Request](#提交-pull-request)
+    - [添加新站点支持](#添加新站点支持)
+- [代码规范](#代码规范)
+
+## 环境要求
+
+| 依赖        | 版本要求 | 说明         |
+| ----------- | -------- | ------------ |
+| **Go**      | 1.22+    | 后端开发语言 |
+| **Node.js** | 18+      | 前端构建环境 |
+| **pnpm**    | 8+       | 前端包管理器 |
+
+### 安装依赖
+
+**Go**：
+
+```bash
+# Linux (使用官方安装脚本)
+wget https://go.dev/dl/go1.25.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+
+# macOS (使用 Homebrew)
+brew install go
+```
+
+**Node.js 和 pnpm**：
+
+```bash
+# 使用 nvm 安装 Node.js
+nvm install 25
+nvm use 25
+
+# 安装 pnpm
+npm install -g pnpm
+```
+
+## 从源码构建
+
+### 克隆仓库
+
+```bash
+git clone https://github.com/sunerpy/pt-tools.git
+cd pt-tools
+```
+
+### 构建前端
+
+```bash
+cd web/frontend
+pnpm install
+pnpm build
+cd ../..
+```
+
+构建产物会输出到 `web/frontend/dist/` 目录，并被嵌入到 Go 二进制文件中。
+
+### 构建后端
+
+```bash
+go build -o pt-tools .
+```
+
+### 使用 Makefile
+
+推荐使用 Makefile 进行构建，它封装了完整的构建流程：
+
+```bash
+# 完整构建（前端 + 后端）
+make build-local
+
+# 仅构建前端
+make build-frontend
+
+# 仅构建后端
+make build-backend
+
+# 查看所有可用命令
+make help
+```
+
+构建产物位于 `dist/` 目录。
+
+## 开发模式
+
+开发模式下，前端和后端可以分别启动，支持热重载：
+
+**终端 1 - 启动前端开发服务器**：
+
+```bash
+cd web/frontend
+pnpm dev
+```
+
+前端开发服务器默认运行在 `http://localhost:5173`。
+
+**终端 2 - 启动后端服务**：
+
+```bash
+go run main.go web --port 8081
+```
+
+也可以直接运行`make run-dev`来启动开发环境（默认8080端口）
+
+后端服务运行在 `http://localhost:8081`。
+
+**开发环境配置**：
+
+- 前端会自动代理 API 请求到后端
+- 修改前端代码后会自动热重载
+- 修改后端代码需要重新运行
+
+## 技术架构
+
+### 项目结构
+
+```
+pt-tools/
+├── cmd/              # CLI 命令定义 (Cobra)
+├── config/           # 日志配置 (Zap)
+├── core/             # 运行时生命周期、配置存储、迁移
+├── global/           # 全局单例（logger, DB）
+├── internal/         # 统一站点接口、RSS 处理器、过滤器
+├── models/           # GORM 模型定义
+├── scheduler/        # RSS 任务调度器
+├── site/v2/          # 站点驱动和定义
+│   └── definitions/  # 各站点具体实现
+├── thirdpart/        # 第三方集成
+│   └── downloader/   # 下载器接口
+├── utils/            # 工具函数
+├── web/              # HTTP 服务和 API
+│   ├── api_*.go      # API 处理器
+│   └── frontend/     # Vue 3 前端项目
+├── main.go           # 程序入口
+├── Makefile          # 构建脚本
+└── go.mod            # Go 模块定义
+```
+
+### 性能优化
+
+pt-tools 采用了多项性能优化措施：
+
+| 优化项       | 说明                        |
+| ------------ | --------------------------- |
+| **内存缓存** | 两级缓存减少数据库访问      |
+| **熔断器**   | 自动检测和隔离故障站点      |
+| **连接池**   | HTTP 连接复用，减少连接开销 |
+| **限流**     | 防止请求过快触发站点限制    |
+| **并发控制** | 合理的并发数避免被站点封禁  |
+
+## 贡献指南
+
+欢迎贡献代码或提交问题！
+
+### 提交 Issue
+
+在提交 Issue 前，请：
+
+1. 搜索现有 Issue，避免重复
+2. 使用清晰的标题描述问题
+3. 提供详细的复现步骤
+4. 附上相关日志或截图
+
+Issue 地址：[GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
+
+### 提交 Pull Request
+
+1. Fork 仓库到你的账户
+2. 创建功能分支：`git checkout -b feature/your-feature`
+3. 提交更改：`git commit -m "Add your feature"`
+4. 推送分支：`git push origin feature/your-feature`
+5. 创建 Pull Request
+
+PR 地址：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
+
+### 添加新站点支持
+
+添加新 PT 站点支持的步骤：
+
+1. **创建站点定义文件**
+    - 在 `site/v2/definitions/` 目录下创建新文件
+    - 参考现有站点实现（如 `hdsky.go`）
+
+2. **实现站点接口**
+    - 认证方法（Cookie 或 API Key）
+    - 搜索功能
+    - 用户信息获取
+    - RSS 解析（如有特殊格式）
+
+3. **注册站点**
+    - 在 `init()` 函数中注册到 Registry
+
+4. **编写测试**
+    - 添加单元测试
+    - 测试各功能正常工作
+
+5. **更新文档**
+    - 更新 README 中的站点列表
+    - 添加站点特殊说明（如有）
+
+6. **提交 PR**
+
+**站点定义模板**：
+
+```go
+package definitions
+
+import (
+    "github.com/sunerpy/pt-tools/site/v2"
+)
+
+func init() {
+    site.Registry.Register(&site.SiteDefinition{
+        Name:     "SiteName",
+        Type:     site.TypeNexusPHP, // 或 site.TypeMTorrent
+        BaseURL:  "https://site.com",
+        AuthType: site.AuthCookie,   // 或 site.AuthAPIKey
+        // ... 其他配置
+    })
+}
+```
+
+## 代码规范
+
+### 运行代码检查
+
+```bash
+# 运行 lint 检查
+make lint
+
+# 运行单元测试
+make unit-test
+
+# 格式化代码
+make fmt
+```
+
+### Go 代码规范
+
+- 遵循 [Effective Go](https://golang.org/doc/effective_go) 指南
+- 使用 `gofmt` 格式化代码
+- 导入分组：标准库、第三方库、项目内部包
+- 错误处理：不要忽略错误，适当包装错误信息
+- 注释：导出的函数和类型必须有文档注释
+
+### 前端代码规范
+
+- 遵循 Vue 3 Composition API 风格
+- 使用 TypeScript 类型注解
+- 组件命名使用 PascalCase
+- 使用 ESLint 和 Prettier 格式化
+
+### 提交信息规范
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Type 类型**：
+
+- `feat`: 新功能
+- `fix`: Bug 修复
+- `docs`: 文档更新
+- `style`: 代码格式（不影响功能）
+- `refactor`: 重构
+- `test`: 测试相关
+- `chore`: 构建/工具相关
+
+**示例**：
+
+```
+feat(site): add support for NewSite
+
+- Implement cookie authentication
+- Add search and user info functions
+- Update site registry
+
+Closes #123
+```
+
+---
+
+如有开发相关问题，欢迎在 [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions) 讨论。
+
+[返回首页](../README.md)

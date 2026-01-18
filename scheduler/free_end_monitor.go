@@ -343,6 +343,21 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 	delete(m.pendingTasks, torrent.ID)
 	m.mu.Unlock()
 
+	// 使用数据库原子更新获取处理锁，防止独立定时器和周期检查同时处理同一个种子
+	// 只有当种子仍处于待处理状态时才继续处理
+	result := m.db.Model(&models.TorrentInfo{}).
+		Where("id = ? AND is_paused_by_system = ? AND is_completed = ?", torrent.ID, false, false).
+		Update("last_check_time", time.Now())
+	if result.Error != nil {
+		global.GetSlogger().Errorf("[FreeEndMonitor] 获取处理锁失败 (种子:%s, ID:%d): %v", torrent.Title, torrent.ID, result.Error)
+		return
+	}
+	if result.RowsAffected == 0 {
+		// 种子已被其他 goroutine 处理（已暂停或已完成），跳过
+		global.GetSlogger().Debugf("[FreeEndMonitor] 种子已被处理，跳过 (种子:%s, ID:%d)", torrent.Title, torrent.ID)
+		return
+	}
+
 	dl, err := m.getDownloader(torrent)
 	if err != nil {
 		global.GetSlogger().Errorf("[FreeEndMonitor] 获取下载器失败 (种子:%s, ID:%d): %v", torrent.Title, torrent.ID, err)
