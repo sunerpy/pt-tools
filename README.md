@@ -1,6 +1,6 @@
 # pt-tools
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-blue.svg)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/sunerpy/pt-tools.svg)](https://hub.docker.com/r/sunerpy/pt-tools)
 

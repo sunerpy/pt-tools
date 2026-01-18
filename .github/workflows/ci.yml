@@ -11,9 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go-checks:
-    name: Go Checks
+  go-build-test:
+    name: Go Build & Test (${{ matrix.go-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.25"]
+      fail-fast: false
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -21,7 +25,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: "go.mod"
+          go-version: ${{ matrix.go-version }}
           cache: true
 
       - name: Download Dependencies
@@ -38,9 +42,22 @@ jobs:
       - name: Upload Coverage
         uses: actions/upload-artifact@v4
         with:
-          name: go-coverage
+          name: go-coverage-${{ matrix.go-version }}
           path: dist/coverage.out
           retention-days: 7
+
+  go-lint:
+    name: Go Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -126,17 +143,20 @@ jobs:
       - name: Build
         run: pnpm build
 
-  # Summary job for branch protection
   ci-success:
     name: CI Success
-    needs: [go-checks, go-security, format-check, frontend-checks]
+    needs: [go-build-test, go-lint, go-security, format-check, frontend-checks]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
-          if [[ "${{ needs.go-checks.result }}" != "success" ]]; then
-            echo "go-checks failed"
+          if [[ "${{ needs.go-build-test.result }}" != "success" ]]; then
+            echo "go-build-test failed"
+            exit 1
+          fi
+          if [[ "${{ needs.go-lint.result }}" != "success" ]]; then
+            echo "go-lint failed"
             exit 1
           fi
           if [[ "${{ needs.go-security.result }}" != "success" ]]; then
