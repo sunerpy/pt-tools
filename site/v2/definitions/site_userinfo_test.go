@@ -245,6 +245,7 @@ func TestSiteWithHTMLDump(t *testing.T) {
 	cfg := findSiteConfig(siteID)
 	if cfg == nil {
 		t.Fatalf("Unknown site ID: %s. Available: hdsky, cmct/springsunday, hddolby", siteID)
+		return
 	}
 
 	// Enable debug
@@ -255,6 +256,7 @@ func TestSiteWithHTMLDump(t *testing.T) {
 	def := v2.GetDefinitionRegistry().GetOrDefault(cfg.SiteID)
 	if def == nil {
 		t.Fatalf("Site definition %s not found", cfg.SiteID)
+		return
 	}
 
 	// Create driver
@@ -312,6 +314,7 @@ func TestSiteSelectorDebug(t *testing.T) {
 	cfg := findSiteConfig(siteID)
 	if cfg == nil {
 		t.Fatalf("Unknown site ID: %s", siteID)
+		return
 	}
 
 	// Get site definition
@@ -387,11 +390,13 @@ func TestPrintSiteDefinition(t *testing.T) {
 	cfg := findSiteConfig(siteID)
 	if cfg == nil {
 		t.Fatalf("Unknown site ID: %s", siteID)
+		return
 	}
 
 	def := v2.GetDefinitionRegistry().GetOrDefault(cfg.SiteID)
 	if def == nil {
 		t.Fatalf("Site definition %s not found", cfg.SiteID)
+		return
 	}
 
 	t.Logf("\n=== Site Definition: %s ===", def.ID)

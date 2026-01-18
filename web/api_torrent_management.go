@@ -320,7 +320,7 @@ func (s *Server) apiResumeTorrent(w http.ResponseWriter, r *http.Request) {
 
 	// 查找种子
 	var torrent models.TorrentInfo
-	if err := db.First(&torrent, uint(id)).Error; err != nil {
+	if dbErr := db.First(&torrent, uint(id)).Error; dbErr != nil {
 		http.Error(w, "种子不存在", http.StatusNotFound)
 		return
 	}

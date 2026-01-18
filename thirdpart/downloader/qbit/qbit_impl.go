@@ -160,8 +160,8 @@ func (q *QbitClient) doRequestWithRetry(req *http.Request) (*http.Response, erro
 
 	if resp.StatusCode == http.StatusForbidden {
 		resp.Body.Close()
-		if err := q.Authenticate(); err != nil {
-			return nil, fmt.Errorf("re-authentication failed: %w", err)
+		if authErr := q.Authenticate(); authErr != nil {
+			return nil, fmt.Errorf("re-authentication failed: %w", authErr)
 		}
 		newReq := req.Clone(req.Context())
 		if req.Body != nil {

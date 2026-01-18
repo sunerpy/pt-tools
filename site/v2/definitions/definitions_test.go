@@ -209,10 +209,12 @@ func TestLevelProgressCalculation(t *testing.T) {
 	progress := v2.CalculateSiteLevelProgress(info, def.LevelRequirements)
 	if progress == nil {
 		t.Fatal("Progress should not be nil")
+		return
 	}
 
 	if progress.CurrentLevel == nil {
 		t.Fatal("CurrentLevel should not be nil")
+		return
 	}
 	if progress.CurrentLevel.Name != "User" {
 		t.Errorf("CurrentLevel.Name = %q, want %q", progress.CurrentLevel.Name, "User")

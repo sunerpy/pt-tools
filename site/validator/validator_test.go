@@ -452,6 +452,7 @@ func TestNewSiteValidatorWithOptions(t *testing.T) {
 	v3 := NewSiteValidatorWithOptions()
 	if v3 == nil {
 		t.Fatal("NewSiteValidatorWithOptions() should not return nil")
+		return
 	}
 	if v3.timeout != 60*time.Second {
 		t.Errorf("NewSiteValidatorWithOptions() default timeout = %v, want %v", v3.timeout, 60*time.Second)
@@ -1097,6 +1098,7 @@ func TestNewSiteValidator(t *testing.T) {
 
 	if validator == nil {
 		t.Fatal("NewSiteValidator() should not return nil")
+		return
 	}
 
 	if validator.httpClient == nil {

@@ -513,6 +513,7 @@ func TestCalculateSiteLevelProgress(t *testing.T) {
 			result := CalculateSiteLevelProgress(tt.info, requirements)
 			if result == nil {
 				t.Fatal("CalculateSiteLevelProgress() returned nil")
+				return
 			}
 
 			if result.CurrentLevel != nil && result.CurrentLevel.Name != tt.expectCurrent {
