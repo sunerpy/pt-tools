@@ -463,6 +463,15 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 			}
 		}
 
+		// Fallback: parse discount end time from onmouseover attribute of discount icon
+		// Some sites (like HDSky) embed the end time in the tooltip, not as a separate element
+		// Format: domTT_activate(..., '<span title="2026-01-18 22:37:47">1时19分</span>', ...)
+		if item.DiscountEndTime.IsZero() && discountElem.Length() > 0 {
+			if onmouseover, exists := discountElem.Attr("onmouseover"); exists && onmouseover != "" {
+				item.DiscountEndTime = parseDiscountEndTimeFromOnmouseover(onmouseover)
+			}
+		}
+
 		// Parse download link - use proxy URL instead of direct link for authentication handling
 		// The backend proxy will handle cookie/passkey authentication
 		if item.ID != "" {
@@ -1483,6 +1492,16 @@ func parseDiscountFromElement(elem *goquery.Selection) DiscountLevel {
 	default:
 		return DiscountNone
 	}
+}
+
+var discountEndTimeInOnmouseoverRegex = regexp.MustCompile(`title=(?:&quot;|")(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:&quot;|")`)
+
+func parseDiscountEndTimeFromOnmouseover(onmouseover string) time.Time {
+	matches := discountEndTimeInOnmouseoverRegex.FindStringSubmatch(onmouseover)
+	if len(matches) >= 2 {
+		return parseTime(matches[1])
+	}
+	return time.Time{}
 }
 
 // parseTime parses various time formats

@@ -384,19 +384,19 @@ var HDSkyDefinition = &v2.SiteDefinition{
 	},
 	// Custom selectors for HDSky search and detail pages
 	Selectors: &v2.SiteSelectors{
-		// Search result rows - HDSky uses table.torrentname inside each row
-		TableRows: "table.torrents > tbody > tr:has(table.torrentname), table.torrents > tr:has(table.torrentname)",
-		// Title is inside table.torrentname
-		Title:     "table.torrentname a[href*='details.php']",
-		TitleLink: "table.torrentname a[href*='details.php']",
-		// Subtitle is the span WITHOUT optiontag class (optiontag spans are tags like 官组/中字)
-		// The actual subtitle is the last span without the optiontag class
-		Subtitle: "table.torrentname td.embedded > span:not(.optiontag)",
-		// Detail page selectors - HDSky specific
-		// "下载链接" row contains the passkey download link
+		TableRows:          "table.torrents > tbody > tr:has(table.torrentname), table.torrents > tr:has(table.torrentname)",
+		Title:              "table.torrentname a[href*='details.php']",
+		TitleLink:          "table.torrentname a[href*='details.php']",
+		Subtitle:           "table.torrentname td.embedded > span:not(.optiontag)",
+		Size:               "td.rowfollow:nth-child(5)",
+		Seeders:            "td.rowfollow:nth-child(6)",
+		Leechers:           "td.rowfollow:nth-child(7)",
+		Snatched:           "td.rowfollow:nth-child(8)",
+		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_50pctdown, img.pro_30pctdown, img.pro_2up, img.pro_50pctdown2up",
+		Category:           "td.rowfollow:nth-child(1) img[alt]",
+		UploadTime:         "td.rowfollow:nth-child(4) span[title]",
 		DetailDownloadLink: "td.rowhead:contains('下载链接') + td a[href*='download.php']",
-		// Subtitle from detail page
-		DetailSubtitle: "td.rowhead:contains('副标题') + td",
+		DetailSubtitle:     "td.rowhead:contains('副标题') + td",
 	},
 	LevelRequirements: hdSkyNewLevelRequirements,
 }

@@ -191,6 +191,64 @@ func TestNexusPHPDriver_ParseSearch(t *testing.T) {
 	assert.Equal(t, "Test Movie 2024", items[0].Title)
 }
 
+func TestNexusPHPDriver_ParseSearch_DiscountEndTimeFromOnmouseover(t *testing.T) {
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{
+		BaseURL: "https://hdsky.me",
+		Cookie:  "test-cookie",
+	})
+
+	html := `
+	<html>
+	<body>
+	<table class="torrents">
+		<tbody>
+			<tr><td>Header</td></tr>
+			<tr>
+				<td><img alt="Movie" /></td>
+				<td>
+					<a href="details.php?id=12345">Test Free Movie</a>
+					<img class="pro_free" src="pic/trans.gif" alt="Free" onmouseover="domTT_activate(this, event, 'content', '&lt;b&gt;&lt;font class=&quot;free&quot;&gt;免费&lt;/font&gt;&lt;/b&gt;优惠剩余时间：&lt;b&gt;&lt;span title=&quot;2026-01-20 15:30:00&quot;&gt;2天3时&lt;/span&gt;&lt;/b&gt;', 'trail', false)" />
+				</td>
+				<td></td>
+				<td><span>2024-01-01</span></td>
+				<td>2.5 GB</td>
+				<td>50</td>
+				<td>5</td>
+				<td>200</td>
+			</tr>
+		</tbody>
+	</table>
+	</body>
+	</html>
+	`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	driver.BaseURL = server.URL
+
+	req := NexusPHPRequest{Path: "/torrents.php", Method: "GET"}
+	res, err := driver.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(res)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	assert.Equal(t, "12345", items[0].ID)
+	assert.Equal(t, "Test Free Movie", items[0].Title)
+	assert.Equal(t, DiscountFree, items[0].DiscountLevel)
+	assert.False(t, items[0].DiscountEndTime.IsZero(), "DiscountEndTime should be parsed from onmouseover")
+	assert.Equal(t, 2026, items[0].DiscountEndTime.Year())
+	assert.Equal(t, 1, int(items[0].DiscountEndTime.Month()))
+	assert.Equal(t, 20, items[0].DiscountEndTime.Day())
+	assert.Equal(t, 15, items[0].DiscountEndTime.Hour())
+	assert.Equal(t, 30, items[0].DiscountEndTime.Minute())
+}
+
 func TestNexusPHPDriver_PrepareDetail(t *testing.T) {
 	driver := NewNexusPHPDriver(NexusPHPDriverConfig{
 		BaseURL: "https://example.com",
@@ -673,7 +731,6 @@ func TestNexusPHPDriver_Execute_SessionExpired_TakeloginForm(t *testing.T) {
 }
 
 func TestNexusPHPDriver_Execute_NormalPage(t *testing.T) {
-	// Test that normal pages are not detected as login pages
 	normalPageHTML := `
 	<!DOCTYPE html>
 	<html>
@@ -704,4 +761,172 @@ func TestNexusPHPDriver_Execute_NormalPage(t *testing.T) {
 	res, err := driver.Execute(context.Background(), req)
 	assert.NoError(t, err)
 	assert.NotNil(t, res.Document)
+}
+
+func TestNexusPHPDriver_ParseSearch_DiscountEndTimeFromDOMElement(t *testing.T) {
+	// SpringSunday uses a DOM element for discount end time, not onmouseover
+	// Selector: "div.torrent-title span[style*='DimGray'] span[title]"
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{
+		BaseURL: "https://springsunday.net",
+		Cookie:  "test-cookie",
+		Selectors: &SiteSelectors{
+			TableRows:       "table.torrents > tbody > tr:has(table.torrentname), table.torrents > tr:has(table.torrentname)",
+			Title:           "div.torrent-title > a[href*='details.php']",
+			TitleLink:       "div.torrent-title > a[href*='details.php']",
+			Subtitle:        "div.torrent-smalldescr > span[title]:last-of-type",
+			Size:            "td.rowfollow:nth-child(5)",
+			Seeders:         "td.rowfollow:nth-child(6)",
+			Leechers:        "td.rowfollow:nth-child(7)",
+			Snatched:        "td.rowfollow:nth-child(8)",
+			DiscountIcon:    "span.torrent-pro-free, span.torrent-pro-2up, span.torrent-pro-50pctdown, span.torrent-pro-30pctdown, span.torrent-pro-2xfree",
+			DiscountEndTime: "div.torrent-title span[style*='DimGray'] span[title]",
+			DownloadLink:    "a[href*='download.php']",
+			Category:        "td.rowfollow:nth-child(1) img[alt]",
+			UploadTime:      "td.rowfollow.nowrap span[title]",
+		},
+	})
+
+	// SpringSunday HTML structure with free torrent and discount end time in DOM element
+	html := `
+	<html>
+	<body>
+	<table class="torrents">
+		<tbody>
+			<tr>
+				<td class="rowfollow">
+					<img alt="电影" />
+				</td>
+				<td class="rowfollow">
+					<table class="torrentname">
+						<tr>
+							<td>
+								<div class="torrent-title">
+									<a href="details.php?id=98765">Test.Movie.2024.BluRay</a>
+									<span class="torrent-pro-free">Free</span>
+									<span style="color: DimGray;"> (限时: <span title="2026-01-25 18:00:00">6天23时</span>)</span>
+								</div>
+								<div class="torrent-smalldescr">
+									<span title="测试电影副标题">测试电影副标题</span>
+								</div>
+							</td>
+						</tr>
+					</table>
+				</td>
+				<td class="rowfollow"></td>
+				<td class="rowfollow nowrap">
+					<span title="2026-01-18 12:00:00">1时前</span>
+				</td>
+				<td class="rowfollow">4.2 GB</td>
+				<td class="rowfollow">120</td>
+				<td class="rowfollow">10</td>
+				<td class="rowfollow">500</td>
+			</tr>
+		</tbody>
+	</table>
+	</body>
+	</html>
+	`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	driver.BaseURL = server.URL
+
+	req := NexusPHPRequest{Path: "/torrents.php", Method: "GET"}
+	res, err := driver.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	items, err := driver.ParseSearch(res)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	assert.Equal(t, "98765", items[0].ID)
+	assert.Equal(t, "Test.Movie.2024.BluRay", items[0].Title)
+	assert.Equal(t, DiscountFree, items[0].DiscountLevel)
+	assert.False(t, items[0].DiscountEndTime.IsZero(), "DiscountEndTime should be parsed from DOM element")
+	assert.Equal(t, 2026, items[0].DiscountEndTime.Year())
+	assert.Equal(t, 1, int(items[0].DiscountEndTime.Month()))
+	assert.Equal(t, 25, items[0].DiscountEndTime.Day())
+	assert.Equal(t, 18, items[0].DiscountEndTime.Hour())
+	assert.Equal(t, 0, items[0].DiscountEndTime.Minute())
+}
+
+func TestParseDiscountEndTimeFromOnmouseover(t *testing.T) {
+	tests := []struct {
+		name        string
+		onmouseover string
+		wantYear    int
+		wantMonth   int
+		wantDay     int
+		wantHour    int
+		wantMinute  int
+		wantSecond  int
+		wantZero    bool
+	}{
+		{
+			name:        "HDSky format with HTML entities",
+			onmouseover: `domTT_activate(this, event, 'content', '&lt;b&gt;&lt;font class=&quot;free&quot;&gt;免费&lt;/font&gt;&lt;/b&gt;优惠剩余时间：&lt;b&gt;&lt;span title=&quot;2026-01-18 22:37:47&quot;&gt;1时19分&lt;/span&gt;&lt;/b&gt;', 'trail', false)`,
+			wantYear:    2026,
+			wantMonth:   1,
+			wantDay:     18,
+			wantHour:    22,
+			wantMinute:  37,
+			wantSecond:  47,
+		},
+		{
+			name:        "HDSky format with regular quotes",
+			onmouseover: `domTT_activate(this, event, 'content', '<b><font class="free">免费</font></b>优惠剩余时间：<b><span title="2026-01-21 08:42:24">2天11时</span></b>', 'trail', false)`,
+			wantYear:    2026,
+			wantMonth:   1,
+			wantDay:     21,
+			wantHour:    8,
+			wantMinute:  42,
+			wantSecond:  24,
+		},
+		{
+			name:        "2xFree format",
+			onmouseover: `domTT_activate(this, event, 'content', '&lt;b&gt;&lt;font class=&quot;twoupfree&quot;&gt;2X免费&lt;/font&gt;&lt;/b&gt;优惠剩余时间：&lt;b&gt;&lt;span title=&quot;2026-02-15 00:00:00&quot;&gt;27天&lt;/span&gt;&lt;/b&gt;', 'trail', false)`,
+			wantYear:    2026,
+			wantMonth:   2,
+			wantDay:     15,
+			wantHour:    0,
+			wantMinute:  0,
+			wantSecond:  0,
+		},
+		{
+			name:        "empty string",
+			onmouseover: "",
+			wantZero:    true,
+		},
+		{
+			name:        "no title attribute",
+			onmouseover: `domTT_activate(this, event, 'content', 'some content without title')`,
+			wantZero:    true,
+		},
+		{
+			name:        "invalid date format",
+			onmouseover: `domTT_activate(this, event, 'content', '&lt;span title=&quot;invalid-date&quot;&gt;')`,
+			wantZero:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseDiscountEndTimeFromOnmouseover(tt.onmouseover)
+			if tt.wantZero {
+				assert.True(t, result.IsZero(), "expected zero time")
+			} else {
+				assert.False(t, result.IsZero(), "expected non-zero time")
+				assert.Equal(t, tt.wantYear, result.Year())
+				assert.Equal(t, tt.wantMonth, int(result.Month()))
+				assert.Equal(t, tt.wantDay, result.Day())
+				assert.Equal(t, tt.wantHour, result.Hour())
+				assert.Equal(t, tt.wantMinute, result.Minute())
+				assert.Equal(t, tt.wantSecond, result.Second())
+			}
+		})
+	}
 }

@@ -199,6 +199,20 @@ var HDDolbyDefinition = &v2.SiteDefinition{
 			},
 		},
 	},
+	Selectors: &v2.SiteSelectors{
+		TableRows:       "table.torrents > tbody > tr:has(table.torrentname), table.torrents > tr:has(table.torrentname)",
+		Title:           "table.torrentname a[href*='details.php']",
+		TitleLink:       "table.torrentname a[href*='details.php']",
+		Subtitle:        "table.torrentname td.embedded > span:not(.tags)",
+		Size:            "td.rowfollow:nth-child(5)",
+		Seeders:         "td.rowfollow:nth-child(6)",
+		Leechers:        "td.rowfollow:nth-child(7)",
+		Snatched:        "td.rowfollow:nth-child(8)",
+		DiscountIcon:    "img.pro_free, img.pro_free2up, img.pro_50pctdown, img.pro_30pctdown, img.pro_2up, img.pro_50pctdown2up",
+		DiscountEndTime: "span.free_end_time[title], font.free span[title], font.twoupfree span[title]",
+		Category:        "td.rowfollow:nth-child(1) img[alt]",
+		UploadTime:      "td.rowfollow:nth-child(4) span[title]",
+	},
 	LevelRequirements: []v2.SiteLevelRequirement{
 		{
 			ID:        1,

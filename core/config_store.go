@@ -78,7 +78,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample})
+				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd})
 			}
 			// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 			out.Sites[sg] = sc
