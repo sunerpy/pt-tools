@@ -26,9 +26,10 @@ PLATFORMS = linux/amd64 linux/arm64 windows/amd64 windows/arm64
 DOCKERPLATFORMS = linux/amd64
 DIST_DIR = dist
 
-HTTP_PROXY ?=
-HTTPS_PROXY ?=
-NO_PROXY ?=
+# Proxy 设置 (支持大小写环境变量)
+HTTP_PROXY ?= $(http_proxy)
+HTTPS_PROXY ?= $(https_proxy)
+NO_PROXY ?= $(no_proxy)
 
 # 默认基础镜像
 BUILD_IMAGE ?= golang:1.25.5
@@ -223,7 +224,7 @@ fmt-check:
 
 unit-test:
 	@mkdir -p $(DIST_DIR)
-	go test ./... -count=1 -cover -covermode=atomic -coverprofile=$(DIST_DIR)/coverage.out
+	CGO_ENABLED=1 go test ./... -count=1 -race -cover -covermode=atomic -coverprofile=$(DIST_DIR)/coverage.out
 	go tool cover -html=$(DIST_DIR)/coverage.out -o $(DIST_DIR)/coverage.html
 	@echo "Coverage report: $(DIST_DIR)/coverage.html"
 
@@ -249,3 +250,58 @@ build-frontend:
 run-dev: build-frontend
 	@echo "Starting development server..."
 	go run main.go web
+
+# 本地 CI 测试 (使用 act)
+# ACT_IMAGE: 自定义 runner 镜像，解决 Docker Hub 网络问题
+# ACT_CPU: 容器 CPU 限制 (默认 2 核)
+# ACT_MEMORY: 容器内存限制 (默认 4g)
+# GOPROXY: Go 模块代理
+# 示例: make ci-local ACT_IMAGE=ghcr.io/catthehacker/ubuntu:act-latest ACT_CPU=2 ACT_MEMORY=4g GOPROXY=https://goproxy.cn,direct
+ACT_IMAGE ?=
+ACT_CPU ?= 2
+ACT_MEMORY ?= 4g
+GOPROXY ?= https://goproxy.cn,direct
+
+# 构建 act 的环境变量参数
+ACT_ENV_ARGS :=
+ifneq ($(HTTP_PROXY),)
+	ACT_ENV_ARGS += --env HTTP_PROXY=$(HTTP_PROXY) --env http_proxy=$(HTTP_PROXY)
+endif
+ifneq ($(HTTPS_PROXY),)
+	ACT_ENV_ARGS += --env HTTPS_PROXY=$(HTTPS_PROXY) --env https_proxy=$(HTTPS_PROXY)
+endif
+ifneq ($(NO_PROXY),)
+	ACT_ENV_ARGS += --env NO_PROXY=$(NO_PROXY) --env no_proxy=$(NO_PROXY)
+endif
+ifneq ($(GOPROXY),)
+	ACT_ENV_ARGS += --env GOPROXY=$(GOPROXY)
+endif
+
+# 容器资源限制参数
+ACT_CONTAINER_OPTS := --container-options "--cpus=$(ACT_CPU) --memory=$(ACT_MEMORY)"
+
+ci-local:
+	@if command -v act > /dev/null 2>&1; then \
+		if [ -n "$(ACT_IMAGE)" ]; then \
+			act push --container-architecture linux/amd64 -W .github/workflows/ci.yml -P ubuntu-latest=$(ACT_IMAGE) $(ACT_ENV_ARGS) $(ACT_CONTAINER_OPTS); \
+		else \
+			act push --container-architecture linux/amd64 -W .github/workflows/ci.yml $(ACT_ENV_ARGS) $(ACT_CONTAINER_OPTS); \
+		fi; \
+	else \
+		echo "act not found. Install with:"; \
+		echo "  brew install act  # macOS"; \
+		echo "  curl -s https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash  # Linux"; \
+		exit 1; \
+	fi
+
+ci-local-dry:
+	@if command -v act > /dev/null 2>&1; then \
+		if [ -n "$(ACT_IMAGE)" ]; then \
+			act push --container-architecture linux/amd64 -W .github/workflows/ci.yml -P ubuntu-latest=$(ACT_IMAGE) $(ACT_ENV_ARGS) $(ACT_CONTAINER_OPTS) --dryrun; \
+		else \
+			act push --container-architecture linux/amd64 -W .github/workflows/ci.yml $(ACT_ENV_ARGS) $(ACT_CONTAINER_OPTS) --dryrun; \
+		fi; \
+	else \
+		echo "act not found."; \
+		exit 1; \
+	fi

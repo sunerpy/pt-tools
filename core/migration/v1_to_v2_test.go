@@ -857,6 +857,9 @@ func TestMigrationService_RestoreBackup_WithRSS(t *testing.T) {
 
 // TestMigrationService_CreateBackup_ErrorCases 测试创建备份的错误情况
 func TestMigrationService_CreateBackup_ErrorCases(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping test that requires permission denied errors when running as root")
+	}
 	db := setupTestDB(t)
 
 	// 使用不可写的目录

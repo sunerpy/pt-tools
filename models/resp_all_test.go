@@ -7,11 +7,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 func TestMTTorrentDetail_FreeAndFinish(t *testing.T) {
 	lg := zap.NewNop().Sugar()
-	d := MTTorrentDetail{Size: "1048576", Status: &Status{Discount: "free", DiscountEndTime: time.Now().Add(1 * time.Hour).Format("2006-01-02 15:04:05"), ID: "id"}}
+	// Use CST timezone for consistency - CanbeFinished parses time as CST via utils.ParseTimeInCST
+	futureTime := time.Now().In(utils.CSTLocation).Add(1 * time.Hour).Format("2006-01-02 15:04:05")
+	d := MTTorrentDetail{Size: "1048576", Status: &Status{Discount: "free", DiscountEndTime: futureTime, ID: "id"}}
 	if !d.IsFree() {
 		t.Fatalf("free")
 	}

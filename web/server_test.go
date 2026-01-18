@@ -26,7 +26,16 @@ func setupServer(t *testing.T) *Server {
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
-	return NewServer(core.NewConfigStore(db), scheduler.NewManager())
+	mgr := newTestManager(t)
+	return NewServer(core.NewConfigStore(db), mgr)
+}
+
+func newTestManager(t *testing.T) *scheduler.Manager {
+	mgr := scheduler.NewManager()
+	t.Cleanup(func() {
+		mgr.StopAll()
+	})
+	return mgr
 }
 
 func TestServer_AuthAndLogin(t *testing.T) {
@@ -220,7 +229,7 @@ func TestServer_APIs(t *testing.T) {
 		db, _ := core.NewTempDBDir(t.TempDir())
 		store := core.NewConfigStore(db)
 		_ = db.DB.Create(&models.SettingsGlobal{DownloadDir: ""}).Error
-		srv2 := NewServer(store, scheduler.NewManager())
+		srv2 := NewServer(store, newTestManager(t))
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/control/start", nil)
 		srv2.apiStartAll(rr, req)
@@ -378,7 +387,7 @@ func TestServer_APIs(t *testing.T) {
 		require.Equal(t, http.StatusOK, rr.Code)
 	})
 	t.Run("stop all", func(t *testing.T) {
-		srv2 := NewServer(core.NewConfigStore(global.GlobalDB), scheduler.NewManager())
+		srv2 := NewServer(core.NewConfigStore(global.GlobalDB), newTestManager(t))
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/control/stop", nil)
 		srv2.apiStopAll(rr, req)
@@ -386,7 +395,7 @@ func TestServer_APIs(t *testing.T) {
 	})
 	// start all test skipped: requires richer site/qbit configuration to be deterministic
 	t.Run("start all method not allowed", func(t *testing.T) {
-		srv2 := NewServer(core.NewConfigStore(global.GlobalDB), scheduler.NewManager())
+		srv2 := NewServer(core.NewConfigStore(global.GlobalDB), newTestManager(t))
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/control/start", nil)
 		srv2.apiStartAll(rr, req)
@@ -396,7 +405,7 @@ func TestServer_APIs(t *testing.T) {
 		db, _ := core.NewTempDBDir(t.TempDir())
 		store := core.NewConfigStore(db)
 		_ = store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true})
-		srv2 := NewServer(store, scheduler.NewManager())
+		srv2 := NewServer(store, newTestManager(t))
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/control/start", nil)
 		srv2.apiStartAll(rr, req)
@@ -407,7 +416,7 @@ func TestServer_APIs(t *testing.T) {
 func TestServe_RootRedirectAndStatic(t *testing.T) {
 	db, _ := core.NewTempDBDir(t.TempDir())
 	global.InitLogger(zap.NewNop())
-	srv := NewServer(core.NewConfigStore(db), scheduler.NewManager())
+	srv := NewServer(core.NewConfigStore(db), newTestManager(t))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
@@ -709,7 +718,7 @@ func TestLoginHandler_AutoCreateAdmin(t *testing.T) {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	global.GlobalDB = db
-	srv := NewServer(core.NewConfigStore(db), scheduler.NewManager())
+	srv := NewServer(core.NewConfigStore(db), newTestManager(t))
 
 	// 尝试登录，应该自动创建默认管理员
 	rr := httptest.NewRecorder()

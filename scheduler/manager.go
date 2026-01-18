@@ -26,6 +26,8 @@ type Manager struct {
 	lastVersion       int64
 	downloaderManager *downloader.DownloaderManager
 	freeEndMonitor    *FreeEndMonitor
+	eventCancel       func()
+	stopped           bool
 }
 
 func NewManager() *Manager {
@@ -36,6 +38,7 @@ func NewManager() *Manager {
 
 	id, ch, cancel := events.Subscribe(64)
 	_ = id
+	m.eventCancel = cancel
 	go func() {
 		defer cancel()
 		var pendingVersion int64
@@ -44,10 +47,18 @@ func NewManager() *Manager {
 			if e.Type != events.ConfigChanged {
 				continue
 			}
+			m.mu.Lock()
+			if m.stopped {
+				m.mu.Unlock()
+				return
+			}
 			if e.Version <= m.lastVersion {
+				m.mu.Unlock()
 				continue
 			}
 			pendingVersion = e.Version
+			m.mu.Unlock()
+
 			if timer == nil {
 				timer = time.NewTimer(200 * time.Millisecond)
 			} else {
@@ -55,17 +66,24 @@ func NewManager() *Manager {
 				}
 				timer.Reset(200 * time.Millisecond)
 			}
-			go func() {
-				<-timer.C
-				if global.GlobalDB == nil {
-					return
-				}
-				cfg, _ := core.NewConfigStore(global.GlobalDB).Load()
-				if cfg != nil {
-					m.Reload(cfg)
-					m.lastVersion = pendingVersion
-				}
-			}()
+			<-timer.C
+			m.mu.Lock()
+			if m.stopped {
+				m.mu.Unlock()
+				return
+			}
+			db := global.GlobalDB
+			m.mu.Unlock()
+			if db == nil {
+				continue
+			}
+			cfg, _ := core.NewConfigStore(db).Load()
+			if cfg != nil {
+				m.Reload(cfg)
+				m.mu.Lock()
+				m.lastVersion = pendingVersion
+				m.mu.Unlock()
+			}
 		}
 	}()
 	return m
@@ -362,6 +380,7 @@ func validRSS(raw string) bool {
 // StopAll 取消所有任务并等待当前执行结束
 func (m *Manager) StopAll() {
 	m.mu.Lock()
+	m.stopped = true
 	for _, j := range m.jobs {
 		j.cancel()
 	}
@@ -377,6 +396,10 @@ func (m *Manager) StopAll() {
 	if m.freeEndMonitor != nil {
 		m.freeEndMonitor.Stop()
 		m.freeEndMonitor = nil
+	}
+	if m.eventCancel != nil {
+		m.eventCancel()
+		m.eventCancel = nil
 	}
 	m.mu.Unlock()
 }

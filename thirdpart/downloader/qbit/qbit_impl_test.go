@@ -653,6 +653,9 @@ func TestGetTorrentFilesPath_EmptyDir(t *testing.T) {
 
 // TestGetTorrentFilesPath_InvalidDir 测试无效目录
 func TestGetTorrentFilesPath_InvalidDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping test that may have different behavior when running as root")
+	}
 	_, err := GetTorrentFilesPath("/nonexistent/path")
 	if err == nil {
 		t.Error("expected error for invalid directory")

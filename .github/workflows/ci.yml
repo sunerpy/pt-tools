@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: ".node-version"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -58,6 +58,7 @@ jobs:
         run: pnpm build
 
       - name: Upload Frontend Dist
+        if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
@@ -77,10 +78,25 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Frontend Dist
+        if: ${{ !env.ACT }}
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: web/static/dist
+
+      - name: Set up Node.js (act local)
+        if: ${{ env.ACT }}
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Build Frontend (act local)
+        if: ${{ env.ACT }}
+        working-directory: web/frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -100,6 +116,7 @@ jobs:
           go test ./... -count=1 -race -cover -covermode=atomic -coverprofile=dist/coverage.out
 
       - name: Upload Coverage
+        if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v4
         with:
           name: go-coverage-${{ matrix.go-version }}
@@ -115,10 +132,25 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Frontend Dist
+        if: ${{ !env.ACT }}
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: web/static/dist
+
+      - name: Set up Node.js (act local)
+        if: ${{ env.ACT }}
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Build Frontend (act local)
+        if: ${{ env.ACT }}
+        working-directory: web/frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -141,10 +173,25 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Frontend Dist
+        if: ${{ !env.ACT }}
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: web/static/dist
+
+      - name: Set up Node.js (act local)
+        if: ${{ env.ACT }}
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Build Frontend (act local)
+        if: ${{ env.ACT }}
+        working-directory: web/frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
 
       - name: Set up Go
         uses: actions/setup-go@v5
