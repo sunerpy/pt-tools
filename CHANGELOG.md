@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-01-18
+
+### Features
+
+- **scheduler**: 优化免费结束监控器的并发处理逻辑
+
+### Miscellaneous
+
+- **build**: 调整 Makefile 和格式化配置以支持 dprint 工具
+
+### Testing
+
+- **site**: 增加测试中的错误处理
+
 ## [0.3.2] - 2026-01-17
 
 ### Bug Fixes
