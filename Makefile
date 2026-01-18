@@ -36,7 +36,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt lint unit-test coverage-summary
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-dprint fmt-go fmt-check lint unit-test coverage-summary
 
 # 本地构建二进制
 build-local: fmt
@@ -180,30 +180,46 @@ lint: ## Run linters
 	echo "Running Vue type check..." && \
 	pnpm vue-tsc --noEmit
 
+# Go 文件查找（排除 vendor 和 frontend）
+GO_FILES = $(shell find . -name "*.go" -not -path "./vendor/*" -not -path "./web/frontend/*")
+
 # 代码格式化
-fmt:
-	@echo "Formatting code..."
-	@echo "Formatting web code ..."
-	@cd web/frontend && if [ ! -d "node_modules" ]; then \
-		echo "Installing dependencies..."; \
-		pnpm install; \
-	fi && \
-	pnpm format
-	@echo "Formatting web code finished."
-	@echo "Formatting go code ..."
+fmt: fmt-dprint fmt-go
+	@echo "Formatting complete."
+
+fmt-dprint:
+	@echo "Formatting with dprint (config, frontend, docs)..."
+	@if command -v dprint > /dev/null 2>&1; then \
+		dprint fmt; \
+	else \
+		echo "dprint not found. Install with:"; \
+		echo "  curl -fsSL https://dprint.dev/install.sh | sh"; \
+	fi
+
+fmt-go:
+	@echo "Formatting Go code..."
 	@if command -v goimports > /dev/null 2>&1; then \
-		goimports -w -local github.com/sunerpy/pt-tools .; \
+		echo "$(GO_FILES)" | tr ' ' '\n' | xargs -P 4 goimports -w -local github.com/sunerpy/pt-tools; \
 	else \
 		echo "goimports not found. Install with:"; \
 		echo "  go install golang.org/x/tools/cmd/goimports@latest"; \
 	fi
 	@if command -v gofumpt > /dev/null 2>&1; then \
-	gofumpt -extra -w .; \
+		echo "$(GO_FILES)" | tr ' ' '\n' | xargs -P 4 gofumpt -extra -w; \
 	else \
-	echo "gofumpt not found. Install with:"; \
-	echo "  go install mvdan.cc/gofumpt@latest"; \
+		echo "gofumpt not found. Install with:"; \
+		echo "  go install mvdan.cc/gofumpt@latest"; \
 	fi
-	@echo "Formatting code complete."
+
+fmt-check:
+	@echo "Checking code format..."
+	@if command -v dprint > /dev/null 2>&1; then \
+		dprint check; \
+	else \
+		echo "dprint not found. Install with:"; \
+		echo "  curl -fsSL https://dprint.dev/install.sh | sh"; \
+		exit 1; \
+	fi
 
 unit-test:
 	@mkdir -p $(DIST_DIR)

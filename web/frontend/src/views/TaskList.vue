@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { tasksApi, type TaskItem, type TaskListResponse } from '@/api'
-import { ElMessage } from 'element-plus'
+import { type TaskItem, type TaskListResponse, tasksApi } from "@/api"
+import { ElMessage } from "element-plus"
+import { computed, onMounted, ref } from "vue"
 
 const loading = ref(false)
 const tasks = ref<TaskItem[]>([])
@@ -10,8 +10,8 @@ const page = ref(1)
 const pageSize = ref(20)
 
 const filters = ref({
-  q: '',
-  site: '',
+  q: "",
+  site: "",
   downloaded: false,
   pushed: false,
   expired: false
@@ -34,19 +34,19 @@ async function loadTasks() {
   loading.value = true
   try {
     const params = new URLSearchParams()
-    params.set('page', page.value.toString())
-    params.set('page_size', pageSize.value.toString())
-    if (filters.value.q) params.set('q', filters.value.q)
-    if (filters.value.site) params.set('site', filters.value.site)
-    if (filters.value.downloaded) params.set('downloaded', '1')
-    if (filters.value.pushed) params.set('pushed', '1')
-    if (filters.value.expired) params.set('expired', '1')
+    params.set("page", page.value.toString())
+    params.set("page_size", pageSize.value.toString())
+    if (filters.value.q) params.set("q", filters.value.q)
+    if (filters.value.site) params.set("site", filters.value.site)
+    if (filters.value.downloaded) params.set("downloaded", "1")
+    if (filters.value.pushed) params.set("pushed", "1")
+    if (filters.value.expired) params.set("expired", "1")
 
     const data: TaskListResponse = await tasksApi.list(params)
     tasks.value = data.items || []
     total.value = data.total || 0
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -58,7 +58,7 @@ function applyFilters() {
 }
 
 function clearFilters() {
-  filters.value = { q: '', site: '', downloaded: false, pushed: false, expired: false }
+  filters.value = { q: "", site: "", downloaded: false, pushed: false, expired: false }
   page.value = 1
   loadTasks()
 }
@@ -75,17 +75,17 @@ function handleSizeChange(newSize: number) {
 }
 
 function formatTime(timeStr: string): string {
-  if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
+  if (!timeStr || timeStr === "0001-01-01T00:00:00Z") return "-"
   try {
-    return new Date(timeStr).toLocaleString('zh-CN')
+    return new Date(timeStr).toLocaleString("zh-CN")
   } catch {
     return timeStr
   }
 }
 
 function formatSize(bytes: number): string {
-  if (!bytes || bytes <= 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  if (!bytes || bytes <= 0) return "-"
+  const units = ["B", "KB", "MB", "GB", "TB"]
   let unitIndex = 0
   let size = bytes
   while (size >= 1024 && unitIndex < units.length - 1) {
@@ -96,9 +96,9 @@ function formatSize(bytes: number): string {
 }
 
 function getProgressColor(progress: number) {
-  if (progress < 30) return '#F56C6C'
-  if (progress < 70) return '#E6A23C'
-  return '#67C23A'
+  if (progress < 30) return "#F56C6C"
+  if (progress < 70) return "#E6A23C"
+  return "#67C23A"
 }
 
 function getDownloadedSize(task: TaskItem): string {
@@ -110,60 +110,60 @@ function formatProgress(progress: number): string {
   return `${progress.toFixed(1)}%`
 }
 
-function getStatusType(task: TaskItem): 'success' | 'warning' | 'danger' | 'info' {
-  if (task.lastError === '种子已从下载器中删除') return 'info'
-  if (task.isExpired) return 'danger'
-  if (task.isPushed) return 'success'
-  if (task.isDownloaded) return 'warning'
-  return 'info'
+function getStatusType(task: TaskItem): "success" | "warning" | "danger" | "info" {
+  if (task.lastError === "种子已从下载器中删除") return "info"
+  if (task.isExpired) return "danger"
+  if (task.isPushed) return "success"
+  if (task.isDownloaded) return "warning"
+  return "info"
 }
 
 function getStatusText(task: TaskItem): string {
-  if (task.lastError === '种子已从下载器中删除') return '已删除'
-  if (task.isExpired) return '已过期'
-  if (task.isPushed) return '已推送'
-  if (task.isDownloaded) return '已下载'
-  return '无需处理'
+  if (task.lastError === "种子已从下载器中删除") return "已删除"
+  if (task.isExpired) return "已过期"
+  if (task.isPushed) return "已推送"
+  if (task.isDownloaded) return "已下载"
+  return "无需处理"
 }
 
 function getDiscountTag(task: TaskItem): {
   text: string
-  type: 'success' | 'warning' | 'danger' | 'info'
+  type: "success" | "warning" | "danger" | "info"
 } {
-  const level = (task.freeLevel || '').toUpperCase()
+  const level = (task.freeLevel || "").toUpperCase()
 
   switch (level) {
-    case '2XFREE':
-    case '_2X_FREE':
-      return { text: '2xFree', type: 'success' }
-    case 'FREE':
-      return { text: 'Free', type: 'success' }
-    case 'PERCENT_50':
-    case '50%':
-      return { text: '50%', type: 'warning' }
-    case 'PERCENT_30':
-    case '30%':
-      return { text: '30%', type: 'warning' }
-    case 'PERCENT_70':
-    case '70%':
-      return { text: '70%', type: 'warning' }
-    case '2XUP':
-    case '_2X_UP':
-      return { text: '2xUp', type: 'info' }
-    case '2X50':
-    case '_2X_PERCENT_50':
-      return { text: '2x50%', type: 'warning' }
-    case 'NONE':
-    case '':
-      return { text: '普通', type: 'info' }
+    case "2XFREE":
+    case "_2X_FREE":
+      return { text: "2xFree", type: "success" }
+    case "FREE":
+      return { text: "Free", type: "success" }
+    case "PERCENT_50":
+    case "50%":
+      return { text: "50%", type: "warning" }
+    case "PERCENT_30":
+    case "30%":
+      return { text: "30%", type: "warning" }
+    case "PERCENT_70":
+    case "70%":
+      return { text: "70%", type: "warning" }
+    case "2XUP":
+    case "_2X_UP":
+      return { text: "2xUp", type: "info" }
+    case "2X50":
+    case "_2X_PERCENT_50":
+      return { text: "2x50%", type: "warning" }
+    case "NONE":
+    case "":
+      return { text: "普通", type: "info" }
     default:
       if (task.isFree) {
-        return { text: 'Free', type: 'success' }
+        return { text: "Free", type: "success" }
       }
-      if (level && level !== 'NONE') {
-        return { text: level, type: 'warning' }
+      if (level && level !== "NONE") {
+        return { text: level, type: "warning" }
       }
-      return { text: '普通', type: 'info' }
+      return { text: "普通", type: "info" }
   }
 }
 </script>
@@ -187,17 +187,25 @@ function getDiscountTag(task: TaskItem): {
               placeholder="标题/Hash"
               clearable
               style="width: 240px"
-              @keyup.enter="applyFilters"
-            >
+              @keyup.enter="applyFilters">
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
           </el-form-item>
           <el-form-item label="站点">
-            <el-select v-model="filters.site" placeholder="全部站点" clearable style="width: 160px">
+            <el-select
+              v-model="filters.site"
+              placeholder="全部站点"
+              clearable
+              style="width: 160px">
               <el-option label="全部站点" value="" />
-              <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
+              <el-option
+                v-for="site in siteOptions"
+                :key="site"
+                :label="site"
+                :value="site"
+              />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -206,7 +214,10 @@ function getDiscountTag(task: TaskItem): {
             <el-checkbox v-model="filters.expired">已过期</el-checkbox>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :loading="loading" @click="applyFilters">筛选</el-button>
+            <el-button
+              type="primary"
+              :loading="loading"
+              @click="applyFilters">筛选</el-button>
             <el-button @click="clearFilters">重置</el-button>
           </el-form-item>
         </el-form>
@@ -235,11 +246,10 @@ function getDiscountTag(task: TaskItem): {
           :data="tasks"
           style="width: 100%"
           class="pt-table"
-          :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }"
-        >
+          :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }">
           <el-table-column label="站点" prop="siteName" width="120" align="center">
             <template #default="{ row }">
-              <el-tag size="small" type="primary" effect="light">{{ row.siteName || '-' }}</el-tag>
+              <el-tag size="small" type="primary" effect="light">{{ row.siteName || "-" }}</el-tag>
             </template>
           </el-table-column>
 
@@ -255,10 +265,14 @@ function getDiscountTag(task: TaskItem): {
             <template #default="{ row }">
               <div class="title-cell">
                 <div class="title-main">
-                  <span class="title-text">{{ row.title || '-' }}</span>
+                  <span class="title-text">{{ row.title || "-" }}</span>
                 </div>
                 <div v-if="row.category || row.tag" class="title-meta">
-                  <el-tag v-if="row.category" size="small" type="info" effect="plain">
+                  <el-tag
+                    v-if="row.category"
+                    size="small"
+                    type="info"
+                    effect="plain">
                     {{ row.category }}
                   </el-tag>
                   <el-tag v-if="row.tag" size="small" effect="plain">{{ row.tag }}</el-tag>
@@ -354,8 +368,8 @@ function getDiscountTag(task: TaskItem): {
 </template>
 
 <style scoped>
-@import '@/styles/common-page.css';
-@import '@/styles/table-page.css';
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
 
 .search-card {
   margin-bottom: var(--pt-space-6);

@@ -3,7 +3,7 @@ name: Update Changelog
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   changelog:
@@ -25,6 +25,11 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
+
+      - name: Format CHANGELOG
+        run: |
+          curl -fsSL https://dprint.dev/install.sh | sh
+          ~/.dprint/bin/dprint fmt CHANGELOG.md
 
       - name: Check for changes
         id: check_changes

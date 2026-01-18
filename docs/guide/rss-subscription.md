@@ -8,8 +8,8 @@
 
 - [什么是 RSS 订阅](#什么是-rss-订阅)
 - [获取 RSS 链接](#获取-rss-链接)
-    - [NexusPHP 架构站点 (如 HDSky, HDDolby)](#nexusphp-架构站点-如-hdsky-hddolby)
-    - [mTorrent 架构站点 (如 M-Team)](#mtorrent-架构站点-如-m-team)
+  - [NexusPHP 架构站点 (如 HDSky, HDDolby)](#nexusphp-架构站点-如-hdsky-hddolby)
+  - [mTorrent 架构站点 (如 M-Team)](#mtorrent-架构站点-如-m-team)
 - [在 pt-tools 中配置 RSS](#在-pt-tools-中配置-rss)
 - [配置选项详解](#配置选项详解)
 - [最佳实践](#最佳实践)
@@ -117,9 +117,9 @@ _(注：实际配置字段可能因版本更新略有不同，请以当前版本
 
 - **原因**：RSS 链接本身没有返回内容，或者所有内容都被过滤规则拦截了。
 - **解决**：
-    - 在浏览器中直接打开 RSS 链接，看是否有 XML 内容返回。
-    - 检查 `rows` 参数是否太小。
-    - 暂时禁用所有过滤规则，看能否抓取到种子。
+  - 在浏览器中直接打开 RSS 链接，看是否有 XML 内容返回。
+  - 检查 `rows` 参数是否太小。
+  - 暂时禁用所有过滤规则，看能否抓取到种子。
 
 ### 3. 下载器无法添加任务
 

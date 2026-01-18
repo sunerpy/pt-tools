@@ -4,15 +4,15 @@
  * @returns 格式化后的字符串，如 "1.5 GB"
  */
 export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  if (bytes < 0) return '-' + formatBytes(-bytes)
+  if (bytes === 0) return "0 B"
+  if (bytes < 0) return "-" + formatBytes(-bytes)
 
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"]
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   const index = Math.min(i, sizes.length - 1)
 
-  return parseFloat((bytes / Math.pow(k, index)).toFixed(2)) + ' ' + sizes[index]
+  return parseFloat((bytes / Math.pow(k, index)).toFixed(2)) + " " + sizes[index]
 }
 
 /**
@@ -21,12 +21,12 @@ export function formatBytes(bytes: number): string {
  * @returns 格式化后的字符串，如 "1.5万" 或 "2.3亿"
  */
 export function formatNumber(num: number): string {
-  if (num === 0) return '0'
-  if (num < 0) return '-' + formatNumber(-num)
+  if (num === 0) return "0"
+  if (num < 0) return "-" + formatNumber(-num)
   if (num < 1000) return num.toFixed(0)
-  if (num < 10000) return (num / 1000).toFixed(2) + 'K'
-  if (num < 100000000) return (num / 10000).toFixed(2) + '万'
-  return (num / 100000000).toFixed(2) + '亿'
+  if (num < 10000) return (num / 1000).toFixed(2) + "K"
+  if (num < 100000000) return (num / 10000).toFixed(2) + "万"
+  return (num / 100000000).toFixed(2) + "亿"
 }
 
 /**
@@ -35,8 +35,8 @@ export function formatNumber(num: number): string {
  * @returns 格式化后的字符串
  */
 export function formatRatio(ratio: number): string {
-  if (ratio === Infinity || ratio > 999999) return '∞'
-  if (ratio < 0) return '-'
+  if (ratio === Infinity || ratio > 999999) return "∞"
+  if (ratio < 0) return "-"
   return ratio.toFixed(2)
 }
 
@@ -46,8 +46,8 @@ export function formatRatio(ratio: number): string {
  * @returns 格式化后的日期时间字符串
  */
 export function formatTime(timestamp: number): string {
-  if (!timestamp || timestamp <= 0) return '-'
-  return new Date(timestamp * 1000).toLocaleString('zh-CN')
+  if (!timestamp || timestamp <= 0) return "-"
+  return new Date(timestamp * 1000).toLocaleString("zh-CN")
 }
 
 /**
@@ -56,8 +56,8 @@ export function formatTime(timestamp: number): string {
  * @returns 格式化后的日期字符串
  */
 export function formatDate(timestamp: number): string {
-  if (!timestamp || timestamp <= 0) return '-'
-  return new Date(timestamp * 1000).toLocaleDateString('zh-CN')
+  if (!timestamp || timestamp <= 0) return "-"
+  return new Date(timestamp * 1000).toLocaleDateString("zh-CN")
 }
 
 /**
@@ -66,12 +66,12 @@ export function formatDate(timestamp: number): string {
  * @returns 相对时间描述，如 "5分钟前", "2小时前", "3天前"
  */
 export function formatTimeAgo(timestamp: number): string {
-  if (!timestamp || timestamp <= 0) return '-'
+  if (!timestamp || timestamp <= 0) return "-"
 
   const now = Date.now() / 1000
   const diff = now - timestamp
 
-  if (diff < 60) return '刚刚'
+  if (diff < 60) return "刚刚"
   if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
   if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
   if (diff < 2592000) return `${Math.floor(diff / 86400)}天前`
@@ -85,7 +85,7 @@ export function formatTimeAgo(timestamp: number): string {
  * @returns 时长描述，如 "3年2月"
  */
 export function formatJoinDuration(timestamp: number): string {
-  if (!timestamp || timestamp <= 0) return '-'
+  if (!timestamp || timestamp <= 0) return "-"
 
   const now = Date.now() / 1000
   const diff = now - timestamp
@@ -109,7 +109,7 @@ export function formatJoinDuration(timestamp: number): string {
  * @returns 中文描述，如 "5周", "10周", "1年", "1月", "7天"
  */
 export function parseISODuration(duration: string): string {
-  if (!duration) return '-'
+  if (!duration) return "-"
 
   const match = duration.match(/P(\d+)([YMWD])/i)
   if (!match || match.length < 3) return duration
@@ -117,10 +117,10 @@ export function parseISODuration(duration: string): string {
   const num = match[1]!
   const unit = match[2]!
   const units: Record<string, string> = {
-    Y: '年',
-    M: '月',
-    W: '周',
-    D: '天'
+    Y: "年",
+    M: "月",
+    W: "周",
+    D: "天"
   }
 
   return `${num}${units[unit.toUpperCase()] || unit}`
@@ -141,13 +141,13 @@ export function parseISODurationToDays(duration: string): number {
   const unit = match[2]!
 
   switch (unit.toUpperCase()) {
-    case 'Y':
+    case "Y":
       return num * 365
-    case 'M':
+    case "M":
       return num * 30
-    case 'W':
+    case "W":
       return num * 7
-    case 'D':
+    case "D":
       return num
     default:
       return 0
@@ -158,15 +158,15 @@ export function parseISODurationToDays(duration: string): number {
  * 预定义的站点颜色映射
  */
 const siteColors: Record<string, string> = {
-  hdsky: '#1890ff',
-  mteam: '#52c41a',
-  springsunday: '#fa8c16',
-  hddolby: '#722ed1',
-  audiences: '#eb2f96',
-  pterclub: '#13c2c2',
-  ourbits: '#f5222d',
-  chdbits: '#faad14',
-  ttg: '#2f54eb'
+  hdsky: "#1890ff",
+  mteam: "#52c41a",
+  springsunday: "#fa8c16",
+  hddolby: "#722ed1",
+  audiences: "#eb2f96",
+  pterclub: "#13c2c2",
+  ourbits: "#f5222d",
+  chdbits: "#faad14",
+  ttg: "#2f54eb"
 }
 
 /**
@@ -197,11 +197,11 @@ export function getAvatarColor(siteName: string): string {
  * @param ratio 比率值
  * @returns 'success' | 'warning' | 'danger' | 'info'
  */
-export function getRatioType(ratio: number): 'success' | 'warning' | 'danger' | 'info' {
-  if (ratio >= 2) return 'success'
-  if (ratio >= 1) return 'info'
-  if (ratio >= 0.5) return 'warning'
-  return 'danger'
+export function getRatioType(ratio: number): "success" | "warning" | "danger" | "info" {
+  if (ratio >= 2) return "success"
+  if (ratio >= 1) return "info"
+  if (ratio >= 0.5) return "warning"
+  return "danger"
 }
 
 /**
@@ -235,10 +235,10 @@ export function checkIntervalRequirement(joinTimestamp: number, requiredDuration
  * 站点魔力值名称映射
  */
 const siteBonusNames: Record<string, string> = {
-  mteam: '魔力',
-  hdsky: '魔力',
-  springsunday: '茉莉',
-  hddolby: '鲸币'
+  mteam: "魔力",
+  hdsky: "魔力",
+  springsunday: "茉莉",
+  hddolby: "鲸币"
   // 默认使用"魔力"
 }
 
@@ -249,15 +249,15 @@ const siteBonusNames: Record<string, string> = {
  */
 export function getSiteBonusName(siteId: string): string {
   const lower = siteId.toLowerCase()
-  return siteBonusNames[lower] || '魔力'
+  return siteBonusNames[lower] || "魔力"
 }
 
 /**
  * 站点做种积分名称映射（只有部分站点有做种积分）
  */
 const siteSeedingBonusNames: Record<string, string> = {
-  springsunday: '做种积分',
-  hddolby: '保种积分'
+  springsunday: "做种积分",
+  hddolby: "保种积分"
 }
 
 /**

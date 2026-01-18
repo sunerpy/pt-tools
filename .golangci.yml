@@ -28,8 +28,8 @@ linters:
     - misspell
     - unconvert
     - bodyclose
-    - noctx  # TODO: 需要重构所有 HTTP 请求使用 context，暂时禁用
-    # - prealloc  # 建议性优化，暂时禁用
+    - noctx # TODO: 需要重构所有 HTTP 请求使用 context，暂时禁用
+  # - prealloc  # 建议性优化，暂时禁用
 
   settings:
     errcheck:

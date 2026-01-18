@@ -1,37 +1,37 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, shallowRef } from 'vue'
-import { logsApi, type LogsResponse } from '@/api'
-import { ElMessage } from 'element-plus'
-import { Refresh, Top, Bottom } from '@element-plus/icons-vue'
+import { logsApi, type LogsResponse } from "@/api"
+import { Bottom, Refresh, Top } from "@element-plus/icons-vue"
+import { ElMessage } from "element-plus"
+import { nextTick, onMounted, ref, shallowRef } from "vue"
 
 const loading = ref(false)
 const logs = shallowRef<string[]>([])
-const logPath = ref('')
+const logPath = ref("")
 const truncated = ref(false)
 const logContainer = ref<HTMLElement | null>(null)
 const autoScroll = ref(true)
-const renderedHtml = shallowRef('')
+const renderedHtml = shallowRef("")
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 function getLevelClass(level: string): string {
   switch (level?.toLowerCase()) {
-    case 'debug':
-      return 'log-debug'
-    case 'info':
-      return 'log-info'
-    case 'warn':
-    case 'warning':
-      return 'log-warn'
-    case 'error':
-      return 'log-error'
-    case 'fatal':
-    case 'panic':
-      return 'log-fatal'
+    case "debug":
+      return "log-debug"
+    case "info":
+      return "log-info"
+    case "warn":
+    case "warning":
+      return "log-warn"
+    case "error":
+      return "log-error"
+    case "fatal":
+    case "panic":
+      return "log-fatal"
     default:
-      return 'json-string'
+      return "json-string"
   }
 }
 
@@ -39,21 +39,21 @@ function formatValue(value: unknown, key?: string): string {
   if (value === null) {
     return '<span class="json-null">null</span>'
   }
-  if (typeof value === 'boolean') {
+  if (typeof value === "boolean") {
     return `<span class="json-boolean">${value}</span>`
   }
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return `<span class="json-number">${value}</span>`
   }
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const escaped = escapeHtml(value)
-    if (key === 'level') {
+    if (key === "level") {
       return `"<span class="${getLevelClass(value)}">${escaped}</span>"`
     }
-    if (key === 'time') {
+    if (key === "time") {
       return `"<span class="json-time">${escaped}</span>"`
     }
-    if (key === 'msg') {
+    if (key === "msg") {
       return `"<span class="json-msg">${escaped}</span>"`
     }
     return `"<span class="json-string">${escaped}</span>"`
@@ -62,7 +62,7 @@ function formatValue(value: unknown, key?: string): string {
     const items = value.map(v => formatValue(v)).join('<span class="json-punct">,</span> ')
     return `<span class="json-punct">[</span>${items}<span class="json-punct">]</span>`
   }
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     return formatObject(value as Record<string, unknown>)
   }
   return escapeHtml(String(value))
@@ -76,11 +76,13 @@ function formatObject(obj: Record<string, unknown>): string {
   const parts = entries.map(([k, v]) => {
     return `"<span class="json-key">${escapeHtml(k)}</span>": ${formatValue(v, k)}`
   })
-  return `<span class="json-punct">{</span>${parts.join('<span class="json-punct">,</span> ')}<span class="json-punct">}</span>`
+  return `<span class="json-punct">{</span>${
+    parts.join('<span class="json-punct">,</span> ')
+  }<span class="json-punct">}</span>`
 }
 
 function highlightLine(line: string): string {
-  if (!line.trim()) return ''
+  if (!line.trim()) return ""
   try {
     const obj = JSON.parse(line)
     return formatObject(obj)
@@ -90,7 +92,7 @@ function highlightLine(line: string): string {
 }
 
 function processLogs(lines: string[]): string {
-  return lines.map(highlightLine).join('\n')
+  return lines.map(highlightLine).join("\n")
 }
 
 onMounted(async () => {
@@ -103,7 +105,7 @@ async function loadLogs() {
     const data: LogsResponse = await logsApi.get()
     const lines = data.lines || []
     logs.value = lines
-    logPath.value = data.path || ''
+    logPath.value = data.path || ""
     truncated.value = data.truncated || false
 
     await nextTick()
@@ -114,7 +116,7 @@ async function loadLogs() {
       scrollToBottom()
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -144,11 +146,14 @@ function scrollToTop() {
             type="warning"
             size="small"
             effect="plain"
-            class="status-badge status-badge--warning"
-          >
+            class="status-badge status-badge--warning">
             已截断（最近 5000 行）
           </el-tag>
-          <el-tag type="info" size="small" effect="plain" class="status-badge status-badge--info">
+          <el-tag
+            type="info"
+            size="small"
+            effect="plain"
+            class="status-badge status-badge--info">
             {{ logs.length }} 行
           </el-tag>
           <span v-if="logPath" class="log-path-text">{{ logPath }}</span>
@@ -192,7 +197,7 @@ function scrollToTop() {
 }
 
 .log-path-text {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: var(--pt-text-xs);
   color: var(--pt-text-tertiary);
   margin-left: var(--pt-space-2);
@@ -208,7 +213,7 @@ function scrollToTop() {
 
 .log-content {
   margin: 0;
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", "Consolas", monospace;
   font-size: 13px;
   line-height: 1.8;
   white-space: pre-wrap;

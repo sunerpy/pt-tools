@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { getAvatarColor } from '@/utils/format'
+import { getAvatarColor } from "@/utils/format"
+import { computed, ref } from "vue"
 
 const props = withDefaults(
   defineProps<{
@@ -42,8 +42,7 @@ function handleImageError() {
       width: size + 'px',
       height: size + 'px',
       minWidth: size + 'px'
-    }"
-  >
+    }">
     <img
       v-if="faviconUrl && !imageError"
       :src="faviconUrl"
@@ -58,8 +57,7 @@ function handleImageError() {
         backgroundColor: avatarColor,
         fontSize: size * 0.5 + 'px',
         lineHeight: size + 'px'
-      }"
-    >
+      }">
       {{ avatarLetter }}
     </span>
   </div>

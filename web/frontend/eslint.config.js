@@ -1,19 +1,16 @@
-import js from '@eslint/js'
-import configPrettier from 'eslint-config-prettier'
-import globals from 'globals'
-import pluginVue from 'eslint-plugin-vue'
-import vueParser from 'vue-eslint-parser'
-import tsParser from '@typescript-eslint/parser'
+import js from "@eslint/js"
+import tsParser from "@typescript-eslint/parser"
+import pluginVue from "eslint-plugin-vue"
+import globals from "globals"
+import vueParser from "vue-eslint-parser"
 
 export default [
-  // 基础 JavaScript 规则
   js.configs.recommended,
 
-  // 全局变量配置
   {
     languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
+      ecmaVersion: "latest",
+      sourceType: "module",
       globals: {
         ...globals.browser,
         ...globals.node,
@@ -22,56 +19,50 @@ export default [
     }
   },
 
-  // Vue 文件配置
   {
-    files: ['**/*.vue'],
+    files: ["**/*.vue"],
     languageOptions: {
       parser: vueParser,
       parserOptions: {
         parser: tsParser,
-        ecmaVersion: 'latest',
-        sourceType: 'module'
+        ecmaVersion: "latest",
+        sourceType: "module"
       }
     },
     plugins: {
       vue: pluginVue
     },
     rules: {
-      ...pluginVue.configs['flat/recommended'].rules,
-      // 检测模板中的解析错误
-      'vue/no-parsing-error': 'error',
-      'no-unused-vars': 'off',
-      'no-undef': 'off',
-      'no-control-regex': 'off',
-      // 关闭一些与 Prettier 冲突或过于严格的规则
-      'vue/max-attributes-per-line': 'off',
-      'vue/singleline-html-element-content-newline': 'off',
-      'vue/html-self-closing': 'off'
+      ...pluginVue.configs["flat/recommended"].rules,
+      "vue/no-parsing-error": "error",
+      "no-unused-vars": "off",
+      "no-undef": "off",
+      "no-control-regex": "off",
+      "vue/max-attributes-per-line": "off",
+      "vue/singleline-html-element-content-newline": "off",
+      "vue/html-self-closing": "off",
+      "vue/html-indent": "off",
+      "vue/html-closing-bracket-newline": "off"
     }
   },
 
-  // TypeScript 文件配置
   {
-    files: ['**/*.ts', '**/*.tsx'],
+    files: ["**/*.ts", "**/*.tsx"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module'
+        ecmaVersion: "latest",
+        sourceType: "module"
       }
     },
     rules: {
-      'no-unused-vars': 'off',
-      'no-undef': 'off',
-      'no-control-regex': 'off'
+      "no-unused-vars": "off",
+      "no-undef": "off",
+      "no-control-regex": "off"
     }
   },
 
-  // Prettier 配置（禁用与 Prettier 冲突的规则）
-  configPrettier,
-
-  // 全局忽略
   {
-    ignores: ['node_modules/**', 'dist/**', '*.d.ts']
+    ignores: ["node_modules/**", "dist/**", "*.d.ts"]
   }
 ]

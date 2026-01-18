@@ -1,16 +1,16 @@
-import { ref } from 'vue'
+import { ref } from "vue"
 
 interface ToastMessage {
   id: number
   message: string
-  type: 'success' | 'error'
+  type: "success" | "error"
 }
 
 const toasts = ref<ToastMessage[]>([])
 let nextId = 0
 
 export function useToast() {
-  function show(message: string, type: 'success' | 'error' = 'success') {
+  function show(message: string, type: "success" | "error" = "success") {
     const id = nextId++
     toasts.value.push({ id, message, type })
     setTimeout(() => {
@@ -22,11 +22,11 @@ export function useToast() {
   }
 
   function success(message: string) {
-    show(message, 'success')
+    show(message, "success")
   }
 
   function error(message: string) {
-    show(message, 'error')
+    show(message, "error")
   }
 
   return { toasts, show, success, error }

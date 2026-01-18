@@ -11,8 +11,8 @@ body,
 #app {
   height: 100%;
   font-family:
-    'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑',
-    Arial, sans-serif;
+    "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
 }
 
 /* 滚动条样式 */
@@ -60,7 +60,7 @@ a:hover {
 
 /* 代码样式 */
 code {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
   background: var(--pt-bg-tertiary);
   padding: 0.2em 0.4em;
   border-radius: var(--pt-radius-sm);

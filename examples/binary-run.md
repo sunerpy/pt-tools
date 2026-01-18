@@ -14,10 +14,10 @@
 
 前往 [Releases 页面](https://github.com/sunerpy/pt-tools/releases) 下载适合你系统的版本：
 
-| 系统 | 架构 | 文件名 |
-|------|------|--------|
-| Linux | amd64 | `pt-tools-linux-amd64.tar.gz` |
-| Linux | arm64 | `pt-tools-linux-arm64.tar.gz` |
+| 系统    | 架构  | 文件名                           |
+| ------- | ----- | -------------------------------- |
+| Linux   | amd64 | `pt-tools-linux-amd64.tar.gz`    |
+| Linux   | arm64 | `pt-tools-linux-arm64.tar.gz`    |
 | Windows | amd64 | `pt-tools-windows-amd64.exe.zip` |
 | Windows | arm64 | `pt-tools-windows-arm64.exe.zip` |
 

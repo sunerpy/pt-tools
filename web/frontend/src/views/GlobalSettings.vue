@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { globalApi, type GlobalSettings } from '@/api'
-import { ElMessage } from 'element-plus'
-import { Setting, Folder, Timer } from '@element-plus/icons-vue'
+import { globalApi, type GlobalSettings } from "@/api"
+import { Folder, Setting, Timer } from "@element-plus/icons-vue"
+import { ElMessage } from "element-plus"
+import { onMounted, ref } from "vue"
 
 const loading = ref(false)
 const saving = ref(false)
@@ -10,7 +10,7 @@ const showWarning = ref(false)
 
 const form = ref<GlobalSettings>({
   default_interval_minutes: 10,
-  download_dir: '',
+  download_dir: "",
   download_limit_enabled: false,
   download_speed_limit: 20,
   torrent_size_gb: 200,
@@ -27,7 +27,7 @@ onMounted(async () => {
     }
     showWarning.value = !form.value.download_dir
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -35,7 +35,7 @@ onMounted(async () => {
 
 async function save() {
   if (!form.value.download_dir) {
-    ElMessage.error('下载目录不能为空')
+    ElMessage.error("下载目录不能为空")
     showWarning.value = true
     return
   }
@@ -46,10 +46,10 @@ async function save() {
       ...form.value,
       default_interval_minutes: Math.max(5, form.value.default_interval_minutes)
     })
-    ElMessage.success('保存成功')
+    ElMessage.success("保存成功")
     showWarning.value = false
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '保存失败')
+    ElMessage.error((e as Error).message || "保存失败")
   } finally {
     saving.value = false
   }
@@ -115,7 +115,10 @@ async function save() {
             存储路径
           </div>
           <el-form-item label="种子下载目录">
-            <el-input v-model="form.download_dir" placeholder="保存 .torrent 种子文件的目录" />
+            <el-input
+              v-model="form.download_dir"
+              placeholder="保存 .torrent 种子文件的目录"
+            />
             <div class="form-tip">
               绝对路径将直接使用；相对路径会拼接为
               <code>~/.pt-tools/&lt;输入值&gt;</code>
@@ -144,7 +147,9 @@ async function save() {
                   :max="10000"
                   class="w-full"
                 />
-                <div class="form-tip">超过此大小的种子将被自动忽略，防止磁盘撑爆</div>
+                <div class="form-tip">
+                  超过此大小的种子将被自动忽略，防止磁盘撑爆
+                </div>
               </el-form-item>
             </el-col>
             <el-col :md="12" :sm="24">

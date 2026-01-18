@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useThemeStore } from './stores/theme'
-import { useLogLevelStore } from './stores/logLevel'
-import { controlApi } from './api'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from "element-plus"
+import { computed, onMounted, ref, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
+import { controlApi } from "./api"
+import { useLogLevelStore } from "./stores/logLevel"
+import { useThemeStore } from "./stores/theme"
 
 const route = useRoute()
 const router = useRouter()
@@ -17,8 +17,8 @@ const startLoading = ref(false)
 
 const activeMenu = computed(() => {
   const name = route.name as string
-  if (name === 'site-detail') return 'sites'
-  return name || 'global'
+  if (name === "site-detail") return "sites"
+  return name || "global"
 })
 
 onMounted(() => {
@@ -29,24 +29,24 @@ onMounted(() => {
 watch(
   () => themeStore.isDark,
   isDark => {
-    document.documentElement.classList.toggle('dark', isDark)
+    document.documentElement.classList.toggle("dark", isDark)
   },
   { immediate: true }
 )
 
 async function stopAll() {
   try {
-    await ElMessageBox.confirm('确定要停止所有任务吗？', '确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
+    await ElMessageBox.confirm("确定要停止所有任务吗？", "确认", {
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      type: "warning"
     })
     stopLoading.value = true
     await controlApi.stop()
-    ElMessage.success('已停止所有任务')
+    ElMessage.success("已停止所有任务")
   } catch (e: unknown) {
-    if ((e as string) !== 'cancel') {
-      ElMessage.error((e as Error).message || '操作失败')
+    if ((e as string) !== "cancel") {
+      ElMessage.error((e as Error).message || "操作失败")
     }
   } finally {
     stopLoading.value = false
@@ -55,17 +55,17 @@ async function stopAll() {
 
 async function startAll() {
   try {
-    await ElMessageBox.confirm('确定要启动所有任务吗？', '确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'info'
+    await ElMessageBox.confirm("确定要启动所有任务吗？", "确认", {
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      type: "info"
     })
     startLoading.value = true
     await controlApi.start()
-    ElMessage.success('已启动所有任务')
+    ElMessage.success("已启动所有任务")
   } catch (e: unknown) {
-    if ((e as string) !== 'cancel') {
-      ElMessage.error((e as Error).message || '操作失败')
+    if ((e as string) !== "cancel") {
+      ElMessage.error((e as Error).message || "操作失败")
     }
   } finally {
     startLoading.value = false
@@ -77,7 +77,7 @@ function handleMenuSelect(index: string) {
 }
 
 function logout() {
-  window.location.href = '/logout'
+  window.location.href = "/logout"
 }
 </script>
 
@@ -97,8 +97,7 @@ function logout() {
           background-color="transparent"
           text-color="var(--pt-text-primary)"
           active-text-color="var(--pt-color-primary)"
-          @select="handleMenuSelect"
-        >
+          @select="handleMenuSelect">
           <el-menu-item index="userinfo">
             <el-icon><DataAnalysis /></el-icon>
             <template #title>用户统计</template>
@@ -143,7 +142,11 @@ function logout() {
       </div>
 
       <div class="app-aside-footer">
-        <el-button :icon="isCollapse ? 'Expand' : 'Fold'" text @click="isCollapse = !isCollapse" />
+        <el-button
+          :icon="isCollapse ? 'Expand' : 'Fold'"
+          text
+          @click="isCollapse = !isCollapse"
+        />
       </div>
     </el-aside>
 
@@ -158,10 +161,18 @@ function logout() {
 
         <div class="app-header-right">
           <el-button-group class="app-header-actions">
-            <el-button type="danger" :icon="'VideoPause'" :loading="stopLoading" @click="stopAll">
+            <el-button
+              type="danger"
+              :icon="'VideoPause'"
+              :loading="stopLoading"
+              @click="stopAll">
               停止任务
             </el-button>
-            <el-button type="success" :icon="'VideoPlay'" :loading="startLoading" @click="startAll">
+            <el-button
+              type="success"
+              :icon="'VideoPlay'"
+              :loading="startLoading"
+              @click="startAll">
               启动任务
             </el-button>
           </el-button-group>
@@ -183,8 +194,7 @@ function logout() {
             :loading="logLevelStore.loading"
             size="default"
             style="width: 110px"
-            @change="logLevelStore.setLogLevel"
-          >
+            @change="logLevelStore.setLogLevel">
             <el-option
               v-for="level in logLevelStore.availableLevels"
               :key="level"
@@ -225,8 +235,7 @@ function logout() {
           class="app-footer-link"
           href="https://github.com/sunerpy/pt-tools"
           target="_blank"
-          rel="noopener"
-        >
+          rel="noopener">
           pt-tools
         </a>
         <span>© 2025 - PT 助手</span>

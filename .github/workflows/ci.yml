@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-checks:
+    name: Go Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run Tests
+        run: |
+          mkdir -p dist
+          go test ./... -count=1 -race -cover -covermode=atomic -coverprofile=dist/coverage.out
+
+      - name: Upload Coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: dist/coverage.out
+          retention-days: 7
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  go-security:
+    name: Go Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  format-check:
+    name: Format Check (dprint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install dprint
+        run: |
+          curl -fsSL https://dprint.dev/install.sh | sh
+          echo "$HOME/.dprint/bin" >> $GITHUB_PATH
+
+      - name: Check formatting
+        run: ~/.dprint/bin/dprint check
+
+  frontend-checks:
+    name: Frontend Checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web/frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint:check
+
+      - name: Type Check
+        run: pnpm vue-tsc --noEmit
+
+      - name: Build
+        run: pnpm build
+
+  # Summary job for branch protection
+  ci-success:
+    name: CI Success
+    needs: [go-checks, go-security, format-check, frontend-checks]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.go-checks.result }}" != "success" ]]; then
+            echo "go-checks failed"
+            exit 1
+          fi
+          if [[ "${{ needs.go-security.result }}" != "success" ]]; then
+            echo "go-security failed"
+            exit 1
+          fi
+          if [[ "${{ needs.format-check.result }}" != "success" ]]; then
+            echo "format-check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.frontend-checks.result }}" != "success" ]]; then
+            echo "frontend-checks failed"
+            exit 1
+          fi
+          echo "All CI checks passed!"

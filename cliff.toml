@@ -50,7 +50,7 @@ trim = true
 
 # Postprocessors for output
 postprocessors = [
-    { pattern = '<REPO>', replace = "https://github.com/sunerpy/pt-tools" },
+  { pattern = '<REPO>', replace = "https://github.com/sunerpy/pt-tools" },
 ]
 
 [git]
@@ -63,41 +63,41 @@ split_commits = false
 
 # Commit message preprocessors
 commit_preprocessors = [
-    # Replace issue numbers with links
-    { pattern = '\(#([0-9]+)\)', replace = "([#${1}](https://github.com/sunerpy/pt-tools/issues/${1}))" },
-    # Remove unnecessary whitespace
-    { pattern = '  +', replace = " " },
+  # Replace issue numbers with links
+  { pattern = '\(#([0-9]+)\)', replace = "([#${1}](https://github.com/sunerpy/pt-tools/issues/${1}))" },
+  # Remove unnecessary whitespace
+  { pattern = '  +', replace = " " },
 ]
 
 # Commit parsers for grouping
 commit_parsers = [
-    { message = "^feat", group = "Features" },
-    { message = "^fix", group = "Bug Fixes" },
-    { message = "^doc", group = "Documentation" },
-    { message = "^docs", group = "Documentation" },
-    { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Refactor" },
-    { message = "^style", group = "Styling" },
-    { message = "^test", group = "Testing" },
-    { message = "^build", group = "Build" },
-    { message = "^ci", group = "CI/CD" },
-    # Skip release and changelog commits
-    { message = "^chore\\(release\\)", skip = true },
-    { message = "^chore\\(changelog\\)", skip = true },
-    { message = "^chore: (release|bump|update changelog)", skip = true },
-    # Group Dependabot dependency updates (prefixed with deps)
-    { message = "^deps\\(go\\)", group = "Dependencies (Go)" },
-    { message = "^deps\\(pnpm\\)", group = "Dependencies (Frontend)" },
-    { message = "^deps", group = "Dependencies" },
-    # Also handle chore(deps) format for manual dependency updates
-    { message = "^chore\\(deps\\)", group = "Dependencies" },
-    { message = "^chore\\(deps-dev\\)", group = "Dependencies" },
-    # Group other chores
-    { message = "^chore", group = "Miscellaneous" },
-    # Security related commits
-    { body = ".*security", group = "Security" },
-    # Revert commits
-    { message = "^revert", group = "Revert" },
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^doc", group = "Documentation" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^style", group = "Styling" },
+  { message = "^test", group = "Testing" },
+  { message = "^build", group = "Build" },
+  { message = "^ci", group = "CI/CD" },
+  # Skip release and changelog commits
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore\\(changelog\\)", skip = true },
+  { message = "^chore: (release|bump|update changelog)", skip = true },
+  # Group Dependabot dependency updates (prefixed with deps)
+  { message = "^deps\\(go\\)", group = "Dependencies (Go)" },
+  { message = "^deps\\(pnpm\\)", group = "Dependencies (Frontend)" },
+  { message = "^deps", group = "Dependencies" },
+  # Also handle chore(deps) format for manual dependency updates
+  { message = "^chore\\(deps\\)", group = "Dependencies" },
+  { message = "^chore\\(deps-dev\\)", group = "Dependencies" },
+  # Group other chores
+  { message = "^chore", group = "Miscellaneous" },
+  # Security related commits
+  { body = ".*security", group = "Security" },
+  # Revert commits
+  { message = "^revert", group = "Revert" },
 ]
 
 # Filter commits by patterns
@@ -120,8 +120,8 @@ topo_order = false
 
 # Link parsers for auto-linking
 link_parsers = [
-    { pattern = "#(\\d+)", href = "https://github.com/sunerpy/pt-tools/issues/$1" },
-    { pattern = "RFC(\\d+)", href = "https://datatracker.ietf.org/doc/html/rfc$1" },
+  { pattern = "#(\\d+)", href = "https://github.com/sunerpy/pt-tools/issues/$1" },
+  { pattern = "RFC(\\d+)", href = "https://datatracker.ietf.org/doc/html/rfc$1" },
 ]
 
 [bump]

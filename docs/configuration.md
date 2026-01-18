@@ -9,8 +9,8 @@
 - [环境变量](#环境变量)
 - [全局设置](#全局设置)
 - [下载器配置](#下载器配置)
-    - [基本配置](#基本配置)
-    - [下载目录配置](#下载目录配置)
+  - [基本配置](#基本配置)
+  - [下载目录配置](#下载目录配置)
 - [RSS 订阅配置](#rss-订阅配置)
 - [数据持久化](#数据持久化)
 - [配置示例](#配置示例)
@@ -48,11 +48,11 @@ docker run -d \
 
 ```yaml
 environment:
-    PT_HOST: "0.0.0.0"
-    PT_PORT: "8080"
-    PT_ADMIN_USER: "admin"
-    PT_ADMIN_PASS: "your_password"
-    TZ: "Asia/Shanghai"
+  PT_HOST: "0.0.0.0"
+  PT_PORT: "8080"
+  PT_ADMIN_USER: "admin"
+  PT_ADMIN_PASS: "your_password"
+  TZ: "Asia/Shanghai"
 ```
 
 ### 重置管理员密码
@@ -212,23 +212,23 @@ cp ./backup/torrents.db ~/.pt-tools/
 ```yaml
 version: "3.8"
 services:
-    pt-tools:
-        image: sunerpy/pt-tools:latest
-        container_name: pt-tools
-        environment:
-            PT_HOST: "0.0.0.0"
-            PT_PORT: "8080"
-            PT_ADMIN_USER: "admin"
-            PT_ADMIN_PASS: "your_secure_password"
-            TZ: "Asia/Shanghai"
-            PUID: "1000"
-            PGID: "1000"
-        ports:
-            - "8080:8080"
-        volumes:
-            - ./data:/app/.pt-tools
-            - /path/to/downloads:/downloads # 可选：映射下载目录
-        restart: unless-stopped
+  pt-tools:
+    image: sunerpy/pt-tools:latest
+    container_name: pt-tools
+    environment:
+      PT_HOST: "0.0.0.0"
+      PT_PORT: "8080"
+      PT_ADMIN_USER: "admin"
+      PT_ADMIN_PASS: "your_secure_password"
+      TZ: "Asia/Shanghai"
+      PUID: "1000"
+      PGID: "1000"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/.pt-tools
+      - /path/to/downloads:/downloads # 可选：映射下载目录
+    restart: unless-stopped
 ```
 
 ### 典型使用场景配置

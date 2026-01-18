@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { SiteLevelRequirement } from '@/api'
+import type { SiteLevelRequirement } from "@/api"
 import {
-  parseISODuration,
-  parseISODurationToDays,
   calculateDaysSinceJoin,
-  formatNumber
-} from '@/utils/format'
+  formatNumber,
+  parseISODuration,
+  parseISODurationToDays
+} from "@/utils/format"
+import { computed } from "vue"
 
 const props = defineProps<{
   currentLevelId?: number
@@ -31,7 +31,9 @@ const isMaxLevel = computed(() => {
 // 计算进度百分比
 const progress = computed(() => {
   if (isMaxLevel.value) return 100
-  if (props.progressPercent !== undefined) return Math.min(100, Math.max(0, props.progressPercent))
+  if (props.progressPercent !== undefined) {
+    return Math.min(100, Math.max(0, props.progressPercent))
+  }
 
   // 如果没有提供进度，尝试计算
   if (!props.nextLevel) return 0
@@ -76,10 +78,10 @@ const progress = computed(() => {
 
 // 进度条颜色
 const progressColor = computed(() => {
-  if (isMaxLevel.value) return '#67c23a'
-  if (progress.value >= 80) return '#67c23a'
-  if (progress.value >= 50) return '#e6a23c'
-  return '#409eff'
+  if (isMaxLevel.value) return "#67c23a"
+  if (progress.value >= 80) return "#67c23a"
+  if (progress.value >= 50) return "#e6a23c"
+  return "#409eff"
 })
 
 // 未满足的要求列表
@@ -123,7 +125,9 @@ const unmetList = computed(() => {
   if (props.nextLevel.seedingBonus && props.seedingBonus !== undefined) {
     if (props.seedingBonus < props.nextLevel.seedingBonus) {
       list.push(
-        `做种积分: ${formatNumber(props.seedingBonus)} / ${formatNumber(props.nextLevel.seedingBonus)}`
+        `做种积分: ${formatNumber(props.seedingBonus)} / ${
+          formatNumber(props.nextLevel.seedingBonus)
+        }`
       )
     }
   }
@@ -138,7 +142,7 @@ function parseSizeToBytes(sizeStr: string | undefined): number {
   if (!match || !match[1]) return 0
 
   const num = parseFloat(match[1])
-  const unit = match[2] ? match[2].toUpperCase() : 'B'
+  const unit = match[2] ? match[2].toUpperCase() : "B"
 
   const multipliers: Record<string, number> = {
     B: 1,
@@ -154,11 +158,11 @@ function parseSizeToBytes(sizeStr: string | undefined): number {
 
 // 格式化字节数
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
+  if (bytes === 0) return "0 B"
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"]
   const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
 }
 </script>
 
@@ -248,7 +252,7 @@ function formatBytes(bytes: number): string {
 }
 
 .unmet-item::before {
-  content: '•';
+  content: "•";
   margin-right: 6px;
   color: var(--el-color-danger);
 }

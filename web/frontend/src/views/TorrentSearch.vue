@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
 import {
-  searchApi,
-  torrentPushApi,
-  downloadersApi,
-  siteCategoriesApi,
   downloaderDirectoriesApi,
-  type SearchTorrentItem,
-  type MultiSiteSearchRequest,
-  type SearchErrorItem,
+  type DownloaderDirectory,
+  downloadersApi,
   type DownloaderSetting,
+  type MultiSiteSearchRequest,
+  searchApi,
+  type SearchErrorItem,
+  type SearchTorrentItem,
+  siteCategoriesApi,
   type SiteCategoriesConfig,
   type SiteSearchParams,
-  type DownloaderDirectory,
+  torrentPushApi,
   type TorrentPushItem
-} from '@/api'
-import { ElMessage, ElMessageBox } from 'element-plus'
+} from "@/api"
+import { ElMessage, ElMessageBox } from "element-plus"
+import { computed, onMounted, ref } from "vue"
 
 // 搜索状态
 const loading = ref(false)
-const searchKeyword = ref('')
+const searchKeyword = ref("")
 const selectedSites = ref<string[]>([])
 const availableSites = ref<string[]>([])
 
@@ -49,9 +49,9 @@ const pushLoading = ref(false)
 const currentPushTorrent = ref<SearchTorrentItem | null>(null)
 const pushForm = ref({
   downloaderIds: [] as number[],
-  savePath: '',
-  category: '',
-  tags: '',
+  savePath: "",
+  category: "",
+  tags: "",
   autoStart: true
 })
 
@@ -63,7 +63,7 @@ const selectedCategoryFilters = ref<Record<string, Record<string, string | numbe
 const batchDownloading = ref(false)
 
 // 缓存 key
-const CACHE_KEY = 'pt-tools-search-cache'
+const CACHE_KEY = "pt-tools-search-cache"
 
 // 获取指定站点的分类配置
 function getSiteCategoriesConfig(siteId: string): SiteCategoriesConfig | null {
@@ -80,7 +80,7 @@ function siteHasCategories(siteId: string): boolean {
 function getSiteFilterCount(siteId: string): number {
   const filters = selectedCategoryFilters.value[siteId]
   if (!filters) return 0
-  return Object.values(filters).filter(v => v !== '' && v !== undefined).length
+  return Object.values(filters).filter(v => v !== "" && v !== undefined).length
 }
 
 // 更新指定站点的分类筛选值
@@ -88,7 +88,7 @@ function updateSiteCategoryFilter(siteId: string, key: string, value: string | n
   if (!selectedCategoryFilters.value[siteId]) {
     selectedCategoryFilters.value[siteId] = {}
   }
-  if (value === '' || value === undefined) {
+  if (value === "" || value === undefined) {
     delete selectedCategoryFilters.value[siteId][key]
   } else {
     selectedCategoryFilters.value[siteId][key] = value
@@ -108,7 +108,7 @@ function buildSiteParams(): Record<string, SiteSearchParams> | undefined {
   for (const [siteId, filters] of Object.entries(selectedCategoryFilters.value)) {
     const siteFilters: SiteSearchParams = {}
     for (const [key, value] of Object.entries(filters)) {
-      if (value !== '' && value !== undefined) {
+      if (value !== "" && value !== undefined) {
         siteFilters[key] = String(value)
         hasParams = true
       }
@@ -122,8 +122,8 @@ function buildSiteParams(): Record<string, SiteSearchParams> | undefined {
 }
 
 // 排序
-const sortBy = ref<'sourceSite' | 'publishTime' | 'size' | 'seeders' | 'leechers' | 'snatched'>(
-  'sourceSite'
+const sortBy = ref<"sourceSite" | "publishTime" | "size" | "seeders" | "leechers" | "snatched">(
+  "sourceSite"
 )
 const orderDesc = ref(false)
 
@@ -132,22 +132,22 @@ const sortedResults = computed(() => {
   return [...searchResults.value].sort((a, b) => {
     let cmp = 0
     switch (sortBy.value) {
-      case 'sourceSite':
-        cmp = (a.sourceSite || '').localeCompare(b.sourceSite || '')
+      case "sourceSite":
+        cmp = (a.sourceSite || "").localeCompare(b.sourceSite || "")
         break
-      case 'publishTime':
+      case "publishTime":
         cmp = (a.uploadedAt || 0) - (b.uploadedAt || 0)
         break
-      case 'size':
+      case "size":
         cmp = a.sizeBytes - b.sizeBytes
         break
-      case 'seeders':
+      case "seeders":
         cmp = a.seeders - b.seeders
         break
-      case 'leechers':
+      case "leechers":
         cmp = a.leechers - b.leechers
         break
-      case 'snatched':
+      case "snatched":
         cmp = a.snatched - b.snatched
         break
     }
@@ -188,7 +188,7 @@ function saveToCache() {
   try {
     sessionStorage.setItem(CACHE_KEY, JSON.stringify(cacheData))
   } catch {
-    console.warn('Failed to save search cache')
+    console.warn("Failed to save search cache")
   }
 }
 
@@ -205,7 +205,7 @@ function loadFromCache() {
       return false
     }
 
-    searchKeyword.value = data.keyword || ''
+    searchKeyword.value = data.keyword || ""
     searchResults.value = data.results || []
     siteResultCounts.value = data.siteResultCounts || {}
     searchErrors.value = data.errors || []
@@ -229,7 +229,7 @@ async function loadAvailableSites() {
   try {
     availableSites.value = await searchApi.getSites()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载站点列表失败')
+    ElMessage.error((e as Error).message || "加载站点列表失败")
   }
 }
 
@@ -241,7 +241,7 @@ async function loadDownloaders() {
     }
     await loadAllDirectories()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载下载器列表失败')
+    ElMessage.error((e as Error).message || "加载下载器列表失败")
   }
 }
 
@@ -249,7 +249,7 @@ async function loadAllDirectories() {
   try {
     downloaderDirectories.value = await downloaderDirectoriesApi.listAll()
   } catch (e: unknown) {
-    console.error('加载下载器目录失败:', e)
+    console.error("加载下载器目录失败:", e)
   }
 }
 
@@ -257,13 +257,13 @@ async function loadSiteCategories() {
   try {
     siteCategories.value = await siteCategoriesApi.getAll()
   } catch (e: unknown) {
-    console.error('加载站点分类配置失败:', e)
+    console.error("加载站点分类配置失败:", e)
   }
 }
 
 async function doSearch() {
   if (!searchKeyword.value.trim()) {
-    ElMessage.warning('请输入搜索关键词')
+    ElMessage.warning("请输入搜索关键词")
     return
   }
 
@@ -272,8 +272,9 @@ async function doSearch() {
   currentPage.value = 1
 
   try {
-    const sitesToSearch =
-      selectedSites.value.length > 0 ? selectedSites.value : availableSites.value
+    const sitesToSearch = selectedSites.value.length > 0
+      ? selectedSites.value
+      : availableSites.value
     const req: MultiSiteSearchRequest = {
       keyword: searchKeyword.value.trim(),
       sites: sitesToSearch,
@@ -293,14 +294,14 @@ async function doSearch() {
     saveToCache()
 
     if (searchErrors.value.length > 0) {
-      const failedNames = searchErrors.value.map(e => `${e.site}: ${e.error}`).join('\n')
+      const failedNames = searchErrors.value.map(e => `${e.site}: ${e.error}`).join("\n")
       ElMessage.warning({
         message: `部分站点搜索失败:\n${failedNames}`,
         duration: 5000
       })
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '搜索失败')
+    ElMessage.error((e as Error).message || "搜索失败")
   } finally {
     loading.value = false
   }
@@ -323,91 +324,91 @@ function handleSizeChange(size: number) {
 function handleSortChange({ prop, order }: { prop: string | null; order: string | null }) {
   if (!prop || !order) {
     // Reset to default sort
-    sortBy.value = 'sourceSite'
+    sortBy.value = "sourceSite"
     orderDesc.value = false
     return
   }
 
   // Map prop to sortBy value
   const propToSortBy: Record<string, typeof sortBy.value> = {
-    sourceSite: 'sourceSite',
-    sizeBytes: 'size',
-    seeders: 'seeders',
-    leechers: 'leechers',
-    snatched: 'snatched',
-    uploadedAt: 'publishTime'
+    sourceSite: "sourceSite",
+    sizeBytes: "size",
+    seeders: "seeders",
+    leechers: "leechers",
+    snatched: "snatched",
+    uploadedAt: "publishTime"
   }
 
   if (propToSortBy[prop]) {
     sortBy.value = propToSortBy[prop]
-    orderDesc.value = order === 'descending'
+    orderDesc.value = order === "descending"
   }
 }
 
 function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  if (bytes === 0) return "0 B"
+  const units = ["B", "KB", "MB", "GB", "TB"]
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i]
+  return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i]
 }
 
 function formatTime(timestamp?: number): string {
-  if (!timestamp) return '-'
+  if (!timestamp) return "-"
   try {
-    return new Date(timestamp * 1000).toLocaleString('zh-CN')
+    return new Date(timestamp * 1000).toLocaleString("zh-CN")
   } catch {
-    return '-'
+    return "-"
   }
 }
 
 function getDiscountTag(torrent: SearchTorrentItem): {
   text: string
-  type: 'success' | 'warning' | 'danger' | 'info'
+  type: "success" | "warning" | "danger" | "info"
 } {
-  const level = (torrent.discountLevel || '').toUpperCase()
+  const level = (torrent.discountLevel || "").toUpperCase()
 
   // Handle specific discount levels
   switch (level) {
-    case '2XFREE':
-    case '_2X_FREE':
-      return { text: '2xFree', type: 'success' }
-    case 'FREE':
-      return { text: 'Free', type: 'success' }
-    case 'PERCENT_50':
-    case '50%':
-      return { text: '50%', type: 'warning' }
-    case 'PERCENT_30':
-    case '30%':
-      return { text: '30%', type: 'warning' }
-    case 'PERCENT_70':
-    case '70%':
-      return { text: '70%', type: 'warning' }
-    case '2XUP':
-    case '_2X_UP':
-      return { text: '2xUp', type: 'info' }
-    case '2X50':
-    case '_2X_PERCENT_50':
-      return { text: '2x50%', type: 'warning' }
-    case 'NONE':
-    case '':
-      return { text: '普通', type: 'info' }
+    case "2XFREE":
+    case "_2X_FREE":
+      return { text: "2xFree", type: "success" }
+    case "FREE":
+      return { text: "Free", type: "success" }
+    case "PERCENT_50":
+    case "50%":
+      return { text: "50%", type: "warning" }
+    case "PERCENT_30":
+    case "30%":
+      return { text: "30%", type: "warning" }
+    case "PERCENT_70":
+    case "70%":
+      return { text: "70%", type: "warning" }
+    case "2XUP":
+    case "_2X_UP":
+      return { text: "2xUp", type: "info" }
+    case "2X50":
+    case "_2X_PERCENT_50":
+      return { text: "2x50%", type: "warning" }
+    case "NONE":
+    case "":
+      return { text: "普通", type: "info" }
     default:
       // Fallback for unknown discount levels
       if (torrent.isFree) {
-        return { text: 'Free', type: 'success' }
+        return { text: "Free", type: "success" }
       }
       // Show the original discount level if not recognized
-      if (level && level !== 'NONE') {
-        return { text: level, type: 'warning' }
+      if (level && level !== "NONE") {
+        return { text: level, type: "warning" }
       }
-      return { text: '普通', type: 'info' }
+      return { text: "普通", type: "info" }
   }
 }
 
 // 下载单个种子到本地
 async function downloadTorrent(torrent: SearchTorrentItem) {
   if (!torrent.downloadUrl) {
-    ElMessage.warning('该种子没有下载链接')
+    ElMessage.warning("该种子没有下载链接")
     return
   }
   try {
@@ -415,7 +416,7 @@ async function downloadTorrent(torrent: SearchTorrentItem) {
     let downloadUrl = torrent.downloadUrl
     if (torrent.title) {
       // Add title parameter to the URL for filename generation
-      const separator = downloadUrl.includes('?') ? '&' : '?'
+      const separator = downloadUrl.includes("?") ? "&" : "?"
       downloadUrl = `${downloadUrl}${separator}title=${encodeURIComponent(torrent.title)}`
     }
 
@@ -426,12 +427,12 @@ async function downloadTorrent(torrent: SearchTorrentItem) {
     }
 
     // Get filename from Content-Disposition header or use default
-    const contentDisposition = response.headers.get('Content-Disposition')
+    const contentDisposition = response.headers.get("Content-Disposition")
     let filename = `${torrent.title}.torrent`
     if (contentDisposition) {
       const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
       if (filenameMatch && filenameMatch[1]) {
-        filename = filenameMatch[1].replace(/['"]/g, '')
+        filename = filenameMatch[1].replace(/['"]/g, "")
         // Decode URI encoded filename
         try {
           filename = decodeURIComponent(filename)
@@ -444,7 +445,7 @@ async function downloadTorrent(torrent: SearchTorrentItem) {
     // Create blob and trigger download
     const blob = await response.blob()
     const blobUrl = URL.createObjectURL(blob)
-    const link = document.createElement('a')
+    const link = document.createElement("a")
     link.href = blobUrl
     link.download = filename
     document.body.appendChild(link)
@@ -452,10 +453,10 @@ async function downloadTorrent(torrent: SearchTorrentItem) {
     document.body.removeChild(link)
     URL.revokeObjectURL(blobUrl)
 
-    ElMessage.success('种子文件下载成功')
+    ElMessage.success("种子文件下载成功")
   } catch (error) {
-    console.error('Download failed:', error)
-    ElMessage.error('下载失败: ' + (error instanceof Error ? error.message : '未知错误'))
+    console.error("Download failed:", error)
+    ElMessage.error("下载失败: " + (error instanceof Error ? error.message : "未知错误"))
   }
 }
 
@@ -463,19 +464,19 @@ async function downloadTorrent(torrent: SearchTorrentItem) {
 async function copyDownloadLink(torrent: SearchTorrentItem) {
   const link = torrent.downloadUrl || torrent.magnetLink
   if (!link) {
-    ElMessage.warning('没有可复制的链接')
+    ElMessage.warning("没有可复制的链接")
     return
   }
 
   // Build full URL for relative paths
   let fullLink = link
-  if (link.startsWith('/')) {
+  if (link.startsWith("/")) {
     fullLink = `${window.location.origin}${link}`
   }
 
   // Add title parameter if it's a download URL
-  if (torrent.downloadUrl && torrent.title && fullLink.includes('/api/site/')) {
-    const separator = fullLink.includes('?') ? '&' : '?'
+  if (torrent.downloadUrl && torrent.title && fullLink.includes("/api/site/")) {
+    const separator = fullLink.includes("?") ? "&" : "?"
     fullLink = `${fullLink}${separator}title=${encodeURIComponent(torrent.title)}`
   }
 
@@ -485,27 +486,27 @@ async function copyDownloadLink(torrent: SearchTorrentItem) {
       await navigator.clipboard.writeText(fullLink)
     } else {
       // Fallback for non-HTTPS environments
-      const textArea = document.createElement('textarea')
+      const textArea = document.createElement("textarea")
       textArea.value = fullLink
-      textArea.style.position = 'fixed'
-      textArea.style.left = '-9999px'
-      textArea.style.top = '-9999px'
+      textArea.style.position = "fixed"
+      textArea.style.left = "-9999px"
+      textArea.style.top = "-9999px"
       document.body.appendChild(textArea)
       textArea.focus()
       textArea.select()
-      const successful = document.execCommand('copy')
+      const successful = document.execCommand("copy")
       document.body.removeChild(textArea)
       if (!successful) {
-        throw new Error('execCommand copy failed')
+        throw new Error("execCommand copy failed")
       }
     }
-    ElMessage.success('链接已复制到剪贴板')
+    ElMessage.success("链接已复制到剪贴板")
   } catch (error) {
-    console.error('Copy failed:', error)
+    console.error("Copy failed:", error)
     // Show link in a dialog as last resort
-    ElMessageBox.alert(`请手动复制以下链接：\n\n${fullLink}`, '复制链接', {
-      confirmButtonText: '确定',
-      customClass: 'copy-link-dialog'
+    ElMessageBox.alert(`请手动复制以下链接：\n\n${fullLink}`, "复制链接", {
+      confirmButtonText: "确定",
+      customClass: "copy-link-dialog"
     })
   }
 }
@@ -513,18 +514,18 @@ async function copyDownloadLink(torrent: SearchTorrentItem) {
 // 批量下载种子为 tar 包
 async function batchDownloadTorrents() {
   if (selectedTorrents.value.length === 0) {
-    ElMessage.warning('请先选择要下载的种子')
+    ElMessage.warning("请先选择要下载的种子")
     return
   }
 
   try {
     await ElMessageBox.confirm(
       `确定要批量下载选中的 ${selectedTorrents.value.length} 个种子吗？\n将打包为 tar.gz 文件下载。`,
-      '批量下载确认',
+      "批量下载确认",
       {
-        confirmButtonText: '下载',
-        cancelButtonText: '取消',
-        type: 'info'
+        confirmButtonText: "下载",
+        cancelButtonText: "取消",
+        type: "info"
       }
     )
   } catch {
@@ -541,10 +542,10 @@ async function batchDownloadTorrents() {
     }))
 
     // Use fetch to POST and download the response as blob
-    const response = await fetch('/api/v2/torrents/batch-download', {
-      method: 'POST',
+    const response = await fetch("/api/v2/torrents/batch-download", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({ torrents })
     })
@@ -555,19 +556,19 @@ async function batchDownloadTorrents() {
     }
 
     // Get filename from Content-Disposition header or use default
-    const contentDisposition = response.headers.get('Content-Disposition')
+    const contentDisposition = response.headers.get("Content-Disposition")
     let filename = `torrents_${new Date().toISOString().slice(0, 10)}.tar.gz`
     if (contentDisposition) {
       const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
       if (filenameMatch && filenameMatch[1]) {
-        filename = filenameMatch[1].replace(/['"]/g, '')
+        filename = filenameMatch[1].replace(/['"]/g, "")
       }
     }
 
     // Create blob and trigger download
     const blob = await response.blob()
     const blobUrl = URL.createObjectURL(blob)
-    const link = document.createElement('a')
+    const link = document.createElement("a")
     link.href = blobUrl
     link.download = filename
     document.body.appendChild(link)
@@ -575,9 +576,9 @@ async function batchDownloadTorrents() {
     document.body.removeChild(link)
     URL.revokeObjectURL(blobUrl)
 
-    ElMessage.success('开始下载种子包')
+    ElMessage.success("开始下载种子包")
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '批量下载失败')
+    ElMessage.error((e as Error).message || "批量下载失败")
   } finally {
     batchDownloading.value = false
   }
@@ -588,9 +589,9 @@ function openPushDialog(torrent: SearchTorrentItem) {
   currentPushTorrent.value = torrent
   pushForm.value = {
     downloaderIds: defaultDownloader.value ? [defaultDownloader.value.id!] : [],
-    savePath: '',
-    category: '',
-    tags: '',
+    savePath: "",
+    category: "",
+    tags: "",
     autoStart: true
   }
   pushDialogVisible.value = true
@@ -599,14 +600,14 @@ function openPushDialog(torrent: SearchTorrentItem) {
 // 打开批量推送对话框
 function openBatchPushDialog() {
   if (selectedTorrents.value.length === 0) {
-    ElMessage.warning('请先选择要推送的种子')
+    ElMessage.warning("请先选择要推送的种子")
     return
   }
   pushForm.value = {
     downloaderIds: defaultDownloader.value ? [defaultDownloader.value.id!] : [],
-    savePath: '',
-    category: '',
-    tags: '',
+    savePath: "",
+    category: "",
+    tags: "",
     autoStart: true
   }
   batchPushDialogVisible.value = true
@@ -616,7 +617,7 @@ function openBatchPushDialog() {
 async function doPush() {
   if (!currentPushTorrent.value) return
   if (pushForm.value.downloaderIds.length === 0) {
-    ElMessage.warning('请选择下载器')
+    ElMessage.warning("请选择下载器")
     return
   }
 
@@ -642,20 +643,20 @@ async function doPush() {
       const newPushCount = resp.results.filter(r => r.success && !r.skipped).length
 
       if (allSkipped) {
-        ElMessage.warning('种子已存在于所有下载器中，已跳过')
+        ElMessage.warning("种子已存在于所有下载器中，已跳过")
       } else if (skippedCount > 0) {
         ElMessage.success(`推送成功 ${newPushCount} 个，跳过 ${skippedCount} 个（已存在）`)
       } else {
-        ElMessage.success('推送成功')
+        ElMessage.success("推送成功")
       }
       pushDialogVisible.value = false
     } else {
       const failedResults = resp.results.filter(r => !r.success)
-      const failedMsg = failedResults.map(r => `${r.downloaderName}: ${r.message}`).join('\n')
+      const failedMsg = failedResults.map(r => `${r.downloaderName}: ${r.message}`).join("\n")
       ElMessage.error(`部分推送失败:\n${failedMsg}`)
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '推送失败')
+    ElMessage.error((e as Error).message || "推送失败")
   } finally {
     pushLoading.value = false
   }
@@ -665,18 +666,18 @@ async function doPush() {
 async function doBatchPush() {
   if (selectedTorrents.value.length === 0) return
   if (pushForm.value.downloaderIds.length === 0) {
-    ElMessage.warning('请选择下载器')
+    ElMessage.warning("请选择下载器")
     return
   }
 
   try {
     await ElMessageBox.confirm(
       `确定要推送选中的 ${selectedTorrents.value.length} 个种子吗？`,
-      '批量推送确认',
+      "批量推送确认",
       {
-        confirmButtonText: '推送',
-        cancelButtonText: '取消',
-        type: 'info'
+        confirmButtonText: "推送",
+        cancelButtonText: "取消",
+        type: "info"
       }
     )
   } catch {
@@ -707,7 +708,7 @@ async function doBatchPush() {
     if (resp.successCount > 0) parts.push(`成功 ${resp.successCount}`)
     if (resp.skippedCount > 0) parts.push(`跳过 ${resp.skippedCount}`)
     if (resp.failedCount > 0) parts.push(`失败 ${resp.failedCount}`)
-    const summary = parts.join('，')
+    const summary = parts.join("，")
 
     if (resp.success) {
       if (resp.skippedCount > 0 && resp.successCount === 0) {
@@ -726,7 +727,7 @@ async function doBatchPush() {
       ElMessage.warning(`批量推送部分失败: ${summary}`)
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '批量推送失败')
+    ElMessage.error((e as Error).message || "批量推送失败")
   } finally {
     pushLoading.value = false
   }
@@ -737,9 +738,9 @@ async function clearCache() {
   try {
     await searchApi.clearCache()
     sessionStorage.removeItem(CACHE_KEY)
-    ElMessage.success('缓存已清除')
+    ElMessage.success("缓存已清除")
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '清除缓存失败')
+    ElMessage.error((e as Error).message || "清除缓存失败")
   }
 }
 
@@ -772,8 +773,7 @@ function toggleAllSites() {
               placeholder="输入搜索关键词"
               clearable
               style="width: 280px"
-              @keyup.enter="doSearch"
-            >
+              @keyup.enter="doSearch">
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
@@ -783,49 +783,43 @@ function toggleAllSites() {
           <el-form-item label="站点">
             <div class="site-selector-wrapper">
               <el-tooltip
-                :content="
-                  selectedSites.length === 0
-                    ? '未选择站点，将搜索所有可用站点'
-                    : `已选择 ${selectedSites.length} 个站点`
-                "
-                placement="top"
-              >
+                :content="selectedSites.length === 0
+                ? '未选择站点，将搜索所有可用站点'
+                : `已选择 ${selectedSites.length} 个站点`"
+                placement="top">
                 <el-select
                   v-model="selectedSites"
                   multiple
                   collapse-tags
                   collapse-tags-tooltip
-                  :placeholder="
-                    availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'
-                  "
+                  :placeholder="availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'"
                   style="width: 300px"
-                  :class="{ 'all-sites-selected': selectedSites.length === 0 }"
-                >
+                  :class="{ 'all-sites-selected': selectedSites.length === 0 }">
                   <template #header>
                     <div class="site-select-header">
                       <el-checkbox
                         :model-value="selectedSites.length === availableSites.length"
-                        :indeterminate="
-                          selectedSites.length > 0 && selectedSites.length < availableSites.length
-                        "
-                        @change="toggleAllSites"
-                      >
+                        :indeterminate="selectedSites.length > 0 && selectedSites.length < availableSites.length"
+                        @change="toggleAllSites">
                         全选
                       </el-checkbox>
                       <span class="site-count-hint">
-                        {{ selectedSites.length === 0 ? '(未选择 = 搜索全部)' : '' }}
+                        {{ selectedSites.length === 0 ? "(未选择 = 搜索全部)" : "" }}
                       </span>
                     </div>
                   </template>
-                  <el-option v-for="site in availableSites" :key="site" :label="site" :value="site">
+                  <el-option
+                    v-for="site in availableSites"
+                    :key="site"
+                    :label="site"
+                    :value="site">
                     <div class="site-option-item">
                       <span>{{ site }}</span>
                       <el-tag
                         v-if="siteHasCategories(site)"
                         type="info"
                         size="small"
-                        effect="plain"
-                      >
+                        effect="plain">
                         可筛选
                       </el-tag>
                     </div>
@@ -843,19 +837,16 @@ function toggleAllSites() {
                   v-if="siteHasCategories(siteId)"
                   placement="bottom-start"
                   :width="400"
-                  trigger="click"
-                >
+                  trigger="click">
                   <template #reference>
                     <el-badge
                       :value="getSiteFilterCount(siteId)"
                       :hidden="getSiteFilterCount(siteId) === 0"
                       type="primary"
-                      class="site-filter-badge"
-                    >
+                      class="site-filter-badge">
                       <el-button
                         size="small"
-                        :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'"
-                      >
+                        :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'">
                         <el-icon style="margin-right: 4px"><Filter /></el-icon>
                         {{ siteId }}
                       </el-button>
@@ -871,8 +862,7 @@ function toggleAllSites() {
                         type="danger"
                         size="small"
                         text
-                        @click="clearSiteCategoryFilters(siteId)"
-                      >
+                        @click="clearSiteCategoryFilters(siteId)">
                         清除
                       </el-button>
                     </div>
@@ -880,17 +870,13 @@ function toggleAllSites() {
                       <el-form-item
                         v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
                         :key="category.key"
-                        :label="category.name"
-                      >
+                        :label="category.name">
                         <el-select
                           :model-value="selectedCategoryFilters[siteId]?.[category.key]"
                           placeholder="全部"
                           clearable
                           style="width: 100%"
-                          @update:model-value="
-                            updateSiteCategoryFilter(siteId, category.key, $event)
-                          "
-                        >
+                          @update:model-value="updateSiteCategoryFilter(siteId, category.key, $event)">
                           <el-option
                             v-for="opt in category.options"
                             :key="opt.value"
@@ -922,7 +908,10 @@ function toggleAllSites() {
           </el-form-item>
 
           <el-form-item>
-            <el-button type="primary" :loading="loading" @click="doSearch">搜索</el-button>
+            <el-button
+              type="primary"
+              :loading="loading"
+              @click="doSearch">搜索</el-button>
             <el-button @click="clearCache">清除缓存</el-button>
           </el-form-item>
         </el-form>
@@ -948,16 +937,14 @@ function toggleAllSites() {
             v-if="selectedTorrents.length > 0"
             size="small"
             :loading="batchDownloading"
-            @click="batchDownloadTorrents"
-          >
+            @click="batchDownloadTorrents">
             批量下载 ({{ selectedTorrents.length }})
           </el-button>
           <el-button
             v-if="selectedTorrents.length > 0"
             type="primary"
             size="small"
-            @click="openBatchPushDialog"
-          >
+            @click="openBatchPushDialog">
             批量推送 ({{ selectedTorrents.length }})
           </el-button>
         </div>
@@ -965,14 +952,15 @@ function toggleAllSites() {
 
       <div class="table-wrapper">
         <!-- 站点状态摘要 -->
-        <div v-if="Object.keys(siteResultCounts).length > 0" class="filter-bar site-summary-bar">
+        <div
+          v-if="Object.keys(siteResultCounts).length > 0"
+          class="filter-bar site-summary-bar">
           <el-tag
             v-for="(count, site) in siteResultCounts"
             :key="site"
             type="success"
             size="small"
-            effect="plain"
-          >
+            effect="plain">
             {{ site }}: {{ count }}
           </el-tag>
           <el-tag
@@ -980,8 +968,7 @@ function toggleAllSites() {
             :key="err.site"
             type="danger"
             size="small"
-            effect="plain"
-          >
+            effect="plain">
             {{ err.site }}: 失败
           </el-tag>
         </div>
@@ -994,8 +981,7 @@ function toggleAllSites() {
           :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }"
           :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
           @selection-change="handleSelectionChange"
-          @sort-change="handleSortChange"
-        >
+          @sort-change="handleSortChange">
           <el-table-column type="selection" width="45" align="center" />
 
           <el-table-column
@@ -1003,8 +989,7 @@ function toggleAllSites() {
             prop="sourceSite"
             width="90"
             align="center"
-            sortable="custom"
-          >
+            sortable="custom">
             <template #default="{ row }">
               <el-tag size="small" type="primary" effect="light">{{ row.sourceSite }}</el-tag>
             </template>
@@ -1019,16 +1004,14 @@ function toggleAllSites() {
                     :href="row.url"
                     target="_blank"
                     rel="noopener"
-                    class="title-link"
-                  >
+                    class="title-link">
                     {{ row.title }}
                   </a>
                   <span v-else class="title-text">{{ row.title }}</span>
                 </el-tooltip>
                 <div
                   v-if="row.subtitle || (row.tags && row.tags.length > 0)"
-                  class="title-subtitle-row"
-                >
+                  class="title-subtitle-row">
                   <span v-if="row.subtitle" class="subtitle">{{ row.subtitle }}</span>
                   <span v-if="row.tags && row.tags.length > 0" class="title-tags">
                     <el-tag
@@ -1036,8 +1019,7 @@ function toggleAllSites() {
                       :key="tag"
                       size="small"
                       type="info"
-                      effect="plain"
-                    >
+                      effect="plain">
                       {{ tag }}
                     </el-tag>
                   </span>
@@ -1055,8 +1037,7 @@ function toggleAllSites() {
             prop="sizeBytes"
             width="95"
             align="center"
-            sortable="custom"
-          >
+            sortable="custom">
             <template #default="{ row }">
               <span class="table-cell-secondary">{{ formatSize(row.sizeBytes) }}</span>
             </template>
@@ -1070,25 +1051,44 @@ function toggleAllSites() {
             </template>
           </el-table-column>
 
-          <el-table-column label="上传" prop="seeders" width="65" align="center" sortable="custom">
+          <el-table-column
+            label="上传"
+            prop="seeders"
+            width="65"
+            align="center"
+            sortable="custom">
             <template #default="{ row }">
               <span class="seeders">{{ row.seeders }}</span>
             </template>
           </el-table-column>
 
-          <el-table-column label="下载" prop="leechers" width="65" align="center" sortable="custom">
+          <el-table-column
+            label="下载"
+            prop="leechers"
+            width="65"
+            align="center"
+            sortable="custom">
             <template #default="{ row }">
               <span class="leechers">{{ row.leechers }}</span>
             </template>
           </el-table-column>
 
-          <el-table-column label="完成" prop="snatched" width="65" align="center" sortable="custom">
+          <el-table-column
+            label="完成"
+            prop="snatched"
+            width="65"
+            align="center"
+            sortable="custom">
             <template #default="{ row }">
               <span class="table-cell-secondary">{{ row.snatched }}</span>
             </template>
           </el-table-column>
 
-          <el-table-column label="发布时间" prop="uploadedAt" width="150" sortable="custom">
+          <el-table-column
+            label="发布时间"
+            prop="uploadedAt"
+            width="150"
+            sortable="custom">
             <template #default="{ row }">
               <span class="table-cell-secondary">{{ formatTime(row.uploadedAt) }}</span>
             </template>
@@ -1104,8 +1104,7 @@ function toggleAllSites() {
                     circle
                     plain
                     :disabled="!row.downloadUrl"
-                    @click="downloadTorrent(row)"
-                  >
+                    @click="downloadTorrent(row)">
                     <el-icon><Download /></el-icon>
                   </el-button>
                 </el-tooltip>
@@ -1116,13 +1115,17 @@ function toggleAllSites() {
                     circle
                     plain
                     :disabled="!row.downloadUrl && !row.magnetLink"
-                    @click="copyDownloadLink(row)"
-                  >
+                    @click="copyDownloadLink(row)">
                     <el-icon><CopyDocument /></el-icon>
                   </el-button>
                 </el-tooltip>
                 <el-tooltip content="推送到下载器" placement="top">
-                  <el-button type="primary" size="small" circle plain @click="openPushDialog(row)">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    circle
+                    plain
+                    @click="openPushDialog(row)">
                     <el-icon><Upload /></el-icon>
                   </el-button>
                 </el-tooltip>
@@ -1148,7 +1151,7 @@ function toggleAllSites() {
         <div v-if="!loading && sortedResults.length === 0" class="table-empty">
           <el-icon class="table-empty-icon"><Search /></el-icon>
           <p class="table-empty-text">
-            {{ searchKeyword ? '没有找到结果' : '输入关键词开始搜索' }}
+            {{ searchKeyword ? "没有找到结果" : "输入关键词开始搜索" }}
           </p>
         </div>
       </div>
@@ -1171,8 +1174,7 @@ function toggleAllSites() {
             v-model="pushForm.downloaderIds"
             multiple
             placeholder="选择下载器"
-            style="width: 100%"
-          >
+            style="width: 100%">
             <el-option
               v-for="d in downloaders.filter(d => d.enabled)"
               :key="d.id"
@@ -1186,13 +1188,13 @@ function toggleAllSites() {
             v-model="pushForm.savePath"
             placeholder="使用默认路径"
             clearable
-            style="width: 100%"
-          >
-            <template v-for="downloaderId in pushForm.downloaderIds" :key="downloaderId">
+            style="width: 100%">
+            <template
+              v-for="downloaderId in pushForm.downloaderIds"
+              :key="downloaderId">
               <el-option-group
                 v-if="getDirectoryOptions(downloaderId).length > 0"
-                :label="downloaders.find(d => d.id === downloaderId)?.name"
-              >
+                :label="downloaders.find(d => d.id === downloaderId)?.name">
                 <el-option
                   v-for="dir in getDirectoryOptions(downloaderId)"
                   :key="dir.id"
@@ -1230,8 +1232,7 @@ function toggleAllSites() {
             v-model="pushForm.downloaderIds"
             multiple
             placeholder="选择下载器"
-            style="width: 100%"
-          >
+            style="width: 100%">
             <el-option
               v-for="d in downloaders.filter(d => d.enabled)"
               :key="d.id"
@@ -1245,13 +1246,13 @@ function toggleAllSites() {
             v-model="pushForm.savePath"
             placeholder="使用默认路径"
             clearable
-            style="width: 100%"
-          >
-            <template v-for="downloaderId in pushForm.downloaderIds" :key="downloaderId">
+            style="width: 100%">
+            <template
+              v-for="downloaderId in pushForm.downloaderIds"
+              :key="downloaderId">
               <el-option-group
                 v-if="getDirectoryOptions(downloaderId).length > 0"
-                :label="downloaders.find(d => d.id === downloaderId)?.name"
-              >
+                :label="downloaders.find(d => d.id === downloaderId)?.name">
                 <el-option
                   v-for="dir in getDirectoryOptions(downloaderId)"
                   :key="dir.id"
@@ -1274,7 +1275,10 @@ function toggleAllSites() {
       </el-form>
       <template #footer>
         <el-button @click="batchPushDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="pushLoading" @click="doBatchPush">批量推送</el-button>
+        <el-button
+          type="primary"
+          :loading="pushLoading"
+          @click="doBatchPush">批量推送</el-button>
       </template>
     </el-dialog>
   </div>

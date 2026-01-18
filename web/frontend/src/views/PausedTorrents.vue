@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { pausedTorrentsApi, type PausedTorrent, type ArchiveTorrent } from '@/api'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Timer, InfoFilled } from '@element-plus/icons-vue'
+import { type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api"
+import { InfoFilled, Refresh, Timer } from "@element-plus/icons-vue"
+import { ElMessage, ElMessageBox } from "element-plus"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 
-const activeTab = ref('paused')
+const activeTab = ref("paused")
 const loading = ref(false)
 const autoRefresh = ref(false)
 const refreshTimer = ref<number | null>(null)
@@ -19,7 +19,7 @@ const archiveTotal = ref(0)
 const archivePage = ref(1)
 const archivePageSize = ref(20)
 
-const siteFilter = ref('')
+const siteFilter = ref("")
 const selectedIds = ref<number[]>([])
 
 const deleteDialogVisible = ref(false)
@@ -47,19 +47,19 @@ onUnmounted(() => {
 watch(autoRefresh, val => {
   if (val) {
     refreshTimer.value = window.setInterval(() => {
-      if (activeTab.value === 'paused') {
+      if (activeTab.value === "paused") {
         loadPausedTorrents()
       } else {
         loadArchiveTorrents()
       }
     }, 30000)
-    ElMessage.success('已开启自动刷新（30秒）')
+    ElMessage.success("已开启自动刷新（30秒）")
   } else {
     if (refreshTimer.value) {
       clearInterval(refreshTimer.value)
       refreshTimer.value = null
     }
-    ElMessage.info('已关闭自动刷新')
+    ElMessage.info("已关闭自动刷新")
   }
 })
 
@@ -74,7 +74,7 @@ async function loadPausedTorrents() {
     pausedTorrents.value = data.items || []
     pausedTotal.value = data.total || 0
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -91,14 +91,14 @@ async function loadArchiveTorrents() {
     archiveTorrents.value = data.items || []
     archiveTotal.value = data.total || 0
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
 }
 
 function handleTabChange(tab: string) {
-  if (tab === 'paused') {
+  if (tab === "paused") {
     loadPausedTorrents()
   } else {
     loadArchiveTorrents()
@@ -133,22 +133,22 @@ function handleSelectionChange(selection: PausedTorrent[]) {
 
 async function resumeTorrent(torrent: PausedTorrent) {
   try {
-    await ElMessageBox.confirm(`确定恢复下载 "${torrent.title}"？`, '确认恢复', {
-      confirmButtonText: '恢复',
-      cancelButtonText: '取消',
-      type: 'info'
+    await ElMessageBox.confirm(`确定恢复下载 "${torrent.title}"？`, "确认恢复", {
+      confirmButtonText: "恢复",
+      cancelButtonText: "取消",
+      type: "info"
     })
 
     const result = await pausedTorrentsApi.resume(torrent.id)
     if (result.success) {
-      ElMessage.success('已恢复下载')
+      ElMessage.success("已恢复下载")
       await loadPausedTorrents()
     } else {
-      ElMessage.error(result.message || '恢复失败')
+      ElMessage.error(result.message || "恢复失败")
     }
   } catch (e: unknown) {
-    if ((e as string) !== 'cancel') {
-      ElMessage.error((e as Error).message || '恢复失败')
+    if ((e as string) !== "cancel") {
+      ElMessage.error((e as Error).message || "恢复失败")
     }
   }
 }
@@ -165,24 +165,24 @@ async function performDelete(ids: number[], removeData: boolean) {
     selectedIds.value = []
     await loadPausedTorrents()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '删除失败')
+    ElMessage.error((e as Error).message || "删除失败")
   }
 }
 
 async function deleteTorrents(ids: number[], removeData: boolean) {
   try {
     const count = ids.length
-    const dataHint = removeData ? '（包含数据文件）' : '（保留数据文件）'
-    await ElMessageBox.confirm(`确定删除 ${count} 个暂停任务${dataHint}？`, '确认删除', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning'
+    const dataHint = removeData ? "（包含数据文件）" : "（保留数据文件）"
+    await ElMessageBox.confirm(`确定删除 ${count} 个暂停任务${dataHint}？`, "确认删除", {
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+      type: "warning"
     })
 
     await performDelete(ids, removeData)
   } catch (e: unknown) {
-    if ((e as string) !== 'cancel') {
-      ElMessage.error((e as Error).message || '操作取消')
+    if ((e as string) !== "cancel") {
+      ElMessage.error((e as Error).message || "操作取消")
     }
   }
 }
@@ -199,8 +199,8 @@ async function confirmDeleteRow(removeData: boolean) {
 }
 
 function formatSize(bytes: number): string {
-  if (!bytes || bytes <= 0) return '-'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  if (!bytes || bytes <= 0) return "-"
+  const units = ["B", "KB", "MB", "GB", "TB"]
   let unitIndex = 0
   let size = bytes
   while (size >= 1024 && unitIndex < units.length - 1) {
@@ -216,15 +216,15 @@ function getDownloadedSize(torrent: PausedTorrent): string {
 }
 
 function getProgressColor(percentage: number) {
-  if (percentage < 30) return '#F56C6C'
-  if (percentage < 70) return '#E6A23C'
-  return '#67C23A'
+  if (percentage < 30) return "#F56C6C"
+  if (percentage < 70) return "#E6A23C"
+  return "#67C23A"
 }
 
 function formatTime(timeStr: string | undefined): string {
-  if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
+  if (!timeStr || timeStr === "0001-01-01T00:00:00Z") return "-"
   try {
-    return new Date(timeStr).toLocaleString('zh-CN')
+    return new Date(timeStr).toLocaleString("zh-CN")
   } catch {
     return timeStr
   }
@@ -259,17 +259,20 @@ function formatProgress(progress: number): string {
           placeholder="全部站点"
           clearable
           style="width: 140px"
-          @change="handleTabChange(activeTab)"
-        >
+          @change="handleTabChange(activeTab)">
           <el-option label="全部站点" value="" />
-          <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
+          <el-option
+            v-for="site in siteOptions"
+            :key="site"
+            :label="site"
+            :value="site"
+          />
         </el-select>
         <el-button
           type="primary"
           :icon="Refresh"
           :loading="loading"
-          @click="handleTabChange(activeTab)"
-        >
+          @click="handleTabChange(activeTab)">
           刷新
         </el-button>
       </div>
@@ -281,14 +284,20 @@ function formatProgress(progress: number): string {
           <div
             v-if="selectedIds.length > 0"
             class="filter-bar"
-            style="margin: 16px; margin-bottom: 0"
-          >
+            style="margin: 16px; margin-bottom: 0">
             <div class="filter-group">
-              <span class="filter-group-label">已选择 {{ selectedIds.length }} 项</span>
-              <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, false)">
+              <span class="filter-group-label">已选择 {{ selectedIds.length }}
+                项</span>
+              <el-button
+                type="danger"
+                size="small"
+                @click="deleteTorrents(selectedIds, false)">
                 删除任务
               </el-button>
-              <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, true)">
+              <el-button
+                type="danger"
+                size="small"
+                @click="deleteTorrents(selectedIds, true)">
                 删除任务和数据
               </el-button>
             </div>
@@ -299,19 +308,24 @@ function formatProgress(progress: number): string {
               v-loading="loading"
               :data="pausedTorrents"
               style="width: 100%"
-              @selection-change="handleSelectionChange"
-            >
+              @selection-change="handleSelectionChange">
               <el-table-column type="selection" width="50" />
               <el-table-column label="站点" prop="site_name" width="100">
                 <template #default="{ row }">
-                  <el-tag size="small" effect="plain" class="status-badge status-badge--info">
+                  <el-tag
+                    size="small"
+                    effect="plain"
+                    class="status-badge status-badge--info">
                     {{ row.site_name }}
                   </el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="标题" min-width="250">
                 <template #default="{ row }">
-                  <el-tooltip :content="row.title" placement="top" :show-after="500">
+                  <el-tooltip
+                    :content="row.title"
+                    placement="top"
+                    :show-after="500">
                     <span class="table-cell-primary title-text">{{ row.title }}</span>
                   </el-tooltip>
                 </template>
@@ -344,12 +358,12 @@ function formatProgress(progress: number): string {
               </el-table-column>
               <el-table-column label="下载器" width="120">
                 <template #default="{ row }">
-                  <span class="table-cell-secondary">{{ row.downloader_name || '-' }}</span>
+                  <span class="table-cell-secondary">{{ row.downloader_name || "-" }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="暂停原因" min-width="150">
                 <template #default="{ row }">
-                  <span class="table-cell-secondary">{{ row.pause_reason || '-' }}</span>
+                  <span class="table-cell-secondary">{{ row.pause_reason || "-" }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="暂停时间" width="160">
@@ -360,10 +374,18 @@ function formatProgress(progress: number): string {
               <el-table-column label="操作" width="160" fixed="right">
                 <template #default="{ row }">
                   <div class="table-cell-actions">
-                    <el-button link type="primary" size="small" @click="resumeTorrent(row)">
+                    <el-button
+                      link
+                      type="primary"
+                      size="small"
+                      @click="resumeTorrent(row)">
                       恢复
                     </el-button>
-                    <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
+                    <el-button
+                      link
+                      type="danger"
+                      size="small"
+                      @click="openDeleteDialog(row)">
                       删除
                     </el-button>
                   </div>
@@ -395,14 +417,20 @@ function formatProgress(progress: number): string {
             <el-table v-loading="loading" :data="archiveTorrents" style="width: 100%">
               <el-table-column label="站点" prop="site_name" width="100">
                 <template #default="{ row }">
-                  <el-tag size="small" effect="plain" class="status-badge status-badge--info">
+                  <el-tag
+                    size="small"
+                    effect="plain"
+                    class="status-badge status-badge--info">
                     {{ row.site_name }}
                   </el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="标题" min-width="250">
                 <template #default="{ row }">
-                  <el-tooltip :content="row.title" placement="top" :show-after="500">
+                  <el-tooltip
+                    :content="row.title"
+                    placement="top"
+                    :show-after="500">
                     <span class="table-cell-primary title-text">{{ row.title }}</span>
                   </el-tooltip>
                 </template>
@@ -412,9 +440,8 @@ function formatProgress(progress: number): string {
                   <el-tag
                     :type="row.is_completed ? 'success' : 'warning'"
                     size="small"
-                    effect="light"
-                  >
-                    {{ row.is_completed ? '已完成' : '未完成' }}
+                    effect="light">
+                    {{ row.is_completed ? "已完成" : "未完成" }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -425,12 +452,12 @@ function formatProgress(progress: number): string {
               </el-table-column>
               <el-table-column label="下载器" width="120">
                 <template #default="{ row }">
-                  <span class="table-cell-secondary">{{ row.downloader_name || '-' }}</span>
+                  <span class="table-cell-secondary">{{ row.downloader_name || "-" }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="暂停原因" min-width="150">
                 <template #default="{ row }">
-                  <span class="table-cell-secondary">{{ row.pause_reason || '-' }}</span>
+                  <span class="table-cell-secondary">{{ row.pause_reason || "-" }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="归档时间" width="160">
@@ -478,8 +505,13 @@ function formatProgress(progress: number): string {
         <div class="dialog-footer-custom">
           <el-button @click="deleteDialogVisible = false">取消</el-button>
           <div class="action-buttons">
-            <el-button type="danger" plain @click="confirmDeleteRow(true)">同时删除数据</el-button>
-            <el-button type="primary" @click="confirmDeleteRow(false)">仅删除任务</el-button>
+            <el-button
+              type="danger"
+              plain
+              @click="confirmDeleteRow(true)">同时删除数据</el-button>
+            <el-button
+              type="primary"
+              @click="confirmDeleteRow(false)">仅删除任务</el-button>
           </div>
         </div>
       </template>
@@ -488,8 +520,8 @@ function formatProgress(progress: number): string {
 </template>
 
 <style scoped>
-@import '@/styles/common-page.css';
-@import '@/styles/table-page.css';
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
 
 .custom-tabs :deep(.el-tabs__header) {
   margin-bottom: 0;

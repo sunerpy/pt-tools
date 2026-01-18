@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { qbitApi, type QbitSettings } from '@/api'
-import { ElMessage } from 'element-plus'
+import { qbitApi, type QbitSettings } from "@/api"
+import { ElMessage } from "element-plus"
+import { onMounted, ref } from "vue"
 
 const loading = ref(false)
 const saving = ref(false)
 
 const form = ref<QbitSettings>({
   enabled: false,
-  url: '',
-  user: '',
-  password: ''
+  url: "",
+  user: "",
+  password: ""
 })
 
 onMounted(async () => {
@@ -18,7 +18,7 @@ onMounted(async () => {
   try {
     form.value = await qbitApi.get()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -26,16 +26,16 @@ onMounted(async () => {
 
 async function save() {
   if (form.value.enabled && (!form.value.url || !form.value.user || !form.value.password)) {
-    ElMessage.error('启用时 URL、用户名、密码均为必填')
+    ElMessage.error("启用时 URL、用户名、密码均为必填")
     return
   }
 
   saving.value = true
   try {
     await qbitApi.save(form.value)
-    ElMessage.success('保存成功')
+    ElMessage.success("保存成功")
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '保存失败')
+    ElMessage.error((e as Error).message || "保存失败")
   } finally {
     saving.value = false
   }
@@ -49,7 +49,7 @@ async function save() {
         <div class="card-header">
           <span>qBittorrent 设置</span>
           <el-tag :type="form.enabled ? 'success' : 'info'" size="small">
-            {{ form.enabled ? '已启用' : '未启用' }}
+            {{ form.enabled ? "已启用" : "未启用" }}
           </el-tag>
         </div>
       </template>
@@ -66,8 +66,7 @@ async function save() {
           <el-input
             v-model="form.url"
             placeholder="http://192.168.1.10:8080"
-            :disabled="!form.enabled"
-          >
+            :disabled="!form.enabled">
             <template #prepend>
               <el-icon><Link /></el-icon>
             </template>
@@ -89,8 +88,7 @@ async function save() {
             type="password"
             show-password
             placeholder="请输入密码"
-            :disabled="!form.enabled"
-          >
+            :disabled="!form.enabled">
             <template #prepend>
               <el-icon><Lock /></el-icon>
             </template>

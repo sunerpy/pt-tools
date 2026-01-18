@@ -1,8 +1,8 @@
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { siteLevelsApi, type SiteLevelRequirement, type SiteLevelsResponse } from '@/api'
+import { type SiteLevelRequirement, siteLevelsApi, type SiteLevelsResponse } from "@/api"
+import { defineStore } from "pinia"
+import { ref } from "vue"
 
-export const useSiteLevelsStore = defineStore('siteLevels', () => {
+export const useSiteLevelsStore = defineStore("siteLevels", () => {
   // 缓存所有站点的等级信息
   const levelsCache = ref<Record<string, SiteLevelsResponse>>({})
   const loading = ref(false)
@@ -21,7 +21,7 @@ export const useSiteLevelsStore = defineStore('siteLevels', () => {
       levelsCache.value = response.sites || {}
       loaded.value = true
     } catch (e) {
-      error.value = (e as Error).message || '加载等级信息失败'
+      error.value = (e as Error).message || "加载等级信息失败"
     } finally {
       loading.value = false
     }

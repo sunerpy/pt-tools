@@ -1,4 +1,4 @@
-const BASE_URL = ''
+const BASE_URL = ""
 
 interface ApiOptions extends RequestInit {
   body?: string
@@ -10,22 +10,22 @@ class ApiError extends Error {
     message: string
   ) {
     super(message)
-    this.name = 'ApiError'
+    this.name = "ApiError"
   }
 }
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
-    credentials: 'same-origin',
+    credentials: "same-origin",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...options.headers
     },
     ...options
   })
 
-  const contentType = response.headers.get('content-type') || ''
-  const isJSON = contentType.includes('application/json')
+  const contentType = response.headers.get("content-type") || ""
+  const isJSON = contentType.includes("application/json")
 
   if (!response.ok) {
     const msg = await response.text()
@@ -42,10 +42,10 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, data?: unknown) =>
     request<T>(path, {
-      method: 'POST',
+      method: "POST",
       body: data ? JSON.stringify(data) : undefined
     }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' })
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" })
 }
 
 // API 类型定义
@@ -124,17 +124,17 @@ export interface LogsResponse {
 
 // API 方法
 export const globalApi = {
-  get: () => api.get<GlobalSettings>('/api/global'),
-  save: (data: GlobalSettings) => api.post<void>('/api/global', data)
+  get: () => api.get<GlobalSettings>("/api/global"),
+  save: (data: GlobalSettings) => api.post<void>("/api/global", data)
 }
 
 export const qbitApi = {
-  get: () => api.get<QbitSettings>('/api/qbit'),
-  save: (data: QbitSettings) => api.post<void>('/api/qbit', data)
+  get: () => api.get<QbitSettings>("/api/qbit"),
+  save: (data: QbitSettings) => api.post<void>("/api/qbit", data)
 }
 
 export const sitesApi = {
-  list: () => api.get<Record<string, SiteConfig>>('/api/sites'),
+  list: () => api.get<Record<string, SiteConfig>>("/api/sites"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
   delete: (name: string) => api.delete<void>(`/api/sites?name=${encodeURIComponent(name)}`),
@@ -147,17 +147,17 @@ export const tasksApi = {
 }
 
 export const logsApi = {
-  get: () => api.get<LogsResponse>('/api/logs')
+  get: () => api.get<LogsResponse>("/api/logs")
 }
 
 export const controlApi = {
-  stop: () => api.post<void>('/api/control/stop'),
-  start: () => api.post<void>('/api/control/start')
+  stop: () => api.post<void>("/api/control/stop"),
+  start: () => api.post<void>("/api/control/start")
 }
 
 export const passwordApi = {
   change: (data: { username: string; old: string; new: string }) =>
-    api.post<void>('/api/password', data)
+    api.post<void>("/api/password", data)
 }
 
 // 下载器相关类型
@@ -230,12 +230,12 @@ export interface TemplateImportRequest {
 
 // 下载器 API
 export const downloadersApi = {
-  list: () => api.get<DownloaderSetting[]>('/api/downloaders'),
+  list: () => api.get<DownloaderSetting[]>("/api/downloaders"),
   get: (id: number) => api.get<DownloaderSetting>(`/api/downloaders/${id}`),
-  create: (data: DownloaderSetting) => api.post<DownloaderSetting>('/api/downloaders', data),
+  create: (data: DownloaderSetting) => api.post<DownloaderSetting>("/api/downloaders", data),
   update: (id: number, data: DownloaderSetting) =>
     request<DownloaderSetting>(`/api/downloaders/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data)
     }),
   delete: (id: number) => api.delete<void>(`/api/downloaders/${id}`),
@@ -245,18 +245,18 @@ export const downloadersApi = {
 
 // 动态站点 API
 export const dynamicSitesApi = {
-  list: () => api.get<DynamicSiteSetting[]>('/api/sites/dynamic'),
-  create: (data: Omit<DynamicSiteSetting, 'id' | 'is_builtin'>) =>
-    api.post<DynamicSiteSetting>('/api/sites/dynamic', data),
+  list: () => api.get<DynamicSiteSetting[]>("/api/sites/dynamic"),
+  create: (data: Omit<DynamicSiteSetting, "id" | "is_builtin">) =>
+    api.post<DynamicSiteSetting>("/api/sites/dynamic", data),
   validate: (data: SiteValidationRequest) =>
-    api.post<SiteValidationResponse>('/api/sites/validate', data)
+    api.post<SiteValidationResponse>("/api/sites/validate", data)
 }
 
 // 站点模板 API
 export const templatesApi = {
-  list: () => api.get<SiteTemplate[]>('/api/sites/templates'),
+  list: () => api.get<SiteTemplate[]>("/api/sites/templates"),
   import: (data: TemplateImportRequest) =>
-    api.post<DynamicSiteSetting>('/api/sites/templates/import', data),
+    api.post<DynamicSiteSetting>("/api/sites/templates/import", data),
   export: (id: number) => api.get<unknown>(`/api/sites/templates/${id}/export`)
 }
 
@@ -265,8 +265,8 @@ export interface FilterRule {
   id?: number
   name: string
   pattern: string
-  pattern_type: 'keyword' | 'wildcard' | 'regex'
-  match_field?: 'title' | 'tag' | 'both'
+  pattern_type: "keyword" | "wildcard" | "regex"
+  match_field?: "title" | "tag" | "both"
   require_free: boolean
   enabled: boolean
   site_id?: number
@@ -300,18 +300,18 @@ export interface FilterRuleTestResponse {
 
 // 过滤规则 API
 export const filterRulesApi = {
-  list: () => api.get<FilterRule[]>('/api/filter-rules'),
+  list: () => api.get<FilterRule[]>("/api/filter-rules"),
   get: (id: number) => api.get<FilterRule>(`/api/filter-rules/${id}`),
-  create: (data: Omit<FilterRule, 'id' | 'created_at' | 'updated_at'>) =>
-    api.post<FilterRule>('/api/filter-rules', data),
+  create: (data: Omit<FilterRule, "id" | "created_at" | "updated_at">) =>
+    api.post<FilterRule>("/api/filter-rules", data),
   update: (id: number, data: Partial<FilterRule>) =>
     request<FilterRule>(`/api/filter-rules/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data)
     }),
   delete: (id: number) => api.delete<void>(`/api/filter-rules/${id}`),
   test: (data: FilterRuleTestRequest) =>
-    api.post<FilterRuleTestResponse>('/api/filter-rules/test', data)
+    api.post<FilterRuleTestResponse>("/api/filter-rules/test", data)
 }
 
 // RSS-Filter 关联相关类型
@@ -330,7 +330,7 @@ export const rssFilterApi = {
   get: (rssId: number) => api.get<RSSFilterAssociationResponse>(`/api/rss/${rssId}/filter-rules`),
   update: (rssId: number, data: RSSFilterAssociationRequest) =>
     request<RSSFilterAssociationResponse>(`/api/rss/${rssId}/filter-rules`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data)
     })
 }
@@ -348,10 +348,10 @@ export interface LogLevelRequest {
 
 // 日志级别 API
 export const logLevelApi = {
-  get: () => api.get<LogLevelResponse>('/api/log-level'),
+  get: () => api.get<LogLevelResponse>("/api/log-level"),
   set: (level: string) =>
-    request<LogLevelResponse>('/api/log-level', {
-      method: 'PUT',
+    request<LogLevelResponse>("/api/log-level", {
+      method: "PUT",
       body: JSON.stringify({ level })
     })
 }
@@ -419,20 +419,20 @@ export interface SyncResponse {
 
 // 用户信息 API
 export const userInfoApi = {
-  getAggregated: () => api.get<AggregatedStatsResponse>('/api/v2/userinfo/aggregated'),
-  getSites: () => api.get<UserInfoResponse[]>('/api/v2/userinfo/sites'),
+  getAggregated: () => api.get<AggregatedStatsResponse>("/api/v2/userinfo/aggregated"),
+  getSites: () => api.get<UserInfoResponse[]>("/api/v2/userinfo/sites"),
   getSite: (siteId: string) => api.get<UserInfoResponse>(`/api/v2/userinfo/sites/${siteId}`),
   syncSite: (siteId: string) => api.post<UserInfoResponse>(`/api/v2/userinfo/sites/${siteId}`),
   deleteSite: (siteId: string) => api.delete<void>(`/api/v2/userinfo/sites/${siteId}`),
   syncAll: (sites?: string[]) =>
-    api.post<SyncResponse>('/api/v2/userinfo/sync', sites ? { sites } : {}),
-  getRegisteredSites: () => api.get<{ sites: string[] }>('/api/v2/userinfo/registered'),
-  clearCache: () => api.post<{ status: string }>('/api/v2/userinfo/cache/clear')
+    api.post<SyncResponse>("/api/v2/userinfo/sync", sites ? { sites } : {}),
+  getRegisteredSites: () => api.get<{ sites: string[] }>("/api/v2/userinfo/registered"),
+  clearCache: () => api.post<{ status: string }>("/api/v2/userinfo/cache/clear")
 }
 
 // 批量下载相关类型
 export interface FreeTorrentBatchRequest {
-  archiveType: 'tar.gz' | 'zip'
+  archiveType: "tar.gz" | "zip"
 }
 
 export interface TorrentManifestItem {
@@ -460,7 +460,7 @@ export const batchDownloadApi = {
   listFreeTorrents: (siteId: string) =>
     api.get<TorrentManifestItem[]>(`/api/site/${siteId}/free-torrents`),
   // 下载免费种子压缩包
-  downloadFreeTorrents: (siteId: string, archiveType: 'tar.gz' | 'zip' = 'tar.gz') =>
+  downloadFreeTorrents: (siteId: string, archiveType: "tar.gz" | "zip" = "tar.gz") =>
     api.get<FreeTorrentBatchResponse>(
       `/api/site/${siteId}/free-torrents/download?type=${archiveType}`
     )
@@ -479,7 +479,7 @@ export interface SiteLevelRequirement {
   id: number
   name: string
   nameAka?: string[]
-  groupType?: 'user' | 'vip' | 'manager'
+  groupType?: "user" | "vip" | "manager"
   interval?: string // ISO 8601 duration, e.g., "P5W" for 5 weeks
   downloaded?: string // e.g., "200GB"
   uploaded?: string
@@ -506,7 +506,7 @@ export interface AllSiteLevelsResponse {
 // 站点等级 API
 export const siteLevelsApi = {
   get: (siteId: string) => api.get<SiteLevelsResponse>(`/api/v2/sites/${siteId}/levels`),
-  getAll: () => api.get<AllSiteLevelsResponse>('/api/v2/sites/levels')
+  getAll: () => api.get<AllSiteLevelsResponse>("/api/v2/sites/levels")
 }
 
 // ============== 下载器目录管理 ==============
@@ -527,11 +527,11 @@ export const downloaderDirectoriesApi = {
     api.get<DownloaderDirectory[]>(`/api/downloaders/${downloaderId}/directories`),
   create: (
     downloaderId: number,
-    data: Omit<DownloaderDirectory, 'id' | 'downloader_id' | 'created_at' | 'updated_at'>
+    data: Omit<DownloaderDirectory, "id" | "downloader_id" | "created_at" | "updated_at">
   ) => api.post<DownloaderDirectory>(`/api/downloaders/${downloaderId}/directories`, data),
   update: (downloaderId: number, dirId: number, data: Partial<DownloaderDirectory>) =>
     request<DownloaderDirectory>(`/api/downloaders/${downloaderId}/directories/${dirId}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data)
     }),
   delete: (downloaderId: number, dirId: number) =>
@@ -540,7 +540,7 @@ export const downloaderDirectoriesApi = {
     api.post<DownloaderDirectory>(
       `/api/downloaders/${downloaderId}/directories/${dirId}/set-default`
     ),
-  listAll: () => api.get<Record<number, DownloaderDirectory[]>>('/api/downloaders/all-directories')
+  listAll: () => api.get<Record<number, DownloaderDirectory[]>>("/api/downloaders/all-directories")
 }
 
 // ============== 站点分类配置 ==============
@@ -564,9 +564,9 @@ export interface SiteCategoriesConfig {
 
 // 站点分类 API
 export const siteCategoriesApi = {
-  getAll: () => api.get<Record<string, SiteCategoriesConfig>>('/api/v2/sites/categories'),
+  getAll: () => api.get<Record<string, SiteCategoriesConfig>>("/api/v2/sites/categories"),
   get: (siteId: string) => api.get<SiteCategoriesConfig>(`/api/v2/sites/${siteId}/categories`),
-  getSupportedSites: () => api.get<string[]>('/api/v2/sites/supported')
+  getSupportedSites: () => api.get<string[]>("/api/v2/sites/supported")
 }
 
 // ============== 种子搜索相关 ==============
@@ -601,7 +601,7 @@ export interface MultiSiteSearchRequest {
   sites: string[]
   page?: number
   pageSize?: number
-  sortBy?: 'sourceSite' | 'publishTime' | 'size' | 'seeders' | 'leechers' | 'snatched'
+  sortBy?: "sourceSite" | "publishTime" | "size" | "seeders" | "leechers" | "snatched"
   orderDesc?: boolean
   siteParams?: Record<string, SiteSearchParams>
   timeoutSecs?: number // Timeout in seconds for the search
@@ -630,13 +630,13 @@ export interface SearchCacheStats {
 // 搜索 API
 export const searchApi = {
   multiSite: (req: MultiSiteSearchRequest) =>
-    api.post<MultiSiteSearchResponse>('/api/v2/search/multi', req),
+    api.post<MultiSiteSearchResponse>("/api/v2/search/multi", req),
   getSites: async () => {
-    const resp = await api.get<{ sites: string[] }>('/api/v2/search/sites')
+    const resp = await api.get<{ sites: string[] }>("/api/v2/search/sites")
     return resp.sites || []
   },
-  clearCache: () => api.post<{ status: string }>('/api/v2/search/cache/clear'),
-  getCacheStats: () => api.get<SearchCacheStats>('/api/v2/search/cache/stats')
+  clearCache: () => api.post<{ status: string }>("/api/v2/search/cache/clear"),
+  getCacheStats: () => api.get<SearchCacheStats>("/api/v2/search/cache/stats")
 }
 
 // ============== 种子推送相关 ==============
@@ -706,9 +706,9 @@ export interface BatchTorrentPushResponse {
 
 // 种子推送 API
 export const torrentPushApi = {
-  push: (req: TorrentPushRequest) => api.post<TorrentPushResponse>('/api/v2/torrents/push', req),
+  push: (req: TorrentPushRequest) => api.post<TorrentPushResponse>("/api/v2/torrents/push", req),
   batchPush: (req: BatchTorrentPushRequest) =>
-    api.post<BatchTorrentPushResponse>('/api/v2/torrents/batch-push', req)
+    api.post<BatchTorrentPushResponse>("/api/v2/torrents/batch-push", req)
 }
 
 // ============== 暂停种子管理相关 ==============
@@ -779,19 +779,19 @@ export interface ArchiveTorrentsResponse {
 export const pausedTorrentsApi = {
   list: (page = 1, pageSize = 50, site?: string) => {
     const params = new URLSearchParams()
-    params.set('page', page.toString())
-    params.set('page_size', pageSize.toString())
-    if (site) params.set('site', site)
+    params.set("page", page.toString())
+    params.set("page_size", pageSize.toString())
+    if (site) params.set("site", site)
     return api.get<PausedTorrentsResponse>(`/api/torrents/paused?${params.toString()}`)
   },
   delete: (req: DeletePausedRequest) =>
-    api.post<DeletePausedResponse>('/api/torrents/delete-paused', req),
+    api.post<DeletePausedResponse>("/api/torrents/delete-paused", req),
   resume: (id: number) => api.post<ResumeTorrentResponse>(`/api/torrents/${id}/resume`),
   listArchive: (page = 1, pageSize = 50, site?: string) => {
     const params = new URLSearchParams()
-    params.set('page', page.toString())
-    params.set('page_size', pageSize.toString())
-    if (site) params.set('site', site)
+    params.set("page", page.toString())
+    params.set("page_size", pageSize.toString())
+    if (site) params.set("site", site)
     return api.get<ArchiveTorrentsResponse>(`/api/torrents/archive?${params.toString()}`)
   }
 }

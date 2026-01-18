@@ -81,18 +81,18 @@ docker run -d \
 ```yaml
 version: "3.8"
 services:
-    pt-tools:
-        image: sunerpy/pt-tools:latest
-        container_name: pt-tools
-        environment:
-            PT_HOST: "0.0.0.0"
-            PT_PORT: "8080"
-            TZ: "Asia/Shanghai"
-        ports:
-            - "8080:8080"
-        volumes:
-            - ./data:/app/.pt-tools
-        restart: unless-stopped
+  pt-tools:
+    image: sunerpy/pt-tools:latest
+    container_name: pt-tools
+    environment:
+      PT_HOST: "0.0.0.0"
+      PT_PORT: "8080"
+      TZ: "Asia/Shanghai"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/.pt-tools
+    restart: unless-stopped
 ```
 
 启动后访问 `http://localhost:8080` 进入 Web 管理界面。

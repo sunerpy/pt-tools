@@ -48,16 +48,16 @@ docker run -d \
 
 ## 环境变量
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `PT_HOST` | 监听地址 | `0.0.0.0` |
-| `PT_PORT` | 监听端口 | `8080` |
-| `PT_ADMIN_USER` | 管理员用户名 | `admin` |
-| `PT_ADMIN_PASS` | 管理员密码 | `adminadmin` |
-| `PT_ADMIN_RESET` | 重置密码（设为 `1`） | - |
-| `PUID` | 用户 ID | `1000` |
-| `PGID` | 组 ID | `1000` |
-| `TZ` | 时区 | `Asia/Shanghai` |
+| 变量             | 说明                 | 默认值          |
+| ---------------- | -------------------- | --------------- |
+| `PT_HOST`        | 监听地址             | `0.0.0.0`       |
+| `PT_PORT`        | 监听端口             | `8080`          |
+| `PT_ADMIN_USER`  | 管理员用户名         | `admin`         |
+| `PT_ADMIN_PASS`  | 管理员密码           | `adminadmin`    |
+| `PT_ADMIN_RESET` | 重置密码（设为 `1`） | -               |
+| `PUID`           | 用户 ID              | `1000`          |
+| `PGID`           | 组 ID                | `1000`          |
+| `TZ`             | 时区                 | `Asia/Shanghai` |
 
 ## 重置管理员密码
 

@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
 import {
-  dynamicSitesApi,
-  templatesApi,
   downloadersApi,
+  type DownloaderSetting,
+  dynamicSitesApi,
   type DynamicSiteSetting,
   type SiteTemplate,
-  type DownloaderSetting,
-  type SiteValidationResponse
-} from '@/api'
-import { ElMessage } from 'element-plus'
+  type SiteValidationResponse,
+  templatesApi
+} from "@/api"
+import { ElMessage } from "element-plus"
+import { computed, onMounted, ref } from "vue"
 
 const loading = ref(false)
 const saving = ref(false)
@@ -27,27 +27,27 @@ const showValidationResult = ref(false)
 
 // 表单
 const addForm = ref({
-  name: '',
-  display_name: '',
-  base_url: '',
-  auth_method: 'cookie',
-  cookie: '',
-  api_key: '',
-  api_url: '',
+  name: "",
+  display_name: "",
+  base_url: "",
+  auth_method: "cookie",
+  cookie: "",
+  api_key: "",
+  api_url: "",
   downloader_id: undefined as number | undefined
 })
 
 const importForm = ref({
-  templateJson: '',
-  cookie: '',
-  api_key: ''
+  templateJson: "",
+  cookie: "",
+  api_key: ""
 })
 
 const validationResult = ref<SiteValidationResponse | null>(null)
 
 const authMethods = [
-  { value: 'cookie', label: 'Cookie 认证' },
-  { value: 'api_key', label: 'API Key 认证' }
+  { value: "cookie", label: "Cookie 认证" },
+  { value: "api_key", label: "API Key 认证" }
 ]
 
 const enabledDownloaders = computed(() => {
@@ -70,7 +70,7 @@ async function loadData() {
     templates.value = templatesData
     downloaders.value = downloadersData
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -78,13 +78,13 @@ async function loadData() {
 
 function openAddDialog() {
   addForm.value = {
-    name: '',
-    display_name: '',
-    base_url: '',
-    auth_method: 'cookie',
-    cookie: '',
-    api_key: '',
-    api_url: '',
+    name: "",
+    display_name: "",
+    base_url: "",
+    auth_method: "cookie",
+    cookie: "",
+    api_key: "",
+    api_url: "",
     downloader_id: undefined
   }
   validationResult.value = null
@@ -94,16 +94,16 @@ function openAddDialog() {
 
 function openImportDialog() {
   importForm.value = {
-    templateJson: '',
-    cookie: '',
-    api_key: ''
+    templateJson: "",
+    cookie: "",
+    api_key: ""
   }
   showImportDialog.value = true
 }
 
 async function validateSite() {
   if (!addForm.value.name) {
-    ElMessage.error('站点名称不能为空')
+    ElMessage.error("站点名称不能为空")
     return
   }
 
@@ -120,12 +120,12 @@ async function validateSite() {
     showValidationResult.value = true
 
     if (validationResult.value.valid) {
-      ElMessage.success('验证成功')
+      ElMessage.success("验证成功")
     } else {
       ElMessage.warning(validationResult.value.message)
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '验证失败')
+    ElMessage.error((e as Error).message || "验证失败")
   } finally {
     validating.value = false
   }
@@ -133,7 +133,7 @@ async function validateSite() {
 
 async function createSite() {
   if (!addForm.value.name) {
-    ElMessage.error('站点名称不能为空')
+    ElMessage.error("站点名称不能为空")
     return
   }
 
@@ -150,11 +150,11 @@ async function createSite() {
       downloader_id: addForm.value.downloader_id,
       enabled: true
     })
-    ElMessage.success('创建成功')
+    ElMessage.success("创建成功")
     showAddDialog.value = false
     await loadData()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '创建失败')
+    ElMessage.error((e as Error).message || "创建失败")
   } finally {
     saving.value = false
   }
@@ -162,7 +162,7 @@ async function createSite() {
 
 async function importTemplate() {
   if (!importForm.value.templateJson) {
-    ElMessage.error('请输入模板JSON')
+    ElMessage.error("请输入模板JSON")
     return
   }
 
@@ -170,7 +170,7 @@ async function importTemplate() {
   try {
     templateData = JSON.parse(importForm.value.templateJson)
   } catch {
-    ElMessage.error('无效的JSON格式')
+    ElMessage.error("无效的JSON格式")
     return
   }
 
@@ -181,11 +181,11 @@ async function importTemplate() {
       cookie: importForm.value.cookie,
       api_key: importForm.value.api_key
     })
-    ElMessage.success('导入成功')
+    ElMessage.success("导入成功")
     showImportDialog.value = false
     await loadData()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '导入失败')
+    ElMessage.error((e as Error).message || "导入失败")
   } finally {
     saving.value = false
   }
@@ -198,25 +198,25 @@ async function exportTemplate(tpl: SiteTemplate) {
 
     // 复制到剪贴板
     await navigator.clipboard.writeText(json)
-    ElMessage.success('模板已复制到剪贴板')
+    ElMessage.success("模板已复制到剪贴板")
 
     // 也可以下载
-    const blob = new Blob([json], { type: 'application/json' })
+    const blob = new Blob([json], { type: "application/json" })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
+    const a = document.createElement("a")
     a.href = url
     a.download = `${tpl.name}-template.json`
     a.click()
     URL.revokeObjectURL(url)
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '导出失败')
+    ElMessage.error((e as Error).message || "导出失败")
   }
 }
 
 function getDownloaderName(id?: number) {
-  if (!id) return '默认'
+  if (!id) return "默认"
   const dl = downloaders.value.find(d => d.id === id)
-  return dl?.name || '未知'
+  return dl?.name || "未知"
 }
 
 function getAuthMethodLabel(method: string) {
@@ -235,7 +235,10 @@ function getAuthMethodLabel(method: string) {
             <el-button type="success" :icon="'Upload'" @click="openImportDialog">
               导入模板
             </el-button>
-            <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加站点</el-button>
+            <el-button
+              type="primary"
+              :icon="'Plus'"
+              @click="openAddDialog">添加站点</el-button>
           </el-space>
         </div>
       </template>
@@ -255,7 +258,7 @@ function getAuthMethodLabel(method: string) {
         <el-table-column label="状态" min-width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-              {{ row.enabled ? '已启用' : '未启用' }}
+              {{ row.enabled ? "已启用" : "未启用" }}
             </el-tag>
           </template>
         </el-table-column>
@@ -276,8 +279,11 @@ function getAuthMethodLabel(method: string) {
 
         <el-table-column label="类型" min-width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.is_builtin ? 'primary' : 'success'" size="small" effect="plain">
-              {{ row.is_builtin ? '内置' : '动态' }}
+            <el-tag
+              :type="row.is_builtin ? 'primary' : 'success'"
+              size="small"
+              effect="plain">
+              {{ row.is_builtin ? "内置" : "动态" }}
             </el-tag>
           </template>
         </el-table-column>
@@ -316,19 +322,22 @@ function getAuthMethodLabel(method: string) {
 
         <el-table-column label="描述" min-width="200">
           <template #default="{ row }">
-            <span>{{ row.description || '-' }}</span>
+            <span>{{ row.description || "-" }}</span>
           </template>
         </el-table-column>
 
         <el-table-column label="版本" min-width="80" align="center">
           <template #default="{ row }">
-            <span>{{ row.version || '-' }}</span>
+            <span>{{ row.version || "-" }}</span>
           </template>
         </el-table-column>
 
         <el-table-column label="操作" min-width="100" align="center">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="exportTemplate(row)">导出</el-button>
+            <el-button
+              type="primary"
+              size="small"
+              @click="exportTemplate(row)">导出</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -356,7 +365,12 @@ function getAuthMethodLabel(method: string) {
 
         <el-form-item label="认证方式" required>
           <el-select v-model="addForm.auth_method" style="width: 100%">
-            <el-option v-for="m in authMethods" :key="m.value" :label="m.label" :value="m.value" />
+            <el-option
+              v-for="m in authMethods"
+              :key="m.value"
+              :label="m.label"
+              :value="m.value"
+            />
           </el-select>
         </el-form-item>
 
@@ -385,8 +399,7 @@ function getAuthMethodLabel(method: string) {
             v-model="addForm.downloader_id"
             style="width: 100%"
             clearable
-            placeholder="使用默认下载器"
-          >
+            placeholder="使用默认下载器">
             <el-option
               v-for="dl in enabledDownloaders"
               :key="dl.id"
@@ -414,7 +427,9 @@ function getAuthMethodLabel(method: string) {
             发现 {{ validationResult.free_torrents.length }} 个免费种子:
           </div>
           <ul>
-            <li v-for="(t, i) in validationResult.free_torrents.slice(0, 5)" :key="i">{{ t }}</li>
+            <li v-for="(t, i) in validationResult.free_torrents.slice(0, 5)" :key="i">
+              {{ t }}
+            </li>
           </ul>
           <div v-if="validationResult.free_torrents.length > 5" class="more-hint">
             还有 {{ validationResult.free_torrents.length - 5 }} 个...
@@ -424,7 +439,10 @@ function getAuthMethodLabel(method: string) {
 
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="info" :loading="validating" @click="validateSite">验证配置</el-button>
+        <el-button
+          type="info"
+          :loading="validating"
+          @click="validateSite">验证配置</el-button>
         <el-button type="primary" :loading="saving" @click="createSite">创建站点</el-button>
       </template>
     </el-dialog>

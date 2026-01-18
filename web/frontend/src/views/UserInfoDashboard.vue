@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { userInfoApi, type AggregatedStatsResponse } from '@/api'
-import { ElMessage } from 'element-plus'
-import SiteAvatar from '@/components/SiteAvatar.vue'
-import LevelTooltip from '@/components/LevelTooltip.vue'
-import { useSiteLevelsStore } from '@/stores/siteLevels'
+import { type AggregatedStatsResponse, userInfoApi } from "@/api"
+import LevelTooltip from "@/components/LevelTooltip.vue"
+import SiteAvatar from "@/components/SiteAvatar.vue"
+import { useSiteLevelsStore } from "@/stores/siteLevels"
 import {
   formatBytes,
+  formatDate,
+  formatJoinDuration,
   formatNumber,
   formatRatio,
   formatTime,
-  formatDate,
   formatTimeAgo,
-  formatJoinDuration,
   getRatioType,
   getSiteBonusName,
   getSiteSeedingBonusName
-} from '@/utils/format'
+} from "@/utils/format"
+import { ElMessage } from "element-plus"
+import { computed, onMounted, onUnmounted, ref } from "vue"
 
 const siteLevelsStore = useSiteLevelsStore()
 
@@ -42,71 +42,71 @@ const statsCards = computed(() => {
   const stats = aggregatedStats.value
   const cards = [
     {
-      title: '总上传量',
+      title: "总上传量",
       value: formatBytes(stats.totalUploaded),
-      icon: 'Upload',
-      type: 'success'
+      icon: "Upload",
+      type: "success"
     },
     {
-      title: '总下载量',
+      title: "总下载量",
       value: formatBytes(stats.totalDownloaded),
-      icon: 'Download',
-      type: 'info'
+      icon: "Download",
+      type: "info"
     },
     {
-      title: '平均分享率',
+      title: "平均分享率",
       value: formatRatio(stats.averageRatio),
-      icon: 'DataAnalysis',
-      type: stats.averageRatio >= 1 ? 'success' : 'warning'
+      icon: "DataAnalysis",
+      type: stats.averageRatio >= 1 ? "success" : "warning"
     },
     {
-      title: '做种数',
+      title: "做种数",
       value: stats.totalSeeding.toString(),
-      icon: 'Connection',
-      type: 'success'
+      icon: "Connection",
+      type: "success"
     },
     {
-      title: '下载中',
+      title: "下载中",
       value: stats.totalLeeching.toString(),
-      icon: 'Loading',
-      type: 'info'
+      icon: "Loading",
+      type: "info"
     },
     {
-      title: '总魔力值',
+      title: "总魔力值",
       value: formatNumber(stats.totalBonus),
-      icon: 'Star',
-      type: 'warning'
+      icon: "Star",
+      type: "warning"
     },
     {
-      title: '总时魔/h',
+      title: "总时魔/h",
       value: formatNumber(stats.totalBonusPerHour ?? 0),
-      icon: 'Timer',
-      type: 'warning'
+      icon: "Timer",
+      type: "warning"
     }
   ]
 
   // 只有当存在做种积分时才显示
   if (stats.totalSeedingBonus && stats.totalSeedingBonus > 0) {
     cards.push({
-      title: '总做种积分',
+      title: "总做种积分",
       value: formatNumber(stats.totalSeedingBonus),
-      icon: 'Medal',
-      type: 'success'
+      icon: "Medal",
+      type: "success"
     })
   }
 
   cards.push(
     {
-      title: '做种总量',
+      title: "做种总量",
       value: formatBytes(stats.totalSeederSize ?? 0),
-      icon: 'Upload',
-      type: 'success'
+      icon: "Upload",
+      type: "success"
     },
     {
-      title: '站点数量',
+      title: "站点数量",
       value: stats.siteCount.toString(),
-      icon: 'OfficeBuilding',
-      type: 'info'
+      icon: "OfficeBuilding",
+      type: "info"
     }
   )
 
@@ -119,7 +119,7 @@ async function loadData() {
   try {
     aggregatedStats.value = await userInfoApi.getAggregated()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '加载失败')
+    ElMessage.error((e as Error).message || "加载失败")
   } finally {
     loading.value = false
   }
@@ -131,13 +131,15 @@ async function syncAll() {
   try {
     const result = await userInfoApi.syncAll()
     if (result.failed && result.failed.length > 0) {
-      ElMessage.warning(`同步完成: ${result.success.length} 成功, ${result.failed.length} 失败`)
+      ElMessage.warning(
+        `同步完成: ${result.success.length} 成功, ${result.failed.length} 失败`
+      )
     } else {
       ElMessage.success(`同步完成: ${result.success.length} 个站点`)
     }
     await loadData()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '同步失败')
+    ElMessage.error((e as Error).message || "同步失败")
   } finally {
     syncing.value = false
   }
@@ -151,7 +153,7 @@ async function syncSite(siteId: string) {
     ElMessage.success(`站点 ${siteId} 同步成功`)
     await loadData()
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '同步失败')
+    ElMessage.error((e as Error).message || "同步失败")
   } finally {
     syncingSite.value = null
   }
@@ -161,9 +163,9 @@ async function syncSite(siteId: string) {
 async function clearCache() {
   try {
     await userInfoApi.clearCache()
-    ElMessage.success('缓存已清除')
+    ElMessage.success("缓存已清除")
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '清除缓存失败')
+    ElMessage.error((e as Error).message || "清除缓存失败")
   }
 }
 
@@ -192,17 +194,18 @@ function toggleAutoRefresh() {
   autoRefreshEnabled.value = !autoRefreshEnabled.value
   if (autoRefreshEnabled.value) {
     startAutoRefresh()
-    ElMessage.success('已开启自动刷新')
+    ElMessage.success("已开启自动刷新")
   } else {
     stopAutoRefresh()
-    ElMessage.info('已关闭自动刷新')
+    ElMessage.info("已关闭自动刷新")
   }
 }
 
 // 检查是否有 H&R 数据
 function hasHnR(row: any): boolean {
   return (
-    (row.hnrUnsatisfied && row.hnrUnsatisfied > 0) || (row.hnrPreWarning && row.hnrPreWarning > 0)
+    (row.hnrUnsatisfied && row.hnrUnsatisfied > 0)
+    || (row.hnrPreWarning && row.hnrPreWarning > 0)
   )
 }
 
@@ -213,12 +216,12 @@ onMounted(() => {
   if (autoRefreshEnabled.value) {
     startAutoRefresh()
   }
-  window.addEventListener('resize', handleResize)
+  window.addEventListener("resize", handleResize)
 })
 
 onUnmounted(() => {
   stopAutoRefresh()
-  window.removeEventListener('resize', handleResize)
+  window.removeEventListener("resize", handleResize)
 })
 </script>
 
@@ -230,8 +233,7 @@ onUnmounted(() => {
         v-for="card in statsCards"
         :key="card.title"
         class="dashboard-stat-card"
-        :class="card.type"
-      >
+        :class="card.type">
         <div class="dashboard-stat-icon">
           <el-icon><component :is="card.icon" /></el-icon>
         </div>
@@ -249,15 +251,13 @@ onUnmounted(() => {
         <div class="dashboard-header-actions">
           <el-tooltip
             :content="autoRefreshEnabled ? '点击关闭自动刷新 (5分钟)' : '点击开启自动刷新'"
-            placement="top"
-          >
+            placement="top">
             <el-button
               size="small"
               :type="autoRefreshEnabled ? 'success' : 'info'"
-              @click="toggleAutoRefresh"
-            >
+              @click="toggleAutoRefresh">
               <el-icon><Timer /></el-icon>
-              {{ autoRefreshEnabled ? '自动刷新中' : '自动刷新已关闭' }}
+              {{ autoRefreshEnabled ? "自动刷新中" : "自动刷新已关闭" }}
             </el-button>
           </el-tooltip>
           <el-button size="small" @click="clearCache">清除缓存</el-button>
@@ -276,8 +276,7 @@ onUnmounted(() => {
           style="width: 100%"
           :default-sort="{ prop: 'uploaded', order: 'descending' }"
           stripe
-          highlight-current-row
-        >
+          highlight-current-row>
           <!-- 站点列：带消息徽章和悬停效果 -->
           <el-table-column prop="site" label="站点" min-width="160" sortable fixed="left">
             <template #default="{ row }">
@@ -286,11 +285,18 @@ onUnmounted(() => {
                   :value="row.unreadMessageCount"
                   :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
                   :max="99"
-                  type="danger"
-                >
-                  <div class="site-avatar-wrapper" @click.stop="syncSite(row.site)">
-                    <SiteAvatar :site-name="row.site" :site-id="row.site" :size="32" />
-                    <el-icon v-if="syncingSite === row.site" class="sync-icon is-loading">
+                  type="danger">
+                  <div
+                    class="site-avatar-wrapper"
+                    @click.stop="syncSite(row.site)">
+                    <SiteAvatar
+                      :site-name="row.site"
+                      :site-id="row.site"
+                      :size="32"
+                    />
+                    <el-icon
+                      v-if="syncingSite === row.site"
+                      class="sync-icon is-loading">
                       <Loading />
                     </el-icon>
                   </div>
@@ -315,7 +321,12 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 上传/下载量：双行布局带图标 -->
-          <el-table-column prop="uploaded" label="数据量" min-width="140" sortable align="right">
+          <el-table-column
+            prop="uploaded"
+            label="数据量"
+            min-width="140"
+            sortable
+            align="right">
             <template #default="{ row }">
               <div class="data-cell">
                 <div class="data-row upload">
@@ -336,10 +347,11 @@ onUnmounted(() => {
             label="真实数据"
             min-width="140"
             sortable
-            align="right"
-          >
+            align="right">
             <template #default="{ row }">
-              <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="data-cell">
+              <div
+                v-if="row.trueUploaded && row.trueUploaded !== row.uploaded"
+                class="data-cell">
                 <div class="data-row upload">
                   <el-icon><Top /></el-icon>
                   <span>{{ formatBytes(row.trueUploaded) }}</span>
@@ -354,7 +366,12 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 分享率 -->
-          <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
+          <el-table-column
+            prop="ratio"
+            label="分享率"
+            min-width="90"
+            sortable
+            align="center">
             <template #default="{ row }">
               <el-tag :type="getRatioType(row.ratio)" size="small" effect="plain">
                 {{ formatRatio(row.ratio) }}
@@ -363,7 +380,12 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 做种数 + H&R -->
-          <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
+          <el-table-column
+            prop="seeding"
+            label="做种"
+            min-width="110"
+            sortable
+            align="center">
             <template #default="{ row }">
               <div class="seeding-cell">
                 <div class="seeding-count">
@@ -372,8 +394,7 @@ onUnmounted(() => {
                 <div v-if="hasHnR(row)" class="hnr-info">
                   <el-tooltip
                     v-if="row.hnrPreWarning > 0"
-                    :content="`H&R 预警: ${row.hnrPreWarning}`"
-                  >
+                    :content="`H&R 预警: ${row.hnrPreWarning}`">
                     <span class="hnr-item warning">
                       <el-icon><Warning /></el-icon>
                       <span>{{ row.hnrPreWarning }}</span>
@@ -381,8 +402,7 @@ onUnmounted(() => {
                   </el-tooltip>
                   <el-tooltip
                     v-if="row.hnrUnsatisfied > 0"
-                    :content="`H&R 未满足: ${row.hnrUnsatisfied}`"
-                  >
+                    :content="`H&R 未满足: ${row.hnrUnsatisfied}`">
                     <span class="hnr-item danger">
                       <el-icon><CircleClose /></el-icon>
                       <span>{{ row.hnrUnsatisfied }}</span>
@@ -399,15 +419,19 @@ onUnmounted(() => {
             label="做种体积"
             min-width="110"
             sortable
-            align="right"
-          >
+            align="right">
             <template #default="{ row }">
               <span class="seeding-size">{{ formatBytes(row.seederSize ?? 0) }}</span>
             </template>
           </el-table-column>
 
           <!-- 魔力值 + 做种积分 -->
-          <el-table-column prop="bonus" label="积分" min-width="140" sortable align="right">
+          <el-table-column
+            prop="bonus"
+            label="积分"
+            min-width="140"
+            sortable
+            align="right">
             <template #default="{ row }">
               <div class="bonus-cell">
                 <el-tooltip :content="getSiteBonusName(row.site)" placement="left">
@@ -417,12 +441,9 @@ onUnmounted(() => {
                   </div>
                 </el-tooltip>
                 <el-tooltip
-                  v-if="
-                    row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)
-                  "
+                  v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
                   :content="getSiteSeedingBonusName(row.site) || '做种积分'"
-                  placement="left"
-                >
+                  placement="left">
                   <div class="bonus-row seeding">
                     <span class="value">{{ formatNumber(row.seedingBonus) }}</span>
                     <span class="label">{{ getSiteSeedingBonusName(row.site) }}</span>
@@ -438,17 +459,24 @@ onUnmounted(() => {
             label="时魔/h"
             min-width="100"
             sortable
-            align="right"
-          >
+            align="right">
             <template #default="{ row }">
               <span class="bonus-per-hour">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
             </template>
           </el-table-column>
 
           <!-- 注册时间 -->
-          <el-table-column prop="joinDate" label="入站" min-width="110" sortable align="center">
+          <el-table-column
+            prop="joinDate"
+            label="入站"
+            min-width="110"
+            sortable
+            align="center">
             <template #default="{ row }">
-              <el-tooltip v-if="row.joinDate" :content="formatDate(row.joinDate)" placement="top">
+              <el-tooltip
+                v-if="row.joinDate"
+                :content="formatDate(row.joinDate)"
+                placement="top">
                 <span class="join-time">{{ formatJoinDuration(row.joinDate) }}</span>
               </el-tooltip>
               <span v-else class="no-data">-</span>
@@ -456,7 +484,12 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 更新时间 -->
-          <el-table-column prop="lastUpdate" label="更新" min-width="100" sortable align="center">
+          <el-table-column
+            prop="lastUpdate"
+            label="更新"
+            min-width="100"
+            sortable
+            align="center">
             <template #default="{ row }">
               <el-tooltip :content="formatTime(row.lastUpdate)" placement="top">
                 <span class="update-time">{{ formatTimeAgo(row.lastUpdate) }}</span>
@@ -472,8 +505,7 @@ onUnmounted(() => {
                 size="small"
                 circle
                 :loading="syncingSite === row.site"
-                @click="syncSite(row.site)"
-              >
+                @click="syncSite(row.site)">
                 <el-icon><Refresh /></el-icon>
               </el-button>
             </template>
@@ -486,8 +518,7 @@ onUnmounted(() => {
         <div
           v-for="row in aggregatedStats?.perSiteStats || []"
           :key="row.site"
-          class="mobile-site-card"
-        >
+          class="mobile-site-card">
           <!-- 卡片头部：站点信息 -->
           <div class="mobile-card-header">
             <div class="site-info-wrapper">
@@ -495,11 +526,16 @@ onUnmounted(() => {
                 :value="row.unreadMessageCount"
                 :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
                 :max="99"
-                type="danger"
-              >
+                type="danger">
                 <div class="site-avatar-wrapper" @click.stop="syncSite(row.site)">
-                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="40" />
-                  <el-icon v-if="syncingSite === row.site" class="sync-icon is-loading">
+                  <SiteAvatar
+                    :site-name="row.site"
+                    :site-id="row.site"
+                    :size="40"
+                  />
+                  <el-icon
+                    v-if="syncingSite === row.site"
+                    class="sync-icon is-loading">
                     <Loading />
                   </el-icon>
                 </div>
@@ -574,8 +610,7 @@ onUnmounted(() => {
             </div>
             <div
               v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
-              class="stat-item"
-            >
+              class="stat-item">
               <span class="label">
                 <el-icon><Medal /></el-icon>
                 做种积分
@@ -602,8 +637,7 @@ onUnmounted(() => {
               size="small"
               round
               :loading="syncingSite === row.site"
-              @click="syncSite(row.site)"
-            >
+              @click="syncSite(row.site)">
               <el-icon><Refresh /></el-icon>
               同步
             </el-button>
@@ -620,8 +654,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-@import '@/styles/common-page.css';
-@import '@/styles/dashboard.css';
+@import "@/styles/common-page.css";
+@import "@/styles/dashboard.css";
 
 /* Component specific overrides */
 .dashboard-card-body {

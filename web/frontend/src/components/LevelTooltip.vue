@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { useSiteLevelsStore } from '@/stores/siteLevels'
-import type { SiteLevelRequirement } from '@/api'
-import { parseISODuration, formatNumber } from '@/utils/format'
+import type { SiteLevelRequirement } from "@/api"
+import { useSiteLevelsStore } from "@/stores/siteLevels"
+import { formatNumber, parseISODuration } from "@/utils/format"
+import { computed, onMounted } from "vue"
 
 const props = defineProps<{
   siteId: string
@@ -31,9 +31,9 @@ function isCurrentLevel(level: SiteLevelRequirement): boolean {
     return true
   }
   // 通过名称匹配
-  if (props.currentLevelName && props.currentLevelName !== '-') {
+  if (props.currentLevelName && props.currentLevelName !== "-") {
     // 标准化名称：去除空格、转小写
-    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '').trim()
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, "").trim()
     const currentName = normalize(props.currentLevelName)
     const levelName = normalize(level.name)
 
@@ -119,23 +119,23 @@ function formatAlternatives(level: SiteLevelRequirement): string[][] {
 // 获取等级组类型标签
 function getGroupTypeLabel(groupType?: string): string {
   switch (groupType) {
-    case 'vip':
-      return 'VIP'
-    case 'manager':
-      return '管理'
+    case "vip":
+      return "VIP"
+    case "manager":
+      return "管理"
     default:
-      return ''
+      return ""
   }
 }
 
 // 过滤只显示普通用户等级
 const userLevels = computed(() => {
-  return levels.value.filter(l => !l.groupType || l.groupType === 'user')
+  return levels.value.filter(l => !l.groupType || l.groupType === "user")
 })
 
 // 特殊等级（VIP、管理等）
 const specialLevels = computed(() => {
-  return levels.value.filter(l => l.groupType && l.groupType !== 'user')
+  return levels.value.filter(l => l.groupType && l.groupType !== "user")
 })
 
 // 重新加载等级数据
@@ -149,7 +149,7 @@ function reloadLevels() {
   <el-popover placement="bottom" :width="400" trigger="hover">
     <template #reference>
       <el-tag size="small" type="info" class="level-tag">
-        {{ currentLevelName || '-' }}
+        {{ currentLevelName || "-" }}
       </el-tag>
     </template>
 
@@ -179,12 +179,15 @@ function reloadLevels() {
           v-for="level in userLevels"
           :key="level.id"
           class="level-item"
-          :class="{ 'is-current': isCurrentLevel(level) }"
-        >
+          :class="{ 'is-current': isCurrentLevel(level) }">
           <div class="level-header">
             <span class="level-name">
               {{ level.name }}
-              <el-tag v-if="isCurrentLevel(level)" size="small" type="success" effect="dark">
+              <el-tag
+                v-if="isCurrentLevel(level)"
+                size="small"
+                type="success"
+                effect="dark">
                 当前
               </el-tag>
             </span>
@@ -195,8 +198,7 @@ function reloadLevels() {
             <span
               v-for="(req, idx) in formatRequirement(level)"
               :key="idx"
-              class="requirement-item"
-            >
+              class="requirement-item">
               {{ req }}
             </span>
           </div>
@@ -206,12 +208,16 @@ function reloadLevels() {
             <div
               v-for="(altReqs, altIdx) in formatAlternatives(level)"
               :key="altIdx"
-              class="alternative-group"
-            >
-              <span class="or-separator" v-if="altIdx > 0 || formatRequirement(level).length > 0">
+              class="alternative-group">
+              <span
+                class="or-separator"
+                v-if="altIdx > 0 || formatRequirement(level).length > 0">
                 或
               </span>
-              <span v-for="(req, reqIdx) in altReqs" :key="reqIdx" class="requirement-item alt">
+              <span
+                v-for="(req, reqIdx) in altReqs"
+                :key="reqIdx"
+                class="requirement-item alt">
                 {{ req }}
               </span>
             </div>
@@ -233,15 +239,20 @@ function reloadLevels() {
             v-for="level in specialLevels"
             :key="level.id"
             class="level-item special"
-            :class="{ 'is-current': isCurrentLevel(level) }"
-          >
+            :class="{ 'is-current': isCurrentLevel(level) }">
             <div class="level-header">
               <span class="level-name">
                 {{ level.name }}
-                <el-tag size="small" :type="level.groupType === 'vip' ? 'warning' : 'danger'">
+                <el-tag
+                  size="small"
+                  :type="level.groupType === 'vip' ? 'warning' : 'danger'">
                   {{ getGroupTypeLabel(level.groupType) }}
                 </el-tag>
-                <el-tag v-if="isCurrentLevel(level)" size="small" type="success" effect="dark">
+                <el-tag
+                  v-if="isCurrentLevel(level)"
+                  size="small"
+                  type="success"
+                  effect="dark">
                   当前
                 </el-tag>
               </span>

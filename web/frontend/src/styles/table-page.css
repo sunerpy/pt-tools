@@ -107,7 +107,7 @@
 }
 
 .table-cell-mono {
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
   font-size: var(--pt-text-sm);
   color: var(--pt-text-secondary);
   word-break: break-all;
