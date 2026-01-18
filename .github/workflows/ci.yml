@@ -11,99 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go-build-test:
-    name: Go Build & Test (${{ matrix.go-version }})
+  frontend-build:
+    name: Frontend Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ["1.25"]
-      fail-fast: false
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
-          cache: true
-
-      - name: Download Dependencies
-        run: go mod download
-
-      - name: Build
-        run: go build -v ./...
-
-      - name: Run Tests
-        run: |
-          mkdir -p dist
-          go test ./... -count=1 -race -cover -covermode=atomic -coverprofile=dist/coverage.out
-
-      - name: Upload Coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-coverage-${{ matrix.go-version }}
-          path: dist/coverage.out
-          retention-days: 7
-
-  go-lint:
-    name: Go Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: "go.mod"
-          cache: true
-
-      - name: Install golangci-lint from source
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-
-      - name: Run golangci-lint
-        run: golangci-lint run --timeout=5m
-
-  go-security:
-    name: Go Security
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: "go.mod"
-          cache: true
-
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
-  format-check:
-    name: Format Check (dprint)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install dprint
-        run: |
-          curl -fsSL https://dprint.dev/install.sh | sh
-          echo "$HOME/.dprint/bin" >> $GITHUB_PATH
-
-      - name: Check formatting
-        run: ~/.dprint/bin/dprint check
-
-  frontend-checks:
-    name: Frontend Checks
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web/frontend
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -132,25 +42,148 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install Dependencies
+        working-directory: web/frontend
         run: pnpm install --frozen-lockfile
 
       - name: Lint
+        working-directory: web/frontend
         run: pnpm lint:check
 
       - name: Type Check
+        working-directory: web/frontend
         run: pnpm vue-tsc --noEmit
 
       - name: Build
+        working-directory: web/frontend
         run: pnpm build
+
+      - name: Upload Frontend Dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/static/dist
+          retention-days: 1
+
+  go-build-test:
+    name: Go Build & Test (${{ matrix.go-version }})
+    needs: frontend-build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.25"]
+      fail-fast: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Frontend Dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/static/dist
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run Tests
+        run: |
+          mkdir -p dist
+          go test ./... -count=1 -race -cover -covermode=atomic -coverprofile=dist/coverage.out
+
+      - name: Upload Coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage-${{ matrix.go-version }}
+          path: dist/coverage.out
+          retention-days: 7
+
+  go-lint:
+    name: Go Lint
+    needs: frontend-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Frontend Dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/static/dist
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install golangci-lint from source
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        run: golangci-lint run --timeout=5m
+
+  go-security:
+    name: Go Security
+    needs: frontend-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Frontend Dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/static/dist
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  format-check:
+    name: Format Check (dprint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install dprint
+        run: |
+          curl -fsSL https://dprint.dev/install.sh | sh
+          echo "$HOME/.dprint/bin" >> $GITHUB_PATH
+
+      - name: Check formatting
+        run: ~/.dprint/bin/dprint check
 
   ci-success:
     name: CI Success
-    needs: [go-build-test, go-lint, go-security, format-check, frontend-checks]
+    needs: [frontend-build, go-build-test, go-lint, go-security, format-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
+          if [[ "${{ needs.frontend-build.result }}" != "success" ]]; then
+            echo "frontend-build failed"
+            exit 1
+          fi
           if [[ "${{ needs.go-build-test.result }}" != "success" ]]; then
             echo "go-build-test failed"
             exit 1
@@ -165,10 +198,6 @@ jobs:
           fi
           if [[ "${{ needs.format-check.result }}" != "success" ]]; then
             echo "format-check failed"
-            exit 1
-          fi
-          if [[ "${{ needs.frontend-checks.result }}" != "success" ]]; then
-            echo "frontend-checks failed"
             exit 1
           fi
           echo "All CI checks passed!"
