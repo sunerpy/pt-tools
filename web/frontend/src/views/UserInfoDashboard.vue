@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { type AggregatedStatsResponse, userInfoApi } from "@/api"
-import LevelTooltip from "@/components/LevelTooltip.vue"
-import SiteAvatar from "@/components/SiteAvatar.vue"
-import { useSiteLevelsStore } from "@/stores/siteLevels"
+import { type AggregatedStatsResponse, userInfoApi } from "@/api";
+import LevelTooltip from "@/components/LevelTooltip.vue";
+import SiteAvatar from "@/components/SiteAvatar.vue";
+import { useSiteLevelsStore } from "@/stores/siteLevels";
 import {
   formatBytes,
   formatDate,
@@ -13,77 +13,77 @@ import {
   formatTimeAgo,
   getRatioType,
   getSiteBonusName,
-  getSiteSeedingBonusName
-} from "@/utils/format"
-import { ElMessage } from "element-plus"
-import { computed, onMounted, onUnmounted, ref } from "vue"
+  getSiteSeedingBonusName,
+} from "@/utils/format";
+import { ElMessage } from "element-plus";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
-const siteLevelsStore = useSiteLevelsStore()
+const siteLevelsStore = useSiteLevelsStore();
 
-const loading = ref(false)
-const syncing = ref(false)
-const syncingSite = ref<string | null>(null)
-const aggregatedStats = ref<AggregatedStatsResponse | null>(null)
-const isMobile = ref(window.innerWidth < 768)
+const loading = ref(false);
+const syncing = ref(false);
+const syncingSite = ref<string | null>(null);
+const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
+const isMobile = ref(window.innerWidth < 768);
 
 // 定时刷新相关
-const REFRESH_INTERVAL = 5 * 60 * 1000 // 5分钟
-let refreshTimer: ReturnType<typeof setInterval> | null = null
-const autoRefreshEnabled = ref(true)
+const REFRESH_INTERVAL = 5 * 60 * 1000; // 5分钟
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+const autoRefreshEnabled = ref(true);
 
 // 监听窗口大小变化
 function handleResize() {
-  isMobile.value = window.innerWidth < 768
+  isMobile.value = window.innerWidth < 768;
 }
 
 // 计算统计卡片数据
 const statsCards = computed(() => {
-  if (!aggregatedStats.value) return []
-  const stats = aggregatedStats.value
+  if (!aggregatedStats.value) return [];
+  const stats = aggregatedStats.value;
   const cards = [
     {
       title: "总上传量",
       value: formatBytes(stats.totalUploaded),
       icon: "Upload",
-      type: "success"
+      type: "success",
     },
     {
       title: "总下载量",
       value: formatBytes(stats.totalDownloaded),
       icon: "Download",
-      type: "info"
+      type: "info",
     },
     {
       title: "平均分享率",
       value: formatRatio(stats.averageRatio),
       icon: "DataAnalysis",
-      type: stats.averageRatio >= 1 ? "success" : "warning"
+      type: stats.averageRatio >= 1 ? "success" : "warning",
     },
     {
       title: "做种数",
       value: stats.totalSeeding.toString(),
       icon: "Connection",
-      type: "success"
+      type: "success",
     },
     {
       title: "下载中",
       value: stats.totalLeeching.toString(),
       icon: "Loading",
-      type: "info"
+      type: "info",
     },
     {
       title: "总魔力值",
       value: formatNumber(stats.totalBonus),
       icon: "Star",
-      type: "warning"
+      type: "warning",
     },
     {
       title: "总时魔/h",
       value: formatNumber(stats.totalBonusPerHour ?? 0),
       icon: "Timer",
-      type: "warning"
-    }
-  ]
+      type: "warning",
+    },
+  ];
 
   // 只有当存在做种积分时才显示
   if (stats.totalSeedingBonus && stats.totalSeedingBonus > 0) {
@@ -91,8 +91,8 @@ const statsCards = computed(() => {
       title: "总做种积分",
       value: formatNumber(stats.totalSeedingBonus),
       icon: "Medal",
-      type: "success"
-    })
+      type: "success",
+    });
   }
 
   cards.push(
@@ -100,129 +100,126 @@ const statsCards = computed(() => {
       title: "做种总量",
       value: formatBytes(stats.totalSeederSize ?? 0),
       icon: "Upload",
-      type: "success"
+      type: "success",
     },
     {
       title: "站点数量",
       value: stats.siteCount.toString(),
       icon: "OfficeBuilding",
-      type: "info"
-    }
-  )
+      type: "info",
+    },
+  );
 
-  return cards
-})
+  return cards;
+});
 
 // 加载数据
 async function loadData() {
-  loading.value = true
+  loading.value = true;
   try {
-    aggregatedStats.value = await userInfoApi.getAggregated()
+    aggregatedStats.value = await userInfoApi.getAggregated();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 // 同步所有站点
 async function syncAll() {
-  syncing.value = true
+  syncing.value = true;
   try {
-    const result = await userInfoApi.syncAll()
+    const result = await userInfoApi.syncAll();
     if (result.failed && result.failed.length > 0) {
-      ElMessage.warning(
-        `同步完成: ${result.success.length} 成功, ${result.failed.length} 失败`
-      )
+      ElMessage.warning(`同步完成: ${result.success.length} 成功, ${result.failed.length} 失败`);
     } else {
-      ElMessage.success(`同步完成: ${result.success.length} 个站点`)
+      ElMessage.success(`同步完成: ${result.success.length} 个站点`);
     }
-    await loadData()
+    await loadData();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "同步失败")
+    ElMessage.error((e as Error).message || "同步失败");
   } finally {
-    syncing.value = false
+    syncing.value = false;
   }
 }
 
 // 同步单个站点
 async function syncSite(siteId: string) {
-  syncingSite.value = siteId
+  syncingSite.value = siteId;
   try {
-    await userInfoApi.syncSite(siteId)
-    ElMessage.success(`站点 ${siteId} 同步成功`)
-    await loadData()
+    await userInfoApi.syncSite(siteId);
+    ElMessage.success(`站点 ${siteId} 同步成功`);
+    await loadData();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "同步失败")
+    ElMessage.error((e as Error).message || "同步失败");
   } finally {
-    syncingSite.value = null
+    syncingSite.value = null;
   }
 }
 
 // 清除缓存
 async function clearCache() {
   try {
-    await userInfoApi.clearCache()
-    ElMessage.success("缓存已清除")
+    await userInfoApi.clearCache();
+    ElMessage.success("缓存已清除");
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "清除缓存失败")
+    ElMessage.error((e as Error).message || "清除缓存失败");
   }
 }
 
 // 启动定时刷新
 function startAutoRefresh() {
   if (refreshTimer) {
-    clearInterval(refreshTimer)
+    clearInterval(refreshTimer);
   }
   refreshTimer = setInterval(() => {
     if (!loading.value && !syncing.value) {
-      loadData()
+      loadData();
     }
-  }, REFRESH_INTERVAL)
+  }, REFRESH_INTERVAL);
 }
 
 // 停止定时刷新
 function stopAutoRefresh() {
   if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 }
 
 // 切换自动刷新
 function toggleAutoRefresh() {
-  autoRefreshEnabled.value = !autoRefreshEnabled.value
+  autoRefreshEnabled.value = !autoRefreshEnabled.value;
   if (autoRefreshEnabled.value) {
-    startAutoRefresh()
-    ElMessage.success("已开启自动刷新")
+    startAutoRefresh();
+    ElMessage.success("已开启自动刷新");
   } else {
-    stopAutoRefresh()
-    ElMessage.info("已关闭自动刷新")
+    stopAutoRefresh();
+    ElMessage.info("已关闭自动刷新");
   }
 }
 
 // 检查是否有 H&R 数据
 function hasHnR(row: any): boolean {
   return (
-    (row.hnrUnsatisfied && row.hnrUnsatisfied > 0)
-    || (row.hnrPreWarning && row.hnrPreWarning > 0)
-  )
+    (row.hnrUnsatisfied && row.hnrUnsatisfied > 0) || (row.hnrPreWarning && row.hnrPreWarning > 0)
+  );
 }
 
 onMounted(() => {
-  loadData()
+  loadData();
   // 预加载所有站点的等级信息
-  siteLevelsStore.loadAll()
+  siteLevelsStore.loadAll();
   if (autoRefreshEnabled.value) {
-    startAutoRefresh()
+    startAutoRefresh();
   }
-  window.addEventListener("resize", handleResize)
-})
+  window.addEventListener("resize", handleResize);
+});
 
 onUnmounted(() => {
-  stopAutoRefresh()
-  window.removeEventListener("resize", handleResize)
-})
+  stopAutoRefresh();
+  window.removeEventListener("resize", handleResize);
+});
 </script>
 
 <template>
@@ -286,17 +283,9 @@ onUnmounted(() => {
                   :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
                   :max="99"
                   type="danger">
-                  <div
-                    class="site-avatar-wrapper"
-                    @click.stop="syncSite(row.site)">
-                    <SiteAvatar
-                      :site-name="row.site"
-                      :site-id="row.site"
-                      :size="32"
-                    />
-                    <el-icon
-                      v-if="syncingSite === row.site"
-                      class="sync-icon is-loading">
+                  <div class="site-avatar-wrapper" @click.stop="syncSite(row.site)">
+                    <SiteAvatar :site-name="row.site" :site-id="row.site" :size="32" />
+                    <el-icon v-if="syncingSite === row.site" class="sync-icon is-loading">
                       <Loading />
                     </el-icon>
                   </div>
@@ -315,18 +304,12 @@ onUnmounted(() => {
               <LevelTooltip
                 :site-id="row.site"
                 :current-level-name="row.levelName || row.rank || '-'"
-                :current-level-id="row.levelId"
-              />
+                :current-level-id="row.levelId" />
             </template>
           </el-table-column>
 
           <!-- 上传/下载量：双行布局带图标 -->
-          <el-table-column
-            prop="uploaded"
-            label="数据量"
-            min-width="140"
-            sortable
-            align="right">
+          <el-table-column prop="uploaded" label="数据量" min-width="140" sortable align="right">
             <template #default="{ row }">
               <div class="data-cell">
                 <div class="data-row upload">
@@ -349,9 +332,7 @@ onUnmounted(() => {
             sortable
             align="right">
             <template #default="{ row }">
-              <div
-                v-if="row.trueUploaded && row.trueUploaded !== row.uploaded"
-                class="data-cell">
+              <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="data-cell">
                 <div class="data-row upload">
                   <el-icon><Top /></el-icon>
                   <span>{{ formatBytes(row.trueUploaded) }}</span>
@@ -366,12 +347,7 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 分享率 -->
-          <el-table-column
-            prop="ratio"
-            label="分享率"
-            min-width="90"
-            sortable
-            align="center">
+          <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
             <template #default="{ row }">
               <el-tag :type="getRatioType(row.ratio)" size="small" effect="plain">
                 {{ formatRatio(row.ratio) }}
@@ -380,12 +356,7 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 做种数 + H&R -->
-          <el-table-column
-            prop="seeding"
-            label="做种"
-            min-width="110"
-            sortable
-            align="center">
+          <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
             <template #default="{ row }">
               <div class="seeding-cell">
                 <div class="seeding-count">
@@ -426,12 +397,7 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 魔力值 + 做种积分 -->
-          <el-table-column
-            prop="bonus"
-            label="积分"
-            min-width="140"
-            sortable
-            align="right">
+          <el-table-column prop="bonus" label="积分" min-width="140" sortable align="right">
             <template #default="{ row }">
               <div class="bonus-cell">
                 <el-tooltip :content="getSiteBonusName(row.site)" placement="left">
@@ -441,7 +407,9 @@ onUnmounted(() => {
                   </div>
                 </el-tooltip>
                 <el-tooltip
-                  v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
+                  v-if="
+                    row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)
+                  "
                   :content="getSiteSeedingBonusName(row.site) || '做种积分'"
                   placement="left">
                   <div class="bonus-row seeding">
@@ -466,17 +434,9 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 注册时间 -->
-          <el-table-column
-            prop="joinDate"
-            label="入站"
-            min-width="110"
-            sortable
-            align="center">
+          <el-table-column prop="joinDate" label="入站" min-width="110" sortable align="center">
             <template #default="{ row }">
-              <el-tooltip
-                v-if="row.joinDate"
-                :content="formatDate(row.joinDate)"
-                placement="top">
+              <el-tooltip v-if="row.joinDate" :content="formatDate(row.joinDate)" placement="top">
                 <span class="join-time">{{ formatJoinDuration(row.joinDate) }}</span>
               </el-tooltip>
               <span v-else class="no-data">-</span>
@@ -484,12 +444,7 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 更新时间 -->
-          <el-table-column
-            prop="lastUpdate"
-            label="更新"
-            min-width="100"
-            sortable
-            align="center">
+          <el-table-column prop="lastUpdate" label="更新" min-width="100" sortable align="center">
             <template #default="{ row }">
               <el-tooltip :content="formatTime(row.lastUpdate)" placement="top">
                 <span class="update-time">{{ formatTimeAgo(row.lastUpdate) }}</span>
@@ -528,14 +483,8 @@ onUnmounted(() => {
                 :max="99"
                 type="danger">
                 <div class="site-avatar-wrapper" @click.stop="syncSite(row.site)">
-                  <SiteAvatar
-                    :site-name="row.site"
-                    :site-id="row.site"
-                    :size="40"
-                  />
-                  <el-icon
-                    v-if="syncingSite === row.site"
-                    class="sync-icon is-loading">
+                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="40" />
+                  <el-icon v-if="syncingSite === row.site" class="sync-icon is-loading">
                     <Loading />
                   </el-icon>
                 </div>
@@ -548,8 +497,7 @@ onUnmounted(() => {
             <LevelTooltip
               :site-id="row.site"
               :current-level-name="row.levelName || row.rank || '-'"
-              :current-level-id="row.levelId"
-            />
+              :current-level-id="row.levelId" />
           </div>
 
           <!-- 主要数据：上传下载和分享率 -->

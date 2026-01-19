@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { useVersionStore } from "@/stores/version"
-import { formatDate } from "@/utils/format"
-import { Check, Close, Link, Promotion, Refresh } from "@element-plus/icons-vue"
-import DOMPurify from "dompurify"
-import { marked } from "marked"
-import { storeToRefs } from "pinia"
-import { onMounted, ref } from "vue"
+import { useVersionStore } from "@/stores/version";
+import { formatDate } from "@/utils/format";
+import { Check, Close, Link, Promotion, Refresh } from "@element-plus/icons-vue";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
+import { storeToRefs } from "pinia";
+import { onMounted, ref } from "vue";
 
-const versionStore = useVersionStore()
+const versionStore = useVersionStore();
 const {
   currentVersion,
   hasUpdate,
@@ -17,44 +17,44 @@ const {
   hasMoreReleases,
   changelogUrl,
   checking,
-  checkResult
-} = storeToRefs(versionStore)
+  checkResult,
+} = storeToRefs(versionStore);
 
-const proxyUrl = ref("")
-const showProxyInput = ref(false)
+const proxyUrl = ref("");
+const showProxyInput = ref(false);
 
 marked.use({
   renderer: {
     link({ href, title, text }) {
       return `<a href="${href}" title="${
         title || ""
-      }" target="_blank" rel="noopener noreferrer">${text}</a>`
-    }
-  }
-})
+      }" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    },
+  },
+});
 
 onMounted(() => {
   if (!versionStore.versionInfo) {
-    versionStore.fetchVersionInfo()
+    versionStore.fetchVersionInfo();
   }
-})
+});
 
 function handleCheckUpdate() {
-  versionStore.checkForUpdates({ force: true, proxy: proxyUrl.value || undefined })
+  versionStore.checkForUpdates({ force: true, proxy: proxyUrl.value || undefined });
 }
 
 function handleDismiss(version: string) {
-  versionStore.dismissVersion(version)
+  versionStore.dismissVersion(version);
 }
 
 function renderMarkdown(text: string): string {
-  if (!text) return ""
+  if (!text) return "";
   try {
-    const html = marked.parse(text, { async: false }) as string
-    return DOMPurify.sanitize(html)
+    const html = marked.parse(text, { async: false }) as string;
+    return DOMPurify.sanitize(html);
   } catch (e) {
-    console.error("Markdown parsing error:", e)
-    return text
+    console.error("Markdown parsing error:", e);
+    return text;
   }
 }
 </script>
@@ -91,8 +91,7 @@ function renderMarkdown(text: string): string {
             :icon="Refresh"
             circle
             @click="handleCheckUpdate"
-            title="检查更新"
-          />
+            title="检查更新" />
         </div>
       </div>
 

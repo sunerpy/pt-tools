@@ -1,20 +1,25 @@
 <script setup lang="ts">
-import { type FilterRule, filterRulesApi, type FilterRuleTestResponse, type RSSConfig } from "@/api"
-import { ElMessage, ElMessageBox } from "element-plus"
-import { computed, onMounted, ref } from "vue"
+import {
+  type FilterRule,
+  filterRulesApi,
+  type FilterRuleTestResponse,
+  type RSSConfig,
+} from "@/api";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false)
-const saving = ref(false)
-const testing = ref(false)
-const showDialog = ref(false)
-const showTestDialog = ref(false)
-const editMode = ref(false)
-const loadingRss = ref(false)
+const loading = ref(false);
+const saving = ref(false);
+const testing = ref(false);
+const showDialog = ref(false);
+const showTestDialog = ref(false);
+const editMode = ref(false);
+const loadingRss = ref(false);
 
-const rules = ref<FilterRule[]>([])
-const rssList = ref<{ id: number; name: string; site_name: string }[]>([])
-const testResult = ref<FilterRuleTestResponse | null>(null)
-const selectedRssId = ref<number | undefined>(undefined)
+const rules = ref<FilterRule[]>([]);
+const rssList = ref<{ id: number; name: string; site_name: string }[]>([]);
+const testResult = ref<FilterRuleTestResponse | null>(null);
+const selectedRssId = ref<number | undefined>(undefined);
 
 const form = ref<FilterRule>({
   name: "",
@@ -23,20 +28,20 @@ const form = ref<FilterRule>({
   match_field: "both",
   require_free: true,
   enabled: true,
-  priority: 100
-})
+  priority: 100,
+});
 
 const patternTypes = [
   { value: "keyword", label: "关键词", tip: "大小写不敏感，匹配包含该关键词的标题" },
   { value: "wildcard", label: "通配符", tip: "使用 * 匹配任意字符，? 匹配单个字符" },
-  { value: "regex", label: "正则表达式", tip: "使用正则表达式进行精确匹配" }
-]
+  { value: "regex", label: "正则表达式", tip: "使用正则表达式进行精确匹配" },
+];
 
 const matchFields = [
   { value: "title", label: "仅标题" },
   { value: "tag", label: "仅标签" },
-  { value: "both", label: "标题和标签" }
-]
+  { value: "both", label: "标题和标签" },
+];
 
 const templates = [
   { name: "4K 资源", pattern: "4K|2160p|UHD", type: "regex" as const },
@@ -44,55 +49,55 @@ const templates = [
   { name: "REMUX 资源", pattern: "*REMUX*", type: "wildcard" as const },
   { name: "HDR 资源", pattern: "HDR|HDR10|Dolby Vision|DV", type: "regex" as const },
   { name: "HEVC/x265", pattern: "HEVC|x265|H.265", type: "regex" as const },
-  { name: "国语配音", pattern: "国语|国配|中配", type: "regex" as const }
-]
+  { name: "国语配音", pattern: "国语|国配|中配", type: "regex" as const },
+];
 
 const currentPatternTip = computed(() => {
-  return patternTypes.find(t => t.value === form.value.pattern_type)?.tip || ""
-})
+  return patternTypes.find((t) => t.value === form.value.pattern_type)?.tip || "";
+});
 
 onMounted(async () => {
-  await loadRules()
-  await loadRssList()
-})
+  await loadRules();
+  await loadRssList();
+});
 
 async function loadRules() {
-  loading.value = true
+  loading.value = true;
   try {
-    rules.value = await filterRulesApi.list()
+    rules.value = await filterRulesApi.list();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 async function loadRssList() {
-  loadingRss.value = true
+  loadingRss.value = true;
   try {
-    const response = await fetch("/api/sites")
-    const sites = await response.json()
-    const list: { id: number; name: string; site_name: string }[] = []
+    const response = await fetch("/api/sites");
+    const sites = await response.json();
+    const list: { id: number; name: string; site_name: string }[] = [];
     for (const [siteName, siteConfig] of Object.entries(sites)) {
-      const config = siteConfig as { rss?: RSSConfig[] }
+      const config = siteConfig as { rss?: RSSConfig[] };
       if (config.rss) {
         for (const rss of config.rss) {
           if (rss.id) {
-            list.push({ id: rss.id, name: rss.name, site_name: siteName })
+            list.push({ id: rss.id, name: rss.name, site_name: siteName });
           }
         }
       }
     }
-    rssList.value = list
+    rssList.value = list;
   } catch (e: unknown) {
-    console.error("加载 RSS 列表失败:", e)
+    console.error("加载 RSS 列表失败:", e);
   } finally {
-    loadingRss.value = false
+    loadingRss.value = false;
   }
 }
 
 function openAddDialog() {
-  editMode.value = false
+  editMode.value = false;
   form.value = {
     name: "",
     pattern: "",
@@ -100,90 +105,90 @@ function openAddDialog() {
     match_field: "both",
     require_free: true,
     enabled: true,
-    priority: 100
-  }
-  selectedRssId.value = undefined
-  showDialog.value = true
+    priority: 100,
+  };
+  selectedRssId.value = undefined;
+  showDialog.value = true;
 }
 
 function openEditDialog(rule: FilterRule) {
-  editMode.value = true
-  form.value = { ...rule }
-  selectedRssId.value = undefined
-  showDialog.value = true
+  editMode.value = true;
+  form.value = { ...rule };
+  selectedRssId.value = undefined;
+  showDialog.value = true;
 }
 
 function applyTemplate(tpl: (typeof templates)[0]) {
-  form.value.pattern = tpl.pattern
-  form.value.pattern_type = tpl.type
+  form.value.pattern = tpl.pattern;
+  form.value.pattern_type = tpl.type;
   if (!form.value.name) {
-    form.value.name = tpl.name
+    form.value.name = tpl.name;
   }
 }
 
 async function saveRule() {
   if (!form.value.name || !form.value.pattern) {
-    ElMessage.error("名称和匹配模式为必填项")
-    return
+    ElMessage.error("名称和匹配模式为必填项");
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
     if (editMode.value && form.value.id) {
-      await filterRulesApi.update(form.value.id, form.value)
-      ElMessage.success("更新成功")
+      await filterRulesApi.update(form.value.id, form.value);
+      ElMessage.success("更新成功");
     } else {
-      await filterRulesApi.create(form.value)
-      ElMessage.success("创建成功")
+      await filterRulesApi.create(form.value);
+      ElMessage.success("创建成功");
     }
-    showDialog.value = false
-    await loadRules()
+    showDialog.value = false;
+    await loadRules();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 async function deleteRule(rule: FilterRule) {
-  if (!rule.id) return
+  if (!rule.id) return;
 
   try {
     await ElMessageBox.confirm(`确定删除过滤规则 "${rule.name}"？`, "确认删除", {
       confirmButtonText: "删除",
       cancelButtonText: "取消",
-      type: "warning"
-    })
-    await filterRulesApi.delete(rule.id)
-    ElMessage.success("已删除")
-    await loadRules()
+      type: "warning",
+    });
+    await filterRulesApi.delete(rule.id);
+    ElMessage.success("已删除");
+    await loadRules();
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "删除失败")
+      ElMessage.error((e as Error).message || "删除失败");
     }
   }
 }
 
 async function toggleEnabled(rule: FilterRule) {
-  if (!rule.id) return
-  const newEnabled = !rule.enabled
+  if (!rule.id) return;
+  const newEnabled = !rule.enabled;
   try {
-    await filterRulesApi.update(rule.id, { ...rule, enabled: newEnabled })
-    rule.enabled = newEnabled
-    ElMessage.success("已保存")
+    await filterRulesApi.update(rule.id, { ...rule, enabled: newEnabled });
+    rule.enabled = newEnabled;
+    ElMessage.success("已保存");
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   }
 }
 
 async function testPattern() {
   if (!form.value.pattern) {
-    ElMessage.error("请先输入匹配模式")
-    return
+    ElMessage.error("请先输入匹配模式");
+    return;
   }
 
-  testing.value = true
-  testResult.value = null
+  testing.value = true;
+  testResult.value = null;
   try {
     testResult.value = await filterRulesApi.test({
       pattern: form.value.pattern,
@@ -191,35 +196,35 @@ async function testPattern() {
       match_field: form.value.match_field || "both",
       require_free: form.value.require_free,
       rss_id: selectedRssId.value,
-      limit: 20
-    })
-    showTestDialog.value = true
+      limit: 20,
+    });
+    showTestDialog.value = true;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "测试失败")
+    ElMessage.error((e as Error).message || "测试失败");
   } finally {
-    testing.value = false
+    testing.value = false;
   }
 }
 
 function getPatternTypeLabel(type: string) {
-  return patternTypes.find(t => t.value === type)?.label || type
+  return patternTypes.find((t) => t.value === type)?.label || type;
 }
 
 function getPatternTypeTag(type: string) {
   switch (type) {
     case "keyword":
-      return "success"
+      return "success";
     case "wildcard":
-      return "warning"
+      return "warning";
     case "regex":
-      return "danger"
+      return "danger";
     default:
-      return "info"
+      return "info";
   }
 }
 
 function getMatchFieldLabel(field: string | undefined) {
-  return matchFields.find(f => f.value === field)?.label || "标题和标签"
+  return matchFields.find((f) => f.value === field)?.label || "标题和标签";
 }
 </script>
 
@@ -229,10 +234,7 @@ function getMatchFieldLabel(field: string | undefined) {
       <template #header>
         <div class="card-header">
           <span>过滤规则管理</span>
-          <el-button
-            type="primary"
-            :icon="'Plus'"
-            @click="openAddDialog">添加规则</el-button>
+          <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加规则</el-button>
         </div>
       </template>
 
@@ -259,10 +261,7 @@ function getMatchFieldLabel(field: string | undefined) {
 
         <el-table-column label="类型" min-width="100" align="center">
           <template #default="{ row }">
-            <el-tag
-              :type="getPatternTypeTag(row.pattern_type)"
-              size="small"
-              effect="plain">
+            <el-tag :type="getPatternTypeTag(row.pattern_type)" size="small" effect="plain">
               {{ getPatternTypeLabel(row.pattern_type) }}
             </el-tag>
           </template>
@@ -291,19 +290,9 @@ function getMatchFieldLabel(field: string | undefined) {
         <el-table-column label="操作" min-width="200" align="center">
           <template #default="{ row }">
             <el-space>
-              <el-switch
-                :model-value="row.enabled"
-                size="small"
-                @change="toggleEnabled(row)"
-              />
-              <el-button
-                type="primary"
-                size="small"
-                @click="openEditDialog(row)">编辑</el-button>
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteRule(row)">删除</el-button>
+              <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
+              <el-button type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
+              <el-button type="danger" size="small" @click="deleteRule(row)">删除</el-button>
             </el-space>
           </template>
         </el-table-column>
@@ -324,33 +313,18 @@ function getMatchFieldLabel(field: string | undefined) {
 
         <el-form-item label="模式类型" required>
           <el-select v-model="form.pattern_type" style="width: 100%">
-            <el-option
-              v-for="t in patternTypes"
-              :key="t.value"
-              :label="t.label"
-              :value="t.value"
-            />
+            <el-option v-for="t in patternTypes" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
           <div class="form-tip">{{ currentPatternTip }}</div>
         </el-form-item>
 
         <el-form-item label="匹配模式" required>
-          <el-input
-            v-model="form.pattern"
-            placeholder="输入匹配模式"
-            :rows="2"
-            type="textarea"
-          />
+          <el-input v-model="form.pattern" placeholder="输入匹配模式" :rows="2" type="textarea" />
         </el-form-item>
 
         <el-form-item label="匹配范围">
           <el-select v-model="form.match_field" style="width: 100%">
-            <el-option
-              v-for="f in matchFields"
-              :key="f.value"
-              :label="f.label"
-              :value="f.value"
-            />
+            <el-option v-for="f in matchFields" :key="f.value" :label="f.label" :value="f.value" />
           </el-select>
           <div class="form-tip">选择从标题、标签还是两者中进行匹配</div>
         </el-form-item>
@@ -393,19 +367,13 @@ function getMatchFieldLabel(field: string | undefined) {
               v-for="rss in rssList"
               :key="rss.id"
               :label="`${rss.name} (${rss.site_name})`"
-              :value="rss.id"
-            />
+              :value="rss.id" />
           </el-select>
-          <div class="form-tip">
-            选择 RSS 订阅从实时数据中测试，不选则从历史记录中测试
-          </div>
+          <div class="form-tip">选择 RSS 订阅从实时数据中测试，不选则从历史记录中测试</div>
         </el-form-item>
 
         <el-form-item>
-          <el-button
-            type="info"
-            :loading="testing"
-            @click="testPattern">测试匹配</el-button>
+          <el-button type="info" :loading="testing" @click="testPattern">测试匹配</el-button>
         </el-form-item>
       </el-form>
 
@@ -421,9 +389,7 @@ function getMatchFieldLabel(field: string | undefined) {
     <el-dialog v-model="showTestDialog" title="匹配测试结果" width="800px">
       <div v-if="testResult" v-loading="testing">
         <div class="test-result-header">
-          <el-alert
-            :type="testResult.match_count > 0 ? 'success' : 'warning'"
-            :closable="false">
+          <el-alert :type="testResult.match_count > 0 ? 'success' : 'warning'" :closable="false">
             <template #title>
               <div style="font-size: 14px">
                 共测试 {{ testResult.total_count }} 条记录，匹配到
@@ -435,10 +401,7 @@ function getMatchFieldLabel(field: string | undefined) {
             </template>
           </el-alert>
 
-          <el-radio-group
-            v-model="form.match_field"
-            size="small"
-            style="margin-top: 12px">
+          <el-radio-group v-model="form.match_field" size="small" style="margin-top: 12px">
             <el-radio-button v-for="f in matchFields" :key="f.value" :label="f.value">
               {{ f.label }}
             </el-radio-button>
@@ -455,18 +418,10 @@ function getMatchFieldLabel(field: string | undefined) {
               <div class="match-header">
                 <span class="match-index">#{{ idx + 1 }}</span>
                 <el-tag size="small" type="success" effect="plain">匹配成功</el-tag>
-                <el-tag
-                  v-if="match.is_free"
-                  size="small"
-                  type="warning"
-                  effect="plain">
+                <el-tag v-if="match.is_free" size="small" type="warning" effect="plain">
                   免费
                 </el-tag>
-                <el-tag
-                  v-else
-                  size="small"
-                  type="info"
-                  effect="plain">非免费</el-tag>
+                <el-tag v-else size="small" type="info" effect="plain">非免费</el-tag>
               </div>
             </template>
 
@@ -489,10 +444,7 @@ function getMatchFieldLabel(field: string | undefined) {
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="showTestDialog = false">关闭</el-button>
-          <el-button
-            type="primary"
-            :loading="testing"
-            @click="testPattern">重新测试</el-button>
+          <el-button type="primary" :loading="testing" @click="testPattern">重新测试</el-button>
         </div>
       </template>
     </el-dialog>

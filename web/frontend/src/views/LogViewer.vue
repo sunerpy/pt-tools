@@ -1,136 +1,136 @@
 <script setup lang="ts">
-import { logsApi, type LogsResponse } from "@/api"
-import { Bottom, Refresh, Top } from "@element-plus/icons-vue"
-import { ElMessage } from "element-plus"
-import { nextTick, onMounted, ref, shallowRef } from "vue"
+import { logsApi, type LogsResponse } from "@/api";
+import { Bottom, Refresh, Top } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
+import { nextTick, onMounted, ref, shallowRef } from "vue";
 
-const loading = ref(false)
-const logs = shallowRef<string[]>([])
-const logPath = ref("")
-const truncated = ref(false)
-const logContainer = ref<HTMLElement | null>(null)
-const autoScroll = ref(true)
-const renderedHtml = shallowRef("")
+const loading = ref(false);
+const logs = shallowRef<string[]>([]);
+const logPath = ref("");
+const truncated = ref(false);
+const logContainer = ref<HTMLElement | null>(null);
+const autoScroll = ref(true);
+const renderedHtml = shallowRef("");
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function getLevelClass(level: string): string {
   switch (level?.toLowerCase()) {
     case "debug":
-      return "log-debug"
+      return "log-debug";
     case "info":
-      return "log-info"
+      return "log-info";
     case "warn":
     case "warning":
-      return "log-warn"
+      return "log-warn";
     case "error":
-      return "log-error"
+      return "log-error";
     case "fatal":
     case "panic":
-      return "log-fatal"
+      return "log-fatal";
     default:
-      return "json-string"
+      return "json-string";
   }
 }
 
 function formatValue(value: unknown, key?: string): string {
   if (value === null) {
-    return '<span class="json-null">null</span>'
+    return '<span class="json-null">null</span>';
   }
   if (typeof value === "boolean") {
-    return `<span class="json-boolean">${value}</span>`
+    return `<span class="json-boolean">${value}</span>`;
   }
   if (typeof value === "number") {
-    return `<span class="json-number">${value}</span>`
+    return `<span class="json-number">${value}</span>`;
   }
   if (typeof value === "string") {
-    const escaped = escapeHtml(value)
+    const escaped = escapeHtml(value);
     if (key === "level") {
-      return `"<span class="${getLevelClass(value)}">${escaped}</span>"`
+      return `"<span class="${getLevelClass(value)}">${escaped}</span>"`;
     }
     if (key === "time") {
-      return `"<span class="json-time">${escaped}</span>"`
+      return `"<span class="json-time">${escaped}</span>"`;
     }
     if (key === "msg") {
-      return `"<span class="json-msg">${escaped}</span>"`
+      return `"<span class="json-msg">${escaped}</span>"`;
     }
-    return `"<span class="json-string">${escaped}</span>"`
+    return `"<span class="json-string">${escaped}</span>"`;
   }
   if (Array.isArray(value)) {
-    const items = value.map(v => formatValue(v)).join('<span class="json-punct">,</span> ')
-    return `<span class="json-punct">[</span>${items}<span class="json-punct">]</span>`
+    const items = value.map((v) => formatValue(v)).join('<span class="json-punct">,</span> ');
+    return `<span class="json-punct">[</span>${items}<span class="json-punct">]</span>`;
   }
   if (typeof value === "object") {
-    return formatObject(value as Record<string, unknown>)
+    return formatObject(value as Record<string, unknown>);
   }
-  return escapeHtml(String(value))
+  return escapeHtml(String(value));
 }
 
 function formatObject(obj: Record<string, unknown>): string {
-  const entries = Object.entries(obj)
+  const entries = Object.entries(obj);
   if (entries.length === 0) {
-    return '<span class="json-punct">{}</span>'
+    return '<span class="json-punct">{}</span>';
   }
   const parts = entries.map(([k, v]) => {
-    return `"<span class="json-key">${escapeHtml(k)}</span>": ${formatValue(v, k)}`
-  })
-  return `<span class="json-punct">{</span>${
-    parts.join('<span class="json-punct">,</span> ')
-  }<span class="json-punct">}</span>`
+    return `"<span class="json-key">${escapeHtml(k)}</span>": ${formatValue(v, k)}`;
+  });
+  return `<span class="json-punct">{</span>${parts.join(
+    '<span class="json-punct">,</span> ',
+  )}<span class="json-punct">}</span>`;
 }
 
 function highlightLine(line: string): string {
-  if (!line.trim()) return ""
+  if (!line.trim()) return "";
   try {
-    const obj = JSON.parse(line)
-    return formatObject(obj)
+    const obj = JSON.parse(line);
+    return formatObject(obj);
   } catch {
-    return escapeHtml(line)
+    return escapeHtml(line);
   }
 }
 
 function processLogs(lines: string[]): string {
-  return lines.map(highlightLine).join("\n")
+  return lines.map(highlightLine).join("\n");
 }
 
 onMounted(async () => {
-  await loadLogs()
-})
+  await loadLogs();
+});
 
 async function loadLogs() {
-  loading.value = true
+  loading.value = true;
   try {
-    const data: LogsResponse = await logsApi.get()
-    const lines = data.lines || []
-    logs.value = lines
-    logPath.value = data.path || ""
-    truncated.value = data.truncated || false
+    const data: LogsResponse = await logsApi.get();
+    const lines = data.lines || [];
+    logs.value = lines;
+    logPath.value = data.path || "";
+    truncated.value = data.truncated || false;
 
-    await nextTick()
-    renderedHtml.value = processLogs(lines)
+    await nextTick();
+    renderedHtml.value = processLogs(lines);
 
     if (autoScroll.value) {
-      await nextTick()
-      scrollToBottom()
+      await nextTick();
+      scrollToBottom();
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function scrollToBottom() {
   if (logContainer.value) {
-    logContainer.value.scrollTop = logContainer.value.scrollHeight
+    logContainer.value.scrollTop = logContainer.value.scrollHeight;
   }
 }
 
 function scrollToTop() {
   if (logContainer.value) {
-    logContainer.value.scrollTop = 0
+    logContainer.value.scrollTop = 0;
   }
 }
 </script>
@@ -149,11 +149,7 @@ function scrollToTop() {
             class="status-badge status-badge--warning">
             已截断（最近 5000 行）
           </el-tag>
-          <el-tag
-            type="info"
-            size="small"
-            effect="plain"
-            class="status-badge status-badge--info">
+          <el-tag type="info" size="small" effect="plain" class="status-badge status-badge--info">
             {{ logs.length }} 行
           </el-tag>
           <span v-if="logPath" class="log-path-text">{{ logPath }}</span>

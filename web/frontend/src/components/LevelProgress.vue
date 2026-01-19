@@ -1,123 +1,123 @@
 <script setup lang="ts">
-import type { SiteLevelRequirement } from "@/api"
+import type { SiteLevelRequirement } from "@/api";
 import {
   calculateDaysSinceJoin,
   formatNumber,
   parseISODuration,
-  parseISODurationToDays
-} from "@/utils/format"
-import { computed } from "vue"
+  parseISODurationToDays,
+} from "@/utils/format";
+import { computed } from "vue";
 
 const props = defineProps<{
-  currentLevelId?: number
-  currentLevelName?: string
-  nextLevel?: SiteLevelRequirement | null
-  unmetRequirements?: Record<string, unknown>
-  progressPercent?: number
-  joinDate?: number // Unix timestamp in seconds
-  uploaded?: number
-  downloaded?: number
-  ratio?: number
-  bonus?: number
-  seedingBonus?: number
-  uploads?: number
-}>()
+  currentLevelId?: number;
+  currentLevelName?: string;
+  nextLevel?: SiteLevelRequirement | null;
+  unmetRequirements?: Record<string, unknown>;
+  progressPercent?: number;
+  joinDate?: number; // Unix timestamp in seconds
+  uploaded?: number;
+  downloaded?: number;
+  ratio?: number;
+  bonus?: number;
+  seedingBonus?: number;
+  uploads?: number;
+}>();
 
 // 是否已达到最高等级
 const isMaxLevel = computed(() => {
-  return !props.nextLevel
-})
+  return !props.nextLevel;
+});
 
 // 计算进度百分比
 const progress = computed(() => {
-  if (isMaxLevel.value) return 100
+  if (isMaxLevel.value) return 100;
   if (props.progressPercent !== undefined) {
-    return Math.min(100, Math.max(0, props.progressPercent))
+    return Math.min(100, Math.max(0, props.progressPercent));
   }
 
   // 如果没有提供进度，尝试计算
-  if (!props.nextLevel) return 0
+  if (!props.nextLevel) return 0;
 
-  let totalProgress = 0
-  let requirementCount = 0
+  let totalProgress = 0;
+  let requirementCount = 0;
 
   // 注册时间进度
   if (props.nextLevel.interval && props.joinDate) {
-    const requiredDays = parseISODurationToDays(props.nextLevel.interval)
-    const actualDays = calculateDaysSinceJoin(props.joinDate)
+    const requiredDays = parseISODurationToDays(props.nextLevel.interval);
+    const actualDays = calculateDaysSinceJoin(props.joinDate);
     if (requiredDays > 0) {
-      totalProgress += Math.min(100, (actualDays / requiredDays) * 100)
-      requirementCount++
+      totalProgress += Math.min(100, (actualDays / requiredDays) * 100);
+      requirementCount++;
     }
   }
 
   // 下载量进度
   if (props.nextLevel.downloaded && props.downloaded !== undefined) {
-    const required = parseSizeToBytes(props.nextLevel.downloaded)
+    const required = parseSizeToBytes(props.nextLevel.downloaded);
     if (required > 0) {
-      totalProgress += Math.min(100, (props.downloaded / required) * 100)
-      requirementCount++
+      totalProgress += Math.min(100, (props.downloaded / required) * 100);
+      requirementCount++;
     }
   }
 
   // 分享率进度
   if (props.nextLevel.ratio && props.ratio !== undefined) {
-    totalProgress += Math.min(100, (props.ratio / props.nextLevel.ratio) * 100)
-    requirementCount++
+    totalProgress += Math.min(100, (props.ratio / props.nextLevel.ratio) * 100);
+    requirementCount++;
   }
 
   // 魔力进度
   if (props.nextLevel.bonus && props.bonus !== undefined) {
-    totalProgress += Math.min(100, (props.bonus / props.nextLevel.bonus) * 100)
-    requirementCount++
+    totalProgress += Math.min(100, (props.bonus / props.nextLevel.bonus) * 100);
+    requirementCount++;
   }
 
-  if (requirementCount === 0) return 0
-  return Math.round(totalProgress / requirementCount)
-})
+  if (requirementCount === 0) return 0;
+  return Math.round(totalProgress / requirementCount);
+});
 
 // 进度条颜色
 const progressColor = computed(() => {
-  if (isMaxLevel.value) return "#67c23a"
-  if (progress.value >= 80) return "#67c23a"
-  if (progress.value >= 50) return "#e6a23c"
-  return "#409eff"
-})
+  if (isMaxLevel.value) return "#67c23a";
+  if (progress.value >= 80) return "#67c23a";
+  if (progress.value >= 50) return "#e6a23c";
+  return "#409eff";
+});
 
 // 未满足的要求列表
 const unmetList = computed(() => {
-  const list: string[] = []
+  const list: string[] = [];
 
-  if (!props.nextLevel) return list
+  if (!props.nextLevel) return list;
 
   // 注册时间
   if (props.nextLevel.interval && props.joinDate) {
-    const requiredDays = parseISODurationToDays(props.nextLevel.interval)
-    const actualDays = calculateDaysSinceJoin(props.joinDate)
+    const requiredDays = parseISODurationToDays(props.nextLevel.interval);
+    const actualDays = calculateDaysSinceJoin(props.joinDate);
     if (actualDays < requiredDays) {
-      list.push(`注册时间: ${actualDays}天 / ${parseISODuration(props.nextLevel.interval)}`)
+      list.push(`注册时间: ${actualDays}天 / ${parseISODuration(props.nextLevel.interval)}`);
     }
   }
 
   // 下载量
   if (props.nextLevel.downloaded && props.downloaded !== undefined) {
-    const required = parseSizeToBytes(props.nextLevel.downloaded)
+    const required = parseSizeToBytes(props.nextLevel.downloaded);
     if (props.downloaded < required) {
-      list.push(`下载量: ${formatBytes(props.downloaded)} / ${props.nextLevel.downloaded}`)
+      list.push(`下载量: ${formatBytes(props.downloaded)} / ${props.nextLevel.downloaded}`);
     }
   }
 
   // 分享率
   if (props.nextLevel.ratio && props.ratio !== undefined) {
     if (props.ratio < props.nextLevel.ratio) {
-      list.push(`分享率: ${props.ratio.toFixed(2)} / ${props.nextLevel.ratio}`)
+      list.push(`分享率: ${props.ratio.toFixed(2)} / ${props.nextLevel.ratio}`);
     }
   }
 
   // 魔力
   if (props.nextLevel.bonus && props.bonus !== undefined) {
     if (props.bonus < props.nextLevel.bonus) {
-      list.push(`魔力: ${formatNumber(props.bonus)} / ${formatNumber(props.nextLevel.bonus)}`)
+      list.push(`魔力: ${formatNumber(props.bonus)} / ${formatNumber(props.nextLevel.bonus)}`);
     }
   }
 
@@ -125,24 +125,24 @@ const unmetList = computed(() => {
   if (props.nextLevel.seedingBonus && props.seedingBonus !== undefined) {
     if (props.seedingBonus < props.nextLevel.seedingBonus) {
       list.push(
-        `做种积分: ${formatNumber(props.seedingBonus)} / ${
-          formatNumber(props.nextLevel.seedingBonus)
-        }`
-      )
+        `做种积分: ${formatNumber(props.seedingBonus)} / ${formatNumber(
+          props.nextLevel.seedingBonus,
+        )}`,
+      );
     }
   }
 
-  return list
-})
+  return list;
+});
 
 // 解析大小字符串为字节数
 function parseSizeToBytes(sizeStr: string | undefined): number {
-  if (!sizeStr) return 0
-  const match = sizeStr.match(/^([\d.]+)\s*(B|KB|MB|GB|TB|PB)?$/i)
-  if (!match || !match[1]) return 0
+  if (!sizeStr) return 0;
+  const match = sizeStr.match(/^([\d.]+)\s*(B|KB|MB|GB|TB|PB)?$/i);
+  if (!match || !match[1]) return 0;
 
-  const num = parseFloat(match[1])
-  const unit = match[2] ? match[2].toUpperCase() : "B"
+  const num = parseFloat(match[1]);
+  const unit = match[2] ? match[2].toUpperCase() : "B";
 
   const multipliers: Record<string, number> = {
     B: 1,
@@ -150,19 +150,19 @@ function parseSizeToBytes(sizeStr: string | undefined): number {
     MB: 1024 ** 2,
     GB: 1024 ** 3,
     TB: 1024 ** 4,
-    PB: 1024 ** 5
-  }
+    PB: 1024 ** 5,
+  };
 
-  return num * (multipliers[unit] || 1)
+  return num * (multipliers[unit] || 1);
 }
 
 // 格式化字节数
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B"
-  const k = 1024
-  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"]
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 </script>
 
@@ -191,8 +191,7 @@ function formatBytes(bytes: number): string {
             :percentage="progress"
             :color="progressColor"
             :stroke-width="8"
-            :show-text="false"
-          />
+            :show-text="false" />
           <span class="progress-text">
             {{ progress }}%
             <span class="next-level" v-if="nextLevel">→ {{ nextLevel.name }}</span>

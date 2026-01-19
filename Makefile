@@ -37,7 +37,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-dprint fmt-go fmt-check lint unit-test coverage-summary
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -159,7 +159,9 @@ clean-docker:
 	@echo "Cleaning Docker cache"
 	docker builder prune -f
 
-lint: ## Run linters
+lint: lint-go lint-frontend
+
+lint-go:
 	@echo "Running Go linters..."
 	@if command -v golangci-lint > /dev/null 2>&1; then \
 		golangci-lint run ./...; \
@@ -170,8 +172,9 @@ lint: ## Run linters
 		echo "Running go vet instead..."; \
 		go vet ./...; \
 	fi
-	@echo ""
-	@echo "Running frontend linters..."
+
+lint-frontend:
+	@echo "Running frontend linters with oxlint..."
 	@cd web/frontend && if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
 		pnpm install; \
@@ -185,17 +188,16 @@ lint: ## Run linters
 GO_FILES = $(shell find . -name "*.go" -not -path "./vendor/*" -not -path "./web/frontend/*")
 
 # 代码格式化
-fmt: fmt-dprint fmt-go
+fmt: fmt-oxfmt fmt-go
 	@echo "Formatting complete."
 
-fmt-dprint:
-	@echo "Formatting with dprint (config, frontend, docs)..."
-	@if command -v dprint > /dev/null 2>&1; then \
-		dprint fmt; \
-	else \
-		echo "dprint not found. Install with:"; \
-		echo "  curl -fsSL https://dprint.dev/install.sh | sh"; \
-	fi
+fmt-oxfmt:
+	@echo "Formatting with oxfmt..."
+	@cd web/frontend && if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		pnpm install; \
+	fi && \
+	pnpm oxfmt --no-error-on-unmatched-pattern "$(PROJECT_ROOT)"
 
 fmt-go:
 	@echo "Formatting Go code..."
@@ -214,13 +216,11 @@ fmt-go:
 
 fmt-check:
 	@echo "Checking code format..."
-	@if command -v dprint > /dev/null 2>&1; then \
-		dprint check; \
-	else \
-		echo "dprint not found. Install with:"; \
-		echo "  curl -fsSL https://dprint.dev/install.sh | sh"; \
-		exit 1; \
-	fi
+	@cd web/frontend && if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		pnpm install; \
+	fi && \
+	pnpm oxfmt --no-error-on-unmatched-pattern --check "$(PROJECT_ROOT)"
 
 unit-test:
 	@mkdir -p $(DIST_DIR)

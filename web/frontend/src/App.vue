@@ -1,60 +1,60 @@
 <script setup lang="ts">
-import { ElMessage, ElMessageBox } from "element-plus"
-import { computed, onMounted, ref, watch } from "vue"
-import { useRoute, useRouter } from "vue-router"
-import { controlApi } from "./api"
-import VersionChecker from "./components/VersionChecker.vue"
-import { useLogLevelStore } from "./stores/logLevel"
-import { useThemeStore } from "./stores/theme"
-import { useVersionStore } from "./stores/version"
+import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { controlApi } from "./api";
+import VersionChecker from "./components/VersionChecker.vue";
+import { useLogLevelStore } from "./stores/logLevel";
+import { useThemeStore } from "./stores/theme";
+import { useVersionStore } from "./stores/version";
 
-const route = useRoute()
-const router = useRouter()
-const themeStore = useThemeStore()
-const logLevelStore = useLogLevelStore()
-const versionStore = useVersionStore()
+const route = useRoute();
+const router = useRouter();
+const themeStore = useThemeStore();
+const logLevelStore = useLogLevelStore();
+const versionStore = useVersionStore();
 
-const isCollapse = ref(false)
-const stopLoading = ref(false)
-const startLoading = ref(false)
+const isCollapse = ref(false);
+const stopLoading = ref(false);
+const startLoading = ref(false);
 
 const activeMenu = computed(() => {
-  const name = route.name as string
-  if (name === "site-detail") return "sites"
-  return name || "global"
-})
+  const name = route.name as string;
+  if (name === "site-detail") return "sites";
+  return name || "global";
+});
 
 onMounted(() => {
-  logLevelStore.fetchLogLevel()
-  versionStore.fetchVersionInfo()
-  versionStore.checkForUpdates(undefined, true)
-})
+  logLevelStore.fetchLogLevel();
+  versionStore.fetchVersionInfo();
+  versionStore.checkForUpdates(undefined, true);
+});
 
 // 监听主题变化，切换 Element Plus 暗色模式
 watch(
   () => themeStore.isDark,
-  isDark => {
-    document.documentElement.classList.toggle("dark", isDark)
+  (isDark) => {
+    document.documentElement.classList.toggle("dark", isDark);
   },
-  { immediate: true }
-)
+  { immediate: true },
+);
 
 async function stopAll() {
   try {
     await ElMessageBox.confirm("确定要停止所有任务吗？", "确认", {
       confirmButtonText: "确定",
       cancelButtonText: "取消",
-      type: "warning"
-    })
-    stopLoading.value = true
-    await controlApi.stop()
-    ElMessage.success("已停止所有任务")
+      type: "warning",
+    });
+    stopLoading.value = true;
+    await controlApi.stop();
+    ElMessage.success("已停止所有任务");
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "操作失败")
+      ElMessage.error((e as Error).message || "操作失败");
     }
   } finally {
-    stopLoading.value = false
+    stopLoading.value = false;
   }
 }
 
@@ -63,26 +63,26 @@ async function startAll() {
     await ElMessageBox.confirm("确定要启动所有任务吗？", "确认", {
       confirmButtonText: "确定",
       cancelButtonText: "取消",
-      type: "info"
-    })
-    startLoading.value = true
-    await controlApi.start()
-    ElMessage.success("已启动所有任务")
+      type: "info",
+    });
+    startLoading.value = true;
+    await controlApi.start();
+    ElMessage.success("已启动所有任务");
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "操作失败")
+      ElMessage.error((e as Error).message || "操作失败");
     }
   } finally {
-    startLoading.value = false
+    startLoading.value = false;
   }
 }
 
 function handleMenuSelect(index: string) {
-  router.push(`/${index}`)
+  router.push(`/${index}`);
 }
 
 function logout() {
-  window.location.href = "/logout"
+  window.location.href = "/logout";
 }
 </script>
 
@@ -147,11 +147,7 @@ function logout() {
       </div>
 
       <div class="app-aside-footer">
-        <el-button
-          :icon="isCollapse ? 'Expand' : 'Fold'"
-          text
-          @click="isCollapse = !isCollapse"
-        />
+        <el-button :icon="isCollapse ? 'Expand' : 'Fold'" text @click="isCollapse = !isCollapse" />
       </div>
     </el-aside>
 
@@ -166,18 +162,10 @@ function logout() {
 
         <div class="app-header-right">
           <el-button-group class="app-header-actions">
-            <el-button
-              type="danger"
-              :icon="'VideoPause'"
-              :loading="stopLoading"
-              @click="stopAll">
+            <el-button type="danger" :icon="'VideoPause'" :loading="stopLoading" @click="stopAll">
               停止任务
             </el-button>
-            <el-button
-              type="success"
-              :icon="'VideoPlay'"
-              :loading="startLoading"
-              @click="startAll">
+            <el-button type="success" :icon="'VideoPlay'" :loading="startLoading" @click="startAll">
               启动任务
             </el-button>
           </el-button-group>
@@ -193,8 +181,7 @@ function logout() {
             :active-icon="'Moon'"
             :inactive-icon="'Sunny'"
             inline-prompt
-            @change="themeStore.toggle"
-          />
+            @change="themeStore.toggle" />
 
           <span class="app-header-divider"></span>
 
@@ -208,8 +195,7 @@ function logout() {
               v-for="level in logLevelStore.availableLevels"
               :key="level"
               :label="level"
-              :value="level"
-            />
+              :value="level" />
           </el-select>
 
           <span class="app-header-divider"></span>

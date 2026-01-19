@@ -1,147 +1,147 @@
 <script setup lang="ts">
-import type { SiteLevelRequirement } from "@/api"
-import { useSiteLevelsStore } from "@/stores/siteLevels"
-import { formatNumber, parseISODuration } from "@/utils/format"
-import { computed, onMounted } from "vue"
+import type { SiteLevelRequirement } from "@/api";
+import { useSiteLevelsStore } from "@/stores/siteLevels";
+import { formatNumber, parseISODuration } from "@/utils/format";
+import { computed, onMounted } from "vue";
 
 const props = defineProps<{
-  siteId: string
-  currentLevelName: string
-  currentLevelId?: number
-}>()
+  siteId: string;
+  currentLevelName: string;
+  currentLevelId?: number;
+}>();
 
-const siteLevelsStore = useSiteLevelsStore()
+const siteLevelsStore = useSiteLevelsStore();
 
 // 使用store中的数据
-const levels = computed(() => siteLevelsStore.getLevels(props.siteId))
-const loading = computed(() => siteLevelsStore.loading)
-const error = computed(() => siteLevelsStore.error)
+const levels = computed(() => siteLevelsStore.getLevels(props.siteId));
+const loading = computed(() => siteLevelsStore.loading);
+const error = computed(() => siteLevelsStore.error);
 
 // 组件挂载时确保等级数据已加载
 onMounted(() => {
   if (!siteLevelsStore.loaded) {
-    siteLevelsStore.loadAll()
+    siteLevelsStore.loadAll();
   }
-})
+});
 
 // 检查是否是当前等级
 function isCurrentLevel(level: SiteLevelRequirement): boolean {
   // 优先通过 ID 匹配
   if (props.currentLevelId && props.currentLevelId > 0 && level.id === props.currentLevelId) {
-    return true
+    return true;
   }
   // 通过名称匹配
   if (props.currentLevelName && props.currentLevelName !== "-") {
     // 标准化名称：去除空格、转小写
-    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, "").trim()
-    const currentName = normalize(props.currentLevelName)
-    const levelName = normalize(level.name)
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, "").trim();
+    const currentName = normalize(props.currentLevelName);
+    const levelName = normalize(level.name);
 
     // 精确匹配
     if (currentName === levelName) {
-      return true
+      return true;
     }
 
     // 检查别名
     if (level.nameAka) {
       for (const aka of level.nameAka) {
         if (currentName === normalize(aka)) {
-          return true
+          return true;
         }
       }
     }
   }
-  return false
+  return false;
 }
 
 // 格式化等级要求
 function formatRequirement(level: SiteLevelRequirement): string[] {
-  const reqs: string[] = []
+  const reqs: string[] = [];
 
   if (level.interval) {
-    reqs.push(`注册 ${parseISODuration(level.interval)}`)
+    reqs.push(`注册 ${parseISODuration(level.interval)}`);
   }
   if (level.downloaded) {
-    reqs.push(`下载 ${level.downloaded}`)
+    reqs.push(`下载 ${level.downloaded}`);
   }
   if (level.uploaded) {
-    reqs.push(`上传 ${level.uploaded}`)
+    reqs.push(`上传 ${level.uploaded}`);
   }
   if (level.ratio && level.ratio > 0) {
-    reqs.push(`分享率 ${level.ratio}`)
+    reqs.push(`分享率 ${level.ratio}`);
   }
   if (level.bonus && level.bonus > 0) {
-    reqs.push(`魔力 ${formatNumber(level.bonus)}`)
+    reqs.push(`魔力 ${formatNumber(level.bonus)}`);
   }
   if (level.seedingBonus && level.seedingBonus > 0) {
-    reqs.push(`做种积分 ${formatNumber(level.seedingBonus)}`)
+    reqs.push(`做种积分 ${formatNumber(level.seedingBonus)}`);
   }
   if (level.uploads && level.uploads > 0) {
-    reqs.push(`发布 ${level.uploads} 个`)
+    reqs.push(`发布 ${level.uploads} 个`);
   }
   if (level.seeding && level.seeding > 0) {
-    reqs.push(`做种 ${level.seeding} 个`)
+    reqs.push(`做种 ${level.seeding} 个`);
   }
   if (level.seedingSize) {
-    reqs.push(`做种体积 ${level.seedingSize}`)
+    reqs.push(`做种体积 ${level.seedingSize}`);
   }
 
-  return reqs
+  return reqs;
 }
 
 // 格式化替代要求
 function formatAlternatives(level: SiteLevelRequirement): string[][] {
   if (!level.alternative || level.alternative.length === 0) {
-    return []
+    return [];
   }
 
-  return level.alternative.map(alt => {
-    const reqs: string[] = []
+  return level.alternative.map((alt) => {
+    const reqs: string[] = [];
     if (alt.seedingBonus && alt.seedingBonus > 0) {
-      reqs.push(`做种积分 ${formatNumber(alt.seedingBonus)}`)
+      reqs.push(`做种积分 ${formatNumber(alt.seedingBonus)}`);
     }
     if (alt.uploads && alt.uploads > 0) {
-      reqs.push(`发布 ${alt.uploads} 个`)
+      reqs.push(`发布 ${alt.uploads} 个`);
     }
     if (alt.bonus && alt.bonus > 0) {
-      reqs.push(`魔力 ${formatNumber(alt.bonus)}`)
+      reqs.push(`魔力 ${formatNumber(alt.bonus)}`);
     }
     if (alt.downloaded) {
-      reqs.push(`下载 ${alt.downloaded}`)
+      reqs.push(`下载 ${alt.downloaded}`);
     }
     if (alt.ratio && alt.ratio > 0) {
-      reqs.push(`分享率 ${alt.ratio}`)
+      reqs.push(`分享率 ${alt.ratio}`);
     }
-    return reqs
-  })
+    return reqs;
+  });
 }
 
 // 获取等级组类型标签
 function getGroupTypeLabel(groupType?: string): string {
   switch (groupType) {
     case "vip":
-      return "VIP"
+      return "VIP";
     case "manager":
-      return "管理"
+      return "管理";
     default:
-      return ""
+      return "";
   }
 }
 
 // 过滤只显示普通用户等级
 const userLevels = computed(() => {
-  return levels.value.filter(l => !l.groupType || l.groupType === "user")
-})
+  return levels.value.filter((l) => !l.groupType || l.groupType === "user");
+});
 
 // 特殊等级（VIP、管理等）
 const specialLevels = computed(() => {
-  return levels.value.filter(l => l.groupType && l.groupType !== "user")
-})
+  return levels.value.filter((l) => l.groupType && l.groupType !== "user");
+});
 
 // 重新加载等级数据
 function reloadLevels() {
-  siteLevelsStore.reset()
-  siteLevelsStore.loadAll()
+  siteLevelsStore.reset();
+  siteLevelsStore.loadAll();
 }
 </script>
 
@@ -183,11 +183,7 @@ function reloadLevels() {
           <div class="level-header">
             <span class="level-name">
               {{ level.name }}
-              <el-tag
-                v-if="isCurrentLevel(level)"
-                size="small"
-                type="success"
-                effect="dark">
+              <el-tag v-if="isCurrentLevel(level)" size="small" type="success" effect="dark">
                 当前
               </el-tag>
             </span>
@@ -209,15 +205,10 @@ function reloadLevels() {
               v-for="(altReqs, altIdx) in formatAlternatives(level)"
               :key="altIdx"
               class="alternative-group">
-              <span
-                class="or-separator"
-                v-if="altIdx > 0 || formatRequirement(level).length > 0">
+              <span class="or-separator" v-if="altIdx > 0 || formatRequirement(level).length > 0">
                 或
               </span>
-              <span
-                v-for="(req, reqIdx) in altReqs"
-                :key="reqIdx"
-                class="requirement-item alt">
+              <span v-for="(req, reqIdx) in altReqs" :key="reqIdx" class="requirement-item alt">
                 {{ req }}
               </span>
             </div>
@@ -243,16 +234,10 @@ function reloadLevels() {
             <div class="level-header">
               <span class="level-name">
                 {{ level.name }}
-                <el-tag
-                  size="small"
-                  :type="level.groupType === 'vip' ? 'warning' : 'danger'">
+                <el-tag size="small" :type="level.groupType === 'vip' ? 'warning' : 'danger'">
                   {{ getGroupTypeLabel(level.groupType) }}
                 </el-tag>
-                <el-tag
-                  v-if="isCurrentLevel(level)"
-                  size="small"
-                  type="success"
-                  effect="dark">
+                <el-tag v-if="isCurrentLevel(level)" size="small" type="success" effect="dark">
                   当前
                 </el-tag>
               </span>

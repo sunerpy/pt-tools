@@ -205,19 +205,29 @@ jobs:
           govulncheck ./...
 
   format-check:
-    name: Format Check (dprint)
+    name: Format Check (oxfmt)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install dprint
-        run: |
-          curl -fsSL https://dprint.dev/install.sh | sh
-          echo "$HOME/.dprint/bin" >> $GITHUB_PATH
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Dependencies
+        working-directory: web/frontend
+        run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: ~/.dprint/bin/dprint check
+        working-directory: web/frontend
+        run: pnpm fmt:check
 
   ci-success:
     name: CI Success

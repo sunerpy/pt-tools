@@ -1,134 +1,134 @@
 <script setup lang="ts">
-import { type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api"
-import { InfoFilled, Refresh, Timer } from "@element-plus/icons-vue"
-import { ElMessage, ElMessageBox } from "element-plus"
-import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+import { type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
+import { InfoFilled, Refresh, Timer } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
-const activeTab = ref("paused")
-const loading = ref(false)
-const autoRefresh = ref(false)
-const refreshTimer = ref<number | null>(null)
+const activeTab = ref("paused");
+const loading = ref(false);
+const autoRefresh = ref(false);
+const refreshTimer = ref<number | null>(null);
 
-const pausedTorrents = ref<PausedTorrent[]>([])
-const pausedTotal = ref(0)
-const pausedPage = ref(1)
-const pausedPageSize = ref(20)
+const pausedTorrents = ref<PausedTorrent[]>([]);
+const pausedTotal = ref(0);
+const pausedPage = ref(1);
+const pausedPageSize = ref(20);
 
-const archiveTorrents = ref<ArchiveTorrent[]>([])
-const archiveTotal = ref(0)
-const archivePage = ref(1)
-const archivePageSize = ref(20)
+const archiveTorrents = ref<ArchiveTorrent[]>([]);
+const archiveTotal = ref(0);
+const archivePage = ref(1);
+const archivePageSize = ref(20);
 
-const siteFilter = ref("")
-const selectedIds = ref<number[]>([])
+const siteFilter = ref("");
+const selectedIds = ref<number[]>([]);
 
-const deleteDialogVisible = ref(false)
-const deleteTarget = ref<PausedTorrent | null>(null)
+const deleteDialogVisible = ref(false);
+const deleteTarget = ref<PausedTorrent | null>(null);
 
 const siteOptions = computed(() => {
-  const sites = new Set<string>()
-  pausedTorrents.value.forEach(t => {
-    if (t.site_name) sites.add(t.site_name)
-  })
-  return Array.from(sites)
-})
+  const sites = new Set<string>();
+  pausedTorrents.value.forEach((t) => {
+    if (t.site_name) sites.add(t.site_name);
+  });
+  return Array.from(sites);
+});
 
 onMounted(async () => {
-  await loadPausedTorrents()
-})
+  await loadPausedTorrents();
+});
 
 onUnmounted(() => {
   if (refreshTimer.value) {
-    clearInterval(refreshTimer.value)
-    refreshTimer.value = null
+    clearInterval(refreshTimer.value);
+    refreshTimer.value = null;
   }
-})
+});
 
-watch(autoRefresh, val => {
+watch(autoRefresh, (val) => {
   if (val) {
     refreshTimer.value = window.setInterval(() => {
       if (activeTab.value === "paused") {
-        loadPausedTorrents()
+        loadPausedTorrents();
       } else {
-        loadArchiveTorrents()
+        loadArchiveTorrents();
       }
-    }, 30000)
-    ElMessage.success("已开启自动刷新（30秒）")
+    }, 30000);
+    ElMessage.success("已开启自动刷新（30秒）");
   } else {
     if (refreshTimer.value) {
-      clearInterval(refreshTimer.value)
-      refreshTimer.value = null
+      clearInterval(refreshTimer.value);
+      refreshTimer.value = null;
     }
-    ElMessage.info("已关闭自动刷新")
+    ElMessage.info("已关闭自动刷新");
   }
-})
+});
 
 async function loadPausedTorrents() {
-  loading.value = true
+  loading.value = true;
   try {
     const data = await pausedTorrentsApi.list(
       pausedPage.value,
       pausedPageSize.value,
-      siteFilter.value || undefined
-    )
-    pausedTorrents.value = data.items || []
-    pausedTotal.value = data.total || 0
+      siteFilter.value || undefined,
+    );
+    pausedTorrents.value = data.items || [];
+    pausedTotal.value = data.total || 0;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 async function loadArchiveTorrents() {
-  loading.value = true
+  loading.value = true;
   try {
     const data = await pausedTorrentsApi.listArchive(
       archivePage.value,
       archivePageSize.value,
-      siteFilter.value || undefined
-    )
-    archiveTorrents.value = data.items || []
-    archiveTotal.value = data.total || 0
+      siteFilter.value || undefined,
+    );
+    archiveTorrents.value = data.items || [];
+    archiveTotal.value = data.total || 0;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function handleTabChange(tab: string) {
   if (tab === "paused") {
-    loadPausedTorrents()
+    loadPausedTorrents();
   } else {
-    loadArchiveTorrents()
+    loadArchiveTorrents();
   }
 }
 
 function handlePausedPageChange(newPage: number) {
-  pausedPage.value = newPage
-  loadPausedTorrents()
+  pausedPage.value = newPage;
+  loadPausedTorrents();
 }
 
 function handlePausedSizeChange(newSize: number) {
-  pausedPageSize.value = newSize
-  pausedPage.value = 1
-  loadPausedTorrents()
+  pausedPageSize.value = newSize;
+  pausedPage.value = 1;
+  loadPausedTorrents();
 }
 
 function handleArchivePageChange(newPage: number) {
-  archivePage.value = newPage
-  loadArchiveTorrents()
+  archivePage.value = newPage;
+  loadArchiveTorrents();
 }
 
 function handleArchiveSizeChange(newSize: number) {
-  archivePageSize.value = newSize
-  archivePage.value = 1
-  loadArchiveTorrents()
+  archivePageSize.value = newSize;
+  archivePage.value = 1;
+  loadArchiveTorrents();
 }
 
 function handleSelectionChange(selection: PausedTorrent[]) {
-  selectedIds.value = selection.map(t => t.id)
+  selectedIds.value = selection.map((t) => t.id);
 }
 
 async function resumeTorrent(torrent: PausedTorrent) {
@@ -136,102 +136,102 @@ async function resumeTorrent(torrent: PausedTorrent) {
     await ElMessageBox.confirm(`确定恢复下载 "${torrent.title}"？`, "确认恢复", {
       confirmButtonText: "恢复",
       cancelButtonText: "取消",
-      type: "info"
-    })
+      type: "info",
+    });
 
-    const result = await pausedTorrentsApi.resume(torrent.id)
+    const result = await pausedTorrentsApi.resume(torrent.id);
     if (result.success) {
-      ElMessage.success("已恢复下载")
-      await loadPausedTorrents()
+      ElMessage.success("已恢复下载");
+      await loadPausedTorrents();
     } else {
-      ElMessage.error(result.message || "恢复失败")
+      ElMessage.error(result.message || "恢复失败");
     }
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "恢复失败")
+      ElMessage.error((e as Error).message || "恢复失败");
     }
   }
 }
 
 async function performDelete(ids: number[], removeData: boolean) {
   try {
-    const result = await pausedTorrentsApi.delete({ ids, remove_data: removeData })
+    const result = await pausedTorrentsApi.delete({ ids, remove_data: removeData });
     if (result.success > 0) {
-      ElMessage.success(`成功删除 ${result.success} 个任务`)
+      ElMessage.success(`成功删除 ${result.success} 个任务`);
     }
     if (result.failed > 0) {
-      ElMessage.warning(`${result.failed} 个任务删除失败`)
+      ElMessage.warning(`${result.failed} 个任务删除失败`);
     }
-    selectedIds.value = []
-    await loadPausedTorrents()
+    selectedIds.value = [];
+    await loadPausedTorrents();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "删除失败")
+    ElMessage.error((e as Error).message || "删除失败");
   }
 }
 
 async function deleteTorrents(ids: number[], removeData: boolean) {
   try {
-    const count = ids.length
-    const dataHint = removeData ? "（包含数据文件）" : "（保留数据文件）"
+    const count = ids.length;
+    const dataHint = removeData ? "（包含数据文件）" : "（保留数据文件）";
     await ElMessageBox.confirm(`确定删除 ${count} 个暂停任务${dataHint}？`, "确认删除", {
       confirmButtonText: "删除",
       cancelButtonText: "取消",
-      type: "warning"
-    })
+      type: "warning",
+    });
 
-    await performDelete(ids, removeData)
+    await performDelete(ids, removeData);
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "操作取消")
+      ElMessage.error((e as Error).message || "操作取消");
     }
   }
 }
 
 function openDeleteDialog(row: PausedTorrent) {
-  deleteTarget.value = row
-  deleteDialogVisible.value = true
+  deleteTarget.value = row;
+  deleteDialogVisible.value = true;
 }
 
 async function confirmDeleteRow(removeData: boolean) {
-  if (!deleteTarget.value) return
-  deleteDialogVisible.value = false
-  await performDelete([deleteTarget.value.id], removeData)
+  if (!deleteTarget.value) return;
+  deleteDialogVisible.value = false;
+  await performDelete([deleteTarget.value.id], removeData);
 }
 
 function formatSize(bytes: number): string {
-  if (!bytes || bytes <= 0) return "-"
-  const units = ["B", "KB", "MB", "GB", "TB"]
-  let unitIndex = 0
-  let size = bytes
+  if (!bytes || bytes <= 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let unitIndex = 0;
+  let size = bytes;
   while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex++
+    size /= 1024;
+    unitIndex++;
   }
-  return `${size.toFixed(2)} ${units[unitIndex]}`
+  return `${size.toFixed(2)} ${units[unitIndex]}`;
 }
 
 function getDownloadedSize(torrent: PausedTorrent): string {
-  const downloaded = torrent.torrent_size * (torrent.progress / 100)
-  return formatSize(downloaded)
+  const downloaded = torrent.torrent_size * (torrent.progress / 100);
+  return formatSize(downloaded);
 }
 
 function getProgressColor(percentage: number) {
-  if (percentage < 30) return "#F56C6C"
-  if (percentage < 70) return "#E6A23C"
-  return "#67C23A"
+  if (percentage < 30) return "#F56C6C";
+  if (percentage < 70) return "#E6A23C";
+  return "#67C23A";
 }
 
 function formatTime(timeStr: string | undefined): string {
-  if (!timeStr || timeStr === "0001-01-01T00:00:00Z") return "-"
+  if (!timeStr || timeStr === "0001-01-01T00:00:00Z") return "-";
   try {
-    return new Date(timeStr).toLocaleString("zh-CN")
+    return new Date(timeStr).toLocaleString("zh-CN");
   } catch {
-    return timeStr
+    return timeStr;
   }
 }
 
 function formatProgress(progress: number): string {
-  return `${progress.toFixed(1)}%`
+  return `${progress.toFixed(1)}%`;
 }
 </script>
 
@@ -251,8 +251,7 @@ function formatProgress(progress: number): string {
             :inactive-icon="Timer"
             active-text="自动刷新"
             inactive-text="自动刷新"
-            style="--el-switch-on-color: var(--pt-color-success)"
-          />
+            style="--el-switch-on-color: var(--pt-color-success)" />
         </div>
         <el-select
           v-model="siteFilter"
@@ -261,12 +260,7 @@ function formatProgress(progress: number): string {
           style="width: 140px"
           @change="handleTabChange(activeTab)">
           <el-option label="全部站点" value="" />
-          <el-option
-            v-for="site in siteOptions"
-            :key="site"
-            :label="site"
-            :value="site"
-          />
+          <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
         </el-select>
         <el-button
           type="primary"
@@ -286,18 +280,11 @@ function formatProgress(progress: number): string {
             class="filter-bar"
             style="margin: 16px; margin-bottom: 0">
             <div class="filter-group">
-              <span class="filter-group-label">已选择 {{ selectedIds.length }}
-                项</span>
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteTorrents(selectedIds, false)">
+              <span class="filter-group-label">已选择 {{ selectedIds.length }} 项</span>
+              <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, false)">
                 删除任务
               </el-button>
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteTorrents(selectedIds, true)">
+              <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, true)">
                 删除任务和数据
               </el-button>
             </div>
@@ -312,20 +299,14 @@ function formatProgress(progress: number): string {
               <el-table-column type="selection" width="50" />
               <el-table-column label="站点" prop="site_name" width="100">
                 <template #default="{ row }">
-                  <el-tag
-                    size="small"
-                    effect="plain"
-                    class="status-badge status-badge--info">
+                  <el-tag size="small" effect="plain" class="status-badge status-badge--info">
                     {{ row.site_name }}
                   </el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="标题" min-width="250">
                 <template #default="{ row }">
-                  <el-tooltip
-                    :content="row.title"
-                    placement="top"
-                    :show-after="500">
+                  <el-tooltip :content="row.title" placement="top" :show-after="500">
                     <span class="table-cell-primary title-text">{{ row.title }}</span>
                   </el-tooltip>
                 </template>
@@ -338,8 +319,7 @@ function formatProgress(progress: number): string {
                       :stroke-width="10"
                       :show-text="false"
                       :color="getProgressColor"
-                      class="custom-progress"
-                    />
+                      class="custom-progress" />
                     <div class="progress-info">
                       <span class="progress-detail-text">
                         {{ getDownloadedSize(row) }} / {{ formatSize(row.torrent_size) }}
@@ -374,18 +354,10 @@ function formatProgress(progress: number): string {
               <el-table-column label="操作" width="160" fixed="right">
                 <template #default="{ row }">
                   <div class="table-cell-actions">
-                    <el-button
-                      link
-                      type="primary"
-                      size="small"
-                      @click="resumeTorrent(row)">
+                    <el-button link type="primary" size="small" @click="resumeTorrent(row)">
                       恢复
                     </el-button>
-                    <el-button
-                      link
-                      type="danger"
-                      size="small"
-                      @click="openDeleteDialog(row)">
+                    <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
                       删除
                     </el-button>
                   </div>
@@ -403,8 +375,7 @@ function formatProgress(progress: number): string {
               :total="pausedTotal"
               layout="total, sizes, prev, pager, next, jumper"
               @size-change="handlePausedSizeChange"
-              @current-change="handlePausedPageChange"
-            />
+              @current-change="handlePausedPageChange" />
           </div>
 
           <div v-if="!loading && pausedTorrents.length === 0" class="table-empty">
@@ -417,20 +388,14 @@ function formatProgress(progress: number): string {
             <el-table v-loading="loading" :data="archiveTorrents" style="width: 100%">
               <el-table-column label="站点" prop="site_name" width="100">
                 <template #default="{ row }">
-                  <el-tag
-                    size="small"
-                    effect="plain"
-                    class="status-badge status-badge--info">
+                  <el-tag size="small" effect="plain" class="status-badge status-badge--info">
                     {{ row.site_name }}
                   </el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="标题" min-width="250">
                 <template #default="{ row }">
-                  <el-tooltip
-                    :content="row.title"
-                    placement="top"
-                    :show-after="500">
+                  <el-tooltip :content="row.title" placement="top" :show-after="500">
                     <span class="table-cell-primary title-text">{{ row.title }}</span>
                   </el-tooltip>
                 </template>
@@ -477,8 +442,7 @@ function formatProgress(progress: number): string {
               :total="archiveTotal"
               layout="total, sizes, prev, pager, next, jumper"
               @size-change="handleArchiveSizeChange"
-              @current-change="handleArchivePageChange"
-            />
+              @current-change="handleArchivePageChange" />
           </div>
 
           <div v-if="!loading && archiveTorrents.length === 0" class="table-empty">
@@ -505,13 +469,8 @@ function formatProgress(progress: number): string {
         <div class="dialog-footer-custom">
           <el-button @click="deleteDialogVisible = false">取消</el-button>
           <div class="action-buttons">
-            <el-button
-              type="danger"
-              plain
-              @click="confirmDeleteRow(true)">同时删除数据</el-button>
-            <el-button
-              type="primary"
-              @click="confirmDeleteRow(false)">仅删除任务</el-button>
+            <el-button type="danger" plain @click="confirmDeleteRow(true)">同时删除数据</el-button>
+            <el-button type="primary" @click="confirmDeleteRow(false)">仅删除任务</el-button>
           </div>
         </div>
       </template>

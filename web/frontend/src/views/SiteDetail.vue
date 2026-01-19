@@ -8,27 +8,27 @@ import {
   filterRulesApi,
   type RSSConfig,
   type SiteConfig,
-  sitesApi
-} from "@/api"
-import { ElMessage, ElMessageBox } from "element-plus"
-import { computed, onMounted, reactive, ref } from "vue"
-import { useRoute, useRouter } from "vue-router"
+  sitesApi,
+} from "@/api";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
-const route = useRoute()
-const router = useRouter()
+const route = useRoute();
+const router = useRouter();
 
-const siteName = computed(() => route.params.name as string)
-const loading = ref(false)
-const saving = ref(false)
-const addingRss = ref(false)
-const rssDialogVisible = ref(false)
-const downloaders = ref<DownloaderSetting[]>([])
-const filterRules = ref<FilterRule[]>([])
-const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({})
+const siteName = computed(() => route.params.name as string);
+const loading = ref(false);
+const saving = ref(false);
+const addingRss = ref(false);
+const rssDialogVisible = ref(false);
+const downloaders = ref<DownloaderSetting[]>([]);
+const filterRules = ref<FilterRule[]>([]);
+const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
 
 // 新增：是否使用自定义路径
-const newRssUseCustomPath = ref(false)
-const editRssUseCustomPath = ref(false)
+const newRssUseCustomPath = ref(false);
+const editRssUseCustomPath = ref(false);
 
 const form = ref<SiteConfig>({
   enabled: false,
@@ -36,8 +36,8 @@ const form = ref<SiteConfig>({
   cookie: "",
   api_key: "",
   api_url: "",
-  rss: []
-})
+  rss: [],
+});
 
 // 示例 RSS 配置（不存入数据库，仅用于展示）
 const exampleRssConfigs: Record<string, RSSConfig[]> = {
@@ -48,8 +48,8 @@ const exampleRssConfigs: Record<string, RSSConfig[]> = {
       category: "Tv",
       tag: "SpringSunday",
       interval_minutes: 5,
-      is_example: true
-    }
+      is_example: true,
+    },
   ],
   hdsky: [
     {
@@ -58,8 +58,8 @@ const exampleRssConfigs: Record<string, RSSConfig[]> = {
       category: "Mv",
       tag: "HDSKY",
       interval_minutes: 5,
-      is_example: true
-    }
+      is_example: true,
+    },
   ],
   mteam: [
     {
@@ -68,32 +68,32 @@ const exampleRssConfigs: Record<string, RSSConfig[]> = {
       category: "Tv",
       tag: "MT",
       interval_minutes: 10,
-      is_example: true
-    }
-  ]
-}
+      is_example: true,
+    },
+  ],
+};
 
 // 获取当前站点的示例 RSS
 const exampleRss = computed(() => {
-  const name = siteName.value.toLowerCase()
-  return exampleRssConfigs[name] || []
-})
+  const name = siteName.value.toLowerCase();
+  return exampleRssConfigs[name] || [];
+});
 
 // 显示的 RSS 列表（真实数据 + 示例数据）
 const displayRssList = computed(() => {
-  const realRss = form.value.rss || []
+  const realRss = form.value.rss || [];
   // 如果有真实数据，只显示真实数据
   if (realRss.length > 0) {
-    return realRss
+    return realRss;
   }
   // 如果没有真实数据，显示示例数据
-  return exampleRss.value
-})
+  return exampleRss.value;
+});
 
 // 是否显示的是示例数据
 const showingExamples = computed(() => {
-  return (form.value.rss || []).length === 0 && exampleRss.value.length > 0
-})
+  return (form.value.rss || []).length === 0 && exampleRss.value.length > 0;
+});
 
 const newRss = reactive<RSSConfig>({
   name: "",
@@ -104,10 +104,10 @@ const newRss = reactive<RSSConfig>({
   downloader_id: undefined,
   download_path: "",
   filter_rule_ids: [],
-  pause_on_free_end: false
-})
+  pause_on_free_end: false,
+});
 
-const editRssDialogVisible = ref(false)
+const editRssDialogVisible = ref(false);
 const editingRss = reactive<RSSConfig>({
   id: undefined,
   name: "",
@@ -118,72 +118,72 @@ const editingRss = reactive<RSSConfig>({
   downloader_id: undefined,
   download_path: "",
   filter_rule_ids: [],
-  pause_on_free_end: false
-})
-const editingRssIndex = ref(-1)
-const updatingRss = ref(false)
+  pause_on_free_end: false,
+});
+const editingRssIndex = ref(-1);
+const updatingRss = ref(false);
 
 onMounted(async () => {
-  loading.value = true
+  loading.value = true;
   try {
     // 并行加载站点配置、下载器列表、过滤规则列表和下载器目录
     const [siteData, downloaderList, filterRuleList, directoriesData] = await Promise.all([
       sitesApi.get(siteName.value),
       downloadersApi.list(),
       filterRulesApi.list(),
-      downloaderDirectoriesApi.listAll()
-    ])
-    form.value = siteData
-    downloaders.value = downloaderList // 显示所有下载器，不过滤
-    filterRules.value = filterRuleList.filter(r => r.enabled) // 只显示启用的过滤规则
-    downloaderDirectories.value = directoriesData
+      downloaderDirectoriesApi.listAll(),
+    ]);
+    form.value = siteData;
+    downloaders.value = downloaderList; // 显示所有下载器，不过滤
+    filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
+    downloaderDirectories.value = directoriesData;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
-})
+});
 
 // 获取指定下载器的目录列表
 function getDirectoriesForDownloader(downloaderId: number | undefined): DownloaderDirectory[] {
   if (!downloaderId) {
     // 如果没有指定下载器，获取默认下载器的目录
-    const defaultDownloader = downloaders.value.find(d => d.is_default && d.enabled)
+    const defaultDownloader = downloaders.value.find((d) => d.is_default && d.enabled);
     if (defaultDownloader?.id) {
-      return downloaderDirectories.value[defaultDownloader.id] || []
+      return downloaderDirectories.value[defaultDownloader.id] || [];
     }
-    return []
+    return [];
   }
-  return downloaderDirectories.value[downloaderId] || []
+  return downloaderDirectories.value[downloaderId] || [];
 }
 
 // 检查路径是否为预设目录
 function isPresetDirectory(path: string, downloaderId: number | undefined): boolean {
-  const dirs = getDirectoriesForDownloader(downloaderId)
-  return dirs.some(d => d.path === path)
+  const dirs = getDirectoriesForDownloader(downloaderId);
+  return dirs.some((d) => d.path === path);
 }
 
 // 获取路径的显示名称（优先显示别名）
 function getPathDisplayName(path: string, downloaderId: number | undefined): string {
-  const dirs = getDirectoriesForDownloader(downloaderId)
-  const dir = dirs.find(d => d.path === path)
+  const dirs = getDirectoriesForDownloader(downloaderId);
+  const dir = dirs.find((d) => d.path === path);
   if (dir) {
-    return dir.alias || path
+    return dir.alias || path;
   }
   // 如果是自定义路径，只显示最后一级目录名
-  const parts = path.split("/").filter(Boolean)
-  return parts.length > 0 ? (parts[parts.length - 1] as string) : path
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 0 ? (parts[parts.length - 1] as string) : path;
 }
 
 async function save() {
-  saving.value = true
+  saving.value = true;
   try {
-    await sitesApi.save(siteName.value, form.value)
-    ElMessage.success("保存成功")
+    await sitesApi.save(siteName.value, form.value);
+    ElMessage.success("保存成功");
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
@@ -197,36 +197,36 @@ function openAddRssDialog() {
     downloader_id: undefined,
     download_path: "",
     filter_rule_ids: [],
-    pause_on_free_end: true
-  })
-  newRssUseCustomPath.value = false
-  rssDialogVisible.value = true
+    pause_on_free_end: true,
+  });
+  newRssUseCustomPath.value = false;
+  rssDialogVisible.value = true;
 }
 
 async function addRss() {
   if (!newRss.name || !newRss.url) {
-    ElMessage.error("名称和链接为必填")
-    return
+    ElMessage.error("名称和链接为必填");
+    return;
   }
   if (!newRss.url.startsWith("http://") && !newRss.url.startsWith("https://")) {
-    ElMessage.error("链接必须以 http:// 或 https:// 开头")
-    return
+    ElMessage.error("链接必须以 http:// 或 https:// 开头");
+    return;
   }
 
   // 检查重复 RSS URL
-  const normalizedUrl = newRss.url.trim().toLowerCase()
-  const rssList = form.value.rss || []
-  const isDuplicate = rssList.some(r => r.url.trim().toLowerCase() === normalizedUrl)
+  const normalizedUrl = newRss.url.trim().toLowerCase();
+  const rssList = form.value.rss || [];
+  const isDuplicate = rssList.some((r) => r.url.trim().toLowerCase() === normalizedUrl);
   if (isDuplicate) {
-    ElMessage.error("该 RSS 链接已存在，请勿重复添加")
-    return
+    ElMessage.error("该 RSS 链接已存在，请勿重复添加");
+    return;
   }
 
-  addingRss.value = true
-  console.log("[RSS] 开始添加 RSS:", newRss.name, newRss.url)
+  addingRss.value = true;
+  console.log("[RSS] 开始添加 RSS:", newRss.name, newRss.url);
   try {
     if (!form.value.rss) {
-      form.value.rss = []
+      form.value.rss = [];
     }
     form.value.rss.push({
       ...newRss,
@@ -234,66 +234,66 @@ async function addRss() {
       downloader_id: newRss.downloader_id || undefined,
       download_path: newRss.download_path || "",
       filter_rule_ids: newRss.filter_rule_ids || [],
-      pause_on_free_end: newRss.pause_on_free_end || false
-    })
-    await sitesApi.save(siteName.value, form.value)
+      pause_on_free_end: newRss.pause_on_free_end || false,
+    });
+    await sitesApi.save(siteName.value, form.value);
     // 重新加载数据以获取数据库中的真实 ID
-    const data = await sitesApi.get(siteName.value)
+    const data = await sitesApi.get(siteName.value);
     form.value = {
       ...data,
-      rss: data.rss || []
-    }
-    ElMessage.success("RSS 添加成功")
-    rssDialogVisible.value = false
+      rss: data.rss || [],
+    };
+    ElMessage.success("RSS 添加成功");
+    rssDialogVisible.value = false;
   } catch (e: unknown) {
     // 添加失败时，移除刚添加的 RSS
-    form.value.rss.pop()
-    ElMessage.error((e as Error).message || "添加失败")
+    form.value.rss.pop();
+    ElMessage.error((e as Error).message || "添加失败");
   } finally {
-    addingRss.value = false
+    addingRss.value = false;
   }
 }
 
 async function deleteRss(index: number) {
-  const rss = form.value.rss[index]
-  if (!rss) return
+  const rss = form.value.rss[index];
+  if (!rss) return;
 
   try {
     await ElMessageBox.confirm(`确定删除 RSS "${rss.name}"？`, "确认删除", {
       confirmButtonText: "删除",
       cancelButtonText: "取消",
-      type: "warning"
-    })
+      type: "warning",
+    });
 
-    console.log("[RSS] 开始删除 RSS:", rss.name, "id:", rss.id)
+    console.log("[RSS] 开始删除 RSS:", rss.name, "id:", rss.id);
     if (rss.id) {
-      await sitesApi.deleteRss(siteName.value, rss.id)
-      console.log("[RSS] 删除 RSS 成功:", rss.name)
+      await sitesApi.deleteRss(siteName.value, rss.id);
+      console.log("[RSS] 删除 RSS 成功:", rss.name);
       // 重新加载数据以确保数据一致性
-      const data = await sitesApi.get(siteName.value)
+      const data = await sitesApi.get(siteName.value);
       form.value = {
         ...data,
-        rss: data.rss || []
-      }
+        rss: data.rss || [],
+      };
     } else {
       // 没有 ID 的 RSS（未保存到数据库），直接从前端列表移除
-      console.log("[RSS] RSS 无 ID，仅从前端移除:", rss.name)
-      form.value.rss.splice(index, 1)
+      console.log("[RSS] RSS 无 ID，仅从前端移除:", rss.name);
+      form.value.rss.splice(index, 1);
     }
-    ElMessage.success("已删除")
+    ElMessage.success("已删除");
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      console.error("[RSS] 删除 RSS 失败:", e)
-      ElMessage.error((e as Error).message || "删除失败")
+      console.error("[RSS] 删除 RSS 失败:", e);
+      ElMessage.error((e as Error).message || "删除失败");
     }
   }
 }
 
 function openEditRssDialog(index: number) {
-  const rss = form.value.rss[index]
-  if (!rss) return
+  const rss = form.value.rss[index];
+  if (!rss) return;
 
-  editingRssIndex.value = index
+  editingRssIndex.value = index;
   Object.assign(editingRss, {
     id: rss.id,
     name: rss.name,
@@ -304,37 +304,37 @@ function openEditRssDialog(index: number) {
     downloader_id: rss.downloader_id || undefined,
     download_path: rss.download_path || "",
     filter_rule_ids: rss.filter_rule_ids || [],
-    pause_on_free_end: rss.pause_on_free_end || false
-  })
+    pause_on_free_end: rss.pause_on_free_end || false,
+  });
   // 检查当前路径是否为预设目录，如果不是则启用自定义输入
   editRssUseCustomPath.value = rss.download_path
     ? !isPresetDirectory(rss.download_path, rss.downloader_id)
-    : false
-  editRssDialogVisible.value = true
+    : false;
+  editRssDialogVisible.value = true;
 }
 
 async function updateRss() {
   if (!editingRss.name || !editingRss.url) {
-    ElMessage.error("名称和链接为必填")
-    return
+    ElMessage.error("名称和链接为必填");
+    return;
   }
   if (!editingRss.url.startsWith("http://") && !editingRss.url.startsWith("https://")) {
-    ElMessage.error("链接必须以 http:// 或 https:// 开头")
-    return
+    ElMessage.error("链接必须以 http:// 或 https:// 开头");
+    return;
   }
 
-  const normalizedUrl = editingRss.url.trim().toLowerCase()
-  const rssList = form.value.rss || []
+  const normalizedUrl = editingRss.url.trim().toLowerCase();
+  const rssList = form.value.rss || [];
   const isDuplicate = rssList.some(
-    (r, idx) => idx !== editingRssIndex.value && r.url.trim().toLowerCase() === normalizedUrl
-  )
+    (r, idx) => idx !== editingRssIndex.value && r.url.trim().toLowerCase() === normalizedUrl,
+  );
   if (isDuplicate) {
-    ElMessage.error("该 RSS 链接已存在，请勿重复添加")
-    return
+    ElMessage.error("该 RSS 链接已存在，请勿重复添加");
+    return;
   }
 
-  updatingRss.value = true
-  console.log("[RSS] 开始更新 RSS:", editingRss.name, editingRss.url)
+  updatingRss.value = true;
+  console.log("[RSS] 开始更新 RSS:", editingRss.name, editingRss.url);
 
   try {
     // 更新本地数据
@@ -348,47 +348,47 @@ async function updateRss() {
       downloader_id: editingRss.downloader_id || undefined,
       download_path: editingRss.download_path || "",
       filter_rule_ids: editingRss.filter_rule_ids || [],
-      pause_on_free_end: editingRss.pause_on_free_end || false
-    }
+      pause_on_free_end: editingRss.pause_on_free_end || false,
+    };
 
     // 保存到服务器
-    await sitesApi.save(siteName.value, form.value)
-    ElMessage.success("RSS 更新成功")
-    editRssDialogVisible.value = false
+    await sitesApi.save(siteName.value, form.value);
+    ElMessage.success("RSS 更新成功");
+    editRssDialogVisible.value = false;
   } catch (e: unknown) {
-    console.error("[RSS] 更新 RSS 失败:", e)
-    ElMessage.error((e as Error).message || "更新失败")
+    console.error("[RSS] 更新 RSS 失败:", e);
+    ElMessage.error((e as Error).message || "更新失败");
   } finally {
     // 无论成功或失败，都重新加载数据以确保数据一致性
-    const data = await sitesApi.get(siteName.value)
+    const data = await sitesApi.get(siteName.value);
     form.value = {
       ...data,
-      rss: data.rss || []
-    }
-    updatingRss.value = false
+      rss: data.rss || [],
+    };
+    updatingRss.value = false;
   }
 }
 
 function goBack() {
-  router.push("/sites")
+  router.push("/sites");
 }
 
 function toggleNewRssCustomPath() {
-  newRssUseCustomPath.value = !newRssUseCustomPath.value
+  newRssUseCustomPath.value = !newRssUseCustomPath.value;
   if (!newRssUseCustomPath.value) {
-    newRss.download_path = ""
+    newRss.download_path = "";
   }
 }
 
 function toggleEditRssCustomPath() {
-  editRssUseCustomPath.value = !editRssUseCustomPath.value
+  editRssUseCustomPath.value = !editRssUseCustomPath.value;
   if (!editRssUseCustomPath.value) {
-    editingRss.download_path = ""
+    editingRss.download_path = "";
   }
 }
 
 function getRowClassName({ row }: { row: RSSConfig }) {
-  return row.is_example ? "example-row" : ""
+  return row.is_example ? "example-row" : "";
 }
 </script>
 
@@ -401,10 +401,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
           <div class="header-left">
             <el-button :icon="'ArrowLeft'" text @click="goBack" />
             <span>站点设置 - {{ siteName }}</span>
-            <el-tag
-              :type="form.enabled ? 'success' : 'info'"
-              size="small"
-              style="margin-left: 8px">
+            <el-tag :type="form.enabled ? 'success' : 'info'" size="small" style="margin-left: 8px">
               {{ form.enabled ? "已启用" : "未启用" }}
             </el-tag>
           </div>
@@ -435,8 +432,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             v-model="form.cookie"
             type="textarea"
             :rows="3"
-            placeholder="从浏览器开发者工具中获取"
-          />
+            placeholder="从浏览器开发者工具中获取" />
         </el-form-item>
 
         <el-form-item v-if="form.auth_method === 'api_key'" label="API Key">
@@ -444,8 +440,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             v-model="form.api_key"
             type="password"
             show-password
-            placeholder="从 M-Team 个人设置中获取"
-          />
+            placeholder="从 M-Team 个人设置中获取" />
         </el-form-item>
 
         <el-form-item v-if="form.auth_method === 'api_key'" label="API URL">
@@ -481,11 +476,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
         <el-table-column label="名称" prop="name" min-width="120">
           <template #default="{ row }">
             <span :class="{ 'example-text': row.is_example }">{{ row.name }}</span>
-            <el-tag
-              v-if="row.is_example"
-              type="info"
-              size="small"
-              style="margin-left: 4px">
+            <el-tag v-if="row.is_example" type="info" size="small" style="margin-left: 4px">
               示例
             </el-tag>
           </template>
@@ -516,7 +507,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             </template>
             <template v-else>
               <el-tag v-if="row.downloader_id" type="primary" size="small">
-                {{ downloaders.find(d => d.id === row.downloader_id)?.name || "未知" }}
+                {{ downloaders.find((d) => d.id === row.downloader_id)?.name || "未知" }}
               </el-tag>
               <el-tag v-else type="info" size="small">默认</el-tag>
             </template>
@@ -551,7 +542,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
                 type="success"
                 size="small"
                 style="margin-right: 4px">
-                {{ filterRules.find(r => r.id === ruleId)?.name || `规则${ruleId}` }}
+                {{ filterRules.find((r) => r.id === ruleId)?.name || `规则${ruleId}` }}
               </el-tag>
               <el-tag v-if="row.filter_rule_ids.length > 2" type="info" size="small">
                 +{{ row.filter_rule_ids.length - 2 }}
@@ -560,11 +551,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             <el-tag v-else type="info" size="small">无</el-tag>
           </template>
         </el-table-column>
-        <el-table-column
-          label="间隔(分钟)"
-          prop="interval_minutes"
-          width="100"
-          align="center">
+        <el-table-column label="间隔(分钟)" prop="interval_minutes" width="100" align="center">
           <template #default="{ row }">
             <span :class="{ 'example-text': row.is_example }">{{ row.interval_minutes }}</span>
           </template>
@@ -583,11 +570,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
                   @click="openEditRssDialog($index)">
                   编辑
                 </el-button>
-                <el-button
-                  type="danger"
-                  size="small"
-                  :icon="'Delete'"
-                  @click="deleteRss($index)">
+                <el-button type="danger" size="small" :icon="'Delete'" @click="deleteRss($index)">
                   删除
                 </el-button>
               </div>
@@ -625,8 +608,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
               :key="dl.id"
               :label="dl.name + (dl.is_default ? ' (默认)' : '') + (!dl.enabled ? ' (未启用)' : '')"
               :value="dl.id"
-              :disabled="!dl.enabled"
-            />
+              :disabled="!dl.enabled" />
           </el-select>
           <div class="form-tip">
             不选择则使用默认下载器。灰色选项表示下载器未启用，请先在下载器管理中启用。
@@ -645,18 +627,13 @@ function getRowClassName({ row }: { row: RSSConfig }) {
               v-for="rule in filterRules"
               :key="rule.id"
               :label="rule.name"
-              :value="rule.id"
-            />
+              :value="rule.id" />
           </el-select>
-          <div class="form-tip">
-            选择要应用于此 RSS 订阅的过滤规则，不选择则不进行过滤下载
-          </div>
+          <div class="form-tip">选择要应用于此 RSS 订阅的过滤规则，不选择则不进行过滤下载</div>
         </el-form-item>
         <el-form-item label="免费结束暂停">
           <el-switch v-model="newRss.pause_on_free_end" />
-          <div class="form-tip">
-            启用后，免费期结束时如果下载未完成，系统将自动暂停任务
-          </div>
+          <div class="form-tip">启用后，免费期结束时如果下载未完成，系统将自动暂停任务</div>
         </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">
@@ -671,15 +648,13 @@ function getRowClassName({ row }: { row: RSSConfig }) {
                 v-for="dir in getDirectoriesForDownloader(newRss.downloader_id)"
                 :key="dir.id"
                 :label="`${dir.alias || dir.path}${dir.is_default ? ' (默认)' : ''}`"
-                :value="dir.path"
-              />
+                :value="dir.path" />
             </el-select>
             <el-input
               v-else
               v-model="newRss.download_path"
               placeholder="输入自定义路径，如: /downloads/movies"
-              style="flex: 1"
-            />
+              style="flex: 1" />
             <el-button
               :type="newRssUseCustomPath ? 'primary' : 'default'"
               :icon="newRssUseCustomPath ? 'Select' : 'Edit'"
@@ -729,8 +704,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
               :key="dl.id"
               :label="dl.name + (dl.is_default ? ' (默认)' : '') + (!dl.enabled ? ' (未启用)' : '')"
               :value="dl.id"
-              :disabled="!dl.enabled"
-            />
+              :disabled="!dl.enabled" />
           </el-select>
           <div class="form-tip">
             不选择则使用默认下载器。灰色选项表示下载器未启用，请先在下载器管理中启用。
@@ -749,18 +723,13 @@ function getRowClassName({ row }: { row: RSSConfig }) {
               v-for="rule in filterRules"
               :key="rule.id"
               :label="rule.name"
-              :value="rule.id"
-            />
+              :value="rule.id" />
           </el-select>
-          <div class="form-tip">
-            选择要应用于此 RSS 订阅的过滤规则，不选择则不进行过滤下载
-          </div>
+          <div class="form-tip">选择要应用于此 RSS 订阅的过滤规则，不选择则不进行过滤下载</div>
         </el-form-item>
         <el-form-item label="免费结束暂停">
           <el-switch v-model="editingRss.pause_on_free_end" />
-          <div class="form-tip">
-            启用后，免费期结束时如果下载未完成，系统将自动暂停任务
-          </div>
+          <div class="form-tip">启用后，免费期结束时如果下载未完成，系统将自动暂停任务</div>
         </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">
@@ -775,15 +744,13 @@ function getRowClassName({ row }: { row: RSSConfig }) {
                 v-for="dir in getDirectoriesForDownloader(editingRss.downloader_id)"
                 :key="dir.id"
                 :label="`${dir.alias || dir.path}${dir.is_default ? ' (默认)' : ''}`"
-                :value="dir.path"
-              />
+                :value="dir.path" />
             </el-select>
             <el-input
               v-else
               v-model="editingRss.download_path"
               placeholder="输入自定义路径，如: /downloads/movies"
-              style="flex: 1"
-            />
+              style="flex: 1" />
             <el-button
               :type="editRssUseCustomPath ? 'primary' : 'default'"
               :icon="editRssUseCustomPath ? 'Select' : 'Edit'"

@@ -1,8 +1,8 @@
-import js from "@eslint/js"
-import tsParser from "@typescript-eslint/parser"
-import pluginVue from "eslint-plugin-vue"
-import globals from "globals"
-import vueParser from "vue-eslint-parser"
+import js from "@eslint/js";
+import tsParser from "@typescript-eslint/parser";
+import pluginVue from "eslint-plugin-vue";
+import globals from "globals";
+import vueParser from "vue-eslint-parser";
 
 export default [
   js.configs.recommended,
@@ -14,9 +14,9 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
-        ...globals.es2021
-      }
-    }
+        ...globals.es2021,
+      },
+    },
   },
 
   {
@@ -26,11 +26,11 @@ export default [
       parserOptions: {
         parser: tsParser,
         ecmaVersion: "latest",
-        sourceType: "module"
-      }
+        sourceType: "module",
+      },
     },
     plugins: {
-      vue: pluginVue
+      vue: pluginVue,
     },
     rules: {
       ...pluginVue.configs["flat/recommended"].rules,
@@ -42,8 +42,8 @@ export default [
       "vue/singleline-html-element-content-newline": "off",
       "vue/html-self-closing": "off",
       "vue/html-indent": "off",
-      "vue/html-closing-bracket-newline": "off"
-    }
+      "vue/html-closing-bracket-newline": "off",
+    },
   },
 
   {
@@ -52,17 +52,17 @@ export default [
       parser: tsParser,
       parserOptions: {
         ecmaVersion: "latest",
-        sourceType: "module"
-      }
+        sourceType: "module",
+      },
     },
     rules: {
       "no-unused-vars": "off",
       "no-undef": "off",
-      "no-control-regex": "off"
-    }
+      "no-control-regex": "off",
+    },
   },
 
   {
-    ignores: ["node_modules/**", "dist/**", "*.d.ts"]
-  }
-]
+    ignores: ["node_modules/**", "dist/**", "*.d.ts"],
+  },
+];

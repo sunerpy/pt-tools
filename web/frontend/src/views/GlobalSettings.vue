@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { globalApi, type GlobalSettings } from "@/api"
-import { Folder, Setting, Timer } from "@element-plus/icons-vue"
-import { ElMessage } from "element-plus"
-import { onMounted, ref } from "vue"
+import { globalApi, type GlobalSettings } from "@/api";
+import { Folder, Setting, Timer } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
+import { onMounted, ref } from "vue";
 
-const loading = ref(false)
-const saving = ref(false)
-const showWarning = ref(false)
+const loading = ref(false);
+const saving = ref(false);
+const showWarning = ref(false);
 
 const form = ref<GlobalSettings>({
   default_interval_minutes: 10,
@@ -14,44 +14,44 @@ const form = ref<GlobalSettings>({
   download_limit_enabled: false,
   download_speed_limit: 20,
   torrent_size_gb: 200,
-  auto_start: false
-})
+  auto_start: false,
+});
 
 onMounted(async () => {
-  loading.value = true
+  loading.value = true;
   try {
-    const data = await globalApi.get()
+    const data = await globalApi.get();
     form.value = {
       ...data,
-      default_interval_minutes: Math.max(5, data.default_interval_minutes || 10)
-    }
-    showWarning.value = !form.value.download_dir
+      default_interval_minutes: Math.max(5, data.default_interval_minutes || 10),
+    };
+    showWarning.value = !form.value.download_dir;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
-})
+});
 
 async function save() {
   if (!form.value.download_dir) {
-    ElMessage.error("下载目录不能为空")
-    showWarning.value = true
-    return
+    ElMessage.error("下载目录不能为空");
+    showWarning.value = true;
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
     await globalApi.save({
       ...form.value,
-      default_interval_minutes: Math.max(5, form.value.default_interval_minutes)
-    })
-    ElMessage.success("保存成功")
-    showWarning.value = false
+      default_interval_minutes: Math.max(5, form.value.default_interval_minutes),
+    });
+    ElMessage.success("保存成功");
+    showWarning.value = false;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 </script>
@@ -77,8 +77,7 @@ async function save() {
       type="warning"
       show-icon
       :closable="false"
-      class="mb-6"
-    />
+      class="mb-6" />
 
     <el-card v-loading="loading" shadow="never" class="common-card">
       <template #header>
@@ -102,8 +101,7 @@ async function save() {
               v-model="form.default_interval_minutes"
               :min="5"
               :max="1440"
-              :step="1"
-            />
+              :step="1" />
             <div class="form-tip">所有 RSS 任务的默认检查时间间隔，最小 5 分钟</div>
           </el-form-item>
         </div>
@@ -115,10 +113,7 @@ async function save() {
             存储路径
           </div>
           <el-form-item label="种子下载目录">
-            <el-input
-              v-model="form.download_dir"
-              placeholder="保存 .torrent 种子文件的目录"
-            />
+            <el-input v-model="form.download_dir" placeholder="保存 .torrent 种子文件的目录" />
             <div class="form-tip">
               绝对路径将直接使用；相对路径会拼接为
               <code>~/.pt-tools/&lt;输入值&gt;</code>
@@ -145,11 +140,8 @@ async function save() {
                   v-model="form.torrent_size_gb"
                   :min="1"
                   :max="10000"
-                  class="w-full"
-                />
-                <div class="form-tip">
-                  超过此大小的种子将被自动忽略，防止磁盘撑爆
-                </div>
+                  class="w-full" />
+                <div class="form-tip">超过此大小的种子将被自动忽略，防止磁盘撑爆</div>
               </el-form-item>
             </el-col>
             <el-col :md="12" :sm="24">
@@ -174,8 +166,7 @@ async function save() {
                   :min="1"
                   :max="1000"
                   :disabled="!form.download_limit_enabled"
-                  class="w-full"
-                />
+                  class="w-full" />
                 <div class="form-tip">根据您的网络环境填写实际平均下载速度</div>
               </el-form-item>
             </el-col>

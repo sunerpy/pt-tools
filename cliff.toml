@@ -34,7 +34,10 @@ body = """
             {{ commit.message | upper_first | trim }}\
             {% if commit.github.pr_number %} \
                 ([#{{ commit.github.pr_number }}](https://github.com/sunerpy/pt-tools/pull/{{ commit.github.pr_number }}))\
-            {% endif %}\
+            {% endif %}
+        {% if commit.body %}\
+{{ commit.body | trim | indent(prefix="      ") }}
+        {% endif %}\
     {% endfor %}
 {% endfor %}
 """
@@ -49,9 +52,7 @@ footer = """
 trim = true
 
 # Postprocessors for output
-postprocessors = [
-  { pattern = '<REPO>', replace = "https://github.com/sunerpy/pt-tools" },
-]
+postprocessors = [{ pattern = '<REPO>', replace = "https://github.com/sunerpy/pt-tools" }]
 
 [git]
 # Parse conventional commits

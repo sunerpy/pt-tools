@@ -4,33 +4,33 @@ import {
   type DownloaderDirectory,
   type DownloaderHealthResponse,
   downloadersApi,
-  type DownloaderSetting
-} from "@/api"
-import { ElMessage, ElMessageBox } from "element-plus"
-import { computed, onMounted, ref } from "vue"
+  type DownloaderSetting,
+} from "@/api";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false)
-const saving = ref(false)
-const showDialog = ref(false)
-const editMode = ref(false)
+const loading = ref(false);
+const saving = ref(false);
+const showDialog = ref(false);
+const editMode = ref(false);
 
-const downloaders = ref<DownloaderSetting[]>([])
-const healthStatus = ref<Record<number, DownloaderHealthResponse>>({})
+const downloaders = ref<DownloaderSetting[]>([]);
+const healthStatus = ref<Record<number, DownloaderHealthResponse>>({});
 
 // 目录管理相关
-const showDirDialog = ref(false)
-const currentDownloader = ref<DownloaderSetting | null>(null)
-const directories = ref<DownloaderDirectory[]>([])
-const loadingDirs = ref(false)
-const showAddDirDialog = ref(false)
-const editDirMode = ref(false)
-const savingDir = ref(false)
+const showDirDialog = ref(false);
+const currentDownloader = ref<DownloaderSetting | null>(null);
+const directories = ref<DownloaderDirectory[]>([]);
+const loadingDirs = ref(false);
+const showAddDirDialog = ref(false);
+const editDirMode = ref(false);
+const savingDir = ref(false);
 const dirForm = ref<DownloaderDirectory>({
   downloader_id: 0,
   path: "",
   alias: "",
-  is_default: false
-})
+  is_default: false,
+});
 
 const form = ref<DownloaderSetting>({
   name: "",
@@ -40,49 +40,49 @@ const form = ref<DownloaderSetting>({
   password: "",
   is_default: false,
   enabled: true,
-  auto_start: false
-})
+  auto_start: false,
+});
 
 const downloaderTypes = [
   { value: "qbittorrent", label: "qBittorrent" },
-  { value: "transmission", label: "Transmission" }
-]
+  { value: "transmission", label: "Transmission" },
+];
 
 const defaultDownloader = computed(() => {
-  return downloaders.value.find(d => d.is_default)
-})
+  return downloaders.value.find((d) => d.is_default);
+});
 
 onMounted(async () => {
-  await loadDownloaders()
-})
+  await loadDownloaders();
+});
 
 async function loadDownloaders() {
-  loading.value = true
+  loading.value = true;
   try {
-    downloaders.value = await downloadersApi.list()
+    downloaders.value = await downloadersApi.list();
     // 加载健康状态
     for (const dl of downloaders.value) {
       if (dl.id && dl.enabled) {
         try {
-          healthStatus.value[dl.id] = await downloadersApi.health(dl.id)
+          healthStatus.value[dl.id] = await downloadersApi.health(dl.id);
         } catch {
           healthStatus.value[dl.id] = {
             name: dl.name,
             is_healthy: false,
-            message: "检查失败"
-          }
+            message: "检查失败",
+          };
         }
       }
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 function openAddDialog() {
-  editMode.value = false
+  editMode.value = false;
   form.value = {
     name: "",
     type: "qbittorrent",
@@ -91,221 +91,221 @@ function openAddDialog() {
     password: "",
     is_default: downloaders.value.length === 0,
     enabled: true,
-    auto_start: false
-  }
-  showDialog.value = true
+    auto_start: false,
+  };
+  showDialog.value = true;
 }
 
 function openEditDialog(dl: DownloaderSetting) {
-  editMode.value = true
-  form.value = { ...dl, password: "" }
-  showDialog.value = true
+  editMode.value = true;
+  form.value = { ...dl, password: "" };
+  showDialog.value = true;
 }
 
 async function saveDownloader() {
   if (!form.value.name || !form.value.url) {
-    ElMessage.error("名称和URL为必填项")
-    return
+    ElMessage.error("名称和URL为必填项");
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
     if (editMode.value && form.value.id) {
-      await downloadersApi.update(form.value.id, form.value)
-      ElMessage.success("更新成功")
+      await downloadersApi.update(form.value.id, form.value);
+      ElMessage.success("更新成功");
     } else {
-      await downloadersApi.create(form.value)
-      ElMessage.success("创建成功")
+      await downloadersApi.create(form.value);
+      ElMessage.success("创建成功");
     }
-    showDialog.value = false
-    await loadDownloaders()
+    showDialog.value = false;
+    await loadDownloaders();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 async function deleteDownloader(dl: DownloaderSetting) {
-  if (!dl.id) return
+  if (!dl.id) return;
 
   try {
     await ElMessageBox.confirm(`确定删除下载器 "${dl.name}"？`, "确认删除", {
       confirmButtonText: "删除",
       cancelButtonText: "取消",
-      type: "warning"
-    })
-    await downloadersApi.delete(dl.id)
-    ElMessage.success("已删除")
-    await loadDownloaders()
+      type: "warning",
+    });
+    await downloadersApi.delete(dl.id);
+    ElMessage.success("已删除");
+    await loadDownloaders();
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "删除失败")
+      ElMessage.error((e as Error).message || "删除失败");
     }
   }
 }
 
 async function toggleEnabled(dl: DownloaderSetting) {
-  if (!dl.id) return
-  const newEnabled = !dl.enabled
+  if (!dl.id) return;
+  const newEnabled = !dl.enabled;
   try {
-    await downloadersApi.update(dl.id, { ...dl, enabled: newEnabled })
-    dl.enabled = newEnabled
-    ElMessage.success("已保存")
+    await downloadersApi.update(dl.id, { ...dl, enabled: newEnabled });
+    dl.enabled = newEnabled;
+    ElMessage.success("已保存");
     // 刷新健康状态
     if (newEnabled) {
       try {
-        healthStatus.value[dl.id] = await downloadersApi.health(dl.id)
+        healthStatus.value[dl.id] = await downloadersApi.health(dl.id);
       } catch {
         healthStatus.value[dl.id] = {
           name: dl.name,
           is_healthy: false,
-          message: "检查失败"
-        }
+          message: "检查失败",
+        };
       }
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   }
 }
 
 async function setDefault(dl: DownloaderSetting) {
-  if (!dl.id || dl.is_default) return
+  if (!dl.id || dl.is_default) return;
   try {
-    await downloadersApi.setDefault(dl.id)
-    ElMessage.success("已设为默认")
-    await loadDownloaders()
+    await downloadersApi.setDefault(dl.id);
+    ElMessage.success("已设为默认");
+    await loadDownloaders();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "设置失败")
+    ElMessage.error((e as Error).message || "设置失败");
   }
 }
 
 async function checkHealth(dl: DownloaderSetting) {
-  if (!dl.id) return
+  if (!dl.id) return;
   try {
-    healthStatus.value[dl.id] = await downloadersApi.health(dl.id)
-    const status = healthStatus.value[dl.id]
+    healthStatus.value[dl.id] = await downloadersApi.health(dl.id);
+    const status = healthStatus.value[dl.id];
     if (status && status.is_healthy) {
-      ElMessage.success("连接正常")
+      ElMessage.success("连接正常");
     } else {
-      ElMessage.warning(status?.message || "连接异常")
+      ElMessage.warning(status?.message || "连接异常");
     }
   } catch (e: unknown) {
-    healthStatus.value[dl.id] = { name: dl.name, is_healthy: false, message: "检查失败" }
-    ElMessage.error((e as Error).message || "检查失败")
+    healthStatus.value[dl.id] = { name: dl.name, is_healthy: false, message: "检查失败" };
+    ElMessage.error((e as Error).message || "检查失败");
   }
 }
 
 function getHealthTag(dl: DownloaderSetting) {
-  if (!dl.id || !dl.enabled) return { type: "info" as const, text: "未启用" }
-  const status = healthStatus.value[dl.id]
-  if (!status) return { type: "info" as const, text: "未检查" }
+  if (!dl.id || !dl.enabled) return { type: "info" as const, text: "未启用" };
+  const status = healthStatus.value[dl.id];
+  if (!status) return { type: "info" as const, text: "未检查" };
   return status.is_healthy
     ? { type: "success" as const, text: "正常" }
-    : { type: "danger" as const, text: status.message || "异常" }
+    : { type: "danger" as const, text: status.message || "异常" };
 }
 
 function getTypeLabel(type: string) {
-  return downloaderTypes.find(t => t.value === type)?.label || type
+  return downloaderTypes.find((t) => t.value === type)?.label || type;
 }
 
 // ============== 目录管理功能 ==============
 
 async function openDirDialog(dl: DownloaderSetting) {
-  currentDownloader.value = dl
-  showDirDialog.value = true
-  await loadDirectories(dl.id!)
+  currentDownloader.value = dl;
+  showDirDialog.value = true;
+  await loadDirectories(dl.id!);
 }
 
 async function loadDirectories(downloaderId: number) {
-  loadingDirs.value = true
+  loadingDirs.value = true;
   try {
-    directories.value = await downloaderDirectoriesApi.list(downloaderId)
+    directories.value = await downloaderDirectoriesApi.list(downloaderId);
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载目录失败")
-    directories.value = []
+    ElMessage.error((e as Error).message || "加载目录失败");
+    directories.value = [];
   } finally {
-    loadingDirs.value = false
+    loadingDirs.value = false;
   }
 }
 
 function openAddDirDialog() {
-  if (!currentDownloader.value?.id) return
-  editDirMode.value = false
+  if (!currentDownloader.value?.id) return;
+  editDirMode.value = false;
   dirForm.value = {
     downloader_id: currentDownloader.value.id,
     path: "",
     alias: "",
-    is_default: directories.value.length === 0
-  }
-  showAddDirDialog.value = true
+    is_default: directories.value.length === 0,
+  };
+  showAddDirDialog.value = true;
 }
 
 function openEditDirDialog(dir: DownloaderDirectory) {
-  editDirMode.value = true
-  dirForm.value = { ...dir }
-  showAddDirDialog.value = true
+  editDirMode.value = true;
+  dirForm.value = { ...dir };
+  showAddDirDialog.value = true;
 }
 
 async function saveDirectory() {
   if (!dirForm.value.path) {
-    ElMessage.error("路径为必填项")
-    return
+    ElMessage.error("路径为必填项");
+    return;
   }
 
-  savingDir.value = true
+  savingDir.value = true;
   try {
     if (editDirMode.value && dirForm.value.id) {
       await downloaderDirectoriesApi.update(
         dirForm.value.downloader_id,
         dirForm.value.id,
-        dirForm.value
-      )
-      ElMessage.success("更新成功")
+        dirForm.value,
+      );
+      ElMessage.success("更新成功");
     } else {
       await downloaderDirectoriesApi.create(currentDownloader.value!.id!, {
         path: dirForm.value.path,
         alias: dirForm.value.alias,
-        is_default: dirForm.value.is_default
-      })
-      ElMessage.success("添加成功")
+        is_default: dirForm.value.is_default,
+      });
+      ElMessage.success("添加成功");
     }
-    showAddDirDialog.value = false
-    await loadDirectories(currentDownloader.value!.id!)
+    showAddDirDialog.value = false;
+    await loadDirectories(currentDownloader.value!.id!);
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   } finally {
-    savingDir.value = false
+    savingDir.value = false;
   }
 }
 
 async function deleteDirectory(dir: DownloaderDirectory) {
-  if (!dir.id || !currentDownloader.value?.id) return
+  if (!dir.id || !currentDownloader.value?.id) return;
 
   try {
     await ElMessageBox.confirm(`确定删除目录 "${dir.alias || dir.path}"？`, "确认删除", {
       confirmButtonText: "删除",
       cancelButtonText: "取消",
-      type: "warning"
-    })
-    await downloaderDirectoriesApi.delete(currentDownloader.value.id, dir.id)
-    ElMessage.success("已删除")
-    await loadDirectories(currentDownloader.value.id)
+      type: "warning",
+    });
+    await downloaderDirectoriesApi.delete(currentDownloader.value.id, dir.id);
+    ElMessage.success("已删除");
+    await loadDirectories(currentDownloader.value.id);
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "删除失败")
+      ElMessage.error((e as Error).message || "删除失败");
     }
   }
 }
 
 async function setDefaultDirectory(dir: DownloaderDirectory) {
-  if (!dir.id || !currentDownloader.value?.id || dir.is_default) return
+  if (!dir.id || !currentDownloader.value?.id || dir.is_default) return;
   try {
-    await downloaderDirectoriesApi.setDefault(currentDownloader.value.id, dir.id)
-    ElMessage.success("已设为默认")
-    await loadDirectories(currentDownloader.value.id)
+    await downloaderDirectoriesApi.setDefault(currentDownloader.value.id, dir.id);
+    ElMessage.success("已设为默认");
+    await loadDirectories(currentDownloader.value.id);
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "设置失败")
+    ElMessage.error((e as Error).message || "设置失败");
   }
 }
 </script>
@@ -316,10 +316,7 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
       <template #header>
         <div class="card-header">
           <span>下载器管理</span>
-          <el-button
-            type="primary"
-            :icon="'Plus'"
-            @click="openAddDialog">添加下载器</el-button>
+          <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加下载器</el-button>
         </div>
       </template>
 
@@ -367,11 +364,7 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
         <el-table-column label="操作" min-width="340" align="center">
           <template #default="{ row }">
             <el-space>
-              <el-switch
-                :model-value="row.enabled"
-                size="small"
-                @change="toggleEnabled(row)"
-              />
+              <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
               <el-button
                 type="info"
                 size="small"
@@ -379,10 +372,7 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
                 @click="checkHealth(row)">
                 检查
               </el-button>
-              <el-button
-                type="success"
-                size="small"
-                @click="openDirDialog(row)">目录</el-button>
+              <el-button type="success" size="small" @click="openDirDialog(row)">目录</el-button>
               <el-button
                 type="warning"
                 size="small"
@@ -390,14 +380,8 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
                 @click="setDefault(row)">
                 设为默认
               </el-button>
-              <el-button
-                type="primary"
-                size="small"
-                @click="openEditDialog(row)">编辑</el-button>
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteDownloader(row)">删除</el-button>
+              <el-button type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
+              <el-button type="danger" size="small" @click="deleteDownloader(row)">删除</el-button>
             </el-space>
           </template>
         </el-table-column>
@@ -407,17 +391,10 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
     </el-card>
 
     <!-- 添加/编辑对话框 -->
-    <el-dialog
-      v-model="showDialog"
-      :title="editMode ? '编辑下载器' : '添加下载器'"
-      width="500px">
+    <el-dialog v-model="showDialog" :title="editMode ? '编辑下载器' : '添加下载器'" width="500px">
       <el-form :model="form" label-width="100px" label-position="right">
         <el-form-item label="名称" required>
-          <el-input
-            v-model="form.name"
-            placeholder="例如: 主下载器"
-            :disabled="editMode"
-          />
+          <el-input v-model="form.name" placeholder="例如: 主下载器" :disabled="editMode" />
         </el-form-item>
 
         <el-form-item label="类型" required>
@@ -426,16 +403,16 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
               v-for="t in downloaderTypes"
               :key="t.value"
               :label="t.label"
-              :value="t.value"
-            />
+              :value="t.value" />
           </el-select>
         </el-form-item>
 
         <el-form-item label="URL" required>
           <el-input
             v-model="form.url"
-            :placeholder="form.type === 'qbittorrent' ? 'http://192.168.1.10:8080' : 'http://192.168.1.10:9091'"
-          />
+            :placeholder="
+              form.type === 'qbittorrent' ? 'http://192.168.1.10:8080' : 'http://192.168.1.10:9091'
+            " />
           <div class="form-tip">
             {{ form.type === "qbittorrent" ? "qBittorrent Web UI 地址" : "Transmission RPC 地址" }}
           </div>
@@ -450,8 +427,7 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
             v-model="form.password"
             type="password"
             show-password
-            :placeholder="editMode ? '留空保持不变' : '请输入密码'"
-          />
+            :placeholder="editMode ? '留空保持不变' : '请输入密码'" />
         </el-form-item>
 
         <el-form-item label="设为默认">
@@ -483,10 +459,7 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
       :title="`目录管理 - ${currentDownloader?.name || ''}`"
       width="700px">
       <div class="dir-header">
-        <el-button
-          type="primary"
-          size="small"
-          @click="openAddDirDialog">添加目录</el-button>
+        <el-button type="primary" size="small" @click="openAddDirDialog">添加目录</el-button>
       </div>
 
       <el-table v-loading="loadingDirs" :data="directories" style="width: 100%">
@@ -518,10 +491,7 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
               <el-button type="primary" size="small" @click="openEditDirDialog(row)">
                 编辑
               </el-button>
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteDirectory(row)">删除</el-button>
+              <el-button type="danger" size="small" @click="deleteDirectory(row)">删除</el-button>
             </el-space>
           </template>
         </el-table-column>

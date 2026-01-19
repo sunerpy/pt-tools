@@ -1,14 +1,14 @@
-import vue from "@vitejs/plugin-vue"
-import { resolve } from "path"
-import { defineConfig } from "vite"
+import vue from "@vitejs/plugin-vue";
+import { resolve } from "path";
+import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
   plugins: [vue()],
   resolve: {
     alias: {
-      "@": resolve(__dirname, "src")
-    }
+      "@": resolve(__dirname, "src"),
+    },
   },
   build: {
     outDir: "../static/dist",
@@ -19,38 +19,37 @@ export default defineConfig(({ command }) => ({
         manualChunks(id) {
           if (id.includes("node_modules")) {
             if (id.includes("element-plus")) {
-              return "element-plus"
+              return "element-plus";
             }
-            if (
-              id.includes("vue") || id.includes("pinia") || id.includes("vue-router")
-            ) {
-              return "vue-vendor"
+            if (id.includes("vue") || id.includes("pinia") || id.includes("vue-router")) {
+              return "vue-vendor";
             }
             if (id.includes("@element-plus/icons-vue")) {
-              return "element-plus-icons"
+              return "element-plus-icons";
             }
-            return "vendor"
+            return "vendor";
           }
-        }
-      }
-    }
+        },
+      },
+    },
   },
   esbuild: {
     drop: command === "build" ? ["console", "debugger"] : [],
-    pure: command === "build"
-      ? ["console.log", "console.info", "console.debug", "console.warn", "console.error"]
-      : []
+    pure:
+      command === "build"
+        ? ["console.log", "console.info", "console.debug", "console.warn", "console.error"]
+        : [],
   },
   server: {
     proxy: {
       "/api": {
         target: "http://localhost:8080",
-        changeOrigin: true
+        changeOrigin: true,
       },
       "/logout": {
         target: "http://localhost:8080",
-        changeOrigin: true
-      }
-    }
-  }
-}))
+        changeOrigin: true,
+      },
+    },
+  },
+}));

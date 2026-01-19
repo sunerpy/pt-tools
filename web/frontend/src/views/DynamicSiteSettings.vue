@@ -6,24 +6,24 @@ import {
   type DynamicSiteSetting,
   type SiteTemplate,
   type SiteValidationResponse,
-  templatesApi
-} from "@/api"
-import { ElMessage } from "element-plus"
-import { computed, onMounted, ref } from "vue"
+  templatesApi,
+} from "@/api";
+import { ElMessage } from "element-plus";
+import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false)
-const saving = ref(false)
-const validating = ref(false)
+const loading = ref(false);
+const saving = ref(false);
+const validating = ref(false);
 
 // 数据
-const dynamicSites = ref<DynamicSiteSetting[]>([])
-const templates = ref<SiteTemplate[]>([])
-const downloaders = ref<DownloaderSetting[]>([])
+const dynamicSites = ref<DynamicSiteSetting[]>([]);
+const templates = ref<SiteTemplate[]>([]);
+const downloaders = ref<DownloaderSetting[]>([]);
 
 // 对话框状态
-const showAddDialog = ref(false)
-const showImportDialog = ref(false)
-const showValidationResult = ref(false)
+const showAddDialog = ref(false);
+const showImportDialog = ref(false);
+const showValidationResult = ref(false);
 
 // 表单
 const addForm = ref({
@@ -34,45 +34,45 @@ const addForm = ref({
   cookie: "",
   api_key: "",
   api_url: "",
-  downloader_id: undefined as number | undefined
-})
+  downloader_id: undefined as number | undefined,
+});
 
 const importForm = ref({
   templateJson: "",
   cookie: "",
-  api_key: ""
-})
+  api_key: "",
+});
 
-const validationResult = ref<SiteValidationResponse | null>(null)
+const validationResult = ref<SiteValidationResponse | null>(null);
 
 const authMethods = [
   { value: "cookie", label: "Cookie 认证" },
-  { value: "api_key", label: "API Key 认证" }
-]
+  { value: "api_key", label: "API Key 认证" },
+];
 
 const enabledDownloaders = computed(() => {
-  return downloaders.value // 返回所有下载器，不过滤
-})
+  return downloaders.value; // 返回所有下载器，不过滤
+});
 
 onMounted(async () => {
-  await loadData()
-})
+  await loadData();
+});
 
 async function loadData() {
-  loading.value = true
+  loading.value = true;
   try {
     const [sitesData, templatesData, downloadersData] = await Promise.all([
       dynamicSitesApi.list(),
       templatesApi.list(),
-      downloadersApi.list()
-    ])
-    dynamicSites.value = sitesData
-    templates.value = templatesData
-    downloaders.value = downloadersData
+      downloadersApi.list(),
+    ]);
+    dynamicSites.value = sitesData;
+    templates.value = templatesData;
+    downloaders.value = downloadersData;
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
@@ -85,29 +85,29 @@ function openAddDialog() {
     cookie: "",
     api_key: "",
     api_url: "",
-    downloader_id: undefined
-  }
-  validationResult.value = null
-  showValidationResult.value = false
-  showAddDialog.value = true
+    downloader_id: undefined,
+  };
+  validationResult.value = null;
+  showValidationResult.value = false;
+  showAddDialog.value = true;
 }
 
 function openImportDialog() {
   importForm.value = {
     templateJson: "",
     cookie: "",
-    api_key: ""
-  }
-  showImportDialog.value = true
+    api_key: "",
+  };
+  showImportDialog.value = true;
 }
 
 async function validateSite() {
   if (!addForm.value.name) {
-    ElMessage.error("站点名称不能为空")
-    return
+    ElMessage.error("站点名称不能为空");
+    return;
   }
 
-  validating.value = true
+  validating.value = true;
   try {
     validationResult.value = await dynamicSitesApi.validate({
       name: addForm.value.name,
@@ -115,29 +115,29 @@ async function validateSite() {
       auth_method: addForm.value.auth_method,
       cookie: addForm.value.cookie,
       api_key: addForm.value.api_key,
-      api_url: addForm.value.api_url
-    })
-    showValidationResult.value = true
+      api_url: addForm.value.api_url,
+    });
+    showValidationResult.value = true;
 
     if (validationResult.value.valid) {
-      ElMessage.success("验证成功")
+      ElMessage.success("验证成功");
     } else {
-      ElMessage.warning(validationResult.value.message)
+      ElMessage.warning(validationResult.value.message);
     }
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "验证失败")
+    ElMessage.error((e as Error).message || "验证失败");
   } finally {
-    validating.value = false
+    validating.value = false;
   }
 }
 
 async function createSite() {
   if (!addForm.value.name) {
-    ElMessage.error("站点名称不能为空")
-    return
+    ElMessage.error("站点名称不能为空");
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
     await dynamicSitesApi.create({
       name: addForm.value.name,
@@ -148,79 +148,79 @@ async function createSite() {
       api_key: addForm.value.api_key,
       api_url: addForm.value.api_url,
       downloader_id: addForm.value.downloader_id,
-      enabled: true
-    })
-    ElMessage.success("创建成功")
-    showAddDialog.value = false
-    await loadData()
+      enabled: true,
+    });
+    ElMessage.success("创建成功");
+    showAddDialog.value = false;
+    await loadData();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "创建失败")
+    ElMessage.error((e as Error).message || "创建失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 async function importTemplate() {
   if (!importForm.value.templateJson) {
-    ElMessage.error("请输入模板JSON")
-    return
+    ElMessage.error("请输入模板JSON");
+    return;
   }
 
-  let templateData: unknown
+  let templateData: unknown;
   try {
-    templateData = JSON.parse(importForm.value.templateJson)
+    templateData = JSON.parse(importForm.value.templateJson);
   } catch {
-    ElMessage.error("无效的JSON格式")
-    return
+    ElMessage.error("无效的JSON格式");
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
     await templatesApi.import({
       template: templateData,
       cookie: importForm.value.cookie,
-      api_key: importForm.value.api_key
-    })
-    ElMessage.success("导入成功")
-    showImportDialog.value = false
-    await loadData()
+      api_key: importForm.value.api_key,
+    });
+    ElMessage.success("导入成功");
+    showImportDialog.value = false;
+    await loadData();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "导入失败")
+    ElMessage.error((e as Error).message || "导入失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 async function exportTemplate(tpl: SiteTemplate) {
   try {
-    const data = await templatesApi.export(tpl.id)
-    const json = JSON.stringify(data, null, 2)
+    const data = await templatesApi.export(tpl.id);
+    const json = JSON.stringify(data, null, 2);
 
     // 复制到剪贴板
-    await navigator.clipboard.writeText(json)
-    ElMessage.success("模板已复制到剪贴板")
+    await navigator.clipboard.writeText(json);
+    ElMessage.success("模板已复制到剪贴板");
 
     // 也可以下载
-    const blob = new Blob([json], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${tpl.name}-template.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${tpl.name}-template.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "导出失败")
+    ElMessage.error((e as Error).message || "导出失败");
   }
 }
 
 function getDownloaderName(id?: number) {
-  if (!id) return "默认"
-  const dl = downloaders.value.find(d => d.id === id)
-  return dl?.name || "未知"
+  if (!id) return "默认";
+  const dl = downloaders.value.find((d) => d.id === id);
+  return dl?.name || "未知";
 }
 
 function getAuthMethodLabel(method: string) {
-  return authMethods.find(m => m.value === method)?.label || method
+  return authMethods.find((m) => m.value === method)?.label || method;
 }
 </script>
 
@@ -235,10 +235,7 @@ function getAuthMethodLabel(method: string) {
             <el-button type="success" :icon="'Upload'" @click="openImportDialog">
               导入模板
             </el-button>
-            <el-button
-              type="primary"
-              :icon="'Plus'"
-              @click="openAddDialog">添加站点</el-button>
+            <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加站点</el-button>
           </el-space>
         </div>
       </template>
@@ -279,10 +276,7 @@ function getAuthMethodLabel(method: string) {
 
         <el-table-column label="类型" min-width="100" align="center">
           <template #default="{ row }">
-            <el-tag
-              :type="row.is_builtin ? 'primary' : 'success'"
-              size="small"
-              effect="plain">
+            <el-tag :type="row.is_builtin ? 'primary' : 'success'" size="small" effect="plain">
               {{ row.is_builtin ? "内置" : "动态" }}
             </el-tag>
           </template>
@@ -334,10 +328,7 @@ function getAuthMethodLabel(method: string) {
 
         <el-table-column label="操作" min-width="100" align="center">
           <template #default="{ row }">
-            <el-button
-              type="primary"
-              size="small"
-              @click="exportTemplate(row)">导出</el-button>
+            <el-button type="primary" size="small" @click="exportTemplate(row)">导出</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -365,12 +356,7 @@ function getAuthMethodLabel(method: string) {
 
         <el-form-item label="认证方式" required>
           <el-select v-model="addForm.auth_method" style="width: 100%">
-            <el-option
-              v-for="m in authMethods"
-              :key="m.value"
-              :label="m.label"
-              :value="m.value"
-            />
+            <el-option v-for="m in authMethods" :key="m.value" :label="m.label" :value="m.value" />
           </el-select>
         </el-form-item>
 
@@ -379,8 +365,7 @@ function getAuthMethodLabel(method: string) {
             v-model="addForm.cookie"
             type="textarea"
             :rows="3"
-            placeholder="请输入站点Cookie"
-          />
+            placeholder="请输入站点Cookie" />
         </el-form-item>
 
         <template v-if="addForm.auth_method === 'api_key'">
@@ -405,8 +390,7 @@ function getAuthMethodLabel(method: string) {
               :key="dl.id"
               :label="dl.name + (dl.is_default ? ' (默认)' : '') + (!dl.enabled ? ' (未启用)' : '')"
               :value="dl.id"
-              :disabled="!dl.enabled"
-            />
+              :disabled="!dl.enabled" />
           </el-select>
           <div class="form-tip">
             为此站点指定专用下载器，留空使用默认。灰色选项表示下载器未启用，请先在下载器管理中启用。
@@ -420,8 +404,7 @@ function getAuthMethodLabel(method: string) {
           :title="validationResult.valid ? '验证成功' : '验证失败'"
           :type="validationResult.valid ? 'success' : 'error'"
           :description="validationResult.message"
-          show-icon
-        />
+          show-icon />
         <div v-if="validationResult.free_torrents?.length" class="free-torrents">
           <div class="free-torrents-title">
             发现 {{ validationResult.free_torrents.length }} 个免费种子:
@@ -439,10 +422,7 @@ function getAuthMethodLabel(method: string) {
 
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button
-          type="info"
-          :loading="validating"
-          @click="validateSite">验证配置</el-button>
+        <el-button type="info" :loading="validating" @click="validateSite">验证配置</el-button>
         <el-button type="primary" :loading="saving" @click="createSite">创建站点</el-button>
       </template>
     </el-dialog>
@@ -455,8 +435,7 @@ function getAuthMethodLabel(method: string) {
             v-model="importForm.templateJson"
             type="textarea"
             :rows="8"
-            placeholder="粘贴模板JSON内容"
-          />
+            placeholder="粘贴模板JSON内容" />
         </el-form-item>
 
         <el-divider>认证信息</el-divider>
@@ -466,15 +445,13 @@ function getAuthMethodLabel(method: string) {
             v-model="importForm.cookie"
             type="textarea"
             :rows="2"
-            placeholder="如果模板使用Cookie认证，请在此输入"
-          />
+            placeholder="如果模板使用Cookie认证，请在此输入" />
         </el-form-item>
 
         <el-form-item label="API Key">
           <el-input
             v-model="importForm.api_key"
-            placeholder="如果模板使用API Key认证，请在此输入"
-          />
+            placeholder="如果模板使用API Key认证，请在此输入" />
         </el-form-item>
       </el-form>
 

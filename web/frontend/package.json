@@ -1,14 +1,16 @@
 {
   "name": "frontend",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint \"src/**/*.{vue,ts,tsx}\" --fix",
-    "lint:check": "eslint \"src/**/*.{vue,ts,tsx}\"",
+    "lint": "oxlint --fix",
+    "lint:check": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -25,27 +27,22 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
     "@types/node": "^25.0.7",
-    "@typescript-eslint/eslint-plugin": "^8.50.1",
-    "@typescript-eslint/parser": "^8.53.0",
     "@vitejs/plugin-vue": "^6.0.3",
     "@vue/tsconfig": "^0.8.1",
-    "eslint": "^9.39.2",
-    "eslint-plugin-vue": "^10.6.2",
-    "globals": "^17.0.0",
+    "oxfmt": "^0.24.0",
+    "oxlint": "^1.39.0",
     "sass": "^1.97.2",
     "typescript": "~5.9.3",
     "vite": "^7.3.0",
     "vitest": "^4.0.17",
-    "vue-eslint-parser": "^10.2.0",
     "vue-tsc": "^3.2.1"
   },
-  "packageManager": "pnpm@10.25.0",
   "engines": {
     "node": ">=20",
     "pnpm": ">=10"
   },
+  "packageManager": "pnpm@10.25.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "@parcel/watcher",

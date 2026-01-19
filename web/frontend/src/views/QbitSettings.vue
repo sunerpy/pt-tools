@@ -1,43 +1,43 @@
 <script setup lang="ts">
-import { qbitApi, type QbitSettings } from "@/api"
-import { ElMessage } from "element-plus"
-import { onMounted, ref } from "vue"
+import { qbitApi, type QbitSettings } from "@/api";
+import { ElMessage } from "element-plus";
+import { onMounted, ref } from "vue";
 
-const loading = ref(false)
-const saving = ref(false)
+const loading = ref(false);
+const saving = ref(false);
 
 const form = ref<QbitSettings>({
   enabled: false,
   url: "",
   user: "",
-  password: ""
-})
+  password: "",
+});
 
 onMounted(async () => {
-  loading.value = true
+  loading.value = true;
   try {
-    form.value = await qbitApi.get()
+    form.value = await qbitApi.get();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败")
+    ElMessage.error((e as Error).message || "加载失败");
   } finally {
-    loading.value = false
+    loading.value = false;
   }
-})
+});
 
 async function save() {
   if (form.value.enabled && (!form.value.url || !form.value.user || !form.value.password)) {
-    ElMessage.error("启用时 URL、用户名、密码均为必填")
-    return
+    ElMessage.error("启用时 URL、用户名、密码均为必填");
+    return;
   }
 
-  saving.value = true
+  saving.value = true;
   try {
-    await qbitApi.save(form.value)
-    ElMessage.success("保存成功")
+    await qbitApi.save(form.value);
+    ElMessage.success("保存成功");
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败")
+    ElMessage.error((e as Error).message || "保存失败");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 </script>

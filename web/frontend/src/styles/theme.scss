@@ -36,9 +36,7 @@
   --pt-color-warning-500: #f59e0b;
   --pt-color-warning-600: #d97706;
   --pt-color-warning-700: #b45309;
-  --pt-color-warning: var(
-    --pt-color-warning-500
-  ); /* Slightly lighter for visibility */
+  --pt-color-warning: var(--pt-color-warning-500); /* Slightly lighter for visibility */
 
   /* Danger - Soft Red/Rose */
   --pt-color-danger-50: #fff1f2;
@@ -106,13 +104,7 @@
   --pt-glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.06);
 
   /* --- Typography --- */
-  --pt-font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  --pt-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --pt-text-xs: 0.75rem; /* 12px */
   --pt-text-sm: 0.875rem; /* 14px */
   --pt-text-base: 1rem; /* 16px */
@@ -183,15 +175,9 @@ html.dark {
   /* Shadows - Darker, more intense for depth */
   --pt-shadow-color: 0 0% 0%;
   --pt-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --pt-shadow-md:
-    0 4px 6px -1px rgba(0, 0, 0, 0.5),
-    0 2px 4px -2px rgba(0, 0, 0, 0.4);
-  --pt-shadow-lg:
-    0 10px 15px -3px rgba(0, 0, 0, 0.5),
-    0 4px 6px -4px rgba(0, 0, 0, 0.4);
-  --pt-shadow-xl:
-    0 20px 25px -5px rgba(0, 0, 0, 0.5),
-    0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --pt-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
+  --pt-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --pt-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
   --pt-shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.4);
 
   /* Glassmorphism - Dark tint */

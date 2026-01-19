@@ -35,11 +35,7 @@
   gap: var(--pt-space-3);
   padding: 0 var(--pt-space-4);
   border-bottom: 1px solid var(--pt-border-color);
-  background: linear-gradient(
-    135deg,
-    var(--pt-color-primary-50) 0%,
-    var(--pt-bg-surface) 100%
-  );
+  background: linear-gradient(135deg, var(--pt-color-primary-50) 0%, var(--pt-bg-surface) 100%);
 }
 
 .app-aside .el-menu-item {
@@ -53,11 +49,7 @@
 }
 
 .app-aside .el-menu-item.is-active {
-  background: linear-gradient(
-    90deg,
-    var(--pt-color-primary-light),
-    transparent
-  ) !important;
+  background: linear-gradient(90deg, var(--pt-color-primary-light), transparent) !important;
   color: var(--pt-color-primary) !important;
   box-shadow: var(--pt-shadow-sm);
 }
@@ -87,11 +79,7 @@
 }
 
 html.dark .app-aside-logo {
-  background: linear-gradient(
-    135deg,
-    rgba(99, 102, 241, 0.08) 0%,
-    var(--pt-bg-surface) 100%
-  );
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, var(--pt-bg-surface) 100%);
 }
 
 .app-aside-logo-icon {
