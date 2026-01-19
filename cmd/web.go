@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/version"
 	"github.com/sunerpy/pt-tools/web"
 )
 
@@ -116,6 +118,7 @@ var webCmd = &cobra.Command{
 			}
 		}
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
+		go startVersionChecker()
 		if err := srv.Serve(addr); err != nil {
 			color.Red("Web 启动失败: %v", err)
 		}
@@ -145,4 +148,33 @@ func getRegisteredSitesFromRegistry(registry *v2.SiteRegistry) []models.Register
 		})
 	}
 	return result
+}
+
+func startVersionChecker() {
+	checker := version.GetChecker()
+	logger := global.GetSlogger()
+
+	checkVersion := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		result, err := checker.CheckForUpdates(ctx, version.CheckOptions{})
+		if err != nil {
+			logger.Warnf("版本检查失败: %v", err)
+			return
+		}
+		if result.HasUpdate && len(result.NewReleases) > 0 {
+			latest := result.NewReleases[0]
+			logger.Infof("发现新版本 %s，当前版本 %s，请访问 %s 更新",
+				latest.Version, result.CurrentVersion, latest.URL)
+		}
+	}
+
+	checkVersion()
+
+	ticker := time.NewTicker(version.CheckInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		checkVersion()
+	}
 }

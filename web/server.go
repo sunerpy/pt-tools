@@ -118,6 +118,9 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/torrents/delete-paused", s.auth(s.apiDeletePausedTorrents))
 	mux.HandleFunc("/api/torrents/archive", s.auth(s.apiArchiveTorrents))
 	mux.HandleFunc("/api/torrents/", s.auth(s.apiTorrentManagementRouter))
+	// Version check API
+	mux.HandleFunc("/api/version", s.auth(s.apiVersion))
+	mux.HandleFunc("/api/version/check", s.auth(s.apiVersionCheck))
 	// Torrent download proxy API
 	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
 	// Static UI - Vue 3 SPA

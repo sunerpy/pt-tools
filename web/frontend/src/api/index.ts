@@ -795,3 +795,40 @@ export const pausedTorrentsApi = {
     return api.get<ArchiveTorrentsResponse>(`/api/torrents/archive?${params.toString()}`)
   }
 }
+
+// ============== 版本检查相关 ==============
+
+export interface VersionInfo {
+  version: string
+  build_time: string
+  commit_id: string
+}
+
+export interface ReleaseInfo {
+  version: string
+  name: string
+  changelog: string
+  url: string
+  published_at: number
+}
+
+export interface VersionCheckResult {
+  current_version: string
+  has_update: boolean
+  new_releases?: ReleaseInfo[]
+  changelog_url?: string
+  has_more_releases?: boolean
+  checked_at: number
+  error?: string
+}
+
+export const versionApi = {
+  getInfo: () => api.get<VersionInfo>("/api/version"),
+  checkUpdate: (options?: { force?: boolean; proxy?: string }) => {
+    const params = new URLSearchParams()
+    if (options?.force) params.set("force", "true")
+    if (options?.proxy) params.set("proxy", options.proxy)
+    const query = params.toString()
+    return api.get<VersionCheckResult>(`/api/version/check${query ? `?${query}` : ""}`)
+  }
+}

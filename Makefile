@@ -18,7 +18,7 @@ ifeq ($(MAKECMDGOALS), prod-new)
 else ifeq ($(MAKECMDGOALS), test-new)
   TAG = $(NEW_TAG)
 else
-  TAG = $(GIT_TAG)
+  TAG ?= $(GIT_TAG)
 endif
 
 # 定义多平台
@@ -40,7 +40,7 @@ BUILD_ENV ?= remote
 .PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-dprint fmt-go fmt-check lint unit-test coverage-summary
 
 # 本地构建二进制
-build-local: fmt
+build-local: fmt build-frontend
 	@echo "Building binary for local environment"
 	mkdir -p $(DIST_DIR) && \
 	GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) CGO_ENABLED=0 \

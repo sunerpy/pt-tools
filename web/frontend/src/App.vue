@@ -3,13 +3,16 @@ import { ElMessage, ElMessageBox } from "element-plus"
 import { computed, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { controlApi } from "./api"
+import VersionChecker from "./components/VersionChecker.vue"
 import { useLogLevelStore } from "./stores/logLevel"
 import { useThemeStore } from "./stores/theme"
+import { useVersionStore } from "./stores/version"
 
 const route = useRoute()
 const router = useRouter()
 const themeStore = useThemeStore()
 const logLevelStore = useLogLevelStore()
+const versionStore = useVersionStore()
 
 const isCollapse = ref(false)
 const stopLoading = ref(false)
@@ -23,6 +26,8 @@ const activeMenu = computed(() => {
 
 onMounted(() => {
   logLevelStore.fetchLogLevel()
+  versionStore.fetchVersionInfo()
+  versionStore.checkForUpdates(undefined, true)
 })
 
 // 监听主题变化，切换 Element Plus 暗色模式
@@ -176,6 +181,10 @@ function logout() {
               启动任务
             </el-button>
           </el-button-group>
+
+          <span class="app-header-divider"></span>
+
+          <VersionChecker />
 
           <span class="app-header-divider"></span>
 
