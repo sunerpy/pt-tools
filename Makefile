@@ -92,14 +92,14 @@ upx-binaries: install-upx
 		fi; \
 	done
 
-# 压缩二进制文件
+# 压缩二进制文件 (不带版本号，支持 GitHub latest 重定向)
 package-binaries: upx-binaries
 	@echo "Packaging binaries into tar.gz/zip archives"
 	for file in $(DIST_DIR)/$(IMAGE_NAME)-*; do \
 		if [[ $$file == *.exe ]]; then \
-			zip -j $(DIST_DIR)/$$(basename $$file)-$(TAG).zip $$file; \
+			zip -j $(DIST_DIR)/$$(basename $$file).zip $$file; \
 		else \
-			tar -czvf $(DIST_DIR)/$$(basename $$file)-$(TAG).tar.gz -C $(DIST_DIR) $$(basename $$file); \
+			tar -czvf $(DIST_DIR)/$$(basename $$file).tar.gz -C $(DIST_DIR) $$(basename $$file); \
 		fi; \
 	done
 

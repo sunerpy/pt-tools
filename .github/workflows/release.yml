@@ -201,12 +201,12 @@ jobs:
           ### From Binary
           Download the appropriate binary for your platform from the assets below.
 
-          | Platform | Architecture | File |
-          |----------|--------------|------|
-          | Linux | x86_64 | \`pt-tools-linux-amd64-${TAG_NAME}.tar.gz\` |
-          | Linux | aarch64 | \`pt-tools-linux-arm64-${TAG_NAME}.tar.gz\` |
-          | Windows | x86_64 | \`pt-tools-windows-amd64.exe-${TAG_NAME}.zip\` |
-          | Windows | aarch64 | \`pt-tools-windows-arm64.exe-${TAG_NAME}.zip\` |
+          | Platform | Architecture | File | Latest Link |
+          |----------|--------------|------|-------------|
+          | Linux | x86_64 | \`pt-tools-linux-amd64.tar.gz\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-amd64.tar.gz) |
+          | Linux | aarch64 | \`pt-tools-linux-arm64.tar.gz\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-arm64.tar.gz) |
+          | Windows | x86_64 | \`pt-tools-windows-amd64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-amd64.exe.zip) |
+          | Windows | aarch64 | \`pt-tools-windows-arm64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-arm64.exe.zip) |
 
           ### Docker Images
 
