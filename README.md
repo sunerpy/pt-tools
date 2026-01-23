@@ -122,6 +122,13 @@ chmod +x pt-tools
 **Windows (PowerShell)**：
 
 ```powershell
+# 一键下载、解压并运行（复制整段命令到 PowerShell 执行）
+Invoke-WebRequest -Uri "https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-amd64.exe.zip" -OutFile "pt-tools.zip"; Expand-Archive -Path "pt-tools.zip" -DestinationPath "." -Force; .\pt-tools.exe web --host 0.0.0.0 --port 8080
+```
+
+或分步执行：
+
+```powershell
 # 下载并解压
 Invoke-WebRequest -Uri "https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-amd64.exe.zip" -OutFile "pt-tools.zip"
 Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
@@ -129,6 +136,8 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 # 运行
 .\pt-tools.exe web --host 0.0.0.0 --port 8080
 ```
+
+> **注意**：这是一个命令行工具，双击 exe 文件会提示需要在命令行中运行。请使用上述 PowerShell 命令启动服务。
 
 | 系统    | 架构  | 文件名                           |
 | ------- | ----- | -------------------------------- |

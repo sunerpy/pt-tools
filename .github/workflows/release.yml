@@ -147,7 +147,10 @@ jobs:
             if [ -f "$file" ]; then
               new_file_name="${file}"
               mkdir -p temp && unzip -q "$file" -d temp && rm -f "$file"
-              if ls temp/pt-tools-* 1> /dev/null 2>&1; then
+              if ls temp/pt-tools-*.exe 1> /dev/null 2>&1; then
+                # Windows: preserve .exe extension
+                mv temp/pt-tools-*.exe temp/pt-tools.exe
+              elif ls temp/pt-tools-* 1> /dev/null 2>&1; then
                 mv temp/pt-tools-* temp/pt-tools
               fi
               (cd temp && zip -rq "../$new_file_name" *)
