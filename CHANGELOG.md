@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-24
+
+### Features
+
+- **web**: 增加版本一键自动升级功能
+- 新增运行时环境检测与升级状态接口 - 实现 Web 界面触发的二进制自动升级流程 - 支持下载进度跟踪与取消操作 - 前端集成升级控制与状态展示逻辑
+
 ## [0.4.2] - 2026-01-24
 
 ### Features
