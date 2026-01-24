@@ -26,10 +26,24 @@ jobs:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Dependencies
+        working-directory: web/frontend
+        run: pnpm install --frozen-lockfile
+
       - name: Format CHANGELOG
         run: |
-          curl -fsSL https://dprint.dev/install.sh | sh
-          ~/.dprint/bin/dprint fmt CHANGELOG.md
+          cd web/frontend
+          pnpm oxfmt --no-error-on-unmatched-pattern "${{ github.workspace }}/CHANGELOG.md"
 
       - name: Check for changes
         id: check_changes
