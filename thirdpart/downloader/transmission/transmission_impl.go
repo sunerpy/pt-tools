@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -161,13 +162,13 @@ func (t *TransmissionClient) Authenticate() error {
 	// 首次请求会返回 409 和 X-Transmission-Session-Id header
 	req, err := t.createRequest("session-get", nil)
 	if err != nil {
-		return fmt.Errorf("failed to create auth request: %w", err)
+		return fmt.Errorf("创建认证请求失败: %w", err)
 	}
 
 	resp, err := t.client.Do(req)
 	if err != nil {
 		t.healthy = false
-		return fmt.Errorf("authentication request failed: %w", err)
+		return t.wrapConnectionError(err)
 	}
 	defer resp.Body.Close()
 
@@ -176,7 +177,7 @@ func (t *TransmissionClient) Authenticate() error {
 		t.sessionID = resp.Header.Get("X-Transmission-Session-Id")
 		if t.sessionID == "" {
 			t.healthy = false
-			return fmt.Errorf("failed to get session ID from response")
+			return fmt.Errorf("无法获取 Session ID，请检查 Transmission 版本")
 		}
 		// 使用新的 session ID 重试
 		return t.verifyConnection()
@@ -184,18 +185,45 @@ func (t *TransmissionClient) Authenticate() error {
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		t.healthy = false
-		return fmt.Errorf("authentication failed: invalid username or password")
+		return fmt.Errorf("用户名或密码错误")
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		t.healthy = false
-		return fmt.Errorf("authentication failed with status code: %d", resp.StatusCode)
+		return t.wrapStatusCodeError(resp.StatusCode)
 	}
 
 	t.healthy = true
 	t.lastActivity = time.Now()
 	sLogger().Info("Successfully connected to Transmission")
 	return nil
+}
+
+func (t *TransmissionClient) wrapConnectionError(err error) error {
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "connection refused"):
+		return fmt.Errorf("连接被拒绝，请检查: 1) Transmission 是否正在运行 2) RPC 是否已启用 3) 端口是否正确(默认9091) (原始错误: %w)", err)
+	case strings.Contains(errStr, "no such host"):
+		return fmt.Errorf("无法解析主机名，请检查 URL 地址是否正确 (原始错误: %w)", err)
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return fmt.Errorf("连接超时，请检查: 1) 网络是否可达 2) 防火墙设置 3) URL 地址是否正确 (原始错误: %w)", err)
+	case strings.Contains(errStr, "certificate"):
+		return fmt.Errorf("SSL 证书错误，如使用自签名证书请检查配置 (原始错误: %w)", err)
+	default:
+		return fmt.Errorf("连接失败: %w", err)
+	}
+}
+
+func (t *TransmissionClient) wrapStatusCodeError(statusCode int) error {
+	switch statusCode {
+	case http.StatusForbidden:
+		return fmt.Errorf("访问被禁止(403)，请检查 Transmission 的 RPC 白名单设置")
+	case http.StatusNotFound:
+		return fmt.Errorf("RPC 路径不存在(404)，请检查 URL 是否正确(通常为 http://host:9091/transmission/rpc)")
+	default:
+		return fmt.Errorf("认证失败，HTTP 状态码: %d", statusCode)
+	}
 }
 
 // verifyConnection 验证连接

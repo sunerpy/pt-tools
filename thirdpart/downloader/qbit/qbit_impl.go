@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,7 +115,7 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 
 	req, err := http.NewRequestWithContext(ctx, "POST", loginURL, bytes.NewBufferString(data.Encode()))
 	if err != nil {
-		return fmt.Errorf("failed to create login request: %w", err)
+		return fmt.Errorf("创建登录请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", q.baseURL)
@@ -122,30 +123,62 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 	resp, err := q.client.Do(req)
 	if err != nil {
 		q.healthy = false
-		return fmt.Errorf("login request failed: %w", err)
+		return q.wrapConnectionError(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		q.healthy = false
-		return fmt.Errorf("login failed with status code: %d", resp.StatusCode)
+		return q.wrapStatusCodeError(resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		q.healthy = false
-		return fmt.Errorf("failed to read response: %w", err)
+		return fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	if string(body) != "Ok." {
 		q.healthy = false
-		return fmt.Errorf("login failed, response: %s", string(body))
+		if string(body) == "Fails." {
+			return fmt.Errorf("用户名或密码错误")
+		}
+		return fmt.Errorf("登录失败，服务器响应: %s", string(body))
 	}
 
 	q.healthy = true
 	q.lastActivity = time.Now()
 	sLogger().Info("Successfully logged in to qBittorrent")
 	return nil
+}
+
+func (q *QbitClient) wrapConnectionError(err error) error {
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "connection refused"):
+		return fmt.Errorf("连接被拒绝，请检查: 1) qBittorrent 是否正在运行 2) WebUI 是否已启用 3) 端口是否正确 (原始错误: %w)", err)
+	case strings.Contains(errStr, "no such host"):
+		return fmt.Errorf("无法解析主机名，请检查 URL 地址是否正确 (原始错误: %w)", err)
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return fmt.Errorf("连接超时，请检查: 1) 网络是否可达 2) 防火墙设置 3) URL 地址是否正确 (原始错误: %w)", err)
+	case strings.Contains(errStr, "certificate"):
+		return fmt.Errorf("SSL 证书错误，如使用自签名证书请检查配置 (原始错误: %w)", err)
+	default:
+		return fmt.Errorf("连接失败: %w", err)
+	}
+}
+
+func (q *QbitClient) wrapStatusCodeError(statusCode int) error {
+	switch statusCode {
+	case http.StatusForbidden:
+		return fmt.Errorf("访问被禁止(403)，可能原因: 1) IP 被封禁（登录失败次数过多） 2) 需要在 qBittorrent 设置中添加 IP 白名单")
+	case http.StatusNotFound:
+		return fmt.Errorf("API 路径不存在(404)，请检查: 1) URL 是否正确 2) qBittorrent 版本是否过旧")
+	case http.StatusUnauthorized:
+		return fmt.Errorf("认证失败(401)，用户名或密码错误")
+	default:
+		return fmt.Errorf("登录失败，HTTP 状态码: %d", statusCode)
+	}
 }
 
 // doRequestWithRetry 执行请求并在需要时重试

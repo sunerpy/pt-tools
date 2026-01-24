@@ -366,11 +366,13 @@ func (s *Server) downloaderHealthCheck(w http.ResponseWriter, r *http.Request, i
 		config := qbit.NewQBitConfig(dlSetting.URL, dlSetting.Username, dlSetting.Password)
 		dl, err := qbit.NewQbitClient(config, dlSetting.Name)
 		if err != nil {
+			global.GetSlogger().Warnf("[Downloader] 健康检查失败: name=%s, type=%s, url=%s, error=%v", dlSetting.Name, dlSetting.Type, dlSetting.URL, err)
 			response.Message = err.Error()
 			writeJSON(w, response)
 			return
 		}
 		defer dl.Close()
+		global.GetSlogger().Infof("[Downloader] 健康检查成功: name=%s, type=%s", dlSetting.Name, dlSetting.Type)
 		response.IsHealthy = true
 		response.Message = "连接正常"
 
@@ -378,15 +380,18 @@ func (s *Server) downloaderHealthCheck(w http.ResponseWriter, r *http.Request, i
 		config := transmission.NewTransmissionConfigWithAutoStart(dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
 		dl, err := transmission.NewTransmissionClient(config, dlSetting.Name)
 		if err != nil {
+			global.GetSlogger().Warnf("[Downloader] 健康检查失败: name=%s, type=%s, url=%s, error=%v", dlSetting.Name, dlSetting.Type, dlSetting.URL, err)
 			response.Message = err.Error()
 			writeJSON(w, response)
 			return
 		}
 		defer dl.Close()
+		global.GetSlogger().Infof("[Downloader] 健康检查成功: name=%s, type=%s", dlSetting.Name, dlSetting.Type)
 		response.IsHealthy = true
 		response.Message = "连接正常"
 
 	default:
+		global.GetSlogger().Warnf("[Downloader] 健康检查失败: name=%s, 不支持的下载器类型=%s", dlSetting.Name, dlSetting.Type)
 		response.Message = "不支持的下载器类型: " + dlSetting.Type
 	}
 
