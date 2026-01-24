@@ -2,6 +2,7 @@ package transmission
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -20,9 +21,9 @@ func (c *TransmissionConfig) GetType() downloader.DownloaderType {
 	return downloader.DownloaderTransmission
 }
 
-// GetURL 获取下载器 URL
+// GetURL 获取下载器 URL（自动去除尾斜杠）
 func (c *TransmissionConfig) GetURL() string {
-	return c.URL
+	return strings.TrimSuffix(c.URL, "/")
 }
 
 // GetUsername 获取用户名

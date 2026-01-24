@@ -2,6 +2,7 @@ package qbit
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -19,9 +20,9 @@ func (c *QBitConfig) GetType() downloader.DownloaderType {
 	return downloader.DownloaderQBittorrent
 }
 
-// GetURL 获取下载器 URL
+// GetURL 获取下载器 URL（自动去除尾斜杠）
 func (c *QBitConfig) GetURL() string {
-	return c.URL
+	return strings.TrimSuffix(c.URL, "/")
 }
 
 // GetUsername 获取用户名

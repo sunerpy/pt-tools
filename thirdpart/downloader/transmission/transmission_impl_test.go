@@ -1687,3 +1687,22 @@ func TestAddTorrentDelegatesToAddTorrentWithPath_Transmission(t *testing.T) {
 		t.Errorf("expected download-dir to be empty when using AddTorrent, got '%s'", capturedDownloadDir)
 	}
 }
+
+func TestTransmissionConfigURLTrailingSlash(t *testing.T) {
+	tests := []struct {
+		inputURL    string
+		expectedURL string
+	}{
+		{"http://localhost:9091/", "http://localhost:9091"},
+		{"http://localhost:9091", "http://localhost:9091"},
+		{"http://192.168.1.100:9091/", "http://192.168.1.100:9091"},
+		{"https://transmission.example.com/", "https://transmission.example.com"},
+	}
+
+	for _, tt := range tests {
+		config := NewTransmissionConfig(tt.inputURL, "admin", "password")
+		if config.GetURL() != tt.expectedURL {
+			t.Errorf("GetURL(%q) = %q, want %q", tt.inputURL, config.GetURL(), tt.expectedURL)
+		}
+	}
+}

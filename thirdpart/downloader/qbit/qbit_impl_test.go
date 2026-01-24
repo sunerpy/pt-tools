@@ -974,3 +974,22 @@ func TestAddTorrentDelegatesToAddTorrentWithPath(t *testing.T) {
 		t.Errorf("expected savepath to be empty when using AddTorrent, got '%s'", capturedSavePath)
 	}
 }
+
+func TestQBitConfigURLTrailingSlash(t *testing.T) {
+	tests := []struct {
+		inputURL    string
+		expectedURL string
+	}{
+		{"http://localhost:8080/", "http://localhost:8080"},
+		{"http://localhost:8080", "http://localhost:8080"},
+		{"http://192.168.1.100:8080/", "http://192.168.1.100:8080"},
+		{"https://qbit.example.com/", "https://qbit.example.com"},
+	}
+
+	for _, tt := range tests {
+		config := NewQBitConfig(tt.inputURL, "admin", "password")
+		if config.GetURL() != tt.expectedURL {
+			t.Errorf("GetURL(%q) = %q, want %q", tt.inputURL, config.GetURL(), tt.expectedURL)
+		}
+	}
+}

@@ -10,6 +10,8 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/transmission"
 )
 
 // DownloaderRequest 下载器请求结构
@@ -328,7 +330,7 @@ func (s *Server) deleteDownloader(w http.ResponseWriter, r *http.Request, id uin
 	writeJSON(w, map[string]string{"status": "deleted"})
 }
 
-// downloaderHealthCheck 下载器健康检查
+// downloaderHealthCheck 下载器健康检查（真正测试连接）
 func (s *Server) downloaderHealthCheck(w http.ResponseWriter, r *http.Request, idStr string) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -342,21 +344,50 @@ func (s *Server) downloaderHealthCheck(w http.ResponseWriter, r *http.Request, i
 	}
 
 	db := global.GlobalDB.DB
-	var downloader models.DownloaderSetting
-	if err := db.First(&downloader, uint(id)).Error; err != nil {
+	var dlSetting models.DownloaderSetting
+	if err := db.First(&dlSetting, uint(id)).Error; err != nil {
 		http.Error(w, "下载器不存在", http.StatusNotFound)
 		return
 	}
 
-	// 简单的健康检查：尝试连接
-	// 这里只返回基本状态，实际健康检查需要通过DownloaderManager
 	response := HealthCheckResponse{
-		Name:      downloader.Name,
-		IsHealthy: downloader.Enabled,
-		Message:   "配置已启用",
+		Name:      dlSetting.Name,
+		IsHealthy: false,
 	}
-	if !downloader.Enabled {
-		response.Message = "配置已禁用"
+
+	if !dlSetting.Enabled {
+		response.Message = "下载器未启用"
+		writeJSON(w, response)
+		return
+	}
+
+	switch dlSetting.Type {
+	case "qbittorrent":
+		config := qbit.NewQBitConfig(dlSetting.URL, dlSetting.Username, dlSetting.Password)
+		dl, err := qbit.NewQbitClient(config, dlSetting.Name)
+		if err != nil {
+			response.Message = err.Error()
+			writeJSON(w, response)
+			return
+		}
+		defer dl.Close()
+		response.IsHealthy = true
+		response.Message = "连接正常"
+
+	case "transmission":
+		config := transmission.NewTransmissionConfigWithAutoStart(dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
+		dl, err := transmission.NewTransmissionClient(config, dlSetting.Name)
+		if err != nil {
+			response.Message = err.Error()
+			writeJSON(w, response)
+			return
+		}
+		defer dl.Close()
+		response.IsHealthy = true
+		response.Message = "连接正常"
+
+	default:
+		response.Message = "不支持的下载器类型: " + dlSetting.Type
 	}
 
 	writeJSON(w, response)
