@@ -25,22 +25,37 @@ const (
 	RequestTimeout     = 15 * time.Second
 )
 
+type GitHubAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type"`
+}
+
 type GitHubRelease struct {
-	TagName     string    `json:"tag_name"`
-	Name        string    `json:"name"`
-	Body        string    `json:"body"`
-	HTMLURL     string    `json:"html_url"`
-	PublishedAt time.Time `json:"published_at"`
-	Prerelease  bool      `json:"prerelease"`
-	Draft       bool      `json:"draft"`
+	TagName     string        `json:"tag_name"`
+	Name        string        `json:"name"`
+	Body        string        `json:"body"`
+	HTMLURL     string        `json:"html_url"`
+	PublishedAt time.Time     `json:"published_at"`
+	Prerelease  bool          `json:"prerelease"`
+	Draft       bool          `json:"draft"`
+	Assets      []GitHubAsset `json:"assets"`
+}
+
+type ReleaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"download_url"`
+	Size        int64  `json:"size"`
 }
 
 type ReleaseInfo struct {
-	Version     string `json:"version"`
-	Name        string `json:"name"`
-	Changelog   string `json:"changelog"`
-	URL         string `json:"url"`
-	PublishedAt int64  `json:"published_at"`
+	Version     string         `json:"version"`
+	Name        string         `json:"name"`
+	Changelog   string         `json:"changelog"`
+	URL         string         `json:"url"`
+	PublishedAt int64          `json:"published_at"`
+	Assets      []ReleaseAsset `json:"assets,omitempty"`
 }
 
 type VersionCheckResult struct {
@@ -211,12 +226,21 @@ func (c *Checker) filterNewReleases(releases []GitHubRelease) []ReleaseInfo {
 		}
 
 		if CompareVersions(releaseParsed, currentParsed) > 0 {
+			assets := make([]ReleaseAsset, 0, len(r.Assets))
+			for _, a := range r.Assets {
+				assets = append(assets, ReleaseAsset{
+					Name:        a.Name,
+					DownloadURL: a.DownloadURL,
+					Size:        a.Size,
+				})
+			}
 			newReleases = append(newReleases, ReleaseInfo{
 				Version:     r.TagName,
 				Name:        r.Name,
 				Changelog:   r.Body,
 				URL:         r.HTMLURL,
 				PublishedAt: r.PublishedAt.Unix(),
+				Assets:      assets,
 			})
 		}
 	}

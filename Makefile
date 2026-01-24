@@ -47,7 +47,9 @@ build-local: fmt build-frontend
 	go build -ldflags="-s -w \
 	-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
 	-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
-	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
+	-X github.com/sunerpy/pt-tools/version.BuildOS=$(shell go env GOOS) \
+	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH)" \
 	-o $(DIST_DIR)/$(IMAGE_NAME) .
 
 # 多平台二进制构建
@@ -62,7 +64,9 @@ build-binaries:
 			GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 go build -ldflags="-s -w \
 			-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
 			-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
-			-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+			-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
+			-X github.com/sunerpy/pt-tools/version.BuildOS=$$GOOS \
+			-X github.com/sunerpy/pt-tools/version.BuildArch=$$GOARCH" \
 			-o $$OUTPUT . || exit 1; \
 		done
 

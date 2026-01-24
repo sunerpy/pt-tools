@@ -2,14 +2,13 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/sunerpy/pt-tools/version"
 )
 
-// apiVersion returns the current version information
-// GET /api/version
 func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -18,8 +17,6 @@ func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, version.GetVersionInfo())
 }
 
-// apiVersionCheck checks for new releases on GitHub
-// GET /api/version/check?force=true&proxy=http://proxy:port
 func (s *Server) apiVersionCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -44,4 +41,117 @@ func (s *Server) apiVersionCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, result)
+}
+
+func (s *Server) apiVersionRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	env := version.DetectEnvironment()
+	upgrader := version.GetUpgrader()
+	progress := upgrader.GetProgress()
+
+	resp := map[string]any{
+		"runtime":          env,
+		"upgrade_progress": progress,
+	}
+	writeJSON(w, resp)
+}
+
+func (s *Server) apiVersionUpgrade(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.apiUpgradeProgress(w, r)
+	case http.MethodPost:
+		s.apiUpgradeStart(w, r)
+	case http.MethodDelete:
+		s.apiUpgradeCancel(w, r)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiUpgradeProgress(w http.ResponseWriter, _ *http.Request) {
+	upgrader := version.GetUpgrader()
+	writeJSON(w, upgrader.GetProgress())
+}
+
+type upgradeRequest struct {
+	Version  string `json:"version"`
+	ProxyURL string `json:"proxy_url"`
+}
+
+func (s *Server) apiUpgradeStart(w http.ResponseWriter, r *http.Request) {
+	upgrader := version.GetUpgrader()
+
+	if err := upgrader.CanUpgrade(); err != nil {
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var req upgradeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "请求格式错误", http.StatusBadRequest)
+		return
+	}
+
+	if req.Version == "" {
+		writeJSONError(w, "未指定目标版本", http.StatusBadRequest)
+		return
+	}
+
+	checker := version.GetChecker()
+	result := checker.GetCachedResult()
+	if result == nil {
+		writeJSONError(w, "请先检查更新", http.StatusBadRequest)
+		return
+	}
+
+	var targetRelease *version.ReleaseInfo
+	for i := range result.NewReleases {
+		if result.NewReleases[i].Version == req.Version {
+			targetRelease = &result.NewReleases[i]
+			break
+		}
+	}
+
+	if targetRelease == nil {
+		writeJSONError(w, "未找到指定版本的更新信息", http.StatusBadRequest)
+		return
+	}
+
+	if len(targetRelease.Assets) == 0 {
+		writeJSONError(w, "该版本没有可用的安装包", http.StatusBadRequest)
+		return
+	}
+
+	if err := upgrader.Upgrade(r.Context(), targetRelease, req.ProxyURL); err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"success": true,
+		"message": "升级已开始",
+	})
+}
+
+func (s *Server) apiUpgradeCancel(w http.ResponseWriter, _ *http.Request) {
+	upgrader := version.GetUpgrader()
+	upgrader.Cancel()
+	writeJSON(w, map[string]any{
+		"success": true,
+		"message": "升级已取消",
+	})
+}
+
+func writeJSONError(w http.ResponseWriter, message string, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": false,
+		"error":   message,
+	})
 }

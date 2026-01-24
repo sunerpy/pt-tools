@@ -804,12 +804,43 @@ export interface VersionInfo {
   commit_id: string;
 }
 
+export interface ReleaseAsset {
+  name: string;
+  download_url: string;
+  size: number;
+}
+
 export interface ReleaseInfo {
   version: string;
   name: string;
   changelog: string;
   url: string;
   published_at: number;
+  assets?: ReleaseAsset[];
+}
+
+export interface RuntimeEnvironment {
+  is_docker: boolean;
+  os: string;
+  arch: string;
+  executable: string;
+  can_self_upgrade: boolean;
+}
+
+export interface UpgradeProgress {
+  status: "idle" | "downloading" | "extracting" | "replacing" | "completed" | "failed";
+  target_version?: string;
+  progress: number;
+  bytes_downloaded: number;
+  total_bytes: number;
+  error?: string;
+  started_at?: number;
+  completed_at?: number;
+}
+
+export interface RuntimeResponse {
+  runtime: RuntimeEnvironment;
+  upgrade_progress: UpgradeProgress;
 }
 
 export interface VersionCheckResult {
@@ -831,4 +862,15 @@ export const versionApi = {
     const query = params.toString();
     return api.get<VersionCheckResult>(`/api/version/check${query ? `?${query}` : ""}`);
   },
+  getRuntime: () => api.get<RuntimeResponse>("/api/version/runtime"),
+
+  getUpgradeProgress: () => api.get<UpgradeProgress>("/api/version/upgrade"),
+
+  startUpgrade: (version: string, proxyUrl?: string) =>
+    api.post<{ success: boolean; message: string }>("/api/version/upgrade", {
+      version,
+      proxy_url: proxyUrl,
+    }),
+
+  cancelUpgrade: () => api.delete<{ success: boolean; message: string }>("/api/version/upgrade"),
 };

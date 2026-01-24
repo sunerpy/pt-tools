@@ -27,6 +27,8 @@ var webCmd = &cobra.Command{
 	Use:   "web",
 	Short: "启动 Web 管理界面（默认）",
 	Run: func(cmd *cobra.Command, args []string) {
+		version.CleanupOldBinary()
+
 		// 初始化配置与数据库
 		if _, err := core.InitRuntime(); err != nil {
 			color.Red("初始化失败: %v", err)

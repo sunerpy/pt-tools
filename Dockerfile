@@ -86,6 +86,10 @@ ENV PT_HOST=0.0.0.0 PT_PORT=8080
 # 从构建阶段拷贝二进制文件
 COPY --from=builder /app/pt-tools /app/bin/pt-tools
 COPY --chown=1000:1000 --chmod=755 docker/docker-entrypoint.sh /app/bin/
+
+# 创建 Docker 环境标记文件（用于运行时检测是否在容器中）
+RUN echo -n "pt-tools-docker-build" > /app/.pt-tools-docker
+
 ENV GOSU_VERSION 1.17
 RUN set -eux; \
 	\

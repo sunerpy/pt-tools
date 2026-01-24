@@ -121,6 +121,8 @@ func (s *Server) Serve(addr string) error {
 	// Version check API
 	mux.HandleFunc("/api/version", s.auth(s.apiVersion))
 	mux.HandleFunc("/api/version/check", s.auth(s.apiVersionCheck))
+	mux.HandleFunc("/api/version/runtime", s.auth(s.apiVersionRuntime))
+	mux.HandleFunc("/api/version/upgrade", s.auth(s.apiVersionUpgrade))
 	// Torrent download proxy API
 	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
 	// Static UI - Vue 3 SPA

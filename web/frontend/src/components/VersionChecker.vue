@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useVersionStore } from "@/stores/version";
 import { formatDate } from "@/utils/format";
-import { Check, Close, Link, Promotion, Refresh } from "@element-plus/icons-vue";
+import { Check, Close, Download, Link, Promotion, Refresh } from "@element-plus/icons-vue";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { storeToRefs } from "pinia";
@@ -18,6 +18,10 @@ const {
   changelogUrl,
   checking,
   checkResult,
+  upgradeProgress,
+  upgrading,
+  canSelfUpgrade,
+  isDocker,
 } = storeToRefs(versionStore);
 
 const proxyUrl = ref("");
@@ -37,6 +41,7 @@ onMounted(() => {
   if (!versionStore.versionInfo) {
     versionStore.fetchVersionInfo();
   }
+  versionStore.fetchRuntime();
 });
 
 function handleCheckUpdate() {
@@ -45,6 +50,22 @@ function handleCheckUpdate() {
 
 function handleDismiss(version: string) {
   versionStore.dismissVersion(version);
+}
+
+function handleUpgrade(version: string) {
+  versionStore.startUpgrade(version, proxyUrl.value || undefined);
+}
+
+function handleCancelUpgrade() {
+  versionStore.cancelUpgrade();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
 function renderMarkdown(text: string): string {
@@ -100,6 +121,45 @@ function renderMarkdown(text: string): string {
       </div>
 
       <div class="status-container">
+        <div v-if="isDocker" class="docker-info">
+          <el-alert type="info" :closable="false" show-icon>
+            <template #title>Docker 环境检测</template>
+            <p>当前运行在 Docker 容器中。推荐使用以下方式更新：</p>
+            <ul>
+              <li>
+                使用
+                <a href="https://containrrr.dev/watchtower/" target="_blank">Watchtower</a>
+                自动更新
+              </li>
+              <li>或手动拉取新镜像: <code>docker pull sunerpy/pt-tools:latest</code></li>
+            </ul>
+          </el-alert>
+        </div>
+
+        <div v-if="upgrading && upgradeProgress" class="upgrade-progress">
+          <div class="progress-header">
+            <span>正在升级到 {{ upgradeProgress.target_version }}</span>
+            <el-button size="small" text type="danger" @click="handleCancelUpgrade">取消</el-button>
+          </div>
+          <el-progress
+            :percentage="Math.round(upgradeProgress.progress)"
+            :status="upgradeProgress.status === 'failed' ? 'exception' : undefined" />
+          <div class="progress-status">
+            <span v-if="upgradeProgress.status === 'downloading'">
+              下载中... {{ formatBytes(upgradeProgress.bytes_downloaded) }} /
+              {{ formatBytes(upgradeProgress.total_bytes) }}
+            </span>
+            <span v-else-if="upgradeProgress.status === 'extracting'">解压中...</span>
+            <span v-else-if="upgradeProgress.status === 'replacing'">替换文件中...</span>
+            <span v-else-if="upgradeProgress.status === 'completed'" class="success">
+              升级完成，请重启应用
+            </span>
+            <span v-else-if="upgradeProgress.status === 'failed'" class="error">
+              {{ upgradeProgress.error }}
+            </span>
+          </div>
+        </div>
+
         <div v-if="checking && !hasUpdate" class="status-state loading">
           <el-icon class="is-loading"><Refresh /></el-icon>
           <span>正在检查更新...</span>
@@ -145,6 +205,15 @@ function renderMarkdown(text: string): string {
               </div>
 
               <div class="release-actions">
+                <el-button
+                  v-if="canSelfUpgrade"
+                  type="primary"
+                  size="small"
+                  :icon="Download"
+                  :disabled="upgrading"
+                  @click="handleUpgrade(release.version)">
+                  升级
+                </el-button>
                 <el-link
                   v-if="release.url"
                   :href="release.url"
@@ -448,6 +517,7 @@ function renderMarkdown(text: string): string {
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px dashed var(--el-border-color-lighter);
+  align-items: center;
 }
 
 .action-link {
@@ -495,5 +565,43 @@ function renderMarkdown(text: string): string {
   to {
     transform: rotate(360deg);
   }
+}
+
+.docker-info {
+  margin-bottom: 12px;
+}
+
+.upgrade-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: var(--el-fill-color-light);
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 12px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.progress-status {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  display: flex;
+  justify-content: space-between;
+}
+
+.progress-status .success {
+  color: var(--el-color-success);
+}
+
+.progress-status .error {
+  color: var(--el-color-danger);
 }
 </style>
