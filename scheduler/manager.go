@@ -169,19 +169,12 @@ func (m *Manager) Reload(cfg *models.Config) {
 	m.initFreeEndMonitor()
 
 	// 重新启动：每次启动任务时从 DB 读取最新配置，保证一致性
-	store := core.NewConfigStore(global.GlobalDB)
-	qb, _ := store.GetQbitOnly()
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {
 			// 使用统一的工厂函数创建站点实现
 			impl, err := internal.NewUnifiedSiteImpl(context.Background(), site)
 			if err != nil {
 				global.GetSlogger().Warnf("站点 %s 未注册或不支持，跳过: %v", string(site), err)
-				continue
-			}
-			// 检查下载器配置
-			if qb.URL == "" || qb.User == "" || qb.Password == "" {
-				global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
 				continue
 			}
 			for _, r := range sc.RSS {
