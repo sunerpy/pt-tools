@@ -98,6 +98,17 @@ func (r *SiteRegistry) registerDefaults() {
 		RateLimit:      2.0, // Increased from 0.5
 		RateBurst:      5,   // Increased from 2
 	})
+
+	// OurBits (NexusPHP)
+	r.Register(SiteMeta{
+		ID:             "ourbits",
+		Name:           "OurBits",
+		Kind:           SiteNexusPHP,
+		DefaultBaseURL: "https://ourbits.club",
+		AuthMethod:     "cookie",
+		RateLimit:      2.0,
+		RateBurst:      5,
+	})
 }
 
 // Register adds or updates site metadata

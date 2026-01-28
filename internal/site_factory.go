@@ -13,6 +13,8 @@ var SiteGroupToID = map[models.SiteGroup]string{
 	models.MTEAM:        "mteam",
 	models.HDSKY:        "hdsky",
 	models.SpringSunday: "springsunday",
+	models.HDDOLBY:      "hddolby",
+	models.OURBITS:      "ourbits",
 }
 
 // IDToSiteGroup 将 site/v2 的 site ID 映射到 models.SiteGroup
@@ -20,6 +22,8 @@ var IDToSiteGroup = map[string]models.SiteGroup{
 	"mteam":        models.MTEAM,
 	"hdsky":        models.HDSKY,
 	"springsunday": models.SpringSunday,
+	"hddolby":      models.HDDOLBY,
+	"ourbits":      models.OURBITS,
 }
 
 // SiteGroupToKind 将 models.SiteGroup 映射到 v2.SiteKind
@@ -27,6 +31,8 @@ var SiteGroupToKind = map[models.SiteGroup]v2.SiteKind{
 	models.MTEAM:        v2.SiteMTorrent,
 	models.HDSKY:        v2.SiteNexusPHP,
 	models.SpringSunday: v2.SiteNexusPHP,
+	models.HDDOLBY:      v2.SiteNexusPHP,
+	models.OURBITS:      v2.SiteNexusPHP,
 }
 
 // NewUnifiedSiteImpl 创建统一站点实现

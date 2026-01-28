@@ -457,7 +457,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 // DeleteSite 删除站点（预置站点禁止删除）
 func (s *ConfigStore) DeleteSite(name string) error {
 	lower := strings.ToLower(name)
-	if lower == "springsunday" || lower == "hdsky" || lower == "mteam" {
+	if lower == "springsunday" || lower == "hdsky" || lower == "mteam" || lower == "hddolby" || lower == "ourbits" {
 		return errors.New("预置站点不可删除")
 	}
 	tx := s.db.DB.Begin()
