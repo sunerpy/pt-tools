@@ -10,6 +10,8 @@ const (
 	HDSKY        SiteGroup = "hdsky"
 	MTEAM        SiteGroup = "mteam"
 	HDDOLBY      SiteGroup = "hddolby"
+	OURBITS      SiteGroup = "ourbits"
+	TTG          SiteGroup = "ttg"
 )
 
 const (
@@ -21,6 +23,8 @@ var allowedGroups = map[SiteGroup]struct{}{
 	HDSKY:        {},
 	MTEAM:        {},
 	HDDOLBY:      {},
+	OURBITS:      {},
+	TTG:          {},
 }
 
 func ValidateSiteName(value string) (SiteGroup, error) {

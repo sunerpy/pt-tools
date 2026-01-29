@@ -296,6 +296,127 @@ func (p *SpringSundayParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo
 }
 
 // ============================================================================
+// TTG Parser
+// ============================================================================
+
+// TTGParser implements NexusPHPDetailParser for TTG (To The Glory) site
+type TTGParser struct {
+	Config NexusPHPParserConfig
+}
+
+// NewTTGParser creates a new TTGParser
+func NewTTGParser(options ...NexusPHPParserOption) *TTGParser {
+	config := DefaultNexusPHPParserConfig()
+	for _, opt := range options {
+		opt(&config)
+	}
+	return &TTGParser{Config: config}
+}
+
+// ParseTitleAndID parses title and torrent ID from TTG page
+func (p *TTGParser) ParseTitleAndID(doc *goquery.Selection) (title, torrentID string) {
+	// 标题从 h1 标签获取
+	title = doc.Find("h1").First().Text()
+
+	// 种子ID从多个可能的位置获取
+	// 1. 从 bookmark 链接的 tid 属性
+	if tid, exists := doc.Find("a.bookmark").Attr("tid"); exists && tid != "" {
+		torrentID = tid
+	} else {
+		// 2. 从 mycart 的 value 属性
+		if tid, exists := doc.Find("#mycart").Attr("value"); exists && tid != "" {
+			torrentID = tid
+		}
+	}
+	return title, torrentID
+}
+
+// ParseDiscount parses discount type and end time from TTG page
+func (p *TTGParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, time.Time) {
+	discount := DiscountNone
+	var endTime time.Time
+
+	// 方法1: 检查是否有 ico_free.gif 图片
+	doc.Find("img[src*='ico_free.gif']").Each(func(_ int, s *goquery.Selection) {
+		discount = DiscountFree
+	})
+
+	// 方法2: 检查所有红色 font 标签是否有免费相关的文本（作为后备）
+	if discount == DiscountNone {
+		doc.Find("font[color='red']").Each(func(_ int, s *goquery.Selection) {
+			text := s.Text()
+			if strings.Contains(text, "限时不计流量") || strings.Contains(text, "Freeleech") ||
+				strings.Contains(text, "限时免费") || (strings.Contains(text, "免费") && strings.Contains(text, "下载")) {
+				discount = DiscountFree
+			}
+		})
+	}
+
+	// 解析过期时间 - 从所有红色 font 标签中查找 "到期时间为2026-01-30 16:32" 格式
+	timeRe := regexp.MustCompile(`到期时间为(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})`)
+	doc.Find("font[color='red']").Each(func(_ int, s *goquery.Selection) {
+		if !endTime.IsZero() {
+			return // 已经找到了时间
+		}
+		text := s.Text()
+		matches := timeRe.FindStringSubmatch(text)
+		if len(matches) >= 2 {
+			// TTG 使用格式 "2026-01-30 16:32" 不包含秒
+			if t, err := ParseTimeInCST("2006-01-02 15:04", matches[1]); err == nil {
+				endTime = t
+			}
+		}
+	})
+
+	return discount, endTime
+}
+
+// ParseHR parses HR status from TTG page
+func (p *TTGParser) ParseHR(doc *goquery.Selection) bool {
+	html, _ := doc.Html()
+	// TTG 使用 "禁转资源" 表示 H&R
+	// 检查 "禁转资源"、"H&R"、"H&amp;R" (HTML实体转义后)
+	return strings.Contains(html, "禁转资源") || strings.Contains(html, "H&R") || strings.Contains(html, "H&amp;R")
+}
+
+// ParseSizeMB parses torrent size in MB from TTG page
+func (p *TTGParser) ParseSizeMB(doc *goquery.Selection) float64 {
+	var sizeMB float64
+	// TTG 使用 "尺寸" 标签
+	doc.Find("td.heading:contains('尺寸')").Each(func(_ int, s *goquery.Selection) {
+		rowFollow := s.Next()
+		text := rowFollow.Text()
+		// 格式: "45.27 GB (48,609,376,900 字节)"
+		sizeRe := regexp.MustCompile(`([\d.]+)\s*GB`)
+		matches := sizeRe.FindStringSubmatch(text)
+		if len(matches) >= 2 {
+			size, err := strconv.ParseFloat(matches[1], 64)
+			if err == nil {
+				sizeMB = size * 1024 // 转换为 MB
+			}
+		}
+	})
+	return sizeMB
+}
+
+// ParseAll parses all information from TTG page
+func (p *TTGParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo {
+	title, torrentID := p.ParseTitleAndID(doc)
+	discount, endTime := p.ParseDiscount(doc)
+	hasHR := p.ParseHR(doc)
+	sizeMB := p.ParseSizeMB(doc)
+
+	return &TorrentDetailInfo{
+		TorrentID:     torrentID,
+		Title:         title,
+		SizeMB:        sizeMB,
+		DiscountLevel: discount,
+		DiscountEnd:   endTime,
+		HasHR:         hasHR,
+	}
+}
+
+// ============================================================================
 // Parser Registry
 // ============================================================================
 
@@ -303,6 +424,7 @@ func (p *SpringSundayParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo
 var ParserRegistry = map[SiteName]func() NexusPHPDetailParser{
 	SiteNameHDSky:        func() NexusPHPDetailParser { return NewHDSkyParser() },
 	SiteNameSpringSunday: func() NexusPHPDetailParser { return NewSpringSundayParser() },
+	SiteNameTTG:          func() NexusPHPDetailParser { return NewTTGParser() },
 }
 
 // GetParser returns a parser for the given site name
