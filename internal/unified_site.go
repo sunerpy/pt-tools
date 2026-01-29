@@ -184,6 +184,8 @@ func (u *UnifiedSiteImpl) getNexusPHPDetails(item *gofeed.Item) (*v2.TorrentItem
 		v2Parser = v2.NewHDSkyParser()
 	case models.SpringSunday:
 		v2Parser = v2.NewSpringSundayParser()
+	case models.TTG:
+		v2Parser = v2.NewTTGParser()
 	default:
 		v2Parser = v2.NewHDSkyParser() // 默认使用 HDSky 解析器
 	}
