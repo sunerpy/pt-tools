@@ -148,9 +148,67 @@ func TestHDDolbyDefinition(t *testing.T) {
 	}
 }
 
+func TestOurBitsDefinition(t *testing.T) {
+	def, ok := v2.GetDefinitionRegistry().Get("ourbits")
+	if !ok {
+		t.Fatal("OurBits definition not found in registry")
+	}
+
+	if def.Name != "OurBits" {
+		t.Errorf("Name = %q, want %q", def.Name, "OurBits")
+	}
+	if def.Schema != "NexusPHP" {
+		t.Errorf("Schema = %q, want %q", def.Schema, "NexusPHP")
+	}
+	if len(def.Aka) == 0 {
+		t.Error("Aka should not be empty")
+	}
+	// OurBits has 11 levels: Peasant(0), User(1), Power User(2), Elite User(3),
+	// Crazy User(4), Insane User(5), Veteran User(6), Extreme User(7),
+	// Ultimate User(8), Nexus Master(9), VIP(100)
+	if len(def.LevelRequirements) != 11 {
+		t.Errorf("LevelRequirements count = %d, want 11", len(def.LevelRequirements))
+	}
+
+	// Verify OurBits does NOT have seedingBonus in any level requirements
+	// (OurBits only has bonus, no separate seedingBonus)
+	for _, req := range def.LevelRequirements {
+		if req.SeedingBonus > 0 {
+			t.Errorf("OurBits should NOT have seedingBonus requirements, but level %q has SeedingBonus=%f", req.Name, req.SeedingBonus)
+		}
+	}
+
+	// Verify VIP level exists
+	hasVIPLevel := false
+	for _, req := range def.LevelRequirements {
+		if req.ID == 100 && req.Name == "VIP" {
+			hasVIPLevel = true
+			if req.GroupType != v2.LevelGroupVIP {
+				t.Errorf("VIP level should have GroupType=VIP, got %v", req.GroupType)
+			}
+			break
+		}
+	}
+	if !hasVIPLevel {
+		t.Error("OurBits should have VIP level")
+	}
+
+	// Verify Peasant level exists (ID: 0)
+	hasPeasantLevel := false
+	for _, req := range def.LevelRequirements {
+		if req.ID == 0 && req.Name == "Peasant" {
+			hasPeasantLevel = true
+			break
+		}
+	}
+	if !hasPeasantLevel {
+		t.Error("OurBits should have Peasant level")
+	}
+}
+
 func TestAllDefinitionsRegistered(t *testing.T) {
 	registry := v2.GetDefinitionRegistry()
-	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby"}
+	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby", "ourbits"}
 
 	for _, siteID := range expectedSites {
 		if _, ok := registry.Get(siteID); !ok {
@@ -169,6 +227,7 @@ func TestDefinitionUserInfoConfig(t *testing.T) {
 		{"springsunday", 3, true},
 		{"mteam", 4, true},
 		{"hddolby", 3, true},
+		{"ourbits", 3, true},
 	}
 
 	registry := v2.GetDefinitionRegistry()
@@ -230,5 +289,49 @@ func TestLevelProgressCalculation(t *testing.T) {
 	// Should have unmet requirements
 	if len(progress.UnmetRequirements) == 0 {
 		t.Error("Should have unmet requirements")
+	}
+}
+
+func TestOurBitsLevelProgressCalculation(t *testing.T) {
+	def, ok := v2.GetDefinitionRegistry().Get("ourbits")
+	if !ok {
+		t.Fatal("OurBits definition not found")
+	}
+
+	// Create a user at User level (ID: 1) progressing to Power User
+	// Power User requires: P5W, 100GB, 2.0 ratio
+	info := &v2.UserInfo{
+		LevelID:    1,
+		Downloaded: 80 * 1024 * 1024 * 1024, // 80GB - not enough
+		Ratio:      1.5,                      // Not enough
+		Bonus:      50000,
+	}
+
+	progress := v2.CalculateSiteLevelProgress(info, def.LevelRequirements)
+	if progress == nil {
+		t.Fatal("Progress should not be nil")
+		return
+	}
+
+	if progress.CurrentLevel == nil {
+		t.Fatal("CurrentLevel should not be nil")
+		return
+	}
+	if progress.CurrentLevel.Name != "User" {
+		t.Errorf("CurrentLevel.Name = %q, want %q", progress.CurrentLevel.Name, "User")
+	}
+
+	if progress.NextLevel == nil {
+		t.Fatal("NextLevel should not be nil")
+		return
+	}
+	if progress.NextLevel.Name != "Power User" {
+		t.Errorf("NextLevel.Name = %q, want %q", progress.NextLevel.Name, "Power User")
+	}
+
+	// OurBits Power User requires: 5 weeks, 100GB downloaded, 2.0 ratio
+	// Should have unmet requirements
+	if len(progress.UnmetRequirements) == 0 {
+		t.Error("Should have unmet requirements for Power User level")
 	}
 }

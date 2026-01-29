@@ -44,6 +44,12 @@ func GetAllSiteTestConfigs() []SiteTestConfig {
 			BaseURL:    "https://www.hddolby.com",
 			EnvVarName: "HDDOLBY_COOKIE",
 		},
+		{
+			SiteID:     "ourbits",
+			Aliases:    []string{"ourbits", "ob"},
+			BaseURL:    "https://ourbits.club",
+			EnvVarName: "OURBITS_COOKIE",
+		},
 	}
 }
 
@@ -227,6 +233,28 @@ func TestHDDolbyUserInfoDebug(t *testing.T) {
 	testSiteUserInfo(t, *cfg, cookie, true)
 }
 
+// TestOurBitsUserInfoLive tests OurBits user info fetching
+// Run with: OURBITS_COOKIE="your_cookie" go test -v -run TestOurBitsUserInfoLive ./site/v2/definitions/
+func TestOurBitsUserInfoLive(t *testing.T) {
+	cookie := os.Getenv("OURBITS_COOKIE")
+	if cookie == "" {
+		t.Skip("OURBITS_COOKIE environment variable not set, skipping live test")
+	}
+	cfg := findSiteConfig("ourbits")
+	testSiteUserInfo(t, *cfg, cookie, false)
+}
+
+// TestOurBitsUserInfoDebug tests OurBits with debug output
+// Run with: OURBITS_COOKIE="your_cookie" go test -v -run TestOurBitsUserInfoDebug ./site/v2/definitions/
+func TestOurBitsUserInfoDebug(t *testing.T) {
+	cookie := os.Getenv("OURBITS_COOKIE")
+	if cookie == "" {
+		t.Skip("OURBITS_COOKIE environment variable not set, skipping live test")
+	}
+	cfg := findSiteConfig("ourbits")
+	testSiteUserInfo(t, *cfg, cookie, true)
+}
+
 // TestSiteWithHTMLDump tests a site and dumps HTML responses for debugging
 // First run TestSiteWithHTMLDump, then use TestSiteSelectorDebug to debug selectors
 // Run with: SITE_COOKIE="your_cookie" SITE_ID="cmct" go test -v -run TestSiteWithHTMLDump ./site/v2/definitions/
@@ -244,7 +272,7 @@ func TestSiteWithHTMLDump(t *testing.T) {
 	// Find site config
 	cfg := findSiteConfig(siteID)
 	if cfg == nil {
-		t.Fatalf("Unknown site ID: %s. Available: hdsky, cmct/springsunday, hddolby", siteID)
+		t.Fatalf("Unknown site ID: %s. Available: hdsky, cmct/springsunday, hddolby, ourbits", siteID)
 		return
 	}
 
