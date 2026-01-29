@@ -38,7 +38,7 @@ async function toggleEnabled(name: string) {
 }
 
 async function deleteSite(name: string) {
-  if (["springsunday", "hdsky", "mteam", "hddolby", "ourbits"].includes(name.toLowerCase())) {
+  if (["springsunday", "hdsky", "mteam", "hddolby", "ourbits", "ttg"].includes(name.toLowerCase())) {
     ElMessage.warning("预置站点不可删除");
     return;
   }
@@ -64,7 +64,7 @@ async function addSite() {
     const { value: name } = await ElMessageBox.prompt("请输入站点标识", "新增站点", {
       confirmButtonText: "确定",
       cancelButtonText: "取消",
-      inputPlaceholder: "springsunday / hdsky / mteam / hddolby / ourbits 或自定义",
+      inputPlaceholder: "springsunday / hdsky / mteam / hddolby / ourbits / ttg 或自定义",
       inputValidator: (val) => {
         if (!val || !val.trim()) return "站点标识不能为空";
         if (sites.value[val.toLowerCase()]) return "站点已存在";
@@ -195,7 +195,7 @@ function getRssCount(site: SiteConfig): number {
                 size="small"
                 text
                 bg
-                :disabled="['springsunday', 'hdsky', 'mteam', 'hddolby', 'ourbits'].includes(row[0].toLowerCase())"
+                :disabled="['springsunday', 'hdsky', 'mteam', 'hddolby', 'ourbits', 'ttg'].includes(row[0].toLowerCase())"
                 @click="deleteSite(row[0])">
                 删除
               </el-button>

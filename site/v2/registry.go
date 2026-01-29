@@ -109,6 +109,17 @@ func (r *SiteRegistry) registerDefaults() {
 		RateLimit:      2.0,
 		RateBurst:      5,
 	})
+
+	// TTG (NexusPHP variant)
+	r.Register(SiteMeta{
+		ID:             "ttg",
+		Name:           "TTG",
+		Kind:           SiteNexusPHP,
+		DefaultBaseURL: "https://totheglory.im",
+		AuthMethod:     "cookie",
+		RateLimit:      2.0,
+		RateBurst:      5,
+	})
 }
 
 // Register adds or updates site metadata

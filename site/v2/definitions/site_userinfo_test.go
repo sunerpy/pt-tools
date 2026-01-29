@@ -50,6 +50,12 @@ func GetAllSiteTestConfigs() []SiteTestConfig {
 			BaseURL:    "https://ourbits.club",
 			EnvVarName: "OURBITS_COOKIE",
 		},
+		{
+			SiteID:     "ttg",
+			Aliases:    []string{"ttg"},
+			BaseURL:    "https://totheglory.im",
+			EnvVarName: "TTG_COOKIE",
+		},
 	}
 }
 

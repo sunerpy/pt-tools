@@ -208,7 +208,7 @@ func TestOurBitsDefinition(t *testing.T) {
 
 func TestAllDefinitionsRegistered(t *testing.T) {
 	registry := v2.GetDefinitionRegistry()
-	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby", "ourbits"}
+	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby", "ourbits", "ttg"}
 
 	for _, siteID := range expectedSites {
 		if _, ok := registry.Get(siteID); !ok {
@@ -228,6 +228,7 @@ func TestDefinitionUserInfoConfig(t *testing.T) {
 		{"mteam", 4, true},
 		{"hddolby", 3, true},
 		{"ourbits", 3, true},
+		{"ttg", 3, true},
 	}
 
 	registry := v2.GetDefinitionRegistry()
@@ -333,5 +334,73 @@ func TestOurBitsLevelProgressCalculation(t *testing.T) {
 	// Should have unmet requirements
 	if len(progress.UnmetRequirements) == 0 {
 		t.Error("Should have unmet requirements for Power User level")
+	}
+}
+
+func TestTTGDefinition(t *testing.T) {
+	def, ok := v2.GetDefinitionRegistry().Get("ttg")
+	if !ok {
+		t.Fatal("TTG definition not found in registry")
+	}
+
+	if def.Name != "TTG" {
+		t.Errorf("Name = %q, want %q", def.Name, "TTG")
+	}
+	if def.Schema != "NexusPHP" {
+		t.Errorf("Schema = %q, want %q", def.Schema, "NexusPHP")
+	}
+	if len(def.Aka) == 0 {
+		t.Error("Aka should not be empty")
+	}
+	// TTG has 13 levels: Peasant(0), User(1), Power User(2), Elite User(3),
+	// Crazy User(4), Insane User(5), Veteran User(6), Extreme User(7),
+	// Ultimate User(8), Nexus Master(9), NonaByte(10), DoggaByte(11), VIP(100)
+	if len(def.LevelRequirements) != 13 {
+		t.Errorf("LevelRequirements count = %d, want 13", len(def.LevelRequirements))
+	}
+
+	// Verify VIP level exists
+	hasVIPLevel := false
+	for _, req := range def.LevelRequirements {
+		if req.ID == 100 && req.Name == "VIP" {
+			hasVIPLevel = true
+			if req.GroupType != v2.LevelGroupVIP {
+				t.Errorf("VIP level should have GroupType=VIP, got %v", req.GroupType)
+			}
+			break
+		}
+	}
+	if !hasVIPLevel {
+		t.Error("TTG should have VIP level")
+	}
+
+	// Verify Peasant level exists (ID: 0)
+	hasPeasantLevel := false
+	for _, req := range def.LevelRequirements {
+		if req.ID == 0 && req.Name == "Peasant" {
+			hasPeasantLevel = true
+			break
+		}
+	}
+	if !hasPeasantLevel {
+		t.Error("TTG should have Peasant level")
+	}
+
+	// Verify NonaByte and DoggaByte levels exist
+	hasNonaByte := false
+	hasDoggaByte := false
+	for _, req := range def.LevelRequirements {
+		if req.Name == "NonaByte" {
+			hasNonaByte = true
+		}
+		if req.Name == "DoggaByte" {
+			hasDoggaByte = true
+		}
+	}
+	if !hasNonaByte {
+		t.Error("TTG should have NonaByte level")
+	}
+	if !hasDoggaByte {
+		t.Error("TTG should have DoggaByte level")
 	}
 }
