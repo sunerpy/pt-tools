@@ -23,7 +23,7 @@ var OurBitsDefinition = &v2.SiteDefinition{
 					URL:          "/index.php",
 					ResponseType: "document",
 				},
-				Fields: []string{"id", "name", "seeding", "leeching", "bonus", "uploaded", "downloaded", "ratio", "levelName", "messageCount"},
+				Fields: []string{"id", "name", "seeding", "leeching", "bonus", "uploaded", "downloaded", "ratio", "messageCount"},
 			},
 			{
 				RequestConfig: v2.RequestConfig{
@@ -33,6 +33,7 @@ var OurBitsDefinition = &v2.SiteDefinition{
 				Assertion: map[string]string{"id": "params.id"},
 				Fields: []string{
 					"joinTime",
+					"levelName",
 				},
 			},
 			{
