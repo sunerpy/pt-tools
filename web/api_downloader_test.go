@@ -29,7 +29,6 @@ func setupTestServer(t *testing.T) (*Server, *gorm.DB) {
 	// 迁移表
 	db.AutoMigrate(
 		&models.DownloaderSetting{},
-		&models.DynamicSiteSetting{},
 		&models.SiteTemplate{},
 		&models.AdminUser{},
 		&models.SettingsGlobal{},
@@ -138,7 +137,7 @@ func TestDownloaderCRUD(t *testing.T) {
 			Type:      "qbittorrent",
 			URL:       "http://localhost:9090",
 			IsDefault: true, // 保持默认状态，因为是唯一的下载器
-			Enabled:   false,
+			Enabled:   true, // 默认下载器不能禁用
 		}
 		body, _ := json.Marshal(reqBody)
 

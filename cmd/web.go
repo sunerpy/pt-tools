@@ -35,20 +35,24 @@ var webCmd = &cobra.Command{
 			return
 		}
 
+		global.GetSlogger().Infof("=== pt-tools 启动 === 版本: %s, 构建时间: %s", version.Version, version.BuildTime)
+
 		// 创建 SiteRegistry 并同步到数据库
 		siteRegistry := v2.NewSiteRegistry(global.GetLogger())
 		store := core.NewConfigStore(global.GlobalDB)
 
-		// 从 SiteRegistry 同步站点到数据库
 		registeredSites := getRegisteredSitesFromRegistry(siteRegistry)
+		global.GetSlogger().Infof("注册站点数量: %d", len(registeredSites))
 		if err := store.SyncSites(registeredSites); err != nil {
 			global.GetSlogger().Warnf("同步站点到数据库失败: %v", err)
 		}
 
-		// 从 DB 读取配置，若为空允许后续通过 Web 初始化
 		gl, _ := store.GetGlobalOnly()
 		if strings.TrimSpace(gl.DownloadDir) == "" {
 			color.Yellow("当前未检测到 DB 配置，可通过 Web 进行初始化")
+		} else {
+			global.GetSlogger().Infof("配置加载完成: 下载目录=%s, 自动启动=%v, 下载限速=%v",
+				gl.DownloadDir, gl.AutoStart, gl.DownloadLimitEnabled)
 		}
 		addr := fmt.Sprintf("%s:%d", host, port)
 		mgr := scheduler.NewManager()

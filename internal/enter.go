@@ -8,6 +8,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 const (
@@ -30,6 +31,9 @@ type TorrentScheduleFunc func(torrent models.TorrentInfo)
 var (
 	scheduleFuncMu   sync.RWMutex
 	scheduleTorrentF TorrentScheduleFunc
+
+	dlManagerMu         sync.RWMutex
+	globalDownloaderMgr *downloader.DownloaderManager
 )
 
 func RegisterTorrentScheduler(f TorrentScheduleFunc) {
@@ -45,4 +49,16 @@ func ScheduleTorrentForMonitoring(torrent models.TorrentInfo) {
 	if f != nil {
 		f(torrent)
 	}
+}
+
+func SetGlobalDownloaderManager(dm *downloader.DownloaderManager) {
+	dlManagerMu.Lock()
+	defer dlManagerMu.Unlock()
+	globalDownloaderMgr = dm
+}
+
+func GetGlobalDownloaderManager() *downloader.DownloaderManager {
+	dlManagerMu.RLock()
+	defer dlManagerMu.RUnlock()
+	return globalDownloaderMgr
 }

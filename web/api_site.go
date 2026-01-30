@@ -8,6 +8,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 // SiteValidationRequest 站点验证请求
@@ -42,14 +43,16 @@ type DynamicSiteRequest struct {
 
 // DynamicSiteResponse 动态站点响应
 type DynamicSiteResponse struct {
-	ID           uint   `json:"id"`
-	Name         string `json:"name"`
-	DisplayName  string `json:"display_name"`
-	BaseURL      string `json:"base_url"`
-	Enabled      bool   `json:"enabled"`
-	AuthMethod   string `json:"auth_method"`
-	DownloaderID *uint  `json:"downloader_id,omitempty"`
-	IsBuiltin    bool   `json:"is_builtin"`
+	ID                uint   `json:"id"`
+	Name              string `json:"name"`
+	DisplayName       string `json:"display_name"`
+	BaseURL           string `json:"base_url"`
+	Enabled           bool   `json:"enabled"`
+	AuthMethod        string `json:"auth_method"`
+	DownloaderID      *uint  `json:"downloader_id,omitempty"`
+	IsBuiltin         bool   `json:"is_builtin"`
+	Unavailable       bool   `json:"unavailable,omitempty"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
 // TemplateResponse 模板响应
@@ -140,17 +143,19 @@ func (s *Server) apiDynamicSites(w http.ResponseWriter, r *http.Request) {
 }
 
 // listDynamicSites 列出动态站点
-func (s *Server) listDynamicSites(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listDynamicSites(w http.ResponseWriter, _ *http.Request) {
 	db := global.GlobalDB.DB
-	var sites []models.DynamicSiteSetting
+	var sites []models.SiteSetting
 	if err := db.Find(&sites).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	defRegistry := v2.GetDefinitionRegistry()
 	responses := make([]DynamicSiteResponse, len(sites))
+	var sitesToDisable []models.SiteGroup
 	for i, site := range sites {
-		responses[i] = DynamicSiteResponse{
+		resp := DynamicSiteResponse{
 			ID:           site.ID,
 			Name:         site.Name,
 			DisplayName:  site.DisplayName,
@@ -160,12 +165,25 @@ func (s *Server) listDynamicSites(w http.ResponseWriter, r *http.Request) {
 			DownloaderID: site.DownloaderID,
 			IsBuiltin:    site.IsBuiltin,
 		}
+		if def, ok := defRegistry.Get(site.Name); ok {
+			resp.Unavailable = def.Unavailable
+			resp.UnavailableReason = def.UnavailableReason
+			if def.Unavailable {
+				resp.Enabled = false
+				if site.Enabled {
+					sitesToDisable = append(sitesToDisable, models.SiteGroup(site.Name))
+				}
+			}
+		}
+		responses[i] = resp
+	}
+	if len(sitesToDisable) > 0 {
+		go s.disableUnavailableSites(sitesToDisable)
 	}
 
 	writeJSON(w, responses)
 }
 
-// createDynamicSite 创建动态站点
 func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 	var req DynamicSiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -173,7 +191,6 @@ func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证必填字段
 	if req.Name == "" {
 		http.Error(w, "站点名称不能为空", http.StatusBadRequest)
 		return
@@ -183,17 +200,8 @@ func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db := global.GlobalDB.DB
-
-	// 检查名称是否已存在
-	var count int64
-	db.Model(&models.DynamicSiteSetting{}).Where("name = ?", req.Name).Count(&count)
-	if count > 0 {
-		http.Error(w, "站点名称已存在", http.StatusBadRequest)
-		return
-	}
-
-	site := models.DynamicSiteSetting{
+	repo := models.NewSiteRepository(global.GlobalDB.DB)
+	siteID, err := repo.CreateSite(models.SiteData{
 		Name:         req.Name,
 		DisplayName:  req.DisplayName,
 		BaseURL:      req.BaseURL,
@@ -205,13 +213,13 @@ func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 		DownloaderID: req.DownloaderID,
 		ParserConfig: req.ParserConfig,
 		IsBuiltin:    false,
-	}
-
-	if err := db.Create(&site).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	site, _ := repo.GetSiteByID(siteID)
 	global.GetSlogger().Infof("[Site] 创建动态站点: name=%s, auth_method=%s", req.Name, req.AuthMethod)
 
 	writeJSON(w, DynamicSiteResponse{
@@ -305,11 +313,9 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 
 	db := global.GlobalDB.DB
 
-	// 保存模板
 	template := models.SiteTemplate{}
 	_ = template.FromExport(&templateExport)
 	if err := db.Create(&template).Error; err != nil {
-		// 如果模板已存在，更新它
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			db.Where("name = ?", template.Name).Updates(&template)
 		} else {
@@ -318,8 +324,8 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 创建动态站点
-	site := models.DynamicSiteSetting{
+	repo := models.NewSiteRepository(db)
+	siteID, err := repo.CreateSite(models.SiteData{
 		Name:         templateExport.Name,
 		DisplayName:  templateExport.DisplayName,
 		BaseURL:      templateExport.BaseURL,
@@ -330,13 +336,13 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 		ParserConfig: string(templateExport.ParserConfig),
 		IsBuiltin:    false,
 		TemplateID:   &template.ID,
-	}
-
-	if err := db.Create(&site).Error; err != nil {
+	})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	site, _ := repo.GetSiteByID(siteID)
 	global.GetSlogger().Infof("[Site] 导入模板: name=%s", templateExport.Name)
 
 	writeJSON(w, DynamicSiteResponse{

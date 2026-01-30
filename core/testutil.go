@@ -25,7 +25,6 @@ func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 		&models.TorrentInfoArchive{},
 		&models.AdminUser{},
 		&models.DownloaderSetting{},
-		&models.DynamicSiteSetting{},
 		&models.SiteTemplate{},
 		&models.FilterRule{},
 		&models.RSSFilterAssociation{},

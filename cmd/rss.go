@@ -125,7 +125,7 @@ func processRSSUnified(ctx context.Context, cfg models.RSSConfig, ptSite interna
 	if err := internal.FetchAndDownloadFreeRSSUnified(ctx, ptSite, cfg); err != nil {
 		return err
 	}
-	if err := ptSite.SendTorrentToQbit(ctx, cfg); err != nil {
+	if err := ptSite.SendTorrentToDownloader(ctx, cfg); err != nil {
 		return err
 	}
 	return nil
@@ -185,7 +185,7 @@ func processRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup
 	if err := internal.FetchAndDownloadFreeRSS(ctx, siteName, ptSite, cfg); err != nil {
 		return err
 	}
-	if err := ptSite.SendTorrentToQbit(ctx, cfg); err != nil {
+	if err := ptSite.SendTorrentToDownloader(ctx, cfg); err != nil {
 		return err
 	}
 	return nil

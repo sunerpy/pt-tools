@@ -92,10 +92,12 @@ func (s *siteFail) IsEnabled() bool { return true }
 func (s *siteFail) DownloadTorrent(url, title, dir string) (string, error) {
 	return "", context.DeadlineExceeded
 }
-func (s *siteFail) MaxRetries() int                                                      { return 1 }
-func (s *siteFail) RetryDelay() time.Duration                                            { return 0 }
-func (s *siteFail) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error { return nil }
-func (s *siteFail) Context() context.Context                                             { return context.Background() }
+func (s *siteFail) MaxRetries() int           { return 1 }
+func (s *siteFail) RetryDelay() time.Duration { return 0 }
+func (s *siteFail) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
+	return nil
+}
+func (s *siteFail) Context() context.Context { return context.Background() }
 func TestFetchRSS_NoEnclosuresAndDetailFail(t *testing.T) {
 	dir := t.TempDir()
 	db, err := core.NewTempDBDir(dir)
@@ -123,7 +125,7 @@ func (s *rssSiteStub) DownloadTorrent(url, title, dir string) (string, error) {
 }
 func (s *rssSiteStub) MaxRetries() int           { return 1 }
 func (s *rssSiteStub) RetryDelay() time.Duration { return 0 }
-func (s *rssSiteStub) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+func (s *rssSiteStub) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
 	return nil
 }
 func (s *rssSiteStub) Context() context.Context { return context.Background() }
@@ -460,12 +462,14 @@ func (s *siteDummy) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[mo
 	d := models.PHPTorrentInfo{Title: "x", TorrentID: "id", Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(1 * time.Hour), SizeMB: 1}
 	return &models.APIResponse[models.PHPTorrentInfo]{Code: "success", Data: d}, nil
 }
-func (s *siteDummy) IsEnabled() bool                                                      { return true }
-func (s *siteDummy) DownloadTorrent(url, title, dir string) (string, error)               { return "h", nil }
-func (s *siteDummy) MaxRetries() int                                                      { return 1 }
-func (s *siteDummy) RetryDelay() time.Duration                                            { return 0 }
-func (s *siteDummy) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error { return nil }
-func (s *siteDummy) Context() context.Context                                             { return context.Background() }
+func (s *siteDummy) IsEnabled() bool                                        { return true }
+func (s *siteDummy) DownloadTorrent(url, title, dir string) (string, error) { return "h", nil }
+func (s *siteDummy) MaxRetries() int                                        { return 1 }
+func (s *siteDummy) RetryDelay() time.Duration                              { return 0 }
+func (s *siteDummy) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
+	return nil
+}
+func (s *siteDummy) Context() context.Context { return context.Background() }
 func TestFetchRSS_InvalidURL(t *testing.T) {
 	err := FetchAndDownloadFreeRSS(context.Background(), models.SpringSunday, &siteDummy{}, models.RSSConfig{URL: "://bad"})
 	if err == nil {
@@ -483,7 +487,7 @@ func (s *disabledSite) IsEnabled() bool                                        {
 func (s *disabledSite) DownloadTorrent(url, title, dir string) (string, error) { return "h", nil }
 func (s *disabledSite) MaxRetries() int                                        { return 1 }
 func (s *disabledSite) RetryDelay() time.Duration                              { return 0 }
-func (s *disabledSite) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+func (s *disabledSite) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
 	return nil
 }
 func (s *disabledSite) Context() context.Context { return context.Background() }
@@ -660,6 +664,14 @@ func TestGetDownloaderForRSS_TransmissionType(t *testing.T) {
 // TestGetDownloaderForRSS_UnknownType 测试未知下载器类型
 func TestGetDownloaderForRSS_UnknownType(t *testing.T) {
 	db := setupDB(t)
+
+	dlMgr := downloader.NewDownloaderManager()
+	dlMgr.RegisterFactory(downloader.DownloaderQBittorrent, func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		qbitConfig := qbit.NewQBitConfigWithAutoStart(config.GetURL(), config.GetUsername(), config.GetPassword(), config.GetAutoStart())
+		return qbit.NewQbitClient(qbitConfig, name)
+	})
+	SetGlobalDownloaderManager(dlMgr)
+	defer SetGlobalDownloaderManager(nil)
 
 	ds := models.DownloaderSetting{
 		Name:      "unknown-type",

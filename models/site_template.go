@@ -70,31 +70,6 @@ func (t *SiteTemplate) FromExport(export *SiteTemplateExport) error {
 	return nil
 }
 
-// DynamicSiteSetting 动态站点设置
-// 扩展SiteSetting以支持动态站点
-type DynamicSiteSetting struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Name         string    `gorm:"uniqueIndex;size:64;not null" json:"name"`
-	DisplayName  string    `gorm:"size:128" json:"display_name"`
-	BaseURL      string    `gorm:"size:512" json:"base_url"`
-	Enabled      bool      `json:"enabled"`
-	AuthMethod   string    `gorm:"size:16;not null" json:"auth_method"` // cookie, api_key
-	Cookie       string    `gorm:"size:2048" json:"cookie,omitempty"`
-	APIKey       string    `gorm:"size:512" json:"api_key,omitempty"`
-	APIURL       string    `gorm:"size:512" json:"api_url,omitempty"`
-	DownloaderID *uint     `gorm:"index" json:"downloader_id,omitempty"` // 关联的下载器ID
-	ParserConfig string    `gorm:"type:text" json:"parser_config"`       // JSON格式的解析器配置
-	IsBuiltin    bool      `json:"is_builtin"`                           // 是否为内置站点
-	TemplateID   *uint     `gorm:"index" json:"template_id,omitempty"`   // 关联的模板ID
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-// TableName 指定表名
-func (DynamicSiteSetting) TableName() string {
-	return "dynamic_site_settings"
-}
-
 // DownloaderSetting 下载器设置
 type DownloaderSetting struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

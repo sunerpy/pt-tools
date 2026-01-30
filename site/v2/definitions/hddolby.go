@@ -5,18 +5,18 @@ import (
 )
 
 // HDDolbyDefinition is the site definition for HD Dolby
-// Note: HDDolby may require 2FA verification, which can limit access to userdetails.php
-// Most data is fetched from index.php info_block instead
 var HDDolbyDefinition = &v2.SiteDefinition{
-	ID:             "hddolby",
-	Name:           "HD Dolby",
-	Aka:            []string{"高清杜比"},
-	Description:    "高清杜比",
-	Schema:         "NexusPHP",
-	URLs:           []string{"https://www.hddolby.com/"},
-	LegacyURLs:     []string{"https://hddolby.com/"},
-	FaviconURL:     "https://www.hddolby.com/favicon.ico",
-	TimezoneOffset: "+0800",
+	ID:                "hddolby",
+	Name:              "HD Dolby",
+	Aka:               []string{"高清杜比"},
+	Description:       "高清杜比",
+	Schema:            "NexusPHP",
+	URLs:              []string{"https://www.hddolby.com/"},
+	LegacyURLs:        []string{"https://hddolby.com/"},
+	FaviconURL:        "https://www.hddolby.com/favicon.ico",
+	Unavailable:       true, // 暂时禁用，由于两步验证无法获取种子和用户信息
+	UnavailableReason: "由于站点启用了两步验证(2FA)，暂时无法使用自动化功能",
+	TimezoneOffset:    "+0800",
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,

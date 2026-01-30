@@ -22,12 +22,14 @@ func (s *ptStub) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[model
 	d := models.PHPTorrentInfo{Title: item.Title, TorrentID: item.GUID, Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(1 * time.Hour), SizeMB: 64}
 	return &models.APIResponse[models.PHPTorrentInfo]{Code: "success", Data: d}, nil
 }
-func (s *ptStub) IsEnabled() bool                                                      { return true }
-func (s *ptStub) DownloadTorrent(url, title, dir string) (string, error)               { return "hash", nil }
-func (s *ptStub) MaxRetries() int                                                      { return 1 }
-func (s *ptStub) RetryDelay() time.Duration                                            { return 0 }
-func (s *ptStub) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error { return nil }
-func (s *ptStub) Context() context.Context                                             { return context.Background() }
+func (s *ptStub) IsEnabled() bool                                        { return true }
+func (s *ptStub) DownloadTorrent(url, title, dir string) (string, error) { return "hash", nil }
+func (s *ptStub) MaxRetries() int                                        { return 1 }
+func (s *ptStub) RetryDelay() time.Duration                              { return 0 }
+func (s *ptStub) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
+	return nil
+}
+func (s *ptStub) Context() context.Context { return context.Background() }
 func TestGetInterval_DefaultAndConfigured(t *testing.T) {
 	dir := t.TempDir()
 	db, err := core.NewTempDBDir(dir)
@@ -114,10 +116,10 @@ func (s *errSite) IsEnabled() bool { return true }
 func (s *errSite) DownloadTorrent(url, title, dir string) (string, error) {
 	return "", context.DeadlineExceeded
 }
-func (s *errSite) MaxRetries() int                                               { return 1 }
-func (s *errSite) RetryDelay() time.Duration                                     { return 0 }
-func (s *errSite) SendTorrentToQbit(c context.Context, r models.RSSConfig) error { return nil }
-func (s *errSite) Context() context.Context                                      { return context.Background() }
+func (s *errSite) MaxRetries() int                                                     { return 1 }
+func (s *errSite) RetryDelay() time.Duration                                           { return 0 }
+func (s *errSite) SendTorrentToDownloader(c context.Context, r models.RSSConfig) error { return nil }
+func (s *errSite) Context() context.Context                                            { return context.Background() }
 func TestExecuteTask_ErrorPath_NoPanic(t *testing.T) {
 	dir := t.TempDir()
 	db, err := core.NewTempDBDir(dir)
@@ -136,12 +138,12 @@ func (s *siteStub) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[mod
 	d := models.PHPTorrentInfo{Title: "x", TorrentID: "id", Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(1 * time.Hour), SizeMB: 1}
 	return &models.APIResponse[models.PHPTorrentInfo]{Code: "success", Data: d}, nil
 }
-func (s *siteStub) IsEnabled() bool                                               { return true }
-func (s *siteStub) DownloadTorrent(url, title, dir string) (string, error)        { return "h", nil }
-func (s *siteStub) MaxRetries() int                                               { return 1 }
-func (s *siteStub) RetryDelay() time.Duration                                     { return 0 }
-func (s *siteStub) SendTorrentToQbit(c context.Context, r models.RSSConfig) error { return nil }
-func (s *siteStub) Context() context.Context                                      { return context.Background() }
+func (s *siteStub) IsEnabled() bool                                                     { return true }
+func (s *siteStub) DownloadTorrent(url, title, dir string) (string, error)              { return "h", nil }
+func (s *siteStub) MaxRetries() int                                                     { return 1 }
+func (s *siteStub) RetryDelay() time.Duration                                           { return 0 }
+func (s *siteStub) SendTorrentToDownloader(c context.Context, r models.RSSConfig) error { return nil }
+func (s *siteStub) Context() context.Context                                            { return context.Background() }
 func TestRunSiteJobs_WithSingleMode(t *testing.T) {
 	baseCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()

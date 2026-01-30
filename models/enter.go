@@ -16,7 +16,7 @@ const (
 	DefaultAPIUrlMTeam = "https://api.m-team.cc"
 )
 
-var allowedGroups = map[SiteGroup]struct{}{
+var AllowedSiteGroups = map[SiteGroup]struct{}{
 	SpringSunday: {},
 	HDSKY:        {},
 	MTEAM:        {},
@@ -25,7 +25,7 @@ var allowedGroups = map[SiteGroup]struct{}{
 
 func ValidateSiteName(value string) (SiteGroup, error) {
 	group := SiteGroup(value)
-	if _, ok := allowedGroups[group]; ok {
+	if _, ok := AllowedSiteGroups[group]; ok {
 		return group, nil
 	}
 	return "", errors.New("invalid group value")

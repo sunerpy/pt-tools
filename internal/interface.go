@@ -18,7 +18,7 @@ type PTSiteInter[T models.ResType] interface {
 	DownloadTorrent(url, title, downloadDir string) (string, error)
 	MaxRetries() int
 	RetryDelay() time.Duration
-	SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error
+	SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error
 	Context() context.Context
 }
 
@@ -35,8 +35,8 @@ type UnifiedPTSite interface {
 	MaxRetries() int
 	// RetryDelay 返回重试间隔
 	RetryDelay() time.Duration
-	// SendTorrentToQbit 发送种子到下载器
-	SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error
+	// SendTorrentToDownloader 发送种子到下载器
+	SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error
 	// Context 返回上下文
 	Context() context.Context
 	// SiteGroup 返回站点分组标识

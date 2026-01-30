@@ -153,7 +153,7 @@ func TestDynamicSiteCRUD(t *testing.T) {
 	})
 
 	// 清理
-	db.Where("1 = 1").Delete(&models.DynamicSiteSetting{})
+	db.Where("1 = 1").Delete(&models.SiteSetting{})
 }
 
 // TestSiteTemplates 测试站点模板
@@ -238,7 +238,7 @@ func TestSiteTemplates(t *testing.T) {
 		}
 
 		// 验证站点已创建
-		var site models.DynamicSiteSetting
+		var site models.SiteSetting
 		if err := db.Where("name = ?", "imported-template").First(&site).Error; err != nil {
 			t.Errorf("site not created: %v", err)
 		}

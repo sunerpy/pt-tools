@@ -5,6 +5,8 @@ import {
   type DownloaderHealthResponse,
   downloadersApi,
   type DownloaderSetting,
+  dynamicSitesApi,
+  type SiteDownloaderSummaryItem,
 } from "@/api";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
@@ -31,6 +33,13 @@ const dirForm = ref<DownloaderDirectory>({
   alias: "",
   is_default: false,
 });
+
+const showSyncDialog = ref(false);
+const syncSites = ref<SiteDownloaderSummaryItem[]>([]);
+const selectedSiteIds = ref<number[]>([]);
+const loadingSyncSites = ref(false);
+const applyingSites = ref(false);
+const newDefaultDownloader = ref<DownloaderSetting | null>(null);
 
 const form = ref<DownloaderSetting>({
   name: "",
@@ -190,6 +199,7 @@ async function setDefault(dl: DownloaderSetting) {
     await downloadersApi.setDefault(dl.id);
     ElMessage.success("已设为默认");
     await loadDownloaders();
+    openSyncDialog(dl);
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "设置失败");
   }
@@ -321,6 +331,53 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
     await loadDirectories(currentDownloader.value.id);
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "设置失败");
+  }
+}
+
+async function openSyncDialog(dl: DownloaderSetting) {
+  newDefaultDownloader.value = dl;
+  loadingSyncSites.value = true;
+  showSyncDialog.value = true;
+
+  try {
+    const resp = await dynamicSitesApi.getDownloaderSummary();
+    syncSites.value = resp.sites;
+    selectedSiteIds.value = resp.sites.filter((s) => s.downloader_id == null).map((s) => s.site_id);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "加载站点失败");
+    showSyncDialog.value = false;
+  } finally {
+    loadingSyncSites.value = false;
+  }
+}
+
+async function applySitesDownloader() {
+  if (selectedSiteIds.value.length === 0) {
+    showSyncDialog.value = false;
+    return;
+  }
+  if (!newDefaultDownloader.value?.id) return;
+
+  applyingSites.value = true;
+  try {
+    const resp = await downloadersApi.applyToSites(
+      newDefaultDownloader.value.id,
+      selectedSiteIds.value,
+    );
+    ElMessage.success(`已更新 ${resp.updated_count} 个站点`);
+    showSyncDialog.value = false;
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "应用失败");
+  } finally {
+    applyingSites.value = false;
+  }
+}
+
+function toggleAllSites() {
+  if (selectedSiteIds.value.length === syncSites.value.length) {
+    selectedSiteIds.value = [];
+  } else {
+    selectedSiteIds.value = syncSites.value.map((s) => s.site_id);
   }
 }
 </script>
@@ -559,6 +616,61 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 站点下载器同步对话框 -->
+    <el-dialog v-model="showSyncDialog" title="同步站点下载器" width="600px">
+      <div v-if="newDefaultDownloader" class="sync-info">
+        是否将以下站点的下载器设置为「{{ newDefaultDownloader.name }}」？
+      </div>
+
+      <div class="sync-header">
+        <el-button size="small" @click="toggleAllSites">
+          {{ selectedSiteIds.length === syncSites.length ? "取消全选" : "全选" }}
+        </el-button>
+        <span class="sync-count">已选择 {{ selectedSiteIds.length }} / {{ syncSites.length }}</span>
+      </div>
+
+      <el-table
+        v-loading="loadingSyncSites"
+        :data="syncSites"
+        style="width: 100%"
+        border
+        max-height="400">
+        <el-table-column width="50" align="center">
+          <template #default="{ row }">
+            <el-checkbox
+              :model-value="selectedSiteIds.includes(row.site_id)"
+              @change="
+                (val: boolean) => {
+                  if (val) {
+                    selectedSiteIds.push(row.site_id);
+                  } else {
+                    selectedSiteIds = selectedSiteIds.filter((id) => id !== row.site_id);
+                  }
+                }
+              " />
+          </template>
+        </el-table-column>
+        <el-table-column label="站点" min-width="120">
+          <template #default="{ row }">
+            <span>{{ row.display_name || row.site_name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="当前下载器" min-width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.downloader_name" size="small">{{ row.downloader_name }}</el-tag>
+            <el-tag v-else type="info" size="small">默认</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <template #footer>
+        <el-button @click="showSyncDialog = false">跳过</el-button>
+        <el-button type="primary" :loading="applyingSites" @click="applySitesDownloader">
+          应用 ({{ selectedSiteIds.length }})
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -616,5 +728,25 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
   align-items: center;
   gap: 8px;
   font-weight: 500;
+}
+
+.sync-info {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: var(--el-color-primary-light-9);
+  border-radius: 4px;
+  color: var(--el-color-primary);
+}
+
+.sync-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.sync-count {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>

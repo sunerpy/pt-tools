@@ -9,7 +9,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/utils"
@@ -43,7 +42,6 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 			out.Global.DownloadSpeedLimit = gs.DownloadSpeedLimit
 			out.Global.TorrentSizeGB = gs.TorrentSizeGB
 			out.Global.AutoStart = gs.AutoStart
-			// default auto start to false if column missing; migrate via SaveGlobal when user sets
 		} else {
 			out.Global.DefaultIntervalMinutes = durationToMinutes(20 * time.Minute)
 			out.Global.DefaultEnabled = true
@@ -71,7 +69,6 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 		}
 		for _, sitem := range sites {
 			sg := models.SiteGroup(strings.ToLower(sitem.Name))
-			// 初始化 RSS 为空数组，确保 JSON 序列化时返回 [] 而不是 null
 			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
@@ -80,18 +77,17 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 			for _, r := range rss {
 				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd})
 			}
-			// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 			out.Sites[sg] = sc
 		}
 		return nil
 	}); err != nil {
+		sLogger().Errorf("[配置加载失败] 错误=%v", err)
 		return nil, err
 	}
-	// optional: validate here if needed
+	sLogger().Debugf("[配置加载完成] 站点数=%d", len(out.Sites))
 	return &out, nil
 }
 
-// Save* 方法：供 Web 写入配置
 func (s *ConfigStore) SaveGlobal(gl models.SettingsGlobal) error {
 	db := s.db.DB
 	var gs models.SettingsGlobal
@@ -119,6 +115,7 @@ func (s *ConfigStore) SaveGlobal(gl models.SettingsGlobal) error {
 	if err := db.Save(&gs).Error; err != nil {
 		return err
 	}
+	sLogger().Infof("[全局配置已更新] 下载目录=%s, 自动启动=%v", gs.DownloadDir, gs.AutoStart)
 	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "global", At: time.Now()})
 	return nil
 }
@@ -334,7 +331,7 @@ func (s *ConfigStore) AdminCount() (int64, error) {
 	for _, u := range users {
 		names = append(names, u.Username)
 	}
-	global.GetSlogger().Infof("admin_users users=%v count=%d", names, len(users))
+	sLogger().Infof("admin_users users=%v count=%d", names, len(users))
 	var cnt int64
 	err := s.db.DB.Model(&models.AdminUser{}).Count(&cnt).Error
 	return cnt, err
@@ -404,7 +401,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	return s.db.DB.Transaction(func(tx *gorm.DB) error {
 		var row models.SiteSetting
 		if err := tx.Where("name = ?", string(site)).First(&row).Error; err != nil {
-			row = models.SiteSetting{Name: string(site)}
+			row = models.SiteSetting{Name: string(site), DisplayName: string(site), IsBuiltin: true}
 		}
 		if sc.Enabled != nil {
 			row.Enabled = *sc.Enabled
@@ -416,6 +413,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
+
 		// 替换 RSS
 		if err := tx.Where("site_id = ?", row.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
 			return err
@@ -450,6 +448,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			}
 		}
 		events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+		sLogger().Infof("[站点配置已更新] 站点=%s, 启用=%v, RSS数量=%d", site, row.Enabled, len(sc.RSS))
 		return nil
 	})
 }

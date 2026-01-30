@@ -25,7 +25,7 @@ func (m *PTSiteMock[T]) DownloadTorrent(url, title, dir string) (string, error) 
 }
 func (m *PTSiteMock[T]) MaxRetries() int           { return 1 }
 func (m *PTSiteMock[T]) RetryDelay() time.Duration { return 0 }
-func (m *PTSiteMock[T]) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+func (m *PTSiteMock[T]) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
 	return nil
 }
 func (m *PTSiteMock[T]) Context() context.Context { return context.Background() }

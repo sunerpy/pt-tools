@@ -377,3 +377,123 @@ func (dm *DownloaderManager) RemoveDownloader(name string) error {
 	sLogger().Infof("Removed downloader: %s", name)
 	return nil
 }
+
+// CreateFromConfig 从配置创建临时下载器实例（不注册到管理器）
+// 调用方需要负责调用 Close() 释放资源
+func (dm *DownloaderManager) CreateFromConfig(config DownloaderConfig, name string) (Downloader, error) {
+	dm.mu.RLock()
+	factory, exists := dm.factories[config.GetType()]
+	dm.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("no factory registered for type: %s", config.GetType())
+	}
+
+	return factory(config, name)
+}
+
+// HasFactory 检查是否已注册指定类型的工厂
+func (dm *DownloaderManager) HasFactory(dlType DownloaderType) bool {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	_, exists := dm.factories[dlType]
+	return exists
+}
+
+// DownloaderDBRecord 表示数据库中的下载器配置记录
+type DownloaderDBRecord struct {
+	Name      string
+	Type      DownloaderType
+	URL       string
+	Username  string
+	Password  string
+	IsDefault bool
+	Enabled   bool
+	AutoStart bool
+}
+
+// SyncFromDB 从数据库记录同步下载器配置
+// 处理新增、删除、更新三种情况，确保内存状态与数据库一致
+func (dm *DownloaderManager) SyncFromDB(records []DownloaderDBRecord) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	dbConfigs := make(map[string]DownloaderDBRecord)
+	var newDefaultName string
+
+	for _, r := range records {
+		if !r.Enabled {
+			continue
+		}
+		dbConfigs[r.Name] = r
+		if r.IsDefault {
+			newDefaultName = r.Name
+		}
+	}
+
+	for name, dl := range dm.downloaders {
+		dbRecord, existsInDB := dbConfigs[name]
+		if !existsInDB {
+			sLogger().Infof("[SyncFromDB] 删除下载器: %s (已从数据库移除或禁用)", name)
+			dl.Close()
+			delete(dm.downloaders, name)
+			delete(dm.configs, name)
+			delete(dm.errorCounts, name)
+			delete(dm.lastHealthCheck, name)
+			continue
+		}
+
+		oldConfig, hasOldConfig := dm.configs[name]
+		if hasOldConfig && dm.configChanged(oldConfig, dbRecord) {
+			sLogger().Infof("[SyncFromDB] 更新下载器: %s (配置已变更)", name)
+			dl.Close()
+			delete(dm.downloaders, name)
+		}
+	}
+
+	for name := range dm.configs {
+		if _, existsInDB := dbConfigs[name]; !existsInDB {
+			delete(dm.configs, name)
+			delete(dm.errorCounts, name)
+			delete(dm.lastHealthCheck, name)
+		}
+	}
+
+	for name, r := range dbConfigs {
+		if _, exists := dm.factories[r.Type]; !exists {
+			sLogger().Warnf("[SyncFromDB] 跳过下载器 %s: 未知类型 %s", name, r.Type)
+			continue
+		}
+		config := NewGenericConfig(r.Type, r.URL, r.Username, r.Password, r.AutoStart)
+		dm.configs[name] = config
+	}
+
+	dm.defaultName = newDefaultName
+
+	for site, dlName := range dm.siteDownloaders {
+		if _, exists := dbConfigs[dlName]; !exists {
+			delete(dm.siteDownloaders, site)
+		}
+	}
+
+	sLogger().Infof("[SyncFromDB] 同步完成: 配置数=%d, 默认=%s", len(dm.configs), dm.defaultName)
+}
+
+func (dm *DownloaderManager) configChanged(oldConfig DownloaderConfig, newRecord DownloaderDBRecord) bool {
+	if oldConfig.GetType() != newRecord.Type {
+		return true
+	}
+	if oldConfig.GetURL() != newRecord.URL {
+		return true
+	}
+	if oldConfig.GetUsername() != newRecord.Username {
+		return true
+	}
+	if oldConfig.GetPassword() != newRecord.Password {
+		return true
+	}
+	if oldConfig.GetAutoStart() != newRecord.AutoStart {
+		return true
+	}
+	return false
+}

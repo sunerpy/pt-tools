@@ -10,9 +10,36 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
-	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
-	"github.com/sunerpy/pt-tools/thirdpart/downloader/transmission"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
+
+func (s *Server) syncDownloaderManager() {
+	if s.mgr == nil || global.GlobalDB == nil {
+		return
+	}
+
+	var settings []models.DownloaderSetting
+	if err := global.GlobalDB.DB.Find(&settings).Error; err != nil {
+		global.GetSlogger().Errorf("[Downloader] 同步失败，无法加载配置: %v", err)
+		return
+	}
+
+	records := make([]downloader.DownloaderDBRecord, 0, len(settings))
+	for _, ds := range settings {
+		records = append(records, downloader.DownloaderDBRecord{
+			Name:      ds.Name,
+			Type:      downloader.DownloaderType(ds.Type),
+			URL:       ds.URL,
+			Username:  ds.Username,
+			Password:  ds.Password,
+			IsDefault: ds.IsDefault,
+			Enabled:   ds.Enabled,
+			AutoStart: ds.AutoStart,
+		})
+	}
+
+	s.mgr.GetDownloaderManager().SyncFromDB(records)
+}
 
 // DownloaderRequest 下载器请求结构
 type DownloaderRequest struct {
@@ -196,6 +223,8 @@ func (s *Server) createDownloader(w http.ResponseWriter, r *http.Request) {
 
 	global.GetSlogger().Infof("[Downloader] 创建下载器: name=%s, type=%s, is_default=%v", req.Name, req.Type, req.IsDefault)
 
+	go s.syncDownloaderManager()
+
 	writeJSON(w, DownloaderResponse{
 		ID:          downloader.ID,
 		Name:        downloader.Name,
@@ -256,6 +285,11 @@ func (s *Server) updateDownloader(w http.ResponseWriter, r *http.Request, id uin
 		}
 	}
 
+	if downloader.IsDefault && downloader.Enabled && !req.Enabled {
+		http.Error(w, "不能禁用默认下载器，请先将其他下载器设为默认", http.StatusBadRequest)
+		return
+	}
+
 	// 如果设置为默认，先清除其他默认
 	if req.IsDefault && !downloader.IsDefault {
 		db.Model(&models.DownloaderSetting{}).Where("is_default = ? AND id != ?", true, id).Update("is_default", false)
@@ -286,6 +320,8 @@ func (s *Server) updateDownloader(w http.ResponseWriter, r *http.Request, id uin
 	}
 
 	global.GetSlogger().Infof("[Downloader] 更新下载器: id=%d, name=%s", id, downloader.Name)
+
+	go s.syncDownloaderManager()
 
 	writeJSON(w, DownloaderResponse{
 		ID:          downloader.ID,
@@ -327,6 +363,8 @@ func (s *Server) deleteDownloader(w http.ResponseWriter, r *http.Request, id uin
 
 	global.GetSlogger().Infof("[Downloader] 删除下载器: id=%d, name=%s", id, downloader.Name)
 
+	go s.syncDownloaderManager()
+
 	writeJSON(w, map[string]string{"status": "deleted"})
 }
 
@@ -345,7 +383,7 @@ func (s *Server) downloaderHealthCheck(w http.ResponseWriter, r *http.Request, i
 
 	db := global.GlobalDB.DB
 	var dlSetting models.DownloaderSetting
-	if err := db.First(&dlSetting, uint(id)).Error; err != nil {
+	if findErr := db.First(&dlSetting, uint(id)).Error; findErr != nil {
 		http.Error(w, "下载器不存在", http.StatusNotFound)
 		return
 	}
@@ -361,39 +399,29 @@ func (s *Server) downloaderHealthCheck(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	switch dlSetting.Type {
-	case "qbittorrent":
-		config := qbit.NewQBitConfig(dlSetting.URL, dlSetting.Username, dlSetting.Password)
-		dl, err := qbit.NewQbitClient(config, dlSetting.Name)
-		if err != nil {
-			global.GetSlogger().Warnf("[Downloader] 健康检查失败: name=%s, type=%s, url=%s, error=%v", dlSetting.Name, dlSetting.Type, dlSetting.URL, err)
-			response.Message = err.Error()
-			writeJSON(w, response)
-			return
-		}
-		defer dl.Close()
-		global.GetSlogger().Infof("[Downloader] 健康检查成功: name=%s, type=%s", dlSetting.Name, dlSetting.Type)
-		response.IsHealthy = true
-		response.Message = "连接正常"
+	dlMgr := s.mgr.GetDownloaderManager()
+	dlType := downloader.DownloaderType(dlSetting.Type)
 
-	case "transmission":
-		config := transmission.NewTransmissionConfigWithAutoStart(dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
-		dl, err := transmission.NewTransmissionClient(config, dlSetting.Name)
-		if err != nil {
-			global.GetSlogger().Warnf("[Downloader] 健康检查失败: name=%s, type=%s, url=%s, error=%v", dlSetting.Name, dlSetting.Type, dlSetting.URL, err)
-			response.Message = err.Error()
-			writeJSON(w, response)
-			return
-		}
-		defer dl.Close()
-		global.GetSlogger().Infof("[Downloader] 健康检查成功: name=%s, type=%s", dlSetting.Name, dlSetting.Type)
-		response.IsHealthy = true
-		response.Message = "连接正常"
-
-	default:
+	if !dlMgr.HasFactory(dlType) {
 		global.GetSlogger().Warnf("[Downloader] 健康检查失败: name=%s, 不支持的下载器类型=%s", dlSetting.Name, dlSetting.Type)
 		response.Message = "不支持的下载器类型: " + dlSetting.Type
+		writeJSON(w, response)
+		return
 	}
+
+	config := downloader.NewGenericConfig(dlType, dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
+	dl, err := dlMgr.CreateFromConfig(config, dlSetting.Name)
+	if err != nil {
+		global.GetSlogger().Errorf("[Downloader] 健康检查失败: name=%s, type=%s, url=%s, error=%v", dlSetting.Name, dlSetting.Type, dlSetting.URL, err)
+		response.Message = err.Error()
+		writeJSON(w, response)
+		return
+	}
+	defer dl.Close()
+
+	global.GetSlogger().Infof("[Downloader] 健康检查成功: name=%s, type=%s", dlSetting.Name, dlSetting.Type)
+	response.IsHealthy = true
+	response.Message = "连接正常"
 
 	writeJSON(w, response)
 }
@@ -451,4 +479,109 @@ func (s *Server) setDefaultDownloader(w http.ResponseWriter, r *http.Request, id
 		AutoStart:   downloader.AutoStart,
 		ExtraConfig: downloader.ExtraConfig,
 	})
+}
+
+type SiteDownloaderSummaryItem struct {
+	SiteID         uint    `json:"site_id"`
+	SiteName       string  `json:"site_name"`
+	DisplayName    string  `json:"display_name"`
+	DownloaderID   *uint   `json:"downloader_id"`
+	DownloaderName *string `json:"downloader_name"`
+}
+
+type SiteDownloaderSummaryResponse struct {
+	Sites []SiteDownloaderSummaryItem `json:"sites"`
+}
+
+func (s *Server) apiSiteDownloaderSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	db := global.GlobalDB.DB
+	repo := models.NewSiteRepository(db)
+	sites, err := repo.ListEnabledSites()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var downloaders []models.DownloaderSetting
+	if err := db.Find(&downloaders).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dlMap := make(map[uint]string)
+	for _, dl := range downloaders {
+		dlMap[dl.ID] = dl.Name
+	}
+
+	items := make([]SiteDownloaderSummaryItem, 0, len(sites))
+	for _, site := range sites {
+		item := SiteDownloaderSummaryItem{
+			SiteID:      site.ID,
+			SiteName:    site.Name,
+			DisplayName: site.DisplayName,
+		}
+		if site.DownloaderID != nil {
+			item.DownloaderID = site.DownloaderID
+			if name, ok := dlMap[*site.DownloaderID]; ok {
+				item.DownloaderName = &name
+			}
+		}
+		items = append(items, item)
+	}
+
+	writeJSON(w, SiteDownloaderSummaryResponse{Sites: items})
+}
+
+type ApplyDownloaderToSitesRequest struct {
+	SiteIDs []uint `json:"site_ids"`
+}
+
+type ApplyDownloaderToSitesResponse struct {
+	UpdatedCount int `json:"updated_count"`
+}
+
+func (s *Server) applyDownloaderToSites(w http.ResponseWriter, r *http.Request, idStr string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "无效的下载器ID", http.StatusBadRequest)
+		return
+	}
+
+	db := global.GlobalDB.DB
+	var downloader models.DownloaderSetting
+	if dbErr := db.First(&downloader, uint(id)).Error; dbErr != nil {
+		http.Error(w, "下载器不存在", http.StatusNotFound)
+		return
+	}
+
+	var req ApplyDownloaderToSitesRequest
+	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr != nil {
+		http.Error(w, decodeErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.SiteIDs) == 0 {
+		writeJSON(w, ApplyDownloaderToSitesResponse{UpdatedCount: 0})
+		return
+	}
+
+	repo := models.NewSiteRepository(db)
+	rowsAffected, err := repo.BatchUpdateSiteDownloader(req.SiteIDs, uint(id))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	global.GetSlogger().Infof("[Downloader] 批量应用下载器到站点: downloader=%s, site_count=%d", downloader.Name, rowsAffected)
+
+	writeJSON(w, ApplyDownloaderToSitesResponse{UpdatedCount: int(rowsAffected)})
 }

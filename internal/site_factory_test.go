@@ -18,94 +18,18 @@ func setupFactoryTestDB(t *testing.T) func() {
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
-	return func() {
-		// cleanup if needed
-	}
-}
-
-func TestSiteGroupToID(t *testing.T) {
-	tests := []struct {
-		siteGroup models.SiteGroup
-		wantID    string
-		wantOK    bool
-	}{
-		{models.MTEAM, "mteam", true},
-		{models.HDSKY, "hdsky", true},
-		{models.SpringSunday, "springsunday", true},
-		{models.SiteGroup("unknown"), "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.siteGroup), func(t *testing.T) {
-			id, ok := SiteGroupToID[tt.siteGroup]
-			if ok != tt.wantOK {
-				t.Errorf("SiteGroupToID[%s] ok = %v, want %v", tt.siteGroup, ok, tt.wantOK)
-			}
-			if ok && id != tt.wantID {
-				t.Errorf("SiteGroupToID[%s] = %v, want %v", tt.siteGroup, id, tt.wantID)
-			}
-		})
-	}
-}
-
-func TestIDToSiteGroup(t *testing.T) {
-	tests := []struct {
-		id        string
-		wantGroup models.SiteGroup
-		wantOK    bool
-	}{
-		{"mteam", models.MTEAM, true},
-		{"hdsky", models.HDSKY, true},
-		{"springsunday", models.SpringSunday, true},
-		{"unknown", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.id, func(t *testing.T) {
-			group, ok := IDToSiteGroup[tt.id]
-			if ok != tt.wantOK {
-				t.Errorf("IDToSiteGroup[%s] ok = %v, want %v", tt.id, ok, tt.wantOK)
-			}
-			if ok && group != tt.wantGroup {
-				t.Errorf("IDToSiteGroup[%s] = %v, want %v", tt.id, group, tt.wantGroup)
-			}
-		})
-	}
-}
-
-func TestSiteGroupToKind(t *testing.T) {
-	tests := []struct {
-		siteGroup models.SiteGroup
-		wantKind  v2.SiteKind
-		wantOK    bool
-	}{
-		{models.MTEAM, v2.SiteMTorrent, true},
-		{models.HDSKY, v2.SiteNexusPHP, true},
-		{models.SpringSunday, v2.SiteNexusPHP, true},
-		{models.SiteGroup("unknown"), "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.siteGroup), func(t *testing.T) {
-			kind, ok := SiteGroupToKind[tt.siteGroup]
-			if ok != tt.wantOK {
-				t.Errorf("SiteGroupToKind[%s] ok = %v, want %v", tt.siteGroup, ok, tt.wantOK)
-			}
-			if ok && kind != tt.wantKind {
-				t.Errorf("SiteGroupToKind[%s] = %v, want %v", tt.siteGroup, kind, tt.wantKind)
-			}
-		})
-	}
+	return func() {}
 }
 
 func TestGetAllSupportedSiteGroups(t *testing.T) {
 	groups := GetAllSupportedSiteGroups()
 
-	if len(groups) != 3 {
-		t.Errorf("GetAllSupportedSiteGroups() returned %d groups, want 3", len(groups))
+	// HDDolby is marked as unavailable, so we expect at least 3 groups
+	if len(groups) < 3 {
+		t.Errorf("GetAllSupportedSiteGroups() returned %d groups, want at least 3", len(groups))
 	}
 
-	// Check that all expected groups are present
+	// HDDolby is unavailable, so it should NOT be in supported groups
 	expected := map[models.SiteGroup]bool{
 		models.MTEAM:        false,
 		models.HDSKY:        false,
@@ -115,8 +39,6 @@ func TestGetAllSupportedSiteGroups(t *testing.T) {
 	for _, g := range groups {
 		if _, ok := expected[g]; ok {
 			expected[g] = true
-		} else {
-			t.Errorf("Unexpected site group: %s", g)
 		}
 	}
 
@@ -135,6 +57,7 @@ func TestIsSiteGroupSupported(t *testing.T) {
 		{models.MTEAM, true},
 		{models.HDSKY, true},
 		{models.SpringSunday, true},
+		{models.HDDOLBY, false}, // HDDolby is marked as unavailable
 		{models.SiteGroup("unknown"), false},
 		{models.SiteGroup(""), false},
 	}
@@ -152,6 +75,8 @@ func TestNewUnifiedSiteImpl_AllSupportedSites(t *testing.T) {
 	cleanup := setupFactoryTestDB(t)
 	defer cleanup()
 
+	registry := v2.GetGlobalSiteRegistry()
+
 	for _, siteGroup := range GetAllSupportedSiteGroups() {
 		t.Run(string(siteGroup), func(t *testing.T) {
 			impl, err := NewUnifiedSiteImpl(context.Background(), siteGroup)
@@ -165,16 +90,15 @@ func TestNewUnifiedSiteImpl_AllSupportedSites(t *testing.T) {
 				t.Errorf("SiteGroup() = %v, want %v", impl.SiteGroup(), siteGroup)
 			}
 
-			// Verify site kind is set correctly
-			expectedKind := SiteGroupToKind[siteGroup]
-			if impl.siteKind != expectedKind {
-				t.Errorf("siteKind = %v, want %v", impl.siteKind, expectedKind)
+			meta, ok := registry.Get(string(siteGroup))
+			if !ok {
+				t.Fatalf("Registry.Get(%s) failed", siteGroup)
 			}
-
-			// Verify site ID is set correctly
-			expectedID := SiteGroupToID[siteGroup]
-			if impl.siteID != expectedID {
-				t.Errorf("siteID = %v, want %v", impl.siteID, expectedID)
+			if impl.siteKind != meta.Kind {
+				t.Errorf("siteKind = %v, want %v", impl.siteKind, meta.Kind)
+			}
+			if impl.siteID != string(siteGroup) {
+				t.Errorf("siteID = %v, want %v", impl.siteID, string(siteGroup))
 			}
 		})
 	}

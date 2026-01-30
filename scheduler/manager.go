@@ -168,20 +168,27 @@ func (m *Manager) Reload(cfg *models.Config) {
 	// 初始化并启动免费结束监控器
 	m.initFreeEndMonitor()
 
+	// 检查是否有可用的默认下载器
+	defaultDl, err := m.downloaderManager.GetDefaultDownloader()
+	if err != nil {
+		global.GetSlogger().Warnf("未配置默认下载器，任务不启动: %v", err)
+		return
+	}
+
+	// 对默认下载器进行健康检查
+	if ok, pingErr := defaultDl.Ping(); !ok {
+		global.GetSlogger().Errorf("默认下载器健康检查失败，任务不启动: %v", pingErr)
+		return
+	}
+	global.GetSlogger().Infof("默认下载器 %s 健康检查通过", defaultDl.GetName())
+
 	// 重新启动：每次启动任务时从 DB 读取最新配置，保证一致性
-	store := core.NewConfigStore(global.GlobalDB)
-	qb, _ := store.GetQbitOnly()
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {
 			// 使用统一的工厂函数创建站点实现
 			impl, err := internal.NewUnifiedSiteImpl(context.Background(), site)
 			if err != nil {
 				global.GetSlogger().Warnf("站点 %s 未注册或不支持，跳过: %v", string(site), err)
-				continue
-			}
-			// 检查下载器配置
-			if qb.URL == "" || qb.User == "" || qb.Password == "" {
-				global.GetSlogger().Warnf("跳过站点 %s：qbit 未配置", string(site))
 				continue
 			}
 			for _, r := range sc.RSS {
@@ -222,50 +229,50 @@ func (m *Manager) initDownloaderManager() {
 			continue
 		}
 
-		var config downloader.DownloaderConfig
-		switch ds.Type {
-		case "qbittorrent":
-			config = &qbitDownloaderConfig{
-				url:       ds.URL,
-				username:  ds.Username,
-				password:  ds.Password,
-				autoStart: ds.AutoStart,
-			}
-		case "transmission":
-			config = &transmissionDownloaderConfig{
-				url:       ds.URL,
-				username:  ds.Username,
-				password:  ds.Password,
-				autoStart: ds.AutoStart,
-			}
-		default:
+		dlType := downloader.DownloaderType(ds.Type)
+		if !m.downloaderManager.HasFactory(dlType) {
 			global.GetSlogger().Warnf("未知下载器类型: %s", ds.Type)
 			continue
 		}
 
+		config := downloader.NewGenericConfig(dlType, ds.URL, ds.Username, ds.Password, ds.AutoStart)
 		if err := m.downloaderManager.RegisterConfig(ds.Name, config, ds.IsDefault); err != nil {
 			global.GetSlogger().Errorf("注册下载器配置失败: %s, %v", ds.Name, err)
+			continue
+		}
+
+		// 对启用的下载器进行健康检查
+		dl, err := m.downloaderManager.GetDownloader(ds.Name)
+		if err != nil {
+			global.GetSlogger().Errorf("[下载器健康检查] %s 创建实例失败: %v", ds.Name, err)
+			continue
+		}
+		if ok, pingErr := dl.Ping(); ok {
+			global.GetSlogger().Infof("[下载器健康检查] %s 连接正常 (类型=%s, 默认=%v)", ds.Name, ds.Type, ds.IsDefault)
+		} else {
+			global.GetSlogger().Warnf("[下载器健康检查] %s 连接失败: %v (类型=%s)", ds.Name, pingErr, ds.Type)
 		}
 	}
 
 	// 加载站点-下载器映射
-	var dynamicSites []models.DynamicSiteSetting
-	if err := global.GlobalDB.DB.Find(&dynamicSites).Error; err != nil {
-		global.GetSlogger().Errorf("加载动态站点配置失败: %v", err)
+	var sites []models.SiteSetting
+	if err := global.GlobalDB.DB.Find(&sites).Error; err != nil {
+		global.GetSlogger().Errorf("加载站点配置失败: %v", err)
 		return
 	}
 
-	for _, ds := range dynamicSites {
-		if ds.DownloaderID != nil {
-			// 查找下载器名称
+	for _, site := range sites {
+		if site.DownloaderID != nil {
 			var dlSetting models.DownloaderSetting
-			if err := global.GlobalDB.DB.First(&dlSetting, *ds.DownloaderID).Error; err == nil {
-				m.downloaderManager.SetSiteDownloader(ds.Name, dlSetting.Name)
+			if err := global.GlobalDB.DB.First(&dlSetting, *site.DownloaderID).Error; err == nil {
+				m.downloaderManager.SetSiteDownloader(site.Name, dlSetting.Name)
 			}
 		}
 	}
 
 	global.GetSlogger().Info("下载器管理器初始化完成")
+
+	internal.SetGlobalDownloaderManager(m.downloaderManager)
 }
 
 func (m *Manager) initFreeEndMonitor() {
@@ -294,50 +301,6 @@ func (m *Manager) initFreeEndMonitor() {
 			monitor.ScheduleTorrent(torrent)
 		}
 	})
-}
-
-// qbitDownloaderConfig qBittorrent 下载器配置
-type qbitDownloaderConfig struct {
-	url       string
-	username  string
-	password  string
-	autoStart bool
-}
-
-func (c *qbitDownloaderConfig) GetType() downloader.DownloaderType {
-	return downloader.DownloaderQBittorrent
-}
-func (c *qbitDownloaderConfig) GetURL() string      { return c.url }
-func (c *qbitDownloaderConfig) GetUsername() string { return c.username }
-func (c *qbitDownloaderConfig) GetPassword() string { return c.password }
-func (c *qbitDownloaderConfig) GetAutoStart() bool  { return c.autoStart }
-func (c *qbitDownloaderConfig) Validate() error {
-	if c.url == "" {
-		return downloader.ErrInvalidConfig
-	}
-	return nil
-}
-
-// transmissionDownloaderConfig Transmission 下载器配置
-type transmissionDownloaderConfig struct {
-	url       string
-	username  string
-	password  string
-	autoStart bool
-}
-
-func (c *transmissionDownloaderConfig) GetType() downloader.DownloaderType {
-	return downloader.DownloaderTransmission
-}
-func (c *transmissionDownloaderConfig) GetURL() string      { return c.url }
-func (c *transmissionDownloaderConfig) GetUsername() string { return c.username }
-func (c *transmissionDownloaderConfig) GetPassword() string { return c.password }
-func (c *transmissionDownloaderConfig) GetAutoStart() bool  { return c.autoStart }
-func (c *transmissionDownloaderConfig) Validate() error {
-	if c.url == "" {
-		return downloader.ErrInvalidConfig
-	}
-	return nil
 }
 
 // createQBitFactory 创建 qBittorrent 工厂
@@ -464,7 +427,7 @@ func processRSSUnified(ctx context.Context, cfg models.RSSConfig, ptSite interna
 	if err := internal.FetchAndDownloadFreeRSSUnified(ctx, ptSite, cfg); err != nil {
 		return err
 	}
-	if err := ptSite.SendTorrentToQbit(ctx, cfg); err != nil {
+	if err := ptSite.SendTorrentToDownloader(ctx, cfg); err != nil {
 		return err
 	}
 	return nil
@@ -496,7 +459,7 @@ func processRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup
 	if err := internal.FetchAndDownloadFreeRSS(ctx, siteName, ptSite, cfg); err != nil {
 		return err
 	}
-	if err := ptSite.SendTorrentToQbit(ctx, cfg); err != nil {
+	if err := ptSite.SendTorrentToDownloader(ctx, cfg); err != nil {
 		return err
 	}
 	return nil

@@ -96,9 +96,9 @@ func (r *MockPTSiteInterMockRecorder[T]) RetryDelay() *gomock.Call {
 	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "RetryDelay", reflect.TypeOf((*MockPTSiteInter[T])(nil).RetryDelay))
 }
 
-func (m *MockPTSiteInter[T]) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+func (m *MockPTSiteInter[T]) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SendTorrentToQbit", ctx, rssCfg)
+	ret := m.ctrl.Call(m, "SendTorrentToDownloader", ctx, rssCfg)
 	var r0 error
 	if ret[0] != nil {
 		r0 = ret[0].(error)
@@ -106,9 +106,9 @@ func (m *MockPTSiteInter[T]) SendTorrentToQbit(ctx context.Context, rssCfg model
 	return r0
 }
 
-func (r *MockPTSiteInterMockRecorder[T]) SendTorrentToQbit(ctx, rssCfg any) *gomock.Call {
+func (r *MockPTSiteInterMockRecorder[T]) SendTorrentToDownloader(ctx, rssCfg any) *gomock.Call {
 	r.mock.ctrl.T.Helper()
-	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "SendTorrentToQbit", reflect.TypeOf((*MockPTSiteInter[T])(nil).SendTorrentToQbit), ctx, rssCfg)
+	return r.mock.ctrl.RecordCallWithMethodType(r.mock, "SendTorrentToDownloader", reflect.TypeOf((*MockPTSiteInter[T])(nil).SendTorrentToDownloader), ctx, rssCfg)
 }
 
 func (m *MockPTSiteInter[T]) Context() context.Context {

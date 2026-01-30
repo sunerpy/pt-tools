@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,4 +75,51 @@ func ResolveDownloadBase(home, work, dir string) (string, error) {
 
 func SubPathFromTag(tag string) string {
 	return strings.TrimSpace(tag)
+}
+
+// sensitiveParams 定义需要脱敏的 URL 查询参数名（小写匹配）
+var sensitiveParams = map[string]bool{
+	"passkey":      true,
+	"sign":         true,
+	"apikey":       true,
+	"api_key":      true,
+	"token":        true,
+	"secret":       true,
+	"key":          true,
+	"authkey":      true,
+	"auth":         true,
+	"password":     true,
+	"pwd":          true,
+	"rsskey":       true,
+	"torrent_pass": true,
+}
+
+// SanitizeURL 对 URL 中的敏感查询参数进行脱敏处理
+// 返回脱敏后的 URL 字符串，敏感参数值会被替换为 "***"
+// 如果解析失败，返回 "<invalid-url>"
+func SanitizeURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+
+	query := parsed.Query()
+	if len(query) == 0 {
+		return rawURL
+	}
+
+	modified := false
+	for key := range query {
+		if sensitiveParams[strings.ToLower(key)] {
+			query.Set(key, "***")
+			modified = true
+		}
+	}
+
+	if !modified {
+		return rawURL
+	}
+
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }

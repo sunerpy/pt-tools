@@ -196,30 +196,9 @@ PR 地址：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
 
 ### 添加新站点支持
 
-添加新 PT 站点支持的步骤：
+添加新 PT 站点只需创建**一个文件**：`site/v2/definitions/<sitename>.go`
 
-1. **创建站点定义文件**
-   - 在 `site/v2/definitions/` 目录下创建新文件
-   - 参考现有站点实现（如 `hdsky.go`）
-
-2. **实现站点接口**
-   - 认证方法（Cookie 或 API Key）
-   - 搜索功能
-   - 用户信息获取
-   - RSS 解析（如有特殊格式）
-
-3. **注册站点**
-   - 在 `init()` 函数中注册到 Registry
-
-4. **编写测试**
-   - 添加单元测试
-   - 测试各功能正常工作
-
-5. **更新文档**
-   - 更新 README 中的站点列表
-   - 添加站点特殊说明（如有）
-
-6. **提交 PR**
+系统会自动从 `SiteDefinitionRegistry` 生成运行时元数据，无需手动编辑其他文件。
 
 **站点定义模板**：
 
@@ -227,19 +206,58 @@ PR 地址：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
 package definitions
 
 import (
-    "github.com/sunerpy/pt-tools/site/v2"
+    v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
+var MySiteDefinition = &v2.SiteDefinition{
+    // 必填字段
+    ID:     "mysite",           // 唯一标识符（小写）
+    Name:   "MySite",           // 显示名称
+    Schema: "NexusPHP",         // "NexusPHP", "mTorrent", "Gazelle", "Unit3D"
+    URLs:   []string{"https://mysite.com/"},
+
+    // 可选字段（有默认值）
+    AuthMethod: "cookie",       // "cookie" 或 "api_key"（根据 Schema 自动推断）
+    RateLimit:  2.0,            // 请求频率限制（默认 2.0 req/s）
+    RateBurst:  5,              // 突发请求数（默认 5）
+
+    // 可选元数据
+    Aka:            []string{"MS", "MySite别名"},
+    Description:    "站点描述",
+    FaviconURL:     "https://mysite.com/favicon.ico",
+    TimezoneOffset: "+0800",
+
+    // 站点特定选择器（覆盖 Schema 默认值）
+    Selectors: &v2.SiteSelectors{...},
+
+    // 用户信息解析配置
+    UserInfo: &v2.UserInfoConfig{...},
+
+    // 等级要求
+    LevelRequirements: []v2.SiteLevelRequirement{...},
+}
+
 func init() {
-    site.Registry.Register(&site.SiteDefinition{
-        Name:     "SiteName",
-        Type:     site.TypeNexusPHP, // 或 site.TypeMTorrent
-        BaseURL:  "https://site.com",
-        AuthType: site.AuthCookie,   // 或 site.AuthAPIKey
-        // ... 其他配置
-    })
+    v2.RegisterSiteDefinition(MySiteDefinition)
 }
 ```
+
+**Schema 与认证方式映射**：
+
+| Schema     | 站点类型          | 默认认证方式 |
+| ---------- | ----------------- | ------------ |
+| `NexusPHP` | NexusPHP 架构站点 | Cookie       |
+| `mTorrent` | M-Team 等         | API Key      |
+| `Gazelle`  | Gazelle 架构站点  | Cookie       |
+| `Unit3D`   | Unit3D 架构站点   | API Key      |
+
+**添加步骤**：
+
+1. 在 `site/v2/definitions/` 创建 `<sitename>.go`
+2. 参考现有实现（如 `hdsky.go`、`mteam.go`）
+3. 运行测试：`go test ./site/v2/...`
+4. 更新站点列表文档：`docs/sites.md`
+5. 提交 PR
 
 ## 代码规范
 

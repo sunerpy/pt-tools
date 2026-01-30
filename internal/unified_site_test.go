@@ -12,6 +12,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
 )
 
 func setupTestDB(t *testing.T) func() {
