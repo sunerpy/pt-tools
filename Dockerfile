@@ -1,5 +1,5 @@
 # 参数区分构建环境与基础镜像来源
-ARG BUILD_IMAGE=golang:1.25.5
+ARG BUILD_IMAGE=golang:1.25.6
 ARG BASE_IMAGE=alpine:3.20.3
 ARG NODE_IMAGE=node:25.2.0-alpine
 ARG BUILD_ENV=local
