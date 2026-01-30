@@ -237,6 +237,14 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 
 [![Star History Chart](https://api.star-history.com/svg?repos=sunerpy/pt-tools&type=Date)](https://star-history.com/#sunerpy/pt-tools&Date)
 
+## 交流分享
+
+[Telegram](https://t.me/+7YK2kmWIX0s1Nzdl)
+<img width="948" height="948" alt="image" src="https://github.com/user-attachments/assets/547991c9-dd8e-4fa7-b5e3-9756f456a9fc" />
+
+[复制QQ群号](274984594)
+<img width="1284" height="2283" alt="qq" src="https://github.com/user-attachments/assets/e3d65e3e-ff2d-4c03-a4f7-871b99064517" />
+
 ---
 
 **免责声明**：本工具仅供学习和研究使用，请遵守各 PT 站点的规则，合理使用。
