@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-30
+
+### Bug Fixes
+
+- Downloader sync bugs - RSS subscription sync + auto-enable on set default
+- BatchUpdateSiteDownloader now also updates associated RSS subscriptions' downloader_id - setDefaultDownloader automatically enables the downloader when set as default
+
+      Both fixes include corresponding tests.
+
+### Features
+
+- 站点配置统一化与下载器增强
+- 简化新增站点配置，修复未配置qbit下载器的错误，增加tg交流群 ([#42](https://github.com/sunerpy/pt-tools/pull/42))
+- 修复未配置qbittorrent下载器时跳过站点的问题 - 统一站点配置源，简化新站点添加流程，新增站点只需创建 definitions/.go 文件 - 前端禁用不可用站点并同步数据库状态 - 新增tg交流群
+
+### Miscellaneous
+
+- **build**: 更新 Go 版本至 1.25.6
+- 统一构建环境中的 Go 版本 - 确保与 Docker 构建镜像版本一致
+
 ## [0.5.0] - 2026-01-24
 
 ### Features
