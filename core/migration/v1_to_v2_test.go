@@ -32,7 +32,6 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.SiteSetting{},
 		&models.RSSSubscription{},
 		&models.DownloaderSetting{},
-		&models.DynamicSiteSetting{},
 		&models.SiteTemplate{},
 	)
 	if err != nil {
@@ -106,8 +105,8 @@ func TestProperty4_MigrationPreservesData(t *testing.T) {
 		gen.Bool(),
 	))
 
-	// Property: Site settings are preserved after migration
-	properties.Property("site settings preserved after migration", prop.ForAll(
+	// Property: Site settings are updated after migration
+	properties.Property("site settings updated after migration", prop.ForAll(
 		func(name, cookie, apiKey string, enabled, isCookieAuth bool) bool {
 			if name == "" {
 				return true
@@ -115,10 +114,9 @@ func TestProperty4_MigrationPreservesData(t *testing.T) {
 
 			db := setupTestDBForProperty(t)
 
-			// Create temp backup dir for this test
 			tmpDir, err := os.MkdirTemp("", "migration-test-*")
 			if err != nil {
-				return true // Skip on temp dir error
+				return true
 			}
 			defer os.RemoveAll(tmpDir)
 
@@ -127,7 +125,6 @@ func TestProperty4_MigrationPreservesData(t *testing.T) {
 				authMethod = "api_key"
 			}
 
-			// Create old site settings
 			site := models.SiteSetting{
 				Name:       name,
 				Enabled:    enabled,
@@ -139,7 +136,6 @@ func TestProperty4_MigrationPreservesData(t *testing.T) {
 				return true
 			}
 
-			// Run migration with temp backup dir
 			service := NewMigrationServiceWithBackupDir(db, tmpDir)
 			result := service.MigrateV1ToV2()
 
@@ -147,29 +143,18 @@ func TestProperty4_MigrationPreservesData(t *testing.T) {
 				return false
 			}
 
-			// Verify dynamic site was created
-			var dynamicSite models.DynamicSiteSetting
-			if err := db.Where("name = ?", name).First(&dynamicSite).Error; err != nil {
+			var updatedSite models.SiteSetting
+			if err := db.Where("name = ?", name).First(&updatedSite).Error; err != nil {
 				return false
 			}
 
-			// Verify data preserved
-			if dynamicSite.Name != name {
+			if updatedSite.Name != name {
 				return false
 			}
-			if dynamicSite.Enabled != enabled {
+			if updatedSite.DisplayName != name {
 				return false
 			}
-			if dynamicSite.AuthMethod != authMethod {
-				return false
-			}
-			if dynamicSite.Cookie != cookie {
-				return false
-			}
-			if dynamicSite.APIKey != apiKey {
-				return false
-			}
-			if !dynamicSite.IsBuiltin {
+			if !updatedSite.IsBuiltin {
 				return false
 			}
 
@@ -345,7 +330,6 @@ func setupTestDBForProperty(t *testing.T) *gorm.DB {
 		&models.SiteSetting{},
 		&models.RSSSubscription{},
 		&models.DownloaderSetting{},
-		&models.DynamicSiteSetting{},
 		&models.SiteTemplate{},
 	)
 
@@ -422,16 +406,14 @@ func TestMigrationService_SiteMigration(t *testing.T) {
 	db := setupTestDB(t)
 	service := NewMigrationService(db)
 
-	// Add sites
-	sites := []models.SiteSetting{
+	sitesToCreate := []models.SiteSetting{
 		{Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "hdsky-cookie"},
 		{Name: "mteam", Enabled: false, AuthMethod: "api_key", APIKey: "mteam-key", APIUrl: "https://api.mteam.com"},
 	}
-	for _, site := range sites {
+	for _, site := range sitesToCreate {
 		db.Create(&site)
 	}
 
-	// Run migration
 	result := service.MigrateV1ToV2()
 	if !result.Success {
 		t.Errorf("migration failed: %s", result.Message)
@@ -440,17 +422,18 @@ func TestMigrationService_SiteMigration(t *testing.T) {
 		t.Errorf("expected 2 sites migrated, got %d", result.SitesMigrated)
 	}
 
-	// Verify dynamic sites created
-	var dynamicSites []models.DynamicSiteSetting
-	db.Find(&dynamicSites)
-	if len(dynamicSites) != 2 {
-		t.Errorf("expected 2 dynamic sites, got %d", len(dynamicSites))
+	var updatedSites []models.SiteSetting
+	db.Find(&updatedSites)
+	if len(updatedSites) != 2 {
+		t.Errorf("expected 2 sites, got %d", len(updatedSites))
 	}
 
-	// Verify site data
-	for _, ds := range dynamicSites {
-		if !ds.IsBuiltin {
-			t.Errorf("expected site %s to be builtin", ds.Name)
+	for _, site := range updatedSites {
+		if !site.IsBuiltin {
+			t.Errorf("expected site %s to be builtin", site.Name)
+		}
+		if site.DisplayName == "" {
+			t.Errorf("expected site %s to have display_name set", site.Name)
 		}
 	}
 }
@@ -518,21 +501,11 @@ func TestIsMigrationNeeded_WithSiteSettings(t *testing.T) {
 	db := setupTestDB(t)
 	service := NewMigrationService(db)
 
-	// 添加旧的站点配置
 	db.Create(&models.SiteSetting{Name: "test-site", AuthMethod: "cookie", Cookie: "test"})
 
-	// IsMigrationNeeded 只检查 qbit 设置，所以这里不需要迁移
 	needed := service.IsMigrationNeeded()
-	// 注意：IsMigrationNeeded 只检查 qbit 设置
-	_ = needed
-
-	// 添加新的动态站点配置
-	db.Create(&models.DynamicSiteSetting{Name: "test-site", AuthMethod: "cookie"})
-
-	// 有新配置后不需要迁移
-	needed = service.IsMigrationNeeded()
 	if needed {
-		t.Error("should not need migration after adding dynamic site")
+		t.Error("should not need migration with only site settings (no qbit config)")
 	}
 }
 
@@ -628,14 +601,10 @@ func TestMigrationService_MigrateV1ToV2_AlreadyMigrated(t *testing.T) {
 	db := setupTestDB(t)
 	service := NewMigrationService(db)
 
-	// 添加新格式的数据（已迁移）
 	db.Create(&models.DownloaderSetting{Name: "existing", Type: "qbittorrent", URL: "http://test"})
-	db.Create(&models.DynamicSiteSetting{Name: "existing-site", AuthMethod: "cookie"})
 
-	// 运行迁移
 	result := service.MigrateV1ToV2()
 
-	// 应该成功但没有迁移任何数据
 	if !result.Success {
 		t.Errorf("migration should succeed: %s", result.Message)
 	}
@@ -895,31 +864,21 @@ func TestMigrationService_GetMigrationStatus_AllCases(t *testing.T) {
 	db := setupTestDB(t)
 	service := NewMigrationService(db)
 
-	// 空数据库
 	status := service.GetMigrationStatus()
 	require.False(t, status.NeedsMigration)
 	require.False(t, status.HasOldQbitConfig)
 	require.False(t, status.HasNewDownloaders)
-	require.Equal(t, 0, status.OldSitesCount)
-	require.Equal(t, 0, status.NewDynamicSitesCount)
+	require.Equal(t, 0, status.SitesCount)
 
-	// 添加旧站点
-	db.Create(&models.SiteSetting{Name: "old-site", AuthMethod: "cookie"})
+	db.Create(&models.SiteSetting{Name: "site1", AuthMethod: "cookie"})
 	status = service.GetMigrationStatus()
-	require.Equal(t, 1, status.OldSitesCount)
+	require.Equal(t, 1, status.SitesCount)
 
-	// 添加新动态站点
-	db.Create(&models.DynamicSiteSetting{Name: "new-site", AuthMethod: "cookie"})
-	status = service.GetMigrationStatus()
-	require.Equal(t, 1, status.NewDynamicSitesCount)
-
-	// 添加旧qbit配置
 	db.Create(&models.QbitSettings{URL: "http://test", User: "user"})
 	status = service.GetMigrationStatus()
 	require.True(t, status.HasOldQbitConfig)
 	require.True(t, status.NeedsMigration)
 
-	// 添加新下载器配置
 	db.Create(&models.DownloaderSetting{Name: "new-dl", Type: "qbittorrent", URL: "http://test"})
 	status = service.GetMigrationStatus()
 	require.True(t, status.HasNewDownloaders)

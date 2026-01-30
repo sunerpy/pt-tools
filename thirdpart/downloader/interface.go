@@ -240,6 +240,63 @@ type Downloader interface {
 // 用于根据配置创建下载器实例
 type DownloaderFactory func(config DownloaderConfig, name string) (Downloader, error)
 
+// GenericConfig 通用下载器配置
+// 用于不需要特定实现的场景，如健康检查、临时实例创建等
+type GenericConfig struct {
+	Type      DownloaderType `json:"type"`
+	URL       string         `json:"url"`
+	Username  string         `json:"username"`
+	Password  string         `json:"password"`
+	AutoStart bool           `json:"auto_start"`
+}
+
+// GetType 获取下载器类型
+func (c *GenericConfig) GetType() DownloaderType {
+	return c.Type
+}
+
+// GetURL 获取下载器 URL
+func (c *GenericConfig) GetURL() string {
+	return c.URL
+}
+
+// GetUsername 获取用户名
+func (c *GenericConfig) GetUsername() string {
+	return c.Username
+}
+
+// GetPassword 获取密码
+func (c *GenericConfig) GetPassword() string {
+	return c.Password
+}
+
+// GetAutoStart 获取是否自动开始下载
+func (c *GenericConfig) GetAutoStart() bool {
+	return c.AutoStart
+}
+
+// Validate 验证配置是否有效
+func (c *GenericConfig) Validate() error {
+	if c.URL == "" {
+		return ErrInvalidConfig
+	}
+	if c.Type == "" {
+		return ErrInvalidConfig
+	}
+	return nil
+}
+
+// NewGenericConfig 创建通用下载器配置
+func NewGenericConfig(dlType DownloaderType, url, username, password string, autoStart bool) *GenericConfig {
+	return &GenericConfig{
+		Type:      dlType,
+		URL:       url,
+		Username:  username,
+		Password:  password,
+		AutoStart: autoStart,
+	}
+}
+
 // DownloadTaskInfo 下载任务信息
 type DownloadTaskInfo struct {
 	Name          string

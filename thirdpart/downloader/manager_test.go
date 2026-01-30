@@ -910,3 +910,112 @@ func TestRegisterConfig_InvalidConfig(t *testing.T) {
 		t.Error("expected error for invalid config")
 	}
 }
+
+func TestSyncFromDB_AddNewDownloader(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+
+	records := []DownloaderDBRecord{
+		{Name: "qbit-1", Type: DownloaderQBittorrent, URL: "http://localhost:8080", Enabled: true, IsDefault: true},
+	}
+
+	dm.SyncFromDB(records)
+
+	if len(dm.configs) != 1 {
+		t.Errorf("expected 1 config, got %d", len(dm.configs))
+	}
+	if dm.defaultName != "qbit-1" {
+		t.Errorf("expected default 'qbit-1', got '%s'", dm.defaultName)
+	}
+}
+
+func TestSyncFromDB_RemoveDownloader(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+
+	dm.RegisterConfig("qbit-1", &MockConfig{Type: DownloaderQBittorrent, URL: "http://localhost:8080"}, true)
+	_, _ = dm.GetDownloader("qbit-1")
+
+	if len(dm.downloaders) != 1 {
+		t.Fatalf("expected 1 instance before sync")
+	}
+
+	dm.SyncFromDB([]DownloaderDBRecord{})
+
+	if len(dm.configs) != 0 {
+		t.Errorf("expected 0 configs after sync, got %d", len(dm.configs))
+	}
+	if len(dm.downloaders) != 0 {
+		t.Errorf("expected 0 instances after sync, got %d", len(dm.downloaders))
+	}
+}
+
+func TestSyncFromDB_UpdateDownloader(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+
+	dm.RegisterConfig("qbit-1", &MockConfig{Type: DownloaderQBittorrent, URL: "http://old:8080"}, true)
+	dl, _ := dm.GetDownloader("qbit-1")
+
+	if !dl.IsHealthy() {
+		t.Fatal("downloader should be healthy before update")
+	}
+
+	records := []DownloaderDBRecord{
+		{Name: "qbit-1", Type: DownloaderQBittorrent, URL: "http://new:8080", Enabled: true, IsDefault: true},
+	}
+	dm.SyncFromDB(records)
+
+	if len(dm.downloaders) != 0 {
+		t.Errorf("expected old instance to be closed and removed, got %d", len(dm.downloaders))
+	}
+
+	newDl, err := dm.GetDownloader("qbit-1")
+	if err != nil {
+		t.Fatalf("failed to get downloader after sync: %v", err)
+	}
+	if newDl == dl {
+		t.Error("expected new instance after config change")
+	}
+}
+
+func TestSyncFromDB_ChangeDefault(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+	dm.RegisterFactory(DownloaderTransmission, MockDownloaderFactory)
+
+	records := []DownloaderDBRecord{
+		{Name: "qbit-1", Type: DownloaderQBittorrent, URL: "http://qbit:8080", Enabled: true, IsDefault: true},
+		{Name: "trans-1", Type: DownloaderTransmission, URL: "http://trans:9091", Enabled: true, IsDefault: false},
+	}
+	dm.SyncFromDB(records)
+
+	if dm.defaultName != "qbit-1" {
+		t.Errorf("expected default 'qbit-1', got '%s'", dm.defaultName)
+	}
+
+	records[0].IsDefault = false
+	records[1].IsDefault = true
+	dm.SyncFromDB(records)
+
+	if dm.defaultName != "trans-1" {
+		t.Errorf("expected default 'trans-1' after change, got '%s'", dm.defaultName)
+	}
+}
+
+func TestSyncFromDB_DisabledDownloader(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+
+	dm.RegisterConfig("qbit-1", &MockConfig{Type: DownloaderQBittorrent, URL: "http://localhost:8080"}, true)
+	_, _ = dm.GetDownloader("qbit-1")
+
+	records := []DownloaderDBRecord{
+		{Name: "qbit-1", Type: DownloaderQBittorrent, URL: "http://localhost:8080", Enabled: false, IsDefault: true},
+	}
+	dm.SyncFromDB(records)
+
+	if len(dm.configs) != 0 {
+		t.Errorf("disabled downloader should be removed, got %d configs", len(dm.configs))
+	}
+}

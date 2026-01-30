@@ -180,10 +180,15 @@ function getRssCount(site: SiteConfig): number {
         <el-table-column label="操作" min-width="240" align="center" fixed="right">
           <template #default="{ row }">
             <div class="table-cell-actions">
-              <el-tooltip :content="row[1].enabled ? '禁用' : '启用'" placement="top">
+              <el-tooltip
+                :content="
+                  row[1].unavailable ? row[1].unavailable_reason : row[1].enabled ? '禁用' : '启用'
+                "
+                placement="top">
                 <el-switch
                   :model-value="row[1].enabled"
                   size="small"
+                  :disabled="row[1].unavailable"
                   @change="toggleEnabled(row[0])"
                   style="--el-switch-on-color: var(--pt-color-success)" />
               </el-tooltip>

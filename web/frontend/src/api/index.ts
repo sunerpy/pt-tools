@@ -86,6 +86,8 @@ export interface SiteConfig {
   api_key: string;
   api_url: string;
   rss: RSSConfig[];
+  unavailable?: boolean;
+  unavailable_reason?: string;
 }
 
 export interface TaskItem {
@@ -241,7 +243,23 @@ export const downloadersApi = {
   delete: (id: number) => api.delete<void>(`/api/downloaders/${id}`),
   health: (id: number) => api.get<DownloaderHealthResponse>(`/api/downloaders/${id}/health`),
   setDefault: (id: number) => api.post<DownloaderSetting>(`/api/downloaders/${id}/set-default`),
+  applyToSites: (id: number, siteIds: number[]) =>
+    api.post<{ updated_count: number }>(`/api/downloaders/${id}/apply-to-sites`, {
+      site_ids: siteIds,
+    }),
 };
+
+export interface SiteDownloaderSummaryItem {
+  site_id: number;
+  site_name: string;
+  display_name: string;
+  downloader_id?: number;
+  downloader_name?: string;
+}
+
+export interface SiteDownloaderSummaryResponse {
+  sites: SiteDownloaderSummaryItem[];
+}
 
 // 动态站点 API
 export const dynamicSitesApi = {
@@ -250,6 +268,8 @@ export const dynamicSitesApi = {
     api.post<DynamicSiteSetting>("/api/sites/dynamic", data),
   validate: (data: SiteValidationRequest) =>
     api.post<SiteValidationResponse>("/api/sites/validate", data),
+  getDownloaderSummary: () =>
+    api.get<SiteDownloaderSummaryResponse>("/api/sites/downloader-summary"),
 };
 
 // 站点模板 API

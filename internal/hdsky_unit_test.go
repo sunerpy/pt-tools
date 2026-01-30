@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
@@ -88,7 +89,7 @@ func TestUnifiedSiteImpl_HDSKY_ContextGetter(t *testing.T) {
 	}
 }
 
-func TestUnifiedSiteImpl_HDSKY_SendTorrentToQbit(t *testing.T) {
+func TestUnifiedSiteImpl_HDSKY_SendTorrentToDownloader(t *testing.T) {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
@@ -136,7 +137,16 @@ func TestUnifiedSiteImpl_HDSKY_SendTorrentToQbit(t *testing.T) {
 		IsDefault: true,
 	}
 	require.NoError(t, db.DB.Create(&dlSetting).Error)
+
+	dlMgr := downloader.NewDownloaderManager()
+	dlMgr.RegisterFactory(downloader.DownloaderQBittorrent, func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		qbitConfig := qbit.NewQBitConfigWithAutoStart(config.GetURL(), config.GetUsername(), config.GetPassword(), config.GetAutoStart())
+		return qbit.NewQbitClient(qbitConfig, name)
+	})
+	SetGlobalDownloaderManager(dlMgr)
+	defer SetGlobalDownloaderManager(nil)
+
 	hds, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
 	require.NoError(t, err)
-	require.NoError(t, hds.SendTorrentToQbit(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
+	require.NoError(t, hds.SendTorrentToDownloader(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 }

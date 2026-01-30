@@ -29,7 +29,6 @@ func setupTestServer(t *testing.T) (*Server, *gorm.DB) {
 	// 迁移表
 	db.AutoMigrate(
 		&models.DownloaderSetting{},
-		&models.DynamicSiteSetting{},
 		&models.SiteTemplate{},
 		&models.AdminUser{},
 		&models.SettingsGlobal{},
@@ -138,7 +137,7 @@ func TestDownloaderCRUD(t *testing.T) {
 			Type:      "qbittorrent",
 			URL:       "http://localhost:9090",
 			IsDefault: true, // 保持默认状态，因为是唯一的下载器
-			Enabled:   false,
+			Enabled:   true, // 默认下载器不能禁用
 		}
 		body, _ := json.Marshal(reqBody)
 
@@ -596,6 +595,44 @@ func TestDownloaderAutoStart(t *testing.T) {
 			t.Error("expected auto_start to be false in get response")
 		}
 	})
+}
+
+func TestSetDefaultDownloaderAutoEnable(t *testing.T) {
+	server, db := setupTestServer(t)
+
+	db.Create(&models.DownloaderSetting{
+		Name:      "disabled-dl",
+		Type:      "qbittorrent",
+		URL:       "http://localhost:8080",
+		IsDefault: false,
+		Enabled:   false,
+	})
+
+	var dl models.DownloaderSetting
+	db.First(&dl)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/downloaders/1/set-default", nil)
+	w := httptest.NewRecorder()
+
+	server.setDefaultDownloader(w, req, "1")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	db.First(&dl, dl.ID)
+	if !dl.IsDefault {
+		t.Error("expected is_default to be true")
+	}
+	if !dl.Enabled {
+		t.Error("expected enabled to be true after setting as default")
+	}
+
+	var resp DownloaderResponse
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.Enabled {
+		t.Error("expected enabled in response to be true")
+	}
 }
 
 // TestDownloaderAutoStartDefault 测试 auto_start 默认值

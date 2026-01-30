@@ -48,6 +48,12 @@ func (s *Server) apiDownloaderRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 检查是否是应用到站点的路由
+	if len(parts) == 2 && parts[1] == "apply-to-sites" {
+		s.applyDownloaderToSites(w, r, parts[0])
+		return
+	}
+
 	// 其他情况交给原有的下载器详情处理
 	s.apiDownloaderDetail(w, r)
 }

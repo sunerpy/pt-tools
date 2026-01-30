@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 func newTestManager(t *testing.T) *Manager {
@@ -200,7 +201,7 @@ func (s *rssSiteStub) IsEnabled() bool                                        { 
 func (s *rssSiteStub) DownloadTorrent(url, title, dir string) (string, error) { return "hash-rss", nil }
 func (s *rssSiteStub) MaxRetries() int                                        { return 1 }
 func (s *rssSiteStub) RetryDelay() time.Duration                              { return 0 }
-func (s *rssSiteStub) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+func (s *rssSiteStub) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
 	return nil
 }
 func (s *rssSiteStub) Context() context.Context { return context.Background() }
@@ -256,11 +257,7 @@ func TestValidRSS_MoreBranches(t *testing.T) {
 
 // TestQbitDownloaderConfig 测试 qBittorrent 下载器配置
 func TestQbitDownloaderConfig(t *testing.T) {
-	config := &qbitDownloaderConfig{
-		url:      "http://localhost:8080",
-		username: "admin",
-		password: "adminadmin",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderQBittorrent, "http://localhost:8080", "admin", "adminadmin", false)
 
 	assert.Equal(t, "http://localhost:8080", config.GetURL())
 	assert.Equal(t, "admin", config.GetUsername())
@@ -268,17 +265,13 @@ func TestQbitDownloaderConfig(t *testing.T) {
 	assert.NoError(t, config.Validate())
 
 	// 测试空 URL 验证失败
-	emptyConfig := &qbitDownloaderConfig{url: ""}
+	emptyConfig := downloader.NewGenericConfig(downloader.DownloaderQBittorrent, "", "", "", false)
 	assert.Error(t, emptyConfig.Validate())
 }
 
 // TestTransmissionDownloaderConfig 测试 Transmission 下载器配置
 func TestTransmissionDownloaderConfig(t *testing.T) {
-	config := &transmissionDownloaderConfig{
-		url:      "http://localhost:9091",
-		username: "admin",
-		password: "password",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderTransmission, "http://localhost:9091", "admin", "password", false)
 
 	assert.Equal(t, "http://localhost:9091", config.GetURL())
 	assert.Equal(t, "admin", config.GetUsername())
@@ -286,7 +279,7 @@ func TestTransmissionDownloaderConfig(t *testing.T) {
 	assert.NoError(t, config.Validate())
 
 	// 测试空 URL 验证失败
-	emptyConfig := &transmissionDownloaderConfig{url: ""}
+	emptyConfig := downloader.NewGenericConfig(downloader.DownloaderTransmission, "", "", "", false)
 	assert.Error(t, emptyConfig.Validate())
 }
 
@@ -424,11 +417,7 @@ func TestCreateQBitFactory(t *testing.T) {
 	assert.NotNil(t, factory)
 
 	// 创建一个 mock 配置
-	config := &qbitDownloaderConfig{
-		url:      "http://localhost:8080",
-		username: "admin",
-		password: "adminadmin",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderQBittorrent, "http://localhost:8080", "admin", "adminadmin", false)
 
 	// 工厂应该能创建下载器（即使连接失败）
 	_, err := factory(config, "test-qbit")
@@ -443,11 +432,7 @@ func TestCreateTransmissionFactory(t *testing.T) {
 	assert.NotNil(t, factory)
 
 	// 创建一个 mock 配置
-	config := &transmissionDownloaderConfig{
-		url:      "http://localhost:9091",
-		username: "admin",
-		password: "password",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderTransmission, "http://localhost:9091", "admin", "password", false)
 
 	// 工厂应该能创建下载器
 	_, err := factory(config, "test-transmission")
@@ -456,21 +441,13 @@ func TestCreateTransmissionFactory(t *testing.T) {
 
 // TestQbitDownloaderConfig_GetType 测试 GetType 方法
 func TestQbitDownloaderConfig_GetType(t *testing.T) {
-	config := &qbitDownloaderConfig{
-		url:      "http://localhost:8080",
-		username: "admin",
-		password: "adminadmin",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderQBittorrent, "http://localhost:8080", "admin", "adminadmin", false)
 	assert.Equal(t, "qbittorrent", string(config.GetType()))
 }
 
 // TestTransmissionDownloaderConfig_GetType 测试 GetType 方法
 func TestTransmissionDownloaderConfig_GetType(t *testing.T) {
-	config := &transmissionDownloaderConfig{
-		url:      "http://localhost:9091",
-		username: "admin",
-		password: "password",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderTransmission, "http://localhost:9091", "admin", "password", false)
 	assert.Equal(t, "transmission", string(config.GetType()))
 }
 

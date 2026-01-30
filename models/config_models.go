@@ -83,17 +83,23 @@ type QbitSettings struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// 站点设置
+// SiteSetting 站点设置（统一表，合并原 DynamicSiteSetting）
 type SiteSetting struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	Name       string    `gorm:"index;size:32" json:"name"`
-	Enabled    bool      `json:"enabled"`
-	AuthMethod string    `gorm:"size:16;not null" json:"auth_method"`
-	Cookie     string    `gorm:"size:1024" json:"cookie"`
-	APIKey     string    `gorm:"size:512" json:"api_key"`
-	APIUrl     string    `gorm:"size:512" json:"api_url"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Name         string    `gorm:"uniqueIndex;size:64;not null" json:"name"`
+	DisplayName  string    `gorm:"size:128" json:"display_name"`
+	BaseURL      string    `gorm:"size:512" json:"base_url"`
+	Enabled      bool      `json:"enabled"`
+	AuthMethod   string    `gorm:"size:16;not null" json:"auth_method"`
+	Cookie       string    `gorm:"size:2048" json:"cookie,omitempty"`
+	APIKey       string    `gorm:"size:512" json:"api_key,omitempty"`
+	APIUrl       string    `gorm:"size:512" json:"api_url,omitempty"`
+	DownloaderID *uint     `gorm:"index" json:"downloader_id,omitempty"`
+	ParserConfig string    `gorm:"type:text" json:"parser_config,omitempty"`
+	IsBuiltin    bool      `json:"is_builtin"`
+	TemplateID   *uint     `gorm:"index" json:"template_id,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // RSS 订阅

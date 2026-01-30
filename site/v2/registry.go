@@ -9,6 +9,19 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	globalSiteRegistry     *SiteRegistry
+	globalSiteRegistryOnce sync.Once
+)
+
+// GetGlobalSiteRegistry returns the global site registry singleton
+func GetGlobalSiteRegistry() *SiteRegistry {
+	globalSiteRegistryOnce.Do(func() {
+		globalSiteRegistry = NewSiteRegistry(nil)
+	})
+	return globalSiteRegistry
+}
+
 // SiteMeta contains metadata for a site type
 type SiteMeta struct {
 	// ID is the unique site identifier (e.g., "mteam", "hdsky")
@@ -53,51 +66,72 @@ func NewSiteRegistry(logger *zap.Logger) *SiteRegistry {
 	return registry
 }
 
-// registerDefaults registers the default site metadata
+// registerDefaults registers site metadata from SiteDefinitionRegistry
 func (r *SiteRegistry) registerDefaults() {
-	// M-Team (uses MTorrent API)
-	r.Register(SiteMeta{
-		ID:             "mteam",
-		Name:           "M-Team",
-		Kind:           SiteMTorrent,
-		DefaultBaseURL: "https://api.m-team.cc",
-		AuthMethod:     "api_key",
-		RateLimit:      1.0,
-		RateBurst:      3,
-	})
+	defRegistry := GetDefinitionRegistry()
+	for _, def := range defRegistry.GetAll() {
+		if def.Unavailable {
+			continue
+		}
+		meta := r.siteMetaFromDefinition(def)
+		r.Register(meta)
+	}
+}
 
-	// HDSky (NexusPHP)
-	r.Register(SiteMeta{
-		ID:             "hdsky",
-		Name:           "HDSky",
-		Kind:           SiteNexusPHP,
-		DefaultBaseURL: "https://hdsky.me",
-		AuthMethod:     "cookie",
-		RateLimit:      2.0, // Increased from 0.5 to allow faster searches
-		RateBurst:      5,   // Increased from 2 for initial burst
-	})
+func (r *SiteRegistry) siteMetaFromDefinition(def *SiteDefinition) SiteMeta {
+	baseURL := ""
+	if len(def.URLs) > 0 {
+		baseURL = def.URLs[0]
+	}
 
-	// SpringSunday (NexusPHP)
-	r.Register(SiteMeta{
-		ID:             "springsunday",
-		Name:           "SpringSunday",
-		Kind:           SiteNexusPHP,
-		DefaultBaseURL: "https://springsunday.net",
-		AuthMethod:     "cookie",
-		RateLimit:      2.0, // Increased from 0.5
-		RateBurst:      5,   // Increased from 2
-	})
+	authMethod := def.AuthMethod
+	if authMethod == "" {
+		authMethod = schemaToAuthMethod(def.Schema)
+	}
 
-	// HDDolby (NexusPHP)
-	r.Register(SiteMeta{
-		ID:             "hddolby",
-		Name:           "HDDolby",
-		Kind:           SiteNexusPHP,
-		DefaultBaseURL: "https://www.hddolby.com",
-		AuthMethod:     "cookie",
-		RateLimit:      2.0, // Increased from 0.5
-		RateBurst:      5,   // Increased from 2
-	})
+	rateLimit := def.RateLimit
+	if rateLimit == 0 {
+		rateLimit = 2.0
+	}
+
+	rateBurst := def.RateBurst
+	if rateBurst == 0 {
+		rateBurst = 5
+	}
+
+	return SiteMeta{
+		ID:             def.ID,
+		Name:           def.Name,
+		Kind:           schemaToKind(def.Schema),
+		DefaultBaseURL: baseURL,
+		AuthMethod:     authMethod,
+		RateLimit:      rateLimit,
+		RateBurst:      rateBurst,
+	}
+}
+
+func schemaToKind(schema string) SiteKind {
+	switch schema {
+	case "NexusPHP":
+		return SiteNexusPHP
+	case "mTorrent":
+		return SiteMTorrent
+	case "Gazelle":
+		return SiteGazelle
+	case "Unit3D":
+		return SiteUnit3D
+	default:
+		return SiteNexusPHP
+	}
+}
+
+func schemaToAuthMethod(schema string) string {
+	switch schema {
+	case "mTorrent", "Unit3D":
+		return "api_key"
+	default:
+		return "cookie"
+	}
 }
 
 // Register adds or updates site metadata

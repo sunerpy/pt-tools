@@ -65,11 +65,7 @@ func setupTestDownloaderManager(t *testing.T, srv *httptest.Server) *downloader.
 	t.Helper()
 	dlMgr := downloader.NewDownloaderManager()
 	dlMgr.RegisterFactory(downloader.DownloaderQBittorrent, createQBitFactory())
-	config := &qbitDownloaderConfig{
-		url:      srv.URL,
-		username: "admin",
-		password: "admin",
-	}
+	config := downloader.NewGenericConfig(downloader.DownloaderQBittorrent, srv.URL, "admin", "admin", false)
 	err := dlMgr.RegisterConfig("test-qbit", config, true)
 	require.NoError(t, err)
 	return dlMgr

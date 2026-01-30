@@ -23,7 +23,6 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
-	"github.com/sunerpy/pt-tools/thirdpart/downloader/transmission"
 	"github.com/sunerpy/pt-tools/utils"
 )
 
@@ -50,6 +49,7 @@ type DownloaderInfo struct {
 	ID        uint
 	Name      string
 	AutoStart bool
+	NeedClose bool
 }
 
 // GetDownloaderForRSS 根据 RSS 配置获取下载器
@@ -61,8 +61,7 @@ func GetDownloaderForRSS(rssCfg models.RSSConfig) (downloader.Downloader, error)
 }
 
 // GetDownloaderForRSSWithInfo 根据 RSS 配置获取下载器及其信息
-// 优先级：RSS 指定的下载器 > 默认下载器
-// 返回下载器实例和下载器信息（用于内部使用）
+// 优先使用全局 DownloaderManager（连接池复用），回退到直接创建实例
 func GetDownloaderForRSSWithInfo(rssCfg models.RSSConfig) (downloader.Downloader, *DownloaderInfo, error) {
 	if global.GlobalDB == nil {
 		return nil, nil, errors.New("数据库未初始化")
@@ -71,7 +70,6 @@ func GetDownloaderForRSSWithInfo(rssCfg models.RSSConfig) (downloader.Downloader
 	var dlSetting models.DownloaderSetting
 
 	if rssCfg.DownloaderID != nil {
-		// 使用 RSS 指定的下载器
 		if err := global.GlobalDB.DB.First(&dlSetting, *rssCfg.DownloaderID).Error; err != nil {
 			return nil, nil, fmt.Errorf("获取指定下载器失败: %w", err)
 		}
@@ -79,7 +77,6 @@ func GetDownloaderForRSSWithInfo(rssCfg models.RSSConfig) (downloader.Downloader
 			return nil, nil, fmt.Errorf("指定的下载器 %s 未启用", dlSetting.Name)
 		}
 	} else {
-		// 使用默认下载器
 		if err := global.GlobalDB.DB.Where("is_default = ?", true).First(&dlSetting).Error; err != nil {
 			return nil, nil, fmt.Errorf("获取默认下载器失败: %w", err)
 		}
@@ -88,29 +85,39 @@ func GetDownloaderForRSSWithInfo(rssCfg models.RSSConfig) (downloader.Downloader
 		}
 	}
 
-	// 根据类型创建下载器实例
-	var dl downloader.Downloader
-	var err error
-	switch dlSetting.Type {
-	case "qbittorrent":
-		config := qbit.NewQBitConfig(dlSetting.URL, dlSetting.Username, dlSetting.Password)
-		dl, err = qbit.NewQbitClient(config, dlSetting.Name)
-	case "transmission":
-		config := transmission.NewTransmissionConfigWithAutoStart(dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
-		dl, err = transmission.NewTransmissionClient(config, dlSetting.Name)
-	default:
-		return nil, nil, fmt.Errorf("不支持的下载器类型: %s", dlSetting.Type)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-
 	info := &DownloaderInfo{
 		ID:        dlSetting.ID,
 		Name:      dlSetting.Name,
 		AutoStart: dlSetting.AutoStart,
+		NeedClose: false,
 	}
-	return dl, info, nil
+
+	dm := GetGlobalDownloaderManager()
+	if dm != nil {
+		dl, err := dm.GetDownloader(dlSetting.Name)
+		if err == nil {
+			return dl, info, nil
+		}
+		sLogger().Warnf("从 DownloaderManager 获取下载器失败，回退到直接创建: %v", err)
+	}
+
+	info.NeedClose = true
+	dlType := downloader.DownloaderType(dlSetting.Type)
+
+	if dm != nil && !dm.HasFactory(dlType) {
+		return nil, nil, fmt.Errorf("不支持的下载器类型: %s", dlSetting.Type)
+	}
+
+	config := downloader.NewGenericConfig(dlType, dlSetting.URL, dlSetting.Username, dlSetting.Password, dlSetting.AutoStart)
+	if dm != nil {
+		dl, err := dm.CreateFromConfig(config, dlSetting.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return dl, info, nil
+	}
+
+	return nil, nil, fmt.Errorf("DownloaderManager 未初始化且无法创建下载器: %s", dlSetting.Name)
 }
 
 // ProcessTorrentsWithDownloaderByRSS 根据 RSS 配置选择下载器并处理种子
@@ -124,9 +131,11 @@ func ProcessTorrentsWithDownloaderByRSS(
 	if err != nil {
 		return fmt.Errorf("获取下载器失败: %w", err)
 	}
-	defer dl.Close()
+	if dlInfo.NeedClose {
+		defer dl.Close()
+	}
 
-	sLogger().Infof("使用下载器: %s (%s) 处理种子", dl.GetName(), dl.GetType())
+	sLogger().Infof("[种子推送开始] 站点=%s, 下载器=%s(%s), 目录=%s", siteName, dl.GetName(), dl.GetType(), dirPath)
 
 	downloadPath := rssCfg.GetEffectiveDownloadPath()
 	if downloadPath != "" {
@@ -139,14 +148,19 @@ func ProcessTorrentsWithDownloaderByRSS(
 		return fmt.Errorf("无法读取目录: %v", err)
 	}
 
+	successCount := 0
+	failCount := 0
 	for _, file := range filePaths {
 		err := processSingleTorrentWithDownloader(ctx, dl, dlInfo, file, category, tags, downloadPath, siteName, rssCfg.PauseOnFreeEnd)
 		if err != nil {
 			sLogger().Errorf("处理种子失败: %s, %v", file, err)
+			failCount++
+		} else {
+			successCount++
 		}
 	}
 
-	sLogger().Info("所有种子处理完成")
+	sLogger().Infof("[种子推送完成] 站点=%s, 总数=%d, 成功=%d, 失败=%d", siteName, len(filePaths), successCount, failCount)
 	return nil
 }
 
@@ -822,7 +836,10 @@ func sanitizeTitle(title string) string {
 
 // FetchAndDownloadFreeRSSUnified 使用 UnifiedPTSite 接口获取并下载免费 RSS 种子
 func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg models.RSSConfig) error {
-	// 每次运行从 DB 读取最新配置并更新目录缓存（以 DB 为唯一配置源）
+	startTime := time.Now()
+	siteName := m.SiteGroup()
+	sLogger().Infof("[RSS任务开始] 站点=%s, RSS=%s, URL=%s", siteName, rssCfg.Name, utils.SanitizeURL(rssCfg.URL))
+
 	if global.GlobalDB == nil {
 		return errors.New("配置未就绪: DB 不可用")
 	}
@@ -838,21 +855,22 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 	if !m.IsEnabled() {
 		return errors.New(enableError)
 	}
-	// DownloadSubPath 前端移除，允许为空；使用 Tag 作为子目录
+
 	feed, err := fetchRSSFeed(rssCfg.URL)
 	if err != nil {
+		sLogger().Errorf("[RSS任务失败] 站点=%s, RSS=%s, 错误=%v", siteName, rssCfg.Name, err)
 		return err
 	}
+	sLogger().Infof("[RSS解析完成] 站点=%s, RSS=%s, 种子数量=%d", siteName, rssCfg.Name, len(feed.Items))
+
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	var wg sync.WaitGroup
 	torrentChan := make(chan *gofeed.Item, len(feed.Items))
 
-	// 获取有效的并发数（RSS 配置优先，否则使用全局配置）
 	concurrency := rssCfg.GetEffectiveConcurrency(&gl)
 	sLogger().Infof("RSS %s 使用并发数: %d", rssCfg.Name, concurrency)
 
-	// 启动多个下载 Worker (使用新的 UnifiedPTSite 接口)
 	for range concurrency {
 		wg.Add(1)
 		go downloadWorkerUnified(
@@ -863,7 +881,7 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 			rssCfg,
 		)
 	}
-	// 将种子发送到下载队列
+
 	for _, item := range feed.Items {
 		if len(item.Enclosures) > 0 {
 			select {
@@ -878,6 +896,9 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 	}
 	close(torrentChan)
 	wg.Wait()
+
+	duration := time.Since(startTime)
+	sLogger().Infof("[RSS任务完成] 站点=%s, RSS=%s, 耗时=%v", siteName, rssCfg.Name, duration.Round(time.Millisecond))
 	return nil
 }
 

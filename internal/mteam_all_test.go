@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
@@ -56,7 +57,7 @@ func TestUnifiedSiteImpl_MTEAM_IsEnabled(t *testing.T) {
 	require.True(t, m.IsEnabled())
 }
 
-func TestUnifiedSiteImpl_MTEAM_SendTorrentToQbit_WithStub(t *testing.T) {
+func TestUnifiedSiteImpl_MTEAM_SendTorrentToDownloader_WithStub(t *testing.T) {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	global.GlobalDB = db
@@ -105,9 +106,18 @@ func TestUnifiedSiteImpl_MTEAM_SendTorrentToQbit_WithStub(t *testing.T) {
 		IsDefault: true,
 	}
 	require.NoError(t, db.DB.Create(&dlSetting).Error)
+
+	dlMgr := downloader.NewDownloaderManager()
+	dlMgr.RegisterFactory(downloader.DownloaderQBittorrent, func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		qbitConfig := qbit.NewQBitConfigWithAutoStart(config.GetURL(), config.GetUsername(), config.GetPassword(), config.GetAutoStart())
+		return qbit.NewQbitClient(qbitConfig, name)
+	})
+	SetGlobalDownloaderManager(dlMgr)
+	defer SetGlobalDownloaderManager(nil)
+
 	m, err := NewUnifiedSiteImpl(context.Background(), models.MTEAM)
 	require.NoError(t, err)
-	require.NoError(t, m.SendTorrentToQbit(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
+	require.NoError(t, m.SendTorrentToDownloader(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 }
 
 // TestNewUnifiedSiteImpl_MTEAM 测试创建 UnifiedSiteImpl for MTEAM

@@ -101,12 +101,6 @@ func TestSiteTemplateFromExportNilParserConfig(t *testing.T) {
 	assert.Equal(t, "", template.ParserConfig)
 }
 
-// TestDynamicSiteSettingTableName 测试动态站点设置表名
-func TestDynamicSiteSettingTableName(t *testing.T) {
-	setting := DynamicSiteSetting{}
-	assert.Equal(t, "dynamic_site_settings", setting.TableName())
-}
-
 // TestSiteTemplateExportFields 测试导出结构体字段
 func TestSiteTemplateExportFields(t *testing.T) {
 	export := SiteTemplateExport{

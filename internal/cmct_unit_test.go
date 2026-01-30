@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
@@ -77,7 +78,7 @@ func TestUnifiedSiteImpl_CMCT_DownloadTorrentAndContext(t *testing.T) {
 	}
 }
 
-func TestUnifiedSiteImpl_CMCT_SendTorrentToQbit(t *testing.T) {
+func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	global.GlobalDB = db
@@ -126,9 +127,18 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToQbit(t *testing.T) {
 		IsDefault: true,
 	}
 	require.NoError(t, db.DB.Create(&dlSetting).Error)
+
+	dlMgr := downloader.NewDownloaderManager()
+	dlMgr.RegisterFactory(downloader.DownloaderQBittorrent, func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		qbitConfig := qbit.NewQBitConfigWithAutoStart(config.GetURL(), config.GetUsername(), config.GetPassword(), config.GetAutoStart())
+		return qbit.NewQbitClient(qbitConfig, name)
+	})
+	SetGlobalDownloaderManager(dlMgr)
+	defer SetGlobalDownloaderManager(nil)
+
 	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
 	require.NoError(t, err)
-	require.NoError(t, c.SendTorrentToQbit(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
+	require.NoError(t, c.SendTorrentToDownloader(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 	if _, err := os.Stat(p); err == nil {
 		t.Fatalf("expected file removed")
 	}

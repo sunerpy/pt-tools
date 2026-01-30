@@ -18,13 +18,14 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 4
+const CurrentSchemaVersion = 5
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
 // v2: 添加 IsExample 字段到 RSS 订阅，添加 DefaultConcurrency 到全局设置
 // v3: 添加 user_info 表用于存储用户统计信息
 // v4: 添加免费结束管理功能 - TorrentInfo 新增下载器追踪字段，RSSSubscription 新增 PauseOnFreeEnd，添加 TorrentInfoArchive 归档表
+// v5: 合并 DynamicSiteSetting 表到 SiteSetting，删除 dynamic_site_settings 表
 
 // MigrationFunc 迁移函数类型
 type MigrationFunc func(db *gorm.DB) error
@@ -75,6 +76,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     4,
 		Description: "添加免费结束管理功能",
 		Up:          migrateV3ToV4,
+	})
+
+	// v4 -> v5: 合并 DynamicSiteSetting 到 SiteSetting
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     5,
+		Description: "合并 DynamicSiteSetting 到 SiteSetting",
+		Up:          migrateV4ToV5,
 	})
 }
 
@@ -246,5 +254,142 @@ func migrateV2ToV3(db *gorm.DB) error {
 }
 
 func migrateV3ToV4(db *gorm.DB) error {
+	return nil
+}
+
+// migrateV4ToV5 v4 到 v5 的迁移 - 合并 DynamicSiteSetting 到 SiteSetting
+func migrateV4ToV5(db *gorm.DB) error {
+	// 如果 dynamic_site_settings 表不存在，无需迁移
+	if !db.Migrator().HasTable("dynamic_site_settings") {
+		// 仍需设置默认值
+		return setDefaultsForSiteSetting(db)
+	}
+
+	// 定义旧表结构用于读取
+	type DynamicSiteSettingLegacy struct {
+		ID           uint   `gorm:"primaryKey"`
+		Name         string `gorm:"uniqueIndex;size:64;not null"`
+		DisplayName  string `gorm:"size:128"`
+		BaseURL      string `gorm:"size:512"`
+		Enabled      bool
+		AuthMethod   string `gorm:"size:16;not null"`
+		Cookie       string `gorm:"size:2048"`
+		APIKey       string `gorm:"size:512"`
+		APIURL       string `gorm:"size:512"`
+		DownloaderID *uint  `gorm:"index"`
+		ParserConfig string `gorm:"type:text"`
+		IsBuiltin    bool
+		TemplateID   *uint `gorm:"index"`
+	}
+
+	// 读取旧表数据
+	var dynamics []DynamicSiteSettingLegacy
+	if err := db.Table("dynamic_site_settings").Find(&dynamics).Error; err != nil {
+		return err
+	}
+
+	// 如果旧表为空，直接删除并设置默认值
+	if len(dynamics) == 0 {
+		if err := db.Migrator().DropTable("dynamic_site_settings"); err != nil {
+			// 忽略删除失败，不影响迁移
+			_ = err
+		}
+		return setDefaultsForSiteSetting(db)
+	}
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for _, d := range dynamics {
+			var site SiteSetting
+			switch findErr := tx.Where("name = ?", d.Name).First(&site).Error; findErr {
+			case gorm.ErrRecordNotFound:
+				site = SiteSetting{
+					Name:         d.Name,
+					DisplayName:  d.DisplayName,
+					BaseURL:      d.BaseURL,
+					Enabled:      d.Enabled,
+					AuthMethod:   d.AuthMethod,
+					Cookie:       d.Cookie,
+					APIKey:       d.APIKey,
+					APIUrl:       d.APIURL,
+					DownloaderID: d.DownloaderID,
+					ParserConfig: d.ParserConfig,
+					IsBuiltin:    d.IsBuiltin,
+					TemplateID:   d.TemplateID,
+				}
+				if createErr := tx.Create(&site).Error; createErr != nil {
+					return createErr
+				}
+			case nil:
+				updates := map[string]any{}
+				if site.DisplayName == "" && d.DisplayName != "" {
+					updates["display_name"] = d.DisplayName
+				}
+				if site.BaseURL == "" && d.BaseURL != "" {
+					updates["base_url"] = d.BaseURL
+				}
+				if site.DownloaderID == nil && d.DownloaderID != nil {
+					updates["downloader_id"] = d.DownloaderID
+				}
+				if site.ParserConfig == "" && d.ParserConfig != "" {
+					updates["parser_config"] = d.ParserConfig
+				}
+				if site.TemplateID == nil && d.TemplateID != nil {
+					updates["template_id"] = d.TemplateID
+				}
+				if site.Cookie == "" && d.Cookie != "" {
+					updates["cookie"] = d.Cookie
+				}
+				if site.APIKey == "" && d.APIKey != "" {
+					updates["api_key"] = d.APIKey
+				}
+				if site.APIUrl == "" && d.APIURL != "" {
+					updates["api_url"] = d.APIURL
+				}
+				if !site.IsBuiltin && d.IsBuiltin {
+					updates["is_builtin"] = true
+				}
+
+				if len(updates) > 0 {
+					if updateErr := tx.Model(&site).Updates(updates).Error; updateErr != nil {
+						return updateErr
+					}
+				}
+			default:
+				return findErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// 删除旧表
+	if err := db.Migrator().DropTable("dynamic_site_settings"); err != nil {
+		// 忽略删除失败
+		_ = err
+	}
+
+	// 设置默认值
+	return setDefaultsForSiteSetting(db)
+}
+
+// setDefaultsForSiteSetting 为 SiteSetting 设置默认值
+func setDefaultsForSiteSetting(db *gorm.DB) error {
+	// 为 DisplayName 为空的站点设置默认值（使用 Name）
+	if err := db.Model(&SiteSetting{}).
+		Where("display_name = '' OR display_name IS NULL").
+		Update("display_name", gorm.Expr("name")).Error; err != nil {
+		return err
+	}
+
+	// 为现有站点设置 IsBuiltin 默认值
+	// 注：这里将所有 IsBuiltin=false 的设置为 true，因为迁移前所有站点都是内置的
+	if err := db.Model(&SiteSetting{}).
+		Where("is_builtin = ?", false).
+		Update("is_builtin", true).Error; err != nil {
+		return err
+	}
+
 	return nil
 }

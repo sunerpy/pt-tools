@@ -13,7 +13,7 @@ const filters = ref({
   q: "",
   site: "",
   downloaded: false,
-  pushed: false,
+  pushed: true,
   expired: false,
 });
 

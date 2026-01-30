@@ -90,3 +90,54 @@ func TestIsDirectoryEmpty_OnUnreadable(t *testing.T) {
 		t.Fatalf("expected *fs.PathError, got %T", err)
 	}
 }
+
+func TestSanitizeURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "passkey masked",
+			input:    "https://rss.example.com/rss?passkey=abc123&other=value",
+			expected: "https://rss.example.com/rss?other=value&passkey=%2A%2A%2A",
+		},
+		{
+			name:     "sign masked",
+			input:    "https://rss.m-team.cc/api/rss/fetch?sign=259dcb690912c699776d0a51a9145597",
+			expected: "https://rss.m-team.cc/api/rss/fetch?sign=%2A%2A%2A",
+		},
+		{
+			name:     "multiple sensitive params",
+			input:    "https://example.com?passkey=secret&apikey=token123&normal=ok",
+			expected: "https://example.com?apikey=%2A%2A%2A&normal=ok&passkey=%2A%2A%2A",
+		},
+		{
+			name:     "no sensitive params unchanged",
+			input:    "https://example.com/rss?category=movie&limit=50",
+			expected: "https://example.com/rss?category=movie&limit=50",
+		},
+		{
+			name:     "no query params unchanged",
+			input:    "https://example.com/rss",
+			expected: "https://example.com/rss",
+		},
+		{
+			name:     "invalid url returns placeholder",
+			input:    "://invalid",
+			expected: "<invalid-url>",
+		},
+		{
+			name:     "case insensitive matching",
+			input:    "https://example.com?PassKey=secret&APIKEY=token",
+			expected: "https://example.com?APIKEY=%2A%2A%2A&PassKey=%2A%2A%2A",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeURL(tt.input)
+			require.Equal(t, tt.expected, got)
+		})
+	}
+}

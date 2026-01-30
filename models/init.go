@@ -156,8 +156,7 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 		&RSSSubscription{},
 		// New tables for downloader and site extensibility
 		&DownloaderSetting{},
-		&DownloaderDirectory{}, // 下载器目录配置
-		&DynamicSiteSetting{},
+		&DownloaderDirectory{},
 		&SiteTemplate{},
 		// Filter rules for RSS filtering
 		&FilterRule{},

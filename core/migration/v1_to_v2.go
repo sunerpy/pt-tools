@@ -126,8 +126,8 @@ func (m *MigrationService) RestoreBackup(backupPath string) error {
 		if err := tx.Where("1 = 1").Delete(&models.DownloaderSetting{}).Error; err != nil {
 			return fmt.Errorf("清空下载器设置失败: %w", err)
 		}
-		if err := tx.Where("1 = 1").Delete(&models.DynamicSiteSetting{}).Error; err != nil {
-			return fmt.Errorf("清空动态站点设置失败: %w", err)
+		if err := tx.Where("1 = 1").Delete(&models.SiteSetting{}).Error; err != nil {
+			return fmt.Errorf("清空站点设置失败: %w", err)
 		}
 
 		// 恢复全局设置
@@ -198,26 +198,28 @@ func (m *MigrationService) MigrateV1ToV2() *MigrationResult {
 			result.DownloadersMigrated++
 		}
 
-		// 迁移站点设置到dynamic_site_settings
+		// 更新站点设置的扩展字段
 		var sites []models.SiteSetting
 		if findErr := tx.Find(&sites).Error; findErr != nil {
 			return fmt.Errorf("获取站点设置失败: %w", findErr)
 		}
 
 		for _, site := range sites {
-			dynamicSite := models.DynamicSiteSetting{
-				Name:        site.Name,
-				DisplayName: site.Name, // 使用name作为display_name
-				Enabled:     site.Enabled,
-				AuthMethod:  site.AuthMethod,
-				Cookie:      site.Cookie,
-				APIKey:      site.APIKey,
-				APIURL:      site.APIUrl,
-				IsBuiltin:   true, // 现有站点标记为内置
+			updates := map[string]any{}
+			// 设置 DisplayName 默认值
+			if site.DisplayName == "" {
+				updates["display_name"] = site.Name
 			}
-			if createErr := tx.Create(&dynamicSite).Error; createErr != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("迁移站点 %s 失败: %v", site.Name, createErr))
-				continue
+			// 设置 IsBuiltin 默认值
+			if !site.IsBuiltin {
+				updates["is_builtin"] = true
+			}
+
+			if len(updates) > 0 {
+				if updateErr := tx.Model(&site).Updates(updates).Error; updateErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("更新站点 %s 失败: %v", site.Name, updateErr))
+					continue
+				}
 			}
 			result.SitesMigrated++
 		}
@@ -259,38 +261,28 @@ func (m *MigrationService) IsMigrationNeeded() bool {
 
 // GetMigrationStatus 获取迁移状态
 type MigrationStatus struct {
-	NeedsMigration       bool `json:"needs_migration"`
-	HasOldQbitConfig     bool `json:"has_old_qbit_config"`
-	HasNewDownloaders    bool `json:"has_new_downloaders"`
-	OldSitesCount        int  `json:"old_sites_count"`
-	NewDynamicSitesCount int  `json:"new_dynamic_sites_count"`
+	NeedsMigration    bool `json:"needs_migration"`
+	HasOldQbitConfig  bool `json:"has_old_qbit_config"`
+	HasNewDownloaders bool `json:"has_new_downloaders"`
+	SitesCount        int  `json:"sites_count"`
 }
 
 func (m *MigrationService) GetMigrationStatus() *MigrationStatus {
 	status := &MigrationStatus{}
 
-	// 检查旧qbit配置
 	var qbit models.QbitSettings
 	if err := m.db.First(&qbit).Error; err == nil && qbit.URL != "" {
 		status.HasOldQbitConfig = true
 	}
 
-	// 检查新下载器配置
 	var downloaderCount int64
 	m.db.Model(&models.DownloaderSetting{}).Count(&downloaderCount)
 	status.HasNewDownloaders = downloaderCount > 0
 
-	// 检查旧站点数量
-	var oldSitesCount int64
-	m.db.Model(&models.SiteSetting{}).Count(&oldSitesCount)
-	status.OldSitesCount = int(oldSitesCount)
+	var sitesCount int64
+	m.db.Model(&models.SiteSetting{}).Count(&sitesCount)
+	status.SitesCount = int(sitesCount)
 
-	// 检查新动态站点数量
-	var newSitesCount int64
-	m.db.Model(&models.DynamicSiteSetting{}).Count(&newSitesCount)
-	status.NewDynamicSitesCount = int(newSitesCount)
-
-	// 判断是否需要迁移
 	status.NeedsMigration = status.HasOldQbitConfig && !status.HasNewDownloaders
 
 	return status

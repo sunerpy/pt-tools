@@ -205,7 +205,7 @@ jobs:
           govulncheck ./...
 
   format-check:
-    name: Format Check (oxfmt)
+    name: Format Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -221,13 +221,37 @@ jobs:
         with:
           version: 10
 
-      - name: Install Dependencies
+      - name: Install Frontend Dependencies
         working-directory: web/frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting
-        working-directory: web/frontend
-        run: pnpm fmt:check
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install Go formatters
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install mvdan.cc/gofumpt@latest
+
+      - name: Run make fmt
+        run: make fmt
+
+      - name: Check for formatting changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Code is not formatted. Please run 'make fmt' locally and commit the changes."
+            echo ""
+            echo "Changed files:"
+            git status --porcelain
+            echo ""
+            echo "Diff:"
+            git diff --color=always
+            exit 1
+          fi
+          echo "All code is properly formatted."
 
   ci-success:
     name: CI Success

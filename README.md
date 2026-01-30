@@ -98,14 +98,9 @@ docker run -d \
 
 Watchtower 会自动检测并更新 pt-tools 容器到最新版本。
 
-## 内置支持站点
+## 支持站点
 
-| 站点             | 站点类型 | 认证方式 | 支持功能                      |
-| ---------------- | -------- | -------- | ----------------------------- |
-| **HDSky**        | NexusPHP | Cookie   | RSS、搜索、用户信息、等级要求 |
-| **SpringSunday** | NexusPHP | Cookie   | RSS、搜索、用户信息、等级要求 |
-| **M-Team**       | mTorrent | API Key  | RSS、搜索、用户信息           |
-| **HDDolby**      | NexusPHP | Cookie   | RSS、搜索、用户信息           |
+[已适配站点列表](docs/sites.md)
 
 > **扩展站点支持**：如需支持其他站点，欢迎提交 [Issue](https://github.com/sunerpy/pt-tools/issues) 或 [Pull Request](https://github.com/sunerpy/pt-tools/pulls)。
 
@@ -224,6 +219,7 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 
 - **提交 Issue**：[GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
 - **提交 PR**：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
+- **交流群**：[Telegram](https://t.me/+7YK2kmWIX0s1Nzdl)
 
 详细的贡献流程请参考 [开发指南](docs/development.md)。
 

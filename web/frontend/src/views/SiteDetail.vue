@@ -410,10 +410,23 @@ function getRowClassName({ row }: { row: RSSConfig }) {
       </template>
 
       <el-form :model="form" label-width="100px" label-position="right">
+        <el-alert
+          v-if="form.unavailable"
+          :title="form.unavailable_reason || '该站点暂时不可用'"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px" />
+
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="启用">
-              <el-switch v-model="form.enabled" />
+              <el-tooltip
+                :content="form.unavailable ? form.unavailable_reason : ''"
+                :disabled="!form.unavailable"
+                placement="top">
+                <el-switch v-model="form.enabled" :disabled="form.unavailable" />
+              </el-tooltip>
             </el-form-item>
           </el-col>
           <el-col :span="12">

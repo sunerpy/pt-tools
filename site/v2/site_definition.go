@@ -20,6 +20,18 @@ type SiteDefinition struct {
 	// FaviconURL is the site's favicon URL for caching
 	FaviconURL string `json:"faviconUrl,omitempty"`
 
+	// Unavailable marks the site as temporarily unavailable
+	Unavailable bool `json:"unavailable,omitempty"`
+	// UnavailableReason explains why the site is unavailable
+	UnavailableReason string `json:"unavailableReason,omitempty"`
+
+	// AuthMethod is "cookie" or "api_key" (inferred from Schema if empty)
+	AuthMethod string `json:"authMethod,omitempty"`
+	// RateLimit is requests per second (default: 2.0)
+	RateLimit float64 `json:"rateLimit,omitempty"`
+	// RateBurst is the burst size for rate limiting (default: 5)
+	RateBurst int `json:"rateBurst,omitempty"`
+
 	// TimezoneOffset is the site's timezone (e.g., "+0800")
 	TimezoneOffset string `json:"timezoneOffset,omitempty"`
 

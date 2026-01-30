@@ -25,6 +25,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 type Server struct {
@@ -80,6 +81,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/downloaders/all-directories", s.auth(s.apiAllDownloaderDirectories))
 	mux.HandleFunc("/api/downloaders/", s.auth(s.apiDownloaderRouter))
 	// Site management APIs
+	mux.HandleFunc("/api/sites/downloader-summary", s.auth(s.apiSiteDownloaderSummary))
 	mux.HandleFunc("/api/sites/validate", s.auth(s.apiSiteValidate))
 	mux.HandleFunc("/api/sites/dynamic", s.auth(s.apiDynamicSites))
 	mux.HandleFunc("/api/sites/templates", s.auth(s.apiSiteTemplates))
@@ -168,7 +170,11 @@ func logMiddleware(next http.Handler) http.Handler {
 		sr := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sr, r)
 		d := time.Since(start).Milliseconds()
-		global.GetSlogger().Infof("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+		if sr.status >= 400 {
+			global.GetSlogger().Warnf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+		} else {
+			global.GetSlogger().Debugf("http method=%s path=%s status=%d dur=%dms remote=%s", r.Method, r.URL.Path, sr.status, d, r.RemoteAddr)
+		}
 	})
 }
 
@@ -463,16 +469,55 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SiteConfigResponse extends SiteConfig with unavailable status for API responses
+type SiteConfigResponse struct {
+	Enabled           *bool              `json:"enabled"`
+	AuthMethod        string             `json:"auth_method"`
+	Cookie            string             `json:"cookie"`
+	APIKey            string             `json:"api_key"`
+	APIUrl            string             `json:"api_url"`
+	RSS               []models.RSSConfig `json:"rss"`
+	Unavailable       bool               `json:"unavailable,omitempty"`
+	UnavailableReason string             `json:"unavailable_reason,omitempty"`
+}
+
 func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// 直接从 DB 读取，确保初始三站点展示
 		sites, err := s.store.ListSites()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, sites)
+		defRegistry := v2.GetDefinitionRegistry()
+		result := make(map[models.SiteGroup]SiteConfigResponse)
+		var sitesToDisable []models.SiteGroup
+		for sg, sc := range sites {
+			resp := SiteConfigResponse{
+				Enabled:    sc.Enabled,
+				AuthMethod: sc.AuthMethod,
+				Cookie:     sc.Cookie,
+				APIKey:     sc.APIKey,
+				APIUrl:     sc.APIUrl,
+				RSS:        sc.RSS,
+			}
+			if def, ok := defRegistry.Get(string(sg)); ok {
+				resp.Unavailable = def.Unavailable
+				resp.UnavailableReason = def.UnavailableReason
+				if def.Unavailable {
+					f := false
+					resp.Enabled = &f
+					if sc.Enabled != nil && *sc.Enabled {
+						sitesToDisable = append(sitesToDisable, sg)
+					}
+				}
+			}
+			result[sg] = resp
+		}
+		if len(sitesToDisable) > 0 {
+			go s.disableUnavailableSites(sitesToDisable)
+		}
+		writeJSON(w, result)
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if name == "" {
@@ -502,6 +547,21 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) disableUnavailableSites(sites []models.SiteGroup) {
+	for _, sg := range sites {
+		disabled := models.SiteConfig{Enabled: func() *bool { f := false; return &f }()}
+		if _, err := s.store.UpsertSite(sg, disabled); err != nil {
+			global.GetSlogger().Warnf("[Site] 禁用不可用站点失败: %s, err=%v", sg, err)
+			continue
+		}
+		global.GetSlogger().Infof("[Site] 已自动禁用不可用站点: %s", sg)
+	}
+	cfg, _ := s.store.Load()
+	if cfg != nil {
+		s.mgr.Reload(cfg)
 	}
 }
 

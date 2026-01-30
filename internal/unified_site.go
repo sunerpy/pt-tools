@@ -35,31 +35,22 @@ type UnifiedSiteImpl struct {
 	logger     *zap.SugaredLogger
 }
 
-// newUnifiedSiteImplWithID 使用指定的 siteID 创建统一站点实现
-func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, siteID string) (*UnifiedSiteImpl, error) {
-	siteKind, ok := SiteGroupToKind[siteGroup]
-	if !ok {
-		return nil, fmt.Errorf("unsupported site group: %s", siteGroup)
-	}
-
+func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, siteID string, siteKind v2.SiteKind) (*UnifiedSiteImpl, error) {
 	var logger *zap.SugaredLogger
 	var zapLogger *zap.Logger
 	if global.GetLogger() != nil {
 		logger = global.GetSlogger()
-		zapLogger = global.GetLogger()
 	} else {
-		// 使用 nop logger 作为后备
 		zapLogger = zap.NewNop()
 		logger = zapLogger.Sugar()
 	}
-	registry := v2.NewSiteRegistry(zapLogger)
 
 	return &UnifiedSiteImpl{
 		ctx:        ctx,
 		siteGroup:  siteGroup,
 		siteID:     siteID,
 		siteKind:   siteKind,
-		registry:   registry,
+		registry:   v2.GetGlobalSiteRegistry(),
 		maxRetries: maxRetries,
 		retryDelay: retryDelay,
 		logger:     logger,
@@ -118,6 +109,8 @@ func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem,
 	if item == nil {
 		return nil, fmt.Errorf("RSS item 为空")
 	}
+
+	u.logger.Debugf("[获取种子详情] 站点=%s, ID=%s, 标题=%s", u.siteGroup, item.GUID, item.Title)
 
 	switch u.siteKind {
 	case v2.SiteMTorrent:
@@ -303,8 +296,8 @@ func (u *UnifiedSiteImpl) mapPHPDiscountLevel(discount models.DiscountType) v2.D
 	}
 }
 
-// SendTorrentToQbit 发送种子到下载器
-func (u *UnifiedSiteImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.RSSConfig) error {
+// SendTorrentToDownloader 发送种子到下载器
+func (u *UnifiedSiteImpl) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
 	homeDir, _ := os.UserHomeDir()
 	store := core.NewConfigStore(global.GlobalDB)
 	gl, _ := store.GetGlobalOnly()
@@ -315,7 +308,6 @@ func (u *UnifiedSiteImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.R
 	sub := utils.SubPathFromTag(rssCfg.Tag)
 	dirPath := filepath.Join(base, sub)
 
-	// 检查目录
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		_ = os.MkdirAll(dirPath, 0o755)
 	}
@@ -325,20 +317,18 @@ func (u *UnifiedSiteImpl) SendTorrentToQbit(ctx context.Context, rssCfg models.R
 		return err
 	}
 	if !exists {
-		u.logger.Infof("下载目录不存在(未下载种子,跳过): %s", dirPath)
+		u.logger.Debugf("[跳过推送] 站点=%s, 下载目录不存在: %s", u.siteGroup, dirPath)
 		return nil
 	}
 	if empty {
-		u.logger.Infof("下载目录为空(未下载种子,跳过): %s", dirPath)
+		u.logger.Debugf("[跳过推送] 站点=%s, 下载目录为空: %s", u.siteGroup, dirPath)
 		return nil
 	}
 
-	// 使用下载器选择逻辑
 	err = ProcessTorrentsWithDownloaderByRSS(ctx, rssCfg, dirPath, rssCfg.Category, rssCfg.Tag, u.siteGroup)
 	if err != nil {
-		u.logger.Errorf("发送种子到下载器失败: %v", err)
+		u.logger.Errorf("[推送失败] 站点=%s, 错误=%v", u.siteGroup, err)
 		return err
 	}
-	u.logger.Infof("种子处理完成并更新数据库记录, 路径: %s, 分类: %s, 标签: %s", dirPath, rssCfg.Category, rssCfg.Tag)
 	return nil
 }
