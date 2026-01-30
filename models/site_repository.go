@@ -114,10 +114,23 @@ func (r *SiteRepository) BatchUpdateSiteDownloader(siteIDs []uint, downloaderID 
 	if len(siteIDs) == 0 {
 		return 0, nil
 	}
-	result := r.db.Model(&SiteSetting{}).
-		Where("id IN ?", siteIDs).
-		Update("downloader_id", downloaderID)
-	return result.RowsAffected, result.Error
+
+	var rowsAffected int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		siteResult := tx.Model(&SiteSetting{}).
+			Where("id IN ?", siteIDs).
+			Update("downloader_id", downloaderID)
+		if siteResult.Error != nil {
+			return siteResult.Error
+		}
+		rowsAffected = siteResult.RowsAffected
+
+		return tx.Model(&RSSSubscription{}).
+			Where("site_id IN ?", siteIDs).
+			Update("downloader_id", downloaderID).Error
+	})
+
+	return rowsAffected, err
 }
 
 func (r *SiteRepository) GetSiteByName(name string) (*SiteSetting, error) {

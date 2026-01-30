@@ -12,7 +12,7 @@ import (
 func setupSiteRepoTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&SiteSetting{}))
+	require.NoError(t, db.AutoMigrate(&SiteSetting{}, &RSSSubscription{}))
 	return db
 }
 
@@ -133,6 +133,42 @@ func TestSiteRepository_BatchUpdateSiteDownloader(t *testing.T) {
 
 	site3, _ := repo.GetSiteByName("site3")
 	assert.Nil(t, site3.DownloaderID)
+}
+
+func TestSiteRepository_BatchUpdateSiteDownloader_WithRSS(t *testing.T) {
+	db := setupSiteRepoTestDB(t)
+	repo := NewSiteRepository(db)
+
+	id1, _ := repo.CreateSite(SiteData{Name: "site1", AuthMethod: "cookie"})
+	id2, _ := repo.CreateSite(SiteData{Name: "site2", AuthMethod: "cookie"})
+
+	rss1 := RSSSubscription{SiteID: id1, Name: "rss1", URL: "http://example.com/rss1", IntervalMinutes: 5}
+	rss2 := RSSSubscription{SiteID: id1, Name: "rss2", URL: "http://example.com/rss2", IntervalMinutes: 5}
+	rss3 := RSSSubscription{SiteID: id2, Name: "rss3", URL: "http://example.com/rss3", IntervalMinutes: 5}
+	db.Create(&rss1)
+	db.Create(&rss2)
+	db.Create(&rss3)
+
+	downloaderID := uint(100)
+	rowsAffected, err := repo.BatchUpdateSiteDownloader([]uint{id1, id2}, downloaderID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), rowsAffected)
+
+	site1, _ := repo.GetSiteByID(id1)
+	assert.NotNil(t, site1.DownloaderID)
+	assert.Equal(t, downloaderID, *site1.DownloaderID)
+
+	var updatedRSS1, updatedRSS2, updatedRSS3 RSSSubscription
+	db.First(&updatedRSS1, rss1.ID)
+	db.First(&updatedRSS2, rss2.ID)
+	db.First(&updatedRSS3, rss3.ID)
+
+	assert.NotNil(t, updatedRSS1.DownloaderID, "RSS1 downloader_id should be set")
+	assert.Equal(t, downloaderID, *updatedRSS1.DownloaderID, "RSS1 downloader_id should match")
+	assert.NotNil(t, updatedRSS2.DownloaderID, "RSS2 downloader_id should be set")
+	assert.Equal(t, downloaderID, *updatedRSS2.DownloaderID, "RSS2 downloader_id should match")
+	assert.NotNil(t, updatedRSS3.DownloaderID, "RSS3 downloader_id should be set")
+	assert.Equal(t, downloaderID, *updatedRSS3.DownloaderID, "RSS3 downloader_id should match")
 }
 
 func TestSiteRepository_DeleteSite(t *testing.T) {

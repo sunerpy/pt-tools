@@ -452,8 +452,11 @@ func (s *Server) setDefaultDownloader(w http.ResponseWriter, r *http.Request, id
 		if clearErr := tx.Model(&models.DownloaderSetting{}).Where("is_default = ?", true).Update("is_default", false).Error; clearErr != nil {
 			return clearErr
 		}
-		// 设置当前为默认
-		if setErr := tx.Model(&downloader).Update("is_default", true).Error; setErr != nil {
+		// 设置当前为默认，并自动启用
+		if setErr := tx.Model(&downloader).Updates(map[string]interface{}{
+			"is_default": true,
+			"enabled":    true,
+		}).Error; setErr != nil {
 			return setErr
 		}
 		return nil
