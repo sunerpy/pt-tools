@@ -151,9 +151,42 @@ func TestHDDolbyDefinition(t *testing.T) {
 	}
 }
 
+func TestNovaHDDefinition(t *testing.T) {
+	def, ok := v2.GetDefinitionRegistry().Get("novahd")
+	if !ok {
+		t.Fatal("NovaHD definition not found in registry")
+	}
+
+	if def.Name != "NovaHD" {
+		t.Errorf("Name = %q, want %q", def.Name, "NovaHD")
+	}
+	if def.Schema != "NexusPHP" {
+		t.Errorf("Schema = %q, want %q", def.Schema, "NexusPHP")
+	}
+	if len(def.URLs) == 0 || def.URLs[0] != "https://pt.novahd.top/" {
+		t.Errorf("URLs = %v, want [https://pt.novahd.top/]", def.URLs)
+	}
+	if def.UserInfo == nil {
+		t.Error("UserInfo should not be nil")
+	}
+	if def.DetailParser == nil {
+		t.Error("DetailParser should not be nil")
+	}
+	if len(def.LevelRequirements) != 9 {
+		t.Errorf("LevelRequirements count = %d, want 9", len(def.LevelRequirements))
+	}
+
+	if def.DetailParser.DiscountSelector != "h1 font.free, h1 font[class]" {
+		t.Errorf("DiscountSelector = %q, want %q", def.DetailParser.DiscountSelector, "h1 font.free, h1 font[class]")
+	}
+	if def.DetailParser.EndTimeSelector != "h1 span[title]" {
+		t.Errorf("EndTimeSelector = %q, want %q", def.DetailParser.EndTimeSelector, "h1 span[title]")
+	}
+}
+
 func TestAllDefinitionsRegistered(t *testing.T) {
 	registry := v2.GetDefinitionRegistry()
-	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby"}
+	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby", "novahd"}
 
 	for _, siteID := range expectedSites {
 		if _, ok := registry.Get(siteID); !ok {
