@@ -14,6 +14,12 @@ const router = createRouter({
       meta: { title: "用户统计" },
     },
     {
+      path: "/userinfo/export",
+      name: "userinfo-export",
+      component: () => import("@/views/UserDataExport.vue"),
+      meta: { title: "数据导出" },
+    },
+    {
       path: "/global",
       name: "global",
       component: () => import("@/views/GlobalSettings.vue"),
