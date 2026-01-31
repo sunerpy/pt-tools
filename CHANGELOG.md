@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-01-31
+
+### Bug Fixes
+
+- **site**: 修复站点404错误
+- 站点验证改为从 Registry 动态获取，支持所有已注册站点
+- **site**: 修复站点404错误 ([#49](https://github.com/sunerpy/pt-tools/pull/49))
+- 站点验证改为从 Registry 动态获取，支持所有已注册站点
+
 ## [0.9.0] - 2026-01-31
 
 ### Features
