@@ -439,13 +439,17 @@ function createExportCanvas(): HTMLCanvasElement {
           ctx.fillText(`${formatNumber(site.bonusPerHour)}/h`, x + siteCardWidth - 10, y + 34);
         }
 
-        ctx.fillStyle = "#60a5fa";
+        ctx.fillStyle = "#93c5fd";
         ctx.fillText(`R: ${formatRatio(site.ratio)}`, x + siteCardWidth - 10, y + 50);
 
         if (site.joinDate) {
           ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
           ctx.textAlign = "left";
-          ctx.fillText(`${formatJoinDuration(site.joinDate)}`, x + 10, y + 62);
+          ctx.fillText(
+            `${formatDate(site.joinDate)} · ${formatJoinDuration(site.joinDate)}`,
+            x + 10,
+            y + 62,
+          );
         }
       });
     }
@@ -488,28 +492,52 @@ async function copyToClipboard() {
   await nextTick();
 
   try {
+    // 检查是否为安全上下文（HTTPS 或 localhost）
+    if (!window.isSecureContext) {
+      ElMessage.warning("HTTP 环境不支持一键复制，请右键复制预览图或使用下载功能");
+      return;
+    }
+
     const canvas = createExportCanvas();
 
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => {
-          if (b) resolve(b);
-          else reject(new Error("无法生成图片"));
-        },
-        "image/png",
-        1.0,
-      );
-    });
+    // 方法1: 现代 Clipboard API (需要 HTTPS)
+    if (
+      navigator.clipboard &&
+      typeof navigator.clipboard.write === "function" &&
+      typeof ClipboardItem !== "undefined"
+    ) {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => {
+            if (b) resolve(b);
+            else reject(new Error("无法生成图片"));
+          },
+          "image/png",
+          1.0,
+        );
+      });
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      ElMessage.success("图片已复制到剪贴板");
+      return;
+    }
 
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    // 方法2: 复制 Data URL 文本
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      const dataUrl = canvas.toDataURL("image/png", 1.0);
+      await navigator.clipboard.writeText(dataUrl);
+      ElMessage.warning("浏览器不支持复制图片，已复制图片 Base64 数据");
+      return;
+    }
 
-    ElMessage.success("图片已复制到剪贴板");
+    // 不支持任何剪贴板 API
+    ElMessage.warning("浏览器不支持剪贴板操作，请右键复制预览图或使用下载功能");
   } catch (e: unknown) {
     const error = e as Error;
     if (error.name === "NotAllowedError") {
       ElMessage.warning("请授予剪贴板访问权限");
     } else {
-      ElMessage.error(error.message || "复制失败");
+      ElMessage.error("复制失败，请右键复制预览图或使用下载功能");
+      console.error("Clipboard error:", error);
     }
   } finally {
     copying.value = false;
@@ -652,7 +680,10 @@ onMounted(() => {
                     </div>
                   </div>
                   <div v-if="site.joinDate" class="site-card-row site-card-footer-row">
-                    <span class="site-join-time">{{ formatJoinDuration(site.joinDate) }}</span>
+                    <span class="site-join-time"
+                      >{{ formatDate(site.joinDate) }} ·
+                      {{ formatJoinDuration(site.joinDate) }}</span
+                    >
                   </div>
                 </div>
               </div>
