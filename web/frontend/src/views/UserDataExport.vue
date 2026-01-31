@@ -403,17 +403,31 @@ function createExportCanvas(): HTMLCanvasElement {
           12,
         );
 
-        if (site.username) {
+        // 绘制用户名和等级（在同一行）
+        const levelText = site.levelName || site.rank;
+        if (site.username || levelText) {
           ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-          drawMosaicText(
-            ctx,
-            `@${site.username}`,
-            x + 10 + logoSize + 6,
-            y + 34,
-            exportConfig.value.blurUsernames,
-            10,
-          );
+          let currentX = x + 10 + logoSize + 6;
+
+          if (site.username) {
+            ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+            drawMosaicText(
+              ctx,
+              `@${site.username}`,
+              currentX,
+              y + 34,
+              exportConfig.value.blurUsernames,
+              10,
+            );
+            currentX +=
+              ctx.measureText(`@${getMosaicText(site.username, exportConfig.value.blurUsernames)}`)
+                .width + 6;
+          }
+
+          if (levelText) {
+            ctx.fillStyle = "#a78bfa";
+            ctx.fillText(levelText, currentX, y + 34);
+          }
         }
 
         ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
@@ -654,12 +668,17 @@ onMounted(() => {
                           :class="{ 'mosaic-text': exportConfig.blurSiteNames }">
                           {{ getMosaicText(site.site, exportConfig.blurSiteNames) }}
                         </span>
-                        <span
-                          v-if="site.username"
-                          class="site-card-username"
-                          :class="{ 'mosaic-text': exportConfig.blurUsernames }">
-                          @{{ getMosaicText(site.username, exportConfig.blurUsernames) }}
-                        </span>
+                        <div class="site-card-meta">
+                          <span
+                            v-if="site.username"
+                            class="site-card-username"
+                            :class="{ 'mosaic-text': exportConfig.blurUsernames }">
+                            @{{ getMosaicText(site.username, exportConfig.blurUsernames) }}
+                          </span>
+                          <span v-if="site.levelName || site.rank" class="site-card-level">
+                            {{ site.levelName || site.rank }}
+                          </span>
+                        </div>
                       </div>
                     </div>
                     <div class="site-card-right">
