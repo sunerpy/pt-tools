@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-01-31
+
+### Features
+
+- **site**: HDDolby 两步验证支持 + 解析逻辑优化
+  主要变更：- feat(hddolby): 新增 HDDolbyDriver 支持两步验证（Cookie + 详情页解析）- feat(ratelimit): 实现 SQLite 持久化速率限制器，重启后状态不丢失 - refactor(parser): 统一 NexusPHP 详情页解析配置到 SiteDefinition - feat(discount): 搜索结果页支持可配置的 DiscountMapping - docs: 更新开发指南，添加持久化限流和解析配置说明
+
+        技术细节：
+        - 新增 models/rate_limit.go (SiteRateLimit 数据模型)
+        - 新增 site/v2/persistent_rate_limiter.go (滑动窗口限速器)
+        - 新增 site/v2/hddolby_driver.go (HDDolby 专用驱动)
+        - 删除冗余的 site/parser/ 和 site/mocks/ 目录
+        - SiteDefinition 新增 DetailParser 和 DiscountMapping 配置
+
+- **site**: HDDolby 两步验证支持 + 支持分享站点数据截图 ([#47](https://github.com/sunerpy/pt-tools/pull/47))
+- feat(hddolby): 新增 HDDolby 支持两步验证（Cookie + 详情页解析）- feat: 支持用户统计页面导出分享数据截图，支持模糊站点logo、名称、用户名等自定义项 - refactor(parser): 统一 NexusPHP 详情页解析配置到 SiteDefinition - feat(discount): 搜索结果页支持可配置的 DiscountMapping - docs: 更新开发指南，添加持久化限流和解析配置说明
+
 ## [0.7.0] - 2026-01-31
 
 ### CI/CD
