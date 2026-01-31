@@ -26,18 +26,12 @@ func GetAllSupportedSiteGroups() []models.SiteGroup {
 
 	groups := make([]models.SiteGroup, 0, len(ids))
 	for _, id := range ids {
-		if _, ok := models.AllowedSiteGroups[models.SiteGroup(id)]; ok {
-			groups = append(groups, models.SiteGroup(id))
-		}
+		groups = append(groups, models.SiteGroup(id))
 	}
 	return groups
 }
 
 func IsSiteGroupSupported(siteGroup models.SiteGroup) bool {
-	if _, ok := models.AllowedSiteGroups[siteGroup]; !ok {
-		return false
-	}
-
 	registry := v2.GetGlobalSiteRegistry()
 	_, ok := registry.Get(string(siteGroup))
 	return ok

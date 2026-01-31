@@ -86,6 +86,7 @@ export interface SiteConfig {
   api_key: string;
   api_url: string;
   rss: RSSConfig[];
+  urls?: string[];
   unavailable?: boolean;
   unavailable_reason?: string;
 }
