@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-01-31
+
+### Features
+
+- **site**: 新增 NovaHD 站点支持 + 修复图片分享功能
+  NovaHD 站点支持: - 新增 NovaHD 站点定义，包含 9 个等级要求 - 自定义 DetailParser 配置用于解析优惠和结束时间
+- **site**: 新增 NovaHD 站点支持 + 修复图片分享功能 ([#48](https://github.com/sunerpy/pt-tools/pull/48))
+- 新增 NovaHD 站点定义，包含 9 个等级要求 - 自定义 DetailParser 配置用于解析优惠和结束时间
+
+      - 修复 HTTP 环境下剪贴板 API 不可用导致的错误
+      - 优化分享率颜色对比度，在绿色主题下更易辨识
+      - 站点卡片显示入站日期和时长
+
 ## [0.8.0] - 2026-01-31
 
 ### Features
