@@ -110,6 +110,9 @@ func (s *Server) apiSiteValidate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, SiteValidationResponse{Valid: false, Message: "API Key不能为空"})
 			return
 		}
+	case "rss_passkey":
+		writeJSON(w, SiteValidationResponse{Valid: true, Message: "RSS Passkey 认证暂不支持预验证"})
+		return
 	default:
 		writeJSON(w, SiteValidationResponse{Valid: false, Message: "不支持的认证方式"})
 		return

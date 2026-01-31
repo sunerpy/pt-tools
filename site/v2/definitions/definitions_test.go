@@ -131,8 +131,11 @@ func TestHDDolbyDefinition(t *testing.T) {
 	if def.Name != "HD Dolby" {
 		t.Errorf("Name = %q, want %q", def.Name, "HD Dolby")
 	}
-	if def.Schema != "NexusPHP" {
-		t.Errorf("Schema = %q, want %q", def.Schema, "NexusPHP")
+	if def.Schema != "HDDolby" {
+		t.Errorf("Schema = %q, want %q", def.Schema, "HDDolby")
+	}
+	if def.AuthMethod != "cookie_and_api_key" {
+		t.Errorf("AuthMethod = %q, want %q", def.AuthMethod, "cookie_and_api_key")
 	}
 
 	// Verify seedingBonus requirements exist
@@ -168,7 +171,6 @@ func TestDefinitionUserInfoConfig(t *testing.T) {
 		{"hdsky", 3, true},
 		{"springsunday", 3, true},
 		{"mteam", 4, true},
-		{"hddolby", 3, true},
 	}
 
 	registry := v2.GetDefinitionRegistry()

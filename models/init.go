@@ -164,6 +164,7 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 		&RSSFilterAssociation{},
 		// Favicon cache for site icons
 		&FaviconCache{},
+		&SiteRateLimit{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

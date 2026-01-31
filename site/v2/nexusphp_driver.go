@@ -54,6 +54,9 @@ type SiteSelectors struct {
 	Snatched string `json:"snatched"`
 	// DiscountIcon selects the discount icon element
 	DiscountIcon string `json:"discountIcon"`
+	// DiscountMapping maps keywords to discount levels (optional, uses default if nil)
+	// Keys are matched against class, src, alt attributes (case-insensitive)
+	DiscountMapping map[string]DiscountLevel `json:"discountMapping,omitempty"`
 	// DiscountEndTime selects the discount end time
 	DiscountEndTime string `json:"discountEndTime"`
 	// DownloadLink selects the download link
@@ -450,7 +453,7 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		// Parse discount level
 		discountElem := s.Find(d.Selectors.DiscountIcon)
 		if discountElem.Length() > 0 {
-			item.DiscountLevel = parseDiscountFromElement(discountElem)
+			item.DiscountLevel = parseDiscountFromElement(discountElem, d.Selectors.DiscountMapping)
 		}
 
 		// Parse discount end time
@@ -1461,20 +1464,22 @@ func parseSize(sizeStr string) int64 {
 }
 
 // parseDiscountFromElement parses discount level from an HTML element
-func parseDiscountFromElement(elem *goquery.Selection) DiscountLevel {
-	// Check class attribute
+func parseDiscountFromElement(elem *goquery.Selection, customMapping map[string]DiscountLevel) DiscountLevel {
 	class, _ := elem.Attr("class")
 	class = strings.ToLower(class)
 
-	// Check src attribute for image
 	src, _ := elem.Attr("src")
 	src = strings.ToLower(src)
 
-	// Check alt attribute
 	alt, _ := elem.Attr("alt")
 	alt = strings.ToLower(alt)
 
 	combined := class + " " + src + " " + alt
+	for keyword, level := range customMapping {
+		if strings.Contains(combined, strings.ToLower(keyword)) {
+			return level
+		}
+	}
 
 	switch {
 	case strings.Contains(combined, "2xfree") || strings.Contains(combined, "free2up"):

@@ -275,29 +275,6 @@ func TestSpringSundayParser(t *testing.T) {
 	})
 }
 
-// TestParserRegistry tests the parser registry
-func TestParserRegistry(t *testing.T) {
-	t.Run("get HDSky parser", func(t *testing.T) {
-		parser := GetParser(SiteNameHDSky)
-		assert.NotNil(t, parser)
-		_, ok := parser.(*HDSkyParser)
-		assert.True(t, ok)
-	})
-
-	t.Run("get SpringSunday parser", func(t *testing.T) {
-		parser := GetParser(SiteNameSpringSunday)
-		assert.NotNil(t, parser)
-		_, ok := parser.(*SpringSundayParser)
-		assert.True(t, ok)
-	})
-
-	t.Run("get unknown parser returns nil", func(t *testing.T) {
-		parser := GetParser(SiteName("unknown"))
-		assert.Nil(t, parser)
-	})
-}
-
-// TestParserConfig tests parser configuration
 func TestParserConfig(t *testing.T) {
 	t.Run("default config", func(t *testing.T) {
 		config := DefaultNexusPHPParserConfig()
@@ -305,7 +282,14 @@ func TestParserConfig(t *testing.T) {
 	})
 
 	t.Run("custom time layout", func(t *testing.T) {
-		parser := NewHDSkyParser(WithParserTimeLayout("2006/01/02 15:04:05"))
-		assert.Equal(t, "2006/01/02 15:04:05", parser.Config.TimeLayout)
+		parser := NewNexusPHPParser(WithTimeLayout("2006/01/02 15:04:05"))
+		assert.Equal(t, "2006/01/02 15:04:05", parser.config.TimeLayout)
+	})
+
+	t.Run("type aliases work", func(t *testing.T) {
+		p1 := NewHDSkyParser()
+		p2 := NewSpringSundayParser()
+		assert.NotNil(t, p1)
+		assert.NotNil(t, p2)
 	})
 }

@@ -46,6 +46,8 @@ const (
 	SiteGazelle SiteKind = "gazelle"
 	// SiteMTorrent represents M-Team's custom API
 	SiteMTorrent SiteKind = "mtorrent"
+	// SiteHDDolby represents HDDolby's REST API
+	SiteHDDolby SiteKind = "hddolby"
 )
 
 // DiscountLevel represents the discount level of a torrent
@@ -430,4 +432,9 @@ type Driver[Req any, Res any] interface {
 	PrepareDownload(torrentID string) (Req, error)
 	// ParseDownload extracts torrent file data from response
 	ParseDownload(res Res) ([]byte, error)
+}
+
+// HashDownloader is an optional interface for sites that require a hash for download
+type HashDownloader interface {
+	DownloadWithHash(ctx context.Context, torrentID, hash string) ([]byte, error)
 }

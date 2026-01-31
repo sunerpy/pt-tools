@@ -43,6 +43,10 @@ type SiteDefinition struct {
 
 	// Selectors contains custom CSS selectors (merged with schema defaults)
 	Selectors *SiteSelectors `json:"selectors,omitempty"`
+
+	// DetailParser contains detail page parsing configuration
+	// If nil, uses DefaultDetailParserConfig()
+	DetailParser *DetailParserConfig `json:"detailParser,omitempty"`
 }
 
 // UserInfoConfig defines how to fetch and parse user info
@@ -110,4 +114,41 @@ type Filter struct {
 	Name string `json:"name"`
 	// Args are optional arguments
 	Args []any `json:"args,omitempty"`
+}
+
+// DetailParserConfig defines how to parse torrent detail pages
+// Used for RSS detail fetching to extract discount status, size, HR flag, etc.
+type DetailParserConfig struct {
+	TimeLayout       string                   `json:"timeLayout,omitempty"`
+	DiscountMapping  map[string]DiscountLevel `json:"discountMapping,omitempty"`
+	HRKeywords       []string                 `json:"hrKeywords,omitempty"`
+	TitleSelector    string                   `json:"titleSelector,omitempty"`
+	IDSelector       string                   `json:"idSelector,omitempty"`
+	DiscountSelector string                   `json:"discountSelector,omitempty"`
+	EndTimeSelector  string                   `json:"endTimeSelector,omitempty"`
+	SizeSelector     string                   `json:"sizeSelector,omitempty"`
+	SizeRegex        string                   `json:"sizeRegex,omitempty"`
+}
+
+// DefaultDetailParserConfig returns default config for standard NexusPHP sites
+func DefaultDetailParserConfig() *DetailParserConfig {
+	return &DetailParserConfig{
+		TimeLayout: "2006-01-02 15:04:05",
+		DiscountMapping: map[string]DiscountLevel{
+			"free":          DiscountFree,
+			"twoup":         Discount2xUp,
+			"twoupfree":     Discount2xFree,
+			"thirtypercent": DiscountPercent30,
+			"halfdown":      DiscountPercent50,
+			"twouphalfdown": Discount2x50,
+			"pro_custom":    DiscountNone,
+		},
+		HRKeywords:       []string{"hitandrun", "hit_run.gif", "Hit and Run", "Hit & Run"},
+		TitleSelector:    "input[name='torrent_name']",
+		IDSelector:       "input[name='detail_torrent_id']",
+		DiscountSelector: "h1 font",
+		EndTimeSelector:  "h1 span[title]",
+		SizeSelector:     "td.rowhead:contains('基本信息')",
+		SizeRegex:        `大小：[^\d]*([\d.]+)\s*(GB|MB|KB|TB)`,
+	}
 }

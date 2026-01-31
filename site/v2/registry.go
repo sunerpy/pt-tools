@@ -120,6 +120,8 @@ func schemaToKind(schema string) SiteKind {
 		return SiteGazelle
 	case "Unit3D":
 		return SiteUnit3D
+	case "HDDolby":
+		return SiteHDDolby
 	default:
 		return SiteNexusPHP
 	}
@@ -127,7 +129,7 @@ func schemaToKind(schema string) SiteKind {
 
 func schemaToAuthMethod(schema string) string {
 	switch schema {
-	case "mTorrent", "Unit3D":
+	case "mTorrent", "Unit3D", "HDDolby":
 		return "api_key"
 	default:
 		return "cookie"
@@ -208,6 +210,14 @@ func (r *SiteRegistry) CreateSite(siteID string, creds SiteCredentials, customBa
 			return nil, fmt.Errorf("site %s requires API key or cookie", siteID)
 		}
 		options, err = json.Marshal(GazelleOptions{APIKey: creds.APIKey, Cookie: creds.Cookie})
+	case SiteHDDolby:
+		if creds.APIKey == "" {
+			return nil, fmt.Errorf("site %s requires RSS Key (from getrss.php)", siteID)
+		}
+		if creds.Cookie == "" {
+			return nil, fmt.Errorf("site %s requires Cookie (for bonus info)", siteID)
+		}
+		options, err = json.Marshal(HDDolbyOptions{APIKey: creds.APIKey, Cookie: creds.Cookie})
 	default:
 		return nil, fmt.Errorf("unsupported site kind: %s", meta.Kind)
 	}

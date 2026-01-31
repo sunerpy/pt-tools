@@ -95,6 +95,15 @@ const showingExamples = computed(() => {
   return (form.value.rss || []).length === 0 && exampleRss.value.length > 0;
 });
 
+// API Key 输入框占位符（根据站点显示不同提示）
+const apiKeyPlaceholder = computed(() => {
+  const name = siteName.value.toLowerCase();
+  if (name === "hddolby") {
+    return "从站点 RSS 订阅页面获取 RSS Key";
+  }
+  return "从 M-Team 个人设置中获取";
+});
+
 const newRss = reactive<RSSConfig>({
   name: "",
   url: "",
@@ -178,7 +187,15 @@ function getPathDisplayName(path: string, downloaderId: number | undefined): str
 async function save() {
   saving.value = true;
   try {
-    await sitesApi.save(siteName.value, form.value);
+    // 根据认证方式清空互斥字段，避免后端校验失败
+    const payload = { ...form.value };
+    if (payload.auth_method === "api_key") {
+      payload.cookie = "";
+    } else if (payload.auth_method === "cookie") {
+      payload.api_key = "";
+    }
+    // cookie_and_api_key: keep both fields
+    await sitesApi.save(siteName.value, payload);
     ElMessage.success("保存成功");
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "保存失败");
@@ -432,7 +449,13 @@ function getRowClassName({ row }: { row: RSSConfig }) {
           <el-col :span="12">
             <el-form-item label="认证方式">
               <el-tag type="warning">
-                {{ form.auth_method === "api_key" ? "API Key" : "Cookie" }}
+                {{
+                  form.auth_method === "api_key"
+                    ? "API Key"
+                    : form.auth_method === "cookie_and_api_key"
+                      ? "Cookie + API Key"
+                      : "Cookie"
+                }}
               </el-tag>
             </el-form-item>
           </el-col>
@@ -453,12 +476,48 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             v-model="form.api_key"
             type="password"
             show-password
-            placeholder="从 M-Team 个人设置中获取" />
+            :placeholder="apiKeyPlaceholder" />
+          <div v-if="siteName.toLowerCase() === 'hddolby'" class="form-tip">
+            请前往站点「<a
+              href="https://www.hddolby.com/getrss.php"
+              target="_blank"
+              rel="noopener noreferrer"
+              >控制面板 - RSS订阅</a
+            >」页面，复制「本次加密密钥（RssKEY）」。
+          </div>
         </el-form-item>
 
         <el-form-item v-if="form.auth_method === 'api_key'" label="API URL">
           <el-input :model-value="form.api_url" disabled />
         </el-form-item>
+
+        <template v-if="form.auth_method === 'cookie_and_api_key'">
+          <el-form-item label="Cookie">
+            <el-input
+              v-model="form.cookie"
+              type="textarea"
+              :rows="3"
+              placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）" />
+          </el-form-item>
+          <el-form-item label="API Key / RSS Key">
+            <el-input
+              v-model="form.api_key"
+              type="password"
+              show-password
+              :placeholder="apiKeyPlaceholder" />
+            <div v-if="siteName.toLowerCase() === 'hddolby'" class="form-tip">
+              请前往站点「<a
+                href="https://www.hddolby.com/getrss.php"
+                target="_blank"
+                rel="noopener noreferrer"
+                >控制面板 - RSS订阅</a
+              >」页面，复制「本次加密密钥（RssKEY）」。
+            </div>
+          </el-form-item>
+          <el-form-item label="API URL">
+            <el-input :model-value="form.api_url" disabled />
+          </el-form-item>
+        </template>
       </el-form>
     </el-card>
 

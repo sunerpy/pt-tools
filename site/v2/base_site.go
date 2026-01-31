@@ -242,3 +242,15 @@ func (b *BaseSite[Req, Res]) GetDriver() Driver[Req, Res] {
 func (b *BaseSite[Req, Res]) GetRateLimiter() *rate.Limiter {
 	return b.limiter
 }
+
+// DownloadWithHash downloads a torrent using hash if driver supports it
+func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, hash string) ([]byte, error) {
+	if err := b.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit: %w", err)
+	}
+
+	if hd, ok := any(b.driver).(HashDownloader); ok {
+		return hd.DownloadWithHash(ctx, torrentID, hash)
+	}
+	return b.Download(ctx, torrentID)
+}

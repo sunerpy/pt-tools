@@ -11,6 +11,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 // TorrentPushRequest 种子推送请求
@@ -158,12 +159,16 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 	}
 
 	// 解析 downloadUrl 获取 siteID 和 torrentID
-	siteID, torrentID, err := parseDownloadURL(req.DownloadURL)
+	parsed, err := parseDownloadURL(req.DownloadURL)
 	if err != nil {
 		response.Success = false
 		response.Message = fmt.Sprintf("Invalid download URL: %v", err)
 		return response
 	}
+
+	siteID := parsed.SiteID
+	torrentID := parsed.TorrentID
+	downhash := parsed.Downhash
 
 	// 如果请求中提供了 torrentID，使用它
 	if req.TorrentID != "" {
@@ -190,8 +195,17 @@ func (s *Server) processTorrentPush(r *http.Request, req TorrentPushRequest) Tor
 		return response
 	}
 
-	// 下载种子数据
-	torrentData, err := site.Download(ctx, torrentID)
+	// 下载种子数据 - use hash if available (required by some sites like HDDolby)
+	var torrentData []byte
+	if downhash != "" {
+		if hd, ok := site.(v2.HashDownloader); ok {
+			torrentData, err = hd.DownloadWithHash(ctx, torrentID, downhash)
+		} else {
+			torrentData, err = site.Download(ctx, torrentID)
+		}
+	} else {
+		torrentData, err = site.Download(ctx, torrentID)
+	}
 	if err != nil {
 		response.Success = false
 		response.Message = fmt.Sprintf("Failed to download torrent: %v", err)
@@ -336,20 +350,41 @@ func (s *Server) processBatchTorrentPush(r *http.Request, req BatchTorrentPushRe
 	return response
 }
 
+type parsedDownloadURL struct {
+	SiteID    string
+	TorrentID string
+	Downhash  string
+}
+
 // parseDownloadURL 解析内部下载 URL
-// 格式: /api/site/{siteID}/torrent/{torrentID}/download
-func parseDownloadURL(urlStr string) (siteID, torrentID string, err error) {
-	if !strings.HasPrefix(urlStr, "/api/site/") {
-		return "", "", fmt.Errorf("invalid internal download URL format")
+// 格式: /api/site/{siteID}/torrent/{torrentID}/download[?downhash={hash}]
+func parseDownloadURL(urlStr string) (parsedDownloadURL, error) {
+	var result parsedDownloadURL
+
+	baseURL := urlStr
+	if idx := strings.Index(urlStr, "?"); idx != -1 {
+		baseURL = urlStr[:idx]
+		query := urlStr[idx+1:]
+		for _, param := range strings.Split(query, "&") {
+			if strings.HasPrefix(param, "downhash=") {
+				result.Downhash = strings.TrimPrefix(param, "downhash=")
+			}
+		}
 	}
 
-	path := strings.TrimPrefix(urlStr, "/api/site/")
+	if !strings.HasPrefix(baseURL, "/api/site/") {
+		return result, fmt.Errorf("invalid internal download URL format")
+	}
+
+	path := strings.TrimPrefix(baseURL, "/api/site/")
 	parts := strings.Split(path, "/")
 
 	// Expected: [siteID, "torrent", torrentID, "download"] or [siteID, "torrent", torrentID]
 	if len(parts) < 3 || parts[1] != "torrent" {
-		return "", "", fmt.Errorf("invalid internal download URL format: expected /api/site/{siteID}/torrent/{torrentID}/download")
+		return result, fmt.Errorf("invalid internal download URL format: expected /api/site/{siteID}/torrent/{torrentID}/download")
 	}
 
-	return parts[0], parts[2], nil
+	result.SiteID = parts[0]
+	result.TorrentID = parts[2]
+	return result, nil
 }

@@ -161,13 +161,13 @@ pt-tools/
 
 pt-tools 采用了多项性能优化措施：
 
-| 优化项       | 说明                        |
-| ------------ | --------------------------- |
-| **内存缓存** | 两级缓存减少数据库访问      |
-| **熔断器**   | 自动检测和隔离故障站点      |
-| **连接池**   | HTTP 连接复用，减少连接开销 |
-| **限流**     | 防止请求过快触发站点限制    |
-| **并发控制** | 合理的并发数避免被站点封禁  |
+| 优化项         | 说明                                      |
+| -------------- | ----------------------------------------- |
+| **内存缓存**   | 两级缓存减少数据库访问                    |
+| **熔断器**     | 自动检测和隔离故障站点                    |
+| **连接池**     | HTTP 连接复用，减少连接开销               |
+| **持久化限流** | SQLite 存储滑动窗口，重启后限流状态不丢失 |
+| **并发控制**   | 合理的并发数避免被站点封禁                |
 
 ## 贡献指南
 
@@ -218,7 +218,7 @@ var MySiteDefinition = &v2.SiteDefinition{
 
     // 可选字段（有默认值）
     AuthMethod: "cookie",       // "cookie" 或 "api_key"（根据 Schema 自动推断）
-    RateLimit:  2.0,            // 请求频率限制（默认 2.0 req/s）
+    RateLimit:  2.0,            // 请求频率限制（默认 2.0 req/s，持久化存储）
     RateBurst:  5,              // 突发请求数（默认 5）
 
     // 可选元数据
@@ -228,7 +228,24 @@ var MySiteDefinition = &v2.SiteDefinition{
     TimezoneOffset: "+0800",
 
     // 站点特定选择器（覆盖 Schema 默认值）
-    Selectors: &v2.SiteSelectors{...},
+    Selectors: &v2.SiteSelectors{
+        // 搜索结果页免费图标选择器
+        DiscountIcon: "img.pro_free",
+        // 自定义免费关键词映射（可选，nil 时使用默认映射）
+        DiscountMapping: map[string]v2.DiscountLevel{
+            "custom_free": v2.DiscountFree,
+        },
+    },
+
+    // 详情页解析配置（用于 RSS 详情获取）
+    DetailParser: &v2.DetailParserConfig{
+        DiscountSelector: "h1 font",                    // 免费标签选择器
+        DiscountMapping: map[string]v2.DiscountLevel{   // CSS class → 免费等级
+            "free":      v2.DiscountFree,
+            "twoupfree": v2.Discount2xFree,
+        },
+        TimeLayout: "2006-01-02 15:04:05",              // 时间格式
+    },
 
     // 用户信息解析配置
     UserInfo: &v2.UserInfoConfig{...},

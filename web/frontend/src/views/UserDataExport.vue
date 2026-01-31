@@ -30,7 +30,7 @@ const exportConfig = ref({
   textColor: "#ffffff",
   cardBackground: "rgba(255, 255, 255, 0.12)",
   selectedSites: [] as string[],
-  blurUsernames: true,
+  blurUsernames: false,
   blurSiteNames: true,
   blurLogos: true,
   maxSitesToShow: 10,
@@ -574,89 +574,93 @@ onMounted(() => {
           </div>
         </div>
 
-        <div
-          v-loading="loading"
-          id="export-card"
-          class="export-card"
-          :style="{
-            background: `linear-gradient(135deg, ${exportConfig.backgroundColor}, ${exportConfig.gradientEnd})`,
-          }">
-          <div class="export-card-header">
-            <h1 class="export-title">{{ exportConfig.title }}</h1>
-            <p v-if="aggregatedStats" class="export-subtitle">
-              {{ aggregatedStats.siteCount }} 个站点 · 更新于
-              {{ new Date().toLocaleDateString("zh-CN") }}
-            </p>
-          </div>
-
-          <div v-if="earliestJoinDate" class="export-user-info">
-            <span class="user-info-icon">🎂</span>
-            <span class="user-info-item">入站时间: {{ formatDate(earliestJoinDate) }}</span>
-            <span class="user-info-divider">·</span>
-            <span class="user-info-item">已入站 {{ formatJoinDuration(earliestJoinDate) }}</span>
-          </div>
-
-          <div v-if="aggregatedStats" class="export-summary-grid">
-            <div v-for="stat in summaryStats" :key="stat.label" class="export-summary-item">
-              <div class="summary-value" :style="{ color: stat.color }">{{ stat.value }}</div>
-              <div class="summary-label">
-                <span class="summary-icon">{{ stat.icon }}</span>
-                {{ stat.label }}
-              </div>
-            </div>
-          </div>
-
+        <div class="preview-scroll-container">
           <div
-            v-if="exportConfig.showSiteDetails && selectedSiteStats.length > 0"
-            class="export-sites-section">
-            <h3 class="export-section-title">站点详情</h3>
-            <div class="export-sites-grid">
-              <div v-for="site in selectedSiteStats" :key="site.site" class="export-site-card">
-                <div class="site-card-row site-card-header-row">
-                  <div class="site-card-left">
-                    <div class="site-avatar-wrapper" :class="{ pixelated: exportConfig.blurLogos }">
-                      <SiteAvatar :site-name="site.site" :site-id="site.site" :size="20" />
-                    </div>
-                    <div class="site-card-info">
-                      <span
-                        class="site-card-name"
-                        :class="{ 'mosaic-text': exportConfig.blurSiteNames }">
-                        {{ getMosaicText(site.site, exportConfig.blurSiteNames) }}
-                      </span>
-                      <span
-                        v-if="site.username"
-                        class="site-card-username"
-                        :class="{ 'mosaic-text': exportConfig.blurUsernames }">
-                        @{{ getMosaicText(site.username, exportConfig.blurUsernames) }}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="site-card-right">
-                    <span class="site-bonus">{{ formatNumber(site.bonus ?? 0) }}</span>
-                    <span class="site-bonus-label">{{ getSiteBonusName(site.site) }}</span>
-                  </div>
-                </div>
-                <div class="site-card-row site-card-stats-row">
-                  <div class="site-card-left">
-                    <span class="stat-upload">↑{{ formatBytes(site.uploaded) }}</span>
-                    <span class="stat-download">↓{{ formatBytes(site.downloaded) }}</span>
-                  </div>
-                  <div class="site-card-right">
-                    <span class="stat-ratio">R: {{ formatRatio(site.ratio) }}</span>
-                    <span v-if="site.bonusPerHour" class="stat-bonus-hour"
-                      >{{ formatNumber(site.bonusPerHour) }}/h</span
-                    >
-                  </div>
-                </div>
-                <div v-if="site.joinDate" class="site-card-row site-card-footer-row">
-                  <span class="site-join-time">{{ formatJoinDuration(site.joinDate) }}</span>
+            v-loading="loading"
+            id="export-card"
+            class="export-card"
+            :style="{
+              background: `linear-gradient(135deg, ${exportConfig.backgroundColor}, ${exportConfig.gradientEnd})`,
+            }">
+            <div class="export-card-header">
+              <h1 class="export-title">{{ exportConfig.title }}</h1>
+              <p v-if="aggregatedStats" class="export-subtitle">
+                {{ aggregatedStats.siteCount }} 个站点 · 更新于
+                {{ new Date().toLocaleDateString("zh-CN") }}
+              </p>
+            </div>
+
+            <div v-if="earliestJoinDate" class="export-user-info">
+              <span class="user-info-icon">🎂</span>
+              <span class="user-info-item">入站时间: {{ formatDate(earliestJoinDate) }}</span>
+              <span class="user-info-divider">·</span>
+              <span class="user-info-item">已入站 {{ formatJoinDuration(earliestJoinDate) }}</span>
+            </div>
+
+            <div v-if="aggregatedStats" class="export-summary-grid">
+              <div v-for="stat in summaryStats" :key="stat.label" class="export-summary-item">
+                <div class="summary-value" :style="{ color: stat.color }">{{ stat.value }}</div>
+                <div class="summary-label">
+                  <span class="summary-icon">{{ stat.icon }}</span>
+                  {{ stat.label }}
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="export-footer">
-            Generated by pt-tools · {{ new Date().toLocaleString("zh-CN") }}
+            <div
+              v-if="exportConfig.showSiteDetails && selectedSiteStats.length > 0"
+              class="export-sites-section">
+              <h3 class="export-section-title">站点详情</h3>
+              <div class="export-sites-grid">
+                <div v-for="site in selectedSiteStats" :key="site.site" class="export-site-card">
+                  <div class="site-card-row site-card-header-row">
+                    <div class="site-card-left">
+                      <div
+                        class="site-avatar-wrapper"
+                        :class="{ pixelated: exportConfig.blurLogos }">
+                        <SiteAvatar :site-name="site.site" :site-id="site.site" :size="20" />
+                      </div>
+                      <div class="site-card-info">
+                        <span
+                          class="site-card-name"
+                          :class="{ 'mosaic-text': exportConfig.blurSiteNames }">
+                          {{ getMosaicText(site.site, exportConfig.blurSiteNames) }}
+                        </span>
+                        <span
+                          v-if="site.username"
+                          class="site-card-username"
+                          :class="{ 'mosaic-text': exportConfig.blurUsernames }">
+                          @{{ getMosaicText(site.username, exportConfig.blurUsernames) }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="site-card-right">
+                      <span class="site-bonus">{{ formatNumber(site.bonus ?? 0) }}</span>
+                      <span class="site-bonus-label">{{ getSiteBonusName(site.site) }}</span>
+                    </div>
+                  </div>
+                  <div class="site-card-row site-card-stats-row">
+                    <div class="site-card-left">
+                      <span class="stat-upload">↑{{ formatBytes(site.uploaded) }}</span>
+                      <span class="stat-download">↓{{ formatBytes(site.downloaded) }}</span>
+                    </div>
+                    <div class="site-card-right">
+                      <span class="stat-ratio">R: {{ formatRatio(site.ratio) }}</span>
+                      <span v-if="site.bonusPerHour" class="stat-bonus-hour"
+                        >{{ formatNumber(site.bonusPerHour) }}/h</span
+                      >
+                    </div>
+                  </div>
+                  <div v-if="site.joinDate" class="site-card-row site-card-footer-row">
+                    <span class="site-join-time">{{ formatJoinDuration(site.joinDate) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="export-footer">
+              Generated by pt-tools · {{ new Date().toLocaleString("zh-CN") }}
+            </div>
           </div>
         </div>
       </div>
