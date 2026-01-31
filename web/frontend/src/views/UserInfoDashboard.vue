@@ -258,6 +258,10 @@ onUnmounted(() => {
             </el-button>
           </el-tooltip>
           <el-button size="small" @click="clearCache">清除缓存</el-button>
+          <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
+            <el-icon><Share /></el-icon>
+            导出分享
+          </el-button>
           <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
             <el-icon><Refresh /></el-icon>
             同步全部
