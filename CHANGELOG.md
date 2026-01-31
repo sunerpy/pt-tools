@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-01-31
+
+### CI/CD
+
+- Add dependabot auto-merge workflow with safety checks
+- Add dependabot auto-merge workflow with safety checks ([#45](https://github.com/sunerpy/pt-tools/pull/45))
+- Bump actions/setup-go from 5 to 6
+  Bumps [actions/setup-go](https://github.com/actions/setup-go) from 5 to 6. - [Release notes](https://github.com/actions/setup-go/releases) - [Commits](https://github.com/actions/setup-go/compare/v5...v6)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/setup-go
+         dependency-version: '6'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+- Bump actions/setup-node from 4 to 6
+  Bumps [actions/setup-node](https://github.com/actions/setup-node) from 4 to 6. - [Release notes](https://github.com/actions/setup-node/releases) - [Commits](https://github.com/actions/setup-node/compare/v4...v6)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/setup-node
+         dependency-version: '6'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+- Bump actions/download-artifact from 4 to 7
+  Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 7. - [Release notes](https://github.com/actions/download-artifact/releases) - [Commits](https://github.com/actions/download-artifact/compare/v4...v7)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/download-artifact
+         dependency-version: '7'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+- Bump actions/cache from 4 to 5
+  Bumps [actions/cache](https://github.com/actions/cache) from 4 to 5. - [Release notes](https://github.com/actions/cache/releases) - [Changelog](https://github.com/actions/cache/blob/main/RELEASES.md) - [Commits](https://github.com/actions/cache/compare/v4...v5)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/cache
+         dependency-version: '5'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+- Bump actions/checkout from 4 to 6
+  Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release notes](https://github.com/actions/checkout/releases) - [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) - [Commits](https://github.com/actions/checkout/compare/v4...v6)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/checkout
+         dependency-version: '6'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue from 3.5.26 to 3.5.27 in /web/frontend
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.26 to 3.5.27. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.26...v3.5.27)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.27
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.39.0 to 1.42.0 in /web/frontend
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.39.0 to 1.42.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.42.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.42.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxfmt from 0.24.0 to 0.27.0 in /web/frontend ([#37](https://github.com/sunerpy/pt-tools/issues/37)) ([#37](https://github.com/sunerpy/pt-tools/pull/37))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.24.0 to 0.27.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.27.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.27.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **frontend**: 新增用户数据导出分享功能
+- 新增 UserDataExport.vue 组件，支持 Canvas 渲染生成分享图片 - 支持导出总上传/下载、分享率、魔力值、做种数等汇总统计 - 支持展示各站点详情：用户名、上传下载量、魔力值、入站时长 - 隐私保护：支持模糊用户名、站点名和站点图标（马赛克效果）- 6 种预设主题配色 + 自定义颜色选择器 - 支持下载 PNG 图片和复制到剪贴板 - 可自由选择要展示的站点
+- **frontend**: 新增用户数据导出分享功能 ([#46](https://github.com/sunerpy/pt-tools/pull/46))
+- 新增 UserDataExport.vue 组件，支持 Canvas 渲染生成分享图片 - 支持导出总上传/下载、分享率、魔力值、做种数等汇总统计 - 支持展示各站点详情：用户名、上传下载量、魔力值、入站时长 - 隐私保护：支持模糊用户名、站点名和站点图标（马赛克效果）- 支持下载 PNG 图片和复制到剪贴板 - 可自由选择要展示的站点
+
 ## [0.6.0] - 2026-01-30
 
 ### Bug Fixes
