@@ -11,6 +11,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/utils"
 )
 
@@ -342,30 +343,41 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	// 严格校验：
 	// 1) 认证方式必填且合法；
 	// 2) 根据认证方式二选一且对应字段不为空（api_key 或 cookie），另一项必须为空；
+	//    特殊：cookie_and_api_key 同时需要两者
 	// 3) 对于非预置站点，API URL 必填；预置站点使用常量
 	// 4) RSS 列表可以为空，但如果有则各项字段需合法。
 	am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
-	if am != "cookie" && am != "api_key" {
-		return errors.New("认证方式必须为 'cookie' 或 'api_key'")
+	if am != "cookie" && am != "api_key" && am != "cookie_and_api_key" {
+		return errors.New("认证方式必须为 'cookie'、'api_key' 或 'cookie_and_api_key'")
 	}
 
-	// 预置站点使用常量 URL，不需要用户提供
-	isBuiltinSite := site == models.MTEAM || site == models.SpringSunday || site == models.HDSKY
-	if !isBuiltinSite && strings.TrimSpace(sc.APIUrl) == "" {
+	// 检查站点是否在注册表中（有默认 URL），注册表中的站点不需要用户提供 API URL
+	registry := v2.GetGlobalSiteRegistry()
+	meta, isRegistered := registry.Get(string(site))
+	hasDefaultURL := isRegistered && meta.DefaultBaseURL != ""
+	if !hasDefaultURL && strings.TrimSpace(sc.APIUrl) == "" {
 		return errors.New("API 地址不能为空")
 	}
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
 	cookieEmpty := strings.TrimSpace(sc.Cookie) == ""
-	if am == "api_key" {
+	switch am {
+	case "api_key":
 		if apiKeyEmpty {
 			return errors.New("API Key 不能为空")
 		}
 		if !cookieEmpty {
 			return errors.New("认证方式为 api_key 时 Cookie 必须留空")
 		}
-	} else { // cookie
+	case "cookie_and_api_key":
+		if apiKeyEmpty {
+			return errors.New("API Key 不能为空")
+		}
 		if cookieEmpty {
-			return errors.New("cookie 不能为空")
+			return errors.New("Cookie 不能为空")
+		}
+	case "cookie":
+		if cookieEmpty {
+			return errors.New("Cookie 不能为空")
 		}
 		if !apiKeyEmpty {
 			return errors.New("认证方式为 cookie 时 API Key 必须留空")

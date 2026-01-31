@@ -24,16 +24,15 @@ func setupFactoryTestDB(t *testing.T) func() {
 func TestGetAllSupportedSiteGroups(t *testing.T) {
 	groups := GetAllSupportedSiteGroups()
 
-	// HDDolby is marked as unavailable, so we expect at least 3 groups
-	if len(groups) < 3 {
-		t.Errorf("GetAllSupportedSiteGroups() returned %d groups, want at least 3", len(groups))
+	if len(groups) < 4 {
+		t.Errorf("GetAllSupportedSiteGroups() returned %d groups, want at least 4", len(groups))
 	}
 
-	// HDDolby is unavailable, so it should NOT be in supported groups
 	expected := map[models.SiteGroup]bool{
 		models.MTEAM:        false,
 		models.HDSKY:        false,
 		models.SpringSunday: false,
+		models.HDDOLBY:      false,
 	}
 
 	for _, g := range groups {
@@ -57,7 +56,7 @@ func TestIsSiteGroupSupported(t *testing.T) {
 		{models.MTEAM, true},
 		{models.HDSKY, true},
 		{models.SpringSunday, true},
-		{models.HDDOLBY, false}, // HDDolby is marked as unavailable
+		{models.HDDOLBY, true}, // HDDolby is now available via API
 		{models.SiteGroup("unknown"), false},
 		{models.SiteGroup(""), false},
 	}

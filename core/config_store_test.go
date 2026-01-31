@@ -14,6 +14,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
+	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
 )
 
 func newTempDB(t *testing.T) *models.TorrentDB {

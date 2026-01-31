@@ -300,3 +300,46 @@ func TestUnifiedSiteImpl_ConvertPHPTorrentToItem(t *testing.T) {
 		t.Errorf("Tags = %v, want [PHP Test Subtitle]", item.Tags)
 	}
 }
+
+func TestUnifiedSiteImpl_RateLimiter(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	impl, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	require.NoError(t, err)
+	require.NotNil(t, impl)
+	require.NotNil(t, impl.limiter, "limiter should be initialized")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		err := impl.waitForRateLimit(ctx)
+		require.NoError(t, err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Logf("Rate limit applied, elapsed: %v (burst allowed initial requests)", elapsed)
+	}
+}
+
+func TestUnifiedSiteImpl_RateLimiter_ContextCanceled(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	impl, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	require.NoError(t, err)
+
+	for i := 0; i < 200; i++ {
+		_ = impl.limiter.Allow()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = impl.waitForRateLimit(ctx)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+}

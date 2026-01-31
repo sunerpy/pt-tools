@@ -48,6 +48,7 @@ const validationResult = ref<SiteValidationResponse | null>(null);
 const authMethods = [
   { value: "cookie", label: "Cookie 认证" },
   { value: "api_key", label: "API Key 认证" },
+  { value: "cookie_and_api_key", label: "Cookie + API Key 认证" },
 ];
 
 const enabledDownloaders = computed(() => {
@@ -374,6 +375,24 @@ function getAuthMethodLabel(method: string) {
           </el-form-item>
           <el-form-item label="API URL">
             <el-input v-model="addForm.api_url" placeholder="https://api.example.com" />
+          </el-form-item>
+        </template>
+
+        <template v-if="addForm.auth_method === 'cookie_and_api_key'">
+          <el-form-item label="Cookie" required>
+            <el-input
+              v-model="addForm.cookie"
+              type="textarea"
+              :rows="3"
+              placeholder="请输入站点Cookie（用于获取时魔等信息）" />
+          </el-form-item>
+          <el-form-item label="API Key / RSS Key" required>
+            <el-input
+              v-model="addForm.api_key"
+              placeholder="请输入API Key或RSS Key（用于搜索和下载）" />
+          </el-form-item>
+          <el-form-item label="API URL">
+            <el-input v-model="addForm.api_url" placeholder="https://api.example.com（可选）" />
           </el-form-item>
         </template>
 

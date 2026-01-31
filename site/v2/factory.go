@@ -109,6 +109,12 @@ type MTorrentOptions struct {
 	APIKey string `json:"apiKey"`
 }
 
+// HDDolbyOptions holds HDDolby-specific configuration
+type HDDolbyOptions struct {
+	APIKey string `json:"apiKey"`
+	Cookie string `json:"cookie"`
+}
+
 // Unit3DOptions holds Unit3D-specific configuration
 type Unit3DOptions struct {
 	APIKey string `json:"apiKey"`
@@ -156,6 +162,8 @@ func (f *SiteFactory) CreateSite(config SiteConfig) (Site, error) {
 		return f.createUnit3DSite(config)
 	case SiteGazelle:
 		return f.createGazelleSite(config)
+	case SiteHDDolby:
+		return f.createHDDolbySite(config)
 	default:
 		return nil, fmt.Errorf("unsupported site type: %s", config.Type)
 	}
@@ -256,6 +264,46 @@ func (f *SiteFactory) createMTorrentSite(config SiteConfig) (Site, error) {
 		ID:        config.ID,
 		Name:      config.Name,
 		Kind:      SiteMTorrent,
+		RateLimit: config.RateLimit,
+		RateBurst: config.RateBurst,
+		Logger:    f.logger.With(zap.String("site", config.ID)),
+	})
+
+	return site, nil
+}
+
+func (f *SiteFactory) createHDDolbySite(config SiteConfig) (Site, error) {
+	var opts HDDolbyOptions
+	if len(config.Options) > 0 {
+		if err := json.Unmarshal(config.Options, &opts); err != nil {
+			return nil, fmt.Errorf("parse HDDolby options: %w", err)
+		}
+	}
+
+	if opts.APIKey == "" {
+		return nil, fmt.Errorf("HDDolby 站点需要配置 RSS Key（从站点 RSS 订阅页面获取）")
+	}
+
+	if opts.Cookie == "" {
+		return nil, fmt.Errorf("HDDolby 站点需要配置 Cookie（用于获取时魔等信息）")
+	}
+
+	siteDef := GetDefinitionRegistry().GetOrDefault(config.ID)
+
+	driver := NewHDDolbyDriver(HDDolbyDriverConfig{
+		BaseURL: config.BaseURL,
+		APIKey:  opts.APIKey,
+		Cookie:  opts.Cookie,
+	})
+
+	if siteDef != nil {
+		driver.SetSiteDefinition(siteDef)
+	}
+
+	site := NewBaseSite(driver, BaseSiteConfig{
+		ID:        config.ID,
+		Name:      config.Name,
+		Kind:      SiteHDDolby,
 		RateLimit: config.RateLimit,
 		RateBurst: config.RateBurst,
 		Logger:    f.logger.With(zap.String("site", config.ID)),

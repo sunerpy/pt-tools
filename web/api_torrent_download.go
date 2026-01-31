@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 // apiSiteRouter routes /api/site/* requests to appropriate handlers
@@ -69,8 +70,8 @@ func (s *Server) apiSiteTorrentDownload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get optional title from query parameter
 	title := r.URL.Query().Get("title")
+	downhash := r.URL.Query().Get("downhash")
 
 	global.GetSlogger().Infof("[TorrentDownload] Downloading torrent: site=%s, id=%s, title=%s", siteID, torrentID, title)
 
@@ -92,8 +93,18 @@ func (s *Server) apiSiteTorrentDownload(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// Download torrent using site's Download method
-	data, err := site.Download(ctx, torrentID)
+	// Download torrent - use hash if available (required by some sites like HDDolby)
+	var data []byte
+	var err error
+	if downhash != "" {
+		if hd, ok := site.(v2.HashDownloader); ok {
+			data, err = hd.DownloadWithHash(ctx, torrentID, downhash)
+		} else {
+			data, err = site.Download(ctx, torrentID)
+		}
+	} else {
+		data, err = site.Download(ctx, torrentID)
+	}
 	if err != nil {
 		global.GetSlogger().Errorf("[TorrentDownload] Failed to download torrent: site=%s, id=%s, err=%v", siteID, torrentID, err)
 		http.Error(w, fmt.Sprintf("Failed to download torrent: %v", err), http.StatusInternalServerError)

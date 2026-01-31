@@ -153,11 +153,23 @@ function getRssCount(site: SiteConfig): number {
         <el-table-column label="认证方式" min-width="120" align="center">
           <template #default="{ row }">
             <el-tag
-              :type="row[1].auth_method === 'api_key' ? 'warning' : 'info'"
+              :type="
+                row[1].auth_method === 'api_key'
+                  ? 'warning'
+                  : row[1].auth_method === 'cookie_and_api_key'
+                    ? 'success'
+                    : 'info'
+              "
               size="small"
               effect="plain"
               round>
-              {{ row[1].auth_method === "api_key" ? "API Key" : "Cookie" }}
+              {{
+                row[1].auth_method === "api_key"
+                  ? "API Key"
+                  : row[1].auth_method === "cookie_and_api_key"
+                    ? "Cookie + API Key"
+                    : "Cookie"
+              }}
             </el-tag>
           </template>
         </el-table-column>

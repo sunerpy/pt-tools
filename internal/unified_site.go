@@ -33,6 +33,7 @@ type UnifiedSiteImpl struct {
 	maxRetries int
 	retryDelay time.Duration
 	logger     *zap.SugaredLogger
+	limiter    *v2.PersistentRateLimiter
 }
 
 func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, siteID string, siteKind v2.SiteKind) (*UnifiedSiteImpl, error) {
@@ -45,6 +46,27 @@ func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, s
 		logger = zapLogger.Sugar()
 	}
 
+	// 从站点定义获取速率限制配置
+	rateLimit := 2.0 // 默认: 2 请求/秒
+	rateBurst := 5   // 默认: burst 5
+	if def := v2.GetDefinitionRegistry().GetOrDefault(siteID); def != nil {
+		if def.RateLimit > 0 {
+			rateLimit = def.RateLimit
+		}
+		if def.RateBurst > 0 {
+			rateBurst = def.RateBurst
+		}
+		logger.Debugf("[速率限制] 站点=%s, RateLimit=%.2f/s, Burst=%d", siteID, rateLimit, rateBurst)
+	}
+
+	// 创建持久化速率限制器
+	var limiter *v2.PersistentRateLimiter
+	if global.GlobalDB != nil && global.GlobalDB.DB != nil {
+		limiter = v2.NewPersistentRateLimiterFromRPS(global.GlobalDB.DB, siteID, rateLimit, rateBurst)
+	} else {
+		limiter = v2.NewPersistentRateLimiterFromRPS(nil, siteID, rateLimit, rateBurst)
+	}
+
 	return &UnifiedSiteImpl{
 		ctx:        ctx,
 		siteGroup:  siteGroup,
@@ -54,6 +76,7 @@ func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, s
 		maxRetries: maxRetries,
 		retryDelay: retryDelay,
 		logger:     logger,
+		limiter:    limiter,
 	}, nil
 }
 
@@ -101,6 +124,11 @@ func (u *UnifiedSiteImpl) DownloadTorrent(url, title, downloadDir string) (strin
 	return downloadTorrent(url, title, downloadDir, u.maxRetries, u.retryDelay)
 }
 
+// waitForRateLimit 等待速率限制，返回等待时间
+func (u *UnifiedSiteImpl) waitForRateLimit(ctx context.Context) error {
+	return u.limiter.Wait(ctx)
+}
+
 // GetTorrentDetails 获取种子详情，返回统一的 TorrentItem
 func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem, error) {
 	if !u.IsEnabled() {
@@ -110,12 +138,16 @@ func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem,
 		return nil, fmt.Errorf("RSS item 为空")
 	}
 
+	if err := u.waitForRateLimit(u.ctx); err != nil {
+		return nil, fmt.Errorf("速率限制等待失败: %w", err)
+	}
+
 	u.logger.Debugf("[获取种子详情] 站点=%s, ID=%s, 标题=%s", u.siteGroup, item.GUID, item.Title)
 
 	switch u.siteKind {
 	case v2.SiteMTorrent:
 		return u.getMTorrentDetails(item)
-	case v2.SiteNexusPHP:
+	case v2.SiteNexusPHP, v2.SiteHDDolby:
 		return u.getNexusPHPDetails(item)
 	default:
 		return nil, fmt.Errorf("unsupported site kind: %s", u.siteKind)
@@ -158,8 +190,6 @@ func (u *UnifiedSiteImpl) getMTorrentDetails(item *gofeed.Item) (*v2.TorrentItem
 	return u.convertMTTorrentToItem(&responseData.Data), nil
 }
 
-// getNexusPHPDetails 获取 NexusPHP 种子详情
-// 使用 site/v2 中的新解析器
 func (u *UnifiedSiteImpl) getNexusPHPDetails(item *gofeed.Item) (*v2.TorrentItem, error) {
 	url := item.Link
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -170,19 +200,9 @@ func (u *UnifiedSiteImpl) getNexusPHPDetails(item *gofeed.Item) (*v2.TorrentItem
 		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
 
-	// 使用 site/v2 的新解析器
-	var v2Parser v2.NexusPHPDetailParser
-	switch u.siteGroup {
-	case models.HDSKY:
-		v2Parser = v2.NewHDSkyParser()
-	case models.SpringSunday:
-		v2Parser = v2.NewSpringSundayParser()
-	default:
-		v2Parser = v2.NewHDSkyParser() // 默认使用 HDSky 解析器
-	}
-
-	// 使用旧的 colly 方式获取页面，但用新解析器解析
-	siteCfg := NewSiteMapConfig(u.siteGroup, cfg.Sites[u.siteGroup].Cookie, cfg.Sites[u.siteGroup], NewLegacyParserAdapter(v2Parser))
+	def := v2.GetDefinitionRegistry().GetOrDefault(string(u.siteGroup))
+	parser := v2.NewNexusPHPParserFromDefinition(def)
+	siteCfg := NewSiteMapConfig(u.siteGroup, cfg.Sites[u.siteGroup].Cookie, cfg.Sites[u.siteGroup], NewLegacyParserAdapter(parser))
 	co := NewCollectorWithTransport()
 
 	info, err := CommonFetchTorrentInfo(ctx, co, siteCfg, url)
@@ -190,7 +210,6 @@ func (u *UnifiedSiteImpl) getNexusPHPDetails(item *gofeed.Item) (*v2.TorrentItem
 		return nil, err
 	}
 
-	// 转换为 v2.TorrentItem
 	return u.convertPHPTorrentToItem(info), nil
 }
 

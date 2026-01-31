@@ -15,12 +15,15 @@
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-4);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .preview-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .preview-header h2 {
@@ -33,6 +36,14 @@
 .preview-actions {
   display: flex;
   gap: var(--pt-space-3);
+}
+
+.preview-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--pt-space-2);
+  margin: calc(-1 * var(--pt-space-2));
 }
 
 .export-card {
