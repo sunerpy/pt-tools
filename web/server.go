@@ -477,6 +477,7 @@ type SiteConfigResponse struct {
 	APIKey            string             `json:"api_key"`
 	APIUrl            string             `json:"api_url"`
 	RSS               []models.RSSConfig `json:"rss"`
+	URLs              []string           `json:"urls,omitempty"`
 	Unavailable       bool               `json:"unavailable,omitempty"`
 	UnavailableReason string             `json:"unavailable_reason,omitempty"`
 }
@@ -502,6 +503,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				RSS:        sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
+				resp.URLs = def.URLs
 				resp.Unavailable = def.Unavailable
 				resp.UnavailableReason = def.UnavailableReason
 				if def.Unavailable {
@@ -567,11 +569,12 @@ func (s *Server) disableUnavailableSites(sites []models.SiteGroup) {
 
 func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/sites/")
-	sg, err := models.ValidateSiteName(name)
-	if err != nil {
+	registry := v2.GetGlobalSiteRegistry()
+	if _, ok := registry.Get(strings.ToLower(name)); !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	sg := models.SiteGroup(strings.ToLower(name))
 	switch r.Method {
 	case http.MethodGet:
 		sc, err := s.store.GetSiteConf(sg)
@@ -579,7 +582,21 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		writeJSON(w, sc)
+		resp := SiteConfigResponse{
+			Enabled:    sc.Enabled,
+			AuthMethod: sc.AuthMethod,
+			Cookie:     sc.Cookie,
+			APIKey:     sc.APIKey,
+			APIUrl:     sc.APIUrl,
+			RSS:        sc.RSS,
+		}
+		defRegistry := v2.GetDefinitionRegistry()
+		if def, ok := defRegistry.Get(string(sg)); ok {
+			resp.URLs = def.URLs
+			resp.Unavailable = def.Unavailable
+			resp.UnavailableReason = def.UnavailableReason
+		}
+		writeJSON(w, resp)
 	case http.MethodPost:
 		var sc models.SiteConfig
 		if err := json.NewDecoder(r.Body).Decode(&sc); err != nil {

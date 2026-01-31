@@ -461,6 +461,14 @@ function getRowClassName({ row }: { row: RSSConfig }) {
           </el-col>
         </el-row>
 
+        <el-form-item v-if="form.urls && form.urls.length > 0" label="站点地址">
+          <div class="site-urls">
+            <el-tag v-for="url in form.urls" :key="url" type="info" effect="plain" class="url-tag">
+              <a :href="url" target="_blank" rel="noopener noreferrer">{{ url }}</a>
+            </el-tag>
+          </div>
+        </el-form-item>
+
         <el-divider />
 
         <el-form-item v-if="form.auth_method === 'cookie'" label="Cookie">
@@ -884,6 +892,25 @@ function getRowClassName({ row }: { row: RSSConfig }) {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+}
+
+.site-urls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.url-tag {
+  cursor: pointer;
+}
+
+.url-tag a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.url-tag a:hover {
+  text-decoration: underline;
 }
 
 .path-selector {
