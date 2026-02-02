@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-02-02
+
+### Features
+
+- **export**: 导出图片显示用户等级信息
+- Canvas 导出和 HTML 预览均显示站点等级 - 等级显示在用户名右侧，使用紫色标识
+- **site**: 新增 RousiPro 站点支持
+- 新增 RousiPro (rousipro) 站点支持 - 修复 NovaHD 免费种子检测问题 (Issue #50)
+- **site**: 新增 RousiPro 站点支持 ([#52](https://github.com/sunerpy/pt-tools/pull/52))
+- 新增 RousiPro (rousipro) 站点支持 - 修复 NovaHD 免费种子检测问题 (Issue #50)
+
 ## [0.9.1] - 2026-01-31
 
 ### Bug Fixes
