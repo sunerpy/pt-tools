@@ -46,10 +46,10 @@ func TestSyncSitesFromRegistry(t *testing.T) {
 
 	// 模拟注册的站点
 	registeredSites := []RegisteredSite{
-		{ID: "springsunday", Name: "SpringSunday", AuthMethod: "cookie", DefaultAPIUrl: ""},
-		{ID: "hdsky", Name: "HDSky", AuthMethod: "cookie", DefaultAPIUrl: ""},
-		{ID: "mteam", Name: "M-Team", AuthMethod: "api_key", DefaultAPIUrl: "https://api.m-team.cc"},
-		{ID: "hddolby", Name: "HDDolby", AuthMethod: "cookie", DefaultAPIUrl: ""},
+		{ID: "springsunday", Name: "SpringSunday", AuthMethod: "cookie", DefaultBaseURL: ""},
+		{ID: "hdsky", Name: "HDSky", AuthMethod: "cookie", DefaultBaseURL: ""},
+		{ID: "mteam", Name: "M-Team", AuthMethod: "api_key", DefaultBaseURL: "https://api.m-team.cc"},
+		{ID: "hddolby", Name: "HDDolby", AuthMethod: "cookie", DefaultBaseURL: ""},
 	}
 
 	// 执行同步

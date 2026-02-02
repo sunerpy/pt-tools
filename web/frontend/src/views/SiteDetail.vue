@@ -36,6 +36,7 @@ const form = ref<SiteConfig>({
   cookie: "",
   api_key: "",
   api_url: "",
+  passkey: "",
   rss: [],
 });
 
@@ -454,7 +455,9 @@ function getRowClassName({ row }: { row: RSSConfig }) {
                     ? "API Key"
                     : form.auth_method === "cookie_and_api_key"
                       ? "Cookie + API Key"
-                      : "Cookie"
+                      : form.auth_method === "passkey"
+                        ? "Passkey"
+                        : "Cookie"
                 }}
               </el-tag>
             </el-form-item>
@@ -526,6 +529,15 @@ function getRowClassName({ row }: { row: RSSConfig }) {
             <el-input :model-value="form.api_url" disabled />
           </el-form-item>
         </template>
+
+        <el-form-item v-if="form.auth_method === 'passkey'" label="Passkey">
+          <el-input
+            v-model="form.passkey"
+            type="password"
+            show-password
+            placeholder="从站点个人设置中获取 Passkey" />
+          <div class="form-tip">Passkey 用于 RSS 订阅认证，请从站点个人设置页面获取。</div>
+        </el-form-item>
       </el-form>
     </el-card>
 

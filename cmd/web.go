@@ -97,8 +97,9 @@ var webCmd = &cobra.Command{
 					site, createErr := siteRegistry.CreateSite(
 						string(siteGroup),
 						v2.SiteCredentials{
-							Cookie: siteConfig.Cookie,
-							APIKey: siteConfig.APIKey,
+							Cookie:  siteConfig.Cookie,
+							APIKey:  siteConfig.APIKey,
+							Passkey: siteConfig.Passkey,
 						},
 						siteConfig.APIUrl,
 					)
@@ -147,10 +148,10 @@ func getRegisteredSitesFromRegistry(registry *v2.SiteRegistry) []models.Register
 			continue
 		}
 		result = append(result, models.RegisteredSite{
-			ID:            meta.ID,
-			Name:          meta.Name,
-			AuthMethod:    meta.AuthMethod,
-			DefaultAPIUrl: meta.DefaultBaseURL,
+			ID:             meta.ID,
+			Name:           meta.Name,
+			AuthMethod:     meta.AuthMethod.String(),
+			DefaultBaseURL: meta.DefaultBaseURL,
 		})
 	}
 	return result

@@ -132,17 +132,36 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 	}
 	// 数据库文件路径
 	dbFile := filepath.Join(dbDir, DBFile)
-	// 初始化 GORM
+	// 初始化 GORM with SQLite optimizations for concurrent access
+	// _busy_timeout: wait up to 30s for locks (prevents "database is locked" errors)
+	// _txlock: use IMMEDIATE transactions to detect conflicts early
+	// cache=shared: share cache between connections
+	dsn := fmt.Sprintf("file:%s?_busy_timeout=30000&_txlock=immediate&cache=shared", dbFile)
 	db, err := gorm.Open(
-		sqlite.Open("file:"+dbFile), &gorm.Config{
+		sqlite.Open(dsn), &gorm.Config{
 			Logger: gormLg,
 		})
 	if err != nil {
 		return nil, fmt.Errorf("无法初始化 GORM: %w", err)
 	}
+
+	// Configure connection pool for SQLite
+	// SQLite handles concurrency at the file level, so limit connections
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("获取底层数据库连接失败: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetConnMaxLifetime(0)
+
 	// 启用 WAL 模式
 	if err := db.Exec("PRAGMA journal_mode=WAL;").Error; err != nil {
 		return nil, fmt.Errorf("无法启用 WAL 模式: %w", err)
+	}
+	// Set synchronous=NORMAL for better performance while maintaining durability
+	if err := db.Exec("PRAGMA synchronous=NORMAL;").Error; err != nil {
+		return nil, fmt.Errorf("无法设置 synchronous 模式: %w", err)
 	}
 	// 自动迁移表结构（包括版本表）
 	if err := db.AutoMigrate(
@@ -256,15 +275,22 @@ func (t *TorrentDB) UpdateTorrentStatus(torrentHash string, isDownloaded, isPush
 
 // WithTransaction 使用事务
 // 创建一个全局的信号量，限制同时只有一个事务执行
-var globalSemaphore = semaphore.NewWeighted(1) // 只有一个令牌，最多一个 Goroutine 可以获取
+var globalSemaphore = semaphore.NewWeighted(1)
+
+const defaultTxTimeout = 60 * time.Second
+
 func (t *TorrentDB) WithTransaction(fn func(tx *gorm.DB) error) error {
-	// 尝试获取信号量
-	if err := globalSemaphore.Acquire(context.Background(), 1); err != nil {
-		// 获取信号量失败，表示已经有事务在执行
-		fmt.Println("无法获取信号量，事务已被其他 Goroutine 占用")
-		return err
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTxTimeout)
+	defer cancel()
+	return t.WithTransactionContext(ctx, fn)
+}
+
+// WithTransactionContext 使用事务（支持 context）
+func (t *TorrentDB) WithTransactionContext(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if err := globalSemaphore.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("获取数据库锁超时: %w", err)
 	}
-	defer globalSemaphore.Release(1) // 执行完事务后释放信号量
-	// 执行事务
-	return t.DB.Transaction(fn)
+	defer globalSemaphore.Release(1)
+
+	return t.DB.WithContext(ctx).Transaction(fn)
 }

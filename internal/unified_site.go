@@ -2,17 +2,13 @@ package internal
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/sunerpy/requests"
 	"go.uber.org/zap"
 
 	"github.com/sunerpy/pt-tools/core"
@@ -144,175 +140,43 @@ func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem,
 
 	u.logger.Debugf("[获取种子详情] 站点=%s, ID=%s, 标题=%s", u.siteGroup, item.GUID, item.Title)
 
-	switch u.siteKind {
-	case v2.SiteMTorrent:
-		return u.getMTorrentDetails(item)
-	case v2.SiteNexusPHP, v2.SiteHDDolby:
-		return u.getNexusPHPDetails(item)
-	default:
-		return nil, fmt.Errorf("unsupported site kind: %s", u.siteKind)
-	}
-}
-
-// getMTorrentDetails 获取 M-Team 种子详情
-func (u *UnifiedSiteImpl) getMTorrentDetails(item *gofeed.Item) (*v2.TorrentItem, error) {
 	cfg, err := core.NewConfigStore(global.GlobalDB).Load()
 	if err != nil {
 		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
 	sc := cfg.Sites[u.siteGroup]
-	if sc.APIUrl == "" || sc.APIKey == "" {
-		return nil, fmt.Errorf("站点 API 未配置")
+
+	creds := v2.SiteCredentials{
+		Cookie:  sc.Cookie,
+		APIKey:  sc.APIKey,
+		Passkey: sc.Passkey,
 	}
 
-	data := fmt.Sprintf("id=%s", item.GUID)
-	apiPath := fmt.Sprintf("%s%s", sc.APIUrl, torrentDetailPath)
+	baseURL := ""
+	if def := v2.GetDefinitionRegistry().GetOrDefault(u.siteID); def != nil && len(def.URLs) > 0 {
+		baseURL = def.URLs[0]
+	}
+	if sc.APIUrl != "" {
+		baseURL = sc.APIUrl
+	}
 
-	resp, err := requests.Post(apiPath, strings.NewReader(data),
-		requests.WithContext(u.ctx),
-		requests.WithTimeout(30*time.Second),
-		requests.WithHeader("x-api-key", sc.APIKey),
-		requests.WithHeader("Content-Type", mteamContentType),
-	)
+	site, err := u.registry.CreateSite(u.siteID, creds, baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("请求失败: %w", err)
+		return nil, fmt.Errorf("创建站点实例失败: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("请求失败，状态码: %d", resp.StatusCode)
-	}
+	defer site.Close()
 
-	var responseData models.APIResponse[models.MTTorrentDetail]
-	if err := json.Unmarshal(resp.Bytes(), &responseData); err != nil {
-		return nil, fmt.Errorf("解析 JSON 失败: %w", err)
+	provider, ok := site.(v2.DetailFetcherProvider)
+	if !ok {
+		return nil, fmt.Errorf("站点 %s 不支持 DetailFetcherProvider 接口", u.siteID)
 	}
 
-	// 转换为 v2.TorrentItem
-	return u.convertMTTorrentToItem(&responseData.Data), nil
-}
-
-func (u *UnifiedSiteImpl) getNexusPHPDetails(item *gofeed.Item) (*v2.TorrentItem, error) {
-	url := item.Link
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cfg, err := core.NewConfigStore(global.GlobalDB).Load()
-	if err != nil {
-		return nil, fmt.Errorf("加载配置失败: %w", err)
+	fetcher := provider.GetDetailFetcher()
+	if fetcher == nil {
+		return nil, fmt.Errorf("站点 %s 未实现 TorrentDetailFetcher", u.siteID)
 	}
 
-	def := v2.GetDefinitionRegistry().GetOrDefault(string(u.siteGroup))
-	parser := v2.NewNexusPHPParserFromDefinition(def)
-	siteCfg := NewSiteMapConfig(u.siteGroup, cfg.Sites[u.siteGroup].Cookie, cfg.Sites[u.siteGroup], NewLegacyParserAdapter(parser))
-	co := NewCollectorWithTransport()
-
-	info, err := CommonFetchTorrentInfo(ctx, co, siteCfg, url)
-	if err != nil {
-		return nil, err
-	}
-
-	return u.convertPHPTorrentToItem(info), nil
-}
-
-// convertMTTorrentToItem 将 MTTorrentDetail 转换为 v2.TorrentItem
-func (u *UnifiedSiteImpl) convertMTTorrentToItem(detail *models.MTTorrentDetail) *v2.TorrentItem {
-	item := &v2.TorrentItem{
-		ID:            detail.ID,
-		Title:         detail.Name,
-		SourceSite:    string(u.siteGroup),
-		DiscountLevel: v2.DiscountNone,
-	}
-
-	// 解析大小
-	if detail.Size != "" {
-		var sizeBytes int64
-		if _, err := fmt.Sscanf(detail.Size, "%d", &sizeBytes); err == nil {
-			item.SizeBytes = sizeBytes
-		}
-	}
-
-	// 解析优惠信息
-	if detail.Status != nil {
-		item.DiscountLevel = u.mapMTDiscountLevel(detail.Status.Discount)
-
-		// 解析优惠结束时间
-		if detail.Status.DiscountEndTime != "" {
-			if endTime, err := v2.ParseTimeInCST("2006-01-02 15:04:05", detail.Status.DiscountEndTime); err == nil {
-				item.DiscountEndTime = endTime
-			}
-		}
-	}
-
-	// 设置标签
-	if detail.SmallDescr != "" {
-		item.Tags = []string{detail.SmallDescr}
-	}
-
-	return item
-}
-
-// convertPHPTorrentToItem 将 PHPTorrentInfo 转换为 v2.TorrentItem
-func (u *UnifiedSiteImpl) convertPHPTorrentToItem(info *models.PHPTorrentInfo) *v2.TorrentItem {
-	item := &v2.TorrentItem{
-		ID:              info.TorrentID,
-		Title:           info.Title,
-		SizeBytes:       int64(info.SizeMB * 1024 * 1024),
-		Seeders:         info.Seeders,
-		Leechers:        info.Leechers,
-		SourceSite:      string(u.siteGroup),
-		DiscountLevel:   u.mapPHPDiscountLevel(info.Discount),
-		DiscountEndTime: info.EndTime,
-		HasHR:           info.HR,
-	}
-
-	// 设置标签
-	if info.SubTitle != "" {
-		item.Tags = []string{info.SubTitle}
-	}
-
-	return item
-}
-
-// mapMTDiscountLevel 将 M-Team 优惠类型映射到 v2.DiscountLevel
-func (u *UnifiedSiteImpl) mapMTDiscountLevel(discount string) v2.DiscountLevel {
-	discount = strings.ToUpper(strings.TrimSpace(discount))
-	switch discount {
-	case "FREE":
-		return v2.DiscountFree
-	case "_2X_FREE", "2XFREE":
-		return v2.Discount2xFree
-	case "PERCENT_50", "50%":
-		return v2.DiscountPercent50
-	case "PERCENT_30", "30%":
-		return v2.DiscountPercent30
-	case "PERCENT_70", "70%":
-		return v2.DiscountPercent70
-	case "_2X_UP", "2XUP":
-		return v2.Discount2xUp
-	case "_2X_PERCENT_50", "2X50%":
-		return v2.Discount2x50
-	default:
-		return v2.DiscountNone
-	}
-}
-
-// mapPHPDiscountLevel 将 PHP 优惠类型映射到 v2.DiscountLevel
-func (u *UnifiedSiteImpl) mapPHPDiscountLevel(discount models.DiscountType) v2.DiscountLevel {
-	switch discount {
-	case models.DISCOUNT_FREE:
-		return v2.DiscountFree
-	case models.DISCOUNT_TWO_X_FREE:
-		return v2.Discount2xFree
-	case models.DISCOUNT_TWO_X:
-		return v2.Discount2xUp
-	case models.DISCOUNT_FIFTY:
-		return v2.DiscountPercent50
-	case models.DISCOUNT_THIRTY:
-		return v2.DiscountPercent30
-	case models.DISCOUNT_TWO_X_FIFTY:
-		return v2.Discount2x50
-	default:
-		return v2.DiscountNone
-	}
+	return fetcher.GetTorrentDetail(u.ctx, item.GUID, item.Link)
 }
 
 // SendTorrentToDownloader 发送种子到下载器

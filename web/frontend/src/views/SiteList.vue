@@ -78,7 +78,7 @@ async function addSite() {
     const payload: SiteConfig = {
       enabled: false,
       rss: [],
-      auth_method: lower === "mteam" ? "api_key" : "cookie",
+      auth_method: lower === "mteam" ? "api_key" : lower === "rousipro" ? "passkey" : "cookie",
       cookie: "",
       api_key: "",
       api_url: "", // 预置站点的 API URL 由后端常量提供
@@ -158,7 +158,9 @@ function getRssCount(site: SiteConfig): number {
                   ? 'warning'
                   : row[1].auth_method === 'cookie_and_api_key'
                     ? 'success'
-                    : 'info'
+                    : row[1].auth_method === 'passkey'
+                      ? 'primary'
+                      : 'info'
               "
               size="small"
               effect="plain"
@@ -168,7 +170,9 @@ function getRssCount(site: SiteConfig): number {
                   ? "API Key"
                   : row[1].auth_method === "cookie_and_api_key"
                     ? "Cookie + API Key"
-                    : "Cookie"
+                    : row[1].auth_method === "passkey"
+                      ? "Passkey"
+                      : "Cookie"
               }}
             </el-tag>
           </template>

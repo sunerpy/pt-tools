@@ -157,9 +157,12 @@ func (p *NexusPHPParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, t
 	doc.Find(p.config.DiscountSelector).EachWithBreak(func(_ int, el *goquery.Selection) bool {
 		class, exists := el.Attr("class")
 		if exists {
-			if level, ok := p.config.DiscountMapping[class]; ok {
-				discount = level
-				return false
+			// Handle multiple classes and whitespace: class="free highlight" or class="free "
+			for _, cls := range strings.Fields(class) {
+				if level, ok := p.config.DiscountMapping[cls]; ok {
+					discount = level
+					return false
+				}
 			}
 		}
 		return true

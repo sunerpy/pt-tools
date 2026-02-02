@@ -254,3 +254,10 @@ func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, ha
 	}
 	return b.Download(ctx, torrentID)
 }
+
+func (b *BaseSite[Req, Res]) GetDetailFetcher() TorrentDetailFetcher {
+	if fetcher, ok := any(b.driver).(TorrentDetailFetcher); ok {
+		return fetcher
+	}
+	return nil
+}

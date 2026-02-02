@@ -70,7 +70,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 		}
 		for _, sitem := range sites {
 			sg := models.SiteGroup(strings.ToLower(sitem.Name))
-			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, RSS: []models.RSSConfig{}}
+			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
 				return e
@@ -263,6 +263,7 @@ func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (u
 	row.Cookie = sc.Cookie
 	row.APIKey = sc.APIKey
 	row.APIUrl = sc.APIUrl
+	row.Passkey = sc.Passkey
 	if err := db.Save(&row).Error; err != nil {
 		return 0, err
 	}
@@ -347,8 +348,8 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	// 3) 对于非预置站点，API URL 必填；预置站点使用常量
 	// 4) RSS 列表可以为空，但如果有则各项字段需合法。
 	am := strings.ToLower(strings.TrimSpace(sc.AuthMethod))
-	if am != "cookie" && am != "api_key" && am != "cookie_and_api_key" {
-		return errors.New("认证方式必须为 'cookie'、'api_key' 或 'cookie_and_api_key'")
+	if am != "cookie" && am != "api_key" && am != "cookie_and_api_key" && am != "passkey" {
+		return errors.New("认证方式必须为 'cookie'、'api_key'、'cookie_and_api_key' 或 'passkey'")
 	}
 
 	// 检查站点是否在注册表中（有默认 URL），注册表中的站点不需要用户提供 API URL
@@ -360,6 +361,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	}
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
 	cookieEmpty := strings.TrimSpace(sc.Cookie) == ""
+	passkeyEmpty := strings.TrimSpace(sc.Passkey) == ""
 	switch am {
 	case "api_key":
 		if apiKeyEmpty {
@@ -381,6 +383,10 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		}
 		if !apiKeyEmpty {
 			return errors.New("认证方式为 cookie 时 API Key 必须留空")
+		}
+	case "passkey":
+		if passkeyEmpty {
+			return errors.New("Passkey 不能为空")
 		}
 	}
 	// RSS 列表允许为空，只在有内容时进行校验
@@ -410,7 +416,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		}
 	}
 	// 事务保存站点与 RSS
-	return s.db.DB.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithTransaction(func(tx *gorm.DB) error {
 		var row models.SiteSetting
 		if err := tx.Where("name = ?", string(site)).First(&row).Error; err != nil {
 			row = models.SiteSetting{Name: string(site), DisplayName: string(site), IsBuiltin: true}
@@ -422,6 +428,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		row.Cookie = sc.Cookie
 		row.APIKey = sc.APIKey
 		row.APIUrl = sc.APIUrl
+		row.Passkey = sc.Passkey
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
@@ -471,21 +478,20 @@ func (s *ConfigStore) DeleteSite(name string) error {
 	if lower == "springsunday" || lower == "hdsky" || lower == "mteam" {
 		return errors.New("预置站点不可删除")
 	}
-	tx := s.db.DB.Begin()
-	var site models.SiteSetting
-	if err := tx.Where("name = ?", lower).First(&site).Error; err != nil {
-		tx.Rollback()
-		return err
-	}
-	if err := tx.Where("site_id = ?", site.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
-		tx.Rollback()
-		return err
-	}
-	if err := tx.Delete(&site).Error; err != nil {
-		tx.Rollback()
-		return err
-	}
-	if err := tx.Commit().Error; err != nil {
+	err := s.db.WithTransaction(func(tx *gorm.DB) error {
+		var site models.SiteSetting
+		if err := tx.Where("name = ?", lower).First(&site).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_id = ?", site.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&site).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
@@ -508,7 +514,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
-		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, RSS: []models.RSSConfig{}}
+		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, RSS: []models.RSSConfig{}}
 		var rss []models.RSSSubscription
 		if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 			return nil, err
@@ -529,7 +535,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 		return models.SiteConfig{}, err
 	}
 	// 初始化 RSS 为空数组，确保 JSON 序列化时返回 [] 而不是 null
-	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, RSS: []models.RSSConfig{}}
+	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, RSS: []models.RSSConfig{}}
 	var rss []models.RSSSubscription
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err

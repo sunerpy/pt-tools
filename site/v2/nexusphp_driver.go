@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -1900,4 +1902,114 @@ func extractSiteIDFromURL(baseURL string) string {
 	}
 
 	return host
+}
+
+func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link string) (*TorrentItem, error) {
+	torrentID := guid
+	if torrentID == "" && link != "" {
+		torrentID = extractTorrentIDFromURL(link)
+	}
+	if torrentID == "" {
+		return nil, fmt.Errorf("unable to determine torrent ID")
+	}
+
+	req, err := d.PrepareDetail(torrentID)
+	if err != nil {
+		return nil, fmt.Errorf("prepare detail request: %w", err)
+	}
+
+	res, err := d.Execute(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("execute detail request: %w", err)
+	}
+
+	if res.Document == nil {
+		return nil, ErrParseError
+	}
+
+	parser := NewNexusPHPParserFromDefinition(d.GetSiteDefinition())
+	detailInfo := parser.ParseAll(res.Document.Selection)
+
+	item := &TorrentItem{
+		ID:              detailInfo.TorrentID,
+		Title:           detailInfo.Title,
+		SizeBytes:       int64(detailInfo.SizeMB * 1024 * 1024),
+		DiscountLevel:   detailInfo.DiscountLevel,
+		DiscountEndTime: detailInfo.DiscountEnd,
+		HasHR:           detailInfo.HasHR,
+		SourceSite:      d.getSiteID(),
+	}
+
+	return item, nil
+}
+
+func (d *NexusPHPDriver) getSiteID() string {
+	if d.siteDefinition != nil {
+		return d.siteDefinition.ID
+	}
+	return extractSiteIDFromURL(d.BaseURL)
+}
+
+func extractTorrentIDFromURL(link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	if id := u.Query().Get("id"); id != "" {
+		return id
+	}
+	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for _, part := range pathParts {
+		if _, err := strconv.Atoi(part); err == nil {
+			return part
+		}
+	}
+	return ""
+}
+
+func init() {
+	RegisterDriverForSchema("NexusPHP", createNexusPHPSite)
+}
+
+func createNexusPHPSite(config SiteConfig, logger *zap.Logger) (Site, error) {
+	var opts NexusPHPOptions
+	if len(config.Options) > 0 {
+		if err := json.Unmarshal(config.Options, &opts); err != nil {
+			return nil, fmt.Errorf("parse NexusPHP options: %w", err)
+		}
+	}
+
+	if opts.Cookie == "" {
+		return nil, fmt.Errorf("NexusPHP site requires cookie")
+	}
+
+	registry := GetDefinitionRegistry()
+	siteDef := registry.GetOrDefault(config.ID)
+
+	selectors := DefaultNexusPHPSelectors()
+	if opts.Selectors != nil {
+		mergeSelectors(&selectors, opts.Selectors)
+	}
+	if siteDef != nil && siteDef.Selectors != nil {
+		mergeSelectors(&selectors, siteDef.Selectors)
+	}
+
+	driver := NewNexusPHPDriver(NexusPHPDriverConfig{
+		BaseURL:   config.BaseURL,
+		Cookie:    opts.Cookie,
+		Selectors: &selectors,
+	})
+
+	if siteDef != nil {
+		driver.SetSiteDefinition(siteDef)
+	}
+
+	return NewBaseSite(driver, BaseSiteConfig{
+		ID:        config.ID,
+		Name:      config.Name,
+		Kind:      SiteNexusPHP,
+		RateLimit: config.RateLimit,
+		RateBurst: config.RateBurst,
+		Logger:    logger.With(zap.String("site", config.ID)),
+	}), nil
 }

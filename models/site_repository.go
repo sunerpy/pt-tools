@@ -26,6 +26,7 @@ type SiteData struct {
 	Cookie       string
 	APIKey       string
 	APIURL       string
+	Passkey      string
 	DownloaderID *uint
 	ParserConfig string
 	IsBuiltin    bool
@@ -62,6 +63,7 @@ func (r *SiteRepository) CreateSite(data SiteData) (uint, error) {
 		Cookie:       data.Cookie,
 		APIKey:       data.APIKey,
 		APIUrl:       data.APIURL,
+		Passkey:      data.Passkey,
 		DownloaderID: data.DownloaderID,
 		ParserConfig: data.ParserConfig,
 		IsBuiltin:    data.IsBuiltin,
@@ -75,7 +77,7 @@ func (r *SiteRepository) CreateSite(data SiteData) (uint, error) {
 	return site.ID, nil
 }
 
-func (r *SiteRepository) UpdateSiteCredentials(name string, enabled *bool, authMethod, cookie, apiKey, apiURL string) error {
+func (r *SiteRepository) UpdateSiteCredentials(name string, enabled *bool, authMethod, cookie, apiKey, apiURL, passkey string) error {
 	var site SiteSetting
 	if err := r.db.Where("name = ?", name).First(&site).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -94,6 +96,7 @@ func (r *SiteRepository) UpdateSiteCredentials(name string, enabled *bool, authM
 	site.Cookie = cookie
 	site.APIKey = apiKey
 	site.APIUrl = apiURL
+	site.Passkey = passkey
 
 	return r.db.Save(&site).Error
 }

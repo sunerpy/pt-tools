@@ -1,52 +1,29 @@
 package v2
 
-// SiteDefinition contains site-specific metadata and configuration
 type SiteDefinition struct {
-	// ID is the unique site identifier (e.g., "hdsky")
-	ID string `json:"id"`
-	// Name is the human-readable site name (e.g., "HDSky")
-	Name string `json:"name"`
-	// Aka contains alternative names for the site
-	Aka []string `json:"aka,omitempty"`
-	// Description is a brief description of the site
-	Description string `json:"description,omitempty"`
-	// Schema is the base schema type (e.g., "NexusPHP", "mTorrent")
-	Schema string `json:"schema"`
-
-	// URLs are the primary site URLs
-	URLs []string `json:"urls"`
-	// LegacyURLs are alternative/legacy URLs
-	LegacyURLs []string `json:"legacyUrls,omitempty"`
-	// FaviconURL is the site's favicon URL for caching
-	FaviconURL string `json:"faviconUrl,omitempty"`
-
-	// Unavailable marks the site as temporarily unavailable
-	Unavailable bool `json:"unavailable,omitempty"`
-	// UnavailableReason explains why the site is unavailable
-	UnavailableReason string `json:"unavailableReason,omitempty"`
-
-	// AuthMethod is "cookie" or "api_key" (inferred from Schema if empty)
-	AuthMethod string `json:"authMethod,omitempty"`
-	// RateLimit is requests per second (default: 2.0)
-	RateLimit float64 `json:"rateLimit,omitempty"`
-	// RateBurst is the burst size for rate limiting (default: 5)
-	RateBurst int `json:"rateBurst,omitempty"`
-
-	// TimezoneOffset is the site's timezone (e.g., "+0800")
-	TimezoneOffset string `json:"timezoneOffset,omitempty"`
-
-	// UserInfo contains user info fetching configuration
-	UserInfo *UserInfoConfig `json:"userInfo,omitempty"`
-
-	// LevelRequirements defines user level requirements
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Aka               []string               `json:"aka,omitempty"`
+	Description       string                 `json:"description,omitempty"`
+	Schema            Schema                 `json:"schema"`
+	URLs              []string               `json:"urls"`
+	LegacyURLs        []string               `json:"legacyUrls,omitempty"`
+	FaviconURL        string                 `json:"faviconUrl,omitempty"`
+	Unavailable       bool                   `json:"unavailable,omitempty"`
+	UnavailableReason string                 `json:"unavailableReason,omitempty"`
+	AuthMethod        AuthMethod             `json:"authMethod,omitempty"`
+	RateLimit         float64                `json:"rateLimit,omitempty"`
+	RateBurst         int                    `json:"rateBurst,omitempty"`
+	TimezoneOffset    string                 `json:"timezoneOffset,omitempty"`
+	UserInfo          *UserInfoConfig        `json:"userInfo,omitempty"`
 	LevelRequirements []SiteLevelRequirement `json:"levelRequirements,omitempty"`
+	Selectors         *SiteSelectors         `json:"selectors,omitempty"`
+	DetailParser      *DetailParserConfig    `json:"detailParser,omitempty"`
 
-	// Selectors contains custom CSS selectors (merged with schema defaults)
-	Selectors *SiteSelectors `json:"selectors,omitempty"`
-
-	// DetailParser contains detail page parsing configuration
-	// If nil, uses DefaultDetailParserConfig()
-	DetailParser *DetailParserConfig `json:"detailParser,omitempty"`
+	// CreateDriver is an optional custom driver factory for this site.
+	// If nil, the driver is created based on Schema field.
+	// This allows sites with unique APIs to provide custom driver logic.
+	CreateDriver DriverFactory `json:"-"`
 }
 
 // UserInfoConfig defines how to fetch and parse user info

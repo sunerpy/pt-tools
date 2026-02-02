@@ -15,10 +15,11 @@ import (
 type SiteValidationRequest struct {
 	Name       string `json:"name"`
 	BaseURL    string `json:"base_url"`
-	AuthMethod string `json:"auth_method"` // cookie, api_key
+	AuthMethod string `json:"auth_method"` // cookie, api_key, cookie_and_api_key, passkey
 	Cookie     string `json:"cookie,omitempty"`
 	APIKey     string `json:"api_key,omitempty"`
 	APIURL     string `json:"api_url,omitempty"`
+	Passkey    string `json:"passkey,omitempty"`
 }
 
 // SiteValidationResponse 站点验证响应
@@ -37,6 +38,7 @@ type DynamicSiteRequest struct {
 	Cookie       string `json:"cookie,omitempty"`
 	APIKey       string `json:"api_key,omitempty"`
 	APIURL       string `json:"api_url,omitempty"`
+	Passkey      string `json:"passkey,omitempty"`
 	DownloaderID *uint  `json:"downloader_id,omitempty"`
 	ParserConfig string `json:"parser_config,omitempty"`
 }
@@ -72,6 +74,7 @@ type TemplateImportRequest struct {
 	Template json.RawMessage `json:"template"`
 	Cookie   string          `json:"cookie,omitempty"`
 	APIKey   string          `json:"api_key,omitempty"`
+	Passkey  string          `json:"passkey,omitempty"`
 }
 
 // apiSiteValidate 验证站点配置
@@ -108,6 +111,16 @@ func (s *Server) apiSiteValidate(w http.ResponseWriter, r *http.Request) {
 	case "api_key":
 		if req.APIKey == "" {
 			writeJSON(w, SiteValidationResponse{Valid: false, Message: "API Key不能为空"})
+			return
+		}
+	case "cookie_and_api_key":
+		if req.Cookie == "" || req.APIKey == "" {
+			writeJSON(w, SiteValidationResponse{Valid: false, Message: "Cookie和API Key都不能为空"})
+			return
+		}
+	case "passkey":
+		if req.Passkey == "" {
+			writeJSON(w, SiteValidationResponse{Valid: false, Message: "Passkey不能为空"})
 			return
 		}
 	case "rss_passkey":
@@ -213,6 +226,7 @@ func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 		Cookie:       req.Cookie,
 		APIKey:       req.APIKey,
 		APIURL:       req.APIURL,
+		Passkey:      req.Passkey,
 		DownloaderID: req.DownloaderID,
 		ParserConfig: req.ParserConfig,
 		IsBuiltin:    false,
@@ -312,6 +326,16 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "API Key不能为空", http.StatusBadRequest)
 			return
 		}
+	case "cookie_and_api_key":
+		if req.Cookie == "" || req.APIKey == "" {
+			http.Error(w, "Cookie和API Key都不能为空", http.StatusBadRequest)
+			return
+		}
+	case "passkey":
+		if req.Passkey == "" {
+			http.Error(w, "Passkey不能为空", http.StatusBadRequest)
+			return
+		}
 	}
 
 	db := global.GlobalDB.DB
@@ -336,6 +360,7 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 		AuthMethod:   templateExport.AuthMethod,
 		Cookie:       req.Cookie,
 		APIKey:       req.APIKey,
+		Passkey:      req.Passkey,
 		ParserConfig: string(templateExport.ParserConfig),
 		IsBuiltin:    false,
 		TemplateID:   &template.ID,

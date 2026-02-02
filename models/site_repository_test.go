@@ -84,7 +84,7 @@ func TestSiteRepository_UpdateSiteCredentials(t *testing.T) {
 	require.NoError(t, err)
 
 	enabled := true
-	err = repo.UpdateSiteCredentials("test-site", &enabled, "api_key", "", "new-api-key", "https://api.example.com")
+	err = repo.UpdateSiteCredentials("test-site", &enabled, "api_key", "", "new-api-key", "https://api.example.com", "")
 	require.NoError(t, err)
 
 	var site SiteSetting
@@ -100,7 +100,7 @@ func TestSiteRepository_UpdateSiteCredentials_CreateIfNotExists(t *testing.T) {
 	repo := NewSiteRepository(db)
 
 	enabled := true
-	err := repo.UpdateSiteCredentials("new-site", &enabled, "cookie", "new-cookie", "", "")
+	err := repo.UpdateSiteCredentials("new-site", &enabled, "cookie", "new-cookie", "", "", "")
 	require.NoError(t, err)
 
 	var site SiteSetting

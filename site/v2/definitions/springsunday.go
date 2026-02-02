@@ -10,7 +10,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 	Name:           "SpringSunday",
 	Aka:            []string{"SSD"},
 	Description:    "Classic Movie Compression Team",
-	Schema:         "NexusPHP",
+	Schema:         v2.SchemaNexusPHP,
 	URLs:           []string{"https://springsunday.net/"},
 	LegacyURLs:     []string{"https://hdcmct.org/"},
 	FaviconURL:     "https://springsunday.net/favicon.ico",

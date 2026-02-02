@@ -261,12 +261,13 @@ func init() {
 
 **Schema 与认证方式映射**：
 
-| Schema     | 站点类型          | 默认认证方式 |
-| ---------- | ----------------- | ------------ |
-| `NexusPHP` | NexusPHP 架构站点 | Cookie       |
-| `mTorrent` | M-Team 等         | API Key      |
-| `Gazelle`  | Gazelle 架构站点  | Cookie       |
-| `Unit3D`   | Unit3D 架构站点   | API Key      |
+| Schema     | 站点类型          | 默认认证方式     |
+| ---------- | ----------------- | ---------------- |
+| `NexusPHP` | NexusPHP 架构站点 | Cookie           |
+| `mTorrent` | M-Team 等         | API Key          |
+| `Gazelle`  | Gazelle 架构站点  | Cookie           |
+| `Unit3D`   | Unit3D 架构站点   | API Key          |
+| `HDDolby`  | HDDolby 专用      | API Key + Cookie |
 
 **添加步骤**：
 
@@ -275,6 +276,67 @@ func init() {
 3. 运行测试：`go test ./site/v2/...`
 4. 更新站点列表文档：`docs/sites.md`
 5. 提交 PR
+
+**自定义驱动（单文件模式）**：
+
+如果站点架构与现有 Schema 不兼容，可以在 **同一个文件** 中实现完整的驱动逻辑。参考 `definitions/rousipro.go` 的实现：
+
+```go
+package definitions
+
+import (
+    "context"
+    "encoding/json"
+    "fmt"
+
+    v2 "github.com/sunerpy/pt-tools/site/v2"
+    "go.uber.org/zap"
+)
+
+var CustomSiteDefinition = &v2.SiteDefinition{
+    ID:          "customsite",
+    Name:        "CustomSite",
+    Schema:      "Custom",
+    URLs:        []string{"https://customsite.com/"},
+    CreateDriver: createCustomDriver,
+}
+
+func init() {
+    v2.RegisterSiteDefinition(CustomSiteDefinition)
+}
+
+func createCustomDriver(config v2.SiteConfig, logger *zap.Logger) (v2.Site, error) {
+    var opts v2.CustomOptions
+    if err := json.Unmarshal(config.Options, &opts); err != nil {
+        return nil, err
+    }
+
+    driver := &customDriver{baseURL: config.BaseURL, apiKey: opts.APIKey}
+
+    return v2.NewBaseSite(driver, v2.BaseSiteConfig{
+        ID:     config.ID,
+        Name:   config.Name,
+        Kind:   v2.SiteKind("custom"),
+        Logger: logger,
+    }), nil
+}
+
+// customDriver 实现 v2.Driver 接口
+type customDriver struct {
+    baseURL string
+    apiKey  string
+}
+
+// 实现 Driver 接口的方法...
+func (d *customDriver) PrepareSearch(q v2.SearchQuery) (customReq, error) { ... }
+func (d *customDriver) Execute(ctx context.Context, req customReq) (customRes, error) { ... }
+func (d *customDriver) ParseSearch(res customRes) ([]v2.TorrentItem, error) { ... }
+func (d *customDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) { ... }
+func (d *customDriver) PrepareDownload(id string) (customReq, error) { ... }
+func (d *customDriver) ParseDownload(res customRes) ([]byte, error) { ... }
+```
+
+当设置了 `CreateDriver` 时，系统会优先使用它而非基于 Schema 的驱动查找。这种模式的优势是 **新站点只需要一个文件**，所有驱动逻辑都包含在 `definitions/<site>.go` 中。
 
 ## 代码规范
 

@@ -275,6 +275,65 @@ func TestSpringSundayParser(t *testing.T) {
 	})
 }
 
+func TestParseDiscountEdgeCases(t *testing.T) {
+	parser := NewHDSkyParser()
+
+	t.Run("class with trailing whitespace", func(t *testing.T) {
+		html := `<html>
+			<h1><font class="free ">免费</font></h1>
+		</html>`
+
+		doc := parseHTML(t, html)
+		discount, _ := parser.ParseDiscount(doc)
+
+		assert.Equal(t, DiscountFree, discount)
+	})
+
+	t.Run("class with leading whitespace", func(t *testing.T) {
+		html := `<html>
+			<h1><font class=" free">免费</font></h1>
+		</html>`
+
+		doc := parseHTML(t, html)
+		discount, _ := parser.ParseDiscount(doc)
+
+		assert.Equal(t, DiscountFree, discount)
+	})
+
+	t.Run("multiple classes with free", func(t *testing.T) {
+		html := `<html>
+			<h1><font class="highlight free bold">免费</font></h1>
+		</html>`
+
+		doc := parseHTML(t, html)
+		discount, _ := parser.ParseDiscount(doc)
+
+		assert.Equal(t, DiscountFree, discount)
+	})
+
+	t.Run("multiple classes with twoupfree", func(t *testing.T) {
+		html := `<html>
+			<h1><font class="discount twoupfree special">2x Free</font></h1>
+		</html>`
+
+		doc := parseHTML(t, html)
+		discount, _ := parser.ParseDiscount(doc)
+
+		assert.Equal(t, Discount2xFree, discount)
+	})
+
+	t.Run("NovaHD real HTML pattern", func(t *testing.T) {
+		html := `<html>
+			<h1 align="center" id="top">窈窕淑女（92集）刘擎＆姚慧&nbsp;&nbsp;&nbsp; <b>[<font class='free' >免费</font>]</b></h1>
+		</html>`
+
+		doc := parseHTML(t, html)
+		discount, _ := parser.ParseDiscount(doc)
+
+		assert.Equal(t, DiscountFree, discount)
+	})
+}
+
 func TestParserConfig(t *testing.T) {
 	t.Run("default config", func(t *testing.T) {
 		config := DefaultNexusPHPParserConfig()
