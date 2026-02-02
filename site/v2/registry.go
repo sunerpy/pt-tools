@@ -32,8 +32,8 @@ type SiteMeta struct {
 	Kind SiteKind
 	// DefaultBaseURL is the default base URL for the site
 	DefaultBaseURL string
-	// AuthMethod is the authentication method (cookie, api_key)
-	AuthMethod string
+	// AuthMethod is the authentication method
+	AuthMethod AuthMethod
 	// RateLimit is the default rate limit (requests per second)
 	RateLimit float64
 	// RateBurst is the default rate burst
@@ -86,7 +86,7 @@ func (r *SiteRegistry) siteMetaFromDefinition(def *SiteDefinition) SiteMeta {
 
 	authMethod := def.AuthMethod
 	if authMethod == "" {
-		authMethod = schemaToAuthMethod(def.Schema)
+		authMethod = def.Schema.DefaultAuthMethod()
 	}
 
 	rateLimit := def.RateLimit
@@ -102,37 +102,11 @@ func (r *SiteRegistry) siteMetaFromDefinition(def *SiteDefinition) SiteMeta {
 	return SiteMeta{
 		ID:             def.ID,
 		Name:           def.Name,
-		Kind:           schemaToKind(def.Schema),
+		Kind:           def.Schema.ToSiteKind(),
 		DefaultBaseURL: baseURL,
 		AuthMethod:     authMethod,
 		RateLimit:      rateLimit,
 		RateBurst:      rateBurst,
-	}
-}
-
-func schemaToKind(schema string) SiteKind {
-	switch schema {
-	case "NexusPHP":
-		return SiteNexusPHP
-	case "mTorrent":
-		return SiteMTorrent
-	case "Gazelle":
-		return SiteGazelle
-	case "Unit3D":
-		return SiteUnit3D
-	case "HDDolby":
-		return SiteHDDolby
-	default:
-		return SiteNexusPHP
-	}
-}
-
-func schemaToAuthMethod(schema string) string {
-	switch schema {
-	case "mTorrent", "Unit3D", "HDDolby":
-		return "api_key"
-	default:
-		return "cookie"
 	}
 }
 
@@ -165,8 +139,9 @@ func (r *SiteRegistry) List() []string {
 
 // SiteCredentials holds authentication credentials for a site
 type SiteCredentials struct {
-	Cookie string
-	APIKey string
+	Cookie  string
+	APIKey  string
+	Passkey string
 }
 
 // CreateSite creates a Site instance from registry metadata and credentials
@@ -218,6 +193,11 @@ func (r *SiteRegistry) CreateSite(siteID string, creds SiteCredentials, customBa
 			return nil, fmt.Errorf("site %s requires Cookie (for bonus info)", siteID)
 		}
 		options, err = json.Marshal(HDDolbyOptions{APIKey: creds.APIKey, Cookie: creds.Cookie})
+	case SiteRousi:
+		if creds.Passkey == "" {
+			return nil, fmt.Errorf("site %s requires passkey", siteID)
+		}
+		options, err = json.Marshal(RousiOptions{Passkey: creds.Passkey})
 	default:
 		return nil, fmt.Errorf("unsupported site kind: %s", meta.Kind)
 	}

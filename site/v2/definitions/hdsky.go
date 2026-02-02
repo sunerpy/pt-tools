@@ -184,7 +184,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 	Name:           "HDSky",
 	Aka:            []string{"HDS", "天空"},
 	Description:    "高清发烧友后花园PT",
-	Schema:         "NexusPHP",
+	Schema:         v2.SchemaNexusPHP,
 	URLs:           []string{"https://hdsky.me/"},
 	FaviconURL:     "https://hdsky.me/favicon.ico",
 	TimezoneOffset: "+0800",

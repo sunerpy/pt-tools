@@ -162,8 +162,9 @@ func RefreshSiteRegistrations(store interface {
 		site, createErr := siteRegistry.CreateSite(
 			siteID,
 			v2.SiteCredentials{
-				Cookie: siteConfig.Cookie,
-				APIKey: siteConfig.APIKey,
+				Cookie:  siteConfig.Cookie,
+				APIKey:  siteConfig.APIKey,
+				Passkey: siteConfig.Passkey,
 			},
 			siteConfig.APIUrl,
 		)

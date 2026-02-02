@@ -10,7 +10,7 @@ var MTeamDefinition = &v2.SiteDefinition{
 	Name:        "M-Team - TP",
 	Aka:         []string{"MTeam", "馒头"},
 	Description: "综合性网站，有分享率要求",
-	Schema:      "mTorrent",
+	Schema:      v2.SchemaMTorrent,
 	RateLimit:   1.0,
 	RateBurst:   3,
 	URLs: []string{

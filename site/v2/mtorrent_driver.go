@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/requests"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -955,4 +956,96 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	}
 
 	return info, nil
+}
+
+func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _ string) (*TorrentItem, error) {
+	req := MTorrentRequest{
+		Endpoint:    "/api/torrent/detail",
+		Method:      "POST",
+		Body:        fmt.Sprintf("id=%s", guid),
+		ContentType: "application/x-www-form-urlencoded",
+	}
+
+	res, err := d.Execute(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	if !res.Code.IsSuccess() {
+		return nil, fmt.Errorf("API error: %s - %s", res.Code.String(), res.Message)
+	}
+
+	var detail MTorrentTorrent
+	if err := json.Unmarshal(res.Data, &detail); err != nil {
+		return nil, fmt.Errorf("parse torrent detail: %w", err)
+	}
+
+	item := &TorrentItem{
+		ID:            detail.ID,
+		Title:         detail.Name,
+		Seeders:       int(detail.Status.Seeders),
+		Leechers:      int(detail.Status.Leechers),
+		Snatched:      int(detail.Status.TimesCompleted),
+		SourceSite:    d.getSiteID(),
+		DiscountLevel: parseMTorrentDiscount(detail.Status.Discount),
+	}
+
+	if detail.SmallDescr != "" {
+		item.Tags = []string{detail.SmallDescr}
+	}
+	if detail.Size != "" {
+		if sizeBytes, err := strconv.ParseInt(detail.Size, 10, 64); err == nil {
+			item.SizeBytes = sizeBytes
+		}
+	}
+	if detail.Status.DiscountEndTime != "" {
+		if endTime, err := ParseTimeInCST("2006-01-02 15:04:05", detail.Status.DiscountEndTime); err == nil {
+			item.DiscountEndTime = endTime
+		}
+	}
+
+	return item, nil
+}
+
+func (d *MTorrentDriver) getSiteID() string {
+	if d.siteDefinition != nil {
+		return d.siteDefinition.ID
+	}
+	return "mteam"
+}
+
+func init() {
+	RegisterDriverForSchema("mTorrent", createMTorrentSite)
+}
+
+func createMTorrentSite(config SiteConfig, logger *zap.Logger) (Site, error) {
+	var opts MTorrentOptions
+	if len(config.Options) > 0 {
+		if err := json.Unmarshal(config.Options, &opts); err != nil {
+			return nil, fmt.Errorf("parse MTorrent options: %w", err)
+		}
+	}
+
+	if opts.APIKey == "" {
+		return nil, fmt.Errorf("MTorrent site requires apiKey")
+	}
+
+	siteDef := GetDefinitionRegistry().GetOrDefault(config.ID)
+
+	driver := NewMTorrentDriver(MTorrentDriverConfig{
+		BaseURL: config.BaseURL,
+		APIKey:  opts.APIKey,
+	})
+
+	if siteDef != nil {
+		driver.SetSiteDefinition(siteDef)
+	}
+
+	return NewBaseSite(driver, BaseSiteConfig{
+		ID:        config.ID,
+		Name:      config.Name,
+		Kind:      SiteMTorrent,
+		RateLimit: config.RateLimit,
+		RateBurst: config.RateBurst,
+		Logger:    logger.With(zap.String("site", config.ID)),
+	}), nil
 }

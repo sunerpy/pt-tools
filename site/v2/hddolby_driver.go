@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -638,4 +640,99 @@ func (d *HDDolbyDriver) Search(ctx context.Context, query SearchQuery) ([]Torren
 	}
 
 	return d.ParseSearch(res)
+}
+
+// GetTorrentDetail fetches torrent detail from the detail page using cookie authentication.
+// HDDolby uses NexusPHP-style HTML detail pages, so we use the NexusPHP parser.
+func (d *HDDolbyDriver) GetTorrentDetail(ctx context.Context, guid, link string) (*TorrentItem, error) {
+	torrentID := guid
+	if torrentID == "" && link != "" {
+		torrentID = extractTorrentIDFromURL(link)
+	}
+	if torrentID == "" {
+		return nil, fmt.Errorf("unable to determine torrent ID")
+	}
+
+	if d.Cookie == "" {
+		return nil, fmt.Errorf("HDDolby requires cookie for detail page access")
+	}
+
+	detailURL := fmt.Sprintf("%s/details.php?id=%s&hit=1", d.BaseURL, torrentID)
+	headers := map[string]string{
+		"Cookie":          d.Cookie,
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+	}
+
+	resp, err := d.httpClient.DoRequest(ctx, http.MethodGet, detailURL, nil, headers)
+	if err != nil {
+		return nil, fmt.Errorf("fetch detail page: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("detail page returned HTTP %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(resp.Body)))
+	if err != nil {
+		return nil, fmt.Errorf("parse HTML: %w", err)
+	}
+
+	parser := NewNexusPHPParserFromDefinition(d.siteDefinition)
+	detailInfo := parser.ParseAll(doc.Selection)
+
+	item := &TorrentItem{
+		ID:              torrentID,
+		Title:           detailInfo.Title,
+		SizeBytes:       int64(detailInfo.SizeMB * 1024 * 1024),
+		DiscountLevel:   detailInfo.DiscountLevel,
+		DiscountEndTime: detailInfo.DiscountEnd,
+		HasHR:           detailInfo.HasHR,
+		SourceSite:      d.getSiteID(),
+	}
+
+	return item, nil
+}
+
+func init() {
+	RegisterDriverForSchema("HDDolby", createHDDolbySite)
+}
+
+func createHDDolbySite(config SiteConfig, logger *zap.Logger) (Site, error) {
+	var opts HDDolbyOptions
+	if len(config.Options) > 0 {
+		if err := json.Unmarshal(config.Options, &opts); err != nil {
+			return nil, fmt.Errorf("parse HDDolby options: %w", err)
+		}
+	}
+
+	if opts.APIKey == "" {
+		return nil, fmt.Errorf("HDDolby 站点需要配置 RSS Key（从站点 RSS 订阅页面获取）")
+	}
+
+	if opts.Cookie == "" {
+		return nil, fmt.Errorf("HDDolby 站点需要配置 Cookie（用于获取时魔等信息）")
+	}
+
+	siteDef := GetDefinitionRegistry().GetOrDefault(config.ID)
+
+	driver := NewHDDolbyDriver(HDDolbyDriverConfig{
+		BaseURL: config.BaseURL,
+		APIKey:  opts.APIKey,
+		Cookie:  opts.Cookie,
+	})
+
+	if siteDef != nil {
+		driver.SetSiteDefinition(siteDef)
+	}
+
+	return NewBaseSite(driver, BaseSiteConfig{
+		ID:        config.ID,
+		Name:      config.Name,
+		Kind:      SiteHDDolby,
+		RateLimit: config.RateLimit,
+		RateBurst: config.RateBurst,
+		Logger:    logger.With(zap.String("site", config.ID)),
+	}), nil
 }

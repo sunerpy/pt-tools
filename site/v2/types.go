@@ -48,7 +48,103 @@ const (
 	SiteMTorrent SiteKind = "mtorrent"
 	// SiteHDDolby represents HDDolby's REST API
 	SiteHDDolby SiteKind = "hddolby"
+	// SiteRousi represents Rousi-based sites using passkey auth
+	SiteRousi SiteKind = "rousi"
 )
+
+// AuthMethod represents the authentication method for a site
+type AuthMethod string
+
+const (
+	// AuthMethodCookie uses browser cookie for authentication
+	AuthMethodCookie AuthMethod = "cookie"
+	// AuthMethodAPIKey uses API key for authentication
+	AuthMethodAPIKey AuthMethod = "api_key"
+	// AuthMethodCookieAndAPIKey uses both cookie and API key
+	AuthMethodCookieAndAPIKey AuthMethod = "cookie_and_api_key"
+	// AuthMethodPasskey uses passkey for RSS/download authentication
+	AuthMethodPasskey AuthMethod = "passkey"
+)
+
+// IsValid checks if the auth method is a known valid value
+func (a AuthMethod) IsValid() bool {
+	switch a {
+	case AuthMethodCookie, AuthMethodAPIKey, AuthMethodCookieAndAPIKey, AuthMethodPasskey:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns the string representation of the auth method
+func (a AuthMethod) String() string {
+	return string(a)
+}
+
+// Schema represents the site architecture/schema type
+type Schema string
+
+const (
+	// SchemaNexusPHP is the NexusPHP architecture (most common for Chinese PT sites)
+	SchemaNexusPHP Schema = "NexusPHP"
+	// SchemaMTorrent is M-Team's custom API architecture
+	SchemaMTorrent Schema = "mTorrent"
+	// SchemaUnit3D is the Unit3D architecture
+	SchemaUnit3D Schema = "Unit3D"
+	// SchemaGazelle is the Gazelle architecture
+	SchemaGazelle Schema = "Gazelle"
+	// SchemaHDDolby is HDDolby's custom REST API architecture
+	SchemaHDDolby Schema = "HDDolby"
+	// SchemaRousi is RousiPro's custom architecture
+	SchemaRousi Schema = "Rousi"
+)
+
+// IsValid checks if the schema is a known valid value
+func (s Schema) IsValid() bool {
+	switch s {
+	case SchemaNexusPHP, SchemaMTorrent, SchemaUnit3D, SchemaGazelle, SchemaHDDolby, SchemaRousi:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns the string representation of the schema
+func (s Schema) String() string {
+	return string(s)
+}
+
+// ToSiteKind converts a Schema to corresponding SiteKind
+func (s Schema) ToSiteKind() SiteKind {
+	switch s {
+	case SchemaNexusPHP:
+		return SiteNexusPHP
+	case SchemaMTorrent:
+		return SiteMTorrent
+	case SchemaUnit3D:
+		return SiteUnit3D
+	case SchemaGazelle:
+		return SiteGazelle
+	case SchemaHDDolby:
+		return SiteHDDolby
+	case SchemaRousi:
+		return SiteRousi
+	default:
+		return SiteNexusPHP // Default fallback
+	}
+}
+
+// DefaultAuthMethod returns the default auth method for this schema
+func (s Schema) DefaultAuthMethod() AuthMethod {
+	switch s {
+	case SchemaMTorrent, SchemaUnit3D:
+		return AuthMethodAPIKey
+	case SchemaRousi:
+		return AuthMethodPasskey
+	default:
+		return AuthMethodCookie
+	}
+}
 
 // DiscountLevel represents the discount level of a torrent
 type DiscountLevel string
@@ -437,4 +533,22 @@ type Driver[Req any, Res any] interface {
 // HashDownloader is an optional interface for sites that require a hash for download
 type HashDownloader interface {
 	DownloadWithHash(ctx context.Context, torrentID, hash string) ([]byte, error)
+}
+
+// TorrentDetailFetcher is an optional interface for drivers that can fetch torrent details
+// from RSS item metadata. This is used by RSS processing to get discount info, size, etc.
+// Drivers that implement this interface can be used with GetTorrentDetails in unified_site.go.
+type TorrentDetailFetcher interface {
+	// GetTorrentDetail fetches detailed torrent info given an RSS item's GUID and link.
+	// The guid is typically the torrent ID, and link is the detail page URL.
+	// Returns nil TorrentItem if the torrent is not found (without error).
+	GetTorrentDetail(ctx context.Context, guid, link string) (*TorrentItem, error)
+}
+
+// DetailFetcherProvider is an optional interface for Site implementations that can provide
+// a TorrentDetailFetcher. This allows unified_site.go to delegate detail fetching to drivers.
+type DetailFetcherProvider interface {
+	// GetDetailFetcher returns a TorrentDetailFetcher if the site supports it.
+	// Returns nil if the site doesn't support detail fetching (e.g., NexusPHP uses HTML scraping).
+	GetDetailFetcher() TorrentDetailFetcher
 }

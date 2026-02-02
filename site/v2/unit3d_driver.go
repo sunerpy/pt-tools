@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Unit3DRequest represents a request to a Unit3D site
@@ -327,4 +329,35 @@ func parseUnit3DDiscount(freeleech string, doubleUpload bool) DiscountLevel {
 	}
 
 	return DiscountNone
+}
+
+func init() {
+	RegisterDriverForSchema("Unit3D", createUnit3DSite)
+}
+
+func createUnit3DSite(config SiteConfig, logger *zap.Logger) (Site, error) {
+	var opts Unit3DOptions
+	if len(config.Options) > 0 {
+		if err := json.Unmarshal(config.Options, &opts); err != nil {
+			return nil, fmt.Errorf("parse Unit3D options: %w", err)
+		}
+	}
+
+	if opts.APIKey == "" {
+		return nil, fmt.Errorf("Unit3D site requires apiKey")
+	}
+
+	driver := NewUnit3DDriver(Unit3DDriverConfig{
+		BaseURL: config.BaseURL,
+		APIKey:  opts.APIKey,
+	})
+
+	return NewBaseSite(driver, BaseSiteConfig{
+		ID:        config.ID,
+		Name:      config.Name,
+		Kind:      SiteUnit3D,
+		RateLimit: config.RateLimit,
+		RateBurst: config.RateBurst,
+		Logger:    logger.With(zap.String("site", config.ID)),
+	}), nil
 }

@@ -85,6 +85,7 @@ export interface SiteConfig {
   cookie: string;
   api_key: string;
   api_url: string;
+  passkey?: string;
   rss: RSSConfig[];
   urls?: string[];
   unavailable?: boolean;
@@ -194,6 +195,7 @@ export interface DynamicSiteSetting {
   cookie?: string;
   api_key?: string;
   api_url?: string;
+  passkey?: string;
   downloader_id?: number;
   parser_config?: string;
   is_builtin: boolean;
@@ -206,6 +208,7 @@ export interface SiteValidationRequest {
   cookie?: string;
   api_key?: string;
   api_url?: string;
+  passkey?: string;
 }
 
 export interface SiteValidationResponse {

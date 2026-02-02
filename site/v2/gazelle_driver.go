@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // GazelleRequest represents a request to a Gazelle site
@@ -347,4 +349,36 @@ func parseGazelleDiscount(isFreeleech, isNeutralLeech, isPersonalFL bool) Discou
 		return DiscountFree // Neutral leech is effectively free
 	}
 	return DiscountNone
+}
+
+func init() {
+	RegisterDriverForSchema("Gazelle", createGazelleSite)
+}
+
+func createGazelleSite(config SiteConfig, logger *zap.Logger) (Site, error) {
+	var opts GazelleOptions
+	if len(config.Options) > 0 {
+		if err := json.Unmarshal(config.Options, &opts); err != nil {
+			return nil, fmt.Errorf("parse Gazelle options: %w", err)
+		}
+	}
+
+	if opts.APIKey == "" && opts.Cookie == "" {
+		return nil, fmt.Errorf("Gazelle site requires apiKey or cookie")
+	}
+
+	driver := NewGazelleDriver(GazelleDriverConfig{
+		BaseURL: config.BaseURL,
+		APIKey:  opts.APIKey,
+		Cookie:  opts.Cookie,
+	})
+
+	return NewBaseSite(driver, BaseSiteConfig{
+		ID:        config.ID,
+		Name:      config.Name,
+		Kind:      SiteGazelle,
+		RateLimit: config.RateLimit,
+		RateBurst: config.RateBurst,
+		Logger:    logger.With(zap.String("site", config.ID)),
+	}), nil
 }

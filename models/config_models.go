@@ -94,6 +94,7 @@ type SiteSetting struct {
 	Cookie       string    `gorm:"size:2048" json:"cookie,omitempty"`
 	APIKey       string    `gorm:"size:512" json:"api_key,omitempty"`
 	APIUrl       string    `gorm:"size:512" json:"api_url,omitempty"`
+	Passkey      string    `gorm:"size:512" json:"passkey,omitempty"`
 	DownloaderID *uint     `gorm:"index" json:"downloader_id,omitempty"`
 	ParserConfig string    `gorm:"type:text" json:"parser_config,omitempty"`
 	IsBuiltin    bool      `json:"is_builtin"`
@@ -203,6 +204,7 @@ type SiteConfig struct {
 	Cookie     string      `json:"cookie"`
 	APIKey     string      `json:"api_key"`
 	APIUrl     string      `json:"api_url"`
+	Passkey    string      `json:"passkey"`
 	RSS        []RSSConfig `json:"rss"`
 }
 type Config struct {

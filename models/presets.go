@@ -30,10 +30,16 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 	for _, regSite := range registeredSites {
 		name := strings.ToLower(regSite.ID)
 		if existing, exists := existingMap[name]; exists {
-			// 站点已存在，只更新认证方式和API URL（保留用户的cookie/api_key/enabled）
-			if existing.AuthMethod != regSite.AuthMethod || existing.APIUrl != regSite.DefaultAPIUrl {
+			// 站点已存在，更新认证方式和BaseURL（保留用户的cookie/api_key/enabled）
+			needsUpdate := existing.AuthMethod != regSite.AuthMethod ||
+				(existing.BaseURL == "" && regSite.DefaultBaseURL != "") ||
+				!existing.IsBuiltin
+			if needsUpdate {
 				existing.AuthMethod = regSite.AuthMethod
-				existing.APIUrl = regSite.DefaultAPIUrl
+				existing.IsBuiltin = true
+				if existing.BaseURL == "" {
+					existing.BaseURL = regSite.DefaultBaseURL
+				}
 				if err := db.Save(&existing).Error; err != nil {
 					return err
 				}
@@ -44,7 +50,8 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 				Name:       name,
 				AuthMethod: regSite.AuthMethod,
 				Enabled:    false,
-				APIUrl:     regSite.DefaultAPIUrl,
+				BaseURL:    regSite.DefaultBaseURL,
+				IsBuiltin:  true,
 			}
 			if err := db.Create(&newSite).Error; err != nil {
 				return err
@@ -141,10 +148,10 @@ func migrateCmctToSpringSunday(db *gorm.DB) error {
 
 // RegisteredSite 表示从注册表获取的站点信息
 type RegisteredSite struct {
-	ID            string
-	Name          string
-	AuthMethod    string // "cookie" 或 "api_key"
-	DefaultAPIUrl string
+	ID             string
+	Name           string
+	AuthMethod     string // "cookie" 或 "api_key"
+	DefaultBaseURL string
 }
 
 // ExampleRSSPatterns 示例 RSS URL 的特征模式

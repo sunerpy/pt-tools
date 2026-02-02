@@ -22,20 +22,20 @@ func TestNewSiteRegistry(t *testing.T) {
 	meta, ok := registry.Get("mteam")
 	assert.True(t, ok, "mteam should be registered")
 	assert.Equal(t, v2.SiteMTorrent, meta.Kind)
-	assert.Equal(t, "api_key", meta.AuthMethod)
+	assert.Equal(t, v2.AuthMethodAPIKey, meta.AuthMethod)
 	assert.NotEmpty(t, meta.DefaultBaseURL)
 
 	// Check hdsky
 	meta, ok = registry.Get("hdsky")
 	assert.True(t, ok, "hdsky should be registered")
 	assert.Equal(t, v2.SiteNexusPHP, meta.Kind)
-	assert.Equal(t, "cookie", meta.AuthMethod)
+	assert.Equal(t, v2.AuthMethodCookie, meta.AuthMethod)
 
 	// Check springsunday
 	meta, ok = registry.Get("springsunday")
 	assert.True(t, ok, "springsunday should be registered")
 	assert.Equal(t, v2.SiteNexusPHP, meta.Kind)
-	assert.Equal(t, "cookie", meta.AuthMethod)
+	assert.Equal(t, v2.AuthMethodCookie, meta.AuthMethod)
 }
 
 func TestSiteRegistry_Register(t *testing.T) {
@@ -47,7 +47,7 @@ func TestSiteRegistry_Register(t *testing.T) {
 		Name:           "Test Site",
 		Kind:           v2.SiteUnit3D,
 		DefaultBaseURL: "https://test.example.com",
-		AuthMethod:     "api_key",
+		AuthMethod:     v2.AuthMethodAPIKey,
 	})
 
 	meta, ok := registry.Get("testsite")

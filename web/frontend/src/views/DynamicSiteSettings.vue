@@ -34,6 +34,7 @@ const addForm = ref({
   cookie: "",
   api_key: "",
   api_url: "",
+  passkey: "",
   downloader_id: undefined as number | undefined,
 });
 
@@ -49,6 +50,7 @@ const authMethods = [
   { value: "cookie", label: "Cookie 认证" },
   { value: "api_key", label: "API Key 认证" },
   { value: "cookie_and_api_key", label: "Cookie + API Key 认证" },
+  { value: "passkey", label: "Passkey 认证" },
 ];
 
 const enabledDownloaders = computed(() => {
@@ -86,6 +88,7 @@ function openAddDialog() {
     cookie: "",
     api_key: "",
     api_url: "",
+    passkey: "",
     downloader_id: undefined,
   };
   validationResult.value = null;
@@ -117,6 +120,7 @@ async function validateSite() {
       cookie: addForm.value.cookie,
       api_key: addForm.value.api_key,
       api_url: addForm.value.api_url,
+      passkey: addForm.value.passkey,
     });
     showValidationResult.value = true;
 
@@ -148,6 +152,7 @@ async function createSite() {
       cookie: addForm.value.cookie,
       api_key: addForm.value.api_key,
       api_url: addForm.value.api_url,
+      passkey: addForm.value.passkey,
       downloader_id: addForm.value.downloader_id,
       enabled: true,
     });
@@ -395,6 +400,14 @@ function getAuthMethodLabel(method: string) {
             <el-input v-model="addForm.api_url" placeholder="https://api.example.com（可选）" />
           </el-form-item>
         </template>
+
+        <el-form-item v-if="addForm.auth_method === 'passkey'" label="Passkey" required>
+          <el-input
+            v-model="addForm.passkey"
+            type="password"
+            show-password
+            placeholder="请输入站点 Passkey（从站点个人设置中获取）" />
+        </el-form-item>
 
         <el-divider />
 

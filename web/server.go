@@ -476,6 +476,7 @@ type SiteConfigResponse struct {
 	Cookie            string             `json:"cookie"`
 	APIKey            string             `json:"api_key"`
 	APIUrl            string             `json:"api_url"`
+	Passkey           string             `json:"passkey"`
 	RSS               []models.RSSConfig `json:"rss"`
 	URLs              []string           `json:"urls,omitempty"`
 	Unavailable       bool               `json:"unavailable,omitempty"`
@@ -588,6 +589,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			Cookie:     sc.Cookie,
 			APIKey:     sc.APIKey,
 			APIUrl:     sc.APIUrl,
+			Passkey:    sc.Passkey,
 			RSS:        sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()

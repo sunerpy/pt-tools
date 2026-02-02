@@ -232,6 +232,12 @@
   gap: 1px;
 }
 
+.site-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .site-card-name {
   font-weight: 700;
   font-size: 12px;
@@ -240,6 +246,12 @@
 .site-card-username {
   font-size: 10px;
   opacity: 0.5;
+}
+
+.site-card-level {
+  font-size: 10px;
+  color: #a78bfa;
+  font-weight: 500;
 }
 
 .site-bonus {

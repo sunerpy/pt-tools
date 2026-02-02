@@ -10,7 +10,7 @@ var NovaHDDefinition = &v2.SiteDefinition{
 	Name:           "NovaHD",
 	Aka:            []string{"Nova"},
 	Description:    "NovaHD PT站点",
-	Schema:         "NexusPHP",
+	Schema:         v2.SchemaNexusPHP,
 	URLs:           []string{"https://pt.novahd.top/"},
 	FaviconURL:     "https://pt.novahd.top/favicon.ico",
 	TimezoneOffset: "+0800",
