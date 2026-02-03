@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-02-03
+
+### Bug Fixes
+
+- 修复低版本数据迁移导致的不兼容问题
+- 强制同步站点认证方式与默认URL，确保旧数据正确迁移 - 新增 defaultAPIUrlForSite 函数统一设置 MTeam API URL - 支持旧版密码格式兼容（明文/SHA256）自动升级为新格式
+- **frontend**: 修复 SiteList 组件 TypeScript 类型错误
+  MessageBoxData 类型不能直接解构 value 属性
+- 修复低版本数据迁移导致的不兼容问题 ([#64](https://github.com/sunerpy/pt-tools/pull/64))
+- 强制同步站点认证方式与默认URL，确保旧数据正确迁移 - 新增 defaultAPIUrlForSite 函数统一设置 MTeam API URL - 支持旧版密码格式自动升级为新格式
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump oxfmt from 0.27.0 to 0.28.0 in /web/frontend ([#54](https://github.com/sunerpy/pt-tools/issues/54)) ([#54](https://github.com/sunerpy/pt-tools/pull/54))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.27.0 to 0.28.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.28.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.28.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vitest from 4.0.17 to 4.0.18 in /web/frontend ([#55](https://github.com/sunerpy/pt-tools/issues/55)) ([#55](https://github.com/sunerpy/pt-tools/pull/55))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.0.17 to 4.0.18. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.0.18/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.0.18
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump element-plus from 2.13.1 to 2.13.2 in /web/frontend ([#58](https://github.com/sunerpy/pt-tools/issues/58)) ([#58](https://github.com/sunerpy/pt-tools/pull/58))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.1 to 2.13.2. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.1...2.13.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.13.2
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @vueuse/core from 14.1.0 to 14.2.0 in /web/frontend ([#60](https://github.com/sunerpy/pt-tools/issues/60)) ([#60](https://github.com/sunerpy/pt-tools/pull/60))
+  Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.1.0 to 14.2.0. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.2.0/packages/core)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vueuse/core"
+         dependency-version: 14.2.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxlint from 1.42.0 to 1.43.0 in /web/frontend ([#56](https://github.com/sunerpy/pt-tools/issues/56)) ([#56](https://github.com/sunerpy/pt-tools/pull/56))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.42.0 to 1.43.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.43.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.43.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump @types/node from 25.0.7 to 25.2.0 in /web/frontend ([#59](https://github.com/sunerpy/pt-tools/issues/59)) ([#59](https://github.com/sunerpy/pt-tools/pull/59))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.0.7 to 25.2.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.2.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump sass from 1.97.2 to 1.97.3 in /web/frontend ([#62](https://github.com/sunerpy/pt-tools/issues/62)) ([#62](https://github.com/sunerpy/pt-tools/pull/62))
+  Bumps [sass](https://github.com/sass/dart-sass) from 1.97.2 to 1.97.3. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.97.2...1.97.3)
+
+        ---
+        updated-dependencies:
+        - dependency-name: sass
+         dependency-version: 1.97.3
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @vitejs/plugin-vue from 6.0.3 to 6.0.4 in /web/frontend ([#61](https://github.com/sunerpy/pt-tools/issues/61)) ([#61](https://github.com/sunerpy/pt-tools/pull/61))
+  Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.3 to 6.0.4. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.4/packages/plugin-vue)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vitejs/plugin-vue"
+         dependency-version: 6.0.4
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
 ## [0.10.0] - 2026-02-02
 
 ### Features
