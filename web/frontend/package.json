@@ -35,7 +35,7 @@
     "sass": "^1.97.2",
     "typescript": "~5.9.3",
     "vite": "^7.3.0",
-    "vitest": "^4.0.17",
+    "vitest": "^4.0.18",
     "vue-tsc": "^3.2.1"
   },
   "engines": {
