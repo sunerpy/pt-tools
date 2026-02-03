@@ -179,6 +179,13 @@ type MTorrentSearchData struct {
 	Total FlexInt           `json:"total"`
 }
 
+// MTorrentPromotionRule represents an additional promotion rule from M-Team API
+type MTorrentPromotionRule struct {
+	Discount  string `json:"discount"`
+	StartTime string `json:"startTime,omitempty"`
+	EndTime   string `json:"endTime,omitempty"`
+}
+
 // MTorrentTorrent represents a torrent in M-Team API response
 type MTorrentTorrent struct {
 	ID          string `json:"id"`
@@ -187,11 +194,12 @@ type MTorrentTorrent struct {
 	Size        string `json:"size"`
 	CreatedDate string `json:"createdDate"`
 	Status      struct {
-		Seeders         FlexInt `json:"seeders"`
-		Leechers        FlexInt `json:"leechers"`
-		TimesCompleted  FlexInt `json:"timesCompleted"`
-		Discount        string  `json:"discount"`
-		DiscountEndTime string  `json:"discountEndTime,omitempty"`
+		Seeders         FlexInt                `json:"seeders"`
+		Leechers        FlexInt                `json:"leechers"`
+		TimesCompleted  FlexInt                `json:"timesCompleted"`
+		Discount        string                 `json:"discount"`
+		DiscountEndTime string                 `json:"discountEndTime,omitempty"`
+		PromotionRule   *MTorrentPromotionRule `json:"promotionRule,omitempty"`
 	} `json:"status"`
 	Category string `json:"category"`
 }
@@ -458,30 +466,25 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 
 	items := make([]TorrentItem, 0, len(searchData.Data))
 	for _, t := range searchData.Data {
+		discount, discountEndTime := parseMTorrentDiscountWithPromotion(t.Status.Discount, t.Status.DiscountEndTime, t.Status.PromotionRule)
 		item := TorrentItem{
-			ID:            t.ID,
-			Title:         t.Name,
-			Subtitle:      t.SmallDescr,
-			SizeBytes:     parseSize(t.Size),
-			Seeders:       t.Status.Seeders.Int(),
-			Leechers:      t.Status.Leechers.Int(),
-			Snatched:      t.Status.TimesCompleted.Int(),
-			SourceSite:    d.BaseURL,
-			Category:      getMTeamCategoryName(t.Category),
-			DiscountLevel: parseMTorrentDiscount(t.Status.Discount),
+			ID:              t.ID,
+			Title:           t.Name,
+			Subtitle:        t.SmallDescr,
+			SizeBytes:       parseSize(t.Size),
+			Seeders:         t.Status.Seeders.Int(),
+			Leechers:        t.Status.Leechers.Int(),
+			Snatched:        t.Status.TimesCompleted.Int(),
+			SourceSite:      d.BaseURL,
+			Category:        getMTeamCategoryName(t.Category),
+			DiscountLevel:   discount,
+			DiscountEndTime: discountEndTime,
 		}
 
 		// Parse upload time
 		if t.CreatedDate != "" {
 			if uploadTime, err := ParseTimeInCST("2006-01-02 15:04:05", t.CreatedDate); err == nil {
 				item.UploadedAt = uploadTime.Unix()
-			}
-		}
-
-		// Parse discount end time
-		if t.Status.DiscountEndTime != "" {
-			if endTime, err := ParseTimeInCST("2006-01-02 15:04:05", t.Status.DiscountEndTime); err == nil {
-				item.DiscountEndTime = endTime
 			}
 		}
 
@@ -680,6 +683,36 @@ func parseMTorrentDiscount(discount string) DiscountLevel {
 		}
 		return DiscountNone
 	}
+}
+
+func parseMTorrentDiscountWithPromotion(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule) (DiscountLevel, time.Time) {
+	now := time.Now()
+
+	if promotion != nil && promotion.Discount != "" {
+		var promoStart, promoEnd time.Time
+		if promotion.StartTime != "" {
+			promoStart, _ = ParseTimeInCST("2006-01-02 15:04:05", promotion.StartTime)
+		}
+		if promotion.EndTime != "" {
+			promoEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", promotion.EndTime)
+		}
+
+		promoActive := (promoStart.IsZero() || !now.Before(promoStart)) && (promoEnd.IsZero() || now.Before(promoEnd))
+		if promoActive {
+			promoLevel := parseMTorrentDiscount(promotion.Discount)
+			baseLevel := parseMTorrentDiscount(baseDiscount)
+			if IsBetterDiscount(promoLevel, baseLevel) {
+				return promoLevel, promoEnd
+			}
+		}
+	}
+
+	level := parseMTorrentDiscount(baseDiscount)
+	var endTime time.Time
+	if baseEndTime != "" {
+		endTime, _ = ParseTimeInCST("2006-01-02 15:04:05", baseEndTime)
+	}
+	return level, endTime
 }
 
 // ============================================================================
@@ -979,14 +1012,16 @@ func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _ string) (
 		return nil, fmt.Errorf("parse torrent detail: %w", err)
 	}
 
+	discount, discountEndTime := parseMTorrentDiscountWithPromotion(detail.Status.Discount, detail.Status.DiscountEndTime, detail.Status.PromotionRule)
 	item := &TorrentItem{
-		ID:            detail.ID,
-		Title:         detail.Name,
-		Seeders:       int(detail.Status.Seeders),
-		Leechers:      int(detail.Status.Leechers),
-		Snatched:      int(detail.Status.TimesCompleted),
-		SourceSite:    d.getSiteID(),
-		DiscountLevel: parseMTorrentDiscount(detail.Status.Discount),
+		ID:              detail.ID,
+		Title:           detail.Name,
+		Seeders:         int(detail.Status.Seeders),
+		Leechers:        int(detail.Status.Leechers),
+		Snatched:        int(detail.Status.TimesCompleted),
+		SourceSite:      d.getSiteID(),
+		DiscountLevel:   discount,
+		DiscountEndTime: discountEndTime,
 	}
 
 	if detail.SmallDescr != "" {
@@ -995,11 +1030,6 @@ func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _ string) (
 	if detail.Size != "" {
 		if sizeBytes, err := strconv.ParseInt(detail.Size, 10, 64); err == nil {
 			item.SizeBytes = sizeBytes
-		}
-	}
-	if detail.Status.DiscountEndTime != "" {
-		if endTime, err := ParseTimeInCST("2006-01-02 15:04:05", detail.Status.DiscountEndTime); err == nil {
-			item.DiscountEndTime = endTime
 		}
 	}
 

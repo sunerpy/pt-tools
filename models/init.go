@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"golang.org/x/sync/semaphore"
 	"gorm.io/gorm"
 	"moul.io/zapgorm2"
 )
@@ -274,23 +273,11 @@ func (t *TorrentDB) UpdateTorrentStatus(torrentHash string, isDownloaded, isPush
 }
 
 // WithTransaction 使用事务
-// 创建一个全局的信号量，限制同时只有一个事务执行
-var globalSemaphore = semaphore.NewWeighted(1)
-
-const defaultTxTimeout = 60 * time.Second
-
 func (t *TorrentDB) WithTransaction(fn func(tx *gorm.DB) error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTxTimeout)
-	defer cancel()
-	return t.WithTransactionContext(ctx, fn)
+	return t.DB.Transaction(fn)
 }
 
 // WithTransactionContext 使用事务（支持 context）
 func (t *TorrentDB) WithTransactionContext(ctx context.Context, fn func(tx *gorm.DB) error) error {
-	if err := globalSemaphore.Acquire(ctx, 1); err != nil {
-		return fmt.Errorf("获取数据库锁超时: %w", err)
-	}
-	defer globalSemaphore.Release(1)
-
 	return t.DB.WithContext(ctx).Transaction(fn)
 }
