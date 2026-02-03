@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MessageBoxData 类型不能直接解构 value 属性
 - 修复低版本数据迁移导致的不兼容问题 ([#64](https://github.com/sunerpy/pt-tools/pull/64))
 - 强制同步站点认证方式与默认URL，确保旧数据正确迁移 - 新增 defaultAPIUrlForSite 函数统一设置 MTeam API URL - 支持旧版密码格式自动升级为新格式
+- 修复数据库锁、事务超时及 MTeam 促销规则解析问题
+- 移除全局信号量，解决前端页面加载慢的问题 - 移除事务中的 HTTP 调用，避免 context deadline exceeded 错误 - RSS 无关联过滤规则时不再匹配全局规则 - MTeam GetTorrentDetail 正确解析 promotionRule 促销折扣
 
 ### Dependencies (Frontend)
 
