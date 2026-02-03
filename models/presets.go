@@ -30,19 +30,15 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 	for _, regSite := range registeredSites {
 		name := strings.ToLower(regSite.ID)
 		if existing, exists := existingMap[name]; exists {
-			// 站点已存在，更新认证方式和BaseURL（保留用户的cookie/api_key/enabled）
-			needsUpdate := existing.AuthMethod != regSite.AuthMethod ||
-				(existing.BaseURL == "" && regSite.DefaultBaseURL != "") ||
-				!existing.IsBuiltin
-			if needsUpdate {
-				existing.AuthMethod = regSite.AuthMethod
-				existing.IsBuiltin = true
-				if existing.BaseURL == "" {
-					existing.BaseURL = regSite.DefaultBaseURL
-				}
-				if err := db.Save(&existing).Error; err != nil {
-					return err
-				}
+			// 站点已存在，强制对齐认证方式与默认 URL（保留用户的cookie/api_key/enabled）
+			existing.AuthMethod = regSite.AuthMethod
+			existing.IsBuiltin = true
+			if regSite.DefaultBaseURL != "" {
+				existing.BaseURL = regSite.DefaultBaseURL
+			}
+			existing.APIUrl = defaultAPIUrlForSite(name)
+			if err := db.Save(&existing).Error; err != nil {
+				return err
 			}
 		} else {
 			// 站点不存在，创建新记录
@@ -53,6 +49,7 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 				BaseURL:    regSite.DefaultBaseURL,
 				IsBuiltin:  true,
 			}
+			newSite.APIUrl = defaultAPIUrlForSite(name)
 			if err := db.Create(&newSite).Error; err != nil {
 				return err
 			}
@@ -152,6 +149,13 @@ type RegisteredSite struct {
 	Name           string
 	AuthMethod     string // "cookie" 或 "api_key"
 	DefaultBaseURL string
+}
+
+func defaultAPIUrlForSite(name string) string {
+	if name == string(MTEAM) {
+		return DefaultAPIUrlMTeam
+	}
+	return ""
 }
 
 // ExampleRSSPatterns 示例 RSS URL 的特征模式

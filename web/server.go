@@ -224,8 +224,13 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !verifyPassword(u.PasswordHash, pass) {
-			http.Error(w, "密码错误", http.StatusUnauthorized)
-			return
+			if verifyLegacyPassword(u.PasswordHash, pass) {
+				u.PasswordHash = hashPassword(pass)
+				_ = s.store.UpdateAdmin(u)
+			} else {
+				http.Error(w, "密码错误", http.StatusUnauthorized)
+				return
+			}
 		}
 		sid := randomID()
 		s.sessions[sid] = u.Username
@@ -337,6 +342,17 @@ func verifyPassword(stored, pw string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare(expect, sum) == 1
+}
+
+func verifyLegacyPassword(stored, pw string) bool {
+	if strings.Contains(stored, "|") {
+		return false
+	}
+	if stored == pw {
+		return true
+	}
+	h := sha256.Sum256([]byte(pw))
+	return stored == hex.EncodeToString(h[:])
 }
 
 const loginHTML = `{{define "login"}}
