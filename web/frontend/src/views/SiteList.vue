@@ -61,7 +61,7 @@ async function deleteSite(name: string) {
 
 async function addSite() {
   try {
-    const { value: name } = await ElMessageBox.prompt("请输入站点标识", "新增站点", {
+    const result = (await ElMessageBox.prompt("请输入站点标识", "新增站点", {
       confirmButtonText: "确定",
       cancelButtonText: "取消",
       inputPlaceholder: "springsunday / hdsky / mteam 或自定义",
@@ -70,8 +70,9 @@ async function addSite() {
         if (sites.value[val.toLowerCase()]) return "站点已存在";
         return true;
       },
-    });
+    })) as { value: string };
 
+    const name = result.value;
     if (!name) return;
 
     const lower = name.toLowerCase();
