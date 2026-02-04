@@ -241,17 +241,7 @@ func (m *Manager) initDownloaderManager() {
 			continue
 		}
 
-		// 对启用的下载器进行健康检查
-		dl, err := m.downloaderManager.GetDownloader(ds.Name)
-		if err != nil {
-			global.GetSlogger().Errorf("[下载器健康检查] %s 创建实例失败: %v", ds.Name, err)
-			continue
-		}
-		if ok, pingErr := dl.Ping(); ok {
-			global.GetSlogger().Infof("[下载器健康检查] %s 连接正常 (类型=%s, 默认=%v)", ds.Name, ds.Type, ds.IsDefault)
-		} else {
-			global.GetSlogger().Warnf("[下载器健康检查] %s 连接失败: %v (类型=%s)", ds.Name, pingErr, ds.Type)
-		}
+		m.checkDownloaderHealthAsync(ds)
 	}
 
 	// 加载站点-下载器映射
@@ -273,6 +263,30 @@ func (m *Manager) initDownloaderManager() {
 	global.GetSlogger().Info("下载器管理器初始化完成")
 
 	internal.SetGlobalDownloaderManager(m.downloaderManager)
+}
+
+func (m *Manager) checkDownloaderHealthAsync(setting models.DownloaderSetting) {
+	go func(ds models.DownloaderSetting) {
+		dlType := downloader.DownloaderType(ds.Type)
+		if !m.downloaderManager.HasFactory(dlType) {
+			global.GetSlogger().Warnf("未知下载器类型: %s", ds.Type)
+			return
+		}
+
+		config := downloader.NewGenericConfig(dlType, ds.URL, ds.Username, ds.Password, ds.AutoStart)
+		dl, err := m.downloaderManager.CreateFromConfig(config, ds.Name)
+		if err != nil {
+			global.GetSlogger().Errorf("[下载器健康检查] %s 创建实例失败: %v", ds.Name, err)
+			return
+		}
+		defer dl.Close()
+
+		if ok, pingErr := dl.Ping(); ok {
+			global.GetSlogger().Infof("[下载器健康检查] %s 连接正常 (类型=%s, 默认=%v)", ds.Name, ds.Type, ds.IsDefault)
+		} else {
+			global.GetSlogger().Warnf("[下载器健康检查] %s 连接失败: %v (类型=%s)", ds.Name, pingErr, ds.Type)
+		}
+	}(setting)
 }
 
 func (m *Manager) initFreeEndMonitor() {

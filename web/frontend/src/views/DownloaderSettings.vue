@@ -15,6 +15,7 @@ const loading = ref(false);
 const saving = ref(false);
 const showDialog = ref(false);
 const editMode = ref(false);
+const healthTimeoutMs = 5000;
 
 const downloaders = ref<DownloaderSetting[]>([]);
 const healthStatus = ref<Record<number, DownloaderHealthResponse>>({});
@@ -69,25 +70,63 @@ async function loadDownloaders() {
   loading.value = true;
   try {
     downloaders.value = await downloadersApi.list();
-    // 加载健康状态
-    for (const dl of downloaders.value) {
-      if (dl.id && dl.enabled) {
-        try {
-          healthStatus.value[dl.id] = await downloadersApi.health(dl.id);
-        } catch {
-          healthStatus.value[dl.id] = {
-            name: dl.name,
-            is_healthy: false,
-            message: "检查失败",
-          };
-        }
-      }
-    }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载失败");
   } finally {
     loading.value = false;
   }
+  loadHealthStatuses(downloaders.value);
+}
+
+async function fetchHealthStatus(downloaderId: number): Promise<DownloaderHealthResponse> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), healthTimeoutMs);
+  try {
+    const response = await fetch(`/api/downloaders/${downloaderId}/health`, {
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const msg = await response.text();
+      throw new Error(msg || `HTTP ${response.status}`);
+    }
+
+    return (await response.json()) as DownloaderHealthResponse;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function getHealthErrorMessage(error: unknown) {
+  if (error instanceof Error && error.name === "AbortError") {
+    return "检查超时";
+  }
+  return (error as Error)?.message || "检查失败";
+}
+
+function loadHealthStatuses(list: DownloaderSetting[]) {
+  const tasks = list
+    .filter((dl) => dl.id && dl.enabled)
+    .map((dl) =>
+      fetchHealthStatus(dl.id!).then(
+        (response) => {
+          healthStatus.value[dl.id!] = response;
+        },
+        (error) => {
+          healthStatus.value[dl.id!] = {
+            name: dl.name,
+            is_healthy: false,
+            message: getHealthErrorMessage(error),
+          };
+        },
+      ),
+    );
+
+  void Promise.allSettled(tasks);
 }
 
 function openAddDialog() {
@@ -179,12 +218,12 @@ async function toggleEnabled(dl: DownloaderSetting) {
     // 刷新健康状态
     if (newEnabled) {
       try {
-        healthStatus.value[dl.id] = await downloadersApi.health(dl.id);
-      } catch {
+        healthStatus.value[dl.id] = await fetchHealthStatus(dl.id);
+      } catch (error: unknown) {
         healthStatus.value[dl.id] = {
           name: dl.name,
           is_healthy: false,
-          message: "检查失败",
+          message: getHealthErrorMessage(error),
         };
       }
     }
@@ -208,7 +247,7 @@ async function setDefault(dl: DownloaderSetting) {
 async function checkHealth(dl: DownloaderSetting) {
   if (!dl.id) return;
   try {
-    healthStatus.value[dl.id] = await downloadersApi.health(dl.id);
+    healthStatus.value[dl.id] = await fetchHealthStatus(dl.id);
     const status = healthStatus.value[dl.id];
     if (status && status.is_healthy) {
       ElMessage.success("连接正常");
@@ -216,8 +255,9 @@ async function checkHealth(dl: DownloaderSetting) {
       ElMessage.warning(status?.message || "连接异常");
     }
   } catch (e: unknown) {
-    healthStatus.value[dl.id] = { name: dl.name, is_healthy: false, message: "检查失败" };
-    ElMessage.error((e as Error).message || "检查失败");
+    const message = getHealthErrorMessage(e);
+    healthStatus.value[dl.id] = { name: dl.name, is_healthy: false, message };
+    ElMessage.error(message);
   }
 }
 
