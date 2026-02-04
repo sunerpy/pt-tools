@@ -204,6 +204,31 @@ func TestAllDefinitionsRegistered(t *testing.T) {
 	}
 }
 
+func TestOurBitsDefinition(t *testing.T) {
+	// Verify OurBits definition is registered
+	def, ok := v2.GetDefinitionRegistry().Get("ourbits")
+	if !ok {
+		t.Fatal("OurBits definition not found in registry")
+	}
+
+	// Verify basic properties
+	if def.Name != "OurBits" {
+		t.Errorf("Name = %q, want %q", def.Name, "OurBits")
+	}
+	if def.Schema != "NexusPHP" {
+		t.Errorf("Schema = %q, want %q", def.Schema, "NexusPHP")
+	}
+	if len(def.URLs) == 0 {
+		t.Error("URLs should not be empty")
+	}
+	if def.UserInfo == nil {
+		t.Error("UserInfo should not be nil")
+	}
+	if len(def.LevelRequirements) != 11 {
+		t.Errorf("LevelRequirements count = %d, want 11", len(def.LevelRequirements))
+	}
+}
+
 func TestDefinitionUserInfoConfig(t *testing.T) {
 	tests := []struct {
 		siteID       string
@@ -213,6 +238,7 @@ func TestDefinitionUserInfoConfig(t *testing.T) {
 		{"hdsky", 3, true},
 		{"springsunday", 3, true},
 		{"mteam", 4, true},
+		{"ourbits", 3, true},
 	}
 
 	registry := v2.GetDefinitionRegistry()
