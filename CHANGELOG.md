@@ -5,13 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.2](https://github.com/sunerpy/pt-tools/compare/v0.10.1...v0.10.2) (2026-02-04)
-
+## [0.10.2] - 2026-02-04
 
 ### Bug Fixes
 
-* 修复下载器地址不通时 web 无法访问的问题 ([#66](https://github.com/sunerpy/pt-tools/issues/66)) ([89b6555](https://github.com/sunerpy/pt-tools/commit/89b6555982009220e397d6be61079f9cd02e2ae4))
-* 修复下载器地址不通时 web 无法访问的问题 ([#66](https://github.com/sunerpy/pt-tools/issues/66)) ([c26a40d](https://github.com/sunerpy/pt-tools/commit/c26a40d4557253b01f06e19df8c4b25fdac58c59))
+- 修复下载器地址不通时 web 无法访问的问题 ([#66](https://github.com/sunerpy/pt-tools/issues/66))
+- 修复下载器地址不通时 web 无法访问的问题 ([#66](https://github.com/sunerpy/pt-tools/issues/66)) ([#68](https://github.com/sunerpy/pt-tools/pull/68))
+- 将下载器健康检查改为 goroutine 异步执行，不阻塞启动 - 健康状态并行加载，互不阻塞
+
+### CI/CD
+
+- 使用 Release Please 自动化版本发布
+  替换手动 tag 发布流程为 Release Please 自动化发布:
+
+        - 添加 release-please.yml: 基于 Conventional Commits 自动创建 Release PR
+        - 添加 release-please-config.json: 配置版本规则和 changelog 分类
+        - 添加 .release-please-manifest.json: 跟踪当前版本 (v0.10.1)
+        - 删除 release.yml: 旧的手动 tag 触发发布
+        - 删除 changelog.yml: 旧的手动 changelog 更新
+
+### Miscellaneous
+
+- **main**: Release 0.10.2
 
 ## [0.10.1] - 2026-02-03
 
