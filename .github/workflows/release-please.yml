@@ -17,16 +17,13 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - name: Release Please
         id: release
         uses: googleapis/release-please-action@v4
         with:
           release-type: go
-          # 使用 Conventional Commits 规范
-          # feat: → minor version bump
-          # fix: → patch version bump
-          # feat!: 或 BREAKING CHANGE: → major version bump
 
   build-and-release:
     name: Build and Release
@@ -226,25 +223,28 @@ jobs:
         working-directory: web/frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Format CHANGELOG
+      - name: Format all files
         run: |
           cd web/frontend
-          pnpm oxfmt --no-error-on-unmatched-pattern "${{ github.workspace }}/CHANGELOG.md"
+          pnpm oxfmt --no-error-on-unmatched-pattern \
+            "${{ github.workspace }}/CHANGELOG.md" \
+            "${{ github.workspace }}/.release-please-manifest.json" \
+            "${{ github.workspace }}/release-please-config.json"
 
       - name: Check for changes
         id: check_changes
         run: |
-          if git diff --quiet CHANGELOG.md; then
+          if git diff --quiet; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit CHANGELOG
+      - name: Commit changes
         if: steps.check_changes.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
+          git add -A
           git commit -m "chore(changelog): update CHANGELOG.md [skip ci]"
           git push origin main
