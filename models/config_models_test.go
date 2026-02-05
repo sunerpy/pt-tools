@@ -268,12 +268,20 @@ func TestPHPTorrentInfo_CanbeFinished(t *testing.T) {
 		expected    bool
 	}{
 		{
-			name:        "限制未启用",
+			name:        "限速未启用且无大小限制",
 			torrent:     PHPTorrentInfo{SizeMB: 1024, EndTime: time.Now().Add(1 * time.Hour)},
 			enabled:     false,
 			speedLimit:  10,
-			sizeLimitGB: 1,
+			sizeLimitGB: 0,
 			expected:    true,
+		},
+		{
+			name:        "限速未启用但大小超限",
+			torrent:     PHPTorrentInfo{SizeMB: 2048, EndTime: time.Now().Add(1 * time.Hour)},
+			enabled:     false,
+			speedLimit:  10,
+			sizeLimitGB: 1,
+			expected:    false,
 		},
 		{
 			name:        "种子大小超过限制",

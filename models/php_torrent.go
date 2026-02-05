@@ -42,21 +42,21 @@ func (p PHPTorrentInfo) IsFree() bool {
 }
 
 func (p PHPTorrentInfo) CanbeFinished(logger *zap.SugaredLogger, enabled bool, speedLimit, sizeLimitGB int) bool {
-	if !enabled {
-		return true
-	} else {
-		if p.SizeMB >= float64(sizeLimitGB*1024) {
-			logger.Warn("种子大小超过设定值,跳过...")
-			return false
-		}
+	// 种子大小检查独立于限速开关，只要设置了大小限制就生效
+	if sizeLimitGB > 0 && p.SizeMB >= float64(sizeLimitGB*1024) {
+		logger.Warn("种子大小超过设定值,跳过...")
+		return false
+	}
+	// 限速检查仅在启用时生效
+	if enabled && speedLimit > 0 {
 		duration := time.Until(p.EndTime)
 		secondsDiff := int(duration.Seconds())
 		if float64(secondsDiff)*float64(speedLimit) < (p.SizeMB / 1024 / 1024) {
 			logger.Warn("种子免费时间不足以完成下载,跳过...")
 			return false
 		}
-		return true
 	}
+	return true
 }
 
 func (p PHPTorrentInfo) GetFreeEndTime() *time.Time {

@@ -411,7 +411,7 @@ func TestDownloadWorker_Table(t *testing.T) {
 		expectSkip bool
 	}{
 		{"nonfree", models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true}, models.PHPTorrentInfo{Title: "NonFree", TorrentID: "guid-nonfree", Discount: models.DISCOUNT_NONE, EndTime: time.Now().Add(30 * time.Minute), SizeMB: 64}, true, true},
-		{"cannotfinish", models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true, DownloadLimitEnabled: true, DownloadSpeedLimit: 0, TorrentSizeGB: 200}, models.PHPTorrentInfo{Title: "SkipTitle", TorrentID: "guid-skip", Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(5 * time.Minute), SizeMB: 512}, false, true},
+		{"cannotfinish_by_size", models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true, DownloadLimitEnabled: false, TorrentSizeGB: 1}, models.PHPTorrentInfo{Title: "SkipTitle", TorrentID: "guid-skip", Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(5 * time.Minute), SizeMB: 2048}, false, true},
 		{"canfinish", models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true, DownloadLimitEnabled: false, TorrentSizeGB: 1}, models.PHPTorrentInfo{Title: "OkTitle", TorrentID: "guid-ok", Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(30 * time.Minute), SizeMB: 256}, false, false},
 	}
 	for _, c := range cases {
