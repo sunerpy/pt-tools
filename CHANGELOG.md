@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-02-05
+
+### Bug Fixes
+
+- **rss**: Allow longer intervals and stabilize release-please config ([#78](https://github.com/sunerpy/pt-tools/issues/78)) ([#78](https://github.com/sunerpy/pt-tools/pull/78))
+- **release**: Remove manifest schema for release-please ([#79](https://github.com/sunerpy/pt-tools/issues/79)) ([#79](https://github.com/sunerpy/pt-tools/pull/79))
+- **release**: Remove manifest schema for release-please ([#80](https://github.com/sunerpy/pt-tools/pull/80))
+
 ## [0.12.0] - 2026-02-05
 
 ### Features
