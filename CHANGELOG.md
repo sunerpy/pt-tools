@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0](https://github.com/sunerpy/pt-tools/compare/v0.10.2...v0.11.0) (2026-02-05)
+
+
+### Features
+
+* **docker:** 增加 ARM64 架构支持 ([c6d7ad4](https://github.com/sunerpy/pt-tools/commit/c6d7ad43da9655e948b4396afd08018f22804f9a)), closes [#72](https://github.com/sunerpy/pt-tools/issues/72)
+* **docker:** 增加 ARM64 架构支持 ([e465029](https://github.com/sunerpy/pt-tools/commit/e4650292083d0f48eda6c85eb5e2e7cf82d1c24e)), closes [#72](https://github.com/sunerpy/pt-tools/issues/72)
+
 ## [0.10.2] - 2026-02-04
 
 ### Bug Fixes
