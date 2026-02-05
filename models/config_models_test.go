@@ -24,7 +24,7 @@ func TestSettingsGlobal_GetEffectiveIntervalMinutes(t *testing.T) {
 		{"负值返回默认值", -5, DefaultIntervalMinutes},
 		{"小于最小值返回最小值", 2, MinIntervalMinutes},
 		{"正常值返回原值", 15, 15},
-		{"大于最大值返回最大值", 100, MaxIntervalMinutes},
+		{"大于最大值返回最大值", 2000, MaxIntervalMinutes},
 		{"边界值-最小值", MinIntervalMinutes, MinIntervalMinutes},
 		{"边界值-最大值", MaxIntervalMinutes, MaxIntervalMinutes},
 	}
@@ -75,7 +75,7 @@ func TestRSSConfig_GetEffectiveIntervalMinutes(t *testing.T) {
 		{"RSS为负使用全局配置", -5, globalSettings, 20},
 		{"全局配置为nil使用默认值", 0, nil, DefaultIntervalMinutes},
 		{"RSS小于最小值返回最小值", 2, globalSettings, MinIntervalMinutes},
-		{"RSS大于最大值返回最大值", 100, globalSettings, MaxIntervalMinutes},
+		{"RSS大于最大值返回最大值", 2000, globalSettings, MaxIntervalMinutes},
 	}
 
 	for _, tt := range tests {

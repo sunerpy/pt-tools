@@ -6,9 +6,9 @@ import (
 
 // 间隔时间常量
 const (
-	MinIntervalMinutes     int32 = 5  // 最小间隔时间（分钟）
-	DefaultIntervalMinutes int32 = 10 // 默认间隔时间（分钟）
-	MaxIntervalMinutes     int32 = 60 // 最大间隔时间（分钟）
+	MinIntervalMinutes     int32 = 5    // 最小间隔时间（分钟）
+	DefaultIntervalMinutes int32 = 10   // 默认间隔时间（分钟）
+	MaxIntervalMinutes     int32 = 1440 // 最大间隔时间（分钟）
 )
 
 // 并发数常量
