@@ -11,7 +11,6 @@
   "separate-pull-requests": false,
   "packages": {
     ".": {
-      "changelog-path": "",
       "skip-changelog": true
     }
   }

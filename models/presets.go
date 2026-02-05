@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 
 	"gorm.io/gorm"
@@ -29,6 +30,12 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 	// 添加或更新注册表中的站点（不删除任何站点）
 	for _, regSite := range registeredSites {
 		name := strings.ToLower(regSite.ID)
+		apiUrlsJSON := encodeAPIUrls(regSite.APIUrls)
+		apiUrl := ""
+		if len(regSite.APIUrls) > 0 {
+			apiUrl = regSite.APIUrls[0]
+		}
+
 		if existing, exists := existingMap[name]; exists {
 			// 站点已存在，强制对齐认证方式与默认 URL（保留用户的cookie/api_key/enabled）
 			existing.AuthMethod = regSite.AuthMethod
@@ -36,7 +43,8 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 			if regSite.DefaultBaseURL != "" {
 				existing.BaseURL = regSite.DefaultBaseURL
 			}
-			existing.APIUrl = defaultAPIUrlForSite(name)
+			existing.APIUrl = apiUrl
+			existing.APIUrls = apiUrlsJSON
 			if err := db.Save(&existing).Error; err != nil {
 				return err
 			}
@@ -48,8 +56,9 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 				Enabled:    false,
 				BaseURL:    regSite.DefaultBaseURL,
 				IsBuiltin:  true,
+				APIUrl:     apiUrl,
+				APIUrls:    apiUrlsJSON,
 			}
-			newSite.APIUrl = defaultAPIUrlForSite(name)
 			if err := db.Create(&newSite).Error; err != nil {
 				return err
 			}
@@ -149,13 +158,18 @@ type RegisteredSite struct {
 	Name           string
 	AuthMethod     string // "cookie" 或 "api_key"
 	DefaultBaseURL string
+	APIUrls        []string // API URL 列表，用于轮换（如 mTorrent 站点）
 }
 
-func defaultAPIUrlForSite(name string) string {
-	if name == string(MTEAM) {
-		return DefaultAPIUrlMTeam
+func encodeAPIUrls(urls []string) string {
+	if len(urls) == 0 {
+		return ""
 	}
-	return ""
+	data, err := json.Marshal(urls)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // ExampleRSSPatterns 示例 RSS URL 的特征模式

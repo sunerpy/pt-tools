@@ -35,17 +35,17 @@ func TestNewUnifiedSiteImpl(t *testing.T) {
 	}{
 		{
 			name:      "MTEAM site",
-			siteGroup: models.MTEAM,
+			siteGroup: models.SiteGroup("mteam"),
 			wantErr:   false,
 		},
 		{
 			name:      "HDSKY site",
-			siteGroup: models.HDSKY,
+			siteGroup: models.SiteGroup("hdsky"),
 			wantErr:   false,
 		},
 		{
 			name:      "CMCT site",
-			siteGroup: models.SpringSunday,
+			siteGroup: models.SiteGroup("springsunday"),
 			wantErr:   false,
 		},
 		{
@@ -93,7 +93,7 @@ func TestUnifiedSiteImpl_IsEnabled(t *testing.T) {
 
 	// 插入启用的站点
 	global.GlobalDB.DB.Create(&models.SiteSetting{
-		Name:       string(models.MTEAM),
+		Name:       string(models.SiteGroup("mteam")),
 		Enabled:    true,
 		AuthMethod: "api_key",
 		APIKey:     "test-key",
@@ -102,7 +102,7 @@ func TestUnifiedSiteImpl_IsEnabled(t *testing.T) {
 
 	// 插入禁用的站点
 	global.GlobalDB.DB.Create(&models.SiteSetting{
-		Name:       string(models.HDSKY),
+		Name:       string(models.SiteGroup("hdsky")),
 		Enabled:    false,
 		AuthMethod: "cookie",
 		Cookie:     "test-cookie",
@@ -115,17 +115,17 @@ func TestUnifiedSiteImpl_IsEnabled(t *testing.T) {
 	}{
 		{
 			name:      "Enabled site",
-			siteGroup: models.MTEAM,
+			siteGroup: models.SiteGroup("mteam"),
 			want:      true,
 		},
 		{
 			name:      "Disabled site",
-			siteGroup: models.HDSKY,
+			siteGroup: models.SiteGroup("hdsky"),
 			want:      false,
 		},
 		{
 			name:      "Non-existent site",
-			siteGroup: models.SpringSunday,
+			siteGroup: models.SiteGroup("springsunday"),
 			want:      false,
 		},
 	}
@@ -150,7 +150,7 @@ func TestUnifiedSiteImpl_RateLimiter(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	impl, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	impl, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 	require.NotNil(t, impl)
 	require.NotNil(t, impl.limiter, "limiter should be initialized")
@@ -174,7 +174,7 @@ func TestUnifiedSiteImpl_RateLimiter_ContextCanceled(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
 
-	impl, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	impl, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 
 	for i := 0; i < 200; i++ {

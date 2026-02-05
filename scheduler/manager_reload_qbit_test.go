@@ -21,9 +21,9 @@ func TestReload_QbitNotConfiguredWarnPaths(t *testing.T) {
 	cfg := &models.Config{Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true}, Sites: map[models.SiteGroup]models.SiteConfig{}}
 	// add three sites with enabled=true and invalid rss to hit qbit not configured warnings
 	e := true
-	cfg.Sites[models.SpringSunday] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}}
-	cfg.Sites[models.HDSKY] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r2", URL: "http://"}}}
-	cfg.Sites[models.MTEAM] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r3", URL: "http://"}}}
+	cfg.Sites[models.SiteGroup("springsunday")] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}}
+	cfg.Sites[models.SiteGroup("hdsky")] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r2", URL: "http://"}}}
+	cfg.Sites[models.SiteGroup("mteam")] = models.SiteConfig{Enabled: &e, RSS: []models.RSSConfig{{Name: "r3", URL: "http://"}}}
 	m := newTestManager(t)
 	require.NotPanics(t, func() { m.Reload(cfg) })
 }

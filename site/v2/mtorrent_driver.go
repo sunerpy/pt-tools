@@ -688,6 +688,12 @@ func parseMTorrentDiscount(discount string) DiscountLevel {
 func parseMTorrentDiscountWithPromotion(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule) (DiscountLevel, time.Time) {
 	now := time.Now()
 
+	baseLevel := parseMTorrentDiscount(baseDiscount)
+	var baseEnd time.Time
+	if baseEndTime != "" {
+		baseEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", baseEndTime)
+	}
+
 	if promotion != nil && promotion.Discount != "" {
 		var promoStart, promoEnd time.Time
 		if promotion.StartTime != "" {
@@ -700,19 +706,16 @@ func parseMTorrentDiscountWithPromotion(baseDiscount, baseEndTime string, promot
 		promoActive := (promoStart.IsZero() || !now.Before(promoStart)) && (promoEnd.IsZero() || now.Before(promoEnd))
 		if promoActive {
 			promoLevel := parseMTorrentDiscount(promotion.Discount)
-			baseLevel := parseMTorrentDiscount(baseDiscount)
 			if IsBetterDiscount(promoLevel, baseLevel) {
+				return promoLevel, promoEnd
+			}
+			if promoLevel == baseLevel && promoEnd.After(baseEnd) {
 				return promoLevel, promoEnd
 			}
 		}
 	}
 
-	level := parseMTorrentDiscount(baseDiscount)
-	var endTime time.Time
-	if baseEndTime != "" {
-		endTime, _ = ParseTimeInCST("2006-01-02 15:04:05", baseEndTime)
-	}
-	return level, endTime
+	return baseLevel, baseEnd
 }
 
 // ============================================================================

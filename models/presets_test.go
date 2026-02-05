@@ -48,7 +48,7 @@ func TestSyncSitesFromRegistry(t *testing.T) {
 	registeredSites := []RegisteredSite{
 		{ID: "springsunday", Name: "SpringSunday", AuthMethod: "cookie", DefaultBaseURL: ""},
 		{ID: "hdsky", Name: "HDSky", AuthMethod: "cookie", DefaultBaseURL: ""},
-		{ID: "mteam", Name: "M-Team", AuthMethod: "api_key", DefaultBaseURL: "https://api.m-team.cc"},
+		{ID: "mteam", Name: "M-Team", AuthMethod: "api_key", DefaultBaseURL: "https://api.m-team.cc", APIUrls: []string{"https://api.m-team.cc", "https://kp.m-team.cc"}},
 		{ID: "hddolby", Name: "HDDolby", AuthMethod: "cookie", DefaultBaseURL: ""},
 	}
 
@@ -76,6 +76,12 @@ func TestSyncSitesFromRegistry(t *testing.T) {
 	if site, ok := siteMap["mteam"]; ok {
 		if site.AuthMethod != "api_key" {
 			t.Errorf("mteam AuthMethod = %q, want %q", site.AuthMethod, "api_key")
+		}
+		if site.APIUrl != "https://api.m-team.cc" {
+			t.Errorf("mteam APIUrl = %q, want %q", site.APIUrl, "https://api.m-team.cc")
+		}
+		if site.APIUrls != `["https://api.m-team.cc","https://kp.m-team.cc"]` {
+			t.Errorf("mteam APIUrls = %q, want JSON array", site.APIUrls)
 		}
 	} else {
 		t.Error("未找到 mteam 站点")

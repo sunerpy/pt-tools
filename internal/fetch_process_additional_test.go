@@ -28,7 +28,7 @@ func (pt *ptStub) Context() context.Context { return context.Background() }
 func TestProcessRSS_WithStub_NoPanic(t *testing.T) {
 	cfg := models.RSSConfig{Name: "r", URL: "http://example/rss", IntervalMinutes: 1}
 	// 调用 cmd 包中的 processRSS（与生产逻辑一致）
-	require.NotPanics(t, func() { _ = cmdProcessRSS(context.Background(), models.SpringSunday, cfg, &ptStub{}) })
+	require.NotPanics(t, func() { _ = cmdProcessRSS(context.Background(), models.SiteGroup("springsunday"), cfg, &ptStub{}) })
 }
 
 // 复制签名以使用 cmd.processRSS（避免 import cycle）
