@@ -308,19 +308,19 @@ func (t *TorrentItem) IsDiscountActive() bool {
 // speedLimit: download speed limit in MB/s
 // sizeLimitGB: maximum torrent size in GB
 func (t *TorrentItem) CanbeFinished(enabled bool, speedLimit, sizeLimitGB int) bool {
-	if !enabled {
-		return true
-	}
 	sizeMB := float64(t.SizeBytes) / 1024 / 1024
-	if sizeMB >= float64(sizeLimitGB*1024) {
+	if sizeLimitGB > 0 && sizeMB >= float64(sizeLimitGB*1024) {
 		return false
 	}
-	if t.DiscountEndTime.IsZero() {
-		return true // Permanent discount
+	if enabled && speedLimit > 0 {
+		if t.DiscountEndTime.IsZero() {
+			return true
+		}
+		duration := time.Until(t.DiscountEndTime)
+		secondsDiff := int(duration.Seconds())
+		return float64(secondsDiff)*float64(speedLimit) >= (sizeMB / 1024 / 1024)
 	}
-	duration := time.Until(t.DiscountEndTime)
-	secondsDiff := int(duration.Seconds())
-	return float64(secondsDiff)*float64(speedLimit) >= (sizeMB / 1024 / 1024)
+	return true
 }
 
 // GetFreeEndTime returns the discount end time

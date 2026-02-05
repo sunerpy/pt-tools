@@ -168,13 +168,21 @@ func (t MTTorrentDetail) IsFree() bool {
 }
 
 func (t MTTorrentDetail) CanbeFinished(logger *zap.SugaredLogger, enabled bool, speedLimit, sizeLimitGB int) bool {
-	if !enabled {
-		return true
-	} else {
-		if t.Status == nil {
-			logger.Error("种子状态为空,跳过...")
-			return false
-		}
+	if t.Status == nil {
+		logger.Error("种子状态为空,跳过...")
+		return false
+	}
+	torrentSizeBytes, err := strconv.Atoi(t.Size)
+	if err != nil {
+		logger.Error("torrent: %s 解析种子大小失败, %v", t.Status.ID, err)
+		return false
+	}
+	torrentSizeMB := torrentSizeBytes / 1024 / 1024
+	if sizeLimitGB > 0 && torrentSizeMB > sizeLimitGB*1024 {
+		logger.Warn("种子: %s 大小超过设定值,跳过...", t.Status.ID)
+		return false
+	}
+	if enabled && speedLimit > 0 {
 		if t.Status.DiscountEndTime == "" {
 			logger.Warnf("种子: %s 免费时间为空,跳过...", t.Status.ID)
 			return false
@@ -184,24 +192,14 @@ func (t MTTorrentDetail) CanbeFinished(logger *zap.SugaredLogger, enabled bool, 
 			logger.Error("torrent: %s 解析时间失败, %v", t.Status.ID, err)
 			return false
 		}
-		torrentSizeBytes, err := strconv.Atoi(t.Size)
-		if err != nil {
-			logger.Error("torrent: %s 解析种子大小失败, %v", t.Status.ID, err)
-			return false
-		}
-		torrentSizeMB := torrentSizeBytes / 1024 / 1024
-		if torrentSizeMB > sizeLimitGB*1024 {
-			logger.Warn("种子: %s 大小超过设定值,跳过...", t.Status.ID)
-			return false
-		}
 		duration := time.Until(timeEnd)
 		secondsDiff := int(duration.Seconds())
 		if secondsDiff*speedLimit < (torrentSizeMB / 1024 / 1024) {
 			logger.Warnf("种子: %s 免费时间不足以完成下载,跳过...", t.Status.ID)
 			return false
 		}
-		return true
 	}
+	return true
 }
 
 func (t MTTorrentDetail) GetFreeEndTime() *time.Time {
