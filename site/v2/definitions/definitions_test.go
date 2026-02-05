@@ -215,8 +215,8 @@ func TestOurBitsDefinition(t *testing.T) {
 	if def.UserInfo == nil {
 		t.Error("UserInfo should not be nil")
 	}
-	if len(def.LevelRequirements) != 11 {
-		t.Errorf("LevelRequirements count = %d, want 11", len(def.LevelRequirements))
+	if len(def.LevelRequirements) != 10 {
+		t.Errorf("LevelRequirements count = %d, want 10", len(def.LevelRequirements))
 	}
 }
 
