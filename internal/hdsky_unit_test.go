@@ -37,8 +37,8 @@ func TestUnifiedSiteImpl_HDSKY_IsEnabledAndFields(t *testing.T) {
 	s := core.NewConfigStore(db)
 	_ = s.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: ts.URL, User: "u", Password: "p"})
 	e := true
-	_, _ = s.UpsertSite(models.HDSKY, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	h, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	_, _ = s.UpsertSite(models.SiteGroup("hdsky"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	h, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 	// basic getters
 	if !h.IsEnabled() {
@@ -50,7 +50,7 @@ func TestUnifiedSiteImpl_HDSKY_IsEnabledAndFields(t *testing.T) {
 	if h.RetryDelay() != retryDelay {
 		t.Fatalf("retry delay mismatch")
 	}
-	if h.SiteGroup() != models.HDSKY {
+	if h.SiteGroup() != models.SiteGroup("hdsky") {
 		t.Fatalf("site group mismatch")
 	}
 }
@@ -69,7 +69,7 @@ func TestUnifiedSiteImpl_HDSKY_DownloadTorrent(t *testing.T) {
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	h, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	h, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 	if _, err := h.DownloadTorrent(srv.URL, "t", dir); err != nil {
 		t.Fatalf("download: %v", err)
@@ -82,7 +82,7 @@ func TestUnifiedSiteImpl_HDSKY_ContextGetter(t *testing.T) {
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
 	ctx := context.Background()
-	h, err := NewUnifiedSiteImpl(ctx, models.HDSKY)
+	h, err := NewUnifiedSiteImpl(ctx, models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 	if h.Context() == nil {
 		t.Fatalf("nil context")
@@ -106,7 +106,7 @@ func TestUnifiedSiteImpl_HDSKY_SendTorrentToDownloader(t *testing.T) {
 	_ = os.WriteFile(p, data, 0o644)
 	h, _ := qbit.ComputeTorrentHashWithPath(p)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: string(models.HDSKY), TorrentHash: &h, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: string(models.SiteGroup("hdsky")), TorrentHash: &h, IsPushed: &pushed}
 	_ = db.UpsertTorrent(ti)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -146,7 +146,7 @@ func TestUnifiedSiteImpl_HDSKY_SendTorrentToDownloader(t *testing.T) {
 	SetGlobalDownloaderManager(dlMgr)
 	defer SetGlobalDownloaderManager(nil)
 
-	hds, err := NewUnifiedSiteImpl(context.Background(), models.HDSKY)
+	hds, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 	require.NoError(t, hds.SendTorrentToDownloader(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 }

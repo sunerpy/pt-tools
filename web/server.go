@@ -485,7 +485,6 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// SiteConfigResponse extends SiteConfig with unavailable status for API responses
 type SiteConfigResponse struct {
 	Enabled           *bool              `json:"enabled"`
 	AuthMethod        string             `json:"auth_method"`
@@ -497,6 +496,7 @@ type SiteConfigResponse struct {
 	URLs              []string           `json:"urls,omitempty"`
 	Unavailable       bool               `json:"unavailable,omitempty"`
 	UnavailableReason string             `json:"unavailable_reason,omitempty"`
+	IsBuiltin         bool               `json:"is_builtin"`
 }
 
 func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
@@ -523,6 +523,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				resp.URLs = def.URLs
 				resp.Unavailable = def.Unavailable
 				resp.UnavailableReason = def.UnavailableReason
+				resp.IsBuiltin = true
 				if def.Unavailable {
 					f := false
 					resp.Enabled = &f
@@ -613,6 +614,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			resp.URLs = def.URLs
 			resp.Unavailable = def.Unavailable
 			resp.UnavailableReason = def.UnavailableReason
+			resp.IsBuiltin = true
 		}
 		writeJSON(w, resp)
 	case http.MethodPost:

@@ -29,10 +29,10 @@ func TestGetAllSupportedSiteGroups(t *testing.T) {
 	}
 
 	expected := map[models.SiteGroup]bool{
-		models.MTEAM:        false,
-		models.HDSKY:        false,
-		models.SpringSunday: false,
-		models.HDDOLBY:      false,
+		models.SiteGroup("mteam"):        false,
+		models.SiteGroup("hdsky"):        false,
+		models.SiteGroup("springsunday"): false,
+		models.SiteGroup("hddolby"):      false,
 	}
 
 	for _, g := range groups {
@@ -53,10 +53,10 @@ func TestIsSiteGroupSupported(t *testing.T) {
 		siteGroup models.SiteGroup
 		want      bool
 	}{
-		{models.MTEAM, true},
-		{models.HDSKY, true},
-		{models.SpringSunday, true},
-		{models.HDDOLBY, true}, // HDDolby is now available via API
+		{models.SiteGroup("mteam"), true},
+		{models.SiteGroup("hdsky"), true},
+		{models.SiteGroup("springsunday"), true},
+		{models.SiteGroup("hddolby"), true}, // HDDolby is now available via API
 		{models.SiteGroup("unknown"), false},
 		{models.SiteGroup(""), false},
 	}

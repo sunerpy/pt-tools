@@ -286,6 +286,83 @@ func TestParseMTorrentDiscount(t *testing.T) {
 	}
 }
 
+func TestParseMTorrentDiscountWithPromotion(t *testing.T) {
+	tests := []struct {
+		name             string
+		baseDiscount     string
+		baseEndTime      string
+		promotion        *MTorrentPromotionRule
+		wantLevel        DiscountLevel
+		wantEndTimeAfter string
+	}{
+		{
+			name:         "no promotion",
+			baseDiscount: "FREE",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion:    nil,
+			wantLevel:    DiscountFree,
+		},
+		{
+			name:         "promotion better discount",
+			baseDiscount: "PERCENT_50",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion: &MTorrentPromotionRule{
+				Discount:  "FREE",
+				StartTime: "2026-02-03 00:00:00",
+				EndTime:   "2026-02-05 23:59:59",
+			},
+			wantLevel:        DiscountFree,
+			wantEndTimeAfter: "2026-02-05 23:00:00",
+		},
+		{
+			name:         "same discount but promotion ends later",
+			baseDiscount: "FREE",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion: &MTorrentPromotionRule{
+				Discount:  "FREE",
+				StartTime: "2026-02-03 00:00:00",
+				EndTime:   "2026-02-05 23:59:59",
+			},
+			wantLevel:        DiscountFree,
+			wantEndTimeAfter: "2026-02-05 23:00:00",
+		},
+		{
+			name:         "same discount but base ends later",
+			baseDiscount: "FREE",
+			baseEndTime:  "2026-02-06 19:57:34",
+			promotion: &MTorrentPromotionRule{
+				Discount:  "FREE",
+				StartTime: "2026-02-03 00:00:00",
+				EndTime:   "2026-02-05 23:59:59",
+			},
+			wantLevel:        DiscountFree,
+			wantEndTimeAfter: "2026-02-06 19:00:00",
+		},
+		{
+			name:         "promotion worse discount ignored",
+			baseDiscount: "FREE",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion: &MTorrentPromotionRule{
+				Discount:  "PERCENT_50",
+				StartTime: "2026-02-03 00:00:00",
+				EndTime:   "2026-02-05 23:59:59",
+			},
+			wantLevel: DiscountFree,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			level, endTime := parseMTorrentDiscountWithPromotion(tt.baseDiscount, tt.baseEndTime, tt.promotion)
+			assert.Equal(t, tt.wantLevel, level)
+			if tt.wantEndTimeAfter != "" {
+				checkTime, _ := ParseTimeInCST("2006-01-02 15:04:05", tt.wantEndTimeAfter)
+				assert.True(t, endTime.After(checkTime), "endTime %v should be after %v", endTime, checkTime)
+			}
+		})
+	}
+}
+
 // TestMTorrentDriver_PrepareExtendedEndpoints tests all extended API endpoint paths
 func TestMTorrentDriver_PrepareExtendedEndpoints(t *testing.T) {
 	driver := NewMTorrentDriver(MTorrentDriverConfig{

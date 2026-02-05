@@ -34,7 +34,7 @@ func TestUnifiedSiteImpl_MTEAM_DownloadTorrentAndContext(t *testing.T) {
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	m, err := NewUnifiedSiteImpl(context.Background(), models.MTEAM)
+	m, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("mteam"))
 	require.NoError(t, err)
 	if _, err := m.DownloadTorrent(srv.URL, "t", dir); err != nil {
 		t.Fatalf("download: %v", err)
@@ -50,9 +50,9 @@ func TestUnifiedSiteImpl_MTEAM_IsEnabled(t *testing.T) {
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
 	enabled := true
-	_, err = core.NewConfigStore(db).UpsertSite(models.MTEAM, models.SiteConfig{Enabled: &enabled})
+	_, err = core.NewConfigStore(db).UpsertSite(models.SiteGroup("mteam"), models.SiteConfig{Enabled: &enabled})
 	require.NoError(t, err)
-	m, err := NewUnifiedSiteImpl(context.Background(), models.MTEAM)
+	m, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("mteam"))
 	require.NoError(t, err)
 	require.True(t, m.IsEnabled())
 }
@@ -75,7 +75,7 @@ func TestUnifiedSiteImpl_MTEAM_SendTorrentToDownloader_WithStub(t *testing.T) {
 	h, err := qbit.ComputeTorrentHashWithPath(p)
 	require.NoError(t, err)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: string(models.MTEAM), TorrentHash: &h, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: string(models.SiteGroup("mteam")), TorrentHash: &h, IsPushed: &pushed}
 	require.NoError(t, db.UpsertTorrent(ti))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -115,7 +115,7 @@ func TestUnifiedSiteImpl_MTEAM_SendTorrentToDownloader_WithStub(t *testing.T) {
 	SetGlobalDownloaderManager(dlMgr)
 	defer SetGlobalDownloaderManager(nil)
 
-	m, err := NewUnifiedSiteImpl(context.Background(), models.MTEAM)
+	m, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("mteam"))
 	require.NoError(t, err)
 	require.NoError(t, m.SendTorrentToDownloader(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 }
@@ -127,10 +127,10 @@ func TestNewUnifiedSiteImpl_MTEAM(t *testing.T) {
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
 	ctx := context.Background()
-	m, err := NewUnifiedSiteImpl(ctx, models.MTEAM)
+	m, err := NewUnifiedSiteImpl(ctx, models.SiteGroup("mteam"))
 	require.NoError(t, err)
 	require.NotNil(t, m)
-	require.Equal(t, models.MTEAM, m.SiteGroup())
+	require.Equal(t, models.SiteGroup("mteam"), m.SiteGroup())
 }
 
 // TestUnifiedSiteImpl_MTEAM_MaxRetries 测试最大重试次数
@@ -139,7 +139,7 @@ func TestUnifiedSiteImpl_MTEAM_MaxRetries(t *testing.T) {
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
-	m, err := NewUnifiedSiteImpl(context.Background(), models.MTEAM)
+	m, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("mteam"))
 	require.NoError(t, err)
 	require.Equal(t, maxRetries, m.MaxRetries())
 }
@@ -150,7 +150,7 @@ func TestUnifiedSiteImpl_MTEAM_RetryDelay(t *testing.T) {
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
-	m, err := NewUnifiedSiteImpl(context.Background(), models.MTEAM)
+	m, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("mteam"))
 	require.NoError(t, err)
 	require.Equal(t, retryDelay, m.RetryDelay())
 }

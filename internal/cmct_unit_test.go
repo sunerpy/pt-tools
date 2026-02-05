@@ -37,8 +37,8 @@ func TestUnifiedSiteImpl_CMCT_IsEnabledAndFields(t *testing.T) {
 	s := core.NewConfigStore(db)
 	_ = s.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: ts.URL, User: "u", Password: "p"})
 	e := true
-	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
+	_, _ = s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	c, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("springsunday"))
 	require.NoError(t, err)
 	if !c.IsEnabled() {
 		t.Fatalf("expected enabled")
@@ -49,7 +49,7 @@ func TestUnifiedSiteImpl_CMCT_IsEnabledAndFields(t *testing.T) {
 	if c.RetryDelay() != retryDelay {
 		t.Fatalf("retry delay mismatch")
 	}
-	if c.SiteGroup() != models.SpringSunday {
+	if c.SiteGroup() != models.SiteGroup("springsunday") {
 		t.Fatalf("site group mismatch")
 	}
 }
@@ -68,7 +68,7 @@ func TestUnifiedSiteImpl_CMCT_DownloadTorrentAndContext(t *testing.T) {
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
-	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
+	c, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("springsunday"))
 	require.NoError(t, err)
 	if _, err := c.DownloadTorrent(srv.URL, "t", dir); err != nil {
 		t.Fatalf("download: %v", err)
@@ -96,7 +96,7 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 	h, err := qbit.ComputeTorrentHashWithPath(p)
 	require.NoError(t, err)
 	pushed := false
-	ti := &models.TorrentInfo{SiteName: string(models.SpringSunday), TorrentHash: &h, IsPushed: &pushed}
+	ti := &models.TorrentInfo{SiteName: string(models.SiteGroup("springsunday")), TorrentHash: &h, IsPushed: &pushed}
 	require.NoError(t, db.UpsertTorrent(ti))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -136,7 +136,7 @@ func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
 	SetGlobalDownloaderManager(dlMgr)
 	defer SetGlobalDownloaderManager(nil)
 
-	c, err := NewUnifiedSiteImpl(context.Background(), models.SpringSunday)
+	c, err := NewUnifiedSiteImpl(context.Background(), models.SiteGroup("springsunday"))
 	require.NoError(t, err)
 	require.NoError(t, c.SendTorrentToDownloader(context.Background(), models.RSSConfig{Tag: tag, Category: "cat"}))
 	if _, err := os.Stat(p); err == nil {

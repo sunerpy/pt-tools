@@ -94,6 +94,7 @@ type SiteSetting struct {
 	Cookie       string    `gorm:"size:2048" json:"cookie,omitempty"`
 	APIKey       string    `gorm:"size:512" json:"api_key,omitempty"`
 	APIUrl       string    `gorm:"size:512" json:"api_url,omitempty"`
+	APIUrls      string    `gorm:"size:2048" json:"api_urls,omitempty"`
 	Passkey      string    `gorm:"size:512" json:"passkey,omitempty"`
 	DownloaderID *uint     `gorm:"index" json:"downloader_id,omitempty"`
 	ParserConfig string    `gorm:"type:text" json:"parser_config,omitempty"`

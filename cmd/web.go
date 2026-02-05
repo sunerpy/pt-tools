@@ -141,18 +141,23 @@ func init() {
 // getRegisteredSitesFromRegistry 从 SiteRegistry 获取所有注册的站点信息
 func getRegisteredSitesFromRegistry(registry *v2.SiteRegistry) []models.RegisteredSite {
 	siteIDs := registry.List()
+	defRegistry := v2.GetDefinitionRegistry()
 	result := make([]models.RegisteredSite, 0, len(siteIDs))
 	for _, id := range siteIDs {
 		meta, ok := registry.Get(id)
 		if !ok {
 			continue
 		}
-		result = append(result, models.RegisteredSite{
+		regSite := models.RegisteredSite{
 			ID:             meta.ID,
 			Name:           meta.Name,
 			AuthMethod:     meta.AuthMethod.String(),
 			DefaultBaseURL: meta.DefaultBaseURL,
-		})
+		}
+		if def, found := defRegistry.Get(id); found && def.Schema == v2.SchemaMTorrent {
+			regSite.APIUrls = def.URLs
+		}
+		result = append(result, regSite)
 	}
 	return result
 }

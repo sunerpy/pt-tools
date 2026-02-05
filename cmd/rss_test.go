@@ -66,7 +66,7 @@ func TestProcessRSS_WithStub(t *testing.T) {
 </channel></rss>`)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write(feed.Bytes()) }))
 	defer srv.Close()
-	if err := processRSS(context.Background(), models.SpringSunday, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}, &ptStub{}); err != nil {
+	if err := processRSS(context.Background(), models.SiteGroup("springsunday"), models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}, &ptStub{}); err != nil {
 		t.Fatalf("proc rss: %v", err)
 	}
 }
@@ -86,7 +86,7 @@ func TestRunRSSJob_SingleMode(t *testing.T) {
 	if err = core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 1, DefaultEnabled: true}); err != nil {
 		t.Fatalf("save gl: %v", err)
 	}
-	go runRSSJob(ctx, models.SpringSunday, cfg, &ptStub{})
+	go runRSSJob(ctx, models.SiteGroup("springsunday"), cfg, &ptStub{})
 	time.Sleep(200 * time.Millisecond)
 }
 
@@ -101,7 +101,7 @@ func TestRunSiteJobs_PersistentCancel(t *testing.T) {
 		{Name: "r1", URL: "http://invalid", IntervalMinutes: 1},
 		{Name: "r2", URL: "http://invalid", IntervalMinutes: 1},
 	}}
-	go runSiteJobs(ctx, models.SpringSunday, siteCfg, &siteStub{})
+	go runSiteJobs(ctx, models.SiteGroup("springsunday"), siteCfg, &siteStub{})
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	time.Sleep(50 * time.Millisecond)
@@ -129,7 +129,7 @@ func TestExecuteTask_ErrorPath_NoPanic(t *testing.T) {
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
 	_ = core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 1, DefaultEnabled: true})
-	executeTask(context.Background(), models.SpringSunday, models.RSSConfig{Name: "r", URL: "://bad"}, &errSite{})
+	executeTask(context.Background(), models.SiteGroup("springsunday"), models.RSSConfig{Name: "r", URL: "://bad"}, &errSite{})
 }
 
 type siteStub struct{}
@@ -150,7 +150,7 @@ func TestRunSiteJobs_WithSingleMode(t *testing.T) {
 	ctx := context.WithValue(baseCtx, modeKey, "single")
 	global.InitLogger(zap.NewNop())
 	siteCfg := models.SiteConfig{RSS: []models.RSSConfig{{Name: "r1", URL: "http://invalid", IntervalMinutes: 1}}}
-	runSiteJobs(ctx, models.SpringSunday, siteCfg, &siteStub{})
+	runSiteJobs(ctx, models.SiteGroup("springsunday"), siteCfg, &siteStub{})
 }
 
 func TestGenTorrentsWithRSSOnce_NoRSS(t *testing.T) {
@@ -324,7 +324,7 @@ func TestRunRSSJob_PersistentModeCancel(t *testing.T) {
 	ctx := context.WithValue(baseCtx, modeKey, "persistent")
 	cfg := models.RSSConfig{Name: "r", URL: "http://invalid", Tag: "tag", IntervalMinutes: 1}
 
-	go runRSSJob(ctx, models.SpringSunday, cfg, &ptStub{})
+	go runRSSJob(ctx, models.SiteGroup("springsunday"), cfg, &ptStub{})
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	time.Sleep(50 * time.Millisecond)
@@ -465,7 +465,7 @@ func TestExecuteTask_Success(t *testing.T) {
 	cfg := models.RSSConfig{Name: "test-rss", URL: "http://invalid", Tag: "tag"}
 
 	// 使用 stub 站点
-	executeTask(context.Background(), models.SpringSunday, cfg, &siteStub{})
+	executeTask(context.Background(), models.SiteGroup("springsunday"), cfg, &siteStub{})
 }
 
 // TestProcessRSS_SendTorrentError 测试发送种子错误
@@ -485,7 +485,7 @@ func TestProcessRSS_SendTorrentError(t *testing.T) {
 	cfg := models.RSSConfig{Name: "test-rss", URL: "http://invalid", Tag: "tag"}
 
 	// 使用错误站点
-	err = processRSS(context.Background(), models.SpringSunday, cfg, &errSite{})
+	err = processRSS(context.Background(), models.SiteGroup("springsunday"), cfg, &errSite{})
 	// 应该返回错误
 	if err == nil {
 		t.Log("processRSS returned nil error, which is acceptable for invalid URL")

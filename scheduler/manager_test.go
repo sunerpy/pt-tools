@@ -91,9 +91,9 @@ func TestReload_InvalidRSSNotStarted(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: "/tmp", AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.SpringSunday: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}},
-			models.HDSKY:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://rss.m-team.xxx/path"}}},
-			models.MTEAM:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example/rss"}}},
+			models.SiteGroup("springsunday"): {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "http://"}}},
+			models.SiteGroup("hdsky"):        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://rss.m-team.xxx/path"}}},
+			models.SiteGroup("mteam"):        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example/rss"}}},
 		},
 	}
 	require.NotPanics(t, func() { m.Reload(cfg) })
@@ -151,7 +151,7 @@ func TestReload_StartAndStopAll_WithValidConfig(t *testing.T) {
 	}))
 	defer srv.Close()
 	_ = store.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: srv.URL, User: "u", Password: "p"})
-	cfg := &models.Config{Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true}, Sites: map[models.SiteGroup]models.SiteConfig{models.MTEAM: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "https://example.com/rss", IntervalMinutes: 1}}}}}
+	cfg := &models.Config{Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true}, Sites: map[models.SiteGroup]models.SiteConfig{models.SiteGroup("mteam"): {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "https://example.com/rss", IntervalMinutes: 1}}}}}
 	m := newTestManager(t)
 	m.Reload(cfg)
 	time.Sleep(100 * time.Millisecond)
@@ -180,9 +180,9 @@ func TestManager_Reload_StartAllBranches(t *testing.T) {
 	defer srv.Close()
 	_ = store.SaveQbitSettings(models.QbitSettings{Enabled: true, URL: srv.URL, User: "u", Password: "p"})
 	cfg := &models.Config{Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true}, Sites: map[models.SiteGroup]models.SiteConfig{
-		models.SpringSunday: {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "https://example.com/rss", IntervalMinutes: 1}}},
-		models.HDSKY:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://example.com/rss", IntervalMinutes: 1}}},
-		models.MTEAM:        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example.com/rss", IntervalMinutes: 1}}},
+		models.SiteGroup("springsunday"): {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r1", URL: "https://example.com/rss", IntervalMinutes: 1}}},
+		models.SiteGroup("hdsky"):        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r2", URL: "https://example.com/rss", IntervalMinutes: 1}}},
+		models.SiteGroup("mteam"):        {Enabled: ptr(true), RSS: []models.RSSConfig{{Name: "r3", URL: "https://example.com/rss", IntervalMinutes: 1}}},
 	}}
 	m := newTestManager(t)
 	m.Reload(cfg)
@@ -225,7 +225,7 @@ func TestRunRSSJob_WithStub(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfg := models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag", IntervalMinutes: 1}
-	go runRSSJob(ctx, models.SpringSunday, cfg, &rssSiteStub{})
+	go runRSSJob(ctx, models.SiteGroup("springsunday"), cfg, &rssSiteStub{})
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 	time.Sleep(100 * time.Millisecond)
@@ -235,12 +235,12 @@ func TestManager_StartStop(t *testing.T) {
 	m := newTestManager(t)
 	r := models.RSSConfig{Name: "r1", URL: "http://example", IntervalMinutes: 1}
 	ran := make(chan struct{}, 1)
-	m.Start(models.SpringSunday, r, func(ctx context.Context) { ran <- struct{}{} })
-	m.Start(models.SpringSunday, r, func(ctx context.Context) { ran <- struct{}{} })
+	m.Start(models.SiteGroup("springsunday"), r, func(ctx context.Context) { ran <- struct{}{} })
+	m.Start(models.SiteGroup("springsunday"), r, func(ctx context.Context) { ran <- struct{}{} })
 	if _, ok := <-ran; !ok {
 		t.Fatalf("runner not invoked")
 	}
-	m.Stop(models.SpringSunday, r.Name)
+	m.Stop(models.SiteGroup("springsunday"), r.Name)
 }
 
 func TestKeyFormat(t *testing.T) {
@@ -462,7 +462,7 @@ func TestStartAll_WithMTEAM(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.MTEAM: {
+			models.SiteGroup("mteam"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
@@ -490,7 +490,7 @@ func TestStartAll_WithHDSKY(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.HDSKY: {
+			models.SiteGroup("hdsky"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
@@ -517,7 +517,7 @@ func TestStartAll_WithCMCT(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.SpringSunday: {
+			models.SiteGroup("springsunday"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
@@ -569,7 +569,7 @@ func TestStartAll_WithSkippedRSS(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.MTEAM: {
+			models.SiteGroup("mteam"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "test-rss", URL: "", IntervalMinutes: 1}, // 空 URL 应该被跳过
@@ -594,7 +594,7 @@ func TestStartAll_WithDisabledSite(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.MTEAM: {
+			models.SiteGroup("mteam"): {
 				Enabled: ptr(false), // 禁用
 				RSS: []models.RSSConfig{
 					{Name: "test-rss", URL: "https://example.com/rss", IntervalMinutes: 1},
@@ -619,19 +619,19 @@ func TestStartAll_AllSiteTypes(t *testing.T) {
 	cfg := &models.Config{
 		Global: models.SettingsGlobal{DownloadDir: t.TempDir(), AutoStart: true},
 		Sites: map[models.SiteGroup]models.SiteConfig{
-			models.MTEAM: {
+			models.SiteGroup("mteam"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "mteam-rss", URL: "https://example.com/mteam", IntervalMinutes: 1},
 				},
 			},
-			models.HDSKY: {
+			models.SiteGroup("hdsky"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "hdsky-rss", URL: "https://example.com/hdsky", IntervalMinutes: 1},
 				},
 			},
-			models.SpringSunday: {
+			models.SiteGroup("springsunday"): {
 				Enabled: ptr(true),
 				RSS: []models.RSSConfig{
 					{Name: "cmct-rss", URL: "https://example.com/cmct", IntervalMinutes: 1},
@@ -660,7 +660,7 @@ func TestExecuteTask(t *testing.T) {
 	// 使用 stub 测试
 	stub := &rssSiteStub{}
 	require.NotPanics(t, func() {
-		executeTask(ctx, models.SpringSunday, cfg, stub)
+		executeTask(ctx, models.SiteGroup("springsunday"), cfg, stub)
 	})
 }
 
@@ -676,5 +676,5 @@ func TestProcessRSS(t *testing.T) {
 
 	stub := &rssSiteStub{}
 	// processRSS 可能返回错误，但不应该 panic
-	_ = processRSS(ctx, models.SpringSunday, cfg, stub)
+	_ = processRSS(ctx, models.SiteGroup("springsunday"), cfg, stub)
 }

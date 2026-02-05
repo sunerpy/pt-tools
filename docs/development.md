@@ -196,9 +196,14 @@ PR 地址：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
 
 ### 添加新站点支持
 
-添加新 PT 站点只需创建**一个文件**：`site/v2/definitions/<sitename>.go`
+添加新 PT 站点只需创建 **一个定义文件**，系统会自动完成以下工作：
 
-系统会自动从 `SiteDefinitionRegistry` 生成运行时元数据，无需手动编辑其他文件。
+- 从 `SiteDefinitionRegistry` 生成运行时元数据
+- 在 `SiteRegistry` 中注册站点
+- API 返回 `is_builtin: true` 标识为内置站点
+- 前端自动识别为不可删除的预置站点
+
+**无需手动编辑** `models/enter.go`、`web/server.go` 或前端代码。
 
 **站点定义模板**：
 
@@ -274,8 +279,11 @@ func init() {
 1. 在 `site/v2/definitions/` 创建 `<sitename>.go`
 2. 参考现有实现（如 `hdsky.go`、`mteam.go`）
 3. 运行测试：`go test ./site/v2/...`
-4. 更新站点列表文档：`docs/sites.md`
-5. 提交 PR
+4. （可选）在 `site/v2/definitions/definitions_test.go` 中添加站点测试
+5. 更新站点列表文档：`docs/sites.md`
+6. 提交 PR
+
+> **注意**：旧版本需要手动更新 `models/enter.go` 中的 `AllowedSiteGroups` 和前端的预置站点列表，现已不再需要。系统会从 Registry 自动识别内置站点。
 
 **自定义驱动（单文件模式）**：
 

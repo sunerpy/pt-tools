@@ -90,6 +90,7 @@ export interface SiteConfig {
   urls?: string[];
   unavailable?: boolean;
   unavailable_reason?: string;
+  is_builtin?: boolean;
 }
 
 export interface TaskItem {

@@ -37,12 +37,11 @@ func (d *DefaultReferer) GetReferer() string {
 
 // NewDefaultReferer creates a new DefaultReferer based on site group
 func NewDefaultReferer(name models.SiteGroup) *DefaultReferer {
-	referers := map[models.SiteGroup]string{
-		models.HDSKY:        "https://hdsky.me/",
-		models.SpringSunday: "https://springsunday.net/",
-		models.MTEAM:        "https://kp.m-team.cc/",
+	def, ok := v2.GetDefinitionRegistry().Get(string(name))
+	if !ok || len(def.URLs) == 0 {
+		return &DefaultReferer{}
 	}
-	return &DefaultReferer{referer: referers[name]}
+	return &DefaultReferer{referer: def.URLs[0]}
 }
 
 // SiteConfig holds site-specific configuration

@@ -66,7 +66,7 @@ func TestLoadSnapshotConsistency(t *testing.T) {
 	}
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "ck", APIUrl: "http://api"}
 	sc.RSS = []models.RSSConfig{{Name: "cmct", URL: "https://rss", IntervalMinutes: 10}}
-	if err := store.UpsertSiteWithRSS(models.SpringSunday, sc); err != nil {
+	if err := store.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc); err != nil {
 		t.Fatalf("save site: %v", err)
 	}
 	// load snapshot
@@ -80,7 +80,7 @@ func TestLoadSnapshotConsistency(t *testing.T) {
 	if cfg.Qbit.URL == "" {
 		t.Fatalf("qbit url empty")
 	}
-	if len(cfg.Sites[models.SpringSunday].RSS) != 1 {
+	if len(cfg.Sites[models.SiteGroup("springsunday")].RSS) != 1 {
 		t.Fatalf("rss count mismatch")
 	}
 }
@@ -183,14 +183,14 @@ func TestUpsertSiteWithRSS_Validations(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	s := NewConfigStore(db)
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "invalid", APIUrl: "http://x", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "invalid", APIUrl: "http://x", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.MTEAM, models.SiteConfig{AuthMethod: "api_key", APIUrl: models.DefaultAPIUrlMTeam, APIKey: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.Error(t, err)
 	e := true
-	err = s.UpsertSiteWithRSS(models.MTEAM, models.SiteConfig{Enabled: &e, AuthMethod: "api_key", APIUrl: models.DefaultAPIUrlMTeam, APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{Enabled: &e, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "http://u"}}})
 	require.NoError(t, err)
 }
 
@@ -199,11 +199,11 @@ func TestUpsertSiteWithRSS_SaveAndList(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}}}
-	require.NoError(t, s.UpsertSiteWithRSS(models.SpringSunday, sc))
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), sc))
 	out, err := s.ListSites()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(out))
-	require.Equal(t, "cookie", out[models.SpringSunday].AuthMethod)
+	require.Equal(t, "cookie", out[models.SiteGroup("springsunday")].AuthMethod)
 }
 
 func TestConfigStore_GlobalCRUD(t *testing.T) {
@@ -238,7 +238,7 @@ func TestConfigStore_SiteCRUD(t *testing.T) {
 	}
 	s := NewConfigStore(db)
 	sc := models.SiteConfig{Enabled: boolPtr(true), AuthMethod: "cookie", Cookie: "c"}
-	id, err := s.UpsertSite(models.SpringSunday, sc)
+	id, err := s.UpsertSite(models.SiteGroup("springsunday"), sc)
 	if err != nil || id == 0 {
 		t.Fatalf("upsert: %v %d", err, id)
 	}
@@ -325,14 +325,14 @@ func TestConfigStore_QbitOnlyAndSiteConf(t *testing.T) {
 		t.Fatalf("qbit empty fields")
 	}
 	e := true
-	siteID, err := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	siteID, err := s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	if err != nil {
 		t.Fatalf("upsert site: %v", err)
 	}
 	if err = s.ReplaceSiteRSS(siteID, []models.RSSConfig{{Name: "r1", URL: "http://example/rss", Tag: "tag", IntervalMinutes: 10}}); err != nil {
 		t.Fatalf("rss: %v", err)
 	}
-	sc, err := s.GetSiteConf(models.SpringSunday)
+	sc, err := s.GetSiteConf(models.SiteGroup("springsunday"))
 	if err != nil {
 		t.Fatalf("get site conf: %v", err)
 	}
@@ -349,10 +349,10 @@ func TestGetSiteConf_ApplyDefaults_HDSKY(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
-	id, err := s.UpsertSite(models.HDSKY, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	id, err := s.UpsertSite(models.SiteGroup("hdsky"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	require.NoError(t, err)
 	require.NoError(t, s.ReplaceSiteRSS(id, []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}}))
-	sc, err := s.GetSiteConf(models.HDSKY)
+	sc, err := s.GetSiteConf(models.SiteGroup("hdsky"))
 	require.NoError(t, err)
 	require.NotNil(t, sc.Enabled)
 	require.Equal(t, "cookie", sc.AuthMethod)
@@ -365,7 +365,7 @@ func TestDeleteSite_ValidateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
-	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	_, _ = s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	assert.Error(t, s.DeleteSite("cmct"))
 	_, _ = s.UpsertSite(models.SiteGroup("custom"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	assert.NoError(t, s.DeleteSite("custom"))
@@ -375,19 +375,19 @@ func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
 	s := NewConfigStore(db)
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "bad", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "bad", APIUrl: "http://api", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
 	// 预置站点（SpringSunday）不需要 APIUrl，由后端常量提供
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.NoError(t, err) // 预置站点允许空 APIUrl
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.MTEAM, models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
 	// RSS 列表允许为空
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
 	assert.NoError(t, err)
-	err = s.UpsertSiteWithRSS(models.SpringSunday, models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
 	assert.NoError(t, err)
 }
 
@@ -396,18 +396,18 @@ func TestListSites_ApplyDefaults(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
-	_, _ = s.UpsertSite(models.MTEAM, models.SiteConfig{Enabled: &e, AuthMethod: "api_key", APIUrl: models.DefaultAPIUrlMTeam})
-	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
-	_, _ = s.UpsertSite(models.HDSKY, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	_, _ = s.UpsertSite(models.SiteGroup("mteam"), models.SiteConfig{Enabled: &e, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc"})
+	_, _ = s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	_, _ = s.UpsertSite(models.SiteGroup("hdsky"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	out, err := s.ListSites()
 	require.NoError(t, err)
-	if out[models.MTEAM].AuthMethod != "api_key" {
+	if out[models.SiteGroup("mteam")].AuthMethod != "api_key" {
 		t.Fatalf("mteam auth default")
 	}
-	if out[models.SpringSunday].AuthMethod != "cookie" {
+	if out[models.SiteGroup("springsunday")].AuthMethod != "cookie" {
 		t.Fatalf("cmct auth default")
 	}
-	if out[models.HDSKY].AuthMethod != "cookie" {
+	if out[models.SiteGroup("hdsky")].AuthMethod != "cookie" {
 		t.Fatalf("hdsky auth default")
 	}
 }
@@ -533,7 +533,7 @@ func TestDeleteSite_AllCases(t *testing.T) {
 
 	// Test deleting preset site (should fail)
 	e := true
-	_, _ = s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	_, _ = s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	err = s.DeleteSite("cmct")
 	assert.Error(t, err)
 
@@ -559,7 +559,7 @@ func TestReplaceSiteRSS_EmptyRSS(t *testing.T) {
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	e := true
-	id, err := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+	id, err := s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 	require.NoError(t, err)
 	// Replace with empty RSS list
 	err = s.ReplaceSiteRSS(id, []models.RSSConfig{})

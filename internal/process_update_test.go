@@ -34,6 +34,6 @@ func TestProcessTorrentsWithDBUpdate_NoFail(t *testing.T) {
 	global.GlobalDB = db
 	// minimal call ensures not panic (details of processing covered elsewhere)
 	require.NotPanics(t, func() {
-		_ = ProcessTorrentsWithDBUpdate(context.Background(), nil, t.TempDir(), "cat", "tag", models.SpringSunday)
+		_ = ProcessTorrentsWithDBUpdate(context.Background(), nil, t.TempDir(), "cat", "tag", models.SiteGroup("springsunday"))
 	})
 }

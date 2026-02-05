@@ -163,16 +163,16 @@ func TestServer_APIs(t *testing.T) {
 	t.Run("sites delete preset forbidden", func(t *testing.T) {
 		// create preset site then attempt delete -> should be BadRequest
 		e := true
-		siteID, _ := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+		siteID, _ := s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 		_ = s.ReplaceSiteRSS(siteID, []models.RSSConfig{})
 		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodDelete, "/api/sites?name="+string(models.SpringSunday), nil)
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites?name="+string(models.SiteGroup("springsunday")), nil)
 		srv.apiSites(rr, req)
 		_ = rr.Body
 	})
 	t.Run("site detail GET/POST/DELETE rss", func(t *testing.T) {
 		e := true
-		siteID, _ := s.UpsertSite(models.SpringSunday, models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
+		siteID, _ := s.UpsertSite(models.SiteGroup("springsunday"), models.SiteConfig{Enabled: &e, AuthMethod: "cookie", Cookie: "c"})
 		_ = s.ReplaceSiteRSS(siteID, []models.RSSConfig{{Name: "r1", URL: "http://example/rss", Tag: "t", IntervalMinutes: 10}})
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/sites/springsunday", nil)
