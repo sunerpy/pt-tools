@@ -51,10 +51,11 @@ COPY dist /app/dist
 COPY --from=frontend-builder /app/web/static/dist /app/web/static/dist
 
 # 构建或接受外部二进制，并统一执行 upx 压缩
+ARG TARGETARCH
 RUN set -eux; \
-  if [ -f /app/dist/pt-tools-linux-amd64 ]; then \
-    echo "Using provided binary from dist"; \
-    mv /app/dist/pt-tools-linux-amd64 /app/pt-tools && chmod +x /app/pt-tools; \
+  if [ -f /app/dist/pt-tools-linux-${TARGETARCH} ]; then \
+    echo "Using provided binary from dist for ${TARGETARCH}"; \
+    mv /app/dist/pt-tools-linux-${TARGETARCH} /app/pt-tools && chmod +x /app/pt-tools; \
   else \
     if [ "$BUILD_ENV" = "local" ]; then \
       go env -w GOPROXY=https://goproxy.cn,direct; \

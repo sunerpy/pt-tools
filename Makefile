@@ -23,7 +23,7 @@ endif
 
 # 定义多平台
 PLATFORMS = linux/amd64 linux/arm64 windows/amd64 windows/arm64
-DOCKERPLATFORMS = linux/amd64
+DOCKERPLATFORMS = linux/amd64,linux/arm64
 DIST_DIR = dist
 
 # Proxy 设置 (支持大小写环境变量)
