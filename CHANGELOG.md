@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-02-05
+
+### Bug Fixes
+
+- **rss**: 修复种子大小限制独立于限速开关生效 ([#81](https://github.com/sunerpy/pt-tools/issues/81)) ([#81](https://github.com/sunerpy/pt-tools/pull/81))
+- TorrentSizeGB 设置现在即使未启用下载限速也会生效 - 先检查种子大小限制，再检查限速时间
+- **rss**: 修复种子大小限制独立于限速开关生效 ([#81](https://github.com/sunerpy/pt-tools/issues/81)) ([#82](https://github.com/sunerpy/pt-tools/pull/82))
+- TorrentSizeGB 设置现在即使未启用下载限速也会生效
+
 ## [0.12.1] - 2026-02-05
 
 ### Bug Fixes
