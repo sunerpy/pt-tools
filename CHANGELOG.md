@@ -5,13 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.0](https://github.com/sunerpy/pt-tools/compare/v0.11.0...v0.12.0) (2026-02-05)
-
+## [0.12.0] - 2026-02-05
 
 ### Features
 
-* **site:** 简化新增站点设计并修复 mTorrent 优惠时间判断 ([1c4fc9a](https://github.com/sunerpy/pt-tools/commit/1c4fc9a7a170ced52bd3bf85b814faa039432ef0))
-* **site:** 简化新增站点设计并修复 mTorrent 优惠时间判断 ([95f1368](https://github.com/sunerpy/pt-tools/commit/95f1368f0e04b8fe0ad474f3389203cff0e3e14b))
+- **site**: 简化新增站点设计并修复 mTorrent 优惠时间判断
+- 移除硬编码的站点常量，改为从 v2 Registry 动态获取 - 新增 APIUrls 字段支持 API 站点 URL 列表轮换 - 修复 mTorrent 活动优惠结束时间判断问题 ([#75](https://github.com/sunerpy/pt-tools/issues/75)) - 更新前端使用 is_builtin 字段替代硬编码站点列表 - 扩展 CI 触发分支包含 dev - 更新 README 添加数据截图分享功能介绍
+- **site**: 简化新增站点设计并修复 mTorrent 优惠时间判断 ([#76](https://github.com/sunerpy/pt-tools/pull/76))
+- 移除硬编码的站点常量，改为从 v2 Registry 动态获取 - 新增 APIUrls 字段支持 API 站点 URL 列表轮换 - 修复 mTorrent 活动优惠结束时间判断问题 ([#75](https://github.com/sunerpy/pt-tools/issues/75)) - 更新前端使用 is_builtin 字段替代硬编码站点列表 - 扩展 CI 触发分支包含 dev - 更新 README 添加数据截图分享功能介绍
+- **site**: 简化新增站点设计并修复 mTorrent 优惠时间判断 ([#77](https://github.com/sunerpy/pt-tools/pull/77))
+- 移除硬编码的站点常量，改为从 v2 Registry 动态获取 - 新增 APIUrls 字段支持 API 站点 URL 列表轮换 - 修复 mTorrent 活动优惠结束时间判断问题 ([#75](https://github.com/sunerpy/pt-tools/issues/75)) - 更新前端使用 is_builtin 字段替代硬编码站点列表 - 扩展 CI 触发分支包含 dev - 更新 README 添加数据截图分享功能介绍
 
 ## [0.11.0] - 2026-02-05
 
