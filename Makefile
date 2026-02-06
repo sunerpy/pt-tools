@@ -32,7 +32,7 @@ HTTPS_PROXY ?= $(https_proxy)
 NO_PROXY ?= $(no_proxy)
 
 # 默认基础镜像
-BUILD_IMAGE ?= golang:1.25.6
+BUILD_IMAGE ?= golang:1.25.7
 BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
