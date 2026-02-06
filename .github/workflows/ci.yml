@@ -59,7 +59,7 @@ jobs:
 
       - name: Upload Frontend Dist
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: frontend-dist
           path: web/static/dist
@@ -113,7 +113,7 @@ jobs:
 
       - name: Upload Coverage
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: go-coverage
           path: dist/coverage.out
