@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -63,7 +63,7 @@ jobs:
         with:
           name: frontend-dist
           path: web/static/dist
-          retention-days: 1
+          retention-days: 7
 
   go-build-test:
     name: Go Build & Test (${{ matrix.go-version }})

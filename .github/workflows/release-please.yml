@@ -81,9 +81,6 @@ jobs:
           TAG="${{ needs.release-please.outputs.tag_name }}"
           make package-binaries TAG="$TAG"
 
-      - name: Debug Dist Directory
-        run: ls -l dist/
-
       - name: Organize Files
         run: |
           cd dist
