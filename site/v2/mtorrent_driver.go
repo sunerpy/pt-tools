@@ -686,8 +686,10 @@ func parseMTorrentDiscount(discount string) DiscountLevel {
 }
 
 func parseMTorrentDiscountWithPromotion(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule) (DiscountLevel, time.Time) {
-	now := time.Now()
+	return parseMTorrentDiscountWithPromotionAt(baseDiscount, baseEndTime, promotion, time.Now())
+}
 
+func parseMTorrentDiscountWithPromotionAt(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, now time.Time) (DiscountLevel, time.Time) {
 	baseLevel := parseMTorrentDiscount(baseDiscount)
 	var baseEnd time.Time
 	if baseEndTime != "" {

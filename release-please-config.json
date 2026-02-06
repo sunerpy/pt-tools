@@ -6,12 +6,13 @@
   "include-v-in-tag": true,
   "include-component-in-tag": false,
   "skip-github-release": false,
-  "pull-request-title-pattern": "chore: release ${version}",
-  "pull-request-header": "## Release ${version}",
+  "pull-request-title-pattern": "chore: release v${version}",
+  "pull-request-header": ":robot: I have created a release *beep* *boop*",
   "separate-pull-requests": false,
   "packages": {
     ".": {
-      "skip-changelog": true
+      "skip-changelog": true,
+      "component": "pt-tools"
     }
   }
 }

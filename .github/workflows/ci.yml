@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -63,16 +63,12 @@ jobs:
         with:
           name: frontend-dist
           path: web/static/dist
-          retention-days: 1
+          retention-days: 7
 
   go-build-test:
-    name: Go Build & Test (${{ matrix.go-version }})
+    name: Go Build & Test
     needs: frontend-build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ["1.25"]
-      fail-fast: false
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -101,7 +97,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: "go.mod"
           cache: true
 
       - name: Download Dependencies
@@ -119,7 +115,7 @@ jobs:
         if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v4
         with:
-          name: go-coverage-${{ matrix.go-version }}
+          name: go-coverage
           path: dist/coverage.out
           retention-days: 7
 
