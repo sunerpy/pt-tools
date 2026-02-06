@@ -351,9 +351,12 @@ func TestParseMTorrentDiscountWithPromotion(t *testing.T) {
 		},
 	}
 
+	// Fixed time within all test promotion windows
+	fixedNow, _ := ParseTimeInCST("2006-01-02 15:04:05", "2026-02-04 12:00:00")
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			level, endTime := parseMTorrentDiscountWithPromotion(tt.baseDiscount, tt.baseEndTime, tt.promotion)
+			level, endTime := parseMTorrentDiscountWithPromotionAt(tt.baseDiscount, tt.baseEndTime, tt.promotion, fixedNow)
 			assert.Equal(t, tt.wantLevel, level)
 			if tt.wantEndTimeAfter != "" {
 				checkTime, _ := ParseTimeInCST("2006-01-02 15:04:05", tt.wantEndTimeAfter)
