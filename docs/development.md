@@ -218,11 +218,11 @@ var MySiteDefinition = &v2.SiteDefinition{
     // 必填字段
     ID:     "mysite",           // 唯一标识符（小写）
     Name:   "MySite",           // 显示名称
-    Schema: "NexusPHP",         // "NexusPHP", "mTorrent", "Gazelle", "Unit3D"
+    Schema: v2.SchemaNexusPHP,    // 见下方「Schema 枚举」
     URLs:   []string{"https://mysite.com/"},
 
     // 可选字段（有默认值）
-    AuthMethod: "cookie",       // "cookie" 或 "api_key"（根据 Schema 自动推断）
+    AuthMethod: v2.AuthMethodCookie, // 见下方「AuthMethod 枚举」（根据 Schema 自动推断，通常无需设置）
     RateLimit:  2.0,            // 请求频率限制（默认 2.0 req/s，持久化存储）
     RateBurst:  5,              // 突发请求数（默认 5）
 
@@ -264,22 +264,32 @@ func init() {
 }
 ```
 
-**Schema 与认证方式映射**：
+**Schema 枚举**（`v2.Schema` 类型，定义在 `site/v2/types.go`）：
 
-| Schema     | 站点类型          | 默认认证方式     |
-| ---------- | ----------------- | ---------------- |
-| `NexusPHP` | NexusPHP 架构站点 | Cookie           |
-| `mTorrent` | M-Team 等         | API Key          |
-| `Gazelle`  | Gazelle 架构站点  | Cookie           |
-| `Unit3D`   | Unit3D 架构站点   | API Key          |
-| `HDDolby`  | HDDolby 专用      | API Key + Cookie |
+| 枚举常量            | 值           | 站点类型            | 默认 AuthMethod      |
+| ------------------- | ------------ | ------------------- | -------------------- |
+| `v2.SchemaNexusPHP` | `"NexusPHP"` | NexusPHP 架构站点   | `cookie`             |
+| `v2.SchemaMTorrent` | `"mTorrent"` | M-Team 等           | `api_key`            |
+| `v2.SchemaGazelle`  | `"Gazelle"`  | Gazelle 架构站点    | `cookie`             |
+| `v2.SchemaUnit3D`   | `"Unit3D"`   | Unit3D 架构站点     | `api_key`            |
+| `v2.SchemaHDDolby`  | `"HDDolby"`  | HDDolby 专用        | `cookie_and_api_key` |
+| `v2.SchemaRousi`    | `"Rousi"`    | RousiPro 自定义 API | `passkey`            |
+
+**AuthMethod 枚举**（`v2.AuthMethod` 类型，定义在 `site/v2/types.go`）：
+
+| 枚举常量                       | 值                     | 说明                          |
+| ------------------------------ | ---------------------- | ----------------------------- |
+| `v2.AuthMethodCookie`          | `"cookie"`             | 浏览器 Cookie 认证            |
+| `v2.AuthMethodAPIKey`          | `"api_key"`            | API Key 认证                  |
+| `v2.AuthMethodCookieAndAPIKey` | `"cookie_and_api_key"` | Cookie + API Key 双重认证     |
+| `v2.AuthMethodPasskey`         | `"passkey"`            | Passkey 认证（用于 RSS/下载） |
 
 **添加步骤**：
 
 1. 在 `site/v2/definitions/` 创建 `<sitename>.go`
 2. 参考现有实现（如 `hdsky.go`、`mteam.go`）
-3. 运行测试：`go test ./site/v2/...`
-4. （可选）在 `site/v2/definitions/definitions_test.go` 中添加站点测试
+3. **必须** 创建 `<sitename>_fixture_test.go`，提供 fixture 数据证明解析逻辑正确（见下方「Fixture 测试要求」）
+4. 运行测试：`go test ./site/v2/...`（CI 会自动验证定义的完整性和正确性）
 5. 更新站点列表文档：`docs/sites.md`
 6. 提交 PR
 
@@ -304,7 +314,7 @@ import (
 var CustomSiteDefinition = &v2.SiteDefinition{
     ID:          "customsite",
     Name:        "CustomSite",
-    Schema:      "Custom",
+    Schema:      v2.Schema("CustomSite"), // 在 site/v2/types.go 中添加新 Schema 常量
     URLs:        []string{"https://customsite.com/"},
     CreateDriver: createCustomDriver,
 }
@@ -345,6 +355,195 @@ func (d *customDriver) ParseDownload(res customRes) ([]byte, error) { ... }
 ```
 
 当设置了 `CreateDriver` 时，系统会优先使用它而非基于 Schema 的驱动查找。这种模式的优势是 **新站点只需要一个文件**，所有驱动逻辑都包含在 `definitions/<site>.go` 中。
+
+### Fixture 测试要求
+
+**所有站点**（无论是复用 NexusPHP 还是自定义驱动）都 **必须** 提供 fixture 测试，以便仓库 owner 通过审查实际数据来判断 PR 的正确性。
+
+测试文件命名：`definitions/<sitename>_fixture_test.go`
+
+#### FixtureSuite 注册（必须）
+
+每个站点 **必须** 在 `init()` 中注册 `FixtureSuite`，包含三个必填测试函数：
+
+| 字段       | 验证内容          | 说明                               |
+| ---------- | ----------------- | ---------------------------------- |
+| `Search`   | 搜索/RSS 列表解析 | 标题、大小、免费状态、免费结束时间 |
+| `Detail`   | 种子详情页解析    | 免费等级、HR 状态、大小            |
+| `UserInfo` | 用户信息解析      | 上传量、下载量、分享率、等级       |
+
+`TestAllSites_FixtureCoverage`（在 `definitions_validation_test.go` 中）会自动遍历所有注册站点，检查是否有 `FixtureSuite` 且三个字段非 nil。**缺少任一字段的新站点 CI 会直接失败。**
+
+```go
+func init() {
+    RegisterFixtureSuite(FixtureSuite{
+        SiteID:   "mysite",
+        Search:   testMySiteSearch,
+        Detail:   testMySiteDetail,
+        UserInfo: testMySiteUserInfo,
+    })
+}
+```
+
+#### 辅助函数
+
+测试框架（`definitions/fixture_helper_test.go`）提供以下辅助函数：
+
+```go
+RequireNoSecrets(t, "fixture_name", data)
+resp := DecodeFixtureJSON[ResponseType](t, "fixture_name", jsonString)
+doc := FixtureDoc(t, "fixture_name", htmlString)
+```
+
+**隐私保护**：`RequireNoSecrets` 自动扫描以下模式，匹配则测试失败：
+
+| 检测内容                              | 说明                                       |
+| ------------------------------------- | ------------------------------------------ |
+| `c_secure_uid=...` 等 NexusPHP cookie | 真实登录凭证                               |
+| `PHPSESSID=...`                       | PHP 会话 ID                                |
+| `passkey=<32+位hex>`                  | 真实 passkey                               |
+| `Bearer <32+位token>`                 | 真实 API Token（`FAKE_`/`TEST_` 前缀除外） |
+
+**规则**：
+
+- 所有 fixture 数据 **必须** 是 Go 字符串常量，定义在 `_test.go` 文件中（不会编入生产二进制）
+- 用户名、ID 等应脱敏（使用虚构值）
+- 凭证字段使用 `FAKE_TEST_` 前缀
+
+---
+
+#### NexusPHP 站点（HTML fixture）
+
+NexusPHP 站点通过 CSS 选择器解析 HTML 页面。参考 `hdsky_fixture_test.go`：
+
+```go
+package definitions
+
+import (
+    "context"
+    "net/http"
+    "net/http/httptest"
+    "testing"
+
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+    v2 "github.com/sunerpy/pt-tools/site/v2"
+)
+
+func init() {
+    RegisterFixtureSuite(FixtureSuite{
+        SiteID:   "mysite",
+        Search:   testMySiteSearch,
+        Detail:   testMySiteDetail,
+        UserInfo: testMySiteUserInfo,
+    })
+}
+
+// 脱敏的搜索页 HTML — 保留真实 DOM 结构，替换敏感数据
+const mysiteSearchFixture = `<html><body>
+<table class="torrents"><tbody>
+<tr>
+  <td class="rowfollow"><img alt="Movie" /></td>
+  <td class="rowfollow">
+    <table class="torrentname"><tr><td class="embedded">
+      <a href="details.php?id=12345">Test.Movie.2025</a>
+      <img class="pro_free" src="pic/trans.gif" alt="Free"
+        onmouseover="domTT_activate(this, event, 'content', '&lt;span title=&quot;2026-03-01 12:00:00&quot;&gt;29天&lt;/span&gt;')" />
+    </td></tr></table>
+  </td>
+  <td class="rowfollow"></td>
+  <td class="rowfollow"><span title="2025-01-15 08:30:00">1天前</span></td>
+  <td class="rowfollow">42.5 GB</td>
+  <td class="rowfollow">150</td>
+  <td class="rowfollow">10</td>
+  <td class="rowfollow">500</td>
+</tr>
+</tbody></table>
+</body></html>`
+
+func testMySiteSearch(t *testing.T) {
+    def, ok := v2.GetDefinitionRegistry().Get("mysite")
+    require.True(t, ok)
+
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+        _, _ = w.Write([]byte(mysiteSearchFixture))
+    }))
+    defer server.Close()
+
+    driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{
+        BaseURL: server.URL, Cookie: "test=1", Selectors: def.Selectors,
+    })
+    driver.SetSiteDefinition(def)
+
+    res, err := driver.Execute(context.Background(), v2.NexusPHPRequest{Path: "/torrents.php", Method: "GET"})
+    require.NoError(t, err)
+
+    items, err := driver.ParseSearch(res)
+    require.NoError(t, err)
+    require.Len(t, items, 1)
+    assert.Equal(t, v2.DiscountFree, items[0].DiscountLevel)
+    assert.False(t, items[0].DiscountEndTime.IsZero())
+}
+
+func testMySiteDetail(t *testing.T) {
+    def, ok := v2.GetDefinitionRegistry().Get("mysite")
+    require.True(t, ok)
+    doc := FixtureDoc(t, "detail", mysiteDetailFixture)
+    parser := v2.NewNexusPHPParserFromDefinition(def)
+    info := parser.ParseAll(doc.Selection)
+    assert.Equal(t, v2.DiscountFree, info.DiscountLevel)
+    assert.NotEmpty(t, info.TorrentID)
+}
+
+func testMySiteUserInfo(t *testing.T) {
+    def, ok := v2.GetDefinitionRegistry().Get("mysite")
+    require.True(t, ok)
+    driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{
+        BaseURL: def.URLs[0], Cookie: "test=1",
+    })
+    driver.SetSiteDefinition(def)
+
+    doc := FixtureDoc(t, "index", mysiteIndexFixture)
+    for field, expected := range map[string]string{"id": "12345", "name": "TestUser"} {
+        sel := def.UserInfo.Selectors[field]
+        assert.Equal(t, expected, driver.ExtractFieldValuePublic(doc, sel))
+    }
+}
+```
+
+#### 自定义驱动站点（JSON fixture）
+
+自定义驱动站点使用 JSON API。参考 `rousipro_fixture_test.go`：
+
+```go
+func init() {
+    RegisterFixtureSuite(FixtureSuite{
+        SiteID:   "mysite",
+        Search:   testMySiteSearch,
+        Detail:   testMySiteDetail,
+        UserInfo: testMySiteUserInfo,
+    })
+}
+
+func testMySiteSearch(t *testing.T) {
+    resp := DecodeFixtureJSON[myResponse](t, "search", mySearchFixtureJSON)
+    driver := newMyDriver(myDriverConfig{BaseURL: "https://mysite.com", Passkey: "FAKE_TEST_KEY"})
+    items, err := driver.ParseSearch(resp)
+    require.NoError(t, err)
+    require.Len(t, items, 2)
+    assert.Equal(t, v2.DiscountFree, items[0].DiscountLevel)
+}
+
+func testMySiteDetail(t *testing.T) {
+    // 验证 JSON detail 解析 + 免费状态判断
+}
+
+func testMySiteUserInfo(t *testing.T) {
+    // 验证用户信息 JSON 解析
+}
+```
+
+> **提示**：`TestCreateDriver_Smoke`（在 `definitions_validation_test.go` 中）会自动遍历所有 `CreateDriver` 站点。新增自定义驱动时，在 `fakeOptionsForSchema()` 中添加对应 Schema 的 fake options 即可。
 
 ## 代码规范
 

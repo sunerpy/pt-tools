@@ -186,11 +186,20 @@ func TestNovaHDDefinition(t *testing.T) {
 
 func TestAllDefinitionsRegistered(t *testing.T) {
 	registry := v2.GetDefinitionRegistry()
-	expectedSites := []string{"hdsky", "springsunday", "mteam", "hddolby", "novahd"}
+	defs := registry.GetAll()
 
-	for _, siteID := range expectedSites {
-		if _, ok := registry.Get(siteID); !ok {
-			t.Errorf("Site %q not found in registry", siteID)
+	if len(defs) == 0 {
+		t.Fatal("no site definitions registered; init() functions may not be running")
+	}
+
+	for _, def := range defs {
+		got, ok := registry.Get(def.ID)
+		if !ok {
+			t.Errorf("site %q returned by GetAll() but not found by Get()", def.ID)
+			continue
+		}
+		if got != def {
+			t.Errorf("site %q: Get() returned different pointer than GetAll()", def.ID)
 		}
 	}
 }
