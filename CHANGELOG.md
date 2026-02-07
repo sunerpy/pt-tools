@@ -5,12 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.4] - 2026-02-07
 
 ### Bug Fixes
 
 - **release**: 回滚 release-please 标题模式与 component 配置 ([#86](https://github.com/sunerpy/pt-tools/issues/86)) ([#86](https://github.com/sunerpy/pt-tools/pull/86))
 - 恢复 pull-request-title-pattern 为 chore: release - 恢复 pull-request-header 为 ## Release - 移除根包 component 配置，回到此前可稳定触发发布的单包模式
+- **release**: 拆分 release-please 与 tag 构建流程 ([#88](https://github.com/sunerpy/pt-tools/issues/88)) ([#88](https://github.com/sunerpy/pt-tools/pull/88))
+- release-please 工作流仅负责创建 Release PR 与更新 changelog - 新增 release-assets 工作流，仅在 v\* tag 或手动触发时构建并发布资产 - 避免普通 main 提交在未确认 tag 发布前触发 Build and Release
+- **release**: 拆分 release-please 与 tag 构建流程 ([#87](https://github.com/sunerpy/pt-tools/pull/87))
+- release-please 工作流仅负责创建 Release PR 与更新 changelog - 新增 release-assets 工作流，仅在 v\* tag 或手动触发时构建并发布资产 - 避免普通 main 提交在未确认 tag 发布前触发 Build and Release
 
 ## [0.12.3] - 2026-02-07
 
