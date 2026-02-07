@@ -26,9 +26,165 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  build-and-release:
+    name: Build and Release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Build Frontend
+        run: |
+          cd web/frontend
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip xz-utils
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Compress And Package Binaries
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          make package-binaries TAG="$TAG"
+
+      - name: Organize Files
+        run: |
+          cd dist
+          for file in *.tar.gz; do
+            if [ -f "$file" ]; then
+              new_file_name="${file}"
+              mkdir -p temp && tar -xzf "$file" -C temp && rm -f "$file"
+              if ls temp/pt-tools-* 1> /dev/null 2>&1; then
+                mv temp/pt-tools-* temp/pt-tools
+              fi
+              (cd temp && tar -czf "../$new_file_name" *)
+              rm -rf temp
+            fi
+          done
+          for file in *.zip; do
+            if [ -f "$file" ]; then
+              new_file_name="${file}"
+              mkdir -p temp && unzip -q "$file" -d temp && rm -f "$file"
+              if ls temp/pt-tools-*.exe 1> /dev/null 2>&1; then
+                mv temp/pt-tools-*.exe temp/pt-tools.exe
+              elif ls temp/pt-tools-* 1> /dev/null 2>&1; then
+                mv temp/pt-tools-* temp/pt-tools
+              fi
+              (cd temp && zip -rq "../$new_file_name" *)
+              rm -rf temp
+            fi
+          done
+
+      - name: List organized files
+        run: ls -la dist/
+
+      - name: Build and Push Docker Images
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          echo "Building and pushing Docker images with tag $TAG"
+          make build-remote-docker TAG="$TAG"
+        env:
+          DOCKER_BUILDKIT: 1
+
+      - name: Generate changelog with git-cliff
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Prepare release notes
+        run: |
+          TAG_NAME="${{ needs.release-please.outputs.tag_name }}"
+
+          cat > RELEASE_NOTES.md << 'HEADER'
+          ## What's Changed
+
+          HEADER
+
+          if [ -f RELEASE_CHANGELOG.md ]; then
+            cat RELEASE_CHANGELOG.md >> RELEASE_NOTES.md
+          fi
+
+          cat >> RELEASE_NOTES.md << EOF
+
+          ---
+
+          ## Installation
+
+          ### Using Docker (Recommended)
+          \`\`\`bash
+          docker pull sunerpy/pt-tools:${TAG_NAME}
+          \`\`\`
+
+          ### From Binary
+          Download the appropriate binary for your platform from the assets below.
+
+          | Platform | Architecture | File | Latest Link |
+          |----------|--------------|------|-------------|
+          | Linux | x86_64 | \`pt-tools-linux-amd64.tar.gz\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-amd64.tar.gz) |
+          | Linux | aarch64 | \`pt-tools-linux-arm64.tar.gz\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-arm64.tar.gz) |
+          | Windows | x86_64 | \`pt-tools-windows-amd64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-amd64.exe.zip) |
+          | Windows | aarch64 | \`pt-tools-windows-arm64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-arm64.exe.zip) |
+
+          ### Docker Images
+
+          - \`sunerpy/pt-tools:${TAG_NAME}\`
+          - \`sunerpy/pt-tools:latest\`
+          EOF
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          name: Release ${{ needs.release-please.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   update-changelog:
     name: Update CHANGELOG.md
-    needs: [release-please]
+    needs: [release-please, build-and-release]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
