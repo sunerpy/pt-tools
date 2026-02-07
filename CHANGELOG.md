@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Bug Fixes
+
+- **release**: 回滚 release-please 标题模式与 component 配置 ([#86](https://github.com/sunerpy/pt-tools/issues/86)) ([#86](https://github.com/sunerpy/pt-tools/pull/86))
+- 恢复 pull-request-title-pattern 为 chore: release - 恢复 pull-request-header 为 ## Release - 移除根包 component 配置，回到此前可稳定触发发布的单包模式
+
+## [0.12.3] - 2026-02-07
+
+### Features
+
+- **site**: 增加站点定义 CI 校验体系与 RSS 免费下载说明 ([#84](https://github.com/sunerpy/pt-tools/issues/84)) ([#84](https://github.com/sunerpy/pt-tools/pull/84))
+- 新增 SiteDefinition.Validate() 校验方法及完整单元测试 - RegisterSiteDefinition() 增加重复 ID 检测 - 新增 FixtureSuite 框架，全部 6 个内置站点迁移至 fixture 测试 - 清空 legacy 白名单，所有站点通过动态注册表驱动测试 - 更新 docs/development.md 增加测试指南 - README/RSS 指南/过滤规则指南增加警告：默认仅下载免费种子 - 前端 RSS 页面和过滤规则页面增加 warning 级别提醒横幅
+- **site**: 增加站点定义 CI 校验体系与 RSS 免费下载说明 ([#85](https://github.com/sunerpy/pt-tools/pull/85))
+- 新增 SiteDefinition.Validate() 校验方法及完整单元测试 - RegisterSiteDefinition() 增加重复 ID 检测 - 新增 FixtureSuite 框架，全部 6 个内置站点迁移至 fixture 测试 - 清空 legacy 白名单，所有站点通过动态注册表驱动测试 - 更新 docs/development.md 增加测试指南 - README/RSS 指南/过滤规则指南增加警告：默认仅下载免费种子 - 前端 RSS 页面和过滤规则页面增加 warning 级别提醒横幅
+
+### Miscellaneous
+
+- **ci**: 调整 GitHub Actions 分支触发规则并更新 release-please 配置 ([#83](https://github.com/sunerpy/pt-tools/issues/83)) ([#83](https://github.com/sunerpy/pt-tools/pull/83))
+
+* chore(ci): 调整 GitHub Actions 分支触发规则并更新 release-please 配置
+
+      - 限制 CI 触发分支为 main
+      - 更新 release-please 标题模板并指定组件名
+
+      * chore(build): 更新 Go 版本至 1.25.7
+
+      - 同步 Dockerfile 和 Makefile 中的构建镜像版本
+      - 更新 go.mod 文件中的 Go 模块版本要求
+
+      * chore(ci): 简化 Go 构建测试工作流并使用 go.mod 指定版本
+
+      - 使用 go.mod 文件指定 Go 版本以确保一致性
+
+      * refactor(site): 抽离时间参数以支持测试断言
+
+      - 新增 parseMTorrentDiscountWithPromotionAt 方法用于注入时间
+      - 固定测试时间避免随机性影响断言结果
+
 ## [0.12.2] - 2026-02-05
 
 ### Bug Fixes
