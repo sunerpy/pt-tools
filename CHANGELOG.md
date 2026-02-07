@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.5] - 2026-02-07
+
+### Bug Fixes
+
+- **release**: 将构建发布流程收敛到 release-please 内部
+- 在同一工作流内串联 release-please、build-and-release、update-changelog - 避免跨工作流触发造成重复触发或遗漏 - 确保 release PR 合并后按单链路完成 tag 后构建发布
+
 ## [0.12.4] - 2026-02-07
 
 ### Bug Fixes
