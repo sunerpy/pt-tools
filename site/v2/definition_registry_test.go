@@ -1,8 +1,11 @@
 package v2
 
 import (
+	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSiteDefinitionRegistry_Register(t *testing.T) {
@@ -190,25 +193,23 @@ func TestSiteDefinitionRegistry_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 100
 
-	// Concurrent writes
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			def := &SiteDefinition{
-				ID:   "site-" + string(rune('a'+id%26)),
+				ID:   fmt.Sprintf("site-%d", id),
 				Name: "Site",
 			}
 			registry.Register(def)
 		}(i)
 	}
 
-	// Concurrent reads
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			registry.Get("site-" + string(rune('a'+id%26)))
+			registry.Get(fmt.Sprintf("site-%d", id))
 			registry.List()
 			registry.GetAll()
 		}(i)
@@ -216,10 +217,9 @@ func TestSiteDefinitionRegistry_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Should not panic and should have some definitions
 	list := registry.List()
-	if len(list) == 0 {
-		t.Error("expected some definitions after concurrent access")
+	if len(list) != numGoroutines {
+		t.Errorf("expected %d definitions, got %d", numGoroutines, len(list))
 	}
 }
 
@@ -253,31 +253,27 @@ func TestRegisterSiteDefinition_Convenience(t *testing.T) {
 	}
 }
 
-func TestSiteDefinitionRegistry_Overwrite(t *testing.T) {
+func TestSiteDefinitionRegistry_DuplicatePanics(t *testing.T) {
 	registry := &SiteDefinitionRegistry{
 		definitions: make(map[string]*SiteDefinition),
 	}
 
-	// Register first definition
 	def1 := &SiteDefinition{
 		ID:   "test-site",
 		Name: "Original Name",
 	}
 	registry.Register(def1)
 
-	// Register with same ID but different name
 	def2 := &SiteDefinition{
 		ID:   "test-site",
 		Name: "Updated Name",
 	}
-	registry.Register(def2)
 
-	// Should have the updated definition
-	result, ok := registry.Get("test-site")
-	if !ok {
-		t.Fatal("expected to find registered site definition")
-	}
-	if result.Name != "Updated Name" {
-		t.Errorf("Name = %q, want %q", result.Name, "Updated Name")
-	}
+	assert.Panics(t, func() {
+		registry.Register(def2)
+	}, "registering a different definition with the same ID should panic")
+
+	assert.NotPanics(t, func() {
+		registry.Register(def1)
+	}, "re-registering the exact same definition pointer should not panic")
 }

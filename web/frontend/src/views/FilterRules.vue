@@ -238,6 +238,16 @@ function getMatchFieldLabel(field: string | undefined) {
         </div>
       </template>
 
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 16px">
+        <template #title>
+          <strong>大多数用户无需设置过滤规则</strong>
+        </template>
+        <template #default>
+          未启用过滤规则时，RSS
+          订阅<strong>默认只下载免费种子</strong>，适合日常刷流使用。仅在需要追剧或下载特定资源（即便非免费也要下载）时，才需要创建过滤规则并将「仅免费」设为「否」。
+        </template>
+      </el-alert>
+
       <el-alert type="info" :closable="false" style="margin-bottom: 16px">
         <template #title>
           过滤规则用于自动下载匹配的种子。规则按优先级排序，数字越小优先级越高。

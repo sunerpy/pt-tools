@@ -216,7 +216,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 					URL:          "/mybonus.php",
 					ResponseType: "document",
 				},
-				Fields: []string{"bonusPerHour", "seedingBonusPerHour"},
+				Fields: []string{"bonusPerHour"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{

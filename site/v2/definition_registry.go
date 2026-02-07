@@ -1,8 +1,12 @@
 package v2
 
 import (
+	"fmt"
 	"sync"
 )
+
+// ErrDuplicateSiteID is returned when attempting to register a site with an already-used ID
+var ErrDuplicateSiteID = fmt.Errorf("duplicate site definition ID")
 
 // SiteDefinitionRegistry manages site definitions
 type SiteDefinitionRegistry struct {
@@ -25,13 +29,17 @@ func GetDefinitionRegistry() *SiteDefinitionRegistry {
 	return globalDefinitionRegistry
 }
 
-// Register adds a site definition to the registry
+// Register adds a site definition to the registry.
+// Panics if a definition with the same ID is already registered.
 func (r *SiteDefinitionRegistry) Register(def *SiteDefinition) {
 	if def == nil || def.ID == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if existing, ok := r.definitions[def.ID]; ok && existing != def {
+		panic(fmt.Sprintf("duplicate site definition ID %q: already registered by %q", def.ID, existing.Name))
+	}
 	r.definitions[def.ID] = def
 }
 

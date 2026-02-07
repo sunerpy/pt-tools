@@ -550,6 +550,19 @@ function getRowClassName({ row }: { row: RSSConfig }) {
         </div>
       </template>
 
+      <!-- 免费种子默认行为提示 -->
+      <el-alert
+        title="默认只下载免费种子"
+        type="warning"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 16px">
+        <template #default>
+          未启用过滤规则时，RSS
+          订阅<strong>仅自动下载免费种子</strong>。如果只是刷流，无需设置过滤规则。只有在追剧或需要下载特定资源（即便非免费）时，才需要创建过滤规则并关闭「仅免费」开关。
+        </template>
+      </el-alert>
+
       <!-- 示例数据提示 -->
       <el-alert
         v-if="showingExamples"
