@@ -1,85 +1,53 @@
-/**
- * App Layout Styles
- * Main application shell: sidebar, header, content, footer
- */
-
-/* ============================================
-   App Container
-   ============================================ */
+/* App shell */
 .app-container {
   height: 100vh;
   display: flex;
   overflow: hidden;
-  background-color: var(--pt-bg-secondary);
+  background:
+    radial-gradient(
+      circle at 18% -12%,
+      color-mix(in srgb, var(--pt-color-info-50) var(--pt-light-shell-primary-mix), transparent) 0%,
+      transparent 52%
+    ),
+    radial-gradient(
+      circle at 92% 4%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-primary-50) 52%, var(--pt-color-neutral-100))
+            var(--pt-light-decor-mist-mix),
+          transparent
+        )
+        0%,
+      transparent 46%
+    ),
+    var(--pt-bg-secondary);
 }
 
-/* ============================================
-   Sidebar
-   ============================================ */
 .app-aside {
-  background: var(--pt-bg-surface);
+  background: linear-gradient(
+    180deg,
+    var(--pt-bg-surface-raised),
+    var(--pt-bg-surface) 20%,
+    var(--pt-bg-surface)
+  );
   border-right: 1px solid var(--pt-border-color);
   display: flex;
   flex-direction: column;
-  transition: width var(--pt-transition-normal);
+  transition:
+    width var(--pt-transition-normal),
+    border-color var(--pt-transition-normal);
   box-shadow: var(--pt-shadow-sm);
   z-index: 100;
 }
 
-/* Logo Area */
 .app-aside-logo {
-  height: 72px;
+  height: 74px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--pt-space-3);
   padding: 0 var(--pt-space-4);
   border-bottom: 1px solid var(--pt-border-color);
-  background: linear-gradient(135deg, var(--pt-color-primary-50) 0%, var(--pt-bg-surface) 100%);
-}
-
-.app-aside .el-menu-item {
-  margin: var(--pt-space-2) var(--pt-space-3);
-  padding: 0 var(--pt-space-4) !important;
-  height: 48px;
-  line-height: 48px;
-  border-radius: var(--pt-radius-lg);
-  transition: all var(--pt-transition-normal);
-  font-weight: 500;
-}
-
-.app-aside .el-menu-item.is-active {
-  background: linear-gradient(90deg, var(--pt-color-primary-light), transparent) !important;
-  color: var(--pt-color-primary) !important;
-  box-shadow: var(--pt-shadow-sm);
-}
-
-.app-aside .el-menu-item .el-icon {
-  font-size: 20px;
-  margin-right: 12px;
-  transition: transform var(--pt-transition-normal);
-}
-
-.app-aside .el-menu-item:hover .el-icon {
-  transform: scale(1.2);
-}
-
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 72px;
-  padding: 0 var(--pt-space-6);
-  background: var(--pt-glass-bg);
-  backdrop-filter: blur(var(--pt-glass-blur));
-  -webkit-backdrop-filter: blur(var(--pt-glass-blur));
-  border-bottom: 1px solid var(--pt-glass-border);
-  box-shadow: var(--pt-glass-shadow);
-  z-index: 99;
-}
-
-html.dark .app-aside-logo {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, var(--pt-bg-surface) 100%);
 }
 
 .app-aside-logo-icon {
@@ -89,73 +57,118 @@ html.dark .app-aside-logo {
 }
 
 .app-aside-logo:hover .app-aside-logo-icon {
-  transform: scale(1.1);
+  transform: scale(1.06);
 }
 
 .app-aside-logo-text {
   font-size: var(--pt-text-lg);
-  font-weight: 700;
+  font-weight: 800;
   color: var(--pt-text-primary);
   letter-spacing: -0.02em;
 }
 
-/* Menu Area */
 .app-aside-menu {
   flex: 1;
   overflow-y: auto;
-  padding: var(--pt-space-2) 0;
+  padding: var(--pt-space-3) 0;
 }
 
-/* Override Element Plus menu styles for better integration */
 .app-aside .el-menu {
-  border-right: none !important;
-  background-color: transparent !important;
+  border-right: none;
+  background: transparent;
+  padding: 0 var(--pt-space-2);
 }
 
 .app-aside .el-menu-item {
-  margin: var(--pt-space-1) var(--pt-space-2);
-  border-radius: var(--pt-radius-md);
-  transition: all var(--pt-transition-fast);
+  margin: var(--pt-space-1) 0;
+  padding: 0 var(--pt-space-4);
+  height: 46px;
+  line-height: 46px;
+  border-radius: var(--pt-radius-lg);
+  color: var(--pt-text-secondary);
+  font-weight: 600;
+  transition:
+    color var(--pt-transition-fast),
+    background-color var(--pt-transition-fast),
+    transform var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast);
+}
+
+.app-aside .el-menu-item .el-icon {
+  font-size: 18px;
+  margin-right: 12px;
+  color: inherit;
+  transition:
+    transform var(--pt-transition-fast),
+    color var(--pt-transition-fast);
 }
 
 .app-aside .el-menu-item:hover {
-  background-color: var(--pt-bg-secondary) !important;
+  color: var(--pt-text-primary);
+  background: var(--pt-bg-accent-soft);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--pt-color-primary) 18%, var(--pt-border-color));
+  transform: translateX(2px);
+}
+
+.app-aside .el-menu-item:hover .el-icon {
+  color: var(--pt-color-primary);
+  transform: scale(1.08);
 }
 
 .app-aside .el-menu-item.is-active {
-  background-color: var(--pt-color-primary-light) !important;
-  color: var(--pt-color-primary) !important;
+  background: linear-gradient(
+    95deg,
+    color-mix(in srgb, var(--pt-color-primary-100) 78%, var(--pt-bg-surface)),
+    color-mix(in srgb, var(--pt-color-info-50) 75%, var(--pt-bg-surface))
+  );
+  color: var(--pt-color-primary-700);
+  box-shadow:
+    inset 3px 0 0 var(--pt-color-primary),
+    inset 0 0 0 1px color-mix(in srgb, var(--pt-color-primary) 20%, var(--pt-border-color)),
+    var(--pt-shadow-sm);
 }
 
-html.dark .app-aside .el-menu-item:hover {
-  background-color: var(--pt-bg-tertiary) !important;
+.app-aside .el-menu-item.is-active .el-icon {
+  color: var(--pt-color-primary);
 }
 
-html.dark .app-aside .el-menu-item.is-active {
-  background-color: var(--pt-color-primary-light) !important;
+.app-aside.is-collapse .app-aside-logo {
+  padding: 0;
 }
 
-/* Sidebar Footer */
+.app-aside.is-collapse .el-menu {
+  padding: 0 var(--pt-space-1);
+}
+
+.app-aside.is-collapse .el-menu-item {
+  margin: var(--pt-space-1) 0;
+  border-radius: var(--pt-radius-md);
+}
+
 .app-aside-footer {
   padding: var(--pt-space-3);
-  text-align: center;
   border-top: 1px solid var(--pt-border-color);
-  background-color: var(--pt-bg-secondary);
+  background: var(--pt-bg-surface-muted);
 }
 
 .app-aside-footer .el-button {
   width: 100%;
+  border-radius: var(--pt-radius-md);
+  color: var(--pt-text-secondary);
 }
 
-/* ============================================
-   Header
-   ============================================ */
+.app-aside-footer .el-button:hover {
+  color: var(--pt-color-primary);
+  background: var(--pt-bg-accent-soft);
+}
+
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
-  padding: 0 var(--pt-space-5);
+  height: 66px;
+  padding: 0 var(--pt-space-6);
   background: var(--pt-glass-bg);
   backdrop-filter: blur(var(--pt-glass-blur));
   -webkit-backdrop-filter: blur(var(--pt-glass-blur));
@@ -164,162 +177,108 @@ html.dark .app-aside .el-menu-item.is-active {
   z-index: 99;
 }
 
-.app-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--pt-space-4);
-}
-
+.app-header-left,
 .app-header-right {
   display: flex;
   align-items: center;
+}
+
+.app-header-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-header-title {
+  font-size: var(--pt-text-base);
+  font-weight: 700;
+  color: var(--pt-text-primary);
+  line-height: 1.2;
+}
+
+.app-header-right {
   gap: var(--pt-space-3);
 }
 
-/* Header Divider */
 .app-header-divider {
-  height: 20px;
   width: 1px;
-  background-color: var(--pt-border-color);
-  margin: 0 var(--pt-space-1);
+  height: 20px;
+  background: var(--pt-border-color);
 }
 
-/* Header Action Buttons */
 .app-header-actions {
-  box-shadow: var(--pt-shadow-sm);
-  border-radius: var(--pt-radius-lg);
   overflow: hidden;
+  border-radius: var(--pt-radius-lg);
+  box-shadow: var(--pt-shadow-sm);
 }
 
 .app-header-actions .el-button {
-  padding: 8px 16px;
   font-weight: 600;
-  transition: all var(--pt-transition-normal);
-  vertical-align: middle;
-}
-
-.app-header-actions .el-button-group {
-  display: inline-flex;
-  align-items: stretch;
-}
-
-.app-header-actions .el-button-group > .el-button {
-  margin: 0;
-  border-radius: 0;
-}
-
-.app-header-actions .el-button-group > .el-button:first-child {
-  border-top-left-radius: var(--pt-radius-lg);
-  border-bottom-left-radius: var(--pt-radius-lg);
-}
-
-.app-header-actions .el-button-group > .el-button:last-child {
-  border-top-right-radius: var(--pt-radius-lg);
-  border-bottom-right-radius: var(--pt-radius-lg);
-}
-
-.app-header-actions .el-button--success {
-  background: var(--pt-color-success);
-  border-color: var(--pt-color-success);
-}
-
-.app-header-actions .el-button--danger {
-  background: var(--pt-color-danger);
-  border-color: var(--pt-color-danger);
+  padding: 8px 14px;
+  transition:
+    transform var(--pt-transition-fast),
+    filter var(--pt-transition-fast);
 }
 
 .app-header-actions .el-button:hover {
-  filter: brightness(1.1);
+  filter: brightness(1.05);
   transform: translateY(-1px);
 }
 
-/* Header User Dropdown */
-.app-header .el-dropdown {
-  cursor: pointer;
+.app-header-theme-switch,
+.app-header-style,
+.app-header-loglevel,
+.app-header-user {
+  flex-shrink: 0;
 }
 
-.app-header .el-dropdown .el-button {
+.app-header-user-btn {
   padding: var(--pt-space-2) var(--pt-space-3);
   border-radius: var(--pt-radius-md);
-  transition: background-color var(--pt-transition-fast);
 }
 
-.app-header .el-dropdown .el-button:hover {
-  background-color: var(--pt-bg-secondary);
+.app-header-user-btn:hover {
+  background: var(--pt-bg-surface-muted);
 }
 
-/* ============================================
-   Main Content Area
-   ============================================ */
 .app-main {
   flex: 1;
   overflow: auto;
   padding: var(--pt-space-5);
-  background: var(--pt-bg-secondary);
+  background:
+    radial-gradient(circle at 18% -6%, var(--pt-main-canvas-spot-a) 0%, transparent 56%),
+    radial-gradient(circle at 88% -2%, var(--pt-main-canvas-spot-b) 0%, transparent 50%),
+    var(--pt-main-canvas-base);
 }
 
 .app-main-content {
-  max-width: 1800px;
-  margin: 0 auto;
   width: 100%;
+  margin: 0 auto;
+  max-width: 1800px;
 }
 
-/* Wider screens: reduce padding, allow more content width */
-@media (min-width: 1600px) {
-  .app-main {
-    padding: var(--pt-space-6) var(--pt-space-8);
-  }
-
-  .app-main-content {
-    max-width: 95%;
-  }
-}
-
-@media (min-width: 1920px) {
-  .app-main {
-    padding: var(--pt-space-6) var(--pt-space-10);
-  }
-
-  .app-main-content {
-    max-width: 95%;
-  }
-}
-
-@media (min-width: 2560px) {
-  .app-main-content {
-    max-width: 90%;
-  }
-}
-
-/* ============================================
-   Footer
-   ============================================ */
 .app-footer {
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--pt-space-4);
-  height: 48px;
   font-size: var(--pt-text-xs);
   color: var(--pt-text-tertiary);
-  background: var(--pt-bg-surface);
   border-top: 1px solid var(--pt-border-color);
+  background: var(--pt-bg-surface);
 }
 
 .app-footer-link {
   color: var(--pt-color-primary);
   text-decoration: none;
-  font-weight: 500;
-  transition: color var(--pt-transition-fast);
+  font-weight: 600;
 }
 
 .app-footer-link:hover {
   color: var(--pt-color-primary-hover);
 }
 
-/* ============================================
-   Page Transitions
-   ============================================ */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity var(--pt-transition-fast);
@@ -330,38 +289,31 @@ html.dark .app-aside .el-menu-item.is-active {
   opacity: 0;
 }
 
-.slide-fade-enter-active {
-  transition: all var(--pt-transition-normal);
-}
-
-.slide-fade-leave-active {
-  transition: all var(--pt-transition-fast);
-}
-
-.slide-fade-enter-from {
-  transform: translateY(10px);
-  opacity: 0;
-}
-
-.slide-fade-leave-to {
-  transform: translateY(-10px);
-  opacity: 0;
-}
-
-/* ============================================
-   Responsive Adjustments
-   ============================================ */
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .app-header {
-    padding: 0 var(--pt-space-3);
+    padding: 0 var(--pt-space-4);
   }
 
-  .app-header-left .el-breadcrumb {
+  .app-header-title {
     display: none;
   }
 
   .app-header-right {
     gap: var(--pt-space-2);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header-left .el-breadcrumb {
+    display: none;
+  }
+
+  .app-header-actions {
+    display: none;
+  }
+
+  .app-header-divider {
+    display: none;
   }
 
   .app-main {
@@ -369,25 +321,47 @@ html.dark .app-aside .el-menu-item.is-active {
   }
 
   .app-footer {
-    flex-direction: column;
-    gap: var(--pt-space-1);
     height: auto;
-    padding: var(--pt-space-3);
+    padding: var(--pt-space-2) var(--pt-space-3);
+    flex-direction: column;
+    gap: 2px;
   }
 }
 
-/* ============================================
-   Dark Mode Adjustments
-   ============================================ */
-html.dark .app-header {
-  background: var(--pt-glass-bg);
-  border-bottom-color: var(--pt-glass-border);
+html.dark .app-container {
+  background:
+    radial-gradient(
+      circle at 15% -8%,
+      color-mix(in srgb, var(--pt-color-info) var(--pt-dark-decor-primary-mix), transparent) 0%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 92% 0%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-info) 58%, var(--pt-color-neutral-500))
+            var(--pt-dark-decor-secondary-mix),
+          transparent
+        )
+        0%,
+      transparent 42%
+    ),
+    var(--pt-bg-secondary);
+}
+
+html.dark .app-aside .el-menu-item:hover {
+  background: color-mix(in srgb, var(--pt-color-primary) 15%, var(--pt-bg-surface-raised));
+}
+
+html.dark .app-aside .el-menu-item.is-active {
+  background: linear-gradient(
+    95deg,
+    color-mix(in srgb, var(--pt-color-primary) 28%, var(--pt-bg-surface-raised)),
+    color-mix(in srgb, var(--pt-color-info) 22%, var(--pt-bg-surface-raised))
+  );
+  color: color-mix(in srgb, var(--pt-color-primary-200) 90%, #fff 10%);
 }
 
 html.dark .app-aside {
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
-}
-
-html.dark .app-footer {
-  background: var(--pt-bg-surface);
+  box-shadow: 2px 0 14px rgba(0, 0, 0, 0.4);
 }

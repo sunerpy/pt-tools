@@ -1,0 +1,290 @@
+.paused-torrents-page {
+  position: relative;
+  padding-top: var(--pt-space-3);
+}
+
+.paused-torrents-page::before {
+  content: "";
+  position: absolute;
+  inset: var(--pt-page-decor-inset-top) var(--pt-page-decor-inset-x) auto;
+  height: var(--pt-page-decor-height);
+  pointer-events: none;
+  z-index: -1;
+  border-radius: var(--pt-page-decor-radius);
+  border: var(--pt-page-decor-border);
+  box-shadow: var(--pt-page-decor-shadow);
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 10% 20%,
+      color-mix(in srgb, var(--pt-color-info-50) var(--pt-light-decor-primary-mix), transparent) 0%,
+      transparent var(--pt-light-decor-primary-stop)
+    ),
+    radial-gradient(
+      circle at 88% 15%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-primary-50) 52%, var(--pt-color-neutral-100))
+            var(--pt-light-decor-mist-mix),
+          transparent
+        )
+        0%,
+      transparent var(--pt-light-decor-secondary-stop)
+    );
+}
+
+.paused-torrents-page .page-header {
+  margin-bottom: var(--pt-space-8);
+  padding-bottom: var(--pt-space-3);
+}
+
+.paused-torrents-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.paused-torrents-page .page-actions {
+  flex-wrap: wrap;
+}
+
+.custom-tabs {
+  --el-tabs-header-height: 48px;
+}
+
+.custom-tabs > .el-tabs__header {
+  margin: 0;
+  padding: var(--pt-space-4) var(--pt-space-5) 0;
+  border-bottom: 1px solid var(--pt-border-color);
+  background: var(--pt-bg-surface);
+  transition: border-color var(--pt-transition-fast);
+}
+
+.custom-tabs > .el-tabs__content {
+  padding-top: var(--pt-space-4);
+  background: var(--pt-bg-surface);
+}
+
+.custom-tabs .el-tabs__item {
+  font-size: var(--pt-text-sm);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: var(--pt-text-secondary);
+  padding: 0 var(--pt-space-4);
+  height: 48px;
+  line-height: 48px;
+  transition: all var(--pt-transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  position: relative;
+}
+
+.custom-tabs .el-tabs__item:hover {
+  color: var(--pt-color-primary);
+}
+
+.custom-tabs .el-tabs__item.is-active {
+  font-weight: 600;
+  color: var(--pt-color-primary);
+  letter-spacing: 0.4px;
+}
+
+.custom-tabs .el-tabs__active-bar {
+  height: 2px;
+  background: linear-gradient(90deg, var(--pt-color-primary-600), var(--pt-color-primary-500));
+  bottom: -1px;
+  border-radius: 1px;
+  transition: all var(--pt-transition-normal);
+  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.24);
+}
+
+html.dark .custom-tabs > .el-tabs__header {
+  border-bottom-color: var(--pt-border-color);
+  background: var(--pt-bg-surface);
+}
+
+html.dark .custom-tabs > .el-tabs__content {
+  background: var(--pt-bg-surface);
+}
+
+html.dark .custom-tabs .el-tabs__item {
+  color: var(--pt-text-secondary);
+}
+
+html.dark .custom-tabs .el-tabs__item:hover {
+  color: var(--pt-color-primary-400);
+}
+
+html.dark .custom-tabs .el-tabs__item.is-active {
+  color: var(--pt-color-primary-400);
+}
+
+html.dark .custom-tabs .el-tabs__active-bar {
+  background: linear-gradient(90deg, var(--pt-color-primary-500), var(--pt-color-primary-400));
+  box-shadow: 0 2px 8px rgba(45, 212, 191, 0.28);
+}
+
+.archive-table .status-badge {
+  min-width: 88px;
+  justify-content: center;
+}
+
+.control-pill {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--pt-space-3);
+  height: 40px;
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-full);
+  background: var(--pt-bg-surface);
+}
+
+.site-filter-select {
+  width: 150px;
+}
+
+.refresh-button {
+  min-width: 96px;
+  font-weight: 700;
+}
+
+.batch-action-bar {
+  margin: var(--pt-space-4);
+  margin-bottom: 0;
+  background: rgba(244, 63, 94, 0.08);
+  border-color: rgba(225, 29, 72, 0.2);
+}
+
+.batch-action-button {
+  font-weight: 700;
+}
+
+.title-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+.progress-container {
+  padding: 4px 0;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.progress-detail-text {
+  color: var(--pt-text-secondary);
+  font-family: var(--pt-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-percentage {
+  color: var(--pt-text-primary);
+  font-weight: 700;
+  font-family: var(--pt-font-mono);
+}
+
+.action-button {
+  padding: 3px 8px;
+  border-radius: var(--pt-radius-full);
+  border: 1px solid transparent;
+}
+
+.action-button.el-button--primary {
+  background: rgba(20, 184, 166, 0.12);
+}
+
+.action-button.el-button--danger {
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.delete-confirm-content {
+  padding: 10px 0;
+}
+
+.confirm-text {
+  font-size: 14px;
+  color: var(--pt-text-primary);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.highlight-text {
+  font-weight: 700;
+  color: var(--pt-color-primary);
+}
+
+.confirm-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  background-color: var(--pt-bg-secondary);
+  border-radius: var(--pt-radius-md);
+  font-size: 13px;
+  color: var(--pt-text-secondary);
+  line-height: 1.4;
+}
+
+.confirm-tip .el-icon {
+  margin-top: 2px;
+  color: var(--pt-text-tertiary);
+}
+
+.dialog-footer-custom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+html.dark .control-pill {
+  background: var(--pt-bg-tertiary);
+}
+
+html.dark .paused-torrents-page::before {
+  background:
+    radial-gradient(
+      circle at 10% 20%,
+      color-mix(in srgb, var(--pt-color-primary) var(--pt-dark-decor-primary-mix), transparent) 0%,
+      transparent var(--pt-dark-decor-primary-stop)
+    ),
+    radial-gradient(
+      circle at 88% 15%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-info) 58%, var(--pt-color-neutral-500))
+            var(--pt-dark-decor-secondary-mix),
+          transparent
+        )
+        0%,
+      transparent var(--pt-dark-decor-secondary-stop)
+    );
+}
+
+html.dark .batch-action-bar {
+  background: rgba(244, 63, 94, 0.16);
+}
+
+@media (max-width: 768px) {
+  .custom-tabs > .el-tabs__header {
+    padding: var(--pt-space-3) var(--pt-space-4) 0;
+  }
+
+  .custom-tabs > .el-tabs__content {
+    padding-top: var(--pt-space-3);
+  }
+}

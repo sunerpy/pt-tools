@@ -423,12 +423,24 @@ function toggleAllSites() {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-card v-loading="loading" shadow="never">
+  <div class="page-container downloader-page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">下载器设置</h1>
+        <p class="page-subtitle">配置和管理系统使用的下载工具及保存路径</p>
+      </div>
+    </div>
+    <el-card v-loading="loading" shadow="never" class="downloaders-card">
       <template #header>
         <div class="card-header">
-          <span>下载器管理</span>
-          <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加下载器</el-button>
+          <span class="header-title">下载器管理</span>
+          <el-button
+            type="primary"
+            :icon="'Plus'"
+            class="add-downloader-btn"
+            @click="openAddDialog">
+            添加下载器
+          </el-button>
         </div>
       </template>
 
@@ -439,14 +451,18 @@ function toggleAllSites() {
         </span>
       </div>
 
-      <el-table :data="downloaders" style="width: 100%" border resizable>
+      <el-table :data="downloaders" style="width: 100%" border resizable class="downloaders-table">
         <el-table-column type="index" label="序号" width="60" align="center" />
 
         <el-table-column label="名称" min-width="120" resizable show-overflow-tooltip>
           <template #default="{ row }">
             <div class="dl-name">
               <el-icon v-if="row.is_default" color="#E6A23C"><Star /></el-icon>
+              <span :class="['dl-status-dot', row.enabled ? 'is-enabled' : 'is-disabled']"></span>
               <span>{{ row.name }}</span>
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
+                {{ row.enabled ? "启用" : "停用" }}
+              </el-tag>
             </div>
           </template>
         </el-table-column>
@@ -477,11 +493,15 @@ function toggleAllSites() {
               :content="healthStatus[row.id]?.message"
               placement="top"
               :show-after="300">
-              <el-tag :type="getHealthTag(row).type" size="small">
+              <el-tag :type="getHealthTag(row).type" size="small" class="health-tag status-chip">
                 {{ getHealthTag(row).text }}
               </el-tag>
             </el-tooltip>
-            <el-tag v-else :type="getHealthTag(row).type" size="small">
+            <el-tag
+              v-else
+              :type="getHealthTag(row).type"
+              size="small"
+              class="health-tag status-chip">
               {{ getHealthTag(row).text }}
             </el-tag>
           </template>
@@ -489,7 +509,7 @@ function toggleAllSites() {
 
         <el-table-column label="操作" min-width="300" align="center">
           <template #default="{ row }">
-            <el-space>
+            <el-space class="downloader-actions">
               <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
               <el-button
                 type="info"
@@ -517,8 +537,12 @@ function toggleAllSites() {
     </el-card>
 
     <!-- 添加/编辑对话框 -->
-    <el-dialog v-model="showDialog" :title="editMode ? '编辑下载器' : '添加下载器'" width="500px">
-      <el-form :model="form" label-width="100px" label-position="right">
+    <el-dialog
+      v-model="showDialog"
+      :title="editMode ? '编辑下载器' : '添加下载器'"
+      width="500px"
+      class="downloader-dialog">
+      <el-form :model="form" label-width="100px" label-position="right" class="downloader-form">
         <el-form-item label="名称" required>
           <el-input v-model="form.name" placeholder="例如: 主下载器" :disabled="editMode" />
         </el-form-item>
@@ -583,12 +607,19 @@ function toggleAllSites() {
     <el-dialog
       v-model="showDirDialog"
       :title="`目录管理 - ${currentDownloader?.name || ''}`"
-      width="700px">
+      width="700px"
+      class="dir-dialog">
       <div class="dir-header">
         <el-button type="primary" size="small" @click="openAddDirDialog">添加目录</el-button>
       </div>
 
-      <el-table v-loading="loadingDirs" :data="directories" style="width: 100%" border resizable>
+      <el-table
+        v-loading="loadingDirs"
+        :data="directories"
+        style="width: 100%"
+        border
+        resizable
+        class="dirs-table">
         <el-table-column label="别名" min-width="120" resizable show-overflow-tooltip>
           <template #default="{ row }">
             <div class="dir-alias">
@@ -606,7 +637,7 @@ function toggleAllSites() {
 
         <el-table-column label="操作" min-width="180" align="center">
           <template #default="{ row }">
-            <el-space>
+            <el-space class="downloader-actions">
               <el-button
                 type="warning"
                 size="small"
@@ -631,8 +662,9 @@ function toggleAllSites() {
       v-model="showAddDirDialog"
       :title="editDirMode ? '编辑目录' : '添加目录'"
       width="500px"
+      class="dir-edit-dialog"
       append-to-body>
-      <el-form :model="dirForm" label-width="100px" label-position="right">
+      <el-form :model="dirForm" label-width="100px" label-position="right" class="downloader-form">
         <el-form-item label="路径" required>
           <el-input v-model="dirForm.path" placeholder="/downloads/movies" />
           <div class="form-tip">下载器中的目标保存路径</div>
@@ -658,7 +690,7 @@ function toggleAllSites() {
     </el-dialog>
 
     <!-- 站点下载器同步对话框 -->
-    <el-dialog v-model="showSyncDialog" title="同步站点下载器" width="600px">
+    <el-dialog v-model="showSyncDialog" title="同步站点下载器" width="600px" class="sync-dialog">
       <div v-if="newDefaultDownloader" class="sync-info">
         是否将以下站点的下载器设置为「{{ newDefaultDownloader.name }}」？
       </div>
@@ -675,6 +707,7 @@ function toggleAllSites() {
         :data="syncSites"
         style="width: 100%"
         border
+        class="sync-table"
         max-height="400">
         <el-table-column width="50" align="center">
           <template #default="{ row }">
@@ -715,78 +748,8 @@ function toggleAllSites() {
 </template>
 
 <style scoped>
-.page-container {
-  width: 100%;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.default-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  margin-bottom: 16px;
-  background: var(--el-color-warning-light-9);
-  border-radius: 4px;
-  color: var(--el-color-warning);
-}
-
-.dl-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-}
-
-.url-text {
-  font-family: monospace;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.form-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-}
-
-.dir-header {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 16px;
-}
-
-.dir-alias {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-}
-
-.sync-info {
-  padding: 12px;
-  margin-bottom: 16px;
-  background: var(--el-color-primary-light-9);
-  border-radius: 4px;
-  color: var(--el-color-primary);
-}
-
-.sync-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.sync-count {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
+@import "@/styles/form-page.css";
+@import "@/styles/downloader-settings-page.css";
 </style>

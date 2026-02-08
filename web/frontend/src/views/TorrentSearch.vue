@@ -763,15 +763,15 @@ function toggleAllSites() {
     </div>
 
     <!-- 搜索工具栏 -->
-    <div class="common-card search-card">
+    <div class="common-card search-card search-surface">
       <div class="common-card-body">
-        <el-form :inline="true" class="search-form" @submit.prevent="doSearch">
+        <el-form :inline="true" class="search-form modern-search-form" @submit.prevent="doSearch">
           <el-form-item label="关键词">
             <el-input
               v-model="searchKeyword"
+              class="keyword-input"
               placeholder="输入搜索关键词"
               clearable
-              style="width: 280px"
               @keyup.enter="doSearch">
               <template #prefix>
                 <el-icon><Search /></el-icon>
@@ -796,8 +796,10 @@ function toggleAllSites() {
                   :placeholder="
                     availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'
                   "
-                  style="width: 300px"
-                  :class="{ 'all-sites-selected': selectedSites.length === 0 }">
+                  :class="[
+                    { 'all-sites-selected': selectedSites.length === 0 },
+                    'site-select-input',
+                  ]">
                   <template #header>
                     <div class="site-select-header">
                       <el-checkbox
@@ -848,7 +850,7 @@ function toggleAllSites() {
                       <el-button
                         size="small"
                         :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'">
-                        <el-icon style="margin-right: 4px"><Filter /></el-icon>
+                        <el-icon class="filter-icon"><Filter /></el-icon>
                         {{ siteId }}
                       </el-button>
                     </el-badge>
@@ -895,7 +897,7 @@ function toggleAllSites() {
           </el-form-item>
 
           <el-form-item label="排序">
-            <el-select v-model="sortBy" style="width: 120px">
+            <el-select v-model="sortBy" class="sort-select">
               <el-option label="站点" value="sourceSite" />
               <el-option label="发布时间" value="publishTime" />
               <el-option label="大小" value="size" />
@@ -910,23 +912,29 @@ function toggleAllSites() {
           </el-form-item>
 
           <el-form-item>
-            <el-button type="primary" :loading="loading" @click="doSearch">搜索</el-button>
-            <el-button @click="clearCache">清除缓存</el-button>
+            <el-button type="primary" :loading="loading" class="search-btn" @click="doSearch"
+              >搜索</el-button
+            >
+            <el-button class="clear-cache-btn" @click="clearCache">清除缓存</el-button>
           </el-form-item>
         </el-form>
       </div>
     </div>
 
     <!-- 搜索结果 -->
-    <div v-loading="loading" class="table-card result-card">
+    <div
+      v-loading="loading"
+      class="table-card result-card search-result-panel"
+      element-loading-text="正在聚合多站点搜索结果..."
+      element-loading-background="rgba(20, 184, 166, 0.08)">
       <div class="table-card-header">
         <div class="table-card-header-title">
           <span>搜索结果</span>
           <template v-if="totalResults > 0">
-            <el-tag type="info" size="small" effect="plain" style="margin-left: 8px">
+            <el-tag type="info" size="small" effect="plain" class="result-stats-tag">
               共 {{ totalResults }} 条
             </el-tag>
-            <el-tag type="success" size="small" effect="plain" style="margin-left: 4px">
+            <el-tag type="success" size="small" effect="plain" class="result-stats-tag">
               耗时 {{ searchTime }}ms
             </el-tag>
           </template>
@@ -935,6 +943,8 @@ function toggleAllSites() {
           <el-button
             v-if="selectedTorrents.length > 0"
             size="small"
+            type="success"
+            class="batch-download-btn"
             :loading="batchDownloading"
             @click="batchDownloadTorrents">
             批量下载 ({{ selectedTorrents.length }})
@@ -943,6 +953,7 @@ function toggleAllSites() {
             v-if="selectedTorrents.length > 0"
             type="primary"
             size="small"
+            class="batch-push-btn"
             @click="openBatchPushDialog">
             批量推送 ({{ selectedTorrents.length }})
           </el-button>
@@ -957,6 +968,7 @@ function toggleAllSites() {
             :key="site"
             type="success"
             size="small"
+            class="site-summary-tag"
             effect="plain">
             {{ site }}: {{ count }}
           </el-tag>
@@ -965,6 +977,7 @@ function toggleAllSites() {
             :key="err.site"
             type="danger"
             size="small"
+            class="site-summary-tag site-summary-tag--error"
             effect="plain">
             {{ err.site }}: 失败
           </el-tag>
@@ -973,7 +986,7 @@ function toggleAllSites() {
         <!-- 种子列表表格 -->
         <el-table
           :data="pagedTorrents"
-          style="width: 100%"
+          class="pt-table search-result-table"
           stripe
           :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }"
           :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
@@ -988,7 +1001,9 @@ function toggleAllSites() {
             align="center"
             sortable="custom">
             <template #default="{ row }">
-              <el-tag size="small" type="primary" effect="light">{{ row.sourceSite }}</el-tag>
+              <el-tag size="small" type="primary" effect="light" class="site-tag">{{
+                row.sourceSite
+              }}</el-tag>
             </template>
           </el-table-column>
 
@@ -1022,8 +1037,22 @@ function toggleAllSites() {
                   </span>
                 </div>
                 <div class="title-meta">
-                  <el-tag v-if="row.category" size="small" type="info">{{ row.category }}</el-tag>
-                  <el-tag v-if="row.hasHR" size="small" type="danger">H&R</el-tag>
+                  <el-tag
+                    v-if="row.category"
+                    size="small"
+                    type="info"
+                    effect="plain"
+                    class="meta-tag">
+                    {{ row.category }}
+                  </el-tag>
+                  <el-tag
+                    v-if="row.hasHR"
+                    size="small"
+                    type="danger"
+                    effect="plain"
+                    class="meta-tag">
+                    H&R
+                  </el-tag>
                 </div>
               </div>
             </template>
@@ -1042,7 +1071,11 @@ function toggleAllSites() {
 
           <el-table-column label="优惠" width="80" align="center">
             <template #default="{ row }">
-              <el-tag :type="getDiscountTag(row).type" size="small" effect="dark">
+              <el-tag
+                :type="getDiscountTag(row).type"
+                size="small"
+                effect="dark"
+                class="discount-tag">
                 {{ getDiscountTag(row).text }}
               </el-tag>
             </template>
@@ -1081,6 +1114,7 @@ function toggleAllSites() {
                     size="small"
                     circle
                     plain
+                    class="action-icon-btn"
                     :disabled="!row.downloadUrl"
                     @click="downloadTorrent(row)">
                     <el-icon><Download /></el-icon>
@@ -1092,13 +1126,20 @@ function toggleAllSites() {
                     size="small"
                     circle
                     plain
+                    class="action-icon-btn"
                     :disabled="!row.downloadUrl && !row.magnetLink"
                     @click="copyDownloadLink(row)">
                     <el-icon><CopyDocument /></el-icon>
                   </el-button>
                 </el-tooltip>
                 <el-tooltip content="推送到下载器" placement="top">
-                  <el-button type="primary" size="small" circle plain @click="openPushDialog(row)">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    circle
+                    plain
+                    class="action-icon-btn"
+                    @click="openPushDialog(row)">
                     <el-icon><Upload /></el-icon>
                   </el-button>
                 </el-tooltip>
@@ -1130,7 +1171,7 @@ function toggleAllSites() {
     </div>
 
     <!-- 单个推送对话框 -->
-    <el-dialog v-model="pushDialogVisible" title="推送到下载器" width="500px">
+    <el-dialog v-model="pushDialogVisible" title="推送到下载器" width="560px" class="push-dialog">
       <el-form :model="pushForm" label-width="100px">
         <el-form-item label="种子标题">
           <span class="dialog-text">{{ currentPushTorrent?.title }}</span>
@@ -1190,7 +1231,11 @@ function toggleAllSites() {
     </el-dialog>
 
     <!-- 批量推送对话框 -->
-    <el-dialog v-model="batchPushDialogVisible" title="批量推送到下载器" width="500px">
+    <el-dialog
+      v-model="batchPushDialogVisible"
+      title="批量推送到下载器"
+      width="560px"
+      class="push-dialog">
       <el-form :model="pushForm" label-width="100px">
         <el-form-item label="选中数量">
           <el-tag type="primary">{{ selectedTorrents.length }} 个种子</el-tag>
@@ -1246,196 +1291,8 @@ function toggleAllSites() {
 </template>
 
 <style scoped>
-.search-card {
-  margin-bottom: var(--pt-space-4);
-}
-
-.search-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.search-form :deep(.el-form-item) {
-  margin-bottom: 8px;
-  margin-top: 8px;
-}
-
-.site-summary-bar {
-  margin: var(--pt-space-4);
-  gap: var(--pt-space-2);
-}
-
-.title-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 8px; /* Increased gap */
-  width: 100%;
-  padding: 8px 0; /* Increased padding */
-}
-
-.title-link {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700; /* Bolder */
-  color: var(--pt-color-primary-600); /* Darker blue for light mode */
-  text-decoration: none;
-  font-size: 15px; /* Slightly larger */
-  line-height: 1.4;
-  transition: color var(--pt-transition-fast);
-}
-
-.title-link:hover {
-  color: var(--pt-color-primary-700);
-  text-decoration: underline;
-}
-
-.title-text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-  font-size: 15px;
-  line-height: 1.4;
-  color: var(--pt-text-primary);
-}
-
-.title-subtitle-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.subtitle {
-  font-size: 13px; /* Larger subtitle */
-  color: var(--pt-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 600px;
-}
-
-.title-meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.title-tags {
-  display: inline-flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.seeders {
-  color: var(--pt-color-success-600);
-  font-weight: 700;
-}
-
-.leechers {
-  color: var(--pt-color-danger-600);
-  font-weight: 700;
-}
-
-.site-select-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--pt-border-color);
-}
-
-.site-count-hint {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-}
-
-.all-sites-selected :deep(.el-select__placeholder) {
-  color: var(--pt-color-primary);
-  font-weight: 600;
-}
-
-.site-selector-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.site-option-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.selected-sites-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.site-filter-badge {
-  display: inline-flex;
-}
-
-.site-filter-popover {
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.site-filter-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--pt-border-color);
-}
-
-.filter-title {
-  font-weight: 600;
-  color: var(--pt-text-primary);
-}
-
-.site-filter-form :deep(.el-form-item) {
-  margin-bottom: 12px;
-}
-
-.site-filter-form :deep(.el-form-item__label) {
-  font-size: 13px;
-  color: var(--pt-text-secondary);
-  padding-bottom: 4px;
-}
-
-.dialog-text {
-  word-break: break-all;
-  line-height: 1.5;
-  color: var(--pt-text-primary);
-  font-weight: 500;
-}
-
-:deep(.el-table__fixed-right) {
-  height: 100% !important;
-}
-
-/* Dark mode adjustments */
-html.dark .title-link {
-  color: var(--pt-color-primary-400); /* Lighter blue for dark mode */
-}
-
-html.dark .title-link:hover {
-  color: var(--pt-color-primary-300);
-}
-
-html.dark .seeders {
-  color: var(--pt-color-success-400); /* Lighter green */
-}
-
-html.dark .leechers {
-  color: var(--pt-color-danger-400); /* Lighter red */
-}
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
+@import "@/styles/form-page.css";
+@import "@/styles/torrent-search-page.css";
 </style>

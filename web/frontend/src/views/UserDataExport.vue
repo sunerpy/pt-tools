@@ -38,10 +38,10 @@ const exportConfig = ref({
 
 const presetThemes = [
   { name: "森林绿", bg: "#134e5e", end: "#71b280" },
-  { name: "蓝色海洋", bg: "#2193b0", end: "#6dd5ed" },
-  { name: "日落橙", bg: "#ee0979", end: "#ff6a00" },
+  { name: "海岸青", bg: "#0f766e", end: "#22d3ee" },
+  { name: "日落橙", bg: "#c2410c", end: "#fb923c" },
   { name: "暗夜黑", bg: "#232526", end: "#414345" },
-  { name: "玫瑰金", bg: "#f4c4f3", end: "#fc67fa" },
+  { name: "暖金", bg: "#a16207", end: "#fbbf24" },
   { name: "深海蓝", bg: "#0f2027", end: "#2c5364" },
 ];
 
@@ -89,7 +89,7 @@ const summaryStats = computed(() => {
       color: "#2dd4bf",
       icon: "◆",
     },
-    { label: "站点数", value: stats.siteCount.toString(), color: "#a78bfa", icon: "▣" },
+    { label: "站点数", value: stats.siteCount.toString(), color: "#14b8a6", icon: "▣" },
   ];
   if (stats.totalSeedingBonus && stats.totalSeedingBonus > 0) {
     items.splice(5, 0, {
@@ -425,7 +425,7 @@ function createExportCanvas(): HTMLCanvasElement {
           }
 
           if (levelText) {
-            ctx.fillStyle = "#a78bfa";
+            ctx.fillStyle = "#22d3ee";
             ctx.fillText(levelText, currentX, y + 34);
           }
         }

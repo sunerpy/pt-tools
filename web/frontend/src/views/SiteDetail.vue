@@ -404,37 +404,51 @@ function toggleEditRssCustomPath() {
     editingRss.download_path = "";
   }
 }
-
-function getRowClassName({ row }: { row: RSSConfig }) {
-  return row.is_example ? "example-row" : "";
-}
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="page-container site-detail-page">
+    <div class="page-header site-detail-header">
+      <div>
+        <h1 class="page-title">站点设置</h1>
+        <p class="page-subtitle">管理站点认证配置与 RSS 订阅策略</p>
+      </div>
+      <div class="site-detail-header-actions">
+        <el-button type="primary" :loading="saving" class="save-btn save-btn--header" @click="save">
+          保存配置
+        </el-button>
+        <el-button
+          type="success"
+          :icon="'Plus'"
+          class="add-rss-btn add-rss-btn--header"
+          @click="openAddRssDialog">
+          添加 RSS
+        </el-button>
+      </div>
+    </div>
+
     <!-- 站点配置 -->
-    <el-card v-loading="loading" shadow="never">
+    <el-card v-loading="loading" shadow="never" class="form-card site-config-card">
       <template #header>
-        <div class="card-header">
+        <div class="card-header site-card-header">
           <div class="header-left">
             <el-button :icon="'ArrowLeft'" text @click="goBack" />
-            <span>站点设置 - {{ siteName }}</span>
-            <el-tag :type="form.enabled ? 'success' : 'info'" size="small" style="margin-left: 8px">
+            <span class="site-title">{{ siteName }}</span>
+            <el-tag :type="form.enabled ? 'success' : 'info'" size="small" class="site-status-tag">
               {{ form.enabled ? "已启用" : "未启用" }}
             </el-tag>
           </div>
-          <el-button type="primary" :loading="saving" @click="save">保存配置</el-button>
         </div>
       </template>
 
-      <el-form :model="form" label-width="100px" label-position="right">
+      <el-form :model="form" label-width="100px" label-position="right" class="site-detail-form">
         <el-alert
           v-if="form.unavailable"
           :title="form.unavailable_reason || '该站点暂时不可用'"
           type="warning"
           :closable="false"
           show-icon
-          style="margin-bottom: 16px" />
+          class="unavailable-alert" />
 
         <el-row :gutter="20">
           <el-col :span="12">
@@ -464,7 +478,10 @@ function getRowClassName({ row }: { row: RSSConfig }) {
           </el-col>
         </el-row>
 
-        <el-form-item v-if="form.urls && form.urls.length > 0" label="站点地址">
+        <el-form-item
+          v-if="form.urls && form.urls.length > 0"
+          label="站点地址"
+          class="site-urls-item">
           <div class="site-urls">
             <el-tag v-for="url in form.urls" :key="url" type="info" effect="plain" class="url-tag">
               <a :href="url" target="_blank" rel="noopener noreferrer">{{ url }}</a>
@@ -542,11 +559,10 @@ function getRowClassName({ row }: { row: RSSConfig }) {
     </el-card>
 
     <!-- RSS 订阅列表 -->
-    <el-card shadow="never" style="margin-top: 16px">
+    <el-card shadow="never" class="table-card rss-card">
       <template #header>
-        <div class="card-header">
-          <span>RSS 订阅</span>
-          <el-button type="primary" :icon="'Plus'" @click="openAddRssDialog">添加 RSS</el-button>
+        <div class="card-header site-card-header">
+          <span class="rss-title">RSS 订阅</span>
         </div>
       </template>
 
@@ -556,7 +572,7 @@ function getRowClassName({ row }: { row: RSSConfig }) {
         type="warning"
         show-icon
         :closable="false"
-        style="margin-bottom: 16px">
+        class="free-only-alert">
         <template #default>
           未启用过滤规则时，RSS
           订阅<strong>仅自动下载免费种子</strong>。如果只是刷流，无需设置过滤规则。只有在追剧或需要下载特定资源（即便非免费）时，才需要创建过滤规则并关闭「仅免费」开关。
@@ -570,126 +586,142 @@ function getRowClassName({ row }: { row: RSSConfig }) {
         type="info"
         :closable="false"
         show-icon
-        style="margin-bottom: 16px">
+        class="example-alert">
         <template #default>
           示例配置不会被执行，请点击"添加 RSS"按钮添加您自己的 RSS 订阅。
         </template>
       </el-alert>
 
-      <el-table :data="displayRssList" style="width: 100%" :row-class-name="getRowClassName">
-        <el-table-column type="index" label="序号" width="60" align="center" />
-        <el-table-column label="名称" prop="name" min-width="120">
-          <template #default="{ row }">
-            <span :class="{ 'example-text': row.is_example }">{{ row.name }}</span>
-            <el-tag v-if="row.is_example" type="info" size="small" style="margin-left: 4px">
-              示例
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="链接" min-width="250">
-          <template #default="{ row }">
-            <el-tooltip :content="row.url" placement="top">
-              <span class="url-cell" :class="{ 'example-text': row.is_example }">
-                {{ row.url }}
-              </span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column label="分类" prop="category" min-width="80">
-          <template #default="{ row }">
-            <span :class="{ 'example-text': row.is_example }">{{ row.category }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="标签" prop="tag" min-width="80">
-          <template #default="{ row }">
-            <span :class="{ 'example-text': row.is_example }">{{ row.tag }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="下载器" min-width="120">
-          <template #default="{ row }">
-            <template v-if="row.is_example">
-              <el-tag type="info" size="small" class="example-text">默认</el-tag>
-            </template>
-            <template v-else>
-              <el-tag v-if="row.downloader_id" type="primary" size="small">
-                {{ downloaders.find((d) => d.id === row.downloader_id)?.name || "未知" }}
-              </el-tag>
-              <el-tag v-else type="info" size="small">默认</el-tag>
-            </template>
-          </template>
-        </el-table-column>
-        <el-table-column label="下载路径" min-width="150">
-          <template #default="{ row }">
-            <template v-if="row.is_example">
-              <el-tag type="info" size="small" class="example-text">默认</el-tag>
-            </template>
-            <template v-else-if="row.download_path">
-              <el-tooltip :content="row.download_path" placement="top">
-                <el-tag type="success" size="small" class="path-tag">
-                  {{ getPathDisplayName(row.download_path, row.downloader_id) }}
-                </el-tag>
-              </el-tooltip>
-            </template>
-            <template v-else>
-              <el-tag type="info" size="small">默认</el-tag>
-            </template>
-          </template>
-        </el-table-column>
-        <el-table-column label="过滤规则" min-width="150">
-          <template #default="{ row }">
-            <template v-if="row.is_example">
-              <el-tag type="info" size="small" class="example-text">无</el-tag>
-            </template>
-            <template v-else-if="row.filter_rule_ids && row.filter_rule_ids.length > 0">
-              <el-tag
-                v-for="ruleId in row.filter_rule_ids.slice(0, 2)"
-                :key="ruleId"
-                type="success"
-                size="small"
-                style="margin-right: 4px">
-                {{ filterRules.find((r) => r.id === ruleId)?.name || `规则${ruleId}` }}
-              </el-tag>
-              <el-tag v-if="row.filter_rule_ids.length > 2" type="info" size="small">
-                +{{ row.filter_rule_ids.length - 2 }}
-              </el-tag>
-            </template>
-            <el-tag v-else type="info" size="small">无</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="间隔(分钟)" prop="interval_minutes" width="100" align="center">
-          <template #default="{ row }">
-            <span :class="{ 'example-text': row.is_example }">{{ row.interval_minutes }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" min-width="160" align="center">
-          <template #default="{ row, $index }">
-            <template v-if="row.is_example">
-              <el-button type="info" size="small" disabled>示例</el-button>
-            </template>
-            <template v-else>
-              <div class="action-buttons">
-                <el-button
-                  type="primary"
-                  size="small"
-                  :icon="'Edit'"
-                  @click="openEditRssDialog($index)">
-                  编辑
-                </el-button>
-                <el-button type="danger" size="small" :icon="'Delete'" @click="deleteRss($index)">
-                  删除
-                </el-button>
+      <div v-if="displayRssList.length > 0" class="rss-grid">
+        <el-card
+          v-for="(row, $index) in displayRssList"
+          :key="row.id || `${row.url}-${$index}`"
+          shadow="never"
+          class="rss-item-card"
+          :class="{ 'rss-item-card--example': row.is_example }">
+          <div class="rss-item-head">
+            <div class="rss-item-title-wrap">
+              <div class="rss-item-title-row">
+                <span class="rss-item-title" :class="{ 'example-text': row.is_example }">{{
+                  row.name
+                }}</span>
+                <el-tag v-if="row.is_example" type="info" size="small" effect="plain">示例</el-tag>
               </div>
-            </template>
-          </template>
-        </el-table-column>
-      </el-table>
+              <el-tooltip :content="row.url" placement="top">
+                <span class="url-cell" :class="{ 'example-text': row.is_example }">
+                  {{ row.url }}
+                </span>
+              </el-tooltip>
+            </div>
+            <el-tag type="warning" size="small" effect="plain" class="rss-interval-tag">
+              {{ row.interval_minutes }} 分钟
+            </el-tag>
+          </div>
 
-      <el-empty v-if="displayRssList.length === 0" description="暂无 RSS 订阅" />
+          <div class="rss-item-meta">
+            <el-tag v-if="row.category" size="small" effect="plain">{{ row.category }}</el-tag>
+            <el-tag v-if="row.tag" size="small" type="success" effect="plain">{{ row.tag }}</el-tag>
+            <el-tag v-if="row.pause_on_free_end" size="small" type="warning" effect="plain">
+              免费结束暂停
+            </el-tag>
+          </div>
+
+          <div class="rss-item-info-grid">
+            <div class="rss-info-item">
+              <span class="rss-info-label">下载器</span>
+              <div class="rss-info-value">
+                <template v-if="row.is_example">
+                  <el-tag type="info" size="small" class="example-text">默认</el-tag>
+                </template>
+                <template v-else>
+                  <el-tag v-if="row.downloader_id" type="primary" size="small">
+                    {{ downloaders.find((d) => d.id === row.downloader_id)?.name || "未知" }}
+                  </el-tag>
+                  <el-tag v-else type="info" size="small">默认</el-tag>
+                </template>
+              </div>
+            </div>
+
+            <div class="rss-info-item">
+              <span class="rss-info-label">下载路径</span>
+              <div class="rss-info-value">
+                <template v-if="row.is_example">
+                  <el-tag type="info" size="small" class="example-text">默认</el-tag>
+                </template>
+                <template v-else-if="row.download_path">
+                  <el-tooltip :content="row.download_path" placement="top">
+                    <el-tag type="success" size="small" class="path-tag">
+                      {{ getPathDisplayName(row.download_path, row.downloader_id) }}
+                    </el-tag>
+                  </el-tooltip>
+                </template>
+                <template v-else>
+                  <el-tag type="info" size="small">默认</el-tag>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="rss-rules-wrap">
+            <span class="rss-info-label">过滤规则</span>
+            <div class="rss-rules-list">
+              <template v-if="row.is_example">
+                <el-tag type="info" size="small" class="example-text">无</el-tag>
+              </template>
+              <template v-else-if="row.filter_rule_ids && row.filter_rule_ids.length > 0">
+                <el-tag
+                  v-for="ruleId in row.filter_rule_ids.slice(0, 3)"
+                  :key="ruleId"
+                  type="success"
+                  size="small"
+                  effect="plain">
+                  {{ filterRules.find((r) => r.id === ruleId)?.name || `规则${ruleId}` }}
+                </el-tag>
+                <el-tag
+                  v-if="row.filter_rule_ids.length > 3"
+                  type="info"
+                  size="small"
+                  effect="plain">
+                  +{{ row.filter_rule_ids.length - 3 }}
+                </el-tag>
+              </template>
+              <template v-else>
+                <el-tag type="warning" size="small" effect="plain">仅免费</el-tag>
+              </template>
+            </div>
+          </div>
+
+          <div class="action-buttons rss-action-buttons">
+            <template v-if="row.is_example">
+              <el-button type="info" size="small" plain disabled>示例配置</el-button>
+            </template>
+            <template v-else>
+              <el-button
+                type="primary"
+                size="small"
+                :icon="'Edit'"
+                @click="openEditRssDialog($index)">
+                编辑
+              </el-button>
+              <el-button
+                type="danger"
+                size="small"
+                :icon="'Delete'"
+                plain
+                @click="deleteRss($index)">
+                删除
+              </el-button>
+            </template>
+          </div>
+        </el-card>
+      </div>
+
+      <el-empty v-else description="暂无 RSS 订阅" class="rss-empty" />
     </el-card>
 
     <!-- 添加 RSS 对话框 -->
-    <el-dialog v-model="rssDialogVisible" title="添加 RSS 订阅" width="500px">
-      <el-form :model="newRss" label-width="100px">
+    <el-dialog v-model="rssDialogVisible" title="添加 RSS 订阅" width="560px" class="rss-dialog">
+      <el-form :model="newRss" label-width="100px" class="rss-dialog-form">
         <el-form-item label="名称" required>
           <el-input v-model="newRss.name" placeholder="如：CMCT电视剧" />
         </el-form-item>
@@ -784,8 +816,12 @@ function getRowClassName({ row }: { row: RSSConfig }) {
     </el-dialog>
 
     <!-- 编辑 RSS 对话框 -->
-    <el-dialog v-model="editRssDialogVisible" title="编辑 RSS 订阅" width="500px">
-      <el-form :model="editingRss" label-width="100px">
+    <el-dialog
+      v-model="editRssDialogVisible"
+      title="编辑 RSS 订阅"
+      width="560px"
+      class="rss-dialog">
+      <el-form :model="editingRss" label-width="100px" class="rss-dialog-form">
         <el-form-item label="名称" required>
           <el-input v-model="editingRss.name" placeholder="如：CMCT电视剧" />
         </el-form-item>
@@ -882,103 +918,8 @@ function getRowClassName({ row }: { row: RSSConfig }) {
 </template>
 
 <style scoped>
-.page-container {
-  width: 100%;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.url-cell {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.action-buttons {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-}
-
-.form-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-}
-
-.site-urls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.url-tag {
-  cursor: pointer;
-}
-
-.url-tag a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.url-tag a:hover {
-  text-decoration: underline;
-}
-
-.path-selector {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
-.path-tag {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 示例数据样式 - 使用 CSS 变量适配明暗主题 */
-.example-text {
-  color: var(--el-text-color-placeholder);
-  font-style: italic;
-}
-
-:deep(.example-row) {
-  background-color: var(--el-fill-color-lighter);
-  border-left: 3px dashed var(--el-border-color);
-}
-
-:deep(.example-row > td) {
-  background-color: var(--el-fill-color-lighter) !important;
-}
-
-:deep(.example-row:hover > td) {
-  background-color: var(--el-fill-color-light) !important;
-}
-
-/* 示例标签样式 */
-:deep(.example-row .el-tag--info) {
-  background-color: var(--el-fill-color);
-  border-color: var(--el-border-color-lighter);
-  color: var(--el-text-color-secondary);
-}
-
-/* 示例提示框样式增强 */
-:deep(.el-alert--info) {
-  border: 1px dashed var(--el-color-info-light-5);
-}
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
+@import "@/styles/form-page.css";
+@import "@/styles/site-detail-page.css";
 </style>

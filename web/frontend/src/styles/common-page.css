@@ -1,4 +1,6 @@
 .page-container {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   max-width: 100%; /* Allow full width usage within app-main */
   margin: 0 auto;
@@ -10,8 +12,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-4);
-  margin-bottom: var(--pt-space-6);
-  padding-bottom: var(--pt-space-2);
+  margin-bottom: var(--pt-page-header-margin-bottom);
+  padding: var(--pt-page-header-padding-top) var(--pt-page-header-padding-x)
+    var(--pt-page-header-padding-bottom);
 }
 
 @media (min-width: 768px) {
@@ -19,23 +22,34 @@
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+    padding: var(--pt-space-5) var(--pt-space-5) var(--pt-page-header-padding-bottom);
+  }
+}
+
+@media (max-width: 767px) {
+  .page-header {
+    padding: var(--pt-space-3) var(--pt-space-3) var(--pt-page-header-padding-bottom);
   }
 }
 
 .page-title {
   margin: 0;
   font-size: var(--pt-text-3xl); /* Larger title */
-  font-weight: 800;
-  color: var(--pt-text-primary);
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font-weight: var(--pt-page-title-weight);
+  color: var(--pt-page-title-color);
+  line-height: 1.16;
+  letter-spacing: var(--pt-page-title-letter-spacing);
+  text-shadow: var(--pt-page-title-shadow);
 }
 
 .page-subtitle {
   margin: var(--pt-space-1) 0 0;
   font-size: var(--pt-text-sm);
-  color: var(--pt-text-secondary);
-  font-weight: 500;
+  color: var(--pt-page-subtitle-color);
+  font-weight: var(--pt-page-subtitle-weight);
+  letter-spacing: var(--pt-page-subtitle-letter-spacing);
+  line-height: 1.45;
+  text-shadow: var(--pt-page-subtitle-shadow);
 }
 
 .page-actions {
@@ -46,7 +60,7 @@
 
 /* Modern Card Styles */
 .common-card {
-  background-color: var(--pt-bg-surface);
+  background-color: var(--pt-bg-surface-raised);
   border: 1px solid var(--pt-border-color);
   border-radius: var(--pt-radius-xl);
   box-shadow: var(--pt-shadow-sm);
@@ -59,7 +73,7 @@
 .common-card--hoverable:hover {
   box-shadow: var(--pt-shadow-lg);
   transform: translateY(-2px);
-  border-color: var(--pt-color-primary-300);
+  border-color: color-mix(in srgb, var(--pt-color-primary) 30%, var(--pt-border-color));
   cursor: pointer;
 }
 
@@ -69,7 +83,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: var(--pt-bg-surface);
+  background: linear-gradient(180deg, var(--pt-bg-surface-muted), var(--pt-bg-surface-raised));
 }
 
 .common-card-body {
@@ -80,7 +94,7 @@
 .common-card-footer {
   padding: var(--pt-space-4) var(--pt-space-6);
   border-top: 1px solid var(--pt-border-color);
-  background-color: var(--pt-bg-surface); /* Unified background */
+  background: var(--pt-bg-surface-muted);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -119,7 +133,7 @@
 }
 
 .stat-card {
-  background-color: var(--pt-bg-surface);
+  background-color: var(--pt-bg-surface-raised);
   border: 1px solid var(--pt-border-color);
   border-radius: var(--pt-radius-xl);
   padding: var(--pt-space-5);
@@ -146,7 +160,7 @@
 
 .stat-card:hover {
   box-shadow: var(--pt-shadow-lg);
-  border-color: var(--pt-color-primary-200);
+  border-color: color-mix(in srgb, var(--pt-color-primary) 36%, var(--pt-border-color));
   transform: translateY(-4px);
 }
 
@@ -184,7 +198,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--pt-color-primary-50);
+  background-color: var(--pt-bg-accent-soft);
   color: var(--pt-color-primary);
   font-size: 1.75rem;
   transition: all var(--pt-transition-normal);
@@ -194,7 +208,7 @@
 .stat-card:hover .stat-icon {
   transform: scale(1.1) rotate(-5deg);
   background-color: var(--pt-color-primary);
-  color: white;
+  color: #fff;
 }
 
 .stat-trend {
@@ -209,13 +223,15 @@
 }
 
 .stat-trend--up {
-  color: var(--pt-color-success-700);
-  background-color: var(--pt-color-success-50);
+  color: var(--pt-state-success-text);
+  background-color: var(--pt-state-success-bg);
+  border: 1px solid var(--pt-state-success-border);
 }
 
 .stat-trend--down {
-  color: var(--pt-color-danger-700);
-  background-color: var(--pt-color-danger-50);
+  color: var(--pt-state-danger-text);
+  background-color: var(--pt-state-danger-bg);
+  border: 1px solid var(--pt-state-danger-border);
 }
 
 .btn-icon {
@@ -226,7 +242,7 @@
   height: 32px;
   padding: 0;
   border: 1px solid var(--pt-border-color);
-  background-color: var(--pt-bg-surface);
+  background-color: var(--pt-bg-surface-raised);
   color: var(--pt-text-secondary);
   border-radius: var(--pt-radius-md);
   cursor: pointer;
@@ -234,7 +250,7 @@
 }
 
 .btn-icon:hover {
-  background-color: var(--pt-bg-secondary);
+  background-color: var(--pt-bg-surface-muted);
   color: var(--pt-color-primary);
   border-color: var(--pt-border-color-hover);
 }
@@ -327,36 +343,55 @@
 .status-badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
+  gap: 6px;
+  padding: 3px 10px;
   border-radius: var(--pt-radius-full);
   font-size: var(--pt-text-xs);
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
   white-space: nowrap;
+  border: 1px solid transparent;
+  transition:
+    transform var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast);
+}
+
+.status-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--pt-radius-full);
+  background: currentColor;
+  opacity: 0.8;
 }
 
 .status-badge--success {
-  background-color: var(--pt-color-success-50);
-  color: var(--pt-color-success-700);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background-color: var(--pt-state-success-bg);
+  color: var(--pt-state-success-text);
+  border-color: var(--pt-state-success-border);
 }
 
 .status-badge--warning {
-  background-color: var(--pt-color-warning-50);
-  color: var(--pt-color-warning-700);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  background-color: var(--pt-state-warning-bg);
+  color: var(--pt-state-warning-text);
+  border-color: var(--pt-state-warning-border);
 }
 
 .status-badge--danger {
-  background-color: var(--pt-color-danger-50);
-  color: var(--pt-color-danger-700);
-  border: 1px solid rgba(244, 63, 94, 0.2);
+  background-color: var(--pt-state-danger-bg);
+  color: var(--pt-state-danger-text);
+  border-color: var(--pt-state-danger-border);
 }
 
 .status-badge--info {
-  background-color: var(--pt-color-info-50);
-  color: var(--pt-color-info-700);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background-color: var(--pt-state-info-bg);
+  color: var(--pt-state-info-text);
+  border-color: var(--pt-state-info-border);
+}
+
+.status-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--pt-shadow-sm);
 }
 
 .empty-state {
@@ -366,7 +401,7 @@
   justify-content: center;
   padding: var(--pt-space-12) var(--pt-space-4);
   text-align: center;
-  background-color: var(--pt-bg-surface);
+  background-color: var(--pt-bg-surface-raised);
   border-radius: var(--pt-radius-lg);
   border: 1px dashed var(--pt-border-color);
 }
@@ -385,51 +420,21 @@
   line-height: 1.5;
 }
 
-html.dark .page-title {
-  color: var(--pt-text-primary);
-}
-
-html.dark .stat-trend--up {
-  background-color: rgba(16, 185, 129, 0.1);
-  color: var(--pt-color-success-500);
-}
-
-html.dark .stat-trend--down {
-  background-color: rgba(244, 63, 94, 0.1);
-  color: var(--pt-color-danger-500);
-}
-
-html.dark .status-badge--success {
-  background-color: rgba(16, 185, 129, 0.1);
-  color: var(--pt-color-success-500);
-  border-color: rgba(16, 185, 129, 0.2);
-}
-
-html.dark .status-badge--warning {
-  background-color: rgba(245, 158, 11, 0.1);
-  color: var(--pt-color-warning-500);
-  border-color: rgba(245, 158, 11, 0.2);
-}
-
-html.dark .status-badge--danger {
-  background-color: rgba(244, 63, 94, 0.1);
-  color: var(--pt-color-danger-500);
-  border-color: rgba(244, 63, 94, 0.2);
-}
-
-html.dark .status-badge--info {
-  background-color: rgba(14, 165, 233, 0.1);
-  color: var(--pt-color-info-500);
-  border-color: rgba(14, 165, 233, 0.2);
-}
-
 html.dark .btn-icon {
-  background-color: rgba(255, 255, 255, 0.05);
-  border-color: var(--pt-border-color);
+  background-color: var(--pt-bg-surface-muted);
+  border-color: color-mix(in srgb, var(--pt-border-color) 86%, transparent);
 }
 
 html.dark .btn-icon:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: var(--pt-text-secondary);
+  background-color: color-mix(in srgb, var(--pt-color-primary) 16%, var(--pt-bg-surface-raised));
+  border-color: color-mix(in srgb, var(--pt-color-primary) 34%, var(--pt-border-color));
   color: var(--pt-text-primary);
+}
+
+.el-card {
+  background-color: var(--pt-bg-surface);
+}
+
+.el-card__header {
+  background-color: var(--pt-bg-surface);
 }

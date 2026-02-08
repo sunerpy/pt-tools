@@ -46,42 +46,49 @@ const statsCards = computed(() => {
       value: formatBytes(stats.totalUploaded),
       icon: "Upload",
       type: "success",
+      className: "stat-upload",
     },
     {
       title: "总下载量",
       value: formatBytes(stats.totalDownloaded),
       icon: "Download",
       type: "info",
+      className: "stat-download",
     },
     {
       title: "平均分享率",
       value: formatRatio(stats.averageRatio),
       icon: "DataAnalysis",
       type: stats.averageRatio >= 1 ? "success" : "warning",
+      className: "stat-ratio",
     },
     {
       title: "做种数",
       value: stats.totalSeeding.toString(),
       icon: "Connection",
       type: "success",
+      className: "stat-seeding",
     },
     {
       title: "下载中",
       value: stats.totalLeeching.toString(),
       icon: "Loading",
       type: "info",
+      className: "stat-leeching",
     },
     {
       title: "总魔力值",
       value: formatNumber(stats.totalBonus),
       icon: "Star",
       type: "warning",
+      className: "stat-bonus",
     },
     {
       title: "总时魔/h",
       value: formatNumber(stats.totalBonusPerHour ?? 0),
       icon: "Timer",
       type: "warning",
+      className: "stat-bonus-hour",
     },
   ];
 
@@ -92,6 +99,7 @@ const statsCards = computed(() => {
       value: formatNumber(stats.totalSeedingBonus),
       icon: "Medal",
       type: "success",
+      className: "stat-seeding-bonus",
     });
   }
 
@@ -101,12 +109,14 @@ const statsCards = computed(() => {
       value: formatBytes(stats.totalSeederSize ?? 0),
       icon: "Upload",
       type: "success",
+      className: "stat-seeding-size",
     },
     {
       title: "站点数量",
       value: stats.siteCount.toString(),
       icon: "OfficeBuilding",
       type: "info",
+      className: "stat-sites",
     },
   );
 
@@ -230,7 +240,7 @@ onUnmounted(() => {
         v-for="card in statsCards"
         :key="card.title"
         class="dashboard-stat-card"
-        :class="card.type">
+        :class="[card.type, card.className]">
         <div class="dashboard-stat-icon">
           <el-icon><component :is="card.icon" /></el-icon>
         </div>
@@ -726,6 +736,7 @@ onUnmounted(() => {
   padding: var(--pt-space-3) 0;
   border-top: 1px solid var(--pt-border-color);
   border-bottom: 1px solid var(--pt-border-color);
+  margin-bottom: var(--pt-space-2);
 }
 
 .data-group {
@@ -761,15 +772,19 @@ onUnmounted(() => {
 .mobile-card-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: var(--pt-space-3);
-  padding: var(--pt-space-4) 0;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-lg);
+  background: color-mix(in srgb, var(--pt-bg-secondary) 75%, var(--pt-color-primary-50));
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
+  min-height: 48px;
 }
 
 .stat-item .label {
@@ -809,6 +824,10 @@ onUnmounted(() => {
   gap: 4px;
   font-size: var(--pt-text-xs);
   color: var(--pt-text-tertiary);
+}
+
+html.dark .mobile-card-stats {
+  background: color-mix(in srgb, var(--pt-bg-tertiary) 88%, var(--pt-color-primary-900));
 }
 
 @media (max-width: 480px) {

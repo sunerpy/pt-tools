@@ -231,22 +231,30 @@ function getAuthMethodLabel(method: string) {
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="page-container dynamic-sites-page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">动态站点设置</h1>
+        <p class="page-subtitle">管理动态站点和模板，快速导入并验证站点配置</p>
+      </div>
+      <div class="page-actions">
+        <el-button type="success" :icon="'Upload'" @click="openImportDialog">导入模板</el-button>
+        <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加站点</el-button>
+      </div>
+    </div>
+
     <!-- 动态站点列表 -->
-    <el-card v-loading="loading" shadow="never" class="section-card">
+    <el-card v-loading="loading" shadow="never" class="section-card dynamic-sites-card">
       <template #header>
         <div class="card-header">
           <span>动态站点</span>
-          <el-space>
-            <el-button type="success" :icon="'Upload'" @click="openImportDialog">
-              导入模板
-            </el-button>
-            <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加站点</el-button>
-          </el-space>
+          <el-tag class="status-badge status-badge--info" effect="plain"
+            >{{ dynamicSites.length }} 个站点</el-tag
+          >
         </div>
       </template>
 
-      <el-table :data="dynamicSites" style="width: 100%">
+      <el-table :data="dynamicSites" class="pt-table" style="width: 100%">
         <el-table-column type="index" label="序号" width="60" align="center" />
 
         <el-table-column label="站点" min-width="150">
@@ -293,14 +301,17 @@ function getAuthMethodLabel(method: string) {
     </el-card>
 
     <!-- 模板列表 -->
-    <el-card shadow="never" class="section-card">
+    <el-card shadow="never" class="section-card dynamic-templates-card">
       <template #header>
         <div class="card-header">
           <span>站点模板</span>
+          <el-tag class="status-badge status-badge--info" effect="plain"
+            >{{ templates.length }} 个模板</el-tag
+          >
         </div>
       </template>
 
-      <el-table :data="templates" style="width: 100%">
+      <el-table :data="templates" class="pt-table" style="width: 100%">
         <el-table-column type="index" label="序号" width="60" align="center" />
 
         <el-table-column label="模板名称" min-width="150">
@@ -343,8 +354,8 @@ function getAuthMethodLabel(method: string) {
     </el-card>
 
     <!-- 添加站点对话框 -->
-    <el-dialog v-model="showAddDialog" title="添加动态站点" width="600px">
-      <el-form :model="addForm" label-width="100px" label-position="right">
+    <el-dialog v-model="showAddDialog" title="添加动态站点" width="600px" class="site-dialog">
+      <el-form :model="addForm" label-width="100px" label-position="right" class="site-dialog-form">
         <el-form-item label="站点标识" required>
           <el-input v-model="addForm.name" placeholder="例如: mysite" />
           <div class="form-tip">唯一标识，用于内部引用</div>
@@ -358,7 +369,7 @@ function getAuthMethodLabel(method: string) {
           <el-input v-model="addForm.base_url" placeholder="https://example.com" />
         </el-form-item>
 
-        <el-divider />
+        <el-divider class="dialog-divider" />
 
         <el-form-item label="认证方式" required>
           <el-select v-model="addForm.auth_method" style="width: 100%">
@@ -409,7 +420,7 @@ function getAuthMethodLabel(method: string) {
             placeholder="请输入站点 Passkey（从站点个人设置中获取）" />
         </el-form-item>
 
-        <el-divider />
+        <el-divider class="dialog-divider" />
 
         <el-form-item label="下载器">
           <el-select
@@ -460,8 +471,12 @@ function getAuthMethodLabel(method: string) {
     </el-dialog>
 
     <!-- 导入模板对话框 -->
-    <el-dialog v-model="showImportDialog" title="导入站点模板" width="600px">
-      <el-form :model="importForm" label-width="100px" label-position="right">
+    <el-dialog v-model="showImportDialog" title="导入站点模板" width="600px" class="site-dialog">
+      <el-form
+        :model="importForm"
+        label-width="100px"
+        label-position="right"
+        class="site-dialog-form">
         <el-form-item label="模板JSON" required>
           <el-input
             v-model="importForm.templateJson"
@@ -496,71 +511,8 @@ function getAuthMethodLabel(method: string) {
 </template>
 
 <style scoped>
-.page-container {
-  width: 100%;
-}
-
-.section-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.site-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.site-name {
-  font-weight: 500;
-}
-
-.site-id {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.form-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-}
-
-.validation-result {
-  margin-top: 16px;
-  padding: 16px;
-  background: var(--el-fill-color-light);
-  border-radius: 4px;
-}
-
-.free-torrents {
-  margin-top: 12px;
-}
-
-.free-torrents-title {
-  font-weight: 500;
-  margin-bottom: 8px;
-}
-
-.free-torrents ul {
-  margin: 0;
-  padding-left: 20px;
-}
-
-.free-torrents li {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.more-hint {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-  margin-top: 4px;
-}
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
+@import "@/styles/form-page.css";
+@import "@/styles/dynamic-site-settings-page.css";
 </style>

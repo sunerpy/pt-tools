@@ -78,10 +78,10 @@ const progress = computed(() => {
 
 // 进度条颜色
 const progressColor = computed(() => {
-  if (isMaxLevel.value) return "#67c23a";
-  if (progress.value >= 80) return "#67c23a";
-  if (progress.value >= 50) return "#e6a23c";
-  return "#409eff";
+  if (isMaxLevel.value) return "var(--pt-color-success)";
+  if (progress.value >= 80) return "var(--pt-color-primary)";
+  if (progress.value >= 50) return "var(--pt-color-warning)";
+  return "#f97316";
 });
 
 // 未满足的要求列表
@@ -176,7 +176,10 @@ function formatBytes(bytes: number): string {
     </template>
 
     <template v-else>
-      <el-tooltip :disabled="unmetList.length === 0" placement="top">
+      <el-tooltip
+        :disabled="unmetList.length === 0"
+        placement="top"
+        popper-class="level-progress-tooltip-popper">
         <template #content>
           <div class="unmet-tooltip">
             <div class="tooltip-title">升级到 {{ nextLevel?.name }} 还需:</div>
@@ -201,58 +204,3 @@ function formatBytes(bytes: number): string {
     </template>
   </div>
 </template>
-
-<style scoped>
-.level-progress {
-  display: inline-flex;
-  align-items: center;
-  min-width: 120px;
-}
-
-.progress-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  cursor: pointer;
-}
-
-.progress-wrapper :deep(.el-progress) {
-  width: 100%;
-}
-
-.progress-text {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.next-level {
-  color: var(--el-color-primary);
-  font-weight: 500;
-}
-
-.unmet-tooltip {
-  max-width: 250px;
-}
-
-.tooltip-title {
-  font-weight: 600;
-  margin-bottom: 6px;
-  color: var(--el-color-warning);
-}
-
-.unmet-item {
-  font-size: 12px;
-  padding: 2px 0;
-  color: var(--el-text-color-regular);
-}
-
-.unmet-item::before {
-  content: "•";
-  margin-right: 6px;
-  color: var(--el-color-danger);
-}
-</style>

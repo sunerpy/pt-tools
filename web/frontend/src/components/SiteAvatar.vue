@@ -38,6 +38,7 @@ function handleImageError() {
 <template>
   <div
     class="site-avatar"
+    :class="{ 'has-image': !!faviconUrl && !imageError, 'is-fallback': !faviconUrl || imageError }"
     :style="{
       width: size + 'px',
       height: size + 'px',
@@ -53,42 +54,10 @@ function handleImageError() {
       v-else
       class="avatar-letter"
       :style="{
-        backgroundColor: avatarColor,
         fontSize: size * 0.5 + 'px',
-        lineHeight: size + 'px',
+        '--avatar-base': avatarColor,
       }">
       {{ avatarLetter }}
     </span>
   </div>
 </template>
-
-<style scoped>
-.site-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.avatar-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background-color: #fff;
-  border-radius: 6px;
-}
-
-.avatar-letter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  color: #fff;
-  font-weight: 600;
-  text-transform: uppercase;
-  border-radius: 6px;
-}
-</style>

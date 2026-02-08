@@ -10,6 +10,7 @@ import "./styles/app-layout.css";
 import "./styles/dashboard.css";
 import "./styles/form-page.css";
 import "./styles/table-page.css";
+import "./styles/shared-components.css";
 import App from "./App.vue";
 import router from "./router";
 import "./styles/main.css";

@@ -169,7 +169,7 @@ function getDiscountTag(task: TaskItem): {
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="page-container tasklist-page">
     <div class="page-header">
       <div>
         <h1 class="page-title">任务列表</h1>
@@ -178,9 +178,9 @@ function getDiscountTag(task: TaskItem): {
     </div>
 
     <!-- 筛选工具栏 -->
-    <div class="common-card search-card">
+    <div class="common-card search-card task-filter-card task-filter-shell">
       <div class="common-card-body">
-        <el-form :inline="true" :model="filters" class="filter-form">
+        <el-form :inline="true" :model="filters" class="filter-form task-filter-form">
           <el-form-item label="搜索">
             <el-input
               v-model="filters.q"
@@ -199,12 +199,12 @@ function getDiscountTag(task: TaskItem): {
               <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
             </el-select>
           </el-form-item>
-          <el-form-item>
+          <el-form-item class="filter-checks">
             <el-checkbox v-model="filters.downloaded">已下载</el-checkbox>
             <el-checkbox v-model="filters.pushed">已推送</el-checkbox>
             <el-checkbox v-model="filters.expired">已过期</el-checkbox>
           </el-form-item>
-          <el-form-item>
+          <el-form-item class="filter-actions">
             <el-button type="primary" :loading="loading" @click="applyFilters">筛选</el-button>
             <el-button @click="clearFilters">重置</el-button>
           </el-form-item>
@@ -213,16 +213,21 @@ function getDiscountTag(task: TaskItem): {
     </div>
 
     <!-- 任务列表 -->
-    <div class="table-card" v-loading="loading">
+    <div class="table-card task-table-card" v-loading="loading">
       <div class="table-card-header">
         <div class="table-card-header-title">
           <span>任务列表</span>
-          <el-tag type="info" size="small" effect="plain" style="margin-left: 8px">
+          <el-tag
+            type="info"
+            size="small"
+            effect="plain"
+            class="total-tag table-total-tag"
+            style="margin-left: 8px">
             共 {{ total }} 条
           </el-tag>
         </div>
         <div class="table-card-header-actions">
-          <el-button type="primary" size="small" plain @click="loadTasks">
+          <el-button type="primary" size="small" plain class="refresh-btn" @click="loadTasks">
             <el-icon class="mr-1"><Refresh /></el-icon>
             刷新
           </el-button>
@@ -237,13 +242,19 @@ function getDiscountTag(task: TaskItem): {
           :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }">
           <el-table-column label="站点" prop="siteName" width="120" align="center">
             <template #default="{ row }">
-              <el-tag size="small" type="primary" effect="light">{{ row.siteName || "-" }}</el-tag>
+              <el-tag size="small" type="primary" effect="light" class="site-tag">{{
+                row.siteName || "-"
+              }}</el-tag>
             </template>
           </el-table-column>
 
           <el-table-column label="优惠" width="90" align="center">
             <template #default="{ row }">
-              <el-tag :type="getDiscountTag(row).type" size="small" effect="dark">
+              <el-tag
+                :type="getDiscountTag(row).type"
+                size="small"
+                effect="dark"
+                class="discount-tag">
                 {{ getDiscountTag(row).text }}
               </el-tag>
             </template>
@@ -286,6 +297,7 @@ function getDiscountTag(task: TaskItem): {
             <template #default="{ row }">
               <div v-if="row.torrentSize > 0" class="progress-container">
                 <el-progress
+                  class="task-progress"
                   :percentage="Math.round(row.progress)"
                   :stroke-width="8"
                   :show-text="false"
@@ -303,7 +315,7 @@ function getDiscountTag(task: TaskItem): {
 
           <el-table-column label="免费结束" width="160">
             <template #default="{ row }">
-              <span :class="row.isExpired ? 'text-danger' : 'text-secondary'">
+              <span :class="['free-end-time', row.isExpired ? 'text-danger' : 'text-secondary']">
                 {{ formatTime(row.freeEndTime) }}
               </span>
             </template>
@@ -326,7 +338,11 @@ function getDiscountTag(task: TaskItem): {
 
           <el-table-column label="状态" width="100" align="center" fixed="right">
             <template #default="{ row }">
-              <el-tag :type="getStatusType(row)" size="small" effect="dark">
+              <el-tag
+                :type="getStatusType(row)"
+                size="small"
+                effect="light"
+                :class="['status-pill', `status-pill--${getStatusType(row)}`]">
                 {{ getStatusText(row) }}
               </el-tag>
             </template>
@@ -352,95 +368,6 @@ function getDiscountTag(task: TaskItem): {
 <style scoped>
 @import "@/styles/common-page.css";
 @import "@/styles/table-page.css";
-
-.search-card {
-  margin-bottom: var(--pt-space-6);
-}
-
-.filter-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.title-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 0;
-}
-
-.title-text {
-  font-weight: 600;
-  color: var(--pt-text-primary);
-  line-height: 1.4;
-  /* Allow multi-line */
-  white-space: normal;
-  word-break: break-word;
-}
-
-.title-meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.hash-cell {
-  font-family: var(--pt-font-mono);
-  font-size: 12px;
-  background: var(--pt-bg-tertiary);
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--pt-text-secondary);
-  cursor: pointer;
-  border: 1px solid var(--pt-border-color);
-}
-
-.text-danger {
-  color: var(--pt-color-danger);
-}
-.text-success {
-  color: var(--pt-color-success);
-}
-.text-secondary {
-  color: var(--pt-text-secondary);
-}
-.text-tertiary {
-  color: var(--pt-text-tertiary);
-}
-
-.mr-1 {
-  margin-right: 4px;
-}
-
-.size-text {
-  font-family: var(--pt-font-mono);
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-}
-
-.progress-container {
-  padding: 2px 0;
-}
-
-.progress-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 4px;
-  font-size: 11px;
-}
-
-.progress-detail {
-  color: var(--pt-text-secondary);
-  font-family: var(--pt-font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.progress-pct {
-  color: var(--pt-text-primary);
-  font-weight: 600;
-  font-family: var(--pt-font-mono);
-}
+@import "@/styles/form-page.css";
+@import "@/styles/task-list-page.css";
 </style>

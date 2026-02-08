@@ -10,9 +10,9 @@ html,
 body,
 #app {
   height: 100%;
-  font-family:
-    "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑",
-    Arial, sans-serif;
+  font-family: var(--pt-font-family);
+  background: var(--pt-bg-base);
+  color: var(--pt-text-primary);
 }
 
 /* 滚动条样式 */
@@ -26,7 +26,7 @@ body,
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--pt-color-neutral-200);
+  background: var(--pt-border-color-hover);
   border-radius: 20px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -34,17 +34,17 @@ body,
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--pt-color-neutral-300);
+  background: var(--pt-border-color-strong);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 html.dark ::-webkit-scrollbar-thumb {
-  background: var(--pt-color-neutral-700);
+  background: color-mix(in srgb, var(--pt-border-color-hover) 88%, transparent);
 }
 
 html.dark ::-webkit-scrollbar-thumb:hover {
-  background: var(--pt-color-neutral-600);
+  background: var(--pt-border-color-strong);
 }
 
 /* 链接样式 */
@@ -71,5 +71,5 @@ code {
 
 html.dark code {
   color: var(--pt-color-primary-300);
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--pt-bg-surface-muted) 90%, var(--pt-bg-surface));
 }

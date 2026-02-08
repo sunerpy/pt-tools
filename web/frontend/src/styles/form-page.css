@@ -1,5 +1,5 @@
 .form-card {
-  background: var(--pt-bg-surface);
+  background: var(--pt-bg-surface-raised);
   border: 1px solid var(--pt-border-color);
   border-radius: var(--pt-radius-xl);
   box-shadow: var(--pt-shadow-sm);
@@ -16,7 +16,7 @@
 .form-card-header {
   padding: var(--pt-space-5) var(--pt-space-6);
   border-bottom: 1px solid var(--pt-border-color);
-  background: var(--pt-bg-surface);
+  background: linear-gradient(180deg, var(--pt-bg-surface-muted), var(--pt-bg-surface-raised));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -57,7 +57,7 @@
 
 .form-actions {
   padding: var(--pt-space-5) var(--pt-space-6);
-  background: var(--pt-bg-surface); /* Unified background */
+  background: var(--pt-bg-surface-muted);
   border-top: 1px solid var(--pt-border-color);
   display: flex;
   justify-content: flex-end;
@@ -65,13 +65,13 @@
 }
 
 .default-info {
-  background: var(--pt-color-info-50);
-  border: 1px solid var(--pt-color-info-200);
-  border-left: 4px solid var(--pt-color-info-500);
+  background: var(--pt-state-info-bg);
+  border: 1px solid var(--pt-state-info-border);
+  border-left: 4px solid var(--pt-color-info);
   border-radius: var(--pt-radius-md);
   padding: var(--pt-space-4) var(--pt-space-5);
   margin-bottom: var(--pt-space-6);
-  color: var(--pt-color-info-800);
+  color: var(--pt-state-info-text);
   font-size: var(--pt-text-sm);
   display: flex;
   align-items: center;
@@ -82,7 +82,7 @@
 .url-text {
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 0.8em;
-  background: var(--pt-bg-tertiary);
+  background: var(--pt-bg-surface-muted);
   padding: 2px 6px;
   border-radius: var(--pt-radius-sm);
   color: var(--pt-text-secondary);
@@ -113,19 +113,19 @@
 }
 
 html.dark .default-info {
-  background: rgba(14, 165, 233, 0.1);
-  color: var(--pt-color-info-500);
-  border-color: rgba(14, 165, 233, 0.2);
-  border-left-color: var(--pt-color-info-500);
+  background: color-mix(in srgb, var(--pt-state-info-bg) 88%, var(--pt-bg-surface));
+  color: var(--pt-state-info-text);
+  border-color: var(--pt-state-info-border);
+  border-left-color: var(--pt-color-info);
 }
 
 html.dark .form-actions {
-  background: var(--pt-bg-surface);
+  background: var(--pt-bg-surface-muted);
 }
 
 html.dark .url-text {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--pt-bg-surface-muted) 85%, var(--pt-bg-surface));
+  border-color: color-mix(in srgb, var(--pt-border-color) 88%, transparent);
 }
 
 @media (max-width: 768px) {
