@@ -359,17 +359,21 @@ const loginHTML = `{{define "login"}}
 <!doctype html><html><head><meta charset="utf-8"><title>登录</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/static/style.css"></head>
-<body>
-<main style="display:flex;justify-content:center;align-items:center;height:100vh;">
-  <div class="card" style="width:360px;">
-    <h2 style="text-align:center;">pt-tools 登录</h2>
-    <form id="loginForm" method="post">
-      <label>用户名</label>
-      <input name="username" placeholder="用户名" value="admin"/>
-      <label>密码</label>
-      <input name="password" type="password" placeholder="密码"/>
-      <div style="margin-top:12px;text-align:center;">
-        <button type="submit">登录</button>
+<body class="login-page">
+<main class="login-layout">
+  <div class="login-card">
+    <header class="login-card__header">
+      <p class="login-eyebrow">PT TOOLS</p>
+      <h1 class="login-title">欢迎登录</h1>
+      <p class="login-subtitle">集中管理站点、RSS 与下载任务</p>
+    </header>
+    <form id="loginForm" method="post" class="login-form">
+      <label for="username" class="login-label">用户名</label>
+      <input id="username" name="username" placeholder="用户名" value="admin" autocomplete="username"/>
+      <label for="password" class="login-label">密码</label>
+      <input id="password" name="password" type="password" placeholder="密码" autocomplete="current-password"/>
+      <div class="login-actions">
+        <button type="submit" class="login-button">登录</button>
       </div>
     </form>
   </div>

@@ -1,6 +1,6 @@
 .export-page {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: var(--pt-space-6);
   min-height: calc(100vh - 120px);
 }
@@ -23,7 +23,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--pt-space-4);
   flex-shrink: 0;
+  padding: var(--pt-space-4) var(--pt-space-5);
+  background: var(--pt-bg-surface);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-xl);
+  box-shadow: var(--pt-shadow-sm);
 }
 
 .preview-header h2 {
@@ -36,14 +42,17 @@
 .preview-actions {
   display: flex;
   gap: var(--pt-space-3);
+  flex-wrap: wrap;
 }
 
 .preview-scroll-container {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--pt-space-2);
-  margin: calc(-1 * var(--pt-space-2));
+  padding: var(--pt-space-4);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-xl);
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.06), transparent 42%);
 }
 
 .export-card {
@@ -51,9 +60,9 @@
   max-width: 640px;
   margin: 0 auto;
   padding: 28px;
-  border-radius: var(--pt-radius-2xl);
+  border-radius: 20px;
   color: #ffffff;
-  box-shadow: var(--pt-shadow-2xl);
+  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.28);
   position: relative;
   overflow: hidden;
 }
@@ -250,7 +259,7 @@
 
 .site-card-level {
   font-size: 10px;
-  color: #a78bfa;
+  color: #2dd4bf;
   font-weight: 500;
 }
 
@@ -325,6 +334,17 @@
   border-radius: var(--pt-radius-xl);
   padding: var(--pt-space-5);
   box-shadow: var(--pt-shadow-sm);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+}
+
+html.dark .preview-header,
+html.dark .preview-scroll-container {
+  background: var(--pt-bg-surface);
+}
+
+html.dark .preview-scroll-container {
+  background-image: linear-gradient(180deg, rgba(20, 184, 166, 0.1), transparent 42%);
 }
 
 .settings-card h3 {
@@ -450,4 +470,24 @@ html.dark .site-checkbox-group {
 /* Site card header row alignment fix */
 .site-card-header-row {
   align-items: flex-start;
+}
+
+@media (max-width: 768px) {
+  .preview-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .preview-actions {
+    width: 100%;
+  }
+
+  .preview-actions .el-button {
+    flex: 1;
+    min-width: 110px;
+  }
+
+  .export-settings-section {
+    position: static;
+  }
 }

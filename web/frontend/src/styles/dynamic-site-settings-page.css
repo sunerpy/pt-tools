@@ -1,0 +1,165 @@
+.dynamic-sites-page {
+  position: relative;
+  padding-top: var(--pt-space-3);
+  width: 100%;
+  --el-input-border-color: var(--pt-border-color);
+  --el-input-hover-border-color: var(--pt-color-primary-400);
+  --el-input-focus-border-color: var(--pt-color-primary);
+}
+
+.dynamic-sites-page::before {
+  content: "";
+  position: absolute;
+  inset: var(--pt-page-decor-inset-top) var(--pt-page-decor-inset-x) auto;
+  height: var(--pt-page-decor-height);
+  pointer-events: none;
+  z-index: -1;
+  border-radius: var(--pt-page-decor-radius);
+  border: var(--pt-page-decor-border);
+  box-shadow: var(--pt-page-decor-shadow);
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 11% 17%,
+      color-mix(in srgb, var(--pt-color-info-50) var(--pt-light-decor-primary-mix), transparent) 0%,
+      transparent var(--pt-light-decor-primary-stop)
+    ),
+    radial-gradient(
+      circle at 89% 14%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-primary-50) 52%, var(--pt-color-neutral-100))
+            var(--pt-light-decor-mist-mix),
+          transparent
+        )
+        0%,
+      transparent var(--pt-light-decor-secondary-stop)
+    );
+}
+
+.dynamic-sites-page .page-header {
+  margin-bottom: var(--pt-space-8);
+  padding-bottom: var(--pt-space-3);
+}
+
+.dynamic-sites-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dynamic-sites-page .page-actions {
+  flex-wrap: wrap;
+}
+
+.section-card {
+  margin-bottom: var(--pt-space-5);
+}
+
+.dynamic-sites-card,
+.dynamic-templates-card {
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pt-space-3);
+  font-size: var(--pt-text-lg);
+  font-weight: 700;
+}
+
+.site-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.site-name {
+  font-weight: 700;
+  color: var(--pt-text-primary);
+}
+
+.site-id {
+  font-size: var(--pt-text-xs);
+  color: var(--pt-text-secondary);
+}
+
+.site-dialog-form {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pt-color-primary-50) var(--pt-light-shell-primary-mix), transparent),
+    transparent 36%
+  );
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-lg);
+  padding: var(--pt-space-4);
+}
+
+.dialog-divider {
+  margin: var(--pt-space-4) 0;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: var(--pt-text-secondary);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.validation-result {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--pt-bg-secondary);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-md);
+}
+
+.free-torrents {
+  margin-top: 12px;
+}
+
+.free-torrents-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.free-torrents ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.free-torrents li {
+  font-size: 13px;
+  color: var(--pt-text-secondary);
+}
+
+.more-hint {
+  font-size: 12px;
+  color: var(--pt-text-tertiary);
+  margin-top: 4px;
+}
+
+html.dark .site-dialog-form {
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.12), transparent 35%);
+}
+
+html.dark .dynamic-sites-page::before {
+  background:
+    radial-gradient(
+      circle at 11% 17%,
+      color-mix(in srgb, var(--pt-color-primary) var(--pt-dark-decor-primary-mix), transparent) 0%,
+      transparent var(--pt-dark-decor-primary-stop)
+    ),
+    radial-gradient(
+      circle at 89% 14%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-info) 58%, var(--pt-color-neutral-500))
+            var(--pt-dark-decor-secondary-mix),
+          transparent
+        )
+        0%,
+      transparent var(--pt-dark-decor-secondary-stop)
+    );
+}

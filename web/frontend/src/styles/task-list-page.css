@@ -1,0 +1,314 @@
+.tasklist-page {
+  position: relative;
+  padding-top: var(--pt-space-3);
+}
+
+.tasklist-page::before {
+  content: "";
+  position: absolute;
+  inset: var(--pt-page-decor-inset-top) var(--pt-page-decor-inset-x) auto;
+  height: var(--pt-page-decor-height);
+  pointer-events: none;
+  z-index: -1;
+  border-radius: var(--pt-page-decor-radius);
+  border: var(--pt-page-decor-border);
+  box-shadow: var(--pt-page-decor-shadow);
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 12% 10%,
+      color-mix(in srgb, var(--pt-color-info-50) var(--pt-light-decor-primary-mix), transparent) 0%,
+      transparent var(--pt-light-decor-primary-stop)
+    ),
+    radial-gradient(
+      circle at 85% 16%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-primary-50) 52%, var(--pt-color-neutral-100))
+            var(--pt-light-decor-mist-mix),
+          transparent
+        )
+        0%,
+      transparent var(--pt-light-decor-secondary-stop)
+    );
+}
+
+.tasklist-page .page-header {
+  margin-bottom: var(--pt-space-8);
+  padding-bottom: var(--pt-space-3);
+}
+
+.tasklist-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.search-card {
+  margin-top: var(--pt-space-3);
+  margin-bottom: var(--pt-space-6);
+}
+
+.task-filter-shell {
+  box-shadow: var(--pt-shadow-sm);
+}
+
+.task-filter-card {
+  border-radius: var(--pt-radius-xl);
+  border: 1px solid var(--pt-border-color);
+  background:
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, var(--pt-color-primary-50) var(--pt-light-shell-primary-mix), transparent)
+        0%,
+      transparent 42%
+    ),
+    var(--pt-bg-surface);
+}
+
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-filter-form {
+  row-gap: 10px;
+}
+
+.filter-checks .el-checkbox {
+  margin-right: 12px;
+}
+
+.filter-actions .el-button {
+  border-radius: var(--pt-radius-md);
+}
+
+.task-table-card {
+  border-radius: var(--pt-radius-xl);
+  box-shadow: var(--pt-shadow-sm);
+}
+
+.task-table-card .el-table__header th.el-table__cell {
+  background: color-mix(in srgb, var(--pt-color-primary-50) 56%, var(--pt-bg-secondary));
+}
+
+.table-total-tag,
+.refresh-btn,
+.site-tag,
+.discount-tag {
+  border-radius: var(--pt-radius-full);
+}
+
+.site-tag,
+.discount-tag {
+  font-weight: 700;
+}
+
+.refresh-btn {
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--pt-color-primary) 14%, transparent);
+}
+
+.title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.title-text {
+  font-weight: 700;
+  color: var(--pt-text-primary);
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.title-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hash-cell {
+  font-family: var(--pt-font-mono);
+  font-size: 12px;
+  background: var(--pt-bg-tertiary);
+  padding: 3px 7px;
+  border-radius: var(--pt-radius-sm);
+  color: var(--pt-text-secondary);
+  cursor: pointer;
+  border: 1px solid var(--pt-border-color);
+}
+
+.free-end-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.text-danger {
+  color: var(--pt-color-danger);
+}
+
+.text-success {
+  color: var(--pt-color-success);
+}
+
+.text-secondary {
+  color: var(--pt-text-secondary);
+}
+
+.text-tertiary {
+  color: var(--pt-text-tertiary);
+}
+
+.mr-1 {
+  margin-right: 4px;
+}
+
+.size-text {
+  font-family: var(--pt-font-mono);
+  font-size: 12px;
+  color: var(--pt-text-secondary);
+}
+
+.progress-container {
+  padding: 2px 0;
+}
+
+.task-progress {
+  filter: saturate(1.08);
+}
+
+.task-progress .el-progress-bar__outer {
+  background: color-mix(in srgb, var(--pt-bg-tertiary) 88%, var(--pt-bg-secondary));
+  border-radius: var(--pt-radius-full);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-border-color) 85%, transparent);
+}
+
+.task-progress .el-progress-bar__inner {
+  border-radius: var(--pt-radius-full);
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.progress-detail {
+  color: var(--pt-text-secondary);
+  font-family: var(--pt-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-pct {
+  color: var(--pt-text-primary);
+  font-weight: 700;
+  font-family: var(--pt-font-mono);
+}
+
+.status-pill {
+  min-width: 72px;
+  border-radius: var(--pt-radius-full);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  position: relative;
+  padding-left: 16px;
+}
+
+.status-pill::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--pt-radius-full);
+  transform: translateY(-50%);
+  background: currentColor;
+}
+
+.status-pill--success {
+  color: var(--pt-color-success-700);
+  background: color-mix(in srgb, var(--pt-color-success-50) 90%, var(--pt-bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-color-success) 36%, transparent);
+}
+
+.status-pill--warning {
+  color: var(--pt-color-warning-700);
+  background: color-mix(in srgb, var(--pt-color-warning-50) 90%, var(--pt-bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-color-warning) 36%, transparent);
+}
+
+.status-pill--danger {
+  color: var(--pt-color-danger-700);
+  background: color-mix(in srgb, var(--pt-color-danger-50) 90%, var(--pt-bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-color-danger) 36%, transparent);
+}
+
+.status-pill--info {
+  color: var(--pt-color-info-700);
+  background: color-mix(in srgb, var(--pt-color-info-50) 90%, var(--pt-bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-color-info) 36%, transparent);
+}
+
+html.dark .tasklist-page::before {
+  background:
+    radial-gradient(
+      circle at 12% 10%,
+      color-mix(in srgb, var(--pt-color-primary) var(--pt-dark-decor-primary-mix), transparent) 0%,
+      transparent var(--pt-dark-decor-primary-stop)
+    ),
+    radial-gradient(
+      circle at 85% 16%,
+      color-mix(
+          in srgb,
+          color-mix(in srgb, var(--pt-color-info) 58%, var(--pt-color-neutral-500))
+            var(--pt-dark-decor-secondary-mix),
+          transparent
+        )
+        0%,
+      transparent var(--pt-dark-decor-secondary-stop)
+    );
+}
+
+html.dark .task-filter-card {
+  background:
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, var(--pt-color-primary) 14%, transparent) 0%,
+      transparent 36%
+    ),
+    var(--pt-bg-surface);
+}
+
+html.dark .task-table-card .el-table__header th.el-table__cell {
+  background: color-mix(in srgb, var(--pt-color-primary) 14%, var(--pt-bg-tertiary));
+}
+
+html.dark .task-progress .el-progress-bar__outer {
+  background: color-mix(in srgb, var(--pt-bg-tertiary) 86%, #000);
+}
+
+html.dark .status-pill--success,
+html.dark .status-pill--warning,
+html.dark .status-pill--danger,
+html.dark .status-pill--info {
+  color: var(--pt-text-primary);
+}
+
+@media (max-width: 768px) {
+  .task-filter-form {
+    align-items: stretch;
+  }
+
+  .filter-actions {
+    width: 100%;
+  }
+
+  .filter-actions .el-button {
+    width: calc(50% - 6px);
+  }
+}

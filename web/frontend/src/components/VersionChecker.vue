@@ -85,19 +85,27 @@ function renderMarkdown(text: string): string {
     <template #reference>
       <el-button class="version-btn" :class="{ 'has-update': hasUpdate }" text>
         <div class="btn-content">
-          <el-icon :class="{ 'is-checking': checking }">
-            <Promotion v-if="!checking" />
-            <Refresh v-else />
-          </el-icon>
-          <span class="version-text">{{ currentVersion }}</span>
-          <span v-if="hasUpdate" class="update-dot"></span>
+          <span class="version-icon-wrap">
+            <el-icon :class="{ 'is-checking': checking }">
+              <Promotion v-if="!checking" />
+              <Refresh v-else />
+            </el-icon>
+            <span v-if="hasUpdate" class="update-dot"></span>
+          </span>
+          <span class="version-meta">
+            <span class="version-label">版本</span>
+            <span class="version-text">{{ currentVersion }}</span>
+          </span>
         </div>
       </el-button>
     </template>
 
     <div class="version-content">
       <div class="popover-header">
-        <span class="title">版本信息</span>
+        <div class="title-wrap">
+          <span class="title">版本信息</span>
+          <span class="subtitle">当前版本与更新日志</span>
+        </div>
         <div class="header-actions">
           <el-button
             size="small"
@@ -176,8 +184,14 @@ function renderMarkdown(text: string): string {
         <div v-else-if="allDismissed" class="status-state dismissed">
           <div class="text-group">
             <span class="primary">已忽略所有新版本</span>
-            <span class="secondary">当前版本: {{ currentVersion }}</span>
-            <span class="secondary">最新版本: {{ latestVersion }}</span>
+            <span class="version-pair">
+              <span class="secondary-label">当前</span>
+              <span class="secondary">{{ currentVersion }}</span>
+            </span>
+            <span class="version-pair">
+              <span class="secondary-label">最新</span>
+              <span class="secondary">{{ latestVersion }}</span>
+            </span>
           </div>
           <el-button size="small" text type="primary" @click="versionStore.clearDismissed()">
             重新显示
@@ -250,358 +264,3 @@ function renderMarkdown(text: string): string {
     </div>
   </el-popover>
 </template>
-
-<style scoped>
-.version-btn {
-  height: 32px;
-  padding: 0 8px;
-  border-radius: 6px;
-  transition: all 0.3s;
-  color: var(--el-text-color-regular);
-}
-
-.version-btn:hover {
-  background-color: var(--el-fill-color);
-  color: var(--el-color-primary);
-}
-
-.btn-content {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  position: relative;
-}
-
-.version-text {
-  font-family: var(--el-font-family-monospace);
-  font-size: 13px;
-}
-
-.update-dot {
-  position: absolute;
-  top: -2px;
-  right: -4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--el-color-danger);
-  border: 1px solid var(--el-bg-color);
-}
-
-.has-update .version-btn {
-  color: var(--el-color-primary);
-}
-
-/* Popover Content */
-.version-content {
-  padding: 4px;
-}
-
-.popover-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.popover-header .title {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.proxy-section {
-  margin-bottom: 12px;
-}
-
-.status-container {
-  min-height: 60px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.status-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 0;
-  text-align: center;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
-.status-state.latest {
-  flex-direction: row;
-  gap: 12px;
-}
-
-.status-state.dismissed {
-  gap: 12px;
-}
-
-.success-icon {
-  font-size: 24px;
-  color: var(--el-color-success);
-}
-
-.text-group {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.text-group .primary {
-  color: var(--el-text-color-primary);
-  font-weight: 500;
-}
-
-.text-group .secondary {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-/* Updates List */
-.updates-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.update-header {
-  margin-bottom: 4px;
-}
-
-.release-item {
-  background-color: var(--el-fill-color-light);
-  border-radius: 8px;
-  padding: 12px;
-  border: 1px solid var(--el-border-color-lighter);
-  transition: all 0.2s;
-}
-
-.release-item:hover {
-  background-color: var(--el-fill-color);
-  border-color: var(--el-border-color);
-}
-
-.release-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.release-title-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.version-tag {
-  font-weight: 600;
-  color: var(--el-color-primary);
-  font-family: var(--el-font-family-monospace);
-  font-size: 14px;
-}
-
-.release-date {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.release-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.release-changelog-wrapper {
-  background-color: var(--el-bg-color);
-  border-radius: 4px;
-  padding: 8px 12px;
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid var(--el-border-color-lighter);
-}
-
-/* Markdown Styles */
-:deep(.markdown-body) {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-  line-height: 1.5;
-}
-
-:deep(.markdown-body h1),
-:deep(.markdown-body h2),
-:deep(.markdown-body h3) {
-  font-weight: 600;
-  margin-top: 12px;
-  margin-bottom: 8px;
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-}
-
-:deep(.markdown-body h1:first-child),
-:deep(.markdown-body h2:first-child),
-:deep(.markdown-body h3:first-child) {
-  margin-top: 0;
-}
-
-:deep(.markdown-body p) {
-  margin-bottom: 8px;
-}
-
-:deep(.markdown-body ul),
-:deep(.markdown-body ol) {
-  padding-left: 20px;
-  margin-bottom: 8px;
-}
-
-:deep(.markdown-body li) {
-  margin-bottom: 4px;
-}
-
-:deep(.markdown-body code) {
-  background-color: var(--el-fill-color-dark);
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-family: var(--el-font-family-monospace);
-  font-size: 12px;
-  color: var(--el-color-primary);
-}
-
-:deep(.markdown-body pre) {
-  background-color: var(--el-fill-color-dark);
-  padding: 8px;
-  border-radius: 4px;
-  overflow-x: auto;
-  margin-bottom: 8px;
-}
-
-:deep(.markdown-body pre code) {
-  background-color: transparent;
-  padding: 0;
-  color: var(--el-text-color-regular);
-}
-
-:deep(.markdown-body blockquote) {
-  margin: 0 0 8px 0;
-  padding-left: 12px;
-  border-left: 3px solid var(--el-border-color);
-  color: var(--el-text-color-secondary);
-}
-
-:deep(.markdown-body a) {
-  color: var(--el-color-primary);
-  text-decoration: none;
-}
-
-:deep(.markdown-body a:hover) {
-  text-decoration: underline;
-}
-
-.release-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-  align-items: center;
-}
-
-.action-link {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.more-releases {
-  margin-top: 8px;
-  text-align: center;
-  padding-top: 8px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-}
-
-/* Custom Scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--el-border-color);
-  border-radius: 3px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--el-text-color-secondary);
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-/* Animations */
-.is-checking {
-  animation: rotate 1.5s linear infinite;
-}
-
-@keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.docker-info {
-  margin-bottom: 12px;
-}
-
-.upgrade-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background-color: var(--el-fill-color-light);
-  border-radius: 8px;
-  border: 1px solid var(--el-border-color-lighter);
-  margin-bottom: 12px;
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.progress-status {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  display: flex;
-  justify-content: space-between;
-}
-
-.progress-status .success {
-  color: var(--el-color-success);
-}
-
-.progress-status .error {
-  color: var(--el-color-danger);
-}
-</style>

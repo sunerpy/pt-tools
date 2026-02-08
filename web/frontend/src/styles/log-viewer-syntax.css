@@ -1,0 +1,106 @@
+.log-viewer-page .json-key {
+  color: #0f766e;
+}
+
+.log-viewer-page .json-string {
+  color: #155e75;
+}
+
+.log-viewer-page .json-number {
+  color: #0c4a6e;
+}
+
+.log-viewer-page .json-boolean {
+  color: #be123c;
+}
+
+.log-viewer-page .json-null {
+  color: #64748b;
+  font-style: italic;
+}
+
+.log-viewer-page .json-punct {
+  color: #64748b;
+}
+
+.log-viewer-page .json-time {
+  color: #0e7490;
+}
+
+.log-viewer-page .json-msg {
+  color: #173036;
+}
+
+.log-viewer-page .log-debug {
+  color: #64748b;
+}
+
+.log-viewer-page .log-info {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.log-viewer-page .log-warn {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.log-viewer-page .log-error {
+  color: #be123c;
+  font-weight: 700;
+}
+
+.log-viewer-page .log-fatal {
+  color: #ffffff;
+  background: #be123c;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+html.dark .log-viewer-page .json-key {
+  color: #5eead4;
+}
+
+html.dark .log-viewer-page .json-string {
+  color: #67e8f9;
+}
+
+html.dark .log-viewer-page .json-number {
+  color: #fbbf24;
+}
+
+html.dark .log-viewer-page .json-boolean {
+  color: #fb7185;
+}
+
+html.dark .log-viewer-page .json-null,
+html.dark .log-viewer-page .json-punct,
+html.dark .log-viewer-page .log-debug {
+  color: #7a8a89;
+}
+
+html.dark .log-viewer-page .json-time {
+  color: #22d3ee;
+}
+
+html.dark .log-viewer-page .json-msg {
+  color: #dbe7e5;
+}
+
+html.dark .log-viewer-page .log-info {
+  color: #2dd4bf;
+}
+
+html.dark .log-viewer-page .log-warn {
+  color: #f59e0b;
+}
+
+html.dark .log-viewer-page .log-error {
+  color: #fb7185;
+}
+
+html.dark .log-viewer-page .log-fatal {
+  color: #101716;
+  background: #fb7185;
+}

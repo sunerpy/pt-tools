@@ -18,6 +18,13 @@ const isCollapse = ref(false);
 const stopLoading = ref(false);
 const startLoading = ref(false);
 
+const themeStyleOptions = [
+  { label: "默认配色", value: "default" },
+  { label: "海洋配色", value: "ocean" },
+  { label: "石墨配色", value: "graphite" },
+  { label: "高辨识", value: "contrast" },
+];
+
 const activeMenu = computed(() => {
   const name = route.name as string;
   if (name === "site-detail") return "sites";
@@ -88,7 +95,10 @@ function logout() {
 
 <template>
   <el-container class="app-container">
-    <el-aside :width="isCollapse ? '64px' : '220px'" class="app-aside">
+    <el-aside
+      :width="isCollapse ? '68px' : '236px'"
+      class="app-aside"
+      :class="{ 'is-collapse': isCollapse }">
       <div class="app-aside-logo">
         <el-icon class="app-aside-logo-icon" :size="28"><Monitor /></el-icon>
         <span v-show="!isCollapse" class="app-aside-logo-text">pt-tools</span>
@@ -154,10 +164,13 @@ function logout() {
     <el-container>
       <el-header class="app-header">
         <div class="app-header-left">
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item>{{ route.meta?.title || route.name }}</el-breadcrumb-item>
-          </el-breadcrumb>
+          <div class="app-header-title-group">
+            <div class="app-header-title">{{ route.meta?.title || route.name }}</div>
+            <el-breadcrumb separator="/">
+              <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
+              <el-breadcrumb-item>{{ route.meta?.title || route.name }}</el-breadcrumb-item>
+            </el-breadcrumb>
+          </div>
         </div>
 
         <div class="app-header-right">
@@ -177,15 +190,30 @@ function logout() {
           <span class="app-header-divider"></span>
 
           <el-switch
+            class="app-header-theme-switch"
             :model-value="themeStore.isDark"
             :active-icon="'Moon'"
             :inactive-icon="'Sunny'"
             inline-prompt
             @change="themeStore.toggle" />
 
+          <el-select
+            class="app-header-style"
+            :model-value="themeStore.themeStyle"
+            size="default"
+            style="width: 118px"
+            @change="themeStore.setThemeStyle">
+            <el-option
+              v-for="option in themeStyleOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value" />
+          </el-select>
+
           <span class="app-header-divider"></span>
 
           <el-select
+            class="app-header-loglevel"
             v-model="logLevelStore.currentLevel"
             :loading="logLevelStore.loading"
             size="default"
@@ -200,8 +228,8 @@ function logout() {
 
           <span class="app-header-divider"></span>
 
-          <el-dropdown>
-            <el-button text>
+          <el-dropdown class="app-header-user">
+            <el-button text class="app-header-user-btn">
               <el-icon><User /></el-icon>
               <span style="margin-left: 4px">admin</span>
             </el-button>

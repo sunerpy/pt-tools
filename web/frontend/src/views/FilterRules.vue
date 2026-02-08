@@ -229,16 +229,29 @@ function getMatchFieldLabel(field: string | undefined) {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-card v-loading="loading" shadow="never">
+  <div class="page-container filter-rules-page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">过滤规则</h1>
+        <p class="page-subtitle">配置 RSS 订阅的自动过滤和下载规则</p>
+      </div>
+    </div>
+    <el-card v-loading="loading" shadow="never" class="rules-main-card">
       <template #header>
         <div class="card-header">
-          <span>过滤规则管理</span>
-          <el-button type="primary" :icon="'Plus'" @click="openAddDialog">添加规则</el-button>
+          <span class="header-title">过滤规则管理</span>
+          <el-button type="primary" :icon="'Plus'" class="add-rule-btn" @click="openAddDialog">
+            添加规则
+          </el-button>
         </div>
       </template>
 
-      <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 16px">
+      <el-alert
+        class="rules-alert rules-alert-warning"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 16px">
         <template #title>
           <strong>大多数用户无需设置过滤规则</strong>
         </template>
@@ -248,18 +261,32 @@ function getMatchFieldLabel(field: string | undefined) {
         </template>
       </el-alert>
 
-      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+      <el-alert
+        class="rules-alert rules-alert-info"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 16px">
         <template #title>
           过滤规则用于自动下载匹配的种子。规则按优先级排序，数字越小优先级越高。
         </template>
       </el-alert>
 
-      <el-table :data="rules" style="width: 100%">
+      <el-table :data="rules" style="width: 100%" class="rules-table">
         <el-table-column type="index" label="序号" width="60" align="center" />
 
         <el-table-column label="名称" min-width="120">
           <template #default="{ row }">
-            <span class="rule-name">{{ row.name }}</span>
+            <div class="rule-name-cell">
+              <span :class="['rule-status-dot', row.enabled ? 'is-enabled' : 'is-disabled']"></span>
+              <span class="rule-name">{{ row.name }}</span>
+              <el-tag
+                :type="row.enabled ? 'success' : 'info'"
+                size="small"
+                effect="light"
+                class="rule-status-tag">
+                {{ row.enabled ? "启用" : "停用" }}
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
 
@@ -299,7 +326,7 @@ function getMatchFieldLabel(field: string | undefined) {
 
         <el-table-column label="操作" min-width="200" align="center">
           <template #default="{ row }">
-            <el-space>
+            <el-space class="rule-actions">
               <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
               <el-button type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
               <el-button type="danger" size="small" @click="deleteRule(row)">删除</el-button>
@@ -315,8 +342,9 @@ function getMatchFieldLabel(field: string | undefined) {
     <el-dialog
       v-model="showDialog"
       :title="editMode ? '编辑过滤规则' : '添加过滤规则'"
-      width="600px">
-      <el-form :model="form" label-width="100px" label-position="right">
+      width="600px"
+      class="rule-dialog">
+      <el-form :model="form" label-width="100px" label-position="right" class="rule-form">
         <el-form-item label="名称" required>
           <el-input v-model="form.name" placeholder="例如: 4K电影" />
         </el-form-item>
@@ -396,14 +424,17 @@ function getMatchFieldLabel(field: string | undefined) {
     </el-dialog>
 
     <!-- 测试结果对话框 -->
-    <el-dialog v-model="showTestDialog" title="匹配测试结果" width="800px">
-      <div v-if="testResult" v-loading="testing">
+    <el-dialog v-model="showTestDialog" title="匹配测试结果" width="800px" class="test-dialog">
+      <div v-if="testResult" v-loading="testing" class="test-result-panel">
         <div class="test-result-header">
-          <el-alert :type="testResult.match_count > 0 ? 'success' : 'warning'" :closable="false">
+          <el-alert
+            :type="testResult.match_count > 0 ? 'success' : 'warning'"
+            :closable="false"
+            class="test-summary-alert">
             <template #title>
-              <div style="font-size: 14px">
+              <div class="test-summary-text">
                 共测试 {{ testResult.total_count }} 条记录，匹配到
-                <span style="color: var(--el-color-primary); font-weight: bold">
+                <span class="test-summary-count">
                   {{ testResult.match_count }}
                 </span>
                 条
@@ -411,7 +442,7 @@ function getMatchFieldLabel(field: string | undefined) {
             </template>
           </el-alert>
 
-          <el-radio-group v-model="form.match_field" size="small" style="margin-top: 12px">
+          <el-radio-group v-model="form.match_field" size="small" class="test-scope-switch">
             <el-radio-button v-for="f in matchFields" :key="f.value" :label="f.value">
               {{ f.label }}
             </el-radio-button>
@@ -462,113 +493,8 @@ function getMatchFieldLabel(field: string | undefined) {
 </template>
 
 <style scoped>
-.page-container {
-  width: 100%;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.rule-name {
-  font-weight: 500;
-}
-
-.pattern-text {
-  font-family: monospace;
-  font-size: 13px;
-  background: var(--el-fill-color-light);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.form-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-}
-
-.template-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.template-tag {
-  cursor: pointer;
-}
-
-.template-tag:hover {
-  background: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary);
-}
-
-.test-result-header {
-  margin-bottom: 16px;
-  text-align: center;
-}
-
-.match-list {
-  max-height: 600px;
-  overflow-y: auto;
-  padding: 0 4px;
-}
-
-.match-item {
-  margin-bottom: 12px;
-}
-
-.match-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.match-index {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-.match-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.match-section {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.match-label {
-  flex-shrink: 0;
-  width: 40px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.match-title {
-  flex: 1;
-  font-size: 13px;
-  line-height: 1.5;
-  word-break: break-all;
-}
-
-.match-tag-content {
-  flex: 1;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--el-text-color-regular);
-  word-break: break-all;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: space-between;
-}
+@import "@/styles/common-page.css";
+@import "@/styles/table-page.css";
+@import "@/styles/form-page.css";
+@import "@/styles/filter-rules-page.css";
 </style>

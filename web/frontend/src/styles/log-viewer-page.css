@@ -1,0 +1,146 @@
+.log-viewer-page {
+  height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+}
+
+.page-actions {
+  flex-wrap: wrap;
+}
+
+.control-check {
+  padding: 0 var(--pt-space-3);
+  height: 36px;
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-full);
+  background: var(--pt-bg-surface);
+}
+
+.scroll-button-group {
+  box-shadow: none;
+}
+
+.scroll-btn,
+.refresh-btn {
+  font-weight: 700;
+}
+
+.log-card {
+  flex: 1;
+  min-height: 0;
+  background: var(--pt-bg-surface);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-xl);
+  box-shadow: var(--pt-shadow-sm);
+  overflow: hidden;
+  position: relative;
+}
+
+.log-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.08), transparent 24%);
+}
+
+.log-path-text {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: var(--pt-text-xs);
+  color: var(--pt-text-tertiary);
+  margin-left: var(--pt-space-2);
+  max-width: 48ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-container {
+  height: 100%;
+  overflow: auto;
+  padding: 18px 20px;
+  background-color: #f6faf9;
+  color: #173036;
+  position: relative;
+}
+
+.log-content {
+  margin: 0;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre;
+  word-break: normal;
+}
+
+.log-content code {
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  border: none;
+  color: inherit;
+}
+
+.log-line {
+  display: block;
+  min-height: 1.8em;
+}
+
+.virtual-spacer {
+  width: 100%;
+}
+
+.log-container::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.log-container::-webkit-scrollbar-track {
+  background: #eaf2f0;
+}
+
+.log-container::-webkit-scrollbar-thumb {
+  background-color: #93bcb5;
+  border-radius: 5px;
+  border: 2px solid #eaf2f0;
+}
+
+.log-container::-webkit-scrollbar-thumb:hover {
+  background-color: #6aa79d;
+}
+
+html.dark .control-check {
+  background: var(--pt-bg-tertiary);
+}
+
+html.dark .log-container {
+  background-color: #101716;
+  color: #c7d9d5;
+}
+
+html.dark .log-container::-webkit-scrollbar-track {
+  background: #0f1214;
+}
+
+html.dark .log-container::-webkit-scrollbar-thumb {
+  background-color: #3e5552;
+  border-color: #0f1214;
+}
+
+html.dark .log-container::-webkit-scrollbar-thumb:hover {
+  background-color: #5a7571;
+}
+
+@media (max-width: 768px) {
+  .log-viewer-page {
+    height: auto;
+  }
+
+  .log-container {
+    height: 60vh;
+  }
+
+  .log-content {
+    font-size: 12px;
+  }
+}

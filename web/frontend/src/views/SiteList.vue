@@ -144,8 +144,10 @@ function getRssCount(site: SiteConfig): number {
             <el-tag
               :type="row[1].enabled ? 'success' : 'info'"
               size="small"
-              effect="dark"
-              class="status-tag">
+              effect="plain"
+              class="status-tag"
+              round>
+              <span class="status-dot" :class="{ active: row[1].enabled }"></span>
               {{ row[1].enabled ? "已启用" : "未启用" }}
             </el-tag>
           </template>
@@ -164,13 +166,14 @@ function getRssCount(site: SiteConfig): number {
                       : 'info'
               "
               size="small"
-              effect="plain"
+              effect="light"
+              class="status-tag status-tag--auth"
               round>
               {{
                 row[1].auth_method === "api_key"
                   ? "API Key"
                   : row[1].auth_method === "cookie_and_api_key"
-                    ? "Cookie + API Key"
+                    ? "Cookie + API"
                     : row[1].auth_method === "passkey"
                       ? "Passkey"
                       : "Cookie"
@@ -209,7 +212,13 @@ function getRssCount(site: SiteConfig): number {
                   @change="toggleEnabled(row[0])"
                   style="--el-switch-on-color: var(--pt-color-success)" />
               </el-tooltip>
-              <el-button type="primary" size="small" text bg @click="manageSite(row[0])">
+              <el-button
+                type="primary"
+                size="small"
+                text
+                bg
+                class="action-btn action-btn--config"
+                @click="manageSite(row[0])">
                 配置
               </el-button>
               <el-button
@@ -217,6 +226,7 @@ function getRssCount(site: SiteConfig): number {
                 size="small"
                 text
                 bg
+                class="action-btn action-btn--delete"
                 :disabled="row[1].is_builtin"
                 @click="deleteSite(row[0])">
                 删除
@@ -273,7 +283,7 @@ function getRssCount(site: SiteConfig): number {
 
 /* Force table cell to allow overflow for the badge */
 :deep(.el-table__body-wrapper .el-table__cell .cell) {
-  overflow: visible !important;
+  overflow: visible;
 }
 
 .mr-2 {
@@ -281,20 +291,99 @@ function getRssCount(site: SiteConfig): number {
 }
 
 .status-tag {
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 24px;
+}
+
+.status-tag--auth {
+  border-width: 1px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--pt-color-neutral-400);
+  transition: background-color var(--pt-transition-normal);
+}
+
+.status-dot.active {
+  background-color: var(--pt-color-success);
+  box-shadow: 0 0 0 2px var(--pt-color-success-50);
 }
 
 :deep(.el-table__row) {
-  transition: background-color var(--pt-transition-fast);
+  transition:
+    background-color var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast);
 }
 
 :deep(.el-table__row:hover) {
-  background-color: var(--pt-bg-secondary) !important;
+  background-color: color-mix(in srgb, var(--pt-color-primary-50) 60%, var(--pt-bg-secondary));
+}
+
+.action-btn {
+  min-width: 56px;
+  border-radius: var(--pt-radius-md);
+  font-weight: 600;
+  border-width: 1px;
+  border-style: solid;
+  background: var(--pt-bg-surface);
+  transition:
+    transform var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast);
+}
+
+.action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--pt-shadow-sm);
+}
+
+.action-btn--config {
+  color: var(--pt-color-primary);
+  border-color: color-mix(in srgb, var(--pt-color-primary) 38%, var(--pt-border-color));
+  background: color-mix(in srgb, var(--pt-color-primary-50) 82%, var(--pt-bg-surface));
+}
+
+.action-btn--delete {
+  color: var(--pt-color-danger);
+  border-color: color-mix(in srgb, var(--pt-color-danger) 36%, var(--pt-border-color));
+  background: color-mix(in srgb, var(--pt-color-danger-50) 82%, var(--pt-bg-surface));
 }
 
 /* Dark mode adjustments */
 html.dark .site-name {
   color: var(--pt-text-primary);
+}
+
+html.dark .status-dot.active {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pt-color-success) 30%, transparent);
+}
+
+html.dark .action-btn {
+  color: var(--pt-text-primary);
+  background: color-mix(in srgb, var(--pt-bg-tertiary) 90%, #000 10%);
+  border-color: color-mix(in srgb, var(--pt-border-color) 82%, #fff 12%);
+}
+
+html.dark .action-btn--config {
+  color: color-mix(in srgb, var(--pt-color-primary-100) 90%, #fff 10%);
+  border-color: color-mix(in srgb, var(--pt-color-primary) 40%, var(--pt-border-color));
+  background: color-mix(in srgb, var(--pt-color-primary) 24%, var(--pt-bg-tertiary));
+}
+
+html.dark .action-btn--delete {
+  color: color-mix(in srgb, var(--pt-color-danger-100) 90%, #fff 10%);
+  border-color: color-mix(in srgb, var(--pt-color-danger) 40%, var(--pt-border-color));
+  background: color-mix(in srgb, var(--pt-color-danger) 22%, var(--pt-bg-tertiary));
+}
+
+html.dark :deep(.el-table__row:hover) {
+  background-color: color-mix(in srgb, var(--pt-color-primary-900) 34%, var(--pt-bg-surface));
 }
 </style>

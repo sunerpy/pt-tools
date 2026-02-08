@@ -57,7 +57,7 @@ async function save() {
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="page-container global-settings-page">
     <div class="page-header">
       <div class="page-title-group">
         <h2 class="page-title">系统设置</h2>
@@ -77,9 +77,9 @@ async function save() {
       type="warning"
       show-icon
       :closable="false"
-      class="mb-6" />
+      class="settings-warning" />
 
-    <el-card v-loading="loading" shadow="never" class="common-card">
+    <el-card v-loading="loading" shadow="never" class="common-card global-settings-card">
       <template #header>
         <div class="form-card-header">
           <h3>
@@ -89,9 +89,9 @@ async function save() {
         </div>
       </template>
 
-      <el-form :model="form" label-width="160px" label-position="top">
+      <el-form :model="form" label-width="160px" label-position="top" class="settings-form">
         <!-- 基础运行设置 -->
-        <div class="form-section">
+        <div class="form-section settings-section">
           <div class="form-section-title">
             <el-icon><Timer /></el-icon>
             运行频率
@@ -107,7 +107,7 @@ async function save() {
         </div>
 
         <!-- 目录设置 -->
-        <div class="form-section">
+        <div class="form-section settings-section">
           <div class="form-section-title">
             <el-icon><Folder /></el-icon>
             存储路径
@@ -128,7 +128,7 @@ async function save() {
         </div>
 
         <!-- 限制与自动化 -->
-        <div class="form-section">
+        <div class="form-section settings-section">
           <div class="form-section-title">
             <el-icon><Speedometer /></el-icon>
             下载策略与限制
@@ -152,7 +152,7 @@ async function save() {
             </el-col>
           </el-row>
 
-          <el-row :gutter="40" class="mt-4">
+          <el-row :gutter="40" class="strategy-row">
             <el-col :md="12" :sm="24">
               <el-form-item label="启用下载限速判断">
                 <el-switch v-model="form.download_limit_enabled" />
@@ -184,37 +184,7 @@ async function save() {
 </template>
 
 <style scoped>
-.mb-6 {
-  margin-bottom: 1.5rem;
-}
-.mt-4 {
-  margin-top: 1rem;
-}
-.w-full {
-  width: 100%;
-}
-
-/* Custom tip code styling compatible with the new theme */
-.form-tip code {
-  background: var(--pt-bg-tertiary);
-  padding: 2px 6px;
-  border-radius: var(--pt-radius-sm);
-  font-family: var(--pt-font-mono, monospace);
-  color: var(--pt-color-primary);
-  font-size: 0.9em;
-}
-
-:deep(.el-form-item__label) {
-  font-weight: 600;
-  color: var(--pt-text-primary);
-  margin-bottom: 8px !important;
-}
-
-:deep(.el-input-number.w-full) {
-  width: 100%;
-}
-
-:deep(.el-input-number.w-full .el-input__inner) {
-  text-align: left;
-}
+@import "@/styles/common-page.css";
+@import "@/styles/form-page.css";
+@import "@/styles/global-settings-page.css";
 </style>

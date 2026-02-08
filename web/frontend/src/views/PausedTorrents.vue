@@ -236,14 +236,14 @@ function formatProgress(progress: number): string {
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="page-container paused-torrents-page">
     <div class="page-header">
       <div>
         <h1 class="page-title">暂停任务管理</h1>
         <p class="page-subtitle">管理 RSS 订阅中因免费期结束而自动暂停的下载任务</p>
       </div>
       <div class="page-actions">
-        <div class="auto-refresh-switch">
+        <div class="auto-refresh-switch control-pill">
           <el-switch
             v-model="autoRefresh"
             inline-prompt
@@ -255,15 +255,16 @@ function formatProgress(progress: number): string {
         </div>
         <el-select
           v-model="siteFilter"
+          class="site-filter-select"
           placeholder="全部站点"
           clearable
-          style="width: 140px"
           @change="handleTabChange(activeTab)">
           <el-option label="全部站点" value="" />
           <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
         </el-select>
         <el-button
           type="primary"
+          class="refresh-button"
           :icon="Refresh"
           :loading="loading"
           @click="handleTabChange(activeTab)">
@@ -275,16 +276,22 @@ function formatProgress(progress: number): string {
     <div class="table-card">
       <el-tabs v-model="activeTab" class="custom-tabs" @tab-change="handleTabChange">
         <el-tab-pane label="暂停中" name="paused">
-          <div
-            v-if="selectedIds.length > 0"
-            class="filter-bar"
-            style="margin: 16px; margin-bottom: 0">
+          <div v-if="selectedIds.length > 0" class="filter-bar batch-action-bar">
             <div class="filter-group">
               <span class="filter-group-label">已选择 {{ selectedIds.length }} 项</span>
-              <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, false)">
+              <el-button
+                type="danger"
+                plain
+                size="small"
+                class="batch-action-button"
+                @click="deleteTorrents(selectedIds, false)">
                 删除任务
               </el-button>
-              <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, true)">
+              <el-button
+                type="danger"
+                size="small"
+                class="batch-action-button"
+                @click="deleteTorrents(selectedIds, true)">
                 删除任务和数据
               </el-button>
             </div>
@@ -294,10 +301,11 @@ function formatProgress(progress: number): string {
             <el-table
               v-loading="loading"
               :data="pausedTorrents"
+              class="pt-table paused-table"
               style="width: 100%"
               @selection-change="handleSelectionChange">
               <el-table-column type="selection" width="50" />
-              <el-table-column label="站点" prop="site_name" width="100">
+              <el-table-column label="站点" prop="site_name" min-width="128">
                 <template #default="{ row }">
                   <el-tag size="small" effect="plain" class="status-badge status-badge--info">
                     {{ row.site_name }}
@@ -354,10 +362,20 @@ function formatProgress(progress: number): string {
               <el-table-column label="操作" width="160" fixed="right">
                 <template #default="{ row }">
                   <div class="table-cell-actions">
-                    <el-button link type="primary" size="small" @click="resumeTorrent(row)">
+                    <el-button
+                      link
+                      type="primary"
+                      size="small"
+                      class="action-button"
+                      @click="resumeTorrent(row)">
                       恢复
                     </el-button>
-                    <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
+                    <el-button
+                      link
+                      type="danger"
+                      size="small"
+                      class="action-button"
+                      @click="openDeleteDialog(row)">
                       删除
                     </el-button>
                   </div>
@@ -385,8 +403,12 @@ function formatProgress(progress: number): string {
 
         <el-tab-pane label="历史归档" name="archive">
           <div class="table-wrapper">
-            <el-table v-loading="loading" :data="archiveTorrents" style="width: 100%">
-              <el-table-column label="站点" prop="site_name" width="100">
+            <el-table
+              v-loading="loading"
+              :data="archiveTorrents"
+              class="pt-table archive-table"
+              style="width: 100%">
+              <el-table-column label="站点" prop="site_name" min-width="128">
                 <template #default="{ row }">
                   <el-tag size="small" effect="plain" class="status-badge status-badge--info">
                     {{ row.site_name }}
@@ -481,99 +503,5 @@ function formatProgress(progress: number): string {
 <style scoped>
 @import "@/styles/common-page.css";
 @import "@/styles/table-page.css";
-
-.custom-tabs :deep(.el-tabs__header) {
-  margin-bottom: 0;
-  padding: 0 var(--pt-space-5);
-  border-bottom: 1px solid var(--pt-border-color);
-}
-
-.title-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  word-break: break-all;
-}
-
-.auto-refresh-switch {
-  display: flex;
-  align-items: center;
-  margin-right: 12px;
-}
-
-.progress-container {
-  padding: 4px 0;
-}
-
-.custom-progress :deep(.el-progress-bar__outer) {
-  background-color: var(--pt-bg-tertiary);
-}
-
-.progress-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 6px;
-  font-size: 11px;
-  line-height: 1.2;
-}
-
-.progress-detail-text {
-  color: var(--pt-text-secondary);
-  font-family: var(--pt-font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.progress-percentage {
-  color: var(--pt-text-primary);
-  font-weight: 600;
-  font-family: var(--pt-font-mono);
-}
-
-.delete-confirm-content {
-  padding: 10px 0;
-}
-
-.confirm-text {
-  font-size: 14px;
-  color: var(--pt-text-primary);
-  margin-bottom: 16px;
-  line-height: 1.5;
-}
-
-.highlight-text {
-  font-weight: 600;
-  color: var(--pt-color-primary);
-}
-
-.confirm-tip {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 12px;
-  background-color: var(--pt-bg-secondary);
-  border-radius: 4px;
-  font-size: 13px;
-  color: var(--pt-text-secondary);
-  line-height: 1.4;
-}
-
-.confirm-tip .el-icon {
-  margin-top: 2px;
-  color: var(--pt-text-placeholder);
-}
-
-.dialog-footer-custom {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 12px;
-}
+@import "@/styles/paused-torrents-page.css";
 </style>
