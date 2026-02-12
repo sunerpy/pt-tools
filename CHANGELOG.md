@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-02-12
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue from 3.5.27 to 3.5.28 in /web/frontend ([#93](https://github.com/sunerpy/pt-tools/issues/93)) ([#93](https://github.com/sunerpy/pt-tools/pull/93))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.27 to 3.5.28. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.27...v3.5.28)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.28
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @types/node from 25.2.0 to 25.2.2 in /web/frontend ([#96](https://github.com/sunerpy/pt-tools/issues/96)) ([#96](https://github.com/sunerpy/pt-tools/pull/96))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.2.0 to 25.2.2. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.2.2
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/sys from 0.40.0 to 0.41.0 ([#95](https://github.com/sunerpy/pt-tools/issues/95)) ([#95](https://github.com/sunerpy/pt-tools/pull/95))
+  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.40.0 to 0.41.0. - [Commits](https://github.com/golang/sys/compare/v0.40.0...v0.41.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/sys
+         dependency-version: 0.41.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/text from 0.33.0 to 0.34.0 ([#94](https://github.com/sunerpy/pt-tools/issues/94)) ([#94](https://github.com/sunerpy/pt-tools/pull/94))
+  Bumps [golang.org/x/text](https://github.com/golang/text) from 0.33.0 to 0.34.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.33.0...v0.34.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/text
+         dependency-version: 0.34.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **multi**: 多站点优化与代理支持 ([#97](https://github.com/sunerpy/pt-tools/issues/97)) ([#97](https://github.com/sunerpy/pt-tools/pull/97))
+- 增加 ALL_PROXY 支持并统一 HTTP 客户端代理与连接池 - 迁移站点验证器从 net/http 到 requests 库 - 删除无调用者的死代码和冗余依赖 - 新增代理配置文档和使用说明 - 更新站点列表和 docker-compose 配置 - 修复多站点免费解析失败与种子过期误判(HDDolby/RousiPro/SpringSunday) - 修复 RSS 任务统计计数与站点列表 Passkey 缺失 - 美化主题配色系统并重命名高辨识为极光配色
+
+### Miscellaneous
+
+- **config**: 调整 release-please 版本策略
+- bump-patch-for-minor-pre-major 改为 false - feat 类型在 v0.x 阶段触发 minor 版本升级
+
 ## [0.12.6] - 2026-02-08
 
 ### Bug Fixes
