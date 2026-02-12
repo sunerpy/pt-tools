@@ -542,7 +542,7 @@ type TorrentDetailFetcher interface {
 	// GetTorrentDetail fetches detailed torrent info given an RSS item's GUID and link.
 	// The guid is typically the torrent ID, and link is the detail page URL.
 	// Returns nil TorrentItem if the torrent is not found (without error).
-	GetTorrentDetail(ctx context.Context, guid, link string) (*TorrentItem, error)
+	GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error)
 }
 
 // DetailFetcherProvider is an optional interface for Site implementations that can provide

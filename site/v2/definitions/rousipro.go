@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/sunerpy/pt-tools/global"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -113,8 +114,14 @@ type rousiTorrent struct {
 }
 
 type rousiPromotion struct {
-	Type     int  `json:"type"`
-	IsActive bool `json:"is_active"`
+	Type           int     `json:"type"`
+	IsActive       bool    `json:"is_active"`
+	Until          string  `json:"until,omitempty"`
+	DownMultiplier float64 `json:"down_multiplier"`
+	UpMultiplier   float64 `json:"up_multiplier"`
+	TimeType       int     `json:"time_type"`
+	IsGlobal       bool    `json:"is_global"`
+	Text           string  `json:"text,omitempty"`
 }
 
 type rousiUserData struct {
@@ -269,21 +276,22 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 	siteID := d.getSiteID()
 
 	for _, t := range searchData.Torrents {
-		discount := d.parsePromotion(t.Promotion)
+		discount, discountEnd := d.parsePromotion(t.Promotion)
 
 		item := v2.TorrentItem{
-			ID:            t.UUID,
-			Title:         t.Title,
-			Subtitle:      t.Subtitle,
-			SizeBytes:     t.Size,
-			Seeders:       t.Seeders,
-			Leechers:      t.Leechers,
-			Snatched:      t.Downloads,
-			DiscountLevel: discount,
-			Category:      t.CategoryName,
-			URL:           fmt.Sprintf("%s/torrent/%s", d.BaseURL, t.UUID),
-			DownloadURL:   fmt.Sprintf("%s/api/torrent/%s/download/%s", d.BaseURL, t.UUID, d.Passkey),
-			SourceSite:    siteID,
+			ID:              t.UUID,
+			Title:           t.Title,
+			Subtitle:        t.Subtitle,
+			SizeBytes:       t.Size,
+			Seeders:         t.Seeders,
+			Leechers:        t.Leechers,
+			Snatched:        t.Downloads,
+			DiscountLevel:   discount,
+			DiscountEndTime: discountEnd,
+			Category:        t.CategoryName,
+			URL:             fmt.Sprintf("%s/torrent/%s", d.BaseURL, t.UUID),
+			DownloadURL:     fmt.Sprintf("%s/api/torrent/%s/download/%s", d.BaseURL, t.UUID, d.Passkey),
+			SourceSite:      siteID,
 		}
 
 		if t.CreatedAt != "" {
@@ -300,27 +308,59 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 	return items, nil
 }
 
-func (d *rousiDriver) parsePromotion(promo *rousiPromotion) v2.DiscountLevel {
+func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, time.Time) {
 	if promo == nil || !promo.IsActive {
-		return v2.DiscountNone
+		return v2.DiscountNone, time.Time{}
 	}
 
-	switch promo.Type {
-	case 2:
-		return v2.DiscountFree
-	case 3:
-		return v2.Discount2xUp
-	case 4:
-		return v2.Discount2xFree
-	case 5:
-		return v2.DiscountPercent50
-	case 6:
-		return v2.Discount2x50
-	case 7:
-		return v2.DiscountPercent30
-	default:
-		return v2.DiscountNone
+	if logger := global.GetSloggerSafe(); logger != nil {
+		logger.Debugf("[RousiPro] promotion: type=%d, down=%.2f, up=%.2f, text=%s, until=%s",
+			promo.Type, promo.DownMultiplier, promo.UpMultiplier, promo.Text, promo.Until)
 	}
+
+	var endTime time.Time
+	if promo.Until != "" {
+		for _, layout := range []string{
+			time.RFC3339,
+			"2006-01-02T15:04:05-0700",
+			"2006-01-02 15:04:05",
+		} {
+			if t, err := time.Parse(layout, promo.Until); err == nil {
+				if layout == "2006-01-02 15:04:05" {
+					t = t.In(time.FixedZone("CST", 8*3600))
+				}
+				endTime = t
+				break
+			}
+		}
+	}
+
+	var level v2.DiscountLevel
+	switch promo.Type {
+	case 0, 1:
+		level = v2.DiscountNone
+	case 2:
+		level = v2.DiscountFree
+	case 3:
+		level = v2.Discount2xUp
+	case 4:
+		level = v2.Discount2xFree
+	case 5:
+		level = v2.DiscountPercent50
+	case 6:
+		level = v2.Discount2x50
+	case 7:
+		level = v2.DiscountPercent30
+	default:
+		if promo.DownMultiplier == 0 && promo.UpMultiplier >= 2 {
+			level = v2.Discount2xFree
+		} else if promo.DownMultiplier == 0 {
+			level = v2.DiscountFree
+		} else {
+			level = v2.DiscountNone
+		}
+	}
+	return level, endTime
 }
 
 func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
@@ -335,6 +375,10 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 	res, err := d.Execute(ctx, req)
 	if err != nil {
 		return v2.UserInfo{}, fmt.Errorf("execute user info: %w", err)
+	}
+
+	if logger := global.GetSloggerSafe(); logger != nil {
+		logger.Debugf("[RousiPro] GetUserInfo raw response: %s", string(res.RawBody))
 	}
 
 	if !res.IsSuccess() {
@@ -372,11 +416,15 @@ func (d *rousiDriver) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 	if userData.RegisteredAt != "" {
 		if joinTime, err := time.Parse(time.RFC3339, userData.RegisteredAt); err == nil {
 			info.JoinDate = joinTime.Unix()
+		} else if joinTime, err := time.Parse("2006-01-02T15:04:05-0700", userData.RegisteredAt); err == nil {
+			info.JoinDate = joinTime.Unix()
 		}
 	}
 
 	if userData.LastActiveAt != "" {
 		if accessTime, err := time.Parse(time.RFC3339, userData.LastActiveAt); err == nil {
+			info.LastAccess = accessTime.Unix()
+		} else if accessTime, err := time.Parse("2006-01-02T15:04:05-0700", userData.LastActiveAt); err == nil {
 			info.LastAccess = accessTime.Unix()
 		}
 	}
@@ -416,7 +464,7 @@ func extractUUIDFromLink(link string) string {
 	return ""
 }
 
-func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link string) (*v2.TorrentItem, error) {
+func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string) (*v2.TorrentItem, error) {
 	torrentUUID := extractUUIDFromLink(link)
 	if torrentUUID == "" {
 		torrentUUID = guid
@@ -450,16 +498,19 @@ func (d *rousiDriver) GetTorrentDetail(ctx context.Context, guid, link string) (
 		return nil, fmt.Errorf("API error: %s", result.Message)
 	}
 
+	discount, discountEnd := d.parsePromotion(result.Data.Promotion)
+
 	item := &v2.TorrentItem{
-		ID:            result.Data.UUID,
-		Title:         result.Data.Title,
-		Subtitle:      result.Data.Subtitle,
-		SizeBytes:     result.Data.Size,
-		Seeders:       result.Data.Seeders,
-		Leechers:      result.Data.Leechers,
-		Snatched:      result.Data.Downloads,
-		SourceSite:    d.getSiteID(),
-		DiscountLevel: d.parsePromotion(result.Data.Promotion),
+		ID:              result.Data.UUID,
+		Title:           result.Data.Title,
+		Subtitle:        result.Data.Subtitle,
+		SizeBytes:       result.Data.Size,
+		Seeders:         result.Data.Seeders,
+		Leechers:        result.Data.Leechers,
+		Snatched:        result.Data.Downloads,
+		SourceSite:      d.getSiteID(),
+		DiscountLevel:   discount,
+		DiscountEndTime: discountEnd,
 	}
 
 	if result.Data.CreatedAt != "" {

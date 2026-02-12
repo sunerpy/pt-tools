@@ -22,7 +22,7 @@ const themeStyleOptions = [
   { label: "默认配色", value: "default" },
   { label: "海洋配色", value: "ocean" },
   { label: "石墨配色", value: "graphite" },
-  { label: "高辨识", value: "contrast" },
+  { label: "极光配色", value: "contrast" },
 ];
 
 const activeMenu = computed(() => {

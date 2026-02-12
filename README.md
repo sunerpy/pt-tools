@@ -1,6 +1,6 @@
 # pt-tools
 
-[![Go Version](https://img.shields.io/badge/Go-1.25+-blue.svg)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/sunerpy/pt-tools.svg)](https://hub.docker.com/r/sunerpy/pt-tools)
 
@@ -26,6 +26,7 @@
 | **下载器管理**       | 支持多个下载器实例，可配置不同的下载目录和启动策略                |
 | **过滤规则**         | 对 RSS 订阅进行精细化筛选，支持关键词/通配符/正则表达式           |
 | **免费结束自动暂停** | 监控种子免费状态，免费期结束时自动暂停未完成的下载任务            |
+| **代理支持**         | 支持 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY 环境变量代理       |
 | **版本更新检查**     | 自动检测新版本，支持代理设置，在 Web 界面展示更新日志             |
 | **一键自动升级**     | 二进制部署支持 Web 界面一键升级，自动下载替换，无需手动操作       |
 | **Web 管理界面**     | Web UI 管理后台，方便配置和监控                                   |
@@ -139,7 +140,6 @@ docker run -d \
 ### Docker Compose（推荐）
 
 ```yaml
-version: "3.8"
 services:
   pt-tools:
     image: sunerpy/pt-tools:latest
@@ -154,6 +154,9 @@ services:
       - ./data:/app/.pt-tools
     restart: unless-stopped
 ```
+
+> 如需通过代理访问站点，可设置环境变量：`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`。
+> 详细说明见 [docs/configuration.md](docs/configuration.md#代理配置)。
 
 启动后访问 `http://localhost:8080` 进入 Web 管理界面。
 

@@ -1904,10 +1904,13 @@ func extractSiteIDFromURL(baseURL string) string {
 	return host
 }
 
-func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link string) (*TorrentItem, error) {
-	torrentID := guid
-	if torrentID == "" && link != "" {
+func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ string) (*TorrentItem, error) {
+	torrentID := ""
+	if link != "" {
 		torrentID = extractTorrentIDFromURL(link)
+	}
+	if torrentID == "" {
+		torrentID = guid
 	}
 	if torrentID == "" {
 		return nil, fmt.Errorf("unable to determine torrent ID")

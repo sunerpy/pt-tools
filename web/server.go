@@ -521,6 +521,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				Cookie:     sc.Cookie,
 				APIKey:     sc.APIKey,
 				APIUrl:     sc.APIUrl,
+				Passkey:    sc.Passkey,
 				RSS:        sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {

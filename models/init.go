@@ -98,15 +98,13 @@ type TorrentInfoArchive struct {
 }
 
 func (t *TorrentInfo) GetExpired() bool {
-	// 如果已标记为过期，直接返回 true
 	if t.IsExpired {
 		return true
 	}
-	// 处理免费结束时间为 nil 的情况
 	if t.FreeEndTime == nil {
-		return true
+		isFreeLevel := t.FreeLevel != "" && t.FreeLevel != "NONE" && t.FreeLevel != "normal"
+		return !isFreeLevel
 	}
-	// 正常计算过期时间（带缓冲）
 	buffer := 5 * time.Minute
 	return time.Now().Add(buffer).After(*t.FreeEndTime)
 }

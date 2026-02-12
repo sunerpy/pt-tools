@@ -996,7 +996,7 @@ func (d *MTorrentDriver) GetUserInfo(ctx context.Context) (UserInfo, error) {
 	return info, nil
 }
 
-func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _ string) (*TorrentItem, error) {
+func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _, _ string) (*TorrentItem, error) {
 	req := MTorrentRequest{
 		Endpoint:    "/api/torrent/detail",
 		Method:      "POST",

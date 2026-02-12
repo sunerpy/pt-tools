@@ -2,7 +2,6 @@ package v2
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -19,74 +18,68 @@ func TestNewHTTPClientPool(t *testing.T) {
 	assert.NotNil(t, pool)
 }
 
-func TestHTTPClientPool_GetClient(t *testing.T) {
+func TestHTTPClientPool_GetSession(t *testing.T) {
 	pool := NewHTTPClientPool(DefaultHTTPClientConfig(), nil)
 
-	client1 := pool.GetClient("site1")
-	assert.NotNil(t, client1)
+	session1 := pool.GetSession("site1")
+	assert.NotNil(t, session1)
 
-	// Same site should return same client (same pointer)
-	client2 := pool.GetClient("site1")
-	assert.Same(t, client1, client2)
+	session2 := pool.GetSession("site1")
+	assert.Same(t, session1, session2)
 
-	// Different site should return different client (different pointer)
-	client3 := pool.GetClient("site2")
-	assert.NotSame(t, client1, client3)
+	session3 := pool.GetSession("site2")
+	assert.NotSame(t, session1, session3)
 }
 
-func TestHTTPClientPool_GetClient_Concurrent(t *testing.T) {
+func TestHTTPClientPool_GetSession_Concurrent(t *testing.T) {
 	pool := NewHTTPClientPool(DefaultHTTPClientConfig(), nil)
 
 	var wg sync.WaitGroup
-	clients := make([]*http.Client, 10)
+	sessions := make([]interface{}, 10)
 
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			clients[idx] = pool.GetClient("site1")
+			sessions[idx] = pool.GetSession("site1")
 		}(i)
 	}
 
 	wg.Wait()
 
-	// All should be the same client
 	for i := 1; i < 10; i++ {
-		assert.Equal(t, clients[0], clients[i])
+		assert.Equal(t, sessions[0], sessions[i])
 	}
 }
 
 func TestHTTPClientPool_CloseClient(t *testing.T) {
 	pool := NewHTTPClientPool(DefaultHTTPClientConfig(), nil)
 
-	client1 := pool.GetClient("site1")
-	assert.NotNil(t, client1)
+	session1 := pool.GetSession("site1")
+	assert.NotNil(t, session1)
 
 	pool.CloseClient("site1")
 
-	// Verify client was removed
 	pool.mu.RLock()
-	_, exists := pool.clients["site1"]
+	_, exists := pool.sessions["site1"]
 	pool.mu.RUnlock()
 	assert.False(t, exists)
 
-	// Should create new client after close
-	client2 := pool.GetClient("site1")
-	assert.NotNil(t, client2)
+	session2 := pool.GetSession("site1")
+	assert.NotNil(t, session2)
 }
 
 func TestHTTPClientPool_CloseAll(t *testing.T) {
 	pool := NewHTTPClientPool(DefaultHTTPClientConfig(), nil)
 
-	pool.GetClient("site1")
-	pool.GetClient("site2")
-	pool.GetClient("site3")
+	pool.GetSession("site1")
+	pool.GetSession("site2")
+	pool.GetSession("site3")
 
 	pool.CloseAll()
 
-	// Pool should be empty (new clients will be created)
 	pool.mu.RLock()
-	assert.Empty(t, pool.clients)
+	assert.Empty(t, pool.sessions)
 	pool.mu.RUnlock()
 }
 
@@ -476,20 +469,4 @@ func TestRequestsResponse_Methods(t *testing.T) {
 	errResp := &RequestsResponse{statusCode: http.StatusInternalServerError}
 	assert.False(t, errResp.IsSuccess())
 	assert.True(t, errResp.IsError())
-}
-
-func TestHTTPClientPool_GetSession(t *testing.T) {
-	pool := NewHTTPClientPool(DefaultHTTPClientConfig(), nil)
-
-	session1 := pool.GetSession("site1")
-	assert.NotNil(t, session1)
-
-	// Same site should return same session (same pointer)
-	session2 := pool.GetSession("site1")
-	// Use reflect.ValueOf to compare pointers since Session is an interface
-	assert.Equal(t, fmt.Sprintf("%p", session1), fmt.Sprintf("%p", session2))
-
-	// Different site should return different session
-	session3 := pool.GetSession("site2")
-	assert.NotEqual(t, fmt.Sprintf("%p", session1), fmt.Sprintf("%p", session3))
 }

@@ -60,7 +60,7 @@
 }
 
 .custom-tabs > .el-tabs__content {
-  padding-top: var(--pt-space-4);
+  padding: var(--pt-space-4) var(--pt-space-5) var(--pt-space-5);
   background: var(--pt-bg-surface);
 }
 

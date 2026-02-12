@@ -11,6 +11,8 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 	Aka:            []string{"SSD"},
 	Description:    "Classic Movie Compression Team",
 	Schema:         v2.SchemaNexusPHP,
+	RateLimit:      0.5,
+	RateBurst:      2,
 	URLs:           []string{"https://springsunday.net/"},
 	LegacyURLs:     []string{"https://hdcmct.org/"},
 	FaviconURL:     "https://springsunday.net/favicon.ico",

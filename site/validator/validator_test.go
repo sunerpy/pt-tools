@@ -10,6 +10,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/sunerpy/requests"
 )
 
 // Feature: downloader-site-extensibility, Property 6: Site Validation Result Completeness
@@ -395,7 +396,6 @@ func (m *mockDynamicSiteConfig) IsEnabled() bool           { return m.enabled }
 func (m *mockDynamicSiteConfig) GetDownloaderName() string { return m.downloaderName }
 func (m *mockDynamicSiteConfig) Validate() error           { return nil }
 
-// TestWithTimeout 测试 WithTimeout 选项
 func TestWithTimeout(t *testing.T) {
 	timeout := 10 * time.Second
 	opt := WithTimeout(timeout)
@@ -406,49 +406,40 @@ func TestWithTimeout(t *testing.T) {
 	if validator.timeout != timeout {
 		t.Errorf("WithTimeout() timeout = %v, want %v", validator.timeout, timeout)
 	}
-	if validator.httpClient.Timeout != timeout {
-		t.Errorf("WithTimeout() httpClient.Timeout = %v, want %v", validator.httpClient.Timeout, timeout)
-	}
 }
 
-// TestWithHTTPClient 测试 WithHTTPClient 选项
-func TestWithHTTPClient(t *testing.T) {
-	customClient := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-	opt := WithHTTPClient(customClient)
+func TestWithSession(t *testing.T) {
+	customSession := requests.NewSession().WithTimeout(5 * time.Second)
+	defer func() { _ = customSession.Close() }()
+
+	opt := WithSession(customSession)
 
 	validator := NewSiteValidator()
 	opt(validator)
 
-	if validator.httpClient != customClient {
-		t.Error("WithHTTPClient() did not set the custom client")
+	if validator.session != customSession {
+		t.Error("WithSession() did not set the custom session")
 	}
 }
 
-// TestNewSiteValidatorWithOptions 测试带选项的验证器创建
 func TestNewSiteValidatorWithOptions(t *testing.T) {
 	timeout := 15 * time.Second
-	customClient := &http.Client{
-		Timeout: 20 * time.Second,
-	}
+	customSession := requests.NewSession().WithTimeout(20 * time.Second)
+	defer func() { _ = customSession.Close() }()
 
-	// 测试单个选项
 	v1 := NewSiteValidatorWithOptions(WithTimeout(timeout))
 	if v1.timeout != timeout {
 		t.Errorf("NewSiteValidatorWithOptions() with timeout = %v, want %v", v1.timeout, timeout)
 	}
 
-	// 测试多个选项
 	v2 := NewSiteValidatorWithOptions(
 		WithTimeout(timeout),
-		WithHTTPClient(customClient),
+		WithSession(customSession),
 	)
-	if v2.httpClient != customClient {
-		t.Error("NewSiteValidatorWithOptions() did not set custom client")
+	if v2.session != customSession {
+		t.Error("NewSiteValidatorWithOptions() did not set custom session")
 	}
 
-	// 测试无选项
 	v3 := NewSiteValidatorWithOptions()
 	if v3 == nil {
 		t.Fatal("NewSiteValidatorWithOptions() should not return nil")
@@ -1092,7 +1083,6 @@ func TestValidateConfigWithUnsupportedAuthMethod(t *testing.T) {
 	}
 }
 
-// TestNewSiteValidator 测试默认验证器创建
 func TestNewSiteValidator(t *testing.T) {
 	validator := NewSiteValidator()
 
@@ -1101,15 +1091,11 @@ func TestNewSiteValidator(t *testing.T) {
 		return
 	}
 
-	if validator.httpClient == nil {
-		t.Error("NewSiteValidator() httpClient should not be nil")
+	if validator.session == nil {
+		t.Error("NewSiteValidator() session should not be nil")
 	}
 
 	if validator.timeout != 60*time.Second {
 		t.Errorf("NewSiteValidator() timeout = %v, want %v", validator.timeout, 60*time.Second)
-	}
-
-	if validator.httpClient.Timeout != 30*time.Second {
-		t.Errorf("NewSiteValidator() httpClient.Timeout = %v, want %v", validator.httpClient.Timeout, 30*time.Second)
 	}
 }

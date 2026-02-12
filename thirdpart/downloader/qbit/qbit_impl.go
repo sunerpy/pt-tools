@@ -10,7 +10,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sunerpy/requests"
 	"github.com/zeebo/bencode"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -31,10 +29,14 @@ type QbitClient struct {
 	username     string
 	password     string
 	autoStart    bool
-	client       *http.Client
+	client       requestDoer
 	mu           sync.Mutex
 	healthy      bool
 	lastActivity time.Time
+}
+
+type requestDoer interface {
+	Do(req *http.Request) (*http.Response, error)
 }
 
 // QbitTorrentProperties qBittorrent 种子属性
@@ -51,15 +53,13 @@ func NewQbitClient(config downloader.DownloaderConfig, name string) (downloader.
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	jar, _ := cookiejar.New(nil)
-	transport := requests.GetTransport(false)
 	client := &QbitClient{
 		name:      name,
 		baseURL:   config.GetURL(),
 		username:  config.GetUsername(),
 		password:  config.GetPassword(),
 		autoStart: config.GetAutoStart(),
-		client:    &http.Client{Jar: jar, Transport: transport, Timeout: 30 * time.Second},
+		client:    downloader.NewRequestsHTTPDoer(config.GetURL(), 30*time.Second),
 		healthy:   false,
 	}
 
@@ -92,11 +92,8 @@ func (q *QbitClient) Close() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.healthy = false
-	if q.client != nil && q.client.Transport != nil {
-		if tr, ok := q.client.Transport.(*http.Transport); ok {
-			requests.PutTransport(tr)
-			q.client.Transport = nil
-		}
+	if closer, ok := q.client.(interface{ Close() error }); ok {
+		_ = closer.Close()
 	}
 	return nil
 }
@@ -503,10 +500,18 @@ func NewQbitClientForTesting(httpClient *http.Client, baseURL string) *QbitClien
 	return &QbitClient{
 		name:         "test-client",
 		baseURL:      baseURL,
-		client:       httpClient,
+		client:       &standardHTTPDoer{client: httpClient},
 		healthy:      true,
 		lastActivity: time.Now(),
 	}
+}
+
+type standardHTTPDoer struct {
+	client *http.Client
+}
+
+func (d *standardHTTPDoer) Do(req *http.Request) (*http.Response, error) {
+	return d.client.Do(req)
 }
 
 // ProcessTorrentDirectory 处理目录中的所有种子文件
