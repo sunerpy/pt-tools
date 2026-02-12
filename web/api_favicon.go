@@ -4,6 +4,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,9 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunerpy/requests"
+
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // FaviconService 管理站点图标缓存（数据库存储）
@@ -139,33 +143,29 @@ func (fs *FaviconService) fetchAndSave(siteID, siteName, faviconURL string) erro
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
+	session := requests.NewSession().WithTimeout(30 * time.Second)
+	if proxyURL := httpclient.ResolveProxyFromEnvironment(faviconURL); proxyURL != "" {
+		session = session.WithProxy(proxyURL)
 	}
+	defer func() { _ = session.Close() }()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, faviconURL, nil)
+	req, err := requests.NewGet(faviconURL).Build()
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.AddHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-	resp, err := client.Do(req)
+	resp, err := session.DoWithContext(ctx, req)
 	if err != nil {
 		return fmt.Errorf("下载图标失败: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("下载图标失败: HTTP %d", resp.StatusCode)
 	}
 
 	// 限制读取大小（最大 1MB）
-	limitedReader := io.LimitReader(resp.Body, 1024*1024)
+	limitedReader := io.LimitReader(bytes.NewReader(resp.Bytes()), 1024*1024)
 	data, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return fmt.Errorf("读取图标数据失败: %w", err)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
@@ -32,6 +33,13 @@ type UnifiedSiteImpl struct {
 	limiter    *v2.PersistentRateLimiter
 }
 
+func getDBInstance() *gorm.DB {
+	if global.GlobalDB != nil && global.GlobalDB.DB != nil {
+		return global.GlobalDB.DB
+	}
+	return nil
+}
+
 func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, siteID string, siteKind v2.SiteKind) (*UnifiedSiteImpl, error) {
 	var logger *zap.SugaredLogger
 	var zapLogger *zap.Logger
@@ -45,6 +53,8 @@ func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, s
 	// 从站点定义获取速率限制配置
 	rateLimit := 2.0 // 默认: 2 请求/秒
 	rateBurst := 5   // 默认: burst 5
+	var rateWindow time.Duration
+	var rateWindowLimit int
 	if def := v2.GetDefinitionRegistry().GetOrDefault(siteID); def != nil {
 		if def.RateLimit > 0 {
 			rateLimit = def.RateLimit
@@ -52,15 +62,23 @@ func newUnifiedSiteImplWithID(ctx context.Context, siteGroup models.SiteGroup, s
 		if def.RateBurst > 0 {
 			rateBurst = def.RateBurst
 		}
-		logger.Debugf("[速率限制] 站点=%s, RateLimit=%.2f/s, Burst=%d", siteID, rateLimit, rateBurst)
+		rateWindow = def.RateWindow
+		rateWindowLimit = def.RateWindowLimit
+		logger.Debugf("[速率限制] 站点=%s, RateLimit=%.4f/s, Burst=%d", siteID, rateLimit, rateBurst)
 	}
 
-	// 创建持久化速率限制器
 	var limiter *v2.PersistentRateLimiter
-	if global.GlobalDB != nil && global.GlobalDB.DB != nil {
-		limiter = v2.NewPersistentRateLimiterFromRPS(global.GlobalDB.DB, siteID, rateLimit, rateBurst)
+	db := getDBInstance()
+	if rateWindow > 0 && rateWindowLimit > 0 {
+		limiter = v2.NewPersistentRateLimiter(v2.PersistentRateLimiterConfig{
+			DB:     db,
+			SiteID: siteID,
+			Limit:  rateWindowLimit,
+			Window: rateWindow,
+		})
+		logger.Debugf("[速率限制] 站点=%s, 使用滑动窗口: %d次/%v", siteID, rateWindowLimit, rateWindow)
 	} else {
-		limiter = v2.NewPersistentRateLimiterFromRPS(nil, siteID, rateLimit, rateBurst)
+		limiter = v2.NewPersistentRateLimiterFromRPS(db, siteID, rateLimit, rateBurst)
 	}
 
 	return &UnifiedSiteImpl{
@@ -176,7 +194,7 @@ func (u *UnifiedSiteImpl) GetTorrentDetails(item *gofeed.Item) (*v2.TorrentItem,
 		return nil, fmt.Errorf("站点 %s 未实现 TorrentDetailFetcher", u.siteID)
 	}
 
-	return fetcher.GetTorrentDetail(u.ctx, item.GUID, item.Link)
+	return fetcher.GetTorrentDetail(u.ctx, item.GUID, item.Link, item.Title)
 }
 
 // SendTorrentToDownloader 发送种子到下载器
@@ -200,11 +218,11 @@ func (u *UnifiedSiteImpl) SendTorrentToDownloader(ctx context.Context, rssCfg mo
 		return err
 	}
 	if !exists {
-		u.logger.Debugf("[跳过推送] 站点=%s, 下载目录不存在: %s", u.siteGroup, dirPath)
+		u.logger.Infof("[跳过推送] 站点=%s, 下载目录不存在: %s", u.siteGroup, dirPath)
 		return nil
 	}
 	if empty {
-		u.logger.Debugf("[跳过推送] 站点=%s, 下载目录为空: %s", u.siteGroup, dirPath)
+		u.logger.Infof("[跳过推送] 站点=%s, 下载目录为空: %s", u.siteGroup, dirPath)
 		return nil
 	}
 

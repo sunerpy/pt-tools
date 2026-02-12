@@ -2,12 +2,10 @@ package v2
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +15,8 @@ import (
 
 	"github.com/sunerpy/requests"
 	"github.com/zeebo/bencode"
+
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // Common errors for torrent operations
@@ -266,16 +266,22 @@ func GetRemoteTorrent(torrentURL, cookie string) (*ParsedTorrent, error) {
 
 // GetRemoteTorrentWithRequests fetches a torrent file from a URL using requests library
 func GetRemoteTorrentWithRequests(torrentURL, cookie string) (*ParsedTorrent, error) {
-	opts := []requests.RequestOption{
-		requests.WithHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
-		requests.WithTimeout(30 * time.Second),
+	session := requests.NewSession().WithTimeout(30 * time.Second)
+	if proxyURL := httpclient.ResolveProxyFromEnvironment(torrentURL); proxyURL != "" {
+		session = session.WithProxy(proxyURL)
 	}
+	defer func() { _ = session.Close() }()
 
+	req, err := requests.NewGet(torrentURL).Build()
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.AddHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	if cookie != "" {
-		opts = append(opts, requests.WithHeader("Cookie", cookie))
+		req.AddHeader("Cookie", cookie)
 	}
 
-	resp, err := requests.Get(torrentURL, opts...)
+	resp, err := session.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch torrent: %w", err)
 	}
@@ -285,60 +291,6 @@ func GetRemoteTorrentWithRequests(torrentURL, cookie string) (*ParsedTorrent, er
 	}
 
 	data := resp.Bytes()
-	if len(data) == 0 {
-		return nil, ErrTorrentNotFound
-	}
-
-	return ParseTorrent(data)
-}
-
-// GetRemoteTorrentWithClient fetches a torrent file from a URL with a custom HTTP client
-// Deprecated: Use GetRemoteTorrentWithRequests instead
-func GetRemoteTorrentWithClient(torrentURL, cookie string, client *http.Client) (*ParsedTorrent, error) {
-	if client == nil {
-		client = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				DisableKeepAlives: true,
-			},
-		}
-	}
-
-	req, err := http.NewRequestWithContext(context.Background(), "GET", torrentURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	if cookie != "" {
-		req.Header.Set("Cookie", cookie)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch torrent: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
-	}
-
-	// Validate content type
-	contentType := resp.Header.Get("Content-Type")
-	if !isValidTorrentContentType(contentType) {
-		// Some sites don't set proper content type, so we'll try to parse anyway
-		// but log a warning
-	}
-
-	// Read body with size limit (50MB max)
-	const maxSize = 50 * 1024 * 1024
-	limitedReader := io.LimitReader(resp.Body, maxSize)
-	data, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
 	if len(data) == 0 {
 		return nil, ErrTorrentNotFound
 	}

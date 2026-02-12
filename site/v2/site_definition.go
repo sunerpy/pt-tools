@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // idPattern enforces lowercase alphanumeric IDs with hyphens/underscores
@@ -326,6 +327,8 @@ type SiteDefinition struct {
 	AuthMethod        AuthMethod             `json:"authMethod,omitempty"`
 	RateLimit         float64                `json:"rateLimit,omitempty"`
 	RateBurst         int                    `json:"rateBurst,omitempty"`
+	RateWindow        time.Duration          `json:"-"`
+	RateWindowLimit   int                    `json:"rateWindowLimit,omitempty"`
 	TimezoneOffset    string                 `json:"timezoneOffset,omitempty"`
 	UserInfo          *UserInfoConfig        `json:"userInfo,omitempty"`
 	LevelRequirements []SiteLevelRequirement `json:"levelRequirements,omitempty"`

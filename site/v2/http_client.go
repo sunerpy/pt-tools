@@ -10,11 +10,14 @@ import (
 	"math/rand"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sunerpy/requests"
 	"go.uber.org/zap"
+
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // HTTPClientConfig holds configuration for HTTP clients
@@ -51,6 +54,11 @@ func DefaultHTTPClientConfig() HTTPClientConfig {
 type SiteHTTPClient struct {
 	session   requests.Session
 	userAgent string
+	proxyURL  string
+	timeout   time.Duration
+	idleTime  time.Duration
+	maxIdle   int
+	keepAlive bool
 	logger    *zap.Logger
 }
 
@@ -60,6 +68,7 @@ type SiteHTTPClientConfig struct {
 	MaxIdleConns      int
 	IdleConnTimeout   time.Duration
 	DisableKeepAlives bool
+	ProxyURL          string
 	UserAgent         string
 	Logger            *zap.Logger
 }
@@ -87,9 +96,18 @@ func NewSiteHTTPClient(config SiteHTTPClientConfig) *SiteHTTPClient {
 		WithMaxIdleConns(config.MaxIdleConns).
 		WithKeepAlive(!config.DisableKeepAlives)
 
+	if strings.TrimSpace(config.ProxyURL) != "" {
+		session = session.WithProxy(strings.TrimSpace(config.ProxyURL))
+	}
+
 	return &SiteHTTPClient{
 		session:   session,
 		userAgent: config.UserAgent,
+		proxyURL:  strings.TrimSpace(config.ProxyURL),
+		timeout:   config.Timeout,
+		idleTime:  config.IdleConnTimeout,
+		maxIdle:   config.MaxIdleConns,
+		keepAlive: !config.DisableKeepAlives,
 		logger:    config.Logger,
 	}
 }
@@ -113,33 +131,51 @@ func (r *HTTPResponse) IsError() bool {
 
 // DoRequest performs an HTTP request using the requests library
 func (c *SiteHTTPClient) DoRequest(ctx context.Context, method, url string, body io.Reader, headers map[string]string) (*HTTPResponse, error) {
-	opts := []requests.RequestOption{
-		requests.WithContext(ctx),
-		requests.WithHeader("User-Agent", c.userAgent),
-	}
-
-	for k, v := range headers {
-		opts = append(opts, requests.WithHeader(k, v))
-	}
-
-	var resp *requests.Response
-	var err error
-
+	var builder *requests.RequestBuilder
 	switch method {
 	case http.MethodGet:
-		resp, err = requests.Get(url, opts...)
+		builder = requests.NewGet(url)
 	case http.MethodPost:
-		resp, err = requests.Post(url, body, opts...)
+		builder = requests.NewPost(url)
 	case http.MethodPut:
-		resp, err = requests.Put(url, body, opts...)
+		builder = requests.NewPut(url)
 	case http.MethodDelete:
-		resp, err = requests.Delete(url, opts...)
+		builder = requests.NewDeleteBuilder(url)
 	case http.MethodPatch:
-		resp, err = requests.Patch(url, body, opts...)
+		builder = requests.NewPatch(url)
 	default:
 		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
 	}
 
+	if body != nil && method != http.MethodGet && method != http.MethodDelete {
+		builder = builder.WithBody(body)
+	}
+
+	req, err := builder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("build request failed: %w", err)
+	}
+
+	req.AddHeader("User-Agent", c.userAgent)
+	for k, v := range headers {
+		req.AddHeader(k, v)
+	}
+
+	activeSession := c.session
+	if c.proxyURL == "" {
+		envProxyURL := httpclient.ResolveProxyFromEnvironment(url)
+		if envProxyURL != "" {
+			activeSession = requests.NewSession().
+				WithTimeout(c.timeout).
+				WithIdleTimeout(c.idleTime).
+				WithMaxIdleConns(c.maxIdle).
+				WithKeepAlive(c.keepAlive).
+				WithProxy(envProxyURL)
+			defer func() { _ = activeSession.Close() }()
+		}
+	}
+
+	resp, err := activeSession.DoWithContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -180,23 +216,19 @@ func (c *SiteHTTPClient) Close() error {
 	return c.session.Close()
 }
 
-// HTTPClientPool manages HTTP sessions for different sites using requests library
 type HTTPClientPool struct {
 	sessions map[string]requests.Session
-	clients  map[string]*http.Client // Keep for backward compatibility
 	mu       sync.RWMutex
 	config   HTTPClientConfig
 	logger   *zap.Logger
 }
 
-// NewHTTPClientPool creates a new HTTP client pool
 func NewHTTPClientPool(config HTTPClientConfig, logger *zap.Logger) *HTTPClientPool {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &HTTPClientPool{
 		sessions: make(map[string]requests.Session),
-		clients:  make(map[string]*http.Client),
 		config:   config,
 		logger:   logger,
 	}
@@ -232,44 +264,6 @@ func (p *HTTPClientPool) GetSession(siteID string) requests.Session {
 	return session
 }
 
-// GetClient returns an HTTP client for the given site ID (backward compatibility)
-func (p *HTTPClientPool) GetClient(siteID string) *http.Client {
-	p.mu.RLock()
-	client, ok := p.clients[siteID]
-	p.mu.RUnlock()
-
-	if ok {
-		return client
-	}
-
-	// Create new client
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if client, ok = p.clients[siteID]; ok {
-		return client
-	}
-
-	// Create a standard http.Client with configured transport
-	transport := &http.Transport{
-		MaxIdleConns:        p.config.MaxIdleConns,
-		MaxIdleConnsPerHost: p.config.MaxIdleConnsPerHost,
-		IdleConnTimeout:     p.config.IdleConnTimeout,
-		DisableKeepAlives:   p.config.DisableKeepAlives,
-	}
-
-	client = &http.Client{
-		Timeout:   p.config.Timeout,
-		Transport: transport,
-	}
-
-	p.clients[siteID] = client
-	p.logger.Debug("Created HTTP client", zap.String("site", siteID))
-	return client
-}
-
-// CloseClient closes and removes the client for a site
 func (p *HTTPClientPool) CloseClient(siteID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -278,11 +272,9 @@ func (p *HTTPClientPool) CloseClient(siteID string) {
 		_ = session.Close()
 		delete(p.sessions, siteID)
 	}
-	delete(p.clients, siteID)
 	p.logger.Debug("Closed HTTP client", zap.String("site", siteID))
 }
 
-// CloseAll closes all clients
 func (p *HTTPClientPool) CloseAll() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -291,10 +283,6 @@ func (p *HTTPClientPool) CloseAll() {
 		_ = session.Close()
 		delete(p.sessions, siteID)
 		p.logger.Debug("Closed HTTP client", zap.String("site", siteID))
-	}
-	// Clear the clients map as well
-	for siteID := range p.clients {
-		delete(p.clients, siteID)
 	}
 }
 

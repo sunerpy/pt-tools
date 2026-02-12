@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -8,6 +9,9 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"github.com/sunerpy/requests"
+
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // AuthMethod 认证方式
@@ -47,39 +51,33 @@ type DynamicSiteConfig interface {
 // SiteValidator 站点验证器
 // 用于验证新站点配置是否有效
 type SiteValidator struct {
-	httpClient *http.Client
-	timeout    time.Duration
+	session requests.Session
+	timeout time.Duration
 }
 
-// NewSiteValidator 创建站点验证器
 func NewSiteValidator() *SiteValidator {
+	session := requests.NewSession().WithTimeout(30 * time.Second)
 	return &SiteValidator{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		session: session,
 		timeout: 60 * time.Second,
 	}
 }
 
-// ValidatorOption 验证器选项
 type ValidatorOption func(*SiteValidator)
 
-// WithTimeout 设置超时时间
 func WithTimeout(d time.Duration) ValidatorOption {
 	return func(v *SiteValidator) {
 		v.timeout = d
-		v.httpClient.Timeout = d
+		v.session = v.session.WithTimeout(d)
 	}
 }
 
-// WithHTTPClient 设置HTTP客户端
-func WithHTTPClient(client *http.Client) ValidatorOption {
+func WithSession(session requests.Session) ValidatorOption {
 	return func(v *SiteValidator) {
-		v.httpClient = client
+		v.session = session
 	}
 }
 
-// NewSiteValidatorWithOptions 创建带选项的验证器
 func NewSiteValidatorWithOptions(opts ...ValidatorOption) *SiteValidator {
 	v := NewSiteValidator()
 	for _, opt := range opts {
@@ -88,7 +86,13 @@ func NewSiteValidatorWithOptions(opts ...ValidatorOption) *SiteValidator {
 	return v
 }
 
-// ValidationRequest 验证请求
+func (v *SiteValidator) sessionWithProxy(targetURL string) requests.Session {
+	if proxyURL := httpclient.ResolveProxyFromEnvironment(targetURL); proxyURL != "" {
+		return v.session.Clone().(requests.Session).WithProxy(proxyURL)
+	}
+	return v.session
+}
+
 type ValidationRequest struct {
 	Name        string     `json:"name"`
 	DisplayName string     `json:"display_name"`
@@ -312,22 +316,21 @@ func (v *SiteValidator) testConnection(ctx context.Context, req *ValidationReque
 		return fmt.Errorf("unsupported auth method: %s", req.AuthMethod)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
+	session := v.sessionWithProxy(testURL)
+
+	r, err := requests.NewGet(testURL).Build()
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %w", err)
 	}
-
 	for k, val := range headers {
-		httpReq.Header.Set(k, val)
+		r.AddHeader(k, val)
 	}
 
-	resp, err := v.httpClient.Do(httpReq)
+	resp, err := session.DoWithContext(ctx, r)
 	if err != nil {
 		return fmt.Errorf("连接失败: %w", err)
 	}
-	defer resp.Body.Close()
 
-	// 检查响应状态
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("认证失败，状态码: %d", resp.StatusCode)
 	}
@@ -341,49 +344,46 @@ func (v *SiteValidator) testConnection(ctx context.Context, req *ValidationReque
 
 // fetchFreeTorrentsPreview 获取免费种子预览
 func (v *SiteValidator) fetchFreeTorrentsPreview(ctx context.Context, req *ValidationRequest) ([]TorrentPreview, int, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", req.RSSURL, nil)
+	session := v.sessionWithProxy(req.RSSURL)
+
+	r, err := requests.NewGet(req.RSSURL).Build()
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// 设置认证头
 	switch req.AuthMethod {
 	case AuthMethodCookie:
-		httpReq.Header.Set("Cookie", req.Cookie)
+		r.AddHeader("Cookie", req.Cookie)
 	case AuthMethodAPIKey:
-		httpReq.Header.Set("x-api-key", req.APIKey)
+		r.AddHeader("x-api-key", req.APIKey)
 	}
-	httpReq.Header.Set("User-Agent", "Mozilla/5.0")
+	r.AddHeader("User-Agent", "Mozilla/5.0")
 
-	resp, err := v.httpClient.Do(httpReq)
+	resp, err := session.DoWithContext(ctx, r)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, 0, fmt.Errorf("RSS请求失败，状态码: %d", resp.StatusCode)
 	}
 
-	// 解析RSS
 	fp := gofeed.NewParser()
-	feed, err := fp.Parse(resp.Body)
+	feed, err := fp.Parse(bytes.NewReader(resp.Bytes()))
 	if err != nil {
 		return nil, 0, fmt.Errorf("RSS解析失败: %w", err)
 	}
 
-	// 提取种子预览（最多返回10个）
 	var previews []TorrentPreview
 	maxPreviews := 10
 	for i, item := range feed.Items {
 		if i >= maxPreviews {
 			break
 		}
-		preview := TorrentPreview{
+		previews = append(previews, TorrentPreview{
 			ID:    item.GUID,
 			Title: item.Title,
-		}
-		previews = append(previews, preview)
+		})
 	}
 
 	return previews, len(feed.Items), nil

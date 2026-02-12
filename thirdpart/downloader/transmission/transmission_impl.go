@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sunerpy/requests"
-
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
@@ -26,7 +24,7 @@ type TransmissionClient struct {
 	username     string
 	password     string
 	autoStart    bool
-	client       *http.Client
+	client       downloader.HTTPDoer
 	sessionID    string
 	mu           sync.Mutex
 	healthy      bool
@@ -106,15 +104,13 @@ func NewTransmissionClient(config downloader.DownloaderConfig, name string) (dow
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	transport := requests.GetTransport(false)
-
 	client := &TransmissionClient{
 		name:      name,
 		baseURL:   config.GetURL(),
 		username:  config.GetUsername(),
 		password:  config.GetPassword(),
 		autoStart: config.GetAutoStart(),
-		client:    &http.Client{Timeout: 30 * time.Second, Transport: transport},
+		client:    downloader.NewRequestsHTTPDoer(config.GetURL(), 30*time.Second),
 		healthy:   false,
 	}
 
@@ -147,11 +143,8 @@ func (t *TransmissionClient) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.healthy = false
-	if t.client != nil && t.client.Transport != nil {
-		if tr, ok := t.client.Transport.(*http.Transport); ok {
-			requests.PutTransport(tr)
-			t.client.Transport = nil
-		}
+	if closer, ok := t.client.(interface{ Close() error }); ok {
+		_ = closer.Close()
 	}
 	return nil
 }

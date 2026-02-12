@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -95,6 +94,11 @@ type HDDolbyDriver struct {
 	httpClient     *SiteHTTPClient
 	userAgent      string
 	siteDefinition *SiteDefinition
+
+	detailCacheMu   sync.RWMutex
+	detailCache     []HDDolbyTorrent
+	detailCacheTime time.Time
+	detailCacheMiss int
 }
 
 type HDDolbyDriverConfig struct {
@@ -189,13 +193,17 @@ func (d *HDDolbyDriver) Execute(ctx context.Context, req HDDolbyRequest) (HDDolb
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyStr := string(body)
+		if strings.Contains(bodyStr, "Just a moment") || strings.Contains(bodyStr, "cf_chl_opt") {
+			return result, fmt.Errorf("HTTP %d: Cloudflare 验证拦截，请检查网络环境或更换代理", resp.StatusCode)
+		}
 		if len(body) > 0 {
 			_ = json.Unmarshal(body, &result)
 		}
 		if result.Error != nil {
 			return result, fmt.Errorf("API error (HTTP %d): %s - %s", resp.StatusCode, result.Error.Code, result.Error.Message)
 		}
-		return result, fmt.Errorf("API error: HTTP %d (body: %s)", resp.StatusCode, string(body))
+		return result, fmt.Errorf("API error: HTTP %d", resp.StatusCode)
 	}
 
 	if len(body) > 0 && body[0] == '{' {
@@ -644,55 +652,135 @@ func (d *HDDolbyDriver) Search(ctx context.Context, query SearchQuery) ([]Torren
 
 // GetTorrentDetail fetches torrent detail from the detail page using cookie authentication.
 // HDDolby uses NexusPHP-style HTML detail pages, so we use the NexusPHP parser.
-func (d *HDDolbyDriver) GetTorrentDetail(ctx context.Context, guid, link string) (*TorrentItem, error) {
-	torrentID := guid
-	if torrentID == "" && link != "" {
+func (d *HDDolbyDriver) GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error) {
+	torrentID := ""
+	if link != "" {
 		torrentID = extractTorrentIDFromURL(link)
+	}
+	if torrentID == "" {
+		torrentID = guid
 	}
 	if torrentID == "" {
 		return nil, fmt.Errorf("unable to determine torrent ID")
 	}
 
-	if d.Cookie == "" {
-		return nil, fmt.Errorf("HDDolby requires cookie for detail page access")
-	}
-
-	detailURL := fmt.Sprintf("%s/details.php?id=%s&hit=1", d.BaseURL, torrentID)
-	headers := map[string]string{
-		"Cookie":          d.Cookie,
-		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-	}
-
-	resp, err := d.httpClient.DoRequest(ctx, http.MethodGet, detailURL, nil, headers)
+	numericID, err := strconv.Atoi(torrentID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch detail page: %w", err)
+		return nil, fmt.Errorf("invalid torrent ID %q: %w", torrentID, err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("detail page returned HTTP %d", resp.StatusCode)
-	}
-
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(resp.Body)))
+	torrents, err := d.getOrRefreshDetailCache(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("parse HTML: %w", err)
+		return nil, err
 	}
 
-	parser := NewNexusPHPParserFromDefinition(d.siteDefinition)
-	detailInfo := parser.ParseAll(doc.Selection)
+	for _, t := range torrents {
+		if t.ID == numericID {
+			d.detailCacheMu.Lock()
+			d.detailCacheMiss = 0
+			d.detailCacheMu.Unlock()
+			return d.torrentToItem(t), nil
+		}
+	}
 
-	item := &TorrentItem{
-		ID:              torrentID,
-		Title:           detailInfo.Title,
-		SizeBytes:       int64(detailInfo.SizeMB * 1024 * 1024),
-		DiscountLevel:   detailInfo.DiscountLevel,
-		DiscountEndTime: detailInfo.DiscountEnd,
-		HasHR:           detailInfo.HasHR,
+	d.detailCacheMu.Lock()
+	d.detailCacheMiss++
+	missCount := d.detailCacheMiss
+	d.detailCacheMu.Unlock()
+
+	if missCount >= 3 {
+		d.invalidateDetailCache()
+		torrents, err = d.getOrRefreshDetailCache(ctx)
+		if err == nil {
+			for _, t := range torrents {
+				if t.ID == numericID {
+					d.detailCacheMu.Lock()
+					d.detailCacheMiss = 0
+					d.detailCacheMu.Unlock()
+					return d.torrentToItem(t), nil
+				}
+			}
+		}
+	}
+
+	return &TorrentItem{
+		ID:            torrentID,
+		DiscountLevel: DiscountNone,
+		SourceSite:    d.getSiteID(),
+	}, nil
+}
+
+func (d *HDDolbyDriver) torrentToItem(t HDDolbyTorrent) *TorrentItem {
+	discount := d.parseDiscount(t.PromotionTimeType, t.Tags)
+	discountEnd := d.parseDiscountEndTime(t.PromotionUntil)
+	return &TorrentItem{
+		ID:              strconv.Itoa(t.ID),
+		Title:           t.Name,
+		Subtitle:        t.SmallDescr,
+		SizeBytes:       t.Size,
+		Seeders:         t.Seeders,
+		Leechers:        t.Leechers,
+		Snatched:        t.TimesCompleted,
+		DiscountLevel:   discount,
+		DiscountEndTime: discountEnd,
+		HasHR:           t.HR > 0,
 		SourceSite:      d.getSiteID(),
 	}
+}
 
-	return item, nil
+func (d *HDDolbyDriver) getOrRefreshDetailCache(ctx context.Context) ([]HDDolbyTorrent, error) {
+	d.detailCacheMu.RLock()
+	if d.detailCache != nil && time.Since(d.detailCacheTime) < 5*time.Minute {
+		defer d.detailCacheMu.RUnlock()
+		return d.detailCache, nil
+	}
+	d.detailCacheMu.RUnlock()
+
+	d.detailCacheMu.Lock()
+	defer d.detailCacheMu.Unlock()
+
+	if d.detailCache != nil && time.Since(d.detailCacheTime) < 5*time.Minute {
+		return d.detailCache, nil
+	}
+
+	req := HDDolbyRequest{
+		Endpoint:    "/api/v1/torrent/search",
+		Method:      http.MethodPost,
+		ContentType: "application/json",
+		Body: map[string]any{
+			"keyword":     "",
+			"page_number": 0,
+			"page_size":   100,
+			"visible":     1,
+		},
+	}
+
+	res, err := d.Execute(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("execute search API: %w", err)
+	}
+
+	var searchData HDDolbySearchResponse
+	if err := json.Unmarshal(res.Data, &searchData); err != nil {
+		var torrents []HDDolbyTorrent
+		if err2 := json.Unmarshal(res.Data, &torrents); err2 != nil {
+			return nil, fmt.Errorf("parse search data: %w", err)
+		}
+		searchData.Data = torrents
+	}
+
+	d.detailCache = searchData.Data
+	d.detailCacheTime = time.Now()
+	d.detailCacheMiss = 0
+	return d.detailCache, nil
+}
+
+func (d *HDDolbyDriver) invalidateDetailCache() {
+	d.detailCacheMu.Lock()
+	defer d.detailCacheMu.Unlock()
+	d.detailCache = nil
+	d.detailCacheTime = time.Time{}
+	d.detailCacheMiss = 0
 }
 
 func init() {

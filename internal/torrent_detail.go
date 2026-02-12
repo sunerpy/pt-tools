@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,11 +10,13 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"github.com/sunerpy/requests"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 // TorrentDetailForTest 用于测试的种子详情
@@ -87,26 +90,30 @@ func fetchMTorrentDetail(ctx context.Context, siteName models.SiteGroup, item *g
 	// API 路径需要加上 /api 前缀
 	apiPath := fmt.Sprintf("%s/api/torrent/detail", sc.APIUrl)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiPath, strings.NewReader(data))
+	session := requests.NewSession().WithTimeout(30 * time.Second)
+	if proxyURL := httpclient.ResolveProxyFromEnvironment(apiPath); proxyURL != "" {
+		session = session.WithProxy(proxyURL)
+	}
+	defer func() { _ = session.Close() }()
+
+	req, err := requests.NewPost(apiPath).WithBody(strings.NewReader(data)).Build()
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("x-api-key", sc.APIKey)
+	req.AddHeader("Content-Type", "application/x-www-form-urlencoded")
+	req.AddHeader("x-api-key", sc.APIKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := session.DoWithContext(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %v", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("请求失败，状态码: %d", resp.StatusCode)
 	}
 
 	var responseData models.APIResponse[models.MTTorrentDetail]
-	if err := json.NewDecoder(resp.Body).Decode(&responseData); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(resp.Bytes())).Decode(&responseData); err != nil {
 		return nil, fmt.Errorf("解析 JSON 失败: %v", err)
 	}
 

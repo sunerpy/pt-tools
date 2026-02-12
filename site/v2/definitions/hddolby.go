@@ -1,23 +1,27 @@
 package definitions
 
 import (
+	"time"
+
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 var HDDolbyDefinition = &v2.SiteDefinition{
-	ID:             "hddolby",
-	Name:           "HD Dolby",
-	Aka:            []string{"高清杜比"},
-	Description:    "高清杜比 - 需要同时配置 Cookie 和 RSS Key。RSS Key 用于搜索和下载，Cookie 用于获取时魔等信息",
-	Schema:         v2.SchemaHDDolby,
-	AuthMethod:     v2.AuthMethodCookieAndAPIKey,
-	URLs:           []string{"https://www.hddolby.com/"},
-	LegacyURLs:     []string{"https://hddolby.com/"},
-	FaviconURL:     "https://www.hddolby.com/favicon.ico",
-	Unavailable:    false,
-	TimezoneOffset: "+0800",
-	RateLimit:      0.5, // 1 request per 2 seconds sustained rate
-	RateBurst:      3,   // Allow burst of 3 requests for search + user info
+	ID:              "hddolby",
+	Name:            "HD Dolby",
+	Aka:             []string{"高清杜比"},
+	Description:     "高清杜比 - 需要同时配置 Cookie 和 RSS Key。RSS Key 用于搜索和下载，Cookie 用于获取时魔等信息",
+	Schema:          v2.SchemaHDDolby,
+	AuthMethod:      v2.AuthMethodCookieAndAPIKey,
+	URLs:            []string{"https://www.hddolby.com/"},
+	LegacyURLs:      []string{"https://hddolby.com/"},
+	FaviconURL:      "https://www.hddolby.com/favicon.ico",
+	Unavailable:     false,
+	TimezoneOffset:  "+0800",
+	RateLimit:       0.5,
+	RateBurst:       3,
+	RateWindow:      time.Hour,
+	RateWindowLimit: 50,
 	LevelRequirements: []v2.SiteLevelRequirement{
 		{
 			ID:        1,

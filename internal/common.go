@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -432,13 +433,22 @@ func downloadTorrent(url, title, downloadDir string, maxRetries int, retryDelay 
 	return "", fmt.Errorf("下载失败: %v", lastError)
 }
 
-// downloadWorkerUnified 使用 UnifiedPTSite 接口的下载 Worker
+type rssTaskStats struct {
+	total          atomic.Int64
+	free           atomic.Int64
+	downloaded     atomic.Int64
+	skipped        atomic.Int64
+	detailFailed   atomic.Int64
+	downloadFailed atomic.Int64
+}
+
 func downloadWorkerUnified(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 	site UnifiedPTSite,
 	torrentChan <-chan *gofeed.Item,
 	rssCfg models.RSSConfig,
+	stats *rssTaskStats,
 ) {
 	defer wg.Done()
 	siteName := site.SiteGroup()
@@ -491,12 +501,15 @@ func downloadWorkerUnified(
 			// 如果种子已跳过或已推送，直接跳过
 			if torrent != nil && (torrent.IsSkipped || torrent.IsPushed != nil) {
 				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
+				stats.skipped.Add(1)
 				continue
 			}
+			stats.total.Add(1)
 			// 获取种子详情 (使用 UnifiedPTSite 接口，返回 *v2.TorrentItem)
 			detail, err := site.GetTorrentDetails(item)
 			if err != nil {
-				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
+				sLogger().Errorf("[%s] %s: 获取种子详情失败, %v", siteName, title, err)
+				stats.detailFailed.Add(1)
 				continue
 			}
 			// 使用 v2.TorrentItem 的方法
@@ -565,6 +578,10 @@ func downloadWorkerUnified(
 			shouldDownloadByFree := isFree && canFinished
 			shouldDownload := shouldDownloadByFilter || shouldDownloadByFree
 
+			if isFree {
+				stats.free.Add(1)
+			}
+
 			if !shouldDownload {
 				torrent.IsSkipped = true
 				sLogger().Infof("种子: %s 不满足下载条件，跳过 (原因: %s)", title, buildSkipReason(isFree, canFinished, shouldDownloadByFilter))
@@ -608,6 +625,7 @@ func downloadWorkerUnified(
 				hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
 				if downloadErr != nil {
 					sLogger().Errorf("%s: 种子下载失败, %v", title, downloadErr)
+					stats.downloadFailed.Add(1)
 					continue
 				}
 				torrentFile := filepath.Join(downloadPath, fileBase+".torrent")
@@ -639,6 +657,7 @@ func downloadWorkerUnified(
 					sLogger().Errorf("%s: 数据库更新失败, %v", title, err)
 				} else {
 					sLogger().Info("种子下载成功并记录到数据库 ", title)
+					stats.downloaded.Add(1)
 				}
 			}
 		}
@@ -847,6 +866,8 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 	var wg sync.WaitGroup
 	torrentChan := make(chan *gofeed.Item, len(feed.Items))
 
+	var stats rssTaskStats
+
 	concurrency := rssCfg.GetEffectiveConcurrency(&gl)
 	sLogger().Infof("RSS %s 使用并发数: %d", rssCfg.Name, concurrency)
 
@@ -858,6 +879,7 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 			m,
 			torrentChan,
 			rssCfg,
+			&stats,
 		)
 	}
 
@@ -877,7 +899,10 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 	wg.Wait()
 
 	duration := time.Since(startTime)
-	sLogger().Infof("[RSS任务完成] 站点=%s, RSS=%s, 耗时=%v", siteName, rssCfg.Name, duration.Round(time.Millisecond))
+	sLogger().Infof("[RSS任务完成] 站点=%s, RSS=%s, 耗时=%v, 总数=%d, 免费=%d, 已下载=%d, 跳过=%d, 详情失败=%d, 下载失败=%d",
+		siteName, rssCfg.Name, duration.Round(time.Millisecond),
+		stats.total.Load(), stats.free.Load(), stats.downloaded.Load(),
+		stats.skipped.Load(), stats.detailFailed.Load(), stats.downloadFailed.Load())
 	return nil
 }
 
@@ -1018,7 +1043,7 @@ func downloadWorker[T models.ResType](
 			// 获取种子详情
 			resDetail, err := site.GetTorrentDetails(item)
 			if err != nil {
-				sLogger().Errorf("%s: 获取种子详情失败, %v", title, err)
+				sLogger().Errorf("[%s] %s: 获取种子详情失败, %v", siteName, title, err)
 				continue
 			}
 			detail := resDetail.Data

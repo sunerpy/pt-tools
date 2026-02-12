@@ -43,8 +43,15 @@ func TestGetAllTorrents_AfterInsert(t *testing.T) {
 
 func TestTorrentInfo_GetExpired(t *testing.T) {
 	now := time.Now()
+	// FreeEndTime=nil + FreeLevel="" → 非免费，视为过期
 	ti := &models.TorrentInfo{FreeEndTime: nil}
 	require.True(t, ti.GetExpired())
+	// FreeEndTime=nil + FreeLevel="FREE" → 永久免费，不过期
+	tiFree := &models.TorrentInfo{FreeEndTime: nil, FreeLevel: "FREE"}
+	require.False(t, tiFree.GetExpired())
+	// FreeEndTime=nil + FreeLevel="NONE" → 非免费，视为过期
+	tiNone := &models.TorrentInfo{FreeEndTime: nil, FreeLevel: "NONE"}
+	require.True(t, tiNone.GetExpired())
 	future := now.Add(10 * time.Minute)
 	ti2 := &models.TorrentInfo{FreeEndTime: &future}
 	require.False(t, ti2.GetExpired())

@@ -7,6 +7,7 @@
 ## 目录
 
 - [环境变量](#环境变量)
+- [代理配置](#代理配置)
 - [全局设置](#全局设置)
 - [下载器配置](#下载器配置)
   - [基本配置](#基本配置)
@@ -70,6 +71,49 @@ docker run -d \
 ```
 
 > 重置完成后，移除 `PT_ADMIN_RESET` 环境变量重新启动容器。
+
+## 代理配置
+
+pt-tools 支持通过标准环境变量配置网络代理，适用于 Docker、systemd 和本地二进制运行。
+
+| 变量                          | 说明                           | 示例                       |
+| ----------------------------- | ------------------------------ | -------------------------- |
+| `HTTP_PROXY` / `http_proxy`   | HTTP 请求代理                  | `http://127.0.0.1:7890`    |
+| `HTTPS_PROXY` / `https_proxy` | HTTPS 请求代理                 | `http://127.0.0.1:7890`    |
+| `ALL_PROXY` / `all_proxy`     | 通用代理（作为回退）           | `socks5://127.0.0.1:1080`  |
+| `NO_PROXY` / `no_proxy`       | 不走代理的地址列表（逗号分隔） | `localhost,127.0.0.1,.lan` |
+
+说明：
+
+- 建议同时设置 `HTTP_PROXY` 和 `HTTPS_PROXY`。
+- 如果未设置 `HTTP_PROXY`/`HTTPS_PROXY`，会尝试使用 `ALL_PROXY`。
+- `NO_PROXY` 对内网地址非常有用，可避免本地服务或局域网请求走代理。
+
+### 代理配置示例
+
+**Docker 命令行**：
+
+```bash
+docker run -d \
+  --name pt-tools \
+  -p 8080:8080 \
+  -v ~/pt-data:/app/.pt-tools \
+  -e HTTP_PROXY=http://127.0.0.1:7890 \
+  -e HTTPS_PROXY=http://127.0.0.1:7890 \
+  -e ALL_PROXY=socks5://127.0.0.1:1080 \
+  -e NO_PROXY=localhost,127.0.0.1,.lan \
+  sunerpy/pt-tools:latest
+```
+
+**Docker Compose**：
+
+```yaml
+environment:
+  HTTP_PROXY: "http://127.0.0.1:7890"
+  HTTPS_PROXY: "http://127.0.0.1:7890"
+  ALL_PROXY: "socks5://127.0.0.1:1080"
+  NO_PROXY: "localhost,127.0.0.1,.lan"
+```
 
 ## 全局设置
 
@@ -210,7 +254,6 @@ cp ./backup/torrents.db ~/.pt-tools/
 ### 完整 Docker Compose 配置
 
 ```yaml
-version: "3.8"
 services:
   pt-tools:
     image: sunerpy/pt-tools:latest

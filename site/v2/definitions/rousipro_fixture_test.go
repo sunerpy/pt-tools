@@ -236,7 +236,7 @@ func testRousiProDetail(t *testing.T) {
 	assert.Equal(t, 10, data.Downloads)
 
 	driver := newTestRousiDriver()
-	discount := driver.parsePromotion(data.Promotion)
+	discount, _ := driver.parsePromotion(data.Promotion)
 	assert.Equal(t, v2.DiscountFree, discount, "promotion type 2 should be Free")
 }
 

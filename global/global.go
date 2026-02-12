@@ -44,6 +44,13 @@ func GetSlogger() *zap.SugaredLogger {
 	return GlobalLogger.Sugar()
 }
 
+func GetSloggerSafe() *zap.SugaredLogger {
+	if GlobalLogger == nil {
+		return nil
+	}
+	return GlobalLogger.Sugar()
+}
+
 // GetLogLevel 获取当前日志级别
 func GetLogLevel() LogLevel {
 	if v := logLevel.Load(); v != nil {

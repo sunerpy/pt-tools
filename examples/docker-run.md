@@ -3,7 +3,7 @@
 ## 功能特性
 
 - RSS 自动订阅下载免费种子
-- 多站点种子搜索（HDSky、SpringSunday、M-Team、HDDolby）
+- 多站点种子搜索（参见[支持站点列表](../docs/sites.md)）
 - 用户信息统计和等级进度追踪
 - 支持 qBittorrent 和 Transmission 下载器
 - 过滤规则精细化筛选
@@ -58,6 +58,24 @@ docker run -d \
 | `PUID`           | 用户 ID              | `1000`          |
 | `PGID`           | 组 ID                | `1000`          |
 | `TZ`             | 时区                 | `Asia/Shanghai` |
+| `HTTP_PROXY`     | HTTP 请求代理        | -               |
+| `HTTPS_PROXY`    | HTTPS 请求代理       | -               |
+| `ALL_PROXY`      | 通用代理（回退）     | -               |
+| `NO_PROXY`       | 不走代理地址列表     | -               |
+
+### 代理配置示例
+
+```bash
+docker run -d \
+  --name pt-tools \
+  -p 8080:8080 \
+  -v ~/pt-data:/app/.pt-tools \
+  -e HTTP_PROXY=http://127.0.0.1:7890 \
+  -e HTTPS_PROXY=http://127.0.0.1:7890 \
+  -e ALL_PROXY=socks5://127.0.0.1:1080 \
+  -e NO_PROXY=localhost,127.0.0.1,.lan \
+  sunerpy/pt-tools:latest
+```
 
 ## 重置管理员密码
 
@@ -96,9 +114,4 @@ docker run -d \
 
 ## 内置支持站点
 
-- HDSky（Cookie 认证）
-- SpringSunday（Cookie 认证）
-- M-Team（API Key 认证）
-- HDDolby（Cookie 认证）
-
-> 如需支持其他站点，欢迎提交 Issue 或 PR。
+参见[支持站点列表](../docs/sites.md)。
