@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 
-type ThemeStyle = "default" | "ocean" | "graphite" | "contrast";
+type ThemeStyle = "default" | "ocean" | "graphite" | "contrast" | "emerald";
 
 export const useThemeStore = defineStore("theme", () => {
   // 默认为黑暗模式：只有明确设置为 'light' 时才使用亮色模式
@@ -12,7 +12,8 @@ export const useThemeStore = defineStore("theme", () => {
   const themeStyle = ref<ThemeStyle>(
     storedThemeStyle === "ocean" ||
       storedThemeStyle === "graphite" ||
-      storedThemeStyle === "contrast"
+      storedThemeStyle === "contrast" ||
+      storedThemeStyle === "emerald"
       ? storedThemeStyle
       : "default",
   );
@@ -41,7 +42,13 @@ export const useThemeStore = defineStore("theme", () => {
   }
 
   function setThemeStyle(value: string) {
-    if (value === "ocean" || value === "graphite" || value === "contrast" || value === "default") {
+    if (
+      value === "ocean" ||
+      value === "graphite" ||
+      value === "contrast" ||
+      value === "emerald" ||
+      value === "default"
+    ) {
       themeStyle.value = value;
     }
   }

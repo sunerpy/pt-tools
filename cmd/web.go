@@ -127,7 +127,7 @@ var webCmd = &cobra.Command{
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
 		go startVersionChecker()
 		if err := srv.Serve(addr); err != nil {
-			color.Red("Web 启动失败: %v", err)
+			global.GetSlogger().Fatalf("Web 启动失败: %v", err)
 		}
 	},
 }

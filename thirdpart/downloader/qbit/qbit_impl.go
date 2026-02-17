@@ -784,7 +784,11 @@ func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 		t.SavePath = savePath
 	}
 	if category, ok := qt["category"].(string); ok {
+		t.Category = category
 		t.Label = category
+	}
+	if tags, ok := qt["tags"].(string); ok {
+		t.Tags = tags
 	}
 	if state, ok := qt["state"].(string); ok {
 		t.State = q.mapQbitState(state)
@@ -804,9 +808,111 @@ func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	if downloaded, ok := qt["downloaded"].(float64); ok {
 		t.TotalDownloaded = int64(downloaded)
 	}
+	if eta, ok := qt["eta"].(float64); ok {
+		t.ETA = int64(eta)
+	}
+	if seedingTime, ok := qt["seeding_time"].(float64); ok {
+		t.SeedingTime = int64(seedingTime)
+	}
+	if tracker, ok := qt["tracker"].(string); ok {
+		t.Tracker = tracker
+	}
+	if completionOn, ok := qt["completion_on"].(float64); ok {
+		t.CompletionOn = int64(completionOn)
+	}
+	if numSeeds, ok := qt["num_seeds"].(float64); ok {
+		t.NumSeeds = int(numSeeds)
+	}
+	if numLeechs, ok := qt["num_leechs"].(float64); ok {
+		t.NumPeers = int(numLeechs)
+	}
+	if availability, ok := qt["availability"].(float64); ok {
+		t.Availability = availability
+	}
+	if contentPath, ok := qt["content_path"].(string); ok {
+		t.ContentPath = contentPath
+	}
 
 	t.Raw = qt
 	return t
+}
+
+func (q *QbitClient) postForm(endpoint string, data url.Values) error {
+	req, err := http.NewRequestWithContext(context.Background(), "POST", fmt.Sprintf("%s%s", q.baseURL, endpoint), bytes.NewBufferString(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create request for %s: %w", endpoint, err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := q.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed for %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed for %s with status %d: %s", endpoint, resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+func (q *QbitClient) getJSON(endpoint string, dst any) error {
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("%s%s", q.baseURL, endpoint), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request for %s: %w", endpoint, err)
+	}
+
+	resp, err := q.doRequestWithRetry(req)
+	if err != nil {
+		return fmt.Errorf("request failed for %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed for %s with status %d: %s", endpoint, resp.StatusCode, string(body))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		return fmt.Errorf("failed to decode response for %s: %w", endpoint, err)
+	}
+
+	return nil
+}
+
+func (q *QbitClient) callPauseResumeEndpoints(ids []string, modernEndpoint, legacyEndpoint string) error {
+	hashes := strings.Join(ids, "|")
+	if hashes == "" {
+		return nil
+	}
+
+	data := url.Values{}
+	data.Set("hashes", hashes)
+
+	req, err := http.NewRequestWithContext(context.Background(), "POST", fmt.Sprintf("%s%s", q.baseURL, modernEndpoint), bytes.NewBufferString(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create request for %s: %w", modernEndpoint, err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := q.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed for %s: %w", modernEndpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return q.postForm(legacyEndpoint, data)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed for %s with status %d: %s", modernEndpoint, resp.StatusCode, string(body))
+	}
+
+	return nil
 }
 
 // mapQbitState 将 qBittorrent 状态映射到通用状态
@@ -1062,149 +1168,269 @@ func (q *QbitClient) writeAddTorrentOptions(writer *multipart.Writer, opt downlo
 // PauseTorrent 暂停种子
 // qBittorrent 5.0+ 使用 /api/v2/torrents/stop，旧版本使用 /api/v2/torrents/pause
 func (q *QbitClient) PauseTorrent(id string) error {
-	sLogger().Infof("[qBittorrent] PauseTorrent called: hash=%s", id)
-
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	data := url.Values{}
-	data.Set("hashes", id)
-
-	// 优先尝试 qBittorrent 5.x 的 stop 端点
-	stopURL := fmt.Sprintf("%s/api/v2/torrents/stop", q.baseURL)
-	req, err := http.NewRequestWithContext(context.Background(), "POST", stopURL, bytes.NewBufferString(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("failed to create stop request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := q.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("stop request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 如果 stop 端点返回 404，尝试旧版本的 pause 端点
-	if resp.StatusCode == http.StatusNotFound {
-		sLogger().Debugf("[qBittorrent] stop endpoint not found, trying pause endpoint for older version")
-		pauseURL := fmt.Sprintf("%s/api/v2/torrents/pause", q.baseURL)
-		req2, err := http.NewRequestWithContext(context.Background(), "POST", pauseURL, bytes.NewBufferString(data.Encode()))
-		if err != nil {
-			return fmt.Errorf("failed to create pause request: %w", err)
-		}
-		req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-		resp2, err := q.client.Do(req2)
-		if err != nil {
-			return fmt.Errorf("pause request failed: %w", err)
-		}
-		defer resp2.Body.Close()
-
-		if resp2.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp2.Body)
-			return fmt.Errorf("pause request failed with status %d: %s", resp2.StatusCode, string(body))
-		}
-
-		sLogger().Infof("[qBittorrent] Torrent paused successfully (legacy API): hash=%s", id)
-		return nil
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("stop request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	sLogger().Infof("[qBittorrent] Torrent stopped successfully: hash=%s", id)
-	return nil
+	return q.PauseTorrents([]string{id})
 }
 
 // ResumeTorrent 恢复种子
 // qBittorrent 5.0+ 使用 /api/v2/torrents/start，旧版本使用 /api/v2/torrents/resume
 func (q *QbitClient) ResumeTorrent(id string) error {
-	sLogger().Infof("[qBittorrent] ResumeTorrent called: hash=%s", id)
-
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	data := url.Values{}
-	data.Set("hashes", id)
-
-	startURL := fmt.Sprintf("%s/api/v2/torrents/start", q.baseURL)
-	req, err := http.NewRequestWithContext(context.Background(), "POST", startURL, bytes.NewBufferString(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("failed to create start request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := q.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("start request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		sLogger().Debugf("[qBittorrent] start endpoint not found, trying resume endpoint for older version")
-		resumeURL := fmt.Sprintf("%s/api/v2/torrents/resume", q.baseURL)
-		req2, err := http.NewRequestWithContext(context.Background(), "POST", resumeURL, bytes.NewBufferString(data.Encode()))
-		if err != nil {
-			return fmt.Errorf("failed to create resume request: %w", err)
-		}
-		req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-		resp2, err := q.client.Do(req2)
-		if err != nil {
-			return fmt.Errorf("resume request failed: %w", err)
-		}
-		defer resp2.Body.Close()
-
-		if resp2.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp2.Body)
-			return fmt.Errorf("resume request failed with status %d: %s", resp2.StatusCode, string(body))
-		}
-
-		sLogger().Infof("[qBittorrent] Torrent resumed successfully (legacy API): hash=%s", id)
-		return nil
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	sLogger().Infof("[qBittorrent] Torrent started successfully: hash=%s", id)
-	return nil
+	return q.ResumeTorrents([]string{id})
 }
 
 // RemoveTorrent 删除种子
 func (q *QbitClient) RemoveTorrent(id string, removeData bool) error {
-	sLogger().Infof("[qBittorrent] RemoveTorrent called: hash=%s, removeData=%v", id, removeData)
+	return q.RemoveTorrents([]string{id}, removeData)
+}
+
+// PauseTorrents 批量暂停种子
+func (q *QbitClient) PauseTorrents(ids []string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.callPauseResumeEndpoints(ids, "/api/v2/torrents/stop", "/api/v2/torrents/pause")
+}
+
+// ResumeTorrents 批量恢复种子
+func (q *QbitClient) ResumeTorrents(ids []string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.callPauseResumeEndpoints(ids, "/api/v2/torrents/start", "/api/v2/torrents/resume")
+}
+
+// RemoveTorrents 批量删除种子
+func (q *QbitClient) RemoveTorrents(ids []string, removeData bool) error {
+	hashes := strings.Join(ids, "|")
+	if hashes == "" {
+		return nil
+	}
+
+	data := url.Values{}
+	data.Set("hashes", hashes)
+	data.Set("deleteFiles", fmt.Sprintf("%t", removeData))
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/delete", data)
+}
 
-	deleteURL := fmt.Sprintf("%s/api/v2/torrents/delete", q.baseURL)
+// SetTorrentCategory 设置种子分类
+func (q *QbitClient) SetTorrentCategory(id, category string) error {
 	data := url.Values{}
 	data.Set("hashes", id)
-	data.Set("deleteFiles", fmt.Sprintf("%t", removeData))
+	data.Set("category", category)
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", deleteURL, bytes.NewBufferString(data.Encode()))
-	if err != nil {
-		return fmt.Errorf("failed to create delete request: %w", err)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/setCategory", data)
+}
+
+// SetTorrentTags 设置种子标签
+func (q *QbitClient) SetTorrentTags(id, tags string) error {
+	data := url.Values{}
+	data.Set("hashes", id)
+	data.Set("tags", tags)
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/addTags", data)
+}
+
+// SetTorrentSavePath 设置种子保存路径
+func (q *QbitClient) SetTorrentSavePath(id, path string) error {
+	data := url.Values{}
+	data.Set("hashes", id)
+	data.Set("location", path)
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/setLocation", data)
+}
+
+// RecheckTorrent 重新校验种子
+func (q *QbitClient) RecheckTorrent(id string) error {
+	data := url.Values{}
+	data.Set("hashes", id)
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/recheck", data)
+}
+
+// GetTorrentFiles 获取种子文件列表
+func (q *QbitClient) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
+	var qFiles []map[string]any
+	if err := q.getJSON(fmt.Sprintf("/api/v2/torrents/files?hash=%s", url.QueryEscape(id)), &qFiles); err != nil {
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := q.client.Do(req)
+	files := make([]downloader.TorrentFile, 0, len(qFiles))
+	for _, item := range qFiles {
+		file := downloader.TorrentFile{}
+		if index, ok := item["index"].(float64); ok {
+			file.Index = int(index)
+		}
+		if name, ok := item["name"].(string); ok {
+			file.Name = name
+		}
+		if size, ok := item["size"].(float64); ok {
+			file.Size = int64(size)
+		}
+		if progress, ok := item["progress"].(float64); ok {
+			file.Progress = progress
+		}
+		if priority, ok := item["priority"].(float64); ok {
+			file.Priority = int(priority)
+		}
+		files = append(files, file)
+	}
+
+	return files, nil
+}
+
+// GetTorrentTrackers 获取种子 Tracker 列表
+func (q *QbitClient) GetTorrentTrackers(id string) ([]downloader.TorrentTracker, error) {
+	var qTrackers []map[string]any
+	if err := q.getJSON(fmt.Sprintf("/api/v2/torrents/trackers?hash=%s", url.QueryEscape(id)), &qTrackers); err != nil {
+		return nil, err
+	}
+
+	trackers := make([]downloader.TorrentTracker, 0, len(qTrackers))
+	for _, item := range qTrackers {
+		tracker := downloader.TorrentTracker{}
+		if trackerURL, ok := item["url"].(string); ok {
+			tracker.URL = trackerURL
+		}
+		if status, ok := item["status"].(float64); ok {
+			tracker.Status = int(status)
+		}
+		if peers, ok := item["num_peers"].(float64); ok {
+			tracker.Peers = int(peers)
+		}
+		if seeds, ok := item["num_seeds"].(float64); ok {
+			tracker.Seeds = int(seeds)
+		}
+		if leeches, ok := item["num_leeches"].(float64); ok {
+			tracker.Leeches = int(leeches)
+		}
+		if msg, ok := item["msg"].(string); ok {
+			tracker.Message = msg
+		} else if message, ok := item["message"].(string); ok {
+			tracker.Message = message
+		}
+		trackers = append(trackers, tracker)
+	}
+
+	return trackers, nil
+}
+
+// GetDiskInfo 获取磁盘信息
+func (q *QbitClient) GetDiskInfo() (downloader.DiskInfo, error) {
+	var responseData map[string]any
+	if err := q.getJSON("/api/v2/sync/maindata", &responseData); err != nil {
+		return downloader.DiskInfo{}, err
+	}
+
+	serverState, ok := responseData["server_state"].(map[string]any)
+	if !ok {
+		return downloader.DiskInfo{}, fmt.Errorf("unable to get server_state info")
+	}
+
+	diskInfo := downloader.DiskInfo{}
+	if freeSpace, ok := serverState["free_space_on_disk"].(float64); ok {
+		diskInfo.FreeSpace = int64(freeSpace)
+	}
+	if savePath, ok := serverState["default_save_path"].(string); ok {
+		diskInfo.Path = savePath
+	}
+
+	return diskInfo, nil
+}
+
+// GetSpeedLimit 获取全局速度限制
+func (q *QbitClient) GetSpeedLimit() (downloader.SpeedLimit, error) {
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("%s/api/v2/transfer/speedLimitsMode", q.baseURL), nil)
 	if err != nil {
-		return fmt.Errorf("delete request failed: %w", err)
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to create speed mode request: %w", err)
+	}
+	resp, err := q.doRequestWithRetry(req)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("speed mode request failed: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("delete request failed with status %d: %s", resp.StatusCode, string(body))
+		return downloader.SpeedLimit{}, fmt.Errorf("speed mode request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	sLogger().Infof("[qBittorrent] Torrent removed successfully: hash=%s, dataRemoved=%v", id, removeData)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to read speed mode response: %w", err)
+	}
+	mode := strings.TrimSpace(string(body))
+
+	reqDl, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("%s/api/v2/transfer/downloadLimit", q.baseURL), nil)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to create download limit request: %w", err)
+	}
+	respDl, err := q.doRequestWithRetry(reqDl)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("download limit request failed: %w", err)
+	}
+	defer respDl.Body.Close()
+	if respDl.StatusCode != http.StatusOK {
+		dlBody, _ := io.ReadAll(respDl.Body)
+		return downloader.SpeedLimit{}, fmt.Errorf("download limit request failed with status %d: %s", respDl.StatusCode, string(dlBody))
+	}
+	dlBody, err := io.ReadAll(respDl.Body)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to read download limit response: %w", err)
+	}
+
+	reqUl, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("%s/api/v2/transfer/uploadLimit", q.baseURL), nil)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to create upload limit request: %w", err)
+	}
+	respUl, err := q.doRequestWithRetry(reqUl)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("upload limit request failed: %w", err)
+	}
+	defer respUl.Body.Close()
+	if respUl.StatusCode != http.StatusOK {
+		ulBody, _ := io.ReadAll(respUl.Body)
+		return downloader.SpeedLimit{}, fmt.Errorf("upload limit request failed with status %d: %s", respUl.StatusCode, string(ulBody))
+	}
+	ulBody, err := io.ReadAll(respUl.Body)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to read upload limit response: %w", err)
+	}
+
+	limit := downloader.SpeedLimit{}
+	_, _ = fmt.Sscanf(strings.TrimSpace(string(dlBody)), "%d", &limit.DownloadLimit)
+	_, _ = fmt.Sscanf(strings.TrimSpace(string(ulBody)), "%d", &limit.UploadLimit)
+	limit.LimitEnabled = mode != "0"
+
+	return limit, nil
+}
+
+// SetSpeedLimit 设置全局速度限制
+func (q *QbitClient) SetSpeedLimit(limit downloader.SpeedLimit) error {
+	dataDl := url.Values{}
+	dataDl.Set("limit", fmt.Sprintf("%d", limit.DownloadLimit))
+	if err := q.postForm("/api/v2/transfer/setDownloadLimit", dataDl); err != nil {
+		return err
+	}
+
+	dataUl := url.Values{}
+	dataUl.Set("limit", fmt.Sprintf("%d", limit.UploadLimit))
+	if err := q.postForm("/api/v2/transfer/setUploadLimit", dataUl); err != nil {
+		return err
+	}
+
+	if current, err := q.GetSpeedLimit(); err == nil && current.LimitEnabled != limit.LimitEnabled {
+		if err := q.postForm("/api/v2/transfer/toggleSpeedLimitsMode", url.Values{}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

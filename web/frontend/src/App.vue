@@ -23,6 +23,7 @@ const themeStyleOptions = [
   { label: "海洋配色", value: "ocean" },
   { label: "石墨配色", value: "graphite" },
   { label: "极光配色", value: "contrast" },
+  { label: "翡翠配色", value: "emerald" },
 ];
 
 const activeMenu = computed(() => {
@@ -120,6 +121,10 @@ function logout() {
           <el-menu-item index="global">
             <el-icon><Setting /></el-icon>
             <template #title>全局设置</template>
+          </el-menu-item>
+          <el-menu-item index="cleanup">
+            <el-icon><Delete /></el-icon>
+            <template #title>自动删种</template>
           </el-menu-item>
           <el-menu-item index="downloaders">
             <el-icon><Download /></el-icon>

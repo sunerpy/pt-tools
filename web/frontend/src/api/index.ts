@@ -55,7 +55,26 @@ export interface GlobalSettings {
   download_limit_enabled: boolean;
   download_speed_limit: number;
   torrent_size_gb: number;
+  min_free_minutes: number;
   auto_start: boolean;
+  cleanup_enabled?: boolean;
+  cleanup_interval_min?: number;
+  cleanup_scope?: string;
+  cleanup_scope_tags?: string;
+  cleanup_remove_data?: boolean;
+  cleanup_condition_mode?: string;
+  cleanup_max_seed_time_h?: number;
+  cleanup_min_ratio?: number;
+  cleanup_max_inactive_h?: number;
+  cleanup_slow_seed_time_h?: number;
+  cleanup_slow_max_ratio?: number;
+  cleanup_del_free_expired?: boolean;
+  cleanup_disk_protect?: boolean;
+  cleanup_min_disk_space_gb?: number;
+  cleanup_protect_dl?: boolean;
+  cleanup_protect_hr?: boolean;
+  cleanup_min_retain_h?: number;
+  cleanup_protect_tags?: string;
 }
 
 export interface QbitSettings {

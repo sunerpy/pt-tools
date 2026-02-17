@@ -14,6 +14,7 @@ const form = ref<GlobalSettings>({
   download_limit_enabled: false,
   download_speed_limit: 20,
   torrent_size_gb: 200,
+  min_free_minutes: 30,
   auto_start: false,
 });
 
@@ -168,6 +169,20 @@ async function save() {
                   :disabled="!form.download_limit_enabled"
                   class="w-full" />
                 <div class="form-tip">根据您的网络环境填写实际平均下载速度</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="40">
+            <el-col :md="12" :sm="24">
+              <el-form-item label="最短免费时间(分钟)">
+                <el-input-number
+                  v-model="form.min_free_minutes"
+                  :min="0"
+                  :max="1440"
+                  :step="5"
+                  class="w-full" />
+                <div class="form-tip">免费剩余时间少于此值的种子将被跳过，0 表示不限制</div>
               </el-form-item>
             </el-col>
           </el-row>

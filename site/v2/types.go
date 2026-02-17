@@ -317,8 +317,11 @@ func (t *TorrentItem) CanbeFinished(enabled bool, speedLimit, sizeLimitGB int) b
 			return true
 		}
 		duration := time.Until(t.DiscountEndTime)
-		secondsDiff := int(duration.Seconds())
-		return float64(secondsDiff)*float64(speedLimit) >= (sizeMB / 1024 / 1024)
+		if duration <= 0 {
+			return false
+		}
+		canDownloadMB := duration.Seconds() * float64(speedLimit)
+		return canDownloadMB >= sizeMB
 	}
 	return true
 }

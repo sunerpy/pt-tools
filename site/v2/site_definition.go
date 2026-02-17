@@ -329,6 +329,8 @@ type SiteDefinition struct {
 	RateBurst         int                    `json:"rateBurst,omitempty"`
 	RateWindow        time.Duration          `json:"-"`
 	RateWindowLimit   int                    `json:"rateWindowLimit,omitempty"`
+	HREnabled         bool                   `json:"hrEnabled,omitempty"`
+	HRSeedTimeHours   int                    `json:"hrSeedTimeHours,omitempty"`
 	TimezoneOffset    string                 `json:"timezoneOffset,omitempty"`
 	UserInfo          *UserInfoConfig        `json:"userInfo,omitempty"`
 	LevelRequirements []SiteLevelRequirement `json:"levelRequirements,omitempty"`

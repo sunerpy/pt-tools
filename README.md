@@ -26,6 +26,7 @@
 | **下载器管理**       | 支持多个下载器实例，可配置不同的下载目录和启动策略                |
 | **过滤规则**         | 对 RSS 订阅进行精细化筛选，支持关键词/通配符/正则表达式           |
 | **免费结束自动暂停** | 监控种子免费状态，免费期结束时自动暂停未完成的下载任务            |
+| **自动删种**         | 按做种时间/分享率/不活跃时间自动清理种子，支持 H&R 保护和磁盘保底 |
 | **代理支持**         | 支持 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY 环境变量代理       |
 | **版本更新检查**     | 自动检测新版本，支持代理设置，在 Web 界面展示更新日志             |
 | **一键自动升级**     | 二进制部署支持 Web 界面一键升级，自动下载替换，无需手动操作       |
@@ -227,6 +228,7 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 | **[获取 Cookie / API Key](docs/guide/get-cookie-apikey.md)**   | 详细介绍如何从各站点获取认证信息   |
 | **[RSS 订阅配置指南](docs/guide/rss-subscription.md)**         | 如何配置 RSS 订阅实现自动下载      |
 | **[过滤规则与追剧指南](docs/guide/filter-rules-tv-series.md)** | 使用过滤规则自动追剧、筛选资源     |
+| **[自动删种指南](docs/guide/auto-cleanup.md)**                 | 自动清理种子策略配置和 H&R 保护    |
 | **[配置说明](docs/configuration.md)**                          | 环境变量、全局设置、下载器配置详解 |
 | **[常见问题 (FAQ)](docs/faq.md)**                              | 常见问题和解决方案                 |
 | **[开发指南](docs/development.md)**                            | 从源码构建、技术架构、贡献指南     |

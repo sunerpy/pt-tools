@@ -397,3 +397,163 @@ func (mr *MockDownloaderMockRecorder) ProcessSingleTorrentFile(ctx, filePath, ca
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessSingleTorrentFile", reflect.TypeOf((*MockDownloader)(nil).ProcessSingleTorrentFile), ctx, filePath, category, tags)
 }
+
+// PauseTorrents mocks base method
+func (m *MockDownloader) PauseTorrents(ids []string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PauseTorrents", ids)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) PauseTorrents(ids any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PauseTorrents", reflect.TypeOf((*MockDownloader)(nil).PauseTorrents), ids)
+}
+
+// ResumeTorrents mocks base method
+func (m *MockDownloader) ResumeTorrents(ids []string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResumeTorrents", ids)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) ResumeTorrents(ids any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResumeTorrents", reflect.TypeOf((*MockDownloader)(nil).ResumeTorrents), ids)
+}
+
+// RemoveTorrents mocks base method
+func (m *MockDownloader) RemoveTorrents(ids []string, removeData bool) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveTorrents", ids, removeData)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) RemoveTorrents(ids, removeData any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveTorrents", reflect.TypeOf((*MockDownloader)(nil).RemoveTorrents), ids, removeData)
+}
+
+// SetTorrentCategory mocks base method
+func (m *MockDownloader) SetTorrentCategory(id, category string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetTorrentCategory", id, category)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) SetTorrentCategory(id, category any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTorrentCategory", reflect.TypeOf((*MockDownloader)(nil).SetTorrentCategory), id, category)
+}
+
+// SetTorrentTags mocks base method
+func (m *MockDownloader) SetTorrentTags(id, tags string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetTorrentTags", id, tags)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) SetTorrentTags(id, tags any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTorrentTags", reflect.TypeOf((*MockDownloader)(nil).SetTorrentTags), id, tags)
+}
+
+// SetTorrentSavePath mocks base method
+func (m *MockDownloader) SetTorrentSavePath(id, path string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetTorrentSavePath", id, path)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) SetTorrentSavePath(id, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTorrentSavePath", reflect.TypeOf((*MockDownloader)(nil).SetTorrentSavePath), id, path)
+}
+
+// RecheckTorrent mocks base method
+func (m *MockDownloader) RecheckTorrent(id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecheckTorrent", id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) RecheckTorrent(id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecheckTorrent", reflect.TypeOf((*MockDownloader)(nil).RecheckTorrent), id)
+}
+
+// GetTorrentFiles mocks base method
+func (m *MockDownloader) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTorrentFiles", id)
+	ret0, _ := ret[0].([]downloader.TorrentFile)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+func (mr *MockDownloaderMockRecorder) GetTorrentFiles(id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTorrentFiles", reflect.TypeOf((*MockDownloader)(nil).GetTorrentFiles), id)
+}
+
+// GetTorrentTrackers mocks base method
+func (m *MockDownloader) GetTorrentTrackers(id string) ([]downloader.TorrentTracker, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTorrentTrackers", id)
+	ret0, _ := ret[0].([]downloader.TorrentTracker)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+func (mr *MockDownloaderMockRecorder) GetTorrentTrackers(id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTorrentTrackers", reflect.TypeOf((*MockDownloader)(nil).GetTorrentTrackers), id)
+}
+
+// GetDiskInfo mocks base method
+func (m *MockDownloader) GetDiskInfo() (downloader.DiskInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDiskInfo")
+	ret0, _ := ret[0].(downloader.DiskInfo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+func (mr *MockDownloaderMockRecorder) GetDiskInfo() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDiskInfo", reflect.TypeOf((*MockDownloader)(nil).GetDiskInfo))
+}
+
+// GetSpeedLimit mocks base method
+func (m *MockDownloader) GetSpeedLimit() (downloader.SpeedLimit, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSpeedLimit")
+	ret0, _ := ret[0].(downloader.SpeedLimit)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+func (mr *MockDownloaderMockRecorder) GetSpeedLimit() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSpeedLimit", reflect.TypeOf((*MockDownloader)(nil).GetSpeedLimit))
+}
+
+// SetSpeedLimit mocks base method
+func (m *MockDownloader) SetSpeedLimit(limit downloader.SpeedLimit) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetSpeedLimit", limit)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDownloaderMockRecorder) SetSpeedLimit(limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSpeedLimit", reflect.TypeOf((*MockDownloader)(nil).SetSpeedLimit), limit)
+}
