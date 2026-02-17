@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -614,20 +616,52 @@ func (t *TransmissionClient) GetClientFreeSpace(ctx context.Context) (int64, err
 
 // torrentFullInfo 完整的种子信息结构
 type torrentFullInfo struct {
-	ID             int      `json:"id"`
-	Name           string   `json:"name"`
-	HashString     string   `json:"hashString"`
-	Status         int      `json:"status"`
-	PercentDone    float64  `json:"percentDone"`
-	RateDownload   int64    `json:"rateDownload"`
-	RateUpload     int64    `json:"rateUpload"`
-	TotalSize      int64    `json:"totalSize"`
-	UploadedEver   int64    `json:"uploadedEver"`
-	DownloadedEver int64    `json:"downloadedEver"`
-	UploadRatio    float64  `json:"uploadRatio"`
-	AddedDate      int64    `json:"addedDate"`
-	DownloadDir    string   `json:"downloadDir"`
-	Labels         []string `json:"labels"`
+	ID                 int      `json:"id"`
+	Name               string   `json:"name"`
+	HashString         string   `json:"hashString"`
+	Status             int      `json:"status"`
+	PercentDone        float64  `json:"percentDone"`
+	RateDownload       int64    `json:"rateDownload"`
+	RateUpload         int64    `json:"rateUpload"`
+	TotalSize          int64    `json:"totalSize"`
+	UploadedEver       int64    `json:"uploadedEver"`
+	DownloadedEver     int64    `json:"downloadedEver"`
+	UploadRatio        float64  `json:"uploadRatio"`
+	AddedDate          int64    `json:"addedDate"`
+	DownloadDir        string   `json:"downloadDir"`
+	Labels             []string `json:"labels"`
+	ETA                int64    `json:"eta"`
+	SecondsSeeding     int64    `json:"secondsSeeding"`
+	DoneDate           int64    `json:"doneDate"`
+	PeersSendingToUs   int      `json:"peersSendingToUs"`
+	PeersGettingFromUs int      `json:"peersGettingFromUs"`
+	PeersConnected     int      `json:"peersConnected"`
+	DesiredAvailable   float64  `json:"desiredAvailable"`
+	Trackers           []struct {
+		Announce string `json:"announce"`
+	} `json:"trackers"`
+}
+
+type transmissionFile struct {
+	Name           string `json:"name"`
+	Length         int64  `json:"length"`
+	BytesCompleted int64  `json:"bytesCompleted"`
+}
+
+type transmissionFileStat struct {
+	Wanted   bool `json:"wanted"`
+	Priority int  `json:"priority"`
+}
+
+type transmissionTrackerStat struct {
+	Announce              string `json:"announce"`
+	Host                  string `json:"host"`
+	LeecherCount          int    `json:"leecherCount"`
+	SeederCount           int    `json:"seederCount"`
+	DownloadCount         int    `json:"downloadCount"`
+	AnnounceState         int    `json:"announceState"`
+	LastAnnounceResult    string `json:"lastAnnounceResult"`
+	LastAnnounceSucceeded bool   `json:"lastAnnounceSucceeded"`
 }
 
 // GetAllTorrents 获取所有种子列表
@@ -637,6 +671,8 @@ func (t *TransmissionClient) GetAllTorrents() ([]downloader.Torrent, error) {
 			"id", "name", "hashString", "status", "percentDone",
 			"rateDownload", "rateUpload", "totalSize", "uploadedEver",
 			"downloadedEver", "uploadRatio", "addedDate", "downloadDir", "labels",
+			"eta", "secondsSeeding", "trackers", "doneDate", "peersSendingToUs",
+			"peersGettingFromUs", "peersConnected", "desiredAvailable",
 		},
 	}
 
@@ -675,14 +711,31 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 		TotalSize:       tt.TotalSize,
 		UploadSpeed:     tt.RateUpload,
 		DownloadSpeed:   tt.RateDownload,
+		ETA:             tt.ETA,
+		SeedingTime:     tt.SecondsSeeding,
+		CompletionOn:    tt.DoneDate,
+		NumSeeds:        tt.PeersGettingFromUs,
+		NumPeers:        tt.PeersSendingToUs,
+		Availability:    tt.DesiredAvailable,
+		ContentPath:     filepath.Join(tt.DownloadDir, tt.Name),
 		TotalUploaded:   tt.UploadedEver,
 		TotalDownloaded: tt.DownloadedEver,
 		ClientID:        t.name,
 		Raw:             tt,
 	}
 
-	// 使用第一个 label 作为标签
+	if len(tt.Trackers) > 0 {
+		torrent.Tracker = tt.Trackers[0].Announce
+	}
+
+	if torrent.NumPeers == 0 {
+		torrent.NumPeers = tt.PeersConnected
+	}
+
+	torrent.Tags = strings.Join(tt.Labels, ",")
+
 	if len(tt.Labels) > 0 {
+		torrent.Category = tt.Labels[0]
 		torrent.Label = tt.Labels[0]
 	}
 
@@ -885,42 +938,348 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 
 // PauseTorrent 暂停种子
 func (t *TransmissionClient) PauseTorrent(id string) error {
-	args := map[string]any{
-		"ids": []any{id},
-	}
-
-	_, err := t.doRequest("torrent-stop", args)
-	if err != nil {
-		return fmt.Errorf("failed to pause torrent: %w", err)
-	}
-
-	return nil
+	return t.PauseTorrents([]string{id})
 }
 
 // ResumeTorrent 恢复种子
 func (t *TransmissionClient) ResumeTorrent(id string) error {
-	args := map[string]any{
-		"ids": []any{id},
+	return t.ResumeTorrents([]string{id})
+}
+
+// RemoveTorrent 删除种子
+func (t *TransmissionClient) RemoveTorrent(id string, removeData bool) error {
+	return t.RemoveTorrents([]string{id}, removeData)
+}
+
+func normalizeTransmissionIDs(ids []string) []any {
+	normalized := make([]any, 0, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if intID, err := strconv.Atoi(trimmed); err == nil {
+			normalized = append(normalized, intID)
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func splitLabels(tags string) []string {
+	if tags == "" {
+		return nil
+	}
+	parts := strings.Split(tags, ",")
+	labels := make([]string, 0, len(parts))
+	for _, part := range parts {
+		label := strings.TrimSpace(part)
+		if label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return labels
+}
+
+func mapTransmissionPriority(wanted bool, priority int) int {
+	if !wanted {
+		return 0
+	}
+	if priority > 0 {
+		return 6
+	}
+	return 1
+}
+
+func mapTransmissionTrackerStatus(stat transmissionTrackerStat) int {
+	if !stat.LastAnnounceSucceeded && stat.LastAnnounceResult != "" {
+		return 4
 	}
 
-	_, err := t.doRequest("torrent-start", args)
+	switch stat.AnnounceState {
+	case 3:
+		return 2
+	case 1, 2:
+		return 3
+	default:
+		return 1
+	}
+}
+
+func (t *TransmissionClient) PauseTorrents(ids []string) error {
+	normalizedIDs := normalizeTransmissionIDs(ids)
+	if len(normalizedIDs) == 0 {
+		return nil
+	}
+
+	_, err := t.doRequest("torrent-stop", map[string]any{"ids": normalizedIDs})
 	if err != nil {
-		return fmt.Errorf("failed to resume torrent: %w", err)
+		return fmt.Errorf("failed to pause torrents: %w", err)
 	}
 
 	return nil
 }
 
-// RemoveTorrent 删除种子
-func (t *TransmissionClient) RemoveTorrent(id string, removeData bool) error {
-	args := map[string]any{
-		"ids":               []any{id},
-		"delete-local-data": removeData,
+func (t *TransmissionClient) ResumeTorrents(ids []string) error {
+	normalizedIDs := normalizeTransmissionIDs(ids)
+	if len(normalizedIDs) == 0 {
+		return nil
 	}
 
-	_, err := t.doRequest("torrent-remove", args)
+	_, err := t.doRequest("torrent-start", map[string]any{"ids": normalizedIDs})
 	if err != nil {
-		return fmt.Errorf("failed to remove torrent: %w", err)
+		return fmt.Errorf("failed to resume torrents: %w", err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionClient) RemoveTorrents(ids []string, removeData bool) error {
+	normalizedIDs := normalizeTransmissionIDs(ids)
+	if len(normalizedIDs) == 0 {
+		return nil
+	}
+
+	_, err := t.doRequest("torrent-remove", map[string]any{
+		"ids":               normalizedIDs,
+		"delete-local-data": removeData,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to remove torrents: %w", err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionClient) SetTorrentCategory(id, category string) error {
+	ids := normalizeTransmissionIDs([]string{id})
+	if len(ids) == 0 {
+		return nil
+	}
+
+	_, err := t.doRequest("torrent-set", map[string]any{
+		"ids":    ids,
+		"labels": []string{category},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set torrent category: %w", err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionClient) SetTorrentTags(id, tags string) error {
+	ids := normalizeTransmissionIDs([]string{id})
+	if len(ids) == 0 {
+		return nil
+	}
+
+	_, err := t.doRequest("torrent-set", map[string]any{
+		"ids":    ids,
+		"labels": splitLabels(tags),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set torrent tags: %w", err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionClient) SetTorrentSavePath(id, path string) error {
+	ids := normalizeTransmissionIDs([]string{id})
+	if len(ids) == 0 {
+		return nil
+	}
+
+	_, err := t.doRequest("torrent-set-location", map[string]any{
+		"ids":      ids,
+		"location": path,
+		"move":     true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set torrent save path: %w", err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionClient) RecheckTorrent(id string) error {
+	ids := normalizeTransmissionIDs([]string{id})
+	if len(ids) == 0 {
+		return nil
+	}
+
+	_, err := t.doRequest("torrent-verify", map[string]any{"ids": ids})
+	if err != nil {
+		return fmt.Errorf("failed to recheck torrent: %w", err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionClient) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
+	args := torrentGetArgs{
+		IDs:    normalizeTransmissionIDs([]string{id}),
+		Fields: []string{"id", "files", "fileStats"},
+	}
+
+	resp, err := t.doRequest("torrent-get", args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get torrent files: %w", err)
+	}
+
+	var getResp struct {
+		Torrents []struct {
+			Files     []transmissionFile     `json:"files"`
+			FileStats []transmissionFileStat `json:"fileStats"`
+		} `json:"torrents"`
+	}
+	if err := json.Unmarshal(resp.Arguments, &getResp); err != nil {
+		return nil, fmt.Errorf("failed to parse torrent files: %w", err)
+	}
+
+	if len(getResp.Torrents) == 0 {
+		return nil, downloader.ErrTorrentNotFound
+	}
+
+	files := make([]downloader.TorrentFile, 0, len(getResp.Torrents[0].Files))
+	for i, file := range getResp.Torrents[0].Files {
+		fileStat := transmissionFileStat{Wanted: true}
+		if i < len(getResp.Torrents[0].FileStats) {
+			fileStat = getResp.Torrents[0].FileStats[i]
+		}
+
+		progress := 0.0
+		if file.Length > 0 {
+			progress = float64(file.BytesCompleted) / float64(file.Length)
+		}
+
+		files = append(files, downloader.TorrentFile{
+			Index:    i,
+			Name:     file.Name,
+			Size:     file.Length,
+			Progress: progress,
+			Priority: mapTransmissionPriority(fileStat.Wanted, fileStat.Priority),
+		})
+	}
+
+	return files, nil
+}
+
+func (t *TransmissionClient) GetTorrentTrackers(id string) ([]downloader.TorrentTracker, error) {
+	args := torrentGetArgs{
+		IDs:    normalizeTransmissionIDs([]string{id}),
+		Fields: []string{"id", "trackerStats"},
+	}
+
+	resp, err := t.doRequest("torrent-get", args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get torrent trackers: %w", err)
+	}
+
+	var getResp struct {
+		Torrents []struct {
+			TrackerStats []transmissionTrackerStat `json:"trackerStats"`
+		} `json:"torrents"`
+	}
+	if err := json.Unmarshal(resp.Arguments, &getResp); err != nil {
+		return nil, fmt.Errorf("failed to parse torrent trackers: %w", err)
+	}
+
+	if len(getResp.Torrents) == 0 {
+		return nil, downloader.ErrTorrentNotFound
+	}
+
+	trackers := make([]downloader.TorrentTracker, 0, len(getResp.Torrents[0].TrackerStats))
+	for _, tracker := range getResp.Torrents[0].TrackerStats {
+		url := tracker.Announce
+		if url == "" {
+			url = tracker.Host
+		}
+
+		trackers = append(trackers, downloader.TorrentTracker{
+			URL:     url,
+			Status:  mapTransmissionTrackerStatus(tracker),
+			Peers:   tracker.DownloadCount,
+			Seeds:   tracker.SeederCount,
+			Leeches: tracker.LeecherCount,
+			Message: tracker.LastAnnounceResult,
+		})
+	}
+
+	return trackers, nil
+}
+
+func (t *TransmissionClient) GetDiskInfo() (downloader.DiskInfo, error) {
+	resp, err := t.doRequest("session-get", nil)
+	if err != nil {
+		return downloader.DiskInfo{}, fmt.Errorf("failed to get session info: %w", err)
+	}
+
+	var sessionInfo struct {
+		DownloadDir string `json:"download-dir"`
+	}
+	if unmarshalErr := json.Unmarshal(resp.Arguments, &sessionInfo); unmarshalErr != nil {
+		return downloader.DiskInfo{}, fmt.Errorf("failed to parse session info: %w", unmarshalErr)
+	}
+
+	path := sessionInfo.DownloadDir
+	if path == "" {
+		path = "/downloads"
+	}
+
+	freeSpaceResp, err := t.doRequest("free-space", freeSpaceArgs{Path: path})
+	if err != nil {
+		return downloader.DiskInfo{}, fmt.Errorf("failed to get free space: %w", err)
+	}
+
+	var freeSpace freeSpaceResponse
+	if err := json.Unmarshal(freeSpaceResp.Arguments, &freeSpace); err != nil {
+		return downloader.DiskInfo{}, fmt.Errorf("failed to parse free space: %w", err)
+	}
+
+	return downloader.DiskInfo{
+		Path:      path,
+		FreeSpace: freeSpace.SizeBytes,
+		TotalSize: 0,
+	}, nil
+}
+
+func (t *TransmissionClient) GetSpeedLimit() (downloader.SpeedLimit, error) {
+	resp, err := t.doRequest("session-get", nil)
+	if err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to get session info: %w", err)
+	}
+
+	var sessionInfo struct {
+		DownEnabled bool `json:"speed-limit-down-enabled"`
+		DownLimit   int  `json:"speed-limit-down"`
+		UpEnabled   bool `json:"speed-limit-up-enabled"`
+		UpLimit     int  `json:"speed-limit-up"`
+	}
+	if err := json.Unmarshal(resp.Arguments, &sessionInfo); err != nil {
+		return downloader.SpeedLimit{}, fmt.Errorf("failed to parse speed limits: %w", err)
+	}
+
+	return downloader.SpeedLimit{
+		DownloadLimit: int64(sessionInfo.DownLimit) * 1024,
+		UploadLimit:   int64(sessionInfo.UpLimit) * 1024,
+		LimitEnabled:  sessionInfo.DownEnabled || sessionInfo.UpEnabled,
+	}, nil
+}
+
+func (t *TransmissionClient) SetSpeedLimit(limit downloader.SpeedLimit) error {
+	args := map[string]any{
+		"speed-limit-down-enabled": limit.LimitEnabled,
+		"speed-limit-up-enabled":   limit.LimitEnabled,
+		"speed-limit-down":         int(limit.DownloadLimit / 1024),
+		"speed-limit-up":           int(limit.UploadLimit / 1024),
+	}
+
+	_, err := t.doRequest("session-set", args)
+	if err != nil {
+		return fmt.Errorf("failed to set speed limits: %w", err)
 	}
 
 	return nil

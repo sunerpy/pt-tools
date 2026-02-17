@@ -928,6 +928,7 @@ func TestProcessSingleTorrentWithDownloader_NewTorrentPushSuccess(t *testing.T) 
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(100*1024*1024*1024), nil)
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
@@ -968,6 +969,7 @@ func TestProcessSingleTorrentWithDownloader_PushFailed(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(100*1024*1024*1024), nil)
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: false, Message: "push failed"}, fmt.Errorf("push failed"))
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
@@ -1402,7 +1404,7 @@ func TestProcessTorrentsWithDownloaderByRSS_WithDownloadPath(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	// 验证 AddTorrentFileEx 被调用时传递了正确的下载路径
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(100*1024*1024*1024), nil)
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}

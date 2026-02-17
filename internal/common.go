@@ -22,6 +22,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/filter"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 	"github.com/sunerpy/pt-tools/utils"
@@ -151,9 +152,13 @@ func ProcessTorrentsWithDownloaderByRSS(
 
 	successCount := 0
 	failCount := 0
-	for _, file := range filePaths {
+	for i, file := range filePaths {
 		err := processSingleTorrentWithDownloader(ctx, dl, dlInfo, file, category, tags, downloadPath, siteName, rssCfg.PauseOnFreeEnd)
 		if err != nil {
+			if errors.Is(err, downloader.ErrInsufficientSpace) {
+				sLogger().Warnf("[磁盘保护] 空间不足，停止推送剩余 %d 个种子", len(filePaths)-i-1)
+				break
+			}
 			sLogger().Errorf("处理种子失败: %s, %v", file, err)
 			failCount++
 		} else {
@@ -290,10 +295,25 @@ func processSingleTorrentWithDownloader(
 	sLogger().Infof("推送新种子到下载器 %s: %s", dl.GetName(), filePath)
 
 	glOnly, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
-	if torrent.RetryCount >= glOnly.MaxRetry {
+	if glOnly.MaxRetry > 0 && torrent.RetryCount >= glOnly.MaxRetry {
 		sLogger().Warnf("超过最大重试次数(%d)，删除文件: %s", glOnly.MaxRetry, filePath)
 		_ = os.Remove(filePath)
 		return nil
+	}
+
+	// 磁盘空间预检查：空间低于保底阈值时拒绝推送
+	if glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
+		freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
+		if spaceErr != nil {
+			sLogger().Warnf("[磁盘保护] 获取磁盘空间失败，继续推送: %v", spaceErr)
+		} else {
+			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
+			if freeGB < glOnly.CleanupMinDiskSpaceGB {
+				sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，跳过推送: %s",
+					dl.GetName(), freeGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+				return downloader.ErrInsufficientSpace
+			}
+		}
 	}
 
 	torrentData, readErr := os.ReadFile(filePath)
@@ -452,7 +472,7 @@ func downloadWorkerUnified(
 ) {
 	defer wg.Done()
 	siteName := site.SiteGroup()
-	// 读取一次全局限制配置，用于 CanbeFinished
+
 	var gl models.SettingsGlobal
 	if global.GlobalDB != nil {
 		if g, err := core.NewConfigStore(global.GlobalDB).GetGlobalOnly(); err == nil {
@@ -460,7 +480,14 @@ func downloadWorkerUnified(
 		}
 	}
 
-	// 初始化过滤服务
+	siteID := string(siteName)
+	var siteHR bool
+	var siteHRSeedTimeH int
+	if def := v2.GetDefinitionRegistry().GetOrDefault(siteID); def != nil {
+		siteHR = def.HREnabled
+		siteHRSeedTimeH = def.HRSeedTimeHours
+	}
+
 	var filterSvc filter.FilterService
 	if global.GlobalDB != nil {
 		filterSvc = filter.NewFilterService(global.GlobalDB.DB)
@@ -516,6 +543,16 @@ func downloadWorkerUnified(
 			canFinished := detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
 			isFree := detail.IsFree()
 
+			freeEndTime := detail.GetFreeEndTime()
+			if isFree && canFinished && freeEndTime != nil && gl.MinFreeMinutes > 0 {
+				remaining := time.Until(*freeEndTime)
+				if remaining > 0 && remaining < time.Duration(gl.MinFreeMinutes)*time.Minute {
+					canFinished = false
+					sLogger().Infof("种子: %s 免费剩余时间不足 (%.0f分钟 < %d分钟)，跳过",
+						title, remaining.Minutes(), gl.MinFreeMinutes)
+				}
+			}
+
 			// 获取种子的标签/副标题用于过滤匹配
 			detailTag := detail.GetSubTitle()
 
@@ -566,6 +603,8 @@ func downloadWorkerUnified(
 					LastCheckTime:  &now,
 					DownloadSource: downloadSource,
 					TorrentSize:    detail.SizeBytes,
+					HasHR:          detail.HasHR || siteHR,
+					HRSeedTimeH:    siteHRSeedTimeH,
 				}
 				if matchedRule != nil {
 					torrent.FilterRuleID = &matchedRule.ID
@@ -786,7 +825,7 @@ func processSingleTorrent(
 	sLogger().Infof("推送新种子到 qBittorrent: %s\n", filePath)
 
 	glOnly, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
-	if torrent.RetryCount >= glOnly.MaxRetry {
+	if glOnly.MaxRetry > 0 && torrent.RetryCount >= glOnly.MaxRetry {
 		sLogger().Warnf("超过最大重试次数(%d)，删除文件: %s", glOnly.MaxRetry, filePath)
 		_ = os.Remove(filePath)
 		return nil
@@ -1049,6 +1088,16 @@ func downloadWorker[T models.ResType](
 			detail := resDetail.Data
 			canFinished := detail.CanbeFinished(global.GetSlogger(), gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
 			isFree := detail.IsFree()
+
+			legacyFreeEndTime := detail.GetFreeEndTime()
+			if isFree && canFinished && legacyFreeEndTime != nil && gl.MinFreeMinutes > 0 {
+				remaining := time.Until(*legacyFreeEndTime)
+				if remaining > 0 && remaining < time.Duration(gl.MinFreeMinutes)*time.Minute {
+					canFinished = false
+					sLogger().Infof("种子: %s 免费剩余时间不足 (%.0f分钟 < %d分钟)，跳过",
+						title, remaining.Minutes(), gl.MinFreeMinutes)
+				}
+			}
 
 			// 获取种子的标签/副标题用于过滤匹配
 			detailTag := detail.GetSubTitle()

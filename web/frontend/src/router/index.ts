@@ -24,6 +24,11 @@ const router = createRouter({
       name: "global",
       component: () => import("@/views/GlobalSettings.vue"),
     },
+    {
+      path: "/cleanup",
+      name: "cleanup",
+      component: () => import("@/views/AutoCleanup.vue"),
+    },
     // 旧的 qBittorrent 设置页面（已隐藏）
     // {
     //   path: '/qbit',

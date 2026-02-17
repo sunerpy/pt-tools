@@ -55,14 +55,57 @@ type Torrent struct {
 	DateAdded       int64        // 添加时间 (Unix timestamp)
 	SavePath        string       // 保存路径
 	Label           string       // 标签
+	Category        string       // 分类 (qBit: category, TR: labels[0])
+	Tags            string       // 标签 (qBit: tags, TR: labels joined)
 	State           TorrentState // 状态
 	TotalSize       int64        // 总大小 (bytes)
 	UploadSpeed     int64        // 上传速度 (bytes/s)
 	DownloadSpeed   int64        // 下载速度 (bytes/s)
+	ETA             int64        // 预计剩余时间(秒), -1=无限, 0=完成
+	SeedingTime     int64        // 做种时间(秒)
+	Tracker         string       // 主 Tracker URL
+	CompletionOn    int64        // 完成时间 (Unix timestamp), 0=未完成
+	NumSeeds        int          // 种子数
+	NumPeers        int          // 下载者数
+	Availability    float64      // 可用性 (0.0-1.0+)
+	ContentPath     string       // 内容路径 (文件/文件夹的完整路径)
 	TotalUploaded   int64        // 总上传量 (bytes)
 	TotalDownloaded int64        // 总下载量 (bytes)
 	Raw             any          // 原始数据
 	ClientID        string       // 客户端ID
+}
+
+// TorrentFile 种子内的文件信息
+type TorrentFile struct {
+	Index    int     // 文件索引
+	Name     string  // 文件路径/名称
+	Size     int64   // 文件大小 (bytes)
+	Progress float64 // 下载进度 (0.0-1.0)
+	Priority int     // 优先级 (0=不下载, 1=普通, 6=高, 7=最高)
+}
+
+// TorrentTracker Tracker 信息
+type TorrentTracker struct {
+	URL     string // Tracker URL
+	Status  int    // 状态 (0=禁用, 1=未联系, 2=工作中, 3=更新中, 4=出错)
+	Peers   int    // Peer 数
+	Seeds   int    // Seed 数
+	Leeches int    // Leech 数
+	Message string // 状态消息
+}
+
+// SpeedLimit 速度限制
+type SpeedLimit struct {
+	DownloadLimit int64 // 下载限速 (bytes/s), 0=不限
+	UploadLimit   int64 // 上传限速 (bytes/s), 0=不限
+	LimitEnabled  bool  // 是否启用限速
+}
+
+// DiskInfo 磁盘信息
+type DiskInfo struct {
+	Path      string // 路径
+	FreeSpace int64  // 可用空间 (bytes)
+	TotalSize int64  // 总空间 (bytes), 0 表示未知
 }
 
 // AddTorrentOptions 添加种子的选项
@@ -187,6 +230,28 @@ type Downloader interface {
 	// RemoveTorrent 删除种子
 	// removeData: 是否同时删除数据文件
 	RemoveTorrent(id string, removeData bool) error
+
+	// === 批量操作 ===
+	PauseTorrents(ids []string) error
+	ResumeTorrents(ids []string) error
+	RemoveTorrents(ids []string, removeData bool) error
+
+	// === 修改操作 ===
+	SetTorrentCategory(id, category string) error
+	SetTorrentTags(id, tags string) error
+	SetTorrentSavePath(id, path string) error
+
+	// === 维护操作 ===
+	RecheckTorrent(id string) error
+
+	// === 详情查询 ===
+	GetTorrentFiles(id string) ([]TorrentFile, error)
+	GetTorrentTrackers(id string) ([]TorrentTracker, error)
+
+	// === 全局状态 ===
+	GetDiskInfo() (DiskInfo, error)
+	GetSpeedLimit() (SpeedLimit, error)
+	SetSpeedLimit(limit SpeedLimit) error
 
 	// GetClientPaths 获取下载器配置的保存路径列表
 	GetClientPaths() ([]string, error)

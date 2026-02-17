@@ -27,6 +27,10 @@ const {
 const proxyUrl = ref("");
 const showProxyInput = ref(false);
 
+function openReleases() {
+  open("https://github.com/sunerpy/pt-tools/releases", "_blank");
+}
+
 marked.use({
   renderer: {
     link({ href, title, text }) {
@@ -107,6 +111,9 @@ function renderMarkdown(text: string): string {
           <span class="subtitle">当前版本与更新日志</span>
         </div>
         <div class="header-actions">
+          <el-button size="small" text @click="openReleases" title="查看所有历史版本">
+            版本历史
+          </el-button>
           <el-button
             size="small"
             text

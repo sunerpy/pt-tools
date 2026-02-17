@@ -21,11 +21,12 @@ type job struct {
 }
 type Manager struct {
 	mu                sync.Mutex
-	jobs              map[string]*job // key: site|rss.name
+	jobs              map[string]*job
 	wg                sync.WaitGroup
 	lastVersion       int64
 	downloaderManager *downloader.DownloaderManager
 	freeEndMonitor    *FreeEndMonitor
+	cleanupMonitor    *CleanupMonitor
 	eventCancel       func()
 	stopped           bool
 }
@@ -92,6 +93,7 @@ func NewManager() *Manager {
 func (m *Manager) InitFreeEndMonitor() {
 	m.initDownloaderManager()
 	m.initFreeEndMonitor()
+	m.initCleanupMonitor()
 }
 
 // GetDownloaderManager 获取下载器管理器
@@ -165,8 +167,8 @@ func (m *Manager) Reload(cfg *models.Config) {
 	// 初始化下载器管理器
 	m.initDownloaderManager()
 
-	// 初始化并启动免费结束监控器
 	m.initFreeEndMonitor()
+	m.initCleanupMonitor()
 
 	// 检查是否有可用的默认下载器
 	defaultDl, err := m.downloaderManager.GetDefaultDownloader()
@@ -317,6 +319,21 @@ func (m *Manager) initFreeEndMonitor() {
 	})
 }
 
+func (m *Manager) initCleanupMonitor() {
+	if global.GlobalDB == nil {
+		return
+	}
+
+	if m.cleanupMonitor != nil {
+		m.cleanupMonitor.Stop()
+	}
+
+	m.cleanupMonitor = NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
+	if err := m.cleanupMonitor.Start(); err != nil {
+		global.GetSlogger().Errorf("启动自动删种监控器失败: %v", err)
+	}
+}
+
 // createQBitFactory 创建 qBittorrent 工厂
 func createQBitFactory() downloader.DownloaderFactory {
 	return func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
@@ -373,6 +390,10 @@ func (m *Manager) StopAll() {
 	if m.freeEndMonitor != nil {
 		m.freeEndMonitor.Stop()
 		m.freeEndMonitor = nil
+	}
+	if m.cleanupMonitor != nil {
+		m.cleanupMonitor.Stop()
+		m.cleanupMonitor = nil
 	}
 	if m.eventCancel != nil {
 		m.eventCancel()

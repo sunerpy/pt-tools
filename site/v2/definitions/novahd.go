@@ -14,6 +14,8 @@ var NovaHDDefinition = &v2.SiteDefinition{
 	URLs:           []string{"https://pt.novahd.top/"},
 	FaviconURL:     "https://pt.novahd.top/favicon.ico",
 	TimezoneOffset: "+0800",
+	RateLimit:      0.5,
+	RateBurst:      2,
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,

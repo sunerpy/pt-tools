@@ -37,6 +37,18 @@ func (m *MockDownloader) AddTorrentFileEx(fileData []byte, opt AddTorrentOptions
 func (m *MockDownloader) PauseTorrent(id string) error                            { return nil }
 func (m *MockDownloader) ResumeTorrent(id string) error                           { return nil }
 func (m *MockDownloader) RemoveTorrent(id string, removeData bool) error          { return nil }
+func (m *MockDownloader) PauseTorrents(ids []string) error                        { return nil }
+func (m *MockDownloader) ResumeTorrents(ids []string) error                       { return nil }
+func (m *MockDownloader) RemoveTorrents(ids []string, removeData bool) error      { return nil }
+func (m *MockDownloader) SetTorrentCategory(id, category string) error            { return nil }
+func (m *MockDownloader) SetTorrentTags(id, tags string) error                    { return nil }
+func (m *MockDownloader) SetTorrentSavePath(id, path string) error                { return nil }
+func (m *MockDownloader) RecheckTorrent(id string) error                          { return nil }
+func (m *MockDownloader) GetTorrentFiles(id string) ([]TorrentFile, error)        { return nil, nil }
+func (m *MockDownloader) GetTorrentTrackers(id string) ([]TorrentTracker, error)  { return nil, nil }
+func (m *MockDownloader) GetDiskInfo() (DiskInfo, error)                          { return DiskInfo{}, nil }
+func (m *MockDownloader) GetSpeedLimit() (SpeedLimit, error)                      { return SpeedLimit{}, nil }
+func (m *MockDownloader) SetSpeedLimit(limit SpeedLimit) error                    { return nil }
 func (m *MockDownloader) GetClientPaths() ([]string, error)                       { return nil, nil }
 func (m *MockDownloader) GetClientLabels() ([]string, error)                      { return nil, nil }
 func (m *MockDownloader) AddTorrent(fileData []byte, category, tags string) error { return nil }
@@ -378,8 +390,24 @@ func (m *StatefulMockDownloader) AddTorrentFileEx(fileData []byte, opt AddTorren
 func (m *StatefulMockDownloader) PauseTorrent(id string) error                   { return nil }
 func (m *StatefulMockDownloader) ResumeTorrent(id string) error                  { return nil }
 func (m *StatefulMockDownloader) RemoveTorrent(id string, removeData bool) error { return nil }
-func (m *StatefulMockDownloader) GetClientPaths() ([]string, error)              { return nil, nil }
-func (m *StatefulMockDownloader) GetClientLabels() ([]string, error)             { return nil, nil }
+func (m *StatefulMockDownloader) PauseTorrents(ids []string) error               { return nil }
+func (m *StatefulMockDownloader) ResumeTorrents(ids []string) error              { return nil }
+func (m *StatefulMockDownloader) RemoveTorrents(ids []string, removeData bool) error {
+	return nil
+}
+func (m *StatefulMockDownloader) SetTorrentCategory(id, category string) error     { return nil }
+func (m *StatefulMockDownloader) SetTorrentTags(id, tags string) error             { return nil }
+func (m *StatefulMockDownloader) SetTorrentSavePath(id, path string) error         { return nil }
+func (m *StatefulMockDownloader) RecheckTorrent(id string) error                   { return nil }
+func (m *StatefulMockDownloader) GetTorrentFiles(id string) ([]TorrentFile, error) { return nil, nil }
+func (m *StatefulMockDownloader) GetTorrentTrackers(id string) ([]TorrentTracker, error) {
+	return nil, nil
+}
+func (m *StatefulMockDownloader) GetDiskInfo() (DiskInfo, error)       { return DiskInfo{}, nil }
+func (m *StatefulMockDownloader) GetSpeedLimit() (SpeedLimit, error)   { return SpeedLimit{}, nil }
+func (m *StatefulMockDownloader) SetSpeedLimit(limit SpeedLimit) error { return nil }
+func (m *StatefulMockDownloader) GetClientPaths() ([]string, error)    { return nil, nil }
+func (m *StatefulMockDownloader) GetClientLabels() ([]string, error)   { return nil, nil }
 func (m *StatefulMockDownloader) AddTorrent(fileData []byte, category, tags string) error {
 	hash := string(fileData) // 简化：使用数据作为hash
 	m.torrentMap[hash] = true

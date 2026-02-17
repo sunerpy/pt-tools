@@ -29,19 +29,41 @@ type AdminUser struct {
 
 // 全局设置
 type SettingsGlobal struct {
-	ID                     uint      `gorm:"primaryKey" json:"id"`
-	DefaultIntervalMinutes int32     `json:"default_interval_minutes" gorm:"default:10"` // 默认 RSS 执行间隔（分钟）
-	DefaultConcurrency     int32     `json:"default_concurrency" gorm:"default:3"`       // 默认并发数
-	DefaultEnabled         bool      `json:"default_enabled"`
-	DownloadDir            string    `gorm:"not null" json:"download_dir"`
-	DownloadLimitEnabled   bool      `json:"download_limit_enabled"`
-	DownloadSpeedLimit     int       `json:"download_speed_limit"`
-	TorrentSizeGB          int       `json:"torrent_size_gb"`
-	AutoStart              bool      `json:"auto_start"`
-	RetainHours            int       `json:"retain_hours" gorm:"default:24"`
-	MaxRetry               int       `json:"max_retry" gorm:"default:3"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID                     uint   `gorm:"primaryKey" json:"id"`
+	DefaultIntervalMinutes int32  `json:"default_interval_minutes" gorm:"default:10"` // 默认 RSS 执行间隔（分钟）
+	DefaultConcurrency     int32  `json:"default_concurrency" gorm:"default:3"`       // 默认并发数
+	DefaultEnabled         bool   `json:"default_enabled"`
+	DownloadDir            string `gorm:"not null" json:"download_dir"`
+	DownloadLimitEnabled   bool   `json:"download_limit_enabled"`
+	DownloadSpeedLimit     int    `json:"download_speed_limit"`
+	TorrentSizeGB          int    `json:"torrent_size_gb"`
+	MinFreeMinutes         int    `json:"min_free_minutes" gorm:"default:30"`
+	AutoStart              bool   `json:"auto_start"`
+	RetainHours            int    `json:"retain_hours" gorm:"default:24"`
+	MaxRetry               int    `json:"max_retry" gorm:"default:3"`
+
+	// 自动删种
+	CleanupEnabled        bool    `json:"cleanup_enabled" gorm:"default:false"`
+	CleanupIntervalMin    int     `json:"cleanup_interval_min" gorm:"default:30"`
+	CleanupScope          string  `json:"cleanup_scope" gorm:"size:16;default:'database'"`
+	CleanupScopeTags      string  `json:"cleanup_scope_tags" gorm:"size:256"`
+	CleanupRemoveData     bool    `json:"cleanup_remove_data" gorm:"default:true"`
+	CleanupConditionMode  string  `json:"cleanup_condition_mode" gorm:"size:8;default:'or'"`
+	CleanupMaxSeedTimeH   int     `json:"cleanup_max_seed_time_h" gorm:"default:0"`
+	CleanupMinRatio       float64 `json:"cleanup_min_ratio" gorm:"default:0"`
+	CleanupMaxInactiveH   int     `json:"cleanup_max_inactive_h" gorm:"default:0"`
+	CleanupSlowSeedTimeH  int     `json:"cleanup_slow_seed_time_h" gorm:"default:0"`
+	CleanupSlowMaxRatio   float64 `json:"cleanup_slow_max_ratio" gorm:"default:0"`
+	CleanupDelFreeExpired bool    `json:"cleanup_del_free_expired" gorm:"default:true"`
+	CleanupDiskProtect    bool    `json:"cleanup_disk_protect" gorm:"default:true"`
+	CleanupMinDiskSpaceGB float64 `json:"cleanup_min_disk_space_gb" gorm:"default:50"`
+	CleanupProtectDL      bool    `json:"cleanup_protect_dl" gorm:"default:false"`
+	CleanupProtectHR      bool    `json:"cleanup_protect_hr" gorm:"default:true"`
+	CleanupMinRetainH     int     `json:"cleanup_min_retain_h" gorm:"default:24"`
+	CleanupProtectTags    string  `json:"cleanup_protect_tags" gorm:"size:256"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // GetEffectiveIntervalMinutes 获取有效的间隔时间（带默认值和边界检查）

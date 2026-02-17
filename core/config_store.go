@@ -177,7 +177,29 @@ func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 		cur.DownloadLimitEnabled = gs.DownloadLimitEnabled
 		cur.DownloadSpeedLimit = gs.DownloadSpeedLimit
 		cur.TorrentSizeGB = gs.TorrentSizeGB
+		cur.MinFreeMinutes = gs.MinFreeMinutes
 		cur.AutoStart = gs.AutoStart
+		cur.RetainHours = gs.RetainHours
+		cur.MaxRetry = gs.MaxRetry
+		cur.DefaultConcurrency = gs.DefaultConcurrency
+		cur.CleanupEnabled = gs.CleanupEnabled
+		cur.CleanupIntervalMin = gs.CleanupIntervalMin
+		cur.CleanupScope = gs.CleanupScope
+		cur.CleanupScopeTags = gs.CleanupScopeTags
+		cur.CleanupRemoveData = gs.CleanupRemoveData
+		cur.CleanupConditionMode = gs.CleanupConditionMode
+		cur.CleanupMaxSeedTimeH = gs.CleanupMaxSeedTimeH
+		cur.CleanupMinRatio = gs.CleanupMinRatio
+		cur.CleanupMaxInactiveH = gs.CleanupMaxInactiveH
+		cur.CleanupSlowSeedTimeH = gs.CleanupSlowSeedTimeH
+		cur.CleanupSlowMaxRatio = gs.CleanupSlowMaxRatio
+		cur.CleanupDelFreeExpired = gs.CleanupDelFreeExpired
+		cur.CleanupDiskProtect = gs.CleanupDiskProtect
+		cur.CleanupMinDiskSpaceGB = gs.CleanupMinDiskSpaceGB
+		cur.CleanupProtectDL = gs.CleanupProtectDL
+		cur.CleanupProtectHR = gs.CleanupProtectHR
+		cur.CleanupMinRetainH = gs.CleanupMinRetainH
+		cur.CleanupProtectTags = gs.CleanupProtectTags
 		if err := db.Save(&cur).Error; err != nil {
 			return err
 		}

@@ -405,13 +405,32 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, gs)
 	case http.MethodPost:
 		var req struct {
-			DefaultIntervalMinutes int32  `json:"default_interval_minutes"`
-			DefaultInterval        int64  `json:"default_interval"`
-			DownloadDir            string `json:"download_dir"`
-			DownloadLimitEnabled   bool   `json:"download_limit_enabled"`
-			DownloadSpeedLimit     int    `json:"download_speed_limit"`
-			TorrentSizeGB          int    `json:"torrent_size_gb"`
-			AutoStart              bool   `json:"auto_start"`
+			DefaultIntervalMinutes int32   `json:"default_interval_minutes"`
+			DefaultInterval        int64   `json:"default_interval"`
+			DownloadDir            string  `json:"download_dir"`
+			DownloadLimitEnabled   bool    `json:"download_limit_enabled"`
+			DownloadSpeedLimit     int     `json:"download_speed_limit"`
+			TorrentSizeGB          int     `json:"torrent_size_gb"`
+			MinFreeMinutes         int     `json:"min_free_minutes"`
+			AutoStart              bool    `json:"auto_start"`
+			CleanupEnabled         bool    `json:"cleanup_enabled"`
+			CleanupIntervalMin     int     `json:"cleanup_interval_min"`
+			CleanupScope           string  `json:"cleanup_scope"`
+			CleanupScopeTags       string  `json:"cleanup_scope_tags"`
+			CleanupRemoveData      bool    `json:"cleanup_remove_data"`
+			CleanupConditionMode   string  `json:"cleanup_condition_mode"`
+			CleanupMaxSeedTimeH    int     `json:"cleanup_max_seed_time_h"`
+			CleanupMinRatio        float64 `json:"cleanup_min_ratio"`
+			CleanupMaxInactiveH    int     `json:"cleanup_max_inactive_h"`
+			CleanupSlowSeedTimeH   int     `json:"cleanup_slow_seed_time_h"`
+			CleanupSlowMaxRatio    float64 `json:"cleanup_slow_max_ratio"`
+			CleanupDelFreeExpired  bool    `json:"cleanup_del_free_expired"`
+			CleanupDiskProtect     bool    `json:"cleanup_disk_protect"`
+			CleanupMinDiskSpaceGB  float64 `json:"cleanup_min_disk_space_gb"`
+			CleanupProtectDL       bool    `json:"cleanup_protect_dl"`
+			CleanupProtectHR       bool    `json:"cleanup_protect_hr"`
+			CleanupMinRetainH      int     `json:"cleanup_min_retain_h"`
+			CleanupProtectTags     string  `json:"cleanup_protect_tags"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -433,7 +452,26 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			DownloadLimitEnabled:   req.DownloadLimitEnabled,
 			DownloadSpeedLimit:     req.DownloadSpeedLimit,
 			TorrentSizeGB:          req.TorrentSizeGB,
+			MinFreeMinutes:         req.MinFreeMinutes,
 			AutoStart:              req.AutoStart,
+			CleanupEnabled:         req.CleanupEnabled,
+			CleanupIntervalMin:     req.CleanupIntervalMin,
+			CleanupScope:           req.CleanupScope,
+			CleanupScopeTags:       req.CleanupScopeTags,
+			CleanupRemoveData:      req.CleanupRemoveData,
+			CleanupConditionMode:   req.CleanupConditionMode,
+			CleanupMaxSeedTimeH:    req.CleanupMaxSeedTimeH,
+			CleanupMinRatio:        req.CleanupMinRatio,
+			CleanupMaxInactiveH:    req.CleanupMaxInactiveH,
+			CleanupSlowSeedTimeH:   req.CleanupSlowSeedTimeH,
+			CleanupSlowMaxRatio:    req.CleanupSlowMaxRatio,
+			CleanupDelFreeExpired:  req.CleanupDelFreeExpired,
+			CleanupDiskProtect:     req.CleanupDiskProtect,
+			CleanupMinDiskSpaceGB:  req.CleanupMinDiskSpaceGB,
+			CleanupProtectDL:       req.CleanupProtectDL,
+			CleanupProtectHR:       req.CleanupProtectHR,
+			CleanupMinRetainH:      req.CleanupMinRetainH,
+			CleanupProtectTags:     req.CleanupProtectTags,
 		}
 		if err := s.store.SaveGlobalSettings(gs); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
