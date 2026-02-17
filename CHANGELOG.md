@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-02-17
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump @types/node from 25.2.2 to 25.2.3 in /web/frontend ([#100](https://github.com/sunerpy/pt-tools/issues/100)) ([#100](https://github.com/sunerpy/pt-tools/pull/100))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.2.2 to 25.2.3. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.2.3
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @vueuse/core from 14.2.0 to 14.2.1 in /web/frontend ([#101](https://github.com/sunerpy/pt-tools/issues/101)) ([#101](https://github.com/sunerpy/pt-tools/pull/101))
+  Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.2.0 to 14.2.1. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.2.1/packages/core)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vueuse/core"
+         dependency-version: 14.2.1
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.43.0 to 1.48.0 in /web/frontend ([#102](https://github.com/sunerpy/pt-tools/issues/102)) ([#102](https://github.com/sunerpy/pt-tools/pull/102))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.43.0 to 1.48.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.48.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.48.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump marked from 17.0.1 to 17.0.2 in /web/frontend ([#103](https://github.com/sunerpy/pt-tools/issues/103)) ([#103](https://github.com/sunerpy/pt-tools/pull/103))
+  Bumps [marked](https://github.com/markedjs/marked) from 17.0.1 to 17.0.2. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.1...v17.0.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: marked
+         dependency-version: 17.0.2
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.28.0 to 0.33.0 in /web/frontend ([#104](https://github.com/sunerpy/pt-tools/issues/104)) ([#104](https://github.com/sunerpy/pt-tools/pull/104))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.28.0 to 0.33.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.33.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.33.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **cleanup**: 磁盘空间保护与自动删种优化 ([#105](https://github.com/sunerpy/pt-tools/issues/105)) ([#105](https://github.com/sunerpy/pt-tools/pull/105))
+- RSS 推送前增加磁盘空间预检查，空间不足时拒绝推送并短路剩余种子 - 手动推送入口同步增加空间预检查 - 修复 SaveGlobalSettings 更新分支丢失 Cleanup/MaxRetry 等字段的问题 - 修复 MaxRetry=0 时所有种子被误判为超过重试次数的问题 - 修复 CanbeFinished 单位换算错误导致免费期判断失效的问题 - 新增最短免费时间阈值(MinFreeMinutes)，跳过免费剩余时间不足的种子 - 自动删种预设方案选择后保留选中状态，页面加载时反向匹配预设 - 自动删种检查增加运行状态日志，缩短启动延迟 - NexusPHP 站点(hdsky/novahd)降低默认请求速率，减少频率限制误判 - CleanupDiskProtect 默认值改为 true - 新增自动删种功能文档，更新配置文档和 FAQ
+
 ## [0.13.0] - 2026-02-12
 
 ### Dependencies (Frontend)
