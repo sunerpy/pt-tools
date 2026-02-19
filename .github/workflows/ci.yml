@@ -249,9 +249,35 @@ jobs:
           fi
           echo "All code is properly formatted."
 
+  extension-build:
+    name: Extension Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Check site consistency
+        run: node --experimental-strip-types scripts/check-sites.ts
+
+      - name: Install and build
+        working-directory: tools/browser-extension
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
   ci-success:
     name: CI Success
-    needs: [frontend-build, go-build-test, go-lint, go-security, format-check]
+    needs: [frontend-build, go-build-test, go-lint, go-security, format-check, extension-build]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -275,6 +301,10 @@ jobs:
           fi
           if [[ "${{ needs.format-check.result }}" != "success" ]]; then
             echo "format-check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.extension-build.result }}" != "success" ]]; then
+            echo "extension-build failed"
             exit 1
           fi
           echo "All CI checks passed!"

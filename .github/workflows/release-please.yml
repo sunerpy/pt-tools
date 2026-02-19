@@ -65,6 +65,13 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - name: Build Extension
+        run: |
+          cd tools/browser-extension
+          pnpm install --frozen-lockfile
+          pnpm build
+          cd dist && zip -r ../pt-tools-helper.zip .
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -179,6 +186,7 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            tools/browser-extension/pt-tools-helper.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

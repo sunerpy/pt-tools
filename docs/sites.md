@@ -10,3 +10,5 @@
 | **Rousi Pro**    | Rousi                   | Passkey  | RSS、搜索、用户信息           | ✅       | 已适配，有问题请提交 issue                   |
 
 > **扩展站点支持**：如需支持其他站点，欢迎提交 [Issue](https://github.com/sunerpy/pt-tools/issues) 或 [Pull Request](https://github.com/sunerpy/pt-tools/pulls)。
+>
+> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](../tools/browser-extension/README.md)（从 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)

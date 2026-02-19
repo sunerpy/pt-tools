@@ -109,13 +109,14 @@ func (s *Server) apiMultiSiteSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate request
 	if req.Keyword == "" {
 		http.Error(w, "Keyword is required", http.StatusBadRequest)
 		return
 	}
 
-	// Set default timeout
+	enabledSites := s.getEnabledSiteIDs()
+	req.Sites = filterEnabledSites(req.Sites, enabledSites)
+
 	timeout := 30 * time.Second
 	if req.TimeoutSecs > 0 {
 		timeout = time.Duration(req.TimeoutSecs) * time.Second
@@ -166,15 +167,16 @@ func (s *Server) apiSearchSites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 如果搜索服务未初始化，返回空列表而不是 503 错误
-	// 这样前端可以正常工作，只是没有搜索功能
 	if searchOrchestrator == nil {
 		writeJSON(w, map[string][]string{"sites": {}})
 		return
 	}
 
-	sites := searchOrchestrator.ListSites()
-	writeJSON(w, map[string][]string{"sites": sites})
+	registered := searchOrchestrator.ListSites()
+	enabledSites := s.getEnabledSiteIDs()
+	filtered := filterEnabledSites(registered, enabledSites)
+
+	writeJSON(w, map[string][]string{"sites": filtered})
 }
 
 // apiSearchCacheClear handles POST /api/v2/search/cache/clear
@@ -263,4 +265,41 @@ func toTorrentItemResponse(item v2.TorrentItem) TorrentItemResponse {
 		Category:        item.Category,
 		IsFree:          item.IsFree(),
 	}
+}
+
+func (s *Server) getEnabledSiteIDs() map[string]bool {
+	if s.store == nil {
+		return nil
+	}
+	sites, err := s.store.ListSites()
+	if err != nil {
+		return nil
+	}
+	enabled := make(map[string]bool, len(sites))
+	for sg, sc := range sites {
+		if sc.Enabled != nil && *sc.Enabled {
+			enabled[string(sg)] = true
+		}
+	}
+	return enabled
+}
+
+func filterEnabledSites(requested []string, enabled map[string]bool) []string {
+	if enabled == nil {
+		return requested
+	}
+	if len(requested) == 0 {
+		result := make([]string, 0, len(enabled))
+		for id := range enabled {
+			result = append(result, id)
+		}
+		return result
+	}
+	filtered := make([]string, 0, len(requested))
+	for _, id := range requested {
+		if enabled[id] {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
 }

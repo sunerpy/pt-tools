@@ -37,7 +37,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -249,6 +249,23 @@ build-frontend:
 	pnpm --dir web/frontend install
 	pnpm --dir web/frontend build
 	@echo "Frontend built to web/static/dist"
+
+# 浏览器扩展构建（自动检查站点一致性）
+build-extension: check-sites
+	@echo "Building browser extension..."
+	pnpm --dir tools/browser-extension install
+	pnpm --dir tools/browser-extension run pack
+	@echo "Extension packaged: tools/browser-extension/pt-tools-helper.zip"
+
+# 从 public/pt-tools.png 一键生成所有尺寸图标（前端 + 扩展）
+generate-icons:
+	@echo "Generating icons from public/pt-tools.png..."
+	node --experimental-strip-types scripts/generate-icons.ts
+
+# 检查扩展内置站点与 Go 项目定义一致
+check-sites:
+	@echo "Checking built-in site consistency..."
+	node --experimental-strip-types scripts/check-sites.ts
 
 # 开发运行（先构建前端，再运行后端）
 run-dev: build-frontend

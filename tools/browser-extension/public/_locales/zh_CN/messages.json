@@ -1,0 +1,8 @@
+{
+  "extensionName": {
+    "message": "PT Tools Helper"
+  },
+  "extensionDescription": {
+    "message": "PT 站点数据采集助手 - 一键采集站点数据、同步 Cookie 到 pt-tools"
+  }
+}

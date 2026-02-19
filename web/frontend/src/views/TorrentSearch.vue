@@ -272,8 +272,10 @@ async function doSearch() {
   currentPage.value = 1;
 
   try {
-    const sitesToSearch =
-      selectedSites.value.length > 0 ? selectedSites.value : availableSites.value;
+    await loadAvailableSites();
+    const validSelected = selectedSites.value.filter((s) => availableSites.value.includes(s));
+    selectedSites.value = validSelected;
+    const sitesToSearch = validSelected.length > 0 ? validSelected : availableSites.value;
     const req: MultiSiteSearchRequest = {
       keyword: searchKeyword.value.trim(),
       sites: sitesToSearch,

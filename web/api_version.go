@@ -9,6 +9,14 @@ import (
 	"github.com/sunerpy/pt-tools/version"
 )
 
+func (s *Server) apiPing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok", "version": version.GetVersionInfo().Version})
+}
+
 func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)

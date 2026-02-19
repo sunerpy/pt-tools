@@ -7,15 +7,15 @@
 ## 目录
 
 - [认证方式概述](#认证方式概述)
-- [Cookie 认证](#cookie-认证)
-  - [什么是 Cookie](#什么是-cookie)
-  - [Edge/Chrome 浏览器获取方法](#chrome-浏览器获取方法)
-  - [Firefox 浏览器获取方法](#firefox-浏览器获取方法)
-  - [Cookie 常见问题](#cookie-常见问题)
-- [API Key 认证](#api-key-认证)
-  - [什么是 API Key](#什么是-api-key)
-  - [M-Team API Key 获取方法](#m-team-api-key-获取方法)
-  - [API Key 安全注意事项](#api-key-安全注意事项)
+- [方式一：使用浏览器扩展自动同步（推荐）](#方式一使用浏览器扩展自动同步推荐)
+  - [安装扩展](#安装扩展)
+  - [连接到 pt-tools](#连接到-pt-tools)
+  - [同步单个站点 Cookie](#同步单个站点-cookie)
+  - [批量同步所有站点 Cookie](#批量同步所有站点-cookie)
+  - [开启自动同步](#开启自动同步)
+- [方式二：手动获取认证信息](#方式二手动获取认证信息)
+  - [Cookie 认证](#cookie-认证)
+  - [API Key 认证](#api-key-认证)
 - [在 pt-tools 中配置认证信息](#在-pt-tools-中配置认证信息)
 - [认证方式对比](#认证方式对比)
 - [常见问题排查](#常见问题排查)
@@ -24,20 +24,94 @@
 
 pt-tools 支持两种站点认证方式：
 
-| 认证方式    | 适用站点                     | 特点                 |
-| ----------- | ---------------------------- | -------------------- |
-| **Cookie**  | HDSky, SpringSunday, HDDolby | 传统方式，需定期更新 |
-| **API Key** | M-Team                       | 长期有效             |
+| 认证方式    | 适用站点                             | 特点                 | 推荐配置方式          |
+| ----------- | ------------------------------------ | -------------------- | --------------------- |
+| **Cookie**  | HDSky, SpringSunday, HDDolby, NovaHD | 传统方式，需定期更新 | ✅ 浏览器扩展自动同步 |
+| **API Key** | M-Team                               | 长期有效             | 手动配置              |
+| **Passkey** | Rousi Pro                            | 长期有效             | 手动配置              |
 
-## Cookie 认证
+**Cookie 鉴权站点强烈推荐使用浏览器扩展**，可省去手动复制粘贴的繁琐操作，并在 Cookie 过期时自动更新。
 
-### 什么是 Cookie
+---
+
+## 方式一：使用浏览器扩展自动同步（推荐）
+
+**PT Tools Helper** 浏览器扩展可在你登录 PT 站点后，一键将 Cookie 同步到 pt-tools，**无需打开开发者工具、无需手动复制粘贴**。
+
+### 安装扩展
+
+1. 从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 下载最新的 `pt-tools-helper.zip`
+2. 解压到一个固定目录（不要解压后删除，浏览器需要持续读取）
+3. 打开浏览器扩展管理页面：
+   - Chrome → `chrome://extensions`
+   - Edge → `edge://extensions`
+4. 开启右上角「**开发者模式**」
+5. 点击「**加载已解压的扩展程序**」，选择解压后的目录
+6. 扩展图标出现在浏览器工具栏（一个翡翠色的 PT 图标）
+7. 首次点击扩展图标，点击「**🔓 授权并启用**」授予所需权限
+
+### 连接到 pt-tools
+
+扩展需要知道 pt-tools 的地址才能同步 Cookie：
+
+1. 点击浏览器工具栏的扩展图标
+2. 在底部「**全局设置**」区域填写：
+   - **pt-tools 地址**：你的 pt-tools 服务地址（如 `http://localhost:8080` 或 `http://192.168.1.100:8080`）
+   - **用户名**（可选）：pt-tools 登录用户名
+   - **密码**（可选）：pt-tools 登录密码
+3. 点击「**🔗 连接测试**」确认连接成功
+4. 连接成功后会显示「pt-tools 连接成功，设置已保存」
+
+> 如果 pt-tools 运行在其他机器或 Docker 中，请确保填写的地址从当前浏览器可以访问。
+
+### 同步单个站点 Cookie
+
+1. 在浏览器中**正常登录** PT 站点（如 HDSky）
+2. 点击扩展图标 → 会显示「**✅ HDSky (NexusPHP)**」
+3. 确认 Cookie 状态显示「**有效**」
+4. 点击「**🔄 同步 Cookie 到 pt-tools**」
+5. 同步成功后显示确认消息
+
+同步完成后，pt-tools 中该站点的 Cookie 配置会自动更新，无需在 pt-tools Web 界面手动填写。
+
+### 批量同步所有站点 Cookie
+
+如果你登录了多个 PT 站点，可以一次性同步所有站点的 Cookie：
+
+1. 点击扩展图标
+2. 展开底部「**全局设置**」
+3. 在「**批量同步 Cookie**」区域可以看到所有内置站点
+4. 每个站点旁边显示 Cookie 状态（有效/即将过期/缺失）
+5. 勾选想要同步的站点（或点击「全选」）
+6. 点击「**🔄 同步已选**」
+
+> **注意**：使用 API Key 或 Passkey 的站点（如 M-Team、Rousi Pro）会显示为灰色不可选，这些站点需要在 pt-tools 中手动配置认证信息。
+
+### 开启自动同步
+
+开启自动同步后，当你在浏览器中访问 PT 站点时，Cookie 变更会自动推送到 pt-tools：
+
+1. 访问一个 PT 站点
+2. 点击扩展图标
+3. 打开「**自动同步 Cookie**」开关
+
+开启后，每次 Cookie 更新（如重新登录、Cookie 刷新）都会自动同步到 pt-tools。
+
+---
+
+## 方式二：手动获取认证信息
+
+如果你不想安装浏览器扩展，或需要配置 API Key / Passkey 类型的站点，可以参考以下手动方法。
+
+### Cookie 认证
+
+#### 什么是 Cookie
 
 Cookie 是网站存储在浏览器中的小段数据，用于维持用户的登录状态。PT 站点通过 Cookie 来识别已登录的用户身份。
 
-**适用站点**：HDSky, SpringSunday, HDDolby 等基于 NexusPHP 架构的站点。
+**适用站点**：HDSky, SpringSunday, HDDolby, NovaHD 等基于 NexusPHP 架构的站点。
 
-### Chrome 浏览器获取方法
+### Chrome / Edge 浏览器手动获取方法
 
 **步骤 1：登录站点**
 
@@ -73,7 +147,7 @@ Cookie 是网站存储在浏览器中的小段数据，用于维持用户的登�
 c_secure_uid=xxxxx; c_secure_pass=xxxxx; c_secure_ssl=xxxxx; c_secure_tracker_ssl=xxxxx
 ```
 
-### Firefox 浏览器获取方法
+### Firefox 浏览器手动获取方法
 
 **步骤 1-2**：与 Chrome 相同，登录站点后按 `F12` 打开开发者工具。
 
@@ -91,15 +165,18 @@ c_secure_uid=xxxxx; c_secure_pass=xxxxx; c_secure_ssl=xxxxx; c_secure_tracker_ss
 
 **Q: Cookie 多久会失效？**
 
-A: 大多数 PT 站点的 Cookie 有效期为 1-4 周不等。如果长时间未访问站点，Cookie 可能会提前失效。
+A: 大多数 PT 站点的 Cookie 有效期为 1-4 周不等。使用浏览器扩展并开启自动同步后，Cookie 更新会自动推送到 pt-tools，无需手动处理。
 
 **Q: 如何延长 Cookie 有效期？**
 
-A: 定期访问站点可以刷新 Cookie 有效期。部分站点的「记住我」选项可以延长有效期。
+A: 定期访问站点可以刷新 Cookie 有效期。部分站点的「记住我」选项可以延长有效期。配合扩展的自动同步功能，访问站点时 Cookie 会自动更新到 pt-tools。
 
 **Q: Cookie 失效后怎么办？**
 
-A: 重新从浏览器获取新的 Cookie，并在 pt-tools 中更新配置。
+A:
+
+- 使用扩展：重新登录站点，扩展自动检测并同步新 Cookie
+- 手动方式：重新从浏览器获取新的 Cookie，在 pt-tools 中更新配置
 
 **Q: 复制 Cookie 时需要注意什么？**
 
@@ -158,7 +235,15 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 ## 在 pt-tools 中配置认证信息
 
-### 通过 Web 界面配置
+### 方式 A：通过浏览器扩展自动配置（Cookie 站点推荐）
+
+使用浏览器扩展同步 Cookie 后，pt-tools 中对应站点的认证信息会**自动更新**，无需在 Web 界面手动操作。只需确保：
+
+1. 扩展已连接到 pt-tools（参见上方[连接到 pt-tools](#连接到-pt-tools)）
+2. 在扩展中点击「同步 Cookie」或已开启自动同步
+3. pt-tools 站点列表中该站点已启用
+
+### 方式 B：通过 Web 界面手动配置
 
 1. 登录 pt-tools Web 管理界面
 2. 进入「站点列表」页面
@@ -179,14 +264,13 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 ## 认证方式对比
 
-| 特性     | Cookie                 | API Key              |
-| -------- | ---------------------- | -------------------- |
-| 获取难度 | 较复杂（需开发者工具） | 简单（站点后台生成） |
-| 有效期   | 1-4 周                 | 长期有效             |
-| 安全性   | 一般                   | 较高                 |
-| 权限范围 | 完整用户权限           | 可限制权限           |
-| 泄露风险 | 可被用于完全冒充       | 可随时撤销           |
-| 适用站点 | NexusPHP 架构          | mTorrent 架构        |
+| 特性     | Cookie（扩展同步）  | Cookie（手动）       | API Key              |
+| -------- | ------------------- | -------------------- | -------------------- |
+| 获取难度 | ⭐ 极低（一键同步） | 较复杂（开发者工具） | 简单（站点后台生成） |
+| 有效期   | 自动续期            | 1-4 周               | 长期有效             |
+| 配置方式 | 扩展自动推送        | 手动粘贴             | 手动粘贴             |
+| 安全性   | 一般                | 一般                 | 较高                 |
+| 适用站点 | NexusPHP 架构       | NexusPHP 架构        | mTorrent 架构        |
 
 ## 常见问题排查
 
@@ -220,7 +304,9 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 ### 3. Cookie 频繁失效
 
-**可能原因**：
+**推荐方案**：安装浏览器扩展并开启自动同步，Cookie 更新时自动推送到 pt-tools。
+
+**手动处理时常见原因**：
 
 - 站点安全策略较严格
 - 长时间未访问站点
