@@ -43,7 +43,7 @@ const constantsPath: string = join(
 const constantsContent: string = readFileSync(constantsPath, "utf-8");
 
 const extSiteIds: Set<string> = new Set();
-const extIdPattern: RegExp = /id:\s*'([^']+)'/g;
+const extIdPattern: RegExp = /id:\s*["']([^"']+)["']/g;
 let extMatch: RegExpExecArray | null;
 while ((extMatch = extIdPattern.exec(constantsContent)) !== null) {
   extSiteIds.add(extMatch[1]);
