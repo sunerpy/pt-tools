@@ -1,0 +1,203 @@
+name: Extension Publish
+
+on:
+  push:
+    tags:
+      - "ext-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (build only, skip upload)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  check-extension-changes:
+    name: Verify Extension Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Extract version from tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=$(node -e "console.log(require('./tools/browser-extension/package.json').version)")
+            TAG_NAME="ext-v${VERSION}"
+          else
+            TAG_NAME="${{ github.ref_name }}"
+            VERSION="${TAG_NAME#ext-v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Extension version: ${VERSION}"
+
+      - name: Verify manifest version matches tag
+        run: |
+          PKG_VERSION=$(node -e "console.log(require('./tools/browser-extension/package.json').version)")
+          TAG_VERSION="${{ steps.meta.outputs.version }}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            echo "Update tools/browser-extension/package.json and src/manifest.ts to match the tag"
+            exit 1
+          fi
+          echo "Version match: $PKG_VERSION"
+
+  build-extension:
+    name: Build Extension
+    needs: check-extension-changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Check site consistency
+        run: node --experimental-strip-types scripts/check-sites.ts
+
+      - name: Install and build extension
+        working-directory: tools/browser-extension
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Package zip
+        working-directory: tools/browser-extension
+        run: cd dist && zip -r ../pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: extension-zip
+          path: tools/browser-extension/pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip
+          retention-days: 30
+
+  publish-edge:
+    name: Publish to Edge Add-ons
+    needs: [check-extension-changes, build-extension]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    env:
+      EDGE_API: https://api.addons.microsoftedge.microsoft.com
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: extension-zip
+
+      - name: Upload package to Edge Add-ons
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
+            -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
+            -H "Content-Type: application/zip" \
+            -X POST \
+            -T "pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip" \
+            "$EDGE_API/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions/draft/package")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          echo "Upload response: $HTTP_CODE"
+          echo "$BODY"
+
+          if [ "$HTTP_CODE" != "202" ]; then
+            echo "::error::Upload failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          OPERATION_ID=$(echo "$BODY" | grep -oP '"id"\s*:\s*"\K[^"]+' || true)
+          echo "operation_id=$OPERATION_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for upload processing
+        run: |
+          for i in $(seq 1 20); do
+            sleep 10
+            STATUS_RESPONSE=$(curl -s \
+              -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
+              -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
+              "$EDGE_API/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions/draft/package/operations/$operation_id")
+
+            STATUS=$(echo "$STATUS_RESPONSE" | grep -oP '"status"\s*:\s*"\K[^"]+' || echo "Unknown")
+            echo "Attempt $i: $STATUS"
+
+            if [ "$STATUS" = "Succeeded" ]; then
+              echo "Upload processing complete"
+              break
+            elif [ "$STATUS" = "Failed" ]; then
+              echo "::error::Upload processing failed"
+              echo "$STATUS_RESPONSE"
+              exit 1
+            fi
+          done
+
+      - name: Publish submission
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
+            -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d '{"notes":"Automated publish via CI for version ${{ needs.check-extension-changes.outputs.version }}"}' \
+            "$EDGE_API/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          echo "Publish response: $HTTP_CODE"
+          echo "$BODY"
+
+          if [ "$HTTP_CODE" != "202" ]; then
+            echo "::error::Publish failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "Submission published, pending Microsoft review"
+
+  attach-to-release:
+    name: Attach to GitHub Release
+    needs: [check-extension-changes, build-extension]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: extension-zip
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-extension-changes.outputs.tag_name }}
+          name: "Browser Extension ${{ needs.check-extension-changes.outputs.version }}"
+          body: |
+            ## PT Tools Helper Browser Extension ${{ needs.check-extension-changes.outputs.version }}
+
+            ### 安装方式
+
+            **Edge Add-ons**（审核通过后可用）:
+            - 搜索 "PT Tools Helper" 或通过 Edge 扩展商店安装
+
+            **手动安装（Chrome / Edge）**:
+            1. 下载下方 `pt-tools-helper-*.zip`
+            2. 解压到任意目录
+            3. 浏览器扩展管理页 → 开发者模式 → 加载已解压的扩展程序
+          files: pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

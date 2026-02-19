@@ -7,6 +7,8 @@ downloads
 examples/docs
 examples/*.ts
 jsons
+node_modules
+pt-tools-helper.zip
 vendor
 
 upx*

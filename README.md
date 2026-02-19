@@ -214,24 +214,56 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 ### 初次配置流程
 
 1. **启动服务**：使用 Docker 或二进制启动 pt-tools
-2. **登录管理界面**：访问 `http://localhost:8080`，使用默认账号登录
+2. **登录管理界面**：访问 `http://localhost:8080`，使用默认账号 `admin` / `adminadmin` 登录
 3. **修改密码**：首次登录后建议修改默认密码
 4. **配置下载器**：添加 qBittorrent 或 Transmission
-5. **配置站点**：启用站点并填写 Cookie 或 API Key
+5. **配置站点认证**（二选一）：
+   - **推荐**：安装 [PT Tools Helper 浏览器扩展](#浏览器扩展)，在 PT 站点登录后一键同步 Cookie
+   - 手动方式：参考 [获取 Cookie / API Key](docs/guide/get-cookie-apikey.md) 手动复制粘贴
 6. **配置 RSS 订阅**：添加 RSS 订阅实现自动下载
 7. **配置过滤规则**（可选）：创建过滤规则实现精准下载
 
+## 浏览器扩展
+
+**PT Tools Helper** 是 pt-tools 的配套浏览器扩展，支持 Chrome 和 Edge。
+
+| 功能                 | 说明                                                          |
+| -------------------- | ------------------------------------------------------------- |
+| **Cookie 自动同步**  | 在 PT 站点登录后，一键将 Cookie 同步到 pt-tools，无需手动复制 |
+| **批量同步**         | 在扩展设置中勾选多个站点，一键批量同步所有 Cookie             |
+| **一键采集站点数据** | 自动抓取种子列表页、详情页、用户信息页，用于请求适配新站点    |
+| **自动脱敏**         | 采集的页面数据自动移除 Passkey、邮箱、IP 等敏感信息           |
+| **导出 & 提交**      | 将采集数据导出为 ZIP，或一键创建 GitHub Issue 请求新站点支持  |
+| **中英文支持**       | 自动跟随浏览器语言切换中文/英文界面                           |
+
+### 安装方式
+
+**从 GitHub Release 下载**（推荐）：
+
+1. 前往 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载最新的 `pt-tools-helper.zip`
+2. 解压到任意目录
+3. Chrome → `chrome://extensions` / Edge → `edge://extensions`
+4. 开启「开发者模式」→「加载已解压的扩展程序」→ 选择解压目录
+
+**Edge Add-ons 扩展商店**（审核中）：
+
+- 审核通过后可在 Edge 扩展商店搜索 "PT Tools Helper" 直接安装
+
+详细使用说明见 [扩展 README](tools/browser-extension/README.md)。
+
 ## 文档
 
-| 文档                                                           | 说明                               |
-| -------------------------------------------------------------- | ---------------------------------- |
-| **[获取 Cookie / API Key](docs/guide/get-cookie-apikey.md)**   | 详细介绍如何从各站点获取认证信息   |
-| **[RSS 订阅配置指南](docs/guide/rss-subscription.md)**         | 如何配置 RSS 订阅实现自动下载      |
-| **[过滤规则与追剧指南](docs/guide/filter-rules-tv-series.md)** | 使用过滤规则自动追剧、筛选资源     |
-| **[自动删种指南](docs/guide/auto-cleanup.md)**                 | 自动清理种子策略配置和 H&R 保护    |
-| **[配置说明](docs/configuration.md)**                          | 环境变量、全局设置、下载器配置详解 |
-| **[常见问题 (FAQ)](docs/faq.md)**                              | 常见问题和解决方案                 |
-| **[开发指南](docs/development.md)**                            | 从源码构建、技术架构、贡献指南     |
+| 文档                                                           | 说明                                   |
+| -------------------------------------------------------------- | -------------------------------------- |
+| **[获取 Cookie / API Key](docs/guide/get-cookie-apikey.md)**   | 详细介绍如何从各站点获取认证信息       |
+| **[浏览器扩展使用指南](tools/browser-extension/README.md)**    | 自动同步 Cookie、采集站点数据          |
+| **[RSS 订阅配置指南](docs/guide/rss-subscription.md)**         | 如何配置 RSS 订阅实现自动下载          |
+| **[过滤规则与追剧指南](docs/guide/filter-rules-tv-series.md)** | 使用过滤规则自动追剧、筛选资源         |
+| **[自动删种指南](docs/guide/auto-cleanup.md)**                 | 自动清理种子策略配置和 H&R 保护        |
+| **[请求新增站点支持](docs/guide/request-new-site.md)**         | 无需编程经验，提供页面数据即可请求适配 |
+| **[配置说明](docs/configuration.md)**                          | 环境变量、全局设置、下载器配置详解     |
+| **[常见问题 (FAQ)](docs/faq.md)**                              | 常见问题和解决方案                     |
+| **[开发指南](docs/development.md)**                            | 从源码构建、技术架构、贡献指南         |
 
 ## 贡献
 

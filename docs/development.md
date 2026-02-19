@@ -152,6 +152,8 @@ pt-tools/
 ├── web/              # HTTP 服务和 API
 │   ├── api_*.go      # API 处理器
 │   └── frontend/     # Vue 3 前端项目
+├── tools/
+│   └── browser-extension/  # 浏览器扩展 (TypeScript + Vue 3)
 ├── main.go           # 程序入口
 ├── Makefile          # 构建脚本
 └── go.mod            # Go 模块定义
@@ -195,6 +197,8 @@ Issue 地址：[GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
 PR 地址：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
 
 ### 添加新站点支持
+
+> **没有编程经验？** 请参考 [请求新增站点支持（无需编程经验）](guide/request-new-site.md)，你只需要提供站点页面数据，维护者会帮你完成适配。
 
 添加新 PT 站点只需创建 **一个定义文件**，系统会自动完成以下工作：
 
@@ -606,6 +610,80 @@ feat(site): add support for NewSite
 
 Closes #123
 ```
+
+---
+
+## 浏览器扩展开发与发布
+
+### 本地开发
+
+```bash
+cd tools/browser-extension
+pnpm install
+pnpm dev          # watch 模式
+pnpm build        # 单次构建
+make build-extension  # 构建 + 站点一致性检查 + 打包 zip
+```
+
+详见 [扩展 README](../tools/browser-extension/README.md)。
+
+### 发布到 Edge Add-ons
+
+扩展使用独立的版本号和 tag（`ext-v*`），与 pt-tools 主版本互不影响。
+
+#### 首次发布（手动）
+
+1. **注册 Edge 开发者账号**（免费）
+   - 访问 [Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/public/login?ref=dd)
+   - 可以使用 GitHub 账号直接登录
+   - 完成注册表单（个人开发者即可）
+
+2. **手动上传第一版扩展**
+
+   首次发布必须通过 Partner Center 手动操作，API 仅支持更新已有扩展。
+   - 运行 `make build-extension` 生成 `tools/browser-extension/pt-tools-helper.zip`
+   - Partner Center → Microsoft Edge → 扩展 → 创建新扩展
+   - 上传 zip 包，填写扩展名称、描述、截图等
+   - 提交审核（通常 1-3 个工作日）
+
+3. **获取 Product ID**
+
+   审核通过后，在 Partner Center 的扩展详情页可以看到 **Product ID**（一个 GUID）。
+
+4. **启用 Publish API 并获取凭证**
+   - Partner Center → Microsoft Edge → Publish API
+   - 点击 **"enable the new experience"** 旁的 **Enable** 按钮（启用 v1.1 API）
+   - 点击 **Create API credentials**
+   - 记录 **Client ID** 和 **API Key**
+
+5. **配置 GitHub Secrets**
+
+   在仓库 Settings → Secrets and variables → Actions 中添加：
+
+   | Secret            | 值                                     |
+   | ----------------- | -------------------------------------- |
+   | `EDGE_PRODUCT_ID` | Partner Center 扩展详情页的 Product ID |
+   | `EDGE_CLIENT_ID`  | Publish API 页面的 Client ID           |
+   | `EDGE_API_KEY`    | Publish API 页面的 API Key             |
+
+#### 后续发布（自动）
+
+配置完成后，后续版本发布只需：
+
+```bash
+# 1. 更新版本号（package.json + manifest.ts 保持一致）
+# 2. 提交代码
+git add -A && git commit -m "chore(extension): bump to 0.2.0"
+git push
+
+# 3. 打 tag 触发自动发布
+git tag ext-v0.2.0
+git push origin ext-v0.2.0
+```
+
+CI 流程：`ext-v*` tag → 校验版本号一致性 → 站点一致性检查 → 构建 → 上传到 Edge Add-ons → 创建 GitHub Release。
+
+也可以在 GitHub Actions 页面手动触发 `Extension Publish` workflow（支持 dry run 模式仅构建不上传）。
 
 ---
 

@@ -66,6 +66,7 @@ func (s *Server) Serve(addr string) error {
 	s.ensureAdminFromEnv()
 	mux.HandleFunc("/login", s.loginHandler)
 	mux.HandleFunc("/logout", s.logoutHandler)
+	mux.HandleFunc("/api/ping", s.apiPing)
 	// JSON APIs
 	mux.HandleFunc("/api/global", s.auth(s.apiGlobal))
 	mux.HandleFunc("/api/qbit", s.auth(s.apiQbit))
@@ -166,6 +167,18 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if strings.HasPrefix(origin, "chrome-extension://") || strings.HasPrefix(origin, "moz-extension://") || strings.HasPrefix(origin, "extension://") {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+
 		start := time.Now()
 		sr := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sr, r)
@@ -247,7 +260,11 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 
-		http.Redirect(w, r, "/", http.StatusFound)
+		if isJSONRequest(r) {
+			writeJSON(w, map[string]any{"success": true, "username": u.Username})
+		} else {
+			http.Redirect(w, r, "/", http.StatusFound)
+		}
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -278,6 +295,11 @@ func readLogin(r *http.Request) (string, string, error) {
 		}
 		return strings.TrimSpace(r.FormValue("username")), strings.TrimSpace(r.FormValue("password")), nil
 	}
+}
+
+func isJSONRequest(r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	return strings.Contains(ct, "application/json")
 }
 
 func (s *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -732,6 +754,8 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 		writeJSON(w, map[string]string{"status": "deleted"})
+	case http.MethodPut:
+		s.updateSiteCredential(w, r, sg)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
