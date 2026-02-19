@@ -619,8 +619,8 @@ func TestLoginHandler_SuccessfulLogin(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	srv.loginHandler(rr, req)
 
-	// 应该重定向到首页
-	assert.Equal(t, http.StatusFound, rr.Code)
+	// JSON 请求应返回 200 和 JSON 响应
+	assert.Equal(t, http.StatusOK, rr.Code)
 	// 应该设置 session cookie
 	cookies := rr.Result().Cookies()
 	var sessionCookie *http.Cookie
@@ -727,8 +727,8 @@ func TestLoginHandler_AutoCreateAdmin(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	srv.loginHandler(rr, req)
 
-	// 应该成功登录
-	assert.Equal(t, http.StatusFound, rr.Code)
+	// JSON 请求应返回 200
+	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
 // TestVerifyPassword_EdgeCases 测试密码验证边界情况
