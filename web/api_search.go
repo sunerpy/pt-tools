@@ -268,6 +268,9 @@ func toTorrentItemResponse(item v2.TorrentItem) TorrentItemResponse {
 }
 
 func (s *Server) getEnabledSiteIDs() map[string]bool {
+	if s.store == nil {
+		return nil
+	}
 	sites, err := s.store.ListSites()
 	if err != nil {
 		return nil
