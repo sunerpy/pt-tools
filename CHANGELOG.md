@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-02-19
+
+### Bug Fixes
+
+- **build**: 修复站点一致性检查脚本引号匹配
+- check-sites.ts 中扩展站点 ID 提取正则兼容双引号和单引号
+- **api**: 修复搜索站点校验在测试环境空指针问题
+- getEnabledSiteIDs 增加 store 空值检查避免测试中 panic
+- **test**: 适配登录接口 JSON 响应变更
+- 登录测试预期状态码从 302 改为 200 以匹配 JSON 请求返回 JSON 响应的行为
+
+### CI/CD
+
+- Bump actions/upload-artifact from 4 to 6 ([#53](https://github.com/sunerpy/pt-tools/issues/53)) ([#53](https://github.com/sunerpy/pt-tools/pull/53))
+  Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 6. - [Release notes](https://github.com/actions/upload-artifact/releases) - [Commits](https://github.com/actions/upload-artifact/compare/v4...v6)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/upload-artifact
+         dependency-version: '6'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue-router from 4.6.4 to 5.0.2 in /web/frontend ([#57](https://github.com/sunerpy/pt-tools/issues/57)) ([#57](https://github.com/sunerpy/pt-tools/pull/57))
+  Bumps [vue-router](https://github.com/vuejs/router) from 4.6.4 to 5.0.2. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v4.6.4...v5.0.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-router
+         dependency-version: 5.0.2
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+### Features
+
+- **extension**: 增加 PT Tools Helper 浏览器扩展及配套设施
+- 新增 Chrome/Edge 浏览器扩展 (tools/browser-extension) - 支持 Cookie 自动同步、批量同步、一键采集站点数据 - 内置 337 个 PT 站点域名识别库，支持中英文界面 - 后端新增 PUT /api/sites/{name} 凭据更新和 /api/ping 健康检查 - 后端增加 CORS 支持、JSON 登录响应、搜索前站点启用校验 - 前端搜索前刷新可用站点列表防止搜索禁用站点 - 新增图标生成脚本和站点一致性检查脚本 - 新增扩展构建发布 CI 流程 (ext-v\* tag 触发 Edge Add-ons 发布) - 更新文档：Cookie 配置优先推荐浏览器扩展同步方式
+
 ## [0.14.0] - 2026-02-17
 
 ### Dependencies (Frontend)
