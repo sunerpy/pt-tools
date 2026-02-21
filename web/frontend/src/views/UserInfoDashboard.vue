@@ -234,6 +234,24 @@ onUnmounted(() => {
 
 <template>
   <div class="page-container">
+    <el-alert type="info" show-icon :closable="true" class="extension-banner">
+      <template #title>
+        <span>
+          推荐安装
+          <a href="https://github.com/sunerpy/pt-tools/releases" target="_blank" rel="noopener">
+            PT Tools Helper 浏览器扩展
+          </a>
+          ：自动同步 Cookie、一键采集新站点数据。
+          <a
+            href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
+            target="_blank"
+            rel="noopener">
+            了解更多
+          </a>
+        </span>
+      </template>
+    </el-alert>
+
     <!-- 统计卡片 -->
     <div class="dashboard-stats-row">
       <div
@@ -620,6 +638,20 @@ onUnmounted(() => {
 @import "@/styles/dashboard.css";
 
 /* Component specific overrides */
+.extension-banner {
+  margin-bottom: 16px;
+}
+
+.extension-banner a {
+  color: var(--el-color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.extension-banner a:hover {
+  text-decoration: underline;
+}
+
 .dashboard-card-body {
   padding: var(--pt-space-5);
 }
