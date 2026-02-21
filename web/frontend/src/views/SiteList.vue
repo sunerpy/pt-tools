@@ -59,42 +59,6 @@ async function deleteSite(name: string) {
   }
 }
 
-async function addSite() {
-  try {
-    const result = (await ElMessageBox.prompt("请输入站点标识", "新增站点", {
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-      inputPlaceholder: "springsunday / hdsky / mteam 或自定义",
-      inputValidator: (val) => {
-        if (!val || !val.trim()) return "站点标识不能为空";
-        if (sites.value[val.toLowerCase()]) return "站点已存在";
-        return true;
-      },
-    })) as { value: string };
-
-    const name = result.value;
-    if (!name) return;
-
-    const lower = name.toLowerCase();
-    const payload: SiteConfig = {
-      enabled: false,
-      rss: [],
-      auth_method: lower === "mteam" ? "api_key" : lower === "rousipro" ? "passkey" : "cookie",
-      cookie: "",
-      api_key: "",
-      api_url: "", // 预置站点的 API URL 由后端常量提供
-    };
-
-    await sitesApi.save(lower, payload);
-    ElMessage.success("已新增站点");
-    await loadSites();
-  } catch (e: unknown) {
-    if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "新增失败");
-    }
-  }
-}
-
 function manageSite(name: string) {
   router.push(`/sites/${name}`);
 }
@@ -112,9 +76,57 @@ function getRssCount(site: SiteConfig): number {
         <p class="page-subtitle">管理您的 PT 站点连接与 RSS 订阅配置</p>
       </div>
       <div class="page-actions">
-        <el-button type="primary" :icon="'Plus'" @click="addSite" disabled>新增站点</el-button>
+        <el-popover placement="bottom" :width="320" trigger="hover">
+          <template #reference>
+            <el-button type="primary" :icon="'Plus'" disabled>新增站点</el-button>
+          </template>
+          <div class="add-site-tip">
+            <p>暂不支持手动添加站点。如需适配新站点，可通过以下方式：</p>
+            <ol>
+              <li>
+                安装
+                <a
+                  href="https://github.com/sunerpy/pt-tools/releases"
+                  target="_blank"
+                  rel="noopener">
+                  PT Tools Helper 浏览器扩展
+                </a>
+                ，在站点页面一键采集数据
+              </li>
+              <li>
+                参考
+                <a
+                  href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
+                  target="_blank"
+                  rel="noopener">
+                  请求新增站点支持指南
+                </a>
+                提交 Issue
+              </li>
+            </ol>
+          </div>
+        </el-popover>
       </div>
     </div>
+
+    <el-alert type="info" show-icon :closable="false" class="new-site-banner">
+      <template #title>
+        <span>
+          需要适配新站点？安装
+          <a href="https://github.com/sunerpy/pt-tools/releases" target="_blank" rel="noopener">
+            PT Tools Helper 浏览器扩展
+          </a>
+          一键采集站点数据，然后按
+          <a
+            href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
+            target="_blank"
+            rel="noopener">
+            指南
+          </a>
+          提交 Issue 即可
+        </span>
+      </template>
+    </el-alert>
 
     <div class="table-card" v-loading="loading">
       <div class="table-card-header">
@@ -385,5 +397,47 @@ html.dark .action-btn--delete {
 
 html.dark :deep(.el-table__row:hover) {
   background-color: color-mix(in srgb, var(--pt-color-primary-900) 34%, var(--pt-bg-surface));
+}
+
+.add-site-tip {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--pt-text-secondary);
+}
+
+.add-site-tip p {
+  margin: 0 0 8px;
+}
+
+.add-site-tip ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.add-site-tip li + li {
+  margin-top: 6px;
+}
+
+.add-site-tip a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+.add-site-tip a:hover {
+  text-decoration: underline;
+}
+
+.new-site-banner {
+  margin-bottom: 16px;
+}
+
+.new-site-banner a {
+  color: var(--el-color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.new-site-banner a:hover {
+  text-decoration: underline;
 }
 </style>
