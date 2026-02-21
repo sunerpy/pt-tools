@@ -131,11 +131,20 @@ html.dark .custom-tabs .el-tabs__active-bar {
 .control-pill {
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 var(--pt-space-3);
   height: 40px;
   border: 1px solid var(--pt-border-color);
   border-radius: var(--pt-radius-full);
   background: var(--pt-bg-surface);
+}
+
+.control-pill-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pt-text-secondary);
+  white-space: nowrap;
+  user-select: none;
 }
 
 .site-filter-select {
