@@ -20,6 +20,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/internal/filter"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -311,6 +312,9 @@ func processSingleTorrentWithDownloader(
 			if freeGB < glOnly.CleanupMinDiskSpaceGB {
 				sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，跳过推送: %s",
 					dl.GetName(), freeGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+				if glOnly.CleanupEnabled {
+					events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "rss", At: time.Now()})
+				}
 				return downloader.ErrInsufficientSpace
 			}
 		}

@@ -8,7 +8,10 @@ import (
 
 type EventType string
 
-const ConfigChanged EventType = "ConfigChanged"
+const (
+	ConfigChanged EventType = "ConfigChanged"
+	DiskSpaceLow  EventType = "DiskSpaceLow"
+)
 
 type Event struct {
 	Type    EventType

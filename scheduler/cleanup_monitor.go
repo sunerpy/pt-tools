@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -20,6 +21,9 @@ import (
 const (
 	cleanupDefaultInterval = 30 * time.Minute
 	cleanupMinInterval     = 5 * time.Minute
+	emergencyBufferMinGB   = 10.0
+	emergencyBufferPercent = 0.2
+	diskEventDebounce      = 3 * time.Second
 )
 
 type CleanupMonitor struct {
@@ -71,8 +75,10 @@ func (c *CleanupMonitor) Stop() {
 }
 
 func (c *CleanupMonitor) runLoop() {
-	// 短暂等待，确保启动流程（下载器注册等）完成
 	time.Sleep(10 * time.Second)
+
+	_, eventCh, cancelSub := events.Subscribe(8)
+	defer cancelSub()
 
 	for {
 		cfg := c.loadConfig()
@@ -82,6 +88,11 @@ func (c *CleanupMonitor) runLoop() {
 			case <-c.ctx.Done():
 				return
 			case <-time.After(5 * time.Minute):
+				continue
+			case ev := <-eventCh:
+				if ev.Type == events.DiskSpaceLow {
+					c.logger.Info("[自动删种] 收到磁盘空间不足信号，但功能未启用，忽略")
+				}
 				continue
 			}
 		}
@@ -99,6 +110,28 @@ func (c *CleanupMonitor) runLoop() {
 		case <-c.ctx.Done():
 			return
 		case <-time.After(interval):
+		case ev := <-eventCh:
+			if ev.Type == events.DiskSpaceLow {
+				c.logger.Info("[自动删种] 收到磁盘空间不足信号，等待短暂去抖后立即执行清理")
+				c.drainAndDebounce(eventCh)
+			}
+		}
+	}
+}
+
+func (c *CleanupMonitor) drainAndDebounce(ch <-chan events.Event) {
+	timer := time.NewTimer(diskEventDebounce)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return
+		case ev := <-ch:
+			if ev.Type == events.DiskSpaceLow {
+				timer.Reset(diskEventDebounce)
+			}
+		case <-c.ctx.Done():
+			return
 		}
 	}
 }
@@ -429,7 +462,12 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates
 	result := make([]downloader.Torrent, len(alreadyMarked))
 	copy(result, alreadyMarked)
 
-	neededBytes := (cfg.CleanupMinDiskSpaceGB - currentFreeGB) * 1024 * 1024 * 1024
+	bufferGB := cfg.CleanupMinDiskSpaceGB * emergencyBufferPercent
+	if bufferGB < emergencyBufferMinGB {
+		bufferGB = emergencyBufferMinGB
+	}
+	targetGB := cfg.CleanupMinDiskSpaceGB + bufferGB
+	neededBytes := (targetGB - currentFreeGB) * 1024 * 1024 * 1024
 	var freedBytes float64
 
 	for _, e := range extras {
@@ -439,6 +477,10 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates
 		result = append(result, e.torrent)
 		freedBytes += float64(e.torrent.TotalSize)
 	}
+
+	freedGB := freedBytes / (1024 * 1024 * 1024)
+	c.logger.Infof("[自动删种] 紧急清理: 当前 %.1f GB, 目标 %.1f GB (阈值 %.1f + 缓冲 %.1f), 预计释放 %.1f GB, 额外删除 %d 个种子",
+		currentFreeGB, targetGB, cfg.CleanupMinDiskSpaceGB, bufferGB, freedGB, len(result)-len(alreadyMarked))
 
 	return result
 }

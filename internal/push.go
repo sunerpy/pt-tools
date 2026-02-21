@@ -15,6 +15,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
@@ -128,6 +129,9 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			if freeGB < glOnly.CleanupMinDiskSpaceGB {
 				sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，跳过推送: site=%s, id=%s",
 					dlSetting.Name, freeGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
+				if glOnly.CleanupEnabled {
+					events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "push", At: time.Now()})
+				}
 				return &PushTorrentResult{
 					Success:     false,
 					TorrentHash: torrentHash,
