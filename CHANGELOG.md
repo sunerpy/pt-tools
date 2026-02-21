@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-02-21
+
+### Documentation
+
+- **guide**: 重构新站点请求指南为扩展优先
+- 新增方式一：浏览器扩展自动采集（安装、一键采集、导出提交完整步骤）- 原有手动步骤降级为方式二 - 增加两种方式对比表
+
+### Features
+
+- **cleanup**: 支持免费期结束自动删除未完成种子
+  新增全局设置「免费结束自动删除」，开启后免费期结束时未下载完成的种子
+  将自动从下载器删除（含数据文件），无需手动操作。默认关闭。
+
+        - SettingsGlobal 新增 AutoDeleteOnFreeEnd 字段
+        - FreeEndMonitor 新增自动删除分支，仅作用于免费期结束未完成的种子
+        - 系统设置页面新增「免费结束管理」区块含开关和警告提示
+        - 暂停任务页面新增自动删除快捷开关（含悬浮提示）
+        - README 补充功能说明
+
+        Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
+
+### Performance
+
+- **cleanup**: 优化磁盘紧急清理策略
+- 紧急清理目标增加缓冲区（阈值 20% 或至少 10GB），避免清理后立即再次触底 - 新增 DiskSpaceLow 事件，推送检测空间不足时通知清理监控立即执行 - CleanupMonitor 订阅事件总线，收到信号后 3 秒去抖再立即清理 - 仅在自动删种启用时才发送磁盘空间不足信号
+
+      Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
+
 ## [0.15.0] - 2026-02-19
 
 ### Bug Fixes
