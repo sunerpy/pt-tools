@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
-import { InfoFilled, Refresh, Timer } from "@element-plus/icons-vue";
+import { globalApi, type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
+import { Delete, InfoFilled, Refresh, Timer } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
@@ -8,6 +8,8 @@ const activeTab = ref("paused");
 const loading = ref(false);
 const autoRefresh = ref(false);
 const refreshTimer = ref<number | null>(null);
+const autoDeleteOnFreeEnd = ref(false);
+const savingAutoDelete = ref(false);
 
 const pausedTorrents = ref<PausedTorrent[]>([]);
 const pausedTotal = ref(0);
@@ -35,6 +37,12 @@ const siteOptions = computed(() => {
 
 onMounted(async () => {
   await loadPausedTorrents();
+  try {
+    const settings = await globalApi.get();
+    autoDeleteOnFreeEnd.value = settings.auto_delete_on_free_end ?? false;
+  } catch {
+    // ignore
+  }
 });
 
 onUnmounted(() => {
@@ -198,6 +206,21 @@ async function confirmDeleteRow(removeData: boolean) {
   await performDelete([deleteTarget.value.id], removeData);
 }
 
+async function toggleAutoDelete(val: boolean) {
+  savingAutoDelete.value = true;
+  try {
+    const current = await globalApi.get();
+    await globalApi.save({ ...current, auto_delete_on_free_end: val });
+    autoDeleteOnFreeEnd.value = val;
+    ElMessage.success(val ? "已开启免费结束自动删除" : "已关闭免费结束自动删除");
+  } catch (e: unknown) {
+    autoDeleteOnFreeEnd.value = !val;
+    ElMessage.error((e as Error).message || "保存失败");
+  } finally {
+    savingAutoDelete.value = false;
+  }
+}
+
 function formatSize(bytes: number): string {
   if (!bytes || bytes <= 0) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -243,16 +266,30 @@ function formatProgress(progress: number): string {
         <p class="page-subtitle">管理 RSS 订阅中因免费期结束而自动暂停的下载任务</p>
       </div>
       <div class="page-actions">
-        <div class="auto-refresh-switch control-pill">
-          <el-switch
-            v-model="autoRefresh"
-            inline-prompt
-            :active-icon="Timer"
-            :inactive-icon="Timer"
-            active-text="自动刷新"
-            inactive-text="自动刷新"
-            style="--el-switch-on-color: var(--pt-color-success)" />
-        </div>
+        <el-tooltip
+          content="开启后，免费期结束时未完成的种子将自动从下载器删除（含数据文件）"
+          placement="bottom">
+          <div class="auto-refresh-switch control-pill">
+            <el-switch
+              v-model="autoDeleteOnFreeEnd"
+              :loading="savingAutoDelete"
+              :active-icon="Delete"
+              :inactive-icon="Delete"
+              style="--el-switch-on-color: var(--el-color-danger)"
+              @change="toggleAutoDelete" />
+            <span class="control-pill-label">自动删除</span>
+          </div>
+        </el-tooltip>
+        <el-tooltip content="每 30 秒自动刷新列表数据" placement="bottom">
+          <div class="auto-refresh-switch control-pill">
+            <el-switch
+              v-model="autoRefresh"
+              :active-icon="Timer"
+              :inactive-icon="Timer"
+              style="--el-switch-on-color: var(--pt-color-success)" />
+            <span class="control-pill-label">自动刷新</span>
+          </div>
+        </el-tooltip>
         <el-select
           v-model="siteFilter"
           class="site-filter-select"

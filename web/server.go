@@ -453,6 +453,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupProtectHR       bool    `json:"cleanup_protect_hr"`
 			CleanupMinRetainH      int     `json:"cleanup_min_retain_h"`
 			CleanupProtectTags     string  `json:"cleanup_protect_tags"`
+			AutoDeleteOnFreeEnd    bool    `json:"auto_delete_on_free_end"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -494,6 +495,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupProtectHR:       req.CleanupProtectHR,
 			CleanupMinRetainH:      req.CleanupMinRetainH,
 			CleanupProtectTags:     req.CleanupProtectTags,
+			AutoDeleteOnFreeEnd:    req.AutoDeleteOnFreeEnd,
 		}
 		if err := s.store.SaveGlobalSettings(gs); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

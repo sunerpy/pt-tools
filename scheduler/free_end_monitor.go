@@ -387,6 +387,22 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 		return
 	}
 
+	if m.isAutoDeleteEnabled() {
+		global.GetSlogger().Infof("[FreeEndMonitor] 准备自动删除种子: %s (进度:%.1f%%, TaskID:%s)", torrent.Title, progress, torrent.DownloaderTaskID)
+
+		if err := dl.RemoveTorrent(torrent.DownloaderTaskID, true); err != nil {
+			if !errors.Is(err, downloader.ErrTorrentNotFound) {
+				global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除种子失败 (种子:%s): %v", torrent.Title, err)
+				m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
+				return
+			}
+		}
+
+		m.markAutoDeleted(torrent, progress, totalSize)
+		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已自动删除 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
+		return
+	}
+
 	global.GetSlogger().Infof("[FreeEndMonitor] 准备暂停种子: %s (进度:%.1f%%, TaskID:%s)", torrent.Title, progress, torrent.DownloaderTaskID)
 
 	if err := m.pauseTorrentWithRetry(ctx, dl, torrent); err != nil {
@@ -539,6 +555,32 @@ func (m *FreeEndMonitor) markRemovedFromDownloader(torrent models.TorrentInfo) {
 		global.GetSlogger().Errorf("更新种子删除状态失败 (种子:%s): %v", torrent.Title, err)
 	}
 	m.CancelTorrent(torrent.ID)
+}
+
+func (m *FreeEndMonitor) isAutoDeleteEnabled() bool {
+	var cfg models.SettingsGlobal
+	if err := m.db.First(&cfg).Error; err != nil {
+		return false
+	}
+	return cfg.AutoDeleteOnFreeEnd
+}
+
+func (m *FreeEndMonitor) markAutoDeleted(torrent models.TorrentInfo, progress float64, totalSize int64) {
+	now := time.Now()
+	updates := map[string]any{
+		"is_paused_by_system": true,
+		"paused_at":           now,
+		"pause_reason":        "免费期结束，自动删除（未完成）",
+		"progress":            progress,
+		"torrent_size":        totalSize,
+		"last_check_time":     now,
+		"retry_count":         0,
+		"last_error":          "",
+		"downloader_task_id":  "",
+	}
+	if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", torrent.ID).Updates(updates).Error; err != nil {
+		global.GetSlogger().Errorf("更新种子自动删除状态失败 (种子:%s): %v", torrent.Title, err)
+	}
 }
 
 func (m *FreeEndMonitor) periodicArchive() {

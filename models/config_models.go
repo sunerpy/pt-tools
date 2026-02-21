@@ -62,6 +62,9 @@ type SettingsGlobal struct {
 	CleanupMinRetainH     int     `json:"cleanup_min_retain_h" gorm:"default:24"`
 	CleanupProtectTags    string  `json:"cleanup_protect_tags" gorm:"size:256"`
 
+	// 免费结束自动删除
+	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -75,6 +75,7 @@ export interface GlobalSettings {
   cleanup_protect_hr?: boolean;
   cleanup_min_retain_h?: number;
   cleanup_protect_tags?: string;
+  auto_delete_on_free_end?: boolean;
 }
 
 export interface QbitSettings {

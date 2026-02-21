@@ -200,6 +200,7 @@ func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 		cur.CleanupProtectHR = gs.CleanupProtectHR
 		cur.CleanupMinRetainH = gs.CleanupMinRetainH
 		cur.CleanupProtectTags = gs.CleanupProtectTags
+		cur.AutoDeleteOnFreeEnd = gs.AutoDeleteOnFreeEnd
 		if err := db.Save(&cur).Error; err != nil {
 			return err
 		}
