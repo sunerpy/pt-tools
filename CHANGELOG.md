@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-02-21
+
+### Features
+
+- **ui**: 站点管理与首页增加浏览器扩展引导提示
+- 站点管理页禁用的「新增站点」按钮增加 Popover 悬浮提示和 Alert 横幅 - 首页 Dashboard 顶部增加可关闭的扩展推荐横幅 - 引导用户通过浏览器扩展快速适配新站点，提供下载和文档链接 - 移除不再使用的 addSite 函数避免构建报错
+
 ## [0.16.0] - 2026-02-21
 
 ### Documentation
