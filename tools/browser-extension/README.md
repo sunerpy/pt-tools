@@ -6,7 +6,7 @@ PT 站点数据采集助手，一键采集站点数据、同步 Cookie 到 pt-to
 
 ### Edge 扩展商店（推荐）
 
-前往 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper) 搜索 "PT Tools Helper" 直接安装，支持自动更新。
+前往 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 搜索 "PT Tools Helper" 直接安装，支持自动更新。
 
 ### Chrome / Edge 手动安装
 

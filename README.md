@@ -245,7 +245,7 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 
 **Edge Add-ons 扩展商店**（推荐）：
 
-- 前往 [Edge 扩展商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper) 搜索 "PT Tools Helper" 直接安装，支持自动更新
+- 前往 [Edge 扩展商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 搜索 "PT Tools Helper" 直接安装，支持自动更新
 
 **从 GitHub Release 手动安装**：
 
