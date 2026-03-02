@@ -1,0 +1,89 @@
+name: Check Site Request Attachment
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  check-attachment:
+    if: contains(github.event.issue.title, '新站点请求')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Check for ZIP attachment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            const hasAttachment = body.includes('user-attachments/files') || body.includes('user-attachments/assets');
+            const issueNumber = context.payload.issue.number;
+
+            if (hasAttachment) {
+              // Remove the missing-attachment label if it exists (e.g., user edited to add ZIP)
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  name: 'missing-attachment',
+                });
+              } catch (e) {
+                // Label doesn't exist, ignore
+              }
+              return;
+            }
+
+            // Add label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['missing-attachment'],
+            });
+
+            // Check if we already commented (avoid duplicate comments on edit)
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            });
+            const botComment = comments.data.find(
+              (c) => c.user.type === 'Bot' && c.body.includes('<!-- attachment-check -->')
+            );
+            if (botComment) return;
+
+            // Post reminder comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: [
+                '<!-- attachment-check -->',
+                '⚠️ **缺少采集数据 ZIP 文件 / Missing collected data ZIP file**',
+                '',
+                '你好 @' + context.payload.issue.user.login + '，',
+                '',
+                '感谢你提交新站点请求！但我们没有在 Issue 中找到采集数据的 ZIP 附件，**没有 ZIP 文件将无法适配站点**。',
+                '',
+                '请按以下步骤补充：',
+                '1. 使用 [PT Tools Helper 浏览器扩展](https://github.com/sunerpy/pt-tools/releases) 采集站点数据',
+                '2. 点击「📦 导出 ZIP」下载采集文件',
+                '3. **编辑此 Issue**，将 ZIP 文件拖拽上传到正文中',
+                '',
+                '上传后系统会自动移除此提醒。',
+                '',
+                '---',
+                '',
+                'Hi @' + context.payload.issue.user.login + ',',
+                '',
+                'Thanks for submitting a new site request! However, we could not find a collected data ZIP attachment in this issue. **The ZIP file is required for site adaptation.**',
+                '',
+                'Please:',
+                '1. Use the [PT Tools Helper browser extension](https://github.com/sunerpy/pt-tools/releases) to collect site data',
+                '2. Click "📦 Export ZIP" to download the collected file',
+                '3. **Edit this issue** and drag-and-drop the ZIP file into the body',
+                '',
+                'The reminder will be automatically removed once the attachment is detected.',
+              ].join('\n'),
+            });

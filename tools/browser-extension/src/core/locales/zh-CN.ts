@@ -129,8 +129,10 @@ export default {
   "issue.timeInfo": "时间信息",
   "issue.sessionCreated": "会话创建",
   "issue.exportedAt": "导出时间",
-  "issue.attachments": "附件",
-  "issue.attachmentsHint": "请将下载的 ZIP 文件拖拽到此处上传，或点击下方区域选择文件。",
+  "issue.attachments": "采集数据附件（必须上传）",
+  "issue.attachmentRequired":
+    "请将下载的 ZIP 文件拖拽到下方 ↓↓↓ 位置上传，未上传 ZIP 将无法适配站点",
+  "issue.attachmentPlaceholder": "👉 ___请将 ZIP 文件拖拽到这里上传___ 👈",
   "issue.checklist": "检查清单",
   "issue.checkDownloaded": "已下载采集 ZIP 文件",
   "issue.checkUploaded": "已将 ZIP 拖拽上传到本 Issue",

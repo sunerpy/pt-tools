@@ -1,0 +1,58 @@
+name: "Bug 报告 / Bug Report"
+description: "报告问题或异常 / Report a bug or unexpected behavior"
+title: ""
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: "问题描述 / Description"
+      description: "清晰描述遇到的问题"
+      placeholder: "描述你遇到的问题..."
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "pt-tools 版本 / Version"
+      placeholder: "例如: v0.19.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy-method
+    attributes:
+      label: "部署方式 / Deployment"
+      options:
+        - Docker
+        - 二进制 / Binary
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "复现步骤 / Steps to Reproduce"
+      placeholder: |
+        1. 打开...
+        2. 点击...
+        3. 出现...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "期望行为 / Expected Behavior"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "日志 / Logs"
+      description: "相关日志信息（如有）"
+      render: shell
+    validations:
+      required: false

@@ -131,9 +131,10 @@ export default {
   "issue.timeInfo": "Time Information",
   "issue.sessionCreated": "Session Created",
   "issue.exportedAt": "Exported At",
-  "issue.attachments": "Attachments",
-  "issue.attachmentsHint":
-    "Drag and drop the downloaded ZIP file here, or click below to select a file.",
+  "issue.attachments": "Collected Data Attachment (Required)",
+  "issue.attachmentRequired":
+    "Drag and drop the downloaded ZIP file below ↓↓↓. Without the ZIP file, the site cannot be adapted.",
+  "issue.attachmentPlaceholder": "👉 ___DRAG AND DROP ZIP FILE HERE___ 👈",
   "issue.checklist": "Checklist",
   "issue.checkDownloaded": "Downloaded the collected ZIP file",
   "issue.checkUploaded": "Uploaded the ZIP file to this issue",
