@@ -98,7 +98,7 @@ jobs:
       EDGE_API: https://api.addons.microsoftedge.microsoft.com
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: extension-zip
 
@@ -177,7 +177,7 @@ jobs:
       contents: write
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: extension-zip
 
