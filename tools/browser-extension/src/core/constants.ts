@@ -74,6 +74,33 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: [],
     syncField: "passkey",
   },
+  {
+    id: "agsvpt",
+    name: "AGSVPT",
+    domains: ["www.agsvpt.com", "new.agsvpt.cn", "pt.agsvpt.cn"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "xingyunge",
+    name: "XingYunGe",
+    domains: ["pt.xingyungept.org", "xingyunge.top", "pt.xingyungept.cn"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "mooko",
+    name: "MooKo",
+    domains: ["mooko.org"],
+    schema: "Gazelle",
+    authMethod: "cookie",
+    cookieNames: ["session"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
