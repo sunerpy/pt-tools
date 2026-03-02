@@ -4,12 +4,17 @@ PT 站点数据采集助手，一键采集站点数据、同步 Cookie 到 pt-to
 
 ## 安装
 
-### Chrome / Edge
+### Edge 扩展商店（推荐）
 
-1. 下载 `pt-tools-helper.zip` 并解压
-2. 打开 `chrome://extensions`，开启「开发者模式」
-3. 点击「加载已解压的扩展程序」，选择解压目录
-4. 首次点击扩展图标时会请求权限，点击「授权并启用」
+前往 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper) 搜索 "PT Tools Helper" 直接安装，支持自动更新。
+
+### Chrome / Edge 手动安装
+
+1. 前往 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载最新的 `pt-tools-helper.zip` 并解压
+2. 打开 `chrome://extensions`（Chrome）或 `edge://extensions`（Edge）
+3. 开启「开发者模式」
+4. 点击「加载已解压的扩展程序」，选择解压目录
+5. 首次点击扩展图标时会请求权限，点击「授权并启用」
 
 ### Firefox
 
