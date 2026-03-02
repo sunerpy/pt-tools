@@ -337,10 +337,10 @@ type hrInfo struct {
 func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 	result := make(map[string]hrInfo)
 
-	siteHRMap := make(map[string]hrInfo)
+	siteDefMap := make(map[string]*v2.SiteDefinition)
 	for _, def := range v2.GetDefinitionRegistry().GetAll() {
 		if def.HREnabled {
-			siteHRMap[def.ID] = hrInfo{HasHR: true, HRSeedTimeH: def.HRSeedTimeHours}
+			siteDefMap[def.ID] = def
 		}
 	}
 
@@ -349,9 +349,10 @@ func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 		SiteName    string
 		HasHR       bool
 		HRSeedTimeH int
+		TorrentSize int64
 	}
 	c.db.Model(&models.TorrentInfo{}).
-		Select("torrent_hash, site_name, has_hr, hr_seed_time_h").
+		Select("torrent_hash, site_name, has_hr, hr_seed_time_h, torrent_size").
 		Where("torrent_hash IS NOT NULL AND torrent_hash != ''").
 		Find(&records)
 
@@ -359,8 +360,9 @@ func (c *CleanupMonitor) getHRInfoMap() map[string]hrInfo {
 		hash := strings.ToLower(r.TorrentHash)
 		if r.HasHR {
 			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: r.HRSeedTimeH}
-		} else if siteInfo, ok := siteHRMap[r.SiteName]; ok {
-			result[hash] = siteInfo
+		} else if def, ok := siteDefMap[r.SiteName]; ok {
+			// Use per-torrent size-based calculation when available
+			result[hash] = hrInfo{HasHR: true, HRSeedTimeH: def.CalcHRSeedTimeH(r.TorrentSize)}
 		}
 	}
 	return result

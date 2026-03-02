@@ -15,3 +15,4 @@ upx*
 dist
 
 Dockerfile-*
+tmp

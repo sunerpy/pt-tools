@@ -354,3 +354,197 @@ func makeMinimalNexusPHP(id string) *SiteDefinition {
 		},
 	}
 }
+
+func TestCalcHRSeedTimeH(t *testing.T) {
+	def := &SiteDefinition{
+		HREnabled:       true,
+		HRSeedTimeHours: 504, // fallback
+		HRSeedTimeRules: []HRSeedTimeRule{
+			{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 204},   // 0-10 GiB
+			{MinSizeGB: 10, MaxSizeGB: 20, SeedTimeH: 240},  // 10-20 GiB
+			{MinSizeGB: 20, MaxSizeGB: 50, SeedTimeH: 288},  // 20-50 GiB
+			{MinSizeGB: 50, MaxSizeGB: 200, SeedTimeH: 336}, // 50-200 GiB
+			{MinSizeGB: 200, MaxSizeGB: 0, SeedTimeH: 504},  // 200+ GiB
+		},
+	}
+
+	tests := []struct {
+		name      string
+		sizeBytes int64
+		expected  int
+	}{
+		{"5 GiB torrent", 5 * 1024 * 1024 * 1024, 204},
+		{"10 GiB boundary (falls into 10-20)", 10 * 1024 * 1024 * 1024, 240},
+		{"15 GiB torrent", 15 * 1024 * 1024 * 1024, 240},
+		{"25 GiB torrent", 25 * 1024 * 1024 * 1024, 288},
+		{"100 GiB torrent", 100 * 1024 * 1024 * 1024, 336},
+		{"200 GiB boundary (falls into 200+)", 200 * 1024 * 1024 * 1024, 504},
+		{"500 GiB torrent", 500 * 1024 * 1024 * 1024, 504},
+		{"0 bytes falls back", 0, 504},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := def.CalcHRSeedTimeH(tt.sizeBytes)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestCalcHRSeedTimeH_NoRules(t *testing.T) {
+	def := &SiteDefinition{
+		HREnabled:       true,
+		HRSeedTimeHours: 72,
+	}
+	assert.Equal(t, 72, def.CalcHRSeedTimeH(5*1024*1024*1024))
+	assert.Equal(t, 72, def.CalcHRSeedTimeH(0))
+}
+
+func TestCalcHRSeedTimeH_EmptyRulesFallback(t *testing.T) {
+	def := &SiteDefinition{
+		HREnabled:       true,
+		HRSeedTimeHours: 100,
+		HRSeedTimeRules: []HRSeedTimeRule{},
+	}
+	assert.Equal(t, 100, def.CalcHRSeedTimeH(50*1024*1024*1024))
+}
+
+func TestValidate_HRSeedTimeRules(t *testing.T) {
+	t.Run("valid rules", func(t *testing.T) {
+		def := SiteDefinition{
+			ID: "test", Name: "Test", Schema: SchemaGazelle,
+			URLs:      []string{"https://example.com/"},
+			HREnabled: true,
+			HRSeedTimeRules: []HRSeedTimeRule{
+				{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 36},
+				{MinSizeGB: 10, MaxSizeGB: 0, SeedTimeH: 72},
+			},
+		}
+		err := def.Validate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid range", func(t *testing.T) {
+		def := SiteDefinition{
+			ID: "test", Name: "Test", Schema: SchemaGazelle,
+			URLs:      []string{"https://example.com/"},
+			HREnabled: true,
+			HRSeedTimeRules: []HRSeedTimeRule{
+				{MinSizeGB: 50, MaxSizeGB: 10, SeedTimeH: 36},
+			},
+		}
+		err := def.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "InvalidRange")
+	})
+
+	t.Run("zero seed time", func(t *testing.T) {
+		def := SiteDefinition{
+			ID: "test", Name: "Test", Schema: SchemaGazelle,
+			URLs:      []string{"https://example.com/"},
+			HREnabled: true,
+			HRSeedTimeRules: []HRSeedTimeRule{
+				{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 0},
+			},
+		}
+		err := def.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SeedTimeH")
+	})
+
+	t.Run("rules without HREnabled", func(t *testing.T) {
+		def := SiteDefinition{
+			ID: "test", Name: "Test", Schema: SchemaGazelle,
+			URLs:      []string{"https://example.com/"},
+			HREnabled: false,
+			HRSeedTimeRules: []HRSeedTimeRule{
+				{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 36},
+			},
+		}
+		err := def.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Consistency")
+	})
+}
+
+func TestCalcHRSeedTimeH_CustomFunc(t *testing.T) {
+	// Custom function takes highest priority
+	def := &SiteDefinition{
+		HREnabled:       true,
+		HRSeedTimeHours: 999,
+		HRSeedTimeRules: []HRSeedTimeRule{
+			{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 888},
+		},
+		HRCalcSeedTime: func(sizeBytes int64) int {
+			if sizeBytes < 1024*1024*1024 {
+				return 24
+			}
+			return 48
+		},
+	}
+	assert.Equal(t, 24, def.CalcHRSeedTimeH(500*1024*1024), "custom func should override rules")
+	assert.Equal(t, 48, def.CalcHRSeedTimeH(5*1024*1024*1024), "custom func should override rules")
+	assert.Equal(t, 24, def.CalcHRSeedTimeH(0), "custom func handles 0 bytes too")
+}
+
+func TestNewSizeTieredHRCalc(t *testing.T) {
+	calc := NewSizeTieredHRCalc(
+		[]HRSeedTimeRule{
+			{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 36},
+			{MinSizeGB: 10, MaxSizeGB: 20, SeedTimeH: 72},
+			{MinSizeGB: 20, MaxSizeGB: 50, SeedTimeH: 120},
+			{MinSizeGB: 50, MaxSizeGB: 200, SeedTimeH: 168},
+			{MinSizeGB: 200, MaxSizeGB: 0, SeedTimeH: 336},
+		},
+		168, // window hours
+	)
+
+	tests := []struct {
+		name      string
+		sizeBytes int64
+		expected  int
+	}{
+		{"5 GiB", 5 * 1024 * 1024 * 1024, 36 + 168},
+		{"10 GiB boundary", 10 * 1024 * 1024 * 1024, 72 + 168},
+		{"15 GiB", 15 * 1024 * 1024 * 1024, 72 + 168},
+		{"30 GiB", 30 * 1024 * 1024 * 1024, 120 + 168},
+		{"100 GiB", 100 * 1024 * 1024 * 1024, 168 + 168},
+		{"300 GiB", 300 * 1024 * 1024 * 1024, 336 + 168},
+		{"0 bytes uses max", 0, 336 + 168},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, calc(tt.sizeBytes))
+		})
+	}
+}
+
+func TestCalcHRSeedTimeH_PriorityChain(t *testing.T) {
+	t.Run("custom func > rules > flat", func(t *testing.T) {
+		def := &SiteDefinition{
+			HREnabled:       true,
+			HRSeedTimeHours: 100,
+			HRSeedTimeRules: []HRSeedTimeRule{{MinSizeGB: 0, MaxSizeGB: 0, SeedTimeH: 200}},
+			HRCalcSeedTime:  func(int64) int { return 300 },
+		}
+		assert.Equal(t, 300, def.CalcHRSeedTimeH(1024), "custom func wins")
+	})
+
+	t.Run("rules > flat when no custom func", func(t *testing.T) {
+		def := &SiteDefinition{
+			HREnabled:       true,
+			HRSeedTimeHours: 100,
+			HRSeedTimeRules: []HRSeedTimeRule{{MinSizeGB: 0, MaxSizeGB: 0, SeedTimeH: 200}},
+		}
+		assert.Equal(t, 200, def.CalcHRSeedTimeH(1024), "rules win over flat")
+	})
+
+	t.Run("flat when nothing else", func(t *testing.T) {
+		def := &SiteDefinition{
+			HREnabled:       true,
+			HRSeedTimeHours: 100,
+		}
+		assert.Equal(t, 100, def.CalcHRSeedTimeH(1024), "flat fallback")
+	})
+}
