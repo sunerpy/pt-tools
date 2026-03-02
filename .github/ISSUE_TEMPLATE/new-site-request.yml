@@ -1,0 +1,97 @@
+name: "新站点请求 / New Site Request"
+description: "请求适配新的 PT 站点 / Request support for a new PT site"
+title: "[新站点请求] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 请求适配新站点
+
+        请使用 [PT Tools Helper 浏览器扩展](https://github.com/sunerpy/pt-tools/releases) 采集站点数据后提交。
+
+        > **重要**：必须上传采集的 ZIP 文件，否则无法适配。
+
+  - type: input
+    id: site-name
+    attributes:
+      label: "站点名称 / Site Name"
+      placeholder: "例如: example.com"
+    validations:
+      required: true
+
+  - type: input
+    id: site-url
+    attributes:
+      label: "站点 URL / Site URL"
+      placeholder: "https://example.com"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: schema
+    attributes:
+      label: "站点架构 / Site Schema"
+      description: "浏览器扩展会自动检测架构类型"
+      options:
+        - NexusPHP
+        - Gazelle
+        - Unit3D
+        - mTorrent
+        - Unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth-method
+    attributes:
+      label: "认证方式 / Auth Method"
+      options:
+        - cookie
+        - api_key
+        - passkey
+    validations:
+      required: true
+
+  - type: textarea
+    id: collected-pages
+    attributes:
+      label: "已采集页面 / Collected Pages"
+      description: "列出已采集的页面 URL（种子列表、详情、个人信息）"
+      placeholder: |
+        - search: https://example.com/torrents.php
+        - detail: https://example.com/details.php?id=xxx
+        - userinfo: https://example.com/userdetails.php?id=xxx
+    validations:
+      required: true
+
+  - type: textarea
+    id: zip-upload
+    attributes:
+      label: "采集数据 ZIP 文件 / Collected Data ZIP File"
+      description: |
+        **必须上传**：将浏览器扩展导出的 ZIP 文件拖拽到下方上传。
+        没有 ZIP 文件将无法适配站点。
+        **Required**: Drag and drop the ZIP file exported from the browser extension below.
+      placeholder: "将 ZIP 文件拖拽到此处 / Drag and drop ZIP file here"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "检查清单 / Checklist"
+      options:
+        - label: "已上传采集 ZIP 文件到上方文本框 / Uploaded collected ZIP file above"
+          required: true
+        - label: "已确认敏感信息已自动脱敏 / Confirmed sensitive data was sanitized"
+          required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: "补充信息 / Additional Information"
+      description: "如有特殊说明（HR 规则、特殊登录方式等）请在此补充"
+      placeholder: "可选 / Optional"
+    validations:
+      required: false
