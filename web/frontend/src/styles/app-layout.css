@@ -365,3 +365,19 @@ html.dark .app-aside .el-menu-item.is-active {
 html.dark .app-aside {
   box-shadow: 2px 0 14px rgba(0, 0, 0, 0.4);
 }
+
+/* Immersive mode: hide aside, full-width content */
+.app-container.is-immersive > .app-aside {
+  display: none;
+}
+
+.app-container.is-immersive > .el-container > .el-header {
+  display: none;
+}
+
+.app-container.is-immersive > .el-container > .el-main {
+  padding: 0;
+  overflow: hidden;
+}
+  box-shadow: 2px 0 14px rgba(0, 0, 0, 0.4);
+}

@@ -919,3 +919,130 @@ export const versionApi = {
 
   cancelUpgrade: () => api.delete<{ success: boolean; message: string }>("/api/version/upgrade"),
 };
+
+
+// ===================== Downloader Torrents (Hub) =====================
+
+export interface TorrentActionTarget {
+  downloader_id: number;
+  task_id: string;
+}
+
+export interface DownloaderTorrentItem {
+  downloader_id: number;
+  downloader_name: string;
+  downloader_type: string;
+  task_id: string;
+  title: string;
+  info_hash: string;
+  state: string;
+  progress: number;
+  size: number;
+  upload_speed: number;
+  download_speed: number;
+  seeds: number;
+  connections: number;
+  ratio: number;
+  added_at: number;
+  completed_at: number;
+  save_path: string;
+  category: string;
+  tags: string;
+  eta: number;
+}
+
+export interface TorrentListResponse {
+  items: DownloaderTorrentItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface TorrentFileInfo {
+  index: number;
+  name: string;
+  size: number;
+  progress: number;
+  priority: number;
+}
+
+export interface TorrentTrackerInfo {
+  url: string;
+  status: number;
+  seeds: number;
+  peers: number;
+  leeches: number;
+}
+
+export interface TorrentDetailResponse {
+  torrent: DownloaderTorrentItem;
+  files: TorrentFileInfo[];
+  trackers: TorrentTrackerInfo[];
+}
+
+export interface DownloaderTransferStats {
+  downloader_id: number;
+  downloader_name: string;
+  total_download_speed: number;
+  total_upload_speed: number;
+  total_downloaded: number;
+  total_uploaded: number;
+  free_space: number;
+}
+
+export interface DownloaderCapability {
+  downloader_id: number;
+  downloader_name: string;
+  supports_categories: boolean;
+  supports_tags: boolean;
+  can_pause: boolean;
+  can_resume: boolean;
+  can_delete: boolean;
+  can_delete_with_data: boolean;
+  can_set_location: boolean;
+  can_recheck: boolean;
+  can_add_torrent: boolean;
+  categories: string[];
+  tags: string[];
+}
+
+export interface DownloaderMeta {
+  downloader_id: number;
+  downloader_name: string;
+  downloader_type: string;
+  version: string;
+}
+
+export const downloaderTorrentsApi = {
+  list: (params: URLSearchParams) =>
+    api.get<TorrentListResponse>(`/api/downloader-torrents?${params.toString()}`),
+
+  detail: (downloaderId: number, taskId: string) =>
+    api.get<TorrentDetailResponse>(
+      `/api/downloader-torrents/${downloaderId}/${encodeURIComponent(taskId)}`,
+    ),
+
+  action: (downloaderId: number, taskIds: string[], action: string, deleteFiles?: boolean) =>
+    api.post<{ success: boolean; message: string }>("/api/downloader-torrents/action", {
+      downloader_id: downloaderId,
+      task_ids: taskIds,
+      action,
+      delete_files: deleteFiles,
+    }),
+
+  transferStats: () =>
+    api.get<{ total_upload_speed: number; total_download_speed: number; total_uploaded: number; total_downloaded: number; total_session_uploaded: number; total_session_downloaded: number; total_free_space: number }>("/api/downloader-torrents/transfer-stats"),
+
+  capabilities: () =>
+    api.get<{ items: DownloaderCapability[] }>("/api/downloader-torrents/capabilities"),
+
+  meta: () =>
+    api.get<{ downloaders: DownloaderMeta[]; categories: string[]; tags: string[] }>("/api/downloader-torrents/meta"),
+
+  batchAction: (payload: { action: string; targets: TorrentActionTarget[]; save_path?: string; delete_files?: boolean }) =>
+    api.post<{ success_count: number; failed_count: number }>("/api/downloader-torrents/batch-action", payload),
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  add: (payload: Record<string, any>) =>
+    api.post<{ success_count: number; failed_count: number }>("/api/downloader-torrents/add", payload),
+};
