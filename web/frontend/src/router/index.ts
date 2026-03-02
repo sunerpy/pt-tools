@@ -88,6 +88,12 @@ const router = createRouter({
       name: "password",
       component: () => import("@/views/ChangePassword.vue"),
     },
+    {
+      path: "/downloader-hub",
+      name: "downloader-hub",
+      component: () => import("@/views/DownloaderHub.vue"),
+      meta: { title: "下载器Web UI" },
+    },
   ],
 });
 

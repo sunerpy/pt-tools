@@ -31,6 +31,7 @@ const activeMenu = computed(() => {
   if (name === "site-detail") return "sites";
   return name || "global";
 });
+const isImmersive = computed(() => route.name === "downloader-hub");
 
 onMounted(() => {
   logLevelStore.fetchLogLevel();
@@ -86,6 +87,11 @@ async function startAll() {
 }
 
 function handleMenuSelect(index: string) {
+  if (index === "downloader-hub") {
+    const url = router.resolve(`/${index}`).href;
+    window.open(url, "_blank");
+    return;
+  }
   router.push(`/${index}`);
 }
 
@@ -95,7 +101,7 @@ function logout() {
 </script>
 
 <template>
-  <el-container class="app-container">
+  <el-container class="app-container" :class="{ 'is-immersive': isImmersive }">
     <el-aside
       :width="isCollapse ? '68px' : '236px'"
       class="app-aside"
@@ -129,6 +135,10 @@ function logout() {
           <el-menu-item index="downloaders">
             <el-icon><Download /></el-icon>
             <template #title>下载器管理</template>
+          </el-menu-item>
+          <el-menu-item index="downloader-hub">
+            <el-icon><Grid /></el-icon>
+            <template #title>下载器Web UI</template>
           </el-menu-item>
           <el-menu-item index="sites">
             <el-icon><Connection /></el-icon>

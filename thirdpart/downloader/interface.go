@@ -21,6 +21,7 @@ const (
 	TorrentDownloading TorrentState = "downloading"
 	TorrentSeeding     TorrentState = "seeding"
 	TorrentPaused      TorrentState = "paused"
+	TorrentStopped     TorrentState = "stopped"
 	TorrentQueued      TorrentState = "queued"
 	TorrentChecking    TorrentState = "checking"
 	TorrentError       TorrentState = "error"
@@ -36,12 +37,13 @@ var (
 	ErrInvalidConfig        = errors.New("invalid configuration")
 )
 
-// ClientStatus 下载器客户端状态
 type ClientStatus struct {
-	UpSpeed int64 // 上传速度 (bytes/s)
-	UpData  int64 // 总上传量 (bytes)
-	DlSpeed int64 // 下载速度 (bytes/s)
-	DlData  int64 // 总下载量 (bytes)
+	UpSpeed       int64 // 上传速度 (bytes/s)
+	DlSpeed       int64 // 下载速度 (bytes/s)
+	UpData        int64 // 历史总上传量 (bytes)
+	DlData        int64 // 历史总下载量 (bytes)
+	SessionUpData int64 // 本次启动上传量 (bytes)
+	SessionDlData int64 // 本次启动下载量 (bytes)
 }
 
 // Torrent 种子信息
