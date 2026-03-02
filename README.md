@@ -243,16 +243,16 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 
 ### 安装方式
 
-**从 GitHub Release 下载**（推荐）：
+**Edge Add-ons 扩展商店**（推荐）：
+
+- 前往 [Edge 扩展商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper) 搜索 "PT Tools Helper" 直接安装，支持自动更新
+
+**从 GitHub Release 手动安装**：
 
 1. 前往 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载最新的 `pt-tools-helper.zip`
 2. 解压到任意目录
 3. Chrome → `chrome://extensions` / Edge → `edge://extensions`
 4. 开启「开发者模式」→「加载已解压的扩展程序」→ 选择解压目录
-
-**Edge Add-ons 扩展商店**（审核中）：
-
-- 审核通过后可在 Edge 扩展商店搜索 "PT Tools Helper" 直接安装
 
 详细使用说明见 [扩展 README](tools/browser-extension/README.md)。
 
