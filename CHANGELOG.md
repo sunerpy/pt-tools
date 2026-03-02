@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-03-02
+
+### Bug Fixes
+
+- **extension**: Add AGSVPT, XingYunGe, MooKo to KNOWN_SITES
+
+### Features
+
+- **site**: 新增 AGSVPT、XingYunGe、MooKo 站点适配及 HR 规则引擎
+- 新增 AGSVPT (NexusPHP) 站点定义及 fixture 测试 - 新增 XingYunGe (NexusPHP) 站点定义及 fixture 测试 - 新增 MooKo (Gazelle) 站点定义及 fixture 测试 - SiteDefinition 新增 HRCalcSeedTime 函数字段支持站点自定义 HR 计算逻辑 - 内置 NewSizeTieredHRCalc 工厂函数处理按体积分档的 HR 规则 - CalcHRSeedTimeH 实现三层优先级链: 自定义函数 > 分档规则 > 固定值 - RSS 入库时按种子实际大小计算精确的 HR 做种时间 - cleanup monitor fallback 路径同步使用 CalcHRSeedTimeH 按种子计算
+
 ## [0.18.1] - 2026-03-02
 
 ### Bug Fixes
