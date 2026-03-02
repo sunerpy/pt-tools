@@ -920,7 +920,6 @@ export const versionApi = {
   cancelUpgrade: () => api.delete<{ success: boolean; message: string }>("/api/version/upgrade"),
 };
 
-
 // ===================== Downloader Torrents (Hub) =====================
 
 export interface TorrentActionTarget {
@@ -1031,18 +1030,39 @@ export const downloaderTorrentsApi = {
     }),
 
   transferStats: () =>
-    api.get<{ total_upload_speed: number; total_download_speed: number; total_uploaded: number; total_downloaded: number; total_session_uploaded: number; total_session_downloaded: number; total_free_space: number }>("/api/downloader-torrents/transfer-stats"),
+    api.get<{
+      total_upload_speed: number;
+      total_download_speed: number;
+      total_uploaded: number;
+      total_downloaded: number;
+      total_session_uploaded: number;
+      total_session_downloaded: number;
+      total_free_space: number;
+    }>("/api/downloader-torrents/transfer-stats"),
 
   capabilities: () =>
     api.get<{ items: DownloaderCapability[] }>("/api/downloader-torrents/capabilities"),
 
   meta: () =>
-    api.get<{ downloaders: DownloaderMeta[]; categories: string[]; tags: string[] }>("/api/downloader-torrents/meta"),
+    api.get<{ downloaders: DownloaderMeta[]; categories: string[]; tags: string[] }>(
+      "/api/downloader-torrents/meta",
+    ),
 
-  batchAction: (payload: { action: string; targets: TorrentActionTarget[]; save_path?: string; delete_files?: boolean }) =>
-    api.post<{ success_count: number; failed_count: number }>("/api/downloader-torrents/batch-action", payload),
+  batchAction: (payload: {
+    action: string;
+    targets: TorrentActionTarget[];
+    save_path?: string;
+    delete_files?: boolean;
+  }) =>
+    api.post<{ success_count: number; failed_count: number }>(
+      "/api/downloader-torrents/batch-action",
+      payload,
+    ),
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   add: (payload: Record<string, any>) =>
-    api.post<{ success_count: number; failed_count: number }>("/api/downloader-torrents/add", payload),
+    api.post<{ success_count: number; failed_count: number }>(
+      "/api/downloader-torrents/add",
+      payload,
+    ),
 };

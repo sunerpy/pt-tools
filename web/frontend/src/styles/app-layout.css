@@ -366,18 +366,21 @@ html.dark .app-aside {
   box-shadow: 2px 0 14px rgba(0, 0, 0, 0.4);
 }
 
-/* Immersive mode: hide aside, full-width content */
+/* Immersive mode: hide aside and header, full-width content */
 .app-container.is-immersive > .app-aside {
   display: none;
 }
 
-.app-container.is-immersive > .el-container > .el-header {
+.app-container.is-immersive .el-header {
   display: none;
 }
 
-.app-container.is-immersive > .el-container > .el-main {
+.app-container.is-immersive .el-footer {
+  display: none;
+}
+
+.app-container.is-immersive .app-main {
   padding: 0;
   overflow: hidden;
-}
-  box-shadow: 2px 0 14px rgba(0, 0, 0, 0.4);
+  height: 100vh;
 }

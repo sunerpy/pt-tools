@@ -28,10 +28,10 @@ const themeStyleOptions = [
 
 const activeMenu = computed(() => {
   const name = route.name as string;
-  if (name === 'site-detail') return 'sites';
-  return name || 'global';
+  if (name === "site-detail") return "sites";
+  return name || "global";
 });
-const isImmersive = computed(() => route.name === 'downloader-hub');
+const isImmersive = computed(() => route.name === "downloader-hub");
 
 onMounted(() => {
   logLevelStore.fetchLogLevel();
@@ -87,9 +87,9 @@ async function startAll() {
 }
 
 function handleMenuSelect(index: string) {
-  if (index === 'downloader-hub') {
+  if (index === "downloader-hub") {
     const url = router.resolve(`/${index}`).href;
-    window.open(url, '_blank');
+    window.open(url, "_blank");
     return;
   }
   router.push(`/${index}`);
