@@ -5,6 +5,110 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-03-02
+
+### Bug Fixes
+
+- **docker**: 升级构建镜像 Go 版本至 1.26.0 ([#133](https://github.com/sunerpy/pt-tools/pull/133))
+
+## [0.18.0] - 2026-03-02
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump oxlint from 1.48.0 to 1.50.0 in /web/frontend ([#121](https://github.com/sunerpy/pt-tools/issues/121)) ([#121](https://github.com/sunerpy/pt-tools/pull/121))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.48.0 to 1.50.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.50.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.50.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue-router from 5.0.2 to 5.0.3 in /web/frontend ([#124](https://github.com/sunerpy/pt-tools/issues/124)) ([#124](https://github.com/sunerpy/pt-tools/pull/124))
+  Bumps [vue-router](https://github.com/vuejs/router) from 5.0.2 to 5.0.3. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.2...v5.0.3)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-router
+         dependency-version: 5.0.3
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.2.2 to 3.2.5 in /web/frontend ([#125](https://github.com/sunerpy/pt-tools/issues/125)) ([#125](https://github.com/sunerpy/pt-tools/pull/125))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.2 to 3.2.5. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.5/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.2.5
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @types/node from 25.2.3 to 25.3.0 in /web/frontend ([#126](https://github.com/sunerpy/pt-tools/issues/126)) ([#126](https://github.com/sunerpy/pt-tools/pull/126))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.2.3 to 25.3.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.3.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxfmt from 0.33.0 to 0.35.0 in /web/frontend ([#123](https://github.com/sunerpy/pt-tools/issues/123)) ([#123](https://github.com/sunerpy/pt-tools/pull/123))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.33.0 to 0.35.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.35.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.35.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump marked from 17.0.2 to 17.0.3 in /web/frontend ([#122](https://github.com/sunerpy/pt-tools/issues/122)) ([#122](https://github.com/sunerpy/pt-tools/pull/122))
+  Bumps [marked](https://github.com/markedjs/marked) from 17.0.2 to 17.0.3. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.2...v17.0.3)
+
+        ---
+        updated-dependencies:
+        - dependency-name: marked
+         dependency-version: 17.0.3
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+### Features
+
+- **downloader-hub**: 新增混合下载器管理中心 ([#131](https://github.com/sunerpy/pt-tools/pull/131))
+
+* feat(ui): 新增混合下载器 Web UI 页面
+
+      包含侧栏统计、任务列表、虚拟滚动、详情面板、右键菜单、列管理等功能
+
+      * feat(downloader): 新增下载器停止状态支持
+
+      * refactor(internal): 提取磁盘预算计算为独立模块
+
+      * feat(api): 新增混合下载器种子列表与详情接口
+
+      * build(deps): 升级 Go 至 1.26 并更新依赖
+
+      * feat(ui): 注册下载器中心路由并优化前端沉浸模式
+
+      - server.go: 注册 Downloader Hub 全部 API 路由
+
+      - App.vue: 统一引号风格为双引号
+
+      - api/index.ts: 拆分长行提升可读性
+
+      - app-layout.css: 修复多余 box-shadow 语法错误，完善沉浸模式全屏布局
+
+      Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
+
 ## [0.17.0] - 2026-02-21
 
 ### Features
