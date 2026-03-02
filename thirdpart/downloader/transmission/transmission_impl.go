@@ -596,16 +596,21 @@ func (t *TransmissionClient) GetClientStatus() (downloader.ClientStatus, error) 
 			UploadedBytes   int64 `json:"uploadedBytes"`
 			DownloadedBytes int64 `json:"downloadedBytes"`
 		} `json:"cumulative-stats"`
+		CurrentStats struct {
+			UploadedBytes   int64 `json:"uploadedBytes"`
+			DownloadedBytes int64 `json:"downloadedBytes"`
+		} `json:"current-stats"`
 	}
 	if err := json.Unmarshal(resp.Arguments, &stats); err != nil {
 		return downloader.ClientStatus{}, fmt.Errorf("failed to parse session stats: %w", err)
 	}
-
 	return downloader.ClientStatus{
-		UpSpeed: stats.UploadSpeed,
-		DlSpeed: stats.DownloadSpeed,
-		UpData:  stats.CumulativeStats.UploadedBytes,
-		DlData:  stats.CumulativeStats.DownloadedBytes,
+		UpSpeed:       stats.UploadSpeed,
+		DlSpeed:       stats.DownloadSpeed,
+		UpData:        stats.CumulativeStats.UploadedBytes,
+		DlData:        stats.CumulativeStats.DownloadedBytes,
+		SessionUpData: stats.CurrentStats.UploadedBytes,
+		SessionDlData: stats.CurrentStats.DownloadedBytes,
 	}, nil
 }
 
@@ -747,7 +752,7 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 func (t *TransmissionClient) mapTransmissionState(status int) downloader.TorrentState {
 	switch status {
 	case 0:
-		return downloader.TorrentPaused
+		return downloader.TorrentStopped
 	case 1, 2:
 		return downloader.TorrentChecking
 	case 3:

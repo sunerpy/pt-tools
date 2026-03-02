@@ -714,6 +714,12 @@ func (q *QbitClient) GetClientStatus() (downloader.ClientStatus, error) {
 	if dlData, ok := serverState["alltime_dl"].(float64); ok { //nolint:misspell // qBittorrent API field name
 		status.DlData = int64(dlData)
 	}
+	if sessionUp, ok := serverState["up_info_data"].(float64); ok {
+		status.SessionUpData = int64(sessionUp)
+	}
+	if sessionDl, ok := serverState["dl_info_data"].(float64); ok {
+		status.SessionDlData = int64(sessionDl)
+	}
 
 	return status, nil
 }
@@ -924,6 +930,8 @@ func (q *QbitClient) mapQbitState(state string) downloader.TorrentState {
 		return downloader.TorrentSeeding
 	case "pausedDL", "pausedUP":
 		return downloader.TorrentPaused
+	case "stoppedDL", "stoppedUP":
+		return downloader.TorrentStopped
 	case "queuedDL", "queuedUP":
 		return downloader.TorrentQueued
 	case "checkingDL", "checkingUP", "checkingResumeData":
