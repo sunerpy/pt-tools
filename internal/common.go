@@ -487,7 +487,9 @@ func downloadWorkerUnified(
 	siteID := string(siteName)
 	var siteHR bool
 	var siteHRSeedTimeH int
+	var siteDef *v2.SiteDefinition
 	if def := v2.GetDefinitionRegistry().GetOrDefault(siteID); def != nil {
+		siteDef = def
 		siteHR = def.HREnabled
 		siteHRSeedTimeH = def.HRSeedTimeHours
 	}
@@ -608,7 +610,7 @@ func downloadWorkerUnified(
 					DownloadSource: downloadSource,
 					TorrentSize:    detail.SizeBytes,
 					HasHR:          detail.HasHR || siteHR,
-					HRSeedTimeH:    siteHRSeedTimeH,
+					HRSeedTimeH:    calcHRSeedTimeForTorrent(siteDef, siteHRSeedTimeH, detail.SizeBytes),
 				}
 				if matchedRule != nil {
 					torrent.FilterRuleID = &matchedRule.ID
@@ -1239,4 +1241,14 @@ func downloadWorker[T models.ResType](
 			}
 		}
 	}
+}
+
+// calcHRSeedTimeForTorrent returns the per-torrent HR seed time (hours).
+// If the site definition has size-tiered rules (HRSeedTimeRules), it calculates
+// based on the torrent size; otherwise falls back to the flat site-wide value.
+func calcHRSeedTimeForTorrent(def *v2.SiteDefinition, fallbackH int, sizeBytes int64) int {
+	if def != nil && len(def.HRSeedTimeRules) > 0 {
+		return def.CalcHRSeedTimeH(sizeBytes)
+	}
+	return fallbackH
 }

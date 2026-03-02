@@ -138,6 +138,11 @@ func (d *SiteDefinition) Validate() error {
 		d.validateUserInfo(addErr)
 	}
 
+	// === HRSeedTimeRules validation ===
+	if len(d.HRSeedTimeRules) > 0 {
+		d.validateHRSeedTimeRules(addErr)
+	}
+
 	// === LevelRequirements validation ===
 	if len(d.LevelRequirements) > 0 {
 		d.validateLevelRequirements(addErr)
@@ -298,6 +303,28 @@ func (d *SiteDefinition) validateLevelRequirements(addErr func(field, rule, deta
 	}
 }
 
+// validateHRSeedTimeRules checks HRSeedTimeRules for consistency
+func (d *SiteDefinition) validateHRSeedTimeRules(addErr func(field, rule, detail string)) {
+	if !d.HREnabled {
+		addErr("HRSeedTimeRules", "Consistency", "HRSeedTimeRules defined but HREnabled is false")
+	}
+	for i, r := range d.HRSeedTimeRules {
+		prefix := fmt.Sprintf("HRSeedTimeRules[%d]", i)
+		if r.SeedTimeH <= 0 {
+			addErr(prefix+".SeedTimeH", "InvalidValue", "must be > 0")
+		}
+		if r.MinSizeGB < 0 {
+			addErr(prefix+".MinSizeGB", "InvalidValue", "must be >= 0")
+		}
+		if r.MaxSizeGB < 0 {
+			addErr(prefix+".MaxSizeGB", "InvalidValue", "must be >= 0")
+		}
+		if r.MaxSizeGB > 0 && r.MaxSizeGB <= r.MinSizeGB {
+			addErr(prefix, "InvalidRange", fmt.Sprintf("MaxSizeGB (%.1f) must be > MinSizeGB (%.1f)", r.MaxSizeGB, r.MinSizeGB))
+		}
+	}
+}
+
 // validateURL checks that a URL is well-formed with http(s) scheme and host
 func validateURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
@@ -314,28 +341,35 @@ func validateURL(rawURL string) error {
 }
 
 type SiteDefinition struct {
-	ID                string                 `json:"id"`
-	Name              string                 `json:"name"`
-	Aka               []string               `json:"aka,omitempty"`
-	Description       string                 `json:"description,omitempty"`
-	Schema            Schema                 `json:"schema"`
-	URLs              []string               `json:"urls"`
-	LegacyURLs        []string               `json:"legacyUrls,omitempty"`
-	FaviconURL        string                 `json:"faviconUrl,omitempty"`
-	Unavailable       bool                   `json:"unavailable,omitempty"`
-	UnavailableReason string                 `json:"unavailableReason,omitempty"`
-	AuthMethod        AuthMethod             `json:"authMethod,omitempty"`
-	RateLimit         float64                `json:"rateLimit,omitempty"`
-	RateBurst         int                    `json:"rateBurst,omitempty"`
-	RateWindow        time.Duration          `json:"-"`
-	RateWindowLimit   int                    `json:"rateWindowLimit,omitempty"`
-	HREnabled         bool                   `json:"hrEnabled,omitempty"`
-	HRSeedTimeHours   int                    `json:"hrSeedTimeHours,omitempty"`
-	TimezoneOffset    string                 `json:"timezoneOffset,omitempty"`
-	UserInfo          *UserInfoConfig        `json:"userInfo,omitempty"`
-	LevelRequirements []SiteLevelRequirement `json:"levelRequirements,omitempty"`
-	Selectors         *SiteSelectors         `json:"selectors,omitempty"`
-	DetailParser      *DetailParserConfig    `json:"detailParser,omitempty"`
+	ID                string           `json:"id"`
+	Name              string           `json:"name"`
+	Aka               []string         `json:"aka,omitempty"`
+	Description       string           `json:"description,omitempty"`
+	Schema            Schema           `json:"schema"`
+	URLs              []string         `json:"urls"`
+	LegacyURLs        []string         `json:"legacyUrls,omitempty"`
+	FaviconURL        string           `json:"faviconUrl,omitempty"`
+	Unavailable       bool             `json:"unavailable,omitempty"`
+	UnavailableReason string           `json:"unavailableReason,omitempty"`
+	AuthMethod        AuthMethod       `json:"authMethod,omitempty"`
+	RateLimit         float64          `json:"rateLimit,omitempty"`
+	RateBurst         int              `json:"rateBurst,omitempty"`
+	RateWindow        time.Duration    `json:"-"`
+	RateWindowLimit   int              `json:"rateWindowLimit,omitempty"`
+	HREnabled         bool             `json:"hrEnabled,omitempty"`
+	HRSeedTimeHours   int              `json:"hrSeedTimeHours,omitempty"`
+	HRSeedTimeRules   []HRSeedTimeRule `json:"hrSeedTimeRules,omitempty"`
+
+	// HRCalcSeedTime is an optional custom function that calculates the required
+	// HR seed time (in hours) for a torrent based on its size in bytes.
+	// This allows each site to implement its own HR rule logic.
+	// If nil, CalcHRSeedTimeH() falls back to HRSeedTimeRules, then HRSeedTimeHours.
+	HRCalcSeedTime    func(sizeBytes int64) int `json:"-"`
+	TimezoneOffset    string                    `json:"timezoneOffset,omitempty"`
+	UserInfo          *UserInfoConfig           `json:"userInfo,omitempty"`
+	LevelRequirements []SiteLevelRequirement    `json:"levelRequirements,omitempty"`
+	Selectors         *SiteSelectors            `json:"selectors,omitempty"`
+	DetailParser      *DetailParserConfig       `json:"detailParser,omitempty"`
 
 	// CreateDriver is an optional custom driver factory for this site.
 	// If nil, the driver is created based on Schema field.
@@ -444,5 +478,68 @@ func DefaultDetailParserConfig() *DetailParserConfig {
 		EndTimeSelector:  "h1 span[title]",
 		SizeSelector:     "td.rowhead:contains('基本信息')",
 		SizeRegex:        `大小：[^\d]*([\d.]+)\s*(GB|MB|KB|TB)`,
+	}
+}
+
+// HRSeedTimeRule defines a size-tiered HR seed time requirement.
+// When a torrent's size falls within [MinSizeGB, MaxSizeGB), the required seed time is SeedTimeH hours.
+type HRSeedTimeRule struct {
+	// MinSizeGB is the lower bound of the size range (inclusive), in GiB
+	MinSizeGB float64 `json:"minSizeGB"`
+	// MaxSizeGB is the upper bound of the size range (exclusive, 0 = unlimited), in GiB
+	MaxSizeGB float64 `json:"maxSizeGB,omitempty"`
+	// SeedTimeH is the required seed time in hours for this size tier
+	SeedTimeH int `json:"seedTimeH"`
+}
+
+// CalcHRSeedTimeH calculates the required HR seed time (hours) for a torrent.
+// Priority chain:
+//  1. HRCalcSeedTime — custom function (site-specific logic, e.g., ratio-based, tier-based)
+//  2. HRSeedTimeRules — built-in size-tiered rules
+//  3. HRSeedTimeHours — flat site-wide fallback
+func (d *SiteDefinition) CalcHRSeedTimeH(sizeBytes int64) int {
+	if d.HRCalcSeedTime != nil {
+		return d.HRCalcSeedTime(sizeBytes)
+	}
+	if len(d.HRSeedTimeRules) > 0 && sizeBytes > 0 {
+		sizeGiB := float64(sizeBytes) / (1024 * 1024 * 1024)
+		for _, rule := range d.HRSeedTimeRules {
+			if sizeGiB >= rule.MinSizeGB && (rule.MaxSizeGB == 0 || sizeGiB < rule.MaxSizeGB) {
+				return rule.SeedTimeH
+			}
+		}
+	}
+	return d.HRSeedTimeHours
+}
+
+// NewSizeTieredHRCalc creates an HRCalcSeedTime function from size-tiered rules.
+// windowH is added to each tier's base seedtime (e.g., 168h for a 7-day grace window).
+// This is a convenience factory for the common "seedtime by torrent size" pattern.
+func NewSizeTieredHRCalc(rules []HRSeedTimeRule, windowH int) func(sizeBytes int64) int {
+	return func(sizeBytes int64) int {
+		if sizeBytes <= 0 {
+			// Unknown size: return the maximum possible seedtime as safe fallback
+			var maxH int
+			for _, r := range rules {
+				if r.SeedTimeH+windowH > maxH {
+					maxH = r.SeedTimeH + windowH
+				}
+			}
+			return maxH
+		}
+		sizeGiB := float64(sizeBytes) / (1024 * 1024 * 1024)
+		for _, rule := range rules {
+			if sizeGiB >= rule.MinSizeGB && (rule.MaxSizeGB == 0 || sizeGiB < rule.MaxSizeGB) {
+				return rule.SeedTimeH + windowH
+			}
+		}
+		// No rule matched: return max as fallback
+		var maxH int
+		for _, r := range rules {
+			if r.SeedTimeH+windowH > maxH {
+				maxH = r.SeedTimeH + windowH
+			}
+		}
+		return maxH
 	}
 }
