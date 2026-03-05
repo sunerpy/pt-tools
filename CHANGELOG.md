@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-03-05
+
+### Bug Fixes
+
+- **extension**: 同步新增站点到浏览器扩展 KNOWN_SITES
+
+### Features
+
+- **site**: 增加多个站点定义并优化现有站点数据抓取
+- 新增 BTSchool、52PT、HDFans、垃圾堆、1PTBar、SoulVoice 六个站点定义及 fixture 测试 - 优化 AGSVPT 和 XingYunGe 上传量/下载量/分享率抓取，改用 regex 从合并单元格提取 - 放宽站点 ID 格式限制，允许数字开头以支持 52pt、1ptba 等站点 - 新增 real HTML 验证测试框架用于真实页面选择器校验
+
 ## [0.19.2] - 2026-03-05
 
 ### Bug Fixes
