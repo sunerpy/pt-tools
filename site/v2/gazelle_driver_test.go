@@ -296,6 +296,70 @@ func TestGazelleDriver_PrepareDownload(t *testing.T) {
 	assert.Equal(t, "12345", req.Params.Get("id"))
 }
 
+func TestGazelleDriver_GetTorrentDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "torrent", r.URL.Query().Get("action"))
+		assert.Equal(t, "12345", r.URL.Query().Get("id"))
+
+		resp := GazelleResponse{
+			Status: "success",
+			Response: json.RawMessage(`{
+				"group": {"name": "Test Album", "artist": "Test Artist"},
+				"torrent": {
+					"torrentId": 12345,
+					"format": "FLAC",
+					"encoding": "Lossless",
+					"size": 524288000,
+					"seeders": 20,
+					"leechers": 3,
+					"snatches": 66,
+					"isFreeleech": true,
+					"time": "2024-01-15 10:30:00"
+				}
+			}`),
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	driver := NewGazelleDriver(GazelleDriverConfig{BaseURL: server.URL, APIKey: "key"})
+
+	item, err := driver.GetTorrentDetail(context.Background(), "", "https://mooko.org/torrents.php?id=12345", "")
+	require.NoError(t, err)
+	require.NotNil(t, item)
+
+	assert.Equal(t, "12345", item.ID)
+	assert.Equal(t, "Test Artist - Test Album [FLAC Lossless]", item.Title)
+	assert.Equal(t, int64(524288000), item.SizeBytes)
+	assert.Equal(t, 20, item.Seeders)
+	assert.Equal(t, 3, item.Leechers)
+	assert.Equal(t, 66, item.Snatched)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.Equal(t, server.URL, item.SourceSite)
+	assert.NotZero(t, item.UploadedAt)
+}
+
+func TestExtractGazelleTorrentID(t *testing.T) {
+	tests := []struct {
+		name string
+		guid string
+		link string
+		want string
+	}{
+		{name: "prefer link id query", guid: "", link: "https://mooko.org/torrents.php?id=12345", want: "12345"},
+		{name: "guid as url", guid: "https://mooko.org/torrents.php?torrentid=23456", link: "", want: "23456"},
+		{name: "guid numeric", guid: "34567", link: "", want: "34567"},
+		{name: "path numeric", guid: "", link: "https://mooko.org/torrent/45678", want: "45678"},
+		{name: "invalid", guid: "abc", link: "https://mooko.org/torrents.php?id=abc", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, extractGazelleTorrentID(tt.guid, tt.link))
+		})
+	}
+}
+
 func TestParseGazelleDiscount(t *testing.T) {
 	tests := []struct {
 		name           string
