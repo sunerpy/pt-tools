@@ -4,18 +4,19 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
-var XingYunGeDefinition = &v2.SiteDefinition{
-	ID:             "xingyunge",
-	Name:           "XingYunGe",
-	Aka:            []string{"星陨阁"},
-	Description:    "三十年河东，三十年河西！莫欺少年穷！",
-	Schema:         v2.SchemaNexusPHP,
-	URLs:           []string{"https://pt.xingyungept.org/"},
-	LegacyURLs:     []string{"https://xingyunge.top/"},
-	FaviconURL:     "https://pt.xingyungept.org/favicon.ico",
-	TimezoneOffset: "+0800",
-	RateLimit:      0.5,
-	RateBurst:      2,
+var HDFansDefinition = &v2.SiteDefinition{
+	ID:              "hdfans",
+	Name:            "HDFans",
+	Aka:             []string{"红豆饭"},
+	Description:     "与志同道合之人前行 分享更多值得珍藏的资源",
+	Schema:          v2.SchemaNexusPHP,
+	URLs:            []string{"https://hdfans.org/"},
+	FaviconURL:      "https://hdfans.org/favicon.ico",
+	TimezoneOffset:  "+0800",
+	RateLimit:       0.5,
+	RateBurst:       2,
+	HREnabled:       true,
+	HRSeedTimeHours: 72,
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,
@@ -25,7 +26,7 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 					URL:          "/index.php",
 					ResponseType: "document",
 				},
-				Fields: []string{"id", "name", "uploaded", "downloaded", "ratio", "seeding", "leeching", "bonusIndex"},
+				Fields: []string{"id", "name", "uploaded", "downloaded", "ratio", "seeding", "leeching", "bonus"},
 			},
 			{
 				RequestConfig: v2.RequestConfig{
@@ -33,10 +34,7 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 					ResponseType: "document",
 				},
 				Assertion: map[string]string{"id": "params.id"},
-				Fields: []string{
-					"name", "uploaded", "downloaded", "ratio", "levelName",
-					"bonus", "joinTime", "messageCount",
-				},
+				Fields:    []string{"name", "uploaded", "downloaded", "ratio", "levelName", "bonus", "joinTime", "messageCount"},
 			},
 			{
 				RequestConfig: v2.RequestConfig{
@@ -67,10 +65,10 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 			"uploaded": {
 				Selector: []string{
 					"#info_block",
-					"td.rowhead:contains('传输') + td",
 					"td.rowhead:contains('上传量') + td",
 					"td.rowhead:contains('上傳量') + td",
 					"td.rowhead:contains('Uploaded') + td",
+					"td.rowhead:contains('传输') + td",
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
@@ -81,10 +79,10 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 			"downloaded": {
 				Selector: []string{
 					"#info_block",
-					"td.rowhead:contains('传输') + td",
 					"td.rowhead:contains('下载量') + td",
 					"td.rowhead:contains('下載量') + td",
 					"td.rowhead:contains('Downloaded') + td",
+					"td.rowhead:contains('传输') + td",
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
@@ -95,15 +93,15 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 			"ratio": {
 				Selector: []string{
 					"#info_block",
-					"td.rowhead:contains('传输') + td",
 					"td.rowhead:contains('分享率') + td font",
 					"td.rowhead:contains('分享率') + td",
 					"td.rowhead:contains('Ratio') + td font",
 					"td.rowhead:contains('Ratio') + td",
+					"td.rowhead:contains('传输') + td",
 				},
 				Attr: "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`(?:分享率|Ratio)[^0-9]*([\d.,]+)`}},
+					{Name: "regex", Args: []any{`(?:分享率|Ratio|做种/下载时间比率)[^\d∞]*([\d.,]+|∞|Inf)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -116,21 +114,18 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 				},
 				Attr: "title",
 			},
-			"bonusIndex": {
-				Selector: []string{"#info_block"},
-				Attr:     "html",
-				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`星[焰焱]\s*</font>\s*\[<a[^>]*>使用</a>\][：:\s]*([\d.,]+)`}},
-					{Name: "parseNumber"},
-				},
-			},
 			"bonus": {
 				Selector: []string{
 					"td.rowhead:contains('魔力值') + td",
-					"td.rowhead:contains('星焱') + td",
+					"td.rowhead:contains('魔力') + td",
 					"td.rowhead:contains('Bonus') + td",
+					"#info_block",
 				},
-				Filters: []v2.Filter{{Name: "parseNumber"}},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:魔力值|Bonus)[^\d]*([\d.,]+)`}},
+					{Name: "parseNumber"},
+				},
 			},
 			"bonusPerHour": {
 				Selector: []string{
@@ -158,7 +153,7 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`class="arrowup"[^>]*/>(\d+)`}},
+					{Name: "regex", Args: []any{`class="arrowup"[^>]*/>\s*(?:做种数:)?(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -166,7 +161,7 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block"},
 				Attr:     "html",
 				Filters: []v2.Filter{
-					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>(\d+)`}},
+					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(?:下载数:)?(\d+)`}},
 					{Name: "parseNumber"},
 				},
 			},
@@ -197,28 +192,29 @@ var XingYunGeDefinition = &v2.SiteDefinition{
 			"halfdown":      v2.DiscountPercent50,
 			"twouphalfdown": v2.Discount2x50,
 		},
-		HRKeywords:       []string{"hitandrun", "hit_run.gif", "Hit and Run", "Hit & Run"},
+		HRKeywords:       []string{"hitandrun", "hit_run.gif", "Hit and Run", "Hit & Run", "H&R"},
 		TitleSelector:    "h1",
 		DiscountSelector: "h1 font.free, h1 font[class]",
 		EndTimeSelector:  "h1 span[title]",
 		SizeSelector:     "td.rowfollow:contains('大小')",
 		SizeRegex:        `大小[：:]\s*([\d.]+)\s*(GB|MB|KB|TB)`,
 	},
-	LevelRequirements: xingYunGeLevelRequirements,
+	LevelRequirements: hdfansLevelRequirements,
 }
 
-var xingYunGeLevelRequirements = []v2.SiteLevelRequirement{
-	{ID: 1, Name: "User", NameAka: []string{"用户"}, Privilege: "新用户的默认级别"},
-	{ID: 2, Name: "Power User", NameAka: []string{"大斗师"}, Interval: "P4W", Downloaded: "50GB", Ratio: 1.05, Bonus: 40000},
-	{ID: 3, Name: "Elite User", NameAka: []string{"斗灵"}, Interval: "P8W", Downloaded: "120GB", Ratio: 1.55, Bonus: 80000},
-	{ID: 4, Name: "Crazy User", NameAka: []string{"斗王"}, Interval: "P15W", Downloaded: "300GB", Ratio: 2.05, Bonus: 150000},
-	{ID: 5, Name: "Insane User", NameAka: []string{"斗皇"}, Interval: "P25W", Downloaded: "500GB", Ratio: 2.55, Bonus: 250000},
-	{ID: 6, Name: "Veteran User", NameAka: []string{"斗宗"}, Interval: "P40W", Downloaded: "750GB", Ratio: 3.05, Bonus: 400000},
-	{ID: 7, Name: "Extreme User", NameAka: []string{"斗尊"}, Interval: "P60W", Downloaded: "1TB", Ratio: 3.55, Bonus: 600000},
-	{ID: 8, Name: "Ultimate User", NameAka: []string{"斗圣"}, Interval: "P80W", Downloaded: "1.5TB", Ratio: 4.05, Bonus: 800000},
-	{ID: 9, Name: "Nexus Master", NameAka: []string{"斗帝"}, Interval: "P100W", Downloaded: "3TB", Ratio: 4.55, Bonus: 1000000},
+var hdfansLevelRequirements = []v2.SiteLevelRequirement{
+	{ID: 1, Name: "Peasant", NameAka: []string{"小卒"}, Privilege: "降级用户"},
+	{ID: 2, Name: "User", NameAka: []string{"用户"}, Privilege: "新用户的默认级别"},
+	{ID: 3, Name: "Power User", NameAka: []string{"高级用户"}, Interval: "P4W", Downloaded: "50GB", Ratio: 1.0, SeedingBonus: 50000},
+	{ID: 4, Name: "Elite User", NameAka: []string{"精英用户"}, Interval: "P8W", Downloaded: "120GB", Ratio: 1.5, SeedingBonus: 100000},
+	{ID: 5, Name: "Crazy User", NameAka: []string{"疯狂用户"}, Interval: "P15W", Downloaded: "256GB", Ratio: 2.0, SeedingBonus: 250000},
+	{ID: 6, Name: "Insane User", NameAka: []string{"变态用户"}, Interval: "P30W", Downloaded: "512GB", Ratio: 2.5, SeedingBonus: 400000},
+	{ID: 7, Name: "Veteran User", NameAka: []string{"资深用户"}, Interval: "P40W", Downloaded: "1TB", Ratio: 3.0, SeedingBonus: 600000},
+	{ID: 8, Name: "Extreme User", NameAka: []string{"极限用户"}, Interval: "P50W", Downloaded: "2TB", Ratio: 3.5, SeedingBonus: 800000},
+	{ID: 9, Name: "Ultimate User", NameAka: []string{"终极用户"}, Interval: "P60W", Downloaded: "4TB", Ratio: 4.0, SeedingBonus: 1000000},
+	{ID: 10, Name: "Nexus Master", NameAka: []string{"大师"}, Interval: "P100W", Downloaded: "10TB", Ratio: 5.0, SeedingBonus: 1688888},
 }
 
 func init() {
-	v2.RegisterSiteDefinition(XingYunGeDefinition)
+	v2.RegisterSiteDefinition(HDFansDefinition)
 }

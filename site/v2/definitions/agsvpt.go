@@ -5,17 +5,18 @@ import (
 )
 
 var AGSVPTDefinition = &v2.SiteDefinition{
-	ID:             "agsvpt",
-	Name:           "AGSVPT",
-	Aka:            []string{"末日种子库", "AGSV"},
-	Description:    "Arctic Global Seed Vault",
-	Schema:         v2.SchemaNexusPHP,
-	URLs:           []string{"https://www.agsvpt.com/"},
-	FaviconURL:     "https://www.agsvpt.com/favicon.ico",
-	TimezoneOffset: "+0800",
-	RateLimit:      0.5,
-	RateBurst:      2,
-	HREnabled:      true,
+	ID:              "agsvpt",
+	Name:            "AGSVPT",
+	Aka:             []string{"末日种子库", "AGSV"},
+	Description:     "Arctic Global Seed Vault",
+	Schema:          v2.SchemaNexusPHP,
+	URLs:            []string{"https://www.agsvpt.com/"},
+	FaviconURL:      "https://www.agsvpt.com/favicon.ico",
+	TimezoneOffset:  "+0800",
+	RateLimit:       0.5,
+	RateBurst:       2,
+	HREnabled:       true,
+	HRSeedTimeHours: 72,
 	UserInfo: &v2.UserInfoConfig{
 		PickLast:     []string{"id"},
 		RequestDelay: 500,
@@ -66,29 +67,49 @@ var AGSVPTDefinition = &v2.SiteDefinition{
 			},
 			"uploaded": {
 				Selector: []string{
+					"td.rowhead:contains('传输') + td",
+					"td.rowhead:contains('傳輸') + td",
+					"td.rowhead:contains('Transfer') + td",
 					"td.rowhead:contains('上传量') + td",
 					"td.rowhead:contains('上傳量') + td",
 					"td.rowhead:contains('Uploaded') + td",
 				},
-				Filters: []v2.Filter{{Name: "parseSize"}},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`<strong>上[传傳]量</strong>[：:\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "parseSize"},
+				},
 			},
 			"downloaded": {
 				Selector: []string{
+					"td.rowhead:contains('传输') + td",
+					"td.rowhead:contains('傳輸') + td",
+					"td.rowhead:contains('Transfer') + td",
 					"td.rowhead:contains('下载量') + td",
 					"td.rowhead:contains('下載量') + td",
 					"td.rowhead:contains('Downloaded') + td",
 				},
-				Filters: []v2.Filter{{Name: "parseSize"}},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`<strong>下[载載]量</strong>[：:\s]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "parseSize"},
+				},
 			},
 			"ratio": {
 				Selector: []string{
+					"td.rowhead:contains('传输') + td",
+					"td.rowhead:contains('傳輸') + td",
+					"td.rowhead:contains('Transfer') + td",
 					"td.rowhead:contains('分享率') + td font",
-					"td.rowhead:contains('分享率') + td > font",
 					"td.rowhead:contains('分享率') + td",
 					"td.rowhead:contains('Ratio') + td font",
 					"td.rowhead:contains('Ratio') + td",
 				},
-				Filters: []v2.Filter{{Name: "parseNumber"}},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:分享率|Ratio)</strong>[：:\s]*(?:<font[^>]*>)?([\d.,]+|∞|Inf)`}},
+					{Name: "parseNumber"},
+				},
 			},
 			"levelName": {
 				Selector: []string{

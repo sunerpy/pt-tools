@@ -71,16 +71,11 @@ const agsvptIndexFixture = `<html><body>
 const agsvptUserdetailsFixture = `<html><body>
 <table>
   <tr>
-    <td class="rowhead">上传量</td>
-    <td>17.020 TB</td>
-  </tr>
-  <tr>
-    <td class="rowhead">下载量</td>
-    <td>1.499 TB</td>
-  </tr>
-  <tr>
-    <td class="rowhead">分享率</td>
-    <td><font color="">11.356</font></td>
+    <td class="rowhead">传输</td>
+    <td><table border="0" cellspacing="0" cellpadding="0">
+      <tr><td class="embedded"><strong>分享率</strong>:  <font color="">11.356</font></td></tr>
+      <tr><td class="embedded"><strong>上传量</strong>:  17.020 TB</td><td class="embedded">&nbsp;&nbsp;<strong>下载量</strong>:  1.499 TB</td></tr>
+    </table></td>
   </tr>
   <tr>
     <td class="rowhead">等级</td>
