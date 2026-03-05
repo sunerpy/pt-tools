@@ -340,6 +340,187 @@ func (d *GazelleDriver) ParseDownload(res GazelleResponse) ([]byte, error) {
 	return res.RawBody, nil
 }
 
+type gazelleTorrentDetailResponse struct {
+	Group struct {
+		Name      string `json:"name"`
+		GroupName string `json:"groupName"`
+		Artist    string `json:"artist"`
+	} `json:"group"`
+	Torrent  GazelleTorrent   `json:"torrent"`
+	Torrents []GazelleTorrent `json:"torrents"`
+
+	ID             int    `json:"id"`
+	GroupName      string `json:"groupName"`
+	Artist         string `json:"artist"`
+	Format         string `json:"format"`
+	Encoding       string `json:"encoding"`
+	Size           int64  `json:"size"`
+	Seeders        int    `json:"seeders"`
+	Leechers       int    `json:"leechers"`
+	Snatches       int    `json:"snatches"`
+	IsFreeleech    bool   `json:"isFreeleech"`
+	IsNeutralLeech bool   `json:"isNeutralLeech"`
+	IsPersonalFL   bool   `json:"isPersonalFreeleech"`
+	Time           string `json:"time"`
+}
+
+func (d *GazelleDriver) GetTorrentDetail(ctx context.Context, guid, link, title string) (*TorrentItem, error) {
+	torrentID := extractGazelleTorrentID(guid, link)
+	if torrentID == "" {
+		return nil, fmt.Errorf("unable to determine torrent ID")
+	}
+
+	req := GazelleRequest{
+		Action: "torrent",
+		Params: url.Values{"id": []string{torrentID}},
+	}
+
+	res, err := d.Execute(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("execute detail request: %w", err)
+	}
+
+	var detail gazelleTorrentDetailResponse
+	if err := json.Unmarshal(res.Response, &detail); err != nil {
+		return nil, fmt.Errorf("parse torrent detail: %w", err)
+	}
+
+	tid, _ := strconv.Atoi(torrentID)
+	torrent := selectGazelleDetailTorrent(detail, tid)
+	groupName, artist := selectGazelleDetailGroup(detail)
+
+	detailTitle := buildGazelleDetailTitle(groupName, artist, torrent)
+	if detailTitle == "" {
+		detailTitle = title
+	}
+
+	item := &TorrentItem{
+		ID:            torrentID,
+		Title:         detailTitle,
+		SizeBytes:     torrent.Size,
+		Seeders:       torrent.Seeders,
+		Leechers:      torrent.Leechers,
+		Snatched:      torrent.Snatches,
+		SourceSite:    d.BaseURL,
+		DiscountLevel: parseGazelleDiscount(torrent.IsFreeleech, torrent.IsNeutralLeech, torrent.IsPersonalFL),
+	}
+
+	if torrent.Time != "" {
+		if uploadTime, err := time.Parse("2006-01-02 15:04:05", torrent.Time); err == nil {
+			item.UploadedAt = uploadTime.Unix()
+		}
+	}
+
+	return item, nil
+}
+
+func extractGazelleTorrentID(guid, link string) string {
+	if link != "" {
+		if id := extractGazelleTorrentIDFromURL(link); id != "" {
+			return id
+		}
+	}
+	if id := extractGazelleTorrentIDFromURL(guid); id != "" {
+		return id
+	}
+	if _, err := strconv.Atoi(guid); err == nil {
+		return guid
+	}
+	return ""
+}
+
+func extractGazelleTorrentIDFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+
+	for _, key := range []string{"id", "torrentid", "torrentId"} {
+		if id := u.Query().Get(key); id != "" {
+			if _, err := strconv.Atoi(id); err == nil {
+				return id
+			}
+		}
+	}
+
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if _, err := strconv.Atoi(parts[i]); err == nil {
+			return parts[i]
+		}
+	}
+
+	return ""
+}
+
+func selectGazelleDetailTorrent(detail gazelleTorrentDetailResponse, expectedID int) GazelleTorrent {
+	if detail.Torrent.TorrentID != 0 {
+		return detail.Torrent
+	}
+
+	if len(detail.Torrents) > 0 {
+		if expectedID > 0 {
+			for _, t := range detail.Torrents {
+				if t.TorrentID == expectedID {
+					return t
+				}
+			}
+		}
+		return detail.Torrents[0]
+	}
+
+	return GazelleTorrent{
+		TorrentID:      detail.ID,
+		Format:         detail.Format,
+		Encoding:       detail.Encoding,
+		Size:           detail.Size,
+		Seeders:        detail.Seeders,
+		Leechers:       detail.Leechers,
+		Snatches:       detail.Snatches,
+		IsFreeleech:    detail.IsFreeleech,
+		IsNeutralLeech: detail.IsNeutralLeech,
+		IsPersonalFL:   detail.IsPersonalFL,
+		Time:           detail.Time,
+	}
+}
+
+func selectGazelleDetailGroup(detail gazelleTorrentDetailResponse) (string, string) {
+	groupName := detail.GroupName
+	artist := detail.Artist
+
+	if groupName == "" {
+		groupName = detail.Group.Name
+	}
+	if groupName == "" {
+		groupName = detail.Group.GroupName
+	}
+	if artist == "" {
+		artist = detail.Group.Artist
+	}
+
+	return groupName, artist
+}
+
+func buildGazelleDetailTitle(groupName, artist string, torrent GazelleTorrent) string {
+	title := groupName
+	if artist != "" && groupName != "" {
+		title = artist + " - " + groupName
+	}
+	if title == "" {
+		return ""
+	}
+
+	if torrent.Format != "" {
+		title += " [" + torrent.Format
+		if torrent.Encoding != "" {
+			title += " " + torrent.Encoding
+		}
+		title += "]"
+	}
+
+	return title
+}
+
 // parseGazelleDiscount parses Gazelle freeleech status to DiscountLevel
 func parseGazelleDiscount(isFreeleech, isNeutralLeech, isPersonalFL bool) DiscountLevel {
 	if isFreeleech || isPersonalFL {

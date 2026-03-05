@@ -1421,3 +1421,54 @@ func TestProcessTorrentsWithDownloaderByRSS_WithDownloadPath(t *testing.T) {
 	require.NotNil(t, ti2.IsPushed)
 	require.True(t, *ti2.IsPushed)
 }
+
+func TestShouldSkipExistingTorrent(t *testing.T) {
+	var nilPushed *bool
+	falsePushed := false
+	truePushed := true
+
+	tests := []struct {
+		name    string
+		torrent *models.TorrentInfo
+		want    bool
+	}{
+		{name: "nil torrent", torrent: nil, want: false},
+		{name: "skipped torrent", torrent: &models.TorrentInfo{IsSkipped: true}, want: true},
+		{name: "pushed true", torrent: &models.TorrentInfo{IsPushed: &truePushed}, want: true},
+		{name: "pushed false should retry", torrent: &models.TorrentInfo{IsPushed: &falsePushed}, want: false},
+		{name: "pushed nil", torrent: &models.TorrentInfo{IsPushed: nilPushed}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, shouldSkipExistingTorrent(tt.torrent))
+		})
+	}
+}
+
+func TestFilterTorrentFilesBySite(t *testing.T) {
+	files := []string{
+		"/app/.pt-tools/downloads/agsvpt-111.torrent",
+		"/app/.pt-tools/downloads/AGSvpt-222.torrent",
+		"/app/.pt-tools/downloads/mteam-333.torrent",
+		"/app/.pt-tools/downloads/xingyunge-444.torrent",
+		"/app/.pt-tools/downloads/random.torrent",
+	}
+
+	filtered := filterTorrentFilesBySite(files, models.SiteGroup("agsvpt"))
+	require.Len(t, filtered, 2)
+	require.Equal(t, "/app/.pt-tools/downloads/agsvpt-111.torrent", filtered[0])
+	require.Equal(t, "/app/.pt-tools/downloads/AGSvpt-222.torrent", filtered[1])
+}
+
+func TestFilterTorrentFilesBySite_FallbackAllWhenNoPrefixMatch(t *testing.T) {
+	files := []string{
+		"/app/.pt-tools/downloads/file-a.torrent",
+		"/app/.pt-tools/downloads/file-b.torrent",
+	}
+
+	filtered := filterTorrentFilesBySite(files, models.SiteGroup("agsvpt"))
+	require.Len(t, filtered, 2)
+	require.Equal(t, files[0], filtered[0])
+	require.Equal(t, files[1], filtered[1])
+}

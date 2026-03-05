@@ -151,6 +151,12 @@ func ProcessTorrentsWithDownloaderByRSS(
 		return fmt.Errorf("无法读取目录: %v", err)
 	}
 
+	filePaths = filterTorrentFilesBySite(filePaths, siteName)
+	if len(filePaths) == 0 {
+		sLogger().Infof("[种子推送完成] 站点=%s, 总数=0, 成功=0, 失败=0", siteName)
+		return nil
+	}
+
 	successCount := 0
 	failCount := 0
 	for i, file := range filePaths {
@@ -169,6 +175,21 @@ func ProcessTorrentsWithDownloaderByRSS(
 
 	sLogger().Infof("[种子推送完成] 站点=%s, 总数=%d, 成功=%d, 失败=%d", siteName, len(filePaths), successCount, failCount)
 	return nil
+}
+
+func filterTorrentFilesBySite(filePaths []string, siteName models.SiteGroup) []string {
+	prefix := strings.ToLower(string(siteName)) + "-"
+	filtered := make([]string, 0, len(filePaths))
+	for _, file := range filePaths {
+		if strings.HasPrefix(strings.ToLower(filepath.Base(file)), prefix) {
+			filtered = append(filtered, file)
+		}
+	}
+	if len(filtered) > 0 {
+		return filtered
+	}
+
+	return filePaths
 }
 
 func processSingleTorrentWithDownloader(
@@ -466,6 +487,18 @@ type rssTaskStats struct {
 	downloadFailed atomic.Int64
 }
 
+func shouldSkipExistingTorrent(torrent *models.TorrentInfo) bool {
+	if torrent == nil {
+		return false
+	}
+
+	if torrent.IsSkipped {
+		return true
+	}
+
+	return torrent.IsPushed != nil && *torrent.IsPushed
+}
+
 func downloadWorkerUnified(
 	ctx context.Context,
 	wg *sync.WaitGroup,
@@ -531,8 +564,7 @@ func downloadWorkerUnified(
 				sLogger().Errorf("从数据库获取种子: %s 详情失败, %v", title, err)
 				continue
 			}
-			// 如果种子已跳过或已推送，直接跳过
-			if torrent != nil && (torrent.IsSkipped || torrent.IsPushed != nil) {
+			if shouldSkipExistingTorrent(torrent) {
 				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
 				stats.skipped.Add(1)
 				continue
@@ -1080,8 +1112,7 @@ func downloadWorker[T models.ResType](
 				sLogger().Errorf("从数据库获取种子: %s 详情失败, %v", title, err)
 				continue
 			}
-			// 如果种子已跳过或已推送，直接跳过
-			if torrent != nil && (torrent.IsSkipped || torrent.IsPushed != nil) {
+			if shouldSkipExistingTorrent(torrent) {
 				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
 				continue
 			}
