@@ -161,7 +161,7 @@ func TestValidate_IDFormat(t *testing.T) {
 		{"site_v2", false},
 		{"a", false},
 		{"HDSKY", true},
-		{"123site", true},
+		{"123site", false},
 		{"-invalid", true},
 		{"has space", true},
 		{"has.dot", true},

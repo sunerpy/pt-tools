@@ -9,7 +9,7 @@ import (
 )
 
 // idPattern enforces lowercase alphanumeric IDs with hyphens/underscores
-var idPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // timezonePattern validates timezone offset format like "+0800" or "-0500"
 var timezonePattern = regexp.MustCompile(`^[+-]\d{4}$`)
@@ -74,7 +74,7 @@ func (d *SiteDefinition) Validate() error {
 			addErr("ID", "MaxLength", "must be ≤ 50 characters")
 		}
 		if !idPattern.MatchString(d.ID) {
-			addErr("ID", "Format", "must be lowercase alphanumeric with hyphens/underscores, starting with a letter (e.g., \"hdsky\", \"my-site\")")
+			addErr("ID", "Format", "must be lowercase alphanumeric with hyphens/underscores (e.g., \"hdsky\", \"1ptba\", \"my-site\")")
 		}
 	}
 

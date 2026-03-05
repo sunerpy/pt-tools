@@ -62,10 +62,12 @@ const xingyungeSearchFixture = `<html><body>
 
 const xingyungeIndexFixture = `<html><body>
 <div id="info_block">
-  <a href="userdetails.php?id=12345" class="User_Name">TestUser</a>
-  上传: <img class="arrowup" alt="up" />42
-  下载: <img class="arrowdown" alt="down" />3
-  <font class='color_bonus'>星焱 </font>[<a href="mybonus.php">使用</a>]: 150,356.9
+  欢迎回来, <a href="userdetails.php?id=12345" class="User_Name">TestUser</a>
+  <font class='color_bonus'>星焰 </font>[<a href="mybonus.php">使用</a>]: 150,356.9
+  <font class="color_ratio">分享率:</font> 59.839
+  <font class='color_uploaded'>上传量:</font> 13.040 TB
+  <font class='color_downloaded'> 下载量:</font> 221.96 GB
+  <font class='color_active'>当前活动:</font> <img class="arrowup" alt="Torrents seeding" title="当前做种" src="pic/trans.gif" />42  <img class="arrowdown" alt="Torrents leeching" title="当前下载" src="pic/trans.gif" />3
 </div>
 </body></html>`
 
@@ -223,6 +225,9 @@ func testXingYunGeUserInfo(t *testing.T) {
 			"seeding":    "42",
 			"leeching":   "3",
 			"bonusIndex": "150356.9",
+			"uploaded":   "14337631626199",
+			"downloaded": "238327735255",
+			"ratio":      "59.839",
 		}
 		for field, expected := range fields {
 			t.Run(field, func(t *testing.T) {
@@ -237,9 +242,6 @@ func testXingYunGeUserInfo(t *testing.T) {
 	t.Run("UserdetailsPage", func(t *testing.T) {
 		doc := FixtureDoc(t, "xingyunge_userdetails", xingyungeUserdetailsFixture)
 		exact := map[string]string{
-			"uploaded":     "18713687904747",
-			"downloaded":   "1648167930036",
-			"ratio":        "11.356",
 			"levelName":    "Extreme User",
 			"bonus":        "1.23456789e+06",
 			"joinTime":     "1579091400",
