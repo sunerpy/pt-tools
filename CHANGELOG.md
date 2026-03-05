@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2] - 2026-03-05
+
+### Bug Fixes
+
+- **site**: 修复新站点详情抓取与跨站点推送问题
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump @vue/tsconfig from 0.8.1 to 0.9.0 in /web/frontend ([#146](https://github.com/sunerpy/pt-tools/issues/146)) ([#146](https://github.com/sunerpy/pt-tools/pull/146))
+  Bumps [@vue/tsconfig](https://github.com/vuejs/tsconfig) from 0.8.1 to 0.9.0. - [Release notes](https://github.com/vuejs/tsconfig/releases) - [Commits](https://github.com/vuejs/tsconfig/compare/v0.8.1...v0.9.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vue/tsconfig"
+         dependency-version: 0.9.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxlint from 1.50.0 to 1.51.0 in /web/frontend ([#145](https://github.com/sunerpy/pt-tools/issues/145)) ([#145](https://github.com/sunerpy/pt-tools/pull/145))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.50.0 to 1.51.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.51.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.51.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump element-plus from 2.13.2 to 2.13.3 in /web/frontend ([#150](https://github.com/sunerpy/pt-tools/issues/150)) ([#150](https://github.com/sunerpy/pt-tools/pull/150))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.2 to 2.13.3. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.2...2.13.3)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.13.3
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.35.0 to 0.36.0 in /web/frontend ([#149](https://github.com/sunerpy/pt-tools/issues/149)) ([#149](https://github.com/sunerpy/pt-tools/pull/149))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.35.0 to 0.36.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.36.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.36.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump @types/node from 25.3.0 to 25.3.3 in /web/frontend ([#148](https://github.com/sunerpy/pt-tools/issues/148)) ([#148](https://github.com/sunerpy/pt-tools/pull/148))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.3.0 to 25.3.3. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.3.3
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Documentation
+
+- **extension**: Update install guide with Edge Add-ons store link
+- **extension**: Fix Edge Add-ons store URL with extension ID
+
 ## [0.19.1] - 2026-03-02
 
 ### Bug Fixes
