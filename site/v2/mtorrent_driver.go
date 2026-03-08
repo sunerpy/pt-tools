@@ -186,6 +186,12 @@ type MTorrentPromotionRule struct {
 	EndTime   string `json:"endTime,omitempty"`
 }
 
+// MallSingleFree represents a mall single free from M-Team API
+type MallSingleFree struct {
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+}
+
 // MTorrentTorrent represents a torrent in M-Team API response
 type MTorrentTorrent struct {
 	ID          string `json:"id"`
@@ -200,6 +206,7 @@ type MTorrentTorrent struct {
 		Discount        string                 `json:"discount"`
 		DiscountEndTime string                 `json:"discountEndTime,omitempty"`
 		PromotionRule   *MTorrentPromotionRule `json:"promotionRule,omitempty"`
+		MallSingleFree  *MallSingleFree        `json:"mallSingleFree,omitempty"`
 	} `json:"status"`
 	Category string `json:"category"`
 }
@@ -466,7 +473,7 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 
 	items := make([]TorrentItem, 0, len(searchData.Data))
 	for _, t := range searchData.Data {
-		discount, discountEndTime := parseMTorrentDiscountWithPromotion(t.Status.Discount, t.Status.DiscountEndTime, t.Status.PromotionRule)
+		discount, discountEndTime := parseMTorrentDiscountWithPromotionAndMallSingleFree(t.Status.Discount, t.Status.DiscountEndTime, t.Status.PromotionRule, t.Status.MallSingleFree)
 		item := TorrentItem{
 			ID:              t.ID,
 			Title:           t.Name,
@@ -685,11 +692,11 @@ func parseMTorrentDiscount(discount string) DiscountLevel {
 	}
 }
 
-func parseMTorrentDiscountWithPromotion(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule) (DiscountLevel, time.Time) {
-	return parseMTorrentDiscountWithPromotionAt(baseDiscount, baseEndTime, promotion, time.Now())
+func parseMTorrentDiscountWithPromotionAndMallSingleFree(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, mallSingleFree *MallSingleFree) (DiscountLevel, time.Time) {
+	return parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEndTime, promotion, mallSingleFree, time.Now())
 }
 
-func parseMTorrentDiscountWithPromotionAt(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, now time.Time) (DiscountLevel, time.Time) {
+func parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEndTime string, promotion *MTorrentPromotionRule, mallSingleFree *MallSingleFree, now time.Time) (DiscountLevel, time.Time) {
 	baseLevel := parseMTorrentDiscount(baseDiscount)
 	var baseEnd time.Time
 	if baseEndTime != "" {
@@ -714,6 +721,15 @@ func parseMTorrentDiscountWithPromotionAt(baseDiscount, baseEndTime string, prom
 			if promoLevel == baseLevel && promoEnd.After(baseEnd) {
 				return promoLevel, promoEnd
 			}
+		}
+	}
+
+	if mallSingleFree != nil && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
+		var singleFreeStart, singleFreeEnd time.Time
+		singleFreeStart, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.StartDate)
+		singleFreeEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.EndDate)
+		if singleFreeStart.IsZero() || !now.Before(singleFreeStart) && singleFreeEnd.IsZero() || now.Before(singleFreeEnd) {
+			return DiscountFree, singleFreeEnd
 		}
 	}
 
@@ -1017,7 +1033,7 @@ func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _, _ string
 		return nil, fmt.Errorf("parse torrent detail: %w", err)
 	}
 
-	discount, discountEndTime := parseMTorrentDiscountWithPromotion(detail.Status.Discount, detail.Status.DiscountEndTime, detail.Status.PromotionRule)
+	discount, discountEndTime := parseMTorrentDiscountWithPromotionAndMallSingleFree(detail.Status.Discount, detail.Status.DiscountEndTime, detail.Status.PromotionRule, detail.Status.MallSingleFree)
 	item := &TorrentItem{
 		ID:              detail.ID,
 		Title:           detail.Name,
