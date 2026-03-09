@@ -722,9 +722,7 @@ func parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEnd
 				return promoLevel, promoEnd
 			}
 		}
-	}
-
-	if mallSingleFree != nil && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
+	} else if mallSingleFree != nil && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
 		var singleFreeStart, singleFreeEnd time.Time
 		singleFreeStart, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.StartDate)
 		singleFreeEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.EndDate)
