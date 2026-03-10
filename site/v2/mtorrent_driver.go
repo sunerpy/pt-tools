@@ -726,7 +726,7 @@ func parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEnd
 		var singleFreeStart, singleFreeEnd time.Time
 		singleFreeStart, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.StartDate)
 		singleFreeEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.EndDate)
-		if singleFreeStart.IsZero() || !now.Before(singleFreeStart) && singleFreeEnd.IsZero() || now.Before(singleFreeEnd) {
+		if (singleFreeStart.IsZero() || !now.Before(singleFreeStart)) && (singleFreeEnd.IsZero() || now.Before(singleFreeEnd)) {
 			return DiscountFree, singleFreeEnd
 		}
 	}
