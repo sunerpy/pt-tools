@@ -356,12 +356,78 @@ func TestParseMTorrentDiscountWithPromotion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			level, endTime := parseMTorrentDiscountWithPromotionAt(tt.baseDiscount, tt.baseEndTime, tt.promotion, fixedNow)
+			level, endTime := parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(tt.baseDiscount, tt.baseEndTime, tt.promotion, nil, fixedNow)
 			assert.Equal(t, tt.wantLevel, level)
 			if tt.wantEndTimeAfter != "" {
 				checkTime, _ := ParseTimeInCST("2006-01-02 15:04:05", tt.wantEndTimeAfter)
 				assert.True(t, endTime.After(checkTime), "endTime %v should be after %v", endTime, checkTime)
 			}
+		})
+	}
+}
+
+func TestParseMTorrentDiscountWithMallSingleFree(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseDiscount string
+		baseEndTime  string
+		promotion    *MTorrentPromotionRule
+		mallSingle   *MallSingleFree
+		wantLevel    DiscountLevel
+		wantEndTime  string
+	}{
+		{
+			name:         "mall single free active without promotion",
+			baseDiscount: "PERCENT_50",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion:    nil,
+			mallSingle: &MallSingleFree{
+				StartDate: "2026-02-03 00:00:00",
+				EndDate:   "2026-02-05 23:59:59",
+			},
+			wantLevel:   DiscountFree,
+			wantEndTime: "2026-02-05 23:59:59",
+		},
+		{
+			name:         "mall single free inactive keeps base",
+			baseDiscount: "PERCENT_50",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion:    nil,
+			mallSingle: &MallSingleFree{
+				StartDate: "2026-02-06 00:00:00",
+				EndDate:   "2026-02-07 00:00:00",
+			},
+			wantLevel:   DiscountPercent50,
+			wantEndTime: "2026-02-05 19:57:34",
+		},
+		{
+			name:         "promotion takes precedence over mall single free",
+			baseDiscount: "PERCENT_50",
+			baseEndTime:  "2026-02-05 19:57:34",
+			promotion: &MTorrentPromotionRule{
+				Discount:  "FREE",
+				StartTime: "2026-02-03 00:00:00",
+				EndTime:   "2026-02-05 22:22:22",
+			},
+			mallSingle: &MallSingleFree{
+				StartDate: "2026-02-03 00:00:00",
+				EndDate:   "2026-02-05 23:59:59",
+			},
+			wantLevel:   DiscountFree,
+			wantEndTime: "2026-02-05 22:22:22",
+		},
+	}
+
+	fixedNow, _ := ParseTimeInCST("2006-01-02 15:04:05", "2026-02-04 12:00:00")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			level, endTime := parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(tt.baseDiscount, tt.baseEndTime, tt.promotion, tt.mallSingle, fixedNow)
+			assert.Equal(t, tt.wantLevel, level)
+
+			wantEnd, err := ParseTimeInCST("2006-01-02 15:04:05", tt.wantEndTime)
+			require.NoError(t, err)
+			assert.Equal(t, wantEnd, endTime)
 		})
 	}
 }
