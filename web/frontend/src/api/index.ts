@@ -114,6 +114,7 @@ export interface SiteConfig {
 }
 
 export interface TaskItem {
+  id: number;
   siteName: string;
   title: string;
   category: string;
@@ -147,6 +148,13 @@ export interface LogsResponse {
   truncated: boolean;
 }
 
+export interface DeleteTasksResponse {
+  success: number;
+  failed: number;
+  failed_ids: number[];
+  failed_errors: string[];
+}
+
 // API 方法
 export const globalApi = {
   get: () => api.get<GlobalSettings>("/api/global"),
@@ -169,6 +177,7 @@ export const sitesApi = {
 
 export const tasksApi = {
   list: (params: URLSearchParams) => api.get<TaskListResponse>(`/api/tasks?${params.toString()}`),
+  batchDelete: (ids: number[]) => api.post<DeleteTasksResponse>("/api/tasks/batch-delete", { ids }),
 };
 
 export const logsApi = {
