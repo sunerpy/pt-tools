@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-03-12
+
+### Bug Fixes
+
+- 修复 mTorrent 单种置顶全站免费判断问题
+- MTorrent 全站免费优先级提高
+- 修复 mallSingleFree 活动时间判断运算符优先级问题
+  || 和 && 混用缺少括号导致条件被解析为 A || (B && C) || D，
+  活动未开始时只要 now < endDate 即被标记为免费，添加括号与 promotion 判断保持一致。
+
+### Build
+
+- **go**: Bump Go version from 1.26.0 to 1.26.1
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump marked from 17.0.3 to 17.0.4 in /web/frontend ([#172](https://github.com/sunerpy/pt-tools/issues/172)) ([#172](https://github.com/sunerpy/pt-tools/pull/172))
+  Bumps [marked](https://github.com/markedjs/marked) from 17.0.3 to 17.0.4. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.3...v17.0.4)
+
+        ---
+        updated-dependencies:
+        - dependency-name: marked
+         dependency-version: 17.0.4
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump dompurify from 3.3.1 to 3.3.2 in /web/frontend ([#173](https://github.com/sunerpy/pt-tools/issues/173)) ([#173](https://github.com/sunerpy/pt-tools/pull/173))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.3.1 to 3.3.2. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.3.1...3.3.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.3.2
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @types/node from 25.3.3 to 25.4.0 in /web/frontend ([#174](https://github.com/sunerpy/pt-tools/issues/174)) ([#174](https://github.com/sunerpy/pt-tools/pull/174))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.3.3 to 25.4.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.4.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump element-plus from 2.13.3 to 2.13.5 in /web/frontend ([#171](https://github.com/sunerpy/pt-tools/issues/171)) ([#171](https://github.com/sunerpy/pt-tools/pull/171))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.3 to 2.13.5. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.3...2.13.5)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.13.5
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue from 3.5.28 to 3.5.30 in /web/frontend ([#169](https://github.com/sunerpy/pt-tools/issues/169)) ([#169](https://github.com/sunerpy/pt-tools/pull/169))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.28 to 3.5.30. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.28...v3.5.30)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.30
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/sys from 0.41.0 to 0.42.0 ([#166](https://github.com/sunerpy/pt-tools/issues/166)) ([#166](https://github.com/sunerpy/pt-tools/pull/166))
+  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.41.0 to 0.42.0. - [Commits](https://github.com/golang/sys/compare/v0.41.0...v0.42.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/sys
+         dependency-version: 0.42.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/time from 0.14.0 to 0.15.0 ([#170](https://github.com/sunerpy/pt-tools/issues/170)) ([#170](https://github.com/sunerpy/pt-tools/pull/170))
+  Bumps [golang.org/x/time](https://github.com/golang/time) from 0.14.0 to 0.15.0. - [Commits](https://github.com/golang/time/compare/v0.14.0...v0.15.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/time
+         dependency-version: 0.15.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/sync from 0.19.0 to 0.20.0 ([#168](https://github.com/sunerpy/pt-tools/issues/168)) ([#168](https://github.com/sunerpy/pt-tools/pull/168))
+  Bumps [golang.org/x/sync](https://github.com/golang/sync) from 0.19.0 to 0.20.0. - [Commits](https://github.com/golang/sync/compare/v0.19.0...v0.20.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/sync
+         dependency-version: 0.20.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+### Testing
+
+- 补充 mallSingleFree 折扣分支用例
+
 ## [0.20.0] - 2026-03-05
 
 ### Bug Fixes
