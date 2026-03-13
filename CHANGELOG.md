@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-03-13
+
+### Features
+
+- **rss**: 增加非免费跳过种子的定时重检与手动清理功能
+- 跳过的非免费种子在 6 小时后允许重新检测免费状态 - 仅对当前 RSS 中仍存在的种子生效，不产生额外请求 - 新增 POST /api/tasks/batch-delete 接口用于批量删除未推送记录 - 任务列表页面增加多选框和批量删除按钮，已推送记录不可选中 - 新增重检逻辑和批量删除接口的单元测试
+
 ## [0.20.1] - 2026-03-12
 
 ### Bug Fixes
