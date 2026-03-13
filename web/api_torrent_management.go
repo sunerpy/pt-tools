@@ -2,10 +2,13 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
@@ -39,6 +42,19 @@ type DeletePausedResponse struct {
 	Success      int      `json:"success"`       // 成功删除数量
 	Failed       int      `json:"failed"`        // 失败数量
 	FailedIDs    []uint   `json:"failed_ids"`    // 失败的种子 ID
+	FailedErrors []string `json:"failed_errors"` // 失败原因
+}
+
+// DeleteTasksRequest 批量删除任务请求
+type DeleteTasksRequest struct {
+	IDs []uint `json:"ids"` // 任务 ID 列表
+}
+
+// DeleteTasksResponse 批量删除任务响应
+type DeleteTasksResponse struct {
+	Success      int      `json:"success"`       // 成功删除数量
+	Failed       int      `json:"failed"`        // 失败数量
+	FailedIDs    []uint   `json:"failed_ids"`    // 失败的任务 ID
 	FailedErrors []string `json:"failed_errors"` // 失败原因
 }
 
@@ -217,6 +233,76 @@ func (s *Server) apiDeletePausedTorrents(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, DeletePausedResponse{
+		Success:      success,
+		Failed:       failed,
+		FailedIDs:    failedIDs,
+		FailedErrors: failedErrors,
+	})
+}
+
+// apiDeleteTasks 批量删除任务记录
+// POST /api/tasks/batch-delete
+func (s *Server) apiDeleteTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req DeleteTasksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "请求体解析失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	db := global.GlobalDB.DB
+
+	// 查询要删除的任务（只删除未推送的记录）
+	var torrents []models.TorrentInfo
+	tx := db.Where("is_pushed IS NULL OR is_pushed != ?", true) // 安全检查: 只删除未被推送的记录（含 NULL）
+	if len(req.IDs) > 0 {
+		tx = tx.Where("id IN ?", req.IDs)
+	}
+	if err := tx.Find(&torrents).Error; err != nil {
+		http.Error(w, "查询失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(torrents) == 0 {
+		writeJSON(w, DeleteTasksResponse{Success: 0, Failed: 0})
+		return
+	}
+
+	var success, failed int
+	var failedIDs []uint
+	var failedErrors []string
+
+	// 使用事务删除记录
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for _, t := range torrents {
+			// 安全检查: 只删除未推送的记录
+			if t.IsPushed != nil && *t.IsPushed {
+				failed++
+				failedIDs = append(failedIDs, t.ID)
+				failedErrors = append(failedErrors, t.Title+": 已推送的记录无法删除")
+				continue
+			}
+
+			// 从数据库删除记录
+			if delErr := tx.Delete(&t).Error; delErr != nil {
+				return fmt.Errorf("删除失败: %w", delErr)
+			}
+
+			success++
+			global.GetSlogger().Infof("已删除任务记录: %s (ID:%d)", t.Title, t.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, "事务处理失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, DeleteTasksResponse{
 		Success:      success,
 		Failed:       failed,
 		FailedIDs:    failedIDs,

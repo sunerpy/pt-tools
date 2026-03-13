@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { type TaskItem, type TaskListResponse, tasksApi } from "@/api";
-import { ElMessage } from "element-plus";
+import { Delete, Refresh, Search } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
 const loading = ref(false);
@@ -16,6 +17,7 @@ const filters = ref({
   pushed: true,
   expired: false,
 });
+const selectedIds = ref<number[]>([]);
 
 // 站点列表（从任务中提取）
 const siteOptions = computed(() => {
@@ -72,6 +74,35 @@ function handleSizeChange(newSize: number) {
   pageSize.value = newSize;
   page.value = 1;
   loadTasks();
+}
+
+function handleSelectionChange(selection: TaskItem[]) {
+  selectedIds.value = selection.map((t) => t.id);
+}
+
+async function handleBatchDelete() {
+  if (selectedIds.value.length === 0) return;
+
+  try {
+    await ElMessageBox.confirm(`确认删除 ${selectedIds.value.length} 条记录吗？`, "警告", {
+      type: "warning",
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+    });
+
+    const res = await tasksApi.batchDelete(selectedIds.value);
+    if (res.failed > 0) {
+      ElMessage.warning(`删除完成：成功 ${res.success} 条，失败 ${res.failed} 条`);
+    } else {
+      ElMessage.success(`成功删除 ${res.success} 条记录`);
+    }
+    selectedIds.value = [];
+    loadTasks();
+  } catch (e: unknown) {
+    if ((e as string) !== "cancel") {
+      ElMessage.error((e as Error).message || "批量删除失败");
+    }
+  }
 }
 
 function formatTime(timeStr: string): string {
@@ -227,19 +258,36 @@ function getDiscountTag(task: TaskItem): {
           </el-tag>
         </div>
         <div class="table-card-header-actions">
+          <el-button
+            type="danger"
+            size="small"
+            plain
+            class="batch-delete-btn"
+            :disabled="selectedIds.length === 0"
+            @click="handleBatchDelete">
+            <el-icon class="mr-1"><Delete /></el-icon>
+            批量删除
+          </el-button>
           <el-button type="primary" size="small" plain class="refresh-btn" @click="loadTasks">
             <el-icon class="mr-1"><Refresh /></el-icon>
             刷新
           </el-button>
         </div>
+        <!-- Close table-card-header-actions -->
       </div>
+      <!-- Close table-card-header -->
 
       <div class="table-wrapper">
         <el-table
           :data="tasks"
           style="width: 100%"
           class="pt-table"
-          :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }">
+          :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }"
+          @selection-change="handleSelectionChange">
+          <el-table-column
+            type="selection"
+            width="55"
+            :selectable="(row: Record<string, any>) => !row.isPushed" />
           <el-table-column label="站点" prop="siteName" width="120" align="center">
             <template #default="{ row }">
               <el-tag size="small" type="primary" effect="light" class="site-tag">{{

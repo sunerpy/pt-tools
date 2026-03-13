@@ -74,6 +74,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/sites/", s.auth(s.apiSiteDetail))
 	mux.HandleFunc("/api/password", s.auth(s.apiPassword))
 	mux.HandleFunc("/api/tasks", s.auth(s.apiTasks))
+	mux.HandleFunc("/api/tasks/batch-delete", s.auth(s.apiDeleteTasks))
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
 	mux.HandleFunc("/api/control/start", s.auth(s.apiStartAll))

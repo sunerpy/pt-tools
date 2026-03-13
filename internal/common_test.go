@@ -1427,16 +1427,42 @@ func TestShouldSkipExistingTorrent(t *testing.T) {
 	falsePushed := false
 	truePushed := true
 
+	// Timestamps for re-check tests
+	oldCheckTime := time.Now().Add(-7 * time.Hour)
+	recentCheckTime := time.Now().Add(-1 * time.Hour)
+
 	tests := []struct {
 		name    string
 		torrent *models.TorrentInfo
 		want    bool
 	}{
+		// Original test cases
 		{name: "nil torrent", torrent: nil, want: false},
-		{name: "skipped torrent", torrent: &models.TorrentInfo{IsSkipped: true}, want: true},
 		{name: "pushed true", torrent: &models.TorrentInfo{IsPushed: &truePushed}, want: true},
 		{name: "pushed false should retry", torrent: &models.TorrentInfo{IsPushed: &falsePushed}, want: false},
 		{name: "pushed nil", torrent: &models.TorrentInfo{IsPushed: nilPushed}, want: false},
+
+		// Re-check tests: skipped non-free torrents
+		{
+			name:    "skipped non-free last check > 6h should allow recheck",
+			torrent: &models.TorrentInfo{IsSkipped: true, IsFree: false, LastCheckTime: &oldCheckTime},
+			want:    false, // Allow re-check
+		},
+		{
+			name:    "skipped non-free last check < 6h should skip",
+			torrent: &models.TorrentInfo{IsSkipped: true, IsFree: false, LastCheckTime: &recentCheckTime},
+			want:    true, // Skip
+		},
+		{
+			name:    "skipped non-free nil LastCheckTime should skip",
+			torrent: &models.TorrentInfo{IsSkipped: true, IsFree: false, LastCheckTime: nil},
+			want:    true, // Skip for safety
+		},
+		{
+			name:    "skipped free torrent should skip regardless",
+			torrent: &models.TorrentInfo{IsSkipped: true, IsFree: true},
+			want:    true, // Skip (not affected by re-check logic)
+		},
 	}
 
 	for _, tt := range tests {

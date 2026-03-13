@@ -29,6 +29,10 @@ import (
 	"github.com/sunerpy/pt-tools/utils"
 )
 
+// SkipRecheckHours defines how long a skipped non-free torrent should remain skipped before re-checking
+// This allows torrents marked as non-free to be re-checked after becoming free during promotions
+const SkipRecheckHours = 6
+
 // buildSkipReason 构建种子跳过原因的可读描述
 func buildSkipReason(isFree, canFinished, shouldDownloadByFilter bool) string {
 	var reasons []string
@@ -490,6 +494,17 @@ type rssTaskStats struct {
 func shouldSkipExistingTorrent(torrent *models.TorrentInfo) bool {
 	if torrent == nil {
 		return false
+	}
+
+	// If skipped and non-free, allow re-check after SkipRecheckHours
+	if torrent.IsSkipped && !torrent.IsFree {
+		if torrent.LastCheckTime != nil {
+			elapsed := time.Since(*torrent.LastCheckTime)
+			if elapsed >= SkipRecheckHours*time.Hour {
+				return false // Allow re-check
+			}
+		}
+		return true
 	}
 
 	if torrent.IsSkipped {

@@ -1,5 +1,6 @@
 .kiro
 .pt-tools
+.sisyphus
 .trae
 AGENTS.md
 coverage.out
@@ -8,6 +9,7 @@ examples/docs
 examples/*.ts
 jsons
 node_modules
+pt-tools
 pt-tools-helper.zip
 vendor
 
