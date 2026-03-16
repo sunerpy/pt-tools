@@ -31,7 +31,7 @@
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/tsconfig": "^0.9.0",
     "oxfmt": "^0.41.0",
-    "oxlint": "^1.51.0",
+    "oxlint": "^1.56.0",
     "sass": "^1.98.0",
     "typescript": "~5.9.3",
     "vite": "^7.3.0",
