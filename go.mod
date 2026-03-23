@@ -3,7 +3,7 @@ module github.com/sunerpy/pt-tools
 go 1.26.1
 
 require (
-	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/fatih/color v1.19.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang/mock v1.6.0
@@ -52,7 +52,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.23.0 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.67.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
