@@ -24,8 +24,8 @@ importers:
         specifier: ^3.3.3
         version: 3.3.3
       element-plus:
-        specifier: ^2.13.5
-        version: 2.13.5(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3))
+        specifier: ^2.13.6
+        version: 2.13.6(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3))
       marked:
         specifier: ^17.0.4
         version: 17.0.4
@@ -953,8 +953,8 @@ packages:
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
-  dayjs@1.11.19:
-    resolution: {integrity: sha512-t5EcLVS6QPBNqM2z8fakk/NKel+Xzshgt8FFKAn+qwlD1pzZWxh0nVCrvFK7ZDb6XucZeF9z8C7CBWTRIVApAw==}
+  dayjs@1.11.20:
+    resolution: {integrity: sha512-YbwwqR/uYpeoP4pu043q+LTDLFBLApUP6VxRihdfNTqu4ubqMlGDLd6ErXhEgsyvY0K6nCs7nggYumAN+9uEuQ==}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
@@ -963,8 +963,8 @@ packages:
   dompurify@3.3.3:
     resolution: {integrity: sha512-Oj6pzI2+RqBfFG+qOaOLbFXLQ90ARpcGG6UePL82bJLtdsa6CYJD7nmiU8MW9nQNOtCHV3lZ/Bzq1X0QYbBZCA==}
 
-  element-plus@2.13.5:
-    resolution: {integrity: sha512-dmY24fhSREfZN/PuUt0YZigMso7wWzl+B5o+YKNN15kQIn/0hzamsPU+ebj9SES0IbUqsLX1wkrzYmzU8VrVOQ==}
+  element-plus@2.13.6:
+    resolution: {integrity: sha512-XHgwXr8Fjz6i+6BaqFhAbae/dJbG7bBAAlHrY3pWL7dpj+JcqcOyKYt4Oy5KP86FQwS1k4uIZDjCx2FyUR5lDg==}
     peerDependencies:
       vue: ^3.3.0
 
@@ -1310,6 +1310,9 @@ packages:
 
   vscode-uri@3.1.0:
     resolution: {integrity: sha512-/BpdSx+yCQGnCvecbyXdxHDkuk55/G3xwnC0GqY4gmQ3j+A+g8kzzgB4Nk/SINjqn6+waqw3EgbVF2QKExkRxQ==}
+
+  vue-component-type-helpers@3.2.6:
+    resolution: {integrity: sha512-O02tnvIfOQVmnvoWwuSydwRoHjZVt8UEBR+2p4rT35p8GAy5VTlWP8o5qXfJR/GWCN0nVZoYWsVUvx2jwgdBmQ==}
 
   vue-router@5.0.3:
     resolution: {integrity: sha512-nG1c7aAFac7NYj8Hluo68WyWfc41xkEjaR0ViLHCa3oDvTQ/nIuLJlXJX1NUPw/DXzx/8+OKMng045HHQKQKWw==}
@@ -2026,7 +2029,7 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  dayjs@1.11.19: {}
+  dayjs@1.11.20: {}
 
   detect-libc@2.1.2:
     optional: true
@@ -2035,7 +2038,7 @@ snapshots:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
-  element-plus@2.13.5(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3)):
+  element-plus@2.13.6(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3)):
     dependencies:
       '@ctrl/tinycolor': 4.2.0
       '@element-plus/icons-vue': 2.3.2(vue@3.5.30(typescript@5.9.3))
@@ -2045,13 +2048,14 @@ snapshots:
       '@types/lodash-es': 4.17.12
       '@vueuse/core': 12.0.0(typescript@5.9.3)
       async-validator: 4.2.5
-      dayjs: 1.11.19
+      dayjs: 1.11.20
       lodash: 4.17.23
       lodash-es: 4.17.23
       lodash-unified: 1.0.3(@types/lodash-es@4.17.12)(lodash-es@4.17.23)(lodash@4.17.23)
       memoize-one: 6.0.0
       normalize-wheel-es: 1.2.0
       vue: 3.5.30(typescript@5.9.3)
+      vue-component-type-helpers: 3.2.6
     transitivePeerDependencies:
       - typescript
 
@@ -2395,6 +2399,8 @@ snapshots:
       - msw
 
   vscode-uri@3.1.0: {}
+
+  vue-component-type-helpers@3.2.6: {}
 
   vue-router@5.0.3(@vue/compiler-sfc@3.5.30)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.30(typescript@5.9.3)))(vue@3.5.30(typescript@5.9.3)):
     dependencies:
