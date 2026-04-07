@@ -1,0 +1,141 @@
+name: Close Stale Site Requests
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  close-stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Close stale site requests without attachments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const STALE_DAYS = 14;
+            const now = new Date();
+
+            // Find open issues that are site requests
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const siteRequestIssues = issues.filter(issue => {
+              const title = issue.title || '';
+              return (
+                title.includes('新站点请求') ||
+                title.includes('New Site Request') ||
+                title.includes('站点支持') ||
+                title.includes('增加') && title.includes('站点')
+              );
+            });
+
+            for (const issue of siteRequestIssues) {
+              const body = issue.body || '';
+              const hasAttachment =
+                body.includes('user-attachments/files') ||
+                body.includes('user-attachments/assets');
+
+              if (hasAttachment) continue; // Has valid attachment, skip
+
+              // Check if there's a bot reminder or maintainer reply asking for attachment
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+              });
+
+              const hasReminder = comments.data.some(c =>
+                c.body.includes('<!-- attachment-check -->') ||
+                c.body.includes('没有上传采集') ||
+                c.body.includes('提供下详情信息') ||
+                c.body.includes('ZIP')
+              );
+
+              if (!hasReminder) continue; // No reminder sent yet, skip
+
+              // Find the earliest reminder/reply date
+              const reminderComment = comments.data.find(c =>
+                c.body.includes('<!-- attachment-check -->') ||
+                c.body.includes('没有上传采集') ||
+                c.body.includes('提供下详情信息') ||
+                c.body.includes('ZIP')
+              );
+
+              if (!reminderComment) continue;
+
+              const reminderDate = new Date(reminderComment.created_at);
+              const daysSinceReminder = (now - reminderDate) / (1000 * 60 * 60 * 24);
+
+              if (daysSinceReminder < STALE_DAYS) continue; // Not stale yet
+
+              // Check if already has close warning
+              const hasCloseWarning = comments.data.some(c =>
+                c.body.includes('<!-- stale-close -->')
+              );
+
+              if (hasCloseWarning) {
+                // Already warned, close the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'not_planned',
+                });
+
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['stale-closed'],
+                });
+
+                console.log(`Closed #${issue.number}: ${issue.title}`);
+                continue;
+              }
+
+              // Post close warning (first pass)
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: [
+                  '<!-- stale-close -->',
+                  '⏰ **即将关闭 / Will be closed soon**',
+                  '',
+                  '你好 @' + issue.user.login + '，',
+                  '',
+                  `此 Issue 已超过 ${STALE_DAYS} 天未收到所需的采集数据 ZIP 附件。`,
+                  '如果 **7 天内** 仍未补充附件，此 Issue 将被自动关闭。',
+                  '',
+                  '如果你仍然需要此站点支持，请：',
+                  '1. 使用 [PT Tools Helper 浏览器扩展](https://github.com/sunerpy/pt-tools/releases) 采集站点数据',
+                  '2. 编辑此 Issue，将 ZIP 文件拖拽上传到正文中',
+                  '',
+                  '关闭后如有需要可以重新提交。',
+                  '',
+                  '---',
+                  '',
+                  `Hi @${issue.user.login},`,
+                  '',
+                  `This issue has been waiting for the required collected data ZIP file for over ${STALE_DAYS} days.`,
+                  'If no attachment is provided within **7 days**, this issue will be automatically closed.',
+                  '',
+                  'If you still need this site supported, please:',
+                  '1. Use the [PT Tools Helper extension](https://github.com/sunerpy/pt-tools/releases) to collect site data',
+                  '2. Edit this issue and drag-and-drop the ZIP file into the body',
+                  '',
+                  'You can always re-open or submit a new request later.',
+                ].join('\n'),
+              });
+
+              console.log(`Warned #${issue.number}: ${issue.title} (${Math.floor(daysSinceReminder)} days since reminder)`);
+            }
