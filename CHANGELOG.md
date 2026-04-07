@@ -5,6 +5,298 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-04-07
+
+### CI/CD
+
+- **workflow**: 增加新站点请求缺失附件自动关闭工作流
+- 每日扫描未上传 ZIP 附件的站点请求 Issue - 提醒超过 14 天未补充附件时发送 7 天倒计时警告 - 警告后仍无附件则自动关闭并标记 stale-closed
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump @vitejs/plugin-vue from 6.0.4 to 6.0.5 in /web/frontend ([#185](https://github.com/sunerpy/pt-tools/issues/185)) ([#185](https://github.com/sunerpy/pt-tools/pull/185))
+  Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.4 to 6.0.5. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.5/packages/plugin-vue)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vitejs/plugin-vue"
+         dependency-version: 6.0.5
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.36.0 to 0.41.0 in /web/frontend ([#188](https://github.com/sunerpy/pt-tools/issues/188)) ([#188](https://github.com/sunerpy/pt-tools/pull/188))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.36.0 to 0.41.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.41.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.41.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump dompurify from 3.3.2 to 3.3.3 in /web/frontend ([#189](https://github.com/sunerpy/pt-tools/issues/189)) ([#189](https://github.com/sunerpy/pt-tools/pull/189))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.3.2 to 3.3.3. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.3.2...3.3.3)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.3.3
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @types/node from 25.4.0 to 25.5.0 in /web/frontend ([#187](https://github.com/sunerpy/pt-tools/issues/187)) ([#187](https://github.com/sunerpy/pt-tools/pull/187))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.4.0 to 25.5.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.5.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vitest from 4.0.18 to 4.1.0 in /web/frontend ([#190](https://github.com/sunerpy/pt-tools/issues/190)) ([#190](https://github.com/sunerpy/pt-tools/pull/190))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.0.18 to 4.1.0. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.0/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump sass from 1.97.3 to 1.98.0 in /web/frontend ([#191](https://github.com/sunerpy/pt-tools/issues/191)) ([#191](https://github.com/sunerpy/pt-tools/pull/191))
+  Bumps [sass](https://github.com/sass/dart-sass) from 1.97.3 to 1.98.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.97.3...1.98.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: sass
+         dependency-version: 1.98.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxlint from 1.51.0 to 1.56.0 in /web/frontend ([#192](https://github.com/sunerpy/pt-tools/issues/192)) ([#192](https://github.com/sunerpy/pt-tools/pull/192))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.51.0 to 1.56.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.56.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.56.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump element-plus from 2.13.5 to 2.13.6 in /web/frontend ([#198](https://github.com/sunerpy/pt-tools/issues/198)) ([#198](https://github.com/sunerpy/pt-tools/pull/198))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.5 to 2.13.6. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.5...2.13.6)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.13.6
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vitest from 4.1.0 to 4.1.1 in /web/frontend ([#200](https://github.com/sunerpy/pt-tools/issues/200)) ([#200](https://github.com/sunerpy/pt-tools/pull/200))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.0 to 4.1.1. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.1/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.1
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue-router from 5.0.3 to 5.0.4 in /web/frontend ([#201](https://github.com/sunerpy/pt-tools/issues/201)) ([#201](https://github.com/sunerpy/pt-tools/pull/201))
+  Bumps [vue-router](https://github.com/vuejs/router) from 5.0.3 to 5.0.4. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.3...v5.0.4)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-router
+         dependency-version: 5.0.4
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump marked from 17.0.4 to 17.0.5 in /web/frontend ([#202](https://github.com/sunerpy/pt-tools/issues/202)) ([#202](https://github.com/sunerpy/pt-tools/pull/202))
+  Bumps [marked](https://github.com/markedjs/marked) from 17.0.4 to 17.0.5. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.4...v17.0.5)
+
+        ---
+        updated-dependencies:
+        - dependency-name: marked
+         dependency-version: 17.0.5
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.2.5 to 3.2.6 in /web/frontend ([#203](https://github.com/sunerpy/pt-tools/issues/203)) ([#203](https://github.com/sunerpy/pt-tools/pull/203))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.5 to 3.2.6. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.6/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.2.6
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.56.0 to 1.57.0 in /web/frontend ([#208](https://github.com/sunerpy/pt-tools/issues/208)) ([#208](https://github.com/sunerpy/pt-tools/pull/208))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.56.0 to 1.57.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.57.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.57.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump @vue/tsconfig from 0.9.0 to 0.9.1 in /web/frontend ([#213](https://github.com/sunerpy/pt-tools/issues/213)) ([#213](https://github.com/sunerpy/pt-tools/pull/213))
+  Bumps [@vue/tsconfig](https://github.com/vuejs/tsconfig) from 0.9.0 to 0.9.1. - [Release notes](https://github.com/vuejs/tsconfig/releases) - [Commits](https://github.com/vuejs/tsconfig/compare/v0.9.0...v0.9.1)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vue/tsconfig"
+         dependency-version: 0.9.1
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.41.0 to 0.42.0 in /web/frontend ([#209](https://github.com/sunerpy/pt-tools/issues/209)) ([#209](https://github.com/sunerpy/pt-tools/pull/209))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.41.0 to 0.42.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.42.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.42.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue from 3.5.30 to 3.5.31 in /web/frontend ([#211](https://github.com/sunerpy/pt-tools/issues/211)) ([#211](https://github.com/sunerpy/pt-tools/pull/211))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.30 to 3.5.31. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.30...v3.5.31)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.31
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vitest from 4.1.1 to 4.1.2 in /web/frontend ([#212](https://github.com/sunerpy/pt-tools/issues/212)) ([#212](https://github.com/sunerpy/pt-tools/pull/212))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.1 to 4.1.2. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.2/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.2
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump sass from 1.98.0 to 1.99.0 in /web/frontend ([#217](https://github.com/sunerpy/pt-tools/issues/217)) ([#217](https://github.com/sunerpy/pt-tools/pull/217))
+  Bumps [sass](https://github.com/sass/dart-sass) from 1.98.0 to 1.99.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.98.0...1.99.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: sass
+         dependency-version: 1.99.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump marked from 17.0.5 to 17.0.6 in /web/frontend ([#218](https://github.com/sunerpy/pt-tools/issues/218)) ([#218](https://github.com/sunerpy/pt-tools/pull/218))
+  Bumps [marked](https://github.com/markedjs/marked) from 17.0.5 to 17.0.6. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.5...v17.0.6)
+
+        ---
+        updated-dependencies:
+        - dependency-name: marked
+         dependency-version: 17.0.6
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.42.0 to 0.43.0 in /web/frontend ([#221](https://github.com/sunerpy/pt-tools/issues/221)) ([#221](https://github.com/sunerpy/pt-tools/pull/221))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.42.0 to 0.43.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.43.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.43.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxlint from 1.57.0 to 1.58.0 in /web/frontend ([#219](https://github.com/sunerpy/pt-tools/issues/219)) ([#219](https://github.com/sunerpy/pt-tools/pull/219))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.57.0 to 1.58.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.58.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.58.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump @types/node from 25.5.0 to 25.5.2 in /web/frontend ([#220](https://github.com/sunerpy/pt-tools/issues/220)) ([#220](https://github.com/sunerpy/pt-tools/pull/220))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.5.0 to 25.5.2. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.5.2
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/text from 0.34.0 to 0.35.0 ([#183](https://github.com/sunerpy/pt-tools/issues/183)) ([#183](https://github.com/sunerpy/pt-tools/pull/183))
+  Bumps [golang.org/x/text](https://github.com/golang/text) from 0.34.0 to 0.35.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.34.0...v0.35.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/text
+         dependency-version: 0.35.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump github.com/fatih/color from 1.18.0 to 1.19.0 ([#197](https://github.com/sunerpy/pt-tools/issues/197)) ([#197](https://github.com/sunerpy/pt-tools/pull/197))
+  Bumps [github.com/fatih/color](https://github.com/fatih/color) from 1.18.0 to 1.19.0. - [Release notes](https://github.com/fatih/color/releases) - [Commits](https://github.com/fatih/color/compare/v1.18.0...v1.19.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: github.com/fatih/color
+         dependency-version: 1.19.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump github.com/PuerkitoBio/goquery from 1.11.0 to 1.12.0 ([#184](https://github.com/sunerpy/pt-tools/issues/184)) ([#184](https://github.com/sunerpy/pt-tools/pull/184))
+  Bumps [github.com/PuerkitoBio/goquery](https://github.com/PuerkitoBio/goquery) from 1.11.0 to 1.12.0. - [Release notes](https://github.com/PuerkitoBio/goquery/releases) - [Commits](https://github.com/PuerkitoBio/goquery/compare/v1.11.0...v1.12.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: github.com/PuerkitoBio/goquery
+         dependency-version: 1.12.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **site**: 新增 13 个站点定义及 fixture 测试
+- audiences.me ([#164](https://github.com/sunerpy/pt-tools/issues/164)), byr.pt ([#196](https://github.com/sunerpy/pt-tools/issues/196)), carpt.net ([#214](https://github.com/sunerpy/pt-tools/issues/214)) - cc.mypt.cc ([#162](https://github.com/sunerpy/pt-tools/issues/162)), hdhome.org ([#175](https://github.com/sunerpy/pt-tools/issues/175)), hdtime.org ([#205](https://github.com/sunerpy/pt-tools/issues/205)) - hxpt.org ([#206](https://github.com/sunerpy/pt-tools/issues/206)), lemonhd.net ([#195](https://github.com/sunerpy/pt-tools/issues/195)), ptlover.cc ([#160](https://github.com/sunerpy/pt-tools/issues/160)) - ptskit.org ([#207](https://github.com/sunerpy/pt-tools/issues/207)), raingfh.top ([#128](https://github.com/sunerpy/pt-tools/issues/128)), tmpt.top ([#182](https://github.com/sunerpy/pt-tools/issues/182)) - ubits.club ([#193](https://github.com/sunerpy/pt-tools/issues/193)) - 全部基于用户提交的 ZIP 采集包分析 HTML 结构实现 - 每个站点包含完整的 Search/Detail/UserInfo fixture 测试
+- **extension**: 同步 13 个新增站点到浏览器扩展 KNOWN_SITES
+
 ## [0.21.0] - 2026-03-13
 
 ### Features
