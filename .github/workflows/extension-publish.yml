@@ -83,7 +83,7 @@ jobs:
         run: cd dist && zip -r ../pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip .
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: extension-zip
           path: tools/browser-extension/pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip
