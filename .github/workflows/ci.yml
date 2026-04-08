@@ -75,7 +75,7 @@ jobs:
 
       - name: Download Frontend Dist
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: web/static/dist
@@ -129,7 +129,7 @@ jobs:
 
       - name: Download Frontend Dist
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: web/static/dist
@@ -170,7 +170,7 @@ jobs:
 
       - name: Download Frontend Dist
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: web/static/dist
