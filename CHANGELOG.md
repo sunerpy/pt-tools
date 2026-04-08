@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.3] - 2026-04-08
+
+### Bug Fixes
+
+- **build**: 同步 Makefile Go 镜像版本至 1.26.2
+- Makefile BUILD_IMAGE 从 golang:1.26.1 升级至 golang:1.26.2 - 此为 Docker 构建失败的根因：Makefile 通过 --build-arg 覆盖了 Dockerfile 的默认值
+
+## [0.22.2] - 2026-04-08
+
+### Bug Fixes
+
+- **docker**: 同步 Dockerfile Go 版本至 1.26.2
+- BUILD_IMAGE 从 golang:1.26.1 升级至 golang:1.26.2 - 与 go.mod 版本保持一致，修复 Docker 构建失败
+
+### CI/CD
+
+- Bump actions/upload-artifact from 6 to 7 ([#144](https://github.com/sunerpy/pt-tools/issues/144)) ([#144](https://github.com/sunerpy/pt-tools/pull/144))
+  Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 6 to 7. - [Release notes](https://github.com/actions/upload-artifact/releases) - [Commits](https://github.com/actions/upload-artifact/compare/v6...v7)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/upload-artifact
+         dependency-version: '7'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+- Bump actions/github-script from 7 to 8 ([#142](https://github.com/sunerpy/pt-tools/issues/142)) ([#142](https://github.com/sunerpy/pt-tools/pull/142))
+  Bumps [actions/github-script](https://github.com/actions/github-script) from 7 to 8. - [Release notes](https://github.com/actions/github-script/releases) - [Commits](https://github.com/actions/github-script/compare/v7...v8)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/github-script
+         dependency-version: '8'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+## [0.22.1] - 2026-04-08
+
+### Bug Fixes
+
+- **deps**: 升级 Go 至 1.26.2 修复 crypto/x509 漏洞 (GO-2026-4947)
+- go.mod 升级 1.26.1 → 1.26.2 - 恢复 ci.yml 中 govulncheck 的阻断逻辑
+
+### CI/CD
+
+- Bump actions/download-artifact from 7 to 8
+  Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 7 to 8. - [Release notes](https://github.com/actions/download-artifact/releases) - [Commits](https://github.com/actions/download-artifact/compare/v7...v8)
+
+        ---
+        updated-dependencies:
+        - dependency-name: actions/download-artifact
+         dependency-version: '8'
+         dependency-type: direct:production
+         update-type: version-update:semver-major
+        ...
+
+- **security**: Govulncheck 使用 stable 版本 Go 运行
+- go-security job 从 go-version-file 切换为 go-version: stable - 确保 govulncheck 始终使用最新 patch 版修复标准库漏洞
+- **security**: 将 govulncheck 降级为非阻断警告
+- 标准库 crypto/x509 漏洞 (GO-2026-4947) 需等待 Go 1.26.2 修复 - govulncheck 设为 continue-on-error 避免阻断 CI - ci-success 中 go-security 失败改为 warning 而非 hard fail
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vite from 7.3.1 to 8.0.5 in /web/frontend
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 7.3.1 to 8.0.5. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.5/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.0.5
+         dependency-type: direct:development
+         update-type: version-update:semver-major
+        ...
+
+- **pnpm**: 升级 typescript 至 6.0.2 并适配废弃选项
+- 升级 typescript 5.9.3 → 6.0.2 - tsconfig.app.json 增加 ignoreDeprecations: "6.0" 适配 baseUrl 废弃警告
+
 ## [0.22.0] - 2026-04-07
 
 ### CI/CD
