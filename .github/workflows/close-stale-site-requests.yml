@@ -17,6 +17,7 @@ jobs:
         with:
           script: |
             const STALE_DAYS = 14;
+            const CLOSE_GRACE_DAYS = 7;
             const now = new Date();
 
             // Find open issues that are site requests
@@ -82,7 +83,33 @@ jobs:
               );
 
               if (hasCloseWarning) {
-                // Already warned, close the issue
+                // Find the close warning comment
+                const closeWarningComment = comments.data.find(c =>
+                  c.body.includes('<!-- stale-close -->')
+                );
+                if (!closeWarningComment) continue;
+
+                const warningDate = new Date(closeWarningComment.created_at);
+                const daysSinceWarning = (now - warningDate) / (1000 * 60 * 60 * 24);
+
+                // Check if any non-bot user replied after the warning
+                const hasUserReplyAfterWarning = comments.data.some(c => {
+                  if (c.user.type === 'Bot') return false;
+                  return new Date(c.created_at) > warningDate;
+                });
+
+                if (hasUserReplyAfterWarning) {
+                  console.log(`Skipped #${issue.number}: user replied after close warning`);
+                  continue;
+                }
+
+                // Wait for the full grace period
+                if (daysSinceWarning < CLOSE_GRACE_DAYS) {
+                  console.log(`Skipped #${issue.number}: only ${Math.floor(daysSinceWarning)} days since warning (need ${CLOSE_GRACE_DAYS})`);
+                  continue;
+                }
+
+                // Grace period expired with no user reply, close the issue
                 await github.rest.issues.update({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -98,7 +125,7 @@ jobs:
                   labels: ['stale-closed'],
                 });
 
-                console.log(`Closed #${issue.number}: ${issue.title}`);
+                console.log(`Closed #${issue.number}: ${issue.title} (${Math.floor(daysSinceWarning)} days since warning)`);
                 continue;
               }
 
