@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.4] - 2026-04-11
+
+### Bug Fixes
+
+- **ci**: 修复 stale issue 自动关闭缺少7天宽限期和用户回复检测
+- 关闭前检查 stale-close 警告是否已过 CLOSE_GRACE_DAYS(7天) - 警告发出后如有非 Bot 用户回复则跳过关闭
+- **api**: 修复下载器目录接口返回格式与前端不匹配
+- all-directories 接口返回数组而非映射导致前端无法按下载器ID索引目录 - 改为返回 map[downloaderID][]DownloaderDirectoryResponse - 修复所有站点推送种子和RSS订阅配置时选择不了下载目录的问题
+
 ## [0.22.3] - 2026-04-08
 
 ### Bug Fixes
