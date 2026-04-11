@@ -349,8 +349,9 @@ func (s *Server) setDefaultDirectory(w http.ResponseWriter, r *http.Request, dow
 	})
 }
 
-// getAllDownloaderDirectories 获取所有下载器及其目录（用于前端选择）
+// apiAllDownloaderDirectories 获取所有下载器的目录映射（用于前端选择）
 // GET /api/downloaders/all-directories
+// 返回 map[downloaderID][]DownloaderDirectoryResponse
 func (s *Server) apiAllDownloaderDirectories(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -366,16 +367,7 @@ func (s *Server) apiAllDownloaderDirectories(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	type DownloaderWithDirectories struct {
-		ID          uint                          `json:"id"`
-		Name        string                        `json:"name"`
-		Type        string                        `json:"type"`
-		IsDefault   bool                          `json:"is_default"`
-		AutoStart   bool                          `json:"auto_start"`
-		Directories []DownloaderDirectoryResponse `json:"directories"`
-	}
-
-	result := make([]DownloaderWithDirectories, 0, len(downloaders))
+	result := make(map[uint][]DownloaderDirectoryResponse, len(downloaders))
 	for _, dl := range downloaders {
 		var directories []models.DownloaderDirectory
 		db.Where("downloader_id = ?", dl.ID).Find(&directories)
@@ -391,14 +383,7 @@ func (s *Server) apiAllDownloaderDirectories(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
-		result = append(result, DownloaderWithDirectories{
-			ID:          dl.ID,
-			Name:        dl.Name,
-			Type:        dl.Type,
-			IsDefault:   dl.IsDefault,
-			AutoStart:   dl.AutoStart,
-			Directories: dirResponses,
-		})
+		result[dl.ID] = dirResponses
 	}
 
 	writeJSON(w, result)
