@@ -210,10 +210,33 @@ pt-tools-cli downloader list
 ### 7. 推送种子到下载器
 
 ```bash
-pt-tools-cli push <torrent_id> [--downloader <name>]
+pt-tools-cli push <downloadUrl> --downloaders <downloader_id>
 ```
 
-> 将搜索到的种子直接推送到下载器下载。
+**重要**：`push` 接收的是种子的完整 `downloadUrl`（如 `/api/site/mteam/torrent/1102489/download`），不是种子 ID。
+
+**获取下载器 ID**（见上方"下载器管理"）：
+```bash
+pt-tools-cli downloader list
+# 输出：│  1 │ 主下载器 │ qbittorrent │ ...
+```
+
+**推送示例**（以 search 结果的第 8 条为例）：
+```bash
+# 搜索并保存结果
+pt-tools-cli search "创：战纪3" --no-interactive --output json > /tmp/results.json
+
+# 提取第 N 条的 downloadUrl（downloadUrl 在 JSON 中完整呈现）
+# 假设第 8 条的 downloadUrl 为 /api/site/mteam/torrent/1102489/download
+
+# 推送到下载器（downloaders 使用数字 ID）
+pt-tools-cli push /api/site/mteam/torrent/1102489/download --downloaders 1
+
+# 可选：指定分类或标签
+pt-tools-cli push /api/site/mteam/torrent/1102489/download --downloaders 1 --category "电影" --tags "2026,4K"
+```
+
+> `downloadUrl` 格式：`/api/site/<站点名>/torrent/<种子ID>/download`，搜索结果 JSON 中每个 item 的 `downloadUrl` 字段即为其完整路径。
 
 ### 8. 日志查看
 
@@ -329,12 +352,13 @@ docker restart pt-tools
 pt-tools-cli --url "$PT_TOOLS_URL" login "$PT_TOOLS_USER" "$PT_TOOLS_PASSWORD"
 
 # 搜索免费高清剧集
-pt-tools-cli search "2026电视剧" --free-only --min-seeders 10 --no-interactive --output json | \
-  jq -r '.results[] | "\(.id)\t\(.title)\t\(.site)"' | \
-  while IFS=$'\t' read -r id title site; do
-    echo "推送: $title ($site)"
-    pt-tools-cli push "$id"
-  done
+pt-tools-cli search "2026电视剧" --free-only --min-seeders 10 --no-interactive --output json > /tmp/search.json
+
+# 从 JSON 中提取 downloadUrl 并推送（示例循环）
+cat /tmp/search.json | jq -r '.items[] | "\(.id)|\(.title)|\(.downloadUrl)"' | while IFS='|' read -r id title url; do
+  echo "推送: $title"
+  pt-tools-cli push "$url" --downloaders 1
+done
 ```
 
 ### 定期清理过期任务
