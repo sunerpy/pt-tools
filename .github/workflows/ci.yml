@@ -24,7 +24,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -213,7 +213,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -262,7 +262,7 @@ jobs:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
