@@ -21,7 +21,7 @@
     "@vueuse/core": "^14.2.1",
     "dompurify": "^3.4.1",
     "element-plus": "^2.13.7",
-    "marked": "^17.0.6",
+    "marked": "^18.0.2",
     "pinia": "^3.0.4",
     "vue": "^3.5.33",
     "vue-router": "^5.0.6"
