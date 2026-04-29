@@ -684,6 +684,9 @@ func sanitizeRuleSize(v int) int {
 // evaluateTestDecision mirrors filter.Decide semantics for the rule-tester UI.
 // It returns the same Decision shape but operates on a single in-memory rule
 // candidate rather than the DB-backed rule cache.
+// Plan A: since the tester is always testing with a rule present, the "rules
+// associated" flag is conceptually true — non-matching conditions do NOT fall
+// back to the free channel under auto_free.
 func evaluateTestDecision(rule *models.FilterRule, mode models.FilterMode, globalSizeGB int, sizeGB float64, isFree bool) filter.Decision {
 	if globalSizeGB > 0 && sizeGB > float64(globalSizeGB) {
 		return filter.Decision{ShouldDownload: false, Source: filter.SourceNone, Reason: "超出全局大小限制"}
@@ -695,22 +698,10 @@ func evaluateTestDecision(rule *models.FilterRule, mode models.FilterMode, globa
 		return filter.Decision{ShouldDownload: false, Source: filter.SourceNone, Reason: "free_only 模式下过滤规则通道已关闭且非免费"}
 	}
 	if rule.RequireFree && !isFree {
-		if mode == models.FilterModeFilterOnly {
-			return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则要求免费，但种子非免费"}
-		}
-		if isFree {
-			return filter.Decision{ShouldDownload: true, MatchedRule: rule, Source: filter.SourceFreeDownload}
-		}
-		return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则要求免费，种子非免费"}
+		return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则要求免费，但种子非免费"}
 	}
 	if !rule.MatchesSize(sizeGB) {
-		if mode == models.FilterModeFilterOnly {
-			return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则但大小不符合规则约束"}
-		}
-		if isFree {
-			return filter.Decision{ShouldDownload: true, MatchedRule: rule, Source: filter.SourceFreeDownload}
-		}
-		return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则但大小不符合且非免费"}
+		return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则但大小不符合规则约束"}
 	}
 	return filter.Decision{ShouldDownload: true, MatchedRule: rule, Source: filter.SourceFilterRule}
 }
