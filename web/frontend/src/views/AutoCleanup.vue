@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { globalApi, type GlobalSettings } from "@/api";
-import { Delete, Setting } from "@element-plus/icons-vue";
+import { DataAnalysis, Delete, Setting } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
@@ -137,6 +137,10 @@ const form = ref({
   cleanup_protect_hr: true,
   cleanup_min_retain_h: 24,
   cleanup_protect_tags: [] as string[],
+  peer_ratio_enabled: false,
+  peer_ratio_max_sl: 30,
+  peer_ratio_interval_min: 10,
+  peer_ratio_remove_data: false,
 });
 
 const presetFields = computed(() => [
@@ -471,6 +475,60 @@ async function save() {
             </el-col>
           </el-row>
         </div>
+      </el-form>
+
+      <div class="form-actions">
+        <el-button type="primary" :loading="saving" @click="save" size="large">保存设置</el-button>
+      </div>
+    </el-card>
+
+    <el-card class="settings-card" shadow="never" style="margin-top: 20px">
+      <template #header>
+        <div class="card-header">
+          <div class="card-title-group">
+            <el-icon :size="20" color="var(--el-color-warning)"><DataAnalysis /></el-icon>
+            <div>
+              <h3 class="card-title">做种竞争度监控</h3>
+              <p class="card-subtitle">
+                监控做种中种子的 Seeder/Leecher 比值，竞争度过高时自动暂停
+              </p>
+            </div>
+          </div>
+          <el-switch v-model="form.peer_ratio_enabled" active-text="启用" inactive-text="关闭" />
+        </div>
+      </template>
+
+      <el-form label-position="top" :disabled="!form.peer_ratio_enabled">
+        <el-row :gutter="40">
+          <el-col :md="12" :sm="24">
+            <el-form-item label="S/L 比值上限">
+              <el-input-number
+                v-model="form.peer_ratio_max_sl"
+                :min="1"
+                :step="5"
+                :precision="1"
+                class="w-full" />
+              <div class="form-tip">Seeder/Leecher 比值超过此值时触发操作（最小值 1）</div>
+            </el-form-item>
+          </el-col>
+          <el-col :md="12" :sm="24">
+            <el-form-item label="检查间隔（分钟）">
+              <el-input-number
+                v-model="form.peer_ratio_interval_min"
+                :min="5"
+                :step="5"
+                class="w-full" />
+              <div class="form-tip">通过 Tracker 获取 Swarm 级别的做种/下载用户数进行判断</div>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item>
+          <el-checkbox v-model="form.peer_ratio_remove_data" label="直接删除种子及数据" border />
+          <div class="form-tip">
+            开启后超标种子将被直接删除（含文件），关闭则仅暂停（可在已暂停种子页面手动恢复）
+          </div>
+        </el-form-item>
       </el-form>
 
       <div class="form-actions">

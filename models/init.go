@@ -57,6 +57,8 @@ type TorrentInfo struct {
 	HasHR            bool       `gorm:"default:false" json:"hasHR"`
 	HRSeedTimeH      int        `gorm:"default:0" json:"hrSeedTimeH"` // 下载器中的任务 ID（用于暂停/删除操作）
 	CheckCount       int        `gorm:"default:0" json:"checkCount"`  // 进度检查次数
+	Seeders          int        `gorm:"default:0" json:"seeders"`
+	Leechers         int        `gorm:"default:0" json:"leechers"`
 }
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）

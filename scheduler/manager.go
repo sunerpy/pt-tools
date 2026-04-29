@@ -27,6 +27,7 @@ type Manager struct {
 	downloaderManager *downloader.DownloaderManager
 	freeEndMonitor    *FreeEndMonitor
 	cleanupMonitor    *CleanupMonitor
+	peerRatioMonitor  *PeerRatioMonitor
 	eventCancel       func()
 	stopped           bool
 }
@@ -94,6 +95,7 @@ func (m *Manager) InitFreeEndMonitor() {
 	m.initDownloaderManager()
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
+	m.initPeerRatioMonitor()
 }
 
 // GetDownloaderManager 获取下载器管理器
@@ -169,8 +171,8 @@ func (m *Manager) Reload(cfg *models.Config) {
 
 	m.initFreeEndMonitor()
 	m.initCleanupMonitor()
+	m.initPeerRatioMonitor()
 
-	// 检查是否有可用的默认下载器
 	defaultDl, err := m.downloaderManager.GetDefaultDownloader()
 	if err != nil {
 		global.GetSlogger().Warnf("未配置默认下载器，任务不启动: %v", err)
@@ -334,6 +336,21 @@ func (m *Manager) initCleanupMonitor() {
 	}
 }
 
+func (m *Manager) initPeerRatioMonitor() {
+	if global.GlobalDB == nil {
+		return
+	}
+
+	if m.peerRatioMonitor != nil {
+		m.peerRatioMonitor.Stop()
+	}
+
+	m.peerRatioMonitor = NewPeerRatioMonitor(global.GlobalDB.DB, m.downloaderManager)
+	if err := m.peerRatioMonitor.Start(); err != nil {
+		global.GetSlogger().Errorf("启动竞争度监控器失败: %v", err)
+	}
+}
+
 // createQBitFactory 创建 qBittorrent 工厂
 func createQBitFactory() downloader.DownloaderFactory {
 	return func(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
@@ -394,6 +411,10 @@ func (m *Manager) StopAll() {
 	if m.cleanupMonitor != nil {
 		m.cleanupMonitor.Stop()
 		m.cleanupMonitor = nil
+	}
+	if m.peerRatioMonitor != nil {
+		m.peerRatioMonitor.Stop()
+		m.peerRatioMonitor = nil
 	}
 	if m.eventCancel != nil {
 		m.eventCancel()
