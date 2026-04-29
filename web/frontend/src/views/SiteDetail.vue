@@ -115,6 +115,7 @@ const newRss = reactive<RSSConfig>({
   download_path: "",
   filter_rule_ids: [],
   pause_on_free_end: false,
+  filter_mode: "",
 });
 
 const editRssDialogVisible = ref(false);
@@ -129,6 +130,7 @@ const editingRss = reactive<RSSConfig>({
   download_path: "",
   filter_rule_ids: [],
   pause_on_free_end: false,
+  filter_mode: "",
 });
 const editingRssIndex = ref(-1);
 const updatingRss = ref(false);
@@ -216,6 +218,7 @@ function openAddRssDialog() {
     download_path: "",
     filter_rule_ids: [],
     pause_on_free_end: true,
+    filter_mode: "",
   });
   newRssUseCustomPath.value = false;
   rssDialogVisible.value = true;
@@ -253,6 +256,7 @@ async function addRss() {
       download_path: newRss.download_path || "",
       filter_rule_ids: newRss.filter_rule_ids || [],
       pause_on_free_end: newRss.pause_on_free_end || false,
+      filter_mode: newRss.filter_mode || "",
     });
     await sitesApi.save(siteName.value, form.value);
     // 重新加载数据以获取数据库中的真实 ID
@@ -323,6 +327,7 @@ function openEditRssDialog(index: number) {
     download_path: rss.download_path || "",
     filter_rule_ids: rss.filter_rule_ids || [],
     pause_on_free_end: rss.pause_on_free_end || false,
+    filter_mode: rss.filter_mode || "",
   });
   // 检查当前路径是否为预设目录，如果不是则启用自定义输入
   editRssUseCustomPath.value = rss.download_path
@@ -367,6 +372,7 @@ async function updateRss() {
       download_path: editingRss.download_path || "",
       filter_rule_ids: editingRss.filter_rule_ids || [],
       pause_on_free_end: editingRss.pause_on_free_end || false,
+      filter_mode: editingRss.filter_mode || "",
     };
 
     // 保存到服务器
@@ -772,6 +778,17 @@ function toggleEditRssCustomPath() {
           <el-switch v-model="newRss.pause_on_free_end" />
           <div class="form-tip">启用后，免费期结束时如果下载未完成，系统将自动暂停任务</div>
         </el-form-item>
+        <el-form-item label="下载模式">
+          <el-radio-group v-model="newRss.filter_mode" size="small">
+            <el-radio-button label="">跟随全局</el-radio-button>
+            <el-radio-button label="auto_free">自动免费+过滤规则</el-radio-button>
+            <el-radio-button label="filter_only">仅过滤规则</el-radio-button>
+            <el-radio-button label="free_only">仅免费</el-radio-button>
+          </el-radio-group>
+          <div class="form-tip">
+            控制此 RSS 的下载策略。"跟随全局"表示使用全局设置。全局大小上限对所有模式都生效。
+          </div>
+        </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">
             <el-select
@@ -871,6 +888,17 @@ function toggleEditRssCustomPath() {
         <el-form-item label="免费结束暂停">
           <el-switch v-model="editingRss.pause_on_free_end" />
           <div class="form-tip">启用后，免费期结束时如果下载未完成，系统将自动暂停任务</div>
+        </el-form-item>
+        <el-form-item label="下载模式">
+          <el-radio-group v-model="editingRss.filter_mode" size="small">
+            <el-radio-button label="">跟随全局</el-radio-button>
+            <el-radio-button label="auto_free">自动免费+过滤规则</el-radio-button>
+            <el-radio-button label="filter_only">仅过滤规则</el-radio-button>
+            <el-radio-button label="free_only">仅免费</el-radio-button>
+          </el-radio-group>
+          <div class="form-tip">
+            控制此 RSS 的下载策略。"跟随全局"表示使用全局设置。全局大小上限对所有模式都生效。
+          </div>
         </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">

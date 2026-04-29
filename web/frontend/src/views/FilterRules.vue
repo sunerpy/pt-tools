@@ -27,9 +27,24 @@ const form = ref<FilterRule>({
   pattern_type: "keyword",
   match_field: "both",
   require_free: true,
+  min_size_gb: 0,
+  max_size_gb: 0,
   enabled: true,
   priority: 100,
 });
+
+const testForm = ref({
+  test_size_gb: 0,
+  test_is_free: null as boolean | null,
+  global_size: 0,
+  filter_mode: "auto_free" as "auto_free" | "filter_only" | "free_only",
+});
+
+const filterModeOptions = [
+  { value: "auto_free", label: "自动免费 + 过滤规则" },
+  { value: "filter_only", label: "仅过滤规则匹配" },
+  { value: "free_only", label: "仅免费种子" },
+];
 
 const patternTypes = [
   { value: "keyword", label: "关键词", tip: "大小写不敏感，匹配包含该关键词的标题" },
@@ -104,6 +119,8 @@ function openAddDialog() {
     pattern_type: "keyword",
     match_field: "both",
     require_free: true,
+    min_size_gb: 0,
+    max_size_gb: 0,
     enabled: true,
     priority: 100,
   };
@@ -195,6 +212,12 @@ async function testPattern() {
       pattern_type: form.value.pattern_type,
       match_field: form.value.match_field || "both",
       require_free: form.value.require_free,
+      min_size_gb: form.value.min_size_gb || 0,
+      max_size_gb: form.value.max_size_gb || 0,
+      test_size_gb: testForm.value.test_size_gb,
+      test_is_free: testForm.value.test_is_free,
+      global_size: testForm.value.global_size,
+      filter_mode: testForm.value.filter_mode,
       rss_id: selectedRssId.value,
       limit: 20,
     });
@@ -324,6 +347,15 @@ function getMatchFieldLabel(field: string | undefined) {
           </template>
         </el-table-column>
 
+        <el-table-column label="大小范围" min-width="120" align="center">
+          <template #default="{ row }">
+            <span v-if="!row.min_size_gb && !row.max_size_gb">不限</span>
+            <span v-else>
+              {{ row.min_size_gb || 0 }} ~ {{ row.max_size_gb ? row.max_size_gb : "∞" }} GB
+            </span>
+          </template>
+        </el-table-column>
+
         <el-table-column label="操作" min-width="200" align="center">
           <template #default="{ row }">
             <el-space class="rule-actions">
@@ -390,6 +422,18 @@ function getMatchFieldLabel(field: string | undefined) {
           <div class="form-tip">开启后仅下载免费种子</div>
         </el-form-item>
 
+        <el-form-item label="最小大小 (GB)">
+          <el-input-number v-model="form.min_size_gb" :min="0" :max="99999" />
+          <div class="form-tip">种子大小小于该值时不通过此规则，0 = 不限制</div>
+        </el-form-item>
+
+        <el-form-item label="最大大小 (GB)">
+          <el-input-number v-model="form.max_size_gb" :min="0" :max="99999" />
+          <div class="form-tip">
+            种子大小大于该值时不通过此规则，0 = 不限制；规则上限不能突破全局设置
+          </div>
+        </el-form-item>
+
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
         </el-form-item>
@@ -408,6 +452,32 @@ function getMatchFieldLabel(field: string | undefined) {
               :value="rss.id" />
           </el-select>
           <div class="form-tip">选择 RSS 订阅从实时数据中测试，不选则从历史记录中测试</div>
+        </el-form-item>
+
+        <el-form-item label="模拟大小 (GB)">
+          <el-input-number v-model="testForm.test_size_gb" :min="0" :step="0.5" :precision="2" />
+          <div class="form-tip">覆盖种子实际大小以测试大小规则，0 = 使用种子真实大小</div>
+        </el-form-item>
+
+        <el-form-item label="模拟免费状态">
+          <el-radio-group v-model="testForm.test_is_free">
+            <el-radio :label="null">使用真实值</el-radio>
+            <el-radio :label="true">免费</el-radio>
+            <el-radio :label="false">非免费</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="模拟全局上限 (GB)">
+          <el-input-number v-model="testForm.global_size" :min="0" :max="99999" />
+          <div class="form-tip">模拟全局 TorrentSizeGB 上限，0 = 无上限</div>
+        </el-form-item>
+
+        <el-form-item label="下载模式">
+          <el-radio-group v-model="testForm.filter_mode">
+            <el-radio-button v-for="m in filterModeOptions" :key="m.value" :label="m.value">
+              {{ m.label }}
+            </el-radio-button>
+          </el-radio-group>
         </el-form-item>
 
         <el-form-item>
@@ -458,11 +528,39 @@ function getMatchFieldLabel(field: string | undefined) {
             <template #header>
               <div class="match-header">
                 <span class="match-index">#{{ idx + 1 }}</span>
-                <el-tag size="small" type="success" effect="plain">匹配成功</el-tag>
+                <el-tag
+                  size="small"
+                  :type="match.decision === 'downloaded' ? 'success' : 'danger'"
+                  effect="plain">
+                  {{
+                    match.decision === "downloaded"
+                      ? "会下载"
+                      : match.decision === "skipped"
+                        ? "会跳过"
+                        : "匹配成功"
+                  }}
+                </el-tag>
                 <el-tag v-if="match.is_free" size="small" type="warning" effect="plain">
                   免费
                 </el-tag>
                 <el-tag v-else size="small" type="info" effect="plain">非免费</el-tag>
+                <el-tag
+                  v-if="match.source === 'filter_rule'"
+                  size="small"
+                  type="primary"
+                  effect="plain">
+                  过滤规则通道
+                </el-tag>
+                <el-tag
+                  v-else-if="match.source === 'free_download'"
+                  size="small"
+                  type="success"
+                  effect="plain">
+                  免费通道
+                </el-tag>
+                <span v-if="match.size_gb" class="match-size">
+                  {{ match.size_gb.toFixed(2) }} GB
+                </span>
               </div>
             </template>
 
@@ -475,6 +573,11 @@ function getMatchFieldLabel(field: string | undefined) {
               <div v-if="match.tag" class="match-section">
                 <div class="match-label">标签</div>
                 <div class="match-tag-content">{{ match.tag }}</div>
+              </div>
+
+              <div v-if="match.reason" class="match-section">
+                <div class="match-label">原因</div>
+                <div class="match-reason">{{ match.reason }}</div>
               </div>
             </div>
           </el-card>

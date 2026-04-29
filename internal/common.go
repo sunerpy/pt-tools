@@ -592,8 +592,9 @@ func downloadWorkerUnified(
 				stats.detailFailed.Add(1)
 				continue
 			}
-			// 使用 v2.TorrentItem 的方法
-			canFinished := detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
+			// 使用 v2.TorrentItem 的方法（此处传 0 给 sizeLimitGB，全局大小硬上限由 filter.Decide 统一检查，
+			// 避免过滤规则通道绕过全局限制）
+			canFinished := detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, 0)
 			isFree := detail.IsFree()
 
 			freeEndTime := detail.GetFreeEndTime()
@@ -608,31 +609,35 @@ func downloadWorkerUnified(
 
 			// 获取种子的标签/副标题用于过滤匹配
 			detailTag := detail.GetSubTitle()
+			sizeGB := float64(detail.SizeBytes) / 1024 / 1024 / 1024
 
-			// 检查过滤规则匹配
-			var matchedRule *models.FilterRule
-			var shouldDownloadByFilter bool
-			downloadSource := "free_download"
+			// 统一通过 filter.Decide 做完整决策：全局大小硬上限 → 过滤规则通道 → 免费通道
+			var decision filter.Decision
+			if filterSvc != nil && rssCfg.ID != 0 && hasAssociatedRules {
+				decision = filterSvc.Decide(filter.DecisionContext{
+					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:     isFree,
+					CanFinish:  canFinished,
+					GlobalSize: gl.TorrentSizeGB,
+					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+				}, rssCfg.ID)
+			} else {
+				decision = filter.DecideWithoutRules(filter.DecisionContext{
+					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:     isFree,
+					CanFinish:  canFinished,
+					GlobalSize: gl.TorrentSizeGB,
+					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+				})
+			}
 
-			if filterSvc != nil && rssCfg.ID != 0 {
-				// 构建匹配输入，包含标题和标签
-				matchInput := filter.MatchInput{
-					Title: title,
-					Tag:   detailTag,
-				}
-
-				// 优先使用 RSS 关联的过滤规则（多对多关联）
-				if hasAssociatedRules {
-					shouldDownloadByFilter, matchedRule = filterSvc.ShouldDownloadForRSSWithInput(matchInput, isFree, rssCfg.ID)
-					if matchedRule != nil {
-						downloadSource = "filter_rule"
-						sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v)", title, detailTag, matchedRule.Name, matchedRule.RequireFree)
-					}
-				} else {
-					// RSS 没有关联规则时，不进行过滤规则匹配
-					shouldDownloadByFilter = false
-					matchedRule = nil
-				}
+			matchedRule := decision.MatchedRule
+			downloadSource := decision.Source
+			if downloadSource == "" {
+				downloadSource = filter.SourceFreeDownload
+			}
+			if matchedRule != nil && decision.Source == filter.SourceFilterRule {
+				sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v, min=%d, max=%d)", title, detailTag, matchedRule.Name, matchedRule.RequireFree, matchedRule.MinSizeGB, matchedRule.MaxSizeGB)
 			}
 
 			// 更新种子状态（标记跳过或继续下载）
@@ -664,11 +669,7 @@ func downloadWorkerUnified(
 				}
 			}
 
-			// 决定是否下载：
-			// 1. 通过过滤规则匹配且满足条件
-			// 2. 或者通过免费下载逻辑（免费且可完成）
-			shouldDownloadByFree := isFree && canFinished
-			shouldDownload := shouldDownloadByFilter || shouldDownloadByFree
+			shouldDownload := decision.ShouldDownload
 
 			if isFree {
 				stats.free.Add(1)
@@ -676,7 +677,11 @@ func downloadWorkerUnified(
 
 			if !shouldDownload {
 				torrent.IsSkipped = true
-				sLogger().Infof("种子: %s 不满足下载条件，跳过 (原因: %s)", title, buildSkipReason(isFree, canFinished, shouldDownloadByFilter))
+				reason := decision.Reason
+				if reason == "" {
+					reason = buildSkipReason(isFree, canFinished, false)
+				}
+				sLogger().Infof("种子: %s 不满足下载条件，跳过 (原因: %s)", title, reason)
 			} else {
 				torrent.IsSkipped = false
 			}
@@ -1138,7 +1143,8 @@ func downloadWorker[T models.ResType](
 				continue
 			}
 			detail := resDetail.Data
-			canFinished := detail.CanbeFinished(global.GetSlogger(), gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, gl.TorrentSizeGB)
+			// 全局大小硬上限由 filter.Decide 统一处理，此处传 0 避免重复检查
+			canFinished := detail.CanbeFinished(global.GetSlogger(), gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, 0)
 			isFree := detail.IsFree()
 
 			legacyFreeEndTime := detail.GetFreeEndTime()
@@ -1153,31 +1159,34 @@ func downloadWorker[T models.ResType](
 
 			// 获取种子的标签/副标题用于过滤匹配
 			detailTag := detail.GetSubTitle()
+			sizeGB := float64(detail.GetSizeBytes()) / 1024 / 1024 / 1024
 
-			// 检查过滤规则匹配
-			var matchedRule *models.FilterRule
-			var shouldDownloadByFilter bool
-			downloadSource := "free_download"
+			var decision filter.Decision
+			if filterSvc != nil && rssCfg.ID != 0 && hasAssociatedRules {
+				decision = filterSvc.Decide(filter.DecisionContext{
+					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:     isFree,
+					CanFinish:  canFinished,
+					GlobalSize: gl.TorrentSizeGB,
+					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+				}, rssCfg.ID)
+			} else {
+				decision = filter.DecideWithoutRules(filter.DecisionContext{
+					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:     isFree,
+					CanFinish:  canFinished,
+					GlobalSize: gl.TorrentSizeGB,
+					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+				})
+			}
 
-			if filterSvc != nil && rssCfg.ID != 0 {
-				// 构建匹配输入，包含标题和标签
-				matchInput := filter.MatchInput{
-					Title: title,
-					Tag:   detailTag,
-				}
-
-				// 优先使用 RSS 关联的过滤规则（多对多关联）
-				if hasAssociatedRules {
-					shouldDownloadByFilter, matchedRule = filterSvc.ShouldDownloadForRSSWithInput(matchInput, isFree, rssCfg.ID)
-					if matchedRule != nil {
-						downloadSource = "filter_rule"
-						sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v)", title, detailTag, matchedRule.Name, matchedRule.RequireFree)
-					}
-				} else {
-					// RSS 没有关联规则时，不进行过滤规则匹配
-					shouldDownloadByFilter = false
-					matchedRule = nil
-				}
+			matchedRule := decision.MatchedRule
+			downloadSource := decision.Source
+			if downloadSource == "" {
+				downloadSource = filter.SourceFreeDownload
+			}
+			if matchedRule != nil && decision.Source == filter.SourceFilterRule {
+				sLogger().Infof("种子 %s (tag: %s) 匹配 RSS 关联过滤规则: %s (require_free=%v, min=%d, max=%d)", title, detailTag, matchedRule.Name, matchedRule.RequireFree, matchedRule.MinSizeGB, matchedRule.MaxSizeGB)
 			}
 
 			// 更新种子状态（标记跳过或继续下载）
@@ -1203,15 +1212,15 @@ func downloadWorker[T models.ResType](
 				}
 			}
 
-			// 决定是否下载：
-			// 1. 通过过滤规则匹配且满足条件
-			// 2. 或者通过免费下载逻辑（免费且可完成）
-			shouldDownloadByFree := isFree && canFinished
-			shouldDownload := shouldDownloadByFilter || shouldDownloadByFree
+			shouldDownload := decision.ShouldDownload
 
 			if !shouldDownload {
 				torrent.IsSkipped = true
-				sLogger().Infof("种子: %s 不满足下载条件，跳过 (原因: %s)", title, buildSkipReason(isFree, canFinished, shouldDownloadByFilter))
+				reason := decision.Reason
+				if reason == "" {
+					reason = buildSkipReason(isFree, canFinished, false)
+				}
+				sLogger().Infof("种子: %s 不满足下载条件，跳过 (原因: %s)", title, reason)
 			} else {
 				torrent.IsSkipped = false
 			}

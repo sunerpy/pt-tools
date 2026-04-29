@@ -25,6 +25,8 @@ type FilterRuleRequest struct {
 	PatternType string `json:"pattern_type"` // keyword, wildcard, regex
 	MatchField  string `json:"match_field"`  // title, tag, both
 	RequireFree bool   `json:"require_free"`
+	MinSizeGB   int    `json:"min_size_gb"`
+	MaxSizeGB   int    `json:"max_size_gb"`
 	Enabled     bool   `json:"enabled"`
 	SiteID      *uint  `json:"site_id"`
 	RSSID       *uint  `json:"rss_id"`
@@ -39,6 +41,8 @@ type FilterRuleResponse struct {
 	PatternType string `json:"pattern_type"`
 	MatchField  string `json:"match_field"`
 	RequireFree bool   `json:"require_free"`
+	MinSizeGB   int    `json:"min_size_gb"`
+	MaxSizeGB   int    `json:"max_size_gb"`
 	Enabled     bool   `json:"enabled"`
 	SiteID      *uint  `json:"site_id"`
 	RSSID       *uint  `json:"rss_id"`
@@ -49,20 +53,30 @@ type FilterRuleResponse struct {
 
 // FilterRuleTestRequest 过滤规则测试请求
 type FilterRuleTestRequest struct {
-	Pattern     string `json:"pattern"`
-	PatternType string `json:"pattern_type"`
-	MatchField  string `json:"match_field"`  // title, tag, both
-	RequireFree bool   `json:"require_free"` // 是否仅匹配免费种子
-	SiteID      *uint  `json:"site_id"`
-	RSSID       *uint  `json:"rss_id"`
-	Limit       int    `json:"limit"` // 最多返回多少条匹配结果
+	Pattern     string  `json:"pattern"`
+	PatternType string  `json:"pattern_type"`
+	MatchField  string  `json:"match_field"`  // title, tag, both
+	RequireFree bool    `json:"require_free"` // 是否仅匹配免费种子
+	MinSizeGB   int     `json:"min_size_gb"`
+	MaxSizeGB   int     `json:"max_size_gb"`
+	TestSizeGB  float64 `json:"test_size_gb"` // 模拟种子大小，用于完整决策测试
+	TestIsFree  *bool   `json:"test_is_free"` // 覆盖 is_free 状态（nil=使用真实值）
+	GlobalSize  int     `json:"global_size"`  // 模拟全局大小上限
+	FilterMode  string  `json:"filter_mode"`  // 模拟 FilterMode
+	SiteID      *uint   `json:"site_id"`
+	RSSID       *uint   `json:"rss_id"`
+	Limit       int     `json:"limit"` // 最多返回多少条匹配结果
 }
 
 // FilterRuleTestMatch 单个匹配结果
 type FilterRuleTestMatch struct {
-	Title  string `json:"title"`
-	Tag    string `json:"tag"`
-	IsFree bool   `json:"is_free"` // 是否免费
+	Title    string  `json:"title"`
+	Tag      string  `json:"tag"`
+	IsFree   bool    `json:"is_free"`  // 是否免费
+	SizeGB   float64 `json:"size_gb"`  // 种子大小（GB）
+	Decision string  `json:"decision"` // 完整决策结果: downloaded / skipped
+	Reason   string  `json:"reason"`   // 跳过原因（如果有）
+	Source   string  `json:"source"`   // 下载通道: filter_rule / free_download / ""
 }
 
 // FilterRuleTestResponse 过滤规则测试响应
@@ -203,6 +217,8 @@ func (s *Server) createFilterRule(w http.ResponseWriter, r *http.Request) {
 		PatternType: patternType,
 		MatchField:  matchField,
 		RequireFree: req.RequireFree,
+		MinSizeGB:   sanitizeRuleSize(req.MinSizeGB),
+		MaxSizeGB:   sanitizeRuleSize(req.MaxSizeGB),
 		Enabled:     req.Enabled,
 		SiteID:      req.SiteID,
 		RSSID:       req.RSSID,
@@ -296,6 +312,8 @@ func (s *Server) updateFilterRule(w http.ResponseWriter, r *http.Request, id uin
 	}
 
 	rule.RequireFree = req.RequireFree
+	rule.MinSizeGB = sanitizeRuleSize(req.MinSizeGB)
+	rule.MaxSizeGB = sanitizeRuleSize(req.MaxSizeGB)
 	rule.Enabled = req.Enabled
 	rule.SiteID = req.SiteID
 	rule.RSSID = req.RSSID
@@ -417,17 +435,48 @@ func (s *Server) testFilterRule(w http.ResponseWriter, r *http.Request) {
 	// 匹配种子
 	var matches []FilterRuleTestMatch
 	global.GetSlogger().Debugf("[FilterRuleTest] 开始匹配种子，总数: %d", len(torrents))
+
+	testRule := &models.FilterRule{
+		Pattern:     req.Pattern,
+		PatternType: models.PatternType(patternType),
+		MatchField:  matchField,
+		RequireFree: req.RequireFree,
+		MinSizeGB:   sanitizeRuleSize(req.MinSizeGB),
+		MaxSizeGB:   sanitizeRuleSize(req.MaxSizeGB),
+		Enabled:     true,
+	}
+	mode := models.NormalizeFilterMode(models.FilterMode(req.FilterMode))
+
 	for _, t := range torrents {
 		isMatch := matchesField(matcher, matchField, t.Title, t.Tag)
 		global.GetSlogger().Debugf("[FilterRuleTest] 尝试匹配: title=%s, tag=%s, matched=%v", t.Title, t.Tag, isMatch)
-		if isMatch {
-			matches = append(matches, FilterRuleTestMatch{
-				Title: t.Title,
-				Tag:   t.Tag,
-			})
-			if len(matches) >= limit {
-				break
-			}
+		if !isMatch {
+			continue
+		}
+
+		// 用当前种子数据评估完整决策（模拟 filter.Decide 流程）
+		torrentSizeGB := bytesToGB(t.TorrentSize)
+		if req.TestSizeGB > 0 {
+			torrentSizeGB = req.TestSizeGB
+		}
+		isFree := t.IsFree
+		if req.TestIsFree != nil {
+			isFree = *req.TestIsFree
+		}
+		decision := evaluateTestDecision(testRule, mode, req.GlobalSize, torrentSizeGB, isFree)
+
+		match := FilterRuleTestMatch{
+			Title:    t.Title,
+			Tag:      t.Tag,
+			IsFree:   isFree,
+			SizeGB:   torrentSizeGB,
+			Decision: decisionLabel(decision.ShouldDownload),
+			Reason:   decision.Reason,
+			Source:   decision.Source,
+		}
+		matches = append(matches, match)
+		if len(matches) >= limit {
+			break
 		}
 	}
 
@@ -518,9 +567,11 @@ func (s *Server) testFilterRuleWithRSS(w http.ResponseWriter, matcher filter.Pat
 
 			if matchCount < limit {
 				matchChan <- FilterRuleTestMatch{
-					Title:  title,
-					Tag:    tag,
-					IsFree: isFree,
+					Title:    title,
+					Tag:      tag,
+					IsFree:   isFree,
+					Decision: decisionLabel(true),
+					Source:   filter.SourceFilterRule,
 				}
 				matchCount++
 			}
@@ -611,6 +662,8 @@ func toFilterRuleResponse(rule models.FilterRule) FilterRuleResponse {
 		PatternType: string(rule.PatternType),
 		MatchField:  matchField,
 		RequireFree: rule.RequireFree,
+		MinSizeGB:   rule.MinSizeGB,
+		MaxSizeGB:   rule.MaxSizeGB,
 		Enabled:     rule.Enabled,
 		SiteID:      rule.SiteID,
 		RSSID:       rule.RSSID,
@@ -618,4 +671,60 @@ func toFilterRuleResponse(rule models.FilterRule) FilterRuleResponse {
 		CreatedAt:   rule.CreatedAt.Format("2006-01-02 15:04:05"),
 		UpdatedAt:   rule.UpdatedAt.Format("2006-01-02 15:04:05"),
 	}
+}
+
+// sanitizeRuleSize clamps negative values to 0 (meaning "no bound").
+func sanitizeRuleSize(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// evaluateTestDecision mirrors filter.Decide semantics for the rule-tester UI.
+// It returns the same Decision shape but operates on a single in-memory rule
+// candidate rather than the DB-backed rule cache.
+func evaluateTestDecision(rule *models.FilterRule, mode models.FilterMode, globalSizeGB int, sizeGB float64, isFree bool) filter.Decision {
+	if globalSizeGB > 0 && sizeGB > float64(globalSizeGB) {
+		return filter.Decision{ShouldDownload: false, Source: filter.SourceNone, Reason: "超出全局大小限制"}
+	}
+	if mode == models.FilterModeFreeOnly {
+		if isFree {
+			return filter.Decision{ShouldDownload: true, Source: filter.SourceFreeDownload}
+		}
+		return filter.Decision{ShouldDownload: false, Source: filter.SourceNone, Reason: "free_only 模式下过滤规则通道已关闭且非免费"}
+	}
+	if rule.RequireFree && !isFree {
+		if mode == models.FilterModeFilterOnly {
+			return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则要求免费，但种子非免费"}
+		}
+		if isFree {
+			return filter.Decision{ShouldDownload: true, MatchedRule: rule, Source: filter.SourceFreeDownload}
+		}
+		return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则要求免费，种子非免费"}
+	}
+	if !rule.MatchesSize(sizeGB) {
+		if mode == models.FilterModeFilterOnly {
+			return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则但大小不符合规则约束"}
+		}
+		if isFree {
+			return filter.Decision{ShouldDownload: true, MatchedRule: rule, Source: filter.SourceFreeDownload}
+		}
+		return filter.Decision{ShouldDownload: false, MatchedRule: rule, Source: filter.SourceNone, Reason: "匹配规则但大小不符合且非免费"}
+	}
+	return filter.Decision{ShouldDownload: true, MatchedRule: rule, Source: filter.SourceFilterRule}
+}
+
+func decisionLabel(ok bool) string {
+	if ok {
+		return "downloaded"
+	}
+	return "skipped"
+}
+
+func bytesToGB(n int64) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / 1024 / 1024 / 1024
 }

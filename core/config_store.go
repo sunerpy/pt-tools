@@ -76,7 +76,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd})
+				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode})
 			}
 			out.Sites[sg] = sc
 		}
@@ -205,6 +205,7 @@ func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 		cur.PeerRatioMaxSL = gs.PeerRatioMaxSL
 		cur.PeerRatioIntervalMin = gs.PeerRatioIntervalMin
 		cur.PeerRatioRemoveData = gs.PeerRatioRemoveData
+		cur.DefaultFilterMode = models.NormalizeFilterMode(gs.DefaultFilterMode)
 		if err := db.Save(&cur).Error; err != nil {
 			return err
 		}
@@ -311,6 +312,7 @@ func (s *ConfigStore) ReplaceSiteRSS(siteID uint, rss []models.RSSConfig) error 
 			Tag:             r.Tag,
 			IntervalMinutes: r.IntervalMinutes,
 			DownloaderID:    r.DownloaderID,
+			FilterMode:      r.FilterMode,
 		}
 		if err := db.Create(&row).Error; err != nil {
 			return err
@@ -481,6 +483,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 				DownloaderID:    r.DownloaderID,
 				DownloadPath:    r.DownloadPath,
 				PauseOnFreeEnd:  r.PauseOnFreeEnd,
+				FilterMode:      r.FilterMode,
 			}
 			if err := tx.Create(&rr).Error; err != nil {
 				return err
@@ -547,7 +550,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd})
+			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode})
 		}
 		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
@@ -583,6 +586,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 			DownloadPath:    r.DownloadPath,
 			IsExample:       r.IsExample,
 			PauseOnFreeEnd:  r.PauseOnFreeEnd,
+			FilterMode:      r.FilterMode,
 		}
 
 		// 获取关联的过滤规则 ID

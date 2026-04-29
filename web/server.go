@@ -468,6 +468,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			PeerRatioMaxSL         float64 `json:"peer_ratio_max_sl"`
 			PeerRatioIntervalMin   int     `json:"peer_ratio_interval_min"`
 			PeerRatioRemoveData    bool    `json:"peer_ratio_remove_data"`
+			DefaultFilterMode      string  `json:"default_filter_mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -514,6 +515,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			PeerRatioMaxSL:         req.PeerRatioMaxSL,
 			PeerRatioIntervalMin:   req.PeerRatioIntervalMin,
 			PeerRatioRemoveData:    req.PeerRatioRemoveData,
+			DefaultFilterMode:      models.NormalizeFilterMode(models.FilterMode(req.DefaultFilterMode)),
 		}
 		if err := s.store.SaveGlobalSettings(gs); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

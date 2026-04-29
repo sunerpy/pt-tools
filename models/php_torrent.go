@@ -80,3 +80,8 @@ func (p PHPTorrentInfo) GetName() string {
 func (p PHPTorrentInfo) GetSubTitle() string {
 	return p.SubTitle
 }
+
+// GetSizeBytes 获取种子大小（字节），由 SizeMB 换算得到。
+func (p PHPTorrentInfo) GetSizeBytes() int64 {
+	return int64(p.SizeMB * 1024 * 1024)
+}

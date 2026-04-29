@@ -25,6 +25,8 @@ type TorrentMetadata interface {
 	GetName() string
 	// GetSubTitle 获取副标题/标签信息
 	GetSubTitle() string
+	// GetSizeBytes 获取种子大小（字节），用于过滤规则的大小匹配
+	GetSizeBytes() int64
 }
 type FreeDownChecker interface {
 	IsFree() bool
@@ -225,4 +227,12 @@ func (t MTTorrentDetail) GetName() string {
 // GetSubTitle 获取副标题（返回 SmallDescr）
 func (t MTTorrentDetail) GetSubTitle() string {
 	return t.SmallDescr
+}
+
+// GetSizeBytes 获取种子大小（字节）；解析失败时返回 0。
+func (t MTTorrentDetail) GetSizeBytes() int64 {
+	if n, err := strconv.ParseInt(t.Size, 10, 64); err == nil {
+		return n
+	}
+	return 0
 }
