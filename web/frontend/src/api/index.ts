@@ -49,6 +49,8 @@ export const api = {
 };
 
 // API 类型定义
+export type FilterMode = "" | "auto_free" | "filter_only" | "free_only";
+
 export interface GlobalSettings {
   default_interval_minutes: number;
   download_dir: string;
@@ -76,6 +78,11 @@ export interface GlobalSettings {
   cleanup_min_retain_h?: number;
   cleanup_protect_tags?: string;
   auto_delete_on_free_end?: boolean;
+  peer_ratio_enabled?: boolean;
+  peer_ratio_max_sl?: number;
+  peer_ratio_interval_min?: number;
+  peer_ratio_remove_data?: boolean;
+  default_filter_mode?: FilterMode;
 }
 
 export interface QbitSettings {
@@ -97,6 +104,7 @@ export interface RSSConfig {
   filter_rule_ids?: number[]; // 关联的过滤规则 ID 列表
   pause_on_free_end?: boolean; // 免费结束时是否暂停未完成的下载
   is_example?: boolean; // 是否为示例配置
+  filter_mode?: FilterMode; // 空字符串表示继承全局
 }
 
 export interface SiteConfig {
@@ -322,6 +330,8 @@ export interface FilterRule {
   pattern_type: "keyword" | "wildcard" | "regex";
   match_field?: "title" | "tag" | "both";
   require_free: boolean;
+  min_size_gb?: number;
+  max_size_gb?: number;
   enabled: boolean;
   site_id?: number;
   rss_id?: number;
@@ -335,6 +345,12 @@ export interface FilterRuleTestRequest {
   pattern_type: string;
   match_field?: string;
   require_free?: boolean;
+  min_size_gb?: number;
+  max_size_gb?: number;
+  test_size_gb?: number;
+  test_is_free?: boolean | null;
+  global_size?: number;
+  filter_mode?: FilterMode;
   site_id?: number;
   rss_id?: number;
   limit?: number;
@@ -344,6 +360,10 @@ export interface FilterRuleTestMatch {
   title: string;
   tag: string;
   is_free: boolean;
+  size_gb?: number;
+  decision?: "downloaded" | "skipped";
+  reason?: string;
+  source?: "filter_rule" | "free_download" | "";
 }
 
 export interface FilterRuleTestResponse {

@@ -12,6 +12,26 @@ import (
 type MatchInput struct {
 	Title string
 	Tag   string
+	// SizeGB is the torrent size in GB. Zero means unknown (skip size checks).
+	SizeGB float64
+}
+
+// DecisionContext bundles the full set of inputs required to make a download decision.
+type DecisionContext struct {
+	Input      MatchInput
+	IsFree     bool
+	CanFinish  bool
+	GlobalSize int
+	FilterMode models.FilterMode
+}
+
+// Decision captures the outcome of a full download decision, including which
+// channel (if any) approved the download and the reason if rejected.
+type Decision struct {
+	ShouldDownload bool
+	MatchedRule    *models.FilterRule
+	Source         string
+	Reason         string
 }
 
 // FilterService provides filter rule matching functionality.
@@ -49,6 +69,11 @@ type FilterService interface {
 	// ShouldDownloadForRSSWithInput determines if a torrent should be downloaded based on RSS-associated filter rules.
 	// Supports matching against title, tag, or both based on rule configuration.
 	ShouldDownloadForRSSWithInput(input MatchInput, isFree bool, rssID uint) (bool, *models.FilterRule)
+
+	// Decide evaluates the full download decision tree for an RSS item, honoring
+	// the configured FilterMode, global hard size limit, and per-rule size bounds.
+	// It is the canonical entry point for the v0.25+ download decision logic.
+	Decide(ctx DecisionContext, rssID uint) Decision
 
 	// GetEnabledRules returns all enabled filter rules ordered by priority.
 	GetEnabledRules() ([]models.FilterRule, error)
@@ -338,5 +363,143 @@ func (s *filterService) MatchTorrentForRSSWithInput(input MatchInput, isFree boo
 		Matched:        true,
 		Rule:           rule,
 		ShouldDownload: shouldDownload,
+	}
+}
+
+// Download source tags persisted on TorrentInfo.DownloadSource.
+const (
+	SourceFreeDownload = "free_download"
+	SourceFilterRule   = "filter_rule"
+	SourceNone         = ""
+)
+
+// Decide implements the FilterMode-aware decision tree. Order of checks:
+//  1. Global hard size limit — if exceeded, reject immediately regardless of mode.
+//  2. Filter-rule channel (enabled unless mode == free_only):
+//     matches pattern + satisfies RequireFree + per-rule size bounds.
+//  3. Free channel (enabled unless mode == filter_only):
+//     isFree + CanFinish (free-period time check only; size already covered by step 1).
+//
+// Per-rule bounds can only narrow the global limit (checked after step 1 is passed).
+// Filter mode falls back to FilterModeAutoFree when unrecognized.
+func (s *filterService) Decide(ctx DecisionContext, rssID uint) Decision {
+	mode := models.NormalizeFilterMode(ctx.FilterMode)
+
+	if ctx.GlobalSize > 0 && ctx.Input.SizeGB > float64(ctx.GlobalSize) {
+		return Decision{
+			ShouldDownload: false,
+			Source:         SourceNone,
+			Reason:         "超出全局大小限制",
+		}
+	}
+
+	var matchedRule *models.FilterRule
+	if mode != models.FilterModeFreeOnly {
+		rule, matched := s.MatchRulesForRSSWithInput(ctx.Input, rssID)
+		if matched {
+			matchedRule = rule
+			if rule.RequireFree && !ctx.IsFree {
+				// Don't approve via filter channel, but keep the matchedRule for
+				// logging; the free channel may still approve below.
+			} else if !rule.MatchesSize(ctx.Input.SizeGB) {
+				// Rule matched text but not size — same handling as above.
+			} else {
+				return Decision{
+					ShouldDownload: true,
+					MatchedRule:    rule,
+					Source:         SourceFilterRule,
+				}
+			}
+		}
+	}
+
+	if mode != models.FilterModeFilterOnly {
+		if ctx.IsFree && ctx.CanFinish {
+			return Decision{
+				ShouldDownload: true,
+				MatchedRule:    matchedRule,
+				Source:         SourceFreeDownload,
+			}
+		}
+	}
+
+	return Decision{
+		ShouldDownload: false,
+		MatchedRule:    matchedRule,
+		Source:         SourceNone,
+		Reason:         buildDecisionReason(mode, matchedRule, ctx.IsFree, ctx.CanFinish),
+	}
+}
+
+// DecideWithoutRules runs the same decision tree as Decide but skips the
+// filter-rule channel entirely. Callers use it when the RSS has no associated
+// rules; it preserves the global hard size limit and free-channel semantics
+// without requiring a FilterService.
+func DecideWithoutRules(ctx DecisionContext) Decision {
+	mode := models.NormalizeFilterMode(ctx.FilterMode)
+
+	if ctx.GlobalSize > 0 && ctx.Input.SizeGB > float64(ctx.GlobalSize) {
+		return Decision{
+			ShouldDownload: false,
+			Source:         SourceNone,
+			Reason:         "超出全局大小限制",
+		}
+	}
+
+	if mode == models.FilterModeFilterOnly {
+		return Decision{
+			ShouldDownload: false,
+			Source:         SourceNone,
+			Reason:         "filter_only 模式下未匹配过滤规则（RSS 无关联规则）",
+		}
+	}
+
+	if ctx.IsFree && ctx.CanFinish {
+		return Decision{
+			ShouldDownload: true,
+			Source:         SourceFreeDownload,
+		}
+	}
+
+	if !ctx.IsFree {
+		return Decision{
+			ShouldDownload: false,
+			Source:         SourceNone,
+			Reason:         "非免费且无关联过滤规则",
+		}
+	}
+	return Decision{
+		ShouldDownload: false,
+		Source:         SourceNone,
+		Reason:         "免费期剩余时间不足",
+	}
+}
+
+func buildDecisionReason(mode models.FilterMode, rule *models.FilterRule, isFree, canFinish bool) string {
+	switch mode {
+	case models.FilterModeFilterOnly:
+		if rule == nil {
+			return "未匹配过滤规则（filter_only 模式下免费通道已关闭）"
+		}
+		if rule.RequireFree && !isFree {
+			return "匹配规则要求免费，但种子非免费"
+		}
+		return "匹配规则但大小不符合规则约束"
+	case models.FilterModeFreeOnly:
+		if !isFree {
+			return "非免费种子（free_only 模式下过滤规则通道已关闭）"
+		}
+		return "免费期剩余时间不足"
+	default:
+		if rule != nil && rule.RequireFree && !isFree {
+			return "匹配规则要求免费，种子非免费；且非免费或无法完成"
+		}
+		if rule != nil && !rule.MatchesSize(0) && rule.MaxSizeGB > 0 {
+			return "匹配规则但大小不符合；且非免费或无法完成"
+		}
+		if !isFree {
+			return "非免费且未匹配过滤规则"
+		}
+		return "免费期剩余时间不足"
 	}
 }

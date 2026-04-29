@@ -36,12 +36,27 @@ type FilterRule struct {
 	PatternType PatternType `gorm:"size:16;not null;default:'keyword'" json:"pattern_type"`
 	MatchField  MatchField  `gorm:"size:16;not null;default:'both'" json:"match_field"`
 	RequireFree bool        `gorm:"default:true" json:"require_free"`
+	MinSizeGB   int         `gorm:"default:0" json:"min_size_gb"`
+	MaxSizeGB   int         `gorm:"default:0" json:"max_size_gb"`
 	Enabled     bool        `gorm:"default:true" json:"enabled"`
 	SiteID      *uint       `gorm:"index" json:"site_id"`
 	RSSID       *uint       `gorm:"index" json:"rss_id"`
 	Priority    int         `gorm:"default:100" json:"priority"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+// MatchesSize reports whether the torrent size (in GB) satisfies this rule's
+// optional MinSizeGB / MaxSizeGB bounds. Zero on either side means "no bound".
+// The rule's bounds can only narrow the global TorrentSizeGB; never widen it.
+func (r *FilterRule) MatchesSize(sizeGB float64) bool {
+	if r.MinSizeGB > 0 && sizeGB < float64(r.MinSizeGB) {
+		return false
+	}
+	if r.MaxSizeGB > 0 && sizeGB > float64(r.MaxSizeGB) {
+		return false
+	}
+	return true
 }
 
 // TableName returns the table name for FilterRule.

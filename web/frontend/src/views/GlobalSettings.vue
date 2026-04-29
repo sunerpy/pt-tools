@@ -17,7 +17,22 @@ const form = ref<GlobalSettings>({
   min_free_minutes: 30,
   auto_start: false,
   auto_delete_on_free_end: false,
+  default_filter_mode: "auto_free",
 });
+
+const filterModeOptions = [
+  {
+    value: "auto_free",
+    label: "自动免费 + 过滤规则",
+    desc: "默认。免费种子自动下载，同时启用过滤规则",
+  },
+  {
+    value: "filter_only",
+    label: "仅过滤规则匹配",
+    desc: "关闭自动下载免费种子，只下载匹配过滤规则的种子",
+  },
+  { value: "free_only", label: "仅免费（忽略过滤规则）", desc: "只下载免费种子，忽略所有过滤规则" },
+];
 
 onMounted(async () => {
   loading.value = true;
@@ -150,6 +165,31 @@ async function save() {
               <el-form-item label="自动启动任务">
                 <el-switch v-model="form.auto_start" />
                 <div class="form-tip">程序启动时立即开启已启用的 RSS 检查任务</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="40" class="strategy-row">
+            <el-col :md="24">
+              <el-form-item label="默认下载模式">
+                <el-radio-group v-model="form.default_filter_mode">
+                  <el-radio-button
+                    v-for="opt in filterModeOptions"
+                    :key="opt.value"
+                    :label="opt.value">
+                    {{ opt.label }}
+                  </el-radio-button>
+                </el-radio-group>
+                <div class="form-tip">
+                  控制 RSS 种子下载逻辑（RSS 订阅级别可 override）。全局大小上限对所有模式都生效。
+                </div>
+                <div
+                  v-for="opt in filterModeOptions"
+                  :key="opt.value"
+                  v-show="form.default_filter_mode === opt.value"
+                  class="form-tip form-tip-secondary">
+                  {{ opt.desc }}
+                </div>
               </el-form-item>
             </el-col>
           </el-row>

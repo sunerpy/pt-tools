@@ -18,6 +18,35 @@ const (
 	MaxConcurrency     int32 = 10 // 最大并发数
 )
 
+// FilterMode controls which download channels are active for an RSS feed.
+type FilterMode string
+
+const (
+	// FilterModeAutoFree enables both the free auto-download channel and
+	// the filter-rule channel. This preserves pre-v0.25 behavior and is the default.
+	FilterModeAutoFree FilterMode = "auto_free"
+	// FilterModeFilterOnly disables the free auto-download channel; only torrents
+	// matching an associated filter rule are downloaded.
+	FilterModeFilterOnly FilterMode = "filter_only"
+	// FilterModeFreeOnly disables the filter-rule channel; only free torrents
+	// that can be finished in time are downloaded (ignores associated rules).
+	FilterModeFreeOnly FilterMode = "free_only"
+)
+
+// DefaultFilterMode is the fallback when neither RSS nor Global specifies one.
+const DefaultFilterMode = FilterModeAutoFree
+
+// NormalizeFilterMode returns a validated FilterMode, falling back to DefaultFilterMode
+// when the input is empty or unrecognized.
+func NormalizeFilterMode(m FilterMode) FilterMode {
+	switch m {
+	case FilterModeAutoFree, FilterModeFilterOnly, FilterModeFreeOnly:
+		return m
+	default:
+		return DefaultFilterMode
+	}
+}
+
 // Admin 用户（单用户登录）
 type AdminUser struct {
 	ID           uint   `gorm:"primaryKey"`
@@ -64,6 +93,9 @@ type SettingsGlobal struct {
 
 	// 免费结束自动删除
 	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
+
+	// 默认下载模式（RSS 级别可 override）
+	DefaultFilterMode FilterMode `json:"default_filter_mode" gorm:"size:16;default:'auto_free'"`
 
 	// 做种竞争度监控（Peer Ratio Monitor）
 	PeerRatioEnabled     bool    `json:"peer_ratio_enabled" gorm:"default:false"`     // 是否启用做种竞争度监控
@@ -158,38 +190,40 @@ type SiteSetting struct {
 
 // RSS 订阅
 type RSSSubscription struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	SiteID          uint      `gorm:"index" json:"site_id"`
-	Name            string    `gorm:"size:128;not null" json:"name"`
-	URL             string    `gorm:"size:1024;not null" json:"url"`
-	Category        string    `gorm:"size:128" json:"category"`
-	Tag             string    `gorm:"size:128" json:"tag"`
-	IntervalMinutes int32     `gorm:"check:interval_minutes >= 1" json:"interval_minutes"` // RSS 执行间隔（分钟），0 表示使用全局设置
-	Concurrency     int32     `json:"concurrency"`                                         // 并发数，0 表示使用全局设置
-	DownloadSubPath string    `gorm:"size:256" json:"download_sub_path"`
-	DownloadPath    string    `gorm:"size:512" json:"download_path"` // 下载器中下载任务的目标下载路径（可选）
-	DownloaderID    *uint     `gorm:"index" json:"downloader_id"`    // 指定下载器，nil 表示使用默认下载器
-	IsExample       bool      `json:"is_example"`                    // 是否为示例配置，示例配置不会被执行
-	PauseOnFreeEnd  bool      `gorm:"default:false" json:"pause_on_free_end"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              uint       `gorm:"primaryKey" json:"id"`
+	SiteID          uint       `gorm:"index" json:"site_id"`
+	Name            string     `gorm:"size:128;not null" json:"name"`
+	URL             string     `gorm:"size:1024;not null" json:"url"`
+	Category        string     `gorm:"size:128" json:"category"`
+	Tag             string     `gorm:"size:128" json:"tag"`
+	IntervalMinutes int32      `gorm:"check:interval_minutes >= 1" json:"interval_minutes"` // RSS 执行间隔（分钟），0 表示使用全局设置
+	Concurrency     int32      `json:"concurrency"`                                         // 并发数，0 表示使用全局设置
+	DownloadSubPath string     `gorm:"size:256" json:"download_sub_path"`
+	DownloadPath    string     `gorm:"size:512" json:"download_path"` // 下载器中下载任务的目标下载路径（可选）
+	DownloaderID    *uint      `gorm:"index" json:"downloader_id"`    // 指定下载器，nil 表示使用默认下载器
+	IsExample       bool       `json:"is_example"`                    // 是否为示例配置，示例配置不会被执行
+	PauseOnFreeEnd  bool       `gorm:"default:false" json:"pause_on_free_end"`
+	FilterMode      FilterMode `gorm:"size:16;default:''" json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // Runtime-friendly structures for API usage and scheduler/config load
 type RSSConfig struct {
-	ID              uint   `json:"id"`
-	Name            string `json:"name"`
-	URL             string `json:"url"`
-	Category        string `json:"category"`
-	Tag             string `json:"tag"`
-	IntervalMinutes int32  `json:"interval_minutes"` // RSS 执行间隔（分钟），0 表示使用全局设置
-	Concurrency     int32  `json:"concurrency"`      // 并发数，0 表示使用全局设置
-	DownloadSubPath string `json:"download_sub_path"`
-	DownloadPath    string `json:"download_path"`   // 下载器中下载任务的目标下载路径（可选）
-	DownloaderID    *uint  `json:"downloader_id"`   // 指定下载器，nil 表示使用默认下载器
-	FilterRuleIDs   []uint `json:"filter_rule_ids"` // 关联的过滤规则 ID 列表
-	IsExample       bool   `json:"is_example"`      // 是否为示例配置，示例配置不会被执行
-	PauseOnFreeEnd  bool   `json:"pause_on_free_end"`
+	ID              uint       `json:"id"`
+	Name            string     `json:"name"`
+	URL             string     `json:"url"`
+	Category        string     `json:"category"`
+	Tag             string     `json:"tag"`
+	IntervalMinutes int32      `json:"interval_minutes"` // RSS 执行间隔（分钟），0 表示使用全局设置
+	Concurrency     int32      `json:"concurrency"`      // 并发数，0 表示使用全局设置
+	DownloadSubPath string     `json:"download_sub_path"`
+	DownloadPath    string     `json:"download_path"`   // 下载器中下载任务的目标下载路径（可选）
+	DownloaderID    *uint      `json:"downloader_id"`   // 指定下载器，nil 表示使用默认下载器
+	FilterRuleIDs   []uint     `json:"filter_rule_ids"` // 关联的过滤规则 ID 列表
+	IsExample       bool       `json:"is_example"`      // 是否为示例配置，示例配置不会被执行
+	PauseOnFreeEnd  bool       `json:"pause_on_free_end"`
+	FilterMode      FilterMode `json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
 }
 
 // ShouldSkip 判断是否应该跳过此 RSS 配置
@@ -249,6 +283,19 @@ func (r *RSSConfig) GetEffectiveDownloadPath() string {
 // HasCustomDownloadPath 检查是否配置了自定义下载路径
 func (r *RSSConfig) HasCustomDownloadPath() bool {
 	return r.DownloadPath != ""
+}
+
+// GetEffectiveFilterMode resolves the filter mode using the RSS > Global > Default priority.
+// RSS-level value takes precedence; empty falls through to the global default; unknown
+// values also fall back to DefaultFilterMode via NormalizeFilterMode.
+func (r *RSSConfig) GetEffectiveFilterMode(globalSettings *SettingsGlobal) FilterMode {
+	if r.FilterMode != "" {
+		return NormalizeFilterMode(r.FilterMode)
+	}
+	if globalSettings != nil && globalSettings.DefaultFilterMode != "" {
+		return NormalizeFilterMode(globalSettings.DefaultFilterMode)
+	}
+	return DefaultFilterMode
 }
 
 type SiteConfig struct {
