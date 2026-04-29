@@ -781,12 +781,14 @@ function toggleEditRssCustomPath() {
         <el-form-item label="下载模式">
           <el-radio-group v-model="newRss.filter_mode" size="small">
             <el-radio-button label="">跟随全局</el-radio-button>
-            <el-radio-button label="auto_free">自动免费+过滤规则</el-radio-button>
+            <el-radio-button label="auto_free">智能（推荐）</el-radio-button>
             <el-radio-button label="filter_only">仅过滤规则</el-radio-button>
             <el-radio-button label="free_only">仅免费</el-radio-button>
           </el-radio-group>
           <div class="form-tip">
-            控制此 RSS 的下载策略。"跟随全局"表示使用全局设置。全局大小上限对所有模式都生效。
+            控制此 RSS 的下载策略。"跟随全局"使用全局设置。
+            <strong>智能模式</strong>：无过滤规则 → 下载免费种子；有过滤规则 →
+            仅下载匹配的种子。全局大小上限始终生效。
           </div>
         </el-form-item>
         <el-form-item label="下载路径">
@@ -892,12 +894,14 @@ function toggleEditRssCustomPath() {
         <el-form-item label="下载模式">
           <el-radio-group v-model="editingRss.filter_mode" size="small">
             <el-radio-button label="">跟随全局</el-radio-button>
-            <el-radio-button label="auto_free">自动免费+过滤规则</el-radio-button>
+            <el-radio-button label="auto_free">智能（推荐）</el-radio-button>
             <el-radio-button label="filter_only">仅过滤规则</el-radio-button>
             <el-radio-button label="free_only">仅免费</el-radio-button>
           </el-radio-group>
           <div class="form-tip">
-            控制此 RSS 的下载策略。"跟随全局"表示使用全局设置。全局大小上限对所有模式都生效。
+            控制此 RSS 的下载策略。"跟随全局"使用全局设置。
+            <strong>智能模式</strong>：无过滤规则 → 下载免费种子；有过滤规则 →
+            仅下载匹配的种子。全局大小上限始终生效。
           </div>
         </el-form-item>
         <el-form-item label="下载路径">

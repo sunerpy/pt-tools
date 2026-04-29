@@ -23,15 +23,19 @@ const form = ref<GlobalSettings>({
 const filterModeOptions = [
   {
     value: "auto_free",
-    label: "自动免费 + 过滤规则",
-    desc: "默认。免费种子自动下载，同时启用过滤规则",
+    label: "智能模式（推荐）",
+    desc: "无过滤规则的 RSS：自动下载免费种子；有过滤规则的 RSS：仅下载匹配规则的种子（不再自动下非匹配的免费种子）",
   },
   {
     value: "filter_only",
     label: "仅过滤规则匹配",
-    desc: "关闭自动下载免费种子，只下载匹配过滤规则的种子",
+    desc: "所有 RSS 都必须匹配过滤规则才下载；未关联规则的 RSS 将不下载任何种子",
   },
-  { value: "free_only", label: "仅免费（忽略过滤规则）", desc: "只下载免费种子，忽略所有过滤规则" },
+  {
+    value: "free_only",
+    label: "仅免费（忽略过滤规则）",
+    desc: "只下载免费种子，完全忽略过滤规则；适合纯刷流用户",
+  },
 ];
 
 onMounted(async () => {
@@ -181,7 +185,12 @@ async function save() {
                   </el-radio-button>
                 </el-radio-group>
                 <div class="form-tip">
-                  控制 RSS 种子下载逻辑（RSS 订阅级别可 override）。全局大小上限对所有模式都生效。
+                  控制 RSS 种子下载逻辑（RSS
+                  订阅级别可覆盖此默认值）。全局大小上限对所有模式都生效。
+                  <strong style="color: var(--el-color-warning)">
+                    v0.26.0 起：智能模式下，为 RSS 关联过滤规则 =
+                    精准下载，不再附带自动下载免费种子。
+                  </strong>
                 </div>
                 <div
                   v-for="opt in filterModeOptions"

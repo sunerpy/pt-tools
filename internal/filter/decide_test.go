@@ -462,6 +462,8 @@ func TestDecide_AutoFreeMode_CombinedChannels(t *testing.T) {
 		Enabled: true, Priority: 100,
 	})
 
+	// Plan A semantics: with rules associated on this RSS, a non-matching free
+	// torrent must NOT be auto-downloaded. Non-matching paid is still rejected.
 	tests := []struct {
 		name      string
 		title     string
@@ -471,8 +473,8 @@ func TestDecide_AutoFreeMode_CombinedChannels(t *testing.T) {
 		wantSrc   string
 	}{
 		{"matching + paid → filter channel", "exact-title", false, true, true, SourceFilterRule},
-		{"matching + free → filter channel (filter wins due to order)", "exact-title", true, true, true, SourceFilterRule},
-		{"non-matching + free + can_finish → free channel", "other", true, true, true, SourceFreeDownload},
+		{"matching + free → filter channel", "exact-title", true, true, true, SourceFilterRule},
+		{"non-matching + free → rejected (Plan A: rules gate free channel)", "other", true, true, false, SourceNone},
 		{"non-matching + paid → rejected", "other", false, true, false, SourceNone},
 		{"non-matching + free but cannot finish → rejected", "other", true, false, false, SourceNone},
 	}
@@ -491,7 +493,67 @@ func TestDecide_AutoFreeMode_CombinedChannels(t *testing.T) {
 	}
 }
 
-func TestDecide_RuleSizeMismatch_FallsBackToFreeChannel(t *testing.T) {
+// TestDecide_AutoFreeMode_NoRules_KeepsFreeChannel guards the legacy behavior
+// for RSS subscriptions that have NO associated filter rules. In that case,
+// the free channel must still auto-download free torrents (backward compat).
+func TestDecide_AutoFreeMode_NoRules_KeepsFreeChannel(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-no-rules")
+	// IMPORTANT: no rules are associated with this RSS
+
+	tests := []struct {
+		name   string
+		isFree bool
+		wantDL bool
+	}{
+		{"free + can finish → auto-download (legacy)", true, true},
+		{"paid → rejected (no rules to match)", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := svc.Decide(DecisionContext{
+				Input:      MatchInput{Title: "anything", SizeGB: 5},
+				IsFree:     tt.isFree,
+				CanFinish:  true,
+				GlobalSize: 100,
+				FilterMode: models.FilterModeAutoFree,
+			}, rss.ID)
+			assert.Equal(t, tt.wantDL, d.ShouldDownload)
+		})
+	}
+}
+
+// TestDecide_PlanA_UserReportedBug is the regression guard for the exact
+// user complaint: "即使设置了过滤规则，免费种子仍然全部自动下载".
+// Must stay forever to prevent reintroduction.
+func TestDecide_PlanA_UserReportedBug(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-user-report")
+
+	createRuleForDecide(t, db, svc, rss.ID, &models.FilterRule{
+		Name: "only-4k-movies", Pattern: "2160p", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, RequireFree: false,
+		Enabled: true, Priority: 100,
+	})
+
+	// User sets rule "only 2160p" expecting to download ONLY matching torrents.
+	// An unrelated free torrent appears — it must NOT be auto-downloaded.
+	d := svc.Decide(DecisionContext{
+		Input:      MatchInput{Title: "Documentary.1080p.WEB-DL", SizeGB: 5},
+		IsFree:     true,
+		CanFinish:  true,
+		GlobalSize: 100,
+		FilterMode: models.FilterModeAutoFree,
+	}, rss.ID)
+	assert.False(t, d.ShouldDownload, "non-matching free torrents must NOT be auto-downloaded when RSS has rules")
+	assert.Equal(t, SourceNone, d.Source)
+}
+
+func TestDecide_RuleSizeMismatch_RejectsUnderPlanA(t *testing.T) {
 	db, cleanup := setupServiceTestDBWithAssociations(t)
 	defer cleanup()
 	svc := NewFilterService(db)
@@ -503,8 +565,9 @@ func TestDecide_RuleSizeMismatch_FallsBackToFreeChannel(t *testing.T) {
 		Enabled: true, Priority: 100,
 	})
 
-	// Torrent text matches rule, but size 5GB < MinSizeGB 100. auto_free mode
-	// should then check the free channel, which accepts.
+	// Plan A: Torrent text matches rule, but size 5GB < MinSizeGB 100.
+	// In auto_free mode WITH rules associated, the free channel is now gated off,
+	// so the torrent is rejected rather than falling back to free download.
 	d := svc.Decide(DecisionContext{
 		Input:      MatchInput{Title: "movie", SizeGB: 5},
 		IsFree:     true,
@@ -512,12 +575,13 @@ func TestDecide_RuleSizeMismatch_FallsBackToFreeChannel(t *testing.T) {
 		GlobalSize: 1000,
 		FilterMode: models.FilterModeAutoFree,
 	}, rss.ID)
-	assert.True(t, d.ShouldDownload)
-	assert.Equal(t, SourceFreeDownload, d.Source)
+	assert.False(t, d.ShouldDownload, "Plan A: rules-associated RSS must not fall back to free channel")
+	assert.Equal(t, SourceNone, d.Source)
 	assert.NotNil(t, d.MatchedRule, "matchedRule should be retained for logging")
+	assert.Contains(t, d.Reason, "关联")
 }
 
-func TestDecide_RuleRequireFreeMismatch_FallsBackToFreeChannel(t *testing.T) {
+func TestDecide_RuleRequireFreeMismatch_RejectsUnderPlanA(t *testing.T) {
 	db, cleanup := setupServiceTestDBWithAssociations(t)
 	defer cleanup()
 	svc := NewFilterService(db)
@@ -529,8 +593,8 @@ func TestDecide_RuleRequireFreeMismatch_FallsBackToFreeChannel(t *testing.T) {
 		Enabled: true, Priority: 100,
 	})
 
-	// Matches pattern but NOT free. free channel also fails (not free).
-	// Expect rejection with matchedRule retained.
+	// Plan A: matches pattern but NOT free. Free channel also fails (not free).
+	// Result: rejected with matchedRule retained (same as before).
 	d := svc.Decide(DecisionContext{
 		Input:      MatchInput{Title: "movie", SizeGB: 5},
 		IsFree:     false,

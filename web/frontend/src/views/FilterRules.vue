@@ -276,11 +276,20 @@ function getMatchFieldLabel(field: string | undefined) {
         show-icon
         style="margin-bottom: 16px">
         <template #title>
-          <strong>大多数用户无需设置过滤规则</strong>
+          <strong>过滤规则 = 精准下载，而非"叠加免费自动下"</strong>
         </template>
         <template #default>
-          未启用过滤规则时，RSS
-          订阅<strong>默认只下载免费种子</strong>，适合日常刷流使用。仅在需要追剧或下载特定资源（即便非免费也要下载）时，才需要创建过滤规则并将「仅免费」设为「否」。
+          <div style="line-height: 1.8">
+            未启用过滤规则时，RSS 订阅<strong>默认自动下载免费种子</strong>（适合日常刷流）。
+            <br />
+            一旦给 RSS
+            关联了过滤规则（v0.26.0+），系统会认为你需要<strong>精准下载</strong>：仅下载匹配规则的种子，其他种子（即便免费）将被忽略。
+            <br />
+            如果希望"既下载规则匹配的，又下载所有免费种子"的旧行为，请在具体 RSS
+            的"下载模式"中保持默认
+            <code>跟随全局</code>，并在<strong>全局设置</strong>里将下载模式设为
+            <code>仅免费（忽略过滤规则）</code>；或对该 RSS 不关联任何过滤规则。
+          </div>
         </template>
       </el-alert>
 

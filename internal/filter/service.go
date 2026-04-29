@@ -185,7 +185,6 @@ func (s *filterService) MatchRulesForRSSWithInput(input MatchInput, rssID uint) 
 	for _, id := range ruleIDs {
 		ruleIDSet[id] = true
 	}
-
 	// Check rules in priority order
 	for i := range s.rules {
 		rule := &s.rules[i]
@@ -373,12 +372,26 @@ const (
 	SourceNone         = ""
 )
 
+// hasAssociatedRules reports whether the given RSS has any filter rule associated.
+// It must be called without holding s.mu; it takes the read lock internally.
+func (s *filterService) hasAssociatedRules(rssID uint) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids, ok := s.rssRules[rssID]
+	return ok && len(ids) > 0
+}
+
 // Decide implements the FilterMode-aware decision tree. Order of checks:
 //  1. Global hard size limit — if exceeded, reject immediately regardless of mode.
 //  2. Filter-rule channel (enabled unless mode == free_only):
 //     matches pattern + satisfies RequireFree + per-rule size bounds.
-//  3. Free channel (enabled unless mode == filter_only):
-//     isFree + CanFinish (free-period time check only; size already covered by step 1).
+//  3. Free channel:
+//     - Disabled when mode == filter_only.
+//     - Disabled when mode == auto_free AND the RSS has associated rules (hasRules).
+//     This enforces the "associating rules = precise opt-in" user expectation:
+//     once any rule is attached, non-matching free torrents are NOT auto-downloaded.
+//     - Enabled when mode == auto_free AND no rules are associated (preserves legacy behavior).
+//     - Always enabled when mode == free_only.
 //
 // Per-rule bounds can only narrow the global limit (checked after step 1 is passed).
 // Filter mode falls back to FilterModeAutoFree when unrecognized.
@@ -394,8 +407,10 @@ func (s *filterService) Decide(ctx DecisionContext, rssID uint) Decision {
 	}
 
 	var matchedRule *models.FilterRule
+	var hasRules bool
 	if mode != models.FilterModeFreeOnly {
 		rule, matched := s.MatchRulesForRSSWithInput(ctx.Input, rssID)
+		hasRules = s.hasAssociatedRules(rssID)
 		if matched {
 			matchedRule = rule
 			if rule.RequireFree && !ctx.IsFree {
@@ -413,7 +428,13 @@ func (s *filterService) Decide(ctx DecisionContext, rssID uint) Decision {
 		}
 	}
 
-	if mode != models.FilterModeFilterOnly {
+	// Free channel gating (Plan A semantics):
+	//   filter_only         → never allow free channel
+	//   auto_free + hasRules → never allow free channel (implicit filter-only)
+	//   auto_free + no rules → allow free channel (legacy behavior)
+	//   free_only           → always allow free channel (rules skipped entirely)
+	freeAllowed := mode != models.FilterModeFilterOnly && (mode != models.FilterModeAutoFree || !hasRules)
+	if freeAllowed {
 		if ctx.IsFree && ctx.CanFinish {
 			return Decision{
 				ShouldDownload: true,
@@ -427,7 +448,7 @@ func (s *filterService) Decide(ctx DecisionContext, rssID uint) Decision {
 		ShouldDownload: false,
 		MatchedRule:    matchedRule,
 		Source:         SourceNone,
-		Reason:         buildDecisionReason(mode, matchedRule, ctx.IsFree, ctx.CanFinish),
+		Reason:         buildDecisionReason(mode, matchedRule, ctx.IsFree, ctx.CanFinish, hasRules),
 	}
 }
 
@@ -475,7 +496,7 @@ func DecideWithoutRules(ctx DecisionContext) Decision {
 	}
 }
 
-func buildDecisionReason(mode models.FilterMode, rule *models.FilterRule, isFree, canFinish bool) string {
+func buildDecisionReason(mode models.FilterMode, rule *models.FilterRule, isFree, canFinish, hasRules bool) string {
 	switch mode {
 	case models.FilterModeFilterOnly:
 		if rule == nil {
@@ -491,11 +512,24 @@ func buildDecisionReason(mode models.FilterMode, rule *models.FilterRule, isFree
 		}
 		return "免费期剩余时间不足"
 	default:
+		// auto_free branch
 		if rule != nil && rule.RequireFree && !isFree {
+			if hasRules {
+				return "匹配规则要求免费但种子非免费；RSS 关联了过滤规则，非匹配的免费种子不再自动下载"
+			}
 			return "匹配规则要求免费，种子非免费；且非免费或无法完成"
 		}
 		if rule != nil && !rule.MatchesSize(0) && rule.MaxSizeGB > 0 {
+			if hasRules {
+				return "匹配规则但大小不符合；RSS 关联了过滤规则，非匹配的免费种子不再自动下载"
+			}
 			return "匹配规则但大小不符合；且非免费或无法完成"
+		}
+		if hasRules {
+			if isFree && !canFinish {
+				return "未匹配过滤规则且免费期剩余时间不足（RSS 关联了规则，未匹配种子不自动下载）"
+			}
+			return "未匹配过滤规则（RSS 关联了规则，非匹配的免费种子不再自动下载）"
 		}
 		if !isFree {
 			return "非免费且未匹配过滤规则"
