@@ -177,6 +177,9 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 
 	var toDelete []downloader.Torrent
 	for _, t := range candidates {
+		if c.isPausedForPeerRatio(t.InfoHash) {
+			continue
+		}
 		if c.shouldDelete(cfg, t) {
 			toDelete = append(toDelete, t)
 		}
@@ -423,6 +426,15 @@ func (c *CleanupMonitor) shouldDelete(cfg *models.SettingsGlobal, t downloader.T
 	}
 
 	return seedTimeMatch || ratioMatch || inactiveMatch || slowSeedMatch
+}
+
+func (c *CleanupMonitor) isPausedForPeerRatio(infoHash string) bool {
+	var count int64
+	c.db.Model(&models.TorrentInfo{}).
+		Where("torrent_hash = ? AND is_paused_by_system = ? AND pause_reason = ?",
+			strings.ToLower(infoHash), true, PauseReasonPeerRatio).
+		Count(&count)
+	return count > 0
 }
 
 func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent) bool {

@@ -464,6 +464,10 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupMinRetainH      int     `json:"cleanup_min_retain_h"`
 			CleanupProtectTags     string  `json:"cleanup_protect_tags"`
 			AutoDeleteOnFreeEnd    bool    `json:"auto_delete_on_free_end"`
+			PeerRatioEnabled       bool    `json:"peer_ratio_enabled"`
+			PeerRatioMaxSL         float64 `json:"peer_ratio_max_sl"`
+			PeerRatioIntervalMin   int     `json:"peer_ratio_interval_min"`
+			PeerRatioRemoveData    bool    `json:"peer_ratio_remove_data"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -506,6 +510,10 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupMinRetainH:      req.CleanupMinRetainH,
 			CleanupProtectTags:     req.CleanupProtectTags,
 			AutoDeleteOnFreeEnd:    req.AutoDeleteOnFreeEnd,
+			PeerRatioEnabled:       req.PeerRatioEnabled,
+			PeerRatioMaxSL:         req.PeerRatioMaxSL,
+			PeerRatioIntervalMin:   req.PeerRatioIntervalMin,
+			PeerRatioRemoveData:    req.PeerRatioRemoveData,
 		}
 		if err := s.store.SaveGlobalSettings(gs); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

@@ -65,6 +65,12 @@ type SettingsGlobal struct {
 	// 免费结束自动删除
 	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
 
+	// 做种竞争度监控（Peer Ratio Monitor）
+	PeerRatioEnabled     bool    `json:"peer_ratio_enabled" gorm:"default:false"`     // 是否启用做种竞争度监控
+	PeerRatioMaxSL       float64 `json:"peer_ratio_max_sl" gorm:"default:30.0"`       // Seeder/Leecher 比值上限
+	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`   // 检查间隔（分钟）
+	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"` // 超标时删除种子及数据（否则仅暂停）
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -95,6 +101,27 @@ func (s *SettingsGlobal) GetEffectiveConcurrency() int32 {
 		return MaxConcurrency
 	}
 	return s.DefaultConcurrency
+}
+
+const (
+	DefaultPeerRatioMaxSL       = 30.0
+	MinPeerRatioMaxSL           = 1.0
+	DefaultPeerRatioIntervalMin = 10
+	MinPeerRatioIntervalMin     = 5
+)
+
+func (s *SettingsGlobal) GetEffectivePeerRatioMaxSL() float64 {
+	if s.PeerRatioMaxSL < MinPeerRatioMaxSL {
+		return DefaultPeerRatioMaxSL
+	}
+	return s.PeerRatioMaxSL
+}
+
+func (s *SettingsGlobal) GetEffectivePeerRatioIntervalMin() int {
+	if s.PeerRatioIntervalMin < MinPeerRatioIntervalMin {
+		return DefaultPeerRatioIntervalMin
+	}
+	return s.PeerRatioIntervalMin
 }
 
 // qBittorrent 设置
