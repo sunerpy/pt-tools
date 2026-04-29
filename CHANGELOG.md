@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] - 2026-04-29
+
+### Bug Fixes
+
+- **filter**: 修复关联过滤规则后仍自动下载非匹配免费种子的问题
+  用户反馈："虽然设置了过滤规则，但实际上还是只要免费的就下载，感觉还是 free 和
+  filter 是 or 的关系，不是 and 的关系"。
+
+        根因：auto_free 模式下，即使 RSS 关联了过滤规则，若种子未匹配规则，仍会走免费通道
+        兜底下载。此 OR 语义违反"设置过滤规则 = 精准下载"的用户直觉。
+
+        修复（Plan A 智能模式语义）：
+        - auto_free + RSS 关联了规则 → 免费通道自动关闭，仅下载匹配规则的种子（精准模式）
+        - auto_free + RSS 无关联规则 → 免费通道开启，自动下载免费种子（保留 v0.25 行为）
+        - filter_only / free_only → 保持原语义不变
+
+        实现：
+        - filter.Service 新增 hasAssociatedRules 内部方法，判断 RSS 是否关联任何规则
+        - Decide 决策树新增"免费通道门控"：有规则时禁用免费通道兜底
+        - buildDecisionReason 增加 hasRules 参数，跳过原因说明为 RSS 关联规则的精准模式
+        - evaluateTestDecision（规则测试 UI）同步新语义，测试中总是视为"有规则"
+
+        测试：
+        - 新增 TestDecide_PlanA_UserReportedBug 永久回归守卫，确保问题不再出现
+        - 新增 TestDecide_AutoFreeMode_NoRules_KeepsFreeChannel 守护无规则的旧行为
+        - 更新 TestDecide_AutoFreeMode_CombinedChannels 预期：非匹配免费 → 拒绝
+        - 重命名 *_FallsBackToFreeChannel 为 *_RejectsUnderPlanA，反映新预期
+
+        UI 更新：
+        - 过滤规则页警告条：明确"关联规则 = 精准下载，不再附带自动下免费"
+        - 全局设置：auto_free 更名为"智能模式"，增加 v0.26.0 行为变更提示
+        - 站点详情 RSS 编辑：下载模式标签同步更新并解释智能模式行为
+
 ## [0.25.0] - 2026-04-29
 
 ### Features
@@ -36,12 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
