@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-04-29
+
+### Features
+
+- **filter**: 新增 FilterMode 与过滤规则大小约束，修复全局大小被绕过问题
+  修复全局 TorrentSizeGB 被过滤规则绕过的 bug：过去 shouldDownload = filter || free 是 OR 逻辑，
+  只要规则命中就会绕过全局大小限制。现在全局大小是所有通道的硬上限。
+
+        - FilterRule 新增 MinSizeGB/MaxSizeGB 字段，规则可进一步收紧大小范围（不能突破全局上限）
+        - 新增 FilterMode (auto_free/filter_only/free_only)，支持 3 种下载策略：
+         * auto_free（默认）: 免费通道 + 过滤规则通道，兼容旧行为
+         * filter_only: 仅匹配过滤规则的种子才下载
+         * free_only: 仅免费种子自动下载，忽略过滤规则
+        - FilterMode 支持 RSS 级别覆盖全局默认（GetEffectiveFilterMode 实现 RSS > Global > Default 优先级）
+        - filter.Service 新增 Decide/DecideWithoutRules 方法，统一决策树：
+         全局大小硬上限 → 过滤规则通道 → 免费通道
+        - internal/common.go 两条 RSS 工作路径（Unified + legacy）统一改用 Decide
+        - 规则测试 UI 新增完整决策模拟：种子大小/免费状态/全局上限/模式，输出 决策结果/原因/下载通道
+        - 全局设置增加"默认下载模式"单选组
+        - RSS 订阅编辑增加"下载模式"选择器（空值=跟随全局）
+        - 新增测试 internal/filter/decide_test.go 覆盖 30+ 场景（含 bug 回归守卫）
+        - 新增测试 models/filter_rule_size_test.go 覆盖 MatchesSize 边界和 FilterMode 优先级
+        - TorrentMetadata 接口新增 GetSizeBytes 方法供 Decide 获取种子大小
+
 ## [0.24.0] - 2026-04-29
 
 ### Features
@@ -12,12 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
