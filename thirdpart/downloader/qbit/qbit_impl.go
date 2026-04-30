@@ -1144,11 +1144,16 @@ func (q *QbitClient) writeAddTorrentOptions(writer *multipart.Writer, opt downlo
 		}
 	}
 
-	// 设置上传速度限制
-	if opt.UploadSpeedLimitMB > 0 {
-		limitBytes := opt.UploadSpeedLimitMB * 1024 * 1024
-		if err := writer.WriteField("upLimit", fmt.Sprintf("%d", limitBytes)); err != nil {
+	// 设置上传/下载速度限制（bytes/second）
+	// qBit 原生支持在 /api/v2/torrents/add 时通过 upLimit/dlLimit 字段设定
+	if upBytes := opt.EffectiveUploadLimitBytes(); upBytes > 0 {
+		if err := writer.WriteField("upLimit", fmt.Sprintf("%d", upBytes)); err != nil {
 			return fmt.Errorf("failed to write upLimit: %w", err)
+		}
+	}
+	if dlBytes := opt.EffectiveDownloadLimitBytes(); dlBytes > 0 {
+		if err := writer.WriteField("dlLimit", fmt.Sprintf("%d", dlBytes)); err != nil {
+			return fmt.Errorf("failed to write dlLimit: %w", err)
 		}
 	}
 

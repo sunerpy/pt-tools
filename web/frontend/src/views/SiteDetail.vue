@@ -37,6 +37,8 @@ const form = ref<SiteConfig>({
   api_key: "",
   api_url: "",
   passkey: "",
+  upload_limit_kbs: 0,
+  download_limit_kbs: 0,
   rss: [],
 });
 
@@ -560,6 +562,32 @@ function toggleEditRssCustomPath() {
             show-password
             placeholder="从站点个人设置中获取 Passkey" />
           <div class="form-tip">Passkey 用于 RSS 订阅认证，请从站点个人设置页面获取。</div>
+        </el-form-item>
+
+        <el-divider content-position="left">单种子速度限制（可选）</el-divider>
+
+        <el-form-item label="上传限速 (KB/s)">
+          <el-input-number
+            v-model="form.upload_limit_kbs"
+            :min="0"
+            :max="1048576"
+            :step="128"
+            placeholder="0 表示不限速" />
+          <div class="form-tip">
+            推送到下载器的每个种子自动应用此上传限速。0 = 不限制（使用下载器全局/默认设置）。
+          </div>
+        </el-form-item>
+
+        <el-form-item label="下载限速 (KB/s)">
+          <el-input-number
+            v-model="form.download_limit_kbs"
+            :min="0"
+            :max="1048576"
+            :step="128"
+            placeholder="0 表示不限速" />
+          <div class="form-tip">
+            推送到下载器的每个种子自动应用此下载限速。0 = 不限制（使用下载器全局/默认设置）。
+          </div>
         </el-form-item>
       </el-form>
     </el-card>

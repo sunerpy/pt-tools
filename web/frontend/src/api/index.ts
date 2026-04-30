@@ -114,6 +114,8 @@ export interface SiteConfig {
   api_key: string;
   api_url: string;
   passkey?: string;
+  upload_limit_kbs?: number;
+  download_limit_kbs?: number;
   rss: RSSConfig[];
   urls?: string[];
   unavailable?: boolean;

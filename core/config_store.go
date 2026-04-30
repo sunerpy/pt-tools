@@ -70,7 +70,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 		}
 		for _, sitem := range sites {
 			sg := models.SiteGroup(strings.ToLower(sitem.Name))
-			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, RSS: []models.RSSConfig{}}
+			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
 				return e
@@ -458,6 +458,8 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		row.APIKey = sc.APIKey
 		row.APIUrl = sc.APIUrl
 		row.Passkey = sc.Passkey
+		row.UploadLimitKBs = sc.UploadLimitKBs
+		row.DownloadLimitKBs = sc.DownloadLimitKBs
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
@@ -544,7 +546,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
-		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, RSS: []models.RSSConfig{}}
+		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
 		var rss []models.RSSSubscription
 		if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 			return nil, err
@@ -565,7 +567,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 		return models.SiteConfig{}, err
 	}
 	// 初始化 RSS 为空数组，确保 JSON 序列化时返回 [] 而不是 null
-	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, RSS: []models.RSSConfig{}}
+	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
 	var rss []models.RSSSubscription
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err
