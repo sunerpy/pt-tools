@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-04-30
+
+### Features
+
+- **downloader**: 支持按站点配置种子上传/下载限速
+  实现 issue #276：为每个 PT 站点配置独立的种子上传和下载速度限制，
+  推送种子到下载器时自动应用。
+
+        设计：
+        - 上传和下载限速完全对称（用户可以分别配置或只配一项）
+        - qBittorrent: 在 /api/v2/torrents/add 时通过 upLimit/dlLimit 原子设置
+         （qBit 4.1+ 原生支持）
+        - Transmission: torrent-add 不支持 limit 字段，实现 add-paused →
+         torrent-set → torrent-start 的 3 步流程；若用户原本要求 paused
+         则跳过最后一步
+        - 全局 DownloadSpeedLimit 不受影响（它是 pt-tools 内部计算 "能否在免费期
+         内下完" 的参数，与本次 per-torrent 限速语义正交）
+
+        实现：
+        - models.SiteSetting + SiteConfig: 新增 UploadLimitKBs + DownloadLimitKBs 字段
+        - downloader.AddTorrentOptions:
+         * 新增 UploadSpeedLimitKBs + DownloadSpeedLimitKBs（KB/s，更细粒度）
+         * 原 UploadSpeedLimitMB 标记为 Deprecated 但保留向后兼容
+         * 新增 EffectiveUploadLimitBytes() / EffectiveDownloadLimitBytes() 辅助方法
+         统一返回 bytes/s，KBs 字段优先于 MB
+        - qbit.AddTorrentFileEx: 改用 EffectiveXxxLimitBytes，同时支持 upLimit 和 dlLimit
+        - transmission.AddTorrentFileEx: 限速时自动 paused → set → start
+        - internal/push.go: 新增 applySiteSpeedLimits() 从 SiteSetting 查询并填入 opts
+        - core/config_store.go: 三处 SiteConfig 构造 + UpsertSiteWithRSS 持久化新字段
+        - web/server.go: SiteConfigResponse 新增两个字段
+        - 前端: SiteConfig 类型 + SiteDetail.vue 新增两个 el-input-number
+
+        测试（全部通过，覆盖所有关键场景）：
+        - thirdpart/downloader/speed_limit_test.go (2 testcase)：
+         * EffectiveUploadLimitBytes 优先级链（KBs > MB）+ 单位换算
+         * EffectiveDownloadLimitBytes 单位换算
+        - thirdpart/downloader/qbit/qbit_speed_limit_test.go (8 testcase)：
+         * UploadLimitKBs / DownloadLimitKBs / 双限速同时设置
+         * 零值不发字段（向后兼容）
+         * 负值忽略
+         * 遗留 MB 字段向后兼容
+         * KBs 优先于 MB
+         * 其他字段不受影响（回归守卫）
+        - thirdpart/downloader/transmission/transmission_speed_limit_test.go (8 testcase)：
+         * 无限速：单次 torrent-add 调用
+         * AutoStart + 限速：完整 add→set→start 三步链路 + 正确 KB/s 单位
+         * 用户明确要求 paused：不调用 torrent-start
+         * 下载限速 / 双限速 / MB 字段兼容 / 调用顺序 / 负值
+        - internal/push_speed_limit_test.go (7 testcase)：
+         * 站点配置正确读取并传递
+         * 零值站点正确传递
+         * 未知站点 / 空 siteID / nil opts / nil DB 全部安全 no-op
+         * 站点配置更新立即生效（无缓存）
+
+        全量测试：go test ./... 21 个包全通过，lint 0 warnings，vue-tsc 0 errors。
+
+        兼容性：GORM AutoMigrate 自动添加新列，所有新字段零值默认，升级后旧
+        行为不变；遗留 UploadSpeedLimitMB 字段继续生效。
+
 ## [0.25.1] - 2026-04-29
 
 ### Bug Fixes
@@ -69,12 +128,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
