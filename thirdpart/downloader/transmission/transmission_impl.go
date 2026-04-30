@@ -889,9 +889,20 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 	// Transmission 使用 base64 编码的种子文件
 	metainfo := base64.StdEncoding.EncodeToString(fileData)
 
+	// Transmission 的 torrent-add 不支持 upload_limit/download_limit 字段，
+	// 必须在 torrent-add（paused）后用 torrent-set 设置限速、再 torrent-start。
+	upBytes := opt.EffectiveUploadLimitBytes()
+	dlBytes := opt.EffectiveDownloadLimitBytes()
+	hasSpeedLimit := upBytes > 0 || dlBytes > 0
+	addAtPaused := opt.AddAtPaused
+	if hasSpeedLimit && !addAtPaused {
+		// 暂停添加以便设置限速，限速生效后再启动
+		addAtPaused = true
+	}
+
 	args := map[string]any{
 		"metainfo": metainfo,
-		"paused":   opt.AddAtPaused,
+		"paused":   addAtPaused,
 	}
 
 	if opt.SavePath != "" {
@@ -920,12 +931,58 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
 	}
 
+	var torrentID int
+	var hashString string
+	var duplicate bool
 	if addResp.TorrentDuplicate != nil {
+		torrentID = addResp.TorrentDuplicate.ID
+		hashString = addResp.TorrentDuplicate.HashString
+		duplicate = true
+	} else if addResp.TorrentAdded != nil {
+		torrentID = addResp.TorrentAdded.ID
+		hashString = addResp.TorrentAdded.HashString
+	}
+
+	// 如果需要设置限速，在 torrent-add 后通过 torrent-set 应用；重复种子跳过（已有限速）
+	if hasSpeedLimit && !duplicate && torrentID != 0 {
+		setArgs := map[string]any{"ids": []int{torrentID}}
+		if upBytes > 0 {
+			// Transmission 使用 kB/s（整数），pt-tools 内部用 bytes/s，此处转换
+			setArgs["uploadLimit"] = upBytes / 1024
+			setArgs["uploadLimited"] = true
+		}
+		if dlBytes > 0 {
+			setArgs["downloadLimit"] = dlBytes / 1024
+			setArgs["downloadLimited"] = true
+		}
+		if _, err := t.doRequest("torrent-set", setArgs); err != nil {
+			return downloader.AddTorrentResult{
+				Success: false,
+				Message: fmt.Sprintf("torrent added but failed to set speed limits: %v", err),
+				ID:      fmt.Sprintf("%d", torrentID),
+				Hash:    hashString,
+			}, err
+		}
+
+		// 如果用户本来希望自动启动（opt.AddAtPaused=false），此时触发 start
+		if !opt.AddAtPaused {
+			if _, err := t.doRequest("torrent-start", map[string]any{"ids": []int{torrentID}}); err != nil {
+				return downloader.AddTorrentResult{
+					Success: false,
+					Message: fmt.Sprintf("torrent added with limits but failed to start: %v", err),
+					ID:      fmt.Sprintf("%d", torrentID),
+					Hash:    hashString,
+				}, err
+			}
+		}
+	}
+
+	if duplicate {
 		return downloader.AddTorrentResult{
 			Success: true,
 			Message: "Torrent already exists",
-			ID:      fmt.Sprintf("%d", addResp.TorrentDuplicate.ID),
-			Hash:    addResp.TorrentDuplicate.HashString,
+			ID:      fmt.Sprintf("%d", torrentID),
+			Hash:    hashString,
 		}, nil
 	}
 
@@ -933,8 +990,8 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 		return downloader.AddTorrentResult{
 			Success: true,
 			Message: "Torrent added successfully",
-			ID:      fmt.Sprintf("%d", addResp.TorrentAdded.ID),
-			Hash:    addResp.TorrentAdded.HashString,
+			ID:      fmt.Sprintf("%d", torrentID),
+			Hash:    hashString,
 		}, nil
 	}
 

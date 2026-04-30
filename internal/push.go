@@ -119,6 +119,9 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		Tags:        req.Tags,
 	}
 
+	// 按站点应用速度限制（从 SiteSetting 读取）
+	applySiteSpeedLimits(&opts, req.SiteID)
+
 	glOnly, glErr := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
 	if glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
 		freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
@@ -203,4 +206,20 @@ func createDownloaderInstanceForPush(config models.DownloaderSetting) (downloade
 	default:
 		return nil, fmt.Errorf("不支持的下载器类型: %s", config.Type)
 	}
+}
+
+// applySiteSpeedLimits fills opts.UploadSpeedLimitKBs / DownloadSpeedLimitKBs
+// from the SiteSetting row keyed by siteName. No-op when siteName is empty
+// or the lookup fails (e.g. unknown site or DB error) — the torrent is added
+// with unlimited speed in that case, matching pre-v0.26 behavior.
+func applySiteSpeedLimits(opts *downloader.AddTorrentOptions, siteName string) {
+	if opts == nil || siteName == "" || global.GlobalDB == nil {
+		return
+	}
+	var site models.SiteSetting
+	if err := global.GlobalDB.DB.Where("name = ?", siteName).First(&site).Error; err != nil {
+		return
+	}
+	opts.UploadSpeedLimitKBs = site.UploadLimitKBs
+	opts.DownloadSpeedLimitKBs = site.DownloadLimitKBs
 }

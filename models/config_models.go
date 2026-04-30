@@ -169,23 +169,25 @@ type QbitSettings struct {
 
 // SiteSetting 站点设置（统一表，合并原 DynamicSiteSetting）
 type SiteSetting struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Name         string    `gorm:"uniqueIndex;size:64;not null" json:"name"`
-	DisplayName  string    `gorm:"size:128" json:"display_name"`
-	BaseURL      string    `gorm:"size:512" json:"base_url"`
-	Enabled      bool      `json:"enabled"`
-	AuthMethod   string    `gorm:"size:16;not null" json:"auth_method"`
-	Cookie       string    `gorm:"size:2048" json:"cookie,omitempty"`
-	APIKey       string    `gorm:"size:512" json:"api_key,omitempty"`
-	APIUrl       string    `gorm:"size:512" json:"api_url,omitempty"`
-	APIUrls      string    `gorm:"size:2048" json:"api_urls,omitempty"`
-	Passkey      string    `gorm:"size:512" json:"passkey,omitempty"`
-	DownloaderID *uint     `gorm:"index" json:"downloader_id,omitempty"`
-	ParserConfig string    `gorm:"type:text" json:"parser_config,omitempty"`
-	IsBuiltin    bool      `json:"is_builtin"`
-	TemplateID   *uint     `gorm:"index" json:"template_id,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	Name             string    `gorm:"uniqueIndex;size:64;not null" json:"name"`
+	DisplayName      string    `gorm:"size:128" json:"display_name"`
+	BaseURL          string    `gorm:"size:512" json:"base_url"`
+	Enabled          bool      `json:"enabled"`
+	AuthMethod       string    `gorm:"size:16;not null" json:"auth_method"`
+	Cookie           string    `gorm:"size:2048" json:"cookie,omitempty"`
+	APIKey           string    `gorm:"size:512" json:"api_key,omitempty"`
+	APIUrl           string    `gorm:"size:512" json:"api_url,omitempty"`
+	APIUrls          string    `gorm:"size:2048" json:"api_urls,omitempty"`
+	Passkey          string    `gorm:"size:512" json:"passkey,omitempty"`
+	DownloaderID     *uint     `gorm:"index" json:"downloader_id,omitempty"`
+	ParserConfig     string    `gorm:"type:text" json:"parser_config,omitempty"`
+	UploadLimitKBs   int       `gorm:"default:0" json:"upload_limit_kbs"`
+	DownloadLimitKBs int       `gorm:"default:0" json:"download_limit_kbs"`
+	IsBuiltin        bool      `json:"is_builtin"`
+	TemplateID       *uint     `gorm:"index" json:"template_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // RSS 订阅
@@ -299,13 +301,15 @@ func (r *RSSConfig) GetEffectiveFilterMode(globalSettings *SettingsGlobal) Filte
 }
 
 type SiteConfig struct {
-	Enabled    *bool       `json:"enabled"`
-	AuthMethod string      `json:"auth_method"`
-	Cookie     string      `json:"cookie"`
-	APIKey     string      `json:"api_key"`
-	APIUrl     string      `json:"api_url"`
-	Passkey    string      `json:"passkey"`
-	RSS        []RSSConfig `json:"rss"`
+	Enabled          *bool       `json:"enabled"`
+	AuthMethod       string      `json:"auth_method"`
+	Cookie           string      `json:"cookie"`
+	APIKey           string      `json:"api_key"`
+	APIUrl           string      `json:"api_url"`
+	Passkey          string      `json:"passkey"`
+	UploadLimitKBs   int         `json:"upload_limit_kbs"`
+	DownloadLimitKBs int         `json:"download_limit_kbs"`
+	RSS              []RSSConfig `json:"rss"`
 }
 type Config struct {
 	Global SettingsGlobal           `json:"global"`

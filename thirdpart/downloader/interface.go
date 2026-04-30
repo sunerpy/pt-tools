@@ -132,11 +132,41 @@ type AddTorrentOptions struct {
 
 	// UploadSpeedLimitMB 上传速度限制 (MB/s)
 	// 0 表示不限制
+	// Deprecated: 使用 UploadSpeedLimitKBs（KB/s，更细粒度）。若同时设置两者，UploadSpeedLimitKBs 优先。
 	UploadSpeedLimitMB int
+
+	// UploadSpeedLimitKBs 上传速度限制 (KB/s)
+	// 0 表示不限制。KB 单位比 MB 更细粒度，适合按站点精确配置。
+	UploadSpeedLimitKBs int
+
+	// DownloadSpeedLimitKBs 下载速度限制 (KB/s)
+	// 0 表示不限制
+	DownloadSpeedLimitKBs int
 
 	// AdvanceOptions 高级选项（可选）
 	// 用于传递客户端特定的高级配置
 	AdvanceOptions map[string]any
+}
+
+// EffectiveUploadLimitBytes returns the effective upload speed limit in bytes/second.
+// Priority: UploadSpeedLimitKBs (new) > UploadSpeedLimitMB (deprecated). Returns 0 for unlimited.
+func (o AddTorrentOptions) EffectiveUploadLimitBytes() int64 {
+	if o.UploadSpeedLimitKBs > 0 {
+		return int64(o.UploadSpeedLimitKBs) * 1024
+	}
+	if o.UploadSpeedLimitMB > 0 {
+		return int64(o.UploadSpeedLimitMB) * 1024 * 1024
+	}
+	return 0
+}
+
+// EffectiveDownloadLimitBytes returns the effective download speed limit in bytes/second.
+// Returns 0 for unlimited.
+func (o AddTorrentOptions) EffectiveDownloadLimitBytes() int64 {
+	if o.DownloadSpeedLimitKBs > 0 {
+		return int64(o.DownloadSpeedLimitKBs) * 1024
+	}
+	return 0
 }
 
 // AddTorrentResult 添加种子的结果

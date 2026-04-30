@@ -578,6 +578,8 @@ type SiteConfigResponse struct {
 	APIKey            string             `json:"api_key"`
 	APIUrl            string             `json:"api_url"`
 	Passkey           string             `json:"passkey"`
+	UploadLimitKBs    int                `json:"upload_limit_kbs"`
+	DownloadLimitKBs  int                `json:"download_limit_kbs"`
 	RSS               []models.RSSConfig `json:"rss"`
 	URLs              []string           `json:"urls,omitempty"`
 	Unavailable       bool               `json:"unavailable,omitempty"`
@@ -598,13 +600,15 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 		var sitesToDisable []models.SiteGroup
 		for sg, sc := range sites {
 			resp := SiteConfigResponse{
-				Enabled:    sc.Enabled,
-				AuthMethod: sc.AuthMethod,
-				Cookie:     sc.Cookie,
-				APIKey:     sc.APIKey,
-				APIUrl:     sc.APIUrl,
-				Passkey:    sc.Passkey,
-				RSS:        sc.RSS,
+				Enabled:          sc.Enabled,
+				AuthMethod:       sc.AuthMethod,
+				Cookie:           sc.Cookie,
+				APIKey:           sc.APIKey,
+				APIUrl:           sc.APIUrl,
+				Passkey:          sc.Passkey,
+				UploadLimitKBs:   sc.UploadLimitKBs,
+				DownloadLimitKBs: sc.DownloadLimitKBs,
+				RSS:              sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
 				resp.URLs = def.URLs
@@ -688,13 +692,15 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := SiteConfigResponse{
-			Enabled:    sc.Enabled,
-			AuthMethod: sc.AuthMethod,
-			Cookie:     sc.Cookie,
-			APIKey:     sc.APIKey,
-			APIUrl:     sc.APIUrl,
-			Passkey:    sc.Passkey,
-			RSS:        sc.RSS,
+			Enabled:          sc.Enabled,
+			AuthMethod:       sc.AuthMethod,
+			Cookie:           sc.Cookie,
+			APIKey:           sc.APIKey,
+			APIUrl:           sc.APIUrl,
+			Passkey:          sc.Passkey,
+			UploadLimitKBs:   sc.UploadLimitKBs,
+			DownloadLimitKBs: sc.DownloadLimitKBs,
+			RSS:              sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()
 		if def, ok := defRegistry.Get(string(sg)); ok {
