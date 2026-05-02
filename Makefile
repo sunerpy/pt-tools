@@ -37,7 +37,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites
+.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites build-cli
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -51,6 +51,17 @@ build-local: fmt build-frontend
 	-X github.com/sunerpy/pt-tools/version.BuildOS=$(shell go env GOOS) \
 	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH)" \
 	-o $(DIST_DIR)/$(IMAGE_NAME) .
+
+# 构建 CLI 远程管理工具
+build-cli:
+	@echo "Building pt-tools-cli"
+	mkdir -p $(DIST_DIR) && \
+	GOROOT= CGO_ENABLED=0 \
+	go build -ldflags="-s -w \
+	-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
+	-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
+	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID)" \
+	-o $(DIST_DIR)/pt-tools-cli ./cli/
 
 # 多平台二进制构建
 build-binaries:
