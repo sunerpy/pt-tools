@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-05-02
+
+### Features
+
+- **site**: 新增 Farmm (pt.0ff.cc) 站点适配
+  实现 Issue #279 站点请求。Farmm 是 CHD/scenetorrents 模板衍生的 NexusPHP
+  站点，需处理两个非标准结构：
+
+        1. 详情页 size 内联于「基本信息」行
+         标准 NexusPHP 详情页有独立的 td.rowhead:contains("大小") 行，此站点将
+         size 与类型/地区/分辨率等字段全部塞进「基本信息」cell 内，用 <b> 标签
+         分隔。SizeRegex 从该 cell 文本中抽取数值与单位。
+
+        2. 用户详情页「传输」行 HDSky 风格
+         分享率/上传量/下载量三个字段打包在同一 td.rowfollow 中。选择器用正则
+         提取每个字段，关键点：用 (?:^|[^实]) 前缀锚定 上传量，避免误匹配
+         实际上传量（此坑在 hdsky.go 也有同样处理）。
+
+        其他字段：
+        - 9 列搜索表格（无隐藏列），td:nth-child(1..9) 分别对应类型/标题/评论数/
+         时间/大小/种子数/下载数/完成数/发布者
+        - 详情页 discount 在 h1#top 的 font.free/twoupfree/halfdown 结构内，
+         无 domTT tooltip 所以无法获取 end_time
+        - 此站点无 H&R 标记（列表页和详情页均无 hitandrun/hit_run.gif）
+        - 浏览器扩展域名 pt.0ff.cc 已在 pt-sites.ts（无需修改）
+        - constants.ts KNOWN_SITES 新增 pt0ffcc 条目
+        - docs/sites.md 已适配站点从 30 增至 31（NexusPHP 系列 27 个）
+
+        测试（全部通过）：
+        - Search: 2 行 fixture，验证 id/title/discount/seeders/leechers/snatched
+        - Detail: FREE discount、9.07 GB size、noHR
+        - UserInfo: IndexPage（登录用户 info_block 的 seeding/leeching）+
+         UserdetailsPage（被查看用户的 name/level）+ 4 个 regex 驱动字段
+         必定非空（防止 上传量/实际上传量 混淆）
+        - 全量回归: go test ./... 21 个包全通过，make lint 0 issues，
+         vue-tsc 0 errors，extension 一致性检查通过 (31 个站点)
+
 ## [0.26.1] - 2026-05-02
 
 ### Bug Fixes
@@ -134,12 +171,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
