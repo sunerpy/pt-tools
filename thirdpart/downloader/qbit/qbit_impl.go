@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +35,9 @@ type QbitClient struct {
 	mu           sync.Mutex
 	healthy      bool
 	lastActivity time.Time
+	appVersion   string
+	isV520Plus   bool
+	versionMu    sync.RWMutex
 }
 
 type requestDoer interface {
@@ -46,6 +51,30 @@ type QbitTorrentProperties struct {
 
 // 确保 QbitClient 实现 Downloader 接口
 var _ downloader.Downloader = (*QbitClient)(nil)
+
+// parseQBitVersion extracts semver major.minor.patch from a qBit version string.
+func parseQBitVersion(raw string) (major, minor, patch int, ok bool) {
+	re := regexp.MustCompile(`v?(\d+)\.(\d+)\.(\d+)`)
+	m := re.FindStringSubmatch(raw)
+	if len(m) != 4 {
+		return 0, 0, 0, false
+	}
+
+	major, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	minor, err = strconv.Atoi(m[2])
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	patch, err = strconv.Atoi(m[3])
+	if err != nil {
+		return 0, 0, 0, false
+	}
+
+	return major, minor, patch, true
+}
 
 // NewQbitClient 创建新的 qBittorrent 客户端
 func NewQbitClient(config downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
@@ -124,9 +153,19 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		q.healthy = false
 		return q.wrapStatusCodeError(resp.StatusCode)
+	}
+
+	if resp.StatusCode == http.StatusNoContent {
+		q.healthy = true
+		q.lastActivity = time.Now()
+		sLogger().Info("Successfully logged in to qBittorrent (204 No Content)")
+		if detectErr := q.detectVersion(ctx); detectErr != nil {
+			sLogger().Debugf("qBit 版本探测返回错误: %v", detectErr)
+		}
+		return nil
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -135,18 +174,80 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 		return fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	if string(body) != "Ok." {
+	if string(body) == "Fails." {
 		q.healthy = false
-		if string(body) == "Fails." {
-			return fmt.Errorf("用户名或密码错误")
-		}
-		return fmt.Errorf("登录失败，服务器响应: %s", string(body))
+		return fmt.Errorf("用户名或密码错误")
 	}
 
 	q.healthy = true
 	q.lastActivity = time.Now()
 	sLogger().Info("Successfully logged in to qBittorrent")
+	if detectErr := q.detectVersion(ctx); detectErr != nil {
+		sLogger().Debugf("qBit 版本探测返回错误: %v", detectErr)
+	}
 	return nil
+}
+
+func (q *QbitClient) detectVersion(ctx context.Context) error {
+	versionURL := fmt.Sprintf("%s/api/v2/app/version", q.baseURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", versionURL, nil)
+	if err != nil {
+		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: %v", err)
+		return nil
+	}
+
+	resp, err := q.client.Do(req)
+	if err != nil {
+		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: HTTP %d", resp.StatusCode)
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: %v", err)
+		return nil
+	}
+
+	version := strings.TrimSpace(string(body))
+	if version == "" {
+		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: empty version response")
+		return nil
+	}
+
+	major, minor, patch, ok := parseQBitVersion(version)
+	if !ok {
+		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: invalid version %q", version)
+		return nil
+	}
+
+	isV520Plus := major > 5 || (major == 5 && (minor > 2 || (minor == 2 && patch >= 0)))
+	q.versionMu.Lock()
+	q.appVersion = version
+	q.isV520Plus = isV520Plus
+	q.versionMu.Unlock()
+
+	mode := "legacy"
+	if isV520Plus {
+		mode = "5.2.0+"
+	}
+	sLogger().Infof("qBit 版本探测: %s (%s 模式)", q.appVersion, mode)
+
+	return nil
+}
+
+func (q *QbitClient) isSuccessStatus(code int) bool {
+	q.versionMu.RLock()
+	defer q.versionMu.RUnlock()
+	if q.isV520Plus {
+		return code >= 200 && code < 300
+	}
+	return code == http.StatusOK
 }
 
 func (q *QbitClient) wrapConnectionError(err error) error {
@@ -203,7 +304,7 @@ func (q *QbitClient) doRequestWithRetry(req *http.Request) (*http.Response, erro
 		}
 	}
 
-	if resp.StatusCode == http.StatusOK {
+	if q.isSuccessStatus(resp.StatusCode) {
 		q.mu.Lock()
 		q.lastActivity = time.Now()
 		q.mu.Unlock()
@@ -228,7 +329,7 @@ func (q *QbitClient) GetDiskSpace(ctx context.Context) (int64, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return 0, fmt.Errorf("disk space request failed with status code: %d", resp.StatusCode)
 	}
 
@@ -340,7 +441,7 @@ func (q *QbitClient) AddTorrentWithPath(fileData []byte, category, tags, downloa
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upload failed with status code: %d, response: %s", resp.StatusCode, string(respBody))
 	}
@@ -372,7 +473,7 @@ func (q *QbitClient) CheckTorrentExistsWithContext(ctx context.Context, torrentH
 		return false, nil
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return false, fmt.Errorf("check failed with status code: %d", resp.StatusCode)
 	}
 
@@ -558,7 +659,7 @@ func (q *QbitClient) EnsureTorrentStarted(torrentHash string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("info request failed with status %d: %s", resp.StatusCode, string(body))
 	}
@@ -598,7 +699,7 @@ func (q *QbitClient) EnsureTorrentStarted(torrentHash string) error {
 		}
 		defer resumeResp.Body.Close()
 
-		if resumeResp.StatusCode != http.StatusOK {
+		if !q.isSuccessStatus(resumeResp.StatusCode) {
 			body, _ := io.ReadAll(resumeResp.Body)
 			return fmt.Errorf("resume request failed with status %d: %s", resumeResp.StatusCode, string(body))
 		}
@@ -631,7 +732,7 @@ func (q *QbitClient) Ping() (bool, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		q.healthy = false
 		return false, nil
 	}
@@ -658,7 +759,7 @@ func (q *QbitClient) GetClientVersion() (string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return "", fmt.Errorf("version request failed with status code: %d", resp.StatusCode)
 	}
 
@@ -687,7 +788,7 @@ func (q *QbitClient) GetClientStatus() (downloader.ClientStatus, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return downloader.ClientStatus{}, fmt.Errorf("status request failed with status code: %d", resp.StatusCode)
 	}
 
@@ -746,7 +847,7 @@ func (q *QbitClient) GetAllTorrents() ([]downloader.Torrent, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return nil, fmt.Errorf("torrents request failed with status code: %d", resp.StatusCode)
 	}
 
@@ -856,7 +957,7 @@ func (q *QbitClient) postForm(endpoint string, data url.Values) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("request failed for %s with status %d: %s", endpoint, resp.StatusCode, string(body))
 	}
@@ -876,7 +977,7 @@ func (q *QbitClient) getJSON(endpoint string, dst any) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("request failed for %s with status %d: %s", endpoint, resp.StatusCode, string(body))
 	}
@@ -913,7 +1014,7 @@ func (q *QbitClient) callPauseResumeEndpoints(ids []string, modernEndpoint, lega
 		return q.postForm(legacyEndpoint, data)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("request failed for %s with status %d: %s", modernEndpoint, resp.StatusCode, string(body))
 	}
@@ -1040,11 +1141,47 @@ func (q *QbitClient) AddTorrentEx(torrentURL string, opt downloader.AddTorrentOp
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
+	}
+
+	q.versionMu.RLock()
+	isNew := q.isV520Plus
+	q.versionMu.RUnlock()
+
+	if isNew {
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusAccepted, http.StatusNoContent:
+			var result struct {
+				SuccessCount    int      `json:"success_count"`
+				PendingCount    int      `json:"pending_count"`
+				FailureCount    int      `json:"failure_count"`
+				AddedTorrentIDs []string `json:"added_torrent_ids"`
+			}
+			if len(bodyBytes) > 0 && json.Unmarshal(bodyBytes, &result) == nil {
+				message := fmt.Sprintf("成功 %d, 待定 %d, 失败 %d", result.SuccessCount, result.PendingCount, result.FailureCount)
+				hash := ""
+				if len(result.AddedTorrentIDs) > 0 {
+					hash = result.AddedTorrentIDs[0]
+				}
+				return downloader.AddTorrentResult{Success: result.FailureCount == 0, Message: message, Hash: hash}, nil
+			}
+			if string(bodyBytes) == "Fails." {
+				return downloader.AddTorrentResult{Success: false, Message: "添加失败"}, fmt.Errorf("add failed")
+			}
+			return downloader.AddTorrentResult{Success: true, Message: "Torrent added successfully"}, nil
+		case http.StatusConflict:
+			return downloader.AddTorrentResult{Success: false, Message: "种子已存在或添加失败 (409 Conflict)"}, nil
+		default:
+			return downloader.AddTorrentResult{Success: false, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}, fmt.Errorf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes))
+		}
+	}
+
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return downloader.AddTorrentResult{
 			Success: false,
-			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(respBody)),
+			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
 	}
 
@@ -1096,11 +1233,47 @@ func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrent
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
+	}
+
+	q.versionMu.RLock()
+	isNew := q.isV520Plus
+	q.versionMu.RUnlock()
+
+	if isNew {
+		switch resp.StatusCode {
+		case http.StatusOK, http.StatusAccepted, http.StatusNoContent:
+			var result struct {
+				SuccessCount    int      `json:"success_count"`
+				PendingCount    int      `json:"pending_count"`
+				FailureCount    int      `json:"failure_count"`
+				AddedTorrentIDs []string `json:"added_torrent_ids"`
+			}
+			if len(bodyBytes) > 0 && json.Unmarshal(bodyBytes, &result) == nil {
+				message := fmt.Sprintf("成功 %d, 待定 %d, 失败 %d", result.SuccessCount, result.PendingCount, result.FailureCount)
+				hash := torrentHash
+				if len(result.AddedTorrentIDs) > 0 {
+					hash = result.AddedTorrentIDs[0]
+				}
+				return downloader.AddTorrentResult{Success: result.FailureCount == 0, Message: message, Hash: hash}, nil
+			}
+			if string(bodyBytes) == "Fails." {
+				return downloader.AddTorrentResult{Success: false, Message: "添加失败"}, fmt.Errorf("add failed")
+			}
+			return downloader.AddTorrentResult{Success: true, Message: "Torrent added successfully", Hash: torrentHash}, nil
+		case http.StatusConflict:
+			return downloader.AddTorrentResult{Success: false, Message: "种子已存在或添加失败 (409 Conflict)"}, nil
+		default:
+			return downloader.AddTorrentResult{Success: false, Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}, fmt.Errorf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes))
+		}
+	}
+
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return downloader.AddTorrentResult{
 			Success: false,
-			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(respBody)),
+			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
 	}
 
@@ -1369,7 +1542,7 @@ func (q *QbitClient) GetSpeedLimit() (downloader.SpeedLimit, error) {
 		return downloader.SpeedLimit{}, fmt.Errorf("speed mode request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		return downloader.SpeedLimit{}, fmt.Errorf("speed mode request failed with status %d: %s", resp.StatusCode, string(body))
 	}
@@ -1389,7 +1562,7 @@ func (q *QbitClient) GetSpeedLimit() (downloader.SpeedLimit, error) {
 		return downloader.SpeedLimit{}, fmt.Errorf("download limit request failed: %w", err)
 	}
 	defer respDl.Body.Close()
-	if respDl.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(respDl.StatusCode) {
 		dlBody, _ := io.ReadAll(respDl.Body)
 		return downloader.SpeedLimit{}, fmt.Errorf("download limit request failed with status %d: %s", respDl.StatusCode, string(dlBody))
 	}
@@ -1407,7 +1580,7 @@ func (q *QbitClient) GetSpeedLimit() (downloader.SpeedLimit, error) {
 		return downloader.SpeedLimit{}, fmt.Errorf("upload limit request failed: %w", err)
 	}
 	defer respUl.Body.Close()
-	if respUl.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(respUl.StatusCode) {
 		ulBody, _ := io.ReadAll(respUl.Body)
 		return downloader.SpeedLimit{}, fmt.Errorf("upload limit request failed with status %d: %s", respUl.StatusCode, string(ulBody))
 	}
@@ -1464,7 +1637,7 @@ func (q *QbitClient) GetClientPaths() ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return nil, fmt.Errorf("preferences request failed with status code: %d", resp.StatusCode)
 	}
 
@@ -1498,7 +1671,7 @@ func (q *QbitClient) GetClientLabels() ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if !q.isSuccessStatus(resp.StatusCode) {
 		return nil, fmt.Errorf("categories request failed with status code: %d", resp.StatusCode)
 	}
 
