@@ -114,7 +114,8 @@ func (m *URLFailoverManager) ExecuteWithFailover(
 			}
 
 			if retry > 0 {
-				m.logger.Debug("Retrying URL",
+				m.logger.Debug(
+					"Retrying URL",
 					zap.String("url", baseURL),
 					zap.Int("retry", retry),
 				)
@@ -128,7 +129,8 @@ func (m *URLFailoverManager) ExecuteWithFailover(
 					m.mu.Lock()
 					m.currentIdx = idx
 					m.mu.Unlock()
-					m.logger.Info("Switched to new base URL",
+					m.logger.Info(
+						"Switched to new base URL",
 						zap.String("url", baseURL),
 						zap.Int("index", idx),
 					)
@@ -137,7 +139,8 @@ func (m *URLFailoverManager) ExecuteWithFailover(
 			}
 
 			lastErr = err
-			m.logger.Warn("URL request failed",
+			m.logger.Warn(
+				"URL request failed",
 				zap.String("url", baseURL),
 				zap.Int("retry", retry),
 				zap.Error(err),
@@ -149,7 +152,8 @@ func (m *URLFailoverManager) ExecuteWithFailover(
 			}
 		}
 
-		m.logger.Debug("Moving to next URL",
+		m.logger.Debug(
+			"Moving to next URL",
 			zap.String("failedURL", baseURL),
 			zap.Int("nextIndex", (idx+1)%urlCount),
 		)

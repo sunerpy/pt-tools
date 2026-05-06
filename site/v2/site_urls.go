@@ -117,7 +117,8 @@ func (r *SiteURLRegistry) RegisterURLs(siteName SiteName, urls []string) {
 	urlsCopy := make([]string, len(urls))
 	copy(urlsCopy, urls)
 	r.urls[siteName] = urlsCopy
-	r.logger.Debug("Registered site URLs",
+	r.logger.Debug(
+		"Registered site URLs",
 		zap.String("site", siteName.String()),
 		zap.Strings("urls", urlsCopy),
 	)

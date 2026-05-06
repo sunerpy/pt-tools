@@ -143,7 +143,8 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 	db, err := gorm.Open(
 		sqlite.Open(dsn), &gorm.Config{
 			Logger: gormLg,
-		})
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("无法初始化 GORM: %w", err)
 	}

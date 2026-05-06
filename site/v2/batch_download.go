@@ -90,7 +90,8 @@ func (s *BatchDownloadService) FetchFreeTorrents(ctx context.Context) ([]Torrent
 		}
 	}
 
-	s.logger.Info("Found free torrents",
+	s.logger.Info(
+		"Found free torrents",
 		zap.String("site", s.site.ID()),
 		zap.Int("count", len(freeTorrents)),
 	)
@@ -133,7 +134,8 @@ func (s *BatchDownloadService) DownloadFreeTorrents(
 		default:
 		}
 
-		s.logger.Debug("Downloading torrent",
+		s.logger.Debug(
+			"Downloading torrent",
 			zap.String("id", t.ID),
 			zap.String("title", t.Title),
 		)
@@ -141,7 +143,8 @@ func (s *BatchDownloadService) DownloadFreeTorrents(
 		// Download torrent file
 		data, dlErr := s.site.Download(ctx, t.ID)
 		if dlErr != nil {
-			s.logger.Warn("Failed to download torrent",
+			s.logger.Warn(
+				"Failed to download torrent",
 				zap.String("id", t.ID),
 				zap.Error(dlErr),
 			)
@@ -152,7 +155,8 @@ func (s *BatchDownloadService) DownloadFreeTorrents(
 		filename := fmt.Sprintf("%s.torrent", sanitizeFilename(t.Title))
 		filepath := filepath.Join(tempDir, filename)
 		if writeErr := os.WriteFile(filepath, data, 0o644); writeErr != nil {
-			s.logger.Warn("Failed to save torrent file",
+			s.logger.Warn(
+				"Failed to save torrent file",
 				zap.String("id", t.ID),
 				zap.Error(writeErr),
 			)
@@ -207,7 +211,8 @@ func (s *BatchDownloadService) DownloadFreeTorrents(
 		}
 	}
 
-	s.logger.Info("Created archive",
+	s.logger.Info(
+		"Created archive",
 		zap.String("path", archivePath),
 		zap.Int("torrentCount", len(manifest)),
 	)

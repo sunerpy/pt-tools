@@ -71,7 +71,8 @@ func AddAtPausedToAutoStart(addAtPaused bool) bool {
 
 // MigrateDownloaderConfig converts an old downloader config to the new format
 func (m *ConfigMigrator) MigrateDownloaderConfig(old OldDownloaderConfig) NewDownloaderConfig {
-	m.logger.Info("Migrating downloader config",
+	m.logger.Info(
+		"Migrating downloader config",
 		zap.String("name", old.Name),
 		zap.Bool("autoStart", old.AutoStart),
 	)
@@ -99,7 +100,8 @@ func (m *ConfigMigrator) MigrateDownloaderConfigJSON(oldJSON []byte) ([]byte, er
 
 // MigrateSiteConfig converts an old site config to the new SiteConfig format
 func (m *ConfigMigrator) MigrateSiteConfig(old OldSiteConfig) SiteConfig {
-	m.logger.Info("Migrating site config",
+	m.logger.Info(
+		"Migrating site config",
 		zap.String("name", old.Name),
 		zap.String("type", old.Type),
 	)
@@ -265,7 +267,8 @@ func (m *ConfigMigrator) CheckForDeprecatedFields(configJSON []byte) []Deprecati
 
 	for _, warning := range allWarnings {
 		if _, exists := data[warning.Field]; exists {
-			m.logger.Warn("Deprecated field detected",
+			m.logger.Warn(
+				"Deprecated field detected",
 				zap.String("field", warning.Field),
 				zap.String("message", warning.Message),
 				zap.String("replacement", warning.Replacement),
@@ -467,7 +470,8 @@ func NewSiteMigrationManager(logger *zap.Logger) *SiteMigrationManager {
 // RegisterSite registers a site with both old and new implementations
 func (m *SiteMigrationManager) RegisterSite(siteID string, oldSite any, newSite Site, useNew bool) {
 	m.adapters[siteID] = NewSiteAdapter(oldSite, newSite, useNew)
-	m.logger.Info("Registered site for migration",
+	m.logger.Info(
+		"Registered site for migration",
 		zap.String("siteId", siteID),
 		zap.Bool("useNew", useNew),
 	)
@@ -499,7 +503,8 @@ func (m *SiteMigrationManager) MigrateToNew(siteID string) error {
 		return fmt.Errorf("new implementation not available for site: %s", siteID)
 	}
 	adapter.UseNew = true
-	m.logger.Info("Migrated site to new implementation",
+	m.logger.Info(
+		"Migrated site to new implementation",
 		zap.String("siteId", siteID),
 	)
 	return nil
@@ -515,7 +520,8 @@ func (m *SiteMigrationManager) RollbackToOld(siteID string) error {
 		return fmt.Errorf("old implementation not available for site: %s", siteID)
 	}
 	adapter.UseNew = false
-	m.logger.Info("Rolled back site to old implementation",
+	m.logger.Info(
+		"Rolled back site to old implementation",
 		zap.String("siteId", siteID),
 	)
 	return nil

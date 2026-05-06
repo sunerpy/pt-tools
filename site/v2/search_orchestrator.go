@@ -195,7 +195,8 @@ func (o *SearchOrchestrator) searchConcurrently(ctx context.Context, sites []Sit
 	)
 
 	startTime := time.Now()
-	o.logger.Info("Starting concurrent search",
+	o.logger.Info(
+		"Starting concurrent search",
 		zap.Int("siteCount", len(sites)),
 		zap.String("keyword", query.Keyword),
 	)
@@ -228,7 +229,8 @@ func (o *SearchOrchestrator) searchConcurrently(ctx context.Context, sites []Sit
 			defer mu.Unlock()
 
 			if err != nil {
-				o.logger.Warn("Search failed",
+				o.logger.Warn(
+					"Search failed",
 					zap.String("site", s.ID()),
 					zap.Duration("duration", siteDuration),
 					zap.Error(err),
@@ -240,7 +242,8 @@ func (o *SearchOrchestrator) searchConcurrently(ctx context.Context, sites []Sit
 				return
 			}
 
-			o.logger.Info("Site search completed",
+			o.logger.Info(
+				"Site search completed",
 				zap.String("site", s.ID()),
 				zap.Int("results", len(items)),
 				zap.Duration("duration", siteDuration),
@@ -250,7 +253,8 @@ func (o *SearchOrchestrator) searchConcurrently(ctx context.Context, sites []Sit
 	}
 
 	wg.Wait()
-	o.logger.Info("All site searches completed",
+	o.logger.Info(
+		"All site searches completed",
 		zap.Int("totalResults", len(results)),
 		zap.Int("errorCount", len(errors)),
 		zap.Duration("totalDuration", time.Since(startTime)),

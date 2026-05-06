@@ -186,7 +186,8 @@ func NewNexusPHPDriver(config NexusPHPDriverConfig) *NexusPHPDriver {
 	// Initialize failover client if enabled and site name is provided
 	if config.UseFailover && config.SiteName != "" {
 		registry := GetGlobalRegistry()
-		if failoverClient, err := registry.GetFailoverClient(config.SiteName,
+		if failoverClient, err := registry.GetFailoverClient(
+			config.SiteName,
 			WithUserAgent(userAgent),
 		); err == nil {
 			driver.failoverClient = failoverClient

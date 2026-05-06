@@ -108,7 +108,8 @@ func (b *BaseSite[Req, Res]) Search(ctx context.Context, query SearchQuery) ([]T
 	}
 
 	startTime := time.Now()
-	b.logger.Debug("Starting search",
+	b.logger.Debug(
+		"Starting search",
 		zap.String("site", b.name),
 		zap.String("keyword", query.Keyword),
 		zap.Bool("freeOnly", query.FreeOnly),
@@ -140,7 +141,8 @@ func (b *BaseSite[Req, Res]) Search(ctx context.Context, query SearchQuery) ([]T
 		items[i].SourceSite = b.id
 	}
 
-	b.logger.Info("Search completed",
+	b.logger.Info(
+		"Search completed",
 		zap.String("site", b.name),
 		zap.Int("results", len(items)),
 		zap.Duration("duration", time.Since(startTime)),
@@ -170,7 +172,8 @@ func (b *BaseSite[Req, Res]) GetUserInfo(ctx context.Context) (UserInfo, error) 
 	info.Site = b.id
 	info.LastUpdate = time.Now().Unix()
 
-	b.logger.Info("User info fetched",
+	b.logger.Info(
+		"User info fetched",
 		zap.String("site", b.name),
 		zap.String("username", info.Username),
 		zap.Duration("duration", time.Since(startTime)),
@@ -187,7 +190,8 @@ func (b *BaseSite[Req, Res]) Download(ctx context.Context, torrentID string) ([]
 	}
 
 	startTime := time.Now()
-	b.logger.Debug("Downloading torrent",
+	b.logger.Debug(
+		"Downloading torrent",
 		zap.String("site", b.name),
 		zap.String("torrentID", torrentID),
 	)
@@ -213,7 +217,8 @@ func (b *BaseSite[Req, Res]) Download(ctx context.Context, torrentID string) ([]
 		return nil, fmt.Errorf("parse download: %w", err)
 	}
 
-	b.logger.Info("Torrent downloaded",
+	b.logger.Info(
+		"Torrent downloaded",
 		zap.String("site", b.name),
 		zap.String("torrentID", torrentID),
 		zap.Int("size", len(data)),

@@ -346,7 +346,8 @@ func (c *RetryableHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
 		if attempt > 0 {
 			backoff := c.calculateBackoff(attempt)
-			c.logger.Debug("Retrying request",
+			c.logger.Debug(
+				"Retrying request",
 				zap.Int("attempt", attempt),
 				zap.Duration("backoff", backoff),
 				zap.String("url", req.URL.String()),
@@ -372,7 +373,8 @@ func (c *RetryableHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		resp, err := c.client.Do(reqClone)
 		if err != nil {
 			lastErr = err
-			c.logger.Warn("Request failed",
+			c.logger.Warn(
+				"Request failed",
 				zap.Int("attempt", attempt),
 				zap.Error(err),
 			)
@@ -383,7 +385,8 @@ func (c *RetryableHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		if c.shouldRetry(resp.StatusCode) {
 			lastResp = resp
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
-			c.logger.Warn("Retryable status code",
+			c.logger.Warn(
+				"Retryable status code",
 				zap.Int("attempt", attempt),
 				zap.Int("status", resp.StatusCode),
 			)

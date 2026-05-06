@@ -296,7 +296,8 @@ func NewMTorrentDriver(config MTorrentDriverConfig) *MTorrentDriver {
 	// Initialize failover client if enabled
 	if config.UseFailover {
 		registry := GetGlobalRegistry()
-		if failoverClient, err := registry.GetFailoverClient(SiteNameMTeam,
+		if failoverClient, err := registry.GetFailoverClient(
+			SiteNameMTeam,
 			WithUserAgent(userAgent),
 		); err == nil {
 			driver.failoverClient = failoverClient

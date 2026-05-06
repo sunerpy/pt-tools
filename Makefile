@@ -37,7 +37,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites
+.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -151,6 +151,35 @@ build-remote-docker:
 	--build-arg COMMIT_ID=$(COMMIT_ID) \
 	-t $(DOCKER_IMAGE_FULL):$(TAG) \
 	-t $(DOCKER_IMAGE_FULL):latest \
+	--push .
+
+# Docker 镜像远程构建（预发版专用）
+# 与 build-remote-docker 的区别：
+#   1. 不打 :latest 标签（避免 docker pull :latest 误拉到预发版）
+#   2. 新增 :$(CHANNEL) 滚动标签（beta/rc/alpha），方便测试者 docker pull sunerpy/pt-tools:beta
+# 用法：make build-prerelease-docker TAG=v0.28.0-beta.1 CHANNEL=beta
+build-prerelease-docker: BUILD_ENV = remote
+build-prerelease-docker:
+	@if [ -z "$(TAG)" ] || [ -z "$(CHANNEL)" ]; then \
+		echo "Usage: make build-prerelease-docker TAG=v0.28.0-beta.1 CHANNEL=beta"; \
+		exit 1; \
+	fi
+	@echo "Preparing dependencies"
+	@mkdir -p dist
+	go mod vendor
+	@echo "Building prerelease Docker image: $(TAG) + :$(CHANNEL)"
+	docker buildx build \
+	--progress=plain \
+	--platform $(DOCKERPLATFORMS) \
+	--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+	--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
+	--build-arg BUILD_ENV=$(BUILD_ENV) \
+	--build-arg TAG=$(TAG) \
+	--build-arg BUILD_TIME=$(BUILD_TIME) \
+	--build-arg COMMIT_ID=$(COMMIT_ID) \
+	-t $(DOCKER_IMAGE_FULL):$(TAG) \
+	-t $(DOCKER_IMAGE_FULL):$(CHANNEL) \
 	--push .
 
 # 清理构建文件
