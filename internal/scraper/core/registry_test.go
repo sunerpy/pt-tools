@@ -221,6 +221,10 @@ func NewMockConnector(name string) MediaServerConnector {
 	return &MockConnector{name: name}
 }
 
+func (m *MockConnector) Name() string {
+	return m.name
+}
+
 func (m *MockConnector) Ping(ctx context.Context) (*ServerInfo, error) {
 	return &ServerInfo{Name: m.name}, nil
 }

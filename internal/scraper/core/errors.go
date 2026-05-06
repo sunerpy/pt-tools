@@ -34,6 +34,12 @@ var (
 
 	// ErrAllProvidersFailed is returned when all providers fail to fulfill a request.
 	ErrAllProvidersFailed = errors.New("all providers failed to complete request")
+
+	// ErrProviderDown is returned when the provider is unreachable or returning 5xx.
+	ErrProviderDown = errors.New("provider is down")
+
+	// ErrUnsupported is returned when a requested feature or server type is not supported.
+	ErrUnsupported = errors.New("unsupported")
 )
 
 // Wrap wraps an error with an additional message using fmt.Errorf.

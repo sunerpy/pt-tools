@@ -101,6 +101,9 @@ type ScanStatus struct {
 
 // MediaServerConnector manages connections to media servers (Jellyfin, Emby, etc.).
 type MediaServerConnector interface {
+	// Name returns the connector type identifier ("jellyfin", "emby", etc.).
+	Name() string
+
 	// Ping tests connectivity to the server.
 	Ping(ctx context.Context) (*ServerInfo, error)
 
