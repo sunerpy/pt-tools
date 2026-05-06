@@ -1,15 +1,14 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
-
-	ollamaapi "github.com/ollama/ollama/api"
 )
 
 const defaultOllamaBaseURL = "http://localhost:11434"
@@ -21,21 +20,39 @@ type OllamaConfig struct {
 	HTTPClient *http.Client
 }
 
-// OllamaNativeProvider 使用原生 format schema。
+// OllamaNativeProvider 使用 Ollama 原生 /api/chat endpoint 的 format 字段来实现严格 JSON schema 输出。
+// 直接手写 HTTP 调用以避免依赖 github.com/ollama/ollama（GO-2025-4251 安全漏洞未修复）。
 type OllamaNativeProvider struct {
-	client *ollamaapi.Client
-	model  string
-	schema []byte
+	baseURL    string
+	model      string
+	schema     json.RawMessage
+	httpClient *http.Client
+}
+
+type ollamaChatRequest struct {
+	Model    string              `json:"model"`
+	Messages []ollamaChatMessage `json:"messages"`
+	Format   json.RawMessage     `json:"format,omitempty"`
+	Stream   bool                `json:"stream"`
+	Options  map[string]any      `json:"options,omitempty"`
+}
+
+type ollamaChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ollamaChatResponse struct {
+	Model     string            `json:"model"`
+	CreatedAt string            `json:"created_at"`
+	Message   ollamaChatMessage `json:"message"`
+	Done      bool              `json:"done"`
 }
 
 func NewOllamaNativeProvider(cfg OllamaConfig) (*OllamaNativeProvider, error) {
-	baseURL := strings.TrimSpace(cfg.BaseURL)
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = defaultOllamaBaseURL
-	}
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse ollama base url: %w", err)
 	}
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
@@ -43,16 +60,17 @@ func NewOllamaNativeProvider(cfg OllamaConfig) (*OllamaNativeProvider, error) {
 	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
-	schema, err := jsonMarshalSchema(generateNFOSchema())
+	schemaBytes, err := jsonMarshalSchema(generateNFOSchema())
 	if err != nil {
 		return nil, err
 	}
 	return &OllamaNativeProvider{
-		client: ollamaapi.NewClient(parsed, httpClient),
-		model:  model,
-		schema: schema,
+		baseURL:    baseURL,
+		model:      model,
+		schema:     schemaBytes,
+		httpClient: httpClient,
 	}, nil
 }
 
@@ -69,27 +87,44 @@ func (p *OllamaNativeProvider) Close() error {
 }
 
 func (p *OllamaNativeProvider) Extract(ctx context.Context, req ExtractRequest) (*NFOResult, error) {
-	stream := false
-	chatReq := &ollamaapi.ChatRequest{
-		Model:  p.model,
-		Stream: &stream,
+	body := ollamaChatRequest{
+		Model: p.model,
+		Messages: []ollamaChatMessage{
+			{Role: "system", Content: buildSystemPrompt()},
+			{Role: "user", Content: buildUserPrompt(req)},
+		},
 		Format: p.schema,
+		Stream: false,
 		Options: map[string]any{
 			"temperature": 0,
 			"num_predict": defaultMaxTokens,
 		},
-		Messages: []ollamaapi.Message{
-			{Role: "system", Content: buildSystemPrompt()},
-			{Role: "user", Content: buildUserPrompt(req)},
-		},
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ollama request: %w", err)
 	}
 
-	var final ollamaapi.ChatResponse
-	if err := p.client.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
-		final = resp
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("ollama native call: %w", err)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/chat", bytes.NewReader(buf))
+	if err != nil {
+		return nil, fmt.Errorf("build ollama request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ollama http call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		slurp, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("ollama http %d: %s", resp.StatusCode, strings.TrimSpace(string(slurp)))
+	}
+
+	var final ollamaChatResponse
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&final); decodeErr != nil {
+		return nil, fmt.Errorf("decode ollama response: %w", decodeErr)
 	}
 
 	result, err := decodeResultPayload(final.Message.Content)
