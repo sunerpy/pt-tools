@@ -239,7 +239,7 @@ func TestFilterNewReleases(t *testing.T) {
 		{TagName: "draft-release", Name: "Draft", HTMLURL: "https://github.com/test/draft", Draft: true},
 	}
 
-	newReleases := checker.filterNewReleases(releases)
+	newReleases := checker.filterNewReleases(releases, false)
 
 	assert.Len(t, newReleases, 2, "should filter to only newer non-draft non-prerelease versions")
 	assert.Equal(t, "v2.0.0", newReleases[0].Version)
@@ -257,7 +257,7 @@ func TestFilterNewReleases_InvalidCurrentVersion(t *testing.T) {
 		{TagName: "v1.0.0", Name: "Version 1.0.0"},
 	}
 
-	newReleases := checker.filterNewReleases(releases)
+	newReleases := checker.filterNewReleases(releases, false)
 	assert.Nil(t, newReleases, "should return nil when current version is invalid")
 }
 
@@ -274,10 +274,76 @@ func TestFilterNewReleases_SortedByVersion(t *testing.T) {
 		{TagName: "v2.0.0", Name: "Another major"},
 	}
 
-	newReleases := checker.filterNewReleases(releases)
+	newReleases := checker.filterNewReleases(releases, false)
 
 	require.Len(t, newReleases, 3)
 	assert.Equal(t, "v3.0.0", newReleases[0].Version)
 	assert.Equal(t, "v2.0.0", newReleases[1].Version)
 	assert.Equal(t, "v1.1.0", newReleases[2].Version)
+}
+
+func TestFilterNewReleases_IncludePrerelease(t *testing.T) {
+	checker := NewChecker()
+	oldVersion := Version
+	defer func() { Version = oldVersion }()
+	Version = "v1.0.0"
+
+	releases := []GitHubRelease{
+		{TagName: "v2.0.0", Name: "Release", HTMLURL: "u"},
+		{TagName: "v2.1.0-beta.1", Name: "Beta", HTMLURL: "u", Prerelease: true},
+		{TagName: "v2.2.0-rc.2", Name: "RC", HTMLURL: "u", Prerelease: true},
+		{TagName: "draft", Name: "Draft", HTMLURL: "u", Draft: true},
+	}
+
+	includePre := checker.filterNewReleases(releases, true)
+	require.Len(t, includePre, 3)
+	assert.Equal(t, "v2.2.0-rc.2", includePre[0].Version)
+	assert.True(t, includePre[0].Prerelease)
+	assert.Equal(t, "rc", includePre[0].PrereleaseLabel)
+	assert.Equal(t, "v2.1.0-beta.1", includePre[1].Version)
+	assert.True(t, includePre[1].Prerelease)
+	assert.Equal(t, "beta", includePre[1].PrereleaseLabel)
+	assert.Equal(t, "v2.0.0", includePre[2].Version)
+	assert.False(t, includePre[2].Prerelease)
+	assert.Empty(t, includePre[2].PrereleaseLabel)
+
+	excludePre := checker.filterNewReleases(releases, false)
+	require.Len(t, excludePre, 1)
+	assert.Equal(t, "v2.0.0", excludePre[0].Version)
+}
+
+func TestFilterNewReleases_TagSuffixDetection(t *testing.T) {
+	checker := NewChecker()
+	oldVersion := Version
+	defer func() { Version = oldVersion }()
+	Version = "v1.0.0"
+
+	releases := []GitHubRelease{
+		{TagName: "v2.0.0-beta.1", Name: "Beta (flag missing)", HTMLURL: "u", Prerelease: false},
+	}
+
+	got := checker.filterNewReleases(releases, true)
+	require.Len(t, got, 1)
+	assert.True(t, got[0].Prerelease, "tag -beta.1 suffix 应识别为预发版，即使 GitHub prerelease 勾选被漏掉")
+	assert.Equal(t, "beta", got[0].PrereleaseLabel)
+}
+
+func TestExtractPrereleaseLabel(t *testing.T) {
+	cases := []struct {
+		in  string
+		out string
+	}{
+		{"", ""},
+		{"beta", "beta"},
+		{"beta.1", "beta"},
+		{"BETA.2", "beta"},
+		{"rc.1", "rc"},
+		{"alpha", "alpha"},
+		{"dev.1", ""},
+		{"snapshot", ""},
+		{"foo.bar", ""},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.out, extractPrereleaseLabel(c.in), "input=%q", c.in)
+	}
 }

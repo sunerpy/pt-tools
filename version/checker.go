@@ -56,6 +56,10 @@ type ReleaseInfo struct {
 	URL         string         `json:"url"`
 	PublishedAt int64          `json:"published_at"`
 	Assets      []ReleaseAsset `json:"assets,omitempty"`
+	// Prerelease 标记此版本是否为预发版（beta/rc/alpha）
+	Prerelease bool `json:"prerelease,omitempty"`
+	// PrereleaseLabel 从 tag 中解析出的预发版通道名（beta/rc/alpha），用于前端徽章展示
+	PrereleaseLabel string `json:"prerelease_label,omitempty"`
 }
 
 type VersionCheckResult struct {
@@ -77,13 +81,17 @@ type VersionInfo struct {
 type CheckOptions struct {
 	Force    bool
 	ProxyURL string
+	// IncludePrerelease 是否在结果中包含预发版（beta/rc/alpha）。
+	// 默认 false，保持与旧客户端兼容；前端通过查询参数按需启用。
+	IncludePrerelease bool
 }
 
 type Checker struct {
-	mu         sync.RWMutex
-	lastCheck  time.Time
-	lastResult *VersionCheckResult
-	lastProxy  string
+	mu                sync.RWMutex
+	lastCheck         time.Time
+	lastResult        *VersionCheckResult
+	lastProxy         string
+	lastIncludePrerel bool
 }
 
 var (
@@ -114,7 +122,8 @@ func GetVersionInfo() VersionInfo {
 func (c *Checker) CheckForUpdates(ctx context.Context, opts CheckOptions) (*VersionCheckResult, error) {
 	c.mu.RLock()
 	proxyChanged := opts.ProxyURL != c.lastProxy
-	if !opts.Force && !proxyChanged && c.lastResult != nil && time.Since(c.lastCheck) < CheckInterval {
+	prerelChanged := opts.IncludePrerelease != c.lastIncludePrerel
+	if !opts.Force && !proxyChanged && !prerelChanged && c.lastResult != nil && time.Since(c.lastCheck) < CheckInterval {
 		result := c.lastResult
 		c.mu.RUnlock()
 		return result, nil
@@ -125,7 +134,8 @@ func (c *Checker) CheckForUpdates(ctx context.Context, opts CheckOptions) (*Vers
 	defer c.mu.Unlock()
 
 	proxyChanged = opts.ProxyURL != c.lastProxy
-	if !opts.Force && !proxyChanged && c.lastResult != nil && time.Since(c.lastCheck) < CheckInterval {
+	prerelChanged = opts.IncludePrerelease != c.lastIncludePrerel
+	if !opts.Force && !proxyChanged && !prerelChanged && c.lastResult != nil && time.Since(c.lastCheck) < CheckInterval {
 		return c.lastResult, nil
 	}
 
@@ -141,7 +151,7 @@ func (c *Checker) CheckForUpdates(ctx context.Context, opts CheckOptions) (*Vers
 		return result, err
 	}
 
-	newReleases := c.filterNewReleases(releases)
+	newReleases := c.filterNewReleases(releases, opts.IncludePrerelease)
 	if len(newReleases) > 0 {
 		result.HasUpdate = true
 		if len(newReleases) > MaxDisplayReleases {
@@ -155,6 +165,7 @@ func (c *Checker) CheckForUpdates(ctx context.Context, opts CheckOptions) (*Vers
 	c.lastResult = result
 	c.lastCheck = time.Now()
 	c.lastProxy = opts.ProxyURL
+	c.lastIncludePrerel = opts.IncludePrerelease
 	return result, nil
 }
 
@@ -208,7 +219,7 @@ func (c *Checker) fetchGitHubReleases(ctx context.Context, proxyURL string) ([]G
 	return releases, nil
 }
 
-func (c *Checker) filterNewReleases(releases []GitHubRelease) []ReleaseInfo {
+func (c *Checker) filterNewReleases(releases []GitHubRelease, includePrerelease bool) []ReleaseInfo {
 	currentParsed := ParseVersion(Version)
 	if currentParsed == nil {
 		return nil
@@ -216,7 +227,10 @@ func (c *Checker) filterNewReleases(releases []GitHubRelease) []ReleaseInfo {
 
 	var newReleases []ReleaseInfo
 	for _, r := range releases {
-		if r.Draft || r.Prerelease {
+		if r.Draft {
+			continue
+		}
+		if r.Prerelease && !includePrerelease {
 			continue
 		}
 
@@ -234,13 +248,19 @@ func (c *Checker) filterNewReleases(releases []GitHubRelease) []ReleaseInfo {
 					Size:        a.Size,
 				})
 			}
+			// 同时认两种信号：GitHub Release 的 prerelease 标记 + tag 中的 -beta/-rc/-alpha 后缀，
+			// 任一命中即当作预发版，避免发版时漏勾 prerelease 勾选导致误判。
+			label := extractPrereleaseLabel(releaseParsed.Prerelease)
+			isPrerelease := r.Prerelease || label != ""
 			newReleases = append(newReleases, ReleaseInfo{
-				Version:     r.TagName,
-				Name:        r.Name,
-				Changelog:   r.Body,
-				URL:         r.HTMLURL,
-				PublishedAt: r.PublishedAt.Unix(),
-				Assets:      assets,
+				Version:         r.TagName,
+				Name:            r.Name,
+				Changelog:       r.Body,
+				URL:             r.HTMLURL,
+				PublishedAt:     r.PublishedAt.Unix(),
+				Assets:          assets,
+				Prerelease:      isPrerelease,
+				PrereleaseLabel: label,
 			})
 		}
 	}
@@ -252,6 +272,21 @@ func (c *Checker) filterNewReleases(releases []GitHubRelease) []ReleaseInfo {
 	})
 
 	return newReleases
+}
+
+// extractPrereleaseLabel 从 semver prerelease 段（例如 "beta.1" / "rc.2" / "alpha"）
+// 提取首个 dot 分段的通道名，返回小写字符串。未识别或为空时返回 ""。
+// 只认 beta/rc/alpha 三类，其它标签（如 "dev" / "snapshot"）一律当作非预发版处理。
+func extractPrereleaseLabel(prereleaseSegment string) string {
+	if prereleaseSegment == "" {
+		return ""
+	}
+	first := strings.ToLower(strings.SplitN(prereleaseSegment, ".", 2)[0])
+	switch first {
+	case "beta", "rc", "alpha":
+		return first
+	}
+	return ""
 }
 
 type SemVer struct {

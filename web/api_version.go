@@ -33,14 +33,16 @@ func (s *Server) apiVersionCheck(w http.ResponseWriter, r *http.Request) {
 
 	force := r.URL.Query().Get("force") == "true"
 	proxyURL := r.URL.Query().Get("proxy")
+	includePrerelease := r.URL.Query().Get("include_prerelease") == "true"
 	checker := version.GetChecker()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	opts := version.CheckOptions{
-		Force:    force,
-		ProxyURL: proxyURL,
+		Force:             force,
+		ProxyURL:          proxyURL,
+		IncludePrerelease: includePrerelease,
 	}
 	result, err := checker.CheckForUpdates(ctx, opts)
 	if err != nil && result == nil {

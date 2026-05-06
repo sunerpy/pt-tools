@@ -11,6 +11,7 @@ import {
 } from "../api";
 
 const DISMISSED_VERSIONS_KEY = "pt-tools-dismissed-versions";
+const SHOW_PRERELEASE_KEY = "pt-tools-show-prerelease";
 
 export const useVersionStore = defineStore("version", () => {
   const versionInfo = ref<VersionInfo | null>(null);
@@ -18,6 +19,7 @@ export const useVersionStore = defineStore("version", () => {
   const loading = ref(false);
   const checking = ref(false);
   const dismissedVersions = ref<string[]>(loadDismissedVersions());
+  const showPrerelease = ref<boolean>(loadShowPrerelease());
 
   const runtime = ref<RuntimeEnvironment | null>(null);
   const upgradeProgress = ref<UpgradeProgress | null>(null);
@@ -62,6 +64,14 @@ export const useVersionStore = defineStore("version", () => {
   const hasMoreReleases = computed(() => checkResult.value?.has_more_releases || false);
   const changelogUrl = computed(() => checkResult.value?.changelog_url || "");
 
+  const hasPrereleaseUpdate = computed(() =>
+    visibleReleases.value.some((r) => r.prerelease === true),
+  );
+  const onlyPrereleaseUpdates = computed(
+    () =>
+      visibleReleases.value.length > 0 && visibleReleases.value.every((r) => r.prerelease === true),
+  );
+
   function loadDismissedVersions(): string[] {
     try {
       const stored = localStorage.getItem(DISMISSED_VERSIONS_KEY);
@@ -73,6 +83,25 @@ export const useVersionStore = defineStore("version", () => {
 
   function saveDismissedVersions() {
     localStorage.setItem(DISMISSED_VERSIONS_KEY, JSON.stringify(dismissedVersions.value));
+  }
+
+  function loadShowPrerelease(): boolean {
+    try {
+      return localStorage.getItem(SHOW_PRERELEASE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveShowPrerelease() {
+    localStorage.setItem(SHOW_PRERELEASE_KEY, showPrerelease.value ? "true" : "false");
+  }
+
+  function setShowPrerelease(value: boolean) {
+    if (showPrerelease.value === value) return;
+    showPrerelease.value = value;
+    saveShowPrerelease();
+    checkForUpdates({ force: true }, false);
   }
 
   async function fetchVersionInfo() {
@@ -173,7 +202,10 @@ export const useVersionStore = defineStore("version", () => {
         saveDismissedVersions();
       }
 
-      checkResult.value = await versionApi.checkUpdate(options);
+      checkResult.value = await versionApi.checkUpdate({
+        ...options,
+        includePrerelease: showPrerelease.value,
+      });
 
       if (showNotification && hasUpdate.value && visibleReleases.value.length > 0) {
         const latestRelease = visibleReleases.value[0];
@@ -237,6 +269,9 @@ export const useVersionStore = defineStore("version", () => {
     visibleReleases,
     hasMoreReleases,
     changelogUrl,
+    hasPrereleaseUpdate,
+    onlyPrereleaseUpdates,
+    showPrerelease,
     runtime,
     upgradeProgress,
     upgrading,
@@ -247,6 +282,7 @@ export const useVersionStore = defineStore("version", () => {
     dismissVersion,
     dismissAllVisible,
     clearDismissed,
+    setShowPrerelease,
     fetchRuntime,
     startUpgrade,
     cancelUpgrade,

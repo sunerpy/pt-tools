@@ -3,6 +3,7 @@ import { useVersionStore } from "@/stores/version";
 import { formatDate } from "@/utils/format";
 import { Check, Close, Download, Link, Promotion, Refresh } from "@element-plus/icons-vue";
 import DOMPurify from "dompurify";
+import { ElMessageBox } from "element-plus";
 import { marked } from "marked";
 import { storeToRefs } from "pinia";
 import { onMounted, ref } from "vue";
@@ -22,6 +23,9 @@ const {
   upgrading,
   canSelfUpgrade,
   isDocker,
+  showPrerelease,
+  hasPrereleaseUpdate,
+  onlyPrereleaseUpdates,
 } = storeToRefs(versionStore);
 
 const proxyUrl = ref("");
@@ -52,11 +56,32 @@ function handleCheckUpdate() {
   versionStore.checkForUpdates({ force: true, proxy: proxyUrl.value || undefined });
 }
 
+function handleTogglePrerelease(value: boolean) {
+  versionStore.setShowPrerelease(value);
+}
+
 function handleDismiss(version: string) {
   versionStore.dismissVersion(version);
 }
 
-function handleUpgrade(version: string) {
+async function handleUpgrade(version: string, prerelease: boolean) {
+  if (prerelease) {
+    try {
+      await ElMessageBox.confirm(
+        `${version} 是预发版本，可能存在未发现的问题。非必要建议等待正式版发布后再升级。\n\n确定要继续升级到此预发版吗？`,
+        "确认升级到预发版",
+        {
+          confirmButtonText: "继续升级",
+          cancelButtonText: "取消",
+          type: "warning",
+          confirmButtonClass: "el-button--warning",
+          customClass: "prerelease-confirm-dialog",
+        },
+      );
+    } catch {
+      return;
+    }
+  }
   versionStore.startUpgrade(version, proxyUrl.value || undefined);
 }
 
@@ -82,19 +107,30 @@ function renderMarkdown(text: string): string {
     return text;
   }
 }
+
+function prereleaseLabelText(label?: string): string {
+  if (!label) return "预发版";
+  return label.toUpperCase();
+}
 </script>
 
 <template>
-  <el-popover placement="bottom" :width="400" trigger="click" popper-class="version-popover">
+  <el-popover placement="bottom" :width="420" trigger="click" popper-class="version-popover">
     <template #reference>
-      <el-button class="version-btn" :class="{ 'has-update': hasUpdate }" text>
+      <el-button
+        class="version-btn"
+        :class="{ 'has-update': hasUpdate, 'has-prerelease': onlyPrereleaseUpdates }"
+        text>
         <div class="btn-content">
           <span class="version-icon-wrap">
             <el-icon :class="{ 'is-checking': checking }">
               <Promotion v-if="!checking" />
               <Refresh v-else />
             </el-icon>
-            <span v-if="hasUpdate" class="update-dot"></span>
+            <span
+              v-if="hasUpdate"
+              class="update-dot"
+              :class="{ 'is-prerelease': onlyPrereleaseUpdates }"></span>
           </span>
           <span class="version-meta">
             <span class="version-label">版本</span>
@@ -129,6 +165,22 @@ function renderMarkdown(text: string): string {
             @click="handleCheckUpdate"
             title="检查更新" />
         </div>
+      </div>
+
+      <div class="prerelease-toggle-row">
+        <span class="prerelease-toggle-label">
+          含预发版（beta/rc）
+          <el-tooltip
+            content="开启后会显示 beta/rc/alpha 等预发布版本，仅建议测试环境使用"
+            placement="top">
+            <span class="prerelease-toggle-hint">?</span>
+          </el-tooltip>
+        </span>
+        <el-switch
+          :model-value="showPrerelease"
+          size="small"
+          :disabled="checking"
+          @update:model-value="handleTogglePrerelease($event as boolean)" />
       </div>
 
       <div v-if="showProxyInput" class="proxy-section">
@@ -207,16 +259,47 @@ function renderMarkdown(text: string): string {
 
         <div v-else-if="hasUpdate" class="updates-list">
           <div class="update-header">
-            <el-tag type="success" size="small" effect="dark">发现新版本</el-tag>
+            <el-tag v-if="onlyPrereleaseUpdates" type="warning" size="small" effect="dark">
+              仅发现预发版
+            </el-tag>
+            <el-tag v-else-if="hasPrereleaseUpdate" type="success" size="small" effect="dark">
+              发现新版本（含预发版）
+            </el-tag>
+            <el-tag v-else type="success" size="small" effect="dark">发现新版本</el-tag>
           </div>
+
+          <el-alert
+            v-if="hasPrereleaseUpdate"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="prerelease-notice">
+            <template #title>预发布版本提示</template>
+            <span>
+              预发版本用于真实环境验证，可能存在已知/未知问题。<strong>非必要请等待正式版发布后再升级</strong>；生产环境请关闭上方开关以隐藏预发版。
+            </span>
+          </el-alert>
 
           <div
             v-for="release in visibleReleases.slice(0, 3)"
             :key="release.version"
-            class="release-item">
+            class="release-item"
+            :class="{ 'is-prerelease': release.prerelease }">
             <div class="release-info">
               <div class="release-title-row">
-                <span class="version-tag">{{ release.version }}</span>
+                <span class="release-title-versions">
+                  <span class="version-tag" :class="{ 'is-prerelease': release.prerelease }">
+                    {{ release.version }}
+                  </span>
+                  <el-tag
+                    v-if="release.prerelease"
+                    type="warning"
+                    size="small"
+                    effect="dark"
+                    class="channel-badge">
+                    {{ prereleaseLabelText(release.prerelease_label) }}
+                  </el-tag>
+                </span>
                 <span class="release-date">{{ formatDate(release.published_at) }}</span>
               </div>
               <div v-if="release.name" class="release-name">{{ release.name }}</div>
@@ -228,12 +311,12 @@ function renderMarkdown(text: string): string {
               <div class="release-actions">
                 <el-button
                   v-if="canSelfUpgrade"
-                  type="primary"
+                  :type="release.prerelease ? 'warning' : 'primary'"
                   size="small"
                   :icon="Download"
                   :disabled="upgrading"
-                  @click="handleUpgrade(release.version)">
-                  升级
+                  @click="handleUpgrade(release.version, !!release.prerelease)">
+                  {{ release.prerelease ? "升级到预发版" : "升级" }}
                 </el-button>
                 <el-link
                   v-if="release.url"
