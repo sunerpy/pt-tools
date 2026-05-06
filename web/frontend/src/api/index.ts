@@ -1100,3 +1100,189 @@ export const downloaderTorrentsApi = {
       payload,
     ),
 };
+
+// ===================== Scraper API Types & Methods =====================
+
+export interface MediaLibraryConfig {
+  id: number;
+  name: string;
+  connector_id: number;
+  media_type: string;
+  scan_interval_hours: number;
+  nfo_dialect: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderCredential {
+  id: number;
+  provider_name: string;
+  credential_type: string;
+  priority: number;
+  is_valid: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectorConfig {
+  id: number;
+  connector_type: string;
+  name: string;
+  url: string;
+  port: number;
+  api_key: string;
+  is_valid: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScrapeTask {
+  id: number;
+  library_id: number;
+  media_key: string;
+  media_type: string;
+  state: "pending" | "running" | "success" | "failed" | "canceled";
+  source_ids: string;
+  request_data: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  last_error?: string;
+}
+
+export interface ScrapeResult {
+  id: number;
+  task_id: number;
+  unified_data: string;
+  created_at: string;
+}
+
+export interface UnifiedMediaInfo {
+  title: string;
+  original_title?: string;
+  year?: number;
+  description?: string;
+  genres?: string[];
+  rating?: number;
+  directors?: string[];
+  actors?: string[];
+  tmdb_id?: number;
+  imdb_id?: string;
+  douban_id?: string;
+}
+
+export interface MediaArtwork {
+  type: string;
+  url: string;
+  language?: string;
+  rating?: number;
+}
+
+export interface ScrapeSearchResult {
+  media_key: string;
+  media_type: string;
+  candidates: UnifiedMediaInfo[];
+  selected_candidate?: UnifiedMediaInfo;
+}
+
+export interface LLMProvider {
+  id: number;
+  provider_type: string;
+  name: string;
+  model: string;
+  api_key: string;
+  base_url?: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface LLMGenerateRequest {
+  provider_id: number;
+  prompt: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface LLMGenerateResult {
+  provider_id: number;
+  model: string;
+  generated_text: string;
+  stop_reason?: string;
+  tokens_used?: number;
+}
+
+export const scraperApi = {
+  // Libraries
+  listLibraries: () => api.get<MediaLibraryConfig[]>("/api/v2/scraper/libraries"),
+
+  createLibrary: (req: Omit<MediaLibraryConfig, "id" | "created_at" | "updated_at">) =>
+    api.post<MediaLibraryConfig>("/api/v2/scraper/libraries", req),
+
+  getLibrary: (id: number) => api.get<MediaLibraryConfig>(`/api/v2/scraper/libraries/${id}`),
+
+  updateLibrary: (id: number, req: Partial<MediaLibraryConfig>) =>
+    request<MediaLibraryConfig>(`/api/v2/scraper/libraries/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    }),
+
+  deleteLibrary: (id: number) => api.delete<void>(`/api/v2/scraper/libraries/${id}`),
+
+  // Scrape Tasks
+  triggerScrape: (req: {
+    library_id: number;
+    media_key: string;
+    media_type: string;
+    source_ids?: string[];
+  }) => api.post<ScrapeTask>("/api/v2/scraper/scrape", req),
+
+  listTasks: (params?: URLSearchParams) =>
+    api.get<{ items: ScrapeTask[]; total: number }>(
+      `/api/v2/scraper/tasks${params ? `?${params.toString()}` : ""}`,
+    ),
+
+  getTask: (id: number) => api.get<ScrapeTask>(`/api/v2/scraper/tasks/${id}`),
+
+  cancelTask: (id: number) => api.delete<void>(`/api/v2/scraper/tasks/${id}`),
+
+  // Providers
+  listProviders: () => api.get<ProviderCredential[]>("/api/v2/scraper/providers"),
+
+  setProviderCredential: (name: string, cred: Record<string, string | number>) =>
+    api.post<ProviderCredential>(
+      `/api/v2/scraper/providers/${encodeURIComponent(name)}/credentials`,
+      cred,
+    ),
+
+  // Connectors
+  listConnectors: () => api.get<ConnectorConfig[]>("/api/v2/scraper/connectors"),
+
+  testConnector: (id: number) =>
+    api.post<{ success: boolean; message?: string }>(`/api/v2/scraper/connectors/${id}/test`, {}),
+
+  // Settings
+  getSettings: () => api.get<Record<string, unknown>>("/api/v2/scraper/settings"),
+
+  updateSettings: (req: Record<string, unknown>) =>
+    request<void>("/api/v2/scraper/settings", {
+      method: "PUT",
+      body: JSON.stringify(req),
+    }),
+
+  // Search & Metadata
+  searchMedia: (req: { library_id: number; query: string; media_type?: string }) =>
+    api.post<ScrapeSearchResult[]>("/api/v2/scraper/search", req),
+
+  getArtworks: (params?: URLSearchParams) =>
+    api.get<MediaArtwork[]>(`/api/v2/scraper/artworks${params ? `?${params.toString()}` : ""}`),
+
+  // LLM
+  listLLMProviders: () => api.get<LLMProvider[]>("/api/v2/scraper/llm/providers"),
+
+  llmGenerate: (req: LLMGenerateRequest) =>
+    api.post<LLMGenerateResult>("/api/v2/scraper/llm/generate", req),
+
+  llmValidate: (req: { provider_id: number; api_key: string }) =>
+    api.post<{ valid: boolean; message?: string }>("/api/v2/scraper/llm/validate", req),
+};
