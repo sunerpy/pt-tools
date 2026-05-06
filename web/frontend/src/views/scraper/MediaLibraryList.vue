@@ -17,7 +17,14 @@ const showCreate = ref(false);
 const showEdit = ref(false);
 const editing = ref<MediaLibraryConfig | null>(null);
 
-const form = reactive({
+const form = reactive<{
+  name: string;
+  type: "movie" | "tv" | "mixed";
+  path: string;
+  provider_ids: string;
+  nfo_dialect: string;
+  auto_scrape: boolean;
+}>({
   name: "",
   type: "mixed",
   path: "",

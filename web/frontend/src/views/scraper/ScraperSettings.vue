@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Check, Close, Refresh } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { useScraperStore } from "@/stores/scraper";
 import { scraperApi } from "@/api";
@@ -80,8 +79,8 @@ async function testConn(id: number) {
   testingId.value = id;
   try {
     const result = await scraperApi.testConnector(id);
-    if (result.ok) ElMessage.success(`连接成功: ${result.message}`);
-    else ElMessage.error(`连接失败: ${result.message}`);
+    if (result.success) ElMessage.success(`连接成功: ${result.message ?? ""}`);
+    else ElMessage.error(`连接失败: ${result.message ?? "未知错误"}`);
   } catch (e: unknown) {
     ElMessage.error(`测试失败: ${(e as Error).message}`);
   } finally {
