@@ -393,7 +393,8 @@ type MediaEntity struct {
 	Runtime         int    // minutes
 	Locked          bool
 	LockedFields    []string
-	Provider        string // "tmdb", "douban", "llm", "fused"
+	Sources         map[string]string // field provenance: field name -> provider(s)
+	Provider        string            // "tmdb", "douban", "llm", "fused"
 	ScrapedAt       time.Time
 }
 
