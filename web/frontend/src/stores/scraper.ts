@@ -7,6 +7,7 @@ import {
   type ScrapeTask,
   type LLMProvider,
   type LLMGenerateRequest,
+  type NFOResult,
   scraperApi,
 } from "../api";
 
@@ -154,7 +155,7 @@ export const useScraperStore = defineStore("scraper", () => {
     }
   }
 
-  async function llmGenerate(req: LLMGenerateRequest) {
+  async function llmGenerate(req: LLMGenerateRequest): Promise<NFOResult> {
     return scraperApi.llmGenerate(req);
   }
 

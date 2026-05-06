@@ -1208,18 +1208,31 @@ export interface LLMProvider {
 }
 
 export interface LLMGenerateRequest {
-  provider_id: number;
-  prompt: string;
-  temperature?: number;
-  max_tokens?: number;
+  text: string;
+  provider?: string;
+  type?: "movie" | "tv" | "unknown";
 }
 
-export interface LLMGenerateResult {
-  provider_id: number;
-  model: string;
-  generated_text: string;
-  stop_reason?: string;
-  tokens_used?: number;
+export interface NFOResult {
+  title: string;
+  original_title?: string;
+  year?: number;
+  type?: string;
+  tmdb_id?: number;
+  imdb_id?: string;
+  season?: number;
+  episode?: number;
+  genres?: string[];
+  language?: string;
+  plot?: string;
+  directors?: string[];
+  cast?: string[];
+  runtime?: number;
+}
+
+export interface LLMGenerateResult extends NFOResult {
+  generated_by?: string;
+  generated_at?: string;
 }
 
 export const scraperApi = {
@@ -1294,7 +1307,7 @@ export const scraperApi = {
   listLLMProviders: () => api.get<LLMProvider[]>("/api/v2/scraper/llm/providers"),
 
   llmGenerate: (req: LLMGenerateRequest) =>
-    api.post<LLMGenerateResult>("/api/v2/scraper/llm/generate", req),
+    api.post<NFOResult>("/api/v2/scraper/llm/generate", req),
 
   llmValidate: (req: { provider_id: number; api_key: string }) =>
     api.post<{ valid: boolean; message?: string }>("/api/v2/scraper/llm/validate", req),

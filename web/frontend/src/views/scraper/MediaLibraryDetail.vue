@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Delete, Edit, VideoPlay } from "@element-plus/icons-vue";
+import { ArrowLeft, Delete, Edit, MagicStick, Search, VideoPlay } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import MatchDialog from "@/components/scraper/MatchDialog.vue";
+import LLMChatPanel from "@/components/scraper/LLMChatPanel.vue";
 import { useScraperStore } from "@/stores/scraper";
-import type { MediaLibraryConfig } from "@/api";
+import type { MediaLibraryConfig, NFOResult, ScrapeSearchResult } from "@/api";
 
 const route = useRoute();
 const router = useRouter();
 const store = useScraperStore();
 
 const lib = ref<MediaLibraryConfig | null>(null);
+const showMatch = ref(false);
+const showLLM = ref(false);
 
 onMounted(async () => {
   const id = Number(route.params.id);
@@ -67,6 +71,24 @@ async function remove() {
     if (err !== "cancel") ElMessage.error(`删除失败: ${(err as Error).message}`);
   }
 }
+
+function onMatched(result: ScrapeSearchResult) {
+  ElMessage.success(`已匹配: ${result.selected_candidate?.title ?? result.media_key}`);
+  // 实际应用：将 match 结果传递给 scrape service 重刮
+}
+
+function onLLMSaved(nfo: NFOResult) {
+  ElMessage.success(`LLM 元数据已保存: ${nfo.title}`);
+  // 实际应用：持久化到 scrape_results 表
+}
+
+function openMatchDialog() {
+  showMatch.value = true;
+}
+
+function openLLMPanel() {
+  showLLM.value = true;
+}
 </script>
 
 <template>
@@ -87,6 +109,8 @@ async function remove() {
         </div>
         <div class="actions">
           <el-button :icon="VideoPlay" @click="scan">扫描</el-button>
+          <el-button :icon="Search" @click="openMatchDialog">手动匹配</el-button>
+          <el-button :icon="MagicStick" @click="openLLMPanel">AI 刮削</el-button>
           <el-button :icon="Edit" @click="router.push(`/scraper/libraries`)">编辑</el-button>
           <el-button :icon="Delete" type="danger" plain @click="remove">删除</el-button>
         </div>
@@ -98,6 +122,9 @@ async function remove() {
         <span v-if="lib.last_scan_at"><b>最近扫描：</b>{{ lib.last_scan_at.slice(0, 19) }}</span>
       </div>
     </section>
+
+    <MatchDialog v-model="showMatch" :library-id="lib.id" @matched="onMatched" />
+    <LLMChatPanel v-model="showLLM" :library-id="lib.id" @saved="onLLMSaved" />
 
     <section class="tasks-section">
       <h3>本库任务（{{ tasksOfLib.length }}）</h3>
