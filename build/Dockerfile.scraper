@@ -1,0 +1,39 @@
+# Multi-stage Docker build for pt-scraper standalone binary.
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /build
+
+RUN apk add --no-cache ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ENV CGO_ENABLED=0 \
+    GOOS=linux
+
+ARG VERSION=dev
+RUN go build \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /out/pt-scraper \
+    ./cmd/pt-scraper
+
+# Final minimal image
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S pt -g 1000 \
+    && adduser -S pt -G pt -u 1000
+
+COPY --from=builder /out/pt-scraper /usr/local/bin/pt-scraper
+
+USER pt:pt
+WORKDIR /data
+
+EXPOSE 8090 8091
+
+ENV TZ=Asia/Shanghai
+
+ENTRYPOINT ["/usr/local/bin/pt-scraper"]
+CMD ["--mode", "http", "--addr", ":8090", "--mcp-addr", ":8091", "--data-dir", "/data"]
