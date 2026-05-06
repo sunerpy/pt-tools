@@ -5,10 +5,8 @@ import {
   type ProviderCredential,
   type ConnectorConfig,
   type ScrapeTask,
-  type ScrapeSearchResult,
   type LLMProvider,
   type LLMGenerateRequest,
-  type LLMGenerateResult,
   scraperApi,
 } from "../api";
 
@@ -30,6 +28,10 @@ export const useScraperStore = defineStore("scraper", () => {
 
   // Computed
   const runningTasks = computed(() => tasks.value.filter((t) => t.state === "running"));
+  const pendingTasks = computed(() =>
+    tasks.value.filter((t) => t.state === "pending" || t.state === "retrying"),
+  );
+  const failedTasks = computed(() => tasks.value.filter((t) => t.state === "failed"));
 
   // Actions
   async function fetchLibraries() {
@@ -45,86 +47,51 @@ export const useScraperStore = defineStore("scraper", () => {
     }
   }
 
-  async function createLibrary(req: Omit<MediaLibraryConfig, "id" | "created_at" | "updated_at">) {
-    try {
-      loading.value = true;
-      error.value = null;
-      const lib = await scraperApi.createLibrary(req);
-      libraries.value.push(lib);
-      return lib;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to create library";
-      throw err;
-    } finally {
-      loading.value = false;
-    }
+  async function fetchLibrary(id: number) {
+    const lib = await scraperApi.getLibrary(id);
+    currentLibrary.value = lib;
+    return lib;
+  }
+
+  async function createLibrary(req: Partial<MediaLibraryConfig>) {
+    const lib = await scraperApi.createLibrary(
+      req as Omit<MediaLibraryConfig, "id" | "created_at" | "updated_at">,
+    );
+    libraries.value.push(lib);
+    return lib;
   }
 
   async function updateLibrary(id: number, req: Partial<MediaLibraryConfig>) {
-    try {
-      loading.value = true;
-      error.value = null;
-      const updated = await scraperApi.updateLibrary(id, req);
-      const idx = libraries.value.findIndex((l) => l.id === id);
-      if (idx >= 0) {
-        libraries.value[idx] = updated;
-      }
-      if (currentLibrary.value?.id === id) {
-        currentLibrary.value = updated;
-      }
-      return updated;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to update library";
-      throw err;
-    } finally {
-      loading.value = false;
-    }
+    const updated = await scraperApi.updateLibrary(id, req);
+    const idx = libraries.value.findIndex((l) => l.id === id);
+    if (idx >= 0) libraries.value[idx] = updated;
+    if (currentLibrary.value?.id === id) currentLibrary.value = updated;
+    return updated;
   }
 
   async function deleteLibrary(id: number) {
-    try {
-      loading.value = true;
-      error.value = null;
-      await scraperApi.deleteLibrary(id);
-      libraries.value = libraries.value.filter((l) => l.id !== id);
-      if (currentLibrary.value?.id === id) {
-        currentLibrary.value = null;
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to delete library";
-      throw err;
-    } finally {
-      loading.value = false;
-    }
+    await scraperApi.deleteLibrary(id);
+    libraries.value = libraries.value.filter((l) => l.id !== id);
+    if (currentLibrary.value?.id === id) currentLibrary.value = null;
   }
 
   async function triggerScrape(req: {
-    library_id: number;
-    media_key: string;
-    media_type: string;
-    source_ids?: string[];
+    library_id?: number;
+    media_path: string;
+    type: "movie" | "tv" | "episode";
   }) {
-    try {
-      error.value = null;
-      const task = await scraperApi.triggerScrape(req);
-      tasks.value.push(task);
-      startTaskPolling();
-      return task;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to trigger scrape";
-      throw err;
-    }
+    const task = await scraperApi.triggerScrape(req);
+    tasks.value.unshift(task);
+    startTaskPolling();
+    return task;
   }
 
-  async function fetchTasks(params?: URLSearchParams) {
+  async function fetchTasks(filter?: { state?: string; library_id?: number; limit?: number }) {
     try {
       tasksLoading.value = true;
       error.value = null;
-      const response = await scraperApi.listTasks(params);
-      tasks.value = response.items;
-      if (runningTasks.value.length > 0) {
-        startTaskPolling();
-      }
+      tasks.value = await scraperApi.listTasks(filter);
+      if (runningTasks.value.length > 0) startTaskPolling();
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Failed to fetch tasks";
       tasks.value = [];
@@ -134,147 +101,85 @@ export const useScraperStore = defineStore("scraper", () => {
   }
 
   async function cancelTask(id: number) {
-    try {
-      error.value = null;
-      await scraperApi.cancelTask(id);
-      const task = tasks.value.find((t) => t.id === id);
-      if (task) {
-        task.state = "canceled";
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to cancel task";
-      throw err;
-    }
+    await scraperApi.cancelTask(id);
+    tasks.value = tasks.value.filter((t) => t.id !== id);
   }
 
   async function fetchProviders() {
     try {
-      error.value = null;
       providers.value = await scraperApi.listProviders();
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to fetch providers";
+    } catch {
       providers.value = [];
     }
   }
 
   async function setProviderCredential(name: string, cred: Record<string, string | number>) {
-    try {
-      error.value = null;
-      const credential = await scraperApi.setProviderCredential(name, cred);
-      const idx = providers.value.findIndex((p) => p.provider_name === name);
-      if (idx >= 0) {
-        providers.value[idx] = credential;
-      } else {
-        providers.value.push(credential);
-      }
-      return credential;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to set provider credential";
-      throw err;
-    }
+    const credential = await scraperApi.setProviderCredential(name, cred);
+    const idx = providers.value.findIndex((p) => p.provider === name);
+    if (idx >= 0) providers.value[idx] = credential;
+    else providers.value.push(credential);
+    return credential;
   }
 
   async function fetchConnectors() {
     try {
-      error.value = null;
       connectors.value = await scraperApi.listConnectors();
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to fetch connectors";
+    } catch {
       connectors.value = [];
     }
   }
 
   async function testConnector(id: number) {
-    try {
-      error.value = null;
-      const result = await scraperApi.testConnector(id);
-      return result;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to test connector";
-      throw err;
-    }
+    return scraperApi.testConnector(id);
   }
 
   async function fetchSettings() {
     try {
-      error.value = null;
       settings.value = await scraperApi.getSettings();
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to fetch settings";
+    } catch {
       settings.value = {};
     }
   }
 
   async function saveSettings(req: Record<string, unknown>) {
-    try {
-      loading.value = true;
-      error.value = null;
-      await scraperApi.updateSettings(req);
-      settings.value = req;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to save settings";
-      throw err;
-    } finally {
-      loading.value = false;
-    }
+    await scraperApi.updateSettings(req);
+    settings.value = req;
   }
 
   async function fetchLLMProviders() {
     try {
-      error.value = null;
       llmProviders.value = await scraperApi.listLLMProviders();
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to fetch LLM providers";
+    } catch {
       llmProviders.value = [];
     }
   }
 
   async function llmGenerate(req: LLMGenerateRequest) {
-    try {
-      error.value = null;
-      const result = await scraperApi.llmGenerate(req);
-      return result;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "LLM generation failed";
-      throw err;
-    }
+    return scraperApi.llmGenerate(req);
   }
 
   async function llmValidate(req: { provider_id: number; api_key: string }) {
-    try {
-      error.value = null;
-      const result = await scraperApi.llmValidate(req);
-      return result;
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : "LLM validation failed";
-      throw err;
-    }
+    return scraperApi.llmValidate(req);
   }
 
-  // Task polling (2s interval)
-  function startTaskPolling() {
-    if (taskPollTimer) {
-      return; // Already polling
-    }
-
+  function startTaskPolling(intervalMs = 2000) {
+    if (taskPollTimer) return;
     taskPollTimer = window.setInterval(async () => {
-      if (runningTasks.value.length === 0) {
+      if (runningTasks.value.length === 0 && pendingTasks.value.length === 0) {
         stopTaskPolling();
         return;
       }
-
       try {
-        for (const task of runningTasks.value) {
+        const active = [...runningTasks.value, ...pendingTasks.value];
+        for (const task of active) {
           const updated = await scraperApi.getTask(task.id);
           const idx = tasks.value.findIndex((t) => t.id === task.id);
-          if (idx >= 0) {
-            tasks.value[idx] = updated;
-          }
+          if (idx >= 0) tasks.value[idx] = updated;
         }
       } catch (err) {
         console.error("Failed to poll task status:", err);
       }
-    }, 2000);
+    }, intervalMs);
   }
 
   function stopTaskPolling() {
@@ -285,7 +190,6 @@ export const useScraperStore = defineStore("scraper", () => {
   }
 
   return {
-    // State
     libraries,
     currentLibrary,
     tasks,
@@ -296,12 +200,11 @@ export const useScraperStore = defineStore("scraper", () => {
     loading,
     tasksLoading,
     error,
-
-    // Computed
     runningTasks,
-
-    // Actions
+    pendingTasks,
+    failedTasks,
     fetchLibraries,
+    fetchLibrary,
     createLibrary,
     updateLibrary,
     deleteLibrary,

@@ -160,6 +160,10 @@ function logout() {
             <el-icon><VideoPause /></el-icon>
             <template #title>暂停任务</template>
           </el-menu-item>
+          <el-menu-item index="scraper">
+            <el-icon><VideoCamera /></el-icon>
+            <template #title>媒体刮削</template>
+          </el-menu-item>
           <el-menu-item index="logs">
             <el-icon><Document /></el-icon>
             <template #title>日志</template>

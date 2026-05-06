@@ -1106,49 +1106,61 @@ export const downloaderTorrentsApi = {
 export interface MediaLibraryConfig {
   id: number;
   name: string;
-  connector_id: number;
-  media_type: string;
-  scan_interval_hours: number;
-  nfo_dialect: string;
+  type: "movie" | "tv" | "mixed";
+  path: string;
   enabled: boolean;
+  provider_ids: string;
+  connector_id?: number;
+  scan_cron?: string;
+  auto_scrape: boolean;
+  nfo_dialect: string;
+  last_scan_at?: string;
   created_at: string;
   updated_at: string;
 }
 
 export interface ProviderCredential {
   id: number;
-  provider_name: string;
-  credential_type: string;
-  priority: number;
-  is_valid: boolean;
-  created_at: string;
-  updated_at: string;
+  provider: string;
+  display_name?: string;
+  base_url?: string;
+  model_name?: string;
+  proxy_url?: string;
+  priority?: number;
+  enabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ConnectorConfig {
   id: number;
-  connector_type: string;
+  type: "jellyfin" | "emby";
   name: string;
-  url: string;
-  port: number;
-  api_key: string;
-  is_valid: boolean;
-  created_at: string;
-  updated_at: string;
+  base_url: string;
+  auto_detected?: boolean;
+  enabled?: boolean;
+  last_ping_at?: string;
+  last_ping_ok?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ScrapeTask {
   id: number;
-  library_id: number;
-  media_key: string;
-  media_type: string;
-  state: "pending" | "running" | "success" | "failed" | "canceled";
-  source_ids: string;
-  request_data: string;
-  created_at: string;
+  library_id?: number;
+  task_type: string;
+  media_path: string;
+  state: "pending" | "running" | "success" | "failed" | "retrying" | "cancelled";
+  current_stage: string;
+  progress: number;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at?: string;
+  last_error: string;
   started_at?: string;
   completed_at?: string;
-  last_error?: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface ScrapeResult {
@@ -1187,14 +1199,12 @@ export interface ScrapeSearchResult {
 }
 
 export interface LLMProvider {
-  id: number;
-  provider_type: string;
   name: string;
-  model: string;
-  api_key: string;
-  base_url?: string;
-  enabled: boolean;
-  created_at: string;
+  base_url: string;
+  models: string[];
+  supports_strict_schema?: boolean;
+  notes?: string;
+  configured?: boolean;
 }
 
 export interface LLMGenerateRequest {
@@ -1231,16 +1241,19 @@ export const scraperApi = {
 
   // Scrape Tasks
   triggerScrape: (req: {
-    library_id: number;
-    media_key: string;
-    media_type: string;
-    source_ids?: string[];
+    library_id?: number;
+    media_path: string;
+    type: "movie" | "tv" | "episode";
   }) => api.post<ScrapeTask>("/api/v2/scraper/scrape", req),
 
-  listTasks: (params?: URLSearchParams) =>
-    api.get<{ items: ScrapeTask[]; total: number }>(
-      `/api/v2/scraper/tasks${params ? `?${params.toString()}` : ""}`,
-    ),
+  listTasks: (filter?: { state?: string; library_id?: number; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (filter?.state) params.set("state", filter.state);
+    if (filter?.library_id != null) params.set("library_id", String(filter.library_id));
+    if (filter?.limit != null) params.set("limit", String(filter.limit));
+    const q = params.toString();
+    return api.get<ScrapeTask[]>(`/api/v2/scraper/tasks${q ? `?${q}` : ""}`);
+  },
 
   getTask: (id: number) => api.get<ScrapeTask>(`/api/v2/scraper/tasks/${id}`),
 
