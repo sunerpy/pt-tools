@@ -1,15 +1,18 @@
-name: Release Assets
+name: Release Prerelease
 
 on:
   push:
     tags:
-      # 仅匹配正式版 tag（v1.2.3），排除预发版（v1.2.3-beta.1 / -rc.1 / -alpha.1）
-      # 预发版由 release-prerelease.yml 处理。
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      # 预发版 tag 格式：v<semver>-<channel>.<N>
+      # 例如 v0.28.0-beta.1 / v0.28.0-rc.1 / v0.28.0-alpha.1
+      # 与 release-assets.yml 的正式版 tag（v1.2.3）完全互斥。
+      - "v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-alpha.[0-9]+"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build (example: v0.12.3)"
+        description: "预发版 tag（例如 v0.28.0-beta.1）"
         required: true
         type: string
 
@@ -17,19 +20,28 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and Release
+  build-and-prerelease:
+    name: Build and Prerelease
     runs-on: ubuntu-latest
 
     steps:
-      - name: Resolve tag
+      - name: Resolve tag and channel
         id: vars
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag_name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            TAG_NAME="${{ inputs.tag }}"
           else
-            echo "tag_name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            TAG_NAME="${{ github.ref_name }}"
           fi
+          # 从 v0.28.0-beta.1 中提取 channel=beta
+          CHANNEL=$(echo "$TAG_NAME" | sed -E 's/^v[0-9]+\.[0-9]+\.[0-9]+-([a-z]+)\.[0-9]+$/\1/')
+          if [ -z "$CHANNEL" ] || [ "$CHANNEL" = "$TAG_NAME" ]; then
+            echo "错误：无法从 tag '$TAG_NAME' 中解析预发版通道（期望格式 vX.Y.Z-<channel>.N）"
+            exit 1
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "解析结果：tag=$TAG_NAME channel=$CHANNEL"
 
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -60,6 +72,13 @@ jobs:
           cd web/frontend
           pnpm install --frozen-lockfile
           pnpm build
+
+      - name: Build Extension
+        run: |
+          cd tools/browser-extension
+          pnpm install --frozen-lockfile
+          pnpm build
+          cd dist && zip -r ../pt-tools-helper.zip .
 
       - name: Install Dependencies
         run: |
@@ -108,11 +127,12 @@ jobs:
       - name: List organized files
         run: ls -la dist/
 
-      - name: Build and Push Docker Images
+      - name: Build and Push Prerelease Docker Images
         run: |
           TAG="${{ steps.vars.outputs.tag_name }}"
-          echo "Building and pushing Docker images with tag $TAG"
-          make build-remote-docker TAG="$TAG"
+          CHANNEL="${{ steps.vars.outputs.channel }}"
+          echo "Building prerelease Docker: $TAG + :$CHANNEL (NOT tagging :latest)"
+          make build-prerelease-docker TAG="$TAG" CHANNEL="$CHANNEL"
         env:
           DOCKER_BUILDKIT: 1
 
@@ -121,7 +141,7 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          args: --latest --strip header
+          args: --unreleased --strip header
         env:
           OUTPUT: RELEASE_CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
@@ -129,8 +149,13 @@ jobs:
       - name: Prepare release notes
         run: |
           TAG_NAME="${{ steps.vars.outputs.tag_name }}"
+          CHANNEL="${{ steps.vars.outputs.channel }}"
 
-          cat > RELEASE_NOTES.md << 'HEADER'
+          cat > RELEASE_NOTES.md << HEADER
+          > ⚠️ **这是 ${CHANNEL} 预发版，不建议在生产环境使用**
+          >
+          > 如遇问题请在 [GitHub Issues](https://github.com/sunerpy/pt-tools/issues) 反馈，测试通过后将合入正式版。
+
           ## What's Changed
 
           HEADER
@@ -143,36 +168,45 @@ jobs:
 
           ---
 
-          ## Installation
+          ## Installation (Prerelease)
 
-          ### Using Docker (Recommended)
+          ### Using Docker
           \`\`\`bash
+          # 固定版本（推荐用于回滚）
           docker pull sunerpy/pt-tools:${TAG_NAME}
+
+          # 滚动 ${CHANNEL} 通道（自动跟进最新预发版）
+          docker pull sunerpy/pt-tools:${CHANNEL}
           \`\`\`
+
+          > 注意：此版本 **不会** 更新 \`:latest\` 标签。生产环境请继续使用正式版。
 
           ### From Binary
           Download the appropriate binary for your platform from the assets below.
 
-          | Platform | Architecture | File | Latest Link |
-          |----------|--------------|------|-------------|
-          | Linux | x86_64 | \`pt-tools-linux-amd64.tar.gz\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-amd64.tar.gz) |
-          | Linux | aarch64 | \`pt-tools-linux-arm64.tar.gz\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-arm64.tar.gz) |
-          | Windows | x86_64 | \`pt-tools-windows-amd64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-amd64.exe.zip) |
-          | Windows | aarch64 | \`pt-tools-windows-arm64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-arm64.exe.zip) |
+          | Platform | Architecture | File |
+          |----------|--------------|------|
+          | Linux | x86_64 | \`pt-tools-linux-amd64.tar.gz\` |
+          | Linux | aarch64 | \`pt-tools-linux-arm64.tar.gz\` |
+          | Windows | x86_64 | \`pt-tools-windows-amd64.exe.zip\` |
+          | Windows | aarch64 | \`pt-tools-windows-arm64.exe.zip\` |
 
           ### Docker Images
 
-          - \`sunerpy/pt-tools:${TAG_NAME}\`
-          - \`sunerpy/pt-tools:latest\`
+          - \`sunerpy/pt-tools:${TAG_NAME}\` （固定版本）
+          - \`sunerpy/pt-tools:${CHANNEL}\` （滚动 ${CHANNEL} 通道）
           EOF
 
-      - name: Upload Release Assets
+      - name: Upload Prerelease Assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag_name }}
+          name: "Prerelease ${{ steps.vars.outputs.tag_name }}"
           body_path: RELEASE_NOTES.md
+          prerelease: true
           files: |
             dist/*.tar.gz
             dist/*.zip
+            tools/browser-extension/pt-tools-helper.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
