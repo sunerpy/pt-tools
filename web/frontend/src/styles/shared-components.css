@@ -66,6 +66,21 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pt-color-warning) 26%, transparent);
 }
 
+.update-dot.is-prerelease {
+  background: var(--pt-color-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pt-color-danger) 26%, transparent);
+}
+
+.version-btn.has-prerelease {
+  color: var(--pt-color-warning);
+}
+
+.version-btn.has-prerelease:hover {
+  background: color-mix(in srgb, var(--pt-color-warning) 10%, transparent);
+  border-color: color-mix(in srgb, var(--pt-color-warning) 28%, transparent);
+  color: var(--pt-color-warning);
+}
+
 .is-checking {
   animation: version-rotate 1.5s linear infinite;
 }
@@ -198,6 +213,34 @@
   box-shadow: var(--pt-shadow-sm);
 }
 
+.version-content .release-item.is-prerelease {
+  border-color: color-mix(in srgb, var(--pt-color-warning) 45%, transparent);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--pt-color-warning) 10%, var(--pt-bg-surface-raised)),
+    var(--pt-bg-surface-raised)
+  );
+  position: relative;
+}
+
+.version-content .release-item.is-prerelease::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--pt-color-warning),
+    color-mix(in srgb, var(--pt-color-warning) 40%, transparent)
+  );
+  border-radius: var(--pt-radius-lg) var(--pt-radius-lg) 0 0;
+}
+
+.version-content .release-item.is-prerelease:hover {
+  border-color: color-mix(in srgb, var(--pt-color-warning) 65%, transparent);
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--pt-color-warning) 35%, transparent);
+}
+
 .version-content .release-info {
   display: flex;
   flex-direction: column;
@@ -220,6 +263,65 @@
   padding: 2px 8px;
   border-radius: var(--pt-radius-full);
   background: color-mix(in srgb, var(--pt-color-primary) 12%, transparent);
+}
+
+.version-content .version-tag.is-prerelease {
+  color: var(--pt-color-warning);
+  background: color-mix(in srgb, var(--pt-color-warning) 16%, transparent);
+}
+
+.version-content .release-title-versions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pt-space-1);
+}
+
+.version-content .channel-badge {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.version-content .prerelease-notice {
+  border-radius: var(--pt-radius-md);
+}
+
+.version-content .prerelease-notice strong {
+  font-weight: 700;
+}
+
+.version-content .prerelease-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-2) var(--pt-space-3);
+  margin-bottom: var(--pt-space-3);
+  border: 1px dashed var(--pt-border-color);
+  border-radius: var(--pt-radius-md);
+  background: var(--pt-bg-surface-muted);
+}
+
+.version-content .prerelease-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--pt-text-secondary);
+  font-weight: 500;
+}
+
+.version-content .prerelease-toggle-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--pt-radius-full);
+  background: var(--pt-border-color);
+  color: var(--pt-text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: help;
 }
 
 .version-content .release-date {

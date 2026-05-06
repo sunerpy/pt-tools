@@ -893,6 +893,8 @@ export interface ReleaseInfo {
   url: string;
   published_at: number;
   assets?: ReleaseAsset[];
+  prerelease?: boolean;
+  prerelease_label?: string;
 }
 
 export interface RuntimeEnvironment {
@@ -931,10 +933,11 @@ export interface VersionCheckResult {
 
 export const versionApi = {
   getInfo: () => api.get<VersionInfo>("/api/version"),
-  checkUpdate: (options?: { force?: boolean; proxy?: string }) => {
+  checkUpdate: (options?: { force?: boolean; proxy?: string; includePrerelease?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.force) params.set("force", "true");
     if (options?.proxy) params.set("proxy", options.proxy);
+    if (options?.includePrerelease) params.set("include_prerelease", "true");
     const query = params.toString();
     return api.get<VersionCheckResult>(`/api/version/check${query ? `?${query}` : ""}`);
   },
