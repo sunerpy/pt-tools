@@ -188,7 +188,8 @@ func (f *SiteFactory) CreateSitesFromJSON(jsonData []byte) ([]Site, error) {
 	for _, config := range configs {
 		site, err := f.CreateSite(config)
 		if err != nil {
-			f.logger.Warn("Failed to create site",
+			f.logger.Warn(
+				"Failed to create site",
 				zap.String("id", config.ID),
 				zap.Error(err),
 			)

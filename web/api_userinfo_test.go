@@ -48,6 +48,7 @@ func (m *mockSite) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
 	}
 	return m.userInfo, nil
 }
+
 func (m *mockSite) Download(ctx context.Context, torrentID string) ([]byte, error) { return nil, nil }
 func (m *mockSite) Close() error                                                   { return nil }
 

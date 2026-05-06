@@ -111,7 +111,8 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 
 	info, err := site.GetUserInfo(ctx)
 	if err != nil {
-		s.logger.Error("Failed to fetch user info",
+		s.logger.Error(
+			"Failed to fetch user info",
 			zap.String("site", siteID),
 			zap.Error(err),
 		)
@@ -120,7 +121,8 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 
 	// Save to repository
 	if err := s.repo.Save(ctx, info); err != nil {
-		s.logger.Error("Failed to save user info",
+		s.logger.Error(
+			"Failed to save user info",
 			zap.String("site", siteID),
 			zap.Error(err),
 		)
@@ -130,7 +132,8 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 	// Update cache
 	s.cache.set(siteID, info)
 
-	s.logger.Info("User info fetched and saved",
+	s.logger.Info(
+		"User info fetched and saved",
 		zap.String("site", siteID),
 		zap.String("username", info.Username),
 		zap.Int64("uploaded", info.Uploaded),
@@ -282,7 +285,8 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 		return nil, nil
 	}
 
-	s.logger.Info("Starting concurrent user info fetch",
+	s.logger.Info(
+		"Starting concurrent user info fetch",
 		zap.Int("sites", len(siteIDs)),
 		zap.Int("maxConcurrent", maxConcurrent),
 		zap.Duration("timeout", timeout),
@@ -319,14 +323,16 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 			defer mu.Unlock()
 
 			if err != nil {
-				s.logger.Warn("Failed to fetch user info",
+				s.logger.Warn(
+					"Failed to fetch user info",
 					zap.String("site", siteID),
 					zap.Duration("duration", time.Since(siteStartTime)),
 					zap.Error(err),
 				)
 				errors = append(errors, SyncError{Site: siteID, Error: err})
 			} else {
-				s.logger.Debug("Fetched user info successfully",
+				s.logger.Debug(
+					"Fetched user info successfully",
 					zap.String("site", siteID),
 					zap.Duration("duration", time.Since(siteStartTime)),
 				)
@@ -339,7 +345,8 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 	// Wait for all to complete (errors are collected, not returned)
 	_ = g.Wait()
 
-	s.logger.Info("Completed concurrent user info fetch",
+	s.logger.Info(
+		"Completed concurrent user info fetch",
 		zap.Int("successful", len(results)),
 		zap.Int("failed", len(errors)),
 		zap.Duration("totalDuration", time.Since(startTime)),

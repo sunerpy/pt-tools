@@ -26,6 +26,7 @@ func (m *mockSearchSite) Name() string                                       { r
 func (m *mockSearchSite) Kind() SiteKind                                     { return m.kind }
 func (m *mockSearchSite) Login(ctx context.Context, creds Credentials) error { return nil }
 func (m *mockSearchSite) GetUserInfo(ctx context.Context) (UserInfo, error)  { return m.userInfo, nil }
+
 func (m *mockSearchSite) Download(ctx context.Context, torrentID string) ([]byte, error) {
 	return nil, nil
 }

@@ -35,8 +35,10 @@ type mockSearchSiteForAPI struct {
 	userInfo v2.UserInfo
 }
 
-func (m *mockSearchSiteForAPI) ID() string                                            { return m.id }
-func (m *mockSearchSiteForAPI) Name() string                                          { return m.name }
+func (m *mockSearchSiteForAPI) ID() string { return m.id }
+
+func (m *mockSearchSiteForAPI) Name() string { return m.name }
+
 func (m *mockSearchSiteForAPI) Kind() v2.SiteKind                                     { return m.kind }
 func (m *mockSearchSiteForAPI) Login(ctx context.Context, creds v2.Credentials) error { return nil }
 func (m *mockSearchSiteForAPI) GetUserInfo(ctx context.Context) (v2.UserInfo, error) {
