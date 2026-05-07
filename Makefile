@@ -14,11 +14,16 @@ DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT_ID := $(shell git rev-parse HEAD)
 
-# BUILDKEYS_LDFLAGS 将 TMDB / OMDb API 凭证在构建时通过 -ldflags 注入到
-# internal/scraper/bootstrap/buildkeys 包。环境变量优先级：
-#   - TMDB_BEARER_TOKEN / TMDB_API_KEY （GitHub Actions 从 Secrets 注入）
-#   - OMDB_API_KEY （可选，当前未启用）
-# 本地开发默认不注入，保持 OSS 源码 key-free；发行构建由 CI 设置。
+# BUILDKEYS_LDFLAGS 将 scraper provider 的 API 凭证在构建时通过 -ldflags 注入。
+#
+# ⚠️ 公开发布（GitHub Releases / Docker Hub）必须保持环境变量为空 —— 否则所有
+# 用户共享同一个 key，流量叠加会超限，且 `strings ./pt-tools` 可提取 key。
+# 详见 internal/scraper/bootstrap/buildkeys/buildkeys.go 的安全警告。
+#
+# 合法使用场景：
+#   - 私有/内部部署：CI 注入团队自己的 key，二进制不对外发布
+#   - 本地 / CI 集成测试：export TMDB_BEARER_TOKEN=... && make build-local
+#   - 本项目公开 Release：应全部留空，用户通过 Web UI BYOK（推荐）
 BUILDKEYS_LDFLAGS := \
 	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.TmdbBearerToken=$(TMDB_BEARER_TOKEN) \
 	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.TmdbApiKey=$(TMDB_API_KEY) \

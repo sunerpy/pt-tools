@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys"
 	"github.com/sunerpy/pt-tools/internal/scraper/core"
 	"github.com/sunerpy/pt-tools/internal/scraper/source/douban"
+	"github.com/sunerpy/pt-tools/internal/scraper/source/imdb"
 	"github.com/sunerpy/pt-tools/internal/scraper/source/tmdb"
 	"github.com/sunerpy/pt-tools/internal/scraper/store"
 )
@@ -57,10 +58,14 @@ func NewProviderManager(db *gorm.DB, sourceReg *core.ScraperRegistry, logger Log
 // Unsupported provider names are silently skipped (LLM providers are handled
 // by the separate LLM layer, not by this source registry).
 //
-// Zero-config providers: douban is ALWAYS registered (pt-tools ships a Frodo
-// app key + HTML scraping fallback — see internal/scraper/source/douban/
-// sign.go and client.go#GetHTMLDetail). Users may still add a custom BaseURL
-// via ProviderCredential to override the defaults.
+// Zero-config providers: douban and imdb are ALWAYS registered without
+// requiring user credentials:
+//   - douban: pt-tools ships a Frodo app key + HTML scraping fallback
+//     (see internal/scraper/source/douban/sign.go and client.go#GetHTMLDetail)
+//   - imdb: pure HTML scraping, no API key required (IMDb has no public API)
+//
+// Users may still add a ProviderCredential row to override BaseURL (useful
+// for mirrors or debug proxies) but it's not required for operation.
 //
 // Returns the list of (successfully) active provider names for diagnostic
 // logging. An error is only returned if the DB query itself fails — per-
@@ -117,6 +122,21 @@ func (pm *ProviderManager) Reload() ([]string, error) {
 	} else {
 		pm.registered["douban"] = true
 		active = append(active, "douban")
+	}
+
+	// IMDb：零配置 HTML 刮削（无 API key，与豆瓣同策略）。
+	// 用户只能覆盖 BaseURL（用于 mirror 或代理），无鉴证字段。
+	imdbCfg := imdb.Config{}
+	if cred, ok := credByProvider["imdb"]; ok {
+		imdbCfg.BaseURL = cred.BaseURL
+	}
+	if err := imdb.Register(pm.sourceReg, imdbCfg); err != nil {
+		if pm.logger != nil {
+			pm.logger.Warnf("scraper bootstrap: imdb 注册失败: %v", err)
+		}
+	} else {
+		pm.registered["imdb"] = true
+		active = append(active, "imdb")
 	}
 
 	if pm.logger != nil {

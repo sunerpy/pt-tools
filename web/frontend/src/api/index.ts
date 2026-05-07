@@ -1281,6 +1281,12 @@ export const scraperApi = {
       cred,
     ),
 
+  testProviderCredential: (name: string) =>
+    api.post<{ ok: boolean; message?: string; error?: string }>(
+      `/api/v2/scraper/providers/${encodeURIComponent(name)}/test`,
+      {},
+    ),
+
   // Connectors
   listConnectors: () => api.get<ConnectorConfig[]>("/api/v2/scraper/connectors"),
 
