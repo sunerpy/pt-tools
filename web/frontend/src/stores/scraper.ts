@@ -39,7 +39,8 @@ export const useScraperStore = defineStore("scraper", () => {
     try {
       loading.value = true;
       error.value = null;
-      libraries.value = await scraperApi.listLibraries();
+      const res = await scraperApi.listLibraries();
+      libraries.value = Array.isArray(res) ? res : [];
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Failed to fetch libraries";
       libraries.value = [];
@@ -91,7 +92,8 @@ export const useScraperStore = defineStore("scraper", () => {
     try {
       tasksLoading.value = true;
       error.value = null;
-      tasks.value = await scraperApi.listTasks(filter);
+      const res = await scraperApi.listTasks(filter);
+      tasks.value = Array.isArray(res) ? res : [];
       if (runningTasks.value.length > 0) startTaskPolling();
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Failed to fetch tasks";
@@ -108,7 +110,8 @@ export const useScraperStore = defineStore("scraper", () => {
 
   async function fetchProviders() {
     try {
-      providers.value = await scraperApi.listProviders();
+      const res = await scraperApi.listProviders();
+      providers.value = Array.isArray(res) ? res : [];
     } catch {
       providers.value = [];
     }
@@ -124,7 +127,8 @@ export const useScraperStore = defineStore("scraper", () => {
 
   async function fetchConnectors() {
     try {
-      connectors.value = await scraperApi.listConnectors();
+      const res = await scraperApi.listConnectors();
+      connectors.value = Array.isArray(res) ? res : [];
     } catch {
       connectors.value = [];
     }
@@ -149,7 +153,8 @@ export const useScraperStore = defineStore("scraper", () => {
 
   async function fetchLLMProviders() {
     try {
-      llmProviders.value = await scraperApi.listLLMProviders();
+      const res = await scraperApi.listLLMProviders();
+      llmProviders.value = Array.isArray(res) ? res : [];
     } catch {
       llmProviders.value = [];
     }

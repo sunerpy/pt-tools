@@ -139,7 +139,7 @@ const libTypeTag = computed(() => (t: string) => {
         <p class="path">{{ lib.path }}</p>
         <div class="meta">
           <el-tag
-            v-for="p in lib.provider_ids.split(',').filter(Boolean)"
+            v-for="p in (lib.provider_ids ?? '').split(',').filter(Boolean)"
             :key="p"
             size="small"
             effect="plain">

@@ -92,6 +92,17 @@ function handleMenuSelect(index: string) {
     window.open(url, "_blank");
     return;
   }
+  // Scraper 子菜单映射
+  const scraperPaths: Record<string, string> = {
+    scraper: "/scraper",
+    "scraper-libraries": "/scraper/libraries",
+    "scraper-tasks": "/scraper/tasks",
+    "scraper-settings": "/scraper/settings",
+  };
+  if (scraperPaths[index]) {
+    router.push(scraperPaths[index]);
+    return;
+  }
   router.push(`/${index}`);
 }
 
@@ -163,6 +174,18 @@ function logout() {
           <el-menu-item index="scraper">
             <el-icon><VideoCamera /></el-icon>
             <template #title>媒体刮削</template>
+          </el-menu-item>
+          <el-menu-item index="scraper-libraries">
+            <el-icon><FolderOpened /></el-icon>
+            <template #title>&nbsp;&nbsp;· 媒体库</template>
+          </el-menu-item>
+          <el-menu-item index="scraper-tasks">
+            <el-icon><List /></el-icon>
+            <template #title>&nbsp;&nbsp;· 刮削任务</template>
+          </el-menu-item>
+          <el-menu-item index="scraper-settings">
+            <el-icon><Setting /></el-icon>
+            <template #title>&nbsp;&nbsp;· 刮削设置</template>
           </el-menu-item>
           <el-menu-item index="logs">
             <el-icon><Document /></el-icon>

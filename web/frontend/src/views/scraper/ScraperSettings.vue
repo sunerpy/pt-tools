@@ -38,15 +38,17 @@ onMounted(async () => {
   ]);
 });
 
-const llmPresetOptions = computed(() =>
-  store.llmProviders.map((p) => ({ value: p.name, label: p.name.toUpperCase(), preset: p })),
-);
+const llmPresetOptions = computed(() => {
+  const list = Array.isArray(store.llmProviders) ? store.llmProviders : [];
+  return list.map((p) => ({ value: p.name, label: p.name.toUpperCase(), preset: p }));
+});
 
 function onLLMPresetChange(name: string) {
-  const preset = store.llmProviders.find((p) => p.name === name);
+  const list = Array.isArray(store.llmProviders) ? store.llmProviders : [];
+  const preset = list.find((p) => p.name === name);
   if (preset) {
-    llmBaseURL.value = preset.base_url;
-    llmModel.value = preset.models[0] || "";
+    llmBaseURL.value = preset.base_url ?? "";
+    llmModel.value = preset.models?.[0] ?? "";
   }
 }
 
