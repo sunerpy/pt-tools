@@ -106,16 +106,45 @@ func searchCandidateFromItem(item searchItem) core.MediaSearchCandidate {
 		}
 	}
 
+	// 豆瓣 Frodo 2025+ 响应开始将 type 字段留空，只在 URI 里保留 /movie/ /tv/
+	// 路径。上层 scraper.SearchMovie / SearchTvShow 按 MediaType 过滤，空 type
+	// 会导致所有结果被丢弃（Unknown）。这里从 URI/URL 推断类型作为 fallback。
+	mediaType := mapMediaType(targetItem.Type)
+	if mediaType == core.MediaTypeUnknown {
+		mediaType = mapMediaType(mediaTypeFromURI(targetItem.URI, targetItem.URL))
+	}
+
 	return core.MediaSearchCandidate{
 		ID:        targetItem.ID,
 		Title:     firstNonEmpty(targetItem.Title, targetItem.OriginalTitle),
 		Year:      parseYear(targetItem.Year, targetItem.CardSubtitle),
-		MediaType: mapMediaType(targetItem.Type),
+		MediaType: mediaType,
 		Provider:  "douban",
 		PosterURL: bestImage(targetItem.Pic),
 		Overview:  targetItem.Abstract,
 		Score:     normalizedScore(item.Rating.Value),
 	}
+}
+
+// mediaTypeFromURI 从 Frodo URI 或 Web URL 中提取 /movie/ 或 /tv/ 片段。
+// 已知格式：
+//   - douban://douban.com/movie/3541415  （Frodo target.uri）
+//   - douban://douban.com/tv/26794435    （同上）
+//   - https://movie.douban.com/subject/N （Web URL —— 域名含 movie 即判电影）
+func mediaTypeFromURI(uri, url string) string {
+	for _, s := range []string{uri, url} {
+		lower := strings.ToLower(s)
+		if lower == "" {
+			continue
+		}
+		if strings.Contains(lower, "/movie/") || strings.Contains(lower, "movie.douban.com") {
+			return "movie"
+		}
+		if strings.Contains(lower, "/tv/") || strings.Contains(lower, "/tv_show/") {
+			return "tv"
+		}
+	}
+	return ""
 }
 
 func baseEntity(detail *subjectDetailResponse) core.MediaEntity {

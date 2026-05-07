@@ -446,19 +446,24 @@ func (s *ScrapeService) collectMovieMetadata(
 	s.setStage(ctx, result, stageSearching)
 	rawResults := make(map[string]*core.RawMediaInfo, len(req.Providers))
 	usedProviders := make([]string, 0, len(req.Providers))
+	unregistered := make([]string, 0, len(req.Providers))
+	empty := make([]string, 0, len(req.Providers))
 
 	for _, name := range req.Providers {
 		scraper, err := s.sourceReg.Get(name)
 		if err != nil {
 			s.logger.Warnf("scraper %s not found: %v", name, err)
+			unregistered = append(unregistered, name)
 			continue
 		}
 		if !scraper.IsActive() {
 			s.logger.Warnf("scraper %s inactive", name)
+			unregistered = append(unregistered, name)
 			continue
 		}
 		movie, ok := scraper.(core.MovieMetadataScraper)
 		if !ok {
+			unregistered = append(unregistered, name)
 			continue
 		}
 		candidates, err := movie.SearchMovie(ctx, core.MovieSearchOptions{
@@ -468,9 +473,11 @@ func (s *ScrapeService) collectMovieMetadata(
 		})
 		if err != nil {
 			s.logger.Warnf("search %s: %v", name, err)
+			empty = append(empty, name)
 			continue
 		}
 		if len(candidates) == 0 {
+			empty = append(empty, name)
 			continue
 		}
 
@@ -484,6 +491,7 @@ func (s *ScrapeService) collectMovieMetadata(
 		})
 		if err != nil {
 			s.logger.Warnf("get %s: %v", name, err)
+			empty = append(empty, name)
 			continue
 		}
 		rawResults[name] = &core.RawMediaInfo{Provider: name, Data: metadata, SearchResult: candidate}
@@ -491,7 +499,7 @@ func (s *ScrapeService) collectMovieMetadata(
 	}
 
 	if len(rawResults) == 0 {
-		return nil, nil, errors.New("no provider returned results")
+		return nil, nil, noProviderResultsErr(unregistered, empty)
 	}
 	return rawResults, usedProviders, nil
 }
@@ -504,18 +512,23 @@ func (s *ScrapeService) collectTvMetadata(
 	s.setStage(ctx, result, stageSearching)
 	rawResults := make(map[string]*core.RawMediaInfo, len(req.Providers))
 	usedProviders := make([]string, 0, len(req.Providers))
+	unregistered := make([]string, 0, len(req.Providers))
+	empty := make([]string, 0, len(req.Providers))
 
 	for _, name := range req.Providers {
 		scraper, err := s.sourceReg.Get(name)
 		if err != nil {
 			s.logger.Warnf("scraper %s not found: %v", name, err)
+			unregistered = append(unregistered, name)
 			continue
 		}
 		if !scraper.IsActive() {
+			unregistered = append(unregistered, name)
 			continue
 		}
 		show, ok := scraper.(core.TvShowMetadataScraper)
 		if !ok {
+			unregistered = append(unregistered, name)
 			continue
 		}
 		candidates, err := show.SearchTvShow(ctx, core.TvShowSearchOptions{
@@ -525,9 +538,11 @@ func (s *ScrapeService) collectTvMetadata(
 		})
 		if err != nil {
 			s.logger.Warnf("search %s: %v", name, err)
+			empty = append(empty, name)
 			continue
 		}
 		if len(candidates) == 0 {
+			empty = append(empty, name)
 			continue
 		}
 
@@ -541,6 +556,7 @@ func (s *ScrapeService) collectTvMetadata(
 		})
 		if err != nil {
 			s.logger.Warnf("get %s: %v", name, err)
+			empty = append(empty, name)
 			continue
 		}
 		rawResults[name] = &core.RawMediaInfo{Provider: name, Data: metadata, SearchResult: candidate}
@@ -548,7 +564,7 @@ func (s *ScrapeService) collectTvMetadata(
 	}
 
 	if len(rawResults) == 0 {
-		return nil, nil, errors.New("no provider returned results")
+		return nil, nil, noProviderResultsErr(unregistered, empty)
 	}
 	return rawResults, usedProviders, nil
 }
@@ -561,18 +577,23 @@ func (s *ScrapeService) collectEpisodeMetadata(
 	s.setStage(ctx, result, stageSearching)
 	rawResults := make(map[string]*core.RawMediaInfo, len(req.Providers))
 	usedProviders := make([]string, 0, len(req.Providers))
+	unregistered := make([]string, 0, len(req.Providers))
+	empty := make([]string, 0, len(req.Providers))
 
 	for _, name := range req.Providers {
 		scraper, err := s.sourceReg.Get(name)
 		if err != nil {
 			s.logger.Warnf("scraper %s not found: %v", name, err)
+			unregistered = append(unregistered, name)
 			continue
 		}
 		if !scraper.IsActive() {
+			unregistered = append(unregistered, name)
 			continue
 		}
 		show, ok := scraper.(core.TvShowMetadataScraper)
 		if !ok {
+			unregistered = append(unregistered, name)
 			continue
 		}
 		candidates, err := show.SearchTvShow(ctx, core.TvShowSearchOptions{
@@ -582,9 +603,11 @@ func (s *ScrapeService) collectEpisodeMetadata(
 		})
 		if err != nil {
 			s.logger.Warnf("search %s: %v", name, err)
+			empty = append(empty, name)
 			continue
 		}
 		if len(candidates) == 0 {
+			empty = append(empty, name)
 			continue
 		}
 
@@ -598,6 +621,7 @@ func (s *ScrapeService) collectEpisodeMetadata(
 		})
 		if err != nil {
 			s.logger.Warnf("get episode %s: %v", name, err)
+			empty = append(empty, name)
 			continue
 		}
 		rawResults[name] = &core.RawMediaInfo{Provider: name, Data: metadata, SearchResult: candidate}
@@ -605,9 +629,23 @@ func (s *ScrapeService) collectEpisodeMetadata(
 	}
 
 	if len(rawResults) == 0 {
-		return nil, nil, errors.New("no provider returned results")
+		return nil, nil, noProviderResultsErr(unregistered, empty)
 	}
 	return rawResults, usedProviders, nil
+}
+
+// noProviderResultsErr 构造带诊断信息的 "no provider results" 错误。
+// 当所有 provider 都未注册（例如用户只配了 tmdb/douban 但 server_scraper.go
+// 未读取凭证并调用 Register）时，错误会被包装为 core.ErrPermanent，让
+// PersistentQueue 跳过重试直接标记 failed —— 因为重试同样会失败。
+// 只要有任何 provider 实际被调用但返回空（search/get 走到了外部 API），
+// 保持为可重试的 transient 错误，允许网络抖动后自动恢复。
+func noProviderResultsErr(unregistered, empty []string) error {
+	msg := fmt.Sprintf("no provider returned results (未注册: %v, 空结果: %v)", unregistered, empty)
+	if len(empty) == 0 && len(unregistered) > 0 {
+		return fmt.Errorf("%s: %w", msg, core.ErrPermanent)
+	}
+	return errors.New(msg)
 }
 
 func (s *ScrapeService) writeMovieNFO(ctx context.Context, result *ScrapeResult, req ScrapeMovieRequest, fused *core.Movie) error {

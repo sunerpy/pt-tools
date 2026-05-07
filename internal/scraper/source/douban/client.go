@@ -24,6 +24,14 @@ var defaultUserAgents = []string{
 	"api-client/1 com.douban.frodo/7.3.0(207) Android/22 product/MI 9 vendor/Xiaomi model/MI 9 brand/Android rom/miui6 network/wifi platform/mobile nd/1",
 }
 
+// defaultHTMLUserAgents 桌面浏览器 UA 池，专用于抓取 movie.douban.com 的 HTML 页面。
+// Frodo app UA 在 Web 端会被返回精简/反爬版本，导致 <title> 解析失败。
+var defaultHTMLUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+}
+
 const (
 	defaultHTTPTimeout = 15 * time.Second
 	defaultRateLimit   = 2 * time.Second
@@ -137,7 +145,16 @@ func (c *Client) GetHTMLDetail(ctx context.Context, id string) (*htmlDetail, err
 	if err != nil {
 		return nil, fmt.Errorf("build douban html request: %w", err)
 	}
-	req.Header.Set("User-Agent", c.randomUserAgent())
+	// 使用桌面浏览器 UA + Accept-Language + Referer 来降低豆瓣反爬检测概率。
+	// Frodo app UA 在 Web 端会触发精简页返回（<title> 缺失导致解析失败）。
+	req.Header.Set("User-Agent", c.randomHTMLUserAgent())
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Referer", c.htmlURL+"/")
+	// 豆瓣反爬：任何首次到达 movie.douban.com 但不带 bid cookie 的请求会被 302 到
+	// sec.douban.com 的验证页面。预设一个伪随机 bid 可直接获得正常内容
+	// （豆瓣只校验 cookie 存在且格式合法，不校验服务端记录）。bid 长度必须为 11。
+	req.AddCookie(&http.Cookie{Name: "bid", Value: fakeBidCookie()})
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -253,6 +270,25 @@ func (c *Client) randomUserAgent() string {
 		return c.userAgents[0]
 	}
 	return c.userAgents[c.randIntn(len(c.userAgents))]
+}
+
+// randomHTMLUserAgent 从桌面浏览器 UA 池中随机挑选，专用于抓取豆瓣 Web 页。
+func (c *Client) randomHTMLUserAgent() string {
+	if len(defaultHTMLUserAgents) == 1 || c.randIntn == nil {
+		return defaultHTMLUserAgents[0]
+	}
+	return defaultHTMLUserAgents[c.randIntn(len(defaultHTMLUserAgents))]
+}
+
+// fakeBidCookie 生成豆瓣期望的 11 字符 bid cookie 值（字母 + 数字 + 下划线 + 短横线，
+// 豆瓣浏览器实测格式）。内容随机即可 —— 豆瓣不校验服务端记录，只校验存在性和字符集。
+func fakeBidCookie() string {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	b := make([]byte, 11)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
 }
 
 func decodeResponse(resp *http.Response, dest any) error {

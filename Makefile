@@ -13,6 +13,16 @@ DOCKER_REPO = sunerpy
 DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT_ID := $(shell git rev-parse HEAD)
+
+# BUILDKEYS_LDFLAGS 将 TMDB / OMDb API 凭证在构建时通过 -ldflags 注入到
+# internal/scraper/bootstrap/buildkeys 包。环境变量优先级：
+#   - TMDB_BEARER_TOKEN / TMDB_API_KEY （GitHub Actions 从 Secrets 注入）
+#   - OMDB_API_KEY （可选，当前未启用）
+# 本地开发默认不注入，保持 OSS 源码 key-free；发行构建由 CI 设置。
+BUILDKEYS_LDFLAGS := \
+	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.TmdbBearerToken=$(TMDB_BEARER_TOKEN) \
+	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.TmdbApiKey=$(TMDB_API_KEY) \
+	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.OmdbApiKey=$(OMDB_API_KEY)
 ifeq ($(MAKECMDGOALS), prod-new)
   TAG = $(NEW_TAG)
 else ifeq ($(MAKECMDGOALS), test-new)
@@ -49,7 +59,8 @@ build-local: fmt build-frontend
 	-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
 	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
 	-X github.com/sunerpy/pt-tools/version.BuildOS=$(shell go env GOOS) \
-	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH)" \
+	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH) \
+	$(BUILDKEYS_LDFLAGS)" \
 	-o $(DIST_DIR)/$(IMAGE_NAME) .
 
 # 多平台二进制构建
@@ -66,7 +77,8 @@ build-binaries:
 			-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
 			-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
 			-X github.com/sunerpy/pt-tools/version.BuildOS=$$GOOS \
-			-X github.com/sunerpy/pt-tools/version.BuildArch=$$GOARCH" \
+			-X github.com/sunerpy/pt-tools/version.BuildArch=$$GOARCH \
+			$(BUILDKEYS_LDFLAGS)" \
 			-o $$OUTPUT . || exit 1; \
 		done
 

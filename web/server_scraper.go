@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/scraper/bootstrap"
 	scrapercore "github.com/sunerpy/pt-tools/internal/scraper/core"
 	"github.com/sunerpy/pt-tools/internal/scraper/service"
 	scraperstore "github.com/sunerpy/pt-tools/internal/scraper/store"
@@ -19,6 +20,8 @@ import (
 //   - 构造 PersistentQueue 并启动 worker pool（默认 3 worker），
 //     解决 queue/taskBuilder 循环依赖：先 NewScrapeService，再 NewPersistentQueue
 //     with service.TaskBuilder()，最后 service.SetQueue() 回填
+//   - 通过 bootstrap.ProviderManager 从 DB ProviderCredential 表加载 tmdb/douban
+//     并注入 OnProvidersChanged 回调，用户在 UI 保存凭证后热加载，无需重启
 //   - 失败不致命：任一步骤失败只记录 warning，pt-tools 主功能继续运行
 func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 	log := global.GetSlogger()
@@ -39,6 +42,13 @@ func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 	sourceReg := scrapercore.NewRegistry[scrapercore.MediaScraper]()
 	writerReg := scrapercore.NewRegistry[scrapercore.NfoWriter]()
 	connectorReg := scrapercore.NewRegistry[scrapercore.MediaServerConnector]()
+
+	providerMgr := bootstrap.NewProviderManager(db.DB, sourceReg, log)
+	if _, err := providerMgr.Reload(); err != nil {
+		if log != nil {
+			log.Warnw("scraper: 初次加载 provider 凭证失败（DB 查询错误）", "err", err)
+		}
+	}
 
 	librarySvc, err := service.NewLibraryService(service.LibraryConfig{DB: db.DB})
 	if err != nil {
@@ -85,6 +95,11 @@ func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 		DB:           db.DB,
 		SourceReg:    sourceReg,
 		ConnectorReg: connectorReg,
+		OnProvidersChanged: func() {
+			if _, err := providerMgr.Reload(); err != nil && log != nil {
+				log.Warnw("scraper: 热加载 provider 凭证失败", "err", err)
+			}
+		},
 	})
 	if newAPIErr != nil {
 		if log != nil {

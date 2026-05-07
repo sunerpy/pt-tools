@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,13 +26,14 @@ type Logger interface {
 }
 
 type API struct {
-	scrape       *service.ScrapeService
-	library      *service.LibraryService
-	db           *gorm.DB
-	sourceReg    *core.Registry[core.MediaScraper]
-	connectorReg *core.Registry[core.MediaServerConnector]
-	llmProviders map[string]llm.Provider
-	logger       Logger
+	scrape             *service.ScrapeService
+	library            *service.LibraryService
+	db                 *gorm.DB
+	sourceReg          *core.Registry[core.MediaScraper]
+	connectorReg       *core.Registry[core.MediaServerConnector]
+	llmProviders       map[string]llm.Provider
+	onProvidersChanged func()
+	logger             Logger
 }
 
 type APIConfig struct {
@@ -41,7 +43,11 @@ type APIConfig struct {
 	SourceReg    *core.Registry[core.MediaScraper]
 	ConnectorReg *core.Registry[core.MediaServerConnector]
 	LLMProviders map[string]llm.Provider
-	Logger       Logger
+	// OnProvidersChanged 在 provider 凭证保存/删除后同步调用，用于触发
+	// sourceReg 的重新注册（embedded 模式下由 web/server_scraper.go 注入）。
+	// 为 nil 时不触发热加载；此时用户需要重启进程让新凭证生效。
+	OnProvidersChanged func()
+	Logger             Logger
 }
 
 func NewAPI(cfg APIConfig) (*API, error) {
@@ -66,13 +72,14 @@ func NewAPI(cfg APIConfig) (*API, error) {
 		providers = map[string]llm.Provider{}
 	}
 	return &API{
-		scrape:       cfg.Scrape,
-		library:      cfg.Library,
-		db:           cfg.DB,
-		sourceReg:    cfg.SourceReg,
-		connectorReg: cfg.ConnectorReg,
-		llmProviders: providers,
-		logger:       logger,
+		scrape:             cfg.Scrape,
+		library:            cfg.Library,
+		db:                 cfg.DB,
+		sourceReg:          cfg.SourceReg,
+		connectorReg:       cfg.ConnectorReg,
+		llmProviders:       providers,
+		onProvidersChanged: cfg.OnProvidersChanged,
+		logger:             logger,
 	}, nil
 }
 
@@ -316,7 +323,56 @@ func (a *API) HandleSetProviderCredential(w http.ResponseWriter, r *http.Request
 		writeInternalError(w, err)
 		return
 	}
+	if a.onProvidersChanged != nil {
+		a.onProvidersChanged()
+	}
 	writeJSON(w, http.StatusOK, credential)
+}
+
+// HandleTestProviderCredential 调用 provider 的 Ping（若实现了 Pinger 接口）
+// 来验证凭证有效性。用于 UI 的"测试"按钮 —— 在保存之后立即确认凭证能用。
+// 若 provider 未注册则返回 404；未实现 Pinger 则返回 200 + "provider 不支持 ping 校验"；
+// Ping 失败则返回 502 + TMDB/豆瓣的原始错误消息（给用户定位 API key / 网络问题的线索）。
+func (a *API) HandleTestProviderCredential(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "provider name required")
+		return
+	}
+	if a.sourceReg == nil {
+		writeError(w, http.StatusInternalServerError, "source registry not configured")
+		return
+	}
+	scraper, err := a.sourceReg.Get(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("provider %q 未注册（请先保存凭证）: %v", name, err))
+		return
+	}
+	pinger, ok := scraper.(pinger)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"message": fmt.Sprintf("provider %q 不支持 ping 校验，已跳过（注册状态已验证）", name),
+		})
+		return
+	}
+	if err := pinger.Ping(r.Context()); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": fmt.Sprintf("provider %q 凭证有效", name),
+	})
+}
+
+// pinger 由支持即时凭证校验的 source provider 实现（当前仅 TMDB）。
+// 豆瓣默认内置 Frodo key + HTML fallback，不需要校验即可使用。
+type pinger interface {
+	Ping(ctx context.Context) error
 }
 
 func (a *API) HandleListConnectors(w http.ResponseWriter, r *http.Request) {

@@ -281,8 +281,10 @@ func (p *persistentTask) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// 失败：判断是否继续重试
-	if p.RetryCount() >= p.MaxRetries() {
+	// 失败：永久错误直接 failed，不进入重试循环。
+	// 典型场景：provider 未注册 / 凭证缺失 / 不支持的媒体类型 —— 这些重试同样失败，
+	// 反复 retrying 只会制造 "任务卡住" 的错觉并浪费 worker。
+	if core.IsPermanent(err) || p.RetryCount() >= p.MaxRetries() {
 		completed := time.Now()
 		p.pq.db.Model(&store.ScrapeTask{}).Where("id = ?", p.dbID).Updates(map[string]any{
 			"state":        stateScrapeFailed,

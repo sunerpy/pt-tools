@@ -105,20 +105,24 @@ async function retry(row: ScrapeTask) {
           {{ row.started_at?.slice(0, 19) || "-" }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="240" align="center" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" text :icon="View" @click.stop="activeTask = row">详情</el-button>
-          <el-button
-            v-if="row.state === 'failed'"
-            size="small"
-            text
-            type="warning"
-            @click.stop="retry(row)">
-            重试
-          </el-button>
-          <el-button size="small" text type="danger" :icon="Delete" @click.stop="remove(row)">
-            删除
-          </el-button>
+          <div class="table-cell-actions">
+            <el-button size="small" text :icon="View" @click.stop="activeTask = row"
+              >详情</el-button
+            >
+            <el-button
+              v-if="row.state === 'failed'"
+              size="small"
+              text
+              type="warning"
+              @click.stop="retry(row)">
+              重试
+            </el-button>
+            <el-button size="small" text type="danger" :icon="Delete" @click.stop="remove(row)">
+              删除
+            </el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -153,8 +157,15 @@ async function retry(row: ScrapeTask) {
 </template>
 
 <style scoped>
+@import "@/styles/table-page.css";
+
 .tasks-wrap {
   padding: 24px;
+}
+
+/* 固定 240px 宽已保证 3 按钮一行显示；禁用 flex-wrap 避免窄屏缩放时回退换行。 */
+.tasks-wrap :deep(.table-cell-actions) {
+  flex-wrap: nowrap;
 }
 
 .tasks-wrap header {

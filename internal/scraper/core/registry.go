@@ -82,6 +82,19 @@ func (r *Registry[T]) Has(name string) bool {
 	return ok
 }
 
+// Deregister removes a factory from the registry. Returns true if removed,
+// false if name was not registered. Used by hot-reload paths (e.g. scraper
+// bootstrap re-registering providers after credential updates).
+func (r *Registry[T]) Deregister(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.entries[name]; !ok {
+		return false
+	}
+	delete(r.entries, name)
+	return true
+}
+
 // Type aliases for improved readability.
 // Each registry is specialized for a specific interface type.
 

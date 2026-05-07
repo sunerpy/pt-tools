@@ -20,6 +20,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux, authMw func(http.HandlerFunc) h
 	mux.HandleFunc("DELETE /api/v2/scraper/tasks/{id}", authMw(a.HandleDeleteTask))
 	mux.HandleFunc("GET /api/v2/scraper/providers", authMw(a.HandleListProviders))
 	mux.HandleFunc("POST /api/v2/scraper/providers/{name}/credentials", authMw(a.HandleSetProviderCredential))
+	mux.HandleFunc("POST /api/v2/scraper/providers/{name}/test", authMw(a.HandleTestProviderCredential))
 	mux.HandleFunc("GET /api/v2/scraper/connectors", authMw(a.HandleListConnectors))
 	mux.HandleFunc("POST /api/v2/scraper/connectors/{id}/test", authMw(a.HandleTestConnector))
 	mux.HandleFunc("GET /api/v2/scraper/settings", authMw(a.HandleGetSettings))

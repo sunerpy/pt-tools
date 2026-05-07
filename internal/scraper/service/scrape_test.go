@@ -162,7 +162,9 @@ func TestScrape_Movie_NoSource_Fails(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, result.Success)
 	require.Equal(t, stageSearching, result.FailedStage)
-	require.Equal(t, "no provider returned results", result.ErrorMessage)
+	require.Contains(t, result.ErrorMessage, "no provider returned results")
+	require.Contains(t, result.ErrorMessage, "未注册: [tmdb]")
+	require.True(t, core.IsPermanent(err), "unregistered-only error should be permanent")
 }
 
 func TestScrape_Movie_SearchFails(t *testing.T) {
@@ -193,7 +195,9 @@ func TestScrape_Movie_SearchFails(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, result.Success)
 	require.Equal(t, stageSearching, result.FailedStage)
-	require.Equal(t, "no provider returned results", result.ErrorMessage)
+	require.Contains(t, result.ErrorMessage, "no provider returned results")
+	require.Contains(t, result.ErrorMessage, "空结果: [tmdb]")
+	require.False(t, core.IsPermanent(err), "provider-called-but-empty should be transient")
 }
 
 func TestScrape_Movie_FilenameFallback(t *testing.T) {

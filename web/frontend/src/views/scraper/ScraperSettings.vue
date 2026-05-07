@@ -134,11 +134,13 @@ async function testConn(id: number) {
                 <el-tag v-else type="info" size="small">未测试</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="120">
+            <el-table-column label="操作" width="120" align="center">
               <template #default="{ row }">
-                <el-button size="small" :loading="testingId === row.id" @click="testConn(row.id)">
-                  测试
-                </el-button>
+                <div class="table-cell-actions">
+                  <el-button size="small" :loading="testingId === row.id" @click="testConn(row.id)">
+                    测试
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -214,6 +216,8 @@ async function testConn(id: number) {
 </template>
 
 <style scoped>
+@import "@/styles/table-page.css";
+
 .settings-wrap {
   padding: 24px;
 }

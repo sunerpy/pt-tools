@@ -40,7 +40,33 @@ var (
 
 	// ErrUnsupported is returned when a requested feature or server type is not supported.
 	ErrUnsupported = errors.New("unsupported")
+
+	// ErrPermanent marks an error as non-retryable. Wrap or errors.Is with this
+	// sentinel when the failure is deterministic and will repeat identically —
+	// e.g. "no provider registered", "provider credentials missing", "invalid
+	// media path". PersistentQueue.persistentTask.Run checks this to skip the
+	// retry loop and mark the task failed immediately, avoiding the misleading
+	// "retrying" UI state for config-level failures.
+	ErrPermanent = errors.New("permanent error (non-retryable)")
 )
+
+// IsPermanent reports whether err indicates a deterministic, non-retryable
+// failure. ErrUnauthorized / ErrNotFound / ErrInvalidID / ErrUnsupported /
+// ErrPermanent and any error wrapping them are treated as permanent.
+func IsPermanent(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, ErrPermanent),
+		errors.Is(err, ErrUnauthorized),
+		errors.Is(err, ErrNotFound),
+		errors.Is(err, ErrInvalidID),
+		errors.Is(err, ErrUnsupported):
+		return true
+	}
+	return false
+}
 
 // Wrap wraps an error with an additional message using fmt.Errorf.
 // It preserves the original error for errors.Is/As checking.

@@ -119,6 +119,22 @@ func (s *TMDBScraper) IsActive() bool {
 	return s.client != nil
 }
 
+// Ping 通过 GetConfigurationAPI 验证凭证有效性（最轻量的 auth-required 调用）。
+// 用于 UI 保存凭证后的即时校验 —— 用户输错 key 时立刻反馈，而不是等扫描任务
+// 进入 retrying 才发现。nil = 凭证有效；非 nil = 凭证被 TMDB 拒绝。
+func (s *TMDBScraper) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.client == nil {
+		return fmt.Errorf("ping tmdb: %w", core.ErrUnauthorized)
+	}
+	if _, err := s.client.GetConfigurationAPI(); err != nil {
+		return mapTMDBError(err, "tmdb 凭证校验失败")
+	}
+	return nil
+}
+
 func (s *TMDBScraper) SearchMovie(ctx context.Context, opts core.MovieSearchOptions) ([]core.MediaSearchCandidate, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
