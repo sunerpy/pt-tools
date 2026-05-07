@@ -162,6 +162,14 @@ func NewScrapeService(cfg ServiceConfig) (*ScrapeService, error) {
 	}, nil
 }
 
+// SetQueue 在 NewScrapeService 之后注入持久化队列（解决 queue/taskBuilder
+// 循环依赖：queue 构造时需要 service.TaskBuilder()，反过来 service 入队又
+// 需要 queue 实例）。嵌入模式 web/server_scraper.go 会先构造 service，再
+// 构造 queue 并回填。
+func (s *ScrapeService) SetQueue(q *PersistentQueue) {
+	s.queue = q
+}
+
 // EnqueueMovie 将电影刮削任务提交到持久化队列。
 func (s *ScrapeService) EnqueueMovie(ctx context.Context, req ScrapeMovieRequest) (*store.ScrapeTask, error) {
 	if s.queue == nil {

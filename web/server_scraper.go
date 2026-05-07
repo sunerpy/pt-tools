@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/sunerpy/pt-tools/global"
@@ -15,6 +16,9 @@ import (
 //   - 复用 pt-tools 的 session auth（已登录用户自动获得 scraper 权限）
 //   - 复用 global.GlobalDB（与主系统共享 SQLite 文件）
 //   - 运行独立 store.Migrate 建表，不污染 pt-tools schema_versions
+//   - 构造 PersistentQueue 并启动 worker pool（默认 3 worker），
+//     解决 queue/taskBuilder 循环依赖：先 NewScrapeService，再 NewPersistentQueue
+//     with service.TaskBuilder()，最后 service.SetQueue() 回填
 //   - 失败不致命：任一步骤失败只记录 warning，pt-tools 主功能继续运行
 func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 	log := global.GetSlogger()
@@ -57,16 +61,34 @@ func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 		return
 	}
 
-	api, err := scraperweb.NewAPI(scraperweb.APIConfig{
+	queue, err := service.NewPersistentQueue(service.PersistentConfig{
+		DB:          db.DB,
+		TaskBuilder: scrapeSvc.TaskBuilder(),
+	})
+	if err != nil {
+		if log != nil {
+			log.Warnw("scraper: PersistentQueue 构造失败", "err", err)
+		}
+		return
+	}
+	if err := queue.Start(context.Background(), 3); err != nil {
+		if log != nil {
+			log.Warnw("scraper: queue start 失败", "err", err)
+		}
+		return
+	}
+	scrapeSvc.SetQueue(queue)
+
+	api, newAPIErr := scraperweb.NewAPI(scraperweb.APIConfig{
 		Scrape:       scrapeSvc,
 		Library:      librarySvc,
 		DB:           db.DB,
 		SourceReg:    sourceReg,
 		ConnectorReg: connectorReg,
 	})
-	if err != nil {
+	if newAPIErr != nil {
 		if log != nil {
-			log.Warnw("scraper: NewAPI 失败", "err", err)
+			log.Warnw("scraper: NewAPI 失败", "err", newAPIErr)
 		}
 		return
 	}
@@ -77,6 +99,6 @@ func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 	api.RegisterRoutes(mux, authAdapter)
 
 	if log != nil {
-		log.Info("scraper: 子系统已挂载到 /api/v2/scraper/*")
+		log.Info("scraper: 子系统已挂载到 /api/v2/scraper/*（queue workers=3）")
 	}
 }
