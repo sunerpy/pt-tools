@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/gorm"
 
+	connectorFactory "github.com/sunerpy/pt-tools/internal/scraper/connector"
 	"github.com/sunerpy/pt-tools/internal/scraper/core"
 	"github.com/sunerpy/pt-tools/internal/scraper/store"
 )
@@ -746,16 +747,17 @@ func (s *ScrapeService) refreshConnector(ctx context.Context, result *ScrapeResu
 	if connectorID == nil {
 		return nil
 	}
-	if s.connectorReg == nil {
-		return errors.New("connector registry not configured")
-	}
 	var cfg store.ConnectorConfig
 	if err := s.db.WithContext(ctx).First(&cfg, *connectorID).Error; err != nil {
 		return fmt.Errorf("load connector %d: %w", *connectorID, err)
 	}
-	connector, err := s.connectorReg.Get(cfg.Type)
+	// Connector 构造是 per-ConnectorConfig 有状态的（BaseURL/APIKey 每行不同），
+	// 不适合 registry 模式（工厂只接受 name）。直接调用 connector.NewConnector，
+	// 由它根据 cfg.Type（auto / jellyfin / emby）自动选实现并处理 auto-detect。
+	// connectorReg 字段保留但已 deprecated —— 留作未来替换设计用。
+	connector, err := connectorFactory.NewConnector(ctx, cfg.Type, cfg.BaseURL, cfg.APIKey, nil)
 	if err != nil {
-		return fmt.Errorf("connector %s: %w", cfg.Type, err)
+		return fmt.Errorf("build connector %s: %w", cfg.Type, err)
 	}
 	s.setStage(ctx, result, stageRefreshingServer)
 	return connector.RefreshLibrary(ctx, "")
