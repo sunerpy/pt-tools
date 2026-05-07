@@ -171,22 +171,28 @@ function logout() {
             <el-icon><VideoPause /></el-icon>
             <template #title>暂停任务</template>
           </el-menu-item>
-          <el-menu-item index="scraper">
-            <el-icon><VideoCamera /></el-icon>
-            <template #title>媒体刮削</template>
-          </el-menu-item>
-          <el-menu-item index="scraper-libraries">
-            <el-icon><FolderOpened /></el-icon>
-            <template #title>&nbsp;&nbsp;· 媒体库</template>
-          </el-menu-item>
-          <el-menu-item index="scraper-tasks">
-            <el-icon><List /></el-icon>
-            <template #title>&nbsp;&nbsp;· 刮削任务</template>
-          </el-menu-item>
-          <el-menu-item index="scraper-settings">
-            <el-icon><Setting /></el-icon>
-            <template #title>&nbsp;&nbsp;· 刮削设置</template>
-          </el-menu-item>
+          <el-sub-menu index="scraper-group">
+            <template #title>
+              <el-icon><VideoCamera /></el-icon>
+              <span>媒体刮削</span>
+            </template>
+            <el-menu-item index="scraper">
+              <el-icon><Grid /></el-icon>
+              <template #title>概览</template>
+            </el-menu-item>
+            <el-menu-item index="scraper-libraries">
+              <el-icon><FolderOpened /></el-icon>
+              <template #title>媒体库</template>
+            </el-menu-item>
+            <el-menu-item index="scraper-tasks">
+              <el-icon><List /></el-icon>
+              <template #title>刮削任务</template>
+            </el-menu-item>
+            <el-menu-item index="scraper-settings">
+              <el-icon><Setting /></el-icon>
+              <template #title>刮削设置</template>
+            </el-menu-item>
+          </el-sub-menu>
           <el-menu-item index="logs">
             <el-icon><Document /></el-icon>
             <template #title>日志</template>
