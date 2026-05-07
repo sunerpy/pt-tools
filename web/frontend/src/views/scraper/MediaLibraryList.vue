@@ -42,9 +42,36 @@ function resetForm() {
   form.auto_scrape = false;
 }
 
+function csvToArray(csv: string): string[] {
+  return csv
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function normalizeProviderIds(v: string | string[] | undefined): string {
+  if (Array.isArray(v)) return v.join(",");
+  return v ?? "";
+}
+
+function providerList(v: string | string[] | undefined): string[] {
+  if (Array.isArray(v)) return v.filter(Boolean);
+  return (v ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 async function submitCreate() {
   try {
-    await store.createLibrary({ ...form });
+    await store.createLibrary({
+      name: form.name,
+      type: form.type,
+      path: form.path,
+      provider_ids: csvToArray(form.provider_ids) as unknown as string,
+      nfo_dialect: form.nfo_dialect,
+      auto_scrape: form.auto_scrape,
+    });
     ElMessage.success("媒体库已添加");
     showCreate.value = false;
     resetForm();
@@ -58,7 +85,7 @@ function openEdit(lib: MediaLibraryConfig) {
   form.name = lib.name;
   form.type = lib.type;
   form.path = lib.path;
-  form.provider_ids = lib.provider_ids;
+  form.provider_ids = normalizeProviderIds(lib.provider_ids);
   form.nfo_dialect = lib.nfo_dialect;
   form.auto_scrape = lib.auto_scrape;
   showEdit.value = true;
@@ -67,7 +94,14 @@ function openEdit(lib: MediaLibraryConfig) {
 async function submitEdit() {
   if (!editing.value) return;
   try {
-    await store.updateLibrary(editing.value.id, { ...form });
+    await store.updateLibrary(editing.value.id, {
+      name: form.name,
+      type: form.type,
+      path: form.path,
+      provider_ids: csvToArray(form.provider_ids) as unknown as string,
+      nfo_dialect: form.nfo_dialect,
+      auto_scrape: form.auto_scrape,
+    });
     ElMessage.success("已更新");
     showEdit.value = false;
     editing.value = null;
@@ -138,11 +172,7 @@ const libTypeTag = computed(() => (t: string) => {
         </header>
         <p class="path">{{ lib.path }}</p>
         <div class="meta">
-          <el-tag
-            v-for="p in (lib.provider_ids ?? '').split(',').filter(Boolean)"
-            :key="p"
-            size="small"
-            effect="plain">
+          <el-tag v-for="p in providerList(lib.provider_ids)" :key="p" size="small" effect="plain">
             {{ p }}
           </el-tag>
           <el-tag v-if="lib.auto_scrape" size="small" type="warning" effect="dark">自动</el-tag>

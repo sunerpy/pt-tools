@@ -1109,7 +1109,7 @@ export interface MediaLibraryConfig {
   type: "movie" | "tv" | "mixed";
   path: string;
   enabled: boolean;
-  provider_ids: string;
+  provider_ids: string | string[];
   connector_id?: number;
   scan_cron?: string;
   auto_scrape: boolean;
