@@ -162,6 +162,8 @@ services:
 ```
 
 > 如需通过代理访问站点，可设置环境变量：`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`。
+> 媒体刮削（豆瓣 / IMDb / TMDB）还支持在 Web 界面「刮削设置」里为每个 provider
+> 单独配置代理（支持 `socks5://`），方便云部署用户通过家中 Tailscale 或住宅代理访问。
 > 详细说明见 [docs/configuration.md](docs/configuration.md#代理配置)。
 
 启动后访问 `http://localhost:8080` 进入 Web 管理界面。

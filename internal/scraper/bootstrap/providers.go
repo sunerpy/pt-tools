@@ -109,9 +109,11 @@ func (pm *ProviderManager) Reload() ([]string, error) {
 
 	// 豆瓣：无凭证也注册（pt-tools 内置 Frodo app key + HTML 爬取降级）。
 	// 用户配置的 BaseURL 会覆盖 douban.defaultBaseURL；无则使用默认值。
+	// ProxyURL 让用户在 UI 单独为豆瓣配代理（例如云部署走家中 tailsocks）。
 	doubanCfg := douban.Config{}
 	if cred, ok := credByProvider["douban"]; ok {
 		doubanCfg.BaseURL = cred.BaseURL
+		doubanCfg.ProxyURL = cred.ProxyURL
 	}
 	doubanClient := douban.NewClient(doubanCfg)
 	doubanFactory := func() core.MediaScraper { return douban.NewScraper(doubanClient) }
@@ -126,9 +128,11 @@ func (pm *ProviderManager) Reload() ([]string, error) {
 
 	// IMDb：零配置 HTML 刮削（无 API key，与豆瓣同策略）。
 	// 用户只能覆盖 BaseURL（用于 mirror 或代理），无鉴证字段。
+	// ProxyURL 让 AWS / 数据中心部署的用户走 residential proxy 规避 WAF。
 	imdbCfg := imdb.Config{}
 	if cred, ok := credByProvider["imdb"]; ok {
 		imdbCfg.BaseURL = cred.BaseURL
+		imdbCfg.ProxyURL = cred.ProxyURL
 	}
 	if err := imdb.Register(pm.sourceReg, imdbCfg); err != nil {
 		if pm.logger != nil {
@@ -156,6 +160,7 @@ func resolveTMDBConfig(cred store.ProviderCredential) tmdb.Config {
 		BearerToken: cred.BearerToken,
 		APIKey:      cred.APIKey,
 		BaseURL:     cred.BaseURL,
+		ProxyURL:    cred.ProxyURL,
 	}
 	if cfg.BearerToken == "" {
 		cfg.BearerToken = os.Getenv("PT_SCRAPER_TMDB_BEARER")

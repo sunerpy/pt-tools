@@ -52,8 +52,12 @@ var defaultUserAgents = []string{
 
 // Config 允许调用方注入自定义 HTTP client（例如带代理）和 base URL（mirror）。
 type Config struct {
-	BaseURL    string
+	BaseURL string
+	// HTTPClient 显式注入的 http.Client。非 nil 时直接使用，忽略 ProxyURL。
 	HTTPClient *http.Client
+	// ProxyURL 仅在 HTTPClient 为 nil 时生效，由 core.NewHTTPClient 构造。
+	// 支持 http/https/socks5/socks5h；空串使用 http.ProxyFromEnvironment。
+	ProxyURL string
 }
 
 // Scraper 实现 core.MediaScraper / MovieMetadataScraper / TvShowMetadataScraper。
@@ -66,6 +70,8 @@ type Scraper struct {
 // NewScraper 构造 IMDb HTML 刮削器。BaseURL 优先级：
 //
 //	Config.BaseURL > buildkeys.ImdbBaseURL > defaultBaseURL
+//
+// ProxyURL 非法时 fallback 到默认 http.Client（与 douban.NewClient 行为保持一致）。
 func NewScraper(cfg Config) *Scraper {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base == "" {
@@ -75,6 +81,14 @@ func NewScraper(cfg Config) *Scraper {
 		base = defaultBaseURL
 	}
 	client := cfg.HTTPClient
+	if client == nil && cfg.ProxyURL != "" {
+		if built, err := core.NewHTTPClient(core.HTTPClientConfig{
+			ProxyURL: cfg.ProxyURL,
+			Timeout:  defaultTimeout,
+		}); err == nil {
+			client = built
+		}
+	}
 	if client == nil {
 		client = &http.Client{Timeout: defaultTimeout}
 	}

@@ -82,6 +82,32 @@ func TestHTTPClient_InvalidProxyURL(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid")
 }
 
+// TestHTTPClient_UnsupportedProxyScheme 验证未知 scheme 立即返回明确错误，
+// 避免误以为配置生效（例如用户错拼成 "sock5" 或 "ftp"）。
+func TestHTTPClient_UnsupportedProxyScheme(t *testing.T) {
+	_, err := NewHTTPClient(HTTPClientConfig{ProxyURL: "ftp://proxy.example.com:21"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported proxy scheme")
+}
+
+// TestHTTPClient_Socks5Scheme_Accepted 验证 socks5:// 形式 URL 成功构造 client。
+// 不实际连上 SOCKS5 server —— 只验证 transport 层接受该 scheme 并完成初始化。
+func TestHTTPClient_Socks5Scheme_Accepted(t *testing.T) {
+	cli, err := NewHTTPClient(HTTPClientConfig{ProxyURL: "socks5://127.0.0.1:1080"})
+	require.NoError(t, err)
+	require.NotNil(t, cli)
+
+	cli2, err := NewHTTPClient(HTTPClientConfig{ProxyURL: "socks5h://user:pass@proxy.example.com:1080"})
+	require.NoError(t, err)
+	require.NotNil(t, cli2)
+}
+
+// TestHTTPClient_Socks5InvalidHost 验证 SOCKS5 URL 缺 host 时返回错误。
+func TestHTTPClient_Socks5InvalidHost(t *testing.T) {
+	_, err := NewHTTPClient(HTTPClientConfig{ProxyURL: "socks5://"})
+	require.Error(t, err)
+}
+
 func TestHTTPClient_DefaultsApplied(t *testing.T) {
 	cli, err := NewHTTPClient(HTTPClientConfig{})
 	require.NoError(t, err)

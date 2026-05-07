@@ -85,3 +85,20 @@ func TestResolveTMDBConfig_Precedence(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveTMDBConfig_ProxyURLForwarded 验证 ProviderCredential.ProxyURL
+// 原样透传到 tmdb.Config.ProxyURL —— 没有任何 fallback（env / ldflags 均不介入），
+// 因为代理是部署环境配置，不应跨用户/跨构建环境默认共享。
+func TestResolveTMDBConfig_ProxyURLForwarded(t *testing.T) {
+	t.Setenv("PT_SCRAPER_TMDB_BEARER", "")
+	t.Setenv("PT_SCRAPER_TMDB_APIKEY", "")
+
+	got := resolveTMDBConfig(store.ProviderCredential{
+		ProxyURL: "socks5://127.0.0.1:1080",
+	})
+	assert.Equal(t, "socks5://127.0.0.1:1080", got.ProxyURL)
+
+	// 空 ProxyURL 时不应被任何默认值覆盖。
+	got2 := resolveTMDBConfig(store.ProviderCredential{})
+	assert.Equal(t, "", got2.ProxyURL)
+}

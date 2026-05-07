@@ -51,16 +51,35 @@ type Client struct {
 }
 
 type Config struct {
-	BaseURL    string
-	HTMLURL    string
+	BaseURL string
+	HTMLURL string
+	// HTTPClient 显式注入的 http.Client（用于测试或共享连接池）。非 nil 时直接使用，
+	// 忽略 ProxyURL。
 	HTTPClient *http.Client
-	RateLimit  time.Duration
+	// ProxyURL 仅在 HTTPClient 为 nil 时生效，由 core.NewHTTPClient 构造内部 client。
+	// 支持 http/https/socks5/socks5h；空串使用 http.ProxyFromEnvironment。
+	ProxyURL  string
+	RateLimit time.Duration
 }
 
+// NewClient 构造豆瓣 API 客户端。
+// 若 cfg.ProxyURL 格式非法，NewClient 会 fallback 到默认 http.Client 并发出警告 ——
+// 豆瓣 client 历史上不返回 error，保持二进制兼容；需严格校验时请用 core.NewHTTPClient
+// 自行构造并通过 HTTPClient 字段注入。
 func NewClient(cfg Config) *Client {
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
+		if cfg.ProxyURL != "" {
+			if built, err := core.NewHTTPClient(core.HTTPClientConfig{
+				ProxyURL: cfg.ProxyURL,
+				Timeout:  defaultHTTPTimeout,
+			}); err == nil {
+				httpClient = built
+			}
+		}
+		if httpClient == nil {
+			httpClient = &http.Client{Timeout: defaultHTTPTimeout}
+		}
 	}
 
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")

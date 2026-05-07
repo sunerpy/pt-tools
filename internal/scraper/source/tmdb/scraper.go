@@ -25,9 +25,15 @@ var providerInfo = core.ProviderInfo{
 }
 
 type Config struct {
-	BearerToken         string
-	APIKey              string
-	HTTPClient          *http.Client
+	BearerToken string
+	APIKey      string
+	// HTTPClient 显式注入的 http.Client。非 nil 时直接使用，忽略 ProxyURL。
+	HTTPClient *http.Client
+	// ProxyURL 仅在 HTTPClient 为 nil 时生效，由 core.NewHTTPClient 构造。
+	// 支持 http/https/socks5/socks5h；空串使用 http.ProxyFromEnvironment。
+	// TMDB 与豆瓣不同：ProxyURL 非法时 NewTMDBScraper 会返回 error（严格模式），
+	// 因为 SDK 本身返回 error，保留错误链路完整性比二进制兼容更重要。
+	ProxyURL            string
 	Language            string
 	FallbackLanguage    string
 	BaseURL             string
@@ -99,6 +105,14 @@ func newClient(cfg Config) (*tmdbsdk.Client, error) {
 
 	if cfg.HTTPClient != nil {
 		client.SetClientConfig(*cfg.HTTPClient)
+	} else if cfg.ProxyURL != "" {
+		httpClient, err := core.NewHTTPClient(core.HTTPClientConfig{
+			ProxyURL: cfg.ProxyURL,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("build tmdb http client: %w", err)
+		}
+		client.SetClientConfig(*httpClient)
 	}
 	client.SetClientAutoRetry()
 

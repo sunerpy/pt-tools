@@ -118,10 +118,10 @@ func TestIntegration_Bootstrap_HotReload(t *testing.T) {
 	reg := core.NewRegistry[core.MediaScraper]()
 	pm := NewProviderManager(db, reg, nil)
 
-	// 初次 reload：只有豆瓣（零配置）。
+	// 初次 reload：零配置 provider 自动注册（豆瓣 + IMDb）。
 	active, err := pm.Reload()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"douban"}, active)
+	assert.ElementsMatch(t, []string{"douban", "imdb"}, active)
 
 	// 写入无效的 TMDB 凭证 —— Register 应失败，active 仍只含豆瓣。
 	require.NoError(t, db.Create(&store.ProviderCredential{
@@ -136,4 +136,35 @@ func TestIntegration_Bootstrap_HotReload(t *testing.T) {
 
 	// 禁用豆瓣行不影响零配置默认（只是没 custom BaseURL）。
 	assert.True(t, reg.Has("douban"))
+}
+
+// TestIntegration_Bootstrap_ProxyURLWiring 验证 ProviderCredential.ProxyURL
+// 确实传入到 provider 构造 —— 用一个绝对连不上的代理，豆瓣搜索应失败。
+// 对比：清空 ProxyURL 后直连应立刻成功。这是"布线真的生效"的端到端证明。
+func TestIntegration_Bootstrap_ProxyURLWiring(t *testing.T) {
+	db := newIntegrationDB(t)
+
+	// 步骤 1: 写入一个无法连通的 ProxyURL。
+	require.NoError(t, db.Create(&store.ProviderCredential{
+		Provider: "douban",
+		ProxyURL: "http://127.0.0.1:1", // port 1 没有服务
+		Enabled:  true,
+	}).Error)
+
+	reg := core.NewRegistry[core.MediaScraper]()
+	pm := NewProviderManager(db, reg, nil)
+	_, err := pm.Reload()
+	require.NoError(t, err)
+
+	scraper, err := reg.Get("douban")
+	require.NoError(t, err)
+	movieScraper := scraper.(core.MovieMetadataScraper)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err = movieScraper.SearchMovie(ctx, core.MovieSearchOptions{
+		Query: "让子弹飞",
+		Year:  2010,
+	})
+	require.Error(t, err, "通过无效代理搜索应失败（证明 ProxyURL 确实被应用）")
 }
