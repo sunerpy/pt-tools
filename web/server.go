@@ -138,6 +138,11 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/downloader-torrents/", s.auth(s.apiDownloaderTorrentDetail))
 	// Torrent download proxy API
 	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
+
+	// Scraper 子系统集成：构造 service 并挂载 /api/v2/scraper/* 路由。
+	// 嵌入模式下复用 pt-tools session auth，无需独立 API Key。
+	s.registerScraperRoutes(mux)
+
 	// Static UI - Vue 3 SPA
 	distFS := mustSub(staticFS, "static/dist")
 	assetsServer := http.FileServer(http.FS(distFS))
