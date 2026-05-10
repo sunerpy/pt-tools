@@ -128,11 +128,8 @@ async function removeLib(lib: MediaLibraryConfig) {
 
 async function scan(lib: MediaLibraryConfig) {
   try {
-    await store.triggerScrape({
-      library_id: lib.id,
-      media_path: lib.path,
-      type: lib.type === "tv" ? "tv" : "movie",
-    });
+    await store.scanLibrary(lib.id);
+    ElMessage.success(`已触发《${lib.name}》目录扫描，新文件会自动入队`);
     router.push("/scraper/tasks");
   } catch (e: unknown) {
     ElMessage.error(`触发扫描失败: ${(e as Error).message}`);
@@ -175,7 +172,7 @@ const libTypeTag = computed(() => (t: string) => {
           <el-tag v-for="p in providerList(lib.provider_ids)" :key="p" size="small" effect="plain">
             {{ p }}
           </el-tag>
-          <el-tag v-if="lib.auto_scrape" size="small" type="warning" effect="dark">自动</el-tag>
+          <el-tag v-if="lib.auto_scrape" size="small" type="warning" effect="dark">监控</el-tag>
         </div>
         <footer>
           <el-button size="small" :icon="VideoPlay" @click="scan(lib)">扫描</el-button>
@@ -211,9 +208,11 @@ const libTypeTag = computed(() => (t: string) => {
             <el-option label="Emby" value="emby" />
           </el-select>
         </el-form-item>
-        <el-form-item label="自动刮削">
+        <el-form-item label="目录监控">
           <el-switch v-model="form.auto_scrape" />
-          <span class="hint">订阅 TorrentCompleted 自动触发</span>
+          <span class="hint"
+            >开启后 Scanner 定时（每 6h）+ fsnotify 实时监控目录，新文件自动入队</span
+          >
         </el-form-item>
       </el-form>
       <template #footer>

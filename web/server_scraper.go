@@ -124,6 +124,18 @@ func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 	}
 	scrapeSvc.SetQueue(queue)
 
+	// 启动 ScannerManager：按 DB 里 Enabled=true 的 library 建立 fsnotify 监控 +
+	// 6h 全量扫描。OnFound 回调自动去重 + 按 library.Type 入队 EnqueueMovie/TvShow。
+	// library CRUD 后通过 OnLibrariesChanged 回调 Reload()。
+	// 使用 Background ctx —— pt-tools 主 server 目前无 Shutdown hook
+	// （见 docs/guide/media-scraper.md 已知限制 #8）。
+	scannerMgr := service.NewScannerManager(db.DB, scrapeSvc, log)
+	if err := scannerMgr.Start(context.Background()); err != nil {
+		if log != nil {
+			log.Warnw("scraper: ScannerManager 启动失败（继续，但新文件无法自动刮削）", "err", err)
+		}
+	}
+
 	api, newAPIErr := scraperweb.NewAPI(scraperweb.APIConfig{
 		Scrape:       scrapeSvc,
 		Library:      librarySvc,
@@ -135,6 +147,12 @@ func (s *Server) registerScraperRoutes(mux *http.ServeMux) {
 				log.Warnw("scraper: 热加载 provider 凭证失败", "err", err)
 			}
 		},
+		OnLibrariesChanged: func() {
+			if err := scannerMgr.Reload(); err != nil && log != nil {
+				log.Warnw("scraper: ScannerManager 热加载失败", "err", err)
+			}
+		},
+		ManualScan: scannerMgr.TriggerManualScan,
 	})
 	if newAPIErr != nil {
 		if log != nil {

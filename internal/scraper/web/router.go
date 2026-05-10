@@ -14,6 +14,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux, authMw func(http.HandlerFunc) h
 	mux.HandleFunc("GET /api/v2/scraper/libraries/{id}", authMw(a.HandleGetLibrary))
 	mux.HandleFunc("PUT /api/v2/scraper/libraries/{id}", authMw(a.HandleUpdateLibrary))
 	mux.HandleFunc("DELETE /api/v2/scraper/libraries/{id}", authMw(a.HandleDeleteLibrary))
+	mux.HandleFunc("POST /api/v2/scraper/libraries/{id}/scan", authMw(a.HandleScanLibrary))
 	mux.HandleFunc("POST /api/v2/scraper/scrape", authMw(a.HandleScrape))
 	mux.HandleFunc("GET /api/v2/scraper/tasks", authMw(a.HandleListTasks))
 	mux.HandleFunc("GET /api/v2/scraper/tasks/{id}", authMw(a.HandleGetTask))

@@ -1252,6 +1252,13 @@ export const scraperApi = {
 
   deleteLibrary: (id: number) => api.delete<void>(`/api/v2/scraper/libraries/${id}`),
 
+  // 触发指定 library 的完整目录扫描（递归 walk + 去重入队）。id=0 = 所有启用库。
+  scanLibrary: (id: number) =>
+    api.post<{ scheduled: boolean; library_id: number; message?: string }>(
+      `/api/v2/scraper/libraries/${id}/scan`,
+      {},
+    ),
+
   // Scrape Tasks
   triggerScrape: (req: {
     library_id?: number;

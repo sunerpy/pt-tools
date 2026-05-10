@@ -33,6 +33,8 @@ type API struct {
 	connectorReg       *core.Registry[core.MediaServerConnector]
 	llmProviders       map[string]llm.Provider
 	onProvidersChanged func()
+	onLibrariesChanged func()
+	manualScan         func(libraryID uint) (int, error)
 	logger             Logger
 }
 
@@ -47,7 +49,13 @@ type APIConfig struct {
 	// sourceReg 的重新注册（embedded 模式下由 web/server_scraper.go 注入）。
 	// 为 nil 时不触发热加载；此时用户需要重启进程让新凭证生效。
 	OnProvidersChanged func()
-	Logger             Logger
+	// OnLibrariesChanged 在 library CRUD 后同步调用，用于触发 ScannerManager.Reload()
+	// 重建 fsnotify watcher。为 nil 时 Scanner 不会自动跟随 library 变化。
+	OnLibrariesChanged func()
+	// ManualScan 由 ScannerManager 注入。接 libraryID（0 = 所有），返回扫描到的
+	// 库数量。为 nil 时手动扫描端点返回 503。
+	ManualScan func(libraryID uint) (int, error)
+	Logger     Logger
 }
 
 func NewAPI(cfg APIConfig) (*API, error) {
@@ -79,6 +87,8 @@ func NewAPI(cfg APIConfig) (*API, error) {
 		connectorReg:       cfg.ConnectorReg,
 		llmProviders:       providers,
 		onProvidersChanged: cfg.OnProvidersChanged,
+		onLibrariesChanged: cfg.OnLibrariesChanged,
+		manualScan:         cfg.ManualScan,
 		logger:             logger,
 	}, nil
 }
@@ -111,6 +121,7 @@ func (a *API) HandleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
+	a.notifyLibrariesChanged()
 	writeJSON(w, http.StatusCreated, lib)
 }
 
@@ -151,6 +162,7 @@ func (a *API) HandleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
+	a.notifyLibrariesChanged()
 	writeJSON(w, http.StatusOK, lib)
 }
 
@@ -163,7 +175,42 @@ func (a *API) HandleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
+	a.notifyLibrariesChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+}
+
+// HandleScanLibrary 立即触发指定 library 的全量扫描（绕过 fsnotify ticker）。
+// libraryID 从 URL path 取；{id}=0 扫描所有已启用库。
+// 调用 ScannerManager.TriggerManualScan —— 同步触发 OnFound 回调链。
+// 返回扫描的 library 数量（实际入队的刮削任务数由 OnFound 去重决定）。
+func (a *API) HandleScanLibrary(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUint(w, r, "id")
+	if !ok {
+		return
+	}
+	if a.manualScan == nil {
+		writeError(w, http.StatusServiceUnavailable, "scanner 未启动（无已启用的媒体库或 Scanner 初始化失败）")
+		return
+	}
+	go func() {
+		if _, err := a.manualScan(id); err != nil && a.logger != nil {
+			a.logger.Warnf("manual scan failed id=%d: %v", id, err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"scheduled":  true,
+		"library_id": id,
+		"message":    "扫描已触发，请查看任务列表",
+	})
+}
+
+// notifyLibrariesChanged 同步调用 onLibrariesChanged（如果注入）。
+// 注意：这里必须同步，ScannerManager.Reload 必须在 HTTP 响应返回前完成，
+// 否则客户端立即调 /scan 会命中旧 library 集合。
+func (a *API) notifyLibrariesChanged() {
+	if a.onLibrariesChanged != nil {
+		a.onLibrariesChanged()
+	}
 }
 
 func (a *API) HandleScrape(w http.ResponseWriter, r *http.Request) {

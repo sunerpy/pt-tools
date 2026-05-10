@@ -88,6 +88,12 @@ export const useScraperStore = defineStore("scraper", () => {
     return task;
   }
 
+  async function scanLibrary(id: number) {
+    const resp = await scraperApi.scanLibrary(id);
+    startTaskPolling();
+    return resp;
+  }
+
   async function fetchTasks(filter?: { state?: string; library_id?: number; limit?: number }) {
     try {
       tasksLoading.value = true;
@@ -215,6 +221,7 @@ export const useScraperStore = defineStore("scraper", () => {
     updateLibrary,
     deleteLibrary,
     triggerScrape,
+    scanLibrary,
     fetchTasks,
     cancelTask,
     fetchProviders,
