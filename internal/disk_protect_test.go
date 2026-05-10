@@ -91,7 +91,7 @@ func TestDiskProtect_RejectsWhenSizeExceedsEffectiveFree(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(80*gb), nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(80*gb, nil)
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil)
 	// AddTorrentFileEx 不应被调用 —— 这是关键断言
 
@@ -117,7 +117,7 @@ func TestDiskProtect_AllowsWhenSizeFits(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(80*gb), nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(80*gb, nil)
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil)
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
 		Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
@@ -126,7 +126,7 @@ func TestDiskProtect_AllowsWhenSizeFits(t *testing.T) {
 	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
 		path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
 	require.NoError(t, err)
-	assert.Equal(t, int64(30*gb), GetDiskBudget().Reserved(),
+	assert.Equal(t, 30*gb, GetDiskBudget().Reserved(),
 		"推送成功后应保留预算 30GB（由 cleanup_monitor Reset 或上层回收）")
 }
 
@@ -146,8 +146,8 @@ func TestDiskProtect_PendingDownloadsSubtracted(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(100*gb), nil)
-	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(60*gb), nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(100*gb, nil)
+	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(60*gb, nil)
 	// AddTorrentFileEx 不应被调用
 
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
@@ -170,7 +170,7 @@ func TestDiskProtect_ReleaseOnPushFailure(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(100*gb), nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(100*gb, nil)
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil)
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
 		Return(downloader.AddTorrentResult{Success: false, Message: "boom"}, errors.New("boom"))
@@ -221,7 +221,7 @@ func TestDiskProtect_PendingErrorTreatedAsZero(t *testing.T) {
 	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
 	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
 	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
-	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(100*gb), nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(100*gb, nil)
 	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), errors.New("api fail"))
 	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
 		Return(downloader.AddTorrentResult{Success: true, Hash: hash}, nil)
@@ -262,7 +262,7 @@ func TestDiskProtect_ConcurrentPushesSerializeAndReject(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 
-			effective := int64(free) - int64(pending) - budget.Reserved()
+			effective := free - pending - budget.Reserved()
 			if effective < 0 {
 				effective = 0
 			}

@@ -163,8 +163,10 @@ func TestPushMutex_Singleton(t *testing.T) {
 	m2 := PushMutex()
 	assert.Same(t, m1, m2, "PushMutex 必须是同一全局实例")
 
-	// 能锁并解锁，不死锁
+	// 能锁并解锁，不死锁。Lock + 其它操作 + Unlock 形式让 staticcheck SA2001
+	// 满意（empty critical section 误判）。
 	m1.Lock()
+	_ = m1
 	m1.Unlock()
 }
 
