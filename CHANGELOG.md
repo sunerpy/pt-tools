@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] - 2026-05-10
+
+### Bug Fixes
+
+- **push**: 修复磁盘保护漏洞 - 推送前考虑种子大小、待下载累计与并发预留 (Issue #299) ([#304](https://github.com/sunerpy/pt-tools/issues/304)) ([#304](https://github.com/sunerpy/pt-tools/pull/304))
+
+* fix(push): 修复磁盘保护漏洞 - 推送前考虑种子大小、待下载累计与并发预留 (Issue #299)
+
+      根因诊断 —— 旧实现 freeGB < threshold 存在三个 race：
+      1. 不扣除即将推送种子自身大小（连推 5 个 100GB 种子时各自看到相同 freeGB）
+      2. qBit 默认 preallocate_all=false，新推送种子直到下载完成才反映在
+       free_space_on_disk —— 多 RSS worker 并发推送基于过时数据通过检查
+      3. GetClientFreeSpace 失败时 fail-open（"继续推送"）
+
+      修复策略 = 三层减法 + 全局互斥锁：
+       effective_free = client_free - in_flight_pending - pre_reserved
+       gate = effective_free - thisTorrentSize >= threshold
+
+      代码变更：
+      - internal/disk_budget.go: 修复 Release 的 Add+CAS race（用 CompareAndSwap 循环
+       保证不下溢）；新增 PushMutex() 全局互斥锁；新增 EffectiveFreeBytes 字节版本；
+       Reset 用 GetSloggerSafe 避免单测 panic
+      - internal/common.go: 推送前 PushMutex 上锁 → 查询 free + pending → 减 reserved
+       → 减种子大小 → 比较阈值；通过则 Reserve；失败 Release；fail-closed 行为
+      - internal/push.go: 同上同步策略；从 .torrent 元数据用 ComputeTorrentSize 推算
+       种子内容大小
+      - thirdpart/downloader/interface.go: Downloader 接口新增 GetIncompletePendingBytes；
+       Torrent struct 新增 AmountLeft 字段
+      - thirdpart/downloader/qbit/qbit_impl.go: 实现 GetIncompletePendingBytes 聚合
+       10 种 active 状态的 amount_left；新增 ComputeTorrentSize 解析 .torrent 内容大小
+      - thirdpart/downloader/transmission/transmission_impl.go: 实现同名方法聚合
+       status ∈ {0,1,2,3,4} 的 leftUntilDone；GetAllTorrents 加 leftUntilDone 字段
+      - mocks/downloader_mock.go + manager_test.go: 同步新接口方法
+
+      测试覆盖（全部 race-free 通过）：
+      - internal/disk_budget_test.go: 12 个测试覆盖 Reserve/Release/Reset/EffectiveFree
+       / 全局单例 / PushMutex 串行化 / 高并发计数收敛 / RaceConditionGate 业务剧本
+      - internal/disk_protect_test.go: 7 个测试覆盖
+       RejectsWhenSizeExceedsEffectiveFree / AllowsWhenSizeFits /
+       PendingDownloadsSubtracted / ReleaseOnPushFailure / FailClosedOnFreeSpaceError /
+       PendingErrorTreatedAsZero / ConcurrentPushesSerializeAndReject
+      - thirdpart/downloader/qbit/qbit_disk_protect_test.go: 8 个测试覆盖
+       ComputeTorrentSize 单/多文件/空/非法 + GetIncompletePendingBytes 聚合规则
+
+      * test(disk-protect): 修复 lint 问题（empty critical section + unnecessary conversions）
+
+      - disk_budget_test.go: PushMutex 测试加占位以避免 SA2001 误判
+      - disk_protect_test.go: 移除冗余的 int64() 转换（gb / free / pending 已是 int64）
+
 ## [0.28.0] - 2026-05-10
 
 ### Features
@@ -402,12 +451,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
