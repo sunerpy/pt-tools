@@ -1100,3 +1100,228 @@ export const downloaderTorrentsApi = {
       payload,
     ),
 };
+
+// ===================== Scraper API Types & Methods =====================
+
+export interface MediaLibraryConfig {
+  id: number;
+  name: string;
+  type: "movie" | "tv" | "mixed";
+  path: string;
+  enabled: boolean;
+  provider_ids: string | string[];
+  connector_id?: number;
+  scan_cron?: string;
+  auto_scrape: boolean;
+  nfo_dialect: string;
+  last_scan_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderCredential {
+  id: number;
+  provider: string;
+  display_name?: string;
+  base_url?: string;
+  model_name?: string;
+  proxy_url?: string;
+  priority?: number;
+  enabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ConnectorConfig {
+  id: number;
+  type: "jellyfin" | "emby";
+  name: string;
+  base_url: string;
+  auto_detected?: boolean;
+  enabled?: boolean;
+  last_ping_at?: string;
+  last_ping_ok?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ScrapeTask {
+  id: number;
+  library_id?: number;
+  task_type: string;
+  media_path: string;
+  state: "pending" | "running" | "success" | "failed" | "retrying" | "cancelled";
+  current_stage: string;
+  progress: number;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at?: string;
+  last_error: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface ScrapeResult {
+  id: number;
+  task_id: number;
+  unified_data: string;
+  created_at: string;
+}
+
+export interface UnifiedMediaInfo {
+  title: string;
+  original_title?: string;
+  year?: number;
+  description?: string;
+  genres?: string[];
+  rating?: number;
+  directors?: string[];
+  actors?: string[];
+  tmdb_id?: number;
+  imdb_id?: string;
+  douban_id?: string;
+}
+
+export interface MediaArtwork {
+  type: string;
+  url: string;
+  language?: string;
+  rating?: number;
+}
+
+export interface ScrapeSearchResult {
+  media_key: string;
+  media_type: string;
+  candidates: UnifiedMediaInfo[];
+  selected_candidate?: UnifiedMediaInfo;
+}
+
+export interface LLMProvider {
+  name: string;
+  base_url: string;
+  models: string[];
+  supports_strict_schema?: boolean;
+  notes?: string;
+  configured?: boolean;
+}
+
+export interface LLMGenerateRequest {
+  text: string;
+  provider?: string;
+  type?: "movie" | "tv" | "unknown";
+}
+
+export interface NFOResult {
+  title: string;
+  original_title?: string;
+  year?: number;
+  type?: string;
+  tmdb_id?: number;
+  imdb_id?: string;
+  season?: number;
+  episode?: number;
+  genres?: string[];
+  language?: string;
+  plot?: string;
+  directors?: string[];
+  cast?: string[];
+  runtime?: number;
+}
+
+export interface LLMGenerateResult extends NFOResult {
+  generated_by?: string;
+  generated_at?: string;
+}
+
+export const scraperApi = {
+  // Libraries
+  listLibraries: () => api.get<MediaLibraryConfig[]>("/api/v2/scraper/libraries"),
+
+  createLibrary: (req: Omit<MediaLibraryConfig, "id" | "created_at" | "updated_at">) =>
+    api.post<MediaLibraryConfig>("/api/v2/scraper/libraries", req),
+
+  getLibrary: (id: number) => api.get<MediaLibraryConfig>(`/api/v2/scraper/libraries/${id}`),
+
+  updateLibrary: (id: number, req: Partial<MediaLibraryConfig>) =>
+    request<MediaLibraryConfig>(`/api/v2/scraper/libraries/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    }),
+
+  deleteLibrary: (id: number) => api.delete<void>(`/api/v2/scraper/libraries/${id}`),
+
+  // 触发指定 library 的完整目录扫描（递归 walk + 去重入队）。id=0 = 所有启用库。
+  scanLibrary: (id: number) =>
+    api.post<{ scheduled: boolean; library_id: number; message?: string }>(
+      `/api/v2/scraper/libraries/${id}/scan`,
+      {},
+    ),
+
+  // Scrape Tasks
+  triggerScrape: (req: {
+    library_id?: number;
+    media_path: string;
+    type: "movie" | "tv" | "episode";
+  }) => api.post<ScrapeTask>("/api/v2/scraper/scrape", req),
+
+  listTasks: (filter?: { state?: string; library_id?: number; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (filter?.state) params.set("state", filter.state);
+    if (filter?.library_id != null) params.set("library_id", String(filter.library_id));
+    if (filter?.limit != null) params.set("limit", String(filter.limit));
+    const q = params.toString();
+    return api.get<ScrapeTask[]>(`/api/v2/scraper/tasks${q ? `?${q}` : ""}`);
+  },
+
+  getTask: (id: number) => api.get<ScrapeTask>(`/api/v2/scraper/tasks/${id}`),
+
+  cancelTask: (id: number) => api.delete<void>(`/api/v2/scraper/tasks/${id}`),
+
+  // Providers
+  listProviders: () => api.get<ProviderCredential[]>("/api/v2/scraper/providers"),
+
+  setProviderCredential: (name: string, cred: Record<string, string | number>) =>
+    api.post<ProviderCredential>(
+      `/api/v2/scraper/providers/${encodeURIComponent(name)}/credentials`,
+      cred,
+    ),
+
+  testProviderCredential: (name: string) =>
+    api.post<{ ok: boolean; message?: string; error?: string }>(
+      `/api/v2/scraper/providers/${encodeURIComponent(name)}/test`,
+      {},
+    ),
+
+  // Connectors
+  listConnectors: () => api.get<ConnectorConfig[]>("/api/v2/scraper/connectors"),
+
+  testConnector: (id: number) =>
+    api.post<{ success: boolean; message?: string }>(`/api/v2/scraper/connectors/${id}/test`, {}),
+
+  // Settings
+  getSettings: () => api.get<Record<string, unknown>>("/api/v2/scraper/settings"),
+
+  updateSettings: (req: Record<string, unknown>) =>
+    request<void>("/api/v2/scraper/settings", {
+      method: "PUT",
+      body: JSON.stringify(req),
+    }),
+
+  // Search & Metadata
+  searchMedia: (req: { library_id: number; query: string; media_type?: string }) =>
+    api.post<ScrapeSearchResult[]>("/api/v2/scraper/search", req),
+
+  getArtworks: (params?: URLSearchParams) =>
+    api.get<MediaArtwork[]>(`/api/v2/scraper/artworks${params ? `?${params.toString()}` : ""}`),
+
+  // LLM
+  listLLMProviders: () => api.get<LLMProvider[]>("/api/v2/scraper/llm/providers"),
+
+  llmGenerate: (req: LLMGenerateRequest) =>
+    api.post<NFOResult>("/api/v2/scraper/llm/generate", req),
+
+  llmValidate: (req: { provider_id: number; api_key: string }) =>
+    api.post<{ valid: boolean; message?: string }>("/api/v2/scraper/llm/validate", req),
+};

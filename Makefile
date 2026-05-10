@@ -13,6 +13,21 @@ DOCKER_REPO = sunerpy
 DOCKER_IMAGE_FULL = $(DOCKER_REPO)/$(IMAGE_NAME)
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT_ID := $(shell git rev-parse HEAD)
+
+# BUILDKEYS_LDFLAGS 将 scraper provider 的 API 凭证在构建时通过 -ldflags 注入。
+#
+# ⚠️ 公开发布（GitHub Releases / Docker Hub）必须保持环境变量为空 —— 否则所有
+# 用户共享同一个 key，流量叠加会超限，且 `strings ./pt-tools` 可提取 key。
+# 详见 internal/scraper/bootstrap/buildkeys/buildkeys.go 的安全警告。
+#
+# 合法使用场景：
+#   - 私有/内部部署：CI 注入团队自己的 key，二进制不对外发布
+#   - 本地 / CI 集成测试：export TMDB_BEARER_TOKEN=... && make build-local
+#   - 本项目公开 Release：应全部留空，用户通过 Web UI BYOK（推荐）
+BUILDKEYS_LDFLAGS := \
+	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.TmdbBearerToken=$(TMDB_BEARER_TOKEN) \
+	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.TmdbApiKey=$(TMDB_API_KEY) \
+	-X github.com/sunerpy/pt-tools/internal/scraper/bootstrap/buildkeys.OmdbApiKey=$(OMDB_API_KEY)
 ifeq ($(MAKECMDGOALS), prod-new)
   TAG = $(NEW_TAG)
 else ifeq ($(MAKECMDGOALS), test-new)
@@ -37,7 +52,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites
+.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker build-scraper-docker build-scraper-local push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -49,7 +64,8 @@ build-local: fmt build-frontend
 	-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
 	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
 	-X github.com/sunerpy/pt-tools/version.BuildOS=$(shell go env GOOS) \
-	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH)" \
+	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH) \
+	$(BUILDKEYS_LDFLAGS)" \
 	-o $(DIST_DIR)/$(IMAGE_NAME) .
 
 # 多平台二进制构建
@@ -66,7 +82,8 @@ build-binaries:
 			-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
 			-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
 			-X github.com/sunerpy/pt-tools/version.BuildOS=$$GOOS \
-			-X github.com/sunerpy/pt-tools/version.BuildArch=$$GOARCH" \
+			-X github.com/sunerpy/pt-tools/version.BuildArch=$$GOARCH \
+			$(BUILDKEYS_LDFLAGS)" \
 			-o $$OUTPUT . || exit 1; \
 		done
 
@@ -187,6 +204,18 @@ clean:
 	@echo "Cleaning up"
 	rm -rf $(DIST_DIR) || true
 	rm -rf $(UPX_DIR) || true
+
+# pt-scraper 独立二进制（本地构建）
+build-scraper-local:
+	@mkdir -p $(DIST_DIR)
+	CGO_ENABLED=0 go build -ldflags="-s -w" \
+		-o $(DIST_DIR)/pt-scraper ./cmd/pt-scraper
+
+# pt-scraper Docker 镜像
+build-scraper-docker:
+	docker build -f build/Dockerfile.scraper \
+		--build-arg VERSION=$(shell git describe --tags --always 2>/dev/null || echo dev) \
+		-t sunerpy/pt-scraper:dev .
 
 clean-docker:
 	@echo "Cleaning Docker cache"

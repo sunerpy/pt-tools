@@ -8,6 +8,7 @@
 
 - [环境变量](#环境变量)
 - [代理配置](#代理配置)
+  - [媒体刮削 Provider 独立代理](#媒体刮削-provider-独立代理)
 - [全局设置](#全局设置)
 - [下载器配置](#下载器配置)
   - [基本配置](#基本配置)
@@ -114,6 +115,43 @@ environment:
   ALL_PROXY: "socks5://127.0.0.1:1080"
   NO_PROXY: "localhost,127.0.0.1,.lan"
 ```
+
+### 媒体刮削 Provider 独立代理
+
+媒体刮削（TMDB / 豆瓣 / IMDb）支持在 Web 管理界面的「刮削设置 → 数据源」里**为每个 provider 单独配置代理 URL**，与全局 `HTTP_PROXY` 互补：
+
+- **全局代理**（环境变量）对所有出站生效（RSS、下载器、刮削）。
+- **Per-provider 代理**（`ProviderCredential.ProxyURL` DB 字段）**只作用于该 provider**，优先级高于环境变量。
+
+支持的 scheme：
+
+| scheme    | 说明                         | 示例                                         |
+| --------- | ---------------------------- | -------------------------------------------- |
+| `http`    | 普通 HTTP 代理               | `http://user:pass@proxy.example.com:3128`    |
+| `https`   | HTTPS 代理                   | `https://proxy.example.com:3128`             |
+| `socks5`  | SOCKS5（DNS 本地解析）       | `socks5://127.0.0.1:1080`                    |
+| `socks5h` | SOCKS5（DNS 远端解析，隐私） | `socks5h://user:pass@proxy.example.com:1080` |
+
+#### 典型场景
+
+**1. 家庭 NAS / 国内 VPS 部署** —— 豆瓣直连即可，通常无需配置代理。
+
+**2. AWS / DigitalOcean / 海外云部署**：
+
+- 豆瓣 / IMDb 对主流数据中心 IP 有反爬限制（302 redirect、WAF challenge）
+- 推荐在家中运行一个 [tailsocks](https://github.com/ItalyPaleAle/tailsocks) 导出 Tailscale exit node，在 pt-tools 刮削设置里：
+  - 豆瓣 ProxyURL：`socks5://127.0.0.1:5040`
+  - IMDb ProxyURL：`socks5://127.0.0.1:5040`
+
+**3. 使用商业住宅代理**（比如 [Webshare](https://www.webshare.io/) 免费 1 GB/月）：
+
+- 豆瓣 ProxyURL：`http://<user>:<pass>@p.webshare.io:80`
+
+**4. TMDB 需要网络代理访问**（国内直连 TMDB 偶尔不稳定）：
+
+- TMDB ProxyURL：留空走 `HTTPS_PROXY` 环境变量；或单独填 `http://127.0.0.1:7890`
+
+> 设计原则：ProxyURL 不会跨实例/跨构建默认共享。每个部署必须显式配置，避免误用他人代理。
 
 ## 全局设置
 

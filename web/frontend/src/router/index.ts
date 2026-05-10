@@ -94,6 +94,36 @@ const router = createRouter({
       component: () => import("@/views/DownloaderHub.vue"),
       meta: { title: "下载器Web UI" },
     },
+    {
+      path: "/scraper",
+      name: "scraper",
+      component: () => import("@/views/scraper/ScraperDashboard.vue"),
+      meta: { title: "媒体刮削" },
+    },
+    {
+      path: "/scraper/libraries",
+      name: "scraper-libraries",
+      component: () => import("@/views/scraper/MediaLibraryList.vue"),
+      meta: { title: "媒体库" },
+    },
+    {
+      path: "/scraper/libraries/:id",
+      name: "scraper-library-detail",
+      component: () => import("@/views/scraper/MediaLibraryDetail.vue"),
+      meta: { title: "媒体库详情" },
+    },
+    {
+      path: "/scraper/tasks",
+      name: "scraper-tasks",
+      component: () => import("@/views/scraper/ScrapeTaskPage.vue"),
+      meta: { title: "刮削任务" },
+    },
+    {
+      path: "/scraper/settings",
+      name: "scraper-settings",
+      component: () => import("@/views/scraper/ScraperSettings.vue"),
+      meta: { title: "刮削设置" },
+    },
   ],
 });
 

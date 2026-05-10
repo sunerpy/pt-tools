@@ -70,6 +70,21 @@ func (fs *FaviconService) refreshExpiredFavicons() {
 	db := global.GlobalDB.DB
 	expiredTime := time.Now().Add(-fs.refreshInterval)
 
+	// 仅处理用户实际添加的站点（SiteSetting 表），避免对 31 个预置但用户未配置
+	// 的站点发起探测请求（导致 "下载图标失败: HTTP 404" 等无用噪声日志）。
+	var userSites []models.SiteSetting
+	if err := db.Select("name").Find(&userSites).Error; err != nil {
+		global.GetSlogger().Warnf("[Favicon] 查询用户站点失败: %v", err)
+		return
+	}
+	if len(userSites) == 0 {
+		return
+	}
+	userSiteIDs := make(map[string]struct{}, len(userSites))
+	for _, s := range userSites {
+		userSiteIDs[strings.ToLower(s.Name)] = struct{}{}
+	}
+
 	// 查找所有过期的缓存
 	var expiredCaches []models.FaviconCache
 	if err := db.Where("last_fetched < ? OR last_fetched IS NULL", expiredTime).Find(&expiredCaches).Error; err != nil {
@@ -77,16 +92,18 @@ func (fs *FaviconService) refreshExpiredFavicons() {
 		return
 	}
 
-	// 获取所有注册的站点定义
 	definitions := v2.GetDefinitionRegistry().GetAll()
 	defMap := make(map[string]*v2.SiteDefinition)
 	for _, def := range definitions {
 		defMap[strings.ToLower(def.ID)] = def
 	}
 
-	// 刷新过期的缓存
 	for _, cache := range expiredCaches {
-		def, ok := defMap[strings.ToLower(cache.SiteID)]
+		key := strings.ToLower(cache.SiteID)
+		if _, ok := userSiteIDs[key]; !ok {
+			continue
+		}
+		def, ok := defMap[key]
 		if !ok {
 			continue
 		}
@@ -105,12 +122,13 @@ func (fs *FaviconService) refreshExpiredFavicons() {
 			global.GetSlogger().Infof("[Favicon] 刷新图标成功: site=%s", cache.SiteID)
 		}
 
-		// 避免请求过于频繁
 		time.Sleep(2 * time.Second)
 	}
 
-	// 检查是否有新站点需要添加缓存
 	for _, def := range definitions {
+		if _, ok := userSiteIDs[strings.ToLower(def.ID)]; !ok {
+			continue
+		}
 		var count int64
 		db.Model(&models.FaviconCache{}).Where("site_id = ?", def.ID).Count(&count)
 		if count == 0 {
