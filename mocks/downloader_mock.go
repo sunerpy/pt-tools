@@ -106,6 +106,21 @@ func (mr *MockDownloaderMockRecorder) GetClientFreeSpace(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetClientFreeSpace", reflect.TypeOf((*MockDownloader)(nil).GetClientFreeSpace), ctx)
 }
 
+// GetIncompletePendingBytes mocks base method
+func (m *MockDownloader) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetIncompletePendingBytes", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetIncompletePendingBytes indicates an expected call of GetIncompletePendingBytes
+func (mr *MockDownloaderMockRecorder) GetIncompletePendingBytes(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIncompletePendingBytes", reflect.TypeOf((*MockDownloader)(nil).GetIncompletePendingBytes), ctx)
+}
+
 // GetAllTorrents mocks base method
 func (m *MockDownloader) GetAllTorrents() ([]downloader.Torrent, error) {
 	m.ctrl.T.Helper()

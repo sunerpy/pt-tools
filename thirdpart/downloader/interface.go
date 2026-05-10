@@ -73,6 +73,7 @@ type Torrent struct {
 	ContentPath     string       // 内容路径 (文件/文件夹的完整路径)
 	TotalUploaded   int64        // 总上传量 (bytes)
 	TotalDownloaded int64        // 总下载量 (bytes)
+	AmountLeft      int64        // 剩余下载字节数 (qBit:amount_left, TR:left_until_done)；用于"待下载累计"磁盘预算
 	Raw             any          // 原始数据
 	ClientID        string       // 客户端ID
 }
@@ -233,6 +234,16 @@ type Downloader interface {
 	// GetClientFreeSpace 获取下载器所在磁盘的可用空间
 	// 返回可用空间（字节）
 	GetClientFreeSpace(ctx context.Context) (int64, error)
+
+	// GetIncompletePendingBytes 聚合所有"未下载完成的活跃种子"还需要下载的字节数。
+	// 用于计算 effective_free_space = client_free - pending - reserved，
+	// 修复 Issue #299：qBit 默认 preallocate_all=false，新推送的种子直到下载
+	// 完成才反映在 OS 空闲空间，多个 worker 并发推送会基于过时数据通过检查。
+	//
+	// 计入聚合的状态（qBit）：downloading / stalledDL / queuedDL / forcedDL /
+	// metaDL / allocating / pausedDL / checkingDL。Transmission：status==3,4。
+	// 实现层应跳过 nil/error 单条种子，错误不应中断聚合。
+	GetIncompletePendingBytes(ctx context.Context) (int64, error)
 
 	// GetAllTorrents 获取所有种子列表
 	GetAllTorrents() ([]Torrent, error)

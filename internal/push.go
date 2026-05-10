@@ -123,30 +123,66 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	applySiteSpeedLimits(&opts, req.SiteID)
 
 	glOnly, glErr := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+	// 磁盘保护预检（修复 Issue #299，与 internal/common.go 同步）：
+	// effective_free = client_free - in_flight_pending - pre_reserved
+	// gate           = effective_free - thisTorrentSize >= threshold
+	// 用全局互斥锁串行化整个 check + Reserve + push 临界区。
+	var pushTorrentSize int64
 	if glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
+		mu := PushMutex()
+		mu.Lock()
+		defer mu.Unlock()
+
 		freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
 		if spaceErr != nil {
-			sLogger().Warnf("[磁盘保护] 获取磁盘空间失败，继续推送: %v", spaceErr)
-		} else {
-			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
-			if freeGB < glOnly.CleanupMinDiskSpaceGB {
-				sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，跳过推送: site=%s, id=%s",
-					dlSetting.Name, freeGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
-				if glOnly.CleanupEnabled {
-					events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "push", At: time.Now()})
-				}
-				return &PushTorrentResult{
-					Success:     false,
-					TorrentHash: torrentHash,
-					Message:     fmt.Sprintf("磁盘空间不足 (%.1f GB < %.1f GB)", freeGB, glOnly.CleanupMinDiskSpaceGB),
-				}, nil
+			sLogger().Warnf("[磁盘保护] %s: 获取磁盘空间失败，磁盘保护启用故拒绝推送: %v", dlSetting.Name, spaceErr)
+			return &PushTorrentResult{
+				Success:     false,
+				TorrentHash: torrentHash,
+				Message:     fmt.Sprintf("无法读取磁盘空间，已拒绝推送: %v", spaceErr),
+			}, nil
+		}
+
+		pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
+		if pendingErr != nil {
+			sLogger().Warnf("[磁盘保护] %s: 查询 in-flight pending 失败，仅以 reserved 推算: %v", dlSetting.Name, pendingErr)
+			pendingBytes = 0
+		}
+		budget := GetDiskBudget()
+		effectiveFreeBytes := freeSpace - pendingBytes - budget.Reserved()
+		if effectiveFreeBytes < 0 {
+			effectiveFreeBytes = 0
+		}
+		if size, sizeErr := qbit.ComputeTorrentSize(req.TorrentData); sizeErr == nil {
+			pushTorrentSize = size
+		}
+		minBytes := int64(glOnly.CleanupMinDiskSpaceGB * 1024 * 1024 * 1024)
+		if effectiveFreeBytes-pushTorrentSize < minBytes {
+			effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
+			tGB := float64(pushTorrentSize) / (1024 * 1024 * 1024)
+			sLogger().Warnf("[磁盘保护] %s: 空间不足 (有效 %.1f GB - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: site=%s, id=%s",
+				dlSetting.Name, effGB, tGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
+			if glOnly.CleanupEnabled {
+				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "push", At: time.Now()})
 			}
+			return &PushTorrentResult{
+				Success:     false,
+				TorrentHash: torrentHash,
+				Message:     fmt.Sprintf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB),
+			}, nil
+		}
+		if pushTorrentSize > 0 {
+			budget.Reserve(pushTorrentSize)
 		}
 	}
 
 	// 推送种子到下载器
 	result, err := dl.AddTorrentFileEx(req.TorrentData, opts)
 	if err != nil {
+		// 推送失败：归还预留配额，避免 budget 永久占用。
+		if pushTorrentSize > 0 {
+			GetDiskBudget().Release(pushTorrentSize)
+		}
 		// 更新推送失败状态
 		_ = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 			Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
@@ -158,6 +194,10 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	}
 
 	if !result.Success {
+		// 业务层失败也需要归还预留。
+		if pushTorrentSize > 0 {
+			GetDiskBudget().Release(pushTorrentSize)
+		}
 		errMsg := fmt.Sprintf("%v", result.Message)
 		_ = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 			Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).

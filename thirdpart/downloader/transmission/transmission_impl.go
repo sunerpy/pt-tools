@@ -619,6 +619,51 @@ func (t *TransmissionClient) GetClientFreeSpace(ctx context.Context) (int64, err
 	return t.GetDiskSpace(ctx)
 }
 
+// trActiveDLStatus 计入"待下载累计"的 Transmission 原始 status 整数（rpc-spec.md）：
+// 3 = TR_STATUS_DOWNLOAD_WAIT (queued for download)
+// 4 = TR_STATUS_DOWNLOAD       (actively downloading)
+// 1 = TR_STATUS_CHECK_WAIT、2 = TR_STATUS_CHECK 也可能含未完成数据 (left_until_done > 0)；
+// 0 = stopped/paused —— 用户可恢复，文件仍占地，与 qBit pausedDL 同样保守计入。
+var trActiveDLStatus = map[int]struct{}{
+	0: {},
+	1: {},
+	2: {},
+	3: {},
+	4: {},
+}
+
+// GetIncompletePendingBytes 调用 transmission torrent-get RPC 拉取所有种子的
+// status + leftUntilDone 字段，聚合处于活跃下载/暂停状态的 leftUntilDone。
+//
+// 与 qBit 实现保持一致的状态约定：暂停种子也计入（用户可恢复）；checking
+// 状态 leftUntilDone 通常为 0 但保留以防边界场景。
+func (t *TransmissionClient) GetIncompletePendingBytes(_ context.Context) (int64, error) {
+	args := torrentGetArgs{Fields: []string{"id", "status", "leftUntilDone"}}
+	resp, err := t.doRequest("torrent-get", args)
+	if err != nil {
+		return 0, fmt.Errorf("torrent-get 失败: %w", err)
+	}
+	var getResp struct {
+		Torrents []struct {
+			Status        int   `json:"status"`
+			LeftUntilDone int64 `json:"leftUntilDone"`
+		} `json:"torrents"`
+	}
+	if err := json.Unmarshal(resp.Arguments, &getResp); err != nil {
+		return 0, fmt.Errorf("解析 torrent-get 失败: %w", err)
+	}
+	var total int64
+	for _, tt := range getResp.Torrents {
+		if _, active := trActiveDLStatus[tt.Status]; !active {
+			continue
+		}
+		if tt.LeftUntilDone > 0 {
+			total += tt.LeftUntilDone
+		}
+	}
+	return total, nil
+}
+
 // torrentFullInfo 完整的种子信息结构
 type torrentFullInfo struct {
 	ID                 int      `json:"id"`
@@ -629,6 +674,7 @@ type torrentFullInfo struct {
 	RateDownload       int64    `json:"rateDownload"`
 	RateUpload         int64    `json:"rateUpload"`
 	TotalSize          int64    `json:"totalSize"`
+	LeftUntilDone      int64    `json:"leftUntilDone"`
 	UploadedEver       int64    `json:"uploadedEver"`
 	DownloadedEver     int64    `json:"downloadedEver"`
 	UploadRatio        float64  `json:"uploadRatio"`
@@ -674,7 +720,7 @@ func (t *TransmissionClient) GetAllTorrents() ([]downloader.Torrent, error) {
 	args := torrentGetArgs{
 		Fields: []string{
 			"id", "name", "hashString", "status", "percentDone",
-			"rateDownload", "rateUpload", "totalSize", "uploadedEver",
+			"rateDownload", "rateUpload", "totalSize", "leftUntilDone", "uploadedEver",
 			"downloadedEver", "uploadRatio", "addedDate", "downloadDir", "labels",
 			"eta", "secondsSeeding", "trackers", "doneDate", "peersSendingToUs",
 			"peersGettingFromUs", "peersConnected", "desiredAvailable",
@@ -714,6 +760,7 @@ func (t *TransmissionClient) mapTransmissionTorrent(tt torrentFullInfo) download
 		SavePath:        tt.DownloadDir,
 		State:           t.mapTransmissionState(tt.Status),
 		TotalSize:       tt.TotalSize,
+		AmountLeft:      tt.LeftUntilDone,
 		UploadSpeed:     tt.RateUpload,
 		DownloadSpeed:   tt.RateDownload,
 		ETA:             tt.ETA,

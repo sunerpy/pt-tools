@@ -24,6 +24,10 @@ func (m *MockDownloader) GetClientStatus() (ClientStatus, error) { return Client
 func (m *MockDownloader) GetClientFreeSpace(ctx context.Context) (int64, error) {
 	return 1024 * 1024 * 1024, nil
 }
+
+func (m *MockDownloader) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	return 0, nil
+}
 func (m *MockDownloader) GetAllTorrents() ([]Torrent, error)                    { return nil, nil }
 func (m *MockDownloader) GetTorrentsBy(filter TorrentFilter) ([]Torrent, error) { return nil, nil }
 func (m *MockDownloader) GetTorrent(id string) (Torrent, error)                 { return Torrent{}, nil }
@@ -378,6 +382,10 @@ func (m *StatefulMockDownloader) GetClientStatus() (ClientStatus, error) { retur
 
 func (m *StatefulMockDownloader) GetClientFreeSpace(ctx context.Context) (int64, error) {
 	return 1024 * 1024 * 1024, nil
+}
+
+func (m *StatefulMockDownloader) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 func (m *StatefulMockDownloader) GetAllTorrents() ([]Torrent, error) { return nil, nil }
 func (m *StatefulMockDownloader) GetTorrentsBy(filter TorrentFilter) ([]Torrent, error) {

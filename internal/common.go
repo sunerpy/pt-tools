@@ -327,21 +327,57 @@ func processSingleTorrentWithDownloader(
 		return nil
 	}
 
-	// 磁盘空间预检查：空间低于保底阈值时拒绝推送
+	// 磁盘空间预检查（修复 Issue #299）
+	//
+	// 旧实现仅比较 freeGB < threshold，存在两个 race：
+	//  1. 没扣除即将推送种子自身大小 —— 一次性多种子推送各自看到相同 free。
+	//  2. qBit 默认 preallocate_all=false，新推送种子直到下载完成才反映在
+	//     free_space_on_disk —— 多 RSS worker 并发推送基于过时数据通过检查。
+	// 修复策略 = 三层减法 + 全局互斥锁串行化：
+	//   effective_free = client_free - in_flight_pending - pre_reserved
+	//   gate           = effective_free - thisTorrentSize >= threshold
 	if glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
+		mu := PushMutex()
+		mu.Lock()
+		defer mu.Unlock()
+
 		freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
 		if spaceErr != nil {
-			sLogger().Warnf("[磁盘保护] 获取磁盘空间失败，继续推送: %v", spaceErr)
-		} else {
-			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
-			if freeGB < glOnly.CleanupMinDiskSpaceGB {
-				sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，跳过推送: %s",
-					dl.GetName(), freeGB, glOnly.CleanupMinDiskSpaceGB, filePath)
-				if glOnly.CleanupEnabled {
-					events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "rss", At: time.Now()})
-				}
-				return downloader.ErrInsufficientSpace
+			// fail-closed：磁盘保护启用时若无法读取空间，拒绝推送而非放行。
+			// 旧实现 fail-open ("继续推送")是 Issue #299 的次因之一。
+			sLogger().Warnf("[磁盘保护] %s: 获取磁盘空间失败，磁盘保护启用故拒绝推送: %v", dl.GetName(), spaceErr)
+			return downloader.ErrInsufficientSpace
+		}
+
+		pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
+		if pendingErr != nil {
+			sLogger().Warnf("[磁盘保护] %s: 查询 in-flight pending 失败，仅以 reserved 推算: %v", dl.GetName(), pendingErr)
+			pendingBytes = 0
+		}
+		budget := GetDiskBudget()
+		effectiveFreeBytes := freeSpace - pendingBytes - budget.Reserved()
+		if effectiveFreeBytes < 0 {
+			effectiveFreeBytes = 0
+		}
+		var torrentSize int64
+		if torrent != nil {
+			torrentSize = torrent.TorrentSize
+		}
+		minBytes := int64(glOnly.CleanupMinDiskSpaceGB * 1024 * 1024 * 1024)
+		if effectiveFreeBytes-torrentSize < minBytes {
+			effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
+			tGB := float64(torrentSize) / (1024 * 1024 * 1024)
+			sLogger().Warnf("[磁盘保护] %s: 空间不足 (有效 %.1f GB - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: %s",
+				dl.GetName(), effGB, tGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+			if glOnly.CleanupEnabled {
+				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "rss", At: time.Now()})
 			}
+			return downloader.ErrInsufficientSpace
+		}
+		// 通过检查后立刻预留，确保后续 worker 能看到本次扣减。
+		// 推送失败会在下方失败分支 Release 归还。
+		if torrentSize > 0 {
+			budget.Reserve(torrentSize)
 		}
 	}
 
@@ -361,6 +397,12 @@ func processSingleTorrentWithDownloader(
 	}
 	result, pushErr := dl.AddTorrentFileEx(torrentData, opt)
 	if pushErr != nil || !result.Success {
+		// 推送失败：归还预留配额，避免 budget 被永久占用。
+		// 注：torrent 可能为 nil（极少数情况下 GetTorrentBySiteAndHash 失败但仍走到这）；
+		// 由 Reserve 的零值守卫保证 Release(0) no-op。
+		if torrent != nil && glOnly.CleanupDiskProtect && torrent.TorrentSize > 0 {
+			GetDiskBudget().Release(torrent.TorrentSize)
+		}
 		errMsg := ""
 		if pushErr != nil {
 			errMsg = pushErr.Error()

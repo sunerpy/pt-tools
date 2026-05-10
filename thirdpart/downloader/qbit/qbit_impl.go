@@ -570,6 +570,35 @@ func ComputeTorrentHash(data []byte) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
+// ComputeTorrentSize 解析 .torrent 元数据，返回种子内容字节数（单文件 length 或多文件
+// files[].length 之和）。失败返回 (0, err)。供磁盘保护预检 size-aware 比较使用。
+//
+// 注意：这是种子内容大小，与 len(torrentData)（.torrent 文件元数据本身大小）完全不同。
+// 旧 CanAddTorrent 误用 len(torrentData) 作为内容大小是 Issue #299 的次要 bug。
+func ComputeTorrentSize(data []byte) (int64, error) {
+	var meta struct {
+		Info struct {
+			Length int64 `bencode:"length"`
+			Files  []struct {
+				Length int64 `bencode:"length"`
+			} `bencode:"files"`
+		} `bencode:"info"`
+	}
+	if err := bencode.DecodeBytes(data, &meta); err != nil {
+		return 0, fmt.Errorf("failed to decode torrent metadata: %w", err)
+	}
+	if meta.Info.Length > 0 {
+		return meta.Info.Length, nil
+	}
+	var total int64
+	for _, f := range meta.Info.Files {
+		if f.Length > 0 {
+			total += f.Length
+		}
+	}
+	return total, nil
+}
+
 // ComputeTorrentHashWithPath 从文件路径计算种子哈希
 func ComputeTorrentHashWithPath(filePath string) (string, error) {
 	data, err := os.ReadFile(filePath)
@@ -830,6 +859,62 @@ func (q *QbitClient) GetClientFreeSpace(ctx context.Context) (int64, error) {
 	return q.GetDiskSpace(ctx)
 }
 
+// qbitActiveDLStates 计入"待下载累计"的 qBit 原始 state 字符串。
+// 不能依赖 mapQbitState 的归一化，因为它把 forcedDL/stalledDL/metaDL/checkingDL
+// 都折叠到 TorrentDownloading/TorrentChecking 等粗粒度类别，破坏了准确性。
+// 见 internal/disk_budget.go 与 Issue #299。
+var qbitActiveDLStates = map[string]struct{}{
+	"downloading":        {},
+	"stalledDL":          {},
+	"queuedDL":           {},
+	"forcedDL":           {},
+	"metaDL":             {},
+	"allocating":         {},
+	"pausedDL":           {},
+	"stoppedDL":          {},
+	"checkingDL":         {},
+	"checkingResumeData": {},
+}
+
+// GetIncompletePendingBytes 调用 qBit /api/v2/torrents/info 拉取所有种子，
+// 聚合 active 下载状态种子的 amount_left 字段（剩余字节数）。
+//
+// 故意保留种子级容错：单个种子的 amount_left 解析失败仅跳过该条；
+// 整体只在 HTTP/auth 层失败时返回错误。
+func (q *QbitClient) GetIncompletePendingBytes(ctx context.Context) (int64, error) {
+	url := fmt.Sprintf("%s/api/v2/torrents/info", q.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("构建请求失败: %w", err)
+	}
+
+	resp, err := q.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("请求 torrents/info 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if !q.isSuccessStatus(resp.StatusCode) {
+		return 0, fmt.Errorf("torrents/info 返回 %d", resp.StatusCode)
+	}
+	var torrents []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&torrents); err != nil {
+		return 0, fmt.Errorf("解析 torrents/info 失败: %w", err)
+	}
+
+	var total int64
+	for _, t := range torrents {
+		state, _ := t["state"].(string)
+		if _, active := qbitActiveDLStates[state]; !active {
+			continue
+		}
+		amountLeft, _ := t["amount_left"].(float64)
+		if amountLeft > 0 {
+			total += int64(amountLeft)
+		}
+	}
+	return total, nil
+}
+
 // GetAllTorrents 获取所有种子列表
 func (q *QbitClient) GetAllTorrents() ([]downloader.Torrent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -902,6 +987,9 @@ func (q *QbitClient) mapQbitTorrent(qt map[string]any) downloader.Torrent {
 	}
 	if size, ok := qt["size"].(float64); ok {
 		t.TotalSize = int64(size)
+	}
+	if amountLeft, ok := qt["amount_left"].(float64); ok {
+		t.AmountLeft = int64(amountLeft)
 	}
 	if upSpeed, ok := qt["upspeed"].(float64); ok {
 		t.UploadSpeed = int64(upSpeed)
