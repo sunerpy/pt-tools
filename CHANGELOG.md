@@ -5,6 +5,237 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-05-10
+
+### Features
+
+- **sites**: 新增 5 个 NexusPHP 站点适配 ([#303](https://github.com/sunerpy/pt-tools/issues/303)) ([#303](https://github.com/sunerpy/pt-tools/pull/303))
+
+* feat(sites): 新增 5 个 NexusPHP 站点适配
+
+      新增站点（均为 NexusPHP + Cookie 鉴权）：
+
+      - CrabPT (蟹黄堡, crabpt.vip) — Issue #302
+      - GameGamePT (GGPT, gamegamept.com) — Issue #301
+      - Dubhe (天枢, dubhe.site) — Issue #300
+      - PTCafe (咖啡, ptcafe.club) — Issue #296
+      - CyanBug (大青虫, cyanbug.net) — Issue #295
+
+      每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验），
+      浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 域名已提前存在）。
+
+      docs/sites.md 已适配站点数从 31 → 36，NexusPHP 系列从 27 → 32。
+
+      * chore(deps): 升级 Go 1.26.2 → 1.26.3 修复 stdlib 漏洞
+
+      govulncheck 报告 Go 1.26.2 stdlib 4 个漏洞，1.26.3 已修复。
+
+      - go.mod: go 1.26.2 → 1.26.3
+      - Makefile: BUILD_IMAGE golang:1.26.2 → 1.26.3
+      - Dockerfile: ARG BUILD_IMAGE 默认值同步
+
+      CI go-security 在 1.26.2 下 fail（此为 v0.28.0-beta.1 之外的新发现），
+      CHANGELOG 历史记录 (1.26.1→1.26.2 的迁移说明) 不动。
+
+## [0.28.0-beta.1] - 2026-05-06
+
+### Bug Fixes
+
+- **qbit**: 兼容 qBittorrent v5.2.0+ 接口变更
+  解决用户升级 qBit 到 5.2.0 后看到「下载器状态 204」的问题。qBit v5.2.0 的
+  PR #21349 (https://github.com/qbittorrent/qBittorrent/pull/21349) 将大量
+  无响应体的 endpoint 从 200 改为 204，且 /api/v2/torrents/add 改用新的
+  JSON 响应格式（含 202 pending/409 duplicate 等新状态码），pt-tools 原有
+  ~18 处 resp.StatusCode != http.StatusOK 严格检查会把 204 误判为失败。
+
+        实现方案：版本探测 + 分支处理，完全兼容旧版 qBit (4.x/5.0/5.1)
+
+        1) QbitClient 新增 appVersion/isV520Plus/versionMu 字段，登录成功后调
+         /api/v2/app/version 探测版本，semver 比较 >=5.2.0 设置 isV520Plus。
+         探测失败（网络错误/500/非法版本串）静默回退 legacy 模式，WARN 日志提示。
+
+        2) AuthenticateWithContext 破解循环依赖：登录阶段版本未知，同时接受
+         200 和 204。200 仅将 body == Fails. 视为凭证错误（容忍新版可能的空 body
+         或非 Ok. 响应），204 直接当成功；认证成功后再做版本探测。401/403
+         继续走 wrapStatusCodeError 原有映射。
+
+        3) 新增 isSuccessStatus(code) helper：5.2.0+ 接受 2xx，旧版仅 200。
+         替换所有非 Authenticate 路径的严格检查（20+ 处），保留 404 回退
+         (pause/resume legacy 端点) 与 403 重新认证重试。
+
+        4) AddTorrentEx / AddTorrentFileEx 新增 5.2.0+ 分支：
+         - 200/202/204: 尝试解析新 JSON {success_count, pending_count,
+         failure_count, added_torrent_ids}，解析失败回退 Ok./Fails. 字符串
+         - 409 Conflict: 返回 Success=false，消息「种子已存在或添加失败」
+         legacy 分支保持原有 200 + Ok. 字符串解析逻辑。
+
+        5) parseQBitVersion(raw) 辅助函数，正则容错解析 v5.2.0/5.2.0/v5.2.0-rc1/
+         qBittorrent v5.2.0 等格式。
+
+        测试覆盖（新增 11 test + 11 sub-test，全部 PASS）：
+        - TestAuthenticate_200LegacyOkBody/200FailsBody/204LoginSuccess/401InvalidCreds
+        - TestDetectVersion_520Plus/Legacy/Fallback
+        - TestParseQBitVersion (9 sub-cases)
+        - TestIsSuccessStatus (2 sub-cases)
+        - TestAddTorrentFileEx_202PendingJSON/409Duplicate
+
+        验证：
+        - go test ./... 21 个包全通过，qbit 包覆盖率 33.6%
+        - make fmt + make lint-go 0 issues
+        - 不变动：interface.go、transmission、http_doer.go、manager.go
+
+        对旧版 qBit (4.x/5.0/5.1) 完全无副作用：版本探测识别为 legacy 时，
+        isSuccessStatus 只接受 200，行为与修改前一致。对 qBit 5.2.0+ 用户，
+        登录、pause/resume、add 等操作不再被 204 误判为失败。
+
+### CI/CD
+
+- 新增预发版发布工作流 (beta/rc/alpha)
+  新增独立的预发版发布通道，支持在正式版之前发布 beta/rc/alpha 进行
+  真实环境测试，测试通过后再合入正式版。
+
+        变更内容：
+
+        1. 新增 .github/workflows/release-prerelease.yml
+         - 触发条件：push tag 匹配 v*-beta.N / v*-rc.N / v*-alpha.N
+         - 触发时自动从 tag 中解析 channel（beta/rc/alpha）
+         - 构建跨平台二进制 (linux/windows × amd64/arm64)
+         - 构建 Docker 镜像并推送 :<version> + :<channel>（不动 :latest）
+         - 发布 GitHub Release 带 prerelease=true 标志
+         - 打包浏览器扩展 zip 一并发布
+         - Release notes 头部警示「不建议生产环境使用」
+
+        2. 修改 .github/workflows/release-assets.yml
+         - tag 过滤器从 v* 收窄为 v[0-9]+.[0-9]+.[0-9]+
+         - 防止预发版误触发两个 workflow 重复发布
+         - 与 release-prerelease.yml 正则完全互斥
+
+        3. 新增 make build-prerelease-docker TAG=... CHANNEL=... target
+         - 与 build-remote-docker 的区别：不打 :latest，改打 :<channel>
+         - 参数校验：TAG/CHANNEL 缺失时给出用法提示并 exit 1
+
+        4. 修复 web/server.go 函数间缺失空行（gofumpt 历史遗留格式问题）
+
+        使用方法：
+         git tag v0.28.0-beta.1 <commit>
+         git push origin v0.28.0-beta.1
+         # 自动触发 release-prerelease.yml，发布预发版
+         # 用户可通过 docker pull sunerpy/pt-tools:beta 测试
+         # 测试通过后，走现有 release-please PR 发正式版 v0.28.0
+
+        防呆设计：
+        - 两个 workflow 的 tag 正则严格互斥
+        - Makefile 参数校验防止误调用
+        - channel 解析失败时 workflow 立即 exit 1
+
+        验证：
+        - YAML 语法合法
+        - Tag 正则覆盖测试：v0.28.0-beta.1/rc.2/alpha.5 通过，v0.28.0 和 v1.2.3-dev 拒绝
+        - Makefile dry-run 只打 :<version> + :<channel> 两个 tag，无 :latest
+        - make fmt + make lint-go 0 issues
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump @vueuse/core from 14.2.1 to 14.3.0 in /web/frontend ([#286](https://github.com/sunerpy/pt-tools/issues/286)) ([#286](https://github.com/sunerpy/pt-tools/pull/286))
+  Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.2.1 to 14.3.0. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.3.0/packages/core)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vueuse/core"
+         dependency-version: 14.3.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.2.7 to 3.2.8 in /web/frontend ([#289](https://github.com/sunerpy/pt-tools/issues/289)) ([#289](https://github.com/sunerpy/pt-tools/pull/289))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.7 to 3.2.8. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.8/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.2.8
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump dompurify from 3.4.1 to 3.4.2 in /web/frontend ([#287](https://github.com/sunerpy/pt-tools/issues/287)) ([#287](https://github.com/sunerpy/pt-tools/pull/287))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.1 to 3.4.2. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.1...3.4.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.4.2
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump go.uber.org/zap from 1.27.1 to 1.28.0 ([#285](https://github.com/sunerpy/pt-tools/issues/285)) ([#285](https://github.com/sunerpy/pt-tools/pull/285))
+  Bumps [go.uber.org/zap](https://github.com/uber-go/zap) from 1.27.1 to 1.28.0. - [Release notes](https://github.com/uber-go/zap/releases) - [Changelog](https://github.com/uber-go/zap/blob/master/CHANGELOG.md) - [Commits](https://github.com/uber-go/zap/compare/v1.27.1...v1.28.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: go.uber.org/zap
+         dependency-version: 1.28.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **version**: 预发版识别与 UI 突出显示
+  用户在版本更新检测和自升级流程中需要直观区分预发版（beta/rc/alpha）与
+  正式版，并在升级到预发版前给出明确警示，避免误升级到测试版本。
+
+        实现方案：后端识别 + 前端 delta-ui 风格的多维度视觉差异化。
+
+        后端变更 (version/checker.go + web/api_version.go):
+
+        1) ReleaseInfo DTO 新增 Prerelease / PrereleaseLabel 字段，透传 GitHub API
+         的 prerelease 标记和从 tag 解析出的通道名 (beta/rc/alpha)。
+        2) 新增 extractPrereleaseLabel 辅助：从 semver 预发版段解析通道名，
+         白名单只认 beta/rc/alpha 三类，dev/snapshot 等非标准标签返回空。
+        3) filterNewReleases 增加 includePrerelease 参数：默认 false 保持向后
+         兼容；双重信号识别预发版 (r.Prerelease || tag 后缀)，防止发版时
+         漏勾 GitHub prerelease 勾选导致的漏判。
+        4) CheckOptions 增加 IncludePrerelease；缓存 key 同时考虑此字段，
+         避免用户切换开关时拿到过期缓存。
+        5) /api/version/check 接受新查询参数 include_prerelease=true。
+
+        前端变更 (Vue 3 + Element Plus):
+
+        1) TS 类型 ReleaseInfo 同步添加 prerelease / prerelease_label 字段；
+         versionApi.checkUpdate 接受 includePrerelease 选项。
+        2) Pinia store 新增 showPrerelease 开关 (localStorage 持久化) +
+         hasPrereleaseUpdate / onlyPrereleaseUpdates computed + setShowPrerelease
+         action (切换后自动强制刷新)。
+        3) VersionChecker.vue 多维度视觉差异化：
+         - 右上角按钮：仅预发版更新时按钮色改为 warning，红点改用 danger 色
+         - 弹层顶部新增「含预发版」开关 + 悬浮帮助提示
+         - 更新列表头部 tag 区分「仅发现预发版」/「发现新版本（含预发版）」/「发现新版本」
+         - 存在预发版时显示 el-alert 警示「非必要请等待正式版」
+         - 预发版卡片整体用 warning 色边框/背景 + 顶部 3px 渐变条
+         - 版本号徽章在预发版使用 warning 色
+         - 版本号旁新增大写通道徽章 BETA/RC/ALPHA
+         - 升级按钮对预发版文案改为「升级到预发版」并使用 warning 色
+         - 点击预发版升级先弹 ElMessageBox 确认对话框，文案强调测试风险
+        4) 样式参考 delta-ui 设计语言：pill 徽章、柔和层叠阴影、color-mix 混色、
+         顶部渐变强调条，保持与现有 pt-tools 设计 token (pt-color-warning) 一致。
+
+        测试覆盖 (5 个新增用例全部通过):
+        - TestFilterNewReleases_IncludePrerelease: 开关语义 + 字段填充 + 排序
+        - TestFilterNewReleases_TagSuffixDetection: 漏勾 prerelease 时的 tag 后缀识别
+        - TestExtractPrereleaseLabel: 9 个输入覆盖白名单 + 大小写 + dot 分段
+
+### Styling
+
+- 应用 gofumpt v0.10.0 列对齐格式化
+  CI 执行 go install mvdan.cc/gofumpt@latest 拉到 v0.10.0，而本地之前是 v0.9.2，
+  新版会对相邻的单行方法签名做列对齐。整理 17 个文件的格式差异。
+
+        仅格式变动，无逻辑改动。
+
 ## [0.27.0] - 2026-05-02
 
 ### Features
@@ -171,12 +402,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
