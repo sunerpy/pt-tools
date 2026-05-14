@@ -116,9 +116,9 @@ func (c *TelegramChannel) Init(ctx context.Context, conf *models.NotificationCon
 	}
 
 	cfg := &Config{}
-	if err := json.Unmarshal(plain, cfg); err != nil {
+	if unmarshalErr := json.Unmarshal(plain, cfg); unmarshalErr != nil {
 		c.markUnhealthy()
-		return fmt.Errorf("telegram: 解析 config_json 失败: %w", err)
+		return fmt.Errorf("telegram: 解析 config_json 失败: %w", unmarshalErr)
 	}
 	if cfg.BotToken == "" {
 		c.markUnhealthy()

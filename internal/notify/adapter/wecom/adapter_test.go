@@ -26,8 +26,7 @@ func TestWecom_Send_Markdown(t *testing.T) {
 		Text:  "种子 X 已下载完成",
 	}
 
-	var payload map[string]interface{}
-	payload = adapter.buildMarkdownPayload(n)
+	payload := adapter.buildMarkdownPayload(n)
 
 	jsonBytes, err := json.Marshal(payload)
 	require.NoError(t, err)
@@ -61,8 +60,7 @@ func TestWecom_Send_Plain(t *testing.T) {
 		Text:  "Test Body",
 	}
 
-	var payload map[string]interface{}
-	payload = adapter.buildTextPayload(n)
+	payload := adapter.buildTextPayload(n)
 
 	jsonBytes, err := json.Marshal(payload)
 	require.NoError(t, err)
