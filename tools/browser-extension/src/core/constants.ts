@@ -371,6 +371,24 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
     syncField: "cookie",
   },
+  {
+    id: "gtkpw",
+    name: "GTKPW",
+    domains: ["pt.gtkpw.xyz", "pt.gtk.pw", "pt.gtk.xyz", "t.myaltbox.com"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "nicept",
+    name: "NicePT",
+    domains: ["www.nicept.net"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [

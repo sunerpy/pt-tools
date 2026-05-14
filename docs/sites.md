@@ -1,46 +1,48 @@
 ## 支持站点
 
-当前已适配 **39** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **41** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（35）
+### NexusPHP 系列（37）
 
-| 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                          |
-| --------------------- | -------- | ----------------------------- | -------- | ----------------------------- |
-| **HDSky**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                      |
-| **SpringSunday**      | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                      |
-| **NovaHD**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **OpenCD**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（繁体界面/自定义模板） |
-| **PTT (pttime)**      | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（PTT-NP 分支）         |
-| **Farmm (pt.0ff.cc)** | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（基本信息行内嵌大小）  |
-| **AGSVPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **XingYunGe**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **HDHome**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **HDTime**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **HDFans**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **LemonHD**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **BTSCHOOL**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **BYRPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **Audiences**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **CarPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **52PT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **HXPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **MyPTCC**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **PTLover**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **PTSKIT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **RainGFH**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **SoulVoice**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **TMPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **UBits**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **CrabPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 蟹黄堡（crabpt.vip）          |
-| **GameGamePT**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | GGPT（gamegamept.com）        |
-| **Dubhe**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 天枢（dubhe.site）            |
-| **PTCafe**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 咖啡（ptcafe.club）           |
-| **CyanBug**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 大青虫（cyanbug.net）         |
-| **DuckBoobee**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 鸭鸭（duckboobee.org）        |
-| **LongPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 龙PT（longpt.org）            |
-| **HDVideo**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HD视频（hdvideo.top）         |
-| **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
-| **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
+| 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
+| --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
+| **HDSky**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                                                         |
+| **SpringSunday**      | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                                                         |
+| **NovaHD**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **OpenCD**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（繁体界面/自定义模板）                                    |
+| **PTT (pttime)**      | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（PTT-NP 分支）                                            |
+| **Farmm (pt.0ff.cc)** | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（基本信息行内嵌大小）                                     |
+| **AGSVPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **XingYunGe**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **HDHome**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **HDTime**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **HDFans**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **LemonHD**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **BTSCHOOL**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **BYRPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **Audiences**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **CarPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **52PT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **HXPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **MyPTCC**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **PTLover**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **PTSKIT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **RainGFH**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **SoulVoice**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **TMPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **UBits**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **CrabPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 蟹黄堡（crabpt.vip）                                             |
+| **GameGamePT**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | GGPT（gamegamept.com）                                           |
+| **Dubhe**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 天枢（dubhe.site）                                               |
+| **PTCafe**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 咖啡（ptcafe.club）                                              |
+| **CyanBug**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 大青虫（cyanbug.net）                                            |
+| **DuckBoobee**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 鸭鸭（duckboobee.org）                                           |
+| **LongPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 龙PT（longpt.org）                                               |
+| **HDVideo**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HD视频（hdvideo.top）                                            |
+| **GTKPW**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 多镜像（pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com） |
+| **NicePT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 好趣（www.nicept.net，繁体）                                     |
+| **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
 
 ### 其他架构（4）
 
