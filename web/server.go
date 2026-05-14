@@ -29,10 +29,11 @@ import (
 )
 
 type Server struct {
-	store    *core.ConfigStore
-	mgr      *scheduler.Manager
-	tpl      *template.Template
-	sessions map[string]string // sessionID -> username
+	store       *core.ConfigStore
+	mgr         *scheduler.Manager
+	tpl         *template.Template
+	sessions    map[string]string // sessionID -> username
+	chatopsDeps *ChatOpsDeps
 }
 
 func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
@@ -128,6 +129,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/version/check", s.auth(s.apiVersionCheck))
 	mux.HandleFunc("/api/version/runtime", s.auth(s.apiVersionRuntime))
 	mux.HandleFunc("/api/version/upgrade", s.auth(s.apiVersionUpgrade))
+	s.registerChatOpsIfWired(mux)
 
 	// Downloader Hub (mixed downloader management)
 	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
