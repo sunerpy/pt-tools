@@ -17,8 +17,17 @@ import (
 )
 
 type job struct {
-	cancel context.CancelFunc
+	cancel    context.CancelFunc
+	startedAt time.Time
 }
+
+type JobStatus struct {
+	SiteName  string
+	RSSName   string
+	Running   bool
+	StartedAt time.Time
+}
+
 type Manager struct {
 	mu                sync.Mutex
 	jobs              map[string]*job
@@ -123,7 +132,7 @@ func (m *Manager) Start(site models.SiteGroup, r models.RSSConfig, runner func(c
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m.jobs[k] = &job{cancel: cancel}
+	m.jobs[k] = &job{cancel: cancel, startedAt: time.Now()}
 	go runner(ctx)
 }
 
@@ -135,6 +144,34 @@ func (m *Manager) Stop(site models.SiteGroup, rssName string) {
 		j.cancel()
 		delete(m.jobs, k)
 	}
+}
+
+func (m *Manager) ListJobs() []JobStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result := make([]JobStatus, 0, len(m.jobs))
+	for k, j := range m.jobs {
+		parts := splitKey(k)
+		if len(parts) == 2 {
+			result = append(result, JobStatus{
+				SiteName:  parts[0],
+				RSSName:   parts[1],
+				Running:   true,
+				StartedAt: j.startedAt,
+			})
+		}
+	}
+	return result
+}
+
+func splitKey(k string) []string {
+	for i := len(k) - 1; i >= 0; i-- {
+		if k[i] == '|' {
+			return []string{k[:i], k[i+1:]}
+		}
+	}
+	return nil
 }
 
 func (m *Manager) Reload(cfg *models.Config) {

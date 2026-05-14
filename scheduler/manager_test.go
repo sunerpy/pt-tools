@@ -99,6 +99,76 @@ func TestReload_InvalidRSSNotStarted(t *testing.T) {
 	require.NotPanics(t, func() { m.Reload(cfg) })
 }
 
+// TestManager_ListJobs_Empty: 启动后无 job → 返回空切片
+func TestManager_ListJobs_Empty(t *testing.T) {
+	m := newTestManager(t)
+	jobs := m.ListJobs()
+	assert.Equal(t, []JobStatus{}, jobs)
+}
+
+// TestManager_ListJobs_AfterStart: Start 一个 job → 返回单元素切片
+func TestManager_ListJobs_AfterStart(t *testing.T) {
+	m := newTestManager(t)
+	siteName := models.SiteGroup("MTeam")
+	rssName := "free"
+	rssConfig := models.RSSConfig{Name: rssName}
+
+	// Start a job with a dummy runner
+	m.Start(siteName, rssConfig, func(ctx context.Context) {
+		<-ctx.Done()
+	})
+
+	// Give it a moment to register
+	time.Sleep(10 * time.Millisecond)
+
+	jobs := m.ListJobs()
+	assert.Equal(t, 1, len(jobs), "should have 1 job after Start")
+	assert.Equal(t, string(siteName), jobs[0].SiteName)
+	assert.Equal(t, rssName, jobs[0].RSSName)
+	assert.True(t, jobs[0].Running, "job should be running")
+	assert.False(t, jobs[0].StartedAt.IsZero(), "StartedAt should be set")
+}
+
+// TestManager_ListJobs_Concurrent: -race，并发 Start/Stop 同时 ListJobs 不 panic
+func TestManager_ListJobs_Concurrent(t *testing.T) {
+	m := newTestManager(t)
+
+	// Goroutine 1: repeatedly start jobs
+	go func() {
+		for i := 0; i < 10; i++ {
+			site := models.SiteGroup("MTeam")
+			rss := models.RSSConfig{Name: "rss" + string(rune('0'+i))}
+			m.Start(site, rss, func(ctx context.Context) {
+				<-ctx.Done()
+			})
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	// Goroutine 2: repeatedly list jobs
+	go func() {
+		for i := 0; i < 20; i++ {
+			jobs := m.ListJobs()
+			_ = jobs // read without error
+			time.Sleep(500 * time.Microsecond)
+		}
+	}()
+
+	// Goroutine 3: repeatedly stop jobs
+	go func() {
+		for i := 0; i < 10; i++ {
+			m.Stop("MTeam", "rss"+string(rune('0'+i)))
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	// Wait for goroutines
+	time.Sleep(200 * time.Millisecond)
+
+	// Final ListJobs should not panic
+	_ = m.ListJobs()
+}
+
 func TestReload_NoGlobalDBEarlyReturn(t *testing.T) {
 	m := newTestManager(t)
 	global.GlobalDB = nil
