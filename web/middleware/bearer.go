@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -33,9 +32,6 @@ type BotTokenStore interface {
 type contextKey string
 
 const identityContextKey contextKey = "bot_identity"
-
-// errUnauthorized 内部统一未授权错误。
-var errUnauthorized = errors.New("unauthorized")
 
 // RequireBearer 创建 Bearer Token 验证中间件。
 // 期望 Authorization 头格式为 "Bearer <token>"。
@@ -215,21 +211,6 @@ func respondUnauthorized(w http.ResponseWriter, logReason string) {
 	// 详细原因写日志（避免 nil logger panic）
 	if logReason != "" && global.GetLogger() != nil {
 		global.GetSlogger().Infof("bearer_auth_failed reason=%s", logReason)
-	}
-}
-
-// respondForbidden 返回标准 403 JSON 响应（权限不足）。
-func respondForbidden(w http.ResponseWriter, logReason string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-
-	resp := map[string]string{
-		"error": "forbidden",
-	}
-	_ = json.NewEncoder(w).Encode(resp)
-
-	if logReason != "" && global.GetLogger() != nil {
-		global.GetSlogger().Infof("bearer_auth_forbidden reason=%s", logReason)
 	}
 }
 
