@@ -5,6 +5,118 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] - 2026-05-14
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump oxfmt from 0.47.0 to 0.49.0 in /web/frontend ([#311](https://github.com/sunerpy/pt-tools/issues/311)) ([#311](https://github.com/sunerpy/pt-tools/pull/311))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.47.0 to 0.49.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.49.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.49.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vitest from 4.1.5 to 4.1.6 in /web/frontend ([#312](https://github.com/sunerpy/pt-tools/issues/312)) ([#312](https://github.com/sunerpy/pt-tools/pull/312))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.5 to 4.1.6. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.6/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.6
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue from 3.5.33 to 3.5.34 in /web/frontend ([#314](https://github.com/sunerpy/pt-tools/issues/314)) ([#314](https://github.com/sunerpy/pt-tools/pull/314))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.33 to 3.5.34. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.33...v3.5.34)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.34
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vite from 8.0.10 to 8.0.12 in /web/frontend ([#313](https://github.com/sunerpy/pt-tools/issues/313)) ([#313](https://github.com/sunerpy/pt-tools/pull/313))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.10 to 8.0.12. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.12/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.0.12
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump element-plus from 2.13.7 to 2.14.0 in /web/frontend ([#315](https://github.com/sunerpy/pt-tools/issues/315)) ([#315](https://github.com/sunerpy/pt-tools/pull/315))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.7 to 2.14.0. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.7...2.14.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.14.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxlint from 1.62.0 to 1.64.0 in /web/frontend ([#317](https://github.com/sunerpy/pt-tools/issues/317)) ([#317](https://github.com/sunerpy/pt-tools/pull/317))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.62.0 to 1.64.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.64.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.64.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/sys from 0.43.0 to 0.44.0 ([#309](https://github.com/sunerpy/pt-tools/issues/309)) ([#309](https://github.com/sunerpy/pt-tools/pull/309))
+  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.43.0 to 0.44.0. - [Commits](https://github.com/golang/sys/compare/v0.43.0...v0.44.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/sys
+         dependency-version: 0.44.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/text from 0.36.0 to 0.37.0 ([#310](https://github.com/sunerpy/pt-tools/issues/310)) ([#310](https://github.com/sunerpy/pt-tools/pull/310))
+  Bumps [golang.org/x/text](https://github.com/golang/text) from 0.36.0 to 0.37.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.36.0...v0.37.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/text
+         dependency-version: 0.37.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **sites**: 新增 3 个 NexusPHP 站点适配
+  新增站点（均为 NexusPHP + Cookie 鉴权）：
+
+        - DuckBoobee (鸭鸭, duckboobee.org) — Issue #319
+        - LongPT (龙PT, longpt.org) — Issue #318
+        - HDVideo (HD视频, hdvideo.top) — Issue #307
+
+        每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验），
+        浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 域名已提前存在）。
+
+        docs/sites.md 已适配站点数从 36 → 39，NexusPHP 系列从 32 → 35。
+
+### Styling
+
+- **changelog**: 应用 oxfmt 格式化
+
 ## [0.28.1] - 2026-05-10
 
 ### Bug Fixes
@@ -451,12 +563,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
