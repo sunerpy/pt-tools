@@ -1115,3 +1115,89 @@ export const downloaderTorrentsApi = {
       payload,
     ),
 };
+
+// ChatOps API
+export interface NotificationConfig {
+  id: number;
+  channel_type: string;
+  name: string;
+  enabled: boolean;
+  // Dynamic fields
+  bot_token?: string;
+  allowed_users?: string;
+  admin_users?: string;
+  default_chat_id?: string;
+  listen_addr?: string;
+  access_token?: string;
+  admin_qq_users?: string;
+  allowed_qq_users?: string;
+  endpoint_url?: string;
+  hmac_secret?: string;
+  headers?: string;
+  webhook_key?: string;
+}
+
+export interface ChatOpBinding {
+  id: number;
+  channel_user_id: string;
+  channel_type: string;
+  label?: string;
+  reply_lang?: string;
+  admin?: boolean;
+  allowed?: boolean;
+  last_active?: string;
+  bind_code?: string;
+  created_at?: string;
+  expires_at?: string;
+}
+
+export interface AuditLog {
+  id: number;
+  command: string;
+  channel_type: string;
+  channel_user_id: string;
+  result: string;
+  created_at: string;
+  latency_ms: number;
+  args_json?: string;
+}
+
+export const chatopsApi = {
+  notifications: {
+    list: () => api.get<NotificationConfig[]>("/api/chatops/notifications"),
+    get: (id: number) => api.get<NotificationConfig>(`/api/chatops/notifications/${id}`),
+    create: (data: Omit<NotificationConfig, "id">) =>
+      api.post<NotificationConfig>("/api/chatops/notifications", data),
+    update: (id: number, data: Partial<NotificationConfig>) =>
+      request<NotificationConfig>(`/api/chatops/notifications/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: number) => api.delete<void>(`/api/chatops/notifications/${id}`),
+    test: (id: number) => api.post<{ success: boolean }>(`/api/chatops/notifications/${id}/test`),
+  },
+  bindings: {
+    list: () =>
+      api.get<{ bindings: ChatOpBinding[]; pending: ChatOpBinding[] }>("/api/chatops/bindings"),
+    generateCode: (confId: number) =>
+      api.post<{ code: string; expires_at: string }>(
+        `/api/chatops/bindings/code?conf_id=${confId}`,
+      ),
+    update: (id: number, data: { reply_lang: string }) =>
+      request<ChatOpBinding>(`/api/chatops/bindings/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: number) => api.delete<void>(`/api/chatops/bindings/${id}`),
+  },
+  audit: {
+    list: (params: URLSearchParams) =>
+      api.get<{
+        items: AuditLog[];
+        total: number;
+        today_count: number;
+        success_rate: number;
+        max_latency_ms: number;
+      }>(`/api/chatops/audit?${params.toString()}`),
+  },
+};
