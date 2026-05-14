@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] - 2026-05-14
+
+### Bug Fixes
+
+- **web**: 修正 favicon 全站刷新行为并增加已支持站点视图
+  修复用户反馈的"只配置了 2 个站点但日志显示刷新全部 40+ 站点"的问题。
+
+        后端：
+        - web/api_favicon.go: refreshExpiredFavicons 改为只迭代 SiteSetting
+         中已启用 (Enabled=true) 的站点，新增 loadEnabledSiteIDsLower 辅助
+        - web/api_favicon.go: apiFavicon 单图标 GET 支持 ?nofetch=1 query，
+         避免"已支持站点"页面对未启用站点触发外部抓取
+        - web/api_favicon.go: apiFaviconList 同样按启用状态过滤
+        - web/api_site.go: 新增 GET /api/sites/definitions handler 暴露
+         SiteDefinitionRegistry 的精简 DTO（id/name/aka/schema/urls/
+         faviconUrl/authMethod/hrEnabled/unavailable*）
+        - web/server.go: 注册 /api/sites/definitions 路由
+
+        前端：
+        - views/SupportedSites.vue: 新增"已支持站点"页面，卡片网格 + 搜索 +
+         按 Schema 筛选 + 不可用状态徽章；favicon 用 noFetch=true 避免
+         对未启用站点发起后端抓取
+        - components/SiteAvatar.vue: 新增 noFetch prop，对应后端 ?nofetch=1
+        - router/index.ts: 新增 /supported-sites 路由
+        - App.vue: 侧栏菜单"站点与RSS"下方新增"已支持站点"入口
+        - views/UserInfoDashboard.vue: 站点统计卡片操作区新增"已支持站点" CTA
+        - api/index.ts: 新增 SupportedSiteDefinition 类型 + sitesApi.listDefinitions()
+
+## [0.30.0] - 2026-05-14
+
+### Features
+
+- **sites**: 新增 2 个 NexusPHP 站点适配
+  新增站点（均为 NexusPHP + Cookie 鉴权）：
+
+        - GTKPW (pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com) — Issue #323
+        - NicePT (好趣, www.nicept.net, 繁体界面) — Issue #321
+
+        每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验）：
+
+        - GTKPW: 4 个镜像域名同时注册，标准简体 NexusPHP 选择器
+        - NicePT: 繁体优先选择器（傳送 / 上傳量 / 下載量 / 等級 / 用戶ID / 加入日期）
+         + 简体 fallback；HasHR 解析；基本資訊 / 基本信息 size 解析；带 H&R 标志
+
+        浏览器扩展 KNOWN_SITES + pt-sites.ts 同步更新（新增 pt.gtk.xyz、t.myaltbox.com）。
+        docs/sites.md 已适配站点数从 39 → 41，NexusPHP 系列从 35 → 37。
+
+### Styling
+
+- **changelog**: 应用 oxfmt 格式化
+
 ## [0.29.0] - 2026-05-14
 
 ### Dependencies (Frontend)
@@ -563,12 +614,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
