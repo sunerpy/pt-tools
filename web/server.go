@@ -34,7 +34,13 @@ type Server struct {
 	tpl         *template.Template
 	sessions    map[string]string // sessionID -> username
 	chatopsDeps *ChatOpsDeps
+	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
 }
+
+// SetQAHook installs a callback invoked once during Serve, after all production
+// routes are registered. Used by the qa build tag (cmd/web_qa.go) to attach
+// /test/* test injection endpoints. No-op in production builds.
+func (s *Server) SetQAHook(fn func(*http.ServeMux)) { s.qaHook = fn }
 
 func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 	t := template.Must(template.New("login").Parse(loginHTML))
@@ -130,6 +136,9 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/version/runtime", s.auth(s.apiVersionRuntime))
 	mux.HandleFunc("/api/version/upgrade", s.auth(s.apiVersionUpgrade))
 	s.registerChatOpsIfWired(mux)
+	if s.qaHook != nil {
+		s.qaHook(mux)
+	}
 
 	// Downloader Hub (mixed downloader management)
 	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))

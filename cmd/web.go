@@ -146,6 +146,7 @@ var webCmd = &cobra.Command{
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
+		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {
 			if cfg.Global.AutoStart && strings.TrimSpace(cfg.Global.DownloadDir) != "" {
 				global.GetSlogger().Info("检测到自动启动配置，加载并启动任务")
@@ -254,6 +255,7 @@ type chatopsBootstrap struct {
 	outbox    *notify.OutboxWorker
 	channels  map[uint]notify.Channel
 	sessions  *chatops.SessionStore
+	chain     *chatops.MessageChain
 	closeOnce sync.Once
 }
 
@@ -262,6 +264,13 @@ func (b *chatopsBootstrap) Deps() *web.ChatOpsDeps {
 		return nil
 	}
 	return b.deps
+}
+
+func (b *chatopsBootstrap) Chain() *chatops.MessageChain {
+	if b == nil {
+		return nil
+	}
+	return b.chain
 }
 
 func (b *chatopsBootstrap) ChannelCount() int {
@@ -374,6 +383,7 @@ func bootstrapChatOps(
 		outbox:   outbox,
 		channels: channels,
 		sessions: sessionStore,
+		chain:    chain,
 	}, nil
 }
 
