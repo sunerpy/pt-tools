@@ -344,6 +344,33 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
     syncField: "cookie",
   },
+  {
+    id: "duckboobee",
+    name: "DuckBoobee",
+    domains: ["duckboobee.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "longpt",
+    name: "LongPT",
+    domains: ["longpt.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "hdvideo",
+    name: "HDVideo",
+    domains: ["hdvideo.top"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
