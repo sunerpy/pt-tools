@@ -144,6 +144,10 @@ function logout() {
             <el-icon><Connection /></el-icon>
             <template #title>站点与RSS</template>
           </el-menu-item>
+          <el-menu-item index="supported-sites">
+            <el-icon><Collection /></el-icon>
+            <template #title>已支持站点</template>
+          </el-menu-item>
           <el-menu-item index="search">
             <el-icon><Search /></el-icon>
             <template #title>种子搜索</template>

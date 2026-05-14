@@ -61,7 +61,8 @@ func (fs *FaviconService) backgroundRefresh() {
 	}
 }
 
-// refreshExpiredFavicons 刷新所有过期的图标
+// refreshExpiredFavicons 仅刷新用户在 SiteSetting 中已启用的站点图标。
+// 不要扩展为遍历全部 SiteDefinition，否则会对未配置的站点发起无意义请求。
 func (fs *FaviconService) refreshExpiredFavicons() {
 	if global.GlobalDB == nil {
 		return
@@ -70,23 +71,29 @@ func (fs *FaviconService) refreshExpiredFavicons() {
 	db := global.GlobalDB.DB
 	expiredTime := time.Now().Add(-fs.refreshInterval)
 
-	// 查找所有过期的缓存
+	enabledIDs := loadEnabledSiteIDsLower()
+	if len(enabledIDs) == 0 {
+		return
+	}
+
 	var expiredCaches []models.FaviconCache
 	if err := db.Where("last_fetched < ? OR last_fetched IS NULL", expiredTime).Find(&expiredCaches).Error; err != nil {
 		global.GetSlogger().Warnf("[Favicon] 查询过期缓存失败: %v", err)
 		return
 	}
 
-	// 获取所有注册的站点定义
 	definitions := v2.GetDefinitionRegistry().GetAll()
-	defMap := make(map[string]*v2.SiteDefinition)
+	defMap := make(map[string]*v2.SiteDefinition, len(definitions))
 	for _, def := range definitions {
 		defMap[strings.ToLower(def.ID)] = def
 	}
 
-	// 刷新过期的缓存
 	for _, cache := range expiredCaches {
-		def, ok := defMap[strings.ToLower(cache.SiteID)]
+		siteIDLower := strings.ToLower(cache.SiteID)
+		if !enabledIDs[siteIDLower] {
+			continue
+		}
+		def, ok := defMap[siteIDLower]
 		if !ok {
 			continue
 		}
@@ -105,32 +112,54 @@ func (fs *FaviconService) refreshExpiredFavicons() {
 			global.GetSlogger().Infof("[Favicon] 刷新图标成功: site=%s", cache.SiteID)
 		}
 
-		// 避免请求过于频繁
 		time.Sleep(2 * time.Second)
 	}
 
-	// 检查是否有新站点需要添加缓存
-	for _, def := range definitions {
+	for siteIDLower := range enabledIDs {
+		def, ok := defMap[siteIDLower]
+		if !ok {
+			continue
+		}
 		var count int64
 		db.Model(&models.FaviconCache{}).Where("site_id = ?", def.ID).Count(&count)
-		if count == 0 {
-			faviconURL := def.FaviconURL
-			if faviconURL == "" && len(def.URLs) > 0 {
-				faviconURL = strings.TrimSuffix(def.URLs[0], "/") + "/favicon.ico"
-			}
-			if faviconURL == "" {
-				continue
-			}
+		if count != 0 {
+			continue
+		}
 
-			if err := fs.fetchAndSave(def.ID, def.Name, faviconURL); err != nil {
-				global.GetSlogger().Warnf("[Favicon] 新站点图标获取失败: site=%s, err=%v", def.ID, err)
-			} else {
-				global.GetSlogger().Infof("[Favicon] 新站点图标已缓存: site=%s", def.ID)
-			}
+		faviconURL := def.FaviconURL
+		if faviconURL == "" && len(def.URLs) > 0 {
+			faviconURL = strings.TrimSuffix(def.URLs[0], "/") + "/favicon.ico"
+		}
+		if faviconURL == "" {
+			continue
+		}
 
-			time.Sleep(2 * time.Second)
+		if err := fs.fetchAndSave(def.ID, def.Name, faviconURL); err != nil {
+			global.GetSlogger().Warnf("[Favicon] 新站点图标获取失败: site=%s, err=%v", def.ID, err)
+		} else {
+			global.GetSlogger().Infof("[Favicon] 新站点图标已缓存: site=%s", def.ID)
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func loadEnabledSiteIDsLower() map[string]bool {
+	if global.GlobalDB == nil {
+		return nil
+	}
+	var settings []models.SiteSetting
+	if err := global.GlobalDB.DB.Where("enabled = ?", true).Find(&settings).Error; err != nil {
+		global.GetSlogger().Warnf("[Favicon] 查询已启用站点失败: %v", err)
+		return nil
+	}
+	result := make(map[string]bool, len(settings))
+	for _, st := range settings {
+		if st.Name != "" {
+			result[strings.ToLower(st.Name)] = true
 		}
 	}
+	return result
 }
 
 // fetchAndSave 下载并保存图标到数据库
@@ -263,15 +292,16 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 初始化服务（如果尚未初始化）
 	if faviconService == nil {
 		initFaviconService()
 	}
 
-	// 从数据库获取缓存
 	cache, err := faviconService.GetFavicon(siteID)
 	if err != nil || cache == nil || len(cache.Data) == 0 {
-		// 缓存不存在，尝试获取
+		if r.URL.Query().Get("nofetch") == "1" {
+			http.Error(w, "图标尚未缓存", http.StatusNotFound)
+			return
+		}
 		def := v2.GetDefinitionRegistry().GetOrDefault(strings.ToLower(siteID))
 		if def == nil {
 			http.Error(w, "站点不存在", http.StatusNotFound)
@@ -287,14 +317,12 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 同步获取并缓存
 		if fetchErr := faviconService.fetchAndSave(siteID, def.Name, faviconURL); fetchErr != nil {
 			global.GetSlogger().Warnf("[Favicon] 获取图标失败: site=%s, err=%v", siteID, fetchErr)
 			http.Error(w, "获取图标失败", http.StatusNotFound)
 			return
 		}
 
-		// 重新获取
 		cache, err = faviconService.GetFavicon(siteID)
 		if err != nil || cache == nil {
 			http.Error(w, "获取图标失败", http.StatusNotFound)
@@ -344,10 +372,9 @@ func (s *Server) apiFaviconList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取所有注册的站点定义
 	definitions := v2.GetDefinitionRegistry().GetAll()
+	enabledIDs := loadEnabledSiteIDsLower()
 
-	// 获取数据库中的缓存信息
 	db := global.GlobalDB.DB
 	var caches []models.FaviconCache
 	db.Find(&caches)
@@ -357,9 +384,12 @@ func (s *Server) apiFaviconList(w http.ResponseWriter, r *http.Request) {
 		cacheMap[strings.ToLower(caches[i].SiteID)] = &caches[i]
 	}
 
-	result := make([]SiteFaviconInfo, 0, len(definitions))
+	result := make([]SiteFaviconInfo, 0, len(enabledIDs))
 
 	for _, def := range definitions {
+		if !enabledIDs[strings.ToLower(def.ID)] {
+			continue
+		}
 		info := SiteFaviconInfo{
 			SiteID:     def.ID,
 			SiteName:   def.Name,

@@ -290,6 +290,10 @@ onUnmounted(() => {
             <el-icon><Share /></el-icon>
             导出分享
           </el-button>
+          <el-button size="small" @click="$router.push('/supported-sites')">
+            <el-icon><Collection /></el-icon>
+            已支持站点
+          </el-button>
           <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
             <el-icon><Refresh /></el-icon>
             同步全部

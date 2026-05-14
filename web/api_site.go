@@ -521,3 +521,43 @@ func (s *Server) apiSiteFreeTorrentsList(w http.ResponseWriter, r *http.Request)
 	// Return empty list for now
 	writeJSON(w, []TorrentManifestItem{})
 }
+
+type SupportedSiteDefinition struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	Aka               []string `json:"aka,omitempty"`
+	Description       string   `json:"description,omitempty"`
+	Schema            string   `json:"schema"`
+	URLs              []string `json:"urls"`
+	FaviconURL        string   `json:"faviconUrl,omitempty"`
+	AuthMethod        string   `json:"authMethod,omitempty"`
+	HREnabled         bool     `json:"hrEnabled"`
+	Unavailable       bool     `json:"unavailable,omitempty"`
+	UnavailableReason string   `json:"unavailableReason,omitempty"`
+}
+
+func (s *Server) apiSiteDefinitions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	defs := v2.GetDefinitionRegistry().GetAll()
+	out := make([]SupportedSiteDefinition, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, SupportedSiteDefinition{
+			ID:                d.ID,
+			Name:              d.Name,
+			Aka:               d.Aka,
+			Description:       d.Description,
+			Schema:            string(d.Schema),
+			URLs:              d.URLs,
+			FaviconURL:        d.FaviconURL,
+			AuthMethod:        string(d.AuthMethod),
+			HREnabled:         d.HREnabled,
+			Unavailable:       d.Unavailable,
+			UnavailableReason: d.UnavailableReason,
+		})
+	}
+	writeJSON(w, out)
+}
