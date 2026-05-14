@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **36** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **39** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（32）
+### NexusPHP 系列（35）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                          |
 | --------------------- | -------- | ----------------------------- | -------- | ----------------------------- |
@@ -36,6 +36,9 @@
 | **Dubhe**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 天枢（dubhe.site）            |
 | **PTCafe**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 咖啡（ptcafe.club）           |
 | **CyanBug**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 大青虫（cyanbug.net）         |
+| **DuckBoobee**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 鸭鸭（duckboobee.org）        |
+| **LongPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 龙PT（longpt.org）            |
+| **HDVideo**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HD视频（hdvideo.top）         |
 | **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
 | **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue    |
 
