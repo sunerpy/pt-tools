@@ -176,6 +176,20 @@ export const qbitApi = {
   save: (data: QbitSettings) => api.post<void>("/api/qbit", data),
 };
 
+export interface SupportedSiteDefinition {
+  id: string;
+  name: string;
+  aka?: string[];
+  description?: string;
+  schema: string;
+  urls: string[];
+  faviconUrl?: string;
+  authMethod?: string;
+  hrEnabled: boolean;
+  unavailable?: boolean;
+  unavailableReason?: string;
+}
+
 export const sitesApi = {
   list: () => api.get<Record<string, SiteConfig>>("/api/sites"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
@@ -183,6 +197,7 @@ export const sitesApi = {
   delete: (name: string) => api.delete<void>(`/api/sites?name=${encodeURIComponent(name)}`),
   deleteRss: (name: string, id: number) =>
     api.delete<void>(`/api/sites/${name}?id=${encodeURIComponent(id.toString())}`),
+  listDefinitions: () => api.get<SupportedSiteDefinition[]>("/api/sites/definitions"),
 };
 
 export const tasksApi = {

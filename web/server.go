@@ -85,6 +85,7 @@ func (s *Server) Serve(addr string) error {
 	// Site management APIs
 	mux.HandleFunc("/api/sites/downloader-summary", s.auth(s.apiSiteDownloaderSummary))
 	mux.HandleFunc("/api/sites/validate", s.auth(s.apiSiteValidate))
+	mux.HandleFunc("/api/sites/definitions", s.auth(s.apiSiteDefinitions))
 	mux.HandleFunc("/api/sites/dynamic", s.auth(s.apiDynamicSites))
 	mux.HandleFunc("/api/sites/templates", s.auth(s.apiSiteTemplates))
 	mux.HandleFunc("/api/sites/templates/import", s.auth(s.apiSiteTemplateImport))

@@ -46,6 +46,12 @@ const router = createRouter({
       component: () => import("@/views/SiteList.vue"),
     },
     {
+      path: "/supported-sites",
+      name: "supported-sites",
+      component: () => import("@/views/SupportedSites.vue"),
+      meta: { title: "已支持站点" },
+    },
+    {
       path: "/search",
       name: "search",
       component: () => import("@/views/TorrentSearch.vue"),

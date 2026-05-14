@@ -7,21 +7,21 @@ const props = withDefaults(
     siteName: string;
     siteId: string;
     size?: number;
+    noFetch?: boolean;
   }>(),
   {
     size: 32,
+    noFetch: false,
   },
 );
 
 const imageError = ref(false);
 
-// 使用后端缓存 API 获取站点图标
-// 后端会自动缓存图标到本地，避免每次都从远程请求
 const faviconUrl = computed(() => {
   if (imageError.value) return null;
   const lower = props.siteId.toLowerCase();
-  // 使用后端 favicon 缓存 API
-  return `/api/favicon/${lower}`;
+  const suffix = props.noFetch ? "?nofetch=1" : "";
+  return `/api/favicon/${lower}${suffix}`;
 });
 
 const avatarColor = computed(() => getAvatarColor(props.siteName));
