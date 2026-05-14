@@ -2,25 +2,50 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/chatops"
+	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/version"
 	"github.com/sunerpy/pt-tools/web"
+
+	// Side-effect imports register notify channel adapters into the notify
+	// default registry during process init so that bootstrapChatOps can
+	// instantiate per-conf channel implementations.
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/qq"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/telegram"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/wecom"
 )
 
 var (
 	host string
 	port int
+)
+
+const (
+	chatopsBindingCreator  = "system"
+	chatopsOutboxInterval  = 10 * time.Second
+	chatopsPushTimeout     = 5 * time.Second
+	chatopsShutdownPerStep = 5 * time.Second
+	chatopsShutdownBudget  = 15 * time.Second
 )
 
 var webCmd = &cobra.Command{
@@ -29,7 +54,6 @@ var webCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		version.CleanupOldBinary()
 
-		// 初始化配置与数据库
 		if _, err := core.InitRuntime(); err != nil {
 			color.Red("初始化失败: %v", err)
 			return
@@ -37,7 +61,6 @@ var webCmd = &cobra.Command{
 
 		global.GetSlogger().Infof("=== pt-tools 启动 === 版本: %s, 构建时间: %s", version.Version, version.BuildTime)
 
-		// 创建 SiteRegistry 并同步到数据库
 		siteRegistry := v2.NewSiteRegistry(global.GetLogger())
 		store := core.NewConfigStore(global.GlobalDB)
 
@@ -58,7 +81,6 @@ var webCmd = &cobra.Command{
 		mgr := scheduler.NewManager()
 		mgr.InitFreeEndMonitor()
 
-		// 初始化 UserInfoService
 		userInfoRepo, err := v2.NewDBUserInfoRepo(global.GlobalDB.DB)
 		if err != nil {
 			global.GetSlogger().Warnf("初始化 UserInfoRepo 失败: %v", err)
@@ -71,7 +93,6 @@ var webCmd = &cobra.Command{
 			web.InitUserInfoService(userInfoService)
 			global.GetSlogger().Info("UserInfoService 初始化成功")
 
-			// 初始化 SearchOrchestrator
 			searchOrchestrator := v2.NewSearchOrchestrator(v2.SearchOrchestratorConfig{
 				Logger: global.GetLogger(),
 			})
@@ -82,8 +103,7 @@ var webCmd = &cobra.Command{
 			web.InitSearchOrchestrator(cachedSearchOrchestrator)
 			global.GetSlogger().Info("SearchOrchestrator 初始化成功")
 
-			// 注册已启用的站点到 UserInfoService 和 SearchOrchestrator
-			web.InitSiteRegistry(siteRegistry) // 保存 registry 供后续动态注册使用
+			web.InitSiteRegistry(siteRegistry)
 			sites, siteErr := store.ListSites()
 			if siteErr != nil {
 				global.GetSlogger().Warnf("读取站点配置失败: %v", siteErr)
@@ -93,7 +113,6 @@ var webCmd = &cobra.Command{
 						continue
 					}
 
-					// 使用 SiteRegistry 创建站点实例
 					site, createErr := siteRegistry.CreateSite(
 						string(siteGroup),
 						v2.SiteCredentials{
@@ -115,7 +134,18 @@ var webCmd = &cobra.Command{
 			}
 		}
 
+		bootCtx, bootCancel := context.WithCancel(context.Background())
+		defer bootCancel()
+		bs, err := bootstrapChatOps(bootCtx, global.GlobalDB, mgr, store)
+		if err != nil {
+			global.GetSlogger().Warnf("ChatOps 子系统接线失败，跳过：%v", err)
+			bs = nil
+		}
+
 		srv := web.NewServer(store, mgr)
+		if bs != nil {
+			srv.SetChatOpsDeps(bs.Deps())
+		}
 		if cfg, _ := store.Load(); cfg != nil {
 			if cfg.Global.AutoStart && strings.TrimSpace(cfg.Global.DownloadDir) != "" {
 				global.GetSlogger().Info("检测到自动启动配置，加载并启动任务")
@@ -124,6 +154,9 @@ var webCmd = &cobra.Command{
 				global.GetSlogger().Info("自动启动未开启或下载目录为空，等待手动启动")
 			}
 		}
+
+		installShutdownHandler(bs)
+
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
 		go startVersionChecker()
 		if err := srv.Serve(addr); err != nil {
@@ -138,7 +171,6 @@ func init() {
 	webCmd.Flags().IntVar(&port, "port", 8080, "服务监听端口")
 }
 
-// getRegisteredSitesFromRegistry 从 SiteRegistry 获取所有注册的站点信息
 func getRegisteredSitesFromRegistry(registry *v2.SiteRegistry) []models.RegisteredSite {
 	siteIDs := registry.List()
 	defRegistry := v2.GetDefinitionRegistry()
@@ -189,4 +221,299 @@ func startVersionChecker() {
 	for range ticker.C {
 		checkVersion()
 	}
+}
+
+// installShutdownHandler traps SIGINT/SIGTERM and tears down the ChatOps
+// subsystem in reverse-dependency order before the process exits.
+func installShutdownHandler(bs *chatopsBootstrap) {
+	if bs == nil {
+		return
+	}
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		ctx, cancel := context.WithTimeout(context.Background(), chatopsShutdownBudget)
+		defer cancel()
+		if err := bs.Shutdown(ctx); err != nil {
+			global.GetSlogger().Warnf("ChatOps 子系统关闭出现错误: %v", err)
+		} else {
+			global.GetSlogger().Info("ChatOps 子系统已优雅关闭")
+		}
+	}()
+}
+
+// chatopsBootstrap holds wired ChatOps + Notify subsystem handles so the web
+// command can inject them into web.Server and unwind them in reverse order
+// during graceful shutdown. Per-channel Init failures are non-fatal: the rest
+// of the system must remain available even when a single notification channel
+// is misconfigured.
+type chatopsBootstrap struct {
+	deps      *web.ChatOpsDeps
+	registry  *notify.Registry
+	outbox    *notify.OutboxWorker
+	channels  map[uint]notify.Channel
+	sessions  *chatops.SessionStore
+	closeOnce sync.Once
+}
+
+func (b *chatopsBootstrap) Deps() *web.ChatOpsDeps {
+	if b == nil {
+		return nil
+	}
+	return b.deps
+}
+
+func (b *chatopsBootstrap) ChannelCount() int {
+	if b == nil {
+		return 0
+	}
+	return len(b.channels)
+}
+
+// Shutdown closes adapters first, then stops the outbox worker, then the
+// session store. Each adapter Close is bounded by chatopsShutdownPerStep so a
+// hung adapter cannot block process exit indefinitely.
+func (b *chatopsBootstrap) Shutdown(ctx context.Context) error {
+	if b == nil {
+		return nil
+	}
+	var firstErr error
+	b.closeOnce.Do(func() {
+		log := chatopsLogger()
+		for confID, ch := range b.channels {
+			stepCtx, cancel := context.WithTimeout(ctx, chatopsShutdownPerStep)
+			if err := ch.Close(stepCtx); err != nil {
+				log.Warnf("ChatOps 通道关闭失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+			cancel()
+		}
+		if b.outbox != nil {
+			b.outbox.Stop()
+		}
+		if b.sessions != nil {
+			b.sessions.Stop()
+		}
+	})
+	return firstErr
+}
+
+func bootstrapChatOps(
+	ctx context.Context,
+	tdb *models.TorrentDB,
+	mgr *scheduler.Manager,
+	store *core.ConfigStore,
+) (*chatopsBootstrap, error) {
+	if tdb == nil || tdb.DB == nil {
+		return nil, errors.New("bootstrapChatOps: 数据库未初始化")
+	}
+	if mgr == nil {
+		return nil, errors.New("bootstrapChatOps: scheduler.Manager 不能为空")
+	}
+	if store == nil {
+		return nil, errors.New("bootstrapChatOps: ConfigStore 不能为空")
+	}
+
+	log := chatopsLogger()
+	db := tdb.DB
+	registry := notify.DefaultRegistry()
+
+	auditSvc := app.NewAuditService(db)
+	bindingSvc := app.NewBindingService(db, chatopsBindingCreator)
+	notifSvc := app.NewNotificationService(db, &noopNotifyManager{}, chatopsPushTimeout)
+	taskSvc := app.NewTaskService(mgr)
+	siteSvc := app.NewSiteService(store, nil)
+	torrentSvc := app.NewTorrentService(mgr.GetDownloaderManager())
+
+	outbox := notify.NewOutboxWorker(db, registry, chatopsOutboxInterval)
+	outbox.Start(ctx)
+
+	rateLimiter := chatops.NewRateLimiter()
+	sessionStore := chatops.NewSessionStore()
+	bindings := &dbBindingLookup{db: db}
+	bindCoder := &bindingConsumerAdapter{svc: bindingSvc}
+	auditRecorder := &auditRecorderAdapter{svc: auditSvc}
+
+	chatopscmds.SetServices(&chatopscmds.Services{
+		Task:       taskSvc,
+		Torrent:    torrentSvc,
+		Site:       siteSvc,
+		Binding:    bindingSvc,
+		Downloader: mgr.GetDownloaderManager(),
+		Bindings:   &commandsBindingResolver{lookup: bindings},
+		Sessions:   sessionStore,
+	})
+
+	chain := chatops.NewMessageChain(
+		chatops.DefaultRegistry(),
+		bindings,
+		bindCoder,
+		auditRecorder,
+		rateLimiter,
+		sessionStore,
+		nil,
+	)
+
+	channels, err := initEnabledChannels(ctx, db, registry, chain.Process, log)
+	if err != nil {
+		return nil, fmt.Errorf("初始化通知通道失败: %w", err)
+	}
+
+	deps := &web.ChatOpsDeps{
+		NotificationSvc: notifSvc,
+		BindingSvc:      bindingSvc,
+		AuditSvc:        auditSvc,
+	}
+
+	return &chatopsBootstrap{
+		deps:     deps,
+		registry: registry,
+		outbox:   outbox,
+		channels: channels,
+		sessions: sessionStore,
+	}, nil
+}
+
+// initEnabledChannels iterates enabled NotificationConf rows, calls Init, and
+// wires the inbound handler. Per-channel error is logged and skipped so a
+// misconfigured channel cannot block boot.
+func initEnabledChannels(
+	ctx context.Context,
+	db *gorm.DB,
+	registry *notify.Registry,
+	inbound notify.InboundHandler,
+	log loggerLike,
+) (map[uint]notify.Channel, error) {
+	out := make(map[uint]notify.Channel)
+
+	var confs []models.NotificationConf
+	if err := db.WithContext(ctx).Where("enabled = ?", true).Find(&confs).Error; err != nil {
+		return out, fmt.Errorf("查询启用的通知通道失败: %w", err)
+	}
+
+	for i := range confs {
+		conf := confs[i]
+		ch, makeErr := registry.Make(conf.ChannelType)
+		if makeErr != nil {
+			log.Warnf("ChatOps 通道工厂未知 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, makeErr)
+			continue
+		}
+		if err := ch.Init(ctx, &conf); err != nil {
+			log.Warnf("ChatOps 通道初始化失败 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, err)
+			continue
+		}
+		if ch.SupportsInbound() && inbound != nil {
+			ch.OnInbound(inbound)
+		}
+		out[conf.ID] = ch
+		log.Infof("ChatOps 通道已就绪 conf_id=%d type=%s name=%s", conf.ID, conf.ChannelType, conf.Name)
+	}
+	return out, nil
+}
+
+func chatopsLogger() loggerLike {
+	if global.GetLogger() == nil {
+		return nopLogger{}
+	}
+	return global.GetSlogger()
+}
+
+type loggerLike interface {
+	Infof(template string, args ...any)
+	Warnf(template string, args ...any)
+}
+
+type nopLogger struct{}
+
+func (nopLogger) Infof(string, ...any) {}
+func (nopLogger) Warnf(string, ...any) {}
+
+// noopNotifyManager is the temporary app.NotifyManager used until notify.Router
+// is wired through web.Server. Returning an error forces NotificationService.Push
+// to fall back to the outbox queue, which the worker already drains.
+type noopNotifyManager struct{}
+
+func (noopNotifyManager) Send(_ context.Context, _ uint, _ app.Notification) error {
+	return errors.New("notify manager not yet wired; falling back to outbox")
+}
+
+// dbBindingLookup satisfies chatops.BindingLookup by querying ChannelBinding rows.
+type dbBindingLookup struct {
+	db *gorm.DB
+}
+
+func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, channelType, channelUserID string) (chatops.BindingInfo, bool, error) {
+	row, ok, err := l.findRow(ctx, channelType, channelUserID)
+	if err != nil || !ok {
+		return chatops.BindingInfo{}, ok, err
+	}
+	return chatops.BindingInfo{
+		ID:            row.ID,
+		ConfID:        row.NotificationConfID,
+		ChannelType:   row.ChannelType,
+		ChannelUserID: row.ChannelUserID,
+		ReplyLang:     row.ReplyLang,
+		PtAdmin:       row.PtAdmin,
+		Allowed:       row.Allowed,
+	}, true, nil
+}
+
+func (l *dbBindingLookup) findRow(ctx context.Context, channelType, channelUserID string) (models.ChannelBinding, bool, error) {
+	var row models.ChannelBinding
+	err := l.db.WithContext(ctx).
+		Where("channel_type = ? AND channel_user_id = ?", channelType, channelUserID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.ChannelBinding{}, false, nil
+	}
+	if err != nil {
+		return models.ChannelBinding{}, false, fmt.Errorf("查询 channel_binding 失败: %w", err)
+	}
+	return row, true, nil
+}
+
+// commandsBindingResolver adapts dbBindingLookup to the
+// chatops/commands.BindingResolver shape (uint return for /unbind).
+type commandsBindingResolver struct {
+	lookup *dbBindingLookup
+}
+
+func (r *commandsBindingResolver) FindByChannelUser(ctx context.Context, channelType, channelUserID string) (uint, bool, error) {
+	row, ok, err := r.lookup.findRow(ctx, channelType, channelUserID)
+	if err != nil || !ok {
+		return 0, ok, err
+	}
+	return row.ID, true, nil
+}
+
+// bindingConsumerAdapter narrows app.BindingService.ConsumeCode (DTO return) to
+// chatops.BindCodeConsumer (error only).
+type bindingConsumerAdapter struct {
+	svc app.BindingService
+}
+
+func (a *bindingConsumerAdapter) ConsumeCode(ctx context.Context, code, channelType, channelUserID string) error {
+	_, err := a.svc.ConsumeCode(ctx, code, channelType, channelUserID)
+	return err
+}
+
+// auditRecorderAdapter forwards the field-compatible chatops.AuditEntry to
+// app.AuditService.Record so the two packages stay decoupled.
+type auditRecorderAdapter struct {
+	svc app.AuditService
+}
+
+func (a *auditRecorderAdapter) Record(ctx context.Context, e chatops.AuditEntry) error {
+	return a.svc.Record(ctx, app.AuditEntry{
+		NotificationConfID: e.NotificationConfID,
+		ChannelType:        e.ChannelType,
+		ChannelUserID:      e.ChannelUserID,
+		Command:            e.Command,
+		Args:               e.Args,
+		Result:             e.Result,
+		LatencyMs:          e.LatencyMs,
+	})
 }
