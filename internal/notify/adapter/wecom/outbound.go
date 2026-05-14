@@ -2,11 +2,11 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	"github.com/sunerpy/requests"
-
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
 
 func (w *WeComChannel) sendNotification(ctx context.Context, n notify.Notification) error {
@@ -22,17 +22,25 @@ func (w *WeComChannel) sendNotification(ctx context.Context, n notify.Notificati
 		payload = w.buildMarkdownPayload(n)
 	}
 
-	resp, err := requests.Post(endpoint, payload, requests.WithContext(ctx))
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("wecom 序列化 payload 失败: %w", err)
+	}
+
+	resp, err := httpclient.Post(endpoint, bodyBytes,
+		httpclient.WithContext(ctx),
+		httpclient.WithContentType("application/json"),
+	)
 	if err != nil {
 		return fmt.Errorf("wecom webhook 请求失败: %w", err)
 	}
 
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		return fmt.Errorf("wecom webhook 返回 4xx: %d, body: %s", resp.StatusCode, string(resp.Bytes()))
+	if resp.StatusCode() >= 400 && resp.StatusCode() < 500 {
+		return fmt.Errorf("wecom webhook 返回 4xx: %d, body: %s", resp.StatusCode(), string(resp.Bytes()))
 	}
 
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("wecom webhook 返回 5xx: %d, body: %s", resp.StatusCode, string(resp.Bytes()))
+	if resp.StatusCode() >= 500 {
+		return fmt.Errorf("wecom webhook 返回 5xx: %d, body: %s", resp.StatusCode(), string(resp.Bytes()))
 	}
 
 	return nil
