@@ -156,13 +156,14 @@ var webCmd = &cobra.Command{
 			}
 		}
 
-		installShutdownHandler(bs)
+		shutdownDone := installShutdownHandler(srv, bs)
 
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
 		go startVersionChecker()
 		if err := srv.Serve(addr); err != nil {
 			global.GetSlogger().Fatalf("Web 启动失败: %v", err)
 		}
+		<-shutdownDone
 	},
 }
 
@@ -225,23 +226,35 @@ func startVersionChecker() {
 }
 
 // installShutdownHandler traps SIGINT/SIGTERM and tears down the ChatOps
-// subsystem in reverse-dependency order before the process exits.
-func installShutdownHandler(bs *chatopsBootstrap) {
-	if bs == nil {
-		return
-	}
+// subsystem in reverse-dependency order, then shuts down the main HTTP server
+// so Serve returns and the process exits cleanly without os.Exit.
+// Returns a done channel closed after both shutdowns complete; main should
+// block on it after Serve returns to ensure shutdown logs are flushed.
+func installShutdownHandler(srv *web.Server, bs *chatopsBootstrap) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		ctx, cancel := context.WithTimeout(context.Background(), chatopsShutdownBudget)
 		defer cancel()
-		if err := bs.Shutdown(ctx); err != nil {
-			global.GetSlogger().Warnf("ChatOps 子系统关闭出现错误: %v", err)
-		} else {
-			global.GetSlogger().Info("ChatOps 子系统已优雅关闭")
+		if bs != nil {
+			if err := bs.Shutdown(ctx); err != nil {
+				global.GetSlogger().Warnf("ChatOps 子系统关闭出现错误: %v", err)
+			} else {
+				global.GetSlogger().Info("ChatOps 子系统已优雅关闭")
+			}
+		}
+		if srv != nil {
+			if err := srv.Shutdown(ctx); err != nil {
+				global.GetSlogger().Warnf("Web 服务关闭出现错误: %v", err)
+			} else {
+				global.GetSlogger().Info("Web 服务已优雅关闭")
+			}
 		}
 	}()
+	return done
 }
 
 // chatopsBootstrap holds wired ChatOps + Notify subsystem handles so the web

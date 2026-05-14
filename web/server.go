@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -35,6 +36,7 @@ type Server struct {
 	sessions    map[string]string // sessionID -> username
 	chatopsDeps *ChatOpsDeps
 	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
+	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
 }
 
 // SetQAHook installs a callback invoked once during Serve, after all production
@@ -178,7 +180,20 @@ func (s *Server) Serve(addr string) error {
 	})
 	handler := logMiddleware(mux)
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	return srv.ListenAndServe()
+	s.httpServer = srv
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// Shutdown gracefully stops the underlying http.Server so Serve returns.
+// Safe to call before Serve (no-op) and concurrent with Serve.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil || s.httpServer == nil {
+		return nil
+	}
+	return s.httpServer.Shutdown(ctx)
 }
 
 type statusRecorder struct {
