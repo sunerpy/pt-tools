@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { type NotificationConfig, chatopsApi } from "@/api";
+import { ChatDotRound, Plus } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -140,27 +141,35 @@ function getChannelLabel(type: string) {
 <template>
   <div class="page-container">
     <div class="hero-block">
-      <h1 class="hero-title">通知通道</h1>
-      <p class="hero-subtitle">
-        管理与即时通讯软件的连接，接收系统通知并通过聊天界面控制 pt-tools。
-      </p>
-      <div class="hero-actions">
-        <el-button type="primary" size="large" @click="openAddDialog" data-testid="add-channel-btn">
-          <el-icon><Plus /></el-icon>
-          添加通道
-        </el-button>
+      <div class="hero-content">
+        <span class="hero-eyebrow">CHATOPS · NOTIFICATIONS</span>
+        <h1 class="hero-title">通知通道</h1>
+        <p class="hero-subtitle">
+          管理与即时通讯软件的连接，接收系统通知并通过聊天界面控制 pt-tools。
+        </p>
+        <div class="hero-actions">
+          <el-button
+            type="primary"
+            size="large"
+            @click="openAddDialog"
+            data-testid="add-channel-btn">
+            <el-icon><Plus /></el-icon>
+            添加通道
+          </el-button>
+          <span class="hero-meta">已配置 {{ notifications.length }} 个通道</span>
+        </div>
       </div>
     </div>
 
     <el-skeleton v-if="loading && notifications.length === 0" :rows="6" animated class="mt-4" />
 
     <div v-else-if="notifications.length > 0" class="cards-grid">
-      <el-card
+      <article
         v-for="item in notifications"
         :key="item.id"
         class="channel-card"
-        :data-testid="`channel-card-${item.name}`"
-        shadow="hover">
+        :data-testid="`channel-card-${item.name}`">
+        <div class="card-accent" :data-channel="item.channel_type"></div>
         <div class="card-header">
           <div class="channel-brand">
             <el-icon class="brand-icon"
@@ -186,14 +195,23 @@ function getChannelLabel(type: string) {
           <div class="spacer"></div>
           <el-button size="small" type="danger" plain @click="handleDelete(item)">删除</el-button>
         </div>
-      </el-card>
+      </article>
     </div>
 
-    <el-empty v-else description="暂无通知通道" class="mt-8">
-      <el-button type="primary" @click="openAddDialog">添加通道</el-button>
-    </el-empty>
+    <div v-else class="empty-state">
+      <div class="empty-icon">
+        <el-icon><ChatDotRound /></el-icon>
+      </div>
+      <h3 class="empty-title">尚未配置任何通知通道</h3>
+      <p class="empty-desc">
+        添加 Telegram / QQ / Webhook / 企业微信 通道，让 pt-tools 主动推送任务结果与告警。
+      </p>
+      <el-button type="primary" size="large" @click="openAddDialog">
+        <el-icon><Plus /></el-icon>
+        添加第一个通道
+      </el-button>
+    </div>
 
-    <!-- 添加通道弹窗 -->
     <el-dialog v-model="addDialogVisible" title="添加通知通道" width="500px">
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="通道类型">
@@ -214,7 +232,6 @@ function getChannelLabel(type: string) {
             data-testid="name-input" />
         </el-form-item>
 
-        <!-- 根据类型显示不同凭证输入 -->
         <template v-if="newChannel.channel_type === 'telegram'">
           <el-form-item label="Bot Token" required>
             <el-input
@@ -259,34 +276,67 @@ function getChannelLabel(type: string) {
   padding: 16px 24px 32px;
 }
 
-/* Delta UI style Hero */
 .hero-block {
   position: relative;
-  padding: 40px 24px;
+  padding: 48px 32px;
   margin-bottom: 32px;
-  border-radius: var(--pt-radius-xl, 16px);
+  border-radius: 22px;
   background:
     radial-gradient(
       ellipse at top right,
-      color-mix(in oklab, var(--pt-color-primary) 15%, transparent),
+      color-mix(in oklab, var(--pt-color-primary) 18%, transparent),
       transparent 60%
     ),
-    linear-gradient(to right, rgb(128 128 128 / 8%) 1px, transparent 1px) 0 0 / 32px 32px,
-    linear-gradient(to bottom, rgb(128 128 128 / 8%) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
+      transparent 1px
+    ) 0 0 / 32px 32px,
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
+      transparent 1px
+    ) 0 0 / 32px 32px,
     var(--pt-bg-surface);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
+  box-shadow:
+    0 1px 2px rgb(28 25 23 / 4%),
+    0 8px 24px -12px rgb(28 25 23 / 8%);
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.hero-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--pt-color-primary);
+  text-transform: uppercase;
 }
 
 .hero-title {
-  font-size: 32px;
+  font-size: 40px;
   font-weight: 700;
   margin: 0;
-  color: var(--pt-text-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  background: linear-gradient(
+    135deg,
+    var(--pt-text-primary) 25%,
+    var(--pt-color-primary) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .hero-subtitle {
@@ -294,11 +344,20 @@ function getChannelLabel(type: string) {
   color: var(--pt-text-secondary);
   margin: 0;
   max-width: 600px;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .hero-actions {
-  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.hero-meta {
+  font-size: 13px;
+  color: var(--pt-text-secondary);
 }
 
 .cards-grid {
@@ -319,50 +378,87 @@ function getChannelLabel(type: string) {
   }
 }
 
-/* Glassmorphism Card */
 .channel-card {
-  border-radius: var(--pt-radius-lg, 12px);
-  background: color-mix(in oklab, var(--pt-bg-surface) 70%, transparent);
-  backdrop-filter: blur(8px);
+  position: relative;
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--pt-bg-surface) 78%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--pt-border-color);
-  box-shadow: var(--pt-shadow-sm);
+  box-shadow: 0 1px 2px rgb(28 25 23 / 4%);
   transition:
-    transform 200ms ease,
-    box-shadow 200ms ease;
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 200ms ease;
   display: flex;
   flex-direction: column;
+  padding: 22px;
+  overflow: hidden;
 }
 
 .channel-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--pt-shadow-md);
+  transform: translateY(-3px);
+  box-shadow:
+    0 1px 2px rgb(28 25 23 / 4%),
+    0 12px 32px -16px rgb(28 25 23 / 14%);
+  border-color: color-mix(in oklab, var(--pt-color-primary) 25%, var(--pt-border-color));
+}
+
+.card-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--pt-color-primary) 0%,
+    color-mix(in oklab, var(--pt-color-primary) 40%, transparent) 100%
+  );
+  opacity: 0.85;
+}
+
+.card-accent[data-channel="telegram"] {
+  background: linear-gradient(90deg, #2aabee 0%, color-mix(in oklab, #2aabee 30%, transparent));
+}
+
+.card-accent[data-channel="qq_onebot"] {
+  background: linear-gradient(90deg, #12b7f5 0%, color-mix(in oklab, #12b7f5 30%, transparent));
+}
+
+.card-accent[data-channel="wecom_webhook"] {
+  background: linear-gradient(90deg, #07c160 0%, color-mix(in oklab, #07c160 30%, transparent));
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .channel-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .brand-icon {
   font-size: 20px;
   color: var(--pt-color-primary);
-  background: color-mix(in oklab, var(--pt-color-primary) 10%, transparent);
-  padding: 8px;
-  border-radius: 8px;
+  background: color-mix(in oklab, var(--pt-color-primary) 12%, transparent);
+  padding: 9px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .brand-name {
   font-weight: 600;
   color: var(--pt-text-secondary);
-  font-size: 14px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
 }
 
 .card-body {
@@ -371,10 +467,11 @@ function getChannelLabel(type: string) {
 }
 
 .channel-name {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 600;
   margin: 0 0 8px 0;
   color: var(--pt-text-primary);
+  letter-spacing: -0.01em;
 }
 
 .channel-status {
@@ -383,7 +480,7 @@ function getChannelLabel(type: string) {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .channel-status::before {
@@ -392,23 +489,75 @@ function getChannelLabel(type: string) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--pt-color-neutral-400);
+  background: color-mix(in oklab, var(--pt-text-secondary) 40%, transparent);
 }
 
 .channel-status.is-active::before {
-  background: var(--pt-color-success);
-  box-shadow: 0 0 8px color-mix(in oklab, var(--pt-color-success) 50%, transparent);
+  background: var(--pt-color-success, #16a34a);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--pt-color-success, #16a34a) 50%, transparent);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.18);
+  }
 }
 
 .card-footer {
   display: flex;
   gap: 8px;
   padding-top: 16px;
-  border-top: 1px solid color-mix(in oklab, var(--pt-border-color) 50%, transparent);
+  border-top: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
 }
 
 .spacer {
   flex: 1;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 64px 24px;
+  margin: 24px auto;
+  max-width: 520px;
+  text-align: center;
+  border-radius: 22px;
+  background: color-mix(in oklab, var(--pt-bg-surface) 70%, transparent);
+  border: 1px dashed var(--pt-border-color);
+}
+
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--pt-color-primary) 10%, transparent);
+  color: var(--pt-color-primary);
+  font-size: 32px;
+}
+
+.empty-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--pt-text-primary);
+}
+
+.empty-desc {
+  font-size: 14px;
+  color: var(--pt-text-secondary);
+  margin: 0 0 8px;
+  line-height: 1.65;
+  max-width: 400px;
 }
 
 .mt-4 {
