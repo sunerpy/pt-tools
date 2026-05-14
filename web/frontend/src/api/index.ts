@@ -1122,7 +1122,7 @@ export interface NotificationConfig {
   channel_type: string;
   name: string;
   enabled: boolean;
-  // Dynamic fields
+  // Dynamic fields (frontend form shape; backend stores under encrypted config_json)
   bot_token?: string;
   allowed_users?: string;
   admin_users?: string;
@@ -1135,6 +1135,88 @@ export interface NotificationConfig {
   hmac_secret?: string;
   headers?: string;
   webhook_key?: string;
+}
+
+const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
+  "id",
+  "channel_type",
+  "name",
+  "enabled",
+]);
+
+const NOTIFICATION_DYNAMIC_FIELDS = [
+  "bot_token",
+  "allowed_users",
+  "admin_users",
+  "default_chat_id",
+  "listen_addr",
+  "access_token",
+  "admin_qq_users",
+  "allowed_qq_users",
+  "endpoint_url",
+  "hmac_secret",
+  "headers",
+  "webhook_key",
+] as const;
+
+interface NotificationWireBody {
+  channel_type?: string;
+  name?: string;
+  enabled?: boolean;
+  config_json?: Record<string, unknown>;
+}
+
+function packNotificationBody(
+  data: Partial<NotificationConfig>,
+  includeEmpty: boolean,
+): NotificationWireBody {
+  const body: NotificationWireBody = {};
+  if (data.channel_type !== undefined) body.channel_type = data.channel_type;
+  if (data.name !== undefined) body.name = data.name;
+  if (data.enabled !== undefined) body.enabled = data.enabled;
+  const config: Record<string, unknown> = {};
+  let hasDynamic = false;
+  for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
+    const v = data[key];
+    if (v !== undefined) {
+      config[key] = v;
+      hasDynamic = true;
+    }
+  }
+  if (hasDynamic || includeEmpty) {
+    body.config_json = config;
+  }
+  return body;
+}
+
+function unpackNotificationResponse(
+  raw: NotificationConfig & { config_json?: unknown },
+): NotificationConfig {
+  const result: NotificationConfig = {
+    id: raw.id,
+    channel_type: raw.channel_type,
+    name: raw.name,
+    enabled: raw.enabled,
+  };
+  const sink = result as unknown as Record<string, unknown>;
+  for (const key of Object.keys(raw) as (keyof typeof raw)[]) {
+    if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
+    if (key === "config_json") continue;
+    const v = raw[key];
+    if (typeof v === "string") {
+      sink[key as string] = v;
+    }
+  }
+  if (raw.config_json && typeof raw.config_json === "object") {
+    const cfg = raw.config_json as Record<string, unknown>;
+    for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
+      const v = cfg[key];
+      if (typeof v === "string") {
+        sink[key] = v;
+      }
+    }
+  }
+  return result;
 }
 
 export interface ChatOpBinding {
@@ -1164,14 +1246,29 @@ export interface AuditLog {
 
 export const chatopsApi = {
   notifications: {
-    list: () => api.get<NotificationConfig[]>("/api/chatops/notifications"),
-    get: (id: number) => api.get<NotificationConfig>(`/api/chatops/notifications/${id}`),
-    create: (data: Omit<NotificationConfig, "id">) =>
-      api.post<NotificationConfig>("/api/chatops/notifications", data),
+    list: async () => {
+      const raw = await api.get<(NotificationConfig & { config_json?: unknown })[]>(
+        "/api/chatops/notifications",
+      );
+      return (raw || []).map(unpackNotificationResponse);
+    },
+    get: async (id: number) => {
+      const raw = await api.get<NotificationConfig & { config_json?: unknown }>(
+        `/api/chatops/notifications/${id}`,
+      );
+      return unpackNotificationResponse(raw);
+    },
+    create: async (data: Omit<NotificationConfig, "id">) => {
+      const raw = await api.post<NotificationConfig & { config_json?: unknown }>(
+        "/api/chatops/notifications",
+        packNotificationBody(data, true),
+      );
+      return unpackNotificationResponse(raw);
+    },
     update: (id: number, data: Partial<NotificationConfig>) =>
-      request<NotificationConfig>(`/api/chatops/notifications/${id}`, {
+      request<{ status: string }>(`/api/chatops/notifications/${id}`, {
         method: "PUT",
-        body: JSON.stringify(data),
+        body: JSON.stringify(packNotificationBody(data, false)),
       }),
     delete: (id: number) => api.delete<void>(`/api/chatops/notifications/${id}`),
     test: (id: number) => api.post<{ success: boolean }>(`/api/chatops/notifications/${id}/test`),
