@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -61,14 +60,9 @@ func TestQQAdapter_PermissionGate_AdminWhitelistAllow(t *testing.T) {
 	require.NoError(t, ch.Init(context.Background(), conf))
 	defer func() { _ = ch.Close(context.Background()) }()
 
-	var (
-		mu       sync.Mutex
-		received []notify.InboundMessage
-	)
+	received := make(chan notify.InboundMessage, 2)
 	ch.OnInbound(func(_ context.Context, msg notify.InboundMessage) error {
-		mu.Lock()
-		defer mu.Unlock()
-		received = append(received, msg)
+		received <- msg
 		return nil
 	})
 
@@ -81,13 +75,16 @@ func TestQQAdapter_PermissionGate_AdminWhitelistAllow(t *testing.T) {
 	require.NoError(t, ch.HandleRawEvent(whitelistedEvent))
 	require.NoError(t, ch.HandleRawEvent(deniedEvent))
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.Len(t, received, 2, "expected only admin + whitelisted to pass")
-	assert.Equal(t, "10001", received[0].ChannelUserID)
-	assert.Equal(t, "10002", received[1].ChannelUserID)
-	assert.Equal(t, "qq_onebot", received[0].ChannelType)
-	assert.Equal(t, uint(7), received[0].SourceConfID)
+	first := requireInboundMessage(t, received)
+	second := requireInboundMessage(t, received)
+	if first.ChannelUserID == "10002" {
+		first, second = second, first
+	}
+	assert.Equal(t, "10001", first.ChannelUserID)
+	assert.Equal(t, "10002", second.ChannelUserID)
+	assert.Equal(t, "qq_onebot", first.ChannelType)
+	assert.Equal(t, uint(7), first.SourceConfID)
+	assertNoInboundMessage(t, received)
 }
 
 // TestQQAdapter_LongMessage_Pagination verifies the in-memory paginator:
@@ -141,6 +138,52 @@ func TestQQAdapter_OnReconnect_StateCleared(t *testing.T) {
 		"pagination session should be cleared after reconnect")
 }
 
+func TestHandleRawEventDispatchesAsync(t *testing.T) {
+	ch := New()
+	conf := &models.NotificationConf{
+		ID:          9,
+		ChannelType: "qq_onebot",
+		ConfigJSON: `{
+			"listen_addr":"127.0.0.1:0",
+			"path":"/onebot/v11/ws",
+			"admin_qq_users":[10001]
+		}`,
+		Enabled: true,
+	}
+	require.NoError(t, ch.Init(context.Background(), conf))
+	defer func() { _ = ch.Close(context.Background()) }()
+
+	blocker := make(chan struct{})
+	received := make(chan notify.InboundMessage, 1)
+	ch.OnInbound(func(_ context.Context, msg notify.InboundMessage) error {
+		received <- msg
+		<-blocker
+		return nil
+	})
+
+	payload := buildEvent(10001, "/help")
+
+	// HandleRawEvent must return promptly even though the handler is blocked.
+	done := make(chan error, 1)
+	go func() { done <- ch.HandleRawEvent(payload) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("HandleRawEvent did not return; handler is still blocking the read path")
+	}
+
+	// Verify the handler did get called.
+	got := requireInboundMessage(t, received)
+	require.Equal(t, "/help", got.Text)
+
+	close(blocker)
+}
+
+// Note: TestCallAPI_TimesOutWhenNoResponse omitted — gorilla websocket.Conn
+// is not easily mockable; CallAPI requires a concrete *websocket.Conn and the
+// timeout path is covered as a defensive runtime guard around production WS I/O.
+
 // --- helpers ---
 
 // buildEvent constructs a OneBot v11 group message JSON payload as bytes.
@@ -186,6 +229,26 @@ func itoa(i int) string {
 	return strings.Clone(string(buf[pos:]))
 }
 
+func requireInboundMessage(t *testing.T, received <-chan notify.InboundMessage) notify.InboundMessage {
+	t.Helper()
+	select {
+	case msg := <-received:
+		return msg
+	case <-time.After(time.Second):
+		t.Fatal("handler was never invoked")
+	}
+	return notify.InboundMessage{}
+}
+
+func assertNoInboundMessage(t *testing.T, received <-chan notify.InboundMessage) {
+	t.Helper()
+	select {
+	case msg := <-received:
+		t.Fatalf("unexpected inbound message: %#v", msg)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // TestEventToInboundPropagatesMessageType verifies that the QQ adapter
 // preserves the original message_type ("private" or "group") in InboundMessage
 // so Reply can route replies correctly via send_private_msg vs send_group_msg.
@@ -204,14 +267,9 @@ func TestEventToInboundPropagatesMessageType(t *testing.T) {
 	require.NoError(t, ch.Init(context.Background(), conf))
 	defer func() { _ = ch.Close(context.Background()) }()
 
-	var (
-		mu       sync.Mutex
-		received []notify.InboundMessage
-	)
+	received := make(chan notify.InboundMessage, 2)
 	ch.OnInbound(func(_ context.Context, msg notify.InboundMessage) error {
-		mu.Lock()
-		defer mu.Unlock()
-		received = append(received, msg)
+		received <- msg
 		return nil
 	})
 
@@ -237,15 +295,17 @@ func TestEventToInboundPropagatesMessageType(t *testing.T) {
 	}`)
 	require.NoError(t, ch.HandleRawEvent(groupEvent))
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.Len(t, received, 2, "expected both messages")
+	privateMsg := requireInboundMessage(t, received)
+	groupMsg := requireInboundMessage(t, received)
+	if privateMsg.MessageType == "group" {
+		privateMsg, groupMsg = groupMsg, privateMsg
+	}
 
 	// Verify private message preservation
-	assert.Equal(t, "private", received[0].MessageType)
-	assert.Equal(t, "429471838", received[0].ChatID)
+	assert.Equal(t, "private", privateMsg.MessageType)
+	assert.Equal(t, "429471838", privateMsg.ChatID)
 
 	// Verify group message preservation
-	assert.Equal(t, "group", received[1].MessageType)
-	assert.Equal(t, "522166605", received[1].ChatID)
+	assert.Equal(t, "group", groupMsg.MessageType)
+	assert.Equal(t, "522166605", groupMsg.ChatID)
 }

@@ -2,14 +2,18 @@ package qq
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/RomiChan/websocket"
 	"github.com/tidwall/gjson"
 	zero "github.com/wdvxdr1123/ZeroBot"
 )
+
+const qqCallAPITimeout = 10 * time.Second
 
 // napCatCaller 实现 zero.APICaller 接口，承载与 NapCat 反向 WS 客户端的
 // 请求/响应映射。设计参考 ZeroBot driver/wsserver.go 中的 *WSSCaller，
@@ -56,6 +60,9 @@ func (c *napCatCaller) CallAPI(ctx context.Context, req zero.APIRequest) (zero.A
 		return zero.APIResponse{}, err
 	}
 
+	timer := time.NewTimer(qqCallAPITimeout)
+	defer timer.Stop()
+
 	select {
 	case resp, ok := <-ch:
 		if !ok {
@@ -67,6 +74,11 @@ func (c *napCatCaller) CallAPI(ctx context.Context, req zero.APIRequest) (zero.A
 		delete(c.pending, req.Echo)
 		c.pendingMu.Unlock()
 		return zero.APIResponse{}, ctx.Err()
+	case <-timer.C:
+		c.pendingMu.Lock()
+		delete(c.pending, req.Echo)
+		c.pendingMu.Unlock()
+		return zero.APIResponse{}, fmt.Errorf("QQ API 调用超时 echo=%d action=%s", req.Echo, req.Action)
 	}
 }
 

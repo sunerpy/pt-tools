@@ -59,7 +59,18 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 	if q.lifecycleCtx != nil {
 		ctx = q.lifecycleCtx
 	}
-	return handler(ctx, msg)
+	// Run handler in its own goroutine so the WS read loop can keep draining
+	// inbound frames (esp. our own outbound API echo responses) while the chain
+	// processes commands. Without this, /sites or any handler that triggers an
+	// outbound CallAPI deadlocks: CallAPI waits for the response, but the
+	// response can only be dispatched by the same read goroutine that's blocked
+	// inside the handler.
+	go func(ctx context.Context, msg inboundMessage) {
+		if err := handler(ctx, msg); err != nil {
+			warnLogger().Warnf("QQ 适配器(%d): ChatOps handler 异常: %v", q.confID, err)
+		}
+	}(ctx, msg)
+	return nil
 }
 
 func (q *QQChannel) eventToInbound(evt onebotEvent, text string) inboundMessage {
