@@ -290,6 +290,8 @@ function getChannelLabel(type: string) {
   --chatops-glass-bg: oklch(1 0 0 / 0.72);
   --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
   --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
+  --chatops-grid-color: oklch(0.36 0.006 50 / 0.05);
+  --chatops-bloom-color: oklch(0.66 0.16 50 / 0.1);
 }
 :global(.dark) .page-container,
 :global(html.dark) .page-container {
@@ -299,6 +301,8 @@ function getChannelLabel(type: string) {
   --chatops-stone-muted: oklch(0.65 0.02 70);
   --chatops-glass-bg: var(--chatops-glass-bg-dk);
   --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
+  --chatops-grid-color: oklch(0.95 0.005 80 / 0.04);
+  --chatops-bloom-color: oklch(0.72 0.15 55 / 0.14);
 }
 
 .page-container {
@@ -307,27 +311,35 @@ function getChannelLabel(type: string) {
 
 .hero-block {
   position: relative;
-  padding: 48px 32px;
-  margin-bottom: 32px;
-  border-radius: var(--chatops-radius-lg);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+  border-radius: 14px;
   background: var(--chatops-glass-bg);
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
   box-shadow: var(--chatops-shadow-md);
+}
+
+@media (min-width: 768px) {
+  .hero-block {
+    padding: 28px 32px;
+  }
 }
 
 .hero-block::before {
   content: "";
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(var(--chatops-dot-color) 1px, transparent 1px);
-  background-size: 18px 18px;
+  background-image:
+    linear-gradient(to right, var(--chatops-grid-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--chatops-grid-color) 1px, transparent 1px);
+  background-size: 32px 32px;
   pointer-events: none;
-  opacity: 0.6;
-  mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
-  -webkit-mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  z-index: 0;
 }
 
 .hero-block::after {
@@ -335,11 +347,17 @@ function getChannelLabel(type: string) {
   position: absolute;
   inset: 0;
   background: radial-gradient(
-    ellipse at top right,
-    color-mix(in oklab, var(--chatops-brand) 14%, transparent),
-    transparent 60%
+    circle at 90% 10%,
+    var(--chatops-bloom-color) 0%,
+    transparent 40%
   );
   pointer-events: none;
+  z-index: 0;
+}
+
+.hero-block > * {
+  position: relative;
+  z-index: 1;
 }
 
 .hero-content {
@@ -347,7 +365,7 @@ function getChannelLabel(type: string) {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   max-width: 720px;
 }
 
@@ -361,11 +379,11 @@ function getChannelLabel(type: string) {
 
 .hero-title {
   font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
-  font-size: 42px;
+  font-size: 1.625rem;
   font-weight: 700;
   margin: 0;
   letter-spacing: -0.025em;
-  line-height: 1.1;
+  line-height: 1.15;
   background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
   -webkit-background-clip: text;
   background-clip: text;
@@ -373,12 +391,18 @@ function getChannelLabel(type: string) {
   color: transparent;
 }
 
+@media (min-width: 768px) {
+  .hero-title {
+    font-size: 2rem;
+  }
+}
+
 .hero-subtitle {
-  font-size: 16px;
+  font-size: 0.95rem;
   color: var(--chatops-stone-muted);
-  margin: 0;
+  margin: 4px 0 0;
   max-width: 600px;
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 .hero-actions {
