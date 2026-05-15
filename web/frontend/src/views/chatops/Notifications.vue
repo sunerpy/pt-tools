@@ -151,6 +151,7 @@ function getChannelLabel(type: string) {
           <el-button
             type="primary"
             size="large"
+            class="delta-cta"
             @click="openAddDialog"
             data-testid="add-channel-btn">
             <el-icon><Plus /></el-icon>
@@ -206,7 +207,7 @@ function getChannelLabel(type: string) {
       <p class="empty-desc">
         添加 Telegram / QQ / Webhook / 企业微信 通道，让 pt-tools 主动推送任务结果与告警。
       </p>
-      <el-button type="primary" size="large" @click="openAddDialog">
+      <el-button type="primary" size="large" class="delta-cta" @click="openAddDialog">
         <el-icon><Plus /></el-icon>
         添加第一个通道
       </el-button>
@@ -272,6 +273,34 @@ function getChannelLabel(type: string) {
 </template>
 
 <style scoped>
+/* delta-ui-origin polish layer — scoped to chatops/Notifications */
+.page-container {
+  --chatops-brand: oklch(0.66 0.16 50);
+  --chatops-brand-hover: oklch(0.6 0.18 50);
+  --chatops-brand-soft: oklch(0.95 0.04 60);
+  --chatops-stone-muted: oklch(0.55 0.02 60);
+  --chatops-radius-sm: 8px;
+  --chatops-radius-md: 12px;
+  --chatops-radius-lg: 18px;
+  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
+  --chatops-shadow-md:
+    0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
+  --chatops-shadow-lg:
+    0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
+  --chatops-glass-bg: oklch(1 0 0 / 0.72);
+  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
+  --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
+}
+:global(.dark) .page-container,
+:global(html.dark) .page-container {
+  --chatops-brand: oklch(0.72 0.15 55);
+  --chatops-brand-hover: oklch(0.78 0.13 55);
+  --chatops-brand-soft: oklch(0.3 0.05 55 / 0.4);
+  --chatops-stone-muted: oklch(0.65 0.02 70);
+  --chatops-glass-bg: var(--chatops-glass-bg-dk);
+  --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
+}
+
 .page-container {
   padding: 16px 24px 32px;
 }
@@ -280,31 +309,37 @@ function getChannelLabel(type: string) {
   position: relative;
   padding: 48px 32px;
   margin-bottom: 32px;
-  border-radius: 22px;
-  background:
-    radial-gradient(
-      ellipse at top right,
-      color-mix(in oklab, var(--pt-color-primary) 18%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(
-        to right,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    linear-gradient(
-        to bottom,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    var(--pt-bg-surface);
+  border-radius: var(--chatops-radius-lg);
+  background: var(--chatops-glass-bg);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 8px 24px -12px rgb(28 25 23 / 8%);
+  box-shadow: var(--chatops-shadow-md);
+}
+
+.hero-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--chatops-dot-color) 1px, transparent 1px);
+  background-size: 18px 18px;
+  pointer-events: none;
+  opacity: 0.6;
+  mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+  -webkit-mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+}
+
+.hero-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at top right,
+    color-mix(in oklab, var(--chatops-brand) 14%, transparent),
+    transparent 60%
+  );
+  pointer-events: none;
 }
 
 .hero-content {
@@ -320,17 +355,18 @@ function getChannelLabel(type: string) {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
-  color: var(--pt-color-primary);
+  color: var(--chatops-brand);
   text-transform: uppercase;
 }
 
 .hero-title {
-  font-size: 40px;
+  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
+  font-size: 42px;
   font-weight: 700;
   margin: 0;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   line-height: 1.1;
-  background: linear-gradient(135deg, var(--pt-text-primary) 25%, var(--pt-color-primary) 100%);
+  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -339,7 +375,7 @@ function getChannelLabel(type: string) {
 
 .hero-subtitle {
   font-size: 16px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
   max-width: 600px;
   line-height: 1.65;
@@ -355,7 +391,25 @@ function getChannelLabel(type: string) {
 
 .hero-meta {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
+}
+
+/* Primary CTA — delta accent (light touch, only on flagged buttons) */
+.delta-cta.el-button--primary {
+  background: linear-gradient(180deg, var(--chatops-brand), var(--chatops-brand-hover));
+  border-color: var(--chatops-brand);
+  box-shadow: 0 4px 12px oklch(0.66 0.16 50 / 0.3);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    filter 150ms ease;
+}
+.delta-cta.el-button--primary:hover {
+  filter: brightness(1.04);
+  box-shadow: 0 6px 16px oklch(0.66 0.16 50 / 0.38);
+}
+.delta-cta.el-button--primary:active {
+  transform: translateY(1px);
 }
 
 .cards-grid {
@@ -378,12 +432,12 @@ function getChannelLabel(type: string) {
 
 .channel-card {
   position: relative;
-  border-radius: 18px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 78%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--chatops-radius-md);
+  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--pt-border-color);
-  box-shadow: 0 1px 2px rgb(28 25 23 / 4%);
+  box-shadow: var(--chatops-shadow-sm);
   transition:
     transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
@@ -396,10 +450,8 @@ function getChannelLabel(type: string) {
 
 .channel-card:hover {
   transform: translateY(-3px);
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 12px 32px -16px rgb(28 25 23 / 14%);
-  border-color: color-mix(in oklab, var(--pt-color-primary) 25%, var(--pt-border-color));
+  box-shadow: var(--chatops-shadow-md);
+  border-color: color-mix(in oklab, var(--chatops-brand) 28%, var(--pt-border-color));
 }
 
 .card-accent {
@@ -410,22 +462,40 @@ function getChannelLabel(type: string) {
   height: 3px;
   background: linear-gradient(
     90deg,
-    var(--pt-color-primary) 0%,
-    color-mix(in oklab, var(--pt-color-primary) 40%, transparent) 100%
+    var(--chatops-brand) 0%,
+    color-mix(in oklab, var(--chatops-brand) 40%, transparent) 100%
   );
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
-.card-accent[data-channel="telegram"] {
-  background: linear-gradient(90deg, #2aabee 0%, color-mix(in oklab, #2aabee 30%, transparent));
-}
-
+/* Delta-prescribed channel palette */
 .card-accent[data-channel="qq_onebot"] {
-  background: linear-gradient(90deg, #12b7f5 0%, color-mix(in oklab, #12b7f5 30%, transparent));
+  background: linear-gradient(
+    90deg,
+    oklch(0.65 0.13 145) 0%,
+    color-mix(in oklab, oklch(0.65 0.13 145) 30%, transparent) 100%
+  );
 }
-
+.card-accent[data-channel="telegram"] {
+  background: linear-gradient(
+    90deg,
+    oklch(0.62 0.13 230) 0%,
+    color-mix(in oklab, oklch(0.62 0.13 230) 30%, transparent) 100%
+  );
+}
 .card-accent[data-channel="wecom_webhook"] {
-  background: linear-gradient(90deg, #07c160 0%, color-mix(in oklab, #07c160 30%, transparent));
+  background: linear-gradient(
+    90deg,
+    oklch(0.66 0.16 50) 0%,
+    color-mix(in oklab, oklch(0.66 0.16 50) 30%, transparent) 100%
+  );
+}
+.card-accent[data-channel="webhook"] {
+  background: linear-gradient(
+    90deg,
+    oklch(0.55 0.18 290) 0%,
+    color-mix(in oklab, oklch(0.55 0.18 290) 30%, transparent) 100%
+  );
 }
 
 .card-header {
@@ -443,8 +513,8 @@ function getChannelLabel(type: string) {
 
 .brand-icon {
   font-size: 20px;
-  color: var(--pt-color-primary);
-  background: color-mix(in oklab, var(--pt-color-primary) 12%, transparent);
+  color: var(--chatops-brand);
+  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
   padding: 9px;
   border-radius: 10px;
   display: inline-flex;
@@ -454,7 +524,7 @@ function getChannelLabel(type: string) {
 
 .brand-name {
   font-weight: 600;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   font-size: 13px;
   letter-spacing: 0.02em;
 }
@@ -474,7 +544,7 @@ function getChannelLabel(type: string) {
 
 .channel-status {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
   display: flex;
   align-items: center;
@@ -487,7 +557,7 @@ function getChannelLabel(type: string) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: color-mix(in oklab, var(--pt-text-secondary) 40%, transparent);
+  background: color-mix(in oklab, var(--chatops-stone-muted) 40%, transparent);
 }
 
 .channel-status.is-active::before {
@@ -519,6 +589,11 @@ function getChannelLabel(type: string) {
   flex: 1;
 }
 
+/* Element Plus tag radius nudge */
+.channel-card :deep(.el-tag) {
+  border-radius: var(--chatops-radius-sm);
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -528,9 +603,12 @@ function getChannelLabel(type: string) {
   margin: 24px auto;
   max-width: 520px;
   text-align: center;
-  border-radius: 22px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 70%, transparent);
+  border-radius: var(--chatops-radius-lg);
+  background: var(--chatops-glass-bg);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px dashed var(--pt-border-color);
+  box-shadow: var(--chatops-shadow-sm);
 }
 
 .empty-icon {
@@ -539,8 +617,8 @@ function getChannelLabel(type: string) {
   width: 72px;
   height: 72px;
   border-radius: 999px;
-  background: color-mix(in oklab, var(--pt-color-primary) 10%, transparent);
-  color: var(--pt-color-primary);
+  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
+  color: var(--chatops-brand);
   font-size: 32px;
 }
 
@@ -553,7 +631,7 @@ function getChannelLabel(type: string) {
 
 .empty-desc {
   font-size: 14px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0 0 8px;
   line-height: 1.65;
   max-width: 400px;

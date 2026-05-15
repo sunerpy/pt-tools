@@ -9,7 +9,7 @@
     </div>
 
     <div class="stats-row">
-      <div class="stat-chip">
+      <div class="stat-chip stat-chip--brand">
         <div class="stat-icon">
           <el-icon><DataLine /></el-icon>
         </div>
@@ -18,7 +18,7 @@
           <div class="stat-value">{{ stats.todayCount }}</div>
         </div>
       </div>
-      <div class="stat-chip">
+      <div class="stat-chip stat-chip--success">
         <div class="stat-icon stat-icon--success">
           <el-icon><Check /></el-icon>
         </div>
@@ -27,7 +27,7 @@
           <div class="stat-value">{{ formatSuccessRate(stats.successRate) }}</div>
         </div>
       </div>
-      <div class="stat-chip">
+      <div class="stat-chip stat-chip--warning">
         <div class="stat-icon stat-icon--warning">
           <el-icon><Timer /></el-icon>
         </div>
@@ -299,6 +299,34 @@ const getResultTagType = (result: string) => {
 </script>
 
 <style scoped>
+/* delta-ui-origin polish layer — scoped to chatops/AuditLog */
+.audit-log-page {
+  --chatops-brand: oklch(0.66 0.16 50);
+  --chatops-brand-hover: oklch(0.6 0.18 50);
+  --chatops-brand-soft: oklch(0.95 0.04 60);
+  --chatops-stone-muted: oklch(0.55 0.02 60);
+  --chatops-radius-sm: 8px;
+  --chatops-radius-md: 12px;
+  --chatops-radius-lg: 18px;
+  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
+  --chatops-shadow-md:
+    0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
+  --chatops-shadow-lg:
+    0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
+  --chatops-glass-bg: oklch(1 0 0 / 0.72);
+  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
+  --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
+}
+:global(.dark) .audit-log-page,
+:global(html.dark) .audit-log-page {
+  --chatops-brand: oklch(0.72 0.15 55);
+  --chatops-brand-hover: oklch(0.78 0.13 55);
+  --chatops-brand-soft: oklch(0.3 0.05 55 / 0.4);
+  --chatops-stone-muted: oklch(0.65 0.02 70);
+  --chatops-glass-bg: var(--chatops-glass-bg-dk);
+  --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
+}
+
 .audit-log-page {
   padding: 16px 24px 32px;
   background-color: var(--pt-bg-base);
@@ -309,31 +337,37 @@ const getResultTagType = (result: string) => {
   position: relative;
   padding: 44px 32px;
   margin-bottom: 24px;
-  border-radius: 22px;
-  background:
-    radial-gradient(
-      ellipse at top right,
-      color-mix(in oklab, var(--pt-color-primary) 16%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(
-        to right,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    linear-gradient(
-        to bottom,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    var(--pt-bg-surface);
+  border-radius: var(--chatops-radius-lg);
+  background: var(--chatops-glass-bg);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 8px 24px -12px rgb(28 25 23 / 8%);
+  box-shadow: var(--chatops-shadow-md);
+}
+
+.hero-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--chatops-dot-color) 1px, transparent 1px);
+  background-size: 18px 18px;
+  pointer-events: none;
+  opacity: 0.6;
+  mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+  -webkit-mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+}
+
+.hero-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at top right,
+    color-mix(in oklab, var(--chatops-brand) 13%, transparent),
+    transparent 60%
+  );
+  pointer-events: none;
 }
 
 .hero-content {
@@ -349,17 +383,18 @@ const getResultTagType = (result: string) => {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
-  color: var(--pt-color-primary);
+  color: var(--chatops-brand);
   text-transform: uppercase;
 }
 
 .hero-title {
-  font-size: 36px;
+  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
+  font-size: 38px;
   font-weight: 700;
   margin: 0;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   line-height: 1.1;
-  background: linear-gradient(135deg, var(--pt-text-primary) 25%, var(--pt-color-primary) 100%);
+  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -368,7 +403,7 @@ const getResultTagType = (result: string) => {
 
 .hero-subtitle {
   font-size: 15px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
   max-width: 600px;
   line-height: 1.65;
@@ -388,26 +423,58 @@ const getResultTagType = (result: string) => {
 }
 
 .stat-chip {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 18px 20px;
-  border-radius: 18px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 78%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--chatops-radius-md);
+  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--pt-border-color);
-  box-shadow: 0 1px 2px rgb(28 25 23 / 4%);
+  box-shadow: var(--chatops-shadow-sm);
   transition:
     transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+/* Distinct top accent stripes per metric */
+.stat-chip::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  opacity: 0.9;
+}
+.stat-chip--brand::before {
+  background: linear-gradient(
+    90deg,
+    var(--chatops-brand) 0%,
+    color-mix(in oklab, var(--chatops-brand) 30%, transparent) 100%
+  );
+}
+.stat-chip--success::before {
+  background: linear-gradient(
+    90deg,
+    oklch(0.65 0.13 145) 0%,
+    color-mix(in oklab, oklch(0.65 0.13 145) 30%, transparent) 100%
+  );
+}
+.stat-chip--warning::before {
+  background: linear-gradient(
+    90deg,
+    oklch(0.74 0.15 70) 0%,
+    color-mix(in oklab, oklch(0.74 0.15 70) 30%, transparent) 100%
+  );
 }
 
 .stat-chip:hover {
   transform: translateY(-2px);
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 8px 20px -14px rgb(28 25 23 / 12%);
+  box-shadow: var(--chatops-shadow-md);
 }
 
 .stat-icon {
@@ -418,8 +485,8 @@ const getResultTagType = (result: string) => {
   height: 48px;
   border-radius: 14px;
   font-size: 22px;
-  background: color-mix(in oklab, var(--pt-color-primary) 12%, transparent);
-  color: var(--pt-color-primary);
+  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
+  color: var(--chatops-brand);
 }
 
 .stat-icon--success {
@@ -440,7 +507,7 @@ const getResultTagType = (result: string) => {
 
 .stat-label {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   font-weight: 500;
 }
 
@@ -456,18 +523,23 @@ const getResultTagType = (result: string) => {
 .stat-unit {
   font-size: 14px;
   font-weight: 500;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin-left: 4px;
 }
 
 .glass-card {
   padding: 24px;
-  border-radius: 18px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 78%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--chatops-radius-md);
+  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--pt-border-color);
-  box-shadow: 0 1px 2px rgb(28 25 23 / 4%);
+  box-shadow: var(--chatops-shadow-sm);
+  transition: box-shadow 200ms ease;
+}
+
+.glass-card:hover {
+  box-shadow: var(--chatops-shadow-md);
 }
 
 .card-section-header {
@@ -496,7 +568,7 @@ const getResultTagType = (result: string) => {
 
 .section-desc {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
 }
 
@@ -509,6 +581,12 @@ const getResultTagType = (result: string) => {
   border-radius: 14px;
   background: color-mix(in oklab, var(--pt-bg-base) 60%, transparent);
   border: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
+}
+
+.filter-bar :deep(.el-form-item__label),
+.filter-bar :deep(.el-input__inner::placeholder),
+.filter-bar :deep(.el-select__placeholder) {
+  color: var(--chatops-stone-muted);
 }
 
 .filter-item {
@@ -534,7 +612,7 @@ const getResultTagType = (result: string) => {
 
 .audit-table :deep(.el-table) {
   background: transparent;
-  --el-table-row-hover-bg-color: color-mix(in oklab, var(--pt-color-primary) 4%, transparent);
+  --el-table-row-hover-bg-color: color-mix(in oklab, var(--chatops-brand) 4%, transparent);
 }
 
 .audit-table :deep(.el-table tr) {
@@ -544,30 +622,35 @@ const getResultTagType = (result: string) => {
 
 .audit-table :deep(.el-table th.el-table__cell) {
   background: color-mix(in oklab, var(--pt-text-primary) 4%, transparent);
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   font-weight: 500;
   font-size: 12.5px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
+.audit-table :deep(.el-tag) {
+  border-radius: var(--chatops-radius-sm);
+  font-weight: 600;
+}
+
 .meta-text {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .user-id {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
 }
 
 .cmd-badge {
-  background: color-mix(in oklab, var(--pt-color-primary) 10%, transparent);
-  color: var(--pt-color-primary);
+  background: color-mix(in oklab, var(--chatops-brand) 10%, transparent);
+  color: var(--chatops-brand);
   padding: 4px 10px;
-  border-radius: 8px;
+  border-radius: var(--chatops-radius-sm);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   font-weight: 500;
@@ -575,7 +658,7 @@ const getResultTagType = (result: string) => {
 
 .latency {
   font-variant-numeric: tabular-nums;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   font-size: 13px;
 }
 

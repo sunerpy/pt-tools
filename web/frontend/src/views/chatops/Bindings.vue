@@ -8,7 +8,7 @@
           为聊天客户端用户颁发一次性绑定码，将通知通道用户与 pt-tools 账户关联。
         </p>
         <div class="hero-actions">
-          <el-button type="primary" size="large" @click="openGenerateDialog">
+          <el-button type="primary" size="large" class="delta-cta" @click="openGenerateDialog">
             生成绑定码
           </el-button>
           <span class="hero-meta">
@@ -137,6 +137,7 @@
       v-model="generateDialogVisible"
       title="生成绑定码"
       width="440px"
+      class="delta-dialog"
       :before-close="handleCloseGenerateDialog">
       <div v-if="!generatedCode">
         <p class="dialog-desc">选择要绑定的渠道配置和绑定码有效期。</p>
@@ -162,7 +163,7 @@
         </el-form>
         <div class="dialog-actions">
           <el-button @click="handleCloseGenerateDialog">取消</el-button>
-          <el-button type="primary" :loading="generating" @click="handleGenerateCode">
+          <el-button type="primary" class="delta-cta" :loading="generating" @click="handleGenerateCode">
             生成
           </el-button>
         </div>
@@ -172,7 +173,7 @@
         <div class="code-bubble">
           <span class="big-code">{{ generatedCode }}</span>
         </div>
-        <el-button type="primary" :icon="CopyDocument" @click="copyToClipboard(generatedCode)">
+        <el-button type="primary" class="delta-cta" :icon="CopyDocument" @click="copyToClipboard(generatedCode)">
           复制绑定码
         </el-button>
         <p class="expiry-hint">
@@ -382,6 +383,34 @@ function getConfNameByConfId(confId?: number) {
 </script>
 
 <style scoped>
+/* delta-ui-origin polish layer — scoped to chatops/Bindings */
+.bindings-page {
+  --chatops-brand: oklch(0.66 0.16 50);
+  --chatops-brand-hover: oklch(0.6 0.18 50);
+  --chatops-brand-soft: oklch(0.95 0.04 60);
+  --chatops-stone-muted: oklch(0.55 0.02 60);
+  --chatops-radius-sm: 8px;
+  --chatops-radius-md: 12px;
+  --chatops-radius-lg: 18px;
+  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
+  --chatops-shadow-md:
+    0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
+  --chatops-shadow-lg:
+    0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
+  --chatops-glass-bg: oklch(1 0 0 / 0.72);
+  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
+  --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
+}
+:global(.dark) .bindings-page,
+:global(html.dark) .bindings-page {
+  --chatops-brand: oklch(0.72 0.15 55);
+  --chatops-brand-hover: oklch(0.78 0.13 55);
+  --chatops-brand-soft: oklch(0.3 0.05 55 / 0.4);
+  --chatops-stone-muted: oklch(0.65 0.02 70);
+  --chatops-glass-bg: var(--chatops-glass-bg-dk);
+  --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
+}
+
 .bindings-page {
   padding: 16px 24px 32px;
   background-color: var(--pt-bg-base);
@@ -393,31 +422,37 @@ function getConfNameByConfId(confId?: number) {
   position: relative;
   padding: 44px 32px;
   margin-bottom: 28px;
-  border-radius: 22px;
-  background:
-    radial-gradient(
-      ellipse at top right,
-      color-mix(in oklab, var(--pt-color-primary) 16%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(
-        to right,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    linear-gradient(
-        to bottom,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    var(--pt-bg-surface);
+  border-radius: var(--chatops-radius-lg);
+  background: var(--chatops-glass-bg);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 8px 24px -12px rgb(28 25 23 / 8%);
+  box-shadow: var(--chatops-shadow-md);
+}
+
+.hero-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--chatops-dot-color) 1px, transparent 1px);
+  background-size: 18px 18px;
+  pointer-events: none;
+  opacity: 0.6;
+  mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+  -webkit-mask-image: linear-gradient(to bottom right, black 30%, transparent 80%);
+}
+
+.hero-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at top right,
+    color-mix(in oklab, var(--chatops-brand) 13%, transparent),
+    transparent 60%
+  );
+  pointer-events: none;
 }
 
 .hero-content {
@@ -433,17 +468,18 @@ function getConfNameByConfId(confId?: number) {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
-  color: var(--pt-color-primary);
+  color: var(--chatops-brand);
   text-transform: uppercase;
 }
 
 .hero-title {
-  font-size: 36px;
+  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
+  font-size: 38px;
   font-weight: 700;
   margin: 0;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   line-height: 1.1;
-  background: linear-gradient(135deg, var(--pt-text-primary) 25%, var(--pt-color-primary) 100%);
+  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -452,7 +488,7 @@ function getConfNameByConfId(confId?: number) {
 
 .hero-subtitle {
   font-size: 15px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
   max-width: 580px;
   line-height: 1.65;
@@ -468,25 +504,43 @@ function getConfNameByConfId(confId?: number) {
 
 .hero-meta {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
+}
+
+/* Primary CTA — delta accent (light touch) */
+.delta-cta.el-button--primary {
+  background: linear-gradient(180deg, var(--chatops-brand), var(--chatops-brand-hover));
+  border-color: var(--chatops-brand);
+  box-shadow: 0 4px 12px oklch(0.66 0.16 50 / 0.3);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    filter 150ms ease;
+}
+.delta-cta.el-button--primary:hover {
+  filter: brightness(1.04);
+  box-shadow: 0 6px 16px oklch(0.66 0.16 50 / 0.38);
+}
+.delta-cta.el-button--primary:active {
+  transform: translateY(1px);
 }
 
 .glass-card {
   margin-bottom: 24px;
   padding: 24px;
-  border-radius: 18px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 78%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--chatops-radius-md);
+  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--pt-border-color);
-  box-shadow: 0 1px 2px rgb(28 25 23 / 4%);
-  transition: box-shadow 200ms ease;
+  box-shadow: var(--chatops-shadow-sm);
+  transition:
+    box-shadow 200ms ease,
+    transform 200ms ease;
 }
 
 .glass-card:hover {
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 8px 20px -14px rgb(28 25 23 / 10%);
+  box-shadow: var(--chatops-shadow-md);
 }
 
 .card-section-header {
@@ -515,13 +569,13 @@ function getConfNameByConfId(confId?: number) {
 
 .section-desc {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
 }
 
 .bindings-table :deep(.el-table) {
   background: transparent;
-  --el-table-row-hover-bg-color: color-mix(in oklab, var(--pt-color-primary) 4%, transparent);
+  --el-table-row-hover-bg-color: color-mix(in oklab, var(--chatops-brand) 4%, transparent);
 }
 
 .bindings-table :deep(.el-table tr) {
@@ -531,11 +585,15 @@ function getConfNameByConfId(confId?: number) {
 
 .bindings-table :deep(.el-table th.el-table__cell) {
   background: color-mix(in oklab, var(--pt-text-primary) 4%, transparent);
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   font-weight: 500;
   font-size: 12.5px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.bindings-table :deep(.el-tag) {
+  border-radius: var(--chatops-radius-sm);
 }
 
 .code-cell {
@@ -549,21 +607,21 @@ function getConfNameByConfId(confId?: number) {
   font-size: 17px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  color: var(--pt-color-primary);
-  background: color-mix(in oklab, var(--pt-color-primary) 10%, transparent);
+  color: var(--chatops-brand);
+  background: color-mix(in oklab, var(--chatops-brand) 10%, transparent);
   padding: 5px 12px;
-  border-radius: 8px;
+  border-radius: var(--chatops-radius-sm);
 }
 
 .mono-text {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
 }
 
 .meta-text {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
 }
 
 .countdown {
@@ -573,7 +631,7 @@ function getConfNameByConfId(confId?: number) {
 }
 
 .countdown--active {
-  color: var(--pt-color-primary);
+  color: var(--chatops-brand);
 }
 
 .countdown--urgent {
@@ -583,7 +641,7 @@ function getConfNameByConfId(confId?: number) {
 }
 
 .countdown--expired {
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   text-decoration: line-through;
 }
 
@@ -602,9 +660,29 @@ function getConfNameByConfId(confId?: number) {
   }
 }
 
+/* Generate dialog — delta skin */
+:deep(.delta-dialog .el-dialog) {
+  border-radius: var(--chatops-radius-lg);
+  box-shadow: var(--chatops-shadow-lg);
+  overflow: hidden;
+}
+:deep(.delta-dialog .el-dialog__header) {
+  background: linear-gradient(135deg, var(--chatops-brand-soft), transparent);
+  margin: 0;
+  padding: 18px 22px;
+  border-bottom: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
+}
+:deep(.delta-dialog .el-dialog__title) {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+:deep(.delta-dialog .el-dialog__body) {
+  padding: 22px;
+}
+
 .dialog-desc {
   font-size: 13px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   line-height: 1.65;
   margin: 0 0 16px;
 }
@@ -632,24 +710,24 @@ function getConfNameByConfId(confId?: number) {
   background:
     radial-gradient(
       ellipse at center,
-      color-mix(in oklab, var(--pt-color-primary) 12%, transparent),
+      color-mix(in oklab, var(--chatops-brand) 14%, transparent),
       transparent 70%
     ),
-    color-mix(in oklab, var(--pt-color-primary) 6%, transparent);
-  border: 1px solid color-mix(in oklab, var(--pt-color-primary) 24%, transparent);
+    color-mix(in oklab, var(--chatops-brand) 6%, transparent);
+  border: 1px solid color-mix(in oklab, var(--chatops-brand) 26%, transparent);
 }
 
 .big-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 36px;
+  font-size: 38px;
   font-weight: 700;
-  letter-spacing: 0.18em;
-  color: var(--pt-color-primary);
+  letter-spacing: 0.2em;
+  color: var(--chatops-brand);
 }
 
 .expiry-hint {
   font-size: 12px;
-  color: var(--pt-text-secondary);
+  color: var(--chatops-stone-muted);
   margin: 0;
 }
 
