@@ -158,6 +158,7 @@ async function handleSaveCredentials() {
         payload.allowed_users = conf.allowed_users;
         payload.admin_users = conf.admin_users;
         payload.default_chat_id = conf.default_chat_id;
+        payload.proxy_url = conf.proxy_url;
         break;
       case "qq_onebot":
         payload.listen_addr = conf.listen_addr;
@@ -350,6 +351,15 @@ function goBack() {
               </el-form-item>
               <el-form-item label="默认 Chat ID">
                 <el-input v-model="conf.default_chat_id" placeholder="主动推送时使用的 chat_id" />
+              </el-form-item>
+              <el-form-item label="代理 URL（可选）" prop="proxy_url">
+                <el-input
+                  v-model="conf.proxy_url"
+                  placeholder="http://127.0.0.1:1080 或 socks5://user:pass@host:1080"
+                  clearable />
+                <div class="form-hint">
+                  留空则使用系统环境变量 HTTPS_PROXY / HTTP_PROXY；填写后该通道单独走此代理。
+                </div>
               </el-form-item>
             </template>
 

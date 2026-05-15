@@ -1135,6 +1135,7 @@ export interface NotificationConfig {
   hmac_secret?: string;
   headers?: string;
   webhook_key?: string;
+  proxy_url?: string;
 }
 
 const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
@@ -1157,6 +1158,7 @@ const NOTIFICATION_DYNAMIC_FIELDS = [
   "hmac_secret",
   "headers",
   "webhook_key",
+  "proxy_url",
 ] as const;
 
 interface NotificationWireBody {

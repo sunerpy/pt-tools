@@ -375,3 +375,38 @@ func TestEscapeMarkdownV2(t *testing.T) {
 	}
 	assert.NotEqual(t, in, out)
 }
+
+func TestDefaultBotFactory_ProxyURL(t *testing.T) {
+	const validToken = "123:abcdefghijklmnopqrstuvwxyzABCDEFGHI"
+	cases := []struct {
+		name     string
+		proxyURL string
+		wantErr  bool
+		errSub   string
+	}{
+		{"empty falls back to env", "", false, ""},
+		{"valid http proxy", "http://127.0.0.1:1080", false, ""},
+		{"valid socks5 proxy", "socks5://user:pass@127.0.0.1:1080", false, ""},
+		{"invalid proxy scheme parse", "://bad-url", true, "proxy_url"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				BotToken: validToken,
+				ProxyURL: tc.proxyURL,
+			}
+			bot, src, err := defaultBotFactory(cfg)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSub)
+				assert.Nil(t, bot)
+				assert.Nil(t, src)
+				return
+			}
+			require.NoError(t, err)
+			assert.NotNil(t, bot)
+			assert.NotNil(t, src)
+		})
+	}
+}

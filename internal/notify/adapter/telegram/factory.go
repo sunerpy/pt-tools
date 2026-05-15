@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -17,12 +18,22 @@ func defaultBotFactory(cfg *Config) (botAPI, updateSource, error) {
 	if cfg.APIServer != "" {
 		opts = append(opts, telego.WithAPIServer(cfg.APIServer))
 	}
-	// Inject net/http client honoring HTTPS_PROXY/HTTP_PROXY env vars.
-	// telego's default fasthttp client ignores those, breaking deployments
-	// behind a corporate proxy. net/http reads them via ProxyFromEnvironment.
+	// Inject net/http client. If cfg.ProxyURL is set, use it explicitly;
+	// otherwise fall back to HTTPS_PROXY/HTTP_PROXY env vars via
+	// http.ProxyFromEnvironment. telego's default fasthttp client ignores
+	// both, so we always replace it with net/http.
+	proxyFn := http.ProxyFromEnvironment
+	if cfg.ProxyURL != "" {
+		parsed, perr := url.Parse(cfg.ProxyURL)
+		if perr != nil {
+			return nil, nil, fmt.Errorf("telegram: 无效的 proxy_url %q: %w", cfg.ProxyURL, perr)
+		}
+		proxyFn = http.ProxyURL(parsed)
+	}
+
 	httpClient := &http.Client{
 		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
+			Proxy:                 proxyFn,
 			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,

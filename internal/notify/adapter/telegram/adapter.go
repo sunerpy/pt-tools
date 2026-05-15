@@ -29,6 +29,7 @@ type Config struct {
 	DefaultChatID         int64   `json:"default_chat_id"`
 	PollingTimeoutSeconds int     `json:"polling_timeout_seconds"`
 	APIServer             string  `json:"api_server,omitempty"`
+	ProxyURL              string  `json:"proxy_url,omitempty"`
 }
 
 // botAPI is the minimal telego.Bot surface used by the adapter, kept narrow
