@@ -87,11 +87,11 @@ async function loadDetail() {
   }
   loading.value = true;
   try {
-    const data = await chatopsApi.notifications.get(id.value);
-    Object.assign(conf, data);
-    if (conf.channel_type === "qq_onebot") {
-      conf.admin_qq_users = qqListToText((data as Record<string, unknown>).admin_qq_users);
-      conf.allowed_qq_users = qqListToText((data as Record<string, unknown>).allowed_qq_users);
+     const data = await chatopsApi.notifications.get(id.value);
+     Object.assign(conf, data);
+     if (conf.channel_type === "qq_onebot") {
+       conf.admin_qq_users = qqListToText((data as unknown as Record<string, unknown>).admin_qq_users);
+       conf.allowed_qq_users = qqListToText((data as unknown as Record<string, unknown>).allowed_qq_users);
     }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载详情失败");
