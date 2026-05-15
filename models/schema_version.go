@@ -19,7 +19,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 6
+const CurrentSchemaVersion = 7
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -28,6 +28,7 @@ const CurrentSchemaVersion = 6
 // v4: 添加免费结束管理功能 - TorrentInfo 新增下载器追踪字段，RSSSubscription 新增 PauseOnFreeEnd，添加 TorrentInfoArchive 归档表
 // v5: 合并 DynamicSiteSetting 表到 SiteSetting，删除 dynamic_site_settings 表
 // v6: RSS 上新通知子系统：rss_subscriptions 加 notify 字段 + 新建 rss_notification_log
+// v7: FilterRule 增加 purpose 字段（download/notify/both），用于区分下载与通知规则
 
 // MigrationFunc 迁移函数类型
 type MigrationFunc func(db *gorm.DB) error
@@ -92,6 +93,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     6,
 		Description: "RSS 上新通知子系统：rss_subscriptions 加 notify 字段 + 新建 rss_notification_log",
 		Up:          migrateV5ToV6,
+	})
+
+	// v6 -> v7: FilterRule 增加 purpose 字段
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     7,
+		Description: "FilterRule 增加 purpose 字段（download/notify/both），用于区分下载与通知规则",
+		Up:          migrateV6ToV7,
 	})
 }
 
@@ -421,6 +429,27 @@ func migrateV5ToV6(db *gorm.DB) error {
 	}
 	if err := db.AutoMigrate(&RSSNotificationLog{}); err != nil {
 		return fmt.Errorf("v5→v6: create rss_notification_log: %w", err)
+	}
+	return nil
+}
+
+func migrateV6ToV7(db *gorm.DB) error {
+	// 旧库可能没有 filter_rules 表（v3 之前的部署或仅启用部分功能时）。
+	// AutoMigrate 会在迁移流程之外另行创建，这里直接跳过即可。
+	if !db.Migrator().HasTable(&FilterRule{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&FilterRule{}, "Purpose") {
+		if err := db.Exec(
+			"ALTER TABLE filter_rules ADD COLUMN purpose TEXT NOT NULL DEFAULT 'download'",
+		).Error; err != nil {
+			return fmt.Errorf("v6→v7: add purpose: %w", err)
+		}
+	}
+	if err := db.Exec(
+		"UPDATE filter_rules SET purpose = 'download' WHERE purpose IS NULL OR purpose = ''",
+	).Error; err != nil {
+		return fmt.Errorf("v6→v7: backfill purpose: %w", err)
 	}
 	return nil
 }

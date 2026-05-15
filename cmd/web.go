@@ -664,3 +664,13 @@ func (a *rssNotifierAdapter) NotifyNewItem(ctx context.Context, ev internal.RSSI
 		TorrentID: ev.TorrentID,
 	})
 }
+
+func (a *rssNotifierAdapter) NotifyFilteredItem(ctx context.Context, ev internal.RSSFilteredNotice) error {
+	return a.inner.NotifyFilteredItem(ctx, app.RSSFilteredEvent{
+		RSS:       ev.RSS,
+		Torrent:   ev.Torrent,
+		Rule:      ev.Rule,
+		SiteName:  ev.SiteName,
+		TorrentID: ev.TorrentID,
+	})
+}

@@ -671,6 +671,33 @@ func downloadWorkerUnified(
 			detailTag := detail.GetSubTitle()
 			sizeGB := float64(detail.SizeBytes) / 1024 / 1024 / 1024
 
+			// Sprint 2: 'filtered' 模式通知钩子。需要详情后才能匹配（subtitle/size）
+			// 与渲染模板。复用 GetTorrentDetails 已有的站点级 PersistentRateLimiter，
+			// 因此不会引入额外站点压力。
+			if notifier := getRSSNotifier(); notifier != nil &&
+				(rssCfg.NotifyMode == "filtered" || rssCfg.NotifyMode == "both") &&
+				filterSvc != nil && rssCfg.ID != 0 {
+				matched, rule := filterSvc.ShouldNotifyForRSSWithInput(
+					filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					isFree, rssCfg.ID,
+				)
+				if matched {
+					_, torrentRef := extractTorrentRef(item)
+					if torrentRef == "" {
+						torrentRef = item.GUID
+					}
+					if torrentRef != "" {
+						_ = notifier.NotifyFilteredItem(ctx, RSSFilteredNotice{
+							RSS:       &rssCfg,
+							Torrent:   detail,
+							Rule:      rule,
+							SiteName:  string(siteName),
+							TorrentID: torrentRef,
+						})
+					}
+				}
+			}
+
 			// 统一通过 filter.Decide 做完整决策：全局大小硬上限 → 过滤规则通道 → 免费通道
 			var decision filter.Decision
 			if filterSvc != nil && rssCfg.ID != 0 && hasAssociatedRules {

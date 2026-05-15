@@ -10,6 +10,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -80,11 +81,24 @@ type RSSItemNotice struct {
 	TorrentID string
 }
 
+// RSSFilteredNotice is the payload for the 'filtered' RSS notification path.
+// Mirror of app.RSSFilteredEvent but defined here to avoid the
+// internal → internal/app import cycle. Bridged by rssNotifierAdapter
+// in cmd/web.go.
+type RSSFilteredNotice struct {
+	RSS       *models.RSSConfig
+	Torrent   *v2.TorrentItem
+	Rule      *models.FilterRule
+	SiteName  string
+	TorrentID string
+}
+
 // RSSNotifier is the structural contract internal/app/rssNotifier satisfies.
 // The concrete adapter lives in cmd/web.go and bridges this minimal type to
 // app.RSSItemEvent before delegating to the real app.RSSNotifier.
 type RSSNotifier interface {
 	NotifyNewItem(ctx context.Context, ev RSSItemNotice) error
+	NotifyFilteredItem(ctx context.Context, ev RSSFilteredNotice) error
 }
 
 func SetRSSNotifier(n RSSNotifier) {

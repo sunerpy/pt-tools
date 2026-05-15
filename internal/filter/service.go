@@ -8,6 +8,26 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 )
 
+// Purpose 区分规则用途轴：下载 / 通知 / 二者皆可。
+type Purpose string
+
+const (
+	PurposeDownload Purpose = "download"
+	PurposeNotify   Purpose = "notify"
+)
+
+// purposeMatches 判断规则的 purpose 字段是否覆盖目标用途。
+// 空字符串视为遗留下载规则（向后兼容）。"both" 同时覆盖两个轴。
+func purposeMatches(rulePurpose string, want Purpose) bool {
+	if rulePurpose == "" {
+		rulePurpose = string(PurposeDownload)
+	}
+	if rulePurpose == "both" {
+		return true
+	}
+	return rulePurpose == string(want)
+}
+
 // MatchInput represents the input fields for matching against filter rules.
 type MatchInput struct {
 	Title string
@@ -70,6 +90,13 @@ type FilterService interface {
 	// Supports matching against title, tag, or both based on rule configuration.
 	ShouldDownloadForRSSWithInput(input MatchInput, isFree bool, rssID uint) (bool, *models.FilterRule)
 
+	// ShouldNotifyForRSS 判断 RSS 关联规则中是否有通知用途的规则匹配标题。
+	// 仅匹配 purpose IN ('notify','both') 的规则；require_free 语义与下载路径一致。
+	ShouldNotifyForRSS(title string, isFree bool, rssID uint) (bool, *models.FilterRule)
+
+	// ShouldNotifyForRSSWithInput 同上，支持 title/tag 多字段匹配。
+	ShouldNotifyForRSSWithInput(input MatchInput, isFree bool, rssID uint) (bool, *models.FilterRule)
+
 	// Decide evaluates the full download decision tree for an RSS item, honoring
 	// the configured FilterMode, global hard size limit, and per-rule size bounds.
 	// It is the canonical entry point for the v0.25+ download decision logic.
@@ -117,11 +144,19 @@ func (s *filterService) MatchRules(title string, siteID, rssID *uint) (*models.F
 
 // MatchRulesWithInput checks if input matches any enabled filter rule.
 func (s *filterService) MatchRulesWithInput(input MatchInput, siteID, rssID *uint) (*models.FilterRule, bool) {
+	return s.matchRulesWithInputForPurpose(input, siteID, rssID, PurposeDownload)
+}
+
+func (s *filterService) matchRulesWithInputForPurpose(input MatchInput, siteID, rssID *uint, purpose Purpose) (*models.FilterRule, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	for i := range s.rules {
 		rule := &s.rules[i]
+
+		if !purposeMatches(rule.Purpose, purpose) {
+			continue
+		}
 
 		// Check if rule applies to this site/RSS
 		if !s.ruleApplies(rule, siteID, rssID) {
@@ -171,6 +206,10 @@ func (s *filterService) MatchRulesForRSS(title string, rssID uint) (*models.Filt
 
 // MatchRulesForRSSWithInput checks if input matches any filter rule associated with the RSS.
 func (s *filterService) MatchRulesForRSSWithInput(input MatchInput, rssID uint) (*models.FilterRule, bool) {
+	return s.matchRulesForRSSWithInputForPurpose(input, rssID, PurposeDownload)
+}
+
+func (s *filterService) matchRulesForRSSWithInputForPurpose(input MatchInput, rssID uint, purpose Purpose) (*models.FilterRule, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -191,6 +230,10 @@ func (s *filterService) MatchRulesForRSSWithInput(input MatchInput, rssID uint) 
 
 		// Only check rules associated with this RSS
 		if !ruleIDSet[rule.ID] {
+			continue
+		}
+
+		if !purposeMatches(rule.Purpose, purpose) {
 			continue
 		}
 
@@ -249,7 +292,23 @@ func (s *filterService) ShouldDownloadForRSSWithInput(input MatchInput, isFree b
 	return true, rule
 }
 
-// GetEnabledRules returns all enabled filter rules ordered by priority.
+// ShouldNotifyForRSS 见接口定义。
+// ShouldNotifyForRSS 见接口定义。
+func (s *filterService) ShouldNotifyForRSS(title string, isFree bool, rssID uint) (bool, *models.FilterRule) {
+	return s.ShouldNotifyForRSSWithInput(MatchInput{Title: title}, isFree, rssID)
+}
+
+// ShouldNotifyForRSSWithInput 见接口定义。
+func (s *filterService) ShouldNotifyForRSSWithInput(input MatchInput, isFree bool, rssID uint) (bool, *models.FilterRule) {
+	rule, matched := s.matchRulesForRSSWithInputForPurpose(input, rssID, PurposeNotify)
+	if !matched {
+		return false, nil
+	}
+	if rule.RequireFree && !isFree {
+		return false, rule
+	}
+	return true, rule
+} // GetEnabledRules returns all enabled filter rules ordered by priority.
 func (s *filterService) GetEnabledRules() ([]models.FilterRule, error) {
 	var rules []models.FilterRule
 	err := s.db.Where("enabled = ?", true).
