@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -625,6 +627,22 @@ func downloadWorkerUnified(
 				sLogger().Infof("%s: 种子 %s 已跳过或已推送，直接跳过", title, item.GUID)
 				stats.skipped.Add(1)
 				continue
+			}
+			if notifier := getRSSNotifier(); notifier != nil {
+				if rssCfg.NotifyMode == "all" || rssCfg.NotifyMode == "both" {
+					_, torrentRef := extractTorrentRef(item)
+					if torrentRef == "" {
+						torrentRef = item.GUID
+					}
+					if torrentRef != "" {
+						_ = notifier.NotifyNewItem(ctx, RSSItemNotice{
+							RSS:       &rssCfg,
+							FeedItem:  item,
+							SiteName:  string(siteName),
+							TorrentID: torrentRef,
+						})
+					}
+				}
 			}
 			stats.total.Add(1)
 			// 获取种子详情 (使用 UnifiedPTSite 接口，返回 *v2.TorrentItem)
@@ -1348,4 +1366,25 @@ func calcHRSeedTimeForTorrent(def *v2.SiteDefinition, fallbackH int, sizeBytes i
 		return def.CalcHRSeedTimeH(sizeBytes)
 	}
 	return fallbackH
+}
+
+func extractTorrentRef(item *gofeed.Item) (siteName, torrentID string) {
+	if item == nil || item.Link == "" {
+		return "", ""
+	}
+	u, err := url.Parse(item.Link)
+	if err != nil {
+		return "", ""
+	}
+	siteName = u.Host
+	if id := u.Query().Get("id"); id != "" {
+		return siteName, id
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for _, p := range parts {
+		if _, err := strconv.Atoi(p); err == nil && p != "" {
+			return siteName, p
+		}
+	}
+	return siteName, ""
 }

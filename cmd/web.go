@@ -17,6 +17,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/chatops"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
@@ -141,6 +142,12 @@ var webCmd = &cobra.Command{
 		if err != nil {
 			global.GetSlogger().Warnf("ChatOps 子系统接线失败，跳过：%v", err)
 			bs = nil
+		}
+
+		if bs != nil {
+			rssNotifier := app.NewRSSNotifier(global.GlobalDB.DB, bs.Deps().NotificationSvc)
+			internal.SetRSSNotifier(&rssNotifierAdapter{inner: rssNotifier})
+			chatopsLogger().Infof("RSS notifier 已就绪")
 		}
 
 		srv := web.NewServer(store, mgr)
@@ -642,5 +649,18 @@ func (a *auditRecorderAdapter) Record(ctx context.Context, e chatops.AuditEntry)
 		Args:               e.Args,
 		Result:             e.Result,
 		LatencyMs:          e.LatencyMs,
+	})
+}
+
+type rssNotifierAdapter struct {
+	inner app.RSSNotifier
+}
+
+func (a *rssNotifierAdapter) NotifyNewItem(ctx context.Context, ev internal.RSSItemNotice) error {
+	return a.inner.NotifyNewItem(ctx, app.RSSItemEvent{
+		RSS:       ev.RSS,
+		FeedItem:  ev.FeedItem,
+		SiteName:  ev.SiteName,
+		TorrentID: ev.TorrentID,
 	})
 }

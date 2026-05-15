@@ -194,6 +194,7 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 		&ActionAudit{},
 		&BotToken{},
 		&NotificationOutbox{},
+		&RSSNotificationLog{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

@@ -206,8 +206,13 @@ type RSSSubscription struct {
 	IsExample       bool       `json:"is_example"`                    // 是否为示例配置，示例配置不会被执行
 	PauseOnFreeEnd  bool       `gorm:"default:false" json:"pause_on_free_end"`
 	FilterMode      FilterMode `gorm:"size:16;default:''" json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+
+	NotifyMode              string `gorm:"column:notify_mode;default:''" json:"notify_mode"`
+	NotifyConfIDs           string `gorm:"column:notify_conf_ids;default:'[]'" json:"notify_conf_ids"`
+	MaxNotificationsPerHour int    `gorm:"column:max_notifications_per_hour;default:100" json:"max_notifications_per_hour"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Runtime-friendly structures for API usage and scheduler/config load
@@ -226,6 +231,10 @@ type RSSConfig struct {
 	IsExample       bool       `json:"is_example"`      // 是否为示例配置，示例配置不会被执行
 	PauseOnFreeEnd  bool       `json:"pause_on_free_end"`
 	FilterMode      FilterMode `json:"filter_mode"` // 空字符串表示使用全局 DefaultFilterMode
+
+	NotifyMode              string `json:"notify_mode"`
+	NotifyConfIDs           string `json:"notify_conf_ids"`
+	MaxNotificationsPerHour int    `json:"max_notifications_per_hour"`
 }
 
 // ShouldSkip 判断是否应该跳过此 RSS 配置
