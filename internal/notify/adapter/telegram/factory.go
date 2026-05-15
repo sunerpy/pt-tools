@@ -3,6 +3,9 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"time"
 
 	"github.com/mymmrac/telego"
 )
@@ -14,6 +17,22 @@ func defaultBotFactory(cfg *Config) (botAPI, updateSource, error) {
 	if cfg.APIServer != "" {
 		opts = append(opts, telego.WithAPIServer(cfg.APIServer))
 	}
+	// Inject net/http client honoring HTTPS_PROXY/HTTP_PROXY env vars.
+	// telego's default fasthttp client ignores those, breaking deployments
+	// behind a corporate proxy. net/http reads them via ProxyFromEnvironment.
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+		Timeout: 0,
+	}
+	opts = append(opts, telego.WithHTTPClient(httpClient))
 
 	bot, err := telego.NewBot(cfg.BotToken, opts...)
 	if err != nil {
