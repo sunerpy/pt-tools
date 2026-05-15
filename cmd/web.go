@@ -33,7 +33,7 @@ import (
 	// default registry during process init so that bootstrapChatOps can
 	// instantiate per-conf channel implementations.
 	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/qq"
-	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/telegram"
+	telegramadapter "github.com/sunerpy/pt-tools/internal/notify/adapter/telegram"
 	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/wecom"
 )
 
@@ -207,9 +207,32 @@ var webCmd = &cobra.Command{
 			retryWorker := app.NewRSSRetryWorker(global.GlobalDB.DB, notifySvc)
 			go retryWorker.Run(runtimeCtx)
 
+			fetcher := func(ctx context.Context, siteName, torrentID string) ([]byte, error) {
+				orchestrator := web.GetSearchOrchestrator()
+				if orchestrator == nil {
+					return nil, errors.New("搜索编排器未初始化")
+				}
+				site := orchestrator.GetSite(siteName)
+				if site == nil {
+					return nil, fmt.Errorf("站点 %s 未注册", siteName)
+				}
+				return site.Download(ctx, torrentID)
+			}
+			callbackActions := app.NewRSSCallbackActions(global.GlobalDB.DB, fetcher)
+			registeredCallbackChannels := 0
+			for _, ch := range bs.channels {
+				if setter, ok := ch.(interface {
+					SetCallbackActionHandler(telegramadapter.CallbackActionHandler)
+				}); ok {
+					setter.SetCallbackActionHandler(callbackActions)
+					registeredCallbackChannels++
+				}
+			}
+
 			internal.SetRSSNotifier(&rssNotifierAdapter{inner: rssNotifier})
 			chatopsLogger().Infof("RSS notifier 已就绪")
 			chatopsLogger().Infof("RSS retry worker 已启动")
+			chatopsLogger().Infof("RSS callback actions 已注册 channels=%d", registeredCallbackChannels)
 		}
 
 		srv := web.NewServer(store, mgr)

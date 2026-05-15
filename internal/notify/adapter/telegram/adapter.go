@@ -38,6 +38,16 @@ type botAPI interface {
 	GetMe(ctx context.Context) (*telego.User, error)
 	SendMessage(ctx context.Context, params *telego.SendMessageParams) (*telego.Message, error)
 	AnswerCallbackQuery(ctx context.Context, params *telego.AnswerCallbackQueryParams) error
+	EditMessageReplyMarkup(ctx context.Context, params *telego.EditMessageReplyMarkupParams) (*telego.Message, error)
+}
+
+// CallbackActionHandler dispatches RSS notification button actions parsed
+// from the inline keyboard payload. Set on the channel via
+// SetCallbackActionHandler. If nil, callbacks are acknowledged but no
+// downstream action is taken (stub mode for testing / pre-S5 boots).
+type CallbackActionHandler interface {
+	OnRSSDownload(ctx context.Context, logID uint, userID int64) error
+	OnRSSIgnore(ctx context.Context, logID uint, userID int64) error
 }
 
 type updateSource func(ctx context.Context) (<-chan telego.Update, error)
@@ -58,7 +68,8 @@ type TelegramChannel struct {
 	pollCancel context.CancelFunc
 	pollDone   chan struct{}
 
-	factory botFactory
+	factory       botFactory
+	actionHandler CallbackActionHandler
 }
 
 // New constructs a fresh TelegramChannel.
@@ -86,6 +97,15 @@ func (c *TelegramChannel) Healthy() bool {
 func (c *TelegramChannel) OnInbound(handler notify.InboundHandler) {
 	c.mu.Lock()
 	c.handler = handler
+	c.mu.Unlock()
+}
+
+// SetCallbackActionHandler installs the dispatcher for RSS notification
+// inline-button actions. Safe to call before or after Init. Pass nil to
+// revert to stub mode.
+func (c *TelegramChannel) SetCallbackActionHandler(h CallbackActionHandler) {
+	c.mu.Lock()
+	c.actionHandler = h
 	c.mu.Unlock()
 }
 

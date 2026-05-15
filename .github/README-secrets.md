@@ -11,4 +11,4 @@ Set these in repo Settings → Secrets and variables → Actions:
 
 The bot must be added to the target group AND granted **"Pin messages"** admin permission. Without that permission the message is still sent, but pinning silently warns and the workflow stays green.
 
-To test without a real release, trigger `Telegram Release Announcement` workflow via Actions → Run workflow → enter tag (e.g. `v0.5.0`).
+To test without a real release, trigger `Telegram Release Announcement` workflow via Actions → Run workflow → enter tag (e.g. `v0.31.0`).

@@ -20,10 +20,18 @@ type capturedSend struct {
 	params *telego.SendMessageParams
 }
 
+type capturedEditMarkup struct {
+	params *telego.EditMessageReplyMarkupParams
+}
+
 type fakeBot struct {
-	mu      sync.Mutex
-	sends   []capturedSend
-	sendErr error
+	mu          sync.Mutex
+	sends       []capturedSend
+	sendErr     error
+	answers     []*telego.AnswerCallbackQueryParams
+	answerErr   error
+	editMarkups []capturedEditMarkup
+	editErr     error
 }
 
 func (f *fakeBot) GetMe(_ context.Context) (*telego.User, error) {
@@ -40,8 +48,21 @@ func (f *fakeBot) SendMessage(_ context.Context, p *telego.SendMessageParams) (*
 	return &telego.Message{MessageID: 1}, nil
 }
 
-func (f *fakeBot) AnswerCallbackQuery(_ context.Context, _ *telego.AnswerCallbackQueryParams) error {
-	return nil
+func (f *fakeBot) AnswerCallbackQuery(_ context.Context, p *telego.AnswerCallbackQueryParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answers = append(f.answers, p)
+	return f.answerErr
+}
+
+func (f *fakeBot) EditMessageReplyMarkup(_ context.Context, p *telego.EditMessageReplyMarkupParams) (*telego.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.editErr != nil {
+		return nil, f.editErr
+	}
+	f.editMarkups = append(f.editMarkups, capturedEditMarkup{params: p})
+	return &telego.Message{MessageID: p.MessageID}, nil
 }
 
 func (f *fakeBot) lastSend() *telego.SendMessageParams {
@@ -57,6 +78,21 @@ func (f *fakeBot) sendCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.sends)
+}
+
+func (f *fakeBot) lastAnswer() *telego.AnswerCallbackQueryParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.answers) == 0 {
+		return nil
+	}
+	return f.answers[len(f.answers)-1]
+}
+
+func (f *fakeBot) editMarkupCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.editMarkups)
 }
 
 type fakeSource struct {

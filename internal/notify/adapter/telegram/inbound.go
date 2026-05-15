@@ -152,10 +152,12 @@ func contains(xs []int64, x int64) bool {
 	return false
 }
 
-// handleCallbackQuery routes inline-keyboard button presses. Sprint 4 ships
-// a stub: we acknowledge the click and edit the message to give visual
-// feedback. Sprint 5 will wire the actual download / suppress actions to
-// the push pipeline.
+// handleCallbackQuery routes inline-keyboard button presses. When a
+// CallbackActionHandler is installed (S5+), `dl:<logID>` and `ig:<logID>`
+// payloads invoke OnRSSDownload / OnRSSIgnore and the originating message's
+// inline keyboard is cleared via EditMessageReplyMarkup so users cannot
+// double-click. Without an action handler the call is acknowledged with a
+// "处理中" stub message (S4 behaviour, retained for tests).
 func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.CallbackQuery) {
 	if cq == nil {
 		return
@@ -164,6 +166,7 @@ func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.Ca
 	bot := c.bot
 	cfg := c.cfg
 	handler := c.handler
+	action := c.actionHandler
 	c.mu.RUnlock()
 	if bot == nil || cfg == nil {
 		return
@@ -182,32 +185,26 @@ func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.Ca
 
 	data := cq.Data
 	parts := strings.SplitN(data, ":", 2)
-	action := ""
+	verb := ""
 	payload := ""
 	if len(parts) == 2 {
-		action = parts[0]
+		verb = parts[0]
 		payload = parts[1]
 	}
 
-	var ackText string
-	switch action {
-	case "dl":
-		ackText = "已记录下载请求 #" + payload + "（处理中）"
-	case "ig":
-		ackText = "已忽略 #" + payload
-	case "dt":
-		ackText = "请查看消息中的链接"
-	default:
-		ackText = "未知操作"
-	}
+	ackText := dispatchCallbackAction(ctx, action, verb, payload, userID, c.logger, c.confID)
 
 	_ = bot.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 		CallbackQueryID: cq.ID,
 		Text:            ackText,
 	})
 
+	if action != nil && (verb == "dl" || verb == "ig") {
+		clearInlineKeyboard(ctx, bot, cq, c.logger, c.confID)
+	}
+
 	c.logger.Infof("telegram: callback conf=%d user=%d data=%q action=%s payload=%s",
-		c.confID, userID, data, action, payload)
+		c.confID, userID, data, verb, payload)
 
 	if handler != nil && data != "" {
 		in := notify.InboundMessage{
@@ -226,5 +223,85 @@ func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.Ca
 			c.logger.Warnf("telegram: callback handler 错误 conf=%d data=%q: %v",
 				c.confID, data, err)
 		}
+	}
+}
+
+func dispatchCallbackAction(
+	ctx context.Context,
+	action CallbackActionHandler,
+	verb, payload string,
+	userID int64,
+	logger interface{ Warnf(string, ...any) },
+	confID uint,
+) string {
+	switch verb {
+	case "dl":
+		if action == nil {
+			return "已记录下载请求 #" + payload + "（处理中）"
+		}
+		logID, ok := parseLogID(payload)
+		if !ok {
+			return "下载请求参数无效"
+		}
+		if err := action.OnRSSDownload(ctx, logID, userID); err != nil {
+			logger.Warnf("telegram: OnRSSDownload 失败 conf=%d log=%d: %v", confID, logID, err)
+			return "下载触发失败：" + err.Error()
+		}
+		return "已加入下载队列 #" + payload
+	case "ig":
+		if action == nil {
+			return "已忽略 #" + payload
+		}
+		logID, ok := parseLogID(payload)
+		if !ok {
+			return "忽略请求参数无效"
+		}
+		if err := action.OnRSSIgnore(ctx, logID, userID); err != nil {
+			logger.Warnf("telegram: OnRSSIgnore 失败 conf=%d log=%d: %v", confID, logID, err)
+			return "忽略失败：" + err.Error()
+		}
+		return "已忽略 #" + payload
+	case "dt":
+		return "请查看消息中的链接"
+	default:
+		return "未知操作"
+	}
+}
+
+func parseLogID(s string) (uint, bool) {
+	v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	if err != nil || v == 0 {
+		return 0, false
+	}
+	return uint(v), true
+}
+
+func clearInlineKeyboard(
+	ctx context.Context,
+	bot botAPI,
+	cq *telego.CallbackQuery,
+	logger interface{ Warnf(string, ...any) },
+	confID uint,
+) {
+	if cq.Message == nil {
+		return
+	}
+	getter, ok := cq.Message.(interface {
+		GetChat() telego.Chat
+		GetMessageID() int
+	})
+	if !ok {
+		return
+	}
+	chat := getter.GetChat()
+	msgID := getter.GetMessageID()
+	if msgID == 0 {
+		return
+	}
+	if _, err := bot.EditMessageReplyMarkup(ctx, &telego.EditMessageReplyMarkupParams{
+		ChatID:    telego.ChatID{ID: chat.ID},
+		MessageID: msgID,
+	}); err != nil {
+		logger.Warnf("telegram: EditMessageReplyMarkup 失败 conf=%d msg=%d: %v", confID, msgID, err)
 	}
 }

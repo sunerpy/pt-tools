@@ -15,7 +15,7 @@
 
 </details>
 
-## 🤖 ChatOps & 机器人（v0.5+）
+## 🤖 ChatOps & 机器人（v0.31+）
 
 pt-tools 现支持通过 **QQ** 或 **Telegram** 机器人远程管理：
 
@@ -23,6 +23,7 @@ pt-tools 现支持通过 **QQ** 或 **Telegram** 机器人远程管理：
 - 🌍 **Telegram Bot** via [BotFather](https://t.me/BotFather)（long-poll，私聊命令，支持代理）
 - 📨 出站推送：企业微信群机器人 / 自定义 Webhook（HMAC-SHA256）
 - 🛠️ 内置 11 个命令：`/help` `/status` `/version` `/tasks` `/sites` `/torrents` `/pause` `/resume` `/delete` `/bind` `/unbind`
+- 📡 **RSS 上新通知**：QQ/Telegram 推送站点新种，支持全量/规则匹配双模式 + 静默时段 + digest 合并
 - 🔐 安全：管理员白名单、绑定码 TTL（5min/1h/1d/30d/永久）、AES-GCM 加密落库、HMAC 签名 webhook、操作审计日志
 
 详见：
@@ -30,6 +31,7 @@ pt-tools 现支持通过 **QQ** 或 **Telegram** 机器人远程管理：
 - [快速开始 → ChatOps](docs/guide/chatops-quickstart.md)
 - [QQ OneBot (NapCat) 配置](docs/guide/chatops-qq-napcat.md)
 - [Telegram Bot 配置](docs/guide/chatops-telegram.md)
+- [RSS 上新通知](docs/guide/chatops-rss-notify.md)
 
 ---
 
@@ -281,6 +283,7 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 | **[ChatOps 快速开始](docs/guide/chatops-quickstart.md)**                    | 机器人功能概览、通道选择与命令清单          |
 | **[QQ OneBot (NapCat) 配置](docs/guide/chatops-qq-napcat.md)**              | NapCat Docker 部署、反向 WS 配置、绑定测试  |
 | **[Telegram Bot 配置](docs/guide/chatops-telegram.md)**                     | BotFather 创建 bot、代理配置、绑定测试      |
+| **[RSS 上新通知](docs/guide/chatops-rss-notify.md)**                        | RSS 新种实时推送：双模式、静默、digest、按钮 |
 | **[获取 Cookie / API Key](docs/guide/get-cookie-apikey.md)**                | 详细介绍如何从各站点获取认证信息            |
 | **[浏览器扩展使用指南](tools/browser-extension/README.md)**                 | 自动同步 Cookie、采集站点数据               |
 | **[RSS 订阅配置指南](docs/guide/rss-subscription.md)**                      | 如何配置 RSS 订阅实现自动下载               |
