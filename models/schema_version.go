@@ -19,7 +19,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 7
+const CurrentSchemaVersion = 8
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -29,6 +29,7 @@ const CurrentSchemaVersion = 7
 // v5: 合并 DynamicSiteSetting 表到 SiteSetting，删除 dynamic_site_settings 表
 // v6: RSS 上新通知子系统：rss_subscriptions 加 notify 字段 + 新建 rss_notification_log
 // v7: FilterRule 增加 purpose 字段（download/notify/both），用于区分下载与通知规则
+// v8: NotificationConf 增加 quiet_hours_start / quiet_hours_end 字段（HH:MM，支持跨日）
 
 // MigrationFunc 迁移函数类型
 type MigrationFunc func(db *gorm.DB) error
@@ -100,6 +101,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     7,
 		Description: "FilterRule 增加 purpose 字段（download/notify/both），用于区分下载与通知规则",
 		Up:          migrateV6ToV7,
+	})
+
+	// v7 -> v8: NotificationConf 增加 quiet_hours_start / quiet_hours_end
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     8,
+		Description: "NotificationConf 增加 quiet_hours_start / quiet_hours_end 字段（HH:MM，支持跨日）",
+		Up:          migrateV7ToV8,
 	})
 }
 
@@ -450,6 +458,27 @@ func migrateV6ToV7(db *gorm.DB) error {
 		"UPDATE filter_rules SET purpose = 'download' WHERE purpose IS NULL OR purpose = ''",
 	).Error; err != nil {
 		return fmt.Errorf("v6→v7: backfill purpose: %w", err)
+	}
+	return nil
+}
+
+func migrateV7ToV8(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&NotificationConf{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&NotificationConf{}, "QuietHoursStart") {
+		if err := db.Exec(
+			"ALTER TABLE notification_conf ADD COLUMN quiet_hours_start TEXT DEFAULT ''",
+		).Error; err != nil {
+			return fmt.Errorf("v7→v8: add quiet_hours_start: %w", err)
+		}
+	}
+	if !db.Migrator().HasColumn(&NotificationConf{}, "QuietHoursEnd") {
+		if err := db.Exec(
+			"ALTER TABLE notification_conf ADD COLUMN quiet_hours_end TEXT DEFAULT ''",
+		).Error; err != nil {
+			return fmt.Errorf("v7→v8: add quiet_hours_end: %w", err)
+		}
 	}
 	return nil
 }

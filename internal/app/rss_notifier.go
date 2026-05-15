@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
@@ -36,6 +37,10 @@ type RSSNotifier interface {
 	NotifyFilteredItem(ctx context.Context, ev RSSFilteredEvent) error
 }
 
+// QuietLookupFunc 返回指定 NotificationConf 的 quiet_hours_start / quiet_hours_end。
+// 用于在 tryDispatch 中按通道判断是否处于静默窗口。
+type QuietLookupFunc func(confID uint) (start, end string, err error)
+
 type NotificationServiceForRSS interface {
 	Push(ctx context.Context, n Notification) error
 }
@@ -44,11 +49,20 @@ type rssNotifier struct {
 	db        *gorm.DB
 	notifySvc NotificationServiceForRSS
 	now       func() time.Time
+	digestBuf *notify.DigestBuffer
+	quietFn   QuietLookupFunc
 }
 
 func NewRSSNotifier(db *gorm.DB, notifySvc NotificationServiceForRSS) RSSNotifier {
 	return &rssNotifier{db: db, notifySvc: notifySvc, now: time.Now}
 }
+
+// SetDigestBuffer 注入 DigestBuffer，启用异步合并发送路径。
+// 未注入时回退到 S1 同步直发，保持已有单测兼容。
+func (r *rssNotifier) SetDigestBuffer(b *notify.DigestBuffer) { r.digestBuf = b }
+
+// SetQuietFn 注入 quiet_hours 查询函数。未注入时跳过静默判断。
+func (r *rssNotifier) SetQuietFn(fn QuietLookupFunc) { r.quietFn = fn }
 
 func (r *rssNotifier) NotifyNewItem(ctx context.Context, ev RSSItemEvent) error {
 	if ev.RSS == nil {
@@ -151,8 +165,9 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 		RSSID: sp.RSSID, SiteName: sp.SiteName, TorrentID: sp.TorrentID,
 		NotifyKind: sp.Kind, NotificationConfID: sp.ConfID,
 		MatchedFilterRuleID: sp.MatchedRuleID,
-		Result:              "pending", Attempts: 1,
+		Result:              "pending", Attempts: 0,
 		PayloadJSON: sp.PayloadJSON,
+		NextRetryAt: &now,
 		CreatedAt:   now, UpdatedAt: now,
 	}
 	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
@@ -162,11 +177,33 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 	if res.RowsAffected == 0 {
 		return nil
 	}
+
+	if r.quietFn != nil {
+		if start, end, qerr := r.quietFn(sp.ConfID); qerr == nil && notify.IsQuietNow(now, start, end) {
+			next := notify.NextQuietEnd(now, end)
+			return r.db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+				Where("id = ?", row.ID).
+				Updates(map[string]any{
+					"next_retry_at": next,
+					"updated_at":    r.now(),
+				}).Error
+		}
+	}
+
+	if r.digestBuf != nil {
+		r.digestBuf.Add(sp.ConfID, notify.DigestItem{
+			LogID: row.ID,
+			Title: sp.Title,
+			Text:  sp.Text,
+		})
+		return nil
+	}
+
 	err := r.notifySvc.Push(ctx, Notification{
 		Title: sp.Title, Text: sp.Text,
 		SourceConfID: sp.ConfID,
 	})
-	upd := map[string]any{"updated_at": r.now()}
+	upd := map[string]any{"updated_at": r.now(), "attempts": 1}
 	if err != nil {
 		upd["result"] = "failed"
 		upd["last_error"] = err.Error()

@@ -144,10 +144,72 @@ var webCmd = &cobra.Command{
 			bs = nil
 		}
 
+		runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+		defer runtimeCancel()
+
 		if bs != nil {
 			rssNotifier := app.NewRSSNotifier(global.GlobalDB.DB, bs.Deps().NotificationSvc)
+
+			quietFn := func(confID uint) (string, string, error) {
+				var conf models.NotificationConf
+				if err := global.GlobalDB.DB.WithContext(runtimeCtx).
+					First(&conf, confID).Error; err != nil {
+					return "", "", err
+				}
+				return conf.QuietHoursStart, conf.QuietHoursEnd, nil
+			}
+
+			notifySvc := bs.Deps().NotificationSvc
+			db := global.GlobalDB.DB
+			digestFlush := func(ctx context.Context, confID uint, items []notify.DigestItem) {
+				title, text := notify.CombineDigest(items)
+				err := notifySvc.Push(ctx, app.Notification{
+					Title: title, Text: text, SourceConfID: confID,
+				})
+				now := time.Now()
+				ids := make([]uint, len(items))
+				for i, it := range items {
+					ids[i] = it.LogID
+				}
+				if err == nil {
+					db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+						Where("id IN ?", ids).
+						Updates(map[string]any{
+							"result":       "sent",
+							"delivered_at": now,
+							"updated_at":   now,
+							"attempts":     gorm.Expr("attempts + 1"),
+						})
+					chatopsLogger().Infof("RSS digest 已投递 conf_id=%d items=%d", confID, len(items))
+					return
+				}
+				nextRetry := now.Add(5 * time.Second)
+				db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+					Where("id IN ?", ids).
+					Updates(map[string]any{
+						"attempts":      gorm.Expr("attempts + 1"),
+						"next_retry_at": nextRetry,
+						"last_error":    err.Error(),
+						"updated_at":    now,
+					})
+				chatopsLogger().Warnf("RSS digest 投递失败 conf_id=%d items=%d err=%v", confID, len(items), err)
+			}
+			digestBuf := notify.NewDigestBuffer(runtimeCtx, digestFlush)
+
+			if rn, ok := rssNotifier.(interface {
+				SetDigestBuffer(*notify.DigestBuffer)
+				SetQuietFn(app.QuietLookupFunc)
+			}); ok {
+				rn.SetDigestBuffer(digestBuf)
+				rn.SetQuietFn(quietFn)
+			}
+
+			retryWorker := app.NewRSSRetryWorker(global.GlobalDB.DB, notifySvc)
+			go retryWorker.Run(runtimeCtx)
+
 			internal.SetRSSNotifier(&rssNotifierAdapter{inner: rssNotifier})
 			chatopsLogger().Infof("RSS notifier 已就绪")
+			chatopsLogger().Infof("RSS retry worker 已启动")
 		}
 
 		srv := web.NewServer(store, mgr)

@@ -5,13 +5,17 @@ import "time"
 // NotificationConf 通知通道配置（Telegram / QQ / Webhook / WeCom 等）。
 // ConfigJSON 由 internal/crypto AES-GCM 加密后存入，本层仅原样存取字符串。
 type NotificationConf struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	ChannelType string    `gorm:"size:32;not null;index:idx_notification_conf_type" json:"channel_type"`
-	Name        string    `gorm:"size:128;not null" json:"name"`
-	ConfigJSON  string    `gorm:"type:text" json:"-"`
-	Enabled     bool      `gorm:"default:true;index:idx_notification_conf_enabled" json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	ChannelType string `gorm:"size:32;not null;index:idx_notification_conf_type" json:"channel_type"`
+	Name        string `gorm:"size:128;not null" json:"name"`
+	ConfigJSON  string `gorm:"type:text" json:"-"`
+	Enabled     bool   `gorm:"default:true;index:idx_notification_conf_enabled" json:"enabled"`
+	// QuietHoursStart / QuietHoursEnd 控制静默时段，格式 "HH:MM"；空字符串表示无静默。
+	// 若 start > end（如 "22:00"–"08:00"）表示窗口跨越午夜。
+	QuietHoursStart string    `gorm:"column:quiet_hours_start;default:''" json:"quiet_hours_start"`
+	QuietHoursEnd   string    `gorm:"column:quiet_hours_end;default:''" json:"quiet_hours_end"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // TableName 强制单数表名，避免 GORM 默认复数化与项目命名风格不一致。
