@@ -359,6 +359,15 @@ func (h *chatopsHandlers) queryAudit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *chatopsHandlers) auditStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.deps.AuditSvc.Stats(r.Context())
+	if err != nil {
+		mapServiceErr(w, err)
+		return
+	}
+	writeJSON(w, stats)
+}
+
 // ----- tokens -----
 
 type createTokenBody struct {

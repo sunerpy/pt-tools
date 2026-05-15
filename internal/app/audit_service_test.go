@@ -270,3 +270,69 @@ func TestQuery_FilterAndPaginate(t *testing.T) {
 	assert.True(t, strings.HasPrefix(items3[0].ChannelUserID, "u"), "应有 channel_user_id")
 	assert.True(t, items3[0].CreatedAt.After(items3[1].CreatedAt) || items3[0].CreatedAt.Equal(items3[1].CreatedAt))
 }
+
+func TestAuditService_Stats(t *testing.T) {
+	t.Run("empty DB returns zeros", func(t *testing.T) {
+		db := setupAuditTestDB(t)
+		svc := NewAuditService(db)
+
+		got, err := svc.Stats(context.Background())
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, got.TotalCount)
+		assert.EqualValues(t, 0, got.TodayCount)
+		assert.EqualValues(t, 0, got.SuccessRate)
+		assert.EqualValues(t, 0, got.MaxLatencyMs)
+		assert.EqualValues(t, 0, got.AvgLatencyMs)
+	})
+
+	t.Run("3 success + 1 error gives 75% success rate and correct max latency", func(t *testing.T) {
+		db := setupAuditTestDB(t)
+		svc := NewAuditService(db)
+
+		now := time.Now()
+		rows := []models.ActionAudit{
+			{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", Command: "ping", ArgsJSON: "{}", Result: "success", LatencyMs: 10, CreatedAt: now.Add(-3 * time.Minute)},
+			{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", Command: "ping", ArgsJSON: "{}", Result: "success", LatencyMs: 20, CreatedAt: now.Add(-2 * time.Minute)},
+			{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", Command: "ping", ArgsJSON: "{}", Result: "success", LatencyMs: 30, CreatedAt: now.Add(-1 * time.Minute)},
+			{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", Command: "ping", ArgsJSON: "{}", Result: "error", LatencyMs: 100, CreatedAt: now.Add(-30 * time.Second)},
+		}
+		for i := range rows {
+			require.NoError(t, db.Create(&rows[i]).Error)
+		}
+
+		got, err := svc.Stats(context.Background())
+		require.NoError(t, err)
+		assert.EqualValues(t, 4, got.TotalCount)
+		assert.InDelta(t, 75.0, got.SuccessRate, 0.001)
+		assert.EqualValues(t, 100, got.MaxLatencyMs)
+		assert.InDelta(t, 40.0, got.AvgLatencyMs, 0.001)
+	})
+
+	t.Run("today_count counts only rows since local midnight", func(t *testing.T) {
+		db := setupAuditTestDB(t)
+		svc := NewAuditService(db)
+
+		now := time.Now()
+		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		yesterday := midnight.Add(-2 * time.Hour)
+		earlierToday := midnight.Add(1 * time.Hour)
+
+		require.NoError(t, db.Create(&models.ActionAudit{
+			NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+			Command: "ping", ArgsJSON: "{}", Result: "success", CreatedAt: yesterday,
+		}).Error)
+		require.NoError(t, db.Create(&models.ActionAudit{
+			NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+			Command: "ping", ArgsJSON: "{}", Result: "success", CreatedAt: earlierToday,
+		}).Error)
+		require.NoError(t, db.Create(&models.ActionAudit{
+			NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+			Command: "ping", ArgsJSON: "{}", Result: "denied", CreatedAt: now,
+		}).Error)
+
+		got, err := svc.Stats(context.Background())
+		require.NoError(t, err)
+		assert.EqualValues(t, 3, got.TotalCount)
+		assert.EqualValues(t, 2, got.TodayCount)
+	})
+}

@@ -1307,5 +1307,13 @@ export const chatopsApi = {
         success_rate: number;
         max_latency_ms: number;
       }>(`/api/chatops/audit?${params.toString()}`),
+    stats: () =>
+      api.get<{
+        today_count: number;
+        total_count: number;
+        success_rate: number;
+        max_latency_ms: number;
+        avg_latency_ms: number;
+      }>("/api/chatops/audit/stats"),
   },
 };

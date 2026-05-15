@@ -146,6 +146,9 @@ type stubAuditSvc struct {
 	queryTotal int
 	queryErr   error
 	lastQuery  app.AuditQuery
+	statsResp  app.AuditStatsDTO
+	statsErr   error
+	statsCalls int32
 }
 
 func (s *stubAuditSvc) Record(ctx context.Context, e app.AuditEntry) error { return nil }
@@ -153,6 +156,11 @@ func (s *stubAuditSvc) Record(ctx context.Context, e app.AuditEntry) error { ret
 func (s *stubAuditSvc) Query(ctx context.Context, q app.AuditQuery) ([]app.AuditDTO, int, error) {
 	s.lastQuery = q
 	return s.queryItems, s.queryTotal, s.queryErr
+}
+
+func (s *stubAuditSvc) Stats(ctx context.Context) (app.AuditStatsDTO, error) {
+	atomic.AddInt32(&s.statsCalls, 1)
+	return s.statsResp, s.statsErr
 }
 
 func (s *stubAuditSvc) Prune(ctx context.Context) (int64, error) { return 0, nil }
@@ -645,6 +653,40 @@ func TestAudit_Unauth(t *testing.T) {
 	srv, _, _, cleanup := newTestChatOpsServer(t)
 	defer cleanup()
 	resp := chatopsReq(t, srv, "GET", "/api/chatops/audit", "", nil)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestQueryAuditStats_HappyPath(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	audit := deps.AuditSvc.(*stubAuditSvc)
+
+	audit.statsResp = app.AuditStatsDTO{
+		TodayCount:   8,
+		TotalCount:   17,
+		SuccessRate:  70.59,
+		MaxLatencyMs: 0,
+		AvgLatencyMs: 0,
+	}
+
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/audit/stats", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out app.AuditStatsDTO
+	decodeBody(t, resp, &out)
+	require.EqualValues(t, 8, out.TodayCount)
+	require.EqualValues(t, 17, out.TotalCount)
+	require.InDelta(t, 70.59, out.SuccessRate, 0.001)
+	require.EqualValues(t, 0, out.MaxLatencyMs)
+	require.Equal(t, int32(1), atomic.LoadInt32(&audit.statsCalls))
+}
+
+func TestQueryAuditStats_Unauth(t *testing.T) {
+	srv, _, _, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/audit/stats", "", nil)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	resp.Body.Close()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -51,9 +52,20 @@ type AuditDTO struct {
 	LatencyMs     int64     `json:"latency_ms"`
 }
 
+// AuditStatsDTO 聚合指标，用于 ChatOps 审计页顶部的 stat chip。
+// SuccessRate 单位为百分比 (0..100)，已四舍五入到 2 位小数。
+type AuditStatsDTO struct {
+	TodayCount   int64   `json:"today_count"`
+	TotalCount   int64   `json:"total_count"`
+	SuccessRate  float64 `json:"success_rate"`
+	MaxLatencyMs int64   `json:"max_latency_ms"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+}
+
 type AuditService interface {
 	Record(ctx context.Context, e AuditEntry) error
 	Query(ctx context.Context, q AuditQuery) (items []AuditDTO, total int, err error)
+	Stats(ctx context.Context) (AuditStatsDTO, error)
 	Prune(ctx context.Context) (deleted int64, err error)
 }
 
@@ -169,6 +181,48 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 		})
 	}
 	return items, int(total), nil
+}
+
+func (s *auditService) Stats(ctx context.Context) (AuditStatsDTO, error) {
+	var dto AuditStatsDTO
+
+	if err := s.db.WithContext(ctx).Model(&models.ActionAudit{}).Count(&dto.TotalCount).Error; err != nil {
+		return dto, fmt.Errorf("audit stats total: %w", err)
+	}
+
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if err := s.db.WithContext(ctx).Model(&models.ActionAudit{}).
+		Where("created_at >= ?", midnight).
+		Count(&dto.TodayCount).Error; err != nil {
+		return dto, fmt.Errorf("audit stats today: %w", err)
+	}
+
+	var successCount int64
+	if err := s.db.WithContext(ctx).Model(&models.ActionAudit{}).
+		Where("result = ?", "success").
+		Count(&successCount).Error; err != nil {
+		return dto, fmt.Errorf("audit stats success: %w", err)
+	}
+	if dto.TotalCount > 0 {
+		rate := float64(successCount) / float64(dto.TotalCount) * 100.0
+		dto.SuccessRate = math.Round(rate*100) / 100
+	}
+
+	type latRow struct {
+		Max int64
+		Avg float64
+	}
+	var lat latRow
+	if err := s.db.WithContext(ctx).Model(&models.ActionAudit{}).
+		Select("COALESCE(MAX(latency_ms), 0) as max, COALESCE(AVG(latency_ms), 0) as avg").
+		Scan(&lat).Error; err != nil {
+		return dto, fmt.Errorf("audit stats latency: %w", err)
+	}
+	dto.MaxLatencyMs = lat.Max
+	dto.AvgLatencyMs = math.Round(lat.Avg*100) / 100
+
+	return dto, nil
 }
 
 func (s *auditService) Prune(ctx context.Context) (int64, error) {

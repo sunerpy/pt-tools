@@ -54,6 +54,7 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	mux.Handle("PATCH /api/chatops/bindings/{id}", wrap(h.patchBinding))
 
 	mux.Handle("GET /api/chatops/audit", wrap(h.queryAudit))
+	mux.Handle("GET /api/chatops/audit/stats", wrap(h.auditStats))
 
 	mux.Handle("POST /api/chatops/tokens", wrap(h.createToken))
 	mux.Handle("GET /api/chatops/tokens", wrap(h.listTokens))

@@ -228,13 +228,16 @@ const fetchAuditLogs = async () => {
       params.append("command", filters.command);
     }
 
-    const res = await chatopsApi.audit.list(params);
+    const [listRes, statsRes] = await Promise.all([
+      chatopsApi.audit.list(params),
+      chatopsApi.audit.stats(),
+    ]);
 
-    auditLogs.value = res.items || [];
-    pagination.total = res.total || 0;
-    stats.todayCount = res.today_count || 0;
-    stats.successRate = res.success_rate || 0;
-    stats.maxLatencyMs = res.max_latency_ms || 0;
+    auditLogs.value = listRes.items || [];
+    pagination.total = listRes.total || 0;
+    stats.todayCount = statsRes.today_count || 0;
+    stats.successRate = statsRes.success_rate || 0;
+    stats.maxLatencyMs = statsRes.max_latency_ms || 0;
   } catch (err: unknown) {
     ElMessage.error((err as Error).message || "获取审计日志失败");
   } finally {
@@ -276,7 +279,7 @@ const formatJson = (jsonStr?: string) => {
   }
 };
 
-const formatSuccessRate = (rate: number) => `${(rate * 100).toFixed(1)}%`;
+const formatSuccessRate = (rate: number) => `${rate.toFixed(2)}%`;
 
 const getChannelTagType = (type: string) => {
   const map: Record<string, "" | "success" | "warning" | "info" | "danger"> = {
