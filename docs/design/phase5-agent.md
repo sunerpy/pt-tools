@@ -109,6 +109,7 @@ Agent 框架持有 MCP token（由 pt-tools Phase 4 的 token 管理体系颁发
 用户输入："帮我看看现在有哪些正在下的种子，按进度排序"
 
 Agent 执行路径：
+
 1. 调用 `mcp_torrent_list`（指定 downloader，不带过滤）
 2. 对返回结果按 `progress` 字段排序
 3. 格式化为自然语言或结构化列表返回给用户
@@ -120,6 +121,7 @@ Agent 执行路径：
 用户输入："把 HDSky 里那几个下了超过 7 天还没完成的种子暂停掉"
 
 Agent 执行路径（Operator 模式）：
+
 1. 调用 `mcp_torrent_list`，筛选 `add_time < now - 7d AND progress < 1.0`
 2. 生成执行计划，向用户发送"发现 3 个符合条件的种子，确认暂停？"
 3. 收到确认后，对每个种子调用 `mcp_torrent_pause`
@@ -132,6 +134,7 @@ Agent 执行路径（Operator 模式）：
 用户输入："检查一下 MTeam 的 free RSS，把今天新出的种子推下来"
 
 Agent 执行路径：
+
 1. 调用 `mcp_site_list` 确认 MTeam 站点存在且配置正常
 2. 调用 `mcp_rss_trigger`（触发指定站点的 RSS 拉取）
 3. 等待任务状态或直接返回"已触发，后台处理中"
@@ -143,6 +146,7 @@ Agent 执行路径：
 用户输入："我在 HDSky 和 MTeam 的上传量分别是多少？分享率怎么样？"
 
 Agent 执行路径：
+
 1. 调用 `mcp_site_info`，分别传入两个站点名称
 2. 从返回的 `UserInfo` 结构提取 `uploaded`、`ratio` 等字段
 3. 组合成比较性的自然语言回答
@@ -154,6 +158,7 @@ Agent 执行路径：
 用户输入："帮我把那些做种比超过 5 且已经做了超过 90 天的种子删掉，数据也删"
 
 Agent 执行路径（Operator 模式，高危动作）：
+
 1. 调用 `mcp_torrent_list`，筛选 `ratio > 5 AND seeded_days > 90`
 2. 生成详细的删除计划（列出所有候选种子名称、大小、当前比）
 3. 向用户发送确认请求，要求明确回复（不接受模糊的"好的"）
@@ -268,4 +273,4 @@ pt-tools 官方只维护 MCP Server 和工具 schema 文档，不提供官方的
 
 ---
 
-*本文档描述的是设计方向和原则，不是实现规范。具体实现细节将在进入 Phase 5 评估阶段后另行设计。*
+_本文档描述的是设计方向和原则，不是实现规范。具体实现细节将在进入 Phase 5 评估阶段后另行设计。_

@@ -617,61 +617,61 @@ type Event struct {
 
 ### §14.1 数据库 Schema（5 张表）
 
-| 表名 | GORM 模型 | 用途 |
-|------|-----------|------|
-| `notification_conf` | `models.NotificationConf` | 通道配置（Telegram / QQ / WeCom / Webhook），`ConfigJSON` AES-GCM 加密存储 |
-| `channel_binding` | `models.ChannelBinding` | 外部用户与通道实例的绑定关系，含管理员标记与白名单状态 |
-| `action_audit` | `models.ActionAudit` | 命令执行审计日志，复合索引 `(conf_id, user_id, created_at DESC)` |
-| `bot_token` | `models.BotToken` | bind code（明文 8 字符，5 min TTL）与 bearer token（bcrypt hash）统一存储 |
-| `notification_outbox` | `models.NotificationOutbox` | 离线投递队列，`status` 取值 `pending/sent/failed/dead` |
+| 表名                  | GORM 模型                   | 用途                                                                       |
+| --------------------- | --------------------------- | -------------------------------------------------------------------------- |
+| `notification_conf`   | `models.NotificationConf`   | 通道配置（Telegram / QQ / WeCom / Webhook），`ConfigJSON` AES-GCM 加密存储 |
+| `channel_binding`     | `models.ChannelBinding`     | 外部用户与通道实例的绑定关系，含管理员标记与白名单状态                     |
+| `action_audit`        | `models.ActionAudit`        | 命令执行审计日志，复合索引 `(conf_id, user_id, created_at DESC)`           |
+| `bot_token`           | `models.BotToken`           | bind code（明文 8 字符，5 min TTL）与 bearer token（bcrypt hash）统一存储  |
+| `notification_outbox` | `models.NotificationOutbox` | 离线投递队列，`status` 取值 `pending/sent/failed/dead`                     |
 
 所有表通过 GORM `AutoMigrate` 追加，旧版本数据库在升级时自动新建这 5 张表，不影响现有数据。
 
 ### §14.2 Channel Adapter（4 个）
 
-| Adapter 类型 | 注册键 | 配置包路径 |
-|-------------|--------|-----------|
-| QQ OneBot（NapCat 反向 WS） | `qq_onebot` | `internal/notify/adapter/qq` |
-| Telegram Bot（长轮询） | `telegram` | `internal/notify/adapter/telegram` |
-| 企业微信群机器人 Webhook | `wecom_webhook` | `internal/notify/adapter/wecom` |
-| 通用 HTTP Webhook | `webhook` | `internal/notify/adapter/webhook` |
+| Adapter 类型                | 注册键          | 配置包路径                         |
+| --------------------------- | --------------- | ---------------------------------- |
+| QQ OneBot（NapCat 反向 WS） | `qq_onebot`     | `internal/notify/adapter/qq`       |
+| Telegram Bot（长轮询）      | `telegram`      | `internal/notify/adapter/telegram` |
+| 企业微信群机器人 Webhook    | `wecom_webhook` | `internal/notify/adapter/wecom`    |
+| 通用 HTTP Webhook           | `webhook`       | `internal/notify/adapter/webhook`  |
 
 每个 adapter 在 `init()` 中调用 `notify.RegisterChannel(type, factory)` 完成注册，与 `site/v2/definitions/` 侧注册模式一致。所有 adapter 实现 `notify.Channel` 接口的 7 个方法：`Type / Init / SupportsInbound / Send / OnInbound / Close / Healthy`。
 
 ### §14.3 ChatOps 命令（11 个）
 
-| 命令 | 文件 | 说明 |
-|------|------|------|
-| `/bind <code>` | `commands/bind.go` | 凭 8 字符 bind code 绑定当前用户 |
-| `/unbind` | `commands/unbind.go` | 解除当前会话绑定 |
-| `/status` | `commands/status.go` | 查询系统运行状态（速度、磁盘、活跃任务数） |
-| `/tasks` | `commands/tasks.go` | 列出 RSS 任务运行状态 |
-| `/torrents` | `commands/torrents.go` | 按下载器分页列出种子 |
-| `/pause <hash>` | `commands/pause.go` | 暂停指定种子 |
-| `/resume <hash>` | `commands/resume.go` | 恢复指定种子 |
-| `/delete <hash>` | `commands/delete.go` | 删除种子（带二次确认） |
-| `/sites` | `commands/sites.go` | 列出配置的站点摘要 |
-| `/version` | `commands/version.go` | 查询当前版本及最新可用版本 |
-| `/help` | `commands/help.go` | 列出所有命令及用法 |
+| 命令             | 文件                   | 说明                                       |
+| ---------------- | ---------------------- | ------------------------------------------ |
+| `/bind <code>`   | `commands/bind.go`     | 凭 8 字符 bind code 绑定当前用户           |
+| `/unbind`        | `commands/unbind.go`   | 解除当前会话绑定                           |
+| `/status`        | `commands/status.go`   | 查询系统运行状态（速度、磁盘、活跃任务数） |
+| `/tasks`         | `commands/tasks.go`    | 列出 RSS 任务运行状态                      |
+| `/torrents`      | `commands/torrents.go` | 按下载器分页列出种子                       |
+| `/pause <hash>`  | `commands/pause.go`    | 暂停指定种子                               |
+| `/resume <hash>` | `commands/resume.go`   | 恢复指定种子                               |
+| `/delete <hash>` | `commands/delete.go`   | 删除种子（带二次确认）                     |
+| `/sites`         | `commands/sites.go`    | 列出配置的站点摘要                         |
+| `/version`       | `commands/version.go`  | 查询当前版本及最新可用版本                 |
+| `/help`          | `commands/help.go`     | 列出所有命令及用法                         |
 
 命令均通过 `internal/chatops.CommandRegistry` 注册，支持速率限制（默认 10 次/分钟/用户）与会话上下文（5 分钟 TTL）。
 
 ### §14.4 前端页面（4 个 Vue SPA）
 
-| 路由路径 | 文件 | 功能 |
-|---------|------|------|
-| `/chatops/notifications` | `views/chatops/Notifications.vue` | 通道列表、新建/编辑/删除/测试通道 |
-| `/chatops/notifications/:id` | `views/chatops/NotificationDetail.vue` | 单通道详情与配置 JSON 编辑 |
-| `/chatops/bindings` | `views/chatops/Bindings.vue` | 绑定关系管理、生成 bind code、调整权限 |
-| `/chatops/audit` | `views/chatops/AuditLog.vue` | 命令执行审计日志分页查询 |
+| 路由路径                     | 文件                                   | 功能                                   |
+| ---------------------------- | -------------------------------------- | -------------------------------------- |
+| `/chatops/notifications`     | `views/chatops/Notifications.vue`      | 通道列表、新建/编辑/删除/测试通道      |
+| `/chatops/notifications/:id` | `views/chatops/NotificationDetail.vue` | 单通道详情与配置 JSON 编辑             |
+| `/chatops/bindings`          | `views/chatops/Bindings.vue`           | 绑定关系管理、生成 bind code、调整权限 |
+| `/chatops/audit`             | `views/chatops/AuditLog.vue`           | 命令执行审计日志分页查询               |
 
 ### §14.5 关键依赖
 
-| 依赖 | 版本 | 用途 |
-|------|------|------|
-| `github.com/mymmrac/telego` | v1.9.0 | Telegram Bot API SDK（长轮询） |
-| `github.com/wdvxdr1123/ZeroBot` | v1.8.2 | QQ OneBot 消息框架 |
-| `golang.org/x/crypto/bcrypt` | v0.51.0+ | bearer token 哈希校验 |
+| 依赖                            | 版本     | 用途                           |
+| ------------------------------- | -------- | ------------------------------ |
+| `github.com/mymmrac/telego`     | v1.9.0   | Telegram Bot API SDK（长轮询） |
+| `github.com/wdvxdr1123/ZeroBot` | v1.8.2   | QQ OneBot 消息框架             |
+| `golang.org/x/crypto/bcrypt`    | v0.51.0+ | bearer token 哈希校验          |
 
 ### §14.6 配置示例
 
@@ -867,13 +867,13 @@ NapCatQQ 是目前主流的 QQ 协议桥实现，通过 OneBot v11 协议与 pt-
 
 字段说明：
 
-| 字段 | 值 | 说明 |
-|------|----|------|
-| `url` | `ws://host:port/path` | 填写 pt-tools 的监听地址，路径与 `path` 配置一致 |
-| `messagePostFormat` | `array` | 固定使用 array 格式，pt-tools 仅解析此格式 |
-| `token` | 同 `access_token` | 与 pt-tools 侧保持完全一致 |
-| `reconnectInterval` | `5000` | 断线重连间隔（毫秒），建议 5000 |
-| `heartInterval` | `30000` | 心跳间隔（毫秒），建议 30000 |
+| 字段                | 值                    | 说明                                             |
+| ------------------- | --------------------- | ------------------------------------------------ |
+| `url`               | `ws://host:port/path` | 填写 pt-tools 的监听地址，路径与 `path` 配置一致 |
+| `messagePostFormat` | `array`               | 固定使用 array 格式，pt-tools 仅解析此格式       |
+| `token`             | 同 `access_token`     | 与 pt-tools 侧保持完全一致                       |
+| `reconnectInterval` | `5000`                | 断线重连间隔（毫秒），建议 5000                  |
+| `heartInterval`     | `30000`               | 心跳间隔（毫秒），建议 30000                     |
 
 ### §16.4 验证连接
 

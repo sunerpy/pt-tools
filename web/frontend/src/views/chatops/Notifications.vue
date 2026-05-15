@@ -288,15 +288,17 @@ function getChannelLabel(type: string) {
       transparent 60%
     ),
     linear-gradient(
-      to right,
-      color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-      transparent 1px
-    ) 0 0 / 32px 32px,
+        to right,
+        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
+        transparent 1px
+      )
+      0 0 / 32px 32px,
     linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-      transparent 1px
-    ) 0 0 / 32px 32px,
+        to bottom,
+        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
+        transparent 1px
+      )
+      0 0 / 32px 32px,
     var(--pt-bg-surface);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
@@ -328,11 +330,7 @@ function getChannelLabel(type: string) {
   margin: 0;
   letter-spacing: -0.03em;
   line-height: 1.1;
-  background: linear-gradient(
-    135deg,
-    var(--pt-text-primary) 25%,
-    var(--pt-color-primary) 100%
-  );
+  background: linear-gradient(135deg, var(--pt-text-primary) 25%, var(--pt-color-primary) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -499,7 +497,8 @@ function getChannelLabel(type: string) {
 }
 
 @keyframes pulse-dot {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }

@@ -21,12 +21,12 @@ Phase 4 把 pt-tools 暴露为一个 [Model Context Protocol](https://modelconte
 
 ## 2. 为什么是 MCP
 
-| 替代方案 | 缺点 |
-|---------|------|
-| Agent 直接调内部 Go 函数 | 紧耦合；每换一个 Agent 框架要重写适配 |
+| 替代方案                   | 缺点                                                                              |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| Agent 直接调内部 Go 函数   | 紧耦合；每换一个 Agent 框架要重写适配                                             |
 | Agent 调 pt-tools REST API | API 是面向 UI 的；缺少能力描述（无 schema、无权限元数据），Agent 难以正确选择工具 |
-| 直接接入某个 Agent 框架 | 与厂商绑死；用户切换 LLM 提供商代价高 |
-| **MCP Server** | 协议级标准；工具自描述；权限元数据；Cursor/Claude Desktop 即插即用 |
+| 直接接入某个 Agent 框架    | 与厂商绑死；用户切换 LLM 提供商代价高                                             |
+| **MCP Server**             | 协议级标准；工具自描述；权限元数据；Cursor/Claude Desktop 即插即用                |
 
 MCP 还提供 **transport-agnostic** 的优势：同一份工具实现可同时通过本地 stdio（IDE 内嵌）和远端 HTTP（多用户共享）暴露。
 
@@ -86,8 +86,8 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
 {
   "type": "object",
   "properties": {
-    "site_id":       { "type": "string", "description": "Optional site identifier filter" },
-    "enabled_only":  { "type": "boolean", "description": "Only enabled tasks" }
+    "site_id": { "type": "string", "description": "Optional site identifier filter" },
+    "enabled_only": { "type": "boolean", "description": "Only enabled tasks" }
   },
   "required": [],
   "additionalProperties": false
@@ -105,9 +105,13 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
   "type": "object",
   "properties": {
     "downloader_id": { "type": "integer" },
-    "page":          { "type": "integer", "minimum": 1, "default": 1 },
-    "page_size":     { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
-    "state_filter":  { "type": "string", "enum": ["all","downloading","seeding","paused","completed","error"], "default": "all" }
+    "page": { "type": "integer", "minimum": 1, "default": 1 },
+    "page_size": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
+    "state_filter": {
+      "type": "string",
+      "enum": ["all", "downloading", "seeding", "paused", "completed", "error"],
+      "default": "all"
+    }
   },
   "required": ["downloader_id"],
   "additionalProperties": false
@@ -137,10 +141,10 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
 {
   "type": "object",
   "properties": {
-    "keyword":   { "type": "string", "minLength": 1 },
-    "sites":     { "type": "array", "items": { "type": "string" } },
+    "keyword": { "type": "string", "minLength": 1 },
+    "sites": { "type": "array", "items": { "type": "string" } },
     "free_only": { "type": "boolean", "default": false },
-    "limit":     { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+    "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
   },
   "required": ["keyword"],
   "additionalProperties": false
@@ -156,8 +160,8 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
   "type": "object",
   "properties": {
     "downloader_id": { "type": "integer" },
-    "task_id":       { "type": "string" },
-    "confirm":       { "type": "boolean", "const": true }
+    "task_id": { "type": "string" },
+    "confirm": { "type": "boolean", "const": true }
   },
   "required": ["downloader_id", "task_id", "confirm"],
   "additionalProperties": false
@@ -173,7 +177,7 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
   "type": "object",
   "properties": {
     "downloader_id": { "type": "integer" },
-    "task_id":       { "type": "string" }
+    "task_id": { "type": "string" }
   },
   "required": ["downloader_id", "task_id"],
   "additionalProperties": false
@@ -189,9 +193,9 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
   "type": "object",
   "properties": {
     "downloader_id": { "type": "integer" },
-    "task_id":       { "type": "string" },
-    "remove_data":   { "type": "boolean", "default": false },
-    "confirm":       { "type": "boolean", "const": true }
+    "task_id": { "type": "string" },
+    "remove_data": { "type": "boolean", "default": false },
+    "confirm": { "type": "boolean", "const": true }
   },
   "required": ["downloader_id", "task_id", "confirm"],
   "additionalProperties": false
@@ -209,11 +213,11 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
   "type": "object",
   "properties": {
     "downloader_id": { "type": "integer" },
-    "torrent_url":   { "type": "string", "format": "uri" },
-    "torrent_b64":   { "type": "string" },
-    "category":      { "type": "string" },
-    "save_path":     { "type": "string" },
-    "paused":        { "type": "boolean", "default": false }
+    "torrent_url": { "type": "string", "format": "uri" },
+    "torrent_b64": { "type": "string" },
+    "category": { "type": "string" },
+    "save_path": { "type": "string" },
+    "paused": { "type": "boolean", "default": false }
   },
   "required": ["downloader_id"],
   "additionalProperties": false
@@ -257,13 +261,13 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
 
 ## 6. 鉴权模型
 
-| 维度 | 策略 |
-|------|------|
-| 复用 T9 bearer token 中间件 | streamable-HTTP transport 必须带 `Authorization: Bearer <token>` |
-| stdio transport | 默认信任本地调用方；可选 `--require-token` flag 强制 |
-| Capability scopes | Token 元数据中的 `scopes` 字段控制可调用工具集合 |
-| 高危工具 | `pause_torrent` / `delete_torrent` 要求 token 持有 `mutate:torrents` scope |
-| Auditing | 每次工具调用写入 `chatops_audit_logs`（与 chatops 共用），记录 token、tool、args 哈希、result code |
+| 维度                        | 策略                                                                                               |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| 复用 T9 bearer token 中间件 | streamable-HTTP transport 必须带 `Authorization: Bearer <token>`                                   |
+| stdio transport             | 默认信任本地调用方；可选 `--require-token` flag 强制                                               |
+| Capability scopes           | Token 元数据中的 `scopes` 字段控制可调用工具集合                                                   |
+| 高危工具                    | `pause_torrent` / `delete_torrent` 要求 token 持有 `mutate:torrents` scope                         |
+| Auditing                    | 每次工具调用写入 `chatops_audit_logs`（与 chatops 共用），记录 token、tool、args 哈希、result code |
 
 Token 与 scope 的具体定义在 T9（`web/middleware_bearer.go`）已落地；MCP server 仅复用。
 

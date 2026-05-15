@@ -168,7 +168,7 @@ func (q *QQChannel) wsHandshakeHandler(w http.ResponseWriter, r *http.Request) {
 	c := newNapCatCaller(conn, hello.SelfID)
 	q.caller.Store(c)
 	q.healthy.Store(true)
-	warnLogger().Warnf("QQ 适配器(%d): [wss] 连接Websocket服务器: %s 成功, 账号: %d", q.confID, r.RemoteAddr, hello.SelfID)
+	qqLogger().Infof("QQ 适配器(%d): [wss] 连接Websocket服务器: %s 成功, 账号: %d", q.confID, r.RemoteAddr, hello.SelfID)
 
 	go q.listenCaller(c)
 }
@@ -207,7 +207,7 @@ func (q *QQChannel) listenCaller(c *napCatCaller) {
 		q.caller.Store(nil)
 		q.healthy.Store(false)
 		_ = c.conn.Close()
-		warnLogger().Warnf("QQ 适配器(%d): [wss] WebSocket 连接断开, 账号: %d", q.confID, c.selfID)
+		qqLogger().Infof("QQ 适配器(%d): [wss] WebSocket 连接断开, 账号: %d", q.confID, c.selfID)
 	}()
 
 	// 初始 read deadline。
@@ -358,18 +358,26 @@ func stripMarkdown(s string) string {
 }
 
 type warnLog interface {
+	Infof(template string, args ...interface{})
 	Warnf(template string, args ...interface{})
 }
 
-func warnLogger() warnLog {
+func qqLogger() warnLog {
 	if global.GetLogger() == nil {
 		return nopLogger{}
 	}
 	return global.GetSlogger()
 }
 
+// warnLogger is preserved as an alias for backward compatibility but new code
+// should call qqLogger() and pick the right level (Infof / Warnf) directly.
+func warnLogger() warnLog {
+	return qqLogger()
+}
+
 type nopLogger struct{}
 
+func (nopLogger) Infof(string, ...interface{}) {}
 func (nopLogger) Warnf(string, ...interface{}) {}
 
 func init() {

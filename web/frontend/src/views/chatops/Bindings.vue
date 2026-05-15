@@ -177,7 +177,9 @@
         </el-button>
         <p class="expiry-hint">
           {{
-            generatedExpiresAt ? `过期时间：${formatDate(generatedExpiresAt)}` : "永久有效（无过期时间）"
+            generatedExpiresAt
+              ? `过期时间：${formatDate(generatedExpiresAt)}`
+              : "永久有效（无过期时间）"
           }}
         </p>
         <div class="dialog-actions">
