@@ -20,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/chatops"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
+	"github.com/sunerpy/pt-tools/internal/crypto"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
@@ -423,6 +424,16 @@ func initEnabledChannels(
 		if makeErr != nil {
 			log.Warnf("ChatOps 通道工厂未知 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, makeErr)
 			continue
+		}
+		// Decrypt ConfigJSON (stored as base64 AES-GCM ciphertext) before
+		// passing to the adapter, which expects plaintext JSON.
+		if conf.ConfigJSON != "" {
+			plain, derr := crypto.Decrypt(conf.ConfigJSON)
+			if derr != nil {
+				log.Warnf("ChatOps 通道配置解密失败 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, derr)
+				continue
+			}
+			conf.ConfigJSON = string(plain)
 		}
 		if err := ch.Init(ctx, &conf); err != nil {
 			log.Warnf("ChatOps 通道初始化失败 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, err)
