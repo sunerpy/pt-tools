@@ -584,6 +584,7 @@ func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notific
 		SourceConfID: n.SourceConfID,
 		UserID:       n.UserID,
 		Targets:      n.Targets,
+		Buttons:      n.Buttons,
 	}); err != nil {
 		chatopsLogger().Warnf("实时通知投递失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
 		return err

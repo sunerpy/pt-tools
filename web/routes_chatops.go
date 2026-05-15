@@ -59,6 +59,10 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	mux.Handle("POST /api/chatops/tokens", wrap(h.createToken))
 	mux.Handle("GET /api/chatops/tokens", wrap(h.listTokens))
 	mux.Handle("DELETE /api/chatops/tokens/{id}", wrap(h.deleteToken))
+
+	mux.Handle("GET /api/chatops/rss-notifications", wrap(h.listRSSNotifications))
+	mux.Handle("POST /api/chatops/rss-notifications/{id}/retry", wrap(h.retryRSSNotification))
+	mux.Handle("POST /api/chatops/rss-notifications/{id}/cancel", wrap(h.cancelRSSNotification))
 }
 
 func (s *Server) SetChatOpsDeps(deps *ChatOpsDeps) {

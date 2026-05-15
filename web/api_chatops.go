@@ -10,7 +10,9 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/models"
 )
 
 type chatopsHandlers struct {
@@ -125,10 +127,12 @@ func (h *chatopsHandlers) createNotification(w http.ResponseWriter, r *http.Requ
 }
 
 type updateNotificationBody struct {
-	ChannelType *string         `json:"channel_type,omitempty"`
-	Name        *string         `json:"name,omitempty"`
-	ConfigJSON  json.RawMessage `json:"config_json,omitempty"`
-	Enabled     *bool           `json:"enabled,omitempty"`
+	ChannelType     *string         `json:"channel_type,omitempty"`
+	Name            *string         `json:"name,omitempty"`
+	ConfigJSON      json.RawMessage `json:"config_json,omitempty"`
+	Enabled         *bool           `json:"enabled,omitempty"`
+	QuietHoursStart *string         `json:"quiet_hours_start,omitempty"`
+	QuietHoursEnd   *string         `json:"quiet_hours_end,omitempty"`
 }
 
 func (h *chatopsHandlers) updateNotification(w http.ResponseWriter, r *http.Request) {
@@ -143,10 +147,12 @@ func (h *chatopsHandlers) updateNotification(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	req := app.UpdateConfReq{
-		ChannelType: body.ChannelType,
-		Name:        body.Name,
-		ConfigJSON:  body.ConfigJSON,
-		Enabled:     body.Enabled,
+		ChannelType:     body.ChannelType,
+		Name:            body.Name,
+		ConfigJSON:      body.ConfigJSON,
+		Enabled:         body.Enabled,
+		QuietHoursStart: body.QuietHoursStart,
+		QuietHoursEnd:   body.QuietHoursEnd,
 	}
 	if err := h.deps.NotificationSvc.UpdateConf(r.Context(), id, req); err != nil {
 		mapServiceErr(w, err)
@@ -433,4 +439,118 @@ func (h *chatopsHandlers) deleteToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// ----- rss notifications log -----
+
+func (h *chatopsHandlers) listRSSNotifications(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
+		writeChatopsErr(w, http.StatusServiceUnavailable, "not_wired", "database not initialized")
+		return
+	}
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page <= 0 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(q.Get("page_size"))
+	if pageSize <= 0 || pageSize > 200 {
+		pageSize = 50
+	}
+
+	db := global.GlobalDB.DB.WithContext(r.Context()).Model(&models.RSSNotificationLog{})
+	if v := q.Get("rss_id"); v != "" {
+		db = db.Where("rss_id = ?", v)
+	}
+	if v := q.Get("kind"); v != "" {
+		db = db.Where("notify_kind = ?", v)
+	}
+	if v := q.Get("result"); v != "" {
+		db = db.Where("result = ?", v)
+	}
+	if v := q.Get("conf_id"); v != "" {
+		db = db.Where("notification_conf_id = ?", v)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		writeChatopsErr(w, http.StatusInternalServerError, "db_error", err.Error())
+		return
+	}
+	var rows []models.RSSNotificationLog
+	if err := db.Order("created_at DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&rows).Error; err != nil {
+		writeChatopsErr(w, http.StatusInternalServerError, "db_error", err.Error())
+		return
+	}
+	if rows == nil {
+		rows = []models.RSSNotificationLog{}
+	}
+	writeJSON(w, map[string]any{
+		"items":     rows,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+func (h *chatopsHandlers) retryRSSNotification(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
+		writeChatopsErr(w, http.StatusServiceUnavailable, "not_wired", "database not initialized")
+		return
+	}
+	id, err := parseUintPathValue(r, "id")
+	if err != nil || id == 0 {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_id", "id required")
+		return
+	}
+	now := time.Now()
+	res := global.GlobalDB.DB.WithContext(r.Context()).
+		Model(&models.RSSNotificationLog{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"result":        "pending",
+			"next_retry_at": now,
+			"last_error":    "",
+			"updated_at":    now,
+		})
+	if res.Error != nil {
+		writeChatopsErr(w, http.StatusInternalServerError, "db_error", res.Error.Error())
+		return
+	}
+	if res.RowsAffected == 0 {
+		writeChatopsErr(w, http.StatusNotFound, "not_found", "")
+		return
+	}
+	writeJSON(w, map[string]any{"success": true, "queued": true})
+}
+
+func (h *chatopsHandlers) cancelRSSNotification(w http.ResponseWriter, r *http.Request) {
+	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
+		writeChatopsErr(w, http.StatusServiceUnavailable, "not_wired", "database not initialized")
+		return
+	}
+	id, err := parseUintPathValue(r, "id")
+	if err != nil || id == 0 {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_id", "id required")
+		return
+	}
+	res := global.GlobalDB.DB.WithContext(r.Context()).
+		Model(&models.RSSNotificationLog{}).
+		Where("id = ? AND result IN ?", id, []string{"pending", "failed"}).
+		Updates(map[string]any{
+			"result":     "suppressed",
+			"updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		writeChatopsErr(w, http.StatusInternalServerError, "db_error", res.Error.Error())
+		return
+	}
+	if res.RowsAffected == 0 {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_state", "row not in retryable state")
+		return
+	}
+	writeJSON(w, map[string]any{"success": true})
 }

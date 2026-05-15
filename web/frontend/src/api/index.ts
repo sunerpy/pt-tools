@@ -105,6 +105,9 @@ export interface RSSConfig {
   pause_on_free_end?: boolean; // 免费结束时是否暂停未完成的下载
   is_example?: boolean; // 是否为示例配置
   filter_mode?: FilterMode; // 空字符串表示继承全局
+  notify_mode?: "" | "all" | "filtered" | "both"; // RSS 上新通知模式
+  notify_conf_ids?: string; // JSON 数组字符串，例如 "[1,2]"
+  max_notifications_per_hour?: number; // 每小时最多通知数（0 = 不限制）
 }
 
 export interface SiteConfig {
@@ -353,6 +356,7 @@ export interface FilterRule {
   site_id?: number;
   rss_id?: number;
   priority: number;
+  purpose?: "download" | "notify" | "both";
   created_at?: string;
   updated_at?: string;
 }
@@ -1122,6 +1126,8 @@ export interface NotificationConfig {
   channel_type: string;
   name: string;
   enabled: boolean;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
   // Dynamic fields (frontend form shape; backend stores under encrypted config_json)
   bot_token?: string;
   allowed_users?: string;
@@ -1143,6 +1149,8 @@ const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
   "channel_type",
   "name",
   "enabled",
+  "quiet_hours_start",
+  "quiet_hours_end",
 ]);
 
 const NOTIFICATION_DYNAMIC_FIELDS = [
@@ -1165,6 +1173,8 @@ interface NotificationWireBody {
   channel_type?: string;
   name?: string;
   enabled?: boolean;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
   config_json?: Record<string, unknown>;
 }
 
@@ -1176,6 +1186,8 @@ function packNotificationBody(
   if (data.channel_type !== undefined) body.channel_type = data.channel_type;
   if (data.name !== undefined) body.name = data.name;
   if (data.enabled !== undefined) body.enabled = data.enabled;
+  if (data.quiet_hours_start !== undefined) body.quiet_hours_start = data.quiet_hours_start;
+  if (data.quiet_hours_end !== undefined) body.quiet_hours_end = data.quiet_hours_end;
   const config: Record<string, unknown> = {};
   let hasDynamic = false;
   for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
@@ -1199,6 +1211,8 @@ function unpackNotificationResponse(
     channel_type: raw.channel_type,
     name: raw.name,
     enabled: raw.enabled,
+    quiet_hours_start: raw.quiet_hours_start,
+    quiet_hours_end: raw.quiet_hours_end,
   };
   const sink = result as unknown as Record<string, unknown>;
   const arrayFields = new Set(["admin_qq_users", "allowed_qq_users"]);
@@ -1251,6 +1265,24 @@ export interface AuditLog {
   created_at: string;
   latency_ms: number;
   args_json?: string;
+}
+
+export interface RSSNotificationLog {
+  id: number;
+  rss_id: number;
+  site_name: string;
+  torrent_id: string;
+  notify_kind: "all" | "filtered";
+  notification_conf_id: number;
+  matched_filter_rule_id?: number;
+  result: "sent" | "failed" | "suppressed" | "pending" | "throttled";
+  attempts: number;
+  next_retry_at?: string;
+  last_error?: string;
+  payload_json?: string;
+  delivered_at?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export const chatopsApi = {
@@ -1315,5 +1347,20 @@ export const chatopsApi = {
         max_latency_ms: number;
         avg_latency_ms: number;
       }>("/api/chatops/audit/stats"),
+  },
+  rssNotifications: {
+    list: (params: URLSearchParams) =>
+      api.get<{
+        items: RSSNotificationLog[];
+        total: number;
+        page: number;
+        page_size: number;
+      }>(`/api/chatops/rss-notifications?${params.toString()}`),
+    retry: (id: number) =>
+      api.post<{ success: boolean; queued: boolean }>(
+        `/api/chatops/rss-notifications/${id}/retry`,
+      ),
+    cancel: (id: number) =>
+      api.post<{ success: boolean }>(`/api/chatops/rss-notifications/${id}/cancel`),
   },
 };

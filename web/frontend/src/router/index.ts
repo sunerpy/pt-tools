@@ -125,6 +125,12 @@ const router = createRouter({
       component: () => import("@/views/chatops/AuditLog.vue"),
       meta: { title: "操作审计日志" },
     },
+    {
+      path: "/chatops/rss-notifications",
+      name: "rss-notifications",
+      component: () => import("@/views/chatops/RSSNotifications.vue"),
+      meta: { title: "RSS 通知日志" },
+    },
   ],
 });
 

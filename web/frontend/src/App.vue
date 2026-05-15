@@ -186,6 +186,10 @@ function logout() {
               <el-icon><DataAnalysis /></el-icon>
               <template #title>操作审计</template>
             </el-menu-item>
+            <el-menu-item index="chatops/rss-notifications">
+              <el-icon><Bell /></el-icon>
+              <template #title>RSS 通知日志</template>
+            </el-menu-item>
           </el-sub-menu>
           <el-menu-item index="password">
             <el-icon><Lock /></el-icon>

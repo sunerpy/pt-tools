@@ -135,6 +135,8 @@ async function handleSaveBasic() {
     await chatopsApi.notifications.update(conf.id, {
       name: conf.name,
       enabled: conf.enabled,
+      quiet_hours_start: conf.quiet_hours_start || "",
+      quiet_hours_end: conf.quiet_hours_end || "",
     });
     ElMessage.success("已保存基本信息");
   } catch (e: unknown) {
@@ -296,6 +298,26 @@ function goBack() {
                 active-text="启用"
                 inactive-text="停用"
                 inline-prompt />
+            </el-form-item>
+            <el-form-item label="静默时段">
+              <el-time-picker
+                v-model="conf.quiet_hours_start"
+                format="HH:mm"
+                value-format="HH:mm"
+                placeholder="开始 (HH:MM)"
+                clearable
+                style="width: 130px" />
+              <span style="margin: 0 8px">→</span>
+              <el-time-picker
+                v-model="conf.quiet_hours_end"
+                format="HH:mm"
+                value-format="HH:mm"
+                placeholder="结束 (HH:MM)"
+                clearable
+                style="width: 130px" />
+              <div class="form-hint">
+                在此时段内通道不会主动发送通知，待静默结束后由 retry worker 投递。支持跨午夜（如 22:00 → 08:00）。
+              </div>
             </el-form-item>
             <div class="form-actions">
               <el-button

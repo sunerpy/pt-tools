@@ -11,17 +11,19 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
 
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
 type Notification struct {
-	Title        string            `json:"title"`
-	Text         string            `json:"text"`
-	SourceConfID uint              `json:"source_conf_id,omitempty"`
-	UserID       string            `json:"user_id,omitempty"`
-	Targets      map[string]string `json:"targets,omitempty"`
+	Title        string             `json:"title"`
+	Text         string             `json:"text"`
+	SourceConfID uint               `json:"source_conf_id,omitempty"`
+	UserID       string             `json:"user_id,omitempty"`
+	Targets      map[string]string  `json:"targets,omitempty"`
+	Buttons      [][]notify.Button  `json:"buttons,omitempty"`
 }
 
 // NotifyManager 抽象底层投递。
@@ -32,13 +34,15 @@ type NotifyManager interface {
 
 // NotificationConfDTO 是对 models.NotificationConf 的对外只读视图，不含密文字段。
 type NotificationConfDTO struct {
-	ID          uint            `json:"id"`
-	ChannelType string          `json:"channel_type"`
-	Name        string          `json:"name"`
-	Enabled     bool            `json:"enabled"`
-	ConfigJSON  json.RawMessage `json:"config_json,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID              uint            `json:"id"`
+	ChannelType     string          `json:"channel_type"`
+	Name            string          `json:"name"`
+	Enabled         bool            `json:"enabled"`
+	QuietHoursStart string          `json:"quiet_hours_start,omitempty"`
+	QuietHoursEnd   string          `json:"quiet_hours_end,omitempty"`
+	ConfigJSON      json.RawMessage `json:"config_json,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // CreateConfReq 创建通知通道的请求；ConfigJSON 为通道原始配置，进入 service 后会被 AES-GCM 加密落库。
@@ -51,10 +55,12 @@ type CreateConfReq struct {
 
 // UpdateConfReq 更新请求，ConfigJSON 为空时不更新对应字段。
 type UpdateConfReq struct {
-	ChannelType *string
-	Name        *string
-	ConfigJSON  json.RawMessage
-	Enabled     *bool
+	ChannelType     *string
+	Name            *string
+	ConfigJSON      json.RawMessage
+	Enabled         *bool
+	QuietHoursStart *string
+	QuietHoursEnd   *string
 }
 
 // NotificationService 管理通知通道配置与消息投递。
@@ -95,12 +101,14 @@ func (s *notificationService) ListConfs(ctx context.Context) ([]NotificationConf
 	out := make([]NotificationConfDTO, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, NotificationConfDTO{
-			ID:          r.ID,
-			ChannelType: r.ChannelType,
-			Name:        r.Name,
-			Enabled:     r.Enabled,
-			CreatedAt:   r.CreatedAt,
-			UpdatedAt:   r.UpdatedAt,
+			ID:              r.ID,
+			ChannelType:     r.ChannelType,
+			Name:            r.Name,
+			Enabled:         r.Enabled,
+			QuietHoursStart: r.QuietHoursStart,
+			QuietHoursEnd:   r.QuietHoursEnd,
+			CreatedAt:       r.CreatedAt,
+			UpdatedAt:       r.UpdatedAt,
 		})
 	}
 	return out, nil
@@ -120,12 +128,14 @@ func (s *notificationService) GetConf(ctx context.Context, id uint) (Notificatio
 		return NotificationConfDTO{}, fmt.Errorf("查询通道详情失败: %w", err)
 	}
 	dto := NotificationConfDTO{
-		ID:          row.ID,
-		ChannelType: row.ChannelType,
-		Name:        row.Name,
-		Enabled:     row.Enabled,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:              row.ID,
+		ChannelType:     row.ChannelType,
+		Name:            row.Name,
+		Enabled:         row.Enabled,
+		QuietHoursStart: row.QuietHoursStart,
+		QuietHoursEnd:   row.QuietHoursEnd,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
 	}
 	if row.ConfigJSON != "" {
 		plain, derr := crypto.Decrypt(row.ConfigJSON)
@@ -165,12 +175,14 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 		return NotificationConfDTO{}, fmt.Errorf("创建通知通道失败: %w", err)
 	}
 	return NotificationConfDTO{
-		ID:          row.ID,
-		ChannelType: row.ChannelType,
-		Name:        row.Name,
-		Enabled:     row.Enabled,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:              row.ID,
+		ChannelType:     row.ChannelType,
+		Name:            row.Name,
+		Enabled:         row.Enabled,
+		QuietHoursStart: row.QuietHoursStart,
+		QuietHoursEnd:   row.QuietHoursEnd,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
 	}, nil
 }
 
@@ -187,6 +199,12 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
+	}
+	if req.QuietHoursStart != nil {
+		updates["quiet_hours_start"] = *req.QuietHoursStart
+	}
+	if req.QuietHoursEnd != nil {
+		updates["quiet_hours_end"] = *req.QuietHoursEnd
 	}
 	if len(req.ConfigJSON) > 0 {
 		cipherStr, err := crypto.Encrypt([]byte(req.ConfigJSON))

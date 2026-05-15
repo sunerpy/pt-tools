@@ -202,6 +202,10 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 	err := r.notifySvc.Push(ctx, Notification{
 		Title: sp.Title, Text: sp.Text,
 		SourceConfID: sp.ConfID,
+		Buttons: [][]notify.Button{{
+			{Text: "立即下载", CallbackData: fmt.Sprintf("dl:%d", row.ID)},
+			{Text: "忽略", CallbackData: fmt.Sprintf("ig:%d", row.ID)},
+		}},
 	})
 	upd := map[string]any{"updated_at": r.now(), "attempts": 1}
 	if err != nil {

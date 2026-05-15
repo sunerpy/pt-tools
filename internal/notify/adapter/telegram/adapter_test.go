@@ -40,6 +40,10 @@ func (f *fakeBot) SendMessage(_ context.Context, p *telego.SendMessageParams) (*
 	return &telego.Message{MessageID: 1}, nil
 }
 
+func (f *fakeBot) AnswerCallbackQuery(_ context.Context, _ *telego.AnswerCallbackQueryParams) error {
+	return nil
+}
+
 func (f *fakeBot) lastSend() *telego.SendMessageParams {
 	f.mu.Lock()
 	defer f.mu.Unlock()

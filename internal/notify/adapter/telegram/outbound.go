@@ -48,11 +48,48 @@ func (c *TelegramChannel) Send(ctx context.Context, n notify.Notification) error
 	if n.DisableWebPreview {
 		params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
 	}
+	if markup := buildInlineKeyboard(n.Buttons); markup != nil {
+		params.ReplyMarkup = markup
+	}
 
 	if _, err := bot.SendMessage(ctx, params); err != nil {
 		return fmt.Errorf("telegram: SendMessage 失败: %w", err)
 	}
 	return nil
+}
+
+func buildInlineKeyboard(rows [][]notify.Button) *telego.InlineKeyboardMarkup {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([][]telego.InlineKeyboardButton, 0, len(rows))
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		buttons := make([]telego.InlineKeyboardButton, 0, len(row))
+		for _, b := range row {
+			if b.Text == "" {
+				continue
+			}
+			btn := telego.InlineKeyboardButton{Text: b.Text}
+			if b.URL != "" {
+				btn.URL = b.URL
+			} else if b.CallbackData != "" {
+				btn.CallbackData = b.CallbackData
+			} else {
+				continue
+			}
+			buttons = append(buttons, btn)
+		}
+		if len(buttons) > 0 {
+			out = append(out, buttons)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: out}
 }
 
 func resolveChatID(n notify.Notification, cfg *Config) (int64, error) {

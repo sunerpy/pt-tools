@@ -37,6 +37,7 @@ type Config struct {
 type botAPI interface {
 	GetMe(ctx context.Context) (*telego.User, error)
 	SendMessage(ctx context.Context, params *telego.SendMessageParams) (*telego.Message, error)
+	AnswerCallbackQuery(ctx context.Context, params *telego.AnswerCallbackQueryParams) error
 }
 
 type updateSource func(ctx context.Context) (<-chan telego.Update, error)

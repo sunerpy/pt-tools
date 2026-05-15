@@ -49,6 +49,10 @@ func (c *TelegramChannel) runInbound(ctx context.Context, src updateSource) {
 }
 
 func (c *TelegramChannel) handleUpdate(ctx context.Context, upd telego.Update) {
+	if upd.CallbackQuery != nil {
+		c.handleCallbackQuery(ctx, upd.CallbackQuery)
+		return
+	}
 	msg := upd.Message
 	if msg == nil || msg.From == nil {
 		return
@@ -146,4 +150,81 @@ func contains(xs []int64, x int64) bool {
 		}
 	}
 	return false
+}
+
+// handleCallbackQuery routes inline-keyboard button presses. Sprint 4 ships
+// a stub: we acknowledge the click and edit the message to give visual
+// feedback. Sprint 5 will wire the actual download / suppress actions to
+// the push pipeline.
+func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.CallbackQuery) {
+	if cq == nil {
+		return
+	}
+	c.mu.RLock()
+	bot := c.bot
+	cfg := c.cfg
+	handler := c.handler
+	c.mu.RUnlock()
+	if bot == nil || cfg == nil {
+		return
+	}
+
+	userID := cq.From.ID
+	if !contains(cfg.AllowedUsers, userID) && !contains(cfg.AdminUsers, userID) {
+		_ = bot.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+			CallbackQueryID: cq.ID,
+			Text:            denyMessage,
+			ShowAlert:       true,
+		})
+		c.logger.Infof("telegram: 拒绝 callback conf=%d user=%d", c.confID, userID)
+		return
+	}
+
+	data := cq.Data
+	parts := strings.SplitN(data, ":", 2)
+	action := ""
+	payload := ""
+	if len(parts) == 2 {
+		action = parts[0]
+		payload = parts[1]
+	}
+
+	var ackText string
+	switch action {
+	case "dl":
+		ackText = "已记录下载请求 #" + payload + "（处理中）"
+	case "ig":
+		ackText = "已忽略 #" + payload
+	case "dt":
+		ackText = "请查看消息中的链接"
+	default:
+		ackText = "未知操作"
+	}
+
+	_ = bot.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+		CallbackQueryID: cq.ID,
+		Text:            ackText,
+	})
+
+	c.logger.Infof("telegram: callback conf=%d user=%d data=%q action=%s payload=%s",
+		c.confID, userID, data, action, payload)
+
+	if handler != nil && data != "" {
+		in := notify.InboundMessage{
+			ChannelType:   ChannelType,
+			SourceConfID:  c.confID,
+			ChannelUserID: strconv.FormatInt(userID, 10),
+			Username:      cq.From.Username,
+			Text:          data,
+			IsCallback:    true,
+			CallbackData:  data,
+		}
+		if msg, ok := cq.Message.(interface{ GetChat() telego.Chat }); ok {
+			in.ChatID = strconv.FormatInt(msg.GetChat().ID, 10)
+		}
+		if err := handler(ctx, in); err != nil {
+			c.logger.Warnf("telegram: callback handler 错误 conf=%d data=%q: %v",
+				c.confID, data, err)
+		}
+	}
 }
