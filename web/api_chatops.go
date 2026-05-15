@@ -178,7 +178,7 @@ func (h *chatopsHandlers) testNotification(w http.ResponseWriter, r *http.Reques
 		mapServiceErr(w, err)
 		return
 	}
-	writeJSON(w, map[string]string{"status": "sent"})
+	writeJSON(w, map[string]any{"success": true, "status": "sent"})
 }
 
 // ----- bindings -----

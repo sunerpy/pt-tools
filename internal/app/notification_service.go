@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,9 +17,11 @@ import (
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
 type Notification struct {
-	Title        string
-	Text         string
-	SourceConfID uint
+	Title        string            `json:"title"`
+	Text         string            `json:"text"`
+	SourceConfID uint              `json:"source_conf_id,omitempty"`
+	UserID       string            `json:"user_id,omitempty"`
+	Targets      map[string]string `json:"targets,omitempty"`
 }
 
 // NotifyManager 抽象底层投递。
@@ -229,11 +232,158 @@ func (s *notificationService) TestConf(ctx context.Context, id uint) error {
 	if err != nil {
 		return fmt.Errorf("查询通知通道失败: %w", err)
 	}
+	chatID, err := s.testChatID(ctx, row)
+	if err != nil {
+		return err
+	}
+	targets := map[string]string(nil)
+	if chatID != "" {
+		targets = map[string]string{"chat_id": chatID}
+		if row.ChannelType == "qq_onebot" {
+			targets["message_type"] = "private"
+		}
+	}
 	return s.Push(ctx, Notification{
 		Title:        "pt-tools 测试通知",
 		Text:         "如果你看到此消息，说明通道配置正常。",
 		SourceConfID: row.ID,
+		UserID:       chatID,
+		Targets:      targets,
 	})
+}
+
+func (s *notificationService) testChatID(ctx context.Context, row models.NotificationConf) (string, error) {
+	switch row.ChannelType {
+	case "qq_onebot":
+		chatID, err := qqTestChatID(row)
+		if err != nil {
+			return "", err
+		}
+		if chatID != "" {
+			return chatID, nil
+		}
+		if bindingChatID, err := s.firstBindingChatID(ctx, row.ID); err != nil || bindingChatID != "" {
+			return bindingChatID, err
+		}
+		return "", errors.New("QQ 通道无可用收件人：请配置至少一个 admin_qq_users 或先完成一次绑定")
+	case "telegram":
+		chatID, err := telegramTestChatID(row)
+		if err != nil {
+			return "", err
+		}
+		if chatID != "" {
+			return chatID, nil
+		}
+		if bindingChatID, err := s.firstBindingChatID(ctx, row.ID); err != nil || bindingChatID != "" {
+			return bindingChatID, err
+		}
+		return "", errors.New("Telegram 通道无可用收件人：请配置 default_chat_id、至少一个 admin_users 或先完成一次绑定")
+	default:
+		return "", nil
+	}
+}
+
+func qqTestChatID(row models.NotificationConf) (string, error) {
+	var cfg struct {
+		AdminQQUsers   []int64 `json:"admin_qq_users"`
+		AllowedQQUsers []int64 `json:"allowed_qq_users"`
+	}
+	if err := decryptConfigJSON(row.ConfigJSON, &cfg); err != nil {
+		return "", err
+	}
+	if len(cfg.AdminQQUsers) > 0 {
+		return strconv.FormatInt(cfg.AdminQQUsers[0], 10), nil
+	}
+	if len(cfg.AllowedQQUsers) > 0 {
+		return strconv.FormatInt(cfg.AllowedQQUsers[0], 10), nil
+	}
+	return "", nil
+}
+
+func telegramTestChatID(row models.NotificationConf) (string, error) {
+	var cfg map[string]json.RawMessage
+	if err := decryptConfigJSON(row.ConfigJSON, &cfg); err != nil {
+		return "", err
+	}
+	if raw := cfg["default_chat_id"]; len(raw) > 0 {
+		chatID, err := rawStringOrInt64(raw)
+		if err != nil {
+			return "", fmt.Errorf("解析 telegram default_chat_id 失败: %w", err)
+		}
+		if chatID != "" {
+			return chatID, nil
+		}
+	}
+	if raw := cfg["admin_users"]; len(raw) > 0 {
+		users, err := rawStringOrInt64Slice(raw)
+		if err != nil {
+			return "", fmt.Errorf("解析 telegram admin_users 失败: %w", err)
+		}
+		if len(users) > 0 {
+			return users[0], nil
+		}
+	}
+	return "", nil
+}
+
+func decryptConfigJSON(configJSON string, dst any) error {
+	if configJSON == "" {
+		return nil
+	}
+	plain, err := crypto.Decrypt(configJSON)
+	if err != nil {
+		return fmt.Errorf("解密 config_json 失败: %w", err)
+	}
+	if err := json.Unmarshal(plain, dst); err != nil {
+		return fmt.Errorf("解析 config_json 失败: %w", err)
+	}
+	return nil
+}
+
+func rawStringOrInt64(raw json.RawMessage) (string, error) {
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		return str, nil
+	}
+	var id int64
+	if err := json.Unmarshal(raw, &id); err == nil {
+		if id == 0 {
+			return "", nil
+		}
+		return strconv.FormatInt(id, 10), nil
+	}
+	return "", errors.New("值必须是字符串或整数")
+}
+
+func rawStringOrInt64Slice(raw json.RawMessage) ([]string, error) {
+	var strings []string
+	if err := json.Unmarshal(raw, &strings); err == nil {
+		return strings, nil
+	}
+	var ids []int64
+	if err := json.Unmarshal(raw, &ids); err == nil {
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, strconv.FormatInt(id, 10))
+		}
+		return out, nil
+	}
+	return nil, errors.New("值必须是字符串数组或整数数组")
+}
+
+func (s *notificationService) firstBindingChatID(ctx context.Context, confID uint) (string, error) {
+	var binding models.ChannelBinding
+	err := s.db.WithContext(ctx).
+		Where("notification_conf_id = ?", confID).
+		Order("pt_admin DESC, allowed DESC, id ASC").
+		First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("查询 channel_binding 失败: %w", err)
+	}
+	return binding.ChannelUserID, nil
 }
 
 // Push 同步投递：尝试在 pushTimeout 内调用 NotifyManager.Send；超时或失败则转为 outbox 异步队列。

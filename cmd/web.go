@@ -267,6 +267,7 @@ type chatopsBootstrap struct {
 	deps      *web.ChatOpsDeps
 	registry  *notify.Registry
 	outbox    *notify.OutboxWorker
+	manager   *liveNotifyManager
 	channels  map[uint]notify.Channel
 	sessions  *chatops.SessionStore
 	chain     *chatops.MessageChain
@@ -346,7 +347,8 @@ func bootstrapChatOps(
 
 	auditSvc := app.NewAuditService(db)
 	bindingSvc := app.NewBindingService(db, chatopsBindingCreator)
-	notifSvc := app.NewNotificationService(db, &noopNotifyManager{}, chatopsPushTimeout)
+	liveManager := newLiveNotifyManager(nil)
+	notifSvc := app.NewNotificationService(db, liveManager, chatopsPushTimeout)
 	taskSvc := app.NewTaskService(mgr)
 	siteSvc := app.NewSiteService(store, nil)
 	torrentSvc := app.NewTorrentService(mgr.GetDownloaderManager())
@@ -384,6 +386,7 @@ func bootstrapChatOps(
 	if err != nil {
 		return nil, fmt.Errorf("初始化通知通道失败: %w", err)
 	}
+	liveManager.SetChannels(channels)
 
 	deps := &web.ChatOpsDeps{
 		NotificationSvc: notifSvc,
@@ -395,6 +398,7 @@ func bootstrapChatOps(
 		deps:     deps,
 		registry: registry,
 		outbox:   outbox,
+		manager:  liveManager,
 		channels: channels,
 		sessions: sessionStore,
 		chain:    chain,
@@ -472,6 +476,51 @@ type noopNotifyManager struct{}
 
 func (noopNotifyManager) Send(_ context.Context, _ uint, _ app.Notification) error {
 	return errors.New("notify manager not yet wired; falling back to outbox")
+}
+
+type liveNotifyManager struct {
+	mu       sync.RWMutex
+	channels map[uint]notify.Channel
+}
+
+func newLiveNotifyManager(channels map[uint]notify.Channel) *liveNotifyManager {
+	if channels == nil {
+		channels = make(map[uint]notify.Channel)
+	}
+	return &liveNotifyManager{channels: channels}
+}
+
+func (m *liveNotifyManager) SetChannels(channels map[uint]notify.Channel) {
+	if channels == nil {
+		channels = make(map[uint]notify.Channel)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.channels = channels
+}
+
+func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notification) error {
+	if m == nil {
+		return errors.New("live notify manager 未初始化")
+	}
+	m.mu.RLock()
+	ch, ok := m.channels[confID]
+	m.mu.RUnlock()
+	if !ok || ch == nil {
+		return fmt.Errorf("通知通道未运行 conf_id=%d", confID)
+	}
+	if err := ch.Send(ctx, notify.Notification{
+		Title:        n.Title,
+		Text:         n.Text,
+		SourceConfID: n.SourceConfID,
+		UserID:       n.UserID,
+		Targets:      n.Targets,
+	}); err != nil {
+		chatopsLogger().Warnf("实时通知投递失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
+		return err
+	}
+	chatopsLogger().Infof("实时通知投递成功 conf_id=%d type=%s", confID, ch.Type())
+	return nil
 }
 
 // dbBindingLookup satisfies chatops.BindingLookup by querying ChannelBinding rows.

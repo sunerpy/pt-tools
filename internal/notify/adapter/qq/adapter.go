@@ -230,7 +230,7 @@ func (q *QQChannel) Send(ctx context.Context, n notify.Notification) error {
 		}
 		body += n.Link
 	}
-	return q.sendOutbound(ctx, chatID, body)
+	return q.sendOutbound(ctx, chatID, body, n.Targets["message_type"])
 }
 
 func (q *QQChannel) OnInbound(handler notify.InboundHandler) {

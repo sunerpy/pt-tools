@@ -149,6 +149,7 @@ func (w *OutboxWorker) deliverOne(ctx context.Context, row models.NotificationOu
 		return w.markFailure(ctx, row, now, fmt.Errorf("加载通知通道配置失败: %w", err))
 	}
 
+	// TODO(stateful-channels): for qq_onebot/telegram, outbox should reuse the live channel instead of registry.Make() to avoid port/connection collisions. Currently the live notify manager handles immediate delivery for these channels; outbox only services webhook/wecom_webhook reliably.
 	ch, err := w.registry.Make(conf.ChannelType)
 	if err != nil {
 		return w.markFailure(ctx, row, now, err)
