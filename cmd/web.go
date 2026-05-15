@@ -543,6 +543,9 @@ func (m *liveNotifyManager) Reply(ctx context.Context, msg notify.InboundMessage
 		return fmt.Errorf("通知通道未运行 conf_id=%d", msg.SourceConfID)
 	}
 	targets := map[string]string{"chat_id": msg.ChatID}
+	if msg.MessageType != "" {
+		targets["message_type"] = msg.MessageType
+	}
 	if err := ch.Send(ctx, notify.Notification{
 		Text:         reply.Text,
 		ChannelType:  msg.ChannelType,

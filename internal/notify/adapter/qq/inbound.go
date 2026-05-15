@@ -73,6 +73,7 @@ func (q *QQChannel) eventToInbound(evt onebotEvent, text string) inboundMessage 
 		ChannelUserID: strconv.FormatInt(evt.UserID, 10),
 		Username:      evt.Sender.Nickname,
 		ChatID:        chatID,
+		MessageType:   evt.MessageType,
 		Text:          text,
 	}
 }

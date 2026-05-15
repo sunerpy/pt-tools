@@ -30,6 +30,7 @@ type InboundMessage struct {
 	ChannelUserID string `json:"channel_user_id"`
 	Username      string `json:"username"`
 	ChatID        string `json:"chat_id"`
+	MessageType   string `json:"message_type,omitempty"` // "private" | "group" — used by reply routing
 	Text          string `json:"text"`
 	IsCallback    bool   `json:"is_callback"`
 	CallbackData  string `json:"callback_data"`

@@ -185,3 +185,67 @@ func itoa(i int) string {
 	}
 	return strings.Clone(string(buf[pos:]))
 }
+
+// TestEventToInboundPropagatesMessageType verifies that the QQ adapter
+// preserves the original message_type ("private" or "group") in InboundMessage
+// so Reply can route replies correctly via send_private_msg vs send_group_msg.
+func TestEventToInboundPropagatesMessageType(t *testing.T) {
+	ch := New()
+	conf := &models.NotificationConf{
+		ID:          1,
+		ChannelType: "qq_onebot",
+		ConfigJSON: `{
+			"listen_addr":"127.0.0.1:0",
+			"path":"/onebot/v11/ws",
+			"admin_qq_users":[429471838]
+		}`,
+		Enabled: true,
+	}
+	require.NoError(t, ch.Init(context.Background(), conf))
+	defer func() { _ = ch.Close(context.Background()) }()
+
+	var (
+		mu       sync.Mutex
+		received []notify.InboundMessage
+	)
+	ch.OnInbound(func(_ context.Context, msg notify.InboundMessage) error {
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, msg)
+		return nil
+	})
+
+	// Test case (a): private message
+	privateEvent := []byte(`{
+		"post_type":"message",
+		"message_type":"private",
+		"user_id":429471838,
+		"group_id":0,
+		"raw_message":"/help",
+		"sender":{"user_id":429471838,"nickname":"TestUser"}
+	}`)
+	require.NoError(t, ch.HandleRawEvent(privateEvent))
+
+	// Test case (b): group message
+	groupEvent := []byte(`{
+		"post_type":"message",
+		"message_type":"group",
+		"user_id":429471838,
+		"group_id":522166605,
+		"raw_message":"/help",
+		"sender":{"user_id":429471838,"nickname":"TestUser"}
+	}`)
+	require.NoError(t, ch.HandleRawEvent(groupEvent))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, received, 2, "expected both messages")
+
+	// Verify private message preservation
+	assert.Equal(t, "private", received[0].MessageType)
+	assert.Equal(t, "429471838", received[0].ChatID)
+
+	// Verify group message preservation
+	assert.Equal(t, "group", received[1].MessageType)
+	assert.Equal(t, "522166605", received[1].ChatID)
+}
