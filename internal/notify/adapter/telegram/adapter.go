@@ -14,7 +14,6 @@ import (
 	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 
-	"github.com/sunerpy/pt-tools/internal/crypto"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -57,15 +56,13 @@ type TelegramChannel struct {
 	pollCancel context.CancelFunc
 	pollDone   chan struct{}
 
-	factory   botFactory
-	decryptFn func(string) ([]byte, error)
+	factory botFactory
 }
 
 // New constructs a fresh TelegramChannel.
 func New() *TelegramChannel {
 	return &TelegramChannel{
-		factory:   defaultBotFactory,
-		decryptFn: crypto.Decrypt,
+		factory: defaultBotFactory,
 	}
 }
 
@@ -90,8 +87,8 @@ func (c *TelegramChannel) OnInbound(handler notify.InboundHandler) {
 	c.mu.Unlock()
 }
 
-// Init parses the encrypted ConfigJSON, builds a per-conf telego bot, and
-// launches the long-poll goroutine.
+// Init parses the plaintext ConfigJSON (already decrypted by cmd/web.go),
+// builds a per-conf telego bot, and launches the long-poll goroutine.
 func (c *TelegramChannel) Init(ctx context.Context, conf *models.NotificationConf) error {
 	if conf == nil {
 		return errors.New("telegram: NotificationConf is nil")
@@ -100,23 +97,14 @@ func (c *TelegramChannel) Init(ctx context.Context, conf *models.NotificationCon
 	if c.factory == nil {
 		c.factory = defaultBotFactory
 	}
-	if c.decryptFn == nil {
-		c.decryptFn = crypto.Decrypt
-	}
 
 	c.mu.Lock()
 	c.logger = sLogger()
 	c.confID = conf.ID
 	c.mu.Unlock()
 
-	plain, err := c.decryptFn(conf.ConfigJSON)
-	if err != nil {
-		c.markUnhealthy()
-		return fmt.Errorf("telegram: 解密 config_json 失败: %w", err)
-	}
-
 	cfg := &Config{}
-	if unmarshalErr := json.Unmarshal(plain, cfg); unmarshalErr != nil {
+	if unmarshalErr := json.Unmarshal([]byte(conf.ConfigJSON), cfg); unmarshalErr != nil {
 		c.markUnhealthy()
 		return fmt.Errorf("telegram: 解析 config_json 失败: %w", unmarshalErr)
 	}

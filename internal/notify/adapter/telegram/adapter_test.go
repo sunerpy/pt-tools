@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,18 +85,13 @@ func newChannelWithFakes(t *testing.T, cfg *Config, bot *fakeBot, src *fakeSourc
 	c.factory = func(_ *Config) (botAPI, updateSource, error) {
 		return bot, src.source(), nil
 	}
-	c.decryptFn = func(s string) ([]byte, error) {
-		if plain == nil {
-			return nil, errors.New("forced decrypt failure")
-		}
-		return plain, nil
-	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		_ = c.Close(ctx)
 	})
 	_ = cfg
+	_ = plain
 	return c
 }
 
@@ -107,7 +101,7 @@ func TestTelegramAdapter_Init_ValidConfig(t *testing.T) {
 	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","allowed_users":[111],"admin_users":[111],"default_chat_id":555}`)
 
 	c := newChannelWithFakes(t, nil, bot, src, plain)
-	conf := &models.NotificationConf{ID: 7, ChannelType: ChannelType, ConfigJSON: "encrypted-blob"}
+	conf := &models.NotificationConf{ID: 7, ChannelType: ChannelType, ConfigJSON: string(plain)}
 
 	err := c.Init(context.Background(), conf)
 	require.NoError(t, err)
@@ -130,12 +124,10 @@ func TestTelegramAdapter_Init_InvalidConfig(t *testing.T) {
 	cases := []struct {
 		name      string
 		plain     []byte
-		fail      bool
 		errSubstr string
 	}{
-		{"decrypt failure", nil, true, "解密"},
-		{"bad json", []byte(`{not-json`), false, "解析"},
-		{"missing token", []byte(`{}`), false, "bot_token"},
+		{"bad json", []byte(`{not-json`), "解析"},
+		{"missing token", []byte(`{}`), "bot_token"},
 	}
 
 	for _, tc := range cases {
@@ -143,10 +135,7 @@ func TestTelegramAdapter_Init_InvalidConfig(t *testing.T) {
 			bot := &fakeBot{}
 			src := newFakeSource()
 			c := newChannelWithFakes(t, nil, bot, src, tc.plain)
-			if tc.fail {
-				c.decryptFn = func(string) ([]byte, error) { return nil, errors.New("decrypt boom") }
-			}
-			conf := &models.NotificationConf{ID: 1, ConfigJSON: "x"}
+			conf := &models.NotificationConf{ID: 1, ConfigJSON: string(tc.plain)}
 
 			err := c.Init(context.Background(), conf)
 			require.Error(t, err)
@@ -158,8 +147,7 @@ func TestTelegramAdapter_Init_InvalidConfig(t *testing.T) {
 
 func TestTelegramAdapter_Init_FailNonFatal(t *testing.T) {
 	c := New()
-	c.decryptFn = func(string) ([]byte, error) { return nil, errors.New("network down") }
-	conf := &models.NotificationConf{ID: 1, ConfigJSON: "x"}
+	conf := &models.NotificationConf{ID: 1, ConfigJSON: "{invalid"}
 
 	err := c.Init(context.Background(), conf)
 	require.Error(t, err)
@@ -211,7 +199,7 @@ func TestTelegramAdapter_PermissionGate_NonAdminCommand(t *testing.T) {
 	handler := &recordingHandler{}
 	c.OnInbound(handler.Handle)
 
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 9, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 9, ConfigJSON: string(plain)}))
 
 	src.push(telego.Update{
 		UpdateID: 1,
@@ -241,7 +229,7 @@ func TestTelegramAdapter_PermissionGate_NotInWhitelist(t *testing.T) {
 	handler := &recordingHandler{}
 	c.OnInbound(handler.Handle)
 
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 9, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 9, ConfigJSON: string(plain)}))
 
 	src.push(telego.Update{
 		UpdateID: 2,
@@ -267,7 +255,7 @@ func TestTelegramAdapter_PermissionGate_AdminAllowed(t *testing.T) {
 	handler := &recordingHandler{}
 	c.OnInbound(handler.Handle)
 
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 9, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 9, ConfigJSON: string(plain)}))
 
 	src.push(telego.Update{
 		UpdateID: 3,
@@ -300,7 +288,7 @@ func TestTelegramAdapter_Send_PlainText(t *testing.T) {
 	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","default_chat_id":555}`)
 
 	c := newChannelWithFakes(t, nil, bot, src, plain)
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: string(plain)}))
 
 	n := notify.Notification{
 		Title: "[FREE] Movie_Title (2024).mkv",
@@ -323,7 +311,7 @@ func TestTelegramAdapter_Send_HTMLForSystem(t *testing.T) {
 	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","default_chat_id":555}`)
 
 	c := newChannelWithFakes(t, nil, bot, src, plain)
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: string(plain)}))
 
 	n := notify.Notification{
 		Title:   "System Alert",
@@ -344,7 +332,7 @@ func TestTelegramAdapter_Send_TargetsChatID(t *testing.T) {
 	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","default_chat_id":555}`)
 
 	c := newChannelWithFakes(t, nil, bot, src, plain)
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: string(plain)}))
 
 	n := notify.Notification{
 		Title:   "Hi",
@@ -364,7 +352,7 @@ func TestTelegramAdapter_Send_NoChatID(t *testing.T) {
 	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK"}`)
 
 	c := newChannelWithFakes(t, nil, bot, src, plain)
-	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: "x"}))
+	require.NoError(t, c.Init(context.Background(), &models.NotificationConf{ID: 1, ConfigJSON: string(plain)}))
 
 	err := c.Send(context.Background(), notify.Notification{Text: "ping"})
 	require.Error(t, err)
