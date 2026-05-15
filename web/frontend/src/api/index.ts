@@ -1283,10 +1283,14 @@ export const chatopsApi = {
   bindings: {
     list: () =>
       api.get<{ bindings: ChatOpBinding[]; pending: ChatOpBinding[] }>("/api/chatops/bindings"),
-    generateCode: (confId: number, label?: string) =>
-      api.post<{ code: string; expires_at: string }>(
+    generateCode: (confId: number, label?: string, ttlSeconds?: number) =>
+      api.post<{ code: string; expires_at?: string }>(
         "/api/chatops/bindings/issue-code",
-        { conf_id: confId, label: label ?? "" },
+        {
+          conf_id: confId,
+          label: label ?? "",
+          ttl_seconds: ttlSeconds ?? 300,
+        },
       ),
     update: (id: number, data: { reply_lang: string }) =>
       request<ChatOpBinding>(`/api/chatops/bindings/${id}`, {

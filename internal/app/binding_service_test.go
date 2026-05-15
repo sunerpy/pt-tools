@@ -47,13 +47,14 @@ func TestIssueCode_HappyPath(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
-	dto, err := svc.IssueCode(ctx, 7, "tg-main")
+	dto, err := svc.IssueCode(ctx, 7, "tg-main", 5*time.Minute)
 	require.NoError(t, err)
 	assert.NotEmpty(t, dto.Code)
 	assert.Len(t, dto.Code, 8)
 	assert.Equal(t, uint(7), dto.ConfID)
 	assert.Equal(t, "tg-main", dto.Label)
-	assert.WithinDuration(t, time.Now().Add(5*time.Minute), dto.ExpiresAt, 2*time.Second)
+	require.NotNil(t, dto.ExpiresAt)
+	assert.WithinDuration(t, time.Now().Add(5*time.Minute), *dto.ExpiresAt, 2*time.Second)
 
 	var rows []models.BotToken
 	require.NoError(t, db.Find(&rows).Error)
@@ -71,10 +72,10 @@ func TestIssueCode_RespectsMaxActiveCap(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		_, err := svc.IssueCode(ctx, 1, "x")
+		_, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 		require.NoError(t, err, "issue #%d should succeed", i+1)
 	}
-	_, err := svc.IssueCode(ctx, 1, "x")
+	_, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTooManyActiveCodes), "expected ErrTooManyActiveCodes, got %v", err)
 }
@@ -84,7 +85,7 @@ func TestIssueCode_ExpiredCodesDoNotCountTowardCap(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		_, err := svc.IssueCode(ctx, 1, "x")
+		_, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 		require.NoError(t, err)
 	}
 	// 强制 3 个全部过期
@@ -93,7 +94,7 @@ func TestIssueCode_ExpiredCodesDoNotCountTowardCap(t *testing.T) {
 		UpdateColumn("expires_at", time.Now().Add(-time.Minute)).Error)
 
 	// 第 4 个应当可以发放
-	_, err := svc.IssueCode(ctx, 1, "x")
+	_, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.NoError(t, err)
 }
 
@@ -102,7 +103,7 @@ func TestIssueCode_UsedCodesDoNotCountTowardCap(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		_, err := svc.IssueCode(ctx, 1, "x")
+		_, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 		require.NoError(t, err)
 	}
 	// 标记 3 个已使用
@@ -111,7 +112,7 @@ func TestIssueCode_UsedCodesDoNotCountTowardCap(t *testing.T) {
 		Where("kind = ?", "bind_code").
 		UpdateColumn("used_at", now).Error)
 
-	_, err := svc.IssueCode(ctx, 1, "x")
+	_, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.NoError(t, err)
 }
 
@@ -119,9 +120,9 @@ func TestListPendingCodes(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
-	c1, err := svc.IssueCode(ctx, 1, "a")
+	c1, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
-	c2, err := svc.IssueCode(ctx, 2, "b")
+	c2, err := svc.IssueCode(ctx, 2, "b", 5*time.Minute)
 	require.NoError(t, err)
 
 	// 让 c2 过期
@@ -139,7 +140,7 @@ func TestConsumeCode_HappyPath(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
-	issued, err := svc.IssueCode(ctx, 9, "tg-main")
+	issued, err := svc.IssueCode(ctx, 9, "tg-main", 5*time.Minute)
 	require.NoError(t, err)
 
 	binding, err := svc.ConsumeCode(ctx, issued.Code, "telegram", "user-42")
@@ -170,7 +171,7 @@ func TestConsumeCode_Expired(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
-	issued, err := svc.IssueCode(ctx, 1, "x")
+	issued, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.NoError(t, err)
 
 	require.NoError(t, db.Model(&models.BotToken{}).
@@ -186,7 +187,7 @@ func TestConsumeCode_Used(t *testing.T) {
 	svc, _ := newBindingService(t)
 	ctx := context.Background()
 
-	issued, err := svc.IssueCode(ctx, 1, "x")
+	issued, err := svc.IssueCode(ctx, 1, "x", 5*time.Minute)
 	require.NoError(t, err)
 
 	_, err = svc.ConsumeCode(ctx, issued.Code, "telegram", "u1")
@@ -210,7 +211,7 @@ func TestConsumeCode_Race(t *testing.T) {
 	svc, _ := newBindingService(t)
 	ctx := context.Background()
 
-	issued, err := svc.IssueCode(ctx, 1, "race-test")
+	issued, err := svc.IssueCode(ctx, 1, "race-test", 5*time.Minute)
 	require.NoError(t, err)
 
 	const goroutines = 2
@@ -249,12 +250,12 @@ func TestListBindings(t *testing.T) {
 	svc, _ := newBindingService(t)
 	ctx := context.Background()
 
-	c1, err := svc.IssueCode(ctx, 1, "a")
+	c1, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
 	_, err = svc.ConsumeCode(ctx, c1.Code, "telegram", "ua")
 	require.NoError(t, err)
 
-	c2, err := svc.IssueCode(ctx, 2, "b")
+	c2, err := svc.IssueCode(ctx, 2, "b", 5*time.Minute)
 	require.NoError(t, err)
 	_, err = svc.ConsumeCode(ctx, c2.Code, "qq", "ub")
 	require.NoError(t, err)
@@ -268,7 +269,7 @@ func TestRevoke(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
-	c, err := svc.IssueCode(ctx, 1, "a")
+	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
 	binding, err := svc.ConsumeCode(ctx, c.Code, "telegram", "u")
 	require.NoError(t, err)
@@ -284,7 +285,7 @@ func TestSetReplyLang(t *testing.T) {
 	svc, db := newBindingService(t)
 	ctx := context.Background()
 
-	c, err := svc.IssueCode(ctx, 1, "a")
+	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
 	binding, err := svc.ConsumeCode(ctx, c.Code, "telegram", "u")
 	require.NoError(t, err)
@@ -300,7 +301,7 @@ func TestSetReplyLang_Invalid(t *testing.T) {
 	svc, _ := newBindingService(t)
 	ctx := context.Background()
 
-	c, err := svc.IssueCode(ctx, 1, "a")
+	c, err := svc.IssueCode(ctx, 1, "a", 5*time.Minute)
 	require.NoError(t, err)
 	binding, err := svc.ConsumeCode(ctx, c.Code, "telegram", "u")
 	require.NoError(t, err)
@@ -308,4 +309,41 @@ func TestSetReplyLang_Invalid(t *testing.T) {
 	err = svc.SetReplyLang(ctx, binding.ID, "fr")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidReplyLang))
+}
+
+func TestIssueCode_PermanentTTL(t *testing.T) {
+	svc, db := newBindingService(t)
+	ctx := context.Background()
+
+	dto, err := svc.IssueCode(ctx, 1, "perma", 0)
+	require.NoError(t, err)
+	require.Nil(t, dto.ExpiresAt, "permanent code DTO must have nil ExpiresAt")
+
+	var row models.BotToken
+	require.NoError(t, db.First(&row, "code_or_token_hash = ?", dto.Code).Error)
+	require.Nil(t, row.ExpiresAt, "permanent code DB row must have NULL expires_at")
+}
+
+func TestIssueCode_CustomTTL(t *testing.T) {
+	svc, _ := newBindingService(t)
+	ctx := context.Background()
+
+	dto, err := svc.IssueCode(ctx, 1, "1d", 24*time.Hour)
+	require.NoError(t, err)
+	require.NotNil(t, dto.ExpiresAt)
+	assert.WithinDuration(t, time.Now().Add(24*time.Hour), *dto.ExpiresAt, 2*time.Second)
+}
+
+func TestListPendingCodes_PermanentVisible(t *testing.T) {
+	svc, _ := newBindingService(t)
+	ctx := context.Background()
+
+	c, err := svc.IssueCode(ctx, 1, "perma", 0)
+	require.NoError(t, err)
+
+	pending, err := svc.ListPendingCodes(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, c.Code, pending[0].Code)
+	assert.Nil(t, pending[0].ExpiresAt)
 }

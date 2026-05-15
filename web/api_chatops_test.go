@@ -101,16 +101,18 @@ type stubBindingSvc struct {
 	lastIssue   struct {
 		ConfID uint
 		Label  string
+		TTL    time.Duration
 	}
 	lastRevokeID uint
 	lastLangID   uint
 	lastLang     string
 }
 
-func (s *stubBindingSvc) IssueCode(ctx context.Context, confID uint, label string) (app.BindCodeDTO, error) {
+func (s *stubBindingSvc) IssueCode(ctx context.Context, confID uint, label string, ttl time.Duration) (app.BindCodeDTO, error) {
 	atomic.AddInt32(&s.issueCalls, 1)
 	s.lastIssue.ConfID = confID
 	s.lastIssue.Label = label
+	s.lastIssue.TTL = ttl
 	return s.issueResp, s.issueErr
 }
 
@@ -440,11 +442,12 @@ func TestBindings_IssueCode_HappyPath(t *testing.T) {
 	tok := store.registerValidToken("chatops:*")
 	bind := deps.BindingSvc.(*stubBindingSvc)
 
+	exp := time.Now().Add(5 * time.Minute)
 	bind.issueResp = app.BindCodeDTO{
 		Code:      "ABCD2345",
 		ConfID:    7,
 		Label:     "primary",
-		ExpiresAt: time.Now().Add(5 * time.Minute),
+		ExpiresAt: &exp,
 		CreatedAt: time.Now(),
 	}
 	resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{
@@ -456,6 +459,71 @@ func TestBindings_IssueCode_HappyPath(t *testing.T) {
 	decodeBody(t, resp, &out)
 	require.Equal(t, "ABCD2345", out["code"])
 	require.Equal(t, int32(1), atomic.LoadInt32(&bind.issueCalls))
+	require.Equal(t, 5*time.Minute, bind.lastIssue.TTL)
+}
+
+func TestBindings_IssueCode_DefaultTTL(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	bind := deps.BindingSvc.(*stubBindingSvc)
+
+	exp := time.Now().Add(5 * time.Minute)
+	bind.issueResp = app.BindCodeDTO{Code: "X1", ConfID: 1, ExpiresAt: &exp, CreatedAt: time.Now()}
+
+	resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{
+		"conf_id": 1,
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+	require.Equal(t, 5*time.Minute, bind.lastIssue.TTL, "missing ttl_seconds should default to 5 min")
+}
+
+func TestBindings_IssueCode_PermanentTTL(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	bind := deps.BindingSvc.(*stubBindingSvc)
+
+	bind.issueResp = app.BindCodeDTO{Code: "PERMA42", ConfID: 1, CreatedAt: time.Now()}
+
+	resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{
+		"conf_id":     1,
+		"ttl_seconds": 0,
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var out map[string]any
+	decodeBody(t, resp, &out)
+	require.Equal(t, "PERMA42", out["code"])
+	_, hasExp := out["expires_at"]
+	require.False(t, hasExp, "expires_at must be omitted for permanent codes")
+	require.Equal(t, time.Duration(0), bind.lastIssue.TTL)
+}
+
+func TestBindings_IssueCode_NegativeTTLRejected(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{
+		"conf_id":     1,
+		"ttl_seconds": -1,
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestBindings_IssueCode_TTLOverCapRejected(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{
+		"conf_id":     1,
+		"ttl_seconds": int64(101 * 365 * 24 * 3600),
+	})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
 }
 
 func TestBindings_List_AndDelete(t *testing.T) {

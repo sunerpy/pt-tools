@@ -139,14 +139,27 @@
       width="440px"
       :before-close="handleCloseGenerateDialog">
       <div v-if="!generatedCode">
-        <p class="dialog-desc">选择要绑定的渠道配置，将生成 6 位有效期 5 分钟的绑定码。</p>
-        <el-select v-model="selectedConfId" placeholder="请选择配置" class="w-full">
-          <el-option
-            v-for="conf in configs"
-            :key="conf.id"
-            :label="conf.name + ' (' + conf.channel_type + ')'"
-            :value="conf.id" />
-        </el-select>
+        <p class="dialog-desc">选择要绑定的渠道配置和绑定码有效期。</p>
+        <el-form label-width="76px" label-position="left">
+          <el-form-item label="渠道配置">
+            <el-select v-model="selectedConfId" placeholder="请选择配置" style="width: 100%">
+              <el-option
+                v-for="conf in configs"
+                :key="conf.id"
+                :label="conf.name + ' (' + conf.channel_type + ')'"
+                :value="conf.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="有效期">
+            <el-select v-model="selectedTTL" placeholder="选择有效期" style="width: 100%">
+              <el-option
+                v-for="opt in ttlOptions"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value" />
+            </el-select>
+          </el-form-item>
+        </el-form>
         <div class="dialog-actions">
           <el-button @click="handleCloseGenerateDialog">取消</el-button>
           <el-button type="primary" :loading="generating" @click="handleGenerateCode">
@@ -162,7 +175,11 @@
         <el-button type="primary" :icon="CopyDocument" @click="copyToClipboard(generatedCode)">
           复制绑定码
         </el-button>
-        <p class="expiry-hint">过期时间：{{ formatDate(generatedExpiresAt || undefined) }}</p>
+        <p class="expiry-hint">
+          {{
+            generatedExpiresAt ? `过期时间：${formatDate(generatedExpiresAt)}` : "永久有效（无过期时间）"
+          }}
+        </p>
         <div class="dialog-actions">
           <el-button @click="handleCloseGenerateDialog">完成</el-button>
         </div>
@@ -184,6 +201,14 @@ const configs = ref<NotificationConfig[]>([]);
 
 const generateDialogVisible = ref(false);
 const selectedConfId = ref<number | null>(null);
+const selectedTTL = ref<number>(300);
+const ttlOptions = [
+  { label: "5 分钟", value: 300 },
+  { label: "1 小时", value: 3600 },
+  { label: "1 天", value: 86400 },
+  { label: "30 天", value: 2592000 },
+  { label: "永久", value: 0 },
+];
 const generatedCode = ref<string | null>(null);
 const generatedExpiresAt = ref<string | null>(null);
 const generating = ref(false);
@@ -220,7 +245,7 @@ async function loadData() {
 }
 
 function getCountdown(expiresAt?: string) {
-  if (!expiresAt) return "-";
+  if (!expiresAt) return "永久";
   const end = new Date(expiresAt).getTime();
   const diff = end - now.value;
   if (diff <= 0) return "已过期";
@@ -231,10 +256,11 @@ function getCountdown(expiresAt?: string) {
 }
 
 function getCountdownClass(expiresAt?: string) {
+  if (!expiresAt) return "countdown countdown--permanent";
   const text = getCountdown(expiresAt);
   if (text === "已过期") return "countdown countdown--expired";
   if (text === "-") return "countdown";
-  const diff = new Date(expiresAt!).getTime() - now.value;
+  const diff = new Date(expiresAt).getTime() - now.value;
   if (diff < 60000) return "countdown countdown--urgent";
   return "countdown countdown--active";
 }
@@ -258,9 +284,13 @@ async function handleGenerateCode() {
   }
   generating.value = true;
   try {
-    const res = await chatopsApi.bindings.generateCode(selectedConfId.value);
+    const res = await chatopsApi.bindings.generateCode(
+      selectedConfId.value,
+      undefined,
+      selectedTTL.value,
+    );
     generatedCode.value = res.code;
-    generatedExpiresAt.value = res.expires_at;
+    generatedExpiresAt.value = res.expires_at ?? null;
     loadData();
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "生成失败");
@@ -271,6 +301,7 @@ async function handleGenerateCode() {
 
 function openGenerateDialog() {
   selectedConfId.value = configs.value.length > 0 ? configs.value[0].id : null;
+  selectedTTL.value = 300;
   generatedCode.value = null;
   generatedExpiresAt.value = null;
   generateDialogVisible.value = true;
@@ -552,6 +583,11 @@ function getConfNameByConfId(confId?: number) {
 .countdown--expired {
   color: var(--pt-text-secondary);
   text-decoration: line-through;
+}
+
+.countdown--permanent {
+  color: var(--pt-color-success, #10b981);
+  font-weight: 600;
 }
 
 @keyframes blink {

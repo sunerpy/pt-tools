@@ -91,7 +91,7 @@ type mockBindingService struct {
 	revokeCalls []uint
 }
 
-func (m *mockBindingService) IssueCode(_ context.Context, _ uint, _ string) (app.BindCodeDTO, error) {
+func (m *mockBindingService) IssueCode(_ context.Context, _ uint, _ string, _ time.Duration) (app.BindCodeDTO, error) {
 	return app.BindCodeDTO{}, nil
 }
 

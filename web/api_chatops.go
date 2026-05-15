@@ -207,8 +207,9 @@ func (h *chatopsHandlers) listBindings(w http.ResponseWriter, r *http.Request) {
 }
 
 type issueCodeBody struct {
-	ConfID uint   `json:"conf_id"`
-	Label  string `json:"label"`
+	ConfID     uint   `json:"conf_id"`
+	Label      string `json:"label"`
+	TTLSeconds *int64 `json:"ttl_seconds"`
 }
 
 func (h *chatopsHandlers) issueBindCode(w http.ResponseWriter, r *http.Request) {
@@ -221,18 +222,31 @@ func (h *chatopsHandlers) issueBindCode(w http.ResponseWriter, r *http.Request) 
 		writeChatopsErr(w, http.StatusBadRequest, "invalid_argument", "conf_id is required")
 		return
 	}
-	dto, err := h.deps.BindingSvc.IssueCode(r.Context(), body.ConfID, body.Label)
+	ttl := 5 * time.Minute
+	if body.TTLSeconds != nil {
+		const maxTTLSeconds = int64(100 * 365 * 24 * 3600) // 100 years
+		if *body.TTLSeconds < 0 || *body.TTLSeconds > maxTTLSeconds {
+			writeChatopsErr(w, http.StatusBadRequest, "invalid_argument",
+				"ttl_seconds 超出允许范围 (0~100年, 0=永久)")
+			return
+		}
+		ttl = time.Duration(*body.TTLSeconds) * time.Second
+	}
+	dto, err := h.deps.BindingSvc.IssueCode(r.Context(), body.ConfID, body.Label, ttl)
 	if err != nil {
 		mapServiceErr(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{
+	resp := map[string]any{
 		"code":       dto.Code,
 		"conf_id":    dto.ConfID,
 		"label":      dto.Label,
-		"expires_at": dto.ExpiresAt,
 		"created_at": dto.CreatedAt,
-	})
+	}
+	if dto.ExpiresAt != nil {
+		resp["expires_at"] = *dto.ExpiresAt
+	}
+	writeJSON(w, resp)
 }
 
 func (h *chatopsHandlers) revokeBinding(w http.ResponseWriter, r *http.Request) {

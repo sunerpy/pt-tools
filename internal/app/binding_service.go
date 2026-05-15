@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	bindCodeTTL          = 5 * time.Minute
 	maxActiveCodesPerAdm = 3
 	defaultReplyLang     = "zh"
 )
@@ -25,11 +24,11 @@ var (
 )
 
 type BindCodeDTO struct {
-	Code      string    `json:"code"`
-	ConfID    uint      `json:"conf_id"`
-	Label     string    `json:"label"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	Code      string     `json:"code"`
+	ConfID    uint       `json:"conf_id"`
+	Label     string     `json:"label"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type BindingDTO struct {
@@ -46,7 +45,7 @@ type BindingDTO struct {
 }
 
 type BindingService interface {
-	IssueCode(ctx context.Context, confID uint, label string) (BindCodeDTO, error)
+	IssueCode(ctx context.Context, confID uint, label string, ttl time.Duration) (BindCodeDTO, error)
 	ListPendingCodes(ctx context.Context) ([]BindCodeDTO, error)
 	ConsumeCode(ctx context.Context, code, channelType, channelUserID string) (BindingDTO, error)
 	ListBindings(ctx context.Context) ([]BindingDTO, error)
@@ -70,7 +69,7 @@ func NewBindingService(db *gorm.DB, createdBy string) BindingService {
 	}
 }
 
-func (s *bindingService) IssueCode(ctx context.Context, confID uint, label string) (BindCodeDTO, error) {
+func (s *bindingService) IssueCode(ctx context.Context, confID uint, label string, ttl time.Duration) (BindCodeDTO, error) {
 	now := s.now()
 
 	var active int64
@@ -89,13 +88,17 @@ func (s *bindingService) IssueCode(ctx context.Context, confID uint, label strin
 		return BindCodeDTO{}, fmt.Errorf("generate bind code: %w", err)
 	}
 
-	expires := now.Add(bindCodeTTL)
 	row := models.BotToken{
 		Kind:            "bind_code",
 		CodeOrTokenHash: code,
 		Scope:           encodeBindScope(confID, label),
-		ExpiresAt:       &expires,
 		CreatedBy:       s.createdBy,
+	}
+	var expiresPtr *time.Time
+	if ttl > 0 {
+		expires := now.Add(ttl)
+		row.ExpiresAt = &expires
+		expiresPtr = &expires
 	}
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return BindCodeDTO{}, fmt.Errorf("persist bind code: %w", err)
@@ -105,7 +108,7 @@ func (s *bindingService) IssueCode(ctx context.Context, confID uint, label strin
 		Code:      code,
 		ConfID:    confID,
 		Label:     label,
-		ExpiresAt: expires,
+		ExpiresAt: expiresPtr,
 		CreatedAt: row.CreatedAt,
 	}, nil
 }
@@ -131,7 +134,8 @@ func (s *bindingService) ListPendingCodes(ctx context.Context) ([]BindCodeDTO, e
 			CreatedAt: r.CreatedAt,
 		}
 		if r.ExpiresAt != nil {
-			dto.ExpiresAt = *r.ExpiresAt
+			t := *r.ExpiresAt
+			dto.ExpiresAt = &t
 		}
 		out = append(out, dto)
 	}
