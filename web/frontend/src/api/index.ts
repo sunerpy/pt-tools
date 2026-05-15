@@ -1199,11 +1199,14 @@ function unpackNotificationResponse(
     enabled: raw.enabled,
   };
   const sink = result as unknown as Record<string, unknown>;
+  const arrayFields = new Set(["admin_qq_users", "allowed_qq_users"]);
   for (const key of Object.keys(raw) as (keyof typeof raw)[]) {
     if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
     if (key === "config_json") continue;
     const v = raw[key];
     if (typeof v === "string") {
+      sink[key as string] = v;
+    } else if (Array.isArray(v) && arrayFields.has(key as string)) {
       sink[key as string] = v;
     }
   }
@@ -1212,6 +1215,8 @@ function unpackNotificationResponse(
     for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
       const v = cfg[key];
       if (typeof v === "string") {
+        sink[key] = v;
+      } else if (Array.isArray(v) && arrayFields.has(key)) {
         sink[key] = v;
       }
     }

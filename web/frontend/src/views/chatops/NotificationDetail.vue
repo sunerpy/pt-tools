@@ -89,11 +89,36 @@ async function loadDetail() {
   try {
     const data = await chatopsApi.notifications.get(id.value);
     Object.assign(conf, data);
+    if (conf.channel_type === "qq_onebot") {
+      conf.admin_qq_users = qqListToText((data as Record<string, unknown>).admin_qq_users);
+      conf.allowed_qq_users = qqListToText((data as Record<string, unknown>).allowed_qq_users);
+    }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载详情失败");
   } finally {
     loading.value = false;
   }
+}
+
+function parseQQList(raw: unknown): number[] {
+  if (Array.isArray(raw)) {
+    return raw.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0);
+  }
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  return raw
+    .split(/[,;\s\n]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+function qqListToText(raw: unknown): string {
+  if (Array.isArray(raw)) {
+    return raw.filter((x) => x !== null && x !== undefined && x !== "").join(",");
+  }
+  if (typeof raw === "string") return raw;
+  return "";
 }
 
 async function handleSaveBasic() {
@@ -133,8 +158,8 @@ async function handleSaveCredentials() {
       case "qq_onebot":
         payload.listen_addr = conf.listen_addr;
         payload.access_token = conf.access_token;
-        payload.admin_qq_users = conf.admin_qq_users;
-        payload.allowed_qq_users = conf.allowed_qq_users;
+        payload.admin_qq_users = parseQQList(conf.admin_qq_users) as unknown as string;
+        payload.allowed_qq_users = parseQQList(conf.allowed_qq_users) as unknown as string;
         break;
       case "webhook":
         payload.endpoint_url = conf.endpoint_url;
