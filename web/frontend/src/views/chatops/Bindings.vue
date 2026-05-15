@@ -34,24 +34,29 @@
         v-loading="loading"
         class="bindings-table"
         :empty-text="loading ? '加载中...' : '暂无待绑定 Code'">
-        <el-table-column prop="bind_code" label="绑定码" width="220">
+        <el-table-column prop="code" label="绑定码" width="220">
           <template #default="{ row }">
             <div class="code-cell">
-              <span class="bind-code">{{ row.bind_code }}</span>
+              <span class="bind-code">{{ row.code }}</span>
               <el-button
                 link
                 type="primary"
                 :icon="CopyDocument"
-                @click="copyToClipboard(row.bind_code)"
+                @click="copyToClipboard(row.code)"
                 aria-label="复制绑定码"></el-button>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="关联渠道" width="160">
+        <el-table-column label="关联渠道" width="180">
           <template #default="{ row }">
             <el-tag round size="small" effect="plain">
-              {{ getConfNameByChannelType(row.channel_type) || row.channel_type }}
+              {{ getConfNameByConfId(row.conf_id) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="label" label="备注" min-width="140">
+          <template #default="{ row }">
+            <span class="meta-text">{{ row.label || "-" }}</span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="180">
@@ -64,11 +69,6 @@
             <span :class="getCountdownClass(row.expires_at)">
               {{ getCountdown(row.expires_at) }}
             </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" align="right">
-          <template #default="{ row }">
-            <el-button link type="danger" @click="handleDelete(row.id)">撤销</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -276,15 +276,37 @@ function openGenerateDialog() {
   generateDialogVisible.value = true;
 }
 
-function copyToClipboard(text: string) {
-  navigator.clipboard
-    .writeText(text)
-    .then(() => {
-      ElMessage.success("已复制到剪贴板");
-    })
-    .catch(() => {
-      ElMessage.error("复制失败，请手动选择复制");
-    });
+async function copyToClipboard(text: string) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      ElMessage.success("已复制");
+      return;
+    }
+  } catch {
+    // fall through to legacy path
+  }
+  // Legacy fallback for HTTP / non-secure contexts
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    const ok = document.execCommand("copy");
+    if (ok) {
+      ElMessage.success("已复制");
+    } else {
+      ElMessage.warning("复制失败，请手动复制");
+    }
+  } catch {
+    ElMessage.warning("复制失败，请手动复制");
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function handleCloseGenerateDialog() {
@@ -319,9 +341,10 @@ async function handleToggleLang(row: ChatOpBinding) {
   }
 }
 
-function getConfNameByChannelType(channelType: string) {
-  const conf = configs.value.find((c) => c.channel_type === channelType);
-  return conf ? conf.name : channelType;
+function getConfNameByConfId(confId?: number) {
+  if (!confId) return "-";
+  const conf = configs.value.find((c) => c.id === confId);
+  return conf ? conf.name : `#${confId}`;
 }
 </script>
 
@@ -345,15 +368,17 @@ function getConfNameByChannelType(channelType: string) {
       transparent 60%
     ),
     linear-gradient(
-      to right,
-      color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-      transparent 1px
-    ) 0 0 / 32px 32px,
+        to right,
+        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
+        transparent 1px
+      )
+      0 0 / 32px 32px,
     linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-      transparent 1px
-    ) 0 0 / 32px 32px,
+        to bottom,
+        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
+        transparent 1px
+      )
+      0 0 / 32px 32px,
     var(--pt-bg-surface);
   border: 1px solid var(--pt-border-color);
   overflow: hidden;
@@ -385,11 +410,7 @@ function getConfNameByChannelType(channelType: string) {
   margin: 0;
   letter-spacing: -0.03em;
   line-height: 1.1;
-  background: linear-gradient(
-    135deg,
-    var(--pt-text-primary) 25%,
-    var(--pt-color-primary) 100%
-  );
+  background: linear-gradient(135deg, var(--pt-text-primary) 25%, var(--pt-color-primary) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -534,8 +555,13 @@ function getConfNameByChannelType(channelType: string) {
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .dialog-desc {

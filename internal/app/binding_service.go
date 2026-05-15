@@ -25,24 +25,24 @@ var (
 )
 
 type BindCodeDTO struct {
-	Code      string
-	ConfID    uint
-	Label     string
-	ExpiresAt time.Time
-	CreatedAt time.Time
+	Code      string    `json:"code"`
+	ConfID    uint      `json:"conf_id"`
+	Label     string    `json:"label"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type BindingDTO struct {
-	ID            uint
-	ConfID        uint
-	ChannelType   string
-	ChannelUserID string
-	Label         string
-	ReplyLang     string
-	PtAdmin       bool
-	Allowed       bool
-	CreatedAt     time.Time
-	LastActiveAt  time.Time
+	ID            uint      `json:"id"`
+	ConfID        uint      `json:"conf_id"`
+	ChannelType   string    `json:"channel_type"`
+	ChannelUserID string    `json:"channel_user_id"`
+	Label         string    `json:"label"`
+	ReplyLang     string    `json:"reply_lang"`
+	PtAdmin       bool      `json:"admin"`
+	Allowed       bool      `json:"allowed"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastActiveAt  time.Time `json:"last_active"`
 }
 
 type BindingService interface {

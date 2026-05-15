@@ -192,7 +192,18 @@ func (h *chatopsHandlers) listBindings(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []app.BindingDTO{}
 	}
-	writeJSON(w, items)
+	pending, err := h.deps.BindingSvc.ListPendingCodes(r.Context())
+	if err != nil {
+		mapServiceErr(w, err)
+		return
+	}
+	if pending == nil {
+		pending = []app.BindCodeDTO{}
+	}
+	writeJSON(w, map[string]any{
+		"bindings": items,
+		"pending":  pending,
+	})
 }
 
 type issueCodeBody struct {

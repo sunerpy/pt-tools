@@ -469,9 +469,12 @@ func TestBindings_List_AndDelete(t *testing.T) {
 	}
 	resp := chatopsReq(t, srv, "GET", "/api/chatops/bindings", tok, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list []app.BindingDTO
-	decodeBody(t, resp, &list)
-	require.Len(t, list, 1)
+	var listEnvelope struct {
+		Bindings []app.BindingDTO  `json:"bindings"`
+		Pending  []app.BindCodeDTO `json:"pending"`
+	}
+	decodeBody(t, resp, &listEnvelope)
+	require.Len(t, listEnvelope.Bindings, 1)
 
 	resp = chatopsReq(t, srv, "DELETE", "/api/chatops/bindings/1", tok, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)

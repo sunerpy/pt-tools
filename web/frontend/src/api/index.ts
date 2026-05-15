@@ -1234,6 +1234,8 @@ export interface ChatOpBinding {
   allowed?: boolean;
   last_active?: string;
   bind_code?: string;
+  code?: string;
+  conf_id?: number;
   created_at?: string;
   expires_at?: string;
 }
