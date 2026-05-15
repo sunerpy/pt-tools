@@ -42,6 +42,7 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	}
 
 	mux.Handle("GET /api/chatops/notifications", wrap(h.listNotifications))
+	mux.Handle("GET /api/chatops/notifications/{id}", wrap(h.getNotification))
 	mux.Handle("POST /api/chatops/notifications", wrap(h.createNotification))
 	mux.Handle("PUT /api/chatops/notifications/{id}", wrap(h.updateNotification))
 	mux.Handle("DELETE /api/chatops/notifications/{id}", wrap(h.deleteNotification))

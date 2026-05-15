@@ -28,6 +28,8 @@ import (
 type stubNotificationSvc struct {
 	listResp     []app.NotificationConfDTO
 	listErr      error
+	getResp      app.NotificationConfDTO
+	getErr       error
 	createResp   app.NotificationConfDTO
 	createErr    error
 	updateErr    error
@@ -37,15 +39,23 @@ type stubNotificationSvc struct {
 	updateCalls  int32
 	deleteCalls  int32
 	testCalls    int32
+	getCalls     int32
 	lastCreate   app.CreateConfReq
 	lastUpdateID uint
 	lastUpdate   app.UpdateConfReq
 	lastDeleteID uint
 	lastTestID   uint
+	lastGetID    uint
 }
 
 func (s *stubNotificationSvc) ListConfs(ctx context.Context) ([]app.NotificationConfDTO, error) {
 	return s.listResp, s.listErr
+}
+
+func (s *stubNotificationSvc) GetConf(ctx context.Context, id uint) (app.NotificationConfDTO, error) {
+	atomic.AddInt32(&s.getCalls, 1)
+	s.lastGetID = id
+	return s.getResp, s.getErr
 }
 
 func (s *stubNotificationSvc) CreateConf(ctx context.Context, req app.CreateConfReq) (app.NotificationConfDTO, error) {
@@ -293,6 +303,7 @@ func TestRegisterChatOpsRoutes_AllEndpoints(t *testing.T) {
 		notStatus int
 	}{
 		{"GET", "/api/chatops/notifications", http.StatusNotFound},
+		{"GET", "/api/chatops/notifications/1", http.StatusNotFound},
 		{"POST", "/api/chatops/notifications", http.StatusNotFound},
 		{"PUT", "/api/chatops/notifications/1", http.StatusNotFound},
 		{"DELETE", "/api/chatops/notifications/1", http.StatusNotFound},
@@ -646,6 +657,70 @@ func TestNotifications_NotFound_Maps404(t *testing.T) {
 
 	resp := chatopsReq(t, srv, "DELETE", "/api/chatops/notifications/123", tok, nil)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestGetNotification_HappyPath(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	notif := deps.NotificationSvc.(*stubNotificationSvc)
+
+	notif.getResp = app.NotificationConfDTO{
+		ID:          1,
+		ChannelType: "qq_onebot",
+		Name:        "t",
+		Enabled:     true,
+		ConfigJSON:  json.RawMessage(`{"listen_addr":"127.0.0.1:5700","access_token":"abc"}`),
+	}
+
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/notifications/1", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out app.NotificationConfDTO
+	decodeBody(t, resp, &out)
+	require.Equal(t, uint(1), out.ID)
+	require.Equal(t, "qq_onebot", out.ChannelType)
+	require.Equal(t, "t", out.Name)
+	require.True(t, out.Enabled)
+	require.NotEmpty(t, out.ConfigJSON)
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal(out.ConfigJSON, &cfg))
+	require.Equal(t, "127.0.0.1:5700", cfg["listen_addr"])
+	require.Equal(t, "abc", cfg["access_token"])
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&notif.getCalls))
+	require.Equal(t, uint(1), notif.lastGetID)
+}
+
+func TestGetNotification_NotFound(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	notif := deps.NotificationSvc.(*stubNotificationSvc)
+	notif.getErr = app.ErrConfNotFound
+
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/notifications/999", tok, nil)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestGetNotification_InvalidID(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/notifications/abc", tok, nil)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestGetNotification_Unauth(t *testing.T) {
+	srv, _, _, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+
+	resp := chatopsReq(t, srv, "GET", "/api/chatops/notifications/1", "", nil)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	resp.Body.Close()
 }
 

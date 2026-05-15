@@ -57,6 +57,7 @@ type UpdateConfReq struct {
 // NotificationService 管理通知通道配置与消息投递。
 type NotificationService interface {
 	ListConfs(ctx context.Context) ([]NotificationConfDTO, error)
+	GetConf(ctx context.Context, id uint) (NotificationConfDTO, error)
 	CreateConf(ctx context.Context, req CreateConfReq) (NotificationConfDTO, error)
 	UpdateConf(ctx context.Context, id uint, req UpdateConfReq) error
 	DeleteConf(ctx context.Context, id uint) error
@@ -100,6 +101,39 @@ func (s *notificationService) ListConfs(ctx context.Context) ([]NotificationConf
 		})
 	}
 	return out, nil
+}
+
+// GetConf 返回单个通知通道配置；config_json 会被解密成原始 JSON 对象，供前端详情页渲染。
+func (s *notificationService) GetConf(ctx context.Context, id uint) (NotificationConfDTO, error) {
+	if id == 0 {
+		return NotificationConfDTO{}, errors.New("id 不能为零")
+	}
+	var row models.NotificationConf
+	err := s.db.WithContext(ctx).First(&row, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return NotificationConfDTO{}, ErrConfNotFound
+	}
+	if err != nil {
+		return NotificationConfDTO{}, fmt.Errorf("查询通道详情失败: %w", err)
+	}
+	dto := NotificationConfDTO{
+		ID:          row.ID,
+		ChannelType: row.ChannelType,
+		Name:        row.Name,
+		Enabled:     row.Enabled,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}
+	if row.ConfigJSON != "" {
+		plain, derr := crypto.Decrypt(row.ConfigJSON)
+		if derr != nil {
+			return NotificationConfDTO{}, fmt.Errorf("解密 config_json 失败: %w", derr)
+		}
+		if json.Valid(plain) {
+			dto.ConfigJSON = json.RawMessage(plain)
+		}
+	}
+	return dto, nil
 }
 
 func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq) (NotificationConfDTO, error) {

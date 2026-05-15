@@ -76,6 +76,20 @@ func (h *chatopsHandlers) listNotifications(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, items)
 }
 
+func (h *chatopsHandlers) getNotification(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintPathValue(r, "id")
+	if err != nil {
+		writeChatopsErr(w, http.StatusBadRequest, "invalid_id", err.Error())
+		return
+	}
+	dto, err := h.deps.NotificationSvc.GetConf(r.Context(), id)
+	if err != nil {
+		mapServiceErr(w, err)
+		return
+	}
+	writeJSON(w, dto)
+}
+
 type createNotificationBody struct {
 	ChannelType string          `json:"channel_type"`
 	Name        string          `json:"name"`
