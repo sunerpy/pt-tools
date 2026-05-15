@@ -13,7 +13,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "sites",
-		Description: "List configured sites or show user info",
+		Description: "列出已配置站点或查看用户信息 (List configured sites or show user info)",
 		Handler:     sitesHandler,
 	})
 }

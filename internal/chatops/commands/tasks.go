@@ -11,7 +11,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "tasks",
-		Description: "List RSS subscription jobs",
+		Description: "列出 RSS 订阅任务 (List RSS subscription jobs)",
 		Handler:     tasksHandler,
 	})
 }

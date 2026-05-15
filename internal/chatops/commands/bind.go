@@ -10,7 +10,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "bind",
-		Description: "Bind this user to a notification config",
+		Description: "绑定当前用户到通知通道 (Bind this user to a notification config)",
 		Handler:     bindHandler,
 	})
 }

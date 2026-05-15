@@ -12,7 +12,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "torrents",
-		Description: "List torrents in a downloader",
+		Description: "列出下载器中的种子 (List torrents in a downloader)",
 		Handler:     torrentsHandler,
 		RateLimit:   &chatops.RateLimitSpec{Per: 10 * time.Second, Burst: 1},
 	})

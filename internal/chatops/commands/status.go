@@ -11,7 +11,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "status",
-		Description: "Show task and downloader status",
+		Description: "查看任务与下载器状态 (Show task and downloader status)",
 		Handler:     statusHandler,
 	})
 }

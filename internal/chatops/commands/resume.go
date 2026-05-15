@@ -11,7 +11,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "resume",
-		Description: "Resume a torrent",
+		Description: "恢复种子 (Resume a torrent)",
 		AdminOnly:   true,
 		Handler:     resumeHandler,
 	})

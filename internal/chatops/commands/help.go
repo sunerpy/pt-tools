@@ -12,7 +12,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "help",
-		Description: "List available commands",
+		Description: "列出可用命令 (List available commands)",
 		Aliases:     []string{"h"},
 		Handler:     helpHandler,
 	})

@@ -9,7 +9,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "unbind",
-		Description: "Revoke this user's binding (admin self-service)",
+		Description: "撤销当前用户绑定（管理员自助） (Revoke this user's binding, admin self-service)",
 		AdminOnly:   true,
 		Handler:     unbindHandler,
 	})

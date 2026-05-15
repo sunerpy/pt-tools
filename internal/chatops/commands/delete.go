@@ -15,7 +15,7 @@ const deleteConfirmTTL = 5 * time.Minute
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "delete",
-		Description: "Delete a torrent (requires YES confirm)",
+		Description: "删除种子（需 YES 确认） (Delete a torrent, requires YES confirm)",
 		AdminOnly:   true,
 		Handler:     deleteHandler,
 	})

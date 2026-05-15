@@ -12,7 +12,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "version",
-		Description: "Show version info",
+		Description: "查看版本信息 (Show version info)",
 		Aliases:     []string{"v", "ver"},
 		Handler:     versionHandler,
 	})

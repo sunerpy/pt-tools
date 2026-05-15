@@ -11,7 +11,7 @@ import (
 func init() {
 	chatops.RegisterCommand(chatops.CommandSpec{
 		Name:        "pause",
-		Description: "Pause a torrent",
+		Description: "暂停种子 (Pause a torrent)",
 		AdminOnly:   true,
 		Handler:     pauseHandler,
 	})
