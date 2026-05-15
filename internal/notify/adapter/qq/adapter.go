@@ -20,7 +20,17 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 )
 
-const channelType = "qq_onebot"
+const (
+	channelType = "qq_onebot"
+
+	// qqReadDeadline 是 WS 读取的最长沉默期：在此期间内若收不到任何 frame
+	// (含 NapCat 心跳事件、ping 的 pong 回包等)，视为半开链路并触发重连。
+	qqReadDeadline = 90 * time.Second
+	// qqPingInterval 是后台主动 ping 的间隔。
+	qqPingInterval = 30 * time.Second
+	// qqPongTimeout 是单次 ping 写控制帧的超时。
+	qqPongTimeout = 10 * time.Second
+)
 
 type qqConfig struct {
 	ListenAddr     string  `json:"listen_addr"`
@@ -185,6 +195,13 @@ func checkAccessToken(req *http.Request, token string) int {
 }
 
 // listenCaller 阻塞式读取 NapCat 推送的 OneBot 事件并分发。
+//
+// 半开链路保护:
+//   - 设置 ReadDeadline，任何 frame (含 pong) 收到时刷新；超时即返回错误退出读循环。
+//   - 后台 30s 间隔主动 ping；写失败立即 Close 触发重连。
+//
+// 已知遗留: 若 NapCat 仅 WS 协议层活跃但内部消息 dispatcher 卡住 (仍能 pong)，
+// 此机制无效，需要切换到 forward-WS 或 HTTP webhook 才能彻底解决。
 func (q *QQChannel) listenCaller(c *napCatCaller) {
 	defer func() {
 		q.caller.Store(nil)
@@ -192,11 +209,49 @@ func (q *QQChannel) listenCaller(c *napCatCaller) {
 		_ = c.conn.Close()
 		warnLogger().Warnf("QQ 适配器(%d): [wss] WebSocket 连接断开, 账号: %d", q.confID, c.selfID)
 	}()
+
+	// 初始 read deadline。
+	if err := c.conn.SetReadDeadline(time.Now().Add(qqReadDeadline)); err != nil {
+		warnLogger().Warnf("QQ 适配器(%d): 设置 ReadDeadline 失败: %v", q.confID, err)
+	}
+	// pong 收到后刷新 deadline。
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(qqReadDeadline))
+	})
+
+	// 后台 ping pump：写失败时主动 Close 以打断 ReadMessage 阻塞。
+	pingCtx, cancelPing := context.WithCancel(q.lifecycleCtx)
+	defer cancelPing()
+	go func() {
+		ticker := time.NewTicker(qqPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-ticker.C:
+				if err := c.conn.WriteControl(
+					websocket.PingMessage,
+					nil,
+					time.Now().Add(qqPongTimeout),
+				); err != nil {
+					warnLogger().Warnf("QQ 适配器(%d): WS Ping 发送失败: %v (主动关闭以触发重连)", q.confID, err)
+					_ = c.conn.Close()
+					return
+				}
+			}
+		}
+	}()
+
 	for {
 		t, payload, err := c.conn.ReadMessage()
 		if err != nil {
+			// 任何读错误（含 deadline exceeded）都触发 defer 关闭连接。
+			warnLogger().Warnf("QQ 适配器(%d): WS Read 异常 (可能 NapCat 半死链路): %v", q.confID, err)
 			return
 		}
+		// 任何收到的 frame 都刷新 deadline。
+		_ = c.conn.SetReadDeadline(time.Now().Add(qqReadDeadline))
 		if t != websocket.TextMessage {
 			continue
 		}
