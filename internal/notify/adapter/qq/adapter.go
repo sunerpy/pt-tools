@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/RomiChan/websocket"
 	zero "github.com/wdvxdr1123/ZeroBot"
-	"github.com/wdvxdr1123/ZeroBot/driver"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/notify"
@@ -45,9 +45,8 @@ type QQChannel struct {
 
 	httpServer *http.Server
 	listener   net.Listener
-	wsServer   *driver.WSServer
 
-	caller   atomic.Value
+	caller   atomic.Pointer[napCatCaller]
 	healthy  atomic.Bool
 	startErr error
 
@@ -107,9 +106,6 @@ func (q *QQChannel) startServer() error {
 	}
 	q.listener = listener
 
-	wss := driver.NewWebSocketServer(16, q.cfg.ListenAddr, q.cfg.AccessToken)
-	q.wsServer = wss
-
 	mux := http.NewServeMux()
 	path := q.cfg.Path
 	if path == "" {
@@ -132,8 +128,86 @@ func (q *QQChannel) startServer() error {
 	return nil
 }
 
-func (q *QQChannel) wsHandshakeHandler(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+func (q *QQChannel) wsHandshakeHandler(w http.ResponseWriter, r *http.Request) {
+	// 鉴权 (mirror ZeroBot driver/wsserver.go: checkAuth)
+	if status := checkAccessToken(r, q.cfg.AccessToken); status != http.StatusOK {
+		warnLogger().Warnf("QQ 适配器(%d): 拒绝 %v 的 WS 请求: token 鉴权失败 (code:%d)", q.confID, r.RemoteAddr, status)
+		w.WriteHeader(status)
+		return
+	}
+
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		warnLogger().Warnf("QQ 适配器(%d): WS upgrade 失败: %v", q.confID, err)
+		return
+	}
+
+	// 读取 OneBot 反向 WS 握手帧 {"self_id": ...}
+	var hello struct {
+		SelfID int64 `json:"self_id"`
+	}
+	if err := conn.ReadJSON(&hello); err != nil {
+		warnLogger().Warnf("QQ 适配器(%d): 握手读 self_id 失败: %v", q.confID, err)
+		_ = conn.Close()
+		return
+	}
+
+	c := newNapCatCaller(conn, hello.SelfID)
+	q.caller.Store(c)
+	q.healthy.Store(true)
+	warnLogger().Warnf("QQ 适配器(%d): [wss] 连接Websocket服务器: %s 成功, 账号: %d", q.confID, r.RemoteAddr, hello.SelfID)
+
+	go q.listenCaller(c)
+}
+
+// checkAccessToken 复刻 ZeroBot driver.checkAuth 的逻辑。
+func checkAccessToken(req *http.Request, token string) int {
+	if token == "" {
+		return http.StatusOK
+	}
+	auth := req.Header.Get("Authorization")
+	if auth == "" {
+		auth = req.URL.Query().Get("access_token")
+	} else if _, after, ok := strings.Cut(auth, " "); ok {
+		auth = after
+	}
+	switch auth {
+	case token:
+		return http.StatusOK
+	case "":
+		return http.StatusUnauthorized
+	default:
+		return http.StatusForbidden
+	}
+}
+
+// listenCaller 阻塞式读取 NapCat 推送的 OneBot 事件并分发。
+func (q *QQChannel) listenCaller(c *napCatCaller) {
+	defer func() {
+		q.caller.Store(nil)
+		q.healthy.Store(false)
+		_ = c.conn.Close()
+		warnLogger().Warnf("QQ 适配器(%d): [wss] WebSocket 连接断开, 账号: %d", q.confID, c.selfID)
+	}()
+	for {
+		t, payload, err := c.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if t != websocket.TextMessage {
+			continue
+		}
+		// API 调用响应（含 echo 字段）走回调通道；否则视为事件。
+		if c.dispatchAPIResponse(payload) {
+			continue
+		}
+		if err := q.HandleRawEvent(payload); err != nil {
+			warnLogger().Warnf("QQ 适配器(%d): 处理 OneBot 事件失败: %v", q.confID, err)
+		}
+	}
 }
 
 func (q *QQChannel) Send(ctx context.Context, n notify.Notification) error {
@@ -185,11 +259,10 @@ func (q *QQChannel) Close(_ context.Context) error {
 }
 
 func (q *QQChannel) activeCaller() zero.APICaller {
-	v := q.caller.Load()
-	if v == nil {
+	c := q.caller.Load()
+	if c == nil {
 		return nil
 	}
-	c, _ := v.(zero.APICaller)
 	return c
 }
 
