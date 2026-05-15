@@ -379,7 +379,7 @@ func bootstrapChatOps(
 		auditRecorder,
 		rateLimiter,
 		sessionStore,
-		nil,
+		liveManager,
 	)
 
 	channels, err := initEnabledChannels(ctx, db, registry, chain.Process, log)
@@ -521,6 +521,47 @@ func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notific
 	}
 	chatopsLogger().Infof("实时通知投递成功 conf_id=%d type=%s", confID, ch.Type())
 	return nil
+}
+
+// Reply implements chatops.Replier — sends a reply to the inbound user via the
+// live channel that received the message. Used by MessageChain.tryReply.
+func (m *liveNotifyManager) Reply(ctx context.Context, msg notify.InboundMessage, reply chatops.Reply) error {
+	if m == nil {
+		return errors.New("live notify manager 未初始化")
+	}
+	if reply.SilentDrop {
+		return nil
+	}
+	if reply.Text == "" && len(reply.Buttons) == 0 {
+		return nil
+	}
+	m.mu.RLock()
+	ch, ok := m.channels[msg.SourceConfID]
+	m.mu.RUnlock()
+	if !ok || ch == nil {
+		chatopsLogger().Warnf("ChatOps 回复失败：通道未运行 conf_id=%d type=%s", msg.SourceConfID, msg.ChannelType)
+		return fmt.Errorf("通知通道未运行 conf_id=%d", msg.SourceConfID)
+	}
+	targets := map[string]string{"chat_id": msg.ChatID}
+	if err := ch.Send(ctx, notify.Notification{
+		Text:         reply.Text,
+		ChannelType:  msg.ChannelType,
+		SourceConfID: msg.SourceConfID,
+		UserID:       msg.ChannelUserID,
+		Targets:      targets,
+	}); err != nil {
+		chatopsLogger().Warnf("ChatOps 回复发送失败 conf_id=%d user=%s: %v", msg.SourceConfID, msg.ChannelUserID, err)
+		return err
+	}
+	chatopsLogger().Infof("ChatOps 回复已发送 conf_id=%d user=%s text=%q", msg.SourceConfID, msg.ChannelUserID, truncateLog(reply.Text, 80))
+	return nil
+}
+
+func truncateLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // dbBindingLookup satisfies chatops.BindingLookup by querying ChannelBinding rows.

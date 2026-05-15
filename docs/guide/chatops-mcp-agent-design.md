@@ -887,6 +887,21 @@ INFO  qq_onebot adapter: websocket client connected, conf_id=1
 
 > **风控提示**：QQ 协议桥属于第三方社区方案，存在账号被风控封禁的风险。建议使用小号或单独的机器人 QQ 账号，不要使用主力 QQ 账号。
 
+### Telegram 机器人接入指南
+
+Telegram 通道适合个人私聊或小群组中的 ChatOps 命令控制，推荐按下面 5 步完成接入：
+
+1. **找 BotFather 拿 token**：在 Telegram 搜索 `@BotFather`，发送 `/newbot`，按提示设置 bot 显示名称和用户名，最后保存 `123456789:ABCdef...` 格式的 bot token。
+2. **拿你自己的 chat_id**：先给新 bot 发送任意一条消息，再用浏览器访问 `https://api.telegram.org/bot<TOKEN>/getUpdates`，在返回 JSON 中找到类似 `"from":{"id":123456}` 的数字 ID。
+3. **Web UI 创建通道**：打开 `/chatops/notifications`，点击添加通道，类型选择 Telegram，并开启 `enabled`。
+4. **配置凭证**：进入通道详情页的“凭证”标签，填写 Bot Token、`admin_users`、`default_chat_id` 后保存；如需限制普通用户，可同步填写 `allowed_users`。
+5. **测试 + 绑定**：在“测试”标签发送测试消息，Telegram 收到即表示出站可用；再到绑定页生成 code，在 Telegram 给 bot 发送 `/bind <code>`，最后发送 `/help` 验证入站命令回复。
+
+与 Hermes 的差异：
+
+- Hermes 通常是单 bot 配置写在 yaml 中；pt-tools 支持 multi-channel，通道配置通过 Web UI 写入 DB，并使用 AES-GCM 加密保存凭证。
+- 命令注册机制等价，都是 `init()` 中 `RegisterCommand`；pt-tools 额外内置 `AdminOnly` 权限、i18n 回复、outbox 异步重试和 audit log，便于多通道排障与审计。
+
 ---
 
 ## §17 Telegram bot token 申请

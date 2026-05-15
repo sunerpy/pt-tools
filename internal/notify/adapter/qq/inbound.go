@@ -28,10 +28,14 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 	if err := json.Unmarshal(payload, &evt); err != nil {
 		return fmt.Errorf("解析 OneBot 事件失败: %w", err)
 	}
+	warnLogger().Warnf("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d text=%q",
+		q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID, evt.RawMessage)
 	if evt.PostType != "message" {
 		return nil
 	}
 	if !q.isUserAllowed(evt.UserID) {
+		warnLogger().Warnf("QQ 适配器(%d): 拒绝非授权用户 user=%d (admin_count=%d allowed_count=%d)",
+			q.confID, evt.UserID, len(q.adminUsers), len(q.allowedUsers))
 		return nil
 	}
 
@@ -46,9 +50,11 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 	handler := q.inboundHandler
 	q.handlerMu.RUnlock()
 	if handler == nil {
+		warnLogger().Warnf("QQ 适配器(%d): inboundHandler 未设置，丢弃消息 text=%q", q.confID, text)
 		return nil
 	}
 
+	warnLogger().Warnf("QQ 适配器(%d): 路由到 ChatOps user=%d text=%q", q.confID, evt.UserID, text)
 	ctx := context.Background()
 	if q.lifecycleCtx != nil {
 		ctx = q.lifecycleCtx

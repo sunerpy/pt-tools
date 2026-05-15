@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,10 +14,33 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/chatops"
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 )
+
+type stubNotifyChannel struct {
+	recorded []notify.Notification
+}
+
+func (s *stubNotifyChannel) Type() string { return "stub" }
+
+func (s *stubNotifyChannel) Init(_ context.Context, _ *models.NotificationConf) error { return nil }
+
+func (s *stubNotifyChannel) SupportsInbound() bool { return true }
+
+func (s *stubNotifyChannel) Send(_ context.Context, n notify.Notification) error {
+	s.recorded = append(s.recorded, n)
+	return nil
+}
+
+func (s *stubNotifyChannel) OnInbound(_ notify.InboundHandler) {}
+
+func (s *stubNotifyChannel) Close(_ context.Context) error { return nil }
+
+func (s *stubNotifyChannel) Healthy() bool { return true }
 
 func TestWebCmdHasFlags(t *testing.T) {
 	c := &cobra.Command{}
@@ -120,4 +144,59 @@ func TestCmdWeb_StartsWithEnabledTelegramConf_NoCrash(t *testing.T) {
 	shutdownCtx, sCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer sCancel()
 	require.NoError(t, bs.Shutdown(shutdownCtx))
+}
+
+func TestLiveNotifyManagerReply(t *testing.T) {
+	msg := notify.InboundMessage{
+		ChannelType:   "qq_onebot",
+		SourceConfID:  1,
+		ChannelUserID: "429471838",
+		ChatID:        "274984594",
+	}
+
+	t.Run("empty reply is ignored", func(t *testing.T) {
+		ch := &stubNotifyChannel{}
+		mgr := newLiveNotifyManager(map[uint]notify.Channel{msg.SourceConfID: ch})
+
+		err := mgr.Reply(context.Background(), msg, chatops.Reply{})
+
+		require.NoError(t, err)
+		assert.Empty(t, ch.recorded)
+	})
+
+	t.Run("silent drop is ignored", func(t *testing.T) {
+		ch := &stubNotifyChannel{}
+		mgr := newLiveNotifyManager(map[uint]notify.Channel{msg.SourceConfID: ch})
+
+		err := mgr.Reply(context.Background(), msg, chatops.Reply{SilentDrop: true, Text: "ignored"})
+
+		require.NoError(t, err)
+		assert.Empty(t, ch.recorded)
+	})
+
+	t.Run("missing channel returns error", func(t *testing.T) {
+		mgr := newLiveNotifyManager(nil)
+
+		err := mgr.Reply(context.Background(), msg, chatops.Reply{Text: "hello"})
+
+		require.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "通道未运行"), "error=%v", err)
+	})
+
+	t.Run("text reply sends to inbound chat", func(t *testing.T) {
+		ch := &stubNotifyChannel{}
+		mgr := newLiveNotifyManager(map[uint]notify.Channel{msg.SourceConfID: ch})
+
+		err := mgr.Reply(context.Background(), msg, chatops.Reply{Text: "帮助信息"})
+
+		require.NoError(t, err)
+		require.Len(t, ch.recorded, 1)
+		assert.Equal(t, notify.Notification{
+			Text:         "帮助信息",
+			ChannelType:  msg.ChannelType,
+			SourceConfID: msg.SourceConfID,
+			UserID:       msg.ChannelUserID,
+			Targets:      map[string]string{"chat_id": msg.ChatID},
+		}, ch.recorded[0])
+	})
 }
