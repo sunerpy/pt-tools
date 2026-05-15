@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { type NotificationConfig, chatopsApi } from "@/api";
-import { ChatDotRound, Plus } from "@element-plus/icons-vue";
+import {
+  ChatDotRound,
+  ChatLineSquare,
+  ChatSquare,
+  Connection,
+  Link,
+  Plus,
+  Refresh,
+} from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
@@ -23,11 +31,29 @@ const newChannel = ref<Partial<NotificationConfig>>({
 });
 
 const channelTypeOptions = [
-  { value: "telegram", label: "Telegram", icon: "ChatDotRound" },
-  { value: "qq_onebot", label: "QQ (OneBot)", icon: "ChatSquare" },
-  { value: "webhook", label: "Webhook", icon: "Link" },
-  { value: "wecom_webhook", label: "WeCom Webhook", icon: "Connection" },
+  { value: "telegram", label: "Telegram", icon: ChatDotRound },
+  { value: "qq_onebot", label: "QQ (OneBot)", icon: ChatSquare },
+  { value: "webhook", label: "Webhook", icon: Link },
+  { value: "wecom_webhook", label: "WeCom Webhook", icon: Connection },
 ];
+
+// 通道类型 → Element Plus tag type 映射
+const channelTagType: Record<string, "" | "success" | "warning" | "info" | "danger"> = {
+  telegram: "info",
+  qq_onebot: "success",
+  webhook: "danger",
+  wecom_webhook: "warning",
+};
+
+const enabledCount = computed(() => notifications.value.filter((n) => n.enabled).length);
+const disabledCount = computed(() => notifications.value.length - enabledCount.value);
+const typeBreakdown = computed(() => {
+  const map: Record<string, number> = {};
+  notifications.value.forEach((n) => {
+    map[n.channel_type] = (map[n.channel_type] || 0) + 1;
+  });
+  return map;
+});
 
 onMounted(async () => {
   await loadNotifications();
@@ -92,7 +118,6 @@ async function handleToggle(row: NotificationConfig) {
 }
 
 function handleEdit(row: NotificationConfig) {
-  // Navigation to details page
   router.push(`/chatops/notifications/${row.id}`);
 }
 
@@ -129,100 +154,162 @@ async function handleDelete(row: NotificationConfig) {
 
 function getChannelIcon(type: string) {
   const opt = channelTypeOptions.find((o) => o.value === type);
-  return opt ? opt.icon : "ChatDotRound";
+  return opt ? opt.icon : ChatLineSquare;
 }
 
 function getChannelLabel(type: string) {
   const opt = channelTypeOptions.find((o) => o.value === type);
   return opt ? opt.label : type;
 }
+
+function getChannelTagType(type: string) {
+  return channelTagType[type] || "info";
+}
 </script>
 
 <template>
-  <div class="page-container">
-    <div class="hero-block">
-      <div class="hero-content">
-        <span class="hero-eyebrow">CHATOPS · NOTIFICATIONS</span>
-        <h1 class="hero-title">通知通道</h1>
-        <p class="hero-subtitle">
+  <div class="page-container chatops-notifications-page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">通知通道</h1>
+        <p class="page-subtitle">
           管理与即时通讯软件的连接，接收系统通知并通过聊天界面控制 pt-tools。
         </p>
-        <div class="hero-actions">
-          <el-button
-            type="primary"
-            size="large"
-            @click="openAddDialog"
-            data-testid="add-channel-btn">
-            <el-icon><Plus /></el-icon>
-            添加通道
-          </el-button>
-          <span class="hero-meta">已配置 {{ notifications.length }} 个通道</span>
-        </div>
+      </div>
+      <div class="page-actions">
+        <el-button size="default" :loading="loading" @click="loadNotifications">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+        <el-button
+          type="primary"
+          size="default"
+          @click="openAddDialog"
+          data-testid="add-channel-btn">
+          <el-icon><Plus /></el-icon>
+          添加通道
+        </el-button>
       </div>
     </div>
 
-    <el-skeleton v-if="loading && notifications.length === 0" :rows="6" animated class="mt-4" />
+    <!-- 汇总信息 -->
+    <div v-if="notifications.length > 0" class="summary-bar">
+      <el-tag size="default" type="info" effect="plain" round>
+        共 {{ notifications.length }} 个通道
+      </el-tag>
+      <el-tag v-if="enabledCount > 0" size="default" type="success" effect="plain" round>
+        {{ enabledCount }} 个启用中
+      </el-tag>
+      <el-tag v-if="disabledCount > 0" size="default" type="info" effect="plain" round>
+        {{ disabledCount }} 个已停用
+      </el-tag>
+      <el-divider direction="vertical" />
+      <el-tag
+        v-for="(count, type) in typeBreakdown"
+        :key="type"
+        size="default"
+        :type="getChannelTagType(String(type))"
+        effect="light"
+        round>
+        {{ getChannelLabel(String(type)) }} · {{ count }}
+      </el-tag>
+    </div>
 
-    <div v-else-if="notifications.length > 0" class="cards-grid">
+    <!-- 加载骨架 -->
+    <el-skeleton
+      v-if="loading && notifications.length === 0"
+      :rows="6"
+      animated
+      class="loading-skeleton" />
+
+    <!-- 通道卡片网格 -->
+    <div v-else-if="notifications.length > 0" class="channels-grid">
       <article
         v-for="item in notifications"
         :key="item.id"
         class="channel-card"
+        :class="{ 'is-disabled': !item.enabled }"
         :data-testid="`channel-card-${item.name}`">
-        <div class="card-accent" :data-channel="item.channel_type"></div>
-        <div class="card-header">
+        <div class="channel-card-accent" :data-channel="item.channel_type"></div>
+
+        <div class="channel-card-header">
           <div class="channel-brand">
-            <el-icon class="brand-icon"
-              ><component :is="getChannelIcon(item.channel_type)"
-            /></el-icon>
-            <span class="brand-name">{{ getChannelLabel(item.channel_type) }}</span>
+            <span class="channel-icon" :data-channel="item.channel_type">
+              <el-icon><component :is="getChannelIcon(item.channel_type)" /></el-icon>
+            </span>
+            <el-tag
+              :type="getChannelTagType(item.channel_type)"
+              size="small"
+              effect="light"
+              round>
+              {{ getChannelLabel(item.channel_type) }}
+            </el-tag>
           </div>
-          <el-switch v-model="item.enabled" @change="handleToggle(item)" />
+          <el-switch
+            v-model="item.enabled"
+            inline-prompt
+            active-text="启用"
+            inactive-text="停用"
+            @change="handleToggle(item)" />
         </div>
 
-        <div class="card-body">
-          <h3 class="channel-name">{{ item.name }}</h3>
-          <p class="channel-status" :class="{ 'is-active': item.enabled }">
-            {{ item.enabled ? "运行中" : "已停用" }}
-          </p>
+        <div class="channel-card-body">
+          <h3 class="channel-name" :title="item.name">{{ item.name }}</h3>
+          <div class="channel-meta">
+            <el-tag size="small" type="info" effect="plain"> ID #{{ item.id }} </el-tag>
+            <span class="status-pill" :class="item.enabled ? 'is-active' : 'is-idle'">
+              <span class="status-dot"></span>
+              {{ item.enabled ? "运行中" : "已停用" }}
+            </span>
+          </div>
         </div>
 
-        <div class="card-footer">
-          <el-button size="small" @click="handleEdit(item)">设置</el-button>
-          <el-button size="small" @click="handleTest(item)" :disabled="!item.enabled"
-            >测试</el-button
-          >
-          <div class="spacer"></div>
-          <el-button size="small" type="danger" plain @click="handleDelete(item)">删除</el-button>
+        <div class="channel-card-footer">
+          <el-button-group>
+            <el-button size="small" @click="handleEdit(item)"> 详情 </el-button>
+            <el-button size="small" :disabled="!item.enabled" @click="handleTest(item)">
+              测试
+            </el-button>
+          </el-button-group>
+          <el-button size="small" type="danger" plain @click="handleDelete(item)"> 删除 </el-button>
         </div>
       </article>
     </div>
 
-    <div v-else class="empty-state">
-      <div class="empty-icon">
-        <el-icon><ChatDotRound /></el-icon>
-      </div>
-      <h3 class="empty-title">尚未配置任何通知通道</h3>
-      <p class="empty-desc">
-        添加 Telegram / QQ / Webhook / 企业微信 通道，让 pt-tools 主动推送任务结果与告警。
-      </p>
-      <el-button type="primary" size="large" @click="openAddDialog">
-        <el-icon><Plus /></el-icon>
-        添加第一个通道
-      </el-button>
+    <!-- 空态 -->
+    <div v-else-if="!loading" class="empty-state">
+      <el-empty :image-size="100" description="">
+        <template #description>
+          <h3 class="empty-title">尚未配置任何通知通道</h3>
+          <p class="empty-desc">
+            添加 Telegram / QQ / Webhook / 企业微信 通道，让 pt-tools 主动推送任务结果与告警。
+          </p>
+        </template>
+        <el-button type="primary" size="default" @click="openAddDialog">
+          <el-icon><Plus /></el-icon>
+          添加你的第一个通知通道
+        </el-button>
+      </el-empty>
     </div>
 
-    <el-dialog v-model="addDialogVisible" title="添加通知通道" width="500px">
+    <!-- 新建通道对话框 -->
+    <el-dialog
+      v-model="addDialogVisible"
+      title="添加通知通道"
+      width="520px"
+      class="chatops-add-dialog">
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="通道类型">
-          <el-select v-model="newChannel.channel_type" class="w-full">
-            <el-option
+          <el-radio-group v-model="newChannel.channel_type" class="channel-type-group">
+            <el-radio-button
               v-for="opt in channelTypeOptions"
               :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-              :data-testid="`channel-type-${opt.value}`" />
-          </el-select>
+              :label="opt.value"
+              :data-testid="`channel-type-${opt.value}`">
+              <el-icon><component :is="opt.icon" /></el-icon>
+              {{ opt.label }}
+            </el-radio-button>
+          </el-radio-group>
         </el-form-item>
 
         <el-form-item label="通道名称" required>
@@ -260,11 +347,11 @@ function getChannelLabel(type: string) {
           <el-button @click="addDialogVisible = false">取消</el-button>
           <el-button
             type="primary"
-            @click="handleCreate"
             :loading="submitting"
             data-testid="save-btn"
-            >确定</el-button
-          >
+            @click="handleCreate">
+            确定
+          </el-button>
         </span>
       </template>
     </el-dialog>
@@ -272,300 +359,313 @@ function getChannelLabel(type: string) {
 </template>
 
 <style scoped>
-.page-container {
-  padding: 16px 24px 32px;
+@import "@/styles/common-page.css";
+
+.chatops-notifications-page {
+  padding: var(--pt-space-4) var(--pt-space-5) var(--pt-space-8);
 }
 
-.hero-block {
-  position: relative;
-  padding: 48px 32px;
-  margin-bottom: 32px;
-  border-radius: 22px;
-  background:
-    radial-gradient(
-      ellipse at top right,
-      color-mix(in oklab, var(--pt-color-primary) 18%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(
-        to right,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    linear-gradient(
-        to bottom,
-        color-mix(in oklab, var(--pt-text-primary) 6%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 32px 32px,
-    var(--pt-bg-surface);
-  border: 1px solid var(--pt-border-color);
-  overflow: hidden;
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 8px 24px -12px rgb(28 25 23 / 8%);
-}
-
-.hero-content {
-  position: relative;
-  z-index: 1;
+/* 汇总条 */
+.summary-bar {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: 720px;
-}
-
-.hero-eyebrow {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--pt-color-primary);
-  text-transform: uppercase;
-}
-
-.hero-title {
-  font-size: 40px;
-  font-weight: 700;
-  margin: 0;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  background: linear-gradient(135deg, var(--pt-text-primary) 25%, var(--pt-color-primary) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-.hero-subtitle {
-  font-size: 16px;
-  color: var(--pt-text-secondary);
-  margin: 0;
-  max-width: 600px;
-  line-height: 1.65;
-}
-
-.hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 12px;
   flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3) var(--pt-space-4);
+  margin-bottom: var(--pt-space-5);
+  background: var(--pt-bg-surface-raised);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-lg);
+  box-shadow: var(--pt-shadow-sm);
 }
 
-.hero-meta {
-  font-size: 13px;
-  color: var(--pt-text-secondary);
+.summary-bar :deep(.el-divider--vertical) {
+  height: 16px;
+  margin: 0 var(--pt-space-1);
 }
 
-.cards-grid {
+.loading-skeleton {
+  padding: var(--pt-space-6);
+  background: var(--pt-bg-surface-raised);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-xl);
+}
+
+/* 通道网格 */
+.channels-grid {
   display: grid;
   grid-template-columns: repeat(1, 1fr);
-  gap: 20px;
+  gap: var(--pt-space-4);
 }
 
-@media (min-width: 768px) {
-  .cards-grid {
+@media (min-width: 640px) {
+  .channels-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
-@media (min-width: 1024px) {
-  .cards-grid {
+@media (min-width: 1280px) {
+  .channels-grid {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
+@media (min-width: 1700px) {
+  .channels-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* 通道卡片 */
 .channel-card {
   position: relative;
-  border-radius: 18px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 78%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: 0 1px 2px rgb(28 25 23 / 4%);
-  transition:
-    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 200ms ease;
   display: flex;
   flex-direction: column;
-  padding: 22px;
+  padding: var(--pt-space-5);
+  padding-top: calc(var(--pt-space-5) + 4px);
+  background: var(--pt-bg-surface-raised);
+  border: 1px solid var(--pt-border-color);
+  border-radius: var(--pt-radius-xl);
+  box-shadow: var(--pt-shadow-sm);
+  transition:
+    box-shadow var(--pt-transition-normal),
+    border-color var(--pt-transition-normal),
+    transform var(--pt-transition-normal);
   overflow: hidden;
 }
 
 .channel-card:hover {
-  transform: translateY(-3px);
-  box-shadow:
-    0 1px 2px rgb(28 25 23 / 4%),
-    0 12px 32px -16px rgb(28 25 23 / 14%);
-  border-color: color-mix(in oklab, var(--pt-color-primary) 25%, var(--pt-border-color));
+  transform: translateY(-2px);
+  box-shadow: var(--pt-shadow-lg);
+  border-color: color-mix(in srgb, var(--pt-color-primary) 30%, var(--pt-border-color));
 }
 
-.card-accent {
+.channel-card.is-disabled {
+  opacity: 0.78;
+}
+
+.channel-card-accent {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--pt-color-primary) 0%,
-    color-mix(in oklab, var(--pt-color-primary) 40%, transparent) 100%
-  );
+  background: var(--pt-color-primary);
   opacity: 0.85;
 }
 
-.card-accent[data-channel="telegram"] {
-  background: linear-gradient(90deg, #2aabee 0%, color-mix(in oklab, #2aabee 30%, transparent));
+.channel-card-accent[data-channel="telegram"] {
+  background: linear-gradient(90deg, #2aabee, #229ed9);
 }
 
-.card-accent[data-channel="qq_onebot"] {
-  background: linear-gradient(90deg, #12b7f5 0%, color-mix(in oklab, #12b7f5 30%, transparent));
+.channel-card-accent[data-channel="qq_onebot"] {
+  background: linear-gradient(90deg, #10b981, #059669);
 }
 
-.card-accent[data-channel="wecom_webhook"] {
-  background: linear-gradient(90deg, #07c160 0%, color-mix(in oklab, #07c160 30%, transparent));
+.channel-card-accent[data-channel="wecom_webhook"] {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
 }
 
-.card-header {
+.channel-card-accent[data-channel="webhook"] {
+  background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
+.channel-card-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  justify-content: space-between;
+  margin-bottom: var(--pt-space-4);
 }
 
 .channel-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--pt-space-2);
 }
 
-.brand-icon {
-  font-size: 20px;
-  color: var(--pt-color-primary);
-  background: color-mix(in oklab, var(--pt-color-primary) 12%, transparent);
-  padding: 9px;
-  border-radius: 10px;
+.channel-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--pt-radius-md);
+  background: var(--pt-bg-accent-soft);
+  color: var(--pt-color-primary);
+  font-size: 18px;
+  flex-shrink: 0;
 }
 
-.brand-name {
-  font-weight: 600;
-  color: var(--pt-text-secondary);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+.channel-icon[data-channel="telegram"] {
+  background: color-mix(in srgb, #2aabee 14%, transparent);
+  color: #2aabee;
 }
 
-.card-body {
+.channel-icon[data-channel="qq_onebot"] {
+  background: color-mix(in srgb, #10b981 14%, transparent);
+  color: #10b981;
+}
+
+.channel-icon[data-channel="wecom_webhook"] {
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: #d97706;
+}
+
+.channel-icon[data-channel="webhook"] {
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+  color: #ef4444;
+}
+
+.channel-card-body {
   flex: 1;
-  margin-bottom: 24px;
+  margin-bottom: var(--pt-space-4);
+  min-height: 60px;
 }
 
 .channel-name {
-  font-size: 19px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
+  margin: 0 0 var(--pt-space-2);
+  font-size: var(--pt-text-lg);
+  font-weight: 700;
   color: var(--pt-text-primary);
   letter-spacing: -0.01em;
+  line-height: 1.3;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
-.channel-status {
-  font-size: 13px;
-  color: var(--pt-text-secondary);
-  margin: 0;
+.channel-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--pt-space-2);
+  flex-wrap: wrap;
 }
 
-.channel-status::before {
-  content: "";
-  display: block;
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--pt-text-xs);
+  font-weight: 600;
+  color: var(--pt-text-secondary);
+}
+
+.status-pill .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--pt-text-secondary) 40%, transparent);
+  border-radius: 999px;
+  background: var(--pt-color-neutral-300);
 }
 
-.channel-status.is-active::before {
-  background: var(--pt-color-success, #16a34a);
-  box-shadow: 0 0 10px color-mix(in oklab, var(--pt-color-success, #16a34a) 50%, transparent);
+.status-pill.is-active {
+  color: var(--pt-color-success);
+}
+
+.status-pill.is-active .status-dot {
+  background: var(--pt-color-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pt-color-success) 22%, transparent);
   animation: pulse-dot 2s ease-in-out infinite;
 }
 
 @keyframes pulse-dot {
   0%,
   100% {
-    opacity: 1;
     transform: scale(1);
+    opacity: 1;
   }
   50% {
-    opacity: 0.7;
     transform: scale(1.18);
+    opacity: 0.78;
   }
 }
 
-.card-footer {
+.channel-card-footer {
   display: flex;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pt-space-2);
+  padding-top: var(--pt-space-3);
+  border-top: 1px solid var(--pt-border-color);
 }
 
-.spacer {
-  flex: 1;
-}
-
+/* 空态 */
 .empty-state {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 64px 24px;
-  margin: 24px auto;
-  max-width: 520px;
-  text-align: center;
-  border-radius: 22px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 70%, transparent);
+  justify-content: center;
+  padding: var(--pt-space-8) var(--pt-space-4);
+  background: var(--pt-bg-surface-raised);
   border: 1px dashed var(--pt-border-color);
-}
-
-.empty-icon {
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--pt-color-primary) 10%, transparent);
-  color: var(--pt-color-primary);
-  font-size: 32px;
+  border-radius: var(--pt-radius-xl);
 }
 
 .empty-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0;
+  margin: 0 0 var(--pt-space-2);
+  font-size: var(--pt-text-lg);
+  font-weight: 700;
   color: var(--pt-text-primary);
 }
 
 .empty-desc {
-  font-size: 14px;
+  margin: 0 auto var(--pt-space-4);
+  max-width: 420px;
+  font-size: var(--pt-text-sm);
   color: var(--pt-text-secondary);
-  margin: 0 0 8px;
-  line-height: 1.65;
-  max-width: 400px;
+  line-height: 1.6;
 }
 
-.mt-4 {
-  margin-top: 16px;
+/* 对话框：通道类型 radio button group */
+.chatops-add-dialog :deep(.channel-type-group) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
 }
-.mt-8 {
-  margin-top: 32px;
+
+.chatops-add-dialog :deep(.channel-type-group .el-radio-button) {
+  margin: 0;
 }
-.w-full {
-  width: 100%;
+
+.chatops-add-dialog :deep(.channel-type-group .el-radio-button__inner) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--pt-radius-md) !important;
+  border-left-width: 1px !important;
+}
+
+.chatops-add-dialog :deep(.channel-type-group .el-radio-button:not(:first-child)) {
+  margin-left: 0;
+}
+
+/* 暗色模式微调 */
+html.dark .channel-card {
+  background: var(--pt-bg-surface);
+}
+
+html.dark .summary-bar {
+  background: var(--pt-bg-surface);
+}
+
+/* 移动端 */
+@media (max-width: 640px) {
+  .chatops-notifications-page {
+    padding: var(--pt-space-3);
+  }
+
+  .channel-card-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .channel-card-footer .el-button-group {
+    display: flex;
+  }
+
+  .channel-card-footer .el-button-group .el-button {
+    flex: 1;
+  }
 }
 </style>
