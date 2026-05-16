@@ -102,20 +102,24 @@ func (c *TelegramChannel) handleUpdate(ctx context.Context, upd telego.Update) {
 }
 
 func permitted(userID int64, cfg *Config, isCommand bool) bool {
+	admins := cfg.AdminUsersList()
+	allowed := cfg.AllowedUsersList()
 	if isCommand {
-		if !contains(cfg.AdminUsers, userID) {
+		if !contains(admins, userID) {
 			return false
 		}
 	}
-	if !contains(cfg.AllowedUsers, userID) && !contains(cfg.AdminUsers, userID) {
+	if !contains(allowed, userID) && !contains(admins, userID) {
 		return false
 	}
 	return true
 }
 
 func denyReason(userID int64, cfg *Config, isCommand bool) string {
-	if isCommand && !contains(cfg.AdminUsers, userID) {
-		if contains(cfg.AllowedUsers, userID) {
+	admins := cfg.AdminUsersList()
+	allowed := cfg.AllowedUsersList()
+	if isCommand && !contains(admins, userID) {
+		if contains(allowed, userID) {
 			return "denied:not_admin"
 		}
 		return "denied:not_in_whitelist"
@@ -173,7 +177,7 @@ func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.Ca
 	}
 
 	userID := cq.From.ID
-	if !contains(cfg.AllowedUsers, userID) && !contains(cfg.AdminUsers, userID) {
+	if !contains(cfg.AllowedUsersList(), userID) && !contains(cfg.AdminUsersList(), userID) {
 		_ = bot.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 			CallbackQueryID: cq.ID,
 			Text:            denyMessage,

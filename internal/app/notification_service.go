@@ -11,9 +11,21 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
+
+// publishNotificationConfigChanged 通知订阅方（如 cmd/web.go 中的热重载 goroutine）
+// 通道配置发生变化，需重建对应通道实例以加载最新的解密配置（proxy_url、bot_token 等）。
+func publishNotificationConfigChanged() {
+	events.Publish(events.Event{
+		Type:    events.ConfigChanged,
+		Version: time.Now().UnixNano(),
+		Source:  "notification",
+		At:      time.Now(),
+	})
+}
 
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
@@ -72,6 +84,7 @@ type NotificationService interface {
 	DeleteConf(ctx context.Context, id uint) error
 	TestConf(ctx context.Context, id uint) error
 	Push(ctx context.Context, n Notification) error
+	PushSync(ctx context.Context, n Notification) error
 	Enqueue(ctx context.Context, n Notification, confID uint) error
 }
 
@@ -174,6 +187,7 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return NotificationConfDTO{}, fmt.Errorf("创建通知通道失败: %w", err)
 	}
+	publishNotificationConfigChanged()
 	return NotificationConfDTO{
 		ID:              row.ID,
 		ChannelType:     row.ChannelType,
@@ -207,7 +221,42 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 		updates["quiet_hours_end"] = *req.QuietHoursEnd
 	}
 	if len(req.ConfigJSON) > 0 {
-		cipherStr, err := crypto.Encrypt([]byte(req.ConfigJSON))
+		// 合并策略：解密 DB 现有配置 → 与 partial 新值 merge（新值覆盖、缺失键保留）→ 重新加密。
+		// 避免前端只发部分字段时把其他原有字段（admin_users / default_chat_id 等）覆盖掉。
+		var existingRow models.NotificationConf
+		if err := s.db.WithContext(ctx).First(&existingRow, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrConfNotFound
+			}
+			return fmt.Errorf("查询通道失败: %w", err)
+		}
+
+		existingMap := map[string]json.RawMessage{}
+		if existingRow.ConfigJSON != "" {
+			plain, derr := crypto.Decrypt(existingRow.ConfigJSON)
+			if derr != nil {
+				return fmt.Errorf("解密旧配置失败: %w", derr)
+			}
+			if len(plain) > 0 {
+				if perr := json.Unmarshal(plain, &existingMap); perr != nil {
+					return fmt.Errorf("解析旧配置失败: %w", perr)
+				}
+			}
+		}
+
+		var newMap map[string]json.RawMessage
+		if perr := json.Unmarshal([]byte(req.ConfigJSON), &newMap); perr != nil {
+			return fmt.Errorf("解析新配置失败: %w", perr)
+		}
+		for k, v := range newMap {
+			existingMap[k] = v
+		}
+
+		merged, merr := json.Marshal(existingMap)
+		if merr != nil {
+			return fmt.Errorf("合并配置失败: %w", merr)
+		}
+		cipherStr, err := crypto.Encrypt(merged)
 		if err != nil {
 			return fmt.Errorf("加密通道配置失败: %w", err)
 		}
@@ -224,6 +273,7 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 	if res.RowsAffected == 0 {
 		return ErrConfNotFound
 	}
+	publishNotificationConfigChanged()
 	return nil
 }
 
@@ -238,6 +288,7 @@ func (s *notificationService) DeleteConf(ctx context.Context, id uint) error {
 	if res.RowsAffected == 0 {
 		return ErrConfNotFound
 	}
+	publishNotificationConfigChanged()
 	return nil
 }
 
@@ -261,7 +312,7 @@ func (s *notificationService) TestConf(ctx context.Context, id uint) error {
 			targets["message_type"] = "private"
 		}
 	}
-	return s.Push(ctx, Notification{
+	return s.PushSync(ctx, Notification{
 		Title:        "pt-tools 测试通知",
 		Text:         "如果你看到此消息，说明通道配置正常。",
 		SourceConfID: row.ID,
@@ -425,6 +476,28 @@ func (s *notificationService) Push(ctx context.Context, n Notification) error {
 		return s.Enqueue(ctx, n, n.SourceConfID)
 	case <-sendCtx.Done():
 		return s.Enqueue(ctx, n, n.SourceConfID)
+	}
+}
+
+// PushSync 仅尝试同步投递：超时或失败时不会写入 outbox，错误原样返回给调用方。
+// 用于 TestConf 等需要"立即验证通道是否可用"的语义场景；业务通知请使用 Push（含 outbox fallback）。
+func (s *notificationService) PushSync(ctx context.Context, n Notification) error {
+	if s.manager == nil {
+		return errors.New("通知管理器未初始化")
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, s.pushTimeout)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.manager.Send(sendCtx, n.SourceConfID, n)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-sendCtx.Done():
+		return fmt.Errorf("通道未在 %s 内响应: %w", s.pushTimeout, sendCtx.Err())
 	}
 }
 

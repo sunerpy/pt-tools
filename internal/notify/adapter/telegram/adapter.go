@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/mymmrac/telego"
@@ -22,14 +24,108 @@ import (
 const ChannelType = "telegram"
 
 // Config is the JSON shape stored (encrypted) in NotificationConf.ConfigJSON.
+//
+// AllowedUsers / AdminUsers / DefaultChatID are stored as json.RawMessage so
+// that the adapter tolerates both numeric and string-quoted values that users
+// commonly type into the Web UI form (e.g. `"8576996727"` or `"@channel"`).
+// Use the helper methods (DefaultChatIDInt, DefaultChatIDUsername,
+// AdminUsersList, AllowedUsersList) to access typed values.
 type Config struct {
-	BotToken              string  `json:"bot_token"`
-	AllowedUsers          []int64 `json:"allowed_users"`
-	AdminUsers            []int64 `json:"admin_users"`
-	DefaultChatID         int64   `json:"default_chat_id"`
-	PollingTimeoutSeconds int     `json:"polling_timeout_seconds"`
-	APIServer             string  `json:"api_server,omitempty"`
-	ProxyURL              string  `json:"proxy_url,omitempty"`
+	BotToken              string          `json:"bot_token"`
+	AllowedUsers          json.RawMessage `json:"allowed_users,omitempty"`
+	AdminUsers            json.RawMessage `json:"admin_users,omitempty"`
+	DefaultChatID         json.RawMessage `json:"default_chat_id,omitempty"`
+	PollingTimeoutSeconds int             `json:"polling_timeout_seconds"`
+	APIServer             string          `json:"api_server,omitempty"`
+	ProxyURL              string          `json:"proxy_url,omitempty"`
+}
+
+// DefaultChatIDInt returns the integer form of default_chat_id. Accepts both
+// raw JSON integers and string-quoted integers ("123456"). Returns (0, false)
+// when the value is absent or is a non-numeric string (e.g. "@channelusername"),
+// in which case the caller should fall back to DefaultChatIDUsername.
+func (c *Config) DefaultChatIDInt() (int64, bool) {
+	if len(c.DefaultChatID) == 0 {
+		return 0, false
+	}
+	var n int64
+	if err := json.Unmarshal(c.DefaultChatID, &n); err == nil {
+		return n, true
+	}
+	var s string
+	if err := json.Unmarshal(c.DefaultChatID, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// DefaultChatIDUsername returns the @channelusername form. Only returns a
+// non-empty string when the stored value is a string that does NOT parse as
+// an integer (so DefaultChatIDInt and DefaultChatIDUsername never both
+// return a usable value for the same config).
+func (c *Config) DefaultChatIDUsername() (string, bool) {
+	if len(c.DefaultChatID) == 0 {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal(c.DefaultChatID, &s); err != nil {
+		return "", false
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	if _, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return "", false
+	}
+	if !strings.HasPrefix(s, "@") {
+		s = "@" + s
+	}
+	return s, true
+}
+
+// AdminUsersList returns admin_users as []int64. Tolerates both raw integer
+// and string-quoted integers in the JSON array; bad entries are silently
+// skipped to avoid taking down the whole channel for one typo.
+func (c *Config) AdminUsersList() []int64 {
+	return parseUserIDList(c.AdminUsers)
+}
+
+// AllowedUsersList returns allowed_users as []int64 with the same tolerance
+// as AdminUsersList.
+func (c *Config) AllowedUsersList() []int64 {
+	return parseUserIDList(c.AllowedUsers)
+}
+
+// parseUserIDList tolerates [123, "456", "bad"] mixed input. Returns nil on
+// invalid JSON or empty input. Bad entries (non-integer strings) are skipped
+// without error so a single bad row doesn't disable the channel.
+func parseUserIDList(raw json.RawMessage) []int64 {
+	if len(raw) == 0 {
+		return nil
+	}
+	var rawList []json.RawMessage
+	if err := json.Unmarshal(raw, &rawList); err != nil {
+		return nil
+	}
+	out := make([]int64, 0, len(rawList))
+	for _, item := range rawList {
+		var n int64
+		if err := json.Unmarshal(item, &n); err == nil {
+			out = append(out, n)
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(item, &s); err == nil && s != "" {
+			if n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
 }
 
 // botAPI is the minimal telego.Bot surface used by the adapter, kept narrow
