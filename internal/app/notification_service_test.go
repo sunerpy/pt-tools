@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -395,4 +396,107 @@ func TestUpdateConf_PartialMergeOverwritesExistingValue(t *testing.T) {
 	var defaultChatID int64
 	require.NoError(t, json.Unmarshal(merged["default_chat_id"], &defaultChatID))
 	assert.Equal(t, int64(111), defaultChatID, "default_chat_id must be preserved")
+}
+
+func waitForNotificationEvent(t *testing.T, ch <-chan events.Event, timeout time.Duration) events.Event {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == events.ConfigChanged && ev.Source == "notification" {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("等待 ConfigChanged{Source:notification} 事件超时")
+			return events.Event{}
+		}
+	}
+}
+
+func TestCreateConf_PublishesConfigChanged(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 5*time.Second)
+
+	_, eventCh, cancel := events.Subscribe(8)
+	defer cancel()
+
+	_, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram",
+		Name:        "tg-publish-create",
+		ConfigJSON:  json.RawMessage(`{"bot_token":"x"}`),
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	ev := waitForNotificationEvent(t, eventCh, 200*time.Millisecond)
+	assert.Equal(t, events.ConfigChanged, ev.Type)
+	assert.Equal(t, "notification", ev.Source)
+	assert.NotZero(t, ev.Version)
+}
+
+func TestUpdateConf_PublishesConfigChanged(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 5*time.Second)
+
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"old"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	_, eventCh, cancelSub := events.Subscribe(8)
+	defer cancelSub()
+
+	newJSON := json.RawMessage(`{"proxy_url":"http://127.0.0.1:1080"}`)
+	require.NoError(t, svc.UpdateConf(context.Background(), row.ID, UpdateConfReq{ConfigJSON: newJSON}))
+
+	ev := waitForNotificationEvent(t, eventCh, 200*time.Millisecond)
+	assert.Equal(t, events.ConfigChanged, ev.Type)
+	assert.Equal(t, "notification", ev.Source)
+}
+
+func TestDeleteConf_PublishesConfigChanged(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 5*time.Second)
+
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"old"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	_, eventCh, cancelSub := events.Subscribe(8)
+	defer cancelSub()
+
+	require.NoError(t, svc.DeleteConf(context.Background(), row.ID))
+
+	ev := waitForNotificationEvent(t, eventCh, 200*time.Millisecond)
+	assert.Equal(t, events.ConfigChanged, ev.Type)
+	assert.Equal(t, "notification", ev.Source)
+}
+
+func TestUpdateConf_NoChanges_DoesNotPublish(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 5*time.Second)
+
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"old"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	_, eventCh, cancelSub := events.Subscribe(8)
+	defer cancelSub()
+
+	require.NoError(t, svc.UpdateConf(context.Background(), row.ID, UpdateConfReq{}))
+
+	select {
+	case ev := <-eventCh:
+		if ev.Type == events.ConfigChanged && ev.Source == "notification" {
+			t.Fatalf("空 UpdateConf 不应 publish 事件: %+v", ev)
+		}
+	case <-time.After(80 * time.Millisecond):
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/chatops"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
@@ -233,6 +234,8 @@ var webCmd = &cobra.Command{
 			chatopsLogger().Infof("RSS notifier 已就绪")
 			chatopsLogger().Infof("RSS retry worker 已启动")
 			chatopsLogger().Infof("RSS callback actions 已注册 channels=%d", registeredCallbackChannels)
+
+			go runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions)
 		}
 
 		srv := web.NewServer(store, mgr)
@@ -750,4 +753,93 @@ func (a *rssNotifierAdapter) NotifyFilteredItem(ctx context.Context, ev internal
 		SiteName:  ev.SiteName,
 		TorrentID: ev.TorrentID,
 	})
+}
+
+// runChatOpsChannelReloader 订阅 events.ConfigChanged{Source:"notification"}，
+// 收到事件后重建 bs.channels：先逐个 Close 旧实例（带超时避免阻塞），
+// 再调用 initEnabledChannels 从 DB 重新加载 enabled=true 的所有通道并 Init，
+// 最后重新注册 RSS callback action handler。事件冒泡式 fan-out 由 events.Publish
+// 保证：单条事件触发一次完整重建。
+func runChatOpsChannelReloader(
+	ctx context.Context,
+	db *gorm.DB,
+	bs *chatopsBootstrap,
+	callbackActions telegramadapter.CallbackActionHandler,
+) {
+	if bs == nil || db == nil {
+		return
+	}
+	id, eventCh, cancel := events.Subscribe(64)
+	defer cancel()
+	log := chatopsLogger()
+	log.Infof("ChatOps 通道热重载订阅已就绪 sub=%s", id)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-eventCh:
+			if !ok {
+				return
+			}
+			if ev.Type != events.ConfigChanged || ev.Source != "notification" {
+				continue
+			}
+			if err := reloadChatOpsChannels(ctx, db, bs, callbackActions); err != nil {
+				log.Warnf("ChatOps 通道热重载失败: %v", err)
+				continue
+			}
+			log.Infof("ChatOps 通道已热重载")
+		}
+	}
+}
+
+// reloadChatOpsChannels 关闭所有旧通道实例并从 DB 重新加载所有 enabled=true 的通道。
+// 采用全量重建策略以匹配 core/config_store.go 的全局 reload 模式：避免逐通道 dirty 状态追踪，
+// 且通道 Init 是轻量操作（TG 仅打开新 HTTPS client，QQ 仅重绑 WS 端口）。
+func reloadChatOpsChannels(
+	ctx context.Context,
+	db *gorm.DB,
+	bs *chatopsBootstrap,
+	callbackActions telegramadapter.CallbackActionHandler,
+) error {
+	log := chatopsLogger()
+
+	for confID, ch := range bs.channels {
+		stepCtx, stepCancel := context.WithTimeout(ctx, chatopsShutdownPerStep)
+		if err := ch.Close(stepCtx); err != nil {
+			log.Warnf("ChatOps 通道关闭失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
+		} else {
+			log.Infof("ChatOps 通道已下线 conf_id=%d type=%s", confID, ch.Type())
+		}
+		stepCancel()
+	}
+	for confID := range bs.channels {
+		delete(bs.channels, confID)
+	}
+
+	var inbound notify.InboundHandler
+	if bs.chain != nil {
+		inbound = bs.chain.Process
+	}
+	newChannels, err := initEnabledChannels(ctx, db, bs.registry, inbound, log)
+	if err != nil {
+		bs.manager.SetChannels(bs.channels)
+		return err
+	}
+
+	if callbackActions != nil {
+		for _, ch := range newChannels {
+			if setter, ok := ch.(interface {
+				SetCallbackActionHandler(telegramadapter.CallbackActionHandler)
+			}); ok {
+				setter.SetCallbackActionHandler(callbackActions)
+			}
+		}
+	}
+
+	for confID, ch := range newChannels {
+		bs.channels[confID] = ch
+	}
+	bs.manager.SetChannels(bs.channels)
+	return nil
 }

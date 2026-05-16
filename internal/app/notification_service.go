@@ -11,9 +11,21 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
+
+// publishNotificationConfigChanged 通知订阅方（如 cmd/web.go 中的热重载 goroutine）
+// 通道配置发生变化，需重建对应通道实例以加载最新的解密配置（proxy_url、bot_token 等）。
+func publishNotificationConfigChanged() {
+	events.Publish(events.Event{
+		Type:    events.ConfigChanged,
+		Version: time.Now().UnixNano(),
+		Source:  "notification",
+		At:      time.Now(),
+	})
+}
 
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
@@ -175,6 +187,7 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return NotificationConfDTO{}, fmt.Errorf("创建通知通道失败: %w", err)
 	}
+	publishNotificationConfigChanged()
 	return NotificationConfDTO{
 		ID:              row.ID,
 		ChannelType:     row.ChannelType,
@@ -260,6 +273,7 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 	if res.RowsAffected == 0 {
 		return ErrConfNotFound
 	}
+	publishNotificationConfigChanged()
 	return nil
 }
 
@@ -274,6 +288,7 @@ func (s *notificationService) DeleteConf(ctx context.Context, id uint) error {
 	if res.RowsAffected == 0 {
 		return ErrConfNotFound
 	}
+	publishNotificationConfigChanged()
 	return nil
 }
 
