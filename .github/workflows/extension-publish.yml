@@ -103,14 +103,19 @@ jobs:
           name: extension-zip
 
       - name: Upload package to Edge Add-ons
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          ZIP_FILE: pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
-            -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
+            -H "Authorization: ApiKey $EDGE_API_KEY" \
+            -H "X-ClientID: $EDGE_CLIENT_ID" \
             -H "Content-Type: application/zip" \
             -X POST \
-            -T "pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip" \
-            "$EDGE_API/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions/draft/package")
+            -T "$ZIP_FILE" \
+            "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | sed '$d')
@@ -126,13 +131,17 @@ jobs:
           echo "operation_id=$OPERATION_ID" >> "$GITHUB_ENV"
 
       - name: Wait for upload processing
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
         run: |
           for i in $(seq 1 20); do
             sleep 10
             STATUS_RESPONSE=$(curl -s \
-              -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
-              -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
-              "$EDGE_API/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions/draft/package/operations/$operation_id")
+              -H "Authorization: ApiKey $EDGE_API_KEY" \
+              -H "X-ClientID: $EDGE_CLIENT_ID" \
+              "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package/operations/$operation_id")
 
             STATUS=$(echo "$STATUS_RESPONSE" | grep -oP '"status"\s*:\s*"\K[^"]+' || echo "Unknown")
             echo "Attempt $i: $STATUS"
@@ -148,14 +157,19 @@ jobs:
           done
 
       - name: Publish submission
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EXT_VERSION: ${{ needs.check-extension-changes.outputs.version }}
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -H "Authorization: ApiKey ${{ secrets.EDGE_API_KEY }}" \
-            -H "X-ClientID: ${{ secrets.EDGE_CLIENT_ID }}" \
+            -H "Authorization: ApiKey $EDGE_API_KEY" \
+            -H "X-ClientID: $EDGE_CLIENT_ID" \
             -H "Content-Type: application/json" \
             -X POST \
-            -d '{"notes":"Automated publish via CI for version ${{ needs.check-extension-changes.outputs.version }}"}' \
-            "$EDGE_API/v1/products/${{ secrets.EDGE_PRODUCT_ID }}/submissions")
+            -d "{\"notes\":\"Automated publish via CI for version $EXT_VERSION\"}" \
+            "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | sed '$d')
