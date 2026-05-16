@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-05-16
+
+### Bug Fixes
+
+- 修复 v0.31.0 发版公告链路 + 添加 CRX 构建 (v0.31.1) ([#333](https://github.com/sunerpy/pt-tools/issues/333)) ([#333](https://github.com/sunerpy/pt-tools/pull/333))
+
+* docs(chatops): 移除不存在的占位截图引用
+
+      botfather-create-bot.png / telegram-getupdates.png / napcat-* 系列 5 张
+      图实际未捕获（属于用户侧 QQ / TG 客户端或 NapCat 容器 WebUI），文档里
+      "请自行截图"的占位 UX 较差。改为：
+      - 删除 ![...](path.png) 占位与对应"截图位置..."blockquote
+      - 关键步骤补一行简洁文字提示（仅 getUpdates 那处加 from.id/chat.id 提示）
+      - 周围编号步骤已充分描述操作，无需额外说明
+
+      不影响已存在的 chatops-*.png（telegram-detail / bindings-* / notifications-list /
+      qq-detail / add-channel-dialog / audit-stats / rss-notifications）。
+
+      * fix(ci/tg-release): workflow 缺少 actions/checkout 导致脚本路径找不到
+
+      * fix(ci/tg-release): 修复多 H2 / 缩进 bullet / PR 链接重复导致公告内容丢失
+
+      v0.31.0 公告（msg_id 170）只显示了"…还有 3 项已省略"，关键内容全没。
+      排查发现三个独立 bug：
+
+      1. 缩进代码块启发式（4+ 空格 → 包成 code span）误把 release-please /
+       git-cliff 的缩进 bullet 转成超长代码行，触发后续截断。删除该启发式。
+      2. release body 多个 H2（`## What's Changed` 后跟 `## [0.31.0] - YYYY-MM-DD`），
+       后者被渲染成"📌 [0.31.0] - ..."噪音。新增 _VERSION_TAG_H2 正则跳过版本
+       标签 H2。
+      3. release body 含重复的 PR 链接（[#330](issues) + [#330](pull) 两个），
+       _preprocess_body 添加去重 regex。
+
+      附加增强：
+      - 缩进 bullet 三级渲染：0-1 空格 → •，2-5 → ◦，6+ → ▸
+      - 缩进 bullet 不再继承 conventional commits emoji（顶层独占）
+      - 智能截断：先丢 ▸ 层，再丢 ◦ 层，最后才硬截断 • 边界
+      - 字节预算改为字符预算（TG 限制是 4096 UTF-16 chars 而非字节），
+       中文场景下避免误判 over-budget
+      - 剥离 release-please 追加的 Installation/Docker Images 等冗余章节
+
+      实测：v0.31.0 真实 body 渲染后 3411 chars / 4704 bytes，无截断，
+      40 个嵌套 bullet 全部可见，msg_id 172 已成功发送并 pin。
+
+      * feat(ci/release): 每次 release 额外签名构建 .crx 浏览器扩展产物
+
+      附在 release 资产里供用户直接安装到 Chrome（无需 unpacked 模式）。
+
+      - release-please.yml: 在 zip 构建后追加 crx 构建（用 pnpm dlx crx + 解码
+       CRX_PRIVATE_KEY 私钥）；签名后上传至 release assets，构建步骤受 secret
+       存在性 guard 保护，缺失时安静 skip
+      - release-please.yml: RELEASE_NOTES 模板增加 Browser Extension 区块，
+       列出 zip / crx 两种下载格式
+      - README-secrets.md: 文档化 CRX_PRIVATE_KEY 一次性设置流程（openssl 生成
+       + base64 编码 + 妥善保管）
+      - README.md: 浏览器扩展安装小节补充 .crx 直装说明
+
+      注意：私钥必须 across releases 稳定，否则用户失去 auto-update 路径。
+
+      * chore: oxfmt 同步 .github/README-secrets.md / CHANGELOG.md / docs/guide/chatops-telegram.md
+
 ## [0.31.0] - 2026-05-16
 
 ### Features
@@ -677,12 +738,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
