@@ -18,3 +18,4 @@ dist
 
 Dockerfile-*
 tmp
+__pycache__/
