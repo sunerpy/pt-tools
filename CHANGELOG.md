@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-05-16
+
+### Features
+
+- ChatOps 机器人 + RSS 上新通知子系统 (v0.31.0) ([#330](https://github.com/sunerpy/pt-tools/issues/330)) ([#330](https://github.com/sunerpy/pt-tools/pull/330))
+
+* feat(events): 扩展事件总线添加 Payload 字段以支持结构化负载
+
+      * feat(crypto): 添加 AES-GCM 加密与 bind code 生成器
+
+      - 新增 internal/crypto/aes_gcm.go：AES-256-GCM 对称加密
+       - Encrypt/Decrypt round-trip，防篡改检测
+       - 支持环境变量 PT_TOOLS_SECRET_KEY（base64 32 字节）
+       - 无 env 时自动生成 ~/.pt-tools/secret.key（0600 权限）
+
+      - 新增 internal/chatops/bindcode.go：8 字符无歧义绑定码生成器
+       - 字符集：23456789ABCDEFGHJKMNPQRSTUVWXYZ（31 字符，排除 0/O/1/l/I）
+       - 使用 crypto/rand + rejection sampling（无模偏差）
+       - 2^40 ≈ 10^12 熵，足以满足 5 分钟 TTL 场景
+
+      - 全部单测 TDD 流程：RED → GREEN → REFACTOR
+      - 测试覆盖：round-trip、篡改检测、secret 文件生成、长度、唯一性、字符集约束
+
+      * feat(scheduler): 暴露 ListJobs() 公开方法供 ChatOps 查询
+
+      - 新增 JobStatus 类型导出（SiteName、RSSName、Running、StartedAt）
+      - 实现 Manager.ListJobs() 返回当前运行中的所有 jobs
+      - 为 job 结构体添加 startedAt 字段记录启动时间
+      - 单测覆盖空状态、单job、并发安全场景（-race）
+
+      * feat(models): 新增 ChatOps 五张表(notification_conf 等)，支持 additive 迁移
+
+      - 新增 NotificationConf / ChannelBinding / ActionAudit / BotToken / NotificationOutbox 5 个 GORM model
+      - 每个 model 实现 TableName() 强制单数表名
+      - ChannelBinding 复合索引 (notification_conf_id, channel_user_id)
+      - ActionAudit 复合索引 (notification_conf_id, channel_user_id, created_at DESC)
+      - NotificationOutbox 复合索引 (status, next_retry_at) 用于 outbox worker 扫描
+      - AutoMigrate 列表追加 5 个新类型，不 bump CurrentSchemaVersion
+      - 单测覆盖 AutoMigrate / TableName / RoundTrip / 三类索引存在性 / Outbox 四态
+
+      * feat(events): 添加 ChatOps 类型化事件常量与 payload 结构体
+
+      - 定义 11 个 EventType 常量（torrent.added/completed/failed、free.ending_soon、free.ended、disk.low、cleanup.triggered、site.login_expired、site.scraped_daily、notification.delivered、notification.failed）
+      - 为每个事件提供对应的 typed payload struct，使用 snake_case JSON tag
+      - 配合 T1 的 PublishWithPayload 使用，为 chatops/MCP 提供机器可读的事件 schema
+      - 不修改任何现有事件常量与发布站点，纯追加
+
+      * feat(web): 添加 bearer token 鉴权中间件支持 bot 与 MCP 调用
+
+      * feat(app): 引入 Application Service 层骨架(torrent/notification/binding/audit/task/site)
+
+      - 新增 internal/app 包，封装 6 个应用服务（T10-T14）：
+       - TorrentService：基于 downloader.DownloaderManager 的种子分页/暂停/恢复/删除
+       - NotificationService：notification_conf CRUD + Push（同步 5s 超时回退 outbox）
+       - BindingService：bind_code 签发/消费/吊销 + max 3 active cap + 并发安全
+       - AuditService：action_audit 写入 + 递归 redact 敏感字段 + 90d/500k 清理
+       - TaskService：封装 scheduler.Manager.ListJobs（Start/Stop 待 T32 接线）
+       - SiteService：基于 ConfigStore + UserInfoRepo 的站点列表与用户信息
+
+      - 测试：38 个单测全绿（含 -race），覆盖加密落库/race/redact/分页/接口契约
+      - 接口边界：通过 mock-friendly 接口（NotifyManager/JobLister/UserInfoSource 等）
+       与底层 manager/store 解耦，便于上层 chatops 命令与 web API 编程对接
+
 ## [0.30.1] - 2026-05-14
 
 ### Bug Fixes
@@ -614,12 +677,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
