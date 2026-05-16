@@ -215,7 +215,8 @@ func TestNotificationOutbox_StatusTransitions(t *testing.T) {
 
 	for _, status := range []string{"pending", "sent", "failed", "dead"} {
 		var count int64
-		require.NoError(t,
+		require.NoError(
+			t,
 			db.Model(&NotificationOutbox{}).Where("status = ?", status).Count(&count).Error,
 			"count by status %s", status,
 		)

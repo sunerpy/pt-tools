@@ -309,6 +309,7 @@ func (s *filterService) ShouldNotifyForRSSWithInput(input MatchInput, isFree boo
 	}
 	return true, rule
 } // GetEnabledRules returns all enabled filter rules ordered by priority.
+
 func (s *filterService) GetEnabledRules() ([]models.FilterRule, error) {
 	var rules []models.FilterRule
 	err := s.db.Where("enabled = ?", true).

@@ -27,7 +27,8 @@ func (w *WeComChannel) sendNotification(ctx context.Context, n notify.Notificati
 		return fmt.Errorf("wecom 序列化 payload 失败: %w", err)
 	}
 
-	resp, err := httpclient.Post(endpoint, bodyBytes,
+	resp, err := httpclient.Post(
+		endpoint, bodyBytes,
 		httpclient.WithContext(ctx),
 		httpclient.WithContentType("application/json"),
 	)
