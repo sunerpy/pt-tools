@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/mymmrac/telego"
 
@@ -39,7 +40,7 @@ func (c *TelegramChannel) Send(ctx context.Context, n notify.Notification) error
 	}
 
 	params := &telego.SendMessageParams{
-		ChatID: telego.ChatID{ID: chatID},
+		ChatID: chatID,
 		Text:   composeText(n, parseMode),
 	}
 	if parseMode != "" {
@@ -92,26 +93,46 @@ func buildInlineKeyboard(rows [][]notify.Button) *telego.InlineKeyboardMarkup {
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: out}
 }
 
-func resolveChatID(n notify.Notification, cfg *Config) (int64, error) {
+// resolveChatID returns the telego.ChatID built from notification targets and
+// channel config. Order of precedence:
+//  1. n.Targets["chat_id"] — accepts numeric string or @username
+//  2. n.UserID — numeric string only
+//  3. cfg.DefaultChatIDInt() — int (or string-quoted int) from raw JSON
+//  4. cfg.DefaultChatIDUsername() — @channelusername fallback
+func resolveChatID(n notify.Notification, cfg *Config) (telego.ChatID, error) {
 	if n.Targets != nil {
 		if raw, ok := n.Targets[targetChatIDKey]; ok && raw != "" {
-			id, err := strconv.ParseInt(raw, 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("telegram: 无效 targets.chat_id %q: %w", raw, err)
-			}
-			return id, nil
+			return parseChatIDString(raw)
 		}
 	}
 	if n.UserID != "" {
-		id, err := strconv.ParseInt(n.UserID, 10, 64)
-		if err == nil {
-			return id, nil
+		if id, err := strconv.ParseInt(n.UserID, 10, 64); err == nil {
+			return telego.ChatID{ID: id}, nil
 		}
 	}
-	if cfg.DefaultChatID != 0 {
-		return cfg.DefaultChatID, nil
+	if id, ok := cfg.DefaultChatIDInt(); ok && id != 0 {
+		return telego.ChatID{ID: id}, nil
 	}
-	return 0, errors.New("telegram: 未指定 chat_id 且 default_chat_id 为空")
+	if name, ok := cfg.DefaultChatIDUsername(); ok && name != "" {
+		return telego.ChatID{Username: name}, nil
+	}
+	return telego.ChatID{}, errors.New("telegram: 未指定 chat_id 且 default_chat_id 为空")
+}
+
+// parseChatIDString turns a string into telego.ChatID. Numeric → ID,
+// @-prefixed or non-numeric → Username (with @ prepended if missing).
+func parseChatIDString(s string) (telego.ChatID, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return telego.ChatID{}, errors.New("telegram: chat_id 为空")
+	}
+	if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return telego.ChatID{ID: id}, nil
+	}
+	if !strings.HasPrefix(s, "@") {
+		s = "@" + s
+	}
+	return telego.ChatID{Username: s}, nil
 }
 
 func composeText(n notify.Notification, parseMode string) string {
