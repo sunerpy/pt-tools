@@ -71,19 +71,20 @@ func TestRSSRetryWorker_PendingPastRetry_PushSucceeds(t *testing.T) {
 
 func TestRSSRetryWorker_PushFails_BackoffScheduled(t *testing.T) {
 	db := setupRetryWorkerDB(t)
-	past := time.Now().Add(-1 * time.Minute)
+	mockNow := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	past := mockNow.Add(-1 * time.Minute)
 	row := models.RSSNotificationLog{
 		RSSID: 1, SiteName: "s", TorrentID: "t2", NotifyKind: "all",
 		NotificationConfID: 1, Result: "pending", Attempts: 0,
 		NextRetryAt: &past,
 		PayloadJSON: mustJSON(t, renderedNotice{Title: "T", Text: "Body"}),
-		CreatedAt:   time.Now(), UpdatedAt: time.Now(),
+		CreatedAt:   mockNow.Add(-2 * time.Minute), UpdatedAt: mockNow.Add(-2 * time.Minute),
 	}
 	require.NoError(t, db.Create(&row).Error)
 
 	svc := &fakePushSvc{err: errors.New("boom")}
 	w := NewRSSRetryWorker(db, svc)
-	w.now = func() time.Time { return time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC) }
+	w.now = func() time.Time { return mockNow }
 	require.NoError(t, w.drainOnce(context.Background()))
 
 	var got models.RSSNotificationLog
