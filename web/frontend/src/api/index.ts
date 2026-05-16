@@ -105,6 +105,9 @@ export interface RSSConfig {
   pause_on_free_end?: boolean; // 免费结束时是否暂停未完成的下载
   is_example?: boolean; // 是否为示例配置
   filter_mode?: FilterMode; // 空字符串表示继承全局
+  notify_mode?: "" | "all" | "filtered" | "both"; // RSS 上新通知模式
+  notify_conf_ids?: string; // JSON 数组字符串，例如 "[1,2]"
+  max_notifications_per_hour?: number; // 每小时最多通知数（0 = 不限制）
 }
 
 export interface SiteConfig {
@@ -353,6 +356,7 @@ export interface FilterRule {
   site_id?: number;
   rss_id?: number;
   priority: number;
+  purpose?: "download" | "notify" | "both";
   created_at?: string;
   updated_at?: string;
 }
@@ -1114,4 +1118,247 @@ export const downloaderTorrentsApi = {
       "/api/downloader-torrents/add",
       payload,
     ),
+};
+
+// ChatOps API
+export interface NotificationConfig {
+  id: number;
+  channel_type: string;
+  name: string;
+  enabled: boolean;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
+  // Dynamic fields (frontend form shape; backend stores under encrypted config_json)
+  bot_token?: string;
+  allowed_users?: string;
+  admin_users?: string;
+  default_chat_id?: string;
+  listen_addr?: string;
+  access_token?: string;
+  admin_qq_users?: string;
+  allowed_qq_users?: string;
+  endpoint_url?: string;
+  hmac_secret?: string;
+  headers?: string;
+  webhook_key?: string;
+  proxy_url?: string;
+}
+
+const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
+  "id",
+  "channel_type",
+  "name",
+  "enabled",
+  "quiet_hours_start",
+  "quiet_hours_end",
+]);
+
+const NOTIFICATION_DYNAMIC_FIELDS = [
+  "bot_token",
+  "allowed_users",
+  "admin_users",
+  "default_chat_id",
+  "listen_addr",
+  "access_token",
+  "admin_qq_users",
+  "allowed_qq_users",
+  "endpoint_url",
+  "hmac_secret",
+  "headers",
+  "webhook_key",
+  "proxy_url",
+] as const;
+
+interface NotificationWireBody {
+  channel_type?: string;
+  name?: string;
+  enabled?: boolean;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
+  config_json?: Record<string, unknown>;
+}
+
+function packNotificationBody(
+  data: Partial<NotificationConfig>,
+  includeEmpty: boolean,
+): NotificationWireBody {
+  const body: NotificationWireBody = {};
+  if (data.channel_type !== undefined) body.channel_type = data.channel_type;
+  if (data.name !== undefined) body.name = data.name;
+  if (data.enabled !== undefined) body.enabled = data.enabled;
+  if (data.quiet_hours_start !== undefined) body.quiet_hours_start = data.quiet_hours_start;
+  if (data.quiet_hours_end !== undefined) body.quiet_hours_end = data.quiet_hours_end;
+  const config: Record<string, unknown> = {};
+  let hasDynamic = false;
+  for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
+    const v = data[key];
+    if (v !== undefined) {
+      config[key] = v;
+      hasDynamic = true;
+    }
+  }
+  if (hasDynamic || includeEmpty) {
+    body.config_json = config;
+  }
+  return body;
+}
+
+function unpackNotificationResponse(
+  raw: NotificationConfig & { config_json?: unknown },
+): NotificationConfig {
+  const result: NotificationConfig = {
+    id: raw.id,
+    channel_type: raw.channel_type,
+    name: raw.name,
+    enabled: raw.enabled,
+    quiet_hours_start: raw.quiet_hours_start,
+    quiet_hours_end: raw.quiet_hours_end,
+  };
+  const sink = result as unknown as Record<string, unknown>;
+  const arrayFields = new Set(["admin_qq_users", "allowed_qq_users"]);
+  for (const key of Object.keys(raw) as (keyof typeof raw)[]) {
+    if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
+    if (key === "config_json") continue;
+    const v = raw[key];
+    if (typeof v === "string") {
+      sink[key as string] = v;
+    } else if (Array.isArray(v) && arrayFields.has(key as string)) {
+      sink[key as string] = v;
+    }
+  }
+  if (raw.config_json && typeof raw.config_json === "object") {
+    const cfg = raw.config_json as Record<string, unknown>;
+    for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
+      const v = cfg[key];
+      if (typeof v === "string") {
+        sink[key] = v;
+      } else if (Array.isArray(v) && arrayFields.has(key)) {
+        sink[key] = v;
+      }
+    }
+  }
+  return result;
+}
+
+export interface ChatOpBinding {
+  id: number;
+  channel_user_id: string;
+  channel_type: string;
+  label?: string;
+  reply_lang?: string;
+  admin?: boolean;
+  allowed?: boolean;
+  last_active?: string;
+  bind_code?: string;
+  code?: string;
+  conf_id?: number;
+  created_at?: string;
+  expires_at?: string;
+}
+
+export interface AuditLog {
+  id: number;
+  command: string;
+  channel_type: string;
+  channel_user_id: string;
+  result: string;
+  created_at: string;
+  latency_ms: number;
+  args_json?: string;
+}
+
+export interface RSSNotificationLog {
+  id: number;
+  rss_id: number;
+  site_name: string;
+  torrent_id: string;
+  notify_kind: "all" | "filtered";
+  notification_conf_id: number;
+  matched_filter_rule_id?: number;
+  result: "sent" | "failed" | "suppressed" | "pending" | "throttled";
+  attempts: number;
+  next_retry_at?: string;
+  last_error?: string;
+  payload_json?: string;
+  delivered_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const chatopsApi = {
+  notifications: {
+    list: async () => {
+      const raw = await api.get<(NotificationConfig & { config_json?: unknown })[]>(
+        "/api/chatops/notifications",
+      );
+      return (raw || []).map(unpackNotificationResponse);
+    },
+    get: async (id: number) => {
+      const raw = await api.get<NotificationConfig & { config_json?: unknown }>(
+        `/api/chatops/notifications/${id}`,
+      );
+      return unpackNotificationResponse(raw);
+    },
+    create: async (data: Omit<NotificationConfig, "id">) => {
+      const raw = await api.post<NotificationConfig & { config_json?: unknown }>(
+        "/api/chatops/notifications",
+        packNotificationBody(data, true),
+      );
+      return unpackNotificationResponse(raw);
+    },
+    update: (id: number, data: Partial<NotificationConfig>) =>
+      request<{ status: string }>(`/api/chatops/notifications/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(packNotificationBody(data, false)),
+      }),
+    delete: (id: number) => api.delete<void>(`/api/chatops/notifications/${id}`),
+    test: (id: number) => api.post<{ success: boolean }>(`/api/chatops/notifications/${id}/test`),
+  },
+  bindings: {
+    list: () =>
+      api.get<{ bindings: ChatOpBinding[]; pending: ChatOpBinding[] }>("/api/chatops/bindings"),
+    generateCode: (confId: number, label?: string, ttlSeconds?: number) =>
+      api.post<{ code: string; expires_at?: string }>("/api/chatops/bindings/issue-code", {
+        conf_id: confId,
+        label: label ?? "",
+        ttl_seconds: ttlSeconds ?? 300,
+      }),
+    update: (id: number, data: { reply_lang: string }) =>
+      request<ChatOpBinding>(`/api/chatops/bindings/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: number) => api.delete<void>(`/api/chatops/bindings/${id}`),
+  },
+  audit: {
+    list: (params: URLSearchParams) =>
+      api.get<{
+        items: AuditLog[];
+        total: number;
+        today_count: number;
+        success_rate: number;
+        max_latency_ms: number;
+      }>(`/api/chatops/audit?${params.toString()}`),
+    stats: () =>
+      api.get<{
+        today_count: number;
+        total_count: number;
+        success_rate: number;
+        max_latency_ms: number;
+        avg_latency_ms: number;
+      }>("/api/chatops/audit/stats"),
+  },
+  rssNotifications: {
+    list: (params: URLSearchParams) =>
+      api.get<{
+        items: RSSNotificationLog[];
+        total: number;
+        page: number;
+        page_size: number;
+      }>(`/api/chatops/rss-notifications?${params.toString()}`),
+    retry: (id: number) =>
+      api.post<{ success: boolean; queued: boolean }>(`/api/chatops/rss-notifications/${id}/retry`),
+    cancel: (id: number) =>
+      api.post<{ success: boolean }>(`/api/chatops/rss-notifications/${id}/cancel`),
+  },
 };

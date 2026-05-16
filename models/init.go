@@ -188,6 +188,13 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 		// Favicon cache for site icons
 		&FaviconCache{},
 		&SiteRateLimit{},
+		// ChatOps subsystem (additive; not bumping CurrentSchemaVersion)
+		&NotificationConf{},
+		&ChannelBinding{},
+		&ActionAudit{},
+		&BotToken{},
+		&NotificationOutbox{},
+		&RSSNotificationLog{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

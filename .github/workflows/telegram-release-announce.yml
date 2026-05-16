@@ -1,0 +1,61 @@
+name: Telegram Release Announcement
+
+on:
+  release:
+    types: [published]
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to announce (e.g. v0.31.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release info
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            NAME="${{ github.event.release.name }}"
+            BODY="${{ github.event.release.body }}"
+            URL="${{ github.event.release.html_url }}"
+          else
+            TAG="$TAG_INPUT"
+            json=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG")
+            NAME=$(echo "$json" | jq -r '.name // .tag_name')
+            BODY=$(echo "$json" | jq -r '.body // ""')
+            URL=$(echo "$json" | jq -r '.html_url')
+          fi
+          {
+            echo "tag=$TAG"
+            echo "name<<__EOF__"
+            echo "$NAME"
+            echo "__EOF__"
+            echo "url=$URL"
+            echo "body<<__EOF__"
+            echo "$BODY"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Announce + pin to Telegram
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REL_TAG: ${{ steps.rel.outputs.tag }}
+          REL_NAME: ${{ steps.rel.outputs.name }}
+          REL_URL: ${{ steps.rel.outputs.url }}
+          REL_BODY: ${{ steps.rel.outputs.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 .github/scripts/tg_release_announce.py

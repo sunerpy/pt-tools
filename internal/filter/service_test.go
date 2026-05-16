@@ -1573,3 +1573,91 @@ func TestMultiFieldMatchingUnit(t *testing.T) {
 		assert.Nil(t, matchedRule)
 	})
 }
+
+// TestPurposeSplit covers Sprint 2 purpose-aware rule routing:
+// download / notify / both / legacy-empty.
+func TestPurposeSplit(t *testing.T) {
+	makeRule := func(db *gorm.DB, purpose string) *models.FilterRule {
+		rule := &models.FilterRule{
+			Name:        "Rule-" + purpose,
+			Pattern:     "test",
+			PatternType: models.PatternKeyword,
+			MatchField:  models.MatchFieldTitle,
+			Enabled:     true,
+			Priority:    100,
+		}
+		require.NoError(t, db.Create(rule).Error)
+		// Set purpose via raw update so we can test the legacy empty case too.
+		require.NoError(t, db.Model(rule).Update("purpose", purpose).Error)
+		rule.Purpose = purpose
+		return rule
+	}
+
+	t.Run("purpose=download matches download path only", func(t *testing.T) {
+		db, cleanup := setupServiceTestDBWithAssociations(t)
+		defer cleanup()
+		rule := makeRule(db, "download")
+		rss := createTestRSSSubscription(t, db, "rss-d")
+		require.NoError(t, db.Create(&models.RSSFilterAssociation{RSSID: rss.ID, FilterRuleID: rule.ID}).Error)
+		svc := NewFilterService(db)
+
+		shouldDl, dlRule := svc.ShouldDownloadForRSS("test title", true, rss.ID)
+		assert.True(t, shouldDl)
+		assert.NotNil(t, dlRule)
+
+		shouldNotify, notifyRule := svc.ShouldNotifyForRSS("test title", true, rss.ID)
+		assert.False(t, shouldNotify)
+		assert.Nil(t, notifyRule)
+	})
+
+	t.Run("purpose=notify matches notify path only", func(t *testing.T) {
+		db, cleanup := setupServiceTestDBWithAssociations(t)
+		defer cleanup()
+		rule := makeRule(db, "notify")
+		rss := createTestRSSSubscription(t, db, "rss-n")
+		require.NoError(t, db.Create(&models.RSSFilterAssociation{RSSID: rss.ID, FilterRuleID: rule.ID}).Error)
+		svc := NewFilterService(db)
+
+		shouldDl, dlRule := svc.ShouldDownloadForRSS("test title", true, rss.ID)
+		assert.False(t, shouldDl)
+		assert.Nil(t, dlRule)
+
+		shouldNotify, notifyRule := svc.ShouldNotifyForRSS("test title", true, rss.ID)
+		assert.True(t, shouldNotify)
+		assert.NotNil(t, notifyRule)
+	})
+
+	t.Run("purpose=both matches both paths", func(t *testing.T) {
+		db, cleanup := setupServiceTestDBWithAssociations(t)
+		defer cleanup()
+		rule := makeRule(db, "both")
+		rss := createTestRSSSubscription(t, db, "rss-b")
+		require.NoError(t, db.Create(&models.RSSFilterAssociation{RSSID: rss.ID, FilterRuleID: rule.ID}).Error)
+		svc := NewFilterService(db)
+
+		shouldDl, dlRule := svc.ShouldDownloadForRSS("test title", true, rss.ID)
+		assert.True(t, shouldDl)
+		assert.NotNil(t, dlRule)
+
+		shouldNotify, notifyRule := svc.ShouldNotifyForRSS("test title", true, rss.ID)
+		assert.True(t, shouldNotify)
+		assert.NotNil(t, notifyRule)
+	})
+
+	t.Run("purpose='' (legacy) treated as download", func(t *testing.T) {
+		db, cleanup := setupServiceTestDBWithAssociations(t)
+		defer cleanup()
+		rule := makeRule(db, "")
+		rss := createTestRSSSubscription(t, db, "rss-legacy")
+		require.NoError(t, db.Create(&models.RSSFilterAssociation{RSSID: rss.ID, FilterRuleID: rule.ID}).Error)
+		svc := NewFilterService(db)
+
+		shouldDl, dlRule := svc.ShouldDownloadForRSS("test title", true, rss.ID)
+		assert.True(t, shouldDl, "legacy empty purpose should map to download")
+		assert.NotNil(t, dlRule)
+
+		shouldNotify, notifyRule := svc.ShouldNotifyForRSS("test title", true, rss.ID)
+		assert.False(t, shouldNotify, "legacy empty purpose must NOT trigger notify path")
+		assert.Nil(t, notifyRule)
+	})
+}

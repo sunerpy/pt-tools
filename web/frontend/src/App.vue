@@ -168,6 +168,29 @@ function logout() {
             <el-icon><Document /></el-icon>
             <template #title>日志</template>
           </el-menu-item>
+
+          <el-sub-menu index="chatops">
+            <template #title>
+              <el-icon><ChatDotRound /></el-icon>
+              <span>ChatOps</span>
+            </template>
+            <el-menu-item index="chatops/notifications">
+              <el-icon><Bell /></el-icon>
+              <template #title>消息通知</template>
+            </el-menu-item>
+            <el-menu-item index="chatops/bindings">
+              <el-icon><Connection /></el-icon>
+              <template #title>ChatOps 绑定</template>
+            </el-menu-item>
+            <el-menu-item index="chatops/audit">
+              <el-icon><DataAnalysis /></el-icon>
+              <template #title>操作审计</template>
+            </el-menu-item>
+            <el-menu-item index="chatops/rss-notifications">
+              <el-icon><Bell /></el-icon>
+              <template #title>RSS 通知日志</template>
+            </el-menu-item>
+          </el-sub-menu>
           <el-menu-item index="password">
             <el-icon><Lock /></el-icon>
             <template #title>修改密码</template>

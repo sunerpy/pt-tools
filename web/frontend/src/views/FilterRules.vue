@@ -31,6 +31,7 @@ const form = ref<FilterRule>({
   max_size_gb: 0,
   enabled: true,
   priority: 100,
+  purpose: "download",
 });
 
 const testForm = ref({
@@ -123,6 +124,7 @@ function openAddDialog() {
     max_size_gb: 0,
     enabled: true,
     priority: 100,
+    purpose: "download",
   };
   selectedRssId.value = undefined;
   showDialog.value = true;
@@ -440,6 +442,17 @@ function getMatchFieldLabel(field: string | undefined) {
           <el-input-number v-model="form.max_size_gb" :min="0" :max="99999" />
           <div class="form-tip">
             种子大小大于该值时不通过此规则，0 = 不限制；规则上限不能突破全局设置
+          </div>
+        </el-form-item>
+
+        <el-form-item label="规则用途" prop="purpose">
+          <el-select v-model="form.purpose" style="width: 100%" placeholder="选择用途">
+            <el-option label="下载（控制是否推送到下载器）" value="download" />
+            <el-option label="通知（控制是否触发上新推送）" value="notify" />
+            <el-option label="两者（同时控制下载与通知）" value="both" />
+          </el-select>
+          <div class="form-tip">
+            决定规则匹配后的行为：仅作下载控制 / 仅作通知触发 / 两者皆控制。默认 download。
           </div>
         </el-form-item>
 

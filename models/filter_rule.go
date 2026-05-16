@@ -42,8 +42,13 @@ type FilterRule struct {
 	SiteID      *uint       `gorm:"index" json:"site_id"`
 	RSSID       *uint       `gorm:"index" json:"rss_id"`
 	Priority    int         `gorm:"default:100" json:"priority"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	// Purpose 区分规则用途：
+	//   "download" — 仅用于下载（默认，向后兼容空值）
+	//   "notify"   — 仅用于通知（filtered 模式）
+	//   "both"     — 下载与通知都使用
+	Purpose   string    `gorm:"column:purpose;not null;default:'download'" json:"purpose"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MatchesSize reports whether the torrent size (in GB) satisfies this rule's

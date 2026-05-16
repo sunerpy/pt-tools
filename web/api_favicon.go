@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -21,6 +22,27 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/utils/httpclient"
 )
+
+// transparentPNG 是一个 1x1 透明 PNG，用作未配置/获取失败站点的 favicon 占位，
+// 避免 "已适配站点" 页面对未启用站点产生大量 404 噪音。
+var transparentPNG []byte
+
+func init() {
+	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+	if data, err := base64.StdEncoding.DecodeString(b64); err == nil {
+		transparentPNG = data
+	}
+}
+
+// servePlaceholderFavicon 返回 1x1 透明 PNG 占位图，带 24 小时浏览器缓存。
+// 用于未配置或获取失败的站点 favicon，避免产生 404 日志噪音。
+func servePlaceholderFavicon(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Favicon-Placeholder", "1")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(transparentPNG)
+}
 
 // FaviconService 管理站点图标缓存（数据库存储）
 type FaviconService struct {
@@ -304,7 +326,7 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 		}
 		def := v2.GetDefinitionRegistry().GetOrDefault(strings.ToLower(siteID))
 		if def == nil {
-			http.Error(w, "站点不存在", http.StatusNotFound)
+			servePlaceholderFavicon(w)
 			return
 		}
 
@@ -313,19 +335,19 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 			faviconURL = strings.TrimSuffix(def.URLs[0], "/") + "/favicon.ico"
 		}
 		if faviconURL == "" {
-			http.Error(w, "站点未配置图标", http.StatusNotFound)
+			servePlaceholderFavicon(w)
 			return
 		}
 
 		if fetchErr := faviconService.fetchAndSave(siteID, def.Name, faviconURL); fetchErr != nil {
-			global.GetSlogger().Warnf("[Favicon] 获取图标失败: site=%s, err=%v", siteID, fetchErr)
-			http.Error(w, "获取图标失败", http.StatusNotFound)
+			global.GetSlogger().Debugf("[Favicon] 获取图标失败，使用占位图: site=%s, err=%v", siteID, fetchErr)
+			servePlaceholderFavicon(w)
 			return
 		}
 
 		cache, err = faviconService.GetFavicon(siteID)
 		if err != nil || cache == nil {
-			http.Error(w, "获取图标失败", http.StatusNotFound)
+			servePlaceholderFavicon(w)
 			return
 		}
 	}

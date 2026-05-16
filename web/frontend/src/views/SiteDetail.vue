@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import {
+  chatopsApi,
   downloaderDirectoriesApi,
   type DownloaderDirectory,
   downloadersApi,
   type DownloaderSetting,
   type FilterRule,
   filterRulesApi,
+  type NotificationConfig,
   type RSSConfig,
   type SiteConfig,
   sitesApi,
@@ -24,6 +26,7 @@ const addingRss = ref(false);
 const rssDialogVisible = ref(false);
 const downloaders = ref<DownloaderSetting[]>([]);
 const filterRules = ref<FilterRule[]>([]);
+const availableConfs = ref<NotificationConfig[]>([]);
 const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
 
 // 新增：是否使用自定义路径
@@ -118,6 +121,9 @@ const newRss = reactive<RSSConfig>({
   filter_rule_ids: [],
   pause_on_free_end: false,
   filter_mode: "",
+  notify_mode: "",
+  notify_conf_ids: "[]",
+  max_notifications_per_hour: 100,
 });
 
 const editRssDialogVisible = ref(false);
@@ -133,24 +139,55 @@ const editingRss = reactive<RSSConfig>({
   filter_rule_ids: [],
   pause_on_free_end: false,
   filter_mode: "",
+  notify_mode: "",
+  notify_conf_ids: "[]",
+  max_notifications_per_hour: 100,
 });
 const editingRssIndex = ref(-1);
 const updatingRss = ref(false);
 
+function parseConfIDs(raw: string | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((n) => typeof n === "number") : [];
+  } catch {
+    return [];
+  }
+}
+
+const newRssConfIDs = computed<number[]>({
+  get: () => parseConfIDs(newRss.notify_conf_ids),
+  set: (v) => {
+    newRss.notify_conf_ids = JSON.stringify(v || []);
+  },
+});
+
+const editingRssConfIDs = computed<number[]>({
+  get: () => parseConfIDs(editingRss.notify_conf_ids),
+  set: (v) => {
+    editingRss.notify_conf_ids = JSON.stringify(v || []);
+  },
+});
+
 onMounted(async () => {
   loading.value = true;
   try {
-    // 并行加载站点配置、下载器列表、过滤规则列表和下载器目录
-    const [siteData, downloaderList, filterRuleList, directoriesData] = await Promise.all([
-      sitesApi.get(siteName.value),
-      downloadersApi.list(),
-      filterRulesApi.list(),
-      downloaderDirectoriesApi.listAll(),
-    ]);
+    // 并行加载站点配置、下载器列表、过滤规则列表、下载器目录、通知通道列表
+    const [siteData, downloaderList, filterRuleList, directoriesData, confList] = await Promise.all(
+      [
+        sitesApi.get(siteName.value),
+        downloadersApi.list(),
+        filterRulesApi.list(),
+        downloaderDirectoriesApi.listAll(),
+        chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
+      ],
+    );
     form.value = siteData;
     downloaders.value = downloaderList; // 显示所有下载器，不过滤
     filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
     downloaderDirectories.value = directoriesData;
+    availableConfs.value = (confList || []).filter((c) => c.enabled);
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载失败");
   } finally {
@@ -221,6 +258,9 @@ function openAddRssDialog() {
     filter_rule_ids: [],
     pause_on_free_end: true,
     filter_mode: "",
+    notify_mode: "",
+    notify_conf_ids: "[]",
+    max_notifications_per_hour: 100,
   });
   newRssUseCustomPath.value = false;
   rssDialogVisible.value = true;
@@ -259,6 +299,9 @@ async function addRss() {
       filter_rule_ids: newRss.filter_rule_ids || [],
       pause_on_free_end: newRss.pause_on_free_end || false,
       filter_mode: newRss.filter_mode || "",
+      notify_mode: newRss.notify_mode || "",
+      notify_conf_ids: newRss.notify_conf_ids || "[]",
+      max_notifications_per_hour: newRss.max_notifications_per_hour ?? 100,
     });
     await sitesApi.save(siteName.value, form.value);
     // 重新加载数据以获取数据库中的真实 ID
@@ -330,6 +373,9 @@ function openEditRssDialog(index: number) {
     filter_rule_ids: rss.filter_rule_ids || [],
     pause_on_free_end: rss.pause_on_free_end || false,
     filter_mode: rss.filter_mode || "",
+    notify_mode: rss.notify_mode || "",
+    notify_conf_ids: rss.notify_conf_ids || "[]",
+    max_notifications_per_hour: rss.max_notifications_per_hour ?? 100,
   });
   // 检查当前路径是否为预设目录，如果不是则启用自定义输入
   editRssUseCustomPath.value = rss.download_path
@@ -375,6 +421,9 @@ async function updateRss() {
       filter_rule_ids: editingRss.filter_rule_ids || [],
       pause_on_free_end: editingRss.pause_on_free_end || false,
       filter_mode: editingRss.filter_mode || "",
+      notify_mode: editingRss.notify_mode || "",
+      notify_conf_ids: editingRss.notify_conf_ids || "[]",
+      max_notifications_per_hour: editingRss.max_notifications_per_hour ?? 100,
     };
 
     // 保存到服务器
@@ -819,6 +868,41 @@ function toggleEditRssCustomPath() {
             仅下载匹配的种子。全局大小上限始终生效。
           </div>
         </el-form-item>
+        <el-form-item label="通知模式">
+          <el-radio-group v-model="newRss.notify_mode" size="small">
+            <el-radio-button label="">不通知</el-radio-button>
+            <el-radio-button label="all">全部新种（简略）</el-radio-button>
+            <el-radio-button label="filtered">只通知匹配的（详细）</el-radio-button>
+            <el-radio-button label="both">全部都通知 + 匹配的给详细</el-radio-button>
+          </el-radio-group>
+          <div class="form-tip">
+            "全部新种（简略)"：仅用 RSS 标题/链接立即通知，不消耗站点详情请求；
+            "只通知匹配的（详细)"：拉详情后按
+            <code>filter_rules.purpose IN ('notify','both')</code> 匹配，命中才通知； "全部都通知 +
+            匹配的给详细"：上面两路都开，同一种子命中规则时合并为详细版本，不会重复通知。
+          </div>
+        </el-form-item>
+        <el-form-item v-if="newRss.notify_mode" label="通知通道">
+          <el-select
+            v-model="newRssConfIDs"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 100%"
+            placeholder="选择推送的 ChatOps 通道（空 = 不通知）">
+            <el-option
+              v-for="c in availableConfs"
+              :key="c.id"
+              :label="`${c.name} (${c.channel_type})`"
+              :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="newRss.notify_mode" label="每小时最多">
+          <el-input-number v-model="newRss.max_notifications_per_hour" :min="0" :max="10000" />
+          <div class="form-tip">
+            超过该数量后剩余通知会标记为 throttled 直接放弃。设为 0 表示不限制。默认 100。
+          </div>
+        </el-form-item>
         <el-form-item label="下载路径">
           <div class="path-selector">
             <el-select
@@ -930,6 +1014,41 @@ function toggleEditRssCustomPath() {
             控制此 RSS 的下载策略。"跟随全局"使用全局设置。
             <strong>智能模式</strong>：无过滤规则 → 下载免费种子；有过滤规则 →
             仅下载匹配的种子。全局大小上限始终生效。
+          </div>
+        </el-form-item>
+        <el-form-item label="通知模式">
+          <el-radio-group v-model="editingRss.notify_mode" size="small">
+            <el-radio-button label="">不通知</el-radio-button>
+            <el-radio-button label="all">全部新种（简略）</el-radio-button>
+            <el-radio-button label="filtered">只通知匹配的（详细）</el-radio-button>
+            <el-radio-button label="both">全部都通知 + 匹配的给详细</el-radio-button>
+          </el-radio-group>
+          <div class="form-tip">
+            "全部新种（简略)"：仅用 RSS 标题/链接立即通知，不消耗站点详情请求；
+            "只通知匹配的（详细)"：拉详情后按
+            <code>filter_rules.purpose IN ('notify','both')</code> 匹配，命中才通知； "全部都通知 +
+            匹配的给详细"：上面两路都开，同一种子命中规则时合并为详细版本，不会重复通知。
+          </div>
+        </el-form-item>
+        <el-form-item v-if="editingRss.notify_mode" label="通知通道">
+          <el-select
+            v-model="editingRssConfIDs"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 100%"
+            placeholder="选择推送的 ChatOps 通道（空 = 不通知）">
+            <el-option
+              v-for="c in availableConfs"
+              :key="c.id"
+              :label="`${c.name} (${c.channel_type})`"
+              :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingRss.notify_mode" label="每小时最多">
+          <el-input-number v-model="editingRss.max_notifications_per_hour" :min="0" :max="10000" />
+          <div class="form-tip">
+            超过该数量后剩余通知会标记为 throttled 直接放弃。设为 0 表示不限制。默认 100。
           </div>
         </el-form-item>
         <el-form-item label="下载路径">

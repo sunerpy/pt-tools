@@ -100,6 +100,37 @@ const router = createRouter({
       component: () => import("@/views/DownloaderHub.vue"),
       meta: { title: "下载器Web UI" },
     },
+
+    {
+      path: "/chatops/notifications",
+      name: "notifications",
+      component: () => import("@/views/chatops/Notifications.vue"),
+      meta: { title: "消息通知配置" },
+    },
+    {
+      path: "/chatops/notifications/:id",
+      name: "notification-detail",
+      component: () => import("@/views/chatops/NotificationDetail.vue"),
+      meta: { title: "通知通道详情" },
+    },
+    {
+      path: "/chatops/bindings",
+      name: "bindings",
+      component: () => import("@/views/chatops/Bindings.vue"),
+      meta: { title: "ChatOps 绑定" },
+    },
+    {
+      path: "/chatops/audit",
+      name: "audit-log",
+      component: () => import("@/views/chatops/AuditLog.vue"),
+      meta: { title: "操作审计日志" },
+    },
+    {
+      path: "/chatops/rss-notifications",
+      name: "rss-notifications",
+      component: () => import("@/views/chatops/RSSNotifications.vue"),
+      meta: { title: "RSS 通知日志" },
+    },
   ],
 });
 

@@ -76,7 +76,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 				return e
 			}
 			for _, r := range rss {
-				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode})
+				sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
 			}
 			out.Sites[sg] = sc
 		}
@@ -305,14 +305,17 @@ func (s *ConfigStore) ReplaceSiteRSS(siteID uint, rss []models.RSSConfig) error 
 	}
 	for _, r := range rss {
 		row := models.RSSSubscription{
-			SiteID:          siteID,
-			Name:            r.Name,
-			URL:             r.URL,
-			Category:        r.Category,
-			Tag:             r.Tag,
-			IntervalMinutes: r.IntervalMinutes,
-			DownloaderID:    r.DownloaderID,
-			FilterMode:      r.FilterMode,
+			SiteID:                  siteID,
+			Name:                    r.Name,
+			URL:                     r.URL,
+			Category:                r.Category,
+			Tag:                     r.Tag,
+			IntervalMinutes:         r.IntervalMinutes,
+			DownloaderID:            r.DownloaderID,
+			FilterMode:              r.FilterMode,
+			NotifyMode:              r.NotifyMode,
+			NotifyConfIDs:           r.NotifyConfIDs,
+			MaxNotificationsPerHour: r.MaxNotificationsPerHour,
 		}
 		if err := db.Create(&row).Error; err != nil {
 			return err
@@ -476,16 +479,19 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 				r.IntervalMinutes = models.MinIntervalMinutes
 			}
 			rr := models.RSSSubscription{
-				SiteID:          row.ID,
-				Name:            r.Name,
-				URL:             r.URL,
-				Category:        r.Category,
-				Tag:             r.Tag,
-				IntervalMinutes: r.IntervalMinutes,
-				DownloaderID:    r.DownloaderID,
-				DownloadPath:    r.DownloadPath,
-				PauseOnFreeEnd:  r.PauseOnFreeEnd,
-				FilterMode:      r.FilterMode,
+				SiteID:                  row.ID,
+				Name:                    r.Name,
+				URL:                     r.URL,
+				Category:                r.Category,
+				Tag:                     r.Tag,
+				IntervalMinutes:         r.IntervalMinutes,
+				DownloaderID:            r.DownloaderID,
+				DownloadPath:            r.DownloadPath,
+				PauseOnFreeEnd:          r.PauseOnFreeEnd,
+				FilterMode:              r.FilterMode,
+				NotifyMode:              r.NotifyMode,
+				NotifyConfIDs:           r.NotifyConfIDs,
+				MaxNotificationsPerHour: r.MaxNotificationsPerHour,
 			}
 			if err := tx.Create(&rr).Error; err != nil {
 				return err
@@ -552,7 +558,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 			return nil, err
 		}
 		for _, r := range rss {
-			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode})
+			sc.RSS = append(sc.RSS, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
 		}
 		// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 		out[sg] = sc
@@ -578,17 +584,20 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 
 	for _, r := range rss {
 		rssCfg := models.RSSConfig{
-			ID:              r.ID,
-			Name:            r.Name,
-			URL:             r.URL,
-			Category:        r.Category,
-			Tag:             r.Tag,
-			IntervalMinutes: r.IntervalMinutes,
-			DownloaderID:    r.DownloaderID,
-			DownloadPath:    r.DownloadPath,
-			IsExample:       r.IsExample,
-			PauseOnFreeEnd:  r.PauseOnFreeEnd,
-			FilterMode:      r.FilterMode,
+			ID:                      r.ID,
+			Name:                    r.Name,
+			URL:                     r.URL,
+			Category:                r.Category,
+			Tag:                     r.Tag,
+			IntervalMinutes:         r.IntervalMinutes,
+			DownloaderID:            r.DownloaderID,
+			DownloadPath:            r.DownloadPath,
+			IsExample:               r.IsExample,
+			PauseOnFreeEnd:          r.PauseOnFreeEnd,
+			FilterMode:              r.FilterMode,
+			NotifyMode:              r.NotifyMode,
+			NotifyConfIDs:           r.NotifyConfIDs,
+			MaxNotificationsPerHour: r.MaxNotificationsPerHour,
 		}
 
 		// 获取关联的过滤规则 ID

@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -29,11 +30,19 @@ import (
 )
 
 type Server struct {
-	store    *core.ConfigStore
-	mgr      *scheduler.Manager
-	tpl      *template.Template
-	sessions map[string]string // sessionID -> username
+	store       *core.ConfigStore
+	mgr         *scheduler.Manager
+	tpl         *template.Template
+	sessions    map[string]string // sessionID -> username
+	chatopsDeps *ChatOpsDeps
+	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
+	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
 }
+
+// SetQAHook installs a callback invoked once during Serve, after all production
+// routes are registered. Used by the qa build tag (cmd/web_qa.go) to attach
+// /test/* test injection endpoints. No-op in production builds.
+func (s *Server) SetQAHook(fn func(*http.ServeMux)) { s.qaHook = fn }
 
 func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 	t := template.Must(template.New("login").Parse(loginHTML))
@@ -128,6 +137,10 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/version/check", s.auth(s.apiVersionCheck))
 	mux.HandleFunc("/api/version/runtime", s.auth(s.apiVersionRuntime))
 	mux.HandleFunc("/api/version/upgrade", s.auth(s.apiVersionUpgrade))
+	s.registerChatOpsIfWired(mux)
+	if s.qaHook != nil {
+		s.qaHook(mux)
+	}
 
 	// Downloader Hub (mixed downloader management)
 	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
@@ -167,7 +180,20 @@ func (s *Server) Serve(addr string) error {
 	})
 	handler := logMiddleware(mux)
 	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	return srv.ListenAndServe()
+	s.httpServer = srv
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// Shutdown gracefully stops the underlying http.Server so Serve returns.
+// Safe to call before Serve (no-op) and concurrent with Serve.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil || s.httpServer == nil {
+		return nil
+	}
+	return s.httpServer.Shutdown(ctx)
 }
 
 type statusRecorder struct {

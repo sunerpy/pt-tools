@@ -28,6 +28,9 @@ import (
 
 	// Import site definitions to register them via init()
 	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
+
+	// Import notification channel adapters to register them via init()
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/webhook"
 )
 
 // rootCmd represents the base command when called without any subcommands

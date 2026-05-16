@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -626,6 +628,22 @@ func downloadWorkerUnified(
 				stats.skipped.Add(1)
 				continue
 			}
+			if notifier := getRSSNotifier(); notifier != nil {
+				if rssCfg.NotifyMode == "all" || rssCfg.NotifyMode == "both" {
+					_, torrentRef := extractTorrentRef(item)
+					if torrentRef == "" {
+						torrentRef = item.GUID
+					}
+					if torrentRef != "" {
+						_ = notifier.NotifyNewItem(ctx, RSSItemNotice{
+							RSS:       &rssCfg,
+							FeedItem:  item,
+							SiteName:  string(siteName),
+							TorrentID: torrentRef,
+						})
+					}
+				}
+			}
 			stats.total.Add(1)
 			// 获取种子详情 (使用 UnifiedPTSite 接口，返回 *v2.TorrentItem)
 			detail, err := site.GetTorrentDetails(item)
@@ -652,6 +670,33 @@ func downloadWorkerUnified(
 			// 获取种子的标签/副标题用于过滤匹配
 			detailTag := detail.GetSubTitle()
 			sizeGB := float64(detail.SizeBytes) / 1024 / 1024 / 1024
+
+			// Sprint 2: 'filtered' 模式通知钩子。需要详情后才能匹配（subtitle/size）
+			// 与渲染模板。复用 GetTorrentDetails 已有的站点级 PersistentRateLimiter，
+			// 因此不会引入额外站点压力。
+			if notifier := getRSSNotifier(); notifier != nil &&
+				(rssCfg.NotifyMode == "filtered" || rssCfg.NotifyMode == "both") &&
+				filterSvc != nil && rssCfg.ID != 0 {
+				matched, rule := filterSvc.ShouldNotifyForRSSWithInput(
+					filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					isFree, rssCfg.ID,
+				)
+				if matched {
+					_, torrentRef := extractTorrentRef(item)
+					if torrentRef == "" {
+						torrentRef = item.GUID
+					}
+					if torrentRef != "" {
+						_ = notifier.NotifyFilteredItem(ctx, RSSFilteredNotice{
+							RSS:       &rssCfg,
+							Torrent:   detail,
+							Rule:      rule,
+							SiteName:  string(siteName),
+							TorrentID: torrentRef,
+						})
+					}
+				}
+			}
 
 			// 统一通过 filter.Decide 做完整决策：全局大小硬上限 → 过滤规则通道 → 免费通道
 			var decision filter.Decision
@@ -1348,4 +1393,25 @@ func calcHRSeedTimeForTorrent(def *v2.SiteDefinition, fallbackH int, sizeBytes i
 		return def.CalcHRSeedTimeH(sizeBytes)
 	}
 	return fallbackH
+}
+
+func extractTorrentRef(item *gofeed.Item) (siteName, torrentID string) {
+	if item == nil || item.Link == "" {
+		return "", ""
+	}
+	u, err := url.Parse(item.Link)
+	if err != nil {
+		return "", ""
+	}
+	siteName = u.Host
+	if id := u.Query().Get("id"); id != "" {
+		return siteName, id
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for _, p := range parts {
+		if _, err := strconv.Atoi(p); err == nil && p != "" {
+			return siteName, p
+		}
+	}
+	return siteName, ""
 }

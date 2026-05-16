@@ -1,6 +1,7 @@
 package events
 
 import (
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,7 @@ type Event struct {
 	Version int64
 	Source  string
 	At      time.Time
+	Payload json.RawMessage `json:"Payload,omitempty"`
 }
 
 var (
@@ -55,6 +57,22 @@ func Publish(e Event) {
 		default:
 		}
 	}
+}
+
+func PublishWithPayload(eventType EventType, payload any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	e := Event{
+		Type:    eventType,
+		Version: time.Now().UnixNano(),
+		Source:  "system",
+		At:      time.Now(),
+		Payload: json.RawMessage(b),
+	}
+	Publish(e)
+	return nil
 }
 
 func nextID() string {

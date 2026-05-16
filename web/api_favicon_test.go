@@ -93,6 +93,26 @@ func TestApiFavicon_NonexistentSite(t *testing.T) {
 
 	server.apiFavicon(rec, req)
 
+	// 未配置/不存在的站点返回 1x1 透明 PNG 占位图，避免 404 日志噪音
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "1", rec.Header().Get("X-Favicon-Placeholder"))
+	assert.Greater(t, rec.Body.Len(), 0)
+}
+
+func TestApiFavicon_NonexistentSite_NoFetch(t *testing.T) {
+	server := &Server{}
+
+	faviconService = &FaviconService{
+		refreshInterval: 12 * time.Hour,
+	}
+
+	// nofetch=1 显式要求不获取，仍返回 404（供 apiFaviconList 等场景使用）
+	req := httptest.NewRequest(http.MethodGet, "/api/favicon/nonexistent_site_xyz?nofetch=1", nil)
+	rec := httptest.NewRecorder()
+
+	server.apiFavicon(rec, req)
+
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
