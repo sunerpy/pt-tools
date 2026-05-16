@@ -18,6 +18,9 @@ jobs:
   announce:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Resolve release info
         id: rel
         env:
