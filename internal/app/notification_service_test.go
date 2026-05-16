@@ -307,3 +307,92 @@ func TestConf_SyncFailureSurfacesError(t *testing.T) {
 		Where("status = ?", "pending").Count(&pendingCount).Error)
 	assert.Equal(t, int64(0), pendingCount, "TestConf failure must NOT enqueue to outbox")
 }
+
+// TestUpdateConf_PartialMergePreservesExistingFields 验证 UpdateConf 在收到 partial config_json 时，
+// 只覆盖传入的字段、保留其它已有字段，避免 Web 编辑表单只填一项就把其它字段清掉的数据丢失 bug。
+func TestUpdateConf_PartialMergePreservesExistingFields(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 5*time.Second)
+
+	full := `{"bot_token":"original-token","admin_users":[8576996727],"default_chat_id":8576996727,"proxy_url":""}`
+	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram",
+		Name:        "merge-test",
+		ConfigJSON:  json.RawMessage(full),
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	partial := `{"proxy_url":"http://127.0.0.1:1080"}`
+	require.NoError(t, svc.UpdateConf(context.Background(), dto.ID, UpdateConfReq{
+		ConfigJSON: json.RawMessage(partial),
+	}))
+
+	var stored string
+	require.NoError(t, db.Raw("SELECT config_json FROM notification_conf WHERE id = ?", dto.ID).
+		Scan(&stored).Error)
+	plain, err := crypto.Decrypt(stored)
+	require.NoError(t, err, "should decrypt merged config_json")
+
+	var merged map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(plain, &merged), "merged config_json should parse")
+
+	assert.Contains(t, merged, "bot_token", "bot_token must be preserved after partial update")
+	assert.Contains(t, merged, "admin_users", "admin_users must be preserved after partial update")
+	assert.Contains(t, merged, "default_chat_id", "default_chat_id must be preserved after partial update")
+	assert.Contains(t, merged, "proxy_url", "proxy_url should be present (newly written)")
+
+	var botToken string
+	require.NoError(t, json.Unmarshal(merged["bot_token"], &botToken))
+	assert.Equal(t, "original-token", botToken, "bot_token value must be unchanged")
+
+	var proxyURL string
+	require.NoError(t, json.Unmarshal(merged["proxy_url"], &proxyURL))
+	assert.Equal(t, "http://127.0.0.1:1080", proxyURL, "proxy_url should be the new value")
+
+	var adminUsers []int64
+	require.NoError(t, json.Unmarshal(merged["admin_users"], &adminUsers))
+	assert.Equal(t, []int64{8576996727}, adminUsers, "admin_users content must be unchanged")
+
+	var defaultChatID int64
+	require.NoError(t, json.Unmarshal(merged["default_chat_id"], &defaultChatID))
+	assert.Equal(t, int64(8576996727), defaultChatID, "default_chat_id must be unchanged")
+}
+
+// TestUpdateConf_PartialMergeOverwritesExistingValue 验证 partial update 中若包含已有 key，
+// 该 key 会被新值覆盖（merge 语义为「新值优先」）。
+func TestUpdateConf_PartialMergeOverwritesExistingValue(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 5*time.Second)
+
+	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram",
+		Name:        "merge-overwrite",
+		ConfigJSON:  json.RawMessage(`{"bot_token":"old","default_chat_id":111}`),
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.UpdateConf(context.Background(), dto.ID, UpdateConfReq{
+		ConfigJSON: json.RawMessage(`{"bot_token":"new"}`),
+	}))
+
+	var stored string
+	require.NoError(t, db.Raw("SELECT config_json FROM notification_conf WHERE id = ?", dto.ID).
+		Scan(&stored).Error)
+	plain, err := crypto.Decrypt(stored)
+	require.NoError(t, err)
+
+	var merged map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(plain, &merged))
+
+	var botToken string
+	require.NoError(t, json.Unmarshal(merged["bot_token"], &botToken))
+	assert.Equal(t, "new", botToken, "bot_token must be overwritten with new value")
+
+	var defaultChatID int64
+	require.NoError(t, json.Unmarshal(merged["default_chat_id"], &defaultChatID))
+	assert.Equal(t, int64(111), defaultChatID, "default_chat_id must be preserved")
+}

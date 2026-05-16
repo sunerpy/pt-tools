@@ -208,7 +208,42 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 		updates["quiet_hours_end"] = *req.QuietHoursEnd
 	}
 	if len(req.ConfigJSON) > 0 {
-		cipherStr, err := crypto.Encrypt([]byte(req.ConfigJSON))
+		// 合并策略：解密 DB 现有配置 → 与 partial 新值 merge（新值覆盖、缺失键保留）→ 重新加密。
+		// 避免前端只发部分字段时把其他原有字段（admin_users / default_chat_id 等）覆盖掉。
+		var existingRow models.NotificationConf
+		if err := s.db.WithContext(ctx).First(&existingRow, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrConfNotFound
+			}
+			return fmt.Errorf("查询通道失败: %w", err)
+		}
+
+		existingMap := map[string]json.RawMessage{}
+		if existingRow.ConfigJSON != "" {
+			plain, derr := crypto.Decrypt(existingRow.ConfigJSON)
+			if derr != nil {
+				return fmt.Errorf("解密旧配置失败: %w", derr)
+			}
+			if len(plain) > 0 {
+				if perr := json.Unmarshal(plain, &existingMap); perr != nil {
+					return fmt.Errorf("解析旧配置失败: %w", perr)
+				}
+			}
+		}
+
+		var newMap map[string]json.RawMessage
+		if perr := json.Unmarshal([]byte(req.ConfigJSON), &newMap); perr != nil {
+			return fmt.Errorf("解析新配置失败: %w", perr)
+		}
+		for k, v := range newMap {
+			existingMap[k] = v
+		}
+
+		merged, merr := json.Marshal(existingMap)
+		if merr != nil {
+			return fmt.Errorf("合并配置失败: %w", merr)
+		}
+		cipherStr, err := crypto.Encrypt(merged)
 		if err != nil {
 			return fmt.Errorf("加密通道配置失败: %w", err)
 		}

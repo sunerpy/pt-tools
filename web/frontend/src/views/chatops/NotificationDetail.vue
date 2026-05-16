@@ -89,12 +89,18 @@ async function loadDetail() {
   try {
     const data = await chatopsApi.notifications.get(id.value);
     Object.assign(conf, data);
+    // 后端返回的 config_json 是解密后的对象（如 { bot_token, admin_users, default_chat_id, ... }），
+    // 必须 flatten 到 conf 上，否则编辑表单的 v-model 输入框是空的，提交时会把已有字段覆盖丢失。
+    const cfg = (data as unknown as Record<string, unknown>).config_json;
+    if (cfg && typeof cfg === "object") {
+      Object.assign(conf, cfg as Record<string, unknown>);
+    }
     if (conf.channel_type === "qq_onebot") {
       conf.admin_qq_users = qqListToText(
-        (data as unknown as Record<string, unknown>).admin_qq_users,
+        (conf as unknown as Record<string, unknown>).admin_qq_users,
       );
       conf.allowed_qq_users = qqListToText(
-        (data as unknown as Record<string, unknown>).allowed_qq_users,
+        (conf as unknown as Record<string, unknown>).allowed_qq_users,
       );
     }
   } catch (e: unknown) {
