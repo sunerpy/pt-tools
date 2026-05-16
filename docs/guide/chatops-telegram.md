@@ -41,7 +41,7 @@
    123456789:ABCdefGHIjklMNOpqrstUVWxyz
    ```
 
-    冒号后面那一大串就是 `bot_token`，格式是 `数字ID:大小写字母数字串`，把它保存好。
+   冒号后面那一大串就是 `bot_token`，格式是 `数字ID:大小写字母数字串`，把它保存好。
 
 > [!WARNING]
 > bot_token 等同于 bot 的密码。不要把它发在公开频道或截图里，不要提交到代码仓库。
@@ -85,7 +85,7 @@
    }
    ```
 
-    这里的 `123456789` 就是你的 user_id，也是私聊的 `chat_id`。
+   这里的 `123456789` 就是你的 user_id，也是私聊的 `chat_id`。
 
 > 💡 在返回的 JSON 中找 `from.id` 或 `chat.id`，那个数字就是你的 Telegram user_id。
 

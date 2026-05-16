@@ -2,11 +2,11 @@
 
 Set these in repo Settings → Secrets and variables → Actions:
 
-| Secret               | Value                                                                  |
-| -------------------- | ---------------------------------------------------------------------- |
-| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather (release announcer)                      |
-| `TELEGRAM_CHAT_ID`   | Target group chat_id (negative integer for supergroups)                |
-| `CRX_PRIVATE_KEY`    | Base64-encoded RSA private key for signing browser extension `.crx`    |
+| Secret               | Value                                                               |
+| -------------------- | ------------------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather (release announcer)                   |
+| `TELEGRAM_CHAT_ID`   | Target group chat_id (negative integer for supergroups)             |
+| `CRX_PRIVATE_KEY`    | Base64-encoded RSA private key for signing browser extension `.crx` |
 
 `GITHUB_TOKEN` is auto-provided.
 
