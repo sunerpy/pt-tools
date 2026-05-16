@@ -116,6 +116,125 @@ def _strip_trailing_refs(content: str) -> str:
     return content
 
 
+def _localize_section(title: str) -> str:
+    """Translate common release-please / git-cliff English section headings to Chinese.
+
+    Falls back to original title when not in the mapping.
+    """
+    t = title.strip()
+    mapping = {
+        "What's Changed": "更新概览",
+        "Whats Changed": "更新概览",
+        "Changelog": "更新日志",
+        "Features": "新功能",
+        "Feature": "新功能",
+        "New Features": "新功能",
+        "Bug Fixes": "Bug 修复",
+        "Bug Fix": "Bug 修复",
+        "Fixes": "修复",
+        "Performance Improvements": "性能优化",
+        "Performance": "性能优化",
+        "Refactors": "代码重构",
+        "Refactor": "代码重构",
+        "Documentation": "文档更新",
+        "Docs": "文档更新",
+        "Tests": "测试",
+        "Test": "测试",
+        "Builds": "构建",
+        "Build": "构建",
+        "Build System": "构建系统",
+        "CI": "CI/CD",
+        "Continuous Integration": "CI/CD",
+        "Style": "样式调整",
+        "Styles": "样式调整",
+        "Chores": "杂项",
+        "Chore": "杂项",
+        "Reverts": "回滚",
+        "Revert": "回滚",
+        "Breaking Changes": "破坏性变更",
+        "Breaking": "破坏性变更",
+        "Security": "安全修复",
+        "Deprecations": "废弃",
+        "Dependencies": "依赖更新",
+        "Dependency Updates": "依赖更新",
+    }
+    return mapping.get(t, title)
+
+
+def _section_emoji(title: str) -> str:
+    """Map a release-please section heading to a contextual emoji.
+
+    Empty string returned when no match — caller falls back to plain bold heading.
+    """
+    t = title.strip().lower()
+    if t in ("what's changed", "whats changed", "changelog", "更新内容", "变更", "更新概览", "更新日志"):
+        return "📋"
+    mapping = (
+        ("feature", "✨"),
+        ("功能", "✨"),
+        ("bug fix", "🐛"),
+        ("修复", "🐛"),
+        ("fix", "🐛"),
+        ("performance", "⚡️"),
+        ("性能", "⚡️"),
+        ("perf", "⚡️"),
+        ("refactor", "♻️"),
+        ("重构", "♻️"),
+        ("doc", "📚"),
+        ("文档", "📚"),
+        ("test", "✅"),
+        ("测试", "✅"),
+        ("ci", "🔧"),
+        ("build", "📦"),
+        ("构建", "📦"),
+        ("style", "🎨"),
+        ("样式", "🎨"),
+        ("chore", "🧹"),
+        ("杂项", "🧹"),
+        ("revert", "⏪"),
+        ("回滚", "⏪"),
+        ("break", "💥"),
+        ("破坏", "💥"),
+        ("security", "🔐"),
+        ("安全", "🔐"),
+        ("deprecation", "⚠️"),
+        ("废弃", "⚠️"),
+        ("dependency", "🧩"),
+        ("依赖", "🧩"),
+    )
+    for needle, emoji in mapping:
+        if needle in t:
+            return emoji
+    return "📌"
+
+
+def _conventional_emoji(content: str) -> str:
+    """Detect conventional commits prefix in a bullet body and return emoji.
+
+    Looks at the start of the content for `feat:` / `fix:` / `feat(scope):` etc.
+    Returns "" if no conventional prefix detected (caller keeps generic bullet).
+    """
+    m = re.match(r"^(?P<type>[a-zA-Z]+)(?:\([^)]+\))?!?:\s", content)
+    if not m:
+        return ""
+    t = m.group("type").lower()
+    mapping = {
+        "feat": "✨",
+        "fix": "🐛",
+        "perf": "⚡️",
+        "refactor": "♻️",
+        "docs": "📚",
+        "test": "✅",
+        "ci": "🔧",
+        "build": "📦",
+        "style": "🎨",
+        "chore": "🧹",
+        "revert": "⏪",
+        "deps": "🧩",
+    }
+    return mapping.get(t, "")
+
+
 def _convert_line(ln: str) -> str:
     # Preserve fenced/indented code roughly: lines starting with 4 spaces or
     # tab → wrap as code (escape only backtick/backslash).
@@ -123,19 +242,38 @@ def _convert_line(ln: str) -> str:
         return "`" + _esc_code(ln.lstrip()) + "`"
 
     if ln.startswith("#### "):
-        return "*" + esc(ln[5:].strip()) + "*"
+        title = ln[5:].strip()
+        emoji = _section_emoji(title)
+        zh = _localize_section(title)
+        return f"{emoji} *{esc(zh)}*" if emoji else f"*{esc(zh)}*"
     if ln.startswith("### "):
-        return "*" + esc(ln[4:].strip()) + "*"
+        title = ln[4:].strip()
+        emoji = _section_emoji(title)
+        zh = _localize_section(title)
+        return f"{emoji} *{esc(zh)}*" if emoji else f"*{esc(zh)}*"
     if ln.startswith("## "):
-        return "\n*" + esc(ln[3:].strip()) + "*"
+        title = ln[3:].strip()
+        emoji = _section_emoji(title)
+        zh = _localize_section(title)
+        return f"\n{emoji} *{esc(zh)}*" if emoji else f"\n*{esc(zh)}*"
     if ln.startswith("# "):
-        return "\n*" + esc(ln[2:].strip()) + "*"
+        title = ln[2:].strip()
+        emoji = _section_emoji(title)
+        zh = _localize_section(title)
+        return f"\n{emoji} *{esc(zh)}*" if emoji else f"\n*{esc(zh)}*"
 
     m = re.match(r"^(\s*)([*\-+])\s+(.*)$", ln)
     if m:
         indent, _, content = m.groups()
         content = _strip_trailing_refs(content)
-        bullet = "◦" if len(indent) >= 2 else "•"
+        # Pick bullet glyph based on conventional commits prefix or nesting.
+        type_emoji = _conventional_emoji(content)
+        if type_emoji:
+            bullet = type_emoji
+        elif len(indent) >= 2:
+            bullet = "◦"
+        else:
+            bullet = "•"
         return f"{indent}{bullet} {_convert_inline(content)}"
 
     if not ln.strip():
@@ -267,29 +405,39 @@ def build_message() -> str:
     rendered_body = _gfm_to_markdownv2(BODY, URL)
 
     parts = [
-        f"🎉 *{title}*",
-        f"🏷 `{_esc_code(TAG)}` · 📅 {date} · 🤖 {esc('自动发布')}",
+        f"🎉🎉🎉  *{title}*  🎉🎉🎉",
+        "",
+        f"🏷 *{esc('版本')}* `{_esc_code(TAG)}`",
+        f"📅 *{esc('发布时间')}* {date}",
+        f"🤖 *{esc('发布方式')}* {esc('GitHub Actions 自动发布')}",
     ]
     if rendered_body:
         parts.append("")
         parts.append(rendered_body)
 
     parts.append("")
+    parts.append("━━━━━━━━━━━━━━━━━━")
+    parts.append(f"🔗 *{esc('快速访问')}*")
     if URL:
-        parts.append(f"🔗 [{esc('Release 页面')}]({_esc_url(URL)})")
+        parts.append(f"  ▸ [{esc('GitHub Release 页面')}]({_esc_url(URL)})")
     if REPO:
         changelog_url = f"https://github.com/{REPO}/blob/main/CHANGELOG.md"
-        parts.append(f"📜 [{esc('CHANGELOG')}]({_esc_url(changelog_url)})")
+        parts.append(f"  ▸ [{esc('完整 CHANGELOG')}]({_esc_url(changelog_url)})")
+        docker_hub_url = "https://hub.docker.com/r/sunerpy/pt-tools/tags"
+        parts.append(f"  ▸ [{esc('Docker Hub 镜像')}]({_esc_url(docker_hub_url)})")
 
     contrib = _contributors_line(TAG)
     if contrib:
+        parts.append("")
         parts.append(contrib)
 
     parts.append("")
+    parts.append(f"🐳 *{esc('Docker 一键拉取')}*")
     parts.append("```bash")
-    parts.append("# Docker")
     parts.append(f"docker pull sunerpy/pt-tools:{TAG}")
     parts.append("```")
+    parts.append("")
+    parts.append(f"💬 {esc('遇到问题？欢迎在 GitHub 提 issue 或在群里反馈 🙏')}")
     return "\n".join(parts)
 
 
