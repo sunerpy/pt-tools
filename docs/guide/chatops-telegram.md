@@ -43,10 +43,6 @@
 
    冒号后面那一大串就是 `bot_token`，格式是 `数字ID:大小写字母数字串`，把它保存好。
 
-![BotFather 创建 bot 对话](images/chatops/botfather-create-bot.png)
-
-> **截图位置**：和 @BotFather 的对话，完成 `/newbot` 流程后 BotFather 返回 token 的那条消息。请自行截图。
-
 > [!WARNING]
 > bot_token 等同于 bot 的密码。不要把它发在公开频道或截图里，不要提交到代码仓库。
 
@@ -91,9 +87,7 @@
 
    这里的 `123456789` 就是你的 user_id，也是私聊的 `chat_id`。
 
-![getUpdates 返回 JSON](images/chatops/telegram-getupdates.png)
-
-> **截图位置**：浏览器访问 getUpdates 接口后返回的 JSON，找 `from.id` 或 `chat.id`。请自行截图。
+> 💡 在返回的 JSON 中找 `from.id` 或 `chat.id`，那个数字就是你的 Telegram user_id。
 
 > **没有 result？** 说明 bot 还没有收到任何消息，先去给 bot 发一条 `hello` 再访问 getUpdates。
 

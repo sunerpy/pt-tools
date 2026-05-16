@@ -72,6 +72,24 @@ jobs:
           pnpm build
           cd dist && zip -r ../pt-tools-helper.zip .
 
+      - name: Decode CRX signing key
+        if: ${{ env.CRX_PRIVATE_KEY != '' }}
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          echo "${CRX_PRIVATE_KEY}" | base64 -d > tools/browser-extension/crx-private.pem
+          chmod 600 tools/browser-extension/crx-private.pem
+
+      - name: Build Browser Extension CRX
+        if: ${{ env.CRX_PRIVATE_KEY != '' }}
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        working-directory: tools/browser-extension
+        run: |
+          pnpm dlx crx pack dist -o pt-tools-helper.crx -p crx-private.pem
+          rm -f crx-private.pem
+          ls -la pt-tools-helper.crx
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -171,6 +189,13 @@ jobs:
           | Windows | x86_64 | \`pt-tools-windows-amd64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-amd64.exe.zip) |
           | Windows | aarch64 | \`pt-tools-windows-arm64.exe.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-windows-arm64.exe.zip) |
 
+          ### Browser Extension
+
+          | Format | File | Latest Link |
+          |--------|------|-------------|
+          | Edge / Chrome (zip, unpacked) | \`pt-tools-helper.zip\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-helper.zip) |
+          | Chrome (signed crx) | \`pt-tools-helper.crx\` | [Download](https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-helper.crx) |
+
           ### Docker Images
 
           - \`sunerpy/pt-tools:${TAG_NAME}\`
@@ -187,6 +212,7 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             tools/browser-extension/pt-tools-helper.zip
+            tools/browser-extension/pt-tools-helper.crx
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -275,6 +275,8 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 3. Chrome → `chrome://extensions` / Edge → `edge://extensions`
 4. 开启「开发者模式」→「加载已解压的扩展程序」→ 选择解压目录
 
+**直接安装签名版 `.crx`**：从 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载 `pt-tools-helper.crx`，拖入 `chrome://extensions/`（需开启「开发者模式」）。注意 Chrome 现在默认禁止 `.crx` 直接安装，浏览器可能会提示已停用；如不可用，请改用上面的 zip + 加载已解压扩展程序方式。
+
 详细使用说明见 [扩展 README](tools/browser-extension/README.md)。
 
 ## 文档

@@ -51,6 +51,16 @@ _CODE_RE = re.compile(r"([\\`])")
 # tail after we've extracted links.
 _TRAILING_REF_RE = re.compile(r"\s*\((?:#?\d+|[0-9a-f]{7,40})\)\s*$")
 
+# Version-tag style H2 such as `[0.31.0] - 2026-05-16` — pure noise after
+# release-please squashes its own changelog entry under the previous H2.
+_VERSION_TAG_H2 = re.compile(r"^\s*\[\d+\.\d+\.\d+(?:[^\]]*)?\]")
+
+# Duplicate PR link artifact from release-please squash merges:
+# `([#330](issues/330)) ([#330](pull/330))` → keep only the first link.
+_DUP_PR_RE = re.compile(
+    r"\(\[#(\d+)\]\(([^)]+)\)\)\s*\(\[#\1\]\([^)]+\)\)"
+)
+
 # Inline tokenizer: order matters — match code first, then links, then
 # bold/italic/strike. Each branch carries a named group so we can dispatch.
 _INLINE_RE = re.compile(
@@ -62,7 +72,7 @@ _INLINE_RE = re.compile(
     r"|(?P<emph>(?<![A-Za-z0-9_])_(?P<etxt>[^_\n]+)_(?![A-Za-z0-9_]))"
 )
 
-MAX_BYTES = 3500  # leave headroom under TG's 4096 limit for header + footer
+MAX_CHARS = 3600  # TG sendMessage limit is 4096 UTF-16 chars; reserve room for header + footer
 
 
 def esc(s: str) -> str:
@@ -236,11 +246,6 @@ def _conventional_emoji(content: str) -> str:
 
 
 def _convert_line(ln: str) -> str:
-    # Preserve fenced/indented code roughly: lines starting with 4 spaces or
-    # tab → wrap as code (escape only backtick/backslash).
-    if ln.startswith("    ") or ln.startswith("\t"):
-        return "`" + _esc_code(ln.lstrip()) + "`"
-
     if ln.startswith("#### "):
         title = ln[5:].strip()
         emoji = _section_emoji(title)
@@ -253,11 +258,15 @@ def _convert_line(ln: str) -> str:
         return f"{emoji} *{esc(zh)}*" if emoji else f"*{esc(zh)}*"
     if ln.startswith("## "):
         title = ln[3:].strip()
+        if _VERSION_TAG_H2.match(title):
+            return ""
         emoji = _section_emoji(title)
         zh = _localize_section(title)
         return f"\n{emoji} *{esc(zh)}*" if emoji else f"\n*{esc(zh)}*"
     if ln.startswith("# "):
         title = ln[2:].strip()
+        if _VERSION_TAG_H2.match(title):
+            return ""
         emoji = _section_emoji(title)
         zh = _localize_section(title)
         return f"\n{emoji} *{esc(zh)}*" if emoji else f"\n*{esc(zh)}*"
@@ -266,14 +275,17 @@ def _convert_line(ln: str) -> str:
     if m:
         indent, _, content = m.groups()
         content = _strip_trailing_refs(content)
-        # Pick bullet glyph based on conventional commits prefix or nesting.
-        type_emoji = _conventional_emoji(content)
-        if type_emoji:
-            bullet = type_emoji
-        elif len(indent) >= 2:
+        indent_len = len(indent.expandtabs())
+        if indent_len >= 6:
+            bullet = "▸"
+        elif indent_len >= 2:
             bullet = "◦"
         else:
             bullet = "•"
+        if indent_len < 2:
+            type_emoji = _conventional_emoji(content)
+            if type_emoji:
+                bullet = type_emoji
         return f"{indent}{bullet} {_convert_inline(content)}"
 
     if not ln.strip():
@@ -283,12 +295,27 @@ def _convert_line(ln: str) -> str:
 
 def _strip_release_please_noise(lines):
     out = []
+    skip_until_next_h2 = False
     for ln in lines:
         s = ln.rstrip()
-        # Drop "Full Changelog:" lines — URL is provided separately.
-        if s.lstrip().startswith("**Full Changelog**:"):
+        stripped = s.lstrip()
+        if stripped.startswith("**Full Changelog**:"):
             continue
-        if s.lstrip().lower().startswith("full changelog:"):
+        if stripped.lower().startswith("full changelog:"):
+            continue
+        if stripped.startswith("## ") or stripped.startswith("# "):
+            title = stripped.lstrip("#").strip().lower()
+            if title in ("installation", "docker images", "from binary"):
+                skip_until_next_h2 = True
+                continue
+            skip_until_next_h2 = False
+        if stripped.startswith("### "):
+            title = stripped[4:].strip().lower()
+            if title in ("using docker (recommended)", "from binary", "docker images"):
+                skip_until_next_h2 = True
+                continue
+            skip_until_next_h2 = False
+        if skip_until_next_h2:
             continue
         out.append(s)
     return out
@@ -315,28 +342,43 @@ def _collapse_blanks(lines):
 
 
 def _maybe_truncate(text: str, url: str) -> str:
-    if len(text.encode("utf-8")) <= MAX_BYTES:
+    if len(text) <= MAX_CHARS:
         return text
-    # Truncate at last `•` bullet boundary inside the byte budget.
-    encoded = text.encode("utf-8")[:MAX_BYTES]
-    truncated = encoded.decode("utf-8", errors="ignore")
-    # Find last bullet line start
+
+    lines = text.split("\n")
+
+    pruned = [ln for ln in lines if not ln.lstrip().startswith("▸")]
+    candidate = "\n".join(pruned)
+    if len(candidate) <= MAX_CHARS:
+        return candidate
+
+    pruned = [ln for ln in pruned if not ln.lstrip().startswith("◦")]
+    candidate = "\n".join(pruned)
+    if len(candidate) <= MAX_CHARS:
+        return candidate
+
+    truncated = candidate[:MAX_CHARS]
     cut = truncated.rfind("\n•")
     if cut < 0:
         cut = truncated.rfind("\n")
     if cut > 0:
         truncated = truncated[:cut]
-    omitted = text.count("\n•") - truncated.count("\n•")
+    omitted = candidate.count("\n•") - truncated.count("\n•")
     if omitted < 1:
         omitted = 1
     suffix = f"\n\n_…还有 {omitted} 项已省略，[查看完整说明]({_esc_url(url)})_"
     return truncated.rstrip() + suffix
 
 
+def _preprocess_body(body: str) -> str:
+    return _DUP_PR_RE.sub(r"([#\1](\2))", body)
+
+
 def _gfm_to_markdownv2(body: str, url_for_truncation: str) -> str:
     """Convert GFM body to MarkdownV2 preserving headings, bullets, inline."""
     if not body:
         return ""
+    body = _preprocess_body(body)
     lines = body.splitlines()
     lines = _strip_release_please_noise(lines)
     lines = _collapse_blanks(lines)
