@@ -84,6 +84,10 @@ func (s *stubNotificationSvc) TestConf(ctx context.Context, id uint) error {
 }
 
 func (s *stubNotificationSvc) Push(ctx context.Context, n app.Notification) error { return nil }
+func (s *stubNotificationSvc) PushSync(ctx context.Context, n app.Notification) error {
+	return nil
+}
+
 func (s *stubNotificationSvc) Enqueue(ctx context.Context, n app.Notification, confID uint) error {
 	return nil
 }

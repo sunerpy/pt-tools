@@ -207,23 +207,39 @@ async function handleTest() {
   testResult.value = null;
   try {
     const res = await chatopsApi.notifications.test(conf.id);
+    const ok = !!res?.success;
     testResult.value = {
-      success: !!res?.success,
-      message: res?.success ? "测试消息发送成功" : "测试消息可能未送达，请检查日志",
+      success: ok,
+      message: ok ? "测试消息发送成功，请在目标账号查收。" : "测试消息可能未送达，请检查日志",
       at: new Date().toLocaleString(),
     };
-    if (res?.success) {
-      ElMessage.success("测试消息已发送");
+    if (ok) {
+      ElMessage.success("测试消息发送成功");
     } else {
       ElMessage.warning("已触发测试，但返回结果异常");
     }
   } catch (e: unknown) {
+    const raw = (e as Error).message || "测试失败";
+    let reason = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        reason = parsed.detail || parsed.error || raw;
+      }
+    } catch {
+      // raw 不是 JSON，原样使用
+    }
     testResult.value = {
       success: false,
-      message: (e as Error).message || "测试失败",
+      message: reason,
       at: new Date().toLocaleString(),
     };
-    ElMessage.error((e as Error).message || "测试失败");
+    ElMessage({
+      type: "error",
+      message: `测试消息发送失败：${reason}`,
+      duration: 8000,
+      showClose: true,
+    });
   } finally {
     testing.value = false;
   }

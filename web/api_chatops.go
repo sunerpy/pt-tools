@@ -181,7 +181,13 @@ func (h *chatopsHandlers) testNotification(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := h.deps.NotificationSvc.TestConf(r.Context(), id); err != nil {
-		mapServiceErr(w, err)
+		if errors.Is(err, app.ErrConfNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			writeChatopsErr(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		detail := "通道发送失败：" + err.Error() +
+			"。请检查网络是否通畅、proxy_url 配置是否正确（Telegram 用户）、或 NapCat 反向 WS 连接是否在线（QQ 用户）"
+		writeChatopsErr(w, http.StatusBadGateway, "send_failed", detail)
 		return
 	}
 	writeJSON(w, map[string]any{"success": true, "status": "sent"})

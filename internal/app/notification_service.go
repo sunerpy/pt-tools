@@ -72,6 +72,7 @@ type NotificationService interface {
 	DeleteConf(ctx context.Context, id uint) error
 	TestConf(ctx context.Context, id uint) error
 	Push(ctx context.Context, n Notification) error
+	PushSync(ctx context.Context, n Notification) error
 	Enqueue(ctx context.Context, n Notification, confID uint) error
 }
 
@@ -261,7 +262,7 @@ func (s *notificationService) TestConf(ctx context.Context, id uint) error {
 			targets["message_type"] = "private"
 		}
 	}
-	return s.Push(ctx, Notification{
+	return s.PushSync(ctx, Notification{
 		Title:        "pt-tools 测试通知",
 		Text:         "如果你看到此消息，说明通道配置正常。",
 		SourceConfID: row.ID,
@@ -425,6 +426,28 @@ func (s *notificationService) Push(ctx context.Context, n Notification) error {
 		return s.Enqueue(ctx, n, n.SourceConfID)
 	case <-sendCtx.Done():
 		return s.Enqueue(ctx, n, n.SourceConfID)
+	}
+}
+
+// PushSync 仅尝试同步投递：超时或失败时不会写入 outbox，错误原样返回给调用方。
+// 用于 TestConf 等需要"立即验证通道是否可用"的语义场景；业务通知请使用 Push（含 outbox fallback）。
+func (s *notificationService) PushSync(ctx context.Context, n Notification) error {
+	if s.manager == nil {
+		return errors.New("通知管理器未初始化")
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, s.pushTimeout)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.manager.Send(sendCtx, n.SourceConfID, n)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-sendCtx.Done():
+		return fmt.Errorf("通道未在 %s 内响应: %w", s.pushTimeout, sendCtx.Err())
 	}
 }
 

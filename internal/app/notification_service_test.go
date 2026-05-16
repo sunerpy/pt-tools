@@ -226,3 +226,84 @@ func TestPush_ManagerError_FallbackOutbox(t *testing.T) {
 		Where("status = ?", "pending").Count(&pendingCount).Error)
 	assert.Equal(t, int64(1), pendingCount, "outbox should have 1 pending row")
 }
+
+// TestPushSync_ManagerError_NoOutbox 验证 PushSync 在 manager.Send 出错时直接返回错误，
+// 不会 fallback 到 outbox。
+func TestPushSync_ManagerError_NoOutbox(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+
+	mock := &mockNotifyManager{delay: 0, returnErr: errors.New("boom")}
+	svc := NewNotificationService(db, mock, 5*time.Second)
+
+	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram",
+		Name:        "test",
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	n := Notification{Title: "hi", Text: "hello", SourceConfID: dto.ID}
+	err = svc.PushSync(context.Background(), n)
+	require.Error(t, err, "PushSync should propagate manager error")
+	assert.Contains(t, err.Error(), "boom", "error should contain underlying reason")
+
+	var pendingCount int64
+	require.NoError(t, db.Model(&models.NotificationOutbox{}).
+		Where("status = ?", "pending").Count(&pendingCount).Error)
+	assert.Equal(t, int64(0), pendingCount, "PushSync must NOT write to outbox on failure")
+}
+
+// TestPushSync_Timeout_NoOutbox 验证 PushSync 在 send 超时后直接报错，不写 outbox。
+func TestPushSync_Timeout_NoOutbox(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+
+	mock := &mockNotifyManager{delay: 200 * time.Millisecond, returnErr: nil}
+	svc := NewNotificationService(db, mock, 50*time.Millisecond)
+
+	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram",
+		Name:        "test",
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx"}`),
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	n := Notification{Title: "hi", Text: "hello", SourceConfID: dto.ID}
+	err = svc.PushSync(context.Background(), n)
+	require.Error(t, err, "PushSync should error on timeout")
+
+	var pendingCount int64
+	require.NoError(t, db.Model(&models.NotificationOutbox{}).
+		Where("status = ?", "pending").Count(&pendingCount).Error)
+	assert.Equal(t, int64(0), pendingCount, "PushSync must NOT write to outbox on timeout")
+}
+
+// TestConf_SyncFailureSurfacesError 验证 TestConf 改用 PushSync 后，
+// 底层 manager.Send 失败会作为错误返回，且不会静默写入 outbox。
+func TestConf_SyncFailureSurfacesError(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+
+	mock := &mockNotifyManager{delay: 0, returnErr: errors.New("boom")}
+	svc := NewNotificationService(db, mock, 5*time.Second)
+
+	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram",
+		Name:        "test-tg",
+		ConfigJSON:  json.RawMessage(`{"bot_token":"xxx","default_chat_id":"123456"}`),
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	err = svc.TestConf(context.Background(), dto.ID)
+	require.Error(t, err, "TestConf must surface underlying send error")
+	assert.Contains(t, err.Error(), "boom", "error must contain underlying reason")
+
+	var pendingCount int64
+	require.NoError(t, db.Model(&models.NotificationOutbox{}).
+		Where("status = ?", "pending").Count(&pendingCount).Error)
+	assert.Equal(t, int64(0), pendingCount, "TestConf failure must NOT enqueue to outbox")
+}
