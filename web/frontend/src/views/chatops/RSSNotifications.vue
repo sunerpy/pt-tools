@@ -71,8 +71,8 @@
           clearable
           class="filter-item"
           @change="handleFilterChange">
-          <el-option label="全部上新 (all)" value="all" />
-          <el-option label="仅匹配规则 (filtered)" value="filtered" />
+          <el-option label="每条新种（不拉详情） (all)" value="all" />
+          <el-option label="仅匹配过滤规则的种子 (filtered)" value="filtered" />
         </el-select>
 
         <el-select

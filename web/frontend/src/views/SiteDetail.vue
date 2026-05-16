@@ -869,13 +869,13 @@ function toggleEditRssCustomPath() {
         <el-form-item label="通知模式">
           <el-radio-group v-model="newRss.notify_mode" size="small">
             <el-radio-button label="">不通知</el-radio-button>
-            <el-radio-button label="all">全部上新</el-radio-button>
-            <el-radio-button label="filtered">仅匹配规则</el-radio-button>
-            <el-radio-button label="both">两者</el-radio-button>
+            <el-radio-button label="all">每条新种（不拉详情）</el-radio-button>
+            <el-radio-button label="filtered">仅匹配过滤规则的种子</el-radio-button>
+            <el-radio-button label="both">以上两种都开</el-radio-button>
           </el-radio-group>
           <div class="form-tip">
-            "全部上新"使用 RSS 标题/链接立刻通知，不消耗站点详情请求；"仅匹配规则"等待详情拉取后按
-            <code>filter_rules.purpose IN ('notify','both')</code> 匹配。
+            "每条新种"仅用 RSS 标题/链接立刻通知，不消耗站点详情请求；"仅匹配规则"拉详情后按
+            <code>filter_rules.purpose IN ('notify','both')</code> 匹配才通知。
           </div>
         </el-form-item>
         <el-form-item v-if="newRss.notify_mode" label="通知通道">
@@ -1015,13 +1015,13 @@ function toggleEditRssCustomPath() {
         <el-form-item label="通知模式">
           <el-radio-group v-model="editingRss.notify_mode" size="small">
             <el-radio-button label="">不通知</el-radio-button>
-            <el-radio-button label="all">全部上新</el-radio-button>
-            <el-radio-button label="filtered">仅匹配规则</el-radio-button>
-            <el-radio-button label="both">两者</el-radio-button>
+            <el-radio-button label="all">每条新种（不拉详情）</el-radio-button>
+            <el-radio-button label="filtered">仅匹配过滤规则的种子</el-radio-button>
+            <el-radio-button label="both">以上两种都开</el-radio-button>
           </el-radio-group>
           <div class="form-tip">
-            "全部上新"使用 RSS 标题/链接立刻通知，不消耗站点详情请求；"仅匹配规则"等待详情拉取后按
-            <code>filter_rules.purpose IN ('notify','both')</code> 匹配。
+            "每条新种"仅用 RSS 标题/链接立刻通知，不消耗站点详情请求；"仅匹配规则"拉详情后按
+            <code>filter_rules.purpose IN ('notify','both')</code> 匹配才通知。
           </div>
         </el-form-item>
         <el-form-item v-if="editingRss.notify_mode" label="通知通道">
