@@ -561,15 +561,6 @@ type nopLogger struct{}
 func (nopLogger) Infof(string, ...any) {}
 func (nopLogger) Warnf(string, ...any) {}
 
-// noopNotifyManager is the temporary app.NotifyManager used until notify.Router
-// is wired through web.Server. Returning an error forces NotificationService.Push
-// to fall back to the outbox queue, which the worker already drains.
-type noopNotifyManager struct{}
-
-func (noopNotifyManager) Send(_ context.Context, _ uint, _ app.Notification) error {
-	return errors.New("notify manager not yet wired; falling back to outbox")
-}
-
 type liveNotifyManager struct {
 	mu       sync.RWMutex
 	channels map[uint]notify.Channel

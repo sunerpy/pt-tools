@@ -174,13 +174,15 @@ onMounted(async () => {
   loading.value = true;
   try {
     // 并行加载站点配置、下载器列表、过滤规则列表、下载器目录、通知通道列表
-    const [siteData, downloaderList, filterRuleList, directoriesData, confList] = await Promise.all([
-      sitesApi.get(siteName.value),
-      downloadersApi.list(),
-      filterRulesApi.list(),
-      downloaderDirectoriesApi.listAll(),
-      chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
-    ]);
+    const [siteData, downloaderList, filterRuleList, directoriesData, confList] = await Promise.all(
+      [
+        sitesApi.get(siteName.value),
+        downloadersApi.list(),
+        filterRulesApi.list(),
+        downloaderDirectoriesApi.listAll(),
+        chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
+      ],
+    );
     form.value = siteData;
     downloaders.value = downloaderList; // 显示所有下载器，不过滤
     filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
@@ -876,8 +878,8 @@ function toggleEditRssCustomPath() {
           <div class="form-tip">
             "全部新种（简略)"：仅用 RSS 标题/链接立即通知，不消耗站点详情请求；
             "只通知匹配的（详细)"：拉详情后按
-            <code>filter_rules.purpose IN ('notify','both')</code> 匹配，命中才通知；
-            "全部都通知 + 匹配的给详细"：上面两路都开，同一种子命中规则时合并为详细版本，不会重复通知。
+            <code>filter_rules.purpose IN ('notify','both')</code> 匹配，命中才通知； "全部都通知 +
+            匹配的给详细"：上面两路都开，同一种子命中规则时合并为详细版本，不会重复通知。
           </div>
         </el-form-item>
         <el-form-item v-if="newRss.notify_mode" label="通知通道">
@@ -1024,8 +1026,8 @@ function toggleEditRssCustomPath() {
           <div class="form-tip">
             "全部新种（简略)"：仅用 RSS 标题/链接立即通知，不消耗站点详情请求；
             "只通知匹配的（详细)"：拉详情后按
-            <code>filter_rules.purpose IN ('notify','both')</code> 匹配，命中才通知；
-            "全部都通知 + 匹配的给详细"：上面两路都开，同一种子命中规则时合并为详细版本，不会重复通知。
+            <code>filter_rules.purpose IN ('notify','both')</code> 匹配，命中才通知； "全部都通知 +
+            匹配的给详细"：上面两路都开，同一种子命中规则时合并为详细版本，不会重复通知。
           </div>
         </el-form-item>
         <el-form-item v-if="editingRss.notify_mode" label="通知通道">

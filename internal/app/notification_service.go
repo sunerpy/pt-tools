@@ -18,12 +18,12 @@ import (
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
 type Notification struct {
-	Title        string             `json:"title"`
-	Text         string             `json:"text"`
-	SourceConfID uint               `json:"source_conf_id,omitempty"`
-	UserID       string             `json:"user_id,omitempty"`
-	Targets      map[string]string  `json:"targets,omitempty"`
-	Buttons      [][]notify.Button  `json:"buttons,omitempty"`
+	Title        string            `json:"title"`
+	Text         string            `json:"text"`
+	SourceConfID uint              `json:"source_conf_id,omitempty"`
+	UserID       string            `json:"user_id,omitempty"`
+	Targets      map[string]string `json:"targets,omitempty"`
+	Buttons      [][]notify.Button `json:"buttons,omitempty"`
 }
 
 // NotifyManager 抽象底层投递。

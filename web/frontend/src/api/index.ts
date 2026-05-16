@@ -1357,9 +1357,7 @@ export const chatopsApi = {
         page_size: number;
       }>(`/api/chatops/rss-notifications?${params.toString()}`),
     retry: (id: number) =>
-      api.post<{ success: boolean; queued: boolean }>(
-        `/api/chatops/rss-notifications/${id}/retry`,
-      ),
+      api.post<{ success: boolean; queued: boolean }>(`/api/chatops/rss-notifications/${id}/retry`),
     cancel: (id: number) =>
       api.post<{ success: boolean }>(`/api/chatops/rss-notifications/${id}/cancel`),
   },

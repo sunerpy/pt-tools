@@ -316,7 +316,8 @@ function goBack() {
                 clearable
                 style="width: 130px" />
               <div class="form-hint">
-                在此时段内通道不会主动发送通知，待静默结束后由 retry worker 投递。支持跨午夜（如 22:00 → 08:00）。
+                在此时段内通道不会主动发送通知，待静默结束后由 retry worker 投递。支持跨午夜（如
+                22:00 → 08:00）。
               </div>
             </el-form-item>
             <div class="form-actions">

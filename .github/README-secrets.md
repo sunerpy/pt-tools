@@ -2,10 +2,10 @@
 
 Set these in repo Settings → Secrets and variables → Actions:
 
-| Secret | Value |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather (release announcer) |
-| `TELEGRAM_CHAT_ID` | Target group chat_id (negative integer for supergroups) |
+| Secret               | Value                                                   |
+| -------------------- | ------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather (release announcer)       |
+| `TELEGRAM_CHAT_ID`   | Target group chat_id (negative integer for supergroups) |
 
 `GITHUB_TOKEN` is auto-provided.
 

@@ -279,21 +279,21 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 
 ## 文档
 
-| 文档                                                                        | 说明                                        |
-| --------------------------------------------------------------------------- | ------------------------------------------- |
-| **[ChatOps 快速开始](docs/guide/chatops-quickstart.md)**                    | 机器人功能概览、通道选择与命令清单          |
-| **[QQ OneBot (NapCat) 配置](docs/guide/chatops-qq-napcat.md)**              | NapCat Docker 部署、反向 WS 配置、绑定测试  |
-| **[Telegram Bot 配置](docs/guide/chatops-telegram.md)**                     | BotFather 创建 bot、代理配置、绑定测试      |
-| **[RSS 上新通知](docs/guide/chatops-rss-notify.md)**                        | RSS 新种实时推送：双模式、静默、digest、按钮 |
-| **[获取 Cookie / API Key](docs/guide/get-cookie-apikey.md)**                | 详细介绍如何从各站点获取认证信息            |
-| **[浏览器扩展使用指南](tools/browser-extension/README.md)**                 | 自动同步 Cookie、采集站点数据               |
-| **[RSS 订阅配置指南](docs/guide/rss-subscription.md)**                      | 如何配置 RSS 订阅实现自动下载               |
-| **[过滤规则与追剧指南](docs/guide/filter-rules-tv-series.md)**              | 使用过滤规则自动追剧、筛选资源              |
-| **[自动删种指南](docs/guide/auto-cleanup.md)**                              | 自动清理种子策略配置和 H&R 保护             |
-| **[请求新增站点支持](docs/guide/request-new-site.md)**                      | 无需编程经验，提供页面数据即可请求适配      |
-| **[配置说明](docs/configuration.md)**                                       | 环境变量、全局设置、下载器配置详解          |
-| **[常见问题 (FAQ)](docs/faq.md)**                                           | 常见问题和解决方案                          |
-| **[开发指南](docs/development.md)**                                         | 从源码构建、技术架构、贡献指南              |
+| 文档                                                           | 说明                                         |
+| -------------------------------------------------------------- | -------------------------------------------- |
+| **[ChatOps 快速开始](docs/guide/chatops-quickstart.md)**       | 机器人功能概览、通道选择与命令清单           |
+| **[QQ OneBot (NapCat) 配置](docs/guide/chatops-qq-napcat.md)** | NapCat Docker 部署、反向 WS 配置、绑定测试   |
+| **[Telegram Bot 配置](docs/guide/chatops-telegram.md)**        | BotFather 创建 bot、代理配置、绑定测试       |
+| **[RSS 上新通知](docs/guide/chatops-rss-notify.md)**           | RSS 新种实时推送：双模式、静默、digest、按钮 |
+| **[获取 Cookie / API Key](docs/guide/get-cookie-apikey.md)**   | 详细介绍如何从各站点获取认证信息             |
+| **[浏览器扩展使用指南](tools/browser-extension/README.md)**    | 自动同步 Cookie、采集站点数据                |
+| **[RSS 订阅配置指南](docs/guide/rss-subscription.md)**         | 如何配置 RSS 订阅实现自动下载                |
+| **[过滤规则与追剧指南](docs/guide/filter-rules-tv-series.md)** | 使用过滤规则自动追剧、筛选资源               |
+| **[自动删种指南](docs/guide/auto-cleanup.md)**                 | 自动清理种子策略配置和 H&R 保护              |
+| **[请求新增站点支持](docs/guide/request-new-site.md)**         | 无需编程经验，提供页面数据即可请求适配       |
+| **[配置说明](docs/configuration.md)**                          | 环境变量、全局设置、下载器配置详解           |
+| **[常见问题 (FAQ)](docs/faq.md)**                              | 常见问题和解决方案                           |
+| **[开发指南](docs/development.md)**                            | 从源码构建、技术架构、贡献指南               |
 
 ## 贡献
 

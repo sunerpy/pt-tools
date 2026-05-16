@@ -44,6 +44,7 @@
    冒号后面那一大串就是 `bot_token`，格式是 `数字ID:大小写字母数字串`，把它保存好。
 
 ![BotFather 创建 bot 对话](images/chatops/botfather-create-bot.png)
+
 > **截图位置**：和 @BotFather 的对话，完成 `/newbot` 流程后 BotFather 返回 token 的那条消息。请自行截图。
 
 > [!WARNING]
@@ -91,6 +92,7 @@
    这里的 `123456789` 就是你的 user_id，也是私聊的 `chat_id`。
 
 ![getUpdates 返回 JSON](images/chatops/telegram-getupdates.png)
+
 > **截图位置**：浏览器访问 getUpdates 接口后返回的 JSON，找 `from.id` 或 `chat.id`。请自行截图。
 
 > **没有 result？** 说明 bot 还没有收到任何消息，先去给 bot 发一条 `hello` 再访问 getUpdates。
@@ -109,17 +111,19 @@
 
 Telegram 通道有两个白名单字段，语义不同：
 
-| 字段 | 谁能使用 | 权限 |
-|------|---------|------|
-| `admin_users` | 管理员的 TG user_id 列表 | 可发送 `/help`、`/bind` 等斜杠命令；可收消息 |
-| `allowed_users` | 允许互动的普通用户 user_id 列表 | 可与 bot 发普通文本对话 + 收消息；**不能**使用斜杠命令 |
-| `default_chat_id` | 主动推送目标 | 当 pt-tools 主动发通知时投递到此 chat_id |
+| 字段              | 谁能使用                        | 权限                                                   |
+| ----------------- | ------------------------------- | ------------------------------------------------------ |
+| `admin_users`     | 管理员的 TG user_id 列表        | 可发送 `/help`、`/bind` 等斜杠命令；可收消息           |
+| `allowed_users`   | 允许互动的普通用户 user_id 列表 | 可与 bot 发普通文本对话 + 收消息；**不能**使用斜杠命令 |
+| `default_chat_id` | 主动推送目标                    | 当 pt-tools 主动发通知时投递到此 chat_id               |
 
 **单人自用场景**：只填 `admin_users = [你的 user_id]` + `default_chat_id = 你的 user_id` 即可，`allowed_users` 留空。这样：
+
 - 出站推送：通过 `default_chat_id` 投递（不依赖白名单）
 - 入站命令：通过 `admin_users` 鉴权（你能发命令；其他人发被拒绝）
 
 **多人共享场景**：
+
 - 管理员 user_id 加入 `admin_users`
 - 普通成员 user_id 加入 `allowed_users`
 - 普通成员可以收推送、回普通话给 bot；但不能 `/bind` / `/help` 这些操作
@@ -128,18 +132,19 @@ Telegram 通道有两个白名单字段，语义不同：
 
 ### 凭证字段
 
-| 字段 | 填写值 | 说明 |
-|------|--------|------|
-| Bot Token | `123456789:ABCdef...` | 从 BotFather 拿到的 token |
-| 管理员用户（admin_users） | `[你的user_id]` | 见上方「字段语义说明」 |
-| 允许用户（allowed_users） | `[你的user_id]` | 见上方「字段语义说明」（可留空） |
-| 默认 Chat ID | `你的user_id` | 见上方「字段语义说明」（必填） |
-| 轮询超时（polling_timeout_seconds） | `30` | 长轮询超时，推荐 30，网络好的情况可以调高 |
-| 代理 URL（可选） | `http://127.0.0.1:1080` | 如果需要代理才能访问 TG，填这里（见第 6 节） |
+| 字段                                | 填写值                  | 说明                                         |
+| ----------------------------------- | ----------------------- | -------------------------------------------- |
+| Bot Token                           | `123456789:ABCdef...`   | 从 BotFather 拿到的 token                    |
+| 管理员用户（admin_users）           | `[你的user_id]`         | 见上方「字段语义说明」                       |
+| 允许用户（allowed_users）           | `[你的user_id]`         | 见上方「字段语义说明」（可留空）             |
+| 默认 Chat ID                        | `你的user_id`           | 见上方「字段语义说明」（必填）               |
+| 轮询超时（polling_timeout_seconds） | `30`                    | 长轮询超时，推荐 30，网络好的情况可以调高    |
+| 代理 URL（可选）                    | `http://127.0.0.1:1080` | 如果需要代理才能访问 TG，填这里（见第 6 节） |
 
 填好后点「**保存凭证**」。
 
 ![pt-tools Telegram 通道凭证配置](images/chatops/chatops-telegram-detail.png)
+
 > Web UI → Telegram 通道 → 凭证标签，展示所有字段包括代理 URL
 
 通道状态应变为「运行中」，说明长轮询已经成功连上 Telegram 服务器。
@@ -163,6 +168,7 @@ Telegram 通道有两个白名单字段，语义不同：
 - 点「生成」
 
 ![生成绑定码对话框](images/chatops/chatops-bindings-dialog.png)
+
 > 绑定码生成后出现在「待绑定 Code」列表，8 字符，视觉友好（不含 0/O/1/l/I 等易混淆字符）
 
 复制生成的 8 字符绑定码（如 `A3F7KP2M`），在 Telegram 私聊给 bot 发：
@@ -180,6 +186,7 @@ bot 应该回复：
 绑定完成后可以在「已绑定列表」看到你的账号。
 
 ![绑定管理列表](images/chatops/chatops-bindings-list.png)
+
 > 绑定成功后，账号出现在「已绑定列表」，显示通道类型、用户 ID（部分隐藏）、管理员标记
 
 ### 测试命令
@@ -216,20 +223,20 @@ environment:
 
 支持的代理格式：
 
-| 代理类型 | 格式示例 |
-|---------|---------|
-| HTTP 代理 | `http://127.0.0.1:1080` |
-| HTTPS 代理 | `https://proxy.example.com:8443` |
-| SOCKS5 代理 | `socks5://127.0.0.1:7890` |
+| 代理类型           | 格式示例                                  |
+| ------------------ | ----------------------------------------- |
+| HTTP 代理          | `http://127.0.0.1:1080`                   |
+| HTTPS 代理         | `https://proxy.example.com:8443`          |
+| SOCKS5 代理        | `socks5://127.0.0.1:7890`                 |
 | 带认证的 HTTP 代理 | `http://user:pass@proxy.example.com:3128` |
 
 **常见本地代理工具对应地址：**
 
-| 工具 | 默认 HTTP 端口 | 默认 SOCKS5 端口 |
-|-----|-------------|----------------|
-| Clash | 7890 | 7891（或 HTTP 也是 7890） |
-| V2Ray / Xray | 1087（HTTP） | 1080（SOCKS5） |
-| Shadowsocks | 1087（如果开启了本地 HTTP 代理） | 1080 |
+| 工具         | 默认 HTTP 端口                   | 默认 SOCKS5 端口          |
+| ------------ | -------------------------------- | ------------------------- |
+| Clash        | 7890                             | 7891（或 HTTP 也是 7890） |
+| V2Ray / Xray | 1087（HTTP）                     | 1080（SOCKS5）            |
+| Shadowsocks  | 1087（如果开启了本地 HTTP 代理） | 1080                      |
 
 如果不确定端口，在代理工具的界面里查看「允许局域网连接」或「LAN 连接」部分即可。
 
@@ -250,9 +257,11 @@ environment:
 **原因一**：网络不通到 `api.telegram.org`，需要配置代理（见第 6 节）。
 
 **检查**：在 pt-tools 所在机器上测试：
+
 ```bash
 curl -x http://127.0.0.1:1080 https://api.telegram.org/bot<TOKEN>/getMe
 ```
+
 如果代理正常，会返回 bot 的基本信息 JSON。
 
 **原因二**：bot_token 填错了，多了空格或少了字符。注意 token 格式是 `数字:字母数字串`，冒号两侧没有空格。
@@ -264,6 +273,7 @@ curl -x http://127.0.0.1:1080 https://api.telegram.org/bot<TOKEN>/getMe
 **原因**：pt-tools 到 Telegram API 服务器的网络不通，或代理配置有误。
 
 **解决**：
+
 1. 确认 `proxy_url` 填写正确
 2. 在 pt-tools 所在机器手动测试代理是否可以访问 `api.telegram.org`
 3. 如果用环境变量代理，注意环境变量要在启动 pt-tools 之前就设置好

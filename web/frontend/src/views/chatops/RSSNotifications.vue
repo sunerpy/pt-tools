@@ -4,9 +4,7 @@
       <div class="hero-content">
         <span class="hero-eyebrow">CHATOPS · RSS NOTIFY</span>
         <h1 class="hero-title">RSS 通知日志</h1>
-        <p class="hero-subtitle">
-          查看 RSS 上新通知的投递结果，对失败/待发送条目执行重试或取消。
-        </p>
+        <p class="hero-subtitle">查看 RSS 上新通知的投递结果，对失败/待发送条目执行重试或取消。</p>
       </div>
     </div>
 
@@ -47,11 +45,7 @@
           <p class="section-desc">展开行可查看 last_error 详情，失败行可手动触发重试</p>
         </div>
         <div class="header-actions">
-          <el-switch
-            v-model="autoRefresh"
-            active-text="自动刷新 10s"
-            inline-prompt
-            size="small" />
+          <el-switch v-model="autoRefresh" active-text="自动刷新 10s" inline-prompt size="small" />
           <el-button :icon="Refresh" circle @click="fetchLogs" />
         </div>
       </header>
@@ -366,8 +360,7 @@ onBeforeUnmount(() => {
   --chatops-stone-muted: oklch(0.55 0.02 60);
   --chatops-radius-md: 12px;
   --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
-  --chatops-shadow-md:
-    0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
+  --chatops-shadow-md: 0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
   --chatops-glass-bg: oklch(1 0 0 / 0.72);
   --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
   --chatops-grid-color: oklch(0.36 0.006 50 / 0.05);

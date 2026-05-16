@@ -157,7 +157,7 @@ func contains(xs []int64, x int64) bool {
 // payloads invoke OnRSSDownload / OnRSSIgnore and the originating message's
 // inline keyboard is cleared via EditMessageReplyMarkup so users cannot
 // double-click. Without an action handler the call is acknowledged with a
-// "处理中" stub message (S4 behaviour, retained for tests).
+// "处理中" stub message (S4 behavior, retained for tests).
 func (c *TelegramChannel) handleCallbackQuery(ctx context.Context, cq *telego.CallbackQuery) {
 	if cq == nil {
 		return

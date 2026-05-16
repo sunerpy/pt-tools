@@ -163,7 +163,11 @@
         </el-form>
         <div class="dialog-actions">
           <el-button @click="handleCloseGenerateDialog">取消</el-button>
-          <el-button type="primary" class="delta-cta" :loading="generating" @click="handleGenerateCode">
+          <el-button
+            type="primary"
+            class="delta-cta"
+            :loading="generating"
+            @click="handleGenerateCode">
             生成
           </el-button>
         </div>
@@ -173,7 +177,11 @@
         <div class="code-bubble">
           <span class="big-code">{{ generatedCode }}</span>
         </div>
-        <el-button type="primary" class="delta-cta" :icon="CopyDocument" @click="copyToClipboard(generatedCode)">
+        <el-button
+          type="primary"
+          class="delta-cta"
+          :icon="CopyDocument"
+          @click="copyToClipboard(generatedCode)">
           复制绑定码
         </el-button>
         <p class="expiry-hint">
@@ -393,10 +401,8 @@ function getConfNameByConfId(confId?: number) {
   --chatops-radius-md: 12px;
   --chatops-radius-lg: 18px;
   --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
-  --chatops-shadow-md:
-    0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
-  --chatops-shadow-lg:
-    0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
+  --chatops-shadow-md: 0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
+  --chatops-shadow-lg: 0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
   --chatops-glass-bg: oklch(1 0 0 / 0.72);
   --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
   --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
@@ -459,11 +465,7 @@ function getConfNameByConfId(confId?: number) {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-    circle at 90% 10%,
-    var(--chatops-bloom-color) 0%,
-    transparent 40%
-  );
+  background: radial-gradient(circle at 90% 10%, var(--chatops-bloom-color) 0%, transparent 40%);
   pointer-events: none;
   z-index: 0;
 }
