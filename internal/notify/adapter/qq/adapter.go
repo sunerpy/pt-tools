@@ -358,6 +358,7 @@ func stripMarkdown(s string) string {
 }
 
 type warnLog interface {
+	Debugf(template string, args ...interface{})
 	Infof(template string, args ...interface{})
 	Warnf(template string, args ...interface{})
 }
@@ -377,8 +378,9 @@ func warnLogger() warnLog {
 
 type nopLogger struct{}
 
-func (nopLogger) Infof(string, ...interface{}) {}
-func (nopLogger) Warnf(string, ...interface{}) {}
+func (nopLogger) Debugf(string, ...interface{}) {}
+func (nopLogger) Infof(string, ...interface{})  {}
+func (nopLogger) Warnf(string, ...interface{})  {}
 
 func init() {
 	notify.RegisterChannel(channelType, func() notify.Channel { return New() })

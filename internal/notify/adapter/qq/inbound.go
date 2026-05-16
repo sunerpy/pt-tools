@@ -28,8 +28,13 @@ func (q *QQChannel) HandleRawEvent(payload []byte) error {
 	if err := json.Unmarshal(payload, &evt); err != nil {
 		return fmt.Errorf("解析 OneBot 事件失败: %w", err)
 	}
-	qqLogger().Infof("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d text=%q",
-		q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID, evt.RawMessage)
+	if isHeartbeatEvent(evt) {
+		qqLogger().Debugf("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d",
+			q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID)
+	} else {
+		qqLogger().Infof("QQ 适配器(%d): 收到事件 post_type=%s msg_type=%s user=%d group=%d text=%q",
+			q.confID, evt.PostType, evt.MessageType, evt.UserID, evt.GroupID, evt.RawMessage)
+	}
 	if evt.PostType != "message" {
 		return nil
 	}
@@ -123,4 +128,8 @@ func decodeMessageField(raw json.RawMessage) string {
 		return out
 	}
 	return ""
+}
+
+func isHeartbeatEvent(evt onebotEvent) bool {
+	return evt.PostType == "meta_event"
 }
