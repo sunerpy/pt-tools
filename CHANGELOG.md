@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.2] - 2026-05-16
+
+### Bug Fixes
+
+- **chatops**: 修复 4 个通知通道 bug + 配置热重载 (v0.31.2) ([#340](https://github.com/sunerpy/pt-tools/issues/340)) ([#340](https://github.com/sunerpy/pt-tools/pull/340))
+
+* fix(chatops/notify): 测试消息不再走 outbox fallback，失败直接报错给前端
+
+      之前 TestConf → Push → manager.Send 超时/失败时 fallback 到 Enqueue（写
+      notification_outbox 等异步重试），返回 nil 给 handler，前端 toast 显示
+      "测试消息发送成功"——但消息其实没送达，用户被误导。
+
+      测试消息的语义是"立即验证通道工作"，与业务通知（应当 fallback retry）
+      不同。新增 PushSync：仅同步 manager.Send + 5s 超时，错误原样返回，**不写
+      outbox**。TestConf 改用 PushSync。
+
+      前端 NotificationDetail.vue 收到错误后展示明确失败 toast 含原因；后端
+      testNotification handler 在错误响应里给出操作提示（检查网络 / proxy_url /
+      NapCat WS）。
+
+      业务通知（free-end / 上新 RSS / chatops 命令回复等）继续走原 Push（含
+      outbox fallback），不受影响。
+
+      * fix(chatops/notify): UpdateConf 合并配置而非整体覆盖，避免编辑时丢失字段
+
+      之前 UpdateConf 把前端发的 partial config_json 整体加密覆盖到 DB，结果用户
+      在 Web UI 编辑某一项时（比如只填 proxy_url），其他原有字段（admin_users /
+      default_chat_id 等）全部丢失。
+
+      新行为：UpdateConf 接到 config_json 时先解密 DB 现有值，json.Unmarshal 成
+      map，与 partial 新值 merge（新值覆盖、缺失键保留），再加密回写。
+
+      前端 loadDetail 同步修复：把 GET 返回的 config_json 对象 flatten 到表单
+      绑定的 conf 上，避免编辑表单 v-model 显示为空。
+
+      单测覆盖 partial update 不丢字段、partial 同 key 覆盖两个场景。
+
+      * feat(chatops/notify): 通道配置变更后自动热重载，无需重启服务
+
+      之前 UpdateConf / CreateConf / DeleteConf 修改 DB 后，运行中的通道实例
+      继续使用启动时的旧配置（如 proxy_url、bot_token），用户必须手动重启服务
+      才能让新配置生效。
+
+      - NotificationService 在 Create/Update/DeleteConf 成功后 publish
+       events.ConfigChanged{Source: "notification"}
+      - cmd/web.go 在 bootstrapChatOps 后启动订阅 goroutine，收到该事件时
+       重建 bs.channels：先逐个 Close 旧实例（带 chatopsShutdownPerStep
+       超时），再调 initEnabledChannels 重新加载所有 enabled=true 的 conf
+       并 Init，最后重新注册 RSS callback action handler 与 liveManager
+      - 全量重建匹配 core/config_store.go 现有模式，避免逐通道 dirty 状态
+       追踪；通道 Init 是轻量操作（TG 仅打开新 HTTPS client）
+      - internal/app/notification_service_test.go 新增 4 个测试覆盖
+       Create/Update/Delete 触发事件、空 UpdateConf 不触发事件
+
+      实测：编辑 telegram conf 的 proxy_url 后 1ms 内通道重建完成，下一次
+      SendMessage 自动通过新代理发送，无需重启进程。
+
+      * fix(chatops/telegram): default_chat_id / admin_users 容错 string 与 int 混合输入
+
+      之前 Config 用强类型 int64 / []int64，用户在 Web UI 表单填字符串
+      （@channelusername、加引号的数字 "8576996727"、混合数组等）会让整个
+      channel init 失败：
+
+       ChatOps 通道初始化失败 conf_id=1 type=telegram: telegram: 解析
+       config_json 失败: json: cannot unmarshal string into Go struct field
+       Config.default_chat_id of type int64
+
+      按 Telegram Bot API 官方语义，chat_id 同时支持 Integer 与 String
+      (@channelusername)。改 Config 字段为 json.RawMessage，访问通过 helper
+      （DefaultChatIDInt / DefaultChatIDUsername / AdminUsersList /
+      AllowedUsersList）做容错解析：
+
+      - 数字 → ID
+      - 加引号的数字字符串 → 解析为 ID
+      - @ 前缀字符串 → Username（@ 缺失自动补）
+      - 混合数组中坏条目跳过、不再 abort init
+
+      resolveChatID 返回 telego.ChatID 而非 int64，让 username 形式也能正常发
+      （频道公告等用例需要）。inbound.go 鉴权改用 cfg.AdminUsersList() /
+      cfg.AllowedUsersList()。
+
+      新增单测覆盖 int / 加引号 int / @username / mixed array / bad entry 五种
+      输入。
+
+      * fix(test): rss_retry_worker_test 协调 mockNow 与 row CreatedAt 避免时区差异 fail
+
+      之前测试用 real time.Now() 创建 row 但用 mock 2026-05-16 12:00 UTC 作为 worker now，
+      两者时差导致 query 'next_retry_at <= mock_now' 在 CI（UTC）和某些时区本地都找不到
+      row (past = real_now - 1min > mock_now)。
+
+      改用一致 mockNow 作为整个测试的时间基准：row.CreatedAt / past / w.now() 全部锚定
+      mockNow，确保 query 总能命中。
+
+## [ext-v0.2.0] - 2026-05-16
+
+### Bug Fixes
+
+- **ci/extension-publish**: 通过 env 注入 secrets 防止 $ 字符被 shell 展开 ([#336](https://github.com/sunerpy/pt-tools/issues/336)) ([#336](https://github.com/sunerpy/pt-tools/pull/336))
+  含 $ 字符的 EDGE_API_KEY 在 ${{ secrets.EDGE_API_KEY }} 模板展开后直接进入
+      shell 命令字符串，bash 把 $BzUHf30Hi8G3N 当作变量替换为空，导致 API 鉴权
+      401。改为通过 env: 注入 + shell 用 "$VAR" 引用，避免任何展开。
+
+### Miscellaneous
+
+- **extension**: 版本 0.1.0 → 0.2.0 准备首次 Edge 商店 API 发布 ([#335](https://github.com/sunerpy/pt-tools/issues/335)) ([#335](https://github.com/sunerpy/pt-tools/pull/335))
+
+* chore(extension): 版本 0.1.0 → 0.2.0 准备首次 Edge 商店 API 发布
+
+      * chore: oxfmt 同步 CHANGELOG.md (release-please 提交后)
+
 ## [0.31.1] - 2026-05-16
 
 ### Bug Fixes
@@ -738,12 +848,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
