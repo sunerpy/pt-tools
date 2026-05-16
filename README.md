@@ -19,12 +19,13 @@
 
 pt-tools 现支持通过 **QQ** 或 **Telegram** 机器人远程管理：
 
-- 🇨🇳 **QQ OneBot** via [NapCat](https://github.com/NapNeko/NapCatQQ)（reverse-WebSocket，私聊命令）
-- 🌍 **Telegram Bot** via [BotFather](https://t.me/BotFather)（long-poll，私聊命令，支持代理）
-- 📨 出站推送：企业微信群机器人 / 自定义 Webhook（HMAC-SHA256）
+- 🇨🇳 **QQ OneBot** via [NapCat](https://github.com/NapNeko/NapCatQQ)（reverse-WebSocket，私聊命令，已端到端验证）
+- 🌍 **Telegram Bot** via [BotFather](https://t.me/BotFather)（long-poll，私聊命令，支持代理，已端到端验证）
 - 🛠️ 内置 11 个命令：`/help` `/status` `/version` `/tasks` `/sites` `/torrents` `/pause` `/resume` `/delete` `/bind` `/unbind`
 - 📡 **RSS 上新通知**：QQ/Telegram 推送站点新种，支持全量/规则匹配双模式 + 静默时段 + digest 合并
 - 🔐 安全：管理员白名单、绑定码 TTL（5min/1h/1d/30d/永久）、AES-GCM 加密落库、HMAC 签名 webhook、操作审计日志
+
+> **实验性出站通道（暂未端到端验证）**：企业微信群机器人 / 自定义 Webhook（HMAC-SHA256）— 代码已实现，欢迎贡献测试反馈。
 
 详见：
 

@@ -105,12 +105,35 @@
 
 填写基本信息后点确定，系统会创建通道并跳转到详情页。进入「**凭证**」标签，填写：
 
+### 字段语义说明
+
+Telegram 通道有两个白名单字段，语义不同：
+
+| 字段 | 谁能使用 | 权限 |
+|------|---------|------|
+| `admin_users` | 管理员的 TG user_id 列表 | 可发送 `/help`、`/bind` 等斜杠命令；可收消息 |
+| `allowed_users` | 允许互动的普通用户 user_id 列表 | 可与 bot 发普通文本对话 + 收消息；**不能**使用斜杠命令 |
+| `default_chat_id` | 主动推送目标 | 当 pt-tools 主动发通知时投递到此 chat_id |
+
+**单人自用场景**：只填 `admin_users = [你的 user_id]` + `default_chat_id = 你的 user_id` 即可，`allowed_users` 留空。这样：
+- 出站推送：通过 `default_chat_id` 投递（不依赖白名单）
+- 入站命令：通过 `admin_users` 鉴权（你能发命令；其他人发被拒绝）
+
+**多人共享场景**：
+- 管理员 user_id 加入 `admin_users`
+- 普通成员 user_id 加入 `allowed_users`
+- 普通成员可以收推送、回普通话给 bot；但不能 `/bind` / `/help` 这些操作
+
+**两者都空**：任何 TG 用户给 bot 发消息都会被拒绝（`denied:not_in_whitelist`）；出站推送仍然有效（不走白名单）。
+
+### 凭证字段
+
 | 字段 | 填写值 | 说明 |
 |------|--------|------|
 | Bot Token | `123456789:ABCdef...` | 从 BotFather 拿到的 token |
-| 允许用户（allowed_users） | `[你的user_id]` | 仅这些用户可与 bot 交互，留空则不限制（不推荐） |
-| 管理员用户（admin_users） | `[你的user_id]` | 可执行 pause/resume/delete 等管理命令 |
-| 默认 Chat ID | `你的user_id` | pt-tools 主动推送消息时的默认目标 |
+| 管理员用户（admin_users） | `[你的user_id]` | 见上方「字段语义说明」 |
+| 允许用户（allowed_users） | `[你的user_id]` | 见上方「字段语义说明」（可留空） |
+| 默认 Chat ID | `你的user_id` | 见上方「字段语义说明」（必填） |
 | 轮询超时（polling_timeout_seconds） | `30` | 长轮询超时，推荐 30，网络好的情况可以调高 |
 | 代理 URL（可选） | `http://127.0.0.1:1080` | 如果需要代理才能访问 TG，填这里（见第 6 节） |
 
