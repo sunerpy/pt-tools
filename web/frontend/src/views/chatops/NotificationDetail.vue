@@ -406,7 +406,7 @@ function goBack() {
               </el-form-item>
               <el-form-item label="允许用户 (allowed_users)">
                 <el-input
-                  v-model="(conf as any).allowed_users_text"
+                  v-model="tgForm.allowed_users_text"
                   type="textarea"
                   :rows="2"
                   placeholder="逗号分隔的 Telegram user_id 列表，例如：123456789,987654321（留空表示允许所有）" />
@@ -417,7 +417,7 @@ function goBack() {
               </el-form-item>
               <el-form-item label="管理员用户 (admin_users)">
                 <el-input
-                  v-model="(conf as any).admin_users_text"
+                  v-model="tgForm.admin_users_text"
                   type="textarea"
                   :rows="2"
                   placeholder="逗号分隔的 Telegram user_id 列表，例如：123456789" />
@@ -427,7 +427,7 @@ function goBack() {
               </el-form-item>
               <el-form-item label="默认 Chat ID">
                 <el-input
-                  v-model="(conf as any).default_chat_id_text"
+                  v-model="tgForm.default_chat_id_text"
                   placeholder="主动推送时使用的 chat_id（数字 user_id 或 @channelusername）" />
                 <div class="form-hint">
                   出站推送目标。可填用户 user_id（数字）或 @channelusername（公开频道）。
