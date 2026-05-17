@@ -87,7 +87,7 @@ func TestServer_AuthAndLogin(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/global", nil)
 		h := srv.auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 		h(rr, req)
-		assert.Equal(t, http.StatusFound, rr.Code)
+		assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	})
 	t.Run("auth wrapper with session ok", func(t *testing.T) {
 		rr := httptest.NewRecorder()
@@ -99,6 +99,46 @@ func TestServer_AuthAndLogin(t *testing.T) {
 		h(rr, req)
 		assert.Equal(t, http.StatusOK, rr.Code)
 	})
+}
+
+func TestAuth_APIPathReturns401_NotRedirect(t *testing.T) {
+	srv := setupServer(t)
+	h := srv.auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	cases := []string{
+		"/api/sites",
+		"/api/sites/hdsky",
+		"/api/global",
+		"/api/v2/userinfo/aggregated",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, path, nil)
+			h(rr, req)
+			assert.Equal(t, http.StatusUnauthorized, rr.Code)
+			assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
+			body := rr.Body.String()
+			assert.Contains(t, body, "unauthorized")
+			assert.Contains(t, body, "session")
+		})
+	}
+}
+
+func TestAuth_SPAPathReturns302_StillRedirects(t *testing.T) {
+	srv := setupServer(t)
+	h := srv.auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	cases := []string{"/", "/dashboard", "/sites/hdsky", "/login-page"}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			h(rr, req)
+			assert.Equal(t, http.StatusFound, rr.Code)
+			assert.Equal(t, "/login", rr.Header().Get("Location"))
+		})
+	}
 }
 
 func TestServer_APIs(t *testing.T) {
