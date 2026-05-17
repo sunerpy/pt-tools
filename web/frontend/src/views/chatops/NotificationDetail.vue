@@ -26,6 +26,12 @@ const conf = reactive<NotificationConfig>({
   enabled: true,
 });
 
+const tgForm = reactive({
+  admin_users_text: "",
+  allowed_users_text: "",
+  default_chat_id_text: "",
+});
+
 interface TestResult {
   success: boolean;
   message: string;
@@ -96,12 +102,18 @@ async function loadDetail() {
       Object.assign(conf, cfg as Record<string, unknown>);
     }
     if (conf.channel_type === "qq_onebot") {
-      conf.admin_qq_users = qqListToText(
+      conf.admin_qq_users = userIdListToText(
         (conf as unknown as Record<string, unknown>).admin_qq_users,
       );
-      conf.allowed_qq_users = qqListToText(
+      conf.allowed_qq_users = userIdListToText(
         (conf as unknown as Record<string, unknown>).allowed_qq_users,
       );
+    } else if (conf.channel_type === "telegram") {
+      const sink = conf as unknown as Record<string, unknown>;
+      tgForm.admin_users_text = userIdListToText(sink.admin_users);
+      tgForm.allowed_users_text = userIdListToText(sink.allowed_users);
+      const dcid = sink.default_chat_id;
+      tgForm.default_chat_id_text = dcid != null && dcid !== "" ? String(dcid) : "";
     }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载详情失败");
@@ -110,7 +122,7 @@ async function loadDetail() {
   }
 }
 
-function parseQQList(raw: unknown): number[] {
+function parseUserIdList(raw: unknown): number[] {
   if (Array.isArray(raw)) {
     return raw.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0);
   }
@@ -123,11 +135,12 @@ function parseQQList(raw: unknown): number[] {
     .filter((n) => Number.isFinite(n) && n > 0);
 }
 
-function qqListToText(raw: unknown): string {
+function userIdListToText(raw: unknown): string {
   if (Array.isArray(raw)) {
     return raw.filter((x) => x !== null && x !== undefined && x !== "").join(",");
   }
   if (typeof raw === "string") return raw;
+  if (typeof raw === "number") return String(raw);
   return "";
 }
 
@@ -163,16 +176,29 @@ async function handleSaveCredentials() {
     switch (conf.channel_type) {
       case "telegram":
         payload.bot_token = conf.bot_token;
-        payload.allowed_users = conf.allowed_users;
-        payload.admin_users = conf.admin_users;
-        payload.default_chat_id = conf.default_chat_id;
+        {
+          (payload as unknown as Record<string, unknown>).allowed_users = parseUserIdList(
+            tgForm.allowed_users_text,
+          );
+          (payload as unknown as Record<string, unknown>).admin_users = parseUserIdList(
+            tgForm.admin_users_text,
+          );
+          const dcidText = tgForm.default_chat_id_text.trim();
+          if (dcidText === "") {
+            (payload as unknown as Record<string, unknown>).default_chat_id = "";
+          } else {
+            const asNum = Number(dcidText);
+            (payload as unknown as Record<string, unknown>).default_chat_id =
+              Number.isFinite(asNum) && /^-?\d+$/.test(dcidText) ? asNum : dcidText;
+          }
+        }
         payload.proxy_url = conf.proxy_url;
         break;
       case "qq_onebot":
         payload.listen_addr = conf.listen_addr;
         payload.access_token = conf.access_token;
-        payload.admin_qq_users = parseQQList(conf.admin_qq_users) as unknown as string;
-        payload.allowed_qq_users = parseQQList(conf.allowed_qq_users) as unknown as string;
+        payload.admin_qq_users = parseUserIdList(conf.admin_qq_users) as unknown as string;
+        payload.allowed_qq_users = parseUserIdList(conf.allowed_qq_users) as unknown as string;
         break;
       case "webhook":
         payload.endpoint_url = conf.endpoint_url;
@@ -380,22 +406,32 @@ function goBack() {
               </el-form-item>
               <el-form-item label="允许用户 (allowed_users)">
                 <el-input
-                  v-model="conf.allowed_users"
+                  v-model="(conf as any).allowed_users_text"
                   type="textarea"
                   :rows="2"
-                  placeholder="逗号分隔的 Telegram user_id 列表，留空表示允许所有" />
-                <div class="form-hint">仅这些 Telegram 用户可与机器人交互。</div>
+                  placeholder="逗号分隔的 Telegram user_id 列表，例如：123456789,987654321（留空表示允许所有）" />
+                <div class="form-hint">
+                  仅这些 Telegram
+                  用户可与机器人交互（接收消息、发送非管理员命令）。留空表示允许所有用户。
+                </div>
               </el-form-item>
               <el-form-item label="管理员用户 (admin_users)">
                 <el-input
-                  v-model="conf.admin_users"
+                  v-model="(conf as any).admin_users_text"
                   type="textarea"
                   :rows="2"
-                  placeholder="逗号分隔的 Telegram user_id 列表" />
-                <div class="form-hint">管理员可执行受限指令。</div>
+                  placeholder="逗号分隔的 Telegram user_id 列表，例如：123456789" />
+                <div class="form-hint">
+                  管理员可执行 /unbind /pause /resume /delete 等管理命令。
+                </div>
               </el-form-item>
               <el-form-item label="默认 Chat ID">
-                <el-input v-model="conf.default_chat_id" placeholder="主动推送时使用的 chat_id" />
+                <el-input
+                  v-model="(conf as any).default_chat_id_text"
+                  placeholder="主动推送时使用的 chat_id（数字 user_id 或 @channelusername）" />
+                <div class="form-hint">
+                  出站推送目标。可填用户 user_id（数字）或 @channelusername（公开频道）。
+                </div>
               </el-form-item>
               <el-form-item label="代理 URL（可选）" prop="proxy_url">
                 <el-input

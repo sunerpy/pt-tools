@@ -1215,7 +1215,18 @@ function unpackNotificationResponse(
     quiet_hours_end: raw.quiet_hours_end,
   };
   const sink = result as unknown as Record<string, unknown>;
-  const arrayFields = new Set(["admin_qq_users", "allowed_qq_users"]);
+  // Fields that may legitimately come back as arrays of user IDs (number[] / string[]).
+  // Telegram admin_users / allowed_users are []int64 on the backend; QQ counterparts
+  // are []int64 too (raw json.RawMessage tolerated). Preserve them so the form can
+  // render array → comma-separated text via its own loadDetail transform.
+  const arrayFields = new Set([
+    "admin_qq_users",
+    "allowed_qq_users",
+    "admin_users",
+    "allowed_users",
+  ]);
+  // Fields that may come back as numbers (default_chat_id can be int64 OR string).
+  const numericFields = new Set(["default_chat_id"]);
   for (const key of Object.keys(raw) as (keyof typeof raw)[]) {
     if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
     if (key === "config_json") continue;
@@ -1223,6 +1234,8 @@ function unpackNotificationResponse(
     if (typeof v === "string") {
       sink[key as string] = v;
     } else if (Array.isArray(v) && arrayFields.has(key as string)) {
+      sink[key as string] = v;
+    } else if (typeof v === "number" && numericFields.has(key as string)) {
       sink[key as string] = v;
     }
   }
@@ -1233,6 +1246,8 @@ function unpackNotificationResponse(
       if (typeof v === "string") {
         sink[key] = v;
       } else if (Array.isArray(v) && arrayFields.has(key)) {
+        sink[key] = v;
+      } else if (typeof v === "number" && numericFields.has(key)) {
         sink[key] = v;
       }
     }
