@@ -233,6 +233,19 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
 		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+			// 对 API 请求返回 401 + JSON，避免浏览器扩展/CLI 客户端
+			// 因 fetch 默认 follow 302 跳转到 /login → GET /login → 405
+			// 而看不到真正的 "未登录" 提示。
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error":   "unauthorized",
+					"message": "session 无效或已过期，请重新登录",
+				})
+				return
+			}
+			// SPA 路径保持 302，让浏览器用户透明跳转到登录页
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}

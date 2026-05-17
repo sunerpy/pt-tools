@@ -12,8 +12,6 @@ import (
 
 const denyMessage = "您没有权限执行此操作。"
 
-const adminOnlyMessage = "只有管理员才有权限执行此命令。"
-
 func (c *TelegramChannel) runInbound(ctx context.Context, src updateSource) {
 	c.mu.RLock()
 	done := c.pollDone
@@ -65,7 +63,6 @@ func (c *TelegramChannel) handleUpdate(ctx context.Context, upd telego.Update) {
 
 	userID := msg.From.ID
 	chatID := msg.Chat.ID
-	isCommand := strings.HasPrefix(text, "/")
 
 	c.mu.RLock()
 	cfg := c.cfg
@@ -76,10 +73,10 @@ func (c *TelegramChannel) handleUpdate(ctx context.Context, upd telego.Update) {
 		return
 	}
 
-	if !permitted(userID, cfg, isCommand) {
-		c.replyDenied(ctx, chatID, isCommand)
-		c.logger.Infof("telegram: 拒绝消息 conf=%d user=%d cmd=%v reason=%s",
-			c.confID, userID, isCommand, denyReason(userID, cfg, isCommand))
+	if !permitted(userID, cfg) {
+		c.replyDenied(ctx, chatID)
+		c.logger.Infof("telegram: 拒绝消息 conf=%d user=%d reason=%s",
+			c.confID, userID, denyReason())
 		return
 	}
 
@@ -101,37 +98,30 @@ func (c *TelegramChannel) handleUpdate(ctx context.Context, upd telego.Update) {
 	}
 }
 
-func permitted(userID int64, cfg *Config, isCommand bool) bool {
-	admins := cfg.AdminUsersList()
-	allowed := cfg.AllowedUsersList()
-	if isCommand {
-		if !contains(admins, userID) {
-			return false
-		}
+// permitted returns whether the user is on either whitelist (admin or allowed).
+// Per-command admin-only gating is enforced downstream in MessageChain.Process
+// based on the binding.PtAdmin flag, not here.
+func permitted(userID int64, cfg *Config) bool {
+	if contains(cfg.AdminUsersList(), userID) {
+		return true
 	}
-	if !contains(allowed, userID) && !contains(admins, userID) {
-		return false
+	if contains(cfg.AllowedUsersList(), userID) {
+		return true
 	}
-	return true
+	return false
 }
 
-func denyReason(userID int64, cfg *Config, isCommand bool) string {
-	admins := cfg.AdminUsersList()
-	allowed := cfg.AllowedUsersList()
-	if isCommand && !contains(admins, userID) {
-		if contains(allowed, userID) {
-			return "denied:not_admin"
-		}
-		return "denied:not_in_whitelist"
-	}
+// denyReason returns the rejection reason. Always "denied:not_in_whitelist"
+// at adapter layer — per-command admin checks emit "denied:not_admin" from
+// the chain layer.
+func denyReason() string {
 	return "denied:not_in_whitelist"
 }
 
-func (c *TelegramChannel) replyDenied(ctx context.Context, chatID int64, isCommand bool) {
-	text := denyMessage
-	if isCommand {
-		text = adminOnlyMessage
-	}
+// replyDenied sends a generic "not whitelisted" message. Per-command admin
+// gating happens at the chain layer with its own user-facing reply
+// ("需管理员权限" via Reply{Text} in MessageChain.Process).
+func (c *TelegramChannel) replyDenied(ctx context.Context, chatID int64) {
 	c.mu.RLock()
 	bot := c.bot
 	c.mu.RUnlock()
@@ -140,7 +130,7 @@ func (c *TelegramChannel) replyDenied(ctx context.Context, chatID int64, isComma
 	}
 	if _, err := bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: chatID},
-		Text:   text,
+		Text:   denyMessage,
 	}); err != nil {
 		c.logger.Warnf("telegram: 发送拒绝消息失败 conf=%d chat=%d: %v",
 			c.confID, chatID, err)

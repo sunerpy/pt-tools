@@ -230,7 +230,7 @@ func waitForSend(t *testing.T, bot *fakeBot, want int) {
 	t.Fatalf("timeout waiting for %d sends; got %d", want, bot.sendCount())
 }
 
-func TestTelegramAdapter_PermissionGate_NonAdminCommand(t *testing.T) {
+func TestTelegramAdapter_PermissionGate_AllowedUserCanSendCommands(t *testing.T) {
 	bot := &fakeBot{}
 	src := newFakeSource()
 	plain := []byte(`{"bot_token":"123:abcdefghijklmnopqrstuvwxyzABCDEFGHIJK","allowed_users":[222],"admin_users":[111]}`)
@@ -247,17 +247,21 @@ func TestTelegramAdapter_PermissionGate_NonAdminCommand(t *testing.T) {
 			MessageID: 10,
 			From:      &telego.User{ID: 222, Username: "alice"},
 			Chat:      telego.Chat{ID: 222, Type: "private"},
-			Text:      "/pause abc",
+			Text:      "/help",
 		},
 	})
 
-	waitForSend(t, bot, 1)
-
-	last := bot.lastSend()
-	require.NotNil(t, last)
-	assert.Empty(t, last.ParseMode, "deny reply must be plain text (no parse_mode)")
-	assert.Contains(t, last.Text, "管理员")
-	assert.Equal(t, 0, handler.callCount(), "handler must NOT be invoked when permission denied")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if handler.callCount() == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Equal(t, 1, handler.callCount(), "allowed_users user must reach inbound handler for any command (admin-only check happens in chain layer)")
+	assert.Equal(t, "/help", handler.last.Text)
+	assert.Equal(t, "222", handler.last.ChannelUserID)
+	assert.Equal(t, 0, bot.sendCount(), "adapter must not auto-reply when user is on whitelist")
 }
 
 func TestTelegramAdapter_PermissionGate_NotInWhitelist(t *testing.T) {

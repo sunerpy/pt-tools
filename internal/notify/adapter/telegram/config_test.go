@@ -180,3 +180,22 @@ func TestParseChatIDString_TrimsWhitespace(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, telego.ChatID{ID: 555}, id)
 }
+
+func TestPermitted_AdmitsBothListsForAllMessages(t *testing.T) {
+	cfg := mustConfigFromJSON(t, `{"admin_users":[1],"allowed_users":[2]}`)
+
+	assert.True(t, permitted(1, cfg), "admin user must be admitted")
+	assert.True(t, permitted(2, cfg), "allowed user must be admitted (per-command admin gating happens in chain layer)")
+	assert.False(t, permitted(3, cfg), "user not in either list must be rejected")
+}
+
+func TestPermitted_EmptyLists(t *testing.T) {
+	cfg := mustConfigFromJSON(t, `{}`)
+
+	assert.False(t, permitted(1, cfg))
+	assert.False(t, permitted(0, cfg))
+}
+
+func TestDenyReason_AlwaysNotInWhitelist(t *testing.T) {
+	assert.Equal(t, "denied:not_in_whitelist", denyReason())
+}
