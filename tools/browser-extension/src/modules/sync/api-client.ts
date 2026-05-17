@@ -22,11 +22,7 @@ function trimSlash(value: string): string {
 }
 
 function isAuthRequired(response: Response): boolean {
-  return (
-    response.status === 401 ||
-    response.status === 0 ||
-    response.type === "opaqueredirect"
-  );
+  return response.status === 401 || response.status === 0 || response.type === "opaqueredirect";
 }
 
 export class PtToolsApiClient {
