@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.3] - 2026-05-17
+
+### Bug Fixes
+
+- **chatops**: 5 个用户反馈 bug + 表单/权限/UX 改进 (v0.31.3) ([#341](https://github.com/sunerpy/pt-tools/issues/341)) ([#341](https://github.com/sunerpy/pt-tools/pull/341))
+
+* fix(chatops/telegram): allowed_users 用户可以使用非管理员命令
+
+      之前 Telegram adapter 在 permitted() 里硬性要求"任何斜杠命令必须 admin"，
+      导致 allowed_users 的普通用户连 /help / /version 这种纯查询都被回复
+      "只有管理员才有权限执行此命令。"，与设计意图不符，且与 QQ adapter 行为不
+      一致 (QQ 同时接受 admin + allowed 进入命令链)。
+
+      修复：
+
+      - adapter 层只检查白名单（admin OR allowed），任意名单内用户都能进入命令链
+      - 命令级别的 AdminOnly 检查由 MessageChain.Process 在 binding.PtAdmin 上
+       细粒度执行，回复 "需管理员权限"（已存在的逻辑）
+      - AdminOnly 标记的 4 个命令仍然限管理员: /unbind /delete /pause /resume
+      - 其余 7 个命令（/help /status /version /tasks /sites /torrents /bind）
+       对所有白名单用户开放
+      - 删除 adminOnlyMessage 常量，permitted/denyReason/replyDenied 移除
+       isCommand 参数
+
+      文档同步：chatops-telegram.md 字段语义说明表更新 allowed_users 权限范围。
+
+      测试：新增 TestPermitted_AdmitsBothListsForAllMessages、
+      TestPermitted_EmptyLists、TestDenyReason_AlwaysNotInWhitelist；
+      将 TestTelegramAdapter_PermissionGate_NonAdminCommand 改写为
+      TestTelegramAdapter_PermissionGate_AllowedUserCanSendCommands 验证新语义。
+
+      * fix(web): API 路径 auth 失败时返 401 JSON 而非 302 重定向，扩展同步 Cookie 不再误报 405
+
+      之前 auth middleware 对未登录请求一律 302 跳 /login，浏览器扩展 fetch
+      默认 follow 重定向 → GET /login → /login 仅接受 POST → 405 Method Not
+      Allowed。用户看到 "HTTP 405" 完全不知道是 session 问题。
+
+      - web/server.go: auth middleware 检测 r.URL.Path 前缀 /api/，API 请求返
+       401 + JSON {error:"unauthorized", message:"..."}；SPA 路径保持 302
+       让浏览器用户透明跳转到 /login
+      - tools/browser-extension/src/modules/sync/api-client.ts: fetch 加
+       redirect:"manual"，对 401/opaqueredirect 显式抛 "未登录或会话已过期"
+       错误，让用户知道要先在扩展里登录 pt-tools；getSites/ping 同步加固
+      - web/server_test.go: 新增 TestAuth_APIPathReturns401_NotRedirect 与
+       TestAuth_SPAPathReturns302_StillRedirects 双向覆盖
+
+      * fix(chatops/chain): 非命令消息回复 /help 提示，不再 silent drop
+
+      之前用户发非 / 开头的普通文本（"你好" 等）被 silent ignore，没回复，
+      用户以为 bot 挂了。改为：
+      - 回复："🤖 我只识别命令消息（以 / 开头）。\n\n发送 /help 查看支持的命令清单。"
+      - audit result 由 user_message_ignored 改为 user_message_hinted 区分
+
+      unknown-command 分支（/ 开头但命令不存在）的"命令未知，发送 /help 查看"
+      逻辑保持不变。测试更新：
+      - TestProcess_FreeText_Bound_Ignored 改名为 TestProcess_FreeText_Bound_RepliesWithHelpHint
+      - 现在验证回复包含 /help 和命令消息相关内容
+
+      * fix(chatops/web): Telegram 表单 admin_users/allowed_users/default_chat_id 双向绑定
+
+      - textarea 直接 v-model 到 conf.admin_users（[]int64），数组在 input 显示
+       为空或乱码；保存时把 textarea 字符串当数组发，后端解析失败导致编辑保存
+       不生效
+      - 引入 tgForm 独立 reactive 持有 *_text 字段：加载时数组 → 逗号分隔文本，
+       保存时文本 → 数字数组（parseUserIdList 容错空白和非数字）
+      - default_chat_id 同理：number 显示为字符串，保存时含字母（@username）
+       保留字符串供 Telegram 公开频道使用，纯数字回转 number
+      - unpackNotificationResponse 此前仅 QQ 数组字段透传，Telegram []int64 与
+       数字 default_chat_id 被静默丢弃；扩充 arrayFields/numericFields 使
+       Telegram 配置完整流到表单
+      - QQ 既有 helper 重命名为通用 userIdListToText/parseUserIdList，TG/QQ 共用
+      - 提示文本明确格式（含示例）与权限范围
+
+      * fix(chatops/web): Telegram 表单 v-model 绑定到 tgForm 而不是 conf
+
+      01bb4f0 子 agent 把 *_text 字段写在 tgForm reactive 里，但 template
+      v-model 写成 (conf as any).admin_users_text — conf 上没这字段，强转
+      读到 undefined，textarea 永远空白。
+
+      3 处 v-model 改为 tgForm.{admin_users,allowed_users,default_chat_id}_text，
+      与 loadDetail / saveCredentials 中的 tgForm.* 引用对齐。
+
+      * chore: oxfmt 同步 CHANGELOG.md / chatops-telegram.md / api-client.ts
+
 ## [0.31.2] - 2026-05-16
 
 ### Bug Fixes
@@ -848,12 +932,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
