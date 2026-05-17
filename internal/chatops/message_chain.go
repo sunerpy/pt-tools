@@ -167,7 +167,10 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	}
 
 	if cmdName == "" {
-		mc.recordAudit(ctx, msg, binding.ConfID, "", nil, "user_message_ignored", start)
+		mc.recordAudit(ctx, msg, binding.ConfID, "", nil, "user_message_hinted", start)
+		mc.tryReply(ctx, msg, Reply{
+			Text: "🤖 我只识别命令消息（以 / 开头）。\n\n发送 /help 查看支持的命令清单。",
+		})
 		return nil
 	}
 

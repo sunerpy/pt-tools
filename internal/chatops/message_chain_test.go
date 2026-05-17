@@ -343,7 +343,7 @@ func TestProcess_NotBound_FreeText_Ignored(t *testing.T) {
 	assert.Equal(t, "denied:not_bound", entries[0].Result)
 }
 
-func TestProcess_FreeText_Bound_Ignored(t *testing.T) {
+func TestProcess_FreeText_Bound_RepliesWithHelpHint(t *testing.T) {
 	f := newChain(t)
 	f.bindings.exists = true
 	f.bindings.binding = BindingInfo{ID: 1, ConfID: 7, Allowed: true}
@@ -353,9 +353,11 @@ func TestProcess_FreeText_Bound_Ignored(t *testing.T) {
 
 	entries := f.audit.snapshot()
 	require.Len(t, entries, 1)
-	assert.Equal(t, "user_message_ignored", entries[0].Result)
-	_, replied := f.replier.lastReply()
-	assert.False(t, replied)
+	assert.Equal(t, "user_message_hinted", entries[0].Result)
+	reply, replied := f.replier.lastReply()
+	assert.True(t, replied)
+	assert.Contains(t, reply.Text, "/help")
+	assert.Contains(t, reply.Text, "命令消息")
 }
 
 func TestProcess_BindingNotAllowed(t *testing.T) {
