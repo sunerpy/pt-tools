@@ -26,10 +26,23 @@ const themeStyleOptions = [
   { label: "翡翠配色", value: "emerald" },
 ];
 
+// 路由 name -> 侧栏菜单 index 的映射。
+// 当路由 name 与菜单 index 不一致（例如详情页、ChatOps 子路由）时在此显式映射。
+const routeNameToMenuIndex: Record<string, string> = {
+  "userinfo-export": "userinfo",
+  "site-detail": "sites",
+  notifications: "chatops/notifications",
+  "notification-detail": "chatops/notifications",
+  bindings: "chatops/bindings",
+  "audit-log": "chatops/audit",
+  "rss-notifications": "chatops/rss-notifications",
+};
+
 const activeMenu = computed(() => {
-  const name = route.name as string;
-  if (name === "site-detail") return "sites";
-  return name || "global";
+  const name = route.name as string | undefined;
+  // 路由尚未就绪（首屏挂载第一帧）时返回空串，避免错误地高亮「全局设置」造成闪烁。
+  if (!name) return "";
+  return routeNameToMenuIndex[name] ?? name;
 });
 const isImmersive = computed(() => route.name === "downloader-hub");
 
