@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.1] - 2026-05-22
+
+### Bug Fixes
+
+- **scheduler**: 修复部分种子免费期结束后未自动暂停
+- updateAllMonitoredProgress / updateAllPushedTasksProgress 不再仅凭
+  progress=1.0 标记 is_completed；新增 isTorrentTrulyCompleted 同时校验
+  下载器状态（仅 Seeding/Queued 视为完成），避免 pausedDL/missingFiles/
+  checkingResumeData 等噪音状态被误判，导致种子被永久排除出免费期监控。- 移除完成路径上的 CancelTorrent，让定时器继续生效，便于后续真实状态
+  确认。- periodicCheck 在处理已过期种子之外，新增 rescheduleMissingFutureTorrents
+  补预约：扫描 free_end_time>now 但不在 pendingTasks 中的种子并重新调度，
+  覆盖初始 Schedule 漏调用 / 进程重启丢失定时器的场景。- ScheduleTorrent 在跳过调度时输出 Debug 日志（缺 FreeEndTime 或
+  DownloaderTaskID 各自独立提示），成功调度时升级到 Info 级别，便于
+  运维 grep "跳过调度" 诊断。- 测试：新增 4 组真实路径回归——pausedDL/stoppedDL/error/missingFiles/
+  checkingResumeData 在 progress=1.0 不应被标记完成；
+  uploading/stalledUP/forcedUP 应被标记完成；
+  periodicCheck 必须补预约错过初始 Schedule 的未来过期种子；
+  ScheduleTorrent 在缺前置条件时不进入 pendingTasks。- 更新 mock qBit 服务器：progress=1.0 时返回 uploading/stalledUP，
+  贴合真实 qBit 语义。
+
+### Build
+
+- **release**: 公告流程支持自定义 release-notes 文件并隐藏依赖噪音
+- telegram-release-announce.yml 在读取 release.body 之前先尝试加载
+  .github/release-notes/<tag>.md（带或不带 v 前缀均可）；存在则覆盖
+  release.body 作为 TG 公告输入。修复 v0.32.0 公告被 release-please
+  squash 进来的 6 个 dependabot PR body 污染、commit body 被截断的问题。- release-please-config.json 增加 changelog-sections，将 chore / docs /
+  style / refactor / test / build / ci / deps / deps(go) / deps(pnpm)
+  全部 hidden=true，仅在公告与 release body 中保留 feat / fix / perf /
+  revert，避免 dependabot 升级污染 release notes。CHANGELOG.md 仍由
+  git-cliff 单独完整生成。- 新增 .github/release-notes/README.md 说明覆盖文件命名与发版流程，
+  以及预置 v0.32.1.md 作为本次发版的精简公告（≤ 400 字）。
+
+### Documentation
+
+- **release-notes**: 合并 v0.32.0 公告至 v0.32.1，统一对外发布
+  v0.32.0 的 TG 公告由于 release-please 自动 body 被 dependabot 6 个 deps PR 污染、commit body 被截断，未能符合精简要求。本次发版的 TG 公告改为合并版，覆盖两次 release 的所有用户可见改动：
+
+        - 磁盘保护并发 race + 日志拆分（Issue #299）
+        - 5 站点 UserInfo 字段同步（Issue #332）
+        - GTKPW Cloudflare RSS UA
+        - 哈希计算失败提示
+        - 自动暂停误标完成 (v0.32.1 新修)
+
+        字数 ≈ 365 中文字符，符合 ≤400 限制；通过 .github/release-notes/v0.32.1.md 走新引入的 TG 公告覆盖路径。
+
 ## [0.32.0] - 2026-05-22
 
 ### Bug Fixes
@@ -1045,12 +1091,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
