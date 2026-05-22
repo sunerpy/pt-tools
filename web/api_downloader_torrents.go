@@ -1,16 +1,23 @@
 package web
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 type DownloaderTorrentItem struct {
@@ -713,12 +720,28 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 			})
 			continue
 		}
+		reservedSize, guardErr := reserveDownloaderAddDiskBudget(r.Context(), dl, torrentBytes, source)
+		if guardErr != nil {
+			resp.FailedCount++
+			resp.Results = append(resp.Results, AddDownloaderTorrentResult{
+				DownloaderID:   rec.ID,
+				DownloaderName: rec.Name,
+				Success:        false,
+				Message:        guardErr.Error(),
+			})
+			continue
+		}
 
 		var result downloader.AddTorrentResult
 		if len(torrentBytes) > 0 {
 			result, err = dl.AddTorrentFileEx(torrentBytes, opt)
 		} else {
 			result, err = dl.AddTorrentEx(source, opt)
+		}
+		if err != nil || !result.Success {
+			if reservedSize > 0 {
+				ptinternal.GetDiskBudget().Release(reservedSize)
+			}
 		}
 
 		if err != nil {
@@ -732,17 +755,82 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 
-		resp.SuccessCount++
+		if result.Success {
+			resp.SuccessCount++
+		} else {
+			resp.FailedCount++
+		}
 		resp.Results = append(resp.Results, AddDownloaderTorrentResult{
 			DownloaderID:   rec.ID,
 			DownloaderName: rec.Name,
 			Success:        result.Success,
 			TaskID:         result.ID,
 			Hash:           result.Hash,
+			Message:        fmt.Sprint(result.Message),
 		})
 	}
 
 	writeJSON(w, resp)
+}
+
+// reserveDownloaderAddDiskBudget executes the disk-protect gate for the manual
+// "add torrent" endpoint. Returns the reserved torrent size on success (caller
+// is responsible for Releasing it on failure paths). When disk protection is
+// disabled, returns (0, nil) and the caller must NOT call Release.
+//
+// Magnet / URL sources cannot be sized before the metadata is fetched, so they
+// are rejected when disk protection is on. This closes a bypass where a user
+// could submit a magnet and skip the gate entirely.
+func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloader, torrentBytes []byte, source string) (int64, error) {
+	glOnly, err := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+	if err != nil || !glOnly.CleanupDiskProtect || glOnly.CleanupMinDiskSpaceGB <= 0 {
+		return 0, nil
+	}
+
+	if len(torrentBytes) == 0 {
+		return 0, fmt.Errorf("[磁盘保护] 已启用，无法在添加前确定 magnet/URL 种子大小: %s。请改用 .torrent 文件上传，或在全局设置中关闭磁盘保护。", source)
+	}
+
+	torrentSize, sizeErr := qbit.ComputeTorrentSize(torrentBytes)
+	if sizeErr != nil {
+		return 0, fmt.Errorf("种子文件无效，无法解析大小: %w", sizeErr)
+	}
+
+	mu := ptinternal.PushMutex()
+	mu.Lock()
+	defer mu.Unlock()
+
+	freeSpace, spaceErr := dl.GetClientFreeSpace(ctx)
+	if spaceErr != nil {
+		return 0, fmt.Errorf("[磁盘保护] %s: 获取磁盘空间失败，拒绝添加: %w", dl.GetName(), spaceErr)
+	}
+	pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
+	if pendingErr != nil {
+		pendingBytes = 0
+	}
+	budget := ptinternal.GetDiskBudget()
+	effectiveFreeBytes := freeSpace - pendingBytes - budget.Reserved()
+	if effectiveFreeBytes < 0 {
+		effectiveFreeBytes = 0
+	}
+	minBytes := int64(glOnly.CleanupMinDiskSpaceGB * 1024 * 1024 * 1024)
+	if effectiveFreeBytes-torrentSize < minBytes {
+		effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
+		tGB := float64(torrentSize) / (1024 * 1024 * 1024)
+		freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
+		pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
+		reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
+		global.GetSlogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过手动添加",
+			dl.GetName(), freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
+		if glOnly.CleanupEnabled {
+			events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "downloader-add", At: time.Now()})
+		}
+		return 0, fmt.Errorf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB)
+	}
+	if torrentSize > 0 {
+		budget.Reserve(torrentSize)
+	}
+	return torrentSize, nil
 }
 
 func (s *Server) getDownloaderRecordMap() (map[uint]downloaderRecord, error) {

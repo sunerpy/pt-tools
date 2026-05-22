@@ -26,7 +26,14 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 			{
 				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
 				Assertion:     map[string]string{"id": "params.id"},
-				Fields:        []string{"name", "uploaded", "downloaded", "ratio", "levelName", "joinTime"},
+				Fields: []string{
+					"name", "uploaded", "downloaded", "ratio", "levelName", "joinTime",
+					"trueUploaded", "trueDownloaded",
+				},
+			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/mybonus.php", ResponseType: "document"},
+				Fields:        []string{"bonusPerHour"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -75,6 +82,41 @@ var GameGamePTDefinition = &v2.SiteDefinition{
 				Selector: []string{"#info_block"},
 				Attr:     "html",
 				Filters:  []v2.Filter{{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(\d+)`}}, {Name: "parseNumber"}},
+			},
+			"trueUploaded": {
+				Selector: []string{
+					"td.rowhead:contains('传输') + td",
+					"td.rowhead:contains('傳輸') + td",
+					"td.rowhead:contains('傳送') + td",
+				},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:实际上传量|實際上傳量|實際上傳|实际上传)</strong>[\s:：]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "parseSize"},
+				},
+			},
+			"trueDownloaded": {
+				Selector: []string{
+					"td.rowhead:contains('传输') + td",
+					"td.rowhead:contains('傳輸') + td",
+					"td.rowhead:contains('傳送') + td",
+				},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:实际下载量|實際下載量|實際下載|实际下载)</strong>[\s:：]*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "parseSize"},
+				},
+			},
+			"bonusPerHour": {
+				Selector: []string{
+					"#outer",
+					"body",
+				},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(?:你當前每小時能獲取|你当前每小时能获取|您當前每小時能獲取|您当前每小时能获取)[^\d-]{0,20}([\d.,]+)`}},
+					{Name: "parseNumber"},
+				},
 			},
 		},
 	},

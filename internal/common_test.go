@@ -759,6 +759,23 @@ func TestFetchRSSFeed(t *testing.T) {
 	require.Len(t, result.Items, 1)
 }
 
+// TestFetchRSSFeed_BrowserUserAgent 验证 RSS 请求会携带浏览器 User-Agent，
+// 否则 Cloudflare-fronted PT 站点（如 gtkpw）会直接 RST 连接（issue #332）。
+func TestFetchRSSFeed_BrowserUserAgent(t *testing.T) {
+	feed := `<?xml version="1.0"?><rss version="2.0"><channel><title>UA</title></channel></rss>`
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(feed))
+	}))
+	defer srv.Close()
+
+	_, err := fetchRSSFeed(srv.URL)
+	require.NoError(t, err)
+	require.Contains(t, gotUA, "Mozilla/5.0", "RSS fetcher must send a browser-like UA")
+}
+
 // TestFetchRSSFeed_InvalidURL 测试无效 URL
 func TestFetchRSSFeed_InvalidURL(t *testing.T) {
 	_, err := fetchRSSFeed("://invalid")

@@ -427,18 +427,15 @@ func TestTransmissionClientGetDiskSpaceWithError(t *testing.T) {
 
 	ctx := context.Background()
 	space, err := client.GetDiskSpace(ctx)
-	// 应该不返回错误，而是返回默认的 100GB
-	if err != nil {
-		t.Fatalf("expected no error when free-space fails, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error when free-space fails")
 	}
-
-	expectedSpace := int64(100 * 1024 * 1024 * 1024) // 100 GB default
-	if space != expectedSpace {
-		t.Errorf("expected default space %d (100GB), got %d", expectedSpace, space)
+	if space != 0 {
+		t.Errorf("expected zero space when free-space fails, got %d", space)
 	}
 }
 
-// TestTransmissionClientCanAddTorrentWithDiskSpaceError 测试磁盘空间检查失败时仍能添加种子
+// TestTransmissionClientCanAddTorrentWithDiskSpaceError 测试磁盘空间检查失败时 fail-closed
 func TestTransmissionClientCanAddTorrentWithDiskSpaceError(t *testing.T) {
 	server := createMockServerWithFreeSpaceError()
 	defer server.Close()
@@ -452,13 +449,12 @@ func TestTransmissionClientCanAddTorrentWithDiskSpaceError(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 即使 free-space 失败，也应该允许添加合理大小的种子
 	canAdd, err := client.CanAddTorrent(ctx, 1024*1024*100) // 100 MB
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error when disk space check fails")
 	}
-	if !canAdd {
-		t.Error("expected to be able to add torrent when disk space check fails with default value")
+	if canAdd {
+		t.Error("expected cannot add torrent when disk space check fails")
 	}
 }
 
@@ -686,14 +682,11 @@ func TestTransmissionClientGetDiskSpaceZero(t *testing.T) {
 
 	ctx := context.Background()
 	space, err := client.GetDiskSpace(ctx)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error when free-space returns zero")
 	}
-
-	// 当返回零空间时，应该返回默认的 100GB
-	expectedSpace := int64(100 * 1024 * 1024 * 1024)
-	if space != expectedSpace {
-		t.Errorf("expected default space %d (100GB), got %d", expectedSpace, space)
+	if space != 0 {
+		t.Errorf("expected zero space when free-space returns zero, got %d", space)
 	}
 }
 

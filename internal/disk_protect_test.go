@@ -8,8 +8,12 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,12 +22,14 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zeebo/bencode"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 // setUpDiskProtectTest 为磁盘保护测试初始化全局 DB + 写入 SettingsGlobal 行。
@@ -127,7 +133,9 @@ func TestDiskProtect_AllowsWhenSizeFits(t *testing.T) {
 		path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
 	require.NoError(t, err)
 	assert.Equal(t, 30*gb, GetDiskBudget().Reserved(),
-		"推送成功后应保留预算 30GB（由 cleanup_monitor Reset 或上层回收）")
+		"推送成功后预留必须保留：qBit torrents/info 在 1~2 秒内还看不到本种子，"+
+			"立即 Release 会让并发 worker 重复借用同一份磁盘空间（Issue #299 race）。"+
+			"预留由 cleanup_monitor 周期 Reset 归还。")
 }
 
 // TestDiskProtect_PendingDownloadsSubtracted 验证 in-flight pending 被扣除：
@@ -288,4 +296,117 @@ func TestDiskProtect_ConcurrentPushesSerializeAndReject(t *testing.T) {
 		"剩余 3 个 worker 应被磁盘保护拦截")
 	assert.Equal(t, 2*torrentSize, budget.Reserved(),
 		"通过的 2 个 worker 共预留 60GB")
+}
+
+// makeUniqueTorrentFile 创建一个内容唯一（基于 nameSuffix）的 .torrent 文件，
+// 用于让并发测试里多个 worker 拿到不同的 hash + 不同的 DB 行。
+func makeUniqueTorrentFile(t *testing.T, dir, nameSuffix string) (string, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	torrent := map[string]any{"info": map[string]any{"name": "abc-" + nameSuffix}}
+	require.NoError(t, bencode.NewEncoder(&buf).Encode(torrent))
+	path := filepath.Join(dir, "x-"+nameSuffix+".torrent")
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
+	h, err := qbit.ComputeTorrentHashWithPath(path)
+	require.NoError(t, err)
+	return path, h
+}
+
+// TestDiskProtect_RealRSSPath_SuccessKeepsReservation 是 P0 race 的真实路径回归。
+//
+// 旧版（推送成功立即 Release）会让此测试失败：
+//
+//	worker A 推送成功 → 立即 Release(30GB) → Reserved=0
+//	worker B 此时进入临界区 → 看到 effective_free = 100-0-0 = 100，30GB 通过
+//	worker C 同样通过 → 三个 worker 同时占用 100GB 中的 90GB
+//	最终 Reserved = 30GB（只有最后一个未 Release），但实际已超借
+//
+// 新版预期：成功后保留预留，cleanup_monitor 周期 Reset 归还。
+//
+// 100GB free, 0 pending, 30GB 种子, 阈值 20GB。
+// 第 1 个：effective=100, 100-30=70 ≥ 20，通过，Reserved=30
+// 第 2 个：effective=70, 70-30=40 ≥ 20，通过，Reserved=60
+// 第 3 个：effective=40, 40-30=10 < 20，拒绝
+// 第 4/5 个：同样拒绝
+// 期望 success=2 / fail=3 / final reserved = 60GB。
+func TestDiskProtect_RealRSSPath_SuccessKeepsReservation(t *testing.T) {
+	setUpDiskProtectTest(t)
+	dir := t.TempDir()
+
+	const workers = 5
+	const torrentSize int64 = 30 * gb
+	const free int64 = 100 * gb
+
+	type job struct {
+		path string
+		hash string
+	}
+	jobs := make([]job, workers)
+	for i := 0; i < workers; i++ {
+		path, hash := makeUniqueTorrentFile(t, dir, fmt.Sprintf("w%d", i))
+		pushed := false
+		future := time.Now().Add(1 * time.Hour)
+		ti := &models.TorrentInfo{
+			SiteName:     string(models.SiteGroup("springsunday")),
+			TorrentID:    fmt.Sprintf("race-w%d", i),
+			TorrentHash:  &hash,
+			IsPushed:     &pushed,
+			FreeEndTime:  &future,
+			TorrentSize:  torrentSize,
+			IsDownloaded: true,
+		}
+		require.NoError(t, global.GlobalDB.UpsertTorrent(ti))
+		jobs[i] = job{path: path, hash: hash}
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	for _, j := range jobs {
+		mockDl.EXPECT().CheckTorrentExists(j.hash).Return(false, nil).AnyTimes()
+	}
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(free, nil).AnyTimes()
+	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(data []byte, _ downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+			h, err := qbit.ComputeTorrentHash(data)
+			require.NoError(t, err)
+			return downloader.AddTorrentResult{Success: true, Hash: h}, nil
+		}).AnyTimes()
+
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+
+	var success, fail atomic.Int32
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		wg.Add(1)
+		go func(j job) {
+			defer wg.Done()
+			err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
+				j.path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
+			if err != nil {
+				if errors.Is(err, downloader.ErrInsufficientSpace) {
+					fail.Add(1)
+				} else {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			success.Add(1)
+		}(j)
+	}
+	wg.Wait()
+
+	t.Logf("成功 %d, 失败 %d, 最终预留 %d GB",
+		success.Load(), fail.Load(), GetDiskBudget().Reserved()/gb)
+
+	assert.Equal(t, int32(2), success.Load(),
+		"100GB free / 30GB 种子 / 20GB 阈值 → 仅前 2 个 worker 应该成功推送")
+	assert.Equal(t, int32(3), fail.Load(),
+		"后 3 个 worker 应被磁盘保护拦截")
+	assert.Equal(t, 2*torrentSize, GetDiskBudget().Reserved(),
+		"两次成功推送的预留必须保留，等待 cleanup_monitor 周期 Reset；"+
+			"如果此处显示 0 表示 P0 race 被复活：成功路径仍在立即 Release。")
 }

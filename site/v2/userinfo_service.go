@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,9 +119,14 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 		)
 		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, err)
 	}
+	if strings.TrimSpace(info.Username) == "" {
+		return UserInfo{}, fmt.Errorf("fetch user info from %s: parsed empty username", siteID)
+	}
 
 	// Save to repository
-	if err := s.repo.Save(ctx, info); err != nil {
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := s.repo.Save(saveCtx, info); err != nil {
 		s.logger.Error(
 			"Failed to save user info",
 			zap.String("site", siteID),

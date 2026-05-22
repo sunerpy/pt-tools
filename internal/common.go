@@ -338,6 +338,7 @@ func processSingleTorrentWithDownloader(
 	// 修复策略 = 三层减法 + 全局互斥锁串行化：
 	//   effective_free = client_free - in_flight_pending - pre_reserved
 	//   gate           = effective_free - thisTorrentSize >= threshold
+	var reservedTorrentSize int64
 	if glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
 		mu := PushMutex()
 		mu.Lock()
@@ -365,12 +366,22 @@ func processSingleTorrentWithDownloader(
 		if torrent != nil {
 			torrentSize = torrent.TorrentSize
 		}
+		if torrentSize <= 0 {
+			if torrentData, readErr := os.ReadFile(filePath); readErr == nil {
+				if parsedSize, sizeErr := qbit.ComputeTorrentSize(torrentData); sizeErr == nil {
+					torrentSize = parsedSize
+				}
+			}
+		}
 		minBytes := int64(glOnly.CleanupMinDiskSpaceGB * 1024 * 1024 * 1024)
 		if effectiveFreeBytes-torrentSize < minBytes {
 			effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
 			tGB := float64(torrentSize) / (1024 * 1024 * 1024)
-			sLogger().Warnf("[磁盘保护] %s: 空间不足 (有效 %.1f GB - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: %s",
-				dl.GetName(), effGB, tGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
+			pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
+			reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
+			sLogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: %s",
+				dl.GetName(), freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB, filePath)
 			if glOnly.CleanupEnabled {
 				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "rss", At: time.Now()})
 			}
@@ -380,6 +391,7 @@ func processSingleTorrentWithDownloader(
 		// 推送失败会在下方失败分支 Release 归还。
 		if torrentSize > 0 {
 			budget.Reserve(torrentSize)
+			reservedTorrentSize = torrentSize
 		}
 	}
 
@@ -402,8 +414,8 @@ func processSingleTorrentWithDownloader(
 		// 推送失败：归还预留配额，避免 budget 被永久占用。
 		// 注：torrent 可能为 nil（极少数情况下 GetTorrentBySiteAndHash 失败但仍走到这）；
 		// 由 Reserve 的零值守卫保证 Release(0) no-op。
-		if torrent != nil && glOnly.CleanupDiskProtect && torrent.TorrentSize > 0 {
-			GetDiskBudget().Release(torrent.TorrentSize)
+		if reservedTorrentSize > 0 {
+			GetDiskBudget().Release(reservedTorrentSize)
 		}
 		errMsg := ""
 		if pushErr != nil {
@@ -426,6 +438,13 @@ func processSingleTorrentWithDownloader(
 		}
 		return fmt.Errorf("推送种子失败: %s", errMsg)
 	}
+	// 推送成功的预留**不**在此处归还。
+	// 原因：AddTorrentFileEx 返回成功后，qBit 通常仍需 1~2 秒才会把新种子计入
+	// torrents/info 的 amount_left（in-flight pending）。如果此处立刻 Release，
+	// 这段窗口内并发 worker 看到 pre_reserved=0 且 pending 也不含本种子，会
+	// 把同一份磁盘空间重复借给两个推送 —— 即 Issue #299 的原始 race。
+	// 预留由 scheduler/cleanup_monitor.runOnce 的周期 Reset 归还（默认 30 分钟），
+	// 期间 effective_free 略偏保守但不会越界。详见 disk_budget.go 顶部注释。
 
 	pushed2 := true
 	now := time.Now()
@@ -478,6 +497,14 @@ func attemptDownloadWithContext(ctx context.Context, url, title, downloadDir str
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP 状态码错误: %d", resp.StatusCode)
 	}
+	// 获取响应体字节
+	bodyBytes := resp.Bytes()
+	// 先计算种子的 torrentHash，确认响应体确实是合法 .torrent 后再落盘。
+	// 旧逻辑先写文件再算 hash，站点返回 HTML/JSON 错误页时会留下无效 .torrent，后续推送扫描反复报错。
+	torrentHash, err := qbit.ComputeTorrentHash(bodyBytes)
+	if err != nil {
+		return "", fmt.Errorf("下载到的内容不是有效种子文件，无法解析 info hash: status=%d, size=%d, preview=%q, err=%w", resp.StatusCode, len(bodyBytes), invalidTorrentPreview(bodyBytes), err)
+	}
 	// 创建下载目录
 	if err = os.MkdirAll(downloadDir, os.ModePerm); err != nil {
 		return "", fmt.Errorf("创建下载目录失败: %v", err)
@@ -489,20 +516,30 @@ func attemptDownloadWithContext(ctx context.Context, url, title, downloadDir str
 		return "", fmt.Errorf("创建种子文件失败: %v", err)
 	}
 	defer file.Close()
-	// 获取响应体字节
-	bodyBytes := resp.Bytes()
 	// 写入文件
 	_, err = file.Write(bodyBytes)
 	if err != nil {
 		return "", fmt.Errorf("写入种子文件失败: %v", err)
 	}
-	// 计算种子的 torrentHash
-	torrentHash, err := qbit.ComputeTorrentHash(bodyBytes)
-	if err != nil {
-		return "", fmt.Errorf("计算种子哈希失败: %v", err)
-	}
 	// 下载成功
 	return torrentHash, nil
+}
+
+func invalidTorrentPreview(data []byte) string {
+	preview := strings.ToValidUTF8(string(data), "")
+	preview = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, preview)
+	preview = strings.TrimSpace(preview)
+	preview = regexp.MustCompile(`\s+`).ReplaceAllString(preview, " ")
+	runes := []rune(preview)
+	if len(runes) > 160 {
+		preview = string(runes[:160])
+	}
+	return preview
 }
 
 // 下载种子文件，包含重试机制
@@ -1091,13 +1128,44 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 }
 
 func fetchRSSFeed(url string) (*gofeed.Feed, error) {
-	parser := gofeed.NewParser()
-	feed, err := parser.ParseURL(url)
+	return fetchRSSFeedWithContext(context.Background(), url)
+}
+
+// fetchRSSFeedWithContext fetches an RSS feed with a real browser User-Agent so
+// Cloudflare-fronted PT trackers (e.g. gtkpw, agsvpt) don't drop the TLS handshake.
+// gofeed's default ParseURL sets a generic UA that is regularly RST'd by these CDNs.
+func fetchRSSFeedWithContext(ctx context.Context, url string) (*gofeed.Feed, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("解析 RSS 失败: %v", err)
+		return nil, fmt.Errorf("构造 RSS 请求失败: %w", err)
+	}
+	req.Header.Set("User-Agent", rssUserAgent)
+	req.Header.Set("Accept", "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("解析 RSS 失败: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("解析 RSS 失败: HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+
+	parser := gofeed.NewParser()
+	feed, err := parser.Parse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 RSS 失败: %w", err)
 	}
 	return feed, nil
 }
+
+const rssUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
 // FetchAndDownloadFreeRSS 旧的泛型版本（已废弃，请使用 FetchAndDownloadFreeRSSUnified）
 // Deprecated: Use FetchAndDownloadFreeRSSUnified instead for new implementations

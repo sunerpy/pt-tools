@@ -65,11 +65,17 @@ const gamegameptIndexFixture = `<html><body>
 
 const gamegameptUserdetailsFixture = `<html><body>
 <table>
-  <tr><td class="rowhead">用户ID/UID</td><td class="rowfollow">44933</td></tr>
-  <tr><td class="rowhead">加入日期</td><td class="rowfollow">2026-03-20 08:30:00 (<span title="2026-03-20 08:30:00">7天前</span>)</td></tr>
-  <tr><td class="rowhead">传输</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">4.000</font></td></tr><tr><td class="embedded"><strong>上传量</strong>: 1.00 TB</td><td class="embedded"><strong>下载量</strong>: 256.00 GB</td></tr></table></td></tr>
-  <tr><td class="rowhead">等级</td><td class="rowfollow"><img title="User" src="pic/user.gif" /></td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">用户ID/UID</td><td class="rowfollow">44933</td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">加入日期</td><td class="rowfollow">2026-03-20 08:30:00 (<span title="2026-03-20 08:30:00">7天前</span>)</td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">传输</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">4.000</font></td></tr><tr><td class="embedded"><strong>上传量</strong>: 1.00 TB</td><td class="embedded"><strong>下载量</strong>: 256.00 GB</td></tr><tr><td class="embedded"><strong>实际上传量</strong>: 50.00 TB</td><td class="embedded"><strong>实际下载量</strong>: 1.00 TB</td></tr></table></td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">等级</td><td class="rowfollow"><img title="User" src="pic/user.gif" /></td></tr>
 </table>
+</body></html>`
+
+const gamegameptMyBonusFixture = `<html><body>
+<div id="outer">
+您当前每小时能获取 56.78 个魔力值
+</div>
 </body></html>`
 
 const gamegameptDetailFixture = `<html><body>
@@ -147,6 +153,11 @@ func testGameGamePTUserInfo(t *testing.T) {
 	assert.Equal(t, "4", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "1773995400", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "54975581388800", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueUploaded"]))
+	assert.Equal(t, "1099511627776", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueDownloaded"]))
+
+	bonusDoc := FixtureDoc(t, "gamegamept_mybonus", gamegameptMyBonusFixture)
+	assert.Equal(t, "56.78", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
 }
 
 func TestGameGamePT_Fixtures_NoSecrets(t *testing.T) {
@@ -154,6 +165,7 @@ func TestGameGamePT_Fixtures_NoSecrets(t *testing.T) {
 		"search":      gamegameptSearchFixture,
 		"index":       gamegameptIndexFixture,
 		"userdetails": gamegameptUserdetailsFixture,
+		"mybonus":     gamegameptMyBonusFixture,
 		"detail":      gamegameptDetailFixture,
 	}
 	for name, data := range fixtures {

@@ -33,7 +33,7 @@ var PTTimeDefinition = &v2.SiteDefinition{
 			{
 				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
 				Assertion:     map[string]string{"id": "params.id"},
-				Fields:        []string{"joinTime"},
+				Fields:        []string{"joinTime", "bonusPerHour"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -121,6 +121,17 @@ var PTTimeDefinition = &v2.SiteDefinition{
 				Filters: []v2.Filter{
 					{Name: "split", Args: []any{" (", 0}},
 					{Name: "parseTime"},
+				},
+			},
+			"bonusPerHour": {
+				Selector: []string{
+					"#info_block",
+					"body",
+				},
+				Attr: "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`\(([\d.,]+)\s*魔力/小[時时]\)`}},
+					{Name: "parseNumber"},
 				},
 			},
 		},

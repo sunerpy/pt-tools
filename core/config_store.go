@@ -135,6 +135,8 @@ func (s *ConfigStore) GetGlobalOnly() (models.SettingsGlobal, error) {
 	out.DownloadSpeedLimit = 20
 	out.TorrentSizeGB = 200
 	out.AutoStart = false
+	out.CleanupDiskProtect = true
+	out.CleanupMinDiskSpaceGB = 50
 	return out, nil
 }
 
@@ -150,6 +152,8 @@ func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 		gs.DownloadSpeedLimit = 20
 		gs.TorrentSizeGB = 200
 		gs.AutoStart = false
+		gs.CleanupDiskProtect = true
+		gs.CleanupMinDiskSpaceGB = 50
 		return gs, nil
 	}
 	return gs, nil

@@ -160,8 +160,11 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		if effectiveFreeBytes-pushTorrentSize < minBytes {
 			effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
 			tGB := float64(pushTorrentSize) / (1024 * 1024 * 1024)
-			sLogger().Warnf("[磁盘保护] %s: 空间不足 (有效 %.1f GB - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: site=%s, id=%s",
-				dlSetting.Name, effGB, tGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
+			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
+			pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
+			reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
+			sLogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: site=%s, id=%s",
+				dlSetting.Name, freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
 			if glOnly.CleanupEnabled {
 				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "push", At: time.Now()})
 			}
@@ -211,6 +214,9 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			Message:     errMsg,
 		}, nil
 	}
+	// 推送成功的预留由 scheduler/cleanup_monitor 周期 Reset 归还，避免与
+	// downloader.GetIncompletePendingBytes 在 qBit 可见性窗口内双重计数
+	// （Issue #299 race，详见 disk_budget.go 顶部注释）。
 
 	// 推送成功，更新数据库状态
 	pushed := true
