@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,12 +224,14 @@ type MTorrentUserInfo struct {
 
 // MTorrentMemberCount contains upload/download stats
 type MTorrentMemberCount struct {
-	Uploaded   string `json:"uploaded"`
-	Downloaded string `json:"downloaded"`
-	Bonus      string `json:"bonus"`
-	ShareRate  string `json:"shareRate"`
-	Seedtime   string `json:"seedtime"`
-	Leechtime  string `json:"leechtime"`
+	Uploaded       string `json:"uploaded"`
+	Downloaded     string `json:"downloaded"`
+	TrueUploaded   string `json:"trueUploaded"`
+	TrueDownloaded string `json:"trueDownloaded"`
+	Bonus          string `json:"bonus"`
+	ShareRate      string `json:"shareRate"`
+	Seedtime       string `json:"seedtime"`
+	Leechtime      string `json:"leechtime"`
 }
 
 // MTorrentMemberStatus contains user status info
@@ -553,16 +556,18 @@ func (d *MTorrentDriver) ParseUserInfo(res MTorrentResponse) (UserInfo, error) {
 	levelID, _ := strconv.Atoi(userData.Role)
 
 	info := UserInfo{
-		UserID:     userData.ID,
-		Username:   userData.Username,
-		Uploaded:   parseSize(userData.MemberCount.Uploaded),
-		Downloaded: parseSize(userData.MemberCount.Downloaded),
-		Ratio:      ratio,
-		Bonus:      bonus,
-		Rank:       rank,
-		LevelName:  rank,
-		LevelID:    levelID,
-		LastUpdate: time.Now().Unix(),
+		UserID:         userData.ID,
+		Username:       userData.Username,
+		Uploaded:       parseSize(userData.MemberCount.Uploaded),
+		Downloaded:     parseSize(userData.MemberCount.Downloaded),
+		TrueUploaded:   parseSize(userData.MemberCount.TrueUploaded),
+		TrueDownloaded: parseSize(userData.MemberCount.TrueDownloaded),
+		Ratio:          ratio,
+		Bonus:          bonus,
+		Rank:           rank,
+		LevelName:      rank,
+		LevelID:        levelID,
+		LastUpdate:     time.Now().Unix(),
 	}
 
 	// Parse join date
@@ -656,7 +661,29 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, downloadURL)
 	}
 
-	return resp.Bytes(), nil
+	data := resp.Bytes()
+	if err := ValidateTorrentFile(data); err != nil {
+		return nil, fmt.Errorf("invalid torrent response from %s: size=%d, preview=%q, err=%w", downloadURL, len(data), torrentResponsePreview(data), err)
+	}
+
+	return data, nil
+}
+
+func torrentResponsePreview(data []byte) string {
+	preview := strings.ToValidUTF8(string(data), "")
+	preview = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, preview)
+	preview = strings.TrimSpace(preview)
+	preview = regexp.MustCompile(`\s+`).ReplaceAllString(preview, " ")
+	runes := []rune(preview)
+	if len(runes) > 160 {
+		preview = string(runes[:160])
+	}
+	return preview
 }
 
 // parseMTorrentDiscount parses M-Team discount string to DiscountLevel

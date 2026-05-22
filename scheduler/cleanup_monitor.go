@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
+	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -145,6 +146,14 @@ func (c *CleanupMonitor) loadConfig() *models.SettingsGlobal {
 }
 
 func (c *CleanupMonitor) runOnce(cfg *models.SettingsGlobal) {
+	// Reset 必须在 PushMutex 内执行：否则可能在某个 worker 的「Reserve → push」
+	// 中间清零，让下一个 worker 看到 pre_reserved=0 而重复借用同一份磁盘空间
+	// （Issue #299 race 的另一形态）。
+	mu := ptinternal.PushMutex()
+	mu.Lock()
+	ptinternal.GetDiskBudget().Reset()
+	mu.Unlock()
+
 	dlNames := c.downloaderMgr.ListDownloaders()
 	if len(dlNames) == 0 {
 		return

@@ -64,11 +64,17 @@ const gtkpwIndexFixture = `<html><body>
 
 const gtkpwUserdetailsFixture = `<html><body>
 <table>
-  <tr><td class="rowhead">用户ID/UID</td><td class="rowfollow">7283</td></tr>
-  <tr><td class="rowhead">加入日期</td><td class="rowfollow">2025-08-20 09:00:00 (<span title="2025-08-20 09:00:00">8月前</span>)</td></tr>
-  <tr><td class="rowhead">传输</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">6.789</font></td></tr><tr><td class="embedded"><strong>上传量</strong>: 3.50 TB</td><td class="embedded"><strong>下载量</strong>: 600.00 GB</td></tr></table></td></tr>
-  <tr><td class="rowhead">等级</td><td class="rowfollow"><img title="Crazy User" src="pic/crazyuser.gif" /></td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">用户ID/UID</td><td class="rowfollow">7283</td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">加入日期</td><td class="rowfollow">2025-08-20 09:00:00 (<span title="2025-08-20 09:00:00">8月前</span>)</td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">传输</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">6.789</font></td></tr><tr><td class="embedded"><strong>上传量</strong>: 3.50 TB</td><td class="embedded"><strong>下载量</strong>: 600.00 GB</td></tr><tr><td class="embedded"><strong>实际上传量</strong>: 4.00 TB</td><td class="embedded"><strong>实际下载量</strong>: 2.00 TB</td></tr></table></td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">等级</td><td class="rowfollow"><img title="Crazy User" src="pic/crazyuser.gif" /></td></tr>
 </table>
+</body></html>`
+
+const gtkpwMyBonusFixture = `<html><body>
+<div id="outer">
+您当前每小时能获取 23.45 个魔力值
+</div>
 </body></html>`
 
 const gtkpwDetailFixture = `<html><body>
@@ -146,6 +152,11 @@ func testGTKPWUserInfo(t *testing.T) {
 	assert.Equal(t, "644245094400", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "6.789", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Crazy User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
+	assert.Equal(t, "4398046511104", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueUploaded"]))
+	assert.Equal(t, "2199023255552", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueDownloaded"]))
+
+	bonusDoc := FixtureDoc(t, "gtkpw_mybonus", gtkpwMyBonusFixture)
+	assert.Equal(t, "23.45", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
 }
 
 func TestGTKPW_Fixtures_NoSecrets(t *testing.T) {
@@ -153,6 +164,7 @@ func TestGTKPW_Fixtures_NoSecrets(t *testing.T) {
 		"search":      gtkpwSearchFixture,
 		"index":       gtkpwIndexFixture,
 		"userdetails": gtkpwUserdetailsFixture,
+		"mybonus":     gtkpwMyBonusFixture,
 		"detail":      gtkpwDetailFixture,
 	}
 	for name, data := range fixtures {

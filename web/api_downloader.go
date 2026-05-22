@@ -2,7 +2,9 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -181,6 +183,11 @@ func (s *Server) createDownloader(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "URL不能为空", http.StatusBadRequest)
 		return
 	}
+	downloaderURL, err := normalizeDownloaderURL(req.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	db := global.GlobalDB.DB
 
@@ -207,7 +214,7 @@ func (s *Server) createDownloader(w http.ResponseWriter, r *http.Request) {
 	downloader := models.DownloaderSetting{
 		Name:        req.Name,
 		Type:        req.Type,
-		URL:         req.URL,
+		URL:         downloaderURL,
 		Username:    req.Username,
 		Password:    req.Password,
 		IsDefault:   req.IsDefault,
@@ -303,7 +310,12 @@ func (s *Server) updateDownloader(w http.ResponseWriter, r *http.Request, id uin
 		downloader.Type = req.Type
 	}
 	if req.URL != "" {
-		downloader.URL = req.URL
+		downloaderURL, err := normalizeDownloaderURL(req.URL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		downloader.URL = downloaderURL
 	}
 	downloader.Username = req.Username
 	if req.Password != "" {
@@ -334,6 +346,30 @@ func (s *Server) updateDownloader(w http.ResponseWriter, r *http.Request, id uin
 		AutoStart:   downloader.AutoStart,
 		ExtraConfig: downloader.ExtraConfig,
 	})
+}
+
+func normalizeDownloaderURL(rawURL string) (string, error) {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return "", fmt.Errorf("URL不能为空")
+	}
+	if !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return "", fmt.Errorf("URL格式无效")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("URL仅支持 http 或 https")
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("URL中请勿包含用户名或密码")
+	}
+	if parsed.Fragment != "" {
+		return "", fmt.Errorf("URL中请勿包含片段标识")
+	}
+	return strings.TrimRight(value, "/"), nil
 }
 
 // deleteDownloader 删除下载器

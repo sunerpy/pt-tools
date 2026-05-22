@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -25,6 +26,11 @@ type TorrentDetailForTest struct {
 	Tag    string // 种子标签/副标题
 	IsFree bool   // 是否免费
 }
+
+var mtorrentDetailLimiter = struct {
+	sync.Mutex
+	next map[models.SiteGroup]time.Time
+}{next: make(map[models.SiteGroup]time.Time)}
 
 // GetTorrentDetailForTest 获取种子详情用于过滤规则测试
 // 根据站点类型调用对应的 API 获取完整的种子信息
@@ -102,6 +108,9 @@ func fetchMTorrentDetail(ctx context.Context, siteName models.SiteGroup, item *g
 	}
 	req.AddHeader("Content-Type", "application/x-www-form-urlencoded")
 	req.AddHeader("x-api-key", sc.APIKey)
+	if rateErr := waitMTorrentDetailRateLimit(ctx, siteName); rateErr != nil {
+		return nil, rateErr
+	}
 
 	resp, err := session.DoWithContext(ctx, req)
 	if err != nil {
@@ -116,8 +125,33 @@ func fetchMTorrentDetail(ctx context.Context, siteName models.SiteGroup, item *g
 	if err := json.NewDecoder(bytes.NewReader(resp.Bytes())).Decode(&responseData); err != nil {
 		return nil, fmt.Errorf("解析 JSON 失败: %v", err)
 	}
+	if code := strings.TrimSpace(fmt.Sprint(responseData.Code)); code != "" && code != "0" {
+		return nil, fmt.Errorf("API error: %s - %s", code, responseData.Message)
+	}
 
 	return &responseData.Data, nil
+}
+
+func waitMTorrentDetailRateLimit(ctx context.Context, siteName models.SiteGroup) error {
+	mtorrentDetailLimiter.Lock()
+	now := time.Now()
+	waitUntil := mtorrentDetailLimiter.next[siteName]
+	if now.After(waitUntil) {
+		waitUntil = now
+	}
+	mtorrentDetailLimiter.next[siteName] = waitUntil.Add(1200 * time.Millisecond)
+	mtorrentDetailLimiter.Unlock()
+
+	if delay := time.Until(waitUntil); delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
 }
 
 // fetchNexusPHPDetail 获取 NexusPHP 架构站点的种子详情

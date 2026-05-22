@@ -363,11 +363,7 @@ func (t *TransmissionClient) GetDiskSpace(ctx context.Context) (int64, error) {
 	// 获取下载目录的可用空间
 	freeSpaceResp, err := t.doRequest("free-space", freeSpaceArgs{Path: downloadDir})
 	if err != nil {
-		// 如果获取磁盘空间失败，记录警告但返回一个大值以允许继续
-		// 这样可以避免因为路径问题导致无法添加种子
-		sLogger().Warnf("Failed to get free space for path %s: %v, assuming sufficient space", downloadDir, err)
-		// 返回 100GB 作为默认值，让种子可以继续添加
-		return 100 * 1024 * 1024 * 1024, nil
+		return 0, fmt.Errorf("failed to get free space for path %s: %w", downloadDir, err)
 	}
 
 	var freeSpace freeSpaceResponse
@@ -377,8 +373,7 @@ func (t *TransmissionClient) GetDiskSpace(ctx context.Context) (int64, error) {
 
 	// 如果返回的空间为 0 或负数，可能是路径问题
 	if freeSpace.SizeBytes <= 0 {
-		sLogger().Warnf("Free space returned %d bytes for path %s, assuming sufficient space", freeSpace.SizeBytes, downloadDir)
-		return 100 * 1024 * 1024 * 1024, nil
+		return 0, fmt.Errorf("free space returned %d bytes for path %s", freeSpace.SizeBytes, downloadDir)
 	}
 
 	return freeSpace.SizeBytes, nil

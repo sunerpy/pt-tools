@@ -2,6 +2,7 @@ package qbit
 
 import (
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -22,7 +23,11 @@ func (c *QBitConfig) GetType() downloader.DownloaderType {
 
 // GetURL 获取下载器 URL（自动去除尾斜杠）
 func (c *QBitConfig) GetURL() string {
-	return strings.TrimSuffix(c.URL, "/")
+	value := strings.TrimSpace(c.URL)
+	if value != "" && !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	return strings.TrimSuffix(value, "/")
 }
 
 // GetUsername 获取用户名
@@ -44,6 +49,19 @@ func (c *QBitConfig) GetAutoStart() bool {
 func (c *QBitConfig) Validate() error {
 	if c.URL == "" {
 		return errors.New("qBittorrent URL is required")
+	}
+	parsed, err := url.Parse(c.GetURL())
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return errors.New("qBittorrent URL is invalid")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("qBittorrent URL must use http or https")
+	}
+	if parsed.User != nil {
+		return errors.New("qBittorrent URL must not include username or password")
+	}
+	if parsed.Fragment != "" {
+		return errors.New("qBittorrent URL must not include fragment")
 	}
 	return nil
 }

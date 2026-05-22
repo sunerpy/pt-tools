@@ -37,6 +37,7 @@ var MTeamDefinition = &v2.SiteDefinition{
 				},
 				Fields: []string{
 					"id", "name", "joinTime", "uploaded", "downloaded",
+					"trueUploaded", "trueDownloaded",
 					"levelName", "levelId", "bonus", "lastAccessAt",
 				},
 			},
@@ -83,6 +84,14 @@ var MTeamDefinition = &v2.SiteDefinition{
 			},
 			"downloaded": {
 				Selector: []string{"data.memberCount.downloaded"},
+				Filters:  []v2.Filter{{Name: "parseNumber"}},
+			},
+			"trueUploaded": {
+				Selector: []string{"data.memberCount.trueUploaded"},
+				Filters:  []v2.Filter{{Name: "parseNumber"}},
+			},
+			"trueDownloaded": {
+				Selector: []string{"data.memberCount.trueDownloaded"},
 				Filters:  []v2.Filter{{Name: "parseNumber"}},
 			},
 			"levelName": {

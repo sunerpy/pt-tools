@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -228,6 +229,11 @@ func (u *UnifiedSiteImpl) SendTorrentToDownloader(ctx context.Context, rssCfg mo
 
 	err = ProcessTorrentsWithDownloaderByRSS(ctx, rssCfg, dirPath, rssCfg.Category, rssCfg.Tag, u.siteGroup)
 	if err != nil {
+		if strings.Contains(err.Error(), "未启用") {
+			u.logger.Warnf("[推送跳过] 站点=%s, 配置的下载器未启用：%v；请在站点设置中切换下载器或在下载器管理中启用",
+				u.siteGroup, err)
+			return err
+		}
 		u.logger.Errorf("[推送失败] 站点=%s, 错误=%v", u.siteGroup, err)
 		return err
 	}

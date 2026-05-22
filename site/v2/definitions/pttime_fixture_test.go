@@ -88,12 +88,15 @@ const pttimeIndexFixture = `<html><body>
 </body></html>`
 
 const pttimeUserdetailsFixture = `<html><body>
-<table>
-  <tr>
-    <td class="rowhead">加入日期</td>
-    <td class="rowfollow">2023-01-15 10:00:00 (<span title="2023-01-15 10:00:00">3年前</span>)</td>
-  </tr>
-</table>
+<div id="outer">
+  魔力值(84.36魔力/小时) [<a href="mybonus.php">使用</a>]: 1889134.7
+  <table>
+    <tr>
+      <td class="rowhead">加入日期</td>
+      <td class="rowfollow">2023-01-15 10:00:00 (<span title="2023-01-15 10:00:00">3年前</span>)</td>
+    </tr>
+  </table>
+</div>
 </body></html>`
 
 const pttimeDetailFixture = `<html><body>
@@ -219,6 +222,10 @@ func testPTTimeUserInfo(t *testing.T) {
 		require.True(t, ok)
 		got := driver.ExtractFieldValuePublic(doc, sel)
 		assert.NotEmpty(t, got, "joinTime should be parsed")
+
+		bonusSel, ok := def.UserInfo.Selectors["bonusPerHour"]
+		require.True(t, ok, "bonusPerHour selector not found")
+		assert.Equal(t, "84.36", driver.ExtractFieldValuePublic(doc, bonusSel))
 	})
 }
 

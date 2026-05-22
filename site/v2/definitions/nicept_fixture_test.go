@@ -65,11 +65,17 @@ const niceptIndexFixture = `<html><body>
 
 const niceptUserdetailsFixture = `<html><body>
 <table>
-  <tr><td class="rowhead">用戶ID/UID</td><td class="rowfollow">1188761</td></tr>
-  <tr><td class="rowhead">加入日期</td><td class="rowfollow">2025-06-15 10:00:00 (<span title="2025-06-15 10:00:00">11月前</span>)</td></tr>
-  <tr><td class="rowhead">傳送</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">7.890</font></td></tr><tr><td class="embedded"><strong>上傳量</strong>: 5.00 TB</td><td class="embedded"><strong>下載量</strong>: 650.00 GB</td></tr></table></td></tr>
-  <tr><td class="rowhead">等級</td><td class="rowfollow"><img title="Veteran User" src="pic/veteran.gif" /></td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">用戶ID/UID</td><td class="rowfollow">1188761</td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">加入日期</td><td class="rowfollow">2025-06-15 10:00:00 (<span title="2025-06-15 10:00:00">11月前</span>)</td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">傳送</td><td class="rowfollow"><table><tr><td class="embedded"><strong>分享率</strong>: <font color="">7.890</font></td></tr><tr><td class="embedded"><strong>上傳量</strong>: 5.00 TB</td><td class="embedded"><strong>下載量</strong>: 650.00 GB</td></tr><tr><td class="embedded"><strong>實際上傳量</strong>: 14.00 TB</td><td class="embedded"><strong>實際下載量</strong>: 2.00 TB</td></tr></table></td></tr>
+  <tr><td class="rowhead nowrap" valign="top" align="right">等級</td><td class="rowfollow"><img title="Veteran User" src="pic/veteran.gif" /></td></tr>
 </table>
+</body></html>`
+
+const niceptMyBonusFixture = `<html><body>
+<div id="outer">
+您當前每小時能獲取 12.34 個魔力值
+</div>
 </body></html>`
 
 const niceptDetailFixture = `<html><body>
@@ -148,6 +154,11 @@ func testNicePTUserInfo(t *testing.T) {
 	assert.Equal(t, "697932185600", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "7.89", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Veteran User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
+	assert.Equal(t, "15393162788864", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueUploaded"]))
+	assert.Equal(t, "2199023255552", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["trueDownloaded"]))
+
+	bonusDoc := FixtureDoc(t, "nicept_mybonus", niceptMyBonusFixture)
+	assert.Equal(t, "12.34", driver.ExtractFieldValuePublic(bonusDoc, def.UserInfo.Selectors["bonusPerHour"]))
 }
 
 func TestNicePT_Fixtures_NoSecrets(t *testing.T) {
@@ -155,6 +166,7 @@ func TestNicePT_Fixtures_NoSecrets(t *testing.T) {
 		"search":      niceptSearchFixture,
 		"index":       niceptIndexFixture,
 		"userdetails": niceptUserdetailsFixture,
+		"mybonus":     niceptMyBonusFixture,
 		"detail":      niceptDetailFixture,
 	}
 	for name, data := range fixtures {
