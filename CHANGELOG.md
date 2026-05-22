@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-05-22
+
+### Bug Fixes
+
+- **core**: 修复磁盘保护 race、站点字段同步、RSS Cloudflare 与下载器 URL 等用户反馈问题
+- 磁盘保护 (Issue #299 race 修复) - 推送成功后保留预留，由 cleanup_monitor 周期 Reset 归还，避免 qBit 可见性窗口内并发 worker 重复借用空间 - cleanup_monitor.runOnce 的 Reset 包入 PushMutex，避免与 worker 临界区交错 - DB 缺失 TorrentSize 时回退到 ComputeTorrentSize 解析种子文件 - 日志拆分输出 qBit可用 / 下载中待占用 / 本进程预留 / 有效空间，解释空间不足原因 - 手动添加 API 加入磁盘保护，magnet/URL 在保护启用时拒绝放行 - 默认全局配置启用 CleanupDiskProtect 与 50GB 保底 - Transmission GetDiskSpace 改为 fail-closed - 新增 TestDiskProtect_RealRSSPath_SuccessKeepsReservation 端到端 race 回归
+
+      - 站点字段同步 (Issue #332)
+       - 基于 issue 用户上传的真实 DOM 重写 nicept/gtkpw/gamegamept 的 trueUploaded/trueDownloaded 选择器，从 传输/傳送 row 内 实际上传量/實際上傳量 strong 标签提取
+       - 撤回 seedingSize 显式选择器，恢复 driver 自动 FetchSeedingStatus ajax 兜底
+       - bonusPerHour 改用 #outer / #info_block 容器 + 紧凑正则，避免误匹配
+       - pttime 时魔从 userdetails.php 内联 (xx魔力/小时) 解析，无需 mybonus.php
+       - mteam 增加 trueUploaded/trueDownloaded JSON 字段映射
+       - 各站 fixture 测试更新为真实 DOM 形态
+
+      - 种子下载与同步稳定性
+       - 下载响应先校验为合法 torrent 再落盘，错误信息附带 status/size/preview
+       - mTorrent 详情接口增加 1.2s 本站频控与业务错误码识别
+       - UserInfoService 拒绝空用户名，保存使用独立 10s 超时
+
+      - RSS 抓取
+       - fetchRSSFeed 改用浏览器 UA + 30s 超时，修复 Cloudflare-fronted 站点 (gtkpw) TLS reset
+
+      - 下载器配置
+       - qbit/transmission URL 自动补全 http:// 前缀，拒绝非 http(s)/带 userinfo/带 fragment 的输入
+
+      - 推送日志降噪
+       - 推送目标下载器未启用时改为 Warn，提示用户切换或启用，避免 Error 刷屏
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump oxlint from 1.64.0 to 1.65.0 in /web/frontend ([#343](https://github.com/sunerpy/pt-tools/issues/343)) ([#343](https://github.com/sunerpy/pt-tools/pull/343))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.64.0 to 1.65.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.65.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.65.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.2.8 to 3.3.0 in /web/frontend ([#346](https://github.com/sunerpy/pt-tools/issues/346)) ([#346](https://github.com/sunerpy/pt-tools/pull/346))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.8 to 3.3.0. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.0/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.3.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vite from 8.0.12 to 8.0.13 in /web/frontend ([#347](https://github.com/sunerpy/pt-tools/issues/347)) ([#347](https://github.com/sunerpy/pt-tools/pull/347))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.12 to 8.0.13. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.13/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.0.13
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue-router from 5.0.6 to 5.0.7 in /web/frontend ([#344](https://github.com/sunerpy/pt-tools/issues/344)) ([#344](https://github.com/sunerpy/pt-tools/pull/344))
+  Bumps [vue-router](https://github.com/vuejs/router) from 5.0.6 to 5.0.7. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.6...v5.0.7)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-router
+         dependency-version: 5.0.7
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @vitejs/plugin-vue from 6.0.6 to 6.0.7 in /web/frontend ([#348](https://github.com/sunerpy/pt-tools/issues/348)) ([#348](https://github.com/sunerpy/pt-tools/pull/348))
+  Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.6 to 6.0.7. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.7/packages/plugin-vue)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@vitejs/plugin-vue"
+         dependency-version: 6.0.7
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.49.0 to 0.50.0 in /web/frontend ([#349](https://github.com/sunerpy/pt-tools/issues/349)) ([#349](https://github.com/sunerpy/pt-tools/pull/349))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.49.0 to 0.50.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.50.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.50.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump @types/node from 25.6.0 to 25.9.0 in /web/frontend ([#350](https://github.com/sunerpy/pt-tools/issues/350)) ([#350](https://github.com/sunerpy/pt-tools/pull/350))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.6.0 to 25.9.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.9.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **ui**: 优化侧栏菜单激活逻辑，支持详情页与子路由映射
+- 新增 routeNameToMenuIndex 映射表，解决路由 name 与菜单 index 不一致问题 - 改进 activeMenu 计算逻辑，避免首屏闪烁并正确匹配子菜单项
+
 ## [0.31.3] - 2026-05-17
 
 ### Bug Fixes
@@ -932,12 +1045,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
