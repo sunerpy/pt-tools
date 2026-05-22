@@ -39,9 +39,19 @@ func createMockQBitServer(t *testing.T, progress float64, paused bool) *httptest
 			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":10000000000}}`))
 		case "/api/v2/torrents/info":
 			w.WriteHeader(http.StatusOK)
+			// qBit reports `uploading`/`stalledUP` once a torrent reaches
+			// progress=1.0, never `downloading`. Mirroring that here keeps
+			// the fixtures aligned with isTorrentTrulyCompleted's contract.
 			state := "downloading"
+			if progress >= 1.0 {
+				state = "uploading"
+			}
 			if paused {
-				state = "pausedDL"
+				if progress >= 1.0 {
+					state = "pausedUP"
+				} else {
+					state = "pausedDL"
+				}
 			}
 			_, _ = w.Write([]byte(`[{"hash":"test-hash-123","name":"Test Torrent","progress":` +
 				floatToString(progress) + `,"state":"` + state + `","size":1073741824}]`))
@@ -654,4 +664,180 @@ func TestFreeEndMonitor_CheckTorrentCompletion(t *testing.T) {
 
 func ptrTime(t time.Time) *time.Time {
 	return &t
+}
+
+// createMockQBitServerWithState pins the exact qBit `state` value returned
+// for a given progress, so tests can assert behavior on noise states like
+// `pausedDL` or `missingFiles` at progress=1.0.
+func createMockQBitServerWithState(t *testing.T, progress float64, state string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("Ok."))
+		case "/api/v2/sync/maindata":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":10000000000}}`))
+		case "/api/v2/torrents/info":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"hash":"test-hash-123","name":"Test Torrent","progress":` +
+				floatToString(progress) + `,"state":"` + state + `","size":1073741824}]`))
+		case "/api/v2/torrents/pause":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("Ok."))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+}
+
+// TestFreeEndMonitor_UpdateProgress_DoesNotMarkCompletedOnNoiseStates asserts
+// that progress=1.0 in non-seeding states must NOT flip is_completed. Marking
+// completed cancels the timer and excludes the row from every later free-end
+// query, so the user reports "种子没有自动暂停".
+func TestFreeEndMonitor_UpdateProgress_DoesNotMarkCompletedOnNoiseStates(t *testing.T) {
+	noiseStates := []string{"pausedDL", "stoppedDL", "error", "missingFiles", "checkingResumeData"}
+	for _, state := range noiseStates {
+		t.Run(state, func(t *testing.T) {
+			db := setupTestDB(t)
+			srv := createMockQBitServerWithState(t, 1.0, state)
+			defer srv.Close()
+			dlMgr := setupTestDownloaderManager(t, srv)
+
+			monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+			freeEndTime := time.Now().Add(1 * time.Hour)
+			isPushed := true
+			torrent := models.TorrentInfo{
+				SiteName:         "test-site",
+				TorrentID:        "tid-" + state,
+				Title:            "noise-" + state,
+				PauseOnFreeEnd:   true,
+				FreeEndTime:      &freeEndTime,
+				DownloaderTaskID: "test-hash-123",
+				DownloaderName:   "test-qbit",
+				IsPushed:         &isPushed,
+			}
+			require.NoError(t, db.DB.Create(&torrent).Error)
+
+			monitor.updateAllMonitoredProgress()
+
+			var got models.TorrentInfo
+			require.NoError(t, db.DB.First(&got, torrent.ID).Error)
+			assert.False(t, got.IsCompleted,
+				"progress=1.0 in noise state %q must NOT mark is_completed; doing so locks the torrent out of the free-end timer permanently",
+				state)
+		})
+	}
+}
+
+// TestFreeEndMonitor_UpdateProgress_MarksCompletedOnSeedingStates is the
+// positive complement of the noise-state test: a torrent at progress=1.0 in a
+// real seeding state must be marked completed.
+func TestFreeEndMonitor_UpdateProgress_MarksCompletedOnSeedingStates(t *testing.T) {
+	for _, state := range []string{"uploading", "stalledUP", "forcedUP"} {
+		t.Run(state, func(t *testing.T) {
+			db := setupTestDB(t)
+			srv := createMockQBitServerWithState(t, 1.0, state)
+			defer srv.Close()
+			dlMgr := setupTestDownloaderManager(t, srv)
+
+			monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+			freeEndTime := time.Now().Add(1 * time.Hour)
+			isPushed := true
+			torrent := models.TorrentInfo{
+				SiteName:         "test-site",
+				TorrentID:        "tid-seed-" + state,
+				Title:            "seed-" + state,
+				PauseOnFreeEnd:   true,
+				FreeEndTime:      &freeEndTime,
+				DownloaderTaskID: "test-hash-123",
+				DownloaderName:   "test-qbit",
+				IsPushed:         &isPushed,
+			}
+			require.NoError(t, db.DB.Create(&torrent).Error)
+
+			monitor.updateAllMonitoredProgress()
+
+			var got models.TorrentInfo
+			require.NoError(t, db.DB.First(&got, torrent.ID).Error)
+			assert.True(t, got.IsCompleted,
+				"progress=1.0 in seeding state %q should mark is_completed",
+				state)
+		})
+	}
+}
+
+// TestFreeEndMonitor_PeriodicCheck_RescheduleMissingFutureTorrents asserts the
+// 5-minute periodic sweep also covers torrents whose initial Schedule call
+// never fired (push happened before monitor wired up, restart loss, etc.).
+// Without it, a missed schedule means free-end pause is delayed until the
+// torrent is already past its free window.
+func TestFreeEndMonitor_PeriodicCheck_RescheduleMissingFutureTorrents(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	freeEndTime := time.Now().Add(2 * time.Hour)
+	isPushed := true
+	torrent := models.TorrentInfo{
+		SiteName:         "test-site",
+		TorrentID:        "future-1",
+		Title:            "future-pending",
+		PauseOnFreeEnd:   true,
+		FreeEndTime:      &freeEndTime,
+		DownloaderTaskID: "test-hash-123",
+		DownloaderName:   "test-qbit",
+		IsPushed:         &isPushed,
+	}
+	require.NoError(t, db.DB.Create(&torrent).Error)
+
+	monitor.mu.Lock()
+	_, alreadyScheduled := monitor.pendingTasks[torrent.ID]
+	monitor.mu.Unlock()
+	require.False(t, alreadyScheduled, "precondition: torrent must NOT be scheduled before periodicCheck runs")
+
+	monitor.checkAndProcessExpiredTorrents()
+
+	monitor.mu.Lock()
+	task, scheduled := monitor.pendingTasks[torrent.ID]
+	monitor.mu.Unlock()
+	require.True(t, scheduled, "periodic check must reschedule a future-expiring torrent that was missed by the initial Schedule")
+	require.NotNil(t, task)
+	require.NotNil(t, task.timer)
+	task.timer.Stop()
+	if task.cancel != nil {
+		task.cancel()
+	}
+}
+
+// TestFreeEndMonitor_ScheduleTorrent_LogsSkipReason guards observability:
+// when ScheduleTorrent no-ops on missing prerequisites the call must not
+// silently return — operators rely on a log line to grep for "跳过调度" when
+// diagnosing "this torrent never got a free-end timer".
+func TestFreeEndMonitor_ScheduleTorrent_LogsSkipReason(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	freeEnd := time.Now().Add(1 * time.Hour)
+
+	monitor.ScheduleTorrent(models.TorrentInfo{ID: 100, Title: "missing-task-id", PauseOnFreeEnd: true, FreeEndTime: &freeEnd, DownloaderTaskID: ""})
+	monitor.mu.Lock()
+	_, scheduled := monitor.pendingTasks[100]
+	monitor.mu.Unlock()
+	require.False(t, scheduled, "torrent without DownloaderTaskID must not be scheduled")
+
+	monitor.ScheduleTorrent(models.TorrentInfo{ID: 101, Title: "missing-free-end", PauseOnFreeEnd: true, FreeEndTime: nil, DownloaderTaskID: "x"})
+	monitor.mu.Lock()
+	_, scheduled = monitor.pendingTasks[101]
+	monitor.mu.Unlock()
+	require.False(t, scheduled, "torrent without FreeEndTime must not be scheduled")
 }

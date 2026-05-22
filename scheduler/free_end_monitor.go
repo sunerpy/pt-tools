@@ -135,7 +135,15 @@ func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 }
 
 func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
-	if !torrent.PauseOnFreeEnd || torrent.FreeEndTime == nil || torrent.DownloaderTaskID == "" {
+	if !torrent.PauseOnFreeEnd {
+		return
+	}
+	if torrent.FreeEndTime == nil {
+		global.GetSlogger().Debugf("[FreeEndMonitor] 跳过调度 (种子:%s, ID:%d): FreeEndTime 为空", torrent.Title, torrent.ID)
+		return
+	}
+	if torrent.DownloaderTaskID == "" {
+		global.GetSlogger().Debugf("[FreeEndMonitor] 跳过调度 (种子:%s, ID:%d): DownloaderTaskID 为空，将由周期巡检兜底", torrent.Title, torrent.ID)
 		return
 	}
 
@@ -147,6 +155,8 @@ func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
 	}
 
 	m.scheduleTaskLocked(torrent)
+	global.GetSlogger().Infof("[FreeEndMonitor] 已调度种子 %s (ID:%d) 的免费结束监控，将在 %v 后检查",
+		torrent.Title, torrent.ID, time.Until(*torrent.FreeEndTime))
 }
 
 func (m *FreeEndMonitor) scheduleTask(torrent models.TorrentInfo) {
@@ -294,11 +304,10 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 			"check_count":     gorm.Expr("check_count + 1"),
 		}
 
-		if info.Progress >= 1.0 {
+		if isTorrentTrulyCompleted(info) {
 			updates["is_completed"] = true
 			updates["completed_at"] = time.Now()
-			m.CancelTorrent(t.ID)
-			global.GetSlogger().Infof("种子已完成下载: %s (ID:%d)", t.Title, t.ID)
+			global.GetSlogger().Infof("种子已完成下载: %s (ID:%d, state=%s)", t.Title, t.ID, info.State)
 		}
 
 		if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", t.ID).Updates(updates).Error; err != nil {
@@ -307,6 +316,43 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 	}
 
 	global.GetSlogger().Debugf("已更新 %d 个种子的下载进度", len(torrents))
+}
+
+// isTorrentTrulyCompleted returns true only when the torrent is *actually*
+// finished from the user's perspective: progress == 1.0 AND the downloader
+// reports a state that means the data is complete (seeding/queued/checking
+// post-download). A 100% progress reading on its own is unreliable because:
+//   - qBit may briefly report progress=1.0 in transient states like
+//     `checkingResumeData` after add, then drop back as files mismatch
+//     (`missingFiles`) — marking complete locks us out of the free-end timer.
+//   - paused/error/missingFiles at 100% means user/downloader interrupted
+//     and we cannot infer "done". Free-end timer must still fire.
+//
+// isTorrentTrulyCompleted returns true only when the torrent is *actually*
+// finished from the user's perspective: progress == 1.0 AND the downloader
+// reports a state that means the data is complete (seeding/queued).
+//
+// Why TorrentChecking is excluded: qBit's mapQbitState collapses
+// checkingDL / checkingUP / checkingResumeData onto a single generic
+// TorrentChecking. checkingResumeData runs *before* downloading on add,
+// so progress=1.0 there is meaningless (it's verifying an unexpectedly
+// pre-existing file, not real completion). Excluding the whole group
+// costs at most one cycle of latency for a torrent in checkingUP, which
+// flips to TorrentSeeding on the next pass anyway.
+//
+// Why TorrentPaused / TorrentError are excluded: a paused-at-100% or
+// missingFiles-at-100% torrent is in a degraded state where we cannot
+// claim completion; the free-end timer must still fire so we can pause
+// it explicitly when the free window closes.
+func isTorrentTrulyCompleted(info downloader.Torrent) bool {
+	if info.Progress < 1.0 {
+		return false
+	}
+	switch info.State {
+	case downloader.TorrentSeeding, downloader.TorrentQueued:
+		return true
+	}
+	return false
 }
 
 func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
@@ -332,6 +378,46 @@ func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 			defer m.wg.Done()
 			m.handleFreeEndedTorrent(torrent)
 		}(t)
+	}
+
+	m.rescheduleMissingFutureTorrents(now)
+}
+
+// rescheduleMissingFutureTorrents catches torrents that should have an
+// in-process timer but don't — e.g. when the initial Schedule call was
+// missed because DownloaderTaskID hadn't been written yet, or a process
+// restart dropped the timer for a row whose loadPendingTasksFromDB
+// excluded it (transient is_paused_by_system / is_completed flag, etc.).
+//
+// Without this safety net, a future-expiring torrent missed by the
+// in-memory scheduler would only be picked up after free_end_time has
+// already passed (worst case: 5 minutes of non-free download before
+// pause). Calling ScheduleTorrent is idempotent (it returns early when
+// the torrent is already in pendingTasks), so this is a cheap reconcile.
+func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(now time.Time) {
+	var torrents []models.TorrentInfo
+	err := m.db.Where(
+		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time > ? AND downloader_task_id != ''",
+		true, false, false, now,
+	).Find(&torrents).Error
+	if err != nil {
+		global.GetSlogger().Errorf("查询待补预约种子失败: %v", err)
+		return
+	}
+
+	rescheduled := 0
+	m.mu.Lock()
+	for _, t := range torrents {
+		if _, exists := m.pendingTasks[t.ID]; exists {
+			continue
+		}
+		m.scheduleTaskLocked(t)
+		rescheduled++
+	}
+	m.mu.Unlock()
+
+	if rescheduled > 0 {
+		global.GetSlogger().Infof("[FreeEndMonitor] 周期巡检：补预约了 %d 个未在内存中的未来过期种子", rescheduled)
 	}
 }
 
@@ -449,7 +535,7 @@ func (m *FreeEndMonitor) checkTorrentCompletion(_ context.Context, dl downloader
 	}
 
 	progress := info.Progress * 100
-	return info.Progress >= 1.0, progress, info.TotalSize, nil
+	return isTorrentTrulyCompleted(info), progress, info.TotalSize, nil
 }
 
 func (m *FreeEndMonitor) pauseTorrentWithRetry(ctx context.Context, dl downloader.Downloader, torrent models.TorrentInfo) error {
@@ -768,10 +854,10 @@ func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 			"check_count":     gorm.Expr("check_count + 1"),
 		}
 
-		if info.Progress >= 1.0 {
+		if isTorrentTrulyCompleted(info) {
 			updates["is_completed"] = true
 			updates["completed_at"] = time.Now()
-			global.GetSlogger().Infof("任务已完成下载 (ID:%d, Title:%s)", t.ID, t.Title)
+			global.GetSlogger().Infof("任务已完成下载 (ID:%d, Title:%s, state=%s)", t.ID, t.Title, info.State)
 		}
 
 		if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", t.ID).Updates(updates).Error; err != nil {
