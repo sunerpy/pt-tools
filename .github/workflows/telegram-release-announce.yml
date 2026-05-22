@@ -40,6 +40,22 @@ jobs:
             BODY=$(echo "$json" | jq -r '.body // ""')
             URL=$(echo "$json" | jq -r '.html_url')
           fi
+          # Curated announcement override: .github/release-notes/<tag>.md (or
+          # without the leading "v") wins over the release-please-generated
+          # release body, which is prone to dependabot noise + truncated commit
+          # bodies. The override file is committed to the repo before the
+          # release PR is merged so CI can pick it up here.
+          OVERRIDE_PATH=".github/release-notes/${TAG}.md"
+          OVERRIDE_PATH_ALT=".github/release-notes/${TAG#v}.md"
+          if [ -f "$OVERRIDE_PATH" ]; then
+            echo "Using announcement override: $OVERRIDE_PATH"
+            BODY=$(cat "$OVERRIDE_PATH")
+          elif [ -f "$OVERRIDE_PATH_ALT" ]; then
+            echo "Using announcement override: $OVERRIDE_PATH_ALT"
+            BODY=$(cat "$OVERRIDE_PATH_ALT")
+          else
+            echo "No announcement override found; falling back to release body."
+          fi
           {
             echo "tag=$TAG"
             echo "name<<__EOF__"
