@@ -150,6 +150,12 @@ jobs:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+        # 区分两种 Failed：
+        #   - 快速 Failed (<5s, errorCode/errors 都为 null)：通常是
+        #     Microsoft 拒绝原因为「product 已经有 InReview 的 submission」，
+        #     或其它前置状态机锁。无法通过 Public API 自愈，需等前一次审核完成。
+        #     此时输出 warning 并以 exit code 0 退出（视为软失败），不阻塞后续 release artifact。
+        #   - 慢速或 errorCode 非空：真实包错误，硬失败。
         run: |
           set -euo pipefail
           if [ -z "${UPLOAD_OPERATION_ID:-}" ]; then
@@ -157,6 +163,8 @@ jobs:
             exit 1
           fi
           STATUS=""
+          STATUS_RESPONSE=""
+          STARTED_AT=$(date +%s)
           for i in $(seq 1 30); do
             sleep 10
             STATUS_RESPONSE=$(curl -sS \
@@ -169,20 +177,41 @@ jobs:
 
             if [ "$STATUS" = "Succeeded" ]; then
               echo "Upload processing complete"
+              echo "UPLOAD_SOFT_FAIL=false" >> "$GITHUB_ENV"
               break
             elif [ "$STATUS" = "Failed" ]; then
-              echo "::error::Upload processing failed"
+              ELAPSED=$(( $(date +%s) - STARTED_AT ))
+              ERROR_CODE=$(echo "$STATUS_RESPONSE" | grep -oP '"errorCode"\s*:\s*"\K[^"]+' || echo "")
+              HAS_ERRORS=$(echo "$STATUS_RESPONSE" | grep -oP '"errors"\s*:\s*\[\K[^]]*' || echo "")
+
+              echo "::group::Failure response"
               echo "$STATUS_RESPONSE"
+              echo "::endgroup::"
+              echo "Elapsed: ${ELAPSED}s, errorCode=${ERROR_CODE:-<null>}, errors=[${HAS_ERRORS:-<empty>}]"
+
+              if [ "$ELAPSED" -lt 5 ] && [ -z "$ERROR_CODE" ] && [ -z "$HAS_ERRORS" ]; then
+                echo "::warning::Edge API quickly rejected upload (status=Failed within ${ELAPSED}s, no errorCode/errors)."
+                echo "::warning::Most likely cause: previous submission for this product is still InReview."
+                echo "::warning::Edge enforces serialized submissions: only one in-flight submission per product is allowed."
+                echo "::warning::Action: wait for previous submission to reach InExtensionStore (Live) state, then re-trigger this workflow via:"
+                echo "::warning::  gh workflow run extension-publish.yml --ref main"
+                echo "::warning::Skipping publish for now. Release artifact (zip + GitHub Release) was still created."
+                echo "UPLOAD_SOFT_FAIL=true" >> "$GITHUB_ENV"
+                break
+              fi
+
+              echo "::error::Upload processing failed (real package error: errorCode=${ERROR_CODE:-<null>}, elapsed=${ELAPSED}s)"
               exit 1
             fi
           done
-          if [ "$STATUS" != "Succeeded" ]; then
+          if [ "$STATUS" != "Succeeded" ] && [ "${UPLOAD_SOFT_FAIL:-false}" != "true" ]; then
             echo "::error::Upload processing did not reach Succeeded after 30 polls (last status: ${STATUS:-<empty>})"
             echo "Last response: $STATUS_RESPONSE"
             exit 1
           fi
 
       - name: Publish submission
+        if: env.UPLOAD_SOFT_FAIL != 'true'
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
@@ -222,6 +251,7 @@ jobs:
           echo "PUBLISH_OPERATION_ID=$PUBLISH_OPERATION_ID" >> "$GITHUB_ENV"
 
       - name: Wait for publish processing
+        if: env.UPLOAD_SOFT_FAIL != 'true'
         env:
           EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
