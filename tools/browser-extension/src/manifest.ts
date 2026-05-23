@@ -1,10 +1,10 @@
 export const manifest = {
   manifest_version: 3,
   name: "__MSG_extensionName__",
-  version: "0.2.2",
+  version: "0.2.3",
   description: "__MSG_extensionDescription__",
   default_locale: "zh_CN",
-  permissions: ["storage", "activeTab", "scripting"],
+  permissions: ["storage", "activeTab", "scripting", "notifications"],
   optional_permissions: ["cookies", "tabs"],
   optional_host_permissions: ["*://*/*"],
   background: {
