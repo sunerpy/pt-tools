@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { initI18n, t } from "../core/i18n";
+import { initI18n, t, type MessageKey } from "../core/i18n";
 import { createMessage, sendToBackground } from "../core/messages";
 import { hasRequiredPermissions, requestCorePermissions } from "../core/permissions";
 import type {
@@ -17,10 +17,13 @@ import type {
   ToggleAutoSyncPayload,
 } from "../core/types";
 import { createGitHubIssue, createExportZip, downloadZip } from "../modules/export";
+import { friendlyErrorMessage } from "../modules/sync";
+import { useToast } from "./composables/useToast";
 import CookieStatus from "./components/CookieStatus.vue";
 import DefaultView from "./components/DefaultView.vue";
 import KnownSiteView from "./components/KnownSiteView.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
+import ToastStack from "./components/ToastStack.vue";
 import UnknownSiteView from "./components/UnknownSiteView.vue";
 
 interface MessageResponse<T> {
@@ -28,6 +31,8 @@ interface MessageResponse<T> {
   data?: T;
   error?: string;
 }
+
+const toast = useToast();
 
 function asMessageResponse<T>(value: unknown): MessageResponse<T> {
   if (typeof value !== "object" || value === null) {
@@ -42,6 +47,12 @@ function asMessageResponse<T>(value: unknown): MessageResponse<T> {
   };
 }
 
+function showError(error: unknown, fallbackKey: MessageKey): void {
+  const raw = error instanceof Error ? error.message : "";
+  const message = raw ? friendlyErrorMessage(raw) : t(fallbackKey);
+  toast.error(message);
+}
+
 const tabStatus = ref<TabSiteStatus>({ mode: "none" });
 const allSites = ref<KnownSiteStatus[]>([]);
 const activeSession = ref<CollectionSession | null>(null);
@@ -51,7 +62,6 @@ const connection = ref<PtToolsConnection>({
   connected: false,
   lastSync: null,
 });
-const feedback = ref("");
 const isSettingsOpen = ref(false);
 const permissionsGranted = ref(true);
 
@@ -65,7 +75,7 @@ async function handleGrantPermissions(): Promise<void> {
   const granted = await requestCorePermissions();
   permissionsGranted.value = granted;
   if (granted) {
-    feedback.value = t("feedback.permissionGranted");
+    toast.success(t("feedback.permissionGranted"));
     await refreshState();
   }
 }
@@ -105,15 +115,19 @@ async function refreshState(): Promise<void> {
   allSites.value = sites;
 }
 
+function siteNameById(siteId: string): string {
+  const site = allSites.value.find((s) => s.site.id === siteId);
+  return site?.site.name ?? siteId;
+}
+
 async function handleSyncSite(siteId: string): Promise<void> {
   busySync.value = true;
-  feedback.value = "";
   try {
     await requestMessage<"SYNC_SITE_COOKIES", { ok: true }>("SYNC_SITE_COOKIES", { siteId });
     await refreshState();
-    feedback.value = t("feedback.syncSuccess");
+    toast.success(t("feedback.syncSuccess", siteNameById(siteId)));
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.syncFailed");
+    showError(error, "feedback.syncFailed");
   } finally {
     busySync.value = false;
   }
@@ -121,12 +135,16 @@ async function handleSyncSite(siteId: string): Promise<void> {
 
 async function handleToggleAutoSync(payload: ToggleAutoSyncPayload): Promise<void> {
   busySync.value = true;
-  feedback.value = "";
   try {
-    await requestMessage<"TOGGLE_AUTO_SYNC", { enabled: boolean }>("TOGGLE_AUTO_SYNC", payload);
+    const result = await requestMessage<"TOGGLE_AUTO_SYNC", { enabled: boolean }>(
+      "TOGGLE_AUTO_SYNC",
+      payload,
+    );
     await refreshState();
+    const name = siteNameById(payload.siteId);
+    toast.info(t(result.enabled ? "feedback.autoSyncEnabled" : "feedback.autoSyncDisabled", name));
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.autoSyncFailed");
+    showError(error, "feedback.autoSyncFailed");
   } finally {
     busySync.value = false;
   }
@@ -134,13 +152,12 @@ async function handleToggleAutoSync(payload: ToggleAutoSyncPayload): Promise<voi
 
 async function handleCapture(): Promise<void> {
   busyCapture.value = true;
-  feedback.value = "";
   try {
     await requestMessage<"CAPTURE_PAGE", { dispatched: boolean }>("CAPTURE_PAGE", {});
     await refreshState();
-    feedback.value = t("feedback.captured");
+    toast.success(t("feedback.captured"));
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.captureFailed");
+    showError(error, "feedback.captureFailed");
   } finally {
     busyCapture.value = false;
   }
@@ -148,18 +165,17 @@ async function handleCapture(): Promise<void> {
 
 async function handleExportZip(): Promise<void> {
   if (!activeSession.value) {
-    feedback.value = t("feedback.noSession");
+    toast.warning(t("feedback.noSession"));
     return;
   }
 
   busyExport.value = true;
-  feedback.value = "";
   try {
     const blob = await createExportZip(activeSession.value);
     downloadZip(blob, `${activeSession.value.site.name}-${activeSession.value.id}.zip`);
-    feedback.value = t("feedback.zipExported");
+    toast.success(t("feedback.zipExported"));
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.exportFailed");
+    showError(error, "feedback.exportFailed");
   } finally {
     busyExport.value = false;
   }
@@ -167,19 +183,18 @@ async function handleExportZip(): Promise<void> {
 
 async function handleCreateIssue(): Promise<void> {
   if (!activeSession.value) {
-    feedback.value = t("feedback.noIssueSession");
+    toast.warning(t("feedback.noIssueSession"));
     return;
   }
 
   busyExport.value = true;
-  feedback.value = "";
   try {
     const blob = await createExportZip(activeSession.value);
     downloadZip(blob, `${activeSession.value.site.name}-${activeSession.value.id}.zip`);
     await createGitHubIssue(activeSession.value, blob);
-    feedback.value = t("feedback.issueCreated");
+    toast.success(t("feedback.issueCreated"));
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.issueFailed");
+    showError(error, "feedback.issueFailed");
   } finally {
     busyExport.value = false;
   }
@@ -191,13 +206,16 @@ async function handleTestConnection(payload: {
   password?: string;
 }): Promise<void> {
   busySettings.value = true;
-  feedback.value = "";
   try {
-    await requestMessage<"SYNC_COOKIES", PtToolsConnection>("SYNC_COOKIES", payload);
+    const result = await requestMessage<"SYNC_COOKIES", PtToolsConnection>("SYNC_COOKIES", payload);
     await refreshState();
-    feedback.value = t("feedback.connectionSuccess");
+    if (result.connected) {
+      toast.success(t("feedback.connectionSuccess"));
+    } else {
+      toast.warning(t("feedback.settingsSavedNotConnected", payload.baseUrl));
+    }
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.connectionFailed");
+    showError(error, "feedback.connectionFailed");
   } finally {
     busySettings.value = false;
   }
@@ -205,15 +223,18 @@ async function handleTestConnection(payload: {
 
 async function handleSaveSettings(payload: { baseUrl: string }): Promise<void> {
   busySettings.value = true;
-  feedback.value = "";
   try {
-    await requestMessage<"SYNC_COOKIES", PtToolsConnection>("SYNC_COOKIES", {
+    const result = await requestMessage<"SYNC_COOKIES", PtToolsConnection>("SYNC_COOKIES", {
       baseUrl: payload.baseUrl,
     });
     await refreshState();
-    feedback.value = t("feedback.settingsSaved");
+    if (result.connected) {
+      toast.success(t("feedback.settingsSaved"));
+    } else {
+      toast.warning(t("feedback.settingsSavedNotConnected", payload.baseUrl));
+    }
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.settingsFailed");
+    showError(error, "feedback.settingsFailed");
   } finally {
     busySettings.value = false;
   }
@@ -221,28 +242,36 @@ async function handleSaveSettings(payload: { baseUrl: string }): Promise<void> {
 
 async function handleBatchSync(siteIds: string[]): Promise<void> {
   busySettings.value = true;
-  feedback.value = "";
   try {
     const result = await requestMessage<"BATCH_SYNC_SITES", BatchSyncResult>("BATCH_SYNC_SITES", {
       siteIds,
     });
     await refreshState();
-    const parts: string[] = [];
-    if (result.synced.length > 0) {
-      parts.push(t("feedback.batchSynced", result.synced.length));
-    }
-    if (result.failed.length > 0) {
-      parts.push(
+    const total = result.synced.length + result.failed.length;
+    if (total === 0) {
+      toast.warning(t("feedback.noSyncable"));
+    } else if (result.failed.length === 0) {
+      toast.success(t("feedback.batchAllSynced", result.synced.length));
+    } else if (result.synced.length === 0) {
+      toast.error(
         t(
-          "feedback.batchFailed",
+          "feedback.batchAllFailed",
           result.failed.length,
-          result.failed.map((f) => f.siteId).join(", "),
+          result.failed.map((f) => siteNameById(f.siteId)).join(", "),
+        ),
+      );
+    } else {
+      toast.warning(
+        t(
+          "feedback.batchPartial",
+          result.synced.length,
+          result.failed.length,
+          result.failed.map((f) => siteNameById(f.siteId)).join(", "),
         ),
       );
     }
-    feedback.value = parts.join(", ") || t("feedback.noSyncable");
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.batchSyncFailed");
+    showError(error, "feedback.batchSyncFailed");
   } finally {
     busySettings.value = false;
   }
@@ -250,16 +279,16 @@ async function handleBatchSync(siteIds: string[]): Promise<void> {
 
 async function handleAutoCollect(payload: AutoCollectPayload): Promise<void> {
   busyAutoCollect.value = true;
-  feedback.value = t("feedback.autoCollecting");
+  toast.info(t("feedback.autoCollecting"));
   try {
     const result = await requestMessage<"AUTO_COLLECT", { collected: number; pages: string[] }>(
       "AUTO_COLLECT",
       payload,
     );
     await refreshState();
-    feedback.value = t("feedback.autoCollected", result.collected, result.pages.join(", "));
+    toast.success(t("feedback.autoCollected", result.collected, result.pages.join(", ")));
   } catch (error: unknown) {
-    feedback.value = error instanceof Error ? error.message : t("feedback.autoCollectFailed");
+    showError(error, "feedback.autoCollectFailed");
   } finally {
     busyAutoCollect.value = false;
   }
@@ -271,7 +300,7 @@ onMounted(async () => {
 
   if (permissionsGranted.value) {
     void refreshState().catch((error: unknown) => {
-      feedback.value = error instanceof Error ? error.message : t("feedback.initFailed");
+      showError(error, "feedback.initFailed");
     });
   }
 
@@ -379,6 +408,6 @@ onMounted(async () => {
       </section>
     </template>
 
-    <p v-if="feedback" class="feedback">{{ feedback }}</p>
+    <ToastStack />
   </main>
 </template>
