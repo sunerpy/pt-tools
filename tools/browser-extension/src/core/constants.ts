@@ -26,7 +26,9 @@ export const KNOWN_SITES: KnownSite[] = [
     domains: ["springsunday.net"],
     schema: "NexusPHP",
     authMethod: "cookie",
-    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    // SSD 已迁移到 PHP session 鉴权（session_name=SPRINGID），不再下发传统 NexusPHP 的
+    // c_secure_uid / c_secure_pass / c_secure_tracker_ssl 三件套，因此只校验 SPRINGID。
+    cookieNames: ["SPRINGID"],
     syncField: "cookie",
   },
   {

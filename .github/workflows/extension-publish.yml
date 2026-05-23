@@ -108,8 +108,13 @@ jobs:
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
           ZIP_FILE: pt-tools-helper-${{ needs.check-extension-changes.outputs.version }}.zip
+        # OperationID 由响应的 Location 头返回（不是 body），见
+        # https://learn.microsoft.com/en-us/microsoft-edge/extensions-chromium/publish/api/using-addons-api
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
+          set -euo pipefail
+          HEADERS_FILE=$(mktemp)
+          BODY_FILE=$(mktemp)
+          HTTP_CODE=$(curl -sS -o "$BODY_FILE" -D "$HEADERS_FILE" -w "%{http_code}" \
             -H "Authorization: ApiKey $EDGE_API_KEY" \
             -H "X-ClientID: $EDGE_CLIENT_ID" \
             -H "Content-Type: application/zip" \
@@ -117,18 +122,28 @@ jobs:
             -T "$ZIP_FILE" \
             "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package")
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
           echo "Upload response: $HTTP_CODE"
-          echo "$BODY"
+          echo "--- Response headers ---"
+          cat "$HEADERS_FILE"
+          echo "--- Response body ---"
+          cat "$BODY_FILE"
+          echo
 
           if [ "$HTTP_CODE" != "202" ]; then
             echo "::error::Upload failed with HTTP $HTTP_CODE"
             exit 1
           fi
 
-          OPERATION_ID=$(echo "$BODY" | grep -oP '"id"\s*:\s*"\K[^"]+' || true)
-          echo "operation_id=$OPERATION_ID" >> "$GITHUB_ENV"
+          # Location header carries the OperationID, e.g.
+          #   Location: 7e2c66f0-a2d3-44eb-9f67-7c3e4f8d0d44
+          UPLOAD_OPERATION_ID=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {print $2}' "$HEADERS_FILE" \
+            | tr -d '\r\n' | xargs)
+          if [ -z "$UPLOAD_OPERATION_ID" ]; then
+            echo "::error::Upload succeeded but Location header missing OperationID"
+            exit 1
+          fi
+          echo "Upload OperationID: $UPLOAD_OPERATION_ID"
+          echo "UPLOAD_OPERATION_ID=$UPLOAD_OPERATION_ID" >> "$GITHUB_ENV"
 
       - name: Wait for upload processing
         env:
@@ -136,15 +151,21 @@ jobs:
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
         run: |
-          for i in $(seq 1 20); do
+          set -euo pipefail
+          if [ -z "${UPLOAD_OPERATION_ID:-}" ]; then
+            echo "::error::UPLOAD_OPERATION_ID not set"
+            exit 1
+          fi
+          STATUS=""
+          for i in $(seq 1 30); do
             sleep 10
-            STATUS_RESPONSE=$(curl -s \
+            STATUS_RESPONSE=$(curl -sS \
               -H "Authorization: ApiKey $EDGE_API_KEY" \
               -H "X-ClientID: $EDGE_CLIENT_ID" \
-              "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package/operations/$operation_id")
+              "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package/operations/$UPLOAD_OPERATION_ID")
 
-            STATUS=$(echo "$STATUS_RESPONSE" | grep -oP '"status"\s*:\s*"\K[^"]+' || echo "Unknown")
-            echo "Attempt $i: $STATUS"
+            STATUS=$(echo "$STATUS_RESPONSE" | grep -oP '"status"\s*:\s*"\K[^"]+' || echo "")
+            echo "Attempt $i: status=${STATUS:-<empty>}"
 
             if [ "$STATUS" = "Succeeded" ]; then
               echo "Upload processing complete"
@@ -155,6 +176,11 @@ jobs:
               exit 1
             fi
           done
+          if [ "$STATUS" != "Succeeded" ]; then
+            echo "::error::Upload processing did not reach Succeeded after 30 polls (last status: ${STATUS:-<empty>})"
+            echo "Last response: $STATUS_RESPONSE"
+            exit 1
+          fi
 
       - name: Publish submission
         env:
@@ -163,7 +189,10 @@ jobs:
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
           EXT_VERSION: ${{ needs.check-extension-changes.outputs.version }}
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
+          set -euo pipefail
+          HEADERS_FILE=$(mktemp)
+          BODY_FILE=$(mktemp)
+          HTTP_CODE=$(curl -sS -o "$BODY_FILE" -D "$HEADERS_FILE" -w "%{http_code}" \
             -H "Authorization: ApiKey $EDGE_API_KEY" \
             -H "X-ClientID: $EDGE_CLIENT_ID" \
             -H "Content-Type: application/json" \
@@ -171,17 +200,63 @@ jobs:
             -d "{\"notes\":\"Automated publish via CI for version $EXT_VERSION\"}" \
             "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions")
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
           echo "Publish response: $HTTP_CODE"
-          echo "$BODY"
+          echo "--- Response headers ---"
+          cat "$HEADERS_FILE"
+          echo "--- Response body ---"
+          cat "$BODY_FILE"
+          echo
 
           if [ "$HTTP_CODE" != "202" ]; then
             echo "::error::Publish failed with HTTP $HTTP_CODE"
             exit 1
           fi
 
-          echo "Submission published, pending Microsoft review"
+          PUBLISH_OPERATION_ID=$(awk 'BEGIN{IGNORECASE=1} /^Location:/ {print $2}' "$HEADERS_FILE" \
+            | tr -d '\r\n' | xargs)
+          if [ -z "$PUBLISH_OPERATION_ID" ]; then
+            echo "::error::Publish succeeded but Location header missing OperationID"
+            exit 1
+          fi
+          echo "Publish OperationID: $PUBLISH_OPERATION_ID"
+          echo "PUBLISH_OPERATION_ID=$PUBLISH_OPERATION_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for publish processing
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PUBLISH_OPERATION_ID:-}" ]; then
+            echo "::error::PUBLISH_OPERATION_ID not set"
+            exit 1
+          fi
+          STATUS=""
+          for i in $(seq 1 30); do
+            sleep 10
+            STATUS_RESPONSE=$(curl -sS \
+              -H "Authorization: ApiKey $EDGE_API_KEY" \
+              -H "X-ClientID: $EDGE_CLIENT_ID" \
+              "$EDGE_API/v1/products/$EDGE_PRODUCT_ID/submissions/operations/$PUBLISH_OPERATION_ID")
+
+            STATUS=$(echo "$STATUS_RESPONSE" | grep -oP '"status"\s*:\s*"\K[^"]+' || echo "")
+            echo "Attempt $i: status=${STATUS:-<empty>}"
+
+            if [ "$STATUS" = "Succeeded" ]; then
+              echo "Submission accepted by Edge Add-ons; pending Microsoft review"
+              break
+            elif [ "$STATUS" = "Failed" ]; then
+              echo "::error::Publish processing failed"
+              echo "$STATUS_RESPONSE"
+              exit 1
+            fi
+          done
+          if [ "$STATUS" != "Succeeded" ]; then
+            echo "::error::Publish processing did not reach Succeeded after 30 polls (last status: ${STATUS:-<empty>})"
+            echo "Last response: $STATUS_RESPONSE"
+            exit 1
+          fi
 
   attach-to-release:
     name: Attach to GitHub Release
