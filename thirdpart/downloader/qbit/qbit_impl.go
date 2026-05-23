@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -51,6 +52,40 @@ type QbitTorrentProperties struct {
 
 // 确保 QbitClient 实现 Downloader 接口
 var _ downloader.Downloader = (*QbitClient)(nil)
+
+// errWrongServer indicates the WebAPI response was HTML, meaning the URL
+// almost certainly points at a non-qBit server. Callers should propagate
+// this rather than falling back to legacy mode.
+var errWrongServer = fmt.Errorf("downloader URL does not point to qBittorrent")
+
+// looksLikeHTML reports whether the given body is HTML rather than a qBit
+// WebAPI response. qBit's API responses are plain text (`Ok.`, `Fails.`,
+// version strings) or JSON. Receiving HTML means the request hit a non-qBit
+// endpoint — typically because the configured URL points at a different web
+// server (e.g. pt-tools' own Web UI), or a reverse proxy intercepted an
+// auth failure with a custom error page.
+func looksLikeHTML(body []byte) bool {
+	trimmed := bytes.TrimLeft(body, " \t\r\n\xef\xbb\xbf")
+	if len(trimmed) == 0 {
+		return false
+	}
+	// Match `<` followed by `!doctype`, `html`, `body`, or any tag-name char.
+	if trimmed[0] != '<' {
+		return false
+	}
+	if len(trimmed) < 2 {
+		return false
+	}
+	// Reject XML processing instructions (`<?xml ...`).
+	if trimmed[1] == '?' {
+		return false
+	}
+	lower := bytes.ToLower(trimmed)
+	return bytes.HasPrefix(lower, []byte("<!doctype")) ||
+		bytes.HasPrefix(lower, []byte("<html")) ||
+		bytes.HasPrefix(lower, []byte("<head")) ||
+		bytes.HasPrefix(lower, []byte("<body"))
+}
 
 // parseQBitVersion extracts semver major.minor.patch from a qBit version string.
 func parseQBitVersion(raw string) (major, minor, patch int, ok bool) {
@@ -163,6 +198,9 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 		q.lastActivity = time.Now()
 		sLogger().Info("Successfully logged in to qBittorrent (204 No Content)")
 		if detectErr := q.detectVersion(ctx); detectErr != nil {
+			if errors.Is(detectErr, errWrongServer) {
+				return fmt.Errorf("疑似检测到非 qBittorrent 响应：登录看似成功但后续 API 返回 HTML 页面（可能是 pt-tools 自身或反向代理的登录页），请检查下载器 WebUI 地址是否正确")
+			}
 			sLogger().Debugf("qBit 版本探测返回错误: %v", detectErr)
 		}
 		return nil
@@ -179,10 +217,18 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 		return fmt.Errorf("用户名或密码错误")
 	}
 
+	if looksLikeHTML(body) {
+		q.healthy = false
+		return fmt.Errorf("疑似检测到非 qBittorrent 响应：登录返回了 HTML 页面，请检查下载器 WebUI 地址是否正确（例如错误指向了 pt-tools 自身或反向代理的登录页）")
+	}
+
 	q.healthy = true
 	q.lastActivity = time.Now()
 	sLogger().Info("Successfully logged in to qBittorrent")
 	if detectErr := q.detectVersion(ctx); detectErr != nil {
+		if errors.Is(detectErr, errWrongServer) {
+			return fmt.Errorf("疑似检测到非 qBittorrent 响应：登录看似成功但后续 API 返回 HTML 页面（可能是 pt-tools 自身或反向代理的登录页），请检查下载器 WebUI 地址是否正确")
+		}
 		sLogger().Debugf("qBit 版本探测返回错误: %v", detectErr)
 	}
 	return nil
@@ -212,6 +258,13 @@ func (q *QbitClient) detectVersion(ctx context.Context) error {
 	if err != nil {
 		sLogger().Warnf("qBit 版本探测失败，使用 legacy 模式（旧版兼容）: %v", err)
 		return nil
+	}
+
+	if looksLikeHTML(body) {
+		q.mu.Lock()
+		q.healthy = false
+		q.mu.Unlock()
+		return fmt.Errorf("%w: 版本探测返回 HTML 页面", errWrongServer)
 	}
 
 	version := strings.TrimSpace(string(body))
