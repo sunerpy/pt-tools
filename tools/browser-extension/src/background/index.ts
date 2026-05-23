@@ -28,7 +28,7 @@ import type {
   TabSiteStatus,
   UnknownSiteStatus,
 } from "../core/types";
-import { PtToolsApiClient, checkCookieHealth } from "../modules/sync";
+import { PtToolsApiClient, checkCookieHealth, friendlyErrorMessage } from "../modules/sync";
 import { autoCollect } from "../modules/collector/auto-collector";
 import { extractDomain, matchKnownSite } from "../utils";
 
@@ -323,13 +323,35 @@ async function maybeAutoSyncByDomain(domain: string): Promise<void> {
   try {
     await syncKnownSite(matched);
     logger.info("Auto-sync completed", { siteId: matched.id });
+    notifyAutoSync("success", matched.name, t("notification.autoSyncSuccessBody", matched.name));
     const [activeTab, map] = await Promise.all([getActiveTab(), getTabStatusMap()]);
     if (activeTab?.id && map[String(activeTab.id)]?.mode === "known") {
       await resolveCurrentTabStatus();
     }
   } catch (error: unknown) {
     logger.warn("Auto-sync failed", { siteId: matched.id, error });
+    const reason = error instanceof Error ? friendlyErrorMessage(error.message) : String(error);
+    notifyAutoSync(
+      "failure",
+      matched.name,
+      t("notification.autoSyncFailureBody", matched.name, reason),
+    );
   }
+}
+
+function notifyAutoSync(kind: "success" | "failure", siteName: string, body: string): void {
+  if (typeof chrome === "undefined" || !chrome.notifications?.create) {
+    return;
+  }
+  const titleKey =
+    kind === "success" ? "notification.autoSyncSuccess" : "notification.autoSyncFailure";
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: t(titleKey, siteName),
+    message: body,
+    priority: kind === "failure" ? 2 : 0,
+  });
 }
 
 onMessage("SITE_DETECTED", async (payload: SiteDetectedPayload, sender) => {
@@ -457,13 +479,24 @@ onMessage("BATCH_SYNC_SITES", async ({ siteIds }) => {
 
 onMessage("SYNC_COOKIES", async ({ baseUrl, username, password }) => {
   const api = new PtToolsApiClient(baseUrl);
-  const loginOk = username && password ? await api.login(username, password) : true;
+  const isExplicitTest = Boolean(username && password);
+  const loginOk = isExplicitTest ? await api.login(username!, password!) : true;
 
   if (!loginOk) {
     throw new Error(t("error.ptToolsLoginFailed"));
   }
 
-  const connected = await api.ping();
+  let connected = false;
+  try {
+    await api.ping();
+    connected = true;
+  } catch (error) {
+    if (isExplicitTest) {
+      throw error;
+    }
+    logger.warn("ping failed during settings save", { error });
+  }
+
   const connection: PtToolsConnection = {
     baseUrl,
     sessionId: "",
