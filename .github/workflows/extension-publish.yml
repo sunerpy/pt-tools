@@ -151,11 +151,12 @@ jobs:
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
         # 区分两种 Failed：
-        #   - 快速 Failed (<5s, errorCode/errors 都为 null)：通常是
+        #   - Edge 返回通用失败 message，且 errorCode/errors 都为 null：通常是
         #     Microsoft 拒绝原因为「product 已经有 InReview 的 submission」，
-        #     或其它前置状态机锁。无法通过 Public API 自愈，需等前一次审核完成。
+        #     或其它前置状态机锁。实测该失败可能在 1s 内返回，也可能在 30s 左右返回；
+        #     无法通过 Public API 自愈，需等前一次审核完成。
         #     此时输出 warning 并以 exit code 0 退出（视为软失败），不阻塞后续 release artifact。
-        #   - 慢速或 errorCode 非空：真实包错误，硬失败。
+        #   - errorCode 或 errors 非空：真实包错误，硬失败。
         run: |
           set -euo pipefail
           if [ -z "${UPLOAD_OPERATION_ID:-}" ]; then
@@ -181,16 +182,17 @@ jobs:
               break
             elif [ "$STATUS" = "Failed" ]; then
               ELAPSED=$(( $(date +%s) - STARTED_AT ))
+              MESSAGE=$(echo "$STATUS_RESPONSE" | grep -oP '"message"\s*:\s*"\K[^"]+' || echo "")
               ERROR_CODE=$(echo "$STATUS_RESPONSE" | grep -oP '"errorCode"\s*:\s*"\K[^"]+' || echo "")
               HAS_ERRORS=$(echo "$STATUS_RESPONSE" | grep -oP '"errors"\s*:\s*\[\K[^]]*' || echo "")
 
               echo "::group::Failure response"
               echo "$STATUS_RESPONSE"
               echo "::endgroup::"
-              echo "Elapsed: ${ELAPSED}s, errorCode=${ERROR_CODE:-<null>}, errors=[${HAS_ERRORS:-<empty>}]"
+              echo "Elapsed: ${ELAPSED}s, message=${MESSAGE:-<empty>}, errorCode=${ERROR_CODE:-<null>}, errors=[${HAS_ERRORS:-<empty>}]"
 
-              if [ "$ELAPSED" -lt 5 ] && [ -z "$ERROR_CODE" ] && [ -z "$HAS_ERRORS" ]; then
-                echo "::warning::Edge API quickly rejected upload (status=Failed within ${ELAPSED}s, no errorCode/errors)."
+              if [ -z "$ERROR_CODE" ] && [ -z "$HAS_ERRORS" ] && [ "$MESSAGE" = "An error occurred while performing the operation" ]; then
+                echo "::warning::Edge API rejected upload with opaque failure (elapsed ${ELAPSED}s, no errorCode/errors)."
                 echo "::warning::Most likely cause: previous submission for this product is still InReview."
                 echo "::warning::Edge enforces serialized submissions: only one in-flight submission per product is allowed."
                 echo "::warning::Action: wait for previous submission to reach InExtensionStore (Live) state, then re-trigger this workflow via:"
