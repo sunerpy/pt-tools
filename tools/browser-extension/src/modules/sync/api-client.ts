@@ -1,4 +1,6 @@
 import type { KnownSite } from "../../core/constants";
+import { PtToolsApiError } from "./errors";
+import { classifyHttpResponse, fetchWithTimeout } from "./http";
 
 interface LoginResponse {
   success?: boolean;
@@ -15,14 +17,8 @@ interface SiteConfigEntry {
   auth_method?: string;
 }
 
-const AUTH_REQUIRED_MESSAGE = "未登录或会话已过期，请先在扩展中登录 pt-tools";
-
 function trimSlash(value: string): string {
   return value.replace(/\/+$/, "");
-}
-
-function isAuthRequired(response: Response): boolean {
-  return response.status === 401 || response.status === 0 || response.type === "opaqueredirect";
 }
 
 export class PtToolsApiClient {
@@ -33,7 +29,7 @@ export class PtToolsApiClient {
   }
 
   async login(username: string, password: string): Promise<boolean> {
-    const response = await fetch(`${this.baseUrl}/login`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
@@ -55,38 +51,34 @@ export class PtToolsApiClient {
 
   async syncSiteCredential(site: KnownSite, credential: string): Promise<void> {
     const siteId = site.id.toLowerCase();
-    const response = await fetch(`${this.baseUrl}/api/sites/${encodeURIComponent(siteId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ [site.syncField]: credential }),
-      credentials: "include",
-      redirect: "manual",
-    });
-
-    if (isAuthRequired(response)) {
-      throw new Error(AUTH_REQUIRED_MESSAGE);
-    }
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/api/sites/${encodeURIComponent(siteId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ [site.syncField]: credential }),
+        credentials: "include",
+        redirect: "manual",
+      },
+    );
 
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `HTTP ${response.status}`);
+      const text = await response.text().catch(() => "");
+      classifyHttpResponse(response, text);
     }
   }
 
   async getSites(): Promise<Array<{ name: string; enabled: boolean }>> {
-    const response = await fetch(`${this.baseUrl}/api/sites`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/sites`, {
       method: "GET",
       headers: { Accept: "application/json" },
       credentials: "include",
       redirect: "manual",
     });
 
-    if (isAuthRequired(response)) {
-      throw new Error(AUTH_REQUIRED_MESSAGE);
-    }
-
     if (!response.ok) {
-      throw new Error("Failed to get configured sites");
+      const text = await response.text().catch(() => "");
+      classifyHttpResponse(response, text);
     }
 
     const raw = await this.safeJson(response);
@@ -110,20 +102,20 @@ export class PtToolsApiClient {
     });
   }
 
-  async ping(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/ping`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        credentials: "include",
-        redirect: "manual",
-      });
-      if (isAuthRequired(response)) return false;
-      if (!response.ok) return false;
-      const result = (await this.safeJson(response)) as PingResponse | null;
-      return result?.status === "ok";
-    } catch {
-      return false;
+  async ping(): Promise<void> {
+    const response = await fetchWithTimeout(`${this.baseUrl}/api/ping`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      redirect: "manual",
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      classifyHttpResponse(response, text);
+    }
+    const result = (await this.safeJson(response)) as PingResponse | null;
+    if (result?.status !== "ok") {
+      throw new PtToolsApiError("ping_failed", "ping returned non-ok status");
     }
   }
 
