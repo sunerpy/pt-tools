@@ -5,6 +5,146 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-05-24
+
+### Bug Fixes
+
+- **ci**: Edge 商店 InReview 阻塞时软失败而非硬失败
+  实验发现：Edge Add-ons Public API 不允许在前一次 submission 处于
+  InReview 状态时上传新 draft package。0.2.2 实验中验证：
+
+        - 0.2.0 / 0.2.1 失败：都是"InProgress → Failed"，~10s（验证管线后期失败）
+        - 0.2.2 失败：直接"Failed"，<1s（同步前置条件检查失败）
+
+        时间差 + null errorCode/errors 是"product 已被锁定，无法接受新 submission"
+        的特征签名。Public API 没有公开端点查询 submission 列表（/overview/submissions
+        是内部 Cookie 鉴权 endpoint），因此无法预检。
+
+        修复：Wait for upload processing 步骤改为：
+        - 失败 < 5s 且 errorCode/errors 都为 null
+         → 视为前置条件失败（很可能是 InReview 阻塞）
+         → 输出 ::warning:: + 操作指引（手动 workflow_dispatch 重试）
+         → exit 0，软失败
+        - 其它失败（慢速 / 有 errorCode / 有 errors）
+         → 真实包错误，硬失败 exit 1
+
+        Publish submission + Wait for publish processing 两步增加
+        `if: env.UPLOAD_SOFT_FAIL != 'true'` 跳过保护。
+
+        操作指引：前一次 submission 进入 InExtensionStore (Live) 后，
+        `gh workflow run extension-publish.yml --ref main` 手动重试发布。
+
+        Release artifact (zip + GitHub Release) 始终生成，软失败不影响。
+
+- **qbit**: 检测到 HTML 响应时拒绝认证，避免错误 URL 静默通过
+
+### CI/CD
+
+- **extension-publish**: 放宽 InReview 软失败判定为基于响应 message
+  Edge API 在已有 InReview 的提交时，会以 'An error occurred while performing the operation'+空 errorCode/errors 形式失败。原本 <5s 的时间窗口判定不够稳健，实测有 31s 才返回 Failed 的情况，会被误判为硬失败。改成基于响应 message 字面识别，时间窗口去掉。
+
+### Features
+
+- **extension**: API 错误分类与超时控制
+- 新增 PtToolsApiError 类型化错误码：network_unreachable / timeout
+  / auth_required / client_error / server_error / invalid_response
+  / ping_failed / unknown - 错误码以 "[code] message" 前缀编码，可穿越 chrome.runtime 消息总线
+  保留分类信息（messages.ts 的 Error→string 序列化只保留 .message）- friendlyErrorMessage() 把错误码映射到 i18n key，server/client 错误
+  附带 HTTP 状态详情 - fetchWithTimeout: AbortController + 默认 10s 超时
+  TypeError → network_unreachable
+  AbortError → timeout - classifyHttpResponse: 401/0/opaqueredirect → auth_required
+  4xx → client_error，5xx → server_error - api-client.ts: - 所有 fetch 改用 fetchWithTimeout - 4xx/5xx 通过 classifyHttpResponse 抛 PtToolsApiError - 移除硬编码中文 AUTH_REQUIRED_MESSAGE - ping() 不再静默吞掉错误（旧版 catch{} 返回 false 让用户看不到原因），
+  现在抛 PtToolsApiError，由调用方决定如何处理
+- **extension**: SYNC_COOKIES 区分 test-vs-save，加 chrome.notifications 自动同步反馈
+- onMessage("SYNC_COOKIES") 新行为：- 提供用户名密码 = 显式 "测试连接"，ping 失败抛错，弹窗看到具体原因 - 仅 baseUrl = 静默 "保存设置"，ping 失败仍保存 URL 但 connected=false，
+  弹窗显示 warning（设置已保存但未连通）- 修复旧 bug：ping 失败时弹窗显示绿色「连接成功」（旧 ping 永远 boolean）- maybeAutoSyncByDomain() 在弹窗关着时通过 chrome.notifications 推送：- 成功：「{site} Cookie 自动同步成功」- 失败：「{site} 同步失败：{friendly reason}」priority 2 - 失败原因经 friendlyErrorMessage() 翻译为可读中文 - 之前 logger.warn 是后台静默日志，用户完全看不见
+- **extension**: 用 toast 替代单行 feedback；按操作分类显示成功/失败/警告
+- 新增 useToast composable + ToastStack 组件 - 4 种 severity：success/error/warning/info，各自配色 + 图标 - 自动消失：success/info 3.5s，warning 6s，error 8s - 点击立即关闭，多条堆叠 - 进出场动画 - App.vue 重写所有 7 个 handler：- 单点同步成功 → success（含站点名）- 同步失败 → error，错误码经 friendlyErrorMessage() 翻译 - 自动同步开关 → info - 测试连接 → 服务器在线 success；离线 warning（提示设置已保存）- 保存设置（无凭据）→ ping 通 success，ping 不通 warning（不再误显绿色）- 批量同步分四档：全部成功 success / 部分成功 warning / 全部失败 error / 无可同步 warning - 失败站点列表显示站点名（之前只显示 siteId）- 删除孤儿组件 CookieSync.vue（零引用）
+- **extension**: 新增 i18n 错误分类 key 与 notifications 权限
+- manifest 增加 "notifications" 权限以支持 chrome.notifications.create()
+  自动同步运行时弹窗关闭，依赖 OS 通知反馈 - 新增 i18n key（zh-CN + en-US 双语）：- feedback.syncSuccess（带站点名占位符）- feedback.autoSyncEnabled / autoSyncDisabled - feedback.settingsSavedNotConnected - feedback.batchAllSynced / batchPartial / batchAllFailed - error.networkUnreachable / timeout / authRequired - error.clientError（占位符填 HTTP 状态详情）- error.serverError / pingFailed / invalidResponseFromPtTools - notification.autoSyncSuccess / autoSyncSuccessBody - notification.autoSyncFailure / autoSyncFailureBody - 修复历史漏译（中文 locale 中夹杂英文）：- error.noActiveTab "No active tab" → "未找到活动标签页" - error.invalidResponse "Invalid response" → "响应数据无效" - error.ptToolsLoginFailed "pt-tools login failed" → "pt-tools 登录失败，请检查用户名密码" - 版本 0.2.2 → 0.2.3
+
+## [ext-v0.2.2] - 2026-05-23
+
+### Documentation
+
+- **extension**: 新增 PRIVACY.md 用于 Edge 商店隐私策略 URL
+  Microsoft Edge 商店 0.2.1 提交被拒，API 返回仅
+  "An error occurred while performing the operation"。通过
+  Partner Center 页面诊断定位到隐私表未填。
+
+        隐私策略 URL 为隐私表必填项。本文档详细阐述：
+        - 数据读取/传输/不传输范围（仅同步到用户自部署 pt-tools）
+        - 自动脱敏规则（Cookie 值 / 邮箱 / IP / API Key 等）
+        - 所有权限（storage / activeTab / scripting / cookies / tabs）逆向用途
+        - 未使用远程代码声明
+        - 开源审计指引与联系方式
+
+        提交后 URL 会预在 Edge 商店扩展页面公开展示。
+
+### Miscellaneous
+
+- **extension**: 发布 0.2.2 验证 API 发布路径
+  0.2.1 经 Partner Center Web UI 提交后已 InReview，stuck draft 槽位
+  被消费。本次纯版本号 bump（无任何代码改动）作为判别实验：
+
+        - 通过 ext-v0.2.2 tag 触发 extension-publish workflow
+        - workflow 仅走 Public Add-ons API（非 Web UI）
+        - 若 publish-edge job 全绿、商店 Submission 进入 InReview：
+         hypothesis (a) stuck-draft 已消除，未来 API path 可持续使用
+        - 若仍报 status=Failed errorCode=null：
+         hypothesis (c) 后端流水线差异占主导，需进一步排查 zip 内容
+         （locale/manifest 归一化）或申请 Microsoft 工单查内部错误
+
+        不含任何业务变更，与 0.2.1 zip 字节差异仅 manifest version 字段。
+
+## [ext-v0.2.1] - 2026-05-23
+
+### Bug Fixes
+
+- **ci**: Edge 商店发布从 Location 头提取 OperationID
+- 微软 Add-ons API 在 202 响应的 Location 头返回 OperationID（不在 body）- 之前用 grep -oP body 抓 "id" 字段始终为空，env 变量 $operation_id 是空字符串 - 状态轮询 URL 拼成 /operations/ 拿不到合法响应，20 次循环全部 Unknown - 但 if/elif 没有 else 分支，循环跑完后步骤继续执行 - 最终 publish 调用看似 202 成功，实际微软那边没有可发布的 draft，submission stuck - 表现：CI 全绿但商店仍是旧版本（0.1.0）
+
+      修复：
+      - 改用 curl -D 把 headers 写到独立文件，从 Location 行提取 OperationID
+      - 上传/发布两步均用大写 $UPLOAD_OPERATION_ID / $PUBLISH_OPERATION_ID 通过 GITHUB_ENV 传递
+      - 30 次轮询结束仍未 Succeeded 必须 fail（不再静默继续）
+      - 新增 publish 后的状态轮询，确认 submission 真正进入审核
+      - 全步骤 set -euo pipefail，header 与 body 完整打印便于排障
+
+      参考：
+      https://learn.microsoft.com/en-us/microsoft-edge/extensions-chromium/publish/api/using-addons-api
+
+- **extension**: 修复 SpringSunday Cookie 检测使用 SPRINGID
+- SSD（springsunday.net）已迁移到 PHP session 鉴权 - session_name=SPRINGID 是站点唯一鉴权 cookie - 不再下发传统 NexusPHP 的 c_secure_uid / c_secure_pass / c_secure_tracker_ssl 三件套 - 插件之前硬编码要求三件套，导致已登录用户被判定为 missing - 表现：扩展弹窗显示"❌ Cookie 缺失"，无法同步到 pt-tools
+
+      修复：
+      - KNOWN_SITES 中 SpringSunday 的 cookieNames 从三件套改为 [SPRINGID]
+      - 版本 0.2.0 → 0.2.1（package.json + src/manifest.ts）
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/net 0.53.0 -> 0.55.0 修复 5 个 HTML 解析 CVE
+  govulncheck 报告 site/v2/nexusphp_driver.go 通过 goquery.NewDocumentFromReader
+  触发 golang.org/x/net/html 的 5 个漏洞：
+
+        - GO-2026-5028 解析任意 HTML 时的 DoS
+        - GO-2026-5027 foreign content 中元素处理错误
+        - GO-2026-5025 foreign content 中命名空间元素处理错误
+        - 另 2 个 x/net/html 同源 advisory
+
+        修复仅升级到 v0.55.0；go mod tidy 顺手把已被 web 子包直接导入的
+        RomiChan/websocket 与 tidwall/gjson 从 indirect 提到 direct（不影响构建）。
+
+        go.mod 自带 vendor 目录非 git 跟踪，本次只更新 go.mod / go.sum。
+
+### Styling
+
+- **changelog**: Oxfmt 自动格式化历史 v0.24.0 条目
+  CI 的 Format Check 因 oxfmt 输出与仓库版本漂移而失败。漂移点是 v0.24.0
+  （OpenCD/PTT 适配）一个嵌套列表的 markdown 转义：oxfmt 把多层 "\_" / "\*"
+  归一化为反斜杠转义。仅文档格式调整，不改任何内容。
+
 ## [0.32.1] - 2026-05-22
 
 ### Bug Fixes
@@ -1091,12 +1231,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
