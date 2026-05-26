@@ -18,7 +18,7 @@ require (
 	github.com/wdvxdr1123/ZeroBot v1.8.2
 	github.com/zeebo/bencode v1.0.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/crypto v0.51.0
+	golang.org/x/crypto v0.52.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.45.0
 	golang.org/x/text v0.37.0
