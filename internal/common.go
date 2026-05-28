@@ -69,25 +69,66 @@ func GetDownloaderForRSS(rssCfg models.RSSConfig) (downloader.Downloader, error)
 	return dl, err
 }
 
-// GetDownloaderForRSSWithInfo 根据 RSS 配置获取下载器及其信息
-// 优先使用全局 DownloaderManager（连接池复用），回退到直接创建实例
+// GetDownloaderForRSSWithInfo 根据 RSS 配置获取下载器及其信息（无站点上下文）。
+// 优先级：RSS.DownloaderID > is_default。**不查站点绑定** —— 仅用于无站点
+// 信息可用的旧调用点（CLI、cmd/rss 等）。新代码请用
+// GetDownloaderForRSSAndSiteWithInfo。
 func GetDownloaderForRSSWithInfo(rssCfg models.RSSConfig) (downloader.Downloader, *DownloaderInfo, error) {
+	return getDownloaderForRSSImpl(rssCfg, "")
+}
+
+// GetDownloaderForRSSAndSiteWithInfo 根据 RSS 配置 + 站点名解析下载器。
+//
+// 优先级（新）：
+//  1. rssCfg.DownloaderID（RSS 行级覆盖）
+//  2. SiteSetting.DownloaderID（站点绑定，issue #373 修复点）
+//  3. is_default=true（兜底）
+//
+// siteName 为空时退化为 GetDownloaderForRSSWithInfo 的旧行为。
+func GetDownloaderForRSSAndSiteWithInfo(rssCfg models.RSSConfig, siteName string) (downloader.Downloader, *DownloaderInfo, error) {
+	return getDownloaderForRSSImpl(rssCfg, strings.TrimSpace(siteName))
+}
+
+func getDownloaderForRSSImpl(rssCfg models.RSSConfig, siteName string) (downloader.Downloader, *DownloaderInfo, error) {
 	if global.GlobalDB == nil {
 		return nil, nil, errors.New("数据库未初始化")
 	}
 
 	var dlSetting models.DownloaderSetting
 
-	if rssCfg.DownloaderID != nil {
+	switch {
+	case rssCfg.DownloaderID != nil:
+		// 优先级 1: RSS 行自己指定了下载器
 		if err := global.GlobalDB.DB.First(&dlSetting, *rssCfg.DownloaderID).Error; err != nil {
 			return nil, nil, fmt.Errorf("获取指定下载器失败: %w", err)
 		}
 		if !dlSetting.Enabled {
 			return nil, nil, fmt.Errorf("指定的下载器 %s 未启用", dlSetting.Name)
 		}
-	} else {
-		if err := global.GlobalDB.DB.Where("is_default = ?", true).First(&dlSetting).Error; err != nil {
-			return nil, nil, fmt.Errorf("获取默认下载器失败: %w", err)
+	case siteName != "":
+		// 优先级 2: 站点绑定（issue #373）
+		// 直接查 SiteSetting 而非 DownloaderManager.siteDownloaders 以避免内存
+		// 状态过时（manager 仅在 scheduler init / Reload 时同步一次）。
+		var site models.SiteSetting
+		siteErr := global.GlobalDB.DB.Where("name = ?", siteName).First(&site).Error
+		if siteErr == nil && site.DownloaderID != nil {
+			if err := global.GlobalDB.DB.First(&dlSetting, *site.DownloaderID).Error; err == nil {
+				if !dlSetting.Enabled {
+					return nil, nil, fmt.Errorf("站点 %s 绑定的下载器 %s 未启用", siteName, dlSetting.Name)
+				}
+				break
+			}
+			// 站点 DownloaderID 指向已删除的下载器：fallthrough 到 is_default
+			sLogger().Warnf("站点 %s 绑定的下载器 ID=%d 不存在，回退到 is_default", siteName, *site.DownloaderID)
+		}
+		// 站点未绑定 / 站点行不存在：fallthrough 到 is_default
+		fallthrough
+	default:
+		// 优先级 3: is_default=true 兜底
+		if dlSetting.ID == 0 {
+			if err := global.GlobalDB.DB.Where("is_default = ?", true).First(&dlSetting).Error; err != nil {
+				return nil, nil, fmt.Errorf("获取默认下载器失败: %w", err)
+			}
 		}
 		if !dlSetting.Enabled {
 			return nil, nil, fmt.Errorf("默认下载器 %s 未启用", dlSetting.Name)
@@ -136,7 +177,7 @@ func ProcessTorrentsWithDownloaderByRSS(
 	dirPath, category, tags string,
 	siteName models.SiteGroup,
 ) error {
-	dl, dlInfo, err := GetDownloaderForRSSWithInfo(rssCfg)
+	dl, dlInfo, err := GetDownloaderForRSSAndSiteWithInfo(rssCfg, string(siteName))
 	if err != nil {
 		return fmt.Errorf("获取下载器失败: %w", err)
 	}

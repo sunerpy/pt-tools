@@ -25,6 +25,9 @@ const (
 	emergencyBufferMinGB   = 10.0
 	emergencyBufferPercent = 0.2
 	diskEventDebounce      = 3 * time.Second
+	// diskBudgetResetInterval 控制 CleanupEnabled=false 但 CleanupDiskProtect=true 时
+	// 的 DiskBudget Reset 节奏。Issue #374 修复：原本这条路径下 Reset 永不触发。
+	diskBudgetResetInterval = 5 * time.Minute
 )
 
 type CleanupMonitor struct {
@@ -83,12 +86,14 @@ func (c *CleanupMonitor) runLoop() {
 
 	for {
 		cfg := c.loadConfig()
+		c.maybeResetDiskBudget(cfg)
+
 		if cfg == nil || !cfg.CleanupEnabled {
 			c.logger.Debug("[自动删种] 功能未启用，等待下次检查")
 			select {
 			case <-c.ctx.Done():
 				return
-			case <-time.After(5 * time.Minute):
+			case <-time.After(diskBudgetResetInterval):
 				continue
 			case ev := <-eventCh:
 				if ev.Type == events.DiskSpaceLow {
@@ -120,6 +125,21 @@ func (c *CleanupMonitor) runLoop() {
 	}
 }
 
+// maybeResetDiskBudget 在每次 runLoop 迭代顶部决定是否归还 DiskBudget。
+// Issue #374 修复点：原本 Reset 仅在 runOnce 内被调用，而 runOnce 又被
+// CleanupEnabled gate 拦下，导致 CleanupDiskProtect=true + CleanupEnabled=false
+// 配置组合下预留永不归零。这里改为只要 CleanupDiskProtect=true 就 Reset，
+// 与 CleanupEnabled 解耦。
+//
+// 抽成独立方法以便单测可在不进入完整 runLoop（含 10 秒 Sleep）的前提下
+// 验证 fix 的契约。
+func (c *CleanupMonitor) maybeResetDiskBudget(cfg *models.SettingsGlobal) {
+	if cfg == nil || !cfg.CleanupDiskProtect {
+		return
+	}
+	c.resetDiskBudget()
+}
+
 func (c *CleanupMonitor) drainAndDebounce(ch <-chan events.Event) {
 	timer := time.NewTimer(diskEventDebounce)
 	defer timer.Stop()
@@ -146,13 +166,7 @@ func (c *CleanupMonitor) loadConfig() *models.SettingsGlobal {
 }
 
 func (c *CleanupMonitor) runOnce(cfg *models.SettingsGlobal) {
-	// Reset 必须在 PushMutex 内执行：否则可能在某个 worker 的「Reserve → push」
-	// 中间清零，让下一个 worker 看到 pre_reserved=0 而重复借用同一份磁盘空间
-	// （Issue #299 race 的另一形态）。
-	mu := ptinternal.PushMutex()
-	mu.Lock()
-	ptinternal.GetDiskBudget().Reset()
-	mu.Unlock()
+	c.resetDiskBudget()
 
 	dlNames := c.downloaderMgr.ListDownloaders()
 	if len(dlNames) == 0 {
@@ -166,6 +180,17 @@ func (c *CleanupMonitor) runOnce(cfg *models.SettingsGlobal) {
 		}
 		c.processDownloader(cfg, dl, name)
 	}
+}
+
+// resetDiskBudget 在 PushMutex 内清零 DiskBudget。
+// PushMutex 内 Reset 是必须的：否则可能在某个 worker 的「Reserve → push」中间
+// 清零，让下一个 worker 看到 pre_reserved=0 而重复借用同一份磁盘空间
+// （Issue #299 race 的另一形态）。
+func (c *CleanupMonitor) resetDiskBudget() {
+	mu := ptinternal.PushMutex()
+	mu.Lock()
+	ptinternal.GetDiskBudget().Reset()
+	mu.Unlock()
 }
 
 func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downloader.Downloader, dlName string) {
