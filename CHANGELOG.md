@@ -5,6 +5,126 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-05-28
+
+### Bug Fixes
+
+- **downloader**: RSS 推送遵循站点-下载器绑定，不再静默回退到 is_default
+- **scheduler**: 磁盘预留独立于 CleanupEnabled 周期归零，避免单调累加
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump sass from 1.99.0 to 1.100.0 in /web/frontend ([#364](https://github.com/sunerpy/pt-tools/issues/364)) ([#364](https://github.com/sunerpy/pt-tools/pull/364))
+  Bumps [sass](https://github.com/sass/dart-sass) from 1.99.0 to 1.100.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.99.0...1.100.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: sass
+         dependency-version: 1.100.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump dompurify from 3.4.2 to 3.4.5 in /web/frontend ([#368](https://github.com/sunerpy/pt-tools/issues/368)) ([#368](https://github.com/sunerpy/pt-tools/pull/368))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.2 to 3.4.5. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.2...3.4.5)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.4.5
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.3.0 to 3.3.2 in /web/frontend ([#369](https://github.com/sunerpy/pt-tools/issues/369)) ([#369](https://github.com/sunerpy/pt-tools/pull/369))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.0 to 3.3.2. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.2/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.3.2
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.65.0 to 1.66.0 in /web/frontend ([#367](https://github.com/sunerpy/pt-tools/issues/367)) ([#367](https://github.com/sunerpy/pt-tools/pull/367))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.65.0 to 1.66.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.66.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.66.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vite from 8.0.13 to 8.0.14 in /web/frontend ([#370](https://github.com/sunerpy/pt-tools/issues/370)) ([#370](https://github.com/sunerpy/pt-tools/pull/370))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.13 to 8.0.14. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.14/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.0.14
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vitest from 4.1.6 to 4.1.7 in /web/frontend ([#372](https://github.com/sunerpy/pt-tools/issues/372)) ([#372](https://github.com/sunerpy/pt-tools/pull/372))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.6 to 4.1.7. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.7/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.7
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump @types/node from 25.9.0 to 25.9.1 in /web/frontend ([#371](https://github.com/sunerpy/pt-tools/issues/371)) ([#371](https://github.com/sunerpy/pt-tools/pull/371))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.9.0 to 25.9.1. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.9.1
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Features
+
+- **sites**: 新增 2 个 NexusPHP 站点适配（ourbits / mua）
+  新增站点（均为 NexusPHP + Cookie 鉴权）：
+
+        - OurBits (ourbits.club) — Issue #329
+         - 标准 10 列 NexusPHP 表格
+         - 详情页 h1 嵌入 free 折扣 + onmouseover 含剩余时间
+         - 用户信息：标准 userdetails.php?id 路径
+        - Mua (mua.xloli.cc, 二次元站点) — Issue #339
+         - 9 列变体（无'进度'列）
+         - userdetails URL 使用 uuid= 而非 id=，因此 id 字段从
+         'td.rowhead:contains(用户ID/UID) + td' 提取整数 UID
+         - 副标题在 td.embedded > span（无 optiontag/tag class）
+
+        每站包含完整定义 + fixture 测试（搜索/详情/用户信息 + 无密钥校验）。
+        此外两站点都被加入 real_html_validation_test.go 的 TestRealHTML_*
+        测试列表，本地放置 issue 附件 ZIP 解压到 /tmp/site-zips/<id>/ 后
+        即可对真实站点 HTML 跑回归。本次实现已用 issue 附件验证：
+
+        - OurBits: 真实搜索 100 行解析 OK；详情 SizeMB=88709.1 / Discount=FREE；
+         userinfo 全字段（id/name/bonus/seeding/leeching/uploaded/downloaded/ratio/
+         levelName/joinTime/trueUploaded/trueDownloaded）解析非空
+        - Mua: 真实搜索 100 行解析 OK；详情 SizeMB=1402.9 / Discount=FREE；
+         userinfo 全字段（含 uuid 路径下的 UID 提取）解析非空
+
+        浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 中两域名已存在）。
+        docs/sites.md 已适配站点数从 41 → 43，NexusPHP 系列从 37 → 39。
+
+### Styling
+
+- **changelog**: 应用 oxfmt 自动格式化
+  CI Format Check 触发 oxfmt 重排已有 CHANGELOG 行；本次修复仅是格式调整，无内容变更。
+
 ## [0.33.0] - 2026-05-24
 
 ### Bug Fixes
@@ -1231,12 +1351,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
