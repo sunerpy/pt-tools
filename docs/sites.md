@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **41** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **43** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（37）
+### NexusPHP 系列（39）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
@@ -41,6 +41,8 @@
 | **HDVideo**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HD视频（hdvideo.top）                                            |
 | **GTKPW**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 多镜像（pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com） |
 | **NicePT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 好趣（www.nicept.net，繁体）                                     |
+| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329）                               |
+| **Mua**               | Cookie   | RSS、搜索、用户信息           | ✅       | 二次元站点（mua.xloli.cc，userdetails 走 uuid，issue #339）      |
 | **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
 | **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
 
