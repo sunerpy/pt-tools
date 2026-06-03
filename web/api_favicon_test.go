@@ -107,13 +107,15 @@ func TestApiFavicon_NonexistentSite_NoFetch(t *testing.T) {
 		refreshInterval: 12 * time.Hour,
 	}
 
-	// nofetch=1 显式要求不获取，仍返回 404（供 apiFaviconList 等场景使用）
+	// nofetch=1 对未缓存站点返回 200 透明占位图（可缓存 24h），
+	// 避免浏览/添加站点视图刷屏 404 噪音，前端仍可降级为字母头像。
 	req := httptest.NewRequest(http.MethodGet, "/api/favicon/nonexistent_site_xyz?nofetch=1", nil)
 	rec := httptest.NewRecorder()
 
 	server.apiFavicon(rec, req)
 
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Greater(t, rec.Body.Len(), 0)
 }
 
 func TestApiFaviconRefresh_MethodNotAllowed(t *testing.T) {
