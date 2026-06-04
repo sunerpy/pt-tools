@@ -246,6 +246,7 @@ func TestGazelleDriver_ParseUserInfo(t *testing.T) {
 			Downloaded int64   `json:"downloaded"`
 			Ratio      float64 `json:"ratio"`
 			Buffer     int64   `json:"buffer"`
+			LastAccess string  `json:"LastAccess,omitempty"`
 		}{
 			Uploaded:   1099511627776, // 1 TB
 			Downloaded: 549755813888,  // 512 GB

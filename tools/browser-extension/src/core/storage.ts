@@ -102,3 +102,14 @@ export async function setLastSync(siteId: string, timestamp: string): Promise<vo
   map[siteId] = timestamp;
   await set(STORAGE_KEYS.lastSyncMap, map);
 }
+
+export async function getLastVisitMap(): Promise<Record<string, string>> {
+  return (await get<Record<string, string>>(STORAGE_KEYS.lastVisitMap)) ?? {};
+}
+
+export async function setLastVisit(siteId: string, ts: number | string): Promise<void> {
+  const iso = typeof ts === "number" ? new Date(ts).toISOString() : ts;
+  const map = await getLastVisitMap();
+  map[siteId] = iso;
+  await set(STORAGE_KEYS.lastVisitMap, map);
+}

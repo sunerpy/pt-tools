@@ -26,7 +26,7 @@ var TMPTDefinition = &v2.SiteDefinition{
 			{
 				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
 				Assertion:     map[string]string{"id": "params.id"},
-				Fields:        []string{"name", "uploaded", "downloaded", "ratio", "levelName", "bonus", "joinTime"},
+				Fields:        []string{"name", "uploaded", "downloaded", "ratio", "levelName", "bonus", "joinTime", "lastAccessAt"},
 			},
 		},
 		Selectors: map[string]v2.FieldSelector{
@@ -78,6 +78,21 @@ var TMPTDefinition = &v2.SiteDefinition{
 				Selector: []string{"td.rowhead:contains('加入日期') + td", "td.rowhead:contains('Join') + td"},
 				Filters: []v2.Filter{
 					{Name: "split", Args: []any{" (", 0}},
+					{Name: "parseTime"},
+				},
+			},
+			"lastAccessAt": {
+				Selector: []string{
+					"td.rowhead:contains('最近动向') + td",
+					"td.rowhead:contains('最近動向') + td",
+					"td.rowhead:contains('最后活动') + td",
+					"td.rowhead:contains('最後活動') + td",
+					"td.rowhead:contains('上次访问') + td",
+					"td.rowhead:contains('上次訪問') + td",
+					"td.rowhead:contains('Last access') + td",
+				},
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
 					{Name: "parseTime"},
 				},
 			},

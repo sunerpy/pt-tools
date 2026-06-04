@@ -238,6 +238,8 @@ var webCmd = &cobra.Command{
 			go runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions)
 		}
 
+		wireLoginReminderMonitor(mgr, store, siteRegistry, bs)
+
 		srv := web.NewServer(store, mgr)
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())

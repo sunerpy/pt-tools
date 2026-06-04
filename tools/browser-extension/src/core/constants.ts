@@ -70,7 +70,7 @@ export const KNOWN_SITES: KnownSite[] = [
   {
     id: "rousipro",
     name: "Rousi Pro",
-    domains: ["rousi.pro"],
+    domains: ["rousi.pro", "www.rousi.pro"],
     schema: "Rousi",
     authMethod: "passkey",
     cookieNames: [],
@@ -444,7 +444,22 @@ export const STORAGE_KEYS = {
   tabStatusMap: "pt_tools_tab_status_map",
   autoSyncMap: "pt_tools_auto_sync_map",
   lastSyncMap: "pt_tools_last_sync_map",
+  lastVisitMap: "pt_tools_last_visit_map",
+  autoOpenTabsOnSync: "pt_tools_auto_open_tabs",
+  batchTabQueue: "pt_tools_batch_tab_queue",
 } as const;
+
+/**
+ * Sites that should be SKIPPED during batch tab-open sync.
+ * Per T0 spike (.sisyphus/evidence/task-0-mteam-spike.md STATUS=SKIPPED),
+ * M-Team is treated as observe-only: cookie sync + backend probing still run,
+ * but the extension does NOT open kp.m-team.cc tabs to refresh lastModifiedDate
+ * because the force-open-tab path was never validated against M-Team's SPA.
+ *
+ * Add a site here only when its force-open-tab keepalive path is unverified or
+ * known not to refresh server-side last-active timestamps.
+ */
+export const MTORRENT_DEGRADED_SITES: readonly string[] = ["mteam"] as const;
 
 export const GITHUB_REPO = "sunerpy/pt-tools";
 export const GITHUB_NEW_ISSUE_URL = `https://github.com/${GITHUB_REPO}/issues/new`;

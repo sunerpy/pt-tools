@@ -235,7 +235,7 @@ func testAGSVPTUserInfo(t *testing.T) {
 			"ratio":        "11.356",
 			"levelName":    "Extreme User",
 			"bonus":        "1.23456789e+06",
-			"joinTime":     "1579091400",
+			"joinTime":     "1579062600",
 			"messageCount": "7",
 		}
 		for field, expected := range exact {

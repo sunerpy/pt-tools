@@ -297,6 +297,85 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 | **[常见问题 (FAQ)](docs/faq.md)**                              | 常见问题和解决方案                           |
 | **[开发指南](docs/development.md)**                            | 从源码构建、技术架构、贡献指南               |
 
+## 站点登录管理（防封号）
+
+通过浏览器扩展 pt-tools-helper 一次性同步站点 cookie，后端定期探测各站点的权威 `last_access` / `last_login` 字段，预警即将触发封号判定的站点，并在阈值期内通过已配置的通知通道循环提醒，直到用户主动刷新登录。
+
+### 重要：AES 密钥备份（必读）
+
+`~/.pt-tools/secret.key` 保存着用于 AES-256-GCM 加密所有站点 cookie 的密钥。**一旦密钥丢失，已存储的 cookie 将无法解密，必须重新粘贴所有站点的 cookie。**
+
+**备份密钥**：
+
+```bash
+pt-tools secret export > ~/secret.key.backup && chmod 600 ~/secret.key.backup
+```
+
+**从备份恢复密钥**：
+
+```bash
+pt-tools secret import --force < ~/secret.key.backup
+```
+
+> [!WARNING]
+> 强烈建议将备份保存到 pt-tools 数据目录之外的安全位置，如密码管理器、加密 USB 等。备份文件本身具有与原始密钥等同的访问权限，请勿明文存放在云盘或代码仓库中。
+
+### Docker 部署须知
+
+Docker 容器重建后，容器内的文件系统会重置。必须将 `~/.pt-tools/` 目录（含 `secret.key`、数据库和备份文件）挂载为持久化 volume，否则每次重建容器都会丢失密钥，已加密的 cookie 将无法使用。
+
+最简 docker-compose.yaml 示例：
+
+```yaml
+services:
+  pt-tools:
+    image: sunerpy/pt-tools:latest
+    volumes:
+      - ./pt-tools-data:/root/.pt-tools # 包含 secret.key + db + backups
+    ports:
+      - "8080:8080"
+```
+
+> [!WARNING]
+> 千万不要误删 `./pt-tools-data` 目录。删除该目录等同于同时丢失密钥和数据库，所有已同步的 cookie 将不可恢复。
+
+### 远端访问安全警告
+
+浏览器扩展与 pt-tools 后端之间的通信会传输站点 cookie 明文。如果 `baseUrl` 配置为非 `localhost` / `127.0.0.1` 的 HTTP 地址（而非 HTTPS），扩展会弹出安全警告，提示连接不安全。
+
+建议通过反向代理（nginx / Caddy）为后端启用 HTTPS，或仅在本地运行时使用 `localhost`。
+
+### 使用步骤
+
+1. 在 pt-tools 站点管理页面启用目标站点
+2. 安装 pt-tools-helper 浏览器扩展，在浏览器中登录各 PT 站点
+3. 在扩展 popup 中点击"批量同步 cookie"；可选同时打开站点标签页，用于记录真实访问时间
+4. 在 pt-tools 前端 `/sites/login` 页面查看各站点的剩余天数，并可自定义阈值、cron 表达式和通知通道
+5. 当距封禁期限不足设定天数时，系统按 cron（默认 `0 10,22 * * *`）通过已配置的通知通道循环提醒，直到 cookie 刷新
+
+### 每站点配置项
+
+| 配置项                   | 默认值          | 说明                                          |
+| ------------------------ | --------------- | --------------------------------------------- |
+| `BanThresholdDays`       | `30`            | 站点封号判定天数（不活跃超过此天数将被封号）  |
+| `RemindBeforeDays`       | `10`            | 在封号前多少天开始提醒                        |
+| `ReminderCron`           | `0 10,22 * * *` | 提醒发送的 cron 表达式（每天 10:00 和 22:00） |
+| `NotificationChannelIDs` | 空              | 用于发送提醒的通知通道 ID 列表                |
+
+### 合规免责声明
+
+本功能通过用户自身已登录的 cookie / API key，周期性请求站点用户页面或 profile API，以获取最后访问时间。
+
+**请在使用前自行评估风险**：
+
+- 部分 PT 站点的服务条款（TOS）可能将频繁的脚本化访问视为违规行为
+- 默认探测频率为每 6 小时一次（带随机抖动），属于轻量请求，但仍可能被站点管理员注意
+- 用户应基于个人风险偏好决定是否启用本功能
+
+本工具不对因使用本功能导致的账号封禁、警告、降级或其他任何后果承担责任。
+
+---
+
 ## 贡献
 
 欢迎贡献代码或提交问题！
@@ -310,6 +389,186 @@ Expand-Archive -Path "pt-tools.zip" -DestinationPath "."
 ## 更新日志
 
 查看 [Releases](https://github.com/sunerpy/pt-tools/releases) 获取完整更新日志。
+
+## v2.0 升级与新功能
+
+### 简介与升级路径
+
+v2.0 在 v1 的 cookie HTTP keep-alive 探测路径之上，规划了可选的 **CloakBrowser-Manager fallback** 层。对于部署了 Cloudflare 或 ja3 指纹检测的站点，普通 HTTP 请求会被拦截；按设计，CloakBrowser fallback 将使 pt-tools 通过本地 CloakBrowser-Manager 实例，经由真实 Chromium 内核加载页面，绕过指纹识别。
+
+> **⚠️ 当前状态（实验性 / 开发中）**：CloakBrowser 的底层驱动（各框架驱动库）与「CloakBrowser 配置 / 测试连接」功能已实现并可用，但**端到端的探测 fallback 尚未接入运行时**。目前站点探测不会实际经由 CloakBrowser；per-site「启用 CloakBrowser fallback」开关亦尚未实现。本节描述的是目标设计，相关运行时集成列入后续版本。**配置页与「测试连接」可正常使用，供提前配置与连通性验证。**
+
+**v1 的 cookie HTTP 探测路径不变，仍是所有站点的默认行为。** v2.0 不破坏任何已有配置。
+
+升级时，数据库 schema 从 v9 自动迁移到 v10，**首次启动即完成，无需手动干预**。迁移备份写入 `~/.pt-tools/backups/site_login_states_v9_to_v10_<时间戳>.json`。迁移完成后有 24 小时静默窗口，防止提醒风暴（对应需求 R24）。
+
+### 三种部署形态
+
+v2.0 支持以下三种运行方式：
+
+**形态一：裸二进制 + 用户自管 CloakBrowser-Manager**
+
+适合有 Docker 经验的高级自托管用户。用户自行启动 CloakBrowser-Manager 容器，再在 pt-tools UI 中填写端点地址即可。
+
+```bash
+# 单独启动 CloakBrowser-Manager（用户自行选择版本和参数）
+docker run -d \
+  --name cloakbrowser-manager \
+  -p 127.0.0.1:8080:8080 \
+  -e AUTH_TOKEN=<your-token> \
+  cloakhq/cloakbrowser-manager:0.0.4
+```
+
+然后在 pt-tools UI 中将端点填写为 `http://localhost:8080`，并输入对应的 `AUTH_TOKEN`。
+
+**形态二：docker-compose 套件（推荐）**
+
+推荐大多数用户使用此方式。两个容器各司其职，内置健康检查和命名 volume，配置一次即可长期稳定运行。
+
+```bash
+cd build
+cp docker-compose.example.env .env
+# 编辑 .env，至少设置 CLOAK_AUTH_TOKEN
+docker compose -f build/docker-compose.yaml up -d
+```
+
+详细参数、SHA 摘要锁定方法和常见排障步骤见 [build/README.md](build/README.md)。
+
+**形态三：单镜像集成 — v2.0 暂不可用**
+
+将 pt-tools binary 与 CloakBrowser-Manager 打包进同一 Docker 镜像的方案，在 v2.0 中**未发布**。
+
+原因：`cloakhq/cloakbrowser-manager` 的 `BINARY-LICENSE.md` 包含 OEM/SaaS 条款，将 binary 捆绑进公开分发的镜像可能触发该条款，需要获得 CloakHQ 的书面授权。inquiry 邮件草稿见 [docs/legal/cloakhq-oem-inquiry.md](docs/legal/cloakhq-oem-inquiry.md)，将在收到 cloakhq@pm.me 回复后评估是否在后续版本中发布。
+
+### CloakBrowser 配置步骤
+
+1. 生成认证令牌：
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. 将生成的令牌设置到 `.env` 文件中的 `CLOAK_AUTH_TOKEN` 字段。
+
+3. 打开 pt-tools Web UI，进入「CloakBrowser 配置」页面。
+
+4. 填写端点地址：
+   - docker-compose 部署：`http://cloakbrowser-manager:8080`
+   - 裸二进制模式：`http://localhost:8080`
+
+5. 粘贴认证令牌（pt-tools 会用 AES-GCM 加密后存储，不会明文落盘）。
+
+6. 点击「测试连接」，系统返回分类诊断结果：`DNS_FAIL` / `CONN_REFUSED` / `AUTH_FAIL` / `TIMEOUT` / `SUCCESS`。
+
+7. 在「站点列表」中找到目标站点，设置 `ProbeMode`（已实现，见下节）。（计划中）逐站点开启 CloakBrowser fallback：per-site 开关尚未实现，当前版本无法逐站点启用 fallback；运行时集成完成后将在「站点列表」提供此开关。
+
+### ProbeMode 三态说明
+
+每个站点可独立配置 `ProbeMode`：
+
+| 模式           | 调度行为                                                                                    | 说明                                   |
+| -------------- | ------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `auto`（默认） | 调度器每 6 小时带随机抖动执行探测；提醒在配置的 cron 窗口触发；手动「立即探测」按钮随时可用 | 全自动，适合大多数站点                 |
+| `manual`       | 调度器跳过此站点；只有手动点击「立即探测」才触发探测；扩展 cookie 同步照常接受              | 适合不希望后台流量但偶尔手动刷新的用户 |
+| `disabled`     | 调度器完全跳过；提醒也暂停；扩展同步的 cookie 仍照常加密存储，但不产生任何出站探测流量      | 适合暂时不活跃的站点                   |
+
+无论哪种模式，扩展同步过来的 cookie 都会被接受并加密存储。
+
+### 废弃说明（SEC-3）
+
+v1 的批量打开标签页功能（`batchOpenTabsForSync`）已在 v2.0 中移除。
+
+新的同步流程：pt-tools 后端将「打开此 URL」请求写入 `pending_actions` 队列，浏览器扩展通过 `chrome.alarms` 每 30 秒轮询一次队列并执行。用户在扩展 popup 中可以看到各站点的登录状态面板，以及每站点单独的「在浏览器打开」按钮。
+
+### 风险与免责说明
+
+使用本功能前，请充分理解以下技术局限和使用风险：
+
+**cookie HTTP 探测的有效范围**
+
+cookie 加上 curl 探测，能可靠地刷新多数 NexusPHP 站点的 `last_access` 字段（清理脚本默认逻辑为 `WHERE last_access < cutoff AND last_login < cutoff`），从而规避常见的 30 天不活跃封号判定。
+
+**改过清理脚本的站点**
+
+少数站点修改了 `cleanup.php`，只检查 `last_login` 字段。对于这些站点，无论是 cookie HTTP 探测还是 CloakBrowser 页面加载，都无法刷新 `last_login`。**用户必须通过真实浏览器手动登录。** v2.0 会通过提醒消息提示「建议手动登录刷新」。自动登录（含 2FA 支持）列入后续版本规划。
+
+**Cloudflare / ja3 指纹检测**
+
+部分站点的 Cloudflare 或 ja3 指纹检测会拦截所有 cookie + curl 请求。CloakBrowser fallback（参见形态一/二）正是为此设计。（规划中）`enable_cloak_fallback` per-site 开关尚未实现，当前版本站点探测不经由 CloakBrowser；运行时集成完成后将支持逐站点开启。
+
+**注意：** CloakBrowser 能有效应对当前主流的反爬策略，但这是一场持续博弈。CloakBrowser 版本更新、站点侧配置变化，都可能影响实际效果。pt-tools 不对绕过效果作任何保证。
+
+**站点人工审核**
+
+人工审核无法通过任何技术手段规避。账号的长期安全依赖真实的社区参与：上传、下载、论坛互动。
+
+**CloakBrowser-Manager 软件成熟度**
+
+CloakBrowser-Manager 目前处于 alpha 阶段（v0.0.4，约 80 颗星）。API 合约可能在版本间发生破坏性变更。v2.0 固定依赖 `0.0.4`，升级到新版本前需重新验证兼容性。
+
+本工具不对因使用上述功能导致的账号封禁、警告、降级或任何其他后果承担责任。
+
+### 主密钥安全建议
+
+v2.0 仍从 `~/.pt-tools/secret.key` 读取 AES 主密钥（文件路径不变）。OS keyring 集成列入后续版本规划，届时可直接从系统钥匙串读取密钥而无需明文文件。
+
+**当前建议做法（v2.0）：**
+
+首先，收紧数据目录权限，防止其他本地账户读取：
+
+```bash
+chmod 700 ~/.pt-tools/
+```
+
+任何能读取 `~/.pt-tools/` 的人都可以解密所有存储的 cookie 和认证令牌，请务必执行上述命令。
+
+其次，用 CLI 备份主密钥（v1 已有此功能）：
+
+```bash
+pt-tools secret export > ~/secret.key.backup && chmod 600 ~/secret.key.backup
+```
+
+对于希望进一步强化安全的用户，可在每次启动时手动从 OS keyring 挂载密钥文件。具体方式取决于操作系统：
+
+**Linux（GNOME Keyring / KDE Wallet）：**
+
+```bash
+# 存入 keyring（首次）
+secret-tool store --label="pt-tools master key" service pt-tools account master-key < ~/.pt-tools/secret.key
+
+# 启动前从 keyring 读取并挂载
+secret-tool lookup service pt-tools account master-key > ~/.pt-tools/secret.key
+chmod 600 ~/.pt-tools/secret.key
+```
+
+**macOS（Keychain）：**
+
+```bash
+# 存入 Keychain（首次）
+security add-generic-password -a master-key -s pt-tools -w "$(base64 < ~/.pt-tools/secret.key)"
+
+# 启动前从 Keychain 读取并还原
+security find-generic-password -a master-key -s pt-tools -w | base64 --decode > ~/.pt-tools/secret.key
+chmod 600 ~/.pt-tools/secret.key
+```
+
+**Windows（Credential Manager，PowerShell）：**
+
+```powershell
+# 存入 Credential Manager（首次）
+$key = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes("$env:USERPROFILE\.pt-tools\secret.key"))
+$cred = New-Object System.Management.Automation.PSCredential("pt-tools-master-key", (ConvertTo-SecureString $key -AsPlainText -Force))
+$cred | Export-Clixml "$env:USERPROFILE\pt-tools-cred.xml"
+
+# 启动前从 Credential Manager 读取并还原
+$cred = Import-Clixml "$env:USERPROFILE\pt-tools-cred.xml"
+$key = $cred.GetNetworkCredential().Password
+[System.IO.File]::WriteAllBytes("$env:USERPROFILE\.pt-tools\secret.key", [Convert]::FromBase64String($key))
+```
+
+OS keyring 集成的原生支持（`pt-tools secret use-keyring`）将在后续版本中作为内置功能提供，届时无需手动脚本。
+
+---
 
 ## 许可证
 

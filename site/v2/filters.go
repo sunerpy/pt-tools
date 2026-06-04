@@ -451,7 +451,7 @@ func parseTimeString(timeStr string) time.Time {
 	}
 
 	for _, format := range formats {
-		if t, err := time.Parse(format, timeStr); err == nil {
+		if t, err := ParseTimeInCST(format, timeStr); err == nil {
 			return t
 		}
 	}

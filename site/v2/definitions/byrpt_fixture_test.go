@@ -156,7 +156,7 @@ func testBYRPTUserInfo(t *testing.T) {
 	assert.Equal(t, "754411005542", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "165.662", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Ultimate User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1618337104", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1618308304", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestBYRPT_Fixtures_NoSecrets(t *testing.T) {

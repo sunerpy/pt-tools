@@ -144,7 +144,7 @@ func testPTSKITUserInfo(t *testing.T) {
 	assert.Equal(t, "137438953472", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "4", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Power User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1762387246", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1762358446", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestPTSKIT_Fixtures_NoSecrets(t *testing.T) {

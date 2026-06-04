@@ -209,7 +209,7 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Assertion: map[string]string{"id": "params.id"},
 				Fields: []string{
 					"name", "uploaded", "downloaded", "ratio", "levelName",
-					"bonus", "seedingBonus", "joinTime",
+					"bonus", "seedingBonus", "joinTime", "lastAccessAt",
 					"hnrUnsatisfied", "hnrPreWarning", "messageCount",
 				},
 			},
@@ -338,6 +338,18 @@ var HDSkyDefinition = &v2.SiteDefinition{
 				Selector: []string{
 					"td.rowhead:contains('加入日期') + td",
 					"td.rowhead:contains('Join') + td",
+				},
+				Filters: []v2.Filter{
+					{Name: "split", Args: []any{" (", 0}},
+					{Name: "parseTime"},
+				},
+			},
+			"lastAccessAt": {
+				Selector: []string{
+					"td.rowhead:contains('最近动向') + td",
+					"td.rowhead:contains('最近動向') + td",
+					"td.rowhead:contains('上次访问') + td",
+					"td.rowhead:contains('Last access') + td",
 				},
 				Filters: []v2.Filter{
 					{Name: "split", Args: []any{" (", 0}},

@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
@@ -41,6 +42,10 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 	if req.Passkey != nil {
 		sc.Passkey = *req.Passkey
 	}
+	if credentialProvided(req) {
+		enabled := true
+		sc.Enabled = &enabled
+	}
 
 	if err := s.store.UpsertSiteWithRSS(sg, sc); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -60,4 +65,10 @@ func (s *Server) updateSiteCredential(w http.ResponseWriter, r *http.Request, sg
 	}()
 
 	writeJSON(w, map[string]any{"success": true, "site": string(sg)})
+}
+
+func credentialProvided(req credentialUpdateRequest) bool {
+	return req.Cookie != nil && strings.TrimSpace(*req.Cookie) != "" ||
+		req.APIKey != nil && strings.TrimSpace(*req.APIKey) != "" ||
+		req.Passkey != nil && strings.TrimSpace(*req.Passkey) != ""
 }

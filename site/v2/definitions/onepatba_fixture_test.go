@@ -180,7 +180,7 @@ func testOnePTBAUserInfo(t *testing.T) {
 			"downloaded": "107374182400",
 			"ratio":      "2.382",
 			"levelName":  "Power User",
-			"joinTime":   "1577836800",
+			"joinTime":   "1577808000",
 		}
 		for field, want := range expected {
 			sel, ok := def.UserInfo.Selectors[field]

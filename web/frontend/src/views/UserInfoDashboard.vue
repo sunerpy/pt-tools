@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { type AggregatedStatsResponse, userInfoApi } from "@/api";
+import {
+  type AggregatedStatsResponse,
+  type SiteConfig,
+  type SiteLoginState,
+  sitesApi,
+  userInfoApi,
+} from "@/api";
 import LevelTooltip from "@/components/LevelTooltip.vue";
 import SiteAvatar from "@/components/SiteAvatar.vue";
+import { useLoginState } from "@/composables/useLoginState";
 import { useSiteLevelsStore } from "@/stores/siteLevels";
 import {
   formatBytes,
@@ -24,7 +31,11 @@ const loading = ref(false);
 const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
+const sitesByName = ref<Record<string, SiteConfig>>({});
+const loginStates = ref<Record<string, SiteLoginState>>({});
 const isMobile = ref(window.innerWidth < 768);
+const { effectiveLastActive, daysRemaining, reminderTier, tierTagType, tierLabel } =
+  useLoginState(loginStates);
 
 // 定时刷新相关
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5分钟
@@ -127,11 +138,74 @@ const statsCards = computed(() => {
 async function loadData() {
   loading.value = true;
   try {
-    aggregatedStats.value = await userInfoApi.getAggregated();
+    const [agg, siteMap, states] = await Promise.all([
+      userInfoApi.getAggregated(),
+      sitesApi.list().catch(() => ({}) as Record<string, SiteConfig>),
+      sitesApi.listLoginStates().catch(() => [] as SiteLoginState[]),
+    ]);
+
+    aggregatedStats.value = agg;
+    sitesByName.value = siteMap;
+
+    const byName: Record<string, SiteLoginState> = {};
+    for (const st of states ?? []) byName[st.site_name] = st;
+    loginStates.value = byName;
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "加载失败");
   } finally {
     loading.value = false;
+  }
+}
+
+function openSite(site: string) {
+  const url =
+    sitesByName.value[site]?.web_url ??
+    sitesByName.value[site]?.urls?.[0] ??
+    loginStates.value[site]?.base_url;
+  if (url) window.open(url, "_blank", "noopener");
+}
+
+function openAllSites() {
+  const rows = aggregatedStats.value?.perSiteStats ?? [];
+  const urls = rows
+    .map(
+      (row) =>
+        sitesByName.value[row.site]?.web_url ??
+        sitesByName.value[row.site]?.urls?.[0] ??
+        loginStates.value[row.site]?.base_url,
+    )
+    .filter((url): url is string => Boolean(url));
+
+  if (urls.length === 0) {
+    ElMessage.info("没有可打开的站点");
+    return;
+  }
+
+  if (urls.length === 1) {
+    window.open(urls[0], "_blank");
+    return;
+  }
+
+  let opened = 0;
+  let blocked = 0;
+  for (const url of urls) {
+    const w = window.open(url, "_blank");
+    if (w === null || typeof w === "undefined") {
+      blocked++;
+    } else {
+      opened++;
+    }
+  }
+
+  if (blocked > 0) {
+    ElMessage({
+      type: "warning",
+      duration: 8000,
+      showClose: true,
+      message: `已打开 ${opened} 个站点，浏览器拦截了其余 ${blocked} 个。请在浏览器地址栏允许本站“弹出式窗口”后重试，或使用每行的“打开站点”按钮逐个打开。`,
+    });
+  } else {
+    ElMessage.success(`已打开 ${opened} 个站点`);
   }
 }
 
@@ -252,6 +326,13 @@ onUnmounted(() => {
       </template>
     </el-alert>
 
+    <el-alert
+      type="warning"
+      show-icon
+      :closable="true"
+      class="risk-hint-alert"
+      title="活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，请勿仅依赖此处数据。" />
+
     <!-- 统计卡片 -->
     <div class="dashboard-stats-row">
       <div
@@ -286,6 +367,13 @@ onUnmounted(() => {
             </el-button>
           </el-tooltip>
           <el-button size="small" @click="clearCache">清除缓存</el-button>
+          <el-button
+            size="small"
+            data-testid="userinfo-open-all-btn"
+            :disabled="!(aggregatedStats?.perSiteStats?.length ?? 0)"
+            @click="openAllSites">
+            一键打开站点
+          </el-button>
           <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
             <el-icon><Share /></el-icon>
             导出分享
@@ -479,6 +567,36 @@ onUnmounted(() => {
             </template>
           </el-table-column>
 
+          <!-- 判定活跃 -->
+          <el-table-column label="判定活跃" min-width="110" align="center">
+            <template #default="{ row }">
+              <span class="login-time">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
+            </template>
+          </el-table-column>
+
+          <!-- 封禁提醒 -->
+          <el-table-column min-width="120" align="center">
+            <template #header>
+              <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
+                <span>剩余天数</span>
+              </el-tooltip>
+            </template>
+            <template #default="{ row }">
+              <div class="days-remaining-cell">
+                <span class="days-remaining-value">
+                  {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
+                </span>
+                <el-tag
+                  size="small"
+                  :type="tierTagType(reminderTier(row.site))"
+                  effect="plain"
+                  class="tier-tag">
+                  {{ tierLabel(reminderTier(row.site)) }}
+                </el-tag>
+              </div>
+            </template>
+          </el-table-column>
+
           <!-- 更新时间 -->
           <el-table-column prop="lastUpdate" label="更新" min-width="100" sortable align="center">
             <template #default="{ row }">
@@ -489,16 +607,40 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 操作列 -->
-          <el-table-column label="操作" width="80" align="center" fixed="right">
+          <el-table-column label="操作" width="170" align="center" fixed="right">
             <template #default="{ row }">
-              <el-button
-                type="primary"
-                size="small"
-                circle
-                :loading="syncingSite === row.site"
-                @click="syncSite(row.site)">
-                <el-icon><Refresh /></el-icon>
-              </el-button>
+              <div class="table-actions">
+                <el-tooltip
+                  content="未配置站点地址"
+                  placement="top"
+                  :disabled="
+                    !!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)
+                  ">
+                  <span>
+                    <el-button
+                      type="info"
+                      size="small"
+                      text
+                      bg
+                      :disabled="
+                        !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
+                      "
+                      :data-testid="`userinfo-open-site-${row.site}`"
+                      @click="openSite(row.site)">
+                      <el-icon><TopRight /></el-icon>
+                      打开站点
+                    </el-button>
+                  </span>
+                </el-tooltip>
+                <el-button
+                  type="primary"
+                  size="small"
+                  circle
+                  :loading="syncingSite === row.site"
+                  @click="syncSite(row.site)">
+                  <el-icon><Refresh /></el-icon>
+                </el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -608,6 +750,29 @@ onUnmounted(() => {
               </span>
               <span class="value">{{ formatJoinDuration(row.joinDate ?? 0) }}</span>
             </div>
+            <div class="stat-item">
+              <span class="label">
+                <el-icon><Clock /></el-icon>
+                判定活跃
+              </span>
+              <span class="value">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">
+                <el-icon><Warning /></el-icon>
+                剩余天数
+              </span>
+              <span class="value remaining">
+                {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
+              </span>
+              <el-tag
+                size="small"
+                :type="tierTagType(reminderTier(row.site))"
+                effect="plain"
+                class="tier-tag">
+                {{ tierLabel(reminderTier(row.site)) }}
+              </el-tag>
+            </div>
           </div>
 
           <!-- 卡片底部：操作和更新时间 -->
@@ -616,15 +781,36 @@ onUnmounted(() => {
               <el-icon><Clock /></el-icon>
               {{ formatTimeAgo(row.lastUpdate) }}
             </span>
-            <el-button
-              type="primary"
-              size="small"
-              round
-              :loading="syncingSite === row.site"
-              @click="syncSite(row.site)">
-              <el-icon><Refresh /></el-icon>
-              同步
-            </el-button>
+            <div class="mobile-card-actions">
+              <el-tooltip
+                content="未配置站点地址"
+                placement="top"
+                :disabled="!!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)">
+                <span>
+                  <el-button
+                    type="info"
+                    size="small"
+                    round
+                    :disabled="
+                      !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
+                    "
+                    :data-testid="`userinfo-open-site-${row.site}`"
+                    @click="openSite(row.site)">
+                    <el-icon><TopRight /></el-icon>
+                    打开站点
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                type="primary"
+                size="small"
+                round
+                :loading="syncingSite === row.site"
+                @click="syncSite(row.site)">
+                <el-icon><Refresh /></el-icon>
+                同步
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -644,6 +830,15 @@ onUnmounted(() => {
 /* Component specific overrides */
 .extension-banner {
   margin-bottom: 16px;
+}
+
+.risk-hint-alert {
+  margin-bottom: var(--pt-space-3, 12px);
+}
+
+.risk-hint-alert :deep(.el-alert__title) {
+  font-weight: 600;
+  line-height: 1.6;
 }
 
 .extension-banner a {
@@ -673,6 +868,29 @@ onUnmounted(() => {
 
 .no-data {
   color: var(--pt-text-tertiary);
+}
+
+.table-actions,
+.mobile-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pt-space-2);
+}
+
+.days-remaining-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pt-space-2);
+}
+
+.days-remaining-value {
+  font-weight: 700;
+  color: var(--pt-text-primary);
+}
+
+.tier-tag {
+  flex: 0 0 auto;
 }
 
 /* Seeding cell styles */
@@ -727,6 +945,7 @@ onUnmounted(() => {
 
 /* Time styles */
 .join-time,
+.login-time,
 .update-time {
   font-size: var(--pt-text-xs);
   color: var(--pt-text-secondary);
@@ -843,6 +1062,9 @@ onUnmounted(() => {
 }
 .stat-item .value.seeding {
   color: var(--pt-color-success);
+}
+.stat-item .value.remaining {
+  color: var(--pt-color-warning);
 }
 
 .mobile-card-footer {

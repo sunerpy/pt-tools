@@ -14,6 +14,8 @@ class ApiError extends Error {
   }
 }
 
+export { ApiError };
+
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     credentials: "same-origin",
@@ -43,6 +45,11 @@ export const api = {
   post: <T>(path: string, data?: unknown) =>
     request<T>(path, {
       method: "POST",
+      body: data ? JSON.stringify(data) : undefined,
+    }),
+  put: <T>(path: string, data?: unknown) =>
+    request<T>(path, {
+      method: "PUT",
       body: data ? JSON.stringify(data) : undefined,
     }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
@@ -114,6 +121,7 @@ export interface SiteConfig {
   enabled: boolean;
   auth_method: string;
   cookie: string;
+  has_cookie?: boolean;
   api_key: string;
   api_url: string;
   passkey?: string;
@@ -121,9 +129,17 @@ export interface SiteConfig {
   download_limit_kbs?: number;
   rss: RSSConfig[];
   urls?: string[];
+  web_url?: string;
   unavailable?: boolean;
   unavailable_reason?: string;
   is_builtin?: boolean;
+  api_last_login_at?: number;
+  cookie_last_login_at?: number;
+  last_access_at?: number;
+  last_consistency_check?: number;
+  probe_mode?: "auto" | "manual" | "disabled";
+  ban_threshold_days?: number;
+  remind_before_days?: number;
 }
 
 export interface TaskItem {
@@ -193,14 +209,49 @@ export interface SupportedSiteDefinition {
   unavailableReason?: string;
 }
 
+export interface SiteLoginState {
+  site_name: string;
+  display_name?: string;
+  base_url?: string;
+  enabled: boolean;
+  last_login_at?: number;
+  last_access_at?: number;
+  last_visit_at?: number;
+  effective_last_active_at?: number;
+  last_probe_at?: number;
+  last_probe_status?: string;
+  last_probe_error?: string;
+  consecutive_probe_failures: number;
+  ban_threshold_days: number;
+  remind_before_days: number;
+  reminder_cron: string;
+  notification_channel_ids: number[];
+  last_reminder_tier: string;
+  last_reminder_sent_at?: number;
+  days_remaining: number;
+  tier: string;
+  probe_mode: string;
+}
+
 export const sitesApi = {
   list: () => api.get<Record<string, SiteConfig>>("/api/sites"),
+  listLoginStates: () => api.get<SiteLoginState[]>("/api/sites/login-state"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
   delete: (name: string) => api.delete<void>(`/api/sites?name=${encodeURIComponent(name)}`),
   deleteRss: (name: string, id: number) =>
     api.delete<void>(`/api/sites/${name}?id=${encodeURIComponent(id.toString())}`),
   listDefinitions: () => api.get<SupportedSiteDefinition[]>("/api/sites/definitions"),
+  validate: (name: string, data: SiteConfig) =>
+    api.post<void>(`/api/sites/validate?name=${encodeURIComponent(name)}`, data),
+  updateProbeMode: (name: string, mode: "auto" | "manual" | "disabled") =>
+    api.put<void>(`/api/sites/${name}/login-state/config`, { probe_mode: mode }),
+  probeNow: (name: string) =>
+    api.post<{ ok: boolean; last_probe_at?: number; last_probe_status?: string }>(
+      `/api/sites/${name}/login-state/probe`,
+    ),
+  testReminder: (name: string) =>
+    api.post<{ success: boolean; message: string }>(`/api/sites/${name}/login-state/test-reminder`),
 };
 
 export const tasksApi = {
@@ -1376,4 +1427,35 @@ export const chatopsApi = {
     cancel: (id: number) =>
       api.post<{ success: boolean }>(`/api/chatops/rss-notifications/${id}/cancel`),
   },
+};
+
+export interface CloakConfig {
+  endpoint: string;
+  has_token: boolean;
+  manager_version: string | null;
+}
+
+export type CloakTestCategory =
+  | "success"
+  | "dns_fail"
+  | "conn_refused"
+  | "timeout"
+  | "auth_fail"
+  | "not_found"
+  | "server_error"
+  | "protocol_error"
+  | "unknown";
+
+export interface CloakTestResult {
+  category: CloakTestCategory;
+  message: string;
+  manager_version?: string;
+}
+
+export const cloakApi = {
+  getConfig: () => api.get<CloakConfig>("/api/cloak/config"),
+  updateConfig: (data: { endpoint: string; token?: string }) =>
+    api.put<void>("/api/cloak/config", data),
+  testConnection: (data?: { endpoint?: string; token?: string }) =>
+    api.post<CloakTestResult>("/api/cloak/test", data ?? {}),
 };

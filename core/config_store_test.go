@@ -206,6 +206,132 @@ func TestUpsertSiteWithRSS_SaveAndList(t *testing.T) {
 	require.Equal(t, "cookie", out[models.SiteGroup("springsunday")].AuthMethod)
 }
 
+func TestUpsertSiteWithRSS_PreservesLoginStateCookieForAPIKeySite(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	loginCookie := "session=login-state; uid=123"
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		AuthMethod: "api_key",
+		Cookie:     loginCookie,
+		APIKey:     "api-key",
+		APIUrl:     "https://api.m-team.cc",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var saved models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "mteam").First(&saved).Error)
+	require.NotEmpty(t, saved.CookieEncrypted)
+	plain, err := s.DecryptCookie(saved.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, loginCookie, plain)
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		AuthMethod: "api_key",
+		APIKey:     "api-key-updated",
+		APIUrl:     "https://api.m-team.cc",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var updated models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "mteam").First(&updated).Error)
+	require.Empty(t, updated.Cookie)
+	require.NotEmpty(t, updated.CookieEncrypted)
+	plain, err = s.DecryptCookie(updated.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, loginCookie, plain)
+
+	loaded, err := s.GetSiteConf(models.SiteGroup("mteam"))
+	require.NoError(t, err)
+	require.Equal(t, loginCookie, loaded.Cookie)
+}
+
+func TestUpsertSiteWithRSS_CookieAuthStillEncryptsCookie(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	cookie := "sid=cookie-auth"
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		AuthMethod: "cookie",
+		Cookie:     cookie,
+		APIUrl:     "http://api",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var saved models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "springsunday").First(&saved).Error)
+	require.NotEmpty(t, saved.CookieEncrypted)
+	plain, err := s.DecryptCookie(saved.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, cookie, plain)
+
+	loaded, err := s.GetSiteConf(models.SiteGroup("springsunday"))
+	require.NoError(t, err)
+	require.Equal(t, cookie, loaded.Cookie)
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		AuthMethod: "cookie",
+		APIUrl:     "http://api",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var updated models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "springsunday").First(&updated).Error)
+	require.Empty(t, updated.Cookie)
+	require.NotEmpty(t, updated.CookieEncrypted)
+	plain, err = s.DecryptCookie(updated.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, cookie, plain)
+}
+
+func TestUpsertSiteWithRSS_CookieAndAPIKeyAcceptsEmptyCookieWhenStored(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	storedCookie := "uid=123; session=stored"
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		Cookie:     storedCookie,
+		APIKey:     "api-key",
+		APIUrl:     "https://www.hddolby.com",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		APIKey:     "api-key-updated",
+		APIUrl:     "https://www.hddolby.com",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var updated models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "hddolby").First(&updated).Error)
+	require.Empty(t, updated.Cookie)
+	require.NotEmpty(t, updated.CookieEncrypted)
+	plain, err := s.DecryptCookie(updated.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, storedCookie, plain)
+}
+
+func TestUpsertSiteWithRSS_CookieAndAPIKeyRequiresCookieWhenNoneStored(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	err = s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		APIKey:     "api-key",
+		APIUrl:     "https://www.hddolby.com",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	})
+	require.EqualError(t, err, "Cookie 不能为空")
+}
+
 func TestConfigStore_GlobalCRUD(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	if err != nil {
@@ -382,8 +508,8 @@ func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	assert.NoError(t, err) // 预置站点允许空 APIUrl
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
-	assert.Error(t, err)
+	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	assert.NoError(t, err)
 	// RSS 列表允许为空
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
 	assert.NoError(t, err)

@@ -1,26 +1,103 @@
 package core
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/global"
+	internalcrypto "github.com/sunerpy/pt-tools/internal/crypto"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/utils"
 )
 
+var ErrKeyMissing = errors.New("AES secret key missing or corrupt")
+
 type ConfigStore struct {
-	db *models.TorrentDB
+	db             *models.TorrentDB
+	keyMissingWarn sync.Once
 }
 
 func NewConfigStore(db *models.TorrentDB) *ConfigStore {
 	return &ConfigStore{db: db}
+}
+
+func (s *ConfigStore) EncryptCookie(plain string) (string, error) {
+	if err := s.ensureCookieKeyAvailable(); err != nil {
+		return "", err
+	}
+	cipherText, err := internalcrypto.Encrypt([]byte(plain))
+	if err != nil {
+		return "", fmt.Errorf("encrypt cookie failed: %w", err)
+	}
+	return cipherText, nil
+}
+
+func (s *ConfigStore) DecryptCookie(cipherText string) (string, error) {
+	if err := s.ensureCookieKeyAvailable(); err != nil {
+		return "", err
+	}
+	plainBytes, err := internalcrypto.Decrypt(cipherText)
+	if err != nil {
+		return "", fmt.Errorf("decrypt cookie failed: %w", err)
+	}
+	return string(plainBytes), nil
+}
+
+func (s *ConfigStore) ensureCookieKeyAvailable() error {
+	if envKey := strings.TrimSpace(os.Getenv("PT_TOOLS_SECRET_KEY")); envKey != "" {
+		keyBytes, err := internalcryptoKeyFromEnv(envKey)
+		if err == nil && len(keyBytes) == 32 {
+			return nil
+		}
+		return s.cookieKeyError()
+	}
+
+	keyFile, err := cookieSecretKeyFile()
+	if err != nil {
+		return s.cookieKeyError()
+	}
+	keyHex, err := os.ReadFile(keyFile)
+	if err != nil {
+		return s.cookieKeyError()
+	}
+	keyBytes, err := hex.DecodeString(string(bytes.TrimSpace(keyHex)))
+	if err != nil || len(keyBytes) != 32 {
+		return s.cookieKeyError()
+	}
+	return nil
+}
+
+func (s *ConfigStore) cookieKeyError() error {
+	s.keyMissingWarn.Do(func() {
+		if logger := global.GetSloggerSafe(); logger != nil {
+			logger.Warn("AES secret.key missing or corrupt; 请运行 pt-tools secret import 或检查 ~/.pt-tools/secret.key")
+		}
+	})
+	return fmt.Errorf("KEY_ERROR: %w", ErrKeyMissing)
+}
+
+func cookieSecretKeyFile() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, ".pt-tools", "secret.key"), nil
+}
+
+func internalcryptoKeyFromEnv(keyBase64 string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(keyBase64)
 }
 
 // SyncSites 从注册的站点列表同步到数据库
@@ -70,7 +147,11 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 		}
 		for _, sitem := range sites {
 			sg := models.SiteGroup(strings.ToLower(sitem.Name))
-			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: sitem.Cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, RSS: []models.RSSConfig{}}
+			cookie, e := s.cookiePlaintextForSite(sitem)
+			if e != nil {
+				return e
+			}
+			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
 				return e
@@ -293,6 +374,15 @@ func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (u
 	}
 	row.AuthMethod = sc.AuthMethod
 	row.Cookie = sc.Cookie
+	if strings.TrimSpace(sc.Cookie) == "" {
+		row.CookieEncrypted = ""
+	} else {
+		cookieCipherText, err := s.EncryptCookie(sc.Cookie)
+		if err != nil {
+			return 0, err
+		}
+		row.CookieEncrypted = cookieCipherText
+	}
 	row.APIKey = sc.APIKey
 	row.APIUrl = sc.APIUrl
 	row.Passkey = sc.Passkey
@@ -395,16 +485,23 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	if !hasDefaultURL && strings.TrimSpace(sc.APIUrl) == "" {
 		return errors.New("API 地址不能为空")
 	}
+	var existingSite models.SiteSetting
+	hasStoredCookie := false
+	if err := s.db.DB.Where("name = ?", string(site)).First(&existingSite).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else {
+		hasStoredCookie = strings.TrimSpace(existingSite.CookieEncrypted) != "" || strings.TrimSpace(existingSite.Cookie) != ""
+	}
+
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
-	cookieEmpty := strings.TrimSpace(sc.Cookie) == ""
+	cookieEmpty := strings.TrimSpace(sc.Cookie) == "" && !hasStoredCookie
 	passkeyEmpty := strings.TrimSpace(sc.Passkey) == ""
 	switch am {
 	case "api_key":
 		if apiKeyEmpty {
 			return errors.New("API Key 不能为空")
-		}
-		if !cookieEmpty {
-			return errors.New("认证方式为 api_key 时 Cookie 必须留空")
 		}
 	case "cookie_and_api_key":
 		if apiKeyEmpty {
@@ -461,7 +558,17 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			row.Enabled = *sc.Enabled
 		}
 		row.AuthMethod = sc.AuthMethod
-		row.Cookie = sc.Cookie
+		if strings.TrimSpace(sc.Cookie) != "" {
+			row.Cookie = sc.Cookie
+			cookieCipherText, err := s.EncryptCookie(sc.Cookie)
+			if err != nil {
+				return err
+			}
+			row.CookieEncrypted = cookieCipherText
+		} else {
+			// 本次保存未携带 cookie：保留已存储的登录态 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
+			row.Cookie = ""
+		}
 		row.APIKey = sc.APIKey
 		row.APIUrl = sc.APIUrl
 		row.Passkey = sc.Passkey
@@ -556,7 +663,11 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 	}
 	for _, ss := range sites {
 		sg := models.SiteGroup(strings.ToLower(ss.Name))
-		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
+		cookie, err := s.cookiePlaintextForSite(ss)
+		if err != nil {
+			return nil, err
+		}
+		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
 		var rss []models.RSSSubscription
 		if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 			return nil, err
@@ -577,7 +688,11 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 		return models.SiteConfig{}, err
 	}
 	// 初始化 RSS 为空数组，确保 JSON 序列化时返回 [] 而不是 null
-	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: ss.Cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
+	cookie, err := s.cookiePlaintextForSite(ss)
+	if err != nil {
+		return models.SiteConfig{}, err
+	}
+	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
 	var rss []models.RSSSubscription
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err
@@ -614,4 +729,144 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	}
 	// 注意：AuthMethod 和 APIUrl 已从数据库读取（由 SyncSites 初始化）
 	return sc, nil
+}
+
+func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, error) {
+	if strings.TrimSpace(site.CookieEncrypted) == "" {
+		return site.Cookie, nil
+	}
+	plainCookie, err := s.DecryptCookie(site.CookieEncrypted)
+	if err != nil {
+		return "", err
+	}
+	return plainCookie, nil
+}
+
+// CloakConfigSnapshot is the in-memory view of CloakBrowser-Manager接入配置。
+// 仅在 ConfigStore 内部及调用方使用；HTTP 层通过 web.api_cloak.go 暴露的响应类型
+// 控制对外字段，token 永远不会以明文出现在 API 响应里。
+type CloakConfigSnapshot struct {
+	Endpoint string
+	HasToken bool
+}
+
+// GetCloakConfig 返回 endpoint + 是否已设置 token。永远不返回 token 明文。
+func (s *ConfigStore) GetCloakConfig() (CloakConfigSnapshot, error) {
+	var row models.CloakSettings
+	err := s.db.DB.First(&row).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return CloakConfigSnapshot{}, err
+	}
+	return CloakConfigSnapshot{
+		Endpoint: row.Endpoint,
+		HasToken: strings.TrimSpace(row.TokenEncrypted) != "",
+	}, nil
+}
+
+// GetCloakEndpoint 返回当前持久化的 endpoint，记录不存在时返回空字符串。
+func (s *ConfigStore) GetCloakEndpoint() (string, error) {
+	cfg, err := s.GetCloakConfig()
+	if err != nil {
+		return "", err
+	}
+	return cfg.Endpoint, nil
+}
+
+// GetCloakToken 解密并返回 token 明文。
+// 仅 test-connection / driver 内部调用，绝不能写到任何 HTTP 响应或日志。
+func (s *ConfigStore) GetCloakToken() (string, error) {
+	var row models.CloakSettings
+	if err := s.db.DB.First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if strings.TrimSpace(row.TokenEncrypted) == "" {
+		return "", nil
+	}
+	plain, err := s.DecryptCookie(row.TokenEncrypted)
+	if err != nil {
+		return "", err
+	}
+	return plain, nil
+}
+
+// SetCloakEndpoint 仅更新 endpoint 字段，不影响已存 token。
+func (s *ConfigStore) SetCloakEndpoint(endpoint string) error {
+	endpoint = strings.TrimSpace(endpoint)
+	db := s.db.DB
+	var row models.CloakSettings
+	if err := db.First(&row).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		row = models.CloakSettings{Endpoint: endpoint}
+		return db.Create(&row).Error
+	}
+	row.Endpoint = endpoint
+	return db.Save(&row).Error
+}
+
+// SetCloakToken 加密后落库；空字符串表示清除 token。
+func (s *ConfigStore) SetCloakToken(plaintext string) error {
+	db := s.db.DB
+	var row models.CloakSettings
+	if err := db.First(&row).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		row = models.CloakSettings{}
+		if strings.TrimSpace(plaintext) != "" {
+			cipherText, encErr := s.EncryptCookie(plaintext)
+			if encErr != nil {
+				return encErr
+			}
+			row.TokenEncrypted = cipherText
+		}
+		return db.Create(&row).Error
+	}
+	if strings.TrimSpace(plaintext) == "" {
+		row.TokenEncrypted = ""
+	} else {
+		cipherText, encErr := s.EncryptCookie(plaintext)
+		if encErr != nil {
+			return encErr
+		}
+		row.TokenEncrypted = cipherText
+	}
+	return db.Save(&row).Error
+}
+
+// SaveCloakConfig 在单次事务里同时更新 endpoint + token；
+// emptyToken=true 时显式清空 token，否则 plaintextToken=="" 表示保持不变（部分更新）。
+func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool) error {
+	endpoint = strings.TrimSpace(endpoint)
+	return s.db.WithTransaction(func(tx *gorm.DB) error {
+		var row models.CloakSettings
+		err := tx.First(&row).Error
+		isNew := false
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			isNew = true
+			row = models.CloakSettings{}
+		}
+		row.Endpoint = endpoint
+		switch {
+		case clearToken:
+			row.TokenEncrypted = ""
+		case strings.TrimSpace(plaintextToken) != "":
+			cipherText, encErr := s.EncryptCookie(plaintextToken)
+			if encErr != nil {
+				return encErr
+			}
+			row.TokenEncrypted = cipherText
+		}
+		if isNew {
+			return tx.Create(&row).Error
+		}
+		return tx.Save(&row).Error
+	})
 }

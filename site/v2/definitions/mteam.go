@@ -22,6 +22,7 @@ var MTeamDefinition = &v2.SiteDefinition{
 		"https://next.m-team.cc",
 		"https://ob.m-team.cc",
 	},
+	WebURL:         "https://kp.m-team.cc",
 	LegacyURLs:     []string{"https://xp.m-team.io/", "https://pt.m-team.cc/", "https://tp.m-team.cc/"},
 	FaviconURL:     "https://kp.m-team.cc/favicon.ico",
 	TimezoneOffset: "+0800",

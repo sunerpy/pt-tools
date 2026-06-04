@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Login</title>
+  </head>
+  <body>
+    <main class="auth">
+      <h1>Login</h1>
+      <form method="POST" action="/login" class="auth__form">
+        <input type="hidden" name="_token" value="csrf-token-here" />
+        <label>
+          Username
+          <input type="text" name="username" required />
+        </label>
+        <label>
+          Password
+          <input type="password" name="password" required />
+        </label>
+        <button type="submit" class="btn btn-primary">Login</button>
+      </form>
+      <p>Don't have an account? <a href="/register">Register</a></p>
+    </main>
+  </body>
+</html>

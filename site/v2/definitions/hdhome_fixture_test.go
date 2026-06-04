@@ -168,7 +168,7 @@ func testHDHomeUserInfo(t *testing.T) {
 
 	userDoc := FixtureDoc(t, "hdhome_userdetails", hdhomeUserdetailsFixture)
 	assert.Equal(t, "Extreme User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1693555200", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1693526400", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestHDHome_Fixtures_NoSecrets(t *testing.T) {

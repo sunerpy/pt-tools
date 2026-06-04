@@ -148,7 +148,7 @@ func testHDTimeUserInfo(t *testing.T) {
 	assert.Equal(t, "2147483648", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "12.34", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "Veteran User", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1746278777", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1746249977", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestHDTime_Fixtures_NoSecrets(t *testing.T) {

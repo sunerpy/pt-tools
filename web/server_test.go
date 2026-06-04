@@ -2,12 +2,14 @@ package web
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +30,45 @@ func setupServer(t *testing.T) *Server {
 	global.GlobalDB = db
 	mgr := newTestManager(t)
 	return NewServer(core.NewConfigStore(db), mgr)
+}
+
+func TestAPISiteDetailDoesNotExposeCookieFields(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	enabled := true
+	plainCookie := "abc=1; def=2"
+
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled:    &enabled,
+		AuthMethod: "cookie",
+		Cookie:     plainCookie,
+		APIUrl:     "https://hdsky.me",
+	}))
+
+	var site models.SiteSetting
+	require.NoError(t, global.GlobalDB.DB.Where("name = ?", "hdsky").First(&site).Error)
+	require.Equal(t, plainCookie, site.Cookie)
+	require.NotEmpty(t, site.CookieEncrypted)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/sites/hdsky", nil)
+	srv.apiSiteDetail(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.NotContains(t, response, "cookie")
+	require.NotContains(t, response, "cookie_encrypted")
+}
+
+func writeWebTestSecretKey(t *testing.T) {
+	t.Helper()
+	t.Setenv("PT_TOOLS_SECRET_KEY", "")
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	keyDir := filepath.Join(homeDir, ".pt-tools")
+	require.NoError(t, os.MkdirAll(keyDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(keyDir, "secret.key"), []byte(strings.Repeat("b", 64)), 0o600))
 }
 
 func newTestManager(t *testing.T) *scheduler.Manager {

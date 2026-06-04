@@ -8,6 +8,7 @@ interface CookieHealthResult {
   status: CookieHealthStatus;
   expireDays: number | null;
   cookieString: string;
+  hasCookie: boolean;
 }
 
 function ensureCookiesApi(): void {
@@ -54,12 +55,17 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
   const domainCookies = await getBestDomainCookies(site);
   const allCookies = await getCookiesAcrossDomains(site);
   const cookieString = toCookieString(domainCookies);
+  const hasCookie = domainCookies.length > 0;
 
+  // 对于 passkey / api_key 站点（cookieNames 为空），保号仍依赖浏览器登录态，
+  // 因此只要检测到跨域的任意 cookie 即视为已获取，否则标记 missing。
   if (site.cookieNames.length === 0) {
+    const crossDomainHasCookie = allCookies.length > 0;
     return {
-      status: "valid",
+      status: crossDomainHasCookie ? "valid" : "missing",
       expireDays: null,
       cookieString,
+      hasCookie: crossDomainHasCookie,
     };
   }
 
@@ -75,6 +81,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       status: "missing",
       expireDays: null,
       cookieString,
+      hasCookie,
     };
   }
 
@@ -91,6 +98,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       status: "expired",
       expireDays,
       cookieString,
+      hasCookie,
     };
   }
 
@@ -99,6 +107,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
       status: "expiring",
       expireDays,
       cookieString,
+      hasCookie,
     };
   }
 
@@ -106,6 +115,7 @@ export async function checkCookieHealth(site: KnownSite): Promise<CookieHealthRe
     status: "valid",
     expireDays,
     cookieString,
+    hasCookie,
   };
 }
 

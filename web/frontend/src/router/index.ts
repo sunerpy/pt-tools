@@ -25,6 +25,12 @@ const router = createRouter({
       component: () => import("@/views/GlobalSettings.vue"),
     },
     {
+      path: "/cloak-config",
+      name: "cloak-config",
+      component: () => import("@/views/CloakBrowserConfig.vue"),
+      meta: { title: "CloakBrowser 配置" },
+    },
+    {
       path: "/cleanup",
       name: "cleanup",
       component: () => import("@/views/AutoCleanup.vue"),

@@ -57,4 +57,4 @@
 
 > **扩展站点支持**：如需支持其他站点，欢迎提交 [Issue](https://github.com/sunerpy/pt-tools/issues) 或 [Pull Request](https://github.com/sunerpy/pt-tools/pulls)。
 >
-> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](../tools/browser-extension/README.md)（从 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)
+> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](../tools/browser-extension/README.md)（推荐从 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 安装，支持自动更新；或从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 手动下载），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)

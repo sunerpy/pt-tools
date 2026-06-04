@@ -146,7 +146,7 @@ func testCrabPTUserInfo(t *testing.T) {
 	assert.Equal(t, "274877906944", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "4", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1773995400", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1773966600", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestCrabPT_Fixtures_NoSecrets(t *testing.T) {

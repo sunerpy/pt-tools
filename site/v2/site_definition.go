@@ -347,6 +347,7 @@ type SiteDefinition struct {
 	Description       string           `json:"description,omitempty"`
 	Schema            Schema           `json:"schema"`
 	URLs              []string         `json:"urls"`
+	WebURL            string           `json:"webUrl,omitempty"`
 	LegacyURLs        []string         `json:"legacyUrls,omitempty"`
 	FaviconURL        string           `json:"faviconUrl,omitempty"`
 	Unavailable       bool             `json:"unavailable,omitempty"`

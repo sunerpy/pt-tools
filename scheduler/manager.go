@@ -29,16 +29,17 @@ type JobStatus struct {
 }
 
 type Manager struct {
-	mu                sync.Mutex
-	jobs              map[string]*job
-	wg                sync.WaitGroup
-	lastVersion       int64
-	downloaderManager *downloader.DownloaderManager
-	freeEndMonitor    *FreeEndMonitor
-	cleanupMonitor    *CleanupMonitor
-	peerRatioMonitor  *PeerRatioMonitor
-	eventCancel       func()
-	stopped           bool
+	mu                   sync.Mutex
+	jobs                 map[string]*job
+	wg                   sync.WaitGroup
+	lastVersion          int64
+	downloaderManager    *downloader.DownloaderManager
+	freeEndMonitor       *FreeEndMonitor
+	cleanupMonitor       *CleanupMonitor
+	peerRatioMonitor     *PeerRatioMonitor
+	loginReminderMonitor *LoginReminderMonitor
+	eventCancel          func()
+	stopped              bool
 }
 
 func NewManager() *Manager {
@@ -453,6 +454,10 @@ func (m *Manager) StopAll() {
 		m.peerRatioMonitor.Stop()
 		m.peerRatioMonitor = nil
 	}
+	if m.loginReminderMonitor != nil {
+		m.loginReminderMonitor.Stop()
+		m.loginReminderMonitor = nil
+	}
 	if m.eventCancel != nil {
 		m.eventCancel()
 		m.eventCancel = nil
@@ -556,4 +561,26 @@ func processRSS[T models.ResType](ctx context.Context, siteName models.SiteGroup
 		return err
 	}
 	return nil
+}
+
+// SetLoginReminderMonitor wires a fully-constructed LoginReminderMonitor
+// into the manager. It is intended to be called by the web layer after the
+// monitor has been built with a SiteResolver that knows how to produce
+// v2.Site instances. Calling this twice replaces and stops the previous
+// instance. Pass nil to detach without stopping.
+func (m *Manager) SetLoginReminderMonitor(mon *LoginReminderMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.loginReminderMonitor != nil && m.loginReminderMonitor != mon {
+		m.loginReminderMonitor.Stop()
+	}
+	m.loginReminderMonitor = mon
+}
+
+// GetLoginReminderMonitor returns the registered monitor, or nil if not yet
+// wired. Used by web handlers that want to trigger ad-hoc probes.
+func (m *Manager) GetLoginReminderMonitor() *LoginReminderMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loginReminderMonitor
 }

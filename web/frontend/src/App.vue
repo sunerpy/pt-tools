@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { controlApi } from "./api";
 import VersionChecker from "./components/VersionChecker.vue";
+import V2DeprecationBanner from "./components/V2DeprecationBanner.vue";
 import { useLogLevelStore } from "./stores/logLevel";
 import { useThemeStore } from "./stores/theme";
 import { useVersionStore } from "./stores/version";
@@ -45,6 +46,13 @@ const activeMenu = computed(() => {
   return routeNameToMenuIndex[name] ?? name;
 });
 const isImmersive = computed(() => route.name === "downloader-hub");
+const footerYear = computed(() => {
+  const browserYear = new Date().getFullYear();
+  const buildTime = versionStore.versionInfo?.build_time;
+  if (!buildTime || buildTime === "unknown") return browserYear;
+  const buildYear = new Date(buildTime).getFullYear();
+  return Number.isFinite(buildYear) ? Math.max(browserYear, buildYear) : browserYear;
+});
 
 onMounted(() => {
   logLevelStore.fetchLogLevel();
@@ -301,6 +309,7 @@ function logout() {
       </el-header>
 
       <el-main class="app-main">
+        <V2DeprecationBanner />
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" />
@@ -316,7 +325,7 @@ function logout() {
           rel="noopener">
           pt-tools
         </a>
-        <span>© 2025 - PT 助手</span>
+        <span>© {{ footerYear }} - PT 助手</span>
       </el-footer>
     </el-container>
   </el-container>

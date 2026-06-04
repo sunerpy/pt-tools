@@ -144,3 +144,12 @@ func Decrypt(cipherStr string) (plain []byte, err error) {
 
 	return plain, nil
 }
+
+func ExportKey() ([]byte, error) {
+	if encryptor == nil || len(encryptor.key) == 0 {
+		return nil, errNoKey
+	}
+	key := make([]byte, len(encryptor.key))
+	copy(key, encryptor.key)
+	return key, nil
+}

@@ -153,7 +153,7 @@ func testMyptccUserInfo(t *testing.T) {
 	assert.Equal(t, "372.832", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "养老族", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "10081.3", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["bonus"]))
-	assert.Equal(t, "1750544963", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1750516163", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestMyptcc_Fixtures_NoSecrets(t *testing.T) {

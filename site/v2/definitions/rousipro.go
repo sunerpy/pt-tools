@@ -57,8 +57,9 @@ func createRousiDriver(config v2.SiteConfig, logger *zap.Logger) (v2.Site, error
 	}
 
 	driver := newRousiDriver(rousiDriverConfig{
-		BaseURL: baseURL,
-		Passkey: opts.Passkey,
+		BaseURL:     baseURL,
+		Passkey:     opts.Passkey,
+		LoginCookie: opts.Cookie,
 	})
 
 	if siteDef != nil {
@@ -150,16 +151,18 @@ type rousiSeedingLeechingData struct {
 type rousiDriver struct {
 	BaseURL        string
 	Passkey        string
+	LoginCookie    string
 	httpClient     *v2.SiteHTTPClient
 	userAgent      string
 	siteDefinition *v2.SiteDefinition
 }
 
 type rousiDriverConfig struct {
-	BaseURL    string
-	Passkey    string
-	HTTPClient *v2.SiteHTTPClient
-	UserAgent  string
+	BaseURL     string
+	Passkey     string
+	LoginCookie string
+	HTTPClient  *v2.SiteHTTPClient
+	UserAgent   string
 }
 
 func newRousiDriver(config rousiDriverConfig) *rousiDriver {
@@ -181,10 +184,11 @@ func newRousiDriver(config rousiDriverConfig) *rousiDriver {
 	}
 
 	return &rousiDriver{
-		BaseURL:    baseURL,
-		Passkey:    config.Passkey,
-		httpClient: httpClient,
-		userAgent:  userAgent,
+		BaseURL:     baseURL,
+		Passkey:     config.Passkey,
+		LoginCookie: config.LoginCookie,
+		httpClient:  httpClient,
+		userAgent:   userAgent,
 	}
 }
 

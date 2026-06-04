@@ -25,12 +25,13 @@ func ParseTimeInCST(layout, value string) (time.Time, error) {
 var (
 	ErrSiteNotFound       = errors.New("site not found")
 	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrSessionExpired     = errors.New("session expired")
+	ErrSessionExpired     = errors.New("session expired or cookie invalid")
 	ErrAuthFailed         = errors.New("authentication failed: please check cookie or 2FA settings")
 	Err2FARequired        = ErrAuthFailed // Alias for backward compatibility
 	ErrRateLimited        = errors.New("rate limited")
 	ErrParseError         = errors.New("failed to parse response")
 	ErrNetworkError       = errors.New("network error")
+	ErrCircuitOpen        = errors.New("circuit breaker open")
 	ErrNotImplemented     = errors.New("not implemented")
 )
 
@@ -385,6 +386,8 @@ type UserInfo struct {
 	JoinDate int64 `json:"joinDate,omitempty"`
 	// LastAccess is the last access time (Unix seconds)
 	LastAccess int64 `json:"lastAccess,omitempty"`
+	// LastLogin is the last login time (Unix seconds)
+	LastLogin int64 `json:"lastLogin,omitempty"`
 	// LastUpdate is when this info was last updated (Unix seconds)
 	LastUpdate int64 `json:"lastUpdate"`
 	// NextLevel contains level progression info (optional)

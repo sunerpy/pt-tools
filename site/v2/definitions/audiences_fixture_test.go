@@ -157,7 +157,7 @@ func testAudiencesUserInfo(t *testing.T) {
 	assert.Equal(t, "64.82", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "(年轻气盛)Power User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "229786.3", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["bonus"]))
-	assert.Equal(t, "1759448051", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1759419251", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestAudiences_Fixtures_NoSecrets(t *testing.T) {

@@ -165,7 +165,7 @@ func testUBitsUserInfo(t *testing.T) {
 
 	userDoc := FixtureDoc(t, "ubits_userdetails", ubitsUserdetailsFixture)
 	assert.Equal(t, "Extreme User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1738011669", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1737982869", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 	assert.Equal(t, "112049030963396", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["uploaded"]))
 	assert.Equal(t, "15272216509808", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "7.337", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))

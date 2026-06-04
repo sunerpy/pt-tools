@@ -33,6 +33,7 @@ export interface KnownSiteStatus {
   site: KnownSite;
   cookieStatus: "valid" | "expiring" | "expired" | "missing";
   cookieExpireDays: number | null;
+  hasCookie: boolean;
   lastSync: string | null;
   autoSync: boolean;
 }
@@ -87,11 +88,14 @@ export type MessageType =
   | "SYNC_COOKIES"
   | "SYNC_SITE_COOKIES"
   | "BATCH_SYNC_SITES"
+  | "BATCH_OPEN_TABS"
+  | "CHECK_EXTENSION_UPDATE"
   | "AUTO_COLLECT"
   | "COOKIES_SYNCED"
   | "TOGGLE_AUTO_SYNC"
   | "GET_TAB_STATUS"
   | "GET_ALL_SITES_STATUS"
+  | "GET_SITE_LOGIN_STATE"
   | "EXPORT_ZIP"
   | "CREATE_ISSUE"
   | "GET_STATUS"
@@ -120,6 +124,20 @@ export interface SyncSiteCookiesPayload {
   siteId: string;
 }
 
+/**
+ * PUT /api/sites/{id} payload sent by syncSiteCredential.
+ * `cookie` / `api_key` / `passkey` is keyed dynamically by `KnownSite.syncField`.
+ * `last_visit_at` is an optional RFC3339 ISO timestamp pulled from
+ * `getLastVisitMap()` and forwarded so the backend can refresh
+ * `site_login_state.last_visit_at` in the same request.
+ */
+export interface SyncSiteCredentialPayload {
+  cookie?: string;
+  api_key?: string;
+  passkey?: string;
+  last_visit_at?: string;
+}
+
 export interface BatchSyncSitesPayload {
   siteIds: string[];
 }
@@ -127,6 +145,23 @@ export interface BatchSyncSitesPayload {
 export interface BatchSyncResult {
   synced: string[];
   failed: Array<{ siteId: string; error: string }>;
+}
+
+export interface BatchOpenTabsPayload {
+  siteIds: string[];
+  timeoutMs?: number;
+}
+
+export interface BatchOpenTabsResult {
+  ok: string[];
+  failed: Array<{ siteId: string; reason: string }>;
+  skipped: string[];
+}
+
+export interface ExtensionUpdateCheckResult {
+  currentVersion: string;
+  status: "checking" | "no_update" | "update_available" | "throttled" | "unavailable";
+  releaseUrl: string;
 }
 
 export interface AutoCollectPayload {
@@ -174,11 +209,14 @@ export interface MessagePayloadMap {
   SYNC_COOKIES: SyncCookiesPayload;
   SYNC_SITE_COOKIES: SyncSiteCookiesPayload;
   BATCH_SYNC_SITES: BatchSyncSitesPayload;
+  BATCH_OPEN_TABS: BatchOpenTabsPayload;
+  CHECK_EXTENSION_UPDATE: Record<string, never>;
   AUTO_COLLECT: AutoCollectPayload;
   COOKIES_SYNCED: CookiesSyncedPayload;
   TOGGLE_AUTO_SYNC: ToggleAutoSyncPayload;
   GET_TAB_STATUS: Record<string, never>;
   GET_ALL_SITES_STATUS: Record<string, never>;
+  GET_SITE_LOGIN_STATE: Record<string, never>;
   EXPORT_ZIP: ExportZipPayload;
   CREATE_ISSUE: CreateIssuePayload;
   GET_STATUS: Record<string, never>;

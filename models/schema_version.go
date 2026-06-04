@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,7 +20,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 8
+const CurrentSchemaVersion = 10
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -30,6 +31,8 @@ const CurrentSchemaVersion = 8
 // v6: RSS 上新通知子系统：rss_subscriptions 加 notify 字段 + 新建 rss_notification_log
 // v7: FilterRule 增加 purpose 字段（download/notify/both），用于区分下载与通知规则
 // v8: NotificationConf 增加 quiet_hours_start / quiet_hours_end 字段（HH:MM，支持跨日）
+// v9: 加密存量站点 Cookie，新增 site_login_state 表
+// v10: site_login_state 增加 API/Cookie 双时间戳、ProbeMode、一致性检查字段
 
 // MigrationFunc 迁移函数类型
 type MigrationFunc func(db *gorm.DB) error
@@ -43,9 +46,12 @@ type Migration struct {
 
 // SchemaManager 架构版本管理器
 type SchemaManager struct {
-	db         *gorm.DB
-	migrations []Migration
-	appVersion string
+	db            *gorm.DB
+	migrations    []Migration
+	appVersion    string
+	BackupTable   func(db *gorm.DB, table string) (path string, err error)
+	EncryptCookie func(plain string) (cipher string, err error)
+	DecryptCookie func(cipher string) (plain string, err error)
 }
 
 // NewSchemaManager 创建架构版本管理器
@@ -56,6 +62,20 @@ func NewSchemaManager(db *gorm.DB, appVersion string) *SchemaManager {
 		migrations: make([]Migration, 0),
 	}
 	sm.registerMigrations()
+	return sm
+}
+
+func NewSchemaManagerWithHooks(
+	db *gorm.DB,
+	appVersion string,
+	backupFn func(db *gorm.DB, table string) (path string, err error),
+	encryptFn func(plain string) (cipher string, err error),
+	decryptFn func(cipher string) (plain string, err error),
+) *SchemaManager {
+	sm := NewSchemaManager(db, appVersion)
+	sm.BackupTable = backupFn
+	sm.EncryptCookie = encryptFn
+	sm.DecryptCookie = decryptFn
 	return sm
 }
 
@@ -108,6 +128,20 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     8,
 		Description: "NotificationConf 增加 quiet_hours_start / quiet_hours_end 字段（HH:MM，支持跨日）",
 		Up:          migrateV7ToV8,
+	})
+
+	// v8 -> v9: 加密存量 cookie 并创建站点登录状态表
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     9,
+		Description: "encrypt cookies + add site_login_state",
+		Up:          sm.migrateV8ToV9,
+	})
+
+	// v9 -> v10: site_login_state 增加双轨探测字段
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     10,
+		Description: "site_login_state: add 4 columns (ApiLastLoginAt, CookieLastLoginAt, ProbeMode, LastConsistencyCheck)",
+		Up:          sm.migrateV9ToV10,
 	})
 }
 
@@ -479,6 +513,139 @@ func migrateV7ToV8(db *gorm.DB) error {
 		).Error; err != nil {
 			return fmt.Errorf("v7→v8: add quiet_hours_end: %w", err)
 		}
+	}
+	return nil
+}
+
+func (sm *SchemaManager) migrateV8ToV9(db *gorm.DB) error {
+	if sm.BackupTable == nil {
+		return fmt.Errorf("v9 migration requires backup hook")
+	}
+	if sm.EncryptCookie == nil || sm.DecryptCookie == nil {
+		return fmt.Errorf("v9 migration requires crypto hooks")
+	}
+
+	if _, err := sm.BackupTable(db, "site_settings"); err != nil {
+		return fmt.Errorf("v8→v9: backup site_settings: %w", err)
+	}
+
+	if !db.Migrator().HasColumn(&SiteSetting{}, "CookieEncrypted") {
+		if err := db.Exec("ALTER TABLE site_settings ADD COLUMN cookie_encrypted TEXT").Error; err != nil {
+			return fmt.Errorf("v8→v9: add cookie_encrypted: %w", err)
+		}
+	}
+	if err := db.AutoMigrate(&SiteLoginState{}); err != nil {
+		return fmt.Errorf("v8→v9: create site_login_state: %w", err)
+	}
+
+	type cookieRow struct {
+		ID     uint
+		Name   string
+		Cookie string
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var rows []cookieRow
+		if err := tx.Raw(
+			"SELECT id, name, cookie FROM site_settings WHERE cookie != '' AND (cookie_encrypted IS NULL OR cookie_encrypted = '')",
+		).Scan(&rows).Error; err != nil {
+			return fmt.Errorf("v8→v9: query plaintext cookies: %w", err)
+		}
+
+		sanityChecks := 0
+		for _, row := range rows {
+			cipherText, err := sm.EncryptCookie(row.Cookie)
+			if err != nil {
+				return fmt.Errorf("v8→v9: encrypt cookie for site %s: %w", row.Name, err)
+			}
+			if err := tx.Model(&SiteSetting{}).
+				Where("id = ?", row.ID).
+				Update("cookie_encrypted", cipherText).Error; err != nil {
+				return fmt.Errorf("v8→v9: update encrypted cookie for site %s: %w", row.Name, err)
+			}
+
+			if sanityChecks < 3 {
+				plain, err := sm.DecryptCookie(cipherText)
+				if err != nil {
+					return fmt.Errorf("v8→v9: decrypt sanity check for site %s: %w", row.Name, err)
+				}
+				if plain != row.Cookie {
+					return fmt.Errorf("v8→v9: decrypt sanity check mismatch for site %s", row.Name)
+				}
+				sanityChecks++
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	var siteNames []string
+	if err := db.Model(&SiteSetting{}).Order("id ASC").Pluck("name", &siteNames).Error; err != nil {
+		return fmt.Errorf("v8→v9: query site names for login state seed: %w", err)
+	}
+	repo := NewSiteLoginStateRepository(db)
+	for _, siteName := range siteNames {
+		banThresholdDays, remindBeforeDays, _ := ApplyPresetIfMissing(siteName)
+		if err := repo.UpsertLoginState(siteName, map[string]any{
+			"BanThresholdDays": banThresholdDays,
+			"RemindBeforeDays": remindBeforeDays,
+		}); err != nil {
+			return fmt.Errorf("v8→v9: seed login state for site %s: %w", siteName, err)
+		}
+	}
+
+	return nil
+}
+
+func (sm *SchemaManager) migrateV9ToV10(db *gorm.DB) error {
+	if sm.BackupTable == nil {
+		return errors.New("v10 migration requires backup hook")
+	}
+	if db.Migrator().HasColumn(&SiteLoginState{}, "ApiLastLoginAt") {
+		return sm.recordV10MigrationState(db)
+	}
+
+	if _, err := sm.BackupTable(db, "site_login_states"); err != nil {
+		return fmt.Errorf("v9→v10: backup site_login_states: %w", err)
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Migrator().AddColumn(&SiteLoginState{}, "ApiLastLoginAt"); err != nil {
+			return fmt.Errorf("v9→v10: add api_last_login_at: %w", err)
+		}
+		if err := tx.Migrator().AddColumn(&SiteLoginState{}, "CookieLastLoginAt"); err != nil {
+			return fmt.Errorf("v9→v10: add cookie_last_login_at: %w", err)
+		}
+		if err := tx.Migrator().AddColumn(&SiteLoginState{}, "ProbeMode"); err != nil {
+			return fmt.Errorf("v9→v10: add probe_mode: %w", err)
+		}
+		if err := tx.Migrator().AddColumn(&SiteLoginState{}, "LastConsistencyCheck"); err != nil {
+			return fmt.Errorf("v9→v10: add last_consistency_check: %w", err)
+		}
+		if err := tx.Exec("UPDATE site_login_states SET api_last_login_at = last_login_at WHERE last_login_at IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("v9→v10: backfill api_last_login_at: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return sm.recordV10MigrationState(db)
+}
+
+// recordV10MigrationState writes the post-v10 MigrationState row used by
+// LoginReminderMonitor (24h silence window) and core.InitRuntime
+// (one-time v2 broadcast). Idempotent: re-running updates CompletedAt
+// without resetting BroadcastSent.
+func (sm *SchemaManager) recordV10MigrationState(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&MigrationState{}) {
+		if err := db.AutoMigrate(&MigrationState{}); err != nil {
+			return fmt.Errorf("v9→v10: ensure migration_states table: %w", err)
+		}
+	}
+	if err := UpsertMigrationState(db, 10, time.Now().UTC()); err != nil {
+		return fmt.Errorf("v9→v10: record migration state: %w", err)
 	}
 	return nil
 }

@@ -261,7 +261,7 @@ func testHDSkyUserInfo(t *testing.T) {
 			"downloaded": "1648167930036",
 			"ratio":      "11.356",
 			"levelName":  "Extreme User",
-			"joinTime":   "1579091400",
+			"joinTime":   "1579062600",
 		}
 		notEmpty := []string{"bonus", "seedingBonus"}
 

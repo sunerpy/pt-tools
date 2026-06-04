@@ -862,6 +862,14 @@ func (d *NexusPHPDriver) ParseUserDetails(res NexusPHPResponse) (UserInfo, error
 			info.Seeding, _ = strconv.Atoi(extractNumber(value))
 		case containsAny(header, "加入日期", "Join"):
 			// Parse join date if needed
+		case containsAny(header, "上次访问", "上次訪問", "Last access", "Last seen"):
+			if t, err := ParseTimeInCST("2006-01-02 15:04:05", value); err == nil {
+				info.LastAccess = t.Unix()
+			}
+		case containsAny(header, "上次登录", "上次登錄", "Last login"):
+			if t, err := ParseTimeInCST("2006-01-02 15:04:05", value); err == nil {
+				info.LastLogin = t.Unix()
+			}
 		}
 	})
 
@@ -1217,6 +1225,10 @@ func (d *NexusPHPDriver) setUserInfoField(info *UserInfo, fieldName, value strin
 	case "lastAccessAt", "lastAccess":
 		if ts, err := strconv.ParseInt(value, 10, 64); err == nil {
 			info.LastAccess = ts
+		}
+	case "lastLoginAt", "lastLogin":
+		if ts, err := strconv.ParseInt(value, 10, 64); err == nil {
+			info.LastLogin = ts
 		}
 	case "messageCount", "unreadMessageCount":
 		if count, err := strconv.Atoi(value); err == nil {
