@@ -91,6 +91,9 @@ type GazelleUserResponse struct {
 		Downloaded int64   `json:"downloaded"`
 		Ratio      float64 `json:"ratio"`
 		Buffer     int64   `json:"buffer"`
+		// LastAccess is the user's last access time (only populated by /ajax.php?action=user&id={uid})
+		// Format is typically "2006-01-02 15:04:05" in site-local timezone (CST for most Gazelle deployments)
+		LastAccess string `json:"LastAccess,omitempty"`
 	} `json:"stats"`
 	Ranks struct {
 		Class string `json:"class"`
@@ -301,6 +304,12 @@ func (d *GazelleDriver) ParseUserInfo(res GazelleResponse) (UserInfo, error) {
 		Leeching:   userResp.Community.Leeching,
 		Rank:       userResp.Ranks.Class,
 		LastUpdate: time.Now().Unix(),
+	}
+
+	if ts := strings.TrimSpace(userResp.Stats.LastAccess); ts != "" {
+		if parsed, err := ParseTimeInCST("2006-01-02 15:04:05", ts); err == nil {
+			info.LastAccess = parsed.Unix()
+		}
 	}
 
 	return info, nil

@@ -169,7 +169,7 @@ func (r *SiteRegistry) CreateSite(siteID string, creds SiteCredentials, customBa
 		if creds.APIKey == "" {
 			return nil, fmt.Errorf("site %s requires API key", siteID)
 		}
-		options, err = json.Marshal(MTorrentOptions{APIKey: creds.APIKey})
+		options, err = json.Marshal(MTorrentOptions{APIKey: creds.APIKey, Cookie: creds.Cookie})
 	case SiteNexusPHP:
 		if creds.Cookie == "" {
 			return nil, fmt.Errorf("site %s requires cookie", siteID)
@@ -197,7 +197,7 @@ func (r *SiteRegistry) CreateSite(siteID string, creds SiteCredentials, customBa
 		if creds.Passkey == "" {
 			return nil, fmt.Errorf("site %s requires passkey", siteID)
 		}
-		options, err = json.Marshal(RousiOptions{Passkey: creds.Passkey})
+		options, err = json.Marshal(RousiOptions{Passkey: creds.Passkey, Cookie: creds.Cookie})
 	default:
 		return nil, fmt.Errorf("unsupported site kind: %s", meta.Kind)
 	}

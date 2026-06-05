@@ -1,15 +1,63 @@
 package internal
 
 import (
+	"context"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/global"
+	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
+
+// TestRSSPushPath_AppliesSiteSpeedLimits is the end-to-end regression guard for
+// the bug where the RSS/common push path never applied per-site speed limits
+// (only the manual push path did). It drives processSingleTorrentWithDownloader
+// and captures the AddTorrentOptions handed to the downloader, asserting the
+// site's UploadLimitKBs/DownloadLimitKBs actually reach AddTorrentFileEx.
+func TestRSSPushPath_AppliesSiteSpeedLimits(t *testing.T) {
+	setUpDiskProtectTest(t)
+	dir := t.TempDir()
+	path, hash := makeTorrentFile(t, dir)
+	makeTorrentInfoWithSize(t, global.GlobalDB, hash, 1*gb)
+
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{
+		Name:             "springsunday",
+		AuthMethod:       "cookie",
+		UploadLimitKBs:   500,
+		DownloadLimitKBs: 2000,
+	}).Error)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().GetName().Return("test-dl").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().CheckTorrentExists(hash).Return(false, nil)
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(80*gb, nil)
+	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil)
+
+	var captured downloader.AddTorrentOptions
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+			captured = opt
+			return downloader.AddTorrentResult{Success: true, Hash: hash}, nil
+		})
+
+	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
+	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
+		path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
+	require.NoError(t, err)
+
+	assert.Equal(t, 500, captured.UploadSpeedLimitKBs,
+		"RSS push path must apply site upload limit (regression: previously never called applySiteSpeedLimits)")
+	assert.Equal(t, 2000, captured.DownloadSpeedLimitKBs,
+		"RSS push path must apply site download limit")
+}
 
 // TestApplySiteSpeedLimits_PopulatesFromSiteRow verifies the core integration
 // point for issue #276: push flow reads per-site speed limits from SiteSetting

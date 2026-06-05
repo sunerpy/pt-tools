@@ -18,19 +18,20 @@ func NewSiteRepository(db *gorm.DB) *SiteRepository {
 
 // SiteData 站点数据（用于创建/更新）
 type SiteData struct {
-	Name         string
-	DisplayName  string
-	BaseURL      string
-	Enabled      bool
-	AuthMethod   string
-	Cookie       string
-	APIKey       string
-	APIURL       string
-	Passkey      string
-	DownloaderID *uint
-	ParserConfig string
-	IsBuiltin    bool
-	TemplateID   *uint
+	Name            string
+	DisplayName     string
+	BaseURL         string
+	Enabled         bool
+	AuthMethod      string
+	Cookie          string
+	CookieEncrypted string
+	APIKey          string
+	APIURL          string
+	Passkey         string
+	DownloaderID    *uint
+	ParserConfig    string
+	IsBuiltin       bool
+	TemplateID      *uint
 }
 
 func (r *SiteRepository) CreateSite(data SiteData) (uint, error) {
@@ -55,19 +56,20 @@ func (r *SiteRepository) CreateSite(data SiteData) (uint, error) {
 	}
 
 	site := SiteSetting{
-		Name:         data.Name,
-		DisplayName:  displayName,
-		BaseURL:      data.BaseURL,
-		Enabled:      data.Enabled,
-		AuthMethod:   data.AuthMethod,
-		Cookie:       data.Cookie,
-		APIKey:       data.APIKey,
-		APIUrl:       data.APIURL,
-		Passkey:      data.Passkey,
-		DownloaderID: data.DownloaderID,
-		ParserConfig: data.ParserConfig,
-		IsBuiltin:    data.IsBuiltin,
-		TemplateID:   data.TemplateID,
+		Name:            data.Name,
+		DisplayName:     displayName,
+		BaseURL:         data.BaseURL,
+		Enabled:         data.Enabled,
+		AuthMethod:      data.AuthMethod,
+		Cookie:          data.Cookie,
+		CookieEncrypted: data.CookieEncrypted,
+		APIKey:          data.APIKey,
+		APIUrl:          data.APIURL,
+		Passkey:         data.Passkey,
+		DownloaderID:    data.DownloaderID,
+		ParserConfig:    data.ParserConfig,
+		IsBuiltin:       data.IsBuiltin,
+		TemplateID:      data.TemplateID,
 	}
 
 	if err := r.db.Create(&site).Error; err != nil {

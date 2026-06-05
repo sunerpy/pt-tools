@@ -1,10 +1,13 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	glogger "gorm.io/gorm/logger"
 	"moul.io/zapgorm2"
 
@@ -36,7 +39,17 @@ func InitRuntime() (*zap.Logger, error) {
 			LogLevel:      glogger.Silent,
 			SlowThreshold: 0,
 		}
-		global.GlobalDB, err = models.NewDBWithVersion(gormLg, version.Version)
+		cookieStore := NewConfigStore(&models.TorrentDB{})
+		backupTable := func(db *gorm.DB, table string) (string, error) {
+			return migration.DumpTableJSON(db, table, "", 8, 9)
+		}
+		global.GlobalDB, err = models.NewDBWithVersionAndHooks(
+			gormLg,
+			version.Version,
+			backupTable,
+			cookieStore.EncryptCookie,
+			cookieStore.DecryptCookie,
+		)
 		if err != nil {
 			initErr = fmt.Errorf("初始化数据库失败: %w", err)
 			return
@@ -57,9 +70,24 @@ func InitRuntime() (*zap.Logger, error) {
 			}
 		}
 
+		dispatchV2BroadcastIfReady(global.GlobalDB.DB, global.GetSlogger())
+
 		global.GetSlogger().Info("运行时初始化完成")
 	})
 	// 返回捕获的错误
 	return global.GlobalLogger, initErr
 }
 func GetLogger() *zap.Logger { return global.GlobalLogger }
+
+// dispatchV2BroadcastIfReady wires the registered V2Broadcaster into
+// MaybeSendV2Broadcast. Skipped silently when no broadcaster is configured
+// (e.g. during early startup before notify.Router exists).
+func dispatchV2BroadcastIfReady(db *gorm.DB, logger *zap.SugaredLogger) {
+	bc := currentV2Broadcaster()
+	if bc == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = MaybeSendV2Broadcast(ctx, db, bc, logger, time.Now().UTC())
+}

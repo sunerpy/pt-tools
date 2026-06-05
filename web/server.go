@@ -113,6 +113,11 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/userinfo/sync", s.auth(s.apiUserInfoSync))
 	mux.HandleFunc("/api/v2/userinfo/registered", s.auth(s.apiUserInfoRegisteredSites))
 	mux.HandleFunc("/api/v2/userinfo/cache/clear", s.auth(s.apiUserInfoClearCache))
+	s.registerLoginStateRoutes(mux)
+	s.registerExtensionActionRoutes(mux)
+	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
+	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
+	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))
 	// Site levels API
 	mux.HandleFunc("/api/v2/sites/", s.auth(s.apiSiteLevelsRouter))
 	// Site favicon API (with caching)
@@ -613,19 +618,23 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 }
 
 type SiteConfigResponse struct {
-	Enabled           *bool              `json:"enabled"`
-	AuthMethod        string             `json:"auth_method"`
-	Cookie            string             `json:"cookie"`
-	APIKey            string             `json:"api_key"`
-	APIUrl            string             `json:"api_url"`
-	Passkey           string             `json:"passkey"`
-	UploadLimitKBs    int                `json:"upload_limit_kbs"`
-	DownloadLimitKBs  int                `json:"download_limit_kbs"`
-	RSS               []models.RSSConfig `json:"rss"`
-	URLs              []string           `json:"urls,omitempty"`
-	Unavailable       bool               `json:"unavailable,omitempty"`
-	UnavailableReason string             `json:"unavailable_reason,omitempty"`
-	IsBuiltin         bool               `json:"is_builtin"`
+	Enabled            *bool              `json:"enabled"`
+	AuthMethod         string             `json:"auth_method"`
+	Cookie             string             `json:"cookie,omitempty"`
+	CookieEncrypted    string             `json:"cookie_encrypted,omitempty"`
+	HasCookie          bool               `json:"has_cookie"`
+	CookieFieldVisible bool               `json:"cookie_field_visible"`
+	APIKey             string             `json:"api_key"`
+	APIUrl             string             `json:"api_url"`
+	Passkey            string             `json:"passkey"`
+	UploadLimitKBs     int                `json:"upload_limit_kbs"`
+	DownloadLimitKBs   int                `json:"download_limit_kbs"`
+	RSS                []models.RSSConfig `json:"rss"`
+	URLs               []string           `json:"urls,omitempty"`
+	WebURL             string             `json:"web_url,omitempty"`
+	Unavailable        bool               `json:"unavailable,omitempty"`
+	UnavailableReason  string             `json:"unavailable_reason,omitempty"`
+	IsBuiltin          bool               `json:"is_builtin"`
 }
 
 func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
@@ -643,7 +652,9 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			resp := SiteConfigResponse{
 				Enabled:          sc.Enabled,
 				AuthMethod:       sc.AuthMethod,
-				Cookie:           sc.Cookie,
+				Cookie:           "",
+				CookieEncrypted:  "",
+				HasCookie:        strings.TrimSpace(sc.Cookie) != "",
 				APIKey:           sc.APIKey,
 				APIUrl:           sc.APIUrl,
 				Passkey:          sc.Passkey,
@@ -653,6 +664,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
 				resp.URLs = def.URLs
+				resp.WebURL = def.WebURL
 				resp.Unavailable = def.Unavailable
 				resp.UnavailableReason = def.UnavailableReason
 				resp.IsBuiltin = true
@@ -719,6 +731,25 @@ func (s *Server) disableUnavailableSites(sites []models.SiteGroup) {
 
 func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/sites/")
+	// 拦截 RESTful 形态的 login-state 子路径：/api/sites/{name}/login-state[/{action}]
+	// 转发到既有的 login-state 处理器，保持与 apiSiteLoginStateRouter 行为一致（siteName 原样传递）。
+	if idx := strings.Index(name, "/login-state"); idx >= 0 {
+		siteName := name[:idx]
+		action := strings.TrimPrefix(name[idx:], "/login-state")
+		switch action {
+		case "":
+			s.handleLoginStateGet(w, r, siteName)
+		case "/probe":
+			s.handleLoginStateProbe(w, r, siteName)
+		case "/test-reminder":
+			s.handleLoginStateTestReminder(w, r, siteName)
+		case "/config":
+			s.handleLoginStateConfigUpdate(w, r, siteName)
+		default:
+			writeJSONError(w, "未知操作", http.StatusNotFound)
+		}
+		return
+	}
 	registry := v2.GetGlobalSiteRegistry()
 	if _, ok := registry.Get(strings.ToLower(name)); !ok {
 		w.WriteHeader(http.StatusNotFound)
@@ -733,19 +764,23 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := SiteConfigResponse{
-			Enabled:          sc.Enabled,
-			AuthMethod:       sc.AuthMethod,
-			Cookie:           sc.Cookie,
-			APIKey:           sc.APIKey,
-			APIUrl:           sc.APIUrl,
-			Passkey:          sc.Passkey,
-			UploadLimitKBs:   sc.UploadLimitKBs,
-			DownloadLimitKBs: sc.DownloadLimitKBs,
-			RSS:              sc.RSS,
+			Enabled:            sc.Enabled,
+			AuthMethod:         sc.AuthMethod,
+			Cookie:             "",
+			CookieEncrypted:    "",
+			HasCookie:          strings.TrimSpace(sc.Cookie) != "",
+			CookieFieldVisible: true,
+			APIKey:             sc.APIKey,
+			APIUrl:             sc.APIUrl,
+			Passkey:            sc.Passkey,
+			UploadLimitKBs:     sc.UploadLimitKBs,
+			DownloadLimitKBs:   sc.DownloadLimitKBs,
+			RSS:                sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()
 		if def, ok := defRegistry.Get(string(sg)); ok {
 			resp.URLs = def.URLs
+			resp.WebURL = def.WebURL
 			resp.Unavailable = def.Unavailable
 			resp.UnavailableReason = def.UnavailableReason
 			resp.IsBuiltin = true

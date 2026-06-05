@@ -238,6 +238,8 @@ var webCmd = &cobra.Command{
 			go runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions)
 		}
 
+		wireLoginReminderMonitor(mgr, store, siteRegistry, bs)
+
 		srv := web.NewServer(store, mgr)
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
@@ -463,6 +465,7 @@ func bootstrapChatOps(
 		Site:       siteSvc,
 		Binding:    bindingSvc,
 		Downloader: mgr.GetDownloaderManager(),
+		RSSWizard:  &chatopsRSSWizardService{store: store, db: db},
 		Bindings:   &commandsBindingResolver{lookup: bindings},
 		Sessions:   sessionStore,
 	})
@@ -563,6 +566,59 @@ type nopLogger struct{}
 
 func (nopLogger) Infof(string, ...any) {}
 func (nopLogger) Warnf(string, ...any) {}
+
+type chatopsRSSWizardService struct {
+	store *core.ConfigStore
+	db    *gorm.DB
+}
+
+func (s *chatopsRSSWizardService) AppendRSSToSite(siteName string, entry models.RSSConfig) (models.RSSConfig, error) {
+	return s.store.AppendRSSToSite(siteName, entry)
+}
+
+func (s *chatopsRSSWizardService) ListRSSForSite(siteName string) ([]models.RSSConfig, error) {
+	return s.store.ListRSSForSite(siteName)
+}
+
+func (s *chatopsRSSWizardService) DeleteRSSFromSite(siteName string, rssID uint) (models.RSSConfig, error) {
+	return s.store.DeleteRSSFromSite(siteName, rssID)
+}
+
+func (s *chatopsRSSWizardService) ListDownloaders(ctx context.Context) ([]chatopscmds.DownloaderOption, error) {
+	var rows []models.DownloaderSetting
+	if err := s.db.WithContext(ctx).Order("is_default DESC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]chatopscmds.DownloaderOption, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, chatopscmds.DownloaderOption{ID: row.ID, Name: row.Name, IsDefault: row.IsDefault})
+	}
+	return out, nil
+}
+
+func (s *chatopsRSSWizardService) ListFilterRules(ctx context.Context) ([]chatopscmds.IDNameOption, error) {
+	var rows []models.FilterRule
+	if err := s.db.WithContext(ctx).Where("enabled = ?", true).Order("priority ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]chatopscmds.IDNameOption, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, chatopscmds.IDNameOption{ID: row.ID, Name: row.Name})
+	}
+	return out, nil
+}
+
+func (s *chatopsRSSWizardService) ListNotificationChannels(ctx context.Context) ([]chatopscmds.IDNameOption, error) {
+	var rows []models.NotificationConf
+	if err := s.db.WithContext(ctx).Where("enabled = ?", true).Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]chatopscmds.IDNameOption, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, chatopscmds.IDNameOption{ID: row.ID, Name: row.Name})
+	}
+	return out, nil
+}
 
 type liveNotifyManager struct {
 	mu       sync.RWMutex

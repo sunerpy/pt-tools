@@ -167,6 +167,17 @@ type QbitSettings struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// CloakSettings 持久化 CloakBrowser-Manager 接入信息（v2）。
+// 单行表（约定 ID=1）。Token 仅以 AES-GCM 密文形式落库，
+// 字段名 `TokenEncrypted` 与 SiteSetting.CookieEncrypted 保持一致。
+type CloakSettings struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	Endpoint       string    `gorm:"size:512" json:"endpoint"`
+	TokenEncrypted string    `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 // SiteSetting 站点设置（统一表，合并原 DynamicSiteSetting）
 type SiteSetting struct {
 	ID               uint      `gorm:"primaryKey" json:"id"`
@@ -176,6 +187,7 @@ type SiteSetting struct {
 	Enabled          bool      `json:"enabled"`
 	AuthMethod       string    `gorm:"size:16;not null" json:"auth_method"`
 	Cookie           string    `gorm:"size:2048" json:"cookie,omitempty"`
+	CookieEncrypted  string    `gorm:"type:text" json:"cookie_encrypted,omitempty"`
 	APIKey           string    `gorm:"size:512" json:"api_key,omitempty"`
 	APIUrl           string    `gorm:"size:512" json:"api_url,omitempty"`
 	APIUrls          string    `gorm:"size:2048" json:"api_urls,omitempty"`

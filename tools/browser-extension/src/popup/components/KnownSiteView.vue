@@ -51,12 +51,12 @@ function handleAutoCollect(): void {
       <h3>✅ {{ status.site.name }} ({{ status.site.schema }})</h3>
     </header>
 
-    <template v-if="isCookieSyncable">
-      <p class="line-item">
-        <span>{{ t("known.cookieStatus") }}</span>
-        <CookieStatus :status="status.cookieStatus" :days="status.cookieExpireDays" />
-      </p>
+    <p class="line-item">
+      <span>{{ t("known.cookieStatus") }}</span>
+      <CookieStatus :status="status.cookieStatus" :days="status.cookieExpireDays" />
+    </p>
 
+    <template v-if="isCookieSyncable">
       <button
         type="button"
         class="btn primary"

@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **43** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **44** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（39）
+### NexusPHP 系列（40）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
@@ -45,6 +45,7 @@
 | **Mua**               | Cookie   | RSS、搜索、用户信息           | ✅       | 二次元站点（mua.xloli.cc，userdetails 走 uuid，issue #339）      |
 | **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
 | **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
+| **PTLGS**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptlgs.org，issue #377）                                  |
 
 ### 其他架构（4）
 
@@ -57,4 +58,4 @@
 
 > **扩展站点支持**：如需支持其他站点，欢迎提交 [Issue](https://github.com/sunerpy/pt-tools/issues) 或 [Pull Request](https://github.com/sunerpy/pt-tools/pulls)。
 >
-> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](../tools/browser-extension/README.md)（从 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)
+> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](../tools/browser-extension/README.md)（推荐从 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 安装，支持自动更新；或从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 手动下载），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)

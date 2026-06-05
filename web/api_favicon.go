@@ -321,7 +321,7 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 	cache, err := faviconService.GetFavicon(siteID)
 	if err != nil || cache == nil || len(cache.Data) == 0 {
 		if r.URL.Query().Get("nofetch") == "1" {
-			http.Error(w, "图标尚未缓存", http.StatusNotFound)
+			servePlaceholderFavicon(w)
 			return
 		}
 		def := v2.GetDefinitionRegistry().GetOrDefault(strings.ToLower(siteID))

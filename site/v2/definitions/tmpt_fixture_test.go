@@ -163,7 +163,7 @@ func testTMPTUserInfo(t *testing.T) {
 
 	userDoc := FixtureDoc(t, "tmpt_userdetails", tmptUserdetailsFixture)
 	assert.Equal(t, "User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1773654941", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1773626141", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 	assert.Equal(t, "21474836480", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["uploaded"]))
 	assert.Equal(t, "0", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["downloaded"]))
 }

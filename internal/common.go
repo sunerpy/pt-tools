@@ -447,6 +447,7 @@ func processSingleTorrentWithDownloader(
 		Category:    category,
 		Tags:        tags,
 	}
+	applySiteSpeedLimits(&opt, string(siteName))
 	if downloadPath != "" {
 		sLogger().Infof("使用自定义下载路径推送种子: %s -> %s", filePath, downloadPath)
 	}

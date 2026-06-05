@@ -150,7 +150,7 @@ func testPtloveUserInfo(t *testing.T) {
 	assert.Equal(t, "0", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["ratio"]))
 	assert.Equal(t, "User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "10", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["bonus"]))
-	assert.Equal(t, "1772907872", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1772879072", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestPtlover_Fixtures_NoSecrets(t *testing.T) {

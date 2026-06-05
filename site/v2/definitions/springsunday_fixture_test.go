@@ -263,7 +263,7 @@ func testSpringSundayUserInfo(t *testing.T) {
 			"ratio":        "11.948",
 			"levelName":    "精英",
 			"seedingBonus": "913905.2",
-			"joinTime":     "1435708988",
+			"joinTime":     "1435680188",
 			"messageCount": "3",
 		}
 		for field, expected := range exact {

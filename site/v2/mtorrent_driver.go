@@ -214,12 +214,13 @@ type MTorrentTorrent struct {
 
 // MTorrentUserInfo represents user info from M-Team API
 type MTorrentUserInfo struct {
-	ID           string               `json:"id"`
-	Username     string               `json:"username"`
-	CreatedDate  string               `json:"createdDate"`
-	Role         string               `json:"role"`
-	MemberCount  MTorrentMemberCount  `json:"memberCount"`
-	MemberStatus MTorrentMemberStatus `json:"memberStatus"`
+	ID               string               `json:"id"`
+	Username         string               `json:"username"`
+	CreatedDate      string               `json:"createdDate"`
+	LastModifiedDate string               `json:"lastModifiedDate"`
+	Role             string               `json:"role"`
+	MemberCount      MTorrentMemberCount  `json:"memberCount"`
+	MemberStatus     MTorrentMemberStatus `json:"memberStatus"`
 }
 
 // MTorrentMemberCount contains upload/download stats
@@ -246,6 +247,7 @@ type MTorrentDriver struct {
 	BaseURL        string // API URL (e.g., https://api.m-team.cc)
 	WebURL         string // Web URL for detail pages (e.g., https://kp.m-team.cc)
 	APIKey         string
+	LoginCookie    string // 仅用于登录态探测，绝不用于检索/下载请求
 	httpClient     *SiteHTTPClient
 	failoverClient *FailoverHTTPClient
 	userAgent      string
@@ -258,6 +260,7 @@ type MTorrentDriverConfig struct {
 	BaseURL     string
 	WebURL      string // Optional: Web URL for detail pages, defaults to "https://kp.m-team.cc"
 	APIKey      string
+	LoginCookie string          // 仅用于登录态探测，绝不用于检索/下载请求
 	HTTPClient  *SiteHTTPClient // Use SiteHTTPClient instead of *http.Client
 	UserAgent   string
 	UseFailover bool // Enable multi-URL failover
@@ -291,6 +294,7 @@ func NewMTorrentDriver(config MTorrentDriverConfig) *MTorrentDriver {
 		BaseURL:     strings.TrimSuffix(config.BaseURL, "/"),
 		WebURL:      strings.TrimSuffix(webURL, "/"),
 		APIKey:      config.APIKey,
+		LoginCookie: config.LoginCookie,
 		httpClient:  httpClient,
 		userAgent:   userAgent,
 		useFailover: config.UseFailover,
@@ -581,6 +585,14 @@ func (d *MTorrentDriver) ParseUserInfo(res MTorrentResponse) (UserInfo, error) {
 	if userData.MemberStatus.LastBrowse != "" {
 		if accessTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastBrowse); err == nil {
 			info.LastAccess = accessTime.Unix()
+		}
+	}
+
+	// lastModifiedDate is the authoritative profile-update timestamp used by
+	// the site-login keepalive subsystem; format is "2026-05-15T12:00:00.000+0800".
+	if userData.LastModifiedDate != "" {
+		if modTime, err := time.Parse("2006-01-02T15:04:05.000-0700", userData.LastModifiedDate); err == nil {
+			info.LastAccess = modTime.Unix()
 		}
 	}
 
@@ -1109,8 +1121,9 @@ func createMTorrentSite(config SiteConfig, logger *zap.Logger) (Site, error) {
 	siteDef := GetDefinitionRegistry().GetOrDefault(config.ID)
 
 	driver := NewMTorrentDriver(MTorrentDriverConfig{
-		BaseURL: config.BaseURL,
-		APIKey:  opts.APIKey,
+		BaseURL:     config.BaseURL,
+		APIKey:      opts.APIKey,
+		LoginCookie: opts.Cookie,
 	})
 
 	if siteDef != nil {

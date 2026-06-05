@@ -6,8 +6,10 @@ import { createMessage, sendToBackground } from "../core/messages";
 import { hasRequiredPermissions, requestCorePermissions } from "../core/permissions";
 import type {
   AutoCollectPayload,
+  BatchOpenTabsResult,
   BatchSyncResult,
   CollectionSession,
+  ExtensionUpdateCheckResult,
   KnownSiteStatus,
   MessagePayloadMap,
   MessageType,
@@ -86,9 +88,7 @@ const knownStatus = computed(() =>
 const unknownStatus = computed(() =>
   tabStatus.value.mode === "unknown" ? (tabStatus.value.unknown ?? null) : null,
 );
-const showSettingsExpanded = computed(
-  () => isSettingsOpen.value || (!knownStatus.value && !unknownStatus.value),
-);
+const showSettingsExpanded = computed(() => isSettingsOpen.value);
 
 async function requestMessage<K extends MessageType, T>(
   type: K,
@@ -230,11 +230,59 @@ async function handleSaveSettings(payload: { baseUrl: string }): Promise<void> {
     await refreshState();
     if (result.connected) {
       toast.success(t("feedback.settingsSaved"));
+      isSettingsOpen.value = false;
     } else {
       toast.warning(t("feedback.settingsSavedNotConnected", payload.baseUrl));
     }
   } catch (error: unknown) {
     showError(error, "feedback.settingsFailed");
+  } finally {
+    busySettings.value = false;
+  }
+}
+
+async function handleBatchOpen(siteIds: string[]): Promise<void> {
+  busySettings.value = true;
+  try {
+    const result = await requestMessage<"BATCH_OPEN_TABS", BatchOpenTabsResult>("BATCH_OPEN_TABS", {
+      siteIds,
+      timeoutMs: 150,
+    });
+    if (result.failed.length > 0) {
+      toast.warning(`已打开 ${result.ok.length} 个站点，失败 ${result.failed.length} 个`);
+    } else {
+      toast.success(`已打开 ${result.ok.length} 个站点页面`);
+    }
+  } catch (error: unknown) {
+    showError(error, "feedback.requestFailed");
+  } finally {
+    busySettings.value = false;
+  }
+}
+
+async function handleCheckExtensionUpdate(): Promise<void> {
+  busySettings.value = true;
+  try {
+    const result = await requestMessage<"CHECK_EXTENSION_UPDATE", ExtensionUpdateCheckResult>(
+      "CHECK_EXTENSION_UPDATE",
+      {},
+    );
+    if (result.status === "update_available") {
+      toast.success(
+        `发现扩展更新，当前版本 ${result.currentVersion}，请在浏览器扩展页重载以完成更新`,
+      );
+    } else if (result.status === "no_update") {
+      toast.success(`扩展已是最新版本：${result.currentVersion}`);
+    } else if (result.status === "throttled") {
+      toast.warning("浏览器限制了更新检查频率，请稍后再试");
+    } else {
+      toast.warning("当前安装方式不支持自动更新检查，请打开 Releases 页面手动更新");
+    }
+    if (result.status === "unavailable") {
+      void chrome.tabs.create({ url: result.releaseUrl, active: true });
+    }
+  } catch (error: unknown) {
+    showError(error, "feedback.requestFailed");
   } finally {
     busySettings.value = false;
   }
@@ -397,7 +445,9 @@ onMounted(async () => {
           :sites="allSites"
           @test="handleTestConnection"
           @save="handleSaveSettings"
-          @batch-sync="handleBatchSync" />
+          @batch-sync="handleBatchSync"
+          @batch-open="handleBatchOpen"
+          @check-update="handleCheckExtensionUpdate" />
         <div v-if="knownStatus && !showSettingsExpanded" class="quick-cookie-status">
           <span class="quick-cookie-label">{{ t("known.cookieStatus") }}</span>
           <CookieStatus

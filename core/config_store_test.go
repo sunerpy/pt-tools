@@ -206,6 +206,357 @@ func TestUpsertSiteWithRSS_SaveAndList(t *testing.T) {
 	require.Equal(t, "cookie", out[models.SiteGroup("springsunday")].AuthMethod)
 }
 
+func TestAppendRSSToSite_AppendsOneRowAndPublishesConfigChanged(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&site).Error)
+	downloader := models.DownloaderSetting{Name: "qbit", Type: "qbittorrent", URL: "http://127.0.0.1:8080", IsDefault: true, Enabled: true}
+	require.NoError(t, db.DB.Create(&downloader).Error)
+	rule := models.FilterRule{Name: "free", Pattern: "*", Enabled: true}
+	require.NoError(t, db.DB.Create(&rule).Error)
+	existing := []models.RSSSubscription{
+		{SiteID: site.ID, Name: "old-a", URL: "https://example.com/a", Category: "cat-a", Tag: "tag-a", IntervalMinutes: 10, DownloadPath: "/downloads/a", NotifyMode: "all", NotifyConfIDs: "[1]", MaxNotificationsPerHour: 5},
+		{SiteID: site.ID, Name: "old-b", URL: "https://example.com/b", Category: "cat-b", Tag: "tag-b", IntervalMinutes: 20, DownloadPath: "/downloads/b", NotifyMode: "filtered", NotifyConfIDs: "[]", MaxNotificationsPerHour: 10},
+	}
+	require.NoError(t, db.DB.Create(&existing).Error)
+
+	_, ch, cancel := events.Subscribe(1)
+	defer cancel()
+	created, err := s.AppendRSSToSite("mteam", models.RSSConfig{
+		Name:                    "new",
+		URL:                     "https://example.com/new",
+		Category:                "cat-new",
+		Tag:                     "tag-new",
+		IntervalMinutes:         1,
+		DownloaderID:            &downloader.ID,
+		DownloadPath:            "/downloads/new",
+		FilterMode:              models.FilterMode("any"),
+		FilterRuleIDs:           []uint{rule.ID},
+		NotifyMode:              "all",
+		NotifyConfIDs:           "[2]",
+		MaxNotificationsPerHour: 7,
+	})
+	require.NoError(t, err)
+	require.NotZero(t, created.ID)
+	assert.Equal(t, models.MinIntervalMinutes, created.IntervalMinutes)
+
+	select {
+	case event := <-ch:
+		assert.Equal(t, events.ConfigChanged, event.Type)
+		assert.Equal(t, "sites", event.Source)
+	case <-time.After(time.Second):
+		t.Fatal("expected ConfigChanged event")
+	}
+
+	var rows []models.RSSSubscription
+	require.NoError(t, db.DB.Where("site_id = ?", site.ID).Order("id ASC").Find(&rows).Error)
+	require.Len(t, rows, 3)
+	assert.Equal(t, existing[0].Name, rows[0].Name)
+	assert.Equal(t, existing[0].URL, rows[0].URL)
+	assert.Equal(t, existing[0].Category, rows[0].Category)
+	assert.Equal(t, existing[0].Tag, rows[0].Tag)
+	assert.Equal(t, existing[0].DownloadPath, rows[0].DownloadPath)
+	assert.Equal(t, existing[1].Name, rows[1].Name)
+	assert.Equal(t, existing[1].URL, rows[1].URL)
+	assert.Equal(t, "new", rows[2].Name)
+	assert.Equal(t, "https://example.com/new", rows[2].URL)
+	assert.Equal(t, "cat-new", rows[2].Category)
+	assert.Equal(t, "tag-new", rows[2].Tag)
+	assert.Equal(t, models.MinIntervalMinutes, rows[2].IntervalMinutes)
+	require.NotNil(t, rows[2].DownloaderID)
+	assert.Equal(t, downloader.ID, *rows[2].DownloaderID)
+	assert.Equal(t, "/downloads/new", rows[2].DownloadPath)
+	assert.Equal(t, models.FilterMode("any"), rows[2].FilterMode)
+	assert.Equal(t, "all", rows[2].NotifyMode)
+	assert.Equal(t, "[2]", rows[2].NotifyConfIDs)
+	assert.Equal(t, 7, rows[2].MaxNotificationsPerHour)
+
+	var associations []models.RSSFilterAssociation
+	require.NoError(t, db.DB.Where("rss_id = ?", created.ID).Find(&associations).Error)
+	require.Len(t, associations, 1)
+	assert.Equal(t, rule.ID, associations[0].FilterRuleID)
+}
+
+func TestAppendRSSToSite_RejectsDuplicateURLWithoutInsert(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&site).Error)
+	require.NoError(t, db.DB.Create(&models.RSSSubscription{SiteID: site.ID, Name: "old", URL: "https://example.com/rss", IntervalMinutes: 10}).Error)
+
+	_, err = s.AppendRSSToSite("mteam", models.RSSConfig{Name: "dup", URL: "  HTTPS://EXAMPLE.COM/RSS  ", IntervalMinutes: 10})
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, db.DB.Model(&models.RSSSubscription{}).Where("site_id = ?", site.ID).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestAppendRSSToSite_RejectsNonexistentSite(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	_, err = s.AppendRSSToSite("missing", models.RSSConfig{Name: "rss", URL: "https://example.com/rss", IntervalMinutes: 10})
+	require.Error(t, err)
+}
+
+func TestAppendRSSToSite_RejectsNonexistentDownloader(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&site).Error)
+	missingID := uint(404)
+
+	_, err = s.AppendRSSToSite("mteam", models.RSSConfig{Name: "rss", URL: "https://example.com/rss", IntervalMinutes: 10, DownloaderID: &missingID})
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, db.DB.Model(&models.RSSSubscription{}).Where("site_id = ?", site.ID).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestDeleteRSSFromSite_DeletesRowAndAssociationsAndPublishes(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&site).Error)
+	rule := models.FilterRule{Name: "free", Pattern: "*", Enabled: true}
+	require.NoError(t, db.DB.Create(&rule).Error)
+	target := models.RSSSubscription{SiteID: site.ID, Name: "to-delete", URL: "https://example.com/del", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&target).Error)
+	keep := models.RSSSubscription{SiteID: site.ID, Name: "keep", URL: "https://example.com/keep", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&keep).Error)
+	assoc := models.NewRSSFilterAssociationDB(db.DB)
+	require.NoError(t, assoc.SetFilterRulesForRSS(target.ID, []uint{rule.ID}))
+
+	_, ch, cancel := events.Subscribe(1)
+	defer cancel()
+	deleted, err := s.DeleteRSSFromSite("mteam", target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, target.ID, deleted.ID)
+	assert.Equal(t, "to-delete", deleted.Name)
+
+	select {
+	case event := <-ch:
+		assert.Equal(t, events.ConfigChanged, event.Type)
+		assert.Equal(t, "sites", event.Source)
+	case <-time.After(time.Second):
+		t.Fatal("expected ConfigChanged event")
+	}
+
+	var rows []models.RSSSubscription
+	require.NoError(t, db.DB.Where("site_id = ?", site.ID).Order("id ASC").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "keep", rows[0].Name)
+
+	var assocCount int64
+	require.NoError(t, db.DB.Model(&models.RSSFilterAssociation{}).Where("rss_id = ?", target.ID).Count(&assocCount).Error)
+	assert.Zero(t, assocCount)
+}
+
+func TestDeleteRSSFromSite_RejectsNonexistentRSS(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&site).Error)
+	other := models.RSSSubscription{SiteID: site.ID, Name: "other", URL: "https://example.com/other", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&other).Error)
+
+	_, err = s.DeleteRSSFromSite("mteam", 9999)
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, db.DB.Model(&models.RSSSubscription{}).Where("site_id = ?", site.ID).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestDeleteRSSFromSite_RejectsCrossSiteRSS(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	siteA := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&siteA).Error)
+	siteB := models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie", APIUrl: "https://hdsky.me"}
+	require.NoError(t, db.DB.Create(&siteB).Error)
+	rssB := models.RSSSubscription{SiteID: siteB.ID, Name: "b-rss", URL: "https://example.com/b", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&rssB).Error)
+
+	_, err = s.DeleteRSSFromSite("mteam", rssB.ID)
+	require.Error(t, err)
+
+	var count int64
+	require.NoError(t, db.DB.Model(&models.RSSSubscription{}).Where("site_id = ?", siteB.ID).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestListRSSForSite_ReturnsRowsWithFilterRuleIDs(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	site := models.SiteSetting{Name: "mteam", Enabled: true, AuthMethod: "api_key", APIUrl: "https://api.m-team.cc", APIKey: "k"}
+	require.NoError(t, db.DB.Create(&site).Error)
+	rule := models.FilterRule{Name: "free", Pattern: "*", Enabled: true}
+	require.NoError(t, db.DB.Create(&rule).Error)
+	r1 := models.RSSSubscription{SiteID: site.ID, Name: "feed-1", URL: "https://example.com/1", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&r1).Error)
+	r2 := models.RSSSubscription{SiteID: site.ID, Name: "feed-2", URL: "https://example.com/2", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&r2).Error)
+	assoc := models.NewRSSFilterAssociationDB(db.DB)
+	require.NoError(t, assoc.SetFilterRulesForRSS(r1.ID, []uint{rule.ID}))
+
+	list, err := s.ListRSSForSite("mteam")
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	byName := map[string]models.RSSConfig{}
+	for _, r := range list {
+		byName[r.Name] = r
+	}
+	assert.Equal(t, []uint{rule.ID}, byName["feed-1"].FilterRuleIDs)
+	assert.Empty(t, byName["feed-2"].FilterRuleIDs)
+}
+
+func TestListRSSForSite_RejectsNonexistentSite(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	_, err = s.ListRSSForSite("missing")
+	require.Error(t, err)
+}
+
+func TestUpsertSiteWithRSS_PreservesLoginStateCookieForAPIKeySite(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	loginCookie := "session=login-state; uid=123"
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		AuthMethod: "api_key",
+		Cookie:     loginCookie,
+		APIKey:     "api-key",
+		APIUrl:     "https://api.m-team.cc",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var saved models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "mteam").First(&saved).Error)
+	require.NotEmpty(t, saved.CookieEncrypted)
+	plain, err := s.DecryptCookie(saved.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, loginCookie, plain)
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		AuthMethod: "api_key",
+		APIKey:     "api-key-updated",
+		APIUrl:     "https://api.m-team.cc",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var updated models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "mteam").First(&updated).Error)
+	require.Empty(t, updated.Cookie)
+	require.NotEmpty(t, updated.CookieEncrypted)
+	plain, err = s.DecryptCookie(updated.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, loginCookie, plain)
+
+	loaded, err := s.GetSiteConf(models.SiteGroup("mteam"))
+	require.NoError(t, err)
+	require.Equal(t, loginCookie, loaded.Cookie)
+}
+
+func TestUpsertSiteWithRSS_CookieAuthStillEncryptsCookie(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	cookie := "sid=cookie-auth"
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		AuthMethod: "cookie",
+		Cookie:     cookie,
+		APIUrl:     "http://api",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var saved models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "springsunday").First(&saved).Error)
+	require.NotEmpty(t, saved.CookieEncrypted)
+	plain, err := s.DecryptCookie(saved.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, cookie, plain)
+
+	loaded, err := s.GetSiteConf(models.SiteGroup("springsunday"))
+	require.NoError(t, err)
+	require.Equal(t, cookie, loaded.Cookie)
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		AuthMethod: "cookie",
+		APIUrl:     "http://api",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var updated models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "springsunday").First(&updated).Error)
+	require.Empty(t, updated.Cookie)
+	require.NotEmpty(t, updated.CookieEncrypted)
+	plain, err = s.DecryptCookie(updated.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, cookie, plain)
+}
+
+func TestUpsertSiteWithRSS_CookieAndAPIKeyAcceptsEmptyCookieWhenStored(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	storedCookie := "uid=123; session=stored"
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		Cookie:     storedCookie,
+		APIKey:     "api-key",
+		APIUrl:     "https://www.hddolby.com",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		APIKey:     "api-key-updated",
+		APIUrl:     "https://www.hddolby.com",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	}))
+
+	var updated models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "hddolby").First(&updated).Error)
+	require.Empty(t, updated.Cookie)
+	require.NotEmpty(t, updated.CookieEncrypted)
+	plain, err := s.DecryptCookie(updated.CookieEncrypted)
+	require.NoError(t, err)
+	require.Equal(t, storedCookie, plain)
+}
+
+func TestUpsertSiteWithRSS_CookieAndAPIKeyRequiresCookieWhenNoneStored(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	err = s.UpsertSiteWithRSS(models.SiteGroup("hddolby"), models.SiteConfig{
+		AuthMethod: "cookie_and_api_key",
+		APIKey:     "api-key",
+		APIUrl:     "https://www.hddolby.com",
+		RSS:        []models.RSSConfig{{Name: "r", URL: "http://rss", IntervalMinutes: 10}},
+	})
+	require.EqualError(t, err, "Cookie 不能为空")
+}
+
 func TestConfigStore_GlobalCRUD(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	if err != nil {
@@ -382,8 +733,8 @@ func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	assert.NoError(t, err) // 预置站点允许空 APIUrl
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
-	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
-	assert.Error(t, err)
+	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	assert.NoError(t, err)
 	// RSS 列表允许为空
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
 	assert.NoError(t, err)

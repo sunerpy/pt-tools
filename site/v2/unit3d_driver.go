@@ -76,7 +76,9 @@ type Unit3DUserProfile struct {
 	Group      struct {
 		Name string `json:"name"`
 	} `json:"group"`
-	CreatedAt string `json:"created_at"`
+	CreatedAt  string `json:"created_at"`
+	LastLogin  string `json:"last_login,omitempty"`
+	LastAction string `json:"last_action,omitempty"`
 }
 
 // Unit3DDriver implements the Driver interface for Unit3D sites
@@ -264,7 +266,40 @@ func (d *Unit3DDriver) ParseUserInfo(res Unit3DResponse) (UserInfo, error) {
 		}
 	}
 
+	if ts := parseUnit3DTimestamp(profile.LastLogin); ts > 0 {
+		info.LastLogin = ts
+	}
+	if ts := parseUnit3DTimestamp(profile.LastAction); ts > 0 {
+		info.LastAccess = ts
+	}
+
 	return info, nil
+}
+
+// parseUnit3DTimestamp parses a Unit3D activity timestamp. Unit3D installs
+// vary between RFC3339 ("2026-05-15T12:00:00.000Z") and the Laravel default
+// "2006-01-02 15:04:05" without timezone (assumed UTC). Returns 0 if the
+// string is empty or unparseable.
+func parseUnit3DTimestamp(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Unix()
+		}
+	}
+	if t, err := ParseTimeInCST("2006-01-02 15:04:05", s); err == nil {
+		return t.Unix()
+	}
+	return 0
 }
 
 // GetUserInfo fetches complete user information

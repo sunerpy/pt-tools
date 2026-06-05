@@ -217,19 +217,29 @@ func (s *Server) createDynamicSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repo := models.NewSiteRepository(global.GlobalDB.DB)
+	cookieCipherText := ""
+	if strings.TrimSpace(req.Cookie) != "" {
+		var err error
+		cookieCipherText, err = s.store.EncryptCookie(req.Cookie)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	siteID, err := repo.CreateSite(models.SiteData{
-		Name:         req.Name,
-		DisplayName:  req.DisplayName,
-		BaseURL:      req.BaseURL,
-		Enabled:      true,
-		AuthMethod:   req.AuthMethod,
-		Cookie:       req.Cookie,
-		APIKey:       req.APIKey,
-		APIURL:       req.APIURL,
-		Passkey:      req.Passkey,
-		DownloaderID: req.DownloaderID,
-		ParserConfig: req.ParserConfig,
-		IsBuiltin:    false,
+		Name:            req.Name,
+		DisplayName:     req.DisplayName,
+		BaseURL:         req.BaseURL,
+		Enabled:         true,
+		AuthMethod:      req.AuthMethod,
+		Cookie:          req.Cookie,
+		CookieEncrypted: cookieCipherText,
+		APIKey:          req.APIKey,
+		APIURL:          req.APIURL,
+		Passkey:         req.Passkey,
+		DownloaderID:    req.DownloaderID,
+		ParserConfig:    req.ParserConfig,
+		IsBuiltin:       false,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -352,18 +362,28 @@ func (s *Server) apiSiteTemplateImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repo := models.NewSiteRepository(db)
+	cookieCipherText := ""
+	if strings.TrimSpace(req.Cookie) != "" {
+		var err error
+		cookieCipherText, err = s.store.EncryptCookie(req.Cookie)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	siteID, err := repo.CreateSite(models.SiteData{
-		Name:         templateExport.Name,
-		DisplayName:  templateExport.DisplayName,
-		BaseURL:      templateExport.BaseURL,
-		Enabled:      true,
-		AuthMethod:   templateExport.AuthMethod,
-		Cookie:       req.Cookie,
-		APIKey:       req.APIKey,
-		Passkey:      req.Passkey,
-		ParserConfig: string(templateExport.ParserConfig),
-		IsBuiltin:    false,
-		TemplateID:   &template.ID,
+		Name:            templateExport.Name,
+		DisplayName:     templateExport.DisplayName,
+		BaseURL:         templateExport.BaseURL,
+		Enabled:         true,
+		AuthMethod:      templateExport.AuthMethod,
+		Cookie:          req.Cookie,
+		CookieEncrypted: cookieCipherText,
+		APIKey:          req.APIKey,
+		Passkey:         req.Passkey,
+		ParserConfig:    string(templateExport.ParserConfig),
+		IsBuiltin:       false,
+		TemplateID:      &template.ID,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

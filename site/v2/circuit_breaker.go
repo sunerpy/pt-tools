@@ -33,12 +33,8 @@ func (s CircuitState) String() string {
 	}
 }
 
-var (
-	// ErrCircuitOpen is returned when the circuit is open
-	ErrCircuitOpen = errors.New("circuit breaker is open")
-	// ErrTooManyRequests is returned when too many requests in half-open state
-	ErrTooManyRequests = errors.New("too many requests in half-open state")
-)
+// ErrTooManyRequests is returned when too many requests in half-open state
+var ErrTooManyRequests = errors.New("too many requests in half-open state")
 
 // CircuitBreakerConfig configures the circuit breaker
 type CircuitBreakerConfig struct {

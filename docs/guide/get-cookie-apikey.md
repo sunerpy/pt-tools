@@ -40,6 +40,12 @@ pt-tools 支持两种站点认证方式：
 
 ### 安装扩展
 
+**推荐：Edge 扩展商店安装（支持自动更新，但每次发版约有 1 周的微软审核延迟）**
+
+前往 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 搜索 "PT Tools Helper" 直接安装。Edge 安装的扩展同样适用于其他 Chromium 内核浏览器（如 Chrome）。
+
+**备用：手动安装（不自动更新，需手动更新）**
+
 1. 从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 下载最新的 `pt-tools-helper.zip`
 2. 解压到一个固定目录（不要解压后删除，浏览器需要持续读取）
 3. 打开浏览器扩展管理页面：

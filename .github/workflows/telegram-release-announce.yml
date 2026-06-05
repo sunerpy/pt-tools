@@ -10,6 +10,10 @@ on:
         description: "Release tag to announce (e.g. v0.31.0)"
         required: true
         type: string
+      announcement:
+        description: "公告正文（Markdown）。填写后直接作为 TG 公告，无需仓库内 release-notes 文件。留空则回退到 Release body。"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_INPUT: ${{ inputs.tag }}
+          ANNOUNCEMENT_INPUT: ${{ inputs.announcement }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "release" ]; then
@@ -40,21 +45,23 @@ jobs:
             BODY=$(echo "$json" | jq -r '.body // ""')
             URL=$(echo "$json" | jq -r '.html_url')
           fi
-          # Curated announcement override: .github/release-notes/<tag>.md (or
-          # without the leading "v") wins over the release-please-generated
-          # release body, which is prone to dependabot noise + truncated commit
-          # bodies. The override file is committed to the repo before the
-          # release PR is merged so CI can pick it up here.
+          # 公告正文优先级（高 → 低）：
+          #   1. workflow_dispatch 手动输入的 announcement（发版时确认后直接粘贴，无需仓库 md）
+          #   2. .github/release-notes/<tag>.md 覆盖文件（旧机制，仍兼容，但不再要求每版提交）
+          #   3. release-please 生成的 release body（含 dependabot 噪音，仅兜底）
           OVERRIDE_PATH=".github/release-notes/${TAG}.md"
           OVERRIDE_PATH_ALT=".github/release-notes/${TAG#v}.md"
-          if [ -f "$OVERRIDE_PATH" ]; then
+          if [ -n "${ANNOUNCEMENT_INPUT:-}" ]; then
+            echo "Using manual announcement input."
+            BODY="$ANNOUNCEMENT_INPUT"
+          elif [ -f "$OVERRIDE_PATH" ]; then
             echo "Using announcement override: $OVERRIDE_PATH"
             BODY=$(cat "$OVERRIDE_PATH")
           elif [ -f "$OVERRIDE_PATH_ALT" ]; then
             echo "Using announcement override: $OVERRIDE_PATH_ALT"
             BODY=$(cat "$OVERRIDE_PATH_ALT")
           else
-            echo "No announcement override found; falling back to release body."
+            echo "No manual input or override file; falling back to release body."
           fi
           {
             echo "tag=$TAG"

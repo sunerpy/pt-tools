@@ -69,7 +69,7 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				Assertion: map[string]string{"id": "params.id"},
 				Fields: []string{
 					"name", "uploaded", "downloaded", "ratio", "levelName",
-					"seedingBonus", "joinTime", "messageCount",
+					"seedingBonus", "joinTime", "lastAccessAt", "messageCount",
 				},
 			},
 			{
@@ -214,6 +214,20 @@ var SpringSundayDefinition = &v2.SiteDefinition{
 				},
 				Filters: []v2.Filter{
 					{Name: "regex", Args: []any{`^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+					{Name: "parseTime"},
+				},
+			},
+			// Last access time from userdetails.php
+			// HTML: 2026-06-03 22:58:23 (< 1分前)
+			"lastAccessAt": {
+				Selector: []string{
+					"td.rowhead:contains('最近动向') + td",
+					"td.rowhead:contains('最近動向') + td",
+					"td.rowhead:contains('上次访问') + td",
+					"td.rowhead:contains('Last access') + td",
+				},
+				Filters: []v2.Filter{
+					{Name: "split", Args: []any{" (", 0}},
 					{Name: "parseTime"},
 				},
 			},

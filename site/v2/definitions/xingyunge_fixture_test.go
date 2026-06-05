@@ -244,7 +244,7 @@ func testXingYunGeUserInfo(t *testing.T) {
 		exact := map[string]string{
 			"levelName":    "Extreme User",
 			"bonus":        "1.23456789e+06",
-			"joinTime":     "1579091400",
+			"joinTime":     "1579062600",
 			"messageCount": "7",
 		}
 		for field, expected := range exact {

@@ -15,6 +15,17 @@ export default defineConfig(({ command }) => ({
     emptyOutDir: true,
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
+      onLog(level, log, defaultHandler) {
+        if (
+          level === "warn" &&
+          log.code === "INVALID_ANNOTATION" &&
+          typeof log.id === "string" &&
+          log.id.includes("/node_modules/@vueuse/core/")
+        ) {
+          return;
+        }
+        defaultHandler(level, log);
+      },
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {

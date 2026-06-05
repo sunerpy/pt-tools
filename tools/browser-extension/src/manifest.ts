@@ -4,8 +4,8 @@ export const manifest = {
   version: "0.2.3",
   description: "__MSG_extensionDescription__",
   default_locale: "zh_CN",
-  permissions: ["storage", "activeTab", "scripting", "notifications"],
-  optional_permissions: ["cookies", "tabs"],
+  permissions: ["storage", "activeTab", "scripting", "notifications", "alarms"],
+  optional_permissions: ["cookies", "tabs", "webNavigation"],
   optional_host_permissions: ["*://*/*"],
   background: {
     service_worker: "background.js",

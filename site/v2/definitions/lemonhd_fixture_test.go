@@ -145,7 +145,7 @@ func testLemonHDUserInfo(t *testing.T) {
 	assert.Equal(t, "42702712340", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["uploaded"]))
 	assert.Equal(t, "0", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["downloaded"]))
 	assert.Equal(t, "User", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["levelName"]))
-	assert.Equal(t, "1767965269", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["joinTime"]))
+	assert.Equal(t, "1767936469", driver.ExtractFieldValuePublic(doc, def.UserInfo.Selectors["joinTime"]))
 }
 
 func TestLemonHD_Fixtures_NoSecrets(t *testing.T) {

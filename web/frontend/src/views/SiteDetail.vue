@@ -44,6 +44,7 @@ const form = ref<SiteConfig>({
   download_limit_kbs: 0,
   rss: [],
 });
+const savedCookieHidden = computed(() => form.value.has_cookie === true && !form.value.cookie);
 
 // 示例 RSS 配置（不存入数据库，仅用于展示）
 const exampleRssConfigs: Record<string, RSSConfig[]> = {
@@ -549,11 +550,19 @@ function toggleEditRssCustomPath() {
         <el-divider />
 
         <el-form-item v-if="form.auth_method === 'cookie'" label="Cookie">
-          <el-input
-            v-model="form.cookie"
-            type="textarea"
-            :rows="3"
-            placeholder="从浏览器开发者工具中获取" />
+          <div class="credential-field-stack">
+            <el-alert
+              v-if="savedCookieHidden"
+              type="success"
+              show-icon
+              :closable="false"
+              title="Cookie 已保存，出于安全原因不会回显。留空保存不会覆盖已保存 Cookie。" />
+            <el-input
+              v-model="form.cookie"
+              type="textarea"
+              :rows="3"
+              placeholder="从浏览器开发者工具中获取；已保存 Cookie 时可留空" />
+          </div>
         </el-form-item>
 
         <el-form-item v-if="form.auth_method === 'api_key'" label="API Key">
@@ -578,11 +587,19 @@ function toggleEditRssCustomPath() {
 
         <template v-if="form.auth_method === 'cookie_and_api_key'">
           <el-form-item label="Cookie">
-            <el-input
-              v-model="form.cookie"
-              type="textarea"
-              :rows="3"
-              placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）" />
+            <div class="credential-field-stack">
+              <el-alert
+                v-if="savedCookieHidden"
+                type="success"
+                show-icon
+                :closable="false"
+                title="Cookie 已保存，出于安全原因不会回显。留空保存不会覆盖已保存 Cookie。" />
+              <el-input
+                v-model="form.cookie"
+                type="textarea"
+                :rows="3"
+                placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）；已保存 Cookie 时可留空" />
+            </div>
           </el-form-item>
           <el-form-item label="API Key / RSS Key">
             <el-input
@@ -615,24 +632,26 @@ function toggleEditRssCustomPath() {
 
         <el-divider content-position="left">单种子速度限制（可选）</el-divider>
 
-        <el-form-item label="上传限速 (KB/s)">
+        <el-form-item label="上传限速 (KB/s)" class="speed-limit-item">
           <el-input-number
             v-model="form.upload_limit_kbs"
             :min="0"
             :max="1048576"
             :step="128"
+            class="w-full"
             placeholder="0 表示不限速" />
           <div class="form-tip">
             推送到下载器的每个种子自动应用此上传限速。0 = 不限制（使用下载器全局/默认设置）。
           </div>
         </el-form-item>
 
-        <el-form-item label="下载限速 (KB/s)">
+        <el-form-item label="下载限速 (KB/s)" class="speed-limit-item">
           <el-input-number
             v-model="form.download_limit_kbs"
             :min="0"
             :max="1048576"
             :step="128"
+            class="w-full"
             placeholder="0 表示不限速" />
           <div class="form-tip">
             推送到下载器的每个种子自动应用此下载限速。0 = 不限制（使用下载器全局/默认设置）。

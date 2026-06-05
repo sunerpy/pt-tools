@@ -127,6 +127,16 @@ func NewDB(gormLg zapgorm2.Logger) (*TorrentDB, error) {
 
 // NewDBWithVersion 初始化并返回 TorrentDB（带应用版本）
 func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, error) {
+	return NewDBWithVersionAndHooks(gormLg, appVersion, nil, nil, nil)
+}
+
+func NewDBWithVersionAndHooks(
+	gormLg zapgorm2.Logger,
+	appVersion string,
+	backupFn func(db *gorm.DB, table string) (path string, err error),
+	encryptFn func(plain string) (cipher string, err error),
+	decryptFn func(cipher string) (plain string, err error),
+) (*TorrentDB, error) {
 	// 确保工作目录存在
 	homeDir, _ := os.UserHomeDir()
 	dbDir := filepath.Join(homeDir, WorkDir)
@@ -195,12 +205,15 @@ func NewDBWithVersion(gormLg zapgorm2.Logger, appVersion string) (*TorrentDB, er
 		&BotToken{},
 		&NotificationOutbox{},
 		&RSSNotificationLog{},
+		&SiteLoginState{},
+		&MigrationState{},
+		&CloakSettings{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
 
 	// 运行架构版本迁移
-	schemaManager := NewSchemaManager(db, appVersion)
+	schemaManager := NewSchemaManagerWithHooks(db, appVersion, backupFn, encryptFn, decryptFn)
 	if err := schemaManager.RunMigrations(); err != nil {
 		return nil, fmt.Errorf("架构迁移失败: %w", err)
 	}

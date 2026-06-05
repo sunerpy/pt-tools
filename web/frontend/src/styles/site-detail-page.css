@@ -69,6 +69,13 @@
   font-weight: 700;
 }
 
+.credential-field-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
 .header-left {
   display: flex;
   align-items: center;
@@ -96,6 +103,7 @@
 .save-btn--header,
 .add-rss-btn--header {
   min-width: 118px;
+  color: #fff;
   box-shadow: var(--pt-shadow-sm);
 }
 
@@ -320,6 +328,14 @@
   color: var(--el-text-color-secondary);
   margin-top: 4px;
   line-height: 1.55;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.speed-limit-item :deep(.el-form-item__label) {
+  white-space: nowrap;
 }
 
 .path-selector {

@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  cloakbrowser-manager:
+    # NOTE: Pin to specific version + SHA digest (R21). Discover the actual SHA via:
+    #   docker pull cloakhq/cloakbrowser-manager:0.0.4
+    #   docker inspect cloakhq/cloakbrowser-manager:0.0.4 | jq '.[0].RepoDigests[0]'
+    # If the digest is not yet known (alpha image, evolving), use just the tag and document this in the README + a TODO comment here.
+    image: cloakhq/cloakbrowser-manager:0.0.4
+    # image: cloakhq/cloakbrowser-manager:0.0.4@sha256:<digest>  # uncomment after digest captured
+    container_name: pt-tools-cloak
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080" # bind to localhost only (security)
+    volumes:
+      - cloak_profiles:/data
+    environment:
+      - AUTH_TOKEN=${CLOAK_AUTH_TOKEN:?must be set in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  pt-tools:
+    image: sunerpy/pt-tools:v2-latest
+    container_name: pt-tools
+    restart: unless-stopped
+    depends_on:
+      cloakbrowser-manager:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - pttools_data:/root/.pt-tools
+    environment:
+      - PT_TOOLS_CLOAK_ENDPOINT=http://cloakbrowser-manager:8080
+      - PT_TOOLS_CLOAK_AUTH_TOKEN=${CLOAK_AUTH_TOKEN}
+      # Optional: extend with site-specific or notification config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  cloak_profiles:
+  pttools_data:

@@ -96,6 +96,7 @@ type NexusPHPOptions struct {
 
 type MTorrentOptions struct {
 	APIKey string `json:"apiKey"`
+	Cookie string `json:"cookie,omitempty"`
 }
 
 type HDDolbyOptions struct {
@@ -114,6 +115,7 @@ type GazelleOptions struct {
 
 type RousiOptions struct {
 	Passkey string `json:"passkey"`
+	Cookie  string `json:"cookie,omitempty"`
 }
 
 type SiteFactory struct {
