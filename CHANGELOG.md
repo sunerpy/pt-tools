@@ -5,6 +5,134 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.1] - 2026-06-05
+
+### Bug Fixes
+
+- **build**: Docker 构建镜像同步升级至 Go 1.26.4
+- Makefile BUILD_IMAGE 默认值与 go.mod / Dockerfile 保持一致 - 修复 release 流水线 Docker 构建因 go.mod 要求 >=1.26.4 而失败
+
+## [0.35.0] - 2026-06-05
+
+### Bug Fixes
+
+- **rss**: RSS 推送路径应用站点限速
+- processSingleTorrentWithDownloader 推送前调用 applySiteSpeedLimits - 此前仅手动推送应用站点限速，RSS 自动下载种子无限速 - 新增端到端回归测试验证限速送达 AddTorrentFileEx
+- **web**: Favicon 未缓存时返回占位图避免 404 刷屏
+- nofetch 模式下站点图标未缓存时返回透明占位图（200）- 此前返回 404，浏览/添加站点页因前端预取持续刷屏 404 日志 - 占位图可缓存，消除重复请求
+
+### Dependencies
+
+- **deps**: 升级 Go 至 1.26.4
+- 修复 net/textproto (GO-2026-5039) 与 crypto/x509 (GO-2026-5037) 标准库漏洞 - 同步更新 Dockerfile 构建镜像版本
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump dompurify from 3.4.5 to 3.4.8 in /web/frontend ([#379](https://github.com/sunerpy/pt-tools/issues/379)) ([#379](https://github.com/sunerpy/pt-tools/pull/379))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.5 to 3.4.8. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.5...3.4.8)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.4.8
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.50.0 to 0.53.0 in /web/frontend ([#381](https://github.com/sunerpy/pt-tools/issues/381)) ([#381](https://github.com/sunerpy/pt-tools/pull/381))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.50.0 to 0.53.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.53.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.53.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue from 3.5.34 to 3.5.35 in /web/frontend ([#384](https://github.com/sunerpy/pt-tools/issues/384)) ([#384](https://github.com/sunerpy/pt-tools/pull/384))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.34 to 3.5.35. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.34...v3.5.35)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.35
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.66.0 to 1.68.0 in /web/frontend ([#382](https://github.com/sunerpy/pt-tools/issues/382)) ([#382](https://github.com/sunerpy/pt-tools/pull/382))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.66.0 to 1.68.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.68.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.68.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump element-plus from 2.14.0 to 2.14.1 in /web/frontend ([#383](https://github.com/sunerpy/pt-tools/issues/383)) ([#383](https://github.com/sunerpy/pt-tools/pull/383))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.14.0 to 2.14.1. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.14.0...2.14.1)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.14.1
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue-router from 5.0.7 to 5.1.0 in /web/frontend ([#380](https://github.com/sunerpy/pt-tools/issues/380)) ([#380](https://github.com/sunerpy/pt-tools/pull/380))
+  Bumps [vue-router](https://github.com/vuejs/router) from 5.0.7 to 5.1.0. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.7...v5.1.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-router
+         dependency-version: 5.1.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vite from 8.0.14 to 8.0.16 in /web/frontend ([#385](https://github.com/sunerpy/pt-tools/issues/385)) ([#385](https://github.com/sunerpy/pt-tools/pull/385))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.14 to 8.0.16. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.16/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.0.16
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Documentation
+
+- **release-notes**: 添加 v0.34.0 公告覆盖文件
+  用于 telegram-release-announce.yml workflow，替代 release-please 自动生成
+  的 release body（含 commit SHA / 内部术语，对外用户视角不友好）。
+- 精简 README 并补充 chatops 命令文档
+- README 移除冗长版本亮点，改为指向 Release 与 CHANGELOG - 功能表增加登录态保号条目 - chatops 快速开始补充 /addrss 与 /delrss 命令
+
+### Features
+
+- **site-login**: 站点登录态探测保号体系与扩展协同
+- 站点登录态探测(双轨 HTTP/cookie + API key)与封号提醒 - NexusPHP/Rousi/HDDolby 最近动向解析,38+ 站点 lastAccessAt 回填 - 探测调度每 6 小时 + 启动延迟初探,reminder 路径结构化日志 - 站点登录态探测端点(REST + 兼容路由)与一键/批量探测 - 测试提醒一键推送至通知通道,绕过 cron/tier 门控 - CloakBrowser 底层驱动(manager/CDP/各 schema)与配置页(端到端 fallback 待接入) - 非 cookie 站点保留登录态 cookie,driver 接受但隔离检索 - 浏览器扩展:cookie 跨域检测/登录状态错误本地化/批量打开站点/更新检查 - WebUI:站点页与用户统计页判定活跃/剩余天数/打开站点/风险提示横幅 - 修复 RSS 推送站点限速、favicon 占位、cookie 持久化、操作列布局 - vite 抑制 @vueuse INVALID_ANNOTATION 警告 - 文档:扩展优先 Edge 商店安装,CloakBrowser 接入状态澄清
+- **chatops**: 增加互动添加和删除 RSS 订阅命令
+- 新增 /addrss 向导命令，支持多步文本向导与单行快捷格式 - 新增 /delrss 命令，先列出站点 RSS 再按名称/ID/序号选择删除 - 站点和下载器选择均支持名称或列表序号 - ConfigStore 增加原子 AppendRSSToSite/DeleteRSSFromSite/ListRSSForSite - 抽取共享 RSS 校验器 rss_validator
+- **web**: 支持在登录管理页编辑站点保号配置
+- 站点列表新增保号配置弹窗，可编辑封禁阈值、提前提醒天数、提醒 cron、通知通道与探测模式 - 提醒 cron 增加格式说明 tooltip - 通知通道说明留空发送全部已启用通道，配置后仅发所选 - 修复 probe_mode 经配置接口未持久化的问题 - 收窄站点列表各列并压缩操作列间距，避免横向滚动
+- **site**: 适配 PTLGS 站点
+- 新增 NexusPHP 架构站点 ptlgs.org 定义与 fixture 测试 - 配置 lastAccessAt 选择器以支持保号探测 - 浏览器扩展 KNOWN_SITES 增加 ptlgs - docs/sites.md 更新站点列表与计数（close #377）
+
+### Miscellaneous
+
+- **ci**: 发版公告改为手动输入触发
+- telegram-release-announce 增加 announcement 手动输入，优先级高于覆盖文件 - 更新 release-notes 说明文档为新流程
+
+### Styling
+
+- **changelog**: 应用 oxfmt 自动格式化
+
 ## [0.34.0] - 2026-05-28
 
 ### Bug Fixes
@@ -1351,12 +1479,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: 新增 OpenCD 和 PTT 站点适配
 - 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
   _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin\*details.php 链接格式
-  - 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  - 处理 font.promotion 替代 img.pro\*_ 的非标准折扣标记
-    _ span.category 替代 img[alt] 的分类标记
-    _ 处理 info_block 隐藏列的 nth-child 索引偏移
-    _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+  _ 支持 plugin*details.php 链接格式
+  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
+  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
+  _ span.category 替代 img[alt] 的分类标记
+  _ 处理 info_block 隐藏列的 nth-child 索引偏移
+  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
