@@ -621,6 +621,129 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 	})
 }
 
+func (s *ConfigStore) AppendRSSToSite(siteName string, entry models.RSSConfig) (models.RSSConfig, error) {
+	var created models.RSSConfig
+	err := s.db.WithTransaction(func(tx *gorm.DB) error {
+		var site models.SiteSetting
+		if err := tx.Where("name = ?", siteName).First(&site).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("站点不存在: %s", siteName)
+			}
+			return err
+		}
+
+		var rows []models.RSSSubscription
+		if err := tx.Where("site_id = ?", site.ID).Find(&rows).Error; err != nil {
+			return err
+		}
+		existing := make([]models.RSSConfig, 0, len(rows))
+		for _, r := range rows {
+			existing = append(existing, models.RSSConfig{ID: r.ID, Name: r.Name, URL: r.URL, Category: r.Category, Tag: r.Tag, IntervalMinutes: r.IntervalMinutes, DownloaderID: r.DownloaderID, DownloadPath: r.DownloadPath, IsExample: r.IsExample, PauseOnFreeEnd: r.PauseOnFreeEnd, FilterMode: r.FilterMode, NotifyMode: r.NotifyMode, NotifyConfIDs: r.NotifyConfIDs, MaxNotificationsPerHour: r.MaxNotificationsPerHour})
+		}
+
+		normalized, err := validateAndNormalizeRSS(existing, entry)
+		if err != nil {
+			return err
+		}
+		if normalized.DownloaderID != nil {
+			var downloader models.DownloaderSetting
+			if err := tx.First(&downloader, *normalized.DownloaderID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("下载器不存在: %d", *normalized.DownloaderID)
+				}
+				return err
+			}
+		}
+
+		rss := models.RSSSubscription{
+			SiteID:                  site.ID,
+			Name:                    normalized.Name,
+			URL:                     normalized.URL,
+			Category:                normalized.Category,
+			Tag:                     normalized.Tag,
+			IntervalMinutes:         normalized.IntervalMinutes,
+			DownloaderID:            normalized.DownloaderID,
+			DownloadPath:            normalized.DownloadPath,
+			PauseOnFreeEnd:          normalized.PauseOnFreeEnd,
+			FilterMode:              normalized.FilterMode,
+			NotifyMode:              normalized.NotifyMode,
+			NotifyConfIDs:           normalized.NotifyConfIDs,
+			MaxNotificationsPerHour: normalized.MaxNotificationsPerHour,
+		}
+		if err := tx.Create(&rss).Error; err != nil {
+			return err
+		}
+
+		if len(normalized.FilterRuleIDs) > 0 {
+			assocDB := models.NewRSSFilterAssociationDB(tx)
+			if err := assocDB.SetFilterRulesForRSS(rss.ID, normalized.FilterRuleIDs); err != nil {
+				return err
+			}
+		}
+
+		created = normalized
+		created.ID = rss.ID
+		return nil
+	})
+	if err != nil {
+		return models.RSSConfig{}, err
+	}
+	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+	sLogger().Infof("[RSS订阅已追加] 站点=%s, RSS=%s", siteName, created.Name)
+	return created, nil
+}
+
+// DeleteRSSFromSite 原子删除指定站点下的单条 RSS 订阅，并清理其过滤规则关联。
+func (s *ConfigStore) DeleteRSSFromSite(siteName string, rssID uint) (models.RSSConfig, error) {
+	var deleted models.RSSConfig
+	err := s.db.WithTransaction(func(tx *gorm.DB) error {
+		var site models.SiteSetting
+		if err := tx.Where("name = ?", siteName).First(&site).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("站点不存在: %s", siteName)
+			}
+			return err
+		}
+
+		var row models.RSSSubscription
+		if err := tx.Where("site_id = ? AND id = ?", site.ID, rssID).First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("RSS 订阅不存在: %d", rssID)
+			}
+			return err
+		}
+
+		assocDB := models.NewRSSFilterAssociationDB(tx)
+		if err := assocDB.DeleteByRSSID(row.ID); err != nil {
+			return err
+		}
+		if err := tx.Where("site_id = ? AND id = ?", site.ID, rssID).Delete(&models.RSSSubscription{}).Error; err != nil {
+			return err
+		}
+
+		deleted = models.RSSConfig{ID: row.ID, Name: row.Name, URL: row.URL}
+		return nil
+	})
+	if err != nil {
+		return models.RSSConfig{}, err
+	}
+	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+	sLogger().Infof("[RSS订阅已删除] 站点=%s, RSS=%s(ID=%d)", siteName, deleted.Name, deleted.ID)
+	return deleted, nil
+}
+
+// ListRSSForSite 返回指定站点的所有 RSS 订阅。
+func (s *ConfigStore) ListRSSForSite(siteName string) ([]models.RSSConfig, error) {
+	sc, err := s.GetSiteConf(models.SiteGroup(siteName))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("站点不存在: %s", siteName)
+		}
+		return nil, err
+	}
+	return sc.RSS, nil
+}
+
 // DeleteSite 删除站点（预置站点禁止删除）
 func (s *ConfigStore) DeleteSite(name string) error {
 	lower := strings.ToLower(name)
