@@ -68,6 +68,15 @@ export const KNOWN_SITES: KnownSite[] = [
     syncField: "cookie",
   },
   {
+    id: "ptlgs",
+    name: "PTLGS",
+    domains: ["ptlgs.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
     id: "rousipro",
     name: "Rousi Pro",
     domains: ["rousi.pro", "www.rousi.pro"],
