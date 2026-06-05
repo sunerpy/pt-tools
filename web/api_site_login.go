@@ -54,6 +54,7 @@ type SiteLoginConfigUpdateRequest struct {
 	RemindBeforeDays       *int    `json:"remind_before_days,omitempty"`
 	ReminderCron           *string `json:"reminder_cron,omitempty"`
 	NotificationChannelIDs *[]uint `json:"notification_channel_ids,omitempty"`
+	ProbeMode              *string `json:"probe_mode,omitempty"`
 }
 
 // SiteVisitReportRequest is the payload for POST /api/sites/visit emitted
@@ -294,6 +295,14 @@ func (s *Server) handleLoginStateConfigUpdate(w http.ResponseWriter, r *http.Req
 		writeJSONError(w, "remind_before_days 必须在 1..365 之间", http.StatusBadRequest)
 		return
 	}
+	if req.ProbeMode != nil {
+		switch *req.ProbeMode {
+		case "auto", "manual", "disabled":
+		default:
+			writeJSONError(w, "probe_mode 必须为 auto、manual 或 disabled", http.StatusBadRequest)
+			return
+		}
+	}
 	db := global.GlobalDB.DB
 	if err := ensureLoginStateRow(db, siteName); err != nil {
 		writeJSONError(w, fmt.Sprintf("初始化站点登录状态失败: %v", err), http.StatusInternalServerError)
@@ -317,6 +326,9 @@ func (s *Server) handleLoginStateConfigUpdate(w http.ResponseWriter, r *http.Req
 			return
 		}
 		updates["NotificationChannelIDs"] = string(raw)
+	}
+	if req.ProbeMode != nil {
+		updates["ProbeMode"] = *req.ProbeMode
 	}
 	if len(updates) == 0 {
 		writeJSONError(w, "未提供任何可更新字段", http.StatusBadRequest)

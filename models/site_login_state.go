@@ -86,6 +86,10 @@ func (r *SiteLoginStateRepository) UpsertLoginState(siteName string, fields map[
 			if v, ok := val.(int); ok {
 				state.ProbeJitterSeconds = v
 			}
+		case "ProbeMode":
+			if v, ok := val.(string); ok {
+				state.ProbeMode = v
+			}
 		}
 	}
 

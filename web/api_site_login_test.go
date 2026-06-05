@@ -139,6 +139,37 @@ func TestApiSiteLoginStateConfigUpdateRejectsBadBounds(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestApiSiteLoginStateConfigUpdatePersistsProbeMode(t *testing.T) {
+	srv, cleanup := newSiteLoginTestServer(t)
+	defer cleanup()
+
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "HDSKY", Enabled: true}).Error)
+
+	body := SiteLoginConfigUpdateRequest{ProbeMode: strPtr("manual")}
+	rec := httptest.NewRecorder()
+	srv.apiSiteLoginStateRouter(rec, authedRequest(http.MethodPut, "/api/sites/login-state/HDSKY/config", body))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var state models.SiteLoginState
+	require.NoError(t, db.Where("site_name = ?", "HDSKY").First(&state).Error)
+	assert.Equal(t, "manual", state.ProbeMode)
+}
+
+func TestApiSiteLoginStateConfigUpdateRejectsInvalidProbeMode(t *testing.T) {
+	srv, cleanup := newSiteLoginTestServer(t)
+	defer cleanup()
+
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "HDSKY", Enabled: true}).Error)
+
+	body := SiteLoginConfigUpdateRequest{ProbeMode: strPtr("bogus")}
+	rec := httptest.NewRecorder()
+	srv.apiSiteLoginStateRouter(rec, authedRequest(http.MethodPut, "/api/sites/login-state/HDSKY/config", body))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "probe_mode")
+}
+
 func TestApiSiteVisitClampsFutureTimestamp(t *testing.T) {
 	srv, cleanup := newSiteLoginTestServer(t)
 	defer cleanup()

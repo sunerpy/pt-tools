@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ApiError, type SiteConfig, type SiteLoginState, sitesApi } from "@/api";
+import { ApiError, type SiteConfig, type SiteLoginState, chatopsApi, sitesApi } from "@/api";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
@@ -321,6 +321,77 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
     updatingMode[name] = false;
   }
 }
+
+interface LoginConfigForm {
+  ban_threshold_days: number;
+  remind_before_days: number;
+  reminder_cron: string;
+  notification_channel_ids: number[];
+  probe_mode: "auto" | "manual" | "disabled";
+}
+
+const configDialogVisible = ref(false);
+const configSaving = ref(false);
+const configSiteName = ref("");
+const notifyChannels = ref<{ id: number; name: string }[]>([]);
+const configForm = reactive<LoginConfigForm>({
+  ban_threshold_days: 30,
+  remind_before_days: 10,
+  reminder_cron: "0 10,22 * * *",
+  notification_channel_ids: [],
+  probe_mode: "auto",
+});
+
+async function loadNotifyChannels() {
+  if (notifyChannels.value.length > 0) return;
+  try {
+    const list = await chatopsApi.notifications.list();
+    notifyChannels.value = list.map((c) => ({ id: c.id, name: c.name }));
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "加载通知通道失败");
+  }
+}
+
+async function openConfigDialog(name: string) {
+  configSiteName.value = name;
+  const st = loginStates.value[name];
+  configForm.ban_threshold_days = st?.ban_threshold_days ?? 30;
+  configForm.remind_before_days = st?.remind_before_days ?? 10;
+  configForm.reminder_cron = st?.reminder_cron || "0 10,22 * * *";
+  configForm.notification_channel_ids = [...(st?.notification_channel_ids ?? [])];
+  configForm.probe_mode = probeModeOf(name);
+  configDialogVisible.value = true;
+  await loadNotifyChannels();
+}
+
+async function saveLoginConfig() {
+  const name = configSiteName.value;
+  if (!name) return;
+  configSaving.value = true;
+  try {
+    await sitesApi.updateLoginConfig(name, {
+      ban_threshold_days: configForm.ban_threshold_days,
+      remind_before_days: configForm.remind_before_days,
+      reminder_cron: configForm.reminder_cron,
+      notification_channel_ids: configForm.notification_channel_ids,
+      probe_mode: configForm.probe_mode,
+    });
+    const st = loginStates.value[name];
+    if (st) {
+      st.ban_threshold_days = configForm.ban_threshold_days;
+      st.remind_before_days = configForm.remind_before_days;
+      st.reminder_cron = configForm.reminder_cron;
+      st.notification_channel_ids = [...configForm.notification_channel_ids];
+      st.probe_mode = configForm.probe_mode;
+    }
+    ElMessage.success("保号配置已更新");
+    configDialogVisible.value = false;
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "更新失败");
+  } finally {
+    configSaving.value = false;
+  }
+}
 </script>
 
 <template>
@@ -399,7 +470,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
         </template>
         <el-table-column type="index" label="#" width="60" align="center" />
 
-        <el-table-column label="站点" min-width="150">
+        <el-table-column label="站点" min-width="120">
           <template #default="{ row }">
             <div class="table-cell-primary site-name-wrapper">
               <span class="site-name">{{ row[0] }}</span>
@@ -407,7 +478,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" min-width="100" align="center">
+        <el-table-column label="状态" min-width="78" align="center">
           <template #default="{ row }">
             <el-tag
               :type="row[1].enabled ? 'success' : 'info'"
@@ -421,7 +492,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column label="认证方式" min-width="120" align="center">
+        <el-table-column label="认证方式" min-width="90" align="center">
           <template #default="{ row }">
             <el-tag
               :type="
@@ -450,7 +521,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column label="RSS 订阅" min-width="100" align="center">
+        <el-table-column label="RSS 订阅" min-width="76" align="center">
           <template #default="{ row }">
             <div class="rss-cell">
               <el-badge
@@ -465,7 +536,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column min-width="120" align="center">
+        <el-table-column min-width="98" align="center">
           <template #header>
             <el-tooltip
               content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；不是网页登录时间"
@@ -480,7 +551,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column min-width="120" align="center">
+        <el-table-column min-width="100" align="center">
           <template #header>
             <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
               <span>剩余天数</span>
@@ -502,7 +573,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column min-width="120" align="center">
+        <el-table-column min-width="98" align="center">
           <template #header>
             <el-tooltip
               content="站点/API 返回的原始 last_access 或 lastBrowse 时间"
@@ -517,7 +588,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column label="探测模式" min-width="130" align="center">
+        <el-table-column label="探测模式" min-width="96" align="center">
           <template #default="{ row }">
             <el-select
               :model-value="probeModeOf(row[0])"
@@ -533,7 +604,7 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="500" align="center" fixed="right">
+        <el-table-column label="操作" width="400" align="center" fixed="right">
           <template #default="{ row }">
             <div class="table-cell-actions site-actions-nowrap">
               <el-tooltip
@@ -599,6 +670,16 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
                 class="action-btn action-btn--config"
                 @click="manageSite(row[0])">
                 配置
+              </el-button>
+              <el-button
+                type="primary"
+                size="small"
+                text
+                bg
+                class="action-btn action-btn--login-config"
+                :data-testid="`login-config-btn-${row[0]}`"
+                @click="openConfigDialog(row[0])">
+                保号配置
               </el-button>
               <el-button
                 type="danger"
@@ -690,6 +771,85 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
         </div>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="configDialogVisible"
+      :title="`保号配置 - ${configSiteName}`"
+      width="520px"
+      data-testid="login-config-dialog"
+      append-to-body>
+      <el-form label-width="120px" label-position="right">
+        <el-form-item label="封号判定天数">
+          <el-input-number
+            v-model="configForm.ban_threshold_days"
+            :min="1"
+            :max="365"
+            data-testid="login-config-ban-threshold" />
+          <span class="login-config-hint">不活跃超过此天数将被站点判定封号</span>
+        </el-form-item>
+        <el-form-item label="提前提醒天数">
+          <el-input-number
+            v-model="configForm.remind_before_days"
+            :min="1"
+            :max="365"
+            data-testid="login-config-remind-before" />
+          <span class="login-config-hint">距封号前多少天开始提醒</span>
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <el-tooltip placement="top">
+              <template #content>
+                标准 5 字段 cron：分 时 日 月 周。<br />
+                <code>0 10,22 * * *</code> = 每天 10:00 与 22:00 各提醒一次。<br />
+                示例：<code>0 9 * * *</code> 每天 9 点；<code>0 */6 * * *</code> 每 6 小时；
+                <code>30 8 * * 1</code> 每周一 8:30。
+              </template>
+              <span
+                >提醒 cron <el-icon><QuestionFilled /></el-icon
+              ></span>
+            </el-tooltip>
+          </template>
+          <el-input
+            v-model="configForm.reminder_cron"
+            placeholder="0 10,22 * * *"
+            data-testid="login-config-cron" />
+          <span class="login-config-hint"
+            >5 字段 cron（分 时 日 月 周），留空使用默认 0 10,22 * * *</span
+          >
+        </el-form-item>
+        <el-form-item label="通知通道">
+          <el-select
+            v-model="configForm.notification_channel_ids"
+            multiple
+            clearable
+            placeholder="留空 = 发送到所有已启用通知通道"
+            style="width: 100%"
+            data-testid="login-config-channels">
+            <el-option v-for="ch in notifyChannels" :key="ch.id" :label="ch.name" :value="ch.id" />
+          </el-select>
+          <span class="login-config-hint">
+            未选择 = 发送到所有已启用的通知通道；选择后仅发送到所选通道（且通道需处于启用状态）。
+          </span>
+        </el-form-item>
+        <el-form-item label="探测模式">
+          <el-select v-model="configForm.probe_mode" data-testid="login-config-probe-mode">
+            <el-option label="自动" value="auto" />
+            <el-option label="手动" value="manual" />
+            <el-option label="禁用" value="disabled" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="configDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="configSaving"
+          data-testid="login-config-save"
+          @click="saveLoginConfig">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -704,6 +864,12 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
 .risk-hint-alert :deep(.el-alert__title) {
   font-weight: 600;
   line-height: 1.6;
+}
+
+.login-config-hint {
+  margin-left: var(--pt-space-2, 8px);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .site-name-wrapper {
@@ -813,6 +979,18 @@ async function changeProbeMode(name: string, mode: "auto" | "manual" | "disabled
 
 .site-actions-nowrap {
   flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.site-actions-nowrap .action-btn {
+  min-width: 0;
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.site-actions-nowrap .action-btn--probe,
+.site-actions-nowrap .action-btn--test-reminder {
+  min-width: 0;
 }
 
 .action-btn--test-reminder {
@@ -977,6 +1155,6 @@ html.dark :deep(.el-table__row:hover) {
 }
 
 .probe-mode-select {
-  width: 96px;
+  width: 82px;
 }
 </style>

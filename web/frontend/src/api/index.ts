@@ -246,6 +246,16 @@ export const sitesApi = {
     api.post<void>(`/api/sites/validate?name=${encodeURIComponent(name)}`, data),
   updateProbeMode: (name: string, mode: "auto" | "manual" | "disabled") =>
     api.put<void>(`/api/sites/${name}/login-state/config`, { probe_mode: mode }),
+  updateLoginConfig: (
+    name: string,
+    data: Partial<{
+      ban_threshold_days: number;
+      remind_before_days: number;
+      reminder_cron: string;
+      notification_channel_ids: number[];
+      probe_mode: "auto" | "manual" | "disabled";
+    }>,
+  ) => api.put<void>(`/api/sites/${name}/login-state/config`, data),
   probeNow: (name: string) =>
     api.post<{ ok: boolean; last_probe_at?: number; last_probe_status?: string }>(
       `/api/sites/${name}/login-state/probe`,
