@@ -68,6 +68,8 @@ const hdfansUserdetailsFixture = `<html><body>
 <table>
   <tr><td class="rowhead">等级</td><td><img title="Extreme User" src="pic/extreme.gif" /></td></tr>
   <tr><td class="rowhead">加入日期</td><td>2020-01-15 12:30:00 (5年前)</td></tr>
+  <tr><td width="1%" class="rowhead nowrap">魔力值</td><td class="rowfollow">14,964.0</td></tr>
+  <tr><td width="1%" class="rowhead nowrap">最近动向</td><td class="rowfollow">2026-06-01 08:30:00 (<span title="2026-06-01 08:30:00">&lt; 1分钟前</span>)</td></tr>
 </table>
 </body></html>`
 
@@ -164,6 +166,37 @@ func testHDFansUserInfo(t *testing.T) {
 	userDoc := FixtureDoc(t, "hdfans_userdetails", hdfansUserdetailsFixture)
 	assert.Equal(t, "Extreme User", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["levelName"]))
 	assert.Equal(t, "1579062600", driver.ExtractFieldValuePublic(userDoc, def.UserInfo.Selectors["joinTime"]))
+}
+
+// TestHDFansUserInfo_BonusAndLastAccess is a full-flow regression guard:
+//   - bonus must come from #info_block (index.php) and must NOT be clobbered to 0
+//     by the bare "魔力值" cell on userdetails.php (which carries no label for the
+//     label-anchored bonus regex). HDFans previously listed "bonus" under the
+//     userdetails process, which overwrote the correct value with 0.
+//   - lastAccessAt must be parsed (>0); a zero LastAccess makes the login-state
+//     probe classify the site as PARSE_ERROR even though the cookie is valid.
+func TestHDFansUserInfo_BonusAndLastAccess(t *testing.T) {
+	def := getHDFansDef(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/index.php":
+			_, _ = w.Write([]byte(hdfansIndexFixture))
+		case "/userdetails.php":
+			_, _ = w.Write([]byte(hdfansUserdetailsFixture))
+		default:
+			_, _ = w.Write([]byte(`<html><body></body></html>`))
+		}
+	}))
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1"})
+	driver.SetSiteDefinition(def)
+
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 14964.0, info.Bonus, 0.01, "bonus from #info_block must survive userdetails merge")
+	assert.Positive(t, info.LastAccess, "lastAccessAt must be parsed, else probe => PARSE_ERROR")
 }
 
 func TestHDFans_Fixtures_NoSecrets(t *testing.T) {

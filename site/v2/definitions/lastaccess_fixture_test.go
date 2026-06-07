@@ -279,6 +279,24 @@ func TestLastAccessParse_BackfillBatch(t *testing.T) {
 			html:    `<html><body><table><tr><td width="1%" class="rowhead nowrap" valign="top" align="right">最近动向</td><td width="99%" class="rowfollow" valign="top" align="left">2026-03-20 18:14:39 (<span title="2026-03-20 18:14:39">2月前</span>)</td></tr></table></body></html>`,
 			wantRaw: "2026-03-20 18:14:39",
 		},
+		{
+			name:    "hdfans",
+			def:     HDFansDefinition,
+			html:    `<html><body><table><tr><td width="1%" class="rowhead nowrap" valign="top" align="right">最近动向</td><td width="99%" class="rowfollow" valign="top" align="left">2026-06-07 19:06:04 (<span title="2026-06-07 19:06:04">&lt; 1分钟前</span>)</td></tr></table></body></html>`,
+			wantRaw: "2026-06-07 19:06:04",
+		},
+		{
+			name:    "pttime",
+			def:     PTTimeDefinition,
+			html:    `<html><body><table><tr><td width="1%" class="rowhead nowrap" valign="top" align="right">最近动向</td><td width="95%" class="rowfollow" valign="top" align="left">2026-06-07 00:46:25 (<span title="2026-06-07 00:46:25">18时19分前</span>)</td></tr></table></body></html>`,
+			wantRaw: "2026-06-07 00:46:25",
+		},
+		{
+			name:    "btschool",
+			def:     BTSchoolDefinition,
+			html:    `<html><body><table><tr><td width="1%" class="rowhead nowrap" valign="top" align="right">最近动向</td><td width="99%" class="rowfollow" valign="top" align="left">2026-06-07 19:06:07 (<span title="2026-06-07 19:06:07">&lt; 1分前</span>)</td></tr></table></body></html>`,
+			wantRaw: "2026-06-07 19:06:07",
+		},
 	}
 
 	for _, tt := range cases {
