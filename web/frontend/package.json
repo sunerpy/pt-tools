@@ -30,7 +30,7 @@
     "@types/node": "^25.9.1",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/tsconfig": "^0.9.1",
-    "oxfmt": "^0.53.0",
+    "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
     "sass": "^1.100.0",
     "typescript": "~6.0.3",
