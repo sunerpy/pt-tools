@@ -5,6 +5,136 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.2] - 2026-06-09
+
+### Bug Fixes
+
+- **site**: Parse lastAccess for hdfans/pttime/btschool & fix hdfans bonus
+  The NexusPHP login-state probe classifies a site as PARSE_ERROR whenever
+  GetUserInfo returns LastAccess == 0 (internal/sitelogin/probe_nexusphp.go),
+  even when the cookie is valid and the username/stats parse fine. hdfans,
+  pttime and btschool had no `lastAccessAt` selector, so their probe always
+  failed with PARSE_ERROR. Add the standard `最近动向` lastAccessAt selector and
+  wire it into each site's userdetails process.
+
+        Also fix hdfans bonus always reading 0. hdfans was the only site listing
+        `bonus` in its userdetails process. On userdetails the 魔力值 value lives in
+        its own cell (e.g. "15,879,858.1") with no inline label, so the
+        label-anchored bonus regex fails; parseNumber then yields "0", which (being
+        non-empty) overwrites the correct value already parsed from #info_block on
+        index.php. Drop `bonus` from hdfans' userdetails process to match every
+        other site (bonus is sourced from #info_block on index.php).
+
+        Verified against real userdetails HTML for all three sites; adds last-access
+        backfill cases and an hdfans full-flow regression test (bonus + lastAccess).
+
+- **build**: Fmt 流程排除 CHANGELOG 与 release 清单
+- 新增 .oxfmtignore，fmt-oxfmt/fmt-check 经 --ignore-path 跳过
+  CHANGELOG.md 及 release-please 清单 - 这些文件由 release 工作流 update-changelog job 专门格式化 - 修复两次 release 之间 format-check 对所有 PR 误报的问题
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vitest from 4.1.7 to 4.1.8 in /web/frontend ([#394](https://github.com/sunerpy/pt-tools/issues/394)) ([#394](https://github.com/sunerpy/pt-tools/pull/394))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.7 to 4.1.8. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.8/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.8
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.68.0 to 1.69.0 in /web/frontend ([#396](https://github.com/sunerpy/pt-tools/issues/396)) ([#396](https://github.com/sunerpy/pt-tools/pull/396))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.68.0 to 1.69.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.69.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.69.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.3.2 to 3.3.4 in /web/frontend ([#397](https://github.com/sunerpy/pt-tools/issues/397)) ([#397](https://github.com/sunerpy/pt-tools/pull/397))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.2 to 3.3.4. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.4/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.3.4
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.53.0 to 0.54.0 in /web/frontend ([#398](https://github.com/sunerpy/pt-tools/issues/398)) ([#398](https://github.com/sunerpy/pt-tools/pull/398))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.53.0 to 0.54.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.54.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.54.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump @types/node from 25.9.1 to 25.9.2 in /web/frontend ([#400](https://github.com/sunerpy/pt-tools/issues/400)) ([#400](https://github.com/sunerpy/pt-tools/pull/400))
+  Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.9.1 to 25.9.2. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+        ---
+        updated-dependencies:
+        - dependency-name: "@types/node"
+         dependency-version: 25.9.2
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/sys from 0.45.0 to 0.46.0 ([#391](https://github.com/sunerpy/pt-tools/issues/391)) ([#391](https://github.com/sunerpy/pt-tools/pull/391))
+  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.45.0 to 0.46.0. - [Commits](https://github.com/golang/sys/compare/v0.45.0...v0.46.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/sys
+         dependency-version: 0.46.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/sync from 0.20.0 to 0.21.0 ([#395](https://github.com/sunerpy/pt-tools/issues/395)) ([#395](https://github.com/sunerpy/pt-tools/pull/395))
+  Bumps [golang.org/x/sync](https://github.com/golang/sync) from 0.20.0 to 0.21.0. - [Commits](https://github.com/golang/sync/compare/v0.20.0...v0.21.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/sync
+         dependency-version: 0.21.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/text from 0.37.0 to 0.38.0 ([#393](https://github.com/sunerpy/pt-tools/issues/393)) ([#393](https://github.com/sunerpy/pt-tools/pull/393))
+  Bumps [golang.org/x/text](https://github.com/golang/text) from 0.37.0 to 0.38.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.37.0...v0.38.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/text
+         dependency-version: 0.38.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump golang.org/x/crypto from 0.51.0 to 0.53.0 ([#392](https://github.com/sunerpy/pt-tools/issues/392)) ([#392](https://github.com/sunerpy/pt-tools/pull/392))
+  Bumps [golang.org/x/crypto](https://github.com/golang/crypto) from 0.51.0 to 0.53.0. - [Commits](https://github.com/golang/crypto/compare/v0.51.0...v0.53.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/crypto
+         dependency-version: 0.53.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
 ## [0.35.1] - 2026-06-05
 
 ### Bug Fixes
