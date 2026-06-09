@@ -224,13 +224,18 @@ GO_FILES = $(shell find . -name "*.go" -not -path "./vendor/*" -not -path "./web
 fmt: fmt-oxfmt fmt-go
 	@echo "Formatting complete."
 
+# CHANGELOG.md 与 release-please 清单由 release 工作流（update-changelog job）专门生成并格式化，
+# 开发与 CI 的 fmt 流程不应触碰，否则 git-cliff 重新生成后会与 oxfmt 期望格式冲突，导致
+# format-check 在两次 release 之间对所有 PR 误报。排除清单见仓库根目录 .oxfmtignore。
+OXFMT_IGNORE = --ignore-path "$(PROJECT_ROOT)/.oxfmtignore"
+
 fmt-oxfmt:
 	@echo "Formatting with oxfmt..."
 	@cd web/frontend && if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
 		pnpm install; \
 	fi && \
-	pnpm oxfmt --no-error-on-unmatched-pattern "$(PROJECT_ROOT)"
+	pnpm oxfmt --no-error-on-unmatched-pattern $(OXFMT_IGNORE) "$(PROJECT_ROOT)"
 
 fmt-go:
 	@echo "Formatting Go code..."
@@ -253,7 +258,7 @@ fmt-check:
 		echo "Installing dependencies..."; \
 		pnpm install; \
 	fi && \
-	pnpm oxfmt --no-error-on-unmatched-pattern --check "$(PROJECT_ROOT)"
+	pnpm oxfmt --no-error-on-unmatched-pattern --check $(OXFMT_IGNORE) "$(PROJECT_ROOT)"
 
 unit-test:
 	@mkdir -p $(DIST_DIR)
