@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-06-09
+
+### Features
+
+- **site**: 适配 ZmPT 站点
+- 新增 NexusPHP 架构站点 zmpt.cc（织梦）定义与 fixture 测试 - 从 #info_block 解析用户数据，bonus 适配「电力值」标签 - 配置 lastAccessAt 选择器以支持保号探测 - 浏览器扩展 KNOWN_SITES 增加 zmpt - docs/sites.md 更新站点列表与计数
+
 ## [0.35.2] - 2026-06-09
 
 ### Bug Fixes
