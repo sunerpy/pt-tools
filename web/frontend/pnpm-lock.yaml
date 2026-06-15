@@ -24,8 +24,8 @@ importers:
         specifier: ^3.4.8
         version: 3.4.8
       element-plus:
-        specifier: ^2.14.1
-        version: 2.14.1(vue@3.5.35(typescript@6.0.3))
+        specifier: ^2.14.2
+        version: 2.14.2(vue@3.5.35(typescript@6.0.3))
       marked:
         specifier: ^17.0.6
         version: 17.0.6
@@ -952,8 +952,8 @@ packages:
   dompurify@3.4.8:
     resolution: {integrity: sha512-yb1cEmaOum7wFvOCSQxyfgVlv5D47Rc30iZWoMpbDIWTnJ6grDDQyu2KFJzB2k7u0pMuJcQ1zphH//fFnw2tjQ==}
 
-  element-plus@2.14.1:
-    resolution: {integrity: sha512-UFnm1+BckNi+azkKJ7L32q1uXs9ekr99Z9pWTQPeDR05jqEWUwQq51ro4kZMVrANbjknX3Z7ukCZwTi2T6Tr9A==}
+  element-plus@2.14.2:
+    resolution: {integrity: sha512-eNH9uP3wQoNqieEIHXiNvIVv+zO5sZDU0CAZq5b0zqSN06DD0/V9xIq1R/qm3rw5k3nBTM1JvpxhCfRbaFLzDQ==}
     peerDependencies:
       vue: ^3.3.7
 
@@ -1386,8 +1386,8 @@ packages:
   vscode-uri@3.1.0:
     resolution: {integrity: sha512-/BpdSx+yCQGnCvecbyXdxHDkuk55/G3xwnC0GqY4gmQ3j+A+g8kzzgB4Nk/SINjqn6+waqw3EgbVF2QKExkRxQ==}
 
-  vue-component-type-helpers@3.3.3:
-    resolution: {integrity: sha512-x4nsFpy5Pe8fqPzp/5vkTPeTTDBpAx4WVtV47Ejt0+2FQrq4pRRsJs7JmYRqMFzTu/LW+pCWEjQ3YVCkPV7f9g==}
+  vue-component-type-helpers@3.3.5:
+    resolution: {integrity: sha512-Fe1jyPJoUGpJOYKOri44jduR7My4yYINOMJISuMAbmrs+L5LbIDUc8NTWZYY3EJLK0yPLuCmcd5zoCsE4k2/KA==}
 
   vue-router@5.1.0:
     resolution: {integrity: sha512-HAbiLzLEHQwxPgvsbOJDAwtavszEgLwri6XfyrsPECIFez8+59xc9LofWVdc/HEaSRT822lJ8H9Ns38VVond5g==}
@@ -2108,7 +2108,7 @@ snapshots:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
-  element-plus@2.14.1(vue@3.5.35(typescript@6.0.3)):
+  element-plus@2.14.2(vue@3.5.35(typescript@6.0.3)):
     dependencies:
       '@ctrl/tinycolor': 4.2.0
       '@element-plus/icons-vue': 2.3.2(vue@3.5.35(typescript@6.0.3))
@@ -2125,7 +2125,7 @@ snapshots:
       memoize-one: 6.0.0
       normalize-wheel-es: 1.2.0
       vue: 3.5.35(typescript@6.0.3)
-      vue-component-type-helpers: 3.3.3
+      vue-component-type-helpers: 3.3.5
 
   entities@7.0.1: {}
 
@@ -2503,7 +2503,7 @@ snapshots:
 
   vscode-uri@3.1.0: {}
 
-  vue-component-type-helpers@3.3.3: {}
+  vue-component-type-helpers@3.3.5: {}
 
   vue-router@5.1.0(@vue/compiler-sfc@3.5.35)(pinia@3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3)))(vite@8.0.16(@types/node@25.9.2)(esbuild@0.27.2)(sass@1.100.0)(yaml@2.9.0))(vue@3.5.35(typescript@6.0.3)):
     dependencies:
