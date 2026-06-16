@@ -614,6 +614,24 @@ type rssTaskStats struct {
 	downloadFailed atomic.Int64
 }
 
+func shouldSkipSiteDownload(torrent *models.TorrentInfo, downloadPath, fileBase string, maxRetry int) (bool, string) {
+	if torrent == nil {
+		return false, ""
+	}
+	if torrent.IsPushed != nil && *torrent.IsPushed {
+		return true, "已推送，跳过重新下载"
+	}
+	if maxRetry > 0 && torrent.RetryCount >= maxRetry {
+		return true, fmt.Sprintf("超过最大重试次数 %d", maxRetry)
+	}
+	if torrent.IsDownloaded {
+		if _, statErr := os.Stat(filepath.Join(downloadPath, fileBase+".torrent")); statErr == nil {
+			return true, "已下载且本地文件存在"
+		}
+	}
+	return false, ""
+}
+
 func shouldSkipExistingTorrent(torrent *models.TorrentInfo) bool {
 	if torrent == nil {
 		return false
@@ -693,7 +711,7 @@ func downloadWorkerUnified(
 			if len(item.Enclosures) > 0 {
 				torrentURL = item.Enclosures[0].URL
 			} else {
-				torrentURL = ""
+				torrentURL = item.Link
 			}
 			title := item.Title
 			// 查询数据库记录
@@ -885,6 +903,11 @@ func downloadWorkerUnified(
 				}
 				// 文件命名统一为 siteName-torrentID.torrent，避免重复与歧义
 				fileBase := fmt.Sprintf("%s-%s", strings.ToLower(string(siteName)), item.GUID)
+				if skip, reason := shouldSkipSiteDownload(torrent, downloadPath, fileBase, gl.MaxRetry); skip {
+					sLogger().Infof("种子: %s 跳过重新下载 (原因: %s)", title, reason)
+					stats.skipped.Add(1)
+					continue
+				}
 				hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
 				if downloadErr != nil {
 					sLogger().Errorf("%s: 种子下载失败, %v", title, downloadErr)
@@ -1146,17 +1169,23 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 		)
 	}
 
+	var discarded int
 	for _, item := range feed.Items {
-		if len(item.Enclosures) > 0 {
-			select {
-			case <-ctxWithTimeout.Done():
-				sLogger().Info("任务被取消")
-				close(torrentChan)
-				wg.Wait()
-				return ctxWithTimeout.Err()
-			case torrentChan <- item:
-			}
+		if len(item.Enclosures) == 0 && strings.TrimSpace(item.Link) == "" {
+			discarded++
+			continue
 		}
+		select {
+		case <-ctxWithTimeout.Done():
+			sLogger().Info("任务被取消")
+			close(torrentChan)
+			wg.Wait()
+			return ctxWithTimeout.Err()
+		case torrentChan <- item:
+		}
+	}
+	if discarded > 0 {
+		sLogger().Warnf("[RSS] 站点=%s, RSS=%s, 丢弃 %d 个无下载链接条目", siteName, rssCfg.Name, discarded)
 	}
 	close(torrentChan)
 	wg.Wait()
@@ -1255,17 +1284,23 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 		)
 	}
 	// 将种子发送到下载队列
+	var discarded int
 	for _, item := range feed.Items {
-		if len(item.Enclosures) > 0 {
-			select {
-			case <-ctxWithTimeout.Done():
-				sLogger().Info("任务被取消")
-				close(torrentChan)
-				wg.Wait()
-				return ctxWithTimeout.Err()
-			case torrentChan <- item:
-			}
+		if len(item.Enclosures) == 0 && strings.TrimSpace(item.Link) == "" {
+			discarded++
+			continue
 		}
+		select {
+		case <-ctxWithTimeout.Done():
+			sLogger().Info("任务被取消")
+			close(torrentChan)
+			wg.Wait()
+			return ctxWithTimeout.Err()
+		case torrentChan <- item:
+		}
+	}
+	if discarded > 0 {
+		sLogger().Warnf("[RSS] 站点=%s, RSS=%s, 丢弃 %d 个无下载链接条目", siteName, rssCfg.Name, discarded)
 	}
 	close(torrentChan)
 	wg.Wait()
@@ -1320,7 +1355,7 @@ func downloadWorker[T models.ResType](
 			if len(item.Enclosures) > 0 {
 				torrentURL = item.Enclosures[0].URL
 			} else {
-				torrentURL = ""
+				torrentURL = item.Link
 			}
 			title := item.Title
 			// 查询数据库记录
@@ -1454,6 +1489,10 @@ func downloadWorker[T models.ResType](
 					}
 					// 文件命名统一为 siteName-torrentID.torrent，避免重复与歧义
 					fileBase := fmt.Sprintf("%s-%s", strings.ToLower(string(siteName)), item.GUID)
+					if skip, reason := shouldSkipSiteDownload(torrent, downloadPath, fileBase, gl.MaxRetry); skip {
+						sLogger().Infof("种子: %s 跳过重新下载 (原因: %s)", title, reason)
+						return nil
+					}
 					hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
 					if downloadErr != nil {
 						return fmt.Errorf("种子下载失败: %w", downloadErr)

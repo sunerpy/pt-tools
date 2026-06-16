@@ -49,6 +49,11 @@ func classifyNexusPHPResult(info v2.UserInfo, err error, clock Clock, source Pro
 		result.Status = CHALLENGE
 	default:
 		result.Status = UNKNOWN
+		if isAuthError(err) {
+			result.Diagnostic = "Cookie 未配置或已失效，请用浏览器扩展同步 Cookie 后重试"
+		} else {
+			result.Diagnostic = err.Error()
+		}
 	}
 
 	return result, nil
@@ -60,4 +65,17 @@ func isChallengeError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "cloudflare") || strings.Contains(msg, "challenge")
+}
+
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "cookie") ||
+		strings.Contains(msg, "401") ||
+		strings.Contains(msg, "403") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "login")
 }

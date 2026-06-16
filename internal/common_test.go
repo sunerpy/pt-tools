@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -145,6 +146,70 @@ func TestFetchAndDownloadFreeRSS_Basic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, FetchAndDownloadFreeRSS(ctx, models.SiteGroup("springsunday"), &rssSiteStub{}, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}))
+}
+
+// linkURLSiteStub 记录传入 DownloadTorrent 的 url，用于断言无 enclosure 时回退 item.Link
+type linkURLSiteStub struct{ gotURL string }
+
+func (s *linkURLSiteStub) GetTorrentDetails(item *gofeed.Item) (*models.APIResponse[models.PHPTorrentInfo], error) {
+	d := models.PHPTorrentInfo{Title: item.Title, TorrentID: item.GUID, Discount: models.DISCOUNT_FREE, EndTime: time.Now().Add(1 * time.Hour), SizeMB: 64}
+	return &models.APIResponse[models.PHPTorrentInfo]{Code: "success", Data: d}, nil
+}
+func (s *linkURLSiteStub) IsEnabled() bool { return true }
+func (s *linkURLSiteStub) DownloadTorrent(url, title, dir string) (string, error) {
+	s.gotURL = url
+	_ = os.MkdirAll(dir, 0o755)
+	p := filepath.Join(dir, title+".torrent")
+	return "hash-link", os.WriteFile(p, []byte("d4:infoe"), 0o644)
+}
+func (s *linkURLSiteStub) MaxRetries() int           { return 1 }
+func (s *linkURLSiteStub) RetryDelay() time.Duration { return 0 }
+func (s *linkURLSiteStub) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSConfig) error {
+	return nil
+}
+func (s *linkURLSiteStub) Context() context.Context { return context.Background() }
+
+// TestFetchAndDownloadFreeRSS_FallbackToLink 验证无 <enclosure> 但有 <link> 的 mteam API 型 RSS
+// item 不再被静默丢弃，torrentURL 回退使用 item.Link。
+func TestFetchAndDownloadFreeRSS_FallbackToLink(t *testing.T) {
+	dir := t.TempDir()
+	db, err := core.NewTempDBDir(dir)
+	require.NoError(t, err)
+	global.GlobalDB = db
+	global.InitLogger(zap.NewNop())
+	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 10, DefaultEnabled: true}))
+	const dlURL = "http://mteam.example/dl/12345"
+	feed := bytes.NewBufferString(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Test</title>
+<item><title>ItemLink</title><guid>guid-link</guid><link>` + dlURL + `</link></item>
+</channel></rss>`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write(feed.Bytes()) }))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stub := &linkURLSiteStub{}
+	require.NoError(t, FetchAndDownloadFreeRSS(ctx, models.SiteGroup("springsunday"), stub, models.RSSConfig{Name: "r", URL: srv.URL, Tag: "tag"}))
+	require.Equal(t, dlURL, stub.gotURL, "无 enclosure 时 torrentURL 应回退为 item.Link")
+}
+
+// TestComputeDiscarded 验证入队丢弃逻辑：无 enclosure 且无 link 视为丢弃，有任一则保留。
+func TestComputeDiscarded(t *testing.T) {
+	cases := []struct {
+		name      string
+		item      *gofeed.Item
+		discarded bool
+	}{
+		{"both empty", &gofeed.Item{GUID: "g1"}, true},
+		{"blank link", &gofeed.Item{GUID: "g2", Link: "   "}, true},
+		{"has link", &gofeed.Item{GUID: "g3", Link: "http://x/dl"}, false},
+		{"has enclosure", &gofeed.Item{GUID: "g4", Enclosures: []*gofeed.Enclosure{{URL: "http://x/e.torrent"}}}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := len(c.item.Enclosures) == 0 && strings.TrimSpace(c.item.Link) == ""
+			require.Equal(t, c.discarded, got)
+		})
+	}
 }
 
 type props404Transport struct{}
@@ -1517,4 +1582,85 @@ func TestFilterTorrentFilesBySite_FallbackAllWhenNoPrefixMatch(t *testing.T) {
 	require.Len(t, filtered, 2)
 	require.Equal(t, files[0], filtered[0])
 	require.Equal(t, files[1], filtered[1])
+}
+
+func TestShouldSkipSiteDownload(t *testing.T) {
+	dir := t.TempDir()
+	fileBase := "site-123"
+	existingPath := filepath.Join(dir, fileBase+".torrent")
+	require.NoError(t, os.WriteFile(existingPath, []byte("d4:test4:datae"), 0o644))
+
+	boolPtr := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name       string
+		torrent    *models.TorrentInfo
+		fileBase   string
+		maxRetry   int
+		wantSkip   bool
+		wantReason string
+	}{
+		{
+			name:       "已推送应跳过",
+			torrent:    &models.TorrentInfo{IsPushed: boolPtr(true)},
+			fileBase:   fileBase,
+			maxRetry:   3,
+			wantSkip:   true,
+			wantReason: "已推送，跳过重新下载",
+		},
+		{
+			name:       "超过最大重试次数应跳过",
+			torrent:    &models.TorrentInfo{RetryCount: 3},
+			fileBase:   fileBase,
+			maxRetry:   3,
+			wantSkip:   true,
+			wantReason: "超过最大重试次数 3",
+		},
+		{
+			name:       "已下载且本地文件存在应跳过",
+			torrent:    &models.TorrentInfo{IsDownloaded: true},
+			fileBase:   fileBase,
+			maxRetry:   3,
+			wantSkip:   true,
+			wantReason: "已下载且本地文件存在",
+		},
+		{
+			name:     "已下载但本地文件不存在不跳过",
+			torrent:  &models.TorrentInfo{IsDownloaded: true},
+			fileBase: "missing-file",
+			maxRetry: 3,
+			wantSkip: false,
+		},
+		{
+			name:     "torrent为nil不跳过",
+			torrent:  nil,
+			fileBase: fileBase,
+			maxRetry: 3,
+			wantSkip: false,
+		},
+		{
+			name:     "未下载不跳过",
+			torrent:  &models.TorrentInfo{IsDownloaded: false},
+			fileBase: fileBase,
+			maxRetry: 3,
+			wantSkip: false,
+		},
+		{
+			name:     "maxRetry为0时高重试次数不跳过",
+			torrent:  &models.TorrentInfo{RetryCount: 99},
+			fileBase: fileBase,
+			maxRetry: 0,
+			wantSkip: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, reason := shouldSkipSiteDownload(tt.torrent, dir, tt.fileBase, tt.maxRetry)
+			require.Equal(t, tt.wantSkip, skip)
+			if tt.wantReason != "" {
+				require.Equal(t, tt.wantReason, reason)
+			}
+		})
+	}
 }

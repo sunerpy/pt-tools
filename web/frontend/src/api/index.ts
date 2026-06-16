@@ -127,6 +127,7 @@ export interface SiteConfig {
   passkey?: string;
   upload_limit_kbs?: number;
   download_limit_kbs?: number;
+  seeding_capacity_gb?: number;
   rss: RSSConfig[];
   urls?: string[];
   web_url?: string;

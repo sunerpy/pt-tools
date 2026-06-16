@@ -42,6 +42,7 @@ const form = ref<SiteConfig>({
   passkey: "",
   upload_limit_kbs: 0,
   download_limit_kbs: 0,
+  seeding_capacity_gb: 0,
   rss: [],
 });
 const savedCookieHidden = computed(() => form.value.has_cookie === true && !form.value.cookie);
@@ -656,6 +657,16 @@ function toggleEditRssCustomPath() {
           <div class="form-tip">
             推送到下载器的每个种子自动应用此下载限速。0 = 不限制（使用下载器全局/默认设置）。
           </div>
+        </el-form-item>
+
+        <el-form-item label="刷流容量上限 (GB)" class="speed-limit-item">
+          <el-input-number
+            v-model="form.seeding_capacity_gb"
+            :min="0"
+            :step="10"
+            class="w-full"
+            placeholder="0 表示不限制" />
+          <div class="form-tip">该站点做种总容量达到此上限后将停止推送新种子。0 = 不限制。</div>
         </el-form-item>
       </el-form>
     </el-card>
