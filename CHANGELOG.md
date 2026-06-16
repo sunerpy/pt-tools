@@ -5,6 +5,131 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-06-16
+
+### Bug Fixes
+
+- **site-login**: 细化无 Cookie 时的探测诊断文案
+- UNKNOWN 探测在 cookie/401/403 类错误时给出可操作提示 - 引导用户用浏览器扩展同步 Cookie，非认证错误保留原始错误 - .gitignore 忽略 .omo 内部状态目录
+- **rss**: 推送失败种子不再重复下载触发站点限制
+- 新增 shouldSkipSiteDownload 闸门：已推送/超重试上限/已下载且文件存在时跳过重新下载 - 两处 RSS 下载循环接入，避免每周期重抓站点 .torrent 触发 M-Team 下载次数限制
+- **rss**: 兼容无 enclosure 的 RSS 并记录丢弃项
+- 入队放宽：有 enclosure 或有 Link 的 item 均处理（适配 mteam API 型 RSS）- torrentURL 缺 enclosure 时回退 item.Link - 无下载链接的条目不再静默丢弃，记录丢弃数量
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump sass from 1.100.0 to 1.101.0 in /web/frontend ([#406](https://github.com/sunerpy/pt-tools/issues/406)) ([#406](https://github.com/sunerpy/pt-tools/pull/406))
+  Bumps [sass](https://github.com/sass/dart-sass) from 1.100.0 to 1.101.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.100.0...1.101.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: sass
+         dependency-version: 1.101.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vue-tsc from 3.3.4 to 3.3.5 in /web/frontend ([#409](https://github.com/sunerpy/pt-tools/issues/409)) ([#409](https://github.com/sunerpy/pt-tools/pull/409))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.4 to 3.3.5. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.5/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.3.5
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.54.0 to 0.55.0 in /web/frontend ([#411](https://github.com/sunerpy/pt-tools/issues/411)) ([#411](https://github.com/sunerpy/pt-tools/pull/411))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.54.0 to 0.55.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.55.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.55.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump element-plus from 2.14.1 to 2.14.2 in /web/frontend ([#413](https://github.com/sunerpy/pt-tools/issues/413)) ([#413](https://github.com/sunerpy/pt-tools/pull/413))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.14.1 to 2.14.2. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.14.1...2.14.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: element-plus
+         dependency-version: 2.14.2
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump dompurify from 3.4.8 to 3.4.10 in /web/frontend ([#410](https://github.com/sunerpy/pt-tools/issues/410)) ([#410](https://github.com/sunerpy/pt-tools/pull/410))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.8 to 3.4.10. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.8...3.4.10)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.4.10
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue from 3.5.35 to 3.5.38 in /web/frontend ([#412](https://github.com/sunerpy/pt-tools/issues/412)) ([#412](https://github.com/sunerpy/pt-tools/pull/412))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.35 to 3.5.38. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.35...v3.5.38)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.38
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vitest from 4.1.8 to 4.1.9 in /web/frontend ([#408](https://github.com/sunerpy/pt-tools/issues/408)) ([#408](https://github.com/sunerpy/pt-tools/pull/408))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.8 to 4.1.9. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/HEAD/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.9
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump github.com/mymmrac/telego from 1.9.0 to 1.10.0 ([#407](https://github.com/sunerpy/pt-tools/issues/407)) ([#407](https://github.com/sunerpy/pt-tools/pull/407))
+  Bumps [github.com/mymmrac/telego](https://github.com/mymmrac/telego) from 1.9.0 to 1.10.0. - [Release notes](https://github.com/mymmrac/telego/releases) - [Commits](https://github.com/mymmrac/telego/compare/v1.9.0...v1.10.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: github.com/mymmrac/telego
+         dependency-version: 1.10.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump github.com/tidwall/gjson from 1.18.0 to 1.19.0 ([#365](https://github.com/sunerpy/pt-tools/issues/365)) ([#365](https://github.com/sunerpy/pt-tools/pull/365))
+  Bumps [github.com/tidwall/gjson](https://github.com/tidwall/gjson) from 1.18.0 to 1.19.0. - [Commits](https://github.com/tidwall/gjson/compare/v1.18.0...v1.19.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: github.com/tidwall/gjson
+         dependency-version: 1.19.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+### Features
+
+- **site**: 增加单站点刷流容量限制
+- SiteSetting 新增 SeedingCapacityGB（0=不限制）- 推送前按下载器实时聚合该站点做种总量，超限拒绝推送 - 获取做种量失败时 fail-closed 拒绝，避免超刷
+- **web**: 站点配置增加刷流容量上限输入
+- SiteConfig 运行时结构、ConfigStore 映射、Web API DTO 透传 SeedingCapacityGB - 站点详情页增加「刷流容量上限 (GB)」输入项，0=不限制
+
+### Styling
+
+- **web**: Oxfmt 格式化站点容量上限提示
+
 ## [0.36.0] - 2026-06-09
 
 ### Features
