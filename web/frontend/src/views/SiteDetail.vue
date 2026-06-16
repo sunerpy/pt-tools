@@ -666,9 +666,7 @@ function toggleEditRssCustomPath() {
             :step="10"
             class="w-full"
             placeholder="0 表示不限制" />
-          <div class="form-tip">
-            该站点做种总容量达到此上限后将停止推送新种子。0 = 不限制。
-          </div>
+          <div class="form-tip">该站点做种总容量达到此上限后将停止推送新种子。0 = 不限制。</div>
         </el-form-item>
       </el-form>
     </el-card>
