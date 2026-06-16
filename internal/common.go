@@ -614,6 +614,24 @@ type rssTaskStats struct {
 	downloadFailed atomic.Int64
 }
 
+func shouldSkipSiteDownload(torrent *models.TorrentInfo, downloadPath, fileBase string, maxRetry int) (bool, string) {
+	if torrent == nil {
+		return false, ""
+	}
+	if torrent.IsPushed != nil && *torrent.IsPushed {
+		return true, "已推送，跳过重新下载"
+	}
+	if maxRetry > 0 && torrent.RetryCount >= maxRetry {
+		return true, fmt.Sprintf("超过最大重试次数 %d", maxRetry)
+	}
+	if torrent.IsDownloaded {
+		if _, statErr := os.Stat(filepath.Join(downloadPath, fileBase+".torrent")); statErr == nil {
+			return true, "已下载且本地文件存在"
+		}
+	}
+	return false, ""
+}
+
 func shouldSkipExistingTorrent(torrent *models.TorrentInfo) bool {
 	if torrent == nil {
 		return false
@@ -885,6 +903,11 @@ func downloadWorkerUnified(
 				}
 				// 文件命名统一为 siteName-torrentID.torrent，避免重复与歧义
 				fileBase := fmt.Sprintf("%s-%s", strings.ToLower(string(siteName)), item.GUID)
+				if skip, reason := shouldSkipSiteDownload(torrent, downloadPath, fileBase, gl.MaxRetry); skip {
+					sLogger().Infof("种子: %s 跳过重新下载 (原因: %s)", title, reason)
+					stats.skipped.Add(1)
+					continue
+				}
 				hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
 				if downloadErr != nil {
 					sLogger().Errorf("%s: 种子下载失败, %v", title, downloadErr)
@@ -1454,6 +1477,10 @@ func downloadWorker[T models.ResType](
 					}
 					// 文件命名统一为 siteName-torrentID.torrent，避免重复与歧义
 					fileBase := fmt.Sprintf("%s-%s", strings.ToLower(string(siteName)), item.GUID)
+					if skip, reason := shouldSkipSiteDownload(torrent, downloadPath, fileBase, gl.MaxRetry); skip {
+						sLogger().Infof("种子: %s 跳过重新下载 (原因: %s)", title, reason)
+						return nil
+					}
 					hash, downloadErr := site.DownloadTorrent(torrentURL, fileBase, downloadPath)
 					if downloadErr != nil {
 						return fmt.Errorf("种子下载失败: %w", downloadErr)

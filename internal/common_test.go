@@ -1518,3 +1518,84 @@ func TestFilterTorrentFilesBySite_FallbackAllWhenNoPrefixMatch(t *testing.T) {
 	require.Equal(t, files[0], filtered[0])
 	require.Equal(t, files[1], filtered[1])
 }
+
+func TestShouldSkipSiteDownload(t *testing.T) {
+	dir := t.TempDir()
+	fileBase := "site-123"
+	existingPath := filepath.Join(dir, fileBase+".torrent")
+	require.NoError(t, os.WriteFile(existingPath, []byte("d4:test4:datae"), 0o644))
+
+	boolPtr := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name       string
+		torrent    *models.TorrentInfo
+		fileBase   string
+		maxRetry   int
+		wantSkip   bool
+		wantReason string
+	}{
+		{
+			name:       "已推送应跳过",
+			torrent:    &models.TorrentInfo{IsPushed: boolPtr(true)},
+			fileBase:   fileBase,
+			maxRetry:   3,
+			wantSkip:   true,
+			wantReason: "已推送，跳过重新下载",
+		},
+		{
+			name:       "超过最大重试次数应跳过",
+			torrent:    &models.TorrentInfo{RetryCount: 3},
+			fileBase:   fileBase,
+			maxRetry:   3,
+			wantSkip:   true,
+			wantReason: "超过最大重试次数 3",
+		},
+		{
+			name:       "已下载且本地文件存在应跳过",
+			torrent:    &models.TorrentInfo{IsDownloaded: true},
+			fileBase:   fileBase,
+			maxRetry:   3,
+			wantSkip:   true,
+			wantReason: "已下载且本地文件存在",
+		},
+		{
+			name:     "已下载但本地文件不存在不跳过",
+			torrent:  &models.TorrentInfo{IsDownloaded: true},
+			fileBase: "missing-file",
+			maxRetry: 3,
+			wantSkip: false,
+		},
+		{
+			name:     "torrent为nil不跳过",
+			torrent:  nil,
+			fileBase: fileBase,
+			maxRetry: 3,
+			wantSkip: false,
+		},
+		{
+			name:     "未下载不跳过",
+			torrent:  &models.TorrentInfo{IsDownloaded: false},
+			fileBase: fileBase,
+			maxRetry: 3,
+			wantSkip: false,
+		},
+		{
+			name:     "maxRetry为0时高重试次数不跳过",
+			torrent:  &models.TorrentInfo{RetryCount: 99},
+			fileBase: fileBase,
+			maxRetry: 0,
+			wantSkip: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, reason := shouldSkipSiteDownload(tt.torrent, dir, tt.fileBase, tt.maxRetry)
+			require.Equal(t, tt.wantSkip, skip)
+			if tt.wantReason != "" {
+				require.Equal(t, tt.wantReason, reason)
+			}
+		})
+	}
+}
