@@ -151,7 +151,7 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 			if e != nil {
 				return e
 			}
-			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, RSS: []models.RSSConfig{}}
+			sc := models.SiteConfig{Enabled: boolPtr(sitem.Enabled), AuthMethod: sitem.AuthMethod, Cookie: cookie, APIKey: sitem.APIKey, APIUrl: sitem.APIUrl, Passkey: sitem.Passkey, UploadLimitKBs: sitem.UploadLimitKBs, DownloadLimitKBs: sitem.DownloadLimitKBs, SeedingCapacityGB: sitem.SeedingCapacityGB, RSS: []models.RSSConfig{}}
 			var rss []models.RSSSubscription
 			if e := tx.Where("site_id = ?", sitem.ID).Find(&rss).Error; e != nil {
 				return e
@@ -574,6 +574,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		row.Passkey = sc.Passkey
 		row.UploadLimitKBs = sc.UploadLimitKBs
 		row.DownloadLimitKBs = sc.DownloadLimitKBs
+		row.SeedingCapacityGB = sc.SeedingCapacityGB
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
@@ -790,7 +791,7 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 		if err != nil {
 			return nil, err
 		}
-		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
+		sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, SeedingCapacityGB: ss.SeedingCapacityGB, RSS: []models.RSSConfig{}}
 		var rss []models.RSSSubscription
 		if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 			return nil, err
@@ -815,7 +816,7 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	if err != nil {
 		return models.SiteConfig{}, err
 	}
-	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, RSS: []models.RSSConfig{}}
+	sc := models.SiteConfig{Enabled: boolPtr(ss.Enabled), AuthMethod: ss.AuthMethod, Cookie: cookie, APIKey: ss.APIKey, APIUrl: ss.APIUrl, Passkey: ss.Passkey, UploadLimitKBs: ss.UploadLimitKBs, DownloadLimitKBs: ss.DownloadLimitKBs, SeedingCapacityGB: ss.SeedingCapacityGB, RSS: []models.RSSConfig{}}
 	var rss []models.RSSSubscription
 	if err := s.db.DB.Where("site_id = ?", ss.ID).Find(&rss).Error; err != nil {
 		return models.SiteConfig{}, err

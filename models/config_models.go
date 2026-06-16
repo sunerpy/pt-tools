@@ -323,15 +323,16 @@ func (r *RSSConfig) GetEffectiveFilterMode(globalSettings *SettingsGlobal) Filte
 }
 
 type SiteConfig struct {
-	Enabled          *bool       `json:"enabled"`
-	AuthMethod       string      `json:"auth_method"`
-	Cookie           string      `json:"cookie"`
-	APIKey           string      `json:"api_key"`
-	APIUrl           string      `json:"api_url"`
-	Passkey          string      `json:"passkey"`
-	UploadLimitKBs   int         `json:"upload_limit_kbs"`
-	DownloadLimitKBs int         `json:"download_limit_kbs"`
-	RSS              []RSSConfig `json:"rss"`
+	Enabled           *bool       `json:"enabled"`
+	AuthMethod        string      `json:"auth_method"`
+	Cookie            string      `json:"cookie"`
+	APIKey            string      `json:"api_key"`
+	APIUrl            string      `json:"api_url"`
+	Passkey           string      `json:"passkey"`
+	UploadLimitKBs    int         `json:"upload_limit_kbs"`
+	DownloadLimitKBs  int         `json:"download_limit_kbs"`
+	SeedingCapacityGB float64     `json:"seeding_capacity_gb"`
+	RSS               []RSSConfig `json:"rss"`
 }
 type Config struct {
 	Global SettingsGlobal           `json:"global"`

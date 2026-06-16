@@ -629,6 +629,7 @@ type SiteConfigResponse struct {
 	Passkey            string             `json:"passkey"`
 	UploadLimitKBs     int                `json:"upload_limit_kbs"`
 	DownloadLimitKBs   int                `json:"download_limit_kbs"`
+	SeedingCapacityGB  float64            `json:"seeding_capacity_gb"`
 	RSS                []models.RSSConfig `json:"rss"`
 	URLs               []string           `json:"urls,omitempty"`
 	WebURL             string             `json:"web_url,omitempty"`
@@ -650,17 +651,18 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 		var sitesToDisable []models.SiteGroup
 		for sg, sc := range sites {
 			resp := SiteConfigResponse{
-				Enabled:          sc.Enabled,
-				AuthMethod:       sc.AuthMethod,
-				Cookie:           "",
-				CookieEncrypted:  "",
-				HasCookie:        strings.TrimSpace(sc.Cookie) != "",
-				APIKey:           sc.APIKey,
-				APIUrl:           sc.APIUrl,
-				Passkey:          sc.Passkey,
-				UploadLimitKBs:   sc.UploadLimitKBs,
-				DownloadLimitKBs: sc.DownloadLimitKBs,
-				RSS:              sc.RSS,
+				Enabled:           sc.Enabled,
+				AuthMethod:        sc.AuthMethod,
+				Cookie:            "",
+				CookieEncrypted:   "",
+				HasCookie:         strings.TrimSpace(sc.Cookie) != "",
+				APIKey:            sc.APIKey,
+				APIUrl:            sc.APIUrl,
+				Passkey:           sc.Passkey,
+				UploadLimitKBs:    sc.UploadLimitKBs,
+				DownloadLimitKBs:  sc.DownloadLimitKBs,
+				SeedingCapacityGB: sc.SeedingCapacityGB,
+				RSS:               sc.RSS,
 			}
 			if def, ok := defRegistry.Get(string(sg)); ok {
 				resp.URLs = def.URLs
@@ -775,6 +777,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			Passkey:            sc.Passkey,
 			UploadLimitKBs:     sc.UploadLimitKBs,
 			DownloadLimitKBs:   sc.DownloadLimitKBs,
+			SeedingCapacityGB:  sc.SeedingCapacityGB,
 			RSS:                sc.RSS,
 		}
 		defRegistry := v2.GetDefinitionRegistry()
