@@ -711,7 +711,7 @@ func downloadWorkerUnified(
 			if len(item.Enclosures) > 0 {
 				torrentURL = item.Enclosures[0].URL
 			} else {
-				torrentURL = ""
+				torrentURL = item.Link
 			}
 			title := item.Title
 			// 查询数据库记录
@@ -1169,17 +1169,23 @@ func FetchAndDownloadFreeRSSUnified(ctx context.Context, m UnifiedPTSite, rssCfg
 		)
 	}
 
+	var discarded int
 	for _, item := range feed.Items {
-		if len(item.Enclosures) > 0 {
-			select {
-			case <-ctxWithTimeout.Done():
-				sLogger().Info("任务被取消")
-				close(torrentChan)
-				wg.Wait()
-				return ctxWithTimeout.Err()
-			case torrentChan <- item:
-			}
+		if len(item.Enclosures) == 0 && strings.TrimSpace(item.Link) == "" {
+			discarded++
+			continue
 		}
+		select {
+		case <-ctxWithTimeout.Done():
+			sLogger().Info("任务被取消")
+			close(torrentChan)
+			wg.Wait()
+			return ctxWithTimeout.Err()
+		case torrentChan <- item:
+		}
+	}
+	if discarded > 0 {
+		sLogger().Warnf("[RSS] 站点=%s, RSS=%s, 丢弃 %d 个无下载链接条目", siteName, rssCfg.Name, discarded)
 	}
 	close(torrentChan)
 	wg.Wait()
@@ -1278,17 +1284,23 @@ func FetchAndDownloadFreeRSS[T models.ResType](ctx context.Context, siteName mod
 		)
 	}
 	// 将种子发送到下载队列
+	var discarded int
 	for _, item := range feed.Items {
-		if len(item.Enclosures) > 0 {
-			select {
-			case <-ctxWithTimeout.Done():
-				sLogger().Info("任务被取消")
-				close(torrentChan)
-				wg.Wait()
-				return ctxWithTimeout.Err()
-			case torrentChan <- item:
-			}
+		if len(item.Enclosures) == 0 && strings.TrimSpace(item.Link) == "" {
+			discarded++
+			continue
 		}
+		select {
+		case <-ctxWithTimeout.Done():
+			sLogger().Info("任务被取消")
+			close(torrentChan)
+			wg.Wait()
+			return ctxWithTimeout.Err()
+		case torrentChan <- item:
+		}
+	}
+	if discarded > 0 {
+		sLogger().Warnf("[RSS] 站点=%s, RSS=%s, 丢弃 %d 个无下载链接条目", siteName, rssCfg.Name, discarded)
 	}
 	close(torrentChan)
 	wg.Wait()
@@ -1343,7 +1355,7 @@ func downloadWorker[T models.ResType](
 			if len(item.Enclosures) > 0 {
 				torrentURL = item.Enclosures[0].URL
 			} else {
-				torrentURL = ""
+				torrentURL = item.Link
 			}
 			title := item.Title
 			// 查询数据库记录
