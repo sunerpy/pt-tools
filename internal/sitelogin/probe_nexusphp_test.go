@@ -162,14 +162,87 @@ func TestProbeNexusPHPCloudflareChallenge(t *testing.T) {
 }
 
 func TestProbeNexusPHPUnknown(t *testing.T) {
-	clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
-	site := &fakeSite{err: errors.New("weird")}
+	t.Run("unknown error preserves original message", func(t *testing.T) {
+		clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+		site := &fakeSite{err: errors.New("weird")}
 
-	res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
+		res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
 
-	require.NoError(t, err)
-	require.NotNil(t, res)
-	assert.Equal(t, UNKNOWN, res.Status)
-	require.Error(t, res.RawError)
-	assert.Contains(t, res.RawError.Error(), "weird")
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, UNKNOWN, res.Status)
+		require.Error(t, res.RawError)
+		assert.Contains(t, res.RawError.Error(), "weird")
+		assert.Equal(t, "weird", res.Diagnostic)
+	})
+
+	t.Run("401 unauthorized error suggests cookie refresh", func(t *testing.T) {
+		clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+		site := &fakeSite{err: errors.New("HTTP 401 Unauthorized")}
+
+		res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
+
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, UNKNOWN, res.Status)
+		require.Error(t, res.RawError)
+		assert.Contains(t, res.Diagnostic, "Cookie")
+		assert.Contains(t, res.Diagnostic, "未配置或已失效")
+	})
+
+	t.Run("403 forbidden error suggests cookie refresh", func(t *testing.T) {
+		clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+		site := &fakeSite{err: errors.New("HTTP 403 Forbidden")}
+
+		res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
+
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, UNKNOWN, res.Status)
+		require.Error(t, res.RawError)
+		assert.Contains(t, res.Diagnostic, "Cookie")
+		assert.Contains(t, res.Diagnostic, "未配置或已失效")
+	})
+
+	t.Run("cookie in error message suggests refresh", func(t *testing.T) {
+		clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+		site := &fakeSite{err: errors.New("invalid cookie format")}
+
+		res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
+
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, UNKNOWN, res.Status)
+		require.Error(t, res.RawError)
+		assert.Contains(t, res.Diagnostic, "Cookie")
+		assert.Contains(t, res.Diagnostic, "未配置或已失效")
+	})
+
+	t.Run("unauthorized keyword suggests cookie refresh", func(t *testing.T) {
+		clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+		site := &fakeSite{err: errors.New("Request unauthorized")}
+
+		res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
+
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, UNKNOWN, res.Status)
+		require.Error(t, res.RawError)
+		assert.Contains(t, res.Diagnostic, "Cookie")
+		assert.Contains(t, res.Diagnostic, "未配置或已失效")
+	})
+
+	t.Run("login keyword suggests cookie refresh", func(t *testing.T) {
+		clock := newProbeClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+		site := &fakeSite{err: errors.New("please login first")}
+
+		res, err := ProbeNexusPHP(context.Background(), site, clock, ProbeSourceHTTPCookie)
+
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, UNKNOWN, res.Status)
+		require.Error(t, res.RawError)
+		assert.Contains(t, res.Diagnostic, "Cookie")
+		assert.Contains(t, res.Diagnostic, "未配置或已失效")
+	})
 }
