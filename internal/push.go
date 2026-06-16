@@ -128,7 +128,8 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	// gate           = effective_free - thisTorrentSize >= threshold
 	// 用全局互斥锁串行化整个 check + Reserve + push 临界区。
 	var pushTorrentSize int64
-	if glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
+	diskProtectOn := glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0
+	if diskProtectOn {
 		mu := PushMutex()
 		mu.Lock()
 		defer mu.Unlock()
@@ -176,6 +177,48 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		}
 		if pushTorrentSize > 0 {
 			budget.Reserve(pushTorrentSize)
+		}
+	}
+
+	// 站点容量闸门（Issue #405）：超过该站点 SeedingCapacityGB 上限则拒绝推送。
+	// 接在 disk-protect 之后、AddTorrentFileEx 之前；disk-protect 关闭时本闸门自行加锁。
+	if capGB := siteSeedingCapacityGB(req.SiteID); capGB > 0 {
+		if !diskProtectOn {
+			mu := PushMutex()
+			mu.Lock()
+			defer mu.Unlock()
+		}
+		if pushTorrentSize == 0 {
+			if size, sizeErr := qbit.ComputeTorrentSize(req.TorrentData); sizeErr == nil {
+				pushTorrentSize = size
+			}
+		}
+		used, usedErr := getSiteSeedingSizeBytes(ctx, req.SiteID, dl)
+		if usedErr != nil {
+			sLogger().Warnf("[站点容量] %s: 获取站点做种总量失败，容量限制启用故拒绝推送: %v", req.SiteID, usedErr)
+			if pushTorrentSize > 0 {
+				GetDiskBudget().Release(pushTorrentSize)
+			}
+			return &PushTorrentResult{
+				Success:     false,
+				TorrentHash: torrentHash,
+				Message:     fmt.Sprintf("无法读取站点做种总量，已拒绝推送: %v", usedErr),
+			}, nil
+		}
+		capBytes := int64(capGB * gibiByte)
+		if used+pushTorrentSize > capBytes {
+			usedGB := float64(used) / gibiByte
+			tGB := float64(pushTorrentSize) / gibiByte
+			sLogger().Warnf("[站点容量] %s: 超过容量上限 (当前做种 %.1f GB + 本次种子 %.1f GB > 上限 %.1f GB)，跳过推送: id=%s",
+				req.SiteID, usedGB, tGB, capGB, req.TorrentID)
+			if pushTorrentSize > 0 {
+				GetDiskBudget().Release(pushTorrentSize)
+			}
+			return &PushTorrentResult{
+				Success:     false,
+				TorrentHash: torrentHash,
+				Message:     fmt.Sprintf("站点容量已满 (当前 %.1f GB + 种子 %.1f GB > %.1f GB)", usedGB, tGB, capGB),
+			}, nil
 		}
 	}
 
