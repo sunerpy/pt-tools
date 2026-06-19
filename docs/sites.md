@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **45** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **48** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（41）
+### NexusPHP 系列（44）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
@@ -47,6 +47,9 @@
 | **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
 | **PTLGS**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptlgs.org，issue #377）                                  |
 | **ZmPT**              | Cookie   | RSS、搜索、用户信息           | ✅       | 织梦（zmpt.cc，电力值=魔力值）                                   |
+| **PandaPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（pandapt.net，info_block 取上传/下载/魔力，issue #416）   |
+| **PTFans**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptfans.cc，含 H&R，info_block 取数据，issue #417）       |
+| **KamePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（kamept.com，info_block 含做种积分，issue #418）          |
 
 ### 其他架构（4）
 
