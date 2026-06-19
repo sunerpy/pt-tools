@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] - 2026-06-19
+
+### Documentation
+
+- **site**: 更新站点列表与浏览器扩展站点常量
+  docs/sites.md 新增 pandapt/ptfans/kamept 三行并更新站点总数(45->48)与
+  NexusPHP 分类计数(41->44)；浏览器扩展 KNOWN_SITES 同步新增三站(Cookie 鉴权)。
+
+### Features
+
+- **site**: 新增 pandapt/ptfans/kamept 三个 NexusPHP 站点适配
+  新增 pandapt.net([#416](https://github.com/sunerpy/pt-tools/issues/416))、ptfans.cc([#417](https://github.com/sunerpy/pt-tools/issues/417))、kamept.com([#418](https://github.com/sunerpy/pt-tools/issues/418)) 三个 NexusPHP
+  站点定义及 fixture 测试。三站均从 #info_block 解析上传/下载/分享率/魔力值/
+  做种/下载数据(区别于传输行模式)，并补充 lastAccessAt 以支持保号探测。
+  ptfans 启用 H&R(168 小时)，kamept 额外解析做种积分。
+
+### Testing
+
+- **site**: 为三个新站点补充真实 HTML 校验用例
+  将 pandapt/ptfans/kamept 加入 TestRealHTML_UserInfo/Search/Detail 用例表，
+  针对采集到的真实页面 HTML 验证搜索/详情/用户信息字段解析正确。
+
 ## [0.37.0] - 2026-06-16
 
 ### Bug Fixes
