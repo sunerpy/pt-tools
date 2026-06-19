@@ -73,6 +73,24 @@ func TestRealHTML_UserInfo(t *testing.T) {
 			indexFields:  []string{"id", "name", "bonus", "seeding", "leeching"},
 			detailFields: []string{"uploaded", "downloaded", "ratio", "joinTime"},
 		},
+		{
+			siteID:       "pandapt",
+			zipDir:       "/tmp/site-zips/pandapt",
+			indexFields:  []string{"id", "name", "bonus", "ratio", "uploaded", "downloaded", "seeding", "leeching"},
+			detailFields: []string{"levelName", "joinTime", "lastAccessAt"},
+		},
+		{
+			siteID:       "ptfans",
+			zipDir:       "/tmp/site-zips/ptfans",
+			indexFields:  []string{"id", "name", "bonus", "ratio", "uploaded", "downloaded", "seeding"},
+			detailFields: []string{"levelName", "joinTime", "lastAccessAt"},
+		},
+		{
+			siteID:       "kamept",
+			zipDir:       "/tmp/site-zips/kamept",
+			indexFields:  []string{"id", "name", "bonus", "seedingBonus", "ratio", "uploaded", "downloaded", "seeding"},
+			detailFields: []string{"levelName", "joinTime", "lastAccessAt"},
+		},
 	}
 
 	for _, tc := range sites {
@@ -152,6 +170,9 @@ func TestRealHTML_Search(t *testing.T) {
 		{"1ptba", "/tmp/site-zips/1ptba"},
 		{"ourbits", "/tmp/site-zips/ourbits"},
 		{"mua", "/tmp/site-zips/mua"},
+		{"pandapt", "/tmp/site-zips/pandapt"},
+		{"ptfans", "/tmp/site-zips/ptfans"},
+		{"kamept", "/tmp/site-zips/kamept"},
 	}
 
 	for _, tc := range sites {
@@ -205,6 +226,9 @@ func TestRealHTML_Detail(t *testing.T) {
 		{"1ptba", "/tmp/site-zips/1ptba"},
 		{"ourbits", "/tmp/site-zips/ourbits"},
 		{"mua", "/tmp/site-zips/mua"},
+		{"pandapt", "/tmp/site-zips/pandapt"},
+		{"ptfans", "/tmp/site-zips/ptfans"},
+		{"kamept", "/tmp/site-zips/kamept"},
 	}
 
 	for _, tc := range sites {
