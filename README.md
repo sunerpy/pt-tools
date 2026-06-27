@@ -182,6 +182,12 @@ services:
     volumes:
       - ./data:/app/.pt-tools
     restart: unless-stopped
+    # 限制容器日志大小，避免长期运行膨胀到数 GB（见下方「Docker 用户注意」）
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 ```
 
 > 如需通过代理访问站点，可设置环境变量：`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`。
@@ -196,6 +202,43 @@ services:
 > - [examples/docker-run.md](examples/docker-run.md) - Docker 单容器运行详解
 > - [examples/docker-compose.yml](examples/docker-compose.yml) - Docker Compose 编排
 > - [examples/binary-run.md](examples/binary-run.md) - 二进制运行和 systemd 配置
+
+### ⚙️ Docker 用户注意（日志膨胀）
+
+容器日志（`docker logs`）默认由 Docker 的 `json-file` 驱动管理，**默认没有大小限制**，长期运行可能增长到数 GB。pt-tools 自身的日志文件（`~/.pt-tools/logs/`）已自动滚动切割，但容器 stdout 日志需由 Docker 侧限制。建议开启日志轮转：
+
+- **Docker Compose**（推荐，所有平台通用）：在服务下添加 `logging` 块（见上方示例）
+
+  ```yaml
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  ```
+
+- **`docker run`**：追加参数
+
+  ```bash
+  --log-opt max-size=10m --log-opt max-file=3
+  ```
+
+- **飞牛 NAS（fnOS）/ 群晖 DSM Container Manager / Unraid / Portainer**：
+
+  图形界面创建的容器，多数版本**未开放日志驱动配置**。建议改用 **Docker Compose** 部署并按上述方式配置 `logging`；若已用 GUI 创建，可 SSH 到 NAS 改用 Compose 重建容器。
+
+- **Linux 全局默认**（影响此后新建的所有容器）：编辑 `/etc/docker/daemon.json`
+
+  ```json
+  {
+    "log-driver": "json-file",
+    "log-opts": { "max-size": "10m", "max-file": "3" }
+  }
+  ```
+
+  然后 `sudo systemctl restart docker`。⚠️ 仅对**重新创建**的容器生效，已有容器需重建。
+
+> 完整日志说明（应用日志滚动、环境变量 `PT_TOOLS_LOG_LEVEL` / `PT_TOOLS_LOG_CONSOLE`）见 [docs/configuration.md](docs/configuration.md#日志管理)。
 
 ### 二进制运行
 

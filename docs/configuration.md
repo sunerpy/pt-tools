@@ -263,7 +263,21 @@ pt-tools 的日志由两部分组成，需分别管理：
 
 控制台输出默认开启（`PT_TOOLS_LOG_CONSOLE=true`），以便在飞牛/群晖等 NAS 的容器控制台直接查看日志；**因此务必**为容器配置日志上限，否则 stdout 会被 Docker 无限累积。如确实不需要控制台日志，可设 `PT_TOOLS_LOG_CONSOLE=false` 关闭。
 
-`docker run`：
+按部署方式选择对应配置：
+
+**Docker Compose（推荐，所有平台通用）**：在服务下添加 `logging` 块。
+
+```yaml
+services:
+  pt-tools:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+**`docker run`**：追加参数。
 
 ```bash
 docker run -d \
@@ -274,17 +288,19 @@ docker run -d \
   sunerpy/pt-tools:latest
 ```
 
-`docker-compose.yml`：
+**飞牛 NAS（fnOS）/ 群晖 DSM Container Manager / Unraid / Portainer**：
+图形界面创建的容器，多数版本**未开放日志驱动（log driver）配置**。推荐改用 **Docker Compose** 部署并按上述方式配置 `logging`；若已用 GUI 创建，可 SSH 到 NAS 改用 Compose 重建容器（数据目录已持久化，不会丢失）。不建议为单容器去改 `daemon.json`。
 
-```yaml
-services:
-  pt-tools:
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+**Linux 全局默认**（影响此后新建的所有容器）：编辑 `/etc/docker/daemon.json`。
+
+```json
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
 ```
+
+然后执行 `sudo systemctl restart docker`。⚠️ 该配置**仅对重新创建的容器生效**，已存在的容器需重建后才会应用。
 
 清理已堆积的旧容器日志：`docker logs` 无法直接清空，可重建容器（`docker rm` 后重新 `run`，数据目录已持久化不会丢失）或截断对应的 `*-json.log` 文件。
 
