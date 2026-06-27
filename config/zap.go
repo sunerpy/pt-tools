@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -23,7 +27,27 @@ var DefaultZapConfig = Zap{
 	ShowLine:      false,
 	EncodeLevel:   "CapitalColorLevelEncoder",
 	StacktraceKey: "",
-	LogInConsole:  true,
+	// 默认输出到控制台，便于通过 docker logs / NAS(飞牛/群晖等) 控制台查看日志。
+	// 容器日志膨胀（如 8GB）的根因是 Docker json-file 驱动默认无上限，应通过
+	// --log-opt max-size 限制（见 docs/configuration.md）；如需彻底关闭控制台
+	// 输出可设 PT_TOOLS_LOG_CONSOLE=false。
+	LogInConsole: true,
+}
+
+// ApplyEnvOverrides 在日志器构建前从环境变量读取可在 DB 就绪前生效的配置
+// （级别与是否输出控制台）。DB 中的滚动/保留配置在 InitRuntime 中二次重建时再应用。
+func (z *Zap) ApplyEnvOverrides() {
+	if v := strings.TrimSpace(os.Getenv("PT_TOOLS_LOG_LEVEL")); v != "" {
+		var lvl zapcore.Level
+		if err := lvl.UnmarshalText([]byte(v)); err == nil {
+			z.Level = v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("PT_TOOLS_LOG_CONSOLE")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			z.LogInConsole = b
+		}
+	}
 }
 
 // AtomicLogLevel 全局动态日志级别，用于运行时调整
@@ -181,6 +205,62 @@ func SetLogLevel(level string) error {
 		return fmt.Errorf("无效的日志级别: %s", level)
 	}
 	AtomicLogLevel.SetLevel(zapLevel)
+	return nil
+}
+
+// PruneOldLogs 在启动时清理日志目录中超出保留策略的滚动备份文件。
+// lumberjack 仅在发生「滚动」时才执行清理；若进程频繁重启且单个日志流尚未达到
+// MaxSize，旧的带时间戳/压缩备份可能永久滞留。本函数做一次性补充清理：
+// 对每个基础日志名（all/debug/info/error）的备份按时间倒序保留 MaxBackups 个，
+// 并删除超过 MaxAge 天的备份。base 文件（如 all.log）本身永不删除。
+func (z *Zap) PruneOldLogs() error {
+	homeDir, _ := os.UserHomeDir()
+	zapPath := filepath.Join(homeDir, models.WorkDir, z.Directory)
+	entries, err := os.ReadDir(zapPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("读取日志目录失败: %w", err)
+	}
+
+	type backup struct {
+		name string
+		mod  time.Time
+	}
+	groups := map[string][]backup{}
+	for _, base := range []string{"all", "debug", "info", "error"} {
+		prefix := base + "-"
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			if !strings.HasSuffix(name, ".log") && !strings.HasSuffix(name, ".log.gz") {
+				continue
+			}
+			info, ierr := e.Info()
+			if ierr != nil {
+				continue
+			}
+			groups[base] = append(groups[base], backup{name: name, mod: info.ModTime()})
+		}
+	}
+
+	cutoff := time.Now().Add(-time.Duration(z.MaxAge) * 24 * time.Hour)
+	for _, list := range groups {
+		sort.Slice(list, func(i, j int) bool { return list[i].mod.After(list[j].mod) })
+		for idx, b := range list {
+			tooMany := z.MaxBackups > 0 && idx >= z.MaxBackups
+			tooOld := z.MaxAge > 0 && b.mod.Before(cutoff)
+			if tooMany || tooOld {
+				_ = os.Remove(filepath.Join(zapPath, b.name))
+			}
+		}
+	}
 	return nil
 }
 

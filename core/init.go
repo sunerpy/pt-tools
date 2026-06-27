@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -26,7 +27,12 @@ func InitRuntime() (*zap.Logger, error) {
 	var initErr error
 	once.Do(func() {
 		var err error
-		logger, err := config.DefaultZapConfig.InitLogger()
+		zapCfg := config.DefaultZapConfig
+		zapCfg.ApplyEnvOverrides()
+		if pruneErr := zapCfg.PruneOldLogs(); pruneErr != nil {
+			fmt.Fprintf(os.Stderr, "清理历史日志失败: %v\n", pruneErr)
+		}
+		logger, err := zapCfg.InitLogger()
 		if err != nil {
 			initErr = fmt.Errorf("初始化日志失败: %w", err)
 			return
