@@ -289,7 +289,7 @@ docker run -d \
 ```
 
 **飞牛 NAS（fnOS）/ 群晖 DSM Container Manager / Unraid / Portainer**：
-图形界面创建的容器，多数版本**未开放日志驱动（log driver）配置**。推荐改用 **Docker Compose** 部署并按上述方式配置 `logging`；若已用 GUI 创建，可 SSH 到 NAS 改用 Compose 重建容器（数据目录已持久化，不会丢失）。不建议为单容器去改 `daemon.json`。
+图形界面创建的容器，多数版本**未开放日志驱动（log driver）配置**。两种处理方式：(1) **长期方案（推荐）**改用 **Docker Compose** 部署并按上述方式配置 `logging`（GUI 已创建的可 SSH 到 NAS 改用 Compose 重建容器，数据目录已持久化不会丢失）；(2) **即时补救**手动清理已堆积的容器日志（见下方「清理已堆积的旧容器日志」）。不建议为单容器去改 `daemon.json`。
 
 **Linux 全局默认**（影响此后新建的所有容器）：编辑 `/etc/docker/daemon.json`。
 
@@ -302,7 +302,15 @@ docker run -d \
 
 然后执行 `sudo systemctl restart docker`。⚠️ 该配置**仅对重新创建的容器生效**，已存在的容器需重建后才会应用。
 
-清理已堆积的旧容器日志：`docker logs` 无法直接清空，可重建容器（`docker rm` 后重新 `run`，数据目录已持久化不会丢失）或截断对应的 `*-json.log` 文件。
+**清理已堆积的旧容器日志**：`docker logs` 无法直接清空，有两种方式：
+
+- 截断日志文件（不影响容器运行）：
+
+  ```bash
+  truncate -s 0 $(docker inspect --format='{{.LogPath}}' pt-tools)
+  ```
+
+- 或重建容器（`docker rm` 后重新创建，数据目录已持久化不会丢失）。
 
 ### 数据备份
 
