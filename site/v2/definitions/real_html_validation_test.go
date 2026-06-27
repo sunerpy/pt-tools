@@ -91,6 +91,26 @@ func TestRealHTML_UserInfo(t *testing.T) {
 			indexFields:  []string{"id", "name", "bonus", "seedingBonus", "ratio", "uploaded", "downloaded", "seeding"},
 			detailFields: []string{"levelName", "joinTime", "lastAccessAt"},
 		},
+		{
+			siteID:       "ptchdbits",
+			zipDir:       "/tmp/site-zips/ptchdbits",
+			indexFields:  []string{"id", "name", "bonus", "seedingBonus", "ratio", "uploaded", "downloaded", "seeding"},
+			detailFields: []string{"levelName", "joinTime", "lastAccessAt"},
+		},
+		{
+			siteID:       "pterclub",
+			zipDir:       "/tmp/site-zips/pterclub",
+			indexFields:  []string{"id", "name", "bonus", "seedingBonus", "ratio", "uploaded", "downloaded", "seeding"},
+			detailFields: []string{"levelName", "joinTime", "lastAccessAt"},
+		},
+		{
+			// pthome userinfo capture was privacy-denied for the target user, so only the
+			// viewer's own #info_block fields are present (no join/lastAccess/level rows).
+			siteID:       "pthome",
+			zipDir:       "/tmp/site-zips/pthome",
+			indexFields:  []string{"id", "name", "bonus", "seedingBonus", "ratio", "uploaded", "downloaded", "seeding"},
+			detailFields: []string{},
+		},
 	}
 
 	for _, tc := range sites {
@@ -173,6 +193,9 @@ func TestRealHTML_Search(t *testing.T) {
 		{"pandapt", "/tmp/site-zips/pandapt"},
 		{"ptfans", "/tmp/site-zips/ptfans"},
 		{"kamept", "/tmp/site-zips/kamept"},
+		{"ptchdbits", "/tmp/site-zips/ptchdbits"},
+		{"pterclub", "/tmp/site-zips/pterclub"},
+		{"pthome", "/tmp/site-zips/pthome"},
 	}
 
 	for _, tc := range sites {
@@ -229,6 +252,9 @@ func TestRealHTML_Detail(t *testing.T) {
 		{"pandapt", "/tmp/site-zips/pandapt"},
 		{"ptfans", "/tmp/site-zips/ptfans"},
 		{"kamept", "/tmp/site-zips/kamept"},
+		{"ptchdbits", "/tmp/site-zips/ptchdbits"},
+		{"pterclub", "/tmp/site-zips/pterclub"},
+		{"pthome", "/tmp/site-zips/pthome"},
 	}
 
 	for _, tc := range sites {

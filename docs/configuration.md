@@ -14,6 +14,7 @@
   - [下载目录配置](#下载目录配置)
 - [RSS 订阅配置](#rss-订阅配置)
 - [数据持久化](#数据持久化)
+- [日志管理](#日志管理)
 - [配置示例](#配置示例)
 
 ## 环境变量
@@ -228,6 +229,64 @@ pt-tools 的所有数据存储在数据目录中：
 | **数据库**   | `torrents.db`    | `torrents.db` | SQLite 数据库文件    |
 | **种子文件** | `downloads/`     | `downloads/`  | 下载的 .torrent 文件 |
 | **日志文件** | `logs/`          | `logs/`       | 运行日志             |
+
+## 日志管理
+
+pt-tools 的日志由两部分组成，需分别管理：
+
+### 1. 应用日志文件（`~/.pt-tools/logs/`）
+
+应用通过 [lumberjack](https://github.com/natefinch/lumberjack) 自动滚动切割，无需手动清理：
+
+| 项目       | 默认值 | 说明                           |
+| ---------- | ------ | ------------------------------ |
+| 单文件上限 | 10 MB  | 超过后自动切割为带时间戳的备份 |
+| 保留天数   | 30 天  | 超过天数的备份在下次切割时删除 |
+| 保留备份数 | 10 个  | 每个日志流最多保留 10 个旧备份 |
+| 压缩       | 开启   | 旧备份以 gzip 压缩存储         |
+
+日志按级别分文件：`all.log`、`info.log`、`error.log`、`debug.log`。四个文件合计上限约 440 MB，不会无限增长。
+
+> 启动时会额外做一次清理，删除超出保留策略的历史备份（针对频繁重启、单文件未达切割阈值导致旧备份滞留的场景）。
+
+可通过环境变量调整启动期行为：
+
+| 环境变量               | 默认值 | 说明                                                                                                                   |
+| ---------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `PT_TOOLS_LOG_LEVEL`   | `info` | 日志级别：`debug`/`info`/`warn`/`error`                                                                                |
+| `PT_TOOLS_LOG_CONSOLE` | `true` | 是否同时输出到控制台（stdout）。默认开启，便于通过 `docker logs` / NAS 控制台查看；设为 `false` 可彻底关闭 stdout 输出 |
+
+### 2. 容器 stdout 日志（Docker 用户必读）
+
+> [!WARNING]
+> **Docker 日志膨胀**：应用日志会同时写到 stdout（便于 `docker logs` / NAS 控制台查看），而 Docker 的 `json-file` 日志驱动**默认无大小上限**，长期运行可能累积到数 GB（曾出现 8GB）。这部分日志位于 `/var/lib/docker/containers/<id>/<id>-json.log`，**不受应用 lumberjack 控制**，必须由 Docker 侧限制。
+
+控制台输出默认开启（`PT_TOOLS_LOG_CONSOLE=true`），以便在飞牛/群晖等 NAS 的容器控制台直接查看日志；**因此务必**为容器配置日志上限，否则 stdout 会被 Docker 无限累积。如确实不需要控制台日志，可设 `PT_TOOLS_LOG_CONSOLE=false` 关闭。
+
+`docker run`：
+
+```bash
+docker run -d \
+  --name pt-tools \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  ... \
+  sunerpy/pt-tools:latest
+```
+
+`docker-compose.yml`：
+
+```yaml
+services:
+  pt-tools:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+清理已堆积的旧容器日志：`docker logs` 无法直接清空，可重建容器（`docker rm` 后重新 `run`，数据目录已持久化不会丢失）或截断对应的 `*-json.log` 文件。
 
 ### 数据备份
 

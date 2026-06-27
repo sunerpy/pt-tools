@@ -1,0 +1,186 @@
+package definitions
+
+import (
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+)
+
+// PTHomeDefinition is the site definition for PTHome (pthome.net, 铂金家).
+// Standard NexusPHP site; user stats live in the #info_block div present on both
+// index.php and userdetails.php. Uses full-width colons (：) in info_block, and the
+// torrents table carries the "torrents torrents-table" class (matched by table.torrents).
+var PTHomeDefinition = &v2.SiteDefinition{
+	ID:             "pthome",
+	Name:           "PTHome",
+	Aka:            []string{"铂金家", "PT之家"},
+	Description:    "综合性 PT 站点",
+	Schema:         v2.SchemaNexusPHP,
+	URLs:           []string{"https://pthome.net/"},
+	FaviconURL:     "https://pthome.net/favicon.ico",
+	AuthMethod:     v2.AuthMethodCookie,
+	TimezoneOffset: "+0800",
+	RateLimit:      0.5,
+	RateBurst:      2,
+	UserInfo: &v2.UserInfoConfig{
+		PickLast:     []string{"id"},
+		RequestDelay: 500,
+		Process: []v2.UserInfoProcess{
+			{
+				RequestConfig: v2.RequestConfig{URL: "/index.php", ResponseType: "document"},
+				Fields:        []string{"id", "name", "seeding", "leeching", "bonus", "seedingBonus", "uploaded", "downloaded", "ratio"},
+			},
+			{
+				RequestConfig: v2.RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
+				Assertion:     map[string]string{"id": "params.id"},
+				Fields:        []string{"levelName", "joinTime", "lastAccessAt"},
+			},
+		},
+		Selectors: map[string]v2.FieldSelector{
+			"id": {
+				Selector: []string{
+					"#info_block a[href*='userdetails.php'][class*='Name']",
+					"#info_block a[href*='userdetails.php']",
+					"a[href*='userdetails.php']",
+				},
+				Attr:    "href",
+				Filters: []v2.Filter{{Name: "querystring", Args: []any{"id"}}},
+			},
+			"name": {
+				Selector: []string{
+					"#info_block a[href*='userdetails.php'][class*='Name'] b",
+					"#info_block a[href*='userdetails.php'][class*='Name']",
+					"#info_block a[href*='userdetails.php']",
+				},
+			},
+			"uploaded": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`上传量[:：]\s*</font>\s*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "parseSize"},
+				},
+			},
+			"downloaded": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`下载量[:：]\s*</font>\s*([\d.,]+\s*[KMGTP]?i?B)`}},
+					{Name: "parseSize"},
+				},
+			},
+			"ratio": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`分享率[:：]\s*</font>\s*(?:<font[^>]*>)?([\d.,]+|∞|Inf)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			// 魔力值 </font>[使用]: 1,986,609.6&nbsp;(签到已得20) — capture stops at the number before &nbsp;
+			"bonus": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`魔力值\s*</font>\s*\[[^\]]*\]\s*[:：]\s*([\d.,]+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			// 做种积分：</font>...</a>2,232,801.6 (full-width colon, value after the closing </a>)
+			"seedingBonus": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`做种积分\s*[:：]\s*</font>\s*(?:</a>)?\s*([\d.,]+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			"seeding": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`class="arrowup"[^>]*/>\s*(\d+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			"leeching": {
+				Selector: []string{"#info_block"},
+				Attr:     "html",
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`class="arrowdown"[^>]*/>\s*(\d+)`}},
+					{Name: "parseNumber"},
+				},
+			},
+			"levelName": {
+				Selector: []string{
+					"td.rowhead:contains('等级') + td img",
+					"td.rowhead:contains('等級') + td img",
+					"td.rowhead:contains('等级') + td",
+					"td.rowhead:contains('等級') + td",
+				},
+				Attr: "title",
+			},
+			"joinTime": {
+				Selector: []string{
+					"td.rowhead:contains('加入日期') + td",
+					"td.rowhead:contains('加入時間') + td",
+					"td.rowhead:contains('Join') + td",
+				},
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+					{Name: "parseTime"},
+				},
+			},
+			// 保号 probe depends on lastAccessAt; fallback labels guard against drift
+			"lastAccessAt": {
+				Selector: []string{
+					"td.rowhead:contains('最近动向') + td",
+					"td.rowhead:contains('最近動向') + td",
+					"td.rowhead:contains('最近活动') + td",
+					"td.rowhead:contains('上次访问') + td",
+					"td.rowhead:contains('上次訪問') + td",
+					"td.rowhead:contains('Last access') + td",
+				},
+				Filters: []v2.Filter{
+					{Name: "regex", Args: []any{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+					{Name: "parseTime"},
+				},
+			},
+		},
+	},
+	Selectors: &v2.SiteSelectors{
+		TableRows:          "table.torrents > tbody > tr:has(table.torrentname), table.torrents > tr:has(table.torrentname)",
+		Title:              "table.torrentname a[href*='details.php']",
+		TitleLink:          "table.torrentname a[href*='details.php']",
+		Subtitle:           "table.torrentname td.embedded > span:last-of-type, table.torrentname td.embedded > span",
+		Size:               "td.rowfollow:nth-child(5)",
+		Seeders:            "td.rowfollow:nth-child(6)",
+		Leechers:           "td.rowfollow:nth-child(7)",
+		Snatched:           "td.rowfollow:nth-child(8)",
+		DiscountIcon:       "img.pro_free, img.pro_free2up, img.pro_2up, img.pro_50pctdown, img.pro_50pctdown2up, img.pro_30pctdown",
+		Category:           "td.rowfollow:nth-child(1) img[alt]",
+		UploadTime:         "td.rowfollow:nth-child(4) span[title]",
+		DetailDownloadLink: "td.rowhead:contains('下载') + td a[href*='download.php']",
+		DetailSubtitle:     "td.rowhead:contains('副标题') + td",
+	},
+	DetailParser: &v2.DetailParserConfig{
+		TimeLayout: "2006-01-02 15:04:05",
+		DiscountMapping: map[string]v2.DiscountLevel{
+			"free":          v2.DiscountFree,
+			"twoup":         v2.Discount2xUp,
+			"twoupfree":     v2.Discount2xFree,
+			"thirtypercent": v2.DiscountPercent30,
+			"halfdown":      v2.DiscountPercent50,
+			"twouphalfdown": v2.Discount2x50,
+		},
+		HRKeywords:       []string{"hitandrun", "hit_run.gif", "Hit and Run", "Hit & Run"},
+		TitleSelector:    "input[name='torrent_name']",
+		IDSelector:       "input[name='detail_torrent_id']",
+		DiscountSelector: "h1 font.free, h1 font[class]",
+		EndTimeSelector:  "h1 span[title]",
+		SizeSelector:     "td.rowhead:contains('基本信息')",
+		SizeRegex:        `大小[：:]\s*([\d.]+)\s*(GB|MB|KB|TB)`,
+	},
+}
+
+func init() {
+	v2.RegisterSiteDefinition(PTHomeDefinition)
+}

@@ -18,6 +18,12 @@ services:
       # 数据持久化（数据库和种子文件）
       - ./data:/app/.pt-tools
     restart: unless-stopped
+    # 限制容器 stdout 日志大小，避免 Docker json-file 驱动无上限累积（曾出现 8GB 日志）
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # ===========================================
 # 使用说明

@@ -454,6 +454,33 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
     syncField: "cookie",
   },
+  {
+    id: "ptchdbits",
+    name: "PTCHDBits",
+    domains: ["ptchdbits.co"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "pterclub",
+    name: "PTerClub",
+    domains: ["pterclub.net"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "pthome",
+    name: "PTHome",
+    domains: ["pthome.net"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
