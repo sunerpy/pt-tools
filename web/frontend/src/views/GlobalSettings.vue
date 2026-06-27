@@ -17,6 +17,7 @@ const form = ref<GlobalSettings>({
   min_free_minutes: 30,
   auto_start: false,
   auto_delete_on_free_end: false,
+  free_end_advance_minutes: 0,
   default_filter_mode: "auto_free",
 });
 
@@ -258,6 +259,18 @@ async function save() {
               class="mt-2" />
             <div class="form-tip">
               关闭时，免费期结束的未完成种子仅暂停，可在「暂停任务管理」页面手动恢复或删除
+            </div>
+          </el-form-item>
+          <el-form-item label="免费期结束前提前处理（分钟）">
+            <el-input-number
+              v-model="form.free_end_advance_minutes"
+              :min="0"
+              :max="60"
+              :step="1"
+              controls-position="right" />
+            <div class="form-tip">
+              提前 N 分钟暂停/删除未完成的种子，规避删除延迟与 tracker 汇报滞后导致的超额下载量；0
+              表示到点处理（默认）。建议 ≥5 分钟，范围 0-60。
             </div>
           </el-form-item>
         </div>

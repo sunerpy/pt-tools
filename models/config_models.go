@@ -94,6 +94,10 @@ type SettingsGlobal struct {
 	// 免费结束自动删除
 	AutoDeleteOnFreeEnd bool `json:"auto_delete_on_free_end" gorm:"default:false"` // 免费期结束时自动删除未完成的种子及数据
 
+	// 免费期结束前提前处理的安全余量（分钟）。>0 时暂停/删除提前 N 分钟触发，规避删除延迟与
+	// tracker 汇报滞后导致的超额下载量；0 = 到点处理（旧行为）。生效范围 [0,60]。
+	FreeEndAdvanceMinutes int `json:"free_end_advance_minutes" gorm:"default:0"`
+
 	// 默认下载模式（RSS 级别可 override）
 	DefaultFilterMode FilterMode `json:"default_filter_mode" gorm:"size:16;default:'auto_free'"`
 

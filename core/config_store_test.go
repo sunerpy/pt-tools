@@ -573,6 +573,59 @@ func TestConfigStore_GlobalCRUD(t *testing.T) {
 	}
 }
 
+// TestSaveGlobalSettings_PersistsFreeEndAdvanceOnUpdate locks FIX-1: the
+// db.First(&cur) update branch must copy FreeEndAdvanceMinutes, else db.Save
+// writes back the stale value and the UI-saved advance never persists.
+func TestSaveGlobalSettings_PersistsFreeEndAdvanceOnUpdate(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	// A pre-existing row forces SaveGlobalSettings into the update branch.
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir:            t.TempDir(),
+		DefaultIntervalMinutes: models.MinIntervalMinutes,
+		FreeEndAdvanceMinutes:  0,
+	}).Error)
+
+	gl := models.SettingsGlobal{
+		DownloadDir:            t.TempDir(),
+		DefaultIntervalMinutes: models.MinIntervalMinutes,
+		FreeEndAdvanceMinutes:  10,
+	}
+	require.NoError(t, s.SaveGlobalSettings(gl))
+
+	got, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.Equal(t, 10, got.FreeEndAdvanceMinutes)
+
+	var fresh models.SettingsGlobal
+	require.NoError(t, db.DB.First(&fresh).Error)
+	assert.Equal(t, 10, fresh.FreeEndAdvanceMinutes)
+}
+
+func TestSaveGlobalSettings_PersistsClampedFreeEndAdvance(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir:            t.TempDir(),
+		DefaultIntervalMinutes: models.MinIntervalMinutes,
+	}).Error)
+
+	gl := models.SettingsGlobal{
+		DownloadDir:            t.TempDir(),
+		DefaultIntervalMinutes: models.MinIntervalMinutes,
+		FreeEndAdvanceMinutes:  max(0, min(999, 60)),
+	}
+	require.NoError(t, s.SaveGlobalSettings(gl))
+
+	got, err := s.GetGlobalSettings()
+	require.NoError(t, err)
+	assert.Equal(t, 60, got.FreeEndAdvanceMinutes)
+}
+
 func TestConfigStore_ListSites_Empty(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	require.NoError(t, err)
