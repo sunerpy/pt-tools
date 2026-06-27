@@ -286,6 +286,7 @@ func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 		cur.CleanupMinRetainH = gs.CleanupMinRetainH
 		cur.CleanupProtectTags = gs.CleanupProtectTags
 		cur.AutoDeleteOnFreeEnd = gs.AutoDeleteOnFreeEnd
+		cur.FreeEndAdvanceMinutes = gs.FreeEndAdvanceMinutes
 		cur.PeerRatioEnabled = gs.PeerRatioEnabled
 		cur.PeerRatioMaxSL = gs.PeerRatioMaxSL
 		cur.PeerRatioIntervalMin = gs.PeerRatioIntervalMin

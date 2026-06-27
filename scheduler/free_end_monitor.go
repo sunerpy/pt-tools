@@ -25,6 +25,7 @@ const (
 	maxRetryDelay            = 10 * time.Minute
 	completionCheckTimeout   = 10 * time.Second
 	progressUpdateBatchSize  = 50
+	maxFreeEndAdvance        = 60 * time.Minute
 )
 
 type FreeEndMonitor struct {
@@ -55,6 +56,28 @@ func NewFreeEndMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManager)
 		checkInterval: defaultCheckInterval,
 		pendingTasks:  make(map[uint]*monitorTask),
 	}
+}
+
+func (m *FreeEndMonitor) advanceDuration() time.Duration {
+	var cfg models.SettingsGlobal
+	if err := m.db.First(&cfg).Error; err != nil {
+		return 0
+	}
+	adv := time.Duration(cfg.FreeEndAdvanceMinutes) * time.Minute
+	if adv < 0 {
+		return 0
+	}
+	if adv > maxFreeEndAdvance {
+		return maxFreeEndAdvance
+	}
+	return adv
+}
+
+func effectiveDeadline(freeEnd *time.Time, advance time.Duration) time.Time {
+	if freeEnd == nil {
+		return time.Time{}
+	}
+	return freeEnd.Add(-advance)
 }
 
 func (m *FreeEndMonitor) Start() error {
@@ -118,8 +141,9 @@ func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 	}
 
 	now := time.Now()
+	adv := m.advanceDuration()
 	for _, t := range torrents {
-		if t.FreeEndTime == nil || t.FreeEndTime.Before(now) {
+		if t.FreeEndTime == nil || effectiveDeadline(t.FreeEndTime, adv).Before(now) {
 			m.wg.Add(1)
 			go func(torrent models.TorrentInfo) {
 				defer m.wg.Done()
@@ -147,6 +171,8 @@ func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
 		return
 	}
 
+	adv := m.advanceDuration()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -154,23 +180,24 @@ func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
 		return
 	}
 
-	m.scheduleTaskLocked(torrent)
+	m.scheduleTaskLockedWithAdvance(torrent, adv)
 	global.GetSlogger().Infof("[FreeEndMonitor] 已调度种子 %s (ID:%d) 的免费结束监控，将在 %v 后检查",
-		torrent.Title, torrent.ID, time.Until(*torrent.FreeEndTime))
+		torrent.Title, torrent.ID, time.Until(effectiveDeadline(torrent.FreeEndTime, adv)))
 }
 
 func (m *FreeEndMonitor) scheduleTask(torrent models.TorrentInfo) {
+	adv := m.advanceDuration()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.scheduleTaskLocked(torrent)
+	m.scheduleTaskLockedWithAdvance(torrent, adv)
 }
 
-func (m *FreeEndMonitor) scheduleTaskLocked(torrent models.TorrentInfo) {
+func (m *FreeEndMonitor) scheduleTaskLockedWithAdvance(torrent models.TorrentInfo, advance time.Duration) {
 	if torrent.FreeEndTime == nil {
 		return
 	}
 
-	delay := time.Until(*torrent.FreeEndTime)
+	delay := time.Until(effectiveDeadline(torrent.FreeEndTime, advance))
 	if delay < 0 {
 		delay = 0
 	}
@@ -358,10 +385,11 @@ func isTorrentTrulyCompleted(info downloader.Torrent) bool {
 func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 	var torrents []models.TorrentInfo
 	now := time.Now()
+	cutoff := now.Add(m.advanceDuration())
 
 	err := m.db.Where(
 		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time <= ? AND downloader_task_id != ''",
-		true, false, false, now,
+		true, false, false, cutoff,
 	).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询已过期种子失败: %v", err)
@@ -380,7 +408,7 @@ func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 		}(t)
 	}
 
-	m.rescheduleMissingFutureTorrents(now)
+	m.rescheduleMissingFutureTorrents(cutoff)
 }
 
 // rescheduleMissingFutureTorrents catches torrents that should have an
@@ -394,24 +422,30 @@ func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 // already passed (worst case: 5 minutes of non-free download before
 // pause). Calling ScheduleTorrent is idempotent (it returns early when
 // the torrent is already in pendingTasks), so this is a cheap reconcile.
-func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(now time.Time) {
+func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(cutoff time.Time) {
 	var torrents []models.TorrentInfo
+	// Cap the scan like updateAllMonitoredProgress: rows beyond the batch are
+	// reconciled by the next 5-min periodicCheck (idempotent), so capping here
+	// bounds a restart-time mass load without dropping any torrent permanently.
 	err := m.db.Where(
 		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time > ? AND downloader_task_id != ''",
-		true, false, false, now,
-	).Find(&torrents).Error
+		true, false, false, cutoff,
+	).Limit(progressUpdateBatchSize).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询待补预约种子失败: %v", err)
 		return
 	}
 
+	// Read advance once outside the hot mutex to avoid a DB query per torrent
+	// under the lock.
+	adv := m.advanceDuration()
 	rescheduled := 0
 	m.mu.Lock()
 	for _, t := range torrents {
 		if _, exists := m.pendingTasks[t.ID]; exists {
 			continue
 		}
-		m.scheduleTaskLocked(t)
+		m.scheduleTaskLockedWithAdvance(t, adv)
 		rescheduled++
 	}
 	m.mu.Unlock()
@@ -424,6 +458,8 @@ func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(now time.Time) {
 func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 	global.GetSlogger().Debugf("[FreeEndMonitor] 开始处理免费期结束的种子: ID=%d, Title=%s, TaskID=%s, Downloader=%s",
 		torrent.ID, torrent.Title, torrent.DownloaderTaskID, torrent.DownloaderName)
+
+	advanced := m.advanceDuration() > 0
 
 	m.mu.Lock()
 	delete(m.pendingTasks, torrent.ID)
@@ -484,7 +520,7 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 			}
 		}
 
-		m.markAutoDeleted(torrent, progress, totalSize)
+		m.markAutoDeleted(torrent, progress, totalSize, advanced)
 		global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已自动删除 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
 		return
 	}
@@ -497,7 +533,7 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 		return
 	}
 
-	m.markPaused(torrent, progress, totalSize)
+	m.markPaused(torrent, progress, totalSize, advanced)
 	global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已暂停 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
 }
 
@@ -590,12 +626,16 @@ func (m *FreeEndMonitor) markCompleted(torrent models.TorrentInfo, totalSize int
 	}
 }
 
-func (m *FreeEndMonitor) markPaused(torrent models.TorrentInfo, progress float64, totalSize int64) {
+func (m *FreeEndMonitor) markPaused(torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool) {
 	now := time.Now()
+	reason := "免费期结束，下载未完成"
+	if advanced {
+		reason = "免费期临近结束，已暂停（未完成）"
+	}
 	updates := map[string]any{
 		"is_paused_by_system": true,
 		"paused_at":           now,
-		"pause_reason":        "免费期结束，下载未完成",
+		"pause_reason":        reason,
 		"progress":            progress,
 		"torrent_size":        totalSize,
 		"last_check_time":     now,
@@ -621,11 +661,17 @@ func (m *FreeEndMonitor) markRetry(torrent models.TorrentInfo, errMsg string) {
 	var updated models.TorrentInfo
 	m.db.First(&updated, torrent.ID)
 	if updated.RetryCount < maxRetryCount {
-		retryDelay := min(baseRetryDelay*time.Duration(1<<uint(updated.RetryCount))*2, maxRetryDelay)
-		retryTime := now.Add(retryDelay)
+		// 预补偿 advance：scheduleTaskLocked 会用 effectiveDeadline 再减去 advance，
+		// 这里先加回去，使净触发时刻保持 now+retryDelay（重试不受提前量影响）。
+		retryTime := retryDeadline(now, updated.RetryCount, m.advanceDuration())
 		updated.FreeEndTime = &retryTime
 		m.scheduleTask(updated)
 	}
+}
+
+func retryDeadline(now time.Time, retryCount int, advance time.Duration) time.Time {
+	retryDelay := min(baseRetryDelay*time.Duration(1<<uint(retryCount))*2, maxRetryDelay)
+	return now.Add(retryDelay).Add(advance)
 }
 
 func (m *FreeEndMonitor) markRemovedFromDownloader(torrent models.TorrentInfo) {
@@ -651,12 +697,16 @@ func (m *FreeEndMonitor) isAutoDeleteEnabled() bool {
 	return cfg.AutoDeleteOnFreeEnd
 }
 
-func (m *FreeEndMonitor) markAutoDeleted(torrent models.TorrentInfo, progress float64, totalSize int64) {
+func (m *FreeEndMonitor) markAutoDeleted(torrent models.TorrentInfo, progress float64, totalSize int64, advanced bool) {
 	now := time.Now()
+	reason := "免费期结束，自动删除（未完成）"
+	if advanced {
+		reason = "免费期临近结束，自动删除（未完成）"
+	}
 	updates := map[string]any{
 		"is_paused_by_system": true,
 		"paused_at":           now,
-		"pause_reason":        "免费期结束，自动删除（未完成）",
+		"pause_reason":        reason,
 		"progress":            progress,
 		"torrent_size":        totalSize,
 		"last_check_time":     now,

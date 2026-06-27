@@ -510,6 +510,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupMinRetainH      int     `json:"cleanup_min_retain_h"`
 			CleanupProtectTags     string  `json:"cleanup_protect_tags"`
 			AutoDeleteOnFreeEnd    bool    `json:"auto_delete_on_free_end"`
+			FreeEndAdvanceMinutes  int     `json:"free_end_advance_minutes"`
 			PeerRatioEnabled       bool    `json:"peer_ratio_enabled"`
 			PeerRatioMaxSL         float64 `json:"peer_ratio_max_sl"`
 			PeerRatioIntervalMin   int     `json:"peer_ratio_interval_min"`
@@ -530,6 +531,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "下载目录不能为空", http.StatusBadRequest)
 			return
 		}
+		req.FreeEndAdvanceMinutes = max(0, min(req.FreeEndAdvanceMinutes, 60))
 		gs := models.SettingsGlobal{
 			DefaultIntervalMinutes: req.DefaultIntervalMinutes,
 			DownloadDir:            req.DownloadDir,
@@ -557,6 +559,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			CleanupMinRetainH:      req.CleanupMinRetainH,
 			CleanupProtectTags:     req.CleanupProtectTags,
 			AutoDeleteOnFreeEnd:    req.AutoDeleteOnFreeEnd,
+			FreeEndAdvanceMinutes:  req.FreeEndAdvanceMinutes,
 			PeerRatioEnabled:       req.PeerRatioEnabled,
 			PeerRatioMaxSL:         req.PeerRatioMaxSL,
 			PeerRatioIntervalMin:   req.PeerRatioIntervalMin,

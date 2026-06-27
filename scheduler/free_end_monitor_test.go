@@ -588,7 +588,7 @@ func TestFreeEndMonitor_MarkPaused(t *testing.T) {
 	err := db.DB.Create(&torrent).Error
 	require.NoError(t, err)
 
-	monitor.markPaused(torrent, 50.0, 1073741824)
+	monitor.markPaused(torrent, 50.0, 1073741824, false)
 
 	var updated models.TorrentInfo
 	err = db.DB.First(&updated, torrent.ID).Error
@@ -840,4 +840,437 @@ func TestFreeEndMonitor_ScheduleTorrent_LogsSkipReason(t *testing.T) {
 	_, scheduled = monitor.pendingTasks[101]
 	monitor.mu.Unlock()
 	require.False(t, scheduled, "torrent without FreeEndTime must not be scheduled")
+}
+
+func setAdvanceMinutes(t *testing.T, db *models.TorrentDB, minutes int) {
+	t.Helper()
+	require.NoError(t, db.DB.Where("1 = 1").Delete(&models.SettingsGlobal{}).Error)
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{FreeEndAdvanceMinutes: minutes}).Error)
+}
+
+func TestEffectiveDeadline(t *testing.T) {
+	assert.True(t, effectiveDeadline(nil, 0).IsZero(), "nil freeEnd should return zero time")
+	assert.True(t, effectiveDeadline(nil, 10*time.Minute).IsZero(), "nil freeEnd should return zero time regardless of advance")
+
+	freeEnd := time.Now().Add(1 * time.Hour)
+	assert.Equal(t, freeEnd, effectiveDeadline(&freeEnd, 0), "advance=0 should equal freeEnd")
+	assert.Equal(t, freeEnd.Add(-10*time.Minute), effectiveDeadline(&freeEnd, 10*time.Minute), "advance=10m should shift freeEnd back 10m")
+}
+
+func TestAdvanceDuration_ClampAndDefault(t *testing.T) {
+	t.Run("no config row", func(t *testing.T) {
+		db := setupTestDB(t)
+		monitor := NewFreeEndMonitor(db.DB, downloader.NewDownloaderManager())
+		assert.Equal(t, time.Duration(0), monitor.advanceDuration(), "no config row should yield 0")
+	})
+
+	cases := []struct {
+		name    string
+		minutes int
+		want    time.Duration
+	}{
+		{"zero", 0, 0},
+		{"ten", 10, 10 * time.Minute},
+		{"clamp over max", 999, maxFreeEndAdvance},
+		{"negative", -5, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			setAdvanceMinutes(t, db, tc.minutes)
+			monitor := NewFreeEndMonitor(db.DB, downloader.NewDownloaderManager())
+			assert.Equal(t, tc.want, monitor.advanceDuration())
+		})
+	}
+}
+
+func TestScheduleTask_AdvanceShiftsDelay(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+
+	setAdvanceMinutes(t, db, 10)
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	freeEnd := time.Now().Add(12 * time.Minute)
+	torrent := models.TorrentInfo{
+		SiteName:         "test-site",
+		TorrentID:        "advance-shift",
+		Title:            "Advance Shift",
+		PauseOnFreeEnd:   true,
+		FreeEndTime:      &freeEnd,
+		DownloaderTaskID: "test-hash-123",
+		DownloaderName:   "test-qbit",
+	}
+	require.NoError(t, db.DB.Create(&torrent).Error)
+
+	monitor.ScheduleTorrent(torrent)
+
+	monitor.mu.Lock()
+	task, exists := monitor.pendingTasks[torrent.ID]
+	monitor.mu.Unlock()
+	require.True(t, exists, "torrent should be scheduled")
+	require.NotNil(t, task.timer)
+	task.timer.Stop()
+	if task.cancel != nil {
+		task.cancel()
+	}
+
+	rawDelay := time.Until(freeEnd)
+	effectiveDelay := time.Until(effectiveDeadline(&freeEnd, monitor.advanceDuration()))
+	assert.Less(t, effectiveDelay, rawDelay, "advance should shift the effective delay earlier")
+	assert.InDelta(t, (2 * time.Minute).Seconds(), effectiveDelay.Seconds(), 5.0, "effective delay should be ~2m")
+}
+
+func TestCheckExpired_AdvancedCutoff(t *testing.T) {
+	t.Run("advance includes near-end torrent", func(t *testing.T) {
+		db := setupTestDB(t)
+		srv := createMockQBitServer(t, 0.5, false)
+		defer srv.Close()
+		dlMgr := setupTestDownloaderManager(t, srv)
+
+		setAdvanceMinutes(t, db, 5)
+		monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+		freeEnd := time.Now().Add(3 * time.Minute)
+		torrent := models.TorrentInfo{
+			SiteName:         "test-site",
+			TorrentID:        "near-end",
+			Title:            "Near End",
+			PauseOnFreeEnd:   true,
+			FreeEndTime:      &freeEnd,
+			DownloaderTaskID: "test-hash-123",
+			DownloaderName:   "test-qbit",
+		}
+		require.NoError(t, db.DB.Create(&torrent).Error)
+
+		monitor.checkAndProcessExpiredTorrents()
+		monitor.wg.Wait()
+
+		var updated models.TorrentInfo
+		require.NoError(t, db.DB.First(&updated, torrent.ID).Error)
+		assert.True(t, updated.IsPausedBySystem, "near-end torrent within advance window should be processed")
+	})
+
+	t.Run("advance zero excludes future torrent", func(t *testing.T) {
+		db := setupTestDB(t)
+		srv := createMockQBitServer(t, 0.5, false)
+		defer srv.Close()
+		dlMgr := setupTestDownloaderManager(t, srv)
+
+		setAdvanceMinutes(t, db, 0)
+		monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+		freeEnd := time.Now().Add(3 * time.Minute)
+		torrent := models.TorrentInfo{
+			SiteName:         "test-site",
+			TorrentID:        "still-future",
+			Title:            "Still Future",
+			PauseOnFreeEnd:   true,
+			FreeEndTime:      &freeEnd,
+			DownloaderTaskID: "test-hash-123",
+			DownloaderName:   "test-qbit",
+		}
+		require.NoError(t, db.DB.Create(&torrent).Error)
+
+		monitor.checkAndProcessExpiredTorrents()
+		monitor.wg.Wait()
+
+		var updated models.TorrentInfo
+		require.NoError(t, db.DB.First(&updated, torrent.ID).Error)
+		assert.False(t, updated.IsPausedBySystem, "advance=0 must not process a still-future torrent")
+	})
+}
+
+func TestBackwardCompat_AdvanceZero(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+
+	setAdvanceMinutes(t, db, 0)
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	expired := time.Now().Add(-1 * time.Second)
+	expiredTorrent := models.TorrentInfo{
+		SiteName:         "test-site",
+		TorrentID:        "compat-expired",
+		Title:            "Compat Expired",
+		PauseOnFreeEnd:   true,
+		FreeEndTime:      &expired,
+		DownloaderTaskID: "test-hash-123",
+		DownloaderName:   "test-qbit",
+	}
+	require.NoError(t, db.DB.Create(&expiredTorrent).Error)
+
+	future := time.Now().Add(1 * time.Hour)
+	futureTorrent := models.TorrentInfo{
+		SiteName:         "test-site",
+		TorrentID:        "compat-future",
+		Title:            "Compat Future",
+		PauseOnFreeEnd:   true,
+		FreeEndTime:      &future,
+		DownloaderTaskID: "test-hash-456",
+		DownloaderName:   "test-qbit",
+	}
+	require.NoError(t, db.DB.Create(&futureTorrent).Error)
+
+	monitor.checkAndProcessExpiredTorrents()
+	monitor.wg.Wait()
+
+	var gotExpired models.TorrentInfo
+	require.NoError(t, db.DB.First(&gotExpired, expiredTorrent.ID).Error)
+	assert.True(t, gotExpired.IsPausedBySystem, "advance=0: expired torrent should be processed")
+
+	var gotFuture models.TorrentInfo
+	require.NoError(t, db.DB.First(&gotFuture, futureTorrent.ID).Error)
+	assert.False(t, gotFuture.IsPausedBySystem, "advance=0: future torrent should not be processed")
+}
+
+func TestAdvanceLargerThanFreeWindow_Immediate(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+
+	setAdvanceMinutes(t, db, 10)
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	freeEnd := time.Now().Add(2 * time.Minute)
+	torrent := models.TorrentInfo{
+		SiteName:         "test-site",
+		TorrentID:        "advance-overflow",
+		Title:            "Advance Overflow",
+		PauseOnFreeEnd:   true,
+		FreeEndTime:      &freeEnd,
+		DownloaderTaskID: "test-hash-123",
+		DownloaderName:   "test-qbit",
+	}
+	require.NoError(t, db.DB.Create(&torrent).Error)
+
+	require.NotPanics(t, func() {
+		monitor.scheduleTask(torrent)
+	})
+
+	monitor.mu.Lock()
+	task, exists := monitor.pendingTasks[torrent.ID]
+	monitor.mu.Unlock()
+	require.True(t, exists)
+	require.NotNil(t, task.timer)
+	task.timer.Stop()
+	if task.cancel != nil {
+		task.cancel()
+	}
+
+	effectiveDelay := time.Until(effectiveDeadline(&freeEnd, monitor.advanceDuration()))
+	assert.LessOrEqual(t, effectiveDelay, time.Duration(0), "effective deadline should be in the past")
+}
+
+func TestMarkRetry_NotDoubleAdvanced(t *testing.T) {
+	db := setupTestDB(t)
+	dlMgr := downloader.NewDownloaderManager()
+
+	setAdvanceMinutes(t, db, 10)
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+	require.NoError(t, monitor.Start())
+	defer monitor.Stop()
+
+	freeEnd := time.Now().Add(1 * time.Hour)
+	torrent := models.TorrentInfo{
+		SiteName:         "test",
+		TorrentID:        "retry-no-double",
+		Title:            "Retry No Double",
+		PauseOnFreeEnd:   true,
+		FreeEndTime:      &freeEnd,
+		DownloaderTaskID: "test-hash",
+	}
+	require.NoError(t, db.DB.Create(&torrent).Error)
+
+	before := time.Now()
+	monitor.markRetry(torrent, "test error")
+
+	monitor.mu.Lock()
+	task, exists := monitor.pendingTasks[torrent.ID]
+	monitor.mu.Unlock()
+	require.True(t, exists, "retry should schedule a follow-up timer")
+	require.NotNil(t, task.timer)
+	task.timer.Stop()
+	if task.cancel != nil {
+		task.cancel()
+	}
+
+	advance := monitor.advanceDuration()
+	require.Equal(t, 10*time.Minute, advance)
+
+	// markRetry uses retryDeadline(now, retryCount=1, advance): retryTime is
+	// pre-advanced so scheduleTaskLocked's effectiveDeadline subtraction nets
+	// back to now+retryDelay (not double-advanced).
+	retryTime := retryDeadline(before, 1, advance)
+	netTrigger := effectiveDeadline(&retryTime, advance)
+	expectedRetryDelay := min(baseRetryDelay*time.Duration(1<<1)*2, maxRetryDelay)
+	gotNetDelay := netTrigger.Sub(before)
+	assert.InDelta(t, expectedRetryDelay.Seconds(), gotNetDelay.Seconds(), 5.0,
+		"retry net trigger must be ~now+retryDelay, not double-advanced")
+
+	assert.InDelta(t, (expectedRetryDelay + advance).Seconds(), retryTime.Sub(before).Seconds(), 5.0,
+		"retryTime must be pre-compensated by +advance")
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, torrent.ID).Error)
+	require.Equal(t, 1, updated.RetryCount)
+}
+
+func TestPauseReason_TextByAdvance(t *testing.T) {
+	t.Run("advance positive uses near-end wording", func(t *testing.T) {
+		db := setupTestDB(t)
+		srv := createMockQBitServer(t, 0.5, false)
+		defer srv.Close()
+		dlMgr := setupTestDownloaderManager(t, srv)
+
+		setAdvanceMinutes(t, db, 10)
+		monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+		freeEnd := time.Now().Add(-1 * time.Minute)
+		torrent := models.TorrentInfo{
+			SiteName:         "test-site",
+			TorrentID:        "reason-advance",
+			Title:            "Reason Advance",
+			PauseOnFreeEnd:   true,
+			FreeEndTime:      &freeEnd,
+			DownloaderTaskID: "test-hash-123",
+			DownloaderName:   "test-qbit",
+		}
+		require.NoError(t, db.DB.Create(&torrent).Error)
+
+		monitor.handleFreeEndedTorrent(torrent)
+
+		var updated models.TorrentInfo
+		require.NoError(t, db.DB.First(&updated, torrent.ID).Error)
+		assert.True(t, updated.IsPausedBySystem)
+		assert.Contains(t, updated.PauseReason, "临近结束", "advance>0 pause reason should mention 临近结束")
+	})
+
+	t.Run("advance zero keeps original wording", func(t *testing.T) {
+		db := setupTestDB(t)
+		srv := createMockQBitServer(t, 0.5, false)
+		defer srv.Close()
+		dlMgr := setupTestDownloaderManager(t, srv)
+
+		setAdvanceMinutes(t, db, 0)
+		monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+		freeEnd := time.Now().Add(-1 * time.Minute)
+		torrent := models.TorrentInfo{
+			SiteName:         "test-site",
+			TorrentID:        "reason-exact",
+			Title:            "Reason Exact",
+			PauseOnFreeEnd:   true,
+			FreeEndTime:      &freeEnd,
+			DownloaderTaskID: "test-hash-123",
+			DownloaderName:   "test-qbit",
+		}
+		require.NoError(t, db.DB.Create(&torrent).Error)
+
+		monitor.handleFreeEndedTorrent(torrent)
+
+		var updated models.TorrentInfo
+		require.NoError(t, db.DB.First(&updated, torrent.ID).Error)
+		assert.True(t, updated.IsPausedBySystem)
+		assert.Equal(t, "免费期结束，下载未完成", updated.PauseReason, "advance=0 should keep original wording")
+	})
+}
+
+// TestRescheduleMissingFutureTorrents_MultipleWithAdvance exercises the FIX-2
+// lock-outside advance read: multiple future torrents must all be rescheduled
+// with the advanced effective delay (freeEnd - advance), proving the refactored
+// path computes advance once outside the lock without changing per-torrent timing.
+func TestRescheduleMissingFutureTorrents_MultipleWithAdvance(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+
+	setAdvanceMinutes(t, db, 10)
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	freeEnd := time.Now().Add(2 * time.Hour)
+	ids := make([]uint, 0, 3)
+	for i := range 3 {
+		torrent := models.TorrentInfo{
+			SiteName:         "test-site",
+			TorrentID:        fmt.Sprintf("future-%d", i),
+			Title:            fmt.Sprintf("future-%d", i),
+			PauseOnFreeEnd:   true,
+			FreeEndTime:      &freeEnd,
+			DownloaderTaskID: "test-hash-123",
+			DownloaderName:   "test-qbit",
+		}
+		require.NoError(t, db.DB.Create(&torrent).Error)
+		ids = append(ids, torrent.ID)
+	}
+
+	monitor.rescheduleMissingFutureTorrents(time.Now().Add(monitor.advanceDuration()))
+
+	wantDelay := time.Until(effectiveDeadline(&freeEnd, 10*time.Minute))
+	monitor.mu.Lock()
+	defer monitor.mu.Unlock()
+	require.Len(t, monitor.pendingTasks, 3, "all future torrents should be scheduled")
+	for _, id := range ids {
+		task, ok := monitor.pendingTasks[id]
+		require.True(t, ok, "torrent %d should be scheduled", id)
+		require.NotNil(t, task.timer)
+		task.timer.Stop()
+		if task.cancel != nil {
+			task.cancel()
+		}
+	}
+	assert.InDelta(t, (110 * time.Minute).Seconds(), wantDelay.Seconds(), 5.0,
+		"advanced effective delay should be ~110m (120m - 10m)")
+}
+
+// TestRescheduleMissingFutureTorrents_RespectsBatchLimit locks FIX-3: the query
+// is capped at progressUpdateBatchSize. With a small set under the cap every row
+// is still scheduled and the call must not panic; rows beyond the cap are picked
+// up by the next periodicCheck (idempotent), so capping is safe.
+func TestRescheduleMissingFutureTorrents_RespectsBatchLimit(t *testing.T) {
+	db := setupTestDB(t)
+	srv := createMockQBitServer(t, 0.5, false)
+	defer srv.Close()
+	dlMgr := setupTestDownloaderManager(t, srv)
+
+	monitor := NewFreeEndMonitor(db.DB, dlMgr)
+
+	freeEnd := time.Now().Add(2 * time.Hour)
+	const n = 5
+	for i := range n {
+		torrent := models.TorrentInfo{
+			SiteName:         "test-site",
+			TorrentID:        fmt.Sprintf("batch-%d", i),
+			Title:            fmt.Sprintf("batch-%d", i),
+			PauseOnFreeEnd:   true,
+			FreeEndTime:      &freeEnd,
+			DownloaderTaskID: "test-hash-123",
+			DownloaderName:   "test-qbit",
+		}
+		require.NoError(t, db.DB.Create(&torrent).Error)
+	}
+
+	require.NotPanics(t, func() {
+		monitor.rescheduleMissingFutureTorrents(time.Now())
+	})
+
+	monitor.mu.Lock()
+	defer monitor.mu.Unlock()
+	scheduled := len(monitor.pendingTasks)
+	for _, task := range monitor.pendingTasks {
+		if task.timer != nil {
+			task.timer.Stop()
+		}
+		if task.cancel != nil {
+			task.cancel()
+		}
+	}
+	assert.LessOrEqual(t, scheduled, progressUpdateBatchSize, "scheduled count must not exceed batch cap")
+	assert.Equal(t, n, scheduled, "a set under the cap should all be scheduled")
 }
