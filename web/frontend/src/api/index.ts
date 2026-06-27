@@ -85,6 +85,7 @@ export interface GlobalSettings {
   cleanup_min_retain_h?: number;
   cleanup_protect_tags?: string;
   auto_delete_on_free_end?: boolean;
+  free_end_advance_minutes?: number;
   peer_ratio_enabled?: boolean;
   peer_ratio_max_sl?: number;
   peer_ratio_interval_min?: number;
