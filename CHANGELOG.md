@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] - 2026-06-27
+
+### Documentation
+
+- **site**: 更新站点列表、扩展常量与真实 HTML 校验用例
+  将 ptchdbits/pterclub/pthome 加入 real_html_validation_test 用例表(针对采集
+  到的真实页面校验解析)；docs/sites.md 新增三行并更新站点总数(48->51)与 NexusPHP
+  分类计数(44->47)；浏览器扩展 KNOWN_SITES 同步新增三站(Cookie 鉴权)。
+- **log**: 补充飞牛/群晖等 NAS 用户的容器日志轮转指引
+  README 与 configuration.md 增补「Docker 用户注意」小节，覆盖 Docker Compose、
+  docker run、飞牛 NAS(fnOS)/群晖 DSM/Unraid/Portainer 图形界面，以及 daemon.json
+  全局配置等多种部署方式的日志轮转(max-size/max-file)设置方法，避免容器日志膨胀。
+- **log**: NAS 用户补充手动清理容器日志的即时补救方式
+  针对飞牛/群晖等图形界面创建的容器(无法配置日志驱动)，除推荐改用 Compose 部署外，
+  补充即时补救方式：SSH 截断容器日志文件(truncate -s 0 $(docker inspect
+  --format='{{.LogPath}}' pt-tools))或重建容器。README 与 configuration.md 同步。
+
+### Features
+
+- **site**: 新增 ptchdbits/pterclub/pthome 三个 NexusPHP 站点适配
+  新增 ptchdbits.co、pterclub.net、pthome.net 三个 NexusPHP 站点定义及 fixture
+  测试。三站均从 #info_block 解析上传/下载/分享率/魔力值/做种积分等数据，并补充
+  lastAccessAt 支持保号探测。
+
+        站点差异化处理：
+        - ptchdbits 详情页促销为 img.pro_free(无 font.free)，DiscountMapping 增加
+         pro_* 类名键，详情解析正确识别免费
+        - pterclub 魔力值标签为「猫粮」且位于 <span> 内，使用专用正则提取
+        - pthome 采集页为隐私保护页(仅含本人 info_block)，等级/加入/动向选择器保留
+         生产标准行并加多语言回退
+
+- **log**: 启动清理历史日志备份并支持环境变量与 Docker 日志限制
+  针对日志膨胀（如 8GB）问题做综合治理：- 启动时执行 PruneOldLogs，按 MaxAge/MaxBackups 清理滞留的滚动备份（补足
+  lumberjack 仅在切割时清理、频繁重启容器旧备份滞留的缺口）- 新增环境变量 PT_TOOLS_LOG_LEVEL / PT_TOOLS_LOG_CONSOLE，在日志器构建前生效 - 控制台输出保持默认开启，便于 docker logs / NAS(飞牛/群晖) 控制台查看；
+  容器日志膨胀根因是 Docker json-file 驱动默认无上限，应通过 --log-opt
+  max-size 限制 - docker-compose 示例增加 logging.max-size 限制；configuration.md 增补
+  日志管理章节说明应用日志滚动与容器 stdout 日志的区别与治理方式
+
+### Styling
+
+- **docs**: Oxfmt 格式化日志管理章节表格对齐
+
 ## [0.38.0] - 2026-06-19
 
 ### Documentation
