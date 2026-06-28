@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-06-28
+
+### Documentation
+
+- **web**: 全局设置增加免费期提前处理项及说明
+- 全局设置页面新增免费期提前处理分钟数配置项 - API 类型定义同步 FreeEndAdvanceMinutes 字段 - 配置文档补充免费结束管理与日志相关说明
+
+### Features
+
+- **scheduler**: 免费期结束前支持提前 N 分钟删除/暂停未完成种子
+- models 增加 FreeEndAdvanceMinutes 配置字段 - 免费结束监控支持提前 N 分钟触发删除/暂停逻辑 - 修复调度过程中的锁使用问题并补充候选数量限制 - config_store 持久化 FreeEndAdvanceMinutes 并补充往返测试 - API 层对提前分钟数做 [0,60] 范围钳制
+
+### Miscellaneous
+
+- Ignore .codegraph index directory
+
 ## [0.39.0] - 2026-06-27
 
 ### Documentation
