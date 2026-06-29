@@ -27,8 +27,8 @@ importers:
         specifier: ^2.14.2
         version: 2.14.2(vue@3.5.39(typescript@6.0.3))
       marked:
-        specifier: ^17.0.6
-        version: 17.0.6
+        specifier: ^18.0.5
+        version: 18.0.5
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@6.0.3)(vue@3.5.39(typescript@6.0.3))
@@ -1118,8 +1118,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  marked@17.0.6:
-    resolution: {integrity: sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA==}
+  marked@18.0.5:
+    resolution: {integrity: sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -1868,7 +1868,7 @@ snapshots:
 
   '@types/marked@6.0.0':
     dependencies:
-      marked: 17.0.6
+      marked: 18.0.5
 
   '@types/node@25.9.2':
     dependencies:
@@ -2269,7 +2269,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  marked@17.0.6: {}
+  marked@18.0.5: {}
 
   memoize-one@6.0.0: {}
 
