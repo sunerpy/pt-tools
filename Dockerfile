@@ -94,8 +94,9 @@ RUN echo -n "pt-tools-docker-build" > /app/.pt-tools-docker
 ENV GOSU_VERSION 1.17
 RUN set -eux; \
 	\
+	apk add --no-cache tzdata ca-certificates; \
+	\
 	apk add --no-cache --virtual .gosu-deps \
-	ca-certificates \
 	dpkg \
 	gnupg \
 	; \
