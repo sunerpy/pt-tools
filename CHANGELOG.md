@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.1] - 2026-07-04
+
+### Bug Fixes
+
+- **docker**: Alpine 运行镜像补装 tzdata 修复容器时区不生效 ([#435](https://github.com/sunerpy/pt-tools/issues/435)) ([#435](https://github.com/sunerpy/pt-tools/pull/435))
+- Alpine 默认不含 tzdata 仅设置 TZ 环境变量不生效补装 tzdata - 将 ca-certificates 移出 .gosu-deps 虚拟包避免随虚拟包删除 - 保证运行时 HTTPS 证书常驻及时区数据可用 - 用户反馈 Docker 设置 TZ=Asia/Shanghai 时区不生效
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vite from 8.0.16 to 8.1.0 in /web/frontend ([#428](https://github.com/sunerpy/pt-tools/issues/428)) ([#428](https://github.com/sunerpy/pt-tools/pull/428))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.16 to 8.1.0. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/create-vite@8.1.0/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.1.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump oxfmt from 0.55.0 to 0.56.0 in /web/frontend ([#431](https://github.com/sunerpy/pt-tools/issues/431)) ([#431](https://github.com/sunerpy/pt-tools/pull/431))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.55.0 to 0.56.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.56.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.56.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump dompurify from 3.4.10 to 3.4.11 in /web/frontend ([#434](https://github.com/sunerpy/pt-tools/issues/434)) ([#434](https://github.com/sunerpy/pt-tools/pull/434))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.10 to 3.4.11. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.10...3.4.11)
+
+        ---
+        updated-dependencies:
+        - dependency-name: dompurify
+         dependency-version: 3.4.11
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vue from 3.5.38 to 3.5.39 in /web/frontend ([#429](https://github.com/sunerpy/pt-tools/issues/429)) ([#429](https://github.com/sunerpy/pt-tools/pull/429))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.38 to 3.5.39. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.38...v3.5.39)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue
+         dependency-version: 3.5.39
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.69.0 to 1.71.0 in /web/frontend ([#433](https://github.com/sunerpy/pt-tools/issues/433)) ([#433](https://github.com/sunerpy/pt-tools/pull/433))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.69.0 to 1.71.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.71.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.71.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
 ## [0.40.0] - 2026-06-28
 
 ### Documentation
