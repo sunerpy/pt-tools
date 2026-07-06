@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.2] - 2026-07-06
+
+### Bug Fixes
+
+- Web 启动时异步加载下载器配置避免下载器不可达阻塞端口 ([#437](https://github.com/sunerpy/pt-tools/issues/437)) ([#437](https://github.com/sunerpy/pt-tools/pull/437))
+- 下载器不可达时 mgr.Reload 经 createWithRetry 阻塞约 3.5 分钟，原同步调用会拖住 srv.Serve 使 8080 端口在此期间不可用 - 抽出 maybeAutoStartReload 承载自动启动判定与 go mgr.Reload 异步派发，webCmd.Run 改为调用该函数，行为与原异步修复一致 - 重写 web_startup_test 驱动真实函数：注入阻塞 reloader 断言快速返回，已验证同步实现下失败、异步实现下通过 - 重写 web_startup_preservation_test 改用真实判定函数做表驱动，移除手动重载是同步的错误前提
+
 ## [0.40.1] - 2026-07-04
 
 ### Bug Fixes
