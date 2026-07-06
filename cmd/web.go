@@ -246,12 +246,7 @@ var webCmd = &cobra.Command{
 		}
 		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {
-			if cfg.Global.AutoStart && strings.TrimSpace(cfg.Global.DownloadDir) != "" {
-				global.GetSlogger().Info("检测到自动启动配置，加载并启动任务")
-				mgr.Reload(cfg)
-			} else {
-				global.GetSlogger().Info("自动启动未开启或下载目录为空，等待手动启动")
-			}
+			maybeAutoStartReload(mgr, cfg)
 		}
 
 		shutdownDone := installShutdownHandler(srv, bs)
@@ -263,6 +258,28 @@ var webCmd = &cobra.Command{
 		}
 		<-shutdownDone
 	},
+}
+
+// startupReloader 抽象出启动重载能力，*scheduler.Manager 已满足；
+// 抽出接口便于测试注入阻塞实现，验证重载是异步派发不阻塞 srv.Serve。
+type startupReloader interface {
+	Reload(*models.Config)
+}
+
+// maybeAutoStartReload 承载 Web 启动时「自动启动」的判定与派发。
+// 采用 go mgr.Reload 异步派发以修复下载器不可达时的死锁：Reload 经
+// createWithRetry 可阻塞约 3.5 分钟，同步执行会拖住 srv.Serve 使端口不可用。
+func maybeAutoStartReload(mgr startupReloader, cfg *models.Config) (dispatched bool) {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Global.AutoStart && strings.TrimSpace(cfg.Global.DownloadDir) != "" {
+		global.GetSlogger().Info("检测到自动启动配置，异步加载并启动任务")
+		go mgr.Reload(cfg)
+		return true
+	}
+	global.GetSlogger().Info("自动启动未开启或下载目录为空，等待手动启动")
+	return false
 }
 
 func init() {
