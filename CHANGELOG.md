@@ -5,6 +5,94 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.3] - 2026-07-08
+
+### Bug Fixes
+
+- 站点探测失败时展示状态与原因避免误报成功 ([#446](https://github.com/sunerpy/pt-tools/issues/446)) ([#446](https://github.com/sunerpy/pt-tools/pull/446))
+- 探测结果 last_probe_status 为状态码而非成功标志，原前端无条件弹绿色成功提示导致 PARSE_ERROR 等失败被误报为成功；改为按状态严重级别分级提示，仅 OK 显示成功 - 新增 probeStatus.ts 统一 ProbeStatus→严重级别+中文标签映射 - probeNow 接口补充返回 last_probe_error，前端在探测未通过时展示具体失败原因（如 Cookie 未配置或已失效）- 批量探测按 last_probe_status===OK 计成功，修正 HTTP 200 即计成功的同类问题
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue-tsc from 3.3.5 to 3.3.6 in /web/frontend ([#441](https://github.com/sunerpy/pt-tools/issues/441)) ([#441](https://github.com/sunerpy/pt-tools/pull/441))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.5 to 3.3.6. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.6/packages/tsc)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vue-tsc
+         dependency-version: 3.3.6
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxfmt from 0.56.0 to 0.57.0 in /web/frontend ([#442](https://github.com/sunerpy/pt-tools/issues/442)) ([#442](https://github.com/sunerpy/pt-tools/pull/442))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.56.0 to 0.57.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.57.0/npm/oxfmt)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxfmt
+         dependency-version: 0.57.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+- **pnpm**: Bump vite from 8.1.0 to 8.1.3 in /web/frontend ([#445](https://github.com/sunerpy/pt-tools/issues/445)) ([#445](https://github.com/sunerpy/pt-tools/pull/445))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.1.0 to 8.1.3. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.1.3/packages/vite)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vite
+         dependency-version: 8.1.3
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump vitest from 4.1.9 to 4.1.10 in /web/frontend ([#443](https://github.com/sunerpy/pt-tools/issues/443)) ([#443](https://github.com/sunerpy/pt-tools/pull/443))
+  Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.9 to 4.1.10. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.10/packages/vitest)
+
+        ---
+        updated-dependencies:
+        - dependency-name: vitest
+         dependency-version: 4.1.10
+         dependency-type: direct:development
+         update-type: version-update:semver-patch
+        ...
+
+- **pnpm**: Bump oxlint from 1.71.0 to 1.72.0 in /web/frontend ([#444](https://github.com/sunerpy/pt-tools/issues/444)) ([#444](https://github.com/sunerpy/pt-tools/pull/444))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.71.0 to 1.72.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.72.0/npm/oxlint)
+
+        ---
+        updated-dependencies:
+        - dependency-name: oxlint
+         dependency-version: 1.72.0
+         dependency-type: direct:development
+         update-type: version-update:semver-minor
+        ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/text from 0.38.0 to 0.39.0 ([#440](https://github.com/sunerpy/pt-tools/issues/440)) ([#440](https://github.com/sunerpy/pt-tools/pull/440))
+  Bumps [golang.org/x/text](https://github.com/golang/text) from 0.38.0 to 0.39.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.38.0...v0.39.0)
+
+        ---
+        updated-dependencies:
+        - dependency-name: golang.org/x/text
+         dependency-version: 0.39.0
+         dependency-type: direct:production
+         update-type: version-update:semver-minor
+        ...
+
+- **go**: Bump gorm.io/gorm from 1.31.1 to 1.31.2 ([#430](https://github.com/sunerpy/pt-tools/issues/430)) ([#430](https://github.com/sunerpy/pt-tools/pull/430))
+  Bumps [gorm.io/gorm](https://github.com/go-gorm/gorm) from 1.31.1 to 1.31.2. - [Release notes](https://github.com/go-gorm/gorm/releases) - [Commits](https://github.com/go-gorm/gorm/compare/v1.31.1...v1.31.2)
+
+        ---
+        updated-dependencies:
+        - dependency-name: gorm.io/gorm
+         dependency-version: 1.31.2
+         dependency-type: direct:production
+         update-type: version-update:semver-patch
+        ...
+
 ## [0.40.2] - 2026-07-06
 
 ### Bug Fixes
