@@ -245,6 +245,7 @@ func (s *Server) handleLoginStateProbe(w http.ResponseWriter, r *http.Request, s
 		"ok":                true,
 		"last_probe_at":     timestampPtr(state.LastProbeAt),
 		"last_probe_status": state.LastProbeStatus,
+		"last_probe_error":  state.LastProbeError,
 	})
 }
 
