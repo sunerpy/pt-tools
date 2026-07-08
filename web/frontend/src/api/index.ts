@@ -259,9 +259,12 @@ export const sitesApi = {
     }>,
   ) => api.put<void>(`/api/sites/${name}/login-state/config`, data),
   probeNow: (name: string) =>
-    api.post<{ ok: boolean; last_probe_at?: number; last_probe_status?: string }>(
-      `/api/sites/${name}/login-state/probe`,
-    ),
+    api.post<{
+      ok: boolean;
+      last_probe_at?: number;
+      last_probe_status?: string;
+      last_probe_error?: string;
+    }>(`/api/sites/${name}/login-state/probe`),
   testReminder: (name: string) =>
     api.post<{ success: boolean; message: string }>(`/api/sites/${name}/login-state/test-reminder`),
 };

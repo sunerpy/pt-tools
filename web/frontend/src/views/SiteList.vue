@@ -6,6 +6,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { formatTimeAgo } from "@/utils/format";
+import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
 import { useLoginState } from "@/composables/useLoginState";
 
 const router = useRouter();
@@ -96,7 +97,32 @@ async function probeSite(name: string) {
   probing[name] = true;
   try {
     const res = await sitesApi.probeNow(name);
-    ElMessage.success(`探测完成: ${res.last_probe_status || "ok"}`);
+    // 注意：后端 res.ok 恒为 true（仅表示探测已执行、未发生锁冲突），
+    // 判定探测是否成功必须以 last_probe_status === "OK" 为准。
+    const status = res.last_probe_status;
+    const label = probeStatusLabel(status);
+    // 后端 last_probe_error 为人类可读的失败原因（如 Cookie 未失效提示）；
+    // 仅在存在非空原因、且原因未重复状态码时展示，避免冗余。
+    const reason = res.last_probe_error?.trim();
+    if (isProbeSuccess(status)) {
+      ElMessage.success(`探测完成：${label}`);
+    } else {
+      const severity = probeStatusSeverity(status);
+      if (severity === "info") {
+        // NOT_APPLICABLE 等：探测已完成但不适用，若有原因一并展示。
+        ElMessage.info(reason ? `探测完成：${label} — ${reason}` : `探测完成：${label}`);
+      } else {
+        // warning/error：探测未通过，原因可能较长，改用可关闭、长驻留的提示。
+        const message = reason ? `探测未通过：${label} — ${reason}` : `探测未通过：${label}`;
+        ElMessage({
+          type: severity,
+          message,
+          showClose: true,
+          duration: severity === "error" ? 0 : 6000,
+        });
+      }
+    }
+    // 无论成功与否都刷新表格，使状态列反映最新的 last_probe_status / last_probe_at。
     await loadSites();
   } catch (e: unknown) {
     if (e instanceof ApiError && e.status === 409) {
@@ -148,8 +174,11 @@ async function probeAllEnabled() {
 
       probing[name] = true;
       try {
-        await sitesApi.probeNow(name);
-        success++;
+        const res = await sitesApi.probeNow(name);
+        // res.ok 恒为 true，仅以 last_probe_status === "OK" 判定真正成功；
+        // 其余状态（如 PARSE_ERROR，HTTP 200 但探测失败）计为失败。
+        if (isProbeSuccess(res.last_probe_status)) success++;
+        else failed++;
       } catch (e: unknown) {
         if (e instanceof ApiError && e.status === 409) skipped++;
         else failed++;
