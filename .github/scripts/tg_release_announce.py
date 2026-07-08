@@ -74,6 +74,52 @@ _INLINE_RE = re.compile(
 
 MAX_CHARS = 3600  # TG sendMessage limit is 4096 UTF-16 chars; reserve room for header + footer
 
+# Representative sample mirroring the real v0.40.3 release-body shape:
+# a version-tag H2, a real Bug Fixes section (with a release-please detail
+# sub-block), and dependency/chore walls of dependabot bumps that must fold.
+_SMOKE_BODY = '''
+## What's Changed
+
+## [0.31.0] - 2026-07-08
+
+### Features
+
+* feat(rss/notify): Sprint 1 — backend skeleton + all mode + throttle ([#101](https://github.com/sunerpy/pt-tools/pull/101)) ([a1b2c3d](https://github.com/sunerpy/pt-tools/commit/a1b2c3d))
+* feat(chatops): bilingual command descriptions ([#102](https://github.com/sunerpy/pt-tools/pull/102)) ([4d5e6f7](https://github.com/sunerpy/pt-tools/commit/4d5e6f7))
+
+### Bug Fixes
+
+* fix(chatops/qq): WebSocket half-open detection ([#103](https://github.com/sunerpy/pt-tools/pull/103)) ([8a9b0c1](https://github.com/sunerpy/pt-tools/commit/8a9b0c1))
+      - detail sub-line that must not be counted
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue-tsc from 3.3.5 to 3.3.6 in /web/frontend ([#441](https://github.com/sunerpy/pt-tools/pull/441))
+Bumps vue-tsc from 3.3.5 to 3.3.6.
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+      ...
+- **pnpm**: Bump oxfmt from 0.56.0 to 0.57.0 in /web/frontend ([#442](https://github.com/sunerpy/pt-tools/pull/442))
+- **pnpm**: Bump vite from 8.1.0 to 8.1.3 in /web/frontend ([#445](https://github.com/sunerpy/pt-tools/pull/445))
+- **pnpm**: Bump vitest from 4.1.9 to 4.1.10 in /web/frontend ([#443](https://github.com/sunerpy/pt-tools/pull/443))
+- **pnpm**: Bump oxlint from 1.71.0 to 1.72.0 in /web/frontend ([#444](https://github.com/sunerpy/pt-tools/pull/444))
+- **pnpm**: Bump eslint from 9.0.0 to 9.1.0 in /web/frontend ([#447](https://github.com/sunerpy/pt-tools/pull/447))
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/text from 0.38.0 to 0.39.0 ([#440](https://github.com/sunerpy/pt-tools/pull/440))
+- **go**: Bump gorm.io/gorm from 1.31.1 to 1.31.2 ([#430](https://github.com/sunerpy/pt-tools/pull/430))
+
+### Chores
+
+- chore(deps): update actions/checkout to v5 ([#450](https://github.com/sunerpy/pt-tools/pull/450))
+- chore: bump go toolchain metadata ([#451](https://github.com/sunerpy/pt-tools/pull/451))
+- chore: refresh generated mocks ([#452](https://github.com/sunerpy/pt-tools/pull/452))
+
+**Full Changelog**: https://github.com/sunerpy/pt-tools/compare/v0.30.1...v0.31.0
+'''
+
 
 def esc(s: str) -> str:
     """Full MarkdownV2 escape for plain text."""
@@ -132,6 +178,10 @@ def _localize_section(title: str) -> str:
     Falls back to original title when not in the mapping.
     """
     t = title.strip()
+    if _is_dependency_section(t):
+        return "依赖更新"
+    if _is_chore_section(t):
+        return "杂项"
     mapping = {
         "What's Changed": "更新概览",
         "Whats Changed": "更新概览",
@@ -179,6 +229,8 @@ def _section_emoji(title: str) -> str:
     t = title.strip().lower()
     if t in ("what's changed", "whats changed", "changelog", "更新内容", "变更", "更新概览", "更新日志"):
         return "📋"
+    if _is_dependency_section(t):
+        return "🧩"
     mapping = (
         ("feature", "✨"),
         ("功能", "✨"),
@@ -311,13 +363,111 @@ def _strip_release_please_noise(lines):
             skip_until_next_h2 = False
         if stripped.startswith("### "):
             title = stripped[4:].strip().lower()
-            if title in ("using docker (recommended)", "from binary", "docker images"):
+            if title in ("using docker (recommended)", "from binary", "docker images", "browser extension"):
                 skip_until_next_h2 = True
                 continue
-            skip_until_next_h2 = False
         if skip_until_next_h2:
             continue
         out.append(s)
+    return out
+
+
+def _heading_level(ln: str) -> int:
+    """Return the markdown heading level (# count) for a line, else 0.
+
+    Only treats `#`+space as a heading (`#foo` is not a heading).
+    """
+    s = ln.lstrip()
+    i = 0
+    while i < len(s) and s[i] == "#":
+        i += 1
+    if i == 0 or i > 6:
+        return 0
+    if i < len(s) and s[i] == " ":
+        return i
+    return 0
+
+
+def _heading_title(ln: str) -> str:
+    """Strip leading `#`s and surrounding whitespace from a heading line."""
+    return ln.lstrip().lstrip("#").strip()
+
+
+def _is_dependency_section(title: str) -> bool:
+    """True when a heading title is dependency-family (handles subsections)."""
+    t = title.strip().lower()
+    return any(n in t for n in ("dependencies", "dependency updates", "dependency", "deps", "依赖"))
+
+
+def _is_chore_section(title: str) -> bool:
+    """True when a heading title is chore-family."""
+    t = title.strip().lower()
+    return any(n in t for n in ("chores", "chore", "杂项"))
+
+
+def _is_noise_section(title: str) -> bool:
+    """True when a section heading belongs to the dependency/chore family.
+
+    Robust to both English (pre-localization body) and the localized Chinese,
+    and to release-please subsection suffixes like `Dependencies (Frontend)`.
+    Never matches Features / Bug Fixes / Performance / Refactor / Docs /
+    Security / Breaking / etc.
+    """
+    return _is_dependency_section(title) or _is_chore_section(title)
+
+
+def _is_top_level_bullet(ln: str) -> bool:
+    """True for a top-level bullet (`* `/`- `/`+ `) with indent < 2 columns.
+
+    Mirrors how `_convert_line` classifies top-level bullets so counts match
+    the rendered `•` bullets.
+    """
+    m = re.match(r"^(\s*)([*\-+])\s+", ln)
+    if not m:
+        return False
+    return len(m.group(1).expandtabs()) < 2
+
+
+def _fold_noise_sections(lines, url: str):
+    """Collapse dependency/chore sections into a one-line count summary.
+
+    Operates on raw GFM lines BEFORE per-line conversion, so the important
+    Features/Bug Fixes sections always survive later truncation. Section
+    boundaries are heading-based: a section runs from its heading until the
+    next heading of the same-or-higher level (`<=` the number of `#`).
+
+    For each folded section the heading line is kept as-is (so emoji +
+    localization still render), and its body is replaced by a single bullet:
+        * 本次含 {N} 项，详见 [Release 页面]({url})
+    where N is the count of TOP-LEVEL bullets. A folded section with 0
+    top-level bullets is dropped entirely (heading + nothing).
+    """
+    out = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        ln = lines[i]
+        level = _heading_level(ln)
+        if level and _is_noise_section(_heading_title(ln)):
+            # Collect the section body: lines until the next heading whose
+            # level is same-or-higher (<= this heading's level).
+            j = i + 1
+            count = 0
+            while j < n:
+                nxt_level = _heading_level(lines[j])
+                if nxt_level and nxt_level <= level:
+                    break
+                if _is_top_level_bullet(lines[j]):
+                    count += 1
+                j += 1
+            if count > 0:
+                out.append(ln)
+                out.append(f"* 本次含 {count} 项，详见 [Release 页面]({url})")
+            # count == 0: drop heading + body entirely.
+            i = j
+            continue
+        out.append(ln)
+        i += 1
     return out
 
 
@@ -381,6 +531,7 @@ def _gfm_to_markdownv2(body: str, url_for_truncation: str) -> str:
     body = _preprocess_body(body)
     lines = body.splitlines()
     lines = _strip_release_please_noise(lines)
+    lines = _fold_noise_sections(lines, url_for_truncation)
     lines = _collapse_blanks(lines)
     converted = [_convert_line(ln) for ln in lines]
     text = "\n".join(converted)
@@ -530,24 +681,7 @@ def main() -> int:
 
 def _smoke_test():
     """Manual smoke test — preview the rendered output without a real release."""
-    sample_body = '''
-## What's Changed
-
-### Features
-
-* feat(rss/notify): Sprint 1 — backend skeleton + all mode + throttle ([#101](https://github.com/sunerpy/pt-tools/pull/101)) ([a1b2c3d](https://github.com/sunerpy/pt-tools/commit/a1b2c3d))
-* feat(chatops): bilingual command descriptions ([#102](https://github.com/sunerpy/pt-tools/pull/102)) ([4d5e6f7](https://github.com/sunerpy/pt-tools/commit/4d5e6f7))
-
-### Bug Fixes
-
-* fix(chatops/qq): WebSocket half-open detection ([#103](https://github.com/sunerpy/pt-tools/pull/103)) ([8a9b0c1](https://github.com/sunerpy/pt-tools/commit/8a9b0c1))
-
-### Documentation
-
-* docs(chatops): retake screenshots at 1920x1080
-
-**Full Changelog**: https://github.com/sunerpy/pt-tools/compare/v0.30.1...v0.31.0
-'''
+    sample_body = _SMOKE_BODY
     os.environ.setdefault('REL_TAG', 'v0.31.0-smoke')
     os.environ.setdefault('REL_NAME', 'pt-tools v0.31.0 (smoke test)')
     os.environ.setdefault('REL_URL', 'https://github.com/sunerpy/pt-tools/releases/tag/v0.31.0')
@@ -566,7 +700,53 @@ def _smoke_test():
     print(f"\n--- length: {len(text)} chars, {len(text.encode('utf-8'))} bytes ---")
 
 
+def _selftest() -> int:
+    """Assert the noise-fold behavior against a representative sample body.
+
+    Verifies dependency/chore walls collapse to count summaries while real
+    Features/Bug Fixes sections survive untouched.
+    """
+    url = "https://github.com/sunerpy/pt-tools/releases/tag/v0.31.0"
+    rendered = _gfm_to_markdownv2(_SMOKE_BODY, url)
+    failures = []
+
+    def check(cond, msg):
+        if not cond:
+            failures.append(msg)
+
+    check("本次含 6 项" in rendered, "Dependencies (Frontend) should fold to 6 项")
+    check("本次含 2 项" in rendered, "Dependencies (Go) should fold to 2 项")
+    check("本次含 3 项" in rendered, "Chores should fold to 3 项")
+
+    for token in ("Bump", "vue-tsc", "oxlint", "vitest", "golang.org/x/text", "updated-dependencies"):
+        check(token not in rendered, f"noise token {token!r} should be gone")
+
+    check("WebSocket" in rendered, "Bug Fixes bullet content should survive")
+    check("bilingual" in rendered, "Features bullet content should survive")
+
+    check("🧩 *依赖更新*" in rendered, "dependency heading should localize with emoji")
+    check("🧹 *杂项*" in rendered, "chore heading should localize with emoji")
+    check("🐛 *Bug 修复*" in rendered, "Bug Fixes heading should localize with emoji")
+
+    summary_count = rendered.count("本次含")
+    check(summary_count == 3, f"expected 3 fold summaries, got {summary_count}")
+
+    if failures:
+        print("SELFTEST FAILED:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
+        print("--- rendered ---", file=sys.stderr)
+        print(rendered, file=sys.stderr)
+        return 1
+    print("SELFTEST PASSED — all assertions hold.")
+    print("--- rendered ---")
+    print(rendered)
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
     if "--smoke" in sys.argv:
         _smoke_test()
         if "--send" in sys.argv:
