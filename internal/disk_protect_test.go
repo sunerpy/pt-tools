@@ -104,8 +104,10 @@ func TestDiskProtect_RejectsWhenSizeExceedsEffectiveFree(t *testing.T) {
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
 	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
 		path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
-	require.ErrorIs(t, err, downloader.ErrInsufficientSpace,
-		"种子 80GB > effective_free 80GB - 阈值 20GB 应被拒")
+	// Issue #450：effective_free(80) > min(20) 但 80-80=0 < 20 属"单种子过大"，
+	// 语义拆分后返回 ErrTorrentTooLarge（而非 ErrInsufficientSpace）。
+	require.ErrorIs(t, err, downloader.ErrTorrentTooLarge,
+		"种子 80GB > effective_free 80GB - 阈值 20GB 属过大，应跳过")
 	assert.Equal(t, int64(0), GetDiskBudget().Reserved(),
 		"被拒后不应预留")
 }
@@ -161,8 +163,10 @@ func TestDiskProtect_PendingDownloadsSubtracted(t *testing.T) {
 	dlInfo := &DownloaderInfo{ID: 1, Name: "test-dl", AutoStart: true}
 	err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
 		path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
-	require.ErrorIs(t, err, downloader.ErrInsufficientSpace,
-		"100GB free - 60GB pending - 30GB new = 10 < 20 阈值 应被拒")
+	// Issue #450：effective(40) > min(20) 但 40-30=10 < 20 属"单种子过大"，
+	// 语义拆分后返回 ErrTorrentTooLarge。pending 扣除逻辑本身不变。
+	require.ErrorIs(t, err, downloader.ErrTorrentTooLarge,
+		"100GB free - 60GB pending - 30GB new = 10 < 20 阈值 应被跳过")
 }
 
 // TestDiskProtect_ReleaseOnPushFailure 验证推送失败时 Reserve 被归还。
@@ -387,7 +391,9 @@ func TestDiskProtect_RealRSSPath_SuccessKeepsReservation(t *testing.T) {
 			err := processSingleTorrentWithDownloader(context.Background(), mockDl, dlInfo,
 				j.path, "cat", "tag", "", models.SiteGroup("springsunday"), false)
 			if err != nil {
-				if errors.Is(err, downloader.ErrInsufficientSpace) {
+				// Issue #450：拒绝可能是 insufficient（盘满）或 too-large（单种子过大）。
+				// 本场景 effective 一直 > min，被拒的都是 too-large。
+				if errors.Is(err, downloader.ErrInsufficientSpace) || errors.Is(err, downloader.ErrTorrentTooLarge) {
 					fail.Add(1)
 				} else {
 					t.Errorf("unexpected error: %v", err)

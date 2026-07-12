@@ -158,24 +158,37 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			pushTorrentSize = size
 		}
 		minBytes := int64(glOnly.CleanupMinDiskSpaceGB * 1024 * 1024 * 1024)
-		if effectiveFreeBytes-pushTorrentSize < minBytes {
-			effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
-			tGB := float64(pushTorrentSize) / (1024 * 1024 * 1024)
-			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
-			pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
-			reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
-			sLogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: site=%s, id=%s",
-				dlSetting.Name, freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
+		effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
+		tGB := float64(pushTorrentSize) / (1024 * 1024 * 1024)
+		freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
+		pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
+		reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
+		switch {
+		case effectiveFreeBytes <= minBytes:
+			sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB <= 保底 %.1f GB)，暂停推送: site=%s, id=%s",
+				dlSetting.Name, freeGB, pendingGB, reservedGB, effGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
+			recordPushDiskProtectError(req.SiteID, req.TorrentID, "磁盘空间不足，暂停推送")
 			if glOnly.CleanupEnabled {
 				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "push", At: time.Now()})
 			}
 			return &PushTorrentResult{
 				Success:     false,
 				TorrentHash: torrentHash,
-				Message:     fmt.Sprintf("磁盘空间不足 (有效 %.1f GB - 种子 %.1f GB < %.1f GB)", effGB, tGB, glOnly.CleanupMinDiskSpaceGB),
+				Message:     fmt.Sprintf("磁盘空间不足 (有效 %.1f GB <= %.1f GB)，暂停推送", effGB, glOnly.CleanupMinDiskSpaceGB),
 			}, nil
-		}
-		if pushTorrentSize > 0 {
+		case pushTorrentSize <= 0:
+			sLogger().Warnf("[磁盘保护] %s: 种子大小未知但有效空间高于保底线，放行推送: site=%s, id=%s", dlSetting.Name, req.SiteID, req.TorrentID)
+		case effectiveFreeBytes-pushTorrentSize < minBytes:
+			sLogger().Warnf("[磁盘保护] %s: 种子体积 %.1f GB 超过当前可用空间 %.1f GB (有效 - 种子 < 保底 %.1f GB)，已跳过: site=%s, id=%s",
+				dlSetting.Name, tGB, effGB, glOnly.CleanupMinDiskSpaceGB, req.SiteID, req.TorrentID)
+			recordPushDiskProtectError(req.SiteID, req.TorrentID,
+				fmt.Sprintf("种子体积 %.1f GB 超过当前可用空间 %.1f GB，已跳过", tGB, effGB))
+			return &PushTorrentResult{
+				Success:     false,
+				TorrentHash: torrentHash,
+				Message:     fmt.Sprintf("种子体积 %.1f GB 超过当前可用空间 %.1f GB，已跳过", tGB, effGB),
+			}, nil
+		default:
 			budget.Reserve(pushTorrentSize)
 		}
 	}
@@ -281,6 +294,19 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		Success:     true,
 		TorrentHash: result.Hash,
 	}, nil
+}
+
+// recordPushDiskProtectError 将手动推送的磁盘保护拒绝原因写入 last_error，
+// 与 RSS 路径记账口径一致；不累加 retry_count（拒绝非本种子之过）。
+func recordPushDiskProtectError(siteID, torrentID, msg string) {
+	if global.GlobalDB == nil {
+		return
+	}
+	if err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Where("site_name = ? AND torrent_id = ?", siteID, torrentID).
+		Update("last_error", msg).Error; err != nil {
+		sLogger().Errorf("记录磁盘保护状态失败: site=%s, id=%s, %v", siteID, torrentID, err)
+	}
 }
 
 // createDownloaderInstanceForPush 根据配置创建下载器实例

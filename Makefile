@@ -26,6 +26,14 @@ PLATFORMS = linux/amd64 linux/arm64 windows/amd64 windows/arm64
 DOCKERPLATFORMS = linux/amd64,linux/arm64
 DIST_DIR = dist
 
+# 覆盖率门禁配置
+# COVERAGE_MIN: 过滤后的总覆盖率下限（低于则 coverage-gate/coverage-gate-check 失败）。
+#   当前值为今日可达到的现实基线，后续覆盖率提升活动中再逐步抬高。
+# COVERAGE_EXCLUDE: 从门禁统计中排除的文件（grep -E 正则）。必须与 codecov.yml 的 ignore 集合保持一致。
+#   排除集合固定 3 项：测试文件、生成的 mocks、入口 main.go。version/ 等真实业务包不排除。
+COVERAGE_MIN := 55
+COVERAGE_EXCLUDE := (_test\.go|/mocks/|(^|/)main\.go:)
+
 # Proxy 设置 (支持大小写环境变量)
 HTTP_PROXY ?= $(http_proxy)
 HTTPS_PROXY ?= $(https_proxy)
@@ -37,7 +45,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary build-extension generate-icons check-sites plan-inventory-check
+.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension generate-icons check-sites plan-inventory-check
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -276,6 +284,38 @@ coverage-summary: unit-test
 	@go tool cover -func=$(DIST_DIR)/filtered_coverage.out | tee $(DIST_DIR)/coverage.txt
 	@echo ""
 	@echo "Filtered coverage saved to: $(DIST_DIR)/coverage.txt"
+
+# 覆盖率门禁（本地，自包含）：先跑 race+atomic 覆盖率测试，再按 COVERAGE_MIN 校验过滤后总覆盖率。
+# 供开发者本地一键使用。CI 中请用 coverage-gate-check（复用已生成的 profile，避免重复跑测试）。
+coverage-gate:
+	@mkdir -p $(DIST_DIR)
+	CGO_ENABLED=1 go test ./... -count=1 -race -covermode=atomic -coverprofile=$(DIST_DIR)/coverage.out
+	@$(MAKE) coverage-gate-check
+
+# 覆盖率门禁校验（CI）：不重跑测试，仅对已存在的 $(DIST_DIR)/coverage.out 做过滤 + 下限校验。
+coverage-gate-check:
+	@test -f $(DIST_DIR)/coverage.out || (echo "coverage profile not found: run 'make unit-test' or 'make coverage-gate' first"; exit 1)
+	@grep -Ev '$(COVERAGE_EXCLUDE)' $(DIST_DIR)/coverage.out > $(DIST_DIR)/coverage.filtered.out
+	@go tool cover -func=$(DIST_DIR)/coverage.filtered.out | tee $(DIST_DIR)/coverage.filtered.txt
+	@awk -v min=$(COVERAGE_MIN) '/^total:/ { gsub(/%/,"",$$3); \
+		if (($$3+0) < min) { printf "coverage gate failed: %.1f%% < %d%%\n", $$3, min; exit 1 } \
+		printf "coverage gate passed: %.1f%% >= %d%%\n", $$3, min }' $(DIST_DIR)/coverage.filtered.txt
+
+# 覆盖率排除一致性校验：确保 codecov.yml 的 ignore 集合与 Makefile 门禁排除项同步，漂移即失败。
+# 排除集合固定 3 项：mocks、main.go、_test.go。
+coverage-parity:
+	@set -euo pipefail; \
+	codecov_expected=('**/mocks/**' 'main.go' '**/*_test.go'); \
+	makefile_expected=('_test\.go' '/mocks/' 'main\.go'); \
+	for p in "$${codecov_expected[@]}"; do \
+		grep -F -- "$$p" codecov.yml >/dev/null || { echo "codecov.yml missing $$p"; exit 1; }; \
+	done; \
+	for p in "$${makefile_expected[@]}"; do \
+		grep -F -- "$$p" Makefile >/dev/null || { echo "Makefile missing $$p"; exit 1; }; \
+	done; \
+	n=$$(grep -E '^[[:space:]]*-[[:space:]]+"' codecov.yml | wc -l); \
+	[ "$$n" -eq $${#codecov_expected[@]} ] || { echo "codecov ignore count $$n mismatch (expected $${#codecov_expected[@]})"; exit 1; }; \
+	echo "coverage parity passed"
 
 # 前端构建
 build-frontend:

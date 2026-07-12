@@ -34,7 +34,10 @@ var (
 	ErrConnectionFailed     = errors.New("connection failed")
 	ErrTorrentNotFound      = errors.New("torrent not found")
 	ErrInsufficientSpace    = errors.New("insufficient disk space")
-	ErrInvalidConfig        = errors.New("invalid configuration")
+	// ErrTorrentTooLarge 单个种子体积超过当前有效可用空间——应跳过该种子，继续处理其余。
+	// 与 ErrInsufficientSpace 区分：前者"盘还够，只是这个太大"，后者"盘本身不够了"。
+	ErrTorrentTooLarge = errors.New("torrent size exceeds available space")
+	ErrInvalidConfig   = errors.New("invalid configuration")
 )
 
 type ClientStatus struct {

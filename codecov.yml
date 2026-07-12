@@ -1,0 +1,10 @@
+coverage:
+  status:
+    project:
+      default: { target: 55%, threshold: 1% }
+    patch:
+      default: { target: 80%, threshold: 1% }
+ignore:
+  - "**/mocks/**"
+  - "main.go"
+  - "**/*_test.go"
