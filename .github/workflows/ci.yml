@@ -111,6 +111,12 @@ jobs:
           mkdir -p dist
           go test ./... -count=1 -race -cover -covermode=atomic -coverprofile=dist/coverage.out
 
+      - name: Coverage gate
+        run: make coverage-gate-check
+
+      - name: Coverage exclusion parity
+        run: make coverage-parity
+
       - name: Upload Coverage
         if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v7
@@ -118,6 +124,14 @@ jobs:
           name: go-coverage
           path: dist/coverage.out
           retention-days: 7
+
+      - name: Upload coverage to Codecov
+        if: ${{ !env.ACT }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./dist/coverage.out
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   go-lint:
     name: Go Lint
