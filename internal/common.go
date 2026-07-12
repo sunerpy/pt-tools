@@ -204,24 +204,125 @@ func ProcessTorrentsWithDownloaderByRSS(
 		return nil
 	}
 
-	successCount := 0
-	failCount := 0
+	gl, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+	result := runPushLoop(ctx, dl, dlInfo, dirPath, filePaths, category, tags, downloadPath, siteName, rssCfg.PauseOnFreeEnd, gl.RetainHours)
+
+	sLogger().Infof("[种子推送完成] 站点=%s, 总数=%d, 成功=%d, 失败=%d, 跳过(过大)=%d, 磁盘满=%v",
+		siteName, len(filePaths), result.success, result.failed, result.skippedTooLarge, result.diskFull)
+	return nil
+}
+
+// pushLoopResult 汇总一次推送循环的处理结果，供日志与测试断言使用。
+type pushLoopResult struct {
+	success         int
+	failed          int
+	skippedTooLarge int
+	diskFull        bool
+}
+
+// runPushLoop 遍历暂存目录中的 .torrent 逐个推送，并按磁盘保护语义分类处理：
+// 磁盘整体不足则停止本轮（break），单个种子过大则跳过继续，其余错误计入 failed。
+// defer sweepStagingDir 注册在循环前，确保正常结束/磁盘满 break/过大 continue
+// 三种退出路径都执行暂存目录兜底清理。
+func runPushLoop(
+	ctx context.Context,
+	dl downloader.Downloader,
+	dlInfo *DownloaderInfo,
+	dirPath string,
+	filePaths []string,
+	category, tags, downloadPath string,
+	siteName models.SiteGroup,
+	pauseOnFreeEnd bool,
+	retainHours int,
+) pushLoopResult {
+	defer sweepStagingDir(dirPath, siteName, retainHours)
+
+	var result pushLoopResult
+LOOP:
 	for i, file := range filePaths {
-		err := processSingleTorrentWithDownloader(ctx, dl, dlInfo, file, category, tags, downloadPath, siteName, rssCfg.PauseOnFreeEnd)
-		if err != nil {
-			if errors.Is(err, downloader.ErrInsufficientSpace) {
-				sLogger().Warnf("[磁盘保护] 空间不足，停止推送剩余 %d 个种子", len(filePaths)-i-1)
-				break
-			}
+		err := processSingleTorrentWithDownloader(ctx, dl, dlInfo, file, category, tags, downloadPath, siteName, pauseOnFreeEnd)
+		switch {
+		case err == nil:
+			result.success++
+		case errors.Is(err, downloader.ErrInsufficientSpace):
+			sLogger().Warnf("[磁盘保护] 磁盘空间已达保底线，停止本轮推送剩余 %d 个种子", len(filePaths)-i-1)
+			result.diskFull = true
+			break LOOP
+		case errors.Is(err, downloader.ErrTorrentTooLarge):
+			sLogger().Warnf("[磁盘保护] 种子过大跳过，继续处理后续: %s", file)
+			result.skippedTooLarge++
+			continue
+		default:
 			sLogger().Errorf("处理种子失败: %s, %v", file, err)
-			failCount++
-		} else {
-			successCount++
+			result.failed++
 		}
 	}
+	return result
+}
 
-	sLogger().Infof("[种子推送完成] 站点=%s, 总数=%d, 成功=%d, 失败=%d", siteName, len(filePaths), successCount, failCount)
-	return nil
+// recordDiskProtectError 将磁盘保护拒绝原因写入 last_error，使状态在 Web/ChatOps
+// 可见，且不累加 retry_count（拒绝非本种子之过，避免误达 MaxRetry 被删）。
+func recordDiskProtectError(siteName models.SiteGroup, torrentHash, msg string) {
+	if global.GlobalDB == nil {
+		return
+	}
+	if err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Where("site_name = ? AND torrent_hash = ?", string(siteName), torrentHash).
+		Update("last_error", msg).Error; err != nil {
+		sLogger().Errorf("记录磁盘保护状态失败: hash=%s, %v", torrentHash, err)
+	}
+}
+
+// sweepStagingDir 独立于推送循环，按文件系统 mtime + DB 状态兜底清理暂存目录里
+// 已无意义的 .torrent（已推送/孤立/已达最大重试/超过保留期未推送）。
+// retainHours <= 0 时不启用（保持旧语义）。用 mtime 而非被 RSS 每轮刷新的
+// last_check_time，避免"反复被看到但推不出去"的种子永不老化。
+func sweepStagingDir(dirPath string, siteName models.SiteGroup, retainHours int) {
+	if retainHours <= 0 {
+		return
+	}
+	files, err := qbit.GetTorrentFilesPath(dirPath)
+	if err != nil {
+		return
+	}
+	for _, f := range filterTorrentFilesBySite(files, siteName) {
+		if !shouldSweep(f, siteName, retainHours) {
+			continue
+		}
+		if rmErr := os.Remove(f); rmErr != nil && !os.IsNotExist(rmErr) {
+			sLogger().Errorf("[暂存清理] 删除失败: %s, %v", f, rmErr)
+			continue
+		}
+		sLogger().Infof("[暂存清理] 删除已无意义的 .torrent: %s", f)
+	}
+}
+
+// shouldSweep 判定一个暂存 .torrent 是否应被清理（保守，避免误删还有用的）。
+func shouldSweep(filePath string, siteName models.SiteGroup, retainHours int) bool {
+	hash, err := qbit.ComputeTorrentHashWithPath(filePath)
+	if err != nil {
+		return false
+	}
+	torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(string(siteName), hash)
+	if err != nil {
+		return false
+	}
+	if torrent == nil {
+		return true
+	}
+	if torrent.IsPushed != nil && *torrent.IsPushed {
+		return true
+	}
+	gl, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
+	if gl.MaxRetry > 0 && torrent.RetryCount >= gl.MaxRetry {
+		return true
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+	cutoff := time.Now().Add(-time.Duration(retainHours) * time.Hour)
+	return info.ModTime().Before(cutoff)
 }
 
 func filterTorrentFilesBySite(filePaths []string, siteName models.SiteGroup) []string {
@@ -415,22 +516,29 @@ func processSingleTorrentWithDownloader(
 			}
 		}
 		minBytes := int64(glOnly.CleanupMinDiskSpaceGB * 1024 * 1024 * 1024)
-		if effectiveFreeBytes-torrentSize < minBytes {
-			effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
-			tGB := float64(torrentSize) / (1024 * 1024 * 1024)
-			freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
-			pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
-			reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
-			sLogger().Warnf("[磁盘保护] %s: 空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB；有效 - 种子 %.1f GB < 保底 %.1f GB)，跳过推送: %s",
-				dl.GetName(), freeGB, pendingGB, reservedGB, effGB, tGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+		effGB := float64(effectiveFreeBytes) / (1024 * 1024 * 1024)
+		tGB := float64(torrentSize) / (1024 * 1024 * 1024)
+		freeGB := float64(freeSpace) / (1024 * 1024 * 1024)
+		pendingGB := float64(pendingBytes) / (1024 * 1024 * 1024)
+		reservedGB := float64(budget.Reserved()) / (1024 * 1024 * 1024)
+		switch {
+		case effectiveFreeBytes <= minBytes:
+			sLogger().Warnf("[磁盘保护] %s: 磁盘空间不足 (qBit可用 %.1f GB - 下载中待占用 %.1f GB - 本进程预留 %.1f GB = 有效 %.1f GB <= 保底 %.1f GB)，暂停推送: %s",
+				dl.GetName(), freeGB, pendingGB, reservedGB, effGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+			recordDiskProtectError(siteName, torrentHash, "磁盘空间不足，暂停推送")
 			if glOnly.CleanupEnabled {
 				events.Publish(events.Event{Type: events.DiskSpaceLow, Source: "rss", At: time.Now()})
 			}
 			return downloader.ErrInsufficientSpace
-		}
-		// 通过检查后立刻预留，确保后续 worker 能看到本次扣减。
-		// 推送失败会在下方失败分支 Release 归还。
-		if torrentSize > 0 {
+		case torrentSize <= 0:
+			sLogger().Warnf("[磁盘保护] %s: 种子大小未知但有效空间高于保底线，放行推送: %s", dl.GetName(), filePath)
+		case effectiveFreeBytes-torrentSize < minBytes:
+			sLogger().Warnf("[磁盘保护] %s: 种子体积 %.1f GB 超过当前可用空间 %.1f GB (有效 - 种子 < 保底 %.1f GB)，已跳过: %s",
+				dl.GetName(), tGB, effGB, glOnly.CleanupMinDiskSpaceGB, filePath)
+			recordDiskProtectError(siteName, torrentHash,
+				fmt.Sprintf("种子体积 %.1f GB 超过当前可用空间 %.1f GB，已跳过", tGB, effGB))
+			return downloader.ErrTorrentTooLarge
+		default:
 			budget.Reserve(torrentSize)
 			reservedTorrentSize = torrentSize
 		}
