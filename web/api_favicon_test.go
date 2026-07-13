@@ -201,14 +201,16 @@ func TestServeFaviconData_Caching(t *testing.T) {
 }
 
 func TestApiFaviconList_WithRegisteredSites(t *testing.T) {
-	// 注册测试站点定义
-	testDef := &v2.SiteDefinition{
-		ID:         "testsite_favicon",
-		Name:       "Test Site for Favicon",
-		URLs:       []string{"https://test.example.com/"},
-		FaviconURL: "https://test.example.com/favicon.ico",
+	// 幂等注册：definition registry 对重复 ID 会 panic（除非是同一指针），
+	// 因此在 -count>1 时须先检查再注册，否则第二次迭代会崩溃。
+	if v2.GetDefinitionRegistry().GetOrDefault("testsite_favicon") == nil {
+		v2.RegisterSiteDefinition(&v2.SiteDefinition{
+			ID:         "testsite_favicon",
+			Name:       "Test Site for Favicon",
+			URLs:       []string{"https://test.example.com/"},
+			FaviconURL: "https://test.example.com/favicon.ico",
+		})
 	}
-	v2.RegisterSiteDefinition(testDef)
 
 	// 初始化服务
 	faviconService = &FaviconService{
