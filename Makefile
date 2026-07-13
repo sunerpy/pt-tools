@@ -31,7 +31,7 @@ DIST_DIR = dist
 #   当前值为今日可达到的现实基线，后续覆盖率提升活动中再逐步抬高。
 # COVERAGE_EXCLUDE: 从门禁统计中排除的文件（grep -E 正则）。必须与 codecov.yml 的 ignore 集合保持一致。
 #   排除集合固定 3 项：测试文件、生成的 mocks、入口 main.go。version/ 等真实业务包不排除。
-COVERAGE_MIN := 55
+COVERAGE_MIN := 90
 COVERAGE_EXCLUDE := (_test\.go|/mocks/|(^|/)main\.go:)
 
 # Proxy 设置 (支持大小写环境变量)
