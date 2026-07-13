@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { globalApi, type GlobalSettings } from "@/api";
-import { DataAnalysis, Delete, Setting } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { globalApi, maintenanceApi, type CleanResult, type GlobalSettings } from "@/api";
+import { Brush, DataAnalysis, Delete, Setting, View } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
 const loading = ref(false);
@@ -192,6 +192,73 @@ async function save() {
     ElMessage.error((e as Error).message || "保存失败");
   } finally {
     saving.value = false;
+  }
+}
+
+const workdirCategoryOptions = [
+  { value: "logs", label: "日志文件", desc: "logs/ 目录下的历史日志" },
+  { value: "staging", label: "暂存种子文件", desc: "临时下载的 .torrent 暂存文件" },
+  { value: "backups", label: "旧配置备份", desc: "自动生成的历史配置备份" },
+];
+
+const workdirCategories = ref<string[]>(["logs", "staging", "backups"]);
+const keepBackups = ref(5);
+const previewing = ref(false);
+const cleaning = ref(false);
+const cleanPreview = ref<CleanResult | null>(null);
+const cleanResult = ref<CleanResult | null>(null);
+
+function categoryLabel(name: string): string {
+  return workdirCategoryOptions.find((o) => o.value === name)?.label ?? name;
+}
+
+async function previewClean() {
+  previewing.value = true;
+  cleanResult.value = null;
+  try {
+    cleanPreview.value = await maintenanceApi.preview();
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "预览失败");
+  } finally {
+    previewing.value = false;
+  }
+}
+
+async function executeClean() {
+  if (workdirCategories.value.length === 0) {
+    ElMessage.warning("请至少选择一个清理项");
+    return;
+  }
+  const selectedNames = workdirCategories.value.map(categoryLabel).join("、");
+  try {
+    await ElMessageBox.confirm(
+      `即将清理以下内容：${selectedNames}。数据库、密钥等受保护项不会被删除。此操作不可撤销，确认继续？`,
+      "确认清理工作目录",
+      {
+        confirmButtonText: "立即清理",
+        cancelButtonText: "取消",
+        type: "warning",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  cleaning.value = true;
+  try {
+    cleanResult.value = await maintenanceApi.clean({
+      categories: workdirCategories.value,
+      dryRun: false,
+      keepBackups: keepBackups.value,
+    });
+    cleanPreview.value = null;
+    ElMessage.success(
+      `清理完成，共删除 ${cleanResult.value.totalDeleted} 项，释放 ${cleanResult.value.totalFreedHuman}`,
+    );
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "清理失败");
+  } finally {
+    cleaning.value = false;
   }
 }
 </script>
@@ -534,6 +601,108 @@ async function save() {
       <div class="form-actions">
         <el-button type="primary" :loading="saving" @click="save" size="large">保存设置</el-button>
       </div>
+    </el-card>
+
+    <el-card class="settings-card" shadow="never" style="margin-top: 20px">
+      <template #header>
+        <div class="card-header">
+          <div class="card-title-group">
+            <el-icon :size="20" color="var(--el-color-primary)"><Brush /></el-icon>
+            <div>
+              <h3 class="card-title">清理工作目录 (.pt-tools)</h3>
+              <p class="card-subtitle">
+                清理日志、暂存种子文件、旧配置备份；数据库、密钥等受保护项不会被删除
+              </p>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <el-form label-position="top">
+        <el-form-item label="清理项">
+          <el-checkbox-group v-model="workdirCategories">
+            <el-checkbox
+              v-for="opt in workdirCategoryOptions"
+              :key="opt.value"
+              :value="opt.value"
+              border>
+              {{ opt.label }}
+              <span style="color: var(--pt-text-tertiary); font-size: 12px; margin-left: 6px">{{
+                opt.desc
+              }}</span>
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+
+        <el-form-item label="保留最近备份数量">
+          <el-input-number v-model="keepBackups" :min="0" :max="100" :step="1" />
+          <div class="form-tip">清理旧配置备份时保留最近的 N 份，其余删除（0 表示全部清理）</div>
+        </el-form-item>
+
+        <div class="form-actions" style="justify-content: flex-start; gap: 12px">
+          <el-button :loading="previewing" @click="previewClean">
+            <el-icon><View /></el-icon>
+            预览可清理项
+          </el-button>
+          <el-button type="danger" :loading="cleaning" @click="executeClean">
+            <el-icon><Delete /></el-icon>
+            立即清理
+          </el-button>
+        </div>
+      </el-form>
+
+      <el-alert
+        v-if="cleanPreview"
+        title="以下为预览结果，尚未删除任何文件。点击「立即清理」并确认后才会实际删除。"
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin: 12px 0" />
+
+      <el-table v-if="cleanPreview" :data="cleanPreview.categories" size="small" border>
+        <el-table-column label="清理项" min-width="120">
+          <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
+        </el-table-column>
+        <el-table-column prop="deletedCount" label="可删除数量" width="110" align="center" />
+        <el-table-column prop="freedHuman" label="可释放空间" width="120" align="center" />
+        <el-table-column label="状态" min-width="160">
+          <template #default="{ row }">
+            <el-tag v-if="row.note" type="warning" size="small">{{ row.note }}</el-tag>
+            <el-tag v-else-if="row.skippedCount > 0" type="info" size="small"
+              >跳过 {{ row.skippedCount }} 项(受保护)</el-tag
+            >
+            <span v-else style="color: var(--pt-text-tertiary)">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="cleanPreview" class="form-tip" style="margin-top: 8px">
+        合计可删除 {{ cleanPreview.totalDeleted }} 项，可释放 {{ cleanPreview.totalFreedHuman }}
+      </div>
+
+      <template v-if="cleanResult">
+        <el-alert
+          :title="`清理完成：共删除 ${cleanResult.totalDeleted} 项，释放 ${cleanResult.totalFreedHuman}`"
+          type="success"
+          :closable="false"
+          show-icon
+          style="margin: 12px 0" />
+        <el-table :data="cleanResult.categories" size="small" border>
+          <el-table-column label="清理项" min-width="120">
+            <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
+          </el-table-column>
+          <el-table-column prop="deletedCount" label="已删除" width="90" align="center" />
+          <el-table-column prop="freedHuman" label="释放空间" width="120" align="center" />
+          <el-table-column label="状态" min-width="160">
+            <template #default="{ row }">
+              <el-tag v-if="row.note" type="warning" size="small">{{ row.note }}</el-tag>
+              <el-tag v-else-if="row.skippedCount > 0" type="info" size="small"
+                >跳过 {{ row.skippedCount }} 项(受保护)</el-tag
+              >
+              <span v-else style="color: var(--pt-text-tertiary)">—</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
     </el-card>
   </div>
 </template>

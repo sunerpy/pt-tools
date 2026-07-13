@@ -1474,3 +1474,36 @@ export const cloakApi = {
   testConnection: (data?: { endpoint?: string; token?: string }) =>
     api.post<CloakTestResult>("/api/cloak/test", data ?? {}),
 };
+
+// ============== 工作目录清理相关 ==============
+
+export interface CleanCategoryResult {
+  name: string;
+  deletedCount: number;
+  freedBytes: number;
+  freedHuman: string;
+  skippedCount: number;
+  note?: string;
+}
+
+export interface CleanResult {
+  dryRun: boolean;
+  categories: CleanCategoryResult[];
+  totalDeleted: number;
+  totalFreedBytes: number;
+  totalFreedHuman: string;
+}
+
+export interface CleanRequest {
+  categories?: string[];
+  dryRun: boolean;
+  keepBackups?: number;
+}
+
+// 工作目录清理 API
+export const maintenanceApi = {
+  // 预览可清理项（dryRun，不删除任何文件）
+  preview: () => api.get<CleanResult>("/api/maintenance/clean"),
+  // 执行清理（dryRun:false 才会实际删除）
+  clean: (data: CleanRequest) => api.post<CleanResult>("/api/maintenance/clean", data),
+};

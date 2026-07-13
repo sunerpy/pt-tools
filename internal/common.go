@@ -24,6 +24,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/internal/filter"
+	"github.com/sunerpy/pt-tools/internal/maintenance"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -298,31 +299,14 @@ func sweepStagingDir(dirPath string, siteName models.SiteGroup, retainHours int)
 }
 
 // shouldSweep 判定一个暂存 .torrent 是否应被清理（保守，避免误删还有用的）。
+// 决策规则复用 internal/maintenance.ShouldSweepStaging（Issue #450 与特性 D 共享的
+// 唯一 sweep 规则），避免两处逻辑分叉。MaxRetry 从全局配置读取后透传。
 func shouldSweep(filePath string, siteName models.SiteGroup, retainHours int) bool {
-	hash, err := qbit.ComputeTorrentHashWithPath(filePath)
-	if err != nil {
+	if global.GlobalDB == nil {
 		return false
-	}
-	torrent, err := global.GlobalDB.GetTorrentBySiteAndHash(string(siteName), hash)
-	if err != nil {
-		return false
-	}
-	if torrent == nil {
-		return true
-	}
-	if torrent.IsPushed != nil && *torrent.IsPushed {
-		return true
 	}
 	gl, _ := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
-	if gl.MaxRetry > 0 && torrent.RetryCount >= gl.MaxRetry {
-		return true
-	}
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return false
-	}
-	cutoff := time.Now().Add(-time.Duration(retainHours) * time.Hour)
-	return info.ModTime().Before(cutoff)
+	return maintenance.ShouldSweepStaging(global.GlobalDB, filePath, siteName, retainHours, gl.MaxRetry)
 }
 
 func filterTorrentFilesBySite(filePaths []string, siteName models.SiteGroup) []string {
