@@ -20,7 +20,7 @@
     "@types/marked": "^6.0.0",
     "@vueuse/core": "^14.3.0",
     "dompurify": "^3.4.11",
-    "element-plus": "^2.14.2",
+    "element-plus": "^2.14.3",
     "marked": "^17.0.6",
     "pinia": "^3.0.4",
     "vue": "^3.5.39",
