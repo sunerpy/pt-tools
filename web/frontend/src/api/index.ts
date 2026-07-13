@@ -1486,6 +1486,8 @@ export interface CleanCategoryResult {
   deletedCount: number;
   freedBytes: number;
   freedHuman: string;
+  dirUsedBytes: number;
+  dirUsedHuman: string;
   skippedCount: number;
   note?: string;
 }

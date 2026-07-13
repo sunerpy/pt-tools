@@ -251,10 +251,14 @@ async function executeClean() {
       dryRun: false,
       keepBackups: keepBackups.value,
     });
-    cleanPreview.value = null;
     ElMessage.success(
       `清理完成，共删除 ${cleanResult.value.totalDeleted} 项，释放 ${cleanResult.value.totalFreedHuman}`,
     );
+    try {
+      cleanPreview.value = await maintenanceApi.preview();
+    } catch {
+      cleanPreview.value = null;
+    }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "清理失败");
   } finally {
@@ -663,6 +667,7 @@ async function executeClean() {
         <el-table-column label="清理项" min-width="120">
           <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
         </el-table-column>
+        <el-table-column prop="dirUsedHuman" label="当前已用空间" width="120" align="center" />
         <el-table-column prop="deletedCount" label="可删除数量" width="110" align="center" />
         <el-table-column prop="freedHuman" label="可释放空间" width="120" align="center" />
         <el-table-column label="状态" min-width="160">
@@ -690,6 +695,7 @@ async function executeClean() {
           <el-table-column label="清理项" min-width="120">
             <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
           </el-table-column>
+          <el-table-column prop="dirUsedHuman" label="当前已用空间" width="120" align="center" />
           <el-table-column prop="deletedCount" label="已删除" width="90" align="center" />
           <el-table-column prop="freedHuman" label="释放空间" width="120" align="center" />
           <el-table-column label="状态" min-width="160">
