@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] - 2026-07-13
+
+### Features
+
+- 新增 .pt-tools 工作目录统一清理入口(CLI 命令 + Web 按钮) ([#458](https://github.com/sunerpy/pt-tools/issues/458)) ([#458](https://github.com/sunerpy/pt-tools/pull/458))
+- 抽取共享 internal/maintenance.Cleaner，采用白名单(logs/staging/backups)+红线黑名单(DB/secret.key/日志基座)+软链逃逸防护+dry-run - 新增 pt-tools clean CLI 命令(默认 --dry-run，--confirm 才删除，--category 分类，--keep-backups 保留备份) - 新增鉴权 /api/maintenance/clean 接口(GET 预览 / POST 执行)及 AutoCleanup.vue 清理按钮 - 复用 #450 staging sweep 规则(提取为 maintenance.ShouldSweepStaging，不破坏 #450 回归)
+
 ## [0.40.5] - 2026-07-13
 
 ### Bug Fixes
