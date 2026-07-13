@@ -1661,3 +1661,130 @@ func TestPurposeSplit(t *testing.T) {
 		assert.Nil(t, notifyRule)
 	})
 }
+
+// TestMatchesInput_MatchFieldTag covers the MatchFieldTitle / MatchFieldTag /
+// unknown-value branches of matchesInput via MatchRulesWithInput.
+func TestMatchesInput_MatchFields(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+
+	// Tag-only rule: matches on Tag field only.
+	tagRule := &models.FilterRule{
+		Name: "tag-rule", Pattern: "anime", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldTag, Enabled: true, Priority: 10,
+	}
+	require.NoError(t, db.Create(tagRule).Error)
+
+	svc := NewFilterService(db)
+
+	// Matches via Tag but title doesn't contain "anime".
+	rule, matched := svc.MatchRulesWithInput(MatchInput{Title: "some movie", Tag: "anime pack"}, nil, nil)
+	assert.True(t, matched)
+	assert.NotNil(t, rule)
+
+	// Title contains keyword but rule is tag-only -> no match.
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "anime show", Tag: "other"}, nil, nil)
+	assert.False(t, matched)
+}
+
+// TestMatchesInput_TitleOnly covers MatchFieldTitle explicit branch.
+func TestMatchesInput_TitleOnly(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+
+	titleRule := &models.FilterRule{
+		Name: "title-rule", Pattern: "movie", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldTitle, Enabled: true, Priority: 10,
+	}
+	require.NoError(t, db.Create(titleRule).Error)
+	svc := NewFilterService(db)
+
+	_, matched := svc.MatchRulesWithInput(MatchInput{Title: "a movie", Tag: "nope"}, nil, nil)
+	assert.True(t, matched)
+
+	// Only tag has the keyword; title-only rule should not match.
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "nope", Tag: "movie tag"}, nil, nil)
+	assert.False(t, matched)
+}
+
+// TestRuleApplies_SiteAndRSSRestrictions covers the ruleApplies branches:
+// site-restricted and RSS-restricted rules.
+func TestRuleApplies_SiteAndRSSRestrictions(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+
+	siteID := uint(7)
+	rssID := uint(9)
+
+	// Rule restricted to a specific site.
+	siteRule := &models.FilterRule{
+		Name: "site-rule", Pattern: "x", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, Enabled: true, Priority: 10, SiteID: &siteID,
+	}
+	require.NoError(t, db.Create(siteRule).Error)
+	// Rule restricted to a specific RSS.
+	rssRule := &models.FilterRule{
+		Name: "rss-rule", Pattern: "y", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, Enabled: true, Priority: 20, RSSID: &rssID,
+	}
+	require.NoError(t, db.Create(rssRule).Error)
+	svc := NewFilterService(db)
+
+	// site rule: siteID nil -> should NOT apply
+	_, matched := svc.MatchRulesWithInput(MatchInput{Title: "x"}, nil, nil)
+	assert.False(t, matched)
+
+	// site rule: mismatched siteID -> should NOT apply
+	otherSite := uint(99)
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "x"}, &otherSite, nil)
+	assert.False(t, matched)
+
+	// site rule: correct siteID -> applies
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "x"}, &siteID, nil)
+	assert.True(t, matched)
+
+	// rss rule: rssID nil -> should NOT apply
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "y"}, nil, nil)
+	assert.False(t, matched)
+
+	// rss rule: mismatched rssID -> should NOT apply
+	otherRSS := uint(88)
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "y"}, nil, &otherRSS)
+	assert.False(t, matched)
+
+	// rss rule: correct rssID -> applies
+	_, matched = svc.MatchRulesWithInput(MatchInput{Title: "y"}, nil, &rssID)
+	assert.True(t, matched)
+}
+
+// TestShouldNotifyForRSS covers the notify-purpose channel including require_free.
+func TestShouldNotifyForRSS(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-notify")
+
+	// Notify-purpose rule that requires free.
+	createRuleForDecide(t, db, svc, rss.ID, &models.FilterRule{
+		Name: "notify-free", Pattern: "series", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, RequireFree: true, Purpose: "notify",
+		Enabled: true, Priority: 5,
+	})
+
+	t.Run("matches + free -> notify", func(t *testing.T) {
+		ok, rule := svc.ShouldNotifyForRSS("new series ep", true, rss.ID)
+		assert.True(t, ok)
+		assert.NotNil(t, rule)
+	})
+
+	t.Run("matches but not free -> no notify", func(t *testing.T) {
+		ok, rule := svc.ShouldNotifyForRSS("new series ep", false, rss.ID)
+		assert.False(t, ok)
+		assert.NotNil(t, rule)
+	})
+
+	t.Run("no match -> no notify", func(t *testing.T) {
+		ok, _ := svc.ShouldNotifyForRSS("unrelated title", true, rss.ID)
+		assert.False(t, ok)
+	})
+}

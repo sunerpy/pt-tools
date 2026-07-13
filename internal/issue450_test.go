@@ -1,10 +1,6 @@
 // MIT License
 // Copyright (c) 2025 pt-tools
 
-// Tests for Issue #450: 磁盘保护误短路推送 + 暂存目录 .torrent 堆积。
-// 复用 disk_protect_test.go 的 setUpDiskProtectTest / makeTorrentFile /
-// makeUniqueTorrentFile / makeTorrentInfoWithSize / gomock MockDownloader / gb。
-
 package internal
 
 import (
@@ -60,8 +56,6 @@ func getTorrent(t *testing.T, hash string) *models.TorrentInfo {
 	require.NoError(t, err)
 	return ti
 }
-
-// ============ 6.1 processSingleTorrentWithDownloader 拒绝分类 ============
 
 // T1: free=102, min=20, size=95 → 102-95=7<20 → ErrTorrentTooLarge（不是 insufficient）。
 func TestDiskProtect_TooLargeReturnsTorrentTooLarge(t *testing.T) {
@@ -183,8 +177,6 @@ func TestDiskProtect_FitsStillPushes(t *testing.T) {
 	assert.Equal(t, 30*gb, GetDiskBudget().Reserved())
 }
 
-// ============ 6.2 runPushLoop 循环行为 ============
-
 // T5: [big, small, small], free=102, min=20 → big 跳过、两个 small 推送；不 break。
 func TestRunPushLoop_TooLargeSkippedSmallPushed(t *testing.T) {
 	setUpDiskProtectTest(t)
@@ -295,8 +287,6 @@ func TestRunPushLoop_SweepRunsOnDiskFullBreak(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "defer sweep 应删除已推送的陈旧 .torrent")
 }
 
-// ============ 6.3 记账 ============
-
 // T8: too-large 后 last_error 含"超过"，retry_count 未增。
 func TestDiskProtect_TooLargeRecordsLastError(t *testing.T) {
 	setUpDiskProtectTest(t)
@@ -337,8 +327,6 @@ func TestDiskProtect_InsufficientRecordsLastError(t *testing.T) {
 	ti := getTorrent(t, hash)
 	assert.Contains(t, ti.LastError, "磁盘空间不足")
 }
-
-// ============ 6.4 sweepStagingDir / shouldSweep ============
 
 // T10: is_pushed=true → 删。
 func TestSweep_RemovesPushedLeftover(t *testing.T) {

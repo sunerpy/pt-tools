@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (
@@ -18,6 +21,493 @@ import (
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 )
+
+func TestUpdateConf_MergesExistingConfigJSON(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"old","default_chat_id":"111"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	// Only send bot_token; default_chat_id must be preserved from the merge.
+	require.NoError(t, svc.UpdateConf(context.Background(), row.ID, UpdateConfReq{
+		ConfigJSON: []byte(`{"bot_token":"new"}`),
+	}))
+
+	dto, err := svc.GetConf(context.Background(), row.ID)
+	require.NoError(t, err)
+	assert.Contains(t, string(dto.ConfigJSON), `"new"`)
+	assert.Contains(t, string(dto.ConfigJSON), `"111"`)
+}
+
+func TestUpdateConf_InvalidNewConfigJSON(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"old"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err = svc.UpdateConf(context.Background(), row.ID, UpdateConfReq{
+		ConfigJSON: []byte(`{not-json`),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "解析新配置")
+}
+
+func TestUpdateConf_ConfigJSONForMissingRow(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err := svc.UpdateConf(context.Background(), 4321, UpdateConfReq{
+		ConfigJSON: []byte(`{"x":1}`),
+	})
+	require.ErrorIs(t, err, ErrConfNotFound)
+}
+
+func TestUpdateConf_MetadataOnly(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"t"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: false}
+	require.NoError(t, db.Create(&row).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	newName := "renamed"
+	enabled := true
+	require.NoError(t, svc.UpdateConf(context.Background(), row.ID, UpdateConfReq{
+		Name: &newName, Enabled: &enabled,
+	}))
+	var got models.NotificationConf
+	require.NoError(t, db.First(&got, row.ID).Error)
+	assert.Equal(t, "renamed", got.Name)
+	assert.True(t, got.Enabled)
+}
+
+func TestTestChatID_QQFallbackToBinding(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+	cipher, err := crypto.Encrypt([]byte(`{}`)) // no admin/allowed users
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "qq_onebot", Name: "qq", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+	require.NoError(t, db.Create(&models.ChannelBinding{
+		NotificationConfID: row.ID, ChannelType: "qq_onebot", ChannelUserID: "9001", PtAdmin: true,
+	}).Error)
+
+	mgr := &mockNotifyManager{}
+	svc := NewNotificationService(db, mgr, 0)
+	require.NoError(t, svc.TestConf(context.Background(), row.ID))
+	assert.Contains(t, mgr.calls, row.ID)
+}
+
+func TestTestChatID_QQNoRecipient(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+	cipher, err := crypto.Encrypt([]byte(`{}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "qq_onebot", Name: "qq", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err = svc.TestConf(context.Background(), row.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "无可用收件人")
+}
+
+func TestTestChatID_UnknownChannelIsNoop(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "webhook", Name: "wh", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	mgr := &mockNotifyManager{}
+	svc := NewNotificationService(db, mgr, 0)
+	// default branch returns "" chatID, no error → still dispatches TestConf.
+	require.NoError(t, svc.TestConf(context.Background(), row.ID))
+}
+
+func TestDecryptConfigJSON_Errors(t *testing.T) {
+	setupTestKey(t)
+	// Empty string is a no-op success.
+	var dst map[string]any
+	require.NoError(t, decryptConfigJSON("", &dst))
+
+	// Non-decryptable ciphertext.
+	err := decryptConfigJSON("not-a-valid-cipher", &dst)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "解密")
+
+	// Valid cipher but wrong destination shape → unmarshal error.
+	cipher, err := crypto.Encrypt([]byte(`{"a":1}`))
+	require.NoError(t, err)
+	var wrong []string
+	err = decryptConfigJSON(cipher, &wrong)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "解析")
+}
+
+func TestEnqueue_ViaManagerlessPush(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, nil, 0) // no manager → Push delegates to Enqueue
+	require.NoError(t, svc.(*notificationService).Push(context.Background(), Notification{
+		Title: "t", Text: "b", SourceConfID: 7,
+	}))
+	var cnt int64
+	require.NoError(t, db.Model(&models.NotificationOutbox{}).Count(&cnt).Error)
+	assert.EqualValues(t, 1, cnt)
+}
+
+func TestPushSync_NoManager(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, nil, 0)
+	err := svc.(*notificationService).PushSync(context.Background(), Notification{Title: "t"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "未初始化")
+}
+
+func TestListConfs_ReturnsRows(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	c, err := crypto.Encrypt([]byte(`{}`))
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&models.NotificationConf{ChannelType: "telegram", Name: "a", ConfigJSON: c}).Error)
+	require.NoError(t, db.Create(&models.NotificationConf{ChannelType: "qq_onebot", Name: "b", ConfigJSON: c}).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	list, err := svc.ListConfs(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, list, 2)
+}
+
+func (e *genericErr) Error() string { return e.s }
+
+func TestTelegramTestChatID_InvalidTypes(t *testing.T) {
+	setupTestKey(t)
+	bad, err := crypto.Encrypt([]byte(`{"default_chat_id":{"nested":1}}`))
+	require.NoError(t, err)
+	_, err = telegramTestChatID(models.NotificationConf{ConfigJSON: bad})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "default_chat_id")
+
+	bad2, err := crypto.Encrypt([]byte(`{"admin_users":123}`))
+	require.NoError(t, err)
+	_, err = telegramTestChatID(models.NotificationConf{ConfigJSON: bad2})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "admin_users")
+}
+
+func TestEnqueue_CreateError(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.NotificationOutbox{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	svc := NewNotificationService(db, nil, 0).(*notificationService)
+	err = svc.Enqueue(context.Background(), Notification{Title: "t"}, 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outbox")
+}
+
+func TestListConfs_DBError(t *testing.T) {
+	db := setupClosedNotifDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	_, err := svc.ListConfs(context.Background())
+	require.Error(t, err)
+}
+
+func setupClosedNotifDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.NotificationConf{}, &models.ChannelBinding{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	return db
+}
+
+func TestTestConf_TelegramDecryptError(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: "corrupt-cipher", Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err := svc.TestConf(context.Background(), row.ID)
+	require.Error(t, err)
+}
+
+func TestUpdateConf_CorruptExistingConfig(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: "corrupt", Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err := svc.UpdateConf(context.Background(), row.ID, UpdateConfReq{ConfigJSON: []byte(`{"a":1}`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "解密旧配置")
+}
+
+func TestCreateConf_Persists(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	dto, err := svc.CreateConf(context.Background(), CreateConfReq{
+		ChannelType: "telegram", Name: "tg", ConfigJSON: []byte(`{"bot_token":"x"}`), Enabled: true,
+	})
+	require.NoError(t, err)
+	assert.NotZero(t, dto.ID)
+
+	var row models.NotificationConf
+	require.NoError(t, db.First(&row, dto.ID).Error)
+	plain, err := crypto.Decrypt(row.ConfigJSON)
+	require.NoError(t, err)
+	assert.Contains(t, string(plain), "bot_token")
+}
+
+func TestCreateConf_Validation(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	ctx := context.Background()
+
+	_, err := svc.CreateConf(ctx, CreateConfReq{})
+	require.Error(t, err)
+	_, err = svc.CreateConf(ctx, CreateConfReq{ChannelType: "telegram"})
+	require.Error(t, err)
+	_, err = svc.CreateConf(ctx, CreateConfReq{ChannelType: "telegram", Name: "x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config_json")
+}
+
+func TestUpdateConf_ZeroIDAndNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	ctx := context.Background()
+
+	require.Error(t, svc.UpdateConf(ctx, 0, UpdateConfReq{}))
+
+	name := "new"
+	err := svc.UpdateConf(ctx, 999, UpdateConfReq{Name: &name})
+	require.ErrorIs(t, err, ErrConfNotFound)
+}
+
+func TestUpdateConf_NoFieldsIsNoop(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	require.NoError(t, svc.UpdateConf(context.Background(), 5, UpdateConfReq{}))
+}
+
+func TestDeleteConf_ZeroIDAndNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	ctx := context.Background()
+
+	require.Error(t, svc.DeleteConf(ctx, 0))
+	require.ErrorIs(t, svc.DeleteConf(ctx, 999), ErrConfNotFound)
+}
+
+func TestEnqueue_PersistsOutbox(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err := svc.Enqueue(context.Background(), Notification{Title: "t", Text: "b"}, 3)
+	require.NoError(t, err)
+
+	var cnt int64
+	require.NoError(t, db.Model(&models.NotificationOutbox{}).Count(&cnt).Error)
+	assert.EqualValues(t, 1, cnt)
+}
+
+func TestBindingService_RevokeNotFound(t *testing.T) {
+	svc, _ := newBindingService(t)
+	err := svc.Revoke(context.Background(), 9999)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+}
+
+func TestBindingService_SetReplyLangNotFound(t *testing.T) {
+	svc, _ := newBindingService(t)
+	err := svc.SetReplyLang(context.Background(), 9999, "en")
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+}
+
+func TestBindingService_IssueCodeNoTTL(t *testing.T) {
+	svc, _ := newBindingService(t)
+	dto, err := svc.IssueCode(context.Background(), 1, "", 0)
+	require.NoError(t, err)
+	assert.Nil(t, dto.ExpiresAt)
+	assert.NotEmpty(t, dto.Code)
+	_ = time.Now
+}
+
+func TestGetConf_NotFoundAndZeroID(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+
+	_, err := svc.GetConf(context.Background(), 0)
+	require.Error(t, err)
+
+	_, err = svc.GetConf(context.Background(), 999)
+	require.ErrorIs(t, err, ErrConfNotFound)
+}
+
+func TestGetConf_DecryptsConfigJSON(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"abc","default_chat_id":123}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	dto, err := svc.GetConf(context.Background(), row.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "telegram", dto.ChannelType)
+	assert.Contains(t, string(dto.ConfigJSON), "bot_token")
+}
+
+func TestTestConf_TelegramWithDefaultChatID(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"t","default_chat_id":"999"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	mgr := &mockNotifyManager{}
+	svc := NewNotificationService(db, mgr, 0)
+	require.NoError(t, svc.TestConf(context.Background(), row.ID))
+	assert.Contains(t, mgr.calls, row.ID)
+}
+
+func TestTestConf_QQWithAdminUsers(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	cipher, err := crypto.Encrypt([]byte(`{"admin_qq_users":[12345]}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "qq_onebot", Name: "qq", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	mgr := &mockNotifyManager{}
+	svc := NewNotificationService(db, mgr, 0)
+	require.NoError(t, svc.TestConf(context.Background(), row.ID))
+	assert.Contains(t, mgr.calls, row.ID)
+}
+
+func TestTestConf_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	require.ErrorIs(t, svc.TestConf(context.Background(), 404), ErrConfNotFound)
+}
+
+func TestTestConf_TelegramNoRecipient(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+	cipher, err := crypto.Encrypt([]byte(`{"bot_token":"t"}`))
+	require.NoError(t, err)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", ConfigJSON: cipher, Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	err = svc.TestConf(context.Background(), row.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "无可用收件人")
+}
+
+func TestQQTestChatID(t *testing.T) {
+	setupTestKey(t)
+	admin, err := crypto.Encrypt([]byte(`{"admin_qq_users":[111,222]}`))
+	require.NoError(t, err)
+	got, err := qqTestChatID(models.NotificationConf{ConfigJSON: admin})
+	require.NoError(t, err)
+	assert.Equal(t, "111", got)
+
+	allowed, err := crypto.Encrypt([]byte(`{"allowed_qq_users":[333]}`))
+	require.NoError(t, err)
+	got, err = qqTestChatID(models.NotificationConf{ConfigJSON: allowed})
+	require.NoError(t, err)
+	assert.Equal(t, "333", got)
+
+	empty, err := crypto.Encrypt([]byte(`{}`))
+	require.NoError(t, err)
+	got, err = qqTestChatID(models.NotificationConf{ConfigJSON: empty})
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
+}
+
+func TestTelegramTestChatID(t *testing.T) {
+	setupTestKey(t)
+	// default_chat_id as string.
+	c1, err := crypto.Encrypt([]byte(`{"default_chat_id":"555"}`))
+	require.NoError(t, err)
+	got, err := telegramTestChatID(models.NotificationConf{ConfigJSON: c1})
+	require.NoError(t, err)
+	assert.Equal(t, "555", got)
+
+	// admin_users as int slice.
+	c2, err := crypto.Encrypt([]byte(`{"admin_users":[777,888]}`))
+	require.NoError(t, err)
+	got, err = telegramTestChatID(models.NotificationConf{ConfigJSON: c2})
+	require.NoError(t, err)
+	assert.Equal(t, "777", got)
+}
+
+func TestRawStringOrInt64(t *testing.T) {
+	got, err := rawStringOrInt64([]byte(`"abc"`))
+	require.NoError(t, err)
+	assert.Equal(t, "abc", got)
+
+	got, err = rawStringOrInt64([]byte(`42`))
+	require.NoError(t, err)
+	assert.Equal(t, "42", got)
+
+	got, err = rawStringOrInt64([]byte(`0`))
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
+
+	_, err = rawStringOrInt64([]byte(`{"x":1}`))
+	require.Error(t, err)
+}
+
+func TestRawStringOrInt64Slice(t *testing.T) {
+	got, err := rawStringOrInt64Slice([]byte(`["a","b"]`))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, got)
+
+	got, err = rawStringOrInt64Slice([]byte(`[1,2,3]`))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "2", "3"}, got)
+
+	_, err = rawStringOrInt64Slice([]byte(`"notaslice"`))
+	require.Error(t, err)
+}
+
+func TestFirstBindingChatID(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.ChannelBinding{}))
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0).(*notificationService)
+
+	// No binding -> empty, no error.
+	got, err := svc.firstBindingChatID(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
+
+	require.NoError(t, db.Create(&models.ChannelBinding{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u-admin", PtAdmin: true,
+	}).Error)
+	got, err = svc.firstBindingChatID(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Equal(t, "u-admin", got)
+}
 
 // setupTestDB 创建独立的 in-memory SQLite，仅 AutoMigrate NotificationService 用到的 ChatOps 表。
 func setupTestDB(t *testing.T) *gorm.DB {

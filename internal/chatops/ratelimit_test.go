@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package chatops
 
 import (
@@ -5,7 +8,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestNewTokenLimiter_Defaults(t *testing.T) {
+	l := newTokenLimiter(RateLimitSpec{})
+	require.NotNil(t, l)
+	assert.Equal(t, defaultRateLimitBurst, l.Burst())
+
+	l2 := newTokenLimiter(RateLimitSpec{Per: time.Second, Burst: 3})
+	require.NotNil(t, l2)
+	assert.Equal(t, 3, l2.Burst())
+}
 
 func TestRateLimiter_PerUser_10PerMin(t *testing.T) {
 	rl := NewRateLimiter()

@@ -1,15 +1,333 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package scheduler
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sunerpy/pt-tools/global"
+	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
+
+// newCleanupMonitorWithFake builds a CleanupMonitor whose DownloaderManager has
+// a single registered fake downloader (default). Returns the monitor and fake
+// so tests can inspect recorded RemoveTorrents/PauseTorrent side effects.
+func newCleanupMonitorWithFake(t *testing.T, fake *schedFakeDownloader) *CleanupMonitor {
+	t.Helper()
+	db := setupTestDB(t)
+	dm := downloader.NewDownloaderManager()
+	registerFakeDownloader(t, dm, fake, true)
+	// Force instantiation so ListDownloaders + GetDownloader return the fake.
+	_, err := dm.GetDownloader(fake.name)
+	require.NoError(t, err)
+	return NewCleanupMonitor(db.DB, dm)
+}
+
+func TestProcessDownloader_DeletesAndUpdatesDB(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 72
+	cfg.CleanupProtectDL = false
+	cfg.CleanupProtectHR = false
+
+	// One torrent past seed-time threshold, one below.
+	del := seedingTorrent("del1", "hashdelete", "OldSeed", 100, 1.0)
+	keep := seedingTorrent("keep1", "hashkeep", "Young", 10, 1.0)
+	fake.torrents = []downloader.Torrent{del, keep}
+
+	// DB row so updateDatabase has something to mark expired.
+	hash := "hashdelete"
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "t1", TorrentHash: &hash, IsPushed: &pushed,
+		DownloaderName: "qb1", Title: "OldSeed",
+	}).Error)
+
+	cm.processDownloader(cfg, fake, "qb1")
+
+	require.Len(t, fake.removedBatch, 1)
+	assert.Equal(t, []string{"del1"}, fake.removedBatch[0])
+
+	var info models.TorrentInfo
+	require.NoError(t, cm.db.Where("torrent_id = ?", "t1").First(&info).Error)
+	assert.True(t, info.IsExpired, "deleted torrent should be marked expired in DB")
+}
+
+func TestProcessDownloader_NoCandidatesNoDelete(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 72
+	fake.torrents = []downloader.Torrent{seedingTorrent("y", "h", "Young", 1, 0.1)}
+
+	cm.processDownloader(cfg, fake, "qb1")
+	assert.Empty(t, fake.removedBatch)
+}
+
+func TestProcessDownloader_ManagedScope_Empty(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "database"
+	fake.torrents = []downloader.Torrent{seedingTorrent("x", "h", "X", 100, 5)}
+
+	cm.processDownloader(cfg, fake, "qb1")
+	assert.Empty(t, fake.removedBatch, "no DB-managed hashes → nothing deleted")
+}
+
+func TestProcessDownloader_GetAllError(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getAllErr = errors.New("boom")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	require.NotPanics(t, func() { cm.processDownloader(cfg, fake, "qb1") })
+	assert.Empty(t, fake.removedBatch)
+}
+
+func TestProcessDownloader_SkipsPeerRatioPaused(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 72
+	cfg.CleanupProtectHR = false
+
+	hash := "peerpausedhash"
+	tor := seedingTorrent("p1", hash, "PeerPaused", 100, 1.0)
+	fake.torrents = []downloader.Torrent{tor}
+
+	// Mark it paused-for-peer-ratio in DB so isPausedForPeerRatio returns true.
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "p1", TorrentHash: &hash, IsPushed: &pushed,
+		IsPausedBySystem: true, PauseReason: PauseReasonPeerRatio, Title: "PeerPaused",
+	}).Error)
+
+	cm.processDownloader(cfg, fake, "qb1")
+	assert.Empty(t, fake.removedBatch, "peer-ratio-paused torrent must be skipped")
+}
+
+func TestProcessDownloader_RemoveError(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.removeErr = errors.New("remove failed")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 72
+	cfg.CleanupProtectHR = false
+
+	hash := "failhash"
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "f1", TorrentHash: &hash, IsPushed: &pushed,
+		DownloaderName: "qb1", Title: "Fail",
+	}).Error)
+	fake.torrents = []downloader.Torrent{seedingTorrent("f1", hash, "Fail", 100, 1.0)}
+
+	cm.processDownloader(cfg, fake, "qb1")
+
+	var info models.TorrentInfo
+	require.NoError(t, cm.db.Where("torrent_id = ?", "f1").First(&info).Error)
+	assert.False(t, info.IsExpired, "remove failure must not mark expired")
+}
+
+func TestProcessDownloader_EmergencyCleanupWhenDiskLow(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupProtectHR = false
+	cfg.CleanupProtectDL = false
+	cfg.CleanupDiskProtect = true
+	cfg.CleanupMinDiskSpaceGB = 100
+	// No rule matches (no seed-time/ratio), so toDelete starts empty; the disk
+	// being low forces emergencyCleanup to pick candidates by priority.
+	fake.diskInfo = downloader.DiskInfo{FreeSpace: 10 * oneGB} // 10GB < 100GB
+
+	big := seedingTorrent("big", "hbig", "Big", 10, 1.0)
+	big.TotalSize = 200 * oneGB
+	fake.torrents = []downloader.Torrent{big}
+
+	cm.processDownloader(cfg, fake, "qb1")
+	require.Len(t, fake.removedBatch, 1)
+	assert.Contains(t, fake.removedBatch[0], "big")
+}
+
+func TestRunOnce_NoDownloaders(t *testing.T) {
+	db := setupTestDB(t)
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	require.NotPanics(t, func() { cm.runOnce(baseCfg()) })
+}
+
+func TestRunOnce_UnhealthySkipped(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.healthy = false
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 1
+	fake.torrents = []downloader.Torrent{seedingTorrent("x", "h", "X", 100, 5)}
+
+	cm.runOnce(cfg)
+	assert.Empty(t, fake.removedBatch, "unhealthy downloader must be skipped")
+}
+
+func TestRunOnce_HealthyDeletes(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 1
+	cfg.CleanupProtectHR = false
+	cfg.CleanupProtectDL = false
+	fake.torrents = []downloader.Torrent{seedingTorrent("d", "h", "D", 100, 5)}
+
+	cm.runOnce(cfg)
+	require.Len(t, fake.removedBatch, 1)
+}
+
+func TestRunManual_NoConfig(t *testing.T) {
+	db := setupTestDB(t)
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	_, err := cm.RunManual()
+	require.Error(t, err)
+}
+
+func TestRunManual_Disabled(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir: t.TempDir(), CleanupEnabled: false,
+	}).Error)
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	_, err := cm.RunManual()
+	require.Error(t, err)
+}
+
+func TestRunManual_Enabled(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	db := setupTestDB(t)
+	dm := downloader.NewDownloaderManager()
+	registerFakeDownloader(t, dm, fake, true)
+	_, err := dm.GetDownloader(fake.name)
+	require.NoError(t, err)
+	cm := NewCleanupMonitor(db.DB, dm)
+
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir: t.TempDir(), CleanupEnabled: true, CleanupScope: "all",
+		CleanupMaxSeedTimeH: 1,
+	}).Error)
+	fake.torrents = []downloader.Torrent{seedingTorrent("d", "h", "D", 100, 5)}
+
+	n, err := cm.RunManual()
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	require.Len(t, fake.removedBatch, 1)
+}
+
+func TestUpdateDatabase_MarksExpired(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	hash := "updatehash"
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "u1", TorrentHash: &hash, IsPushed: &pushed,
+		DownloaderName: "qb1", Title: "U",
+	}).Error)
+
+	cm.updateDatabase([]downloader.Torrent{{ID: "u1", InfoHash: hash}}, "qb1")
+
+	var info models.TorrentInfo
+	require.NoError(t, cm.db.Where("torrent_id = ?", "u1").First(&info).Error)
+	assert.True(t, info.IsExpired)
+	require.NotNil(t, info.LastCheckTime)
+}
+
+func TestIsPausedForPeerRatio(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	hash := "prhash"
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "pr1", TorrentHash: &hash, IsPushed: &pushed,
+		IsPausedBySystem: true, PauseReason: PauseReasonPeerRatio, Title: "PR",
+	}).Error)
+
+	assert.True(t, cm.isPausedForPeerRatio(hash))
+	assert.False(t, cm.isPausedForPeerRatio("nonexistent"))
+}
+
+func TestGetManagedHashes_IncludesArchive(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	pushed := true
+
+	liveHash := "livehash"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "l1", TorrentHash: &liveHash, IsPushed: &pushed,
+		DownloaderName: "qb1", Title: "Live",
+	}).Error)
+
+	archHash := "archivehash"
+	require.NoError(t, cm.db.Create(&models.TorrentInfoArchive{
+		OriginalID: 999, SiteName: "s", TorrentID: "a1", TorrentHash: &archHash,
+		IsPushed: &pushed, DownloaderName: "qb1", Title: "Arch",
+	}).Error)
+
+	hashes := cm.getManagedHashes("qb1")
+	_, hasLive := hashes["livehash"]
+	_, hasArch := hashes["archivehash"]
+	assert.True(t, hasLive)
+	assert.True(t, hasArch)
+}
+
+func TestGetHRInfoMap_ReadsHRRows(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	hash := "HRHASHUPPER"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "hr1", TorrentHash: &hash, HasHR: true,
+		HRSeedTimeH: 120, Title: "HR",
+	}).Error)
+
+	m := cm.getHRInfoMap()
+	info, ok := m["hrhashupper"]
+	require.True(t, ok, "hash should be lowercased in map")
+	assert.True(t, info.HasHR)
+	assert.Equal(t, 120, info.HRSeedTimeH)
+}
+
+func TestCleanupMonitor_StartStop(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	require.NoError(t, cm.Start())
+	// double start is a no-op
+	require.NoError(t, cm.Start())
+
+	// give the goroutine a moment; it sleeps 10s before doing anything so no work happens
+	time.Sleep(20 * time.Millisecond)
+
+	cm.Stop()
+	// double stop safe
+	require.NotPanics(t, func() { cm.Stop() })
+}
 
 func newTestCleanupMonitor(t *testing.T) *CleanupMonitor {
 	t.Helper()
@@ -41,8 +359,6 @@ func seedingTorrent(id, hash, name string, seedTimeH int, ratio float64) downloa
 		TotalSize:   1024 * 1024 * 1024,
 	}
 }
-
-// === shouldDelete OR mode ===
 
 func TestShouldDelete_OR_SeedTimeExceeded(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
@@ -102,8 +418,6 @@ func TestShouldDelete_OR_AnyConditionSufficient(t *testing.T) {
 	assert.False(t, cm.shouldDelete(cfg, t3))
 }
 
-// === shouldDelete AND mode ===
-
 func TestShouldDelete_AND_AllConditionsRequired(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 	cfg := baseCfg()
@@ -140,8 +454,6 @@ func TestShouldDelete_AND_SingleConditionAlwaysMatches(t *testing.T) {
 	assert.True(t, cm.shouldDelete(cfg, t1))
 }
 
-// === shouldDelete: no conditions configured ===
-
 func TestShouldDelete_NoConditions(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 	cfg := baseCfg()
@@ -149,8 +461,6 @@ func TestShouldDelete_NoConditions(t *testing.T) {
 	t1 := seedingTorrent("1", "aaa", "T1", 100, 5.0)
 	assert.False(t, cm.shouldDelete(cfg, t1))
 }
-
-// === shouldDelete: free expired ===
 
 func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
@@ -200,8 +510,6 @@ func TestShouldDelete_FreeExpiredDisabled(t *testing.T) {
 	assert.False(t, cm.shouldDelete(cfg, t1))
 }
 
-// === splitProtected: downloading ===
-
 func TestSplitProtected_Downloading(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 	cfg := baseCfg()
@@ -233,8 +541,6 @@ func TestSplitProtected_DownloadingDisabled(t *testing.T) {
 	assert.Len(t, candidates, 1)
 }
 
-// === splitProtected: min retain time ===
-
 func TestSplitProtected_MinRetainTime(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 	cfg := baseCfg()
@@ -255,8 +561,6 @@ func TestSplitProtected_MinRetainTime(t *testing.T) {
 	assert.Equal(t, "2", candidates[0].ID)
 }
 
-// === splitProtected: tags ===
-
 func TestSplitProtected_ProtectTags(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 	cfg := baseCfg()
@@ -273,8 +577,6 @@ func TestSplitProtected_ProtectTags(t *testing.T) {
 	assert.Len(t, candidates, 1)
 	assert.Equal(t, "2", candidates[0].ID)
 }
-
-// === splitProtected: H&R from DB ===
 
 func TestSplitProtected_HRFromDatabase(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
@@ -360,8 +662,6 @@ func TestSplitProtected_HRDisabled(t *testing.T) {
 	assert.Len(t, protected, 0)
 	assert.Len(t, candidates, 1)
 }
-
-// === filterManagedTorrents ===
 
 func TestFilterManaged_DatabaseScope(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
@@ -457,8 +757,6 @@ func TestFilterManaged_AllScope(t *testing.T) {
 	assert.Len(t, result, 2)
 }
 
-// === calcPriority ===
-
 func TestCalcPriority_PausedHigherThanSeeding(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
 
@@ -485,8 +783,6 @@ func TestCalcPriority_LargerSizeHigherPriority(t *testing.T) {
 
 	assert.Greater(t, cm.calcPriority(big), cm.calcPriority(small))
 }
-
-// === emergencyCleanup ===
 
 func TestEmergencyCleanup_DeletesUntilSpaceSufficient(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
@@ -530,8 +826,6 @@ func TestEmergencyCleanup_SkipsAlreadyMarked(t *testing.T) {
 	assert.Equal(t, 1, ids["2"])
 }
 
-// === helpers ===
-
 func TestSplitTags(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -553,8 +847,6 @@ func TestContainsIgnoreCase(t *testing.T) {
 	assert.False(t, containsIgnoreCase([]string{"keep"}, "other"))
 	assert.False(t, containsIgnoreCase(nil, "any"))
 }
-
-// === AND/OR edge cases ===
 
 func TestShouldDelete_DefaultModeIsOR(t *testing.T) {
 	cm := newTestCleanupMonitor(t)
@@ -654,4 +946,229 @@ func TestShouldDelete_AND_SlowSeedWithOtherConditions(t *testing.T) {
 	t2 := seedingTorrent("2", "bbb", "NotSlow", 72, 0.5)
 	t2.IsCompleted = true
 	assert.False(t, cm.shouldDelete(cfg, t2))
+}
+
+func TestDrainAndDebounce_ReturnsAfterQuiet(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	ch := make(chan events.Event)
+
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		cm.drainAndDebounce(ch)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(diskEventDebounce + 2*time.Second):
+		t.Fatal("drainAndDebounce did not return")
+	}
+	assert.GreaterOrEqual(t, time.Since(start), diskEventDebounce-100*time.Millisecond)
+}
+
+func TestDrainAndDebounce_ResetsOnEvent(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	ch := make(chan events.Event, 4)
+
+	done := make(chan struct{})
+	go func() {
+		cm.drainAndDebounce(ch)
+		close(done)
+	}()
+
+	// Send one DiskSpaceLow to reset the timer, then let it drain.
+	ch <- events.Event{Type: events.DiskSpaceLow}
+
+	select {
+	case <-done:
+	case <-time.After(diskEventDebounce + 2*time.Second):
+		t.Fatal("drainAndDebounce did not return after reset")
+	}
+}
+
+func TestDrainAndDebounce_CtxCancel(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cm.cancel() // pre-cancel
+
+	ch := make(chan events.Event)
+	done := make(chan struct{})
+	go func() {
+		cm.drainAndDebounce(ch)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("drainAndDebounce did not return on ctx cancel")
+	}
+}
+
+const oneGB = int64(1024 * 1024 * 1024)
+
+// TestIssue374_DiskProtectOn_CleanupOff_ResetStillRuns 修复后核心契约：
+// 用户配置「磁盘保护开但自动删种关」时，maybeResetDiskBudget 仍会触发 Reset，
+// 预留不再单调累积。这是 Bug 报告中 984.6 GB 现象的直接验证。
+func TestIssue374_DiskProtectOn_CleanupOff_ResetStillRuns(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir:           t.TempDir(),
+		CleanupDiskProtect:    true,
+		CleanupMinDiskSpaceGB: 200,
+		CleanupEnabled:        false, // 关键：自动删种关
+	}).Error)
+
+	budget := ptinternal.GetDiskBudget()
+	budget.Reset()
+	t.Cleanup(func() { budget.Reset() })
+
+	const n = 30
+	const sizePerTorrent = 30 * oneGB
+	for i := 0; i < n; i++ {
+		budget.Reserve(sizePerTorrent)
+	}
+	require.Equal(t, int64(n)*sizePerTorrent, budget.Reserved(), "sanity: 累计 900 GB")
+
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	cfg := cm.loadConfig()
+	require.NotNil(t, cfg)
+	require.True(t, cfg.CleanupDiskProtect)
+	require.False(t, cfg.CleanupEnabled)
+
+	cm.maybeResetDiskBudget(cfg)
+
+	assert.Equal(t, int64(0), budget.Reserved(),
+		"修复 #374：CleanupDiskProtect=true + CleanupEnabled=false 时 Reset 必须运行")
+}
+
+// TestIssue374_DiskProtectOff_ResetSkipped 反向：
+// 当 CleanupDiskProtect=false 时（用户根本没开磁盘保护），无需 Reset；
+// 否则我们就是在偷偷修改一个用户没启用的子系统的状态。
+func TestIssue374_DiskProtectOff_ResetSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	row := models.SettingsGlobal{
+		DownloadDir:           t.TempDir(),
+		CleanupDiskProtect:    false,
+		CleanupMinDiskSpaceGB: 0,
+		CleanupEnabled:        false,
+	}
+	require.NoError(t, db.DB.Create(&row).Error)
+	// GORM `default:true` 标签会把零值 false 覆盖回 true，必须显式 Update
+	require.NoError(t, db.DB.Model(&row).Update("cleanup_disk_protect", false).Error)
+
+	budget := ptinternal.GetDiskBudget()
+	budget.Reset()
+	t.Cleanup(func() { budget.Reset() })
+
+	budget.Reserve(50 * oneGB)
+	require.Equal(t, 50*oneGB, budget.Reserved())
+
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	cfg := cm.loadConfig()
+	require.NotNil(t, cfg)
+	require.False(t, cfg.CleanupDiskProtect)
+
+	cm.maybeResetDiskBudget(cfg)
+
+	assert.Equal(t, 50*oneGB, budget.Reserved(),
+		"CleanupDiskProtect=false → Reset 不该跑（DiskBudget 子系统未启用，prep 状态保留）")
+}
+
+// TestIssue374_NilConfig_NoOp 防御性：
+// loadConfig 失败返回 nil 时 maybeResetDiskBudget 必须是 no-op，
+// 不能 panic 或访问 nil 字段。
+func TestIssue374_NilConfig_NoOp(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+
+	budget := ptinternal.GetDiskBudget()
+	budget.Reset()
+	t.Cleanup(func() { budget.Reset() })
+
+	budget.Reserve(10 * oneGB)
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+
+	require.NotPanics(t, func() {
+		cm.maybeResetDiskBudget(nil)
+	})
+	assert.Equal(t, 10*oneGB, budget.Reserved(), "nil cfg → no-op，不动现状")
+}
+
+// TestIssue374_BothFlagsOn_ResetRunsViaRunOnce 兼容性：
+// 用户同时开 CleanupEnabled+CleanupDiskProtect 时，runOnce 路径仍会 Reset
+// （runOnce 内的 resetDiskBudget 调用未被删除）。证明 fix 没破坏旧的 happy path。
+func TestIssue374_BothFlagsOn_ResetRunsViaRunOnce(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir:           t.TempDir(),
+		CleanupDiskProtect:    true,
+		CleanupMinDiskSpaceGB: 200,
+		CleanupEnabled:        true,
+	}).Error)
+
+	budget := ptinternal.GetDiskBudget()
+	budget.Reset()
+	t.Cleanup(func() { budget.Reset() })
+
+	budget.Reserve(500 * oneGB)
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	cfg := cm.loadConfig()
+	require.NotNil(t, cfg)
+
+	cm.runOnce(cfg)
+
+	assert.Equal(t, int64(0), budget.Reserved(),
+		"CleanupEnabled=true 时 runOnce 路径仍正确清零")
+}
+
+// TestIssue374_ResetIsIdempotent 性质测试：
+// 多次连续 Reset 等价于一次，不会下溢或异常。runLoop 在 5 分钟节奏下会反复
+// 调用，必须保证幂等。
+func TestIssue374_ResetIsIdempotent(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir:        t.TempDir(),
+		CleanupDiskProtect: true,
+	}).Error)
+
+	budget := ptinternal.GetDiskBudget()
+	budget.Reset()
+	t.Cleanup(func() { budget.Reset() })
+
+	cm := NewCleanupMonitor(db.DB, downloader.NewDownloaderManager())
+	cfg := cm.loadConfig()
+	require.NotNil(t, cfg)
+
+	for i := 0; i < 10; i++ {
+		cm.maybeResetDiskBudget(cfg)
+	}
+	assert.Equal(t, int64(0), budget.Reserved(), "连续 10 次 Reset 仍为 0")
+}
+
+func TestGetHRInfoMap_FromDefinitionAndDB(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+
+	// Explicit HR from DB row.
+	h1 := "aaaa1111"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "t1", TorrentHash: &h1, HasHR: true, HRSeedTimeH: 96,
+	}).Error)
+	// A row for an HR-enabled site definition (agsvpt) with HasHR=false → derived.
+	h2 := "bbbb2222"
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName: "agsvpt", TorrentID: "t2", TorrentHash: &h2, HasHR: false, TorrentSize: 10 << 30,
+	}).Error)
+
+	m := cm.getHRInfoMap()
+	require.Contains(t, m, "aaaa1111")
+	assert.Equal(t, 96, m["aaaa1111"].HRSeedTimeH)
+	if _, ok := m["bbbb2222"]; ok {
+		assert.True(t, m["bbbb2222"].HasHR)
+	}
 }

@@ -1,10 +1,6 @@
 // MIT License
 // Copyright (c) 2025 pt-tools
 
-// Coverage for the public New* constructors (NewSiteService, NewTaskService,
-// NewTorrentService, NewAuditService, NewAuditServiceWithCap defaults) and
-// RSSRetryWorker.Run's ctx-cancel exit.
-
 package app
 
 import (

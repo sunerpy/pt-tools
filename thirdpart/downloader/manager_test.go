@@ -8,6 +8,8 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MockDownloader 用于测试的模拟下载器
@@ -1061,4 +1063,92 @@ func TestSyncFromDB_DisabledDownloader(t *testing.T) {
 	if len(dm.configs) != 0 {
 		t.Errorf("disabled downloader should be removed, got %d configs", len(dm.configs))
 	}
+}
+
+func TestCreateFromConfigNoFactory(t *testing.T) {
+	dm := NewDownloaderManager()
+	_, err := dm.CreateFromConfig(&MockConfig{Type: DownloaderQBittorrent, URL: "http://x"}, "temp")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no factory registered")
+}
+
+func TestCreateFromConfigSuccess(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+	dl, err := dm.CreateFromConfig(&MockConfig{Type: DownloaderQBittorrent, URL: "http://x"}, "temp")
+	require.NoError(t, err)
+	assert.Equal(t, "temp", dl.GetName())
+	assert.Equal(t, DownloaderQBittorrent, dl.GetType())
+
+	assert.Empty(t, dm.ListDownloaders(), "CreateFromConfig must NOT register the instance")
+}
+
+func TestHasFactory(t *testing.T) {
+	dm := NewDownloaderManager()
+	assert.False(t, dm.HasFactory(DownloaderQBittorrent))
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+	assert.True(t, dm.HasFactory(DownloaderQBittorrent))
+	assert.False(t, dm.HasFactory(DownloaderTransmission))
+}
+
+func TestSyncFromDBUnknownTypeSkipped(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+
+	records := []DownloaderDBRecord{
+		{Name: "known", Type: DownloaderQBittorrent, URL: "http://k", Enabled: true, IsDefault: true},
+		{Name: "unknown", Type: DownloaderType("mystery"), URL: "http://u", Enabled: true},
+	}
+	dm.SyncFromDB(records)
+
+	names := dm.ListDownloaders()
+	assert.Contains(t, names, "known")
+	assert.NotContains(t, names, "unknown", "records with unregistered type must be skipped")
+}
+
+func TestSyncFromDBClearsSiteMappingForRemoved(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+	dm.RegisterConfig("qbit-1", &MockConfig{Type: DownloaderQBittorrent, URL: "http://x"}, true)
+	dm.SetSiteDownloader("siteA", "qbit-1")
+
+	dm.SyncFromDB([]DownloaderDBRecord{})
+
+	_, err := dm.GetDownloaderForSite("siteA")
+	require.Error(t, err, "site mapping to a removed downloader must be cleared")
+}
+
+func TestSyncFromDBConfigUnchangedKeepsInstance(t *testing.T) {
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, MockDownloaderFactory)
+	dm.RegisterConfig("qbit-1", &GenericConfig{Type: DownloaderQBittorrent, URL: "http://same:8080", Username: "u", Password: "p", AutoStart: true}, true)
+	dl, _ := dm.GetDownloader("qbit-1")
+
+	records := []DownloaderDBRecord{
+		{Name: "qbit-1", Type: DownloaderQBittorrent, URL: "http://same:8080", Username: "u", Password: "p", AutoStart: true, Enabled: true, IsDefault: true},
+	}
+	dm.SyncFromDB(records)
+
+	newDl, err := dm.GetDownloader("qbit-1")
+	require.NoError(t, err)
+	assert.Same(t, dl, newDl, "unchanged config must keep the existing instance")
+}
+
+func TestConfigChangedDetectsEachField(t *testing.T) {
+	dm := NewDownloaderManager()
+	base := &GenericConfig{Type: DownloaderQBittorrent, URL: "http://x", Username: "u", Password: "p", AutoStart: true}
+	rec := DownloaderDBRecord{Type: DownloaderQBittorrent, URL: "http://x", Username: "u", Password: "p", AutoStart: true}
+
+	assert.False(t, dm.configChanged(base, rec), "identical → unchanged")
+
+	assert.True(t, dm.configChanged(base, withRec(rec, func(r *DownloaderDBRecord) { r.Type = DownloaderTransmission })))
+	assert.True(t, dm.configChanged(base, withRec(rec, func(r *DownloaderDBRecord) { r.URL = "http://y" })))
+	assert.True(t, dm.configChanged(base, withRec(rec, func(r *DownloaderDBRecord) { r.Username = "u2" })))
+	assert.True(t, dm.configChanged(base, withRec(rec, func(r *DownloaderDBRecord) { r.Password = "p2" })))
+	assert.True(t, dm.configChanged(base, withRec(rec, func(r *DownloaderDBRecord) { r.AutoStart = false })))
+}
+
+func withRec(r DownloaderDBRecord, mut func(*DownloaderDBRecord)) DownloaderDBRecord {
+	mut(&r)
+	return r
 }

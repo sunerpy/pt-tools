@@ -12,9 +12,44 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sunerpy/pt-tools/global"
 	sm "github.com/sunerpy/pt-tools/mocks"
+	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
+
+func TestSiteSeedingCapacityGB_Lookup(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	assert.Equal(t, float64(0), siteSeedingCapacityGB(""))
+	assert.Equal(t, float64(0), siteSeedingCapacityGB("unknown-site"))
+	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "springsunday", SeedingCapacityGB: 42}).Error)
+	assert.Equal(t, float64(42), siteSeedingCapacityGB("springsunday"))
+}
+
+func TestSiteSeedingCapacityGB_NilDB(t *testing.T) {
+	global.GlobalDB = nil
+	assert.Equal(t, float64(0), siteSeedingCapacityGB("springsunday"))
+}
+
+func TestSiteSeedingCapacityGB(t *testing.T) {
+	// empty site name -> 0
+	assert.Equal(t, float64(0), siteSeedingCapacityGB(""))
+
+	// DB nil -> 0
+	global.GlobalDB = nil
+	assert.Equal(t, float64(0), siteSeedingCapacityGB("mteam"))
+
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+
+	// unknown site -> 0
+	assert.Equal(t, float64(0), siteSeedingCapacityGB("nosuchsite"))
+
+	// known site with capacity
+	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "mteam", SeedingCapacityGB: 500}).Error)
+	assert.Equal(t, float64(500), siteSeedingCapacityGB("mteam"))
+}
 
 func TestTorrentBelongsToSite(t *testing.T) {
 	cases := []struct {

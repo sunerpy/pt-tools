@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package chatops
 
 import (
@@ -12,6 +15,93 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/notify"
 )
+
+// TestExecuteBind_MissingCode drives executeBind's empty-args branch via an
+// unbound user sending "/bind" with no code.
+func TestExecuteBind_MissingCode(t *testing.T) {
+	f := newChain(t)
+	f.bindings.exists = false
+
+	require.NoError(t, f.chain.Process(context.Background(), mkMsg("/bind")))
+	assert.Equal(t, "denied:missing_code", lastResult(f.audit.snapshot()))
+	reply, ok := f.replier.lastReply()
+	require.True(t, ok)
+	assert.Contains(t, reply.Text, "用法")
+}
+
+// TestExecuteBind_Success drives the happy path where ConsumeCode succeeds.
+func TestExecuteBind_Success(t *testing.T) {
+	f := newChain(t)
+	f.bindings.exists = false
+
+	require.NoError(t, f.chain.Process(context.Background(), mkMsg("/bind CODE123")))
+	assert.Equal(t, "success", lastResult(f.audit.snapshot()))
+	reply, ok := f.replier.lastReply()
+	require.True(t, ok)
+	assert.Contains(t, reply.Text, "绑定成功")
+}
+
+// TestExecuteBind_ConsumeError drives the ConsumeCode-error branch.
+func TestExecuteBind_ConsumeError(t *testing.T) {
+	f := newChain(t)
+	f.bindings.exists = false
+	f.bindCoder.err = errors.New("bad code")
+
+	require.NoError(t, f.chain.Process(context.Background(), mkMsg("/bind BADCODE")))
+	assert.Equal(t, "error:bind_failed", lastResult(f.audit.snapshot()))
+	reply, ok := f.replier.lastReply()
+	require.True(t, ok)
+	assert.Contains(t, reply.Text, "绑定失败")
+}
+
+// TestExecuteBind_NoBindCoder covers the nil-bindCoder error return by building
+// a chain with a nil BindCodeConsumer.
+func TestExecuteBind_NoBindCoder(t *testing.T) {
+	registry := newStubRegistry()
+	bindings := &stubBindings{exists: false}
+	audit := &stubAudit{}
+	rl := &stubRateLimiter{allow: true}
+	sessions := newStubSessions()
+	replier := &stubReplier{}
+	chain := NewMessageChain(registry, bindings, nil, audit, rl, sessions, replier)
+
+	err := chain.Process(context.Background(), mkMsg("/bind CODE"))
+	require.Error(t, err)
+	assert.Equal(t, "error:no_binding_service", lastResult(audit.snapshot()))
+}
+
+func TestParseCommand_Branches(t *testing.T) {
+	name, args := parseCommand("/status now here")
+	assert.Equal(t, "status", name)
+	assert.Equal(t, []string{"now", "here"}, args)
+
+	name, _ = parseCommand("/Help@mybot")
+	assert.Equal(t, "help", name, "@bot suffix must be stripped and lowercased")
+
+	name, args = parseCommand("no-slash")
+	assert.Equal(t, "", name)
+	assert.Nil(t, args)
+
+	name, _ = parseCommand("/")
+	assert.Equal(t, "", name, "slash with no fields yields empty command")
+
+	name, _ = parseCommand("/   ")
+	assert.Equal(t, "", name)
+}
+
+// TestTryReply_NilReplier ensures tryReply is a safe no-op when the replier is
+// nil (built directly to bypass newChain's non-nil replier).
+func TestTryReply_NilReplier(t *testing.T) {
+	registry := newStubRegistry(CommandSpec{Name: "status", Handler: func(context.Context, []string, Source) (Reply, error) {
+		return Reply{Text: "hi"}, nil
+	}})
+	bindings := &stubBindings{exists: true, binding: BindingInfo{ConfID: 7, Allowed: true}}
+	chain := NewMessageChain(registry, bindings, &stubBindCoder{}, &stubAudit{}, &stubRateLimiter{allow: true}, newStubSessions(), nil)
+
+	assert.NotPanics(t, func() {
+		_ = chain.Process(context.Background(), mkMsg("/status"))
+	})
+}
 
 type stubBindings struct {
 	mu       sync.Mutex
@@ -46,6 +136,7 @@ func newStubRegistry(specs ...CommandSpec) *stubRegistry {
 }
 
 func (r *stubRegistry) Get(name string) (CommandSpec, bool) { s, ok := r.specs[name]; return s, ok }
+
 func (r *stubRegistry) List() []CommandSpec {
 	out := make([]CommandSpec, 0, len(r.specs))
 	for _, s := range r.specs {

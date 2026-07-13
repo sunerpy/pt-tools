@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package scheduler
 
 import (
@@ -11,6 +14,28 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
+
+func TestPeerRatio_RunOnce_ProcessesHealthy(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	pm, db := newPeerRatioMonitorWithFake(t, fake)
+
+	hash := "prro"
+	tor := completedManagedTorrent(t, db, "prro1", hash, "qb1")
+	fake.torrents = []downloader.Torrent{tor}
+	fake.trackers[tor.ID] = []downloader.TorrentTracker{{Status: 2, Seeds: 100, Leeches: 1}}
+
+	pm.runOnce(&models.SettingsGlobal{PeerRatioMaxSL: 5}, 5.0)
+	assert.Equal(t, []string{"prro1"}, fake.pausedIDs)
+}
+
+func TestPeerRatio_ProcessDownloader_CtxCancelled(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	pm, db := newPeerRatioMonitorWithFake(t, fake)
+	tor := completedManagedTorrent(t, db, "prc", "prchash", "qb1")
+	fake.torrents = []downloader.Torrent{tor}
+	pm.cancel()
+	require.NotPanics(t, func() { pm.processDownloader(fake, "qb1", 5.0, false) })
+}
 
 func newPeerRatioMonitorWithFake(t *testing.T, fake *schedFakeDownloader) (*PeerRatioMonitor, *models.TorrentDB) {
 	t.Helper()
@@ -33,8 +58,6 @@ func completedManagedTorrent(t *testing.T, db *models.TorrentDB, id, hash, dlNam
 	}).Error)
 	return downloader.Torrent{ID: id, InfoHash: hash, Name: "T-" + id, State: downloader.TorrentSeeding}
 }
-
-// === processDownloader: pause when S/L ratio exceeds threshold ===
 
 func TestPeerRatio_ProcessDownloader_Pauses(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -60,8 +83,6 @@ func TestPeerRatio_ProcessDownloader_Pauses(t *testing.T) {
 	assert.Equal(t, 1, info.Leechers)
 }
 
-// === processDownloader: remove-data mode deletes torrent ===
-
 func TestPeerRatio_ProcessDownloader_RemovesData(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	pm, db := newPeerRatioMonitorWithFake(t, fake)
@@ -82,8 +103,6 @@ func TestPeerRatio_ProcessDownloader_RemovesData(t *testing.T) {
 	assert.Equal(t, PauseReasonPeerRatio, info.PauseReason)
 }
 
-// === processDownloader: ratio within threshold → no action ===
-
 func TestPeerRatio_ProcessDownloader_WithinThreshold(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	pm, db := newPeerRatioMonitorWithFake(t, fake)
@@ -103,8 +122,6 @@ func TestPeerRatio_ProcessDownloader_WithinThreshold(t *testing.T) {
 	assert.Equal(t, 2, info.Leechers)
 }
 
-// === processDownloader: seeds==0 → skip (avoid div-by-zero + no action) ===
-
 func TestPeerRatio_ProcessDownloader_ZeroSeeds(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	pm, db := newPeerRatioMonitorWithFake(t, fake)
@@ -117,8 +134,6 @@ func TestPeerRatio_ProcessDownloader_ZeroSeeds(t *testing.T) {
 	pm.processDownloader(fake, "qb1", 5.0, false)
 	assert.Empty(t, fake.pausedIDs)
 }
-
-// === processDownloader: already paused for peer ratio → skip re-pause ===
 
 func TestPeerRatio_ProcessDownloader_AlreadyPaused(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -139,8 +154,6 @@ func TestPeerRatio_ProcessDownloader_AlreadyPaused(t *testing.T) {
 	assert.Empty(t, fake.pausedIDs, "already-paused torrent must not be paused again")
 }
 
-// === processDownloader: GetAllTorrents error ===
-
 func TestPeerRatio_ProcessDownloader_GetAllError(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	fake.getAllErr = errors.New("list boom")
@@ -148,8 +161,6 @@ func TestPeerRatio_ProcessDownloader_GetAllError(t *testing.T) {
 
 	require.NotPanics(t, func() { pm.processDownloader(fake, "qb1", 5.0, false) })
 }
-
-// === processDownloader: tracker error skips torrent ===
 
 func TestPeerRatio_ProcessDownloader_TrackerError(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -164,8 +175,6 @@ func TestPeerRatio_ProcessDownloader_TrackerError(t *testing.T) {
 	assert.Empty(t, fake.pausedIDs)
 }
 
-// === processDownloader: no managed seeding torrents ===
-
 func TestPeerRatio_ProcessDownloader_NoManaged(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	pm, _ := newPeerRatioMonitorWithFake(t, fake)
@@ -175,8 +184,6 @@ func TestPeerRatio_ProcessDownloader_NoManaged(t *testing.T) {
 	require.NotPanics(t, func() { pm.processDownloader(fake, "qb1", 5.0, false) })
 	assert.Empty(t, fake.pausedIDs)
 }
-
-// === processDownloader: pause error tolerated (no DB mark) ===
 
 func TestPeerRatio_ProcessDownloader_PauseError(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -194,8 +201,6 @@ func TestPeerRatio_ProcessDownloader_PauseError(t *testing.T) {
 	require.NoError(t, db.DB.Where("torrent_id = ?", "pr7").First(&info).Error)
 	assert.False(t, info.IsPausedBySystem, "pause failure must not mark paused")
 }
-
-// === filterManagedSeedingTorrents: only seeding + managed ===
 
 func TestPeerRatio_FilterManagedSeeding(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -223,8 +228,6 @@ func TestPeerRatio_FilterManagedSeeding_NoHashes(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-// === getTrackerPeerCounts: picks max across working trackers, skips inactive ===
-
 func TestPeerRatio_GetTrackerPeerCounts(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	pm, _ := newPeerRatioMonitorWithFake(t, fake)
@@ -240,15 +243,11 @@ func TestPeerRatio_GetTrackerPeerCounts(t *testing.T) {
 	assert.Equal(t, 3, leeches)
 }
 
-// === runOnce: no downloaders → no-op ===
-
 func TestPeerRatio_RunOnce_NoDownloaders(t *testing.T) {
 	db := setupTestDB(t)
 	pm := NewPeerRatioMonitor(db.DB, downloader.NewDownloaderManager())
 	require.NotPanics(t, func() { pm.runOnce(&models.SettingsGlobal{}, 5.0) })
 }
-
-// === runOnce: unhealthy skipped ===
 
 func TestPeerRatio_RunOnce_UnhealthySkipped(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
@@ -263,8 +262,6 @@ func TestPeerRatio_RunOnce_UnhealthySkipped(t *testing.T) {
 	assert.Empty(t, fake.pausedIDs)
 }
 
-// === runOnce: healthy → pauses ===
-
 func TestPeerRatio_RunOnce_Healthy(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	pm, db := newPeerRatioMonitorWithFake(t, fake)
@@ -277,8 +274,6 @@ func TestPeerRatio_RunOnce_Healthy(t *testing.T) {
 	assert.Equal(t, []string{"run2"}, fake.pausedIDs)
 }
 
-// === loadConfig ===
-
 func TestPeerRatio_LoadConfig(t *testing.T) {
 	db := setupTestDB(t)
 	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
@@ -289,8 +284,6 @@ func TestPeerRatio_LoadConfig(t *testing.T) {
 	require.NotNil(t, cfg)
 	assert.True(t, cfg.PeerRatioEnabled)
 }
-
-// === Start/Stop lifecycle ===
 
 func TestPeerRatio_StartStop(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")

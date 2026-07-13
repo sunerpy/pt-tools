@@ -17,6 +17,80 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 )
 
+// ==== merged from api_extension_actions_cov_test.go ====
+func TestApiExtensionActionsRouter_Dispatch(t *testing.T) {
+	srv, cleanup := newExtensionActionTestServer(t)
+	defer cleanup()
+
+	require.NoError(t, extension.Enqueue(global.GlobalDB.DB, extension.PendingAction{
+		Type:      extension.ActionOpenTab,
+		TargetURL: "https://hdsky.me/",
+		SiteName:  "hdsky",
+	}))
+
+	t.Run("empty rest", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.apiExtensionActionsRouter(rec, authedRequest(http.MethodPost, "/api/extension/actions/", nil))
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("non-ack suffix", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.apiExtensionActionsRouter(rec, authedRequest(http.MethodPost, "/api/extension/actions/1/other", nil))
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("invalid id", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.apiExtensionActionsRouter(rec, authedRequest(http.MethodPost, "/api/extension/actions/abc/ack", nil))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("ack existing via router", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.apiExtensionActionsRouter(rec, authedRequest(http.MethodPost, "/api/extension/actions/1/ack", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "acked")
+	})
+
+	t.Run("ack wrong method", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.handleExtensionActionAck(rec, authedRequest(http.MethodGet, "/api/extension/actions/1/ack", nil), 1)
+		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	})
+}
+
+func TestRequireDB_NilDB(t *testing.T) {
+	prev := global.GlobalDB
+	global.GlobalDB = nil
+	t.Cleanup(func() { global.GlobalDB = prev })
+
+	s := &Server{}
+	w := httptest.NewRecorder()
+	db, ok := s.requireDB(w)
+	assert.Nil(t, db)
+	assert.False(t, ok)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestApiExtensionActionsPending_BadSince(t *testing.T) {
+	srv, cleanup := newExtensionActionTestServer(t)
+	defer cleanup()
+
+	t.Run("method not allowed", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.apiExtensionActionsPending(rec, authedRequest(http.MethodPost, "/api/extension/actions/pending", nil))
+		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	})
+
+	t.Run("bad since", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.apiExtensionActionsPending(rec, authedRequest(http.MethodGet, "/api/extension/actions/pending?since=-1", nil))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+}
+
+// ==== merged from api_extension_actions_test.go ====
 func newExtensionActionTestServer(t *testing.T) (*Server, func()) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -173,4 +247,73 @@ func itoa(v int64) string {
 		digits = append([]byte{'-'}, digits...)
 	}
 	return string(digits)
+}
+
+// ==== merged from api_extension_site_cov6_test.go ====
+func TestRegisterExtensionActionRoutes_Cov(t *testing.T) {
+	srv, cleanup := newExtensionActionTestServer(t)
+	defer cleanup()
+
+	mux := http.NewServeMux()
+	srv.registerExtensionActionRoutes(mux)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/extension/actions/pending", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "sess-test"})
+	mux.ServeHTTP(w, req)
+	assert.NotEqual(t, http.StatusNotFound, w.Code)
+}
+
+func TestApiExtensionActionsPending_WithData(t *testing.T) {
+	srv, cleanup := newExtensionActionTestServer(t)
+	defer cleanup()
+
+	require.NoError(t, extension.Enqueue(global.GlobalDB.DB, extension.PendingAction{
+		Type: extension.ActionOpenTab, TargetURL: "https://hdsky.me/", SiteName: "hdsky",
+	}))
+
+	t.Run("list all", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.apiExtensionActionsPending(w, authedRequest(http.MethodGet, "/api/extension/actions/pending", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "hdsky")
+	})
+
+	t.Run("list since", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.apiExtensionActionsPending(w, authedRequest(http.MethodGet, "/api/extension/actions/pending?since=1", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestApiExtensionActionsRouter_AckDispatch(t *testing.T) {
+	srv, cleanup := newExtensionActionTestServer(t)
+	defer cleanup()
+
+	require.NoError(t, extension.Enqueue(global.GlobalDB.DB, extension.PendingAction{
+		Type: extension.ActionOpenTab, TargetURL: "https://hdsky.me/", SiteName: "hdsky",
+	}))
+
+	w := httptest.NewRecorder()
+	srv.apiExtensionActionsRouter(w, authedRequest(http.MethodPost, "/api/extension/actions/1/ack", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestApiSiteDetail_LoginStateProbeAndTestReminder(t *testing.T) {
+	srv := newLoginMonitorServer(t)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "hdsky", Enabled: true}).Error)
+
+	t.Run("probe via detail", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/hdsky/login-state/probe", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("test-reminder via detail", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/hdsky/login-state/test-reminder", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
 }

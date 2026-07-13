@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (
@@ -346,4 +349,70 @@ func TestListPendingCodes_PermanentVisible(t *testing.T) {
 	require.Len(t, pending, 1)
 	assert.Equal(t, c.Code, pending[0].Code)
 	assert.Nil(t, pending[0].ExpiresAt)
+}
+
+func TestIssueCode_GenError(t *testing.T) {
+	db := setupBindingTestDB(t)
+	svc := &bindingService{
+		db:        db,
+		createdBy: "admin",
+		now:       time.Now,
+		gen:       func() (string, error) { return "", errors.New("gen boom") },
+	}
+	_, err := svc.IssueCode(context.Background(), 1, "x", time.Minute)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "generate bind code")
+}
+
+func TestToBindingDTO_CopiesLastActiveAt(t *testing.T) {
+	now := time.Now()
+	dto := toBindingDTO(models.ChannelBinding{
+		NotificationConfID: 3, ChannelType: "telegram", ChannelUserID: "u",
+		Label: "l", ReplyLang: "en", PtAdmin: true, Allowed: true,
+		LastActiveAt: &now,
+	})
+	assert.Equal(t, uint(3), dto.ConfID)
+	assert.Equal(t, "en", dto.ReplyLang)
+	assert.False(t, dto.LastActiveAt.IsZero())
+}
+
+func TestListBindings_ReturnsDTOs(t *testing.T) {
+	svc, db := newBindingService(t)
+	require.NoError(t, db.Create(&models.ChannelBinding{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", PtAdmin: true, Allowed: true,
+	}).Error)
+	list, err := svc.ListBindings(context.Background())
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "u1", list[0].ChannelUserID)
+}
+
+func TestConsumeCode_MissingArgs(t *testing.T) {
+	svc, _ := newBindingService(t)
+	_, err := svc.ConsumeCode(context.Background(), "", "telegram", "u")
+	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+	_, err = svc.ConsumeCode(context.Background(), "c", "", "u")
+	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+	_, err = svc.ConsumeCode(context.Background(), "c", "telegram", "")
+	require.ErrorIs(t, err, ErrCodeUsedOrExpired)
+}
+
+func TestConsumeCode_LookupError(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.BotToken{}, &models.ChannelBinding{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	svc := NewBindingService(db, "admin")
+	_, err = svc.ConsumeCode(context.Background(), "code", "telegram", "u")
+	require.Error(t, err)
+}
+
+func TestRevoke_DBError(t *testing.T) {
+	db := setupClosedNotifDB(t)
+	svc := NewBindingService(db, "admin")
+	err := svc.Revoke(context.Background(), 1)
+	require.Error(t, err)
 }

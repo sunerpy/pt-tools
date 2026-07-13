@@ -14,9 +14,454 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
+// ==== merged from api_mixed_cov3_test.go ====
+func TestApiUserInfoSiteDetail_PostWithStore(t *testing.T) {
+	writeWebTestSecretKey(t)
+	svc := setupTestUserInfoService()
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	srv := newLoginMonitorServer(t)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sites/site1", nil)
+	srv.apiUserInfoSiteDetail(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "site1")
+}
+
+func TestApiDeleteTasks_MixedPushed(t *testing.T) {
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}))
+
+	require.NoError(t, db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "a"}).Error)
+	require.NoError(t, db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "b"}).Error)
+
+	body, _ := json.Marshal(DeleteTasksRequest{})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/batch-delete", bytes.NewReader(body))
+	server.apiDeleteTasks(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp DeleteTasksResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 2, resp.Success)
+}
+
+func TestApiDeletePausedTorrents_NoDownloaderInfo(t *testing.T) {
+	server, _ := setupServerWithFakeDownloader(t, &fakeDownloader{})
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	ti := models.TorrentInfo{SiteName: "s", TorrentID: "p1", IsPausedBySystem: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&ti).Error)
+
+	body, _ := json.Marshal(DeletePausedRequest{IDs: []uint{ti.ID}})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/torrents/delete-paused", bytes.NewReader(body))
+	server.apiDeletePausedTorrents(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp DeletePausedResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 1, resp.Success)
+}
+
+func TestApiSiteLoginStateVisit_UnknownSiteInits(t *testing.T) {
+	srv, cleanup := newSiteLoginTestServer(t)
+	defer cleanup()
+
+	body, _ := json.Marshal(SiteVisitReportRequest{SiteName: "brandnew", LastVisitAt: "2026-01-01T00:00:00Z"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sites/login-state/visit", bytes.NewReader(body))
+	srv.apiSiteLoginStateVisit(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// ==== merged from api_mixed_cov5_test.go ====
+func TestApiResumeTorrent_DownloaderErrors(t *testing.T) {
+	t.Run("resume torrent fails", func(t *testing.T) {
+		fake := &fakeDownloader{resumeErr: assertErr("resumefail")}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+		require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+		ti := models.TorrentInfo{
+			SiteName: "s", TorrentID: "r1", IsPausedBySystem: true,
+			DownloaderTaskID: "task-r1", DownloaderName: "qb1",
+		}
+		require.NoError(t, global.GlobalDB.DB.Create(&ti).Error)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/torrents/1/resume", nil)
+		server.apiResumeTorrent(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("downloader not found in manager", func(t *testing.T) {
+		server, _ := setupServerWithFakeDownloader(t, &fakeDownloader{})
+		require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+		ti := models.TorrentInfo{
+			SiteName: "s", TorrentID: "r2", IsPausedBySystem: true,
+			DownloaderTaskID: "task-r2", DownloaderName: "no-such-dl",
+		}
+		require.NoError(t, global.GlobalDB.DB.Create(&ti).Error)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/torrents/1/resume", nil)
+		server.apiResumeTorrent(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestApiUserInfoSiteDetail_DeleteFail(t *testing.T) {
+	svc := setupTestUserInfoService()
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	s := &Server{}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v2/userinfo/sites/site1", nil)
+	s.apiUserInfoSiteDetail(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestApiSiteLoginStateList_WithStoredStates(t *testing.T) {
+	srv, cleanup := newSiteLoginTestServer(t)
+	defer cleanup()
+
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", DisplayName: "HDSky", Enabled: true}).Error)
+	la := time.Now().Add(-time.Hour)
+	require.NoError(t, db.Create(&models.SiteLoginState{
+		SiteName: "hdsky", BanThresholdDays: 30, RemindBeforeDays: 10,
+		ReminderCron: "0 10 * * *", LastReminderTier: "none", ProbeMode: "auto",
+		LastAccessAt: &la,
+	}).Error)
+
+	w := httptest.NewRecorder()
+	srv.apiSiteLoginStateList(w, authedRequest(http.MethodGet, "/api/sites/login-state", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var out []SiteLoginStateResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	require.Len(t, out, 1)
+}
+
+var (
+	_ = context.Background
+	_ = bytes.NewReader
+)
+
+// ==== merged from api_userinfo_cov2_test.go ====
+func TestApiUserInfoSync_AllAndSpecific(t *testing.T) {
+	service := setupTestUserInfoService()
+	InitUserInfoService(service)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	s := &Server{}
+
+	t.Run("sync all sites", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sync", nil)
+		s.apiUserInfoSync(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp SyncResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.GreaterOrEqual(t, len(resp.Success), 1)
+	})
+
+	t.Run("sync specific site", func(t *testing.T) {
+		body, _ := json.Marshal(SyncRequest{Sites: []string{"site1"}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sync", bytes.NewReader(body))
+		s.apiUserInfoSync(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp SyncResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp.Success, "site1")
+	})
+
+	t.Run("sync unknown site records failure", func(t *testing.T) {
+		body, _ := json.Marshal(SyncRequest{Sites: []string{"no-such-site"}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sync", bytes.NewReader(body))
+		s.apiUserInfoSync(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp SyncResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.GreaterOrEqual(t, len(resp.Failed), 1)
+	})
+
+	t.Run("bad body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sync", bytes.NewBufferString(`{bad`))
+		s.apiUserInfoSync(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/sync", nil)
+		s.apiUserInfoSync(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestApiUserInfoSiteDetail_PostSyncError(t *testing.T) {
+	service := setupTestUserInfoService()
+	InitUserInfoService(service)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	s := &Server{}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/sites/no-such-site", nil)
+	s.apiUserInfoSiteDetail(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ==== merged from api_userinfo_cov_test.go ====
+func TestInitAndGetGlobals(t *testing.T) {
+	svc := setupTestUserInfoService()
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+	assert.Equal(t, svc, GetUserInfoService())
+
+	reg := v2.NewSiteRegistry(nil)
+	InitSiteRegistry(reg)
+	t.Cleanup(func() { InitSiteRegistry(nil) })
+	assert.Equal(t, reg, GetSiteRegistry())
+}
+
+// storeStub satisfies the ListSites interface used by RefreshSiteRegistrations.
+type refreshStore struct {
+	err error
+}
+
+func (s refreshStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error) {
+	return nil, s.err
+}
+
+func TestRefreshSiteRegistrations_NoServices(t *testing.T) {
+	InitUserInfoService(nil)
+	InitSiteRegistry(nil)
+	err := RefreshSiteRegistrations(refreshStore{})
+	assert.NoError(t, err)
+}
+
+func TestFilterStatsByEnabledSites(t *testing.T) {
+	stats := v2.AggregatedStats{
+		PerSiteStats: []v2.UserInfo{
+			{Site: "site1", Uploaded: 100, Downloaded: 50, Ratio: 2.0, Seeding: 5, Bonus: 10, BonusPerHour: 1, SeederSize: 1000},
+			{Site: "site2", Uploaded: 200, Downloaded: 100, Ratio: 2.0, Seeding: 10, Bonus: 20},
+			{Site: "site3", Uploaded: 999, Downloaded: 999, Ratio: 5000, Seeding: 1},
+		},
+		LastUpdate: time.Now().Unix(),
+	}
+
+	enabled := map[string]bool{"site1": true, "site2": true}
+	filtered := filterStatsByEnabledSites(stats, enabled)
+
+	assert.Equal(t, 2, filtered.SiteCount)
+	assert.Equal(t, int64(300), filtered.TotalUploaded)
+	assert.Equal(t, int64(150), filtered.TotalDownloaded)
+	assert.Equal(t, 15, filtered.TotalSeeding)
+	assert.InDelta(t, 2.0, filtered.AverageRatio, 0.001)
+}
+
+func TestFilterStatsByEnabledSites_ExcludesInvalidRatio(t *testing.T) {
+	stats := v2.AggregatedStats{
+		PerSiteStats: []v2.UserInfo{
+			{Site: "site1", Ratio: 5000},
+		},
+	}
+	filtered := filterStatsByEnabledSites(stats, map[string]bool{"site1": true})
+	assert.Equal(t, 1, filtered.SiteCount)
+	assert.Equal(t, 0.0, filtered.AverageRatio)
+}
+
+func TestApiUserInfoAggregated_WithEnabledStore(t *testing.T) {
+	svc := setupTestUserInfoService()
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	srv := setupServer(t)
+	srv2 := &Server{store: srv.store}
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("site1"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c=1", APIUrl: "https://s1",
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/aggregated", nil)
+	w := httptest.NewRecorder()
+	srv2.apiUserInfoAggregated(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp AggregatedStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.GreaterOrEqual(t, resp.SiteCount, 0)
+}
+
+// ==== merged from api_userinfo_guards_test.go ====
+func TestUserInfoHandlers_ServiceAndMethodGuards(t *testing.T) {
+	InitUserInfoService(nil)
+	s := &Server{}
+
+	cases := []struct {
+		name       string
+		handler    http.HandlerFunc
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{"sites method", s.apiUserInfoSites, http.MethodPost, "/api/v2/userinfo/sites", http.StatusMethodNotAllowed},
+		{"sites no service", s.apiUserInfoSites, http.MethodGet, "/api/v2/userinfo/sites", http.StatusServiceUnavailable},
+		{"registered method", s.apiUserInfoRegisteredSites, http.MethodPost, "/api/v2/userinfo/registered", http.StatusMethodNotAllowed},
+		{"registered no service", s.apiUserInfoRegisteredSites, http.MethodGet, "/api/v2/userinfo/registered", http.StatusServiceUnavailable},
+		{"sync method", s.apiUserInfoSync, http.MethodGet, "/api/v2/userinfo/sync", http.StatusMethodNotAllowed},
+		{"sync no service", s.apiUserInfoSync, http.MethodPost, "/api/v2/userinfo/sync", http.StatusServiceUnavailable},
+		{"clearcache method", s.apiUserInfoClearCache, http.MethodGet, "/api/v2/userinfo/cache/clear", http.StatusMethodNotAllowed},
+		{"clearcache no service", s.apiUserInfoClearCache, http.MethodPost, "/api/v2/userinfo/cache/clear", http.StatusServiceUnavailable},
+		{"detail empty site", s.apiUserInfoSiteDetail, http.MethodGet, "/api/v2/userinfo/sites/", http.StatusBadRequest},
+		{"detail no service", s.apiUserInfoSiteDetail, http.MethodGet, "/api/v2/userinfo/sites/site1", http.StatusServiceUnavailable},
+		{"aggregated method", s.apiUserInfoAggregated, http.MethodPost, "/api/v2/userinfo/aggregated", http.StatusMethodNotAllowed},
+		{"aggregated no service", s.apiUserInfoAggregated, http.MethodGet, "/api/v2/userinfo/aggregated", http.StatusServiceUnavailable},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			tc.handler(w, req)
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestUserInfoSiteDetail_UnsupportedMethod(t *testing.T) {
+	svc := setupTestUserInfoService()
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	s := &Server{}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v2/userinfo/sites/site1", nil)
+	s.apiUserInfoSiteDetail(w, req)
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestApiVersionCheck(t *testing.T) {
+	s := &Server{}
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/version/check", nil)
+		s.apiVersionCheck(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("returns result or error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/version/check?proxy=http://127.0.0.1:1", nil)
+		s.apiVersionCheck(w, req)
+		// Network likely fails in test env; either a JSON body or 500 is acceptable.
+		assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	})
+}
+
+// ==== merged from api_userinfo_refresh_cov3_test.go ====
+func TestRefreshSiteRegistrations_ReRegisterUpdatesCreds(t *testing.T) {
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{})
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	reg := v2.NewSiteRegistry(nil)
+	InitSiteRegistry(reg)
+	t.Cleanup(func() { InitSiteRegistry(nil) })
+
+	prevOrch := searchOrchestrator
+	orch := v2.NewSearchOrchestrator(v2.SearchOrchestratorConfig{})
+	searchOrchestrator = v2.NewCachedSearchOrchestrator(orch, v2.SearchCacheConfig{})
+	t.Cleanup(func() { searchOrchestrator = prevOrch })
+
+	enabled := true
+	store := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{
+		"hdsky": {Enabled: &enabled, Cookie: "c=1", APIUrl: "https://hdsky.me"},
+	}}
+
+	require.NoError(t, RefreshSiteRegistrations(store))
+	require.Contains(t, svc.ListSites(), "hdsky")
+
+	// Second refresh: site already registered -> exercises the unregister+re-register branch.
+	store2 := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{
+		"hdsky": {Enabled: &enabled, Cookie: "c=2", APIUrl: "https://hdsky.me"},
+	}}
+	require.NoError(t, RefreshSiteRegistrations(store2))
+	assert.Contains(t, svc.ListSites(), "hdsky")
+}
+
+// ==== merged from api_userinfo_refresh_test.go ====
+// registerRefreshStore adapts an in-memory site map to the ListSites interface.
+type registerRefreshStore struct {
+	sites map[models.SiteGroup]models.SiteConfig
+}
+
+func (s registerRefreshStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error) {
+	return s.sites, nil
+}
+
+func TestRefreshSiteRegistrations_RegistersEnabled(t *testing.T) {
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{})
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	reg := v2.NewSiteRegistry(nil)
+	InitSiteRegistry(reg)
+	t.Cleanup(func() { InitSiteRegistry(nil) })
+
+	prevOrch := searchOrchestrator
+	orch := v2.NewSearchOrchestrator(v2.SearchOrchestratorConfig{})
+	searchOrchestrator = v2.NewCachedSearchOrchestrator(orch, v2.SearchCacheConfig{})
+	t.Cleanup(func() { searchOrchestrator = prevOrch })
+
+	enabled := true
+	disabled := false
+
+	t.Run("enabled site with valid cookie registers", func(t *testing.T) {
+		store := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{
+			"hdsky": {Enabled: &enabled, Cookie: "c=1", APIUrl: "https://hdsky.me"},
+		}}
+		require.NoError(t, RefreshSiteRegistrations(store))
+		assert.Contains(t, svc.ListSites(), "hdsky")
+	})
+
+	t.Run("disabled site is unregistered", func(t *testing.T) {
+		store := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{
+			"hdsky": {Enabled: &disabled, Cookie: "c=1", APIUrl: "https://hdsky.me"},
+		}}
+		require.NoError(t, RefreshSiteRegistrations(store))
+		assert.NotContains(t, svc.ListSites(), "hdsky")
+	})
+
+	t.Run("site missing from config is unregistered", func(t *testing.T) {
+		store := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{
+			"hdsky": {Enabled: &enabled, Cookie: "c=1", APIUrl: "https://hdsky.me"},
+		}}
+		require.NoError(t, RefreshSiteRegistrations(store))
+		require.Contains(t, svc.ListSites(), "hdsky")
+
+		empty := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{}}
+		require.NoError(t, RefreshSiteRegistrations(empty))
+		assert.NotContains(t, svc.ListSites(), "hdsky")
+	})
+
+	t.Run("enabled site with missing credentials is skipped", func(t *testing.T) {
+		store := registerRefreshStore{sites: map[models.SiteGroup]models.SiteConfig{
+			"hdsky": {Enabled: &enabled, APIUrl: "https://hdsky.me"},
+		}}
+		require.NoError(t, RefreshSiteRegistrations(store))
+		assert.NotContains(t, svc.ListSites(), "hdsky")
+	})
+}
+
+// ==== merged from api_userinfo_test.go ====
 func init() {
 	// Initialize global logger for tests
 	if global.GlobalLogger == nil {

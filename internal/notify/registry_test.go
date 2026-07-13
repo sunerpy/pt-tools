@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/models"
@@ -134,4 +135,23 @@ func TestRegistry_RegisterChannel_DefaultRegistry(t *testing.T) {
 	ch, err := DefaultRegistry().Make(typ)
 	require.NoError(t, err)
 	require.Equal(t, typ, ch.Type())
+}
+
+// TestRegistry_MakeNilFactory covers Make returning an error when a factory
+// yields nil.
+func TestRegistry_MakeNilFactory(t *testing.T) {
+	r := NewRegistry()
+	r.Register("nilmaker", func() Channel { return nil })
+	ch, err := r.Make("nilmaker")
+	require.Error(t, err)
+	assert.Nil(t, ch)
+	assert.Contains(t, err.Error(), "空实例")
+}
+
+// TestRegistry_NilReceiver covers the nil-registry branches of Make and Types.
+func TestRegistry_NilReceiver(t *testing.T) {
+	var r *Registry
+	_, err := r.Make("x")
+	require.Error(t, err)
+	assert.Nil(t, r.Types())
 }

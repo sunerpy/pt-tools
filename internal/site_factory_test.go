@@ -1,25 +1,15 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package internal
 
 import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-
-	"github.com/sunerpy/pt-tools/core"
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
-
-func setupFactoryTestDB(t *testing.T) func() {
-	db, err := core.NewTempDBDir(t.TempDir())
-	require.NoError(t, err)
-	global.InitLogger(zap.NewNop())
-	global.GlobalDB = db
-	return func() {}
-}
 
 func TestGetAllSupportedSiteGroups(t *testing.T) {
 	groups := GetAllSupportedSiteGroups()

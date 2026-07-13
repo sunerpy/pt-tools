@@ -7,8 +7,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -368,4 +371,364 @@ func TestSchemaManager_IsLegacyDatabase(t *testing.T) {
 			}
 		})
 	}
+}
+
+func closedDB(t *testing.T, tables ...any) *gorm.DB {
+	t.Helper()
+	db := newMemDB(t, tables...)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	return db
+}
+
+func TestErrorPaths_ClosedDB(t *testing.T) {
+	db := closedDB(t, &SiteSetting{}, &RSSSubscription{}, &FilterRule{},
+		&RSSFilterAssociation{}, &SiteLoginState{})
+
+	siteRepo := NewSiteRepository(db)
+	_, err := siteRepo.ListSites()
+	assert.Error(t, err)
+	_, err = siteRepo.ListEnabledSites()
+	assert.Error(t, err)
+	_, err = siteRepo.SiteExistsByName("x")
+	assert.Error(t, err)
+	_, err = siteRepo.CreateSite(SiteData{Name: "n", AuthMethod: "cookie"})
+	assert.Error(t, err)
+
+	assocDB := NewRSSFilterAssociationDB(db)
+	_, err = assocDB.GetByRSSID(1)
+	assert.Error(t, err)
+	_, err = assocDB.GetByFilterRuleID(1)
+	assert.Error(t, err)
+	assert.Error(t, assocDB.SetFilterRulesForRSS(1, []uint{2}))
+
+	loginRepo := NewSiteLoginStateRepository(db)
+	assert.Error(t, loginRepo.UpsertLoginState("s", map[string]any{"LastProbeStatus": "OK"}))
+	_, err = loginRepo.GetLoginState("s")
+	assert.Error(t, err)
+	_, err = loginRepo.ListLoginStates(false)
+	assert.Error(t, err)
+
+	assert.Error(t, MigrateExampleRSS(db))
+	assert.Error(t, SyncSitesFromRegistry(db, []RegisteredSite{{ID: "x", AuthMethod: "cookie"}}))
+	assert.Error(t, setDefaultsForSiteSetting(db))
+	assert.Error(t, migrateV1ToV2(db))
+
+	assert.Error(t, loginRepo.UpdateProbeResult("s", "OK", nil, nil, nil))
+	assert.Error(t, loginRepo.ClampLastVisit("s", time.Now(), time.Now()))
+	assert.Error(t, loginRepo.IncrProbeFailures("s"))
+	assert.Error(t, loginRepo.ResetProbeFailures("s"))
+	assert.Error(t, assocDB.DeleteByRSSID(1))
+	assert.Error(t, assocDB.DeleteByFilterRuleID(1))
+	_, err = assocDB.HasAssociations(1)
+	assert.Error(t, err)
+	_, err = assocDB.Exists(1, 2)
+	assert.Error(t, err)
+
+	sm := NewSchemaManager(db, "1.0.0")
+	assert.Error(t, sm.RunMigrations())
+	_, err = sm.isLegacyDatabase()
+	assert.Error(t, err)
+}
+
+type dynamicSiteSettingLegacyRow struct {
+	ID           uint   `gorm:"primaryKey"`
+	Name         string `gorm:"uniqueIndex;size:64;not null"`
+	DisplayName  string `gorm:"size:128"`
+	BaseURL      string `gorm:"size:512"`
+	Enabled      bool
+	AuthMethod   string `gorm:"size:16;not null"`
+	Cookie       string `gorm:"size:2048"`
+	APIKey       string `gorm:"size:512"`
+	APIURL       string `gorm:"size:512"`
+	DownloaderID *uint  `gorm:"index"`
+	ParserConfig string `gorm:"type:text"`
+	IsBuiltin    bool
+	TemplateID   *uint `gorm:"index"`
+}
+
+func (dynamicSiteSettingLegacyRow) TableName() string { return "dynamic_site_settings" }
+
+func TestMigrateV4ToV5_CreateAndMerge(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &dynamicSiteSettingLegacyRow{})
+
+	dlID := uint(7)
+	require.NoError(t, db.Create(&dynamicSiteSettingLegacyRow{
+		Name: "newsite", DisplayName: "New Site", BaseURL: "https://new.example",
+		Enabled: true, AuthMethod: "cookie", Cookie: "ck", APIKey: "ak",
+		APIURL: "https://api.new", DownloaderID: &dlID, ParserConfig: "{}", IsBuiltin: true,
+	}).Error)
+	tmpl := uint(3)
+	require.NoError(t, db.Create(&dynamicSiteSettingLegacyRow{
+		Name: "existing", DisplayName: "Legacy Name", BaseURL: "https://legacy",
+		AuthMethod: "cookie", Cookie: "legacyck", APIKey: "legacyak", APIURL: "https://legacy-api",
+		DownloaderID: &tmpl, ParserConfig: "{\"a\":1}", TemplateID: &tmpl, IsBuiltin: true,
+	}).Error)
+
+	require.NoError(t, db.Create(&SiteSetting{Name: "existing", AuthMethod: "cookie"}).Error)
+
+	require.NoError(t, migrateV4ToV5(db))
+
+	assert.False(t, db.Migrator().HasTable("dynamic_site_settings"))
+
+	var created SiteSetting
+	require.NoError(t, db.Where("name = ?", "newsite").First(&created).Error)
+	assert.Equal(t, "New Site", created.DisplayName)
+	assert.Equal(t, "ck", created.Cookie)
+	require.NotNil(t, created.DownloaderID)
+	assert.Equal(t, uint(7), *created.DownloaderID)
+
+	var merged SiteSetting
+	require.NoError(t, db.Where("name = ?", "existing").First(&merged).Error)
+	assert.Equal(t, "Legacy Name", merged.DisplayName)
+	assert.Equal(t, "legacyck", merged.Cookie)
+	assert.Equal(t, "https://legacy-api", merged.APIUrl)
+	assert.Equal(t, "{\"a\":1}", merged.ParserConfig)
+	require.NotNil(t, merged.DownloaderID)
+	require.NotNil(t, merged.TemplateID)
+	assert.True(t, merged.IsBuiltin)
+}
+
+func TestMigrateV4ToV5_EmptyLegacyTable(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &dynamicSiteSettingLegacyRow{})
+	require.NoError(t, db.Create(&SiteSetting{Name: "s1", AuthMethod: "cookie"}).Error)
+
+	require.NoError(t, migrateV4ToV5(db))
+
+	assert.False(t, db.Migrator().HasTable("dynamic_site_settings"))
+	var s SiteSetting
+	require.NoError(t, db.Where("name = ?", "s1").First(&s).Error)
+	assert.Equal(t, "s1", s.DisplayName)
+	assert.True(t, s.IsBuiltin)
+}
+
+func TestMigrateV5ToV6_AddsColumns(t *testing.T) {
+	db := newMemDB(t)
+	require.NoError(t, db.Exec("CREATE TABLE rss_subscriptions (id INTEGER PRIMARY KEY)").Error)
+
+	require.NoError(t, migrateV5ToV6(db))
+
+	assert.True(t, db.Migrator().HasColumn(&RSSSubscription{}, "NotifyMode"))
+	assert.True(t, db.Migrator().HasColumn(&RSSSubscription{}, "NotifyConfIDs"))
+	assert.True(t, db.Migrator().HasColumn(&RSSSubscription{}, "MaxNotificationsPerHour"))
+	assert.True(t, db.Migrator().HasTable(&RSSNotificationLog{}))
+}
+
+func TestMigrateV6ToV7_AddsPurposeColumn(t *testing.T) {
+	db := newMemDB(t)
+	require.NoError(t, db.Exec("CREATE TABLE filter_rules (id INTEGER PRIMARY KEY)").Error)
+
+	require.NoError(t, migrateV6ToV7(db))
+
+	assert.True(t, db.Migrator().HasColumn(&FilterRule{}, "Purpose"))
+}
+
+func TestMigrateV7ToV8_AddsQuietHours(t *testing.T) {
+	db := newMemDB(t)
+	require.NoError(t, db.Exec("CREATE TABLE notification_conf (id INTEGER PRIMARY KEY)").Error)
+
+	require.NoError(t, migrateV7ToV8(db))
+
+	assert.True(t, db.Migrator().HasColumn(&NotificationConf{}, "QuietHoursStart"))
+	assert.True(t, db.Migrator().HasColumn(&NotificationConf{}, "QuietHoursEnd"))
+}
+
+func TestRunMigrations_LegacyChainV1ToV10(t *testing.T) {
+	db := newMemDB(
+		t,
+		&SchemaVersion{}, &SettingsGlobal{}, &SiteSetting{}, &RSSSubscription{},
+		&FilterRule{}, &NotificationConf{},
+	)
+
+	require.NoError(t, db.Create(&SiteSetting{Name: "hdsky", AuthMethod: "cookie", Cookie: "uid=1;pass=2", Enabled: true}).Error)
+	require.NoError(t, db.Create(&RSSSubscription{Name: "ex", URL: "https://example.com/rss", IntervalMinutes: 5}).Error)
+
+	backup := func(*gorm.DB, string) (string, error) { return "b", nil }
+	enc := func(p string) (string, error) { return "enc:" + p, nil }
+	dec := func(c string) (string, error) { return c[4:], nil }
+
+	sm := NewSchemaManagerWithHooks(db, "1.0.0", backup, enc, dec)
+	require.NoError(t, sm.RunMigrations())
+
+	got, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, CurrentSchemaVersion, got)
+
+	assert.True(t, db.Migrator().HasColumn(&SiteSetting{}, "CookieEncrypted"))
+	assert.True(t, db.Migrator().HasTable(&SiteLoginState{}))
+	assert.True(t, db.Migrator().HasColumn(&SiteLoginState{}, "ApiLastLoginAt"))
+
+	var cipher string
+	require.NoError(t, db.Model(&SiteSetting{}).Where("name = ?", "hdsky").Pluck("cookie_encrypted", &cipher).Error)
+	assert.Equal(t, "enc:uid=1;pass=2", cipher)
+
+	var rss RSSSubscription
+	require.NoError(t, db.Where("name = ?", "ex").First(&rss).Error)
+	assert.True(t, rss.IsExample)
+
+	_, ok := GetMigrationState(db, 10)
+	assert.True(t, ok)
+}
+
+func TestRunMigrations_FreshInstall(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &SettingsGlobal{}, &RSSSubscription{})
+	sm := NewSchemaManager(db, "1.2.3")
+
+	require.NoError(t, sm.RunMigrations())
+
+	got, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, CurrentSchemaVersion, got)
+}
+
+func TestGetCurrentVersion_NoTable(t *testing.T) {
+	db := newMemDB(t)
+	sm := NewSchemaManager(db, "1.0.0")
+
+	got, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, 0, got)
+}
+
+func TestSchemaManager_RecordAndReadVersion(t *testing.T) {
+	db := newMemDB(t)
+	sm := NewSchemaManager(db, "9.9.9")
+	require.NoError(t, sm.EnsureSchemaVersionTable())
+	require.NoError(t, sm.RecordVersion(3, "test v3"))
+
+	got, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, 3, got)
+}
+
+func TestSchemaManager_IsLegacyByRSSOnly(t *testing.T) {
+	db := newMemDB(t, &SchemaVersion{}, &SettingsGlobal{}, &SiteSetting{}, &RSSSubscription{},
+		&FilterRule{}, &NotificationConf{})
+	require.NoError(t, db.Create(&RSSSubscription{Name: "r", URL: "http://x", IntervalMinutes: 5}).Error)
+
+	backup := func(*gorm.DB, string) (string, error) { return "b", nil }
+	enc := func(p string) (string, error) { return "e:" + p, nil }
+	dec := func(c string) (string, error) { return c[2:], nil }
+	sm := NewSchemaManagerWithHooks(db, "1.0.0", backup, enc, dec)
+
+	require.NoError(t, sm.RunMigrations())
+	got, err := sm.GetCurrentVersion()
+	require.NoError(t, err)
+	assert.Equal(t, CurrentSchemaVersion, got)
+}
+
+func TestMigrateV8ToV9_NilHooks(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{})
+	sm := NewSchemaManager(db, "1.0.0")
+	assert.Error(t, sm.migrateV8ToV9(db))
+
+	sm.BackupTable = func(*gorm.DB, string) (string, error) { return "b", nil }
+	assert.Error(t, sm.migrateV8ToV9(db))
+}
+
+func TestMigrateV8ToV9_DecryptSanityMismatch(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &SiteLoginState{})
+	require.NoError(t, db.Create(&SiteSetting{Name: "s", AuthMethod: "cookie", Cookie: "raw"}).Error)
+
+	sm := NewSchemaManagerWithHooks(
+		db, "1.0.0",
+		func(*gorm.DB, string) (string, error) { return "b", nil },
+		func(p string) (string, error) { return "e:" + p, nil },
+		func(string) (string, error) { return "TAMPERED", nil },
+	)
+	err := sm.migrateV8ToV9(db)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sanity")
+}
+
+func TestMigrateV9ToV10_NilBackupHook(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	sm := NewSchemaManager(db, "1.0.0")
+	assert.Error(t, sm.migrateV9ToV10(db))
+}
+
+func TestMigrateV2ToV3_UserInfoTableExists(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{})
+	require.NoError(t, db.Exec("CREATE TABLE user_info (id INTEGER PRIMARY KEY)").Error)
+	require.NoError(t, migrateV2ToV3(db))
+	assert.True(t, db.Migrator().HasTable("user_info"))
+}
+
+func TestMigrateV8ToV9_IdempotentColumnPresent(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &SiteLoginState{})
+	require.NoError(t, db.Create(&SiteSetting{Name: "s", AuthMethod: "cookie", Cookie: "raw"}).Error)
+
+	backup := func(*gorm.DB, string) (string, error) { return "b", nil }
+	enc := func(p string) (string, error) { return "e:" + p, nil }
+	dec := func(c string) (string, error) { return c[2:], nil }
+	sm := NewSchemaManagerWithHooks(db, "1.0.0", backup, enc, dec)
+
+	require.NoError(t, sm.migrateV8ToV9(db))
+
+	var cipher string
+	require.NoError(t, db.Model(&SiteSetting{}).Where("name = ?", "s").Pluck("cookie_encrypted", &cipher).Error)
+	assert.Equal(t, "e:raw", cipher)
+}
+
+func TestMigrateV1ToV2_Full(t *testing.T) {
+	db := newMemDB(t, &SettingsGlobal{}, &RSSSubscription{})
+
+	require.NoError(t, db.Create(&SettingsGlobal{DefaultConcurrency: 0}).Error)
+	require.NoError(t, db.Create(&RSSSubscription{Name: "ex", URL: "https://example.com/rss", IntervalMinutes: 5}).Error)
+
+	require.NoError(t, migrateV1ToV2(db))
+
+	var gl SettingsGlobal
+	require.NoError(t, db.First(&gl).Error)
+	assert.Equal(t, DefaultConcurrency, gl.DefaultConcurrency)
+
+	var rss RSSSubscription
+	require.NoError(t, db.Where("name = ?", "ex").First(&rss).Error)
+	assert.True(t, rss.IsExample)
+}
+
+func TestMigrators_V5V6V7V8(t *testing.T) {
+	db := newMemDB(t, &RSSSubscription{}, &FilterRule{}, &NotificationConf{}, &RSSNotificationLog{})
+
+	// v5→v6 is idempotent when columns already exist (AutoMigrate created them)
+	require.NoError(t, migrateV5ToV6(db))
+	assert.True(t, db.Migrator().HasTable(&RSSNotificationLog{}))
+
+	// v6→v7 backfills purpose; column already present via AutoMigrate
+	require.NoError(t, migrateV6ToV7(db))
+
+	// v7→v8 adds quiet-hours columns; idempotent when present
+	require.NoError(t, migrateV7ToV8(db))
+}
+
+func TestMigrators_V6V7_NoTables(t *testing.T) {
+	// FilterRule / NotificationConf tables absent → migrators no-op cleanly
+	db := newMemDB(t, &RSSSubscription{})
+	require.NoError(t, migrateV6ToV7(db))
+	require.NoError(t, migrateV7ToV8(db))
+}
+
+func TestMigrateV4ToV5_NoLegacyTable(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{})
+	// no dynamic_site_settings table → sets defaults only
+	require.NoError(t, db.Create(&SiteSetting{Name: "abc", AuthMethod: "cookie"}).Error)
+	require.NoError(t, migrateV4ToV5(db))
+
+	var site SiteSetting
+	require.NoError(t, db.Where("name = ?", "abc").First(&site).Error)
+	assert.Equal(t, "abc", site.DisplayName) // defaulted from Name
+	assert.True(t, site.IsBuiltin)
+}
+
+func TestMigrateV2ToV3_CreatesUserInfo(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{})
+	assert.False(t, db.Migrator().HasTable("user_info_records"))
+	require.NoError(t, migrateV2ToV3(db))
+	assert.True(t, db.Migrator().HasTable("user_info_records"))
+}
+
+func TestMigrateV3ToV4_Noop(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{})
+	require.NoError(t, migrateV3ToV4(db))
 }

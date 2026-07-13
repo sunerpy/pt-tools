@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package internal
 
 import (
@@ -9,10 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const gb = int64(1024 * 1024 * 1024)
-
-// resetGlobalBudget 把全局 budget 清零，避免测试之间互相污染。
-func resetGlobalBudget() { GetDiskBudget().Reset() }
+func TestDiskBudget_ReservedNormalizesNegative(t *testing.T) {
+	b := &DiskBudget{}
+	b.Release(50 * gb) // release with nothing reserved → clamps to 0
+	assert.Equal(t, int64(0), b.Reserved())
+}
 
 func TestDiskBudget_ReserveAndReleaseBasic(t *testing.T) {
 	resetGlobalBudget()

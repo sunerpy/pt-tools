@@ -7,6 +7,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/stretchr/testify/assert"
 )
 
 // MockConfig 用于测试的模拟配置
@@ -145,4 +146,33 @@ func TestDownloadTaskInfo(t *testing.T) {
 	if info.Hash != "abc123" {
 		t.Errorf("expected hash 'abc123', got '%s'", info.Hash)
 	}
+}
+
+func TestToAddTorrentOptions(t *testing.T) {
+	cfg := &GenericConfig{Type: DownloaderQBittorrent, URL: "http://x", AutoStart: true}
+	opt := ToAddTorrentOptions(cfg, "movies", "hd,free", "/downloads")
+	assert.False(t, opt.AddAtPaused, "autoStart=true → AddAtPaused=false")
+	assert.Equal(t, "movies", opt.Category)
+	assert.Equal(t, "hd,free", opt.Tags)
+	assert.Equal(t, "/downloads", opt.SavePath)
+
+	cfg2 := &GenericConfig{Type: DownloaderQBittorrent, URL: "http://x", AutoStart: false}
+	opt2 := ToAddTorrentOptions(cfg2, "", "", "")
+	assert.True(t, opt2.AddAtPaused, "autoStart=false → AddAtPaused=true")
+}
+
+func TestGenericConfigGetters(t *testing.T) {
+	c := NewGenericConfig(DownloaderTransmission, "http://t:9091", "user", "pass", true)
+	assert.Equal(t, DownloaderTransmission, c.GetType())
+	assert.Equal(t, "http://t:9091", c.GetURL())
+	assert.Equal(t, "user", c.GetUsername())
+	assert.Equal(t, "pass", c.GetPassword())
+	assert.True(t, c.GetAutoStart())
+	assert.NoError(t, c.Validate())
+}
+
+func TestGenericConfigValidate(t *testing.T) {
+	assert.ErrorIs(t, (&GenericConfig{Type: DownloaderQBittorrent}).Validate(), ErrInvalidConfig)
+	assert.ErrorIs(t, (&GenericConfig{URL: "http://x"}).Validate(), ErrInvalidConfig)
+	assert.NoError(t, (&GenericConfig{Type: DownloaderQBittorrent, URL: "http://x"}).Validate())
 }

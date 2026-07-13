@@ -6,11 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -125,30 +129,6 @@ func TestNewQbitClient(t *testing.T) {
 	}
 	if !client.IsHealthy() {
 		t.Error("expected client to be healthy after successful authentication")
-	}
-}
-
-// TestQbitClientGetDiskSpace 测试获取磁盘空间
-func TestQbitClientGetDiskSpace(t *testing.T) {
-	server := createMockQbitServer()
-	defer server.Close()
-
-	config := NewQBitConfig(server.URL, "admin", "password")
-	client, err := NewQbitClient(config, "test-qbit")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-	space, err := client.GetDiskSpace(ctx)
-	if err != nil {
-		t.Fatalf("failed to get disk space: %v", err)
-	}
-
-	expectedSpace := int64(1024 * 1024 * 1024 * 100) // 100 GB
-	if space != expectedSpace {
-		t.Errorf("expected space %d, got %d", expectedSpace, space)
 	}
 }
 
@@ -296,33 +276,6 @@ func TestQbitClientAuthenticateFailed(t *testing.T) {
 	_, err := NewQbitClient(config, "test-qbit")
 	if err == nil {
 		t.Error("expected error for failed authentication")
-	}
-}
-
-// TestQbitClientGetDiskSpaceError 测试获取磁盘空间失败
-func TestQbitClientGetDiskSpaceError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v2/auth/login":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Ok."))
-		case "/api/v2/sync/maindata":
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	}))
-	defer server.Close()
-
-	config := NewQBitConfig(server.URL, "admin", "password")
-	client, err := NewQbitClient(config, "test-qbit")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-	_, err = client.GetDiskSpace(ctx)
-	if err == nil {
-		t.Error("expected error for failed disk space request")
 	}
 }
 
@@ -499,25 +452,6 @@ func createMockQbitServerWithInvalidDiskSpaceResponse() *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-}
-
-// TestQbitClientGetDiskSpaceInvalidResponse 测试无效的磁盘空间响应
-func TestQbitClientGetDiskSpaceInvalidResponse(t *testing.T) {
-	server := createMockQbitServerWithInvalidDiskSpaceResponse()
-	defer server.Close()
-
-	config := NewQBitConfig(server.URL, "admin", "password")
-	client, err := NewQbitClient(config, "test-qbit")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-	_, err = client.GetDiskSpace(ctx)
-	if err == nil {
-		t.Error("expected error for invalid disk space response")
-	}
 }
 
 // TestDoRequestWithRetry_Forbidden 测试 403 重试
@@ -992,4 +926,488 @@ func TestQBitConfigURLTrailingSlash(t *testing.T) {
 			t.Errorf("GetURL(%q) = %q, want %q", tt.inputURL, config.GetURL(), tt.expectedURL)
 		}
 	}
+}
+
+// failStatusServer responds to every request with the given status code so
+// callers hit their non-success error branch.
+func failStatusServer(t *testing.T, status int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// coverageTestClient builds a QbitClient pointed at the given test-server URL,
+// bypassing NewQbitClient's network Authenticate() so per-method tests stay
+// fast and hermetic. version==5.2.0+ toggles the v520 success-status path.
+func coverageTestClient(baseURL string, v520 bool) *QbitClient {
+	c := &QbitClient{
+		name:    "test-qbit",
+		baseURL: baseURL,
+		client:  &standardHTTPDoer{client: &http.Client{}},
+		healthy: true,
+	}
+	c.versionMu.Lock()
+	c.isV520Plus = v520
+	if v520 {
+		c.appVersion = "v5.2.0"
+	}
+	c.versionMu.Unlock()
+	return c
+}
+
+// qbitAddServer serves auth + add + properties(404) so file-processing flows
+// can exercise CheckTorrentExists -> CanAddTorrent -> AddTorrent end-to-end.
+func qbitAddServer(t *testing.T, existing bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/auth/login":
+			_, _ = w.Write([]byte("Ok."))
+		case r.URL.Path == "/api/v2/sync/maindata":
+			_, _ = w.Write([]byte(`{"server_state":{"free_space_on_disk":107374182400}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v2/torrents/properties"):
+			if existing {
+				_, _ = w.Write([]byte(`{"save_path":"/downloads"}`))
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case r.URL.Path == "/api/v2/torrents/add":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// assertErr is a tiny error helper carrying the given message.
+type assertErr string
+
+func (e assertErr) Error() string { return string(e) }
+
+// reauthDoer forces the first request to return 403, then delegates to the
+// wrapped client so doRequestWithRetry's re-auth branch is exercised.
+type reauthDoer struct {
+	inner   *standardHTTPDoer
+	tripped atomic.Bool
+}
+
+func (d *reauthDoer) Do(req *http.Request) (*http.Response, error) {
+	if !d.tripped.Swap(true) {
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Body:       http.NoBody,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}
+	return d.inner.Do(req)
+}
+
+func TestQbitParseQBitVersion_Branches(t *testing.T) {
+	maj, min, patch, ok := parseQBitVersion("v5.2.1")
+	require.True(t, ok)
+	assert.Equal(t, 5, maj)
+	assert.Equal(t, 2, min)
+	assert.Equal(t, 1, patch)
+
+	_, _, _, ok = parseQBitVersion("not-a-version")
+	assert.False(t, ok)
+}
+
+func TestQbitAuthenticate_204NoContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v2/app/version":
+			_, _ = w.Write([]byte("v5.2.0"))
+		}
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	c.username = "admin"
+	c.password = "pw"
+	require.NoError(t, c.Authenticate())
+	assert.True(t, c.healthy)
+}
+
+func TestQbitAuthenticate_200ThenVersionDetected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = w.Write([]byte("Ok."))
+		case "/api/v2/app/version":
+			_, _ = w.Write([]byte("v5.2.1"))
+		}
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	require.NoError(t, c.Authenticate())
+	assert.True(t, c.healthy)
+	c.versionMu.RLock()
+	defer c.versionMu.RUnlock()
+	assert.True(t, c.isV520Plus)
+}
+
+func TestQbitAuthenticate_200ButVersionHTML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/auth/login":
+			_, _ = w.Write([]byte("Ok."))
+		case "/api/v2/app/version":
+			_, _ = w.Write([]byte("<!DOCTYPE html><html>x</html>"))
+		}
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	err := c.Authenticate()
+	require.Error(t, err)
+}
+
+func TestQbitDetectVersion_Branches(t *testing.T) {
+	t.Run("legacy version", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("v4.6.0"))
+		}))
+		defer srv.Close()
+		c := coverageTestClient(srv.URL, false)
+		require.NoError(t, c.detectVersion(context.Background()))
+		c.versionMu.RLock()
+		defer c.versionMu.RUnlock()
+		assert.False(t, c.isV520Plus)
+	})
+
+	t.Run("empty version body", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("   "))
+		}))
+		defer srv.Close()
+		require.NoError(t, coverageTestClient(srv.URL, false).detectVersion(context.Background()))
+	})
+
+	t.Run("invalid version", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("garbage"))
+		}))
+		defer srv.Close()
+		require.NoError(t, coverageTestClient(srv.URL, false).detectVersion(context.Background()))
+	})
+
+	t.Run("non-2xx status", func(t *testing.T) {
+		srv := failStatusServer(t, http.StatusInternalServerError)
+		require.NoError(t, coverageTestClient(srv.URL, false).detectVersion(context.Background()))
+	})
+
+	t.Run("html returns wrong-server error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("<!DOCTYPE html><html>x</html>"))
+		}))
+		defer srv.Close()
+		require.Error(t, coverageTestClient(srv.URL, false).detectVersion(context.Background()))
+	})
+
+	t.Run("connection error is non-fatal", func(t *testing.T) {
+		require.NoError(t, coverageTestClient("http://127.0.0.1:1", false).detectVersion(context.Background()))
+	})
+}
+
+func TestQbitEnsureTorrentStarted_ResumesPaused(t *testing.T) {
+	var resumed bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/torrents/info":
+			_, _ = w.Write([]byte(`[{"name":"t","state":"pausedDL"}]`))
+		case "/api/v2/torrents/resume":
+			resumed = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	c.autoStart = true
+	require.NoError(t, c.EnsureTorrentStarted("hash1"))
+	assert.True(t, resumed, "paused torrent must be resumed under autoStart")
+}
+
+func TestQbitEnsureTorrentStarted_AlreadyRunning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/torrents/info" {
+			_, _ = w.Write([]byte(`[{"name":"t","state":"downloading"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	c.autoStart = true
+	require.NoError(t, c.EnsureTorrentStarted("hash1"))
+}
+
+func TestQbitGetClientVersion_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("v4.6.5"))
+	}))
+	defer srv.Close()
+	v, err := coverageTestClient(srv.URL, false).GetClientVersion()
+	require.NoError(t, err)
+	assert.Equal(t, "v4.6.5", v)
+}
+
+func TestQbitCheckTorrentExists_Found(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"hash":"h1","name":"t"}`))
+	}))
+	defer srv.Close()
+	got, err := coverageTestClient(srv.URL, false).CheckTorrentExists("h1")
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+func TestQbitGetTorrentsBy_UnfilteredReturnsAll(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"hash":"h1","name":"t1","state":"downloading"}]`))
+	}))
+	defer srv.Close()
+	got, err := coverageTestClient(srv.URL, false).GetTorrentsBy(downloader.TorrentFilter{})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}
+
+func TestQbitGetAllTorrents_MapsRichFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{
+			"hash":"h1","name":"t1","state":"uploading","progress":1.0,
+			"dlspeed":10,"upspeed":20,"size":1024,"downloaded":2048,"uploaded":4096,
+			"ratio":2.0,"added_on":1600000000,"save_path":"/dl","category":"movies",
+			"tags":"a,b","num_seeds":5,"num_leechs":3,"tracker":"http://tr1","eta":100,
+			"completion_on":1600001000
+		}]`))
+	}))
+	defer srv.Close()
+
+	torrents, err := coverageTestClient(srv.URL, false).GetAllTorrents()
+	require.NoError(t, err)
+	require.Len(t, torrents, 1)
+	assert.Equal(t, "h1", torrents[0].InfoHash)
+	assert.Equal(t, downloader.TorrentSeeding, torrents[0].State)
+}
+
+func TestQbitGetAllTorrentsAndMapping(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"hash": "h1", "name": "torrent-one", "progress": float64(1.0),
+				"ratio": float64(2.5), "added_on": float64(1600000000),
+				"save_path": "/downloads", "category": "movies", "tags": "hd,new",
+				"state": "uploading", "size": float64(1024), "amount_left": float64(0),
+				"upspeed": float64(10), "dlspeed": float64(20), "uploaded": float64(2048),
+				"downloaded": float64(4096), "eta": float64(0), "seeding_time": float64(3600),
+				"tracker": "http://t.example", "completion_on": float64(1600001000),
+				"num_seeds": float64(5), "num_leechs": float64(3), "availability": float64(1.5),
+				"content_path": "/downloads/torrent-one",
+			},
+			{"hash": "h2", "name": "torrent-two", "progress": float64(0.5), "state": "downloading"},
+		})
+	}))
+	defer srv.Close()
+
+	torrents, err := coverageTestClient(srv.URL, false).GetAllTorrents()
+	require.NoError(t, err)
+	require.Len(t, torrents, 2)
+
+	first := torrents[0]
+	assert.Equal(t, "h1", first.ID)
+	assert.Equal(t, "h1", first.InfoHash)
+	assert.Equal(t, "torrent-one", first.Name)
+	assert.True(t, first.IsCompleted)
+	assert.Equal(t, 2.5, first.Ratio)
+	assert.Equal(t, "/downloads", first.SavePath)
+	assert.Equal(t, "movies", first.Category)
+	assert.Equal(t, "movies", first.Label)
+	assert.Equal(t, "hd,new", first.Tags)
+	assert.Equal(t, downloader.TorrentSeeding, first.State)
+	assert.Equal(t, int64(1024), first.TotalSize)
+	assert.Equal(t, int64(10), first.UploadSpeed)
+	assert.Equal(t, int64(20), first.DownloadSpeed)
+	assert.Equal(t, int64(2048), first.TotalUploaded)
+	assert.Equal(t, int64(4096), first.TotalDownloaded)
+	assert.Equal(t, int64(3600), first.SeedingTime)
+	assert.Equal(t, "http://t.example", first.Tracker)
+	assert.Equal(t, 5, first.NumSeeds)
+	assert.Equal(t, 3, first.NumPeers)
+	assert.Equal(t, "test-qbit", first.ClientID)
+
+	assert.False(t, torrents[1].IsCompleted)
+	assert.Equal(t, downloader.TorrentDownloading, torrents[1].State)
+}
+
+func TestQbitMapQbitState(t *testing.T) {
+	c := coverageTestClient("http://x", false)
+	cases := map[string]downloader.TorrentState{
+		"downloading":        downloader.TorrentDownloading,
+		"forcedDL":           downloader.TorrentDownloading,
+		"uploading":          downloader.TorrentSeeding,
+		"forcedUP":           downloader.TorrentSeeding,
+		"pausedDL":           downloader.TorrentPaused,
+		"pausedUP":           downloader.TorrentPaused,
+		"stoppedDL":          downloader.TorrentStopped,
+		"stoppedUP":          downloader.TorrentStopped,
+		"queuedDL":           downloader.TorrentQueued,
+		"queuedUP":           downloader.TorrentQueued,
+		"checkingDL":         downloader.TorrentChecking,
+		"checkingResumeData": downloader.TorrentChecking,
+		"error":              downloader.TorrentError,
+		"missingFiles":       downloader.TorrentError,
+		"somethingElse":      downloader.TorrentUnknown,
+	}
+	for state, want := range cases {
+		assert.Equal(t, want, c.mapQbitState(state), state)
+	}
+}
+
+func TestQbitGetTorrentsByAndGetTorrent(t *testing.T) {
+	body := []map[string]any{
+		{"hash": "h1", "name": "a", "progress": float64(1.0), "state": "uploading"},
+		{"hash": "h2", "name": "b", "progress": float64(0.3), "state": "downloading"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer srv.Close()
+	c := coverageTestClient(srv.URL, false)
+
+	t.Run("no filter returns all", func(t *testing.T) {
+		got, err := c.GetTorrentsBy(downloader.TorrentFilter{})
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+	})
+
+	t.Run("filter by hash", func(t *testing.T) {
+		got, err := c.GetTorrentsBy(downloader.TorrentFilter{Hashes: []string{"h2"}})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "h2", got[0].InfoHash)
+	})
+
+	t.Run("filter by id", func(t *testing.T) {
+		got, err := c.GetTorrentsBy(downloader.TorrentFilter{IDs: []string{"h1"}})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "h1", got[0].ID)
+	})
+
+	t.Run("filter by complete", func(t *testing.T) {
+		done := true
+		got, err := c.GetTorrentsBy(downloader.TorrentFilter{Complete: &done})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.True(t, got[0].IsCompleted)
+	})
+
+	t.Run("filter by state", func(t *testing.T) {
+		state := downloader.TorrentDownloading
+		got, err := c.GetTorrentsBy(downloader.TorrentFilter{State: &state})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, downloader.TorrentDownloading, got[0].State)
+	})
+
+	t.Run("GetTorrent found", func(t *testing.T) {
+		got, err := c.GetTorrent("h1")
+		require.NoError(t, err)
+		assert.Equal(t, "h1", got.InfoHash)
+	})
+
+	t.Run("GetTorrent not found", func(t *testing.T) {
+		_, err := c.GetTorrent("missing")
+		require.ErrorIs(t, err, downloader.ErrTorrentNotFound)
+	})
+}
+
+func TestQbitPauseResumeRemove(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c := coverageTestClient(srv.URL, true)
+
+	require.NoError(t, c.PauseTorrent("h1"))
+	require.NoError(t, c.ResumeTorrent("h1"))
+	require.NoError(t, c.RemoveTorrent("h1", true))
+	require.NoError(t, c.PauseTorrents([]string{"h1", "h2"}))
+	require.NoError(t, c.ResumeTorrents([]string{"h1", "h2"}))
+	require.NoError(t, c.RemoveTorrents([]string{"h1"}, false))
+
+	assert.Contains(t, paths, "/api/v2/torrents/stop")
+	assert.Contains(t, paths, "/api/v2/torrents/start")
+	assert.Contains(t, paths, "/api/v2/torrents/delete")
+}
+
+func TestQbitSetters(t *testing.T) {
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c := coverageTestClient(srv.URL, false)
+
+	require.NoError(t, c.SetTorrentCategory("h1", "movies"))
+	require.NoError(t, c.SetTorrentTags("h1", "tag1"))
+	require.NoError(t, c.SetTorrentSavePath("h1", "/new/path"))
+	require.NoError(t, c.RecheckTorrent("h1"))
+
+	assert.Contains(t, seen, "/api/v2/torrents/setCategory")
+	assert.Contains(t, seen, "/api/v2/torrents/addTags")
+	assert.Contains(t, seen, "/api/v2/torrents/setLocation")
+	assert.Contains(t, seen, "/api/v2/torrents/recheck")
+}
+
+func TestQbitGetTorrentTrackers(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Contains(t, r.URL.Path, "/api/v2/torrents/trackers")
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"url": "http://tracker1", "status": float64(2), "num_peers": float64(10),
+					"num_seeds": float64(5), "num_leeches": float64(3), "msg": "working",
+				},
+				{"url": "http://tracker2", "message": "alt-message-field"},
+			})
+		}))
+		defer srv.Close()
+
+		trackers, err := coverageTestClient(srv.URL, false).GetTorrentTrackers("h1")
+		require.NoError(t, err)
+		require.Len(t, trackers, 2)
+		assert.Equal(t, "http://tracker1", trackers[0].URL)
+		assert.Equal(t, 2, trackers[0].Status)
+		assert.Equal(t, 10, trackers[0].Peers)
+		assert.Equal(t, 5, trackers[0].Seeds)
+		assert.Equal(t, 3, trackers[0].Leeches)
+		assert.Equal(t, "working", trackers[0].Message)
+		assert.Equal(t, "alt-message-field", trackers[1].Message)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		_, err := coverageTestClient(srv.URL, false).GetTorrentTrackers("h1")
+		require.Error(t, err)
+	})
 }

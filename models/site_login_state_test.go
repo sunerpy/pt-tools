@@ -164,3 +164,97 @@ func TestSiteLoginStateUniqueIndex(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count, "should only have 1 row for same SiteName")
 }
+
+func TestSiteLoginState_IncrResetClamp(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	repo := NewSiteLoginStateRepository(db)
+
+	require.NoError(t, repo.UpsertLoginState("hdsky", map[string]any{
+		"BanThresholdDays":       45,
+		"RemindBeforeDays":       7,
+		"ReminderCron":           "0 8 * * *",
+		"NotificationChannelIDs": "[1,2,3]",
+	}))
+
+	require.NoError(t, repo.IncrProbeFailures("hdsky"))
+	require.NoError(t, repo.IncrProbeFailures("hdsky"))
+	st, err := repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, 2, st.ConsecutiveProbeFailures)
+	assert.Equal(t, 45, st.BanThresholdDays)
+	assert.Equal(t, "0 8 * * *", st.ReminderCron)
+	assert.Equal(t, "[1,2,3]", st.NotificationChannelIDs)
+
+	require.NoError(t, repo.ResetProbeFailures("hdsky"))
+	st, err = repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, 0, st.ConsecutiveProbeFailures)
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	require.NoError(t, repo.ClampLastVisit("hdsky", future, now))
+	st, err = repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	require.NotNil(t, st.LastVisitAt)
+	assert.WithinDuration(t, now, *st.LastVisitAt, 2*time.Second)
+
+	past := now.Add(-time.Hour)
+	require.NoError(t, repo.ClampLastVisit("hdsky", past, now))
+	st, err = repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.WithinDuration(t, past, *st.LastVisitAt, 2*time.Second)
+}
+
+func TestSiteLoginState_ListAndUpdateProbe(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	repo := NewSiteLoginStateRepository(db)
+
+	require.NoError(t, repo.UpsertLoginState("hdsky", map[string]any{
+		"LastProbeStatus":    "OK",
+		"ProbeJitterSeconds": 30,
+		"ProbeMode":          "api",
+	}))
+	require.NoError(t, repo.UpsertLoginState("mteam", map[string]any{"LastProbeStatus": "FAIL"}))
+
+	all, err := repo.ListLoginStates(false)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	okOnly, err := repo.ListLoginStates(true)
+	require.NoError(t, err)
+	assert.Len(t, okOnly, 1)
+	assert.Equal(t, "hdsky", okOnly[0].SiteName)
+
+	// UpdateProbeResult with login/access times + error
+	login := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	access := login.Add(time.Hour)
+	require.NoError(t, repo.UpdateProbeResult("hdsky", "OK", &login, &access, assert.AnError))
+	st, err := repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	require.NotNil(t, st.LastLoginAt)
+	require.NotNil(t, st.LastAccessAt)
+	assert.Equal(t, assert.AnError.Error(), st.LastProbeError)
+
+	// nil-time, nil-error path clears error message
+	require.NoError(t, repo.UpdateProbeResult("hdsky", "OK", nil, nil, nil))
+	st, err = repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.Empty(t, st.LastProbeError)
+}
+
+func TestSiteLoginState_EmptyNameErrors(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	repo := NewSiteLoginStateRepository(db)
+
+	assert.Error(t, repo.UpsertLoginState("", nil))
+	_, err := repo.GetLoginState("")
+	assert.Error(t, err)
+	assert.Error(t, repo.UpdateProbeResult("", "OK", nil, nil, nil))
+	assert.Error(t, repo.ClampLastVisit("", time.Now(), time.Now()))
+	assert.Error(t, repo.IncrProbeFailures(""))
+	assert.Error(t, repo.ResetProbeFailures(""))
+
+	// GetLoginState on missing site → error
+	_, err = repo.GetLoginState("does-not-exist")
+	assert.Error(t, err)
+}

@@ -481,3 +481,62 @@ func TestValidateRegexPattern(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidRegex)
 	})
 }
+
+// TestMatcher_PatternAndType covers the previously-uncovered Pattern()/Type()
+// accessors on all three matcher implementations.
+func TestMatcher_PatternAndType(t *testing.T) {
+	kw, err := NewKeywordMatcher("hello")
+	require.NoError(t, err)
+	assert.Equal(t, "hello", kw.Pattern())
+	assert.Equal(t, PatternKeyword, kw.Type())
+
+	wc, err := NewWildcardMatcher("he*o")
+	require.NoError(t, err)
+	assert.Equal(t, "he*o", wc.Pattern())
+	assert.Equal(t, PatternWildcard, wc.Type())
+
+	rx, err := NewRegexMatcher("h.llo")
+	require.NoError(t, err)
+	assert.Equal(t, "h.llo", rx.Pattern())
+	assert.Equal(t, PatternRegex, rx.Type())
+}
+
+// TestNewMatcher_AllBranches covers NewMatcher's dispatch + error branches.
+func TestNewMatcher_AllBranches(t *testing.T) {
+	t.Run("empty pattern", func(t *testing.T) {
+		_, err := NewMatcher(PatternKeyword, "")
+		assert.ErrorIs(t, err, ErrEmptyPattern)
+	})
+
+	t.Run("pattern too long", func(t *testing.T) {
+		long := make([]byte, MaxPatternLength+1)
+		for i := range long {
+			long[i] = 'a'
+		}
+		_, err := NewMatcher(PatternKeyword, string(long))
+		assert.ErrorIs(t, err, ErrPatternTooLong)
+	})
+
+	t.Run("keyword", func(t *testing.T) {
+		m, err := NewMatcher(PatternKeyword, "kw")
+		require.NoError(t, err)
+		assert.Equal(t, PatternKeyword, m.Type())
+	})
+
+	t.Run("wildcard", func(t *testing.T) {
+		m, err := NewMatcher(PatternWildcard, "w*")
+		require.NoError(t, err)
+		assert.Equal(t, PatternWildcard, m.Type())
+	})
+
+	t.Run("regex", func(t *testing.T) {
+		m, err := NewMatcher(PatternRegex, "r.*")
+		require.NoError(t, err)
+		assert.Equal(t, PatternRegex, m.Type())
+	})
+
+	t.Run("unknown type", func(t *testing.T) {
+		_, err := NewMatcher(PatternType("bogus"), "x")
+		assert.ErrorIs(t, err, ErrUnknownType)
+	})
+}

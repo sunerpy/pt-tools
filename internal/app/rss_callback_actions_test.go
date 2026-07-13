@@ -1,11 +1,6 @@
 // MIT License
 // Copyright (c) 2025 pt-tools
 
-// Coverage for RSSCallbackActions: OnRSSIgnore (suppress + not-found),
-// OnRSSDownload guard paths (nil-db, missing row, unwired fetcher, missing
-// subscription, no default downloader, fetcher error, empty data), and the
-// resolveDownloaderID branches.
-
 package app
 
 import (
@@ -21,6 +16,78 @@ import (
 
 	"github.com/sunerpy/pt-tools/models"
 )
+
+func TestResolveDownloaderID_ConfiguredWins(t *testing.T) {
+	db := setupCallbackDB(t)
+	a := NewRSSCallbackActions(db, nil)
+	id := uint(42)
+	got, err := a.resolveDownloaderID(context.Background(), &id)
+	require.NoError(t, err)
+	assert.Equal(t, uint(42), got)
+}
+
+func TestResolveDownloaderID_ZeroFallsThroughToDefault(t *testing.T) {
+	db := setupCallbackDB(t)
+	a := NewRSSCallbackActions(db, nil)
+	ds := models.DownloaderSetting{Name: "d", Type: "qbittorrent", URL: "http://x", Enabled: true, IsDefault: true}
+	require.NoError(t, db.Create(&ds).Error)
+
+	zero := uint(0)
+	got, err := a.resolveDownloaderID(context.Background(), &zero)
+	require.NoError(t, err)
+	assert.Equal(t, ds.ID, got)
+}
+
+func TestRecordPushError_NilCauseIsNoop(t *testing.T) {
+	db := setupCallbackDB(t)
+	a := NewRSSCallbackActions(db, nil)
+	row := models.RSSNotificationLog{
+		RSSID: 1, SiteName: "s", TorrentID: "t", NotifyKind: "all",
+		NotificationConfID: 1, Result: "sent", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, db.Create(&row).Error)
+	assert.NoError(t, a.recordPushError(context.Background(), &row, nil))
+}
+
+func TestOnRSSDownload_PushFailureRecordsError(t *testing.T) {
+	setupTestKey(t)
+	db := setupCallbackDB(t)
+	dlID := uint(5)
+	ds := models.DownloaderSetting{Name: "d", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, IsDefault: true}
+	ds.ID = dlID
+	require.NoError(t, db.Create(&ds).Error)
+	sub := models.RSSSubscription{Name: "r", URL: "http://x", IntervalMinutes: 1, DownloaderID: &dlID}
+	require.NoError(t, db.Create(&sub).Error)
+	row := models.RSSNotificationLog{
+		RSSID: sub.ID, SiteName: "s", TorrentID: "t", NotifyKind: "all",
+		NotificationConfID: 1, Result: "sent", LastError: "prev",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, db.Create(&row).Error)
+
+	fetcher := func(_ context.Context, _, _ string) ([]byte, error) { return []byte("d8:announce"), nil }
+	a := NewRSSCallbackActions(db, fetcher)
+	err := a.OnRSSDownload(context.Background(), row.ID, 0)
+	require.Error(t, err)
+	var got models.RSSNotificationLog
+	require.NoError(t, db.First(&got, row.ID).Error)
+	assert.NotEmpty(t, got.LastError)
+}
+
+func TestResolveDownloaderID_QueryError(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.DownloaderSetting{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	a := NewRSSCallbackActions(db, nil)
+	zero := uint(0)
+	_, err = a.resolveDownloaderID(context.Background(), &zero)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "查询默认下载器")
+}
 
 func setupCallbackDB(t *testing.T) *gorm.DB {
 	t.Helper()

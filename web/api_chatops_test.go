@@ -14,15 +14,721 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/web/middleware"
 )
 
+// ==== merged from api_chatops_branches_test.go ====
+func TestChatOpsValidationBranches(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	t.Run("create notification missing channel_type", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/notifications", tok,
+			map[string]any{"name": "x"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("create notification missing name", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/notifications", tok,
+			map[string]any{"channel_type": "telegram"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("issue code missing conf_id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/bindings/issue-code", tok,
+			map[string]any{"label": "x"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("patch binding no fields", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPatch, "/api/chatops/bindings/1", tok, map[string]any{})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("create token missing kind", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/tokens", tok,
+			map[string]any{"scope": "x"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("query audit bad since", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/audit?since=not-a-time", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("query audit bad page", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/audit?page=abc", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("list notifications error maps", func(t *testing.T) {
+		deps.NotificationSvc.(*stubNotificationSvc).listErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/notifications", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		deps.NotificationSvc.(*stubNotificationSvc).listErr = nil
+	})
+
+	t.Run("get notification error maps", func(t *testing.T) {
+		deps.NotificationSvc.(*stubNotificationSvc).getErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/notifications/1", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		deps.NotificationSvc.(*stubNotificationSvc).getErr = nil
+	})
+
+	t.Run("query audit ok", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/audit?page=1&page_size=10", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("list bindings ok", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/bindings", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("issue code ok", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/bindings/issue-code", tok,
+			map[string]any{"conf_id": 1, "label": "l"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("create token ok", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/tokens", tok,
+			map[string]any{"kind": "bearer", "scope": "chatops:*", "ttl_s": 3600})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+}
+
+// ==== merged from api_chatops_cov2_test.go ====
+func TestChatopsHandlers_NotWiredBranches(t *testing.T) {
+	h := &chatopsHandlers{deps: &ChatOpsDeps{}}
+
+	t.Run("createToken no admin store", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/chatops/tokens", nil)
+		h.createToken(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("listTokens no admin store", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/chatops/tokens", nil)
+		h.listTokens(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("deleteToken no admin store", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/chatops/tokens/1", nil)
+		h.deleteToken(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+}
+
+func TestChatopsRSSNotify_NoDB(t *testing.T) {
+	prev := global.GlobalDB
+	global.GlobalDB = nil
+	t.Cleanup(func() { global.GlobalDB = prev })
+
+	h := &chatopsHandlers{deps: &ChatOpsDeps{}}
+
+	t.Run("list no db", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/chatops/rss-notifications", nil)
+		h.listRSSNotifications(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("retry no db", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/chatops/rss-notifications/1/retry", nil)
+		h.retryRSSNotification(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("cancel no db", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/chatops/rss-notifications/1/cancel", nil)
+		h.cancelRSSNotification(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+}
+
+func TestChatopsRSSNotify_InvalidID(t *testing.T) {
+	setupChatOpsDB(t)
+	h := &chatopsHandlers{deps: &ChatOpsDeps{}}
+
+	t.Run("retry invalid id", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/chatops/rss-notifications//retry", nil)
+		h.retryRSSNotification(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("cancel invalid id", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/chatops/rss-notifications//cancel", nil)
+		h.cancelRSSNotification(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestChatopsDeleteToken_InvalidID(t *testing.T) {
+	store := newStubBotTokenStore()
+	h := &chatopsHandlers{deps: &ChatOpsDeps{TokenAdmin: store}}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/chatops/tokens/abc", nil)
+	h.deleteToken(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestRegisterChatOpsIfWired(t *testing.T) {
+	t.Run("no deps registers nothing", func(t *testing.T) {
+		s := &Server{}
+		mux := http.NewServeMux()
+		s.registerChatOpsIfWired(mux)
+	})
+
+	t.Run("with deps registers routes", func(t *testing.T) {
+		s := &Server{sessions: map[string]string{}}
+		store := newStubBotTokenStore()
+		s.SetChatOpsDeps(&ChatOpsDeps{
+			NotificationSvc: &stubNotificationSvc{},
+			BindingSvc:      &stubBindingSvc{},
+			AuditSvc:        &stubAuditSvc{},
+			BotTokenStore:   store,
+			TokenAdmin:      store,
+		})
+		mux := http.NewServeMux()
+		s.registerChatOpsIfWired(mux)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/chatops/notifications", nil)
+		mux.ServeHTTP(w, req)
+		require.NotEqual(t, http.StatusNotFound, w.Code)
+	})
+}
+
+// ==== merged from api_chatops_cov3_test.go ====
+func TestChatops_MoreErrorBranches(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	notif := deps.NotificationSvc.(*stubNotificationSvc)
+	bind := deps.BindingSvc.(*stubBindingSvc)
+
+	t.Run("create notification service error", func(t *testing.T) {
+		notif.createErr = errors.New("boom")
+		defer func() { notif.createErr = nil }()
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/notifications", tok, map[string]any{
+			"channel_type": "telegram", "name": "n",
+		})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("update notification invalid id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "PUT", "/api/chatops/notifications/abc", tok, map[string]any{"name": "x"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("update notification service error", func(t *testing.T) {
+		notif.updateErr = errors.New("boom")
+		defer func() { notif.updateErr = nil }()
+		resp := chatopsReq(t, srv, "PUT", "/api/chatops/notifications/1", tok, map[string]any{"name": "x"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("delete notification invalid id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "DELETE", "/api/chatops/notifications/abc", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("delete notification service error", func(t *testing.T) {
+		notif.deleteErr = errors.New("boom")
+		defer func() { notif.deleteErr = nil }()
+		resp := chatopsReq(t, srv, "DELETE", "/api/chatops/notifications/1", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("test notification invalid id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/notifications/abc/test", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("issue bind code missing conf id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("issue bind code service error", func(t *testing.T) {
+		bind.issueErr = app.ErrTooManyActiveCodes
+		defer func() { bind.issueErr = nil }()
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/bindings/issue-code", tok, map[string]any{"conf_id": 1})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("patch binding invalid id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "PATCH", "/api/chatops/bindings/abc", tok, map[string]any{"reply_lang": "zh"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("patch binding no fields", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "PATCH", "/api/chatops/bindings/1", tok, map[string]any{})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("patch binding service error", func(t *testing.T) {
+		bind.setLangErr = app.ErrInvalidReplyLang
+		defer func() { bind.setLangErr = nil }()
+		resp := chatopsReq(t, srv, "PATCH", "/api/chatops/bindings/1", tok, map[string]any{"reply_lang": "xx"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+// ==== merged from api_chatops_cov_test.go ====
+func TestTestNotification_Cov(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	notif := deps.NotificationSvc.(*stubNotificationSvc)
+
+	t.Run("success", func(t *testing.T) {
+		notif.testErr = nil
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/notifications/1/test", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		notif.testErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/notifications/1/test", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("send failure", func(t *testing.T) {
+		notif.testErr = errors.New("network down")
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/notifications/1/test", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	})
+}
+
+func TestRevokeBinding_Cov(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+	bind := deps.BindingSvc.(*stubBindingSvc)
+
+	t.Run("success", func(t *testing.T) {
+		bind.revokeErr = nil
+		resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/bindings/5", tok, nil)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, uint(5), bind.lastRevokeID)
+	})
+
+	t.Run("service error maps", func(t *testing.T) {
+		bind.revokeErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/bindings/6", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+}
+
+func TestDeleteToken_Cov(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	created, _, err := store.CreateToken(nil, "bearer", "chatops:*", 0) //nolint:staticcheck
+	require.NoError(t, err)
+
+	t.Run("delete existing", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/tokens/"+itoaUint(created.ID), tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("delete missing maps error", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/tokens/9999", tok, nil)
+		defer resp.Body.Close()
+		assert.NotEqual(t, http.StatusOK, resp.StatusCode)
+	})
+}
+
+func TestListTokens_Cov(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/tokens", tok, nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAuditStats_Cov(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/audit/stats", tok, nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func itoaUint(n uint) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
+// ==== merged from api_chatops_err_cov2_test.go ====
+func TestChatops_ServiceErrorBranches(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	notif := deps.NotificationSvc.(*stubNotificationSvc)
+	bind := deps.BindingSvc.(*stubBindingSvc)
+	audit := deps.AuditSvc.(*stubAuditSvc)
+
+	t.Run("list notifications error", func(t *testing.T) {
+		notif.listErr = errors.New("boom")
+		defer func() { notif.listErr = nil }()
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/notifications", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("get notification not found maps 404", func(t *testing.T) {
+		notif.getErr = app.ErrConfNotFound
+		defer func() { notif.getErr = nil }()
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/notifications/5", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("test notification send failed maps 502", func(t *testing.T) {
+		notif.testErr = errors.New("channel down")
+		defer func() { notif.testErr = nil }()
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/notifications/1/test", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	})
+
+	t.Run("test notification not found", func(t *testing.T) {
+		notif.testErr = app.ErrConfNotFound
+		defer func() { notif.testErr = nil }()
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/notifications/1/test", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("list bindings error", func(t *testing.T) {
+		bind.listErr = errors.New("boom")
+		defer func() { bind.listErr = nil }()
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/bindings", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("revoke binding error", func(t *testing.T) {
+		bind.revokeErr = errors.New("boom")
+		defer func() { bind.revokeErr = nil }()
+		resp := chatopsReq(t, srv, "DELETE", "/api/chatops/bindings/3", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("revoke binding invalid id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "DELETE", "/api/chatops/bindings/abc", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("query audit error", func(t *testing.T) {
+		audit.queryErr = errors.New("boom")
+		defer func() { audit.queryErr = nil }()
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/audit", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("query audit bad page", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/audit?page=abc", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("query audit bad until", func(t *testing.T) {
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/audit?until=nope", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("audit stats error", func(t *testing.T) {
+		audit.statsErr = errors.New("boom")
+		defer func() { audit.statsErr = nil }()
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/audit/stats", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("create token service error", func(t *testing.T) {
+		store.createFn = func(_, _ string, _ time.Duration) (TokenDTO, string, error) {
+			return TokenDTO{}, "", errors.New("boom")
+		}
+		defer func() { store.createFn = nil }()
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/tokens", tok, map[string]any{"kind": "bearer"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("list tokens error", func(t *testing.T) {
+		store.listErr = errors.New("boom")
+		defer func() { store.listErr = nil }()
+		resp := chatopsReq(t, srv, "GET", "/api/chatops/tokens", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("delete token error", func(t *testing.T) {
+		store.deleteFn = func(uint) error { return errors.New("boom") }
+		defer func() { store.deleteFn = nil }()
+		resp := chatopsReq(t, srv, "DELETE", "/api/chatops/tokens/7", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+}
+
+var _ = context.Background
+
+// ==== merged from api_chatops_err_test.go ====
+func TestChatOpsErrorBranches(t *testing.T) {
+	srv, deps, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	t.Run("list bindings error", func(t *testing.T) {
+		deps.BindingSvc.(*stubBindingSvc).listErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/bindings", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		deps.BindingSvc.(*stubBindingSvc).listErr = nil
+	})
+
+	t.Run("audit stats error", func(t *testing.T) {
+		deps.AuditSvc.(*stubAuditSvc).statsErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/audit/stats", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		deps.AuditSvc.(*stubAuditSvc).statsErr = nil
+	})
+
+	t.Run("list tokens error", func(t *testing.T) {
+		store.listErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/tokens", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		store.listErr = nil
+	})
+
+	t.Run("update notification error", func(t *testing.T) {
+		deps.NotificationSvc.(*stubNotificationSvc).updateErr = app.ErrConfNotFound
+		resp := chatopsReq(t, srv, http.MethodPut, "/api/chatops/notifications/1", tok,
+			map[string]any{"name": "x"})
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		deps.NotificationSvc.(*stubNotificationSvc).updateErr = nil
+	})
+}
+
+// ==== merged from api_chatops_rss_cov3_test.go ====
+func TestListRSSNotifications_AllFilters(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	setupChatOpsDB(t)
+	now := time.Now()
+	require.NoError(t, global.GlobalDB.DB.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "hdsky", TorrentID: "t1", NotifyKind: "new",
+		NotificationConfID: 5, Result: "pending", NextRetryAt: &now,
+	}).Error)
+
+	resp := chatopsReq(t, srv, http.MethodGet,
+		"/api/chatops/rss-notifications?rss_id=1&kind=new&result=pending&conf_id=5&page=1&page_size=10",
+		tok, nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body struct {
+		Total int64 `json:"total"`
+	}
+	decodeBody(t, resp, &body)
+	assert.Equal(t, int64(1), body.Total)
+}
+
+// ==== merged from api_chatops_rssnotify_cov_test.go ====
+func setupChatOpsDB(t *testing.T) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	require.NoError(t, err)
+	prev := global.GlobalDB
+	global.GlobalDB = &models.TorrentDB{DB: db}
+	t.Cleanup(func() { global.GlobalDB = prev })
+	require.NoError(t, db.AutoMigrate(&models.RSSNotificationLog{}))
+}
+
+func TestListRSSNotifications(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	setupChatOpsDB(t)
+	now := time.Now()
+	require.NoError(t, global.GlobalDB.DB.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "hdsky", TorrentID: "t1", NotifyKind: "new",
+		NotificationConfID: 1, Result: "pending", NextRetryAt: &now,
+	}).Error)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.RSSNotificationLog{
+		RSSID: 2, SiteName: "mteam", TorrentID: "t2", NotifyKind: "new",
+		NotificationConfID: 1, Result: "failed",
+	}).Error)
+
+	t.Run("list all", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/rss-notifications", tok, nil)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var body struct {
+			Items []models.RSSNotificationLog `json:"items"`
+			Total int64                       `json:"total"`
+		}
+		decodeBody(t, resp, &body)
+		assert.Equal(t, int64(2), body.Total)
+	})
+
+	t.Run("filter by result and rss_id", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/rss-notifications?result=pending&rss_id=1&page=1&page_size=10", tok, nil)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var body struct {
+			Total int64 `json:"total"`
+		}
+		decodeBody(t, resp, &body)
+		assert.Equal(t, int64(1), body.Total)
+	})
+}
+
+func TestRetryRSSNotification(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	setupChatOpsDB(t)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "hdsky", TorrentID: "t1", NotifyKind: "new",
+		NotificationConfID: 1, Result: "failed",
+	}).Error)
+
+	t.Run("retry existing row", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/rss-notifications/1/retry", tok, nil)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var row models.RSSNotificationLog
+		require.NoError(t, global.GlobalDB.DB.First(&row, 1).Error)
+		assert.Equal(t, "pending", row.Result)
+	})
+
+	t.Run("retry missing row returns 404", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/rss-notifications/999/retry", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+}
+
+func TestCancelRSSNotification(t *testing.T) {
+	srv, _, store, cleanup := newTestChatOpsServer(t)
+	defer cleanup()
+	tok := store.registerValidToken("chatops:*")
+
+	setupChatOpsDB(t)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "hdsky", TorrentID: "t1", NotifyKind: "new",
+		NotificationConfID: 1, Result: "pending",
+	}).Error)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.RSSNotificationLog{
+		RSSID: 2, SiteName: "mteam", TorrentID: "t2", NotifyKind: "new",
+		NotificationConfID: 1, Result: "sent",
+	}).Error)
+
+	t.Run("cancel pending row", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/rss-notifications/1/cancel", tok, nil)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var row models.RSSNotificationLog
+		require.NoError(t, global.GlobalDB.DB.First(&row, 1).Error)
+		assert.Equal(t, "suppressed", row.Result)
+	})
+
+	t.Run("cancel non-retryable row returns 400", func(t *testing.T) {
+		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/rss-notifications/2/cancel", tok, nil)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+// ==== merged from api_chatops_test.go ====
 // ----- stub services -----
 
 type stubNotificationSvc struct {

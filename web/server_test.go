@@ -2,8 +2,13 @@ package web
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,8 +27,1084 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
+// ==== merged from server_api_cov_test.go ====
+func TestApiGlobal_GetAndPost(t *testing.T) {
+	srv := setupServer(t)
+
+	t.Run("GET returns settings", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/global", nil)
+		srv.apiGlobal(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("POST invalid body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/global", bytes.NewBufferString(`{bad`))
+		srv.apiGlobal(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST empty download dir", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{"default_interval_minutes": 20})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/global", bytes.NewReader(body))
+		srv.apiGlobal(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST valid settings", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"default_interval_minutes": 20,
+			"download_dir":             t.TempDir(),
+			"torrent_size_gb":          200,
+			"free_end_advance_minutes": 120,
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/global", bytes.NewReader(body))
+		srv.apiGlobal(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/global", nil)
+		srv.apiGlobal(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestApiQbit_GetAndPost(t *testing.T) {
+	srv := setupServer(t)
+
+	t.Run("GET", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/qbit", nil)
+		srv.apiQbit(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("POST invalid body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/qbit", bytes.NewBufferString(`{bad`))
+		srv.apiQbit(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST valid", func(t *testing.T) {
+		body, _ := json.Marshal(models.QbitSettings{URL: "http://localhost:8080", User: "admin", Password: "x"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/qbit", bytes.NewReader(body))
+		srv.apiQbit(w, req)
+		assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/qbit", nil)
+		srv.apiQbit(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestLoginHandler_FailPaths(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, srv.store.EnsureAdmin("admin", hashPassword("secret")))
+
+	t.Run("empty credentials", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"username": "", "password": ""})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("wrong password", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"username": "admin", "password": "nope"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("unknown user", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"username": "ghost", "password": "x"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+// ==== merged from server_cov2_test.go ====
+func TestLoginHandler_Success(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, srv.store.EnsureAdmin("admin", hashPassword("secret")))
+
+	t.Run("json login sets session", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"username": "admin", "password": "secret"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotEmpty(t, w.Result().Cookies())
+	})
+
+	t.Run("form login redirects", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString("username=admin&password=secret"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusFound, w.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/login", nil)
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestLoginHandler_AutoCreatesAdmin(t *testing.T) {
+	srv := setupServer(t)
+
+	body, _ := json.Marshal(map[string]string{"username": "admin", "password": "adminadmin"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestDownloaderHealthCheck_Success(t *testing.T) {
+	server, db := setupTestServer(t)
+	mgr := scheduler.NewManager()
+	t.Cleanup(func() { mgr.StopAll() })
+	dm := mgr.GetDownloaderManager()
+	fake := &fakeDownloader{}
+	dm.RegisterFactory(downloader.DownloaderQBittorrent, func(_ downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+		fake.name = name
+		return fake, nil
+	})
+	server.mgr = mgr
+
+	dl := models.DownloaderSetting{Name: "healthy-qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
+	require.NoError(t, db.Create(&dl).Error)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/downloaders/1/health", nil)
+	server.downloaderHealthCheck(w, req, "1")
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp HealthCheckResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.IsHealthy)
+}
+
+func TestApiSiteDetail_LoginStateDispatch(t *testing.T) {
+	srv, cleanup := newSiteLoginTestServer(t)
+	defer cleanup()
+
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "hdsky", Enabled: true}).Error)
+
+	t.Run("login-state get", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/sites/hdsky/login-state", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("login-state unknown action", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/sites/hdsky/login-state/bogus", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("login-state probe no monitor", func(t *testing.T) {
+		srv.mgr = scheduler.NewManager()
+		t.Cleanup(func() { srv.mgr.StopAll() })
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/hdsky/login-state/probe", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+}
+
+func TestApiSiteDetail_GetAndNotFound(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "a=1; b=2", APIUrl: "https://hdsky.me",
+	}))
+
+	t.Run("get existing", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/sites/hdsky", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("unknown site 404", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/sites/no-such-site-zzz", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/sites/hdsky", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+// ==== merged from server_cov3_test.go ====
+func TestLoginHandler_LegacyAndErrors(t *testing.T) {
+	srv := setupServer(t)
+
+	t.Run("wrong password legacy fallback fails", func(t *testing.T) {
+		require.NoError(t, srv.store.EnsureAdmin("legacyuser", "not-a-valid-hash-format"))
+		body, _ := json.Marshal(map[string]string{"username": "legacyuser", "password": "whatever"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("bad json body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(`{bad`))
+		req.Header.Set("Content-Type", "application/json")
+		srv.loginHandler(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestApiSites_UnavailableSiteDisabled(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	if v2.GetDefinitionRegistry().GetOrDefault("covunavail") == nil {
+		v2.RegisterSiteDefinition(&v2.SiteDefinition{
+			ID:                "covunavail",
+			Name:              "CovUnavail",
+			URLs:              []string{"https://covunavail.example.com"},
+			Unavailable:       true,
+			UnavailableReason: "test",
+		})
+	}
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("covunavail"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c=1", APIUrl: "https://covunavail.example.com",
+	}))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sites", nil)
+	srv.apiSites(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]SiteConfigResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	entry, ok := resp["covunavail"]
+	require.True(t, ok)
+	assert.True(t, entry.Unavailable)
+	require.NotNil(t, entry.Enabled)
+	assert.False(t, *entry.Enabled)
+}
+
+func TestListDynamicSites_UnavailableSite(t *testing.T) {
+	server, db := setupTestServer(t)
+
+	if v2.GetDefinitionRegistry().GetOrDefault("covunavail2") == nil {
+		v2.RegisterSiteDefinition(&v2.SiteDefinition{
+			ID:                "covunavail2",
+			Name:              "CovUnavail2",
+			URLs:              []string{"https://covunavail2.example.com"},
+			Unavailable:       true,
+			UnavailableReason: "test",
+		})
+	}
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "covunavail2", DisplayName: "CU2", Enabled: true}).Error)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sites/dynamic", nil)
+	server.listDynamicSites(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp []DynamicSiteResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	found := false
+	for _, r := range resp {
+		if r.Name == "covunavail2" {
+			found = true
+			assert.True(t, r.Unavailable)
+			assert.False(t, r.Enabled)
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestApiGlobal_PostSaveAndValidation(t *testing.T) {
+	writeWebTestSecretKey(t)
+	server := setupServer(t)
+
+	t.Run("empty download dir", func(t *testing.T) {
+		body := `{"default_interval_minutes":10}`
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/global", bytes.NewBufferString(body))
+		server.apiGlobal(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("bad body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/global", bytes.NewBufferString(`{bad`))
+		server.apiGlobal(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("valid save", func(t *testing.T) {
+		body := `{"default_interval_minutes":30,"download_dir":"downloads"}`
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/global", bytes.NewBufferString(body))
+		server.apiGlobal(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/global", nil)
+		server.apiGlobal(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+// ==== merged from server_cov4_test.go ====
+func TestApiPassword_Paths(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, srv.store.EnsureAdmin("pwuser", hashPassword("oldpass")))
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/password", nil)
+		srv.apiPassword(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("bad body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/password", bytes.NewBufferString(`{bad`))
+		srv.apiPassword(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("wrong old password", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"Username": "pwuser", "Old": "nope", "New": "newpass"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/password", bytes.NewReader(body))
+		srv.apiPassword(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"Username": "pwuser", "Old": "oldpass", "New": "newpass"})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/password", bytes.NewReader(body))
+		srv.apiPassword(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestLoginHandler_MultipartForm(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, srv.store.EnsureAdmin("admin", hashPassword("adminadmin")))
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("username", "admin")
+	_ = mw.WriteField("password", "adminadmin")
+	_ = mw.Close()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	srv.loginHandler(w, req)
+	assert.Equal(t, http.StatusFound, w.Code)
+}
+
+func TestApiSiteDetail_DeleteRSS(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c=1", APIUrl: "https://hdsky.me",
+		RSS: []models.RSSConfig{{Name: "feed1", URL: "http://e/rss"}},
+	}))
+
+	var rss models.RSSSubscription
+	require.NoError(t, global.GlobalDB.DB.First(&rss).Error)
+
+	t.Run("missing id", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites/hdsky", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("bad id", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites/hdsky?id=abc", nil)
+		srv.apiSiteDetail(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("delete existing rss", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/sites/hdsky?id=1", nil)
+		srv.apiSiteDetail(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestApiQbit_GetPostCov(t *testing.T) {
+	srv := setupServer(t)
+
+	t.Run("get", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/qbit", nil)
+		srv.apiQbit(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("post bad body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/qbit", bytes.NewBufferString(`{bad`))
+		srv.apiQbit(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/qbit", nil)
+		srv.apiQbit(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestApiTasks_Filters(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+	pushed := true
+	require.NoError(t, global.GlobalDB.DB.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "1", Title: "Alpha", IsDownloaded: true, IsPushed: &pushed,
+	}).Error)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.TorrentInfo{
+		SiteName: "mteam", TorrentID: "2", Title: "Beta", IsExpired: true,
+	}).Error)
+
+	t.Run("filter downloaded pushed site", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tasks?downloaded=1&pushed=1&site=hdsky&page=1&page_size=2", nil)
+		srv.apiTasks(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("search and expired sort asc", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tasks?q=Beta&expired=1&sort=created_at_asc", nil)
+		srv.apiTasks(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// ==== merged from server_cov_test.go ====
+func TestSetQAHook(t *testing.T) {
+	s := &Server{}
+	called := false
+	s.SetQAHook(func(_ *http.ServeMux) { called = true })
+	require.NotNil(t, s.qaHook)
+	s.qaHook(http.NewServeMux())
+	assert.True(t, called)
+}
+
+func TestShutdown(t *testing.T) {
+	t.Run("nil server", func(t *testing.T) {
+		var s *Server
+		assert.NoError(t, s.Shutdown(context.Background()))
+	})
+
+	t.Run("no http server", func(t *testing.T) {
+		s := &Server{}
+		assert.NoError(t, s.Shutdown(context.Background()))
+	})
+
+	t.Run("with http server", func(t *testing.T) {
+		s := &Server{httpServer: &http.Server{}}
+		assert.NoError(t, s.Shutdown(context.Background()))
+	})
+}
+
+func TestVerifyLegacyPassword(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored string
+		pw     string
+		want   bool
+	}{
+		{"has pipe rejected", "salt|sum|100", "x", false},
+		{"plaintext match", "secret", "secret", true},
+		{"plaintext mismatch", "secret", "other", false},
+		{"sha256 hex match", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", "hello", true},
+		{"sha256 mismatch", "abcdef", "hello", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, verifyLegacyPassword(tt.stored, tt.pw))
+		})
+	}
+}
+
+func TestDisableUnavailableSites(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c=1", APIUrl: "https://hdsky.me",
+	}))
+
+	srv.disableUnavailableSites([]models.SiteGroup{"hdsky"})
+
+	sc, err := srv.store.GetSiteConf(models.SiteGroup("hdsky"))
+	require.NoError(t, err)
+	require.NotNil(t, sc.Enabled)
+	assert.False(t, *sc.Enabled)
+}
+
+func TestHashAndVerifyPassword_Roundtrip(t *testing.T) {
+	hashed := hashPassword("mypassword")
+	assert.True(t, verifyPassword(hashed, "mypassword"))
+	assert.False(t, verifyPassword(hashed, "wrong"))
+	assert.False(t, verifyPassword("badformat", "mypassword"))
+}
+
+func TestApiSiteDefinitions(t *testing.T) {
+	s := &Server{}
+
+	t.Run("GET returns definitions", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/sites/definitions", nil)
+		w := httptest.NewRecorder()
+		s.apiSiteDefinitions(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotEmpty(t, w.Body.Bytes())
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/sites/definitions", nil)
+		w := httptest.NewRecorder()
+		s.apiSiteDefinitions(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+}
+
+func TestGetEnabledSiteIDs(t *testing.T) {
+	t.Run("nil store", func(t *testing.T) {
+		s := &Server{}
+		assert.Nil(t, s.getEnabledSiteIDs())
+	})
+
+	t.Run("with enabled sites", func(t *testing.T) {
+		writeWebTestSecretKey(t)
+		srv := setupServer(t)
+		enabled := true
+		require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+			Enabled: &enabled, AuthMethod: "cookie", Cookie: "c=1", APIUrl: "https://hdsky.me",
+		}))
+		ids := srv.getEnabledSiteIDs()
+		assert.True(t, ids["hdsky"])
+	})
+}
+
+func TestFilterEnabledSites(t *testing.T) {
+	t.Run("nil enabled returns requested", func(t *testing.T) {
+		got := filterEnabledSites([]string{"a", "b"}, nil)
+		assert.Equal(t, []string{"a", "b"}, got)
+	})
+
+	t.Run("empty requested returns all enabled", func(t *testing.T) {
+		got := filterEnabledSites(nil, map[string]bool{"a": true})
+		assert.Equal(t, []string{"a"}, got)
+	})
+
+	t.Run("filters requested by enabled", func(t *testing.T) {
+		got := filterEnabledSites([]string{"a", "b", "c"}, map[string]bool{"a": true, "c": true})
+		assert.ElementsMatch(t, []string{"a", "c"}, got)
+	})
+}
+
+// ==== merged from server_ctrl_cov3_test.go ====
+func TestApiStopStartAll(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	t.Run("stop method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/control/stop", nil)
+		srv.apiStopAll(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("stop ok", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/control/stop", nil)
+		srv.apiStopAll(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("start method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/control/start", nil)
+		srv.apiStartAll(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("start dispatch", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/control/start", nil)
+		srv.apiStartAll(w, req)
+		assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+	})
+}
+
+func TestApiLogs_Error(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	srv := &Server{}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	srv.apiLogs(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestApiQbit_PostSaveOk(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	body := `{"enabled":true}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/qbit", strings.NewReader(body))
+	srv.apiQbit(w, req)
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+// ==== merged from server_favicon_cov5_test.go ====
+// syncSignalSite 是一个 mock 站点，其 GetUserInfo 被调用时向 called 发送信号。
+// GetUserInfo 在 loginHandler 派生的 goroutine 读取全局 userInfoService 之后才执行，
+// 测试通过接收该信号建立 happens-before 边，确保异步读取先于 cleanup 的写入，
+// 从而在 -race 下不产生对全局变量的数据竞争（单纯 sleep 不建立同步关系，无法消除竞态）。
+type syncSignalSite struct {
+	mockSite
+	called chan struct{}
+}
+
+func (s *syncSignalSite) GetUserInfo(context.Context) (v2.UserInfo, error) {
+	s.called <- struct{}{}
+	return s.userInfo, nil
+}
+
+func TestLoginHandler_TriggersUserInfoSync(t *testing.T) {
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{CacheTTL: 5 * time.Minute})
+	site := &syncSignalSite{
+		mockSite: mockSite{id: "syncsite", name: "SyncSite", kind: v2.SiteNexusPHP, userInfo: v2.UserInfo{Site: "syncsite"}},
+		called:   make(chan struct{}, 1),
+	}
+	svc.RegisterSite(site)
+	InitUserInfoService(svc)
+	t.Cleanup(func() { InitUserInfoService(nil) })
+
+	srv := setupServer(t)
+	require.NoError(t, srv.store.EnsureAdmin("synced", hashPassword("pw")))
+
+	body, _ := json.Marshal(map[string]string{"username": "synced", "password": "pw"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	select {
+	case <-site.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("异步用户信息同步未触发")
+	}
+}
+
+func TestRefreshExpiredFavicons_SkipDisabledAndNoURL(t *testing.T) {
+	setupFaviconServer(t)
+
+	if v2.GetDefinitionRegistry().GetOrDefault("covnourl") == nil {
+		v2.RegisterSiteDefinition(&v2.SiteDefinition{ID: "covnourl", Name: "CovNoURL"})
+	}
+
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "covnourl", Enabled: true}).Error)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "covdisabled", Enabled: false}).Error)
+	old := time.Now().Add(-72 * time.Hour)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.FaviconCache{
+		SiteID: "covnourl", SiteName: "CovNoURL", Data: []byte{1}, LastFetched: old,
+	}).Error)
+	require.NoError(t, global.GlobalDB.DB.Create(&models.FaviconCache{
+		SiteID: "covdisabled", SiteName: "CovDisabled", Data: []byte{1}, LastFetched: old,
+	}).Error)
+
+	fs := &FaviconService{refreshInterval: time.Nanosecond}
+	fs.refreshExpiredFavicons()
+}
+
+func TestApiSiteDetail_PostReloadsConfig(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	body, _ := json.Marshal(models.SiteConfig{
+		AuthMethod: "cookie", Cookie: "x=1", APIUrl: "https://hdsky.me",
+		RSS: []models.RSSConfig{{Name: "f1", URL: "http://e/rss"}},
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sites/hdsky", bytes.NewReader(body))
+	srv.apiSiteDetail(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "ok")
+	time.Sleep(50 * time.Millisecond)
+}
+
+// ==== merged from server_login_cov3_test.go ====
+func TestLoginHandler_LegacyPasswordUpgrade(t *testing.T) {
+	srv := setupServer(t)
+
+	h := sha256.Sum256([]byte("legacypass"))
+	legacyHash := hex.EncodeToString(h[:])
+	require.NoError(t, srv.store.EnsureAdmin("legacyok", legacyHash))
+
+	body, _ := json.Marshal(map[string]string{"username": "legacyok", "password": "legacypass"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.loginHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotEmpty(t, w.Result().Cookies())
+}
+
+func TestVerifyLegacyPassword_Direct(t *testing.T) {
+	assert.False(t, verifyLegacyPassword("has|pipe", "x"))
+	assert.True(t, verifyLegacyPassword("plain", "plain"))
+	h := sha256.Sum256([]byte("secret"))
+	assert.True(t, verifyLegacyPassword(hex.EncodeToString(h[:]), "secret"))
+	assert.False(t, verifyLegacyPassword("nomatch", "secret"))
+}
+
+// ==== merged from server_misc_cov2_test.go ====
+func TestApiSiteDetail_PostSaveConfig(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	body, _ := json.Marshal(models.SiteConfig{
+		AuthMethod: "cookie",
+		Cookie:     "x=1",
+		APIUrl:     "https://hdsky.me",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sites/hdsky", bytes.NewReader(body))
+	srv.apiSiteDetail(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestApiSiteDetail_PostBadBody(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sites/hdsky", bytes.NewBufferString(`{bad`))
+	srv.apiSiteDetail(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestApiVersionCheck_Dispatch(t *testing.T) {
+	s := &Server{}
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/version/check", nil)
+		s.apiVersionCheck(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("get triggers check", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/version/check?proxy=http://127.0.0.1:1", nil)
+		s.apiVersionCheck(w, req)
+		assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	})
+}
+
+func TestApiSiteTorrentDownload_MoreBranches(t *testing.T) {
+	s := &Server{}
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/site/hdsky/torrent/1/download", nil)
+		s.apiSiteTorrentDownload(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("bad path", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/site/hdsky/bad/1", nil)
+		s.apiSiteTorrentDownload(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("download error surfaces 500", func(t *testing.T) {
+		withOrchestrator(t, &fakeV2Site{id: "hdsky", name: "HDSky", err: assertErr("boom")})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/site/hdsky/torrent/1/download", nil)
+		s.apiSiteTorrentDownload(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestApiBatchTorrentDownload_PartialAndErrors(t *testing.T) {
+	s := &Server{}
+
+	t.Run("method not allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/torrents/batch-download", nil)
+		s.apiBatchTorrentDownload(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("bad body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/batch-download", bytes.NewBufferString(`{bad`))
+		s.apiBatchTorrentDownload(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("empty torrents", func(t *testing.T) {
+		body, _ := json.Marshal(BatchDownloadRequest{})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/batch-download", bytes.NewReader(body))
+		s.apiBatchTorrentDownload(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("orchestrator nil", func(t *testing.T) {
+		prev := searchOrchestrator
+		searchOrchestrator = nil
+		t.Cleanup(func() { searchOrchestrator = prev })
+		body, _ := json.Marshal(BatchDownloadRequest{Torrents: []BatchDownloadItem{{SiteID: "hdsky", TorrentID: "1"}}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/batch-download", bytes.NewReader(body))
+		s.apiBatchTorrentDownload(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+}
+
+// ==== merged from server_serve_cov3_test.go ====
+func TestServe_StaticAndAuthedRoutes(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	require.NoError(t, srv.store.EnsureAdmin("admin", hashPassword("adminadmin")))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(addr) }()
+
+	client := &http.Client{
+		Timeout:       3 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	waitReady(t, client, "http://"+addr+"/api/ping")
+
+	base := "http://" + addr
+
+	t.Run("static css served", func(t *testing.T) {
+		resp, err := client.Get(base + "/static/style.css")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		assert.NotEqual(t, http.StatusInternalServerError, resp.StatusCode)
+	})
+
+	t.Run("static js content-type", func(t *testing.T) {
+		resp, err := client.Get(base + "/static/app.js")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+	})
+
+	t.Run("assets served", func(t *testing.T) {
+		resp, err := client.Get(base + "/assets/nonexistent.js")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+	})
+
+	t.Run("version check authed via login", func(t *testing.T) {
+		var jar []*http.Cookie
+		loginResp, err := client.Post(base+"/login", "application/json",
+			strings.NewReader(`{"username":"admin","password":"adminadmin"}`))
+		require.NoError(t, err)
+		jar = loginResp.Cookies()
+		_, _ = io.Copy(io.Discard, loginResp.Body)
+		loginResp.Body.Close()
+
+		req, _ := http.NewRequest(http.MethodGet, base+"/api/version", nil)
+		for _, c := range jar {
+			req.AddCookie(c)
+		}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	require.NoError(t, srv.Shutdown(context.Background()))
+	select {
+	case <-errCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
+// ==== merged from server_serve_test.go ====
+func TestServe_FullLifecycle(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(addr)
+	}()
+
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	waitReady(t, client, "http://"+addr+"/api/ping")
+
+	t.Run("ping is public", func(t *testing.T) {
+		resp, err := client.Get("http://" + addr + "/api/ping")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("protected api returns 401", func(t *testing.T) {
+		resp, err := client.Get("http://" + addr + "/api/global")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	})
+
+	t.Run("root redirects to login without session", func(t *testing.T) {
+		resp, err := client.Get("http://" + addr + "/")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusFound, resp.StatusCode)
+	})
+
+	t.Run("login page served", func(t *testing.T) {
+		resp, err := client.Get("http://" + addr + "/login")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("cors preflight from extension", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodOptions, "http://"+addr+"/api/ping", nil)
+		req.Header.Set("Origin", "chrome-extension://abc")
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+		assert.Equal(t, "chrome-extension://abc", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	require.NoError(t, srv.Shutdown(context.Background()))
+	select {
+	case err := <-errCh:
+		assert.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not shut down in time")
+	}
+}
+
+func waitReady(t *testing.T, client *http.Client, url string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		resp, err := client.Get(url)
+		if err != nil {
+			return false
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
+// ==== merged from server_sites_cov3_test.go ====
+func TestApiSites_DeleteSuccess(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c=1", APIUrl: "https://hdsky.me",
+	}))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sites?name=hdsky", nil)
+	srv.apiSites(w, req)
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+func TestApiSites_DeleteError(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sites?name=does-not-exist-zzz", nil)
+	srv.apiSites(w, req)
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+// ==== merged from server_test.go ====
 func setupServer(t *testing.T) *Server {
 	db, err := core.NewTempDBDir(t.TempDir())
 	require.NoError(t, err)

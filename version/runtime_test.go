@@ -91,3 +91,23 @@ func TestGetAssetName(t *testing.T) {
 	expected := GetAssetNameForPlatform(runtime.GOOS, runtime.GOARCH)
 	assert.Equal(t, expected, result)
 }
+
+func TestDetectEnvironmentBuildOverrides(t *testing.T) {
+	oldOS, oldArch := BuildOS, BuildArch
+	defer func() { BuildOS, BuildArch = oldOS, oldArch }()
+	BuildOS = "linux"
+	BuildArch = "arm64"
+
+	env := DetectEnvironment()
+	assert.Equal(t, "linux", env.OS)
+	assert.Equal(t, "arm64", env.Arch)
+	assert.True(t, env.CanSelfUpgrade)
+}
+
+func TestIsInAppDir(t *testing.T) {
+	assert.False(t, isInAppDir(), "test binary is not under /app")
+}
+
+func TestDetectDocker(t *testing.T) {
+	assert.False(t, detectDocker(), "test host is not the pt-tools docker image")
+}

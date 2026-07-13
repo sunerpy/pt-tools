@@ -1,11 +1,6 @@
 // MIT License
 // Copyright (c) 2025 pt-tools
 
-// Coverage for internal/torrent_detail.go: GetTorrentDetailForTest across the
-// nil-item guard, unknown-site fallback, the mTorrent schema path (against a
-// fake M-Team detail API), and waitMTorrentDetailRateLimit's timing +
-// cancellation behavior.
-
 package internal
 
 import (
@@ -19,12 +14,153 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
-
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	_ "github.com/sunerpy/pt-tools/site/v2/definitions"
 )
+
+func TestFetchMTorrentDetail_DecodeError(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	srv := badJSONServer(t)
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: boolPtrIX(true), AuthMethod: "api_key", APIKey: "k", APIUrl: srv.URL,
+	}))
+	_, err := fetchMTorrentDetail(context.Background(), models.SiteGroup("mteam"), &gofeed.Item{GUID: "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "解析 JSON")
+}
+
+func TestFetchMTorrentDetail_ProxyBranch(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"0","data":{"id":"1","name":"N","smallDescr":"S","size":"1024","status":{"discount":"FREE"}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: boolPtrIX(true), AuthMethod: "api_key", APIKey: "k", APIUrl: srv.URL,
+	}))
+
+	t.Setenv("HTTP_PROXY", srv.URL)
+	t.Setenv("HTTPS_PROXY", srv.URL)
+	detail, err := fetchMTorrentDetail(context.Background(), models.SiteGroup("mteam"), &gofeed.Item{GUID: "1"})
+	if err == nil {
+		require.NotNil(t, detail)
+		assert.Equal(t, "N", detail.GetName())
+	}
+}
+
+func TestGetTorrentDetailForTest_MTorrentRateLimitCanceled(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"0","data":{"id":"1","name":"N","status":{"discount":"FREE"}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: boolPtrIX(true), AuthMethod: "api_key", APIKey: "k", APIUrl: srv.URL,
+	}))
+
+	site := models.SiteGroup("mteam")
+	require.NoError(t, waitMTorrentDetailRateLimit(context.Background(), site))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res, err := GetTorrentDetailForTest(ctx, site, &gofeed.Item{GUID: "1", Title: "fb"})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+}
+
+func TestFetchMTorrentDetail_MissingConfig(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "mteam", AuthMethod: "api_key"}).Error)
+	_, ferr := fetchMTorrentDetail(context.Background(), models.SiteGroup("mteam"), &gofeed.Item{GUID: "1"})
+	require.Error(t, ferr)
+	assert.Contains(t, ferr.Error(), "API 未配置")
+}
+
+func TestFetchMTorrentDetail_APIErrorCode(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"500","message":"boom"}`))
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: boolPtrIX(true), AuthMethod: "api_key", APIKey: "k", APIUrl: srv.URL,
+	}))
+	_, err := fetchMTorrentDetail(context.Background(), models.SiteGroup("mteam"), &gofeed.Item{GUID: "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "API error")
+}
+
+func TestFetchMTorrentDetail_Non200(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: boolPtrIX(true), AuthMethod: "api_key", APIKey: "k", APIUrl: srv.URL,
+	}))
+	_, err := fetchMTorrentDetail(context.Background(), models.SiteGroup("mteam"), &gofeed.Item{GUID: "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "状态码")
+}
+
+func TestFetchNexusPHPDetail_MissingCookie(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "springsunday", AuthMethod: "cookie"}).Error)
+	_, err := fetchNexusPHPDetail(context.Background(), models.SiteGroup("springsunday"), &gofeed.Item{GUID: "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Cookie 未配置")
+}
+
+func TestGetTorrentDetailForTest_NexusPHPSchema(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body>
+			<input name="torrent_name" value="Nexus.Movie">
+			<input name="detail_torrent_id" value="42">
+			<h1><font class="free">免费</font><span title="2030-01-20 15:30:00">2天</span></h1>
+			<td class="rowhead">基本信息</td><td>大小：10.00 GB</td>
+		</body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: boolPtrPS(true), AuthMethod: "cookie", Cookie: "c=1", APIUrl: srv.URL,
+	}))
+
+	item := &gofeed.Item{Title: "fallback", GUID: "42", Link: srv.URL + "/details.php?id=42"}
+	res, err := GetTorrentDetailForTest(context.Background(), models.SiteGroup("springsunday"), item)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "Nexus.Movie", res.Title)
+	assert.True(t, res.IsFree)
+}
+
+func TestGetTorrentDetailForTest_NexusPHPMissingCookie(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	require.NoError(t, core.NewConfigStore(db).UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: boolPtrPS(true), AuthMethod: "cookie", Cookie: "c=1", APIUrl: "http://127.0.0.1:0",
+	}))
+	item := &gofeed.Item{Title: "fb", GUID: "1"}
+	res, err := GetTorrentDetailForTest(context.Background(), models.SiteGroup("springsunday"), item)
+	require.NoError(t, err)
+	assert.Equal(t, "fb", res.Title)
+}
 
 func TestGetTorrentDetailForTest_NilItem(t *testing.T) {
 	_ = setupDB(t)
@@ -108,5 +244,3 @@ func TestWaitMTorrentDetailRateLimit_ContextCanceled(t *testing.T) {
 	err := waitMTorrentDetailRateLimit(ctx, site)
 	require.Error(t, err)
 }
-
-func boolPtrTD(b bool) *bool { return &b }

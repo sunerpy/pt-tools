@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (
@@ -11,6 +14,78 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
+
+func TestClassOf_FallsBackToRank(t *testing.T) {
+	assert.Equal(t, "VIP", classOf(v2.UserInfo{LevelName: "VIP", Rank: "R"}))
+	assert.Equal(t, "R", classOf(v2.UserInfo{Rank: "R"}))
+	assert.Equal(t, "", classOf(v2.UserInfo{}))
+}
+
+func TestFormatBytes_Units(t *testing.T) {
+	assert.Equal(t, "512 B", formatBytes(512))
+	assert.Equal(t, "1.00 KiB", formatBytes(1024))
+	assert.Equal(t, "1.00 MiB", formatBytes(1024*1024))
+	assert.Equal(t, "1.00 GiB", formatBytes(1024*1024*1024))
+}
+
+func TestGetSiteUserInfo_EmptyName(t *testing.T) {
+	svc := NewSiteService(nil, nil)
+	_, err := svc.GetSiteUserInfo(context.Background(), "  ")
+	require.ErrorIs(t, err, ErrSiteNotFound)
+}
+
+func TestListSites_UserGetError(t *testing.T) {
+	store := &stubSiteLister{sites: map[models.SiteGroup]models.SiteConfig{"mteam": {Enabled: boolPtr(true)}}}
+	users := &stubUserInfoSource{err: v2.ErrSiteNotFound}
+	svc := newSiteServiceWithDeps(store, users)
+	got, err := svc.ListSites(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.True(t, got[0].LastScrapedAt.IsZero())
+}
+
+func TestGetSiteUserInfo_ListError(t *testing.T) {
+	store := &stubSiteLister{err: assertGenericErr}
+	svc := newSiteServiceWithDeps(store, &stubUserInfoSource{})
+	_, err := svc.GetSiteUserInfo(context.Background(), "mteam")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list sites")
+}
+
+func TestGetSiteUserInfo_UsersNil(t *testing.T) {
+	store := &stubSiteLister{sites: map[models.SiteGroup]models.SiteConfig{"mteam": {}}}
+	svc := newSiteServiceWithDeps(store, nil)
+	_, err := svc.GetSiteUserInfo(context.Background(), "mteam")
+	require.ErrorIs(t, err, ErrUserInfoUnavailable)
+}
+
+func TestSiteService_GetSiteUserInfo_UsesLevelName(t *testing.T) {
+	store := &stubSiteLister{sites: map[models.SiteGroup]models.SiteConfig{"mteam": {}}}
+	users := &stubUserInfoSource{infos: map[string]v2.UserInfo{
+		"mteam": {Site: "mteam", Username: "bob", LevelName: "Elite", Uploaded: 1 << 30, Downloaded: 1 << 20, Ratio: 2.5, Bonus: 100},
+	}}
+	svc := newSiteServiceWithDeps(store, users)
+
+	dto, err := svc.GetSiteUserInfo(context.Background(), "mteam")
+	require.NoError(t, err)
+	assert.Equal(t, "bob", dto.Username)
+	assert.Equal(t, "Elite", dto.Class)
+}
+
+func TestSiteService_GetSiteUserInfo_Errors(t *testing.T) {
+	store := &stubSiteLister{sites: map[models.SiteGroup]models.SiteConfig{"mteam": {}}}
+	svc := newSiteServiceWithDeps(store, nil)
+
+	_, err := svc.GetSiteUserInfo(context.Background(), "")
+	require.ErrorIs(t, err, ErrSiteNotFound)
+
+	_, err = svc.GetSiteUserInfo(context.Background(), "unknown")
+	require.ErrorIs(t, err, ErrSiteNotFound)
+
+	// users nil -> unavailable for a known site.
+	_, err = svc.GetSiteUserInfo(context.Background(), "mteam")
+	require.ErrorIs(t, err, ErrUserInfoUnavailable)
+}
 
 type stubSiteLister struct {
 	sites map[models.SiteGroup]models.SiteConfig

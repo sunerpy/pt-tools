@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -203,4 +205,135 @@ func TestSyncSitesFromRegistry_MigrateCmct(t *testing.T) {
 	if !sites[0].Enabled {
 		t.Error("Enabled 应被保留为 true")
 	}
+}
+
+func TestMigrateCmctToSpringSunday_RenameBranch(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{}, &TorrentInfo{})
+
+	cmct := SiteSetting{Name: "cmct", AuthMethod: "cookie", Cookie: "ck", Enabled: true}
+	require.NoError(t, db.Create(&cmct).Error)
+	require.NoError(t, db.Create(&TorrentInfo{SiteName: "cmct", TorrentID: "t1"}).Error)
+
+	require.NoError(t, SyncSitesFromRegistry(db, nil))
+
+	var spring SiteSetting
+	require.NoError(t, db.Where("name = ?", "springsunday").First(&spring).Error)
+	assert.Equal(t, "ck", spring.Cookie)
+	assert.True(t, spring.Enabled)
+
+	var cnt int64
+	db.Model(&SiteSetting{}).Where("name = ?", "cmct").Count(&cnt)
+	assert.Equal(t, int64(0), cnt)
+
+	var ti TorrentInfo
+	require.NoError(t, db.Where("torrent_id = ?", "t1").First(&ti).Error)
+	assert.Equal(t, "springsunday", ti.SiteName)
+}
+
+func TestSyncSitesFromRegistry_CreateAndUpdate(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+
+	require.NoError(t, db.Create(&SiteSetting{Name: "mteam", AuthMethod: "cookie", Cookie: "userck", Enabled: true}).Error)
+
+	require.NoError(t, SyncSitesFromRegistry(db, []RegisteredSite{
+		{ID: "MTEAM", Name: "M-Team", AuthMethod: "api_key", DefaultBaseURL: "https://kp.m-team.cc", APIUrls: []string{"https://api.m-team.cc", "https://api2.m-team.cc"}},
+		{ID: "hdsky", Name: "HDSky", AuthMethod: "cookie", DefaultBaseURL: "https://hdsky.me"},
+	}))
+
+	var mteam SiteSetting
+	require.NoError(t, db.Where("name = ?", "mteam").First(&mteam).Error)
+	assert.Equal(t, "api_key", mteam.AuthMethod)
+	assert.Equal(t, "userck", mteam.Cookie)
+	assert.True(t, mteam.Enabled)
+	assert.Equal(t, "https://api.m-team.cc", mteam.APIUrl)
+	assert.Contains(t, mteam.APIUrls, "api2.m-team.cc")
+
+	var hdsky SiteSetting
+	require.NoError(t, db.Where("name = ?", "hdsky").First(&hdsky).Error)
+	assert.False(t, hdsky.Enabled)
+	assert.True(t, hdsky.IsBuiltin)
+}
+
+func TestMigrateCmctToSpringSunday_UserInfoReparent(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+	require.NoError(t, db.Exec("CREATE TABLE user_info (id INTEGER PRIMARY KEY, site TEXT, username TEXT)").Error)
+	require.NoError(t, db.Exec("INSERT INTO user_info (site, username) VALUES ('cmct','alice')").Error)
+
+	require.NoError(t, db.Create(&SiteSetting{Name: "cmct", AuthMethod: "cookie", Cookie: "ck"}).Error)
+
+	require.NoError(t, SyncSitesFromRegistry(db, nil))
+
+	var uname string
+	require.NoError(t, db.Raw("SELECT username FROM user_info WHERE site = ?", "springsunday").Scan(&uname).Error)
+	assert.Equal(t, "alice", uname)
+}
+
+func TestMigrateCmctToSpringSunday_UserInfoKeepExisting(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+	require.NoError(t, db.Exec("CREATE TABLE user_info (id INTEGER PRIMARY KEY, site TEXT, username TEXT)").Error)
+	require.NoError(t, db.Exec("INSERT INTO user_info (site, username) VALUES ('cmct','old')").Error)
+	require.NoError(t, db.Exec("INSERT INTO user_info (site, username) VALUES ('springsunday','current')").Error)
+
+	require.NoError(t, db.Create(&SiteSetting{Name: "cmct", AuthMethod: "cookie"}).Error)
+	require.NoError(t, db.Create(&SiteSetting{Name: "springsunday", AuthMethod: "cookie"}).Error)
+
+	require.NoError(t, SyncSitesFromRegistry(db, nil))
+
+	var cmctCount int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM user_info WHERE site = ?", "cmct").Scan(&cmctCount).Error)
+	assert.Equal(t, int64(0), cmctCount)
+
+	var uname string
+	require.NoError(t, db.Raw("SELECT username FROM user_info WHERE site = ?", "springsunday").Scan(&uname).Error)
+	assert.Equal(t, "current", uname)
+}
+
+func TestMigrateCmctToSpringSunday_MergeExisting(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+
+	// both cmct and springsunday exist; springsunday lacks cookie/apikey/enabled
+	cmct := SiteSetting{Name: "cmct", AuthMethod: "cookie", Cookie: "ck", APIKey: "ak", Enabled: true}
+	require.NoError(t, db.Create(&cmct).Error)
+	spring := SiteSetting{Name: "springsunday", AuthMethod: "cookie"}
+	require.NoError(t, db.Create(&spring).Error)
+
+	// an RSS attached to cmct should be reparented to springsunday
+	require.NoError(t, db.Create(&RSSSubscription{SiteID: cmct.ID, Name: "r", URL: "http://x", IntervalMinutes: 5}).Error)
+
+	require.NoError(t, SyncSitesFromRegistry(db, []RegisteredSite{
+		{ID: "springsunday", Name: "SpringSunday", AuthMethod: "cookie"},
+	}))
+
+	// cmct removed, springsunday inherited user config
+	var cnt int64
+	db.Model(&SiteSetting{}).Where("name = ?", "cmct").Count(&cnt)
+	assert.Equal(t, int64(0), cnt)
+
+	var merged SiteSetting
+	require.NoError(t, db.Where("name = ?", "springsunday").First(&merged).Error)
+	assert.Equal(t, "ck", merged.Cookie)
+	assert.Equal(t, "ak", merged.APIKey)
+	assert.True(t, merged.Enabled)
+
+	// RSS reparented
+	var rss RSSSubscription
+	require.NoError(t, db.Where("name = ?", "r").First(&rss).Error)
+	assert.Equal(t, merged.ID, rss.SiteID)
+}
+
+func TestMigrateExampleRSS(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+
+	require.NoError(t, db.Create(&RSSSubscription{Name: "example", URL: "https://example.com/rss", IntervalMinutes: 5}).Error)
+	require.NoError(t, db.Create(&RSSSubscription{Name: "real", URL: "https://hdsky.me/rss", IntervalMinutes: 5}).Error)
+
+	require.NoError(t, MigrateExampleRSS(db))
+
+	var ex RSSSubscription
+	require.NoError(t, db.Where("name = ?", "example").First(&ex).Error)
+	assert.True(t, ex.IsExample)
+
+	var real RSSSubscription
+	require.NoError(t, db.Where("name = ?", "real").First(&real).Error)
+	assert.False(t, real.IsExample)
 }
