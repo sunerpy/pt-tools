@@ -5,6 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.5] - 2026-07-13
+
+### Bug Fixes
+
+- 修复超大种子触发磁盘保护后阻塞推送并清理暂存种子文件 ([#450](https://github.com/sunerpy/pt-tools/issues/450)) ([#451](https://github.com/sunerpy/pt-tools/issues/451)) ([#451](https://github.com/sunerpy/pt-tools/pull/451))
+
+* fix: 修复超大种子触发磁盘保护后阻塞推送并清理暂存种子文件 ([#450](https://github.com/sunerpy/pt-tools/issues/450))
+
+      - 超大种子命中磁盘保护时跳过单个种子而非停止整批推送
+      - 新增 ErrTorrentTooLarge 哨兵错误区分磁盘保护语义
+      - 提取 runPushLoop 统一分类推送错误并记录 last_error
+      - 按 mtime 清理暂存目录残留的 .torrent 文件
+
+      * ci: 增加覆盖率门禁与 Codecov 上传
+
+      - 新增 coverage-gate/coverage-gate-check/coverage-parity 目标
+      - 设置覆盖率下限 COVERAGE_MIN=55 后续逐步提升
+      - 新增 codecov.yml 配置 project 55% patch 80% 并忽略 mocks 与测试文件
+      - CI 增加覆盖率门禁与 codecov-action@v5 上传步骤并补充徽章
+
+      * fix: 升级 go 版本至 1.26.5 修复 crypto/tls 漏洞
+
+      - 修复 govulncheck 报告的 GO-2026-5856 stdlib 漏洞
+      - 仅调整 go 指令版本 CI 通过 GOTOOLCHAIN=local 拉取修复后标准库
+
+- 对齐 Dockerfile 构建镜像 Go 版本至 1.26.5 修复发布镜像构建失败 ([#454](https://github.com/sunerpy/pt-tools/issues/454)) ([#454](https://github.com/sunerpy/pt-tools/pull/454))
+- Dockerfile ARG BUILD_IMAGE 由 golang:1.26.4 升级至 1.26.5 - Makefile BUILD_IMAGE 默认值同步升级保持与 go.mod 一致
+
+### CI/CD
+
+- TG 发版公告折叠依赖与杂项分区为计数摘要 ([#448](https://github.com/sunerpy/pt-tools/issues/448)) ([#448](https://github.com/sunerpy/pt-tools/pull/448))
+- 回退到 release body 的自动公告会逐条渲染 dependabot 升级，噪声淹没重要修复 - 新增 \_fold_noise_sections 按标题层级识别依赖/杂项分区，折叠为一行"本次含 N 项，详见 Release 页面"摘要 - 仅统计顶层 bullet，忽略嵌套明细与 updated-dependencies 子块；0 项分区整体丢弃 - 修复 Installation 块内 H3 子标题误重置 H2 跳过导致 Browser Extension 泄漏 - 手动 announcement 与 release-notes 覆盖路径不受影响 - 补充 --selftest 断言与贴近真实 v0.40.3 结构的 smoke 样本
+
+### Testing
+
+- 补齐单元测试将过滤覆盖率提升至 92% 并将门禁下限抬至 90% ([#453](https://github.com/sunerpy/pt-tools/issues/453)) ([#453](https://github.com/sunerpy/pt-tools/pull/453))
+
+* fix(downloader): 修复 requests 会话复用陈旧代理导致环回请求被误路由
+
+      - api_favicon.go 与 http_doer.go 始终显式设置代理，空字符串表示清除
+      - 避免 requests 库池化 transport 残留代理污染命中 NO_PROXY 的直连请求
+
+      * test: 补齐单元测试提升整体过滤覆盖率至 92%
+
+      - 覆盖 cmd/web/site/v2/internal/scheduler/models/core 等包的 happy 与 error 路径
+      - 修复若干 -race 竞态：异步 goroutine 读取包级全局与测试清理写入建立同步边
+      - favicon 测试限制 :memory: SQLite 连接数为 1，避免后台刷新访问未迁移空库
+
+      * ci(coverage): 覆盖率门禁下限提升至 90%
+
+      - Makefile COVERAGE_MIN 55 → 90
+      - codecov.yml project target 55% → 90%（patch 与 ignore 排除集不变）
+
+      * test: 修复新增测试的 lint 告警
+
+      - web_run_test.go 重命名内层 err 避免 govet shadow
+      - free_end_extra4_test.go 传 context.Background 替代 nil（SA1012）
+      - coverage2_test.go 合并变量声明与赋值（S1021）
+
+      * test(cmd): 修复关闭处理器测试 SIGTERM 注册竞态导致的偶发超时
+
+      - 先等待 goroutine 注册 signal.Notify 再发信号，避免注册前 SIGTERM 直接终止进程
+      - 注册后周期性重发 SIGTERM，覆盖首个信号偶发早到丢失的情况
+
+      * test: 整合冗余覆盖率测试文件为按源文件命名的结构(web/models/core/internal/scheduler/notify/downloaders/version)
+
+      - 纯测试文件合并/重命名，无任何生产代码改动
+      - 无断言/逻辑改动，测试函数逐字迁移
+      - 覆盖率保持不变(statement 92.0%)
+
+      * test: 整合 cmd/site-v2/cloakdriver 剩余冗余测试文件命名
+
+      - 纯测试文件合并/重命名，无任何生产代码改动
+      - 无断言/逻辑改动，测试函数逐字迁移
+      - cmd: 6 个 cov2/extra 文件按源文件归并
+      - site/v2: 17 个 coverage 文件按源文件归并
+      - internal/cloakdriver: 5 个 extra 文件并入同目录 driver/manager_client 测试
+      - 覆盖率保持不变(statement 92.0%)
+
+      * ci(coverage): codecov project 改为 auto 并排除 cloakdriver/version 等 live-env 胶水
+
+      - codecov project 目标由固定 90 改为 auto，防回退且不受行覆盖率无法达标制约
+      - codecov ignore 与 Makefile COVERAGE_EXCLUDE 新增 internal/cloakdriver 与 version
+      - coverage-parity 断言项数由 3 调整为 5，保持双侧一致
+
+      * fix(version): 消除 TestUpgraderDownloadFile 的数据竞争
+
+      - downloadFile 始终显式调用 WithProxy，proxyURL 为空时清空代理
+      - 底层 requests 会话复用池化 Transport，归还时不清除 tr.Proxy，会继承陈旧代理
+      - 修复本应直连的环回请求被误路由，消除并发跑测试时的偶发失败
+
 ## [0.40.3] - 2026-07-08
 
 ### Bug Fixes
