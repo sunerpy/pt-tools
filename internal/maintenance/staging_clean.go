@@ -18,13 +18,19 @@ import (
 // 扫描根固定为 ~/.pt-tools/downloads（白名单内），绝不读取 DownloadDir 配置——
 // 若用户把 DownloadDir 配成 .pt-tools 之外的绝对路径，本特性一律不碰那个目录（§2.4）。
 //
+// defaultStagingRetainHours 是手动清理（特性 D）在 RetainHours<=0（未配置/被清零）时
+// 使用的兜底保留期。手动清理是用户明确意图，不应被"自动清理阈值"整类卡死。
+const defaultStagingRetainHours = 24
+
 // 判定复用 shouldSweepAnySite（与 #450 shouldSweep 相同规则，但按 hash 跨站点查 DB）。
-// RetainHours/MaxRetry 从 ConfigStore 读取；RetainHours<=0 时禁用 staging 清理（保持旧语义）。
+// RetainHours/MaxRetry 从 ConfigStore 读取；RetainHours<=0 时改用兜底 24h 继续清理（孤立/
+// 已推送/达最大重试与 mtime 无关，仍应清；超期未推送用兜底判定），而非整类禁用。
+// 注意：#450 的 internal.sweepStagingDir（RSS 自动 sweep）保持 retain<=0 → 禁用的旧语义不变。
 func (c *Cleaner) cleanStaging(resolvedRoot string, dryRun bool, cr *CategoryResult) {
 	retainHours, maxRetry := c.stagingRetention()
 	if retainHours <= 0 {
-		cr.Note = "staging 清理已禁用（RetainHours<=0）"
-		return
+		retainHours = defaultStagingRetainHours
+		cr.Note = "使用默认保留期 24h（未配置 RetainHours）"
 	}
 	for _, file := range collectTorrentFiles(resolvedRoot) {
 		if !shouldSweepAnySite(c.db, file, retainHours, maxRetry) {

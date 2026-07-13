@@ -518,6 +518,10 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			PeerRatioIntervalMin   int     `json:"peer_ratio_interval_min"`
 			PeerRatioRemoveData    bool    `json:"peer_ratio_remove_data"`
 			DefaultFilterMode      string  `json:"default_filter_mode"`
+			DefaultEnabled         *bool   `json:"default_enabled"`
+			RetainHours            *int    `json:"retain_hours"`
+			MaxRetry               *int    `json:"max_retry"`
+			DefaultConcurrency     *int32  `json:"default_concurrency"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -568,7 +572,13 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			PeerRatioRemoveData:    req.PeerRatioRemoveData,
 			DefaultFilterMode:      models.NormalizeFilterMode(models.FilterMode(req.DefaultFilterMode)),
 		}
-		if err := s.store.SaveGlobalSettings(gs); err != nil {
+		patch := &core.GlobalSettingsPatch{
+			DefaultEnabled:     req.DefaultEnabled,
+			RetainHours:        req.RetainHours,
+			MaxRetry:           req.MaxRetry,
+			DefaultConcurrency: req.DefaultConcurrency,
+		}
+		if err := s.store.SaveGlobalSettingsWithPatch(gs, patch); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

@@ -66,6 +66,10 @@ export interface GlobalSettings {
   torrent_size_gb: number;
   min_free_minutes: number;
   auto_start: boolean;
+  retain_hours: number;
+  max_retry: number;
+  default_concurrency: number;
+  default_enabled: boolean;
   cleanup_enabled?: boolean;
   cleanup_interval_min?: number;
   cleanup_scope?: string;
