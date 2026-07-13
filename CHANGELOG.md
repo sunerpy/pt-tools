@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-07-13
+
+### Features
+
+- 适配 TangPT 与 T-Baozi 两个 NexusPHP 站点 (#456, #457) ([#460](https://github.com/sunerpy/pt-tools/issues/460)) ([#460](https://github.com/sunerpy/pt-tools/pull/460))
+- 新增 TangPT（www.tangpt.top，糖果，CHD 模板）站点定义与 fixture 测试 - 新增 T-Baozi（p.t-baozi.cc，包子）站点定义与 fixture 测试 - 两站点均为 NexusPHP + Cookie 认证，覆盖搜索/详情/用户信息解析 - UserInfo 补充 lastAccessAt 选择器，支持登录态保号探测 - 浏览器扩展 KNOWN_SITES 同步 baozi 与 tangpt 条目 - docs/sites.md 更新站点列表与计数（51→53，NexusPHP 47→49）
+
 ## [0.41.0] - 2026-07-13
 
 ### Features
