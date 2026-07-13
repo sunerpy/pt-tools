@@ -6,6 +6,7 @@ package maintenance
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -53,11 +54,12 @@ type FileAction struct {
 
 // CategoryResult 汇总单个类别的清理结果。
 type CategoryResult struct {
-	Category   CleanCategory `json:"category"`
-	Deleted    []FileAction  `json:"deleted"` // DryRun 时为"将删除"项
-	FreedBytes int64         `json:"freedBytes"`
-	Skipped    []string      `json:"skipped"` // 命中红线/越界而被拒绝的路径（含原因）
-	Note       string        `json:"note"`    // 例如整类被拒绝的原因
+	Category     CleanCategory `json:"category"`
+	Deleted      []FileAction  `json:"deleted"` // DryRun 时为"将删除"项
+	FreedBytes   int64         `json:"freedBytes"`
+	DirUsedBytes int64         `json:"dirUsedBytes"` // 该类目录当前递归总占用（含不可删文件）
+	Skipped      []string      `json:"skipped"`      // 命中红线/越界而被拒绝的路径（含原因）
+	Note         string        `json:"note"`         // 例如整类被拒绝的原因
 }
 
 // CleanResult 汇总一次清理的全部结果。
@@ -142,6 +144,8 @@ func (c *Cleaner) cleanCategory(cat CleanCategory, resolvedHomeWork string, opts
 		return cr
 	}
 
+	cr.DirUsedBytes = dirTotalSize(resolvedRoot)
+
 	switch cat {
 	case CategoryLogs:
 		c.cleanLogs(resolvedRoot, opts.DryRun, cr)
@@ -174,19 +178,44 @@ func candidateInRoot(resolvedRoot, candidate string) (bool, string) {
 }
 
 // isRedLine 判定 basename 是否为硬编码红线文件（二次保险）。
+// 大小写不敏感（strings.EqualFold）：Windows FS 大小写不敏感，Torrents.DB / SECRET.KEY /
+// All.Log 等变体必须同样被拦截。
 func isRedLine(p string) bool {
-	switch filepath.Base(p) {
-	case models.DBFile, // torrents.db
+	base := filepath.Base(p)
+	for _, name := range []string{
+		models.DBFile, // torrents.db
 		models.DBFile + "-wal",
 		models.DBFile + "-shm",
 		"secret.key",
-		"all.log", "debug.log", "info.log", "error.log":
-		return true
+		"all.log", "debug.log", "info.log", "error.log",
+	} {
+		if strings.EqualFold(base, name) {
+			return true
+		}
 	}
 	return false
 }
 
+// dirTotalSize 递归累加 root 下所有普通文件的字节大小，用于报告该类目录当前总占用（E）。
+// 跨平台仅依赖 filepath.WalkDir + info.Size()，不做整盘 syscall；单文件 stat 错误忽略
+// （不影响清理与占用估算）。root 不存在返回 0。
+func dirTotalSize(root string) int64 {
+	var total int64
+	_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, ierr := d.Info(); ierr == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
 // withinRoot 报告 target 是否位于 root 之内（含 root 自身），基于 filepath.Rel。
+// 依赖 filepath.Rel + filepath.Separator 的平台相关语义，在 Windows 上同样成立；
+// Windows FS 大小写不敏感由 isRedLine 的 strings.EqualFold 覆盖。
 func withinRoot(root, target string) bool {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {

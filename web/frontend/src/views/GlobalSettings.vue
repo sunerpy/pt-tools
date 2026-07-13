@@ -16,6 +16,10 @@ const form = ref<GlobalSettings>({
   torrent_size_gb: 200,
   min_free_minutes: 30,
   auto_start: false,
+  retain_hours: 24,
+  max_retry: 3,
+  default_concurrency: 3,
+  default_enabled: false,
   auto_delete_on_free_end: false,
   free_end_advance_minutes: 0,
   default_filter_mode: "auto_free",
@@ -234,6 +238,40 @@ async function save() {
                   :step="5"
                   class="w-full" />
                 <div class="form-tip">免费剩余时间少于此值的种子将被跳过，0 表示不限制</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- 种子文件保留 / 暂存种子清理 -->
+        <div class="form-section settings-section">
+          <div class="form-section-title">
+            <el-icon><Folder /></el-icon>
+            种子文件保留 / 暂存种子清理
+          </div>
+          <el-row :gutter="40">
+            <el-col :md="12" :sm="24">
+              <el-form-item label="暂存种子保留时长(小时)">
+                <el-input-number
+                  v-model="form.retain_hours"
+                  :min="0"
+                  :max="8760"
+                  :step="1"
+                  class="w-full" />
+                <div class="form-tip">
+                  暂存种子文件保留时长(小时)；超期未推送将被自动清理。0 = 关闭自动清理
+                </div>
+              </el-form-item>
+            </el-col>
+            <el-col :md="12" :sm="24">
+              <el-form-item label="最大重试次数">
+                <el-input-number
+                  v-model="form.max_retry"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                  class="w-full" />
+                <div class="form-tip">推送失败达到此次数后清理暂存种子；0 = 不按重试次数删除</div>
               </el-form-item>
             </el-col>
           </el-row>

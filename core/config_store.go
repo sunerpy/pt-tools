@@ -240,7 +240,26 @@ func (s *ConfigStore) GetGlobalSettings() (models.SettingsGlobal, error) {
 	return gs, nil
 }
 
+// GlobalSettingsPatch 表达全局设置的“部分更新”语义（方式 ii）。
+// 这些字段在 Web API 中通过指针区分“未提供”（nil → 保留 DB 现值）与
+// “显式提供（含 0）”（非 nil → 写入）。仅用于阻止 apiGlobal 漏传导致的静默清零，
+// 不改变 SaveGlobalSettings 对其余字段的全量赋值语义。
+type GlobalSettingsPatch struct {
+	DefaultEnabled     *bool
+	RetainHours        *int
+	MaxRetry           *int
+	DefaultConcurrency *int32
+}
+
 func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
+	return s.SaveGlobalSettingsWithPatch(gs, nil)
+}
+
+// SaveGlobalSettingsWithPatch 在 SaveGlobalSettings 基础上增加部分更新通道。
+//   - patch == nil：与旧 SaveGlobalSettings 完全一致（4 字段从 gs 全量赋值），保持所有既有调用方语义。
+//   - patch != nil：DefaultEnabled/RetainHours/MaxRetry/DefaultConcurrency 仅在对应指针非 nil 时写入，
+//     nil 时保留 DB 现值（更新分支）或落合理默认（INSERT 分支）。
+func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patch *GlobalSettingsPatch) error {
 	if strings.TrimSpace(gs.DownloadDir) == "" {
 		return errors.New("下载目录不能为空")
 	}
@@ -257,16 +276,32 @@ func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 	db := s.db.DB
 	if err := db.First(&cur).Error; err == nil {
 		cur.DefaultIntervalMinutes = gs.DefaultIntervalMinutes
-		cur.DefaultEnabled = gs.DefaultEnabled
 		cur.DownloadDir = gs.DownloadDir
 		cur.DownloadLimitEnabled = gs.DownloadLimitEnabled
 		cur.DownloadSpeedLimit = gs.DownloadSpeedLimit
 		cur.TorrentSizeGB = gs.TorrentSizeGB
 		cur.MinFreeMinutes = gs.MinFreeMinutes
 		cur.AutoStart = gs.AutoStart
-		cur.RetainHours = gs.RetainHours
-		cur.MaxRetry = gs.MaxRetry
-		cur.DefaultConcurrency = gs.DefaultConcurrency
+		// 以下 4 字段：patch 优先（区分 omitted/explicit），否则维持旧全量赋值语义。
+		if patch != nil {
+			if patch.DefaultEnabled != nil {
+				cur.DefaultEnabled = *patch.DefaultEnabled
+			}
+			if patch.RetainHours != nil {
+				cur.RetainHours = *patch.RetainHours
+			}
+			if patch.MaxRetry != nil {
+				cur.MaxRetry = *patch.MaxRetry
+			}
+			if patch.DefaultConcurrency != nil {
+				cur.DefaultConcurrency = *patch.DefaultConcurrency
+			}
+		} else {
+			cur.DefaultEnabled = gs.DefaultEnabled
+			cur.RetainHours = gs.RetainHours
+			cur.MaxRetry = gs.MaxRetry
+			cur.DefaultConcurrency = gs.DefaultConcurrency
+		}
 		cur.CleanupEnabled = gs.CleanupEnabled
 		cur.CleanupIntervalMin = gs.CleanupIntervalMin
 		cur.CleanupScope = gs.CleanupScope
@@ -296,12 +331,39 @@ func (s *ConfigStore) SaveGlobalSettings(gs models.SettingsGlobal) error {
 			return err
 		}
 	} else {
+		if patch != nil {
+			applyGlobalPatchOnInsert(&gs, patch)
+		}
 		if err := db.Create(&gs).Error; err != nil {
 			return err
 		}
 	}
 	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "global", At: time.Now()})
 	return nil
+}
+
+// applyGlobalPatchOnInsert 在空 DB 首次保存（INSERT）时确保 4 个字段落合理默认：
+// patch 显式提供（含 0）→ 用之；否则 → 用 models 默认（retain=24/maxRetry=3/concurrency=3），
+// 避免 apiGlobal 漏传时把新行写成全 0（PA1）。
+func applyGlobalPatchOnInsert(gs *models.SettingsGlobal, patch *GlobalSettingsPatch) {
+	if patch.DefaultEnabled != nil {
+		gs.DefaultEnabled = *patch.DefaultEnabled
+	}
+	if patch.RetainHours != nil {
+		gs.RetainHours = *patch.RetainHours
+	} else {
+		gs.RetainHours = 24
+	}
+	if patch.MaxRetry != nil {
+		gs.MaxRetry = *patch.MaxRetry
+	} else {
+		gs.MaxRetry = 3
+	}
+	if patch.DefaultConcurrency != nil {
+		gs.DefaultConcurrency = *patch.DefaultConcurrency
+	} else {
+		gs.DefaultConcurrency = models.DefaultConcurrency
+	}
 }
 
 func (s *ConfigStore) SaveQbit(qb models.QbitSettings) error {

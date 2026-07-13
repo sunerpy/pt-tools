@@ -68,8 +68,9 @@ func TestCleaner_MissingCategoryRootSkipped(t *testing.T) {
 	assert.Empty(t, res.Categories, "根不存在应跳过，不产生结果")
 }
 
-// TestCleaner_StagingDisabledWhenRetainZero：RetainHours<=0 时 staging 清理禁用。
-func TestCleaner_StagingDisabledWhenRetainZero(t *testing.T) {
+// TestCleaner_StagingFallbackWhenRetainZero：RetainHours<=0 时手动清理改用兜底 24h 而非禁用，
+// 孤立种子（与 mtime 无关）仍应被删，Note 提示使用默认保留期。
+func TestCleaner_StagingFallbackWhenRetainZero(t *testing.T) {
 	home, db := setupCleanerHome(t)
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
 		DownloadDir: t.TempDir(), RetainHours: 24, MaxRetry: 3,
@@ -81,8 +82,8 @@ func TestCleaner_StagingDisabledWhenRetainZero(t *testing.T) {
 	res, err := c.Clean(context.Background(), CleanOptions{Categories: []CleanCategory{CategoryStaging}})
 	require.NoError(t, err)
 	require.Len(t, res.Categories, 1)
-	assert.NotEmpty(t, res.Categories[0].Note)
-	assert.FileExists(t, orphanPath, "禁用时不删")
+	assert.Contains(t, res.Categories[0].Note, "默认保留期")
+	assert.NoFileExists(t, orphanPath, "retain<=0 兜底后孤立种子仍应删")
 }
 
 // TestCleaner_DeleteFailureRecorded：删除失败（候选是目录）记录到 Skipped。

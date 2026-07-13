@@ -27,6 +27,8 @@ type cleanCategoryDTO struct {
 	DeletedCount int    `json:"deletedCount"`
 	FreedBytes   int64  `json:"freedBytes"`
 	FreedHuman   string `json:"freedHuman"`
+	DirUsedBytes int64  `json:"dirUsedBytes"`
+	DirUsedHuman string `json:"dirUsedHuman"`
 	SkippedCount int    `json:"skippedCount"`
 	Note         string `json:"note,omitempty"`
 }
@@ -94,6 +96,8 @@ func toCleanResultDTO(res *maintenance.CleanResult) cleanResultDTO {
 			DeletedCount: len(cr.Deleted),
 			FreedBytes:   cr.FreedBytes,
 			FreedHuman:   humanBytes(cr.FreedBytes),
+			DirUsedBytes: cr.DirUsedBytes,
+			DirUsedHuman: humanBytes(cr.DirUsedBytes),
 			SkippedCount: len(cr.Skipped),
 			Note:         cr.Note,
 		})
