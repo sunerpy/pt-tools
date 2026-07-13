@@ -106,6 +106,8 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/rss/", s.auth(s.apiRSSFilterAssociation))
 	// Log level API
 	mux.HandleFunc("/api/log-level", s.auth(s.apiLogLevel))
+	// Maintenance clean API (destructive; authenticated only)
+	mux.HandleFunc("/api/maintenance/clean", s.auth(s.apiMaintenanceClean))
 	// User info v2 APIs
 	mux.HandleFunc("/api/v2/userinfo/aggregated", s.auth(s.apiUserInfoAggregated))
 	mux.HandleFunc("/api/v2/userinfo/sites", s.auth(s.apiUserInfoSites))
