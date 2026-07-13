@@ -4,6 +4,7 @@
 package scheduler
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestCheckTorrentCompletion_Error(t *testing.T) {
 	fake := newSchedFakeDownloader("qb1")
 	fake.getErr = errSendBoom
 	m, _ := newFreeEndMonitorWithFake(t, fake)
-	_, _, _, err := m.checkTorrentCompletion(nil, fake, "missing")
+	_, _, _, err := m.checkTorrentCompletion(context.Background(), fake, "missing")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "获取种子信息")
 }

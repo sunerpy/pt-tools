@@ -111,8 +111,8 @@ func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
 	// Wait until the HTTP server is accepting connections on /api/ping.
 	base := "http://127.0.0.1:" + itoa(p)
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(base + "/api/ping")
-		if err != nil {
+		resp, gerr := http.Get(base + "/api/ping")
+		if gerr != nil {
 			return false
 		}
 		_ = resp.Body.Close()

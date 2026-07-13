@@ -243,8 +243,7 @@ func TestNewNexusPHPDriverWithFailover(t *testing.T) {
 }
 
 func TestNexusPHPDriver_ExecuteWithFailover(t *testing.T) {
-	var good *httptest.Server
-	good = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`<html><body><table class="torrents"></table></body></html>`))
 	}))
 	defer good.Close()
@@ -295,8 +294,7 @@ func TestFlexInt_UnmarshalJSON(t *testing.T) {
 }
 
 func TestMTorrentDriver_ParseDownload_Full(t *testing.T) {
-	var torrentServer *httptest.Server
-	torrentServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	torrentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		// minimal valid torrent bencode
 		_, _ = w.Write([]byte("d8:announce4:test4:infod4:name4:teste"))
