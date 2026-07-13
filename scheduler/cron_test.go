@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package scheduler
 
 import (
@@ -73,4 +76,24 @@ func TestCronMatchAndWindowStart(t *testing.T) {
 
 	at0930 := time.Date(2026, 5, 18, 9, 30, 0, 0, time.UTC)
 	assert.Equal(t, time.Date(2026, 5, 17, 22, 0, 0, 0, time.UTC), c.WindowStart(at0930))
+}
+
+func TestParseCron_FieldOutOfRangeErrors(t *testing.T) {
+	cases := []string{
+		"0 0 40 * *", // dom > 31
+		"0 0 * 13 *", // month > 12
+		"0 0 * * 9",  // dow > 6
+	}
+	for _, spec := range cases {
+		_, err := ParseCron(spec)
+		require.Error(t, err, "spec %q should error", spec)
+	}
+}
+
+func TestCronWindowStart_NoMatchReturnsZero(t *testing.T) {
+	// Feb 30 never exists → WindowStart scans a week and returns zero.
+	c, err := ParseCron("0 0 30 2 *")
+	require.NoError(t, err)
+	got := c.WindowStart(time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	assert.True(t, got.IsZero())
 }

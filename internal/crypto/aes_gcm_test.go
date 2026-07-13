@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -113,6 +114,149 @@ func TestKeyMissingFallback(t *testing.T) {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// TestExportKey verifies ExportKey returns a copy of the active key.
+func TestExportKey(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	keyB64 := base64.StdEncoding.EncodeToString(key)
+	t.Setenv("PT_TOOLS_SECRET_KEY", keyB64)
+	testResetEncryptor()
+
+	exported, err := ExportKey()
+	require.NoError(t, err)
+	assert.Equal(t, key, exported)
+
+	exported[0] ^= 0xFF
+	exported2, err := ExportKey()
+	require.NoError(t, err)
+	assert.Equal(t, key, exported2, "internal key should be unaffected by mutation of returned slice")
+}
+
+// TestResetForTest ensures the exported reset helper reloads the key.
+func TestResetForTest(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(255 - i)
+	}
+	t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	ResetForTest()
+
+	exported, err := ExportKey()
+	require.NoError(t, err)
+	assert.Equal(t, key, exported)
+}
+
+// TestInitKeyFromFile covers the ~/.pt-tools/secret.key load branch.
+func TestInitKeyFromFile(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PT_TOOLS_SECRET_KEY", "")
+
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i * 3)
+	}
+	dir := filepath.Join(tmpHome, ".pt-tools")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	keyFile := filepath.Join(dir, "secret.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600))
+
+	testResetEncryptor()
+	t.Cleanup(func() {
+		envKey := make([]byte, 32)
+		t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(envKey))
+		testResetEncryptor()
+	})
+
+	exported, err := ExportKey()
+	require.NoError(t, err)
+	assert.Equal(t, key, exported)
+
+	plain := []byte("file key round trip")
+	cipher, err := Encrypt(plain)
+	require.NoError(t, err)
+	decrypted, err := Decrypt(cipher)
+	require.NoError(t, err)
+	assert.Equal(t, plain, decrypted)
+}
+
+// TestInitKeyGenerated covers the branch where no env and no file exist,
+// so a fresh random key is generated and persisted.
+func TestInitKeyGenerated(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PT_TOOLS_SECRET_KEY", "")
+
+	testResetEncryptor()
+	t.Cleanup(func() {
+		envKey := make([]byte, 32)
+		t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(envKey))
+		testResetEncryptor()
+	})
+
+	keyFile := filepath.Join(tmpHome, ".pt-tools", "secret.key")
+	data, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+	decoded, err := hex.DecodeString(string(data))
+	require.NoError(t, err)
+	assert.Len(t, decoded, 32)
+
+	exported, err := ExportKey()
+	require.NoError(t, err)
+	assert.Equal(t, decoded, exported)
+}
+
+// TestDecryptShortCiphertext covers the "ciphertext too short" branch.
+func TestDecryptShortCiphertext(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	testResetEncryptor()
+
+	short := base64.StdEncoding.EncodeToString([]byte{1, 2, 3})
+	plain, err := Decrypt(short)
+	assert.Error(t, err)
+	assert.Nil(t, plain)
+}
+
+// TestDecryptInvalidBase64 covers the base64 decode error branch.
+func TestDecryptInvalidBase64(t *testing.T) {
+	key := make([]byte, 32)
+	t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	testResetEncryptor()
+
+	plain, err := Decrypt("!!!not base64!!!")
+	assert.Error(t, err)
+	assert.Nil(t, plain)
+}
+
+func TestInitKeyPanicsOnInvalidEnv(t *testing.T) {
+	t.Setenv("PT_TOOLS_SECRET_KEY", "not-valid-base64-and-wrong-length")
+	assert.Panics(t, func() { testResetEncryptor() })
+
+	t.Cleanup(func() {
+		envKey := make([]byte, 32)
+		t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(envKey))
+		testResetEncryptor()
+	})
+}
+
+func TestEncryptDecryptExportNoKey(t *testing.T) {
+	saved := encryptor
+	encryptor = nil
+	t.Cleanup(func() { encryptor = saved })
+
+	_, err := Encrypt([]byte("x"))
+	assert.ErrorIs(t, err, errNoKey)
+
+	_, err = Decrypt("x")
+	assert.ErrorIs(t, err, errNoKey)
+
+	_, err = ExportKey()
+	assert.ErrorIs(t, err, errNoKey)
 }
 
 // testResetEncryptor is a helper to reset the global encryptor for testing

@@ -30,9 +30,10 @@ DIST_DIR = dist
 # COVERAGE_MIN: 过滤后的总覆盖率下限（低于则 coverage-gate/coverage-gate-check 失败）。
 #   当前值为今日可达到的现实基线，后续覆盖率提升活动中再逐步抬高。
 # COVERAGE_EXCLUDE: 从门禁统计中排除的文件（grep -E 正则）。必须与 codecov.yml 的 ignore 集合保持一致。
-#   排除集合固定 3 项：测试文件、生成的 mocks、入口 main.go。version/ 等真实业务包不排除。
-COVERAGE_MIN := 55
-COVERAGE_EXCLUDE := (_test\.go|/mocks/|(^|/)main\.go:)
+#   排除集合固定 5 项：测试文件、生成的 mocks、入口 main.go、live-env 胶水包 internal/cloakdriver（需真实 Chrome/CDP）、
+#   version（fetchGitHubReleases 需真实 GitHub + 二进制自替换）。其余真实业务包不排除。
+COVERAGE_MIN := 90
+COVERAGE_EXCLUDE := (_test\.go|/mocks/|(^|/)main\.go:|/internal/cloakdriver/|/version/)
 
 # Proxy 设置 (支持大小写环境变量)
 HTTP_PROXY ?= $(http_proxy)
@@ -302,11 +303,11 @@ coverage-gate-check:
 		printf "coverage gate passed: %.1f%% >= %d%%\n", $$3, min }' $(DIST_DIR)/coverage.filtered.txt
 
 # 覆盖率排除一致性校验：确保 codecov.yml 的 ignore 集合与 Makefile 门禁排除项同步，漂移即失败。
-# 排除集合固定 3 项：mocks、main.go、_test.go。
+# 排除集合固定 5 项：mocks、main.go、_test.go、internal/cloakdriver、version。
 coverage-parity:
 	@set -euo pipefail; \
-	codecov_expected=('**/mocks/**' 'main.go' '**/*_test.go'); \
-	makefile_expected=('_test\.go' '/mocks/' 'main\.go'); \
+	codecov_expected=('**/mocks/**' 'main.go' '**/*_test.go' '**/internal/cloakdriver/**' '**/version/**'); \
+	makefile_expected=('_test\.go' '/mocks/' 'main\.go' '/internal/cloakdriver/' '/version/'); \
 	for p in "$${codecov_expected[@]}"; do \
 		grep -F -- "$$p" codecov.yml >/dev/null || { echo "codecov.yml missing $$p"; exit 1; }; \
 	done; \

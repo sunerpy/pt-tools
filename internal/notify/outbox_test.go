@@ -3,9 +3,11 @@ package notify
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
@@ -173,4 +175,131 @@ func TestOutbox_GracefulStop(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("worker did not stop within 1s")
 	}
+}
+
+// TestNewOutboxWorker_Defaults covers the interval default and nil-registry
+// substitution.
+func TestNewOutboxWorker_Defaults(t *testing.T) {
+	w := NewOutboxWorker(nil, nil, 0)
+	require.NotNil(t, w)
+	assert.Equal(t, defaultInterval, w.interval)
+	assert.NotNil(t, w.registry)
+}
+
+// TestOutboxWorker_Tick_Guards covers the nil-worker, nil-db and nil-registry
+// guards of Tick.
+func TestOutboxWorker_Tick_Guards(t *testing.T) {
+	var nilWorker *OutboxWorker
+	require.Error(t, nilWorker.Tick(context.Background()))
+
+	require.Error(t, (&OutboxWorker{}).Tick(context.Background()))
+
+	require.Error(t, (&OutboxWorker{db: &gorm.DB{}, registry: nil}).Tick(context.Background()))
+}
+
+// TestOutboxWorker_DeliverOne_ConfMissing seeds a row whose conf row was
+// deleted, so deliverOne's First(&conf) fails and the row moves to backoff.
+func TestOutboxWorker_DeliverOne_ConfMissing(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	withFixedNow(t, now)
+	db := newOutboxTestDB(t)
+	ch := &mockOutboxChannel{}
+	worker := newOutboxWorkerWithMock(t, db, ch)
+
+	row := models.NotificationOutbox{
+		NotificationConfID: 99999, // no such conf
+		PayloadJSON:        `{"title":"x"}`,
+		Status:             "pending",
+		RetryCount:         0,
+		NextRetryAt:        now.Add(-time.Second),
+	}
+	require.NoError(t, db.Create(&row).Error)
+
+	require.NoError(t, worker.Tick(context.Background()))
+
+	var got models.NotificationOutbox
+	require.NoError(t, db.First(&got, row.ID).Error)
+	assert.Equal(t, "pending", got.Status)
+	assert.Equal(t, 1, got.RetryCount)
+	assert.Contains(t, got.ErrorMsg, "加载通知通道配置失败")
+}
+
+// TestOutboxWorker_DeliverOne_MalformedPayload seeds a valid conf but an invalid
+// payload JSON so json.Unmarshal fails inside deliverOne.
+func TestOutboxWorker_DeliverOne_MalformedPayload(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	withFixedNow(t, now)
+	db := newOutboxTestDB(t)
+	ch := &mockOutboxChannel{}
+	worker := newOutboxWorkerWithMock(t, db, ch)
+
+	conf := models.NotificationConf{ChannelType: "mock", Name: "m", Enabled: true}
+	require.NoError(t, db.Create(&conf).Error)
+	row := models.NotificationOutbox{
+		NotificationConfID: conf.ID,
+		PayloadJSON:        `{bad json`,
+		Status:             "pending",
+		NextRetryAt:        now.Add(-time.Second),
+	}
+	require.NoError(t, db.Create(&row).Error)
+
+	require.NoError(t, worker.Tick(context.Background()))
+
+	var got models.NotificationOutbox
+	require.NoError(t, db.First(&got, row.ID).Error)
+	assert.Contains(t, got.ErrorMsg, "解析通知 payload 失败")
+	assert.Equal(t, 0, ch.calls, "malformed payload must not reach Send")
+}
+
+// TestOutboxWorker_DeliverOne_InitError covers the channel Init failure path.
+func TestOutboxWorker_DeliverOne_InitError(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	withFixedNow(t, now)
+	db := newOutboxTestDB(t)
+	ch := &mockOutboxChannel{initErr: errors.New("init boom")}
+	worker := newOutboxWorkerWithMock(t, db, ch)
+	seedOutbox(t, db, 0, now)
+
+	require.NoError(t, worker.Tick(context.Background()))
+
+	var got models.NotificationOutbox
+	require.NoError(t, db.Where("status = ?", "pending").First(&got).Error)
+	assert.Contains(t, got.ErrorMsg, "init boom")
+	assert.Equal(t, 0, ch.calls)
+}
+
+// TestOutboxWorker_Tick_UnknownChannelType covers the registry.Make failure
+// branch inside deliverOne.
+func TestOutboxWorker_Tick_UnknownChannelType(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	withFixedNow(t, now)
+	db := newOutboxTestDB(t)
+	worker := NewOutboxWorker(db, NewRegistry(), 10*time.Millisecond)
+
+	conf := models.NotificationConf{ChannelType: "ghost", Name: "g", Enabled: true}
+	require.NoError(t, db.Create(&conf).Error)
+	row := models.NotificationOutbox{
+		NotificationConfID: conf.ID,
+		PayloadJSON:        `{"title":"x"}`,
+		Status:             "pending",
+		NextRetryAt:        now.Add(-time.Second),
+	}
+	require.NoError(t, db.Create(&row).Error)
+
+	require.NoError(t, worker.Tick(context.Background()))
+
+	var got models.NotificationOutbox
+	require.NoError(t, db.First(&got, row.ID).Error)
+	assert.Equal(t, "pending", got.Status)
+	assert.NotEmpty(t, got.ErrorMsg)
+}
+
+// TestTruncateError covers nil, short and over-long error messages.
+func TestTruncateError(t *testing.T) {
+	assert.Equal(t, "", truncateError(nil))
+	assert.Equal(t, "short", truncateError(errors.New("short")))
+
+	long := errors.New(strings.Repeat("x", maxErrorMsgLen+50))
+	got := truncateError(long)
+	assert.Len(t, got, maxErrorMsgLen)
 }

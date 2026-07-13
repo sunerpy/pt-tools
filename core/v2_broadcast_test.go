@@ -168,3 +168,33 @@ func TestSetV2BroadcasterRoundTrip(t *testing.T) {
 	SetV2Broadcaster(nil)
 	assert.Nil(t, currentV2Broadcaster())
 }
+
+func TestMaybeSendV2Broadcast_ZeroNowAndCompletedZero(t *testing.T) {
+	db := newCloakDB(t)
+	require.NoError(t, db.DB.Create(&models.MigrationState{
+		SchemaVersion: V2BroadcastSchemaVersion,
+	}).Error)
+
+	res := MaybeSendV2Broadcast(context.Background(), db.DB,
+		V2BroadcasterFunc(func(context.Context) error { return nil }), nil, time.Time{})
+	assert.Equal(t, "completed_at_zero", res.Reason)
+}
+
+func TestMaybeSendV2Broadcast_MarkSentFailure(t *testing.T) {
+	db := newCloakDB(t)
+	require.NoError(t, models.UpsertMigrationState(db.DB, V2BroadcastSchemaVersion, time.Now().UTC()))
+
+	sqlDB, err := db.DB.DB()
+	require.NoError(t, err)
+
+	var called bool
+	res := MaybeSendV2Broadcast(context.Background(), db.DB,
+		V2BroadcasterFunc(func(context.Context) error {
+			called = true
+			require.NoError(t, sqlDB.Close())
+			return nil
+		}), nil, time.Now().UTC())
+	assert.True(t, called)
+	assert.True(t, res.Sent)
+	assert.Equal(t, "mark_failed", res.Reason)
+}

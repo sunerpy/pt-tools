@@ -1,4 +1,3 @@
-// Package web provides HTTP server and API handlers
 package web
 
 import (
@@ -11,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// ==== merged from api_compatibility_test.go ====
 // TestDeprecationHeaders tests that deprecated endpoints return proper deprecation headers
 func TestDeprecationHeaders(t *testing.T) {
 	// Register a test deprecated endpoint

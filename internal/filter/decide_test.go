@@ -605,3 +605,99 @@ func TestDecide_RuleRequireFreeMismatch_RejectsUnderPlanA(t *testing.T) {
 	assert.False(t, d.ShouldDownload)
 	assert.NotNil(t, d.MatchedRule)
 }
+
+// TestBuildDecisionReason_AllBranches drives buildDecisionReason indirectly
+// through Decide across the different FilterMode reason branches.
+func TestBuildDecisionReason_FilterOnlyReasons(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-reason-fo")
+
+	// require_free rule under filter_only.
+	createRuleForDecide(t, db, svc, rss.ID, &models.FilterRule{
+		Name: "fo-needfree", Pattern: "movie", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, RequireFree: true,
+		Enabled: true, Priority: 10,
+	})
+
+	// filter_only, matches but not free -> "匹配规则要求免费" branch.
+	d := svc.Decide(DecisionContext{
+		Input:      MatchInput{Title: "movie", SizeGB: 5},
+		IsFree:     false,
+		CanFinish:  true,
+		GlobalSize: 100,
+		FilterMode: models.FilterModeFilterOnly,
+	}, rss.ID)
+	assert.False(t, d.ShouldDownload)
+	assert.Contains(t, d.Reason, "免费")
+
+	// filter_only, no match at all -> "未匹配过滤规则" branch.
+	d2 := svc.Decide(DecisionContext{
+		Input:      MatchInput{Title: "documentary", SizeGB: 5},
+		IsFree:     true,
+		CanFinish:  true,
+		GlobalSize: 100,
+		FilterMode: models.FilterModeFilterOnly,
+	}, rss.ID)
+	assert.False(t, d2.ShouldDownload)
+	assert.Contains(t, d2.Reason, "filter_only")
+}
+
+func TestBuildDecisionReason_FilterOnlySizeMismatch(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-reason-fo-size")
+
+	// filter_only rule, matches text but size out of bounds (RequireFree=false).
+	createRuleForDecide(t, db, svc, rss.ID, &models.FilterRule{
+		Name: "fo-size", Pattern: "movie", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, MinSizeGB: 100,
+		Enabled: true, Priority: 10,
+	})
+
+	d := svc.Decide(DecisionContext{
+		Input:      MatchInput{Title: "movie", SizeGB: 5},
+		IsFree:     false,
+		CanFinish:  true,
+		GlobalSize: 1000,
+		FilterMode: models.FilterModeFilterOnly,
+	}, rss.ID)
+	assert.False(t, d.ShouldDownload)
+	assert.Contains(t, d.Reason, "大小")
+}
+
+func TestBuildDecisionReason_FreeOnlyReasons(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-reason-free")
+
+	createRuleForDecide(t, db, svc, rss.ID, &models.FilterRule{
+		Name: "free-rule", Pattern: "movie", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, Enabled: true, Priority: 10,
+	})
+
+	// free_only + not free -> "非免费种子" reason.
+	d := svc.Decide(DecisionContext{
+		Input:      MatchInput{Title: "movie", SizeGB: 5},
+		IsFree:     false,
+		CanFinish:  true,
+		GlobalSize: 100,
+		FilterMode: models.FilterModeFreeOnly,
+	}, rss.ID)
+	assert.False(t, d.ShouldDownload)
+	assert.Contains(t, d.Reason, "非免费")
+
+	// free_only + free but cannot finish -> "免费期剩余时间不足".
+	d2 := svc.Decide(DecisionContext{
+		Input:      MatchInput{Title: "movie", SizeGB: 5},
+		IsFree:     true,
+		CanFinish:  false,
+		GlobalSize: 100,
+		FilterMode: models.FilterModeFreeOnly,
+	}, rss.ID)
+	assert.False(t, d2.ShouldDownload)
+	assert.Contains(t, d2.Reason, "免费期")
+}

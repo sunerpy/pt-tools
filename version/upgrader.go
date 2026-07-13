@@ -211,9 +211,10 @@ func (u *Upgrader) findAssetURL(release *ReleaseInfo, assetName string) string {
 
 func (u *Upgrader) downloadFile(ctx context.Context, downloadURL, destPath, proxyURL string) error {
 	session := requests.NewSession().WithTimeout(10 * time.Minute)
-	if proxyURL != "" {
-		session = session.WithProxy(proxyURL)
-	}
+	// 显式设置代理（proxyURL 为空时清空）。requests 会话底层复用池化的 *http.Transport，
+	// 上一个使用者若设置过代理，Close() 归还时不会清除 tr.Proxy；此处不显式归零就会继承
+	// 陈旧代理，导致本应直连（含环回）的请求被误路由。始终显式设置以保证代理状态可预期。
+	session = session.WithProxy(proxyURL)
 	defer session.Close()
 
 	req, err := requests.NewGet(downloadURL).

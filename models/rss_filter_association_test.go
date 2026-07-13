@@ -351,3 +351,52 @@ func TestRSSFilterAssociationTableName(t *testing.T) {
 	assoc := RSSFilterAssociation{}
 	assert.Equal(t, "rss_filter_associations", assoc.TableName())
 }
+
+func TestRSSFilterAssociation_QueryHelpers(t *testing.T) {
+	db := newMemDB(t, &FilterRule{}, &RSSSubscription{}, &RSSFilterAssociation{})
+	assocDB := NewRSSFilterAssociationDB(db)
+
+	r1 := FilterRule{Name: "r1", Enabled: true, Priority: 1}
+	r2 := FilterRule{Name: "r2", Enabled: true, Priority: 2}
+	require.NoError(t, db.Create(&r1).Error)
+	require.NoError(t, db.Create(&r2).Error)
+
+	require.NoError(t, assocDB.SetFilterRulesForRSS(5, []uint{r1.ID, r2.ID}))
+
+	rssIDs, err := assocDB.GetByFilterRuleID(r1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []uint{5}, rssIDs)
+
+	rules, err := assocDB.GetFilterRulesForRSS(5)
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+	assert.Equal(t, "r1", rules[0].Name)
+
+	has, err := assocDB.HasAssociations(5)
+	require.NoError(t, err)
+	assert.True(t, has)
+
+	ok, err := assocDB.Exists(5, r1.ID)
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	require.NoError(t, assocDB.DeleteByFilterRuleID(r1.ID))
+	ok, err = assocDB.Exists(5, r1.ID)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestRSSFilterAssociation_GetFilterRuleIDsForRSS(t *testing.T) {
+	db := newMemDB(t, &FilterRule{}, &RSSSubscription{}, &RSSFilterAssociation{})
+	assocDB := NewRSSFilterAssociationDB(db)
+
+	require.NoError(t, assocDB.SetFilterRulesForRSS(7, []uint{11, 22}))
+	ids, err := assocDB.GetFilterRuleIDsForRSS(7)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []uint{11, 22}, ids)
+
+	require.NoError(t, assocDB.DeleteByRSSID(7))
+	ids, err = assocDB.GetFilterRuleIDsForRSS(7)
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}

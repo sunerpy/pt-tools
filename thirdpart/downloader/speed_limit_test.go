@@ -54,3 +54,14 @@ func TestAddTorrentOptions_EffectiveDownloadLimitBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestAddTorrentOptionsEffectiveLimits(t *testing.T) {
+	assert.Equal(t, int64(2048), AddTorrentOptions{UploadSpeedLimitKBs: 2}.EffectiveUploadLimitBytes())
+	assert.Equal(t, int64(3*1024*1024), AddTorrentOptions{UploadSpeedLimitMB: 3}.EffectiveUploadLimitBytes())
+	assert.Equal(t, int64(0), AddTorrentOptions{}.EffectiveUploadLimitBytes())
+	assert.Equal(t, int64(5*1024), AddTorrentOptions{DownloadSpeedLimitKBs: 5}.EffectiveDownloadLimitBytes())
+	assert.Equal(t, int64(0), AddTorrentOptions{}.EffectiveDownloadLimitBytes())
+
+	both := AddTorrentOptions{UploadSpeedLimitKBs: 2, UploadSpeedLimitMB: 3}
+	assert.Equal(t, int64(2048), both.EffectiveUploadLimitBytes(), "KBs takes priority over MB")
+}

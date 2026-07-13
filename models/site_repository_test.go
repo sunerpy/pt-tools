@@ -205,3 +205,129 @@ func TestSiteRepository_ListMethods(t *testing.T) {
 	assert.Len(t, enabledSites, 1)
 	assert.Equal(t, "site1", enabledSites[0].Name)
 }
+
+func TestSiteRepository_BatchUpdateAndByID(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+	repo := NewSiteRepository(db)
+
+	id1, err := repo.CreateSite(SiteData{Name: "a", AuthMethod: "cookie"})
+	require.NoError(t, err)
+	id2, err := repo.CreateSite(SiteData{Name: "b", AuthMethod: "cookie"})
+	require.NoError(t, err)
+
+	require.NoError(t, db.Create(&RSSSubscription{Name: "r", URL: "http://x", IntervalMinutes: 5, SiteID: id1}).Error)
+
+	rows, err := repo.BatchUpdateSiteDownloader([]uint{id1, id2}, 99)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), rows)
+
+	site, err := repo.GetSiteByID(id1)
+	require.NoError(t, err)
+	require.NotNil(t, site.DownloaderID)
+	assert.Equal(t, uint(99), *site.DownloaderID)
+
+	var rss RSSSubscription
+	require.NoError(t, db.Where("name = ?", "r").First(&rss).Error)
+	require.NotNil(t, rss.DownloaderID)
+	assert.Equal(t, uint(99), *rss.DownloaderID)
+}
+
+func TestSiteRepository_ListAndCredentials(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+	repo := NewSiteRepository(db)
+
+	_, err := repo.CreateSite(SiteData{Name: "a", AuthMethod: "cookie", Enabled: true})
+	require.NoError(t, err)
+	_, err = repo.CreateSite(SiteData{Name: "b", AuthMethod: "cookie", Enabled: false})
+	require.NoError(t, err)
+
+	all, err := repo.ListSites()
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	enabled, err := repo.ListEnabledSites()
+	require.NoError(t, err)
+	require.Len(t, enabled, 1)
+	assert.Equal(t, "a", enabled[0].Name)
+
+	exists, err := repo.SiteExistsByName("a")
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	on := true
+	require.NoError(t, repo.UpdateSiteCredentials("a", &on, "api_key", "ck", "ak", "https://api", "pk"))
+	site, err := repo.GetSiteByName("a")
+	require.NoError(t, err)
+	assert.Equal(t, "api_key", site.AuthMethod)
+	assert.Equal(t, "ak", site.APIKey)
+	assert.Equal(t, "pk", site.Passkey)
+
+	require.NoError(t, repo.UpdateSiteCredentials("brand-new", nil, "cookie", "c", "", "", ""))
+	brand, err := repo.GetSiteByName("brand-new")
+	require.NoError(t, err)
+	assert.True(t, brand.IsBuiltin)
+
+	require.NoError(t, repo.DeleteSite("b"))
+	exists, err = repo.SiteExistsByName("b")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	_, err = repo.CreateSite(SiteData{Name: "a", AuthMethod: "cookie"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "已存在")
+
+	_, err = repo.CreateSite(SiteData{AuthMethod: "cookie"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "站点名称不能为空")
+}
+
+func TestSiteRepository_UpdateDownloaderMethods(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+	repo := NewSiteRepository(db)
+
+	id, err := repo.CreateSite(SiteData{Name: "s1", AuthMethod: "cookie"})
+	require.NoError(t, err)
+
+	dlID := uint(42)
+	require.NoError(t, repo.UpdateSiteDownloader("s1", &dlID))
+	site, err := repo.GetSiteByName("s1")
+	require.NoError(t, err)
+	require.NotNil(t, site.DownloaderID)
+	assert.Equal(t, dlID, *site.DownloaderID)
+
+	dlID2 := uint(99)
+	require.NoError(t, repo.UpdateSiteDownloaderByID(id, &dlID2))
+	site, err = repo.GetSiteByID(id)
+	require.NoError(t, err)
+	require.NotNil(t, site.DownloaderID)
+	assert.Equal(t, dlID2, *site.DownloaderID)
+
+	// clear downloader
+	require.NoError(t, repo.UpdateSiteDownloader("s1", nil))
+	site, _ = repo.GetSiteByName("s1")
+	assert.Nil(t, site.DownloaderID)
+
+	// empty batch → 0 rows, no error
+	rows, err := repo.BatchUpdateSiteDownloader(nil, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), rows)
+}
+
+func TestSiteRepository_NotFoundPaths(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{})
+	repo := NewSiteRepository(db)
+
+	_, err := repo.GetSiteByName("nope")
+	assert.Error(t, err)
+	_, err = repo.GetSiteByID(12345)
+	assert.Error(t, err)
+
+	exists, err := repo.SiteExistsByName("nope")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// CreateSite empty auth method
+	_, err = repo.CreateSite(SiteData{Name: "x"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "认证方式不能为空")
+}

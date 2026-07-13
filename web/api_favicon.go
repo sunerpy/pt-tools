@@ -195,9 +195,11 @@ func (fs *FaviconService) fetchAndSave(siteID, siteName, faviconURL string) erro
 	defer cancel()
 
 	session := requests.NewSession().WithTimeout(30 * time.Second)
-	if proxyURL := httpclient.ResolveProxyFromEnvironment(faviconURL); proxyURL != "" {
-		session = session.WithProxy(proxyURL)
-	}
+	// 始终显式设置代理（即使为空）。requests 库的 Session 从全局 transport 池
+	// 复用 *http.Transport，若仅在有代理时调用 WithProxy，池中残留的代理配置
+	// 会污染后续对 NO_PROXY 主机（如 127.0.0.1）的请求，导致其错误地走代理。
+	// 显式传入解析结果（空字符串会清空代理）可保证每次请求的代理配置与当前目标一致。
+	session = session.WithProxy(httpclient.ResolveProxyFromEnvironment(faviconURL))
 	defer func() { _ = session.Close() }()
 
 	req, err := requests.NewGet(faviconURL).Build()

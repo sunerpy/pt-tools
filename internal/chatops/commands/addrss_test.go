@@ -1,7 +1,11 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package commands
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -581,4 +585,215 @@ func seedAddrssSite(t *testing.T, db *models.TorrentDB, name string) models.Site
 	site := models.SiteSetting{Name: name, Enabled: true, AuthMethod: "cookie", APIUrl: "https://" + name + ".example"}
 	require.NoError(t, db.DB.Create(&site).Error)
 	return site
+}
+
+func TestAddrssHandler_ServiceGuards(t *testing.T) {
+	t.Run("no sessions", func(t *testing.T) {
+		setupServices(t, &Services{})
+		reply, err := handler(t, "addrss")(context.Background(), nil, chatops.Source{ReplyLang: "zh"})
+		require.NoError(t, err)
+		assert.Contains(t, reply.Text, "会话存储未初始化")
+	})
+	t.Run("no site service", func(t *testing.T) {
+		s := chatops.NewSessionStore()
+		t.Cleanup(s.Stop)
+		setupServices(t, &Services{Sessions: s})
+		reply, err := handler(t, "addrss")(context.Background(), nil, chatops.Source{ReplyLang: "zh"})
+		require.NoError(t, err)
+		assert.Contains(t, reply.Text, "站点服务不可用")
+	})
+	t.Run("no rss wizard", func(t *testing.T) {
+		s := chatops.NewSessionStore()
+		t.Cleanup(s.Stop)
+		setupServices(t, &Services{Sessions: s, Site: &mockSiteService{}})
+		reply, err := handler(t, "addrss")(context.Background(), nil, chatops.Source{ReplyLang: "zh"})
+		require.NoError(t, err)
+		assert.Contains(t, reply.Text, "RSS 向导服务不可用")
+	})
+}
+
+func TestHandleAddrssShortcut_ErrorPaths(t *testing.T) {
+	newHarness := func(t *testing.T, wizard *addrssFakeRSSWizard) *addrssHarness {
+		return newAddrssHarness(t, "telegram", true, addrssEnabledSites(), wizard)
+	}
+
+	t.Run("too few segments", func(t *testing.T) {
+		h := newHarness(t, newAddrssFakeRSSWizard())
+		reply := h.send(t, "/addrss hdsky | onlyname")
+		assert.Contains(t, reply.Text, "快捷格式有误")
+	})
+
+	t.Run("unknown site", func(t *testing.T) {
+		h := newHarness(t, newAddrssFakeRSSWizard())
+		reply := h.send(t, "/addrss nosite | feed | https://rss.example/x.xml")
+		assert.Contains(t, reply.Text, "站点不存在或未启用")
+	})
+
+	t.Run("invalid url", func(t *testing.T) {
+		h := newHarness(t, newAddrssFakeRSSWizard())
+		reply := h.send(t, "/addrss hdsky | feed | not-a-url")
+		assert.Contains(t, reply.Text, "RSS URL 无效")
+	})
+
+	t.Run("unknown downloader", func(t *testing.T) {
+		h := newHarness(t, newAddrssFakeRSSWizard())
+		reply := h.send(t, "/addrss hdsky | feed | https://rss.example/x.xml | nope-dl")
+		assert.Contains(t, reply.Text, "下载器不存在")
+	})
+
+	t.Run("happy path with named downloader", func(t *testing.T) {
+		wizard := newAddrssFakeRSSWizard()
+		h := newHarness(t, wizard)
+		reply := h.send(t, "/addrss hdsky | feed | https://rss.example/x.xml | tr-backup")
+		assert.Contains(t, reply.Text, "已添加 RSS 订阅")
+		calls := wizard.calls()
+		require.Len(t, calls, 1)
+		require.NotNil(t, calls[0].entry.DownloaderID)
+		assert.Equal(t, uint(23), *calls[0].entry.DownloaderID)
+	})
+
+	t.Run("happy path default downloader", func(t *testing.T) {
+		wizard := newAddrssFakeRSSWizard()
+		h := newHarness(t, wizard)
+		reply := h.send(t, "/addrss hdsky | feed | https://rss.example/x.xml | default")
+		assert.Contains(t, reply.Text, "已添加 RSS 订阅")
+		calls := wizard.calls()
+		require.Len(t, calls, 1)
+		assert.Nil(t, calls[0].entry.DownloaderID, "default keyword should not pin a downloader")
+	})
+
+	t.Run("append error", func(t *testing.T) {
+		wizard := newAddrssFakeRSSWizard()
+		wizard.appendErr = errors.New("db down")
+		h := newHarness(t, wizard)
+		reply := h.send(t, "/addrss hdsky | feed | https://rss.example/x.xml")
+		assert.Contains(t, reply.Text, "添加 RSS 订阅失败")
+	})
+}
+
+func TestHandleAddrssPickSite_ListError(t *testing.T) {
+	s := chatops.NewSessionStore()
+	t.Cleanup(s.Stop)
+	setupServices(t, &Services{Site: &errSiteService{listErr: errors.New("db down")}, RSSWizard: newAddrssFakeRSSWizard(), Sessions: s})
+
+	reply, err := handleAddrssPickSite(context.Background(), chatops.Source{ReplyLang: "zh"}, addrssWizardState{Step: addrssStepPickSite}, "hdsky")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "查询站点失败")
+}
+
+func TestHandleAddrssRSSName_Empty(t *testing.T) {
+	s := chatops.NewSessionStore()
+	t.Cleanup(s.Stop)
+	setupServices(t, &Services{Site: &mockSiteService{sites: addrssEnabledSites()}, RSSWizard: newAddrssFakeRSSWizard(), Sessions: s})
+
+	reply, err := handleAddrssRSSName(context.Background(),
+		chatops.Source{ReplyLang: "zh", ChannelType: "tg", ChannelUserID: "u"},
+		addrssWizardState{Step: addrssStepRSSName, Site: "hdsky"}, "")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "RSS 订阅名不能为空")
+}
+
+func TestHandleAddrssFilterMode_Invalid(t *testing.T) {
+	s := chatops.NewSessionStore()
+	t.Cleanup(s.Stop)
+	setupServices(t, &Services{Site: &mockSiteService{sites: addrssEnabledSites()}, RSSWizard: newAddrssFakeRSSWizard(), Sessions: s})
+
+	reply, err := handleAddrssFilterMode(context.Background(),
+		chatops.Source{ReplyLang: "zh", ChannelType: "tg", ChannelUserID: "u"},
+		addrssWizardState{Step: addrssStepFilterMode, Site: "hdsky"}, "bogus_mode")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "过滤模式无效")
+}
+
+func TestHandleAddrssMaxNotify_Invalid(t *testing.T) {
+	s := chatops.NewSessionStore()
+	t.Cleanup(s.Stop)
+	setupServices(t, &Services{Site: &mockSiteService{sites: addrssEnabledSites()}, RSSWizard: newAddrssFakeRSSWizard(), Sessions: s})
+
+	reply, err := handleAddrssMaxNotify(context.Background(),
+		chatops.Source{ReplyLang: "zh", ChannelType: "tg", ChannelUserID: "u"},
+		addrssWizardState{Step: addrssStepMaxNotify, Site: "hdsky"}, "-3")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "每小时通知上限")
+}
+
+func TestHandleAddrssConfirm_Cancel(t *testing.T) {
+	setupServices(t, &Services{RSSWizard: newAddrssFakeRSSWizard()})
+	reply, err := handleAddrssConfirm(context.Background(), chatops.Source{ReplyLang: "zh"},
+		addrssWizardState{Step: addrssStepConfirm}, "no")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "已取消添加")
+}
+
+func TestHandleAddrssConfirm_AppendError(t *testing.T) {
+	wizard := newAddrssFakeRSSWizard()
+	wizard.appendErr = errors.New("db down")
+	setupServices(t, &Services{RSSWizard: wizard})
+	reply, err := handleAddrssConfirm(context.Background(), chatops.Source{ReplyLang: "zh"},
+		addrssWizardState{Step: addrssStepConfirm, Site: "hdsky", RSSName: "x", RSSURL: "https://x/f"}, "YES")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "添加 RSS 订阅失败")
+}
+
+func TestResolveDownloaderSelection_Branches(t *testing.T) {
+	dls := []DownloaderOption{{ID: 22, Name: "qb-main"}, {ID: 23, Name: "tr-backup"}}
+
+	got, ok := resolveDownloaderSelection("qb-main", dls)
+	require.True(t, ok)
+	assert.Equal(t, uint(22), got.ID)
+
+	got, ok = resolveDownloaderSelection("23", dls)
+	require.True(t, ok)
+	assert.Equal(t, uint(23), got.ID)
+
+	got, ok = resolveDownloaderSelection("2", dls)
+	require.True(t, ok)
+	assert.Equal(t, uint(23), got.ID, "positional index resolves to 2nd downloader")
+
+	_, ok = resolveDownloaderSelection("", dls)
+	assert.False(t, ok)
+
+	_, ok = resolveDownloaderSelection("nope", dls)
+	assert.False(t, ok)
+}
+
+func TestValidAddrssRSSURL_Branches(t *testing.T) {
+	assert.False(t, validAddrssRSSURL(""))
+	assert.False(t, validAddrssRSSURL("ftp://host/x"))
+	assert.False(t, validAddrssRSSURL("http://"))
+	assert.False(t, validAddrssRSSURL("https://rss.m-team.xxx"))
+	assert.True(t, validAddrssRSSURL("https://rss.example.com/feed.xml"))
+	assert.True(t, validAddrssRSSURL("http://host:9090/rss"))
+}
+
+func TestDuplicateRSSURL_Branches(t *testing.T) {
+	t.Run("nil DB returns false", func(t *testing.T) {
+		setupServices(t, &Services{})
+		dup, err := duplicateRSSURL(context.Background(), "hdsky", "https://x/feed")
+		require.NoError(t, err)
+		assert.False(t, dup)
+	})
+
+	t.Run("detects duplicate against seeded DB", func(t *testing.T) {
+		db := setupAddrssGlobalDB(t)
+		site := seedAddrssSite(t, db, "hdsky")
+		require.NoError(t, db.DB.Create(&models.RSSSubscription{
+			SiteID: site.ID, Name: "feed", URL: "https://rss.example/dup.xml", IntervalMinutes: 5,
+		}).Error)
+
+		dup, err := duplicateRSSURL(context.Background(), "hdsky", "https://rss.example/dup.xml")
+		require.NoError(t, err)
+		assert.True(t, dup)
+
+		notDup, err := duplicateRSSURL(context.Background(), "hdsky", "https://rss.example/other.xml")
+		require.NoError(t, err)
+		assert.False(t, notDup)
+	})
+
+	t.Run("unknown site returns false", func(t *testing.T) {
+		setupAddrssGlobalDB(t)
+		dup, err := duplicateRSSURL(context.Background(), "no-such-site", "https://x/feed")
+		require.NoError(t, err)
+		assert.False(t, dup)
+	})
 }

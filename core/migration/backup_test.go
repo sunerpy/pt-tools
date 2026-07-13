@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/sunerpy/pt-tools/models"
 )
 
 // TestDumpTableJSONNonEmpty verifies backup of non-empty table
@@ -164,4 +166,31 @@ func TestDumpTableJSONNonExistentTable(t *testing.T) {
 	// Verify no file was created
 	_, err = os.Stat(path)
 	assert.Error(t, err, "no file should be created on error")
+}
+
+func TestDumpTableJSON_DefaultDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}))
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "s", AuthMethod: "cookie"}).Error)
+
+	path, err := DumpTableJSON(db, "site_settings", "", 8, 9)
+	require.NoError(t, err)
+	require.FileExists(t, path)
+	assert.Contains(t, path, filepath.Join(".pt-tools", "backups"))
+}
+
+func TestDumpTableJSON_QueryError(t *testing.T) {
+	db := closedMigDB(t)
+	_, err := DumpTableJSON(db, "site_settings", t.TempDir(), 8, 9)
+	require.Error(t, err)
+}
+
+func TestDumpTableJSON_MkdirError(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := DumpTableJSON(db, "site_settings", filepath.Join(os.DevNull, "nope"), 8, 9)
+	require.Error(t, err)
 }

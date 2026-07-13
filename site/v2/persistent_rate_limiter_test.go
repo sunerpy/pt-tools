@@ -247,3 +247,19 @@ func TestPersistentRateLimiter_Reset(t *testing.T) {
 	remaining, _ := limiter.Stats()
 	assert.Equal(t, 5, remaining)
 }
+
+func TestNewPersistentRateLimiterFromRPS_Defaults(t *testing.T) {
+	l := NewPersistentRateLimiterFromRPS(nil, "site", 0, 0) // defaults kick in
+	require.NotNil(t, l)
+	d := l.timeUntilNextWindow()
+	assert.GreaterOrEqual(t, d, time.Duration(0))
+}
+
+func TestNewPersistentRateLimiterFromRPS_Values(t *testing.T) {
+	l := NewPersistentRateLimiterFromRPS(nil, "site", 2.0, 5)
+	require.NotNil(t, l)
+}
+
+// ---------------------------------------------------------------------------
+// http_client.go — DoRequest methods, HandleQBittorrentAuthWithRequests
+// ---------------------------------------------------------------------------

@@ -1,22 +1,836 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
+
+func TestUpdateAllPushedTasksProgress_MarksCompletedFull(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-done"] = downloader.Torrent{
+		ID: "task-done", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 100,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "d1", Title: "Done", IsPushed: &pushed,
+		DownloaderTaskID: "task-done", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+
+	m.updateAllPushedTasksProgress()
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, ti.ID).Error)
+	assert.True(t, got.IsCompleted)
+	assert.InDelta(t, 100.0, got.Progress, 0.5)
+}
+
+func TestUpdateAllPushedTasksProgress_ProgressOnlyUpdate(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-part"] = downloader.Torrent{
+		ID: "task-part", Progress: 0.4, State: downloader.TorrentDownloading, TotalSize: 100,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "d2", Title: "Part", IsPushed: &pushed,
+		DownloaderTaskID: "task-part", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+
+	m.updateAllPushedTasksProgress()
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, ti.ID).Error)
+	assert.False(t, got.IsCompleted)
+	assert.InDelta(t, 40.0, got.Progress, 0.5)
+	assert.Equal(t, 1, got.CheckCount)
+}
+
+func TestArchiveOldTorrents_ArchivesPausedAged(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	old := time.Now().AddDate(0, 0, -40)
+	pushed := true
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "old1", Title: "OldPaused",
+		IsPausedBySystem: true, IsPushed: &pushed, CreatedAt: old,
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+
+	m.archiveOldTorrents()
+
+	var remaining int64
+	require.NoError(t, db.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "old1").Count(&remaining).Error)
+	assert.EqualValues(t, 0, remaining)
+
+	var archived int64
+	require.NoError(t, db.DB.Model(&models.TorrentInfoArchive{}).Where("torrent_id = ?", "old1").Count(&archived).Error)
+	assert.EqualValues(t, 1, archived)
+}
+
+func TestHandleFreeEnded_PauseSuccessMarksPaused(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-ps"] = downloader.Torrent{
+		ID: "task-ps", Progress: 0.5, State: downloader.TorrentDownloading, TotalSize: 100,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ps1", Title: "PS", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-ps", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.True(t, got.IsPausedBySystem)
+	assert.Contains(t, fake.pausedIDs, "task-ps")
+}
+
+func TestGetDownloader_FallbackToDownloaderIDLookup(t *testing.T) {
+	fake := newSchedFakeDownloader("qb-bound")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	ds := models.DownloaderSetting{Name: "qb-bound", Type: "qbittorrent", URL: "http://x", Enabled: true}
+	require.NoError(t, db.DB.Create(&ds).Error)
+
+	// DownloaderName empty → falls to DownloaderID lookup → resolves qb-bound.
+	tor := models.TorrentInfo{SiteName: "s", TorrentID: "gd", DownloaderID: &ds.ID}
+	dl, err := m.getDownloader(tor)
+	require.NoError(t, err)
+	assert.Equal(t, "qb-bound", dl.GetName())
+}
+
+func TestGetDownloader_NilManager(t *testing.T) {
+	m := &FreeEndMonitor{}
+	_, err := m.getDownloader(models.TorrentInfo{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "下载器管理器未初始化")
+}
+
+func TestUpdateAllPushedTasksProgress_SkipsMissingDownloaderName(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	pushed := true
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "nn", Title: "NoName", IsPushed: &pushed,
+		DownloaderTaskID: "task-x", DownloaderName: "",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+	require.NotPanics(t, func() { m.updateAllPushedTasksProgress() })
+}
+
+func TestCheckTorrentCompletion_Error(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getErr = errSendBoom
+	m, _ := newFreeEndMonitorWithFake(t, fake)
+	_, _, _, err := m.checkTorrentCompletion(context.Background(), fake, "missing")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "获取种子信息")
+}
+
+func TestUpdateAllMonitoredProgress_MarksCompleted(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-mc"] = downloader.Torrent{
+		ID: "task-mc", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 100,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "mc", Title: "MC", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-mc", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.updateAllMonitoredProgress()
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.True(t, got.IsCompleted)
+}
+
+func TestUpdateAllMonitoredProgress_GetTorrentGenericError(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getErr = errSendBoom
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ge", Title: "GE", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-ge", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	require.NotPanics(t, func() { m.updateAllMonitoredProgress() })
+}
+
+func TestUpdateAllPushedTasksProgress_GetTorrentGenericError(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getErr = errSendBoom
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "pge", Title: "PGE", IsPushed: &pushed,
+		DownloaderTaskID: "task-pge", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+	require.NotPanics(t, func() { m.updateAllPushedTasksProgress() })
+}
+
+func TestRescheduleMissingFutureTorrents_SkipsAlreadyPending(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(2 * time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "rsp", Title: "RSP", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-rsp", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	// Schedule once so it's already pending; a second reconcile must skip it.
+	m.rescheduleMissingFutureTorrents(time.Now())
+	m.rescheduleMissingFutureTorrents(time.Now())
+	m.mu.Lock()
+	_, exists := m.pendingTasks[tor.ID]
+	m.mu.Unlock()
+	assert.True(t, exists)
+	m.CancelTorrent(tor.ID)
+}
+
+func TestScheduleTorrent_AlreadyPendingIgnored(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(2 * time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "sp", Title: "SP", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-sp", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.ScheduleTorrent(tor)
+	// Second call hits the already-pending early return.
+	m.ScheduleTorrent(tor)
+	m.mu.Lock()
+	_, exists := m.pendingTasks[tor.ID]
+	m.mu.Unlock()
+	assert.True(t, exists)
+	m.CancelTorrent(tor.ID)
+}
+
+func TestUpdateAllPushedTasksProgress_DownloaderResolveFails(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	// DownloaderName points at a name the manager cannot resolve; getDownloader
+	// falls through to default (fake) but with a mismatched cache key path.
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "rf", Title: "RF", IsPushed: &pushed,
+		DownloaderTaskID: "missing-task", DownloaderName: "unknown-dl",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+	// fake has no such torrent id → ErrTorrentNotFound → markRemovedFromDownloader.
+	require.NotPanics(t, func() { m.updateAllPushedTasksProgress() })
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, ti.ID).Error)
+	assert.True(t, got.IsCompleted)
+}
+
+func TestUpdateAllPushedTasksProgress_ProgressUpdate(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-pp"] = downloader.Torrent{
+		ID: "task-pp", Progress: 0.7, State: downloader.TorrentDownloading, TotalSize: 100,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "pp", Title: "PP", IsPushed: &pushed,
+		DownloaderTaskID: "task-pp", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+	m.updateAllPushedTasksProgress()
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, ti.ID).Error)
+	assert.InDelta(t, 70.0, got.Progress, 0.5)
+}
+
+func closedFreeEndMonitor(t *testing.T) *FreeEndMonitor {
+	t.Helper()
+	global.InitLogger(zap.NewNop())
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}, &models.SettingsGlobal{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	return NewFreeEndMonitor(db, downloader.NewDownloaderManager())
+}
+
+func TestMarkFuncs_DBErrorNoPanic(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	tor := models.TorrentInfo{Title: "T"}
+	tor.ID = 1
+	require.NotPanics(t, func() {
+		m.markCompleted(tor, 100)
+		m.markPaused(tor, 50, 100, false)
+		m.markAutoDeleted(tor, 50, 100, true)
+		m.markRemovedFromDownloader(tor)
+	})
+}
+
+func TestUpdateAllMonitoredProgress_QueryError(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	require.NotPanics(t, func() { m.updateAllMonitoredProgress() })
+}
+
+func TestUpdateAllPushedTasksProgress_QueryError(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	require.NotPanics(t, func() { m.updateAllPushedTasksProgress() })
+}
+
+func TestCheckAndProcessExpiredTorrents_QueryError(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	require.NotPanics(t, func() { m.checkAndProcessExpiredTorrents() })
+}
+
+func TestArchiveOldTorrents_QueryError(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	require.NotPanics(t, func() { m.archiveOldTorrents() })
+}
+
+func TestLoadPendingTasksFromDB_QueryError(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	require.Error(t, m.loadPendingTasksFromDB())
+}
+
+func TestHandleFreeEndedTorrent_LockAcquireError(t *testing.T) {
+	m := closedFreeEndMonitor(t)
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{Title: "T", PauseOnFreeEnd: true, FreeEndTime: &future, DownloaderTaskID: "x"}
+	tor.ID = 5
+	require.NotPanics(t, func() { m.handleFreeEndedTorrent(tor) })
+}
+
+var _ = context.Background
+
+func newFreeEndMonitorWithFake(t *testing.T, fake *schedFakeDownloader) (*FreeEndMonitor, *models.TorrentDB) {
+	t.Helper()
+	db := setupTestDB(t)
+	dm := downloader.NewDownloaderManager()
+	registerFakeDownloader(t, dm, fake, true)
+	_, err := dm.GetDownloader(fake.name)
+	require.NoError(t, err)
+	return NewFreeEndMonitor(db.DB, dm), db
+}
+
+func TestHandleFreeEnded_AutoDelete(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	// Enable auto-delete.
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
+	}).Error)
+
+	// Incomplete torrent in downloader.
+	fake.torrentByID["task-del"] = downloader.Torrent{
+		ID: "task-del", Progress: 0.4, State: downloader.TorrentDownloading, TotalSize: 500,
+	}
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ad1", Title: "AutoDel", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-del", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	require.Len(t, fake.removedSingle, 1)
+	assert.Equal(t, "task-del", fake.removedSingle[0])
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsPausedBySystem)
+	assert.Equal(t, "免费期结束，自动删除（未完成）", updated.PauseReason)
+	assert.Empty(t, updated.DownloaderTaskID, "auto-deleted clears downloader_task_id")
+}
+
+func TestHandleFreeEnded_AutoDelete_NotFoundTolerated(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
+	}).Error)
+
+	fake.torrentByID["task-nf"] = downloader.Torrent{
+		ID: "task-nf", Progress: 0.3, State: downloader.TorrentDownloading,
+	}
+	fake.removeErr = downloader.ErrTorrentNotFound
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ad2", Title: "AutoDelNF", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-nf", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsPausedBySystem, "ErrTorrentNotFound still marks auto-deleted")
+}
+
+func TestHandleFreeEnded_AutoDelete_RealError_Retries(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
+	}).Error)
+
+	fake.torrentByID["task-err"] = downloader.Torrent{
+		ID: "task-err", Progress: 0.3, State: downloader.TorrentDownloading,
+	}
+	fake.removeErr = errors.New("delete boom")
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ad3", Title: "AutoDelErr", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-err", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.False(t, updated.IsPausedBySystem)
+	assert.Greater(t, updated.RetryCount, 0, "delete error triggers retry")
+}
+
+func TestHandleFreeEnded_GetDownloaderError_Retries(t *testing.T) {
+	db := setupTestDB(t)
+	// no downloader registered → getDownloader returns error
+	m := NewFreeEndMonitor(db.DB, downloader.NewDownloaderManager())
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "gd1", Title: "NoDL", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-x", DownloaderName: "missing",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.Greater(t, updated.RetryCount, 0)
+	assert.Contains(t, updated.LastError, "获取下载器失败")
+}
+
+func TestHandleFreeEnded_CheckCompletionError_Retries(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getErr = errors.New("get torrent boom")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "cc1", Title: "CheckErr", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-cc", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.Greater(t, updated.RetryCount, 0)
+	assert.Contains(t, updated.LastError, "检查完成状态失败")
+}
+
+func TestHandleFreeEnded_PauseError_Retries(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.pauseErr = errors.New("pause boom")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	fake.torrentByID["task-pe"] = downloader.Torrent{
+		ID: "task-pe", Progress: 0.5, State: downloader.TorrentDownloading,
+	}
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "pe1", Title: "PauseErr", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-pe", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.False(t, updated.IsPausedBySystem)
+	assert.Greater(t, updated.RetryCount, 0)
+}
+
+func TestHandleFreeEnded_AlreadyProcessed_Skips(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ap1", Title: "Already", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-ap", DownloaderName: "qb1",
+		IsPausedBySystem: true, // already paused → processing lock RowsAffected==0
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.handleFreeEndedTorrent(tor)
+	// Nothing to assert beyond no panic and no downloader interaction.
+	assert.Empty(t, fake.pausedIDs)
+	assert.Empty(t, fake.removedSingle)
+}
+
+func TestExportedTestHandleFreeEndedTorrent(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	fake.torrentByID["task-w"] = downloader.Torrent{
+		ID: "task-w", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 100,
+	}
+	freeEnd := time.Now().Add(-time.Minute)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "w1", Title: "Wrapper", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-w", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	require.NotPanics(t, func() { m.TestHandleFreeEndedTorrent(tor) })
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted)
+}
+
+func TestUpdateAllPushed_MarksRemovedWhenNotFound(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getErr = downloader.ErrTorrentNotFound
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "rm1", Title: "Removed", IsPushed: &pushed,
+		DownloaderTaskID: "task-gone", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.updateAllPushedTasksProgress()
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted, "removed-from-downloader marks completed")
+	assert.Empty(t, updated.DownloaderTaskID)
+	assert.Equal(t, "种子已从下载器中删除", updated.LastError)
+}
+
+func TestUpdateAllPushed_SkipsMissingDownloaderName(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "sk1", Title: "NoName", IsPushed: &pushed,
+		DownloaderTaskID: "task-x", DownloaderName: "",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	require.NotPanics(t, func() { m.updateAllPushedTasksProgress() })
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.Equal(t, 0, updated.CheckCount, "row without downloader name is skipped")
+}
+
+func TestUpdateAllMonitored_MarksRemovedWhenNotFound(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.getErr = downloader.ErrTorrentNotFound
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	freeEnd := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "mm1", Title: "MonRemoved", PauseOnFreeEnd: true,
+		FreeEndTime: &freeEnd, DownloaderTaskID: "task-gone", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.updateAllMonitoredProgress()
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted)
+}
+
+func TestGetDownloader_FallbackToDownloaderID(t *testing.T) {
+	fake := newSchedFakeDownloader("qb-byid")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	dl := models.DownloaderSetting{Name: "qb-byid", Type: "qbittorrent", Enabled: true}
+	require.NoError(t, db.DB.Create(&dl).Error)
+
+	// DownloaderName empty → falls through to DownloaderID branch.
+	got, err := m.getDownloader(models.TorrentInfo{DownloaderID: &dl.ID})
+	require.NoError(t, err)
+	assert.Equal(t, "qb-byid", got.GetName())
+}
+
+func TestGetDownloader_FallbackToDefault(t *testing.T) {
+	fake := newSchedFakeDownloader("qb-default")
+	m, _ := newFreeEndMonitorWithFake(t, fake)
+
+	got, err := m.getDownloader(models.TorrentInfo{})
+	require.NoError(t, err)
+	assert.Equal(t, "qb-default", got.GetName())
+}
+
+func TestMarkRemovedFromDownloader(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "d1", Title: "Del", DownloaderTaskID: "task",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.markRemovedFromDownloader(tor)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted)
+	assert.Empty(t, updated.DownloaderTaskID)
+}
+
+func TestMarkAutoDeleted_AdvancedReason(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	tor := models.TorrentInfo{SiteName: "s", TorrentID: "adv1", Title: "Adv"}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.markAutoDeleted(tor, 33.3, 999, true)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.Equal(t, "免费期临近结束，自动删除（未完成）", updated.PauseReason)
+	assert.True(t, updated.IsPausedBySystem)
+}
+
+func TestIsAutoDeleteEnabled(t *testing.T) {
+	db := setupTestDB(t)
+	m := NewFreeEndMonitor(db.DB, downloader.NewDownloaderManager())
+	assert.False(t, m.isAutoDeleteEnabled(), "no config row → false")
+
+	require.NoError(t, db.DB.Create(&models.SettingsGlobal{
+		DownloadDir: t.TempDir(), AutoDeleteOnFreeEnd: true,
+	}).Error)
+	assert.True(t, m.isAutoDeleteEnabled())
+}
+
+func TestLoadPendingTasksFromDB_FuturePastSplit(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-future"] = downloader.Torrent{
+		ID: "task-future", Progress: 0.5, State: downloader.TorrentDownloading,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	futureTor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "fut", Title: "Future", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-future", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&futureTor).Error)
+
+	require.NoError(t, m.loadPendingTasksFromDB())
+
+	m.mu.Lock()
+	_, scheduled := m.pendingTasks[futureTor.ID]
+	m.mu.Unlock()
+	assert.True(t, scheduled, "future torrent should be scheduled in pendingTasks")
+
+	// clean up timers
+	m.CancelTorrent(futureTor.ID)
+}
+
+func TestLoadPendingTasksFromDB_PastDueFires(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	// Torrent seeding at 100% → handleFreeEndedTorrent marks completed.
+	fake.torrentByID["task-past"] = downloader.Torrent{
+		ID: "task-past", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 10,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	past := time.Now().Add(-time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "past", Title: "Past", PauseOnFreeEnd: true,
+		FreeEndTime: &past, DownloaderTaskID: "task-past", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	require.NoError(t, m.loadPendingTasksFromDB())
+
+	// The past-due branch spawns a goroutine calling handleFreeEndedTorrent;
+	// wait for the DB to reflect completion.
+	deadline := time.Now().Add(2 * time.Second)
+	var updated models.TorrentInfo
+	for time.Now().Before(deadline) {
+		require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+		if updated.IsCompleted {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	assert.True(t, updated.IsCompleted, "past-due torrent should be processed to completion")
+}
+
+func TestArchiveOldTorrents_MovesAged(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	old := time.Now().AddDate(0, 0, -archiveRetentionDays-1)
+	pushed := true
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "arch1", Title: "Aged", IsCompleted: true,
+		IsPushed: &pushed, DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+	// Force created_at into the past (GORM sets it to now on create).
+	require.NoError(t, db.DB.Model(&models.TorrentInfo{}).Where("id = ?", tor.ID).
+		Update("created_at", old).Error)
+
+	m.archiveOldTorrents()
+
+	var liveCount int64
+	db.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "arch1").Count(&liveCount)
+	assert.Equal(t, int64(0), liveCount, "aged row removed from live table")
+
+	var archCount int64
+	db.DB.Model(&models.TorrentInfoArchive{}).Where("torrent_id = ?", "arch1").Count(&archCount)
+	assert.Equal(t, int64(1), archCount, "aged row moved to archive")
+}
+
+func TestArchiveOldTorrents_NothingToArchive(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, _ := newFreeEndMonitorWithFake(t, fake)
+	require.NotPanics(t, func() { m.archiveOldTorrents() })
+}
+
+func TestUpdateAllPushed_MarksCompleted(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-done"] = downloader.Torrent{
+		ID: "task-done", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 555,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	pushed := true
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "up1", Title: "Done", IsPushed: &pushed,
+		DownloaderTaskID: "task-done", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.updateAllPushedTasksProgress()
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted)
+	assert.Greater(t, updated.CheckCount, 0)
+}
+
+func TestUpdateAllMonitored_MarksCompleted(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-mon"] = downloader.Torrent{
+		ID: "task-mon", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 100,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "mon1", Title: "MonDone", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-mon", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.updateAllMonitoredProgress()
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted)
+}
+
+func TestScheduleTaskLocked_PastDeadlineFires(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-imm"] = downloader.Torrent{
+		ID: "task-imm", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 10,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	past := time.Now().Add(-time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "imm", Title: "Imm", PauseOnFreeEnd: true,
+		FreeEndTime: &past, DownloaderTaskID: "task-imm", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.mu.Lock()
+	m.scheduleTaskLockedWithAdvance(tor, 0)
+	m.mu.Unlock()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var updated models.TorrentInfo
+	for time.Now().Before(deadline) {
+		require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+		if updated.IsCompleted {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	assert.True(t, updated.IsCompleted, "past-deadline timer should fire ~immediately")
+}
 
 func setupTestDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
@@ -1273,4 +2087,199 @@ func TestRescheduleMissingFutureTorrents_RespectsBatchLimit(t *testing.T) {
 	}
 	assert.LessOrEqual(t, scheduled, progressUpdateBatchSize, "scheduled count must not exceed batch cap")
 	assert.Equal(t, n, scheduled, "a set under the cap should all be scheduled")
+}
+
+func TestScheduleTaskLocked_NilFreeEndTime(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, _ := newFreeEndMonitorWithFake(t, fake)
+
+	m.mu.Lock()
+	before := len(m.pendingTasks)
+	m.scheduleTaskLockedWithAdvance(models.TorrentInfo{ID: 1, FreeEndTime: nil}, 0)
+	after := len(m.pendingTasks)
+	m.mu.Unlock()
+
+	assert.Equal(t, before, after, "nil FreeEndTime must not add a pending task")
+}
+
+func TestMarkCompleted_Direct(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	tor := models.TorrentInfo{SiteName: "s", TorrentID: "mc1", Title: "MC"}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.markCompleted(tor, 4242)
+
+	var updated models.TorrentInfo
+	require.NoError(t, db.DB.First(&updated, tor.ID).Error)
+	assert.True(t, updated.IsCompleted)
+	assert.InDelta(t, 100.0, updated.Progress, 0.01)
+	assert.Equal(t, int64(4242), updated.TorrentSize)
+}
+
+func TestCancelTorrent_RemovesPending(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-cancel"] = downloader.Torrent{
+		ID: "task-cancel", Progress: 0.5, State: downloader.TorrentDownloading,
+	}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "c1", Title: "Cancel", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-cancel", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.ScheduleTorrent(tor)
+	m.mu.Lock()
+	_, exists := m.pendingTasks[tor.ID]
+	m.mu.Unlock()
+	require.True(t, exists)
+
+	m.CancelTorrent(tor.ID)
+	m.mu.Lock()
+	_, stillThere := m.pendingTasks[tor.ID]
+	m.mu.Unlock()
+	assert.False(t, stillThere, "CancelTorrent should remove the pending task")
+}
+
+func TestMarkRemovedFromDownloader_ClearsTask(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fm, db := newFreeEndMonitorWithFake(t, fake)
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "rm", Title: "T", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-rm", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+	fm.markRemovedFromDownloader(tor)
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.True(t, got.IsCompleted)
+	assert.Equal(t, "", got.DownloaderTaskID)
+}
+
+func TestMarkAutoDeleted_NonAdvancedReason(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fm, db := newFreeEndMonitorWithFake(t, fake)
+	tor := models.TorrentInfo{SiteName: "s", TorrentID: "ad", Title: "T"}
+	require.NoError(t, db.DB.Create(&tor).Error)
+	fm.markAutoDeleted(tor, 20.0, 100, false)
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.Equal(t, "免费期结束，自动删除（未完成）", got.PauseReason)
+}
+
+func TestIsAutoDeleteEnabled_TrueFalse(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fm, db := newFreeEndMonitorWithFake(t, fake)
+	assert.False(t, fm.isAutoDeleteEnabled())
+	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
+		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10, AutoDeleteOnFreeEnd: true,
+	}))
+	assert.True(t, fm.isAutoDeleteEnabled())
+}
+
+func TestPauseTorrentWithRetry_CtxCancelledMidway(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.pauseErr = assertErr
+	m, _ := newFreeEndMonitorWithFake(t, fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tor := models.TorrentInfo{Title: "T", DownloaderTaskID: "x"}
+	err := m.pauseTorrentWithRetry(ctx, fake, tor)
+	require.Error(t, err)
+}
+
+func TestMarkPaused_AdvancedReason(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	tor := models.TorrentInfo{SiteName: "s", TorrentID: "mp-adv", Title: "T"}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.markPaused(tor, 40.0, 100, true)
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.Equal(t, "免费期临近结束，已暂停（未完成）", got.PauseReason)
+}
+
+func TestMarkRetry_SchedulesWhenUnderMax(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-r"] = downloader.Torrent{ID: "task-r", Progress: 0.5, State: downloader.TorrentDownloading}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "retry-sched", Title: "T", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-r", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.markRetry(tor, "boom")
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.Equal(t, 1, got.RetryCount)
+	m.mu.Lock()
+	_, scheduled := m.pendingTasks[tor.ID]
+	m.mu.Unlock()
+	assert.True(t, scheduled, "under-max retry should reschedule a task")
+	m.CancelTorrent(tor.ID)
+}
+
+func TestArchiveOldTorrents_MovesCompletedAged(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	old := time.Now().AddDate(0, 0, -40)
+	require.NoError(t, db.DB.Create(&models.TorrentInfo{
+		SiteName: "s", TorrentID: "aged", Title: "Aged", IsCompleted: true, CreatedAt: old,
+	}).Error)
+
+	m.archiveOldTorrents()
+
+	var remaining int64
+	require.NoError(t, db.DB.Model(&models.TorrentInfo{}).Where("torrent_id = ?", "aged").Count(&remaining).Error)
+	assert.EqualValues(t, 0, remaining, "aged completed row should be archived away from active table")
+}
+
+func TestCheckAndProcessExpiredTorrents_FiresPast(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	fake.torrentByID["task-exp"] = downloader.Torrent{ID: "task-exp", Progress: 1.0, State: downloader.TorrentSeeding, TotalSize: 10}
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	past := time.Now().Add(-time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "exp1", Title: "Exp", PauseOnFreeEnd: true,
+		FreeEndTime: &past, DownloaderTaskID: "task-exp", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.checkAndProcessExpiredTorrents()
+	m.wg.Wait()
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.First(&got, tor.ID).Error)
+	assert.True(t, got.IsCompleted)
+}
+
+func TestRescheduleMissingFutureTorrents_SchedulesUnseen(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+
+	future := time.Now().Add(2 * time.Hour)
+	tor := models.TorrentInfo{
+		SiteName: "s", TorrentID: "future1", Title: "Fut", PauseOnFreeEnd: true,
+		FreeEndTime: &future, DownloaderTaskID: "task-f", DownloaderName: "qb1",
+	}
+	require.NoError(t, db.DB.Create(&tor).Error)
+
+	m.rescheduleMissingFutureTorrents(time.Now())
+	m.mu.Lock()
+	_, scheduled := m.pendingTasks[tor.ID]
+	m.mu.Unlock()
+	assert.True(t, scheduled)
+	m.CancelTorrent(tor.ID)
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDigestBuffer_BelowThreshold_NoImmediateFlush(t *testing.T) {
@@ -130,4 +131,20 @@ func TestCombineDigest_TruncatedAtMax(t *testing.T) {
 	}
 	_, text := CombineDigest(items)
 	assert.Contains(t, text, "还有 10 条已省略")
+}
+
+// TestNewDigestBuffer_Defaults verifies the convenience constructor wires the
+// default window/threshold.
+func TestNewDigestBuffer_Defaults(t *testing.T) {
+	b := NewDigestBuffer(context.Background(), func(_ context.Context, _ uint, _ []DigestItem) {})
+	require.NotNil(t, b)
+	assert.Equal(t, DigestWindow, b.window)
+	assert.Equal(t, DigestThreshold, b.threshold)
+}
+
+// TestNewDigestBufferWithWindow_DefaultsOnNonPositive covers the <=0 branches.
+func TestNewDigestBufferWithWindow_DefaultsOnNonPositive(t *testing.T) {
+	b := NewDigestBufferWithWindow(context.Background(), func(_ context.Context, _ uint, _ []DigestItem) {}, 0, 0)
+	assert.Equal(t, DigestWindow, b.window)
+	assert.Equal(t, DigestThreshold, b.threshold)
 }

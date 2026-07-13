@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (

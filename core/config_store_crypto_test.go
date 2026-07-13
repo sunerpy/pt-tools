@@ -79,3 +79,28 @@ func writeTestSecretKey(t *testing.T) {
 	keyFile := filepath.Join(keyDir, "secret.key")
 	require.NoError(t, os.WriteFile(keyFile, []byte(strings.Repeat("a", 64)), 0o600))
 }
+
+func TestEncryptCookie_EnvKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PT_TOOLS_SECRET_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+	s := NewConfigStore(nil)
+	require.NoError(t, s.ensureCookieKeyAvailable())
+}
+
+func TestEncryptCookie_EnvKeyInvalid(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PT_TOOLS_SECRET_KEY", "not-32-bytes")
+	s := NewConfigStore(nil)
+	_, err := s.EncryptCookie("x")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrKeyMissing)
+}
+
+func TestDecryptCookie_KeyMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PT_TOOLS_SECRET_KEY", "")
+	s := NewConfigStore(nil)
+	_, err := s.DecryptCookie("garbage")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrKeyMissing)
+}

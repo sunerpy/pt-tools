@@ -1,14 +1,99 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package commands
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/chatops"
 	"github.com/sunerpy/pt-tools/models"
 )
+
+func TestDelrssHandler_ServiceGuards(t *testing.T) {
+	t.Run("no sessions", func(t *testing.T) {
+		setupServices(t, &Services{})
+		reply, err := handler(t, "delrss")(context.Background(), nil, chatops.Source{ReplyLang: "zh"})
+		require.NoError(t, err)
+		assert.Contains(t, reply.Text, "会话存储未初始化")
+	})
+	t.Run("no site service", func(t *testing.T) {
+		s := chatops.NewSessionStore()
+		t.Cleanup(s.Stop)
+		setupServices(t, &Services{Sessions: s})
+		reply, err := handler(t, "delrss")(context.Background(), nil, chatops.Source{ReplyLang: "zh"})
+		require.NoError(t, err)
+		assert.Contains(t, reply.Text, "站点服务不可用")
+	})
+	t.Run("no rss wizard", func(t *testing.T) {
+		s := chatops.NewSessionStore()
+		t.Cleanup(s.Stop)
+		setupServices(t, &Services{Sessions: s, Site: &mockSiteService{}})
+		reply, err := handler(t, "delrss")(context.Background(), nil, chatops.Source{ReplyLang: "zh"})
+		require.NoError(t, err)
+		assert.Contains(t, reply.Text, "RSS 向导服务不可用")
+	})
+}
+
+func TestHandleDelrssPickSite_ListError(t *testing.T) {
+	s := chatops.NewSessionStore()
+	t.Cleanup(s.Stop)
+	setupServices(t, &Services{Site: &errSiteService{listErr: errors.New("db down")}, RSSWizard: delrssWizardWithRSS(), Sessions: s})
+
+	reply, err := handleDelrssPickSite(context.Background(), chatops.Source{ReplyLang: "zh"}, delrssWizardState{Step: delrssStepPickSite}, "hdsky")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "查询站点失败")
+}
+
+func TestDelrssConfirm_DeleteError(t *testing.T) {
+	wizard := delrssWizardWithRSS()
+	wizard.deleteErr = errors.New("delete boom")
+	h := newAddrssHarness(t, "telegram", true, addrssEnabledSites(), wizard)
+
+	runDelrssToConfirm(t, h, "hdsky", "beta")
+	reply := h.send(t, "YES")
+	assert.Contains(t, reply.Text, "删除 RSS 订阅失败")
+}
+
+func TestDelrssStepHandler_InvalidStateAndUnknownStep(t *testing.T) {
+	s := chatops.NewSessionStore()
+	t.Cleanup(s.Stop)
+	setupServices(t, &Services{Site: &mockSiteService{sites: addrssEnabledSites()}, RSSWizard: delrssWizardWithRSS(), Sessions: s})
+	src := chatops.Source{ReplyLang: "zh", ChannelType: "tg", ChannelUserID: "u"}
+
+	bad, err := delrssStepHandler(context.Background(), []string{"x"}, src, "{not-json")
+	require.NoError(t, err)
+	assert.Contains(t, bad.Text, "向导状态已损坏")
+
+	unknown, err := delrssStepHandler(context.Background(), []string{"x"}, src, `{"step":"bogus"}`)
+	require.NoError(t, err)
+	assert.Contains(t, unknown.Text, "未知向导步骤")
+}
+
+func TestHandleDelrssConfirm_DeletedNameFallback(t *testing.T) {
+	wizard := newAddrssFakeRSSWizard()
+	// rssList empty, so DeleteRSSFromSite returns an empty-Name config; the
+	// handler must fall back to st.RSSName.
+	setupServices(t, &Services{RSSWizard: wizard})
+	reply, err := handleDelrssConfirm(context.Background(), chatops.Source{ReplyLang: "zh"},
+		delrssWizardState{Step: delrssStepConfirm, Site: "hdsky", RSSID: 7, RSSName: "fallback-name"}, "YES")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "fallback-name")
+}
+
+func TestHandleDelrssConfirm_Cancel(t *testing.T) {
+	setupServices(t, &Services{RSSWizard: delrssWizardWithRSS()})
+	reply, err := handleDelrssConfirm(context.Background(), chatops.Source{ReplyLang: "zh"},
+		delrssWizardState{Step: delrssStepConfirm}, "no")
+	require.NoError(t, err)
+	assert.Contains(t, reply.Text, "已取消删除")
+}
 
 func delrssWizardWithRSS() *addrssFakeRSSWizard {
 	w := newAddrssFakeRSSWizard()

@@ -1,7 +1,9 @@
 package version
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -346,4 +348,91 @@ func TestExtractPrereleaseLabel(t *testing.T) {
 	for _, c := range cases {
 		assert.Equal(t, c.out, extractPrereleaseLabel(c.in), "input=%q", c.in)
 	}
+}
+
+// TestFilterNewReleases_WithAssets covers the asset-copy loop inside
+// filterNewReleases (previously-uncovered lines building ReleaseAsset slices).
+func TestFilterNewReleases_WithAssets(t *testing.T) {
+	c := NewChecker()
+	oldVersion := Version
+	defer func() { Version = oldVersion }()
+	Version = "v1.0.0"
+
+	releases := []GitHubRelease{
+		{
+			TagName: "v2.0.0", Name: "Release 2", HTMLURL: "u",
+			Assets: []GitHubAsset{
+				{Name: "pt-tools-linux-amd64.tar.gz", DownloadURL: "https://x/a", Size: 111},
+				{Name: "pt-tools-windows-amd64.exe.zip", DownloadURL: "https://x/b", Size: 222},
+			},
+		},
+	}
+	got := c.filterNewReleases(releases, false)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Assets, 2)
+	assert.Equal(t, "pt-tools-linux-amd64.tar.gz", got[0].Assets[0].Name)
+	assert.Equal(t, int64(111), got[0].Assets[0].Size)
+	assert.Equal(t, "https://x/b", got[0].Assets[1].DownloadURL)
+}
+
+// TestCheckForUpdates_ForceError drives CheckForUpdates with Force=true through
+// the fetch path; the unreachable proxy guarantees an error is recorded,
+// exercising the error-return branch after the cache short-circuit checks.
+func TestCheckForUpdates_ForceError(t *testing.T) {
+	c := NewChecker()
+	c.lastResult = &VersionCheckResult{CurrentVersion: "v0.0.1"}
+	c.lastCheck = time.Now()
+
+	res, err := c.CheckForUpdates(context.Background(), CheckOptions{
+		Force:    true,
+		ProxyURL: "http://127.0.0.1:1",
+	})
+	require.Error(t, err)
+	require.NotNil(t, res)
+	assert.NotEmpty(t, res.Error)
+	assert.Equal(t, Version, res.CurrentVersion)
+}
+
+// TestCheckForUpdates_PrereleaseChangeBypassesCache exercises the
+// prerelChanged branch of the cache guard.
+func TestCheckForUpdates_PrereleaseChangeBypassesCache(t *testing.T) {
+	c := NewChecker()
+	c.lastResult = &VersionCheckResult{CurrentVersion: "v0.0.1"}
+	c.lastCheck = time.Now()
+	c.lastProxy = "http://127.0.0.1:1"
+	c.lastIncludePrerel = false
+
+	res, _ := c.CheckForUpdates(context.Background(), CheckOptions{
+		ProxyURL:          "http://127.0.0.1:1",
+		IncludePrerelease: true,
+	})
+	require.NotNil(t, res)
+	assert.NotEmpty(t, res.Error, "prerelease flag change must bypass cache and attempt fetch")
+}
+
+func TestCheckForUpdatesReturnsCachedResult(t *testing.T) {
+	c := NewChecker()
+	cached := &VersionCheckResult{CurrentVersion: "v1.2.3", HasUpdate: false}
+	c.lastResult = cached
+	c.lastCheck = time.Now()
+	c.lastProxy = ""
+	c.lastIncludePrerel = false
+
+	got, err := c.CheckForUpdates(context.Background(), CheckOptions{})
+	require.NoError(t, err)
+	assert.Same(t, cached, got, "fresh cache with matching opts must short-circuit without network")
+}
+
+func TestCheckForUpdatesProxyChangeBypassesCache(t *testing.T) {
+	c := NewChecker()
+	c.lastResult = &VersionCheckResult{CurrentVersion: "v1.0.0"}
+	c.lastCheck = time.Now()
+	c.lastProxy = ""
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, _ := c.CheckForUpdates(ctx, CheckOptions{ProxyURL: "http://127.0.0.1:1"})
+	require.NotNil(t, res)
+	assert.Equal(t, Version, res.CurrentVersion)
+	assert.NotEmpty(t, res.Error, "unreachable proxy must record an error, proving cache bypass")
 }

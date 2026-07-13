@@ -353,3 +353,115 @@ func TestBaseSite_RateLimiting_ContextCanceled(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "rate limit")
 }
+
+func TestBaseSite_DownloadWithHash_NoHashDownloader(t *testing.T) {
+	driver := &MockDriver{}
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+
+	driver.On("PrepareDownload", "12345").Return("req", nil)
+	driver.On("Execute", mock.Anything, "req").Return("resp", nil)
+	driver.On("ParseDownload", "resp").Return([]byte("data"), nil)
+
+	data, err := site.DownloadWithHash(context.Background(), "12345", "hashval")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("data"), data)
+}
+
+func TestBaseSite_GetDetailFetcher_Nil(t *testing.T) {
+	driver := &MockDriver{}
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, Logger: zap.NewNop()})
+	assert.Nil(t, site.GetDetailFetcher())
+}
+
+// ---------------------------------------------------------------------------
+// filters.go — querystringFilter branches
+// ---------------------------------------------------------------------------
+
+func TestBaseSite_Download_PrepareError(t *testing.T) {
+	driver := &MockDriver{}
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	driver.On("PrepareDownload", "1").Return("", errors.New("prep err"))
+	_, err := site.Download(context.Background(), "1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prepare download")
+}
+
+func TestBaseSite_Download_ExecuteError(t *testing.T) {
+	driver := &MockDriver{}
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	driver.On("PrepareDownload", "1").Return("req", nil)
+	driver.On("Execute", mock.Anything, "req").Return("", errors.New("exec err"))
+	_, err := site.Download(context.Background(), "1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "execute download")
+}
+
+func TestBaseSite_Download_ParseError(t *testing.T) {
+	driver := &MockDriver{}
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	driver.On("PrepareDownload", "1").Return("req", nil)
+	driver.On("Execute", mock.Anything, "req").Return("resp", nil)
+	driver.On("ParseDownload", "resp").Return(nil, errors.New("parse err"))
+	_, err := site.Download(context.Background(), "1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse download")
+}
+
+func TestBaseSite_GetUserInfo_Error(t *testing.T) {
+	driver := &MockDriver{}
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	driver.On("GetUserInfo", mock.Anything).Return(UserInfo{}, errors.New("ui err"))
+	_, err := site.GetUserInfo(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get user info")
+}
+
+// ---------------------------------------------------------------------------
+// isLoginPage / is2FAPage — additional branches
+// ---------------------------------------------------------------------------
+
+// hashDriver implements Driver[string,string] AND HashDownloader.
+type hashDriver struct {
+	hashCalled bool
+}
+
+func (h *hashDriver) PrepareSearch(SearchQuery) (string, error) { return "", nil }
+
+func (h *hashDriver) Execute(context.Context, string) (string, error) { return "", nil }
+
+func (h *hashDriver) ParseSearch(string) ([]TorrentItem, error) { return nil, nil }
+
+func (h *hashDriver) GetUserInfo(context.Context) (UserInfo, error) { return UserInfo{}, nil }
+
+func (h *hashDriver) PrepareDownload(string) (string, error) { return "", nil }
+
+func (h *hashDriver) ParseDownload(string) ([]byte, error) { return nil, nil }
+
+func (h *hashDriver) DownloadWithHash(_ context.Context, _, hash string) ([]byte, error) {
+	h.hashCalled = true
+	return []byte("hash:" + hash), nil
+}
+
+func TestBaseSite_DownloadWithHash_UsesHashDownloader(t *testing.T) {
+	hd := &hashDriver{}
+	site := NewBaseSite[string, string](hd, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteHDDolby, RateLimit: 100, RateBurst: 100, Logger: zap.NewNop()})
+	data, err := site.DownloadWithHash(context.Background(), "5", "abc")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hash:abc"), data)
+	assert.True(t, hd.hashCalled)
+}
+
+func TestBaseSite_DownloadWithHash_RateLimitCanceled(t *testing.T) {
+	hd := &hashDriver{}
+	site := NewBaseSite[string, string](hd, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteHDDolby, RateLimit: 0.0001, RateBurst: 1, Logger: zap.NewNop()})
+	// exhaust the single burst token, then cancel
+	_, _ = site.DownloadWithHash(context.Background(), "1", "h")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := site.DownloadWithHash(ctx, "2", "h")
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// ParseSizeMB — TB and KB unit branches
+// ---------------------------------------------------------------------------

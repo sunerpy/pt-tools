@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (
@@ -15,6 +18,225 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
+
+func TestNotifyNewItem_WrongModeSkips(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "filtered", NotifyConfIDs: "[1]"}
+	require.NoError(t, n.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, SiteName: "s", TorrentID: "t", FeedItem: newFeedItem(),
+	}))
+	var cnt int64
+	require.NoError(t, db.Model(&models.RSSNotificationLog{}).Count(&cnt).Error)
+	assert.EqualValues(t, 0, cnt)
+}
+
+func TestNotifyNewItem_InvalidConfIDs(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "all", NotifyConfIDs: "{bad"}
+	err := n.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, SiteName: "s", TorrentID: "t", FeedItem: newFeedItem(),
+	})
+	require.Error(t, err)
+}
+
+func TestExceededHourlyQuota_TriggersThrottle(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "all", NotifyConfIDs: "[1]", MaxNotificationsPerHour: 1}
+	// Pre-seed one recent log so the quota is already met.
+	now := time.Now()
+	require.NoError(t, db.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "s", TorrentID: "old", NotifyKind: "all",
+		NotificationConfID: 1, Result: "sent", CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	require.NoError(t, n.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, SiteName: "s", TorrentID: "t2", FeedItem: newFeedItem(),
+	}))
+	var throttled int64
+	require.NoError(t, db.Model(&models.RSSNotificationLog{}).
+		Where("result = ?", "throttled").Count(&throttled).Error)
+	assert.EqualValues(t, 1, throttled)
+}
+
+func TestNotifyFilteredItem_NilGuards(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	require.Error(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{RSS: nil}))
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "filtered", NotifyConfIDs: "[1]"}
+	require.Error(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{RSS: rss, Torrent: nil}))
+}
+
+func TestRenderAllPayload_TitleAndTimeFallbacks(t *testing.T) {
+	ev := RSSItemEvent{
+		SiteName: "s",
+		FeedItem: &gofeed.Item{Title: "", Published: "Mon, 01 Jan 2026", Link: "http://x"},
+	}
+	got := renderAllPayload(ev)
+	assert.Equal(t, "(无标题)", got.Title)
+	assert.Contains(t, got.Text, "Mon, 01 Jan 2026")
+
+	ev2 := RSSItemEvent{SiteName: "s", FeedItem: &gofeed.Item{Title: "T", Link: "http://y"}}
+	got2 := renderAllPayload(ev2)
+	assert.Contains(t, got2.Text, "未知时间")
+}
+
+func TestRenderFilteredPayload_FreeAndRuleBranches(t *testing.T) {
+	end := time.Now().Add(3 * time.Hour)
+	tItem := &v2.TorrentItem{
+		Title: "", URL: "http://z", SizeBytes: 2 * 1024 * 1024 * 1024,
+		DiscountLevel: v2.DiscountFree, DiscountEndTime: end,
+	}
+	rule := &models.FilterRule{ID: 1, Name: "r1"}
+	got := renderFilteredPayload(RSSFilteredEvent{SiteName: "s", Torrent: tItem, Rule: rule})
+	assert.Equal(t, "(无标题)", got.Title)
+	assert.Contains(t, got.Text, "免费")
+	assert.Contains(t, got.Text, "剩余")
+	assert.Contains(t, got.Text, "匹配规则")
+
+	tItem2 := &v2.TorrentItem{Title: "X", URL: "http://z", DiscountLevel: v2.DiscountFree}
+	got2 := renderFilteredPayload(RSSFilteredEvent{SiteName: "s", Torrent: tItem2})
+	assert.Contains(t, got2.Text, "免费")
+}
+
+func TestFormatBytesRSS_And_FormatRemaining(t *testing.T) {
+	assert.Equal(t, "512 B", formatBytesRSS(512))
+	assert.Contains(t, formatBytesRSS(1024*1024), "MB")
+
+	assert.Equal(t, "已结束", formatRemaining(time.Now().Add(-time.Hour)))
+	assert.Contains(t, formatRemaining(time.Now().Add(90*time.Minute)), "h")
+	assert.Contains(t, formatRemaining(time.Now().Add(30*time.Minute)), "min")
+}
+
+func TestExceededHourlyQuota_CountError(t *testing.T) {
+	db := setupClosedForRSS(t)
+	n := NewRSSNotifier(db, &fakePushSvc{}).(*rssNotifier)
+	rss := &models.RSSConfig{ID: 1, MaxNotificationsPerHour: 5}
+	_, err := n.exceededHourlyQuota(context.Background(), rss)
+	require.Error(t, err)
+}
+
+func setupClosedForRSS(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.RSSNotificationLog{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	return db
+}
+
+func TestNotifyFilteredItem_QuotaThrottles(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "filtered", NotifyConfIDs: "[1]", MaxNotificationsPerHour: 1}
+	require.NoError(t, db.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "s", TorrentID: "old", NotifyKind: "filtered",
+		NotificationConfID: 1, Result: "sent",
+	}).Error)
+	tItem := &v2.TorrentItem{ID: "t2", Title: "X", URL: "http://z"}
+	require.NoError(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{
+		RSS: rss, Torrent: tItem, SiteName: "s", TorrentID: "t2",
+	}))
+	var throttled int64
+	require.NoError(t, db.Model(&models.RSSNotificationLog{}).
+		Where("result = ?", "throttled").Count(&throttled).Error)
+	assert.EqualValues(t, 1, throttled)
+}
+
+func TestNotifyFilteredItem_InvalidConfIDs(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &fakePushSvc{})
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "filtered", NotifyConfIDs: "{bad"}
+	tItem := &v2.TorrentItem{ID: "t", Title: "X"}
+	require.Error(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{
+		RSS: rss, Torrent: tItem, SiteName: "s", TorrentID: "t",
+	}))
+}
+
+func TestRSSNotifier_QuietHoursDefersDelivery(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	push := &capturePushService{}
+	n := NewRSSNotifier(db, push).(*rssNotifier)
+	n.SetQuietFn(func(_ uint) (string, string, error) { return "00:00", "23:59", nil })
+
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "all", NotifyConfIDs: "[7]", MaxNotificationsPerHour: 100}
+	require.NoError(t, n.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, FeedItem: newFeedItem(), SiteName: "example", TorrentID: "quiet-1",
+	}))
+
+	// Quiet window -> row stays pending, no immediate push.
+	var row models.RSSNotificationLog
+	require.NoError(t, db.Where("torrent_id = ?", "quiet-1").First(&row).Error)
+	assert.Equal(t, "pending", row.Result)
+	require.NotNil(t, row.NextRetryAt)
+	assert.Equal(t, 0, push.callCount())
+}
+
+func TestRSSNotifier_HourlyQuotaThrottles(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	push := &capturePushService{}
+	n := NewRSSNotifier(db, push)
+
+	now := time.Now()
+	// Seed one recent row so the quota (max=1) is already reached.
+	require.NoError(t, db.Create(&models.RSSNotificationLog{
+		RSSID: 1, SiteName: "example", TorrentID: "old", NotifyKind: "all",
+		NotificationConfID: 7, Result: "sent", CreatedAt: now, UpdatedAt: now,
+	}).Error)
+
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "all", NotifyConfIDs: "[7]", MaxNotificationsPerHour: 1}
+	require.NoError(t, n.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, FeedItem: newFeedItem(), SiteName: "example", TorrentID: "new",
+	}))
+
+	var throttled models.RSSNotificationLog
+	require.NoError(t, db.Where("torrent_id = ?", "new").First(&throttled).Error)
+	assert.Equal(t, "throttled", throttled.Result)
+	assert.Equal(t, 0, push.callCount())
+}
+
+func TestRSSNotifier_FilteredFreeTorrentRendersRemaining(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	push := &capturePushService{}
+	n := NewRSSNotifier(db, push)
+
+	end := time.Now().Add(3 * time.Hour)
+	torrent := &v2.TorrentItem{
+		ID: "f1", Title: "FreeMovie", URL: "https://x/details.php?id=1",
+		SizeBytes: 2 * 1024 * 1024 * 1024, DiscountLevel: v2.DiscountFree, DiscountEndTime: end,
+	}
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "filtered", NotifyConfIDs: "[7]", MaxNotificationsPerHour: 100}
+	require.NoError(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{
+		RSS: rss, Torrent: torrent, SiteName: "example", TorrentID: "f1",
+	}))
+
+	require.Equal(t, 1, push.callCount())
+	push.mu.Lock()
+	text := push.calls[0].Text
+	push.mu.Unlock()
+	assert.Contains(t, text, "免费")
+	assert.Contains(t, text, "剩余")
+}
+
+func TestFormatRemaining(t *testing.T) {
+	assert.Equal(t, "已结束", formatRemaining(time.Now().Add(-time.Hour)))
+	assert.Contains(t, formatRemaining(time.Now().Add(90*time.Minute)), "h")
+	assert.Contains(t, formatRemaining(time.Now().Add(30*time.Minute)), "min")
+}
+
+func TestRSSNotifier_NilGuards(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	n := NewRSSNotifier(db, &capturePushService{})
+
+	require.Error(t, n.NotifyNewItem(context.Background(), RSSItemEvent{}))
+	require.Error(t, n.NotifyNewItem(context.Background(), RSSItemEvent{RSS: &models.RSSConfig{}}))
+	require.Error(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{}))
+	require.Error(t, n.NotifyFilteredItem(context.Background(), RSSFilteredEvent{RSS: &models.RSSConfig{}}))
+}
 
 func setupRSSNotifierDB(t *testing.T) *gorm.DB {
 	t.Helper()

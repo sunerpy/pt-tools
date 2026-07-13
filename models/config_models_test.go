@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -471,4 +472,71 @@ func TestRSSConfig_FullFields(t *testing.T) {
 	require.False(t, rss.IsExample)
 	require.True(t, rss.HasCustomDownloadPath())
 	require.Equal(t, "/custom/download/path", rss.GetEffectiveDownloadPath())
+}
+
+func TestRSSConfig_GetEffectiveIntervalMinutes_Clamps(t *testing.T) {
+	global := &SettingsGlobal{DefaultIntervalMinutes: 20}
+
+	assert.Equal(t, int32(30), (&RSSConfig{IntervalMinutes: 30}).GetEffectiveIntervalMinutes(global))
+	assert.Equal(t, MinIntervalMinutes, (&RSSConfig{IntervalMinutes: 1}).GetEffectiveIntervalMinutes(global))
+	assert.Equal(t, MaxIntervalMinutes, (&RSSConfig{IntervalMinutes: 99999}).GetEffectiveIntervalMinutes(global))
+	assert.Equal(t, int32(20), (&RSSConfig{IntervalMinutes: 0}).GetEffectiveIntervalMinutes(global))
+	assert.Equal(t, DefaultIntervalMinutes, (&RSSConfig{}).GetEffectiveIntervalMinutes(nil))
+}
+
+func TestSettingsGlobal_EffectiveBounds(t *testing.T) {
+	assert.Equal(t, DefaultIntervalMinutes, (&SettingsGlobal{DefaultIntervalMinutes: 0}).GetEffectiveIntervalMinutes())
+	assert.Equal(t, MinIntervalMinutes, (&SettingsGlobal{DefaultIntervalMinutes: 2}).GetEffectiveIntervalMinutes())
+	assert.Equal(t, MaxIntervalMinutes, (&SettingsGlobal{DefaultIntervalMinutes: 99999}).GetEffectiveIntervalMinutes())
+
+	assert.Equal(t, DefaultConcurrency, (&SettingsGlobal{DefaultConcurrency: 0}).GetEffectiveConcurrency())
+	assert.Equal(t, MaxConcurrency, (&SettingsGlobal{DefaultConcurrency: 999}).GetEffectiveConcurrency())
+	assert.Equal(t, int32(4), (&SettingsGlobal{DefaultConcurrency: 4}).GetEffectiveConcurrency())
+}
+
+func TestSettingsGlobal_GetEffectivePeerRatio(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxSL       float64
+		intervalMin int
+		wantMaxSL   float64
+		wantInt     int
+	}{
+		{"below min falls back to default", 0.5, 2, DefaultPeerRatioMaxSL, DefaultPeerRatioIntervalMin},
+		{"at min kept", MinPeerRatioMaxSL, MinPeerRatioIntervalMin, MinPeerRatioMaxSL, MinPeerRatioIntervalMin},
+		{"above min kept", 50.0, 20, 50.0, 20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := SettingsGlobal{PeerRatioMaxSL: tt.maxSL, PeerRatioIntervalMin: tt.intervalMin}
+			assert.Equal(t, tt.wantMaxSL, s.GetEffectivePeerRatioMaxSL())
+			assert.Equal(t, tt.wantInt, s.GetEffectivePeerRatioIntervalMin())
+		})
+	}
+}
+
+func TestRSSConfig_GetEffectiveConcurrency_Extra(t *testing.T) {
+	global := &SettingsGlobal{DefaultConcurrency: 5}
+
+	// RSS value in range wins
+	assert.Equal(t, int32(4), (&RSSConfig{Concurrency: 4}).GetEffectiveConcurrency(global))
+	// negative RSS value is not >0 so falls back to default (nil global)
+	assert.Equal(t, DefaultConcurrency, (&RSSConfig{Concurrency: -1}).GetEffectiveConcurrency(nil))
+	// zero → falls back to global
+	assert.Equal(t, int32(5), (&RSSConfig{Concurrency: 0}).GetEffectiveConcurrency(global))
+	// RSS above max clamps
+	assert.Equal(t, MaxConcurrency, (&RSSConfig{Concurrency: 999}).GetEffectiveConcurrency(global))
+	// zero + nil global → default
+	assert.Equal(t, DefaultConcurrency, (&RSSConfig{}).GetEffectiveConcurrency(nil))
+}
+
+func TestRSSConfig_MiscGetters(t *testing.T) {
+	assert.True(t, (&RSSConfig{IsExample: true}).ShouldSkip())
+	assert.True(t, (&RSSConfig{URL: ""}).ShouldSkip())
+	assert.False(t, (&RSSConfig{URL: "http://x"}).ShouldSkip())
+
+	r := &RSSConfig{DownloadPath: "/dl"}
+	assert.Equal(t, "/dl", r.GetEffectiveDownloadPath())
+	assert.True(t, r.HasCustomDownloadPath())
+	assert.False(t, (&RSSConfig{}).HasCustomDownloadPath())
 }

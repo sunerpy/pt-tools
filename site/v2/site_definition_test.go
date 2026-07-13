@@ -548,3 +548,183 @@ func TestCalcHRSeedTimeH_PriorityChain(t *testing.T) {
 		assert.Equal(t, 100, def.CalcHRSeedTimeH(1024), "flat fallback")
 	})
 }
+
+func TestNewSizeTieredHRCalc_NoMatchFallback(t *testing.T) {
+	rules := []HRSeedTimeRule{
+		{MinSizeGB: 0, MaxSizeGB: 10, SeedTimeH: 24},
+		{MinSizeGB: 10, MaxSizeGB: 50, SeedTimeH: 48},
+		{MinSizeGB: 50, MaxSizeGB: 0, SeedTimeH: 96},
+	}
+	calc := NewSizeTieredHRCalc(rules, 12)
+
+	// 5 GiB -> tier 1
+	assert.Equal(t, 36, calc(5*1024*1024*1024))
+	// 20 GiB -> tier 2
+	assert.Equal(t, 60, calc(20*1024*1024*1024))
+	// 100 GiB -> tier 3
+	assert.Equal(t, 108, calc(100*1024*1024*1024))
+	// unknown size (<=0) -> max
+	assert.Equal(t, 108, calc(0))
+}
+
+func TestValidate_NexusPHP_MissingSelectorsAndUserInfo(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "nptest",
+		Name:           "NP",
+		Schema:         SchemaNexusPHP,
+		URLs:           []string{"https://np.example/"},
+		TimezoneOffset: "+0800",
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "Selectors")
+	assert.Contains(t, msg, "UserInfo")
+}
+
+func TestValidate_NexusPHP_PartialSelectors(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "nptest2",
+		Name:           "NP",
+		Schema:         SchemaNexusPHP,
+		URLs:           []string{"https://np.example/"},
+		TimezoneOffset: "+0800",
+		Selectors:      &SiteSelectors{TableRows: "tr"},
+		UserInfo: &UserInfoConfig{
+			Process: []UserInfoProcess{
+				{RequestConfig: RequestConfig{URL: "/index.php"}, Fields: []string{"id"}},
+			},
+			Selectors: map[string]FieldSelector{"id": {Selector: []string{"#id"}}},
+		},
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Title")
+}
+
+func TestValidate_MTorrent_MissingUserInfo(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "mttest",
+		Name:           "MT",
+		Schema:         SchemaMTorrent,
+		URLs:           []string{"https://mt.example/"},
+		TimezoneOffset: "+0800",
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "UserInfo")
+}
+
+func TestValidate_HDDolby_BadAuthMethod(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "hdtest",
+		Name:           "HD",
+		Schema:         SchemaHDDolby,
+		URLs:           []string{"https://hd.example/"},
+		TimezoneOffset: "+0800",
+		AuthMethod:     AuthMethodCookie,
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AuthMethod")
+}
+
+func TestValidate_Rousi_MissingCreateDriver(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "rstest",
+		Name:           "RS",
+		Schema:         SchemaRousi,
+		URLs:           []string{"https://rs.example/"},
+		TimezoneOffset: "+0800",
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CreateDriver")
+}
+
+func TestValidate_UserInfo_BadAssertionAndSelectors(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "uitest",
+		Name:           "UI",
+		Schema:         SchemaMTorrent,
+		URLs:           []string{"https://ui.example/"},
+		TimezoneOffset: "+0800",
+		UserInfo: &UserInfoConfig{
+			Process: []UserInfoProcess{
+				{
+					RequestConfig: RequestConfig{URL: "/detail"},
+					Assertion:     map[string]string{"id": "params.id"},
+					Fields:        []string{"name"},
+				},
+			},
+			Selectors: map[string]FieldSelector{
+				"name": {Selector: []string{"n"}},
+				"bad":  {},
+			},
+		},
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "InvalidReference")
+	assert.Contains(t, msg, "NoSelector")
+}
+
+func TestValidate_UserInfo_EmptyProcess(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "uitest2",
+		Name:           "UI",
+		Schema:         SchemaMTorrent,
+		URLs:           []string{"https://ui.example/"},
+		TimezoneOffset: "+0800",
+		UserInfo:       &UserInfoConfig{},
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one process")
+}
+
+func TestValidate_LevelRequirements_Invalid(t *testing.T) {
+	def := &SiteDefinition{
+		ID:             "lvtest",
+		Name:           "LV",
+		Schema:         SchemaMTorrent,
+		URLs:           []string{"https://lv.example/"},
+		TimezoneOffset: "+0800",
+		UserInfo: &UserInfoConfig{
+			Process:   []UserInfoProcess{{RequestConfig: RequestConfig{URL: "/x"}, Fields: []string{"id"}}},
+			Selectors: map[string]FieldSelector{"id": {Selector: []string{"#id"}}},
+		},
+		LevelRequirements: []SiteLevelRequirement{
+			{ID: 1, Name: ""},
+			{ID: 1, Name: "Dup", Downloaded: "notasize", Interval: "bad", Ratio: -1},
+			{ID: 2, Name: "Dup"},
+		},
+	}
+	err := def.Validate()
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "Duplicate")
+	assert.Contains(t, msg, "Format")
+}
+
+// ---------------------------------------------------------------------------
+// nexusphp_parser.go — NewNexusPHPParserFromDefinition custom config + ParseAll
+// ---------------------------------------------------------------------------
+
+func TestNewSizeTieredHRCalc_NoMatchReturnsMax(t *testing.T) {
+	rules := []HRSeedTimeRule{
+		{MinSizeGB: 100, MaxSizeGB: 200, SeedTimeH: 48},
+	}
+	calc := NewSizeTieredHRCalc(rules, 10)
+	// 5 GiB matches no rule -> max (48+10)
+	assert.Equal(t, 58, calc(5*1024*1024*1024))
+}
+
+func TestDefaultDetailParserConfig(t *testing.T) {
+	cfg := DefaultDetailParserConfig()
+	require.NotNil(t, cfg)
+	assert.Equal(t, "2006-01-02 15:04:05", cfg.TimeLayout)
+	assert.Equal(t, DiscountFree, cfg.DiscountMapping["free"])
+	assert.NotEmpty(t, cfg.HRKeywords)
+}

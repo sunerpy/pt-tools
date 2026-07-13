@@ -309,3 +309,12 @@ func TestHDSky_Fixtures_NoSecrets(t *testing.T) {
 		})
 	}
 }
+
+// TestGetHDSkyLevelRequirements_ZeroJoinTime covers the joinTime==0 branch.
+func TestGetHDSkyLevelRequirements_ZeroJoinTime(t *testing.T) {
+	reqs := GetHDSkyLevelRequirements(0)
+	require.NotEmpty(t, reqs)
+	// zero join time should return the "new" requirements (same as a recent join)
+	newReqs := GetHDSkyLevelRequirements(HDSkyNewRequirementsDate.Add(24 * 60 * 60 * 1e9).Unix())
+	assert.Equal(t, len(newReqs), len(reqs))
+}

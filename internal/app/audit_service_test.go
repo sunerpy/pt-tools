@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (
@@ -14,6 +17,70 @@ import (
 
 	"github.com/sunerpy/pt-tools/models"
 )
+
+func TestQuery_CommandAndResultFilters(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	rows := []models.ActionAudit{
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", Command: "ping", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-3 * time.Minute)},
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1", Command: "bind", ArgsJSON: "{}", Result: "error", CreatedAt: now.Add(-2 * time.Minute)},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+
+	items, total, err := svc.Query(context.Background(), AuditQuery{Command: "bind"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "bind", items[0].Command)
+
+	items, total, err = svc.Query(context.Background(), AuditQuery{Result: "error"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "error", items[0].Result)
+}
+
+func TestQuery_TimeWindowAndPaginationDefaults(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	require.NoError(t, db.Create(&models.ActionAudit{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "ping", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-10 * time.Minute),
+	}).Error)
+	require.NoError(t, db.Create(&models.ActionAudit{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "ping", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-1 * time.Minute),
+	}).Error)
+
+	// Since window keeps only the recent row; negative page/pageSize clamp to defaults.
+	items, total, err := svc.Query(context.Background(), AuditQuery{
+		Since: now.Add(-5 * time.Minute), Page: -1, PageSize: -1,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+
+	// Until window keeps only the old row.
+	_, total, err = svc.Query(context.Background(), AuditQuery{Until: now.Add(-5 * time.Minute)})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+}
+
+func TestRecord_NilArgs(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	require.NoError(t, svc.Record(context.Background(), AuditEntry{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "ping", Result: "ok", LatencyMs: 5,
+	}))
+	var cnt int64
+	require.NoError(t, db.Model(&models.ActionAudit{}).Count(&cnt).Error)
+	assert.EqualValues(t, 1, cnt)
+}
 
 // setupAuditTestDB 创建独立的 in-memory SQLite，仅 AutoMigrate ActionAudit 表。
 func setupAuditTestDB(t *testing.T) *gorm.DB {
@@ -335,4 +402,54 @@ func TestAuditService_Stats(t *testing.T) {
 		assert.EqualValues(t, 3, got.TotalCount)
 		assert.EqualValues(t, 2, got.TodayCount)
 	})
+}
+
+func TestAuditRecord_MarshalError(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	err := svc.Record(context.Background(), AuditEntry{
+		Command: "x",
+		Args:    map[string]any{"bad": make(chan int)},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "序列化")
+}
+
+func setupClosedDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.ActionAudit{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	return db
+}
+
+func TestAuditQuery_CountError(t *testing.T) {
+	db := setupClosedDB(t)
+	svc := NewAuditService(db)
+	_, _, err := svc.Query(context.Background(), AuditQuery{})
+	require.Error(t, err)
+}
+
+func TestAuditStats_Error(t *testing.T) {
+	db := setupClosedDB(t)
+	svc := NewAuditService(db)
+	_, err := svc.Stats(context.Background())
+	require.Error(t, err)
+}
+
+func TestAuditPrune_Error(t *testing.T) {
+	db := setupClosedDB(t)
+	svc := NewAuditService(db)
+	_, err := svc.Prune(context.Background())
+	require.Error(t, err)
+}
+
+func TestAuditQuery_PageSizeClampMax(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	_, _, err := svc.Query(context.Background(), AuditQuery{PageSize: 9999})
+	require.NoError(t, err)
 }

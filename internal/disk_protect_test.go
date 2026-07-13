@@ -1,10 +1,6 @@
 // MIT License
 // Copyright (c) 2025 pt-tools
 
-// Tests for Issue #299: 磁盘保护应在推送前考虑 (1) 即将推送种子大小,
-// (2) qBit/Transmission in-flight 待下载累计, (3) 跨 worker 的预留预算。
-// 全局 PushMutex 串行化整个 disk-check + Reserve + push 临界区。
-
 package internal
 
 import (

@@ -1,3 +1,6 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package app
 
 import (
@@ -15,6 +18,26 @@ import (
 
 	"github.com/sunerpy/pt-tools/models"
 )
+
+func TestRSSRetryWorker_InvalidPayloadMarksFailed(t *testing.T) {
+	db := setupRetryWorkerDB(t)
+	past := time.Now().Add(-time.Minute)
+	row := models.RSSNotificationLog{
+		RSSID: 1, SiteName: "s", TorrentID: "bad", NotifyKind: "all",
+		NotificationConfID: 1, Result: "pending", Attempts: 0,
+		NextRetryAt: &past,
+		PayloadJSON: "{not valid json",
+		CreatedAt:   time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, db.Create(&row).Error)
+
+	w := NewRSSRetryWorker(db, &fakePushSvc{})
+	require.NoError(t, w.drainOnce(context.Background()))
+
+	var got models.RSSNotificationLog
+	require.NoError(t, db.First(&got, row.ID).Error)
+	assert.Equal(t, "failed", got.Result)
+}
 
 func setupRetryWorkerDB(t *testing.T) *gorm.DB {
 	t.Helper()

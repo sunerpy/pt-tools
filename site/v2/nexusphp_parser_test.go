@@ -352,3 +352,91 @@ func TestParserConfig(t *testing.T) {
 		assert.NotNil(t, p2)
 	})
 }
+
+func TestNewNexusPHPParserFromDefinition_Custom(t *testing.T) {
+	def := &SiteDefinition{
+		DetailParser: &DetailParserConfig{
+			TimeLayout:       "2006-01-02 15:04:05",
+			DiscountMapping:  map[string]DiscountLevel{"myfree": DiscountFree},
+			HRKeywords:       []string{"MYHR"},
+			TitleSelector:    "input[name='torrent_name']",
+			IDSelector:       "input[name='detail_torrent_id']",
+			DiscountSelector: "h1 font",
+			EndTimeSelector:  "h1 span[title]",
+			SizeSelector:     "td.rowhead:contains('基本信息')",
+			SizeRegex:        `大小：[^\d]*([\d.]+)\s*(GB|MB|KB|TB)`,
+		},
+	}
+	parser := NewNexusPHPParserFromDefinition(def)
+	require.NotNil(t, parser)
+
+	html := `<html><body>
+		<input name="torrent_name" value="Cool.Movie.2024">
+		<input name="detail_torrent_id" value="777">
+		<h1><font class="myfree">FREE</font><span title="2026-01-20 15:30:00">x</span></h1>
+		<table><tr><td class="rowhead">基本信息</td><td>大小：4.00 GB</td></tr></table>
+		<div>MYHR flag</div>
+	</body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	require.NoError(t, err)
+
+	info := parser.ParseAll(doc.Selection)
+	assert.Equal(t, "777", info.TorrentID)
+	assert.Equal(t, "Cool.Movie.2024", info.Title)
+	assert.Equal(t, DiscountFree, info.DiscountLevel)
+	assert.InDelta(t, 4.0*1024, info.SizeMB, 0.1)
+	assert.True(t, info.HasHR)
+	assert.False(t, info.DiscountEnd.IsZero())
+}
+
+func TestNewNexusPHPParserFromDefinition_Nil(t *testing.T) {
+	parser := NewNexusPHPParserFromDefinition(nil)
+	require.NotNil(t, parser)
+	parser2 := NewNexusPHPParserFromDefinition(&SiteDefinition{})
+	require.NotNil(t, parser2)
+}
+
+// ---------------------------------------------------------------------------
+// level.go — GuessUserLevelID, GetSiteNextLevelUnmet, CalculateSiteLevelProgress
+// ---------------------------------------------------------------------------
+
+func TestNexusPHPParser_ParseSizeMB_Units(t *testing.T) {
+	p := NewNexusPHPParser()
+
+	tb := `<html><body><table><tr><td class="rowhead">基本信息</td><td>大小：2.00 TB</td></tr></table></body></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(tb))
+	assert.InDelta(t, 2.0*1024*1024, p.ParseSizeMB(doc.Selection), 1)
+
+	kb := `<html><body><table><tr><td class="rowhead">基本信息</td><td>大小：512.00 KB</td></tr></table></body></html>`
+	doc2, _ := goquery.NewDocumentFromReader(strings.NewReader(kb))
+	assert.InDelta(t, 512.0/1024, p.ParseSizeMB(doc2.Selection), 0.01)
+
+	none := `<html><body><table><tr><td class="rowhead">基本信息</td><td>无</td></tr></table></body></html>`
+	doc3, _ := goquery.NewDocumentFromReader(strings.NewReader(none))
+	assert.Equal(t, float64(0), p.ParseSizeMB(doc3.Selection))
+}
+
+// ---------------------------------------------------------------------------
+// mtorrent GetUnreadMessageCount error
+// ---------------------------------------------------------------------------
+
+func TestNexusPHPParser_Options(t *testing.T) {
+	p := NewNexusPHPParser(
+		WithDiscountMapping(map[string]DiscountLevel{"foo": DiscountFree}),
+		WithHRKeywords([]string{"kw"}),
+		WithParserTimeLayout("2006-01-02"),
+	)
+	require.NotNil(t, p)
+	assert.Equal(t, DiscountFree, p.config.DiscountMapping["foo"])
+	assert.Equal(t, []string{"kw"}, p.config.HRKeywords)
+	assert.Equal(t, "2006-01-02", p.config.TimeLayout)
+}
+
+func TestNexusPHPParserFromDefinition_Default(t *testing.T) {
+	p := NewNexusPHPParserFromDefinition(nil)
+	require.NotNil(t, p)
+
+	def := &SiteDefinition{DetailParser: &DetailParserConfig{TimeLayout: "2006-01-02"}}
+	p2 := NewNexusPHPParserFromDefinition(def)
+	assert.Equal(t, "2006-01-02", p2.config.TimeLayout)
+}

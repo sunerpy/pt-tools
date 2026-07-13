@@ -1,9 +1,13 @@
+// MIT License
+// Copyright (c) 2025 pt-tools
+
 package chatops
 
 import (
 	"regexp"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,4 +60,18 @@ func TestBindCode_AlphaNumeric(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, validPattern.MatchString(code), "bindcode %q must match pattern [A-Z0-9]{8} excluding 0/O/1/l/I", code)
 	}
+}
+
+func TestGenerateBindCode_UniqueValidChars(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 50; i++ {
+		code, err := GenerateBindCode()
+		require.NoError(t, err)
+		require.Len(t, code, 8)
+		for _, c := range code {
+			assert.Contains(t, bindcodeCharset, string(c), "code must only use unambiguous charset")
+		}
+		seen[code] = true
+	}
+	assert.Greater(t, len(seen), 40, "codes should be effectively unique")
 }

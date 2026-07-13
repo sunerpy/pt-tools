@@ -382,3 +382,94 @@ func TestParseGazelleDiscount(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectGazelleDetailTorrent_SingleTorrent(t *testing.T) {
+	detail := gazelleTorrentDetailResponse{Torrent: GazelleTorrent{TorrentID: 7, Size: 100}}
+	got := selectGazelleDetailTorrent(detail, 0)
+	assert.Equal(t, 7, got.TorrentID)
+}
+
+func TestSelectGazelleDetailTorrent_MatchInSlice(t *testing.T) {
+	detail := gazelleTorrentDetailResponse{Torrents: []GazelleTorrent{
+		{TorrentID: 1}, {TorrentID: 2}, {TorrentID: 3},
+	}}
+	got := selectGazelleDetailTorrent(detail, 2)
+	assert.Equal(t, 2, got.TorrentID)
+}
+
+func TestSelectGazelleDetailTorrent_FallbackFirst(t *testing.T) {
+	detail := gazelleTorrentDetailResponse{Torrents: []GazelleTorrent{
+		{TorrentID: 10}, {TorrentID: 20},
+	}}
+	got := selectGazelleDetailTorrent(detail, 999) // no match -> first
+	assert.Equal(t, 10, got.TorrentID)
+}
+
+func TestSelectGazelleDetailTorrent_FallbackTopLevel(t *testing.T) {
+	detail := gazelleTorrentDetailResponse{ID: 55, Format: "FLAC", Size: 999}
+	got := selectGazelleDetailTorrent(detail, 0)
+	assert.Equal(t, 55, got.TorrentID)
+	assert.Equal(t, "FLAC", got.Format)
+	assert.Equal(t, int64(999), got.Size)
+}
+
+func TestGazelleDriver_GetUserInfo_ExecuteError(t *testing.T) {
+	d := NewGazelleDriver(GazelleDriverConfig{BaseURL: "http://127.0.0.1:1", APIKey: "key"})
+	_, err := d.GetUserInfo(context.Background())
+	require.Error(t, err)
+}
+
+func TestGazelleDriver_GetTorrentDetail_Array(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"success","response":{"group":{"name":"Album","artist":"Artist"},
+			"torrents":[{"torrentId":5,"format":"FLAC","encoding":"Lossless","size":2048,"seeders":3,"leechers":1,"snatches":9,"isFreeleech":true,"time":"2024-01-01 10:00:00"}]}}`))
+	}))
+	defer server.Close()
+
+	d := NewGazelleDriver(GazelleDriverConfig{BaseURL: server.URL, APIKey: "key"})
+	item, err := d.GetTorrentDetail(context.Background(), "5", server.URL+"/torrents.php?id=5", "fallback")
+	require.NoError(t, err)
+	require.NotNil(t, item)
+	assert.Equal(t, "5", item.ID)
+	assert.Contains(t, item.Title, "Album")
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.Greater(t, item.UploadedAt, int64(0))
+}
+
+// ---------------------------------------------------------------------------
+// unit3d_driver.go — Execute error paths, GetUserInfo
+// ---------------------------------------------------------------------------
+
+func TestGazelleDriver_GetUserInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"success","response":{
+			"id":42,"username":"gztester",
+			"stats":{"uploaded":10737418240,"downloaded":1073741824,"ratio":10.0,"LastAccess":"2024-06-01 12:00:00"},
+			"ranks":{"class":"Elite"},
+			"personal":{"bonus":5000},
+			"community":{"seeding":15,"leeching":1}
+		}}`))
+	}))
+	defer server.Close()
+
+	d := NewGazelleDriver(GazelleDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	info, err := d.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "42", info.UserID)
+	assert.Equal(t, "gztester", info.Username)
+	assert.Equal(t, int64(10737418240), info.Uploaded)
+	assert.Equal(t, "Elite", info.Rank)
+	assert.Equal(t, 15, info.Seeding)
+	assert.Greater(t, info.LastAccess, int64(0))
+}
+
+func TestGazelleDriver_ParseDownload(t *testing.T) {
+	d := NewGazelleDriver(GazelleDriverConfig{BaseURL: "https://x.com"})
+	data, err := d.ParseDownload(GazelleResponse{RawBody: []byte("torrent")})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("torrent"), data)
+
+	_, err = d.ParseDownload(GazelleResponse{})
+	assert.ErrorIs(t, err, ErrParseError)
+}

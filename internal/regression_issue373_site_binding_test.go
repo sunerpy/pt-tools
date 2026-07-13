@@ -1,15 +1,6 @@
 // MIT License
 // Copyright (c) 2025 pt-tools
 
-// Issue #373 regression tests: 多下载器场景下，绑定到站点的下载器必须生效。
-//
-// 修复后的优先级（GetDownloaderForRSSAndSiteWithInfo）：
-//  1. rssCfg.DownloaderID（RSS 行级覆盖）
-//  2. SiteSetting.DownloaderID（站点绑定，本 issue 修复点）
-//  3. is_default=true（兜底）
-//
-// 旧 API GetDownloaderForRSSWithInfo（无站点上下文）保留向后兼容，仅 1+3 路径。
-
 package internal
 
 import (
