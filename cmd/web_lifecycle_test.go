@@ -65,14 +65,7 @@ func TestInstallShutdownHandler_ShutdownErrorsLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find process: %v", err)
 	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("signal: %v", err)
-	}
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("shutdown handler did not complete after SIGTERM")
-	}
+	waitShutdownAfterSIGTERM(t, proc, done)
 }
 
 // TestInstallShutdownHandler_NilServerAndBootstrap verifies the handler installs
@@ -86,13 +79,30 @@ func TestInstallShutdownHandler_NilServerAndBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find process: %v", err)
 	}
+	waitShutdownAfterSIGTERM(t, proc, done)
+}
+
+// waitShutdownAfterSIGTERM 等待 installShutdownHandler 的 goroutine 先注册
+// signal.Notify，再发送 SIGTERM。注册前 SIGTERM 的默认动作会直接终止进程
+// （signal: terminated），故先给一小段时间让 Notify 生效；注册后 SIGTERM 被捕获，
+// 此时周期性重发可覆盖首个信号仍偶发早到的情况，确保被处理而非丢失或杀进程。
+func waitShutdownAfterSIGTERM(t *testing.T, proc *os.Process, done <-chan struct{}) {
+	t.Helper()
+	time.Sleep(200 * time.Millisecond)
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal: %v", err)
 	}
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("shutdown handler did not complete after SIGTERM")
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			_ = proc.Signal(syscall.SIGTERM)
+		case <-deadline:
+			t.Fatal("shutdown handler did not complete after SIGTERM")
+		}
 	}
 }
