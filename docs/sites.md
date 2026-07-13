@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **51** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **53** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（47）
+### NexusPHP 系列（49）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
@@ -53,6 +53,8 @@
 | **PTCHDBits**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptchdbits.co，详情页 img.pro_free 促销，issue 请求）     |
 | **PTerClub**          | Cookie   | RSS、搜索、用户信息           | ✅       | 猫站（pterclub.net，魔力值=猫粮，info_block 取数据）             |
 | **PTHome**            | Cookie   | RSS、搜索、用户信息           | ✅       | 铂金家（pthome.net，info_block 取上传/下载/魔力/做种积分）       |
+| **TangPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 糖果（www.tangpt.top，CHD 模板，issue #456）                     |
+| **T-Baozi**           | Cookie   | RSS、搜索、用户信息           | ✅       | 包子（p.t-baozi.cc，info_block 取数据，issue #457）              |
 
 ### 其他架构（4）
 
