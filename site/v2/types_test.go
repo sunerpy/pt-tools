@@ -207,3 +207,64 @@ func TestFreeDiscountLevels(t *testing.T) {
 	assert.Contains(t, FreeDiscountLevels, DiscountFree)
 	assert.Contains(t, FreeDiscountLevels, Discount2xFree)
 }
+
+func TestSchema_DefaultAuthMethod(t *testing.T) {
+	assert.Equal(t, AuthMethodAPIKey, SchemaMTorrent.DefaultAuthMethod())
+	assert.Equal(t, AuthMethodAPIKey, SchemaUnit3D.DefaultAuthMethod())
+	assert.Equal(t, AuthMethodPasskey, SchemaRousi.DefaultAuthMethod())
+	assert.Equal(t, AuthMethodCookie, SchemaNexusPHP.DefaultAuthMethod())
+	assert.Equal(t, AuthMethodCookie, SchemaGazelle.DefaultAuthMethod())
+}
+
+// ---------------------------------------------------------------------------
+// persistent_rate_limiter.go — NewPersistentRateLimiterFromRPS, timeUntilNextWindow
+// ---------------------------------------------------------------------------
+
+func TestAuthMethod_IsValidString(t *testing.T) {
+	assert.True(t, AuthMethodCookie.IsValid())
+	assert.True(t, AuthMethodAPIKey.IsValid())
+	assert.True(t, AuthMethodCookieAndAPIKey.IsValid())
+	assert.True(t, AuthMethodPasskey.IsValid())
+	assert.False(t, AuthMethod("bogus").IsValid())
+	assert.Equal(t, "cookie", AuthMethodCookie.String())
+}
+
+func TestTorrentItem_Getters(t *testing.T) {
+	end := time.Now().Add(time.Hour)
+	item := TorrentItem{
+		Title:           "My Torrent",
+		Tags:            []string{"a", "b"},
+		DiscountLevel:   DiscountFree,
+		DiscountEndTime: end,
+	}
+	assert.Equal(t, "My Torrent", item.GetName())
+	assert.Equal(t, "a b", item.GetSubTitle())
+	assert.Equal(t, string(DiscountFree), item.GetFreeLevel())
+	require.NotNil(t, item.GetFreeEndTime())
+	assert.Equal(t, end, *item.GetFreeEndTime())
+
+	noEnd := TorrentItem{DiscountLevel: DiscountFree}
+	assert.Nil(t, noEnd.GetFreeEndTime())
+	assert.Equal(t, "", noEnd.GetSubTitle())
+}
+
+func TestTorrentItem_CanbeFinished(t *testing.T) {
+	// Size over limit -> false
+	big := TorrentItem{SizeBytes: 100 * 1024 * 1024 * 1024}
+	assert.False(t, big.CanbeFinished(true, 10, 50))
+
+	// disabled -> true
+	item := TorrentItem{SizeBytes: 1024 * 1024 * 1024}
+	assert.True(t, item.CanbeFinished(false, 0, 0))
+
+	// enabled, no end time -> true
+	assert.True(t, item.CanbeFinished(true, 100, 0))
+
+	// enabled, end passed -> false
+	past := TorrentItem{SizeBytes: 1024 * 1024 * 1024, DiscountEndTime: time.Now().Add(-time.Hour)}
+	assert.False(t, past.CanbeFinished(true, 100, 0))
+
+	// enabled, plenty of time -> true
+	future := TorrentItem{SizeBytes: 1024 * 1024, DiscountEndTime: time.Now().Add(10 * time.Hour)}
+	assert.True(t, future.CanbeFinished(true, 100, 0))
+}

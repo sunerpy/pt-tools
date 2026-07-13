@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestNewHDDolbyDriver_Defaults(t *testing.T) {
@@ -349,4 +350,103 @@ func TestHDDolbyDriver_InvalidateDetailCache(t *testing.T) {
 	d.detailCache = []HDDolbyTorrent{{ID: 1}}
 	d.invalidateDetailCache()
 	assert.Nil(t, d.detailCache)
+}
+
+func TestHDDolbyDriver_GetTorrentDetail_CacheMissRefresh(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":200,"data":{"data":[{"id":1,"name":"A"}],"total":1}}`))
+	}))
+	defer server.Close()
+
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: server.URL, APIURL: server.URL, APIKey: "k"})
+	// Requesting a missing ID repeatedly should trigger cache invalidation + refresh at miss>=3.
+	for i := 0; i < 3; i++ {
+		item, err := d.GetTorrentDetail(context.Background(), "999", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, "999", item.ID)
+	}
+	assert.GreaterOrEqual(t, calls, 2)
+}
+
+func TestHDDolbyDriver_DownloadWithHash(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("d8:announce"))
+	}))
+	defer server.Close()
+
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: server.URL, APIURL: server.URL, APIKey: "k"})
+	data, err := d.DownloadWithHash(context.Background(), "5", "hh")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("d8:announce"), data)
+
+	data2, err := d.Download(context.Background(), "5")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("d8:announce"), data2)
+}
+
+func TestHDDolbyDriver_DownloadWithHash_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: server.URL, APIURL: server.URL, APIKey: "k"})
+	_, err := d.DownloadWithHash(context.Background(), "5", "")
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// userinfo_service.go — FetchAndSaveAllWithConcurrency
+// ---------------------------------------------------------------------------
+
+func TestCreateHDDolbySite(t *testing.T) {
+	opts := HDDolbyOptions{APIKey: "rsskey", Cookie: "c=1"}
+	optsBytes, _ := json.Marshal(opts)
+	site, err := createHDDolbySite(SiteConfig{
+		ID:      "hddolby",
+		Name:    "HDDolby",
+		BaseURL: "https://www.hddolby.com",
+		Options: optsBytes,
+	}, zap.NewNop())
+	require.NoError(t, err)
+	require.NotNil(t, site)
+	assert.Equal(t, "hddolby", site.ID())
+}
+
+func TestCreateHDDolbySite_MissingCreds(t *testing.T) {
+	_, err := createHDDolbySite(SiteConfig{ID: "hddolby", Name: "HDDolby", BaseURL: "https://x.com"}, zap.NewNop())
+	require.Error(t, err)
+
+	opts := HDDolbyOptions{APIKey: "k"}
+	optsBytes, _ := json.Marshal(opts)
+	_, err = createHDDolbySite(SiteConfig{ID: "hddolby", Name: "HDDolby", BaseURL: "https://x.com", Options: optsBytes}, zap.NewNop())
+	require.Error(t, err)
+}
+
+func TestCreateHDDolbySite_BadOptions(t *testing.T) {
+	_, err := createHDDolbySite(SiteConfig{ID: "hddolby", Options: []byte("notjson")}, zap.NewNop())
+	require.Error(t, err)
+}
+
+func TestHDDolbyDriver_Search_Error(t *testing.T) {
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: "http://127.0.0.1:1", APIURL: "http://127.0.0.1:1", APIKey: "k"})
+	_, err := d.Search(context.Background(), SearchQuery{Keyword: "x"})
+	require.Error(t, err)
+}
+
+func TestHDDolbyDriver_GetTorrentDetail_ArrayCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":200,"data":[{"id":7,"name":"ArrForm"}]}`))
+	}))
+	defer server.Close()
+
+	d := NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: server.URL, APIURL: server.URL, APIKey: "k"})
+	item, err := d.GetTorrentDetail(context.Background(), "7", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "7", item.ID)
+	assert.Equal(t, "ArrForm", item.Title)
 }

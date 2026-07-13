@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -363,5 +365,35 @@ func TestHexDecodeString(t *testing.T) {
 
 	// Invalid hex
 	_, err = hex.DecodeString("invalid")
+	assert.Error(t, err)
+}
+
+func TestComputeTorrentHashFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.torrent")
+	// Minimal valid torrent with info dict
+	content := []byte("d4:infod6:lengthi100e4:name4:teste8:announce3:urle")
+	require.NoError(t, os.WriteFile(path, content, 0o644))
+
+	hash, err := ComputeTorrentHashFromFile(path)
+	require.NoError(t, err)
+	assert.Len(t, hash, 40)
+
+	_, err = ComputeTorrentHashFromFile(filepath.Join(dir, "missing.torrent"))
+	assert.Error(t, err)
+}
+
+func TestParseTorrentFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.torrent")
+	content := []byte("d8:announce3:url4:infod6:lengthi100e4:name8:test.mkv12:piece lengthi16384eee")
+	require.NoError(t, os.WriteFile(path, content, 0o644))
+
+	parsed, err := ParseTorrentFromFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "test.mkv", parsed.Name)
+	assert.Equal(t, int64(100), parsed.Size)
+
+	_, err = ParseTorrentFromFile(filepath.Join(dir, "missing.torrent"))
 	assert.Error(t, err)
 }

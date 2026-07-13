@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // TestURLFailoverManager_ExecuteWithFailover tests the failover behavior
@@ -352,3 +353,71 @@ func TestIsRetryableError(t *testing.T) {
 		assert.True(t, isRetryableError(errors.New("network error")))
 	})
 }
+
+func TestURLFailoverManager_GetAllURLs(t *testing.T) {
+	cfg := URLFailoverConfig{BaseURLs: []string{"http://a", "http://b"}, Timeout: time.Second}
+	m := NewURLFailoverManager(cfg, nil)
+	assert.Equal(t, []string{"http://a", "http://b"}, m.GetAllURLs())
+}
+
+func TestFailover_WithLogger(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := URLFailoverConfig{BaseURLs: []string{"http://a"}, Timeout: time.Second}
+	c := NewFailoverHTTPClient(cfg, WithLogger(logger))
+	assert.Same(t, logger, c.logger)
+}
+
+func TestFailoverHTTPClient_Do(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api", r.URL.Path)
+		assert.Equal(t, "custom", r.Header.Get("X-Test"))
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("get-ok"))
+		}
+	}))
+	defer server.Close()
+
+	cfg := DefaultFailoverConfig([]string{server.URL})
+	c := NewFailoverHTTPClient(cfg)
+
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		resp, err := c.Do(context.Background(), method, "/api", []byte("body"), map[string]string{"X-Test": "custom"})
+		require.NoError(t, err, "method %s", method)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+}
+
+func TestFailoverHTTPClient_Do_UnsupportedMethod(t *testing.T) {
+	cfg := DefaultFailoverConfig([]string{"http://127.0.0.1:1"})
+	cfg.MaxRetries = 0
+	c := NewFailoverHTTPClient(cfg)
+	_, err := c.Do(context.Background(), "BREW", "/x", nil, nil)
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// nexusphp_driver.go — Execute / login & 2FA detection / ParseDownload live /
+// FetchSeedingStatus / filterNames / buildCurlCommand / isHexString
+// ---------------------------------------------------------------------------
+
+func TestURLFailoverManager_GetCurrentURL(t *testing.T) {
+	m := NewURLFailoverManager(URLFailoverConfig{BaseURLs: []string{"http://a", "http://b"}}, nil)
+	assert.Equal(t, "http://a", m.GetCurrentURL())
+
+	empty := NewURLFailoverManager(URLFailoverConfig{}, nil)
+	assert.Equal(t, "", empty.GetCurrentURL())
+}
+
+func TestFailoverHTTPClient_GetCurrentBaseURL(t *testing.T) {
+	c := NewFailoverHTTPClient(URLFailoverConfig{BaseURLs: []string{"http://z"}, Timeout: time.Second})
+	assert.Equal(t, "http://z", c.GetCurrentBaseURL())
+}
+
+// ---------------------------------------------------------------------------
+// http_client.go — RequestsClient doWithRetry max exceeded
+// ---------------------------------------------------------------------------

@@ -322,3 +322,11 @@ func TestSearchOrchestrator_Search_Ranking(t *testing.T) {
 	assert.Equal(t, 50, result.Items[1].Seeders)
 	assert.Equal(t, 5, result.Items[2].Seeders)
 }
+
+func TestSearchOrchestrator_GetSite(t *testing.T) {
+	o := NewSearchOrchestrator(SearchOrchestratorConfig{})
+	site := &mockSearchSite{id: "s1", name: "Site 1"}
+	o.RegisterSite(site)
+	assert.Equal(t, site, o.GetSite("s1"))
+	assert.Nil(t, o.GetSite("missing"))
+}

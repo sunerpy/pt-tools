@@ -254,3 +254,18 @@ func TestSuggestBestDiscount(t *testing.T) {
 	result = SuggestBestDiscount(DiscountPercent50, now.Add(2*time.Hour), time.Hour)
 	assert.Equal(t, DiscountPercent50, result)
 }
+
+func TestSuggestBestDiscount_Cov5(t *testing.T) {
+	// already free
+	assert.Equal(t, DiscountFree, SuggestBestDiscount(DiscountFree, time.Time{}, time.Hour))
+	// permanent discount
+	assert.Equal(t, DiscountPercent50, SuggestBestDiscount(DiscountPercent50, time.Time{}, time.Hour))
+	// enough time remaining
+	assert.Equal(t, DiscountPercent50, SuggestBestDiscount(DiscountPercent50, time.Now().Add(2*time.Hour), time.Hour))
+	// not enough time
+	assert.Equal(t, DiscountPercent50, SuggestBestDiscount(DiscountPercent50, time.Now().Add(time.Minute), time.Hour))
+}
+
+// ---------------------------------------------------------------------------
+// hddolby Search error + getOrRefreshDetailCache array fallback
+// ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // MockSite is a mock implementation of the Site interface
@@ -343,3 +344,34 @@ func TestUserInfoService_ClearCache(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "testuser", info.Username)
 }
+
+func TestUserInfoService_FetchAndSaveAllWithConcurrency(t *testing.T) {
+	service := NewUserInfoService(UserInfoServiceConfig{Logger: zap.NewNop()})
+	ctx := context.Background()
+
+	s1 := &MockSite{}
+	s1.On("ID").Return("hdsky")
+	s1.On("GetUserInfo", mock.Anything).Return(UserInfo{Site: "hdsky", Username: "u1"}, nil)
+
+	s2 := &MockSite{}
+	s2.On("ID").Return("mteam")
+	s2.On("GetUserInfo", mock.Anything).Return(UserInfo{Site: "mteam", Username: "u2"}, nil)
+
+	service.RegisterSite(s1)
+	service.RegisterSite(s2)
+
+	results, errs := service.FetchAndSaveAllWithConcurrency(ctx, 2, 5*time.Second)
+	assert.Len(t, results, 2)
+	assert.Empty(t, errs)
+}
+
+func TestUserInfoService_FetchAndSaveAllWithConcurrency_Empty(t *testing.T) {
+	service := NewUserInfoService(UserInfoServiceConfig{Logger: zap.NewNop()})
+	results, errs := service.FetchAndSaveAllWithConcurrency(context.Background(), 2, time.Second)
+	assert.Nil(t, results)
+	assert.Nil(t, errs)
+}
+
+// ---------------------------------------------------------------------------
+// createHDDolbySite — factory path
+// ---------------------------------------------------------------------------

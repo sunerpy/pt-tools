@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -133,4 +134,12 @@ func TestMetricType_Constants(t *testing.T) {
 	assert.Equal(t, MetricType("counter"), MetricTypeCounter)
 	assert.Equal(t, MetricType("gauge"), MetricTypeGauge)
 	assert.Equal(t, MetricType("histogram"), MetricTypeHistogram)
+}
+
+func TestJSONMarshalMetricsSnapshot(t *testing.T) {
+	// exercise json tags to avoid unused import concerns; harmless coverage of struct
+	snap := MetricsSnapshot{Counters: map[string]int64{"a": 1}}
+	b, err := json.Marshal(snap)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "\"a\":1")
 }

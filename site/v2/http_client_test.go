@@ -470,3 +470,132 @@ func TestRequestsResponse_Methods(t *testing.T) {
 	assert.False(t, errResp.IsSuccess())
 	assert.True(t, errResp.IsError())
 }
+
+func TestSiteHTTPClient_DoRequest_Methods(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(r.Method))
+	}))
+	defer server.Close()
+
+	c := NewSiteHTTPClient(SiteHTTPClientConfig{Timeout: 5 * time.Second, UserAgent: "t"})
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		resp, err := c.DoRequest(context.Background(), method, server.URL, nil, map[string]string{"X-H": "v"})
+		require.NoError(t, err, method)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+}
+
+func TestSiteHTTPClient_DoRequest_UnsupportedMethod(t *testing.T) {
+	c := NewSiteHTTPClient(SiteHTTPClientConfig{Timeout: time.Second, UserAgent: "t"})
+	_, err := c.DoRequest(context.Background(), "BREW", "http://x", nil, nil)
+	require.Error(t, err)
+}
+
+func TestHandleQBittorrentAuthWithRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "SID", Value: "sessid123"})
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Ok."))
+	}))
+	defer server.Close()
+
+	sid, err := HandleQBittorrentAuthWithRequests(context.Background(), server.URL, "admin", "pw")
+	require.NoError(t, err)
+	assert.Equal(t, "sessid123", sid)
+}
+
+func TestHandleQBittorrentAuthWithRequests_NoCookie(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Ok."))
+	}))
+	defer server.Close()
+
+	_, err := HandleQBittorrentAuthWithRequests(context.Background(), server.URL, "a", "p")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no SID cookie")
+}
+
+func TestHandleQBittorrentAuthWithRequests_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	_, err := HandleQBittorrentAuthWithRequests(context.Background(), server.URL, "a", "p")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "login failed")
+}
+
+// ---------------------------------------------------------------------------
+// registry.go — CreateSite HDDolby + Gazelle credential branches
+// ---------------------------------------------------------------------------
+
+func TestRequestsClient_DoWithRetry_MaxExceeded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := DefaultRetryConfig()
+	cfg.MaxRetries = 1
+	cfg.InitialBackoff = 5 * time.Millisecond
+	cfg.MaxBackoff = 10 * time.Millisecond
+	client := NewRequestsClient(DefaultHTTPClientConfig(), cfg, nil)
+	defer client.Close()
+
+	resp, err := client.Get(context.Background(), server.URL)
+	// Retryable status returns the last response and an error after retries exhausted
+	require.Error(t, err)
+	if resp != nil {
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode())
+	}
+}
+
+func TestRequestsClient_DoWithRetry_NetworkError(t *testing.T) {
+	cfg := DefaultRetryConfig()
+	cfg.MaxRetries = 1
+	cfg.InitialBackoff = 5 * time.Millisecond
+	cfg.MaxBackoff = 10 * time.Millisecond
+	client := NewRequestsClient(DefaultHTTPClientConfig(), cfg, nil)
+	defer client.Close()
+
+	_, err := client.Get(context.Background(), "http://127.0.0.1:1")
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// NewSizeTieredHRCalc — no-match fallback returns max
+// ---------------------------------------------------------------------------
+
+func TestDefaultSiteHTTPClientConfig(t *testing.T) {
+	cfg := DefaultSiteHTTPClientConfig()
+	assert.Equal(t, 30*time.Second, cfg.Timeout)
+	assert.Equal(t, 100, cfg.MaxIdleConns)
+	assert.NotEmpty(t, cfg.UserAgent)
+}
+
+func TestHTTPResponse_IsSuccessIsError(t *testing.T) {
+	assert.True(t, (&HTTPResponse{StatusCode: 200}).IsSuccess())
+	assert.True(t, (&HTTPResponse{StatusCode: 299}).IsSuccess())
+	assert.False(t, (&HTTPResponse{StatusCode: 404}).IsSuccess())
+	assert.True(t, (&HTTPResponse{StatusCode: 404}).IsError())
+	assert.True(t, (&HTTPResponse{StatusCode: 500}).IsError())
+	assert.False(t, (&HTTPResponse{StatusCode: 200}).IsError())
+}
+
+func TestSiteHTTPClient_PostJSONAndClose(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewSiteHTTPClient(SiteHTTPClientConfig{Timeout: 5 * time.Second})
+	resp, err := client.PostJSON(context.Background(), server.URL, []byte(`{"a":1}`), nil)
+	require.NoError(t, err)
+	assert.True(t, resp.IsSuccess())
+	require.NoError(t, client.Close())
+}

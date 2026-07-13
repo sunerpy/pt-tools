@@ -177,3 +177,15 @@ func TestDBUserInfoRepo_GetAggregated_Empty(t *testing.T) {
 	assert.Equal(t, 0, stats.SiteCount)
 	assert.Equal(t, float64(0), stats.AverageRatio)
 }
+
+func TestNewDBUserInfoRepo_Success(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	repo, err := NewDBUserInfoRepo(db)
+	require.NoError(t, err)
+	require.NotNil(t, repo)
+}
+
+// ---------------------------------------------------------------------------
+// mtorrent_driver.go — executeDirectly form-urlencoded body + string body
+// ---------------------------------------------------------------------------

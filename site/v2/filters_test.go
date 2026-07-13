@@ -2,6 +2,8 @@ package v2
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParseNumberFilter(t *testing.T) {
@@ -585,4 +587,23 @@ func TestToFloat64(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQuerystringFilter_Branches(t *testing.T) {
+	assert.Equal(t, "42", querystringFilter("https://x.com/details.php?id=42&x=1", "id"))
+	assert.Equal(t, "", querystringFilter("https://x.com?id=42"))
+	assert.Equal(t, "", querystringFilter("https://x.com?a=1", "id"))
+	// control char makes url.Parse fail but url.ParseQuery still recovers id=9 (fallback branch)
+	assert.Equal(t, "9", querystringFilter("foo\nbar=1&id=9", "id"))
+}
+
+// ---------------------------------------------------------------------------
+// site_definition.go — NewSizeTieredHRCalc, DefaultAuthMethod
+// ---------------------------------------------------------------------------
+
+func TestFilters_IntFloatCase(t *testing.T) {
+	assert.Equal(t, int64(1234), ApplyFilters("1,234", []Filter{{Name: "parseInt"}}))
+	assert.InDelta(t, 12.5, ApplyFilters("12.5", []Filter{{Name: "parseFloat"}}).(float64), 0.01)
+	assert.Equal(t, "hello", ApplyFilters("HELLO", []Filter{{Name: "toLowerCase"}}))
+	assert.Equal(t, "HELLO", ApplyFilters("hello", []Filter{{Name: "toUpperCase"}}))
 }

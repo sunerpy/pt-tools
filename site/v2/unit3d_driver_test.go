@@ -261,3 +261,114 @@ func TestParseUnit3DDiscount(t *testing.T) {
 		})
 	}
 }
+
+func TestUnit3DDriver_Execute_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	_, err := d.Execute(context.Background(), Unit3DRequest{Endpoint: "/api/user"})
+	assert.ErrorIs(t, err, ErrInvalidCredentials)
+}
+
+func TestUnit3DDriver_Execute_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	_, err := d.Execute(context.Background(), Unit3DRequest{Endpoint: "/api/user"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 502")
+}
+
+func TestUnit3DDriver_Execute_BadJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer server.Close()
+
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	_, err := d.Execute(context.Background(), Unit3DRequest{Endpoint: "/api/user"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse JSON")
+}
+
+func TestUnit3DDriver_GetUserInfo_Error(t *testing.T) {
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "http://127.0.0.1:1", APIKey: "k"})
+	_, err := d.GetUserInfo(context.Background())
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// base_site.go — DownloadWithHash, GetDetailFetcher
+// ---------------------------------------------------------------------------
+
+func TestUnit3DDriver_ParseSearch_Full(t *testing.T) {
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "https://u.example", APIKey: "k"})
+	data := []byte(`[{"id":5,"name":"Film","info_hash":"abc","size":1024,"seeders":10,"leechers":2,
+		"times_completed":50,"category":{"name":"Movies"},"freeleech":"100","double_upload":true,
+		"created_at":"2024-06-01T12:00:00Z","freeleech_ends":"2024-07-01T12:00:00Z","download_link":"https://dl"}]`)
+	items, err := d.ParseSearch(Unit3DResponse{Data: data})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "5", items[0].ID)
+	assert.Equal(t, "Film", items[0].Title)
+	assert.Equal(t, Discount2xFree, items[0].DiscountLevel)
+	assert.Greater(t, items[0].UploadedAt, int64(0))
+	assert.False(t, items[0].DiscountEndTime.IsZero())
+}
+
+func TestUnit3DDriver_ParseSearch_BadJSON(t *testing.T) {
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "https://u.example", APIKey: "k"})
+	_, err := d.ParseSearch(Unit3DResponse{Data: []byte("notjson")})
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// driver_registry.go — CreateSiteFromDefinition custom driver + no factory
+// ---------------------------------------------------------------------------
+
+func TestUnit3DDriver_GetUserInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":{
+			"id":7,"username":"u3duser","uploaded":10737418240,"downloaded":1073741824,
+			"ratio":10.0,"seedbonus":5000,"seeding":20,"leeching":2,
+			"group":{"name":"Uploader"},"created_at":"2020-01-01T00:00:00Z",
+			"last_login":"2024-06-01T12:00:00Z","last_action":"2024-06-02T09:00:00Z"
+		}}`))
+	}))
+	defer server.Close()
+
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	info, err := d.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "7", info.UserID)
+	assert.Equal(t, "u3duser", info.Username)
+	assert.Equal(t, "Uploader", info.Rank)
+	assert.Greater(t, info.JoinDate, int64(0))
+	assert.Greater(t, info.LastLogin, int64(0))
+	assert.Greater(t, info.LastAccess, int64(0))
+}
+
+func TestUnit3DDriver_ParseDownload(t *testing.T) {
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "https://x.com", APIKey: "k"})
+	data, err := d.ParseDownload(Unit3DResponse{RawBody: []byte("torrent")})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("torrent"), data)
+
+	_, err = d.ParseDownload(Unit3DResponse{})
+	assert.ErrorIs(t, err, ErrParseError)
+}
+
+func TestParseUnit3DTimestamp(t *testing.T) {
+	assert.Equal(t, int64(0), parseUnit3DTimestamp(""))
+	assert.Equal(t, int64(0), parseUnit3DTimestamp("garbage"))
+	assert.Greater(t, parseUnit3DTimestamp("2024-06-01T12:00:00Z"), int64(0))
+	assert.Greater(t, parseUnit3DTimestamp("2024-06-01 12:00:00"), int64(0))
+}

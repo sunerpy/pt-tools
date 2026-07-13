@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/core"
@@ -77,4 +79,17 @@ func TestRunCmdFunc_SingleSuccess(t *testing.T) {
 	cmd.Flags().String("mode", "single", "")
 	require.NoError(t, cmd.Flags().Set("mode", "single"))
 	captureStdout(t, func() { runCmdFunc(cmd, nil) })
+}
+
+// TestRunCmd_FlagErrorFunc_NonMatchingReturnsErr drives the run command's
+// SetFlagErrorFunc closure with an error that does NOT match the special
+// "-m needs argument" string, so it takes the plain return-err branch.
+func TestRunCmd_FlagErrorFunc_NonMatchingReturnsErr(t *testing.T) {
+	fn := runCmd.Flags().ShorthandLookup("m")
+	require.NotNil(t, fn, "run command must define -m/--mode flag")
+
+	sentinel := errors.New("some other flag error")
+	// runCmd is the *cobra.Command that owns the FlagErrorFunc.
+	got := runCmd.FlagErrorFunc()(runCmd, sentinel)
+	assert.Equal(t, sentinel, got, "non-matching flag error must be returned unchanged")
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -674,4 +675,333 @@ func TestMTorrentDriver_ParseBonusPerHour_Property(t *testing.T) {
 			assert.InDelta(t, tc.expectedBonus, bonus, 0.001, "Bonus should match expected value")
 		})
 	}
+}
+
+func TestFlexibleCode_UnmarshalJSON(t *testing.T) {
+	var fc FlexibleCode
+	require.NoError(t, fc.UnmarshalJSON([]byte(`"SUCCESS"`)))
+	assert.Equal(t, "SUCCESS", fc.String())
+	assert.True(t, fc.IsSuccess())
+
+	require.NoError(t, fc.UnmarshalJSON([]byte(`0`)))
+	assert.Equal(t, "0", fc.String())
+	assert.True(t, fc.IsSuccess())
+
+	require.NoError(t, fc.UnmarshalJSON([]byte(`42`)))
+	assert.Equal(t, "42", fc.String())
+
+	require.Error(t, fc.UnmarshalJSON([]byte(`{bad`)))
+}
+
+func TestFlexInt_UnmarshalJSON(t *testing.T) {
+	var fi FlexInt
+	require.NoError(t, fi.UnmarshalJSON([]byte(`123`)))
+	assert.Equal(t, 123, fi.Int())
+
+	require.NoError(t, fi.UnmarshalJSON([]byte(`"456"`)))
+	assert.Equal(t, 456, fi.Int())
+
+	require.NoError(t, fi.UnmarshalJSON([]byte(`""`)))
+	assert.Equal(t, 0, fi.Int())
+
+	require.Error(t, fi.UnmarshalJSON([]byte(`"notanint"`)))
+	require.Error(t, fi.UnmarshalJSON([]byte(`{bad`)))
+}
+
+func TestMTorrentDriver_ParseDownload_Full(t *testing.T) {
+	torrentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// minimal valid torrent bencode
+		_, _ = w.Write([]byte("d8:announce4:test4:infod4:name4:teste"))
+	}))
+	defer torrentServer.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	res := MTorrentResponse{Code: "0", Data: []byte(`"` + torrentServer.URL + `/dl"`)}
+	data, err := d.ParseDownload(res)
+	// ValidateTorrentFile may reject; assert error surface is meaningful either way
+	if err != nil {
+		assert.Contains(t, err.Error(), "invalid torrent")
+	} else {
+		assert.NotEmpty(t, data)
+	}
+}
+
+func TestMTorrentDriver_ParseDownload_APIError(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "1", Message: "fail", RawBody: []byte("errbody")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "API error")
+}
+
+func TestMTorrentDriver_ParseDownload_EmptyURL(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`""`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty download URL")
+}
+
+func TestMTorrentDriver_ParseDownload_BadData(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`{notstring}`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse download URL")
+}
+
+func TestMTorrentDriver_ParseDownload_FetchError(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"http://127.0.0.1:1/dl"`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fetch torrent file")
+}
+
+func TestMapMTorrentRole(t *testing.T) {
+	assert.Equal(t, "Power User", mapMTorrentRole("2"))
+	assert.Equal(t, "Nexus Master", mapMTorrentRole("9"))
+	assert.Equal(t, "User", mapMTorrentRole("999"))
+}
+
+func TestGetMTeamCategoryName(t *testing.T) {
+	assert.Equal(t, "unknowncat", getMTeamCategoryName("unknowncat"))
+}
+
+func TestNewMTorrentDriverWithFailover_Extra(t *testing.T) {
+	GetGlobalRegistry().RegisterURLs(SiteName("mteam"), []string{"https://api.m-team.cc"})
+	d := NewMTorrentDriverWithFailover("apikey")
+	require.NotNil(t, d)
+}
+
+func TestMTorrentDriver_ExecuteWithFailover(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{}}`))
+	}))
+	defer server.Close()
+
+	GetGlobalRegistry().RegisterURLs(SiteNameMTeam, []string{server.URL})
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k", UseFailover: true})
+	if d.failoverClient == nil {
+		t.Skip("failover client not initialized")
+	}
+	res, err := d.Execute(context.Background(), MTorrentRequest{Endpoint: "/api/x", Method: "POST"})
+	require.NoError(t, err)
+	assert.True(t, res.Code.IsSuccess())
+}
+
+func TestMTorrentDriver_GetBonusPerHour_Error(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "http://127.0.0.1:1", APIKey: "k"})
+	_, err := d.GetBonusPerHour(context.Background())
+	require.Error(t, err)
+}
+
+func TestMTorrentDriver_GetPeerStatistics_Error(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "http://127.0.0.1:1", APIKey: "k"})
+	_, err := d.GetPeerStatistics(context.Background())
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// gazelle_driver.go — selectGazelleDetailTorrent branches, GetUserInfo,
+// GetTorrentDetail with Torrents array
+// ---------------------------------------------------------------------------
+
+func TestMTorrentDriver_ExecuteDirectly_FormBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{}}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	res, err := d.Execute(context.Background(), MTorrentRequest{
+		Endpoint:    "/api/x",
+		Method:      "POST",
+		Body:        map[string]any{"id": "5"},
+		ContentType: "application/x-www-form-urlencoded",
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Code.IsSuccess())
+
+	res2, err := d.Execute(context.Background(), MTorrentRequest{
+		Endpoint:    "/api/x",
+		Method:      "POST",
+		Body:        "id=7",
+		ContentType: "application/x-www-form-urlencoded",
+	})
+	require.NoError(t, err)
+	assert.True(t, res2.Code.IsSuccess())
+}
+
+// ---------------------------------------------------------------------------
+// SuggestBestDiscount — branches
+// ---------------------------------------------------------------------------
+
+func TestMTorrentDriver_GetUnreadMessageCount_Error(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "http://127.0.0.1:1", APIKey: "k"})
+	_, _, err := d.GetUnreadMessageCount(context.Background())
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// GetSiteNextLevelUnmet — seedingBonus + interval + bonusPerHour branches
+// ---------------------------------------------------------------------------
+
+func TestMTorrentDriver_GetSiteDefinition(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	assert.Nil(t, d.GetSiteDefinition())
+	def := &SiteDefinition{ID: "mteam"}
+	d.SetSiteDefinition(def)
+	assert.Equal(t, def, d.GetSiteDefinition())
+	assert.Equal(t, "mteam", d.getSiteID())
+}
+
+func TestMTorrentDriver_getSiteID_Default(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	assert.NotEmpty(t, d.getSiteID())
+}
+
+func TestNewMTorrentDriverWithFailover(t *testing.T) {
+	d := NewMTorrentDriverWithFailover("apikey")
+	require.NotNil(t, d)
+	assert.Equal(t, "apikey", d.APIKey)
+}
+
+func TestTorrentResponsePreview(t *testing.T) {
+	assert.Equal(t, "hello world", torrentResponsePreview([]byte("hello   world")))
+	assert.Contains(t, torrentResponsePreview([]byte("d4:info")), "d4:info")
+	long := strings.Repeat("a", 300)
+	assert.LessOrEqual(t, len([]rune(torrentResponsePreview([]byte(long)))), 160)
+}
+
+func TestMTorrentDriver_ParseDownload_Errors(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+
+	// API error code
+	_, err := d.ParseDownload(MTorrentResponse{Code: FlexibleCode("1"), Message: "bad"})
+	assert.Error(t, err)
+
+	// bad JSON download URL
+	_, err = d.ParseDownload(MTorrentResponse{Code: FlexibleCode("0"), Data: json.RawMessage(`{invalid`)})
+	assert.Error(t, err)
+
+	// empty URL
+	_, err = d.ParseDownload(MTorrentResponse{Code: FlexibleCode("0"), Data: json.RawMessage(`""`)})
+	assert.Error(t, err)
+}
+
+func TestMTorrentDriver_GetBonusPerHour(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.URL.Path, "mybonus")
+		w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"formulaParams":{"finalBs":"12.5"}}}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	bph, err := d.GetBonusPerHour(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 12.5, bph, 0.01)
+}
+
+func TestMTorrentDriver_GetUnreadMessageCount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"unMake":"3","count":"10"}}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	unread, total, err := d.GetUnreadMessageCount(context.Background())
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, unread, 0)
+	assert.GreaterOrEqual(t, total, 0)
+}
+
+func TestMTorrentDriver_GetPeerStatistics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"seederCount":"10","seederSize":"1073741824","leecherCount":"2","leecherSize":"536870912"}}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	stats, err := d.GetPeerStatistics(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, stats)
+	assert.Equal(t, 10, stats.SeederCount)
+	assert.Equal(t, int64(1073741824), stats.SeederSize)
+}
+
+func TestMTorrentDriver_GetUserInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "member/profile"):
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{
+				"id":"1001","username":"tester","role":"2","createdDate":"2020-01-01 00:00:00",
+				"memberCount":{"uploaded":"10737418240","downloaded":"1073741824","shareRate":"10.0","bonus":"5000"},
+				"memberStatus":{"lastBrowse":"2024-06-01 12:00:00"}
+			}}`))
+		case strings.Contains(r.URL.Path, "mybonus"):
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"formulaParams":{"finalBs":"8.8"}}}`))
+		case strings.Contains(r.URL.Path, "notify/statistic"):
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"unMake":"2","count":"5"}}`))
+		case strings.Contains(r.URL.Path, "myPeerStatistics"):
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{"seederCount":"20","seederSize":"2048","leecherCount":"1","leecherSize":"512"}}`))
+		default:
+			w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{}}`))
+		}
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	info, err := d.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "1001", info.UserID)
+	assert.Equal(t, "tester", info.Username)
+	assert.Equal(t, "Power User", info.Rank)
+	assert.Equal(t, int64(10737418240), info.Uploaded)
+	assert.Equal(t, 20, info.SeederCount)
+	assert.Greater(t, info.LastAccess, int64(0))
+}
+
+func TestMTorrentDriver_GetUserInfo_ProfileError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"1","message":"denied"}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	_, err := d.GetUserInfo(context.Background())
+	assert.Error(t, err)
+}
+
+func TestMTorrentDriver_GetTorrentDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.URL.Path, "torrent/detail")
+		w.Write([]byte(`{"code":"0","message":"SUCCESS","data":{
+			"id":"555","name":"Detail.Movie","size":"2147483648","smallDescr":"desc",
+			"status":{"seeders":30,"leechers":3,"timesCompleted":99,"discount":"FREE"}
+		}}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	item, err := d.GetTorrentDetail(context.Background(), "555", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "555", item.ID)
+	assert.Equal(t, "Detail.Movie", item.Title)
+	assert.Equal(t, int64(2147483648), item.SizeBytes)
+	assert.Equal(t, DiscountFree, item.DiscountLevel)
+	assert.Equal(t, []string{"desc"}, item.Tags)
+	assert.Equal(t, 30, item.Seeders)
+}
+
+func TestMTorrentDriver_GetTorrentDetail_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"500","message":"error"}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	_, err := d.GetTorrentDetail(context.Background(), "1", "", "")
+	assert.Error(t, err)
 }

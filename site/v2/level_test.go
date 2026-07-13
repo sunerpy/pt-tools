@@ -3,6 +3,9 @@ package v2
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCleanLevelName(t *testing.T) {
@@ -576,3 +579,195 @@ func TestGetSiteNextLevelUnmet(t *testing.T) {
 		t.Error("expected 'bonusNeededHours' in unmet requirements")
 	}
 }
+
+func levelReqs() []SiteLevelRequirement {
+	return []SiteLevelRequirement{
+		{ID: 1, Name: "User"},
+		{ID: 2, Name: "Power User", NameAka: []string{"高级用户"}, Downloaded: "100GB", Ratio: 2.0, Bonus: 1000, Interval: "P5W", SeedingBonus: 500},
+		{ID: 3, Name: "Elite User", Downloaded: "500GB", Ratio: 3.0},
+		{ID: 10, Name: "VIP", GroupType: LevelGroupVIP},
+	}
+}
+
+func TestGuessUserLevelID_NameMatch(t *testing.T) {
+	info := &UserInfo{LevelName: "Power User"}
+	assert.Equal(t, 2, GuessUserLevelID(info, levelReqs()))
+}
+
+func TestGuessUserLevelID_AkaMatch(t *testing.T) {
+	info := &UserInfo{LevelName: "高级用户"}
+	assert.Equal(t, 2, GuessUserLevelID(info, levelReqs()))
+}
+
+func TestGuessUserLevelID_EmptyNoReqs(t *testing.T) {
+	assert.Equal(t, -1, GuessUserLevelID(&UserInfo{}, nil))
+}
+
+func TestGuessUserLevelID_ByRequirements(t *testing.T) {
+	info := &UserInfo{
+		Downloaded:   150 * 1024 * 1024 * 1024,
+		Ratio:        2.5,
+		Bonus:        2000,
+		SeedingBonus: 600,
+		JoinDate:     time.Now().Add(-100 * 24 * time.Hour).Unix(),
+	}
+	id := GuessUserLevelID(info, levelReqs())
+	assert.GreaterOrEqual(t, id, 1)
+}
+
+func TestGetSiteNextLevelUnmet_Cov3(t *testing.T) {
+	info := &UserInfo{
+		LevelID:      2,
+		Downloaded:   10 * 1024 * 1024 * 1024,
+		Ratio:        1.0,
+		Bonus:        100,
+		BonusPerHour: 10,
+	}
+	unmet := GetSiteNextLevelUnmet(info, levelReqs())
+	require.NotNil(t, unmet)
+	assert.Contains(t, unmet, "downloaded")
+	assert.Contains(t, unmet, "ratio")
+}
+
+func TestGetSiteNextLevelUnmet_NoNext(t *testing.T) {
+	info := &UserInfo{LevelID: 3}
+	unmet := GetSiteNextLevelUnmet(info, levelReqs())
+	assert.Empty(t, unmet)
+}
+
+func TestCalculateSiteLevelProgress_Cov3(t *testing.T) {
+	info := &UserInfo{
+		LevelID:    1,
+		Downloaded: 50 * 1024 * 1024 * 1024,
+		Ratio:      1.0,
+		Bonus:      100,
+	}
+	progress := CalculateSiteLevelProgress(info, levelReqs())
+	require.NotNil(t, progress)
+	assert.NotNil(t, progress.CurrentLevel)
+	assert.LessOrEqual(t, progress.ProgressPercent, float64(100))
+}
+
+func TestCalculateSiteLevelProgress_NoReqs(t *testing.T) {
+	assert.Nil(t, CalculateSiteLevelProgress(&UserInfo{}, nil))
+}
+
+func TestCalculateSiteLevelProgress_MaxLevel(t *testing.T) {
+	info := &UserInfo{LevelID: 3}
+	progress := CalculateSiteLevelProgress(info, levelReqs())
+	require.NotNil(t, progress)
+	assert.Equal(t, float64(100), progress.ProgressPercent)
+}
+
+func TestIsSiteRequirementMet_ExtendedFields(t *testing.T) {
+	req := SiteLevelRequirement{
+		Uploads:     5,
+		Seeding:     10,
+		SeedingSize: "1TB",
+	}
+	// not met — nothing set
+	assert.False(t, isSiteRequirementMet(&UserInfo{}, req))
+	// met
+	info := &UserInfo{
+		Uploads:    6,
+		Seeding:    11,
+		SeederSize: 2 * 1024 * 1024 * 1024 * 1024,
+	}
+	assert.True(t, isSiteRequirementMet(info, req))
+}
+
+// ---------------------------------------------------------------------------
+// nexusphp_driver.go — getUserInfoWithDefinition full pipeline
+// ---------------------------------------------------------------------------
+
+func TestGuessUserLevelID_VIPGroup(t *testing.T) {
+	reqs := []SiteLevelRequirement{
+		{ID: 1, Name: "User"},
+		{ID: 100, Name: "VIP", GroupType: LevelGroupVIP},
+	}
+	info := &UserInfo{LevelName: "VIP"}
+	assert.Equal(t, 100, GuessUserLevelID(info, reqs))
+}
+
+func TestGuessUserLevelID_VIPGroup_NoMatchingReq(t *testing.T) {
+	reqs := []SiteLevelRequirement{{ID: 1, Name: "User"}}
+	info := &UserInfo{LevelName: "贵宾"}
+	assert.Equal(t, MinVipLevelID, GuessUserLevelID(info, reqs))
+}
+
+func TestGuessUserLevelID_ManagerGroup(t *testing.T) {
+	reqs := []SiteLevelRequirement{{ID: 1, Name: "User"}}
+	info := &UserInfo{LevelName: "Administrator"}
+	assert.Equal(t, MinManagerLevelID, GuessUserLevelID(info, reqs))
+}
+
+func TestGuessUserLevelID_PreviousLevelOnUnmet(t *testing.T) {
+	reqs := []SiteLevelRequirement{
+		{ID: 1, Name: "User"},
+		{ID: 2, Name: "Power User", Downloaded: "1PB"},
+	}
+	info := &UserInfo{Downloaded: 1024}
+	got := GuessUserLevelID(info, reqs)
+	assert.Equal(t, 1, got)
+}
+
+// ---------------------------------------------------------------------------
+// executeProcess — critical error propagation via full pipeline
+// ---------------------------------------------------------------------------
+
+func TestGetSiteNextLevelUnmet_ExtendedBranches(t *testing.T) {
+	reqs := []SiteLevelRequirement{
+		{ID: 1, Name: "User"},
+		{
+			ID:           2,
+			Name:         "Power User",
+			Downloaded:   "100GB",
+			Uploaded:     "500GB",
+			Ratio:        3.0,
+			Bonus:        10000,
+			SeedingBonus: 5000,
+			Interval:     "P52W",
+		},
+	}
+	info := &UserInfo{
+		LevelID:             1,
+		Downloaded:          10 * 1024 * 1024 * 1024,
+		Uploaded:            1024,
+		Ratio:               1.0,
+		Bonus:               100,
+		BonusPerHour:        10,
+		SeedingBonus:        100,
+		SeedingBonusPerHour: 5,
+		JoinDate:            time.Now().Add(-24 * time.Hour).Unix(),
+	}
+	unmet := GetSiteNextLevelUnmet(info, reqs)
+	assert.Contains(t, unmet, "downloaded")
+	assert.Contains(t, unmet, "uploaded")
+	assert.Contains(t, unmet, "ratio")
+	assert.Contains(t, unmet, "bonus")
+	assert.Contains(t, unmet, "bonusNeededHours")
+	assert.Contains(t, unmet, "seedingBonus")
+	assert.Contains(t, unmet, "seedingBonusNeededHours")
+	assert.Contains(t, unmet, "interval")
+}
+
+// ---------------------------------------------------------------------------
+// isAlternativeMet — each field branch
+// ---------------------------------------------------------------------------
+
+func TestIsAlternativeMet_Branches(t *testing.T) {
+	alt := AlternativeRequirement{SeedingBonus: 100, Uploads: 5, Bonus: 1000, Downloaded: "10GB", Ratio: 2.0}
+	// all met
+	ok := &UserInfo{SeedingBonus: 200, Uploads: 10, Bonus: 2000, Downloaded: 20 * 1024 * 1024 * 1024, Ratio: 3.0}
+	assert.True(t, isAlternativeMet(ok, alt))
+	// downloaded not met
+	bad := &UserInfo{SeedingBonus: 200, Uploads: 10, Bonus: 2000, Downloaded: 1, Ratio: 3.0}
+	assert.False(t, isAlternativeMet(bad, alt))
+	// ratio not met
+	bad2 := &UserInfo{SeedingBonus: 200, Uploads: 10, Bonus: 2000, Downloaded: 20 * 1024 * 1024 * 1024, Ratio: 1.0}
+	assert.False(t, isAlternativeMet(bad2, alt))
+}
+
+// ---------------------------------------------------------------------------
+// getUserInfoLegacy — full 2-step legacy pipeline
+// ---------------------------------------------------------------------------
