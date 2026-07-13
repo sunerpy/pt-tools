@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.1] - 2026-07-13
+
+### Bug Fixes
+
+- 修复清理工作目录 RetainHours 误清零并增强已用空间展示与 Windows 兼容 ([#462](https://github.com/sunerpy/pt-tools/issues/462)) ([#462](https://github.com/sunerpy/pt-tools/pull/462))
+
+* fix: 修复保存全局设置误清零 RetainHours 等字段导致清理工作目录失效
+
+      - apiGlobal POST 请求缺失 default_enabled/retain_hours/max_retry/default_concurrency
+       四个字段，每次保存全局设置都会被 Go 零值静默清零，导致「清理工作目录」暂存种子
+       恒显示已禁用、删除 0 项，并连带关闭 #450 的 RSS 自动 sweep
+      - A：新增 GlobalSettingsPatch 指针 patch 与 SaveGlobalSettingsWithPatch，
+       用指针区分 omitted(nil→保留 DB 现值) 与 explicit-0(写入)，INSERT 分支兜底默认值；
+       apiGlobal 改用 patch 通道，SaveGlobalSettings 保持全量赋值语义不变
+      - B：cleanStaging 手动清理在 RetainHours<=0 时改用兜底 24h 继续清理而非整类禁用；
+       #450 的 sweepStagingDir 自动 sweep 保持 retain<=0 禁用语义不变
+      - C：api/index.ts GlobalSettings 接口新增 4 字段，GlobalSettings.vue 新增
+       「种子文件保留 / 暂存种子清理」小节暴露 retain_hours/max_retry(min=0)
+
+      * feat: 清理工作目录增加当前已用空间列并在清理后刷新预览，兼容 Windows
+
+      - D：AutoCleanup.vue 执行清理成功后重新拉取预览（previewClean），使"可清理项"
+       统计反映清理后最新状态，同时保留清理完成结果提示
+      - E：新增各清理类别目录当前总占用（口径 b，非整盘）。CategoryResult 增
+       DirUsedBytes 字段与 dirTotalSize 递归求和辅助（filepath.WalkDir，跨平台无
+       整盘 syscall）；DTO 增 dirUsedBytes/dirUsedHuman；前端 CleanCategoryResult
+       增 2 字段并在预览表/结果表新增「当前已用空间」列
+      - F：isRedLine 改用 strings.EqualFold 大小写不敏感，防 Windows 上 Torrents.DB/
+       SECRET.KEY/All.Log 等变体漏判；withinRoot 补 Windows 平台语义注释；应用
+       删除失败优雅跳过已具备并补测试（TF2）
+
 ## [0.42.0] - 2026-07-13
 
 ### Features
