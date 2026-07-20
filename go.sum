@@ -275,8 +275,8 @@ github.com/mmcdole/goxpp/v2 v2.0.0/go.mod h1:CUduYMnO9JB6Z/uqDn9Ormk/r8E9BsLQxHP
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v0.0.0-20180701023420-4b7aa43c6742/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
 github.com/modern-go/reflect2 v1.0.1/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
-github.com/mymmrac/telego v1.10.0 h1:Upe0TqYyiK+yE5RFXXuQWVHGfLZnqvUfj4KZVjTcgWE=
-github.com/mymmrac/telego v1.10.0/go.mod h1:LsQKDA6EwssPP9XkORPXwwOFUGIRf/Wf2Wb8y3YyJdE=
+github.com/mymmrac/telego v1.11.1 h1:CpJX1xwQfd9G5mbXbGBWIIqNYrNbUwzNGLd8JlO//6A=
+github.com/mymmrac/telego v1.11.1/go.mod h1:SV926cvGXAAk4vPHAX+JjeTtU7gY8PVEiHUzMS3+fX8=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/neelance/astrewrite v0.0.0-20160511093645-99348263ae86/go.mod h1:kHJEU3ofeGjhHklVoIGuVj85JJwZ6kWPaJwCIxgnFmo=
@@ -352,8 +352,8 @@ github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS
 github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
 github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
-github.com/valyala/fasthttp v1.71.0 h1:tepR7H+Guh9VUqxxcPggYi8R3lGUu2Rsdh+z7/FCY3k=
-github.com/valyala/fasthttp v1.71.0/go.mod h1:z1sDUvOShhXq/C9mwH/fSm1Vb71tUJwmQdgkBrBNwnA=
+github.com/valyala/fasthttp v1.72.0 h1:R7kYdoWhn1ye1fVpP+cDHDJwYm3NkwLliwgzJ/Abg7M=
+github.com/valyala/fasthttp v1.72.0/go.mod h1:zsbLTYqcpIktdQytlVBwIjY9La5d6bs990nBxWg8efk=
 github.com/valyala/fastjson v1.6.10 h1:/yjJg8jaVQdYR3arGxPE2X5z89xrlhS0eGXdv+ADTh4=
 github.com/valyala/fastjson v1.6.10/go.mod h1:e6FubmQouUNP73jtMLmcbxS6ydWIpOfhz34TSfO3JaE=
 github.com/wdvxdr1123/ZeroBot v1.8.2 h1:H4qNHgeYLLm3ID5T9MKnO4fI0SWWl0rFCGLCUr8u10M=

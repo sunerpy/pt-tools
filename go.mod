@@ -12,7 +12,7 @@ require (
 	github.com/golang/mock v1.6.0
 	github.com/leanovate/gopter v0.2.11
 	github.com/mmcdole/gofeed v1.4.0
-	github.com/mymmrac/telego v1.10.0
+	github.com/mymmrac/telego v1.11.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/sunerpy/requests v0.2.0
@@ -68,7 +68,7 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.71.0 // indirect
+	github.com/valyala/fasthttp v1.72.0 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.23.0 // indirect
