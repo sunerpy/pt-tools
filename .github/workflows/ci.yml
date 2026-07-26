@@ -289,6 +289,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - name: Run extension tests
+        working-directory: tools/browser-extension
+        run: pnpm test
+
   ci-success:
     name: CI Success
     needs: [frontend-build, go-build-test, go-lint, go-security, format-check, extension-build]

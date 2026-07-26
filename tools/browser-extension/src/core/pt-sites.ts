@@ -14,6 +14,7 @@ const NEXUSPHP_DOMAINS: string[] = [
   "baconbits.org",
   "bakabt.me",
   "beyond-hd.me",
+  "bilibili.download",
   "bt.byr.cn",
   "byr.pt",
   "cangbao.ge",
