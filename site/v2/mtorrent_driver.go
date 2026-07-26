@@ -189,6 +189,7 @@ type MTorrentPromotionRule struct {
 
 // MallSingleFree represents a mall single free from M-Team API
 type MallSingleFree struct {
+	Status    string `json:"status,omitempty"`
 	StartDate string `json:"startDate,omitempty"`
 	EndDate   string `json:"endDate,omitempty"`
 }
@@ -762,7 +763,7 @@ func parseMTorrentDiscountWithPromotionAndMallSingleFreeAt(baseDiscount, baseEnd
 				return promoLevel, promoEnd
 			}
 		}
-	} else if mallSingleFree != nil && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
+	} else if mallSingleFree != nil && mallSingleFree.Status == "ONGOING" && mallSingleFree.StartDate != "" && mallSingleFree.EndDate != "" {
 		var singleFreeStart, singleFreeEnd time.Time
 		singleFreeStart, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.StartDate)
 		singleFreeEnd, _ = ParseTimeInCST("2006-01-02 15:04:05", mallSingleFree.EndDate)
