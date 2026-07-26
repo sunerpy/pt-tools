@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-07-26
+
+### Features
+
+- **extension**: 修复 div 布局采集并新增 bilibili.download 支持 ([#486](https://github.com/sunerpy/pt-tools/issues/486)) ([#486](https://github.com/sunerpy/pt-tools/pull/486))
+
+* chore(build): 为浏览器扩展补齐测试与类型环境
+
+      - 引入 vitest 并新增 test 脚本
+      - 增加 @types/node 并将 node 加入 tsconfig types
+      - 修复 vite.config.ts 缺少 node 类型导致的 typecheck 失败
+
+      * fix(extension): 修复 div 布局站点无法识别种子 ID
+
+      - 表格行扫描无命中时回退到按种子链接切分窗口
+      - 排除 userdetails.php 链接被误判为种子 ID
+      - 免费标记匹配兼容单引号 class 写法
+      - 新增 7 条回归用例覆盖表格与 div 两种布局
+
+      * feat(extension): 新增 bilibili.download 站点采集支持
+
+      - pt-sites.ts 增加 bilibili.download 到 NexusPHP 域名列表
+      - CI 的扩展构建任务增加测试执行步骤
+
 ## [0.42.2] - 2026-07-26
 
 ### Bug Fixes
