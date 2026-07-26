@@ -9,6 +9,7 @@
     "build": "vite build",
     "pack": "node --experimental-strip-types ../../scripts/check-sites.ts && vite build && cd dist && zip -r ../pt-tools-helper.zip .",
     "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist pt-tools-helper.zip"
   },
   "dependencies": {
@@ -17,9 +18,11 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.1.31",
+    "@types/node": "^25.9.5",
     "@vitejs/plugin-vue": "^6.0.1",
     "typescript": "~5.9.3",
     "vite": "^7.1.12",
+    "vitest": "^4.1.10",
     "vue-tsc": "^3.1.1"
   },
   "packageManager": "pnpm@10.25.0"

@@ -26,20 +26,39 @@ const SCHEMA_URL_MAP: Record<string, SchemaUrls> = {
 
       for (const rowMatch of rows) {
         const row = rowMatch[0];
-        const idMatch = row.match(/details\.php\?id=(\d+)/);
+        const idMatch = row.match(/(?:^|[^A-Za-z])details\.php\?id=(\d+)/);
         if (!idMatch) continue;
 
         if (!firstRowId) {
           firstRowId = idMatch[1];
         }
 
-        if (/pro_free|pro_free2up|class="free"/i.test(row)) {
+        if (/pro_free2up|pro_free|class=["']free["']/i.test(row)) {
           freeRowId = idMatch[1];
           break;
         }
       }
 
-      return freeRowId ?? firstRowId;
+      if (freeRowId ?? firstRowId) {
+        return freeRowId ?? firstRowId;
+      }
+
+      const torrentLinks = [...html.matchAll(/(?:^|[^A-Za-z])details\.php\?id=(\d+)/gi)];
+      let firstWindowId: string | null = null;
+
+      for (let index = 0; index < torrentLinks.length; index += 1) {
+        const link = torrentLinks[index];
+        firstWindowId ??= link[1];
+
+        const windowStart = link.index;
+        const windowEnd = torrentLinks[index + 1]?.index ?? html.length;
+        const window = html.slice(windowStart, windowEnd);
+        if (/pro_free2up|pro_free|class=["']free["']/i.test(window)) {
+          return link[1];
+        }
+      }
+
+      return firstWindowId;
     },
     extractUserId(html: string): string | null {
       const infoBlock = html.match(/<div\s+id=["']info_block["'][^>]*>[\s\S]*?<\/div>/i);
@@ -110,6 +129,10 @@ const SCHEMA_URL_MAP: Record<string, SchemaUrls> = {
 };
 
 SCHEMA_URL_MAP["Rousi"] = SCHEMA_URL_MAP["NexusPHP"];
+
+export function extractNexusPHPTorrentId(html: string): string | null {
+  return SCHEMA_URL_MAP["NexusPHP"].extractTorrentId(html);
+}
 
 function getSchemaUrls(schema: SiteSchema): SchemaUrls | null {
   return SCHEMA_URL_MAP[schema] ?? null;
