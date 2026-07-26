@@ -171,6 +171,44 @@ func TestMTorrentDriver_ParseSearch(t *testing.T) {
 	assert.Equal(t, "电影/SD", items[0].Category) // Should be mapped from 401
 }
 
+func TestMTorrentDriver_ParseSearch_MallSingleFreeRequiresOngoingStatus(t *testing.T) {
+	driver := NewMTorrentDriver(MTorrentDriverConfig{
+		BaseURL: "https://api.m-team.cc",
+		APIKey:  "test-api-key",
+	})
+
+	res := MTorrentResponse{
+		Code:    "0",
+		Message: "success",
+		Data: []byte(`{
+			"data": [{
+				"id": "1211993",
+				"name": "Hell 2025",
+				"size": "22967359242",
+				"status": {
+					"seeders": 53,
+					"leechers": 3,
+					"timesCompleted": 1,
+					"discount": "PERCENT_50",
+					"discountEndTime": "2026-07-21 05:26:41",
+					"mallSingleFree": {
+						"status": "ENDED",
+						"startDate": "2000-01-01 00:00:00",
+						"endDate": "2099-12-31 23:59:59"
+					}
+				},
+				"category": "401"
+			}],
+			"total": 1
+		}`),
+	}
+
+	items, err := driver.ParseSearch(res)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, DiscountPercent50, items[0].DiscountLevel)
+}
+
 func TestMTorrentDriver_ParseSearch_APIError(t *testing.T) {
 	driver := NewMTorrentDriver(MTorrentDriverConfig{
 		BaseURL: "https://api.m-team.cc",
@@ -383,6 +421,7 @@ func TestParseMTorrentDiscountWithMallSingleFree(t *testing.T) {
 			baseEndTime:  "2026-02-05 19:57:34",
 			promotion:    nil,
 			mallSingle: &MallSingleFree{
+				Status:    "ONGOING",
 				StartDate: "2026-02-03 00:00:00",
 				EndDate:   "2026-02-05 23:59:59",
 			},
@@ -395,6 +434,7 @@ func TestParseMTorrentDiscountWithMallSingleFree(t *testing.T) {
 			baseEndTime:  "2026-02-05 19:57:34",
 			promotion:    nil,
 			mallSingle: &MallSingleFree{
+				Status:    "ONGOING",
 				StartDate: "2026-02-06 00:00:00",
 				EndDate:   "2026-02-07 00:00:00",
 			},
@@ -411,6 +451,7 @@ func TestParseMTorrentDiscountWithMallSingleFree(t *testing.T) {
 				EndTime:   "2026-02-05 22:22:22",
 			},
 			mallSingle: &MallSingleFree{
+				Status:    "ONGOING",
 				StartDate: "2026-02-03 00:00:00",
 				EndDate:   "2026-02-05 23:59:59",
 			},
