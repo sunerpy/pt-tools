@@ -5,6 +5,149 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.2] - 2026-07-26
+
+### Bug Fixes
+
+- **site**: 修复 M-Team 商城免费活动已结束仍判定为免费
+- MallSingleFree 增加 status 字段解析 - 仅当 status 为 ONGOING 时才覆盖基础优惠为免费 - 避免已结束活动导致 50% 计费种子被误判为免费
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump oxlint from 1.72.0 to 1.73.0 in /web/frontend ([#471](https://github.com/sunerpy/pt-tools/issues/471)) ([#471](https://github.com/sunerpy/pt-tools/pull/471))
+  Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.72.0 to 1.73.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.73.0/npm/oxlint)
+
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.73.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
+
+- **pnpm**: Bump element-plus from 2.14.2 to 2.14.3 in /web/frontend ([#472](https://github.com/sunerpy/pt-tools/issues/472)) ([#472](https://github.com/sunerpy/pt-tools/pull/472))
+  Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.14.2 to 2.14.3. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.14.2...2.14.3)
+
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.14.3
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **pnpm**: Bump vue-tsc from 3.3.6 to 3.3.7 in /web/frontend ([#474](https://github.com/sunerpy/pt-tools/issues/474)) ([#474](https://github.com/sunerpy/pt-tools/pull/474))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.6 to 3.3.7. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.7/packages/tsc)
+
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.7
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
+
+- **pnpm**: Bump dompurify from 3.4.11 to 3.4.12 in /web/frontend ([#469](https://github.com/sunerpy/pt-tools/issues/469)) ([#469](https://github.com/sunerpy/pt-tools/pull/469))
+  Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.11 to 3.4.12. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.11...3.4.12)
+
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.12
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **pnpm**: Bump @vitejs/plugin-vue from 6.0.7 to 6.0.8 in /web/frontend ([#479](https://github.com/sunerpy/pt-tools/issues/479)) ([#479](https://github.com/sunerpy/pt-tools/pull/479))
+  Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.7 to 6.0.8. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.8/packages/plugin-vue)
+
+      ---
+      updated-dependencies:
+      - dependency-name: "@vitejs/plugin-vue"
+       dependency-version: 6.0.8
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
+
+- **pnpm**: Bump oxfmt from 0.57.0 to 0.59.0 in /web/frontend ([#478](https://github.com/sunerpy/pt-tools/issues/478)) ([#478](https://github.com/sunerpy/pt-tools/pull/478))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.57.0 to 0.59.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.59.0/npm/oxfmt)
+
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.59.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
+
+- **pnpm**: Bump vite from 8.1.3 to 8.1.5 in /web/frontend ([#481](https://github.com/sunerpy/pt-tools/issues/481)) ([#481](https://github.com/sunerpy/pt-tools/pull/481))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.1.3 to 8.1.5. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.1.5/packages/vite)
+
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.1.5
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
+
+### Dependencies (Go)
+
+- **go**: Bump golang.org/x/sys from 0.46.0 to 0.47.0 ([#464](https://github.com/sunerpy/pt-tools/issues/464)) ([#464](https://github.com/sunerpy/pt-tools/pull/464))
+  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.46.0 to 0.47.0. - [Commits](https://github.com/golang/sys/compare/v0.46.0...v0.47.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.47.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+- **go**: Bump github.com/mmcdole/gofeed from 1.3.0 to 1.4.0 ([#467](https://github.com/sunerpy/pt-tools/issues/467)) ([#467](https://github.com/sunerpy/pt-tools/pull/467))
+  Bumps [github.com/mmcdole/gofeed](https://github.com/mmcdole/gofeed) from 1.3.0 to 1.4.0. - [Release notes](https://github.com/mmcdole/gofeed/releases) - [Commits](https://github.com/mmcdole/gofeed/compare/v1.3.0...v1.4.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mmcdole/gofeed
+       dependency-version: 1.4.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+- **go**: Bump golang.org/x/crypto from 0.53.0 to 0.54.0 ([#465](https://github.com/sunerpy/pt-tools/issues/465)) ([#465](https://github.com/sunerpy/pt-tools/pull/465))
+  Bumps [golang.org/x/crypto](https://github.com/golang/crypto) from 0.53.0 to 0.54.0. - [Commits](https://github.com/golang/crypto/compare/v0.53.0...v0.54.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/crypto
+       dependency-version: 0.54.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+- **go**: Bump github.com/mymmrac/telego from 1.10.0 to 1.11.1 ([#477](https://github.com/sunerpy/pt-tools/issues/477)) ([#477](https://github.com/sunerpy/pt-tools/pull/477))
+  Bumps [github.com/mymmrac/telego](https://github.com/mymmrac/telego) from 1.10.0 to 1.11.1. - [Release notes](https://github.com/mymmrac/telego/releases) - [Commits](https://github.com/mymmrac/telego/compare/v1.10.0...v1.11.1)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mymmrac/telego
+       dependency-version: 1.11.1
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+- **go**: Bump github.com/chromedp/chromedp from 0.15.1 to 0.16.0 ([#480](https://github.com/sunerpy/pt-tools/issues/480)) ([#480](https://github.com/sunerpy/pt-tools/pull/480))
+  Bumps [github.com/chromedp/chromedp](https://github.com/chromedp/chromedp) from 0.15.1 to 0.16.0. - [Release notes](https://github.com/chromedp/chromedp/releases) - [Commits](https://github.com/chromedp/chromedp/compare/v0.15.1...v0.16.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/chromedp/chromedp
+       dependency-version: 0.16.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
 ## [0.42.1] - 2026-07-13
 
 ### Bug Fixes
@@ -81,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### CI/CD
 
 - TG 发版公告折叠依赖与杂项分区为计数摘要 ([#448](https://github.com/sunerpy/pt-tools/issues/448)) ([#448](https://github.com/sunerpy/pt-tools/pull/448))
-- 回退到 release body 的自动公告会逐条渲染 dependabot 升级，噪声淹没重要修复 - 新增 \_fold_noise_sections 按标题层级识别依赖/杂项分区，折叠为一行"本次含 N 项，详见 Release 页面"摘要 - 仅统计顶层 bullet，忽略嵌套明细与 updated-dependencies 子块；0 项分区整体丢弃 - 修复 Installation 块内 H3 子标题误重置 H2 跳过导致 Browser Extension 泄漏 - 手动 announcement 与 release-notes 覆盖路径不受影响 - 补充 --selftest 断言与贴近真实 v0.40.3 结构的 smoke 样本
+- 回退到 release body 的自动公告会逐条渲染 dependabot 升级，噪声淹没重要修复 - 新增 _fold_noise_sections 按标题层级识别依赖/杂项分区，折叠为一行"本次含 N 项，详见 Release 页面"摘要 - 仅统计顶层 bullet，忽略嵌套明细与 updated-dependencies 子块；0 项分区整体丢弃 - 修复 Installation 块内 H3 子标题误重置 H2 跳过导致 Browser Extension 泄漏 - 手动 announcement 与 release-notes 覆盖路径不受影响 - 补充 --selftest 断言与贴近真实 v0.40.3 结构的 smoke 样本
 
 ### Testing
 
@@ -153,81 +296,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump vue-tsc from 3.3.5 to 3.3.6 in /web/frontend ([#441](https://github.com/sunerpy/pt-tools/issues/441)) ([#441](https://github.com/sunerpy/pt-tools/pull/441))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.5 to 3.3.6. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.6/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.3.6
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.6
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.56.0 to 0.57.0 in /web/frontend ([#442](https://github.com/sunerpy/pt-tools/issues/442)) ([#442](https://github.com/sunerpy/pt-tools/pull/442))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.56.0 to 0.57.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.57.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.57.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.57.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vite from 8.1.0 to 8.1.3 in /web/frontend ([#445](https://github.com/sunerpy/pt-tools/issues/445)) ([#445](https://github.com/sunerpy/pt-tools/pull/445))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.1.0 to 8.1.3. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.1.3/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.1.3
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.1.3
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vitest from 4.1.9 to 4.1.10 in /web/frontend ([#443](https://github.com/sunerpy/pt-tools/issues/443)) ([#443](https://github.com/sunerpy/pt-tools/pull/443))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.9 to 4.1.10. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.10/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.10
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.10
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.71.0 to 1.72.0 in /web/frontend ([#444](https://github.com/sunerpy/pt-tools/issues/444)) ([#444](https://github.com/sunerpy/pt-tools/pull/444))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.71.0 to 1.72.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.72.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.72.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.72.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/text from 0.38.0 to 0.39.0 ([#440](https://github.com/sunerpy/pt-tools/issues/440)) ([#440](https://github.com/sunerpy/pt-tools/pull/440))
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.38.0 to 0.39.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.38.0...v0.39.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.39.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.39.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump gorm.io/gorm from 1.31.1 to 1.31.2 ([#430](https://github.com/sunerpy/pt-tools/issues/430)) ([#430](https://github.com/sunerpy/pt-tools/pull/430))
   Bumps [gorm.io/gorm](https://github.com/go-gorm/gorm) from 1.31.1 to 1.31.2. - [Release notes](https://github.com/go-gorm/gorm/releases) - [Commits](https://github.com/go-gorm/gorm/compare/v1.31.1...v1.31.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: gorm.io/gorm
-         dependency-version: 1.31.2
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: gorm.io/gorm
+       dependency-version: 1.31.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 ## [0.40.2] - 2026-07-06
 
@@ -248,57 +391,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump vite from 8.0.16 to 8.1.0 in /web/frontend ([#428](https://github.com/sunerpy/pt-tools/issues/428)) ([#428](https://github.com/sunerpy/pt-tools/pull/428))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.16 to 8.1.0. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/create-vite@8.1.0/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.1.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.1.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxfmt from 0.55.0 to 0.56.0 in /web/frontend ([#431](https://github.com/sunerpy/pt-tools/issues/431)) ([#431](https://github.com/sunerpy/pt-tools/pull/431))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.55.0 to 0.56.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.56.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.56.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.56.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump dompurify from 3.4.10 to 3.4.11 in /web/frontend ([#434](https://github.com/sunerpy/pt-tools/issues/434)) ([#434](https://github.com/sunerpy/pt-tools/pull/434))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.10 to 3.4.11. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.10...3.4.11)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.11
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.11
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue from 3.5.38 to 3.5.39 in /web/frontend ([#429](https://github.com/sunerpy/pt-tools/issues/429)) ([#429](https://github.com/sunerpy/pt-tools/pull/429))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.38 to 3.5.39. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.38...v3.5.39)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.39
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.39
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.69.0 to 1.71.0 in /web/frontend ([#433](https://github.com/sunerpy/pt-tools/issues/433)) ([#433](https://github.com/sunerpy/pt-tools/pull/433))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.69.0 to 1.71.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.71.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.71.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.71.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 ## [0.40.0] - 2026-06-28
 
@@ -340,12 +483,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   测试。三站均从 #info_block 解析上传/下载/分享率/魔力值/做种积分等数据，并补充
   lastAccessAt 支持保号探测。
 
-        站点差异化处理：
-        - ptchdbits 详情页促销为 img.pro_free(无 font.free)，DiscountMapping 增加
-         pro_* 类名键，详情解析正确识别免费
-        - pterclub 魔力值标签为「猫粮」且位于 <span> 内，使用专用正则提取
-        - pthome 采集页为隐私保护页(仅含本人 info_block)，等级/加入/动向选择器保留
-         生产标准行并加多语言回退
+      站点差异化处理：
+      - ptchdbits 详情页促销为 img.pro_free(无 font.free)，DiscountMapping 增加
+       pro_* 类名键，详情解析正确识别免费
+      - pterclub 魔力值标签为「猫粮」且位于 <span> 内，使用专用正则提取
+      - pthome 采集页为隐私保护页(仅含本人 info_block)，等级/加入/动向选择器保留
+       生产标准行并加多语言回退
 
 - **log**: 启动清理历史日志备份并支持环境变量与 Docker 日志限制
   针对日志膨胀（如 8GB）问题做综合治理：- 启动时执行 PruneOldLogs，按 MaxAge/MaxBackups 清理滞留的滚动备份（补足
@@ -396,103 +539,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump sass from 1.100.0 to 1.101.0 in /web/frontend ([#406](https://github.com/sunerpy/pt-tools/issues/406)) ([#406](https://github.com/sunerpy/pt-tools/pull/406))
   Bumps [sass](https://github.com/sass/dart-sass) from 1.100.0 to 1.101.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.100.0...1.101.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: sass
-         dependency-version: 1.101.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: sass
+       dependency-version: 1.101.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.3.4 to 3.3.5 in /web/frontend ([#409](https://github.com/sunerpy/pt-tools/issues/409)) ([#409](https://github.com/sunerpy/pt-tools/pull/409))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.4 to 3.3.5. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.5/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.3.5
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.5
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.54.0 to 0.55.0 in /web/frontend ([#411](https://github.com/sunerpy/pt-tools/issues/411)) ([#411](https://github.com/sunerpy/pt-tools/pull/411))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.54.0 to 0.55.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.55.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.55.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.55.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump element-plus from 2.14.1 to 2.14.2 in /web/frontend ([#413](https://github.com/sunerpy/pt-tools/issues/413)) ([#413](https://github.com/sunerpy/pt-tools/pull/413))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.14.1 to 2.14.2. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.14.1...2.14.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.14.2
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.14.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump dompurify from 3.4.8 to 3.4.10 in /web/frontend ([#410](https://github.com/sunerpy/pt-tools/issues/410)) ([#410](https://github.com/sunerpy/pt-tools/pull/410))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.8 to 3.4.10. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.8...3.4.10)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.10
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.10
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue from 3.5.35 to 3.5.38 in /web/frontend ([#412](https://github.com/sunerpy/pt-tools/issues/412)) ([#412](https://github.com/sunerpy/pt-tools/pull/412))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.35 to 3.5.38. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.35...v3.5.38)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.38
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.38
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vitest from 4.1.8 to 4.1.9 in /web/frontend ([#408](https://github.com/sunerpy/pt-tools/issues/408)) ([#408](https://github.com/sunerpy/pt-tools/pull/408))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.8 to 4.1.9. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/HEAD/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.9
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.9
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump github.com/mymmrac/telego from 1.9.0 to 1.10.0 ([#407](https://github.com/sunerpy/pt-tools/issues/407)) ([#407](https://github.com/sunerpy/pt-tools/pull/407))
   Bumps [github.com/mymmrac/telego](https://github.com/mymmrac/telego) from 1.9.0 to 1.10.0. - [Release notes](https://github.com/mymmrac/telego/releases) - [Commits](https://github.com/mymmrac/telego/compare/v1.9.0...v1.10.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: github.com/mymmrac/telego
-         dependency-version: 1.10.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mymmrac/telego
+       dependency-version: 1.10.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump github.com/tidwall/gjson from 1.18.0 to 1.19.0 ([#365](https://github.com/sunerpy/pt-tools/issues/365)) ([#365](https://github.com/sunerpy/pt-tools/pull/365))
   Bumps [github.com/tidwall/gjson](https://github.com/tidwall/gjson) from 1.18.0 to 1.19.0. - [Commits](https://github.com/tidwall/gjson/compare/v1.18.0...v1.19.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: github.com/tidwall/gjson
-         dependency-version: 1.19.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/tidwall/gjson
+       dependency-version: 1.19.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -524,16 +667,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with PARSE_ERROR. Add the standard `最近动向` lastAccessAt selector and
   wire it into each site's userdetails process.
 
-        Also fix hdfans bonus always reading 0. hdfans was the only site listing
-        `bonus` in its userdetails process. On userdetails the 魔力值 value lives in
-        its own cell (e.g. "15,879,858.1") with no inline label, so the
-        label-anchored bonus regex fails; parseNumber then yields "0", which (being
-        non-empty) overwrites the correct value already parsed from #info_block on
-        index.php. Drop `bonus` from hdfans' userdetails process to match every
-        other site (bonus is sourced from #info_block on index.php).
+      Also fix hdfans bonus always reading 0. hdfans was the only site listing
+      `bonus` in its userdetails process. On userdetails the 魔力值 value lives in
+      its own cell (e.g. "15,879,858.1") with no inline label, so the
+      label-anchored bonus regex fails; parseNumber then yields "0", which (being
+      non-empty) overwrites the correct value already parsed from #info_block on
+      index.php. Drop `bonus` from hdfans' userdetails process to match every
+      other site (bonus is sourced from #info_block on index.php).
 
-        Verified against real userdetails HTML for all three sites; adds last-access
-        backfill cases and an hdfans full-flow regression test (bonus + lastAccess).
+      Verified against real userdetails HTML for all three sites; adds last-access
+      backfill cases and an hdfans full-flow regression test (bonus + lastAccess).
 
 - **build**: Fmt 流程排除 CHANGELOG 与 release 清单
 - 新增 .oxfmtignore，fmt-oxfmt/fmt-check 经 --ignore-path 跳过
@@ -544,103 +687,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump vitest from 4.1.7 to 4.1.8 in /web/frontend ([#394](https://github.com/sunerpy/pt-tools/issues/394)) ([#394](https://github.com/sunerpy/pt-tools/pull/394))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.7 to 4.1.8. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.8/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.8
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.8
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.68.0 to 1.69.0 in /web/frontend ([#396](https://github.com/sunerpy/pt-tools/issues/396)) ([#396](https://github.com/sunerpy/pt-tools/pull/396))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.68.0 to 1.69.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.69.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.69.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.69.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.3.2 to 3.3.4 in /web/frontend ([#397](https://github.com/sunerpy/pt-tools/issues/397)) ([#397](https://github.com/sunerpy/pt-tools/pull/397))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.2 to 3.3.4. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.4/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.3.4
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.4
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.53.0 to 0.54.0 in /web/frontend ([#398](https://github.com/sunerpy/pt-tools/issues/398)) ([#398](https://github.com/sunerpy/pt-tools/pull/398))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.53.0 to 0.54.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.54.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.54.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.54.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @types/node from 25.9.1 to 25.9.2 in /web/frontend ([#400](https://github.com/sunerpy/pt-tools/issues/400)) ([#400](https://github.com/sunerpy/pt-tools/pull/400))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.9.1 to 25.9.2. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.9.2
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.9.2
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/sys from 0.45.0 to 0.46.0 ([#391](https://github.com/sunerpy/pt-tools/issues/391)) ([#391](https://github.com/sunerpy/pt-tools/pull/391))
   Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.45.0 to 0.46.0. - [Commits](https://github.com/golang/sys/compare/v0.45.0...v0.46.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sys
-         dependency-version: 0.46.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.46.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/sync from 0.20.0 to 0.21.0 ([#395](https://github.com/sunerpy/pt-tools/issues/395)) ([#395](https://github.com/sunerpy/pt-tools/pull/395))
   Bumps [golang.org/x/sync](https://github.com/golang/sync) from 0.20.0 to 0.21.0. - [Commits](https://github.com/golang/sync/compare/v0.20.0...v0.21.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sync
-         dependency-version: 0.21.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sync
+       dependency-version: 0.21.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/text from 0.37.0 to 0.38.0 ([#393](https://github.com/sunerpy/pt-tools/issues/393)) ([#393](https://github.com/sunerpy/pt-tools/pull/393))
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.37.0 to 0.38.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.37.0...v0.38.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.38.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.38.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/crypto from 0.51.0 to 0.53.0 ([#392](https://github.com/sunerpy/pt-tools/issues/392)) ([#392](https://github.com/sunerpy/pt-tools/pull/392))
   Bumps [golang.org/x/crypto](https://github.com/golang/crypto) from 0.51.0 to 0.53.0. - [Commits](https://github.com/golang/crypto/compare/v0.51.0...v0.53.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/crypto
-         dependency-version: 0.53.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/crypto
+       dependency-version: 0.53.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ## [0.35.1] - 2026-06-05
 
@@ -668,79 +811,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump dompurify from 3.4.5 to 3.4.8 in /web/frontend ([#379](https://github.com/sunerpy/pt-tools/issues/379)) ([#379](https://github.com/sunerpy/pt-tools/pull/379))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.5 to 3.4.8. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.5...3.4.8)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.8
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.8
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.50.0 to 0.53.0 in /web/frontend ([#381](https://github.com/sunerpy/pt-tools/issues/381)) ([#381](https://github.com/sunerpy/pt-tools/pull/381))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.50.0 to 0.53.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.53.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.53.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.53.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue from 3.5.34 to 3.5.35 in /web/frontend ([#384](https://github.com/sunerpy/pt-tools/issues/384)) ([#384](https://github.com/sunerpy/pt-tools/pull/384))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.34 to 3.5.35. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.34...v3.5.35)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.35
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.35
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.66.0 to 1.68.0 in /web/frontend ([#382](https://github.com/sunerpy/pt-tools/issues/382)) ([#382](https://github.com/sunerpy/pt-tools/pull/382))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.66.0 to 1.68.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.68.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.68.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.68.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump element-plus from 2.14.0 to 2.14.1 in /web/frontend ([#383](https://github.com/sunerpy/pt-tools/issues/383)) ([#383](https://github.com/sunerpy/pt-tools/pull/383))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.14.0 to 2.14.1. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.14.0...2.14.1)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.14.1
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.14.1
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-router from 5.0.7 to 5.1.0 in /web/frontend ([#380](https://github.com/sunerpy/pt-tools/issues/380)) ([#380](https://github.com/sunerpy/pt-tools/pull/380))
   Bumps [vue-router](https://github.com/vuejs/router) from 5.0.7 to 5.1.0. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.7...v5.1.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-router
-         dependency-version: 5.1.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.1.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vite from 8.0.14 to 8.0.16 in /web/frontend ([#385](https://github.com/sunerpy/pt-tools/issues/385)) ([#385](https://github.com/sunerpy/pt-tools/pull/385))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.14 to 8.0.16. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.16/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.16
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.16
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Documentation
 
@@ -782,108 +925,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump sass from 1.99.0 to 1.100.0 in /web/frontend ([#364](https://github.com/sunerpy/pt-tools/issues/364)) ([#364](https://github.com/sunerpy/pt-tools/pull/364))
   Bumps [sass](https://github.com/sass/dart-sass) from 1.99.0 to 1.100.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.99.0...1.100.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: sass
-         dependency-version: 1.100.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: sass
+       dependency-version: 1.100.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump dompurify from 3.4.2 to 3.4.5 in /web/frontend ([#368](https://github.com/sunerpy/pt-tools/issues/368)) ([#368](https://github.com/sunerpy/pt-tools/pull/368))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.2 to 3.4.5. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.2...3.4.5)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.5
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.5
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.3.0 to 3.3.2 in /web/frontend ([#369](https://github.com/sunerpy/pt-tools/issues/369)) ([#369](https://github.com/sunerpy/pt-tools/pull/369))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.0 to 3.3.2. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.2/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.3.2
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.2
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.65.0 to 1.66.0 in /web/frontend ([#367](https://github.com/sunerpy/pt-tools/issues/367)) ([#367](https://github.com/sunerpy/pt-tools/pull/367))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.65.0 to 1.66.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.66.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.66.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.66.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vite from 8.0.13 to 8.0.14 in /web/frontend ([#370](https://github.com/sunerpy/pt-tools/issues/370)) ([#370](https://github.com/sunerpy/pt-tools/pull/370))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.13 to 8.0.14. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.14/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.14
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.14
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vitest from 4.1.6 to 4.1.7 in /web/frontend ([#372](https://github.com/sunerpy/pt-tools/issues/372)) ([#372](https://github.com/sunerpy/pt-tools/pull/372))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.6 to 4.1.7. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Changelog](https://github.com/vitest-dev/vitest/blob/main/docs/releases.md) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.7/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.7
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.7
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @types/node from 25.9.0 to 25.9.1 in /web/frontend ([#371](https://github.com/sunerpy/pt-tools/issues/371)) ([#371](https://github.com/sunerpy/pt-tools/pull/371))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.9.0 to 25.9.1. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.9.1
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.9.1
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Features
 
 - **sites**: 新增 2 个 NexusPHP 站点适配（ourbits / mua）
   新增站点（均为 NexusPHP + Cookie 鉴权）：
 
-        - OurBits (ourbits.club) — Issue #329
-         - 标准 10 列 NexusPHP 表格
-         - 详情页 h1 嵌入 free 折扣 + onmouseover 含剩余时间
-         - 用户信息：标准 userdetails.php?id 路径
-        - Mua (mua.xloli.cc, 二次元站点) — Issue #339
-         - 9 列变体（无'进度'列）
-         - userdetails URL 使用 uuid= 而非 id=，因此 id 字段从
-         'td.rowhead:contains(用户ID/UID) + td' 提取整数 UID
-         - 副标题在 td.embedded > span（无 optiontag/tag class）
+      - OurBits (ourbits.club) — Issue #329
+       - 标准 10 列 NexusPHP 表格
+       - 详情页 h1 嵌入 free 折扣 + onmouseover 含剩余时间
+       - 用户信息：标准 userdetails.php?id 路径
+      - Mua (mua.xloli.cc, 二次元站点) — Issue #339
+       - 9 列变体（无'进度'列）
+       - userdetails URL 使用 uuid= 而非 id=，因此 id 字段从
+       'td.rowhead:contains(用户ID/UID) + td' 提取整数 UID
+       - 副标题在 td.embedded > span（无 optiontag/tag class）
 
-        每站包含完整定义 + fixture 测试（搜索/详情/用户信息 + 无密钥校验）。
-        此外两站点都被加入 real_html_validation_test.go 的 TestRealHTML_*
-        测试列表，本地放置 issue 附件 ZIP 解压到 /tmp/site-zips/<id>/ 后
-        即可对真实站点 HTML 跑回归。本次实现已用 issue 附件验证：
+      每站包含完整定义 + fixture 测试（搜索/详情/用户信息 + 无密钥校验）。
+      此外两站点都被加入 real_html_validation_test.go 的 TestRealHTML_*
+      测试列表，本地放置 issue 附件 ZIP 解压到 /tmp/site-zips/<id>/ 后
+      即可对真实站点 HTML 跑回归。本次实现已用 issue 附件验证：
 
-        - OurBits: 真实搜索 100 行解析 OK；详情 SizeMB=88709.1 / Discount=FREE；
-         userinfo 全字段（id/name/bonus/seeding/leeching/uploaded/downloaded/ratio/
-         levelName/joinTime/trueUploaded/trueDownloaded）解析非空
-        - Mua: 真实搜索 100 行解析 OK；详情 SizeMB=1402.9 / Discount=FREE；
-         userinfo 全字段（含 uuid 路径下的 UID 提取）解析非空
+      - OurBits: 真实搜索 100 行解析 OK；详情 SizeMB=88709.1 / Discount=FREE；
+       userinfo 全字段（id/name/bonus/seeding/leeching/uploaded/downloaded/ratio/
+       levelName/joinTime/trueUploaded/trueDownloaded）解析非空
+      - Mua: 真实搜索 100 行解析 OK；详情 SizeMB=1402.9 / Discount=FREE；
+       userinfo 全字段（含 uuid 路径下的 UID 提取）解析非空
 
-        浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 中两域名已存在）。
-        docs/sites.md 已适配站点数从 41 → 43，NexusPHP 系列从 37 → 39。
+      浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 中两域名已存在）。
+      docs/sites.md 已适配站点数从 41 → 43，NexusPHP 系列从 37 → 39。
 
 ### Styling
 
@@ -898,28 +1041,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   实验发现：Edge Add-ons Public API 不允许在前一次 submission 处于
   InReview 状态时上传新 draft package。0.2.2 实验中验证：
 
-        - 0.2.0 / 0.2.1 失败：都是"InProgress → Failed"，~10s（验证管线后期失败）
-        - 0.2.2 失败：直接"Failed"，<1s（同步前置条件检查失败）
+      - 0.2.0 / 0.2.1 失败：都是"InProgress → Failed"，~10s（验证管线后期失败）
+      - 0.2.2 失败：直接"Failed"，<1s（同步前置条件检查失败）
 
-        时间差 + null errorCode/errors 是"product 已被锁定，无法接受新 submission"
-        的特征签名。Public API 没有公开端点查询 submission 列表（/overview/submissions
-        是内部 Cookie 鉴权 endpoint），因此无法预检。
+      时间差 + null errorCode/errors 是"product 已被锁定，无法接受新 submission"
+      的特征签名。Public API 没有公开端点查询 submission 列表（/overview/submissions
+      是内部 Cookie 鉴权 endpoint），因此无法预检。
 
-        修复：Wait for upload processing 步骤改为：
-        - 失败 < 5s 且 errorCode/errors 都为 null
-         → 视为前置条件失败（很可能是 InReview 阻塞）
-         → 输出 ::warning:: + 操作指引（手动 workflow_dispatch 重试）
-         → exit 0，软失败
-        - 其它失败（慢速 / 有 errorCode / 有 errors）
-         → 真实包错误，硬失败 exit 1
+      修复：Wait for upload processing 步骤改为：
+      - 失败 < 5s 且 errorCode/errors 都为 null
+       → 视为前置条件失败（很可能是 InReview 阻塞）
+       → 输出 ::warning:: + 操作指引（手动 workflow_dispatch 重试）
+       → exit 0，软失败
+      - 其它失败（慢速 / 有 errorCode / 有 errors）
+       → 真实包错误，硬失败 exit 1
 
-        Publish submission + Wait for publish processing 两步增加
-        `if: env.UPLOAD_SOFT_FAIL != 'true'` 跳过保护。
+      Publish submission + Wait for publish processing 两步增加
+      `if: env.UPLOAD_SOFT_FAIL != 'true'` 跳过保护。
 
-        操作指引：前一次 submission 进入 InExtensionStore (Live) 后，
-        `gh workflow run extension-publish.yml --ref main` 手动重试发布。
+      操作指引：前一次 submission 进入 InExtensionStore (Live) 后，
+      `gh workflow run extension-publish.yml --ref main` 手动重试发布。
 
-        Release artifact (zip + GitHub Release) 始终生成，软失败不影响。
+      Release artifact (zip + GitHub Release) 始终生成，软失败不影响。
 
 - **qbit**: 检测到 HTML 响应时拒绝认证，避免错误 URL 静默通过
 
@@ -958,14 +1101,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "An error occurred while performing the operation"。通过
   Partner Center 页面诊断定位到隐私表未填。
 
-        隐私策略 URL 为隐私表必填项。本文档详细阐述：
-        - 数据读取/传输/不传输范围（仅同步到用户自部署 pt-tools）
-        - 自动脱敏规则（Cookie 值 / 邮箱 / IP / API Key 等）
-        - 所有权限（storage / activeTab / scripting / cookies / tabs）逆向用途
-        - 未使用远程代码声明
-        - 开源审计指引与联系方式
+      隐私策略 URL 为隐私表必填项。本文档详细阐述：
+      - 数据读取/传输/不传输范围（仅同步到用户自部署 pt-tools）
+      - 自动脱敏规则（Cookie 值 / 邮箱 / IP / API Key 等）
+      - 所有权限（storage / activeTab / scripting / cookies / tabs）逆向用途
+      - 未使用远程代码声明
+      - 开源审计指引与联系方式
 
-        提交后 URL 会预在 Edge 商店扩展页面公开展示。
+      提交后 URL 会预在 Edge 商店扩展页面公开展示。
 
 ### Miscellaneous
 
@@ -973,15 +1116,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.2.1 经 Partner Center Web UI 提交后已 InReview，stuck draft 槽位
   被消费。本次纯版本号 bump（无任何代码改动）作为判别实验：
 
-        - 通过 ext-v0.2.2 tag 触发 extension-publish workflow
-        - workflow 仅走 Public Add-ons API（非 Web UI）
-        - 若 publish-edge job 全绿、商店 Submission 进入 InReview：
-         hypothesis (a) stuck-draft 已消除，未来 API path 可持续使用
-        - 若仍报 status=Failed errorCode=null：
-         hypothesis (c) 后端流水线差异占主导，需进一步排查 zip 内容
-         （locale/manifest 归一化）或申请 Microsoft 工单查内部错误
+      - 通过 ext-v0.2.2 tag 触发 extension-publish workflow
+      - workflow 仅走 Public Add-ons API（非 Web UI）
+      - 若 publish-edge job 全绿、商店 Submission 进入 InReview：
+       hypothesis (a) stuck-draft 已消除，未来 API path 可持续使用
+      - 若仍报 status=Failed errorCode=null：
+       hypothesis (c) 后端流水线差异占主导，需进一步排查 zip 内容
+       （locale/manifest 归一化）或申请 Microsoft 工单查内部错误
 
-        不含任何业务变更，与 0.2.1 zip 字节差异仅 manifest version 字段。
+      不含任何业务变更，与 0.2.1 zip 字节差异仅 manifest version 字段。
 
 ## [ext-v0.2.1] - 2026-05-23
 
@@ -1013,21 +1156,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   govulncheck 报告 site/v2/nexusphp_driver.go 通过 goquery.NewDocumentFromReader
   触发 golang.org/x/net/html 的 5 个漏洞：
 
-        - GO-2026-5028 解析任意 HTML 时的 DoS
-        - GO-2026-5027 foreign content 中元素处理错误
-        - GO-2026-5025 foreign content 中命名空间元素处理错误
-        - 另 2 个 x/net/html 同源 advisory
+      - GO-2026-5028 解析任意 HTML 时的 DoS
+      - GO-2026-5027 foreign content 中元素处理错误
+      - GO-2026-5025 foreign content 中命名空间元素处理错误
+      - 另 2 个 x/net/html 同源 advisory
 
-        修复仅升级到 v0.55.0；go mod tidy 顺手把已被 web 子包直接导入的
-        RomiChan/websocket 与 tidwall/gjson 从 indirect 提到 direct（不影响构建）。
+      修复仅升级到 v0.55.0；go mod tidy 顺手把已被 web 子包直接导入的
+      RomiChan/websocket 与 tidwall/gjson 从 indirect 提到 direct（不影响构建）。
 
-        go.mod 自带 vendor 目录非 git 跟踪，本次只更新 go.mod / go.sum。
+      go.mod 自带 vendor 目录非 git 跟踪，本次只更新 go.mod / go.sum。
 
 ### Styling
 
 - **changelog**: Oxfmt 自动格式化历史 v0.24.0 条目
   CI 的 Format Check 因 oxfmt 输出与仓库版本漂移而失败。漂移点是 v0.24.0
-  （OpenCD/PTT 适配）一个嵌套列表的 markdown 转义：oxfmt 把多层 "\_" / "\*"
+  （OpenCD/PTT 适配）一个嵌套列表的 markdown 转义：oxfmt 把多层 "_" / "*"
   归一化为反斜杠转义。仅文档格式调整，不改任何内容。
 
 ## [0.32.1] - 2026-05-22
@@ -1068,13 +1211,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **release-notes**: 合并 v0.32.0 公告至 v0.32.1，统一对外发布
   v0.32.0 的 TG 公告由于 release-please 自动 body 被 dependabot 6 个 deps PR 污染、commit body 被截断，未能符合精简要求。本次发版的 TG 公告改为合并版，覆盖两次 release 的所有用户可见改动：
 
-        - 磁盘保护并发 race + 日志拆分（Issue #299）
-        - 5 站点 UserInfo 字段同步（Issue #332）
-        - GTKPW Cloudflare RSS UA
-        - 哈希计算失败提示
-        - 自动暂停误标完成 (v0.32.1 新修)
+      - 磁盘保护并发 race + 日志拆分（Issue #299）
+      - 5 站点 UserInfo 字段同步（Issue #332）
+      - GTKPW Cloudflare RSS UA
+      - 哈希计算失败提示
+      - 自动暂停误标完成 (v0.32.1 新修)
 
-        字数 ≈ 365 中文字符，符合 ≤400 限制；通过 .github/release-notes/v0.32.1.md 走新引入的 TG 公告覆盖路径。
+      字数 ≈ 365 中文字符，符合 ≤400 限制；通过 .github/release-notes/v0.32.1.md 走新引入的 TG 公告覆盖路径。
 
 ## [0.32.0] - 2026-05-22
 
@@ -1110,79 +1253,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump oxlint from 1.64.0 to 1.65.0 in /web/frontend ([#343](https://github.com/sunerpy/pt-tools/issues/343)) ([#343](https://github.com/sunerpy/pt-tools/pull/343))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.64.0 to 1.65.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.65.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.65.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.65.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.2.8 to 3.3.0 in /web/frontend ([#346](https://github.com/sunerpy/pt-tools/issues/346)) ([#346](https://github.com/sunerpy/pt-tools/pull/346))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.8 to 3.3.0. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.0/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.3.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vite from 8.0.12 to 8.0.13 in /web/frontend ([#347](https://github.com/sunerpy/pt-tools/issues/347)) ([#347](https://github.com/sunerpy/pt-tools/pull/347))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.12 to 8.0.13. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.13/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.13
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.13
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-router from 5.0.6 to 5.0.7 in /web/frontend ([#344](https://github.com/sunerpy/pt-tools/issues/344)) ([#344](https://github.com/sunerpy/pt-tools/pull/344))
   Bumps [vue-router](https://github.com/vuejs/router) from 5.0.6 to 5.0.7. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.6...v5.0.7)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-router
-         dependency-version: 5.0.7
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.0.7
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @vitejs/plugin-vue from 6.0.6 to 6.0.7 in /web/frontend ([#348](https://github.com/sunerpy/pt-tools/issues/348)) ([#348](https://github.com/sunerpy/pt-tools/pull/348))
   Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.6 to 6.0.7. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.7/packages/plugin-vue)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vitejs/plugin-vue"
-         dependency-version: 6.0.7
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vitejs/plugin-vue"
+       dependency-version: 6.0.7
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.49.0 to 0.50.0 in /web/frontend ([#349](https://github.com/sunerpy/pt-tools/issues/349)) ([#349](https://github.com/sunerpy/pt-tools/pull/349))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.49.0 to 0.50.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.50.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.50.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.50.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @types/node from 25.6.0 to 25.9.0 in /web/frontend ([#350](https://github.com/sunerpy/pt-tools/issues/350)) ([#350](https://github.com/sunerpy/pt-tools/pull/350))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.6.0 to 25.9.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.9.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.9.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -1371,9 +1514,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Bug Fixes
 
 - **ci/extension-publish**: 通过 env 注入 secrets 防止 $ 字符被 shell 展开 ([#336](https://github.com/sunerpy/pt-tools/issues/336)) ([#336](https://github.com/sunerpy/pt-tools/pull/336))
-  含 $ 字符的 EDGE_API_KEY 在 ${{ secrets.EDGE_API_KEY }} 模板展开后直接进入
+含 $ 字符的 EDGE_API_KEY 在 ${{ secrets.EDGE_API_KEY }} 模板展开后直接进入
       shell 命令字符串，bash 把 $BzUHf30Hi8G3N 当作变量替换为空，导致 API 鉴权
-      401。改为通过 env: 注入 + shell 用 "$VAR" 引用，避免任何展开。
+  401。改为通过 env: 注入 + shell 用 "$VAR" 引用，避免任何展开。
 
 ### Miscellaneous
 
@@ -1514,26 +1657,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **web**: 修正 favicon 全站刷新行为并增加已支持站点视图
   修复用户反馈的"只配置了 2 个站点但日志显示刷新全部 40+ 站点"的问题。
 
-        后端：
-        - web/api_favicon.go: refreshExpiredFavicons 改为只迭代 SiteSetting
-         中已启用 (Enabled=true) 的站点，新增 loadEnabledSiteIDsLower 辅助
-        - web/api_favicon.go: apiFavicon 单图标 GET 支持 ?nofetch=1 query，
-         避免"已支持站点"页面对未启用站点触发外部抓取
-        - web/api_favicon.go: apiFaviconList 同样按启用状态过滤
-        - web/api_site.go: 新增 GET /api/sites/definitions handler 暴露
-         SiteDefinitionRegistry 的精简 DTO（id/name/aka/schema/urls/
-         faviconUrl/authMethod/hrEnabled/unavailable*）
-        - web/server.go: 注册 /api/sites/definitions 路由
+      后端：
+      - web/api_favicon.go: refreshExpiredFavicons 改为只迭代 SiteSetting
+       中已启用 (Enabled=true) 的站点，新增 loadEnabledSiteIDsLower 辅助
+      - web/api_favicon.go: apiFavicon 单图标 GET 支持 ?nofetch=1 query，
+       避免"已支持站点"页面对未启用站点触发外部抓取
+      - web/api_favicon.go: apiFaviconList 同样按启用状态过滤
+      - web/api_site.go: 新增 GET /api/sites/definitions handler 暴露
+       SiteDefinitionRegistry 的精简 DTO（id/name/aka/schema/urls/
+       faviconUrl/authMethod/hrEnabled/unavailable*）
+      - web/server.go: 注册 /api/sites/definitions 路由
 
-        前端：
-        - views/SupportedSites.vue: 新增"已支持站点"页面，卡片网格 + 搜索 +
-         按 Schema 筛选 + 不可用状态徽章；favicon 用 noFetch=true 避免
-         对未启用站点发起后端抓取
-        - components/SiteAvatar.vue: 新增 noFetch prop，对应后端 ?nofetch=1
-        - router/index.ts: 新增 /supported-sites 路由
-        - App.vue: 侧栏菜单"站点与RSS"下方新增"已支持站点"入口
-        - views/UserInfoDashboard.vue: 站点统计卡片操作区新增"已支持站点" CTA
-        - api/index.ts: 新增 SupportedSiteDefinition 类型 + sitesApi.listDefinitions()
+      前端：
+      - views/SupportedSites.vue: 新增"已支持站点"页面，卡片网格 + 搜索 +
+       按 Schema 筛选 + 不可用状态徽章；favicon 用 noFetch=true 避免
+       对未启用站点发起后端抓取
+      - components/SiteAvatar.vue: 新增 noFetch prop，对应后端 ?nofetch=1
+      - router/index.ts: 新增 /supported-sites 路由
+      - App.vue: 侧栏菜单"站点与RSS"下方新增"已支持站点"入口
+      - views/UserInfoDashboard.vue: 站点统计卡片操作区新增"已支持站点" CTA
+      - api/index.ts: 新增 SupportedSiteDefinition 类型 + sitesApi.listDefinitions()
 
 ## [0.30.0] - 2026-05-14
 
@@ -1542,17 +1685,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sites**: 新增 2 个 NexusPHP 站点适配
   新增站点（均为 NexusPHP + Cookie 鉴权）：
 
-        - GTKPW (pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com) — Issue #323
-        - NicePT (好趣, www.nicept.net, 繁体界面) — Issue #321
+      - GTKPW (pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com) — Issue #323
+      - NicePT (好趣, www.nicept.net, 繁体界面) — Issue #321
 
-        每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验）：
+      每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验）：
 
-        - GTKPW: 4 个镜像域名同时注册，标准简体 NexusPHP 选择器
-        - NicePT: 繁体优先选择器（傳送 / 上傳量 / 下載量 / 等級 / 用戶ID / 加入日期）
-         + 简体 fallback；HasHR 解析；基本資訊 / 基本信息 size 解析；带 H&R 标志
+      - GTKPW: 4 个镜像域名同时注册，标准简体 NexusPHP 选择器
+      - NicePT: 繁体优先选择器（傳送 / 上傳量 / 下載量 / 等級 / 用戶ID / 加入日期）
+       + 简体 fallback；HasHR 解析；基本資訊 / 基本信息 size 解析；带 H&R 标志
 
-        浏览器扩展 KNOWN_SITES + pt-sites.ts 同步更新（新增 pt.gtk.xyz、t.myaltbox.com）。
-        docs/sites.md 已适配站点数从 39 → 41，NexusPHP 系列从 35 → 37。
+      浏览器扩展 KNOWN_SITES + pt-sites.ts 同步更新（新增 pt.gtk.xyz、t.myaltbox.com）。
+      docs/sites.md 已适配站点数从 39 → 41，NexusPHP 系列从 35 → 37。
 
 ### Styling
 
@@ -1565,106 +1708,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump oxfmt from 0.47.0 to 0.49.0 in /web/frontend ([#311](https://github.com/sunerpy/pt-tools/issues/311)) ([#311](https://github.com/sunerpy/pt-tools/pull/311))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.47.0 to 0.49.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.49.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.49.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.49.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vitest from 4.1.5 to 4.1.6 in /web/frontend ([#312](https://github.com/sunerpy/pt-tools/issues/312)) ([#312](https://github.com/sunerpy/pt-tools/pull/312))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.5 to 4.1.6. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.6/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.6
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.6
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue from 3.5.33 to 3.5.34 in /web/frontend ([#314](https://github.com/sunerpy/pt-tools/issues/314)) ([#314](https://github.com/sunerpy/pt-tools/pull/314))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.33 to 3.5.34. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.33...v3.5.34)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.34
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.34
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vite from 8.0.10 to 8.0.12 in /web/frontend ([#313](https://github.com/sunerpy/pt-tools/issues/313)) ([#313](https://github.com/sunerpy/pt-tools/pull/313))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.10 to 8.0.12. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.12/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.12
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.12
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump element-plus from 2.13.7 to 2.14.0 in /web/frontend ([#315](https://github.com/sunerpy/pt-tools/issues/315)) ([#315](https://github.com/sunerpy/pt-tools/pull/315))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.7 to 2.14.0. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.7...2.14.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.14.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.14.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxlint from 1.62.0 to 1.64.0 in /web/frontend ([#317](https://github.com/sunerpy/pt-tools/issues/317)) ([#317](https://github.com/sunerpy/pt-tools/pull/317))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.62.0 to 1.64.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.64.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.64.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.64.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/sys from 0.43.0 to 0.44.0 ([#309](https://github.com/sunerpy/pt-tools/issues/309)) ([#309](https://github.com/sunerpy/pt-tools/pull/309))
   Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.43.0 to 0.44.0. - [Commits](https://github.com/golang/sys/compare/v0.43.0...v0.44.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sys
-         dependency-version: 0.44.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.44.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/text from 0.36.0 to 0.37.0 ([#310](https://github.com/sunerpy/pt-tools/issues/310)) ([#310](https://github.com/sunerpy/pt-tools/pull/310))
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.36.0 to 0.37.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.36.0...v0.37.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.37.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.37.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
 - **sites**: 新增 3 个 NexusPHP 站点适配
   新增站点（均为 NexusPHP + Cookie 鉴权）：
 
-        - DuckBoobee (鸭鸭, duckboobee.org) — Issue #319
-        - LongPT (龙PT, longpt.org) — Issue #318
-        - HDVideo (HD视频, hdvideo.top) — Issue #307
+      - DuckBoobee (鸭鸭, duckboobee.org) — Issue #319
+      - LongPT (龙PT, longpt.org) — Issue #318
+      - HDVideo (HD视频, hdvideo.top) — Issue #307
 
-        每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验），
-        浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 域名已提前存在）。
+      每站包含完整定义 + fixture 测试（搜索 / 详情 / 用户信息 + 无密钥校验），
+      浏览器扩展 KNOWN_SITES 同步更新（pt-sites.ts 域名已提前存在）。
 
-        docs/sites.md 已适配站点数从 36 → 39，NexusPHP 系列从 32 → 35。
+      docs/sites.md 已适配站点数从 36 → 39，NexusPHP 系列从 32 → 35。
 
 ### Styling
 
@@ -1762,45 +1905,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JSON 响应格式（含 202 pending/409 duplicate 等新状态码），pt-tools 原有
   ~18 处 resp.StatusCode != http.StatusOK 严格检查会把 204 误判为失败。
 
-        实现方案：版本探测 + 分支处理，完全兼容旧版 qBit (4.x/5.0/5.1)
+      实现方案：版本探测 + 分支处理，完全兼容旧版 qBit (4.x/5.0/5.1)
 
-        1) QbitClient 新增 appVersion/isV520Plus/versionMu 字段，登录成功后调
-         /api/v2/app/version 探测版本，semver 比较 >=5.2.0 设置 isV520Plus。
-         探测失败（网络错误/500/非法版本串）静默回退 legacy 模式，WARN 日志提示。
+      1) QbitClient 新增 appVersion/isV520Plus/versionMu 字段，登录成功后调
+       /api/v2/app/version 探测版本，semver 比较 >=5.2.0 设置 isV520Plus。
+       探测失败（网络错误/500/非法版本串）静默回退 legacy 模式，WARN 日志提示。
 
-        2) AuthenticateWithContext 破解循环依赖：登录阶段版本未知，同时接受
-         200 和 204。200 仅将 body == Fails. 视为凭证错误（容忍新版可能的空 body
-         或非 Ok. 响应），204 直接当成功；认证成功后再做版本探测。401/403
-         继续走 wrapStatusCodeError 原有映射。
+      2) AuthenticateWithContext 破解循环依赖：登录阶段版本未知，同时接受
+       200 和 204。200 仅将 body == Fails. 视为凭证错误（容忍新版可能的空 body
+       或非 Ok. 响应），204 直接当成功；认证成功后再做版本探测。401/403
+       继续走 wrapStatusCodeError 原有映射。
 
-        3) 新增 isSuccessStatus(code) helper：5.2.0+ 接受 2xx，旧版仅 200。
-         替换所有非 Authenticate 路径的严格检查（20+ 处），保留 404 回退
-         (pause/resume legacy 端点) 与 403 重新认证重试。
+      3) 新增 isSuccessStatus(code) helper：5.2.0+ 接受 2xx，旧版仅 200。
+       替换所有非 Authenticate 路径的严格检查（20+ 处），保留 404 回退
+       (pause/resume legacy 端点) 与 403 重新认证重试。
 
-        4) AddTorrentEx / AddTorrentFileEx 新增 5.2.0+ 分支：
-         - 200/202/204: 尝试解析新 JSON {success_count, pending_count,
-         failure_count, added_torrent_ids}，解析失败回退 Ok./Fails. 字符串
-         - 409 Conflict: 返回 Success=false，消息「种子已存在或添加失败」
-         legacy 分支保持原有 200 + Ok. 字符串解析逻辑。
+      4) AddTorrentEx / AddTorrentFileEx 新增 5.2.0+ 分支：
+       - 200/202/204: 尝试解析新 JSON {success_count, pending_count,
+       failure_count, added_torrent_ids}，解析失败回退 Ok./Fails. 字符串
+       - 409 Conflict: 返回 Success=false，消息「种子已存在或添加失败」
+       legacy 分支保持原有 200 + Ok. 字符串解析逻辑。
 
-        5) parseQBitVersion(raw) 辅助函数，正则容错解析 v5.2.0/5.2.0/v5.2.0-rc1/
-         qBittorrent v5.2.0 等格式。
+      5) parseQBitVersion(raw) 辅助函数，正则容错解析 v5.2.0/5.2.0/v5.2.0-rc1/
+       qBittorrent v5.2.0 等格式。
 
-        测试覆盖（新增 11 test + 11 sub-test，全部 PASS）：
-        - TestAuthenticate_200LegacyOkBody/200FailsBody/204LoginSuccess/401InvalidCreds
-        - TestDetectVersion_520Plus/Legacy/Fallback
-        - TestParseQBitVersion (9 sub-cases)
-        - TestIsSuccessStatus (2 sub-cases)
-        - TestAddTorrentFileEx_202PendingJSON/409Duplicate
+      测试覆盖（新增 11 test + 11 sub-test，全部 PASS）：
+      - TestAuthenticate_200LegacyOkBody/200FailsBody/204LoginSuccess/401InvalidCreds
+      - TestDetectVersion_520Plus/Legacy/Fallback
+      - TestParseQBitVersion (9 sub-cases)
+      - TestIsSuccessStatus (2 sub-cases)
+      - TestAddTorrentFileEx_202PendingJSON/409Duplicate
 
-        验证：
-        - go test ./... 21 个包全通过，qbit 包覆盖率 33.6%
-        - make fmt + make lint-go 0 issues
-        - 不变动：interface.go、transmission、http_doer.go、manager.go
+      验证：
+      - go test ./... 21 个包全通过，qbit 包覆盖率 33.6%
+      - make fmt + make lint-go 0 issues
+      - 不变动：interface.go、transmission、http_doer.go、manager.go
 
-        对旧版 qBit (4.x/5.0/5.1) 完全无副作用：版本探测识别为 legacy 时，
-        isSuccessStatus 只接受 200，行为与修改前一致。对 qBit 5.2.0+ 用户，
-        登录、pause/resume、add 等操作不再被 204 误判为失败。
+      对旧版 qBit (4.x/5.0/5.1) 完全无副作用：版本探测识别为 legacy 时，
+      isSuccessStatus 只接受 200，行为与修改前一致。对 qBit 5.2.0+ 用户，
+      登录、pause/resume、add 等操作不再被 204 误判为失败。
 
 ### CI/CD
 
@@ -1808,93 +1951,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   新增独立的预发版发布通道，支持在正式版之前发布 beta/rc/alpha 进行
   真实环境测试，测试通过后再合入正式版。
 
-        变更内容：
+      变更内容：
 
-        1. 新增 .github/workflows/release-prerelease.yml
-         - 触发条件：push tag 匹配 v*-beta.N / v*-rc.N / v*-alpha.N
-         - 触发时自动从 tag 中解析 channel（beta/rc/alpha）
-         - 构建跨平台二进制 (linux/windows × amd64/arm64)
-         - 构建 Docker 镜像并推送 :<version> + :<channel>（不动 :latest）
-         - 发布 GitHub Release 带 prerelease=true 标志
-         - 打包浏览器扩展 zip 一并发布
-         - Release notes 头部警示「不建议生产环境使用」
+      1. 新增 .github/workflows/release-prerelease.yml
+       - 触发条件：push tag 匹配 v*-beta.N / v*-rc.N / v*-alpha.N
+       - 触发时自动从 tag 中解析 channel（beta/rc/alpha）
+       - 构建跨平台二进制 (linux/windows × amd64/arm64)
+       - 构建 Docker 镜像并推送 :<version> + :<channel>（不动 :latest）
+       - 发布 GitHub Release 带 prerelease=true 标志
+       - 打包浏览器扩展 zip 一并发布
+       - Release notes 头部警示「不建议生产环境使用」
 
-        2. 修改 .github/workflows/release-assets.yml
-         - tag 过滤器从 v* 收窄为 v[0-9]+.[0-9]+.[0-9]+
-         - 防止预发版误触发两个 workflow 重复发布
-         - 与 release-prerelease.yml 正则完全互斥
+      2. 修改 .github/workflows/release-assets.yml
+       - tag 过滤器从 v* 收窄为 v[0-9]+.[0-9]+.[0-9]+
+       - 防止预发版误触发两个 workflow 重复发布
+       - 与 release-prerelease.yml 正则完全互斥
 
-        3. 新增 make build-prerelease-docker TAG=... CHANNEL=... target
-         - 与 build-remote-docker 的区别：不打 :latest，改打 :<channel>
-         - 参数校验：TAG/CHANNEL 缺失时给出用法提示并 exit 1
+      3. 新增 make build-prerelease-docker TAG=... CHANNEL=... target
+       - 与 build-remote-docker 的区别：不打 :latest，改打 :<channel>
+       - 参数校验：TAG/CHANNEL 缺失时给出用法提示并 exit 1
 
-        4. 修复 web/server.go 函数间缺失空行（gofumpt 历史遗留格式问题）
+      4. 修复 web/server.go 函数间缺失空行（gofumpt 历史遗留格式问题）
 
-        使用方法：
-         git tag v0.28.0-beta.1 <commit>
-         git push origin v0.28.0-beta.1
-         # 自动触发 release-prerelease.yml，发布预发版
-         # 用户可通过 docker pull sunerpy/pt-tools:beta 测试
-         # 测试通过后，走现有 release-please PR 发正式版 v0.28.0
+      使用方法：
+       git tag v0.28.0-beta.1 <commit>
+       git push origin v0.28.0-beta.1
+       # 自动触发 release-prerelease.yml，发布预发版
+       # 用户可通过 docker pull sunerpy/pt-tools:beta 测试
+       # 测试通过后，走现有 release-please PR 发正式版 v0.28.0
 
-        防呆设计：
-        - 两个 workflow 的 tag 正则严格互斥
-        - Makefile 参数校验防止误调用
-        - channel 解析失败时 workflow 立即 exit 1
+      防呆设计：
+      - 两个 workflow 的 tag 正则严格互斥
+      - Makefile 参数校验防止误调用
+      - channel 解析失败时 workflow 立即 exit 1
 
-        验证：
-        - YAML 语法合法
-        - Tag 正则覆盖测试：v0.28.0-beta.1/rc.2/alpha.5 通过，v0.28.0 和 v1.2.3-dev 拒绝
-        - Makefile dry-run 只打 :<version> + :<channel> 两个 tag，无 :latest
-        - make fmt + make lint-go 0 issues
+      验证：
+      - YAML 语法合法
+      - Tag 正则覆盖测试：v0.28.0-beta.1/rc.2/alpha.5 通过，v0.28.0 和 v1.2.3-dev 拒绝
+      - Makefile dry-run 只打 :<version> + :<channel> 两个 tag，无 :latest
+      - make fmt + make lint-go 0 issues
 
 ### Dependencies (Frontend)
 
 - **pnpm**: Bump @vueuse/core from 14.2.1 to 14.3.0 in /web/frontend ([#286](https://github.com/sunerpy/pt-tools/issues/286)) ([#286](https://github.com/sunerpy/pt-tools/pull/286))
   Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.2.1 to 14.3.0. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.3.0/packages/core)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vueuse/core"
-         dependency-version: 14.3.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vueuse/core"
+       dependency-version: 14.3.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.2.7 to 3.2.8 in /web/frontend ([#289](https://github.com/sunerpy/pt-tools/issues/289)) ([#289](https://github.com/sunerpy/pt-tools/pull/289))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.7 to 3.2.8. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.8/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.2.8
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.2.8
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump dompurify from 3.4.1 to 3.4.2 in /web/frontend ([#287](https://github.com/sunerpy/pt-tools/issues/287)) ([#287](https://github.com/sunerpy/pt-tools/pull/287))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.1 to 3.4.2. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.1...3.4.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.2
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump go.uber.org/zap from 1.27.1 to 1.28.0 ([#285](https://github.com/sunerpy/pt-tools/issues/285)) ([#285](https://github.com/sunerpy/pt-tools/pull/285))
   Bumps [go.uber.org/zap](https://github.com/uber-go/zap) from 1.27.1 to 1.28.0. - [Release notes](https://github.com/uber-go/zap/releases) - [Changelog](https://github.com/uber-go/zap/blob/master/CHANGELOG.md) - [Commits](https://github.com/uber-go/zap/compare/v1.27.1...v1.28.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: go.uber.org/zap
-         dependency-version: 1.28.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: go.uber.org/zap
+       dependency-version: 1.28.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -1902,45 +2045,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   用户在版本更新检测和自升级流程中需要直观区分预发版（beta/rc/alpha）与
   正式版，并在升级到预发版前给出明确警示，避免误升级到测试版本。
 
-        实现方案：后端识别 + 前端 delta-ui 风格的多维度视觉差异化。
+      实现方案：后端识别 + 前端 delta-ui 风格的多维度视觉差异化。
 
-        后端变更 (version/checker.go + web/api_version.go):
+      后端变更 (version/checker.go + web/api_version.go):
 
-        1) ReleaseInfo DTO 新增 Prerelease / PrereleaseLabel 字段，透传 GitHub API
-         的 prerelease 标记和从 tag 解析出的通道名 (beta/rc/alpha)。
-        2) 新增 extractPrereleaseLabel 辅助：从 semver 预发版段解析通道名，
-         白名单只认 beta/rc/alpha 三类，dev/snapshot 等非标准标签返回空。
-        3) filterNewReleases 增加 includePrerelease 参数：默认 false 保持向后
-         兼容；双重信号识别预发版 (r.Prerelease || tag 后缀)，防止发版时
-         漏勾 GitHub prerelease 勾选导致的漏判。
-        4) CheckOptions 增加 IncludePrerelease；缓存 key 同时考虑此字段，
-         避免用户切换开关时拿到过期缓存。
-        5) /api/version/check 接受新查询参数 include_prerelease=true。
+      1) ReleaseInfo DTO 新增 Prerelease / PrereleaseLabel 字段，透传 GitHub API
+       的 prerelease 标记和从 tag 解析出的通道名 (beta/rc/alpha)。
+      2) 新增 extractPrereleaseLabel 辅助：从 semver 预发版段解析通道名，
+       白名单只认 beta/rc/alpha 三类，dev/snapshot 等非标准标签返回空。
+      3) filterNewReleases 增加 includePrerelease 参数：默认 false 保持向后
+       兼容；双重信号识别预发版 (r.Prerelease || tag 后缀)，防止发版时
+       漏勾 GitHub prerelease 勾选导致的漏判。
+      4) CheckOptions 增加 IncludePrerelease；缓存 key 同时考虑此字段，
+       避免用户切换开关时拿到过期缓存。
+      5) /api/version/check 接受新查询参数 include_prerelease=true。
 
-        前端变更 (Vue 3 + Element Plus):
+      前端变更 (Vue 3 + Element Plus):
 
-        1) TS 类型 ReleaseInfo 同步添加 prerelease / prerelease_label 字段；
-         versionApi.checkUpdate 接受 includePrerelease 选项。
-        2) Pinia store 新增 showPrerelease 开关 (localStorage 持久化) +
-         hasPrereleaseUpdate / onlyPrereleaseUpdates computed + setShowPrerelease
-         action (切换后自动强制刷新)。
-        3) VersionChecker.vue 多维度视觉差异化：
-         - 右上角按钮：仅预发版更新时按钮色改为 warning，红点改用 danger 色
-         - 弹层顶部新增「含预发版」开关 + 悬浮帮助提示
-         - 更新列表头部 tag 区分「仅发现预发版」/「发现新版本（含预发版）」/「发现新版本」
-         - 存在预发版时显示 el-alert 警示「非必要请等待正式版」
-         - 预发版卡片整体用 warning 色边框/背景 + 顶部 3px 渐变条
-         - 版本号徽章在预发版使用 warning 色
-         - 版本号旁新增大写通道徽章 BETA/RC/ALPHA
-         - 升级按钮对预发版文案改为「升级到预发版」并使用 warning 色
-         - 点击预发版升级先弹 ElMessageBox 确认对话框，文案强调测试风险
-        4) 样式参考 delta-ui 设计语言：pill 徽章、柔和层叠阴影、color-mix 混色、
-         顶部渐变强调条，保持与现有 pt-tools 设计 token (pt-color-warning) 一致。
+      1) TS 类型 ReleaseInfo 同步添加 prerelease / prerelease_label 字段；
+       versionApi.checkUpdate 接受 includePrerelease 选项。
+      2) Pinia store 新增 showPrerelease 开关 (localStorage 持久化) +
+       hasPrereleaseUpdate / onlyPrereleaseUpdates computed + setShowPrerelease
+       action (切换后自动强制刷新)。
+      3) VersionChecker.vue 多维度视觉差异化：
+       - 右上角按钮：仅预发版更新时按钮色改为 warning，红点改用 danger 色
+       - 弹层顶部新增「含预发版」开关 + 悬浮帮助提示
+       - 更新列表头部 tag 区分「仅发现预发版」/「发现新版本（含预发版）」/「发现新版本」
+       - 存在预发版时显示 el-alert 警示「非必要请等待正式版」
+       - 预发版卡片整体用 warning 色边框/背景 + 顶部 3px 渐变条
+       - 版本号徽章在预发版使用 warning 色
+       - 版本号旁新增大写通道徽章 BETA/RC/ALPHA
+       - 升级按钮对预发版文案改为「升级到预发版」并使用 warning 色
+       - 点击预发版升级先弹 ElMessageBox 确认对话框，文案强调测试风险
+      4) 样式参考 delta-ui 设计语言：pill 徽章、柔和层叠阴影、color-mix 混色、
+       顶部渐变强调条，保持与现有 pt-tools 设计 token (pt-color-warning) 一致。
 
-        测试覆盖 (5 个新增用例全部通过):
-        - TestFilterNewReleases_IncludePrerelease: 开关语义 + 字段填充 + 排序
-        - TestFilterNewReleases_TagSuffixDetection: 漏勾 prerelease 时的 tag 后缀识别
-        - TestExtractPrereleaseLabel: 9 个输入覆盖白名单 + 大小写 + dot 分段
+      测试覆盖 (5 个新增用例全部通过):
+      - TestFilterNewReleases_IncludePrerelease: 开关语义 + 字段填充 + 排序
+      - TestFilterNewReleases_TagSuffixDetection: 漏勾 prerelease 时的 tag 后缀识别
+      - TestExtractPrereleaseLabel: 9 个输入覆盖白名单 + 大小写 + dot 分段
 
 ### Styling
 
@@ -1948,7 +2091,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI 执行 go install mvdan.cc/gofumpt@latest 拉到 v0.10.0，而本地之前是 v0.9.2，
   新版会对相邻的单行方法签名做列对齐。整理 17 个文件的格式差异。
 
-        仅格式变动，无逻辑改动。
+      仅格式变动，无逻辑改动。
 
 ## [0.27.0] - 2026-05-02
 
@@ -1958,34 +2101,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   实现 Issue #279 站点请求。Farmm 是 CHD/scenetorrents 模板衍生的 NexusPHP
   站点，需处理两个非标准结构：
 
-        1. 详情页 size 内联于「基本信息」行
-         标准 NexusPHP 详情页有独立的 td.rowhead:contains("大小") 行，此站点将
-         size 与类型/地区/分辨率等字段全部塞进「基本信息」cell 内，用 <b> 标签
-         分隔。SizeRegex 从该 cell 文本中抽取数值与单位。
+      1. 详情页 size 内联于「基本信息」行
+       标准 NexusPHP 详情页有独立的 td.rowhead:contains("大小") 行，此站点将
+       size 与类型/地区/分辨率等字段全部塞进「基本信息」cell 内，用 <b> 标签
+       分隔。SizeRegex 从该 cell 文本中抽取数值与单位。
 
-        2. 用户详情页「传输」行 HDSky 风格
-         分享率/上传量/下载量三个字段打包在同一 td.rowfollow 中。选择器用正则
-         提取每个字段，关键点：用 (?:^|[^实]) 前缀锚定 上传量，避免误匹配
-         实际上传量（此坑在 hdsky.go 也有同样处理）。
+      2. 用户详情页「传输」行 HDSky 风格
+       分享率/上传量/下载量三个字段打包在同一 td.rowfollow 中。选择器用正则
+       提取每个字段，关键点：用 (?:^|[^实]) 前缀锚定 上传量，避免误匹配
+       实际上传量（此坑在 hdsky.go 也有同样处理）。
 
-        其他字段：
-        - 9 列搜索表格（无隐藏列），td:nth-child(1..9) 分别对应类型/标题/评论数/
-         时间/大小/种子数/下载数/完成数/发布者
-        - 详情页 discount 在 h1#top 的 font.free/twoupfree/halfdown 结构内，
-         无 domTT tooltip 所以无法获取 end_time
-        - 此站点无 H&R 标记（列表页和详情页均无 hitandrun/hit_run.gif）
-        - 浏览器扩展域名 pt.0ff.cc 已在 pt-sites.ts（无需修改）
-        - constants.ts KNOWN_SITES 新增 pt0ffcc 条目
-        - docs/sites.md 已适配站点从 30 增至 31（NexusPHP 系列 27 个）
+      其他字段：
+      - 9 列搜索表格（无隐藏列），td:nth-child(1..9) 分别对应类型/标题/评论数/
+       时间/大小/种子数/下载数/完成数/发布者
+      - 详情页 discount 在 h1#top 的 font.free/twoupfree/halfdown 结构内，
+       无 domTT tooltip 所以无法获取 end_time
+      - 此站点无 H&R 标记（列表页和详情页均无 hitandrun/hit_run.gif）
+      - 浏览器扩展域名 pt.0ff.cc 已在 pt-sites.ts（无需修改）
+      - constants.ts KNOWN_SITES 新增 pt0ffcc 条目
+      - docs/sites.md 已适配站点从 30 增至 31（NexusPHP 系列 27 个）
 
-        测试（全部通过）：
-        - Search: 2 行 fixture，验证 id/title/discount/seeders/leechers/snatched
-        - Detail: FREE discount、9.07 GB size、noHR
-        - UserInfo: IndexPage（登录用户 info_block 的 seeding/leeching）+
-         UserdetailsPage（被查看用户的 name/level）+ 4 个 regex 驱动字段
-         必定非空（防止 上传量/实际上传量 混淆）
-        - 全量回归: go test ./... 21 个包全通过，make lint 0 issues，
-         vue-tsc 0 errors，extension 一致性检查通过 (31 个站点)
+      测试（全部通过）：
+      - Search: 2 行 fixture，验证 id/title/discount/seeders/leechers/snatched
+      - Detail: FREE discount、9.07 GB size、noHR
+      - UserInfo: IndexPage（登录用户 info_block 的 seeding/leeching）+
+       UserdetailsPage（被查看用户的 name/level）+ 4 个 regex 驱动字段
+       必定非空（防止 上传量/实际上传量 混淆）
+      - 全量回归: go test ./... 21 个包全通过，make lint 0 issues，
+       vue-tsc 0 errors，extension 一致性检查通过 (31 个站点)
 
 ## [0.26.1] - 2026-05-02
 
@@ -2001,56 +2144,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   实现 issue #276：为每个 PT 站点配置独立的种子上传和下载速度限制，
   推送种子到下载器时自动应用。
 
-        设计：
-        - 上传和下载限速完全对称（用户可以分别配置或只配一项）
-        - qBittorrent: 在 /api/v2/torrents/add 时通过 upLimit/dlLimit 原子设置
-         （qBit 4.1+ 原生支持）
-        - Transmission: torrent-add 不支持 limit 字段，实现 add-paused →
-         torrent-set → torrent-start 的 3 步流程；若用户原本要求 paused
-         则跳过最后一步
-        - 全局 DownloadSpeedLimit 不受影响（它是 pt-tools 内部计算 "能否在免费期
-         内下完" 的参数，与本次 per-torrent 限速语义正交）
+      设计：
+      - 上传和下载限速完全对称（用户可以分别配置或只配一项）
+      - qBittorrent: 在 /api/v2/torrents/add 时通过 upLimit/dlLimit 原子设置
+       （qBit 4.1+ 原生支持）
+      - Transmission: torrent-add 不支持 limit 字段，实现 add-paused →
+       torrent-set → torrent-start 的 3 步流程；若用户原本要求 paused
+       则跳过最后一步
+      - 全局 DownloadSpeedLimit 不受影响（它是 pt-tools 内部计算 "能否在免费期
+       内下完" 的参数，与本次 per-torrent 限速语义正交）
 
-        实现：
-        - models.SiteSetting + SiteConfig: 新增 UploadLimitKBs + DownloadLimitKBs 字段
-        - downloader.AddTorrentOptions:
-         * 新增 UploadSpeedLimitKBs + DownloadSpeedLimitKBs（KB/s，更细粒度）
-         * 原 UploadSpeedLimitMB 标记为 Deprecated 但保留向后兼容
-         * 新增 EffectiveUploadLimitBytes() / EffectiveDownloadLimitBytes() 辅助方法
-         统一返回 bytes/s，KBs 字段优先于 MB
-        - qbit.AddTorrentFileEx: 改用 EffectiveXxxLimitBytes，同时支持 upLimit 和 dlLimit
-        - transmission.AddTorrentFileEx: 限速时自动 paused → set → start
-        - internal/push.go: 新增 applySiteSpeedLimits() 从 SiteSetting 查询并填入 opts
-        - core/config_store.go: 三处 SiteConfig 构造 + UpsertSiteWithRSS 持久化新字段
-        - web/server.go: SiteConfigResponse 新增两个字段
-        - 前端: SiteConfig 类型 + SiteDetail.vue 新增两个 el-input-number
+      实现：
+      - models.SiteSetting + SiteConfig: 新增 UploadLimitKBs + DownloadLimitKBs 字段
+      - downloader.AddTorrentOptions:
+       * 新增 UploadSpeedLimitKBs + DownloadSpeedLimitKBs（KB/s，更细粒度）
+       * 原 UploadSpeedLimitMB 标记为 Deprecated 但保留向后兼容
+       * 新增 EffectiveUploadLimitBytes() / EffectiveDownloadLimitBytes() 辅助方法
+       统一返回 bytes/s，KBs 字段优先于 MB
+      - qbit.AddTorrentFileEx: 改用 EffectiveXxxLimitBytes，同时支持 upLimit 和 dlLimit
+      - transmission.AddTorrentFileEx: 限速时自动 paused → set → start
+      - internal/push.go: 新增 applySiteSpeedLimits() 从 SiteSetting 查询并填入 opts
+      - core/config_store.go: 三处 SiteConfig 构造 + UpsertSiteWithRSS 持久化新字段
+      - web/server.go: SiteConfigResponse 新增两个字段
+      - 前端: SiteConfig 类型 + SiteDetail.vue 新增两个 el-input-number
 
-        测试（全部通过，覆盖所有关键场景）：
-        - thirdpart/downloader/speed_limit_test.go (2 testcase)：
-         * EffectiveUploadLimitBytes 优先级链（KBs > MB）+ 单位换算
-         * EffectiveDownloadLimitBytes 单位换算
-        - thirdpart/downloader/qbit/qbit_speed_limit_test.go (8 testcase)：
-         * UploadLimitKBs / DownloadLimitKBs / 双限速同时设置
-         * 零值不发字段（向后兼容）
-         * 负值忽略
-         * 遗留 MB 字段向后兼容
-         * KBs 优先于 MB
-         * 其他字段不受影响（回归守卫）
-        - thirdpart/downloader/transmission/transmission_speed_limit_test.go (8 testcase)：
-         * 无限速：单次 torrent-add 调用
-         * AutoStart + 限速：完整 add→set→start 三步链路 + 正确 KB/s 单位
-         * 用户明确要求 paused：不调用 torrent-start
-         * 下载限速 / 双限速 / MB 字段兼容 / 调用顺序 / 负值
-        - internal/push_speed_limit_test.go (7 testcase)：
-         * 站点配置正确读取并传递
-         * 零值站点正确传递
-         * 未知站点 / 空 siteID / nil opts / nil DB 全部安全 no-op
-         * 站点配置更新立即生效（无缓存）
+      测试（全部通过，覆盖所有关键场景）：
+      - thirdpart/downloader/speed_limit_test.go (2 testcase)：
+       * EffectiveUploadLimitBytes 优先级链（KBs > MB）+ 单位换算
+       * EffectiveDownloadLimitBytes 单位换算
+      - thirdpart/downloader/qbit/qbit_speed_limit_test.go (8 testcase)：
+       * UploadLimitKBs / DownloadLimitKBs / 双限速同时设置
+       * 零值不发字段（向后兼容）
+       * 负值忽略
+       * 遗留 MB 字段向后兼容
+       * KBs 优先于 MB
+       * 其他字段不受影响（回归守卫）
+      - thirdpart/downloader/transmission/transmission_speed_limit_test.go (8 testcase)：
+       * 无限速：单次 torrent-add 调用
+       * AutoStart + 限速：完整 add→set→start 三步链路 + 正确 KB/s 单位
+       * 用户明确要求 paused：不调用 torrent-start
+       * 下载限速 / 双限速 / MB 字段兼容 / 调用顺序 / 负值
+      - internal/push_speed_limit_test.go (7 testcase)：
+       * 站点配置正确读取并传递
+       * 零值站点正确传递
+       * 未知站点 / 空 siteID / nil opts / nil DB 全部安全 no-op
+       * 站点配置更新立即生效（无缓存）
 
-        全量测试：go test ./... 21 个包全通过，lint 0 warnings，vue-tsc 0 errors。
+      全量测试：go test ./... 21 个包全通过，lint 0 warnings，vue-tsc 0 errors。
 
-        兼容性：GORM AutoMigrate 自动添加新列，所有新字段零值默认，升级后旧
-        行为不变；遗留 UploadSpeedLimitMB 字段继续生效。
+      兼容性：GORM AutoMigrate 自动添加新列，所有新字段零值默认，升级后旧
+      行为不变；遗留 UploadSpeedLimitMB 字段继续生效。
 
 ## [0.25.1] - 2026-04-29
 
@@ -2060,30 +2203,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   用户反馈："虽然设置了过滤规则，但实际上还是只要免费的就下载，感觉还是 free 和
   filter 是 or 的关系，不是 and 的关系"。
 
-        根因：auto_free 模式下，即使 RSS 关联了过滤规则，若种子未匹配规则，仍会走免费通道
-        兜底下载。此 OR 语义违反"设置过滤规则 = 精准下载"的用户直觉。
+      根因：auto_free 模式下，即使 RSS 关联了过滤规则，若种子未匹配规则，仍会走免费通道
+      兜底下载。此 OR 语义违反"设置过滤规则 = 精准下载"的用户直觉。
 
-        修复（Plan A 智能模式语义）：
-        - auto_free + RSS 关联了规则 → 免费通道自动关闭，仅下载匹配规则的种子（精准模式）
-        - auto_free + RSS 无关联规则 → 免费通道开启，自动下载免费种子（保留 v0.25 行为）
-        - filter_only / free_only → 保持原语义不变
+      修复（Plan A 智能模式语义）：
+      - auto_free + RSS 关联了规则 → 免费通道自动关闭，仅下载匹配规则的种子（精准模式）
+      - auto_free + RSS 无关联规则 → 免费通道开启，自动下载免费种子（保留 v0.25 行为）
+      - filter_only / free_only → 保持原语义不变
 
-        实现：
-        - filter.Service 新增 hasAssociatedRules 内部方法，判断 RSS 是否关联任何规则
-        - Decide 决策树新增"免费通道门控"：有规则时禁用免费通道兜底
-        - buildDecisionReason 增加 hasRules 参数，跳过原因说明为 RSS 关联规则的精准模式
-        - evaluateTestDecision（规则测试 UI）同步新语义，测试中总是视为"有规则"
+      实现：
+      - filter.Service 新增 hasAssociatedRules 内部方法，判断 RSS 是否关联任何规则
+      - Decide 决策树新增"免费通道门控"：有规则时禁用免费通道兜底
+      - buildDecisionReason 增加 hasRules 参数，跳过原因说明为 RSS 关联规则的精准模式
+      - evaluateTestDecision（规则测试 UI）同步新语义，测试中总是视为"有规则"
 
-        测试：
-        - 新增 TestDecide_PlanA_UserReportedBug 永久回归守卫，确保问题不再出现
-        - 新增 TestDecide_AutoFreeMode_NoRules_KeepsFreeChannel 守护无规则的旧行为
-        - 更新 TestDecide_AutoFreeMode_CombinedChannels 预期：非匹配免费 → 拒绝
-        - 重命名 *_FallsBackToFreeChannel 为 *_RejectsUnderPlanA，反映新预期
+      测试：
+      - 新增 TestDecide_PlanA_UserReportedBug 永久回归守卫，确保问题不再出现
+      - 新增 TestDecide_AutoFreeMode_NoRules_KeepsFreeChannel 守护无规则的旧行为
+      - 更新 TestDecide_AutoFreeMode_CombinedChannels 预期：非匹配免费 → 拒绝
+      - 重命名 *_FallsBackToFreeChannel 为 *_RejectsUnderPlanA，反映新预期
 
-        UI 更新：
-        - 过滤规则页警告条：明确"关联规则 = 精准下载，不再附带自动下免费"
-        - 全局设置：auto_free 更名为"智能模式"，增加 v0.26.0 行为变更提示
-        - 站点详情 RSS 编辑：下载模式标签同步更新并解释智能模式行为
+      UI 更新：
+      - 过滤规则页警告条：明确"关联规则 = 精准下载，不再附带自动下免费"
+      - 全局设置：auto_free 更名为"智能模式"，增加 v0.26.0 行为变更提示
+      - 站点详情 RSS 编辑：下载模式标签同步更新并解释智能模式行为
 
 ## [0.25.0] - 2026-04-29
 
@@ -2093,35 +2236,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   修复全局 TorrentSizeGB 被过滤规则绕过的 bug：过去 shouldDownload = filter || free 是 OR 逻辑，
   只要规则命中就会绕过全局大小限制。现在全局大小是所有通道的硬上限。
 
-        - FilterRule 新增 MinSizeGB/MaxSizeGB 字段，规则可进一步收紧大小范围（不能突破全局上限）
-        - 新增 FilterMode (auto_free/filter_only/free_only)，支持 3 种下载策略：
-         * auto_free（默认）: 免费通道 + 过滤规则通道，兼容旧行为
-         * filter_only: 仅匹配过滤规则的种子才下载
-         * free_only: 仅免费种子自动下载，忽略过滤规则
-        - FilterMode 支持 RSS 级别覆盖全局默认（GetEffectiveFilterMode 实现 RSS > Global > Default 优先级）
-        - filter.Service 新增 Decide/DecideWithoutRules 方法，统一决策树：
-         全局大小硬上限 → 过滤规则通道 → 免费通道
-        - internal/common.go 两条 RSS 工作路径（Unified + legacy）统一改用 Decide
-        - 规则测试 UI 新增完整决策模拟：种子大小/免费状态/全局上限/模式，输出 决策结果/原因/下载通道
-        - 全局设置增加"默认下载模式"单选组
-        - RSS 订阅编辑增加"下载模式"选择器（空值=跟随全局）
-        - 新增测试 internal/filter/decide_test.go 覆盖 30+ 场景（含 bug 回归守卫）
-        - 新增测试 models/filter_rule_size_test.go 覆盖 MatchesSize 边界和 FilterMode 优先级
-        - TorrentMetadata 接口新增 GetSizeBytes 方法供 Decide 获取种子大小
+      - FilterRule 新增 MinSizeGB/MaxSizeGB 字段，规则可进一步收紧大小范围（不能突破全局上限）
+      - 新增 FilterMode (auto_free/filter_only/free_only)，支持 3 种下载策略：
+       * auto_free（默认）: 免费通道 + 过滤规则通道，兼容旧行为
+       * filter_only: 仅匹配过滤规则的种子才下载
+       * free_only: 仅免费种子自动下载，忽略过滤规则
+      - FilterMode 支持 RSS 级别覆盖全局默认（GetEffectiveFilterMode 实现 RSS > Global > Default 优先级）
+      - filter.Service 新增 Decide/DecideWithoutRules 方法，统一决策树：
+       全局大小硬上限 → 过滤规则通道 → 免费通道
+      - internal/common.go 两条 RSS 工作路径（Unified + legacy）统一改用 Decide
+      - 规则测试 UI 新增完整决策模拟：种子大小/免费状态/全局上限/模式，输出 决策结果/原因/下载通道
+      - 全局设置增加"默认下载模式"单选组
+      - RSS 订阅编辑增加"下载模式"选择器（空值=跟随全局）
+      - 新增测试 internal/filter/decide_test.go 覆盖 30+ 场景（含 bug 回归守卫）
+      - 新增测试 models/filter_rule_size_test.go 覆盖 MatchesSize 边界和 FilterMode 优先级
+      - TorrentMetadata 接口新增 GetSizeBytes 方法供 Decide 获取种子大小
 
 ## [0.24.0] - 2026-04-29
 
 ### Features
 
 - **site**: 新增 OpenCD 和 PTT 站点适配
-- 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP)
-  _ 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead
-  _ 支持 plugin*details.php 链接格式
-  * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支)
-  * 处理 font.promotion 替代 img.pro*_ 的非标准折扣标记
-  _ span.category 替代 img[alt] 的分类标记
-  _ 处理 info_block 隐藏列的 nth-child 索引偏移
-  _ 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 \* 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
+- 新增 site/v2/definitions/opencd.go 适配 open.cd (繁体 NexusPHP) * 使用 div.title + td.rowtitle 替代标准 h1 + td.rowhead * 支持 plugin_details.php 链接格式 * 完整 UserInfo / Search / DetailParser 配置 + fixture 测试 - 新增 site/v2/definitions/pttime.go 适配 www.pttime.org (PTT-NP 分支) * 处理 font.promotion 替代 img.pro_* 的非标准折扣标记 * span.category 替代 img[alt] 的分类标记 * 处理 info_block 隐藏列的 nth-child 索引偏移 * 处理 "上传:" / "下载:" 无 "量" 后缀的 userinfo 标签 * 完整 fixture 测试覆盖 Search/Detail/UserInfo - 浏览器扩展 constants.ts 注册 opencd 和 pttime 至 KNOWN_SITES - docs/sites.md 更新适配站点列表至 30 个 - Closes #233 #250
 
 ## [0.23.0] - 2026-04-29
 
@@ -2130,257 +2266,257 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump oxfmt from 0.43.0 to 0.45.0 in /web/frontend ([#243](https://github.com/sunerpy/pt-tools/issues/243)) ([#243](https://github.com/sunerpy/pt-tools/pull/243))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.43.0 to 0.45.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.45.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.45.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.45.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue from 3.5.31 to 3.5.32 in /web/frontend ([#244](https://github.com/sunerpy/pt-tools/issues/244)) ([#244](https://github.com/sunerpy/pt-tools/pull/244))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.31 to 3.5.32. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.31...v3.5.32)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.32
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.32
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vite from 8.0.5 to 8.0.8 in /web/frontend ([#245](https://github.com/sunerpy/pt-tools/issues/245)) ([#245](https://github.com/sunerpy/pt-tools/pull/245))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.5 to 8.0.8. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.8/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.8
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.8
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @vitejs/plugin-vue from 6.0.5 to 6.0.6 in /web/frontend ([#246](https://github.com/sunerpy/pt-tools/issues/246)) ([#246](https://github.com/sunerpy/pt-tools/pull/246))
   Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.5 to 6.0.6. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.6/packages/plugin-vue)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vitejs/plugin-vue"
-         dependency-version: 6.0.6
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vitejs/plugin-vue"
+       dependency-version: 6.0.6
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump element-plus from 2.13.6 to 2.13.7 in /web/frontend ([#247](https://github.com/sunerpy/pt-tools/issues/247)) ([#247](https://github.com/sunerpy/pt-tools/pull/247))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.6 to 2.13.7. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.6...2.13.7)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.13.7
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.13.7
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.58.0 to 1.60.0 in /web/frontend ([#248](https://github.com/sunerpy/pt-tools/issues/248)) ([#248](https://github.com/sunerpy/pt-tools/pull/248))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.58.0 to 1.60.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.60.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.60.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.60.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @types/node from 25.5.2 to 25.6.0 in /web/frontend ([#249](https://github.com/sunerpy/pt-tools/issues/249)) ([#249](https://github.com/sunerpy/pt-tools/pull/249))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.5.2 to 25.6.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.6.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.6.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump typescript from 6.0.2 to 6.0.3 in /web/frontend ([#251](https://github.com/sunerpy/pt-tools/issues/251)) ([#251](https://github.com/sunerpy/pt-tools/pull/251))
   Bumps [typescript](https://github.com/microsoft/TypeScript) from 6.0.2 to 6.0.3. - [Release notes](https://github.com/microsoft/TypeScript/releases) - [Commits](https://github.com/microsoft/TypeScript/compare/v6.0.2...v6.0.3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: typescript
-         dependency-version: 6.0.3
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: typescript
+       dependency-version: 6.0.3
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.60.0 to 1.61.0 in /web/frontend ([#253](https://github.com/sunerpy/pt-tools/issues/253)) ([#253](https://github.com/sunerpy/pt-tools/pull/253))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.60.0 to 1.61.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.61.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.61.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.61.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump dompurify from 3.3.3 to 3.4.0 in /web/frontend ([#256](https://github.com/sunerpy/pt-tools/issues/256)) ([#256](https://github.com/sunerpy/pt-tools/pull/256))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.3.3 to 3.4.0. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.3.3...3.4.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vitest from 4.1.2 to 4.1.4 in /web/frontend ([#257](https://github.com/sunerpy/pt-tools/issues/257)) ([#257](https://github.com/sunerpy/pt-tools/pull/257))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.2 to 4.1.4. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.4/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.4
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.4
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.2.6 to 3.2.7 in /web/frontend ([#254](https://github.com/sunerpy/pt-tools/issues/254)) ([#254](https://github.com/sunerpy/pt-tools/pull/254))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.6 to 3.2.7. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.7/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.2.7
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.2.7
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vite from 8.0.8 to 8.0.9 in /web/frontend ([#252](https://github.com/sunerpy/pt-tools/issues/252)) ([#252](https://github.com/sunerpy/pt-tools/pull/252))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.8 to 8.0.9. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.9/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.9
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.9
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.45.0 to 0.46.0 in /web/frontend ([#255](https://github.com/sunerpy/pt-tools/issues/255)) ([#255](https://github.com/sunerpy/pt-tools/pull/255))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.45.0 to 0.46.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.46.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.46.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.46.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxlint from 1.61.0 to 1.62.0 in /web/frontend ([#261](https://github.com/sunerpy/pt-tools/issues/261)) ([#261](https://github.com/sunerpy/pt-tools/pull/261))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.61.0 to 1.62.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.62.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.62.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.62.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump dompurify from 3.4.0 to 3.4.1 in /web/frontend ([#262](https://github.com/sunerpy/pt-tools/issues/262)) ([#262](https://github.com/sunerpy/pt-tools/pull/262))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.4.0 to 3.4.1. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.4.0...3.4.1)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.4.1
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.4.1
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue from 3.5.32 to 3.5.33 in /web/frontend ([#264](https://github.com/sunerpy/pt-tools/issues/264)) ([#264](https://github.com/sunerpy/pt-tools/pull/264))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.32 to 3.5.33. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.32...v3.5.33)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.33
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.33
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vitest from 4.1.4 to 4.1.5 in /web/frontend ([#266](https://github.com/sunerpy/pt-tools/issues/266)) ([#266](https://github.com/sunerpy/pt-tools/pull/266))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.4 to 4.1.5. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.5/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.5
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.5
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.46.0 to 0.47.0 in /web/frontend ([#263](https://github.com/sunerpy/pt-tools/issues/263)) ([#263](https://github.com/sunerpy/pt-tools/pull/263))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.46.0 to 0.47.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.47.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.47.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.47.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue-router from 5.0.4 to 5.0.6 in /web/frontend ([#265](https://github.com/sunerpy/pt-tools/issues/265)) ([#265](https://github.com/sunerpy/pt-tools/pull/265))
   Bumps [vue-router](https://github.com/vuejs/router) from 5.0.4 to 5.0.6. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.4...v5.0.6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-router
-         dependency-version: 5.0.6
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.0.6
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vite from 8.0.9 to 8.0.10 in /web/frontend ([#267](https://github.com/sunerpy/pt-tools/issues/267)) ([#267](https://github.com/sunerpy/pt-tools/pull/267))
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.0.9 to 8.0.10. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.10/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.10
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.10
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/text from 0.35.0 to 0.36.0 ([#241](https://github.com/sunerpy/pt-tools/issues/241)) ([#241](https://github.com/sunerpy/pt-tools/pull/241))
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.35.0 to 0.36.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.35.0...v0.36.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.36.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.36.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/sys from 0.42.0 to 0.43.0 ([#242](https://github.com/sunerpy/pt-tools/issues/242)) ([#242](https://github.com/sunerpy/pt-tools/pull/242))
   Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.42.0 to 0.43.0. - [Commits](https://github.com/golang/sys/compare/v0.42.0...v0.43.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sys
-         dependency-version: 0.43.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.43.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -2415,24 +2551,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump actions/upload-artifact from 6 to 7 ([#144](https://github.com/sunerpy/pt-tools/issues/144)) ([#144](https://github.com/sunerpy/pt-tools/pull/144))
   Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 6 to 7. - [Release notes](https://github.com/actions/upload-artifact/releases) - [Commits](https://github.com/actions/upload-artifact/compare/v6...v7)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/upload-artifact
-         dependency-version: '7'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/upload-artifact
+       dependency-version: '7'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/github-script from 7 to 8 ([#142](https://github.com/sunerpy/pt-tools/issues/142)) ([#142](https://github.com/sunerpy/pt-tools/pull/142))
   Bumps [actions/github-script](https://github.com/actions/github-script) from 7 to 8. - [Release notes](https://github.com/actions/github-script/releases) - [Commits](https://github.com/actions/github-script/compare/v7...v8)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/github-script
-         dependency-version: '8'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/github-script
+       dependency-version: '8'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 ## [0.22.1] - 2026-04-08
 
@@ -2446,13 +2582,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump actions/download-artifact from 7 to 8
   Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 7 to 8. - [Release notes](https://github.com/actions/download-artifact/releases) - [Commits](https://github.com/actions/download-artifact/compare/v7...v8)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/download-artifact
-         dependency-version: '8'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/download-artifact
+       dependency-version: '8'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - **security**: Govulncheck 使用 stable 版本 Go 运行
 - go-security job 从 go-version-file 切换为 go-version: stable - 确保 govulncheck 始终使用最新 patch 版修复标准库漏洞
@@ -2464,13 +2600,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump vite from 7.3.1 to 8.0.5 in /web/frontend
   Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 7.3.1 to 8.0.5. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/v8.0.5/packages/vite)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vite
-         dependency-version: 8.0.5
-         dependency-type: direct:development
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.0.5
+       dependency-type: direct:development
+       update-type: version-update:semver-major
+      ...
 
 - **pnpm**: 升级 typescript 至 6.0.2 并适配废弃选项
 - 升级 typescript 5.9.3 → 6.0.2 - tsconfig.app.json 增加 ignoreDeprecations: "6.0" 适配 baseUrl 废弃警告
@@ -2487,279 +2623,279 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump @vitejs/plugin-vue from 6.0.4 to 6.0.5 in /web/frontend ([#185](https://github.com/sunerpy/pt-tools/issues/185)) ([#185](https://github.com/sunerpy/pt-tools/pull/185))
   Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.4 to 6.0.5. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.5/packages/plugin-vue)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vitejs/plugin-vue"
-         dependency-version: 6.0.5
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vitejs/plugin-vue"
+       dependency-version: 6.0.5
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.36.0 to 0.41.0 in /web/frontend ([#188](https://github.com/sunerpy/pt-tools/issues/188)) ([#188](https://github.com/sunerpy/pt-tools/pull/188))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.36.0 to 0.41.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.41.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.41.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.41.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump dompurify from 3.3.2 to 3.3.3 in /web/frontend ([#189](https://github.com/sunerpy/pt-tools/issues/189)) ([#189](https://github.com/sunerpy/pt-tools/pull/189))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.3.2 to 3.3.3. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.3.2...3.3.3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.3.3
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.3.3
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @types/node from 25.4.0 to 25.5.0 in /web/frontend ([#187](https://github.com/sunerpy/pt-tools/issues/187)) ([#187](https://github.com/sunerpy/pt-tools/pull/187))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.4.0 to 25.5.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.5.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.5.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vitest from 4.0.18 to 4.1.0 in /web/frontend ([#190](https://github.com/sunerpy/pt-tools/issues/190)) ([#190](https://github.com/sunerpy/pt-tools/pull/190))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.0.18 to 4.1.0. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.0/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump sass from 1.97.3 to 1.98.0 in /web/frontend ([#191](https://github.com/sunerpy/pt-tools/issues/191)) ([#191](https://github.com/sunerpy/pt-tools/pull/191))
   Bumps [sass](https://github.com/sass/dart-sass) from 1.97.3 to 1.98.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.97.3...1.98.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: sass
-         dependency-version: 1.98.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: sass
+       dependency-version: 1.98.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxlint from 1.51.0 to 1.56.0 in /web/frontend ([#192](https://github.com/sunerpy/pt-tools/issues/192)) ([#192](https://github.com/sunerpy/pt-tools/pull/192))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.51.0 to 1.56.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.56.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.56.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.56.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump element-plus from 2.13.5 to 2.13.6 in /web/frontend ([#198](https://github.com/sunerpy/pt-tools/issues/198)) ([#198](https://github.com/sunerpy/pt-tools/pull/198))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.5 to 2.13.6. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.5...2.13.6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.13.6
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.13.6
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vitest from 4.1.0 to 4.1.1 in /web/frontend ([#200](https://github.com/sunerpy/pt-tools/issues/200)) ([#200](https://github.com/sunerpy/pt-tools/pull/200))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.0 to 4.1.1. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.1/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.1
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.1
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-router from 5.0.3 to 5.0.4 in /web/frontend ([#201](https://github.com/sunerpy/pt-tools/issues/201)) ([#201](https://github.com/sunerpy/pt-tools/pull/201))
   Bumps [vue-router](https://github.com/vuejs/router) from 5.0.3 to 5.0.4. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.3...v5.0.4)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-router
-         dependency-version: 5.0.4
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.0.4
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump marked from 17.0.4 to 17.0.5 in /web/frontend ([#202](https://github.com/sunerpy/pt-tools/issues/202)) ([#202](https://github.com/sunerpy/pt-tools/pull/202))
   Bumps [marked](https://github.com/markedjs/marked) from 17.0.4 to 17.0.5. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.4...v17.0.5)
 
-        ---
-        updated-dependencies:
-        - dependency-name: marked
-         dependency-version: 17.0.5
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: marked
+       dependency-version: 17.0.5
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.2.5 to 3.2.6 in /web/frontend ([#203](https://github.com/sunerpy/pt-tools/issues/203)) ([#203](https://github.com/sunerpy/pt-tools/pull/203))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.5 to 3.2.6. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.6/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.2.6
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.2.6
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.56.0 to 1.57.0 in /web/frontend ([#208](https://github.com/sunerpy/pt-tools/issues/208)) ([#208](https://github.com/sunerpy/pt-tools/pull/208))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.56.0 to 1.57.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.57.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.57.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.57.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @vue/tsconfig from 0.9.0 to 0.9.1 in /web/frontend ([#213](https://github.com/sunerpy/pt-tools/issues/213)) ([#213](https://github.com/sunerpy/pt-tools/pull/213))
   Bumps [@vue/tsconfig](https://github.com/vuejs/tsconfig) from 0.9.0 to 0.9.1. - [Release notes](https://github.com/vuejs/tsconfig/releases) - [Commits](https://github.com/vuejs/tsconfig/compare/v0.9.0...v0.9.1)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vue/tsconfig"
-         dependency-version: 0.9.1
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vue/tsconfig"
+       dependency-version: 0.9.1
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.41.0 to 0.42.0 in /web/frontend ([#209](https://github.com/sunerpy/pt-tools/issues/209)) ([#209](https://github.com/sunerpy/pt-tools/pull/209))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.41.0 to 0.42.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.42.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.42.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.42.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue from 3.5.30 to 3.5.31 in /web/frontend ([#211](https://github.com/sunerpy/pt-tools/issues/211)) ([#211](https://github.com/sunerpy/pt-tools/pull/211))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.30 to 3.5.31. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.30...v3.5.31)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.31
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.31
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vitest from 4.1.1 to 4.1.2 in /web/frontend ([#212](https://github.com/sunerpy/pt-tools/issues/212)) ([#212](https://github.com/sunerpy/pt-tools/pull/212))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.1.1 to 4.1.2. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.1.2/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.1.2
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.1.2
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump sass from 1.98.0 to 1.99.0 in /web/frontend ([#217](https://github.com/sunerpy/pt-tools/issues/217)) ([#217](https://github.com/sunerpy/pt-tools/pull/217))
   Bumps [sass](https://github.com/sass/dart-sass) from 1.98.0 to 1.99.0. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.98.0...1.99.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: sass
-         dependency-version: 1.99.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: sass
+       dependency-version: 1.99.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump marked from 17.0.5 to 17.0.6 in /web/frontend ([#218](https://github.com/sunerpy/pt-tools/issues/218)) ([#218](https://github.com/sunerpy/pt-tools/pull/218))
   Bumps [marked](https://github.com/markedjs/marked) from 17.0.5 to 17.0.6. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.5...v17.0.6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: marked
-         dependency-version: 17.0.6
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: marked
+       dependency-version: 17.0.6
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.42.0 to 0.43.0 in /web/frontend ([#221](https://github.com/sunerpy/pt-tools/issues/221)) ([#221](https://github.com/sunerpy/pt-tools/pull/221))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.42.0 to 0.43.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.43.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.43.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.43.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxlint from 1.57.0 to 1.58.0 in /web/frontend ([#219](https://github.com/sunerpy/pt-tools/issues/219)) ([#219](https://github.com/sunerpy/pt-tools/pull/219))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.57.0 to 1.58.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.58.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.58.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.58.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @types/node from 25.5.0 to 25.5.2 in /web/frontend ([#220](https://github.com/sunerpy/pt-tools/issues/220)) ([#220](https://github.com/sunerpy/pt-tools/pull/220))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.5.0 to 25.5.2. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.5.2
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.5.2
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/text from 0.34.0 to 0.35.0 ([#183](https://github.com/sunerpy/pt-tools/issues/183)) ([#183](https://github.com/sunerpy/pt-tools/pull/183))
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.34.0 to 0.35.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.34.0...v0.35.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.35.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.35.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump github.com/fatih/color from 1.18.0 to 1.19.0 ([#197](https://github.com/sunerpy/pt-tools/issues/197)) ([#197](https://github.com/sunerpy/pt-tools/pull/197))
   Bumps [github.com/fatih/color](https://github.com/fatih/color) from 1.18.0 to 1.19.0. - [Release notes](https://github.com/fatih/color/releases) - [Commits](https://github.com/fatih/color/compare/v1.18.0...v1.19.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: github.com/fatih/color
-         dependency-version: 1.19.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/fatih/color
+       dependency-version: 1.19.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump github.com/PuerkitoBio/goquery from 1.11.0 to 1.12.0 ([#184](https://github.com/sunerpy/pt-tools/issues/184)) ([#184](https://github.com/sunerpy/pt-tools/pull/184))
   Bumps [github.com/PuerkitoBio/goquery](https://github.com/PuerkitoBio/goquery) from 1.11.0 to 1.12.0. - [Release notes](https://github.com/PuerkitoBio/goquery/releases) - [Commits](https://github.com/PuerkitoBio/goquery/compare/v1.11.0...v1.12.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: github.com/PuerkitoBio/goquery
-         dependency-version: 1.12.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/PuerkitoBio/goquery
+       dependency-version: 1.12.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -2793,92 +2929,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump marked from 17.0.3 to 17.0.4 in /web/frontend ([#172](https://github.com/sunerpy/pt-tools/issues/172)) ([#172](https://github.com/sunerpy/pt-tools/pull/172))
   Bumps [marked](https://github.com/markedjs/marked) from 17.0.3 to 17.0.4. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.3...v17.0.4)
 
-        ---
-        updated-dependencies:
-        - dependency-name: marked
-         dependency-version: 17.0.4
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: marked
+       dependency-version: 17.0.4
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump dompurify from 3.3.1 to 3.3.2 in /web/frontend ([#173](https://github.com/sunerpy/pt-tools/issues/173)) ([#173](https://github.com/sunerpy/pt-tools/pull/173))
   Bumps [dompurify](https://github.com/cure53/DOMPurify) from 3.3.1 to 3.3.2. - [Release notes](https://github.com/cure53/DOMPurify/releases) - [Commits](https://github.com/cure53/DOMPurify/compare/3.3.1...3.3.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: dompurify
-         dependency-version: 3.3.2
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: dompurify
+       dependency-version: 3.3.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @types/node from 25.3.3 to 25.4.0 in /web/frontend ([#174](https://github.com/sunerpy/pt-tools/issues/174)) ([#174](https://github.com/sunerpy/pt-tools/pull/174))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.3.3 to 25.4.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.4.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.4.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump element-plus from 2.13.3 to 2.13.5 in /web/frontend ([#171](https://github.com/sunerpy/pt-tools/issues/171)) ([#171](https://github.com/sunerpy/pt-tools/pull/171))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.3 to 2.13.5. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.3...2.13.5)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.13.5
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.13.5
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue from 3.5.28 to 3.5.30 in /web/frontend ([#169](https://github.com/sunerpy/pt-tools/issues/169)) ([#169](https://github.com/sunerpy/pt-tools/pull/169))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.28 to 3.5.30. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.28...v3.5.30)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.30
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.30
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/sys from 0.41.0 to 0.42.0 ([#166](https://github.com/sunerpy/pt-tools/issues/166)) ([#166](https://github.com/sunerpy/pt-tools/pull/166))
   Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.41.0 to 0.42.0. - [Commits](https://github.com/golang/sys/compare/v0.41.0...v0.42.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sys
-         dependency-version: 0.42.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.42.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/time from 0.14.0 to 0.15.0 ([#170](https://github.com/sunerpy/pt-tools/issues/170)) ([#170](https://github.com/sunerpy/pt-tools/pull/170))
   Bumps [golang.org/x/time](https://github.com/golang/time) from 0.14.0 to 0.15.0. - [Commits](https://github.com/golang/time/compare/v0.14.0...v0.15.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/time
-         dependency-version: 0.15.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/time
+       dependency-version: 0.15.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/sync from 0.19.0 to 0.20.0 ([#168](https://github.com/sunerpy/pt-tools/issues/168)) ([#168](https://github.com/sunerpy/pt-tools/pull/168))
   Bumps [golang.org/x/sync](https://github.com/golang/sync) from 0.19.0 to 0.20.0. - [Commits](https://github.com/golang/sync/compare/v0.19.0...v0.20.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sync
-         dependency-version: 0.20.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sync
+       dependency-version: 0.20.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Testing
 
@@ -2906,57 +3042,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump @vue/tsconfig from 0.8.1 to 0.9.0 in /web/frontend ([#146](https://github.com/sunerpy/pt-tools/issues/146)) ([#146](https://github.com/sunerpy/pt-tools/pull/146))
   Bumps [@vue/tsconfig](https://github.com/vuejs/tsconfig) from 0.8.1 to 0.9.0. - [Release notes](https://github.com/vuejs/tsconfig/releases) - [Commits](https://github.com/vuejs/tsconfig/compare/v0.8.1...v0.9.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vue/tsconfig"
-         dependency-version: 0.9.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vue/tsconfig"
+       dependency-version: 0.9.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxlint from 1.50.0 to 1.51.0 in /web/frontend ([#145](https://github.com/sunerpy/pt-tools/issues/145)) ([#145](https://github.com/sunerpy/pt-tools/pull/145))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.50.0 to 1.51.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.51.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.51.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.51.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump element-plus from 2.13.2 to 2.13.3 in /web/frontend ([#150](https://github.com/sunerpy/pt-tools/issues/150)) ([#150](https://github.com/sunerpy/pt-tools/pull/150))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.2 to 2.13.3. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.2...2.13.3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.13.3
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.13.3
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.35.0 to 0.36.0 in /web/frontend ([#149](https://github.com/sunerpy/pt-tools/issues/149)) ([#149](https://github.com/sunerpy/pt-tools/pull/149))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.35.0 to 0.36.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.36.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.36.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.36.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @types/node from 25.3.0 to 25.3.3 in /web/frontend ([#148](https://github.com/sunerpy/pt-tools/issues/148)) ([#148](https://github.com/sunerpy/pt-tools/pull/148))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.3.0 to 25.3.3. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.3.3
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.3.3
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Documentation
 
@@ -2993,68 +3129,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump oxlint from 1.48.0 to 1.50.0 in /web/frontend ([#121](https://github.com/sunerpy/pt-tools/issues/121)) ([#121](https://github.com/sunerpy/pt-tools/pull/121))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.48.0 to 1.50.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.50.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.50.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.50.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vue-router from 5.0.2 to 5.0.3 in /web/frontend ([#124](https://github.com/sunerpy/pt-tools/issues/124)) ([#124](https://github.com/sunerpy/pt-tools/pull/124))
   Bumps [vue-router](https://github.com/vuejs/router) from 5.0.2 to 5.0.3. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.0.2...v5.0.3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-router
-         dependency-version: 5.0.3
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.0.3
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump vue-tsc from 3.2.2 to 3.2.5 in /web/frontend ([#125](https://github.com/sunerpy/pt-tools/issues/125)) ([#125](https://github.com/sunerpy/pt-tools/pull/125))
   Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.2.2 to 3.2.5. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.2.5/packages/tsc)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-tsc
-         dependency-version: 3.2.5
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.2.5
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @types/node from 25.2.3 to 25.3.0 in /web/frontend ([#126](https://github.com/sunerpy/pt-tools/issues/126)) ([#126](https://github.com/sunerpy/pt-tools/pull/126))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.2.3 to 25.3.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.3.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.3.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxfmt from 0.33.0 to 0.35.0 in /web/frontend ([#123](https://github.com/sunerpy/pt-tools/issues/123)) ([#123](https://github.com/sunerpy/pt-tools/pull/123))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.33.0 to 0.35.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.35.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.35.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.35.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump marked from 17.0.2 to 17.0.3 in /web/frontend ([#122](https://github.com/sunerpy/pt-tools/issues/122)) ([#122](https://github.com/sunerpy/pt-tools/pull/122))
   Bumps [marked](https://github.com/markedjs/marked) from 17.0.2 to 17.0.3. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.2...v17.0.3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: marked
-         dependency-version: 17.0.3
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: marked
+       dependency-version: 17.0.3
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 ### Features
 
@@ -3104,13 +3240,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   新增全局设置「免费结束自动删除」，开启后免费期结束时未下载完成的种子
   将自动从下载器删除（含数据文件），无需手动操作。默认关闭。
 
-        - SettingsGlobal 新增 AutoDeleteOnFreeEnd 字段
-        - FreeEndMonitor 新增自动删除分支，仅作用于免费期结束未完成的种子
-        - 系统设置页面新增「免费结束管理」区块含开关和警告提示
-        - 暂停任务页面新增自动删除快捷开关（含悬浮提示）
-        - README 补充功能说明
+      - SettingsGlobal 新增 AutoDeleteOnFreeEnd 字段
+      - FreeEndMonitor 新增自动删除分支，仅作用于免费期结束未完成的种子
+      - 系统设置页面新增「免费结束管理」区块含开关和警告提示
+      - 暂停任务页面新增自动删除快捷开关（含悬浮提示）
+      - README 补充功能说明
 
-        Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
+      Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
 
 ### Performance
 
@@ -3135,31 +3271,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump actions/upload-artifact from 4 to 6 ([#53](https://github.com/sunerpy/pt-tools/issues/53)) ([#53](https://github.com/sunerpy/pt-tools/pull/53))
   Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 6. - [Release notes](https://github.com/actions/upload-artifact/releases) - [Commits](https://github.com/actions/upload-artifact/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/upload-artifact
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/upload-artifact
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 ### Dependencies (Frontend)
 
 - **pnpm**: Bump vue-router from 4.6.4 to 5.0.2 in /web/frontend ([#57](https://github.com/sunerpy/pt-tools/issues/57)) ([#57](https://github.com/sunerpy/pt-tools/pull/57))
   Bumps [vue-router](https://github.com/vuejs/router) from 4.6.4 to 5.0.2. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v4.6.4...v5.0.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue-router
-         dependency-version: 5.0.2
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.0.2
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 ### Features
 
 - **extension**: 增加 PT Tools Helper 浏览器扩展及配套设施
-- 新增 Chrome/Edge 浏览器扩展 (tools/browser-extension) - 支持 Cookie 自动同步、批量同步、一键采集站点数据 - 内置 337 个 PT 站点域名识别库，支持中英文界面 - 后端新增 PUT /api/sites/{name} 凭据更新和 /api/ping 健康检查 - 后端增加 CORS 支持、JSON 登录响应、搜索前站点启用校验 - 前端搜索前刷新可用站点列表防止搜索禁用站点 - 新增图标生成脚本和站点一致性检查脚本 - 新增扩展构建发布 CI 流程 (ext-v\* tag 触发 Edge Add-ons 发布) - 更新文档：Cookie 配置优先推荐浏览器扩展同步方式
+- 新增 Chrome/Edge 浏览器扩展 (tools/browser-extension) - 支持 Cookie 自动同步、批量同步、一键采集站点数据 - 内置 337 个 PT 站点域名识别库，支持中英文界面 - 后端新增 PUT /api/sites/{name} 凭据更新和 /api/ping 健康检查 - 后端增加 CORS 支持、JSON 登录响应、搜索前站点启用校验 - 前端搜索前刷新可用站点列表防止搜索禁用站点 - 新增图标生成脚本和站点一致性检查脚本 - 新增扩展构建发布 CI 流程 (ext-v* tag 触发 Edge Add-ons 发布) - 更新文档：Cookie 配置优先推荐浏览器扩展同步方式
 
 ## [0.14.0] - 2026-02-17
 
@@ -3168,57 +3304,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump @types/node from 25.2.2 to 25.2.3 in /web/frontend ([#100](https://github.com/sunerpy/pt-tools/issues/100)) ([#100](https://github.com/sunerpy/pt-tools/pull/100))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.2.2 to 25.2.3. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.2.3
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.2.3
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @vueuse/core from 14.2.0 to 14.2.1 in /web/frontend ([#101](https://github.com/sunerpy/pt-tools/issues/101)) ([#101](https://github.com/sunerpy/pt-tools/pull/101))
   Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.2.0 to 14.2.1. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.2.1/packages/core)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vueuse/core"
-         dependency-version: 14.2.1
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vueuse/core"
+       dependency-version: 14.2.1
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.43.0 to 1.48.0 in /web/frontend ([#102](https://github.com/sunerpy/pt-tools/issues/102)) ([#102](https://github.com/sunerpy/pt-tools/pull/102))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.43.0 to 1.48.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.48.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.48.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.48.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump marked from 17.0.1 to 17.0.2 in /web/frontend ([#103](https://github.com/sunerpy/pt-tools/issues/103)) ([#103](https://github.com/sunerpy/pt-tools/pull/103))
   Bumps [marked](https://github.com/markedjs/marked) from 17.0.1 to 17.0.2. - [Release notes](https://github.com/markedjs/marked/releases) - [Commits](https://github.com/markedjs/marked/compare/v17.0.1...v17.0.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: marked
-         dependency-version: 17.0.2
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: marked
+       dependency-version: 17.0.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxfmt from 0.28.0 to 0.33.0 in /web/frontend ([#104](https://github.com/sunerpy/pt-tools/issues/104)) ([#104](https://github.com/sunerpy/pt-tools/pull/104))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.28.0 to 0.33.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.33.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.33.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.33.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -3232,48 +3368,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump vue from 3.5.27 to 3.5.28 in /web/frontend ([#93](https://github.com/sunerpy/pt-tools/issues/93)) ([#93](https://github.com/sunerpy/pt-tools/pull/93))
   Bumps [vue](https://github.com/vuejs/core) from 3.5.27 to 3.5.28. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.27...v3.5.28)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.28
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.28
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @types/node from 25.2.0 to 25.2.2 in /web/frontend ([#96](https://github.com/sunerpy/pt-tools/issues/96)) ([#96](https://github.com/sunerpy/pt-tools/pull/96))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.2.0 to 25.2.2. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.2.2
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.2.2
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/sys from 0.40.0 to 0.41.0 ([#95](https://github.com/sunerpy/pt-tools/issues/95)) ([#95](https://github.com/sunerpy/pt-tools/pull/95))
   Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.40.0 to 0.41.0. - [Commits](https://github.com/golang/sys/compare/v0.40.0...v0.41.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sys
-         dependency-version: 0.41.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.41.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/text from 0.33.0 to 0.34.0 ([#94](https://github.com/sunerpy/pt-tools/issues/94)) ([#94](https://github.com/sunerpy/pt-tools/pull/94))
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.33.0 to 0.34.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.33.0...v0.34.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.34.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.34.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -3305,9 +3441,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **release**: 回滚 release-please 标题模式与 component 配置 ([#86](https://github.com/sunerpy/pt-tools/issues/86)) ([#86](https://github.com/sunerpy/pt-tools/pull/86))
 - 恢复 pull-request-title-pattern 为 chore: release - 恢复 pull-request-header 为 ## Release - 移除根包 component 配置，回到此前可稳定触发发布的单包模式
 - **release**: 拆分 release-please 与 tag 构建流程 ([#88](https://github.com/sunerpy/pt-tools/issues/88)) ([#88](https://github.com/sunerpy/pt-tools/pull/88))
-- release-please 工作流仅负责创建 Release PR 与更新 changelog - 新增 release-assets 工作流，仅在 v\* tag 或手动触发时构建并发布资产 - 避免普通 main 提交在未确认 tag 发布前触发 Build and Release
+- release-please 工作流仅负责创建 Release PR 与更新 changelog - 新增 release-assets 工作流，仅在 v* tag 或手动触发时构建并发布资产 - 避免普通 main 提交在未确认 tag 发布前触发 Build and Release
 - **release**: 拆分 release-please 与 tag 构建流程 ([#87](https://github.com/sunerpy/pt-tools/pull/87))
-- release-please 工作流仅负责创建 Release PR 与更新 changelog - 新增 release-assets 工作流，仅在 v\* tag 或手动触发时构建并发布资产 - 避免普通 main 提交在未确认 tag 发布前触发 Build and Release
+- release-please 工作流仅负责创建 Release PR 与更新 changelog - 新增 release-assets 工作流，仅在 v* tag 或手动触发时构建并发布资产 - 避免普通 main 提交在未确认 tag 发布前触发 Build and Release
 
 ## [0.12.3] - 2026-02-07
 
@@ -3401,11 +3537,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 使用 Release Please 自动化版本发布
   替换手动 tag 发布流程为 Release Please 自动化发布:
 
-        - 添加 release-please.yml: 基于 Conventional Commits 自动创建 Release PR
-        - 添加 release-please-config.json: 配置版本规则和 changelog 分类
-        - 添加 .release-please-manifest.json: 跟踪当前版本 (v0.10.1)
-        - 删除 release.yml: 旧的手动 tag 触发发布
-        - 删除 changelog.yml: 旧的手动 changelog 更新
+      - 添加 release-please.yml: 基于 Conventional Commits 自动创建 Release PR
+      - 添加 release-please-config.json: 配置版本规则和 changelog 分类
+      - 添加 .release-please-manifest.json: 跟踪当前版本 (v0.10.1)
+      - 删除 release.yml: 旧的手动 tag 触发发布
+      - 删除 changelog.yml: 旧的手动 changelog 更新
 
 ### Miscellaneous
 
@@ -3429,90 +3565,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pnpm**: Bump oxfmt from 0.27.0 to 0.28.0 in /web/frontend ([#54](https://github.com/sunerpy/pt-tools/issues/54)) ([#54](https://github.com/sunerpy/pt-tools/pull/54))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.27.0 to 0.28.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.28.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.28.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.28.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vitest from 4.0.17 to 4.0.18 in /web/frontend ([#55](https://github.com/sunerpy/pt-tools/issues/55)) ([#55](https://github.com/sunerpy/pt-tools/pull/55))
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 4.0.17 to 4.0.18. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.0.18/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.0.18
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.0.18
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump element-plus from 2.13.1 to 2.13.2 in /web/frontend ([#58](https://github.com/sunerpy/pt-tools/issues/58)) ([#58](https://github.com/sunerpy/pt-tools/pull/58))
   Bumps [element-plus](https://github.com/element-plus/element-plus) from 2.13.1 to 2.13.2. - [Release notes](https://github.com/element-plus/element-plus/releases) - [Changelog](https://github.com/element-plus/element-plus/blob/dev/CHANGELOG.en-US.md) - [Commits](https://github.com/element-plus/element-plus/compare/2.13.1...2.13.2)
 
-        ---
-        updated-dependencies:
-        - dependency-name: element-plus
-         dependency-version: 2.13.2
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: element-plus
+       dependency-version: 2.13.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @vueuse/core from 14.1.0 to 14.2.0 in /web/frontend ([#60](https://github.com/sunerpy/pt-tools/issues/60)) ([#60](https://github.com/sunerpy/pt-tools/pull/60))
   Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.1.0 to 14.2.0. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.2.0/packages/core)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vueuse/core"
-         dependency-version: 14.2.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vueuse/core"
+       dependency-version: 14.2.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxlint from 1.42.0 to 1.43.0 in /web/frontend ([#56](https://github.com/sunerpy/pt-tools/issues/56)) ([#56](https://github.com/sunerpy/pt-tools/pull/56))
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.42.0 to 1.43.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.43.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.43.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.43.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump @types/node from 25.0.7 to 25.2.0 in /web/frontend ([#59](https://github.com/sunerpy/pt-tools/issues/59)) ([#59](https://github.com/sunerpy/pt-tools/pull/59))
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 25.0.7 to 25.2.0. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.2.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.2.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump sass from 1.97.2 to 1.97.3 in /web/frontend ([#62](https://github.com/sunerpy/pt-tools/issues/62)) ([#62](https://github.com/sunerpy/pt-tools/pull/62))
   Bumps [sass](https://github.com/sass/dart-sass) from 1.97.2 to 1.97.3. - [Release notes](https://github.com/sass/dart-sass/releases) - [Changelog](https://github.com/sass/dart-sass/blob/main/CHANGELOG.md) - [Commits](https://github.com/sass/dart-sass/compare/1.97.2...1.97.3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: sass
-         dependency-version: 1.97.3
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: sass
+       dependency-version: 1.97.3
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump @vitejs/plugin-vue from 6.0.3 to 6.0.4 in /web/frontend ([#61](https://github.com/sunerpy/pt-tools/issues/61)) ([#61](https://github.com/sunerpy/pt-tools/pull/61))
   Bumps [@vitejs/plugin-vue](https://github.com/vitejs/vite-plugin-vue/tree/HEAD/packages/plugin-vue) from 6.0.3 to 6.0.4. - [Release notes](https://github.com/vitejs/vite-plugin-vue/releases) - [Changelog](https://github.com/vitejs/vite-plugin-vue/blob/main/packages/plugin-vue/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite-plugin-vue/commits/plugin-vue@6.0.4/packages/plugin-vue)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@vitejs/plugin-vue"
-         dependency-version: 6.0.4
-         dependency-type: direct:development
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@vitejs/plugin-vue"
+       dependency-version: 6.0.4
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
 
 ## [0.10.0] - 2026-02-02
 
@@ -3554,12 +3690,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **site**: HDDolby 两步验证支持 + 解析逻辑优化
   主要变更：- feat(hddolby): 新增 HDDolbyDriver 支持两步验证（Cookie + 详情页解析）- feat(ratelimit): 实现 SQLite 持久化速率限制器，重启后状态不丢失 - refactor(parser): 统一 NexusPHP 详情页解析配置到 SiteDefinition - feat(discount): 搜索结果页支持可配置的 DiscountMapping - docs: 更新开发指南，添加持久化限流和解析配置说明
 
-        技术细节：
-        - 新增 models/rate_limit.go (SiteRateLimit 数据模型)
-        - 新增 site/v2/persistent_rate_limiter.go (滑动窗口限速器)
-        - 新增 site/v2/hddolby_driver.go (HDDolby 专用驱动)
-        - 删除冗余的 site/parser/ 和 site/mocks/ 目录
-        - SiteDefinition 新增 DetailParser 和 DiscountMapping 配置
+      技术细节：
+      - 新增 models/rate_limit.go (SiteRateLimit 数据模型)
+      - 新增 site/v2/persistent_rate_limiter.go (滑动窗口限速器)
+      - 新增 site/v2/hddolby_driver.go (HDDolby 专用驱动)
+      - 删除冗余的 site/parser/ 和 site/mocks/ 目录
+      - SiteDefinition 新增 DetailParser 和 DiscountMapping 配置
 
 - **site**: HDDolby 两步验证支持 + 支持分享站点数据截图 ([#47](https://github.com/sunerpy/pt-tools/pull/47))
 - feat(hddolby): 新增 HDDolby 支持两步验证（Cookie + 详情页解析）- feat: 支持用户统计页面导出分享数据截图，支持模糊站点logo、名称、用户名等自定义项 - refactor(parser): 统一 NexusPHP 详情页解析配置到 SiteDefinition - feat(discount): 搜索结果页支持可配置的 DiscountMapping - docs: 更新开发指南，添加持久化限流和解析配置说明
@@ -3573,92 +3709,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump actions/setup-go from 5 to 6
   Bumps [actions/setup-go](https://github.com/actions/setup-go) from 5 to 6. - [Release notes](https://github.com/actions/setup-go/releases) - [Commits](https://github.com/actions/setup-go/compare/v5...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/setup-go
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/setup-go
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/setup-node from 4 to 6
   Bumps [actions/setup-node](https://github.com/actions/setup-node) from 4 to 6. - [Release notes](https://github.com/actions/setup-node/releases) - [Commits](https://github.com/actions/setup-node/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/setup-node
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/setup-node
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/download-artifact from 4 to 7
   Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 7. - [Release notes](https://github.com/actions/download-artifact/releases) - [Commits](https://github.com/actions/download-artifact/compare/v4...v7)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/download-artifact
-         dependency-version: '7'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/download-artifact
+       dependency-version: '7'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/cache from 4 to 5
   Bumps [actions/cache](https://github.com/actions/cache) from 4 to 5. - [Release notes](https://github.com/actions/cache/releases) - [Changelog](https://github.com/actions/cache/blob/main/RELEASES.md) - [Commits](https://github.com/actions/cache/compare/v4...v5)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/cache
-         dependency-version: '5'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/cache
+       dependency-version: '5'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/checkout from 4 to 6
   Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release notes](https://github.com/actions/checkout/releases) - [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) - [Commits](https://github.com/actions/checkout/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/checkout
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/checkout
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 ### Dependencies (Frontend)
 
 - **pnpm**: Bump vue from 3.5.26 to 3.5.27 in /web/frontend
   Bumps [vue](https://github.com/vuejs/core) from 3.5.26 to 3.5.27. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.26...v3.5.27)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vue
-         dependency-version: 3.5.27
-         dependency-type: direct:production
-         update-type: version-update:semver-patch
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.27
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
 
 - **pnpm**: Bump oxlint from 1.39.0 to 1.42.0 in /web/frontend
   Bumps [oxlint](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxlint) from 1.39.0 to 1.42.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxlint/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxlint_v1.42.0/npm/oxlint)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxlint
-         dependency-version: 1.42.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxlint
+       dependency-version: 1.42.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump oxfmt from 0.24.0 to 0.27.0 in /web/frontend ([#37](https://github.com/sunerpy/pt-tools/issues/37)) ([#37](https://github.com/sunerpy/pt-tools/pull/37))
   Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.24.0 to 0.27.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.27.0/npm/oxfmt)
 
-        ---
-        updated-dependencies:
-        - dependency-name: oxfmt
-         dependency-version: 0.27.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.27.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -3779,149 +3915,149 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump actions/upload-artifact from 4 to 6
   Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 6. - [Release notes](https://github.com/actions/upload-artifact/releases) - [Commits](https://github.com/actions/upload-artifact/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/upload-artifact
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/upload-artifact
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/setup-node from 4 to 6
   Bumps [actions/setup-node](https://github.com/actions/setup-node) from 4 to 6. - [Release notes](https://github.com/actions/setup-node/releases) - [Commits](https://github.com/actions/setup-node/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/setup-node
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/setup-node
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/setup-go from 4 to 6
   Bumps [actions/setup-go](https://github.com/actions/setup-go) from 4 to 6. - [Release notes](https://github.com/actions/setup-go/releases) - [Commits](https://github.com/actions/setup-go/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/setup-go
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/setup-go
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/checkout from 4 to 6
   Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release notes](https://github.com/actions/checkout/releases) - [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) - [Commits](https://github.com/actions/checkout/compare/v4...v6)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/checkout
-         dependency-version: '6'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/checkout
+       dependency-version: '6'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump actions/download-artifact from 4 to 7
   Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 7. - [Release notes](https://github.com/actions/download-artifact/releases) - [Commits](https://github.com/actions/download-artifact/compare/v4...v7)
 
-        ---
-        updated-dependencies:
-        - dependency-name: actions/download-artifact
-         dependency-version: '7'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: actions/download-artifact
+       dependency-version: '7'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump docker/setup-buildx-action from 2 to 3
   Bumps [docker/setup-buildx-action](https://github.com/docker/setup-buildx-action) from 2 to 3. - [Release notes](https://github.com/docker/setup-buildx-action/releases) - [Commits](https://github.com/docker/setup-buildx-action/compare/v2...v3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: docker/setup-buildx-action
-         dependency-version: '3'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: docker/setup-buildx-action
+       dependency-version: '3'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 - Bump docker/login-action from 2 to 3
   Bumps [docker/login-action](https://github.com/docker/login-action) from 2 to 3. - [Release notes](https://github.com/docker/login-action/releases) - [Commits](https://github.com/docker/login-action/compare/v2...v3)
 
-        ---
-        updated-dependencies:
-        - dependency-name: docker/login-action
-         dependency-version: '3'
-         dependency-type: direct:production
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: docker/login-action
+       dependency-version: '3'
+       dependency-type: direct:production
+       update-type: version-update:semver-major
+      ...
 
 ### Dependencies (Frontend)
 
 - **pnpm**: Bump globals from 16.5.0 to 17.0.0 in /web/frontend
   Bumps [globals](https://github.com/sindresorhus/globals) from 16.5.0 to 17.0.0. - [Release notes](https://github.com/sindresorhus/globals/releases) - [Commits](https://github.com/sindresorhus/globals/compare/v16.5.0...v17.0.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: globals
-         dependency-version: 17.0.0
-         dependency-type: direct:development
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: globals
+       dependency-version: 17.0.0
+       dependency-type: direct:development
+       update-type: version-update:semver-major
+      ...
 
 - **pnpm**: Bump @types/node from 24.10.7 to 25.0.7 in /web/frontend
   Bumps [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) from 24.10.7 to 25.0.7. - [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases) - [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@types/node"
-         dependency-version: 25.0.7
-         dependency-type: direct:development
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@types/node"
+       dependency-version: 25.0.7
+       dependency-type: direct:development
+       update-type: version-update:semver-major
+      ...
 
 - **pnpm**: Bump @typescript-eslint/parser in /web/frontend
   Bumps [@typescript-eslint/parser](https://github.com/typescript-eslint/typescript-eslint/tree/HEAD/packages/parser) from 8.52.0 to 8.53.0. - [Release notes](https://github.com/typescript-eslint/typescript-eslint/releases) - [Changelog](https://github.com/typescript-eslint/typescript-eslint/blob/main/packages/parser/CHANGELOG.md) - [Commits](https://github.com/typescript-eslint/typescript-eslint/commits/v8.53.0/packages/parser)
 
-        ---
-        updated-dependencies:
-        - dependency-name: "@typescript-eslint/parser"
-         dependency-version: 8.53.0
-         dependency-type: direct:development
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: "@typescript-eslint/parser"
+       dependency-version: 8.53.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
 
 - **pnpm**: Bump vitest from 3.2.4 to 4.0.17 in /web/frontend
   Bumps [vitest](https://github.com/vitest-dev/vitest/tree/HEAD/packages/vitest) from 3.2.4 to 4.0.17. - [Release notes](https://github.com/vitest-dev/vitest/releases) - [Commits](https://github.com/vitest-dev/vitest/commits/v4.0.17/packages/vitest)
 
-        ---
-        updated-dependencies:
-        - dependency-name: vitest
-         dependency-version: 4.0.17
-         dependency-type: direct:development
-         update-type: version-update:semver-major
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: vitest
+       dependency-version: 4.0.17
+       dependency-type: direct:development
+       update-type: version-update:semver-major
+      ...
 
 ### Dependencies (Go)
 
 - **go**: Bump golang.org/x/text from 0.32.0 to 0.33.0
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.32.0 to 0.33.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.32.0...v0.33.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.33.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.33.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 - **go**: Bump golang.org/x/text from 0.32.0 to 0.33.0
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.32.0 to 0.33.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.32.0...v0.33.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/text
-         dependency-version: 0.33.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/text
+       dependency-version: 0.33.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -3932,7 +4068,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **frontend**: 更新 pnpm 锁定文件中的依赖版本和 libc 支持
 - **build**: 调整 GitHub Actions 触发条件为仅标签推送时更新 CHANGELOG.md
-- 移除对 main 分支的监听限制 - 改为只在 v\* 标签推送时触发工作流
+- 移除对 main 分支的监听限制 - 改为只在 v* 标签推送时触发工作流
 
 ## [0.2.0] - 2026-01-11
 
@@ -3947,13 +4083,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **go**: Bump golang.org/x/sys from 0.39.0 to 0.40.0
   Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.39.0 to 0.40.0. - [Commits](https://github.com/golang/sys/compare/v0.39.0...v0.40.0)
 
-        ---
-        updated-dependencies:
-        - dependency-name: golang.org/x/sys
-         dependency-version: 0.40.0
-         dependency-type: direct:production
-         update-type: version-update:semver-minor
-        ...
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.40.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
 
 ### Features
 
@@ -4154,7 +4290,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Features
 
 - 添加自动下载安装脚本并优化相关功能
-- 新增 download.sh 脚本，实现自动检测平台并下载安装最新版本 pt-tools - 优化 Makefile 中的 upx-binaries 目标，增加对 windows-\*.exe 文件的判断 - 修复 MTTorrentDetail.CanbeFinished 方法，增加对 DiscountEndTime 为空的判断 - 优化 CanbeFinished 方法错误日志，增加 tid 信息
+- 新增 download.sh 脚本，实现自动检测平台并下载安装最新版本 pt-tools - 优化 Makefile 中的 upx-binaries 目标，增加对 windows-*.exe 文件的判断 - 修复 MTTorrentDetail.CanbeFinished 方法，增加对 DiscountEndTime 为空的判断 - 优化 CanbeFinished 方法错误日志，增加 tid 信息
 
 ## [0.0.1] - 2024-12-04
 
