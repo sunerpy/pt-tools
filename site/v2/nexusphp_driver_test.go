@@ -193,6 +193,64 @@ func TestNexusPHPDriver_ParseSearch(t *testing.T) {
 	assert.Equal(t, "Test Movie 2024", items[0].Title)
 }
 
+func TestNexusPHPDriver_ParseSearch_SubtitleExtraction(t *testing.T) {
+	tests := []struct {
+		name      string
+		html      string
+		configure func(*SiteSelectors)
+		want      string
+	}{
+		{
+			name: "structured HTML and regex extracts bare text node",
+			html: `<table class="torrents"><tbody><tr class="torrent-row"><td class="embedded browse_td_name_cell">
+				<a href="details.php?id=2781170"><b>惊变28年</b></a><img class="tag imdb_10548174"><br />
+				28 Years Later 2025 BluRay 1080p x265 10bit DDP7.1 MNHD-FRDS<b>[<div class="famfamfam-silk cup"></div>]</b>
+			</td></tr></tbody></table>`,
+			configure: func(s *SiteSelectors) {
+				s.SubtitleSelector = &FieldSelector{
+					Selector: []string{"td.embedded.browse_td_name_cell"},
+					Attr:     "html",
+					Filters: []Filter{{
+						Name: "regex",
+						Args: []any{`(?s)<br\s*/?>\s*([^<]+?)\s*<b>\[`},
+					}},
+				}
+			},
+			want: "28 Years Later 2025 BluRay 1080p x265 10bit DDP7.1 MNHD-FRDS",
+		},
+		{
+			name: "legacy string selector is unchanged",
+			html: `<table class="torrents"><tbody><tr class="torrent-row"><td>
+				<a href="details.php?id=12345">Test Movie</a><span class="subtitle">Legacy Subtitle</span>
+			</td></tr></tbody></table>`,
+			configure: func(s *SiteSelectors) {
+				s.Subtitle = ".subtitle"
+			},
+			want: "Legacy Subtitle",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selectors := SiteSelectors{
+				TableRows: ".torrent-row",
+				Title:     "a[href*='details.php']",
+			}
+			tt.configure(&selectors)
+			driver := NewNexusPHPDriver(NexusPHPDriverConfig{
+				BaseURL:   "https://example.com",
+				Selectors: &selectors,
+			})
+			doc := mustDoc(t, tt.html)
+
+			items, err := driver.ParseSearch(NexusPHPResponse{Document: doc})
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Equal(t, tt.want, items[0].Subtitle)
+		})
+	}
+}
+
 func TestNexusPHPDriver_ParseSearch_DiscountEndTimeFromOnmouseover(t *testing.T) {
 	driver := NewNexusPHPDriver(NexusPHPDriverConfig{
 		BaseURL: "https://hdsky.me",

@@ -71,6 +71,8 @@ type SiteSelectors struct {
 	HRIcon string `json:"hrIcon"`
 	// Subtitle selects the subtitle in search results
 	Subtitle string `json:"subtitle"`
+	// SubtitleSelector extracts subtitles that require HTML attributes or filters
+	SubtitleSelector *FieldSelector `json:"subtitleSelector,omitempty"`
 	// UserInfo selectors for user page
 	UserInfoUsername   string `json:"userInfoUsername"`
 	UserInfoUploaded   string `json:"userInfoUploaded"`
@@ -435,6 +437,8 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 			if subtitleElem.Length() > 0 {
 				item.Subtitle = strings.TrimSpace(subtitleElem.Text())
 			}
+		} else if d.Selectors.SubtitleSelector != nil {
+			item.Subtitle = d.extractFieldValueFromSelection(s, *d.Selectors.SubtitleSelector)
 		}
 
 		// Parse size
@@ -1119,12 +1123,16 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 
 // extractFieldValue extracts a field value from the document using the selector config
 func (d *NexusPHPDriver) extractFieldValue(doc *goquery.Document, selector FieldSelector) string {
+	return d.extractFieldValueFromSelection(doc.Selection, selector)
+}
+
+func (d *NexusPHPDriver) extractFieldValueFromSelection(root *goquery.Selection, selector FieldSelector) string {
 	var value string
 	var matchedSelector string
 
 	// Try each selector until one matches
 	for _, sel := range selector.Selector {
-		elem := doc.Find(sel).First()
+		elem := root.Find(sel).First()
 		if elem.Length() == 0 {
 			if DebugUserInfo {
 				fmt.Printf("[DEBUG]   Selector %q: no match\n", sel)
