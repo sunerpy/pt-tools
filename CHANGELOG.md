@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2026-07-27
+
+### Features
+
+- **site**: 扩展 NexusPHP 解析器以适配非标准页面 ([#488](https://github.com/sunerpy/pt-tools/issues/488)) ([#488](https://github.com/sunerpy/pt-tools/pull/488))
+- ParseSizeMB 支持 KiB/MiB/GiB/TiB 二进制单位 - ParseTitleAndID 在无 value 属性时回退读取元素文本 - 标题回退按已知优惠词表剥离尾部促销标记 - SiteSelectors 新增 SubtitleSelector 支持属性与过滤器提取 - 补齐单位换算、标题回退与副标题提取回归测试
+- **site**: 新增 PT@KEEPFRDS 站点适配 ([#490](https://github.com/sunerpy/pt-tools/issues/490)) ([#490](https://github.com/sunerpy/pt-tools/pull/490))
+- 标题取 h1#top 并按优惠词表剥离尾部促销标记 - 自定义 SizeRegex 兼容 GiB 二进制单位 - 副标题走 SubtitleSelector 提取 br 之后的裸文本 - 补充 search/detail/userinfo 三项 fixture 测试
+
 ## [0.43.0] - 2026-07-26
 
 ### Features
