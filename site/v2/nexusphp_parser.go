@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -24,17 +25,10 @@ type NexusPHPParserConfig struct {
 
 // DefaultNexusPHPParserConfig 返回默认配置，适用于大多数 NexusPHP 站点
 func DefaultNexusPHPParserConfig() NexusPHPParserConfig {
+	detailConfig := DefaultDetailParserConfig()
 	return NexusPHPParserConfig{
-		TimeLayout: "2006-01-02 15:04:05",
-		DiscountMapping: map[string]DiscountLevel{
-			"free":          DiscountFree,
-			"twoup":         Discount2xUp,
-			"twoupfree":     Discount2xFree,
-			"thirtypercent": DiscountPercent30,
-			"halfdown":      DiscountPercent50,
-			"twouphalfdown": Discount2x50,
-			"pro_custom":    DiscountNone,
-		},
+		TimeLayout:       detailConfig.TimeLayout,
+		DiscountMapping:  detailConfig.DiscountMapping,
 		HRKeywords:       []string{"hitandrun", "hit_run.gif", "Hit and Run", "Hit & Run"},
 		TitleSelector:    "input[name='torrent_name']",
 		IDSelector:       "input[name='detail_torrent_id']",
@@ -147,9 +141,93 @@ func NewNexusPHPParserFromDefinition(def *SiteDefinition) *NexusPHPParser {
 }
 
 func (p *NexusPHPParser) ParseTitleAndID(doc *goquery.Selection) (title, torrentID string) {
-	title, _ = doc.Find(p.config.TitleSelector).Attr("value")
-	torrentID, _ = doc.Find(p.config.IDSelector).Attr("value")
+	title = valueOrText(doc.Find(p.config.TitleSelector), p.config.DiscountMapping)
+	torrentID = valueOrText(doc.Find(p.config.IDSelector), nil)
 	return title, torrentID
+}
+
+func valueOrText(s *goquery.Selection, discountMapping map[string]DiscountLevel) string {
+	if value, exists := s.Attr("value"); exists {
+		return value
+	}
+
+	text := strings.TrimSpace(s.Text())
+	if discountMapping == nil {
+		return text
+	}
+
+	return stripTrailingPromotion(text, discountMapping)
+}
+
+func stripTrailingPromotion(text string, discountMapping map[string]DiscountLevel) string {
+	runes := []rune(text)
+	for start := 0; start < len(runes); {
+		if !unicode.IsSpace(runes[start]) {
+			start++
+			continue
+		}
+
+		end := start
+		for end < len(runes) && unicode.IsSpace(runes[end]) {
+			end++
+		}
+		suffix := strings.TrimSpace(string(runes[end:]))
+		if strings.HasPrefix(suffix, "[") && strings.HasSuffix(suffix, "]") &&
+			isKnownPromotionLabel(suffix[1:len(suffix)-1], discountMapping) {
+			return strings.TrimSpace(string(runes[:start]))
+		}
+		start = end
+	}
+
+	return text
+}
+
+func isKnownPromotionLabel(label string, discountMapping map[string]DiscountLevel) bool {
+	normalized := normalizePromotionLabel(label)
+	for key, level := range discountMapping {
+		if level == DiscountNone {
+			continue
+		}
+		if normalized == normalizePromotionLabel(key) {
+			return true
+		}
+		for _, alias := range renderedPromotionAliases(level) {
+			if normalized == normalizePromotionLabel(alias) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizePromotionLabel(label string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, label)
+}
+
+// renderedPromotionAliases maps configured discount semantics to their common visible labels.
+// CSS class names remain sourced from DiscountMapping; these aliases cover rendered human text.
+func renderedPromotionAliases(level DiscountLevel) []string {
+	switch level {
+	case DiscountFree:
+		return []string{"免费", "free"}
+	case Discount2xUp:
+		return []string{"2x", "2xup"}
+	case Discount2xFree:
+		return []string{"2x免费", "2xfree"}
+	case DiscountPercent50:
+		return []string{"50%"}
+	case DiscountPercent30:
+		return []string{"30%"}
+	case Discount2x50:
+		return []string{"2x50%", "2x50"}
+	default:
+		return nil
+	}
 }
 
 func (p *NexusPHPParser) ParseDiscount(doc *goquery.Selection) (DiscountLevel, time.Time) {
@@ -201,11 +279,11 @@ func (p *NexusPHPParser) ParseSizeMB(doc *goquery.Selection) float64 {
 			return
 		}
 		switch strings.ToUpper(matches[2]) {
-		case "TB":
+		case "TB", "TIB":
 			size *= 1024 * 1024
-		case "GB":
+		case "GB", "GIB":
 			size *= 1024
-		case "KB":
+		case "KB", "KIB":
 			size /= 1024
 		}
 		sizeMB = size

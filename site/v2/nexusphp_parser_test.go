@@ -401,19 +401,162 @@ func TestNewNexusPHPParserFromDefinition_Nil(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNexusPHPParser_ParseSizeMB_Units(t *testing.T) {
-	p := NewNexusPHPParser()
+	p := NewNexusPHPParserFromDefinition(&SiteDefinition{DetailParser: &DetailParserConfig{
+		SizeRegex: `大小：[^\d]*([\d.]+)\s*([KMGT]i?B)`,
+	}})
+	tests := []struct {
+		name   string
+		value  string
+		wantMB float64
+		delta  float64
+	}{
+		{name: "TB", value: "2.00 TB", wantMB: 2097152, delta: 1},
+		{name: "GB", value: "2.00 GB", wantMB: 2048, delta: 0.1},
+		{name: "MB", value: "2.00 MB", wantMB: 2, delta: 0.1},
+		{name: "KB", value: "512.00 KB", wantMB: 0.5, delta: 0.01},
+		{name: "TiB", value: "2.00 TiB", wantMB: 2097152, delta: 1},
+		{name: "GiB", value: "2.00 GiB", wantMB: 2048, delta: 0.1},
+		{name: "MiB", value: "2.00 MiB", wantMB: 2, delta: 0.1},
+		{name: "KiB", value: "512.00 KiB", wantMB: 0.5, delta: 0.01},
+	}
 
-	tb := `<html><body><table><tr><td class="rowhead">基本信息</td><td>大小：2.00 TB</td></tr></table></body></html>`
-	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(tb))
-	assert.InDelta(t, 2.0*1024*1024, p.ParseSizeMB(doc.Selection), 1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			html := `<html><body><table><tr><td class="rowhead">基本信息</td><td>大小：` + tt.value + `</td></tr></table></body></html>`
+			doc := parseHTML(t, html)
+			assert.InDelta(t, tt.wantMB, p.ParseSizeMB(doc), tt.delta)
+		})
+	}
 
-	kb := `<html><body><table><tr><td class="rowhead">基本信息</td><td>大小：512.00 KB</td></tr></table></body></html>`
-	doc2, _ := goquery.NewDocumentFromReader(strings.NewReader(kb))
-	assert.InDelta(t, 512.0/1024, p.ParseSizeMB(doc2.Selection), 0.01)
+	t.Run("no match", func(t *testing.T) {
+		doc := parseHTML(t, `<html><body><table><tr><td class="rowhead">基本信息</td><td>无</td></tr></table></body></html>`)
+		assert.Zero(t, p.ParseSizeMB(doc))
+	})
 
-	none := `<html><body><table><tr><td class="rowhead">基本信息</td><td>无</td></tr></table></body></html>`
-	doc3, _ := goquery.NewDocumentFromReader(strings.NewReader(none))
-	assert.Equal(t, float64(0), p.ParseSizeMB(doc3.Selection))
+	t.Run("default regex does not opt into binary units", func(t *testing.T) {
+		doc := parseHTML(t, `<html><body><table><tr><td class="rowhead">基本信息</td><td>大小：2.00 GiB</td></tr></table></body></html>`)
+		assert.Zero(t, NewNexusPHPParser().ParseSizeMB(doc))
+	})
+}
+
+func TestNexusPHPParser_ParseTitleAndID_ValueAndText(t *testing.T) {
+	tests := []struct {
+		name   string
+		html   string
+		want   string
+		wantID string
+	}{
+		{
+			name:   "falls back to element text and strips trailing promotion",
+			html:   `<h1 id="top">【十日拍拖手册/绝配冤家】10bit HEVC版本 国英双语 评论音轨&nbsp;&nbsp;&nbsp; <b>[<font class="free">免费</font>]</b></h1><span id="torrent-id">2782256</span>`,
+			want:   "【十日拍拖手册/绝配冤家】10bit HEVC版本 国英双语 评论音轨",
+			wantID: "2782256",
+		},
+		// These cases guard against stripping legitimate resolution and release-group brackets.
+		{
+			name:   "preserves resolution bracket after repeated spaces",
+			html:   `<h1 id="top">某剧集 第一季  [1080p BluRay]</h1>`,
+			want:   "某剧集 第一季  [1080p BluRay]",
+			wantID: "",
+		},
+		{
+			name:   "preserves release group bracket after repeated spaces",
+			html:   `<h1 id="top">Some Movie 2025  [FRDS]</h1>`,
+			want:   "Some Movie 2025  [FRDS]",
+			wantID: "",
+		},
+		{
+			name:   "preserves resolution bracket after one space",
+			html:   `<h1 id="top">某剧集 第一季 [1080p BluRay]</h1>`,
+			want:   "某剧集 第一季 [1080p BluRay]",
+			wantID: "",
+		},
+		{
+			name:   "preserves title without brackets",
+			html:   `<h1 id="top">普通标题 没有方括号</h1>`,
+			want:   "普通标题 没有方括号",
+			wantID: "",
+		},
+		{
+			name:   "value attribute wins over element text",
+			html:   `<div id="top" value="  Attribute Title  ">Text Title</div><div id="torrent-id" value="00777">888</div>`,
+			want:   "  Attribute Title  ",
+			wantID: "00777",
+		},
+		{
+			name:   "present empty value does not fall back",
+			html:   `<div id="top" value="">Text Title</div><div id="torrent-id" value="">888</div>`,
+			want:   "",
+			wantID: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewNexusPHPParserFromDefinition(&SiteDefinition{DetailParser: &DetailParserConfig{
+				TitleSelector: "#top",
+				IDSelector:    "#torrent-id",
+			}})
+			title, torrentID := p.ParseTitleAndID(parseHTML(t, tt.html))
+			assert.Equal(t, tt.want, title)
+			assert.Equal(t, tt.wantID, torrentID)
+		})
+	}
+}
+
+func TestStripTrailingPromotion_KnownVocabulary(t *testing.T) {
+	discountMapping := DefaultDetailParserConfig().DiscountMapping
+	tests := []struct {
+		label string
+	}{
+		{label: "免费"},
+		{label: "FREE"},
+		{label: "50%"},
+		{label: "30%"},
+		{label: "2X"},
+		{label: "2x Free"},
+		{label: "2X 免费"},
+		{label: "2x 50%"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.label, func(t *testing.T) {
+			assert.Equal(t, "Title", stripTrailingPromotion("Title  ["+tt.label+"]", discountMapping))
+		})
+	}
+}
+
+func TestStripTrailingPromotion_RequestedCases(t *testing.T) {
+	discountMapping := DefaultDetailParserConfig().DiscountMapping
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "keepfrds promo", input: "...带章节名\u00a0\u00a0\u00a0 [免费]", want: "...带章节名"},
+		{name: "resolution with repeated spaces", input: "某剧集 第一季  [1080p BluRay]", want: "某剧集 第一季  [1080p BluRay]"},
+		{name: "release group", input: "Some Movie 2025  [FRDS]", want: "Some Movie 2025  [FRDS]"},
+		{name: "resolution with one space", input: "某剧集 第一季 [1080p BluRay]", want: "某剧集 第一季 [1080p BluRay]"},
+		{name: "no brackets", input: "普通标题 没有方括号", want: "普通标题 没有方括号"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := stripTrailingPromotion(tt.input, discountMapping)
+			t.Logf("in=%q out=%q", tt.input, actual)
+			assert.Equal(t, tt.want, actual)
+		})
+	}
+
+	t.Run("value attribute remains byte identical", func(t *testing.T) {
+		p := NewNexusPHPParserFromDefinition(&SiteDefinition{DetailParser: &DetailParserConfig{
+			TitleSelector: "#top",
+		}})
+		const want = "  Attribute Title  "
+		title, _ := p.ParseTitleAndID(parseHTML(t, `<div id="top" value="  Attribute Title  ">Text Title&nbsp;&nbsp; [免费]</div>`))
+		t.Logf("value=%q out=%q", want, title)
+		assert.Equal(t, want, title)
+	})
 }
 
 // ---------------------------------------------------------------------------
