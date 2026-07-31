@@ -508,6 +508,33 @@ export const KNOWN_SITES: KnownSite[] = [
     cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
     syncField: "cookie",
   },
+  {
+    id: "discfan",
+    name: "DiscFan",
+    domains: ["discfan.net"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "et8",
+    name: "TCCF",
+    domains: ["et8.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
+    id: "eastgame",
+    name: "TLFBits",
+    domains: ["pt.eastgame.org"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
