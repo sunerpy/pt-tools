@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **57** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **61** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（53）
+### NexusPHP 系列（57）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
@@ -59,6 +59,10 @@
 | **DiscFan**           | Cookie   | RSS、搜索、用户信息           | ✅       | 碟粉（discfan.net，繁体界面，issue #494）                        |
 | **TCCF**              | Cookie   | RSS、搜索、用户信息           | ✅       | TorrentCCF（et8.org，种子列表含进度列，issue #496）              |
 | **TLFBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | TLF / The Last Fantasy（pt.eastgame.org，issue #502）            |
+| **LuckPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | pt.luckpt.de（issue #498）                                       |
+| **青蛙**              | Cookie   | RSS、搜索、用户信息           | ✅       | QingWaPT（www.qingwapt.com，自定义 span 优惠标签，issue #501）   |
+| **RailgunPT**         | Cookie   | RSS、搜索、用户信息           | ✅       | 站名与域名不一致（bilibili.download，issue #500）                |
+| **HDArea**            | Cookie   | RSS、搜索、用户信息           | ✅       | 高清视界（hdarea.club，issue #495）                              |
 
 ### 其他架构（4）
 
