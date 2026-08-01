@@ -1,68 +1,71 @@
 ## 支持站点
 
-当前已适配 **61** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **64** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（57）
+### NexusPHP 系列（60）
 
-| 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                             |
-| --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------- |
-| **HDSky**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                                                         |
-| **SpringSunday**      | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                                                         |
-| **NovaHD**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **OpenCD**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（繁体界面/自定义模板）                                    |
-| **PTT (pttime)**      | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（PTT-NP 分支）                                            |
-| **Farmm (pt.0ff.cc)** | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（基本信息行内嵌大小）                                     |
-| **AGSVPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **XingYunGe**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **HDHome**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **HDTime**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **HDFans**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **LemonHD**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **BTSCHOOL**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **BYRPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **Audiences**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **CarPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **52PT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **HXPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **MyPTCC**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **PTLover**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **PTSKIT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **RainGFH**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **SoulVoice**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **TMPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **UBits**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **CrabPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 蟹黄堡（crabpt.vip）                                             |
-| **GameGamePT**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | GGPT（gamegamept.com）                                           |
-| **Dubhe**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 天枢（dubhe.site）                                               |
-| **PTCafe**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 咖啡（ptcafe.club）                                              |
-| **CyanBug**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 大青虫（cyanbug.net）                                            |
-| **DuckBoobee**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 鸭鸭（duckboobee.org）                                           |
-| **LongPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 龙PT（longpt.org）                                               |
-| **HDVideo**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HD视频（hdvideo.top）                                            |
-| **GTKPW**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 多镜像（pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com） |
-| **NicePT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 好趣（www.nicept.net，繁体）                                     |
-| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329）                               |
-| **Mua**               | Cookie   | RSS、搜索、用户信息           | ✅       | 二次元站点（mua.xloli.cc，userdetails 走 uuid，issue #339）      |
-| **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                       |
-| **PTLGS**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptlgs.org，issue #377）                                  |
-| **ZmPT**              | Cookie   | RSS、搜索、用户信息           | ✅       | 织梦（zmpt.cc，电力值=魔力值）                                   |
-| **PandaPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（pandapt.net，info_block 取上传/下载/魔力，issue #416）   |
-| **PTFans**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptfans.cc，含 H&R，info_block 取数据，issue #417）       |
-| **KamePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（kamept.com，info_block 含做种积分，issue #418）          |
-| **PTCHDBits**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptchdbits.co，详情页 img.pro_free 促销，issue 请求）     |
-| **PTerClub**          | Cookie   | RSS、搜索、用户信息           | ✅       | 猫站（pterclub.net，魔力值=猫粮，info_block 取数据）             |
-| **PTHome**            | Cookie   | RSS、搜索、用户信息           | ✅       | 铂金家（pthome.net，info_block 取上传/下载/魔力/做种积分）       |
-| **TangPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 糖果（www.tangpt.top，CHD 模板，issue #456）                     |
-| **T-Baozi**           | Cookie   | RSS、搜索、用户信息           | ✅       | 包子（p.t-baozi.cc，info_block 取数据，issue #457）              |
-| **PT@KEEPFRDS**       | Cookie   | RSS、搜索、用户信息           | ✅       | 朋友/FRDS（pt.keepfrds.com，issue #449）                         |
-| **DiscFan**           | Cookie   | RSS、搜索、用户信息           | ✅       | 碟粉（discfan.net，繁体界面，issue #494）                        |
-| **TCCF**              | Cookie   | RSS、搜索、用户信息           | ✅       | TorrentCCF（et8.org，种子列表含进度列，issue #496）              |
-| **TLFBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | TLF / The Last Fantasy（pt.eastgame.org，issue #502）            |
-| **LuckPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | pt.luckpt.de（issue #498）                                       |
-| **青蛙**              | Cookie   | RSS、搜索、用户信息           | ✅       | QingWaPT（www.qingwapt.com，自定义 span 优惠标签，issue #501）   |
-| **RailgunPT**         | Cookie   | RSS、搜索、用户信息           | ✅       | 站名与域名不一致（bilibili.download，issue #500）                |
-| **HDArea**            | Cookie   | RSS、搜索、用户信息           | ✅       | 高清视界（hdarea.club，issue #495）                              |
+| 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                                         |
+| --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------------------- |
+| **HDSky**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                                                                     |
+| **SpringSunday**      | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 完全适配                                                                     |
+| **NovaHD**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **OpenCD**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（繁体界面/自定义模板）                                                |
+| **PTT (pttime)**      | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（PTT-NP 分支）                                                        |
+| **Farmm (pt.0ff.cc)** | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（基本信息行内嵌大小）                                                 |
+| **AGSVPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **XingYunGe**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **HDHome**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **HDTime**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **HDFans**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **LemonHD**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **BTSCHOOL**          | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **BYRPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **Audiences**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **CarPT**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **52PT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **HXPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **MyPTCC**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **PTLover**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **PTSKIT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **RainGFH**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **SoulVoice**         | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **TMPT**              | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **UBits**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **CrabPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 蟹黄堡（crabpt.vip）                                                         |
+| **GameGamePT**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | GGPT（gamegamept.com）                                                       |
+| **Dubhe**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 天枢（dubhe.site）                                                           |
+| **PTCafe**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 咖啡（ptcafe.club）                                                          |
+| **CyanBug**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 大青虫（cyanbug.net）                                                        |
+| **DuckBoobee**        | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 鸭鸭（duckboobee.org）                                                       |
+| **LongPT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 龙PT（longpt.org）                                                           |
+| **HDVideo**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | HD视频（hdvideo.top）                                                        |
+| **GTKPW**             | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 多镜像（pt.gtkpw.xyz / pt.gtk.pw / pt.gtk.xyz / t.myaltbox.com）             |
+| **NicePT**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 好趣（www.nicept.net，繁体）                                                 |
+| **OurBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ourbits.club，issue #329）                                           |
+| **Mua**               | Cookie   | RSS、搜索、用户信息           | ✅       | 二次元站点（mua.xloli.cc，userdetails 走 uuid，issue #339）                  |
+| **1PTBar**            | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **lajidui**           | Cookie   | RSS、搜索、用户信息、等级要求 | ✅       | 已适配，有问题请提交 issue                                                   |
+| **PTLGS**             | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptlgs.org，issue #377）                                              |
+| **ZmPT**              | Cookie   | RSS、搜索、用户信息           | ✅       | 织梦（zmpt.cc，电力值=魔力值）                                               |
+| **PandaPT**           | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（pandapt.net，info_block 取上传/下载/魔力，issue #416）               |
+| **PTFans**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptfans.cc，含 H&R，info_block 取数据，issue #417）                   |
+| **KamePT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（kamept.com，info_block 含做种积分，issue #418）                      |
+| **PTCHDBits**         | Cookie   | RSS、搜索、用户信息           | ✅       | 已适配（ptchdbits.co，详情页 img.pro_free 促销，issue 请求）                 |
+| **PTerClub**          | Cookie   | RSS、搜索、用户信息           | ✅       | 猫站（pterclub.net，魔力值=猫粮，info_block 取数据）                         |
+| **PTHome**            | Cookie   | RSS、搜索、用户信息           | ✅       | 铂金家（pthome.net，info_block 取上传/下载/魔力/做种积分）                   |
+| **TangPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | 糖果（www.tangpt.top，CHD 模板，issue #456）                                 |
+| **T-Baozi**           | Cookie   | RSS、搜索、用户信息           | ✅       | 包子（p.t-baozi.cc，info_block 取数据，issue #457）                          |
+| **PT@KEEPFRDS**       | Cookie   | RSS、搜索、用户信息           | ✅       | 朋友/FRDS（pt.keepfrds.com，issue #449）                                     |
+| **DiscFan**           | Cookie   | RSS、搜索、用户信息           | ✅       | 碟粉（discfan.net，繁体界面，issue #494）                                    |
+| **TCCF**              | Cookie   | RSS、搜索、用户信息           | ✅       | TorrentCCF（et8.org，种子列表含进度列，issue #496）                          |
+| **TLFBits**           | Cookie   | RSS、搜索、用户信息           | ✅       | TLF / The Last Fantasy（pt.eastgame.org，issue #502）                        |
+| **LuckPT**            | Cookie   | RSS、搜索、用户信息           | ✅       | pt.luckpt.de（issue #498）                                                   |
+| **青蛙**              | Cookie   | RSS、搜索、用户信息           | ✅       | QingWaPT（www.qingwapt.com，自定义 span 优惠标签，issue #501）               |
+| **RailgunPT**         | Cookie   | RSS、搜索、用户信息           | ✅       | 站名与域名不一致（bilibili.download，issue #500）                            |
+| **HDArea**            | Cookie   | RSS、搜索、用户信息           | ✅       | 高清视界（hdarea.club，issue #495）                                          |
+| **财神**              | Cookie   | RSS、搜索、用户信息           | ✅       | cspt.top（种子列表为 div 布局，issue #499）                                  |
+| **HHCLUB**            | Cookie   | RSS、搜索、用户信息           | ✅       | hhanclub.net（列表与详情页均为 div 布局，优惠标签为自定义 span，issue #492） |
+| **U2分享園@動漫花園** | Cookie   | RSS、搜索、用户信息           | ✅       | U2 / 動漫花園（u2.dmhy.org，详情页无隐藏标题域，标题走文本解析，issue #497） |
 
 ### 其他架构（4）
 
