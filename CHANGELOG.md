@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] - 2026-08-01
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue from 3.5.39 to 3.5.40 in /web/frontend ([#503](https://github.com/sunerpy/pt-tools/issues/503)) ([#503](https://github.com/sunerpy/pt-tools/pull/503))
+  Bumps [vue](https://github.com/vuejs/core) from 3.5.39 to 3.5.40. - [Release notes](https://github.com/vuejs/core/releases) - [Changelog](https://github.com/vuejs/core/blob/main/CHANGELOG.md) - [Commits](https://github.com/vuejs/core/compare/v3.5.39...v3.5.40)
+
+      ---
+      updated-dependencies:
+      - dependency-name: vue
+       dependency-version: 3.5.40
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **pnpm**: Bump oxfmt from 0.59.0 to 0.61.0 in /web/frontend ([#504](https://github.com/sunerpy/pt-tools/issues/504)) ([#504](https://github.com/sunerpy/pt-tools/pull/504))
+  Bumps [oxfmt](https://github.com/oxc-project/oxc/tree/HEAD/npm/oxfmt) from 0.59.0 to 0.61.0. - [Release notes](https://github.com/oxc-project/oxc/releases) - [Changelog](https://github.com/oxc-project/oxc/blob/main/npm/oxfmt/CHANGELOG.md) - [Commits](https://github.com/oxc-project/oxc/commits/oxfmt_v0.61.0/npm/oxfmt)
+
+      ---
+      updated-dependencies:
+      - dependency-name: oxfmt
+       dependency-version: 0.61.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
+
+- **pnpm**: Bump vue-router from 5.1.0 to 5.2.0 in /web/frontend ([#506](https://github.com/sunerpy/pt-tools/issues/506)) ([#506](https://github.com/sunerpy/pt-tools/pull/506))
+  Bumps [vue-router](https://github.com/vuejs/router) from 5.1.0 to 5.2.0. - [Release notes](https://github.com/vuejs/router/releases) - [Commits](https://github.com/vuejs/router/compare/v5.1.0...v5.2.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: vue-router
+       dependency-version: 5.2.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+### Features
+
+- **site**: 新增 DiscFan、TCCF、TLFBits 三个站点适配 ([#509](https://github.com/sunerpy/pt-tools/issues/509)) ([#509](https://github.com/sunerpy/pt-tools/pull/509))
+- discfan.net 繁体界面，传输行标签为繁体「傳送」- et8.org 种子列表含额外进度列，详情页优惠为 2X 免费 - pt.eastgame.org 标准表格布局 - 三站各含 search/detail/userinfo fixture 测试 - 同步扩展 KNOWN_SITES 与 docs/sites.md 计数
+- **site**: 新增四个站点适配并修复采集脱敏缺陷 ([#511](https://github.com/sunerpy/pt-tools/issues/511)) ([#511](https://github.com/sunerpy/pt-tools/pull/511))
+
+* feat(site): 新增 LuckPT、青蛙、RailgunPT、HDArea 四个站点适配
+
+      - pt.luckpt.de 与 bilibili.download 详情页混用 GiB 单位
+      - www.qingwapt.com 使用自定义 span 优惠标签而非标准图标
+      - bilibili.download 站点自称 RailgunPT，ID 按站名而非域名
+      - hdarea.club 搜索页含两个 torrents 表，行选择器仅绑定真实列表
+      - 四站各含 search/detail/userinfo fixture 测试
+      - 同步扩展 KNOWN_SITES 与 docs/sites.md 计数
+
+      * fix(extension): 修复脱敏正则吞掉属性闭合导致采集数据损坏
+
+      - passkey 值匹配按等号与 JSON 两种形式分支处理
+      - 等号形式排除引号与右尖括号，保留标签闭合
+      - JSON 形式强制匹配闭合引号，撇号与 & 也一并脱敏
+      - 新增 12 条用例覆盖三种引号形态与隐私回归
+
+- **site**: 新增财神、HHCLUB、U2 三个站点适配 ([#512](https://github.com/sunerpy/pt-tools/issues/512)) ([#512](https://github.com/sunerpy/pt-tools/pull/512))
+- cspt.top 种子列表为 div 布局，详情页为标准表格 - hhanclub.net 列表与详情页均为 div 布局，优惠标签为自定义 span - u2.dmhy.org 详情页无隐藏标题域，标题走文本回退解析 - 三站各含 search/detail/userinfo fixture 测试 - 同步扩展 KNOWN_SITES 与 docs/sites.md 计数
+
 ## [0.44.0] - 2026-07-27
 
 ### Features
