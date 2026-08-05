@@ -16,7 +16,7 @@ jobs:
       issues: write
     steps:
       - name: Check for ZIP attachment in body or comments
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const issueNumber = context.payload.issue.number;
