@@ -276,6 +276,7 @@ export const sitesApi = {
 export const tasksApi = {
   list: (params: URLSearchParams) => api.get<TaskListResponse>(`/api/tasks?${params.toString()}`),
   batchDelete: (ids: number[]) => api.post<DeleteTasksResponse>("/api/tasks/batch-delete", { ids }),
+  cleanup: () => api.post<DeleteTasksResponse>("/api/tasks/cleanup"),
 };
 
 export const logsApi = {
