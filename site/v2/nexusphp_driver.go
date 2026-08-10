@@ -446,16 +446,18 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		item.SizeBytes = parseSize(sizeText)
 
 		// Parse seeders
+		// 部分站点渲染带千分位分隔符的计数（如 <b>7,170</b>），直接 Atoi 会静默得到 0，
+		// 因此统一先用 extractNumber 提取并去掉分隔符（与 ParseUserDetails 中做种积分的处理一致）
 		seedersText := strings.TrimSpace(s.Find(d.Selectors.Seeders).Text())
-		item.Seeders, _ = strconv.Atoi(seedersText)
+		item.Seeders, _ = strconv.Atoi(extractNumber(seedersText))
 
 		// Parse leechers
 		leechersText := strings.TrimSpace(s.Find(d.Selectors.Leechers).Text())
-		item.Leechers, _ = strconv.Atoi(leechersText)
+		item.Leechers, _ = strconv.Atoi(extractNumber(leechersText))
 
 		// Parse snatched
 		snatchedText := strings.TrimSpace(s.Find(d.Selectors.Snatched).Text())
-		item.Snatched, _ = strconv.Atoi(snatchedText)
+		item.Snatched, _ = strconv.Atoi(extractNumber(snatchedText))
 
 		// Parse discount level
 		discountElem := s.Find(d.Selectors.DiscountIcon)
