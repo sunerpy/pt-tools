@@ -127,6 +127,79 @@ func TestNexusPHPDriver_ParseSearch_CountSeparators(t *testing.T) {
 			wantLeechers: 0,
 			wantSnatched: 0,
 		},
+		{
+			// 负数必须保留符号。这条用例防止再次改回 [\d,]+ 这类正则提取：
+			// 该字符类不含 '-'，会把 -3 吃成 3，静默反转语义。
+			name:         "负数保留符号",
+			seeders:      "-3",
+			leechers:     "-12",
+			snatched:     "-1",
+			wantSeeders:  -3,
+			wantLeechers: -12,
+			wantSnatched: -1,
+		},
+		{
+			// 选择器配错时才会命中日期列。期望 0（而非 2026）：宽松提取会把年份
+			// 当成计数返回，看似合理却完全错误，掩盖配置错误。
+			name:         "日期单元格（选择器配错）",
+			seeders:      "2026-08-10 14:38:57",
+			leechers:     "2026-08-10 14:38:57",
+			snatched:     "2026-08-10 14:38:57",
+			wantSeeders:  0,
+			wantLeechers: 0,
+			wantSnatched: 0,
+		},
+		{
+			// 同上，误取到"剩余时间"列。期望 0（而非 2），保持失败可见。
+			name:         "相对时间单元格（选择器配错）",
+			seeders:      "2天22时",
+			leechers:     "5时30分",
+			snatched:     "3月1天",
+			wantSeeders:  0,
+			wantLeechers: 0,
+			wantSnatched: 0,
+		},
+		{
+			// 只处理逗号分隔符；空格分组不在支持范围内，期望 0（而非 1），
+			// 避免把 1 234 截断成 1 这种量级错误。
+			name:         "空格分组不支持",
+			seeders:      "1 234",
+			leechers:     "12 345",
+			snatched:     "1 234 567",
+			wantSeeders:  0,
+			wantLeechers: 0,
+			wantSnatched: 0,
+		},
+		{
+			// 回归保护：strconv.Atoi 原生接受显式正号，行为不变
+			name:         "显式正号",
+			seeders:      "+5",
+			leechers:     "+0",
+			snatched:     "+1234",
+			wantSeeders:  5,
+			wantLeechers: 0,
+			wantSnatched: 1234,
+		},
+		{
+			// 回归保护：单元格内外多余空白由 TrimSpace 处理，行为不变
+			name:         "首尾空白",
+			seeders:      "  88  ",
+			leechers:     "\n 7 \t",
+			snatched:     "  1,024  ",
+			wantSeeders:  88,
+			wantLeechers: 7,
+			wantSnatched: 1024,
+		},
+		{
+			// 回归保护：小数与破折号占位仍为 0，与修复前一致
+			name:         "小数与破折号占位",
+			seeders:      "1.5",
+			leechers:     "—",
+			snatched:     "3.14",
+			wantSeeders:  0,
+			wantLeechers: 0,
+			wantSnatched: 0,
+		},
 	}
 
 	for _, tt := range tests {
