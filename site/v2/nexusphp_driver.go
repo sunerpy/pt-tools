@@ -446,18 +446,20 @@ func (d *NexusPHPDriver) ParseSearch(res NexusPHPResponse) ([]TorrentItem, error
 		item.SizeBytes = parseSize(sizeText)
 
 		// Parse seeders
-		// 部分站点渲染带千分位分隔符的计数（如 <b>7,170</b>），直接 Atoi 会静默得到 0，
-		// 因此统一先用 extractNumber 提取并去掉分隔符（与 ParseUserDetails 中做种积分的处理一致）
+		// 计数单元格只含数字本身，因此仅去掉千分位分隔符：部分站点渲染 <b>7,170</b>
+		// 这类值，直接 Atoi 会静默得到 0。刻意不做更宽松的数字提取——除逗号外的非数字
+		// 内容（日期、相对时间、空格分组）应继续得到 0，让选择器配错时明显失败，而不是
+		// 产生一个看似合理的错误计数；计数会喂给用户的 RSS 过滤规则，错值比 0 更难发现。
 		seedersText := strings.TrimSpace(s.Find(d.Selectors.Seeders).Text())
-		item.Seeders, _ = strconv.Atoi(extractNumber(seedersText))
+		item.Seeders, _ = strconv.Atoi(strings.ReplaceAll(seedersText, ",", ""))
 
 		// Parse leechers
 		leechersText := strings.TrimSpace(s.Find(d.Selectors.Leechers).Text())
-		item.Leechers, _ = strconv.Atoi(extractNumber(leechersText))
+		item.Leechers, _ = strconv.Atoi(strings.ReplaceAll(leechersText, ",", ""))
 
 		// Parse snatched
 		snatchedText := strings.TrimSpace(s.Find(d.Selectors.Snatched).Text())
-		item.Snatched, _ = strconv.Atoi(extractNumber(snatchedText))
+		item.Snatched, _ = strconv.Atoi(strings.ReplaceAll(snatchedText, ",", ""))
 
 		// Parse discount level
 		discountElem := s.Find(d.Selectors.DiscountIcon)
