@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] - 2026-08-10
+
+### Bug Fixes
+
+- **site**: 计数解析收紧为仅去除千分位分隔符 ([#522](https://github.com/sunerpy/pt-tools/issues/522)) ([#522](https://github.com/sunerpy/pt-tools/pull/522))
+- 改用 strings.ReplaceAll 去逗号，不再复用 extractNumber 的宽松提取 - 保留负号解析，避免 -3 被解析为 3 - 日期、相对时间、空格分组等误配内容继续返回 0 以显性失败 - 补充 7 条用例覆盖收紧后的边界行为
+
+### Dependencies (Frontend)
+
+- **pnpm**: Bump vue-tsc from 3.3.7 to 3.3.9 in /web/frontend ([#514](https://github.com/sunerpy/pt-tools/issues/514)) ([#514](https://github.com/sunerpy/pt-tools/pull/514))
+  Bumps [vue-tsc](https://github.com/vuejs/language-tools/tree/HEAD/packages/tsc) from 3.3.7 to 3.3.9. - [Release notes](https://github.com/vuejs/language-tools/releases) - [Changelog](https://github.com/vuejs/language-tools/blob/master/CHANGELOG.md) - [Commits](https://github.com/vuejs/language-tools/commits/v3.3.9/packages/tsc)
+
+      ---
+      updated-dependencies:
+      - dependency-name: vue-tsc
+       dependency-version: 3.3.9
+       dependency-type: direct:development
+       update-type: version-update:semver-patch
+      ...
+
+- **pnpm**: Bump vite from 8.1.5 to 8.2.0 in /web/frontend ([#515](https://github.com/sunerpy/pt-tools/issues/515)) ([#515](https://github.com/sunerpy/pt-tools/pull/515))
+  Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 8.1.5 to 8.2.0. - [Release notes](https://github.com/vitejs/vite/releases) - [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md) - [Commits](https://github.com/vitejs/vite/commits/create-vite@8.2.0/packages/vite)
+
+      ---
+      updated-dependencies:
+      - dependency-name: vite
+       dependency-version: 8.2.0
+       dependency-type: direct:development
+       update-type: version-update:semver-minor
+      ...
+
+- **pnpm**: Bump @vueuse/core from 14.3.0 to 14.4.0 in /web/frontend ([#516](https://github.com/sunerpy/pt-tools/issues/516)) ([#516](https://github.com/sunerpy/pt-tools/pull/516))
+  Bumps [@vueuse/core](https://github.com/vueuse/vueuse/tree/HEAD/packages/core) from 14.3.0 to 14.4.0. - [Release notes](https://github.com/vueuse/vueuse/releases) - [Commits](https://github.com/vueuse/vueuse/commits/v14.4.0/packages/core)
+
+      ---
+      updated-dependencies:
+      - dependency-name: "@vueuse/core"
+       dependency-version: 14.4.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+### Features
+
+- **site**: 新增 PTzone 站点适配并修复计数千分位解析 ([#520](https://github.com/sunerpy/pt-tools/issues/520)) ([#520](https://github.com/sunerpy/pt-tools/pull/520))
+
+* fix(site): 修复种子计数千分位分隔符被解析为零
+
+      - 做种数、下载数、完成数改为先经 extractNumber 去除分隔符
+      - 与用户详情页做种积分的既有处理方式保持一致
+      - 新增 7 条用例覆盖千分位、普通整数、空值与无数字文本
+
+      * feat(site): 新增 PTzone 站点适配
+
+      - 繁体界面，传输行标签为「傳送」，体积行标签为「基本資訊」
+      - 详情页含隐藏标题域，优惠类名为 twoupfree
+      - 含 search/detail/userinfo fixture 测试
+      - 同步扩展 KNOWN_SITES 与 docs/sites.md 计数
+
 ## [0.45.0] - 2026-08-01
 
 ### Dependencies (Frontend)
