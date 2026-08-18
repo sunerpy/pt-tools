@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { type TaskItem, type TaskListResponse, tasksApi } from "@/api";
-import { Delete, Refresh, Search } from "@element-plus/icons-vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { Brush, Delete, Refresh, Search } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
 const loading = ref(false);
@@ -9,6 +9,7 @@ const tasks = ref<TaskItem[]>([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
+const tableRef = ref<TableInstance>();
 
 const filters = ref({
   q: "",
@@ -78,6 +79,60 @@ function handleSizeChange(newSize: number) {
 
 function handleSelectionChange(selection: TaskItem[]) {
   selectedIds.value = selection.map((t) => t.id);
+}
+
+// ---- 全选（表头复选框）----
+// Element Plus 内置表头全选在存在 :selectable 时会把 isAllSelected 无条件置为 true，
+// 导致当前页全部行不可选（如全部已推送）时表头显示"全选"却没有任何行被选中。
+// 这里用自定义表头复选框，状态基于"当前页所有可选行"实时计算，保证表头与勾选一致。
+const selectableRows = computed(() => tasks.value.filter((t) => !t.isPushed));
+const isHeaderChecked = computed(() => {
+  const rows = selectableRows.value;
+  return rows.length > 0 && rows.every((t) => selectedIds.value.includes(t.id));
+});
+const isHeaderIndeterminate = computed(
+  () => selectedIds.value.length > 0 && !isHeaderChecked.value,
+);
+
+function handleHeaderSelectAll(val: string | number | boolean) {
+  const table = tableRef.value;
+  if (!table) return;
+  if (val) {
+    selectableRows.value.forEach((row) => {
+      if (!selectedIds.value.includes(row.id)) {
+        table.toggleRowSelection(row, true);
+      }
+    });
+  } else {
+    table.clearSelection();
+  }
+}
+
+async function handleCleanup() {
+  try {
+    await ElMessageBox.confirm(
+      "将删除所有「已删除」（种子已从下载器中删除）和「已过期」（免费期结束）的任务记录，此操作不可恢复，确认继续吗？",
+      "清理任务",
+      {
+        type: "warning",
+        confirmButtonText: "清理",
+        cancelButtonText: "取消",
+      },
+    );
+
+    const res = await tasksApi.cleanup();
+    if (res.failed > 0) {
+      ElMessage.warning(`清理完成：成功 ${res.success} 条，失败 ${res.failed} 条`);
+    } else {
+      ElMessage.success(`已清理 ${res.success} 条已删除/已过期任务`);
+    }
+    selectedIds.value = [];
+    await loadTasks();
+  } catch (e: unknown) {
+    if ((e as string) !== "cancel") {
+      ElMessage.error((e as Error).message || "清理失败");
+    }
+  }
 }
 
 async function handleBatchDelete() {
@@ -258,6 +313,10 @@ function getDiscountTag(task: TaskItem): {
           </el-tag>
         </div>
         <div class="table-card-header-actions">
+          <el-button type="warning" size="small" plain class="cleanup-btn" @click="handleCleanup">
+            <el-icon class="mr-1"><Brush /></el-icon>
+            清理所有已删除和已过期任务
+          </el-button>
           <el-button
             type="danger"
             size="small"
@@ -279,6 +338,7 @@ function getDiscountTag(task: TaskItem): {
 
       <div class="table-wrapper">
         <el-table
+          ref="tableRef"
           :data="tasks"
           style="width: 100%"
           class="pt-table"
@@ -287,7 +347,16 @@ function getDiscountTag(task: TaskItem): {
           <el-table-column
             type="selection"
             width="55"
-            :selectable="(row: Record<string, any>) => !row.isPushed" />
+            :selectable="(row: Record<string, any>) => !row.isPushed">
+            <template #header>
+              <el-checkbox
+                :model-value="isHeaderChecked"
+                :indeterminate="isHeaderIndeterminate"
+                :disabled="selectableRows.length === 0"
+                aria-label="全选"
+                @change="handleHeaderSelectAll" />
+            </template>
+          </el-table-column>
           <el-table-column label="站点" prop="siteName" width="120" align="center">
             <template #default="{ row }">
               <el-tag size="small" type="primary" effect="light" class="site-tag">{{
