@@ -265,8 +265,8 @@ github.com/mitchellh/iochan v1.0.0/go.mod h1:JwYml1nuB7xOzsp52dPpHFffvOCDupsG0Qu
 github.com/mitchellh/mapstructure v0.0.0-20160808181253-ca63d7c062ee/go.mod h1:FVVH3fgwuzCH5S8UJGiWEs2h04kUh9fWfEaFds41c1Y=
 github.com/mitchellh/mapstructure v1.1.2/go.mod h1:FVVH3fgwuzCH5S8UJGiWEs2h04kUh9fWfEaFds41c1Y=
 github.com/mitchellh/mapstructure v1.4.1/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
-github.com/mmcdole/gofeed v1.4.1 h1:m7vd4YAukLvoqUQghaILKbqUquHyZq1jBYkeCke/Z3c=
-github.com/mmcdole/gofeed v1.4.1/go.mod h1:X5x1PyeibJi152VEya0AsV+PW4daYmCD4LJaJbeFkcs=
+github.com/mmcdole/gofeed v1.4.2 h1:XFFOtsNNZg+zudjtMXb8BI0J/YdnSIGfjEpPgPnZib0=
+github.com/mmcdole/gofeed v1.4.2/go.mod h1:X5x1PyeibJi152VEya0AsV+PW4daYmCD4LJaJbeFkcs=
 github.com/mmcdole/goxpp/v2 v2.0.0 h1:HrSCflxerUEqZQNq3u7ldtmE/XkwnTx4Zpq2DW4i5rQ=
 github.com/mmcdole/goxpp/v2 v2.0.0/go.mod h1:CUduYMnO9JB6Z/uqDn9Ormk/r8E9BsLQxHPWDZ961Os=
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
