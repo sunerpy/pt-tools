@@ -299,6 +299,51 @@ func TestDecide_GlobalSizeLimit(t *testing.T) {
 	}
 }
 
+func TestDecide_GlobalMinSizeLimit(t *testing.T) {
+	db, cleanup := setupServiceTestDBWithAssociations(t)
+	defer cleanup()
+	svc := NewFilterService(db)
+	rss := createTestRSSSubscription(t, db, "rss-min")
+
+	// Mirror of the upper-bound guard: a matching filter rule MUST NOT bypass the
+	// global minimum size either.
+	createRuleForDecide(t, db, svc, rss.ID, &models.FilterRule{
+		Name: "always-match", Pattern: "movie", PatternType: models.PatternKeyword,
+		MatchField: models.MatchFieldBoth, RequireFree: false, Enabled: true, Priority: 100,
+	})
+
+	tests := []struct {
+		name          string
+		sizeGB        float64
+		globalMinSize int
+		wantDL        bool
+		wantReason    string
+	}{
+		{"size<min rejects even with rule match", 5, 10, false, "低于全局最小大小限制"},
+		{"size==min accepts (boundary)", 10, 10, true, ""},
+		{"size>min accepts via filter rule", 30, 10, true, ""},
+		{"min=0 means no lower bound", 0.5, 0, true, ""},
+		// SizeGB == 0 means unknown; a detail-parse miss must not drop everything.
+		{"unknown size is not rejected", 0, 10, true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := svc.Decide(DecisionContext{
+				Input:         MatchInput{Title: "movie", SizeGB: tt.sizeGB},
+				IsFree:        false,
+				CanFinish:     true,
+				GlobalSize:    1000,
+				GlobalMinSize: tt.globalMinSize,
+				FilterMode:    models.FilterModeAutoFree,
+			}, rss.ID)
+			assert.Equal(t, tt.wantDL, d.ShouldDownload, "ShouldDownload mismatch")
+			if tt.wantReason != "" {
+				assert.Contains(t, d.Reason, tt.wantReason)
+			}
+		})
+	}
+}
+
 func TestDecide_RuleSizeBounds(t *testing.T) {
 	db, cleanup := setupServiceTestDBWithAssociations(t)
 	defer cleanup()
