@@ -10,7 +10,7 @@ import (
 // collected HTML:
 //
 //  1. The real subtitle is a bare text node at the end of the title cell, placed AFTER
-//     several coloured tag badges (<span style="background-color:...">完结/国语/中字</span>).
+//     several colored tag badges (<span style="background-color:...">完结/国语/中字</span>).
 //     A plain `span` selector only yields the last badge, so subtitle extraction goes
 //     through SubtitleSelector with an HTML regex that takes whatever follows the final
 //     </span>.
