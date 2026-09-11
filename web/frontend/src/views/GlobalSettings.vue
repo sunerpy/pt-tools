@@ -14,6 +14,7 @@ const form = ref<GlobalSettings>({
   download_limit_enabled: false,
   download_speed_limit: 20,
   torrent_size_gb: 200,
+  torrent_min_size_gb: 0,
   min_free_minutes: 30,
   auto_start: false,
   retain_hours: 24,
@@ -170,6 +171,21 @@ async function save() {
                 <div class="form-tip">超过此大小的种子将被自动忽略，防止磁盘撑爆</div>
               </el-form-item>
             </el-col>
+            <el-col :md="12" :sm="24">
+              <el-form-item label="最小种子大小(GB)">
+                <el-input-number
+                  v-model="form.torrent_min_size_gb"
+                  :min="0"
+                  :max="10000"
+                  class="w-full" />
+                <div class="form-tip">
+                  小于此大小的种子将被忽略；0 = 不限制，且必须小于最大种子大小
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="40">
             <el-col :md="12" :sm="24">
               <el-form-item label="自动启动任务">
                 <el-switch v-model="form.auto_start" />
