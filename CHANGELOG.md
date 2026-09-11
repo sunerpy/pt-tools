@@ -5,6 +5,129 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.1] - 2026-09-11
+
+### Bug Fixes
+
+- **docker**: Go builder 镜像版本与 go.mod 对齐
+- go.mod 要求 go >= 1.26.7，builder 镜像固定在 golang:1.26.5 - 容器内 GOTOOLCHAIN=local 禁止自动拉取工具链，go mod tidy 直接失败 - v0.47.0 发布时 Build and Release 因此中断，资产上传与镜像推送被跳过 - Makefile 的 BUILD_IMAGE 经 --build-arg 传入，是发布路径实际生效值，与 Dockerfile 默认值一并对齐
+
+## [0.47.0] - 2026-09-11
+
+### Dependencies (Go)
+
+- **go**: Bump github.com/stretchr/testify from 1.11.1 to 1.12.0 ([#523](https://github.com/sunerpy/pt-tools/issues/523)) ([#523](https://github.com/sunerpy/pt-tools/pull/523))
+  Bumps [github.com/stretchr/testify](https://github.com/stretchr/testify) from 1.11.1 to 1.12.0. - [Release notes](https://github.com/stretchr/testify/releases) - [Commits](https://github.com/stretchr/testify/compare/v1.11.1...v1.12.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/stretchr/testify
+       dependency-version: 1.12.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+- **go**: Bump github.com/mmcdole/gofeed from 1.4.0 to 1.4.1 ([#525](https://github.com/sunerpy/pt-tools/issues/525)) ([#525](https://github.com/sunerpy/pt-tools/pull/525))
+  Bumps [github.com/mmcdole/gofeed](https://github.com/mmcdole/gofeed) from 1.4.0 to 1.4.1. - [Release notes](https://github.com/mmcdole/gofeed/releases) - [Commits](https://github.com/mmcdole/gofeed/compare/v1.4.0...v1.4.1)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mmcdole/gofeed
+       dependency-version: 1.4.1
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **go**: Bump github.com/stretchr/testify from 1.12.0 to 1.12.1 ([#527](https://github.com/sunerpy/pt-tools/issues/527)) ([#527](https://github.com/sunerpy/pt-tools/pull/527))
+  Bumps [github.com/stretchr/testify](https://github.com/stretchr/testify) from 1.12.0 to 1.12.1. - [Release notes](https://github.com/stretchr/testify/releases) - [Commits](https://github.com/stretchr/testify/compare/v1.12.0...v1.12.1)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/stretchr/testify
+       dependency-version: 1.12.1
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **go**: Bump github.com/mmcdole/gofeed from 1.4.1 to 1.4.2 ([#529](https://github.com/sunerpy/pt-tools/issues/529)) ([#529](https://github.com/sunerpy/pt-tools/pull/529))
+  Bumps [github.com/mmcdole/gofeed](https://github.com/mmcdole/gofeed) from 1.4.1 to 1.4.2. - [Release notes](https://github.com/mmcdole/gofeed/releases) - [Commits](https://github.com/mmcdole/gofeed/compare/v1.4.1...v1.4.2)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mmcdole/gofeed
+       dependency-version: 1.4.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **go**: Bump github.com/mymmrac/telego from 1.11.1 to 1.11.2 ([#528](https://github.com/sunerpy/pt-tools/issues/528)) ([#528](https://github.com/sunerpy/pt-tools/pull/528))
+  Bumps [github.com/mymmrac/telego](https://github.com/mymmrac/telego) from 1.11.1 to 1.11.2. - [Release notes](https://github.com/mymmrac/telego/releases) - [Commits](https://github.com/mymmrac/telego/compare/v1.11.1...v1.11.2)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mymmrac/telego
+       dependency-version: 1.11.2
+       dependency-type: direct:production
+       update-type: version-update:semver-patch
+      ...
+
+- **go**: Bump github.com/PuerkitoBio/goquery from 1.12.0 to 1.13.0 ([#531](https://github.com/sunerpy/pt-tools/issues/531)) ([#531](https://github.com/sunerpy/pt-tools/pull/531))
+  Bumps [github.com/PuerkitoBio/goquery](https://github.com/PuerkitoBio/goquery) from 1.12.0 to 1.13.0. - [Release notes](https://github.com/PuerkitoBio/goquery/releases) - [Commits](https://github.com/PuerkitoBio/goquery/compare/v1.12.0...v1.13.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/PuerkitoBio/goquery
+       dependency-version: 1.13.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+- **go**: Bump github.com/mymmrac/telego from 1.11.2 to 1.12.1 ([#533](https://github.com/sunerpy/pt-tools/issues/533)) ([#533](https://github.com/sunerpy/pt-tools/pull/533))
+  Bumps [github.com/mymmrac/telego](https://github.com/mymmrac/telego) from 1.11.2 to 1.12.1. - [Release notes](https://github.com/mymmrac/telego/releases) - [Commits](https://github.com/mymmrac/telego/compare/v1.11.2...v1.12.1)
+
+      ---
+      updated-dependencies:
+      - dependency-name: github.com/mymmrac/telego
+       dependency-version: 1.12.1
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
+### Documentation
+
+- **sites**: 补充 PigGo 站点适配说明
+- 站点总数更新为 66，NexusPHP 分节更新为 62
+
+### Features
+
+- **site**: 新增 PigGo 站点适配
+- 基于 issue #532 采集件实现 NexusPHP 定义，列表页九列与默认列序一致 - 副标题走 SubtitleSelector 提取徽章 span 之后的裸文本节点 - 优惠结束时间用 :not([style]) 排除审核状态 span，避免无优惠时误解析 - 补 search / detail 双态 / userinfo fixture 及真实 HTML 回归清单
+- **extension**: 浏览器扩展支持 PigGo 站点
+- KNOWN_SITES 增加 piggo 条目以启用 Cookie 同步
+- **extension**: 一键采集扩充为七类样本并从首页解析用户 ID
+- 用户 ID 改从 /index.php 的 info_block 解析，正则同时匹配 div 与 table 版 - 删除全页出现频次回退，未识别时返回空并提示手动采集，不再误采发布者资料页 - 新增首页、免费筛选列表页、无优惠详情页与 H&R 页样本，进度总数动态计算 - 每次请求间隔 1.5 秒，贴合站点 RateLimit 0.5 的限速习惯 - 免费种与无优惠样本缺失时显式上报，不再静默回退
+- **extension**: 导出 ZIP 记录样本能力与新页面文件名
+- 新增 search-free/detail-nopromo/hr 文件名，原三类文件名保持不变 - site-info.json 增加 capabilities 字段，标明本次采到哪些语义样本
+- **extension**: 采集面板展示缺失样本与采集提示
+- 一键采集结束后以警告形式展示站点无法提供的样本 - 手动采集清单区分必需样本与可选样本，并给出各自打开方式
+- **filter**: 下载决策支持全局最小种子大小
+- SettingsGlobal 新增 TorrentMinSizeGB，0 表示无下限 - DecisionContext 新增 GlobalMinSize，与上限同为硬限，规则只能收窄 - Decide 与 DecideWithoutRules 在上限检查后增加下限检查 - 大小未知（SizeGB 为 0）时不触发下限拦截，避免详情解析失败导致全量漏下 - 新旧两条 RSS worker 路径同步传入，避免行为分叉
+- **config**: 全局设置持久化最小种子大小并校验上下界
+- SaveGlobal 与 SaveGlobalSettingsWithPatch 显式复制新字段，避免静默丢值 - 新增 validateTorrentSizeBounds：负数拒绝，下限须严格小于上限 - POST /api/global 在入参层返回 400，错误信息面向用户 - 补用例覆盖 min==max、min>max、负数、0 与保存往返
+- **ui**: 全局设置新增最小种子大小输入项
+- 与最大种子大小并列展示，自动启动移至下一行 - 提示说明 0 = 不限制且必须小于最大种子大小
+
+### Styling
+
+- **site**: 修正 PigGo 注释拼写以通过 misspell
+
+### Testing
+
+- **extension**: 补充用户 ID 解析与优惠筛选用例
+- 锁定列表页不再回退到发布者 ID 的行为 - 覆盖 table 版 info_block、无免费种与无优惠种筛选场景
+- **filter**: 覆盖带规则路径的全局最小大小下限
+- 与上限回归守卫对称：匹配规则不得绕过全局下限 - 覆盖边界放行、0 表示不限制、大小未知放行
+
 ## [0.46.0] - 2026-08-10
 
 ### Bug Fixes
@@ -4191,6 +4314,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies (Go)
 
+- **go**: Bump golang.org/x/sys from 0.39.0 to 0.40.0
+  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.39.0 to 0.40.0. - [Commits](https://github.com/golang/sys/compare/v0.39.0...v0.40.0)
+
+      ---
+      updated-dependencies:
+      - dependency-name: golang.org/x/sys
+       dependency-version: 0.40.0
+       dependency-type: direct:production
+       update-type: version-update:semver-minor
+      ...
+
 - **go**: Bump golang.org/x/text from 0.32.0 to 0.33.0
   Bumps [golang.org/x/text](https://github.com/golang/text) from 0.32.0 to 0.33.0. - [Release notes](https://github.com/golang/text/releases) - [Commits](https://github.com/golang/text/compare/v0.32.0...v0.33.0)
 
@@ -4231,19 +4365,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 修复构建错误
 - 修复前端模板构建错误
 - 修复构建错误
-
-### Dependencies (Go)
-
-- **go**: Bump golang.org/x/sys from 0.39.0 to 0.40.0
-  Bumps [golang.org/x/sys](https://github.com/golang/sys) from 0.39.0 to 0.40.0. - [Commits](https://github.com/golang/sys/compare/v0.39.0...v0.40.0)
-
-      ---
-      updated-dependencies:
-      - dependency-name: golang.org/x/sys
-       dependency-version: 0.40.0
-       dependency-type: direct:production
-       update-type: version-update:semver-minor
-      ...
 
 ### Features
 
