@@ -13,8 +13,11 @@ export type AuthMethod = "cookie" | "api_key" | "cookie_and_api_key" | "passkey"
 
 export type PageType =
   | "search"
+  | "search_free"
   | "detail"
+  | "detail_nopromo"
   | "userinfo"
+  | "hr"
   | "index"
   | "bonus"
   | "api_response"

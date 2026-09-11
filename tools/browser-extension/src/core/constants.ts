@@ -619,6 +619,9 @@ export const KNOWN_SITES: KnownSite[] = [
 ];
 
 export const PAGE_PATTERNS: Array<{ pattern: RegExp; pageType: PageType }> = [
+  // Promotion-filtered and H&R listings must precede the generic torrents.php rule.
+  { pattern: /(?:torrents|browse)\.php\?[^"']*spstate=[1-9]/i, pageType: "search_free" },
+  { pattern: /myhr\.php|hitandrun\.php/i, pageType: "hr" },
   { pattern: /torrents\.php|browse\.php/i, pageType: "search" },
   { pattern: /details\.php\?id=/i, pageType: "detail" },
   { pattern: /userdetails\.php\?id=/i, pageType: "userinfo" },
