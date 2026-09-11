@@ -1,8 +1,8 @@
 ## 支持站点
 
-当前已适配 **65** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
+当前已适配 **66** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 
-### NexusPHP 系列（61）
+### NexusPHP 系列（62）
 
 | 站点                  | 认证方式 | 支持功能                      | 适配情况 | 备注                                                                         |
 | --------------------- | -------- | ----------------------------- | -------- | ---------------------------------------------------------------------------- |
@@ -67,6 +67,7 @@
 | **HHCLUB**            | Cookie   | RSS、搜索、用户信息           | ✅       | hhanclub.net（列表与详情页均为 div 布局，优惠标签为自定义 span，issue #492） |
 | **U2分享園@動漫花園** | Cookie   | RSS、搜索、用户信息           | ✅       | U2 / 動漫花園（u2.dmhy.org，详情页无隐藏标题域，标题走文本解析，issue #497） |
 | **PTzone**            | Cookie   | RSS、搜索、用户信息           | ✅       | ptzone.xyz（繁体界面，tg群内提交）                                           |
+| **PigGo**             | Cookie   | RSS、搜索、用户信息           | ✅       | 猪猪（piggo.me，副标题为裸文本节点，等级/H&R 待补采验证，issue #532）        |
 
 ### 其他架构（4）
 

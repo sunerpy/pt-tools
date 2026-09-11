@@ -482,6 +482,15 @@ export const KNOWN_SITES: KnownSite[] = [
     syncField: "cookie",
   },
   {
+    id: "piggo",
+    name: "PigGo",
+    domains: ["piggo.me"],
+    schema: "NexusPHP",
+    authMethod: "cookie",
+    cookieNames: ["c_secure_uid", "c_secure_pass", "c_secure_tracker_ssl"],
+    syncField: "cookie",
+  },
+  {
     id: "pthome",
     name: "PTHome",
     domains: ["pthome.net"],
