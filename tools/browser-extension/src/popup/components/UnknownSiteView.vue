@@ -18,16 +18,27 @@ const emit = defineEmits<{
 
 const requiredTypes = ["search", "detail", "userinfo"] as const;
 
+/** Extra samples the collector now gathers; their absence does not block adaptation. */
+const optionalTypes = ["index", "search_free", "detail_nopromo", "hr"] as const;
+
 const typeLabels: Record<string, string> = {
   search: t("unknown.pageSearch"),
   detail: t("unknown.pageDetail"),
   userinfo: t("unknown.pageUserinfo"),
+  index: t("unknown.pageIndex"),
+  search_free: t("unknown.pageSearchFree"),
+  detail_nopromo: t("unknown.pageDetailNoPromo"),
+  hr: t("unknown.pageHr"),
 };
 
 const typeHints: Record<string, string> = {
   search: t("unknown.hintSearch"),
   detail: t("unknown.hintDetail"),
   userinfo: t("unknown.hintUserinfo"),
+  index: t("unknown.hintIndex"),
+  search_free: t("unknown.hintSearchFree"),
+  detail_nopromo: t("unknown.hintDetailNoPromo"),
+  hr: t("unknown.hintHr"),
 };
 
 const completedTypes = computed(() => {
@@ -43,10 +54,11 @@ const progress = computed(() => {
   return `${done}/${requiredTypes.length}`;
 });
 
+const capturableTypes = new Set<string>([...requiredTypes, ...optionalTypes]);
+
 const currentTypeMatch = computed(() => {
   const pt = props.status.pageType;
-  if (pt === "search" || pt === "detail" || pt === "userinfo") return pt;
-  return null;
+  return capturableTypes.has(pt) ? pt : null;
 });
 
 const isCurrentAlreadyCaptured = computed(() => {
@@ -110,6 +122,22 @@ function handleAutoCollect(): void {
       <div class="step-list">
         <div
           v-for="type in requiredTypes"
+          :key="type"
+          class="step-item"
+          :class="{
+            done: completedTypes.has(type),
+            active: currentTypeMatch === type && !completedTypes.has(type),
+          }">
+          <span class="step-icon">{{ completedTypes.has(type) ? "✅" : "⬜" }}</span>
+          <span class="step-label">{{ typeLabels[type] }}</span>
+          <span v-if="!completedTypes.has(type)" class="step-hint">{{ typeHints[type] }}</span>
+        </div>
+      </div>
+
+      <p class="muted-line">{{ t("unknown.optionalTitle") }}</p>
+      <div class="step-list">
+        <div
+          v-for="type in optionalTypes"
           :key="type"
           class="step-item"
           :class="{

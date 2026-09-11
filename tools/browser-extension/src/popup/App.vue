@@ -329,12 +329,16 @@ async function handleAutoCollect(payload: AutoCollectPayload): Promise<void> {
   busyAutoCollect.value = true;
   toast.info(t("feedback.autoCollecting"));
   try {
-    const result = await requestMessage<"AUTO_COLLECT", { collected: number; pages: string[] }>(
+    const result = await requestMessage<
       "AUTO_COLLECT",
-      payload,
-    );
+      { collected: number; pages: string[]; warnings?: string[] }
+    >("AUTO_COLLECT", payload);
     await refreshState();
     toast.success(t("feedback.autoCollected", result.collected, result.pages.join(", ")));
+    const warnings = result.warnings ?? [];
+    if (warnings.length > 0) {
+      toast.warning(t("feedback.autoCollectWarnings", warnings.length, warnings.join(" / ")));
+    }
   } catch (error: unknown) {
     showError(error, "feedback.autoCollectFailed");
   } finally {
