@@ -66,6 +66,7 @@ type SettingsGlobal struct {
 	DownloadLimitEnabled   bool   `json:"download_limit_enabled"`
 	DownloadSpeedLimit     int    `json:"download_speed_limit"`
 	TorrentSizeGB          int    `json:"torrent_size_gb"`
+	TorrentMinSizeGB       int    `json:"torrent_min_size_gb"` // 全局最小种子大小（GB），0 = 无下限
 	MinFreeMinutes         int    `json:"min_free_minutes" gorm:"default:30"`
 	AutoStart              bool   `json:"auto_start"`
 	RetainHours            int    `json:"retain_hours" gorm:"default:24"`
