@@ -111,6 +111,14 @@ func TestRealHTML_UserInfo(t *testing.T) {
 			indexFields:  []string{"id", "name", "bonus", "seedingBonus", "ratio", "uploaded", "downloaded", "seeding"},
 			detailFields: []string{},
 		},
+		{
+			// The issue #532 capture opened another member's profile, which piggo hides
+			// behind privacy settings, so the userdetails rows are absent entirely.
+			siteID:       "piggo",
+			zipDir:       "/tmp/site-zips/piggo",
+			indexFields:  []string{"id", "name", "bonus", "ratio", "uploaded", "downloaded", "seeding"},
+			detailFields: []string{},
+		},
 	}
 
 	for _, tc := range sites {
