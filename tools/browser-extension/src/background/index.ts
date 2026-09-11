@@ -411,14 +411,14 @@ onMessage("PAGE_CAPTURED", async (payload: CapturedPage) => {
 });
 
 onMessage("AUTO_COLLECT", async ({ siteOrigin, schema }) => {
-  const pages = await autoCollect(siteOrigin, schema);
+  const { pages, warnings } = await autoCollect(siteOrigin, schema);
 
   for (const page of pages) {
     await upsertCapturedPage(page);
   }
 
   await publishStatus();
-  return { collected: pages.length, pages: pages.map((p) => p.pageType) };
+  return { collected: pages.length, pages: pages.map((p) => p.pageType), warnings };
 });
 
 onMessage("GET_STATUS", async () => getStatusPayload());
