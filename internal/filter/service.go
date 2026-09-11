@@ -42,7 +42,10 @@ type DecisionContext struct {
 	IsFree     bool
 	CanFinish  bool
 	GlobalSize int
-	FilterMode models.FilterMode
+	// GlobalMinSize is the global minimum torrent size in GB. Zero means no lower
+	// bound. Like GlobalSize it is a hard limit: per-rule bounds may only narrow it.
+	GlobalMinSize int
+	FilterMode    models.FilterMode
 }
 
 // Decision captures the outcome of a full download decision, including which
@@ -466,6 +469,17 @@ func (s *filterService) Decide(ctx DecisionContext, rssID uint) Decision {
 		}
 	}
 
+	// SizeGB == 0 means the size is unknown (see MatchInput), so an unknown size is
+	// never rejected by the lower bound — otherwise a detail-parse miss would silently
+	// drop every torrent.
+	if ctx.GlobalMinSize > 0 && ctx.Input.SizeGB > 0 && ctx.Input.SizeGB < float64(ctx.GlobalMinSize) {
+		return Decision{
+			ShouldDownload: false,
+			Source:         SourceNone,
+			Reason:         "低于全局最小大小限制",
+		}
+	}
+
 	var matchedRule *models.FilterRule
 	var hasRules bool
 	if mode != models.FilterModeFreeOnly {
@@ -524,6 +538,14 @@ func DecideWithoutRules(ctx DecisionContext) Decision {
 			ShouldDownload: false,
 			Source:         SourceNone,
 			Reason:         "超出全局大小限制",
+		}
+	}
+
+	if ctx.GlobalMinSize > 0 && ctx.Input.SizeGB > 0 && ctx.Input.SizeGB < float64(ctx.GlobalMinSize) {
+		return Decision{
+			ShouldDownload: false,
+			Source:         SourceNone,
+			Reason:         "低于全局最小大小限制",
 		}
 	}
 

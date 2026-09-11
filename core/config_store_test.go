@@ -34,6 +34,39 @@ func newTempDB(t *testing.T) *models.TorrentDB {
 // NewTestDB exposes test DB to other packages' tests
 func NewTestDB(t *testing.T) *models.TorrentDB { return newTempDB(t) }
 
+// TestSaveGlobal_TorrentSizeBounds pins the guard that stops a lower bound from
+// rejecting every torrent, and proves the new field survives a save/read round trip
+// (the field has to be copied explicitly in each ConfigStore write path).
+func TestSaveGlobal_TorrentSizeBounds(t *testing.T) {
+	store := NewConfigStore(newTempDB(t))
+	base := models.SettingsGlobal{DefaultIntervalMinutes: 30, DownloadDir: "data", TorrentSizeGB: 50}
+
+	withMin := func(minGB int) models.SettingsGlobal {
+		out := base
+		out.TorrentMinSizeGB = minGB
+		return out
+	}
+
+	err := store.SaveGlobal(withMin(50))
+	require.Error(t, err, "min == max must be rejected")
+	assert.Contains(t, err.Error(), "最小种子大小")
+
+	err = store.SaveGlobal(withMin(80))
+	require.Error(t, err, "min > max must be rejected")
+
+	err = store.SaveGlobal(withMin(-1))
+	require.Error(t, err, "negative bound must be rejected")
+
+	// 0 means "no lower bound" and stays acceptable.
+	require.NoError(t, store.SaveGlobal(withMin(0)))
+
+	require.NoError(t, store.SaveGlobal(withMin(10)))
+	gs, err := store.GetGlobalOnly()
+	require.NoError(t, err)
+	assert.Equal(t, 10, gs.TorrentMinSizeGB, "min size must survive the round trip")
+	assert.Equal(t, 50, gs.TorrentSizeGB)
+}
+
 func TestLoadDefaultPersistence(t *testing.T) {
 	db := newTempDB(t)
 	store := NewConfigStore(db)

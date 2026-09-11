@@ -170,6 +170,18 @@ func (s *ConfigStore) Load() (*models.Config, error) {
 	return &out, nil
 }
 
+// validateTorrentSizeBounds 拒绝会把所有种子拦下的下界配置。
+// 两侧 0 表示无对应限制；下界必须严格小于上界。
+func validateTorrentSizeBounds(minGB, maxGB int) error {
+	if minGB < 0 || maxGB < 0 {
+		return errors.New("种子大小限制不能为负数")
+	}
+	if minGB > 0 && maxGB > 0 && minGB >= maxGB {
+		return errors.New("最小种子大小必须小于最大种子大小")
+	}
+	return nil
+}
+
 func (s *ConfigStore) SaveGlobal(gl models.SettingsGlobal) error {
 	db := s.db.DB
 	var gs models.SettingsGlobal
@@ -185,9 +197,13 @@ func (s *ConfigStore) SaveGlobal(gl models.SettingsGlobal) error {
 	gs.DownloadLimitEnabled = gl.DownloadLimitEnabled
 	gs.DownloadSpeedLimit = gl.DownloadSpeedLimit
 	gs.TorrentSizeGB = gl.TorrentSizeGB
+	gs.TorrentMinSizeGB = gl.TorrentMinSizeGB
 	gs.AutoStart = gl.AutoStart
 	if strings.TrimSpace(gs.DownloadDir) == "" {
 		return errors.New("下载目录不能为空")
+	}
+	if err := validateTorrentSizeBounds(gs.TorrentMinSizeGB, gs.TorrentSizeGB); err != nil {
+		return err
 	}
 	if home, herr := os.UserHomeDir(); herr == nil {
 		if _, rerr := utils.ResolveDownloadBase(home, models.WorkDir, gs.DownloadDir); rerr != nil {
@@ -263,6 +279,9 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 	if strings.TrimSpace(gs.DownloadDir) == "" {
 		return errors.New("下载目录不能为空")
 	}
+	if err := validateTorrentSizeBounds(gs.TorrentMinSizeGB, gs.TorrentSizeGB); err != nil {
+		return err
+	}
 	if gs.DefaultIntervalMinutes < models.MinIntervalMinutes {
 		gs.DefaultIntervalMinutes = models.MinIntervalMinutes
 	}
@@ -280,6 +299,7 @@ func (s *ConfigStore) SaveGlobalSettingsWithPatch(gs models.SettingsGlobal, patc
 		cur.DownloadLimitEnabled = gs.DownloadLimitEnabled
 		cur.DownloadSpeedLimit = gs.DownloadSpeedLimit
 		cur.TorrentSizeGB = gs.TorrentSizeGB
+		cur.TorrentMinSizeGB = gs.TorrentMinSizeGB
 		cur.MinFreeMinutes = gs.MinFreeMinutes
 		cur.AutoStart = gs.AutoStart
 		// 以下 4 字段：patch 优先（区分 omitted/explicit），否则维持旧全量赋值语义。

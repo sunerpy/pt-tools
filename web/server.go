@@ -491,6 +491,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			DownloadLimitEnabled   bool    `json:"download_limit_enabled"`
 			DownloadSpeedLimit     int     `json:"download_speed_limit"`
 			TorrentSizeGB          int     `json:"torrent_size_gb"`
+			TorrentMinSizeGB       int     `json:"torrent_min_size_gb"`
 			MinFreeMinutes         int     `json:"min_free_minutes"`
 			AutoStart              bool    `json:"auto_start"`
 			CleanupEnabled         bool    `json:"cleanup_enabled"`
@@ -537,6 +538,15 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "下载目录不能为空", http.StatusBadRequest)
 			return
 		}
+		// 下界必须严格小于上界，否则配置生效后所有种子都会被拦下，且现象隐晦。
+		if req.TorrentMinSizeGB < 0 || req.TorrentSizeGB < 0 {
+			http.Error(w, "种子大小限制不能为负数", http.StatusBadRequest)
+			return
+		}
+		if req.TorrentMinSizeGB > 0 && req.TorrentSizeGB > 0 && req.TorrentMinSizeGB >= req.TorrentSizeGB {
+			http.Error(w, "最小种子大小必须小于最大种子大小", http.StatusBadRequest)
+			return
+		}
 		req.FreeEndAdvanceMinutes = max(0, min(req.FreeEndAdvanceMinutes, 60))
 		gs := models.SettingsGlobal{
 			DefaultIntervalMinutes: req.DefaultIntervalMinutes,
@@ -544,6 +554,7 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			DownloadLimitEnabled:   req.DownloadLimitEnabled,
 			DownloadSpeedLimit:     req.DownloadSpeedLimit,
 			TorrentSizeGB:          req.TorrentSizeGB,
+			TorrentMinSizeGB:       req.TorrentMinSizeGB,
 			MinFreeMinutes:         req.MinFreeMinutes,
 			AutoStart:              req.AutoStart,
 			CleanupEnabled:         req.CleanupEnabled,

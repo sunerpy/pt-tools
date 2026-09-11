@@ -64,6 +64,7 @@ export interface GlobalSettings {
   download_limit_enabled: boolean;
   download_speed_limit: number;
   torrent_size_gb: number;
+  torrent_min_size_gb: number;
   min_free_minutes: number;
   auto_start: boolean;
   retain_hours: number;

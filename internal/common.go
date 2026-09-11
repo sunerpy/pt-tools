@@ -887,23 +887,25 @@ func downloadWorkerUnified(
 				}
 			}
 
-			// 统一通过 filter.Decide 做完整决策：全局大小硬上限 → 过滤规则通道 → 免费通道
+			// 统一通过 filter.Decide 做完整决策：全局大小硬限（上下限）→ 过滤规则通道 → 免费通道
 			var decision filter.Decision
 			if filterSvc != nil && rssCfg.ID != 0 && hasAssociatedRules {
 				decision = filterSvc.Decide(filter.DecisionContext{
-					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
-					IsFree:     isFree,
-					CanFinish:  canFinished,
-					GlobalSize: gl.TorrentSizeGB,
-					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+					Input:         filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:        isFree,
+					CanFinish:     canFinished,
+					GlobalSize:    gl.TorrentSizeGB,
+					GlobalMinSize: gl.TorrentMinSizeGB,
+					FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
 				}, rssCfg.ID)
 			} else {
 				decision = filter.DecideWithoutRules(filter.DecisionContext{
-					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
-					IsFree:     isFree,
-					CanFinish:  canFinished,
-					GlobalSize: gl.TorrentSizeGB,
-					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+					Input:         filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:        isFree,
+					CanFinish:     canFinished,
+					GlobalSize:    gl.TorrentSizeGB,
+					GlobalMinSize: gl.TorrentMinSizeGB,
+					FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
 				})
 			}
 
@@ -1488,19 +1490,21 @@ func downloadWorker[T models.ResType](
 			var decision filter.Decision
 			if filterSvc != nil && rssCfg.ID != 0 && hasAssociatedRules {
 				decision = filterSvc.Decide(filter.DecisionContext{
-					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
-					IsFree:     isFree,
-					CanFinish:  canFinished,
-					GlobalSize: gl.TorrentSizeGB,
-					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+					Input:         filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:        isFree,
+					CanFinish:     canFinished,
+					GlobalSize:    gl.TorrentSizeGB,
+					GlobalMinSize: gl.TorrentMinSizeGB,
+					FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
 				}, rssCfg.ID)
 			} else {
 				decision = filter.DecideWithoutRules(filter.DecisionContext{
-					Input:      filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
-					IsFree:     isFree,
-					CanFinish:  canFinished,
-					GlobalSize: gl.TorrentSizeGB,
-					FilterMode: rssCfg.GetEffectiveFilterMode(&gl),
+					Input:         filter.MatchInput{Title: title, Tag: detailTag, SizeGB: sizeGB},
+					IsFree:        isFree,
+					CanFinish:     canFinished,
+					GlobalSize:    gl.TorrentSizeGB,
+					GlobalMinSize: gl.TorrentMinSizeGB,
+					FilterMode:    rssCfg.GetEffectiveFilterMode(&gl),
 				})
 			}
 
