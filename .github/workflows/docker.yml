@@ -1,0 +1,203 @@
+# 可复用容器发布 —— 作为 release.yml 的 same-run job 调用：
+#
+#   docker:
+#     needs: release-please
+#     if: needs.release-please.outputs.build_artifacts == 'true'
+#     uses: ./.github/workflows/docker.yml
+#     permissions:
+#       attestations: write
+#       contents: read
+#       id-token: write
+#       packages: write
+#     secrets: inherit
+#     with:
+#       ref: ${{ needs.release-please.outputs.tag_name }}
+#       tag_name: ${{ needs.release-please.outputs.tag_name }}
+#
+# 并列入 publish-release.needs，使镜像失败时 draft 保留。
+#
+# 绝不可用 `release:` 或 `push: tags` 触发：用 GITHUB_TOKEN 创建的事件不会
+# 启动任何 workflow run。
+#
+# 与 github-project-scaffold 的 docker-ghcr-reusable.yml 的差异（已在
+# .github/scaffold.json 的 drift_allow 登记）：
+#   1. 双注册表——GHCR（attested 主体）+ Docker Hub（sunerpy/pt-tools，
+#      对外既有交付面）；
+#   2. build-args 对齐 pt-tools 的 Dockerfile（TAG / BUILD_TIME / COMMIT_ID /
+#      BUILD_ENV），而非模板的 VERSION；
+#   3. 保留上下文准备步骤（go mod vendor + mkdir dist）——当前 Dockerfile 有
+#      `COPY vendor` 与 `COPY dist`，而两者都不在工作树中。迁移设计 v7 阶段 4
+#      重写 Dockerfile（BUILDPLATFORM 交叉编译）后应删除这两步。
+#   4. 保留 setup-qemu：runtime stage 仍执行目标架构的 apk 与 gosu --version。
+name: Publish container
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to build"
+        required: true
+        type: string
+      tag_name:
+        description: "Semantic release tag, for example v1.2.3"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build"
+        required: true
+        type: string
+      tag_name:
+        description: "Semantic release tag, for example v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: Build and push image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify semantic tag and source
+        shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$TAG_NAME" =~ $semver ]]; then
+            echo "::error::tag_name must be a v-prefixed semantic version"
+            exit 1
+          fi
+          tag_commit=$(git rev-parse "${TAG_NAME}^{commit}")
+          head_commit=$(git rev-parse HEAD)
+          if [ "$tag_commit" != "$head_commit" ]; then
+            echo "::error::ref does not resolve to tag_name"
+            exit 1
+          fi
+
+      - name: Derive the lowercase GHCR image name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
+
+      # 过渡步骤：当前 Dockerfile 的 `COPY vendor` / `COPY dist` 要求二者存在。
+      # 迁移设计 v7 阶段 4 重写 Dockerfile 后删除本 step 与下一个 step。
+      - name: Set up Go (context preparation)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Prepare build context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go mod vendor
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: |
+            ${{ steps.image.outputs.name }}
+            sunerpy/pt-tools
+          # prerelease 不会命中 latest：metadata-action 的 semver pattern
+          # 只对稳定版本发出 latest。
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag_name }}
+            type=semver,pattern={{major}},value=${{ inputs.tag_name }}
+
+      - name: Resolve build metadata
+        id: buildmeta
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$GITHUB_OUTPUT"
+          echo "commit_id=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_ENV=remote
+            TAG=${{ inputs.tag_name }}
+            BUILD_TIME=${{ steps.buildmeta.outputs.build_time }}
+            COMMIT_ID=${{ steps.buildmeta.outputs.commit_id }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  attest:
+    name: Attest image provenance
+    needs: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR 为 attested 主体；Docker Hub 仅作镜像分发副本。
+      - name: Attest the pushed image digest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.docker.outputs.image }}
+          subject-digest: ${{ needs.docker.outputs.digest }}
+          push-to-registry: true

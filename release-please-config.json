@@ -1,31 +1,23 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "release-type": "go",
-  "bump-minor-pre-major": true,
-  "bump-patch-for-minor-pre-major": false,
-  "include-v-in-tag": true,
   "include-component-in-tag": false,
-  "skip-github-release": false,
-  "pull-request-title-pattern": "chore: release ${version}",
-  "pull-request-header": "## Release ${version}",
-  "separate-pull-requests": false,
-  "changelog-sections": [
-    { "type": "feat", "section": "Features" },
-    { "type": "fix", "section": "Bug Fixes" },
-    { "type": "perf", "section": "Performance Improvements" },
-    { "type": "revert", "section": "Reverts" },
-    { "type": "docs", "section": "Documentation", "hidden": true },
-    { "type": "style", "section": "Styles", "hidden": true },
-    { "type": "chore", "section": "Miscellaneous Chores", "hidden": true },
-    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
-    { "type": "test", "section": "Tests", "hidden": true },
-    { "type": "build", "section": "Build System", "hidden": true },
-    { "type": "ci", "section": "Continuous Integration", "hidden": true },
-    { "type": "deps", "section": "Dependencies", "hidden": true }
-  ],
+  "pull-request-title-pattern": "chore: release${component} ${version}",
   "packages": {
     ".": {
-      "skip-changelog": true
+      "release-type": "go",
+      "package-name": "pt-tools",
+      "bump-minor-pre-major": true,
+      "include-v-in-tag": true,
+      "draft": true,
+      "force-tag-creation": true,
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "tools/browser-extension/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }
