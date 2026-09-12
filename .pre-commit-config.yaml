@@ -1,14 +1,23 @@
+# See https://pre-commit.com — run `make hooks` (or the install command below)
+# once after cloning to enable:
+#   pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# Local hooks call `make` so the exact same gate runs locally and in CI.
 repos:
   - repo: local
     hooks:
+      # Format on commit — fast, so contributors don't reach for --no-verify.
       - id: fmt
         name: fmt
         entry: make fmt
         language: system
         pass_filenames: false
+        stages: [pre-commit]
 
-      - id: lint
-        name: lint
-        entry: make lint
+      # Lint + test on push — the same correctness gates CI runs.
+      - id: check-push
+        name: lint and test
+        entry: make lint test
         language: system
         pass_filenames: false
+        stages: [pre-push]
