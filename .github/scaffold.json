@@ -1,0 +1,29 @@
+{
+  "profile": "go",
+  "addons": ["pr-title", "docker", "codecov", "pre-commit"],
+  "placeholders": {
+    "DEFAULT_BRANCH": "main",
+    "BINARY": "pt-tools",
+    "GO_MODULE": "github.com/sunerpy/pt-tools",
+    "PACKAGE_NAME": "pt-tools",
+    "OWNER": "sunerpy",
+    "REPO": "pt-tools",
+    "CURRENT_VERSION": "0.47.1"
+  },
+  "drift_allow": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/docker.yml",
+    ".goreleaser.yaml",
+    "release-please-config.json",
+    ".release-please-manifest.json",
+    "scripts/install.sh",
+    "scripts/install.ps1",
+    "Makefile",
+    ".golangci.yml",
+    "codecov.yml",
+    ".github/dependabot.yml",
+    ".dockerignore",
+    ".oxfmtignore"
+  ]
+}
