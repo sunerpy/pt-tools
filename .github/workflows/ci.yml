@@ -1,3 +1,11 @@
+# pt-tools CI —— 依据 CI/Release 迁移设计 v7 §4.3、§5。
+#
+# 关键结构决定：go-lint 与 go-security **不再** needs: frontend-build。
+# 它们不检验前端内容，只需满足 web/server.go 的
+#   //go:embed static/* static/dist/* static/dist/assets/*
+# 因此用 `make embed-placeholder` 自备占位产物（两个 pattern 必须各自匹配到
+# 文件），与前端构建完全并行。关键路径由 frontend + go 串行变为 max(两者)。
+# 占位产物仅供静态检查，绝不可用于对外发布的二进制。
 name: CI
 
 on:
@@ -5,36 +13,43 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 10
+          version: 10.25.0
 
       - name: Get pnpm store directory
         shell: bash
         run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+          echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
 
       - name: Setup pnpm cache
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web/frontend/pnpm-lock.yaml') }}
@@ -59,7 +74,7 @@ jobs:
 
       - name: Upload Frontend Dist
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-dist
           path: web/static/dist
@@ -67,35 +82,41 @@ jobs:
 
   go-build-test:
     name: Go Build & Test
+    # 唯一仍需真实前端产物的 Go job：测试会经由 web 包断言真实静态资源。
     needs: frontend-build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download Frontend Dist
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: frontend-dist
           path: web/static/dist
 
       - name: Set up Node.js (act local)
         if: ${{ env.ACT }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ".node-version"
 
+      - name: Install pnpm (act local)
+        if: ${{ env.ACT }}
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
       - name: Build Frontend (act local)
         if: ${{ env.ACT }}
-        working-directory: web/frontend
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm build
+        run: make build-frontend
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
           cache: true
@@ -106,6 +127,7 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      # 测试产出 coverage profile；下面两个门禁复用它，不重跑测试。
       - name: Run Tests
         run: |
           mkdir -p dist
@@ -119,7 +141,7 @@ jobs:
 
       - name: Upload Coverage
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: go-coverage
           path: dist/coverage.out
@@ -127,7 +149,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: ${{ !env.ACT }}
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: ./dist/coverage.out
           fail_ci_if_error: true
@@ -135,150 +157,121 @@ jobs:
 
   go-lint:
     name: Go Lint
-    needs: frontend-build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
-
-      - name: Download Frontend Dist
-        if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: frontend-dist
-          path: web/static/dist
+          persist-credentials: false
 
-      - name: Set up Node.js (act local)
-        if: ${{ env.ACT }}
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: ".node-version"
-
-      - name: Build Frontend (act local)
-        if: ${{ env.ACT }}
-        working-directory: web/frontend
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm build
+      # 不检验前端内容，用占位产物满足 go:embed，从而与前端构建并行。
+      - name: Create embed placeholder
+        run: make embed-placeholder
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
           cache: true
 
-      - name: Install golangci-lint from source
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-
+      # 使用官方 action（自带二进制分发与 lint 结果缓存），版本固定；
+      # 旧实现用 `go install ...@latest` 现编译，既慢又让上游发版能无关联地
+      # 弄红本仓库，也可能与本地 make lint-go 结果不一致。
       - name: Run golangci-lint
-        run: golangci-lint run --timeout=5m
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
 
   go-security:
     name: Go Security
-    needs: frontend-build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
-
-      - name: Download Frontend Dist
-        if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: frontend-dist
-          path: web/static/dist
+          persist-credentials: false
 
-      - name: Set up Node.js (act local)
-        if: ${{ env.ACT }}
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: ".node-version"
-
-      - name: Build Frontend (act local)
-        if: ${{ env.ACT }}
-        working-directory: web/frontend
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm build
+      - name: Create embed placeholder
+        run: make embed-placeholder
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
           cache: true
 
+      # 版本固定，不用 @latest。
       - name: Run govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
   format-check:
     name: Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 10
+          version: 10.25.0
 
       - name: Install Frontend Dependencies
         working-directory: web/frontend
         run: pnpm install --frozen-lockfile
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
           cache: true
 
-      - name: Install Go formatters
+      # 版本固定，与 Makefile 的 fail-closed 提示保持一致。
+      - name: Install pinned Go formatters
         run: |
-          go install golang.org/x/tools/cmd/goimports@latest
-          go install mvdan.cc/gofumpt@latest
+          go install golang.org/x/tools/cmd/goimports@v0.49.0
+          go install mvdan.cc/gofumpt@v0.11.0
 
-      - name: Run make fmt
-        run: make fmt
+      # 工具链单一事实源门禁：10 类精确 pin + 2 类兼容区间。
+      # 这类漂移必须在 PR 阶段红，而不是等到发布时才暴露（v0.47.0 事故根因）。
+      - name: Toolchain check
+        run: make toolchain-check
 
-      - name: Check for formatting changes
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Code is not formatted. Please run 'make fmt' locally and commit the changes."
-            echo ""
-            echo "Changed files:"
-            git status --porcelain
-            echo ""
-            echo "Diff:"
-            git diff --color=always
-            exit 1
-          fi
-          echo "All code is properly formatted."
+      # 只读校验：不再 `make fmt` 后比 git diff，避免在 CI 内改工作区。
+      - name: Format check
+        run: make fmt-check
 
   extension-build:
     name: Extension Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: ".node-version"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 10
+          version: 10.25.0
 
       - name: Check site consistency
         run: node --experimental-strip-types scripts/check-sites.ts
@@ -293,36 +286,47 @@ jobs:
         working-directory: tools/browser-extension
         run: pnpm test
 
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Windows runner 无 make；直接创建 go:embed 需要的占位文件。
+      # 两个 pattern（static/dist/* 与 static/dist/assets/*）必须各自匹配到文件。
+      - name: Create embed placeholder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path web/static/dist/assets | Out-Null
+          Set-Content -Path web/static/dist/index.html -Value '<!-- placeholder for CI only -->'
+          Set-Content -Path web/static/dist/assets/.keep -Value ''
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      # 发布产物含 windows/amd64 与 windows/arm64，故必须有原生 Windows 测试。
+      # 不带 -race：Windows 上需要 CGO 工具链。
+      - name: Test
+        run: go test -mod=readonly ./...
+
   ci-success:
     name: CI Success
-    needs: [frontend-build, go-build-test, go-lint, go-security, format-check, extension-build]
+    needs:
+      [frontend-build, go-build-test, go-lint, go-security, format-check, extension-build, windows]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
     steps:
-      - name: Check all jobs passed
-        run: |
-          if [[ "${{ needs.frontend-build.result }}" != "success" ]]; then
-            echo "frontend-build failed"
-            exit 1
-          fi
-          if [[ "${{ needs.go-build-test.result }}" != "success" ]]; then
-            echo "go-build-test failed"
-            exit 1
-          fi
-          if [[ "${{ needs.go-lint.result }}" != "success" ]]; then
-            echo "go-lint failed"
-            exit 1
-          fi
-          if [[ "${{ needs.go-security.result }}" != "success" ]]; then
-            echo "go-security failed"
-            exit 1
-          fi
-          if [[ "${{ needs.format-check.result }}" != "success" ]]; then
-            echo "format-check failed"
-            exit 1
-          fi
-          if [[ "${{ needs.extension-build.result }}" != "success" ]]; then
-            echo "extension-build failed"
-            exit 1
-          fi
-          echo "All CI checks passed!"
+      # 逐一手写 if 链的旧实现有个致命缺陷：新增 job 若漏改判定，
+      # 该 job 失败也能合并。改为对整个 needs JSON 求值，今后只需维护 needs。
+      - name: Require every CI job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success")' <<<"$NEEDS_JSON"

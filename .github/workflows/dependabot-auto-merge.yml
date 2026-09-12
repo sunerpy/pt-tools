@@ -12,30 +12,34 @@ jobs:
   auto-merge:
     name: Auto-merge Dependabot PR
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.actor == 'dependabot[bot]'
 
     steps:
       - name: Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
       # 仅自动合并 patch 和 minor 更新，major 更新需要人工审核
       - name: Auto-merge minor and patch updates
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
-        run: |
-          echo "Auto-merging ${{ steps.metadata.outputs.dependency-names }} (${{ steps.metadata.outputs.update-type }})"
-          gh pr merge --auto --squash "$PR_URL"
         env:
+          DEP_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Auto-merging ${DEP_NAMES} (${UPDATE_TYPE})"
+          gh pr merge --auto --squash "$PR_URL"
 
       - name: Skip major updates
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'
-        run: |
-          echo "::warning::Skipping major update for ${{ steps.metadata.outputs.dependency-names }}. Manual review required."
-          gh pr comment "$PR_URL" --body "⚠️ **Major version update** - 需要人工审核后手动合并。"
         env:
+          DEP_NAMES: ${{ steps.metadata.outputs.dependency-names }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "::warning::Skipping major update for ${DEP_NAMES}. Manual review required."
+          gh pr comment "$PR_URL" --body "⚠️ **Major version update** - 需要人工审核后手动合并。"
