@@ -297,13 +297,15 @@ jobs:
           persist-credentials: false
 
       # Windows runner 无 make；直接创建 go:embed 需要的占位文件。
-      # 两个 pattern（static/dist/* 与 static/dist/assets/*）必须各自匹配到文件。
+      # 三个 pattern 必须各自匹配到文件，且占位文件名不能以 . 或 _ 开头：
+      # static/dist/* 会匹配到 assets 目录，go:embed 递归时排除点开头文件，
+      # 只含 .keep 的目录会以 "contains no embeddable files" 失败。
       - name: Create embed placeholder
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path web/static/dist/assets | Out-Null
           Set-Content -Path web/static/dist/index.html -Value '<!-- placeholder for CI only -->'
-          Set-Content -Path web/static/dist/assets/.keep -Value ''
+          Set-Content -Path web/static/dist/assets/placeholder.js -Value '/* placeholder for CI only */'
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

@@ -348,13 +348,17 @@ test: build-frontend
 	CGO_ENABLED=1 go test -mod=readonly ./... -count=1 -race
 
 # 供 CI 的 go-lint / go-security job 使用：用占位产物满足 go:embed，
-# 使其不必等待前端构建。static/dist/* 与 static/dist/assets/* 两个 pattern
-# 必须各自匹配到文件。仅用于静态检查，绝不可用于对外发布的二进制。
+# 使其不必等待前端构建。三个 pattern（static/*、static/dist/*、
+# static/dist/assets/*）必须各自匹配到文件，且占位文件名不能以 . 或 _ 开头：
+# static/dist/* 会匹配到 assets 目录，go:embed 递归目录时排除这类文件，
+# 该目录随即被判为 "contains no embeddable files" 而构建失败。
+# 仅用于静态检查，绝不可用于对外发布的二进制。
 embed-placeholder:
 	@mkdir -p web/static/dist/assets
 	@[ -f web/static/dist/index.html ] \
 		|| echo '<!-- placeholder for lint/security only -->' > web/static/dist/index.html
-	@[ -f web/static/dist/assets/.keep ] || : > web/static/dist/assets/.keep
+	@[ -f web/static/dist/assets/placeholder.js ] \
+		|| echo '/* placeholder for lint/security only */' > web/static/dist/assets/placeholder.js
 	@echo "embed placeholder ready (NOT a shippable frontend)"
 
 # 本地 CI 门禁
