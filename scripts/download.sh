@@ -35,10 +35,10 @@ get_latest_release_url() {
 # 下载和安装工具
 install_pt_tools() {
     echo "Downloading pt-tools from: $DOWNLOAD_URL"
-    curl -L -o pt-tools-$PLATFORM.tar.gz "$DOWNLOAD_URL"
+    curl -L -o "pt-tools-$PLATFORM.tar.gz" "$DOWNLOAD_URL"
 
     echo "Extracting the binary..."
-    tar -xvzf pt-tools-$PLATFORM.tar.gz
+    tar -xvzf "pt-tools-$PLATFORM.tar.gz"
 
     echo "Installing pt-tools to $INSTALL_DIR..."
     # todo 判断文件 文件夹  避免覆盖
@@ -46,7 +46,7 @@ install_pt_tools() {
     sudo chmod +x "$INSTALL_DIR/pt-tools"
 
     echo "Cleaning up..."
-    rm -f pt-tools-$PLATFORM.tar.gz
+    rm -f "pt-tools-$PLATFORM.tar.gz"
 
     echo "pt-tools installed successfully!"
 }

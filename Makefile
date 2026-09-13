@@ -46,7 +46,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension generate-icons check-sites plan-inventory-check
+.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension generate-icons check-sites plan-inventory-check build test check toolchain-check embed-placeholder
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -205,15 +205,12 @@ lint: lint-go lint-frontend
 
 lint-go:
 	@echo "Running Go linters..."
-	@if command -v golangci-lint > /dev/null 2>&1; then \
-		golangci-lint run ./...; \
-	else \
-		echo "golangci-lint not found. Install with:"; \
-		echo "  go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
-		echo ""; \
-		echo "Running go vet instead..."; \
-		go vet ./...; \
-	fi
+	@command -v golangci-lint > /dev/null 2>&1 || { \
+		echo "golangci-lint v2 is required (fail-closed: 不再降级为 go vet)."; \
+		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1"; \
+		exit 1; \
+	}
+	@golangci-lint run ./...
 
 lint-frontend:
 	@echo "Running frontend linters with oxlint..."
@@ -248,21 +245,35 @@ fmt-oxfmt:
 
 fmt-go:
 	@echo "Formatting Go code..."
-	@if command -v goimports > /dev/null 2>&1; then \
-		echo "$(GO_FILES)" | tr ' ' '\n' | xargs -P 4 goimports -w -local github.com/sunerpy/pt-tools; \
-	else \
-		echo "goimports not found. Install with:"; \
+	@command -v goimports > /dev/null 2>&1 || { \
+		echo "goimports is required (fail-closed: 缺失不再静默跳过)."; \
 		echo "  go install golang.org/x/tools/cmd/goimports@latest"; \
-	fi
-	@if command -v gofumpt > /dev/null 2>&1; then \
-		echo "$(GO_FILES)" | tr ' ' '\n' | xargs -P 4 gofumpt -extra -w; \
-	else \
-		echo "gofumpt not found. Install with:"; \
-		echo "  go install mvdan.cc/gofumpt@latest"; \
-	fi
+		exit 1; \
+	}
+	@command -v gofumpt > /dev/null 2>&1 || { \
+		echo "gofumpt is required (fail-closed: 缺失不再静默跳过)."; \
+		echo "  go install mvdan.cc/gofumpt@v0.11.0"; \
+		exit 1; \
+	}
+	@echo "$(GO_FILES)" | tr ' ' '\n' | xargs -P 4 goimports -w -local github.com/sunerpy/pt-tools
+	@echo "$(GO_FILES)" | tr ' ' '\n' | xargs -P 4 gofumpt -extra -w
 
+# 只读格式校验：Go（gofumpt + goimports）与仓库文本（oxfmt）三者全覆盖。
+# 旧实现只校验 oxfmt，Go 代码格式漂移不会被发现。
 fmt-check:
 	@echo "Checking code format..."
+	@command -v gofumpt > /dev/null 2>&1 || { \
+		echo "gofumpt is required: go install mvdan.cc/gofumpt@v0.11.0"; exit 1; }
+	@command -v goimports > /dev/null 2>&1 || { \
+		echo "goimports is required: go install golang.org/x/tools/cmd/goimports@latest"; exit 1; }
+	@gofumpt_files=$$(echo "$(GO_FILES)" | tr ' ' '\n' | xargs -r gofumpt -extra -l); \
+	goimports_files=$$(echo "$(GO_FILES)" | tr ' ' '\n' | xargs -r goimports -l -local github.com/sunerpy/pt-tools); \
+	if [ -n "$$gofumpt_files$$goimports_files" ]; then \
+		printf 'Files needing gofumpt:\n%s\n' "$$gofumpt_files"; \
+		printf 'Files needing goimports:\n%s\n' "$$goimports_files"; \
+		exit 1; \
+	fi; \
+	echo "Go format OK"
 	@cd web/frontend && if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
 		pnpm install; \
@@ -317,6 +328,47 @@ coverage-parity:
 	n=$$(grep -E '^[[:space:]]*-[[:space:]]+"' codecov.yml | wc -l); \
 	[ "$$n" -eq $${#codecov_expected[@]} ] || { echo "codecov ignore count $$n mismatch (expected $${#codecov_expected[@]})"; exit 1; }; \
 	echo "coverage parity passed"
+
+# ---- 标准化目标（github-project-scaffold 的 Makefile 契约）----
+# build 与 test 均依赖真实前端产物：web/server.go 的
+#   //go:embed static/* static/dist/* static/dist/assets/*
+# 要求三个 pattern 各自匹配到文件，否则整个 web 包无法编译。
+build: build-frontend
+	@echo "Building pt-tools binary"
+	@mkdir -p $(DIST_DIR)
+	CGO_ENABLED=0 go build -mod=readonly -trimpath -ldflags="-s -w \
+	-X github.com/sunerpy/pt-tools/version.Version=$(TAG) \
+	-X github.com/sunerpy/pt-tools/version.BuildTime=$(BUILD_TIME) \
+	-X github.com/sunerpy/pt-tools/version.CommitID=$(COMMIT_ID) \
+	-X github.com/sunerpy/pt-tools/version.BuildOS=$(shell go env GOOS) \
+	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH)" \
+	-o $(DIST_DIR)/$(IMAGE_NAME) .
+
+test: build-frontend
+	CGO_ENABLED=1 go test -mod=readonly ./... -count=1 -race
+
+# 供 CI 的 go-lint / go-security job 使用：用占位产物满足 go:embed，
+# 使其不必等待前端构建。三个 pattern（static/*、static/dist/*、
+# static/dist/assets/*）必须各自匹配到文件，且占位文件名不能以 . 或 _ 开头：
+# static/dist/* 会匹配到 assets 目录，go:embed 递归目录时排除这类文件，
+# 该目录随即被判为 "contains no embeddable files" 而构建失败。
+# 仅用于静态检查，绝不可用于对外发布的二进制。
+embed-placeholder:
+	@mkdir -p web/static/dist/assets
+	@[ -f web/static/dist/index.html ] \
+		|| echo '<!-- placeholder for lint/security only -->' > web/static/dist/index.html
+	@[ -f web/static/dist/assets/placeholder.js ] \
+		|| echo '/* placeholder for lint/security only */' > web/static/dist/assets/placeholder.js
+	@echo "embed placeholder ready (NOT a shippable frontend)"
+
+# 本地 CI 门禁
+check: toolchain-check fmt-check lint test build
+	@echo "All checks passed."
+
+# 工具链一致性门禁：10 类精确 pin（规范化 SemVer 相等）+ 2 类兼容区间。
+# 镜像 repository 与 flavor 单独校验。详见 scripts/toolchain-check.py。
+toolchain-check:
+	@python3 scripts/toolchain-check.py
 
 # 前端构建
 build-frontend:

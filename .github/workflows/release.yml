@@ -1,0 +1,619 @@
+# pt-tools 发布线 —— 依据 CI/Release 迁移设计 v7。
+#
+# same-run 状态机：release-please 拥有版本、tag 与 draft Release；承诺产物
+# （二进制归档、扩展 zip/crx、容器镜像）全部在 flip 之前挂到 draft 上并列入
+# publish-release.needs，任何一环失败都只留下 draft、不产生公开残缺 release；
+# 非承诺副作用（Edge 商店上传、Telegram 公告）在 flip 之后执行且不进 needs。
+#
+# 绝不使用 `push: tags` 或 `on: release` 触发：用 GITHUB_TOKEN 创建的事件
+# 不会启动任何 workflow run（这是旧 release-assets.yml 有史以来只运行 2 次、
+# 而 release 有上百个的原因）。
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "已存在且仍为 draft 的 release tag，用于重建（例如 v0.48.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      build_artifacts: ${{ steps.gate.outputs.build_artifacts }}
+      prerelease: ${{ steps.gate.outputs.prerelease }}
+      release_sha: ${{ steps.gate.outputs.release_sha }}
+      tag_name: ${{ steps.gate.outputs.tag_name }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - name: Run release-please
+        id: release
+        if: github.event_name == 'push'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # 该脚本要求 github.ref_protected == true，且只允许在默认分支上运行。
+      - name: Resolve release gate
+        id: gate
+        shell: bash
+        env:
+          DEFAULT_BRANCH: main
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag_name }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          REPO: ${{ github.repository }}
+          RUN_REF: ${{ github.ref }}
+        run: bash .github/scripts/resolve-release-gate.sh
+
+  goreleaser:
+    name: Build and attach archives
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Release build::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      # .goreleaser.yaml 的 builds.hooks.post 使用 upx；apt 自带签名校验。
+      - name: Install UPX
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends upx-ucl
+
+      # 工具链一致性必须在发布构建前再次成立（阶段 0 的门禁同样在 CI 跑）。
+      - name: Toolchain check
+        run: make toolchain-check
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 断言恰好四个归档，名称与迁移前逐字节一致。
+      - name: Assert archive set
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="pt-tools-linux-amd64.tar.gz pt-tools-linux-arm64.tar.gz pt-tools-windows-amd64.exe.zip pt-tools-windows-arm64.exe.zip"
+          mkdir -p upload/archives
+          for name in $expected; do
+            if [ ! -f "dist/$name" ]; then
+              echo "::error title=Archive set::missing dist/$name"
+              exit 1
+            fi
+            cp "dist/$name" "upload/archives/$name"
+          done
+          count=$(find upload/archives -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 4 ]; then
+            echo "::error title=Archive set::expected exactly 4 archives, found $count"
+            exit 1
+          fi
+          ls -l upload/archives
+
+      - name: Upload archives for checksum aggregation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-archives
+          path: upload/archives
+          if-no-files-found: error
+          retention-days: 1
+
+  extension:
+    name: Build and attach browser extension
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      # CRX 是承诺产物：缺签名 key 时 fail-closed，draft 保留。
+      - name: Require the CRX signing key
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRX_PRIVATE_KEY:-}" ]; then
+            echo "::error title=Extension::CRX_PRIVATE_KEY 未配置。pt-tools-helper.crx 是承诺产物，缺 key 必须 fail-closed。"
+            exit 1
+          fi
+
+      # 浏览器 manifest 版本必须是 1..4 段整数、每段 0..65535，
+      # 因此 SemVer 预发布后缀不可直接使用。四段单调映射：
+      #   v0.48.0-rc.N -> 0.48.0.N （N ∈ 1..65534）
+      #   v0.48.0      -> 0.48.0.65535
+      - name: Derive extension manifest version
+        id: extver
+        shell: bash
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          # 推导逻辑抽到脚本以便单独做红绿验证（正例 4 个 + 负例 6 个）。
+          version=$(bash .github/scripts/extension-version.sh)
+          echo "manifest_version=${version}" >>"$GITHUB_OUTPUT"
+          echo "derived manifest version: ${version}"
+
+      # 唯一版本源是 package.json（release-please 通过 extra-files 更新其
+      # SemVer 值）；扩展构建期改写为浏览器可接受的四段数值版本。
+      # 该改写只发生在构建目录，不提交回仓库。
+      - name: Inject manifest version
+        shell: bash
+        env:
+          MANIFEST_VERSION: ${{ steps.extver.outputs.manifest_version }}
+        run: |
+          set -euo pipefail
+          cd tools/browser-extension
+          tmp=$(mktemp)
+          jq --arg v "$MANIFEST_VERSION" '.version = $v' package.json >"$tmp"
+          mv "$tmp" package.json
+          jq -r '.version' package.json
+
+      - name: Build extension
+        working-directory: tools/browser-extension
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types ../../scripts/check-sites.ts
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # 构建后断言：最终产物的 manifest 版本必须等于预期四段版本。
+      - name: Assert built manifest version
+        shell: bash
+        env:
+          MANIFEST_VERSION: ${{ steps.extver.outputs.manifest_version }}
+        run: |
+          set -euo pipefail
+          built=$(jq -r '.version' tools/browser-extension/dist/manifest.json)
+          if [ "$built" != "$MANIFEST_VERSION" ]; then
+            echo "::error title=Extension::built manifest version '$built' != expected '$MANIFEST_VERSION'"
+            exit 1
+          fi
+          echo "manifest version OK: $built"
+
+      - name: Package zip and crx
+        shell: bash
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          cd tools/browser-extension
+          (cd dist && zip -rq ../pt-tools-helper.zip .)
+          printf '%s' "$CRX_PRIVATE_KEY" | base64 -d >crx-private.pem
+          chmod 600 crx-private.pem
+          pnpm dlx crx pack dist -o pt-tools-helper.crx -p crx-private.pem
+          rm -f crx-private.pem
+          test -s pt-tools-helper.zip
+          test -s pt-tools-helper.crx
+
+      - name: Stage extension assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload/extension
+          cp tools/browser-extension/pt-tools-helper.zip upload/extension/
+          cp tools/browser-extension/pt-tools-helper.crx upload/extension/
+          count=$(find upload/extension -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 2 ]; then
+            echo "::error title=Extension::expected exactly 2 assets, found $count"
+            exit 1
+          fi
+
+      - name: Attach extension assets to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" \
+            upload/extension/pt-tools-helper.zip \
+            upload/extension/pt-tools-helper.crx \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload extension assets for checksum aggregation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-extension
+          path: upload/extension
+          if-no-files-found: error
+          retention-days: 1
+
+  docker:
+    name: Publish container
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    secrets: inherit
+    uses: ./.github/workflows/docker.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag_name }}
+      tag_name: ${{ needs.release-please.outputs.tag_name }}
+
+  assemble-checksums:
+    name: Assemble checksums
+    needs: [release-please, goreleaser, extension]
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # 分目录下载：同目录解压无法检测跨 artifact 重名，也就无法证明"拒绝重复"。
+      - name: Download archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-archives
+          path: assets/release-archives
+
+      - name: Download extension assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-extension
+          path: assets/release-extension
+
+      # publish-release-draft.sh 把摘要后的字符串原样当远端 asset name，
+      # 不调用 basename。因此必须在各输入目录内计算，行内只能出现裸 basename；
+      # checksums.txt 生成在输入目录之外，且绝不列出自身。
+      - name: Generate checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archives=$(find assets/release-archives -maxdepth 1 -type f | wc -l)
+          extension=$(find assets/release-extension -maxdepth 1 -type f | wc -l)
+          if [ "$archives" -ne 4 ]; then
+            echo "::error title=Checksums::expected 4 archives, found $archives"
+            exit 1
+          fi
+          if [ "$extension" -ne 2 ]; then
+            echo "::error title=Checksums::expected 2 extension assets, found $extension"
+            exit 1
+          fi
+
+          out="$PWD/checksums.txt"
+          : >"$out"
+          for dir in assets/release-archives assets/release-extension; do
+            (cd "$dir" && sha256sum -- *) >>"$out"
+          done
+
+          # 六行、名称唯一、均为裸 basename（不含 /）、排序稳定。
+          lines=$(wc -l <"$out")
+          if [ "$lines" -ne 6 ]; then
+            echo "::error title=Checksums::expected 6 lines, found $lines"
+            exit 1
+          fi
+          if grep -q '/' "$out"; then
+            echo "::error title=Checksums::checksum line contains a path separator; remote assets are basenames only"
+            cat "$out"
+            exit 1
+          fi
+          if grep -q 'checksums.txt' "$out"; then
+            echo "::error title=Checksums::checksums.txt must not list itself"
+            exit 1
+          fi
+          uniq_names=$(awk '{print $2}' "$out" | sed 's/^\*//' | sort -u | wc -l)
+          if [ "$uniq_names" -ne 6 ]; then
+            echo "::error title=Checksums::duplicate asset names across artifacts"
+            cat "$out"
+            exit 1
+          fi
+
+          expected="pt-tools-helper.crx pt-tools-helper.zip pt-tools-linux-amd64.tar.gz pt-tools-linux-arm64.tar.gz pt-tools-windows-amd64.exe.zip pt-tools-windows-arm64.exe.zip"
+          actual=$(awk '{print $2}' "$out" | sed 's/^\*//' | sort | tr '\n' ' ')
+          if [ "$actual" != "$expected " ]; then
+            echo "::error title=Checksums::asset set mismatch"
+            echo "expected: $expected"
+            echo "actual:   $actual"
+            exit 1
+          fi
+
+          LC_ALL=C sort -k2,2 -o "$out" "$out"
+          cat "$out"
+
+      - name: Attach checksums.txt to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" checksums.txt --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload checksums for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: checksums
+          path: checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release:
+    name: Publish Release
+    needs: [release-please, goreleaser, extension, docker, assemble-checksums]
+    # always() 单用不合规：必须逐一重述每个必需结果并封闭 cancelled。
+    if: >-
+      always() && !cancelled() &&
+      needs.release-please.result == 'success' &&
+      needs.release-please.outputs.build_artifacts == 'true' &&
+      needs.goreleaser.result == 'success' &&
+      needs.extension.result == 'success' &&
+      needs.docker.result == 'success' &&
+      needs.assemble-checksums.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    # 本 job 不执行任何项目代码，是唯一持有 id-token 的 job。
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download checksums
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: checksums
+          path: dist
+
+      - name: Assert the downloaded checksum artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(find dist -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 1 ] || [ ! -f dist/checksums.txt ]; then
+            echo "::error title=Publish::dist must contain exactly checksums.txt"
+            find dist -maxdepth 1 -type f
+            exit 1
+          fi
+
+      # 一份 attestation 经 subject-checksums 覆盖 checksums.txt 列出的全部归档。
+      - name: Attest release archives
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      # 安装说明用成对 marker 精确替换：只删除上一次插入的块，
+      # 保留 release-please 正文以及 flip 后由公告 job 追加的 marker。
+      - name: Compose release notes footer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.release-please.outputs.prerelease }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = "true" ]; then
+            template=.github/release-notes/rc-footer.md
+          else
+            template=.github/release-notes/stable-footer.md
+          fi
+
+          gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json body \
+            --jq '.body // ""' >body.md
+
+          # 删除 marker 对之间的旧块（含两个 marker 本身），其余内容原样保留。
+          awk '
+            /<!-- pt-tools-install-footer -->/ { skip = 1 }
+            skip != 1 { print }
+            /<!-- \/pt-tools-install-footer -->/ { if (skip == 1) skip = 0 }
+          ' body.md >body.trimmed
+
+          # SHELL-FORMAT 必须是未展开的字面变量名；用转义美元符而非单引号，
+          # 以免 shellcheck 误判为「单引号内变量不展开」(SC2016)。
+          # TAG_NAME 已由本 step 的 env: 导出，envsubst 直接从环境读取。
+          envsubst "\$TAG_NAME" <"$template" >footer.md
+
+          cat body.trimmed footer.md >body.new
+          gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --notes-file body.new
+
+      # 校验远端七个资产（checksums.txt 覆盖 6 个 + --asset 覆盖自身），
+      # --exact 保证没有意外多余资产；全部通过后才 flip。
+      - name: Verify remote assets and publish the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          bash .github/scripts/publish-release-draft.sh --publish \
+            --checksums dist/checksums.txt --asset dist/checksums.txt --exact
+
+  edge-publish:
+    name: Publish to Edge Add-ons
+    needs: [release-please, publish-release]
+    # flip 之后的非承诺副作用；RC 不上传商店。
+    if: >-
+      needs.publish-release.result == 'success' &&
+      needs.release-please.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Download the published crx-free zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern pt-tools-helper.zip --dir .
+
+      # Edge 强制串行提交：仅"前一次 submission 仍在 InReview"这一已识别的
+      # 不透明失败可软失败（warning + exit 0）；其余包/API 错误一律保持 red。
+      # 上传前先查询商店当前版本以实现同 tag 幂等。
+      - name: Upload and publish to Edge Add-ons
+        env:
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          ZIP_FILE: pt-tools-helper.zip
+        run: bash .github/scripts/edge-publish.sh
+
+  telegram-announce:
+    name: Announce to Telegram
+    needs: [release-please, publish-release]
+    # flip 之后的尽力而为副作用，按 tag 幂等，不进 publish-release.needs。
+    if: needs.publish-release.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # marker 载体是 Release body 内的 HTML 注释：Release 没有通用 comment
+      # 原语，而 marker asset 会让公开资产从 7 变 8 从而破坏 --exact。
+      # immutable releases 只锁 tag 与 assets，notes 发布后仍可编辑。
+      - name: Skip when this tag was already announced
+        id: marker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          body=$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""')
+          if printf '%s' "$body" | grep -q '<!-- pt-tools-tg-announced -->'; then
+            echo "already announced; skipping"
+            echo "send=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "send=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Send announcement
+        if: steps.marker.outputs.send == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REL_TAG: ${{ needs.release-please.outputs.tag_name }}
+          TG_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          REL_NAME=$(gh release view "$REL_TAG" --repo "$REPO" --json name --jq '.name // .tagName')
+          REL_BODY=$(gh release view "$REL_TAG" --repo "$REPO" --json body --jq '.body // ""')
+          REL_URL=$(gh release view "$REL_TAG" --repo "$REPO" --json url --jq '.url')
+          export REL_NAME REL_BODY REL_URL
+          python3 .github/scripts/tg_release_announce.py
+
+      - name: Record the announcement marker
+        if: steps.marker.outputs.send == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' >body.md
+          printf '\n<!-- pt-tools-tg-announced -->\n' >>body.md
+          gh release edit "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --notes-file body.md

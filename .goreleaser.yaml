@@ -1,0 +1,76 @@
+# GoReleaser 配置 —— 依据 CI/Release 迁移设计 v7 §3.4。
+#
+# 与 github-project-scaffold 标准 asset 的差异（已在 .github/scaffold.json
+# 的 drift_allow 中登记）：
+#   1. main 为仓库根 `.`，而非模板假定的 ./cmd/<binary>；
+#   2. 版本注入 version.{Version,BuildTime,CommitID,BuildOS,BuildArch}
+#      五个字段，而非模板的 main.version；
+#   3. 仅 linux/windows × amd64/arm64 四个目标，不含 darwin
+#      （pt-tools 从未发布 macOS 产物）；
+#   4. 归档采用**无版本号**命名以保住 releases/latest/download/... 稳定链接，
+#      README 与历史公告均依赖它；
+#   5. checksum.disable=true —— 唯一的 checksums.txt 由 release.yml 的
+#      assemble-checksums job 生成，需同时覆盖扩展 zip/crx 共 6 个资产；
+#   6. UPX 通过 build post hook 施加（经 scripts/compress-binary.sh 包装），
+#      保持既有产物体积契约。UPX 4.2.4 不支持 win64/arm64，直接调用会让
+#      release 在该 target 中断（已实测），故由包装脚本显式跳过该平台，
+#      其余任何 UPX 失败仍然硬失败。
+version: 2
+
+project_name: pt-tools
+
+# web/server.go 的 //go:embed static/* static/dist/* static/dist/assets/*
+# 要求三个 pattern 各自匹配到文件，否则整个 web 包无法编译。
+# web/static/dist 无 tracked 产物，故必须在构建前生成真实前端。
+before:
+  hooks:
+    - make build-frontend
+
+builds:
+  - id: pt-tools
+    main: .
+    binary: pt-tools
+    env:
+      - CGO_ENABLED=0
+      - GOFLAGS=-mod=readonly
+    goos: [linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/sunerpy/pt-tools/version.Version={{ .Tag }}
+      - -X github.com/sunerpy/pt-tools/version.BuildTime={{ .Date }}
+      - -X github.com/sunerpy/pt-tools/version.CommitID={{ .FullCommit }}
+      - -X github.com/sunerpy/pt-tools/version.BuildOS={{ .Os }}
+      - -X github.com/sunerpy/pt-tools/version.BuildArch={{ .Arch }}
+    hooks:
+      # post hook 对每个 target 执行一次；.Path/.Os/.Arch 均为单 artifact 字段。
+      post:
+        - bash scripts/compress-binary.sh {{ .Path }} {{ .Os }} {{ .Arch }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # 无版本号命名，与迁移前的资产名逐字节一致：
+    #   pt-tools-linux-amd64.tar.gz / pt-tools-windows-amd64.exe.zip
+    # 归档内的文件名默认取 binary 名（pt-tools / pt-tools.exe），
+    # 因此旧工作流中三份重复的 "Organize Files" 重打包步骤不再需要。
+    name_template: '{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}{{ if eq .Os "windows" }}.exe{{ end }}'
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  # 由 assemble-checksums job 独占生成，见 release.yml。
+  disable: true
+
+changelog:
+  # release-please 独占 CHANGELOG.md 与 Release body。
+  disable: true
+
+release:
+  draft: true
+  # 复用 release-please 创建的 draft；绝不可用 replace_existing_draft，
+  # 那会丢弃作为协调对象的 Release。
+  use_existing_draft: true
+  prerelease: auto
+  replace_existing_artifacts: true

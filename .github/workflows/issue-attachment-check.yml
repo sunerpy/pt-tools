@@ -12,11 +12,12 @@ jobs:
     # issue payload under `github.event.issue`, same key as `issues` event.
     if: contains(github.event.issue.title, '新站点请求') && !github.event.issue.pull_request
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       issues: write
     steps:
       - name: Check for ZIP attachment in body or comments
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const issueNumber = context.payload.issue.number;
