@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.2](https://github.com/sunerpy/pt-tools/compare/v0.47.1...v0.47.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ci:** 公告渲染器按 marker 契约丢弃安装说明并识别代码块 ([ba359a6](https://github.com/sunerpy/pt-tools/commit/ba359a661986dd3c0292c5c5ca494b182813d466))
+* **ci:** 公告渲染器按 marker 契约丢弃安装说明并识别代码块 ([b9ee3d9](https://github.com/sunerpy/pt-tools/commit/b9ee3d9b3f7298ba05355e8bf9254e86d7618adb))
+* **scripts:** 修复下载脚本中未加引号的变量展开 ([d2e724a](https://github.com/sunerpy/pt-tools/commit/d2e724a22b09b16bc946dd8e16a98041a5c46285))
+
 ## [0.47.1] - 2026-09-11
 
 ### Bug Fixes
