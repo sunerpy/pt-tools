@@ -348,9 +348,46 @@ def _convert_line(ln: str) -> str:
 def _strip_release_please_noise(lines):
     out = []
     skip_until_next_h2 = False
+    in_fence = False
+    in_install_footer = False
     for ln in lines:
         s = ln.rstrip()
         stripped = s.lstrip()
+
+        # The install footer is delimited by the same marker pair that
+        # publish-release uses to replace it, so drop the whole block by that
+        # contract instead of guessing its section titles. This keeps working
+        # when the stable/rc footer gains or renames a section.
+        if stripped.startswith("<!-- pt-tools-install-footer"):
+            in_install_footer = True
+            continue
+        if stripped.startswith("<!-- /pt-tools-install-footer"):
+            in_install_footer = False
+            continue
+        if in_install_footer:
+            continue
+
+        # Fence state must be tracked before any heading test: a bash comment
+        # such as `# 校验和` inside a ``` block is code, not a heading. Treating
+        # one as a heading cleared skip_until_next_h2 and leaked the remainder
+        # of an actively skipped section into the announcement.
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            if not skip_until_next_h2:
+                out.append(s)
+            continue
+        if in_fence:
+            if not skip_until_next_h2:
+                out.append(s)
+            continue
+
+        # Any other HTML comment is a marker carrier, never announcement text.
+        if stripped.startswith("<!--"):
+            continue
+        # Horizontal rules survive MarkdownV2 escaping as `\-\-\-` noise.
+        if re.fullmatch(r"-{3,}|\*{3,}|_{3,}", stripped):
+            continue
+
         if stripped.startswith("**Full Changelog**:"):
             continue
         if stripped.lower().startswith("full changelog:"):
@@ -363,7 +400,14 @@ def _strip_release_please_noise(lines):
             skip_until_next_h2 = False
         if stripped.startswith("### "):
             title = stripped[4:].strip().lower()
-            if title in ("using docker (recommended)", "from binary", "docker images", "browser extension"):
+            if title in (
+                "using docker (recommended)",
+                "from binary",
+                "docker images",
+                "browser extension",
+                "install script",
+                "verify integrity",
+            ):
                 skip_until_next_h2 = True
                 continue
         if skip_until_next_h2:
@@ -731,12 +775,84 @@ def _selftest() -> int:
     summary_count = rendered.count("本次含")
     check(summary_count == 3, f"expected 3 fold summaries, got {summary_count}")
 
+    # The install footer that publish-release appends before the flip must
+    # vanish completely. Its fenced blocks carry bash comments such as
+    # `# 校验和`; reading one as a markdown heading ends the active skip block
+    # and leaks the remainder of the footer into the announcement.
+    footer_body = '''
+## [0.47.2](https://github.com/sunerpy/pt-tools/compare/v0.47.1...v0.47.2) (2026-09-13)
+
+### Bug Fixes
+
+* **scripts:** 修复下载脚本中未加引号的变量展开 ([d2e724a](https://github.com/sunerpy/pt-tools/commit/d2e724a))
+<!-- pt-tools-install-footer -->
+
+---
+
+## Installation
+
+### Using Docker (Recommended)
+
+```bash
+docker pull sunerpy/pt-tools:v0.47.2
+# 或从 GHCR 拉取（带 artifact attestation）
+docker pull ghcr.io/sunerpy/pt-tools:v0.47.2
+```
+
+### Install Script
+
+```bash
+curl -fsSL https://example.invalid/install.sh | sh
+```
+
+### Verify Integrity
+
+```bash
+# 校验和
+sha256sum -c checksums.txt --ignore-missing
+
+# 供应链证明
+gh attestation verify checksums.txt --repo sunerpy/pt-tools
+```
+
+### Docker Images
+
+- `sunerpy/pt-tools:v0.47.2`
+
+<!-- /pt-tools-install-footer -->
+'''
+    footer = _gfm_to_markdownv2(footer_body, url)
+    # MarkdownV2 escaping inserts backslashes, so a naive substring test silently
+    # passes on leaked text such as `pt\-tools\-install\-footer` or an orphan
+    # ``` fence. Compare against a backslash-stripped copy so these assertions
+    # cannot go false-negative.
+    plain = footer.replace("\\", "")
+    check(
+        "修复下载脚本中未加引号的变量展开" in footer,
+        "changelog bullet must survive alongside the footer",
+    )
+    check("🐛 *Bug 修复*" in footer, "Bug Fixes heading must survive the footer")
+    for token in (
+        "pt-tools-install-footer",
+        "校验和",
+        "供应链证明",
+        "GHCR",
+        "sha256sum",
+        "docker pull",
+        "attestation verify",
+        "```",
+        "---",
+    ):
+        check(token not in plain, f"footer token {token!r} must not leak")
+
     if failures:
         print("SELFTEST FAILED:", file=sys.stderr)
         for f in failures:
             print(f"  - {f}", file=sys.stderr)
         print("--- rendered ---", file=sys.stderr)
         print(rendered, file=sys.stderr)
+        print("--- footer rendered ---", file=sys.stderr)
+        print(footer, file=sys.stderr)
         return 1
     print("SELFTEST PASSED — all assertions hold.")
     print("--- rendered ---")
