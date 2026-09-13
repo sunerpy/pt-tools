@@ -519,9 +519,13 @@ jobs:
     name: Publish to Edge Add-ons
     needs: [release-please, publish-release]
     # flip 之后的非承诺副作用；RC 不上传商店。
+    # vars.PUBLISH_EDGE 是商店提交开关：置为 'false' 即整体跳过本 job，用于只
+    # 验证发布链而不向 Edge 加载项商店提交。变量缺失时按 != 'false' 成立处理，
+    # 保持原有提交行为，因此新增开关不改变默认语义。
     if: >-
       needs.publish-release.result == 'success' &&
-      needs.release-please.outputs.prerelease == 'false'
+      needs.release-please.outputs.prerelease == 'false' &&
+      vars.PUBLISH_EDGE != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
