@@ -558,7 +558,12 @@ jobs:
     name: Announce to Telegram
     needs: [release-please, publish-release]
     # flip 之后的尽力而为副作用，按 tag 幂等，不进 publish-release.needs。
-    if: needs.publish-release.result == 'success'
+    # vars.ANNOUNCE_TELEGRAM 是公告开关：置为 'false' 即整体跳过本 job，用于只
+    # 验证发布链而不对外发公告。变量缺失时按 != 'false' 成立处理，保持原有发送
+    # 行为，因此新增开关不改变默认语义。
+    if: >-
+      needs.publish-release.result == 'success' &&
+      vars.ANNOUNCE_TELEGRAM != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     continue-on-error: true
