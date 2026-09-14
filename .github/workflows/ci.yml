@@ -253,6 +253,9 @@ jobs:
       - name: Format check
         run: make fmt-check
 
+      - name: Documentation links
+        run: make docs-check
+
   extension-build:
     name: Extension Build
     runs-on: ubuntu-latest

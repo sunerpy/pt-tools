@@ -15,7 +15,7 @@ PASSED=0
 FAILED=0
 
 for n in $(seq 1 33); do
-  for script in "$SCRIPT_DIR"/task-${n}-*.sh; do
+  for script in "$SCRIPT_DIR"/task-"${n}"-*.sh; do
     [ -f "$script" ] || continue
     TOTAL=$((TOTAL + 1))
     name=$(basename "$script")

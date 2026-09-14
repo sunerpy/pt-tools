@@ -14,7 +14,7 @@ set -e         # 遇到错误就退出
 #set -o errexit
 
 LOGFILE=/tmp/docker-entrypoint.sh_$(date +%Y%m%d).log
-touch ${LOGFILE}
+touch "${LOGFILE}"
 date >"${LOGFILE}"
 
 logger() {
@@ -62,7 +62,7 @@ fi
 
 # 创建用户（检查 UID 是否被占用）
 if ! getent passwd "$APP_USER" >/dev/null; then
-    adduser -u "$PUID" -G "$APP_GROUP" -h $HOME -D "$APP_USER"
+    adduser -u "$PUID" -G "$APP_GROUP" -h "$HOME" -D "$APP_USER"
 fi
 
 # 修改/app 权限 忽略挂载的只读目录报错

@@ -46,7 +46,7 @@ BASE_IMAGE ?= alpine:3.20.3
 NODE_IMAGE ?= node:25.2.0-alpine
 BUILD_ENV ?= remote
 
-.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension generate-icons check-sites plan-inventory-check build test check toolchain-check embed-placeholder
+.PHONY: build-local build-binaries build-local-docker build-remote-docker build-prerelease-docker push-image clean fmt fmt-oxfmt fmt-go fmt-check lint unit-test coverage-summary coverage-gate coverage-gate-check coverage-parity build-extension generate-icons check-sites plan-inventory-check build test check toolchain-check docs-check embed-placeholder
 
 # 本地构建二进制
 build-local: fmt build-frontend
@@ -130,6 +130,7 @@ build-local-docker:
 	--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
 	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
 	--build-arg BUILD_ENV=$(BUILD_ENV) \
+	--build-arg GOPROXY=$(GOPROXY) \
 	--build-arg TAG=$(TAG) \
 	--build-arg BUILD_TIME=$(BUILD_TIME) \
 	--build-arg COMMIT_ID=$(COMMIT_ID) \
@@ -155,6 +156,7 @@ build-remote-docker:
 	--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
 	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
 	--build-arg BUILD_ENV=$(BUILD_ENV) \
+	--build-arg GOPROXY=$(GOPROXY) \
 	--build-arg TAG=$(TAG) \
 	--build-arg BUILD_TIME=$(BUILD_TIME) \
 	--build-arg COMMIT_ID=$(COMMIT_ID) \
@@ -184,6 +186,7 @@ build-prerelease-docker:
 	--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
 	--build-arg NODE_IMAGE=$(NODE_IMAGE) \
 	--build-arg BUILD_ENV=$(BUILD_ENV) \
+	--build-arg GOPROXY=$(GOPROXY) \
 	--build-arg TAG=$(TAG) \
 	--build-arg BUILD_TIME=$(BUILD_TIME) \
 	--build-arg COMMIT_ID=$(COMMIT_ID) \
@@ -216,7 +219,7 @@ lint-frontend:
 	@echo "Running frontend linters with oxlint..."
 	@cd web/frontend && if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
-		pnpm install; \
+		pnpm install --frozen-lockfile; \
 	fi && \
 	pnpm lint:check && \
 	echo "" && \
@@ -230,16 +233,15 @@ GO_FILES = $(shell find . -name "*.go" -not -path "./vendor/*" -not -path "./web
 fmt: fmt-oxfmt fmt-go
 	@echo "Formatting complete."
 
-# CHANGELOG.md 与 release-please 清单由 release 工作流（update-changelog job）专门生成并格式化，
-# 开发与 CI 的 fmt 流程不应触碰，否则 git-cliff 重新生成后会与 oxfmt 期望格式冲突，导致
-# format-check 在两次 release 之间对所有 PR 误报。排除清单见仓库根目录 .oxfmtignore。
+# CHANGELOG.md 与 release-please 清单由 release-please 管理，开发与 CI 的 fmt
+# 流程不应改写这些发布状态文件。排除清单见仓库根目录 .oxfmtignore。
 OXFMT_IGNORE = --ignore-path "$(PROJECT_ROOT)/.oxfmtignore"
 
 fmt-oxfmt:
 	@echo "Formatting with oxfmt..."
 	@cd web/frontend && if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
-		pnpm install; \
+		pnpm install --frozen-lockfile; \
 	fi && \
 	pnpm oxfmt --no-error-on-unmatched-pattern $(OXFMT_IGNORE) "$(PROJECT_ROOT)"
 
@@ -247,7 +249,7 @@ fmt-go:
 	@echo "Formatting Go code..."
 	@command -v goimports > /dev/null 2>&1 || { \
 		echo "goimports is required (fail-closed: 缺失不再静默跳过)."; \
-		echo "  go install golang.org/x/tools/cmd/goimports@latest"; \
+		echo "  go install golang.org/x/tools/cmd/goimports@v0.49.0"; \
 		exit 1; \
 	}
 	@command -v gofumpt > /dev/null 2>&1 || { \
@@ -265,7 +267,7 @@ fmt-check:
 	@command -v gofumpt > /dev/null 2>&1 || { \
 		echo "gofumpt is required: go install mvdan.cc/gofumpt@v0.11.0"; exit 1; }
 	@command -v goimports > /dev/null 2>&1 || { \
-		echo "goimports is required: go install golang.org/x/tools/cmd/goimports@latest"; exit 1; }
+		echo "goimports is required: go install golang.org/x/tools/cmd/goimports@v0.49.0"; exit 1; }
 	@gofumpt_files=$$(echo "$(GO_FILES)" | tr ' ' '\n' | xargs -r gofumpt -extra -l); \
 	goimports_files=$$(echo "$(GO_FILES)" | tr ' ' '\n' | xargs -r goimports -l -local github.com/sunerpy/pt-tools); \
 	if [ -n "$$gofumpt_files$$goimports_files" ]; then \
@@ -276,7 +278,7 @@ fmt-check:
 	echo "Go format OK"
 	@cd web/frontend && if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
-		pnpm install; \
+		pnpm install --frozen-lockfile; \
 	fi && \
 	pnpm oxfmt --no-error-on-unmatched-pattern --check $(OXFMT_IGNORE) "$(PROJECT_ROOT)"
 
@@ -362,7 +364,7 @@ embed-placeholder:
 	@echo "embed placeholder ready (NOT a shippable frontend)"
 
 # 本地 CI 门禁
-check: toolchain-check fmt-check lint test build
+check: toolchain-check fmt-check docs-check lint test build
 	@echo "All checks passed."
 
 # 工具链一致性门禁：10 类精确 pin（规范化 SemVer 相等）+ 2 类兼容区间。
@@ -370,17 +372,20 @@ check: toolchain-check fmt-check lint test build
 toolchain-check:
 	@python3 scripts/toolchain-check.py
 
+docs-check:
+	@python3 scripts/check-doc-links.py
+
 # 前端构建
 build-frontend:
 	@echo "Building frontend..."
-	pnpm --dir web/frontend install
+	pnpm --dir web/frontend install --frozen-lockfile
 	pnpm --dir web/frontend build
 	@echo "Frontend built to web/static/dist"
 
 # 浏览器扩展构建（自动检查站点一致性）
 build-extension: check-sites
 	@echo "Building browser extension..."
-	pnpm --dir tools/browser-extension install
+	pnpm --dir tools/browser-extension install --frozen-lockfile
 	pnpm --dir tools/browser-extension run pack
 	@echo "Extension packaged: tools/browser-extension/pt-tools-helper.zip"
 
@@ -438,7 +443,7 @@ ci-local:
 	else \
 		echo "act not found. Install with:"; \
 		echo "  brew install act  # macOS"; \
-		echo "  curl -s https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash  # Linux"; \
+		echo "  https://nektosact.com/installation/index.html  # Linux"; \
 		exit 1; \
 	fi
 
