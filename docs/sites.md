@@ -1,4 +1,6 @@
-## 支持站点
+# 支持站点
+
+[文档中心](README.md) · [返回项目首页](../README.md)
 
 当前已适配 **66** 个站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby、Rousi 等主流 PT 架构。
 

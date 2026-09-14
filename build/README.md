@@ -124,4 +124,4 @@ For production, pin the CloakBrowser-Manager image to a specific digest to preve
 
 ### Legal Compliance
 
-**Single-image deployment**: v2.0 ships only docker-compose; single-image solutions are pending legal confirmation from CloakHQ (see [docs/legal/cloakhq-oem-inquiry.md](../docs/legal/cloakhq-oem-inquiry.md)).
+**Single-image deployment**: v2.0 ships only docker-compose; single-image solutions are pending legal confirmation from CloakHQ.

@@ -14,7 +14,6 @@
   - [使用 Makefile](#使用-makefile)
 - [开发模式](#开发模式)
 - [技术架构](#技术架构)
-  - [技术栈](#技术栈)
   - [项目结构](#项目结构)
   - [性能优化](#性能优化)
 - [贡献指南](#贡献指南)
@@ -22,23 +21,24 @@
   - [提交 Pull Request](#提交-pull-request)
   - [添加新站点支持](#添加新站点支持)
 - [代码规范](#代码规范)
+- [浏览器扩展开发与发布](#浏览器扩展开发与发布)
 
 ## 环境要求
 
-| 依赖        | 版本要求 | 说明         |
-| ----------- | -------- | ------------ |
-| **Go**      | 1.22+    | 后端开发语言 |
-| **Node.js** | 18+      | 前端构建环境 |
-| **pnpm**    | 8+       | 前端包管理器 |
+| 依赖        | 版本要求 | 说明                                   |
+| ----------- | -------- | -------------------------------------- |
+| **Go**      | 1.26.7   | 后端开发语言；以 `go.mod` 为准         |
+| **Node.js** | 25.2.0   | 前端构建环境；以 `.node-version` 为准  |
+| **pnpm**    | 10.25.0  | 前端包管理器；以 `packageManager` 为准 |
 
 ### 安装依赖
 
 **Go**：
 
 ```bash
-# Linux (使用官方安装脚本)
-wget https://go.dev/dl/go1.25.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.25.linux-amd64.tar.gz
+# Linux（下载官方归档）
+wget https://go.dev/dl/go1.26.7.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.26.7.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
 # macOS (使用 Homebrew)
@@ -49,11 +49,11 @@ brew install go
 
 ```bash
 # 使用 nvm 安装 Node.js
-nvm install 25
-nvm use 25
+nvm install 25.2.0
+nvm use 25.2.0
 
-# 安装 pnpm
-npm install -g pnpm
+# 安装仓库固定的 pnpm 版本
+npm install -g pnpm@10.25.0
 ```
 
 ## 从源码构建
@@ -69,12 +69,12 @@ cd pt-tools
 
 ```bash
 cd web/frontend
-pnpm install
+pnpm install --frozen-lockfile
 pnpm build
 cd ../..
 ```
 
-构建产物会输出到 `web/frontend/dist/` 目录，并被嵌入到 Go 二进制文件中。
+构建产物会输出到 `web/static/dist/`，并通过 `go:embed` 嵌入 Go 二进制。
 
 ### 构建后端
 
@@ -87,20 +87,20 @@ go build -o pt-tools .
 推荐使用 Makefile 进行构建，它封装了完整的构建流程：
 
 ```bash
-# 完整构建（前端 + 后端）
+# 标准构建（前端 + 后端，输出 dist/pt-tools）
+make build
+
+# 带版本元数据的本机开发构建（会先格式化）
 make build-local
 
 # 仅构建前端
 make build-frontend
 
-# 仅构建后端
-make build-backend
-
-# 查看所有可用命令
-make help
+# 完整本地门禁：工具链、格式、lint、测试与构建
+make check
 ```
 
-构建产物位于 `dist/` 目录。
+后端单独编译可运行 `go build -o dist/pt-tools .`。所有二进制构建产物位于 `dist/`。
 
 ## 开发模式
 
@@ -118,12 +118,12 @@ pnpm dev
 **终端 2 - 启动后端服务**：
 
 ```bash
-go run main.go web --port 8081
+go run main.go web --port 8080
 ```
 
-也可以直接运行`make run-dev`来启动开发环境（默认8080端口）
+也可以运行 `make run-dev`：该目标先生成前端生产产物，再在默认 `8080` 端口启动后端；它不提供前端热更新。
 
-后端服务运行在 `http://localhost:8081`。
+后端服务运行在 `http://localhost:8080`，Vite 开发服务器会把 `/api` 与 `/logout` 代理到该端口。
 
 **开发环境配置**：
 
@@ -189,10 +189,10 @@ Issue 地址：[GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
 ### 提交 Pull Request
 
 1. Fork 仓库到你的账户
-2. 创建功能分支：`git checkout -b feature/your-feature`
-3. 提交更改：`git commit -m "Add your feature"`
-4. 推送分支：`git push origin feature/your-feature`
-5. 创建 Pull Request
+2. 从最新 `main` 创建分支：`git switch -c feat/your-feature`
+3. 运行 `make check`
+4. 使用 Conventional Commit 提交：`git commit -m "feat(scope): describe the change"`
+5. 推送分支并创建面向 `main` 的 Pull Request
 
 PR 地址：[GitHub Pull Requests](https://github.com/sunerpy/pt-tools/pulls)
 
@@ -554,13 +554,16 @@ func testMySiteUserInfo(t *testing.T) {
 ### 运行代码检查
 
 ```bash
-# 运行 lint 检查
+# 提交前推荐：执行工具链、格式、lint、race 测试和构建门禁
+make check
+
+# 需要分开定位问题时
+make fmt-check
 make lint
-
-# 运行单元测试
 make unit-test
+make build
 
-# 格式化代码
+# 修改后统一格式化
 make fmt
 ```
 
@@ -577,7 +580,7 @@ make fmt
 - 遵循 Vue 3 Composition API 风格
 - 使用 TypeScript 类型注解
 - 组件命名使用 PascalCase
-- 使用 ESLint 和 Prettier 格式化
+- 使用 Oxlint、`vue-tsc` 与 Oxfmt；不要引入另一套格式化器
 
 ### 提交信息规范
 
@@ -602,11 +605,11 @@ make fmt
 **示例**：
 
 ```
-feat(site): add support for NewSite
+feat(site): 新增 NewSite 站点适配
 
-- Implement cookie authentication
-- Add search and user info functions
-- Update site registry
+- 增加 Cookie 认证与页面解析
+- 补充搜索、详情和用户信息 fixture 测试
+- 同步扩展站点清单与文档
 
 Closes #123
 ```
@@ -619,71 +622,36 @@ Closes #123
 
 ```bash
 cd tools/browser-extension
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev          # watch 模式
 pnpm build        # 单次构建
-make build-extension  # 构建 + 站点一致性检查 + 打包 zip
+cd ../..
+make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 ```
 
-详见 [扩展 README](../tools/browser-extension/README.md)。
+`make check-sites` 会比较 Go 站点定义与扩展 `KNOWN_SITES`；新增站点时必须保持两处一致。详见[扩展 README](../tools/browser-extension/README.md)。
 
-### 发布到 Edge Add-ons
+### 发布模型
 
-扩展使用独立的版本号和 tag（`ext-v*`），与 pt-tools 主版本互不影响。
+浏览器扩展与 pt-tools 主程序使用**同一个版本和同一个 Release**，不再使用独立的 `ext-v*` tag：
 
-#### 首次发布（手动）
+1. Conventional Commit 合入受保护的 `main` 后，release-please 更新版本、`CHANGELOG.md` 和扩展 `package.json`。
+2. 合并 release PR 后，同一次 `Release` workflow 创建 draft，并并行构建 Go 归档、扩展 `zip/crx` 与容器镜像。
+3. 所有承诺产物和 `checksums.txt` 校验通过后，workflow 才把 draft 切换为公开 Release；任一必需 job 失败都会保留 draft。
+4. 稳定版公开后，`Publish to Edge Add-ons` 作为发布后的副作用提交 `pt-tools-helper.zip`；RC 不提交商店。
 
-1. **注册 Edge 开发者账号**（免费）
-   - 访问 [Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/public/login?ref=dd)
-   - 可以使用 GitHub 账号直接登录
-   - 完成注册表单（个人开发者即可）
+> [!IMPORTANT]
+> 不要手工创建 release tag，也不要通过 `ext-v*` tag 发布扩展。普通发版由 release-please 管理；`workflow_dispatch` 只用于重建一个**已经存在且仍为 draft** 的 tag。
 
-2. **手动上传第一版扩展**
+Edge 商店发布需要仓库 Secrets：
 
-   首次发布必须通过 Partner Center 手动操作，API 仅支持更新已有扩展。
-   - 运行 `make build-extension` 生成 `tools/browser-extension/pt-tools-helper.zip`
-   - Partner Center → Microsoft Edge → 扩展 → 创建新扩展
-   - 上传 zip 包，填写扩展名称、描述、截图等
-   - 提交审核（通常 1-3 个工作日）
+| Secret            | 用途                  |
+| ----------------- | --------------------- |
+| `EDGE_PRODUCT_ID` | Edge Add-ons 产品 ID  |
+| `EDGE_CLIENT_ID`  | Publish API 客户端 ID |
+| `EDGE_API_KEY`    | Publish API 密钥      |
 
-3. **获取 Product ID**
-
-   审核通过后，在 Partner Center 的扩展详情页可以看到 **Product ID**（一个 GUID）。
-
-4. **启用 Publish API 并获取凭证**
-   - Partner Center → Microsoft Edge → Publish API
-   - 点击 **"enable the new experience"** 旁的 **Enable** 按钮（启用 v1.1 API）
-   - 点击 **Create API credentials**
-   - 记录 **Client ID** 和 **API Key**
-
-5. **配置 GitHub Secrets**
-
-   在仓库 Settings → Secrets and variables → Actions 中添加：
-
-   | Secret            | 值                                     |
-   | ----------------- | -------------------------------------- |
-   | `EDGE_PRODUCT_ID` | Partner Center 扩展详情页的 Product ID |
-   | `EDGE_CLIENT_ID`  | Publish API 页面的 Client ID           |
-   | `EDGE_API_KEY`    | Publish API 页面的 API Key             |
-
-#### 后续发布（自动）
-
-配置完成后，后续版本发布只需：
-
-```bash
-# 1. 更新版本号（package.json + manifest.ts 保持一致）
-# 2. 提交代码
-git add -A && git commit -m "chore(extension): bump to 0.2.0"
-git push
-
-# 3. 打 tag 触发自动发布
-git tag ext-v0.2.0
-git push origin ext-v0.2.0
-```
-
-CI 流程：`ext-v*` tag → 校验版本号一致性 → 站点一致性检查 → 构建 → 上传到 Edge Add-ons → 创建 GitHub Release。
-
-也可以在 GitHub Actions 页面手动触发 `Extension Publish` workflow（支持 dry run 模式仅构建不上传）。
+仓库变量 `PUBLISH_EDGE=false` 可在发布链验收时跳过商店提交；变量缺失或不是 `false` 时保持默认发布行为。Edge 提交不影响已经通过资产门禁并公开的 GitHub Release，但除「前一次 submission 仍在审核」之外的 API 或包错误仍会让该 job 失败，需单独排查。
 
 ---
 

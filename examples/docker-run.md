@@ -42,9 +42,14 @@ docker run -d \
 
 ```
 ~/pt-data/
+├── secret.key       # 凭证加密密钥，必须单独备份
 ├── torrents.db      # SQLite 数据库（配置、任务记录、用户信息缓存）
-└── downloads/       # 种子文件下载目录
+├── downloads/       # 临时种子文件
+└── logs/            # 轮转日志
 ```
+
+> [!IMPORTANT]
+> 不要删除数据目录。`secret.key` 丢失后，数据库中的 Cookie 等凭证无法解密；请将密钥与数据库作为一个单元备份。
 
 ## 环境变量
 

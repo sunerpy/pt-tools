@@ -8,8 +8,8 @@
 
 ## 1. 背景：为何需要 Agent，以及何时引入
 
-pt-tools 当前已经覆盖了"通知"（Phase 1）、"ChatOps 命令"（Phase 2）和"应用服务层"（Phase 3）。
-Phase 4 MCP 提供了标准化工具接口，让外部程序可以通过 JSON-RPC 调用 pt-tools 的核心能力。
+pt-tools 当前已经覆盖了“通知”（Phase 1）、“ChatOps 命令”（Phase 2）和“应用服务层”（Phase 3）。
+Phase 4 MCP 目前只有静态工具契约，尚无可运行 Server；本设计描述的是该运行时未来稳定上线后的下一阶段。
 
 到了这个阶段，我们可以做什么还不够、或者不方便做的事情？
 
@@ -21,7 +21,7 @@ Phase 4 MCP 提供了标准化工具接口，让外部程序可以通过 JSON-RP
 
 **MCP 工具是 Agent 的天然接入点**：
 
-Phase 4 将所有写操作（暂停、删除、推送 RSS、管理通知通道）都抽象为 MCP 工具，每个工具都有精确的输入输出 schema 和权限作用域。这恰好是 AI Agent 需要的接口形态，任何支持 MCP 协议的 Agent 框架都能直接接入，不需要 pt-tools 重新开放专门的"AI 接口"。
+Phase 4 计划把写操作（暂停、删除、推送 RSS、管理通知通道）抽象为 MCP 工具，并为每个工具定义输入输出 schema 和权限作用域。这是 AI Agent 所需的接口形态；只有 MCP Server 真正实现并稳定后，外部 Agent 才能直接接入。
 
 **何时引入**：Phase 4 MCP 上线并稳定运行一段时间、积累足够多的实际使用数据之后再评估。具体触发条件见第 6 节。
 

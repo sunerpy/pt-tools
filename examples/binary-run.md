@@ -3,7 +3,7 @@
 ## 功能特性
 
 - RSS 自动订阅下载免费种子
-- 多站点种子搜索（HDSky、SpringSunday、M-Team、HDDolby）
+- 多站点种子搜索（当前 66 个内置站点，见[支持站点列表](../docs/sites.md)）
 - 用户信息统计和等级进度追踪
 - 支持 qBittorrent 和 Transmission 下载器
 - 过滤规则精细化筛选
@@ -21,12 +21,16 @@
 | Windows | amd64 | `pt-tools-windows-amd64.exe.zip` |
 | Windows | arm64 | `pt-tools-windows-arm64.exe.zip` |
 
+下载归档与同一 Release 的 `checksums.txt` 后先校验再解压：
+
 ```bash
 # Linux amd64 示例
-wget https://github.com/sunerpy/pt-tools/releases/latest/download/pt-tools-linux-amd64.tar.gz
+sha256sum -c checksums.txt --ignore-missing
 tar -xzf pt-tools-linux-amd64.tar.gz
 chmod +x pt-tools
 ```
+
+Release 安装说明还提供固定 tag 的 Linux / Windows 安装脚本；脚本会强制校验 SHA-256。
 
 ### 方式二：从源码构建
 
@@ -34,14 +38,11 @@ chmod +x pt-tools
 git clone https://github.com/sunerpy/pt-tools.git
 cd pt-tools
 
-# 构建前端（需要 Node.js 和 pnpm）
-cd web/frontend && pnpm install && pnpm build && cd ../..
+# 需要 Go、Node.js 与 pnpm；精确版本见 docs/development.md
+make build
 
-# 构建后端
-go build -o pt-tools .
-
-# 可选：安装到系统路径
-sudo mv pt-tools /usr/local/bin/
+# 构建产物
+./dist/pt-tools version
 ```
 
 ## 启动服务
@@ -59,7 +60,7 @@ nohup ./pt-tools web > pt-tools.log 2>&1 &
 
 访问 `http://localhost:8080` 进入 Web 管理界面。
 
-**默认登录账号**：`admin` / `adminadmin`
+**初始登录账号**：`admin` / `adminadmin`。首次登录后请立即修改密码。
 
 ## 数据目录
 
@@ -67,9 +68,14 @@ nohup ./pt-tools web > pt-tools.log 2>&1 &
 
 ```
 ~/.pt-tools/
+├── secret.key       # 凭证加密密钥，必须单独备份
 ├── torrents.db      # SQLite 数据库（配置、任务记录、用户信息缓存）
-└── downloads/       # 种子文件下载目录
+├── downloads/       # 临时种子文件
+└── logs/            # 轮转日志
 ```
+
+> [!IMPORTANT]
+> `secret.key` 丢失后，数据库中的 Cookie 等凭证无法解密。请与数据库一起备份，并限制备份文件的访问权限。
 
 如需预创建目录：
 
@@ -104,12 +110,7 @@ pt-tools --help
 
 ## 内置支持站点
 
-- HDSky（Cookie 认证）
-- SpringSunday（Cookie 认证）
-- M-Team（API Key 认证）
-- HDDolby（Cookie 认证）
-
-> 如需支持其他站点，欢迎提交 Issue 或 PR。
+当前内置适配 66 个站点，完整清单、认证方式与适配备注见[支持站点列表](../docs/sites.md)。如需支持其他站点，可使用 PT Tools Helper 采集脱敏页面数据后提交 Issue。
 
 ## 设置为系统服务（Linux）
 
