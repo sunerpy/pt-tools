@@ -10,11 +10,12 @@
 vendor/
 *.pb.go
 
-# Tool-owned changelogs — DO NOT reformat
+# Release-please-owned metadata — DO NOT reformat
 changelog/
 CHANGELOG.md
 .release-please-manifest.json
 release-please-config.json
+.github/scaffold.json
 
 # Lockfiles
 **/buf.lock
