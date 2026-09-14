@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,7 +101,7 @@ func runSecretImport(force bool) error {
 	}
 
 	tmpPath := filepath.Join(keyDir, ".secret.key.tmp."+fmt.Sprintf("%d", os.Getpid()))
-	if err := os.WriteFile(tmpPath, key, 0o600); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(hex.EncodeToString(key)), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "错误: 写入临时文件失败: %v\n", err)
 		return err
 	}

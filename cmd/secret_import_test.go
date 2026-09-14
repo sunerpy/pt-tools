@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -41,7 +42,10 @@ func TestRunSecretImport_SuccessForce(t *testing.T) {
 
 	written, err := os.ReadFile(filepath.Join(home, ".pt-tools", "secret.key"))
 	require.NoError(t, err)
-	assert.Equal(t, key, written)
+	assert.Equal(t, hex.EncodeToString(key), string(written))
+	reloaded, err := hex.DecodeString(string(written))
+	require.NoError(t, err)
+	assert.Equal(t, key, reloaded, "imported file must use the loader's 64-character hex format")
 }
 
 func TestRunSecretImport_RefusesOverwrite(t *testing.T) {
