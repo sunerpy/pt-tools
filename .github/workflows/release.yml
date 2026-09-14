@@ -119,6 +119,17 @@ jobs:
         with:
           version: 10.25.0
 
+      - name: Install pinned Go formatters
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install mvdan.cc/gofumpt@v0.11.0
+          go install golang.org/x/tools/cmd/goimports@v0.49.0
+
+      - name: Install frontend dependencies
+        working-directory: web/frontend
+        run: pnpm install --frozen-lockfile
+
       # .goreleaser.yaml 的 builds.hooks.post 使用 upx；apt 自带签名校验。
       - name: Install UPX
         shell: bash
@@ -130,6 +141,28 @@ jobs:
       # 工具链一致性必须在发布构建前再次成立（阶段 0 的门禁同样在 CI 跑）。
       - name: Toolchain check
         run: make toolchain-check
+
+      - name: Format check
+        run: make fmt-check
+
+      - name: Documentation links
+        run: make docs-check
+
+      - name: Frontend lint and type check
+        run: make lint-frontend
+
+      # Go lint 不检验前端内容；占位文件只用于满足 go:embed。随后 make test
+      # 会构建真实前端，GoReleaser 也会再次执行其 release hook。
+      - name: Create embed placeholder for Go lint
+        run: make embed-placeholder
+
+      - name: Go lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+
+      - name: Test
+        run: make test
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -243,6 +276,7 @@ jobs:
           node --experimental-strip-types ../../scripts/check-sites.ts
           pnpm install --frozen-lockfile
           pnpm build
+          pnpm test
 
       # 构建后断言：最终产物的 manifest 版本必须等于预期四段版本。
       - name: Assert built manifest version
@@ -268,7 +302,7 @@ jobs:
           (cd dist && zip -rq ../pt-tools-helper.zip .)
           printf '%s' "$CRX_PRIVATE_KEY" | base64 -d >crx-private.pem
           chmod 600 crx-private.pem
-          pnpm dlx crx pack dist -o pt-tools-helper.crx -p crx-private.pem
+          pnpm dlx crx@5.0.1 pack dist -o pt-tools-helper.crx -p crx-private.pem
           rm -f crx-private.pem
           test -s pt-tools-helper.zip
           test -s pt-tools-helper.crx
@@ -308,7 +342,9 @@ jobs:
 
   docker:
     name: Publish container
-    needs: release-please
+    # 容器复用本次 GoReleaser 归档内的 Linux 二进制，确保镜像与下载归档
+    # 交付的是同一份字节，也避免 Dockerfile 的回退构建在发布时修改依赖图。
+    needs: [release-please, goreleaser]
     if: needs.release-please.outputs.build_artifacts == 'true'
     permissions:
       attestations: write
@@ -320,6 +356,7 @@ jobs:
     with:
       ref: ${{ needs.release-please.outputs.tag_name }}
       tag_name: ${{ needs.release-please.outputs.tag_name }}
+      use_release_archives: true
 
   assemble-checksums:
     name: Assemble checksums

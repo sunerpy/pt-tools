@@ -5,7 +5,6 @@
 set -euo pipefail
 
 DB="${PT_QA_DB:-testdata/qa.db}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -f "$DB" ]; then
   echo "ERROR: $DB not found; run seed-data.sh first" >&2

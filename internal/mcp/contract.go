@@ -26,7 +26,7 @@ type Tool struct {
 
 // ContractTools enumerates the 10 MCP tools planned for Phase 4. The list is the
 // authoritative inventory consumed by docs and future server registration. Order
-// reflects pt-tools/docs/guide/chatops-mcp-agent-design.md §8.2.
+// reflects pt-tools/docs/design/chatops-mcp-agent.md §8.2.
 //
 // Mapping to internal/chatops/commands (existing ChatOps surface):
 //

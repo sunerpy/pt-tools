@@ -23,13 +23,22 @@ ARG TAG=unknown
 ARG BUILD_TIME=unknown
 ARG COMMIT_ID=unknown
 ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
+ARG TARGETARCH
+ARG GOPROXY
 
-# 仅在远程构建时执行 go mod vendor
+# 依赖图由仓库提交的 go.mod/go.sum 锁定。构建期间禁止 go mod tidy，
+# 避免上游最新版本改变已打 tag 的依赖图。
 COPY go.* /app/
-RUN if [ "$BUILD_ENV" = "remote" ]; then \
-	go env -w GO111MODULE=on \
-	&& go mod tidy && go mod vendor; \
-	fi
+RUN --mount=type=bind,source=.,target=/context,ro set -eux; \
+  if [ ! -f /context/dist/pt-tools-linux-${TARGETARCH} ]; then \
+    if [ -n "${GOPROXY}" ]; then \
+      GOPROXY="${GOPROXY}" go mod download; \
+    elif [ "${BUILD_ENV}" = "local" ]; then \
+      GOPROXY=https://goproxy.cn,direct go mod download; \
+    else \
+      go mod download; \
+    fi; \
+  fi
 # 拷贝项目代码
 COPY cmd /app/cmd
 COPY config /app/config
@@ -42,33 +51,25 @@ COPY web /app/web
 COPY site /app/site
 COPY thirdpart /app/thirdpart
 COPY utils /app/utils
-COPY vendor /app/vendor
 COPY version /app/version
 COPY *.go /app/
-COPY dist /app/dist
 
 # 从前端构建阶段拷贝构建产物
 COPY --from=frontend-builder /app/web/static/dist /app/web/static/dist
 
 # 构建或接受外部二进制，并统一执行 upx 压缩
-ARG TARGETARCH
-RUN set -eux; \
-  if [ -f /app/dist/pt-tools-linux-${TARGETARCH} ]; then \
+RUN --mount=type=bind,source=.,target=/context,ro set -eux; \
+  if [ -f /context/dist/pt-tools-linux-${TARGETARCH} ]; then \
     echo "Using provided binary from dist for ${TARGETARCH}"; \
-    mv /app/dist/pt-tools-linux-${TARGETARCH} /app/pt-tools && chmod +x /app/pt-tools; \
+    cp /context/dist/pt-tools-linux-${TARGETARCH} /app/pt-tools && chmod +x /app/pt-tools; \
   else \
-    if [ "$BUILD_ENV" = "local" ]; then \
-      go env -w GOPROXY=https://goproxy.cn,direct; \
-    fi; \
     go env -w CGO_ENABLED=0; \
     go env; \
-    go mod tidy; \
-    go mod vendor; \
     go build -ldflags="-s -w \
       -X github.com/sunerpy/pt-tools/version.Version=${TAG} \
       -X github.com/sunerpy/pt-tools/version.BuildTime=${BUILD_TIME} \
       -X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID}" \
-      -mod=vendor -o pt-tools; \
+      -mod=readonly -o pt-tools; \
   fi; \
   if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends upx-ucl || true; fi; \
   if command -v apk >/dev/null 2>&1; then apk add --no-cache upx || true; fi; \
@@ -91,7 +92,7 @@ COPY --chown=1000:1000 --chmod=755 docker/docker-entrypoint.sh /app/bin/
 # 创建 Docker 环境标记文件（用于运行时检测是否在容器中）
 RUN echo -n "pt-tools-docker-build" > /app/.pt-tools-docker
 
-ENV GOSU_VERSION 1.17
+ENV GOSU_VERSION=1.17
 RUN set -eux; \
 	\
 	apk add --no-cache tzdata ca-certificates; \

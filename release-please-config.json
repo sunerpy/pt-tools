@@ -16,6 +16,11 @@
           "type": "json",
           "path": "tools/browser-extension/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".github/scaffold.json",
+          "jsonpath": "$.placeholders.CURRENT_VERSION"
         }
       ]
     }

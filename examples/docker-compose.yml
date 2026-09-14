@@ -15,7 +15,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # 数据持久化（数据库和种子文件）
+      # 数据持久化（数据库、secret.key、日志和临时种子文件）
       - ./data:/app/.pt-tools
     restart: unless-stopped
     # 限制容器 stdout 日志大小，避免 Docker json-file 驱动无上限累积（曾出现 8GB 日志）
@@ -40,8 +40,10 @@ services:
 #    密码: adminadmin
 #
 # 4. 数据持久化：
+#    - 加密密钥: ./data/secret.key（必须备份）
 #    - 数据库: ./data/torrents.db
-#    - 种子文件: ./data/downloads/
+#    - 临时种子文件: ./data/downloads/
+#    - 应用日志: ./data/logs/
 #
 # 5. 功能特性：
 #    - RSS 自动订阅下载免费种子

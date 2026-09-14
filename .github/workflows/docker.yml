@@ -1,7 +1,7 @@
 # 可复用容器发布 —— 作为 release.yml 的 same-run job 调用：
 #
 #   docker:
-#     needs: release-please
+#     needs: [release-please, goreleaser]
 #     if: needs.release-please.outputs.build_artifacts == 'true'
 #     uses: ./.github/workflows/docker.yml
 #     permissions:
@@ -13,6 +13,7 @@
 #     with:
 #       ref: ${{ needs.release-please.outputs.tag_name }}
 #       tag_name: ${{ needs.release-please.outputs.tag_name }}
+#       use_release_archives: true
 #
 # 并列入 publish-release.needs，使镜像失败时 draft 保留。
 #
@@ -25,9 +26,9 @@
 #      对外既有交付面）；
 #   2. build-args 对齐 pt-tools 的 Dockerfile（TAG / BUILD_TIME / COMMIT_ID /
 #      BUILD_ENV），而非模板的 VERSION；
-#   3. 保留上下文准备步骤（go mod vendor + mkdir dist）——当前 Dockerfile 有
-#      `COPY vendor` 与 `COPY dist`，而两者都不在工作树中。迁移设计 v7 阶段 4
-#      重写 Dockerfile（BUILDPLATFORM 交叉编译）后应删除这两步。
+#   3. 下载同一 release run 的 GoReleaser 归档，将 Linux 二进制放进 Dockerfile
+#      的 dist fast path。仅旧 tag 需要生成 vendor 目录；发布构建不执行
+#      go mod tidy，也不独立编译 Go。
 #   4. 保留 setup-qemu：runtime stage 仍执行目标架构的 apk 与 gosu --version。
 name: Publish container
 
@@ -42,6 +43,11 @@ on:
         description: "Semantic release tag, for example v1.2.3"
         required: true
         type: string
+      use_release_archives:
+        description: "Reuse Linux binaries from this run's release-archives artifact"
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       ref:
@@ -52,7 +58,6 @@ on:
         description: "Semantic release tag, for example v1.2.3"
         required: true
         type: string
-
 permissions:
   contents: read
 
@@ -100,8 +105,8 @@ jobs:
           set -euo pipefail
           echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
 
-      # 过渡步骤：当前 Dockerfile 的 `COPY vendor` / `COPY dist` 要求二者存在。
-      # 迁移设计 v7 阶段 4 重写 Dockerfile 后删除本 step 与下一个 step。
+      # v0.47.2 等旧 tag 的 Dockerfile 无条件 COPY vendor；新版本不再需要。
+      # 这里只为旧 tag 生成已锁定的 vendor 树，绝不运行 tidy。
       - name: Set up Go (context preparation)
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -109,12 +114,56 @@ jobs:
           cache: ${{ hashFiles('**/go.sum') != '' }}
           cache-dependency-path: "**/go.sum"
 
+      - name: Download GoReleaser archives
+        if: inputs.use_release_archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-archives
+          path: release-archives
+
       - name: Prepare build context
+        id: context
         shell: bash
+        env:
+          USE_RELEASE_ARCHIVES: ${{ inputs.use_release_archives }}
         run: |
           set -euo pipefail
           mkdir -p dist
-          go mod vendor
+          if grep -Eq '^[[:space:]]*COPY[[:space:]]+vendor([[:space:]]|$)' Dockerfile; then
+            go mod vendor
+            test -s vendor/modules.txt
+          fi
+
+          if [ "$USE_RELEASE_ARCHIVES" = "true" ]; then
+            for arch in amd64 arm64; do
+              archive="release-archives/pt-tools-linux-${arch}.tar.gz"
+              output="dist/pt-tools-linux-${arch}"
+              test -s "$archive"
+
+              members=$(tar -tzf "$archive" | grep -c '^pt-tools$' || true)
+              if [ "$members" -ne 1 ]; then
+                echo "::error title=Docker context::$archive must contain exactly one pt-tools binary"
+                tar -tzf "$archive"
+                exit 1
+              fi
+
+              tar -xOzf "$archive" pt-tools >"$output"
+              chmod 0755 "$output"
+              test -x "$output"
+            done
+
+            # Older release tags ignore every non-Go file by default. These
+            # final negations make the injected binaries part of the context.
+            printf '%s\n' \
+              '!dist/' \
+              '!dist/pt-tools-linux-amd64' \
+              '!dist/pt-tools-linux-arm64' >>.dockerignore
+
+            sha256sum dist/pt-tools-linux-amd64 dist/pt-tools-linux-arm64
+            echo "build_env=release" >>"$GITHUB_OUTPUT"
+          else
+            echo "build_env=remote" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -145,6 +194,7 @@ jobs:
           # prerelease 不会命中 latest：metadata-action 的 semver pattern
           # 只对稳定版本发出 latest。
           tags: |
+            type=raw,value=${{ inputs.tag_name }}
             type=semver,pattern={{version}},value=${{ inputs.tag_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag_name }}
             type=semver,pattern={{major}},value=${{ inputs.tag_name }}
@@ -167,7 +217,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BUILD_ENV=remote
+            BUILD_ENV=${{ steps.context.outputs.build_env }}
+            BUILD_IMAGE=golang:1.26.7@sha256:e30143be198ab04cf7ba25fba83ab3a692ca584c994aad0bf131fa0eb32dd8c1
+            BASE_IMAGE=alpine:3.20.3@sha256:1e42bbe2508154c9126d48c2b8a75420c3544343bf86fd041fb7527e017a4b4a
+            NODE_IMAGE=node:25.2.0-alpine@sha256:3f162243a45e30f6b20f80255779785789e142bec7b1d5d3b431f31d5b3610f6
             TAG=${{ inputs.tag_name }}
             BUILD_TIME=${{ steps.buildmeta.outputs.build_time }}
             COMMIT_ID=${{ steps.buildmeta.outputs.commit_id }}

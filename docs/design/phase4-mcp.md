@@ -2,7 +2,7 @@
 
 > **状态**：Design — 仅契约与文档，**不含运行时实现**。  
 > **代码入口**：[`internal/mcp/contract.go`](../../internal/mcp/contract.go)（零外部依赖）  
-> **关联设计**：[`docs/guide/chatops-mcp-agent-design.md`](../guide/chatops-mcp-agent-design.md) §8
+> **关联设计**：[`chatops-mcp-agent.md`](chatops-mcp-agent.md) §8
 
 ---
 

@@ -1,13 +1,13 @@
 import vue from "@vitejs/plugin-vue";
-import { resolve } from "path";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      "@": resolve(__dirname, "src"),
+      "@": resolve(import.meta.dirname, "src"),
     },
   },
   build: {
@@ -44,13 +44,6 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-  esbuild: {
-    drop: command === "build" ? ["console", "debugger"] : [],
-    pure:
-      command === "build"
-        ? ["console.log", "console.info", "console.debug", "console.warn", "console.error"]
-        : [],
-  },
   server: {
     proxy: {
       "/api": {
@@ -63,4 +56,4 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-}));
+});

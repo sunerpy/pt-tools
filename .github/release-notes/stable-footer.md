@@ -53,8 +53,8 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/${TAG_NAME}/scripts/insta
 # 校验和
 sha256sum -c checksums.txt --ignore-missing
 
-# 供应链证明（一份 attestation 经 subject-checksums 覆盖全部归档）
-gh attestation verify checksums.txt --repo sunerpy/pt-tools \
+# 供应链证明（验证已下载的具体资产；每个 checksums.txt 条目均被证明）
+gh attestation verify pt-tools-linux-amd64.tar.gz --repo sunerpy/pt-tools \
   --signer-workflow sunerpy/pt-tools/.github/workflows/release.yml \
   --deny-self-hosted-runners
 ```

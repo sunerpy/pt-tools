@@ -2,7 +2,7 @@
 
 pt-tools 提供自动删种功能，帮助用户在长时间刷流过程中自动管理磁盘空间，避免硬盘被撑满。
 
-[返回首页](../README.md)
+[文档中心](../README.md) · [返回项目首页](../../README.md)
 
 ## 目录
 
@@ -328,4 +328,4 @@ pt-tools clean --confirm --keep-backups 10
 - [RSS 订阅配置指南](./rss-subscription.md)
 - [常见问题 (FAQ)](../faq.md)
 
-[返回首页](../README.md)
+[文档中心](../README.md) · [返回项目首页](../../README.md)

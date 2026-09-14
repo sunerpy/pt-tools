@@ -5,11 +5,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DB="${PT_QA_DB:-testdata/qa.db}"
 
 case_rate_limit() {
-  local i
-  for i in $(seq 1 11); do
+  for _ in {1..11}; do
     "$SCRIPT_DIR/inject-tg-cmd.sh" "/status" >/dev/null 2>&1 || true
   done
   local out

@@ -29,7 +29,6 @@ func main() {
 	_ = http.ListenAndServe(":"+port, nil)
 }
 GO
-RECV_PID=$!
 
 sleep 1
 

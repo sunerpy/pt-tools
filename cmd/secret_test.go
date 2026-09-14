@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,7 +183,7 @@ func TestSecretImportAtomicWrite(t *testing.T) {
 	content, err := os.ReadFile(keyPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, content, testKey)
+	assert.Equal(t, hex.EncodeToString(testKey), string(content))
 
 	stat, err := os.Stat(keyPath)
 	require.NoError(t, err)
