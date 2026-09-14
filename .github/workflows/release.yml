@@ -145,7 +145,11 @@ jobs:
       - name: Format check
         run: make fmt-check
 
+      # workflow_dispatch 用当前受保护 main 的 workflow 重建不可变的历史 tag；
+      # 历史源码可能早于 docs-check 目标，且文档不进入任何发布产物。正常新版本
+      # 仍在 main CI 与本步骤双重校验文档，恢复任务只跳过这项非产物门禁。
       - name: Documentation links
+        if: github.event_name == 'push'
         run: make docs-check
 
       - name: Frontend lint and type check
