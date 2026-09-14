@@ -1,50 +1,43 @@
-# Required secrets for GitHub Actions
+# GitHub Actions 发布配置
 
-Set these in repo Settings → Secrets and variables → Actions:
+在仓库 **Settings → Secrets and variables → Actions** 中配置以下值。`GITHUB_TOKEN` 由 GitHub 自动提供，不需要手工创建 PAT。
 
-| Secret               | Value                                                               |
-| -------------------- | ------------------------------------------------------------------- |
-| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather (release announcer)                   |
-| `TELEGRAM_CHAT_ID`   | Target group chat_id (negative integer for supergroups)             |
-| `CRX_PRIVATE_KEY`    | Base64-encoded RSA private key for signing browser extension `.crx` |
+## 必需 Secrets
 
-`GITHUB_TOKEN` is auto-provided.
+| Secret            | 用途                                                                                         |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `CRX_PRIVATE_KEY` | Base64 编码的稳定 RSA 私钥，用于签名 `pt-tools-helper.crx`；缺失时 Release 保持 draft 并失败 |
+| `DOCKER_USERNAME` | Docker Hub 用户名                                                                            |
+| `DOCKER_PASSWORD` | Docker Hub access token，不要使用账户密码                                                    |
 
-The bot must be added to the target group AND granted **"Pin messages"** admin permission. Without that permission the message is still sent, but pinning silently warns and the workflow stays green.
+## 发布后副作用
 
-To test without a real release, trigger `Telegram Release Announcement` workflow via Actions → Run workflow → enter tag (e.g. `v0.31.0`).
+| Secret               | 用途                          |
+| -------------------- | ----------------------------- |
+| `TELEGRAM_BOT_TOKEN` | Telegram 发布公告机器人 token |
+| `TELEGRAM_CHAT_ID`   | 公告目标 chat ID              |
+| `EDGE_PRODUCT_ID`    | Edge Add-ons 产品 ID          |
+| `EDGE_CLIENT_ID`     | Edge Publish API 客户端 ID    |
+| `EDGE_API_KEY`       | Edge Publish API 密钥         |
 
-## Setting up CRX signing for browser extension releases
+GitHub Release、二进制、扩展、校验和与容器镜像属于发布门禁的一部分；Telegram 公告和 Edge 商店提交在 Release 公开后运行，不会把已经验证的 Release 回滚。
 
-The `release-please.yml` workflow optionally produces a signed `pt-tools-helper.crx`
-artifact alongside the existing `pt-tools-helper.zip`. The CRX is signed with a
-**stable** RSA private key — it MUST remain identical across releases, otherwise
-users who installed via `.crx` will lose their auto-update path (Chrome treats a
-key change as a different extension).
+仓库变量可在恢复或验收发布链时关闭对外副作用：
 
-### One-time setup
+- `ANNOUNCE_TELEGRAM=false`：跳过 Telegram 公告。
+- `PUBLISH_EDGE=false`：跳过 Edge 商店提交。
 
-1. Generate a stable RSA private key (do this **once**, never regenerate):
+变量缺失或不是精确字符串 `false` 时保持默认启用。
 
-   ```bash
-   openssl genrsa -out crx-private.pem 2048
-   base64 -w 0 crx-private.pem > crx-private.pem.b64
-   ```
+## CRX 私钥一次性初始化
 
-2. Add the contents of `crx-private.pem.b64` as a repo secret named `CRX_PRIVATE_KEY`
-   (Settings → Secrets and variables → Actions → New repository secret).
+```bash
+openssl genrsa -out crx-private.pem 2048
+base64 -w 0 crx-private.pem > crx-private.pem.b64
+```
 
-3. **Keep `crx-private.pem` somewhere safe** (e.g. 1Password, a hardware key, or
-   another offline vault). If you lose it, all users who installed the extension
-   from the signed `.crx` lose their auto-update path and must reinstall.
+把 `crx-private.pem.b64` 的内容保存为 `CRX_PRIVATE_KEY`，并把原始私钥存入受控离线保险库。私钥必须跨版本保持不变；丢失或更换后，既有 `.crx` 安装会被浏览器视为另一个扩展。
 
-4. Once the secret exists, every release-please release run will decode it,
-   sign the freshly built extension, and attach `pt-tools-helper.crx` to the
-   GitHub Release assets.
+## 发布模型
 
-### Behavior when the secret is missing
-
-The CRX build steps are guarded with `if: ${{ env.CRX_PRIVATE_KEY != '' }}` —
-if the secret is unset, those steps are skipped silently, the workflow stays
-green, and only the unsigned `.zip` is uploaded as before. No release is broken
-by a missing key.
+`.github/workflows/release.yml` 在同一次 run 中创建 draft、构建并验证全部承诺产物，最后才公开 Release。不要手工推送 release tag，也不要恢复旧的 `push.tags`、`release:` 或 `workflow_run` 发布链。失败的 draft 通过 `workflow_dispatch` 指定现有 tag 重建。

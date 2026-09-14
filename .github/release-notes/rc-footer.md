@@ -49,7 +49,7 @@ Edge Add-ons 商店**。其 manifest 版本为 `<M.m.p>.<N>`（N 为 RC 序号�
 ```bash
 sha256sum -c checksums.txt --ignore-missing
 
-gh attestation verify checksums.txt --repo sunerpy/pt-tools \
+gh attestation verify pt-tools-linux-amd64.tar.gz --repo sunerpy/pt-tools \
   --signer-workflow sunerpy/pt-tools/.github/workflows/release.yml \
   --deny-self-hosted-runners
 ```

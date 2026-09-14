@@ -1,0 +1,9 @@
+# Release and CI policy changes require maintainer review.
+/.github/workflows/ @sunerpy
+/.github/scripts/ @sunerpy
+/.github/release-notes/ @sunerpy
+/Dockerfile @sunerpy
+/.dockerignore @sunerpy
+/.goreleaser.yaml @sunerpy
+/release-please-config.json @sunerpy
+/.release-please-manifest.json @sunerpy
