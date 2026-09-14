@@ -544,6 +544,85 @@ func TestApiDeleteTasks_SkipsPushed(t *testing.T) {
 	assert.Equal(t, 1, resp.Success)
 }
 
+func TestApiCleanupTasks(t *testing.T) {
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}))
+
+	// 场景数据：
+	// 1. 已过期（is_expired=true）→ 应清理
+	// 2. 已删除（last_error="种子已从下载器中删除"）→ 应清理
+	// 3. 已过期且已推送 → 应清理（清理不区分推送状态）
+	// 4. 正常记录（未过期、无错误）→ 保留
+	// 5. 有错误但不是"已删除"标记 → 保留
+	pushed := true
+	require.NoError(t, db.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "1", Title: "Expired", IsExpired: true,
+	}).Error)
+	require.NoError(t, db.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "2", Title: "Removed",
+		LastError: "种子已从下载器中删除",
+	}).Error)
+	require.NoError(t, db.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "3", Title: "ExpiredAndPushed",
+		IsExpired: true, IsPushed: &pushed,
+	}).Error)
+	require.NoError(t, db.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "4", Title: "Normal",
+	}).Error)
+	require.NoError(t, db.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "5", Title: "OtherError", LastError: "下载失败",
+	}).Error)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/cleanup", nil)
+	server.apiCleanupTasks(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp DeleteTasksResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 3, resp.Success)
+	assert.Equal(t, 0, resp.Failed)
+
+	// 验证数据库：只剩 2 条正常记录
+	var remaining []models.TorrentInfo
+	require.NoError(t, db.Order("id ASC").Find(&remaining).Error)
+	require.Len(t, remaining, 2)
+	assert.Equal(t, "Normal", remaining[0].Title)
+	assert.Equal(t, "OtherError", remaining[1].Title)
+}
+
+func TestApiCleanupTasks_NoMatches(t *testing.T) {
+	server, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.TorrentInfo{}))
+
+	require.NoError(t, db.Create(&models.TorrentInfo{
+		SiteName: "hdsky", TorrentID: "1", Title: "Normal",
+	}).Error)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/cleanup", nil)
+	server.apiCleanupTasks(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp DeleteTasksResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Success)
+	assert.Equal(t, 0, resp.Failed)
+
+	var count int64
+	db.Model(&models.TorrentInfo{}).Count(&count)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestApiCleanupTasks_MethodNotAllowed(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/cleanup", nil)
+	server.apiCleanupTasks(w, req)
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
 // ==== merged from api_torrent_management_test.go ====
 // TestApiDeleteTasks 测试批量删除任务API
 func TestApiDeleteTasks(t *testing.T) {

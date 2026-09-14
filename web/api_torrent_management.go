@@ -310,6 +310,59 @@ func (s *Server) apiDeleteTasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiCleanupTasks 清理所有"已删除"（种子已从下载器中删除）和"已过期"（免费期结束）的任务记录
+// POST /api/tasks/cleanup
+func (s *Server) apiCleanupTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	db := global.GlobalDB.DB
+
+	// 查询所有"已删除"或"已过期"的任务记录
+	const removedMark = "种子已从下载器中删除"
+	var torrents []models.TorrentInfo
+	if err := db.Where("is_expired = ? OR last_error = ?", true, removedMark).Find(&torrents).Error; err != nil {
+		http.Error(w, "查询失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(torrents) == 0 {
+		writeJSON(w, DeleteTasksResponse{Success: 0, Failed: 0})
+		return
+	}
+
+	var success, failed int
+	var failedIDs []uint
+	var failedErrors []string
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for _, t := range torrents {
+			if delErr := tx.Delete(&t).Error; delErr != nil {
+				failed++
+				failedIDs = append(failedIDs, t.ID)
+				failedErrors = append(failedErrors, t.Title+": "+delErr.Error())
+				continue
+			}
+			success++
+			global.GetSlogger().Infof("已清理任务记录: %s (ID:%d)", t.Title, t.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, "事务处理失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, DeleteTasksResponse{
+		Success:      success,
+		Failed:       failed,
+		FailedIDs:    failedIDs,
+		FailedErrors: failedErrors,
+	})
+}
+
 // apiArchiveTorrents 获取归档种子列表
 // GET /api/torrents/archive
 func (s *Server) apiArchiveTorrents(w http.ResponseWriter, r *http.Request) {
