@@ -1,6 +1,11 @@
 {
   "profile": "go",
-  "addons": ["pr-title", "docker", "codecov", "pre-commit"],
+  "addons": [
+    "pr-title",
+    "docker",
+    "codecov",
+    "pre-commit"
+  ],
   "placeholders": {
     "DEFAULT_BRANCH": "main",
     "BINARY": "pt-tools",
@@ -8,7 +13,7 @@
     "PACKAGE_NAME": "pt-tools",
     "OWNER": "sunerpy",
     "REPO": "pt-tools",
-    "CURRENT_VERSION": "0.47.2"
+    "CURRENT_VERSION": "0.47.3"
   },
   "drift_allow": [
     ".github/workflows/ci.yml",

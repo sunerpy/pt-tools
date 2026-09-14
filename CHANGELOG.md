@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.3](https://github.com/sunerpy/pt-tools/compare/v0.47.2...v0.47.3) (2026-09-14)
+
+
+### Bug Fixes
+
+* **ci:** 排除 release-please 托管的脚手架元数据 ([bc29e99](https://github.com/sunerpy/pt-tools/commit/bc29e9977454d290c501f7171d6e2e7989bbb3f6))
+* **ci:** 排除 release-please 托管的脚手架元数据 ([695a895](https://github.com/sunerpy/pt-tools/commit/695a895cd83cdbdb006063a4f42a24a18abb3cbe))
+* **release:** 修复发布恢复并整理项目基础设施 ([1a0eec5](https://github.com/sunerpy/pt-tools/commit/1a0eec5b6405d875140b983de79c5ddf66a458a0))
+* **release:** 修复草稿发布恢复与容器构建 ([c188419](https://github.com/sunerpy/pt-tools/commit/c18841903e6ae3cf1350b0435cd4c66c2f2b7049))
+* **release:** 兼容旧版本文档门禁 ([69a8cc6](https://github.com/sunerpy/pt-tools/commit/69a8cc64d86ee5daee9c8ba5b4ef475b8b8bc40d))
+* **release:** 兼容旧版本文档门禁 ([0eedd49](https://github.com/sunerpy/pt-tools/commit/0eedd49e8386df2885aa6d751e18b6b92fadd661))
+* **secret:** 修复密钥导入后的加载格式 ([ac7206f](https://github.com/sunerpy/pt-tools/commit/ac7206fdd5a56613a9f3ac3fbf18fe0f0000e5dd))
+
 ## [0.47.2](https://github.com/sunerpy/pt-tools/compare/v0.47.1...v0.47.2) (2026-09-13)
 
 
