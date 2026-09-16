@@ -139,6 +139,7 @@ QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/t
 | [支持站点](docs/sites.md)                      | 66 个内置站点及认证方式              |
 | [请求新增站点](docs/guide/request-new-site.md) | 使用扩展采集并脱敏提交站点数据       |
 | [开发指南](docs/development.md)                | 工具链、构建、测试、站点适配与发版   |
+| [品牌标识](docs/brand.md)                      | 标志文件、变体选择、最小尺寸与留白   |
 
 每个版本的功能、修复和升级说明以 [Releases](https://github.com/sunerpy/pt-tools/releases) 与 [CHANGELOG](CHANGELOG.md) 为准。
 

@@ -36,6 +36,7 @@
 ## 开发与设计
 
 - [开发指南](development.md)：固定工具链、构建门禁、代码规范、站点定义与 fixture 测试。
+- [品牌标识](brand.md)：标志文件、变体选择、最小尺寸与留白规则。
 - [ChatOps / MCP / Agent 架构](design/chatops-mcp-agent.md)：能力分层、权限模型与当前实现边界。
 - [MCP Server 接口契约](design/phase4-mcp.md)：未来 MCP 工具、传输与安全边界。
 - [AI Agent 设计](design/phase5-agent.md)：未来 Agent 模式、接入路径与非目标。
