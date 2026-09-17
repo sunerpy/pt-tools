@@ -1,499 +1,723 @@
+/*
+ * pt-tools 设计令牌 —— 来源：Penpot 文件 pt-tools / 页面 G Cockpit。那一页的画板是
+ * 颜色语义、四配色分叉与品牌规则的唯一事实来源；品牌变体怎么选见 docs/brand.md。
+ *
+ * 下文的 §n 指随设计稿一起维护的 design-system 规格书（与画板同源，不在本仓库里；
+ * 早先这里写的 docs/design/ui-cockpit.md 从未进过仓库，不用照着找）。核对数值时
+ * 认画板，规格书只是同一份画板的文字版。
+ *
+ * 三层结构，改配色只动第一层：
+ *   ① 调色板层  html[data-theme-style=<palette>] × html.dark|.light 给出全部语义槽位
+ *   ② 别名层    旧的 --pt-bg-* / --pt-text-* / --pt-border-* 名字全部指向 ① 的槽位，
+ *               所以既有页面样式不用改就能跟着主题走
+ *   ③ Element Plus 映射层  把 --el-* 接到 ① 上，el-* 组件自动跟随主题
+ *
+ * 槽位命名与设计文档 §3 的表格一一对应，不要另起名字：
+ *   canvas / surface / raised / hover / border / border-strong
+ *   chrome / chrome-raised / chrome-border / chrome-t1 / chrome-t2   （深色外壳）
+ *   t1..t4                                                          （正文四级）
+ *   p / p-hover / p-active / on-p                                   （强调色三态）
+ *   ok / warn / dang / info                                         （状态四色）
+ *   kpi-1..kpi-4                                                    （KPI 色相轮转）
+ */
+
+/* ===========================================================================
+ * ① 结构度量 —— 与设计稿同值，四个配色共用（G 的结构主张：一屏尽可能多的行）
+ * =========================================================================== */
 :root {
-  /* 
-   * PT-Tools Design System - Redesigned
-   * Modern, clean, professional aesthetics
-   */
+  --pt-rail-w: 64px; /* 深色图标 rail */
+  --pt-nav-w: 264px; /* 导航列 */
+  --pt-nav-w-collapsed: 0px;
+  --pt-status-h: 28px; /* 底部深色状态条 */
+  --pt-kpi-h: 64px; /* KPI 条 */
+  --pt-toolbar-h: 40px; /* 网格工具栏 */
+  --pt-head-h: 64px; /* 页面标题栏（带面包屑时 88） */
+  --pt-head-h-crumbs: 88px;
+  --pt-row-h: 34px; /* 表格行高 */
+  --pt-row-head-h: 30px; /* 表头 */
+  --pt-pad: 16px;
 
-  /* --- Color Palette (Light Mode Default - Warm Copper) --- */
-  --pt-color-primary-50: #fdf8f0;
-  --pt-color-primary-100: #faecd8;
-  --pt-color-primary-200: #f4d5b0;
-  --pt-color-primary-300: #ecb87e;
-  --pt-color-primary-400: #e29647;
-  --pt-color-primary-500: #d97a28;
-  --pt-color-primary-600: #c4631e;
-  --pt-color-primary-700: #a34d1b;
-  --pt-color-primary-800: #853f1d;
-  --pt-color-primary-900: #6d351b;
-  --pt-color-primary-950: #3c1a0c;
+  /* 移动端（§9）：顶栏 88 / 底部导航 72，触控目标 ≥ 44 */
+  --pt-m-topbar-h: 88px;
+  --pt-m-tabbar-h: 72px;
+  --pt-m-touch: 44px;
 
-  /* Semantic Aliases */
-  --pt-color-primary: var(--pt-color-primary-600);
-  --pt-color-primary-hover: var(--pt-color-primary-500);
-  --pt-color-primary-active: var(--pt-color-primary-700);
-  --pt-color-primary-light: var(--pt-color-primary-100);
+  /* 字号阶梯（§8.4，G 列） */
+  --pt-fz-display: 20px; /* KPI 数值 */
+  --pt-fz-title: 22px; /* 页面大标题 */
+  --pt-fz-h1: 19px; /* 页面标题栏标题 */
+  --pt-fz-h2: 16px; /* 区块标题 */
+  --pt-fz-body: 13px; /* 正文与表格 */
+  --pt-fz-sm: 12px; /* 次要与按钮 */
+  --pt-fz-label: 11px; /* 表头、标签、状态栏 */
+  --pt-fz-foot: 10px; /* 脚注 */
+  --pt-lh-tight: 1.25;
+  --pt-lh-body: 1.45;
+  --pt-lh-row: 1.3;
 
-  /* Element Plus primary alignment */
-  --el-color-primary: var(--pt-color-primary);
-  --el-color-primary-light-3: color-mix(in srgb, var(--pt-color-primary) 70%, #fff);
-  --el-color-primary-light-5: color-mix(in srgb, var(--pt-color-primary) 50%, #fff);
-  --el-color-primary-light-7: color-mix(in srgb, var(--pt-color-primary) 30%, #fff);
-  --el-color-primary-light-8: color-mix(in srgb, var(--pt-color-primary) 20%, #fff);
-  --el-color-primary-light-9: color-mix(in srgb, var(--pt-color-primary) 10%, #fff);
-  --el-color-primary-dark-2: color-mix(in srgb, var(--pt-color-primary) 80%, #000);
+  /* 图标尺寸（§8.5，G 列） */
+  --pt-icon-nav: 20px;
+  --pt-icon-row: 15px;
+  --pt-icon-status: 13px;
 
-  /* Semantic Colors */
-  --pt-color-success: #10b981; /* Emerald 500 */
-  --pt-color-success-50: #ecfdf5;
-  --pt-color-success-100: #d1fae5;
-  --pt-color-success-200: #a7f3d0;
-  --pt-color-success-300: #6ee7b7;
-  --pt-color-success-400: #34d399;
-  --pt-color-success-500: #10b981;
-  --pt-color-success-600: #059669;
-  --pt-color-success-700: #047857;
-  --pt-color-success-800: #065f46;
-  --pt-color-success-900: #064e3b;
-  --pt-color-success-950: #022c22;
-  --pt-color-warning: #f59e0b; /* Amber 500 */
-  --pt-color-danger: #ef4444; /* Red 500 */
-  --pt-color-info: #3b82f6; /* Blue 500 */
+  /* 全站单一字族（§1）。不内嵌字体文件：自托管部署常在内网，
+   * 拉外链会白等；Noto Sans SC 装了就用，没装退到系统 UI 字族。 */
+  --pt-font-family:
+    "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+  --pt-font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, monospace;
 
-  --el-color-success: var(--pt-color-success);
-  --el-color-warning: var(--pt-color-warning);
-  --el-color-danger: var(--pt-color-danger);
-  --el-color-info: var(--pt-color-info);
+  /* 字间距一律 0（§1：CJK 收紧字距会掉可读性） */
+  letter-spacing: 0;
 
-  /* Neutrals - Slate (Cool Gray) */
-  --pt-color-neutral-0: #ffffff;
-  --pt-color-neutral-50: #f8fafc;
-  --pt-color-neutral-100: #f1f5f9;
-  --pt-color-neutral-200: #e2e8f0;
-  --pt-color-neutral-300: #cbd5e1;
-  --pt-color-neutral-400: #94a3b8;
-  --pt-color-neutral-500: #64748b;
-  --pt-color-neutral-600: #475569;
-  --pt-color-neutral-700: #334155;
-  --pt-color-neutral-800: #1e293b;
-  --pt-color-neutral-900: #0f172a;
-  --pt-color-neutral-950: #020617;
+  --pt-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --pt-transition-normal: 240ms cubic-bezier(0.4, 0, 0.2, 1);
+  --pt-transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
 
-  /* Backgrounds & Surfaces */
-  --pt-bg-base: var(--pt-color-neutral-50);
-  --pt-bg-secondary: var(--pt-color-neutral-100);
-  --pt-bg-tertiary: var(--pt-color-neutral-200);
-  --pt-bg-surface: var(--pt-color-neutral-0);
-  --pt-bg-surface-raised: var(--pt-color-neutral-0);
-  --pt-bg-surface-muted: var(--pt-color-neutral-50);
-  --pt-bg-accent-soft: var(--pt-color-primary-50);
+/* ===========================================================================
+ * ① 调色板 · Cockpit（G，默认）—— 浅色内容 + 深色外壳 + 青色强调
+ * 浅色数值直接来自设计文档 §8.1 的 G 表；深色数值来自同文档的 CP 深色浮层表
+ * （已按 12px 文字对比度校过：p 用 pHover #12A6C2，不用 #0E8FA8）。
+ * =========================================================================== */
+html.light,
+html.light[data-theme-style="cockpit"] {
+  --pt-canvas: #f2f4f7;
+  --pt-surface: #ffffff;
+  --pt-raised: #ffffff;
+  --pt-hover: #edf0f4;
+  --pt-border: #dde2e9;
+  --pt-border-strong: #c3cad4;
 
-  /* Text */
-  --pt-text-primary: var(--pt-color-neutral-900);
-  --pt-text-secondary: var(--pt-color-neutral-600);
-  --pt-text-tertiary: var(--pt-color-neutral-400);
-  --pt-text-disabled: var(--pt-color-neutral-300);
+  --pt-chrome: #171a1f;
+  --pt-chrome-raised: #21252c;
+  --pt-chrome-border: #2c313a;
+  --pt-chrome-t1: #e8ebef;
+  --pt-chrome-t2: #99a0ac;
 
-  /* Borders */
-  --pt-border-color: var(--pt-color-neutral-200);
-  --pt-border-color-hover: var(--pt-color-neutral-300);
-  --pt-border-color-dark: var(--pt-color-neutral-300);
-  --pt-border-color-strong: var(--pt-color-neutral-400);
+  --pt-t1: #10141a;
+  --pt-t2: #4e5765;
+  --pt-t3: #7c8695;
+  --pt-t4: #aeb6c2;
 
-  /* Shadows - Smoother & Layered */
-  --pt-shadow-color: 220 3% 15%;
-  --pt-shadow-sm: 0 1px 2px 0 rgb(var(--pt-shadow-color) / 0.05);
-  --pt-shadow-md:
-    0 4px 6px -1px rgb(var(--pt-shadow-color) / 0.1),
-    0 2px 4px -1px rgb(var(--pt-shadow-color) / 0.06);
-  --pt-shadow-lg:
-    0 10px 15px -3px rgb(var(--pt-shadow-color) / 0.1),
-    0 4px 6px -2px rgb(var(--pt-shadow-color) / 0.05);
-  --pt-shadow-xl:
-    0 20px 25px -5px rgb(var(--pt-shadow-color) / 0.1),
-    0 10px 10px -5px rgb(var(--pt-shadow-color) / 0.04);
-  --pt-shadow-inner: inset 0 2px 4px 0 rgb(var(--pt-shadow-color) / 0.06);
+  --pt-p: #0e8fa8;
+  --pt-p-hover: #12a6c2;
+  --pt-p-active: #0b7488;
+  --pt-on-p: #ffffff;
 
-  /* Glassmorphism */
-  --pt-glass-bg: rgba(255, 255, 255, 0.7);
-  --pt-glass-border: rgba(255, 255, 255, 0.5);
-  --pt-glass-blur: 12px;
-  --pt-glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  --pt-ok: #0e8345;
+  --pt-warn: #a5620a;
+  --pt-dang: #b32318;
+  --pt-info: #1361d8;
 
-  /* Typography */
-  --pt-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --pt-text-xs: 0.75rem;
-  --pt-text-sm: 0.875rem;
-  --pt-text-base: 1rem;
-  --pt-text-lg: 1.125rem;
-  --pt-text-xl: 1.25rem;
-  --pt-text-2xl: 1.5rem;
-  --pt-text-3xl: 1.875rem;
-  --pt-text-4xl: 2.25rem;
+  --pt-kpi-1: #1361d8;
+  --pt-kpi-2: #0e8345;
+  --pt-kpi-3: #7a5af8;
+  --pt-kpi-4: #a5620a;
 
-  /* Spacing */
-  --pt-space-1: 0.25rem;
-  --pt-space-2: 0.5rem;
-  --pt-space-3: 0.75rem;
-  --pt-space-4: 1rem;
-  --pt-space-5: 1.25rem;
-  --pt-space-6: 1.5rem;
-  --pt-space-8: 2rem;
-  --pt-space-10: 2.5rem;
-  --pt-space-12: 3rem;
-  --pt-space-16: 4rem;
+  --pt-r-sm: 4px;
+  --pt-r-md: 6px;
+  --pt-r-lg: 8px;
+}
 
-  /* Radius */
-  --pt-radius-sm: 0.375rem;
-  --pt-radius-md: 0.5rem;
-  --pt-radius-lg: 0.75rem;
-  --pt-radius-xl: 1rem;
+html.dark,
+html.dark[data-theme-style="cockpit"] {
+  --pt-canvas: #171a1f;
+  --pt-surface: #21252c;
+  --pt-raised: #2a2f39;
+  --pt-hover: #2c313a;
+  --pt-border: #2c313a;
+  --pt-border-strong: #3b434f;
+
+  --pt-chrome: #12151a;
+  --pt-chrome-raised: #21252c;
+  --pt-chrome-border: #2c313a;
+  --pt-chrome-t1: #e8ebef;
+  --pt-chrome-t2: #99a0ac;
+
+  --pt-t1: #e8ebef;
+  --pt-t2: #99a0ac;
+  --pt-t3: #7c8492;
+  --pt-t4: #5f6774;
+
+  --pt-p: #12a6c2;
+  --pt-p-hover: #22bcd8;
+  --pt-p-active: #0e8fa8;
+  --pt-on-p: #052a33;
+
+  --pt-ok: #34c77b;
+  --pt-warn: #e0a32e;
+  --pt-dang: #f2726a;
+  --pt-info: #5b9df9;
+
+  --pt-kpi-1: #5b9df9;
+  --pt-kpi-2: #34c77b;
+  --pt-kpi-3: #a78bfa;
+  --pt-kpi-4: #e0a32e;
+
+  --pt-r-sm: 4px;
+  --pt-r-md: 6px;
+  --pt-r-lg: 8px;
+}
+
+/* ===========================================================================
+ * ① 调色板 · Atlas（E）—— 纸感浅色 / 紫色强调，圆角更大
+ * =========================================================================== */
+html.light[data-theme-style="atlas"] {
+  --pt-canvas: #f7f8fa;
+  --pt-surface: #ffffff;
+  --pt-raised: #ffffff;
+  --pt-hover: #f4f5f8;
+  --pt-border: #e4e6ec;
+  --pt-border-strong: #cfd3dc;
+
+  --pt-chrome: #1b1d26;
+  --pt-chrome-raised: #262933;
+  --pt-chrome-border: #32353f;
+  --pt-chrome-t1: #eceef4;
+  --pt-chrome-t2: #9aa0af;
+
+  --pt-t1: #14161c;
+  --pt-t2: #565d6d;
+  --pt-t3: #8a909e;
+  --pt-t4: #b4b9c4;
+
+  --pt-p: #7c3aed;
+  --pt-p-hover: #8b5cf6;
+  --pt-p-active: #6d28d9;
+  --pt-on-p: #ffffff;
+
+  --pt-ok: #067647;
+  --pt-warn: #b54708;
+  --pt-dang: #b42318;
+  --pt-info: #175cd3;
+
+  --pt-kpi-1: #2563eb;
+  --pt-kpi-2: #059669;
+  --pt-kpi-3: #7c3aed;
+  --pt-kpi-4: #d97706;
+
+  --pt-r-sm: 6px;
+  --pt-r-md: 8px;
+  --pt-r-lg: 12px;
+}
+
+html.dark[data-theme-style="atlas"] {
+  --pt-canvas: #0e0f14;
+  --pt-surface: #171a21;
+  --pt-raised: #1e2129;
+  --pt-hover: #23262f;
+  --pt-border: #262a33;
+  --pt-border-strong: #363b47;
+
+  --pt-chrome: #0a0b0f;
+  --pt-chrome-raised: #1e2129;
+  --pt-chrome-border: #2a2e38;
+  --pt-chrome-t1: #f4f5f8;
+  --pt-chrome-t2: #a9b0be;
+
+  --pt-t1: #f4f5f8;
+  --pt-t2: #a9b0be;
+  --pt-t3: #7b8291;
+  --pt-t4: #565d6b;
+
+  --pt-p: #a78bfa;
+  --pt-p-hover: #bfa6ff;
+  --pt-p-active: #8b5cf6;
+  --pt-on-p: #1b0f35;
+
+  --pt-ok: #34c77b;
+  --pt-warn: #e8b33a;
+  --pt-dang: #f2726a;
+  --pt-info: #5b9df9;
+
+  --pt-kpi-1: #60a5fa;
+  --pt-kpi-2: #34d399;
+  --pt-kpi-3: #a78bfa;
+  --pt-kpi-4: #fbbf24;
+
+  --pt-r-sm: 6px;
+  --pt-r-md: 8px;
+  --pt-r-lg: 12px;
+}
+
+/* ===========================================================================
+ * ① 调色板 · Deck（D）—— 近黑无彩，强调色就是文字色本身
+ * =========================================================================== */
+html.dark[data-theme-style="deck"] {
+  --pt-canvas: #0a0a0b;
+  --pt-surface: #121214;
+  --pt-raised: #18181b;
+  --pt-hover: #1d1d21;
+  --pt-border: #202024;
+  --pt-border-strong: #2e2e34;
+
+  --pt-chrome: #08080a;
+  --pt-chrome-raised: #18181b;
+  --pt-chrome-border: #202024;
+  --pt-chrome-t1: #fafafa;
+  --pt-chrome-t2: #9b9ba3;
+
+  --pt-t1: #fafafa;
+  --pt-t2: #9b9ba3;
+  --pt-t3: #6b6b73;
+  --pt-t4: #47474e;
+
+  --pt-p: #fafafa;
+  --pt-p-hover: #ffffff;
+  --pt-p-active: #e4e4e7;
+  --pt-on-p: #0a0a0b;
+
+  --pt-ok: #3fcf7f;
+  --pt-warn: #e8b33a;
+  --pt-dang: #f26d6d;
+  --pt-info: #5b9df9;
+
+  --pt-kpi-1: #5b9df9;
+  --pt-kpi-2: #3fcf7f;
+  --pt-kpi-3: #a78bfa;
+  --pt-kpi-4: #e8b33a;
+
+  --pt-r-sm: 6px;
+  --pt-r-md: 8px;
+  --pt-r-lg: 10px;
+}
+
+html.light[data-theme-style="deck"] {
+  --pt-canvas: #fafafa;
+  --pt-surface: #ffffff;
+  --pt-raised: #ffffff;
+  --pt-hover: #f4f4f5;
+  --pt-border: #e4e4e7;
+  --pt-border-strong: #d0d0d5;
+
+  --pt-chrome: #18181b;
+  --pt-chrome-raised: #27272a;
+  --pt-chrome-border: #35353a;
+  --pt-chrome-t1: #fafafa;
+  --pt-chrome-t2: #a1a1aa;
+
+  --pt-t1: #0a0a0b;
+  --pt-t2: #52525b;
+  --pt-t3: #71717a;
+  --pt-t4: #a1a1aa;
+
+  --pt-p: #18181b;
+  --pt-p-hover: #27272a;
+  --pt-p-active: #09090b;
+  --pt-on-p: #fafafa;
+
+  --pt-ok: #067647;
+  --pt-warn: #b54708;
+  --pt-dang: #b42318;
+  --pt-info: #175cd3;
+
+  --pt-kpi-1: #2563eb;
+  --pt-kpi-2: #059669;
+  --pt-kpi-3: #7c3aed;
+  --pt-kpi-4: #d97706;
+
+  --pt-r-sm: 6px;
+  --pt-r-md: 8px;
+  --pt-r-lg: 10px;
+}
+
+/* ===========================================================================
+ * ① 调色板 · Halo（F）—— 暖调，珊瑚橙强调，圆角最大
+ * =========================================================================== */
+html.dark[data-theme-style="halo"] {
+  --pt-canvas: #100e0c;
+  --pt-surface: #1a1714;
+  --pt-raised: #241f1b;
+  --pt-hover: #2b2521;
+  --pt-border: #2a2521;
+  --pt-border-strong: #3a332d;
+
+  --pt-chrome: #16120f;
+  --pt-chrome-raised: #241f1b;
+  --pt-chrome-border: #2a2521;
+  --pt-chrome-t1: #f6f1eb;
+  --pt-chrome-t2: #b3a79b;
+
+  --pt-t1: #f6f1eb;
+  --pt-t2: #b3a79b;
+  --pt-t3: #82766a;
+  --pt-t4: #5c5249;
+
+  --pt-p: #ff8a4c;
+  --pt-p-hover: #ffa271;
+  --pt-p-active: #e5713a;
+  --pt-on-p: #17110c;
+
+  --pt-ok: #5bd08a;
+  --pt-warn: #eab308;
+  --pt-dang: #ff5c77;
+  --pt-info: #6ab8ff;
+
+  --pt-kpi-1: #6ab8ff;
+  --pt-kpi-2: #5bd08a;
+  --pt-kpi-3: #ff8a4c;
+  --pt-kpi-4: #eab308;
+
+  --pt-r-sm: 10px;
+  --pt-r-md: 14px;
+  --pt-r-lg: 20px;
+}
+
+html.light[data-theme-style="halo"] {
+  --pt-canvas: #fbf8f5;
+  --pt-surface: #ffffff;
+  --pt-raised: #ffffff;
+  --pt-hover: #f5efe9;
+  --pt-border: #eae0d6;
+  --pt-border-strong: #d8caba;
+
+  --pt-chrome: #241f1b;
+  --pt-chrome-raised: #332c26;
+  --pt-chrome-border: #3f372f;
+  --pt-chrome-t1: #f6f1eb;
+  --pt-chrome-t2: #b3a79b;
+
+  --pt-t1: #221a13;
+  --pt-t2: #6b5a4b;
+  --pt-t3: #9a8877;
+  --pt-t4: #c0b0a0;
+
+  --pt-p: #d2601f;
+  --pt-p-hover: #e5713a;
+  --pt-p-active: #b04e14;
+  --pt-on-p: #ffffff;
+
+  --pt-ok: #067647;
+  --pt-warn: #a16207;
+  --pt-dang: #c0334d;
+  --pt-info: #1d6fb8;
+
+  --pt-kpi-1: #2563eb;
+  --pt-kpi-2: #059669;
+  --pt-kpi-3: #d2601f;
+  --pt-kpi-4: #b45309;
+
+  --pt-r-sm: 10px;
+  --pt-r-md: 14px;
+  --pt-r-lg: 20px;
+}
+
+/* ===========================================================================
+ * ② 派生值与旧名别名
+ * 旧页面样式里的 --pt-bg-* / --pt-text-* / --pt-border-color* / --pt-color-*
+ * 全部在这里指向 ① 的槽位。删掉任何一条都会让某个页面在换主题时掉色，
+ * 所以迁移完一个页面再删对应的别名，不要提前清理。
+ * =========================================================================== */
+html.light,
+html.dark {
+  /* 半透明派生：状态底、强调底、蒙层、阴影。用 color-mix 而不是写死 rgba，
+     这样四个配色和明暗都只需要这一份定义。 */
+  --pt-p-soft: color-mix(in srgb, var(--pt-p) 12%, transparent);
+  --pt-p-soft-strong: color-mix(in srgb, var(--pt-p) 20%, transparent);
+  --pt-ok-soft: color-mix(in srgb, var(--pt-ok) 12%, transparent);
+  --pt-warn-soft: color-mix(in srgb, var(--pt-warn) 12%, transparent);
+  --pt-dang-soft: color-mix(in srgb, var(--pt-dang) 12%, transparent);
+  --pt-info-soft: color-mix(in srgb, var(--pt-info) 12%, transparent);
+  --pt-scrim: color-mix(in srgb, #0b1220 55%, transparent);
+
+  /* 圆角别名 */
+  --pt-radius-sm: var(--pt-r-sm);
+  --pt-radius-md: var(--pt-r-md);
+  --pt-radius-lg: var(--pt-r-lg);
+  --pt-radius-xl: calc(var(--pt-r-lg) + 4px);
   --pt-radius-full: 9999px;
 
-  /* Transitions */
-  --pt-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --pt-transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
-  --pt-transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* 间距（4 的倍数，§2） */
+  --pt-space-1: 4px;
+  --pt-space-2: 8px;
+  --pt-space-3: 12px;
+  --pt-space-4: 16px;
+  --pt-space-5: 20px;
+  --pt-space-6: 24px;
+  --pt-space-8: 32px;
+  --pt-space-10: 40px;
+  --pt-space-12: 48px;
+  --pt-space-16: 64px;
 
-  /* Page Decor */
-  --pt-page-decor-height: 140px;
-  --pt-page-decor-radius: var(--pt-radius-xl);
-  --pt-page-title-color: var(--pt-text-primary);
-  --pt-page-subtitle-color: var(--pt-text-secondary);
+  /* 字号别名（旧名 rem → 新阶梯 px） */
+  --pt-text-xs: var(--pt-fz-label);
+  --pt-text-sm: var(--pt-fz-sm);
+  --pt-text-base: var(--pt-fz-body);
+  --pt-text-lg: var(--pt-fz-h2);
+  --pt-text-xl: var(--pt-fz-h1);
+  --pt-text-2xl: var(--pt-fz-title);
+  --pt-text-3xl: 26px;
+  --pt-text-4xl: 30px;
 
-  /* Main Canvas */
-  --pt-main-canvas-base: var(--pt-bg-base);
-  --pt-main-canvas-spot-a: color-mix(in srgb, var(--pt-color-primary-100) 40%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, var(--pt-color-info) 10%, transparent);
-}
+  /* 表面与背景（旧名） */
+  --pt-bg-base: var(--pt-canvas);
+  --pt-bg-secondary: var(--pt-hover);
+  --pt-bg-tertiary: var(--pt-hover);
+  --pt-bg-surface: var(--pt-surface);
+  --pt-bg-surface-raised: var(--pt-raised);
+  --pt-bg-surface-muted: var(--pt-canvas);
+  --pt-bg-accent-soft: var(--pt-p-soft);
 
-/* Ocean Theme */
-html[data-theme-style="ocean"] {
-  --pt-color-primary-50: #f0f9ff;
-  --pt-color-primary-100: #e0f2fe;
-  --pt-color-primary-200: #bae6fd;
-  --pt-color-primary-300: #7dd3fc;
-  --pt-color-primary-400: #38bdf8;
-  --pt-color-primary-500: #0ea5e9;
-  --pt-color-primary-600: #0284c7;
-  --pt-color-primary-700: #0369a1;
-  --pt-color-primary-800: #075985;
-  --pt-color-primary-900: #0c4a6e;
-  --pt-color-primary-950: #082f49;
+  /* 文字（旧名） */
+  --pt-text-primary: var(--pt-t1);
+  --pt-text-secondary: var(--pt-t2);
+  --pt-text-tertiary: var(--pt-t3);
+  --pt-text-disabled: var(--pt-t4);
 
-  --pt-bg-base: #f0f9ff;
-  --pt-bg-secondary: #e0f2fe;
-  --pt-bg-tertiary: #bae6fd;
-  --pt-bg-surface: #ffffff;
+  /* 描边（旧名） */
+  --pt-border-color: var(--pt-border);
+  --pt-border-color-hover: var(--pt-border-strong);
+  --pt-border-color-dark: var(--pt-border);
+  --pt-border-color-strong: var(--pt-border-strong);
 
-  --pt-main-canvas-base: #f0f9ff;
-  --pt-main-canvas-spot-a: color-mix(in srgb, var(--pt-color-primary-200) 50%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, var(--pt-color-primary-100) 50%, transparent);
-}
+  /* 强调与状态（旧名） */
+  --pt-color-primary: var(--pt-p);
+  --pt-color-primary-hover: var(--pt-p-hover);
+  --pt-color-primary-active: var(--pt-p-active);
+  --pt-color-primary-light: var(--pt-p-soft);
+  --pt-color-success: var(--pt-ok);
+  --pt-color-warning: var(--pt-warn);
+  --pt-color-danger: var(--pt-dang);
+  --pt-color-info: var(--pt-info);
 
-/* Graphite Theme */
-html[data-theme-style="graphite"] {
-  --pt-color-primary-50: #f8fafc;
-  --pt-color-primary-100: #f1f5f9;
-  --pt-color-primary-200: #e2e8f0;
-  --pt-color-primary-300: #cbd5e1;
-  --pt-color-primary-400: #94a3b8;
-  --pt-color-primary-500: #64748b;
-  --pt-color-primary-600: #475569;
-  --pt-color-primary-700: #334155;
-  --pt-color-primary-800: #1e293b;
-  --pt-color-primary-900: #0f172a;
-  --pt-color-primary-950: #020617;
+  /* 旧代码里出现过的 primary 色阶：按强调色混出来，不再各自成表 */
+  --pt-color-primary-50: color-mix(in srgb, var(--pt-p) 6%, var(--pt-surface));
+  --pt-color-primary-100: color-mix(in srgb, var(--pt-p) 12%, var(--pt-surface));
+  --pt-color-primary-200: color-mix(in srgb, var(--pt-p) 24%, var(--pt-surface));
+  --pt-color-primary-300: color-mix(in srgb, var(--pt-p) 40%, var(--pt-surface));
+  --pt-color-primary-400: color-mix(in srgb, var(--pt-p) 65%, var(--pt-surface));
+  --pt-color-primary-500: var(--pt-p-hover);
+  --pt-color-primary-600: var(--pt-p);
+  --pt-color-primary-700: var(--pt-p-active);
+  --pt-color-primary-800: color-mix(in srgb, var(--pt-p-active) 80%, #000);
+  --pt-color-primary-900: color-mix(in srgb, var(--pt-p-active) 60%, #000);
+  --pt-color-primary-950: color-mix(in srgb, var(--pt-p-active) 40%, #000);
+  --pt-color-success-50: color-mix(in srgb, var(--pt-ok) 8%, var(--pt-surface));
+  --pt-color-success-100: color-mix(in srgb, var(--pt-ok) 16%, var(--pt-surface));
+  --pt-color-success-200: color-mix(in srgb, var(--pt-ok) 28%, var(--pt-surface));
+  --pt-color-success-300: color-mix(in srgb, var(--pt-ok) 42%, var(--pt-surface));
+  --pt-color-success-400: color-mix(in srgb, var(--pt-ok) 68%, var(--pt-surface));
+  --pt-color-success-500: var(--pt-ok);
+  --pt-color-success-600: var(--pt-ok);
+  --pt-color-success-700: color-mix(in srgb, var(--pt-ok) 80%, #000);
+  --pt-color-success-800: color-mix(in srgb, var(--pt-ok) 65%, #000);
+  --pt-color-success-900: color-mix(in srgb, var(--pt-ok) 50%, #000);
+  --pt-color-success-950: color-mix(in srgb, var(--pt-ok) 35%, #000);
 
-  --pt-bg-base: #f8fafc;
-  --pt-bg-secondary: #f1f5f9;
-  --pt-bg-tertiary: #e2e8f0;
-  --pt-bg-surface: #ffffff;
+  /* 中性色阶（旧名，仍有页面直接引用） */
+  --pt-color-neutral-0: var(--pt-surface);
+  --pt-color-neutral-50: var(--pt-canvas);
+  --pt-color-neutral-100: var(--pt-hover);
+  --pt-color-neutral-200: var(--pt-border);
+  --pt-color-neutral-300: var(--pt-border-strong);
+  --pt-color-neutral-400: var(--pt-t4);
+  --pt-color-neutral-500: var(--pt-t3);
+  --pt-color-neutral-600: var(--pt-t2);
+  --pt-color-neutral-700: color-mix(in srgb, var(--pt-t1) 80%, var(--pt-t2));
+  --pt-color-neutral-800: color-mix(in srgb, var(--pt-t1) 90%, var(--pt-t2));
+  --pt-color-neutral-900: var(--pt-t1);
+  --pt-color-neutral-950: var(--pt-t1);
 
-  --pt-main-canvas-base: #f8fafc;
+  /* 阴影：操作台是发丝线为主的界面，阴影只在真正浮起来的层上用 */
+  --pt-shadow-sm: 0 1px 2px color-mix(in srgb, var(--pt-scrim) 26%, transparent);
+  --pt-shadow-md:
+    0 2px 6px color-mix(in srgb, var(--pt-scrim) 22%, transparent),
+    0 1px 2px color-mix(in srgb, var(--pt-scrim) 18%, transparent);
+  --pt-shadow-lg:
+    0 8px 24px color-mix(in srgb, var(--pt-scrim) 26%, transparent),
+    0 2px 6px color-mix(in srgb, var(--pt-scrim) 18%, transparent);
+  --pt-shadow-xl: 0 16px 48px color-mix(in srgb, var(--pt-scrim) 34%, transparent);
+  --pt-shadow-inner: inset 0 1px 2px color-mix(in srgb, var(--pt-scrim) 14%, transparent);
+  --pt-shadow-color: 220 3% 15%;
+
+  /* 玻璃拟态：只保留移动端浮层用，桌面不用 */
+  --pt-glass-bg: color-mix(in srgb, var(--pt-surface) 82%, transparent);
+  --pt-glass-border: var(--pt-border);
+  --pt-glass-blur: 12px;
+  --pt-glass-shadow: var(--pt-shadow-lg);
+
+  /* 状态块（旧名）：底 / 边 / 字三件套 */
+  --pt-state-success-bg: var(--pt-ok-soft);
+  --pt-state-success-border: color-mix(in srgb, var(--pt-ok) 32%, transparent);
+  --pt-state-success-text: var(--pt-ok);
+  --pt-state-warning-bg: var(--pt-warn-soft);
+  --pt-state-warning-border: color-mix(in srgb, var(--pt-warn) 32%, transparent);
+  --pt-state-warning-text: var(--pt-warn);
+  --pt-state-danger-bg: var(--pt-dang-soft);
+  --pt-state-danger-border: color-mix(in srgb, var(--pt-dang) 32%, transparent);
+  --pt-state-danger-text: var(--pt-dang);
+  --pt-state-info-bg: var(--pt-info-soft);
+  --pt-state-info-border: color-mix(in srgb, var(--pt-info) 32%, transparent);
+  --pt-state-info-text: var(--pt-info);
+
+  --pt-bg-elevated: var(--pt-raised);
+
+  --pt-color-danger-50: color-mix(in srgb, var(--pt-dang) 8%, var(--pt-surface));
+  --pt-color-danger-100: color-mix(in srgb, var(--pt-dang) 16%, var(--pt-surface));
+  --pt-color-danger-600: var(--pt-dang);
+  --pt-color-danger-700: color-mix(in srgb, var(--pt-dang) 80%, #000);
+  --pt-color-warning-50: color-mix(in srgb, var(--pt-warn) 8%, var(--pt-surface));
+  --pt-color-warning-500: var(--pt-warn);
+  --pt-color-warning-700: color-mix(in srgb, var(--pt-warn) 80%, #000);
+  --pt-color-info-50: color-mix(in srgb, var(--pt-info) 8%, var(--pt-surface));
+  --pt-color-info-700: color-mix(in srgb, var(--pt-info) 80%, #000);
+
+  /* 页面标题栏（旧名）：G 的 pageHead 是 64px 高、无装饰的一条，
+     所以装饰位全部归零而不是删掉 —— 6 个页面样式表还在 var() 它们，
+     留空值会让 border / box-shadow 直接失效并连带整条声明作废。 */
+  --pt-page-header-padding-top: 0px;
+  --pt-page-header-padding-bottom: 12px;
+  --pt-page-header-padding-x: 0px;
+  --pt-page-header-margin-bottom: 12px;
+  --pt-page-title-color: var(--pt-t1);
+  --pt-page-title-weight: 700;
+  --pt-page-title-letter-spacing: 0;
+  --pt-page-title-shadow: none;
+  --pt-page-subtitle-color: var(--pt-t3);
+  --pt-page-subtitle-weight: 400;
+  --pt-page-subtitle-letter-spacing: 0;
+  --pt-page-subtitle-shadow: none;
+
+  /* 页面装饰：G 不用渐变色块，统一按内容底色走。高度 0 + 全透明混合比例，
+     等于把这些装饰层关掉，但不需要去动那 6 个页面样式表。 */
+  --pt-page-decor-height: 0px;
+  --pt-page-decor-radius: var(--pt-r-md);
+  --pt-page-decor-border: none;
+  --pt-page-decor-shadow: none;
+  --pt-page-decor-inset-top: 0px;
+  --pt-page-decor-inset-x: 0px;
+  --pt-light-decor-primary-mix: 0%;
+  --pt-light-decor-primary-stop: 0%;
+  --pt-light-decor-secondary-stop: 0%;
+  --pt-light-decor-mist-mix: 0%;
+  --pt-light-shell-primary-mix: 0%;
+  --pt-dark-decor-primary-mix: 0%;
+  --pt-dark-decor-primary-stop: 0%;
+  --pt-dark-decor-secondary-mix: 0%;
+  --pt-dark-decor-secondary-stop: 0%;
+  --pt-main-canvas-base: var(--pt-canvas);
   --pt-main-canvas-spot-a: transparent;
   --pt-main-canvas-spot-b: transparent;
 }
 
-/* Contrast Theme (Aurora) */
-html[data-theme-style="contrast"] {
-  --pt-color-primary-50: #f5f3ff;
-  --pt-color-primary-100: #ede9fe;
-  --pt-color-primary-200: #ddd6fe;
-  --pt-color-primary-300: #c4b5fd;
-  --pt-color-primary-400: #a78bfa;
-  --pt-color-primary-500: #8b5cf6;
-  --pt-color-primary-600: #7c3aed;
-  --pt-color-primary-700: #6d28d9;
-  --pt-color-primary-800: #5b21b6;
-  --pt-color-primary-900: #4c1d95;
-  --pt-color-primary-950: #2e1065;
-
-  --pt-bg-base: #fafafa;
-  --pt-bg-secondary: #f4f4f5;
-  --pt-bg-tertiary: #e4e4e7;
-  --pt-bg-surface: #ffffff;
-
-  --pt-main-canvas-base: #fafafa;
-  --pt-main-canvas-spot-a: color-mix(in srgb, #d8b4fe 40%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, #818cf8 30%, transparent);
-}
-
-html[data-theme-style="emerald"] {
-  --pt-color-primary-50: #f2fbf6;
-  --pt-color-primary-100: #dcf5e8;
-  --pt-color-primary-200: #b8ebd1;
-  --pt-color-primary-300: #82d9ae;
-  --pt-color-primary-400: #4fc187;
-  --pt-color-primary-500: #2fa96f;
-  --pt-color-primary-600: #1f8a5a;
-  --pt-color-primary-700: #186f49;
-  --pt-color-primary-800: #155a3c;
-  --pt-color-primary-900: #114a32;
-  --pt-color-primary-950: #072a1b;
-
-  --pt-bg-base: #f5fbf8;
-  --pt-bg-secondary: #ecf8f2;
-  --pt-bg-tertiary: #def1e6;
-  --pt-bg-surface: #ffffff;
-  --pt-bg-surface-raised: #ffffff;
-  --pt-bg-accent-soft: color-mix(in srgb, #1f8a5a 9%, transparent);
-
-  --pt-page-title-color: #113928;
-  --pt-page-subtitle-color: #3f6a56;
-
-  --pt-main-canvas-base: #f5fbf8;
-  --pt-main-canvas-spot-a: color-mix(in srgb, #82d9ae 40%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, #dcf5e8 28%, transparent);
-}
-
-/* Dark Mode */
+/* ===========================================================================
+ * ③ Element Plus 映射
+ * 选择器用 html.light / html.dark（而不是 :root）是有原因的：
+ * element-plus/theme-chalk/dark/css-vars.css 把 --el-* 写在 html.dark 上，
+ * 特异度 (0,1,1) 高于 :root 的 (0,1,0)，写在 :root 会被它盖掉。
+ * =========================================================================== */
+html.light,
 html.dark {
-  --pt-color-primary: var(--pt-color-primary-400);
-  --pt-color-primary-hover: var(--pt-color-primary-300);
-  --pt-color-primary-active: var(--pt-color-primary-500);
-  --pt-color-primary-light: color-mix(in srgb, var(--pt-color-primary) 20%, transparent);
+  --el-color-primary: var(--pt-p);
+  --el-color-primary-light-3: color-mix(in srgb, var(--pt-p) 70%, var(--pt-surface));
+  --el-color-primary-light-5: color-mix(in srgb, var(--pt-p) 50%, var(--pt-surface));
+  --el-color-primary-light-7: color-mix(in srgb, var(--pt-p) 30%, var(--pt-surface));
+  --el-color-primary-light-8: color-mix(in srgb, var(--pt-p) 20%, var(--pt-surface));
+  --el-color-primary-light-9: color-mix(in srgb, var(--pt-p) 10%, var(--pt-surface));
+  --el-color-primary-dark-2: var(--pt-p-active);
 
-  --el-color-primary: var(--pt-color-primary);
-  --el-color-primary-light-3: color-mix(in srgb, var(--pt-color-primary) 70%, #000);
-  --el-color-primary-light-5: color-mix(in srgb, var(--pt-color-primary) 50%, #000);
-  --el-color-primary-light-7: color-mix(in srgb, var(--pt-color-primary) 30%, #000);
-  --el-color-primary-light-8: color-mix(in srgb, var(--pt-color-primary) 20%, #000);
-  --el-color-primary-light-9: color-mix(in srgb, var(--pt-color-primary) 10%, #000);
-  --el-color-primary-dark-2: color-mix(in srgb, var(--pt-color-primary) 80%, #fff);
+  --el-color-success: var(--pt-ok);
+  --el-color-success-light-3: color-mix(in srgb, var(--pt-ok) 70%, var(--pt-surface));
+  --el-color-success-light-5: color-mix(in srgb, var(--pt-ok) 50%, var(--pt-surface));
+  --el-color-success-light-7: color-mix(in srgb, var(--pt-ok) 30%, var(--pt-surface));
+  --el-color-success-light-8: color-mix(in srgb, var(--pt-ok) 20%, var(--pt-surface));
+  --el-color-success-light-9: var(--pt-ok-soft);
+  --el-color-success-dark-2: color-mix(in srgb, var(--pt-ok) 80%, #000);
 
-  --pt-bg-base: #0f172a;
-  --pt-bg-secondary: #1e293b;
-  --pt-bg-tertiary: #334155;
-  --pt-bg-surface: #1e293b;
-  --pt-bg-surface-raised: #334155;
-  --pt-bg-surface-muted: #0f172a;
-  --pt-bg-accent-soft: color-mix(in srgb, var(--pt-color-primary) 15%, transparent);
+  --el-color-warning: var(--pt-warn);
+  --el-color-warning-light-3: color-mix(in srgb, var(--pt-warn) 70%, var(--pt-surface));
+  --el-color-warning-light-5: color-mix(in srgb, var(--pt-warn) 50%, var(--pt-surface));
+  --el-color-warning-light-7: color-mix(in srgb, var(--pt-warn) 30%, var(--pt-surface));
+  --el-color-warning-light-8: color-mix(in srgb, var(--pt-warn) 20%, var(--pt-surface));
+  --el-color-warning-light-9: var(--pt-warn-soft);
+  --el-color-warning-dark-2: color-mix(in srgb, var(--pt-warn) 80%, #000);
 
-  --pt-text-primary: #f8fafc;
-  --pt-text-secondary: #cbd5e1;
-  --pt-text-tertiary: #94a3b8;
-  --pt-text-disabled: #64748b;
+  --el-color-danger: var(--pt-dang);
+  --el-color-danger-light-3: color-mix(in srgb, var(--pt-dang) 70%, var(--pt-surface));
+  --el-color-danger-light-5: color-mix(in srgb, var(--pt-dang) 50%, var(--pt-surface));
+  --el-color-danger-light-7: color-mix(in srgb, var(--pt-dang) 30%, var(--pt-surface));
+  --el-color-danger-light-8: color-mix(in srgb, var(--pt-dang) 20%, var(--pt-surface));
+  --el-color-danger-light-9: var(--pt-dang-soft);
+  --el-color-danger-dark-2: color-mix(in srgb, var(--pt-dang) 80%, #000);
 
-  --pt-border-color: #334155;
-  --pt-border-color-hover: #475569;
-  --pt-border-color-dark: #1e293b;
-  --pt-border-color-strong: #64748b;
+  --el-color-error: var(--pt-dang);
+  --el-color-error-light-9: var(--pt-dang-soft);
 
-  --pt-shadow-color: 0 0% 0%;
-  --pt-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
-  --pt-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --pt-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
-  --pt-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+  --el-color-info: var(--pt-info);
+  --el-color-info-light-3: color-mix(in srgb, var(--pt-info) 70%, var(--pt-surface));
+  --el-color-info-light-5: color-mix(in srgb, var(--pt-info) 50%, var(--pt-surface));
+  --el-color-info-light-7: color-mix(in srgb, var(--pt-info) 30%, var(--pt-surface));
+  --el-color-info-light-8: color-mix(in srgb, var(--pt-info) 20%, var(--pt-surface));
+  --el-color-info-light-9: var(--pt-info-soft);
+  --el-color-info-dark-2: color-mix(in srgb, var(--pt-info) 80%, #000);
 
-  --pt-glass-bg: rgba(30, 41, 59, 0.7);
-  --pt-glass-border: rgba(255, 255, 255, 0.1);
+  --el-bg-color: var(--pt-surface);
+  --el-bg-color-page: var(--pt-canvas);
+  --el-bg-color-overlay: var(--pt-raised);
 
-  --el-bg-color: var(--pt-bg-surface);
-  --el-bg-color-page: var(--pt-bg-base);
-  --el-bg-color-overlay: var(--pt-bg-surface-raised);
-  --el-fill-color: var(--pt-bg-tertiary);
-  --el-fill-color-light: var(--pt-bg-secondary);
-  --el-fill-color-lighter: var(--pt-bg-base);
-  --el-border-color: var(--pt-border-color);
-  --el-border-color-light: var(--pt-border-color-hover);
-  --el-border-color-lighter: var(--pt-border-color-dark);
-  --el-text-color-primary: var(--pt-text-primary);
-  --el-text-color-regular: var(--pt-text-secondary);
-  --el-text-color-secondary: var(--pt-text-tertiary);
-  --el-text-color-placeholder: var(--pt-text-disabled);
+  --el-fill-color: var(--pt-hover);
+  --el-fill-color-light: var(--pt-hover);
+  --el-fill-color-lighter: var(--pt-canvas);
+  --el-fill-color-extra-light: var(--pt-canvas);
+  --el-fill-color-dark: var(--pt-border);
+  --el-fill-color-darker: var(--pt-border-strong);
+  --el-fill-color-blank: var(--pt-surface);
 
-  --pt-main-canvas-base: var(--pt-bg-base);
-  --pt-main-canvas-spot-a: color-mix(in srgb, var(--pt-color-primary-900) 40%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, var(--pt-color-info) 10%, transparent);
-}
+  --el-border-color: var(--pt-border);
+  --el-border-color-light: var(--pt-border);
+  --el-border-color-lighter: var(--pt-border);
+  --el-border-color-extra-light: var(--pt-border);
+  --el-border-color-dark: var(--pt-border-strong);
+  --el-border-color-darker: var(--pt-border-strong);
+  --el-border-color-hover: var(--pt-border-strong);
 
-/* Dark Mode Theme Specifics */
+  --el-text-color-primary: var(--pt-t1);
+  --el-text-color-regular: var(--pt-t2);
+  --el-text-color-secondary: var(--pt-t3);
+  --el-text-color-placeholder: var(--pt-t4);
+  --el-text-color-disabled: var(--pt-t4);
 
-/* Ocean Dark — Deep sea with luminous blue accents */
-html.dark[data-theme-style="ocean"] {
-  --pt-color-primary-50: #0c2d48;
-  --pt-color-primary-100: #0a3a5c;
-  --pt-color-primary-200: #0c4a6e;
-  --pt-color-primary-300: #0369a1;
-  --pt-color-primary-400: #0ea5e9;
-  --pt-color-primary-500: #38bdf8;
-  --pt-color-primary-600: #7dd3fc;
-  --pt-color-primary-700: #bae6fd;
+  --el-font-family: var(--pt-font-family);
+  --el-font-size-base: var(--pt-fz-body);
+  --el-font-size-small: var(--pt-fz-sm);
+  --el-font-size-extra-small: var(--pt-fz-label);
+  --el-font-size-medium: var(--pt-fz-h2);
+  --el-font-size-large: var(--pt-fz-h1);
 
-  --pt-bg-base: #0a1929;
-  --pt-bg-secondary: #0d2137;
-  --pt-bg-tertiary: #132f4c;
-  --pt-bg-surface: #0d2137;
-  --pt-bg-surface-raised: #132f4c;
-  --pt-bg-surface-muted: #091527;
-  --pt-bg-accent-soft: color-mix(in srgb, #0ea5e9 12%, transparent);
+  --el-border-radius-base: var(--pt-r-md);
+  --el-border-radius-small: var(--pt-r-sm);
+  --el-border-radius-round: 999px;
 
-  --pt-text-primary: #e3f2fd;
-  --pt-text-secondary: #90caf9;
-  --pt-text-tertiary: #5c9dc5;
-  --pt-text-disabled: #37638a;
+  /* 控件高度：工具栏 28 / 常规 32，比 Element 默认的 32/40 紧一档，
+     这是 G 的密度主张（一屏 24 行而不是 8 行）。 */
+  --el-component-size: 32px;
+  --el-component-size-small: 28px;
+  --el-component-size-large: 36px;
 
-  --pt-border-color: #1a3a5c;
-  --pt-border-color-hover: #1e4976;
-  --pt-border-color-dark: #0d2137;
-  --pt-border-color-strong: #2a5a8a;
+  --el-box-shadow: var(--pt-shadow-md);
+  --el-box-shadow-light: var(--pt-shadow-sm);
+  --el-box-shadow-lighter: var(--pt-shadow-sm);
+  --el-box-shadow-dark: var(--pt-shadow-lg);
+  --el-overlay-color-lighter: var(--pt-scrim);
+  --el-mask-color: color-mix(in srgb, var(--pt-surface) 72%, transparent);
 
-  --pt-shadow-sm: 0 1px 3px 0 rgba(0, 15, 30, 0.6);
-  --pt-shadow-md: 0 4px 8px -1px rgba(0, 15, 30, 0.6), 0 2px 4px -1px rgba(0, 15, 30, 0.4);
-  --pt-shadow-lg: 0 10px 20px -3px rgba(0, 15, 30, 0.6), 0 4px 8px -2px rgba(0, 15, 30, 0.4);
+  --el-disabled-bg-color: var(--pt-hover);
+  --el-disabled-text-color: var(--pt-t4);
+  --el-disabled-border-color: var(--pt-border);
 
-  --pt-glass-bg: rgba(13, 33, 55, 0.75);
-  --pt-glass-border: rgba(14, 165, 233, 0.12);
+  --el-table-header-bg-color: var(--pt-hover);
+  --el-table-header-text-color: var(--pt-t2);
+  --el-table-text-color: var(--pt-t1);
+  --el-table-row-hover-bg-color: var(--pt-hover);
+  --el-table-current-row-bg-color: var(--pt-p-soft);
+  --el-table-border-color: var(--pt-border);
+  --el-table-bg-color: var(--pt-surface);
+  --el-table-tr-bg-color: var(--pt-surface);
+  --el-table-expanded-cell-bg-color: var(--pt-canvas);
 
-  --pt-page-title-color: #e3f2fd;
-  --pt-page-subtitle-color: #90caf9;
-
-  --pt-main-canvas-base: #0a1929;
-  --pt-main-canvas-spot-a: color-mix(in srgb, #0369a1 18%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, #0ea5e9 8%, transparent);
-}
-
-/* Graphite Dark — Carbon fiber monochrome, zero color distraction */
-html.dark[data-theme-style="graphite"] {
-  --pt-color-primary-50: #1a1a2e;
-  --pt-color-primary-100: #22223b;
-  --pt-color-primary-200: #2d2d44;
-  --pt-color-primary-300: #4a4a6a;
-  --pt-color-primary-400: #8888a8;
-  --pt-color-primary-500: #a8a8c0;
-  --pt-color-primary-600: #c0c0d4;
-  --pt-color-primary-700: #dcdce8;
-
-  --pt-bg-base: #111118;
-  --pt-bg-secondary: #18181f;
-  --pt-bg-tertiary: #222230;
-  --pt-bg-surface: #18181f;
-  --pt-bg-surface-raised: #222230;
-  --pt-bg-surface-muted: #0e0e14;
-  --pt-bg-accent-soft: color-mix(in srgb, #8888a8 10%, transparent);
-
-  --pt-text-primary: #ececf1;
-  --pt-text-secondary: #a1a1b5;
-  --pt-text-tertiary: #6e6e82;
-  --pt-text-disabled: #45455a;
-
-  --pt-border-color: #2a2a3a;
-  --pt-border-color-hover: #363648;
-  --pt-border-color-dark: #18181f;
-  --pt-border-color-strong: #4a4a5e;
-
-  --pt-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.65);
-  --pt-shadow-md: 0 4px 8px -1px rgba(0, 0, 0, 0.6), 0 2px 4px -1px rgba(0, 0, 0, 0.45);
-  --pt-shadow-lg: 0 10px 20px -3px rgba(0, 0, 0, 0.6), 0 4px 8px -2px rgba(0, 0, 0, 0.4);
-
-  --pt-glass-bg: rgba(24, 24, 31, 0.8);
-  --pt-glass-border: rgba(255, 255, 255, 0.06);
-
-  --pt-page-title-color: #ececf1;
-  --pt-page-subtitle-color: #a1a1b5;
-
-  --pt-main-canvas-base: #111118;
-  --pt-main-canvas-spot-a: transparent;
-  --pt-main-canvas-spot-b: transparent;
-}
-
-/* Aurora Dark — Deep space with neon purple/teal aurora glow */
-html.dark[data-theme-style="contrast"] {
-  --pt-color-primary-50: #1a0a2e;
-  --pt-color-primary-100: #2e1065;
-  --pt-color-primary-200: #4c1d95;
-  --pt-color-primary-300: #6d28d9;
-  --pt-color-primary-400: #8b5cf6;
-  --pt-color-primary-500: #a78bfa;
-  --pt-color-primary-600: #c4b5fd;
-  --pt-color-primary-700: #ddd6fe;
-
-  --pt-color-success: #34d399;
-  --pt-color-warning: #fbbf24;
-  --pt-color-info: #67e8f9;
-
-  --pt-bg-base: #0b0414;
-  --pt-bg-secondary: #130a24;
-  --pt-bg-tertiary: #1e1038;
-  --pt-bg-surface: #130a24;
-  --pt-bg-surface-raised: #1e1038;
-  --pt-bg-surface-muted: #08020f;
-  --pt-bg-accent-soft: color-mix(in srgb, #8b5cf6 14%, transparent);
-
-  --pt-text-primary: #f0eaff;
-  --pt-text-secondary: #b8a5e0;
-  --pt-text-tertiary: #7b6a9e;
-  --pt-text-disabled: #4a3d66;
-
-  --pt-border-color: #261a45;
-  --pt-border-color-hover: #3a2a62;
-  --pt-border-color-dark: #130a24;
-  --pt-border-color-strong: #5b3fa0;
-
-  --pt-shadow-sm: 0 1px 3px 0 rgba(11, 4, 20, 0.7);
-  --pt-shadow-md: 0 4px 8px -1px rgba(11, 4, 20, 0.7), 0 2px 4px -1px rgba(11, 4, 20, 0.5);
-  --pt-shadow-lg: 0 10px 20px -3px rgba(11, 4, 20, 0.7), 0 4px 8px -2px rgba(11, 4, 20, 0.5);
-
-  --pt-glass-bg: rgba(19, 10, 36, 0.8);
-  --pt-glass-border: rgba(139, 92, 246, 0.15);
-
-  --pt-page-title-color: #f0eaff;
-  --pt-page-subtitle-color: #b8a5e0;
-
-  --pt-main-canvas-base: #0b0414;
-  --pt-main-canvas-spot-a: color-mix(in srgb, #7c3aed 22%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, #06b6d4 12%, transparent);
-}
-
-html.dark[data-theme-style="emerald"] {
-  --pt-color-primary-50: #0a2618;
-  --pt-color-primary-100: #0f3320;
-  --pt-color-primary-200: #144329;
-  --pt-color-primary-300: #1b5a38;
-  --pt-color-primary-400: #2d7d52;
-  --pt-color-primary-500: #44a36d;
-  --pt-color-primary-600: #6cc292;
-  --pt-color-primary-700: #9fe0bf;
-
-  --pt-bg-base: #07170f;
-  --pt-bg-secondary: #0c2116;
-  --pt-bg-tertiary: #123122;
-  --pt-bg-surface: #0c2116;
-  --pt-bg-surface-raised: #123122;
-  --pt-bg-surface-muted: #05110b;
-  --pt-bg-accent-soft: color-mix(in srgb, #44a36d 13%, transparent);
-
-  --pt-text-primary: #e9f8ef;
-  --pt-text-secondary: #b4ddc5;
-  --pt-text-tertiary: #78ad90;
-  --pt-text-disabled: #4f7c67;
-
-  --pt-border-color: #1a3f2d;
-  --pt-border-color-hover: #245841;
-  --pt-border-color-dark: #0d281b;
-  --pt-border-color-strong: #3f8f66;
-
-  --pt-shadow-sm: 0 1px 3px 0 rgba(5, 17, 11, 0.68);
-  --pt-shadow-md: 0 4px 8px -1px rgba(5, 17, 11, 0.62), 0 2px 4px -1px rgba(5, 17, 11, 0.42);
-  --pt-shadow-lg: 0 10px 20px -3px rgba(5, 17, 11, 0.62), 0 4px 8px -2px rgba(5, 17, 11, 0.42);
-
-  --pt-glass-bg: rgba(12, 33, 22, 0.8);
-  --pt-glass-border: rgba(108, 194, 146, 0.16);
-
-  --pt-page-title-color: #e9f8ef;
-  --pt-page-subtitle-color: #b4ddc5;
-
-  --pt-main-canvas-base: #07170f;
-  --pt-main-canvas-spot-a: color-mix(in srgb, #1f8a5a 18%, transparent);
-  --pt-main-canvas-spot-b: color-mix(in srgb, #44a36d 10%, transparent);
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--pt-t2);
+  --el-menu-active-color: var(--pt-p);
+  --el-menu-hover-bg-color: var(--pt-hover);
 }

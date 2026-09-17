@@ -1,0 +1,412 @@
+/*
+ * 原子件的全局样式层 —— 承载没法放进 SFC scoped 样式里的两件事：
+ *   1. `.pt-grid`：设计稿 G 的 k.table 'grid' 变体，挂在 el-table 上；
+ *   2. 表格单元格与区块条的工具类，需要被 el-table 的 class-name 透传引用。
+ *
+ * 为什么不做一个 PtGrid 组件：14 个页面已经在用 el-table 的排序、筛选、展开行、
+ * 多选，换类名是一行改动，换组件要重写这些行为。所以 G 的网格是一层皮肤。
+ *
+ * 选择器权重是刻意的：`.pt-grid.el-table td.el-table__cell` 是 (0,3,1)，
+ * 压得住旧样式里的 `.table-card .el-table .el-table__cell`（0,3,0），
+ * 于是两套语言可以在 phase ⑤ 逐页替换期间共存，不依赖 import 顺序。
+ */
+
+/*
+ * el-button 里塞 lucide 图标时的间距：Element 的规则是
+ * `[class*=el-icon]+span`，认不出 .pt-icon，所以自己补一条。
+ * 图标后面的文字要包在 <span> 里，纯文本节点选不中。
+ */
+.el-button .pt-icon + span {
+  margin-left: 6px;
+}
+
+.pt-grid.el-table {
+  --el-table-border-color: var(--pt-border);
+  --el-table-bg-color: var(--pt-surface);
+  --el-table-tr-bg-color: var(--pt-surface);
+  --el-table-header-bg-color: var(--pt-hover);
+  --el-table-header-text-color: var(--pt-t3);
+  --el-table-text-color: var(--pt-t2);
+  --el-table-row-hover-bg-color: var(--pt-hover);
+  --el-table-current-row-bg-color: var(--pt-p-soft);
+
+  font-size: var(--pt-fz-body);
+  /* 整表等宽数字：统计表里数字列对不齐是最刺眼的毛病，只影响数字，CJK 不受影响 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 表头 30 高 / 11 号 / 600；下沿走 borderStrong —— 13 号正文与 11 号表头
+   之间需要一条读得出的边界，用 border 会被行线糊掉（设计文档 §3） */
+.pt-grid.el-table th.el-table__cell {
+  height: var(--pt-row-head-h);
+  padding: 0;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+  border-bottom: 1px solid var(--pt-border-strong);
+}
+
+.pt-grid.el-table td.el-table__cell {
+  height: var(--pt-row-h);
+  padding: 0;
+  border-bottom: 1px solid var(--pt-border);
+}
+
+/* 每列一条竖发丝线，grid 变体的电子表格观感就来自这里 */
+.pt-grid.el-table th.el-table__cell:not(:first-child),
+.pt-grid.el-table td.el-table__cell:not(:first-child) {
+  border-left: 1px solid var(--pt-border);
+}
+
+.pt-grid.el-table .cell {
+  padding: 0 var(--pt-pad);
+  line-height: var(--pt-lh-row);
+  word-break: break-word;
+}
+
+/* Element 自带的表体下沿线会和末行的 border-bottom 叠成 2px */
+.pt-grid.el-table .el-table__inner-wrapper::before,
+.pt-grid.el-table::before {
+  display: none;
+}
+
+.pt-grid.el-table .caret-wrapper {
+  color: var(--pt-t4);
+}
+
+.pt-grid.el-table .el-table__expanded-cell {
+  padding: var(--pt-space-4) var(--pt-pad);
+  background: var(--pt-canvas);
+}
+
+/* 空态由 PtDataState 自己控制留白，Element 的 100px 最小高度会多出一截 */
+.pt-grid.el-table .el-table__empty-block {
+  min-height: auto;
+}
+
+.pt-grid.el-table .el-table__empty-text {
+  width: 100%;
+  line-height: inherit;
+}
+
+/*
+ * 单元格工具类 —— 通过 el-table-column 的 class-name / label-class-name 透传。
+ * 主列不自动加粗：带多选列的表格里首列是复选框，靠 :first-child 猜会猜错，
+ * 所以哪一列是主列由页面显式声明。
+ */
+.pt-grid.el-table td.pt-cell-strong .cell {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.pt-grid.el-table td.pt-cell-num .cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pt-grid.el-table th.pt-cell-num .cell {
+  text-align: right;
+}
+
+.pt-grid.el-table td.pt-cell-muted .cell {
+  color: var(--pt-t3);
+}
+
+/* 操作列：按钮组贴右，行高 34 里不能再有额外的上下内边距 */
+.pt-grid.el-table td.pt-cell-act .cell {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+/*
+ * 说明块 —— 页面顶部的功能前提、注意事项、测试结果回显。
+ * 替代 el-alert：Element 的警告条自带 8px 圆角、居中图标和一套自己的配色变量，
+ * 在 G 的发丝线语言里显得又厚又跳；这里用「左侧 2px 色条 + 8% 底色」表达语义色。
+ */
+.pt-note {
+  --pt-note-c: var(--pt-info);
+
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+  background: color-mix(in srgb, var(--pt-note-c) 8%, transparent);
+  border-left: 2px solid var(--pt-note-c);
+  border-radius: 0 var(--pt-r-sm) var(--pt-r-sm) 0;
+}
+
+.pt-note--ok {
+  --pt-note-c: var(--pt-ok);
+}
+
+.pt-note--warn {
+  --pt-note-c: var(--pt-warn);
+}
+
+.pt-note--dang {
+  --pt-note-c: var(--pt-dang);
+}
+
+.pt-note__icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--pt-note-c);
+}
+
+/* 行内代码：说明块与字段提示里出现的路径、命令、配置键 */
+.pt-note code,
+.field-tip code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+/*
+ * 表单皮肤 —— 设计稿 G 的表单块：标签 12/500 压在字段上方，字段间距 16。
+ * 和 .pt-grid 一样是挂在 el-form 上的一层皮肤，不是新组件：11 个设置页已经在用
+ * el-form 的校验、prop 联动和 disabled 传递，换类名是一行，换组件要重写这些。
+ *
+ * 标签走 top 而不是稿上的左侧对齐：本项目的标签长度从「启用」到「CloakBrowser 服务地址」
+ * 差了 5 倍，左对齐要么截断要么留一条很宽的空列，手机上更是直接挤没。
+ */
+.pt-form .el-form-item {
+  margin-bottom: var(--pt-space-4);
+}
+
+.pt-form .el-form-item__label {
+  height: auto;
+  padding-bottom: 4px;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  line-height: var(--pt-lh-row);
+  color: var(--pt-t2);
+}
+
+/* 字段说明：跟在控件下方，11 号 t3，不占 el-form-item 的错误位 */
+.pt-form .field-tip {
+  width: 100%;
+  margin-top: 4px;
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t3);
+}
+
+/* 字段组之间的分隔发丝线，替代 el-divider 的 24 上下外边距 */
+.pt-form .field-rule {
+  height: 1px;
+  margin: 0 0 var(--pt-space-4);
+  background: var(--pt-border);
+}
+
+/*
+ * 带标题的字段组分隔：同 .field-rule 的一条线，外加一行 11/600 的小节名。
+ * 长表单（尤其对话框里的）需要它来分「这条规则是什么」和「拿什么试跑」，
+ * 光靠一条线读者分不出后面几个字段属于哪一组。
+ */
+.pt-form .field-head {
+  margin-bottom: var(--pt-space-3);
+  padding-top: var(--pt-space-4);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-form .field-head:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* 两列字段：窄屏自动退回单列 */
+.pt-form .field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 var(--pt-space-4);
+}
+
+/*
+ * 面板页脚里的说明文字：把右侧的按钮组顶到尾部。
+ * 放全局层而不是 PtPanel 的 scoped 样式里，因为它落在 footer 插槽的内容上，
+ * 属于页面而不是组件 —— 组件的 scoped 选择器选不中插槽外传进来的节点的子孙。
+ */
+.pt-foot-note {
+  margin-right: auto;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+/*
+ * 区块条（设计稿 G 的 `strip()`）：30 高、hover 底、上沿发丝线。
+ * 用于网格内的分组标题，或面板正文里的小节分隔。
+ */
+.pt-strip {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: var(--pt-row-head-h);
+  padding: 0 var(--pt-pad);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-strip__end {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--pt-t3);
+}
+
+/*
+ * 分段选择器 —— 设计稿 G 的 `seg()`：hover 底的凹槽里托一枚 surface 底的选中块。
+ * 挂在 el-segmented 上，用它而不是 el-tabs：G 的语言里「切换看哪一份数据」是
+ * 工具条上的一枚控件，而 el-tabs 会再带一条 48 高的页头和一根下划线，
+ * 跟 PtPanel 的页头叠起来就成了两层标题。
+ *
+ * 选中块默认是 primary 实底配白字，这里换成 surface + t1：四套配色里
+ * ok/warn 这类浅色上压白字对比度不够，抬起一块「纸」比刷一块色更稳。
+ */
+.pt-seg.el-segmented {
+  --el-segmented-bg-color: var(--pt-hover);
+  --el-segmented-color: var(--pt-t3);
+  --el-segmented-item-selected-color: var(--pt-t1);
+  --el-segmented-item-selected-bg-color: var(--pt-surface);
+  --el-segmented-item-hover-color: var(--pt-t1);
+  --el-segmented-item-hover-bg-color: transparent;
+  --el-border-radius-base: var(--pt-r-sm);
+
+  min-height: 28px;
+  font-size: var(--pt-fz-sm);
+}
+
+.pt-seg.el-segmented .el-segmented__item {
+  padding: 0 12px;
+  font-weight: 500;
+}
+
+.pt-seg.el-segmented .el-segmented__item-selected {
+  box-shadow: var(--pt-shadow-sm);
+}
+
+/*
+ * 对话框 —— el-dialog 会 teleport 到 body，SFC 的 scoped 选择器到不了，
+ * 所以皮肤必须挂在全局层。页头与 PtPanel 一致（42 高 + 下沿发丝线），
+ * 页脚同样用一条上沿线收口，正文自己控制内边距。
+ */
+.pt-dialog.el-dialog {
+  --el-dialog-bg-color: var(--pt-surface);
+  --el-dialog-border-radius: var(--pt-r-lg);
+  --el-dialog-padding-primary: var(--pt-pad);
+  --el-dialog-title-font-size: var(--pt-fz-body);
+
+  padding: 0;
+  border: 1px solid var(--pt-border);
+  box-shadow: var(--pt-shadow-xl);
+}
+
+.pt-dialog.el-dialog .el-dialog__header {
+  display: flex;
+  align-items: center;
+  height: 42px;
+  margin: 0;
+  padding: 0 var(--pt-pad);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-dialog.el-dialog .el-dialog__title {
+  font-size: var(--pt-fz-body);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.pt-dialog.el-dialog .el-dialog__headerbtn {
+  top: 0;
+  width: 42px;
+  height: 42px;
+}
+
+.pt-dialog.el-dialog .el-dialog__body {
+  padding: var(--pt-pad);
+  font-size: var(--pt-fz-body);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.pt-dialog.el-dialog .el-dialog__footer {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--pt-space-3) var(--pt-pad);
+  border-top: 1px solid var(--pt-border);
+}
+
+/*
+ * 分页条 —— 挂在 el-pagination 上的一层皮肤，落在 PtPanel 的页脚里。
+ * Element 默认的 32 高按钮和 14 号字在 34 高的页脚里会把页脚顶开，
+ * 所以按钮收到 26、字号降到 12，并让页码方块跟着 G 的 rSm 圆角。
+ *
+ * 与 .pt-foot-note 搭配：说明文字的 margin-right:auto 把分页推到右侧。
+ */
+.pt-pager.el-pagination {
+  --el-pagination-font-size: var(--pt-fz-sm);
+  --el-pagination-button-height: 26px;
+  --el-pagination-button-width: 26px;
+  --el-pagination-text-color: var(--pt-t2);
+  --el-pagination-bg-color: transparent;
+  --el-pagination-button-color: var(--pt-t2);
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-hover-color: var(--pt-p);
+
+  gap: 4px;
+  padding: 0;
+  font-weight: 400;
+}
+
+.pt-pager.el-pagination .el-pager li,
+.pt-pager.el-pagination .btn-prev,
+.pt-pager.el-pagination .btn-next {
+  border-radius: var(--pt-r-sm);
+}
+
+.pt-pager.el-pagination .el-pager li:hover {
+  background: var(--pt-hover);
+}
+
+.pt-pager.el-pagination .el-pager li.is-active {
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+}
+
+.pt-pager.el-pagination .el-pagination__total,
+.pt-pager.el-pagination .el-pagination__jump {
+  color: var(--pt-t3);
+}
+
+/* 手机上宽表格横向滚动，不硬压列宽（整表退化成行卡片是 phase ⑤ 逐页的事） */
+@media (max-width: 768px) {
+  .pt-grid.el-table .cell {
+    padding: 0 var(--pt-space-3);
+  }
+}
+
+/*
+ * 转圈：Element 的 `.el-icon.is-loading` 动画绑在 `.el-icon` 上，PtIcon 渲染的是裸 svg，
+ * 拿不到那条动画，所以 lucide 的 loader-circle 需要这一个类自己转。
+ */
+.pt-spin {
+  animation: pt-spin 1s linear infinite;
+}
+
+@keyframes pt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { qbitApi, type QbitSettings } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { ElMessage } from "element-plus";
 import { onMounted, ref } from "vue";
 
@@ -43,41 +46,38 @@ async function save() {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-card v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>qBittorrent 设置</span>
-          <el-tag :type="form.enabled ? 'success' : 'info'" size="small">
-            {{ form.enabled ? "已启用" : "未启用" }}
-          </el-tag>
-        </div>
+  <div class="qbit-page">
+    <PtPanel v-loading="loading" title="qBittorrent 设置" icon="cloud-download">
+      <template #actions>
+        <PtStatusPill :tone="form.enabled ? 'ok' : 'neutral'" dot>
+          {{ form.enabled ? "已启用" : "未启用" }}
+        </PtStatusPill>
       </template>
 
-      <el-form :model="form" label-width="100px" label-position="right">
+      <el-form :model="form" label-position="top" class="pt-form">
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
-          <div class="form-tip">启用后将自动推送种子到 qBittorrent</div>
+          <div class="field-tip">启用后将自动推送种子到 qBittorrent</div>
         </el-form-item>
 
-        <el-divider />
+        <div class="field-rule" />
 
         <el-form-item label="URL">
           <el-input
             v-model="form.url"
             placeholder="http://192.168.1.10:8080"
             :disabled="!form.enabled">
-            <template #prepend>
-              <el-icon><Link /></el-icon>
+            <template #prefix>
+              <PtIcon name="link" :size="14" />
             </template>
           </el-input>
-          <div class="form-tip">qBittorrent Web UI 地址</div>
+          <div class="field-tip">qBittorrent Web UI 地址</div>
         </el-form-item>
 
         <el-form-item label="用户名">
           <el-input v-model="form.user" placeholder="admin" :disabled="!form.enabled">
-            <template #prepend>
-              <el-icon><User /></el-icon>
+            <template #prefix>
+              <PtIcon name="user" :size="14" />
             </template>
           </el-input>
         </el-form-item>
@@ -89,36 +89,25 @@ async function save() {
             show-password
             placeholder="请输入密码"
             :disabled="!form.enabled">
-            <template #prepend>
-              <el-icon><Lock /></el-icon>
+            <template #prefix>
+              <PtIcon name="lock" :size="14" />
             </template>
           </el-input>
         </el-form-item>
-
-        <el-form-item>
-          <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
-        </el-form-item>
       </el-form>
-    </el-card>
+
+      <template #footer>
+        <span class="pt-foot-note">启用时 URL、用户名、密码均为必填</span>
+        <el-button type="primary" :loading="saving" @click="save">
+          <PtIcon name="save" :size="14" /><span>保存设置</span>
+        </el-button>
+      </template>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
-.page-container {
-  width: 100%;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.form-tip {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
+.qbit-page {
+  max-width: 520px;
 }
 </style>

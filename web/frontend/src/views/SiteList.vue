@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { ApiError, type SiteConfig, type SiteLoginState, chatopsApi, sitesApi } from "@/api";
+import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -8,6 +14,7 @@ import { useRouter } from "vue-router";
 import { formatTimeAgo } from "@/utils/format";
 import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
 import { useLoginState } from "@/composables/useLoginState";
+import type { ReminderTier } from "@/composables/useLoginState";
 
 const router = useRouter();
 
@@ -18,6 +25,9 @@ const probing = reactive<Record<string, boolean>>({});
 const testingReminder = reactive<Record<string, boolean>>({});
 const bulkProbing = ref(false);
 const updatingMode = reactive<Record<string, boolean>>({});
+
+/* 风险提示只在本次会话里可关：它讲的是探测机制的固有局限，不是一条会过期的通知 */
+const riskHintOpen = ref(true);
 
 const {
   loginState,
@@ -259,6 +269,11 @@ function getRssCount(site: SiteConfig): number {
   return site.rss?.length || 0;
 }
 
+/* 与 openSite 用同一套取址顺序，否则会出现「按钮可点但打不开」 */
+function siteUrlOf(name: string): string | undefined {
+  return sites.value[name]?.web_url ?? sites.value[name]?.urls?.[0] ?? loginState(name)?.base_url;
+}
+
 const allEntries = computed(() => Object.entries(sites.value));
 
 const enabledCount = computed(() => allEntries.value.filter(([, s]) => s.enabled).length);
@@ -269,6 +284,12 @@ const visibleEntries = computed(() => {
 });
 
 const disabledEntries = computed(() => allEntries.value.filter(([, s]) => !s.enabled));
+
+/* 分段控件上带计数：切过去之前就知道「全部」比「已启用」多出多少 */
+const viewOptions = computed(() => [
+  { label: `已启用 ${enabledCount.value}`, value: "enabled" },
+  { label: `全部 ${allEntries.value.length}`, value: "all" },
+]);
 
 const addCandidates = computed(() => {
   const q = addSearch.value.trim().toLowerCase();
@@ -320,16 +341,19 @@ function authMethodLabel(method?: string): string {
   }
 }
 
-function authMethodTagType(method?: string): "primary" | "success" | "warning" | "info" {
-  switch (method) {
-    case "api_key":
-      return "warning";
-    case "cookie_and_api_key":
-      return "success";
-    case "passkey":
-      return "primary";
-    default:
+/* 保号档位是状态而不是分类，所以走 PtStatusPill；这里把 el-tag 的类型名折到胶囊的语气上 */
+function tierTone(tier: ReminderTier): "ok" | "warn" | "dang" | "info" | "neutral" {
+  switch (tierTagType(tier)) {
+    case "danger":
+      return "dang";
+    case "warning":
+      return "warn";
+    case "primary":
       return "info";
+    case "info":
+      return "neutral";
+    default:
+      return "ok";
   }
 }
 
@@ -424,207 +448,173 @@ async function saveLoginConfig() {
 </script>
 
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">站点管理</h1>
-        <p class="page-subtitle">管理您的 PT 站点连接与 RSS 订阅配置</p>
-      </div>
-      <div class="page-actions">
+  <div class="sites-page">
+    <div v-if="riskHintOpen" class="pt-note pt-note--warn risk-note">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
+        但少数站点按
+        last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，别只看这里的数字。
+      </span>
+      <button
+        type="button"
+        class="risk-note__x"
+        aria-label="关闭提示"
+        @click="riskHintOpen = false">
+        <PtIcon name="x" :size="14" />
+      </button>
+    </div>
+
+    <PtToolbar standalone>
+      <el-segmented
+        v-model="viewMode"
+        class="pt-seg"
+        :options="viewOptions"
+        data-testid="site-view-toggle" />
+      <el-button size="small" :loading="loading" @click="loadSites">
+        <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+      </el-button>
+
+      <template #right>
         <el-tooltip
-          content="对所有已启用站点执行一次登录状态探测；使用现有单站点探测接口，最多 3 个并发"
+          content="对所有已启用站点执行一次登录状态探测，最多 3 个并发"
           placement="bottom">
           <el-button
+            size="small"
             :loading="bulkProbing"
             :disabled="loading || enabledCount === 0"
             data-testid="probe-all-enabled-button"
             @click="probeAllEnabled">
-            一键探测已启用
+            <PtIcon name="activity" :size="14" /><span>探测已启用</span>
           </el-button>
         </el-tooltip>
         <el-button
+          size="small"
           :disabled="enabledCount === 0"
           data-testid="open-all-sites-btn"
           @click="openAllEnabled">
-          一键打开已启用
+          <PtIcon name="external-link" :size="14" /><span>打开已启用</span>
         </el-button>
-        <el-button
-          type="primary"
-          :icon="'Plus'"
-          data-testid="add-site-button"
-          @click="openAddDialog">
-          新增站点
+        <el-button type="primary" size="small" data-testid="add-site-button" @click="openAddDialog">
+          <PtIcon name="plus" :size="14" /><span>新增站点</span>
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PtToolbar>
 
-    <el-alert
-      type="warning"
-      show-icon
-      :closable="true"
-      class="risk-hint-alert"
-      title="活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，请勿仅依赖此处数据。" />
-
-    <div class="table-card" v-loading="loading">
-      <div class="table-card-header">
-        <div class="table-card-header-title">
-          <el-icon class="mr-2"><Connection /></el-icon>
-          站点列表
-        </div>
-        <el-radio-group
-          v-model="viewMode"
-          size="small"
-          data-testid="site-view-toggle"
-          class="view-toggle">
-          <el-radio-button value="enabled">已启用 ({{ enabledCount }})</el-radio-button>
-          <el-radio-button value="all">全部 ({{ allEntries.length }})</el-radio-button>
-        </el-radio-group>
-      </div>
-
+    <PtPanel
+      v-loading="loading"
+      title="站点列表"
+      icon="globe"
+      :count="`${visibleEntries.length} 个`"
+      padding="none">
       <el-table
         :data="visibleEntries"
         :row-key="(row: [string, SiteConfig]) => row[0]"
-        style="width: 100%"
-        class="pt-table site-table"
-        :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }">
+        class="pt-grid"
+        style="width: 100%">
         <template #empty>
-          <el-empty
-            :description="
-              viewMode === 'enabled' ? '尚未启用任何站点，点击右上角「新增站点」开始' : '暂无站点'
+          <PtDataState
+            :state="viewMode === 'enabled' ? 'empty' : 'zero'"
+            dense
+            :title="viewMode === 'enabled' ? '还没有启用任何站点' : '没有可显示的站点'"
+            :sub="
+              viewMode === 'enabled'
+                ? '从「新增站点」里挑一个开始，启用后才会参与 RSS 与统计'
+                : '站点清单来自内置定义，装上浏览器扩展可以帮助适配新站'
             ">
-            <el-button v-if="viewMode === 'enabled'" type="primary" @click="openAddDialog">
-              新增站点
-            </el-button>
-          </el-empty>
+            <template v-if="viewMode === 'enabled'" #action>
+              <el-button type="primary" size="small" @click="openAddDialog">
+                <PtIcon name="plus" :size="14" /><span>新增站点</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
-        <el-table-column type="index" label="#" width="60" align="center" />
 
-        <el-table-column label="站点" min-width="120">
+        <el-table-column label="站点" min-width="170" class-name="pt-cell-strong">
           <template #default="{ row }">
-            <div class="table-cell-primary site-name-wrapper">
-              <span class="site-name">{{ row[0] }}</span>
-            </div>
+            <span class="site">
+              <SiteAvatar :site-id="row[0]" :site-name="row[0]" :size="22" :no-fetch="true" />
+              <span class="site__name">{{ row[0] }}</span>
+              <PtStatusPill v-if="row[1].unavailable" tone="dang" size="sm">暂不可用</PtStatusPill>
+            </span>
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" min-width="78" align="center">
+        <el-table-column label="认证" width="118">
           <template #default="{ row }">
-            <el-tag
-              :type="row[1].enabled ? 'success' : 'info'"
-              size="small"
-              effect="plain"
-              class="status-tag"
-              round>
-              <span class="status-dot" :class="{ active: row[1].enabled }"></span>
-              {{ row[1].enabled ? "已启用" : "未启用" }}
-            </el-tag>
+            <PtTag>{{ authMethodLabel(row[1].auth_method) }}</PtTag>
           </template>
         </el-table-column>
 
-        <el-table-column label="认证方式" min-width="90" align="center">
+        <el-table-column
+          label="RSS"
+          width="78"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num">
           <template #default="{ row }">
-            <el-tag
-              :type="
-                row[1].auth_method === 'api_key'
-                  ? 'warning'
-                  : row[1].auth_method === 'cookie_and_api_key'
-                    ? 'success'
-                    : row[1].auth_method === 'passkey'
-                      ? 'primary'
-                      : 'info'
-              "
-              size="small"
-              effect="light"
-              class="status-tag status-tag--auth"
-              round>
-              {{
-                row[1].auth_method === "api_key"
-                  ? "API Key"
-                  : row[1].auth_method === "cookie_and_api_key"
-                    ? "Cookie + API"
-                    : row[1].auth_method === "passkey"
-                      ? "Passkey"
-                      : "Cookie"
-              }}
-            </el-tag>
+            <span class="rss" :class="{ 'is-zero': getRssCount(row[1]) === 0 }">
+              <PtIcon name="rss" :size="13" />
+              {{ getRssCount(row[1]) }}
+            </span>
           </template>
         </el-table-column>
 
-        <el-table-column label="RSS 订阅" min-width="76" align="center">
-          <template #default="{ row }">
-            <div class="rss-cell">
-              <el-badge
-                :value="getRssCount(row[1])"
-                :type="getRssCount(row[1]) > 0 ? 'primary' : 'info'"
-                class="rss-badge">
-                <div class="rss-icon-wrapper">
-                  <el-icon :size="18"><RssPost /></el-icon>
-                </div>
-              </el-badge>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column min-width="98" align="center">
+        <el-table-column min-width="104" class-name="pt-cell-muted">
           <template #header>
             <el-tooltip
               content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；不是网页登录时间"
               placement="top">
-              <span>判定活跃</span>
+              <span class="th-help">判定活跃 <PtIcon name="info" :size="12" /></span>
             </el-tooltip>
           </template>
           <template #default="{ row }">
-            <span :data-testid="`last-login-cell-${row[0]}`" class="login-time-cell">
+            <span :data-testid="`last-login-cell-${row[0]}`" class="ts">
               {{ formatTimeAgo(effectiveLastActive(row[0])) }}
             </span>
           </template>
         </el-table-column>
 
-        <el-table-column min-width="100" align="center">
+        <el-table-column min-width="118">
           <template #header>
             <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
-              <span>剩余天数</span>
+              <span class="th-help">剩余天数 <PtIcon name="info" :size="12" /></span>
             </el-tooltip>
           </template>
           <template #default="{ row }">
-            <div class="days-remaining-cell">
+            <span class="days">
               <span :data-testid="`days-remaining-cell-${row[0]}`" :class="daysCellClass(row[0])">
                 {{ daysRemaining(row[0]) === null ? "—" : `${daysRemaining(row[0])} 天` }}
               </span>
-              <el-tag
-                size="small"
-                :type="tierTagType(reminderTier(row[0]))"
-                effect="plain"
-                class="tier-tag">
+              <PtStatusPill :tone="tierTone(reminderTier(row[0]))" size="sm">
                 {{ tierLabel(reminderTier(row[0])) }}
-              </el-tag>
-            </div>
+              </PtStatusPill>
+            </span>
           </template>
         </el-table-column>
 
-        <el-table-column min-width="98" align="center">
+        <el-table-column min-width="104" class-name="pt-cell-muted">
           <template #header>
             <el-tooltip
               content="站点/API 返回的原始 last_access 或 lastBrowse 时间"
               placement="top">
-              <span>站点活跃</span>
+              <span class="th-help">站点活跃 <PtIcon name="info" :size="12" /></span>
             </el-tooltip>
           </template>
           <template #default="{ row }">
-            <span :data-testid="`last-access-cell-${row[0]}`" class="login-time-cell">
+            <span :data-testid="`last-access-cell-${row[0]}`" class="ts">
               {{ formatTimeAgo(lastAccess(row[0])) }}
             </span>
           </template>
         </el-table-column>
 
-        <el-table-column label="探测模式" min-width="96" align="center">
+        <el-table-column label="探测" width="104">
           <template #default="{ row }">
             <el-select
               :model-value="probeModeOf(row[0])"
               size="small"
               :disabled="updatingMode[row[0]]"
               :data-testid="`probe-mode-select-${row[0]}`"
-              class="probe-mode-select"
+              class="mode-sel"
               @change="(value: 'auto' | 'manual' | 'disabled') => changeProbeMode(row[0], value)">
               <el-option label="自动" value="auto" />
               <el-option label="手动" value="manual" />
@@ -633,130 +623,163 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="400" align="center" fixed="right">
+        <el-table-column label="启用" width="72" align="center">
           <template #default="{ row }">
-            <div class="table-cell-actions site-actions-nowrap">
-              <el-tooltip
-                :content="
-                  row[1].unavailable ? row[1].unavailable_reason : row[1].enabled ? '禁用' : '启用'
-                "
-                placement="top">
+            <el-tooltip
+              :content="
+                row[1].unavailable
+                  ? row[1].unavailable_reason || '该站点暂不可用'
+                  : row[1].enabled
+                    ? '点一下停用'
+                    : '点一下启用'
+              "
+              placement="top">
+              <span class="sw">
                 <el-switch
                   :model-value="row[1].enabled"
                   size="small"
                   :disabled="row[1].unavailable"
-                  @change="toggleEnabled(row[0])"
-                  style="--el-switch-on-color: var(--pt-color-success)" />
-              </el-tooltip>
-              <el-tooltip
-                content="未配置站点地址"
-                placement="top"
-                :disabled="!!(sites[row[0]]?.urls?.[0] || loginState(row[0])?.base_url)">
-                <span>
-                  <el-button
-                    type="info"
-                    size="small"
-                    text
-                    bg
-                    class="action-btn"
-                    :icon="'TopRight'"
-                    :disabled="!(sites[row[0]]?.urls?.[0] || loginState(row[0])?.base_url)"
-                    :data-testid="`open-site-btn-${row[0]}`"
-                    @click="openSite(row[0])">
-                    打开站点
-                  </el-button>
-                </span>
-              </el-tooltip>
+                  @change="toggleEnabled(row[0])" />
+              </span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+
+        <!--
+          一行有六个动作，写上文字就要 400 宽，把前面几列挤成两行。
+          这里只留图标 + tooltip，图标顺序按使用频率排：先看站点、再探测，删除放最后。
+        -->
+        <el-table-column label="操作" width="212" fixed="right" class-name="pt-cell-act">
+          <template #default="{ row }">
+            <el-tooltip
+              :content="siteUrlOf(row[0]) ? '打开站点' : '未配置站点地址'"
+              placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="打开站点"
+                  :disabled="!siteUrlOf(row[0])"
+                  :data-testid="`open-site-btn-${row[0]}`"
+                  @click="openSite(row[0])">
+                  <PtIcon name="external-link" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+
+            <el-tooltip content="立即探测登录状态" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="立即探测"
+                  :loading="probing[row[0]]"
+                  :disabled="!row[1].enabled || probing[row[0]]"
+                  :data-testid="`probe-button-${row[0]}`"
+                  @click="probeSite(row[0])">
+                  <PtIcon name="activity" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+
+            <el-tooltip content="发一条测试提醒到通知通道" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="测试提醒"
+                  :loading="testingReminder[row[0]]"
+                  :disabled="!row[1].enabled || testingReminder[row[0]]"
+                  :data-testid="`test-reminder-btn-${row[0]}`"
+                  @click="sendTestReminder(row[0])">
+                  <PtIcon name="bell-ring" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+
+            <el-tooltip content="站点配置与 RSS 订阅" placement="top">
               <el-button
-                type="success"
-                size="small"
-                text
-                bg
-                class="action-btn action-btn--probe"
-                :loading="probing[row[0]]"
-                :disabled="!row[1].enabled || probing[row[0]]"
-                :data-testid="`probe-button-${row[0]}`"
-                @click="probeSite(row[0])">
-                立即探测
-              </el-button>
-              <el-button
-                type="warning"
-                size="small"
-                text
-                bg
-                class="action-btn action-btn--test-reminder"
-                :loading="testingReminder[row[0]]"
-                :disabled="!row[1].enabled || testingReminder[row[0]]"
-                :data-testid="`test-reminder-btn-${row[0]}`"
-                @click="sendTestReminder(row[0])">
-                测试提醒
-              </el-button>
-              <el-button
+                link
                 type="primary"
                 size="small"
-                text
-                bg
-                class="action-btn action-btn--config"
+                aria-label="站点配置"
                 @click="manageSite(row[0])">
-                配置
+                <PtIcon name="sliders-horizontal" :size="15" />
               </el-button>
+            </el-tooltip>
+
+            <el-tooltip content="保号配置：封号阈值、提醒时间、通知通道" placement="top">
               <el-button
+                link
                 type="primary"
                 size="small"
-                text
-                bg
-                class="action-btn action-btn--login-config"
+                aria-label="保号配置"
                 :data-testid="`login-config-btn-${row[0]}`"
                 @click="openConfigDialog(row[0])">
-                保号配置
+                <PtIcon name="shield" :size="15" />
               </el-button>
-              <el-button
-                type="danger"
-                size="small"
-                text
-                bg
-                class="action-btn action-btn--delete"
-                :disabled="row[1].is_builtin"
-                @click="deleteSite(row[0])">
-                删除
-              </el-button>
-            </div>
+            </el-tooltip>
+
+            <el-tooltip
+              :content="row[1].is_builtin ? '预置站点不可删除' : '删除站点'"
+              placement="top">
+              <span>
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  aria-label="删除站点"
+                  :disabled="row[1].is_builtin"
+                  @click="deleteSite(row[0])">
+                  <PtIcon name="trash-2" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
-    </div>
+
+      <template v-if="visibleEntries.length > 0" #footer>
+        <span class="pt-foot-note">
+          「判定活跃」是保号判据，「站点活跃」是站点原始返回值，两者不一致时以前者为准
+        </span>
+      </template>
+    </PtPanel>
 
     <el-dialog
       v-model="addDialogVisible"
+      class="pt-dialog"
       title="添加站点"
       width="640px"
+      align-center
       data-testid="add-site-dialog"
-      class="add-site-dialog"
       append-to-body>
       <el-input
         v-model="addSearch"
         placeholder="搜索：站点名称 / 域名"
         clearable
-        :prefix-icon="'Search'"
         data-testid="add-site-search"
-        class="add-site-search" />
+        class="cand-search">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
 
-      <el-scrollbar max-height="420px" class="add-site-scroll">
-        <div v-if="addCandidates.length > 0" class="add-site-list">
-          <div v-for="[name, site] in addCandidates" :key="name" class="add-site-item">
-            <SiteAvatar :site-id="name" :site-name="name" :size="36" :no-fetch="true" />
-            <div class="add-site-meta">
-              <div class="add-site-name">{{ name }}</div>
-              <div class="add-site-tags">
-                <el-tag size="small" :type="authMethodTagType(site.auth_method)" effect="plain">
-                  {{ authMethodLabel(site.auth_method) }}
-                </el-tag>
-                <el-tag v-if="site.unavailable" size="small" type="danger" effect="plain">
-                  暂不可用
-                </el-tag>
-              </div>
-            </div>
-            <div class="add-site-actions">
+      <el-scrollbar max-height="420px">
+        <div v-if="addCandidates.length > 0" class="cands">
+          <div v-for="[name, site] in addCandidates" :key="name" class="cand">
+            <SiteAvatar :site-id="name" :site-name="name" :size="34" :no-fetch="true" />
+            <span class="cand__meta">
+              <span class="cand__name">{{ name }}</span>
+              <span class="cand__tags">
+                <PtTag>{{ authMethodLabel(site.auth_method) }}</PtTag>
+                <PtStatusPill v-if="site.unavailable" tone="dang" size="sm">暂不可用</PtStatusPill>
+              </span>
+            </span>
+            <span class="cand__acts">
               <el-tooltip
                 :disabled="!site.unavailable"
                 :content="site.unavailable_reason || '该站点暂不可用'"
@@ -773,57 +796,69 @@ async function saveLoginConfig() {
                   </el-button>
                 </span>
               </el-tooltip>
-              <el-button size="small" text bg @click="configureFromDialog(name)">配置</el-button>
-            </div>
+              <el-button size="small" @click="configureFromDialog(name)">配置</el-button>
+            </span>
           </div>
         </div>
-        <el-empty v-else :description="addSearch ? '未找到匹配的站点' : '所有支持的站点均已启用'" />
+        <PtDataState
+          v-else
+          :state="addSearch ? 'zero' : 'empty'"
+          :title="addSearch ? '没有匹配的站点' : '支持的站点都已启用'"
+          :sub="addSearch ? '换个名字或域名再搜' : '需要新站点的话，往下看提交入口'" />
       </el-scrollbar>
 
       <template #footer>
-        <div class="add-site-footer">
-          <span class="add-site-hint">
-            需要适配新站点？安装
-            <a href="https://github.com/sunerpy/pt-tools/releases" target="_blank" rel="noopener">
-              浏览器扩展
-            </a>
-            采集数据后按
-            <a
-              href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
-              target="_blank"
-              rel="noopener">
-              指南
-            </a>
-            提交 Issue
-          </span>
-          <el-button @click="addDialogVisible = false">关闭</el-button>
-        </div>
+        <span class="pt-foot-note cand-hint">
+          需要适配新站点？安装
+          <a href="https://github.com/sunerpy/pt-tools/releases" target="_blank" rel="noopener">
+            浏览器扩展
+          </a>
+          采集数据后按
+          <a
+            href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
+            target="_blank"
+            rel="noopener">
+            指南
+          </a>
+          提交 Issue
+        </span>
+        <el-button @click="addDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="configDialogVisible"
-      :title="`保号配置 - ${configSiteName}`"
+      class="pt-dialog"
+      :title="`保号配置 · ${configSiteName}`"
       width="520px"
+      align-center
       data-testid="login-config-dialog"
       append-to-body>
-      <el-form label-width="120px" label-position="right">
-        <el-form-item label="封号判定天数">
-          <el-input-number
-            v-model="configForm.ban_threshold_days"
-            :min="1"
-            :max="365"
-            data-testid="login-config-ban-threshold" />
-          <span class="login-config-hint">不活跃超过此天数将被站点判定封号</span>
-        </el-form-item>
-        <el-form-item label="提前提醒天数">
-          <el-input-number
-            v-model="configForm.remind_before_days"
-            :min="1"
-            :max="365"
-            data-testid="login-config-remind-before" />
-          <span class="login-config-hint">距封号前多少天开始提醒</span>
-        </el-form-item>
+      <el-form class="pt-form" label-position="top" @submit.prevent>
+        <div class="field-row">
+          <el-form-item label="封号判定天数">
+            <el-input-number
+              v-model="configForm.ban_threshold_days"
+              :min="1"
+              :max="365"
+              controls-position="right"
+              style="width: 100%"
+              data-testid="login-config-ban-threshold" />
+            <div class="field-tip">不活跃超过这个天数，站点就可能判定封号</div>
+          </el-form-item>
+
+          <el-form-item label="提前提醒天数">
+            <el-input-number
+              v-model="configForm.remind_before_days"
+              :min="1"
+              :max="365"
+              controls-position="right"
+              style="width: 100%"
+              data-testid="login-config-remind-before" />
+            <div class="field-tip">距封号还剩多少天开始提醒</div>
+          </el-form-item>
+        </div>
+
         <el-form-item>
           <template #label>
             <el-tooltip placement="top">
@@ -833,19 +868,16 @@ async function saveLoginConfig() {
                 示例：<code>0 9 * * *</code> 每天 9 点；<code>0 */6 * * *</code> 每 6 小时；
                 <code>30 8 * * 1</code> 每周一 8:30。
               </template>
-              <span
-                >提醒 cron <el-icon><QuestionFilled /></el-icon
-              ></span>
+              <span class="th-help">提醒 cron <PtIcon name="info" :size="12" /></span>
             </el-tooltip>
           </template>
           <el-input
             v-model="configForm.reminder_cron"
             placeholder="0 10,22 * * *"
             data-testid="login-config-cron" />
-          <span class="login-config-hint"
-            >5 字段 cron（分 时 日 月 周），留空使用默认 0 10,22 * * *</span
-          >
+          <div class="field-tip">5 字段（分 时 日 月 周），留空按默认 0 10,22 * * * 走</div>
         </el-form-item>
+
         <el-form-item label="通知通道">
           <el-select
             v-model="configForm.notification_channel_ids"
@@ -856,18 +888,24 @@ async function saveLoginConfig() {
             data-testid="login-config-channels">
             <el-option v-for="ch in notifyChannels" :key="ch.id" :label="ch.name" :value="ch.id" />
           </el-select>
-          <span class="login-config-hint">
-            未选择 = 发送到所有已启用的通知通道；选择后仅发送到所选通道（且通道需处于启用状态）。
-          </span>
+          <div class="field-tip">
+            选了就只发选中的通道，而且通道本身也得是启用状态；留空则发给所有已启用通道
+          </div>
         </el-form-item>
+
         <el-form-item label="探测模式">
-          <el-select v-model="configForm.probe_mode" data-testid="login-config-probe-mode">
+          <el-select
+            v-model="configForm.probe_mode"
+            style="width: 100%"
+            data-testid="login-config-probe-mode">
             <el-option label="自动" value="auto" />
             <el-option label="手动" value="manual" />
             <el-option label="禁用" value="disabled" />
           </el-select>
+          <div class="field-tip">自动 = 跟随定时任务；手动 = 只在点「立即探测」时执行</div>
         </el-form-item>
       </el-form>
+
       <template #footer>
         <el-button @click="configDialogVisible = false">取消</el-button>
         <el-button
@@ -883,307 +921,163 @@ async function saveLoginConfig() {
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/table-page.css";
-
-.risk-hint-alert {
-  margin-bottom: var(--pt-space-3, 12px);
-}
-
-.risk-hint-alert :deep(.el-alert__title) {
-  font-weight: 600;
-  line-height: 1.6;
-}
-
-.login-config-hint {
-  margin-left: var(--pt-space-2, 8px);
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.site-name-wrapper {
-  display: flex;
-  align-items: center;
-}
-
-.site-name {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--pt-text-primary);
-  text-transform: capitalize;
-}
-
-/* RSS Badge Fixes */
-.rss-cell {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  padding: 4px 8px; /* Add horizontal padding to container */
-  overflow: visible; /* Attempt to allow overflow */
-}
-
-.rss-icon-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-}
-
-/* Ensure badge doesn't fly too far out */
-.rss-badge :deep(.el-badge__content) {
-  top: 0;
-  right: 0;
-  transform: translateY(-30%) translateX(30%); /* Reduce outward push */
-  z-index: 10;
-}
-
-/* Force table cell to allow overflow for the badge */
-:deep(.el-table__body-wrapper .el-table__cell .cell) {
-  overflow: visible;
-}
-
-.mr-2 {
-  margin-right: 8px;
-}
-
-.status-tag {
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  height: 24px;
-}
-
-.status-tag--auth {
-  border-width: 1px;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--pt-color-neutral-400);
-  transition: background-color var(--pt-transition-normal);
-}
-
-.status-dot.active {
-  background-color: var(--pt-color-success);
-  box-shadow: 0 0 0 2px var(--pt-color-success-50);
-}
-
-:deep(.el-table__row) {
-  transition:
-    background-color var(--pt-transition-fast),
-    box-shadow var(--pt-transition-fast);
-}
-
-:deep(.el-table__row:hover) {
-  background-color: color-mix(in srgb, var(--pt-color-primary-50) 60%, var(--pt-bg-secondary));
-}
-
-.action-btn {
-  min-width: 56px;
-  border-radius: var(--pt-radius-md);
-  font-weight: 600;
-  border-width: 1px;
-  border-style: solid;
-  background: var(--pt-bg-surface);
-  transition:
-    transform var(--pt-transition-fast),
-    box-shadow var(--pt-transition-fast);
-}
-
-.action-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--pt-shadow-sm);
-}
-
-.action-btn--probe {
-  min-width: 84px;
-}
-
-.site-actions-nowrap {
-  flex-wrap: nowrap;
-  gap: 4px;
-}
-
-.site-actions-nowrap .action-btn {
-  min-width: 0;
-  padding-left: 7px;
-  padding-right: 7px;
-}
-
-.site-actions-nowrap .action-btn--probe,
-.site-actions-nowrap .action-btn--test-reminder {
-  min-width: 0;
-}
-
-.action-btn--test-reminder {
-  min-width: 84px;
-}
-
-.action-btn--config {
-  color: var(--pt-color-primary);
-  border-color: color-mix(in srgb, var(--pt-color-primary) 38%, var(--pt-border-color));
-  background: color-mix(in srgb, var(--pt-color-primary-50) 82%, var(--pt-bg-surface));
-}
-
-.action-btn--delete {
-  color: var(--pt-color-danger);
-  border-color: color-mix(in srgb, var(--pt-color-danger) 36%, var(--pt-border-color));
-  background: color-mix(in srgb, var(--pt-color-danger-50) 82%, var(--pt-bg-surface));
-}
-
-/* Dark mode adjustments */
-html.dark .site-name {
-  color: var(--pt-text-primary);
-}
-
-html.dark .status-dot.active {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pt-color-success) 30%, transparent);
-}
-
-html.dark .action-btn {
-  color: var(--pt-text-primary);
-  background: color-mix(in srgb, var(--pt-bg-tertiary) 90%, #000 10%);
-  border-color: color-mix(in srgb, var(--pt-border-color) 82%, #fff 12%);
-}
-
-html.dark .action-btn--config {
-  color: color-mix(in srgb, var(--pt-color-primary-100) 90%, #fff 10%);
-  border-color: color-mix(in srgb, var(--pt-color-primary) 40%, var(--pt-border-color));
-  background: color-mix(in srgb, var(--pt-color-primary) 24%, var(--pt-bg-tertiary));
-}
-
-html.dark .action-btn--delete {
-  color: color-mix(in srgb, var(--pt-color-danger-100) 90%, #fff 10%);
-  border-color: color-mix(in srgb, var(--pt-color-danger) 40%, var(--pt-border-color));
-  background: color-mix(in srgb, var(--pt-color-danger) 22%, var(--pt-bg-tertiary));
-}
-
-html.dark :deep(.el-table__row:hover) {
-  background-color: color-mix(in srgb, var(--pt-color-primary-900) 34%, var(--pt-bg-surface));
-}
-
-.view-toggle {
-  flex-shrink: 0;
-}
-
-.add-site-search {
-  margin-bottom: 12px;
-}
-
-.add-site-list {
+.sites-page {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--pt-space-4);
 }
 
-.add-site-item {
-  display: flex;
+.risk-note {
+  align-items: flex-start;
+}
+
+.risk-note__x {
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--pt-t4);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.risk-note__x:hover {
+  color: var(--pt-t2);
+}
+
+.site {
+  display: inline-flex;
+  gap: var(--pt-space-2);
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--pt-border-color);
-  border-radius: var(--pt-radius-md);
-  background: var(--pt-bg-surface);
-  transition:
-    border-color var(--pt-transition-fast),
-    box-shadow var(--pt-transition-fast);
-}
-
-.add-site-item:hover {
-  border-color: color-mix(in srgb, var(--pt-color-primary) 40%, var(--pt-border-color));
-  box-shadow: var(--pt-shadow-sm);
-}
-
-.add-site-meta {
-  flex: 1;
   min-width: 0;
 }
 
-.add-site-name {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--pt-text-primary);
+/* 站点名在定义文件里是小写 id，首字母大写才像个名字 */
+.site__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 
-.add-site-tags {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.add-site-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.add-site-footer {
-  display: flex;
+.rss {
+  display: inline-flex;
+  gap: 4px;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  color: var(--pt-t1);
 }
 
-.add-site-hint {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-  text-align: left;
-  line-height: 1.5;
+.rss.is-zero {
+  color: var(--pt-t4);
 }
 
-.add-site-hint a {
-  color: var(--el-color-primary);
-  text-decoration: none;
+/* 带 tooltip 的表头：虚线下划线提示「这里有解释」，比只放个图标更好点中 */
+.th-help {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  cursor: help;
+  border-bottom: 1px dotted var(--pt-t4);
 }
 
-.add-site-hint a:hover {
-  text-decoration: underline;
-}
-
-.login-time-cell {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
+.ts {
   font-variant-numeric: tabular-nums;
 }
 
-.days-remaining-cell {
+.days {
   display: inline-flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
+  gap: 3px;
+  align-items: flex-start;
 }
 
 .days-remaining-value {
-  font-size: 13px;
+  font-size: var(--pt-fz-sm);
   font-weight: 600;
-  color: var(--pt-text-primary);
+  color: var(--pt-t1);
   font-variant-numeric: tabular-nums;
 }
 
 .days-remaining--warn {
-  color: var(--pt-color-warning);
+  color: var(--pt-warn);
 }
 
 .days-remaining--critical {
-  color: var(--pt-color-danger);
   font-weight: 700;
+  color: var(--pt-dang);
 }
 
-.tier-tag {
-  font-size: 11px;
-  height: 20px;
-  padding: 0 8px;
+.mode-sel {
+  width: 88px;
 }
 
-.probe-mode-select {
-  width: 82px;
+/* el-tooltip 要一个能接事件的宿主，disabled 的开关和按钮自己不派发 mouseenter */
+.sw {
+  display: inline-flex;
+}
+
+.cand-search {
+  margin-bottom: var(--pt-space-3);
+}
+
+.cands {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.cand {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  padding: var(--pt-space-2) var(--pt-space-3);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+  transition: border-color var(--pt-transition-fast);
+}
+
+.cand:hover {
+  border-color: var(--pt-p);
+}
+
+.cand__meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cand__name {
+  font-size: var(--pt-fz-body);
+  font-weight: 600;
+  color: var(--pt-t1);
+  text-transform: capitalize;
+}
+
+.cand__tags {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.cand__acts {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--pt-space-2);
+}
+
+/* 底部提示要占满左侧，按钮靠右：pt-foot-note 自带 margin-right:auto */
+.cand-hint {
+  text-align: left;
+}
+
+.cand-hint a {
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+.cand-hint a:hover {
+  text-decoration: underline;
 }
 </style>

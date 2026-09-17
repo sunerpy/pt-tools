@@ -7,8 +7,14 @@ import {
   userInfoApi,
 } from "@/api";
 import LevelTooltip from "@/components/LevelTooltip.vue";
+import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
-import { useLoginState } from "@/composables/useLoginState";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtKpiBar from "@/components/ui/PtKpiBar.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { type ReminderTier, useLoginState } from "@/composables/useLoginState";
 import { useSiteLevelsStore } from "@/stores/siteLevels";
 import {
   formatBytes,
@@ -34,8 +40,45 @@ const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const isMobile = ref(window.innerWidth < 768);
-const { effectiveLastActive, daysRemaining, reminderTier, tierTagType, tierLabel } =
-  useLoginState(loginStates);
+const { effectiveLastActive, daysRemaining, reminderTier, tierLabel } = useLoginState(loginStates);
+
+/** 两条顶部说明各自可关，关掉后本次会话不再出现（不落盘：换页回来仍要提醒） */
+const extHintOpen = ref(true);
+const riskHintOpen = ref(true);
+
+type PillTone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
+
+/* getRatioType 返回的是 el-tag 的色名，胶囊用语义名，这里换一次 */
+const RATIO_TONE: Record<ReturnType<typeof getRatioType>, PillTone> = {
+  success: "ok",
+  info: "info",
+  warning: "warn",
+  danger: "dang",
+};
+
+function ratioTone(ratio: number): PillTone {
+  return RATIO_TONE[getRatioType(ratio)];
+}
+
+/*
+ * 封禁提醒档位 → 胶囊语义色。useLoginState.tierTagType 给的是 el-tag 的 type，
+ * 其中 none 档返回空串（Element 的默认灰），但「正常」应该是绿的，所以这里另立一张表。
+ */
+const TIER_TONE: Record<ReminderTier, PillTone> = {
+  none: "ok",
+  "pre-warn": "primary",
+  "30d": "primary",
+  "14d": "warn",
+  "7d": "warn",
+  "3d": "dang",
+  "1d": "dang",
+  "banned-imminent": "dang",
+  unknown: "neutral",
+};
+
+function tierTone(site: string): PillTone {
+  return TIER_TONE[reminderTier(site)];
+}
 
 // 定时刷新相关
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5分钟
@@ -47,92 +90,59 @@ function handleResize() {
   isMobile.value = window.innerWidth < 768;
 }
 
-// 计算统计卡片数据
-const statsCards = computed(() => {
-  if (!aggregatedStats.value) return [];
+/**
+ * KPI 条的数据项。结构与 PtKpiBar 的 KpiItem 一致（结构化匹配，不用导出类型）。
+ * 聚合接口只给当前值、没有历史序列，所以这里不传 series —— 柱子宁缺勿造。
+ */
+interface KpiRow {
+  label: string;
+  value: string;
+  icon: string;
+  delta?: string;
+  deltaTone?: "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
+}
+
+const kpiItems = computed<KpiRow[]>(() => {
   const stats = aggregatedStats.value;
-  const cards = [
-    {
-      title: "总上传量",
-      value: formatBytes(stats.totalUploaded),
-      icon: "Upload",
-      type: "success",
-      className: "stat-upload",
-    },
-    {
-      title: "总下载量",
-      value: formatBytes(stats.totalDownloaded),
-      icon: "Download",
-      type: "info",
-      className: "stat-download",
-    },
-    {
-      title: "平均分享率",
-      value: formatRatio(stats.averageRatio),
-      icon: "DataAnalysis",
-      type: stats.averageRatio >= 1 ? "success" : "warning",
-      className: "stat-ratio",
-    },
-    {
-      title: "做种数",
-      value: stats.totalSeeding.toString(),
-      icon: "Connection",
-      type: "success",
-      className: "stat-seeding",
-    },
-    {
-      title: "下载中",
-      value: stats.totalLeeching.toString(),
-      icon: "Loading",
-      type: "info",
-      className: "stat-leeching",
-    },
-    {
-      title: "总魔力值",
-      value: formatNumber(stats.totalBonus),
-      icon: "Star",
-      type: "warning",
-      className: "stat-bonus",
-    },
-    {
-      title: "总时魔/h",
-      value: formatNumber(stats.totalBonusPerHour ?? 0),
-      icon: "Timer",
-      type: "warning",
-      className: "stat-bonus-hour",
-    },
+  if (!stats) return [];
+
+  const items: KpiRow[] = [
+    { label: "总上传量", value: formatBytes(stats.totalUploaded), icon: "upload" },
+    { label: "总下载量", value: formatBytes(stats.totalDownloaded), icon: "download" },
+    { label: "平均分享率", value: formatRatio(stats.averageRatio), icon: "gauge" },
+    { label: "做种数", value: stats.totalSeeding.toString(), icon: "share-2" },
+    { label: "下载中", value: stats.totalLeeching.toString(), icon: "activity" },
+    { label: "总魔力值", value: formatNumber(stats.totalBonus), icon: "star" },
+    { label: "总时魔/h", value: formatNumber(stats.totalBonusPerHour ?? 0), icon: "timer" },
   ];
+
+  // 分享率低于 1 是要动手的信号，挂一枚警示胶囊；健康时不占位
+  if (stats.averageRatio < 1) {
+    const ratio = items.find((i) => i.label === "平均分享率");
+    if (ratio) {
+      ratio.delta = "偏低";
+      ratio.deltaTone = "warn";
+    }
+  }
 
   // 只有当存在做种积分时才显示
   if (stats.totalSeedingBonus && stats.totalSeedingBonus > 0) {
-    cards.push({
-      title: "总做种积分",
+    items.push({
+      label: "总做种积分",
       value: formatNumber(stats.totalSeedingBonus),
-      icon: "Medal",
-      type: "success",
-      className: "stat-seeding-bonus",
+      icon: "medal",
     });
   }
 
-  cards.push(
-    {
-      title: "做种总量",
-      value: formatBytes(stats.totalSeederSize ?? 0),
-      icon: "Upload",
-      type: "success",
-      className: "stat-seeding-size",
-    },
-    {
-      title: "站点数量",
-      value: stats.siteCount.toString(),
-      icon: "OfficeBuilding",
-      type: "info",
-      className: "stat-sites",
-    },
+  items.push(
+    { label: "做种总量", value: formatBytes(stats.totalSeederSize ?? 0), icon: "hard-drive" },
+    { label: "站点数量", value: stats.siteCount.toString(), icon: "globe" },
   );
 
-  return cards;
+  return items;
 });
+
+const siteRows = computed(() => aggregatedStats.value?.perSiteStats ?? []);
 
 // 加载数据
 async function loadData() {
@@ -307,54 +317,55 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page-container">
-    <el-alert type="info" show-icon :closable="true" class="extension-banner">
-      <template #title>
-        <span>
-          推荐安装
-          <a href="https://github.com/sunerpy/pt-tools/releases" target="_blank" rel="noopener">
-            PT Tools Helper 浏览器扩展
-          </a>
-          ：自动同步 Cookie、一键采集新站点数据。
-          <a
-            href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
-            target="_blank"
-            rel="noopener">
-            了解更多
-          </a>
-        </span>
-      </template>
-    </el-alert>
-
-    <el-alert
-      type="warning"
-      show-icon
-      :closable="true"
-      class="risk-hint-alert"
-      title="活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，请勿仅依赖此处数据。" />
-
-    <!-- 统计卡片 -->
-    <div class="dashboard-stats-row">
-      <div
-        v-for="card in statsCards"
-        :key="card.title"
-        class="dashboard-stat-card"
-        :class="[card.type, card.className]">
-        <div class="dashboard-stat-icon">
-          <el-icon><component :is="card.icon" /></el-icon>
-        </div>
-        <div class="dashboard-stat-info">
-          <div class="dashboard-stat-value">{{ card.value }}</div>
-          <div class="dashboard-stat-title">{{ card.title }}</div>
-        </div>
-      </div>
+  <div class="dash">
+    <div v-if="extHintOpen" class="pt-note dash__note">
+      <PtIcon name="info" :size="14" class="pt-note__icon" />
+      <span>
+        推荐安装
+        <a href="https://github.com/sunerpy/pt-tools/releases" target="_blank" rel="noopener">
+          PT Tools Helper 浏览器扩展
+        </a>
+        ：自动同步 Cookie、一键采集新站点数据。
+        <a
+          href="https://github.com/sunerpy/pt-tools/blob/main/docs/guide/request-new-site.md"
+          target="_blank"
+          rel="noopener">
+          了解更多
+        </a>
+      </span>
+      <button type="button" class="dash__note-x" aria-label="关闭提示" @click="extHintOpen = false">
+        <PtIcon name="x" :size="14" />
+      </button>
     </div>
 
+    <div v-if="riskHintOpen" class="pt-note pt-note--warn dash__note">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；
+        但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，
+        请勿仅依赖此处数据。
+      </span>
+      <button
+        type="button"
+        class="dash__note-x"
+        aria-label="关闭提示"
+        @click="riskHintOpen = false">
+        <PtIcon name="x" :size="14" />
+      </button>
+    </div>
+
+    <!-- KPI 指标条（设计稿 G 的 kpiBar）：10 项按 5 列铺成两行 -->
+    <PtKpiBar v-if="kpiItems.length" :items="kpiItems" :cols="5" />
+
     <!-- 站点详情表格 -->
-    <div v-loading="loading" class="dashboard-table-card">
-      <div class="dashboard-card-header">
-        <h3>站点统计详情</h3>
-        <div class="dashboard-header-actions">
+    <PtPanel
+      v-loading="loading"
+      title="站点统计详情"
+      icon="database"
+      :count="siteRows.length"
+      padding="none">
+      <PtToolbar>
+        <template #right>
           <el-tooltip
             :content="autoRefreshEnabled ? '点击关闭自动刷新 (5分钟)' : '点击开启自动刷新'"
             placement="top">
@@ -362,735 +373,799 @@ onUnmounted(() => {
               size="small"
               :type="autoRefreshEnabled ? 'success' : 'info'"
               @click="toggleAutoRefresh">
-              <el-icon><Timer /></el-icon>
-              {{ autoRefreshEnabled ? "自动刷新中" : "自动刷新已关闭" }}
+              <PtIcon name="timer" :size="14" />
+              <span>{{ autoRefreshEnabled ? "自动刷新中" : "自动刷新已关闭" }}</span>
             </el-button>
           </el-tooltip>
-          <el-button size="small" @click="clearCache">清除缓存</el-button>
+          <el-button size="small" @click="clearCache">
+            <PtIcon name="trash-2" :size="14" />
+            <span>清除缓存</span>
+          </el-button>
           <el-button
             size="small"
             data-testid="userinfo-open-all-btn"
-            :disabled="!(aggregatedStats?.perSiteStats?.length ?? 0)"
+            :disabled="!siteRows.length"
             @click="openAllSites">
-            一键打开站点
+            <PtIcon name="external-link" :size="14" />
+            <span>一键打开站点</span>
           </el-button>
           <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
-            <el-icon><Share /></el-icon>
-            导出分享
+            <PtIcon name="share-2" :size="14" />
+            <span>导出分享</span>
           </el-button>
           <el-button size="small" @click="$router.push('/supported-sites')">
-            <el-icon><Collection /></el-icon>
-            已支持站点
+            <PtIcon name="list" :size="14" />
+            <span>已支持站点</span>
           </el-button>
           <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
-            <el-icon><Refresh /></el-icon>
-            同步全部
+            <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
+            <span>同步全部</span>
           </el-button>
-        </div>
-      </div>
+        </template>
+      </PtToolbar>
 
-      <div class="dashboard-card-body">
-        <!-- 桌面端表格视图 -->
-        <el-table
-          v-if="!isMobile"
-          :data="aggregatedStats?.perSiteStats || []"
-          style="width: 100%"
-          :default-sort="{ prop: 'uploaded', order: 'descending' }"
-          stripe
-          highlight-current-row>
-          <!-- 站点列：带消息徽章和悬停效果 -->
-          <el-table-column prop="site" label="站点" min-width="160" sortable fixed="left">
-            <template #default="{ row }">
-              <div class="site-cell">
-                <el-badge
-                  :value="row.unreadMessageCount"
-                  :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
-                  :max="99"
-                  type="danger">
-                  <div class="site-avatar-wrapper" @click.stop="syncSite(row.site)">
-                    <SiteAvatar :site-name="row.site" :site-id="row.site" :size="32" />
-                    <el-icon v-if="syncingSite === row.site" class="sync-icon is-loading">
-                      <Loading />
-                    </el-icon>
-                  </div>
-                </el-badge>
-                <div class="site-info">
-                  <span class="site-name">{{ row.site }}</span>
-                  <span class="user-name">{{ row.username }}</span>
-                </div>
-              </div>
-            </template>
-          </el-table-column>
-
-          <!-- 等级列 -->
-          <el-table-column prop="rank" label="等级" min-width="100" align="center">
-            <template #default="{ row }">
-              <LevelTooltip
-                :site-id="row.site"
-                :current-level-name="row.levelName || row.rank || '-'"
-                :current-level-id="row.levelId" />
-            </template>
-          </el-table-column>
-
-          <!-- 上传/下载量：双行布局带图标 -->
-          <el-table-column prop="uploaded" label="数据量" min-width="140" sortable align="right">
-            <template #default="{ row }">
-              <div class="data-cell">
-                <div class="data-row upload">
-                  <el-icon><Top /></el-icon>
-                  <span>{{ formatBytes(row.uploaded) }}</span>
-                </div>
-                <div class="data-row download">
-                  <el-icon><Bottom /></el-icon>
-                  <span>{{ formatBytes(row.downloaded) }}</span>
-                </div>
-              </div>
-            </template>
-          </el-table-column>
-
-          <!-- 真实数据（如果不同） -->
-          <el-table-column
-            prop="trueUploaded"
-            label="真实数据"
-            min-width="140"
-            sortable
-            align="right">
-            <template #default="{ row }">
-              <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="data-cell">
-                <div class="data-row upload">
-                  <el-icon><Top /></el-icon>
-                  <span>{{ formatBytes(row.trueUploaded) }}</span>
-                </div>
-                <div class="data-row download">
-                  <el-icon><Bottom /></el-icon>
-                  <span>{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
-                </div>
-              </div>
-              <span v-else class="no-data">-</span>
-            </template>
-          </el-table-column>
-
-          <!-- 分享率 -->
-          <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
-            <template #default="{ row }">
-              <el-tag :type="getRatioType(row.ratio)" size="small" effect="plain">
-                {{ formatRatio(row.ratio) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-
-          <!-- 做种数 + H&R -->
-          <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
-            <template #default="{ row }">
-              <div class="seeding-cell">
-                <div class="seeding-count">
-                  <el-tag type="success" size="small" effect="plain">{{ row.seeding }}</el-tag>
-                </div>
-                <div v-if="hasHnR(row)" class="hnr-info">
-                  <el-tooltip
-                    v-if="row.hnrPreWarning > 0"
-                    :content="`H&R 预警: ${row.hnrPreWarning}`">
-                    <span class="hnr-item warning">
-                      <el-icon><Warning /></el-icon>
-                      <span>{{ row.hnrPreWarning }}</span>
-                    </span>
-                  </el-tooltip>
-                  <el-tooltip
-                    v-if="row.hnrUnsatisfied > 0"
-                    :content="`H&R 未满足: ${row.hnrUnsatisfied}`">
-                    <span class="hnr-item danger">
-                      <el-icon><CircleClose /></el-icon>
-                      <span>{{ row.hnrUnsatisfied }}</span>
-                    </span>
-                  </el-tooltip>
-                </div>
-              </div>
-            </template>
-          </el-table-column>
-
-          <!-- 做种体积 -->
-          <el-table-column
-            prop="seederSize"
-            label="做种体积"
-            min-width="110"
-            sortable
-            align="right">
-            <template #default="{ row }">
-              <span class="seeding-size">{{ formatBytes(row.seederSize ?? 0) }}</span>
-            </template>
-          </el-table-column>
-
-          <!-- 魔力值 + 做种积分 -->
-          <el-table-column prop="bonus" label="积分" min-width="140" sortable align="right">
-            <template #default="{ row }">
-              <div class="bonus-cell">
-                <el-tooltip :content="getSiteBonusName(row.site)" placement="left">
-                  <div class="bonus-row">
-                    <span class="value">{{ formatNumber(row.bonus ?? 0) }}</span>
-                    <span class="label">{{ getSiteBonusName(row.site) }}</span>
-                  </div>
-                </el-tooltip>
-                <el-tooltip
-                  v-if="
-                    row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)
-                  "
-                  :content="getSiteSeedingBonusName(row.site) || '做种积分'"
-                  placement="left">
-                  <div class="bonus-row seeding">
-                    <span class="value">{{ formatNumber(row.seedingBonus) }}</span>
-                    <span class="label">{{ getSiteSeedingBonusName(row.site) }}</span>
-                  </div>
-                </el-tooltip>
-              </div>
-            </template>
-          </el-table-column>
-
-          <!-- 时魔 -->
-          <el-table-column
-            prop="bonusPerHour"
-            label="时魔/h"
-            min-width="100"
-            sortable
-            align="right">
-            <template #default="{ row }">
-              <span class="bonus-per-hour">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
-            </template>
-          </el-table-column>
-
-          <!-- 注册时间 -->
-          <el-table-column prop="joinDate" label="入站" min-width="110" sortable align="center">
-            <template #default="{ row }">
-              <el-tooltip v-if="row.joinDate" :content="formatDate(row.joinDate)" placement="top">
-                <span class="join-time">{{ formatJoinDuration(row.joinDate) }}</span>
-              </el-tooltip>
-              <span v-else class="no-data">-</span>
-            </template>
-          </el-table-column>
-
-          <!-- 判定活跃 -->
-          <el-table-column label="判定活跃" min-width="110" align="center">
-            <template #default="{ row }">
-              <span class="login-time">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
-            </template>
-          </el-table-column>
-
-          <!-- 封禁提醒 -->
-          <el-table-column min-width="120" align="center">
-            <template #header>
-              <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
-                <span>剩余天数</span>
-              </el-tooltip>
-            </template>
-            <template #default="{ row }">
-              <div class="days-remaining-cell">
-                <span class="days-remaining-value">
-                  {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
-                </span>
-                <el-tag
-                  size="small"
-                  :type="tierTagType(reminderTier(row.site))"
-                  effect="plain"
-                  class="tier-tag">
-                  {{ tierLabel(reminderTier(row.site)) }}
-                </el-tag>
-              </div>
-            </template>
-          </el-table-column>
-
-          <!-- 更新时间 -->
-          <el-table-column prop="lastUpdate" label="更新" min-width="100" sortable align="center">
-            <template #default="{ row }">
-              <el-tooltip :content="formatTime(row.lastUpdate)" placement="top">
-                <span class="update-time">{{ formatTimeAgo(row.lastUpdate) }}</span>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-
-          <!-- 操作列 -->
-          <el-table-column label="操作" width="170" align="center" fixed="right">
-            <template #default="{ row }">
-              <div class="table-actions">
-                <el-tooltip
-                  content="未配置站点地址"
-                  placement="top"
-                  :disabled="
-                    !!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)
-                  ">
-                  <span>
-                    <el-button
-                      type="info"
-                      size="small"
-                      text
-                      bg
-                      :disabled="
-                        !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
-                      "
-                      :data-testid="`userinfo-open-site-${row.site}`"
-                      @click="openSite(row.site)">
-                      <el-icon><TopRight /></el-icon>
-                      打开站点
-                    </el-button>
-                  </span>
-                </el-tooltip>
-                <el-button
-                  type="primary"
-                  size="small"
-                  circle
-                  :loading="syncingSite === row.site"
-                  @click="syncSite(row.site)">
-                  <el-icon><Refresh /></el-icon>
-                </el-button>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-
-      <!-- 移动端卡片视图 -->
-      <div v-if="isMobile" class="mobile-cards">
-        <div
-          v-for="row in aggregatedStats?.perSiteStats || []"
-          :key="row.site"
-          class="mobile-site-card">
-          <!-- 卡片头部：站点信息 -->
-          <div class="mobile-card-header">
-            <div class="site-info-wrapper">
+      <!-- 桌面端表格视图 -->
+      <el-table
+        v-if="!isMobile"
+        class="pt-grid"
+        :data="siteRows"
+        style="width: 100%"
+        :default-sort="{ prop: 'uploaded', order: 'descending' }"
+        highlight-current-row>
+        <!-- 站点列：带消息徽章和悬停效果 -->
+        <el-table-column prop="site" label="站点" min-width="160" sortable fixed="left">
+          <template #default="{ row }">
+            <div class="site">
               <el-badge
                 :value="row.unreadMessageCount"
                 :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
                 :max="99"
                 type="danger">
-                <div class="site-avatar-wrapper" @click.stop="syncSite(row.site)">
-                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="40" />
-                  <el-icon v-if="syncingSite === row.site" class="sync-icon is-loading">
-                    <Loading />
-                  </el-icon>
-                </div>
+                <button
+                  type="button"
+                  class="site__av"
+                  :aria-label="`同步 ${row.site}`"
+                  @click.stop="syncSite(row.site)">
+                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="32" />
+                  <PtIcon
+                    v-if="syncingSite === row.site"
+                    name="loader-circle"
+                    :size="14"
+                    class="site__spin" />
+                </button>
               </el-badge>
-              <div class="site-details">
-                <span class="site-name">{{ row.site }}</span>
-                <span class="user-name">{{ row.username }}</span>
+              <div class="site__txt">
+                <span class="site__name">{{ row.site }}</span>
+                <span class="site__user">{{ row.username }}</span>
               </div>
             </div>
+          </template>
+        </el-table-column>
+
+        <!-- 等级列 -->
+        <el-table-column prop="rank" label="等级" min-width="100" align="center">
+          <template #default="{ row }">
             <LevelTooltip
               :site-id="row.site"
               :current-level-name="row.levelName || row.rank || '-'"
               :current-level-id="row.levelId" />
-          </div>
+          </template>
+        </el-table-column>
 
-          <!-- 主要数据：上传下载和分享率 -->
-          <div class="mobile-card-main">
-            <div class="data-group">
-              <div class="data-item upload">
-                <el-icon><Top /></el-icon>
-                <span class="value">{{ formatBytes(row.uploaded) }}</span>
-              </div>
-              <div class="data-item download">
-                <el-icon><Bottom /></el-icon>
-                <span class="value">{{ formatBytes(row.downloaded) }}</span>
-              </div>
+        <!-- 上传/下载量：双行布局带图标 -->
+        <el-table-column
+          prop="uploaded"
+          label="数据量"
+          min-width="140"
+          sortable
+          align="right"
+          class-name="pt-cell-num">
+          <template #default="{ row }">
+            <div class="io">
+              <span class="io__r is-up">
+                <PtIcon name="upload" :size="12" />{{ formatBytes(row.uploaded) }}
+              </span>
+              <span class="io__r is-dn">
+                <PtIcon name="download" :size="12" />{{ formatBytes(row.downloaded) }}
+              </span>
             </div>
-            <div class="ratio-display">
-              <el-tag :type="getRatioType(row.ratio)" effect="dark" size="large">
-                {{ formatRatio(row.ratio) }}
-              </el-tag>
-            </div>
-          </div>
+          </template>
+        </el-table-column>
 
-          <!-- 次要数据网格 -->
-          <div class="mobile-card-stats">
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Star /></el-icon>
-                {{ getSiteBonusName(row.site) }}
+        <!-- 真实数据（如果不同） -->
+        <el-table-column
+          prop="trueUploaded"
+          label="真实数据"
+          min-width="140"
+          sortable
+          align="right"
+          class-name="pt-cell-num">
+          <template #default="{ row }">
+            <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="io">
+              <span class="io__r is-up">
+                <PtIcon name="upload" :size="12" />{{ formatBytes(row.trueUploaded) }}
               </span>
-              <span class="value bonus">{{ formatNumber(row.bonus ?? 0) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Timer /></el-icon>
-                时魔/h
-              </span>
-              <span class="value bonus">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Connection /></el-icon>
-                做种
-              </span>
-              <span class="value">
-                {{ row.seeding }}
-                <template v-if="hasHnR(row)">
-                  <el-icon v-if="(row.hnrUnsatisfied ?? 0) > 0" color="#f56c6c">
-                    <CircleClose />
-                  </el-icon>
-                </template>
+              <span class="io__r is-dn">
+                <PtIcon name="download" :size="12" />{{ formatBytes(row.trueDownloaded ?? 0) }}
               </span>
             </div>
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Upload /></el-icon>
-                体积
-              </span>
-              <span class="value seeding">{{ formatBytes(row.seederSize ?? 0) }}</span>
+            <span v-else class="nil">-</span>
+          </template>
+        </el-table-column>
+
+        <!-- 分享率 -->
+        <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
+          <template #default="{ row }">
+            <PtStatusPill :tone="ratioTone(row.ratio)" size="sm">
+              {{ formatRatio(row.ratio) }}
+            </PtStatusPill>
+          </template>
+        </el-table-column>
+
+        <!-- 做种数 + H&R -->
+        <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
+          <template #default="{ row }">
+            <div class="seed">
+              <PtStatusPill tone="ok" size="sm">{{ row.seeding }}</PtStatusPill>
+              <div v-if="hasHnR(row)" class="hnr">
+                <el-tooltip
+                  v-if="row.hnrPreWarning > 0"
+                  :content="`H&R 预警: ${row.hnrPreWarning}`">
+                  <span class="hnr__i is-warn">
+                    <PtIcon name="triangle-alert" :size="12" />{{ row.hnrPreWarning }}
+                  </span>
+                </el-tooltip>
+                <el-tooltip
+                  v-if="row.hnrUnsatisfied > 0"
+                  :content="`H&R 未满足: ${row.hnrUnsatisfied}`">
+                  <span class="hnr__i is-dang">
+                    <PtIcon name="circle-x" :size="12" />{{ row.hnrUnsatisfied }}
+                  </span>
+                </el-tooltip>
+              </div>
             </div>
-            <div
-              v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
-              class="stat-item">
-              <span class="label">
-                <el-icon><Medal /></el-icon>
-                做种积分
+          </template>
+        </el-table-column>
+
+        <!-- 做种体积 -->
+        <el-table-column
+          prop="seederSize"
+          label="做种体积"
+          min-width="110"
+          sortable
+          align="right"
+          class-name="pt-cell-num">
+          <template #default="{ row }">
+            <span class="is-ok">{{ formatBytes(row.seederSize ?? 0) }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 魔力值 + 做种积分 -->
+        <el-table-column
+          prop="bonus"
+          label="积分"
+          min-width="140"
+          sortable
+          align="right"
+          class-name="pt-cell-num">
+          <template #default="{ row }">
+            <div class="bonus">
+              <span class="bonus__r">
+                <span class="bonus__v">{{ formatNumber(row.bonus ?? 0) }}</span>
+                <span class="bonus__l">{{ getSiteBonusName(row.site) }}</span>
               </span>
-              <span class="value seeding">{{ formatNumber(row.seedingBonus) }}</span>
+              <span
+                v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
+                class="bonus__r is-seed">
+                <span class="bonus__v">{{ formatNumber(row.seedingBonus) }}</span>
+                <span class="bonus__l">{{ getSiteSeedingBonusName(row.site) }}</span>
+              </span>
             </div>
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Calendar /></el-icon>
-                入站
-              </span>
-              <span class="value">{{ formatJoinDuration(row.joinDate ?? 0) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Clock /></el-icon>
-                判定活跃
-              </span>
-              <span class="value">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">
-                <el-icon><Warning /></el-icon>
-                剩余天数
-              </span>
-              <span class="value remaining">
+          </template>
+        </el-table-column>
+
+        <!-- 时魔 -->
+        <el-table-column
+          prop="bonusPerHour"
+          label="时魔/h"
+          min-width="100"
+          sortable
+          align="right"
+          class-name="pt-cell-num">
+          <template #default="{ row }">
+            <span class="is-warn">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 注册时间 -->
+        <el-table-column
+          prop="joinDate"
+          label="入站"
+          min-width="110"
+          sortable
+          align="center"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.joinDate" :content="formatDate(row.joinDate)" placement="top">
+              <span class="ts">{{ formatJoinDuration(row.joinDate) }}</span>
+            </el-tooltip>
+            <span v-else class="nil">-</span>
+          </template>
+        </el-table-column>
+
+        <!-- 判定活跃 -->
+        <el-table-column label="判定活跃" min-width="110" align="center" class-name="pt-cell-muted">
+          <template #default="{ row }">
+            <span class="ts">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 封禁提醒 -->
+        <el-table-column min-width="120" align="center">
+          <template #header>
+            <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
+              <span class="th-help">剩余天数</span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">
+            <div class="days">
+              <span class="days__v">
                 {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
               </span>
-              <el-tag
-                size="small"
-                :type="tierTagType(reminderTier(row.site))"
-                effect="plain"
-                class="tier-tag">
+              <PtStatusPill :tone="tierTone(row.site)" size="sm">
                 {{ tierLabel(reminderTier(row.site)) }}
-              </el-tag>
+              </PtStatusPill>
             </div>
-          </div>
+          </template>
+        </el-table-column>
 
-          <!-- 卡片底部：操作和更新时间 -->
-          <div class="mobile-card-footer">
-            <span class="update-info">
-              <el-icon><Clock /></el-icon>
-              {{ formatTimeAgo(row.lastUpdate) }}
-            </span>
-            <div class="mobile-card-actions">
+        <!-- 更新时间 -->
+        <el-table-column
+          prop="lastUpdate"
+          label="更新"
+          min-width="100"
+          sortable
+          align="center"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">
+            <el-tooltip :content="formatTime(row.lastUpdate)" placement="top">
+              <span class="ts">{{ formatTimeAgo(row.lastUpdate) }}</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+
+        <!-- 操作列 -->
+        <el-table-column
+          label="操作"
+          width="150"
+          align="center"
+          fixed="right"
+          class-name="pt-cell-act">
+          <template #default="{ row }">
+            <div class="acts">
               <el-tooltip
                 content="未配置站点地址"
                 placement="top"
                 :disabled="!!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)">
                 <span>
                   <el-button
-                    type="info"
-                    size="small"
-                    round
+                    link
+                    type="primary"
                     :disabled="
                       !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
                     "
                     :data-testid="`userinfo-open-site-${row.site}`"
                     @click="openSite(row.site)">
-                    <el-icon><TopRight /></el-icon>
-                    打开站点
+                    <PtIcon name="external-link" :size="14" /><span>打开</span>
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                link
+                type="primary"
+                :loading="syncingSite === row.site"
+                @click="syncSite(row.site)">
+                <PtIcon v-if="syncingSite !== row.site" name="refresh-cw" :size="14" />
+                <span>同步</span>
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <PtDataState :state="loading ? 'loading' : 'empty'" sub="同步任意站点后这里会出现统计">
+            <template v-if="!loading" #action>
+              <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
+                <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
+                <span>同步全部</span>
+              </el-button>
+            </template>
+          </PtDataState>
+        </template>
+      </el-table>
+
+      <!--
+        移动端卡片视图：13 列的表格在手机上横向滚动没法用，所以 <768px 换成一站一卡。
+        显隐由 v-if 控制而不是 CSS，两套视图不会同时挂在 DOM 上。
+      -->
+      <div v-else class="cards">
+        <PtDataState
+          v-if="!siteRows.length"
+          :state="loading ? 'loading' : 'empty'"
+          sub="同步任意站点后这里会出现统计">
+          <template v-if="!loading" #action>
+            <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
+              <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
+              <span>同步全部</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <article v-for="row in siteRows" :key="row.site" class="card">
+          <header class="card__head">
+            <div class="site">
+              <el-badge
+                :value="row.unreadMessageCount"
+                :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
+                :max="99"
+                type="danger">
+                <button
+                  type="button"
+                  class="site__av"
+                  :aria-label="`同步 ${row.site}`"
+                  @click.stop="syncSite(row.site)">
+                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="40" />
+                  <PtIcon
+                    v-if="syncingSite === row.site"
+                    name="loader-circle"
+                    :size="16"
+                    class="site__spin" />
+                </button>
+              </el-badge>
+              <div class="site__txt">
+                <span class="site__name">{{ row.site }}</span>
+                <span class="site__user">{{ row.username }}</span>
+              </div>
+            </div>
+            <LevelTooltip
+              :site-id="row.site"
+              :current-level-name="row.levelName || row.rank || '-'"
+              :current-level-id="row.levelId" />
+          </header>
+
+          <div class="card__io">
+            <div class="io">
+              <span class="io__r is-up">
+                <PtIcon name="upload" :size="13" />{{ formatBytes(row.uploaded) }}
+              </span>
+              <span class="io__r is-dn">
+                <PtIcon name="download" :size="13" />{{ formatBytes(row.downloaded) }}
+              </span>
+            </div>
+            <PtStatusPill :tone="ratioTone(row.ratio)">{{ formatRatio(row.ratio) }}</PtStatusPill>
+          </div>
+
+          <div class="card__stats">
+            <div class="stat">
+              <span class="stat__l">
+                <PtIcon name="star" :size="11" />{{ getSiteBonusName(row.site) }}
+              </span>
+              <span class="stat__v is-warn">{{ formatNumber(row.bonus ?? 0) }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__l"><PtIcon name="timer" :size="11" />时魔/h</span>
+              <span class="stat__v is-warn">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__l"><PtIcon name="share-2" :size="11" />做种</span>
+              <span class="stat__v">
+                {{ row.seeding }}
+                <PtIcon
+                  v-if="(row.hnrUnsatisfied ?? 0) > 0"
+                  name="circle-x"
+                  :size="12"
+                  class="is-dang" />
+              </span>
+            </div>
+            <div class="stat">
+              <span class="stat__l"><PtIcon name="hard-drive" :size="11" />体积</span>
+              <span class="stat__v is-ok">{{ formatBytes(row.seederSize ?? 0) }}</span>
+            </div>
+            <div
+              v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
+              class="stat">
+              <span class="stat__l"><PtIcon name="medal" :size="11" />做种积分</span>
+              <span class="stat__v is-ok">{{ formatNumber(row.seedingBonus) }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__l"><PtIcon name="calendar" :size="11" />入站</span>
+              <span class="stat__v">{{ formatJoinDuration(row.joinDate ?? 0) }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__l"><PtIcon name="clock" :size="11" />判定活跃</span>
+              <span class="stat__v">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__l"><PtIcon name="triangle-alert" :size="11" />剩余天数</span>
+              <span class="stat__v">
+                {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
+              </span>
+              <PtStatusPill :tone="tierTone(row.site)" size="sm">
+                {{ tierLabel(reminderTier(row.site)) }}
+              </PtStatusPill>
+            </div>
+          </div>
+
+          <footer class="card__foot">
+            <span class="ts card__ts">
+              <PtIcon name="clock" :size="12" />{{ formatTimeAgo(row.lastUpdate) }}
+            </span>
+            <div class="acts">
+              <el-tooltip
+                content="未配置站点地址"
+                placement="top"
+                :disabled="!!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)">
+                <span>
+                  <el-button
+                    size="small"
+                    :disabled="
+                      !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
+                    "
+                    :data-testid="`userinfo-open-site-${row.site}`"
+                    @click="openSite(row.site)">
+                    <PtIcon name="external-link" :size="14" /><span>打开站点</span>
                   </el-button>
                 </span>
               </el-tooltip>
               <el-button
                 type="primary"
                 size="small"
-                round
                 :loading="syncingSite === row.site"
                 @click="syncSite(row.site)">
-                <el-icon><Refresh /></el-icon>
-                同步
+                <PtIcon v-if="syncingSite !== row.site" name="refresh-cw" :size="14" />
+                <span>同步</span>
               </el-button>
             </div>
-          </div>
-        </div>
+          </footer>
+        </article>
       </div>
 
-      <!-- 最后更新时间 -->
-      <div v-if="aggregatedStats" class="last-update">
-        最后更新: {{ formatTime(aggregatedStats.lastUpdate) }}
-      </div>
-    </div>
+      <template v-if="aggregatedStats" #footer>
+        <PtIcon name="clock" :size="13" />
+        <span>最后更新 {{ formatTime(aggregatedStats.lastUpdate) }}</span>
+      </template>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/dashboard.css";
-
-/* Component specific overrides */
-.extension-banner {
-  margin-bottom: 16px;
+/*
+ * 这一页有两套视图：≥768px 走 el-table（皮肤在全局 .pt-grid），<768px 走卡片。
+ * 两边刻意复用同一批单元格类名（.site / .io / .bonus / .acts …），
+ * 改一处颜色两边一起变，不用维护两份语义色。
+ */
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-4);
 }
 
-.risk-hint-alert {
-  margin-bottom: var(--pt-space-3, 12px);
+/* 两条可关提示：.pt-note 默认居中对齐，这里是多行文案，图标要贴顶 */
+.dash__note {
+  align-items: flex-start;
 }
 
-.risk-hint-alert :deep(.el-alert__title) {
+.dash__note a {
   font-weight: 600;
-  line-height: 1.6;
-}
-
-.extension-banner a {
-  color: var(--el-color-primary);
-  font-weight: 600;
+  color: var(--pt-p);
   text-decoration: none;
 }
 
-.extension-banner a:hover {
+.dash__note a:hover {
   text-decoration: underline;
 }
 
-.dashboard-card-body {
-  padding: var(--pt-space-5);
+.dash__note-x {
+  flex-shrink: 0;
+  padding: 0;
+  margin-left: auto;
+  color: var(--pt-t4);
+  cursor: pointer;
+  background: none;
+  border: 0;
 }
 
-.sync-icon {
+.dash__note-x:hover {
+  color: var(--pt-t2);
+}
+
+/* ---- 站点单元格（表格 + 卡片头共用） ---- */
+.site {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  min-width: 0;
+}
+
+/* 头像本身就是「同步本站」的按钮，所以是真 button，键盘可达 */
+.site__av {
+  position: relative;
+  display: block;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-radius-full);
+}
+
+.site__av:hover {
+  opacity: 0.75;
+}
+
+.site__av:focus-visible {
+  outline: 2px solid var(--pt-p);
+  outline-offset: 2px;
+}
+
+/* 同步中的转圈：不再借 el-icon.is-loading，自己转 */
+.site__spin {
   position: absolute;
-  right: -2px;
-  bottom: -2px;
-  background: var(--pt-bg-surface);
-  border-radius: 50%;
-  font-size: 14px;
-  color: var(--pt-color-primary);
-  box-shadow: var(--pt-shadow-sm);
+  top: 50%;
+  left: 50%;
+  color: var(--pt-p);
+  transform: translate(-50%, -50%);
+  animation: dash-spin 1s linear infinite;
 }
 
-.no-data {
-  color: var(--pt-text-tertiary);
+@keyframes dash-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
 }
 
-.table-actions,
-.mobile-card-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--pt-space-2);
-}
-
-.days-remaining-cell {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--pt-space-2);
-}
-
-.days-remaining-value {
-  font-weight: 700;
-  color: var(--pt-text-primary);
-}
-
-.tier-tag {
-  flex: 0 0 auto;
-}
-
-/* Seeding cell styles */
-.seeding-cell {
+.site__txt {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
+  gap: 1px;
+  min-width: 0;
 }
 
-.hnr-info {
-  display: flex;
-  gap: 6px;
-}
-
-.hnr-item {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 12px;
-}
-
-.hnr-item.warning {
-  color: var(--pt-color-warning);
-}
-.hnr-item.danger {
-  color: var(--pt-color-danger);
-}
-
-.seeding-size {
-  color: var(--pt-color-success);
+.site__name {
+  overflow: hidden;
   font-weight: 600;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Bonus row specialized styles */
-.bonus-row {
+.site__user {
+  overflow: hidden;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 上传/下载两行 ---- */
+.io {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+}
+
+.io__r {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.io__r.is-up {
+  color: var(--pt-ok);
+}
+
+.io__r.is-dn {
+  color: var(--pt-dang);
+}
+
+/* 缺值统一用最弱的文字色，避免和真实数字抢注意力 */
+.nil {
+  color: var(--pt-t4);
+}
+
+/* ---- 做种数 + H&R ---- */
+.seed {
+  display: inline-flex;
+  gap: var(--pt-space-2);
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
 }
 
-.bonus-row.seeding .value,
-.bonus-row.seeding .label {
-  color: var(--pt-color-success);
+.hnr {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
 }
 
-.bonus-per-hour {
-  color: var(--pt-color-warning);
+.hnr__i {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  font-size: var(--pt-fz-label);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
 }
 
-/* Time styles */
-.join-time,
-.login-time,
-.update-time {
-  font-size: var(--pt-text-xs);
-  color: var(--pt-text-secondary);
+.is-ok {
+  color: var(--pt-ok);
 }
 
-.last-update {
-  padding: var(--pt-space-4) var(--pt-space-5);
-  text-align: right;
-  font-size: var(--pt-text-xs);
-  color: var(--pt-text-tertiary);
-  border-top: 1px solid var(--pt-border-color);
+.is-warn {
+  color: var(--pt-warn);
 }
 
-/* Mobile specific styling not in dashboard.css */
-.site-info-wrapper {
-  display: flex;
-  align-items: center;
-  gap: var(--pt-space-3);
+.is-dang {
+  color: var(--pt-dang);
 }
 
-.mobile-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--pt-space-4);
-}
-
-.mobile-card-header .site-details {
+/* ---- 积分：值在上、单位名在下 ---- */
+.bonus {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
 }
 
-.mobile-card-header .site-name {
-  font-weight: 700;
-  font-size: var(--pt-text-base);
-  color: var(--pt-text-primary);
+.bonus__r {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
 }
 
-.mobile-card-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--pt-space-3) 0;
-  border-top: 1px solid var(--pt-border-color);
-  border-bottom: 1px solid var(--pt-border-color);
-  margin-bottom: var(--pt-space-2);
+.bonus__v {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-warn);
 }
 
-.data-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-2);
+.bonus__r.is-seed .bonus__v {
+  color: var(--pt-ok);
 }
 
-.data-item {
-  display: flex;
-  align-items: center;
-  gap: var(--pt-space-2);
+.bonus__l {
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-t4);
 }
 
-.data-item.upload .value {
-  color: var(--pt-color-success);
-}
-.data-item.download .value {
-  color: var(--pt-color-danger);
+/* ---- 时间戳与表头提示 ---- */
+.ts {
+  font-variant-numeric: tabular-nums;
 }
 
-.data-item .value {
-  font-size: var(--pt-text-base);
-  font-weight: 700;
-}
-
-.ratio-display .el-tag {
-  font-weight: 700;
-  font-size: var(--pt-text-lg);
-  padding: 0 var(--pt-space-4);
-}
-
-.mobile-card-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
-  border: 1px solid var(--pt-border-color);
-  border-radius: var(--pt-radius-lg);
-  background: color-mix(in srgb, var(--pt-bg-secondary) 75%, var(--pt-color-primary-50));
-}
-
-.stat-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+.th-help {
+  display: inline-flex;
   gap: 3px;
-  min-height: 48px;
-}
-
-.stat-item .label {
-  display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--pt-text-secondary);
-  text-transform: uppercase;
+  cursor: help;
+  border-bottom: 1px dotted var(--pt-t4);
 }
 
-.stat-item .value {
-  font-size: var(--pt-text-sm);
-  font-weight: 700;
-  color: var(--pt-text-primary);
+.days {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
 }
 
-.stat-item .value.bonus {
-  color: var(--pt-color-warning);
-}
-.stat-item .value.seeding {
-  color: var(--pt-color-success);
-}
-.stat-item .value.remaining {
-  color: var(--pt-color-warning);
+.days__v {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t1);
 }
 
-.mobile-card-footer {
+.acts {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+/* ---- 移动端卡片 ---- */
+.cards {
   display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  padding: var(--pt-pad);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  padding: var(--pt-space-3);
+  background: var(--pt-raised);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+}
+
+.card__head {
+  display: flex;
+  gap: var(--pt-space-3);
   align-items: center;
   justify-content: space-between;
-  margin-top: var(--pt-space-3);
-  padding-top: var(--pt-space-3);
-  border-top: 1px solid var(--pt-border-color);
 }
 
-.update-info {
+/* 上传/下载 + 分享率一行：卡片里最想先看到的就是这三个数 */
+.card__io {
   display: flex;
+  gap: var(--pt-space-3);
   align-items: center;
+  justify-content: space-between;
+  padding-top: var(--pt-space-3);
+  border-top: 1px solid var(--pt-border);
+}
+
+.card__io .io {
+  align-items: flex-start;
+  font-size: var(--pt-fz-sm);
+}
+
+.card__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--pt-space-3) var(--pt-space-2);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.stat__l {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  overflow: hidden;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-t3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.stat__v {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t1);
+}
+
+.card__foot {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--pt-space-3);
+  border-top: 1px solid var(--pt-border);
+}
+
+.card__ts {
+  display: inline-flex;
   gap: 4px;
-  font-size: var(--pt-text-xs);
-  color: var(--pt-text-tertiary);
+  align-items: center;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-t3);
 }
 
-html.dark .mobile-card-stats {
-  background: color-mix(in srgb, var(--pt-bg-tertiary) 88%, var(--pt-color-primary-900));
-}
-
+/* 窄屏三列会把「做种积分」这类长标签挤成两行，退成两列 */
 @media (max-width: 480px) {
-  .mobile-card-stats {
-    grid-template-columns: repeat(2, 1fr);
+  .card__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

@@ -1,0 +1,764 @@
+/*
+ * 应用外壳 —— Penpot 页面 G Cockpit 的三段式结构：
+ *   rail 64（深色，只有图标）│ nav 264（浅色，19 个路由）│ main（页头 + 内容）
+ *   底部通栏 status 28（深色）
+ *
+ * 尺寸全部走 theme.scss 的结构令牌，这里不写死像素，改一个数四套配色一起动。
+ * 断点两个：
+ *   ≤1180  导航列退成抽屉（rail 保留，页头出现汉堡按钮）
+ *   ≤768   整套换成移动端外壳（顶栏 88 + 底部 tab 72），rail/nav/status 全部让位
+ *
+ * 单个自洽的小控件（偏好面板）用组件内 scoped 样式；外壳这几块互相咬合、
+ * 又要跨组件写媒体查询，所以集中放这里。
+ */
+
+/* ===========================================================================
+ * 网格骨架
+ * =========================================================================== */
+.pt-shell {
+  display: grid;
+  grid-template-areas:
+    "rail nav main"
+    "status status status";
+  grid-template-columns: var(--pt-rail-w) var(--pt-nav-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--pt-status-h);
+  width: 100%;
+  height: 100vh;
+  /* dvh 让移动端浏览器地址栏收起时不出现一条空白 */
+  height: 100dvh;
+  overflow: hidden;
+  font-family: var(--pt-font-family);
+  color: var(--pt-t1);
+  background: var(--pt-canvas);
+}
+
+.pt-shell__nav-col {
+  grid-area: nav;
+  min-width: 0;
+  background: var(--pt-surface);
+  border-right: 1px solid var(--pt-border);
+}
+
+.pt-shell__main {
+  display: flex;
+  flex-direction: column;
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ===========================================================================
+ * rail —— 深色外壳，8 个快捷入口
+ * =========================================================================== */
+.pt-rail {
+  display: flex;
+  flex-direction: column;
+  grid-area: rail;
+  align-items: center;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3) 0;
+  background: var(--pt-chrome);
+  border-right: 1px solid var(--pt-chrome-border);
+}
+
+.pt-rail__brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--pt-space-2);
+  color: var(--pt-chrome-t1);
+  border-radius: var(--pt-r-md);
+  transition: background var(--pt-transition-fast);
+}
+
+.pt-rail__brand:hover {
+  background: var(--pt-chrome-raised);
+}
+
+.pt-rail__items {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  min-height: 0;
+  overflow: hidden auto;
+  scrollbar-width: none;
+}
+
+.pt-rail__items::-webkit-scrollbar {
+  display: none;
+}
+
+.pt-rail__item,
+.pt-rail__avatar {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--pt-chrome-t2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pt-r-md);
+  cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    background var(--pt-transition-fast);
+}
+
+.pt-rail__item:hover,
+.pt-rail__avatar:hover {
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
+}
+
+.pt-rail__item.is-active {
+  color: var(--pt-p);
+  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+}
+
+/* 左侧 2px 指示条：深色底上单靠色相区分不够，加一条几何标记 */
+.pt-rail__item.is-active::before {
+  position: absolute;
+  left: -12px;
+  width: 2px;
+  height: 20px;
+  content: "";
+  background: var(--pt-p);
+  border-radius: 0 2px 2px 0;
+}
+
+.pt-rail__avatar {
+  margin-top: var(--pt-space-2);
+  border: 1px solid var(--pt-chrome-border);
+}
+
+/* ===========================================================================
+ * nav —— 浅色导航列
+ * =========================================================================== */
+.pt-nav {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.pt-nav__brand {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: var(--pt-head-h);
+  padding: 0 var(--pt-pad);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-nav__brand-name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--pt-t1);
+}
+
+.pt-nav__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--pt-t3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+}
+
+.pt-nav__close:hover {
+  color: var(--pt-t1);
+  background: var(--pt-hover);
+}
+
+.pt-nav__jump {
+  flex: 0 0 auto;
+  padding: var(--pt-space-3) var(--pt-space-3) var(--pt-space-2);
+}
+
+.pt-nav__jump .el-input__prefix {
+  color: var(--pt-t3);
+}
+
+.pt-nav__scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--pt-space-2) var(--pt-space-4);
+  overflow: hidden auto;
+}
+
+.pt-nav__group + .pt-nav__group {
+  margin-top: var(--pt-space-4);
+}
+
+.pt-nav__group-title {
+  margin: 0 0 var(--pt-space-1);
+  padding: 0 var(--pt-space-2);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--pt-t3);
+}
+
+.pt-nav__item {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--pt-space-2);
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
+  text-decoration: none;
+  border-radius: var(--pt-r-sm);
+  transition:
+    color var(--pt-transition-fast),
+    background var(--pt-transition-fast);
+}
+
+.pt-nav__item:hover {
+  color: var(--pt-t1);
+  background: var(--pt-hover);
+}
+
+.pt-nav__item.is-active {
+  font-weight: 600;
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+}
+
+.pt-nav__item-label {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pt-nav__badge {
+  min-width: 20px;
+  padding: 0 5px;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--pt-t3);
+  text-align: center;
+  background: var(--pt-hover);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+}
+
+.pt-nav__item.is-active .pt-nav__badge {
+  color: var(--pt-p);
+  background: var(--pt-surface);
+  border-color: color-mix(in srgb, var(--pt-p) 30%, transparent);
+}
+
+.pt-nav__ext {
+  color: var(--pt-t4);
+}
+
+.pt-nav__empty {
+  margin: var(--pt-space-4) 0 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+  text-align: center;
+}
+
+/* ===========================================================================
+ * 页头 —— 标题 + 面包屑 + （窄屏）汉堡
+ * =========================================================================== */
+.pt-head {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-3);
+  align-items: center;
+  min-height: var(--pt-head-h);
+  padding: 0 var(--pt-space-6);
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+/* 标题 + 面包屑是两行，比单行页头高一档（板 41 量的 88） */
+.pt-head--crumbs {
+  min-height: var(--pt-head-h-crumbs);
+}
+
+.pt-head__toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--pt-t2);
+  background: transparent;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+}
+
+.pt-head__toggle:hover {
+  color: var(--pt-t1);
+  background: var(--pt-hover);
+}
+
+.pt-head__group {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pt-head__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--pt-fz-h1);
+  font-weight: 600;
+  line-height: var(--pt-lh-tight);
+  color: var(--pt-t1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pt-head__crumbs {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+.pt-head__crumbs a {
+  color: var(--pt-t3);
+  text-decoration: none;
+}
+
+.pt-head__crumbs a:hover {
+  color: var(--pt-p);
+}
+
+/* ===========================================================================
+ * 内容区
+ * =========================================================================== */
+.pt-shell__content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+
+.pt-shell__inner {
+  /* G 的主区宽度 1112；再宽的屏幕上不让表格行长到读不完 */
+  max-width: 1440px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: var(--pt-pad) var(--pt-space-6) var(--pt-space-8);
+}
+
+/* ===========================================================================
+ * 底部状态条
+ * =========================================================================== */
+.pt-status {
+  display: flex;
+  grid-area: status;
+  gap: var(--pt-space-4);
+  align-items: center;
+  padding: 0 var(--pt-space-4);
+  overflow: hidden;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-chrome-t2);
+  background: var(--pt-chrome);
+  border-top: 1px solid var(--pt-chrome-border);
+}
+
+.pt-status__cell {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  align-items: center;
+  height: 20px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pt-status__cell.is-stale {
+  opacity: 0.5;
+}
+
+.pt-status__cell--btn {
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+  transition:
+    background var(--pt-transition-fast),
+    color var(--pt-transition-fast);
+}
+
+.pt-status__cell--btn:hover {
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
+}
+
+.pt-status__caret {
+  color: var(--pt-chrome-t2);
+  opacity: 0.7;
+}
+
+.pt-status__spacer {
+  flex: 1;
+}
+
+.pt-status__version {
+  flex: 0 0 auto;
+  color: var(--pt-chrome-t2);
+}
+
+.pt-status__copy {
+  gap: var(--pt-space-2);
+  color: var(--pt-chrome-t2);
+  opacity: 0.75;
+}
+
+.pt-status__copy a {
+  font-weight: 600;
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+.pt-status__copy a:hover {
+  text-decoration: underline;
+}
+
+.pt-status__menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.pt-status__menu .el-button {
+  width: 100%;
+  margin: 0;
+}
+
+/* ===========================================================================
+ * 移动端外壳
+ * =========================================================================== */
+.pt-mchrome,
+.pt-mnav {
+  display: none;
+}
+
+.pt-mchrome {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-direction: column;
+  justify-content: center;
+  height: var(--pt-m-topbar-h);
+  padding: 0 var(--pt-space-4);
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-mchrome__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: 44px;
+}
+
+.pt-mchrome__icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: var(--pt-m-touch);
+  height: var(--pt-m-touch);
+  margin: 0 calc(var(--pt-space-2) * -1);
+  color: var(--pt-t2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pt-r-md);
+  cursor: pointer;
+}
+
+.pt-mchrome__icon:active {
+  background: var(--pt-hover);
+}
+
+.pt-mchrome__brand {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--pt-fz-body);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.pt-mchrome__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--pt-t1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pt-mnav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  height: calc(var(--pt-m-tabbar-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--pt-surface);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-mnav__tab {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  height: var(--pt-m-tabbar-h);
+  font-family: inherit;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.pt-mnav__tab.is-active {
+  font-weight: 600;
+  color: var(--pt-p);
+}
+
+.pt-msheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-5);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pt-msheet__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.pt-msheet__title {
+  margin: 0;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+}
+
+.pt-msheet__items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--pt-space-2);
+}
+
+.pt-msheet__item {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: var(--pt-m-touch);
+  padding: 0 var(--pt-space-3);
+  font-family: inherit;
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
+  text-align: left;
+  background: var(--pt-hover);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+  cursor: pointer;
+}
+
+.pt-msheet__item.is-active {
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+  border-color: color-mix(in srgb, var(--pt-p) 30%, transparent);
+}
+
+.pt-msheet__foot {
+  margin: 0;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t4);
+  text-align: center;
+}
+
+/* ===========================================================================
+ * 沉浸模式 —— 下载器 Web UI 独占整屏（沿用旧行为）
+ * =========================================================================== */
+.pt-shell.is-immersive {
+  grid-template-areas: "main";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.pt-shell.is-immersive > .pt-rail,
+.pt-shell.is-immersive > .pt-shell__nav-col,
+.pt-shell.is-immersive > .pt-status,
+.pt-shell.is-immersive .pt-head,
+.pt-shell.is-immersive .pt-mchrome,
+.pt-shell.is-immersive .pt-mnav {
+  display: none;
+}
+
+/*
+ * 沉浸页要自己撑满整屏，可它上面还压着 v2 升级横幅。inner 的高度是 auto，
+ * 于是页面根节点那句 min-height: 100% 按规范被当作 auto 忽略，空态下面板只有
+ * 内容高，底部露出一条一百多像素的空背景。这里把 inner 变成定高 flex 列，
+ * 让最后一个子节点（路由出来的页面）吃掉横幅之外的剩余高度；用 flex-shrink: 0
+ * 保证内容超高时仍旧照旧溢出滚动，而不是被压扁。
+ */
+.pt-shell.is-immersive .pt-shell__inner {
+  display: flex;
+  height: 100%;
+  max-width: none;
+  flex-direction: column;
+  padding: 0;
+}
+
+.pt-shell.is-immersive .pt-shell__inner > :last-child {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+/* ===========================================================================
+ * 抽屉：≤1180 时导航列浮起来盖在内容上
+ * =========================================================================== */
+/*
+ * 遮罩只在导航列真的浮起来盖住内容时才存在。>1180 时导航列还在栅格里，
+ * 这时 Ctrl/Cmd+K 只是把焦点送进搜索框，不该铺一层 z-40 的遮罩 ——
+ * 那一层会盖在没有 z-index 的导航列上，把搜索框点不动。
+ */
+.pt-shell__scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--pt-scrim) 44%, transparent);
+  border: 0;
+}
+
+@media (max-width: 1180px) {
+  .pt-shell__scrim {
+    display: block;
+  }
+
+  .pt-shell {
+    grid-template-areas:
+      "rail main"
+      "status status";
+    grid-template-columns: var(--pt-rail-w) minmax(0, 1fr);
+  }
+
+  .pt-shell__nav-col {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: var(--pt-rail-w);
+    z-index: 50;
+    width: var(--pt-nav-w);
+    box-shadow: var(--pt-shadow-lg);
+    transition: transform var(--pt-transition-normal);
+    transform: translateX(calc(-100% - var(--pt-rail-w)));
+  }
+
+  .pt-shell.is-nav-open .pt-shell__nav-col {
+    transform: none;
+  }
+
+  .pt-head__toggle {
+    display: flex;
+  }
+
+  .pt-shell__inner {
+    padding-inline: var(--pt-space-4);
+  }
+}
+
+/* ===========================================================================
+ * 移动端：≤768 换外壳
+ * =========================================================================== */
+@media (max-width: 768px) {
+  .pt-shell {
+    grid-template-areas: "main" "status";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 0;
+  }
+
+  .pt-rail,
+  .pt-status {
+    display: none;
+  }
+
+  .pt-shell__nav-col {
+    left: 0;
+    width: min(300px, 86vw);
+    transform: translateX(-100%);
+  }
+
+  .pt-head {
+    display: none;
+  }
+
+  .pt-mchrome {
+    display: flex;
+  }
+
+  .pt-mnav {
+    display: flex;
+  }
+
+  .pt-shell__content {
+    /* 底部 tab 是 fixed 的，内容要让出它的高度，否则最后一行被压住 */
+    padding-bottom: calc(var(--pt-m-tabbar-h) + env(safe-area-inset-bottom));
+  }
+
+  .pt-shell__inner {
+    padding: var(--pt-space-3) var(--pt-space-3) var(--pt-space-6);
+  }
+}
+
+/* ===========================================================================
+ * 路由切换过渡（从 app-layout.css 沿用，页面依赖 fade 这个 name）
+ * =========================================================================== */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--pt-transition-fast);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}

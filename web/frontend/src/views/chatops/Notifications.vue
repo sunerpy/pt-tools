@@ -1,15 +1,35 @@
 <script setup lang="ts">
-import { type NotificationConfig, chatopsApi } from "@/api";
-import { ChatDotRound, Plus } from "@element-plus/icons-vue";
+import { chatopsApi, type NotificationConfig } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+
+/*
+ * 通道类型的图标与色相：四个通道在卡片网格里必须一眼分得开，
+ * 但只用语义色（info / ok / warn / primary），不引入这一页专属的调色板 ——
+ * 四套主题切换时自定义色号会失配。
+ */
+const channelTypeOptions = [
+  { value: "telegram", label: "Telegram", icon: "send", color: "var(--pt-info)" },
+  { value: "qq_onebot", label: "QQ (OneBot)", icon: "message-square", color: "var(--pt-ok)" },
+  { value: "webhook", label: "Webhook", icon: "link", color: "var(--pt-p)" },
+  {
+    value: "wecom_webhook",
+    label: "WeCom Webhook",
+    icon: "message-circle",
+    color: "var(--pt-warn)",
+  },
+];
 
 const router = useRouter();
 const loading = ref(false);
 const notifications = ref<NotificationConfig[]>([]);
 
-// Dialog for adding a new channel
 const addDialogVisible = ref(false);
 const submitting = ref(false);
 
@@ -21,13 +41,6 @@ const newChannel = ref<Partial<NotificationConfig>>({
   endpoint_url: "",
   webhook_key: "",
 });
-
-const channelTypeOptions = [
-  { value: "telegram", label: "Telegram", icon: "ChatDotRound" },
-  { value: "qq_onebot", label: "QQ (OneBot)", icon: "ChatSquare" },
-  { value: "webhook", label: "Webhook", icon: "Link" },
-  { value: "wecom_webhook", label: "WeCom Webhook", icon: "Connection" },
-];
 
 onMounted(async () => {
   await loadNotifications();
@@ -86,13 +99,12 @@ async function handleToggle(row: NotificationConfig) {
     await chatopsApi.notifications.update(row.id, { enabled: row.enabled });
     ElMessage.success(`${row.enabled ? "已启用" : "已停用"} ${row.name}`);
   } catch (e: unknown) {
-    row.enabled = !row.enabled; // revert
+    row.enabled = !row.enabled; // 回滚开关，避免界面和后端不一致
     ElMessage.error((e as Error).message || "操作失败");
   }
 }
 
 function handleEdit(row: NotificationConfig) {
-  // Navigation to details page
   router.push(`/chatops/notifications/${row.id}`);
 }
 
@@ -127,96 +139,103 @@ async function handleDelete(row: NotificationConfig) {
   }
 }
 
+function channelMeta(type: string) {
+  return channelTypeOptions.find((o) => o.value === type);
+}
+
 function getChannelIcon(type: string) {
-  const opt = channelTypeOptions.find((o) => o.value === type);
-  return opt ? opt.icon : "ChatDotRound";
+  return channelMeta(type)?.icon || "bell";
+}
+
+function getChannelColor(type: string) {
+  return channelMeta(type)?.color || "var(--pt-t3)";
 }
 
 function getChannelLabel(type: string) {
-  const opt = channelTypeOptions.find((o) => o.value === type);
-  return opt ? opt.label : type;
+  return channelMeta(type)?.label || type;
 }
 </script>
 
 <template>
-  <div class="page-container">
-    <div class="hero-block">
-      <div class="hero-content">
-        <span class="hero-eyebrow">CHATOPS · NOTIFICATIONS</span>
-        <h1 class="hero-title">通知通道</h1>
-        <p class="hero-subtitle">
-          管理与即时通讯软件的连接，接收系统通知并通过聊天界面控制 pt-tools。
-        </p>
-        <div class="hero-actions">
-          <el-button
-            type="primary"
-            size="large"
-            class="delta-cta"
-            @click="openAddDialog"
-            data-testid="add-channel-btn">
-            <el-icon><Plus /></el-icon>
-            添加通道
-          </el-button>
-          <span class="hero-meta">已配置 {{ notifications.length }} 个通道</span>
-        </div>
-      </div>
-    </div>
+  <div class="notifications-page">
+    <PtToolbar standalone :note="`已配置 ${notifications.length} 个通道`">
+      <template #right>
+        <el-button :loading="loading" @click="loadNotifications">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+        <el-button type="primary" data-testid="add-channel-btn" @click="openAddDialog">
+          <PtIcon name="plus" :size="14" /><span>添加通道</span>
+        </el-button>
+      </template>
+    </PtToolbar>
 
-    <el-skeleton v-if="loading && notifications.length === 0" :rows="6" animated class="mt-4" />
+    <PtDataState
+      v-if="loading && notifications.length === 0"
+      state="loading"
+      sub="正在读取通知通道" />
 
-    <div v-else-if="notifications.length > 0" class="cards-grid">
+    <PtDataState
+      v-else-if="notifications.length === 0"
+      state="empty"
+      title="还没有通知通道"
+      sub="接上 Telegram / QQ / Webhook / 企业微信，就能收到任务结果与告警，也能反过来发命令">
+      <template #action>
+        <el-button type="primary" @click="openAddDialog">
+          <PtIcon name="plus" :size="14" /><span>添加第一个通道</span>
+        </el-button>
+      </template>
+    </PtDataState>
+
+    <div v-else class="ch-grid">
       <article
         v-for="item in notifications"
         :key="item.id"
-        class="channel-card"
+        class="ch-card"
+        :class="{ 'is-off': !item.enabled }"
         :data-testid="`channel-card-${item.name}`">
-        <div class="card-accent" :data-channel="item.channel_type"></div>
-        <div class="card-header">
-          <div class="channel-brand">
-            <el-icon class="brand-icon"
-              ><component :is="getChannelIcon(item.channel_type)"
-            /></el-icon>
-            <span class="brand-name">{{ getChannelLabel(item.channel_type) }}</span>
-          </div>
-          <el-switch v-model="item.enabled" @change="handleToggle(item)" />
-        </div>
+        <header class="ch-card__head">
+          <span class="ch-card__icon" :style="{ '--ch-c': getChannelColor(item.channel_type) }">
+            <PtIcon :name="getChannelIcon(item.channel_type)" :size="16" />
+          </span>
+          <span class="ch-card__name">{{ item.name }}</span>
+          <el-switch v-model="item.enabled" size="small" @change="handleToggle(item)" />
+        </header>
 
-        <div class="card-body">
-          <h3 class="channel-name">{{ item.name }}</h3>
-          <p class="channel-status" :class="{ 'is-active': item.enabled }">
+        <div class="ch-card__meta">
+          <PtTag>{{ getChannelLabel(item.channel_type) }}</PtTag>
+          <PtStatusPill :tone="item.enabled ? 'ok' : 'neutral'" size="sm">
             {{ item.enabled ? "运行中" : "已停用" }}
-          </p>
+          </PtStatusPill>
         </div>
 
-        <div class="card-footer">
-          <el-button size="small" @click="handleEdit(item)">设置</el-button>
-          <el-button size="small" @click="handleTest(item)" :disabled="!item.enabled"
-            >测试</el-button
-          >
-          <div class="spacer"></div>
-          <el-button size="small" type="danger" plain @click="handleDelete(item)">删除</el-button>
-        </div>
+        <footer class="ch-card__acts">
+          <el-button size="small" @click="handleEdit(item)">
+            <PtIcon name="settings" :size="14" /><span>设置</span>
+          </el-button>
+          <el-button size="small" :disabled="!item.enabled" @click="handleTest(item)">
+            <PtIcon name="send" :size="14" /><span>发测试消息</span>
+          </el-button>
+          <el-button
+            link
+            type="danger"
+            size="small"
+            class="ch-card__del"
+            @click="handleDelete(item)">
+            <PtIcon name="trash-2" :size="14" /><span>删除</span>
+          </el-button>
+        </footer>
       </article>
     </div>
 
-    <div v-else class="empty-state">
-      <div class="empty-icon">
-        <el-icon><ChatDotRound /></el-icon>
-      </div>
-      <h3 class="empty-title">尚未配置任何通知通道</h3>
-      <p class="empty-desc">
-        添加 Telegram / QQ / Webhook / 企业微信 通道，让 pt-tools 主动推送任务结果与告警。
-      </p>
-      <el-button type="primary" size="large" class="delta-cta" @click="openAddDialog">
-        <el-icon><Plus /></el-icon>
-        添加第一个通道
-      </el-button>
-    </div>
-
-    <el-dialog v-model="addDialogVisible" title="添加通知通道" width="500px">
-      <el-form label-position="top" @submit.prevent>
+    <el-dialog
+      v-model="addDialogVisible"
+      class="pt-dialog"
+      title="添加通知通道"
+      width="520px"
+      align-center>
+      <el-form class="pt-form" label-position="top" @submit.prevent>
         <el-form-item label="通道类型">
-          <el-select v-model="newChannel.channel_type" class="w-full">
+          <el-select v-model="newChannel.channel_type" style="width: 100%">
             <el-option
               v-for="opt in channelTypeOptions"
               :key="opt.value"
@@ -231,437 +250,146 @@ function getChannelLabel(type: string) {
             v-model="newChannel.name"
             placeholder="例如：我的 Telegram 机器人"
             data-testid="name-input" />
+          <div class="field-tip">只用于在列表里区分通道，随时可改</div>
         </el-form-item>
 
-        <template v-if="newChannel.channel_type === 'telegram'">
-          <el-form-item label="Bot Token" required>
-            <el-input
-              v-model="newChannel.bot_token"
-              type="password"
-              show-password
-              placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-              data-testid="bot-token-input" />
-          </el-form-item>
-        </template>
+        <div class="field-rule"></div>
 
-        <template v-if="newChannel.channel_type === 'webhook'">
-          <el-form-item label="Endpoint URL" required>
-            <el-input v-model="newChannel.endpoint_url" placeholder="https://..." />
-          </el-form-item>
-        </template>
+        <el-form-item v-if="newChannel.channel_type === 'telegram'" label="Bot Token" required>
+          <el-input
+            v-model="newChannel.bot_token"
+            type="password"
+            show-password
+            placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+            data-testid="bot-token-input" />
+          <div class="field-tip">找 <code>@BotFather</code> 创建机器人后拿到的 token</div>
+        </el-form-item>
 
-        <template v-if="newChannel.channel_type === 'wecom_webhook'">
-          <el-form-item label="Webhook Key" required>
-            <el-input v-model="newChannel.webhook_key" placeholder="企业微信群机器人的 key" />
-          </el-form-item>
-        </template>
+        <el-form-item v-if="newChannel.channel_type === 'webhook'" label="Endpoint URL" required>
+          <el-input v-model="newChannel.endpoint_url" placeholder="https://..." />
+          <div class="field-tip">pt-tools 会向这个地址 POST JSON</div>
+        </el-form-item>
+
+        <el-form-item
+          v-if="newChannel.channel_type === 'wecom_webhook'"
+          label="Webhook Key"
+          required>
+          <el-input v-model="newChannel.webhook_key" placeholder="企业微信群机器人的 key" />
+          <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
+        </el-form-item>
+
+        <div v-if="newChannel.channel_type === 'qq_onebot'" class="pt-note">
+          <PtIcon name="info" :size="14" class="pt-note__icon" />
+          <span>OneBot 的连接地址与 token 在通道创建后，到「设置」里补全。</span>
+        </div>
       </el-form>
+
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="addDialogVisible = false">取消</el-button>
-          <el-button
-            type="primary"
-            @click="handleCreate"
-            :loading="submitting"
-            data-testid="save-btn"
-            >确定</el-button
-          >
-        </span>
+        <el-button @click="addDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          data-testid="save-btn"
+          @click="handleCreate">
+          创建通道
+        </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-/* delta-ui-origin polish layer — scoped to chatops/Notifications */
-.page-container {
-  --chatops-brand: oklch(0.66 0.16 50);
-  --chatops-brand-hover: oklch(0.6 0.18 50);
-  --chatops-brand-soft: oklch(0.95 0.04 60);
-  --chatops-stone-muted: oklch(0.55 0.02 60);
-  --chatops-radius-sm: 8px;
-  --chatops-radius-md: 12px;
-  --chatops-radius-lg: 18px;
-  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
-  --chatops-shadow-md: 0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
-  --chatops-shadow-lg: 0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
-  --chatops-glass-bg: oklch(1 0 0 / 0.72);
-  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
-  --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
-  --chatops-grid-color: oklch(0.36 0.006 50 / 0.05);
-  --chatops-bloom-color: oklch(0.66 0.16 50 / 0.1);
-}
-:global(.dark) .page-container,
-:global(html.dark) .page-container {
-  --chatops-brand: oklch(0.72 0.15 55);
-  --chatops-brand-hover: oklch(0.78 0.13 55);
-  --chatops-brand-soft: oklch(0.3 0.05 55 / 0.4);
-  --chatops-stone-muted: oklch(0.65 0.02 70);
-  --chatops-glass-bg: var(--chatops-glass-bg-dk);
-  --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
-  --chatops-grid-color: oklch(0.95 0.005 80 / 0.04);
-  --chatops-bloom-color: oklch(0.72 0.15 55 / 0.14);
-}
-
-.page-container {
-  padding: 16px 24px 32px;
-}
-
-.hero-block {
-  position: relative;
-  padding: 24px 28px;
-  margin-bottom: 24px;
-  border-radius: 14px;
-  background: var(--chatops-glass-bg);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  border: 1px solid var(--pt-border-color);
-  overflow: hidden;
-  box-shadow: var(--chatops-shadow-md);
-}
-
-@media (min-width: 768px) {
-  .hero-block {
-    padding: 28px 32px;
-  }
-}
-
-.hero-block::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, var(--chatops-grid-color) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--chatops-grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
-  pointer-events: none;
-  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  z-index: 0;
-}
-
-.hero-block::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 90% 10%, var(--chatops-bloom-color) 0%, transparent 40%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.hero-block > * {
-  position: relative;
-  z-index: 1;
-}
-
-.hero-content {
-  position: relative;
-  z-index: 1;
+.notifications-page {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 720px;
+  gap: var(--pt-space-4);
 }
 
-.hero-eyebrow {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--chatops-brand);
-  text-transform: uppercase;
-}
-
-.hero-title {
-  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
-  font-size: 1.625rem;
-  font-weight: 700;
-  margin: 0;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
-  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-@media (min-width: 768px) {
-  .hero-title {
-    font-size: 2rem;
-  }
-}
-
-.hero-subtitle {
-  font-size: 0.95rem;
-  color: var(--chatops-stone-muted);
-  margin: 4px 0 0;
-  max-width: 600px;
-  line-height: 1.6;
-}
-
-.hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
-.hero-meta {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-}
-
-/* Primary CTA — delta accent (light touch, only on flagged buttons) */
-.delta-cta.el-button--primary {
-  background: linear-gradient(180deg, var(--chatops-brand), var(--chatops-brand-hover));
-  border-color: var(--chatops-brand);
-  box-shadow: 0 4px 12px oklch(0.66 0.16 50 / 0.3);
-  transition:
-    transform 150ms ease,
-    box-shadow 150ms ease,
-    filter 150ms ease;
-}
-.delta-cta.el-button--primary:hover {
-  filter: brightness(1.04);
-  box-shadow: 0 6px 16px oklch(0.66 0.16 50 / 0.38);
-}
-.delta-cta.el-button--primary:active {
-  transform: translateY(1px);
-}
-
-.cards-grid {
+/* 280 下限：通道名 + 开关一行，再窄开关就会被挤到第二行 */
+.ch-grid {
   display: grid;
-  grid-template-columns: repeat(1, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--pt-space-4);
 }
 
-@media (min-width: 768px) {
-  .cards-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 1024px) {
-  .cards-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.channel-card {
-  position: relative;
-  border-radius: var(--chatops-radius-md);
-  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-  transition:
-    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 200ms ease;
+.ch-card {
   display: flex;
   flex-direction: column;
-  padding: 22px;
-  overflow: hidden;
+  gap: var(--pt-space-3);
+  padding: var(--pt-pad);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-sm);
+  transition:
+    border-color var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast);
 }
 
-.channel-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--chatops-shadow-md);
-  border-color: color-mix(in oklab, var(--chatops-brand) 28%, var(--pt-border-color));
+.ch-card:hover {
+  border-color: var(--pt-p);
+  box-shadow: var(--pt-shadow-md);
 }
 
-.card-accent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--chatops-brand) 0%,
-    color-mix(in oklab, var(--chatops-brand) 40%, transparent) 100%
-  );
-  opacity: 0.9;
+/* 停用的通道压暗，但操作按钮照常可点：删掉它也是一种操作 */
+.ch-card.is-off .ch-card__icon,
+.ch-card.is-off .ch-card__name {
+  opacity: 0.6;
 }
 
-/* Delta-prescribed channel palette */
-.card-accent[data-channel="qq_onebot"] {
-  background: linear-gradient(
-    90deg,
-    oklch(0.65 0.13 145) 0%,
-    color-mix(in oklab, oklch(0.65 0.13 145) 30%, transparent) 100%
-  );
-}
-.card-accent[data-channel="telegram"] {
-  background: linear-gradient(
-    90deg,
-    oklch(0.62 0.13 230) 0%,
-    color-mix(in oklab, oklch(0.62 0.13 230) 30%, transparent) 100%
-  );
-}
-.card-accent[data-channel="wecom_webhook"] {
-  background: linear-gradient(
-    90deg,
-    oklch(0.66 0.16 50) 0%,
-    color-mix(in oklab, oklch(0.66 0.16 50) 30%, transparent) 100%
-  );
-}
-.card-accent[data-channel="webhook"] {
-  background: linear-gradient(
-    90deg,
-    oklch(0.55 0.18 290) 0%,
-    color-mix(in oklab, oklch(0.55 0.18 290) 30%, transparent) 100%
-  );
-}
-
-.card-header {
+.ch-card__head {
   display: flex;
-  justify-content: space-between;
+  gap: var(--pt-space-3);
   align-items: center;
-  margin-bottom: 20px;
 }
 
-.channel-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.brand-icon {
-  font-size: 20px;
-  color: var(--chatops-brand);
-  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
-  padding: 9px;
-  border-radius: 10px;
+/* 图标底色由 --ch-c 兑 12% 出来，四个通道的身份就靠这一枚色块 */
+.ch-card__icon {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--ch-c);
+  background: color-mix(in srgb, var(--ch-c) 12%, transparent);
+  border-radius: var(--pt-r-md);
 }
 
-.brand-name {
+.ch-card__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--pt-fz-h2);
   font-weight: 600;
-  color: var(--chatops-stone-muted);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.card-body {
-  flex: 1;
-  margin-bottom: 24px;
-}
-
-.channel-name {
-  font-size: 19px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  color: var(--pt-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.channel-status {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  margin: 0;
+.ch-card__meta {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+}
+
+/* 操作组贴卡片底部，卡片再高也对齐 */
+.ch-card__acts {
+  display: flex;
+  gap: var(--pt-space-2);
   align-items: center;
-  gap: 8px;
+  margin-top: auto;
+  padding-top: var(--pt-space-3);
+  border-top: 1px solid var(--pt-border);
 }
 
-.channel-status::before {
-  content: "";
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--chatops-stone-muted) 40%, transparent);
+.ch-card__del {
+  margin-left: auto;
 }
 
-.channel-status.is-active::before {
-  background: var(--pt-color-success, #16a34a);
-  box-shadow: 0 0 10px color-mix(in oklab, var(--pt-color-success, #16a34a) 50%, transparent);
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
+@media (max-width: 768px) {
+  .ch-grid {
+    grid-template-columns: 1fr;
   }
-  50% {
-    opacity: 0.7;
-    transform: scale(1.18);
-  }
-}
-
-.card-footer {
-  display: flex;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
-}
-
-.spacer {
-  flex: 1;
-}
-
-/* Element Plus tag radius nudge */
-.channel-card :deep(.el-tag) {
-  border-radius: var(--chatops-radius-sm);
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  padding: 64px 24px;
-  margin: 24px auto;
-  max-width: 520px;
-  text-align: center;
-  border-radius: var(--chatops-radius-lg);
-  background: var(--chatops-glass-bg);
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border: 1px dashed var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-}
-
-.empty-icon {
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
-  color: var(--chatops-brand);
-  font-size: 32px;
-}
-
-.empty-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--pt-text-primary);
-}
-
-.empty-desc {
-  font-size: 14px;
-  color: var(--chatops-stone-muted);
-  margin: 0 0 8px;
-  line-height: 1.65;
-  max-width: 400px;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-.mt-8 {
-  margin-top: 32px;
-}
-.w-full {
-  width: 100%;
 }
 </style>

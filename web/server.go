@@ -27,6 +27,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/version"
 )
 
 type Server struct {
@@ -163,6 +164,14 @@ func (s *Server) Serve(addr string) error {
 	distFS := mustSub(staticFS, "static/dist")
 	assetsServer := http.FileServer(http.FS(distFS))
 	mux.Handle("/assets/", assetsServer)
+	// 登录页是未认证入口，走不了下面那条 "/" 兜底（它会把未登录请求 302 回 /login），
+	// 所以它引用的品牌矢量与站点图标单独开路由。文件仍然只有 dist 里那一份，
+	// 不在 web/static 下再复制一遍，避免两份资产漂移。
+	for _, asset := range []string{"logo.svg", "wordmark.svg", "favicon.ico"} {
+		mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFileFS(w, r, distFS, asset)
+		})
+	}
 	// Legacy static files (for login page CSS) with proper MIME types
 	legacyFS := mustSub(staticFS, "static")
 	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
@@ -260,10 +269,29 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// displayVersion 返回登录页页脚用的版本号。
+func displayVersion() string { return displayVersionOf(version.GetVersionInfo().Version) }
+
+// displayVersionOf 规整版本号：ldflags 没注入时 version.Version 是 "unknown"，
+// 这种情况返回空串，让模板整段省掉版本，而不是在登录页上印一个假版本。
+func displayVersionOf(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" || v == "unknown" {
+		return ""
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
+}
+
 func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		_ = s.tpl.ExecuteTemplate(w, "login", nil)
+		_ = s.tpl.ExecuteTemplate(w, "login", loginPageData{
+			Version: displayVersion(),
+			Year:    time.Now().Year(),
+		})
 	case http.MethodPost:
 		user, pass, err := readLogin(r)
 		if err != nil {
@@ -435,42 +463,198 @@ func verifyLegacyPassword(stored, pw string) bool {
 	return stored == hex.EncodeToString(h[:])
 }
 
+// loginPageData 是 loginHTML 的模板数据。登录页在 SPA 之外，拿不到 /api/version，
+// 所以页脚要的版本号只能在渲染时塞进来。
+type loginPageData struct {
+	// Version 已带 v 前缀；ldflags 没注入时为空串，此时页脚不显示版本段，
+	// 不写一个假版本上去。
+	Version string
+	Year    int
+}
+
+/*
+loginHTML 是登录页模板，设计来源：Penpot 文件 pt-tools / 页面 G Cockpit / 画板 43。
+
+这一页不在 Vue 里，样式走 /static/style.css（那份文件带了与 theme.scss 逐字一致
+的 8 套调色板副本）。<head> 里的内联脚本负责在首帧之前把 SPA 存的主题选择读出来
+落到 <html> 上，所以登录页与主界面永远是同一套明暗与配色。
+
+图标是 lucide 的 24 栅格路径，与 src/icons/lucide.ts 里同名图标逐字相同；
+描边宽 1.75 是 viewBox 用户单位的常数，浏览器按 viewBox 缩放时会自己按比例收，
+不要再乘一遍 size/24（同 PtIcon.ts 的注释）。
+*/
 const loginHTML = `{{define "login"}}
-<!doctype html><html><head><meta charset="utf-8"><title>登录</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/style.css"></head>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>登录 · pt-tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/static/style.css">
+<script>
+/* 首帧之前定主题：与 stores/theme.ts 的读取逻辑一一对应（含旧配色名的迁移表） */
+(function () {
+  var PALETTES = ['cockpit', 'atlas', 'deck', 'halo'];
+  var LEGACY = { default: 'cockpit', ocean: 'cockpit', contrast: 'atlas', graphite: 'deck', emerald: 'cockpit' };
+  var palette = 'cockpit';
+  var mode = 'dark';
+  try {
+    var rawPalette = localStorage.getItem('theme-style');
+    if (rawPalette && PALETTES.indexOf(rawPalette) >= 0) palette = rawPalette;
+    else if (rawPalette && LEGACY[rawPalette]) palette = LEGACY[rawPalette];
+    var rawMode = localStorage.getItem('theme');
+    if (rawMode === 'light' || rawMode === 'dark' || rawMode === 'auto') mode = rawMode;
+  } catch (e) {
+    /* 隐私模式下 localStorage 会抛，用默认值即可 */
+  }
+  var dark = mode === 'auto'
+    ? (window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : true)
+    : mode === 'dark';
+  var root = document.documentElement;
+  root.classList.add(dark ? 'dark' : 'light');
+  root.setAttribute('data-theme-style', palette);
+  root.style.colorScheme = dark ? 'dark' : 'light';
+})();
+</script>
+</head>
 <body class="login-page">
-<main class="login-layout">
-  <div class="login-card">
-    <header class="login-card__header">
+<div class="login-layout">
+  <aside class="login-brand">
+    <img class="login-brand__mark" src="/wordmark.svg" width="232" height="60" alt="pt-tools">
+    <img class="login-brand__badge login-brand__badge--plated" src="/logo.svg" width="52" height="52" alt="pt-tools">
+    <svg class="login-brand__badge login-brand__badge--mono" width="52" height="52" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="pt-tools"><path d="M192 320 L384 512 L192 704" fill="none" stroke="currentColor" stroke-width="128" stroke-linecap="round" stroke-linejoin="round"/><rect x="576" y="384" width="320" height="256" fill="currentColor"/></svg>
+    <p class="login-brand__tagline">集中管理站点、RSS 与下载任务</p>
+    <ul class="login-brand__features">
+      <li class="login-feature">
+        <span class="login-feature__tile" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"/></svg>
+        </span>
+        <span>
+          <p class="login-feature__title">RSS 自动推送</p>
+          <p class="login-feature__desc">按站点规则抓取、过滤，推送到绑定的下载器</p>
+        </span>
+      </li>
+      <li class="login-feature">
+        <span class="login-feature__tile" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        </span>
+        <span>
+          <p class="login-feature__title">磁盘与容量守门</p>
+          <p class="login-feature__desc">推送前校验剩余空间与站点做种上限，失败即拒</p>
+        </span>
+      </li>
+      <li class="login-feature">
+        <span class="login-feature__tile" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
+        </span>
+        <span>
+          <p class="login-feature__title">ChatOps 双向指令</p>
+          <p class="login-feature__desc">Telegram / 企业微信 等通道收发与操作审计</p>
+        </span>
+      </li>
+    </ul>
+    <p class="login-brand__foot">{{if .Version}}{{.Version}} · {{end}}单用户模式 · © {{.Year}} pt-tools</p>
+  </aside>
+
+  <main class="login-main">
+    <div class="login-card">
       <p class="login-eyebrow">PT TOOLS</p>
       <h1 class="login-title">欢迎登录</h1>
       <p class="login-subtitle">集中管理站点、RSS 与下载任务</p>
-    </header>
-    <form id="loginForm" method="post" class="login-form">
-      <label for="username" class="login-label">用户名</label>
-      <input id="username" name="username" placeholder="用户名" value="admin" autocomplete="username"/>
-      <label for="password" class="login-label">密码</label>
-      <input id="password" name="password" type="password" placeholder="密码" autocomplete="current-password"/>
-      <div class="login-actions">
-        <button type="submit" class="login-button">登录</button>
+
+      <div id="loginAlert" class="login-alert" role="alert">
+        <svg id="loginAlertDang" class="login-alert__icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        <svg id="loginAlertWarn" class="login-alert__icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <span id="loginAlertText"></span>
       </div>
-    </form>
-  </div>
-</main>
+
+      <form id="loginForm" method="post" class="login-form">
+        <div class="login-field">
+          <label class="login-label" for="username">用户名<span class="login-label__req" aria-hidden="true">*</span></label>
+          <div class="login-input">
+            <svg class="login-input__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <input id="username" name="username" value="admin" required autocomplete="username" placeholder="用户名">
+          </div>
+        </div>
+
+        <div class="login-field">
+          <label class="login-label" for="password">密码<span class="login-label__req" aria-hidden="true">*</span></label>
+          <div class="login-input login-input--pass">
+            <svg class="login-input__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="密码">
+            <button type="button" class="login-reveal" data-for="password" aria-label="显示密码">
+              <svg data-eye="on" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg data-eye="off" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <button id="loginSubmit" type="submit" class="login-button">登录</button>
+      </form>
+
+      <p class="login-foot">首次启动会自动创建 admin / adminadmin，登录后请立刻在「修改密码」里更换。</p>
+    </div>
+  </main>
+</div>
 <script>
-  const form = document.getElementById('loginForm');
-  form.addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    const fd = new FormData(form);
-    try{
-      const r = await fetch('/login', {method:'POST', body: fd});
-      if(!r.ok){ const msg = await r.text(); alert(msg || '密码错误'); return; }
-      location.href = '/';
-    }catch(err){ alert('登录失败: '+(err?.message||'未知错误')); }
+(function () {
+  var form = document.getElementById('loginForm');
+  var submit = document.getElementById('loginSubmit');
+  var box = document.getElementById('loginAlert');
+  var boxText = document.getElementById('loginAlertText');
+  var iconDang = document.getElementById('loginAlertDang');
+  var iconWarn = document.getElementById('loginAlertWarn');
+
+  /* 画板 43 的两个失败态：用户不存在走 warn + triangle-alert，其余走 dang + circle-alert。
+     后端返回的是纯文本，除这两条以外原样显示（例如「用户名或密码为空」）。 */
+  function showError(raw) {
+    var msg = (raw || '').trim();
+    var missing = msg.indexOf('用户不存在') >= 0;
+    if (msg === '' || msg === '密码错误') msg = '用户名或密码错误';
+    boxText.textContent = msg;
+    if (missing) box.classList.add('login-alert--warn');
+    else box.classList.remove('login-alert--warn');
+    iconDang.hidden = missing;
+    iconWarn.hidden = !missing;
+    box.classList.add('is-open');
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.login-reveal'), function (btn) {
+    btn.addEventListener('click', function () {
+      var input = document.getElementById(btn.getAttribute('data-for'));
+      var reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      btn.setAttribute('aria-label', reveal ? '隐藏密码' : '显示密码');
+      btn.querySelector('[data-eye="on"]').hidden = reveal;
+      btn.querySelector('[data-eye="off"]').hidden = !reveal;
+      input.focus();
+    });
   });
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    box.classList.remove('is-open');
+    submit.disabled = true;
+    fetch('/login', { method: 'POST', body: new FormData(form) })
+      .then(function (r) {
+        if (r.ok) {
+          location.href = '/';
+          return null;
+        }
+        return r.text().then(showError);
+      })
+      .catch(function (err) {
+        showError('登录失败：' + ((err && err.message) || '网络不可达'));
+      })
+      .then(function () {
+        submit.disabled = false;
+      });
+  });
+})();
 </script>
-</body></html>{{end}}`
+</body>
+</html>{{end}}`
 
 // JSON APIs
 func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {

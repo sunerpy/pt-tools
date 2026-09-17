@@ -344,29 +344,35 @@ watch(
 </template>
 
 <style scoped>
+/*
+ * 虚拟表格是手写的 grid，不走 .pt-grid 皮肤（那层挂在 el-table 上）。
+ * 这里刻意保持和 .pt-grid 一致的度量：表头 30 高走 hover 底 + borderStrong 下沿，
+ * 行线走 border，字号 13/表头 11，读起来才和其他页的网格是同一张表。
+ */
 .virtual-table {
   min-width: max-content;
-  color: #dce8e2;
+  font-size: var(--pt-fz-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t2);
 }
 
 .vt-header,
 .vt-row {
   display: grid;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--pt-border);
 }
 
 .vt-header {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #2f5e50;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.vt-row {
-  background: rgba(255, 255, 255, 0.01);
+  height: var(--pt-row-head-h);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+  border-bottom: 1px solid var(--pt-border-strong);
 }
 
 .vt-row.row-compact {
@@ -377,11 +383,11 @@ watch(
 }
 
 .vt-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--pt-hover);
 }
 
 .vt-cell {
-  padding: 6px 10px;
+  padding: 0 var(--pt-space-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -392,23 +398,29 @@ watch(
   user-select: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--pt-space-2);
+  height: 100%;
 }
 
 .vt-header .vt-cell.sortable:hover {
-  color: #f4fff9;
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--pt-t1);
 }
 
 .sort-indicator {
-  font-size: 12px;
-  color: #8fdcc4;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-p);
 }
 
 .vt-checkbox {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 原生复选框：这里用不起 el-checkbox（一屏上千个组件实例），accent-color 就够换色 */
+.vt-checkbox input {
+  accent-color: var(--pt-p);
+  cursor: pointer;
 }
 
 .align-left {
@@ -421,127 +433,121 @@ watch(
   text-align: center;
 }
 
+/* 状态色条：下载=ok、做种=info、暂停=warn、错误=dang，其余走最弱的文字色 */
 .status-bar {
-  width: 4px;
+  width: 3px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--pt-radius-full);
   margin: 0 auto;
 }
 
 .state-downloading .status-bar {
-  background: #7aca47;
+  background: var(--pt-ok);
 }
 .state-seeding .status-bar {
-  background: #00b3fa;
+  background: var(--pt-info);
 }
 .state-paused .status-bar {
-  background: #f57c00;
+  background: var(--pt-warn);
 }
 .state-error .status-bar {
-  background: #d32f2f;
+  background: var(--pt-dang);
 }
 .state-unknown .status-bar {
-  background: #616161;
+  background: var(--pt-t4);
 }
 
+/*
+ * 进度条这里没有换成 PtProgress：虚拟列表一屏能画上千行，
+ * 每行多一个组件实例比多两个 div 贵得多，度量照 PtProgress 抄就够了。
+ */
 .progress-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--pt-space-2);
 }
 
 .progress-track {
   flex: 1;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  height: 5px;
+  border-radius: var(--pt-radius-full);
+  background: var(--pt-border-strong);
+}
+
+html.dark .progress-track {
+  background: var(--pt-border);
 }
 
 .progress-fill {
   display: block;
   height: 100%;
-  border-radius: 999px;
-  background: #64ceaa;
+  border-radius: inherit;
+  background: var(--pt-p);
 }
 
-.vt-action-header,
-.vt-action-cell {
-  background-color: #2f5e50;
-}
-
-.vt-row:hover .vt-action-cell {
-  background-color: rgba(100, 206, 170, 0.08);
+.progress-cell span {
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t2);
 }
 
 .detail-btn {
   border: none;
   background: transparent;
-  color: #8dd9c1;
+  color: var(--pt-p);
+  font-size: var(--pt-fz-sm);
   cursor: pointer;
 }
 
+.detail-btn:hover {
+  text-decoration: underline;
+}
+
+/* 右键菜单被 teleport 到 body，但仍带作用域属性；配色只能用全局令牌 */
 .table-context-menu {
   position: fixed;
   z-index: 3000;
   min-width: 180px;
-  background: #306052;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
+  padding: var(--pt-space-1);
+  font-size: var(--pt-fz-sm);
+  background: var(--pt-raised);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-lg);
 }
 
 .menu-group-title {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  padding: var(--pt-space-2) var(--pt-space-2) var(--pt-space-1);
+  font-size: var(--pt-fz-label);
   font-weight: 600;
-  padding: 4px 8px 2px;
+  color: var(--pt-t3);
 }
 
 .menu-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  margin: 2px 0;
+  margin: var(--pt-space-1) 0;
+  background: var(--pt-border);
 }
 
 .table-context-menu button {
   text-align: left;
   border: none;
   background: transparent;
-  color: #e0e0e0;
-  border-radius: 8px;
-  padding: 8px 10px;
+  color: var(--pt-t1);
+  font-size: var(--pt-fz-sm);
+  border-radius: var(--pt-r-sm);
+  padding: 6px var(--pt-space-2);
   cursor: pointer;
 }
 
 .table-context-menu button:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--pt-hover);
 }
 
 .table-context-menu button.danger {
-  color: #f56c6c;
-}
-
-.progress-cell span {
-  color: #e8f6ef;
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.progress-track {
-  flex: 1;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.progress-fill {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: #64ceaa;
+  color: var(--pt-dang);
 }
 </style>

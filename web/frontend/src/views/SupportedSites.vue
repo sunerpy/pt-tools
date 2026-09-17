@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { type SupportedSiteDefinition, sitesApi } from "@/api";
+import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -70,16 +75,15 @@ function authMethodLabel(m?: string): string {
   }
 }
 
-function authMethodTagType(m?: string): "primary" | "success" | "warning" | "info" {
+/** 认证方式的语义色：cookie 是最常见的基线，走 primary；组合认证配置成本最高，走 warn */
+function authMethodTone(m?: string): "primary" | "ok" | "warn" | "info" {
   switch (m) {
     case "cookie":
       return "primary";
     case "api_key":
-      return "success";
+      return "ok";
     case "cookie_and_api_key":
-      return "warning";
-    case "passkey":
-      return "info";
+      return "warn";
     default:
       return "info";
   }
@@ -92,29 +96,17 @@ function clearFilters() {
 </script>
 
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">已支持站点</h1>
-        <p class="page-subtitle">
-          pt-tools 当前已适配
-          <strong>{{ totalCount }}</strong>
-          个站点。点击站点 URL 可前往官方主页注册或登录。
-        </p>
-      </div>
-      <div class="page-actions">
-        <el-button :icon="'Refresh'" :loading="loading" @click="loadDefinitions">刷新</el-button>
-        <el-button type="primary" @click="$router.push('/sites')">前往站点管理</el-button>
-      </div>
-    </div>
-
-    <div class="filter-bar">
+  <div class="supported-sites-page">
+    <PtToolbar standalone>
       <el-input
         v-model="search"
         placeholder="搜索：名称 / ID / 别名 / 域名"
         clearable
-        :prefix-icon="'Search'"
-        class="filter-input" />
+        class="filter-input">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
       <el-select v-model="schemaFilter" placeholder="按架构筛选" clearable class="filter-select">
         <el-option
           v-for="opt in schemaOptions"
@@ -122,229 +114,229 @@ function clearFilters() {
           :label="`${opt.schema} (${opt.count})`"
           :value="opt.schema" />
       </el-select>
-      <el-button v-if="search || schemaFilter" :icon="'Close'" @click="clearFilters">
-        清空筛选
+      <el-button v-if="search || schemaFilter" @click="clearFilters">
+        <PtIcon name="x" :size="14" /><span>清空筛选</span>
       </el-button>
-      <div class="result-count">
-        显示
-        <strong>{{ filteredCount }}</strong>
-        / {{ totalCount }} 站点
-        <span v-if="unavailableCount > 0" class="unavailable-hint">
-          （其中 {{ unavailableCount }} 个临时不可用）
-        </span>
-      </div>
-    </div>
 
-    <el-skeleton v-if="loading && definitions.length === 0" :rows="6" animated />
+      <template #note>
+        显示 {{ filteredCount }} / {{ totalCount }} 个站点
+        <template v-if="unavailableCount > 0">
+          ，其中
+          <span class="unavailable-hint">{{ unavailableCount }} 个临时不可用</span>
+        </template>
+      </template>
+
+      <template #right>
+        <el-button :loading="loading" @click="loadDefinitions">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+        <el-button type="primary" @click="$router.push('/sites')">
+          <PtIcon name="settings" :size="14" /><span>站点管理</span>
+        </el-button>
+      </template>
+    </PtToolbar>
+
+    <PtDataState
+      v-if="loading && definitions.length === 0"
+      state="loading"
+      sub="正在读取站点定义" />
+    <PtDataState
+      v-else-if="filtered.length === 0"
+      :state="definitions.length === 0 ? 'empty' : 'zero'"
+      sub="换个关键词，或清空架构筛选">
+      <template v-if="definitions.length > 0" #action>
+        <el-button @click="clearFilters">
+          <PtIcon name="x" :size="14" /><span>清空筛选</span>
+        </el-button>
+      </template>
+    </PtDataState>
 
     <div v-else class="site-grid">
-      <el-card
+      <article
         v-for="def in filtered"
         :key="def.id"
         class="site-card"
-        :class="{ 'is-unavailable': def.unavailable }"
-        shadow="hover">
-        <div class="site-card-header">
-          <SiteAvatar :site-id="def.id" :site-name="def.name" :size="40" :no-fetch="true" />
-          <div class="site-name-block">
-            <div class="site-name">
-              {{ def.name }}
-              <el-tag v-if="def.unavailable" type="danger" size="small" class="status-tag">
-                不可用
-              </el-tag>
+        :class="{ 'is-unavailable': def.unavailable }">
+        <header class="site-card__head">
+          <SiteAvatar :site-id="def.id" :site-name="def.name" :size="34" :no-fetch="true" />
+          <div class="site-card__ident">
+            <div class="site-card__name">
+              <span>{{ def.name }}</span>
+              <PtStatusPill v-if="def.unavailable" tone="dang" size="sm">不可用</PtStatusPill>
             </div>
-            <div v-if="def.aka && def.aka.length > 0" class="site-aka">
+            <div v-if="def.aka && def.aka.length > 0" class="site-card__aka">
               {{ def.aka.join(" / ") }}
             </div>
           </div>
+        </header>
+
+        <p v-if="def.description" class="site-card__desc">{{ def.description }}</p>
+
+        <div v-if="def.unavailable && def.unavailableReason" class="pt-note pt-note--dang">
+          <PtIcon name="circle-alert" :size="14" class="pt-note__icon" />
+          <span>{{ def.unavailableReason }}</span>
         </div>
 
-        <div v-if="def.description" class="site-description">
-          {{ def.description }}
-        </div>
-        <div v-if="def.unavailable && def.unavailableReason" class="unavailable-reason">
-          {{ def.unavailableReason }}
-        </div>
-
-        <div class="site-tags">
-          <el-tag size="small" type="primary" effect="plain">{{ def.schema }}</el-tag>
-          <el-tag size="small" :type="authMethodTagType(def.authMethod)" effect="plain">
+        <div class="site-card__tags">
+          <PtTag>{{ def.schema }}</PtTag>
+          <PtStatusPill :tone="authMethodTone(def.authMethod)" size="sm">
             {{ authMethodLabel(def.authMethod) }}
-          </el-tag>
-          <el-tag v-if="def.hrEnabled" size="small" type="warning" effect="plain">H&amp;R</el-tag>
+          </PtStatusPill>
+          <PtStatusPill v-if="def.hrEnabled" tone="warn" size="sm">H&amp;R</PtStatusPill>
         </div>
 
-        <div v-if="def.urls.length > 0" class="site-urls">
+        <footer v-if="def.urls.length > 0" class="site-card__urls">
           <a
             v-for="url in def.urls"
             :key="url"
             :href="url"
             target="_blank"
-            rel="noopener noreferrer"
-            class="site-url-link">
-            {{ url.replace(/^https?:\/\//, "").replace(/\/$/, "") }}
+            rel="noopener noreferrer">
+            <PtIcon name="external-link" :size="12" />
+            <span>{{ url.replace(/^https?:\/\//, "").replace(/\/$/, "") }}</span>
           </a>
-        </div>
-      </el-card>
-
-      <el-empty v-if="!loading && filtered.length === 0" description="未找到匹配的站点" />
+        </footer>
+      </article>
     </div>
   </div>
 </template>
 
 <style scoped>
-.page-container {
-  padding: 16px 24px 32px;
-}
-
-.page-header {
+.supported-sites-page {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: var(--pt-text-primary);
-}
-
-.page-subtitle {
-  margin: 0;
-  color: var(--pt-text-secondary);
-  font-size: 13px;
-}
-
-.page-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.filter-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 20px;
-  padding: 12px 16px;
-  background: var(--pt-bg-elevated, #fafafa);
-  border-radius: 8px;
+  flex-direction: column;
+  gap: var(--pt-space-4);
 }
 
 .filter-input {
-  flex: 1;
-  min-width: 240px;
-  max-width: 360px;
+  flex: 1 1 240px;
+  max-width: 320px;
 }
 
 .filter-select {
-  min-width: 200px;
-}
-
-.result-count {
-  margin-left: auto;
-  color: var(--pt-text-secondary);
-  font-size: 13px;
+  width: 180px;
 }
 
 .unavailable-hint {
-  color: var(--el-color-danger);
+  color: var(--pt-dang);
 }
 
+/* 320 下限：站点名 + 不可用胶囊 + 两行简介压在更窄的格子里会连续折行 */
 .site-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
+  gap: var(--pt-space-4);
 }
 
 .site-card {
   display: flex;
   flex-direction: column;
+  gap: var(--pt-space-3);
+  padding: var(--pt-pad);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-sm);
+  transition:
+    border-color var(--pt-transition-fast),
+    box-shadow var(--pt-transition-fast);
 }
 
+.site-card:hover {
+  border-color: var(--pt-p);
+  box-shadow: var(--pt-shadow-md);
+}
+
+/* 不可用站点压暗而不是隐藏：用户需要知道它存在、以及为什么用不了 */
 .site-card.is-unavailable {
-  opacity: 0.7;
+  opacity: 0.66;
 }
 
-.site-card-header {
+.site-card__head {
   display: flex;
+  gap: var(--pt-space-3);
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
 }
 
-.site-name-block {
-  flex: 1;
+.site-card__ident {
   min-width: 0;
 }
 
-.site-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--pt-text-primary);
+.site-card__name {
   display: flex;
+  gap: 6px;
   align-items: center;
-  gap: 8px;
+  font-size: var(--pt-fz-h2);
+  font-weight: 600;
+  color: var(--pt-t1);
 }
 
-.status-tag {
-  flex-shrink: 0;
-}
-
-.site-aka {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-  margin-top: 2px;
-  white-space: nowrap;
+.site-card__name > span {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.site-description {
-  color: var(--pt-text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-  margin-bottom: 12px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.site-card__aka {
+  margin-top: 1px;
   overflow: hidden;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.unavailable-reason {
-  font-size: 12px;
-  color: var(--el-color-danger);
-  background: var(--el-color-danger-light-9);
-  padding: 6px 10px;
-  border-radius: 4px;
-  margin-bottom: 12px;
+/* 简介限两行：卡片高度参差不齐时网格会看起来是碎的 */
+.site-card__desc {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--pt-fz-body);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t3);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.site-tags {
+.site-card__tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--pt-space-2);
 }
 
-.site-urls {
+/* URL 组贴卡片底部，卡片再高也对齐 */
+.site-card__urls {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--pt-space-2);
+  border-top: 1px solid var(--pt-border);
 }
 
-.site-url-link {
-  color: var(--el-color-primary);
+.site-card__urls a {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-p);
   text-decoration: none;
   word-break: break-all;
 }
 
-.site-url-link:hover {
+.site-card__urls a:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .filter-input,
+  .filter-select {
+    max-width: none;
+    width: 100%;
+  }
+
+  .site-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

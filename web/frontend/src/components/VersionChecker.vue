@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import PtIcon from "@/components/PtIcon";
 import { useVersionStore } from "@/stores/version";
 import { formatDate } from "@/utils/format";
-import { Check, Close, Download, Link, Promotion, Refresh } from "@element-plus/icons-vue";
 import DOMPurify from "dompurify";
 import { ElMessageBox } from "element-plus";
 import { marked } from "marked";
@@ -112,28 +112,41 @@ function prereleaseLabelText(label?: string): string {
   if (!label) return "预发版";
   return label.toUpperCase();
 }
+
+/**
+ * compact：给底部状态条用的紧凑触发器。状态条只有 28px 高，两行的
+ * 「版本 / v0.47.3」按钮塞不进去，所以去掉「版本」二字、缩掉图标底圈，
+ * popover 内容完全不变（板 42 就是这一版 420 宽的面板）。
+ */
+defineProps<{ compact?: boolean }>();
 </script>
 
 <template>
-  <el-popover placement="bottom" :width="420" trigger="click" popper-class="version-popover">
+  <el-popover
+    :placement="compact ? 'top-end' : 'bottom'"
+    :width="420"
+    trigger="click"
+    popper-class="version-popover">
     <template #reference>
       <el-button
         class="version-btn"
-        :class="{ 'has-update': hasUpdate, 'has-prerelease': onlyPrereleaseUpdates }"
+        :class="{
+          'has-update': hasUpdate,
+          'has-prerelease': onlyPrereleaseUpdates,
+          'is-compact': compact,
+        }"
         text>
         <div class="btn-content">
           <span class="version-icon-wrap">
-            <el-icon :class="{ 'is-checking': checking }">
-              <Promotion v-if="!checking" />
-              <Refresh v-else />
-            </el-icon>
+            <PtIcon v-if="!checking" name="rocket" :size="15" />
+            <PtIcon v-else name="loader-circle" :size="15" class="pt-spin" />
             <span
               v-if="hasUpdate"
               class="update-dot"
               :class="{ 'is-prerelease': onlyPrereleaseUpdates }"></span>
           </span>
           <span class="version-meta">
-            <span class="version-label">版本</span>
+            <span v-if="!compact" class="version-label">版本</span>
             <span class="version-text">{{ currentVersion }}</span>
           </span>
         </div>
@@ -160,10 +173,11 @@ function prereleaseLabelText(label?: string): string {
           <el-button
             size="small"
             :loading="checking"
-            :icon="Refresh"
             circle
             @click="handleCheckUpdate"
-            title="检查更新" />
+            title="检查更新">
+            <PtIcon v-if="!checking" name="refresh-cw" :size="14" />
+          </el-button>
         </div>
       </div>
 
@@ -184,13 +198,14 @@ function prereleaseLabelText(label?: string): string {
       </div>
 
       <div v-if="showProxyInput" class="proxy-section">
-        <el-input v-model="proxyUrl" size="medium" placeholder="http://proxy:port" clearable />
+        <el-input v-model="proxyUrl" size="small" placeholder="http://proxy:port" clearable />
       </div>
 
       <div class="status-container">
-        <div v-if="isDocker" class="docker-info">
-          <el-alert type="info" :closable="false" show-icon>
-            <template #title>Docker 环境检测</template>
+        <div v-if="isDocker" class="pt-note docker-info">
+          <PtIcon name="package" :size="14" class="pt-note__icon" />
+          <div class="note-body">
+            <strong>Docker 环境检测</strong>
             <p>当前运行在 Docker 容器中。推荐使用以下方式更新：</p>
             <ul>
               <li>
@@ -200,7 +215,7 @@ function prereleaseLabelText(label?: string): string {
               </li>
               <li>或手动拉取新镜像: <code>docker pull sunerpy/pt-tools:latest</code></li>
             </ul>
-          </el-alert>
+          </div>
         </div>
 
         <div v-if="upgrading && upgradeProgress" class="upgrade-progress">
@@ -228,12 +243,12 @@ function prereleaseLabelText(label?: string): string {
         </div>
 
         <div v-if="checking && !hasUpdate" class="status-state loading">
-          <el-icon class="is-loading"><Refresh /></el-icon>
+          <PtIcon name="loader-circle" :size="16" class="pt-spin" />
           <span>正在检查更新...</span>
         </div>
 
         <div v-else-if="!hasUpdate && !allDismissed && checkResult" class="status-state latest">
-          <el-icon class="success-icon"><Check /></el-icon>
+          <PtIcon name="circle-check" :size="20" class="success-icon" />
           <div class="text-group">
             <span class="primary">当前已是最新版本</span>
             <span class="secondary">版本 {{ currentVersion }}</span>
@@ -268,17 +283,15 @@ function prereleaseLabelText(label?: string): string {
             <el-tag v-else type="success" size="small" effect="dark">发现新版本</el-tag>
           </div>
 
-          <el-alert
-            v-if="hasPrereleaseUpdate"
-            type="warning"
-            :closable="false"
-            show-icon
-            class="prerelease-notice">
-            <template #title>预发布版本提示</template>
-            <span>
-              预发版本用于真实环境验证，可能存在已知/未知问题。<strong>非必要请等待正式版发布后再升级</strong>；生产环境请关闭上方开关以隐藏预发版。
-            </span>
-          </el-alert>
+          <div v-if="hasPrereleaseUpdate" class="pt-note pt-note--warn prerelease-notice">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <div class="note-body">
+              <strong>预发布版本提示</strong>
+              <span>
+                预发版本用于真实环境验证，可能存在已知/未知问题。<strong>非必要请等待正式版发布后再升级</strong>；生产环境请关闭上方开关以隐藏预发版。
+              </span>
+            </div>
+          </div>
 
           <div
             v-for="release in visibleReleases.slice(0, 3)"
@@ -313,10 +326,10 @@ function prereleaseLabelText(label?: string): string {
                   v-if="canSelfUpgrade"
                   :type="release.prerelease ? 'warning' : 'primary'"
                   size="small"
-                  :icon="Download"
                   :disabled="upgrading"
                   @click="handleUpgrade(release.version, !!release.prerelease)">
-                  {{ release.prerelease ? "升级到预发版" : "升级" }}
+                  <PtIcon name="download" :size="14" />
+                  <span>{{ release.prerelease ? "升级到预发版" : "升级" }}</span>
                 </el-button>
                 <el-link
                   v-if="release.url"
@@ -325,7 +338,7 @@ function prereleaseLabelText(label?: string): string {
                   type="primary"
                   :underline="false"
                   class="action-link">
-                  <el-icon><Link /></el-icon>
+                  <PtIcon name="link" :size="13" />
                   查看
                 </el-link>
                 <el-link
@@ -333,7 +346,7 @@ function prereleaseLabelText(label?: string): string {
                   :underline="false"
                   class="action-link"
                   @click="handleDismiss(release.version)">
-                  <el-icon><Close /></el-icon>
+                  <PtIcon name="x" :size="13" />
                   忽略
                 </el-link>
               </div>
@@ -342,7 +355,7 @@ function prereleaseLabelText(label?: string): string {
 
           <div v-if="hasMoreReleases || changelogUrl" class="more-releases">
             <el-link :href="changelogUrl" target="_blank" type="primary">
-              查看完整更新日志 <el-icon class="el-icon--right"><Link /></el-icon>
+              查看完整更新日志 <PtIcon name="external-link" :size="13" />
             </el-link>
           </div>
         </div>

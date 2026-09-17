@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { logsApi, type LogsResponse } from "@/api";
-import { Bottom, Refresh, Top } from "@element-plus/icons-vue";
+import PtIcon from "@/components/PtIcon";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
@@ -310,44 +313,33 @@ function scrollToTop() {
 </script>
 
 <template>
-  <div class="page-container log-viewer-page">
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">日志查看</h1>
-        <div class="page-subtitle" style="display: flex; gap: 8px; align-items: center">
-          <el-tag
-            v-if="truncated"
-            type="warning"
-            size="small"
-            effect="plain"
-            class="status-badge status-badge--warning">
-            已截断（最近 5000 行）
-          </el-tag>
-          <el-tag type="info" size="small" effect="plain" class="status-badge status-badge--info">
-            {{ logs.length }} 行
-          </el-tag>
-          <span v-if="logPath" class="log-path-text">{{ logPath }}</span>
-        </div>
-      </div>
-      <div class="page-actions">
-        <el-checkbox v-model="autoScroll" label="自动滚动" size="default" class="control-check" />
-        <el-checkbox v-model="autoRefresh" label="自动刷新" size="default" class="control-check" />
-        <el-button-group class="scroll-button-group">
-          <el-button :icon="Top" class="scroll-btn" @click="scrollToTop">顶部</el-button>
-          <el-button :icon="Bottom" class="scroll-btn" @click="scrollToBottom">底部</el-button>
-        </el-button-group>
-        <el-button
-          type="primary"
-          class="refresh-btn"
-          :icon="Refresh"
-          :loading="loading"
-          @click="loadLogs">
-          刷新
-        </el-button>
-      </div>
-    </div>
+  <div class="log-viewer-page">
+    <PtPanel title="运行日志" icon="scroll-text" :count="`${logs.length} 行`" padding="none">
+      <template #actions>
+        <PtStatusPill v-if="truncated" tone="warn" size="sm">已截断（最近 5000 行）</PtStatusPill>
+      </template>
 
-    <div class="log-card">
+      <PtToolbar>
+        <el-checkbox v-model="autoScroll">自动滚动</el-checkbox>
+        <el-checkbox v-model="autoRefresh">自动刷新（15s）</el-checkbox>
+
+        <template v-if="logPath" #note>
+          <code class="log-path">{{ logPath }}</code>
+        </template>
+
+        <template #right>
+          <el-button @click="scrollToTop">
+            <PtIcon name="chevron-up" :size="14" /><span>顶部</span>
+          </el-button>
+          <el-button @click="scrollToBottom">
+            <PtIcon name="chevron-down" :size="14" /><span>底部</span>
+          </el-button>
+          <el-button type="primary" :loading="loading" @click="loadLogs">
+            <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+          </el-button>
+        </template>
+      </PtToolbar>
+
       <div ref="logContainer" class="log-container" @scroll="onLogScroll">
         <pre
           v-if="logs.length"
@@ -363,13 +355,54 @@ function scrollToTop() {
         </pre>
         <pre v-else class="log-content"><code class="log-line">暂无日志</code></pre>
       </div>
-    </div>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/log-viewer-page.css";
+.log-path {
+  padding: 1px 6px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+/*
+ * 视口高度而不是 100% ：日志区是页面里唯一需要自己滚的块，撑满剩余空间要让
+ * 从 App 的滚动容器一路到这里的每一层都参与 flex 高度计算。clamp 只依赖视口，
+ * 上下限保证矮窗口里还看得见几十行、超宽屏上不会拉成一条几千像素的长条。
+ */
+.log-container {
+  height: clamp(360px, calc(100dvh - 320px), 1100px);
+  overflow: auto;
+  font-family: var(--pt-font-mono);
+  color: var(--pt-t1);
+  background: var(--pt-canvas);
+}
+
+.log-content {
+  position: relative;
+  margin: 0;
+  padding: var(--pt-space-3) var(--pt-pad);
+  font-family: inherit;
+  font-size: var(--pt-fz-label);
+  line-height: 1.55;
+  white-space: pre;
+}
+
+/* 逐行 block ：虚拟滚动靠固定行高换算 scrollTop，行内换行会让换算漂移 */
+.log-content .log-line {
+  display: block;
+  font-family: inherit;
+  white-space: pre;
+}
+
+@media (max-width: 768px) {
+  .log-container {
+    height: clamp(300px, calc(100dvh - 260px), 900px);
+  }
+}
 </style>
 
 <style>

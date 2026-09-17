@@ -1,332 +1,155 @@
 <script setup lang="ts">
-import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { controlApi } from "./api";
-import VersionChecker from "./components/VersionChecker.vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import PtIcon from "./components/PtIcon";
+import AppNav from "./components/shell/AppNav.vue";
+import AppRail from "./components/shell/AppRail.vue";
+import AppStatusBar from "./components/shell/AppStatusBar.vue";
+import MobileChrome from "./components/shell/MobileChrome.vue";
 import V2DeprecationBanner from "./components/V2DeprecationBanner.vue";
+import { activeNavPath, NAV_GROUPS, NAV_ITEMS } from "./config/navigation";
 import { useLogLevelStore } from "./stores/logLevel";
-import { useThemeStore } from "./stores/theme";
+import { useRuntimeStore } from "./stores/runtime";
 import { useVersionStore } from "./stores/version";
 
+/**
+ * 应用外壳 —— Penpot 页面 G Cockpit 板 41（全局外壳）。
+ *
+ * 旧顶栏的七个全局控件按板 41 的落位表分散到三处，没有一个丢掉：
+ *   停止/启动任务、版本与更新  → 底部状态条（AppStatusBar）
+ *   明暗、配色、日志级别、退出登录 → rail 头像 popover（ThemePrefs）
+ *   标题 + 面包屑                  → 本文件的页头
+ */
 const route = useRoute();
-const router = useRouter();
-const themeStore = useThemeStore();
 const logLevelStore = useLogLevelStore();
 const versionStore = useVersionStore();
+const runtimeStore = useRuntimeStore();
 
-const isCollapse = ref(false);
-const stopLoading = ref(false);
-const startLoading = ref(false);
+const navOpen = ref(false);
+const navRef = ref<InstanceType<typeof AppNav> | null>(null);
 
-const themeStyleOptions = [
-  { label: "默认配色", value: "default" },
-  { label: "海洋配色", value: "ocean" },
-  { label: "石墨配色", value: "graphite" },
-  { label: "极光配色", value: "contrast" },
-  { label: "翡翠配色", value: "emerald" },
-];
-
-// 路由 name -> 侧栏菜单 index 的映射。
-// 当路由 name 与菜单 index 不一致（例如详情页、ChatOps 子路由）时在此显式映射。
-const routeNameToMenuIndex: Record<string, string> = {
-  "userinfo-export": "userinfo",
-  "site-detail": "sites",
-  notifications: "chatops/notifications",
-  "notification-detail": "chatops/notifications",
-  bindings: "chatops/bindings",
-  "audit-log": "chatops/audit",
-  "rss-notifications": "chatops/rss-notifications",
-};
-
-const activeMenu = computed(() => {
-  const name = route.name as string | undefined;
-  // 路由尚未就绪（首屏挂载第一帧）时返回空串，避免错误地高亮「全局设置」造成闪烁。
-  if (!name) return "";
-  return routeNameToMenuIndex[name] ?? name;
-});
+/** 下载器 Web UI 是独立控制台，整屏让给它（沿用旧的 is-immersive 行为） */
 const isImmersive = computed(() => route.name === "downloader-hub");
-const footerYear = computed(() => {
-  const browserYear = new Date().getFullYear();
-  const buildTime = versionStore.versionInfo?.build_time;
-  if (!buildTime || buildTime === "unknown") return browserYear;
-  const buildYear = new Date(buildTime).getFullYear();
-  return Number.isFinite(buildYear) ? Math.max(browserYear, buildYear) : browserYear;
+
+const activePath = computed(() => activeNavPath(route.name));
+
+const navItem = computed(() => NAV_ITEMS.find((i) => i.path === activePath.value));
+
+const groupTitle = computed(
+  () => NAV_GROUPS.find((g) => g.items.some((i) => i.path === activePath.value))?.title ?? "",
+);
+
+const pageTitle = computed(() => {
+  const metaTitle = route.meta.title;
+  if (typeof metaTitle === "string" && metaTitle) return metaTitle;
+  return navItem.value?.label ?? "pt-tools";
 });
+
+const crumbs = computed(() => {
+  const out: { label: string; to?: string }[] = [{ label: "首页", to: "/userinfo" }];
+  if (groupTitle.value) out.push({ label: groupTitle.value });
+  if (navItem.value && navItem.value.label !== pageTitle.value) {
+    out.push({ label: navItem.value.label, to: navItem.value.path });
+  }
+  out.push({ label: pageTitle.value });
+  return out;
+});
+
+function onKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    navOpen.value = true;
+    navRef.value?.focusSearch();
+    return;
+  }
+  if (e.key === "Escape" && navOpen.value) navOpen.value = false;
+}
 
 onMounted(() => {
   logLevelStore.fetchLogLevel();
   versionStore.fetchVersionInfo();
   versionStore.checkForUpdates(undefined, true);
+  runtimeStore.startPolling();
+  window.addEventListener("keydown", onKeydown);
 });
 
-// 监听主题变化，切换 Element Plus 暗色模式
+onBeforeUnmount(() => {
+  runtimeStore.stopPolling();
+  window.removeEventListener("keydown", onKeydown);
+});
+
+// 标签页标题跟着路由走，多开几个页签时能分清
 watch(
-  () => themeStore.isDark,
-  (isDark) => {
-    document.documentElement.classList.toggle("dark", isDark);
+  pageTitle,
+  (t) => {
+    document.title = t === "pt-tools" ? "pt-tools" : `${t} · pt-tools`;
   },
   { immediate: true },
 );
 
-async function stopAll() {
-  try {
-    await ElMessageBox.confirm("确定要停止所有任务吗？", "确认", {
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-      type: "warning",
-    });
-    stopLoading.value = true;
-    await controlApi.stop();
-    ElMessage.success("已停止所有任务");
-  } catch (e: unknown) {
-    if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "操作失败");
-    }
-  } finally {
-    stopLoading.value = false;
-  }
-}
-
-async function startAll() {
-  try {
-    await ElMessageBox.confirm("确定要启动所有任务吗？", "确认", {
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-      type: "info",
-    });
-    startLoading.value = true;
-    await controlApi.start();
-    ElMessage.success("已启动所有任务");
-  } catch (e: unknown) {
-    if ((e as string) !== "cancel") {
-      ElMessage.error((e as Error).message || "操作失败");
-    }
-  } finally {
-    startLoading.value = false;
-  }
-}
-
-function handleMenuSelect(index: string) {
-  if (index === "downloader-hub") {
-    const url = router.resolve(`/${index}`).href;
-    window.open(url, "_blank");
-    return;
-  }
-  router.push(`/${index}`);
-}
-
-function logout() {
-  window.location.href = "/logout";
-}
+// 路由一变就收起抽屉，免得移动端点完还盖着内容
+watch(
+  () => route.fullPath,
+  () => {
+    navOpen.value = false;
+  },
+);
 </script>
 
 <template>
-  <el-container class="app-container" :class="{ 'is-immersive': isImmersive }">
-    <el-aside
-      :width="isCollapse ? '68px' : '236px'"
-      class="app-aside"
-      :class="{ 'is-collapse': isCollapse }">
-      <div class="app-aside-logo">
-        <el-icon class="app-aside-logo-icon" :size="28"><Monitor /></el-icon>
-        <span v-show="!isCollapse" class="app-aside-logo-text">pt-tools</span>
-      </div>
+  <div class="pt-shell" :class="{ 'is-immersive': isImmersive, 'is-nav-open': navOpen }">
+    <AppRail :active-path="activePath" />
 
-      <div class="app-aside-menu">
-        <el-menu
-          :default-active="activeMenu"
-          :collapse="isCollapse"
-          :collapse-transition="false"
-          background-color="transparent"
-          text-color="var(--pt-text-primary)"
-          active-text-color="var(--pt-color-primary)"
-          @select="handleMenuSelect">
-          <el-menu-item index="userinfo">
-            <el-icon><DataAnalysis /></el-icon>
-            <template #title>用户统计</template>
-          </el-menu-item>
-          <el-menu-item index="global">
-            <el-icon><Setting /></el-icon>
-            <template #title>全局设置</template>
-          </el-menu-item>
-          <el-menu-item index="cleanup">
-            <el-icon><Delete /></el-icon>
-            <template #title>自动删种</template>
-          </el-menu-item>
-          <el-menu-item index="downloaders">
-            <el-icon><Download /></el-icon>
-            <template #title>下载器管理</template>
-          </el-menu-item>
-          <el-menu-item index="downloader-hub">
-            <el-icon><Grid /></el-icon>
-            <template #title>下载器Web UI</template>
-          </el-menu-item>
-          <el-menu-item index="sites">
-            <el-icon><Connection /></el-icon>
-            <template #title>站点与RSS</template>
-          </el-menu-item>
-          <el-menu-item index="supported-sites">
-            <el-icon><Collection /></el-icon>
-            <template #title>已支持站点</template>
-          </el-menu-item>
-          <el-menu-item index="search">
-            <el-icon><Search /></el-icon>
-            <template #title>种子搜索</template>
-          </el-menu-item>
-          <el-menu-item index="filter-rules">
-            <el-icon><Filter /></el-icon>
-            <template #title>过滤规则</template>
-          </el-menu-item>
-          <el-menu-item index="tasks">
-            <el-icon><List /></el-icon>
-            <template #title>任务列表</template>
-          </el-menu-item>
-          <el-menu-item index="paused">
-            <el-icon><VideoPause /></el-icon>
-            <template #title>暂停任务</template>
-          </el-menu-item>
-          <el-menu-item index="logs">
-            <el-icon><Document /></el-icon>
-            <template #title>日志</template>
-          </el-menu-item>
+    <div class="pt-shell__nav-col">
+      <AppNav
+        ref="navRef"
+        :active-path="activePath"
+        :drawer="navOpen"
+        @navigate="navOpen = false" />
+    </div>
 
-          <el-sub-menu index="chatops">
-            <template #title>
-              <el-icon><ChatDotRound /></el-icon>
-              <span>ChatOps</span>
+    <main class="pt-shell__main">
+      <MobileChrome :active-path="activePath" :title="pageTitle" @open-nav="navOpen = true" />
+
+      <header class="pt-head pt-head--crumbs">
+        <button
+          type="button"
+          class="pt-head__toggle"
+          aria-label="打开导航"
+          @click="navOpen = !navOpen">
+          <PtIcon name="menu" :size="18" />
+        </button>
+        <div class="pt-head__group">
+          <h1 class="pt-head__title">{{ pageTitle }}</h1>
+          <nav class="pt-head__crumbs" aria-label="面包屑">
+            <template v-for="(c, i) in crumbs" :key="`${c.label}-${i}`">
+              <PtIcon v-if="i > 0" name="chevron-right" :size="12" />
+              <router-link v-if="c.to" :to="c.to">{{ c.label }}</router-link>
+              <span v-else>{{ c.label }}</span>
             </template>
-            <el-menu-item index="chatops/notifications">
-              <el-icon><Bell /></el-icon>
-              <template #title>消息通知</template>
-            </el-menu-item>
-            <el-menu-item index="chatops/bindings">
-              <el-icon><Connection /></el-icon>
-              <template #title>ChatOps 绑定</template>
-            </el-menu-item>
-            <el-menu-item index="chatops/audit">
-              <el-icon><DataAnalysis /></el-icon>
-              <template #title>操作审计</template>
-            </el-menu-item>
-            <el-menu-item index="chatops/rss-notifications">
-              <el-icon><Bell /></el-icon>
-              <template #title>RSS 通知日志</template>
-            </el-menu-item>
-          </el-sub-menu>
-          <el-menu-item index="password">
-            <el-icon><Lock /></el-icon>
-            <template #title>修改密码</template>
-          </el-menu-item>
-        </el-menu>
-      </div>
-
-      <div class="app-aside-footer">
-        <el-button :icon="isCollapse ? 'Expand' : 'Fold'" text @click="isCollapse = !isCollapse" />
-      </div>
-    </el-aside>
-
-    <el-container>
-      <el-header class="app-header">
-        <div class="app-header-left">
-          <div class="app-header-title-group">
-            <div class="app-header-title">{{ route.meta?.title || route.name }}</div>
-            <el-breadcrumb separator="/">
-              <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-              <el-breadcrumb-item>{{ route.meta?.title || route.name }}</el-breadcrumb-item>
-            </el-breadcrumb>
-          </div>
+          </nav>
         </div>
+      </header>
 
-        <div class="app-header-right">
-          <el-button-group class="app-header-actions">
-            <el-button type="danger" :icon="'VideoPause'" :loading="stopLoading" @click="stopAll">
-              停止任务
-            </el-button>
-            <el-button type="success" :icon="'VideoPlay'" :loading="startLoading" @click="startAll">
-              启动任务
-            </el-button>
-          </el-button-group>
-
-          <span class="app-header-divider"></span>
-
-          <VersionChecker />
-
-          <span class="app-header-divider"></span>
-
-          <el-switch
-            class="app-header-theme-switch"
-            :model-value="themeStore.isDark"
-            :active-icon="'Moon'"
-            :inactive-icon="'Sunny'"
-            inline-prompt
-            @change="themeStore.toggle" />
-
-          <el-select
-            class="app-header-style"
-            :model-value="themeStore.themeStyle"
-            size="default"
-            style="width: 118px"
-            @change="themeStore.setThemeStyle">
-            <el-option
-              v-for="option in themeStyleOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value" />
-          </el-select>
-
-          <span class="app-header-divider"></span>
-
-          <el-select
-            class="app-header-loglevel"
-            v-model="logLevelStore.currentLevel"
-            :loading="logLevelStore.loading"
-            size="default"
-            style="width: 110px"
-            @change="logLevelStore.setLogLevel">
-            <el-option
-              v-for="level in logLevelStore.availableLevels"
-              :key="level"
-              :label="level"
-              :value="level" />
-          </el-select>
-
-          <span class="app-header-divider"></span>
-
-          <el-dropdown class="app-header-user">
-            <el-button text class="app-header-user-btn">
-              <el-icon><User /></el-icon>
-              <span style="margin-left: 4px">admin</span>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="logout">
-                  <el-icon><SwitchButton /></el-icon>
-                  退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+      <div class="pt-shell__content">
+        <div class="pt-shell__inner">
+          <V2DeprecationBanner />
+          <router-view v-slot="{ Component }">
+            <transition name="fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
         </div>
-      </el-header>
+      </div>
+    </main>
 
-      <el-main class="app-main">
-        <V2DeprecationBanner />
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
-      </el-main>
+    <AppStatusBar />
 
-      <el-footer class="app-footer">
-        <a
-          class="app-footer-link"
-          href="https://github.com/sunerpy/pt-tools"
-          target="_blank"
-          rel="noopener">
-          pt-tools
-        </a>
-        <span>© {{ footerYear }} - PT 助手</span>
-      </el-footer>
-    </el-container>
-  </el-container>
+    <button
+      v-if="navOpen"
+      type="button"
+      class="pt-shell__scrim"
+      aria-label="关闭导航"
+      @click="navOpen = false" />
+  </div>
 </template>

@@ -5,6 +5,11 @@ import {
   type FilterRuleTestResponse,
   type RSSConfig,
 } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -235,275 +240,285 @@ function getPatternTypeLabel(type: string) {
   return patternTypes.find((t) => t.value === type)?.label || type;
 }
 
-function getPatternTypeTag(type: string) {
-  switch (type) {
-    case "keyword":
-      return "success";
-    case "wildcard":
-      return "warning";
-    case "regex":
-      return "danger";
-    default:
-      return "info";
-  }
-}
-
 function getMatchFieldLabel(field: string | undefined) {
   return matchFields.find((f) => f.value === field)?.label || "标题和标签";
+}
+
+function formatSizeRange(rule: FilterRule): string {
+  if (!rule.min_size_gb && !rule.max_size_gb) return "不限";
+  return `${rule.min_size_gb || 0} ~ ${rule.max_size_gb ? rule.max_size_gb : "∞"} GB`;
+}
+
+/** 命中一条种子后的最终动作：会下载 / 会跳过 / 只是匹配上了 */
+function decisionText(decision: string | undefined): string {
+  if (decision === "downloaded") return "会下载";
+  if (decision === "skipped") return "会跳过";
+  return "匹配成功";
 }
 </script>
 
 <template>
-  <div class="page-container filter-rules-page">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">过滤规则</h1>
-        <p class="page-subtitle">配置 RSS 订阅的自动过滤和下载规则</p>
+  <div class="filter-rules-page">
+    <div class="pt-note pt-note--warn">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <div class="note-body">
+        <strong>过滤规则等于精准下载，不是「免费之外再多下一些」</strong>
+        <p>
+          没有关联过滤规则时，RSS 订阅默认自动下载免费种子，适合日常刷流。一旦给某个 RSS
+          关联了规则，系统就认为你要精准下载：只有命中规则的种子会被推送，其余种子即使免费也会跳过。
+        </p>
+        <p>
+          想要「规则命中的下、所有免费的也下」这种旧行为，把该 RSS 的下载模式留在
+          <code>跟随全局</code>，并在全局设置里选 <code>仅免费（忽略过滤规则）</code>；或者干脆不给
+          这个 RSS 关联规则。
+        </p>
       </div>
     </div>
-    <el-card v-loading="loading" shadow="never" class="rules-main-card">
-      <template #header>
-        <div class="card-header">
-          <span class="header-title">过滤规则管理</span>
-          <el-button type="primary" :icon="'Plus'" class="add-rule-btn" @click="openAddDialog">
-            添加规则
-          </el-button>
-        </div>
+
+    <PtPanel
+      v-loading="loading"
+      title="过滤规则"
+      icon="list-filter"
+      :count="`${rules.length} 条`"
+      padding="none">
+      <template #actions>
+        <el-button size="small" :loading="loading" @click="loadRules">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+        <el-button type="primary" size="small" @click="openAddDialog">
+          <PtIcon name="plus" :size="14" /><span>添加规则</span>
+        </el-button>
       </template>
 
-      <el-alert
-        class="rules-alert rules-alert-warning"
-        type="warning"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 16px">
-        <template #title>
-          <strong>过滤规则 = 精准下载，而非"叠加免费自动下"</strong>
+      <el-table :data="rules" class="pt-grid" style="width: 100%">
+        <template #empty>
+          <PtDataState state="empty" dense sub="加一条规则，让 RSS 只下你要的资源">
+            <template #action>
+              <el-button size="small" type="primary" @click="openAddDialog">
+                <PtIcon name="plus" :size="14" /><span>添加规则</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
-        <template #default>
-          <div style="line-height: 1.8">
-            未启用过滤规则时，RSS 订阅<strong>默认自动下载免费种子</strong>（适合日常刷流）。
-            <br />
-            一旦给 RSS
-            关联了过滤规则（v0.26.0+），系统会认为你需要<strong>精准下载</strong>：仅下载匹配规则的种子，其他种子（即便免费）将被忽略。
-            <br />
-            如果希望"既下载规则匹配的，又下载所有免费种子"的旧行为，请在具体 RSS
-            的"下载模式"中保持默认
-            <code>跟随全局</code>，并在<strong>全局设置</strong>里将下载模式设为
-            <code>仅免费（忽略过滤规则）</code>；或对该 RSS 不关联任何过滤规则。
-          </div>
-        </template>
-      </el-alert>
 
-      <el-alert
-        class="rules-alert rules-alert-info"
-        type="info"
-        :closable="false"
-        style="margin-bottom: 16px">
-        <template #title>
-          过滤规则用于自动下载匹配的种子。规则按优先级排序，数字越小优先级越高。
-        </template>
-      </el-alert>
-
-      <el-table :data="rules" style="width: 100%" class="rules-table">
-        <el-table-column type="index" label="序号" width="60" align="center" />
-
-        <el-table-column label="名称" min-width="120">
-          <template #default="{ row }">
-            <div class="rule-name-cell">
-              <span :class="['rule-status-dot', row.enabled ? 'is-enabled' : 'is-disabled']"></span>
-              <span class="rule-name">{{ row.name }}</span>
-              <el-tag
-                :type="row.enabled ? 'success' : 'info'"
-                size="small"
-                effect="light"
-                class="rule-status-tag">
-                {{ row.enabled ? "启用" : "停用" }}
-              </el-tag>
-            </div>
-          </template>
+        <el-table-column label="名称" min-width="140" class-name="pt-cell-strong">
+          <template #default="{ row }">{{ row.name }}</template>
         </el-table-column>
 
         <el-table-column label="匹配模式" min-width="200">
           <template #default="{ row }">
-            <code class="pattern-text">{{ row.pattern }}</code>
+            <code class="pattern">{{ row.pattern }}</code>
           </template>
         </el-table-column>
 
-        <el-table-column label="类型" min-width="100" align="center">
+        <el-table-column label="类型" width="96">
           <template #default="{ row }">
-            <el-tag :type="getPatternTypeTag(row.pattern_type)" size="small" effect="plain">
-              {{ getPatternTypeLabel(row.pattern_type) }}
-            </el-tag>
+            <PtTag>{{ getPatternTypeLabel(row.pattern_type) }}</PtTag>
           </template>
         </el-table-column>
 
-        <el-table-column label="匹配范围" min-width="100" align="center">
-          <template #default="{ row }">
-            <span>{{ getMatchFieldLabel(row.match_field) }}</span>
-          </template>
+        <el-table-column label="匹配范围" width="110" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ getMatchFieldLabel(row.match_field) }}</template>
         </el-table-column>
 
-        <el-table-column label="优先级" min-width="80" align="center">
-          <template #default="{ row }">
-            <span>{{ row.priority }}</span>
-          </template>
+        <el-table-column
+          label="优先级"
+          width="80"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num">
+          <template #default="{ row }">{{ row.priority }}</template>
         </el-table-column>
 
-        <el-table-column label="仅免费" min-width="80" align="center">
+        <el-table-column label="仅免费" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.require_free ? 'success' : 'info'" size="small">
+            <PtStatusPill :tone="row.require_free ? 'ok' : 'neutral'" size="sm">
               {{ row.require_free ? "是" : "否" }}
-            </el-tag>
+            </PtStatusPill>
           </template>
         </el-table-column>
 
-        <el-table-column label="大小范围" min-width="120" align="center">
+        <el-table-column label="大小范围" width="130" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ formatSizeRange(row) }}</template>
+        </el-table-column>
+
+        <el-table-column label="启用" width="70">
           <template #default="{ row }">
-            <span v-if="!row.min_size_gb && !row.max_size_gb">不限</span>
-            <span v-else>
-              {{ row.min_size_gb || 0 }} ~ {{ row.max_size_gb ? row.max_size_gb : "∞" }} GB
-            </span>
+            <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" min-width="200" align="center">
+        <el-table-column label="操作" width="120" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
-            <el-space class="rule-actions">
-              <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
-              <el-button type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
-              <el-button type="danger" size="small" @click="deleteRule(row)">删除</el-button>
-            </el-space>
+            <el-button link type="primary" size="small" @click="openEditDialog(row)">
+              <PtIcon name="pencil" :size="14" /><span>编辑</span>
+            </el-button>
+            <el-button link type="danger" size="small" @click="deleteRule(row)">
+              <PtIcon name="trash-2" :size="14" /><span>删除</span>
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="rules.length === 0" description="暂无过滤规则，点击上方按钮添加" />
-    </el-card>
+      <template v-if="rules.length > 0" #footer>
+        <span class="pt-foot-note">优先级数字越小越先匹配，命中即停</span>
+      </template>
+    </PtPanel>
 
-    <!-- 添加/编辑对话框 -->
     <el-dialog
       v-model="showDialog"
+      class="pt-dialog"
       :title="editMode ? '编辑过滤规则' : '添加过滤规则'"
-      width="600px"
-      class="rule-dialog">
-      <el-form :model="form" label-width="100px" label-position="right" class="rule-form">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="例如: 4K电影" />
-        </el-form-item>
+      width="640px"
+      align-center>
+      <el-form :model="form" class="pt-form" label-position="top">
+        <div class="field-head">规则</div>
 
-        <el-form-item label="模式类型" required>
-          <el-select v-model="form.pattern_type" style="width: 100%">
-            <el-option v-for="t in patternTypes" :key="t.value" :label="t.label" :value="t.value" />
-          </el-select>
-          <div class="form-tip">{{ currentPatternTip }}</div>
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="名称" required>
+            <el-input v-model="form.name" placeholder="例如 4K 电影" />
+          </el-form-item>
+
+          <el-form-item label="优先级">
+            <el-input-number v-model="form.priority" :min="1" :max="9999" style="width: 100%" />
+            <div class="field-tip">越小越先匹配，默认 100</div>
+          </el-form-item>
+        </div>
+
+        <div class="field-row">
+          <el-form-item label="模式类型" required>
+            <el-select v-model="form.pattern_type" style="width: 100%">
+              <el-option
+                v-for="t in patternTypes"
+                :key="t.value"
+                :label="t.label"
+                :value="t.value" />
+            </el-select>
+            <div class="field-tip">{{ currentPatternTip }}</div>
+          </el-form-item>
+
+          <el-form-item label="匹配范围">
+            <el-select v-model="form.match_field" style="width: 100%">
+              <el-option
+                v-for="f in matchFields"
+                :key="f.value"
+                :label="f.label"
+                :value="f.value" />
+            </el-select>
+            <div class="field-tip">从标题、标签还是两者里找</div>
+          </el-form-item>
+        </div>
 
         <el-form-item label="匹配模式" required>
-          <el-input v-model="form.pattern" placeholder="输入匹配模式" :rows="2" type="textarea" />
-        </el-form-item>
-
-        <el-form-item label="匹配范围">
-          <el-select v-model="form.match_field" style="width: 100%">
-            <el-option v-for="f in matchFields" :key="f.value" :label="f.label" :value="f.value" />
-          </el-select>
-          <div class="form-tip">选择从标题、标签还是两者中进行匹配</div>
+          <el-input v-model="form.pattern" type="textarea" :rows="2" placeholder="输入匹配模式" />
         </el-form-item>
 
         <el-form-item label="常用模板">
-          <div class="template-list">
-            <el-tag
+          <div class="tpl-list">
+            <button
               v-for="tpl in templates"
               :key="tpl.name"
-              class="template-tag"
-              effect="plain"
+              type="button"
+              class="tpl"
               @click="applyTemplate(tpl)">
               {{ tpl.name }}
-            </el-tag>
+            </button>
           </div>
+          <div class="field-tip">点一下会填好匹配模式和模式类型，名称为空时也一并带上</div>
         </el-form-item>
 
-        <el-form-item label="优先级">
-          <el-input-number v-model="form.priority" :min="1" :max="9999" />
-          <div class="form-tip">数字越小优先级越高，默认100</div>
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="最小大小（GB）">
+            <el-input-number v-model="form.min_size_gb" :min="0" :max="99999" style="width: 100%" />
+            <div class="field-tip">小于该值不通过，0 表示不限</div>
+          </el-form-item>
 
-        <el-form-item label="仅免费">
-          <el-switch v-model="form.require_free" />
-          <div class="form-tip">开启后仅下载免费种子</div>
-        </el-form-item>
-
-        <el-form-item label="最小大小 (GB)">
-          <el-input-number v-model="form.min_size_gb" :min="0" :max="99999" />
-          <div class="form-tip">种子大小小于该值时不通过此规则，0 = 不限制</div>
-        </el-form-item>
-
-        <el-form-item label="最大大小 (GB)">
-          <el-input-number v-model="form.max_size_gb" :min="0" :max="99999" />
-          <div class="form-tip">
-            种子大小大于该值时不通过此规则，0 = 不限制；规则上限不能突破全局设置
-          </div>
-        </el-form-item>
+          <el-form-item label="最大大小（GB）">
+            <el-input-number v-model="form.max_size_gb" :min="0" :max="99999" style="width: 100%" />
+            <div class="field-tip">大于该值不通过，0 表示不限；不能突破全局上限</div>
+          </el-form-item>
+        </div>
 
         <el-form-item label="规则用途" prop="purpose">
           <el-select v-model="form.purpose" style="width: 100%" placeholder="选择用途">
-            <el-option label="下载（控制是否推送到下载器）" value="download" />
-            <el-option label="通知（控制是否触发上新推送）" value="notify" />
-            <el-option label="两者（同时控制下载与通知）" value="both" />
+            <el-option label="下载 —— 控制是否推送到下载器" value="download" />
+            <el-option label="通知 —— 控制是否触发上新推送" value="notify" />
+            <el-option label="两者 —— 同时控制下载与通知" value="both" />
           </el-select>
-          <div class="form-tip">
-            决定规则匹配后的行为：仅作下载控制 / 仅作通知触发 / 两者皆控制。默认 download。
-          </div>
         </el-form-item>
 
-        <el-form-item label="启用">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="仅免费">
+            <el-switch v-model="form.require_free" />
+            <div class="field-tip">开启后只下免费种子</div>
+          </el-form-item>
 
-        <el-form-item label="测试数据源">
+          <el-form-item label="启用规则">
+            <el-switch v-model="form.enabled" />
+            <div class="field-tip">关掉后规则保留但不参与匹配</div>
+          </el-form-item>
+        </div>
+
+        <div class="field-head">试跑（下面几项只影响这次测试，不会保存）</div>
+
+        <el-form-item label="数据源">
           <el-select
             v-model="selectedRssId"
-            placeholder="选择 RSS 订阅进行测试（可选）"
+            placeholder="不选则用历史记录"
             clearable
             style="width: 100%"
             :loading="loadingRss">
             <el-option
               v-for="rss in rssList"
               :key="rss.id"
-              :label="`${rss.name} (${rss.site_name})`"
+              :label="`${rss.name}（${rss.site_name}）`"
               :value="rss.id" />
           </el-select>
-          <div class="form-tip">选择 RSS 订阅从实时数据中测试，不选则从历史记录中测试</div>
+          <div class="field-tip">选一个 RSS 会现拉一次实时数据来试</div>
         </el-form-item>
 
-        <el-form-item label="模拟大小 (GB)">
-          <el-input-number v-model="testForm.test_size_gb" :min="0" :step="0.5" :precision="2" />
-          <div class="form-tip">覆盖种子实际大小以测试大小规则，0 = 使用种子真实大小</div>
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="模拟大小（GB）">
+            <el-input-number
+              v-model="testForm.test_size_gb"
+              :min="0"
+              :step="0.5"
+              :precision="2"
+              style="width: 100%" />
+            <div class="field-tip">0 表示用种子真实大小</div>
+          </el-form-item>
+
+          <el-form-item label="模拟全局上限（GB）">
+            <el-input-number
+              v-model="testForm.global_size"
+              :min="0"
+              :max="99999"
+              style="width: 100%" />
+            <div class="field-tip">0 表示无上限</div>
+          </el-form-item>
+        </div>
 
         <el-form-item label="模拟免费状态">
           <el-radio-group v-model="testForm.test_is_free">
-            <el-radio :label="null">使用真实值</el-radio>
-            <el-radio :label="true">免费</el-radio>
-            <el-radio :label="false">非免费</el-radio>
+            <el-radio :value="null">用真实值</el-radio>
+            <el-radio :value="true">免费</el-radio>
+            <el-radio :value="false">非免费</el-radio>
           </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="模拟全局上限 (GB)">
-          <el-input-number v-model="testForm.global_size" :min="0" :max="99999" />
-          <div class="form-tip">模拟全局 TorrentSizeGB 上限，0 = 无上限</div>
         </el-form-item>
 
         <el-form-item label="下载模式">
-          <el-radio-group v-model="testForm.filter_mode">
-            <el-radio-button v-for="m in filterModeOptions" :key="m.value" :label="m.value">
-              {{ m.label }}
-            </el-radio-button>
-          </el-radio-group>
+          <el-select v-model="testForm.filter_mode" style="width: 100%">
+            <el-option
+              v-for="m in filterModeOptions"
+              :key="m.value"
+              :label="m.label"
+              :value="m.value" />
+          </el-select>
         </el-form-item>
 
         <el-form-item>
-          <el-button type="info" :loading="testing" @click="testPattern">测试匹配</el-button>
+          <el-button :loading="testing" @click="testPattern">
+            <PtIcon name="target" :size="14" /><span>测试匹配</span>
+          </el-button>
         </el-form-item>
       </el-form>
 
@@ -515,111 +530,197 @@ function getMatchFieldLabel(field: string | undefined) {
       </template>
     </el-dialog>
 
-    <!-- 测试结果对话框 -->
-    <el-dialog v-model="showTestDialog" title="匹配测试结果" width="800px" class="test-dialog">
-      <div v-if="testResult" v-loading="testing" class="test-result-panel">
-        <div class="test-result-header">
-          <el-alert
-            :type="testResult.match_count > 0 ? 'success' : 'warning'"
-            :closable="false"
-            class="test-summary-alert">
-            <template #title>
-              <div class="test-summary-text">
-                共测试 {{ testResult.total_count }} 条记录，匹配到
-                <span class="test-summary-count">
-                  {{ testResult.match_count }}
-                </span>
-                条
-              </div>
-            </template>
-          </el-alert>
-
-          <el-radio-group v-model="form.match_field" size="small" class="test-scope-switch">
-            <el-radio-button v-for="f in matchFields" :key="f.value" :label="f.value">
-              {{ f.label }}
-            </el-radio-button>
-          </el-radio-group>
+    <el-dialog
+      v-model="showTestDialog"
+      class="pt-dialog"
+      title="匹配测试结果"
+      width="760px"
+      align-center>
+      <div v-if="testResult" v-loading="testing">
+        <div class="pt-note" :class="testResult.match_count > 0 ? 'pt-note--ok' : 'pt-note--warn'">
+          <PtIcon
+            :name="testResult.match_count > 0 ? 'circle-check' : 'triangle-alert'"
+            :size="14"
+            class="pt-note__icon" />
+          <span>
+            共测试 {{ testResult.total_count }} 条记录，命中
+            <strong>{{ testResult.match_count }}</strong> 条
+          </span>
         </div>
 
-        <div v-if="testResult.matches && testResult.matches.length > 0" class="match-list">
-          <el-card
-            v-for="(match, idx) in testResult.matches"
-            :key="idx"
-            class="match-item"
-            shadow="hover">
-            <template #header>
-              <div class="match-header">
-                <span class="match-index">#{{ idx + 1 }}</span>
-                <el-tag
-                  size="small"
-                  :type="match.decision === 'downloaded' ? 'success' : 'danger'"
-                  effect="plain">
-                  {{
-                    match.decision === "downloaded"
-                      ? "会下载"
-                      : match.decision === "skipped"
-                        ? "会跳过"
-                        : "匹配成功"
-                  }}
-                </el-tag>
-                <el-tag v-if="match.is_free" size="small" type="warning" effect="plain">
-                  免费
-                </el-tag>
-                <el-tag v-else size="small" type="info" effect="plain">非免费</el-tag>
-                <el-tag
-                  v-if="match.source === 'filter_rule'"
-                  size="small"
-                  type="primary"
-                  effect="plain">
-                  过滤规则通道
-                </el-tag>
-                <el-tag
-                  v-else-if="match.source === 'free_download'"
-                  size="small"
-                  type="success"
-                  effect="plain">
-                  免费通道
-                </el-tag>
-                <span v-if="match.size_gb" class="match-size">
-                  {{ match.size_gb.toFixed(2) }} GB
-                </span>
-              </div>
-            </template>
-
-            <div class="match-content">
-              <div class="match-section">
-                <div class="match-label">标题</div>
-                <div class="match-title">{{ match.title }}</div>
-              </div>
-
-              <div v-if="match.tag" class="match-section">
-                <div class="match-label">标签</div>
-                <div class="match-tag-content">{{ match.tag }}</div>
-              </div>
-
-              <div v-if="match.reason" class="match-section">
-                <div class="match-label">原因</div>
-                <div class="match-reason">{{ match.reason }}</div>
-              </div>
-            </div>
-          </el-card>
+        <div class="scope-row">
+          <span class="scope-row__label">匹配范围</span>
+          <el-segmented v-model="form.match_field" class="pt-seg" :options="matchFields" />
+          <span class="scope-row__tip">改完点「重新测试」</span>
         </div>
-        <el-empty v-else description="没有匹配的种子" />
+
+        <div v-if="testResult.matches && testResult.matches.length > 0" class="mlist">
+          <article v-for="(match, idx) in testResult.matches" :key="idx" class="mrow">
+            <header class="mrow__head">
+              <span class="mrow__idx">#{{ idx + 1 }}</span>
+              <PtStatusPill :tone="match.decision === 'downloaded' ? 'ok' : 'dang'" size="sm">
+                {{ decisionText(match.decision) }}
+              </PtStatusPill>
+              <PtStatusPill :tone="match.is_free ? 'ok' : 'neutral'" size="sm">
+                {{ match.is_free ? "免费" : "非免费" }}
+              </PtStatusPill>
+              <PtTag v-if="match.source === 'filter_rule'">过滤规则通道</PtTag>
+              <PtTag v-else-if="match.source === 'free_download'">免费通道</PtTag>
+              <span v-if="match.size_gb" class="mrow__size">
+                {{ match.size_gb.toFixed(2) }} GB
+              </span>
+            </header>
+
+            <p class="mrow__title">{{ match.title }}</p>
+            <p v-if="match.tag" class="mrow__meta"><span>标签</span>{{ match.tag }}</p>
+            <p v-if="match.reason" class="mrow__meta"><span>原因</span>{{ match.reason }}</p>
+          </article>
+        </div>
+        <PtDataState v-else state="zero" dense sub="没有种子命中这条规则，放宽模式或换个数据源" />
       </div>
 
       <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="showTestDialog = false">关闭</el-button>
-          <el-button type="primary" :loading="testing" @click="testPattern">重新测试</el-button>
-        </div>
+        <el-button @click="showTestDialog = false">关闭</el-button>
+        <el-button type="primary" :loading="testing" @click="testPattern">
+          <PtIcon name="refresh-cw" :size="14" /><span>重新测试</span>
+        </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/table-page.css";
-@import "@/styles/form-page.css";
-@import "@/styles/filter-rules-page.css";
+.filter-rules-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-4);
+}
+
+/* 说明块里的多段正文：.pt-note 只管容器，段落间距归页面 */
+.note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.note-body strong {
+  color: var(--pt-t1);
+}
+
+.note-body p {
+  margin: 0;
+}
+
+.pattern {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
+  word-break: break-all;
+}
+</style>
+
+<style>
+/* 两个对话框都 teleport 到 body，scoped 到不了；这些类只在本页的对话框里出现 */
+
+/* 模板胶囊用 button 而不是 el-tag：它是可点的动作，键盘要能聚焦 */
+.pt-dialog .tpl-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+}
+
+.pt-dialog .tpl {
+  padding: 2px 9px;
+  font-family: inherit;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    border-color var(--pt-transition-fast);
+}
+
+.pt-dialog .tpl:hover {
+  color: var(--pt-p);
+  border-color: var(--pt-p);
+}
+
+.pt-dialog .scope-row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  margin: var(--pt-space-4) 0 var(--pt-space-3);
+}
+
+.pt-dialog .scope-row__label {
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  color: var(--pt-t2);
+}
+
+.pt-dialog .scope-row__tip {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/* 命中列表自己滚：20 条结果不该把对话框顶到屏幕外 */
+.pt-dialog .mlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  max-height: 48vh;
+  overflow-y: auto;
+}
+
+.pt-dialog .mrow {
+  padding: var(--pt-space-3);
+  background: var(--pt-canvas);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
+.pt-dialog .mrow__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.pt-dialog .mrow__idx {
+  font-size: var(--pt-fz-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t4);
+}
+
+.pt-dialog .mrow__size {
+  margin-left: auto;
+  font-size: var(--pt-fz-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t3);
+}
+
+.pt-dialog .mrow__title {
+  margin: 0;
+  font-weight: 500;
+  color: var(--pt-t1);
+  word-break: break-all;
+}
+
+.pt-dialog .mrow__meta {
+  display: flex;
+  gap: 6px;
+  margin: 3px 0 0;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.pt-dialog .mrow__meta > span {
+  flex: 0 0 auto;
+  color: var(--pt-t4);
+}
 </style>

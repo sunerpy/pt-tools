@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SiteLevelRequirement } from "@/api";
+import PtIcon from "@/components/PtIcon";
 import { useSiteLevelsStore } from "@/stores/siteLevels";
 import { formatNumber, parseISODuration } from "@/utils/format";
 import { computed, onMounted } from "vue";
@@ -155,12 +156,12 @@ function reloadLevels() {
 
     <div class="level-tooltip-content">
       <div v-if="loading" class="loading-state">
-        <el-icon class="is-loading"><Loading /></el-icon>
+        <PtIcon name="loader-circle" :size="14" class="pt-spin" />
         <span>加载中...</span>
       </div>
 
       <div v-else-if="error" class="error-state">
-        <el-icon><WarningFilled /></el-icon>
+        <PtIcon name="triangle-alert" :size="16" />
         <span>{{ error }}</span>
         <el-button size="small" @click="reloadLevels">重试</el-button>
       </div>
@@ -216,7 +217,7 @@ function reloadLevels() {
 
           <!-- 特权描述 -->
           <div v-if="level.privilege" class="level-privilege">
-            <el-icon><Star /></el-icon>
+            <PtIcon name="star" :size="11" />
             <span>{{ level.privilege }}</span>
           </div>
         </div>
@@ -243,7 +244,7 @@ function reloadLevels() {
               </span>
             </div>
             <div v-if="level.privilege" class="level-privilege">
-              <el-icon><Star /></el-icon>
+              <PtIcon name="star" :size="11" />
               <span>{{ level.privilege }}</span>
             </div>
           </div>

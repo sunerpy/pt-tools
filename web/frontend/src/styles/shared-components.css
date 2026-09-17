@@ -81,8 +81,49 @@
   color: var(--pt-color-warning);
 }
 
-.is-checking {
-  animation: version-rotate 1.5s linear infinite;
+/* 紧凑触发器：底部状态条 28px 高，去掉图标底圈和「版本」二字，颜色随外壳继承 */
+.version-btn.is-compact {
+  height: 20px;
+  padding: 0 6px;
+  color: inherit;
+}
+
+.version-btn.is-compact:hover {
+  color: inherit;
+  background: color-mix(in srgb, currentcolor 14%, transparent);
+  border-color: transparent;
+}
+
+.version-btn.is-compact .btn-content {
+  gap: 5px;
+}
+
+.version-btn.is-compact .version-icon-wrap {
+  width: 14px;
+  height: 14px;
+  color: inherit;
+  background: transparent;
+}
+
+/* PtIcon 渲染的是裸 svg，尺寸靠 width/height 而不是 font-size */
+.version-btn.is-compact .version-icon-wrap .pt-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.version-btn.is-compact .version-text {
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: inherit;
+}
+
+.version-btn.is-compact .update-dot {
+  top: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .version-content {
@@ -281,12 +322,10 @@
   letter-spacing: 0.08em;
 }
 
-.version-content .prerelease-notice {
-  border-radius: var(--pt-radius-md);
-}
-
-.version-content .prerelease-notice strong {
+/* 「非必要请等待正式版」这句是整块里唯一需要抢注意力的，比标题再重一档 */
+.version-content .prerelease-notice .note-body span strong {
   font-weight: 700;
+  color: var(--pt-warn);
 }
 
 .version-content .prerelease-toggle-row {
@@ -400,6 +439,24 @@
 
 .version-content .docker-info {
   margin-bottom: var(--pt-space-2);
+}
+
+/* 说明块正文：标题一行、正文一段、要点一列，全局 reset 清掉了 ul 的缩进要补回来 */
+.version-content .note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.version-content .note-body > strong:first-child {
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.version-content .note-body ul {
+  padding-left: 1.1em;
 }
 
 .version-content .custom-scrollbar::-webkit-scrollbar {
@@ -797,12 +854,4 @@ html.dark .site-avatar {
   border-color: color-mix(in srgb, var(--pt-border-color) 78%, transparent);
 }
 
-@keyframes version-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* 转圈动画统一在 atoms.css 的 .pt-spin */

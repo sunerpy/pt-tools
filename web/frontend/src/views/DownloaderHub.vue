@@ -8,14 +8,28 @@ import {
   type DownloaderTorrentItem,
   type TorrentActionTarget,
 } from "@/api";
+import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDetail.vue";
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
-import { ArrowDown, ArrowUp } from "@element-plus/icons-vue";
+import PtIcon from "@/components/PtIcon";
+import PtLogo from "@/components/PtLogo";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage } from "element-plus";
+import { useThemeStore } from "@/stores/theme";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const themeStore = useThemeStore();
+
+/*
+ * 工具条那颗标志坐在 --pt-hover 上，明暗随模式变，所以变体得跟着表面换：
+ * brand.md 按表面明暗判定 —— 浅色面用自带底板的彩色版，深色面用单色版。
+ * 页头 hero 那颗不参与：它坐在 --pt-chrome 上，8 套配色里恒为深色，固定 mono。
+ */
+const logoVariant = computed(() => (themeStore.isDark ? "mono" : "plated"));
 
 const COLUMN_STORAGE_KEY = "downloader-hub-visible-columns-v1";
 const COLUMN_ORDER_STORAGE_KEY = "downloader-hub-column-order-v1";
@@ -282,6 +296,44 @@ const tableRows = computed(() => {
   return torrents.value;
 });
 
+/* 有筛选时的空结果是「没有匹配」而不是「还没有数据」，两者的下一步动作不同 */
+const hasActiveFilter = computed(
+  () =>
+    Boolean(filters.value.search) ||
+    filters.value.downloaderId !== "all" ||
+    Boolean(filters.value.state) ||
+    Boolean(filters.value.category) ||
+    Boolean(filters.value.tag),
+);
+
+const isEmptyResult = computed(() => !loading.value && torrents.value.length === 0);
+
+const densityOptions = [
+  { label: "紧凑", value: "compact" },
+  { label: "标准", value: "comfortable" },
+];
+
+const detailModeOptions = [
+  { label: "侧边", value: "drawer" },
+  { label: "下方", value: "inline" },
+];
+
+/* 视图范围与渲染方式原先是侧栏里的两个 el-switch，收起侧栏就摸不到，
+   所以搬到工具条上；值是布尔，el-segmented 的 modelValue 支持布尔 */
+const scopeOptions = [
+  { label: "分页", value: false },
+  { label: "全部", value: true },
+];
+
+const renderOptions = [
+  { label: "常规", value: false },
+  { label: "虚拟", value: true },
+];
+
+function clearFilters() {
+  filters.value = { search: "", downloaderId: "all", state: "", category: "", tag: "" };
+}
+
 onMounted(async () => {
   await Promise.all([
     loadDownloaders(),
@@ -320,47 +372,30 @@ onMounted(async () => {
 
 let searchTimer: number | null = null;
 
-watch(
-  () => filters.value.downloaderId,
-  () => {
-    page.value = 1;
-    loadTorrents();
-  },
-);
+/*
+ * 五个筛选字段原先各有一个 watch，「清空筛选」一次性重置就会连发五次请求，
+ * 所以合成一个深监听：同一 tick 内的多处改动只回调一次。
+ * 关键词仍然防抖 320ms（边打字边搜），其余筛选下一 tick 就发。
+ */
+let lastSearch = filters.value.search;
 
 watch(
-  () => filters.value.state,
+  filters,
   () => {
-    page.value = 1;
-    loadTorrents();
-  },
-);
-
-watch(
-  () => filters.value.category,
-  () => {
-    page.value = 1;
-    loadTorrents();
-  },
-);
-watch(
-  () => filters.value.tag,
-  () => {
-    page.value = 1;
-    loadTorrents();
-  },
-);
-watch(
-  () => filters.value.search,
-  () => {
+    const searchChanged = filters.value.search !== lastSearch;
+    lastSearch = filters.value.search;
     if (searchTimer) {
       window.clearTimeout(searchTimer);
     }
-    searchTimer = window.setTimeout(() => {
-      page.value = 1;
-      loadTorrents();
-    }, 320);
+    searchTimer = window.setTimeout(
+      () => {
+        page.value = 1;
+        loadTorrents();
+      },
+      searchChanged ? 320 : 0,
+    );
   },
+  { deep: true },
 );
 
 watch(
@@ -466,9 +501,10 @@ function updateTableMaxHeight() {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
   const rect = tableCardBodyRef.value.getBoundingClientRect();
   if (viewportHeight <= 0 || rect.top <= 0) return;
-  const paginationHeight =
-    !showAllTasks.value && paginationRef.value ? paginationRef.value.offsetHeight : 0;
-  const availableHeight = viewportHeight - rect.top - paginationHeight - 14;
+  /* 页脚现在常驻（说明文字 + 分页），两种视图都要把它的高度让出来；
+     +12 是 PtPanel 页脚上下各 6 的内边距，量不到但一定占位 */
+  const footerHeight = paginationRef.value ? paginationRef.value.offsetHeight + 12 : 0;
+  const availableHeight = viewportHeight - rect.top - footerHeight - 14;
   tableMaxHeight.value = Math.max(240, Math.floor(availableHeight));
 }
 
@@ -1171,146 +1207,161 @@ function toggleHero() {
   heroVisible.value = !heroVisible.value;
   localStorage.setItem(HERO_VISIBLE_STORAGE_KEY, String(heroVisible.value));
 }
+
+/* 沉浸模式下全局导航被隐藏了，工具条上这颗下拉是本页唯一的出口 */
+function onNavCommand(command: string) {
+  if (command === "toggle-sidebar") {
+    toggleSidebar();
+    return;
+  }
+  if (command === "toggle-hero") {
+    toggleHero();
+    return;
+  }
+  router.push(`/${command}`);
+}
 </script>
 
 <template>
-  <div class="page-container downloader-hub-page">
-    <div v-if="heroVisible" class="hub-hero">
-      <div>
-        <h1 class="hub-title">混合下载器控制台</h1>
-        <p class="hub-subtitle">聚合所有下载器任务，支持单下载器与全局视图。</p>
+  <div class="hub">
+    <header v-if="heroVisible" class="hub__hero">
+      <PtLogo :size="30" variant="mono" title="pt-tools" />
+      <div class="hub__hero-text">
+        <h1>混合下载器控制台</h1>
+        <p>聚合所有下载器任务，支持单下载器与全局视图。</p>
       </div>
-      <div class="hub-hero-actions">
-        <el-button type="primary" @click="openAddDialog">添加种子</el-button>
-        <el-button @click="toggleHero">收起</el-button>
+      <div class="hub__hero-acts">
+        <el-button type="primary" @click="openAddDialog">
+          <PtIcon name="plus" :size="14" /><span>添加种子</span>
+        </el-button>
+        <el-button @click="toggleHero">
+          <PtIcon name="chevron-up" :size="14" /><span>收起</span>
+        </el-button>
       </div>
-    </div>
+    </header>
 
-    <div ref="hubLayoutRef" class="hub-layout">
-      <div v-show="sidebarVisible" class="hub-sidebar" :style="sidebarStyle">
-        <div class="sidebar-header">
-          <div class="sidebar-header-title">侧栏</div>
-          <el-button size="small" text @click="toggleSidebar">收起</el-button>
+    <div ref="hubLayoutRef" class="hub__layout">
+      <aside v-show="sidebarVisible" class="hub__side" :style="sidebarStyle">
+        <div class="hub__side-head">
+          <PtIcon name="list-filter" :size="14" />
+          <span>筛选</span>
+          <el-tooltip content="收起侧栏" placement="right">
+            <button type="button" class="hub__ico" @click="toggleSidebar">
+              <PtIcon name="panel-left-close" :size="14" />
+            </button>
+          </el-tooltip>
         </div>
-        <div class="sidebar-section sidebar-stats">
-          <div class="sidebar-title">SPEED</div>
-          <div class="stat-grid">
-            <div class="stat-card stat-dl">
-              <div class="stat-icon">↓</div>
-              <div class="stat-body">
-                <div class="stat-value">
-                  {{ formatSize(transferStats?.total_download_speed || 0) }}/s
-                </div>
-                <div class="stat-label">下载速度</div>
-              </div>
-            </div>
-            <div class="stat-card stat-ul">
-              <div class="stat-icon">↑</div>
-              <div class="stat-body">
-                <div class="stat-value">
-                  {{ formatSize(transferStats?.total_upload_speed || 0) }}/s
-                </div>
-                <div class="stat-label">上传速度</div>
-              </div>
-            </div>
+        <section class="hub__sec">
+          <h3 class="hub__sec-t">实时速度</h3>
+          <div class="hub__stat">
+            <PtIcon name="download" :size="14" class="is-dl" />
+            <span class="hub__stat-l">下载</span>
+            <span class="hub__stat-v"
+              >{{ formatSize(transferStats?.total_download_speed || 0) }}/s</span
+            >
           </div>
-        </div>
-        <div class="sidebar-section sidebar-stats">
-          <div class="sidebar-title">SESSION</div>
-          <div class="stat-grid">
-            <div class="stat-card stat-dl">
-              <div class="stat-icon">⬇</div>
-              <div class="stat-body">
-                <div class="stat-value">
-                  {{ formatSize(transferStats?.total_session_downloaded || 0) }}
-                </div>
-                <div class="stat-label">本次下载</div>
-              </div>
-            </div>
-            <div class="stat-card stat-ul">
-              <div class="stat-icon">⬆</div>
-              <div class="stat-body">
-                <div class="stat-value">
-                  {{ formatSize(transferStats?.total_session_uploaded || 0) }}
-                </div>
-                <div class="stat-label">本次上传</div>
-              </div>
-            </div>
+          <div class="hub__stat">
+            <PtIcon name="upload" :size="14" class="is-ul" />
+            <span class="hub__stat-l">上传</span>
+            <span class="hub__stat-v"
+              >{{ formatSize(transferStats?.total_upload_speed || 0) }}/s</span
+            >
           </div>
-        </div>
-        <div class="sidebar-section sidebar-stats">
-          <div class="sidebar-title">ALL TIME</div>
-          <div class="stat-grid">
-            <div class="stat-card stat-dl">
-              <div class="stat-icon">⬇</div>
-              <div class="stat-body">
-                <div class="stat-value">{{ formatSize(transferStats?.total_downloaded || 0) }}</div>
-                <div class="stat-label">总下载量</div>
-              </div>
-            </div>
-            <div class="stat-card stat-ul">
-              <div class="stat-icon">⬆</div>
-              <div class="stat-body">
-                <div class="stat-value">{{ formatSize(transferStats?.total_uploaded || 0) }}</div>
-                <div class="stat-label">总上传量</div>
-              </div>
-            </div>
+        </section>
+        <section class="hub__sec">
+          <h3 class="hub__sec-t">本次会话</h3>
+          <div class="hub__stat">
+            <PtIcon name="cloud-download" :size="14" class="is-dl" />
+            <span class="hub__stat-l">下载</span>
+            <span class="hub__stat-v">{{
+              formatSize(transferStats?.total_session_downloaded || 0)
+            }}</span>
           </div>
-        </div>
-        <div class="sidebar-section sidebar-stats">
-          <div class="sidebar-title">DISK</div>
-          <div class="stat-grid">
-            <div class="stat-card">
-              <div class="stat-icon">💾</div>
-              <div class="stat-body">
-                <div class="stat-value">{{ formatSize(transferStats?.total_free_space || 0) }}</div>
-                <div class="stat-label">剩余空间</div>
-              </div>
-            </div>
+          <div class="hub__stat">
+            <PtIcon name="cloud-upload" :size="14" class="is-ul" />
+            <span class="hub__stat-l">上传</span>
+            <span class="hub__stat-v">{{
+              formatSize(transferStats?.total_session_uploaded || 0)
+            }}</span>
           </div>
-        </div>
-        <div class="sidebar-section">
-          <div class="sidebar-title">STATUS</div>
-          <div class="sidebar-state-list">
-            <div
-              :class="['state-item state-all', { active: filters.state === '' }]"
-              @click="applyQuickState('')">
-              <span class="state-label">全部</span><span class="state-count">{{ total }}</span>
-            </div>
-            <div
-              :class="['state-item state-dl', { active: filters.state === 'downloading' }]"
-              @click="applyQuickState('downloading')">
-              <span class="state-label">下载中</span
-              ><span class="state-count">{{ downloadingCount }}</span>
-            </div>
-            <div
-              :class="['state-item state-seed', { active: filters.state === 'seeding' }]"
-              @click="applyQuickState('seeding')">
-              <span class="state-label">做种中</span
-              ><span class="state-count">{{ seedingCount }}</span>
-            </div>
-            <div
-              :class="['state-item state-pause', { active: filters.state === 'paused' }]"
-              @click="applyQuickState('paused')">
-              <span class="state-label">暂停</span
-              ><span class="state-count">{{ pausedCount }}</span>
-            </div>
-            <div
-              :class="['state-item state-pause', { active: filters.state === 'stopped' }]"
-              @click="applyQuickState('stopped')">
-              <span class="state-label">已停止</span
-              ><span class="state-count">{{ stoppedCount }}</span>
-            </div>
-            <div
-              :class="['state-item state-err', { active: filters.state === 'error' }]"
-              @click="applyQuickState('error')">
-              <span class="state-label">错误</span><span class="state-count">{{ errorCount }}</span>
-            </div>
+        </section>
+        <section class="hub__sec">
+          <h3 class="hub__sec-t">累计</h3>
+          <div class="hub__stat">
+            <PtIcon name="cloud-download" :size="14" class="is-dl" />
+            <span class="hub__stat-l">下载</span>
+            <span class="hub__stat-v">{{ formatSize(transferStats?.total_downloaded || 0) }}</span>
           </div>
-          <div class="sidebar-torrent-count">{{ total }} Torrents</div>
-        </div>
-        <div class="sidebar-section">
-          <div class="sidebar-title">DOWNLOADER</div>
+          <div class="hub__stat">
+            <PtIcon name="cloud-upload" :size="14" class="is-ul" />
+            <span class="hub__stat-l">上传</span>
+            <span class="hub__stat-v">{{ formatSize(transferStats?.total_uploaded || 0) }}</span>
+          </div>
+          <div class="hub__stat">
+            <PtIcon name="hard-drive" :size="14" />
+            <span class="hub__stat-l">剩余空间</span>
+            <span class="hub__stat-v">{{ formatSize(transferStats?.total_free_space || 0) }}</span>
+          </div>
+        </section>
+        <section class="hub__sec">
+          <h3 class="hub__sec-t">状态</h3>
+          <button
+            type="button"
+            class="hub__pick"
+            :class="{ 'is-on': filters.state === '' }"
+            @click="applyQuickState('')">
+            <PtIcon name="list" :size="14" />
+            <span class="hub__pick-l">全部</span>
+            <span class="hub__pick-n">{{ total }}</span>
+          </button>
+          <button
+            type="button"
+            class="hub__pick is-dl"
+            :class="{ 'is-on': filters.state === 'downloading' }"
+            @click="applyQuickState('downloading')">
+            <PtIcon name="download" :size="14" />
+            <span class="hub__pick-l">下载中</span>
+            <span class="hub__pick-n">{{ downloadingCount }}</span>
+          </button>
+          <button
+            type="button"
+            class="hub__pick is-seed"
+            :class="{ 'is-on': filters.state === 'seeding' }"
+            @click="applyQuickState('seeding')">
+            <PtIcon name="upload" :size="14" />
+            <span class="hub__pick-l">做种中</span>
+            <span class="hub__pick-n">{{ seedingCount }}</span>
+          </button>
+          <button
+            type="button"
+            class="hub__pick is-pause"
+            :class="{ 'is-on': filters.state === 'paused' }"
+            @click="applyQuickState('paused')">
+            <PtIcon name="pause" :size="14" />
+            <span class="hub__pick-l">暂停</span>
+            <span class="hub__pick-n">{{ pausedCount }}</span>
+          </button>
+          <button
+            type="button"
+            class="hub__pick is-pause"
+            :class="{ 'is-on': filters.state === 'stopped' }"
+            @click="applyQuickState('stopped')">
+            <PtIcon name="circle-pause" :size="14" />
+            <span class="hub__pick-l">已停止</span>
+            <span class="hub__pick-n">{{ stoppedCount }}</span>
+          </button>
+          <button
+            type="button"
+            class="hub__pick is-err"
+            :class="{ 'is-on': filters.state === 'error' }"
+            @click="applyQuickState('error')">
+            <PtIcon name="triangle-alert" :size="14" />
+            <span class="hub__pick-l">错误</span>
+            <span class="hub__pick-n">{{ errorCount }}</span>
+          </button>
+        </section>
+        <section class="hub__sec">
+          <h3 class="hub__sec-t">下载器</h3>
           <el-select
             v-model="filters.downloaderId"
             size="small"
@@ -1322,238 +1373,274 @@ function toggleHero() {
               :label="item.label"
               :value="item.value" />
           </el-select>
-        </div>
-        <div class="sidebar-section" v-if="allCategories.length > 0">
-          <div class="sidebar-title">CATEGORY</div>
-          <div class="sidebar-state-list">
-            <div
-              :class="['sidebar-category-item', { active: filters.category === '' }]"
-              @click="filters.category = ''">
-              <span class="state-label">全部</span>
-            </div>
-            <div
-              v-for="cat in allCategories"
-              :key="cat"
-              :class="['sidebar-category-item', { active: filters.category === cat }]"
-              @click="filters.category = filters.category === cat ? '' : cat">
-              <span class="state-label">{{ cat }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="sidebar-section" v-if="allTags.length > 0">
-          <div class="sidebar-title">TAGS</div>
-          <div class="sidebar-tags-wrap">
-            <el-tag
+        </section>
+        <section v-if="allCategories.length > 0" class="hub__sec">
+          <h3 class="hub__sec-t">分类</h3>
+          <button
+            type="button"
+            class="hub__pick"
+            :class="{ 'is-on': filters.category === '' }"
+            @click="filters.category = ''">
+            <PtIcon name="folder-open" :size="14" />
+            <span class="hub__pick-l">全部</span>
+          </button>
+          <button
+            v-for="cat in allCategories"
+            :key="cat"
+            type="button"
+            class="hub__pick"
+            :class="{ 'is-on': filters.category === cat }"
+            @click="filters.category = filters.category === cat ? '' : cat">
+            <PtIcon name="folder" :size="14" />
+            <span class="hub__pick-l">{{ cat }}</span>
+          </button>
+        </section>
+        <section v-if="allTags.length > 0" class="hub__sec">
+          <h3 class="hub__sec-t">标签</h3>
+          <div class="hub__tags">
+            <button
               v-for="tag in allTags"
               :key="tag"
-              :type="filters.tag === tag ? '' : 'info'"
-              :effect="filters.tag === tag ? 'dark' : 'plain'"
-              style="cursor: pointer"
-              @click="filters.tag = filters.tag === tag ? '' : tag"
-              >{{ tag }}</el-tag
-            >
+              type="button"
+              class="hub__tag"
+              :class="{ 'is-on': filters.tag === tag }"
+              @click="filters.tag = filters.tag === tag ? '' : tag">
+              <PtIcon name="tag" :size="12" />
+              <span>{{ tag }}</span>
+            </button>
           </div>
+        </section>
+        <div class="hub__side-foot">
+          <el-tooltip content="保存当前布局" placement="top">
+            <button type="button" class="hub__ico" @click="saveLayoutPreset">
+              <PtIcon name="save" :size="15" />
+            </button>
+          </el-tooltip>
+          <el-tooltip content="载入已保存布局" placement="top">
+            <button type="button" class="hub__ico" @click="loadLayoutPreset">
+              <PtIcon name="folder-open" :size="15" />
+            </button>
+          </el-tooltip>
+          <el-tooltip content="立即刷新" placement="top">
+            <button type="button" class="hub__ico" @click="loadTorrents">
+              <PtIcon name="refresh-cw" :size="15" />
+            </button>
+          </el-tooltip>
+          <el-tooltip content="添加种子" placement="top">
+            <button type="button" class="hub__ico is-primary" @click="openAddDialog">
+              <PtIcon name="plus" :size="15" />
+            </button>
+          </el-tooltip>
         </div>
-        <div class="sidebar-section">
-          <div class="sidebar-title">VIEW</div>
-          <el-switch
-            v-model="showAllTasks"
-            active-text="全部"
-            inactive-text="分页"
-            style="width: 100%" />
-          <el-switch
-            v-model="useVirtualList"
-            :disabled="!showAllTasks"
-            active-text="虚拟"
-            inactive-text="标准"
-            style="width: 100%; margin-top: 6px" />
-        </div>
-        <div class="sidebar-bottom">
-          <el-tooltip content="保存布局" placement="top"
-            ><el-button circle text @click="saveLayoutPreset">💾</el-button></el-tooltip
-          >
-          <el-tooltip content="加载布局" placement="top"
-            ><el-button circle text @click="loadLayoutPreset">📂</el-button></el-tooltip
-          >
-          <el-tooltip content="刷新" placement="top"
-            ><el-button circle text @click="loadTorrents">🔄</el-button></el-tooltip
-          >
-          <el-tooltip content="添加种子" placement="top"
-            ><el-button circle text type="primary" @click="openAddDialog">+</el-button></el-tooltip
-          >
-        </div>
-      </div>
+      </aside>
       <div
         v-show="sidebarVisible"
-        class="sidebar-resizer"
+        class="hub__resizer"
         title="拖拽调整侧栏宽度"
         @mousedown="onSidebarResizeStart" />
 
-      <div ref="hubMainRef" class="hub-main">
-        <div class="hub-toolbar-new">
-          <el-button
-            v-if="!sidebarVisible"
-            size="small"
-            class="toolbar-expand-sidebar"
-            @click="toggleSidebar"
-            >☰ 展开侧栏</el-button
-          >
-          <el-dropdown
-            trigger="click"
-            class="nav-dropdown"
-            @command="
-              (cmd: string) => {
-                if (cmd === 'toggle-sidebar') {
-                  toggleSidebar();
-                } else if (cmd === 'toggle-hero') {
-                  toggleHero();
-                } else {
-                  router.push('/' + cmd);
-                }
-              }
-            ">
-            <el-button class="nav-trigger">
-              <span class="nav-logo">PT</span>
-              <el-icon><ArrowDown /></el-icon>
+      <div ref="hubMainRef" class="hub__main">
+        <PtPanel
+          v-loading="tableLoading"
+          element-loading-text="加载任务…"
+          class="hub__panel"
+          title="任务列表"
+          icon="list-checks"
+          :count="total"
+          padding="none">
+          <template #actions>
+            <el-tooltip content="每 5 秒自动刷新" placement="bottom">
+              <span class="hub__auto">
+                <el-switch v-model="autoRefreshEnabled" size="small" />
+                <span>自动</span>
+              </span>
+            </el-tooltip>
+            <el-button type="primary" size="small" @click="openAddDialog">
+              <PtIcon name="plus" :size="14" /><span>添加种子</span>
             </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="toggle-sidebar">{{
-                  sidebarVisible ? "隐藏侧栏" : "显示侧栏"
-                }}</el-dropdown-item>
-                <el-dropdown-item command="toggle-hero">{{
-                  heroVisible ? "隐藏页头" : "显示页头"
-                }}</el-dropdown-item>
-                <el-dropdown-item divided command="global">全局设置</el-dropdown-item>
-                <el-dropdown-item command="userinfo">用户统计</el-dropdown-item>
-                <el-dropdown-item command="downloaders">下载器管理</el-dropdown-item>
-                <el-dropdown-item command="sites">站点与RSS</el-dropdown-item>
-                <el-dropdown-item command="search">种子搜索</el-dropdown-item>
-                <el-dropdown-item command="tasks">任务列表</el-dropdown-item>
-                <el-dropdown-item command="logs">日志</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <el-input
-            v-model="filters.search"
-            placeholder="搜索"
-            clearable
-            size="small"
-            class="toolbar-search" />
-          <el-select v-model="sortBy" size="small" class="toolbar-sort">
-            <el-option
-              v-for="item in sortOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value" />
-          </el-select>
-          <el-button size="small" circle @click="toggleSortOrder">
-            <el-icon><ArrowUp v-if="sortOrder === 'asc'" /><ArrowDown v-else /></el-icon>
-          </el-button>
-          <el-radio-group v-model="tableDensity" size="small">
-            <el-radio-button label="compact">紧凑</el-radio-button>
-            <el-radio-button label="comfortable">标准</el-radio-button>
-          </el-radio-group>
-          <el-radio-group v-model="detailMode" size="small">
-            <el-radio-button label="drawer">侧边</el-radio-button>
-            <el-radio-button label="inline">下方</el-radio-button>
-          </el-radio-group>
-          <el-popover placement="bottom-end" :width="260" trigger="click">
-            <template #reference><el-button size="small">列</el-button></template>
-            <div class="column-setting-header">
-              <span>显示列</span
-              ><el-button text type="primary" @click="restoreDefaultColumns">恢复默认</el-button>
-            </div>
-            <el-checkbox-group v-model="visibleColumns" class="column-check-group">
-              <el-checkbox v-for="item in columnOptions" :key="item.value" :label="item.value">{{
-                item.label
-              }}</el-checkbox>
-            </el-checkbox-group>
-            <div class="column-order-title">拖拽排序</div>
-            <div class="column-order-list">
-              <div
-                v-for="columnKey in columnOrder"
-                :key="columnKey"
-                class="column-order-item"
-                :class="{ hidden: !visibleColumns.includes(columnKey) }"
-                draggable="true"
-                @dragstart="onColumnDragStart(columnKey)"
-                @dragover.prevent
-                @drop="onColumnDrop(columnKey)">
-                <span class="drag-handle">::</span><span>{{ getColumnLabel(columnKey) }}</span>
-              </div>
-            </div>
-          </el-popover>
-          <el-button type="primary" size="small" @click="openAddDialog">+</el-button>
-          <el-switch
-            v-model="autoRefreshEnabled"
-            active-text="自动"
-            inactive-text=""
-            size="small" />
-          <el-button size="small" type="primary" @click="showAllTasks = !showAllTasks">{{
-            showAllTasks ? "全部" : "分页"
-          }}</el-button>
-          <span class="toolbar-count">{{ total }} 项</span>
-          <span v-if="allTasksLimited" class="toolbar-count toolbar-warning"
-            >仅渲染前 {{ MAX_ALL_TASK_ROWS }} 条（防卡死）</span
-          >
-        </div>
+          </template>
 
-        <div v-show="selectedCount > 0" class="hub-batch-actions">
-          <span>已选 {{ selectedCount }} 项</span>
-          <el-button
-            size="small"
-            :loading="actionLoading"
-            :disabled="!selectedCanUse('pause')"
-            @click="batchAction('pause')"
-            >暂停</el-button
-          >
-          <el-button
-            size="small"
-            :loading="actionLoading"
-            :disabled="!selectedCanUse('resume')"
-            @click="batchAction('resume')"
-            >开始</el-button
-          >
-          <el-button
-            size="small"
-            :loading="actionLoading"
-            :disabled="!selectedCanUse('recheck')"
-            @click="batchAction('recheck')"
-            >复检</el-button
-          >
-          <el-button
-            size="small"
-            :loading="actionLoading"
-            :disabled="!selectedCanUse('set_location')"
-            @click="openSetLocationDialog"
-            >路径</el-button
-          >
-          <el-button
-            size="small"
-            type="danger"
-            :loading="actionLoading"
-            :disabled="!selectedCanUse('delete')"
-            @click="batchAction('delete')"
-            >删除</el-button
-          >
-          <el-button
-            size="small"
-            type="danger"
-            plain
-            :loading="actionLoading"
-            :disabled="!selectedCanUse('delete_with_files')"
-            @click="batchAction('delete_with_files')"
-            >删除+文件</el-button
-          >
-        </div>
-        <el-card v-loading="tableLoading" shadow="never" class="hub-table-card">
-          <div ref="tableCardBodyRef" class="hub-table-body">
-            <div class="hub-table-content" @contextmenu.prevent>
+          <PtToolbar>
+            <el-dropdown trigger="click" @command="onNavCommand">
+              <button type="button" class="hub__nav">
+                <PtLogo :size="16" :variant="logoVariant" title="pt-tools" />
+                <PtIcon name="chevron-down" :size="13" />
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="toggle-sidebar">{{
+                    sidebarVisible ? "隐藏侧栏" : "显示侧栏"
+                  }}</el-dropdown-item>
+                  <el-dropdown-item command="toggle-hero">{{
+                    heroVisible ? "隐藏页头" : "显示页头"
+                  }}</el-dropdown-item>
+                  <el-dropdown-item divided command="global">全局设置</el-dropdown-item>
+                  <el-dropdown-item command="userinfo">用户统计</el-dropdown-item>
+                  <el-dropdown-item command="downloaders">下载器管理</el-dropdown-item>
+                  <el-dropdown-item command="sites">站点与 RSS</el-dropdown-item>
+                  <el-dropdown-item command="search">种子搜索</el-dropdown-item>
+                  <el-dropdown-item command="tasks">任务列表</el-dropdown-item>
+                  <el-dropdown-item command="logs">日志</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-tooltip v-if="!sidebarVisible" content="展开侧栏" placement="bottom">
+              <button type="button" class="hub__ico" @click="toggleSidebar">
+                <PtIcon name="panel-left-open" :size="15" />
+              </button>
+            </el-tooltip>
+            <el-input
+              v-model="filters.search"
+              placeholder="搜索标题"
+              clearable
+              size="small"
+              class="hub__search">
+              <template #prefix><PtIcon name="search" :size="13" /></template>
+            </el-input>
+            <el-select v-model="sortBy" size="small" class="hub__sort">
+              <el-option
+                v-for="item in sortOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value" />
+            </el-select>
+            <el-tooltip :content="sortOrder === 'asc' ? '升序，点击改降序' : '降序，点击改升序'">
+              <button type="button" class="hub__ico" @click="toggleSortOrder">
+                <PtIcon :name="sortOrder === 'asc' ? 'chevron-up' : 'chevron-down'" :size="15" />
+              </button>
+            </el-tooltip>
+
+            <template #right>
+              <el-tooltip content="行高" placement="bottom">
+                <el-segmented v-model="tableDensity" class="pt-seg" :options="densityOptions" />
+              </el-tooltip>
+              <el-tooltip content="详情展示位置" placement="bottom">
+                <el-segmented v-model="detailMode" class="pt-seg" :options="detailModeOptions" />
+              </el-tooltip>
+              <el-tooltip content="数据范围" placement="bottom">
+                <el-segmented v-model="showAllTasks" class="pt-seg" :options="scopeOptions" />
+              </el-tooltip>
+              <el-tooltip content="列表渲染方式，仅全部范围可选" placement="bottom">
+                <el-segmented
+                  v-model="useVirtualList"
+                  class="pt-seg"
+                  :options="renderOptions"
+                  :disabled="!showAllTasks" />
+              </el-tooltip>
+              <el-popover placement="bottom-end" :width="264" trigger="click">
+                <template #reference>
+                  <button type="button" class="hub__ico" aria-label="显示列">
+                    <PtIcon name="columns-3" :size="15" />
+                  </button>
+                </template>
+                <div class="hub__cols-head">
+                  <span>显示列</span>
+                  <el-button text type="primary" size="small" @click="restoreDefaultColumns">
+                    恢复默认
+                  </el-button>
+                </div>
+                <el-checkbox-group v-model="visibleColumns" class="hub__cols">
+                  <el-checkbox
+                    v-for="item in columnOptions"
+                    :key="item.value"
+                    :value="item.value"
+                    :label="item.label" />
+                </el-checkbox-group>
+                <div class="hub__cols-head">
+                  <span>拖拽排序</span>
+                </div>
+                <div class="hub__order">
+                  <div
+                    v-for="columnKey in columnOrder"
+                    :key="columnKey"
+                    class="hub__order-item"
+                    :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
+                    draggable="true"
+                    @dragstart="onColumnDragStart(columnKey)"
+                    @dragover.prevent
+                    @drop="onColumnDrop(columnKey)">
+                    <PtIcon name="grip-vertical" :size="13" />
+                    <span>{{ getColumnLabel(columnKey) }}</span>
+                  </div>
+                </div>
+              </el-popover>
+            </template>
+          </PtToolbar>
+
+          <div v-show="selectedCount > 0" class="pt-strip hub__bulk">
+            <PtIcon name="check-check" :size="14" />
+            <span>已选 {{ selectedCount }} 项</span>
+            <span class="pt-strip__end hub__bulk-acts">
+              <el-button
+                size="small"
+                :loading="actionLoading"
+                :disabled="!selectedCanUse('pause')"
+                @click="batchAction('pause')">
+                <PtIcon name="pause" :size="13" /><span>暂停</span>
+              </el-button>
+              <el-button
+                size="small"
+                :loading="actionLoading"
+                :disabled="!selectedCanUse('resume')"
+                @click="batchAction('resume')">
+                <PtIcon name="play" :size="13" /><span>开始</span>
+              </el-button>
+              <el-button
+                size="small"
+                :loading="actionLoading"
+                :disabled="!selectedCanUse('recheck')"
+                @click="batchAction('recheck')">
+                <PtIcon name="refresh-cw" :size="13" /><span>复检</span>
+              </el-button>
+              <el-button
+                size="small"
+                :loading="actionLoading"
+                :disabled="!selectedCanUse('set_location')"
+                @click="openSetLocationDialog">
+                <PtIcon name="move" :size="13" /><span>路径</span>
+              </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                :loading="actionLoading"
+                :disabled="!selectedCanUse('delete')"
+                @click="batchAction('delete')">
+                <PtIcon name="trash-2" :size="13" /><span>删除</span>
+              </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :loading="actionLoading"
+                :disabled="!selectedCanUse('delete_with_files')"
+                @click="batchAction('delete_with_files')">
+                <PtIcon name="trash-2" :size="13" /><span>删除+文件</span>
+              </el-button>
+            </span>
+          </div>
+
+          <div ref="tableCardBodyRef" class="hub__table">
+            <PtDataState
+              v-if="isEmptyResult"
+              :state="hasActiveFilter ? 'zero' : 'empty'"
+              :title="hasActiveFilter ? '没有匹配的任务' : '下载器里还没有任务'"
+              :sub="
+                hasActiveFilter ? '试试放宽状态、分类或关键词' : '添加一个种子，任务会出现在这里'
+              ">
+              <template #action>
+                <el-button v-if="hasActiveFilter" size="small" @click="clearFilters">
+                  <PtIcon name="rotate-ccw" :size="14" /><span>清空筛选</span>
+                </el-button>
+                <el-button v-else type="primary" size="small" @click="openAddDialog">
+                  <PtIcon name="plus" :size="14" /><span>添加种子</span>
+                </el-button>
+              </template>
+            </PtDataState>
+            <div v-else class="hub__grid" @contextmenu.prevent>
               <div
                 v-if="showAllTasks && useVirtualList"
                 ref="virtualContainer"
-                class="virtual-table-shell"
+                class="hub__vshell"
                 :style="{ maxHeight: `${tableMaxHeight}px` }"
                 @scroll.passive="onVirtualScroll">
                 <div :style="{ height: `${virtualTopSpacer}px` }" />
@@ -1591,361 +1678,676 @@ function toggleHero() {
                 @context-action="handleContextAction"
                 @detail="openDetail" />
             </div>
-            <div v-if="!showAllTasks" ref="paginationRef" class="hub-pagination">
+          </div>
+
+          <template #footer>
+            <div ref="paginationRef" class="hub__foot">
+              <span class="pt-foot-note">
+                共 {{ total }} 个任务<template v-if="allTasksLimited">
+                  ·
+                  <span class="hub__warn">仅渲染前 {{ MAX_ALL_TASK_ROWS }} 条（防卡死）</span>
+                </template>
+              </span>
               <el-pagination
+                v-if="!showAllTasks"
                 v-model:current-page="page"
                 v-model:page-size="pageSize"
+                class="pt-pager"
                 :total="total"
                 :page-sizes="[50, 100, 200]"
-                layout="total, sizes, prev, pager, next, jumper"
+                layout="sizes, prev, pager, next, jumper"
                 @size-change="loadTorrents"
                 @current-change="loadTorrents" />
             </div>
-          </div>
-        </el-card>
+          </template>
+        </PtPanel>
         <teleport to="body">
           <div
             v-if="headerColumnMenuVisible"
             ref="headerColumnMenuRef"
-            class="header-column-menu"
+            class="hub__hmenu"
             :style="{ left: `${headerColumnMenuX}px`, top: `${headerColumnMenuY}px` }"
             @click.stop>
-            <div class="column-setting-header">
+            <div class="hub__cols-head">
               <span>显示列</span>
-              <el-button text type="primary" @click="restoreDefaultColumns">恢复默认</el-button>
+              <el-button text type="primary" size="small" @click="restoreDefaultColumns">
+                恢复默认
+              </el-button>
             </div>
-            <el-checkbox-group v-model="visibleColumns" class="column-check-group">
-              <el-checkbox v-for="item in columnOptions" :key="item.value" :label="item.value">{{
-                item.label
-              }}</el-checkbox>
+            <el-checkbox-group v-model="visibleColumns" class="hub__cols">
+              <el-checkbox
+                v-for="item in columnOptions"
+                :key="item.value"
+                :value="item.value"
+                :label="item.label" />
             </el-checkbox-group>
           </div>
         </teleport>
-        <el-card
-          v-if="inlineDetailVisible"
-          shadow="never"
-          class="inline-detail-card detail-surface">
-          <template #header>
-            <div class="inline-detail-header">
-              <span>任务详情</span>
-              <el-button text @click="closeInlineDetail">关闭</el-button>
-            </div>
+        <PtPanel v-if="inlineDetailVisible" class="hub__detail" title="任务详情" icon="info">
+          <template #actions>
+            <el-button text size="small" @click="closeInlineDetail">
+              <PtIcon name="x" :size="14" /><span>关闭</span>
+            </el-button>
           </template>
-          <div v-loading="detailLoading" class="detail-shell">
-            <template v-if="detail">
-              <div class="detail-meta">
-                <div><strong>标题：</strong>{{ detail.torrent.title }}</div>
-                <div>
-                  <strong>下载器：</strong>{{ detail.torrent.downloader_name }} ({{
-                    detail.torrent.downloader_type
-                  }})
-                </div>
-                <div><strong>Hash：</strong>{{ detail.torrent.info_hash || "-" }}</div>
-                <div><strong>保存路径：</strong>{{ detail.torrent.save_path || "-" }}</div>
-              </div>
-              <el-tabs v-model="detailActiveTab" class="detail-tabs">
-                <el-tab-pane :label="`文件 (${detail.files.length})`" name="files" lazy>
-                  <el-table :data="detail.files" size="small" max-height="300">
-                    <el-table-column prop="index" label="#" width="64" />
-                    <el-table-column
-                      prop="name"
-                      label="文件"
-                      min-width="260"
-                      show-overflow-tooltip />
-                    <el-table-column label="大小" width="120" align="right">
-                      <template #default="{ row }">{{ formatSize(row.size) }}</template>
-                    </el-table-column>
-                    <el-table-column label="进度" width="160">
-                      <template #default="{ row }">
-                        <el-progress
-                          :percentage="Math.round((row.progress || 0) * 100)"
-                          :stroke-width="8" />
-                      </template>
-                    </el-table-column>
-                    <el-table-column prop="priority" label="优先级" width="90" align="right" />
-                  </el-table>
-                </el-tab-pane>
-                <el-tab-pane :label="`Tracker (${detail.trackers.length})`" name="trackers" lazy>
-                  <el-table :data="detail.trackers" size="small" max-height="300">
-                    <el-table-column prop="url" label="URL" min-width="320" show-overflow-tooltip />
-                    <el-table-column prop="status" label="状态" width="80" align="center" />
-                    <el-table-column prop="seeds" label="Seeds" width="90" align="right" />
-                    <el-table-column prop="peers" label="Peers" width="90" align="right" />
-                    <el-table-column prop="leeches" label="Leeches" width="90" align="right" />
-                  </el-table>
-                </el-tab-pane>
-              </el-tabs>
-            </template>
-          </div>
-        </el-card>
+          <DownloaderTorrentDetail
+            v-model:tab="detailActiveTab"
+            :detail="detail"
+            :loading="detailLoading" />
+        </PtPanel>
       </div>
     </div>
 
-    <el-dialog v-model="locationDialogVisible" title="批量修改存储路径" width="480px"
-      ><el-input v-model="newLocation" placeholder="例如 /downloads/tv" /><template #footer
-        ><el-button @click="locationDialogVisible = false">取消</el-button
-        ><el-button type="primary" :loading="actionLoading" @click="submitSetLocation"
-          >确定修改</el-button
-        ></template
-      ></el-dialog
-    >
-    <el-dialog v-model="addDialogVisible" title="添加种子到下载器" width="620px"
-      ><el-form label-width="100px"
-        ><el-form-item label="下载器"
-          ><el-select
-            v-model="addForm.downloaderIds"
-            multiple
-            clearable
-            collapse-tags
-            style="width: 100%"
-            ><el-option
+    <el-dialog
+      v-model="locationDialogVisible"
+      class="pt-dialog"
+      title="批量修改存储路径"
+      width="480px">
+      <el-input v-model="newLocation" placeholder="例如 /downloads/tv" />
+      <template #footer>
+        <el-button @click="locationDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="actionLoading" @click="submitSetLocation">
+          确定修改
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="addDialogVisible" class="pt-dialog" title="添加种子到下载器" width="620px">
+      <el-form class="pt-form" label-position="top">
+        <el-form-item label="下载器">
+          <el-select v-model="addForm.downloaderIds" multiple clearable collapse-tags>
+            <el-option
               v-for="item in downloaders"
               :key="item.id"
               :label="`${item.name} (${item.type})`"
-              :value="item.id" /></el-select></el-form-item
-        ><el-form-item label="种子 URL"
-          ><el-input
-            v-model="addForm.sourceUrl"
-            placeholder="https://.../xxx.torrent" /></el-form-item
-        ><el-form-item label="磁力链接"
-          ><el-input
-            v-model="addForm.magnetLink"
-            placeholder="magnet:?xt=urn:btih:..." /></el-form-item
-        ><el-form-item label="Torrent 文件"
-          ><el-upload
-            action="#"
-            :show-file-list="false"
-            :auto-upload="false"
-            :before-upload="beforeUpload"
-            ><el-button>选择 .torrent 文件</el-button></el-upload
-          ><span v-if="uploadFileName" style="margin-left: 10px">{{
-            uploadFileName
-          }}</span></el-form-item
-        ><el-form-item label="保存路径"
-          ><el-input v-model="addForm.savePath" placeholder="可选" /></el-form-item
-        ><el-form-item label="分类"
-          ><el-input v-model="addForm.category" placeholder="可选" /></el-form-item
-        ><el-form-item label="标签"
-          ><el-input v-model="addForm.tags" placeholder="可选，逗号分隔" /></el-form-item
-        ><el-form-item label="添加为暂停"
-          ><el-switch v-model="addForm.addPaused" /></el-form-item></el-form
-      ><template #footer
-        ><el-button @click="addDialogVisible = false">取消</el-button
-        ><el-button type="primary" :loading="addLoading" @click="submitAdd"
-          >添加</el-button
-        ></template
-      ></el-dialog
-    >
+              :value="item.id" />
+          </el-select>
+          <div class="field-tip">留空则不提交；可同时投递到多个下载器。</div>
+        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="种子 URL">
+            <el-input v-model="addForm.sourceUrl" placeholder="https://.../xxx.torrent" />
+          </el-form-item>
+          <el-form-item label="磁力链接">
+            <el-input v-model="addForm.magnetLink" placeholder="magnet:?xt=urn:btih:..." />
+          </el-form-item>
+        </div>
+        <el-form-item label="Torrent 文件">
+          <div class="hub__upload">
+            <el-upload
+              action="#"
+              :show-file-list="false"
+              :auto-upload="false"
+              :before-upload="beforeUpload">
+              <el-button>
+                <PtIcon name="upload" :size="14" /><span>选择 .torrent 文件</span>
+              </el-button>
+            </el-upload>
+            <span v-if="uploadFileName" class="hub__upload-name">{{ uploadFileName }}</span>
+          </div>
+          <div class="field-tip">URL、磁力、文件三者任选其一。</div>
+        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="保存路径">
+            <el-input v-model="addForm.savePath" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="分类">
+            <el-input v-model="addForm.category" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="标签">
+            <el-input v-model="addForm.tags" placeholder="可选，逗号分隔" />
+          </el-form-item>
+        </div>
+        <el-form-item label="添加为暂停">
+          <el-switch v-model="addForm.addPaused" />
+          <div class="field-tip">开启后任务只入列不开跑，适合先核对路径再手动开始。</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="addLoading" @click="submitAdd">添加</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer
       v-model="detailDrawerVisible"
-      class="detail-drawer detail-surface"
+      class="hub__drawer"
       title="任务详情"
       size="56%"
       direction="rtl"
       :destroy-on-close="true">
-      <div v-loading="detailLoading" class="detail-shell">
-        <template v-if="detail">
-          <div class="detail-meta">
-            <div><strong>标题：</strong>{{ detail.torrent.title }}</div>
-            <div>
-              <strong>下载器：</strong>{{ detail.torrent.downloader_name }} ({{
-                detail.torrent.downloader_type
-              }})
-            </div>
-            <div><strong>Hash：</strong>{{ detail.torrent.info_hash || "-" }}</div>
-            <div><strong>保存路径：</strong>{{ detail.torrent.save_path || "-" }}</div>
-          </div>
-          <el-tabs v-model="detailActiveTab" class="detail-tabs">
-            <el-tab-pane :label="`文件 (${detail.files.length})`" name="files" lazy>
-              <el-table :data="detail.files" size="small" max-height="300">
-                <el-table-column prop="index" label="#" width="64" />
-                <el-table-column prop="name" label="文件" min-width="260" show-overflow-tooltip />
-                <el-table-column label="大小" width="120" align="right">
-                  <template #default="{ row }">{{ formatSize(row.size) }}</template>
-                </el-table-column>
-                <el-table-column label="进度" width="160">
-                  <template #default="{ row }">
-                    <el-progress
-                      :percentage="Math.round((row.progress || 0) * 100)"
-                      :stroke-width="8" />
-                  </template>
-                </el-table-column>
-                <el-table-column prop="priority" label="优先级" width="90" align="right" />
-              </el-table>
-            </el-tab-pane>
-            <el-tab-pane :label="`Tracker (${detail.trackers.length})`" name="trackers" lazy>
-              <el-table :data="detail.trackers" size="small" max-height="300">
-                <el-table-column prop="url" label="URL" min-width="320" show-overflow-tooltip />
-                <el-table-column prop="status" label="状态" width="80" align="center" />
-                <el-table-column prop="seeds" label="Seeds" width="90" align="right" />
-                <el-table-column prop="peers" label="Peers" width="90" align="right" />
-                <el-table-column prop="leeches" label="Leeches" width="90" align="right" />
-              </el-table>
-            </el-tab-pane>
-          </el-tabs>
-        </template>
-      </div>
+      <DownloaderTorrentDetail
+        v-model:tab="detailActiveTab"
+        :detail="detail"
+        :loading="detailLoading" />
     </el-drawer>
   </div>
 </template>
+
 <style scoped>
-@import "@/styles/downloader-hub-page.css";
-
-.detail-shell {
-  color: #ffffff;
-  background: #1a2e27;
-  border-radius: 12px;
+/*
+ * 沉浸模式页面：App.vue 把整块视口交给这一页（.pt-shell.is-immersive 隐藏了
+ * rail / 导航列 / 页头 / 状态条），所以页头、筛选侧栏、导航下拉都由本页自己画。
+ * 其他页面不该照抄这个结构——它们的标题和导航仍由 shell 提供。
+ *
+ * 原先这一页的皮肤在 styles/downloader-hub-page.css，一整套 --vt-* 深绿硬编码，
+ * 换成主题令牌后那份文件再无第二个消费者，于是折进本文件一起删掉。
+ */
+.hub {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  color: var(--pt-t2);
+  background: var(--pt-canvas);
 }
 
-.detail-tabs {
-  --el-text-color-regular: #a0b8ac;
+/* ---------- 页头 ---------- */
+/*
+ * 这条 hero 用的是深色 chrome 底，8 套配色里都是深色，所以文字必须走
+ * --pt-chrome-t1/t2 而不是 --pt-t1/t3 —— 后者在浅色模式下是深灰，
+ * 会变成深底深字。标志同理取该表面主文字色的单色版。
+ */
+.hub__hero {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  padding: var(--pt-space-3) var(--pt-pad);
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome);
+  border-bottom: 1px solid var(--pt-chrome-border);
 }
 
-:deep(.detail-surface .el-drawer__header) {
-  color: #ffffff;
-  font-weight: 700;
-  font-size: 18px;
-  margin-bottom: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1a2e27;
+.hub__hero-text {
+  min-width: 0;
 }
 
-:deep(.detail-surface .el-drawer__body) {
-  color: #ffffff;
-  background: #1a2e27;
-  padding: 16px;
-}
-
-:deep(.inline-detail-card .el-card__header) {
-  border-bottom-color: rgba(255, 255, 255, 0.1);
-}
-
-:deep(.inline-detail-card .el-tabs__item),
-:deep(.detail-surface .el-tabs__item) {
-  color: #a0b8ac;
+.hub__hero-text h1 {
+  margin: 0;
+  font-size: var(--pt-fz-h1);
   font-weight: 600;
-  transition: color 0.2s;
+  line-height: var(--pt-lh-tight);
+  color: var(--pt-chrome-t1);
 }
 
-:deep(.inline-detail-card .el-tabs__item:hover),
-:deep(.detail-surface .el-tabs__item:hover) {
-  color: #ffffff;
+.hub__hero-text p {
+  margin: 2px 0 0;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-chrome-t2);
 }
 
-:deep(.inline-detail-card .el-tabs__item.is-active),
-:deep(.detail-surface .el-tabs__item.is-active) {
-  color: #ffffff;
-  font-weight: 700;
+.hub__hero-acts {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  margin-left: auto;
 }
 
-:deep(.inline-detail-card .el-tabs__active-bar),
-:deep(.detail-surface .el-tabs__active-bar) {
-  background-color: #64ceaa;
-  height: 3px;
+/* ---------- 双列骨架 ---------- */
+.hub__layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
-:deep(.inline-detail-card .el-table),
-:deep(.detail-surface .el-table) {
-  --el-table-bg-color: #14241e;
-  --el-table-tr-bg-color: #14241e;
-  --el-table-header-bg-color: #0d1a15;
-  --el-table-header-text-color: #a0b8ac;
-  --el-table-text-color: #ffffff;
-  --el-table-border-color: rgba(255, 255, 255, 0.08);
-  --el-table-row-hover-bg-color: #1e382f;
-  background-color: #14241e;
+/* 侧栏宽度由 sidebarStyle 内联给（可拖拽），这里只管配色和滚动 */
+.hub__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-4);
+  padding: var(--pt-space-3);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pt-border-strong) transparent;
+  background: var(--pt-surface);
+  border-right: 1px solid var(--pt-border);
 }
 
-:deep(.inline-detail-card .el-table td),
-:deep(.inline-detail-card .el-table th),
-:deep(.detail-surface .el-table td),
-:deep(.detail-surface .el-table th) {
+.hub__side::-webkit-scrollbar {
+  width: 5px;
+}
+
+.hub__side::-webkit-scrollbar-thumb {
+  background: var(--pt-border-strong);
+  border-radius: var(--pt-radius-full);
+}
+
+.hub__side-head {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hub__side-head > .hub__ico {
+  margin-left: auto;
+}
+
+.hub__side-foot {
+  display: flex;
+  gap: var(--pt-space-1);
+  align-items: center;
+  margin-top: auto;
+  padding-top: var(--pt-space-3);
+  border-top: 1px solid var(--pt-border);
+}
+
+/* 8px 的拖拽把手：默认只是一条比边框稍亮的缝，悬停才提示可拖 */
+.hub__resizer {
+  flex: 0 0 8px;
+  cursor: col-resize;
+  background: var(--pt-hover);
+  border-right: 1px solid var(--pt-border);
+}
+
+.hub__resizer:hover {
+  background: var(--pt-p-soft);
+}
+
+.hub__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  min-width: 0;
+  padding: var(--pt-space-3);
+  overflow: hidden;
+}
+
+/* ---------- 侧栏区块 ---------- */
+.hub__sec {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hub__sec-t {
+  margin: 0 0 var(--pt-space-1);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+}
+
+/* [图标] 标签 …… 数值：一行一个指标，比原来的 2×2 卡片省一半高度 */
+.hub__stat {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: 24px;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+.hub__stat-l {
+  flex: 1;
+  min-width: 0;
+}
+
+.hub__stat-v {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 上下行方向统一配色：下载走 ok、上传走 info，和表格里的状态色条一致 */
+.is-dl {
+  color: var(--pt-ok);
+}
+
+.is-ul {
+  color: var(--pt-info);
+}
+
+/* 状态 / 分类筛选项：原来是可点的 div，换成 button 才有键盘焦点 */
+.hub__pick {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--pt-space-2);
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
+  text-align: left;
+  cursor: pointer;
   background: transparent;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: var(--pt-r-md);
 }
 
-:deep(.detail-surface .el-table .el-table__row:hover > td.el-table__cell),
-:deep(.inline-detail-card .el-table .el-table__row:hover > td.el-table__cell) {
-  background-color: #1e382f !important;
-  color: #ffffff !important;
+.hub__pick:hover {
+  background: var(--pt-hover);
 }
 
-:deep(.detail-surface .el-table .el-table__row.current-row > td.el-table__cell),
-:deep(.inline-detail-card .el-table .el-table__row.current-row > td.el-table__cell) {
-  background-color: #234237 !important;
-  color: #ffffff !important;
+.hub__pick.is-on {
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
 }
 
-:deep(.detail-surface .el-progress-bar__outer),
-:deep(.inline-detail-card .el-progress-bar__outer) {
-  background-color: rgba(255, 255, 255, 0.1) !important;
+.hub__pick.is-dl :deep(svg) {
+  color: var(--pt-ok);
 }
 
-:deep(.detail-surface .el-progress-bar__inner),
-:deep(.inline-detail-card .el-progress-bar__inner) {
-  background-color: #64ceaa !important;
+.hub__pick.is-seed :deep(svg) {
+  color: var(--pt-info);
 }
 
-:deep(.detail-surface .el-progress__text),
-:deep(.inline-detail-card .el-progress__text) {
-  color: #ffffff !important;
+.hub__pick.is-pause :deep(svg) {
+  color: var(--pt-warn);
+}
+
+.hub__pick.is-err :deep(svg) {
+  color: var(--pt-dang);
+}
+
+.hub__pick-l {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub__pick-n {
+  font-size: var(--pt-fz-label);
   font-weight: 600;
+  color: var(--pt-t3);
+  font-variant-numeric: tabular-nums;
 }
 
-:deep(.detail-surface .el-loading-mask) {
-  background: rgba(17, 33, 28, 0.68);
-  backdrop-filter: blur(2px);
+.hub__pick.is-on .hub__pick-n {
+  color: var(--pt-p);
 }
 
-:deep(.hub-pagination .el-pagination) {
-  --el-pagination-bg-color: transparent;
-  --el-pagination-text-color: #e8f6ef;
-  --el-pagination-button-color: #e8f6ef;
-  --el-pagination-button-bg-color: rgba(255, 255, 255, 0.12);
-  --el-pagination-hover-color: #9ae6cf;
+/* 标签是分类不是状态，所以做成一片可折行的胶囊而不是整行按钮 */
+.hub__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-1);
 }
 
-:deep(.hub-pagination .btn-prev),
-:deep(.hub-pagination .btn-next),
-:deep(.hub-pagination .el-pager li) {
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #eefbf5 !important;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+.hub__tag {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px var(--pt-space-2);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
+  cursor: pointer;
+  background: var(--pt-hover);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-radius-full);
 }
 
-:deep(.hub-pagination .el-pager li.is-active) {
-  background: rgba(100, 206, 170, 0.34) !important;
-  color: #ffffff !important;
-  border-color: rgba(100, 206, 170, 0.58);
+.hub__tag span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-:deep(.hub-pagination .el-pagination__total),
-:deep(.hub-pagination .el-pagination__jump),
-:deep(.hub-pagination .el-pagination__sizes) {
-  color: #dff3ea !important;
+.hub__tag:hover {
+  border-color: var(--pt-border-strong);
 }
 
-:deep(.hub-pagination .el-input__wrapper),
-:deep(.hub-pagination .el-select__wrapper) {
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #eefbf5 !important;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16) !important;
+.hub__tag.is-on {
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+  border-color: color-mix(in srgb, var(--pt-p) 40%, transparent);
 }
 
-:deep(.hub-pagination .el-input__inner),
-:deep(.hub-pagination .el-select__placeholder),
-:deep(.hub-pagination .el-select__selected-item),
-:deep(.hub-pagination .el-select .el-select__wrapper .el-select__placeholder span),
-:deep(.hub-pagination .el-select__caret),
-:deep(.hub-pagination .el-select__suffix),
-:deep(.hub-pagination .el-input__suffix),
-:deep(.hub-pagination .el-input__prefix) {
-  color: #eefbf5 !important;
+/* ---------- 通用图标按钮 ---------- */
+.hub__ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--pt-t3);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: var(--pt-r-md);
 }
 
-:deep(.hub-pagination .el-pagination__goto),
-:deep(.hub-pagination .el-pagination__classifier) {
-  color: #dff3ea !important;
+.hub__ico:hover {
+  color: var(--pt-t1);
+  background: var(--pt-hover);
+}
+
+/* ---------- 工具条 ---------- */
+.hub__nav {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 26px;
+  padding: 0 var(--pt-space-2);
+  color: var(--pt-t2);
+  cursor: pointer;
+  background: var(--pt-hover);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
+.hub__nav:hover {
+  color: var(--pt-t1);
+  border-color: var(--pt-border-strong);
+}
+
+/*
+ * brand.md 要求 mono 变体取所在表面的主文字色，而工具条整体是次级色（悬停才提到主色）。
+ * 只把标志钉到 --pt-t1，折叠箭头留在次级色上，保住工具条本来的层级。
+ * plated 变体自带品牌色，不受 currentColor 影响，所以只选 mono。
+ */
+.hub__nav .pt-logo--mono {
+  color: var(--pt-t1);
+}
+
+.hub__search {
+  flex: 1 1 180px;
+  min-width: 140px;
+  max-width: 320px;
+}
+
+.hub__sort {
+  flex: 0 0 132px;
+}
+
+/* 面板头里的自动刷新：开关和文字要当成一个整体，tooltip 才有落点 */
+.hub__auto {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+/* ---------- 批量操作条 ---------- */
+/* 紧贴工具条下方，所以去掉 .pt-strip 自带的上沿，改在下沿分隔表头 */
+.hub__bulk {
+  border-top: 0;
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.hub__bulk-acts {
+  display: inline-flex;
+  gap: var(--pt-space-1);
+  align-items: center;
+}
+
+/* ---------- 表格区 ---------- */
+.hub__panel {
+  flex: 1;
+  min-height: 0;
+}
+
+.hub__table,
+.hub__grid {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 虚拟列表自己滚：contain + will-change 把重排关在这一层里 */
+.hub__vshell {
+  height: 100%;
+  overflow: auto;
+  contain: layout style;
+  will-change: scroll-position;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hub__foot {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.hub__warn {
+  color: var(--pt-warn);
+}
+
+.hub__detail {
+  flex: 0 0 auto;
+}
+
+/* ---------- 列设置（工具条气泡与表头右键菜单共用） ---------- */
+.hub__cols-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-bottom: var(--pt-space-1);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+}
+
+.hub__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--pt-space-2);
+}
+
+.hub__cols :deep(.el-checkbox) {
+  height: 24px;
+  margin-right: 0;
+}
+
+.hub__cols :deep(.el-checkbox__label) {
+  font-size: var(--pt-fz-sm);
+}
+
+.hub__order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.hub__order-item {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--pt-space-1);
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  cursor: grab;
+  border-radius: var(--pt-r-sm);
+}
+
+.hub__order-item:hover {
+  background: var(--pt-hover);
+}
+
+.hub__order-item.is-off {
+  color: var(--pt-t4);
+}
+
+/* 表头右键菜单被 teleport 到 body，配色只能用全局令牌 */
+.hub__hmenu {
+  position: fixed;
+  z-index: 3100;
+  width: 260px;
+  max-height: 360px;
+  padding: var(--pt-space-2);
+  overflow: auto;
+  background: var(--pt-raised);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-lg);
+}
+
+/* ---------- 添加种子对话框 ---------- */
+.hub__upload {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+.hub__upload-name {
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+  word-break: break-all;
+}
+
+/* ---------- 详情抽屉 ---------- */
+/* atoms.css 里只有 .pt-dialog 皮肤，没有抽屉皮肤，所以这里按令牌单独铺一层 */
+.hub__drawer :deep(.el-drawer__header) {
+  height: 42px;
+  padding: 0 var(--pt-pad);
+  margin: 0;
+  font-size: var(--pt-fz-h2);
+  font-weight: 600;
+  color: var(--pt-t1);
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.hub__drawer :deep(.el-drawer__body) {
+  padding: var(--pt-pad);
+  background: var(--pt-surface);
+}
+
+/* ---------- 窄屏：侧栏落到上方，拖拽把手无意义 ---------- */
+@media (max-width: 900px) {
+  .hub__layout {
+    flex-direction: column;
+  }
+
+  .hub__resizer {
+    display: none;
+  }
+
+  .hub__side {
+    /* 宽度是拖拽存下来的内联样式，窄屏必须压过它 */
+    width: 100% !important;
+    max-height: 42vh;
+    border-right: none;
+    border-bottom: 1px solid var(--pt-border);
+  }
+
+  .hub__hero {
+    flex-wrap: wrap;
+  }
+
+  .hub__hero-acts {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .hub__main {
+    padding: var(--pt-space-2);
+  }
 }
 </style>

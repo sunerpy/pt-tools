@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { type TaskItem, type TaskListResponse, tasksApi } from "@/api";
-import { Delete, Refresh, Search } from "@element-plus/icons-vue";
+import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
+
+type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
 const loading = ref(false);
 const tasks = ref<TaskItem[]>([]);
@@ -27,6 +34,16 @@ const siteOptions = computed(() => {
   });
   return Array.from(sites);
 });
+
+/** 空表要分「还没跑过任务」和「筛掉了」两种：前者要去建 RSS，后者要放宽条件 */
+const hasFilters = computed(() => {
+  const f = filters.value;
+  return Boolean(f.q || f.site || f.downloaded || f.pushed || f.expired);
+});
+
+const emptySub = computed(() =>
+  hasFilters.value ? "换个关键词，或点重置清掉所有筛选" : "RSS 任务跑过之后这里会出现记录",
+);
 
 onMounted(async () => {
   await loadTasks();
@@ -126,10 +143,12 @@ function formatSize(bytes: number): string {
   return `${size.toFixed(2)} ${units[unitIndex]}`;
 }
 
-function getProgressColor(progress: number) {
-  if (progress < 30) return "#F56C6C";
-  if (progress < 70) return "#E6A23C";
-  return "#67C23A";
+/* el-progress 把 color 写成内联 background-color，所以这里可以直接给 var()，
+   进度条就跟着当前配色走，不再是三个写死的 Element 默认色 */
+function getProgressColor(progress: number): string {
+  if (progress < 30) return "var(--pt-dang)";
+  if (progress < 70) return "var(--pt-warn)";
+  return "var(--pt-ok)";
 }
 
 function getDownloadedSize(task: TaskItem): string {
@@ -141,11 +160,12 @@ function formatProgress(progress: number): string {
   return `${progress.toFixed(1)}%`;
 }
 
-function getStatusType(task: TaskItem): "success" | "warning" | "danger" | "info" {
-  if (task.lastError === "种子已从下载器中删除") return "info";
-  if (task.isExpired) return "danger";
-  if (task.isPushed) return "success";
-  if (task.isDownloaded) return "warning";
+/** 已删除走中性灰：它是终态但不是失败，用 info 会和「无需处理」撞色 */
+function getStatusTone(task: TaskItem): Tone {
+  if (task.lastError === "种子已从下载器中删除") return "neutral";
+  if (task.isExpired) return "dang";
+  if (task.isPushed) return "ok";
+  if (task.isDownloaded) return "warn";
   return "info";
 }
 
@@ -157,265 +177,302 @@ function getStatusText(task: TaskItem): string {
   return "无需处理";
 }
 
-function getDiscountTag(task: TaskItem): {
-  text: string;
-  type: "success" | "warning" | "danger" | "info";
-} {
+/**
+ * 优惠等级的语义色：免费是「白拿」→ ok，打折是「还要付一部分」→ warn，
+ * 上传加成不省流量 → info，普通没有优惠 → 中性灰。
+ */
+function getDiscount(task: TaskItem): { text: string; tone: Tone } {
   const level = (task.freeLevel || "").toUpperCase();
 
   switch (level) {
     case "2XFREE":
     case "_2X_FREE":
-      return { text: "2xFree", type: "success" };
+      return { text: "2xFree", tone: "ok" };
     case "FREE":
-      return { text: "Free", type: "success" };
+      return { text: "Free", tone: "ok" };
     case "PERCENT_50":
     case "50%":
-      return { text: "50%", type: "warning" };
+      return { text: "50%", tone: "warn" };
     case "PERCENT_30":
     case "30%":
-      return { text: "30%", type: "warning" };
+      return { text: "30%", tone: "warn" };
     case "PERCENT_70":
     case "70%":
-      return { text: "70%", type: "warning" };
+      return { text: "70%", tone: "warn" };
     case "2XUP":
     case "_2X_UP":
-      return { text: "2xUp", type: "info" };
+      return { text: "2xUp", tone: "info" };
     case "2X50":
     case "_2X_PERCENT_50":
-      return { text: "2x50%", type: "warning" };
+      return { text: "2x50%", tone: "warn" };
     case "NONE":
     case "":
-      return { text: "普通", type: "info" };
+      return { text: "普通", tone: "neutral" };
     default:
       if (task.isFree) {
-        return { text: "Free", type: "success" };
+        return { text: "Free", tone: "ok" };
       }
-      if (level && level !== "NONE") {
-        return { text: level, type: "warning" };
+      if (level) {
+        return { text: level, tone: "warn" };
       }
-      return { text: "普通", type: "info" };
+      return { text: "普通", tone: "neutral" };
   }
 }
 </script>
 
 <template>
-  <div class="page-container tasklist-page">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">任务列表</h1>
-        <p class="page-subtitle">查看和管理系统后台任务执行记录</p>
-      </div>
-    </div>
+  <div class="tasklist-page">
+    <PtToolbar standalone>
+      <el-input
+        v-model="filters.q"
+        placeholder="搜索标题 / Hash"
+        clearable
+        class="filter-input"
+        @keyup.enter="applyFilters">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
+      <el-select v-model="filters.site" placeholder="全部站点" clearable class="filter-select">
+        <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
+      </el-select>
+      <el-checkbox v-model="filters.downloaded">已下载</el-checkbox>
+      <el-checkbox v-model="filters.pushed">已推送</el-checkbox>
+      <el-checkbox v-model="filters.expired">已过期</el-checkbox>
 
-    <!-- 筛选工具栏 -->
-    <div class="common-card search-card task-filter-card task-filter-shell">
-      <div class="common-card-body">
-        <el-form :inline="true" :model="filters" class="filter-form task-filter-form">
-          <el-form-item label="搜索">
-            <el-input
-              v-model="filters.q"
-              placeholder="标题/Hash"
-              clearable
-              style="width: 240px"
-              @keyup.enter="applyFilters">
-              <template #prefix>
-                <el-icon><Search /></el-icon>
-              </template>
-            </el-input>
-          </el-form-item>
-          <el-form-item label="站点">
-            <el-select v-model="filters.site" placeholder="全部站点" clearable style="width: 160px">
-              <el-option label="全部站点" value="" />
-              <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
-            </el-select>
-          </el-form-item>
-          <el-form-item class="filter-checks">
-            <el-checkbox v-model="filters.downloaded">已下载</el-checkbox>
-            <el-checkbox v-model="filters.pushed">已推送</el-checkbox>
-            <el-checkbox v-model="filters.expired">已过期</el-checkbox>
-          </el-form-item>
-          <el-form-item class="filter-actions">
-            <el-button type="primary" :loading="loading" @click="applyFilters">筛选</el-button>
-            <el-button @click="clearFilters">重置</el-button>
-          </el-form-item>
-        </el-form>
-      </div>
-    </div>
+      <template #right>
+        <el-button @click="clearFilters">
+          <PtIcon name="rotate-ccw" :size="14" /><span>重置</span>
+        </el-button>
+        <el-button type="primary" :loading="loading" @click="applyFilters">
+          <PtIcon name="list-filter" :size="14" /><span>筛选</span>
+        </el-button>
+      </template>
+    </PtToolbar>
 
-    <!-- 任务列表 -->
-    <div class="table-card task-table-card" v-loading="loading">
-      <div class="table-card-header">
-        <div class="table-card-header-title">
-          <span>任务列表</span>
-          <el-tag
-            type="info"
-            size="small"
-            effect="plain"
-            class="total-tag table-total-tag"
-            style="margin-left: 8px">
-            共 {{ total }} 条
-          </el-tag>
-        </div>
-        <div class="table-card-header-actions">
-          <el-button
-            type="danger"
-            size="small"
-            plain
-            class="batch-delete-btn"
-            :disabled="selectedIds.length === 0"
-            @click="handleBatchDelete">
-            <el-icon class="mr-1"><Delete /></el-icon>
-            批量删除
-          </el-button>
-          <el-button type="primary" size="small" plain class="refresh-btn" @click="loadTasks">
-            <el-icon class="mr-1"><Refresh /></el-icon>
-            刷新
-          </el-button>
-        </div>
-        <!-- Close table-card-header-actions -->
-      </div>
-      <!-- Close table-card-header -->
+    <PtPanel
+      v-loading="loading"
+      title="任务记录"
+      icon="list-checks"
+      :count="`${total} 条`"
+      padding="none">
+      <template #actions>
+        <el-button
+          v-if="selectedIds.length > 0"
+          type="danger"
+          size="small"
+          plain
+          @click="handleBatchDelete">
+          <PtIcon name="trash-2" :size="14" /><span>删除 {{ selectedIds.length }} 条</span>
+        </el-button>
+        <el-button size="small" @click="loadTasks">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+      </template>
 
-      <div class="table-wrapper">
-        <el-table
-          :data="tasks"
-          style="width: 100%"
-          class="pt-table"
-          :header-cell-style="{ background: 'var(--pt-bg-secondary)', fontWeight: 600 }"
-          @selection-change="handleSelectionChange">
-          <el-table-column
-            type="selection"
-            width="55"
-            :selectable="(row: Record<string, any>) => !row.isPushed" />
-          <el-table-column label="站点" prop="siteName" width="120" align="center">
-            <template #default="{ row }">
-              <el-tag size="small" type="primary" effect="light" class="site-tag">{{
-                row.siteName || "-"
-              }}</el-tag>
-            </template>
-          </el-table-column>
+      <el-table
+        :data="tasks"
+        class="pt-grid"
+        style="width: 100%"
+        @selection-change="handleSelectionChange">
+        <template #empty>
+          <PtDataState :state="hasFilters ? 'zero' : 'empty'" dense :sub="emptySub" />
+        </template>
 
-          <el-table-column label="优惠" width="90" align="center">
-            <template #default="{ row }">
-              <el-tag
-                :type="getDiscountTag(row).type"
-                size="small"
-                effect="dark"
-                class="discount-tag">
-                {{ getDiscountTag(row).text }}
-              </el-tag>
-            </template>
-          </el-table-column>
+        <el-table-column
+          type="selection"
+          width="46"
+          :selectable="(row: Record<string, any>) => !row.isPushed" />
 
-          <el-table-column label="标题" min-width="300">
-            <template #default="{ row }">
-              <div class="title-cell">
-                <div class="title-main">
-                  <span class="title-text">{{ row.title || "-" }}</span>
-                </div>
-                <div v-if="row.category || row.tag" class="title-meta">
-                  <el-tag v-if="row.category" size="small" type="info" effect="plain">
-                    {{ row.category }}
-                  </el-tag>
-                  <el-tag v-if="row.tag" size="small" effect="plain">{{ row.tag }}</el-tag>
-                </div>
-              </div>
-            </template>
-          </el-table-column>
+        <el-table-column label="站点" prop="siteName" width="110">
+          <template #default="{ row }">
+            <PtTag>{{ row.siteName || "-" }}</PtTag>
+          </template>
+        </el-table-column>
 
-          <el-table-column label="Hash" width="140">
-            <template #default="{ row }">
-              <template v-if="row.torrentHash">
-                <el-tooltip :content="row.torrentHash" placement="top">
-                  <code class="hash-cell">{{ row.torrentHash.slice(0, 8) }}...</code>
-                </el-tooltip>
-              </template>
-              <span v-else class="text-tertiary">-</span>
-            </template>
-          </el-table-column>
+        <el-table-column label="优惠" width="86">
+          <template #default="{ row }">
+            <PtStatusPill :tone="getDiscount(row).tone" size="sm">
+              {{ getDiscount(row).text }}
+            </PtStatusPill>
+          </template>
+        </el-table-column>
 
-          <el-table-column label="大小" width="100" align="right">
-            <template #default="{ row }">
-              <span class="size-text">{{ formatSize(row.torrentSize) }}</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="进度" width="180">
-            <template #default="{ row }">
-              <div v-if="row.torrentSize > 0" class="progress-container">
-                <el-progress
-                  class="task-progress"
-                  :percentage="Math.round(row.progress)"
-                  :stroke-width="8"
-                  :show-text="false"
-                  :color="getProgressColor(row.progress)" />
-                <div class="progress-info">
-                  <span class="progress-detail">
-                    {{ getDownloadedSize(row) }} / {{ formatSize(row.torrentSize) }}
-                  </span>
-                  <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
-                </div>
-              </div>
-              <span v-else class="text-tertiary">-</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="免费结束" width="160">
-            <template #default="{ row }">
-              <span :class="['free-end-time', row.isExpired ? 'text-danger' : 'text-secondary']">
-                {{ formatTime(row.freeEndTime) }}
+        <el-table-column label="标题" min-width="280" class-name="pt-cell-strong">
+          <template #default="{ row }">
+            <div class="title-cell">
+              <span class="title-text">{{ row.title || "-" }}</span>
+              <span v-if="row.category || row.tag" class="title-meta">
+                <PtTag v-if="row.category">{{ row.category }}</PtTag>
+                <PtTag v-if="row.tag">{{ row.tag }}</PtTag>
               </span>
-            </template>
-          </el-table-column>
+            </div>
+          </template>
+        </el-table-column>
 
-          <el-table-column label="最后检查" width="160">
-            <template #default="{ row }">
-              <span class="text-secondary">{{ formatTime(row.lastCheckTime) }}</span>
-            </template>
-          </el-table-column>
+        <el-table-column label="Hash" width="120">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.torrentHash" :content="row.torrentHash" placement="top">
+              <code class="hash-cell">{{ row.torrentHash.slice(0, 8) }}</code>
+            </el-tooltip>
+            <span v-else class="cell-dim">-</span>
+          </template>
+        </el-table-column>
 
-          <el-table-column label="推送时间" width="160">
-            <template #default="{ row }">
-              <span v-if="row.isPushed" class="text-success">
-                {{ formatTime(row.pushTime) }}
+        <el-table-column
+          label="大小"
+          width="96"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num">
+          <template #default="{ row }">{{ formatSize(row.torrentSize) }}</template>
+        </el-table-column>
+
+        <el-table-column label="进度" width="170">
+          <template #default="{ row }">
+            <div v-if="row.torrentSize > 0" class="progress-cell">
+              <el-progress
+                :percentage="Math.round(row.progress)"
+                :stroke-width="4"
+                :show-text="false"
+                :color="getProgressColor(row.progress)" />
+              <span class="progress-info">
+                <span>{{ getDownloadedSize(row) }} / {{ formatSize(row.torrentSize) }}</span>
+                <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
               </span>
-              <span v-else class="text-tertiary">-</span>
-            </template>
-          </el-table-column>
+            </div>
+            <span v-else class="cell-dim">-</span>
+          </template>
+        </el-table-column>
 
-          <el-table-column label="状态" width="100" align="center" fixed="right">
-            <template #default="{ row }">
-              <el-tag
-                :type="getStatusType(row)"
-                size="small"
-                effect="light"
-                :class="['status-pill', `status-pill--${getStatusType(row)}`]">
-                {{ getStatusText(row) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <el-table-column label="免费结束" width="150">
+          <template #default="{ row }">
+            <span :class="row.isExpired ? 'cell-dang' : 'cell-mute'">
+              {{ formatTime(row.freeEndTime) }}
+            </span>
+          </template>
+        </el-table-column>
 
-        <!-- 分页 -->
-        <div v-if="total > 0" class="pagination-container">
-          <el-pagination
-            v-model:current-page="page"
-            v-model:page-size="pageSize"
-            :page-sizes="[10, 20, 50, 100]"
-            :total="total"
-            layout="total, sizes, prev, pager, next, jumper"
-            @size-change="handleSizeChange"
-            @current-change="handlePageChange" />
-        </div>
-      </div>
-    </div>
+        <el-table-column label="最后检查" width="150" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ formatTime(row.lastCheckTime) }}</template>
+        </el-table-column>
+
+        <el-table-column label="推送时间" width="150">
+          <template #default="{ row }">
+            <span v-if="row.isPushed" class="cell-ok">{{ formatTime(row.pushTime) }}</span>
+            <span v-else class="cell-dim">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="状态" width="96" fixed="right">
+          <template #default="{ row }">
+            <PtStatusPill :tone="getStatusTone(row)" size="sm">
+              {{ getStatusText(row) }}
+            </PtStatusPill>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <template v-if="total > 0" #footer>
+        <span class="pt-foot-note">仅未推送的记录可以删除</span>
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          class="pt-pager"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="total"
+          :pager-count="5"
+          layout="sizes, prev, pager, next"
+          @size-change="handleSizeChange"
+          @current-change="handlePageChange" />
+      </template>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/table-page.css";
-@import "@/styles/form-page.css";
-@import "@/styles/task-list-page.css";
+.tasklist-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-4);
+}
+
+.filter-input {
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+
+.filter-select {
+  width: 150px;
+}
+
+/* 标题与分类标签同一行，标题占满剩余宽度后再省略号 */
+.title-cell {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-meta {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.hash-cell {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  cursor: help;
+}
+
+/* 进度条 + 一行说明压在 34 高的行里：4px 细条 + 11 号说明刚好 */
+.progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.progress-info {
+  display: flex;
+  gap: var(--pt-space-2);
+  justify-content: space-between;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-t3);
+}
+
+.progress-pct {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.cell-mute {
+  color: var(--pt-t2);
+}
+
+.cell-dim {
+  color: var(--pt-t4);
+}
+
+.cell-ok {
+  color: var(--pt-ok);
+}
+
+.cell-dang {
+  color: var(--pt-dang);
+}
+
+@media (max-width: 768px) {
+  .filter-input,
+  .filter-select {
+    max-width: none;
+    width: 100%;
+  }
+}
 </style>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { SiteLevelRequirement } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import {
   calculateDaysSinceJoin,
   formatNumber,
@@ -76,12 +78,15 @@ const progress = computed(() => {
   return Math.round(totalProgress / requirementCount);
 });
 
-// 进度条颜色
+/*
+ * 进度条颜色：四档语义色阶。原来最低档写的是硬编码 #f97316，
+ * 在八套配色里（暖纸、nord 深色…）都是同一支橙，跟主题脱节，换成 --pt-dang。
+ */
 const progressColor = computed(() => {
-  if (isMaxLevel.value) return "var(--pt-color-success)";
-  if (progress.value >= 80) return "var(--pt-color-primary)";
-  if (progress.value >= 50) return "var(--pt-color-warning)";
-  return "#f97316";
+  if (isMaxLevel.value) return "var(--pt-ok)";
+  if (progress.value >= 80) return "var(--pt-p)";
+  if (progress.value >= 50) return "var(--pt-warn)";
+  return "var(--pt-dang)";
 });
 
 // 未满足的要求列表
@@ -169,10 +174,10 @@ function formatBytes(bytes: number): string {
 <template>
   <div class="level-progress">
     <template v-if="isMaxLevel">
-      <el-tag type="success" size="small" effect="dark">
-        <el-icon><Trophy /></el-icon>
-        最高等级
-      </el-tag>
+      <PtStatusPill tone="ok" size="sm">
+        <PtIcon name="trophy" :size="11" />
+        <span>最高等级</span>
+      </PtStatusPill>
     </template>
 
     <template v-else>
