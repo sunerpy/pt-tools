@@ -24,6 +24,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { bucketOf, CATEGORY_OPTIONS, type CategoryBucket, categoryLabel } from "@/utils/category";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
@@ -130,38 +131,15 @@ const CACHE_KEY = "pt-tools-search-cache";
  * 会顶到配额），只存关键词、命中数、耗时、时间，够用来「再搜一次」。
  */
 /**
- * 分类分段 —— 画板 bar-88 的 seg：**全部 / 电影 / 剧集 / 动漫 / 音乐**，档位写死，
- * 搜之前也在（画板上它是一条常驻控件，不是有结果才出现）。
+ * 分类分段 —— 画板 bar-88 的 seg：全部 / 电影 / 剧集 / 动漫 / 音乐，档位写死，搜索前也在。
  *
- * 各站点的分类名不统一（RSS 配置里是 `Mv` / `Tv` 这类站点自己的代号），所以这里带一张
- * 关键词映射表把结果的 category 归进画板的四个桶。映射表列的是实际见过的写法，
- * 归不进去的条目在选中具体档位时不显示 —— 五个固定桶的设计本身就是这个含义。
+ * 归桶规则与档位表在 `@/utils/category`，那里按各驱动**真实**会回的分类名写规则
+ * （`影剧/综艺/HD`、`Animation`、`TV游戏` 这类），并有单测钉住漏收与误收两种情形 ——
+ * 页内手写一版子串匹配已经错过一次。
  */
-const CATEGORY_BUCKETS = [
-  { label: "全部", value: "" },
-  { label: "电影", value: "movie", match: ["电影", "movie", "mv", "film"] },
-  { label: "剧集", value: "tv", match: ["剧集", "电视", "连续剧", "tv", "series", "show"] },
-  { label: "动漫", value: "anime", match: ["动漫", "动画", "anime", "comic"] },
-  { label: "音乐", value: "music", match: ["音乐", "music", "flac", "mp3", "album"] },
-] as const;
+const activeCategory = ref<CategoryBucket>("");
 
-const activeCategory = ref("");
-
-/** 档位固定，不随结果变 —— 画板上这条分段器搜索前就在 */
-const categoryOptions = computed(() =>
-  CATEGORY_BUCKETS.map((b) => ({ label: b.label, value: b.value })),
-);
-
-/** 结果的 category 归进哪个桶；归不进去返回空串 */
-function bucketOf(category: string | undefined): string {
-  const name = (category || "").trim().toLowerCase();
-  if (!name) return "";
-  for (const b of CATEGORY_BUCKETS) {
-    if (!("match" in b)) continue;
-    if (b.match.some((kw) => name.includes(kw))) return b.value;
-  }
-  return "";
-}
+const categoryOptions = computed(() => CATEGORY_OPTIONS.map((o) => ({ ...o })));
 
 /** 仅免费 —— 画板 facet-3。结果里带 discount 就是有优惠，FREE 是完全免费 */
 const freeOnly = ref(false);
@@ -209,7 +187,9 @@ function rememberSearch(keyword: string, hits: number, ms: number) {
  * 存的是「关键词 + 站点 + 排序 + 方向 + 分类 + 仅免费」这一组条件，不存结果本体；
  * 点一下就把条件恢复并重搜。同样只落 localStorage，后端没有这份数据。
  */
-const SAVED_KEY = "pt-tools-search-saved-v1";
+const SAVED_KEY = "pt-tools-search-saved-v2";
+/** v1 存的是站点原始分类名；v2 存桶 ID。读到 v1 就归一次桶再写进 v2 */
+const SAVED_KEY_V1 = "pt-tools-search-saved-v1";
 const SAVED_MAX = 12;
 
 interface SavedSearch {
@@ -218,15 +198,38 @@ interface SavedSearch {
   sites: string[];
   sortBy: string;
   orderDesc: boolean;
-  category: string;
+  /** v2 起是桶 ID（movie/tv/anime/music），空串表示不限 */
+  category: CategoryBucket;
   freeOnly: boolean;
 }
 
 const savedSearches = ref<SavedSearch[]>(loadSaved());
 
+/**
+ * 读已保存的搜索。
+ *
+ * v1 → v2 迁移是必须的：v1 的 category 存的是站点原始分类名（「电影/HD」这种），
+ * 而筛选现在拿桶 ID 比较 —— 不迁移的话旧条目点开就是零结果，而且看不出为什么。
+ */
 function loadSaved(): SavedSearch[] {
+  const fromV2 = readList(SAVED_KEY);
+  if (fromV2.length > 0) return fromV2;
+
+  const legacy = readList(SAVED_KEY_V1);
+  if (legacy.length === 0) return [];
+  const migrated = legacy.map((item) => ({ ...item, category: bucketOf(item.category) }));
+  persistSaved(migrated);
   try {
-    const raw = localStorage.getItem(SAVED_KEY);
+    localStorage.removeItem(SAVED_KEY_V1);
+  } catch {
+    /* 删不掉也无所谓：v2 有值之后就不会再读 v1 */
+  }
+  return migrated;
+}
+
+function readList(key: string): SavedSearch[] {
+  try {
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.slice(0, SAVED_MAX) : [];
@@ -270,7 +273,9 @@ function applySaved(item: SavedSearch) {
   selectedSites.value = [...item.sites];
   sortBy.value = item.sortBy as typeof sortBy.value;
   orderDesc.value = item.orderDesc;
-  activeCategory.value = item.category;
+  /* 再过一次 bucketOf：v2 存的已经是桶 ID，但桶 ID 本身也能被规则认回同一个桶，
+     所以这一行对 v1 迁移过来的值和 v2 的值都成立 */
+  activeCategory.value = bucketOf(item.category);
   freeOnly.value = item.freeOnly;
   doSearch();
 }
@@ -1736,7 +1741,7 @@ const footNote = computed(() => {
             <el-button link type="primary" @click="applySaved(item)">{{ item.name }}</el-button>
             <span class="hist__meta">
               {{ item.sites.length > 0 ? `${item.sites.length} 个站点` : "全部站点" }} ·
-              {{ item.category || "全部分类" }}{{ item.freeOnly ? " · 仅免费" : "" }}
+              {{ categoryLabel(item.category) }}{{ item.freeOnly ? " · 仅免费" : "" }}
             </span>
             <el-button link type="danger" @click="removeSaved(item.name)">
               <PtIcon name="x" :size="13" />

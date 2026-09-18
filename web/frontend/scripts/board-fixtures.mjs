@@ -188,7 +188,22 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
   discountLevel: i % 3 === 0 ? "FREE" : "",
   discountEndTime: 0,
   hasHR: i % 5 === 0,
-  category: ["电影", "剧集", "动漫"][i % 3],
+  /*
+   * 用驱动**真实**会回的分类名，不是造出来刚好能命中的「电影 / 剧集 / 动漫」：
+   * 前者来自 mteamCategoryMap 与 HDDolby 的 getCategoryName，
+   * 里面既有漏收过的（影剧/综艺、Animation）也有误收过的（TV游戏）。
+   */
+  category: [
+    "电影/HD",
+    "影剧/综艺/HD",
+    "动画",
+    "Movies/UHD",
+    "TV/HD",
+    "Animation",
+    "音乐(无损)",
+    "TV游戏",
+    "纪录片",
+  ][i % 9],
   tags: [],
 }));
 

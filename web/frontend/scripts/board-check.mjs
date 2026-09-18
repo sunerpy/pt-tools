@@ -479,6 +479,16 @@ const MEASURE = `(() => {
           if (col.querySelector('.pt-panel')) continue;
           push(col);
         }
+        /*
+         * 显式标了 data-card 的块，无论嵌在第几层都算一块。
+         * 站点详情的 bn 横幅就嵌在含 PtPanel 的栏容器里，上面两条都收不到它 ——
+         * 加了 data-card 却仍然不可测，等于没加。
+         */
+        for (const marked of box.querySelectorAll('[data-card]')) {
+          if (marked.classList.contains('pt-panel')) continue;
+          if (out.some((c) => c.title === marked.dataset.card)) continue;
+          push(marked);
+        }
       }
       return out;
     })(),
