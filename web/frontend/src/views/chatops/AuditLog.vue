@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { type AuditLog, chatopsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -40,6 +42,48 @@ const stats = reactive({
 
 /** 统计接口是不是没拿到：0 = 正常，1 = 失败（喂给 useDataState 的 failed） */
 const statsFailed = ref(0);
+
+/**
+ * 画板 25 在 gfoot 之后有三张分析卡：p-cmd 548（命令分布）、p-ch 516（渠道分布）、
+ * p-fail 1080（失败清单）。三张都由当前这页的行现算，没有额外请求；
+ * 口径写在脚注里 —— 接口不回全库的分组计数，当页的分布不能当成全库的分布。
+ */
+const cmdRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const log of auditLogs.value) {
+    const name = log.command || "(空命令)";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "primary" as const }));
+});
+
+const channelRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const log of auditLogs.value) {
+    const name = log.channel_type || "未知渠道";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "info" as const }));
+});
+
+/** 失败与被拒的调用 —— 审计页真正要看的那一小撮 */
+const failRows = computed<BreakdownRow[]>(() =>
+  auditLogs.value
+    .filter((log) => log.result !== "success")
+    .slice(0, 8)
+    .map((log) => ({
+      key: String(log.id),
+      label: log.command || "(空命令)",
+      value: log.result === "denied" ? "被拒" : "出错",
+      weight: 1,
+      tone: log.result === "denied" ? ("warn" as const) : ("dang" as const),
+      hint: `${log.channel_type} · ${log.channel_user_id} · ${log.latency_ms} ms`,
+    })),
+);
 
 const pagination = reactive({
   page: 1,
@@ -547,10 +591,86 @@ function exportCsv() {
         layout="prev, pager, next"
         @current-change="handlePageChange" />
     </div>
+
+    <!-- 画板 25 的分析卡：p-cmd 548 / p-ch 516 两栏 + p-fail 1080 通栏 -->
+    <div v-if="auditLogs.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="命令分布" icon="terminal" :count="`${cmdRows.length} 种`">
+        <PtBreakdown
+          :rows="cmdRows"
+          :total="auditLogs.length"
+          foot="统计的是当前这一页的调用；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel title="渠道分布" icon="message-square" :count="`${channelRows.length} 个`">
+        <PtBreakdown :rows="channelRows" :total="auditLogs.length" />
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="失败与被拒"
+        icon="shield-x"
+        :count="failRows.length > 0 ? `${failRows.length} 条` : '暂无'">
+        <PtBreakdown
+          v-if="failRows.length > 0"
+          :rows="failRows"
+          cols
+          foot="只列当前这一页里 result 不是 success 的调用，最多 8 条。" />
+        <p v-else class="audit-ok">当前这一页的调用都成功了。</p>
+      </PtPanel>
+
+      <!--
+        画板 p-keep 1080：保留与清理。内容按代码核过 —— 审计表是 models.ActionAudit
+        （表名 action_audit），`internal/maintenance` 的 Cleaner 只管 logs / staging /
+        backups 三类，**不碰审计表**，所以这里说的是「不会自动删」而不是某个保留天数。
+      -->
+      <PtPanel class="pt-cards__full" title="保留与清理" icon="archive">
+        <ul class="audit-keep">
+          <li>
+            审计记录写在本机库的 <code>action_audit</code> 表里，<strong>没有自动清理</strong>：
+            <code>pt-tools clean</code> 只清日志轮转备份、暂存目录与旧备份，不动这张表。
+          </li>
+          <li>
+            每条记录只留命令、参数、渠道、发起人、结果与耗时。参数在写入前脱敏，
+            页面上展开看到的就是脱敏后的那份。
+          </li>
+          <li>
+            记录会一直攒着。要缩库就直接删表里的旧行（先备份
+            <code>~/.pt-tools</code>），删掉不影响任何运行中的功能。
+          </li>
+        </ul>
+      </PtPanel>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* 保留与清理说明卡 */
+.audit-keep {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.audit-keep code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+/* 分析卡里「这一页都成功了」的正面结论 */
+.audit-ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
 /*
  * 画板主区是一串全宽横向带（toolbar → grid → gfoot），带与带之间没有间距，
  * 所以这里不给 gap；需要内缩的东西（提示、移动端行卡）自己带 16 的留白。

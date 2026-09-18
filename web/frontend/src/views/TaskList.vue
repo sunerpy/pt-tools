@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { type TaskItem, type TaskListResponse, tasksApi } from "@/api";
+import { type TaskItem, type TaskListResponse, tasksApi, type TaskStatsResponse } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBars from "@/components/ui/PtBars.vue";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -21,29 +24,38 @@ const pageSize = ref(20);
 const tableRef = ref<TableInstance>();
 
 /**
- * 状态档位 —— 画板 16 的 toolbar 第一件是一枚 28 高的分段器（互斥单选）。
+ * 状态开关 —— 三个**可叠加**的筛选位，不是互斥单选。
  *
- * 后端这三个参数（downloaded / pushed / expired）在 SQL 里是 AND 关系，
- * 三个勾一起打开等于「既已下载、又已推送、还已过期」，是个基本查不到东西的组合；
- * 所以这里按画板收成互斥单选，档位仍是后端真实支持的那三个参数。
+ * `apiTasks` 把 downloaded / pushed / expired 逐个 AND 进查询（web/server.go），
+ * 所以「已下载 + 已推送」是「推成功了的」这个真实且常用的组合，
+ * 「已下载 + 已过期」是「下过但免费期结束的」。改版中途曾把这三个收成互斥单选，
+ * 那等于删掉了组合筛选能力 —— 这里恢复成独立开关。
+ *
+ * 落在画板 16 toolbar 的 chip 上（24 高，`chip-0` / `chip-1`）：
+ * 画板那枚分段器是「全部 / 下载中 / 做种中 / 等待中 / 已暂停」的下载器状态，
+ * 这一页的 RSS 任务没有那套状态，接口也不提供，所以状态位走 chip 而不是分段器。
  */
-type StatusKey = "all" | "downloaded" | "pushed" | "expired";
+type StatusKey = "downloaded" | "pushed" | "expired";
 
 const STATUS_OPTIONS: { label: string; value: StatusKey }[] = [
-  { label: "全部", value: "all" },
   { label: "已下载", value: "downloaded" },
   { label: "已推送", value: "pushed" },
   { label: "已过期", value: "expired" },
 ];
 
-/** 默认停在「已推送」，与改版前 filters.pushed = true 的默认口径一致 */
-const status = ref<StatusKey>("pushed");
+/** 默认只开「已推送」，与改版前 filters.pushed = true 的口径一致 */
+const status = ref<Record<StatusKey, boolean>>({
+  downloaded: false,
+  pushed: true,
+  expired: false,
+});
 
-/** el-segmented 回传的是 string | number | boolean，这里收窄成档位 */
-function onStatusChange(value: string | number | boolean) {
-  const next = String(value) as StatusKey;
-  if (next === status.value) return;
-  status.value = next;
+const activeStatusKeys = computed(() =>
+  STATUS_OPTIONS.filter((o) => status.value[o.value]).map((o) => o.value),
+);
+
+function toggleStatus(key: StatusKey) {
+  status.value[key] = !status.value[key];
   applyFilters();
 }
 
@@ -65,7 +77,7 @@ const siteOptions = computed(() => {
 /** 空表要分「还没跑过任务」和「筛掉了」两种：前者要去建 RSS，后者要放宽条件 */
 const hasFilters = computed(() => {
   const f = filters.value;
-  return Boolean(f.q || f.site || status.value !== "all");
+  return Boolean(f.q || f.site || activeStatusKeys.value.length > 0);
 });
 
 /**
@@ -114,6 +126,68 @@ const headSub = computed(() => {
   return parts.join(" · ");
 });
 
+/**
+ * 吞吐 —— 画板 p-thr 548。
+ * 数据是 `/api/tasks/stats` 的最近 7 天按天计数（新增 / 推送 / 免费），
+ * 那是真的时间序列，不是拿当页的行凑出来的。
+ */
+const taskStats = ref<TaskStatsResponse | null>(null);
+
+async function loadStats() {
+  try {
+    taskStats.value = await tasksApi.stats();
+  } catch {
+    /* 吞吐是附带信息，取不到就让卡里说明，不影响列表 */
+    taskStats.value = null;
+  }
+}
+
+const dailySeries = computed(() => taskStats.value?.daily ?? []);
+const pushedSeries = computed(() => dailySeries.value.map((d) => d.pushed));
+const createdSeries = computed(() => dailySeries.value.map((d) => d.created));
+const weekPushed = computed(() => pushedSeries.value.reduce((n, v) => n + v, 0));
+const weekCreated = computed(() => createdSeries.value.reduce((n, v) => n + v, 0));
+
+/**
+ * 画板 16 在 gfoot 之后还有分析卡：p-thr 548（吞吐）、p-site 516（按站点分布）、
+ * p-warn 1080（需要关注）。这里落 p-site 与 p-warn —— 两张的数据都来自当前这页的行。
+ * p-thr 要的是时间序列（每小时推送量一类），接口只回当页的行，没有历史，故未实现。
+ *
+ * 口径都写在卡片脚注里：统计的是**当前这一页**，不是全库 —— 接口不回全库的分组计数，
+ * 把当页的 12 条冒充成全库 37 条的分布会误导人。
+ */
+const siteRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const t of tasks.value) {
+    const name = t.siteName || "未知站点";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "primary" as const }));
+});
+
+/** 需要关注：已过期还没推、推失败重试过、免费期快到但还没下 */
+const warnRows = computed<BreakdownRow[]>(() => {
+  const out: BreakdownRow[] = [];
+  for (const t of tasks.value) {
+    const reasons: string[] = [];
+    if (t.isExpired && !t.isPushed) reasons.push("免费期已过且没推送");
+    if (t.retryCount > 0) reasons.push(`重试过 ${t.retryCount} 次`);
+    if (t.lastError) reasons.push(t.lastError);
+    if (!t.isDownloaded && !t.isExpired && t.freeEndTime) reasons.push("免费期内还没下载");
+    if (reasons.length === 0) continue;
+    out.push({
+      key: String(t.id),
+      label: t.title,
+      value: reasons.length,
+      tone: t.lastError ? "dang" : "warn",
+      hint: `${t.siteName || "未知站点"} · ${reasons.join(" · ")}`,
+    });
+  }
+  return out.sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 8);
+});
+
 /** 画板 gfoot 的左侧说明：「37 个任务 · 显示 1–10」 */
 const rangeText = computed(() => {
   if (!total.value) return "";
@@ -123,7 +197,7 @@ const rangeText = computed(() => {
 });
 
 onMounted(async () => {
-  await loadTasks();
+  await Promise.all([loadTasks(), loadStats()]);
 });
 
 async function loadTasks() {
@@ -135,7 +209,7 @@ async function loadTasks() {
   params.set("page_size", pageSize.value.toString());
   if (filters.value.q) params.set("q", filters.value.q);
   if (filters.value.site) params.set("site", filters.value.site);
-  if (status.value !== "all") params.set(status.value, "1");
+  for (const key of activeStatusKeys.value) params.set(key, "1");
 
   const data = await run<TaskListResponse>(() => tasksApi.list(params));
   if (!data) {
@@ -155,7 +229,7 @@ function applyFilters() {
 
 function clearFilters() {
   filters.value = { q: "", site: "" };
-  status.value = "all";
+  status.value = { downloaded: false, pushed: false, expired: false };
   page.value = 1;
   loadTasks();
 }
@@ -343,11 +417,17 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       分段（状态）+ 搜索 220 + 站点 chip，右侧是 28×28 图标钮。
     -->
     <PtToolbar band>
-      <el-segmented
-        :model-value="status"
-        class="pt-seg"
-        :options="STATUS_OPTIONS"
-        @change="onStatusChange" />
+      <!-- 画板 chip-0 / chip-1：24 高的筛选 chip，这里每个状态位一枚，可叠加 -->
+      <el-button
+        v-for="opt in STATUS_OPTIONS"
+        :key="opt.value"
+        class="tb__chip"
+        :type="status[opt.value] ? 'primary' : 'default'"
+        :plain="status[opt.value]"
+        :aria-pressed="status[opt.value]"
+        @click="toggleStatus(opt.value)">
+        <span>{{ opt.label }}</span>
+      </el-button>
       <el-input
         v-model="filters.q"
         size="small"
@@ -599,6 +679,66 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
         @size-change="handleSizeChange"
         @current-change="handlePageChange" />
     </div>
+
+    <!--
+      画板 16 的分析卡：p-thr 548（吞吐）/ p-site 516（按站点）两栏 + p-warn 1080 通栏。
+      吞吐要时间序列（每小时推送量一类），接口只回当页的行、没有历史，所以那张没做；
+      分布卡占左栏 548，右栏留空 —— 把它挪到右栏会让左边空一张卡的位置更难看。
+    -->
+    <div v-if="tasks.length > 0" class="pt-cards pt-cards--2">
+      <!-- 画板 p-thr 548：最近 7 天的吞吐（真时间序列，来自 /api/tasks/stats） -->
+      <PtPanel title="最近 7 天吞吐" icon="activity" :count="`推送 ${weekPushed} 次`">
+        <template v-if="dailySeries.length > 0">
+          <div class="thr__row">
+            <span class="thr__l">已推送</span>
+            <span class="thr__v">{{ weekPushed }}</span>
+          </div>
+          <PtBars
+            :values="pushedSeries"
+            :count="7"
+            :bar-width="26"
+            :gap="8"
+            :height="40"
+            hue="var(--pt-p)" />
+          <div class="thr__row">
+            <span class="thr__l">新入库</span>
+            <span class="thr__v">{{ weekCreated }}</span>
+          </div>
+          <PtBars
+            :values="createdSeries"
+            :count="7"
+            :bar-width="26"
+            :gap="8"
+            :height="40"
+            hue="var(--pt-info)" />
+          <p class="thr__foot">
+            一根一天，最左是 {{ dailySeries[0]?.date }}，最右是今天。口径是全库按天计数，
+            不是当前这一页。
+          </p>
+        </template>
+        <p v-else class="tl-ok">吞吐数据没取到，列表不受影响。</p>
+      </PtPanel>
+
+      <PtPanel title="按站点分布" icon="globe" :count="`${siteRows.length} 个站点`">
+        <PtBreakdown
+          :rows="siteRows"
+          :total="tasks.length"
+          foot="统计的是当前这一页的行；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="需要关注的任务"
+        icon="triangle-alert"
+        :count="warnRows.length > 0 ? `${warnRows.length} 条` : '暂无'">
+        <PtBreakdown
+          v-if="warnRows.length > 0"
+          :rows="warnRows"
+          cols
+          foot="判定口径：免费期已过还没推送、推送重试过、有错误、或免费期内还没下载。最多列 8 条。" />
+        <p v-else class="tl-ok">当前这一页没有需要处理的任务。</p>
+      </PtPanel>
+    </div>
   </div>
 </template>
 
@@ -729,6 +869,56 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
 .cell-dang {
   color: var(--pt-dang);
+}
+
+/*
+ * 状态筛选 chip —— 画板 chip 是 24 高（工具栏里其余控件 28）。
+ * 用 el-button 而不是 el-check-tag：后者在四套配色下自带一套自己的选中色，
+ * 和 primary/plain 这对已经在用的表达对不上。
+ */
+.tb__chip {
+  height: 24px;
+  padding: 0 10px;
+  margin: 0;
+  font-size: var(--pt-fz-label);
+}
+
+/* 吞吐卡：一行标签 + 数字，下面一排柱 */
+.thr__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: var(--pt-fz-sm);
+}
+
+.thr__row:not(:first-child) {
+  margin-top: var(--pt-space-3);
+}
+
+.thr__l {
+  color: var(--pt-t3);
+}
+
+.thr__v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.thr__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+/* 分析卡里「一条都不用管」的正面结论 */
+.tl-ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
 }
 
 /* 移动端行卡列表：表格带自己不留白，所以 16 的内缩由这里给 */

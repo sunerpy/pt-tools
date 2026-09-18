@@ -275,14 +275,34 @@ export const sitesApi = {
     api.post<{ success: boolean; message: string }>(`/api/sites/${name}/login-state/test-reminder`),
 };
 
+/** 全库任务计数 —— 画板 10 的 KPI 格「活跃任务 / 今日推送 / 免费种子」 */
+export interface TaskStatsResponse {
+  total: number;
+  active: number;
+  pushedToday: number;
+  free: number;
+  /** 最近 7 天按天计数，供 KPI 柱图与任务页的吞吐卡使用 */
+  daily: { date: string; created: number; pushed: number; free: number }[];
+}
+
 export const tasksApi = {
   list: (params: URLSearchParams, signal?: AbortSignal) =>
     api.get<TaskListResponse>(`/api/tasks?${params.toString()}`, { signal }),
+  stats: () => api.get<TaskStatsResponse>("/api/tasks/stats"),
   batchDelete: (ids: number[]) => api.post<DeleteTasksResponse>("/api/tasks/batch-delete", { ids }),
 };
 
+/** 日志目录清单 —— 画板 29 左栏的「文件清单 / 归档」 */
+export interface LogFilesResponse {
+  dir: string;
+  files: { name: string; size: number; mod_time: number; rotated: boolean; is_active: boolean }[];
+  max_age: number;
+  max_backups: number;
+}
+
 export const logsApi = {
   get: () => api.get<LogsResponse>("/api/logs"),
+  files: () => api.get<LogFilesResponse>("/api/logs/files"),
 };
 
 export const controlApi = {
@@ -478,6 +498,8 @@ export const filterRulesApi = {
       body: JSON.stringify(data),
     }),
   delete: (id: number) => api.delete<void>(`/api/filter-rules/${id}`),
+  /** 各规则真实命中过多少个种子（TorrentInfo.filter_rule_id 的分组计数） */
+  hits: () => api.get<{ hits: Record<string, number> }>("/api/filter-rules/hits"),
   test: (data: FilterRuleTestRequest) =>
     api.post<FilterRuleTestResponse>("/api/filter-rules/test", data),
 };

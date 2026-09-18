@@ -17,9 +17,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/core"
@@ -84,6 +87,9 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/sites/", s.auth(s.apiSiteDetail))
 	mux.HandleFunc("/api/password", s.auth(s.apiPassword))
 	mux.HandleFunc("/api/tasks", s.auth(s.apiTasks))
+	mux.HandleFunc("/api/tasks/stats", s.auth(s.apiTaskStats))
+	mux.HandleFunc("/api/filter-rules/hits", s.auth(s.apiFilterRuleHits))
+	mux.HandleFunc("/api/logs/files", s.auth(s.apiLogFiles))
 	mux.HandleFunc("/api/tasks/batch-delete", s.auth(s.apiDeleteTasks))
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
@@ -1207,6 +1213,200 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 		Page  int                  `json:"page"`
 		Size  int                  `json:"page_size"`
 	}{Items: items, Total: total, Page: page, Size: size})
+}
+
+// 任务计数接口：只回几个整数，供总览页的 KPI 带使用。
+//
+// 为什么不复用 /api/tasks：那个接口是分页列表，拿计数要请求三次、每次都带回一页行，
+// 而 KPI 带要的只是「全库有多少」。三个口径都是设计稿 G 画板 10 的 KPI 格：
+// 活跃任务、今日推送、免费种子。
+func (s *Server) apiTaskStats(w http.ResponseWriter, r *http.Request) {
+	db := global.GlobalDB.DB
+	count := func(scope func(*gorm.DB) *gorm.DB) (int64, error) {
+		var n int64
+		err := scope(db.Model(&models.TorrentInfo{})).Count(&n).Error
+		return n, err
+	}
+
+	// 活跃 = 免费期还没过：过期的种子既不会再推也不用管，不该算进「活跃」
+	active, err := count(func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("is_expired = ?", false)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 今日推送按本地零点切分：用户看的是自己这一天推了多少，不是 UTC 的一天
+	dayStart := time.Now().Truncate(24 * time.Hour)
+	if loc := time.Now().Location(); loc != nil {
+		now := time.Now()
+		dayStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	}
+	pushedToday, err := count(func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("push_time IS NOT NULL AND push_time >= ?", dayStart)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 免费种子只数还在免费期内的：过期的免费种子对「现在能下什么」没有意义
+	free, err := count(func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("is_free = ? AND is_expired = ?", true, false)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	total, err := count(func(tx *gorm.DB) *gorm.DB { return tx })
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	/*
+	 * 最近 7 天的按天计数。KPI 格右侧那张 48×22 柱图和任务页的「吞吐」卡都要它 ——
+	 * 没有这一段就只能画「按站点的构成」，画不出「随时间的走势」。
+	 * 按本地日切分，逐天一条 Count 查询：7 次 COUNT 比一次 GROUP BY 好在不依赖
+	 * SQLite 的日期函数，也不受时区函数差异影响。
+	 */
+	type dailyRow struct {
+		Date    string `json:"date"`
+		Created int64  `json:"created"`
+		Pushed  int64  `json:"pushed"`
+		Free    int64  `json:"free"`
+	}
+	daily := make([]dailyRow, 0, 7)
+	for i := 6; i >= 0; i-- {
+		from := dayStart.AddDate(0, 0, -i)
+		to := from.AddDate(0, 0, 1)
+		created, err := count(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("created_at >= ? AND created_at < ?", from, to)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		pushedDay, err := count(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("push_time >= ? AND push_time < ?", from, to)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		freeDay, err := count(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("is_free = ? AND created_at >= ? AND created_at < ?", true, from, to)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		daily = append(daily, dailyRow{
+			Date:    from.Format("2006-01-02"),
+			Created: created,
+			Pushed:  pushedDay,
+			Free:    freeDay,
+		})
+	}
+
+	writeJSON(w, struct {
+		Total       int64      `json:"total"`
+		Active      int64      `json:"active"`
+		PushedToday int64      `json:"pushedToday"`
+		Free        int64      `json:"free"`
+		Daily       []dailyRow `json:"daily"`
+	}{Total: total, Active: active, PushedToday: pushedToday, Free: free, Daily: daily})
+}
+
+// 过滤规则命中数：哪条规则真的把种子下下来了。
+//
+// TorrentInfo.FilterRuleID 记的是命中的规则，所以这是一次 GROUP BY 就能拿到的数；
+// 规则列表接口回的是 []FilterRule，不好塞这个额外字段，于是单独开一个只回计数的接口。
+func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
+	type row struct {
+		FilterRuleID uint  `json:"filter_rule_id"`
+		Hits         int64 `json:"hits"`
+	}
+	var rows []row
+	err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Select("filter_rule_id, COUNT(*) AS hits").
+		Where("filter_rule_id IS NOT NULL").
+		Group("filter_rule_id").
+		Scan(&rows).Error
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	hits := make(map[string]int64, len(rows))
+	for _, it := range rows {
+		hits[strconv.FormatUint(uint64(it.FilterRuleID), 10)] = it.Hits
+	}
+	writeJSON(w, struct {
+		Hits map[string]int64 `json:"hits"`
+	}{Hits: hits})
+}
+
+// 日志目录清单：当前文件加轮转备份。
+//
+// 画板 29 的左栏要「文件清单」与「归档」两张卡，而日志是 lumberjack 轮转的 ——
+// 目录里除了 all.log 还有一串带时间戳的备份。这个接口只读目录，不读内容。
+func (s *Server) apiLogFiles(w http.ResponseWriter, r *http.Request) {
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, models.WorkDir, config.DefaultZapConfig.Directory)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// 目录还没建起来（一条日志都没写过）不是错误，回空清单
+		if os.IsNotExist(err) {
+			writeJSON(w, struct {
+				Dir   string `json:"dir"`
+				Files []any  `json:"files"`
+			}{Dir: dir, Files: []any{}})
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type fileRow struct {
+		Name     string `json:"name"`
+		Size     int64  `json:"size"`
+		ModTime  int64  `json:"mod_time"`
+		Rotated  bool   `json:"rotated"`
+		IsActive bool   `json:"is_active"`
+	}
+	files := make([]fileRow, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		name := e.Name()
+		// lumberjack 的备份名是 <base>-<时间戳>.log，当前文件没有时间戳那一段
+		active := name == "all.log"
+		files = append(files, fileRow{
+			Name:     name,
+			Size:     info.Size(),
+			ModTime:  info.ModTime().Unix(),
+			Rotated:  !active,
+			IsActive: active,
+		})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].ModTime > files[j].ModTime })
+	writeJSON(w, struct {
+		Dir        string    `json:"dir"`
+		Files      []fileRow `json:"files"`
+		MaxAge     int       `json:"max_age"`
+		MaxBackups int       `json:"max_backups"`
+	}{
+		Dir:        dir,
+		Files:      files,
+		MaxAge:     config.DefaultZapConfig.MaxAge,
+		MaxBackups: config.DefaultZapConfig.MaxBackups,
+	})
 }
 
 // 日志查看接口：最多返回 5000 行，实时读取当前日志文件

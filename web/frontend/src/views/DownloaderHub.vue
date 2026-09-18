@@ -13,6 +13,7 @@ import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDe
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
 import PtIcon from "@/components/PtIcon";
+import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtProgress from "@/components/ui/PtProgress.vue";
@@ -238,6 +239,24 @@ const stoppedCount = computed(() => torrentStateCounters.value.stopped);
 const errorCount = computed(() => torrentStateCounters.value.error);
 const allCategories = ref<string[]>([]);
 const allTags = ref<string[]>([]);
+/**
+ * 速率采样窗口 —— 画板 p-rate 386「速率」。
+ *
+ * 后端不存速率历史，但这一页本来就每 5 秒拉一次 transfer-stats，把每次的值留下来
+ * 就是一条真实的滚动曲线（最近 24 个采样 ≈ 2 分钟）。**只在内存里**，刷新页面清零；
+ * 不落 localStorage：它是「刚刚的走势」，不是历史数据。
+ */
+const RATE_SAMPLE_MAX = 24;
+const rateSamples = ref<{ up: number; down: number }[]>([]);
+
+function pushRateSample(up: number, down: number) {
+  const next = [...rateSamples.value, { up, down }];
+  rateSamples.value = next.length > RATE_SAMPLE_MAX ? next.slice(-RATE_SAMPLE_MAX) : next;
+}
+
+const downSeries = computed(() => rateSamples.value.map((s) => s.down));
+const upSeries = computed(() => rateSamples.value.map((s) => s.up));
+
 const transferStats = ref<{
   total_upload_speed: number;
   total_download_speed: number;
@@ -919,7 +938,9 @@ async function loadMeta() {
 }
 async function loadTransferStats() {
   try {
-    transferStats.value = await downloaderTorrentsApi.transferStats();
+    const stats = await downloaderTorrentsApi.transferStats();
+    transferStats.value = stats;
+    pushRateSample(stats.total_upload_speed, stats.total_download_speed);
   } catch {
     /* silent */
   }
@@ -1494,6 +1515,94 @@ function toggleSidebar() {
     </Teleport>
 
     <!--
+      画板 18 的 bar-64：head 之后一条 40 高的全宽带。这些控件原来长在任务卡内部，
+      那样卡头和工具栏会叠成两层标题；按画板提到页面层之后，左右两栏的卡各自只有一层头。
+    -->
+    <PtToolbar band>
+      <el-tooltip v-if="!sidebarVisible" content="展开侧栏" placement="bottom">
+        <button type="button" class="hub__ico" @click="toggleSidebar">
+          <PtIcon name="panel-left-open" :size="15" />
+        </button>
+      </el-tooltip>
+      <el-input
+        v-model="filters.search"
+        placeholder="搜索标题"
+        clearable
+        size="small"
+        class="hub__search">
+        <template #prefix><PtIcon name="search" :size="13" /></template>
+      </el-input>
+      <el-select v-model="sortBy" size="small" class="hub__sort">
+        <el-option
+          v-for="item in sortOptions"
+          :key="item.value"
+          :label="item.label"
+          :value="item.value" />
+      </el-select>
+      <el-tooltip :content="sortOrder === 'asc' ? '升序，点击改降序' : '降序，点击改升序'">
+        <button type="button" class="hub__ico" @click="toggleSortOrder">
+          <PtIcon :name="sortOrder === 'asc' ? 'chevron-up' : 'chevron-down'" :size="15" />
+        </button>
+      </el-tooltip>
+
+      <template #right>
+        <el-tooltip content="行高" placement="bottom">
+          <el-segmented v-model="tableDensity" class="pt-seg" :options="densityOptions" />
+        </el-tooltip>
+        <el-tooltip content="详情展示位置" placement="bottom">
+          <el-segmented v-model="detailMode" class="pt-seg" :options="detailModeOptions" />
+        </el-tooltip>
+        <el-tooltip content="数据范围" placement="bottom">
+          <el-segmented v-model="showAllTasks" class="pt-seg" :options="scopeOptions" />
+        </el-tooltip>
+        <el-tooltip content="列表渲染方式，仅全部范围可选" placement="bottom">
+          <el-segmented
+            v-model="useVirtualList"
+            class="pt-seg"
+            :options="renderOptions"
+            :disabled="!showAllTasks" />
+        </el-tooltip>
+        <el-popover placement="bottom-end" :width="264" trigger="click">
+          <template #reference>
+            <button type="button" class="hub__ico" aria-label="显示列">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="hub__cols-head">
+            <span>显示列</span>
+            <el-button text type="primary" size="small" @click="restoreDefaultColumns">
+              恢复默认
+            </el-button>
+          </div>
+          <el-checkbox-group v-model="visibleColumns" class="hub__cols">
+            <el-checkbox
+              v-for="item in columnOptions"
+              :key="item.value"
+              :value="item.value"
+              :label="item.label" />
+          </el-checkbox-group>
+          <div class="hub__cols-head">
+            <span>拖拽排序</span>
+          </div>
+          <div class="hub__order">
+            <div
+              v-for="columnKey in columnOrder"
+              :key="columnKey"
+              class="hub__order-item"
+              :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
+              draggable="true"
+              @dragstart="onColumnDragStart(columnKey)"
+              @dragover.prevent
+              @drop="onColumnDrop(columnKey)">
+              <PtIcon name="grip-vertical" :size="13" />
+              <span>{{ getColumnLabel(columnKey) }}</span>
+            </div>
+          </div>
+        </el-popover>
+      </template>
+    </PtToolbar>
+
+    <!--
       画板 18 的左右两栏就是卡片层的两栏（276 / 788），所以挂 .pt-cards --rail：
       内缩 16、栏距 16 都由它给。栏宽仍可拖（宽度是内联样式，压过栅格的轨道），
       所以这里同时保留 flex 语义 —— 见下面 .hub__layout 的说明。
@@ -1713,243 +1822,166 @@ function toggleSidebar() {
         title="拖拽调整侧栏宽度"
         @mousedown="onSidebarResizeStart" />
 
-      <div ref="hubMainRef" class="hub__main">
-        <PtPanel
-          v-loading="tableLoading"
-          element-loading-text="加载任务…"
-          class="hub__panel"
-          title="任务列表"
-          icon="list-checks"
-          :count="total"
-          padding="none">
-          <template #actions>
-            <!-- 「添加种子」在外壳页头里已经有一枚，这里不再放第二枚 -->
-            <el-tooltip content="每 5 秒自动刷新" placement="bottom">
-              <span class="hub__auto">
-                <el-switch v-model="autoRefreshEnabled" size="small" />
-                <span>自动</span>
-              </span>
-            </el-tooltip>
-          </template>
-
-          <PtToolbar>
-            <el-tooltip v-if="!sidebarVisible" content="展开侧栏" placement="bottom">
-              <button type="button" class="hub__ico" @click="toggleSidebar">
-                <PtIcon name="panel-left-open" :size="15" />
-              </button>
-            </el-tooltip>
-            <el-input
-              v-model="filters.search"
-              placeholder="搜索标题"
-              clearable
-              size="small"
-              class="hub__search">
-              <template #prefix><PtIcon name="search" :size="13" /></template>
-            </el-input>
-            <el-select v-model="sortBy" size="small" class="hub__sort">
-              <el-option
-                v-for="item in sortOptions"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value" />
-            </el-select>
-            <el-tooltip :content="sortOrder === 'asc' ? '升序，点击改降序' : '降序，点击改升序'">
-              <button type="button" class="hub__ico" @click="toggleSortOrder">
-                <PtIcon :name="sortOrder === 'asc' ? 'chevron-up' : 'chevron-down'" :size="15" />
-              </button>
-            </el-tooltip>
-
-            <template #right>
-              <el-tooltip content="行高" placement="bottom">
-                <el-segmented v-model="tableDensity" class="pt-seg" :options="densityOptions" />
+      <!--
+        右栏是「表格卡 + 下方两张 386 卡」上下两段（画板 p-grid 636,120 788×620，
+        p-rate/p-note 636,752 与 1038,752），所以这里再套一层纵向容器。
+      -->
+      <div class="hub__right">
+        <div ref="hubMainRef" class="hub__main">
+          <PtPanel
+            v-loading="tableLoading"
+            element-loading-text="加载任务…"
+            class="hub__panel"
+            title="任务列表"
+            icon="list-checks"
+            :count="total"
+            padding="none">
+            <template #actions>
+              <!-- 「添加种子」在外壳页头里已经有一枚，这里不再放第二枚 -->
+              <el-tooltip content="每 5 秒自动刷新" placement="bottom">
+                <span class="hub__auto">
+                  <el-switch v-model="autoRefreshEnabled" size="small" />
+                  <span>自动</span>
+                </span>
               </el-tooltip>
-              <el-tooltip content="详情展示位置" placement="bottom">
-                <el-segmented v-model="detailMode" class="pt-seg" :options="detailModeOptions" />
-              </el-tooltip>
-              <el-tooltip content="数据范围" placement="bottom">
-                <el-segmented v-model="showAllTasks" class="pt-seg" :options="scopeOptions" />
-              </el-tooltip>
-              <el-tooltip content="列表渲染方式，仅全部范围可选" placement="bottom">
-                <el-segmented
-                  v-model="useVirtualList"
-                  class="pt-seg"
-                  :options="renderOptions"
-                  :disabled="!showAllTasks" />
-              </el-tooltip>
-              <el-popover placement="bottom-end" :width="264" trigger="click">
-                <template #reference>
-                  <button type="button" class="hub__ico" aria-label="显示列">
-                    <PtIcon name="columns-3" :size="15" />
-                  </button>
-                </template>
-                <div class="hub__cols-head">
-                  <span>显示列</span>
-                  <el-button text type="primary" size="small" @click="restoreDefaultColumns">
-                    恢复默认
-                  </el-button>
-                </div>
-                <el-checkbox-group v-model="visibleColumns" class="hub__cols">
-                  <el-checkbox
-                    v-for="item in columnOptions"
-                    :key="item.value"
-                    :value="item.value"
-                    :label="item.label" />
-                </el-checkbox-group>
-                <div class="hub__cols-head">
-                  <span>拖拽排序</span>
-                </div>
-                <div class="hub__order">
-                  <div
-                    v-for="columnKey in columnOrder"
-                    :key="columnKey"
-                    class="hub__order-item"
-                    :class="{ 'is-off': !visibleColumns.includes(columnKey) }"
-                    draggable="true"
-                    @dragstart="onColumnDragStart(columnKey)"
-                    @dragover.prevent
-                    @drop="onColumnDrop(columnKey)">
-                    <PtIcon name="grip-vertical" :size="13" />
-                    <span>{{ getColumnLabel(columnKey) }}</span>
-                  </div>
-                </div>
-              </el-popover>
             </template>
-          </PtToolbar>
 
-          <div v-show="selectedCount > 0" class="pt-strip hub__bulk">
-            <PtIcon name="check-check" :size="14" />
-            <span>已选 {{ selectedCount }} 项</span>
-            <span class="pt-strip__end hub__bulk-acts">
-              <el-button
-                size="small"
-                :loading="actionLoading"
-                :disabled="!selectedCanUse('pause')"
-                @click="batchAction('pause')">
-                <PtIcon name="pause" :size="13" /><span>暂停</span>
-              </el-button>
-              <el-button
-                size="small"
-                :loading="actionLoading"
-                :disabled="!selectedCanUse('resume')"
-                @click="batchAction('resume')">
-                <PtIcon name="play" :size="13" /><span>开始</span>
-              </el-button>
-              <el-button
-                size="small"
-                :loading="actionLoading"
-                :disabled="!selectedCanUse('recheck')"
-                @click="batchAction('recheck')">
-                <PtIcon name="refresh-cw" :size="13" /><span>复检</span>
-              </el-button>
-              <el-button
-                size="small"
-                :loading="actionLoading"
-                :disabled="!selectedCanUse('set_location')"
-                @click="openSetLocationDialog">
-                <PtIcon name="move" :size="13" /><span>路径</span>
-              </el-button>
-              <el-button
-                size="small"
-                type="danger"
-                :loading="actionLoading"
-                :disabled="!selectedCanUse('delete')"
-                @click="batchAction('delete')">
-                <PtIcon name="trash-2" :size="13" /><span>删除</span>
-              </el-button>
-              <el-button
-                size="small"
-                type="danger"
-                plain
-                :loading="actionLoading"
-                :disabled="!selectedCanUse('delete_with_files')"
-                @click="batchAction('delete_with_files')">
-                <PtIcon name="trash-2" :size="13" /><span>删除+文件</span>
-              </el-button>
-            </span>
-          </div>
+            <div v-show="selectedCount > 0" class="pt-strip hub__bulk">
+              <PtIcon name="check-check" :size="14" />
+              <span>已选 {{ selectedCount }} 项</span>
+              <span class="pt-strip__end hub__bulk-acts">
+                <el-button
+                  size="small"
+                  :loading="actionLoading"
+                  :disabled="!selectedCanUse('pause')"
+                  @click="batchAction('pause')">
+                  <PtIcon name="pause" :size="13" /><span>暂停</span>
+                </el-button>
+                <el-button
+                  size="small"
+                  :loading="actionLoading"
+                  :disabled="!selectedCanUse('resume')"
+                  @click="batchAction('resume')">
+                  <PtIcon name="play" :size="13" /><span>开始</span>
+                </el-button>
+                <el-button
+                  size="small"
+                  :loading="actionLoading"
+                  :disabled="!selectedCanUse('recheck')"
+                  @click="batchAction('recheck')">
+                  <PtIcon name="refresh-cw" :size="13" /><span>复检</span>
+                </el-button>
+                <el-button
+                  size="small"
+                  :loading="actionLoading"
+                  :disabled="!selectedCanUse('set_location')"
+                  @click="openSetLocationDialog">
+                  <PtIcon name="move" :size="13" /><span>路径</span>
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  :loading="actionLoading"
+                  :disabled="!selectedCanUse('delete')"
+                  @click="batchAction('delete')">
+                  <PtIcon name="trash-2" :size="13" /><span>删除</span>
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  :loading="actionLoading"
+                  :disabled="!selectedCanUse('delete_with_files')"
+                  @click="batchAction('delete_with_files')">
+                  <PtIcon name="trash-2" :size="13" /><span>删除+文件</span>
+                </el-button>
+              </span>
+            </div>
 
-          <!--
+            <!--
             部分失败（§5 的 partial）：还有任务可看时不能用一整块状态图顶掉列表 ——
             那等于把已经拿到的任务也藏了。所以有任务时在列表上方挂这条提示，
             一个任务都没有时才让 partial 成为主状态（见下面的 PtDataState）。
           -->
-          <div v-if="hasPartialBanner(torrents.length)" class="pt-note pt-note--warn hub__partial">
-            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-            <div class="hub__partial-body">
-              <p class="hub__partial-t">
-                {{ loadFailures.length }} 台下载器没有返回任务，下面只是其余下载器的列表
-              </p>
-              <p v-for="item in loadFailures" :key="item.downloader_id" class="hub__partial-l">
-                {{ item.downloader_name }}：{{ item.error }}
-              </p>
+            <div
+              v-if="hasPartialBanner(torrents.length)"
+              class="pt-note pt-note--warn hub__partial">
+              <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+              <div class="hub__partial-body">
+                <p class="hub__partial-t">
+                  {{ loadFailures.length }} 台下载器没有返回任务，下面只是其余下载器的列表
+                </p>
+                <p v-for="item in loadFailures" :key="item.downloader_id" class="hub__partial-l">
+                  {{ item.downloader_name }}：{{ item.error }}
+                </p>
+              </div>
+              <el-button size="small" :loading="loading" @click="loadTorrents">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
             </div>
-            <el-button size="small" :loading="loading" @click="loadTorrents">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </div>
 
-          <div ref="tableCardBodyRef" class="hub__table">
-            <PtDataState v-if="showStateBlock" :state="state" :title="stateTitle" :sub="stateSub">
-              <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
-              <template v-if="state !== 'perm' && state !== 'loading'" #action>
-                <el-button
-                  v-if="state === 'error' || state === 'partial'"
-                  size="small"
-                  @click="loadTorrents">
-                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-                </el-button>
-                <el-button v-else-if="hasActiveFilter" size="small" @click="clearFilters">
-                  <PtIcon name="rotate-ccw" :size="14" /><span>清空筛选</span>
-                </el-button>
-                <el-button v-else type="primary" size="small" @click="openAddDialog">
-                  <PtIcon name="plus" :size="14" /><span>添加种子</span>
-                </el-button>
-              </template>
-            </PtDataState>
-            <div v-else-if="!isMobile" class="hub__grid" @contextmenu.prevent>
-              <div
-                v-if="showAllTasks && useVirtualList"
-                ref="virtualContainer"
-                class="hub__vshell"
-                :style="{ maxHeight: `${tableMaxHeight}px` }"
-                @scroll.passive="onVirtualScroll">
-                <div :style="{ height: `${virtualTopSpacer}px` }" />
-                <DownloaderTorrentVirtualTable
+            <div ref="tableCardBodyRef" class="hub__table">
+              <PtDataState v-if="showStateBlock" :state="state" :title="stateTitle" :sub="stateSub">
+                <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
+                <template v-if="state !== 'perm' && state !== 'loading'" #action>
+                  <el-button
+                    v-if="state === 'error' || state === 'partial'"
+                    size="small"
+                    @click="loadTorrents">
+                    <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                  </el-button>
+                  <el-button v-else-if="hasActiveFilter" size="small" @click="clearFilters">
+                    <PtIcon name="rotate-ccw" :size="14" /><span>清空筛选</span>
+                  </el-button>
+                  <el-button v-else type="primary" size="small" @click="openAddDialog">
+                    <PtIcon name="plus" :size="14" /><span>添加种子</span>
+                  </el-button>
+                </template>
+              </PtDataState>
+              <div v-else-if="!isMobile" class="hub__grid" @contextmenu.prevent>
+                <div
+                  v-if="showAllTasks && useVirtualList"
+                  ref="virtualContainer"
+                  class="hub__vshell"
+                  :style="{ maxHeight: `${tableMaxHeight}px` }"
+                  @scroll.passive="onVirtualScroll">
+                  <div :style="{ height: `${virtualTopSpacer}px` }" />
+                  <DownloaderTorrentVirtualTable
+                    :data="tableRows"
+                    :all-data="torrents"
+                    :selected-row-keys="selectedRowKeys"
+                    :visible-columns="visibleColumns"
+                    :column-order="columnOrder"
+                    :density="tableDensity"
+                    :sort-by="sortBy"
+                    :sort-order="sortOrder"
+                    :hide-context-menu-token="hideRowContextMenuToken"
+                    @selection-change="onSelectionChange"
+                    @selection-keys-change="onSelectionKeysChange"
+                    @sort-change="handleSortChange"
+                    @header-contextmenu="openHeaderColumnMenu"
+                    @row-contextmenu-open="onRowContextMenuOpen"
+                    @context-action="handleContextAction"
+                    @detail="openDetail" />
+                  <div :style="{ height: `${virtualBottomSpacer}px` }" />
+                </div>
+                <DownloaderTorrentTable
+                  v-else
                   :data="tableRows"
-                  :all-data="torrents"
-                  :selected-row-keys="selectedRowKeys"
                   :visible-columns="visibleColumns"
                   :column-order="columnOrder"
                   :density="tableDensity"
-                  :sort-by="sortBy"
-                  :sort-order="sortOrder"
+                  :max-height="tableMaxHeight"
                   :hide-context-menu-token="hideRowContextMenuToken"
                   @selection-change="onSelectionChange"
-                  @selection-keys-change="onSelectionKeysChange"
                   @sort-change="handleSortChange"
                   @header-contextmenu="openHeaderColumnMenu"
                   @row-contextmenu-open="onRowContextMenuOpen"
                   @context-action="handleContextAction"
                   @detail="openDetail" />
-                <div :style="{ height: `${virtualBottomSpacer}px` }" />
               </div>
-              <DownloaderTorrentTable
-                v-else
-                :data="tableRows"
-                :visible-columns="visibleColumns"
-                :column-order="columnOrder"
-                :density="tableDensity"
-                :max-height="tableMaxHeight"
-                :hide-context-menu-token="hideRowContextMenuToken"
-                @selection-change="onSelectionChange"
-                @sort-change="handleSortChange"
-                @header-contextmenu="openHeaderColumnMenu"
-                @row-contextmenu-open="onRowContextMenuOpen"
-                @context-action="handleContextAction"
-                @detail="openDetail" />
-            </div>
 
-            <!--
+              <!--
               移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
               这张表桌面最多 16 列，手机上横着滚既看不到列头也和页面纵向滚动打架。
               卡上留的是判断一个任务要不要动手真正要看的：标题、下载器/大小/分类/标签、
@@ -1957,136 +1989,200 @@ function toggleSidebar() {
               排序仍然走上面工具条里的「排序 / 方向」，所以表头的 sortable 不算丢功能。
               高度沿用桌面那份测量值 tableMaxHeight，卡片列表自己滚，页脚照旧留在屏内。
             -->
-            <div v-else class="hub__cards" :style="{ maxHeight: `${tableMaxHeight}px` }">
-              <PtRowCard v-for="row in mobileRows" :key="rowSelectionKey(row)">
-                <template #lead>
-                  <el-checkbox
-                    :model-value="isRowSelected(row)"
-                    :aria-label="`选择 ${row.title}`"
-                    @update:model-value="toggleRowSelection(row)" />
-                </template>
+              <div v-else class="hub__cards" :style="{ maxHeight: `${tableMaxHeight}px` }">
+                <PtRowCard v-for="row in mobileRows" :key="rowSelectionKey(row)">
+                  <template #lead>
+                    <el-checkbox
+                      :model-value="isRowSelected(row)"
+                      :aria-label="`选择 ${row.title}`"
+                      @update:model-value="toggleRowSelection(row)" />
+                  </template>
 
-                <template #title>{{ row.title || "-" }}</template>
+                  <template #title>{{ row.title || "-" }}</template>
 
-                <template #meta>
-                  <PtTag>{{ row.downloader_name }}</PtTag>
-                  <span>{{ formatSize(row.size) }}</span>
-                  <span v-if="row.category">
-                    <PtIcon name="folder" :size="11" />
-                    {{ row.category }}
-                  </span>
-                  <span v-if="row.tags">
-                    <PtIcon name="tag" :size="11" />
-                    {{ row.tags }}
-                  </span>
-                </template>
-
-                <template #status>
-                  <PtStatusPill :tone="rowStateTone(row)" size="sm">
-                    {{ rowStateLabel(row) }}
-                  </PtStatusPill>
-                </template>
-
-                <template #progress>
-                  <PtProgress :percent="row.progress" :tone="rowProgressTone(row)" />
-                  <span class="hub__card-pg">
-                    <span>{{ downloadedSize(row) }} / {{ formatSize(row.size) }}</span>
-                    <span class="hub__card-rate">
-                      <span class="is-dl">↓ {{ formatSize(row.download_speed) }}/s</span>
-                      <span class="is-ul">↑ {{ formatSize(row.upload_speed) }}/s</span>
-                      <span class="hub__card-pct">{{ Math.round(row.progress) }}%</span>
+                  <template #meta>
+                    <PtTag>{{ row.downloader_name }}</PtTag>
+                    <span>{{ formatSize(row.size) }}</span>
+                    <span v-if="row.category">
+                      <PtIcon name="folder" :size="11" />
+                      {{ row.category }}
                     </span>
-                  </span>
-                </template>
+                    <span v-if="row.tags">
+                      <PtIcon name="tag" :size="11" />
+                      {{ row.tags }}
+                    </span>
+                  </template>
 
-                <!--
+                  <template #status>
+                    <PtStatusPill :tone="rowStateTone(row)" size="sm">
+                      {{ rowStateLabel(row) }}
+                    </PtStatusPill>
+                  </template>
+
+                  <template #progress>
+                    <PtProgress :percent="row.progress" :tone="rowProgressTone(row)" />
+                    <span class="hub__card-pg">
+                      <span>{{ downloadedSize(row) }} / {{ formatSize(row.size) }}</span>
+                      <span class="hub__card-rate">
+                        <span class="is-dl">↓ {{ formatSize(row.download_speed) }}/s</span>
+                        <span class="is-ul">↑ {{ formatSize(row.upload_speed) }}/s</span>
+                        <span class="hub__card-pct">{{ Math.round(row.progress) }}%</span>
+                      </span>
+                    </span>
+                  </template>
+
+                  <!--
                   主操作走 handleContextAction，和桌面右键菜单是同一条路径（同一份
                   batchAction + 重新加载 + 提示）；可用性读的也是同一份 capabilities。
                 -->
-                <template #actions>
-                  <el-button
-                    v-if="isRowPaused(row)"
-                    size="small"
-                    :disabled="actionLoading || !rowCanUse(row, 'resume')"
-                    @click="handleContextAction({ action: 'resume', row })">
-                    <PtIcon name="play" :size="14" /><span>开始</span>
-                  </el-button>
-                  <el-button
-                    v-else
-                    size="small"
-                    :disabled="actionLoading || !rowCanUse(row, 'pause')"
-                    @click="handleContextAction({ action: 'pause', row })">
-                    <PtIcon name="pause" :size="14" /><span>暂停</span>
-                  </el-button>
-                  <el-button type="primary" size="small" @click="openDetail(row)">
-                    <PtIcon name="info" :size="14" /><span>详情</span>
-                  </el-button>
-                </template>
-              </PtRowCard>
+                  <template #actions>
+                    <el-button
+                      v-if="isRowPaused(row)"
+                      size="small"
+                      :disabled="actionLoading || !rowCanUse(row, 'resume')"
+                      @click="handleContextAction({ action: 'resume', row })">
+                      <PtIcon name="play" :size="14" /><span>开始</span>
+                    </el-button>
+                    <el-button
+                      v-else
+                      size="small"
+                      :disabled="actionLoading || !rowCanUse(row, 'pause')"
+                      @click="handleContextAction({ action: 'pause', row })">
+                      <PtIcon name="pause" :size="14" /><span>暂停</span>
+                    </el-button>
+                    <el-button type="primary" size="small" @click="openDetail(row)">
+                      <PtIcon name="info" :size="14" /><span>详情</span>
+                    </el-button>
+                  </template>
+                </PtRowCard>
+              </div>
             </div>
-          </div>
 
-          <template #footer>
-            <div ref="paginationRef" class="hub__foot">
-              <span class="pt-foot-note">
-                共 {{ total }} 个任务<template v-if="allTasksLimited">
-                  ·
-                  <span class="hub__warn">仅渲染前 {{ MAX_ALL_TASK_ROWS }} 条（防卡死）</span>
-                </template>
-                <!-- 行卡不虚拟滚动，所以移动端的上限比桌面那条更低，得单独说清楚 -->
-                <template v-if="isMobile && mobileRowsLimited">
-                  ·
-                  <span class="hub__warn">
-                    行卡仅渲染前 {{ MAX_MOBILE_CARD_ROWS }} 条（防卡死）
-                  </span>
-                </template>
-              </span>
-              <el-pagination
-                v-if="!showAllTasks"
-                v-model:current-page="page"
-                v-model:page-size="pageSize"
-                class="pt-pager"
-                :total="total"
-                :page-sizes="[50, 100, 200]"
-                layout="sizes, prev, pager, next, jumper"
-                @size-change="loadTorrents"
-                @current-change="loadTorrents" />
+            <template #footer>
+              <div ref="paginationRef" class="hub__foot">
+                <span class="pt-foot-note">
+                  共 {{ total }} 个任务<template v-if="allTasksLimited">
+                    ·
+                    <span class="hub__warn">仅渲染前 {{ MAX_ALL_TASK_ROWS }} 条（防卡死）</span>
+                  </template>
+                  <!-- 行卡不虚拟滚动，所以移动端的上限比桌面那条更低，得单独说清楚 -->
+                  <template v-if="isMobile && mobileRowsLimited">
+                    ·
+                    <span class="hub__warn">
+                      行卡仅渲染前 {{ MAX_MOBILE_CARD_ROWS }} 条（防卡死）
+                    </span>
+                  </template>
+                </span>
+                <el-pagination
+                  v-if="!showAllTasks"
+                  v-model:current-page="page"
+                  v-model:page-size="pageSize"
+                  class="pt-pager"
+                  :total="total"
+                  :page-sizes="[50, 100, 200]"
+                  layout="sizes, prev, pager, next, jumper"
+                  @size-change="loadTorrents"
+                  @current-change="loadTorrents" />
+              </div>
+            </template>
+          </PtPanel>
+          <teleport to="body">
+            <div
+              v-if="headerColumnMenuVisible"
+              ref="headerColumnMenuRef"
+              class="hub__hmenu"
+              :style="{ left: `${headerColumnMenuX}px`, top: `${headerColumnMenuY}px` }"
+              @click.stop>
+              <div class="hub__cols-head">
+                <span>显示列</span>
+                <el-button text type="primary" size="small" @click="restoreDefaultColumns">
+                  恢复默认
+                </el-button>
+              </div>
+              <el-checkbox-group v-model="visibleColumns" class="hub__cols">
+                <el-checkbox
+                  v-for="item in columnOptions"
+                  :key="item.value"
+                  :value="item.value"
+                  :label="item.label" />
+              </el-checkbox-group>
             </div>
-          </template>
-        </PtPanel>
-        <teleport to="body">
-          <div
-            v-if="headerColumnMenuVisible"
-            ref="headerColumnMenuRef"
-            class="hub__hmenu"
-            :style="{ left: `${headerColumnMenuX}px`, top: `${headerColumnMenuY}px` }"
-            @click.stop>
-            <div class="hub__cols-head">
-              <span>显示列</span>
-              <el-button text type="primary" size="small" @click="restoreDefaultColumns">
-                恢复默认
+          </teleport>
+          <PtPanel v-if="inlineDetailVisible" class="hub__detail" title="任务详情" icon="info">
+            <template #actions>
+              <el-button text size="small" @click="closeInlineDetail">
+                <PtIcon name="x" :size="14" /><span>关闭</span>
               </el-button>
+            </template>
+            <DownloaderTorrentDetail
+              v-model:tab="detailActiveTab"
+              :detail="detail"
+              :loading="detailLoading" />
+          </PtPanel>
+        </div>
+
+        <!--
+        画板右下两张 386 卡：p-rate（速率）与 p-note（这一页的口径）。
+        速率曲线用的是本页每 5 秒那一拍 transfer-stats 攒出来的滚动窗口（只在内存里），
+        不是后端的历史数据 —— 后端不存速率历史。
+      -->
+        <div class="hub__bottom">
+          <PtPanel class="hub__card" title="速率" icon="activity">
+            <div class="rate">
+              <div class="rate__row">
+                <PtIcon name="download" :size="14" class="is-dl" />
+                <span class="rate__l">下载</span>
+                <span class="rate__v">
+                  {{ formatSize(transferStats?.total_download_speed || 0) }}/s
+                </span>
+              </div>
+              <PtBars
+                v-if="downSeries.length > 1"
+                :values="downSeries"
+                :count="RATE_SAMPLE_MAX"
+                :bar-width="9"
+                :gap="4"
+                :height="28"
+                hue="var(--pt-info)" />
+              <div class="rate__row">
+                <PtIcon name="upload" :size="14" class="is-ul" />
+                <span class="rate__l">上传</span>
+                <span class="rate__v">
+                  {{ formatSize(transferStats?.total_upload_speed || 0) }}/s
+                </span>
+              </div>
+              <PtBars
+                v-if="upSeries.length > 1"
+                :values="upSeries"
+                :count="RATE_SAMPLE_MAX"
+                :bar-width="9"
+                :gap="4"
+                :height="28"
+                hue="var(--pt-ok)" />
             </div>
-            <el-checkbox-group v-model="visibleColumns" class="hub__cols">
-              <el-checkbox
-                v-for="item in columnOptions"
-                :key="item.value"
-                :value="item.value"
-                :label="item.label" />
-            </el-checkbox-group>
-          </div>
-        </teleport>
-        <PtPanel v-if="inlineDetailVisible" class="hub__detail" title="任务详情" icon="info">
-          <template #actions>
-            <el-button text size="small" @click="closeInlineDetail">
-              <PtIcon name="x" :size="14" /><span>关闭</span>
-            </el-button>
-          </template>
-          <DownloaderTorrentDetail
-            v-model:tab="detailActiveTab"
-            :detail="detail"
-            :loading="detailLoading" />
-        </PtPanel>
+            <p class="rate__foot">
+              每 5 秒一拍，最多留最近 {{ RATE_SAMPLE_MAX }} 拍（约 2 分钟）。刷新页面从零开始 ——
+              后端不存速率历史，这条曲线只说明「刚刚」。
+            </p>
+          </PtPanel>
+
+          <PtPanel class="hub__card" title="这一页的口径" icon="info">
+            <ul class="hub__note">
+              <li>
+                这里列的是**下载器里的任务**，不是 pt-tools 的 RSS 任务；后者在「任务列表」。
+                删除动作直接落到下载器，pt-tools 不做二次确认之外的拦截。
+              </li>
+              <li>
+                「全部下载器」视图会逐台请求再合并；某台连不上时列表照常显示其余各台，
+                并在上方挂一条部分失败提示，不静默跳过。
+              </li>
+              <li>
+                「全部」范围最多取 {{ MAX_ALL_TASK_ROWS }} 行（手机上行卡再收到
+                {{ MAX_MOBILE_CARD_ROWS }} 张），超出的条数写在页脚，不静默丢。
+              </li>
+            </ul>
+          </PtPanel>
+        </div>
       </div>
     </div>
 
@@ -2223,6 +2319,65 @@ function toggleSidebar() {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--pt-border-strong) transparent;
+}
+
+/* 右栏：表格卡在上，两张 386 卡在下 */
+.hub__right {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--pt-pad);
+  min-width: 0;
+}
+
+/* 右栏下方两张 386 卡（画板 p-rate / p-note） */
+.hub__bottom {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--pt-pad);
+  min-width: 0;
+}
+
+.rate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rate__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+}
+
+.rate__l {
+  flex: 1;
+  color: var(--pt-t3);
+}
+
+.rate__v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.rate__foot,
+.hub__note {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+.hub__note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding-left: 16px;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
 }
 
 /* 卡片不许被 flex 压扁：内容多的那张（筛选）自己滚，别把三张一起挤扁 */

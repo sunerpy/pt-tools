@@ -15,6 +15,7 @@ import {
   type TorrentPushItem,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
@@ -120,6 +121,65 @@ const batchDownloading = ref(false);
 
 // 缓存 key
 const CACHE_KEY = "pt-tools-search-cache";
+/**
+ * 搜索历史（画板 p-hist 1080）。
+ *
+ * 之前只有「上一次搜索的结果」缓存在 sessionStorage 里，关掉标签页就没了，
+ * 也看不到搜过什么。画板给了一张历史卡，所以这里单独存一份**只有关键词与战果**
+ * 的短列表：不存结果本体（一次多站点搜索的 items 可以有几百条，塞 localStorage
+ * 会顶到配额），只存关键词、命中数、耗时、时间，够用来「再搜一次」。
+ */
+const HISTORY_KEY = "pt-tools-search-history-v1";
+const HISTORY_MAX = 10;
+
+interface SearchHistoryItem {
+  keyword: string;
+  hits: number;
+  ms: number;
+  at: number;
+}
+
+const searchHistory = ref<SearchHistoryItem[]>(loadHistory());
+
+function loadHistory(): SearchHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSearch(keyword: string, hits: number, ms: number) {
+  const key = keyword.trim();
+  if (!key) return;
+  const next = [
+    { keyword: key, hits, ms, at: Date.now() },
+    ...searchHistory.value.filter((h) => h.keyword !== key),
+  ].slice(0, HISTORY_MAX);
+  searchHistory.value = next;
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  } catch {
+    /* 隐私模式下写不进去，历史只在本次会话里有效，不影响搜索本身 */
+  }
+}
+
+function clearHistory() {
+  searchHistory.value = [];
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {
+    /* 同上 */
+  }
+}
+
+function replaySearch(keyword: string) {
+  searchKeyword.value = keyword;
+  doSearch();
+}
 
 // 获取指定站点的分类配置
 function getSiteCategoriesConfig(siteId: string): SiteCategoriesConfig | null {
@@ -384,6 +444,7 @@ async function doSearch() {
 
   // 保存到缓存
   saveToCache();
+  rememberSearch(searchedKeyword.value, totalResults.value, searchTime.value);
 
   // toast 照旧弹，但它只是提醒；失败清单同时留在结果上方的提示条（或 partial 状态块）里
   if (searchErrors.value.length > 0) {
@@ -888,6 +949,25 @@ function discountTone(torrent: SearchTorrentItem): "ok" | "warn" | "dang" | "neu
  * 14 个站问了 8 个回来，剩下 6 个是超时还是失败，直接决定用户要不要重搜。
  * 还没搜过时返回空串，不摆占位文案。
  */
+/** p-sites：各站点命中多少条 */
+const siteHitRows = computed<BreakdownRow[]>(() =>
+  Object.entries(siteResultCounts.value)
+    .sort((a, b) => b[1] - a[1])
+    .map(([site, n]) => ({ key: site, label: site, value: n, tone: "primary" as const })),
+);
+
+/** p-alt：这次没返回结果的站点，附上真实原因 */
+const failedSiteRows = computed<BreakdownRow[]>(() =>
+  searchErrors.value.map((e) => ({
+    key: e.site,
+    label: e.site,
+    value: "失败",
+    weight: 1,
+    tone: "dang" as const,
+    hint: e.error,
+  })),
+);
+
 const barNote = computed(() => {
   if (!searchedKeyword.value) return "";
   if (loading.value) return `正在搜索「${searchedKeyword.value}」`;
@@ -1386,16 +1466,57 @@ const footNote = computed(() => {
       画板 p-sites 344,524：各站点的命中数属于表格下方的分析卡片，
       不是工具栏上的一排 chip —— 站点一多，那排 chip 会把 40 高的带挤爆。
     -->
-    <div v-if="Object.keys(siteResultCounts).length > 0" class="pt-cards pt-cards--wide">
+    <!--
+      画板 15 的分析卡：p-sites 548（站点命中）/ p-alt 516（没返回的站点）两栏
+      + p-hist 1080（搜索历史）通栏。三张都用已经在手的数据，不额外请求。
+    -->
+    <div
+      v-if="Object.keys(siteResultCounts).length > 0 || searchHistory.length > 0"
+      class="pt-cards pt-cards--2">
       <PtPanel
         title="站点命中"
         icon="layers"
         :count="`${Object.keys(siteResultCounts).length} 个站点`">
-        <div class="sites">
-          <PtTag v-for="(count, site) in siteResultCounts" :key="site">
-            {{ site }} · {{ count }}
-          </PtTag>
-        </div>
+        <PtBreakdown
+          :rows="siteHitRows"
+          :total="totalResults"
+          foot="柱长是该站点命中数占总命中数的比例。" />
+      </PtPanel>
+
+      <PtPanel
+        v-if="Object.keys(siteResultCounts).length > 0"
+        title="没返回的站点"
+        icon="plug-zap"
+        :count="searchErrors.length > 0 ? `${searchErrors.length} 个` : '全部返回'">
+        <PtBreakdown
+          v-if="searchErrors.length > 0"
+          :rows="failedSiteRows"
+          foot="这些站点超时或报错，结果里不含它们的种子；重搜一次通常就能补上。" />
+        <p v-else class="search-ok">这次问到的站点全都返回了结果。</p>
+      </PtPanel>
+
+      <PtPanel
+        v-if="searchHistory.length > 0"
+        class="pt-cards__full"
+        title="搜索历史"
+        icon="history"
+        :count="`${searchHistory.length} 条`"
+        action="清空"
+        @action="clearHistory">
+        <ul class="hist">
+          <li v-for="item in searchHistory" :key="item.keyword" class="hist__row">
+            <el-button link type="primary" @click="replaySearch(item.keyword)">
+              {{ item.keyword }}
+            </el-button>
+            <span class="hist__meta">
+              命中 {{ item.hits }} 条 · 耗时 {{ item.ms }} ms ·
+              {{ new Date(item.at).toLocaleString("zh-CN", { hour12: false }) }}
+            </span>
+          </li>
+        </ul>
+        <p class="hist__foot">
+          只记关键词与战果，不存结果本体 —— 一次多站点搜索的条目太多，塞不进本地存储。
+        </p>
       </PtPanel>
     </div>
 
@@ -1617,12 +1738,46 @@ const footNote = computed(() => {
   color: var(--pt-t1);
 }
 
-/* 站点命中数：现在长在表格下方的分析卡片里，留白由 PtPanel 的 16 内边距给 */
-.sites {
+/* 搜索历史卡：一行「关键词按钮 + 战果」，关键词可点，点了就再搜一次 */
+.hist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hist__row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
+  gap: var(--pt-space-2) var(--pt-space-3);
+  align-items: baseline;
+}
+
+.hist__row :deep(.el-button) {
+  height: auto;
+  padding: 0;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+}
+
+.hist__meta {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.hist__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+.search-ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
 }
 
 /* 部分失败提示条：.pt-note 自带色条和底色，这里只补带内的留白与右侧按钮 */

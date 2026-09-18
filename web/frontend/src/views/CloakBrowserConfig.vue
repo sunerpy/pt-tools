@@ -109,10 +109,12 @@ async function save() {
   <!--
     画板 28：intro 1080×58 → p-cfg 700 / p-res 364 → p-life 1080×240。
     右栏 p-res（探测结果）与 p-life（会话生命周期）后端没有对应数据，本页先落
-    intro + 通栏的 Manager 连接卡，见设计文档 §5 的偏离记录。
+    画板 28：intro 1080×58 → p-cfg 700（Manager 连接）/ p-res 364（探测结果）
+    → p-life 1080×240（会话生命周期）。
+    p-life 要后端暴露会话表，目前接口只回 Manager 连接状态与版本，那张没做。
   -->
-  <div class="cloak-page pt-cards pt-cards--wide" data-testid="cloak-config-page">
-    <div class="pt-note">
+  <div class="cloak-page pt-cards pt-cards--main" data-testid="cloak-config-page">
+    <div class="pt-note pt-cards__full">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
       <span>
         CloakBrowser 为可选功能。默认探测路径仍为 cookie HTTP 直连；仅当某站点开启「使用
@@ -184,11 +186,93 @@ async function save() {
         </el-button>
       </template>
     </PtPanel>
+
+    <!--
+      画板 p-res 364「探测结果」——「测试连接」这一次的结论。
+      后端不存探测历史，所以这张卡只说这一次；没测过就说清下一步动作，不摆占位数字。
+    -->
+    <PtPanel class="res-card" title="探测结果" icon="signal">
+      <ul v-if="testResult" class="res">
+        <li class="res__row">
+          <span class="res__k">结论</span>
+          <PtStatusPill :tone="resultTone" size="sm" dot>
+            {{ testResult.category === "success" ? "连通" : "不通" }}
+          </PtStatusPill>
+        </li>
+        <li class="res__row">
+          <span class="res__k">分类</span>
+          <span class="res__v">{{ testResult.category }}</span>
+        </li>
+        <li v-if="testResult.manager_version" class="res__row">
+          <span class="res__k">Manager 版本</span>
+          <span class="res__v">v{{ testResult.manager_version }}</span>
+        </li>
+        <li class="res__detail">{{ resultText(testResult) }}</li>
+      </ul>
+      <p v-else class="res__empty">
+        还没测过。填好端点与 token 后点左边的「测试连接」，这里会给出这一次的结论。
+      </p>
+      <p class="res__foot">后端不保存探测历史，这张卡只反映最近一次手动测试。</p>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
 /* 内缩 16 与卡间 16 由 .pt-cards--wide 给；画板这几块是 1080 通栏，不是 640 */
+
+/* 右栏窄卡自己顶对齐，别被左边那张高卡拉长 */
+.res-card {
+  align-self: start;
+}
+
+.res {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.res__row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--pt-fz-sm);
+}
+
+.res__k {
+  color: var(--pt-t3);
+}
+
+.res__v {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t1);
+}
+
+.res__detail {
+  padding-top: var(--pt-space-2);
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+  border-top: 1px solid var(--pt-border);
+}
+
+.res__empty {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.res__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
 
 /* 测试结果紧跟在最后一个字段之后，不再多留 el-form-item 的一档间距 */
 .test-result {

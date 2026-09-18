@@ -500,6 +500,29 @@ function getConfNameByConfId(confId?: number) {
       </template>
     </PtPanel>
 
+    <!--
+      画板 p-note 612：绑定流程说明。内容按代码核过 ——
+      绑定码是 8 位、只存 bcrypt 哈希（models.BotToken.CodeOrTokenHash）、有 UsedAt 与
+      ExpiresAt 两个状态；兑换走的是 ChatOps 的 `/bind <绑定码>` 命令
+      （internal/chatops/commands/bind.go）。
+    -->
+    <PtPanel title="绑定是怎么走的" icon="info">
+      <ol class="bind-note">
+        <li>在这一页点「生成绑定码」，选好通道，拿到一个 8 位的码。</li>
+        <li>
+          在对应的聊天里发 <code>/bind &lt;绑定码&gt;</code>。机器人拿这个码换绑定关系，
+          成功后这条记录从「待绑定」挪到「已绑定」。
+        </li>
+        <li>码只存哈希，页面上那一份关掉就再也看不到 —— 丢了就重新生成一个，旧的到期自动失效。</li>
+        <li>
+          绑定之后这个聊天账号才能发命令。管理员身份是另一回事 —— 它在通道的凭证里配置 （<code
+            >admin_users</code
+          >
+          / <code>admin_qq_users</code>），上面那张表只做展示， 绑上不等于是管理员。
+        </li>
+      </ol>
+    </PtPanel>
+
     <el-dialog
       v-model="generateDialogVisible"
       class="pt-dialog"
@@ -561,6 +584,26 @@ function getConfNameByConfId(confId?: number) {
 </template>
 
 <style scoped>
+/* 绑定流程说明卡：有序步骤 */
+.bind-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.bind-note code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
 /* 栏宽 612、内缩 16、卡间 16 都由 .pt-cards--lead 给 */
 
 /* 码 + 复制按钮是一个整体，别让复制按钮掉到第二行 */

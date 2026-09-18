@@ -531,6 +531,130 @@ func TestApiTasks_Filters(t *testing.T) {
 	})
 }
 
+// 画板 10 的 KPI 带要「活跃任务 / 今日推送 / 免费种子」三个全库计数，
+// 这条测试钉住三个口径：活跃 = 未过期；今日推送按本地零点切分；免费只数未过期的。
+func TestApiTaskStats(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	now := time.Now()
+	todayPush := now.Add(-2 * time.Hour)
+	oldPush := now.AddDate(0, 0, -3)
+
+	rows := []*models.TorrentInfo{
+		// 活跃 + 免费 + 今天推的
+		{SiteName: "a", TorrentID: "1", IsFree: true, PushTime: &todayPush},
+		// 活跃 + 免费，没推过
+		{SiteName: "a", TorrentID: "2", IsFree: true},
+		// 活跃、不免费、三天前推的
+		{SiteName: "b", TorrentID: "3", PushTime: &oldPush},
+		// 已过期的免费种子：既不算活跃，也不算「现在能下的免费种子」
+		{SiteName: "b", TorrentID: "4", IsFree: true, IsExpired: true},
+	}
+	for _, row := range rows {
+		require.NoError(t, global.GlobalDB.DB.Create(row).Error)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/stats", nil)
+	srv.apiTaskStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Total       int64 `json:"total"`
+		Active      int64 `json:"active"`
+		PushedToday int64 `json:"pushedToday"`
+		Free        int64 `json:"free"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, int64(4), got.Total)
+	assert.Equal(t, int64(3), got.Active, "过期的那条不算活跃")
+	assert.Equal(t, int64(1), got.PushedToday, "三天前推的那条不算今天")
+	assert.Equal(t, int64(2), got.Free, "过期的免费种子不算")
+}
+
+// 画板 20 的 p-hit 要「哪条规则真的命中过」，口径是 TorrentInfo.FilterRuleID 的分组计数。
+func TestApiFilterRuleHits(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	one := uint(1)
+	two := uint(2)
+	rows := []*models.TorrentInfo{
+		{SiteName: "a", TorrentID: "1", FilterRuleID: &one},
+		{SiteName: "a", TorrentID: "2", FilterRuleID: &one},
+		{SiteName: "b", TorrentID: "3", FilterRuleID: &two},
+		// 没命中规则的（免费自动下载）不该出现在计数里
+		{SiteName: "b", TorrentID: "4"},
+	}
+	for _, row := range rows {
+		require.NoError(t, global.GlobalDB.DB.Create(row).Error)
+	}
+
+	w := httptest.NewRecorder()
+	srv.apiFilterRuleHits(w, httptest.NewRequest(http.MethodGet, "/api/filter-rules/hits", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Hits map[string]int64 `json:"hits"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, int64(2), got.Hits["1"])
+	assert.Equal(t, int64(1), got.Hits["2"])
+	assert.Len(t, got.Hits, 2, "没有 filter_rule_id 的行不计入")
+}
+
+// 日志目录还不存在时（一条日志都没写过）要回空清单而不是 500。
+func TestApiLogFiles_MissingDir(t *testing.T) {
+	srv := setupServer(t)
+	t.Setenv("HOME", t.TempDir())
+
+	w := httptest.NewRecorder()
+	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Dir   string `json:"dir"`
+		Files []any  `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.NotEmpty(t, got.Dir)
+	assert.Empty(t, got.Files)
+}
+
+// 目录里有当前文件与轮转备份时，按修改时间倒序返回，并标出哪个是当前文件。
+func TestApiLogFiles_ListsRotated(t *testing.T) {
+	srv := setupServer(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "all.log"), []byte("now"), 0o644))
+	old := filepath.Join(dir, "all-2026-09-01T00-00-00.000.log")
+	require.NoError(t, os.WriteFile(old, []byte("older"), 0o644))
+	require.NoError(t, os.Chtimes(old, time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour)))
+
+	w := httptest.NewRecorder()
+	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Files []struct {
+			Name     string `json:"name"`
+			Rotated  bool   `json:"rotated"`
+			IsActive bool   `json:"is_active"`
+		} `json:"files"`
+		MaxBackups int `json:"max_backups"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got.Files, 2)
+	assert.Equal(t, "all.log", got.Files[0].Name, "按修改时间倒序，当前文件最新")
+	assert.True(t, got.Files[0].IsActive)
+	assert.True(t, got.Files[1].Rotated)
+	assert.Positive(t, got.MaxBackups)
+}
+
 // ==== merged from server_cov_test.go ====
 func TestSetQAHook(t *testing.T) {
 	s := &Server{}

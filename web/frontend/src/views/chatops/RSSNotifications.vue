@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -90,6 +92,90 @@ const headSub = computed(() => {
   }
   return parts.join(" · ");
 });
+
+/**
+ * 画板 26 在 gfoot 之后有分析卡：p-res 548（结果分布）、p-idem 516（幂等口径）、
+ * p-retry 1080（待重试队列）。结果分布与待重试由当前这页的行现算；
+ * 幂等那张是固定说明 —— 它讲的是这套日志为什么不会重复推送，没有可查的数据。
+ */
+const resultRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const row of logs.value) {
+    buckets.set(row.result, (buckets.get(row.result) ?? 0) + 1);
+  }
+  const toneOf: Record<string, BreakdownRow["tone"]> = {
+    sent: "ok",
+    failed: "dang",
+    pending: "warn",
+    suppressed: "mute",
+    throttled: "warn",
+  };
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => ({
+      key,
+      label: resultMeta(key).label,
+      value: n,
+      tone: toneOf[key] ?? "primary",
+    }));
+});
+
+/** p-site：这一页的通知按站点分布 */
+const siteRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const row of logs.value) {
+    const name = row.site_name || "未知站点";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "primary" as const }));
+});
+
+/**
+ * p-quiet：每个通道的安静时段。
+ * 数据来自通道配置本身（NotificationConf 的 quiet_hours_start / quiet_hours_end），
+ * 这一页已经为了把 conf_id 显示成通道名而拉过 confs，不额外请求。
+ * start > end 表示跨午夜（models/chatops_models.go 上的注释就是这么定义的）。
+ */
+interface QuietRow {
+  id: number;
+  name: string;
+  window: string;
+  crossesMidnight: boolean;
+}
+
+const quietRows = computed<QuietRow[]>(() =>
+  confs.value.map((c) => {
+    const start = c.quiet_hours_start ?? "";
+    const end = c.quiet_hours_end ?? "";
+    const on = Boolean(start && end);
+    return {
+      id: c.id,
+      name: c.name,
+      window: on ? `${start} – ${end}` : "未设置",
+      crossesMidnight: on && start > end,
+    };
+  }),
+);
+
+/** 还会再发一次的那些：failed / pending，按尝试次数排 */
+const retryRows = computed<BreakdownRow[]>(() =>
+  logs.value
+    .filter((row) => row.result === "failed" || row.result === "pending")
+    .sort((a, b) => b.attempts - a.attempts)
+    .slice(0, 8)
+    .map((row) => ({
+      key: String(row.id),
+      label: `${row.site_name || "未知站点"} · ${row.torrent_id}`,
+      value: `${row.attempts} 次`,
+      weight: row.attempts,
+      tone: row.result === "failed" ? ("dang" as const) : ("warn" as const),
+      hint:
+        row.last_error ||
+        (row.next_retry_at ? `下次重试 ${formatDate(row.next_retry_at)}` : "排队中"),
+    })),
+);
 
 function confLabel(id: number): string {
   const c = confs.value.find((x) => x.id === id);
@@ -462,6 +548,65 @@ onBeforeUnmount(() => {
         @current-change="handlePageChange" />
     </div>
 
+    <!-- 画板 26 的分析卡：p-res 548 / p-idem 516 两栏 + p-retry 1080 通栏 -->
+    <div v-if="logs.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="推送结果分布" icon="chart-pie" :count="`${logs.length} 条（本页）`">
+        <PtBreakdown
+          :rows="resultRows"
+          :total="logs.length"
+          foot="统计的是当前这一页的记录；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel title="幂等与去重口径" icon="copy-check">
+        <ul class="idem">
+          <li>每条「RSS + 种子 + 通道」只会留一条记录，调度器重跑同一轮不会重复推送。</li>
+          <li>被安静时段或每小时配额挡下的记为 <code>suppressed</code>，不算失败。</li>
+          <li>合并推送（digest）会把同一轮的多条并成一条消息，日志里仍然一条种子一条记录。</li>
+          <li>手动点「重试」只会把这条重新入队，不会新建一条记录，尝试次数 +1。</li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="待重试与失败"
+        icon="refresh-cw"
+        :count="retryRows.length > 0 ? `${retryRows.length} 条` : '暂无'">
+        <PtBreakdown
+          v-if="retryRows.length > 0"
+          :rows="retryRows"
+          cols
+          foot="只列当前这一页里 failed 与 pending 的记录，按尝试次数排，最多 8 条。" />
+        <p v-else class="idem-ok">当前这一页没有失败或待重试的记录。</p>
+      </PtPanel>
+    </div>
+
+    <!-- 画板 p-site 548（按站点分布）/ p-quiet 516（各通道的安静时段）两栏 -->
+    <div v-if="logs.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="按站点分布" icon="globe" :count="`${siteRows.length} 个站点`">
+        <PtBreakdown
+          :rows="siteRows"
+          :total="logs.length"
+          foot="统计的是当前这一页的记录；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel title="安静时段" icon="moon" :count="`${quietRows.length} 个通道`">
+        <ul v-if="quietRows.length > 0" class="quiet">
+          <li v-for="row in quietRows" :key="row.id" class="quiet__row">
+            <span class="quiet__k">{{ row.name }}</span>
+            <span class="quiet__v" :class="{ 'is-off': row.window === '未设置' }">
+              {{ row.window }}
+            </span>
+            <span v-if="row.crossesMidnight" class="quiet__note">跨午夜</span>
+          </li>
+        </ul>
+        <p v-else class="idem-ok">还没有配置通知通道。</p>
+        <p class="quiet__foot">
+          落在安静时段里的通知记为 <code>suppressed</code>，不算失败、也不会攒着补发。
+          时段在「消息通知」里按通道配置。
+        </p>
+      </PtPanel>
+    </div>
+
     <!-- 行卡替代了展开行，详情放弹窗；桌面走表格展开，不会用到这里 -->
     <el-dialog v-model="detailVisible" title="通知详情" width="92%" align-center>
       <div v-if="detailRow" class="detail">
@@ -480,6 +625,91 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 安静时段卡：一行一个通道 */
+.quiet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quiet__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-sm);
+}
+
+.quiet__k {
+  flex: 1;
+  overflow: hidden;
+  color: var(--pt-t2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quiet__v {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.quiet__v.is-off {
+  font-weight: 400;
+  color: var(--pt-t4);
+}
+
+.quiet__note {
+  padding: 0 5px;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-warn);
+  background: color-mix(in srgb, var(--pt-warn) 14%, transparent);
+  border-radius: var(--pt-r-sm);
+}
+
+.quiet__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+.quiet__foot code {
+  padding: 1px 4px;
+  font-family: var(--pt-font-mono);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+/* 幂等口径卡：固定说明，条目之间留 8 */
+.idem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.idem code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+.idem-ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
 /* 带之间没有间隔（画板上它们是连着的），所以这里不再是带 gap 的 flex 列 */
 .rss-notify-page {
   display: flex;

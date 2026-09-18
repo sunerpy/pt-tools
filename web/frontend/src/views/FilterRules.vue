@@ -6,7 +6,10 @@ import {
   type RSSConfig,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -43,14 +46,134 @@ const TEST_ZERO_SUB = "没有种子命中这条规则，放宽模式或换个数
  */
 const { loading, state, errorText, run, hasPartialBanner } = useDataState({
   failed: () => (rssFailed.value ? 1 : 0),
+  /* 画板 20 的 bar-64 带来了本地筛选：筛掉之后 0 行是 zero，不是「一条都还没建」 */
+  filtered: () => ruleFilterOn.value,
 });
 
 /** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
 const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
   if (state.value === "partial") return "规则读到了，但试跑用的 RSS 数据源列表没读到";
+  /* zero 是「筛掉了」而不是「一条都还没建」，下一步动作完全不同 */
+  if (state.value === "zero") return "当前筛选下没有规则，放宽筛选或清空它";
   return "加一条规则，让 RSS 只下你要的资源";
 });
+
+/**
+ * 画板 20 的 bar-64：分段（全部 / 启用 / 禁用）+ 220 宽搜索框 + 两枚 chip
+ * （类型、仅免费）+ 右侧刷新图标钮。规则表整份在前端，所以这些筛选都是本地的，
+ * 不重新请求。
+ */
+type RuleStatus = "all" | "on" | "off";
+
+const STATUS_SEG: { label: string; value: RuleStatus }[] = [
+  { label: "全部", value: "all" },
+  { label: "启用", value: "on" },
+  { label: "禁用", value: "off" },
+];
+
+const ruleStatus = ref<RuleStatus>("all");
+const ruleQuery = ref("");
+/** 空串 = 全部；其余是 pattern_type 的取值 */
+const ruleType = ref("");
+/** "" 全部 · "yes" 仅免费 · "no" 不限免费 */
+const ruleFree = ref("");
+
+const visibleRules = computed(() => {
+  const q = ruleQuery.value.trim().toLowerCase();
+  return rules.value.filter((r) => {
+    if (ruleStatus.value === "on" && !r.enabled) return false;
+    if (ruleStatus.value === "off" && r.enabled) return false;
+    if (ruleType.value && r.pattern_type !== ruleType.value) return false;
+    if (ruleFree.value === "yes" && !r.require_free) return false;
+    if (ruleFree.value === "no" && r.require_free) return false;
+    if (!q) return true;
+    return r.name.toLowerCase().includes(q) || r.pattern.toLowerCase().includes(q);
+  });
+});
+
+const ruleFilterOn = computed(
+  () =>
+    ruleStatus.value !== "all" ||
+    Boolean(ruleQuery.value.trim()) ||
+    Boolean(ruleType.value) ||
+    Boolean(ruleFree.value),
+);
+
+function clearRuleFilters() {
+  ruleStatus.value = "all";
+  ruleQuery.value = "";
+  ruleType.value = "";
+  ruleFree.value = "";
+}
+
+/**
+ * 规则命中数 —— 画板 p-hit 1080。
+ * 口径是 TorrentInfo.filter_rule_id 的分组计数（`/api/filter-rules/hits`）：
+ * 「这条规则真的把种子下下来过几次」，不是试跑的模拟命中。
+ */
+const ruleHits = ref<Record<string, number>>({});
+
+async function loadHits() {
+  try {
+    const res = await filterRulesApi.hits();
+    ruleHits.value = res.hits ?? {};
+  } catch {
+    /* 命中数是附带信息，取不到就让卡里说明「没取到」，不影响规则表 */
+    ruleHits.value = {};
+  }
+}
+
+const hitRows = computed<BreakdownRow[]>(() =>
+  [...rules.value]
+    .map((r) => ({ rule: r, hits: ruleHits.value[String(r.id ?? "")] ?? 0 }))
+    .sort((a, b) => b.hits - a.hits)
+    .map(({ rule, hits }) => ({
+      key: String(rule.id ?? rule.name),
+      label: rule.name,
+      value: hits,
+      tone: hits > 0 ? ("ok" as const) : ("mute" as const),
+      hint: hits > 0 ? undefined : "还没命中过任何种子",
+    })),
+);
+
+const totalHits = computed(() => Object.values(ruleHits.value).reduce((n, v) => n + v, 0));
+
+/**
+ * 画板 p-test 516 的入口。
+ * 试跑本身是「按某条规则的模式跑一遍数据源」（testPattern 读的是 form 里的模式），
+ * 所以这里选中一条规则后把它填进 form 再复用同一条路径 —— 不另写一份试跑逻辑。
+ */
+const testRuleId = ref<number | undefined>(undefined);
+
+function testSelectedRule() {
+  const rule = rules.value.find((r) => r.id === testRuleId.value);
+  if (!rule) return;
+  form.value = { ...rule };
+  selectedRssId.value = undefined;
+  testPattern();
+}
+
+/**
+ * 画板 20 在 gfoot 之后有四张卡：p-order 548（匹配顺序）、p-test 516（试跑）、
+ * p-hit 1080（命中统计）、p-hint 1080（口径说明）。
+ *
+ * 这里落 p-order 与 p-hint：顺序由规则表现算，口径是固定说明。
+ * p-test 的试跑已经有一个对话框（要选数据源、看命中清单，卡片里放不下），
+ * p-hit 要历史命中计数，后端没有这份统计。
+ */
+const orderRows = computed<BreakdownRow[]>(() =>
+  [...rules.value]
+    .sort((a, b) => a.priority - b.priority)
+    .map((r) => ({
+      key: String(r.id ?? r.name),
+      label: `${r.priority} · ${r.name}`,
+      value: r.enabled ? "启用" : "停用",
+      weight: r.enabled ? 1 : 0.35,
+      tone: r.enabled ? ("ok" as const) : ("mute" as const),
+      hint: `${r.pattern_type} · ${r.pattern}${r.require_free ? " · 仅免费" : ""}`,
+    })),
+);
 
 /** 画板 head 的 sub（11.5/400 t3）：共几条规则、启用几条 */
 const headSub = computed(() => {
@@ -141,7 +264,7 @@ onMounted(async () => {
 
 /** 刷新/重试都同时拉两个数据源，否则 partial 提示点了重试也消不掉 */
 async function reloadAll() {
-  await Promise.all([loadRules(), loadRssList()]);
+  await Promise.all([loadRules(), loadRssList(), loadHits()]);
 }
 
 async function loadRules() {
@@ -355,6 +478,53 @@ function decisionText(decision: string | undefined): string {
       </div>
     </div>
 
+    <!-- 画板 20 的 bar-64：分段 + 搜索 + 两枚 chip + 右侧图标钮，全部是本地筛选 -->
+    <PtToolbar band>
+      <el-segmented
+        v-model="ruleStatus"
+        class="pt-seg"
+        :options="STATUS_SEG"
+        :props="{ label: 'label', value: 'value' }" />
+
+      <el-input v-model="ruleQuery" class="rules-q" placeholder="筛选规则名、匹配模式…" clearable>
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
+
+      <el-select v-model="ruleType" class="rules-chip" placeholder="类型: 全部">
+        <el-option label="类型: 全部" value="" />
+        <el-option label="关键词" value="keyword" />
+        <el-option label="通配符" value="wildcard" />
+        <el-option label="正则" value="regex" />
+      </el-select>
+
+      <el-select v-model="ruleFree" class="rules-chip" placeholder="仅免费: 全部">
+        <el-option label="仅免费: 全部" value="" />
+        <el-option label="只看要求免费的" value="yes" />
+        <el-option label="只看不限免费的" value="no" />
+      </el-select>
+
+      <el-button v-if="ruleFilterOn" @click="clearRuleFilters">
+        <PtIcon name="x" :size="14" /><span>清空筛选</span>
+      </el-button>
+
+      <template #note>显示 {{ visibleRules.length }} / {{ rules.length }} 条</template>
+
+      <template #right>
+        <el-tooltip content="重新拉取规则与数据源" placement="bottom">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新"
+            :disabled="loading"
+            @click="reloadAll">
+            <PtIcon name="refresh-cw" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
+    </PtToolbar>
+
     <div v-loading="loading" class="pt-band--grid">
       <!--
         partial（§5）：规则读到了但试跑数据源没读到。有数据可看时不该用一整块状态图
@@ -368,7 +538,7 @@ function decisionText(decision: string | undefined): string {
         </span>
       </div>
 
-      <el-table v-if="!isMobile" :data="rules" class="pt-grid" style="width: 100%">
+      <el-table v-if="!isMobile" :data="visibleRules" class="pt-grid" style="width: 100%">
         <template #empty>
           <PtDataState :state="state" dense :sub="stateSub">
             <template v-if="stateAction !== 'none'" #action>
@@ -457,7 +627,7 @@ function decisionText(decision: string | undefined): string {
           </template>
         </PtDataState>
 
-        <PtRowCard v-for="rule in rules" :key="rule.id">
+        <PtRowCard v-for="rule in visibleRules" :key="rule.id">
           <template #title>{{ rule.name }}</template>
 
           <template #meta>
@@ -495,6 +665,74 @@ function decisionText(decision: string | undefined): string {
 
     <div v-if="rules.length > 0" class="pt-band--foot">
       <span>优先级数字越小越先匹配，命中即停</span>
+    </div>
+
+    <!-- 画板 20 的分析卡：p-order 548（匹配顺序）+ p-hint 1080（口径说明） -->
+    <div v-if="rules.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="匹配顺序" icon="list-ordered" :count="`${rules.length} 条`">
+        <PtBreakdown
+          :rows="orderRows"
+          foot="按优先级从小到大排，命中即停；停用的规则不参与匹配（柱子画短一截）。" />
+      </PtPanel>
+
+      <!--
+        画板 p-test 516：试跑入口。完整试跑（选数据源、看命中清单）在对话框里，
+        这张卡是入口加口径说明 —— 卡里塞不下一份命中清单。
+      -->
+      <PtPanel title="试跑" icon="flask-conical">
+        <p class="rules-test__p">
+          挑一条规则，拿真实的 RSS 数据跑一遍，看它会命中哪些种子。只读，不推送不写库。
+        </p>
+        <el-select
+          v-model="testRuleId"
+          class="rules-test__sel"
+          placeholder="选一条规则"
+          :disabled="rules.length === 0">
+          <el-option
+            v-for="r in rules"
+            :key="r.id"
+            :label="`${r.name}（${r.pattern_type}）`"
+            :value="r.id" />
+        </el-select>
+        <el-button
+          type="primary"
+          class="rules-test__btn"
+          :disabled="!testRuleId"
+          :loading="testing"
+          @click="testSelectedRule">
+          <PtIcon v-if="!testing" name="flask-conical" :size="15" /><span>试跑这条</span>
+        </el-button>
+        <p class="rules-test__foot">
+          数据源来自各站点的 RSS 配置；{{
+            rssFailed
+              ? "这次没取到，试跑面板里的数据源下拉会是空的。"
+              : `当前有 ${rssList.length} 条可选。`
+          }}结果与命中清单在弹出的面板里。
+        </p>
+      </PtPanel>
+
+      <!-- 画板 p-hit 1080：真实命中统计 -->
+      <PtPanel class="pt-cards__full" title="命中统计" icon="target" :count="`${totalHits} 次`">
+        <PtBreakdown
+          :rows="hitRows"
+          cols
+          foot="口径是「这条规则命中并入库的种子数」（TorrentInfo.filter_rule_id 的分组计数），不是试跑的模拟命中；免费自动下载的种子不记规则，不计入。" />
+      </PtPanel>
+
+      <PtPanel class="pt-cards__full" title="规则怎么生效" icon="info">
+        <ul class="rules-hint">
+          <li>没给某个 RSS 关联规则时，它按<strong>免费种子</strong>自动下载，适合日常刷流。</li>
+          <li>
+            一旦关联了规则，这个 RSS 就变成<strong>精准下载</strong>：只有命中规则的种子会推送，
+            其余种子即使免费也跳过。
+          </li>
+          <li>
+            想要「命中的下、所有免费的也下」，把该 RSS
+            的下载模式留在<code>跟随全局</code>，并在全局设置里选<code>仅免费（忽略过滤规则）</code>。
+          </li>
+          <li>规则里的大小范围与「仅免费」是 AND 关系，三者都满足才算命中。</li>
+        </ul>
+      </PtPanel>
     </div>
 
     <el-dialog
@@ -738,6 +976,66 @@ function decisionText(decision: string | undefined): string {
 </template>
 
 <style scoped>
+/* 画板 bar-64 里的控件：搜索 220，两枚 chip 各按内容 */
+.rules-q {
+  width: 220px;
+}
+
+.rules-chip {
+  width: 132px;
+}
+
+@media (max-width: 768px) {
+  .rules-q,
+  .rules-chip {
+    width: 100%;
+  }
+}
+
+/* 试跑卡：下拉与按钮各占一行，卡只有 516 宽 */
+.rules-test__sel {
+  width: 100%;
+}
+
+.rules-test__btn {
+  margin-top: var(--pt-space-3);
+}
+
+/* 试跑卡 */
+.rules-test__p {
+  margin: 0 0 var(--pt-space-3);
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.rules-test__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+/* 口径说明卡：固定文案 */
+.rules-hint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.rules-hint code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
 /* 带之间不留间隔（画板上它们连着）；顶部那条提示自己内缩 16 */
 .filter-rules-page {
   display: flex;

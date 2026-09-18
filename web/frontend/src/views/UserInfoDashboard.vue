@@ -4,13 +4,17 @@ import {
   type SiteConfig,
   type SiteLoginState,
   sitesApi,
+  tasksApi,
+  type TaskStatsResponse,
   userInfoApi,
 } from "@/api";
 import LevelTooltip from "@/components/LevelTooltip.vue";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtKpiBar from "@/components/ui/PtKpiBar.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { type ReminderTier, useLoginState } from "@/composables/useLoginState";
@@ -45,6 +49,8 @@ const { loading, state, errorText, run, hasPartialBanner } = useDataState({
 const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
+/** 全库任务计数，画板 KPI 六格里有三格来自这里 */
+const taskStats = ref<TaskStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const isMobile = useIsMobile();
@@ -103,27 +109,65 @@ interface KpiRow {
   icon: string;
   delta?: string;
   deltaTone?: "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
+  /** 画板每格右侧 48×22 的柱图。这里画的是按站点的构成，不是时间序列 */
+  series?: number[];
 }
 
 /**
  * KPI 带 —— 画板 kpibar：**6 格一行、整条 64 高**，格间 1px 竖线。
  *
- * 之前是 10 项按 5 列铺成两行（128 高），把主区顶上的那条带撑成了两倍厚。
- * 画板上那 6 格是「一眼要看的」：站点数、上传、下载、平均分享率、做种、魔力。
- * 其余指标（时魔、做种积分、做种总量、下载中）不是没用，而是不该占这条带 ——
- * 它们在下方的分析面板里更合适，挤进 KPI 带只会让每格窄到读不出数。
+ * 六格的口径照画板 10 写：站点、活跃任务、今日推送、免费种子、总上传、平均分享率。
+ * 前三格来自站点统计接口，「活跃任务 / 今日推送 / 免费种子」来自 `/api/tasks/stats`
+ * —— 那三个是任务口径，站点统计接口里没有，为此加了那一个只回四个整数的接口。
+ *
+ * 柱图（画板每格右侧 48×22）画的是**按站点的构成**，不是时间序列：
+ * 聚合接口不存历史，硬造一条趋势线就是编数据。所以只有「按站点能分解」的格子有柱子。
  */
 const kpiItems = computed<KpiRow[]>(() => {
   const stats = aggregatedStats.value;
   if (!stats) return [];
 
+  const perSite = stats.perSiteStats ?? [];
+  const uploadSeries = perSite
+    .map((r) => r.uploaded)
+    .sort((a, b) => b - a)
+    .slice(0, 8);
+  const ratioSeries = perSite
+    .map((r) => r.ratio)
+    .filter((n) => n > 0)
+    .sort((a, b) => b - a)
+    .slice(0, 8);
+  const tasks = taskStats.value;
+
   const items: KpiRow[] = [
     { label: "站点数量", value: stats.siteCount.toString(), icon: "globe" },
-    { label: "总上传量", value: formatBytes(stats.totalUploaded), icon: "upload" },
-    { label: "总下载量", value: formatBytes(stats.totalDownloaded), icon: "download" },
-    { label: "平均分享率", value: formatRatio(stats.averageRatio), icon: "gauge" },
-    { label: "做种数", value: stats.totalSeeding.toString(), icon: "share-2" },
-    { label: "总魔力值", value: formatNumber(stats.totalBonus), icon: "star" },
+    {
+      label: "活跃任务",
+      value: tasks ? tasks.active.toString() : "—",
+      icon: "list-checks",
+    },
+    {
+      label: "今日推送",
+      value: tasks ? tasks.pushedToday.toString() : "—",
+      icon: "send",
+    },
+    {
+      label: "免费种子",
+      value: tasks ? tasks.free.toString() : "—",
+      icon: "zap",
+    },
+    {
+      label: "总上传量",
+      value: formatBytes(stats.totalUploaded),
+      icon: "upload",
+      series: uploadSeries,
+    },
+    {
+      label: "平均分享率",
+      value: formatRatio(stats.averageRatio),
+      icon: "gauge",
+      series: ratioSeries,
+    },
   ];
 
   // 分享率低于 1 是要动手的信号，挂一枚警示胶囊；健康时不占位
@@ -139,6 +183,68 @@ const kpiItems = computed<KpiRow[]>(() => {
 });
 
 const siteRows = computed(() => aggregatedStats.value?.perSiteStats ?? []);
+
+/**
+ * 画板 10 在 gfoot 之后还有三张分析卡：p-up 548（上传构成）、p-dist 516（等级分布）、
+ * p-watch 1080（需要关注的站点）。三张卡的数据全部来自已经拿到的 perSiteStats，
+ * 不额外请求接口 —— 聚合接口没有历史序列，所以这里画的是「当前的构成」而不是趋势。
+ */
+
+/** p-up：上传量最大的几个站点占了多少 */
+const uploadRows = computed<BreakdownRow[]>(() => {
+  const rows = [...siteRows.value].sort((a, b) => b.uploaded - a.uploaded).slice(0, 6);
+  return rows.map((r) => ({
+    key: r.site,
+    label: r.site,
+    value: formatBytes(r.uploaded),
+    weight: r.uploaded,
+    tone: "primary" as const,
+    hint: `分享率 ${formatRatio(r.ratio)} · 做种 ${r.seeding}`,
+  }));
+});
+
+const uploadTotal = computed(() => siteRows.value.reduce((n, r) => n + r.uploaded, 0));
+
+/** p-dist：等级分布。等级名是站点各自的说法，按名字归组就是画板那张分布 */
+const levelRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const r of siteRows.value) {
+    const name = r.levelName || r.rank || "未知等级";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({
+      key: name,
+      label: name,
+      value: n,
+      tone: "info" as const,
+    }));
+});
+
+/**
+ * p-watch：需要动手的站点。
+ * 判定口径写在 hint 里，不让用户猜为什么这一条被列出来。
+ */
+const watchRows = computed<BreakdownRow[]>(() => {
+  const out: BreakdownRow[] = [];
+  for (const r of siteRows.value) {
+    const reasons: string[] = [];
+    if (r.ratio > 0 && r.ratio < 1) reasons.push(`分享率 ${formatRatio(r.ratio)} 低于 1`);
+    if ((r.unreadMessageCount ?? 0) > 0) reasons.push(`${r.unreadMessageCount} 条未读站内信`);
+    if (r.seeding === 0) reasons.push("一个种都没做");
+    if (reasons.length === 0) continue;
+    out.push({
+      key: r.site,
+      label: r.site,
+      value: reasons.length,
+      weight: reasons.length,
+      tone: r.ratio > 0 && r.ratio < 1 ? "dang" : "warn",
+      hint: reasons.join(" · "),
+    });
+  }
+  return out.sort((a, b) => Number(b.value) - Number(a.value));
+});
 
 /*
  * 本页没有摘要行 —— 画板 10 的主区顶上是 KPI 带而不是 head（App.vue 的 KPI_TOP_ROUTES），
@@ -169,7 +275,7 @@ async function loadData() {
   }
   aggregatedStats.value = agg;
 
-  const [siteMap, states] = await Promise.all([
+  const [siteMap, states, stats] = await Promise.all([
     sitesApi.list().catch(() => {
       failedSites.value += 1;
       return {} as Record<string, SiteConfig>;
@@ -178,7 +284,16 @@ async function loadData() {
       failedSites.value += 1;
       return [] as SiteLoginState[];
     }),
+    /*
+     * 任务计数（画板 KPI 的「活跃任务 / 今日推送 / 免费种子」三格）。
+     * 拿不到就让那三格显示 —— 站点统计本身还在，不该因为任务计数失败整页降级。
+     */
+    tasksApi.stats().catch(() => {
+      failedSites.value += 1;
+      return null;
+    }),
   ]);
+  taskStats.value = stats;
 
   sitesByName.value = siteMap;
 
@@ -886,10 +1001,50 @@ onUnmounted(() => {
       <span class="pt-band__spacer" />
       <span>最后更新 {{ formatTime(aggregatedStats.lastUpdate) }}</span>
     </div>
+
+    <!--
+      画板 10 的分析卡：p-up 548 / p-dist 516 两栏 + p-watch 1080 通栏。
+      三张都由 perSiteStats 现算，没有额外请求。
+    -->
+    <div v-if="siteRows.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="上传构成" icon="upload" :count="formatBytes(uploadTotal)">
+        <PtBreakdown
+          :rows="uploadRows"
+          :total="uploadTotal"
+          foot="柱长是该站点上传量占全部站点上传量的比例，只列前 6 个。" />
+      </PtPanel>
+
+      <PtPanel title="等级分布" icon="award" :count="`${levelRows.length} 种`">
+        <PtBreakdown
+          :rows="levelRows"
+          :total="siteRows.length"
+          foot="等级名沿用各站自己的叫法，同名的归成一组。" />
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="需要关注的站点"
+        icon="bell-ring"
+        :count="watchRows.length > 0 ? `${watchRows.length} 个` : '暂无'">
+        <PtBreakdown
+          v-if="watchRows.length > 0"
+          :rows="watchRows"
+          cols
+          foot="判定口径：分享率低于 1、有未读站内信、或者一个种都没做。" />
+        <p v-else class="dash__ok">所有站点的分享率都在 1 以上、没有未读站内信、也都在做种。</p>
+      </PtPanel>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* 需要关注的站点一个都没有时的正面结论，不摆一张空卡 */
+.dash__ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
 /*
  * 这一页有两套视图：≥768px 走 el-table（皮肤在全局 .pt-grid），<768px 走卡片。
  * 两边刻意复用同一批单元格类名（.site / .io / .bonus / .acts …），

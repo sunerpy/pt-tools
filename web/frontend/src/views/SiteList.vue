@@ -1209,7 +1209,11 @@ async function saveLoginConfig() {
       当前这批行，所以卡上的数和表格永远对得上；登录状态接口失败时前两张没有依据，
       直接不出现，不留空壳。
     -->
-    <div v-if="visibleEntries.length > 0" class="pt-cards">
+    <!--
+      画板 12 的分析卡是三栏 364 / 340 / 344 加一张 1080 通栏（p-auth），
+      不是等分 —— .pt-cards 的默认 auto-fit 会把三张都排成 349。
+    -->
+    <div v-if="visibleEntries.length > 0" class="pt-cards pt-cards--3">
       <PtPanel
         v-if="!loginStatesFailed"
         title="探测健康"
@@ -1257,7 +1261,7 @@ async function saveLoginConfig() {
         </ul>
       </PtPanel>
 
-      <PtPanel class="card-wide" title="认证方式" icon="shield" :count="`${analysisTotal} 个`">
+      <PtPanel class="pt-cards__full" title="认证方式" icon="shield" :count="`${analysisTotal} 个`">
         <ul class="mini mini--cols">
           <li v-for="row in authStats" :key="row.key" class="mini__row">
             <span class="mini__k">{{ row.label }}</span>
@@ -1676,9 +1680,6 @@ async function saveLoginConfig() {
 /* ---- 表格下方的分析卡 ---- */
 
 /* p-auth 是通栏（画板 1080 宽），在自适应网格里横跨整行 */
-.card-wide {
-  grid-column: 1 / -1;
-}
 
 /*
  * 卡内的小分布列表：标签 + 计数一行，下面一根 5 高的占比柱（画板令牌里进度条 = 5）。

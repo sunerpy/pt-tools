@@ -6,9 +6,11 @@ import {
   downloadersApi,
   type DownloaderSetting,
   dynamicSitesApi,
+  globalApi,
   type SiteDownloaderSummaryItem,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
@@ -100,6 +102,96 @@ const stateSub = computed(() => {
   return "接上 qBittorrent 或 Transmission，RSS 命中的种子才有地方推";
 });
 
+/**
+ * 画板 19 在 p-dl（下载器表）之后还有四张卡：
+ *   p-dir 548  下载目录（各下载器的预设目录）
+ *   p-safe 516 磁盘保护（全局配置，这里只读回显 + 指路）
+ *   p-bind 1080 站点绑定（哪些站点推到哪台）
+ *   p-log 1080  连通性检查（最近一次探测的结果）
+ * 四张的数据都来自已有接口，不新增后端。
+ */
+const dirSummary = ref<Record<number, DownloaderDirectory[]>>({});
+const siteBindings = ref<SiteDownloaderSummaryItem[]>([]);
+const diskProtect = ref<{ on: boolean; minGb: number } | null>(null);
+
+async function loadCardData() {
+  const [dirs, bindings, global] = await Promise.all([
+    downloaderDirectoriesApi.listAll().catch(() => ({}) as Record<number, DownloaderDirectory[]>),
+    dynamicSitesApi
+      .getDownloaderSummary()
+      .catch(() => ({ sites: [] as SiteDownloaderSummaryItem[] })),
+    globalApi.get().catch(() => null),
+  ]);
+  dirSummary.value = dirs ?? {};
+  siteBindings.value = Array.isArray(bindings?.sites) ? bindings.sites : [];
+  diskProtect.value = global
+    ? {
+        on: global.cleanup_disk_protect === true,
+        minGb: global.cleanup_min_disk_space_gb ?? 0,
+      }
+    : null;
+}
+
+/** p-dir：每台下载器配了几个预设目录 */
+const dirRows = computed<BreakdownRow[]>(() =>
+  downloaders.value
+    .filter((d) => d.id !== undefined)
+    .map((d) => {
+      const list = dirSummary.value[d.id as number] ?? [];
+      return {
+        key: String(d.id),
+        label: d.name,
+        value: `${list.length} 个`,
+        weight: list.length,
+        tone: list.length > 0 ? ("primary" as const) : ("mute" as const),
+        hint: list.length > 0 ? list.map((x) => x.alias || x.path).join(" · ") : "还没配预设目录",
+      };
+    }),
+);
+
+/** p-bind：站点推到哪台下载器；没绑定的走默认 */
+const bindRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, string[]>();
+  for (const item of siteBindings.value) {
+    const name = item.downloader_name || "跟随默认";
+    const list = buckets.get(name) ?? [];
+    list.push(item.display_name || item.site_name);
+    buckets.set(name, list);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([name, sites]) => ({
+      key: name,
+      label: name,
+      value: `${sites.length} 个站点`,
+      weight: sites.length,
+      tone: name === "跟随默认" ? ("mute" as const) : ("primary" as const),
+      hint: sites.join(" · "),
+    }));
+});
+
+/** p-log：最近一次连通性检查的结果 */
+const healthRows = computed<BreakdownRow[]>(() =>
+  downloaders.value
+    .filter((d) => d.id !== undefined)
+    .map((d) => {
+      const id = d.id as number;
+      const probeFailed = healthFailedIds.value.includes(id);
+      const res = healthStatus.value[id];
+      const ok = res?.is_healthy === true;
+      return {
+        key: String(id),
+        label: d.name,
+        value: probeFailed ? "未知" : ok ? "正常" : "异常",
+        weight: 1,
+        tone: probeFailed ? ("mute" as const) : ok ? ("ok" as const) : ("dang" as const),
+        hint: probeFailed
+          ? "这一次没探到（超时或请求失败），不代表下载器有问题"
+          : res?.message || "—",
+      };
+    }),
+);
+
 /** 画板 head 的 sub（11.5/400 t3）：共几个下载器、默认是哪一个 */
 const headSub = computed(() => {
   // 失败时不能顺着 length === 0 说「还没有配置下载器」，那是把加载失败说成空库
@@ -132,6 +224,7 @@ async function loadDownloaders() {
   }
   downloaders.value = data;
   loadHealthStatuses(downloaders.value);
+  void loadCardData();
 }
 
 async function fetchHealthStatus(downloaderId: number): Promise<DownloaderHealthResponse> {
@@ -787,6 +880,57 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       </template>
     </PtPanel>
 
+    <!--
+      画板 19 在 p-dl 之后的四张卡。数据都来自已有接口：
+      目录清单用 /api/downloaders/all-directories，站点绑定用 /api/sites/downloader-summary，
+      磁盘保护读全局配置（只回显，改还是去系统设置 —— 同一份配置不做两个写入口），
+      连通性用每台的 /health 探测结果。
+    -->
+    <div v-if="downloaders.length > 0" class="pt-cards pt-cards--2 dl-cards">
+      <PtPanel title="下载目录" icon="folder" :count="`${downloaders.length} 台`">
+        <PtBreakdown
+          :rows="dirRows"
+          foot="预设目录用于推送时挑保存路径；一台都没配时推送会用下载器自己的默认目录。点表格里的「目录」可以管理。" />
+      </PtPanel>
+
+      <PtPanel title="磁盘保护" icon="shield">
+        <ul v-if="diskProtect" class="dl-kv">
+          <li class="dl-kv__row">
+            <span class="dl-kv__k">保护开关</span>
+            <PtStatusPill :tone="diskProtect.on ? 'ok' : 'neutral'" size="sm" dot>
+              {{ diskProtect.on ? "已开启" : "未开启" }}
+            </PtStatusPill>
+          </li>
+          <li class="dl-kv__row">
+            <span class="dl-kv__k">最低保留空间</span>
+            <span class="dl-kv__v">{{ diskProtect.minGb }} GB</span>
+          </li>
+        </ul>
+        <p v-else class="dl-empty">全局配置没取到，这里只能留空。</p>
+        <p class="dl-foot">
+          推送前会拿「下载器剩余空间 − 未完成体积 − 本进程已预留」和这个阈值比，不够就不推。
+          开启时读不到剩余空间会**拒绝推送**而不是放行。这是全局配置，改在
+          <el-button link type="primary" @click="$router.push('/global')">系统设置</el-button>。
+        </p>
+      </PtPanel>
+
+      <PtPanel class="pt-cards__full" title="站点绑定" icon="link">
+        <PtBreakdown
+          v-if="bindRows.length > 0"
+          :rows="bindRows"
+          cols
+          foot="站点没单独绑定时走默认下载器；RSS 订阅还能再单独绑一台，优先级是 RSS → 站点 → 默认。" />
+        <p v-else class="dl-empty">还没有站点，或者站点列表没取到。</p>
+      </PtPanel>
+
+      <PtPanel class="pt-cards__full" title="连通性检查" icon="activity">
+        <PtBreakdown
+          :rows="healthRows"
+          cols
+          foot="打开页面时自动探一次，每台 5 秒超时。「未知」是这一次没探到（超时或请求没发出去），不等于下载器坏了 —— 可以点表格里的「检查」单独重试。" />
+      </PtPanel>
+    </div>
+
     <!-- 添加/编辑对话框 -->
     <el-dialog
       v-model="showDialog"
@@ -1135,6 +1279,54 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
 </template>
 
 <style scoped>
+/* 画板 19 的四张分析卡 */
+.dl-kv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dl-kv__row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--pt-fz-sm);
+}
+
+.dl-kv__k {
+  color: var(--pt-t3);
+}
+
+.dl-kv__v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.dl-empty {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.dl-foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+.dl-foot :deep(.el-button) {
+  height: auto;
+  padding: 0;
+  font-size: inherit;
+  vertical-align: baseline;
+}
+
 /* 版面（内缩 16、卡间 16）交给 .pt-cards--wide */
 
 .url {

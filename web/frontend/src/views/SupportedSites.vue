@@ -2,7 +2,9 @@
 import { type SupportedSiteDefinition, sitesApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
@@ -69,6 +71,54 @@ const stateSub = computed(() => {
 const totalCount = computed(() => definitions.value.length);
 const filteredCount = computed(() => filtered.value.length);
 const unavailableCount = computed(() => definitions.value.filter((d) => d.unavailable).length);
+
+/**
+ * 画板 p-cap 1080「内置能力」：这批站点定义覆盖了哪些架构、哪些认证方式、有多少启用 H&R。
+ * 全部由已经拿到的 definitions 现算，不额外请求。
+ */
+const capSchemaRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const d of definitions.value) {
+    const name = d.schema || "未标注";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({
+      key: `schema-${name}`,
+      label: name,
+      value: n,
+      tone: "primary" as const,
+    }));
+});
+
+const capAuthRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const d of definitions.value) {
+    const name = d.authMethod || "未标注";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: `auth-${name}`, label: name, value: n, tone: "info" as const }));
+});
+
+const capFlagRows = computed<BreakdownRow[]>(() => {
+  const total = definitions.value.length;
+  const hr = definitions.value.filter((d) => d.hrEnabled).length;
+  const aka = definitions.value.filter((d) => (d.aka?.length ?? 0) > 0).length;
+  return [
+    { key: "hr", label: "标注了 H&R", value: hr, tone: "warn" as const },
+    { key: "aka", label: "有别名", value: aka, tone: "mute" as const },
+    {
+      key: "unavailable",
+      label: "临时不可用",
+      value: unavailableCount.value,
+      tone: "dang" as const,
+    },
+    { key: "ok", label: "可用", value: total - unavailableCount.value, tone: "ok" as const },
+  ];
+});
 
 /** 画板 head 的 sub（11.5/400 t3）：内置了多少站点定义，其中几个临时不可用 */
 const headSub = computed(() => {
@@ -217,11 +267,57 @@ function clearFilters() {
           </a>
         </footer>
       </article>
+
+      <!-- 画板 p-cap 1080「内置能力」：架构 / 认证方式 / 标注三组分布 -->
+      <PtPanel
+        class="pt-cards__full"
+        title="内置能力"
+        icon="shield"
+        :count="`${totalCount} 个定义`">
+        <div class="cap">
+          <section class="cap__col">
+            <h3 class="cap__t">站点架构</h3>
+            <PtBreakdown :rows="capSchemaRows" :total="totalCount" />
+          </section>
+          <section class="cap__col">
+            <h3 class="cap__t">认证方式</h3>
+            <PtBreakdown :rows="capAuthRows" :total="totalCount" />
+          </section>
+          <section class="cap__col">
+            <h3 class="cap__t">标注</h3>
+            <PtBreakdown :rows="capFlagRows" :total="totalCount" />
+          </section>
+        </div>
+        <p class="cap__foot">
+          口径是「内置了多少站点定义」，不是「你启用了几个」—— 启用情况在站点列表。
+        </p>
+      </PtPanel>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* 内置能力卡：三组分布横着铺，窄屏退回单列 */
+.cap {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--pt-pad);
+}
+
+.cap__t {
+  margin: 0 0 var(--pt-space-2);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+}
+
+.cap__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
 /* 带与卡片层各自管留白，这一层只负责纵向堆叠 */
 .supported-sites-page {
   display: flex;

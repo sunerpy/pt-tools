@@ -88,72 +88,153 @@ async function submit() {
 
 <template>
   <!--
-    画板 44：p-acct 624,92 520×456 —— 一张 520 宽的卡片居中，不是通栏。
-    6 个字段横铺在 1080 里会变成一行一个输入框加一大片空白。
+    画板 44：p-acct 624,92 520×456 一张居中的窄卡，下面一条分隔线加三张 344 宽的说明卡。
+    外面这层 .change-password-page 是必需的单一根元素 —— App.vue 的 <router-view>
+    外面套着 `<transition name="fade" mode="out-in">`，路由组件有多个根节点时
+    Transition 认不出要过渡的元素，out-in 的 leave 回调不触发，**下一个页面就永远
+    不挂载**，表现是跳到别的页时主区一片空白（从这一页跳站点详情实测中过）。
   -->
-  <div class="change-password-page pt-cards pt-cards--narrow">
-    <PtPanel title="账号信息" icon="shield-check">
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="pt-form">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" placeholder="请输入当前登录用户名">
-            <template #prefix>
-              <PtIcon name="user" :size="14" />
-            </template>
-          </el-input>
-          <div class="field-tip">出于安全考虑，请再次输入您的用户名以验证身份。</div>
-        </el-form-item>
+  <div class="change-password-page">
+    <div class="pt-cards pt-cards--narrow">
+      <PtPanel title="账号信息" icon="shield-check">
+        <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="pt-form">
+          <el-form-item label="用户名" prop="username">
+            <el-input v-model="form.username" placeholder="请输入当前登录用户名">
+              <template #prefix>
+                <PtIcon name="user" :size="14" />
+              </template>
+            </el-input>
+            <div class="field-tip">出于安全考虑，请再次输入您的用户名以验证身份。</div>
+          </el-form-item>
 
-        <el-form-item label="旧密码" prop="oldPassword">
-          <el-input
-            v-model="form.oldPassword"
-            type="password"
-            show-password
-            placeholder="请输入当前密码">
-            <template #prefix>
-              <PtIcon name="lock" :size="14" />
-            </template>
-          </el-input>
-        </el-form-item>
+          <el-form-item label="旧密码" prop="oldPassword">
+            <el-input
+              v-model="form.oldPassword"
+              type="password"
+              show-password
+              placeholder="请输入当前密码">
+              <template #prefix>
+                <PtIcon name="lock" :size="14" />
+              </template>
+            </el-input>
+          </el-form-item>
 
-        <div class="field-rule" />
+          <div class="field-rule" />
 
-        <el-form-item label="新密码" prop="newPassword">
-          <el-input
-            v-model="form.newPassword"
-            type="password"
-            show-password
-            placeholder="请输入新密码（至少 6 位）">
-            <template #prefix>
-              <PtIcon name="key-round" :size="14" />
-            </template>
-          </el-input>
-          <div class="field-tip">至少 6 位；只校验长度，不做复杂度要求。</div>
-        </el-form-item>
+          <el-form-item label="新密码" prop="newPassword">
+            <el-input
+              v-model="form.newPassword"
+              type="password"
+              show-password
+              placeholder="请输入新密码（至少 6 位）">
+              <template #prefix>
+                <PtIcon name="key-round" :size="14" />
+              </template>
+            </el-input>
+            <div class="field-tip">至少 6 位；只校验长度，不做复杂度要求。</div>
+          </el-form-item>
 
-        <el-form-item label="确认新密码" prop="confirmPassword">
-          <el-input
-            v-model="form.confirmPassword"
-            type="password"
-            show-password
-            placeholder="请再次输入新密码">
-            <template #prefix>
-              <PtIcon name="key-round" :size="14" />
-            </template>
-          </el-input>
-        </el-form-item>
-      </el-form>
+          <el-form-item label="确认新密码" prop="confirmPassword">
+            <el-input
+              v-model="form.confirmPassword"
+              type="password"
+              show-password
+              placeholder="请再次输入新密码">
+              <template #prefix>
+                <PtIcon name="key-round" :size="14" />
+              </template>
+            </el-input>
+          </el-form-item>
+        </el-form>
 
-      <template #footer>
-        <span class="pt-foot-note">定期更换密码可以提高账户安全性</span>
-        <el-button type="primary" size="large" :loading="saving" @click="submit">
-          <PtIcon name="save" :size="14" /><span>保存修改</span>
-        </el-button>
-      </template>
-    </PtPanel>
+        <template #footer>
+          <span class="pt-foot-note">定期更换密码可以提高账户安全性</span>
+          <el-button type="primary" size="large" :loading="saving" @click="submit">
+            <PtIcon name="save" :size="14" /><span>保存修改</span>
+          </el-button>
+        </template>
+      </PtPanel>
+    </div>
+
+    <!--
+      画板 44 在账号卡下面还有一条分隔线加三张 344 宽的卡：p-rules（口令规则）、
+      p-msg（改完会发生什么）、p-note（忘记密码怎么办）。内容是固定说明，
+      改密码这件事本身没有可查的数据，所以三张卡就是三段写死的文案。
+    -->
+    <div class="pw-rule" />
+
+    <div class="pt-cards pt-cards--3">
+      <PtPanel title="口令规则" icon="shield-check">
+        <ul class="pw-list">
+          <li>至少 6 位，只校验长度，不做大小写与符号的复杂度要求。</li>
+          <li>新口令与确认口令必须一致，否则不提交。</li>
+          <li>
+            用户名要再输一次：接口按「用户名 + 原口令」一起校验，对不上会返回
+            <code>原密码错误</code>。
+          </li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel title="改完会发生什么" icon="log-out">
+        <ul class="pw-list">
+          <li>
+            新口令立刻生效（接口只更新口令哈希）。<strong>当前会话不会被踢掉</strong>，
+            手上这个登录态继续有效，下次登录才用新口令。
+          </li>
+          <li>站点 Cookie、下载器口令、CloakBrowser token 都不受影响，它们是另一套凭据。</li>
+          <li>浏览器扩展里存的是站点 Cookie，不是这个账号口令，不用重填。</li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel title="忘记密码怎么办" icon="life-buoy">
+        <ul class="pw-list">
+          <li>Web 端没有找回入口：账号只存在本机库里，没有邮箱可以发信。</li>
+          <li>
+            带 <code>PT_ADMIN_RESET=1</code> 与 <code>PT_ADMIN_USER</code> /
+            <code>PT_ADMIN_PASS</code> 重启一次，启动时会把该用户的口令改成
+            <code>PT_ADMIN_PASS</code>。
+          </li>
+          <li>
+            重置成功后<strong>去掉 <code>PT_ADMIN_RESET</code> 再启动一次</strong>，
+            否则每次启动都会按环境变量把口令覆盖回去。完整命令见
+            <code>docs/configuration.md</code> 的「重置管理员密码」。
+          </li>
+        </ul>
+      </PtPanel>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* 单栏表单页限宽：输入框拉满 1600px 宽屏时字段与标签会离得太远读不成一组 */
 /* 520 的宽度与居中都由 .pt-cards--narrow 给（画板 44 的 p-acct 就是 520） */
+.change-password-page {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 画板 44 在账号卡与下面三张说明卡之间有一条分隔线 */
+.pw-rule {
+  height: 1px;
+  margin: 0 var(--pt-pad);
+  background: var(--pt-border);
+}
+
+.pw-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.pw-list code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
 </style>

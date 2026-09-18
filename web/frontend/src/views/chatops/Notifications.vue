@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { chatopsApi, type NotificationConfig } from "@/api";
+import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
@@ -38,6 +40,65 @@ const notifications = ref<NotificationConfig[]>([]);
  */
 const { loading, state, errorText, run } = useDataState();
 
+/**
+ * 画板 22 在四张通道卡之后还有三张：
+ *   p-policy 548 投递策略（安静时段按通道配置，就在通道自己的字段里）
+ *   p-stat 516  最近投递统计（按通道分组，数据来自 RSS 通知日志）
+ *   p-recent 1080 最近的通知记录
+ * 后两张读 `/api/chatops/rss-notifications` 的一页，不新增后端。
+ */
+const recentLogs = ref<RSSNotificationLog[]>([]);
+
+async function loadRecent() {
+  try {
+    const params = new URLSearchParams({ page: "1", page_size: "50" });
+    const res = await chatopsApi.rssNotifications.list(params);
+    recentLogs.value = res.items ?? [];
+  } catch {
+    /* 统计是附带信息，取不到就让卡里说明，不影响通道列表 */
+    recentLogs.value = [];
+  }
+}
+
+const policyRows = computed(() =>
+  notifications.value.map((n) => {
+    const start = n.quiet_hours_start ?? "";
+    const end = n.quiet_hours_end ?? "";
+    const on = Boolean(start && end);
+    return {
+      id: n.id,
+      name: n.name,
+      enabled: n.enabled,
+      quiet: on ? `${start} – ${end}` : "未设置",
+      crossesMidnight: on && start > end,
+    };
+  }),
+);
+
+/** p-stat：这 50 条里每个通道投了多少、成了多少 */
+const statRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<number, { total: number; sent: number }>();
+  for (const log of recentLogs.value) {
+    const cur = buckets.get(log.notification_conf_id) ?? { total: 0, sent: 0 };
+    cur.total += 1;
+    if (log.result === "sent") cur.sent += 1;
+    buckets.set(log.notification_conf_id, cur);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([id, agg]) => {
+      const conf = notifications.value.find((n) => n.id === id);
+      return {
+        key: String(id),
+        label: conf ? conf.name : `#${id}`,
+        value: `${agg.sent} / ${agg.total}`,
+        weight: agg.total,
+        tone: agg.sent === agg.total ? ("ok" as const) : ("warn" as const),
+        hint: agg.sent === agg.total ? "全部送达" : `${agg.total - agg.sent} 条没送达`,
+      };
+    });
+});
+
 /** 画板 head 的 sub（11.5/400 t3）：共几个通道、几个启用、都是什么类型 */
 const headSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return "通知通道没加载出来";
@@ -67,7 +128,7 @@ const newChannel = ref<Partial<NotificationConfig>>({
 });
 
 onMounted(async () => {
-  await loadNotifications();
+  await Promise.all([loadNotifications(), loadRecent()]);
 });
 
 async function loadNotifications() {
@@ -165,6 +226,20 @@ function channelMeta(type: string) {
   return channelTypeOptions.find((o) => o.value === type);
 }
 
+function channelNameOf(id: number): string {
+  const conf = notifications.value.find((n) => n.id === id);
+  return conf ? conf.name : `#${id}`;
+}
+
+function formatWhen(s?: string): string {
+  if (!s) return "-";
+  try {
+    return new Date(s).toLocaleString("zh-CN", { hour12: false });
+  } catch {
+    return s;
+  }
+}
+
 function getChannelIcon(type: string) {
   return channelMeta(type)?.icon || "bell";
 }
@@ -252,6 +327,66 @@ function getChannelLabel(type: string) {
           </el-button>
         </footer>
       </article>
+
+      <!--
+        画板 22 的后三张卡：p-policy 548（投递策略）/ p-stat 516（最近投递统计）
+        / p-recent 1080（最近记录）。统计与记录读 RSS 通知日志的一页，不新增后端。
+      -->
+      <PtPanel title="投递策略" icon="moon" :count="`${policyRows.length} 个通道`">
+        <ul class="pol">
+          <li v-for="row in policyRows" :key="row.id" class="pol__row">
+            <span class="pol__k">{{ row.name }}</span>
+            <span class="pol__v" :class="{ 'is-off': row.quiet === '未设置' }">{{
+              row.quiet
+            }}</span>
+            <span v-if="row.crossesMidnight" class="pol__tag">跨午夜</span>
+            <span v-if="!row.enabled" class="pol__tag pol__tag--off">已停用</span>
+          </li>
+        </ul>
+        <p class="pol__foot">
+          安静时段里的通知记为 <code>suppressed</code>，不算失败也不补发； 每条 RSS
+          还能单独设「每小时最多几条」，超出的记为 <code>throttled</code>。
+        </p>
+      </PtPanel>
+
+      <PtPanel
+        title="最近投递统计"
+        icon="chart-pie"
+        :count="recentLogs.length > 0 ? `最近 ${recentLogs.length} 条` : '暂无'">
+        <PtBreakdown
+          v-if="statRows.length > 0"
+          :rows="statRows"
+          foot="口径是「已送达 / 总条数」，取的是 RSS 通知日志最近 50 条，不是全量历史。" />
+        <p v-else class="pol__empty">还没有投递记录，或者通知日志没取到。</p>
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="最近的通知"
+        icon="history"
+        :count="`${recentLogs.length} 条`">
+        <ul v-if="recentLogs.length > 0" class="rec">
+          <li v-for="log in recentLogs.slice(0, 8)" :key="log.id" class="rec__row">
+            <PtStatusPill
+              :tone="log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'"
+              size="sm">
+              {{ log.result }}
+            </PtStatusPill>
+            <span class="rec__site">{{ log.site_name || "未知站点" }}</span>
+            <code class="rec__tid">{{ log.torrent_id }}</code>
+            <span class="rec__ch">{{ channelNameOf(log.notification_conf_id) }}</span>
+            <span class="rec__when">{{ formatWhen(log.created_at) }}</span>
+          </li>
+        </ul>
+        <p v-else class="pol__empty">还没有通知记录。</p>
+        <p class="pol__foot">
+          完整清单、重试与取消在
+          <el-button link type="primary" @click="router.push('/chatops/rss-notifications')">
+            RSS 通知日志
+          </el-button>
+          里。
+        </p>
+      </PtPanel>
     </div>
 
     <el-dialog
@@ -326,6 +461,122 @@ function getChannelLabel(type: string) {
 </template>
 
 <style scoped>
+/* 投递策略卡：一行一个通道 */
+.pol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pol__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-sm);
+}
+
+.pol__k {
+  flex: 1;
+  overflow: hidden;
+  color: var(--pt-t2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pol__v {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.pol__v.is-off {
+  font-weight: 400;
+  color: var(--pt-t4);
+}
+
+.pol__tag {
+  padding: 0 5px;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-warn);
+  background: color-mix(in srgb, var(--pt-warn) 14%, transparent);
+  border-radius: var(--pt-r-sm);
+}
+
+.pol__tag--off {
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+}
+
+.pol__empty {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.pol__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+.pol__foot code {
+  padding: 1px 4px;
+  font-family: var(--pt-font-mono);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+.pol__foot :deep(.el-button) {
+  height: auto;
+  padding: 0;
+  font-size: inherit;
+  vertical-align: baseline;
+}
+
+/* 最近的通知：一行一条，站点 + 种子 ID + 通道 + 时间 */
+.rec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rec__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.rec__site {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.rec__tid {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+}
+
+.rec__ch,
+.rec__when {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.rec__when {
+  margin-left: auto;
+}
+
 /* 带与卡片层各自管自己的留白，这一层只负责纵向堆叠 */
 .notifications-page {
   display: flex;
