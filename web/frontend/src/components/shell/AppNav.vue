@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 import { NAV_GROUPS, NAV_ITEMS, type NavItem } from "../../config/navigation";
 import { useRuntimeStore } from "../../stores/runtime";
 import { useThemeStore } from "../../stores/theme";
+import { useVersionStore } from "../../stores/version";
 import PtIcon from "../PtIcon";
 import PtLogo from "../PtLogo";
 import NavLink from "./NavLink.vue";
@@ -25,6 +26,22 @@ const emit = defineEmits<{ navigate: [] }>();
 const router = useRouter();
 const runtimeStore = useRuntimeStore();
 const themeStore = useThemeStore();
+const versionStore = useVersionStore();
+
+/**
+ * 画板 ver「v0.47.2 · 已是最新」：版本贴在品牌下面。
+ * 版本号还没拿到时只显示前半段，不用占位符撑出一个假的「已是最新」。
+ */
+const versionLine = computed(() => {
+  const v = versionStore.currentVersion;
+  // store 在拿到数据前返回字面量 "unknown"，那不是版本号，别显示成「vunknown」
+  if (!v || v === "unknown") return "";
+  return versionStore.hasUpdate ? `v${v} · 有新版本` : `v${v} · 已是最新`;
+});
+
+function logout() {
+  window.location.href = "/logout";
+}
 
 /*
  * 导航列坐在 --pt-surface 上，明暗随模式变，所以标志变体也得跟着换表面：
@@ -84,31 +101,37 @@ watch(
 
 <template>
   <div class="pt-nav">
-    <div class="pt-nav__brand">
-      <PtLogo :variant="logoVariant" :size="22" />
-      <span class="pt-nav__brand-name">pt-tools</span>
-      <button
-        v-if="drawer"
-        type="button"
-        class="pt-nav__close"
-        aria-label="关闭导航"
-        @click="emit('navigate')">
-        <PtIcon name="x" :size="16" />
-      </button>
-    </div>
+    <!-- 画板：品牌 + 版本行 + 跳转框是一个 98 高的整块，分隔线在它们之后 -->
+    <div class="pt-nav__head">
+      <div class="pt-nav__brand">
+        <PtLogo :variant="logoVariant" :size="28" />
+        <span class="pt-nav__brand-text">
+          <span class="pt-nav__brand-name">pt-tools</span>
+          <span class="pt-nav__brand-ver">{{ versionLine }}</span>
+        </span>
+        <button
+          v-if="drawer"
+          type="button"
+          class="pt-nav__close"
+          aria-label="关闭导航"
+          @click="emit('navigate')">
+          <PtIcon name="x" :size="16" />
+        </button>
+      </div>
 
-    <div class="pt-nav__jump">
-      <el-input
-        ref="inputRef"
-        v-model="query"
-        placeholder="跳转到页面…"
-        size="small"
-        clearable
-        @keyup.enter="jumpFirst">
-        <template #prefix>
-          <PtIcon name="search" :size="14" />
-        </template>
-      </el-input>
+      <div class="pt-nav__jump">
+        <el-input
+          ref="inputRef"
+          v-model="query"
+          placeholder="跳转到页面…"
+          size="small"
+          clearable
+          @keyup.enter="jumpFirst">
+          <template #prefix>
+            <PtIcon name="search" :size="14" />
+          </template>
+        </el-input>
+      </div>
     </div>
 
     <nav class="pt-nav__scroll" aria-label="主导航">
@@ -136,5 +159,19 @@ watch(
         </section>
       </template>
     </nav>
+
+    <!-- 画板 nav 底部的账号页脚：头像 + 名称/角色 + 登出 -->
+    <footer class="pt-nav__account">
+      <span class="pt-nav__account-av" aria-hidden="true">
+        <PtIcon name="user" :size="16" />
+      </span>
+      <span class="pt-nav__account-text">
+        <span class="pt-nav__account-name">admin</span>
+        <span class="pt-nav__account-role">管理员 · 本地账号</span>
+      </span>
+      <button type="button" class="pt-nav__account-out" aria-label="退出登录" @click="logout">
+        <PtIcon name="log-out" :size="15" />
+      </button>
+    </footer>
   </div>
 </template>

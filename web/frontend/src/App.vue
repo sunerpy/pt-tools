@@ -74,6 +74,21 @@ const navToggleLabel = computed(() => {
   return navDocked.value ? "收起导航" : "展开导航";
 });
 
+/**
+ * 详情页 —— 画板里只有这两类页面的 head 是 88 高且带面包屑（13 站点详情 / 23 通道详情）。
+ * 其余页面一律 64 高，标题下面那一行是实时摘要而不是面包屑。
+ */
+const DETAIL_ROUTES = new Set(["site-detail", "notification-detail"]);
+const isDetail = computed(() => typeof route.name === "string" && DETAIL_ROUTES.has(route.name));
+
+/**
+ * 总览类页面没有页头 —— 画板 02 工作台与 10 用户统计的主区顶上是 KPI 带（328,0 1112×64），
+ * 不是 head。页面身份由导航列的高亮项表达，KPI 带里的真实数字替代了摘要行。
+ * 导航收起开关已经移到 rail，所以去掉页头不会把它一起带走。
+ */
+const KPI_TOP_ROUTES = new Set(["userinfo"]);
+const hasHead = computed(() => !(typeof route.name === "string" && KPI_TOP_ROUTES.has(route.name)));
+
 /** 下载器 Web UI 是独立控制台，整屏让给它（沿用旧的 is-immersive 行为） */
 const isImmersive = computed(() => route.name === "downloader-hub");
 
@@ -175,7 +190,11 @@ watch(
       'is-nav-docked': navDocked,
       'is-nav-open': navOpen,
     }">
-    <AppRail :active-path="activePath" />
+    <AppRail
+      :active-path="activePath"
+      :nav-toggle-icon="navToggleIcon"
+      :nav-toggle-label="navToggleLabel"
+      @toggle-nav="toggleNav" />
 
     <div id="pt-nav-col" class="pt-shell__nav-col">
       <AppNav
@@ -189,26 +208,36 @@ watch(
     <main class="pt-shell__main">
       <MobileChrome :active-path="activePath" :title="pageTitle" @open-nav="navOpen = true" />
 
-      <header class="pt-head pt-head--crumbs">
-        <button
-          type="button"
-          class="pt-head__toggle"
-          :aria-label="navToggleLabel"
-          :aria-expanded="navDocked || navOpen"
-          aria-controls="pt-nav-col"
-          @click="toggleNav">
-          <PtIcon :name="navToggleIcon" :size="18" />
-        </button>
+      <!--
+        页头 —— 画板 head：列表页 64 高「标题 19/700 + 实时摘要 11.5/400」，
+        详情页 88 高，标题上方多一行面包屑。
+
+        摘要和操作按钮由各页 Teleport 送进来（#pt-head-sub / #pt-head-acts）：
+        画板上每页的摘要都是真实数字（「37 个任务 · 12 下载中 · ↓93.8 MB/s」这类），
+        只有页面自己知道，做不成外壳里的通用逻辑。
+
+        之前这里给每一页都挂了 88 高的面包屑，稿子里面包屑只属于详情页 ——
+        列表页那一行位置放的是摘要。
+      -->
+      <header v-if="hasHead" class="pt-head" :class="{ 'pt-head--crumbs': isDetail }">
         <div class="pt-head__group">
-          <h1 class="pt-head__title">{{ pageTitle }}</h1>
-          <nav class="pt-head__crumbs" aria-label="面包屑">
+          <nav v-if="isDetail" class="pt-head__crumbs" aria-label="面包屑">
             <template v-for="(c, i) in crumbs" :key="`${c.label}-${i}`">
-              <PtIcon v-if="i > 0" name="chevron-right" :size="12" />
+              <PtIcon v-if="i > 0" name="chevron-right" :size="13" />
               <router-link v-if="c.to" :to="c.to">{{ c.label }}</router-link>
               <span v-else>{{ c.label }}</span>
             </template>
           </nav>
+          <h1 class="pt-head__title">{{ pageTitle }}</h1>
+          <div id="pt-head-sub" class="pt-head__sub" />
         </div>
+        <!--
+          注意：≤768px 时整条页头被移动端外壳替掉（shell.css 里 .pt-head display:none），
+          所以送进这两个靶子的东西在手机上是看不见的。页面把主操作 Teleport 进来时
+          必须写成 `<Teleport to="#pt-head-acts" :disabled="isMobile">` ——
+          窄屏就地留在工具栏里，否则手机上会连入口都没有。
+        -->
+        <div id="pt-head-acts" class="pt-head__acts" />
       </header>
 
       <div class="pt-shell__content">

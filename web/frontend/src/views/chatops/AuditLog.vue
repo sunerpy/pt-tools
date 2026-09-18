@@ -2,8 +2,6 @@
 import { type AuditLog, chatopsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
-import PtKpiBar from "@/components/ui/PtKpiBar.vue";
-import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -30,6 +28,9 @@ const isMobile = useIsMobile();
 const auditLogs = ref<AuditLog[]>([]);
 /** 移动端展开了参数的行 id（桌面这活儿由 el-table 的 expand 列自己管） */
 const expandedIds = ref<number[]>([]);
+
+/** 是否已经成功读过一次列表：没读过就不往页头摘要里写数字（宁缺勿造） */
+const loadedOnce = ref(false);
 
 const stats = reactive({
   todayCount: 0,
@@ -68,8 +69,8 @@ const hasFilter = computed(
  * 「还没有数据」上，用户看到的是「机器人一条命令都没执行过」，而真相是请求失败了。
  * 审计页尤其不能这样：日志为空是「没人用过机器人」，请求失败是「查不到证据」。
  *
- * failed 接的是统计接口：它只喂上面的 KPI 条，挂了不该把已经拿到的日志一起丢掉，
- * 所以记一个失败数让状态落到 partial，表格照常渲染。
+ * failed 接的是统计接口：它只喂页头摘要里的三个读数，挂了不该把已经拿到的日志
+ * 一起丢掉，所以记一个失败数让状态落到 partial，表格照常渲染。
  */
 const { loading, state, errorText, run, hasPartialBanner } = useDataState({
   filtered: () => hasFilter.value,
@@ -83,47 +84,62 @@ const stateSub = computed(() => {
   return hasFilter.value ? "换个时间段或清掉筛选再看" : "机器人执行过的每条命令都会记录在这里";
 });
 
-/*
- * 三个读数不带趋势序列：/chatops/audit/stats 只返回当前值，
- * PtKpiBar 的柱子要真实历史才画，没有就别编（组件注释里的规矩）。
- * 统计没拿到时读数一律画「-」：摆一个 0 或上一轮的旧值等于报了个假数。
+/** 「09-18 12:03」这种短时间：摘要行要在一行里放下两个时间点，整段日期太长 */
+function shortTime(input: string | number | Date) {
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * 摘要行里的时间范围。
+ *
+ * 筛了时间就报筛选区间（那是用户此刻在看的范围）；没筛就报本页最早到最新那条 ——
+ * 写成「全部日志的时间跨度」是编的：接口只回当前这一页，最早一条在哪不知道。
  */
-const kpiItems = computed(() => {
-  const ok = statsFailed.value === 0;
-  return [
-    {
-      label: "今日执行命令",
-      value: ok ? stats.todayCount : "-",
-      unit: ok ? " 条" : undefined,
-      icon: "activity",
-    },
-    {
-      label: "整体成功率",
-      value: ok ? stats.successRate.toFixed(2) : "-",
-      unit: ok ? "%" : undefined,
-      icon: "circle-check",
-      delta: ok
-        ? stats.successRate >= 95
-          ? "健康"
-          : stats.successRate >= 80
-            ? "偏低"
-            : "异常"
-        : undefined,
-      deltaTone: (stats.successRate >= 95 ? "ok" : stats.successRate >= 80 ? "warn" : "dang") as
-        | "ok"
-        | "warn"
-        | "dang",
-    },
-    {
-      label: "最高延迟",
-      value: ok ? stats.maxLatencyMs : "-",
-      unit: ok ? "ms" : undefined,
-      icon: "timer",
-      delta: ok && stats.maxLatencyMs > 1000 ? "偏慢" : undefined,
-      deltaTone: "warn" as const,
-    },
-  ];
+const timeRangeText = computed(() => {
+  if (filters.dateRange && filters.dateRange.length === 2) {
+    const from = shortTime(filters.dateRange[0]);
+    const to = shortTime(filters.dateRange[1]);
+    if (from && to) return `${from} ~ ${to}`;
+  }
+
+  const times = auditLogs.value
+    .map((row) => new Date(row.created_at).getTime())
+    .filter((t) => !Number.isNaN(t));
+  if (times.length === 0) return "";
+  return `本页 ${shortTime(new Date(Math.min(...times)))} ~ ${shortTime(new Date(Math.max(...times)))}`;
 });
+
+/**
+ * 画板 head 的 sub —— 标题下面那行实时摘要（11.5/400 t3），由本页 Teleport 进外壳页头。
+ *
+ * 这一页原来在主区顶上摆了一条三格 KPI 带，但画板 25 的构成是
+ * head 64 → toolbar 40 → grid → gfoot 34，顶上那条带的位置就是 head 本身。
+ * 所以三个读数搬进摘要行：条数、时间范围在前（本页的主角是日志条目），
+ * 今日条数 / 成功率 / 最高延迟在后。统计没拿到就直说「未取到」，不摆 0 充数。
+ */
+const headSub = computed(() => {
+  if (!loadedOnce.value) return "";
+
+  const parts = [hasFilter.value ? `筛选后 ${pagination.total} 条` : `${pagination.total} 条记录`];
+  if (timeRangeText.value) parts.push(timeRangeText.value);
+
+  if (statsFailed.value === 0) {
+    parts.push(`今日 ${stats.todayCount} 条`);
+    parts.push(`成功率 ${stats.successRate.toFixed(1)}%`);
+    parts.push(`最高延迟 ${stats.maxLatencyMs} ms`);
+  } else {
+    parts.push("统计读数未取到");
+  }
+
+  return parts.join(" · ");
+});
+
+/** gfoot 左侧的口径：本页在总数里的位置（画板 tasks 是「37 个任务 · 显示 1–10 · 每页 20」） */
+const rangeFrom = computed(() => (pagination.page - 1) * pagination.pageSize + 1);
+const rangeTo = computed(() => rangeFrom.value + auditLogs.value.length - 1);
 
 onMounted(() => {
   fetchAuditLogs();
@@ -177,6 +193,7 @@ async function fetchAuditLogs() {
     auditLogs.value = [];
     pagination.total = 0;
     expandedIds.value = [];
+    loadedOnce.value = false;
     ElMessage.error(errorText.value || "获取审计日志失败");
     return;
   }
@@ -184,6 +201,7 @@ async function fetchAuditLogs() {
   auditLogs.value = data.items || [];
   pagination.total = data.total || 0;
   expandedIds.value = [];
+  loadedOnce.value = true;
 }
 
 function handleFilterChange() {
@@ -236,89 +254,149 @@ function toggleArgs(id: number) {
   if (i === -1) expandedIds.value.push(id);
   else expandedIds.value.splice(i, 1);
 }
+
+/** CSV 单元格：一律加引号并把内部引号翻倍，参数 JSON 里的逗号与换行才不会撕开列 */
+function csvCell(value: unknown) {
+  const s = value === null || value === undefined ? "" : String(value);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+/**
+ * 导出 —— 后端没有导出接口，所以只能导**当前这一页**已经拿到的行，
+ * 按钮提示里也是这么写的。悄悄导成「全部日志」会让人拿着 30 条当完整证据。
+ */
+function exportCsv() {
+  if (auditLogs.value.length === 0) {
+    ElMessage.info("当前页没有可导出的日志");
+    return;
+  }
+
+  // 两处都显式写成 string[]：混进 number 会让 [head, ...rows] 变成联合数组类型，.map 就不可调用了
+  const head: string[] = ["时间", "通道", "触发用户", "命令", "结果", "延迟(ms)", "命令参数"];
+  const rows: string[][] = auditLogs.value.map((row) => [
+    formatDate(row.created_at),
+    channelLabel(row.channel_type),
+    row.channel_user_id || "",
+    row.command,
+    row.result,
+    String(row.latency_ms),
+    formatJson(row.args_json),
+  ]);
+  const body = [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+  // 开头的 BOM 不能省：Excel 不认没有 BOM 的 UTF-8，中文表头会变成乱码
+  const csv = `\uFEFF${body}`;
+
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `chatops-audit-p${pagination.page}-${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出本页 ${auditLogs.value.length} 条`);
+}
 </script>
 
 <template>
   <div class="audit-page">
-    <PtKpiBar :items="kpiItems" />
+    <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
+    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
 
-    <PtPanel
-      v-loading="loading"
-      title="操作审计"
-      icon="scroll-text"
-      :count="`${pagination.total} 条`"
-      padding="none">
-      <PtToolbar>
-        <el-date-picker
-          v-model="filters.dateRange"
-          type="datetimerange"
-          range-separator="至"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
-          format="YYYY-MM-DD HH:mm:ss"
-          value-format="YYYY-MM-DDTHH:mm:ssZ"
-          class="f-date"
-          @change="handleFilterChange" />
+    <!--
+      工具栏带 —— 画板 bar-64：40 高全宽白带。只读页没有主操作，所以这条带上
+      只有筛选控件 + 右侧 28×28 图标钮，#pt-head-acts 保持空着。
+    -->
+    <PtToolbar band>
+      <el-date-picker
+        v-model="filters.dateRange"
+        type="datetimerange"
+        range-separator="至"
+        start-placeholder="开始时间"
+        end-placeholder="结束时间"
+        format="YYYY-MM-DD HH:mm:ss"
+        value-format="YYYY-MM-DDTHH:mm:ssZ"
+        class="f-date"
+        @change="handleFilterChange" />
 
-        <el-select
-          v-model="filters.channelType"
-          placeholder="全部通道"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          class="f-sel"
-          @change="handleFilterChange">
-          <el-option
-            v-for="(label, value) in CHANNEL_LABELS"
-            :key="value"
-            :label="label"
-            :value="value" />
-        </el-select>
+      <el-select
+        v-model="filters.channelType"
+        placeholder="全部通道"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        clearable
+        class="f-sel"
+        @change="handleFilterChange">
+        <el-option
+          v-for="(label, value) in CHANNEL_LABELS"
+          :key="value"
+          :label="label"
+          :value="value" />
+      </el-select>
 
-        <el-select
-          v-model="filters.result"
-          placeholder="全部结果"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          class="f-sel"
-          @change="handleFilterChange">
-          <el-option label="成功" value="success" />
-          <el-option label="被拒绝" value="denied" />
-          <el-option label="出错" value="error" />
-        </el-select>
+      <el-select
+        v-model="filters.result"
+        placeholder="全部结果"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        clearable
+        class="f-sel"
+        @change="handleFilterChange">
+        <el-option label="成功" value="success" />
+        <el-option label="被拒绝" value="denied" />
+        <el-option label="出错" value="error" />
+      </el-select>
 
-        <el-input
-          v-model="filters.command"
-          placeholder="搜索命令"
-          clearable
-          class="f-search"
-          @keyup.enter="handleFilterChange"
-          @clear="handleFilterChange">
-          <template #prefix>
-            <PtIcon name="search" :size="14" />
-          </template>
-        </el-input>
-
-        <template #right>
-          <el-button size="small" :loading="loading" @click="fetchAuditLogs">
-            <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-          </el-button>
+      <el-input
+        v-model="filters.command"
+        placeholder="搜索命令"
+        clearable
+        class="f-search"
+        @keyup.enter="handleFilterChange"
+        @clear="handleFilterChange">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
         </template>
-      </PtToolbar>
+      </el-input>
 
-      <!-- partial：日志拿到了但统计没拿到，别用一整块状态图顶掉已经拿到的日志 -->
-      <div v-if="hasPartialBanner(auditLogs.length)" class="pt-note pt-note--warn partial-note">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>
-          统计读数这次没拿到，上面三个指标显示为
-          <code>-</code>
-          ；下面的审计日志是完整的，点右上角刷新可以再试一次。
-        </span>
-      </div>
+      <template #right>
+        <el-tooltip content="刷新" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新"
+            :disabled="loading"
+            @click="fetchAuditLogs">
+            <PtIcon name="refresh-cw" :size="15" :class="{ 'pt-spin': loading }" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="导出本页为 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出本页为 CSV"
+            :disabled="!auditLogs.length"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
+    </PtToolbar>
 
+    <!--
+      partial：日志拿到了但统计没拿到，别用一整块状态图顶掉已经拿到的日志。
+      提示不是全宽带 —— 画板 27 的落法是在顶部带之后、左右各内缩 16。
+    -->
+    <div v-if="hasPartialBanner(auditLogs.length)" class="pt-note pt-note--warn partial-note">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        统计读数这次没拿到，标题下的摘要里少了「今日条数 / 成功率 / 最高延迟」；
+        下面的审计日志是完整的，点工具栏右侧的刷新可以再试一次。
+      </span>
+    </div>
+
+    <!-- 表格带 —— 画板 grid：全宽平铺，没有圆角也没有外边距，不再包在卡片里 -->
+    <div v-loading="loading" class="pt-band--grid">
       <el-table v-if="!isMobile" :data="auditLogs" class="pt-grid" row-key="id" style="width: 100%">
         <template #empty>
           <PtDataState :state="state" dense :sub="stateSub">
@@ -444,33 +522,42 @@ function toggleArgs(id: number) {
           </template>
         </PtRowCard>
       </div>
+    </div>
 
-      <template v-if="pagination.total > 0" #footer>
-        <span class="pt-foot-note">
-          {{
-            isMobile
-              ? "点卡片上的「命令参数」看脱敏后的完整参数"
-              : "展开一行可以看脱敏后的完整命令参数"
-          }}
-        </span>
-        <el-pagination
-          v-model:current-page="pagination.page"
-          class="pt-pager"
-          :page-size="pagination.pageSize"
-          :total="pagination.total"
-          :pager-count="5"
-          layout="prev, pager, next"
-          @current-change="handlePageChange" />
-      </template>
-    </PtPanel>
+    <!-- 画板 gfoot 34：左边本页口径 + 提示，右边分页 -->
+    <div v-if="pagination.total > 0" class="pt-band--foot foot">
+      <span>
+        {{ pagination.total }} 条 · 显示 {{ rangeFrom }}–{{ rangeTo }} · 每页
+        {{ pagination.pageSize }}
+      </span>
+      <span class="foot__hint">
+        {{
+          isMobile
+            ? "点卡片上的「命令参数」看脱敏后的完整参数"
+            : "展开一行可以看脱敏后的完整命令参数"
+        }}
+      </span>
+      <span class="pt-band__spacer" />
+      <el-pagination
+        v-model:current-page="pagination.page"
+        class="pt-pager"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        :pager-count="5"
+        layout="prev, pager, next"
+        @current-change="handlePageChange" />
+    </div>
   </div>
 </template>
 
 <style scoped>
+/*
+ * 画板主区是一串全宽横向带（toolbar → grid → gfoot），带与带之间没有间距，
+ * 所以这里不给 gap；需要内缩的东西（提示、移动端行卡）自己带 16 的留白。
+ */
 .audit-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
 .f-date {
@@ -483,6 +570,21 @@ function toggleArgs(id: number) {
 
 .f-search {
   width: 200px;
+}
+
+/* 工具栏右侧的图标钮：不可用时只掉色，不从带上消失（位置稳定比隐藏更好认） */
+.pt-band__iconbtn:disabled {
+  color: var(--pt-t4);
+  cursor: not-allowed;
+}
+
+.pt-band__iconbtn:disabled:hover {
+  background: var(--pt-hover);
+}
+
+.pt-band__iconbtn:focus-visible {
+  outline: 2px solid var(--pt-p);
+  outline-offset: 1px;
 }
 
 .uid {
@@ -506,9 +608,10 @@ function toggleArgs(id: number) {
   color: var(--pt-dang);
 }
 
-/* 面板 padding="none"，partial 提示条的留白只能自己给 */
+/* 提示不是全宽带：画板里它在卡片层，左右各内缩 16 */
 .partial-note {
-  margin: var(--pt-space-3);
+  align-items: flex-start;
+  margin: var(--pt-pad);
 }
 
 .args__head {
@@ -549,12 +652,12 @@ function toggleArgs(id: number) {
   border-radius: var(--pt-r-sm);
 }
 
-/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+/* 移动端行卡列表：表格带本身不留白，行卡的 16 内缩由这里给 */
 .cards {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad);
 }
 
 /*
@@ -574,6 +677,19 @@ function toggleArgs(id: number) {
   .f-sel,
   .f-search {
     width: 100%;
+  }
+
+  /*
+   * 34 高的页脚带在手机上装不下「口径 + 提示 + 分页」，允许换行；
+   * 提示那句在窄屏是废话（卡片上就写着按钮名），直接收掉。
+   */
+  .foot {
+    flex-wrap: wrap;
+    padding: var(--pt-space-2) var(--pt-space-3);
+  }
+
+  .foot__hint {
+    display: none;
   }
 }
 </style>

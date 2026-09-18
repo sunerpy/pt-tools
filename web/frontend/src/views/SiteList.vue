@@ -45,6 +45,8 @@ const {
 } = useLoginState(loginStates);
 
 const viewMode = ref<"enabled" | "all">("enabled");
+/* 画板 bar-64 上的搜索框（220×28）：只筛本页表格，按站点名与域名匹配 */
+const searchKeyword = ref("");
 const addDialogVisible = ref(false);
 const addSearch = ref("");
 const enablingInDialog = reactive<Record<string, boolean>>({});
@@ -66,18 +68,23 @@ const { loading, state, errorText, run, hasPartialBanner } = useDataState({
   failed: () => (loginStatesFailed.value ? 1 : 0),
 });
 
+/** 搜索词把 0 行的含义从「库里没有」改成「筛掉了」，也就是 empty 与 zero 的分界 */
+const isFiltered = computed(() => searchKeyword.value.trim() !== "");
+
 /**
  * 空态仍按视图模式分成两种文案（「已启用」空 = 去新增，「全部」空 = 内置清单本身没内容），
- * 所以这里只接管 useDataState 判出的非空态，空态自己按 viewMode 决定。
+ * 所以这里只接管 useDataState 判出的非空态，空态自己按 viewMode 与搜索词决定。
  */
 const tableState = computed<DataStateKey>(() => {
   const s = state.value;
   if (s === "loading" || s === "error" || s === "perm" || s === "partial") return s;
+  if (isFiltered.value) return "zero";
   return viewMode.value === "enabled" ? "empty" : "zero";
 });
 
 /** error / perm / partial 用 PtDataState 的预设标题，传空串即可回落 */
 const stateTitle = computed(() => {
+  if (isFiltered.value && tableState.value === "zero") return "没有匹配的站点";
   if (tableState.value === "empty") return "还没有启用任何站点";
   if (tableState.value === "zero") return "没有可显示的站点";
   return "";
@@ -94,7 +101,9 @@ const stateSub = computed(() => {
     case "empty":
       return "从「新增站点」里挑一个开始，启用后才会参与 RSS 与统计";
     default:
-      return "站点清单来自内置定义，装上浏览器扩展可以帮助适配新站";
+      return isFiltered.value
+        ? "换个站点名或域名再搜，或切到「全部」看未启用的站点"
+        : "站点清单来自内置定义，装上浏览器扩展可以帮助适配新站";
   }
 });
 
@@ -356,11 +365,22 @@ function siteUrlOf(name: string): string | undefined {
 
 const allEntries = computed(() => Object.entries(sites.value));
 
-const enabledCount = computed(() => allEntries.value.filter(([, s]) => s.enabled).length);
+const enabledEntries = computed(() => allEntries.value.filter(([, s]) => s.enabled));
+
+const enabledCount = computed(() => enabledEntries.value.length);
+
+/** 搜索按站点名与域名匹配，取址字段和 openSite 保持一致 */
+function matchesSearch(name: string, site: SiteConfig, q: string): boolean {
+  if (name.toLowerCase().includes(q)) return true;
+  if (site.web_url?.toLowerCase().includes(q)) return true;
+  return Boolean(site.urls?.some((u) => u.toLowerCase().includes(q)));
+}
 
 const visibleEntries = computed(() => {
-  if (viewMode.value === "all") return allEntries.value;
-  return allEntries.value.filter(([, s]) => s.enabled);
+  const base = viewMode.value === "all" ? allEntries.value : enabledEntries.value;
+  const q = searchKeyword.value.trim().toLowerCase();
+  if (!q) return base;
+  return base.filter(([name, site]) => matchesSearch(name, site, q));
 });
 
 const disabledEntries = computed(() => allEntries.value.filter(([, s]) => !s.enabled));
@@ -370,6 +390,165 @@ const viewOptions = computed(() => [
   { label: `已启用 ${enabledCount.value}`, value: "enabled" },
   { label: `全部 ${allEntries.value.length}`, value: "all" },
 ]);
+
+/* ---------------------------------------------------------------------------
+ * 页头摘要与表格下方的四张分析卡
+ *
+ * 数字全部由本页已经加载的两份数据（站点清单 + 登录状态）算出来，没有再拉接口，
+ * 也没有造占位数。登录状态接口单独失败时，靠它的两张卡没有依据，直接不出现。
+ * ------------------------------------------------------------------------- */
+
+/** 需要动手保号的档位：14 天以内才算「要管」，30 天档只是提前知会 */
+const ATTENTION_TIERS = new Set<ReminderTier>(["14d", "7d", "3d", "1d", "banned-imminent"]);
+
+const unavailableCount = computed(() => allEntries.value.filter(([, s]) => s.unavailable).length);
+
+const enabledRssCount = computed(() =>
+  enabledEntries.value.reduce((sum, [, s]) => sum + getRssCount(s), 0),
+);
+
+const enabledProbeOk = computed(
+  () =>
+    enabledEntries.value.filter(([name]) =>
+      isProbeSuccess(loginStates.value[name]?.last_probe_status),
+    ).length,
+);
+
+const enabledAttention = computed(
+  () => enabledEntries.value.filter(([name]) => ATTENTION_TIERS.has(reminderTier(name))).length,
+);
+
+/**
+ * 画板 head 的 sub —— 标题下面那行实时摘要（11.5/400 t3），
+ * 稿上每页都是真实数字，只有页面自己算得出来，所以 Teleport 进外壳页头。
+ * 口径固定看「已启用」那一档，不随分段和搜索抖动；没有站点时返回空串。
+ */
+const headSub = computed(() => {
+  const total = allEntries.value.length;
+  if (total === 0) return "";
+  const parts = [
+    `已启用 ${enabledCount.value} / 共 ${total} 个站点`,
+    `${enabledRssCount.value} 条 RSS`,
+  ];
+  if (!loginStatesFailed.value) {
+    parts.push(`探测正常 ${enabledProbeOk.value}`);
+    if (enabledAttention.value > 0) parts.push(`${enabledAttention.value} 个需保号`);
+  }
+  if (unavailableCount.value > 0) parts.push(`${unavailableCount.value} 个暂不可用`);
+  return parts.join(" · ");
+});
+
+interface MiniRow {
+  key: string;
+  label: string;
+  /** 语义色，对应 .mini__bar 的 is-* */
+  tone: "ok" | "warn" | "dang" | "info" | "mute";
+  n: number;
+}
+
+/** 分析卡的口径 = 表格里当前这批行，卡上的数字和表格永远一致 */
+const analysisTotal = computed(() => visibleEntries.value.length);
+
+function barWidth(n: number): string {
+  const total = analysisTotal.value;
+  if (total <= 0 || n <= 0) return "0%";
+  return `${Math.round((n / total) * 100)}%`;
+}
+
+/**
+ * p-health 探测健康：按 last_probe_status 的严重级别分桶。
+ * 「不适用」（NOT_APPLICABLE）与从未探测归到一起 —— 两者都不构成健康与否的判据。
+ */
+const probeHealth = computed<MiniRow[]>(() => {
+  let ok = 0;
+  let warn = 0;
+  let err = 0;
+  let none = 0;
+  for (const [name] of visibleEntries.value) {
+    const status = loginStates.value[name]?.last_probe_status;
+    if (!status) {
+      none += 1;
+      continue;
+    }
+    const severity = probeStatusSeverity(status);
+    if (severity === "success") ok += 1;
+    else if (severity === "info") none += 1;
+    else if (severity === "warning") warn += 1;
+    else err += 1;
+  }
+  return [
+    { key: "ok", label: "探测正常", tone: "ok", n: ok },
+    { key: "warn", label: "会话 / 密钥告警", tone: "warn", n: warn },
+    { key: "err", label: "探测失败", tone: "dang", n: err },
+    { key: "none", label: "未探测 / 不适用", tone: "mute", n: none },
+  ];
+});
+
+/** p-rss RSS 订阅：条数是总量，其余三行是站点数，所以只有站点数那几行画柱 */
+const rssStats = computed(() => {
+  let total = 0;
+  let withRss = 0;
+  let withoutEnabled = 0;
+  let withoutDisabled = 0;
+  for (const [, site] of visibleEntries.value) {
+    const n = getRssCount(site);
+    total += n;
+    if (n > 0) withRss += 1;
+    else if (site.enabled) withoutEnabled += 1;
+    else withoutDisabled += 1;
+  }
+  const rows: MiniRow[] = [
+    { key: "with", label: "已配置订阅", tone: "ok", n: withRss },
+    { key: "miss", label: "已启用但没有订阅", tone: "warn", n: withoutEnabled },
+  ];
+  if (withoutDisabled > 0) {
+    rows.push({ key: "off", label: "未启用且没有订阅", tone: "mute", n: withoutDisabled });
+  }
+  return { total, rows };
+});
+
+/**
+ * p-ev 保号提醒：按封禁提醒档位分桶。
+ * 画板只给了这张卡的位置和尺寸，没给内容；本页唯一有依据的「事件」就是保号档位。
+ */
+const TIER_GROUPS: { key: string; label: string; tone: MiniRow["tone"]; tiers: ReminderTier[] }[] =
+  [
+    { key: "ok", label: "正常", tone: "ok", tiers: ["none"] },
+    { key: "soon", label: "30 天内", tone: "info", tiers: ["pre-warn", "30d"] },
+    { key: "warn", label: "14 / 7 天内", tone: "warn", tiers: ["14d", "7d"] },
+    {
+      key: "crit",
+      label: "3 天内 / 即将封禁",
+      tone: "dang",
+      tiers: ["3d", "1d", "banned-imminent"],
+    },
+    { key: "unknown", label: "未知", tone: "mute", tiers: ["unknown"] },
+  ];
+
+const tierStats = computed<MiniRow[]>(() =>
+  TIER_GROUPS.map((g) => ({
+    key: g.key,
+    label: g.label,
+    tone: g.tone,
+    n: visibleEntries.value.filter(([name]) => g.tiers.includes(reminderTier(name))).length,
+  })),
+);
+
+const tierAttention = computed(
+  () => visibleEntries.value.filter(([name]) => ATTENTION_TIERS.has(reminderTier(name))).length,
+);
+
+/** p-auth 认证方式：按 auth_method 归并，多的排前面 */
+const authStats = computed<MiniRow[]>(() => {
+  const counts = new Map<string, number>();
+  for (const [, site] of visibleEntries.value) {
+    const label = authMethodLabel(site.auth_method);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, n]) => ({ key: label, label, tone: "info" as const, n }));
+});
 
 const addCandidates = computed(() => {
   const q = addSearch.value.trim().toLowerCase();
@@ -529,79 +708,121 @@ async function saveLoginConfig() {
 
 <template>
   <div class="sites-page">
-    <div v-if="riskHintOpen" class="pt-note pt-note--warn risk-note">
+    <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
+    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+
+    <!--
+      两条提示都不是带：画板 27 的落法是提示跟在顶部带（这里是外壳页头）之后、
+      左右各内缩 16。它们不属于画板构成，关掉之后页面就与画板一致。
+
+      partial（§5）：站点清单拿到了但登录状态没拿到。有数据可看时不该用一整块状态图
+      顶掉表格 —— 那等于把已经拿到的也藏了，所以挂一条提示，表格照常渲染。
+    -->
+    <div
+      v-if="hasPartialBanner(visibleEntries.length)"
+      class="pt-note pt-note--warn page-note"
+      data-testid="sites-partial-note">
       <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-      <span>
+      <span class="page-note__text">
+        站点清单已加载，但登录状态接口没有返回：「判定活跃」「剩余天数」「探测模式」暂时没有依据。
+      </span>
+      <el-button link type="primary" size="small" @click="loadSites">重试</el-button>
+    </div>
+
+    <div v-if="riskHintOpen" class="pt-note pt-note--warn page-note">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span class="page-note__text">
         活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
         但少数站点按
         last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，别只看这里的数字。
       </span>
       <button
         type="button"
-        class="risk-note__x"
+        class="page-note__x"
         aria-label="关闭提示"
         @click="riskHintOpen = false">
         <PtIcon name="x" :size="14" />
       </button>
     </div>
 
-    <PtToolbar standalone>
+    <!--
+      画板 12 的主区：bar-64（40 高工具栏带）+ grid（438 高表格带）都是全宽平铺的带，
+      不是圆角描边卡片，所以表格不再包在 PtPanel 里。
+    -->
+    <PtToolbar band>
       <el-segmented
         v-model="viewMode"
         class="pt-seg"
         :options="viewOptions"
         data-testid="site-view-toggle" />
-      <el-button size="small" :loading="loading" @click="loadSites">
-        <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-      </el-button>
+      <el-input
+        v-model="searchKeyword"
+        class="bar-search"
+        placeholder="搜索：站点名称 / 域名"
+        clearable
+        data-testid="site-search">
+        <template #prefix>
+          <PtIcon name="search" :size="15" />
+        </template>
+      </el-input>
 
       <template #right>
-        <el-tooltip
-          content="对所有已启用站点执行一次登录状态探测，最多 3 个并发"
-          placement="bottom">
+        <span v-if="isFiltered" class="pt-band__note">筛出 {{ visibleEntries.length }} 个</span>
+        <el-tooltip content="重新拉取站点清单与登录状态" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新"
+            :disabled="loading"
+            data-testid="sites-refresh-btn"
+            @click="loadSites">
+            <PtIcon
+              :name="loading ? 'loader-circle' : 'refresh-cw'"
+              :size="15"
+              :class="{ 'pt-spin': loading }" />
+          </button>
+        </el-tooltip>
+
+        <!--
+          画板 head 右侧动作（y=16、高 32、右端对齐）：两枚次按钮 + 一枚主按钮，
+          主操作一律上页头，工具栏只留筛选类控件。
+
+          但 ≤768px 时外壳把 .pt-head 整条 display:none 了，飞进去的按钮会跟着消失，
+          「新增站点」在手机上就没有入口了。所以窄屏把 Teleport 关掉，
+          三枚按钮就地留在工具栏里 —— 这也正是它们原来的位置。
+        -->
+        <Teleport to="#pt-head-acts" :disabled="isMobile">
+          <el-tooltip
+            content="对所有已启用站点执行一次登录状态探测，最多 3 个并发"
+            placement="bottom">
+            <el-button
+              size="small"
+              :loading="bulkProbing"
+              :disabled="loading || enabledCount === 0"
+              data-testid="probe-all-enabled-button"
+              @click="probeAllEnabled">
+              <PtIcon name="activity" :size="15" /><span>探测已启用</span>
+            </el-button>
+          </el-tooltip>
           <el-button
             size="small"
-            :loading="bulkProbing"
-            :disabled="loading || enabledCount === 0"
-            data-testid="probe-all-enabled-button"
-            @click="probeAllEnabled">
-            <PtIcon name="activity" :size="14" /><span>探测已启用</span>
+            :disabled="enabledCount === 0"
+            data-testid="open-all-sites-btn"
+            @click="openAllEnabled">
+            <PtIcon name="external-link" :size="15" /><span>打开已启用</span>
           </el-button>
-        </el-tooltip>
-        <el-button
-          size="small"
-          :disabled="enabledCount === 0"
-          data-testid="open-all-sites-btn"
-          @click="openAllEnabled">
-          <PtIcon name="external-link" :size="14" /><span>打开已启用</span>
-        </el-button>
-        <el-button type="primary" size="small" data-testid="add-site-button" @click="openAddDialog">
-          <PtIcon name="plus" :size="14" /><span>新增站点</span>
-        </el-button>
+          <el-button
+            type="primary"
+            size="small"
+            data-testid="add-site-button"
+            @click="openAddDialog">
+            <PtIcon name="plus" :size="15" /><span>新增站点</span>
+          </el-button>
+        </Teleport>
       </template>
     </PtToolbar>
 
-    <PtPanel
-      v-loading="loading"
-      title="站点列表"
-      icon="globe"
-      :count="`${visibleEntries.length} 个`"
-      padding="none">
-      <!--
-        partial（§5）：站点清单拿到了但登录状态没拿到。有数据可看时不该用一整块状态图
-        顶掉表格 —— 那等于把已经拿到的也藏了，所以挂一条提示，表格照常渲染。
-      -->
-      <div
-        v-if="hasPartialBanner(visibleEntries.length)"
-        class="pt-note pt-note--warn partial-note"
-        data-testid="sites-partial-note">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span class="partial-note__text">
-          站点清单已加载，但登录状态接口没有返回：「判定活跃」「剩余天数」「探测模式」暂时没有依据。
-        </span>
-        <el-button link type="primary" size="small" @click="loadSites">重试</el-button>
-      </div>
-
+    <div v-loading="loading" class="pt-band--grid">
       <el-table
         v-if="!isMobile"
         :data="visibleEntries"
@@ -613,6 +834,12 @@ async function saveLoginConfig() {
             <template v-if="tableState === 'error' || tableState === 'partial'" #action>
               <el-button size="small" @click="loadSites">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+            <!-- 筛出 0 行时该做的是放宽条件，不是去新增一个已经存在的站点 -->
+            <template v-else-if="isFiltered" #action>
+              <el-button size="small" @click="searchKeyword = ''">
+                <PtIcon name="x" :size="14" /><span>清空搜索</span>
               </el-button>
             </template>
             <template v-else-if="tableState === 'empty'" #action>
@@ -852,6 +1079,11 @@ async function saveLoginConfig() {
               <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
             </el-button>
           </template>
+          <template v-else-if="isFiltered" #action>
+            <el-button size="small" @click="searchKeyword = ''">
+              <PtIcon name="x" :size="14" /><span>清空搜索</span>
+            </el-button>
+          </template>
           <template v-else-if="tableState === 'empty'" #action>
             <el-button type="primary" size="small" @click="openAddDialog">
               <PtIcon name="plus" :size="14" /><span>新增站点</span>
@@ -954,13 +1186,92 @@ async function saveLoginConfig() {
           </template>
         </PtRowCard>
       </div>
+    </div>
 
-      <template v-if="visibleEntries.length > 0" #footer>
-        <span class="pt-foot-note">
-          「判定活跃」是保号判据，「站点活跃」是站点原始返回值，两者不一致时以前者为准
-        </span>
-      </template>
-    </PtPanel>
+    <!--
+      画板 gfoot 34：左侧是计数口径，右侧本该是分页（200×30），
+      但这一页不分页 —— 站点数量是几十的量级，一次全给完，所以右侧改放读数提醒。
+    -->
+    <div v-if="visibleEntries.length > 0" class="pt-band--foot">
+      <span>
+        已启用 {{ enabledCount }} · 全部 {{ allEntries.length }} · 当前显示
+        {{ visibleEntries.length }} 个
+      </span>
+      <span class="pt-band__spacer" />
+      <span class="foot-caveat">
+        「判定活跃」是保号判据，「站点活跃」是站点原始返回值，两者不一致时以前者为准
+      </span>
+    </div>
+
+    <!--
+      画板 12 表格下方的卡片层：p-health / p-rss / p-ev 三张并排（364/340/344）
+      + p-auth 通栏（1080）。四张卡的数字全部由本页已加载的数据算出，口径是表格里
+      当前这批行，所以卡上的数和表格永远对得上；登录状态接口失败时前两张没有依据，
+      直接不出现，不留空壳。
+    -->
+    <div v-if="visibleEntries.length > 0" class="pt-cards">
+      <PtPanel
+        v-if="!loginStatesFailed"
+        title="探测健康"
+        icon="activity"
+        :count="`${analysisTotal} 个`">
+        <ul class="mini">
+          <li v-for="row in probeHealth" :key="row.key" class="mini__row">
+            <span class="mini__k">{{ row.label }}</span>
+            <span class="mini__v">{{ row.n }}</span>
+            <span class="mini__bar" :class="`is-${row.tone}`" aria-hidden="true">
+              <span class="mini__fill" :style="{ width: barWidth(row.n) }" />
+            </span>
+          </li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel title="RSS 订阅" icon="rss" :count="`${rssStats.total} 条`">
+        <ul class="mini">
+          <li v-for="row in rssStats.rows" :key="row.key" class="mini__row">
+            <span class="mini__k">{{ row.label }}</span>
+            <span class="mini__v">{{ row.n }}</span>
+            <span class="mini__bar" :class="`is-${row.tone}`" aria-hidden="true">
+              <span class="mini__fill" :style="{ width: barWidth(row.n) }" />
+            </span>
+          </li>
+        </ul>
+        <p class="mini__foot">
+          订阅总条数 {{ rssStats.total }} 条，只有已启用站点的订阅会参与 RSS 任务
+        </p>
+      </PtPanel>
+
+      <PtPanel
+        v-if="!loginStatesFailed"
+        title="保号提醒"
+        icon="bell-ring"
+        :count="tierAttention > 0 ? `需关注 ${tierAttention} 个` : '暂无需关注'">
+        <ul class="mini">
+          <li v-for="row in tierStats" :key="row.key" class="mini__row">
+            <span class="mini__k">{{ row.label }}</span>
+            <span class="mini__v">{{ row.n }}</span>
+            <span class="mini__bar" :class="`is-${row.tone}`" aria-hidden="true">
+              <span class="mini__fill" :style="{ width: barWidth(row.n) }" />
+            </span>
+          </li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel class="card-wide" title="认证方式" icon="shield" :count="`${analysisTotal} 个`">
+        <ul class="mini mini--cols">
+          <li v-for="row in authStats" :key="row.key" class="mini__row">
+            <span class="mini__k">{{ row.label }}</span>
+            <span class="mini__v">{{ row.n }}</span>
+            <span class="mini__bar" :class="`is-${row.tone}`" aria-hidden="true">
+              <span class="mini__fill" :style="{ width: barWidth(row.n) }" />
+            </span>
+          </li>
+        </ul>
+        <p class="mini__foot">
+          认证方式来自站点定义：Cookie 走浏览器扩展同步，API Key / Passkey 需要在站点配置里填。
+        </p>
+      </PtPanel>
+    </div>
 
     <el-dialog
       v-model="addDialogVisible"
@@ -1134,17 +1445,30 @@ async function saveLoginConfig() {
 </template>
 
 <style scoped>
+/*
+ * 主区是一串全宽横向带（工具栏 → 表格 → 页脚带 → 卡片区），带与带之间没有间距，
+ * 所以这里不给 gap；要内缩的东西（提示、卡片区、移动端行卡）自己带 16 的留白。
+ */
 .sites-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
-.risk-note {
+/* 提示不是带：画板里它在卡片层，左右各内缩 16，贴在页头之后 */
+.page-note {
   align-items: flex-start;
+  margin: var(--pt-pad) var(--pt-pad) 0;
 }
 
-.risk-note__x {
+.page-note__text {
+  flex: 1 1 auto;
+}
+
+.page-note .el-button {
+  flex: 0 0 auto;
+}
+
+.page-note__x {
   flex-shrink: 0;
   padding: 0;
   color: var(--pt-t4);
@@ -1153,8 +1477,55 @@ async function saveLoginConfig() {
   border: 0;
 }
 
-.risk-note__x:hover {
+.page-note__x:hover {
   color: var(--pt-t2);
+}
+
+/* 画板 bar-64 的搜索框：220×28，hover 底 + 1px 边 + r=4 */
+.bar-search {
+  flex: 0 0 auto;
+  width: 220px;
+}
+
+.bar-search :deep(.el-input__wrapper) {
+  height: 28px;
+  min-height: 28px;
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+}
+
+.bar-search :deep(.el-input__inner) {
+  font-size: var(--pt-fz-sm);
+}
+
+/* 带上的图标钮共享件没给 disabled 态，刷新中要看得出点不动 */
+.pt-band__iconbtn:disabled {
+  color: var(--pt-t4);
+  cursor: default;
+}
+
+/* gfoot 右侧的读数提醒：窄屏时让它换行而不是把左侧计数挤没 */
+.foot-caveat {
+  min-width: 0;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  /* 搜索框在手机上占满工具栏那一行，220 固定宽会顶出去 */
+  .bar-search {
+    flex: 1 1 100%;
+    width: auto;
+  }
+
+  /* 34 高的页脚带放不下两段文字，允许长高并左对齐 */
+  .pt-band--foot {
+    flex-wrap: wrap;
+    padding: 6px var(--pt-space-3);
+  }
+
+  .foot-caveat {
+    text-align: left;
+  }
 }
 
 .site {
@@ -1294,26 +1665,105 @@ async function saveLoginConfig() {
   text-decoration: underline;
 }
 
-/* 面板 padding="none"，所以「部分失败」提示条自己留白，贴在表格/卡片上沿 */
-.partial-note {
-  align-items: flex-start;
-  margin: var(--pt-space-3) var(--pt-space-3) 0;
-}
-
-.partial-note__text {
-  flex: 1 1 auto;
-}
-
-.partial-note .el-button {
-  flex: 0 0 auto;
-}
-
-/* 移动端行卡列表：面板 padding="none"，留白由这里给 */
+/* 移动端行卡列表：表格带本身贴边，留白由这里给（同样是 16） */
 .cards {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad);
+}
+
+/* ---- 表格下方的分析卡 ---- */
+
+/* p-auth 是通栏（画板 1080 宽），在自适应网格里横跨整行 */
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+/*
+ * 卡内的小分布列表：标签 + 计数一行，下面一根 5 高的占比柱（画板令牌里进度条 = 5）。
+ * 分母是表格当前的行数，所以柱长表达的是「这批站点里占多少」，不是绝对量。
+ */
+.mini {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+/* 通栏那张卡宽度富余，认证方式横着铺 */
+.mini--cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px var(--pt-pad);
+}
+
+.mini__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--pt-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.mini__k {
+  overflow: hidden;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini__v {
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t1);
+}
+
+.mini__bar {
+  grid-column: 1 / -1;
+  height: 5px;
+  overflow: hidden;
+  background: var(--pt-hover);
+  border-radius: 999px;
+}
+
+.mini__fill {
+  display: block;
+  height: 100%;
+  background: var(--mini-c, var(--pt-p));
+  border-radius: inherit;
+}
+
+.mini__bar.is-ok {
+  --mini-c: var(--pt-ok);
+}
+
+.mini__bar.is-warn {
+  --mini-c: var(--pt-warn);
+}
+
+.mini__bar.is-dang {
+  --mini-c: var(--pt-dang);
+}
+
+.mini__bar.is-info {
+  --mini-c: var(--pt-info);
+}
+
+.mini__bar.is-mute {
+  --mini-c: var(--pt-t4);
+}
+
+/* 卡片脚注：说明口径，10/400 t4（画板脚注字号） */
+.mini__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
 }
 
 /* 与表格里的 .site__name 一致：定义文件里是小写 id，首字母大写才像个名字 */

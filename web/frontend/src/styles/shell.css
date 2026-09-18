@@ -85,13 +85,14 @@
 /* ===========================================================================
  * rail —— 深色外壳，8 个快捷入口
  * =========================================================================== */
+/* 画板：rail 64 宽，品牌 16,14 32×32；项 52×40 从 y=64 起、节奏 48；底部分隔线 + 日志入口 + 30 圆头像 */
 .pt-rail {
   display: flex;
   flex-direction: column;
   grid-area: rail;
   align-items: center;
-  gap: var(--pt-space-2);
-  padding: var(--pt-space-3) 0;
+  gap: 8px;
+  padding: 14px 0 12px;
   background: var(--pt-chrome);
   border-right: 1px solid var(--pt-chrome-border);
 }
@@ -100,9 +101,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-bottom: var(--pt-space-2);
+  width: 32px;
+  height: 32px;
   color: var(--pt-chrome-t1);
   border-radius: var(--pt-r-md);
   transition: background var(--pt-transition-fast);
@@ -116,9 +116,11 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  /* 画板 icon y 74 / 122 / 170… 节奏 48 = 项高 40 + 间距 8 */
+  gap: 8px;
   align-items: center;
   min-height: 0;
+  padding-top: 10px;
   overflow: hidden auto;
   scrollbar-width: none;
 }
@@ -127,6 +129,7 @@
   display: none;
 }
 
+/* 画板：项盒 52×40 起于 x=6（rail 64 减两侧 6），圆角 6 */
 .pt-rail__item,
 .pt-rail__tool,
 .pt-rail__avatar {
@@ -135,7 +138,7 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 40px;
+  width: 52px;
   height: 40px;
   padding: 0;
   color: var(--pt-chrome-t2);
@@ -165,23 +168,46 @@
 
 .pt-rail__item.is-active {
   color: var(--pt-p);
-  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  /* 画板 sel-bg：cyan@0.14 */
+  background: color-mix(in srgb, var(--pt-p) 14%, transparent);
 }
 
-/* 左侧 2px 指示条：深色底上单靠色相区分不够，加一条几何标记 */
+/* 画板 sel：3×40 贴 rail 左沿（x=0），与项等高 —— 深色底上单靠色相区分不够 */
 .pt-rail__item.is-active::before {
   position: absolute;
-  left: -12px;
-  width: 2px;
-  height: 20px;
+  left: -6px;
+  width: 3px;
+  height: 40px;
   content: "";
   background: var(--pt-p);
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 1.5px 1.5px 0;
 }
 
+/* 画板 foot-rule 12,900 40×1：把底部这组（日志 / 头像）与导航入口分开 */
+.pt-rail__foot {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  width: 40px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pt-chrome-border);
+}
+
+/* 画板 rail-log 16,916 32×32 r=4 */
+.pt-rail__tool {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--pt-r-sm);
+}
+
+/* 画板 me 17,954 30×30 r=15：圆形、chromeRaised 底、无描边 */
 .pt-rail__avatar {
-  margin-top: var(--pt-space-2);
-  border: 1px solid var(--pt-chrome-border);
+  width: 30px;
+  height: 30px;
+  background: var(--pt-chrome-raised);
+  border-radius: var(--pt-radius-full, 50%);
 }
 
 /* ===========================================================================
@@ -194,22 +220,49 @@
   min-height: 0;
 }
 
-.pt-nav__brand {
+/*
+ * 画板：品牌 y=14、版本行 y=34、跳转框 y=56 高 30、分隔线 y=98。
+ * 也就是「品牌 + 版本 + 跳转框」是一个整块，分隔线在它们**之后** ——
+ * 之前把分隔线放在品牌行之后、跳转框落到线外，和稿子不符。
+ */
+.pt-nav__head {
   display: flex;
   flex: 0 0 auto;
-  gap: var(--pt-space-2);
-  align-items: center;
-  height: var(--pt-head-h);
-  padding: 0 var(--pt-pad);
+  flex-direction: column;
+  height: 98px;
+  padding: 14px 12px 0;
   border-bottom: 1px solid var(--pt-border);
 }
 
-.pt-nav__brand-name {
+.pt-nav__brand {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: flex-start;
+}
+
+.pt-nav__brand-text {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pt-nav__brand-name {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 18px;
   letter-spacing: 0.01em;
   color: var(--pt-t1);
+}
+
+/* 画板 ver 116,34 10.5/400 t3：版本与「已是最新 / 有新版本」贴在品牌下面 */
+.pt-nav__brand-ver {
+  overflow: hidden;
+  font-size: 10.5px;
+  line-height: 13px;
+  color: var(--pt-t3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .pt-nav__close {
@@ -232,7 +285,15 @@
 
 .pt-nav__jump {
   flex: 0 0 auto;
-  padding: var(--pt-space-3) var(--pt-space-3) var(--pt-space-2);
+  margin-top: 9px;
+}
+
+/* 画板 jump 240×30 fill hover r=4 */
+.pt-nav__jump .el-input__wrapper {
+  height: 30px;
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+  box-shadow: none;
 }
 
 .pt-nav__jump .el-input__prefix {
@@ -242,7 +303,8 @@
 .pt-nav__scroll {
   flex: 1;
   min-height: 0;
-  padding: 0 var(--pt-space-2) var(--pt-space-4);
+  /* 画板激活底 x=70 而 nav x=64 → 项左右各内缩 6 */
+  padding: 0 6px var(--pt-space-4);
   overflow: hidden auto;
 }
 
@@ -250,25 +312,28 @@
   margin-top: var(--pt-space-4);
 }
 
+/* 画板 grp-* 10/600 t4：比表头再小一档，颜色是最浅的那一层 */
 .pt-nav__group-title {
-  margin: 0 0 var(--pt-space-1);
-  padding: 0 var(--pt-space-2);
-  font-size: var(--pt-fz-label);
+  margin: 0;
+  padding: 0 10px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 22px;
-  color: var(--pt-t3);
+  color: var(--pt-t4);
 }
 
+/* 画板：项高 30、节奏 30；图标 x=80（内缩 16）、文字 x=106、12.5 号 */
 .pt-nav__item {
+  position: relative;
   display: flex;
-  gap: var(--pt-space-2);
+  gap: 10px;
   align-items: center;
-  height: 32px;
-  padding: 0 var(--pt-space-2);
-  font-size: var(--pt-fz-body);
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
   color: var(--pt-t2);
   text-decoration: none;
-  border-radius: var(--pt-r-sm);
+  border-radius: var(--pt-r-md);
   transition:
     color var(--pt-transition-fast),
     background var(--pt-transition-fast);
@@ -279,10 +344,25 @@
   background: var(--pt-hover);
 }
 
+/*
+ * 画板 sel-0-0 / selbar-0-0：底是 cyan@0.08，另有一条 3×20 的强调条贴在 nav 左沿。
+ * 文字是 t1 而**不是**强调色 —— 强调靠左条和底色表达，文字保持墨黑，
+ * 这样一屏 19 项里「当前在哪」一眼可见，又不会让标签本身变刺眼。
+ */
 .pt-nav__item.is-active {
   font-weight: 600;
-  color: var(--pt-p);
-  background: var(--pt-p-soft);
+  color: var(--pt-t1);
+  background: color-mix(in srgb, var(--pt-p) 8%, transparent);
+}
+
+.pt-nav__item.is-active::before {
+  position: absolute;
+  left: -6px;
+  width: 3px;
+  height: 20px;
+  content: "";
+  background: var(--pt-p);
+  border-radius: 0 1.5px 1.5px 0;
 }
 
 .pt-nav__item-label {
@@ -292,27 +372,93 @@
   text-overflow: ellipsis;
 }
 
+/* 画板 nb-*：24×16 r=8，底 cyan@0.16，无描边。之前那版带边框的灰徽标比稿子重得多 */
 .pt-nav__badge {
-  min-width: 20px;
+  min-width: 24px;
+  height: 16px;
   padding: 0 5px;
-  font-size: var(--pt-fz-label);
+  font-size: 10.5px;
   font-weight: 600;
   line-height: 16px;
-  color: var(--pt-t3);
-  text-align: center;
-  background: var(--pt-hover);
-  border: 1px solid var(--pt-border);
-  border-radius: 8px;
-}
-
-.pt-nav__item.is-active .pt-nav__badge {
   color: var(--pt-p);
-  background: var(--pt-surface);
-  border-color: color-mix(in srgb, var(--pt-p) 30%, transparent);
+  text-align: center;
+  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  border-radius: 8px;
 }
 
 .pt-nav__ext {
   color: var(--pt-t4);
+}
+
+/* ===========================================================================
+ * 画板 nav 底部的账号页脚：分隔线 + 32 圆头像 + 名称/角色两行 + 28 登出钮。
+ * 之前账号只存在于 rail 头像的 popover 里，导航列底部是空的，和稿子差一整块。
+ * =========================================================================== */
+.pt-nav__account {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  align-items: center;
+  height: 56px;
+  padding: 0 12px;
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-nav__account-av {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+  border-radius: var(--pt-radius-full);
+}
+
+.pt-nav__account-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pt-nav__account-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 15px;
+  color: var(--pt-t1);
+}
+
+.pt-nav__account-role {
+  overflow: hidden;
+  font-size: 10.5px;
+  line-height: 13px;
+  color: var(--pt-t3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pt-nav__account-out {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+  border: 0;
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    background var(--pt-transition-fast);
+}
+
+.pt-nav__account-out:hover {
+  color: var(--pt-dang);
+  background: var(--pt-dang-soft);
 }
 
 .pt-nav__empty {
@@ -325,20 +471,55 @@
 /* ===========================================================================
  * 页头 —— 标题 + 面包屑 + （窄屏）汉堡
  * =========================================================================== */
+/*
+ * 画板 head：64 高、白底、底部 1px 边框，内容左内缩 16（h1 x=344 而主区 x=328）。
+ * 之前用的是 24 内边距，比稿子宽 8。
+ */
 .pt-head {
   display: flex;
   flex: 0 0 auto;
   gap: var(--pt-space-3);
   align-items: center;
   min-height: var(--pt-head-h);
-  padding: 0 var(--pt-space-6);
+  padding: 0 var(--pt-pad);
   background: var(--pt-surface);
   border-bottom: 1px solid var(--pt-border);
 }
 
-/* 标题 + 面包屑是两行，比单行页头高一档（板 41 量的 88） */
+/* 详情页：面包屑 + 标题 + 摘要三行，画板量的 88 */
 .pt-head--crumbs {
   min-height: var(--pt-head-h-crumbs);
+}
+
+/* 画板：动作按钮右端对齐、高 32、间距 8 */
+.pt-head__acts {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+.pt-head__acts:empty {
+  display: none;
+}
+
+.pt-head__acts .el-button {
+  height: 32px;
+  margin: 0;
+}
+
+/* 画板 sub 11.5/400 t3：标题下面那行实时摘要 */
+.pt-head__sub {
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 14px;
+  color: var(--pt-t3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pt-head__sub:empty {
+  display: none;
 }
 
 /* 导航开关：钉住时是「收起」，浮起时是「展开 / 打开抽屉」，所以一直在 */
@@ -372,19 +553,27 @@
   margin: 0;
   overflow: hidden;
   font-size: var(--pt-fz-h1);
-  font-weight: 600;
+  /* 画板 h1 19/700 */
+  font-weight: 700;
   line-height: var(--pt-lh-tight);
   color: var(--pt-t1);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* 画板 crumb：11.5/400 t3，当前项 11.5/500 t1，分隔用 chevron-right 13 */
 .pt-head__crumbs {
   display: flex;
   gap: 6px;
   align-items: center;
-  font-size: var(--pt-fz-sm);
+  font-size: 11.5px;
+  line-height: 16px;
   color: var(--pt-t3);
+}
+
+.pt-head__crumbs > span:last-child {
+  font-weight: 500;
+  color: var(--pt-t1);
 }
 
 .pt-head__crumbs a {
@@ -406,12 +595,28 @@
   overscroll-behavior: contain;
 }
 
+/*
+ * 画板的主区不是「带内边距的卡片画布」，而是一串**全宽横向带**：
+ *   toolbar 40 → grid（表格，全宽平铺）→ selband 44 → gfoot 34 → 下方卡片
+ * 表格带直接贴到主区两侧，没有外边距也没有圆角；只有下方的分析卡片才内缩 16。
+ *
+ * 所以这里不再给内容区内边距 —— 之前 16/24/32 的内边距把每一条带都框进了卡片里，
+ * 和稿子差得最远的就是这一点。留白由各条带自己负责（见 atoms.css 的 .pt-band*）。
+ */
 .pt-shell__inner {
-  /* G 的主区宽度 1112；再宽的屏幕上不让表格行长到读不完 */
-  max-width: 1440px;
+  display: flex;
+  flex-direction: column;
   min-height: 100%;
-  margin: 0 auto;
-  padding: var(--pt-pad) var(--pt-space-6) var(--pt-space-8);
+}
+
+/*
+ * v2 升级横幅 —— 画板没有给它在路由构成里留位置（板 41 把它画成一个独立片段）。
+ * 它是可关闭的临时迁移提示，关掉之后页面就与画板一致；显示期间按卡片层处理，
+ * 左右内缩 16，不做成全宽带。
+ */
+.pt-shell__inner > .v2-deprecation-banner {
+  flex: 0 0 auto;
+  margin: var(--pt-pad) var(--pt-pad) 0;
 }
 
 /* ===========================================================================

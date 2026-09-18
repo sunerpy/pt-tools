@@ -56,16 +56,21 @@ beforeEach(() => {
 });
 
 describe("默认值", () => {
-  it("localStorage 为空时落到黑暗 + 驾驶舱，并且首帧就写进 DOM", () => {
+  /*
+   * 默认改成了明亮 —— 设计稿 G Cockpit 的主张是「浅色内容 + 深色外壳」，
+   * 画板内容区是 #F2F4F7 / #FFFFFF，只有 rail 与状态栏是深色。
+   * 这条钉子跟着那个决定一起挪，不是把断言放宽。
+   */
+  it("localStorage 为空时落到明亮 + 驾驶舱，并且首帧就写进 DOM", () => {
     const theme = useThemeStore();
 
-    expect(theme.mode).toBe("dark");
+    expect(theme.mode).toBe("light");
     expect(theme.palette).toBe("cockpit");
-    expect(theme.isDark).toBe(true);
-    expect(root().classList.contains("dark")).toBe(true);
-    expect(root().classList.contains("light")).toBe(false);
+    expect(theme.isDark).toBe(false);
+    expect(root().classList.contains("light")).toBe(true);
+    expect(root().classList.contains("dark")).toBe(false);
     expect(root().getAttribute("data-theme-style")).toBe("cockpit");
-    expect(root().style.colorScheme).toBe("dark");
+    expect(root().style.colorScheme).toBe("light");
   });
 
   it("非法取值当作没存过，不是当作错误抛出来", () => {
@@ -74,7 +79,7 @@ describe("默认值", () => {
 
     const theme = useThemeStore();
 
-    expect(theme.mode).toBe("dark");
+    expect(theme.mode).toBe("light");
     expect(theme.palette).toBe("cockpit");
   });
 });
@@ -121,10 +126,10 @@ describe("切换明暗", () => {
     const theme = useThemeStore();
 
     theme.toggle();
-    expect(theme.mode).toBe("light");
+    expect(theme.mode).toBe("dark");
 
     theme.toggle();
-    expect(theme.mode).toBe("dark");
+    expect(theme.mode).toBe("light");
   });
 
   it("setMode 忽略不认识的值，不把界面打成裸样式", () => {
@@ -132,7 +137,7 @@ describe("切换明暗", () => {
 
     theme.setMode("solarized" as never);
 
-    expect(theme.mode).toBe("dark");
+    expect(theme.mode).toBe("light");
   });
 });
 

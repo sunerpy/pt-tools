@@ -428,3 +428,180 @@
     transform: rotate(360deg);
   }
 }
+
+/* ===========================================================================
+ * 带式版面 —— 画板主区的真实构成
+ *
+ * 每个路由画板的主区（x=328 宽 1112）都是一串全宽横向带，而不是一片带内边距的
+ * 卡片画布：
+ *   head 64 → toolbar 40 → grid（表格，全宽平铺）→ selband 44 → gfoot 34 → 卡片
+ * 表格带贴着主区两侧，没有外边距也没有圆角、不描边；只有表格下方的分析卡片才
+ * 内缩 16 并带 r=8 + 1px 边 + 一层很淡的投影。
+ * =========================================================================== */
+
+/* 工具栏带：画板 bar-64 —— 40 高、白底、底部 1px 边框，内容左右内缩 16 */
+.pt-band--toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-height: var(--pt-toolbar-h);
+  padding: 0 var(--pt-pad);
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+/* 右侧那组图标钮之前的弹性间隔 */
+.pt-band__spacer {
+  flex: 1;
+}
+
+/* 画板 bi-*：28×28 fill hover r=4 icon15，节奏 34 */
+.pt-band__iconbtn {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+  border: 0;
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    background var(--pt-transition-fast);
+}
+
+.pt-band__iconbtn:hover {
+  color: var(--pt-t1);
+  background: var(--pt-border);
+}
+
+.pt-band__iconbtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pt-band__iconbtn:disabled:hover {
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+}
+
+/*
+ * 工具栏里的控件一律 28 高 —— 画板 bar-64 的分段、搜索框、下拉都是 28，
+ * 而 Element 默认 32，塞进 40 高的带里会把带顶满、看不出上下留白。
+ * 三个页面各自用 :deep 压过一遍高度，收到这里来。
+ */
+.pt-band--toolbar .el-input__wrapper,
+.pt-band--toolbar .el-select__wrapper {
+  min-height: 28px;
+  background: var(--pt-hover);
+  box-shadow: none;
+}
+
+.pt-band--toolbar .el-input,
+.pt-band--toolbar .el-select {
+  --el-component-size: 28px;
+}
+
+.pt-band--toolbar .el-button {
+  height: 28px;
+  margin: 0;
+}
+
+.pt-band--toolbar .el-segmented {
+  min-height: 28px;
+}
+
+/* 画板 note：工具栏右侧那行说明字 11/400 t3 */
+.pt-band__note {
+  flex: 0 0 auto;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/* 表格带：全宽平铺，白底，没有圆角与描边 */
+.pt-band--grid {
+  flex: 0 0 auto;
+  min-width: 0;
+  background: var(--pt-surface);
+}
+
+/* 表格页脚带：画板 gfoot —— 34 高、顶部 1px 边框，左说明右分页 */
+.pt-band--foot {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-3);
+  align-items: center;
+  min-height: 34px;
+  padding: 0 var(--pt-pad);
+  font-size: 11.5px;
+  color: var(--pt-t3);
+  background: var(--pt-surface);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-band--foot .pt-band__spacer {
+  flex: 1;
+}
+
+/* 窄屏放不下「左说明 + 右分页」两段，让它换行并放开固定高度 */
+@media (max-width: 768px) {
+  .pt-band--foot {
+    flex-wrap: wrap;
+    gap: var(--pt-space-2);
+    min-height: auto;
+    padding: var(--pt-space-2) var(--pt-pad);
+  }
+
+  .pt-band--foot .pt-band__spacer {
+    flex-basis: 100%;
+  }
+}
+
+/* 多选条：画板 selband —— 44 高、强调色 6% 底、顶部 1px 边框，按钮高 30 */
+.pt-band--sel {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--pt-pad);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pt-t1);
+  background: color-mix(in srgb, var(--pt-p) 6%, transparent);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-band--sel .el-button {
+  height: 30px;
+  margin: 0;
+}
+
+/*
+ * 卡片区 —— 表格带下方的分析面板。画板里卡片 x=344（主区 328 + 16），
+ * 右端 1424，所以左右各内缩 16；卡片之间与上方留白同为 16。
+ * 两栏 548 + 16 + 516，三栏 364 / 340 / 344（都按内容宽度分，不是等分）。
+ */
+.pt-cards {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--pt-pad);
+  padding: var(--pt-pad);
+}
+
+.pt-cards--wide {
+  grid-template-columns: 1fr;
+}
+
+/* 一行两栏时左宽右窄（画板 548 / 516） */
+@media (min-width: 1181px) {
+  .pt-cards--2 {
+    grid-template-columns: minmax(0, 548fr) minmax(0, 516fr);
+  }
+}

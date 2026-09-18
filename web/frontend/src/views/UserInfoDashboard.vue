@@ -11,7 +11,6 @@ import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtKpiBar from "@/components/ui/PtKpiBar.vue";
-import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { type ReminderTier, useLoginState } from "@/composables/useLoginState";
@@ -106,18 +105,25 @@ interface KpiRow {
   deltaTone?: "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 }
 
+/**
+ * KPI 带 —— 画板 kpibar：**6 格一行、整条 64 高**，格间 1px 竖线。
+ *
+ * 之前是 10 项按 5 列铺成两行（128 高），把主区顶上的那条带撑成了两倍厚。
+ * 画板上那 6 格是「一眼要看的」：站点数、上传、下载、平均分享率、做种、魔力。
+ * 其余指标（时魔、做种积分、做种总量、下载中）不是没用，而是不该占这条带 ——
+ * 它们在下方的分析面板里更合适，挤进 KPI 带只会让每格窄到读不出数。
+ */
 const kpiItems = computed<KpiRow[]>(() => {
   const stats = aggregatedStats.value;
   if (!stats) return [];
 
   const items: KpiRow[] = [
+    { label: "站点数量", value: stats.siteCount.toString(), icon: "globe" },
     { label: "总上传量", value: formatBytes(stats.totalUploaded), icon: "upload" },
     { label: "总下载量", value: formatBytes(stats.totalDownloaded), icon: "download" },
     { label: "平均分享率", value: formatRatio(stats.averageRatio), icon: "gauge" },
     { label: "做种数", value: stats.totalSeeding.toString(), icon: "share-2" },
-    { label: "下载中", value: stats.totalLeeching.toString(), icon: "activity" },
     { label: "总魔力值", value: formatNumber(stats.totalBonus), icon: "star" },
-    { label: "总时魔/h", value: formatNumber(stats.totalBonusPerHour ?? 0), icon: "timer" },
   ];
 
   // 分享率低于 1 是要动手的信号，挂一枚警示胶囊；健康时不占位
@@ -129,24 +135,16 @@ const kpiItems = computed<KpiRow[]>(() => {
     }
   }
 
-  // 只有当存在做种积分时才显示
-  if (stats.totalSeedingBonus && stats.totalSeedingBonus > 0) {
-    items.push({
-      label: "总做种积分",
-      value: formatNumber(stats.totalSeedingBonus),
-      icon: "medal",
-    });
-  }
-
-  items.push(
-    { label: "做种总量", value: formatBytes(stats.totalSeederSize ?? 0), icon: "hard-drive" },
-    { label: "站点数量", value: stats.siteCount.toString(), icon: "globe" },
-  );
-
   return items;
 });
 
 const siteRows = computed(() => aggregatedStats.value?.perSiteStats ?? []);
+
+/*
+ * 本页没有摘要行 —— 画板 10 的主区顶上是 KPI 带而不是 head（App.vue 的 KPI_TOP_ROUTES），
+ * 那 6 格真实数字本身就是摘要。之前这里往 #pt-head-sub 打了一个 Teleport，
+ * 而那个靶子在没有 head 的页面上根本不存在，摘要落了空。
+ */
 
 /** 状态块副标题：失败时给真实错误，空态时给下一步动作 */
 const stateSub = computed(() => {
@@ -339,6 +337,17 @@ onUnmounted(() => {
 <template>
   <div class="dash">
     <!--
+      KPI 条 —— 画板 kpibar 328,0 1112×64：主区最顶上的一条全宽白带，
+      6 格之间是 1px 竖线。它替代页头出现在总览页，所以不再包在卡片里。
+    -->
+    <PtKpiBar v-if="kpiItems.length" :items="kpiItems" :cols="6" band />
+
+    <!--
+      提示放在顶部带**之后** —— 画板 27（系统设置）就是这个落法：head 0..64，
+      提示在 y=80、左右内缩 16。放在带之前会把 KPI 带从主区顶上顶下来，
+      而画板里 KPI 带是贴着 y=0 的。
+    -->
+    <!--
       partial（设计文档 §5）：聚合统计拿到了，但站点配置或登录态没拿到。
       既不该整页报错，也不该假装正常 —— 统计照常显示，这里说清少了什么，
       免得用户以为「打开站点」按钮和保号提醒坏了。
@@ -389,56 +398,48 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- KPI 指标条（设计稿 G 的 kpiBar）：10 项按 5 列铺成两行 -->
-    <PtKpiBar v-if="kpiItems.length" :items="kpiItems" :cols="5" />
-
-    <!-- 站点详情表格 -->
-    <PtPanel
-      v-loading="loading"
-      title="站点统计详情"
-      icon="database"
-      :count="siteRows.length"
-      padding="none">
-      <PtToolbar>
-        <template #right>
-          <el-tooltip
-            :content="autoRefreshEnabled ? '点击关闭自动刷新 (5分钟)' : '点击开启自动刷新'"
-            placement="top">
-            <el-button
-              size="small"
-              :type="autoRefreshEnabled ? 'success' : 'info'"
-              @click="toggleAutoRefresh">
-              <PtIcon name="timer" :size="14" />
-              <span>{{ autoRefreshEnabled ? "自动刷新中" : "自动刷新已关闭" }}</span>
-            </el-button>
-          </el-tooltip>
-          <el-button size="small" @click="clearCache">
-            <PtIcon name="trash-2" :size="14" />
-            <span>清除缓存</span>
-          </el-button>
+    <!-- 站点详情表格：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
+    <PtToolbar band>
+      <template #right>
+        <el-tooltip
+          :content="autoRefreshEnabled ? '点击关闭自动刷新 (5分钟)' : '点击开启自动刷新'"
+          placement="top">
           <el-button
             size="small"
-            data-testid="userinfo-open-all-btn"
-            :disabled="!siteRows.length"
-            @click="openAllSites">
-            <PtIcon name="external-link" :size="14" />
-            <span>一键打开站点</span>
+            :type="autoRefreshEnabled ? 'success' : 'info'"
+            @click="toggleAutoRefresh">
+            <PtIcon name="timer" :size="14" />
+            <span>{{ autoRefreshEnabled ? "自动刷新中" : "自动刷新已关闭" }}</span>
           </el-button>
-          <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
-            <PtIcon name="share-2" :size="14" />
-            <span>导出分享</span>
-          </el-button>
-          <el-button size="small" @click="$router.push('/supported-sites')">
-            <PtIcon name="list" :size="14" />
-            <span>已支持站点</span>
-          </el-button>
-          <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
-            <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
-            <span>同步全部</span>
-          </el-button>
-        </template>
-      </PtToolbar>
+        </el-tooltip>
+        <el-button size="small" @click="clearCache">
+          <PtIcon name="trash-2" :size="14" />
+          <span>清除缓存</span>
+        </el-button>
+        <el-button
+          size="small"
+          data-testid="userinfo-open-all-btn"
+          :disabled="!siteRows.length"
+          @click="openAllSites">
+          <PtIcon name="external-link" :size="14" />
+          <span>一键打开站点</span>
+        </el-button>
+        <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
+          <PtIcon name="share-2" :size="14" />
+          <span>导出分享</span>
+        </el-button>
+        <el-button size="small" @click="$router.push('/supported-sites')">
+          <PtIcon name="list" :size="14" />
+          <span>已支持站点</span>
+        </el-button>
+        <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
+          <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
+          <span>同步全部</span>
+        </el-button>
+      </template>
+    </PtToolbar>
 
+    <div v-loading="loading" class="pt-band--grid">
       <!-- 桌面端表格视图 -->
       <!-- roomy：站点列有 32px 头像 + 未读角标，数据量/魔力列是双行，34px 装不下 -->
       <el-table
@@ -877,12 +878,14 @@ onUnmounted(() => {
           </footer>
         </article>
       </div>
+    </div>
 
-      <template v-if="aggregatedStats" #footer>
-        <PtIcon name="clock" :size="13" />
-        <span>最后更新 {{ formatTime(aggregatedStats.lastUpdate) }}</span>
-      </template>
-    </PtPanel>
+    <!-- 画板 gfoot 34：表格下方的说明带，左侧是统计口径与更新时间 -->
+    <div v-if="aggregatedStats" class="pt-band--foot">
+      <span>{{ siteRows.length }} 个站点</span>
+      <span class="pt-band__spacer" />
+      <span>最后更新 {{ formatTime(aggregatedStats.lastUpdate) }}</span>
+    </div>
   </div>
 </template>
 
@@ -892,10 +895,18 @@ onUnmounted(() => {
  * 两边刻意复用同一批单元格类名（.site / .io / .bonus / .acts …），
  * 改一处颜色两边一起变，不用维护两份语义色。
  */
+/*
+ * 画板主区是一串全宽横向带（KPI 条 → 工具栏 → 表格 → 页脚带），带与带之间没有间距，
+ * 所以这里不再给 gap；需要内缩的东西（提示、移动端卡片）自己带 16 的留白。
+ */
 .dash {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
+}
+
+/* 提示不是全宽带：画板里它们在卡片层，左右各内缩 16 */
+.dash__note {
+  margin: var(--pt-pad) var(--pt-pad) 0;
 }
 
 /* 两条可关提示：.pt-note 默认居中对齐，这里是多行文案，图标要贴顶 */

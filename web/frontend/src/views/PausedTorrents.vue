@@ -2,14 +2,13 @@
 import { globalApi, type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
-import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 const TAB_OPTIONS = [
@@ -94,6 +93,69 @@ const archiveStateSub = computed(() => {
     : "被删除或处理完的暂停任务会归档到这里";
 });
 
+/*
+ * 画板 head 的 sub —— 标题下面那行实时摘要（11.5/400 t3），由本页算出真实数字
+ * 再 Teleport 进外壳页头。稿上的口径是「总量 + 分项」（例：「37 个任务 ·
+ * 12 下载中 · 19 做种中」），这一页能拿到的分项只有当前页那一批行，
+ * 所以合计明确写成「本页」，不把一页的和冒充成全量。拿不到数据时给空串。
+ */
+const pausedHeadSub = computed(() => {
+  const rows = pausedTorrents.value;
+  if (!rows.length) return "";
+  const sites = new Set(rows.map((t) => t.site_name).filter(Boolean)).size;
+  const bytes = rows.reduce((sum, t) => sum + (t.torrent_size || 0), 0);
+  const done = rows.filter((t) => t.progress >= 100).length;
+  const parts = [
+    `${pausedTotal.value} 个暂停任务`,
+    `本页 ${rows.length} 条`,
+    `${sites} 个站点`,
+    `本页合计 ${formatSize(bytes)}`,
+  ];
+  if (done > 0) parts.push(`${done} 个已下完`);
+  if (siteFilter.value) parts.push(`筛选 ${siteFilter.value}`);
+  return parts.join(" · ");
+});
+
+const archiveHeadSub = computed(() => {
+  const rows = archiveTorrents.value;
+  if (!rows.length) return "";
+  const done = rows.filter((t) => t.is_completed).length;
+  const parts = [
+    `${archiveTotal.value} 条归档`,
+    `本页 ${rows.length} 条`,
+    `${done} 已完成`,
+    `${rows.length - done} 未完成`,
+  ];
+  if (siteFilter.value) parts.push(`筛选 ${siteFilter.value}`);
+  return parts.join(" · ");
+});
+
+const headSub = computed(() =>
+  activeTab.value === "paused" ? pausedHeadSub.value : archiveHeadSub.value,
+);
+
+/** 画板 gfoot 的左侧文案：「N 个任务 · 显示 a–b · 每页 c」 */
+function rangeNote(total: number, page: number, size: number, unit: string): string {
+  const from = (page - 1) * size + 1;
+  const to = Math.min(page * size, total);
+  return `${total} ${unit} · 显示 ${from}–${to} · 每页 ${size}`;
+}
+
+const pausedFootNote = computed(() =>
+  rangeNote(pausedTotal.value, pausedPage.value, pausedPageSize.value, "个任务"),
+);
+
+const archiveFootNote = computed(() =>
+  rangeNote(archiveTotal.value, archivePage.value, archivePageSize.value, "条记录"),
+);
+
+/** 工具栏右侧那行说明字（画板 note 11/400 t3），两个 tab 各一句 */
+const toolbarNote = computed(() =>
+  activeTab.value === "paused"
+    ? "恢复会把种子重新交给原下载器继续下载"
+    : "归档只作记录，不再占用下载器",
+);
+
 onMounted(async () => {
   await loadPausedTorrents();
   try {
@@ -173,7 +235,21 @@ function pruneSelection() {
   selectedIds.value = selectedIds.value.filter((id) => ids.has(id));
 }
 
+/*
+ * 多选条上的「取消选择」要同时清掉 el-table 自己那份勾选状态，
+ * 只把 selectedIds 置空的话，表格里的复选框还是勾着的。
+ */
+const pausedTableRef = ref<TableInstance>();
+
+function clearSelection() {
+  pausedTableRef.value?.clearSelection();
+  selectedIds.value = [];
+}
+
 function handleTabChange(tab: string) {
+  // 切 tab 时表格会重挂，它内部的勾选随之丢失；不清掉 selectedIds 的话，
+  // 批量删除会打在一批已经看不见的行上
+  clearSelection();
   if (tab === "paused") {
     loadPausedTorrents();
   } else {
@@ -336,7 +412,11 @@ function formatProgress(progress: number): string {
 
 <template>
   <div class="paused-page">
-    <PtToolbar standalone>
+    <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
+    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+
+    <!-- 画板 bar-64：40 高的全宽工具栏带，左侧只放筛选类控件，右侧是 28×28 图标钮 -->
+    <PtToolbar band :note="toolbarNote">
       <el-segmented
         v-model="activeTab"
         class="pt-seg"
@@ -351,82 +431,169 @@ function formatProgress(progress: number): string {
         <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
       </el-select>
 
-      <el-tooltip content="每 30 秒自动刷新当前列表" placement="bottom">
-        <label class="ctl">
-          <el-switch v-model="autoRefresh" size="small" />
-          <span>自动刷新</span>
-        </label>
-      </el-tooltip>
-      <el-tooltip
-        content="开启后，免费期结束时未完成的种子将自动从下载器删除（含数据文件）"
-        placement="bottom">
-        <label class="ctl">
-          <el-switch
-            v-model="autoDeleteOnFreeEnd"
-            size="small"
-            :loading="savingAutoDelete"
-            style="--el-switch-on-color: var(--pt-dang)"
-            @change="toggleAutoDelete" />
-          <span>免费结束自动删除</span>
-        </label>
-      </el-tooltip>
+      <!--
+        两个开关是页面级设置，不是筛选，所以按画板送进页头的动作区（head acts，高 32）。
+        窄屏下外壳把页头整个隐掉（shell.css ≤768 `.pt-head{display:none}`，
+        与 useIsMobile 同一个断点），这时把 Teleport 关掉、就地留在工具栏里，
+        免得手机上这两个开关跟着页头一起消失。
+      -->
+      <Teleport to="#pt-head-acts" :disabled="isMobile">
+        <el-tooltip content="每 30 秒自动刷新当前列表" placement="bottom">
+          <label class="ctl">
+            <el-switch v-model="autoRefresh" size="small" />
+            <span>自动刷新</span>
+          </label>
+        </el-tooltip>
+        <el-tooltip
+          content="开启后，免费期结束时未完成的种子将自动从下载器删除（含数据文件）"
+          placement="bottom">
+          <label class="ctl">
+            <el-switch
+              v-model="autoDeleteOnFreeEnd"
+              size="small"
+              :loading="savingAutoDelete"
+              style="--el-switch-on-color: var(--pt-dang)"
+              @change="toggleAutoDelete" />
+            <span>免费结束自动删除</span>
+          </label>
+        </el-tooltip>
+      </Teleport>
 
       <template #right>
-        <el-button type="primary" :loading="loading" @click="handleTabChange(activeTab)">
-          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-        </el-button>
+        <el-tooltip content="刷新当前列表" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新当前列表"
+            @click="handleTabChange(activeTab)">
+            <PtIcon name="refresh-cw" :size="15" :class="{ 'pt-spin': loading }" />
+          </button>
+        </el-tooltip>
       </template>
     </PtToolbar>
 
-    <PtPanel
-      v-if="activeTab === 'paused'"
-      v-loading="pausedLoading"
-      title="暂停中"
-      icon="circle-pause"
-      :count="`${pausedTotal} 个`"
-      padding="none">
-      <template v-if="selectedIds.length > 0" #actions>
-        <span class="sel-count">已选 {{ selectedIds.length }} 项</span>
-        <el-button type="danger" size="small" plain @click="deleteTorrents(selectedIds, false)">
-          <PtIcon name="trash-2" :size="14" /><span>删除任务</span>
-        </el-button>
-        <el-button type="danger" size="small" @click="deleteTorrents(selectedIds, true)">
-          <PtIcon name="trash-2" :size="14" /><span>连数据一起删</span>
-        </el-button>
-      </template>
+    <template v-if="activeTab === 'paused'">
+      <!-- 画板 grid：表格是全宽平铺的带，不再包在圆角描边卡片里 -->
+      <div v-loading="pausedLoading" class="pt-band--grid">
+        <!-- roomy：进度列是「进度条 + 一行数字」的双行内容，34px 行高会裁掉下面那行 -->
+        <el-table
+          v-if="!isMobile"
+          ref="pausedTableRef"
+          :data="pausedTorrents"
+          class="pt-grid pt-grid--roomy"
+          style="width: 100%"
+          @selection-change="handleSelectionChange">
+          <template #empty>
+            <PtDataState :state="pausedState" dense :sub="pausedStateSub">
+              <template v-if="pausedState === 'error'" #action>
+                <el-button size="small" @click="loadPausedTorrents">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
+          </template>
 
-      <el-table
-        v-if="!isMobile"
-        :data="pausedTorrents"
-        class="pt-grid"
-        style="width: 100%"
-        @selection-change="handleSelectionChange">
-        <template #empty>
-          <PtDataState :state="pausedState" dense :sub="pausedStateSub">
+          <el-table-column type="selection" width="46" />
+          <el-table-column label="站点" prop="site_name" width="110">
+            <template #default="{ row }">
+              <PtTag>{{ row.site_name || "-" }}</PtTag>
+            </template>
+          </el-table-column>
+          <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
+            <template #default="{ row }">
+              <el-tooltip :content="row.title" placement="top" :show-after="500">
+                <span class="title-text">{{ row.title }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="进度" width="180">
+            <template #default="{ row }">
+              <div class="progress-cell">
+                <el-progress
+                  :percentage="Math.round(row.progress)"
+                  :stroke-width="4"
+                  :show-text="false"
+                  :color="getProgressColor(row.progress)" />
+                <span class="progress-info">
+                  <span>{{ getDownloadedSize(row) }} / {{ formatSize(row.torrent_size) }}</span>
+                  <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="大小"
+            width="96"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">{{ formatSize(row.torrent_size) }}</template>
+          </el-table-column>
+          <el-table-column label="下载器" width="110" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ row.downloader_name || "-" }}</template>
+          </el-table-column>
+          <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
+          </el-table-column>
+          <el-table-column label="暂停时间" width="150" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ formatTime(row.paused_at) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right" class-name="pt-cell-act">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="resumeTorrent(row)">
+                <PtIcon name="play" :size="14" /><span>恢复</span>
+              </el-button>
+              <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
+                <PtIcon name="trash-2" :size="14" /><span>删除</span>
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!--
+          移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+          这张表桌面有 8 列，手机上横着滚既看不到列头，又和页面纵向滚动打架。
+          卡上留的是真正要看的：标题 + 站点/大小/下载器/暂停时间 + 进度 + 恢复/删除。
+        -->
+        <div v-else class="cards">
+          <PtDataState v-if="!pausedTorrents.length" :state="pausedState" :sub="pausedStateSub">
             <template v-if="pausedState === 'error'" #action>
               <el-button size="small" @click="loadPausedTorrents">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
               </el-button>
             </template>
           </PtDataState>
-        </template>
 
-        <el-table-column type="selection" width="46" />
-        <el-table-column label="站点" prop="site_name" width="110">
-          <template #default="{ row }">
-            <PtTag>{{ row.site_name || "-" }}</PtTag>
-          </template>
-        </el-table-column>
-        <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
-          <template #default="{ row }">
-            <el-tooltip :content="row.title" placement="top" :show-after="500">
-              <span class="title-text">{{ row.title }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column label="进度" width="180">
-          <template #default="{ row }">
-            <div class="progress-cell">
+          <PtRowCard v-for="row in pausedTorrents" :key="row.id">
+            <template #lead>
+              <el-checkbox
+                :model-value="selectedIds.includes(row.id)"
+                :aria-label="`选择 ${row.title}`"
+                @update:model-value="toggleSelect(row)" />
+            </template>
+
+            <template #title>{{ row.title || "-" }}</template>
+
+            <template #meta>
+              <PtTag>{{ row.site_name || "-" }}</PtTag>
+              <span>{{ formatSize(row.torrent_size) }}</span>
+              <span>
+                <PtIcon name="hard-drive" :size="11" />
+                {{ row.downloader_name || "-" }}
+              </span>
+              <span>
+                <PtIcon name="clock" :size="11" />
+                {{ formatTime(row.paused_at) }}
+              </span>
+            </template>
+
+            <!-- 暂停原因跟着桌面走中性灰（那一列是 pt-cell-muted），不新造语义色 -->
+            <template v-if="row.pause_reason" #status>
+              <PtTag>
+                <span class="reason-cap">{{ row.pause_reason }}</span>
+              </PtTag>
+            </template>
+
+            <template #progress>
               <el-progress
                 :percentage="Math.round(row.progress)"
                 :stroke-width="4"
@@ -436,106 +603,43 @@ function formatProgress(progress: number): string {
                 <span>{{ getDownloadedSize(row) }} / {{ formatSize(row.torrent_size) }}</span>
                 <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
               </span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column
-          label="大小"
-          width="96"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">{{ formatSize(row.torrent_size) }}</template>
-        </el-table-column>
-        <el-table-column label="下载器" width="110" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ row.downloader_name || "-" }}</template>
-        </el-table-column>
-        <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
-        </el-table-column>
-        <el-table-column label="暂停时间" width="150" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatTime(row.paused_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right" class-name="pt-cell-act">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="resumeTorrent(row)">
-              <PtIcon name="play" :size="14" /><span>恢复</span>
-            </el-button>
-            <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
-              <PtIcon name="trash-2" :size="14" /><span>删除</span>
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            </template>
 
-      <!--
-        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
-        这张表桌面有 8 列，手机上横着滚既看不到列头，又和页面纵向滚动打架。
-        卡上留的是真正要看的：标题 + 站点/大小/下载器/暂停时间 + 进度 + 恢复/删除。
-      -->
-      <div v-else class="cards">
-        <PtDataState v-if="!pausedTorrents.length" :state="pausedState" :sub="pausedStateSub">
-          <template v-if="pausedState === 'error'" #action>
-            <el-button size="small" @click="loadPausedTorrents">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </template>
-        </PtDataState>
-
-        <PtRowCard v-for="row in pausedTorrents" :key="row.id">
-          <template #lead>
-            <el-checkbox
-              :model-value="selectedIds.includes(row.id)"
-              :aria-label="`选择 ${row.title}`"
-              @update:model-value="toggleSelect(row)" />
-          </template>
-
-          <template #title>{{ row.title || "-" }}</template>
-
-          <template #meta>
-            <PtTag>{{ row.site_name || "-" }}</PtTag>
-            <span>{{ formatSize(row.torrent_size) }}</span>
-            <span>
-              <PtIcon name="hard-drive" :size="11" />
-              {{ row.downloader_name || "-" }}
-            </span>
-            <span>
-              <PtIcon name="clock" :size="11" />
-              {{ formatTime(row.paused_at) }}
-            </span>
-          </template>
-
-          <!-- 暂停原因跟着桌面走中性灰（那一列是 pt-cell-muted），不新造语义色 -->
-          <template v-if="row.pause_reason" #status>
-            <PtTag>
-              <span class="reason-cap">{{ row.pause_reason }}</span>
-            </PtTag>
-          </template>
-
-          <template #progress>
-            <el-progress
-              :percentage="Math.round(row.progress)"
-              :stroke-width="4"
-              :show-text="false"
-              :color="getProgressColor(row.progress)" />
-            <span class="progress-info">
-              <span>{{ getDownloadedSize(row) }} / {{ formatSize(row.torrent_size) }}</span>
-              <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
-            </span>
-          </template>
-
-          <template #actions>
-            <el-button size="small" @click="resumeTorrent(row)">
-              <PtIcon name="play" :size="14" /><span>恢复</span>
-            </el-button>
-            <el-button type="danger" size="small" plain @click="openDeleteDialog(row)">
-              <PtIcon name="trash-2" :size="14" /><span>删除</span>
-            </el-button>
-          </template>
-        </PtRowCard>
+            <template #actions>
+              <el-button size="small" @click="resumeTorrent(row)">
+                <PtIcon name="play" :size="14" /><span>恢复</span>
+              </el-button>
+              <el-button type="danger" size="small" plain @click="openDeleteDialog(row)">
+                <PtIcon name="trash-2" :size="14" /><span>删除</span>
+              </el-button>
+            </template>
+          </PtRowCard>
+        </div>
       </div>
 
-      <template v-if="pausedTotal > 0" #footer>
-        <span class="pt-foot-note">恢复会把种子重新交给原下载器继续下载</span>
+      <!--
+        画板 selband 44：多选时表格下方那条强调色 6% 的横幅，批量操作放在这里，
+        不再挂到面板头部（带式版面里已经没有面板头了）。
+      -->
+      <div v-if="selectedIds.length > 0" class="pt-band--sel">
+        <PtIcon name="square-check" :size="15" />
+        <span>已选 {{ selectedIds.length }} 项</span>
+        <span class="pt-band__spacer" />
+        <el-button @click="clearSelection">
+          <PtIcon name="x" :size="14" /><span>取消选择</span>
+        </el-button>
+        <el-button type="danger" plain @click="deleteTorrents(selectedIds, false)">
+          <PtIcon name="trash-2" :size="14" /><span>删除任务</span>
+        </el-button>
+        <el-button type="danger" @click="deleteTorrents(selectedIds, true)">
+          <PtIcon name="trash-2" :size="14" /><span>连数据一起删</span>
+        </el-button>
+      </div>
+
+      <!-- 画板 gfoot 34：左侧是条数与分页口径，右侧是分页器 -->
+      <div v-if="pausedTotal > 0" class="pt-band--foot">
+        <span>{{ pausedFootNote }}</span>
+        <span class="pt-band__spacer" />
         <el-pagination
           v-model:current-page="pausedPage"
           v-model:page-size="pausedPageSize"
@@ -546,112 +650,109 @@ function formatProgress(progress: number): string {
           layout="sizes, prev, pager, next"
           @size-change="handlePausedSizeChange"
           @current-change="handlePausedPageChange" />
-      </template>
-    </PtPanel>
+      </div>
+    </template>
 
-    <PtPanel
-      v-else
-      v-loading="archiveLoading"
-      title="历史归档"
-      icon="archive"
-      :count="`${archiveTotal} 条`"
-      padding="none">
-      <el-table v-if="!isMobile" :data="archiveTorrents" class="pt-grid" style="width: 100%">
-        <template #empty>
-          <PtDataState :state="archiveState" dense :sub="archiveStateSub">
+    <template v-else>
+      <div v-loading="archiveLoading" class="pt-band--grid">
+        <el-table v-if="!isMobile" :data="archiveTorrents" class="pt-grid" style="width: 100%">
+          <template #empty>
+            <PtDataState :state="archiveState" dense :sub="archiveStateSub">
+              <template v-if="archiveState === 'error'" #action>
+                <el-button size="small" @click="loadArchiveTorrents">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
+          </template>
+
+          <el-table-column label="站点" prop="site_name" width="110">
+            <template #default="{ row }">
+              <PtTag>{{ row.site_name || "-" }}</PtTag>
+            </template>
+          </el-table-column>
+          <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
+            <template #default="{ row }">
+              <el-tooltip :content="row.title" placement="top" :show-after="500">
+                <span class="title-text">{{ row.title }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="96">
+            <template #default="{ row }">
+              <PtStatusPill :tone="row.is_completed ? 'ok' : 'warn'" size="sm">
+                {{ row.is_completed ? "已完成" : "未完成" }}
+              </PtStatusPill>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="进度"
+            width="90"
+            class-name="pt-cell-num"
+            label-class-name="pt-cell-num">
+            <template #default="{ row }">{{ formatProgress(row.progress) }}</template>
+          </el-table-column>
+          <el-table-column label="下载器" width="110" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ row.downloader_name || "-" }}</template>
+          </el-table-column>
+          <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
+          </el-table-column>
+          <el-table-column label="归档时间" width="150" class-name="pt-cell-muted">
+            <template #default="{ row }">{{ formatTime(row.archived_at) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 归档是只读列表：卡上没有操作，状态给完成与否，进度只有百分比（归档记录不带体积） -->
+        <div v-else class="cards">
+          <PtDataState v-if="!archiveTorrents.length" :state="archiveState" :sub="archiveStateSub">
             <template v-if="archiveState === 'error'" #action>
               <el-button size="small" @click="loadArchiveTorrents">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
               </el-button>
             </template>
           </PtDataState>
-        </template>
 
-        <el-table-column label="站点" prop="site_name" width="110">
-          <template #default="{ row }">
-            <PtTag>{{ row.site_name || "-" }}</PtTag>
-          </template>
-        </el-table-column>
-        <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
-          <template #default="{ row }">
-            <el-tooltip :content="row.title" placement="top" :show-after="500">
-              <span class="title-text">{{ row.title }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="96">
-          <template #default="{ row }">
-            <PtStatusPill :tone="row.is_completed ? 'ok' : 'warn'" size="sm">
-              {{ row.is_completed ? "已完成" : "未完成" }}
-            </PtStatusPill>
-          </template>
-        </el-table-column>
-        <el-table-column
-          label="进度"
-          width="90"
-          class-name="pt-cell-num"
-          label-class-name="pt-cell-num">
-          <template #default="{ row }">{{ formatProgress(row.progress) }}</template>
-        </el-table-column>
-        <el-table-column label="下载器" width="110" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ row.downloader_name || "-" }}</template>
-        </el-table-column>
-        <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
-        </el-table-column>
-        <el-table-column label="归档时间" width="150" class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatTime(row.archived_at) }}</template>
-        </el-table-column>
-      </el-table>
+          <PtRowCard v-for="row in archiveTorrents" :key="row.id">
+            <template #title>{{ row.title || "-" }}</template>
 
-      <!-- 归档是只读列表：卡上没有操作，状态给完成与否，进度只有百分比（归档记录不带体积） -->
-      <div v-else class="cards">
-        <PtDataState v-if="!archiveTorrents.length" :state="archiveState" :sub="archiveStateSub">
-          <template v-if="archiveState === 'error'" #action>
-            <el-button size="small" @click="loadArchiveTorrents">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </template>
-        </PtDataState>
+            <template #meta>
+              <PtTag>{{ row.site_name || "-" }}</PtTag>
+              <span>
+                <PtIcon name="hard-drive" :size="11" />
+                {{ row.downloader_name || "-" }}
+              </span>
+              <span>
+                <PtIcon name="clock" :size="11" />
+                {{ formatTime(row.archived_at) }}
+              </span>
+              <span v-if="row.pause_reason">{{ row.pause_reason }}</span>
+            </template>
 
-        <PtRowCard v-for="row in archiveTorrents" :key="row.id">
-          <template #title>{{ row.title || "-" }}</template>
+            <template #status>
+              <PtStatusPill :tone="row.is_completed ? 'ok' : 'warn'" size="sm">
+                {{ row.is_completed ? "已完成" : "未完成" }}
+              </PtStatusPill>
+            </template>
 
-          <template #meta>
-            <PtTag>{{ row.site_name || "-" }}</PtTag>
-            <span>
-              <PtIcon name="hard-drive" :size="11" />
-              {{ row.downloader_name || "-" }}
-            </span>
-            <span>
-              <PtIcon name="clock" :size="11" />
-              {{ formatTime(row.archived_at) }}
-            </span>
-            <span v-if="row.pause_reason">{{ row.pause_reason }}</span>
-          </template>
-
-          <template #status>
-            <PtStatusPill :tone="row.is_completed ? 'ok' : 'warn'" size="sm">
-              {{ row.is_completed ? "已完成" : "未完成" }}
-            </PtStatusPill>
-          </template>
-
-          <template #progress>
-            <el-progress
-              :percentage="Math.round(row.progress)"
-              :stroke-width="4"
-              :show-text="false"
-              :color="getProgressColor(row.progress)" />
-            <span class="progress-info">
-              <span>完成进度</span>
-              <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
-            </span>
-          </template>
-        </PtRowCard>
+            <template #progress>
+              <el-progress
+                :percentage="Math.round(row.progress)"
+                :stroke-width="4"
+                :show-text="false"
+                :color="getProgressColor(row.progress)" />
+              <span class="progress-info">
+                <span>完成进度</span>
+                <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
+              </span>
+            </template>
+          </PtRowCard>
+        </div>
       </div>
 
-      <template v-if="archiveTotal > 0" #footer>
-        <span class="pt-foot-note">归档只作记录，不再占用下载器</span>
+      <div v-if="archiveTotal > 0" class="pt-band--foot">
+        <span>{{ archiveFootNote }}</span>
+        <span class="pt-band__spacer" />
         <el-pagination
           v-model:current-page="archivePage"
           v-model:page-size="archivePageSize"
@@ -662,8 +763,8 @@ function formatProgress(progress: number): string {
           layout="sizes, prev, pager, next"
           @size-change="handleArchiveSizeChange"
           @current-change="handleArchivePageChange" />
-      </template>
-    </PtPanel>
+      </div>
+    </template>
 
     <el-dialog
       v-model="deleteDialogVisible"
@@ -691,10 +792,14 @@ function formatProgress(progress: number): string {
 </template>
 
 <style scoped>
+/*
+ * 画板主区是一串全宽横向带（工具栏 40 → 表格 → 多选条 44 → 页脚带 34），
+ * 带与带之间靠各自的发丝线收口，没有间距，所以这里不给 gap。
+ * 需要留白的只有移动端行卡列表，它自己内缩 16。
+ */
 .paused-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
 .filter-select {
@@ -710,11 +815,6 @@ function formatProgress(progress: number): string {
   color: var(--pt-t2);
   cursor: pointer;
   user-select: none;
-}
-
-.sel-count {
-  font-size: var(--pt-fz-label);
-  color: var(--pt-t3);
 }
 
 .title-text {
@@ -743,12 +843,18 @@ function formatProgress(progress: number): string {
   font-variant-numeric: tabular-nums;
 }
 
-/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+/* 移动端行卡列表：表格带本身不留边，卡片列表自己内缩 16（画板卡片层的口径） */
 .cards {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad);
+}
+
+/* 多选条里的按钮由 .pt-band--sel 统一压到 30 高，图标与文字要跟着居中 */
+.pt-band--sel > .pt-icon {
+  flex: 0 0 auto;
+  color: var(--pt-p);
 }
 
 /* 暂停原因挂在卡片右上角，长文案要收住，否则会把标题挤成一条 */
@@ -763,6 +869,23 @@ function formatProgress(progress: number): string {
 @media (max-width: 768px) {
   .filter-select {
     width: 100%;
+  }
+
+  /*
+   * 两条带在窄屏都放不下一行：多选条是「已选 N 项 + 三个按钮」，页脚带是
+   * 「口径说明 + 分页器」。共享件里两条都是 nowrap（按 1112 宽的画板定的），
+   * 这里只在本页放开换行，不改公共样式。
+   */
+  .pt-band--sel,
+  .pt-band--foot {
+    flex-wrap: wrap;
+    padding: var(--pt-space-2) var(--pt-space-3);
+  }
+
+  /* 换行后右侧那组不再需要被顶开，spacer 收掉免得单独占一行 */
+  .pt-band--sel .pt-band__spacer,
+  .pt-band--foot .pt-band__spacer {
+    flex: 0 0 0;
   }
 }
 </style>

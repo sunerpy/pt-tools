@@ -1,13 +1,30 @@
 <script setup lang="ts">
 import { globalApi, type GlobalSettings } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false);
+/**
+ * 六态（设计文档 §5）：这一页是表单不是列表，能落到的只有 loading / error / perm ——
+ * 加载成功就是表单本身，没有 empty / zero / partial 可言。
+ *
+ * error / perm 不能只弹一条两秒就消失的 toast：配置没读回来时表单里留着的是
+ * 前端默认值，用户照着点「保存」会把服务端的真实配置覆盖掉。所以失败时用状态块
+ * 顶掉表单，并且不给保存入口。
+ */
+const { loading, state, errorText, run } = useDataState();
 const saving = ref(false);
 const showWarning = ref(false);
+/** 配置真的读回来过一次，摘要行才有意义（默认值不是配置） */
+const loaded = ref(false);
+const isMobile = useIsMobile();
+
+/** 加载失败（含无权限）：表单里的值不可信，既不给编辑也不给保存 */
+const loadFailed = computed(() => state.value === "error" || state.value === "perm");
 
 const form = ref<GlobalSettings>({
   default_interval_minutes: 10,
@@ -27,20 +44,24 @@ const form = ref<GlobalSettings>({
   default_filter_mode: "auto_free",
 });
 
+/** short 是给页头摘要用的短名：摘要行是单行截断的，装不下带括号的完整标签 */
 const filterModeOptions = [
   {
     value: "auto_free",
     label: "智能模式（推荐）",
+    short: "智能模式",
     desc: "无过滤规则的 RSS：自动下载免费种子；有过滤规则的 RSS：仅下载匹配规则的种子（不再自动下非匹配的免费种子）",
   },
   {
     value: "filter_only",
     label: "仅过滤规则匹配",
+    short: "仅过滤规则",
     desc: "所有 RSS 都必须匹配过滤规则才下载；未关联规则的 RSS 将不下载任何种子",
   },
   {
     value: "free_only",
     label: "仅免费（忽略过滤规则）",
+    short: "仅免费",
     desc: "只下载免费种子，完全忽略过滤规则；适合纯刷流用户",
   },
 ];
@@ -50,21 +71,46 @@ const activeFilterMode = computed(() =>
   filterModeOptions.find((o) => o.value === form.value.default_filter_mode),
 );
 
-onMounted(async () => {
-  loading.value = true;
-  try {
-    const data = await globalApi.get();
-    form.value = {
-      ...data,
-      default_interval_minutes: Math.max(5, data.default_interval_minutes || 10),
-    };
-    showWarning.value = !form.value.download_dir;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
-  }
+/**
+ * 画板 head 的 sub —— 标题下面那行摘要（11.5/400 t3）。
+ *
+ * 列表页那一行是实时数据，设置页没有实时数据，对应的口径是「当前生效的关键配置」：
+ * 用户不展开整张卡片也能确认间隔、下载模式、体积区间、限速、暂存与自启这几件事。
+ * 全部取自读回来的配置，没读回来就返回空串（外壳里 :empty 会把这行收掉）。
+ */
+const headSub = computed(() => {
+  if (!loaded.value) return "";
+  const f = form.value;
+  const parts = [
+    `间隔 ${f.default_interval_minutes} 分钟`,
+    activeFilterMode.value?.short ?? "",
+    f.torrent_min_size_gb > 0
+      ? `种子 ${f.torrent_min_size_gb}–${f.torrent_size_gb} GB`
+      : `种子上限 ${f.torrent_size_gb} GB`,
+    f.download_limit_enabled ? `预估 ${f.download_speed_limit} MB/s` : "未启用限速判断",
+    f.retain_hours > 0 ? `暂存保留 ${f.retain_hours} 小时` : "暂存不自动清理",
+    f.auto_start ? "启动即运行" : "手动启动",
+  ].filter(Boolean);
+  // 免费期结束自动删数据是不可恢复的，开着就一定要在摘要里露出来
+  if (f.auto_delete_on_free_end) parts.push("免费结束自动删除");
+  return parts.join(" · ");
 });
+
+async function loadData() {
+  const data = await run(() => globalApi.get());
+  if (!data) {
+    loaded.value = false;
+    return;
+  }
+  form.value = {
+    ...data,
+    default_interval_minutes: Math.max(5, data.default_interval_minutes || 10),
+  };
+  loaded.value = true;
+  showWarning.value = !form.value.download_dir;
+}
+
+onMounted(loadData);
 
 async function save() {
   if (!form.value.download_dir) {
@@ -90,14 +136,43 @@ async function save() {
 </script>
 
 <template>
-  <div class="global-settings-page">
+  <!--
+    画板 27（系统设置）的主区只有两件东西：head 之后的提示，和一张通栏大卡片
+    （warn 344,80 1080×58 → p-cfg 344,154 1080×812）。两者都在卡片层 ——
+    左右各内缩 16、彼此间隔 16 —— 所以容器直接用 .pt-cards--wide，本页不再自己排版。
+    这一页没有表格，也就没有工具栏带 / 表格带 / 页脚带。
+  -->
+  <div class="pt-cards pt-cards--wide">
+    <!-- 页头摘要：口径是「当前生效的关键配置」，由本页把真实配置送进外壳页头 -->
+    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+
+    <!--
+      主操作进页头（画板 head 右侧动作，高 32）。
+      移动端外壳把 .pt-head 整条隐掉了，Teleport 过去的按钮会跟着看不见，
+      所以 <768 时改用面板页脚里的那颗保存键（见下方 footer 插槽）。
+    -->
+    <Teleport v-if="!isMobile && !loadFailed" to="#pt-head-acts">
+      <el-button type="primary" :loading="saving" :disabled="loading" @click="save">
+        <PtIcon v-if="!saving" name="save" :size="15" /><span>保存设置</span>
+      </el-button>
+    </Teleport>
+
     <div v-if="showWarning" class="pt-note pt-note--warn">
       <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
       <span>未设置下载目录，后台任务不会启动，请先设置并保存</span>
     </div>
 
     <PtPanel v-loading="loading" title="全局配置" icon="settings" padding="none">
-      <el-form :model="form" label-position="top" class="pt-form settings-form">
+      <!-- 读不到配置时不渲染表单：表单里是默认值，保存下去就是覆盖服务端配置 -->
+      <PtDataState v-if="loadFailed" :state="state" :sub="errorText">
+        <template #action>
+          <el-button size="small" @click="loadData">
+            <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+          </el-button>
+        </template>
+      </PtDataState>
+
+      <el-form v-else :model="form" label-position="top" class="pt-form settings-form">
         <div class="pt-strip">
           <PtIcon name="timer" :size="13" />
           <span>运行频率</span>
@@ -239,8 +314,14 @@ async function save() {
 
       <template #footer>
         <span class="pt-foot-note">配置程序运行的全局参数和默认行为</span>
-        <el-button type="primary" :loading="saving" @click="save">
-          <PtIcon name="save" :size="14" /><span>保存所有设置</span>
+        <!-- 移动端页头是隐掉的，保存键只能留在这里 -->
+        <el-button
+          v-if="isMobile && !loadFailed"
+          type="primary"
+          :loading="saving"
+          :disabled="loading"
+          @click="save">
+          <PtIcon v-if="!saving" name="save" :size="14" /><span>保存设置</span>
         </el-button>
       </template>
     </PtPanel>
@@ -248,13 +329,6 @@ async function save() {
 </template>
 
 <style scoped>
-.global-settings-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-  max-width: 880px;
-}
-
 /* 第一条区块条紧贴面板页头，两条发丝线会叠成 2px */
 .settings-form > .pt-strip:first-child {
   border-top: 0;

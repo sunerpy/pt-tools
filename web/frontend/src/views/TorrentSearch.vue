@@ -84,6 +84,13 @@ const pageSizeOptions = [20, 50, 100];
 // 选中的种子（用于批量操作）
 const selectedTorrents = ref<SearchTorrentItem[]>([]);
 
+/**
+ * 桌面表格的实例引用，只为了多选带上的「取消选择」能把 el-table 自己那份勾选状态也清掉：
+ * 光清本页数组的话，表头复选框会停在半选态，行上的勾也还在。
+ * 这里只声明用得到的那一个方法，省掉 element-plus 的类型导入。
+ */
+const tableRef = ref<{ clearSelection: () => void } | null>(null);
+
 // 下载器相关
 const downloaders = ref<DownloaderSetting[]>([]);
 const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
@@ -315,7 +322,7 @@ async function doSearch() {
     return;
   }
 
-  selectedTorrents.value = [];
+  clearSelection();
   currentPage.value = 1;
   searchedKeyword.value = searchKeyword.value.trim();
 
@@ -383,6 +390,12 @@ function toggleSelect(torrent: SearchTorrentItem) {
   const i = selectedTorrents.value.indexOf(torrent);
   if (i === -1) selectedTorrents.value.push(torrent);
   else selectedTorrents.value.splice(i, 1);
+}
+
+/** 多选带上的「取消选择」：两套视图各自的选中态都要清 */
+function clearSelection() {
+  selectedTorrents.value = [];
+  tableRef.value?.clearSelection();
 }
 
 /** 行卡的 key：搜索结果跨站点聚合，单靠站内 id 不唯一 */
@@ -846,10 +859,35 @@ function discountTone(torrent: SearchTorrentItem): "ok" | "warn" | "dang" | "neu
   }
 }
 
-/* 面板页脚那行摘要：命中数、耗时、失败站点各自都只有一个数字，凑一行比三个胶囊省地方 */
-const resultNote = computed(() => {
-  if (totalResults.value === 0 && searchErrors.value.length === 0) return "";
-  const parts = [`命中 ${totalResults.value} 条`, `耗时 ${searchTime.value} ms`];
+/**
+ * 画板 head 的 sub —— 标题下面那行实时摘要（11.5/400 t3）。
+ *
+ * 这一页的口径就是「这次搜索的战果」：命中数、有结果的站点数、耗时，失败站点补在末尾。
+ * 还没搜过时返回空串（外壳里那一行 :empty 会自己收起来），不摆占位文案。
+ */
+const headSub = computed(() => {
+  if (!searchedKeyword.value) return "";
+  if (loading.value) return `正在搜索「${searchedKeyword.value}」`;
+  const hitSites = Object.values(siteResultCounts.value).filter((n) => n > 0).length;
+  const parts = [`命中 ${totalResults.value} 条`];
+  if (hitSites > 0) parts.push(`来自 ${hitSites} 个站点`);
+  parts.push(`耗时 ${searchTime.value} ms`);
+  if (searchErrors.value.length > 0) parts.push(`${searchErrors.value.length} 个站点失败`);
+  return parts.join(" · ");
+});
+
+/**
+ * 画板 gfoot 的左侧说明（11.5/400 t3）：命中口径 + 当前页区间 + 每页条数，
+ * 例「命中 128 条 · 显示 1–50 · 每页 50 · 耗时 1240 ms」。
+ * 摘要行在手机上被外壳藏了页头，这行就是唯一能看到命中与耗时的地方，所以耗时也留着。
+ */
+const footNote = computed(() => {
+  const total = sortedResults.value.length;
+  if (total === 0) return "";
+  const from = (currentPage.value - 1) * pageSize.value + 1;
+  const to = Math.min(currentPage.value * pageSize.value, total);
+  const parts = [`命中 ${total} 条`, `显示 ${from}–${to}`, `每页 ${pageSize.value}`];
+  if (searchTime.value > 0) parts.push(`耗时 ${searchTime.value} ms`);
   if (searchErrors.value.length > 0) parts.push(`${searchErrors.value.length} 个站点失败`);
   return parts.join(" · ");
 });
@@ -857,103 +895,97 @@ const resultNote = computed(() => {
 
 <template>
   <div class="search-page">
-    <PtPanel title="搜索条件" icon="search">
+    <!-- 画板 head 的 sub：这次搜索的命中数与耗时，由本页把真实数字送进外壳页头 -->
+    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+
+    <!-- 表格带：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
+    <div v-loading="loading" class="pt-band--grid" element-loading-text="正在聚合多站点搜索结果...">
       <!--
-        搜索条件横排成一条：关键词最宽，站点次之，排序和方向各占一格。
-        el-form :inline 会把每个 form-item 的标签挤到左边，这里改成
-        「标签在上」的自定义栅格，窄屏时整条自然折行。
+        工具栏带 —— 画板 bar-88（40 高）：这里只留筛选类控件（站点、排序、方向、分类 chip），
+        右侧一个 28×28 图标钮。关键词与主搜索按钮按 search-head 的落法进页头。
       -->
-      <div class="bar">
-        <div class="bar__f bar__f--kw">
-          <span class="bar__l">关键词</span>
-          <el-input
-            v-model="searchKeyword"
-            placeholder="输入搜索关键词，回车即搜"
-            clearable
-            @keyup.enter="doSearch">
-            <template #prefix>
-              <PtIcon name="search" :size="14" />
-            </template>
-          </el-input>
-        </div>
-
-        <div class="bar__f bar__f--sites">
-          <span class="bar__l">站点</span>
-          <el-tooltip
-            :content="
-              selectedSites.length === 0
-                ? '未选择站点，将搜索所有可用站点'
-                : `已选择 ${selectedSites.length} 个站点`
-            "
-            placement="top">
-            <el-select
-              v-model="selectedSites"
-              multiple
-              collapse-tags
-              collapse-tags-tooltip
-              :placeholder="
-                availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'
-              "
-              style="width: 100%">
-              <template #header>
-                <div class="site-head">
-                  <el-checkbox
-                    :model-value="selectedSites.length === availableSites.length"
-                    :indeterminate="
-                      selectedSites.length > 0 && selectedSites.length < availableSites.length
-                    "
-                    @change="toggleAllSites">
-                    全选
-                  </el-checkbox>
-                  <span class="site-head__hint">
-                    {{ selectedSites.length === 0 ? "不选 = 搜全部" : "" }}
-                  </span>
-                </div>
+      <PtToolbar band>
+        <!--
+          关键词 + 搜索。桌面送进页头 —— 画板 15 的 head 之所以是 88 高，就是因为
+          搜索条长在页头里。移动端外壳把整条页头藏了（shell.css ≤768 时 .pt-head 是
+          display:none），所以这里用 Teleport 的 disabled 让同一段控件原地落回工具栏，
+          否则手机上连搜索入口都没有。
+        -->
+        <Teleport to="#pt-head-acts" :disabled="isMobile">
+          <div class="hsearch">
+            <el-input
+              v-model="searchKeyword"
+              class="hsearch__kw"
+              placeholder="输入关键词，回车即搜"
+              clearable
+              @keyup.enter="doSearch">
+              <template #prefix>
+                <PtIcon name="search" :size="14" />
               </template>
-              <el-option v-for="site in availableSites" :key="site" :label="site" :value="site">
-                <div class="site-opt">
-                  <span>{{ site }}</span>
-                  <PtTag v-if="siteHasCategories(site)">可筛选</PtTag>
-                </div>
-              </el-option>
-            </el-select>
-          </el-tooltip>
-        </div>
-
-        <div class="bar__f bar__f--sort">
-          <span class="bar__l">排序</span>
-          <el-select v-model="sortBy" style="width: 100%">
-            <el-option label="站点" value="sourceSite" />
-            <el-option label="发布时间" value="publishTime" />
-            <el-option label="大小" value="size" />
-            <el-option label="做种数" value="seeders" />
-            <el-option label="下载数" value="leechers" />
-            <el-option label="完成数" value="snatched" />
-          </el-select>
-        </div>
-
-        <div class="bar__f bar__f--dir">
-          <span class="bar__l">方向</span>
-          <el-button class="dir-btn" @click="orderDesc = !orderDesc">
-            <PtIcon name="arrow-up-down" :size="14" />
-            <span>{{ orderDesc ? "降序" : "升序" }}</span>
-          </el-button>
-        </div>
-
-        <div class="bar__acts">
-          <el-button type="primary" :loading="loading" @click="doSearch">
-            <PtIcon name="search" :size="14" /><span>搜索</span>
-          </el-button>
-          <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="top">
-            <el-button @click="clearCache">
-              <PtIcon name="rotate-ccw" :size="14" /><span>清除缓存</span>
+            </el-input>
+            <el-button type="primary" :loading="loading" @click="doSearch">
+              <PtIcon v-if="!loading" name="search" :size="15" /><span>搜索</span>
             </el-button>
-          </el-tooltip>
-        </div>
-      </div>
+          </div>
+        </Teleport>
 
-      <!-- 支持分类的站点各给一个筛选气泡，按钮上带已选条数 -->
-      <div v-if="selectedSites.length > 0" class="cats">
+        <!-- 站点多选：不选 = 搜全部，占位符直接把「全部 N 个站点」说出来，省掉一个标签 -->
+        <el-tooltip
+          :content="
+            selectedSites.length === 0
+              ? '未选择站点，将搜索所有可用站点'
+              : `已选择 ${selectedSites.length} 个站点`
+          "
+          placement="bottom">
+          <el-select
+            v-model="selectedSites"
+            class="tb__ctl tb__ctl--sites"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            :placeholder="
+              availableSites.length > 0 ? `全部 ${availableSites.length} 个站点` : '加载中...'
+            ">
+            <template #header>
+              <div class="site-head">
+                <el-checkbox
+                  :model-value="selectedSites.length === availableSites.length"
+                  :indeterminate="
+                    selectedSites.length > 0 && selectedSites.length < availableSites.length
+                  "
+                  @change="toggleAllSites">
+                  全选
+                </el-checkbox>
+                <span class="site-head__hint">
+                  {{ selectedSites.length === 0 ? "不选 = 搜全部" : "" }}
+                </span>
+              </div>
+            </template>
+            <el-option v-for="site in availableSites" :key="site" :label="site" :value="site">
+              <div class="site-opt">
+                <span>{{ site }}</span>
+                <PtTag v-if="siteHasCategories(site)">可筛选</PtTag>
+              </div>
+            </el-option>
+          </el-select>
+        </el-tooltip>
+
+        <!-- 排序：选项自带「按」字，这样 40 高的带里不用再多一个「排序」标签 -->
+        <el-select v-model="sortBy" class="tb__ctl tb__ctl--sort">
+          <el-option label="按站点" value="sourceSite" />
+          <el-option label="按发布时间" value="publishTime" />
+          <el-option label="按大小" value="size" />
+          <el-option label="按做种数" value="seeders" />
+          <el-option label="按下载数" value="leechers" />
+          <el-option label="按完成数" value="snatched" />
+        </el-select>
+
+        <el-button class="tb__dir" @click="orderDesc = !orderDesc">
+          <PtIcon name="arrow-up-down" :size="14" />
+          <span>{{ orderDesc ? "降序" : "升序" }}</span>
+        </el-button>
+
+        <!-- 支持分类的站点各给一枚 chip（画板 chip 24 高），按钮上带已选条数 -->
         <template v-for="siteId in selectedSites" :key="siteId">
           <el-popover
             v-if="siteHasCategories(siteId)"
@@ -1007,35 +1039,19 @@ const resultNote = computed(() => {
             </div>
           </el-popover>
         </template>
-      </div>
-    </PtPanel>
 
-    <PtPanel
-      v-loading="loading"
-      title="搜索结果"
-      icon="layers"
-      :count="totalResults > 0 ? `${totalResults} 条` : undefined"
-      padding="none"
-      element-loading-text="正在聚合多站点搜索结果...">
-      <template #actions>
-        <template v-if="selectedTorrents.length > 0">
-          <el-button size="small" :loading="batchDownloading" @click="batchDownloadTorrents">
-            <PtIcon name="download" :size="14" />
-            <span>打包下载 {{ selectedTorrents.length }}</span>
-          </el-button>
-          <el-button type="primary" size="small" @click="openBatchPushDialog">
-            <PtIcon name="upload" :size="14" />
-            <span>批量推送 {{ selectedTorrents.length }}</span>
-          </el-button>
+        <template #right>
+          <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="bottom">
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="清除搜索缓存"
+              @click="clearCache">
+              <PtIcon name="rotate-ccw" :size="15" />
+            </button>
+          </el-tooltip>
         </template>
-      </template>
-
-      <!-- 各站点的命中数 -->
-      <div v-if="Object.keys(siteResultCounts).length > 0" class="sites">
-        <PtTag v-for="(count, site) in siteResultCounts" :key="site">
-          {{ site }} · {{ count }}
-        </PtTag>
-      </div>
+      </PtToolbar>
 
       <!--
         部分失败（§5 的 partial）：还有结果可看时不能用一整块状态图顶掉列表 ——
@@ -1059,6 +1075,7 @@ const resultNote = computed(() => {
 
       <el-table
         v-if="!isMobile"
+        ref="tableRef"
         :data="pagedTorrents"
         class="pt-grid"
         :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
@@ -1298,20 +1315,56 @@ const resultNote = computed(() => {
           </template>
         </PtRowCard>
       </div>
+    </div>
 
-      <template v-if="sortedResults.length > 0" #footer>
-        <span class="pt-foot-note">{{ resultNote }}</span>
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          class="pt-pager"
-          :page-sizes="pageSizeOptions"
-          :total="sortedResults.length"
-          layout="total, sizes, prev, pager, next, jumper"
-          @current-change="handlePageChange"
-          @size-change="handleSizeChange" />
-      </template>
-    </PtPanel>
+    <!--
+      画板 gfoot 34：左说明 + 右分页。板 15 的带序是 grid 128..430 → gfoot 430..464
+      → selband 464..508，所以页脚在多选带之前，和任务列表页正好相反。
+    -->
+    <div v-if="sortedResults.length > 0" class="pt-band--foot">
+      <span>{{ footNote }}</span>
+      <span class="pt-band__spacer" />
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        class="pt-pager"
+        :page-sizes="pageSizeOptions"
+        :total="sortedResults.length"
+        layout="sizes, prev, pager, next, jumper"
+        @current-change="handlePageChange"
+        @size-change="handleSizeChange" />
+    </div>
+
+    <!-- 画板 selband 44（cyan@0.06）：批量操作从原来的面板头部挪到这条带上 -->
+    <div v-if="selectedTorrents.length > 0" class="pt-band--sel">
+      <PtIcon name="square-check" :size="15" />
+      <span>已选 {{ selectedTorrents.length }} 个种子</span>
+      <span class="pt-band__spacer" />
+      <el-button :loading="batchDownloading" @click="batchDownloadTorrents">
+        <PtIcon v-if="!batchDownloading" name="file-down" :size="15" /><span>打包下载</span>
+      </el-button>
+      <el-button type="primary" @click="openBatchPushDialog">
+        <PtIcon name="upload" :size="15" /><span>批量推送</span>
+      </el-button>
+      <el-button link @click="clearSelection">取消选择</el-button>
+    </div>
+
+    <!--
+      画板 p-sites 344,524：各站点的命中数属于表格下方的分析卡片，
+      不是工具栏上的一排 chip —— 站点一多，那排 chip 会把 40 高的带挤爆。
+    -->
+    <div v-if="Object.keys(siteResultCounts).length > 0" class="pt-cards pt-cards--wide">
+      <PtPanel
+        title="站点命中"
+        icon="layers"
+        :count="`${Object.keys(siteResultCounts).length} 个站点`">
+        <div class="sites">
+          <PtTag v-for="(count, site) in siteResultCounts" :key="site">
+            {{ site }} · {{ count }}
+          </PtTag>
+        </div>
+      </PtPanel>
+    </div>
 
     <!-- 单个推送对话框 -->
     <el-dialog
@@ -1451,54 +1504,58 @@ const resultNote = computed(() => {
 </template>
 
 <style scoped>
+/*
+ * 画板主区是一串全宽横向带（工具栏 40 → 表格 → 页脚带 34 → 多选带 44 → 分析卡片），
+ * 带与带之间没有间距，所以这里不给 gap；需要内缩的东西（提示条、卡片、移动端行卡）
+ * 自己带 16 的留白。
+ */
 .search-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
 /*
- * 搜索条件排成一条：关键词吃掉剩余空间，站点、排序、方向各有下限宽度，
- * 窄屏时整条按 flex-wrap 自然折行，不用写断点。
+ * 关键词 + 搜索按钮。桌面落在页头右侧（画板 search-head 里的那条搜索条），
+ * 手机上原地落回工具栏，所以宽度在断点里换成弹性的。
  */
-.bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pt-space-3);
-  align-items: flex-end;
-}
-
-.bar__f {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.bar__f--kw {
-  flex: 1 1 260px;
-}
-
-.bar__f--sites {
-  flex: 0 1 240px;
-}
-
-.bar__f--sort {
-  flex: 0 1 140px;
-}
-
-.bar__l {
-  font-size: var(--pt-fz-label);
-  color: var(--pt-t3);
-}
-
-.dir-btn {
-  width: 100%;
-}
-
-.bar__acts {
+.hsearch {
   display: flex;
   gap: var(--pt-space-2);
-  margin-left: auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.hsearch__kw {
+  width: 260px;
+}
+
+/* 画板：页头里的控件高 32 */
+.hsearch__kw :deep(.el-input__wrapper) {
+  height: 32px;
+}
+
+/* 工具栏里的控件按画板的 28 高：Element 默认的 32 会把 40 高的带顶满 */
+.tb__ctl {
+  flex: 0 0 auto;
+}
+
+.tb__ctl :deep(.el-select__wrapper) {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: var(--pt-fz-sm);
+}
+
+.tb__ctl--sites {
+  width: 208px;
+}
+
+.tb__ctl--sort {
+  width: 132px;
+}
+
+.tb__dir {
+  height: 28px;
+  margin: 0;
 }
 
 .site-head {
@@ -1519,15 +1576,6 @@ const resultNote = computed(() => {
   gap: var(--pt-space-2);
   align-items: center;
   justify-content: space-between;
-}
-
-.cats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pt-space-2);
-  margin-top: var(--pt-space-3);
-  padding-top: var(--pt-space-3);
-  border-top: 1px solid var(--pt-border);
 }
 
 /* 筛选按钮上的计数：原来用 el-badge 悬在角上，会被相邻按钮压住 */
@@ -1560,17 +1608,15 @@ const resultNote = computed(() => {
   color: var(--pt-t1);
 }
 
-/* 站点命中数那条：面板 padding=none，所以自带内边距 */
+/* 站点命中数：现在长在表格下方的分析卡片里，留白由 PtPanel 的 16 内边距给 */
 .sites {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  padding: var(--pt-space-3) var(--pt-pad);
-  border-bottom: 1px solid var(--pt-border);
 }
 
-/* 部分失败提示条：.pt-note 自带色条和底色，这里只补面板内的留白与右侧按钮 */
+/* 部分失败提示条：.pt-note 自带色条和底色，这里只补带内的留白与右侧按钮 */
 .partial {
   align-items: flex-start;
   margin: var(--pt-space-3) var(--pt-pad);
@@ -1672,12 +1718,12 @@ const resultNote = computed(() => {
   color: var(--pt-t3);
 }
 
-/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+/* 移动端行卡列表：表格带是贴边的，行卡这一支自己留 16 内边距（同样板 .cards） */
 .cards {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad);
 }
 
 .card-link {
@@ -1703,5 +1749,22 @@ const resultNote = computed(() => {
   flex-direction: column;
   gap: 4px;
   align-items: flex-end;
+}
+
+@media (max-width: 768px) {
+  /* 页头被外壳藏了，搜索那段控件原地落在工具栏里：占满一行，输入框吃掉剩余宽度 */
+  .hsearch {
+    flex: 1 1 100%;
+  }
+
+  .hsearch__kw {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .tb__ctl--sites,
+  .tb__ctl--sort {
+    width: 140px;
+  }
 }
 </style>

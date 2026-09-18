@@ -13,13 +13,18 @@ withDefaults(
      * 所以补齐四边与圆角。默认 false = 贴在 PtPanel 页头下方。
      */
     standalone?: boolean;
+    /**
+     * 带形态 —— 画板 bar-64：主区里一条 40 高的全宽白带，只有下沿一条线，
+     * 左右不内缩到卡片里。列表页用这个，`standalone` 是卡片网格页那种独立块。
+     */
+    band?: boolean;
   }>(),
-  { note: "", standalone: false },
+  { note: "", standalone: false, band: false },
 );
 </script>
 
 <template>
-  <div class="pt-toolbar" :class="{ 'is-standalone': standalone }">
+  <div class="pt-toolbar" :class="{ 'is-standalone': standalone, 'is-band': band }">
     <div class="pt-toolbar__side">
       <slot />
     </div>
@@ -33,6 +38,12 @@ withDefaults(
 </template>
 
 <style scoped>
+/* 带形态：画板里工具栏就是主区的一条全宽带，两端不留白、不描边、不圆角 */
+.pt-toolbar.is-band {
+  flex-wrap: nowrap;
+  border-radius: 0;
+}
+
 .pt-toolbar {
   display: flex;
   flex-wrap: wrap;

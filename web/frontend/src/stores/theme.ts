@@ -81,8 +81,13 @@ function readPalette(): ThemePalette {
 function readMode(): ThemeMode {
   const raw = localStorage.getItem(STORAGE_MODE);
   if (raw === "light" || raw === "dark" || raw === "auto") return raw;
-  // 历史默认是黑暗模式，保持不变，避免老用户升级后界面突然变白
-  return "dark";
+  /*
+   * 默认明亮 —— 设计稿 G Cockpit 的主张就是「浅色内容 + 深色外壳」，
+   * 画板里内容区是 canvas #F2F4F7 / surface #FFFFFF，只有 rail 与状态栏是深色。
+   * 之前默认深色，等于把内容区整个反过来，一眼看上去就和画板不是一套东西。
+   * 深色仍然是一等选项（黑暗 / 跟随系统都在偏好里），而且一旦用户选过就会被记住。
+   */
+  return "light";
 }
 
 function systemPrefersDark(): boolean {

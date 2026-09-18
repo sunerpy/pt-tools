@@ -35,8 +35,13 @@ const props = withDefaults(
     items: KpiItem[];
     /** 每行格数，默认按项数铺开，最多 6（再多每格就窄到读不了数） */
     cols?: number;
+    /**
+     * 带形态 —— 画板 kpibar 328,0 1112×64：主区最顶上的一条全宽白带，
+     * 格间 1px 竖线、下沿一条线，不包在卡片里。
+     */
+    band?: boolean;
   }>(),
-  { cols: 0 },
+  { cols: 0, band: false },
 );
 
 const cols = computed(() => props.cols || Math.min(props.items.length || 1, 6));
@@ -48,7 +53,7 @@ function hue(i: number) {
 </script>
 
 <template>
-  <div class="pt-kpi">
+  <div class="pt-kpi" :class="{ 'is-band': band }">
     <div class="pt-kpi__grid" :style="{ '--pt-kpi-cols': cols }">
       <div v-for="(it, i) in props.items" :key="it.label" class="pt-kpi__cell">
         <div class="pt-kpi__top">
@@ -89,6 +94,16 @@ function hue(i: number) {
   background: var(--pt-surface);
   border: 1px solid var(--pt-border);
   border-radius: var(--pt-r-lg);
+}
+
+/*
+ * 带形态 —— 画板 kpibar：主区顶上的全宽白带，四周不描边、不圆角，
+ * 只在下沿留一条线。格间竖线由下面那套「每格画左上两条边」的规则继续提供。
+ */
+.pt-kpi.is-band {
+  border: 0;
+  border-bottom: 1px solid var(--pt-border);
+  border-radius: 0;
 }
 
 /*
