@@ -76,7 +76,27 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 
 The SPA uses Vue 3, Vue Router hash history, Pinia, Element Plus, TypeScript, and external CSS files under `web/frontend/src/styles/`. API contracts live in `src/api/index.ts`; update them with backend DTO changes. ChatOps screens live under `src/views/chatops/`.
 
-Build output must exist for production compilation:
+### Every list or table page owes two contracts
+
+Both are design requirements, not polish. `src/views/TaskList.vue` is the reference implementation.
+
+1. **Six data states** — `loading / empty / zero / error / partial / perm`. Drive them with
+   `useDataState` (`src/composables/useDataState.ts`) and render with `PtDataState`. A failed load
+   must leave the error on the page: a toast alone plus an `empty` table tells the user the data is
+   gone rather than unfetched. 401/403 resolve to `perm` and get no retry button. `partial` (some
+   of several sources failed) shows a note above the still-usable rows, and only becomes the main
+   state when nothing was fetched — so aggregating endpoints must report per-source failures
+   instead of skipping silently (see `DownloaderFailure` in `api_downloader_torrents.go`).
+2. **Mobile row cards** — below 768px no desktop table may render and nothing may scroll
+   horizontally. Keep the table behind `v-if="!isMobile"` (`useIsMobile`) and add a `v-else` list of
+   `PtRowCard` (`lead / title / meta / status / progress / actions`). Do not delete desktop columns;
+   the cards are a second view. Touch targets are ≥44px.
+
+Styling slot content from a shared component needs `:slotted(...)` — a plain descendant selector in
+the component's scoped block silently matches nothing.
+
+Build output must exist for production compilation. `pnpm build` runs `vue-tsc -b` and is the real
+type gate; `vue-tsc --noEmit` has been observed to pass errors the build rejects:
 
 ```bash
 pnpm --dir web/frontend test
