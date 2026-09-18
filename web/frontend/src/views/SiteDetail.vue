@@ -517,16 +517,53 @@ const headSub = computed(() => {
 });
 
 /**
- * 画板 tabs 的 6 个分区里，任务 / 推送记录 / 过滤规则 在本项目是独立路由
- * （/tasks、/filter-rules），凭据画板放在右栏的常驻卡里而不是一个分区，
- * 所以这条带只给有本地内容的两项。计数用真实数字，没有就不显示那枚角标。
+ * 画板 tabs 的六个分区。左栏内容随分区切换，右栏四张卡常驻
+ * （画板 13 的激活分区是「RSS 订阅」，右栏那几张照样在）。
+ *
+ * 六项的内容都有真实来源，没有占位分区：
+ *   概览     站点配置表单（基本信息 + 限速与容量）
+ *   RSS 订阅 这个站点的订阅列表
+ *   任务     /api/tasks?site=<name>
+ *   推送记录 /api/tasks?site=<name>&pushed=1
+ *
+ * 「最近推送」与「任务」两张卡在 **RSS 分区下也显示** —— 画板 13 的激活分区是
+ * RSS 订阅，而左栏那一列同时摆着 p-rss / p-push / p-tasks 三张。它们各自还有一个
+ * 同名分区，点过去就是只看这一张。
+ *   过滤规则 这个站点各条 RSS 关联到的规则（form.rss[].filter_rule_ids × filterRules）
+ *   凭据     认证凭据表单（右栏那张只读摘要在这个分区下让位，不做两份同样的表单）
  */
-const tab = ref<"overview" | "rss">("overview");
+const tab = ref<"overview" | "rss" | "tasks" | "push" | "rules" | "cred">("overview");
 
 const TABS = computed(() => [
   { key: "overview" as const, label: "概览", n: 0 },
   { key: "rss" as const, label: "RSS 订阅", n: (form.value.rss || []).length },
+  { key: "tasks" as const, label: "任务", n: siteTasks.value.length },
+  { key: "push" as const, label: "推送记录", n: sitePushed.value.length },
+  { key: "rules" as const, label: "过滤规则", n: siteRuleRows.value.length },
+  { key: "cred" as const, label: "凭据", n: 0 },
 ]);
+
+/**
+ * 这个站点实际用到的过滤规则：从各条 RSS 的 filter_rule_ids 汇总，
+ * 顺带记下是哪条订阅在用 —— 光列规则名看不出「这一站为什么会命中它」。
+ */
+const siteRuleRows = computed(() => {
+  const used = new Map<number, string[]>();
+  for (const rss of form.value.rss || []) {
+    for (const id of rss.filter_rule_ids || []) {
+      const list = used.get(id) ?? [];
+      list.push(rss.name || `RSS #${rss.id ?? "?"}`);
+      used.set(id, list);
+    }
+  }
+  return [...used.entries()]
+    .map(([id, sources]) => ({
+      id,
+      rule: filterRules.value.find((r) => r.id === id),
+      sources,
+    }))
+    .sort((a, b) => (a.rule?.priority ?? 9999) - (b.rule?.priority ?? 9999));
+});
 
 /**
  * 画板 13 右栏是四张常驻卡（p-cred 凭据 / p-keep 保号规则 / p-stat 统计 / p-danger
@@ -568,8 +605,20 @@ async function loadSideCards() {
   sitePushed.value = pushed?.items ?? [];
 }
 
+/**
+ * 内置站点不可删 —— 判定用接口回的 is_builtin（服务端由站点定义注册表给出）。
+ * 服务端 `ConfigStore.DeleteSite` 也会自己拦一道；这里拦是为了不让按钮可点，
+ * 让用户点下去再吃一个报错比一开始就禁用要糟。
+ * 站点列表页原本就有这道拦截，详情页这个新入口当初漏了。
+ */
+const isBuiltinSite = computed(() => form.value.is_builtin === true);
+
 /** 危险操作：删掉这个站点的配置。删完回列表页，别停在一个已经不存在的详情上 */
 async function deleteSite() {
+  if (isBuiltinSite.value) {
+    ElMessage.warning("预置站点不可删除");
+    return;
+  }
   try {
     await ElMessageBox.confirm(
       `删除站点「${siteName.value}」的配置？它的 RSS 订阅、Cookie 与限速设置会一起删掉，` +
@@ -867,7 +916,7 @@ function ruleNameOf(id: number): string {
 
         <!-- 画板 p-push 700「最近推送」：这个站点已推送的任务 -->
         <PtPanel
-          v-show="tab === 'rss'"
+          v-show="tab === 'rss' || tab === 'push'"
           class="rss-card"
           title="最近推送"
           icon="send"
@@ -884,7 +933,7 @@ function ruleNameOf(id: number): string {
 
         <!-- 画板 p-tasks 700「任务」：这个站点的全部 RSS 任务 -->
         <PtPanel
-          v-show="tab === 'rss'"
+          v-show="tab === 'rss' || tab === 'tasks'"
           class="rss-card"
           title="任务"
           icon="list-checks"
@@ -904,15 +953,39 @@ function ruleNameOf(id: number): string {
             里。
           </p>
         </PtPanel>
-      </div>
 
-      <div class="sd-col">
-        <!--
-        画板 p-cred 1060,144 364×210「站点凭据」—— 凭据是这一页风险最高的一块，
-        画板把它单独放在右栏而不是混在配置表里。它在两个分区下都在（画板 13 的
-        激活分区是 RSS 订阅，右栏照样是这张卡）。
-      -->
-        <PtPanel class="cred-card" title="站点凭据" icon="key-round">
+        <!-- 画板分区「过滤规则」：这个站点的订阅实际关联到哪些规则 -->
+        <PtPanel
+          v-show="tab === 'rules'"
+          class="rss-card"
+          title="过滤规则"
+          icon="list-filter"
+          :count="`${siteRuleRows.length} 条`">
+          <ul v-if="siteRuleRows.length > 0" class="sd-list">
+            <li v-for="row in siteRuleRows" :key="row.id" class="sd-list__row">
+              <PtStatusPill :tone="row.rule?.enabled ? 'ok' : 'neutral'" size="sm">
+                {{ row.rule?.enabled ? "启用" : "停用" }}
+              </PtStatusPill>
+              <span class="sd-list__t">
+                {{ row.rule?.name ?? `规则 #${row.id}（已删除）` }}
+              </span>
+              <span class="sd-list__m">{{ row.sources.join("、") }}</span>
+            </li>
+          </ul>
+          <p v-else class="sd-empty">
+            这个站点的订阅没有关联过滤规则 —— 它们按「免费种子自动下载」走。
+          </p>
+          <p class="sd-foot">
+            关联在每条 RSS 的编辑弹窗里改；规则本身在
+            <el-button link type="primary" @click="router.push('/filter-rules')">
+              过滤规则
+            </el-button>
+            页维护。一旦某条 RSS 关联了规则，它就只下命中的种子。
+          </p>
+        </PtPanel>
+
+        <!-- 画板分区「凭据」：可编辑的那一份认证凭据表单，700 宽 -->
+        <PtPanel v-show="tab === 'cred'" class="rss-card" title="认证凭据" icon="key-round">
           <el-form :model="form" label-position="top" class="pt-form">
             <div class="cred-kv">
               <span class="cred-kv__k">认证方式</span>
@@ -994,6 +1067,43 @@ function ruleNameOf(id: number): string {
               <div class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
             </el-form-item>
           </el-form>
+          <p class="sd-foot">
+            改完要点页头的「保存配置」才会落库。留空保存不会覆盖已存的值 ——
+            想清掉某个凭据，填一个空格再保存。
+          </p>
+        </PtPanel>
+      </div>
+
+      <div class="sd-col">
+        <!--
+        画板 p-cred 1060,144 364×210「站点凭据」—— 凭据是这一页风险最高的一块，
+        画板把它单独放在右栏而不是混在配置表里。它在两个分区下都在（画板 13 的
+        激活分区是 RSS 订阅，右栏照样是这张卡）。
+      -->
+        <!--
+          右栏这张是**只读摘要**：认证方式与各凭据存了没。
+          可编辑的那份在「凭据」分区的左栏 —— 同一份表单不做两个副本，
+          否则两处各填一半、保存哪一份都说不清。
+        -->
+        <PtPanel v-show="tab !== 'cred'" class="cred-card" title="站点凭据" icon="key-round">
+          <ul class="sd-kv">
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">认证方式</span>
+              <span class="sd-kv__v">{{ authMethodLabel }}</span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">Cookie</span>
+              <span class="sd-kv__v">{{ form.has_cookie ? "已保存" : "未设置" }}</span>
+            </li>
+            <li v-if="form.api_url" class="sd-kv__row">
+              <span class="sd-kv__k">API 地址</span>
+              <span class="sd-kv__v sd-kv__v--wrap">{{ form.api_url }}</span>
+            </li>
+          </ul>
+          <p class="sd-foot">
+            凭据在本机库里以 AES-GCM 加密存放，页面不回显已存的值。要改就去
+            <el-button link type="primary" @click="tab = 'cred'">凭据分区</el-button>。
+          </p>
         </PtPanel>
 
         <!-- 画板 p-keep 364「保号规则」：探测模式与提醒阈值，来自 login-state -->
@@ -1077,9 +1187,22 @@ function ruleNameOf(id: number): string {
             删除这个站点的配置：它的 RSS 订阅、Cookie / API Key 与限速设置会一起删掉。
             <strong>已经下载的种子和下载器里的任务不受影响。</strong>
           </p>
-          <el-button type="danger" plain :loading="deleting" @click="deleteSite">
-            <PtIcon name="trash-2" :size="15" /><span>删除站点配置</span>
-          </el-button>
+          <p v-if="isBuiltinSite" class="sd-danger__p">
+            这是内置站点（站点定义由程序自带），<strong>不能删除</strong>。
+            不想让它参与任务，把「基本信息」里的「启用站点」关掉就行。
+          </p>
+          <el-tooltip :disabled="!isBuiltinSite" content="预置站点不可删除" placement="top">
+            <span class="sd-danger__btn">
+              <el-button
+                type="danger"
+                plain
+                :disabled="isBuiltinSite"
+                :loading="deleting"
+                @click="deleteSite">
+                <PtIcon name="trash-2" :size="15" /><span>删除站点配置</span>
+              </el-button>
+            </span>
+          </el-tooltip>
         </PtPanel>
       </div>
     </div>
@@ -1474,6 +1597,12 @@ function ruleNameOf(id: number): string {
   text-align: right;
 }
 
+/* API 地址这类长值允许折行，别把卡顶宽 */
+.sd-kv__v--wrap {
+  text-align: left;
+  word-break: break-all;
+}
+
 .sd-kv__v.is-warn {
   color: var(--pt-warn);
 }
@@ -1513,6 +1642,11 @@ function ruleNameOf(id: number): string {
   margin: 0;
   font-size: var(--pt-fz-sm);
   color: var(--pt-t2);
+}
+
+/* disabled 的按钮自己不派发 mouseenter，el-tooltip 需要一个能接事件的宿主 */
+.sd-danger__btn {
+  display: inline-flex;
 }
 
 .sd-danger__p {

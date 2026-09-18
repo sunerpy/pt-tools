@@ -129,6 +129,32 @@ const CACHE_KEY = "pt-tools-search-cache";
  * 的短列表：不存结果本体（一次多站点搜索的 items 可以有几百条，塞 localStorage
  * 会顶到配额），只存关键词、命中数、耗时、时间，够用来「再搜一次」。
  */
+/**
+ * 分类分段 —— 画板 bar-88 的 seg（全部 / 电影 / 剧集 / 动漫 / 音乐）。
+ *
+ * 画板那五个标签是写死的，但本项目的分类是**各站自己的口径**（站点分类配置里那套），
+ * 没有跨站统一映射；硬塞那五个标签会出现一堆永远为空的档位。所以档位取
+ * 「这批结果里真实出现过的分类」，最多 5 个，不够就少几个 —— 形状照画板，标签用真数据。
+ */
+const activeCategory = ref("");
+
+const categoryOptions = computed(() => {
+  const counts = new Map<string, number>();
+  for (const item of searchResults.value) {
+    const name = (item.category || "").trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name]) => ({ label: name, value: name }));
+  return [{ label: "全部", value: "" }, ...top];
+});
+
+/** 仅免费 —— 画板 facet-3。结果里带 discount 就是有优惠，FREE 是完全免费 */
+const freeOnly = ref(false);
+
 const HISTORY_KEY = "pt-tools-search-history-v1";
 const HISTORY_MAX = 10;
 
@@ -165,6 +191,81 @@ function rememberSearch(keyword: string, hits: number, ms: number) {
   } catch {
     /* 隐私模式下写不进去，历史只在本次会话里有效，不影响搜索本身 */
   }
+}
+
+/**
+ * 保存搜索 —— 画板 search-head 的 ha-1。
+ * 存的是「关键词 + 站点 + 排序 + 方向 + 分类 + 仅免费」这一组条件，不存结果本体；
+ * 点一下就把条件恢复并重搜。同样只落 localStorage，后端没有这份数据。
+ */
+const SAVED_KEY = "pt-tools-search-saved-v1";
+const SAVED_MAX = 12;
+
+interface SavedSearch {
+  name: string;
+  keyword: string;
+  sites: string[];
+  sortBy: string;
+  orderDesc: boolean;
+  category: string;
+  freeOnly: boolean;
+}
+
+const savedSearches = ref<SavedSearch[]>(loadSaved());
+
+function loadSaved(): SavedSearch[] {
+  try {
+    const raw = localStorage.getItem(SAVED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, SAVED_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSaved(list: SavedSearch[]) {
+  savedSearches.value = list;
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(list));
+  } catch {
+    /* 隐私模式写不进去，本次会话内仍可用 */
+  }
+}
+
+function saveCurrentSearch() {
+  const keyword = searchKeyword.value.trim();
+  if (!keyword) {
+    ElMessage.warning("先输入关键词再保存");
+    return;
+  }
+  const entry: SavedSearch = {
+    name: keyword,
+    keyword,
+    sites: [...selectedSites.value],
+    sortBy: sortBy.value,
+    orderDesc: orderDesc.value,
+    category: activeCategory.value,
+    freeOnly: freeOnly.value,
+  };
+  persistSaved(
+    [entry, ...savedSearches.value.filter((x) => x.name !== entry.name)].slice(0, SAVED_MAX),
+  );
+  ElMessage.success("已保存这组搜索条件");
+}
+
+function applySaved(item: SavedSearch) {
+  searchKeyword.value = item.keyword;
+  selectedSites.value = [...item.sites];
+  sortBy.value = item.sortBy as typeof sortBy.value;
+  orderDesc.value = item.orderDesc;
+  activeCategory.value = item.category;
+  freeOnly.value = item.freeOnly;
+  doSearch();
+}
+
+function removeSaved(name: string) {
+  persistSaved(savedSearches.value.filter((x) => x.name !== name));
 }
 
 function clearHistory() {
@@ -271,11 +372,26 @@ const sortedResults = computed(() => {
   });
 });
 
+/**
+ * 本地筛选：分类分段与「仅免费」都作用在已经拿到的结果上，不重新请求 ——
+ * 一次多站点搜索要十几秒，为了换个分类再等一遍不合理。
+ */
+const filteredResults = computed(() => {
+  let rows = sortedResults.value;
+  if (activeCategory.value) {
+    rows = rows.filter((r) => (r.category || "").trim() === activeCategory.value);
+  }
+  if (freeOnly.value) {
+    rows = rows.filter((r) => r.isFree);
+  }
+  return rows;
+});
+
 // 当前页的种子列表
 const pagedTorrents = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   const end = start + pageSize.value;
-  return sortedResults.value.slice(start, end);
+  return filteredResults.value.slice(start, end);
 });
 
 // 获取默认下载器
@@ -1022,6 +1138,11 @@ const footNote = computed(() => {
         <el-button type="primary" :loading="loading" @click="doSearch">
           <PtIcon v-if="!loading" name="search" :size="15" /><span>搜索</span>
         </el-button>
+
+        <!-- 画板 search-head 的 ha-1「保存搜索」：把当前这组条件存下来 -->
+        <el-button :disabled="!searchKeyword.trim()" @click="saveCurrentSearch">
+          <PtIcon name="bookmark" :size="15" /><span>保存搜索</span>
+        </el-button>
       </div>
 
       <!--
@@ -1096,6 +1217,28 @@ const footNote = computed(() => {
       里面：套进去就变成表格内部的一行，和画板上那条独立的带不是一回事。
     -->
     <PtToolbar band>
+      <!--
+        画板 bar-88 的 seg：分类分段。档位取这批结果里真实出现过的分类
+        （本项目没有跨站统一的分类口径），所以搜之前只有「全部」一档。
+      -->
+      <el-segmented
+        v-if="categoryOptions.length > 1"
+        v-model="activeCategory"
+        class="pt-seg"
+        :options="categoryOptions"
+        :props="{ label: 'label', value: 'value' }" />
+
+      <!-- 画板 chip-1「仅免费」 -->
+      <el-button
+        v-if="searchResults.length > 0"
+        class="sc-chip"
+        :type="freeOnly ? 'primary' : 'default'"
+        :plain="freeOnly"
+        :aria-pressed="freeOnly"
+        @click="freeOnly = !freeOnly">
+        <span>仅免费</span>
+      </el-button>
+
       <!-- 支持分类的站点各给一枚 chip（画板 chip 24 高），按钮上带已选条数 -->
       <template v-for="siteId in selectedSites" :key="siteId">
         <el-popover
@@ -1518,6 +1661,28 @@ const footNote = computed(() => {
           只记关键词与战果，不存结果本体 —— 一次多站点搜索的条目太多，塞不进本地存储。
         </p>
       </PtPanel>
+
+      <!-- 「保存搜索」存下来的条件组，点一下恢复条件并重搜 -->
+      <PtPanel
+        v-if="savedSearches.length > 0"
+        class="pt-cards__full"
+        title="已保存的搜索"
+        icon="bookmark"
+        :count="`${savedSearches.length} 组`">
+        <ul class="hist">
+          <li v-for="item in savedSearches" :key="item.name" class="hist__row">
+            <el-button link type="primary" @click="applySaved(item)">{{ item.name }}</el-button>
+            <span class="hist__meta">
+              {{ item.sites.length > 0 ? `${item.sites.length} 个站点` : "全部站点" }} ·
+              {{ item.category || "全部分类" }}{{ item.freeOnly ? " · 仅免费" : "" }}
+            </span>
+            <el-button link type="danger" @click="removeSaved(item.name)">
+              <PtIcon name="x" :size="13" />
+            </el-button>
+          </li>
+        </ul>
+        <p class="hist__foot">存的是搜索条件（关键词、站点、排序、分类、仅免费），不含结果。</p>
+      </PtPanel>
     </div>
 
     <!-- 单个推送对话框 -->
@@ -1736,6 +1901,14 @@ const footNote = computed(() => {
   font-size: var(--pt-fz-sm);
   font-weight: 600;
   color: var(--pt-t1);
+}
+
+/* 画板 chip-1「仅免费」：工具栏里的 24 高 chip */
+.sc-chip {
+  height: 24px;
+  padding: 0 10px;
+  margin: 0;
+  font-size: var(--pt-fz-label);
 }
 
 /* 搜索历史卡：一行「关键词按钮 + 战果」，关键词可点，点了就再搜一次 */

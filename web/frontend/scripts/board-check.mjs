@@ -43,12 +43,14 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080], // p-up / p-dist / p-watch
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["上传构成", "等级分布", "需要关注"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/userinfo/export": {
     board: "11 导出分享图",
     kind: CARD,
     cards: [700, 364], // p-prev / p-set
     minCards: 2, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["预览", "导出设置"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/sites": {
     board: "12 站点列表",
@@ -56,6 +58,7 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [364, 340, 344, 1080], // p-health / p-rss / p-ev / p-auth
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["探测健康", "RSS 订阅", "保号提醒", "认证方式"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/supported-sites": {
     board: "14 已支持站点",
@@ -63,6 +66,7 @@ const EXPECT = {
     bands: ["toolbar"], // bar-64，之后直接是卡
     cards: [548, 516, 1080], // g0..g3 两栏（数量随站点数变）+ p-cap 通栏
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["内置能力"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/search": {
     board: "15 种子搜索",
@@ -71,6 +75,9 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080], // p-sites / p-alt / p-hist
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["站点命中", "没返回的站点", "搜索历史"],
+    needsSeg: true, // 画板 bar-88 的分类分段
+    controls: ["搜索", "保存搜索", "仅免费"], // search-head 的 go / ha-1 与 bar-88 的 chip // 画板这一页的卡（标题身份，防同宽卡互相顶替）
     /*
      * 搜索页的结果、页脚带与分析卡都要先搜一次才有。这里直接写进输入框再点按钮，
      * 不动内部状态 —— 走的是用户真实路径，页面自己的 loading / 六态照常参与。
@@ -96,12 +103,14 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080], // p-thr / p-site / p-warn
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["最近 7 天吞吐", "按站点分布", "需要关注的任务"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/paused": {
     board: "17 暂停任务",
     kind: CARD,
     cards: [1080, 1080], // c-paused / c-archive
     minCards: 2, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["暂停中", "历史归档"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/downloader-hub": {
     board: "18 下载器 Web UI",
@@ -109,12 +118,14 @@ const EXPECT = {
     bands: ["toolbar"],
     cards: [276, 276, 276, 788, 386, 386], // 左列三卡 / 右上 p-grid / 右下 p-rate + p-note
     minCards: 6, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["传输", "状态", "筛选", "任务列表", "速率", "这一页的口径"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/downloaders": {
     board: "19 下载器设置",
     kind: CARD,
     cards: [1080, 548, 516, 1080, 1080], // p-dl / p-dir / p-safe / p-bind / p-log
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["下载器", "下载目录", "磁盘保护", "站点绑定", "连通性检查"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/filter-rules": {
     board: "20 过滤规则",
@@ -122,18 +133,23 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"], // bar-64 落地为空带，见 ALLOWED_GAPS
     cards: [548, 516, 1080, 1080], // p-order / p-test / p-hit / p-hint
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["匹配顺序", "试跑", "命中统计", "规则怎么生效"],
+    needsSeg: true, // 画板 bar-64 的「全部 / 启用 / 禁用」分段
+    controls: ["全部", "启用", "禁用", "试跑这条"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/cleanup": {
     board: "21 自动删种",
     kind: CARD,
     cards: [1080], // p-main
     minCards: 1, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["自动删种"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/notifications": {
     board: "22 消息通知",
     kind: CARD,
     cards: [548, 516, 548, 516, 1080], // nt0..nt3 两栏 + p-policy/p-stat + p-recent
     minCards: 7, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["投递策略", "最近投递统计", "最近的通知"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/notifications/1": {
     board: "23 通道详情",
@@ -141,12 +157,14 @@ const EXPECT = {
     detail: true, // head 88 带面包屑
     cards: [1080, 1080, 1080, 700], // hero / c-basic / c-test / p-msg
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["基本信息", "凭证与连接", "连通性测试", "操作提示文案"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/bindings": {
     board: "24 ChatOps 绑定",
     kind: CARD,
     cards: [612, 612, 612], // p-pending / p-active / p-note
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["待绑定", "已绑定", "绑定是怎么走的"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/audit": {
     board: "25 操作审计",
@@ -154,6 +172,7 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080, 1080], // p-cmd / p-ch / p-fail / p-keep
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["命令分布", "渠道分布", "失败与被拒", "保留与清理"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/rss-notifications": {
     board: "26 RSS 通知日志",
@@ -161,18 +180,21 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 548, 516, 1080], // p-res / p-idem / p-site / p-quiet / p-retry
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["推送结果分布", "幂等与去重", "待重试与失败", "按站点分布", "安静时段"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/global": {
     board: "27 系统设置",
     kind: CARD,
     cards: [1080], // p-cfg（画板另有一条 warn 提示，那是状态不是常驻卡）
     minCards: 1, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["全局配置"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/cloak-config": {
     board: "28 CloakBrowser",
     kind: CARD,
     cards: [1080, 700, 364, 1080], // intro / p-cfg / p-res / p-life
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["Manager 连接", "探测结果", "页面状态"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/logs": {
     board: "29 运行日志",
@@ -180,20 +202,24 @@ const EXPECT = {
     bands: ["toolbar"],
     cards: [300, 300, 300, 764], // 左列 p-files/p-lv/p-arc / 右 p-tail
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["日志文件", "级别筛选", "轮转归档", "运行日志"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/password": {
     board: "44 修改密码",
     kind: CARD,
     cards: [520, 344], // p-acct 居中 + p-rules/p-msg/p-note 三栏
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["账号信息", "口令规则", "改完会发生什么", "忘记密码怎么办"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/sites/M-Team": {
     board: "13 站点详情",
     kind: CARD,
     detail: true,
     tabs: true, // tabs 带 40 高
+    tabLabels: ["概览", "RSS 订阅", "任务", "推送记录", "过滤规则", "凭据"], // 画板 tabs 的六项
     cards: [700, 700, 700, 364, 364, 364, 364], // 左列 p-rss/p-push/p-tasks · 右列 p-cred/p-keep/p-stat/p-danger
     minCards: 7, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    titles: ["RSS 订阅", "最近推送", "任务", "站点凭据", "保号规则", "站点统计", "危险操作"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
     /*
      * 画板 13 的激活分区是「RSS 订阅」，左栏那三张卡就是这个分区下的内容。
      * 页面默认停在「概览」，所以先点一下分区带 —— 不点就只能量到右栏。
@@ -379,6 +405,20 @@ const MEASURE = `(() => {
   return {
     head: one('.pt-head'),
     kpi: one('.pt-kpi'),
+    /* KPI 每格：画板要求每格都有变化 pill 与 48×22 柱图，所以逐格量，不只量整条高度 */
+    kpiCells: [...document.querySelectorAll('.pt-kpi__cell')].map((el) => ({
+      label: (el.querySelector('.pt-kpi__label')?.textContent ?? '').trim(),
+      pill: Boolean(el.querySelector('.pt-pill, .pt-status-pill, [class*="pill"]')),
+      bars: Boolean(el.querySelector('.pt-kpi__bars')),
+    })),
+    tabLabels: [...document.querySelectorAll('.pt-band__tab')].map((el) =>
+      (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
+    ),
+    /* 关键控件：按钮/分段这类「画板上画了、少了就不算落地」的东西 */
+    controlText: [...document.querySelectorAll('button, .el-segmented__item, .pt-band__tab')]
+      .map((el) => (el.textContent ?? '').replace(/\\s+/g, ' ').trim())
+      .filter(Boolean),
+    hasSeg: Boolean(document.querySelector('.pt-seg, .el-segmented')),
     ownHead: one('.pt-band--head'),
     tabs: one('.pt-band--tabs'),
     toolbar: one('.pt-band--toolbar'),
@@ -482,6 +522,15 @@ for (const route of routes) {
   if (want.ownHead === "kpi") {
     if (!got.kpi) fail("kpi", "画板用 KPI 带替代 head，页面上找不到 .pt-kpi");
     else if (!near(got.kpi.h, 64)) fail("kpi", `KPI 带高 ${got.kpi.h}，画板 64`);
+    /* 画板 kpibar：6 格，每格都有变化 pill 与 48×22 柱图 */
+    const cells = got.kpiCells;
+    if (cells.length !== (want.kpiCells ?? 6)) {
+      fail("kpi.cells", `KPI 有 ${cells.length} 格，画板 ${want.kpiCells ?? 6} 格`);
+    }
+    const noBars = cells.filter((c) => !c.bars).map((c) => c.label);
+    if (noBars.length > 0) fail("kpi.bars", `这些格没有柱图：${noBars.join("、")}`);
+    const noPill = cells.filter((c) => !c.pill).map((c) => c.label);
+    if (noPill.length > 0) fail("kpi.pill", `这些格没有变化 pill：${noPill.join("、")}`);
   } else if (want.ownHead === "head88") {
     if (!got.ownHead) fail("ownHead", "画板 search-head 88，页面上找不到 .pt-band--head");
     else if (!near(got.ownHead.h, 88, 2)) fail("ownHead", `自带页头高 ${got.ownHead.h}，画板 88`);
@@ -489,6 +538,19 @@ for (const route of routes) {
     const wantH = want.detail ? 88 : 64;
     if (!got.head) fail("head", "找不到 .pt-head");
     else if (!near(got.head.h, wantH, 2)) fail("head", `页头高 ${got.head.h}，画板 ${wantH}`);
+  }
+
+  /*
+   * 关键控件。画板上画了一枚按钮或一条分段器，少了就不算按稿落地 ——
+   * 光量带高与栏宽看不出「工具栏里少了分类分段」这种事。
+   */
+  if (want.needsSeg && !got.hasSeg) {
+    fail("controls.seg", "画板这一页有分段器，页面上找不到");
+  }
+  for (const label of want.controls ?? []) {
+    if (!got.controlText.some((t) => t.includes(label))) {
+      fail(`controls(${label})`, `找不到写着「${label}」的控件`);
+    }
   }
 
   /*
@@ -508,6 +570,12 @@ for (const route of routes) {
   if (want.tabs) {
     if (!got.tabs) fail("tabs", "画板有 40 高的分区带，页面上找不到 .pt-band--tabs");
     else if (!near(got.tabs.h, 40, 2)) fail("tabs", `分区带高 ${got.tabs.h}，画板 40`);
+    /* 分区带的项要逐个对上画板的标签，不能只对上带高 */
+    for (const label of want.tabLabels ?? []) {
+      if (!got.tabLabels.some((t) => t.includes(label))) {
+        fail(`tabs.label(${label})`, `分区带里没有「${label}」；实测 ${got.tabLabels.join(" / ")}`);
+      }
+    }
   }
 
   // 带：存在、贴住主区两侧、高度对得上、彼此相邻
@@ -554,6 +622,16 @@ for (const route of routes) {
           else pool.splice(hit, 1);
         }
         const shown = found.map((c) => `${c.w}${c.title ? `(${c.title})` : ""}`).join(" / ");
+        /*
+         * 身份断言。只比栏宽与张数挡不住「用另一张同宽的卡补位」——
+         * 删掉通道详情里任意一张 1080 的卡，剩下的照样能把三张 1080 配满。
+         * 所以每条路由列出画板那几张卡的标题，逐个要求它在页面上真的存在。
+         */
+        for (const title of want.titles ?? []) {
+          if (!found.some((c) => c.title.includes(title))) {
+            fail(`cards.title(${title})`, `找不到标题含「${title}」的卡；实测 ${shown}`);
+          }
+        }
         /* 逐张上报：一页里某一张卡做不到，不该把整页的卡片检查一起豁免 */
         const seen = new Map();
         for (const w of missing) {

@@ -109,68 +109,171 @@ interface KpiRow {
   icon: string;
   delta?: string;
   deltaTone?: "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
-  /** 画板每格右侧 48×22 的柱图。这里画的是按站点的构成，不是时间序列 */
+  /** 画板每格右侧 48×22 的柱图 */
   series?: number[];
+  /** 柱图画的是什么 —— 每格含义不同，必须说出来，否则读者只能猜 */
+  seriesHint?: string;
 }
 
 /**
- * KPI 带 —— 画板 kpibar：**6 格一行、整条 64 高**，格间 1px 竖线。
+ * 上次查看时的快照 —— 画板每格右侧那枚「变化 pill」要一个比较对象。
  *
- * 六格的口径照画板 10 写：站点、活跃任务、今日推送、免费种子、总上传、平均分享率。
- * 前三格来自站点统计接口，「活跃任务 / 今日推送 / 免费种子」来自 `/api/tasks/stats`
- * —— 那三个是任务口径，站点统计接口里没有，为此加了那一个只回四个整数的接口。
+ * 站点统计接口只回当前值、不存历史，所以站点数 / 总上传 / 平均分享率的变化只能跟
+ * **上一次打开这一页时的值**比。存 localStorage，pill 上写明「较上次」，
+ * 不把它说成「较昨日」—— 那是另一回事，会误导。
+ */
+const SNAPSHOT_KEY = "pt-tools-userinfo-snapshot-v1";
+
+interface Snapshot {
+  siteCount: number;
+  totalUploaded: number;
+  averageRatio: number;
+  at: number;
+}
+
+/** 本次打开时读到的上一份快照；写入新快照不改它，否则第一次渲染就没得比了 */
+const prevSnapshot = ref<Snapshot | null>(loadSnapshot());
+
+function loadSnapshot(): Snapshot | null {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Snapshot;
+    return typeof parsed?.siteCount === "number" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSnapshot(stats: AggregatedStatsResponse) {
+  try {
+    localStorage.setItem(
+      SNAPSHOT_KEY,
+      JSON.stringify({
+        siteCount: stats.siteCount,
+        totalUploaded: stats.totalUploaded,
+        averageRatio: stats.averageRatio,
+        at: Date.now(),
+      } satisfies Snapshot),
+    );
+  } catch {
+    /* 隐私模式写不进去：pill 退回「首次」，不影响别的 */
+  }
+}
+
+/** 把差值写成 pill 文案；没有可比对象时说「首次」而不是编一个 0 */
+function deltaPill(
+  current: number,
+  previous: number | undefined,
+  format: (n: number) => string,
+): { delta: string; deltaTone: "ok" | "warn" | "dang" | "neutral" } {
+  if (previous === undefined) return { delta: "首次", deltaTone: "neutral" };
+  const diff = current - previous;
+  if (diff === 0) return { delta: "持平", deltaTone: "neutral" };
+  const sign = diff > 0 ? "+" : "−";
+  return {
+    delta: `较上次 ${sign}${format(Math.abs(diff))}`,
+    deltaTone: diff > 0 ? "ok" : "warn",
+  };
+}
+
+/**
+ * KPI 带 —— 画板 kpibar：**6 格一行、整条 64 高**，格间 1px 竖线，
+ * **每格都有一枚变化 pill 和一张 48×22 柱图**。
  *
- * 柱图（画板每格右侧 48×22）画的是**按站点的构成**，不是时间序列：
- * 聚合接口不存历史，硬造一条趋势线就是编数据。所以只有「按站点能分解」的格子有柱子。
+ * 六格的口径照画板 10：站点、活跃任务、今日推送、免费种子、总上传、平均分享率。
+ * 后三项里的任务口径来自 `/api/tasks/stats`（站点统计接口没有这些数）。
+ *
+ * 柱图的含义每格不同，都是真数据，没有一格是编的：
+ *   站点数量 / 总上传量 / 平均分享率 → 按站点的构成（perSiteStats）
+ *   活跃任务 / 今日推送 / 免费种子   → 最近 7 天按天（tasks/stats 的 daily）
+ * pill 同理：任务那三格能跟「今天 / 昨天」比，站点那三格只能跟上次查看比。
  */
 const kpiItems = computed<KpiRow[]>(() => {
   const stats = aggregatedStats.value;
   if (!stats) return [];
 
   const perSite = stats.perSiteStats ?? [];
-  const uploadSeries = perSite
-    .map((r) => r.uploaded)
-    .sort((a, b) => b - a)
-    .slice(0, 8);
-  const ratioSeries = perSite
-    .map((r) => r.ratio)
-    .filter((n) => n > 0)
-    .sort((a, b) => b - a)
-    .slice(0, 8);
+  const topN = (pick: (r: (typeof perSite)[number]) => number) =>
+    perSite
+      .map(pick)
+      .filter((n) => n > 0)
+      .sort((a, b) => b - a)
+      .slice(0, 8);
+
   const tasks = taskStats.value;
+  const daily = tasks?.daily ?? [];
+  const today = daily.at(-1);
+  const yesterday = daily.length >= 2 ? daily.at(-2) : undefined;
+  const prev = prevSnapshot.value;
+
+  const siteCountPill = deltaPill(stats.siteCount, prev?.siteCount, (n) => String(n));
+  const uploadPill = deltaPill(stats.totalUploaded, prev?.totalUploaded, (n) => formatBytes(n));
+  const ratioPill = deltaPill(stats.averageRatio, prev?.averageRatio, (n) => n.toFixed(2));
 
   const items: KpiRow[] = [
-    { label: "站点数量", value: stats.siteCount.toString(), icon: "globe" },
+    {
+      label: "站点数量",
+      value: stats.siteCount.toString(),
+      icon: "globe",
+      series: topN((r) => r.seeding),
+      seriesHint: "每根一个站点：做种数构成",
+      ...siteCountPill,
+    },
     {
       label: "活跃任务",
       value: tasks ? tasks.active.toString() : "—",
       icon: "list-checks",
+      series: daily.map((d) => d.created),
+      seriesHint: "最近 7 天每天新入库的任务数",
+      delta: today ? `今日新增 ${today.created}` : "无数据",
+      deltaTone: today && today.created > 0 ? "ok" : "neutral",
     },
     {
       label: "今日推送",
       value: tasks ? tasks.pushedToday.toString() : "—",
       icon: "send",
+      series: daily.map((d) => d.pushed),
+      seriesHint: "最近 7 天每天推送成功的条数",
+      ...(today && yesterday
+        ? (() => {
+            const diff = today.pushed - yesterday.pushed;
+            if (diff === 0) return { delta: "与昨日持平", deltaTone: "neutral" as const };
+            return {
+              delta: `较昨日 ${diff > 0 ? "+" : "−"}${Math.abs(diff)}`,
+              deltaTone: (diff > 0 ? "ok" : "warn") as "ok" | "warn",
+            };
+          })()
+        : { delta: "无数据", deltaTone: "neutral" as const }),
     },
     {
       label: "免费种子",
       value: tasks ? tasks.free.toString() : "—",
       icon: "zap",
+      series: daily.map((d) => d.free),
+      seriesHint: "最近 7 天每天新入库的免费种子数",
+      delta: today ? `今日新增 ${today.free}` : "无数据",
+      deltaTone: today && today.free > 0 ? "ok" : "neutral",
     },
     {
       label: "总上传量",
       value: formatBytes(stats.totalUploaded),
       icon: "upload",
-      series: uploadSeries,
+      series: topN((r) => r.uploaded),
+      seriesHint: "每根一个站点：上传量构成",
+      ...uploadPill,
     },
     {
       label: "平均分享率",
       value: formatRatio(stats.averageRatio),
       icon: "gauge",
-      series: ratioSeries,
+      series: topN((r) => r.ratio),
+      seriesHint: "每根一个站点：分享率构成",
+      ...ratioPill,
     },
   ];
 
-  // 分享率低于 1 是要动手的信号，挂一枚警示胶囊；健康时不占位
+  // 分享率低于 1 是要动手的信号，这条比「较上次」更该占那枚 pill
   if (stats.averageRatio < 1) {
     const ratio = items.find((i) => i.label === "平均分享率");
     if (ratio) {
@@ -274,6 +377,8 @@ async function loadData() {
     return;
   }
   aggregatedStats.value = agg;
+  /* 写新快照，但不动本次读到的 prevSnapshot —— 否则这次渲染就没得比了 */
+  saveSnapshot(agg);
 
   const [siteMap, states, stats] = await Promise.all([
     sitesApi.list().catch(() => {

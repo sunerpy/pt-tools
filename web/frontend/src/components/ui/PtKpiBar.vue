@@ -28,6 +28,8 @@ interface KpiItem {
   icon?: string;
   /** 趋势序列，取最后 7 个点画柱；没有真实序列就别传 */
   series?: number[];
+  /** 柱图画的是什么（鼠标悬停与读屏都用它） */
+  seriesHint?: string;
 }
 
 const props = withDefaults(
@@ -72,6 +74,11 @@ function hue(i: number) {
           <span class="pt-kpi__value">
             {{ it.value }}<em v-if="it.unit">{{ it.unit }}</em>
           </span>
+          <!--
+            柱图的含义每格不同（有的是按站点的构成，有的是最近 7 天按天），
+            所以必须带上说明：只给一排柱子、不说它画的是什么，读者只能猜。
+            用 title + aria-label，一个给鼠标一个给读屏。
+          -->
           <PtBars
             v-if="it.series && it.series.length"
             :values="it.series"
@@ -80,7 +87,10 @@ function hue(i: number) {
             :op0="0.5"
             :foot="0.5"
             :height="22"
-            class="pt-kpi__bars" />
+            class="pt-kpi__bars"
+            role="img"
+            :title="it.seriesHint"
+            :aria-label="it.seriesHint ?? `${it.label} 走势`" />
         </div>
       </div>
     </div>

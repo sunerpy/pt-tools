@@ -828,9 +828,16 @@ func (s *ConfigStore) ListRSSForSite(siteName string) ([]models.RSSConfig, error
 	return sc.RSS, nil
 }
 
-// DeleteSite 删除站点（预置站点禁止删除）
+// DeleteSite 删除站点（预置站点禁止删除）。
+//
+// 判定看的是这一行的 IsBuiltin —— SyncSites 会把站点定义注册表里的每个站点都标上它
+// （models/presets.go），所以这一条覆盖全部内置站点。原来只硬编码了三个名字
+// （springsunday / hdsky / mteam），别的内置站点从任何入口调进来都会被真删掉，
+// 连带它的 RSS 订阅一起没。前端各页的 is_builtin 拦截只是提示，服务端必须自己挡住。
 func (s *ConfigStore) DeleteSite(name string) error {
 	lower := strings.ToLower(name)
+	// 这三个名字留着：SyncSites 还没跑过的库里 IsBuiltin 可能是 false，
+	// 而它们无论如何都不能删。行上的 IsBuiltin 负责覆盖其余内置站点。
 	if lower == "springsunday" || lower == "hdsky" || lower == "mteam" {
 		return errors.New("预置站点不可删除")
 	}
@@ -838,6 +845,9 @@ func (s *ConfigStore) DeleteSite(name string) error {
 		var site models.SiteSetting
 		if err := tx.Where("name = ?", lower).First(&site).Error; err != nil {
 			return err
+		}
+		if site.IsBuiltin {
+			return errors.New("预置站点不可删除")
 		}
 		if err := tx.Where("site_id = ?", site.ID).Delete(&models.RSSSubscription{}).Error; err != nil {
 			return err

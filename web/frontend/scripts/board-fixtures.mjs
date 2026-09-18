@@ -184,10 +184,12 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
   leechers: i,
   snatched: 50 + i * 3,
   uploadedAt: 1758000000,
-  discount: i % 3 === 0 ? "FREE" : "",
+  isFree: i % 3 === 0,
+  discountLevel: i % 3 === 0 ? "FREE" : "",
   discountEndTime: 0,
-  hitAndRun: i % 5 === 0,
-  categoryName: "电影",
+  hasHR: i % 5 === 0,
+  category: ["电影", "剧集", "动漫"][i % 3],
+  tags: [],
 }));
 
 const SUPPORTED = SITES.map(([site], i) => ({
