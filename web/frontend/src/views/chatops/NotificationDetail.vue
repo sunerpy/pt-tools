@@ -336,7 +336,12 @@ function goBack() {
     </Teleport>
 
     <!-- 画板 hero 1080×116：通道身份 —— 色块图标 + 名字 + 类型 + 运行状态 -->
-    <section class="hero">
+    <!--
+      data-card 是给验收用的身份标签：这块是卡片层的一员，但它没有 PtPanel 的标题，
+      验收就没法认出它、删掉也不会红（review 实测这一点）。凡是卡片层里没有标题的块
+      都要带上它，值用画板上的图层名。
+    -->
+    <section class="hero" data-card="hero">
       <span class="hero__icon" :style="{ '--ch-c': currentMeta.color }">
         <PtIcon :name="currentMeta.icon" :size="20" />
       </span>

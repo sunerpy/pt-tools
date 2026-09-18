@@ -162,7 +162,7 @@ async function save() {
     p-life 要后端暴露会话表，目前接口只回 Manager 连接状态与版本，那张没做。
   -->
   <div class="cloak-page pt-cards pt-cards--main" data-testid="cloak-config-page">
-    <div class="pt-note pt-cards__full">
+    <div class="pt-note pt-cards__full" data-card="intro">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
       <span>
         CloakBrowser 为可选功能。默认探测路径仍为 cookie HTTP 直连；仅当某站点开启「使用

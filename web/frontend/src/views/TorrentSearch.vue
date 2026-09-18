@@ -25,7 +25,7 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 const isMobile = useIsMobile();
 
@@ -130,27 +130,38 @@ const CACHE_KEY = "pt-tools-search-cache";
  * 会顶到配额），只存关键词、命中数、耗时、时间，够用来「再搜一次」。
  */
 /**
- * 分类分段 —— 画板 bar-88 的 seg（全部 / 电影 / 剧集 / 动漫 / 音乐）。
+ * 分类分段 —— 画板 bar-88 的 seg：**全部 / 电影 / 剧集 / 动漫 / 音乐**，档位写死，
+ * 搜之前也在（画板上它是一条常驻控件，不是有结果才出现）。
  *
- * 画板那五个标签是写死的，但本项目的分类是**各站自己的口径**（站点分类配置里那套），
- * 没有跨站统一映射；硬塞那五个标签会出现一堆永远为空的档位。所以档位取
- * 「这批结果里真实出现过的分类」，最多 5 个，不够就少几个 —— 形状照画板，标签用真数据。
+ * 各站点的分类名不统一（RSS 配置里是 `Mv` / `Tv` 这类站点自己的代号），所以这里带一张
+ * 关键词映射表把结果的 category 归进画板的四个桶。映射表列的是实际见过的写法，
+ * 归不进去的条目在选中具体档位时不显示 —— 五个固定桶的设计本身就是这个含义。
  */
+const CATEGORY_BUCKETS = [
+  { label: "全部", value: "" },
+  { label: "电影", value: "movie", match: ["电影", "movie", "mv", "film"] },
+  { label: "剧集", value: "tv", match: ["剧集", "电视", "连续剧", "tv", "series", "show"] },
+  { label: "动漫", value: "anime", match: ["动漫", "动画", "anime", "comic"] },
+  { label: "音乐", value: "music", match: ["音乐", "music", "flac", "mp3", "album"] },
+] as const;
+
 const activeCategory = ref("");
 
-const categoryOptions = computed(() => {
-  const counts = new Map<string, number>();
-  for (const item of searchResults.value) {
-    const name = (item.category || "").trim();
-    if (!name) continue;
-    counts.set(name, (counts.get(name) ?? 0) + 1);
+/** 档位固定，不随结果变 —— 画板上这条分段器搜索前就在 */
+const categoryOptions = computed(() =>
+  CATEGORY_BUCKETS.map((b) => ({ label: b.label, value: b.value })),
+);
+
+/** 结果的 category 归进哪个桶；归不进去返回空串 */
+function bucketOf(category: string | undefined): string {
+  const name = (category || "").trim().toLowerCase();
+  if (!name) return "";
+  for (const b of CATEGORY_BUCKETS) {
+    if (!("match" in b)) continue;
+    if (b.match.some((kw) => name.includes(kw))) return b.value;
   }
-  const top = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name]) => ({ label: name, value: name }));
-  return [{ label: "全部", value: "" }, ...top];
-});
+  return "";
+}
 
 /** 仅免费 —— 画板 facet-3。结果里带 discount 就是有优惠，FREE 是完全免费 */
 const freeOnly = ref(false);
@@ -379,13 +390,36 @@ const sortedResults = computed(() => {
 const filteredResults = computed(() => {
   let rows = sortedResults.value;
   if (activeCategory.value) {
-    rows = rows.filter((r) => (r.category || "").trim() === activeCategory.value);
+    rows = rows.filter((r) => bucketOf(r.category) === activeCategory.value);
   }
   if (freeOnly.value) {
     rows = rows.filter((r) => r.isFree);
   }
   return rows;
 });
+
+/*
+ * 这两个 watch 必须排在 filteredResults **之后**：watch 的 getter 在 setup 里会立刻
+ * 跑一次来建立依赖，放在 computed 之前会撞 TDZ（const 还没初始化）。
+ */
+/**
+ * 筛选变了就把页码收回来。
+ *
+ * 不收会出真 bug：在第 3 页开启「仅免费」后总数只剩 1 页，currentPage 还停在 3，
+ * 于是页面显示一片空白，而命中数明明不是 0。所以这里在筛选集变化时把页码夹到
+ * 合法范围内 —— 页脚文案、分页总数与表格必须用同一份集合，这是同一件事的三个出口。
+ */
+watch([activeCategory, freeOnly], () => {
+  currentPage.value = 1;
+});
+
+watch(
+  () => filteredResults.value.length,
+  (total) => {
+    const maxPage = Math.max(1, Math.ceil(total / pageSize.value));
+    if (currentPage.value > maxPage) currentPage.value = maxPage;
+  },
+);
 
 // 当前页的种子列表
 const pagedTorrents = computed(() => {
@@ -1100,7 +1134,7 @@ const barNote = computed(() => {
  * 摘要行在手机上被外壳藏了页头，这行就是唯一能看到命中与耗时的地方，所以耗时也留着。
  */
 const footNote = computed(() => {
-  const total = sortedResults.value.length;
+  const total = filteredResults.value.length;
   if (total === 0) return "";
   const from = (currentPage.value - 1) * pageSize.value + 1;
   const to = Math.min(currentPage.value * pageSize.value, total);
@@ -1139,7 +1173,37 @@ const footNote = computed(() => {
           <PtIcon v-if="!loading" name="search" :size="15" /><span>搜索</span>
         </el-button>
 
-        <!-- 画板 search-head 的 ha-1「保存搜索」：把当前这组条件存下来 -->
+        <!--
+          画板 search-head 的两枚页头动作：ha-0 是 32×32 的 history 图标钮，
+          ha-1 是 101×32 的「保存搜索」。历史这枚做成下拉，点一条就恢复关键词重搜 ——
+          底下那张历史卡是全量清单，这里是搜索框旁边的快捷入口。
+        -->
+        <el-dropdown trigger="click" :disabled="searchHistory.length === 0">
+          <el-tooltip
+            :content="searchHistory.length > 0 ? '最近搜索' : '还没有搜索记录'"
+            placement="bottom">
+            <span class="hsearch__ico-host">
+              <button
+                type="button"
+                class="pt-band__iconbtn hsearch__ico"
+                aria-label="最近搜索"
+                :disabled="searchHistory.length === 0">
+                <PtIcon name="history" :size="16" />
+              </button>
+            </span>
+          </el-tooltip>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="item in searchHistory.slice(0, 8)"
+                :key="item.keyword"
+                @click="replaySearch(item.keyword)">
+                {{ item.keyword }} · 命中 {{ item.hits }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
         <el-button :disabled="!searchKeyword.trim()" @click="saveCurrentSearch">
           <PtIcon name="bookmark" :size="15" /><span>保存搜索</span>
         </el-button>
@@ -1218,11 +1282,10 @@ const footNote = computed(() => {
     -->
     <PtToolbar band>
       <!--
-        画板 bar-88 的 seg：分类分段。档位取这批结果里真实出现过的分类
-        （本项目没有跨站统一的分类口径），所以搜之前只有「全部」一档。
+        画板 bar-88 的 seg：分类分段，档位写死成画板那五个，搜索前也在。
+        各站分类名不统一，靠 bucketOf 的关键词映射归桶。
       -->
       <el-segmented
-        v-if="categoryOptions.length > 1"
         v-model="activeCategory"
         class="pt-seg"
         :options="categoryOptions"
@@ -1230,7 +1293,6 @@ const footNote = computed(() => {
 
       <!-- 画板 chip-1「仅免费」 -->
       <el-button
-        v-if="searchResults.length > 0"
         class="sc-chip"
         :type="freeOnly ? 'primary' : 'default'"
         :plain="freeOnly"
@@ -1314,7 +1376,7 @@ const footNote = computed(() => {
         那等于把已经拿到的数据也藏了。所以有结果时在结果上方挂这条提示，
         一条结果都没有时才让 partial 成为主状态（见下面的 PtDataState）。
       -->
-      <div v-if="hasPartialBanner(sortedResults.length)" class="pt-note pt-note--warn partial">
+      <div v-if="hasPartialBanner(filteredResults.length)" class="pt-note pt-note--warn partial">
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <div class="partial__body">
           <p class="partial__t">
@@ -1577,7 +1639,7 @@ const footNote = computed(() => {
       画板 gfoot 34：左说明 + 右分页。板 15 的带序是 grid 128..430 → gfoot 430..464
       → selband 464..508，所以页脚在多选带之前，和任务列表页正好相反。
     -->
-    <div v-if="sortedResults.length > 0" class="pt-band--foot">
+    <div v-if="filteredResults.length > 0" class="pt-band--foot">
       <span>{{ footNote }}</span>
       <span class="pt-band__spacer" />
       <el-pagination
@@ -1585,7 +1647,7 @@ const footNote = computed(() => {
         v-model:page-size="pageSize"
         class="pt-pager"
         :page-sizes="pageSizeOptions"
-        :total="sortedResults.length"
+        :total="filteredResults.length"
         layout="sizes, prev, pager, next, jumper"
         @current-change="handlePageChange"
         @size-change="handleSizeChange" />
@@ -1901,6 +1963,16 @@ const footNote = computed(() => {
   font-size: var(--pt-fz-sm);
   font-weight: 600;
   color: var(--pt-t1);
+}
+
+/* 画板 ha-0：页头那枚 32×32 的历史图标钮（disabled 时 tooltip 需要一个能接事件的宿主） */
+.hsearch__ico-host {
+  display: inline-flex;
+}
+
+.hsearch__ico {
+  width: 32px;
+  height: 32px;
 }
 
 /* 画板 chip-1「仅免费」：工具栏里的 24 高 chip */

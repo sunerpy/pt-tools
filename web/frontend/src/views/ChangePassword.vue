@@ -161,7 +161,7 @@ async function submit() {
       p-msg（改完会发生什么）、p-note（忘记密码怎么办）。内容是固定说明，
       改密码这件事本身没有可查的数据，所以三张卡就是三段写死的文案。
     -->
-    <div class="pw-rule" />
+    <div class="pw-rule" data-card="rule" />
 
     <div class="pt-cards pt-cards--3">
       <PtPanel title="口令规则" icon="shield-check">

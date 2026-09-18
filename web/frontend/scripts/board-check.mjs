@@ -77,7 +77,8 @@ const EXPECT = {
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["站点命中", "没返回的站点", "搜索历史"],
     needsSeg: true, // 画板 bar-88 的分类分段
-    controls: ["搜索", "保存搜索", "仅免费"], // search-head 的 go / ha-1 与 bar-88 的 chip // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    /* 画板 bar-88 的五个固定档位 + search-head 的 go/ha-0/ha-1 + chip-1 */
+    controls: ["搜索", "保存搜索", "最近搜索", "仅免费", "电影", "剧集", "动漫", "音乐"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
     /*
      * 搜索页的结果、页脚带与分析卡都要先搜一次才有。这里直接写进输入框再点按钮，
      * 不动内部状态 —— 走的是用户真实路径，页面自己的 loading / 六态照常参与。
@@ -157,7 +158,7 @@ const EXPECT = {
     detail: true, // head 88 带面包屑
     cards: [1080, 1080, 1080, 700], // hero / c-basic / c-test / p-msg
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["基本信息", "凭证与连接", "连通性测试", "操作提示文案"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["hero", "基本信息", "凭证与连接", "连通性测试", "操作提示文案"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/bindings": {
     board: "24 ChatOps 绑定",
@@ -194,7 +195,7 @@ const EXPECT = {
     kind: CARD,
     cards: [1080, 700, 364, 1080], // intro / p-cfg / p-res / p-life
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["Manager 连接", "探测结果", "页面状态"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["intro", "Manager 连接", "探测结果", "页面状态"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/logs": {
     board: "29 运行日志",
@@ -414,9 +415,17 @@ const MEASURE = `(() => {
     tabLabels: [...document.querySelectorAll('.pt-band__tab')].map((el) =>
       (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
     ),
-    /* 关键控件：按钮/分段这类「画板上画了、少了就不算落地」的东西 */
+    /*
+     * 关键控件：按钮/分段这类「画板上画了、少了就不算落地」的东西。
+     * 纯图标钮没有文字，身份在 aria-label / title 上，所以三者都收 ——
+     * 只看 textContent 会把画板上那些 32×32 的图标钮全都漏掉。
+     */
     controlText: [...document.querySelectorAll('button, .el-segmented__item, .pt-band__tab')]
-      .map((el) => (el.textContent ?? '').replace(/\\s+/g, ' ').trim())
+      .flatMap((el) => [
+        (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
+        el.getAttribute('aria-label') ?? '',
+        el.getAttribute('title') ?? '',
+      ])
       .filter(Boolean),
     hasSeg: Boolean(document.querySelector('.pt-seg, .el-segmented')),
     ownHead: one('.pt-band--head'),
@@ -443,9 +452,17 @@ const MEASURE = `(() => {
         if (getComputedStyle(el).display === 'none') return;
         const r = el.getBoundingClientRect();
         if (r.width <= 4) return; /* 拖拽把手一类 */
+        /*
+         * 身份优先取 PtPanel 的标题；没有标题的块（hero、提示条一类）取 data-card。
+         * 少了这一层，无标题的卡就没有可测身份 —— 删掉通道详情的 hero，
+         * 剩下的卡照样能把宽度多重集合与张数下限配满，检查不会红。
+         */
         out.push({
           w: Math.round(r.width),
-          title: (el.querySelector('.pt-panel__title')?.textContent ?? '').trim(),
+          title:
+            (el.querySelector('.pt-panel__title')?.textContent ?? '').trim() ||
+            el.dataset.card ||
+            '',
         });
       };
       /* 只从最外层的卡片容器出发：里层容器的卡已经被外层的后代查询收进来了，

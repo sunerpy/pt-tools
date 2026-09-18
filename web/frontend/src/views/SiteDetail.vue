@@ -47,6 +47,12 @@ const addingRss = ref(false);
 const rssDialogVisible = ref(false);
 const downloaders = ref<DownloaderSetting[]>([]);
 const filterRules = ref<FilterRule[]>([]);
+/**
+ * 全量规则（含停用的），只用于把 filter_rule_ids 翻成名字。
+ * filterRules 里只留启用的（编辑弹窗的下拉不该给出停用项），拿它查名会把
+ * 「关联着但已停用」的规则显示成「已删除」—— 两件事的处理方式完全不同。
+ */
+const allFilterRules = ref<FilterRule[]>([]);
 const availableConfs = ref<NotificationConfig[]>([]);
 const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
 
@@ -210,7 +216,8 @@ async function loadDetail() {
   const [siteData, downloaderList, filterRuleList, directoriesData, confList] = data;
   form.value = siteData;
   downloaders.value = downloaderList; // 显示所有下载器，不过滤
-  filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
+  allFilterRules.value = filterRuleList;
+  filterRules.value = filterRuleList.filter((r) => r.enabled); // 下拉只给启用的
   downloaderDirectories.value = directoriesData;
   availableConfs.value = (confList || []).filter((c) => c.enabled);
   void loadSideCards();
@@ -559,7 +566,7 @@ const siteRuleRows = computed(() => {
   return [...used.entries()]
     .map(([id, sources]) => ({
       id,
-      rule: filterRules.value.find((r) => r.id === id),
+      rule: allFilterRules.value.find((r) => r.id === id),
       sources,
     }))
     .sort((a, b) => (a.rule?.priority ?? 9999) - (b.rule?.priority ?? 9999));
@@ -712,7 +719,7 @@ function ruleNameOf(id: number): string {
     <div class="pt-cards pt-cards--main">
       <div class="sd-col">
         <!-- 画板 bn 344,144 700×58：登录状态失效一类的当前告警，压在左栏顶上 -->
-        <div v-if="form.unavailable" class="pt-note pt-note--warn site-bn">
+        <div v-if="form.unavailable" class="pt-note pt-note--warn site-bn" data-card="bn">
           <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
           <span>{{ form.unavailable_reason || "该站点暂时不可用" }}</span>
         </div>
@@ -1068,8 +1075,9 @@ function ruleNameOf(id: number): string {
             </el-form-item>
           </el-form>
           <p class="sd-foot">
-            改完要点页头的「保存配置」才会落库。留空保存不会覆盖已存的值 ——
-            想清掉某个凭据，填一个空格再保存。
+            改完要点页头的「保存配置」才会落库。留空保存**不会**覆盖已存的值。
+            这一页也没法把凭据清空：服务端要求当前认证方式的凭据非空，空白值会被当成留空拒掉。
+            要换就直接填新值；不想让这个站点参与任务，关掉「启用站点」。
           </p>
         </PtPanel>
       </div>
