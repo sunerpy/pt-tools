@@ -21,8 +21,9 @@ const router = useRouter();
 const runtimeStore = useRuntimeStore();
 const themeStore = useThemeStore();
 
-/** 顶栏坐在 --pt-surface 上，变体按表面明暗选（brand.md「用哪个变体」） */
-const logoVariant = computed(() => (themeStore.isDark ? "mono" : "plated"));
+/** 图标表示「点了会变成什么」，与 rail 上那个保持一致 */
+const themeIcon = computed(() => (themeStore.isDark ? "sun" : "moon"));
+const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" : "切换到黑暗模式"));
 
 const sheetOpen = ref(false);
 
@@ -62,9 +63,18 @@ function goFromSheet(path: string) {
         <PtIcon name="menu" :size="20" />
       </button>
       <span class="pt-mchrome__brand">
-        <PtLogo :variant="logoVariant" :size="20" />
+        <!-- 顶栏是深色 chrome（8 套配色里恒为深色），按 brand.md 取单色版，不随主题换 -->
+        <PtLogo variant="mono" :size="20" />
         <span>pt-tools</span>
       </span>
+      <!-- 明暗一键直切。折在「我的」面板里的三段选择器还在，那是它的超集 -->
+      <button
+        type="button"
+        class="pt-mchrome__icon"
+        :aria-label="themeLabel"
+        @click="themeStore.toggle">
+        <PtIcon :name="themeIcon" :size="20" />
+      </button>
       <button
         type="button"
         class="pt-mchrome__icon"
@@ -77,17 +87,42 @@ function goFromSheet(path: string) {
   </header>
 
   <nav class="pt-mnav" aria-label="底部导航">
-    <button
-      v-for="tab in MOBILE_TABS"
-      :key="tab.key"
-      type="button"
-      class="pt-mnav__tab"
-      :class="{ 'is-active': activeTab === tab.key }"
-      :aria-current="activeTab === tab.key ? 'page' : undefined"
-      @click="onTab(tab.path)">
-      <PtIcon :name="tab.icon" :size="20" />
-      <span>{{ tab.label }}</span>
-    </button>
+    <!--
+      桌面状态条折进底栏顶部（round-2「深色 chrome 条 + 折进来的状态行」）。
+      之前这些数字只藏在「我的」抽屉里，手机上等于看不到调度器和速率。
+    -->
+    <div class="pt-mnav__status" :class="{ 'is-stale': runtimeStore.stale }">
+      <span class="pt-mnav__status-cell">
+        <i class="pt-mnav__dot" :class="`is-${runtimeStore.schedulerHint}`" aria-hidden="true" />
+        <span>{{ runtimeStore.schedulerText }}</span>
+      </span>
+      <span class="pt-mnav__status-cell pt-mnav__status-cell--live">
+        <PtIcon name="download" :size="11" />
+        <span>{{ runtimeStore.downloadText }}</span>
+      </span>
+      <span class="pt-mnav__status-cell pt-mnav__status-cell--live">
+        <PtIcon name="upload" :size="11" />
+        <span>{{ runtimeStore.uploadText }}</span>
+      </span>
+      <span class="pt-mnav__status-cell pt-mnav__status-cell--live">
+        <PtIcon name="hard-drive" :size="11" />
+        <span>{{ runtimeStore.freeSpaceText }}</span>
+      </span>
+    </div>
+
+    <div class="pt-mnav__tabs">
+      <button
+        v-for="tab in MOBILE_TABS"
+        :key="tab.key"
+        type="button"
+        class="pt-mnav__tab"
+        :class="{ 'is-active': activeTab === tab.key }"
+        :aria-current="activeTab === tab.key ? 'page' : undefined"
+        @click="onTab(tab.path)">
+        <PtIcon :name="tab.icon" :size="20" />
+        <span>{{ tab.label }}</span>
+      </button>
+    </div>
   </nav>
 
   <el-drawer v-model="sheetOpen" direction="btt" size="auto" :with-header="false" class="pt-msheet">

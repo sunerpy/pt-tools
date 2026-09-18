@@ -3,15 +3,18 @@ import { type TaskItem, type TaskListResponse, tasksApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
 type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const tasks = ref<TaskItem[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -41,34 +44,48 @@ const hasFilters = computed(() => {
   return Boolean(f.q || f.site || f.downloaded || f.pushed || f.expired);
 });
 
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败时弹个 toast 就完事 —— 两秒后 toast 消失，
+ * 表格停在 empty 上，用户看到的是「还没有数据」。请求失败必须留在页面上，
+ * 而且 401/403 要画成「无权访问」，否则用户会一直点重试。
+ */
+const { loading, state, errorText, run } = useDataState({ filtered: () => hasFilters.value });
+
 const emptySub = computed(() =>
   hasFilters.value ? "换个关键词，或点重置清掉所有筛选" : "RSS 任务跑过之后这里会出现记录",
 );
+
+/** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  return emptySub.value;
+});
 
 onMounted(async () => {
   await loadTasks();
 });
 
 async function loadTasks() {
-  loading.value = true;
-  try {
-    const params = new URLSearchParams();
-    params.set("page", page.value.toString());
-    params.set("page_size", pageSize.value.toString());
-    if (filters.value.q) params.set("q", filters.value.q);
-    if (filters.value.site) params.set("site", filters.value.site);
-    if (filters.value.downloaded) params.set("downloaded", "1");
-    if (filters.value.pushed) params.set("pushed", "1");
-    if (filters.value.expired) params.set("expired", "1");
+  const params = new URLSearchParams();
+  params.set("page", page.value.toString());
+  params.set("page_size", pageSize.value.toString());
+  if (filters.value.q) params.set("q", filters.value.q);
+  if (filters.value.site) params.set("site", filters.value.site);
+  if (filters.value.downloaded) params.set("downloaded", "1");
+  if (filters.value.pushed) params.set("pushed", "1");
+  if (filters.value.expired) params.set("expired", "1");
 
-    const data: TaskListResponse = await tasksApi.list(params);
-    tasks.value = data.items || [];
-    total.value = data.total || 0;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  const data = await run<TaskListResponse>(() => tasksApi.list(params));
+  if (!data) {
+    // 失败时清空列表：留着上一次的数据配一个「加载失败」的空态更让人误解
+    tasks.value = [];
+    total.value = 0;
+    return;
   }
+  tasks.value = data.items || [];
+  total.value = data.total || 0;
 }
 
 function applyFilters() {
@@ -95,6 +112,14 @@ function handleSizeChange(newSize: number) {
 
 function handleSelectionChange(selection: TaskItem[]) {
   selectedIds.value = selection.map((t) => t.id);
+}
+
+/** 移动端行卡上的勾选。el-table 的多选是它自己管的，卡片这边自己维护同一份 id 列表 */
+function toggleSelect(task: TaskItem) {
+  if (task.isPushed) return; // 与桌面 :selectable 一致：已推送的不可删，也就不可选
+  const i = selectedIds.value.indexOf(task.id);
+  if (i === -1) selectedIds.value.push(task.id);
+  else selectedIds.value.splice(i, 1);
 }
 
 async function handleBatchDelete() {
@@ -271,12 +296,19 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       </template>
 
       <el-table
+        v-if="!isMobile"
         :data="tasks"
         class="pt-grid"
         style="width: 100%"
         @selection-change="handleSelectionChange">
         <template #empty>
-          <PtDataState :state="hasFilters ? 'zero' : 'empty'" dense :sub="emptySub" />
+          <PtDataState :state="state" dense :sub="stateSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadTasks">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column
@@ -372,6 +404,63 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
         </el-table-column>
       </el-table>
 
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 10 列，手机上横着滚既看不到列头也和页面纵向滚动打架。
+        卡上留的是真正要看的：标题 + 站点/优惠/大小/时间 + 进度 + 状态。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!tasks.length" :state="state" :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadTasks">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="task in tasks" :key="task.id">
+          <template #lead>
+            <el-checkbox
+              :model-value="selectedIds.includes(task.id)"
+              :disabled="task.isPushed"
+              :aria-label="`选择 ${task.title}`"
+              @update:model-value="toggleSelect(task)" />
+          </template>
+
+          <template #title>{{ task.title || "-" }}</template>
+
+          <template #meta>
+            <PtTag>{{ task.siteName || "-" }}</PtTag>
+            <PtStatusPill :tone="getDiscount(task).tone" size="sm">
+              {{ getDiscount(task).text }}
+            </PtStatusPill>
+            <span>{{ formatSize(task.torrentSize) }}</span>
+            <span :class="task.isExpired ? 'cell-dang' : undefined">
+              <PtIcon name="clock" :size="11" />
+              {{ formatTime(task.freeEndTime) }}
+            </span>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="getStatusTone(task)" size="sm">
+              {{ getStatusText(task) }}
+            </PtStatusPill>
+          </template>
+
+          <template v-if="task.torrentSize > 0" #progress>
+            <el-progress
+              :percentage="Math.round(task.progress)"
+              :stroke-width="4"
+              :show-text="false"
+              :color="getProgressColor(task.progress)" />
+            <span class="progress-info">
+              <span>{{ getDownloadedSize(task) }} / {{ formatSize(task.torrentSize) }}</span>
+              <span class="progress-pct">{{ formatProgress(task.progress) }}</span>
+            </span>
+          </template>
+        </PtRowCard>
+      </div>
+
       <template v-if="total > 0" #footer>
         <span class="pt-foot-note">仅未推送的记录可以删除</span>
         <el-pagination
@@ -466,6 +555,14 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 
 .cell-dang {
   color: var(--pt-dang);
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
 }
 
 @media (max-width: 768px) {

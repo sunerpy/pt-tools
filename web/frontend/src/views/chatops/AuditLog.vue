@@ -4,9 +4,12 @@ import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtKpiBar from "@/components/ui/PtKpiBar.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -23,14 +26,19 @@ const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {
   error: "dang",
 };
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const auditLogs = ref<AuditLog[]>([]);
+/** 移动端展开了参数的行 id（桌面这活儿由 el-table 的 expand 列自己管） */
+const expandedIds = ref<number[]>([]);
 
 const stats = reactive({
   todayCount: 0,
   successRate: 0,
   maxLatencyMs: 0,
 });
+
+/** 统计接口是不是没拿到：0 = 正常，1 = 失败（喂给 useDataState 的 failed） */
+const statsFailed = ref(0);
 
 const pagination = reactive({
   page: 1,
@@ -53,78 +61,129 @@ const hasFilter = computed(
     Boolean(filters.command),
 );
 
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败就弹个 toast —— 两秒后 toast 没了，表格停在
+ * 「还没有数据」上，用户看到的是「机器人一条命令都没执行过」，而真相是请求失败了。
+ * 审计页尤其不能这样：日志为空是「没人用过机器人」，请求失败是「查不到证据」。
+ *
+ * failed 接的是统计接口：它只喂上面的 KPI 条，挂了不该把已经拿到的日志一起丢掉，
+ * 所以记一个失败数让状态落到 partial，表格照常渲染。
+ */
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  filtered: () => hasFilter.value,
+  failed: () => statsFailed.value,
+});
+
+/** 状态块的副标题：失败给真实错误，partial 说清缺了哪一半，空态给下一步 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return "统计读数没拿到，日志列表本身确实是空的";
+  return hasFilter.value ? "换个时间段或清掉筛选再看" : "机器人执行过的每条命令都会记录在这里";
+});
+
 /*
  * 三个读数不带趋势序列：/chatops/audit/stats 只返回当前值，
  * PtKpiBar 的柱子要真实历史才画，没有就别编（组件注释里的规矩）。
+ * 统计没拿到时读数一律画「-」：摆一个 0 或上一轮的旧值等于报了个假数。
  */
-const kpiItems = computed(() => [
-  {
-    label: "今日执行命令",
-    value: stats.todayCount,
-    unit: " 条",
-    icon: "activity",
-  },
-  {
-    label: "整体成功率",
-    value: stats.successRate.toFixed(2),
-    unit: "%",
-    icon: "circle-check",
-    delta: stats.successRate >= 95 ? "健康" : stats.successRate >= 80 ? "偏低" : "异常",
-    deltaTone: (stats.successRate >= 95 ? "ok" : stats.successRate >= 80 ? "warn" : "dang") as
-      | "ok"
-      | "warn"
-      | "dang",
-  },
-  {
-    label: "最高延迟",
-    value: stats.maxLatencyMs,
-    unit: "ms",
-    icon: "timer",
-    delta: stats.maxLatencyMs > 1000 ? "偏慢" : undefined,
-    deltaTone: "warn" as const,
-  },
-]);
+const kpiItems = computed(() => {
+  const ok = statsFailed.value === 0;
+  return [
+    {
+      label: "今日执行命令",
+      value: ok ? stats.todayCount : "-",
+      unit: ok ? " 条" : undefined,
+      icon: "activity",
+    },
+    {
+      label: "整体成功率",
+      value: ok ? stats.successRate.toFixed(2) : "-",
+      unit: ok ? "%" : undefined,
+      icon: "circle-check",
+      delta: ok
+        ? stats.successRate >= 95
+          ? "健康"
+          : stats.successRate >= 80
+            ? "偏低"
+            : "异常"
+        : undefined,
+      deltaTone: (stats.successRate >= 95 ? "ok" : stats.successRate >= 80 ? "warn" : "dang") as
+        | "ok"
+        | "warn"
+        | "dang",
+    },
+    {
+      label: "最高延迟",
+      value: ok ? stats.maxLatencyMs : "-",
+      unit: ok ? "ms" : undefined,
+      icon: "timer",
+      delta: ok && stats.maxLatencyMs > 1000 ? "偏慢" : undefined,
+      deltaTone: "warn" as const,
+    },
+  ];
+});
 
 onMounted(() => {
   fetchAuditLogs();
 });
 
 async function fetchAuditLogs() {
-  loading.value = true;
-  try {
-    const params = new URLSearchParams();
-    params.append("page", pagination.page.toString());
-    params.append("page_size", pagination.pageSize.toString());
+  const params = new URLSearchParams();
+  params.append("page", pagination.page.toString());
+  params.append("page_size", pagination.pageSize.toString());
 
-    if (filters.dateRange && filters.dateRange.length === 2) {
-      params.append("start_time", filters.dateRange[0]);
-      params.append("end_time", filters.dateRange[1]);
-    }
-    if (filters.channelType.length > 0) {
-      params.append("channel_type", filters.channelType.join(","));
-    }
-    if (filters.result.length > 0) {
-      params.append("result", filters.result.join(","));
-    }
-    if (filters.command) {
-      params.append("command", filters.command);
-    }
+  if (filters.dateRange && filters.dateRange.length === 2) {
+    params.append("start_time", filters.dateRange[0]);
+    params.append("end_time", filters.dateRange[1]);
+  }
+  if (filters.channelType.length > 0) {
+    params.append("channel_type", filters.channelType.join(","));
+  }
+  if (filters.result.length > 0) {
+    params.append("result", filters.result.join(","));
+  }
+  if (filters.command) {
+    params.append("command", filters.command);
+  }
 
-    const [listRes, statsRes] = await Promise.all([
+  /*
+   * 两个数据源分开判：原来是 Promise.all，统计接口一挂整页就当失败，
+   * 明明拿到手的日志也被丢掉。改成 allSettled —— 列表是主数据源，它失败才算失败；
+   * 统计失败只记 failed，让状态落到 partial。
+   */
+  const data = await run(async () => {
+    const [listRes, statsRes] = await Promise.allSettled([
       chatopsApi.audit.list(params),
       chatopsApi.audit.stats(),
     ]);
 
-    auditLogs.value = listRes.items || [];
-    pagination.total = listRes.total || 0;
-    stats.todayCount = statsRes.today_count || 0;
-    stats.successRate = statsRes.success_rate || 0;
-    stats.maxLatencyMs = statsRes.max_latency_ms || 0;
-  } catch (err: unknown) {
-    ElMessage.error((err as Error).message || "获取审计日志失败");
-  } finally {
-    loading.value = false;
+    if (statsRes.status === "fulfilled") {
+      statsFailed.value = 0;
+      stats.todayCount = statsRes.value.today_count || 0;
+      stats.successRate = statsRes.value.success_rate || 0;
+      stats.maxLatencyMs = statsRes.value.max_latency_ms || 0;
+    } else {
+      statsFailed.value = 1;
+    }
+
+    if (listRes.status === "rejected") throw listRes.reason;
+    return listRes.value;
+  });
+
+  if (!data) {
+    // 失败时清空：留着上一次的日志配一个「加载失败」的状态块更让人误解
+    auditLogs.value = [];
+    pagination.total = 0;
+    expandedIds.value = [];
+    ElMessage.error(errorText.value || "获取审计日志失败");
+    return;
   }
+
+  auditLogs.value = data.items || [];
+  pagination.total = data.total || 0;
+  expandedIds.value = [];
 }
 
 function handleFilterChange() {
@@ -165,6 +224,17 @@ function channelLabel(type: string) {
 
 function resultTone(result: string) {
   return RESULT_TONES[result?.toLowerCase()] || "neutral";
+}
+
+function isArgsOpen(id: number) {
+  return expandedIds.value.includes(id);
+}
+
+/** 行卡上的参数展开：桌面靠 expand 列，手机上卡片没有那一列，自己维护一份 id */
+function toggleArgs(id: number) {
+  const i = expandedIds.value.indexOf(id);
+  if (i === -1) expandedIds.value.push(id);
+  else expandedIds.value.splice(i, 1);
 }
 </script>
 
@@ -239,14 +309,25 @@ function resultTone(result: string) {
         </template>
       </PtToolbar>
 
-      <el-table :data="auditLogs" class="pt-grid" row-key="id" style="width: 100%">
+      <!-- partial：日志拿到了但统计没拿到，别用一整块状态图顶掉已经拿到的日志 -->
+      <div v-if="hasPartialBanner(auditLogs.length)" class="pt-note pt-note--warn partial-note">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>
+          统计读数这次没拿到，上面三个指标显示为
+          <code>-</code>
+          ；下面的审计日志是完整的，点右上角刷新可以再试一次。
+        </span>
+      </div>
+
+      <el-table v-if="!isMobile" :data="auditLogs" class="pt-grid" row-key="id" style="width: 100%">
         <template #empty>
-          <PtDataState
-            :state="hasFilter ? 'zero' : 'empty'"
-            dense
-            :sub="
-              hasFilter ? '换个时间段或清掉筛选再看' : '机器人执行过的每条命令都会记录在这里'
-            " />
+          <PtDataState :state="state" dense :sub="stateSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="fetchAuditLogs">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column type="expand">
@@ -306,8 +387,72 @@ function resultTone(result: string) {
         </el-table-column>
       </el-table>
 
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 6 列加一个展开列，手机上横着滚既看不到列头，也和页面纵向滚动打架。
+        卡上留的是审计要看的四件事：谁（触发用户）在什么时候、从哪个通道、执行了什么命令，
+        结果与延迟进右上角和第二行；完整参数保留成一个展开按钮，不然手机上就查不到证据了。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!auditLogs.length" :state="state" :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="fetchAuditLogs">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in auditLogs" :key="row.id">
+          <template #title>
+            <code class="cmd">{{ row.command }}</code>
+          </template>
+
+          <template #meta>
+            <span>
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.created_at) }}
+            </span>
+            <PtTag>{{ channelLabel(row.channel_type) }}</PtTag>
+            <span>
+              <PtIcon name="user" :size="11" />
+              <code class="uid">{{ row.channel_user_id || "-" }}</code>
+            </span>
+            <span :class="{ 'lat--slow': row.latency_ms > 1000 }">
+              <PtIcon name="timer" :size="11" />
+              {{ row.latency_ms }} ms
+            </span>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="resultTone(row.result)" size="sm">
+              {{ row.result }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button size="small" text @click="toggleArgs(row.id)">
+              <PtIcon :name="isArgsOpen(row.id) ? 'chevron-up' : 'chevron-down'" :size="14" />
+              <span>{{ isArgsOpen(row.id) ? "收起参数" : "命令参数" }}</span>
+            </el-button>
+            <div v-if="isArgsOpen(row.id)" class="card-args">
+              <span class="args__redacted">
+                <PtIcon name="lock" :size="12" />
+                <span>敏感字段已脱敏</span>
+              </span>
+              <pre class="args__json">{{ formatJson(row.args_json) }}</pre>
+            </div>
+          </template>
+        </PtRowCard>
+      </div>
+
       <template v-if="pagination.total > 0" #footer>
-        <span class="pt-foot-note">展开一行可以看脱敏后的完整命令参数</span>
+        <span class="pt-foot-note">
+          {{
+            isMobile
+              ? "点卡片上的「命令参数」看脱敏后的完整参数"
+              : "展开一行可以看脱敏后的完整命令参数"
+          }}
+        </span>
         <el-pagination
           v-model:current-page="pagination.page"
           class="pt-pager"
@@ -361,6 +506,11 @@ function resultTone(result: string) {
   color: var(--pt-dang);
 }
 
+/* 面板 padding="none"，partial 提示条的留白只能自己给 */
+.partial-note {
+  margin: var(--pt-space-3);
+}
+
 .args__head {
   display: flex;
   gap: var(--pt-space-3);
@@ -397,6 +547,26 @@ function resultTone(result: string) {
   background: var(--pt-surface);
   border: 1px solid var(--pt-border);
   border-radius: var(--pt-r-sm);
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
+
+/*
+ * 展开的参数块占满 actions 那一行的整宽：actions 是 flex-wrap，
+ * 不给 100% 基宽它会挤在按钮右边被压成一条。
+ */
+.card-args {
+  display: flex;
+  flex: 1 0 100%;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  min-width: 0;
 }
 
 @media (max-width: 768px) {

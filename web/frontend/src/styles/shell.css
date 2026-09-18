@@ -4,9 +4,15 @@
  *   底部通栏 status 28（深色）
  *
  * 尺寸全部走 theme.scss 的结构令牌，这里不写死像素，改一个数四套配色一起动。
- * 断点两个：
- *   ≤1180  导航列退成抽屉（rail 保留，页头出现汉堡按钮）
- *   ≤768   整套换成移动端外壳（顶栏 88 + 底部 tab 72），rail/nav/status 全部让位
+ *
+ * 导航列有两种存在方式，由 App.vue 的 is-nav-docked 决定，不由媒体查询决定：
+ *   钉住（默认，>1180 且未收起）  在栅格里占一列 264，rail 上的快捷入口藏起来
+ *                                 —— 两者逐条重复，同时出现是冗余
+ *   浮起（收起，或 ≤1180）        变成抽屉，is-nav-open 控制开合；
+ *                                 这时 rail 的图标就是唯一的导航，不再重复
+ * 只有一个断点仍然是纯宽度的：
+ *   ≤768   整套换成移动端外壳，rail/nav/status 全部让位 ——
+ *          深色顶栏 88 + 深色底栏（状态行 24 折在 tab 72 之上）
  *
  * 单个自洽的小控件（偏好面板）用组件内 scoped 样式；外壳这几块互相咬合、
  * 又要跨组件写媒体查询，所以集中放这里。
@@ -17,10 +23,11 @@
  * =========================================================================== */
 .pt-shell {
   display: grid;
+  /* 基线是「导航列浮着」：钉住是加上来的状态，不是默认 */
   grid-template-areas:
-    "rail nav main"
-    "status status status";
-  grid-template-columns: var(--pt-rail-w) var(--pt-nav-w) minmax(0, 1fr);
+    "rail main"
+    "status status";
+  grid-template-columns: var(--pt-rail-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) var(--pt-status-h);
   width: 100%;
   height: 100vh;
@@ -32,11 +39,39 @@
   background: var(--pt-canvas);
 }
 
+.pt-shell.is-nav-docked {
+  grid-template-areas:
+    "rail nav main"
+    "status status status";
+  grid-template-columns: var(--pt-rail-w) var(--pt-nav-w) minmax(0, 1fr);
+}
+
+/* 浮起态：固定定位、贴着 rail 右侧滑出，关着的时候整块推到屏外 */
 .pt-shell__nav-col {
-  grid-area: nav;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--pt-rail-w);
+  z-index: 50;
   min-width: 0;
+  width: var(--pt-nav-w);
   background: var(--pt-surface);
   border-right: 1px solid var(--pt-border);
+  box-shadow: var(--pt-shadow-lg);
+  transition: transform var(--pt-transition-normal);
+  transform: translateX(calc(-100% - var(--pt-rail-w)));
+}
+
+.pt-shell.is-nav-open .pt-shell__nav-col {
+  transform: none;
+}
+
+.pt-shell.is-nav-docked .pt-shell__nav-col {
+  position: static;
+  grid-area: nav;
+  width: auto;
+  box-shadow: none;
+  transform: none;
 }
 
 .pt-shell__main {
@@ -93,6 +128,7 @@
 }
 
 .pt-rail__item,
+.pt-rail__tool,
 .pt-rail__avatar {
   position: relative;
   display: flex;
@@ -113,9 +149,18 @@
 }
 
 .pt-rail__item:hover,
+.pt-rail__tool:hover,
 .pt-rail__avatar:hover {
   color: var(--pt-chrome-t1);
   background: var(--pt-chrome-raised);
+}
+
+/*
+ * 导航列钉在旁边时，rail 这 8 个入口和导航列里的同名项逐条重复，藏掉。
+ * 只藏链接、留住 .pt-rail__items —— 它的 flex:1 是把头像顶到底部的撑杆。
+ */
+.pt-shell.is-nav-docked .pt-rail__item {
+  display: none;
 }
 
 .pt-rail__item.is-active {
@@ -296,8 +341,9 @@
   min-height: var(--pt-head-h-crumbs);
 }
 
+/* 导航开关：钉住时是「收起」，浮起时是「展开 / 打开抽屉」，所以一直在 */
 .pt-head__toggle {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 32px;
@@ -467,6 +513,12 @@
   display: none;
 }
 
+/*
+ * 顶栏是深色 chrome，不跟主题变浅（round-2「深色 88px 顶栏 + 深色 72px 底栏」）。
+ * 理由和桌面一样：外壳是「不变的东西」，内容区才是「在变的数据」，
+ * 眼睛不用在两者之间重新适应对比度；手机版也因此一眼认得出是同一个产品。
+ * --pt-chrome 在 8 套配色里恒为深色，所以这里的文字一律用 chrome 系文字色。
+ */
 .pt-mchrome {
   position: sticky;
   top: 0;
@@ -475,8 +527,9 @@
   justify-content: center;
   height: var(--pt-m-topbar-h);
   padding: 0 var(--pt-space-4);
-  background: var(--pt-surface);
-  border-bottom: 1px solid var(--pt-border);
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome);
+  border-bottom: 1px solid var(--pt-chrome-border);
 }
 
 .pt-mchrome__row {
@@ -494,7 +547,7 @@
   width: var(--pt-m-touch);
   height: var(--pt-m-touch);
   margin: 0 calc(var(--pt-space-2) * -1);
-  color: var(--pt-t2);
+  color: var(--pt-chrome-t2);
   background: transparent;
   border: 0;
   border-radius: var(--pt-r-md);
@@ -502,7 +555,8 @@
 }
 
 .pt-mchrome__icon:active {
-  background: var(--pt-hover);
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
 }
 
 .pt-mchrome__brand {
@@ -513,7 +567,7 @@
   justify-content: center;
   font-size: var(--pt-fz-body);
   font-weight: 600;
-  color: var(--pt-t1);
+  color: var(--pt-chrome-t1);
 }
 
 .pt-mchrome__title {
@@ -522,21 +576,76 @@
   font-size: 17px;
   font-weight: 600;
   line-height: 28px;
-  color: var(--pt-t1);
+  color: var(--pt-chrome-t1);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/*
+ * 底栏同样是深色 chrome，并且把桌面的状态行折进它的顶部
+ * （round-2「G 深色 chrome 条 + 折进来的状态行」）。
+ * 所以整块高度是 状态行 + tab 行，内容区的 padding-bottom 要按同一个式子让位。
+ */
 .pt-mnav {
   position: fixed;
   right: 0;
   bottom: 0;
   left: 0;
   z-index: 30;
-  height: calc(var(--pt-m-tabbar-h) + env(safe-area-inset-bottom));
+  flex-direction: column;
+  height: calc(var(--pt-m-statusrow-h) + var(--pt-m-tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
-  background: var(--pt-surface);
-  border-top: 1px solid var(--pt-border);
+  background: var(--pt-chrome);
+  border-top: 1px solid var(--pt-chrome-border);
+}
+
+.pt-mnav__status {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-3);
+  align-items: center;
+  height: var(--pt-m-statusrow-h);
+  padding: 0 var(--pt-space-4);
+  overflow: hidden;
+  font-size: var(--pt-fz-label);
+  line-height: 1;
+  color: var(--pt-chrome-t2);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--pt-chrome-border);
+}
+
+.pt-mnav__status-cell {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 拉取失败时整行变淡，和桌面状态条的 is-stale 一致 */
+.pt-mnav__status.is-stale .pt-mnav__status-cell--live {
+  opacity: 0.5;
+}
+
+/* 稿上那个绿点：调度器在跑是绿的，停了是危险色，未知就是中性灰 */
+.pt-mnav__dot {
+  width: 6px;
+  height: 6px;
+  background: var(--pt-t4);
+  border-radius: 50%;
+}
+
+.pt-mnav__dot.is-running {
+  background: var(--pt-ok);
+}
+
+.pt-mnav__dot.is-stopped {
+  background: var(--pt-dang);
+}
+
+.pt-mnav__tabs {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .pt-mnav__tab {
@@ -549,7 +658,7 @@
   height: var(--pt-m-tabbar-h);
   font-family: inherit;
   font-size: var(--pt-fz-label);
-  color: var(--pt-t3);
+  color: var(--pt-chrome-t2);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -654,15 +763,15 @@
 }
 
 /* ===========================================================================
- * 抽屉：≤1180 时导航列浮起来盖在内容上
+ * 抽屉遮罩：导航列浮起来盖住内容时的那一层
  * =========================================================================== */
 /*
- * 遮罩只在导航列真的浮起来盖住内容时才存在。>1180 时导航列还在栅格里，
- * 这时 Ctrl/Cmd+K 只是把焦点送进搜索框，不该铺一层 z-40 的遮罩 ——
- * 那一层会盖在没有 z-index 的导航列上，把搜索框点不动。
+ * 遮罩只在导航列真的浮起来盖住内容时才有意义。导航列钉在栅格里时，
+ * 这一层 z-40 会盖在没有 z-index 的导航列上，把搜索框点不动 —— 所以钉住就撤掉。
+ * （元素本身还带 v-if="navOpen"，这里只管钉住那一种情形。）
  */
 .pt-shell__scrim {
-  display: none;
+  display: block;
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -670,38 +779,12 @@
   border: 0;
 }
 
+.pt-shell.is-nav-docked .pt-shell__scrim {
+  display: none;
+}
+
+/* 窄屏只剩宽度相关的一处收紧，导航形态已经交给 is-nav-docked */
 @media (max-width: 1180px) {
-  .pt-shell__scrim {
-    display: block;
-  }
-
-  .pt-shell {
-    grid-template-areas:
-      "rail main"
-      "status status";
-    grid-template-columns: var(--pt-rail-w) minmax(0, 1fr);
-  }
-
-  .pt-shell__nav-col {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: var(--pt-rail-w);
-    z-index: 50;
-    width: var(--pt-nav-w);
-    box-shadow: var(--pt-shadow-lg);
-    transition: transform var(--pt-transition-normal);
-    transform: translateX(calc(-100% - var(--pt-rail-w)));
-  }
-
-  .pt-shell.is-nav-open .pt-shell__nav-col {
-    transform: none;
-  }
-
-  .pt-head__toggle {
-    display: flex;
-  }
-
   .pt-shell__inner {
     padding-inline: var(--pt-space-4);
   }
@@ -742,7 +825,9 @@
 
   .pt-shell__content {
     /* 底部 tab 是 fixed 的，内容要让出它的高度，否则最后一行被压住 */
-    padding-bottom: calc(var(--pt-m-tabbar-h) + env(safe-area-inset-bottom));
+    padding-bottom: calc(
+      var(--pt-m-statusrow-h) + var(--pt-m-tabbar-h) + env(safe-area-inset-bottom)
+    );
   }
 
   .pt-shell__inner {

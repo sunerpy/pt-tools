@@ -3,11 +3,14 @@ import { chatopsApi, type ChatOpBinding, type NotificationConfig } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 const TTL_OPTIONS = [
   { label: "5 分钟", value: 300 },
@@ -17,10 +20,42 @@ const TTL_OPTIONS = [
   { label: "永久", value: 0 },
 ];
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const pendingBindings = ref<ChatOpBinding[]>([]);
 const activeBindings = ref<ChatOpBinding[]>([]);
 const configs = ref<NotificationConfig[]>([]);
+
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败时弹个 toast 就完事 —— 两秒后 toast 消失，
+ * 两张表都停在 empty 上，用户看到的是「还没有人绑定」，而真相是请求失败了。
+ *
+ * 这一页没有筛选框，所以 0 行只会是 empty / error / perm / partial，不会出现 zero。
+ * partial 留给「绑定列表拿到了、渠道配置没拿到」：通道名只能退化成 `#3`，
+ * 发码对话框的通道下拉也会是空的 —— 这件事必须写在页面上，光让通道名变成编号没人看得懂。
+ */
+const configsFailed = ref(0);
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  failed: () => configsFailed.value,
+});
+
+const PARTIAL_SUB = "绑定列表已就绪，但渠道配置没取到，通道名称只能显示编号";
+
+/** 状态块副标题：失败给真实错误，部分失败说清缺了什么，空态给下一步动作 */
+function subFor(emptySub: string) {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return PARTIAL_SUB;
+  return emptySub;
+}
+
+const pendingSub = computed(() => subFor("生成一个绑定码，再去聊天客户端里把它发给机器人"));
+const activeSub = computed(() => subFor("还没有用户完成绑定，先生成一个绑定码"));
+
+/** 有绑定数据但渠道配置没拿到：在内容上方挂一条提示，而不是假装一切正常 */
+const showPartialNote = computed(() =>
+  hasPartialBanner(pendingBindings.value.length + activeBindings.value.length),
+);
 
 const generateDialogVisible = ref(false);
 const selectedConfId = ref<number | null>(null);
@@ -45,20 +80,28 @@ onUnmounted(() => {
 });
 
 async function loadData() {
-  loading.value = true;
-  try {
+  configsFailed.value = 0;
+  const data = await run(async () => {
     const [bindingsRes, configsRes] = await Promise.all([
       chatopsApi.bindings.list(),
-      chatopsApi.notifications.list(),
+      // 渠道配置只用来把 conf_id 显示成通道名、以及填发码下拉，单独失败不该把整页判死
+      chatopsApi.notifications.list().catch(() => {
+        configsFailed.value += 1;
+        return [] as NotificationConfig[];
+      }),
     ]);
-    pendingBindings.value = bindingsRes.pending || [];
-    activeBindings.value = bindingsRes.bindings || [];
     configs.value = configsRes || [];
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "获取绑定列表失败");
-  } finally {
-    loading.value = false;
+    return bindingsRes;
+  });
+
+  if (!data) {
+    // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
+    pendingBindings.value = [];
+    activeBindings.value = [];
+    return;
   }
+  pendingBindings.value = data.pending || [];
+  activeBindings.value = data.bindings || [];
 }
 
 function getCountdown(expiresAt?: string) {
@@ -210,15 +253,35 @@ function getConfNameByConfId(confId?: number) {
       </template>
     </PtToolbar>
 
+    <!-- 部分失败（§5 partial）：绑定拿到了、渠道配置没拿到，说清缺的是什么而不是静默降级 -->
+    <div v-if="showPartialNote" class="pt-note pt-note--warn">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        渠道配置没取到：通道名称只能显示为编号，发码对话框里的通道下拉也会是空的。
+        <el-button link type="primary" @click="loadData">重试</el-button>
+      </span>
+    </div>
+
     <PtPanel
       v-loading="loading"
       title="待绑定绑定码"
       icon="key-round"
       :count="`${pendingBindings.length} 条`"
       padding="none">
-      <el-table :data="pendingBindings" class="pt-grid" row-key="code" style="width: 100%">
+      <el-table
+        v-if="!isMobile"
+        :data="pendingBindings"
+        class="pt-grid"
+        row-key="code"
+        style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="生成一个绑定码，再去聊天客户端里把它发给机器人" />
+          <PtDataState :state="state" dense :sub="pendingSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadData">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column prop="code" label="绑定码" width="220" class-name="pt-cell-strong">
@@ -264,6 +327,49 @@ function getConfNameByConfId(confId?: number) {
         </el-table-column>
       </el-table>
 
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        卡上留的是真正要做的事：把码复制走。所以码本身当标题，
+        倒计时进 status（红字表示快过期了），复制做成一个撑满的主操作 —— 表格里那个
+        16px 的链接图标在手机上根本点不准。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!pendingBindings.length" :state="state" :sub="pendingSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in pendingBindings" :key="row.code ?? row.id">
+          <template #title>
+            <code class="code">{{ row.code }}</code>
+          </template>
+
+          <template #meta>
+            <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
+            <span v-if="row.label">{{ row.label }}</span>
+            <span v-if="row.created_at">
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.created_at) }}
+            </span>
+          </template>
+
+          <template #status>
+            <span :class="getCountdownClass(row.expires_at)">
+              {{ getCountdown(row.expires_at) }}
+            </span>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="copyToClipboard(row.code ?? '')">
+              <PtIcon name="copy" :size="14" /><span>复制绑定码</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
+
       <template v-if="pendingBindings.length > 0" #footer>
         <span class="pt-foot-note">绑定码一次有效，过期或用掉后会从这里消失</span>
       </template>
@@ -275,9 +381,20 @@ function getConfNameByConfId(confId?: number) {
       icon="user-check"
       :count="`${activeBindings.length} 个`"
       padding="none">
-      <el-table :data="activeBindings" class="pt-grid" row-key="id" style="width: 100%">
+      <el-table
+        v-if="!isMobile"
+        :data="activeBindings"
+        class="pt-grid"
+        row-key="id"
+        style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="还没有用户完成绑定，先生成一个绑定码" />
+          <PtDataState :state="state" dense :sub="activeSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadData">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column prop="channel_type" label="渠道" width="120">
@@ -325,6 +442,51 @@ function getConfNameByConfId(confId?: number) {
           </template>
         </el-table-column>
       </el-table>
+
+      <!--
+        移动端行卡。管理员那一栏在卡上不能沿用表格的「是 / 否」—— 卡片没有列头，
+        脱离表头的「否」读不出是在说什么，所以换成自解释的「管理员 / 普通」。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!activeBindings.length" :state="state" :sub="activeSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in activeBindings" :key="row.id">
+          <template #title>
+            <code class="uid uid--card">{{ maskUserId(row.channel_user_id) }}</code>
+          </template>
+
+          <template #meta>
+            <PtTag>{{ row.channel_type }}</PtTag>
+            <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
+            <span v-if="row.label">{{ row.label }}</span>
+            <span v-if="row.last_active">
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.last_active) }}
+            </span>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
+              {{ row.admin ? "管理员" : "普通" }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="handleToggleLang(row)">
+              <PtIcon name="globe" :size="14" /><span>切换语言</span>
+            </el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">
+              <PtIcon name="trash-2" :size="14" /><span>撤销</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
 
       <template v-if="activeBindings.length > 0" #footer>
         <span class="pt-foot-note">
@@ -424,6 +586,13 @@ function getConfNameByConfId(confId?: number) {
   color: var(--pt-t2);
 }
 
+/* 行卡标题位上的用户 ID：等宽体保留，但要用正文字号和主文色，
+   不能沿用表格里那个 11 号次要色 —— 在卡上它是标题，不是次要信息 */
+.uid--card {
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t1);
+}
+
 .cd {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-sm);
@@ -446,6 +615,14 @@ function getConfNameByConfId(confId?: number) {
 .cd--expired {
   color: var(--pt-t4);
   text-decoration: line-through;
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
 }
 
 /* 发码结果：一屏里只有这串码值得看，所以给它整块居中和最大的字号 */

@@ -1,12 +1,48 @@
 <script setup lang="ts">
-import { globalApi, maintenanceApi, type CleanResult, type GlobalSettings } from "@/api";
+import {
+  type CleanCategoryResult,
+  type CleanResult,
+  globalApi,
+  type GlobalSettings,
+  maintenanceApi,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 
-const loading = ref(false);
+type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
+
+const isMobile = useIsMobile();
+
+/**
+ * 全局配置的六态（设计文档 §5）。这个面板不是表格，但读失败的后果更重：
+ * 以前只弹一个 toast，两秒后表单静静停在一整套默认值上，用户点「保存」
+ * 就把默认值写回了服务端。所以失败必须留在页面上，并且说清后果。
+ */
+const {
+  loading,
+  state: settingsState,
+  errorText: settingsErrorText,
+  run: runSettings,
+} = useDataState();
+
+const settingsFailed = computed(
+  () => settingsState.value === "error" || settingsState.value === "perm",
+);
+
+const settingsAlertText = computed(() => {
+  if (settingsState.value === "perm") {
+    return "没有权限读取全局配置。下面显示的是默认值，保存会覆盖服务端现有配置。";
+  }
+  return `配置加载失败：${settingsErrorText.value}。下面显示的是默认值，请先重试成功再保存，否则会用默认值覆盖服务端配置。`;
+});
+
 const saving = ref(false);
 const scopeTagInput = ref("");
 const protectTagInput = ref("");
@@ -158,25 +194,27 @@ const presetFields = computed(() => [
 watch(presetFields, () => detectPreset());
 
 onMounted(async () => {
-  loading.value = true;
-  try {
-    const data = await globalApi.get();
-    const d = data as unknown as Record<string, unknown>;
-    const f = form.value as unknown as Record<string, unknown>;
-    Object.keys(f).forEach((key) => {
-      if (key in d) {
-        f[key] = d[key];
-      }
-    });
-    form.value.cleanup_scope_tags = tagsToArray(d.cleanup_scope_tags as string);
-    form.value.cleanup_protect_tags = tagsToArray(d.cleanup_protect_tags as string);
-    detectPreset();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
-  }
+  await loadSettings();
 });
+
+async function loadSettings() {
+  const data = await runSettings(() => globalApi.get());
+  if (!data) {
+    // toast 照旧弹，但状态留在页面上的那条提示才是用户两秒后还能看到的东西
+    ElMessage.error(settingsErrorText.value || "加载失败");
+    return;
+  }
+  const d = data as unknown as Record<string, unknown>;
+  const f = form.value as unknown as Record<string, unknown>;
+  Object.keys(f).forEach((key) => {
+    if (key in d) {
+      f[key] = d[key];
+    }
+  });
+  form.value.cleanup_scope_tags = tagsToArray(d.cleanup_scope_tags as string);
+  form.value.cleanup_protect_tags = tagsToArray(d.cleanup_protect_tags as string);
+  detectPreset();
+}
 
 async function save() {
   saving.value = true;
@@ -205,25 +243,131 @@ const workdirCategoryOptions = [
 
 const workdirCategories = ref<string[]>(["logs", "staging", "backups"]);
 const keepBackups = ref(5);
-const previewing = ref(false);
-const cleaning = ref(false);
 const cleanPreview = ref<CleanResult | null>(null);
 const cleanResult = ref<CleanResult | null>(null);
+/** 用户点过预览 / 清理之后这两块才出现；出现之后就一直负责交代结果，包括失败 */
+const previewAsked = ref(false);
+const cleanAsked = ref(false);
 
 function categoryLabel(name: string): string {
   return workdirCategoryOptions.find((o) => o.value === name)?.label ?? name;
 }
 
-async function previewClean() {
-  previewing.value = true;
-  cleanResult.value = null;
-  try {
-    cleanPreview.value = await maintenanceApi.preview();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "预览失败");
-  } finally {
-    previewing.value = false;
+/**
+ * 整类被拒绝 —— partial 态的来源。
+ *
+ * 后端只在整类拒绝清理时把 note 写成「类别 X 拒绝清理：…」（cleaner.go），
+ * 其余 note（例如暂存清理的「使用默认保留期 24h」）只是说明，不算失败。
+ * 这里按关键字识别：后端文案改了顶多不再显示「部分失败」提示，不会误判成错误。
+ */
+function isRejected(row: CleanCategoryResult): boolean {
+  return (row.note || "").includes("拒绝");
+}
+
+function countRejected(res: CleanResult | null): number {
+  if (!res) return 0;
+  return res.categories.filter(isRejected).length;
+}
+
+const previewRows = computed<CleanCategoryResult[]>(() => cleanPreview.value?.categories ?? []);
+const cleanRows = computed<CleanCategoryResult[]>(() => cleanResult.value?.categories ?? []);
+
+const previewFailed = computed(() => countRejected(cleanPreview.value));
+const cleanFailed = computed(() => countRejected(cleanResult.value));
+
+/** 预览表：没有筛选条件（预览接口一律扫全部三类），所以 0 行就是 empty 而不是 zero */
+const {
+  loading: previewing,
+  state: previewState,
+  errorText: previewErrorText,
+  run: runPreview,
+  hasPartialBanner: previewPartial,
+} = useDataState({ failed: () => previewFailed.value });
+
+/** 清理结果表：只清勾选的那几类，所以 0 行要分「一个都没勾全」和「真的没东西可删」 */
+const {
+  loading: cleaning,
+  state: cleanState,
+  errorText: cleanErrorText,
+  run: runClean,
+  hasPartialBanner: cleanPartial,
+} = useDataState({
+  filtered: () => workdirCategories.value.length < workdirCategoryOptions.length,
+  failed: () => cleanFailed.value,
+});
+
+/* PtDataState 的默认文案是给「加载列表」写的；这两块一个是扫描一个是删文件，标题要改 */
+const previewStateTitle = computed(() => {
+  if (previewState.value === "loading") return "正在预览";
+  if (previewState.value === "error") return "预览失败";
+  if (previewState.value === "empty") return "没有可清理项";
+  return "";
+});
+
+const previewStateSub = computed(() => {
+  if (previewState.value === "error" || previewState.value === "perm") {
+    return previewErrorText.value;
   }
+  return "日志、暂存种子和旧配置备份目录里都没有可清理的内容";
+});
+
+const cleanStateTitle = computed(() => {
+  if (cleanState.value === "loading") return "正在清理";
+  if (cleanState.value === "error") return "清理失败";
+  if (cleanState.value === "empty" || cleanState.value === "zero") return "没有删除任何文件";
+  return "";
+});
+
+const cleanStateSub = computed(() => {
+  if (cleanState.value === "error" || cleanState.value === "perm") return cleanErrorText.value;
+  if (cleanState.value === "loading") return "正在删除文件，别关页面";
+  if (cleanState.value === "zero") return "勾选的这几项下没有可清理的内容，换一组清理项再试";
+  return "勾选的清理项下没有符合条件的文件";
+});
+
+/** 拒绝 > 有可删 > 无需清理；预览用 warn（还没删），结果用 ok（已删） */
+function previewTone(row: CleanCategoryResult): Tone {
+  if (isRejected(row)) return "dang";
+  return row.deletedCount > 0 ? "warn" : "neutral";
+}
+
+function previewText(row: CleanCategoryResult): string {
+  if (isRejected(row)) return "已拒绝";
+  return row.deletedCount > 0 ? "可清理" : "无需清理";
+}
+
+function cleanTone(row: CleanCategoryResult): Tone {
+  if (isRejected(row)) return "dang";
+  return row.deletedCount > 0 ? "ok" : "neutral";
+}
+
+function cleanText(row: CleanCategoryResult): string {
+  if (isRejected(row)) return "已拒绝";
+  return row.deletedCount > 0 ? "已清理" : "未清理";
+}
+
+/** 行卡那条进度：可释放（已释放）占该目录当前已用的比例 */
+function freedPercent(row: CleanCategoryResult): number {
+  if (!row.dirUsedBytes || row.dirUsedBytes <= 0) return 0;
+  return Math.min(100, Math.round((row.freedBytes / row.dirUsedBytes) * 100));
+}
+
+async function loadPreview() {
+  previewAsked.value = true;
+  // 先清空再请求：这两张表没有面板级 loading 遮罩，留着旧数据的话 loading 态根本看不见
+  cleanPreview.value = null;
+  const data = await runPreview(() => maintenanceApi.preview());
+  if (!data) {
+    ElMessage.error(previewErrorText.value || "预览失败");
+    return;
+  }
+  cleanPreview.value = data;
+}
+
+async function previewClean() {
+  cleanResult.value = null;
+  cleanAsked.value = false;
+  await loadPreview();
 }
 
 async function executeClean() {
@@ -246,26 +390,23 @@ async function executeClean() {
     return;
   }
 
-  cleaning.value = true;
-  try {
-    cleanResult.value = await maintenanceApi.clean({
+  cleanAsked.value = true;
+  cleanResult.value = null;
+  const res = await runClean(() =>
+    maintenanceApi.clean({
       categories: workdirCategories.value,
       dryRun: false,
       keepBackups: keepBackups.value,
-    });
-    ElMessage.success(
-      `清理完成，共删除 ${cleanResult.value.totalDeleted} 项，释放 ${cleanResult.value.totalFreedHuman}`,
-    );
-    try {
-      cleanPreview.value = await maintenanceApi.preview();
-    } catch {
-      cleanPreview.value = null;
-    }
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "清理失败");
-  } finally {
-    cleaning.value = false;
+    }),
+  );
+  if (!res) {
+    // 失败时不留旧结果：上一次的「已删 12 项」配一块「清理失败」比什么都不显示更误导
+    ElMessage.error(cleanErrorText.value || "清理失败");
+    return;
   }
+  cleanResult.value = res;
+  ElMessage.success(`清理完成，共删除 ${res.totalDeleted} 项，释放 ${res.totalFreedHuman}`);
+  await loadPreview();
 }
 </script>
 
@@ -277,6 +418,28 @@ async function executeClean() {
           {{ form.cleanup_enabled ? "运行中" : "未启用" }}
         </PtStatusPill>
       </template>
+
+      <!--
+        配置读失败时，表单会停在一整套默认值上 —— 长得和「服务端就是这么配的」一模一样。
+        perm 不给重试：没权限点多少次都一样。
+      -->
+      <div
+        v-if="settingsFailed"
+        class="pt-note settings-alert"
+        :class="settingsState === 'perm' ? 'pt-note--warn' : 'pt-note--dang'">
+        <PtIcon
+          :name="settingsState === 'perm' ? 'lock' : 'circle-alert'"
+          :size="14"
+          class="pt-note__icon" />
+        <span class="settings-alert__text">{{ settingsAlertText }}</span>
+        <el-button
+          v-if="settingsState === 'error'"
+          size="small"
+          :loading="loading"
+          @click="loadSettings">
+          <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+        </el-button>
+      </div>
 
       <el-form :model="form" label-position="top" class="pt-form settings-form">
         <div class="pt-strip">
@@ -595,15 +758,36 @@ async function executeClean() {
         </div>
       </div>
 
-      <template v-if="cleanPreview">
+      <template v-if="previewAsked">
         <div class="pt-strip">
           <PtIcon name="eye" :size="13" />
           <span>预览结果</span>
-          <span class="pt-strip__end">
+          <span v-if="cleanPreview" class="pt-strip__end">
             可删 {{ cleanPreview.totalDeleted }} 项 · 可释放 {{ cleanPreview.totalFreedHuman }}
           </span>
         </div>
-        <el-table :data="cleanPreview.categories" class="pt-grid" style="width: 100%">
+
+        <!-- partial：有类别被整类拒绝，但拿到的行照样列出来，不用状态块顶掉表格 -->
+        <div v-if="previewPartial(previewRows.length)" class="pt-note pt-note--warn table-note">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>{{ previewFailed }} 个清理项被整类拒绝（原因见「备注」），其余结果照常列出。</span>
+        </div>
+
+        <el-table v-if="!isMobile" :data="previewRows" class="pt-grid" style="width: 100%">
+          <template #empty>
+            <PtDataState
+              :state="previewState"
+              dense
+              :title="previewStateTitle"
+              :sub="previewStateSub">
+              <template v-if="previewState === 'error'" #action>
+                <el-button size="small" @click="loadPreview">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
+          </template>
+
           <el-table-column label="清理项" min-width="120" class-name="pt-cell-strong">
             <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
           </el-table-column>
@@ -627,7 +811,9 @@ async function executeClean() {
             label-class-name="pt-cell-num" />
           <el-table-column label="备注" min-width="160" class-name="pt-cell-muted">
             <template #default="{ row }">
-              <PtStatusPill v-if="row.note" tone="warn" size="sm">{{ row.note }}</PtStatusPill>
+              <PtStatusPill v-if="row.note" :tone="isRejected(row) ? 'dang' : 'warn'" size="sm">
+                {{ row.note }}
+              </PtStatusPill>
               <span v-else-if="row.skippedCount > 0">
                 跳过 {{ row.skippedCount }} 项（受保护）
               </span>
@@ -635,20 +821,87 @@ async function executeClean() {
             </template>
           </el-table-column>
         </el-table>
-        <div class="settings-body settings-body--tail">
+
+        <!--
+          移动端行卡（§9）：这张表 5 列里有 3 列是数字，横着滚就没了列头，
+          数字也就读不出是「已用」还是「可释放」。卡上给每个数字带上词。
+        -->
+        <div v-else class="cards">
+          <PtDataState
+            v-if="!previewRows.length"
+            :state="previewState"
+            :title="previewStateTitle"
+            :sub="previewStateSub">
+            <template v-if="previewState === 'error'" #action>
+              <el-button size="small" @click="loadPreview">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
+
+          <PtRowCard v-for="row in previewRows" :key="row.name">
+            <template #title>{{ categoryLabel(row.name) }}</template>
+
+            <template #meta>
+              <span>可删 {{ row.deletedCount }} 项</span>
+              <span v-if="row.skippedCount > 0">跳过 {{ row.skippedCount }} 项（受保护）</span>
+              <span
+                v-if="row.note"
+                class="note-line"
+                :class="isRejected(row) ? 'is-dang' : 'is-warn'">
+                {{ row.note }}
+              </span>
+            </template>
+
+            <template #status>
+              <PtStatusPill :tone="previewTone(row)" size="sm">{{ previewText(row) }}</PtStatusPill>
+            </template>
+
+            <template v-if="row.dirUsedBytes > 0" #progress>
+              <el-progress
+                :percentage="freedPercent(row)"
+                :stroke-width="4"
+                :show-text="false"
+                color="var(--pt-p)" />
+              <span class="progress-info">
+                <span>可释放 {{ row.freedHuman }} / 已用 {{ row.dirUsedHuman }}</span>
+                <span class="progress-pct">{{ freedPercent(row) }}%</span>
+              </span>
+            </template>
+          </PtRowCard>
+        </div>
+
+        <div v-if="previewRows.length" class="settings-body settings-body--tail">
           <div class="field-tip">这里只是预览，还没删任何文件；点「立即清理」并确认后才真删。</div>
         </div>
       </template>
 
-      <template v-if="cleanResult">
+      <template v-if="cleanAsked">
         <div class="pt-strip">
           <PtIcon name="circle-check" :size="13" />
           <span>清理结果</span>
-          <span class="pt-strip__end">
+          <span v-if="cleanResult" class="pt-strip__end">
             已删 {{ cleanResult.totalDeleted }} 项 · 释放 {{ cleanResult.totalFreedHuman }}
           </span>
         </div>
-        <el-table :data="cleanResult.categories" class="pt-grid" style="width: 100%">
+
+        <div v-if="cleanPartial(cleanRows.length)" class="pt-note pt-note--warn table-note">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>{{ cleanFailed }} 个清理项被整类拒绝（原因见「备注」），其余已按结果处理。</span>
+        </div>
+
+        <el-table v-if="!isMobile" :data="cleanRows" class="pt-grid" style="width: 100%">
+          <template #empty>
+            <PtDataState :state="cleanState" dense :title="cleanStateTitle" :sub="cleanStateSub">
+              <!-- 重试走 executeClean，会重新弹确认框：删文件不能靠一个小按钮直接触发 -->
+              <template v-if="cleanState === 'error'" #action>
+                <el-button size="small" @click="executeClean">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+            </PtDataState>
+          </template>
+
           <el-table-column label="清理项" min-width="120" class-name="pt-cell-strong">
             <template #default="{ row }">{{ categoryLabel(row.name) }}</template>
           </el-table-column>
@@ -672,7 +925,9 @@ async function executeClean() {
             label-class-name="pt-cell-num" />
           <el-table-column label="备注" min-width="160" class-name="pt-cell-muted">
             <template #default="{ row }">
-              <PtStatusPill v-if="row.note" tone="warn" size="sm">{{ row.note }}</PtStatusPill>
+              <PtStatusPill v-if="row.note" :tone="isRejected(row) ? 'dang' : 'warn'" size="sm">
+                {{ row.note }}
+              </PtStatusPill>
               <span v-else-if="row.skippedCount > 0">
                 跳过 {{ row.skippedCount }} 项（受保护）
               </span>
@@ -680,6 +935,51 @@ async function executeClean() {
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-else class="cards">
+          <PtDataState
+            v-if="!cleanRows.length"
+            :state="cleanState"
+            :title="cleanStateTitle"
+            :sub="cleanStateSub">
+            <template v-if="cleanState === 'error'" #action>
+              <el-button size="small" @click="executeClean">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
+
+          <PtRowCard v-for="row in cleanRows" :key="row.name">
+            <template #title>{{ categoryLabel(row.name) }}</template>
+
+            <template #meta>
+              <span>已删 {{ row.deletedCount }} 项</span>
+              <span v-if="row.skippedCount > 0">跳过 {{ row.skippedCount }} 项（受保护）</span>
+              <span
+                v-if="row.note"
+                class="note-line"
+                :class="isRejected(row) ? 'is-dang' : 'is-warn'">
+                {{ row.note }}
+              </span>
+            </template>
+
+            <template #status>
+              <PtStatusPill :tone="cleanTone(row)" size="sm">{{ cleanText(row) }}</PtStatusPill>
+            </template>
+
+            <template v-if="row.dirUsedBytes > 0" #progress>
+              <el-progress
+                :percentage="freedPercent(row)"
+                :stroke-width="4"
+                :show-text="false"
+                color="var(--pt-ok)" />
+              <span class="progress-info">
+                <span>释放 {{ row.freedHuman }} / 清理前已用 {{ row.dirUsedHuman }}</span>
+                <span class="progress-pct">{{ freedPercent(row) }}%</span>
+              </span>
+            </template>
+          </PtRowCard>
+        </div>
       </template>
     </PtPanel>
   </div>
@@ -801,5 +1101,66 @@ async function executeClean() {
   display: flex;
   gap: var(--pt-space-2);
   padding-bottom: var(--pt-space-2);
+}
+
+/* 手机上这两个是本页的主操作，按 §9 的 44 触控高度等分一行 */
+@media (max-width: 768px) {
+  .clean-acts .el-button {
+    flex: 1;
+    min-height: var(--pt-m-touch);
+    margin: 0;
+  }
+}
+
+/* 配置读失败的提示：面板 padding="none"，左右留白自己给 */
+.settings-alert {
+  align-items: center;
+  margin: var(--pt-space-3) var(--pt-pad);
+}
+
+.settings-alert__text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 表格/行卡上方的「部分失败」提示 */
+.table-note {
+  margin: var(--pt-space-3) var(--pt-pad) 0;
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
+
+/* 备注独占一行：整类拒绝的原因带着路径，挤在 meta 的数字之间根本读不出来 */
+.note-line {
+  flex-basis: 100%;
+  line-height: var(--pt-lh-body);
+}
+
+.note-line.is-warn {
+  color: var(--pt-warn);
+}
+
+.note-line.is-dang {
+  color: var(--pt-dang);
+}
+
+/* 进度条 + 一行说明，和任务列表的行卡保持同一形态 */
+.progress-info {
+  display: flex;
+  gap: var(--pt-space-2);
+  justify-content: space-between;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-t3);
+}
+
+.progress-pct {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 </style>

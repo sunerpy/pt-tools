@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   type DownloaderCapability,
+  type DownloaderFailure,
   downloaderTorrentsApi,
   downloadersApi,
   type DownloaderSetting,
@@ -15,7 +16,13 @@ import PtIcon from "@/components/PtIcon";
 import PtLogo from "@/components/PtLogo";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtProgress from "@/components/ui/PtProgress.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
 import { useThemeStore } from "@/stores/theme";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -43,6 +50,13 @@ const SIDEBAR_WIDTH_MIN = 280;
 const SIDEBAR_WIDTH_MAX = 420;
 const SIDEBAR_WIDTH_DEFAULT = 320;
 const MAX_ALL_TASK_ROWS = 5000;
+/*
+ * 移动端行卡的渲染上限。手机上不做虚拟滚动（行卡高度不定，撑不出稳定的行高），
+ * 所以 limitRowsForSafety 那条防卡死上限在这里还得再收一档：「全部」范围下
+ * torrents 已经被削到 5000，可 5000 张不定高的卡照样能让手机卡死。
+ * 超出的条数在页脚说明，不静默丢。
+ */
+const MAX_MOBILE_CARD_ROWS = 200;
 const ALL_COLUMN_KEYS = [
   "status_bar",
   "downloader_name",
@@ -79,7 +93,24 @@ const DEFAULT_VISIBLE_COLUMNS = [
   "tags",
 ];
 
-const loading = ref(false);
+const isMobile = useIsMobile();
+/**
+ * 查询代次 —— 只由「用户意图变了」推进：换筛选、翻页、改排序、手动刷新，
+ * 也就是每一次前台 loadTorrents。
+ *
+ * 落地前比一次代次，号不是最新的就整条丢弃：既不写数据也不清错误。
+ * 没有这道校验会出错：静默请求用筛选 A 发出 → 用户切到筛选 B、前台加载失败并留下错误
+ * → A 的响应晚到，把 B 的真实失败清掉并写回 A 的结果。页面于是把一次更新的失败
+ * 显示成「已恢复」，摆着的还是旧筛选的数据。
+ *
+ * 5 秒的周期轮询**不推进**代次：它刷的是同一个查询，不是新查询。
+ * 让它也推进会造成饥饿 —— 后端串行遍历下载器、单台 qBittorrent 的取列表可以等到 30s，
+ * 请求耗时一旦超过 5 秒轮询间隔，每一拍都会作废上一拍，所有成功响应被永久丢弃，
+ * 列表、partial 提示和错误恢复就再也不会自动更新了。
+ */
+let loadEpoch = 0;
+/** 静默刷新单飞：上一拍还没回来就跳过这一拍，两个静默请求并存没有意义 */
+let silentInFlight = false;
 const actionLoading = ref(false);
 const addLoading = ref(false);
 const autoRefreshEnabled = ref(true);
@@ -106,6 +137,14 @@ const selectedRows = ref<DownloaderTorrentItem[]>([]);
 const selectedRowKeys = ref<string[]>([]);
 const allTasksLimited = ref(false);
 const capabilities = ref<DownloaderCapability[]>([]);
+/**
+ * 后端逐台上报的失败下载器。
+ *
+ * 以前某台下载器连不上会被静默跳过、接口照样返回 200，用户看到的是一份
+ * 「少了一台下载器」的列表却毫无提示 —— 会以为任务真的没了。非空即部分失败：
+ * 有任务时在列表上方挂提示条，一条任务都没有时 partial 成为主状态。
+ */
+const loadFailures = ref<DownloaderFailure[]>([]);
 
 const filters = ref({
   search: "",
@@ -260,7 +299,6 @@ const draggingColumn = ref<string | null>(null);
 const virtualScrollTop = ref(0);
 const virtualOverscan = 20;
 const tableMaxHeight = ref(620);
-const tableLoading = computed(() => loading.value && torrents.value.length === 0);
 let resizeObserver: ResizeObserver | null = null;
 let sidebarResizeDragging = false;
 
@@ -306,7 +344,79 @@ const hasActiveFilter = computed(
     Boolean(filters.value.tag),
 );
 
-const isEmptyResult = computed(() => !loading.value && torrents.value.length === 0);
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 这一页以前只有一个 loading ref：loadTorrents 失败时弹个 toast，两秒后 toast 没了，
+ * 而状态块固定按 hasActiveFilter 画成 empty / zero —— 一个 500 会被显示成
+ * 「下载器里还没有任务」，用户以为下载器被清空了。401/403 还得单独画成「无权访问」，
+ * 否则只会让人一直点重试。
+ *
+ * 多台下载器天生会部分失败，所以 failed 接的是失败下载器数：有任务时挂提示条
+ * （hasPartialBanner），一条任务都没有时 partial 成为主状态。
+ */
+const { loading, state, errorText, run, hasPartialBanner, clearError } = useDataState({
+  filtered: () => hasActiveFilter.value,
+  failed: () => loadFailures.value.length,
+});
+
+/* 面板遮罩只在「还什么都没有」时铺满：手上已经有旧数据时盖一层遮罩会把它糊掉，
+   刷新过程交给按钮上的 loading 表达 */
+const tableLoading = computed(() => loading.value && torrents.value.length === 0);
+
+/** 一行都没拿到时才用状态块顶掉列表；有行时 partial 只挂一条提示条 */
+const showStateBlock = computed(() => torrents.value.length === 0);
+
+/** 失败下载器清单，partial 作为主状态时当副标题用 */
+const failureSummary = computed(() => {
+  if (loadFailures.value.length === 0) return "";
+  return `${loadFailures.value.length} 台下载器没有返回任务：${loadFailures.value
+    .map((item) => item.downloader_name)
+    .join("、")}`;
+});
+
+/* loading 留空，让 PtDataState 用它自带的「加载中」预设 */
+const stateTitle = computed(() => {
+  switch (state.value) {
+    case "error":
+      return "任务加载失败";
+    case "perm":
+      return "无权访问下载器任务";
+    case "partial":
+      return "没有下载器返回任务";
+    case "zero":
+      return "没有匹配的任务";
+    case "empty":
+      return "下载器里还没有任务";
+    default:
+      return "";
+  }
+});
+
+/** 状态块的副标题：失败时给真实原因，空态时给下一步动作 */
+const stateSub = computed(() => {
+  switch (state.value) {
+    case "error":
+    case "perm":
+      return errorText.value;
+    case "partial":
+      return failureSummary.value;
+    case "zero":
+      return "试试放宽状态、分类或关键词";
+    case "empty":
+      return "添加一个种子，任务会出现在这里";
+    default:
+      return "";
+  }
+});
+
+/*
+ * 移动端行卡列表（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+ * 桌面那两套表格原样保留，这里只是并列的第二套视图，所以不复用虚拟切片
+ * （tableRows 在虚拟模式下只是可视窗口），而是从完整的 torrents 自己截。
+ */
+const mobileRows = computed(() => torrents.value.slice(0, MAX_MOBILE_CARD_ROWS));
+const mobileRowsLimited = computed(() => torrents.value.length > MAX_MOBILE_CARD_ROWS);
 
 const densityOptions = [
   { label: "紧凑", value: "compact" },
@@ -352,9 +462,11 @@ onMounted(async () => {
       !headerColumnMenuVisible.value &&
       !actionLoading.value &&
       !addLoading.value &&
-      !detailLoading.value
+      !detailLoading.value &&
+      // 前台正在加载就跳过这一拍：两个请求并存只会互相作废，还白占一个连接
+      !loading.value
     ) {
-      silentLoadTorrents();
+      void silentLoadTorrents();
     }
   }, 5000);
   if (typeof ResizeObserver !== "undefined") {
@@ -451,9 +563,14 @@ watch(useVirtualList, () => {
   scheduleTableHeightUpdate();
 });
 
-watch([selectedCount, heroVisible, sidebarVisible, total, loading], () => {
-  scheduleTableHeightUpdate();
-});
+/* 部分失败提示条挂在 tableCardBodyRef 上方，它一出现就把可用高度吃掉一块，
+   所以失败条数也要触发一次重算 */
+watch(
+  [selectedCount, heroVisible, sidebarVisible, total, loading, () => loadFailures.value.length],
+  () => {
+    scheduleTableHeightUpdate();
+  },
+);
 
 watch(sidebarWidth, (value) => {
   localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(value));
@@ -618,6 +735,10 @@ async function loadDownloaders() {
 }
 
 async function silentLoadTorrents() {
+  if (silentInFlight) return;
+  silentInFlight = true;
+  // 只读当前代次，不推进：轮询刷的是同一个查询
+  const epoch = loadEpoch;
   try {
     const requestedShowAll = showAllTasks.value;
     const params = new URLSearchParams();
@@ -641,14 +762,32 @@ async function silentLoadTorrents() {
     params.set("sort_by", sortBy.value);
     params.set("sort_order", sortOrder.value);
     const resp = await downloaderTorrentsApi.list(params);
-    if (requestedShowAll !== showAllTasks.value) {
+    // 期间用户改过查询（换筛选、翻页、排序，或手动刷新）：这份结果已经过期
+    if (epoch !== loadEpoch || requestedShowAll !== showAllTasks.value) {
       return;
     }
+    /*
+     * 这一拍成功了，上一次失败的结论就作废。
+     *
+     * 这条很要紧：错误态现在是常驻的（不再是两秒消失的 toast），而这个静默刷新
+     * 不走 run()（run 会亮 loading 遮罩，5 秒闪一次没法用），所以不会自动清错误。
+     * 少了这一句，服务恢复后如果恰好返回 0 行，页面会一直停在「任务加载失败」上，
+     * 直到用户手动点重试 —— 把一个已经恢复的真实空态显示成故障。
+     */
+    clearError();
+
     const rows = limitRowsForSafety(resp.items, requestedShowAll);
     if (!isSameTorrentSnapshot(torrents.value, resp.items)) {
       torrents.value = rows;
       total.value = resp.total;
       restoreSelectedRows(rows);
+    }
+    /* 自动刷新也要跟着 failures 走：某台下载器是在两次刷新之间掉线的，
+       不更新的话提示条会一直停在上一次的结论上。和上面一样先比一把，
+       每 5 秒无条件换一个新数组会让提示条白白重渲染 */
+    const nextFailures = resp.failures ?? [];
+    if (!isSameFailureSnapshot(loadFailures.value, nextFailures)) {
+      loadFailures.value = nextFailures;
     }
     autoRefreshTick += 1;
     if (autoRefreshTick % 6 === 0) {
@@ -657,50 +796,68 @@ async function silentLoadTorrents() {
     }
   } catch {
     /* silent */
+  } finally {
+    silentInFlight = false;
   }
 }
 
 async function loadTorrents() {
-  loading.value = true;
-  try {
-    const requestedShowAll = showAllTasks.value;
-    const params = new URLSearchParams();
-    params.set("page", String(page.value));
-    params.set("page_size", requestedShowAll ? "0" : String(pageSize.value));
-    if (filters.value.search.trim()) {
-      params.set("search", filters.value.search.trim());
-    }
-    if (filters.value.downloaderId !== "all") {
-      params.set("downloader_id", filters.value.downloaderId);
-    }
-    if (filters.value.state) {
-      params.set("state", normalizeStateFilter(filters.value.state));
-    }
-    params.set("sort_by", sortBy.value);
-    params.set("sort_order", sortOrder.value);
-    if (filters.value.category) {
-      params.set("category", filters.value.category);
-    }
-    if (filters.value.tag) {
-      params.set("tag", filters.value.tag);
-    }
+  const epoch = ++loadEpoch;
+  const requestedShowAll = showAllTasks.value;
+  const params = new URLSearchParams();
+  params.set("page", String(page.value));
+  params.set("page_size", requestedShowAll ? "0" : String(pageSize.value));
+  if (filters.value.search.trim()) {
+    params.set("search", filters.value.search.trim());
+  }
+  if (filters.value.downloaderId !== "all") {
+    params.set("downloader_id", filters.value.downloaderId);
+  }
+  if (filters.value.state) {
+    params.set("state", normalizeStateFilter(filters.value.state));
+  }
+  params.set("sort_by", sortBy.value);
+  params.set("sort_order", sortOrder.value);
+  if (filters.value.category) {
+    params.set("category", filters.value.category);
+  }
+  if (filters.value.tag) {
+    params.set("tag", filters.value.tag);
+  }
 
-    const resp = await downloaderTorrentsApi.list(params);
-    if (requestedShowAll !== showAllTasks.value) {
-      return;
-    }
-    const rows = limitRowsForSafety(resp.items, requestedShowAll);
-    torrents.value = rows;
-    total.value = resp.total;
-    restoreSelectedRows(rows);
-    virtualScrollTop.value = 0;
-    if (virtualContainer.value) {
-      virtualContainer.value.scrollTop = 0;
-    }
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "任务加载失败");
-  } finally {
-    loading.value = false;
+  const resp = await run(() => downloaderTorrentsApi.list(params));
+
+  /*
+   * 期间又发起了更新的请求（连点筛选、翻页），这一份已经过期：不写任何状态。
+   *
+   * 失败分支这里刻意不去清错误：错误是由「某一次」请求报出来的，更新的那次落地时
+   * 会给出真相。宁可让用户多看一瞬错误，也不能把真实失败藏掉。
+   */
+  if (epoch !== loadEpoch) {
+    return;
+  }
+
+  if (!resp) {
+    /* 失败时清空：留着上一次的列表配一个「加载失败」的状态块更让人误解。
+       toast 照旧弹，但它只是提醒 —— 错误常驻在状态块里 */
+    torrents.value = [];
+    total.value = 0;
+    loadFailures.value = [];
+    restoreSelectedRows([]);
+    ElMessage.error(errorText.value || "任务加载失败");
+    return;
+  }
+  if (requestedShowAll !== showAllTasks.value) {
+    return;
+  }
+  const rows = limitRowsForSafety(resp.items, requestedShowAll);
+  torrents.value = rows;
+  total.value = resp.total;
+  loadFailures.value = resp.failures ?? [];
+  restoreSelectedRows(rows);
+  virtualScrollTop.value = 0;
+  if (virtualContainer.value) {
+    virtualContainer.value.scrollTop = 0;
   }
 }
 
@@ -785,6 +942,102 @@ function onSelectionKeysChange(keys: string[]) {
   restoreSelectedRows(torrents.value);
 }
 
+function isRowSelected(row: DownloaderTorrentItem): boolean {
+  return selectedRowKeys.value.includes(rowSelectionKey(row));
+}
+
+/**
+ * 移动端行卡上的勾选。
+ *
+ * 不另建一套选中态：桌面的 el-table 和虚拟表各自管自己的勾选，但两边最终都汇到
+ * selectedRowKeys，所以这里也改这一份，再走 onSelectionKeysChange 让 selectedRows
+ * 一起更新 —— 顶部那条批量操作条读的就是它。
+ */
+function toggleRowSelection(row: DownloaderTorrentItem) {
+  const key = rowSelectionKey(row);
+  const next = new Set(selectedRowKeys.value);
+  if (next.has(key)) {
+    next.delete(key);
+  } else {
+    next.add(key);
+  }
+  onSelectionKeysChange([...next]);
+}
+
+/** 语义色沿用桌面表格的状态色条：下载 ok、做种 info、暂停/停止 warn、错误 dang */
+function rowStateTone(
+  row: DownloaderTorrentItem,
+): "ok" | "warn" | "dang" | "info" | "primary" | "neutral" {
+  switch (normalizeTorrentState(row.state)) {
+    case "downloading":
+      return "ok";
+    case "seeding":
+      return "info";
+    case "paused":
+    case "stopped":
+      return "warn";
+    case "error":
+      return "dang";
+    case "checking":
+    case "queued":
+      return "primary";
+    default:
+      return "neutral";
+  }
+}
+
+/* 胶囊里给中文状态；下载器原样返回的是 stalledUP 这类内部值，手机上放不下也读不懂 */
+function rowStateLabel(row: DownloaderTorrentItem): string {
+  switch (normalizeTorrentState(row.state)) {
+    case "downloading":
+      return "下载中";
+    case "seeding":
+      return "做种中";
+    case "paused":
+      return "暂停";
+    case "stopped":
+      return "已停止";
+    case "error":
+      return "错误";
+    case "checking":
+      return "校验中";
+    case "queued":
+      return "排队中";
+    default:
+      return row.state || "未知";
+  }
+}
+
+/* 与桌面表格的 progressTone 同一套：错误红、暂停黄、做种绿、其余走主色 */
+function rowProgressTone(row: DownloaderTorrentItem): "primary" | "ok" | "warn" | "dang" {
+  switch (normalizeTorrentState(row.state)) {
+    case "error":
+      return "dang";
+    case "paused":
+    case "stopped":
+      return "warn";
+    case "seeding":
+      return "ok";
+    default:
+      return "primary";
+  }
+}
+
+function isRowPaused(row: DownloaderTorrentItem): boolean {
+  const normalized = normalizeTorrentState(row.state);
+  return normalized === "paused" || normalized === "stopped";
+}
+
+/**
+ * 单行的能力位判断，读的是 loadCapabilities 拿回来的同一份 capabilities，
+ * 语义和批量操作条的 selectedCanUse 一致：拿不到能力信息就当不可用。
+ */
+function rowCanUse(row: DownloaderTorrentItem, action: "pause" | "resume"): boolean {
+  const cap = capabilityByDownloader(row.downloader_id);
+  if (!cap) return false;
+  return action === "pause" ? cap.can_pause : cap.can_resume;
+}
+
 function formatSize(bytes: number): string {
   if (!bytes || bytes <= 0) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -795,6 +1048,12 @@ function formatSize(bytes: number): string {
     i++;
   }
   return `${size.toFixed(2)} ${units[i]}`;
+}
+
+/* 行卡进度那行的「已完成」：接口只给百分比，没有已完成字节数 */
+function downloadedSize(row: DownloaderTorrentItem): string {
+  if (!row.size || row.size <= 0) return "-";
+  return formatSize(row.size * (Math.min(100, Math.max(0, row.progress)) / 100));
 }
 
 function handleSortChange(payload: { prop: string; order: "ascending" | "descending" | null }) {
@@ -968,6 +1227,20 @@ function isSameTorrentSnapshot(
       a.seeds !== b.seeds ||
       a.connections !== b.connections
     ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isSameFailureSnapshot(current: DownloaderFailure[], next: DownloaderFailure[]): boolean {
+  if (current.length !== next.length) {
+    return false;
+  }
+  for (let i = 0; i < current.length; i += 1) {
+    const a = current[i];
+    const b = next[i];
+    if (!a || !b || a.downloader_id !== b.downloader_id || a.error !== b.error) {
       return false;
     }
   }
@@ -1619,16 +1892,37 @@ function onNavCommand(command: string) {
             </span>
           </div>
 
+          <!--
+            部分失败（§5 的 partial）：还有任务可看时不能用一整块状态图顶掉列表 ——
+            那等于把已经拿到的任务也藏了。所以有任务时在列表上方挂这条提示，
+            一个任务都没有时才让 partial 成为主状态（见下面的 PtDataState）。
+          -->
+          <div v-if="hasPartialBanner(torrents.length)" class="pt-note pt-note--warn hub__partial">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <div class="hub__partial-body">
+              <p class="hub__partial-t">
+                {{ loadFailures.length }} 台下载器没有返回任务，下面只是其余下载器的列表
+              </p>
+              <p v-for="item in loadFailures" :key="item.downloader_id" class="hub__partial-l">
+                {{ item.downloader_name }}：{{ item.error }}
+              </p>
+            </div>
+            <el-button size="small" :loading="loading" @click="loadTorrents">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </div>
+
           <div ref="tableCardBodyRef" class="hub__table">
-            <PtDataState
-              v-if="isEmptyResult"
-              :state="hasActiveFilter ? 'zero' : 'empty'"
-              :title="hasActiveFilter ? '没有匹配的任务' : '下载器里还没有任务'"
-              :sub="
-                hasActiveFilter ? '试试放宽状态、分类或关键词' : '添加一个种子，任务会出现在这里'
-              ">
-              <template #action>
-                <el-button v-if="hasActiveFilter" size="small" @click="clearFilters">
+            <PtDataState v-if="showStateBlock" :state="state" :title="stateTitle" :sub="stateSub">
+              <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
+              <template v-if="state !== 'perm' && state !== 'loading'" #action>
+                <el-button
+                  v-if="state === 'error' || state === 'partial'"
+                  size="small"
+                  @click="loadTorrents">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+                <el-button v-else-if="hasActiveFilter" size="small" @click="clearFilters">
                   <PtIcon name="rotate-ccw" :size="14" /><span>清空筛选</span>
                 </el-button>
                 <el-button v-else type="primary" size="small" @click="openAddDialog">
@@ -1636,7 +1930,7 @@ function onNavCommand(command: string) {
                 </el-button>
               </template>
             </PtDataState>
-            <div v-else class="hub__grid" @contextmenu.prevent>
+            <div v-else-if="!isMobile" class="hub__grid" @contextmenu.prevent>
               <div
                 v-if="showAllTasks && useVirtualList"
                 ref="virtualContainer"
@@ -1678,6 +1972,82 @@ function onNavCommand(command: string) {
                 @context-action="handleContextAction"
                 @detail="openDetail" />
             </div>
+
+            <!--
+              移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+              这张表桌面最多 16 列，手机上横着滚既看不到列头也和页面纵向滚动打架。
+              卡上留的是判断一个任务要不要动手真正要看的：标题、下载器/大小/分类/标签、
+              右上角状态、一条进度（已完成 / 总大小 + 百分比 + 上下行速率），底下主操作。
+              排序仍然走上面工具条里的「排序 / 方向」，所以表头的 sortable 不算丢功能。
+              高度沿用桌面那份测量值 tableMaxHeight，卡片列表自己滚，页脚照旧留在屏内。
+            -->
+            <div v-else class="hub__cards" :style="{ maxHeight: `${tableMaxHeight}px` }">
+              <PtRowCard v-for="row in mobileRows" :key="rowSelectionKey(row)">
+                <template #lead>
+                  <el-checkbox
+                    :model-value="isRowSelected(row)"
+                    :aria-label="`选择 ${row.title}`"
+                    @update:model-value="toggleRowSelection(row)" />
+                </template>
+
+                <template #title>{{ row.title || "-" }}</template>
+
+                <template #meta>
+                  <PtTag>{{ row.downloader_name }}</PtTag>
+                  <span>{{ formatSize(row.size) }}</span>
+                  <span v-if="row.category">
+                    <PtIcon name="folder" :size="11" />
+                    {{ row.category }}
+                  </span>
+                  <span v-if="row.tags">
+                    <PtIcon name="tag" :size="11" />
+                    {{ row.tags }}
+                  </span>
+                </template>
+
+                <template #status>
+                  <PtStatusPill :tone="rowStateTone(row)" size="sm">
+                    {{ rowStateLabel(row) }}
+                  </PtStatusPill>
+                </template>
+
+                <template #progress>
+                  <PtProgress :percent="row.progress" :tone="rowProgressTone(row)" />
+                  <span class="hub__card-pg">
+                    <span>{{ downloadedSize(row) }} / {{ formatSize(row.size) }}</span>
+                    <span class="hub__card-rate">
+                      <span class="is-dl">↓ {{ formatSize(row.download_speed) }}/s</span>
+                      <span class="is-ul">↑ {{ formatSize(row.upload_speed) }}/s</span>
+                      <span class="hub__card-pct">{{ Math.round(row.progress) }}%</span>
+                    </span>
+                  </span>
+                </template>
+
+                <!--
+                  主操作走 handleContextAction，和桌面右键菜单是同一条路径（同一份
+                  batchAction + 重新加载 + 提示）；可用性读的也是同一份 capabilities。
+                -->
+                <template #actions>
+                  <el-button
+                    v-if="isRowPaused(row)"
+                    size="small"
+                    :disabled="actionLoading || !rowCanUse(row, 'resume')"
+                    @click="handleContextAction({ action: 'resume', row })">
+                    <PtIcon name="play" :size="14" /><span>开始</span>
+                  </el-button>
+                  <el-button
+                    v-else
+                    size="small"
+                    :disabled="actionLoading || !rowCanUse(row, 'pause')"
+                    @click="handleContextAction({ action: 'pause', row })">
+                    <PtIcon name="pause" :size="14" /><span>暂停</span>
+                  </el-button>
+                  <el-button type="primary" size="small" @click="openDetail(row)">
+                    <PtIcon name="info" :size="14" /><span>详情</span>
+                  </el-button>
+                </template>
+              </PtRowCard>
+            </div>
           </div>
 
           <template #footer>
@@ -1686,6 +2056,13 @@ function onNavCommand(command: string) {
                 共 {{ total }} 个任务<template v-if="allTasksLimited">
                   ·
                   <span class="hub__warn">仅渲染前 {{ MAX_ALL_TASK_ROWS }} 条（防卡死）</span>
+                </template>
+                <!-- 行卡不虚拟滚动，所以移动端的上限比桌面那条更低，得单独说清楚 -->
+                <template v-if="isMobile && mobileRowsLimited">
+                  ·
+                  <span class="hub__warn">
+                    行卡仅渲染前 {{ MAX_MOBILE_CARD_ROWS }} 条（防卡死）
+                  </span>
                 </template>
               </span>
               <el-pagination
@@ -2180,6 +2557,31 @@ function onNavCommand(command: string) {
   align-items: center;
 }
 
+/* ---------- 部分失败提示条 ---------- */
+/* .pt-note 自带色条和底色，这里只补面板内的留白（正文是 padding="none"）与对齐 */
+.hub__partial {
+  align-items: flex-start;
+  margin: var(--pt-space-3) var(--pt-pad);
+}
+
+.hub__partial-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.hub__partial-t {
+  margin: 0;
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.hub__partial-l {
+  margin: 2px 0 0;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  overflow-wrap: anywhere;
+}
+
 /* ---------- 表格区 ---------- */
 .hub__panel {
   flex: 1;
@@ -2201,6 +2603,43 @@ function onNavCommand(command: string) {
   contain: layout style;
   will-change: scroll-position;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ---------- 移动端行卡列表 ---------- */
+/* 面板正文是 padding="none"，所以留白由这里给；高度上限走内联的 tableMaxHeight，
+   和桌面两套表格用的是同一份测量值，卡片列表自己滚，页脚照旧留在屏内 */
+.hub__cards {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  min-height: 0;
+  padding: var(--pt-space-3);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 进度下面那行说明：左边已完成 / 总大小，右边速率与百分比 */
+.hub__card-pg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--pt-space-2);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-t3);
+}
+
+.hub__card-rate {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.hub__card-pct {
+  font-weight: 600;
+  color: var(--pt-t2);
 }
 
 .hub__foot {

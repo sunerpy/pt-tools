@@ -201,7 +201,7 @@ func (s *Server) apiDeletePausedTorrents(w http.ResponseWriter, r *http.Request)
 	for _, t := range torrents {
 		// 从下载器删除
 		if t.DownloaderTaskID != "" && t.DownloaderName != "" {
-			dl, err := dlMgr.GetDownloader(t.DownloaderName)
+			dl, err := acquireDownloader(r.Context(), dlMgr, t.DownloaderName)
 			if err != nil {
 				global.GetSlogger().Warnf("获取下载器失败 (种子:%s): %v", t.Title, err)
 				// 即使获取下载器失败，也尝试从数据库删除记录
@@ -432,7 +432,7 @@ func (s *Server) apiResumeTorrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dl, err := dlMgr.GetDownloader(torrent.DownloaderName)
+	dl, err := acquireDownloader(r.Context(), dlMgr, torrent.DownloaderName)
 	if err != nil {
 		http.Error(w, "获取下载器失败: "+err.Error(), http.StatusInternalServerError)
 		return

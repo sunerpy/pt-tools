@@ -4,6 +4,7 @@ import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
@@ -13,12 +14,14 @@ import { useRouter } from "vue-router";
 
 import { formatTimeAgo } from "@/utils/format";
 import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
+import { type DataStateKey, useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { useLoginState } from "@/composables/useLoginState";
 import type { ReminderTier } from "@/composables/useLoginState";
 
 const router = useRouter();
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const sites = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const probing = reactive<Record<string, boolean>>({});
@@ -46,25 +49,91 @@ const addDialogVisible = ref(false);
 const addSearch = ref("");
 const enablingInDialog = reactive<Record<string, boolean>>({});
 
+/** 登录状态接口是否单独失败了：站点清单拿到了但它没拿到，就是 partial 而不是 error */
+const loginStatesFailed = ref(false);
+
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败时弹个 toast 就完事 —— toast 两秒后消失，
+ * 表格停在「还没有启用任何站点」，用户看到的是「库里是空的」，而真相是请求失败了。
+ * 401/403 也被画成普通失败，用户会一直点刷新。
+ *
+ * 这一页的 partial 是真实存在的：站点清单和登录状态是两个接口，登录状态挂了但清单
+ * 拿到了，表格照常渲染，只是「判定活跃 / 剩余天数 / 探测模式」三列没有依据。
+ */
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  failed: () => (loginStatesFailed.value ? 1 : 0),
+});
+
+/**
+ * 空态仍按视图模式分成两种文案（「已启用」空 = 去新增，「全部」空 = 内置清单本身没内容），
+ * 所以这里只接管 useDataState 判出的非空态，空态自己按 viewMode 决定。
+ */
+const tableState = computed<DataStateKey>(() => {
+  const s = state.value;
+  if (s === "loading" || s === "error" || s === "perm" || s === "partial") return s;
+  return viewMode.value === "enabled" ? "empty" : "zero";
+});
+
+/** error / perm / partial 用 PtDataState 的预设标题，传空串即可回落 */
+const stateTitle = computed(() => {
+  if (tableState.value === "empty") return "还没有启用任何站点";
+  if (tableState.value === "zero") return "没有可显示的站点";
+  return "";
+});
+
+/** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
+const stateSub = computed(() => {
+  switch (tableState.value) {
+    case "error":
+    case "perm":
+      return errorText.value;
+    case "partial":
+      return "站点清单是空的，登录状态也没取到，先重试一次";
+    case "empty":
+      return "从「新增站点」里挑一个开始，启用后才会参与 RSS 与统计";
+    default:
+      return "站点清单来自内置定义，装上浏览器扩展可以帮助适配新站";
+  }
+});
+
 onMounted(async () => {
   await loadSites();
 });
 
 async function loadSites() {
-  loading.value = true;
-  try {
-    const [siteMap, states] = await Promise.all([sitesApi.list(), sitesApi.listLoginStates()]);
-    sites.value = siteMap;
-    const byName: Record<string, SiteLoginState> = {};
-    for (const st of states ?? []) {
-      byName[st.site_name] = st;
-    }
-    loginStates.value = byName;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  loginStatesFailed.value = false;
+
+  const data = await run(async () => {
+    // allSettled 而不是 all：登录状态单独挂掉时站点清单还能用，不该整页变成 error
+    const [siteRes, stateRes] = await Promise.allSettled([
+      sitesApi.list(),
+      sitesApi.listLoginStates(),
+    ]);
+    // 站点清单是主数据，它失败就没有「部分可用」可言，抛出去让状态机判 error / perm
+    if (siteRes.status === "rejected") throw siteRes.reason;
+    loginStatesFailed.value = stateRes.status === "rejected";
+    return {
+      siteMap: siteRes.value,
+      states: stateRes.status === "fulfilled" ? stateRes.value : [],
+    };
+  });
+
+  if (!data) {
+    // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
+    sites.value = {};
+    loginStates.value = {};
+    ElMessage.error(errorText.value || "加载失败");
+    return;
   }
+
+  sites.value = data.siteMap;
+  const byName: Record<string, SiteLoginState> = {};
+  for (const st of data.states ?? []) {
+    byName[st.site_name] = st;
+  }
+  loginStates.value = byName;
 }
 
 async function toggleEnabled(name: string) {
@@ -263,6 +332,17 @@ function openAllEnabled() {
 
 function manageSite(name: string) {
   router.push(`/sites/${name}`);
+}
+
+/**
+ * 行卡「更多」菜单里的低频操作。
+ * 桌面操作列是六个图标按钮，手机上一行放不下六个 44 高的按钮，
+ * 前四个（停用/启用、打开、探测、配置）留在卡上，剩下三个折进菜单，一个都没丢。
+ */
+async function onCardCommand(cmd: { act: string; name: string }) {
+  if (cmd.act === "reminder") await sendTestReminder(cmd.name);
+  else if (cmd.act === "login-config") await openConfigDialog(cmd.name);
+  else if (cmd.act === "delete") await deleteSite(cmd.name);
 }
 
 function getRssCount(site: SiteConfig): number {
@@ -507,22 +587,35 @@ async function saveLoginConfig() {
       icon="globe"
       :count="`${visibleEntries.length} 个`"
       padding="none">
+      <!--
+        partial（§5）：站点清单拿到了但登录状态没拿到。有数据可看时不该用一整块状态图
+        顶掉表格 —— 那等于把已经拿到的也藏了，所以挂一条提示，表格照常渲染。
+      -->
+      <div
+        v-if="hasPartialBanner(visibleEntries.length)"
+        class="pt-note pt-note--warn partial-note"
+        data-testid="sites-partial-note">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span class="partial-note__text">
+          站点清单已加载，但登录状态接口没有返回：「判定活跃」「剩余天数」「探测模式」暂时没有依据。
+        </span>
+        <el-button link type="primary" size="small" @click="loadSites">重试</el-button>
+      </div>
+
       <el-table
+        v-if="!isMobile"
         :data="visibleEntries"
         :row-key="(row: [string, SiteConfig]) => row[0]"
         class="pt-grid"
         style="width: 100%">
         <template #empty>
-          <PtDataState
-            :state="viewMode === 'enabled' ? 'empty' : 'zero'"
-            dense
-            :title="viewMode === 'enabled' ? '还没有启用任何站点' : '没有可显示的站点'"
-            :sub="
-              viewMode === 'enabled'
-                ? '从「新增站点」里挑一个开始，启用后才会参与 RSS 与统计'
-                : '站点清单来自内置定义，装上浏览器扩展可以帮助适配新站'
-            ">
-            <template v-if="viewMode === 'enabled'" #action>
+          <PtDataState :state="tableState" dense :title="stateTitle" :sub="stateSub">
+            <template v-if="tableState === 'error' || tableState === 'partial'" #action>
+              <el-button size="small" @click="loadSites">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+            <template v-else-if="tableState === 'empty'" #action>
               <el-button type="primary" size="small" @click="openAddDialog">
                 <PtIcon name="plus" :size="14" /><span>新增站点</span>
               </el-button>
@@ -741,6 +834,126 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
       </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 9 列、操作列里还有六个按钮，手机上横着滚既看不到列头，
+        也和页面本身的纵向滚动打架。卡上留真正要看的：站点名 + 认证/RSS/活跃/剩余天数
+        + 保号档位，操作收进底部一排 44 高的按钮。
+      -->
+      <div v-else class="cards">
+        <PtDataState
+          v-if="!visibleEntries.length"
+          :state="tableState"
+          :title="stateTitle"
+          :sub="stateSub">
+          <template v-if="tableState === 'error' || tableState === 'partial'" #action>
+            <el-button size="small" @click="loadSites">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+          <template v-else-if="tableState === 'empty'" #action>
+            <el-button type="primary" size="small" @click="openAddDialog">
+              <PtIcon name="plus" :size="14" /><span>新增站点</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard
+          v-for="[name, site] in visibleEntries"
+          :key="name"
+          :data-testid="`site-card-${name}`">
+          <template #lead>
+            <SiteAvatar :site-id="name" :site-name="name" :size="28" :no-fetch="true" />
+          </template>
+
+          <template #title>
+            <span class="card-name">{{ name }}</span>
+          </template>
+
+          <template #meta>
+            <PtTag>{{ authMethodLabel(site.auth_method) }}</PtTag>
+            <span class="rss" :class="{ 'is-zero': getRssCount(site) === 0 }">
+              <PtIcon name="rss" :size="11" />
+              {{ getRssCount(site) }} 条 RSS
+            </span>
+            <span :data-testid="`last-login-cell-${name}`" class="ts">
+              <PtIcon name="clock" :size="11" />
+              活跃 {{ formatTimeAgo(effectiveLastActive(name)) }}
+            </span>
+            <span :data-testid="`days-remaining-cell-${name}`" :class="daysCellClass(name)">
+              {{ daysRemaining(name) === null ? "剩余 —" : `剩余 ${daysRemaining(name)} 天` }}
+            </span>
+          </template>
+
+          <!-- 暂不可用时它比保号档位更要紧：站点用不了，档位也就没有意义 -->
+          <template #status>
+            <PtStatusPill v-if="site.unavailable" tone="dang" size="sm">暂不可用</PtStatusPill>
+            <PtStatusPill v-else :tone="tierTone(reminderTier(name))" size="sm">
+              {{ tierLabel(reminderTier(name)) }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button
+              class="card-act"
+              size="small"
+              :disabled="site.unavailable"
+              :data-testid="`site-toggle-btn-${name}`"
+              @click="toggleEnabled(name)">
+              <PtIcon :name="site.enabled ? 'circle-pause' : 'circle-check'" :size="14" />
+              <span>{{ site.enabled ? "停用" : "启用" }}</span>
+            </el-button>
+
+            <el-button
+              class="card-act"
+              size="small"
+              :disabled="!siteUrlOf(name)"
+              :data-testid="`open-site-btn-${name}`"
+              @click="openSite(name)">
+              <PtIcon name="external-link" :size="14" /><span>打开</span>
+            </el-button>
+
+            <el-button
+              class="card-act"
+              size="small"
+              :loading="probing[name]"
+              :disabled="!site.enabled || probing[name]"
+              :data-testid="`probe-button-${name}`"
+              @click="probeSite(name)">
+              <PtIcon name="activity" :size="14" /><span>探测</span>
+            </el-button>
+
+            <el-button class="card-act" size="small" @click="manageSite(name)">
+              <PtIcon name="sliders-horizontal" :size="14" /><span>配置</span>
+            </el-button>
+
+            <el-dropdown class="card-more" trigger="click" @command="onCardCommand">
+              <el-button size="small" :data-testid="`site-more-btn-${name}`">
+                <PtIcon name="ellipsis" :size="14" /><span>更多</span>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    :command="{ act: 'reminder', name }"
+                    :disabled="!site.enabled || testingReminder[name]">
+                    <PtIcon name="bell-ring" :size="14" class="dd-ico" /><span>测试提醒</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item :command="{ act: 'login-config', name }">
+                    <PtIcon name="shield" :size="14" class="dd-ico" /><span>保号配置</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    divided
+                    :command="{ act: 'delete', name }"
+                    :disabled="site.is_builtin">
+                    <PtIcon name="trash-2" :size="14" class="dd-ico" /><span>删除站点</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </PtRowCard>
+      </div>
 
       <template v-if="visibleEntries.length > 0" #footer>
         <span class="pt-foot-note">
@@ -1079,5 +1292,53 @@ async function saveLoginConfig() {
 
 .cand-hint a:hover {
   text-decoration: underline;
+}
+
+/* 面板 padding="none"，所以「部分失败」提示条自己留白，贴在表格/卡片上沿 */
+.partial-note {
+  align-items: flex-start;
+  margin: var(--pt-space-3) var(--pt-space-3) 0;
+}
+
+.partial-note__text {
+  flex: 1 1 auto;
+}
+
+.partial-note .el-button {
+  flex: 0 0 auto;
+}
+
+/* 移动端行卡列表：面板 padding="none"，留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
+
+/* 与表格里的 .site__name 一致：定义文件里是小写 id，首字母大写才像个名字 */
+.card-name {
+  text-transform: capitalize;
+}
+
+/*
+ * 等分与 ≥44 触控高度由 PtRowCard 的 :slotted 规则给。这里只处理本页特有的两点：
+ * 「更多」是 el-dropdown 包了一层按钮，要让容器本身参与等分并撑满宽度。
+ */
+.pt-rowcard__actions .card-more {
+  display: flex;
+  flex: 1 1 96px;
+  min-height: var(--pt-m-touch);
+  margin: 0;
+}
+
+.card-more :deep(.el-button) {
+  width: 100%;
+  min-height: var(--pt-m-touch);
+}
+
+/* 下拉项的图标与文字间距。菜单被 teleport 到 body，但 scoped 是属性选择器，照样生效 */
+.dd-ico {
+  margin-right: 6px;
 }
 </style>

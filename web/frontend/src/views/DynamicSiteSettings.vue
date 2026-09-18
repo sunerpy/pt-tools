@@ -11,12 +11,15 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const saving = ref(false);
 const validating = ref(false);
 
@@ -24,6 +27,12 @@ const validating = ref(false);
 const dynamicSites = ref<DynamicSiteSetting[]>([]);
 const templates = ref<SiteTemplate[]>([]);
 const downloaders = ref<DownloaderSetting[]>([]);
+/**
+ * 下载器列表只是站点表「下载器」列的名字来源，单独记一笔失败。
+ * 它挂了不该把整张站点表画成错误态 —— 站点数据本身是好的，
+ * 只是下载器名显示不出来，这正是 partial（部分数据失败）要表达的事。
+ */
+const downloadersFailed = ref(false);
 
 // 对话框状态
 const showAddDialog = ref(false);
@@ -62,26 +71,75 @@ const enabledDownloaders = computed(() => {
   return downloaders.value; // 返回所有下载器，不过滤
 });
 
+/**
+ * 六态状态机（设计文档 §5），两张表各一份。
+ *
+ * 以前这里是一个 loading ref + 一个 Promise.all：任意一个接口挂掉就整页弹个 toast，
+ * 两秒后 toast 消失，两张表都停在「还没有数据」上 —— 用户看到的是「库是空的」，
+ * 而真相是请求失败了，401/403 还会让人一直点重试。现在失败必须留在对应的表上。
+ *
+ * 两张表分开加载而不是 Promise.all：模板接口挂了不该把站点表一起拖成空表。
+ */
+const {
+  loading: sitesLoading,
+  state: sitesState,
+  errorText: sitesErrorText,
+  run: runSites,
+  hasPartialBanner: sitesPartialBanner,
+} = useDataState({ failed: () => (downloadersFailed.value ? 1 : 0) });
+
+const {
+  loading: tplLoading,
+  state: tplState,
+  errorText: tplErrorText,
+  run: runTemplates,
+} = useDataState();
+
+/** 面板遮罩和刷新按钮看的是「还有请求在飞」 */
+const loading = computed(() => sitesLoading.value || tplLoading.value);
+
+/** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
+const sitesSub = computed(() => {
+  if (sitesState.value === "error" || sitesState.value === "perm") return sitesErrorText.value;
+  if (sitesState.value === "partial") return "还没有动态站点，下载器列表也没有拿到";
+  return "添加一个动态站点，或从模板导入";
+});
+
+const tplSub = computed(() => {
+  if (tplState.value === "error" || tplState.value === "perm") return tplErrorText.value;
+  return "模板是一份可分享的站点定义，导入后即可直接使用";
+});
+
 onMounted(async () => {
   await loadData();
 });
 
-async function loadData() {
-  loading.value = true;
+async function loadSites() {
+  const data = await runSites(() => dynamicSitesApi.list());
+  // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
+  dynamicSites.value = data ?? [];
+}
+
+async function loadTemplates() {
+  const data = await runTemplates(() => templatesApi.list());
+  templates.value = data ?? [];
+}
+
+async function loadDownloaders() {
   try {
-    const [sitesData, templatesData, downloadersData] = await Promise.all([
-      dynamicSitesApi.list(),
-      templatesApi.list(),
-      downloadersApi.list(),
-    ]);
-    dynamicSites.value = sitesData;
-    templates.value = templatesData;
-    downloaders.value = downloadersData;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+    downloaders.value = await downloadersApi.list();
+    downloadersFailed.value = false;
+  } catch {
+    downloaders.value = [];
+    downloadersFailed.value = true;
   }
+}
+
+async function loadData() {
+  await Promise.all([loadSites(), loadTemplates(), loadDownloaders()]);
+  // toast 只是即时提醒，不再是唯一的反馈：状态已经画在对应的表格里了
+  const err = sitesErrorText.value || tplErrorText.value;
+  if (err) ElMessage.error(err);
 }
 
 function openAddDialog() {
@@ -260,7 +318,7 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
     </div>
 
     <PtPanel
-      v-loading="loading"
+      v-loading="sitesLoading"
       title="动态站点"
       icon="globe"
       :count="`${dynamicSites.length} 个`"
@@ -274,11 +332,23 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
         </el-button>
       </template>
 
-      <el-table :data="dynamicSites" class="pt-grid" style="width: 100%">
+      <!--
+        partial：站点拿到了、下载器没拿到。这时不能用一整块状态图顶掉表格
+        （那等于把已经拿到的站点也藏了），而是在表格上方挂一条提示。
+      -->
+      <div v-if="sitesPartialBanner(dynamicSites.length)" class="pt-note pt-note--warn panel-note">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>下载器列表没有拿到，站点绑定的下载器名会显示为「未知」，站点数据本身是完整的。</span>
+      </div>
+
+      <el-table v-if="!isMobile" :data="dynamicSites" class="pt-grid" style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="添加一个动态站点，或从模板导入">
-            <template #action>
-              <el-button size="small" type="primary" @click="openAddDialog">
+          <PtDataState :state="sitesState" dense :sub="sitesSub">
+            <template v-if="sitesState !== 'perm' && sitesState !== 'loading'" #action>
+              <el-button v-if="sitesState === 'error'" size="small" @click="loadSites">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+              <el-button v-else size="small" type="primary" @click="openAddDialog">
                 <PtIcon name="plus" :size="14" /><span>添加站点</span>
               </el-button>
             </template>
@@ -320,18 +390,72 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
           </template>
         </el-table-column>
       </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        站点表桌面有 5 列，手机上横着滚既看不到列头，又和页面纵向滚动打架。
+        卡上留的是：站点名 + 标识/认证方式/下载器/来源 + 启用状态。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!dynamicSites.length" :state="sitesState" :sub="sitesSub">
+          <template v-if="sitesState !== 'perm' && sitesState !== 'loading'" #action>
+            <el-button v-if="sitesState === 'error'" size="small" @click="loadSites">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+            <el-button v-else size="small" type="primary" @click="openAddDialog">
+              <PtIcon name="plus" :size="14" /><span>添加站点</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="site in dynamicSites" :key="site.id ?? site.name">
+          <template #title>{{ site.display_name || site.name }}</template>
+
+          <template #meta>
+            <code class="card-id">{{ site.name }}</code>
+            <PtStatusPill :tone="authMethodTone(site.auth_method)" size="sm">
+              {{ getAuthMethodLabel(site.auth_method) }}
+            </PtStatusPill>
+            <span>
+              <PtIcon name="hard-drive" :size="11" />
+              {{ getDownloaderName(site.downloader_id) }}
+            </span>
+            <PtTag>{{ site.is_builtin ? "内置" : "动态" }}</PtTag>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="site.enabled ? 'ok' : 'neutral'" size="sm">
+              {{ site.enabled ? "已启用" : "未启用" }}
+            </PtStatusPill>
+          </template>
+        </PtRowCard>
+      </div>
     </PtPanel>
 
-    <PtPanel title="站点模板" icon="file-text" :count="`${templates.length} 个`" padding="none">
+    <PtPanel
+      v-loading="tplLoading"
+      title="站点模板"
+      icon="file-text"
+      :count="`${templates.length} 个`"
+      padding="none">
       <template #actions>
         <el-button size="small" @click="openImportDialog">
           <PtIcon name="upload" :size="14" /><span>导入模板</span>
         </el-button>
       </template>
 
-      <el-table :data="templates" class="pt-grid" style="width: 100%">
+      <el-table v-if="!isMobile" :data="templates" class="pt-grid" style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="模板是一份可分享的站点定义，导入后即可直接使用" />
+          <PtDataState :state="tplState" dense :sub="tplSub">
+            <template v-if="tplState !== 'perm' && tplState !== 'loading'" #action>
+              <el-button v-if="tplState === 'error'" size="small" @click="loadTemplates">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+              <el-button v-else size="small" @click="openImportDialog">
+                <PtIcon name="upload" :size="14" /><span>导入模板</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column label="模板" min-width="180" class-name="pt-cell-strong">
@@ -371,6 +495,42 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 移动端行卡：模板名 + 标识/版本/描述 + 认证方式 + 导出（主操作） -->
+      <div v-else class="cards">
+        <PtDataState v-if="!templates.length" :state="tplState" :sub="tplSub">
+          <template v-if="tplState !== 'perm' && tplState !== 'loading'" #action>
+            <el-button v-if="tplState === 'error'" size="small" @click="loadTemplates">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+            <el-button v-else size="small" @click="openImportDialog">
+              <PtIcon name="upload" :size="14" /><span>导入模板</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="tpl in templates" :key="tpl.id">
+          <template #title>{{ tpl.display_name || tpl.name }}</template>
+
+          <template #meta>
+            <code class="card-id">{{ tpl.name }}</code>
+            <span v-if="tpl.version">v{{ tpl.version }}</span>
+            <span v-if="tpl.description" class="card-desc">{{ tpl.description }}</span>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="authMethodTone(tpl.auth_method)" size="sm">
+              {{ getAuthMethodLabel(tpl.auth_method) }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="exportTemplate(tpl)">
+              <PtIcon name="download" :size="14" /><span>导出模板</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
 
       <template v-if="templates.length > 0" #footer>
         <span class="pt-foot-note">导出会把 JSON 复制到剪贴板，同时下载一份文件</span>
@@ -467,7 +627,10 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
               :value="dl.id"
               :disabled="!dl.enabled" />
           </el-select>
-          <div class="field-tip">
+          <div v-if="downloadersFailed" class="field-tip">
+            下载器列表没有拿到，这里暂时是空的；先点面板上的「刷新」，或直接留空用默认下载器。
+          </div>
+          <div v-else class="field-tip">
             留空使用默认下载器。灰色选项表示该下载器未启用，先去「下载器管理」里打开。
           </div>
         </el-form-item>
@@ -575,6 +738,31 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
   font-size: var(--pt-fz-label);
   font-weight: 400;
   color: var(--pt-t4);
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
+
+/* 表格贴边，所以面板内的提示条要自己补一圈外边距 */
+.panel-note {
+  margin: var(--pt-space-3) var(--pt-space-3) 0;
+}
+
+/* code 的字号要显式写：等宽字族下浏览器会套自己的默认字号，不跟着 meta 走 */
+.card-id {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t4);
+}
+
+/* 描述比其他 meta 项长，单独占满一行再折行，不跟标签挤在同一排 */
+.card-desc {
+  flex: 1 1 100%;
 }
 </style>
 

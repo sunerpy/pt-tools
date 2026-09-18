@@ -41,7 +41,8 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  /** options 用于给轮询类请求挂 AbortSignal：拿不到就主动放弃，别一直占着浏览器的连接槽 */
+  get: <T>(path: string, options?: ApiOptions) => request<T>(path, options),
   post: <T>(path: string, data?: unknown) =>
     request<T>(path, {
       method: "POST",
@@ -241,7 +242,7 @@ export interface SiteLoginState {
 }
 
 export const sitesApi = {
-  list: () => api.get<Record<string, SiteConfig>>("/api/sites"),
+  list: (signal?: AbortSignal) => api.get<Record<string, SiteConfig>>("/api/sites", { signal }),
   listLoginStates: () => api.get<SiteLoginState[]>("/api/sites/login-state"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
@@ -275,7 +276,8 @@ export const sitesApi = {
 };
 
 export const tasksApi = {
-  list: (params: URLSearchParams) => api.get<TaskListResponse>(`/api/tasks?${params.toString()}`),
+  list: (params: URLSearchParams, signal?: AbortSignal) =>
+    api.get<TaskListResponse>(`/api/tasks?${params.toString()}`, { signal }),
   batchDelete: (ids: number[]) => api.post<DeleteTasksResponse>("/api/tasks/batch-delete", { ids }),
 };
 
@@ -943,12 +945,12 @@ export interface ArchiveTorrentsResponse {
 }
 
 export const pausedTorrentsApi = {
-  list: (page = 1, pageSize = 50, site?: string) => {
+  list: (page = 1, pageSize = 50, site?: string, signal?: AbortSignal) => {
     const params = new URLSearchParams();
     params.set("page", page.toString());
     params.set("page_size", pageSize.toString());
     if (site) params.set("site", site);
-    return api.get<PausedTorrentsResponse>(`/api/torrents/paused?${params.toString()}`);
+    return api.get<PausedTorrentsResponse>(`/api/torrents/paused?${params.toString()}`, { signal });
   },
   delete: (req: DeletePausedRequest) =>
     api.post<DeletePausedResponse>("/api/torrents/delete-paused", req),
@@ -1074,11 +1076,20 @@ export interface DownloaderTorrentItem {
   eta: number;
 }
 
+/** 某台下载器没取到数据。非空即「部分失败」：列表里的数据是真的，但不完整 */
+export interface DownloaderFailure {
+  downloader_id: number;
+  downloader_name: string;
+  error: string;
+}
+
 export interface TorrentListResponse {
   items: DownloaderTorrentItem[];
   total: number;
   page: number;
   page_size: number;
+  /** 后端逐台上报的失败，用来驱动 partial 态；全部成功时字段缺省 */
+  failures?: DownloaderFailure[];
 }
 
 export interface TorrentFileInfo {
@@ -1095,6 +1106,8 @@ export interface TorrentTrackerInfo {
   seeds: number;
   peers: number;
   leeches: number;
+  /** tracker 返回的失败原因。后端 TorrentDetailTracker 一直带着它，这里以前漏了声明 */
+  message?: string;
 }
 
 export interface TorrentDetailResponse {
@@ -1153,7 +1166,7 @@ export const downloaderTorrentsApi = {
       delete_files: deleteFiles,
     }),
 
-  transferStats: () =>
+  transferStats: (signal?: AbortSignal) =>
     api.get<{
       total_upload_speed: number;
       total_download_speed: number;
@@ -1162,7 +1175,7 @@ export const downloaderTorrentsApi = {
       total_session_uploaded: number;
       total_session_downloaded: number;
       total_free_space: number;
-    }>("/api/downloader-torrents/transfer-stats"),
+    }>("/api/downloader-torrents/transfer-stats", { signal }),
 
   capabilities: () =>
     api.get<{ items: DownloaderCapability[] }>("/api/downloader-torrents/capabilities"),

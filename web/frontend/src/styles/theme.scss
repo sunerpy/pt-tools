@@ -34,6 +34,7 @@
   --pt-head-h: 64px; /* 页面标题栏（带面包屑时 88） */
   --pt-head-h-crumbs: 88px;
   --pt-row-h: 34px; /* 表格行高 */
+  --pt-row-h-roomy: 48px; /* 行内有头像/角标/双行数字时的行高，见 .pt-grid--roomy */
   --pt-row-head-h: 30px; /* 表头 */
   --pt-pad: 16px;
 
@@ -41,6 +42,8 @@
   --pt-m-topbar-h: 88px;
   --pt-m-tabbar-h: 72px;
   --pt-m-touch: 44px;
+  /* 桌面状态行折进底栏顶部那一条（round-2「深色 chrome 条 + 折进来的状态行」） */
+  --pt-m-statusrow-h: 24px;
 
   /* 字号阶梯（§8.4，G 列） */
   --pt-fz-display: 20px; /* KPI 数值 */

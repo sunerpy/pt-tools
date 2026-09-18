@@ -1191,3 +1191,61 @@ func TestApiDownloaderTorrentActions_SetLocation(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
+
+// TestApiDownloaderTorrents_ReportsPerDownloaderFailures 聚合接口必须逐台上报失败。
+//
+// 回归背景：以前某台下载器连不上或列表取不到，处理器只打一行日志然后 continue，
+// 照样返回 200。前端因此拿到一份「少了一台下载器的任务」的列表，既无法提示用户，
+// 也无从解释数字为什么不对 —— 设计文档 §5 的 partial 态就无法表达。
+func TestApiDownloaderTorrents_ReportsPerDownloaderFailures(t *testing.T) {
+	t.Run("列表失败要出现在 failures 里", func(t *testing.T) {
+		fake := &fakeDownloader{listErr: errors.New("listfail")}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTorrentsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 0, resp.Total)
+		require.Len(t, resp.Failures, 1, "列表失败必须被上报，而不是静默跳过")
+		assert.Equal(t, "qb1", resp.Failures[0].DownloaderName)
+		assert.Contains(t, resp.Failures[0].Error, "listfail")
+	})
+
+	t.Run("拿不到下载器实例同样要上报", func(t *testing.T) {
+		fake := &fakeDownloader{torrents: sampleTorrents()}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+		// 库里再加一台已启用但没注册进 manager 的下载器：acquireDownloader 会失败
+		require.NoError(t, global.GlobalDB.DB.Create(&models.DownloaderSetting{
+			Name: "phantom", Type: "qbittorrent", URL: "http://127.0.0.1:2", Enabled: true,
+		}).Error)
+
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents?page_size=0", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTorrentsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		// 健康那台的任务照常返回 —— partial 的要点是「不整体报错、也不假装正常」
+		assert.Positive(t, resp.Total)
+		require.Len(t, resp.Failures, 1)
+		assert.Equal(t, "phantom", resp.Failures[0].DownloaderName)
+		assert.NotEmpty(t, resp.Failures[0].Error)
+	})
+
+	t.Run("全部成功时 failures 不出现在 JSON 里", func(t *testing.T) {
+		fake := &fakeDownloader{torrents: sampleTorrents()}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents?page_size=0", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+		_, present := raw["failures"]
+		assert.False(t, present, "没有失败时不该多出一个空数组字段，响应体应保持干净")
+	})
+}

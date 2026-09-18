@@ -5,8 +5,9 @@ import PtDataState from "@/components/ui/PtDataState.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 /*
@@ -27,8 +28,20 @@ const channelTypeOptions = [
 ];
 
 const router = useRouter();
-const loading = ref(false);
 const notifications = ref<NotificationConfig[]>([]);
+
+/**
+ * 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有通知通道」，
+ * 用户会以为通道被清空了，去重新配一遍。这一页没有筛选，所以不会出现 zero。
+ */
+const { loading, state, errorText, run } = useDataState();
+
+/** 状态块副标题：失败给真实错误，空态给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "loading") return "正在读取通知通道";
+  return "接上 Telegram / QQ / Webhook / 企业微信，就能收到任务结果与告警，也能反过来发命令";
+});
 
 const addDialogVisible = ref(false);
 const submitting = ref(false);
@@ -47,15 +60,13 @@ onMounted(async () => {
 });
 
 async function loadNotifications() {
-  loading.value = true;
-  try {
-    const data = await chatopsApi.notifications.list();
-    notifications.value = data || [];
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  const data = await run(() => chatopsApi.notifications.list());
+  if (!data) {
+    // 失败时清空：留着旧列表配一个「加载失败」更让人误解
+    notifications.value = [];
+    return;
   }
+  notifications.value = data;
 }
 
 function openAddDialog() {
@@ -170,16 +181,16 @@ function getChannelLabel(type: string) {
     </PtToolbar>
 
     <PtDataState
-      v-if="loading && notifications.length === 0"
-      state="loading"
-      sub="正在读取通知通道" />
-
-    <PtDataState
-      v-else-if="notifications.length === 0"
-      state="empty"
-      title="还没有通知通道"
-      sub="接上 Telegram / QQ / Webhook / 企业微信，就能收到任务结果与告警，也能反过来发命令">
-      <template #action>
+      v-if="notifications.length === 0"
+      :state="state"
+      :title="state === 'empty' ? '还没有通知通道' : ''"
+      :sub="stateSub">
+      <template v-if="state === 'error'" #action>
+        <el-button @click="loadNotifications">
+          <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+        </el-button>
+      </template>
+      <template v-else-if="state === 'empty'" #action>
         <el-button type="primary" @click="openAddDialog">
           <PtIcon name="plus" :size="14" /><span>添加第一个通道</span>
         </el-button>

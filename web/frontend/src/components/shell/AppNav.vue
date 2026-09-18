@@ -13,7 +13,13 @@ import NavLink from "./NavLink.vue";
  * 导航列（设计稿 G 的 `D.nav`，宽 264，浅色）：品牌行 + 跳转框 + 6 组 19 项。
  * 计数徽标来自 runtimeStore；拿不到数或数为 0 就不画徽标，不用 0 占位。
  */
-const props = defineProps<{ activePath: string; drawer?: boolean }>();
+const props = defineProps<{
+  activePath: string;
+  /** 浮起态（抽屉形态）：多一个关闭按钮，钉在栅格里时不需要 */
+  drawer?: boolean;
+  /** 此刻是否真的看得见。收起后清空跳转框，下次打开是干净的 */
+  visible?: boolean;
+}>();
 const emit = defineEmits<{ navigate: [] }>();
 
 const router = useRouter();
@@ -67,11 +73,11 @@ defineExpose({
   },
 });
 
-// 抽屉关掉时清空查询，下次打开是干净的
+// 看不见了就清空查询，下次露出来是干净的
 watch(
-  () => props.drawer,
-  (open) => {
-    if (!open) query.value = "";
+  () => props.visible,
+  (v) => {
+    if (!v) query.value = "";
   },
 );
 </script>

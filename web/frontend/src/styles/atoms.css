@@ -53,6 +53,15 @@
   border-bottom: 1px solid var(--pt-border);
 }
 
+/*
+ * 宽松行变体 —— 34px 是为纯文本行定的，行内一旦出现 32px 头像、角标或双行数字
+ * 就正好卡在边界上：内容盒和行高一样高，任何溢出都会被裁掉。这类表格加
+ * `pt-grid--roomy`，只换行高，其余（发丝线、字号、等宽数字）完全照旧。
+ */
+.pt-grid--roomy.el-table td.el-table__cell {
+  height: var(--pt-row-h-roomy);
+}
+
 /* 每列一条竖发丝线，grid 变体的电子表格观感就来自这里 */
 .pt-grid.el-table th.el-table__cell:not(:first-child),
 .pt-grid.el-table td.el-table__cell:not(:first-child) {
@@ -111,6 +120,15 @@
 
 .pt-grid.el-table td.pt-cell-muted .cell {
   color: var(--pt-t3);
+}
+
+/*
+ * 允许内容探出单元格：Element 的 `.cell` 是 overflow:hidden（给文本省略号用的），
+ * 头像右上角的 el-badge 角标会被连角一起切掉。需要角标的列显式声明这个类，
+ * 别全表放开 —— 其他列还指望那个省略号。
+ */
+.pt-grid.el-table td.pt-cell-overflow .cell {
+  overflow: visible;
 }
 
 /* 操作列：按钮组贴右，行高 34 里不能再有额外的上下内边距 */

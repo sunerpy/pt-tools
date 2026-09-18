@@ -13,6 +13,8 @@ export interface NavItem {
   external?: boolean;
   /** 右侧计数徽标取自哪个统计字段，没有就不显示 */
   badge?: "sites" | "tasks" | "paused";
+  /** 同时出现在深色 rail 上（设计稿 `D.rail` 的 8 个快捷入口） */
+  rail?: boolean;
 }
 
 export interface NavGroup {
@@ -24,23 +26,23 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     title: "概览",
     items: [
-      { path: "/userinfo", label: "用户统计", icon: "gauge" },
+      { path: "/userinfo", label: "用户统计", icon: "gauge", rail: true },
       { path: "/userinfo/export", label: "数据导出", icon: "file-down" },
     ],
   },
   {
     title: "站点",
     items: [
-      { path: "/sites", label: "站点列表", icon: "globe", badge: "sites" },
+      { path: "/sites", label: "站点列表", icon: "globe", badge: "sites", rail: true },
       { path: "/supported-sites", label: "已支持站点", icon: "badge-check" },
     ],
   },
   {
     title: "下载",
     items: [
-      { path: "/search", label: "种子搜索", icon: "search" },
-      { path: "/tasks", label: "任务列表", icon: "list-checks", badge: "tasks" },
-      { path: "/paused", label: "暂停任务", icon: "circle-pause", badge: "paused" },
+      { path: "/search", label: "种子搜索", icon: "search", rail: true },
+      { path: "/tasks", label: "任务列表", icon: "list-checks", badge: "tasks", rail: true },
+      { path: "/paused", label: "暂停任务", icon: "circle-pause", badge: "paused", rail: true },
       { path: "/downloader-hub", label: "下载器 Web UI", icon: "app-window", external: true },
       { path: "/downloaders", label: "下载器设置", icon: "server" },
     ],
@@ -48,14 +50,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     title: "规则",
     items: [
-      { path: "/filter-rules", label: "过滤规则", icon: "list-filter" },
+      { path: "/filter-rules", label: "过滤规则", icon: "list-filter", rail: true },
       { path: "/cleanup", label: "自动清理", icon: "trash-2" },
     ],
   },
   {
     title: "ChatOps",
     items: [
-      { path: "/chatops/notifications", label: "消息通知", icon: "bell" },
+      { path: "/chatops/notifications", label: "消息通知", icon: "bell", rail: true },
       { path: "/chatops/bindings", label: "ChatOps 绑定", icon: "link" },
       { path: "/chatops/audit", label: "操作审计", icon: "shield-check" },
       { path: "/chatops/rss-notifications", label: "RSS 通知日志", icon: "rss" },
@@ -64,24 +66,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     title: "系统",
     items: [
-      { path: "/global", label: "全局设置", icon: "settings" },
+      { path: "/global", label: "全局设置", icon: "settings", rail: true },
       { path: "/cloak-config", label: "CloakBrowser", icon: "shield" },
       { path: "/logs", label: "运行日志", icon: "scroll-text" },
       { path: "/password", label: "修改密码", icon: "key-round" },
     ],
   },
-] as const;
-
-/** 深色 rail 上的 8 个快捷入口（设计稿 `D.rail`），是 NAV_GROUPS 的子集。 */
-export const RAIL_ITEMS: readonly { path: string; icon: LucideIconName; label: string }[] = [
-  { path: "/userinfo", icon: "gauge", label: "用户统计" },
-  { path: "/sites", icon: "globe", label: "站点列表" },
-  { path: "/search", icon: "search", label: "种子搜索" },
-  { path: "/tasks", icon: "list-checks", label: "任务列表" },
-  { path: "/paused", icon: "circle-pause", label: "暂停任务" },
-  { path: "/filter-rules", icon: "list-filter", label: "过滤规则" },
-  { path: "/chatops/notifications", icon: "bell", label: "消息通知" },
-  { path: "/global", icon: "settings", label: "全局设置" },
 ] as const;
 
 /**
@@ -104,6 +94,16 @@ export const MOBILE_TABS: readonly {
 
 /** 所有导航项打平，供标题解析与高亮匹配使用 */
 export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
+
+/**
+ * 深色 rail 上的快捷入口（设计稿 `D.rail`），直接从 NAV_GROUPS 里带 rail 标记的项派生。
+ *
+ * 这里原来另抄了一份 path/label/icon，改一次导航文案要记着改两处，迟早漂移。
+ * 顺序跟着 NAV_GROUPS 走，与设计稿上那 8 项的次序一致。
+ *
+ * 导航列钉在旁边时这排图标是重复的，由 shell.css 藏掉；收起后它就是唯一的导航。
+ */
+export const RAIL_ITEMS: readonly NavItem[] = NAV_ITEMS.filter((i) => i.rail);
 
 /**
  * 路由 name → 导航项 path。详情页、子路由的 name 与导航 path 对不上，

@@ -6,10 +6,13 @@ import PtDataState from "@/components/ui/PtDataState.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
-import { ElMessage } from "element-plus";
+import { useDataState } from "@/composables/useDataState";
 import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false);
+/** 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有数据」 */
+const { loading, state, errorText, run } = useDataState({
+  filtered: () => Boolean(search.value.trim() || schemaFilter.value),
+});
 const definitions = ref<SupportedSiteDefinition[]>([]);
 const search = ref("");
 const schemaFilter = ref("");
@@ -19,17 +22,13 @@ onMounted(async () => {
 });
 
 async function loadDefinitions() {
-  loading.value = true;
-  try {
-    const data = await sitesApi.listDefinitions();
-    definitions.value = (data ?? [])
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  const data = await run(() => sitesApi.listDefinitions());
+  if (!data) {
+    // 失败时清空：留着旧列表配一个「加载失败」更让人误解
+    definitions.value = [];
+    return;
   }
+  definitions.value = data.slice().sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
 
 const schemaOptions = computed(() => {
@@ -54,6 +53,13 @@ const filtered = computed(() => {
     if (d.urls.some((u) => u.toLowerCase().includes(q))) return true;
     return false;
   });
+});
+
+/** 状态块副标题：失败给真实错误，空/零态给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "loading") return "正在读取站点定义";
+  return "换个关键词，或清空架构筛选";
 });
 
 const totalCount = computed(() => definitions.value.length);
@@ -136,15 +142,13 @@ function clearFilters() {
       </template>
     </PtToolbar>
 
-    <PtDataState
-      v-if="loading && definitions.length === 0"
-      state="loading"
-      sub="正在读取站点定义" />
-    <PtDataState
-      v-else-if="filtered.length === 0"
-      :state="definitions.length === 0 ? 'empty' : 'zero'"
-      sub="换个关键词，或清空架构筛选">
-      <template v-if="definitions.length > 0" #action>
+    <PtDataState v-if="filtered.length === 0" :state="state" :sub="stateSub">
+      <template v-if="state === 'error'" #action>
+        <el-button @click="loadDefinitions">
+          <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+        </el-button>
+      </template>
+      <template v-else-if="state === 'zero'" #action>
         <el-button @click="clearFilters">
           <PtIcon name="x" :size="14" /><span>清空筛选</span>
         </el-button>

@@ -29,17 +29,26 @@ import {
   getSiteSeedingBonusName,
 } from "@/utils/format";
 import { ElMessage } from "element-plus";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 const siteLevelsStore = useSiteLevelsStore();
 
-const loading = ref(false);
+/**
+ * 六态状态机（设计文档 §5）。这一页没有筛选，所以 0 行只会是 empty / error / perm，
+ * 不会出现 zero；partial 留给「聚合成功但有站点没同步上」，由 failedSites 决定。
+ */
+const failedSites = ref(0);
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  failed: () => failedSites.value,
+});
 const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
-const isMobile = ref(window.innerWidth < 768);
+const isMobile = useIsMobile();
 const { effectiveLastActive, daysRemaining, reminderTier, tierLabel } = useLoginState(loginStates);
 
 /** 两条顶部说明各自可关，关掉后本次会话不再出现（不落盘：换页回来仍要提醒） */
@@ -84,11 +93,6 @@ function tierTone(site: string): PillTone {
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5分钟
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 const autoRefreshEnabled = ref(true);
-
-// 监听窗口大小变化
-function handleResize() {
-  isMobile.value = window.innerWidth < 768;
-}
 
 /**
  * KPI 条的数据项。结构与 PtKpiBar 的 KpiItem 一致（结构化匹配，不用导出类型）。
@@ -144,27 +148,45 @@ const kpiItems = computed<KpiRow[]>(() => {
 
 const siteRows = computed(() => aggregatedStats.value?.perSiteStats ?? []);
 
-// 加载数据
+/** 状态块副标题：失败时给真实错误，空态时给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  return "同步任意站点后这里会出现统计";
+});
+
+/**
+ * 加载数据。
+ *
+ * 聚合统计是这一页的主数据，拿不到就没有任何东西可显示 —— 它失败走 error/perm。
+ * 站点配置和登录态是装饰性的补充（用来给出站点链接和保号提醒），单独失败不该
+ * 把整页判死，所以它们各自 catch 掉降级为空；但要计入 failedSites，
+ * 页面会挂一条「部分数据没拿到」的提示，而不是假装一切正常。
+ */
 async function loadData() {
-  loading.value = true;
-  try {
-    const [agg, siteMap, states] = await Promise.all([
-      userInfoApi.getAggregated(),
-      sitesApi.list().catch(() => ({}) as Record<string, SiteConfig>),
-      sitesApi.listLoginStates().catch(() => [] as SiteLoginState[]),
-    ]);
-
-    aggregatedStats.value = agg;
-    sitesByName.value = siteMap;
-
-    const byName: Record<string, SiteLoginState> = {};
-    for (const st of states ?? []) byName[st.site_name] = st;
-    loginStates.value = byName;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  failedSites.value = 0;
+  const agg = await run(() => userInfoApi.getAggregated());
+  if (!agg) {
+    aggregatedStats.value = null;
+    return;
   }
+  aggregatedStats.value = agg;
+
+  const [siteMap, states] = await Promise.all([
+    sitesApi.list().catch(() => {
+      failedSites.value += 1;
+      return {} as Record<string, SiteConfig>;
+    }),
+    sitesApi.listLoginStates().catch(() => {
+      failedSites.value += 1;
+      return [] as SiteLoginState[];
+    }),
+  ]);
+
+  sitesByName.value = siteMap;
+
+  const byName: Record<string, SiteLoginState> = {};
+  for (const st of states ?? []) byName[st.site_name] = st;
+  loginStates.value = byName;
 }
 
 function openSite(site: string) {
@@ -307,17 +329,30 @@ onMounted(() => {
   if (autoRefreshEnabled.value) {
     startAutoRefresh();
   }
-  window.addEventListener("resize", handleResize);
 });
 
 onUnmounted(() => {
   stopAutoRefresh();
-  window.removeEventListener("resize", handleResize);
 });
 </script>
 
 <template>
   <div class="dash">
+    <!--
+      partial（设计文档 §5）：聚合统计拿到了，但站点配置或登录态没拿到。
+      既不该整页报错，也不该假装正常 —— 统计照常显示，这里说清少了什么，
+      免得用户以为「打开站点」按钮和保号提醒坏了。
+    -->
+    <div v-if="hasPartialBanner(siteRows.length)" class="pt-note pt-note--warn dash__note">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        部分数据没拿到（{{ failedSites }} 项）：站点链接与保号提醒可能不完整，统计数字不受影响。
+      </span>
+      <button type="button" class="dash__note-x" aria-label="重新加载" @click="loadData">
+        <PtIcon name="refresh-cw" :size="14" />
+      </button>
+    </div>
+
     <div v-if="extHintOpen" class="pt-note dash__note">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
       <span>
@@ -405,15 +440,22 @@ onUnmounted(() => {
       </PtToolbar>
 
       <!-- 桌面端表格视图 -->
+      <!-- roomy：站点列有 32px 头像 + 未读角标，数据量/魔力列是双行，34px 装不下 -->
       <el-table
         v-if="!isMobile"
-        class="pt-grid"
+        class="pt-grid pt-grid--roomy"
         :data="siteRows"
         style="width: 100%"
         :default-sort="{ prop: 'uploaded', order: 'descending' }"
         highlight-current-row>
         <!-- 站点列：带消息徽章和悬停效果 -->
-        <el-table-column prop="site" label="站点" min-width="160" sortable fixed="left">
+        <el-table-column
+          prop="site"
+          label="站点"
+          min-width="160"
+          sortable
+          fixed="left"
+          class-name="pt-cell-overflow">
           <template #default="{ row }">
             <div class="site">
               <el-badge
@@ -672,8 +714,13 @@ onUnmounted(() => {
           </template>
         </el-table-column>
         <template #empty>
-          <PtDataState :state="loading ? 'loading' : 'empty'" sub="同步任意站点后这里会出现统计">
-            <template v-if="!loading" #action>
+          <PtDataState :state="state" :sub="stateSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadData">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+            <template v-else-if="state === 'empty'" #action>
               <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
                 <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
                 <span>同步全部</span>
@@ -688,11 +735,13 @@ onUnmounted(() => {
         显隐由 v-if 控制而不是 CSS，两套视图不会同时挂在 DOM 上。
       -->
       <div v-else class="cards">
-        <PtDataState
-          v-if="!siteRows.length"
-          :state="loading ? 'loading' : 'empty'"
-          sub="同步任意站点后这里会出现统计">
-          <template v-if="!loading" #action>
+        <PtDataState v-if="!siteRows.length" :state="state" :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+          <template v-else-if="state === 'empty'" #action>
             <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
               <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
               <span>同步全部</span>
@@ -884,6 +933,29 @@ onUnmounted(() => {
   gap: var(--pt-space-3);
   align-items: center;
   min-width: 0;
+}
+
+/*
+ * 未读消息角标压在头像右上角内侧。
+ *
+ * Element 默认把角标整个甩到头像外（right 偏移再 translateX(100%)），两位数就有
+ * 十几像素探到间距外面，直接盖住站点名；上沿也要多出 9px，在表格里被 .cell 裁掉。
+ * 改成贴住头像右上角、向左生长（去掉 translateX，只留右偏移）：
+ *   right -2  右沿只探出头像 2px，角标再宽也是往左长进头像里，
+ *             永远吃不到和站点名之间那 8px 间距 —— 居中锚定会随位数左右扩，
+ *             「99+」那种宽度足以横跨整个 32px 头像；
+ *   top 4     上沿落在头像上方 4px，配合 .pt-grid--roomy 的 48px 行高，
+ *             距单元格上边框还剩 4px，不会和行线糊在一起；
+ *   16/11     Element 默认 18px 高、12px 字，在 32px 头像上显得抢戏，收小一档。
+ */
+.site :deep(.el-badge__content.is-fixed) {
+  top: 4px;
+  right: -2px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: var(--pt-fz-label);
+  line-height: 16px;
+  transform: translateY(-50%);
 }
 
 /* 头像本身就是「同步本站」的按钮，所以是真 button，键盘可达 */

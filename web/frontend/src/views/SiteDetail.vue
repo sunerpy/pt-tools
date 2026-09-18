@@ -19,6 +19,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { useDataState } from "@/composables/useDataState";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -26,7 +27,14 @@ const route = useRoute();
 const router = useRouter();
 
 const siteName = computed(() => route.params.name as string);
-const loading = ref(false);
+/**
+ * 六态（设计文档 §5）。这一页比列表页更要紧：加载失败时 form 停在默认值上，
+ * 而「保存配置」会把这份默认值 PUT 回去，等于用空配置覆盖掉真实站点配置。
+ * 所以失败时不渲染表单、也不允许保存。
+ */
+const { loading, state, errorText, run } = useDataState();
+/** 加载失败（含无权限）时锁住表单与保存 */
+const loadFailed = computed(() => state.value === "error" || state.value === "perm");
 const saving = ref(false);
 const addingRss = ref(false);
 const rssDialogVisible = ref(false);
@@ -178,30 +186,27 @@ const editingRssConfIDs = computed<number[]>({
   },
 });
 
-onMounted(async () => {
-  loading.value = true;
-  try {
-    // 并行加载站点配置、下载器列表、过滤规则列表、下载器目录、通知通道列表
-    const [siteData, downloaderList, filterRuleList, directoriesData, confList] = await Promise.all(
-      [
-        sitesApi.get(siteName.value),
-        downloadersApi.list(),
-        filterRulesApi.list(),
-        downloaderDirectoriesApi.listAll(),
-        chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
-      ],
-    );
-    form.value = siteData;
-    downloaders.value = downloaderList; // 显示所有下载器，不过滤
-    filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
-    downloaderDirectories.value = directoriesData;
-    availableConfs.value = (confList || []).filter((c) => c.enabled);
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
-  }
-});
+onMounted(loadDetail);
+
+async function loadDetail() {
+  // 并行加载站点配置、下载器列表、过滤规则列表、下载器目录、通知通道列表
+  const data = await run(() =>
+    Promise.all([
+      sitesApi.get(siteName.value),
+      downloadersApi.list(),
+      filterRulesApi.list(),
+      downloaderDirectoriesApi.listAll(),
+      chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
+    ]),
+  );
+  if (!data) return; // 失败：form 保持原样但被 loadFailed 锁住，绝不能拿默认值去覆盖
+  const [siteData, downloaderList, filterRuleList, directoriesData, confList] = data;
+  form.value = siteData;
+  downloaders.value = downloaderList; // 显示所有下载器，不过滤
+  filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
+  downloaderDirectories.value = directoriesData;
+  availableConfs.value = (confList || []).filter((c) => c.enabled);
+}
 
 // 获取指定下载器的目录列表
 function getDirectoriesForDownloader(downloaderId: number | undefined): DownloaderDirectory[] {
@@ -511,7 +516,13 @@ function ruleNameOf(id: number): string {
       </PtStatusPill>
 
       <template #right>
-        <el-button type="primary" size="small" :loading="saving" @click="save">
+        <!-- 没加载成功就不给保存：那会把默认值写回去，覆盖掉真实配置 -->
+        <el-button
+          type="primary"
+          size="small"
+          :loading="saving"
+          :disabled="loadFailed"
+          @click="save">
           <PtIcon name="save" :size="14" /><span>保存配置</span>
         </el-button>
       </template>
@@ -523,7 +534,15 @@ function ruleNameOf(id: number): string {
     </div>
 
     <PtPanel v-loading="loading" title="站点配置" icon="sliders-horizontal" padding="none">
-      <el-form :model="form" label-position="top" class="pt-form settings-form">
+      <PtDataState v-if="loadFailed" :state="state" :sub="errorText">
+        <template v-if="state === 'error'" #action>
+          <el-button size="small" @click="loadDetail">
+            <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+          </el-button>
+        </template>
+      </PtDataState>
+
+      <el-form v-else :model="form" label-position="top" class="pt-form settings-form">
         <div class="pt-strip">
           <PtIcon name="globe" :size="13" />
           <span>基本信息</span>

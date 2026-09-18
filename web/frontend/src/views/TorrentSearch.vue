@@ -17,14 +17,23 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
+const isMobile = useIsMobile();
+
 // 搜索状态
-const loading = ref(false);
 const searchKeyword = ref("");
+/**
+ * 当前结果集对应的关键词。输入框里的 searchKeyword 随时在变，用它判断
+ * 空结果是「还没搜过」还是「搜了没命中」，会在用户清空输入框时跳变。
+ */
+const searchedKeyword = ref("");
 const selectedSites = ref<string[]>([]);
 const availableSites = ref<string[]>([]);
 
@@ -34,6 +43,38 @@ const siteResultCounts = ref<Record<string, number>>({});
 const searchErrors = ref<SearchErrorItem[]>([]);
 const searchTime = ref(0);
 const totalResults = ref(0);
+
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 这页以前只有一个 loading ref：搜索请求整体失败时弹个 toast，两秒后 toast 没了，
+ * 表格停在「先输入关键词」上 —— 用户看到的是「没搜到」，真相是请求根本没成功。
+ * 401/403 还要单独画成「无权访问」，否则用户会一直点重试。
+ *
+ * 多站点搜索天生会部分失败，所以 failed 接的是失败站点数：
+ * 还有结果时挂一条部分失败提示（hasPartialBanner），一条结果都没有时 partial 成为主状态。
+ */
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  filtered: () => searchedKeyword.value !== "",
+  failed: () => searchErrors.value.length,
+});
+
+/** 失败站点清单，partial 作为主状态时当副标题用 */
+const failedSitesText = computed(() => {
+  if (searchErrors.value.length === 0) return "";
+  return `${searchErrors.value.length} 个站点没有返回结果：${searchErrors.value
+    .map((e) => e.site)
+    .join("、")}`;
+});
+
+/** 状态块的副标题：失败时给真实原因，空态时给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return failedSitesText.value;
+  return searchedKeyword.value
+    ? "换个关键词，或放开站点和分类筛选"
+    : "先输入关键词，回车即可开始搜索";
+});
 
 // 分页
 const currentPage = ref(1);
@@ -211,6 +252,8 @@ function loadFromCache() {
     }
 
     searchKeyword.value = data.keyword || "";
+    // 缓存里的结果集就是这个关键词搜出来的，一起恢复，空结果才能正确画成 zero
+    searchedKeyword.value = data.keyword || "";
     searchResults.value = data.results || [];
     siteResultCounts.value = data.siteResultCounts || {};
     searchErrors.value = data.errors || [];
@@ -272,11 +315,12 @@ async function doSearch() {
     return;
   }
 
-  loading.value = true;
   selectedTorrents.value = [];
   currentPage.value = 1;
+  searchedKeyword.value = searchKeyword.value.trim();
 
-  try {
+  // 站点列表也套在 run 里：它在请求之前，不然这段时间面板上没有加载态
+  const resp = await run(async () => {
     await loadAvailableSites();
     const validSelected = selectedSites.value.filter((s) => availableSites.value.includes(s));
     selectedSites.value = validSelected;
@@ -289,32 +333,61 @@ async function doSearch() {
       siteParams: buildSiteParams(),
       timeoutSecs: 30, // Set 30 second timeout for search
     };
-    const resp = await searchApi.multiSite(req);
-    searchResults.value = resp.items || [];
-    siteResultCounts.value = resp.siteResults || {};
-    searchErrors.value = resp.errors || [];
-    searchTime.value = resp.durationMs;
-    totalResults.value = resp.totalResults;
+    return await searchApi.multiSite(req);
+  });
 
-    // 保存到缓存
-    saveToCache();
+  if (!resp) {
+    // 失败时清空：留着上一次的结果配一个「加载失败」的状态块更让人误解
+    searchResults.value = [];
+    siteResultCounts.value = {};
+    searchErrors.value = [];
+    searchTime.value = 0;
+    totalResults.value = 0;
+    ElMessage.error(errorText.value || "搜索失败");
+    return;
+  }
 
-    if (searchErrors.value.length > 0) {
-      const failedNames = searchErrors.value.map((e) => `${e.site}: ${e.error}`).join("\n");
-      ElMessage.warning({
-        message: `部分站点搜索失败:\n${failedNames}`,
-        duration: 5000,
-      });
-    }
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "搜索失败");
-  } finally {
-    loading.value = false;
+  searchResults.value = resp.items || [];
+  siteResultCounts.value = resp.siteResults || {};
+  searchErrors.value = resp.errors || [];
+  searchTime.value = resp.durationMs;
+  totalResults.value = resp.totalResults;
+
+  // 保存到缓存
+  saveToCache();
+
+  // toast 照旧弹，但它只是提醒；失败清单同时留在结果上方的提示条（或 partial 状态块）里
+  if (searchErrors.value.length > 0) {
+    const failedNames = searchErrors.value.map((e) => `${e.site}: ${e.error}`).join("\n");
+    ElMessage.warning({
+      message: `部分站点搜索失败:\n${failedNames}`,
+      duration: 5000,
+    });
   }
 }
 
 function handleSelectionChange(selection: SearchTorrentItem[]) {
   selectedTorrents.value = selection;
+}
+
+/**
+ * 移动端行卡上的勾选。el-table 的多选是它自己管的，卡片这边自己维护同一份选中列表。
+ * 按对象身份比对而不是 id：同一个种子 id 在不同站点会撞，而 pagedTorrents 里的对象
+ * 就是 searchResults 里的那几个（sortedResults 只是浅拷贝后排序）。
+ */
+function isSelected(torrent: SearchTorrentItem): boolean {
+  return selectedTorrents.value.includes(torrent);
+}
+
+function toggleSelect(torrent: SearchTorrentItem) {
+  const i = selectedTorrents.value.indexOf(torrent);
+  if (i === -1) selectedTorrents.value.push(torrent);
+  else selectedTorrents.value.splice(i, 1);
+}
+
+/** 行卡的 key：搜索结果跨站点聚合，单靠站内 id 不唯一 */
+function rowKey(torrent: SearchTorrentItem): string {
+  return `${torrent.sourceSite}:${torrent.id}`;
 }
 
 function handlePageChange(page: number) {
@@ -957,28 +1030,49 @@ const resultNote = computed(() => {
         </template>
       </template>
 
-      <!-- 各站点的命中数：失败的站点也要留一行，不然会以为它只是没结果 -->
+      <!-- 各站点的命中数 -->
       <div v-if="Object.keys(siteResultCounts).length > 0" class="sites">
         <PtTag v-for="(count, site) in siteResultCounts" :key="site">
           {{ site }} · {{ count }}
         </PtTag>
-        <PtStatusPill v-for="err in searchErrors" :key="err.site" tone="dang" size="sm">
-          {{ err.site }} 失败
-        </PtStatusPill>
+      </div>
+
+      <!--
+        部分失败（§5 的 partial）：还有结果可看时不能用一整块状态图顶掉列表 ——
+        那等于把已经拿到的数据也藏了。所以有结果时在结果上方挂这条提示，
+        一条结果都没有时才让 partial 成为主状态（见下面的 PtDataState）。
+      -->
+      <div v-if="hasPartialBanner(sortedResults.length)" class="pt-note pt-note--warn partial">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <div class="partial__body">
+          <p class="partial__t">
+            {{ searchErrors.length }} 个站点没有返回结果，下面只是其余站点的命中
+          </p>
+          <p v-for="err in searchErrors" :key="err.site" class="partial__l">
+            {{ err.site }}：{{ err.error }}
+          </p>
+        </div>
+        <el-button size="small" :loading="loading" @click="doSearch">
+          <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+        </el-button>
       </div>
 
       <el-table
+        v-if="!isMobile"
         :data="pagedTorrents"
         class="pt-grid"
         :default-sort="{ prop: 'sourceSite', order: 'ascending' }"
         @selection-change="handleSelectionChange"
         @sort-change="handleSortChange">
         <template #empty>
-          <PtDataState
-            :state="searchKeyword ? 'zero' : 'empty'"
-            :sub="
-              searchKeyword ? '换个关键词，或放开站点和分类筛选' : '先输入关键词，回车即可开始搜索'
-            " />
+          <PtDataState :state="state" dense :sub="stateSub">
+            <!-- perm 不给重试：没权限点重试没有意义，只会让用户一直点 -->
+            <template v-if="state === 'error' || state === 'partial'" #action>
+              <el-button size="small" @click="doSearch">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column type="selection" width="45" align="center" />
@@ -1123,6 +1217,87 @@ const resultNote = computed(() => {
           </template>
         </el-table-column>
       </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 10 列，手机上横着滚既看不到列头也和页面纵向滚动打架。
+        卡上留的是判断一个种子够不够抢真正要看的：标题（+副标题）、站点/分类/大小/
+        做种下载完成/发布时间、右上角优惠与 H&R，底下三个操作。
+        排序仍然走上面搜索条里的「排序 / 方向」，所以表头的 sortable 不算丢功能。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!pagedTorrents.length" :state="state" :sub="stateSub">
+          <template v-if="state === 'error' || state === 'partial'" #action>
+            <el-button size="small" @click="doSearch">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="torrent in pagedTorrents" :key="rowKey(torrent)">
+          <template #lead>
+            <el-checkbox
+              :model-value="isSelected(torrent)"
+              :aria-label="`选择 ${torrent.title}`"
+              @update:model-value="toggleSelect(torrent)" />
+          </template>
+
+          <template #title>
+            <a
+              v-if="torrent.url"
+              :href="torrent.url"
+              target="_blank"
+              rel="noopener"
+              class="card-link">
+              {{ torrent.title }}
+            </a>
+            <template v-else>{{ torrent.title }}</template>
+          </template>
+
+          <template #meta>
+            <span v-if="torrent.subtitle" class="card-sub">{{ torrent.subtitle }}</span>
+            <PtTag>{{ torrent.sourceSite }}</PtTag>
+            <PtTag v-if="torrent.category">{{ torrent.category }}</PtTag>
+            <span>{{ formatSize(torrent.sizeBytes) }}</span>
+            <span class="card-peers">
+              <span class="peers peers--up">做种 {{ torrent.seeders }}</span>
+              <span class="peers peers--down">下载 {{ torrent.leechers }}</span>
+              <span>完成 {{ torrent.snatched }}</span>
+            </span>
+            <span>
+              <PtIcon name="clock" :size="11" />
+              {{ formatTime(torrent.uploadedAt) }}
+            </span>
+          </template>
+
+          <template #status>
+            <span class="card-status">
+              <PtStatusPill :tone="discountTone(torrent)" size="sm">
+                {{ getDiscountTag(torrent).text }}
+              </PtStatusPill>
+              <PtStatusPill v-if="torrent.hasHR" tone="dang" size="sm">H&amp;R</PtStatusPill>
+            </span>
+          </template>
+
+          <template #actions>
+            <el-button
+              size="small"
+              :disabled="!torrent.downloadUrl"
+              @click="downloadTorrent(torrent)">
+              <PtIcon name="download" :size="14" /><span>下载</span>
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="!torrent.downloadUrl && !torrent.magnetLink"
+              @click="copyDownloadLink(torrent)">
+              <PtIcon name="copy" :size="14" /><span>复制</span>
+            </el-button>
+            <el-button type="primary" size="small" @click="openPushDialog(torrent)">
+              <PtIcon name="upload" :size="14" /><span>推送</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
 
       <template v-if="sortedResults.length > 0" #footer>
         <span class="pt-foot-note">{{ resultNote }}</span>
@@ -1395,6 +1570,30 @@ const resultNote = computed(() => {
   border-bottom: 1px solid var(--pt-border);
 }
 
+/* 部分失败提示条：.pt-note 自带色条和底色，这里只补面板内的留白与右侧按钮 */
+.partial {
+  align-items: flex-start;
+  margin: var(--pt-space-3) var(--pt-pad);
+}
+
+.partial__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.partial__t {
+  margin: 0;
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.partial__l {
+  margin: 2px 0 0;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  overflow-wrap: anywhere;
+}
+
 /* 标题列是这张表的重心：标题一行、副标题一行、标签一行，其余列都只放一个数 */
 .ti {
   display: flex;
@@ -1471,5 +1670,38 @@ const resultNote = computed(() => {
   align-items: center;
   font-size: var(--pt-fz-label);
   color: var(--pt-t3);
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
+
+.card-link {
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+/* 副标题独占 meta 的第一行，别和站点、大小挤在一起 */
+.card-sub {
+  flex: 0 0 100%;
+  overflow-wrap: anywhere;
+}
+
+/* 做种/下载/完成三个数算一组，不占三个 meta 位；
+   组内间距靠 margin 而不是覆写 gap —— gap 是 PtRowCard 给每个 meta 子项定的 */
+.card-peers span + span {
+  margin-left: 4px;
+}
+
+/* 优惠和 H&R 都是状态，竖着叠在右上角 */
+.card-status {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
 }
 </style>

@@ -43,11 +43,27 @@ type DownloaderTorrentItem struct {
 	ETA            int64   `json:"eta"`
 }
 
+// DownloaderFailure 记录一台没能取到数据的下载器。
+//
+// 为什么要有它：这个接口会聚合多台下载器，以前某一台连不上就静默 continue，
+// 然后照样返回 200 —— 前端看到的是一份「少了一台下载器的种子」的完整列表，
+// 既没法提示用户，也无从判断数字为什么不对。设计文档 §5 的 partial 态
+// （「14 个站点里 12 个成功时，页面既不该整体报错也不该假装正常」）就是为这种情形定的，
+// 而要表达它，响应里必须带上失败信息。
+type DownloaderFailure struct {
+	DownloaderID   uint   `json:"downloader_id"`
+	DownloaderName string `json:"downloader_name"`
+	Error          string `json:"error"`
+}
+
 type DownloaderTorrentsResponse struct {
 	Items    []DownloaderTorrentItem `json:"items"`
 	Total    int                     `json:"total"`
 	Page     int                     `json:"page"`
 	PageSize int                     `json:"page_size"`
+	// Failures 为空表示所有已启用的下载器都取到了数据。非空即 partial：
+	// Items 里的数据是真的，但不完整。
+	Failures []DownloaderFailure `json:"failures,omitempty"`
 }
 
 type TorrentActionTarget struct {
@@ -210,16 +226,24 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]DownloaderTorrentItem, 0)
+	// 逐台记录失败而不是只打日志：不上报的话前端拿到的是一份静默缺料的列表
+	failures := make([]DownloaderFailure, 0)
 	for _, rec := range records {
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
 		if dlErr != nil {
 			global.GetSlogger().Warnf("[DownloaderTorrents] 获取下载器失败: name=%s, err=%v", rec.Name, dlErr)
+			failures = append(failures, DownloaderFailure{
+				DownloaderID: rec.ID, DownloaderName: rec.Name, Error: dlErr.Error(),
+			})
 			continue
 		}
 
 		torrents, listErr := dl.GetAllTorrents()
 		if listErr != nil {
 			global.GetSlogger().Warnf("[DownloaderTorrents] 获取种子失败: downloader=%s, err=%v", rec.Name, listErr)
+			failures = append(failures, DownloaderFailure{
+				DownloaderID: rec.ID, DownloaderName: rec.Name, Error: listErr.Error(),
+			})
 			continue
 		}
 
@@ -317,6 +341,7 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
+		Failures: failures,
 	})
 }
 
@@ -377,7 +402,7 @@ func (s *Server) apiDownloaderTorrentDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	dl, err := dm.GetDownloader(rec.Name)
+	dl, err := acquireDownloader(r.Context(), dm, rec.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -512,7 +537,7 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
 		if dlErr != nil {
 			for _, target := range targets {
 				resp.FailedCount++
@@ -709,7 +734,7 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 
 	resp := AddDownloaderTorrentResponse{Results: make([]AddDownloaderTorrentResult, 0, len(records))}
 	for _, rec := range records {
-		dl, err := dm.GetDownloader(rec.Name)
+		dl, err := acquireDownloader(r.Context(), dm, rec.Name)
 		if err != nil {
 			resp.FailedCount++
 			resp.Results = append(resp.Results, AddDownloaderTorrentResult{
@@ -831,6 +856,28 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 		budget.Reserve(torrentSize)
 	}
 	return torrentSize, nil
+}
+
+// downloaderAcquireTimeout 是 Web 请求获取下载器实例的预算上限。
+//
+// 下载器连不上时，manager 会在后台按重连策略跑最长约 31s 的退避序列。HTTP 请求
+// 不能等它：前端每 30s 全局轮询一次，浏览器对同一来源只有 6 个并发连接，几个卡住
+// 的请求就能把连接池占满，整个页面随之取不到任何数据。所以这里只给一个短预算，
+// 拿不到就跳过这台下载器，让后台那次尝试自己跑完并缓存结果。
+const downloaderAcquireTimeout = 3 * time.Second
+
+// acquireDownloader 在有界预算内获取下载器实例，供所有 HTTP 处理器使用。
+//
+// 与 dm.GetDownloader 的区别只在「等多久」：已就绪的实例照样瞬时返回，
+// 需要新建连时最多等 downloaderAcquireTimeout，也受请求自身取消的约束。
+func acquireDownloader(
+	ctx context.Context,
+	dm *downloader.DownloaderManager,
+	name string,
+) (downloader.Downloader, error) {
+	acquireCtx, cancel := context.WithTimeout(ctx, downloaderAcquireTimeout)
+	defer cancel()
+	return dm.GetDownloaderContext(acquireCtx, name)
 }
 
 func (s *Server) getDownloaderRecordMap() (map[uint]downloaderRecord, error) {
@@ -972,7 +1019,7 @@ func (s *Server) apiDownloaderTorrentMeta(w http.ResponseWriter, r *http.Request
 	tagSet := make(map[string]struct{})
 
 	for _, rec := range records {
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
 		if dlErr != nil {
 			continue
 		}
@@ -1063,7 +1110,7 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 
 	ctx := r.Context()
 	for _, rec := range records {
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
 			continue
 		}

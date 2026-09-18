@@ -15,12 +15,24 @@ import {
   getAvatarColor,
 } from "@/utils/format";
 import { ElMessage } from "element-plus";
+import { useDataState } from "@/composables/useDataState";
 import { computed, onMounted, ref, nextTick } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
 
-const loading = ref(false);
+/**
+ * 六态（设计文档 §5）：以前拉取失败只弹 toast，页面随后画成「还没有可导出的统计」。
+ * 这一页没有筛选，也只有一个数据源，所以只会出现 loading / empty / error / perm。
+ */
+const { loading, state, errorText, run } = useDataState();
+
+/** 状态块副标题：失败给真实错误，空态给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "loading") return "正在读取统计数据";
+  return "先到数据面板刷新一次各站点数据，再回来出图";
+});
 const exporting = ref(false);
 const copying = ref(false);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
@@ -294,18 +306,16 @@ async function preloadSiteLogos() {
 }
 
 async function loadData() {
-  loading.value = true;
-  try {
-    aggregatedStats.value = await userInfoApi.getAggregated();
-    if (exportConfig.value.selectedSites.length === 0) {
-      exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
-    }
-    await preloadSiteLogos();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载数据失败");
-  } finally {
-    loading.value = false;
+  const data = await run(() => userInfoApi.getAggregated());
+  if (!data) {
+    aggregatedStats.value = null;
+    return;
   }
+  aggregatedStats.value = data;
+  if (exportConfig.value.selectedSites.length === 0) {
+    exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
+  }
+  await preloadSiteLogos();
 }
 
 function applyTheme(theme: (typeof presetThemes)[0]) {
@@ -664,10 +674,16 @@ onMounted(() => {
         icon="eye"
         :count="exportConfig.showSiteDetails ? `${selectedSiteStats.length} 个站点入图` : '仅汇总'">
         <PtDataState
-          v-if="!loading && !aggregatedStats"
-          state="empty"
-          title="还没有可导出的统计"
-          sub="先到数据面板刷新一次各站点数据，再回来出图" />
+          v-if="!aggregatedStats"
+          :state="state"
+          :title="state === 'empty' ? '还没有可导出的统计' : ''"
+          :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
 
         <!-- 预览用 DOM 复刻画布，不是画布本身：导出走 canvas，两边的排版规则要手动对齐 -->
         <div v-else class="stage">

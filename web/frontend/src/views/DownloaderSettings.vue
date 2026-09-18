@@ -11,13 +11,18 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false);
+/** 手机上三张表都退化成行卡（设计文档 §9），不做横向滚动表格 */
+const isMobile = useIsMobile();
+
 const saving = ref(false);
 const showDialog = ref(false);
 const editMode = ref(false);
@@ -25,12 +30,18 @@ const healthTimeoutMs = 5000;
 
 const downloaders = ref<DownloaderSetting[]>([]);
 const healthStatus = ref<Record<number, DownloaderHealthResponse>>({});
+/**
+ * 连通性探测**本身**失败（超时 / 请求没发出去 / 非 2xx）的下载器 id。
+ *
+ * 和「下载器回报 is_healthy: false」要分开：后者是拿到了结论，前者是没拿到。
+ * 这一份就是这张表的 partial 数据源 —— 列表本体拿到了，附带的连通性只探到一部分。
+ */
+const healthFailedIds = ref<number[]>([]);
 
 // 目录管理相关
 const showDirDialog = ref(false);
 const currentDownloader = ref<DownloaderSetting | null>(null);
 const directories = ref<DownloaderDirectory[]>([]);
-const loadingDirs = ref(false);
 const showAddDirDialog = ref(false);
 const editDirMode = ref(false);
 const savingDir = ref(false);
@@ -44,7 +55,6 @@ const dirForm = ref<DownloaderDirectory>({
 const showSyncDialog = ref(false);
 const syncSites = ref<SiteDownloaderSummaryItem[]>([]);
 const selectedSiteIds = ref<number[]>([]);
-const loadingSyncSites = ref(false);
 const applyingSites = ref(false);
 const newDefaultDownloader = ref<DownloaderSetting | null>(null);
 
@@ -68,7 +78,32 @@ const defaultDownloader = computed(() => {
   return downloaders.value.find((d) => d.is_default);
 });
 
+/*
+ * 六态状态机（设计文档 §5），这一页三张表各一份。
+ *
+ * 以前三处都是「一个 loading ref + 失败弹个 toast」：toast 两秒就没了，表格停在
+ * 「还没有下载器」上 —— 用户看到的是「库里是空的」，真相是请求失败了。401/403 还会
+ * 被画成普通失败，导致用户一直点重试。错误必须留在页面上，且要分出无权访问。
+ *
+ * 主表的 partial 来自连通性探测：列表本体成功、附带的健康检查有几台没探到。
+ * zero 在这三张表上到不了，因为它们都没有筛选/搜索入口（0 行只能是 empty）。
+ */
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  failed: () => healthFailedIds.value.length,
+});
+
+/** empty 用本页文案，error / perm 让 PtDataState 用自己的预设标题 */
+const stateTitle = computed(() => (state.value === "empty" ? "还没有下载器" : ""));
+
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  return "接上 qBittorrent 或 Transmission，RSS 命中的种子才有地方推";
+});
+
 const toolbarNote = computed(() => {
+  // 失败时不能顺着 length === 0 说「还没有配置下载器」，那是把加载失败说成空库
+  if (state.value === "perm") return "无权访问下载器配置";
+  if (state.value === "error") return "下载器列表没加载出来";
   if (downloaders.value.length === 0) return "还没有配置下载器";
   const dl = defaultDownloader.value;
   return dl
@@ -76,19 +111,25 @@ const toolbarNote = computed(() => {
     : `共 ${downloaders.value.length} 个 · 未指定默认下载器`;
 });
 
+const panelCount = computed(() =>
+  downloaders.value.length ? `${downloaders.value.length} 个` : "",
+);
+
 onMounted(async () => {
   await loadDownloaders();
 });
 
 async function loadDownloaders() {
-  loading.value = true;
-  try {
-    downloaders.value = await downloadersApi.list();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  healthFailedIds.value = [];
+  const data = await run(() => downloadersApi.list());
+  if (!data) {
+    // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
+    downloaders.value = [];
+    healthStatus.value = {};
+    ElMessage.error(errorText.value || "加载失败");
+    return;
   }
+  downloaders.value = data;
   loadHealthStatuses(downloaders.value);
 }
 
@@ -122,6 +163,13 @@ function getHealthErrorMessage(error: unknown) {
   return (error as Error)?.message || "检查失败";
 }
 
+/** 记下 / 抹掉「这台的连通性没探到」，partial 提示条按这份清单计数 */
+function markHealthProbeFailed(id: number, failed: boolean) {
+  const i = healthFailedIds.value.indexOf(id);
+  if (failed && i === -1) healthFailedIds.value.push(id);
+  else if (!failed && i !== -1) healthFailedIds.value.splice(i, 1);
+}
+
 function loadHealthStatuses(list: DownloaderSetting[]) {
   const tasks = list
     .filter((dl) => dl.id && dl.enabled)
@@ -129,6 +177,7 @@ function loadHealthStatuses(list: DownloaderSetting[]) {
       fetchHealthStatus(dl.id!).then(
         (response) => {
           healthStatus.value[dl.id!] = response;
+          markHealthProbeFailed(dl.id!, false);
         },
         (error) => {
           healthStatus.value[dl.id!] = {
@@ -136,6 +185,7 @@ function loadHealthStatuses(list: DownloaderSetting[]) {
             is_healthy: false,
             message: getHealthErrorMessage(error),
           };
+          markHealthProbeFailed(dl.id!, true);
         },
       ),
     );
@@ -237,13 +287,18 @@ async function toggleEnabled(dl: DownloaderSetting) {
     if (newEnabled) {
       try {
         healthStatus.value[dl.id] = await fetchHealthStatus(dl.id);
+        markHealthProbeFailed(dl.id, false);
       } catch (error: unknown) {
         healthStatus.value[dl.id] = {
           name: dl.name,
           is_healthy: false,
           message: getHealthErrorMessage(error),
         };
+        markHealthProbeFailed(dl.id, true);
       }
+    } else {
+      // 停用的不再探测，也就不该继续算进「没探到」的计数里
+      markHealthProbeFailed(dl.id, false);
     }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "保存失败");
@@ -266,6 +321,7 @@ async function checkHealth(dl: DownloaderSetting) {
   if (!dl.id) return;
   try {
     healthStatus.value[dl.id] = await fetchHealthStatus(dl.id);
+    markHealthProbeFailed(dl.id, false);
     const status = healthStatus.value[dl.id];
     if (status && status.is_healthy) {
       ElMessage.success("连接正常");
@@ -275,6 +331,7 @@ async function checkHealth(dl: DownloaderSetting) {
   } catch (e: unknown) {
     const message = getHealthErrorMessage(e);
     healthStatus.value[dl.id] = { name: dl.name, is_healthy: false, message };
+    markHealthProbeFailed(dl.id, true);
     ElMessage.error(message);
   }
 }
@@ -282,6 +339,7 @@ async function checkHealth(dl: DownloaderSetting) {
 /*
  * 状态胶囊上只写四个字以内的结论，失败原因走 tooltip：
  * 后端的 message 可能是一整条 HTTP 错误，直接铺在单元格里会把这一列撑到 300 宽。
+ * （手机行卡上没有 tooltip 可用，那边把 detail 直接排在 meta 里。）
  */
 function healthMeta(dl: DownloaderSetting): {
   tone: "ok" | "warn" | "dang" | "neutral";
@@ -291,6 +349,14 @@ function healthMeta(dl: DownloaderSetting): {
   if (!dl.id || !dl.enabled) return { tone: "neutral", text: "未启用", detail: "" };
   const status = healthStatus.value[dl.id];
   if (!status) return { tone: "warn", text: "未检查", detail: "" };
+  /*
+   * 探测本身失败（超时 / 请求没发出去）时画成红色「异常」是在冤枉机器：
+   * 我们并没有拿到「它不健康」这个结论，只是没问到。所以单独一档 warn「未知」，
+   * 和上方的 partial 提示条对应，用户看到的原因才不矛盾。
+   */
+  if (healthFailedIds.value.includes(dl.id)) {
+    return { tone: "warn", text: "未知", detail: status.message || "连通性检查没成功" };
+  }
   return status.is_healthy
     ? { tone: "ok", text: "正常", detail: "" }
     : { tone: "dang", text: "异常", detail: status.message || "连接异常" };
@@ -302,6 +368,24 @@ function getTypeLabel(type: string) {
 
 // ============== 目录管理功能 ==============
 
+const {
+  loading: loadingDirs,
+  state: dirState,
+  errorText: dirErrorText,
+  run: runDirs,
+} = useDataState();
+
+const dirStateSub = computed(() => {
+  if (dirState.value === "error" || dirState.value === "perm") return dirErrorText.value;
+  return "没有配置目录时，推送走下载器自己的默认保存路径";
+});
+
+const dirNote = computed(() => {
+  if (dirState.value === "perm") return "无权访问目录配置";
+  if (dirState.value === "error") return "目录列表没加载出来";
+  return `${directories.value.length} 个目录`;
+});
+
 async function openDirDialog(dl: DownloaderSetting) {
   currentDownloader.value = dl;
   showDirDialog.value = true;
@@ -309,15 +393,18 @@ async function openDirDialog(dl: DownloaderSetting) {
 }
 
 async function loadDirectories(downloaderId: number) {
-  loadingDirs.value = true;
-  try {
-    directories.value = await downloaderDirectoriesApi.list(downloaderId);
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载目录失败");
+  const data = await runDirs(() => downloaderDirectoriesApi.list(downloaderId));
+  if (!data) {
     directories.value = [];
-  } finally {
-    loadingDirs.value = false;
+    ElMessage.error(dirErrorText.value || "加载目录失败");
+    return;
   }
+  directories.value = data;
+}
+
+/** 状态块里的「重试」用得到：它不知道当前是哪个下载器 */
+function reloadDirectories() {
+  if (currentDownloader.value?.id) void loadDirectories(currentDownloader.value.id);
 }
 
 function openAddDirDialog() {
@@ -400,21 +487,44 @@ async function setDefaultDirectory(dir: DownloaderDirectory) {
   }
 }
 
+const {
+  loading: loadingSyncSites,
+  state: syncState,
+  errorText: syncErrorText,
+  run: runSyncSites,
+} = useDataState();
+
+const syncStateSub = computed(() => {
+  if (syncState.value === "error" || syncState.value === "perm") return syncErrorText.value;
+  return "还没有启用的站点";
+});
+
+const syncNote = computed(() => {
+  if (syncState.value === "perm") return "无权读取站点列表";
+  if (syncState.value === "error") return "站点列表没加载出来";
+  return `已选 ${selectedSiteIds.value.length} / ${syncSites.value.length}`;
+});
+
 async function openSyncDialog(dl: DownloaderSetting) {
   newDefaultDownloader.value = dl;
-  loadingSyncSites.value = true;
   showSyncDialog.value = true;
+  await loadSyncSites();
+}
 
-  try {
-    const resp = await dynamicSitesApi.getDownloaderSummary();
-    syncSites.value = resp.sites;
-    selectedSiteIds.value = resp.sites.filter((s) => s.downloader_id == null).map((s) => s.site_id);
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载站点失败");
-    showSyncDialog.value = false;
-  } finally {
-    loadingSyncSites.value = false;
+/*
+ * 失败时不再顺手把对话框关掉。默认下载器**已经**切过去了，站点同步是紧接着的第二步；
+ * 对话框一闪而过只留个 toast，用户既不知道同步做没做，也没有入口重试。
+ */
+async function loadSyncSites() {
+  const data = await runSyncSites(() => dynamicSitesApi.getDownloaderSummary());
+  if (!data) {
+    syncSites.value = [];
+    selectedSiteIds.value = [];
+    ElMessage.error(syncErrorText.value || "加载站点失败");
+    return;
   }
+  syncSites.value = data.sites;
+  selectedSiteIds.value = data.sites.filter((s) => s.downloader_id == null).map((s) => s.site_id);
 }
 
 async function applySitesDownloader() {
@@ -473,15 +583,34 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       v-loading="loading"
       title="下载器"
       icon="hard-drive"
-      :count="`${downloaders.length} 个`"
+      :count="panelCount"
       padding="none">
-      <el-table :data="downloaders" class="pt-grid" row-key="id" style="width: 100%">
+      <!--
+        partial：列表本体是完整的，只是附带的连通性探测有几台没探到。
+        这种情形不能用一整块状态图顶掉表格 —— 那等于把已经拿到的数据也藏起来。
+      -->
+      <div v-if="hasPartialBanner(downloaders.length)" class="pt-note pt-note--warn partial-note">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>
+          有 {{ healthFailedIds.length }} 个下载器的连通性没探到（超时或请求失败），
+          它们在表里显示为「未知」而不是「异常」。列表本身是完整的，可以单独点「检查」重试。
+        </span>
+      </div>
+
+      <el-table
+        v-if="!isMobile"
+        :data="downloaders"
+        class="pt-grid"
+        row-key="id"
+        style="width: 100%">
         <template #empty>
-          <PtDataState
-            state="empty"
-            dense
-            title="还没有下载器"
-            sub="接上 qBittorrent 或 Transmission，RSS 命中的种子才有地方推" />
+          <PtDataState :state="state" dense :title="stateTitle" :sub="stateSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadDownloaders">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <!-- 「谁是默认」在整张表里只能有一个，做成一列星标比每行一枚按钮更像单选 -->
@@ -576,6 +705,75 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
         </el-table-column>
       </el-table>
 
+      <!--
+        移动端行卡（§9）。桌面这张表 7 列，末列还是 fixed 的操作列，手机上横着滚既看不到
+        列头也和页面纵向滚动打架。卡上留的是真正要看的：名称 + 类型/地址/失败原因 + 连通性 + 操作。
+        「默认」是整张表里的单选，所以放在 lead 上当一枚星标，触控区由 lead 保证 ≥44。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!downloaders.length" :state="state" :title="stateTitle" :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadDownloaders">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="dl in downloaders" :key="dl.id">
+          <template #lead>
+            <button
+              type="button"
+              class="star star--touch"
+              :class="{ 'is-on': dl.is_default }"
+              :disabled="dl.is_default"
+              :aria-label="dl.is_default ? '当前默认下载器' : `把 ${dl.name} 设为默认下载器`"
+              @click="setDefault(dl)">
+              <PtIcon name="star" :size="18" />
+            </button>
+          </template>
+
+          <template #title>{{ dl.name }}</template>
+
+          <template #meta>
+            <PtTag>{{ getTypeLabel(dl.type) }}</PtTag>
+            <code class="url">{{ dl.url }}</code>
+            <!-- 手机上没有 tooltip 可用，失败原因直接排在这里，换行也比藏起来好 -->
+            <span
+              v-if="healthMeta(dl).detail"
+              class="card-reason"
+              :class="`is-${healthMeta(dl).tone}`">
+              <PtIcon name="triangle-alert" :size="11" />{{ healthMeta(dl).detail }}
+            </span>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="healthMeta(dl).tone" size="sm">
+              {{ healthMeta(dl).text }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <!-- 桌面那枚 20 高的开关在手机上按不准，换成和其它操作同宽的按钮 -->
+            <el-button size="small" @click="toggleEnabled(dl)">
+              <PtIcon :name="dl.enabled ? 'circle-pause' : 'circle-check'" :size="14" />
+              <span>{{ dl.enabled ? "停用" : "启用" }}</span>
+            </el-button>
+            <el-button size="small" :disabled="!dl.enabled" @click="checkHealth(dl)">
+              <PtIcon name="activity" :size="14" /><span>检查</span>
+            </el-button>
+            <el-button size="small" @click="openDirDialog(dl)">
+              <PtIcon name="folder" :size="14" /><span>目录</span>
+            </el-button>
+            <el-button size="small" @click="openEditDialog(dl)">
+              <PtIcon name="pencil" :size="14" /><span>编辑</span>
+            </el-button>
+            <el-button size="small" type="danger" plain @click="deleteDownloader(dl)">
+              <PtIcon name="trash-2" :size="14" /><span>删除</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
+
       <template v-if="downloaders.length > 0" #footer>
         <span class="pt-foot-note">
           默认下载器用于没有单独绑定下载器的站点；「检查」只探连通性，不改任何配置
@@ -588,7 +786,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       v-model="showDialog"
       class="pt-dialog"
       :title="editMode ? '编辑下载器' : '添加下载器'"
-      width="520px"
+      :width="isMobile ? '94vw' : '520px'"
       align-center>
       <el-form :model="form" class="pt-form" label-position="top" @submit.prevent>
         <div class="field-row">
@@ -675,9 +873,9 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       v-model="showDirDialog"
       class="pt-dialog"
       :title="`保存目录 · ${currentDownloader?.name || ''}`"
-      width="720px"
+      :width="isMobile ? '94vw' : '720px'"
       align-center>
-      <PtToolbar :note="`${directories.length} 个目录`">
+      <PtToolbar :note="dirNote">
         <template #right>
           <el-button type="primary" size="small" @click="openAddDirDialog">
             <PtIcon name="plus" :size="14" /><span>添加目录</span>
@@ -686,13 +884,20 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       </PtToolbar>
 
       <el-table
+        v-if="!isMobile"
         v-loading="loadingDirs"
         :data="directories"
         class="pt-grid"
         row-key="id"
         style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="没有配置目录时，推送走下载器自己的默认保存路径" />
+          <PtDataState :state="dirState" dense :sub="dirStateSub">
+            <template v-if="dirState === 'error'" #action>
+              <el-button size="small" @click="reloadDirectories">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column label="默认" width="66" align="center">
@@ -739,6 +944,46 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 目录表在手机上同样退化成行卡：别名当标题，完整路径排第二行 -->
+      <div v-else v-loading="loadingDirs" class="cards cards--dialog">
+        <PtDataState v-if="!directories.length" :state="dirState" :sub="dirStateSub">
+          <template v-if="dirState === 'error'" #action>
+            <el-button size="small" @click="reloadDirectories">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="dir in directories" :key="dir.id">
+          <template #lead>
+            <button
+              type="button"
+              class="star star--touch"
+              :class="{ 'is-on': dir.is_default }"
+              :disabled="dir.is_default"
+              :aria-label="dir.is_default ? '当前默认目录' : '设为默认目录'"
+              @click="setDefaultDirectory(dir)">
+              <PtIcon name="star" :size="18" />
+            </button>
+          </template>
+
+          <template #title>{{ dir.alias || dir.path }}</template>
+
+          <template v-if="dir.alias" #meta>
+            <code class="url">{{ dir.path }}</code>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="openEditDirDialog(dir)">
+              <PtIcon name="pencil" :size="14" /><span>编辑</span>
+            </el-button>
+            <el-button size="small" type="danger" plain @click="deleteDirectory(dir)">
+              <PtIcon name="trash-2" :size="14" /><span>删除</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
     </el-dialog>
 
     <!-- 添加/编辑目录对话框 -->
@@ -746,7 +991,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       v-model="showAddDirDialog"
       class="pt-dialog"
       :title="editDirMode ? '编辑目录' : '添加目录'"
-      width="480px"
+      :width="isMobile ? '94vw' : '480px'"
       align-center
       append-to-body>
       <el-form :model="dirForm" class="pt-form" label-position="top" @submit.prevent>
@@ -782,7 +1027,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       v-model="showSyncDialog"
       class="pt-dialog"
       title="同步站点下载器"
-      width="620px"
+      :width="isMobile ? '94vw' : '620px'"
       align-center>
       <div class="pt-note sync-note">
         <PtIcon name="info" :size="14" class="pt-note__icon" />
@@ -792,14 +1037,15 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
         </span>
       </div>
 
-      <PtToolbar :note="`已选 ${selectedSiteIds.length} / ${syncSites.length}`">
-        <el-button size="small" @click="toggleAllSites">
+      <PtToolbar :note="syncNote">
+        <el-button size="small" :disabled="!syncSites.length" @click="toggleAllSites">
           <PtIcon name="check-check" :size="14" />
           <span>{{ selectedSiteIds.length === syncSites.length ? "取消全选" : "全选" }}</span>
         </el-button>
       </PtToolbar>
 
       <el-table
+        v-if="!isMobile"
         v-loading="loadingSyncSites"
         :data="syncSites"
         class="pt-grid"
@@ -807,7 +1053,13 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
         max-height="380"
         style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="还没有启用的站点" />
+          <PtDataState :state="syncState" dense :sub="syncStateSub">
+            <template v-if="syncState === 'error'" #action>
+              <el-button size="small" @click="loadSyncSites">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
 
         <el-table-column width="50" align="center">
@@ -831,9 +1083,44 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
         </el-table-column>
       </el-table>
 
+      <!--
+        站点表在手机上同样退化成行卡。这里的多选是 el-checkbox 自己的，
+        和桌面共用同一份 selectedSiteIds，所以两种视图切来切去勾选不会丢。
+      -->
+      <div v-else v-loading="loadingSyncSites" class="cards cards--dialog cards--scroll">
+        <PtDataState v-if="!syncSites.length" :state="syncState" :sub="syncStateSub">
+          <template v-if="syncState === 'error'" #action>
+            <el-button size="small" @click="loadSyncSites">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="site in syncSites" :key="site.site_id">
+          <template #lead>
+            <el-checkbox
+              :model-value="selectedSiteIds.includes(site.site_id)"
+              :aria-label="`选择 ${site.display_name || site.site_name}`"
+              @change="(val: boolean) => toggleSiteSelection(site.site_id, val)" />
+          </template>
+
+          <template #title>{{ site.display_name || site.site_name }}</template>
+
+          <template #meta>
+            <PtTag v-if="site.downloader_name">{{ site.downloader_name }}</PtTag>
+            <span v-else class="follow">跟随默认</span>
+          </template>
+        </PtRowCard>
+      </div>
+
       <template #footer>
         <el-button @click="showSyncDialog = false">跳过</el-button>
-        <el-button type="primary" :loading="applyingSites" @click="applySitesDownloader">
+        <!-- 站点没加载出来时这枚按钮做不了任何事，别让它看起来还能点 -->
+        <el-button
+          type="primary"
+          :loading="applyingSites"
+          :disabled="!selectedSiteIds.length"
+          @click="applySitesDownloader">
           应用到 {{ selectedSiteIds.length }} 个站点
         </el-button>
       </template>
@@ -852,6 +1139,48 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   color: var(--pt-t2);
+}
+
+/* 行卡里的地址没有列宽兜着，长 URL 允许在任意位置断行，别把卡片撑破 */
+.cards .url {
+  overflow-wrap: anywhere;
+}
+
+/* partial 提示条挂在表格上方；面板 padding="none"，留白由它自己给 */
+.partial-note {
+  margin: var(--pt-space-3) var(--pt-space-3) 0;
+}
+
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
+
+/* 对话框正文已经有 16 内边距，卡片列表不再叠一层 */
+.cards--dialog {
+  padding: var(--pt-space-3) 0 0;
+}
+
+/* 对应桌面表格的 max-height="380"：站点可能有几十个，别把对话框顶出屏幕 */
+.cards--scroll {
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+/* 失败原因：手机上没有 tooltip，原因直接铺在 meta 里，允许换行，配色跟着胶囊走 */
+.card-reason {
+  overflow-wrap: anywhere;
+}
+
+.card-reason.is-warn {
+  color: var(--pt-warn);
+}
+
+.card-reason.is-dang {
+  color: var(--pt-dang);
 }
 
 /* el-tooltip 要一个能挂事件的元素，胶囊本身是组件根，包一层 span 最省事 */
@@ -888,6 +1217,12 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
 .star.is-on {
   color: var(--pt-warn);
   cursor: default;
+}
+
+/* 行卡上的星标要能用拇指按：26 的桌面尺寸撑到 44（§9 的触控下限） */
+.star--touch {
+  width: var(--pt-m-touch);
+  height: var(--pt-m-touch);
 }
 
 .follow {

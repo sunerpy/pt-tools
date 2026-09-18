@@ -8,23 +8,74 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const saving = ref(false);
-const testing = ref(false);
 const showDialog = ref(false);
 const showTestDialog = ref(false);
 const editMode = ref(false);
 const loadingRss = ref(false);
+/** 试跑用的 RSS 数据源列表没拿到。规则表本身不受影响，所以这是「部分失败」而不是失败 */
+const rssFailed = ref(false);
 
 const rules = ref<FilterRule[]>([]);
 const rssList = ref<{ id: number; name: string; site_name: string }[]>([]);
 const testResult = ref<FilterRuleTestResponse | null>(null);
 const selectedRssId = ref<number | undefined>(undefined);
+
+const TEST_ZERO_SUB = "没有种子命中这条规则，放宽模式或换个数据源";
+
+/**
+ * 规则表的六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，加载失败弹个 toast 就完事 —— 两秒后 toast 消失，
+ * 表格停在 empty 上，用户看到的是「一条规则都还没建」，于是又去建一条重复的。
+ * 请求失败必须留在页面上，401/403 还要单独画成「无权访问」，否则用户会一直点重试。
+ *
+ * 这页不接 filtered：规则表没有搜索/筛选，0 行只可能是「一条都还没建」，永远是 empty。
+ * partial 接的是次要数据源 —— 规则拿到了但试跑用的 RSS 列表没拿到。
+ */
+const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+  failed: () => (rssFailed.value ? 1 : 0),
+});
+
+/** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return "规则读到了，但试跑用的 RSS 数据源列表没读到";
+  return "加一条规则，让 RSS 只下你要的资源";
+});
+
+/** perm 不给重试：没权限点重试没有意义，该去要权限 */
+const stateAction = computed<"retry" | "add" | "none">(() => {
+  if (state.value === "error" || state.value === "partial") return "retry";
+  if (state.value === "loading" || state.value === "perm") return "none";
+  return "add";
+});
+
+/**
+ * 试跑命中列表也是一张列表，同样走六态。
+ * 之前它失败时对话框根本不打开，只留一个 toast；现在先开对话框，把状态留在里面。
+ * filtered 恒为 true：命中 0 条永远是「筛掉了」而不是「库里没数据」。
+ */
+const {
+  loading: testing,
+  state: testState,
+  errorText: testErrorText,
+  run: runTest,
+} = useDataState({ filtered: () => true });
+
+const testStateSub = computed(() => {
+  if (testState.value === "error" || testState.value === "perm") return testErrorText.value;
+  return TEST_ZERO_SUB;
+});
 
 const form = ref<FilterRule>({
   name: "",
@@ -78,25 +129,30 @@ const currentPatternTip = computed(() => {
 });
 
 onMounted(async () => {
-  await loadRules();
-  await loadRssList();
+  await reloadAll();
 });
 
+/** 刷新/重试都同时拉两个数据源，否则 partial 提示点了重试也消不掉 */
+async function reloadAll() {
+  await Promise.all([loadRules(), loadRssList()]);
+}
+
 async function loadRules() {
-  loading.value = true;
-  try {
-    rules.value = await filterRulesApi.list();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  const data = await run(() => filterRulesApi.list());
+  if (!data) {
+    // 失败时清空：留着上一次的规则再配一个「加载失败」的空态更让人误解
+    rules.value = [];
+    return;
   }
+  rules.value = data;
 }
 
 async function loadRssList() {
   loadingRss.value = true;
+  rssFailed.value = false;
   try {
     const response = await fetch("/api/sites");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const sites = await response.json();
     const list: { id: number; name: string; site_name: string }[] = [];
     for (const [siteName, siteConfig] of Object.entries(sites)) {
@@ -111,6 +167,9 @@ async function loadRssList() {
     }
     rssList.value = list;
   } catch (e: unknown) {
+    // 次要数据源：规则表照常渲染，失败只记一个标记，由 partial 提示告诉用户少了什么
+    rssFailed.value = true;
+    rssList.value = [];
     console.error("加载 RSS 列表失败:", e);
   } finally {
     loadingRss.value = false;
@@ -211,10 +270,12 @@ async function testPattern() {
     return;
   }
 
-  testing.value = true;
   testResult.value = null;
-  try {
-    testResult.value = await filterRulesApi.test({
+  // 先开对话框再发请求：加载中和失败的状态都要留在这块列表上，而不是只弹一个 toast
+  showTestDialog.value = true;
+
+  const data = await runTest(() =>
+    filterRulesApi.test({
       pattern: form.value.pattern,
       pattern_type: form.value.pattern_type,
       match_field: form.value.match_field || "both",
@@ -227,13 +288,10 @@ async function testPattern() {
       filter_mode: testForm.value.filter_mode,
       rss_id: selectedRssId.value,
       limit: 20,
-    });
-    showTestDialog.value = true;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "测试失败");
-  } finally {
-    testing.value = false;
-  }
+    }),
+  );
+  if (!data) return;
+  testResult.value = data;
 }
 
 function getPatternTypeLabel(type: string) {
@@ -282,7 +340,7 @@ function decisionText(decision: string | undefined): string {
       :count="`${rules.length} 条`"
       padding="none">
       <template #actions>
-        <el-button size="small" :loading="loading" @click="loadRules">
+        <el-button size="small" :loading="loading" @click="reloadAll">
           <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
         </el-button>
         <el-button type="primary" size="small" @click="openAddDialog">
@@ -290,11 +348,26 @@ function decisionText(decision: string | undefined): string {
         </el-button>
       </template>
 
-      <el-table :data="rules" class="pt-grid" style="width: 100%">
+      <!--
+        partial（§5）：规则读到了但试跑数据源没读到。有数据可看时不该用一整块状态图
+        顶掉表格，那等于把已经拿到的规则也藏了，所以挂一条提示，表格照常渲染。
+      -->
+      <div v-if="hasPartialBanner(rules.length)" class="pt-note pt-note--warn partial-banner">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>
+          试跑用的 RSS
+          数据源列表没读到，规则本身不受影响；编辑弹窗里的「数据源」会是空的，点刷新可重试。
+        </span>
+      </div>
+
+      <el-table v-if="!isMobile" :data="rules" class="pt-grid" style="width: 100%">
         <template #empty>
-          <PtDataState state="empty" dense sub="加一条规则，让 RSS 只下你要的资源">
-            <template #action>
-              <el-button size="small" type="primary" @click="openAddDialog">
+          <PtDataState :state="state" dense :sub="stateSub">
+            <template v-if="stateAction !== 'none'" #action>
+              <el-button v-if="stateAction === 'retry'" size="small" @click="reloadAll">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+              <el-button v-else size="small" type="primary" @click="openAddDialog">
                 <PtIcon name="plus" :size="14" /><span>添加规则</span>
               </el-button>
             </template>
@@ -358,6 +431,58 @@ function decisionText(decision: string | undefined): string {
           </template>
         </el-table-column>
       </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 9 列，手机上横着滚既看不到列头又和页面纵向滚动打架。
+        卡上留的是真正要看的：名称 + 类型/范围/大小/优先级 + 匹配模式 + 启用状态 + 三个操作。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!rules.length" :state="state" :sub="stateSub">
+          <template v-if="stateAction !== 'none'" #action>
+            <el-button v-if="stateAction === 'retry'" size="small" @click="reloadAll">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+            <el-button v-else size="small" type="primary" @click="openAddDialog">
+              <PtIcon name="plus" :size="14" /><span>添加规则</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="rule in rules" :key="rule.id">
+          <template #title>{{ rule.name }}</template>
+
+          <template #meta>
+            <PtTag>{{ getPatternTypeLabel(rule.pattern_type) }}</PtTag>
+            <span>{{ getMatchFieldLabel(rule.match_field) }}</span>
+            <span>{{ formatSizeRange(rule) }}</span>
+            <span>优先级 {{ rule.priority }}</span>
+            <!-- 仅免费只在开着的时候出现：关掉是默认值，画个「否」的胶囊只是噪声 -->
+            <PtStatusPill v-if="rule.require_free" tone="ok" size="sm">仅免费</PtStatusPill>
+            <code class="pattern pattern--row">{{ rule.pattern }}</code>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="rule.enabled ? 'ok' : 'neutral'" size="sm">
+              {{ rule.enabled ? "已启用" : "已停用" }}
+            </PtStatusPill>
+          </template>
+
+          <!-- 桌面那个 el-switch 只有 20 高，够不到 44 触控；行卡上换成按钮 -->
+          <template #actions>
+            <el-button size="small" @click="toggleEnabled(rule)">
+              <PtIcon :name="rule.enabled ? 'pause' : 'play'" :size="14" />
+              <span>{{ rule.enabled ? "停用" : "启用" }}</span>
+            </el-button>
+            <el-button size="small" @click="openEditDialog(rule)">
+              <PtIcon name="pencil" :size="14" /><span>编辑</span>
+            </el-button>
+            <el-button size="small" type="danger" plain @click="deleteRule(rule)">
+              <PtIcon name="trash-2" :size="14" /><span>删除</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
 
       <template v-if="rules.length > 0" #footer>
         <span class="pt-foot-note">优先级数字越小越先匹配，命中即停</span>
@@ -473,7 +598,10 @@ function decisionText(decision: string | undefined): string {
               :label="`${rss.name}（${rss.site_name}）`"
               :value="rss.id" />
           </el-select>
-          <div class="field-tip">选一个 RSS 会现拉一次实时数据来试</div>
+          <div v-if="rssFailed" class="field-tip field-tip--warn">
+            数据源列表没读到，这里会是空的；先不选也能用历史记录试跑
+          </div>
+          <div v-else class="field-tip">选一个 RSS 会现拉一次实时数据来试</div>
         </el-form-item>
 
         <div class="field-row">
@@ -536,7 +664,7 @@ function decisionText(decision: string | undefined): string {
       title="匹配测试结果"
       width="760px"
       align-center>
-      <div v-if="testResult" v-loading="testing">
+      <div v-if="testResult">
         <div class="pt-note" :class="testResult.match_count > 0 ? 'pt-note--ok' : 'pt-note--warn'">
           <PtIcon
             :name="testResult.match_count > 0 ? 'circle-check' : 'triangle-alert'"
@@ -576,8 +704,20 @@ function decisionText(decision: string | undefined): string {
             <p v-if="match.reason" class="mrow__meta"><span>原因</span>{{ match.reason }}</p>
           </article>
         </div>
-        <PtDataState v-else state="zero" dense sub="没有种子命中这条规则，放宽模式或换个数据源" />
+        <PtDataState v-else state="zero" dense :sub="TEST_ZERO_SUB" />
       </div>
+
+      <!--
+        命中列表的 loading / error / perm（§5）。以前失败时这个对话框根本不打开，
+        只留一个两秒就没的 toast，用户不知道是没命中还是请求挂了。
+      -->
+      <PtDataState v-else :state="testState" :sub="testStateSub">
+        <template v-if="testState === 'error'" #action>
+          <el-button size="small" @click="testPattern">
+            <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+          </el-button>
+        </template>
+      </PtDataState>
 
       <template #footer>
         <el-button @click="showTestDialog = false">关闭</el-button>
@@ -618,6 +758,24 @@ function decisionText(decision: string | undefined): string {
   color: var(--pt-t2);
   word-break: break-all;
 }
+
+/* 匹配模式是规则的正文，挤在 meta 那排小胶囊里根本读不了，让它独占一行 */
+.pattern--row {
+  flex: 1 1 100%;
+}
+
+/* 部分失败提示：面板 padding="none"，留白由这里给 */
+.partial-banner {
+  margin: var(--pt-space-3) var(--pt-space-3) 0;
+}
+
+/* 移动端行卡列表：同上，面板贴边，所以留白归页面 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3);
+}
 </style>
 
 <style>
@@ -647,6 +805,11 @@ function decisionText(decision: string | undefined): string {
 .pt-dialog .tpl:hover {
   color: var(--pt-p);
   border-color: var(--pt-p);
+}
+
+/* 数据源没读到时，说明文字要看得出是个警告，不能和普通提示一个色 */
+.pt-dialog .field-tip.field-tip--warn {
+  color: var(--pt-warn);
 }
 
 .pt-dialog .scope-row {
