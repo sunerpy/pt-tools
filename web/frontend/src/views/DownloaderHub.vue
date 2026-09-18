@@ -1493,198 +1493,219 @@ function toggleSidebar() {
       </el-button>
     </Teleport>
 
-    <div ref="hubLayoutRef" class="hub__layout">
+    <!--
+      画板 18 的左右两栏就是卡片层的两栏（276 / 788），所以挂 .pt-cards --rail：
+      内缩 16、栏距 16 都由它给。栏宽仍可拖（宽度是内联样式，压过栅格的轨道），
+      所以这里同时保留 flex 语义 —— 见下面 .hub__layout 的说明。
+    -->
+    <div ref="hubLayoutRef" class="hub__layout pt-cards pt-cards--rail">
+      <!--
+        画板 18 的左列是三张 276 宽的卡：p-io 208（传输）、p-state 268（状态）、
+        p-filter 360（筛选）。之前这里是一整块 aside，从头到尾一个面，
+        三组内容之间只有小标题，读起来分不出层级。
+      -->
       <aside v-show="sidebarVisible" class="hub__side" :style="sidebarStyle">
-        <div class="hub__side-head">
-          <PtIcon name="list-filter" :size="14" />
-          <span>筛选</span>
-          <el-tooltip content="收起侧栏" placement="right">
-            <button type="button" class="hub__ico" @click="toggleSidebar">
-              <PtIcon name="panel-left-close" :size="14" />
-            </button>
-          </el-tooltip>
-        </div>
-        <section class="hub__sec">
-          <h3 class="hub__sec-t">实时速度</h3>
-          <div class="hub__stat">
-            <PtIcon name="download" :size="14" class="is-dl" />
-            <span class="hub__stat-l">下载</span>
-            <span class="hub__stat-v"
-              >{{ formatSize(transferStats?.total_download_speed || 0) }}/s</span
-            >
-          </div>
-          <div class="hub__stat">
-            <PtIcon name="upload" :size="14" class="is-ul" />
-            <span class="hub__stat-l">上传</span>
-            <span class="hub__stat-v"
-              >{{ formatSize(transferStats?.total_upload_speed || 0) }}/s</span
-            >
-          </div>
-        </section>
-        <section class="hub__sec">
-          <h3 class="hub__sec-t">本次会话</h3>
-          <div class="hub__stat">
-            <PtIcon name="cloud-download" :size="14" class="is-dl" />
-            <span class="hub__stat-l">下载</span>
-            <span class="hub__stat-v">{{
-              formatSize(transferStats?.total_session_downloaded || 0)
-            }}</span>
-          </div>
-          <div class="hub__stat">
-            <PtIcon name="cloud-upload" :size="14" class="is-ul" />
-            <span class="hub__stat-l">上传</span>
-            <span class="hub__stat-v">{{
-              formatSize(transferStats?.total_session_uploaded || 0)
-            }}</span>
-          </div>
-        </section>
-        <section class="hub__sec">
-          <h3 class="hub__sec-t">累计</h3>
-          <div class="hub__stat">
-            <PtIcon name="cloud-download" :size="14" class="is-dl" />
-            <span class="hub__stat-l">下载</span>
-            <span class="hub__stat-v">{{ formatSize(transferStats?.total_downloaded || 0) }}</span>
-          </div>
-          <div class="hub__stat">
-            <PtIcon name="cloud-upload" :size="14" class="is-ul" />
-            <span class="hub__stat-l">上传</span>
-            <span class="hub__stat-v">{{ formatSize(transferStats?.total_uploaded || 0) }}</span>
-          </div>
-          <div class="hub__stat">
-            <PtIcon name="hard-drive" :size="14" />
-            <span class="hub__stat-l">剩余空间</span>
-            <span class="hub__stat-v">{{ formatSize(transferStats?.total_free_space || 0) }}</span>
-          </div>
-        </section>
-        <section class="hub__sec">
-          <h3 class="hub__sec-t">状态</h3>
-          <button
-            type="button"
-            class="hub__pick"
-            :class="{ 'is-on': filters.state === '' }"
-            @click="applyQuickState('')">
-            <PtIcon name="list" :size="14" />
-            <span class="hub__pick-l">全部</span>
-            <span class="hub__pick-n">{{ total }}</span>
-          </button>
-          <button
-            type="button"
-            class="hub__pick is-dl"
-            :class="{ 'is-on': filters.state === 'downloading' }"
-            @click="applyQuickState('downloading')">
-            <PtIcon name="download" :size="14" />
-            <span class="hub__pick-l">下载中</span>
-            <span class="hub__pick-n">{{ downloadingCount }}</span>
-          </button>
-          <button
-            type="button"
-            class="hub__pick is-seed"
-            :class="{ 'is-on': filters.state === 'seeding' }"
-            @click="applyQuickState('seeding')">
-            <PtIcon name="upload" :size="14" />
-            <span class="hub__pick-l">做种中</span>
-            <span class="hub__pick-n">{{ seedingCount }}</span>
-          </button>
-          <button
-            type="button"
-            class="hub__pick is-pause"
-            :class="{ 'is-on': filters.state === 'paused' }"
-            @click="applyQuickState('paused')">
-            <PtIcon name="pause" :size="14" />
-            <span class="hub__pick-l">暂停</span>
-            <span class="hub__pick-n">{{ pausedCount }}</span>
-          </button>
-          <button
-            type="button"
-            class="hub__pick is-pause"
-            :class="{ 'is-on': filters.state === 'stopped' }"
-            @click="applyQuickState('stopped')">
-            <PtIcon name="circle-pause" :size="14" />
-            <span class="hub__pick-l">已停止</span>
-            <span class="hub__pick-n">{{ stoppedCount }}</span>
-          </button>
-          <button
-            type="button"
-            class="hub__pick is-err"
-            :class="{ 'is-on': filters.state === 'error' }"
-            @click="applyQuickState('error')">
-            <PtIcon name="triangle-alert" :size="14" />
-            <span class="hub__pick-l">错误</span>
-            <span class="hub__pick-n">{{ errorCount }}</span>
-          </button>
-        </section>
-        <section class="hub__sec">
-          <h3 class="hub__sec-t">下载器</h3>
-          <el-select
-            v-model="filters.downloaderId"
-            size="small"
-            style="width: 100%"
-            placeholder="全部下载器">
-            <el-option
-              v-for="item in downloaderOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value" />
-          </el-select>
-        </section>
-        <section v-if="allCategories.length > 0" class="hub__sec">
-          <h3 class="hub__sec-t">分类</h3>
-          <button
-            type="button"
-            class="hub__pick"
-            :class="{ 'is-on': filters.category === '' }"
-            @click="filters.category = ''">
-            <PtIcon name="folder-open" :size="14" />
-            <span class="hub__pick-l">全部</span>
-          </button>
-          <button
-            v-for="cat in allCategories"
-            :key="cat"
-            type="button"
-            class="hub__pick"
-            :class="{ 'is-on': filters.category === cat }"
-            @click="filters.category = filters.category === cat ? '' : cat">
-            <PtIcon name="folder" :size="14" />
-            <span class="hub__pick-l">{{ cat }}</span>
-          </button>
-        </section>
-        <section v-if="allTags.length > 0" class="hub__sec">
-          <h3 class="hub__sec-t">标签</h3>
-          <div class="hub__tags">
+        <PtPanel class="hub__card" title="传输" icon="activity">
+          <template #actions>
+            <el-tooltip content="收起侧栏" placement="right">
+              <button type="button" class="hub__ico" @click="toggleSidebar">
+                <PtIcon name="panel-left-close" :size="14" />
+              </button>
+            </el-tooltip>
+          </template>
+          <section class="hub__sec">
+            <h3 class="hub__sec-t">实时速度</h3>
+            <div class="hub__stat">
+              <PtIcon name="download" :size="14" class="is-dl" />
+              <span class="hub__stat-l">下载</span>
+              <span class="hub__stat-v"
+                >{{ formatSize(transferStats?.total_download_speed || 0) }}/s</span
+              >
+            </div>
+            <div class="hub__stat">
+              <PtIcon name="upload" :size="14" class="is-ul" />
+              <span class="hub__stat-l">上传</span>
+              <span class="hub__stat-v"
+                >{{ formatSize(transferStats?.total_upload_speed || 0) }}/s</span
+              >
+            </div>
+          </section>
+          <section class="hub__sec">
+            <h3 class="hub__sec-t">本次会话</h3>
+            <div class="hub__stat">
+              <PtIcon name="cloud-download" :size="14" class="is-dl" />
+              <span class="hub__stat-l">下载</span>
+              <span class="hub__stat-v">{{
+                formatSize(transferStats?.total_session_downloaded || 0)
+              }}</span>
+            </div>
+            <div class="hub__stat">
+              <PtIcon name="cloud-upload" :size="14" class="is-ul" />
+              <span class="hub__stat-l">上传</span>
+              <span class="hub__stat-v">{{
+                formatSize(transferStats?.total_session_uploaded || 0)
+              }}</span>
+            </div>
+          </section>
+          <section class="hub__sec">
+            <h3 class="hub__sec-t">累计</h3>
+            <div class="hub__stat">
+              <PtIcon name="cloud-download" :size="14" class="is-dl" />
+              <span class="hub__stat-l">下载</span>
+              <span class="hub__stat-v">{{
+                formatSize(transferStats?.total_downloaded || 0)
+              }}</span>
+            </div>
+            <div class="hub__stat">
+              <PtIcon name="cloud-upload" :size="14" class="is-ul" />
+              <span class="hub__stat-l">上传</span>
+              <span class="hub__stat-v">{{ formatSize(transferStats?.total_uploaded || 0) }}</span>
+            </div>
+            <div class="hub__stat">
+              <PtIcon name="hard-drive" :size="14" />
+              <span class="hub__stat-l">剩余空间</span>
+              <span class="hub__stat-v">{{
+                formatSize(transferStats?.total_free_space || 0)
+              }}</span>
+            </div>
+          </section>
+        </PtPanel>
+
+        <PtPanel class="hub__card" title="状态" icon="list-checks">
+          <section class="hub__sec hub__sec--flat">
             <button
-              v-for="tag in allTags"
-              :key="tag"
               type="button"
-              class="hub__tag"
-              :class="{ 'is-on': filters.tag === tag }"
-              @click="filters.tag = filters.tag === tag ? '' : tag">
-              <PtIcon name="tag" :size="12" />
-              <span>{{ tag }}</span>
+              class="hub__pick"
+              :class="{ 'is-on': filters.state === '' }"
+              @click="applyQuickState('')">
+              <PtIcon name="list" :size="14" />
+              <span class="hub__pick-l">全部</span>
+              <span class="hub__pick-n">{{ total }}</span>
             </button>
-          </div>
-        </section>
-        <div class="hub__side-foot">
-          <el-tooltip content="保存当前布局" placement="top">
-            <button type="button" class="hub__ico" @click="saveLayoutPreset">
-              <PtIcon name="save" :size="15" />
+            <button
+              type="button"
+              class="hub__pick is-dl"
+              :class="{ 'is-on': filters.state === 'downloading' }"
+              @click="applyQuickState('downloading')">
+              <PtIcon name="download" :size="14" />
+              <span class="hub__pick-l">下载中</span>
+              <span class="hub__pick-n">{{ downloadingCount }}</span>
             </button>
-          </el-tooltip>
-          <el-tooltip content="载入已保存布局" placement="top">
-            <button type="button" class="hub__ico" @click="loadLayoutPreset">
-              <PtIcon name="folder-open" :size="15" />
+            <button
+              type="button"
+              class="hub__pick is-seed"
+              :class="{ 'is-on': filters.state === 'seeding' }"
+              @click="applyQuickState('seeding')">
+              <PtIcon name="upload" :size="14" />
+              <span class="hub__pick-l">做种中</span>
+              <span class="hub__pick-n">{{ seedingCount }}</span>
             </button>
-          </el-tooltip>
-          <el-tooltip content="立即刷新" placement="top">
-            <button type="button" class="hub__ico" @click="loadTorrents">
-              <PtIcon name="refresh-cw" :size="15" />
+            <button
+              type="button"
+              class="hub__pick is-pause"
+              :class="{ 'is-on': filters.state === 'paused' }"
+              @click="applyQuickState('paused')">
+              <PtIcon name="pause" :size="14" />
+              <span class="hub__pick-l">暂停</span>
+              <span class="hub__pick-n">{{ pausedCount }}</span>
             </button>
-          </el-tooltip>
-          <el-tooltip content="添加种子" placement="top">
-            <button type="button" class="hub__ico is-primary" @click="openAddDialog">
-              <PtIcon name="plus" :size="15" />
+            <button
+              type="button"
+              class="hub__pick is-pause"
+              :class="{ 'is-on': filters.state === 'stopped' }"
+              @click="applyQuickState('stopped')">
+              <PtIcon name="circle-pause" :size="14" />
+              <span class="hub__pick-l">已停止</span>
+              <span class="hub__pick-n">{{ stoppedCount }}</span>
             </button>
-          </el-tooltip>
-        </div>
+            <button
+              type="button"
+              class="hub__pick is-err"
+              :class="{ 'is-on': filters.state === 'error' }"
+              @click="applyQuickState('error')">
+              <PtIcon name="triangle-alert" :size="14" />
+              <span class="hub__pick-l">错误</span>
+              <span class="hub__pick-n">{{ errorCount }}</span>
+            </button>
+          </section>
+        </PtPanel>
+
+        <PtPanel class="hub__card" title="筛选" icon="list-filter">
+          <section class="hub__sec">
+            <h3 class="hub__sec-t">下载器</h3>
+            <el-select
+              v-model="filters.downloaderId"
+              size="small"
+              style="width: 100%"
+              placeholder="全部下载器">
+              <el-option
+                v-for="item in downloaderOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value" />
+            </el-select>
+          </section>
+          <section v-if="allCategories.length > 0" class="hub__sec">
+            <h3 class="hub__sec-t">分类</h3>
+            <button
+              type="button"
+              class="hub__pick"
+              :class="{ 'is-on': filters.category === '' }"
+              @click="filters.category = ''">
+              <PtIcon name="folder-open" :size="14" />
+              <span class="hub__pick-l">全部</span>
+            </button>
+            <button
+              v-for="cat in allCategories"
+              :key="cat"
+              type="button"
+              class="hub__pick"
+              :class="{ 'is-on': filters.category === cat }"
+              @click="filters.category = filters.category === cat ? '' : cat">
+              <PtIcon name="folder" :size="14" />
+              <span class="hub__pick-l">{{ cat }}</span>
+            </button>
+          </section>
+          <section v-if="allTags.length > 0" class="hub__sec">
+            <h3 class="hub__sec-t">标签</h3>
+            <div class="hub__tags">
+              <button
+                v-for="tag in allTags"
+                :key="tag"
+                type="button"
+                class="hub__tag"
+                :class="{ 'is-on': filters.tag === tag }"
+                @click="filters.tag = filters.tag === tag ? '' : tag">
+                <PtIcon name="tag" :size="12" />
+                <span>{{ tag }}</span>
+              </button>
+            </div>
+          </section>
+          <template #footer>
+            <div class="hub__side-foot">
+              <el-tooltip content="保存当前布局" placement="top">
+                <button type="button" class="hub__ico" @click="saveLayoutPreset">
+                  <PtIcon name="save" :size="15" />
+                </button>
+              </el-tooltip>
+              <el-tooltip content="载入已保存布局" placement="top">
+                <button type="button" class="hub__ico" @click="loadLayoutPreset">
+                  <PtIcon name="folder-open" :size="15" />
+                </button>
+              </el-tooltip>
+              <el-tooltip content="立即刷新" placement="top">
+                <button type="button" class="hub__ico" @click="loadTorrents">
+                  <PtIcon name="refresh-cw" :size="15" />
+                </button>
+              </el-tooltip>
+              <el-tooltip content="添加种子" placement="top">
+                <button type="button" class="hub__ico is-primary" @click="openAddDialog">
+                  <PtIcon name="plus" :size="15" />
+                </button>
+              </el-tooltip>
+            </div>
+          </template>
+        </PtPanel>
       </aside>
       <div
         v-show="sidebarVisible"
@@ -2178,29 +2199,35 @@ function toggleSidebar() {
 /* ---------- 双列骨架 ---------- */
 /*
  * 画板 18 的主区：左列卡 344,120 276 宽（右沿 620）→ 16 的间隔 → p-grid 636 起 788 宽
- * （右沿 1424）。所以这一层按卡片层给 16 的内缩与 16 的间隔，两侧各自成卡。
+ * （右沿 1424）。内缩与栏距来自 .pt-cards --rail。
+ *
+ * 这里把 grid 改回 flex：侧栏宽度是用户拖出来的内联 width，flex 下它直接生效，
+ * 而 grid 的轨道宽度由 grid-template-columns 说话，内联 width 压不住它 ——
+ * 拖动会变成没反应。栏宽比例照画板（276 / 788）由下面的 flex-basis 表达。
  */
-.hub__layout {
+.hub__layout.pt-cards {
   display: flex;
   flex: 1;
-  gap: var(--pt-pad);
   min-height: 0;
-  padding: var(--pt-pad);
 }
 
 /* 侧栏宽度由 sidebarStyle 内联给（可拖拽），这里只管配色和滚动 */
+/*
+ * 左列是三张卡叠起来的一栏（画板 p-io / p-state / p-filter），
+ * 所以这一层只负责纵向堆叠与滚动，边框圆角投影都归各张卡自己。
+ */
 .hub__side {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
-  padding: var(--pt-space-3);
+  gap: var(--pt-pad);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--pt-border-strong) transparent;
-  background: var(--pt-surface);
-  border: 1px solid var(--pt-border);
-  border-radius: var(--pt-r-lg);
-  box-shadow: var(--pt-shadow-sm);
+}
+
+/* 卡片不许被 flex 压扁：内容多的那张（筛选）自己滚，别把三张一起挤扁 */
+.hub__card {
+  flex: 0 0 auto;
 }
 
 .hub__side::-webkit-scrollbar {
@@ -2210,21 +2237,6 @@ function toggleSidebar() {
 .hub__side::-webkit-scrollbar-thumb {
   background: var(--pt-border-strong);
   border-radius: var(--pt-radius-full);
-}
-
-.hub__side-head {
-  display: flex;
-  gap: var(--pt-space-2);
-  align-items: center;
-  font-size: var(--pt-fz-label);
-  font-weight: 600;
-  color: var(--pt-t3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.hub__side-head > .hub__ico {
-  margin-left: auto;
 }
 
 .hub__side-foot {
@@ -2265,6 +2277,16 @@ function toggleSidebar() {
 .hub__sec {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+/* 卡内多个区块时彼此留 12；单区块的卡（状态）不需要这一档 */
+.hub__sec + .hub__sec {
+  margin-top: var(--pt-space-3);
+}
+
+/* 状态那张卡只有一组按钮，小标题由卡头顶替，所以不再留标题的位置 */
+.hub__sec--flat {
   gap: 2px;
 }
 
