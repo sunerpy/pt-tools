@@ -2,22 +2,16 @@
 import { globalApi, type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
-import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
-const TAB_OPTIONS = [
-  { label: "暂停中", value: "paused" },
-  { label: "历史归档", value: "archive" },
-];
-
 const isMobile = useIsMobile();
-const activeTab = ref("paused");
 const autoRefresh = ref(false);
 const refreshTimer = ref<number | null>(null);
 const autoDeleteOnFreeEnd = ref(false);
@@ -75,7 +69,6 @@ const {
 } = useDataState({ filtered: () => hasFilters.value });
 
 /** 工具条上的刷新按钮不关心是哪个 tab 在加载 */
-const loading = computed(() => pausedLoading.value || archiveLoading.value);
 
 /** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
 const pausedStateSub = computed(() => {
@@ -130,9 +123,14 @@ const archiveHeadSub = computed(() => {
   return parts.join(" · ");
 });
 
-const headSub = computed(() =>
-  activeTab.value === "paused" ? pausedHeadSub.value : archiveHeadSub.value,
-);
+/**
+ * 画板 17 两个列表同时可见，所以摘要把两边并成一行 ——
+ * 之前是按 tab 二选一，现在没有 tab 了。
+ */
+const headSub = computed(() => {
+  const parts = [pausedHeadSub.value, archiveHeadSub.value].filter(Boolean);
+  return parts.join(" ｜ ");
+});
 
 /** 画板 gfoot 的左侧文案：「N 个任务 · 显示 a–b · 每页 c」 */
 function rangeNote(total: number, page: number, size: number, unit: string): string {
@@ -150,14 +148,9 @@ const archiveFootNote = computed(() =>
 );
 
 /** 工具栏右侧那行说明字（画板 note 11/400 t3），两个 tab 各一句 */
-const toolbarNote = computed(() =>
-  activeTab.value === "paused"
-    ? "恢复会把种子重新交给原下载器继续下载"
-    : "归档只作记录，不再占用下载器",
-);
-
 onMounted(async () => {
-  await loadPausedTorrents();
+  // 画板 17 两个列表同时可见，所以首屏两边都要拉
+  await Promise.all([loadPausedTorrents(), loadArchiveTorrents()]);
   try {
     const settings = await globalApi.get();
     autoDeleteOnFreeEnd.value = settings.auto_delete_on_free_end ?? false;
@@ -176,11 +169,9 @@ onUnmounted(() => {
 watch(autoRefresh, (val) => {
   if (val) {
     refreshTimer.value = window.setInterval(() => {
-      if (activeTab.value === "paused") {
-        loadPausedTorrents();
-      } else {
-        loadArchiveTorrents();
-      }
+      // 两个列表都在页上，所以都要刷
+      loadPausedTorrents();
+      loadArchiveTorrents();
     }, 30000);
     ElMessage.success("已开启自动刷新（30秒）");
   } else {
@@ -246,15 +237,15 @@ function clearSelection() {
   selectedIds.value = [];
 }
 
-function handleTabChange(tab: string) {
-  // 切 tab 时表格会重挂，它内部的勾选随之丢失；不清掉 selectedIds 的话，
-  // 批量删除会打在一批已经看不见的行上
+/**
+ * 两个列表一起重新加载（换站点筛选、点刷新都走这里）。
+ * 先清勾选：重载后表格会重挂、它内部的勾选随之丢失，不清掉 selectedIds
+ * 批量删除就会打在一批已经看不见的行上。
+ */
+function reloadAll() {
   clearSelection();
-  if (tab === "paused") {
-    loadPausedTorrents();
-  } else {
-    loadArchiveTorrents();
-  }
+  loadPausedTorrents();
+  loadArchiveTorrents();
 }
 
 function handlePausedPageChange(newPage: number) {
@@ -415,66 +406,52 @@ function formatProgress(progress: number): string {
     <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
     <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
 
-    <!-- 画板 bar-64：40 高的全宽工具栏带，左侧只放筛选类控件，右侧是 28×28 图标钮 -->
-    <PtToolbar band :note="toolbarNote">
-      <el-segmented
-        v-model="activeTab"
-        class="pt-seg"
-        :options="TAB_OPTIONS"
-        @change="handleTabChange" />
+    <!--
+    画板 17 没有工具栏带，所以站点筛选与两个页面级开关都进页头动作区（高 32）。
+    窄屏下外壳把页头整条隐掉，这时 Teleport 关闭、控件就地留在卡片上方。
+    -->
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-select
         v-model="siteFilter"
         placeholder="全部站点"
         clearable
         class="filter-select"
-        @change="handleTabChange(activeTab)">
+        @change="reloadAll">
         <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
       </el-select>
+      <el-tooltip content="每 30 秒自动刷新当前列表" placement="bottom">
+        <label class="ctl">
+          <el-switch v-model="autoRefresh" size="small" />
+          <span>自动刷新</span>
+        </label>
+      </el-tooltip>
+      <el-tooltip
+        content="开启后，免费期结束时未完成的种子将自动从下载器删除（含数据文件）"
+        placement="bottom">
+        <label class="ctl">
+          <el-switch
+            v-model="autoDeleteOnFreeEnd"
+            size="small"
+            :loading="savingAutoDelete"
+            style="--el-switch-on-color: var(--pt-dang)"
+            @change="toggleAutoDelete" />
+          <span>免费结束自动删除</span>
+        </label>
+      </el-tooltip>
+    </Teleport>
 
-      <!--
-        两个开关是页面级设置，不是筛选，所以按画板送进页头的动作区（head acts，高 32）。
-        窄屏下外壳把页头整个隐掉（shell.css ≤768 `.pt-head{display:none}`，
-        与 useIsMobile 同一个断点），这时把 Teleport 关掉、就地留在工具栏里，
-        免得手机上这两个开关跟着页头一起消失。
-      -->
-      <Teleport to="#pt-head-acts" :disabled="isMobile">
-        <el-tooltip content="每 30 秒自动刷新当前列表" placement="bottom">
-          <label class="ctl">
-            <el-switch v-model="autoRefresh" size="small" />
-            <span>自动刷新</span>
-          </label>
-        </el-tooltip>
-        <el-tooltip
-          content="开启后，免费期结束时未完成的种子将自动从下载器删除（含数据文件）"
-          placement="bottom">
-          <label class="ctl">
-            <el-switch
-              v-model="autoDeleteOnFreeEnd"
-              size="small"
-              :loading="savingAutoDelete"
-              style="--el-switch-on-color: var(--pt-dang)"
-              @change="toggleAutoDelete" />
-            <span>免费结束自动删除</span>
-          </label>
-        </el-tooltip>
-      </Teleport>
-
-      <template #right>
-        <el-tooltip content="刷新当前列表" placement="top">
-          <button
-            type="button"
-            class="pt-band__iconbtn"
-            aria-label="刷新当前列表"
-            @click="handleTabChange(activeTab)">
-            <PtIcon name="refresh-cw" :size="15" :class="{ 'pt-spin': loading }" />
-          </button>
-        </el-tooltip>
-      </template>
-    </PtToolbar>
-
-    <template v-if="activeTab === 'paused'">
-      <!-- 画板 grid：表格是全宽平铺的带，不再包在圆角描边卡片里 -->
-      <div v-loading="pausedLoading" class="pt-band--grid">
+    <!--
+      画板 17 的主区是 head 之后**两张并列的通栏卡**（c-paused 1080×412 /
+      c-archive 1080×254）—— 不是带式表格页，也不是两个 tab：两个列表同时可见。
+      之前按「通用带式构成」实现是照猜测做的（当时画板 17 还没读到），现在按画板改回卡片。
+    -->
+    <div class="pt-cards pt-cards--wide">
+      <PtPanel
+        v-loading="pausedLoading"
+        title="暂停中"
+        icon="circle-pause"
+        :count="pausedTotal"
+        padding="none">
         <!-- roomy：进度列是「进度条 + 一行数字」的双行内容，34px 行高会裁掉下面那行 -->
         <el-table
           v-if="!isMobile"
@@ -615,46 +592,44 @@ function formatProgress(progress: number): string {
             </template>
           </PtRowCard>
         </div>
-      </div>
 
-      <!--
-        画板 selband 44：多选时表格下方那条强调色 6% 的横幅，批量操作放在这里，
-        不再挂到面板头部（带式版面里已经没有面板头了）。
-      -->
-      <div v-if="selectedIds.length > 0" class="pt-band--sel">
-        <PtIcon name="square-check" :size="15" />
-        <span>已选 {{ selectedIds.length }} 项</span>
-        <span class="pt-band__spacer" />
-        <el-button @click="clearSelection">
-          <PtIcon name="x" :size="14" /><span>取消选择</span>
-        </el-button>
-        <el-button type="danger" plain @click="deleteTorrents(selectedIds, false)">
-          <PtIcon name="trash-2" :size="14" /><span>删除任务</span>
-        </el-button>
-        <el-button type="danger" @click="deleteTorrents(selectedIds, true)">
-          <PtIcon name="trash-2" :size="14" /><span>连数据一起删</span>
-        </el-button>
-      </div>
+        <!-- 画板 selband 44：多选时列表下方那条强调色 6% 的横幅，批量操作放在这里 -->
+        <div v-if="selectedIds.length > 0" class="pt-band--sel">
+          <PtIcon name="square-check" :size="15" />
+          <span>已选 {{ selectedIds.length }} 项</span>
+          <span class="pt-band__spacer" />
+          <el-button @click="clearSelection">
+            <PtIcon name="x" :size="14" /><span>取消选择</span>
+          </el-button>
+          <el-button type="danger" plain @click="deleteTorrents(selectedIds, false)">
+            <PtIcon name="trash-2" :size="14" /><span>删除任务</span>
+          </el-button>
+          <el-button type="danger" @click="deleteTorrents(selectedIds, true)">
+            <PtIcon name="trash-2" :size="14" /><span>连数据一起删</span>
+          </el-button>
+        </div>
 
-      <!-- 画板 gfoot 34：左侧是条数与分页口径，右侧是分页器 -->
-      <div v-if="pausedTotal > 0" class="pt-band--foot">
-        <span>{{ pausedFootNote }}</span>
-        <span class="pt-band__spacer" />
-        <el-pagination
-          v-model:current-page="pausedPage"
-          v-model:page-size="pausedPageSize"
-          class="pt-pager"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pausedTotal"
-          :pager-count="5"
-          layout="sizes, prev, pager, next"
-          @size-change="handlePausedSizeChange"
-          @current-change="handlePausedPageChange" />
-      </div>
-    </template>
+        <template v-if="pausedTotal > 0" #footer>
+          <span class="pt-foot-note">{{ pausedFootNote }}</span>
+          <el-pagination
+            v-model:current-page="pausedPage"
+            v-model:page-size="pausedPageSize"
+            class="pt-pager"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="pausedTotal"
+            :pager-count="5"
+            layout="sizes, prev, pager, next"
+            @size-change="handlePausedSizeChange"
+            @current-change="handlePausedPageChange" />
+        </template>
+      </PtPanel>
 
-    <template v-else>
-      <div v-loading="archiveLoading" class="pt-band--grid">
+      <PtPanel
+        v-loading="archiveLoading"
+        title="历史归档"
+        icon="archive"
+        :count="archiveTotal"
+        padding="none">
         <el-table v-if="!isMobile" :data="archiveTorrents" class="pt-grid" style="width: 100%">
           <template #empty>
             <PtDataState :state="archiveState" dense :sub="archiveStateSub">
@@ -748,23 +723,22 @@ function formatProgress(progress: number): string {
             </template>
           </PtRowCard>
         </div>
-      </div>
 
-      <div v-if="archiveTotal > 0" class="pt-band--foot">
-        <span>{{ archiveFootNote }}</span>
-        <span class="pt-band__spacer" />
-        <el-pagination
-          v-model:current-page="archivePage"
-          v-model:page-size="archivePageSize"
-          class="pt-pager"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="archiveTotal"
-          :pager-count="5"
-          layout="sizes, prev, pager, next"
-          @size-change="handleArchiveSizeChange"
-          @current-change="handleArchivePageChange" />
-      </div>
-    </template>
+        <template v-if="archiveTotal > 0" #footer>
+          <span class="pt-foot-note">{{ archiveFootNote }}</span>
+          <el-pagination
+            v-model:current-page="archivePage"
+            v-model:page-size="archivePageSize"
+            class="pt-pager"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="archiveTotal"
+            :pager-count="5"
+            layout="sizes, prev, pager, next"
+            @size-change="handleArchiveSizeChange"
+            @current-change="handleArchivePageChange" />
+        </template>
+      </PtPanel>
+    </div>
 
     <el-dialog
       v-model="deleteDialogVisible"

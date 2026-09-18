@@ -595,8 +595,13 @@
   padding: var(--pt-pad);
 }
 
+/*
+ * 通栏卡：`minmax(0, 1fr)` 而不是 `1fr` —— `1fr` 的最小轨道是 min-content，
+ * 卡里装一张列宽加起来超过 1080 的 el-table 时轨道会被顶宽，整个主区横向溢出
+ * （画板 17 实测被顶出 112px）。`minmax(0, …)` 让表格自己横向滚动。
+ */
 .pt-cards--wide {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* 一行两栏时左宽右窄（画板 548 / 516） */

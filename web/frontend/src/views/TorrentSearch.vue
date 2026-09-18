@@ -20,6 +20,7 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
