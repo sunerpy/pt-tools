@@ -411,7 +411,11 @@ async function executeClean() {
 </script>
 
 <template>
-  <div class="cleanup-page">
+  <!--
+    画板 21（p-main 344,84 1080×882）与画板 36（p-workdir 1080×570）都是通栏卡：
+    head 之后直接进卡片层，左右各内缩 16，卡片之间间隔 16。本页没有表格带。
+  -->
+  <div class="cleanup-page pt-cards pt-cards--wide">
     <PtPanel v-loading="loading" title="自动删种" icon="trash-2" padding="none">
       <template #actions>
         <PtStatusPill :tone="form.cleanup_enabled ? 'ok' : 'neutral'" size="sm">
@@ -986,12 +990,10 @@ async function executeClean() {
 </template>
 
 <style scoped>
-.cleanup-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-  max-width: 880px;
-}
+/*
+ * 版面交给 .pt-cards --wide（间隔与内缩都在那里）。原来这里是 max-width 880 的 flex 列，
+ * 画板上这几张卡是 1080 通栏，880 会在右边留出 200 的空白。
+ */
 
 /* 第一条区块条紧贴面板页头，两条发丝线会叠成 2px */
 .settings-form > .pt-strip:first-child {

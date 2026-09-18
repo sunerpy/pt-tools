@@ -7,7 +7,6 @@ import {
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
-import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -51,6 +50,14 @@ const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
   if (state.value === "partial") return "规则读到了，但试跑用的 RSS 数据源列表没读到";
   return "加一条规则，让 RSS 只下你要的资源";
+});
+
+/** 画板 head 的 sub（11.5/400 t3）：共几条规则、启用几条 */
+const headSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return "规则列表没加载出来";
+  if (rules.value.length === 0) return "";
+  const on = rules.value.filter((r) => r.enabled).length;
+  return `${rules.value.length} 条规则 · ${on} 条启用 · ${rules.value.length - on} 条停用`;
 });
 
 /** perm 不给重试：没权限点重试没有意义，该去要权限 */
@@ -316,8 +323,23 @@ function decisionText(decision: string | undefined): string {
 </script>
 
 <template>
+  <!--
+    画板 20 是带式表格页：head 64 → bar-64（40）→ grid（234）→ gfoot（338）。
+    表格标题与条数走页头，刷新/添加是页头右侧那两枚 32 高的按钮，所以这页没有 PtPanel。
+    顶上那条提示按画板 27 的落法放在页头之后、内缩 16。
+  -->
   <div class="filter-rules-page">
-    <div class="pt-note pt-note--warn">
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="reloadAll">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
+      </el-button>
+      <el-button type="primary" @click="openAddDialog">
+        <PtIcon name="plus" :size="15" /><span>添加规则</span>
+      </el-button>
+    </Teleport>
+
+    <div class="pt-note pt-note--warn rules-intro">
       <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
       <div class="note-body">
         <strong>过滤规则等于精准下载，不是「免费之外再多下一些」</strong>
@@ -333,21 +355,7 @@ function decisionText(decision: string | undefined): string {
       </div>
     </div>
 
-    <PtPanel
-      v-loading="loading"
-      title="过滤规则"
-      icon="list-filter"
-      :count="`${rules.length} 条`"
-      padding="none">
-      <template #actions>
-        <el-button size="small" :loading="loading" @click="reloadAll">
-          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-        </el-button>
-        <el-button type="primary" size="small" @click="openAddDialog">
-          <PtIcon name="plus" :size="14" /><span>添加规则</span>
-        </el-button>
-      </template>
-
+    <div v-loading="loading" class="pt-band--grid">
       <!--
         partial（§5）：规则读到了但试跑数据源没读到。有数据可看时不该用一整块状态图
         顶掉表格，那等于把已经拿到的规则也藏了，所以挂一条提示，表格照常渲染。
@@ -483,11 +491,11 @@ function decisionText(decision: string | undefined): string {
           </template>
         </PtRowCard>
       </div>
+    </div>
 
-      <template v-if="rules.length > 0" #footer>
-        <span class="pt-foot-note">优先级数字越小越先匹配，命中即停</span>
-      </template>
-    </PtPanel>
+    <div v-if="rules.length > 0" class="pt-band--foot">
+      <span>优先级数字越小越先匹配，命中即停</span>
+    </div>
 
     <el-dialog
       v-model="showDialog"
@@ -730,10 +738,14 @@ function decisionText(decision: string | undefined): string {
 </template>
 
 <style scoped>
+/* 带之间不留间隔（画板上它们连着）；顶部那条提示自己内缩 16 */
 .filter-rules-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
+}
+
+.rules-intro {
+  margin: var(--pt-pad) var(--pt-pad) 0;
 }
 
 /* 说明块里的多段正文：.pt-note 只管容器，段落间距归页面 */

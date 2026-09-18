@@ -4,7 +4,6 @@ import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
-import PtToolbar from "@/components/ui/PtToolbar.vue";
 import {
   formatBytes,
   formatNumber,
@@ -16,10 +15,13 @@ import {
 } from "@/utils/format";
 import { ElMessage } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, ref, nextTick } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+/* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
+const isMobile = useIsMobile();
 
 /**
  * 六态（设计文档 §5）：以前拉取失败只弹 toast，页面随后画成「还没有可导出的统计」。
@@ -637,37 +639,34 @@ onMounted(() => {
       </filter>
     </svg>
 
-    <PtToolbar
-      standalone
-      class="export-bar"
-      :note="
+    <!--
+      画板 11 是两栏卡片页：p-prev 700（预览）+ p-set 364（导出设置），
+      head 之后直接进卡片层，没有工具栏带 —— 返回与两枚导出按钮在画板上是页头动作。
+    -->
+    <Teleport to="#pt-head-sub">
+      {{
         aggregatedStats
           ? `${aggregatedStats.siteCount} 个站点 · ${selectedSiteStats.length} 个入图`
-          : '正在读取统计数据'
-      ">
-      <el-button size="small" @click="router.back()">
-        <PtIcon name="arrow-left" :size="14" /><span>返回</span>
+          : "正在读取统计数据"
+      }}
+    </Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button @click="router.back()">
+        <PtIcon name="arrow-left" :size="15" /><span>返回</span>
       </el-button>
-      <template #right>
-        <el-button
-          size="small"
-          :loading="copying"
-          :disabled="!aggregatedStats"
-          @click="copyToClipboard">
-          <PtIcon name="copy" :size="14" /><span>复制图片</span>
-        </el-button>
-        <el-button
-          type="primary"
-          size="small"
-          :loading="exporting"
-          :disabled="!aggregatedStats"
-          @click="exportImage">
-          <PtIcon name="download" :size="14" /><span>下载图片</span>
-        </el-button>
-      </template>
-    </PtToolbar>
+      <el-button :loading="copying" :disabled="!aggregatedStats" @click="copyToClipboard">
+        <PtIcon name="copy" :size="15" /><span>复制图片</span>
+      </el-button>
+      <el-button
+        type="primary"
+        :loading="exporting"
+        :disabled="!aggregatedStats"
+        @click="exportImage">
+        <PtIcon name="download" :size="15" /><span>下载图片</span>
+      </el-button>
+    </Teleport>
 
-    <div class="export-cols">
+    <div class="export-cols pt-cards pt-cards--main">
       <PtPanel
         v-loading="loading"
         title="预览"
@@ -882,11 +881,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.export-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-}
+/* 卡片层的内缩与间隔由 .pt-cards--main 给；这一层只用来挂 SVG 滤镜与 Teleport */
 
 /* 滤镜容器：占位为 0，但不能 display:none，否则 Safari 里 url(#…) 引用失效 */
 .svg-filters {
@@ -897,11 +892,8 @@ onMounted(() => {
   pointer-events: none;
 }
 
-/* 左宽右窄：右栏 340 刚好容下六枚预设色块一行排开 */
+/* 栏宽（700 / 364）与间隔由 .pt-cards--main 给；这里只让两栏顶对齐 */
 .export-cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: var(--pt-space-4);
   align-items: start;
 }
 
@@ -1269,11 +1261,8 @@ onMounted(() => {
   margin-top: var(--pt-space-2);
 }
 
-@media (max-width: 1024px) {
-  .export-cols {
-    grid-template-columns: 1fr;
-  }
-
+/* 单栏是 .pt-cards--main 自己在 1181 以下做的；这里只取消右栏的吸顶 */
+@media (max-width: 1180px) {
   .export-side {
     position: static;
   }

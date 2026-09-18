@@ -106,7 +106,12 @@ async function save() {
 </script>
 
 <template>
-  <div class="cloak-page" data-testid="cloak-config-page">
+  <!--
+    画板 28：intro 1080×58 → p-cfg 700 / p-res 364 → p-life 1080×240。
+    右栏 p-res（探测结果）与 p-life（会话生命周期）后端没有对应数据，本页先落
+    intro + 通栏的 Manager 连接卡，见设计文档 §5 的偏离记录。
+  -->
+  <div class="cloak-page pt-cards pt-cards--wide" data-testid="cloak-config-page">
     <div class="pt-note">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
       <span>
@@ -183,12 +188,7 @@ async function save() {
 </template>
 
 <style scoped>
-.cloak-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-  max-width: 640px;
-}
+/* 内缩 16 与卡间 16 由 .pt-cards--wide 给；画板这几块是 1080 通栏，不是 640 */
 
 /* 测试结果紧跟在最后一个字段之后，不再多留 el-form-item 的一档间距 */
 .test-result {

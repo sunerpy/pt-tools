@@ -523,6 +523,174 @@
   color: var(--pt-t3);
 }
 
+/*
+ * 页面自带的页头带 —— 画板 15 的 search-head（328,0 1112×88）。
+ * 这类路由外壳不画 .pt-head（App.vue 的 OWN_TOP_ROUTES）：画板里这个带装的不是
+ * 标题加摘要，而是页面自己的主控件。两行撑出 88：
+ *   上排 y14..52（38 高）：720 宽查询框 + 74 宽主按钮
+ *   下排 y58..82（24 高）：4 枚筛选 chip + 一行提示
+ * 14 + 38 + 6 + 24 + 6 = 88。
+ */
+.pt-band--head {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  /* 14 + 38 + 6 + 24 + 5 + 1px 下沿 = 88，与画板 search-head 等高 */
+  padding: 14px var(--pt-pad) 5px;
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-band__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * 上排：画板 q 720×38 / go 74×38，比工具栏里的控件高一档。
+ * 高度写死而不是只给 min-height：el-input 带 prefix/suffix 时内容盒会把
+ * min-height 撑到 42，那一行就比画板高 4，整条带跟着高 4。
+ */
+.pt-band__row--query .el-input {
+  --el-component-size: 38px;
+
+  max-width: 720px;
+  height: 38px;
+}
+
+.pt-band__row--query .el-input__wrapper {
+  height: 38px;
+  min-height: 38px;
+}
+
+.pt-band__row--query .el-button {
+  height: 38px;
+  min-height: 38px;
+}
+
+/* 下排：画板 facet-* 是 24 高的 chip，提示文字 11/400 t4 */
+.pt-band__row--facet {
+  min-height: 24px;
+  font-size: var(--pt-fz-label);
+}
+
+.pt-band__row--facet .el-input__wrapper,
+.pt-band__row--facet .el-select__wrapper {
+  min-height: 24px;
+  background: var(--pt-hover);
+  box-shadow: none;
+}
+
+.pt-band__row--facet .el-select,
+.pt-band__row--facet .el-input {
+  --el-component-size: 24px;
+}
+
+.pt-band__row--facet .el-button {
+  height: 24px;
+  padding: 0 8px;
+  margin: 0;
+  font-size: var(--pt-fz-label);
+}
+
+.pt-band__hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 画板 kbd：34×20 hover 底，装 ⌘K 提示 */
+.pt-kbd {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+}
+
+/* 窄屏：查询框吃满整行，筛选 chip 换行 */
+@media (max-width: 768px) {
+  .pt-band--head {
+    padding: var(--pt-space-3) var(--pt-space-3);
+  }
+
+  .pt-band__row {
+    flex-wrap: wrap;
+  }
+
+  .pt-band__row--query .el-input {
+    max-width: none;
+  }
+
+  .pt-band__hint {
+    display: none;
+  }
+}
+
+/*
+ * 分区带 —— 画板 13 的 tabs（328,88 1112×40，下沿 1px 线）。
+ * 不用 el-tabs：它自带一条 48 高的页头、一根贯穿下划线和自己的一套间距，
+ * 和这条 40 高的带叠起来会变成两层标题。这里只要「文字 13 号 + 2px 指示条」。
+ * 激活项 13/600 t1，其余 13/500 t3；每项之间 22 的间隔（画板 344 / 395 / 508…）。
+ */
+.pt-band--tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 22px;
+  align-items: stretch;
+  min-height: 40px;
+  padding: 0 var(--pt-pad);
+  overflow-x: auto;
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-band__tab {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  padding: 0;
+  font-size: var(--pt-fz-body);
+  font-weight: 500;
+  color: var(--pt-t3);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--pt-transition-fast);
+}
+
+.pt-band__tab:hover {
+  color: var(--pt-t1);
+}
+
+.pt-band__tab.is-on {
+  font-weight: 600;
+  color: var(--pt-t1);
+  border-bottom-color: var(--pt-p);
+}
+
+/* 画板 tb-*：标签后面那枚 10/600 的计数 */
+.pt-band__tab-n {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--pt-p);
+  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  border-radius: 8px;
+}
+
 /* 表格带：全宽平铺，白底，没有圆角与描边 */
 .pt-band--grid {
   flex: 0 0 auto;
@@ -604,9 +772,56 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* 一行两栏时左宽右窄（画板 548 / 516） */
+/*
+ * 分栏变体 —— 画板的栏宽**不是等分**，每种页型有自己的比例（设计文档 §6）：
+ *   --2     548 / 516   表格页下方的两张分析卡
+ *   --main  700 / 364   主从页：左边是内容，右边是凭据/危险操作一类的窄栏
+ *   --side  300 / 764   左边是筛选/文件列表，右边是正文（运行日志）
+ *   --rail  276 / 788   左边是一列控制面板，右边是数据表（下载器控制台）
+ *   --3     364 / 340 / 344  三张并排的分析卡
+ * 窄于 1181 一律退回单栏：700 + 16 + 364 在 1180 以下就开始挤字。
+ * 需要通栏的卡片加 `.pt-cards__full`，它跨满所有栏。
+ */
 @media (min-width: 1181px) {
   .pt-cards--2 {
     grid-template-columns: minmax(0, 548fr) minmax(0, 516fr);
   }
+
+  .pt-cards--main {
+    grid-template-columns: minmax(0, 700fr) minmax(0, 364fr);
+  }
+
+  .pt-cards--side {
+    grid-template-columns: minmax(0, 300fr) minmax(0, 764fr);
+  }
+
+  .pt-cards--rail {
+    grid-template-columns: minmax(0, 276fr) minmax(0, 788fr);
+  }
+
+  .pt-cards--3 {
+    grid-template-columns: minmax(0, 364fr) minmax(0, 340fr) minmax(0, 344fr);
+  }
+}
+
+.pt-cards__full {
+  grid-column: 1 / -1;
+}
+
+/*
+ * 居中窄卡（画板 44 修改密码：p-acct 624,92 520×456）—— 只有一张卡的设置页，
+ * 拉通 1080 会让 6 个字段横铺在一片空白里。
+ */
+.pt-cards--narrow {
+  grid-template-columns: minmax(0, 520px);
+  justify-content: center;
+}
+
+/*
+ * 靠左的窄内容栏（画板 24 ChatOps 绑定：p-pending / p-active / p-note 都是 612 宽，
+ * 右边那片空白上画的是弹窗规格，不是页面内容）。绑定页的正文是一份待认领的短码清单，
+ * 拉到 1080 每行都会剩下半行空白。
+ */
+.pt-cards--lead {
+  grid-template-columns: minmax(0, 612px);
 }

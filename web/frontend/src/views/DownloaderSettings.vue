@@ -100,7 +100,8 @@ const stateSub = computed(() => {
   return "接上 qBittorrent 或 Transmission，RSS 命中的种子才有地方推";
 });
 
-const toolbarNote = computed(() => {
+/** 画板 head 的 sub（11.5/400 t3）：共几个下载器、默认是哪一个 */
+const headSub = computed(() => {
   // 失败时不能顺着 length === 0 说「还没有配置下载器」，那是把加载失败说成空库
   if (state.value === "perm") return "无权访问下载器配置";
   if (state.value === "error") return "下载器列表没加载出来";
@@ -567,17 +568,22 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
 </script>
 
 <template>
-  <div class="downloader-page">
-    <PtToolbar standalone :note="toolbarNote">
-      <el-button size="small" :loading="loading" @click="loadDownloaders">
-        <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+  <!--
+    画板 19 是卡片页：head 之后直接是 1080 通栏的 p-dl，没有工具栏带 ——
+    刷新与添加按钮在画板上是页头右侧那两枚（32 高），所以送进外壳页头。
+    画板另有 p-dir / p-safe / p-bind / p-log 四张卡，对应的是全局设置里的
+    下载目录、磁盘保护、站点绑定与日志，本页不重复一份，见设计文档 §5。
+  -->
+  <div class="downloader-page pt-cards pt-cards--wide">
+    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="loadDownloaders">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
-      <template #right>
-        <el-button type="primary" size="small" @click="openAddDialog">
-          <PtIcon name="plus" :size="14" /><span>添加下载器</span>
-        </el-button>
-      </template>
-    </PtToolbar>
+      <el-button type="primary" @click="openAddDialog">
+        <PtIcon name="plus" :size="15" /><span>添加下载器</span>
+      </el-button>
+    </Teleport>
 
     <PtPanel
       v-loading="loading"
@@ -1129,11 +1135,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
 </template>
 
 <style scoped>
-.downloader-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-}
+/* 版面（内缩 16、卡间 16）交给 .pt-cards--wide */
 
 .url {
   font-family: var(--pt-font-mono);

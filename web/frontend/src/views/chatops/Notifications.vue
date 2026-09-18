@@ -4,8 +4,8 @@ import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
-import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -28,6 +28,8 @@ const channelTypeOptions = [
 ];
 
 const router = useRouter();
+/* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
+const isMobile = useIsMobile();
 const notifications = ref<NotificationConfig[]>([]);
 
 /**
@@ -35,6 +37,15 @@ const notifications = ref<NotificationConfig[]>([]);
  * 用户会以为通道被清空了，去重新配一遍。这一页没有筛选，所以不会出现 zero。
  */
 const { loading, state, errorText, run } = useDataState();
+
+/** 画板 head 的 sub（11.5/400 t3）：共几个通道、几个启用、都是什么类型 */
+const headSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return "通知通道没加载出来";
+  if (notifications.value.length === 0) return "";
+  const on = notifications.value.filter((n) => n.enabled).length;
+  const kinds = [...new Set(notifications.value.map((n) => getChannelLabel(n.channel_type)))];
+  return `${notifications.value.length} 个通道 · ${on} 个启用 · ${kinds.join(" / ")}`;
+});
 
 /** 状态块副标题：失败给真实错误，空态给下一步动作 */
 const stateSub = computed(() => {
@@ -168,20 +179,25 @@ function getChannelLabel(type: string) {
 </script>
 
 <template>
+  <!--
+    画板 22：head 64 → bar-64（40）→ nt0..nt3 四张通道卡（548 / 516 两栏）。
+    刷新与添加是页头右侧那两枚 32 高的按钮；工具栏带在画板上留给通道筛选，
+    本项目通道数量个位数，不需要筛选，所以带上只挂一行覆盖率说明。
+  -->
   <div class="notifications-page">
-    <PtToolbar standalone :note="`已配置 ${notifications.length} 个通道`">
-      <template #right>
-        <el-button :loading="loading" @click="loadNotifications">
-          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-        </el-button>
-        <el-button type="primary" data-testid="add-channel-btn" @click="openAddDialog">
-          <PtIcon name="plus" :size="14" /><span>添加通道</span>
-        </el-button>
-      </template>
-    </PtToolbar>
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="loadNotifications">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
+      </el-button>
+      <el-button type="primary" data-testid="add-channel-btn" @click="openAddDialog">
+        <PtIcon name="plus" :size="15" /><span>添加通道</span>
+      </el-button>
+    </Teleport>
 
     <PtDataState
       v-if="notifications.length === 0"
+      class="ch-state"
       :state="state"
       :title="state === 'empty' ? '还没有通知通道' : ''"
       :sub="stateSub">
@@ -197,7 +213,7 @@ function getChannelLabel(type: string) {
       </template>
     </PtDataState>
 
-    <div v-else class="ch-grid">
+    <div v-else class="ch-grid pt-cards pt-cards--2">
       <article
         v-for="item in notifications"
         :key="item.id"
@@ -310,17 +326,20 @@ function getChannelLabel(type: string) {
 </template>
 
 <style scoped>
+/* 带与卡片层各自管自己的留白，这一层只负责纵向堆叠 */
 .notifications-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
-/* 280 下限：通道名 + 开关一行，再窄开关就会被挤到第二行 */
-.ch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: var(--pt-space-4);
+/*
+ * 通道卡栅格 —— 栏宽与间隔由 .pt-cards--2 给（画板 nt0..nt3 是 548 / 516 两栏）。
+ * 280 那条 auto-fill 下限留在窄屏：.pt-cards 的基础规则本身就是 minmax(320px, 1fr)。
+ */
+
+/* 空态不在卡里，自己内缩 16 对齐卡片层 */
+.ch-state {
+  padding: var(--pt-pad);
 }
 
 .ch-card {

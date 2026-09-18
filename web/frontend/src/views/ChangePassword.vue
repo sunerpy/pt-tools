@@ -87,7 +87,11 @@ async function submit() {
 </script>
 
 <template>
-  <div class="change-password-page">
+  <!--
+    画板 44：p-acct 624,92 520×456 —— 一张 520 宽的卡片居中，不是通栏。
+    6 个字段横铺在 1080 里会变成一行一个输入框加一大片空白。
+  -->
+  <div class="change-password-page pt-cards pt-cards--narrow">
     <PtPanel title="账号信息" icon="shield-check">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="pt-form">
         <el-form-item label="用户名" prop="username">
@@ -151,7 +155,5 @@ async function submit() {
 
 <style scoped>
 /* 单栏表单页限宽：输入框拉满 1600px 宽屏时字段与标签会离得太远读不成一组 */
-.change-password-page {
-  max-width: 520px;
-}
+/* 520 的宽度与居中都由 .pt-cards--narrow 给（画板 44 的 p-acct 就是 520） */
 </style>

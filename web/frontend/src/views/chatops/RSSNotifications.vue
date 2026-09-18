@@ -2,8 +2,6 @@
 import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
-import PtKpiBar from "@/components/ui/PtKpiBar.vue";
-import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -76,26 +74,22 @@ const stateSub = computed(() => {
 
 /* 本页统计只反映当前 30 条，标签里写清楚「本页」，免得被当成全局口径。
    加载失败时读数写「—」：这时候摆一排 0 会被读成「库里真的没有记录」 */
-const kpiItems = computed(() => [
-  {
-    label: "通知记录总数",
-    value: loadFailed.value ? "—" : pagination.total,
-    unit: loadFailed.value ? undefined : " 条",
-    icon: "bell-ring",
-  },
-  {
-    label: "已发送（本页）",
-    value: loadFailed.value ? "—" : sentCount.value,
-    icon: "circle-check",
-  },
-  {
-    label: "失败 / 待重试（本页）",
-    value: loadFailed.value ? "—" : failedCount.value,
-    icon: "triangle-alert",
-    delta: !loadFailed.value && failedCount.value > 0 ? "需处理" : undefined,
-    deltaTone: "dang" as const,
-  },
-]);
+/**
+ * 画板 head 的 sub（11.5/400 t3）。
+ *
+ * 画板 26 是带式表格页：head 64 → bar-64 → grid → gfoot，**没有 KPI 带**
+ * （KPI 带只在画板 02 工作台与 10 用户统计的主区顶上）。原来这页顶着一条 3 格
+ * KPI，数字挪到摘要行，信息一条没少，版面回到画板的样子。
+ */
+const headSub = computed(() => {
+  if (loadFailed.value) return "通知日志没加载出来";
+  const parts = [`${pagination.total} 条记录`];
+  if (logs.value.length > 0) {
+    parts.push(`本页已发送 ${sentCount.value}`);
+    parts.push(`失败 / 待重试 ${failedCount.value}`);
+  }
+  return parts.join(" · ");
+});
 
 function confLabel(id: number): string {
   const c = confs.value.find((x) => x.id === id);
@@ -231,77 +225,76 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!--
+    画板 26 的主区构成：head 64 → bar-64（40）→ grid（表格，全宽平铺）→ gfoot（34）。
+    三条带是彼此的兄弟，都不套在卡片里；表格标题与条数走页头，所以这页没有 PtPanel。
+  -->
   <div class="rss-notify-page">
-    <PtKpiBar :items="kpiItems" />
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
 
-    <PtPanel
-      v-loading="loading"
-      title="RSS 通知日志"
-      icon="rss"
-      :count="loadFailed ? '—' : `${pagination.total} 条`"
-      padding="none">
-      <PtToolbar>
-        <el-input
-          v-model="filters.rss_id"
-          placeholder="RSS ID"
-          clearable
-          class="f-id"
-          @keyup.enter="handleFilterChange"
-          @clear="handleFilterChange">
-          <template #prefix>
-            <PtIcon name="hash" :size="14" />
-          </template>
-        </el-input>
-
-        <el-select
-          v-model="filters.kind"
-          placeholder="全部类型"
-          clearable
-          class="f-sel"
-          @change="handleFilterChange">
-          <el-option label="全部新种（简略）" value="all" />
-          <el-option label="仅匹配的（详细）" value="filtered" />
-        </el-select>
-
-        <el-select
-          v-model="filters.result"
-          placeholder="全部结果"
-          clearable
-          class="f-sel"
-          @change="handleFilterChange">
-          <el-option
-            v-for="r in RESULT_OPTIONS"
-            :key="r"
-            :label="`${resultMeta(r).label}（${r}）`"
-            :value="r" />
-        </el-select>
-
-        <el-select
-          v-model="filters.conf_id"
-          placeholder="全部通道"
-          clearable
-          class="f-sel"
-          @change="handleFilterChange">
-          <el-option
-            v-for="c in confs"
-            :key="c.id"
-            :label="`${c.name}（${c.channel_type}）`"
-            :value="c.id" />
-        </el-select>
-
-        <template #right>
-          <el-tooltip content="每 10 秒重新拉一次当前列表" placement="bottom">
-            <label class="ctl">
-              <el-switch v-model="autoRefresh" size="small" />
-              <span>自动刷新</span>
-            </label>
-          </el-tooltip>
-          <el-button size="small" :loading="loading" @click="fetchLogs">
-            <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-          </el-button>
+    <PtToolbar band>
+      <el-input
+        v-model="filters.rss_id"
+        placeholder="RSS ID"
+        clearable
+        class="f-id"
+        @keyup.enter="handleFilterChange"
+        @clear="handleFilterChange">
+        <template #prefix>
+          <PtIcon name="hash" :size="14" />
         </template>
-      </PtToolbar>
+      </el-input>
 
+      <el-select
+        v-model="filters.kind"
+        placeholder="全部类型"
+        clearable
+        class="f-sel"
+        @change="handleFilterChange">
+        <el-option label="全部新种（简略）" value="all" />
+        <el-option label="仅匹配的（详细）" value="filtered" />
+      </el-select>
+
+      <el-select
+        v-model="filters.result"
+        placeholder="全部结果"
+        clearable
+        class="f-sel"
+        @change="handleFilterChange">
+        <el-option
+          v-for="r in RESULT_OPTIONS"
+          :key="r"
+          :label="`${resultMeta(r).label}（${r}）`"
+          :value="r" />
+      </el-select>
+
+      <el-select
+        v-model="filters.conf_id"
+        placeholder="全部通道"
+        clearable
+        class="f-sel"
+        @change="handleFilterChange">
+        <el-option
+          v-for="c in confs"
+          :key="c.id"
+          :label="`${c.name}（${c.channel_type}）`"
+          :value="c.id" />
+      </el-select>
+
+      <template #right>
+        <el-tooltip content="每 10 秒重新拉一次当前列表" placement="bottom">
+          <label class="ctl">
+            <el-switch v-model="autoRefresh" size="small" />
+            <span>自动刷新</span>
+          </label>
+        </el-tooltip>
+        <el-button size="small" :loading="loading" @click="fetchLogs">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+      </template>
+    </PtToolbar>
+
+    <div v-loading="loading" class="pt-band--grid">
       <el-table v-if="!isMobile" :data="logs" class="pt-grid" row-key="id" style="width: 100%">
         <template #empty>
           <PtDataState :state="state" dense :sub="stateSub">
@@ -448,25 +441,26 @@ onBeforeUnmount(() => {
           </template>
         </PtRowCard>
       </div>
+    </div>
 
-      <template v-if="pagination.total > 0" #footer>
-        <span class="pt-foot-note">
-          {{
-            isMobile
-              ? "点卡片上的详情可以看下次重试时间和推送出去的消息内容"
-              : "展开一行可以看失败原因和推送出去的消息内容"
-          }}
-        </span>
-        <el-pagination
-          v-model:current-page="pagination.page"
-          class="pt-pager"
-          :page-size="pagination.pageSize"
-          :total="pagination.total"
-          :pager-count="5"
-          layout="prev, pager, next"
-          @current-change="handlePageChange" />
-      </template>
-    </PtPanel>
+    <div v-if="pagination.total > 0" class="pt-band--foot">
+      <span>
+        {{
+          isMobile
+            ? "点卡片上的详情可以看下次重试时间和推送出去的消息内容"
+            : "展开一行可以看失败原因和推送出去的消息内容"
+        }}
+      </span>
+      <span class="pt-band__spacer" />
+      <el-pagination
+        v-model:current-page="pagination.page"
+        class="pt-pager"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        :pager-count="5"
+        layout="prev, pager, next"
+        @current-change="handlePageChange" />
+    </div>
 
     <!-- 行卡替代了展开行，详情放弹窗；桌面走表格展开，不会用到这里 -->
     <el-dialog v-model="detailVisible" title="通知详情" width="92%" align-center>
@@ -486,10 +480,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 带之间没有间隔（画板上它们是连着的），所以这里不再是带 gap 的 flex 列 */
 .rss-notify-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
 .f-id {

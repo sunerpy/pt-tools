@@ -6,7 +6,6 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
-import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -21,6 +20,11 @@ const TTL_OPTIONS = [
 ];
 
 const isMobile = useIsMobile();
+
+/** 画板 head 的 sub（11.5/400 t3）：待绑定与已绑定各几条 */
+const headSub = computed(
+  () => `待绑定 ${pendingBindings.value.length} · 已绑定 ${activeBindings.value.length}`,
+);
 const pendingBindings = ref<ChatOpBinding[]>([]);
 const activeBindings = ref<ChatOpBinding[]>([]);
 const configs = ref<NotificationConfig[]>([]);
@@ -239,19 +243,20 @@ function getConfNameByConfId(confId?: number) {
 </script>
 
 <template>
-  <div class="bindings-page">
-    <PtToolbar
-      standalone
-      :note="`待绑定 ${pendingBindings.length} · 已绑定 ${activeBindings.length}`">
-      <el-button size="small" :loading="loading" @click="loadData">
-        <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+  <!--
+    画板 24：head 64 之后是靠左的一栏 612 宽的卡（p-pending / p-active / p-note），
+    右边那片空白上画的是发码弹窗的规格，不是页面内容。刷新与生成绑定码是页头动作。
+  -->
+  <div class="bindings-page pt-cards pt-cards--lead">
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="loadData">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
       </el-button>
-      <template #right>
-        <el-button type="primary" size="small" @click="openGenerateDialog">
-          <PtIcon name="plus" :size="14" /><span>生成绑定码</span>
-        </el-button>
-      </template>
-    </PtToolbar>
+      <el-button type="primary" @click="openGenerateDialog">
+        <PtIcon name="plus" :size="15" /><span>生成绑定码</span>
+      </el-button>
+    </Teleport>
 
     <!-- 部分失败（§5 partial）：绑定拿到了、渠道配置没拿到，说清缺的是什么而不是静默降级 -->
     <div v-if="showPartialNote" class="pt-note pt-note--warn">
@@ -556,11 +561,7 @@ function getConfNameByConfId(confId?: number) {
 </template>
 
 <style scoped>
-.bindings-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-}
+/* 栏宽 612、内缩 16、卡间 16 都由 .pt-cards--lead 给 */
 
 /* 码 + 复制按钮是一个整体，别让复制按钮掉到第二行 */
 .code-cell {

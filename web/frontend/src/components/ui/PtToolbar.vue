@@ -24,7 +24,14 @@ withDefaults(
 </script>
 
 <template>
-  <div class="pt-toolbar" :class="{ 'is-standalone': standalone, 'is-band': band }">
+  <!--
+    带形态同时挂上全局的 .pt-band--toolbar：画板 bar-64 里的分段、搜索框、下拉、
+    按钮统统是 28 高（Element 默认 32，塞进 40 高的带里会把带顶满）。那套压高度的
+    规则在 atoms.css 里，只认这个类名 —— 不挂上去的话每个页面都得自己 :deep 一遍。
+  -->
+  <div
+    class="pt-toolbar"
+    :class="{ 'is-standalone': standalone, 'is-band': band, 'pt-band--toolbar': band }">
     <div class="pt-toolbar__side">
       <slot />
     </div>
@@ -42,6 +49,22 @@ withDefaults(
 .pt-toolbar.is-band {
   flex-wrap: nowrap;
   border-radius: 0;
+}
+
+/*
+ * 带形态里左组也不换行，并且吃掉剩余宽度。
+ * 只给容器 nowrap 不够：两个 side 自己还是 wrap，而 space-between 下左组只拿到
+ * 内容宽度，筛选控件一多（搜索框 320 + 下拉 180 + 一枚按钮）就在组内折成两行，
+ * 40 高的带被顶到 65（已支持站点页实测）。控件宽度自己会收缩，不会溢出。
+ */
+@media (min-width: 769px) {
+  .pt-toolbar.is-band .pt-toolbar__side {
+    flex-wrap: nowrap;
+  }
+
+  .pt-toolbar.is-band .pt-toolbar__side:first-child {
+    flex: 1 1 auto;
+  }
 }
 
 .pt-toolbar {

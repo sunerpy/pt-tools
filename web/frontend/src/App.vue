@@ -86,11 +86,22 @@ const isDetail = computed(() => typeof route.name === "string" && DETAIL_ROUTES.
  * 不是 head。页面身份由导航列的高亮项表达，KPI 带里的真实数字替代了摘要行。
  * 导航收起开关已经移到 rail，所以去掉页头不会把它一起带走。
  */
-const KPI_TOP_ROUTES = new Set(["userinfo"]);
-const hasHead = computed(() => !(typeof route.name === "string" && KPI_TOP_ROUTES.has(route.name)));
+/*
+ * 种子搜索同理：画板 15 的 search-head（328,0 1112×88）里没有标题也没有摘要，
+ * 装的是 720 宽的查询框 + 搜索按钮 + 两个页头动作 + 一行 4 个筛选 chip。
+ * 那是页面自己的控件，不是外壳的标题栏，所以页头交给页面画。
+ */
+const OWN_TOP_ROUTES = new Set(["userinfo", "search"]);
+const hasHead = computed(() => !(typeof route.name === "string" && OWN_TOP_ROUTES.has(route.name)));
 
-/** 下载器 Web UI 是独立控制台，整屏让给它（沿用旧的 is-immersive 行为） */
-const isImmersive = computed(() => route.name === "downloader-hub");
+/*
+ * 沉浸模式（整屏让给页面、藏掉 rail / 导航列 / 页头 / 状态条）目前没有页面在用。
+ *
+ * 下载器 Web UI 原来走这条路，但画板 18 明确把它画在外壳里：
+ * head 64 → bar-64 → 左列 276 / 右 788，rail 与导航列都在。
+ * 规则与样式先留着（`.pt-shell.is-immersive`），将来真需要整屏时把路由名加回来即可。
+ */
+const isImmersive = computed(() => false);
 
 const activePath = computed(() => activeNavPath(route.name));
 
@@ -101,6 +112,14 @@ const groupTitle = computed(
 );
 
 const pageTitle = computed(() => {
+  /*
+   * 详情页的标题是「这一条是谁」，不是页面类型名 —— 画板 13 的 h1 写的是
+   * 「PTerClub」而不是「站点详情」，面包屑末节也是同一个名字。站点名就在路由参数里，
+   * 不用页面再往上送一次。
+   */
+  if (route.name === "site-detail" && typeof route.params.name === "string") {
+    return route.params.name;
+  }
   const metaTitle = route.meta.title;
   if (typeof metaTitle === "string" && metaTitle) return metaTitle;
   return navItem.value?.label ?? "pt-tools";
@@ -118,8 +137,15 @@ const HOME_PATH = "/userinfo";
  */
 const crumbs = computed(() => {
   const out: { label: string; to?: string }[] = [];
-  if (activePath.value !== HOME_PATH) out.push({ label: "首页", to: HOME_PATH });
-  if (groupTitle.value) out.push({ label: groupTitle.value });
+  /*
+   * 详情页只有两节：所属列表页 + 这一条的名字（画板 13 的 crumb 就是
+   * 「站点列表 › PTerClub」）。「首页」和分组名对回上一层没有帮助 —— 分组名根本
+   * 不可点，而详情页唯一要回的地方就是它的列表页。
+   */
+  if (!isDetail.value) {
+    if (activePath.value !== HOME_PATH) out.push({ label: "首页", to: HOME_PATH });
+    if (groupTitle.value) out.push({ label: groupTitle.value });
+  }
   if (navItem.value && navItem.value.label !== pageTitle.value) {
     out.push({ label: navItem.value.label, to: navItem.value.path });
   }

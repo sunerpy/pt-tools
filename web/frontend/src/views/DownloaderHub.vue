@@ -13,7 +13,6 @@ import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDe
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
 import PtIcon from "@/components/PtIcon";
-import PtLogo from "@/components/PtLogo";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtProgress from "@/components/ui/PtProgress.vue";
@@ -24,31 +23,19 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
-import { useThemeStore } from "@/stores/theme";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
-
-const router = useRouter();
-const themeStore = useThemeStore();
-
-/*
- * 工具条那颗标志坐在 --pt-hover 上，明暗随模式变，所以变体得跟着表面换：
- * brand.md 按表面明暗判定 —— 浅色面用自带底板的彩色版，深色面用单色版。
- * 页头 hero 那颗不参与：它坐在 --pt-chrome 上，8 套配色里恒为深色，固定 mono。
- */
-const logoVariant = computed(() => (themeStore.isDark ? "mono" : "plated"));
 
 const COLUMN_STORAGE_KEY = "downloader-hub-visible-columns-v1";
 const COLUMN_ORDER_STORAGE_KEY = "downloader-hub-column-order-v1";
 const DENSITY_STORAGE_KEY = "downloader-hub-density-v1";
 const LAYOUT_PRESET_STORAGE_KEY = "downloader-hub-layout-preset-v1";
 const DETAIL_MODE_STORAGE_KEY = "downloader-hub-detail-mode-v1";
-const HERO_VISIBLE_STORAGE_KEY = "downloader-hub-hero-visible-v1";
 const SIDEBAR_VISIBLE_STORAGE_KEY = "downloader-hub-sidebar-visible-v1";
 const SIDEBAR_WIDTH_STORAGE_KEY = "downloader-hub-sidebar-width-v1";
-const SIDEBAR_WIDTH_MIN = 280;
+/* 画板 18 的左列是 276（p-io / p-state / p-filter 都是这个宽度） */
+const SIDEBAR_WIDTH_MIN = 276;
 const SIDEBAR_WIDTH_MAX = 420;
-const SIDEBAR_WIDTH_DEFAULT = 320;
+const SIDEBAR_WIDTH_DEFAULT = 276;
 const MAX_ALL_TASK_ROWS = 5000;
 /*
  * 移动端行卡的渲染上限。手机上不做虚拟滚动（行卡高度不定，撑不出稳定的行高），
@@ -129,7 +116,6 @@ const useVirtualList = ref(true);
 const detailMode = ref<"drawer" | "inline">(loadDetailMode());
 const sidebarVisible = ref(localStorage.getItem(SIDEBAR_VISIBLE_STORAGE_KEY) !== "false");
 const sidebarWidth = ref(loadSidebarWidth());
-const heroVisible = ref(localStorage.getItem(HERO_VISIBLE_STORAGE_KEY) === "true");
 
 const torrents = ref<DownloaderTorrentItem[]>([]);
 const downloaders = ref<DownloaderSetting[]>([]);
@@ -394,6 +380,25 @@ const stateTitle = computed(() => {
 });
 
 /** 状态块的副标题：失败时给真实原因，空态时给下一步动作 */
+/**
+ * 画板 head 的 sub（11.5/400 t3）：任务总数、正在下载/做种，以及当前上下行速度。
+ * 原来这些数字只在页内那条深色 hero 的副标题里说了一句静态介绍文案，
+ * hero 去掉之后这一行是真实数字，比介绍文案有用。
+ */
+const headSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return "任务列表没加载出来";
+  const parts = [`${total.value} 个任务`];
+  const c = torrentStateCounters.value;
+  if (c.downloading > 0) parts.push(`${c.downloading} 下载中`);
+  if (c.seeding > 0) parts.push(`${c.seeding} 做种中`);
+  const t = transferStats.value;
+  if (t) {
+    parts.push(`↓${formatSize(t.total_download_speed)}/s`);
+    parts.push(`↑${formatSize(t.total_upload_speed)}/s`);
+  }
+  return parts.join(" · ");
+});
+
 const stateSub = computed(() => {
   switch (state.value) {
     case "error":
@@ -565,12 +570,9 @@ watch(useVirtualList, () => {
 
 /* 部分失败提示条挂在 tableCardBodyRef 上方，它一出现就把可用高度吃掉一块，
    所以失败条数也要触发一次重算 */
-watch(
-  [selectedCount, heroVisible, sidebarVisible, total, loading, () => loadFailures.value.length],
-  () => {
-    scheduleTableHeightUpdate();
-  },
-);
+watch([selectedCount, sidebarVisible, total, loading, () => loadFailures.value.length], () => {
+  scheduleTableHeightUpdate();
+});
 
 watch(sidebarWidth, (value) => {
   localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(value));
@@ -1475,43 +1477,21 @@ function toggleSidebar() {
   sidebarVisible.value = !sidebarVisible.value;
   localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, String(sidebarVisible.value));
 }
-
-function toggleHero() {
-  heroVisible.value = !heroVisible.value;
-  localStorage.setItem(HERO_VISIBLE_STORAGE_KEY, String(heroVisible.value));
-}
-
-/* 沉浸模式下全局导航被隐藏了，工具条上这颗下拉是本页唯一的出口 */
-function onNavCommand(command: string) {
-  if (command === "toggle-sidebar") {
-    toggleSidebar();
-    return;
-  }
-  if (command === "toggle-hero") {
-    toggleHero();
-    return;
-  }
-  router.push(`/${command}`);
-}
 </script>
 
 <template>
+  <!--
+    画板 18 把控制台画在外壳里（head 64 → bar-64 → 左列 276 / 右 788），
+    不是整屏沉浸：rail 与导航列都在，所以这一页原来自己画的那条深色 hero
+    与工具栏里的页内导航下拉都不再需要 —— 标题走外壳页头，导航走导航列。
+  -->
   <div class="hub">
-    <header v-if="heroVisible" class="hub__hero">
-      <PtLogo :size="30" variant="mono" title="pt-tools" />
-      <div class="hub__hero-text">
-        <h1>混合下载器控制台</h1>
-        <p>聚合所有下载器任务，支持单下载器与全局视图。</p>
-      </div>
-      <div class="hub__hero-acts">
-        <el-button type="primary" @click="openAddDialog">
-          <PtIcon name="plus" :size="14" /><span>添加种子</span>
-        </el-button>
-        <el-button @click="toggleHero">
-          <PtIcon name="chevron-up" :size="14" /><span>收起</span>
-        </el-button>
-      </div>
-    </header>
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button type="primary" @click="openAddDialog">
+        <PtIcon name="plus" :size="15" /><span>添加种子</span>
+      </el-button>
+    </Teleport>
 
     <div ref="hubLayoutRef" class="hub__layout">
       <aside v-show="sidebarVisible" class="hub__side" :style="sidebarStyle">
@@ -1722,41 +1702,16 @@ function onNavCommand(command: string) {
           :count="total"
           padding="none">
           <template #actions>
+            <!-- 「添加种子」在外壳页头里已经有一枚，这里不再放第二枚 -->
             <el-tooltip content="每 5 秒自动刷新" placement="bottom">
               <span class="hub__auto">
                 <el-switch v-model="autoRefreshEnabled" size="small" />
                 <span>自动</span>
               </span>
             </el-tooltip>
-            <el-button type="primary" size="small" @click="openAddDialog">
-              <PtIcon name="plus" :size="14" /><span>添加种子</span>
-            </el-button>
           </template>
 
           <PtToolbar>
-            <el-dropdown trigger="click" @command="onNavCommand">
-              <button type="button" class="hub__nav">
-                <PtLogo :size="16" :variant="logoVariant" title="pt-tools" />
-                <PtIcon name="chevron-down" :size="13" />
-              </button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="toggle-sidebar">{{
-                    sidebarVisible ? "隐藏侧栏" : "显示侧栏"
-                  }}</el-dropdown-item>
-                  <el-dropdown-item command="toggle-hero">{{
-                    heroVisible ? "隐藏页头" : "显示页头"
-                  }}</el-dropdown-item>
-                  <el-dropdown-item divided command="global">全局设置</el-dropdown-item>
-                  <el-dropdown-item command="userinfo">用户统计</el-dropdown-item>
-                  <el-dropdown-item command="downloaders">下载器管理</el-dropdown-item>
-                  <el-dropdown-item command="sites">站点与 RSS</el-dropdown-item>
-                  <el-dropdown-item command="search">种子搜索</el-dropdown-item>
-                  <el-dropdown-item command="tasks">任务列表</el-dropdown-item>
-                  <el-dropdown-item command="logs">日志</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
             <el-tooltip v-if="!sidebarVisible" content="展开侧栏" placement="bottom">
               <button type="button" class="hub__ico" @click="toggleSidebar">
                 <PtIcon name="panel-left-open" :size="15" />
@@ -2202,9 +2157,12 @@ function onNavCommand(command: string) {
 
 <style scoped>
 /*
- * 沉浸模式页面：App.vue 把整块视口交给这一页（.pt-shell.is-immersive 隐藏了
- * rail / 导航列 / 页头 / 状态条），所以页头、筛选侧栏、导航下拉都由本页自己画。
- * 其他页面不该照抄这个结构——它们的标题和导航仍由 shell 提供。
+ * 下载器控制台的皮肤。
+ *
+ * 这一页原来走沉浸模式（整屏，藏掉 rail / 导航列 / 页头 / 状态条），所以自己画了
+ * 一条深色 hero 和一颗页内导航下拉。画板 18 把它画在外壳里 —— head 64 → bar-64 →
+ * 左列 276 / 右 788 —— 那两件于是都删了：标题与动作走外壳页头，导航走导航列。
+ * 留下的特殊之处只有一个：左右两栏之间可拖拽，宽度记在 localStorage 里。
  *
  * 原先这一页的皮肤在 styles/downloader-hub-page.css，一整套 --vt-* 深绿硬编码，
  * 换成主题令牌后那份文件再无第二个消费者，于是折进本文件一起删掉。
@@ -2217,53 +2175,17 @@ function onNavCommand(command: string) {
   background: var(--pt-canvas);
 }
 
-/* ---------- 页头 ---------- */
-/*
- * 这条 hero 用的是深色 chrome 底，8 套配色里都是深色，所以文字必须走
- * --pt-chrome-t1/t2 而不是 --pt-t1/t3 —— 后者在浅色模式下是深灰，
- * 会变成深底深字。标志同理取该表面主文字色的单色版。
- */
-.hub__hero {
-  display: flex;
-  gap: var(--pt-space-3);
-  align-items: center;
-  padding: var(--pt-space-3) var(--pt-pad);
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome);
-  border-bottom: 1px solid var(--pt-chrome-border);
-}
-
-.hub__hero-text {
-  min-width: 0;
-}
-
-.hub__hero-text h1 {
-  margin: 0;
-  font-size: var(--pt-fz-h1);
-  font-weight: 600;
-  line-height: var(--pt-lh-tight);
-  color: var(--pt-chrome-t1);
-}
-
-.hub__hero-text p {
-  margin: 2px 0 0;
-  font-size: var(--pt-fz-sm);
-  line-height: var(--pt-lh-body);
-  color: var(--pt-chrome-t2);
-}
-
-.hub__hero-acts {
-  display: flex;
-  gap: var(--pt-space-2);
-  align-items: center;
-  margin-left: auto;
-}
-
 /* ---------- 双列骨架 ---------- */
+/*
+ * 画板 18 的主区：左列卡 344,120 276 宽（右沿 620）→ 16 的间隔 → p-grid 636 起 788 宽
+ * （右沿 1424）。所以这一层按卡片层给 16 的内缩与 16 的间隔，两侧各自成卡。
+ */
 .hub__layout {
   display: flex;
   flex: 1;
+  gap: var(--pt-pad);
   min-height: 0;
+  padding: var(--pt-pad);
 }
 
 /* 侧栏宽度由 sidebarStyle 内联给（可拖拽），这里只管配色和滚动 */
@@ -2276,7 +2198,9 @@ function onNavCommand(command: string) {
   scrollbar-width: thin;
   scrollbar-color: var(--pt-border-strong) transparent;
   background: var(--pt-surface);
-  border-right: 1px solid var(--pt-border);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-sm);
 }
 
 .hub__side::-webkit-scrollbar {
@@ -2312,25 +2236,28 @@ function onNavCommand(command: string) {
   border-top: 1px solid var(--pt-border);
 }
 
-/* 8px 的拖拽把手：默认只是一条比边框稍亮的缝，悬停才提示可拖 */
+/* 两张卡之间的拖拽把手：16 的间隔里居中一条 2px 的线，hover 才显出来 */
 .hub__resizer {
-  flex: 0 0 8px;
+  position: relative;
+  flex: 0 0 2px;
+  margin: 0 -9px;
   cursor: col-resize;
-  background: var(--pt-hover);
-  border-right: 1px solid var(--pt-border);
+  background: transparent;
+  border-radius: 1px;
+  transition: background var(--pt-transition-fast);
 }
 
 .hub__resizer:hover {
-  background: var(--pt-p-soft);
+  background: var(--pt-p);
 }
 
+/* 内缩已经由 .hub__layout 给了，这里再加一层 padding 会让 p-grid 缩到 788 以内 */
 .hub__main {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: var(--pt-space-3);
   min-width: 0;
-  padding: var(--pt-space-3);
   overflow: hidden;
 }
 
@@ -2495,34 +2422,6 @@ function onNavCommand(command: string) {
 .hub__ico:hover {
   color: var(--pt-t1);
   background: var(--pt-hover);
-}
-
-/* ---------- 工具条 ---------- */
-.hub__nav {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  height: 26px;
-  padding: 0 var(--pt-space-2);
-  color: var(--pt-t2);
-  cursor: pointer;
-  background: var(--pt-hover);
-  border: 1px solid var(--pt-border);
-  border-radius: var(--pt-r-md);
-}
-
-.hub__nav:hover {
-  color: var(--pt-t1);
-  border-color: var(--pt-border-strong);
-}
-
-/*
- * brand.md 要求 mono 变体取所在表面的主文字色，而工具条整体是次级色（悬停才提到主色）。
- * 只把标志钉到 --pt-t1，折叠箭头留在次级色上，保住工具条本来的层级。
- * plated 变体自带品牌色，不受 currentColor 影响，所以只选 mono。
- */
-.hub__nav .pt-logo--mono {
-  color: var(--pt-t1);
 }
 
 .hub__search {
@@ -2774,15 +2673,6 @@ function onNavCommand(command: string) {
     max-height: 42vh;
     border-right: none;
     border-bottom: 1px solid var(--pt-border);
-  }
-
-  .hub__hero {
-    flex-wrap: wrap;
-  }
-
-  .hub__hero-acts {
-    width: 100%;
-    margin-left: 0;
   }
 
   .hub__main {

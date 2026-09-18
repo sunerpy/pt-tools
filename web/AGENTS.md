@@ -92,8 +92,41 @@ Both are design requirements, not polish. `src/views/TaskList.vue` is the refere
    `PtRowCard` (`lead / title / meta / status / progress / actions`). Do not delete desktop columns;
    the cards are a second view. Touch targets are ≥44px.
 
+### Page layout follows the Penpot boards, and the boards use two shapes
+
+The main area (x=328, width 1112 at a 1440 canvas) is either **bands** or **cards**, never a padded
+canvas of floating panels. Pick the shape the page's board uses; `.pt-shell__inner` has no padding of
+its own, so a page that wraps nothing sits flush against the shell.
+
+- **Band pages** (`userinfo`, `sites`, `tasks`, `search`, `filter-rules`, `chatops/audit`,
+  `chatops/rss-notifications`, `supported-sites`) stack full-bleed siblings:
+  head 64 → `PtToolbar band` 40 → `.pt-band--grid` → `.pt-band--sel` 44 → `.pt-band--foot` 34 →
+  cards. The toolbar is a **sibling** of the grid, not a child of it.
+- **Card pages** (everything else) go straight from the head into a `.pt-cards` grid, which supplies
+  the 16px inset and the 16px gutter. Column widths are not equal — use the variant the board uses:
+  `--wide` 1080 · `--2` 548/516 · `--main` 700/364 · `--side` 300/764 · `--rail` 276/788 ·
+  `--3` 364/340/344 · `--narrow` centred 520 · `--lead` left-aligned 612. `.pt-cards__full` spans all
+  columns. All collapse to one column below 1181px.
+
+The head is the shell's, not the page's. Pages fill it through two teleport targets and must disable
+the teleport on mobile, where the head is hidden:
+
+```html
+<Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+<Teleport to="#pt-head-acts" :disabled="isMobile">…</Teleport>
+```
+
+`#pt-head-sub` is a live summary of real numbers (`37 个任务 · 12 下载中 · ↓93.8 MB/s`), not a
+breadcrumb — breadcrumbs belong to detail routes only, where they read `<list page> › <this record>`.
+Two routes own their top band instead of taking the shell head (`App.vue`'s `OWN_TOP_ROUTES`):
+`userinfo` puts a `PtKpiBar` there, `search` an 88-high `.pt-band--head`.
+
 Styling slot content from a shared component needs `:slotted(...)` — a plain descendant selector in
 the component's scoped block silently matches nothing.
+
+`vue-tsc` does **not** report a component used in a template but never imported. Vue renders it as a
+literal unknown element (`<ptpanel>`), so the card's header, footer and border silently vanish while
+the build stays green. `src/views/views.components.test.ts` scans every SFC for this; keep it green.
 
 Build output must exist for production compilation. `pnpm build` runs `vue-tsc -b` and is the real
 type gate; `vue-tsc --noEmit` has been observed to pass errors the build rejects:

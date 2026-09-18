@@ -24,7 +24,7 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 const isMobile = useIsMobile();
 
@@ -43,6 +43,8 @@ const searchResults = ref<SearchTorrentItem[]>([]);
 const siteResultCounts = ref<Record<string, number>>({});
 const searchErrors = ref<SearchErrorItem[]>([]);
 const searchTime = ref(0);
+/** 这次搜索实际请求了多少个站点 —— 工具栏那行覆盖率的分母 */
+const askedSiteCount = ref(0);
 const totalResults = ref(0);
 
 /**
@@ -275,11 +277,27 @@ function loadFromCache() {
   }
 }
 
+/**
+ * 查询框 —— ⌘K / Ctrl+K 聚焦。
+ * 画板 15 的查询框里画了一枚 34×20 的 `⌘K` 键帽，页头下方还写着「⌘K 聚焦」，
+ * 那就得真的能聚焦：印一个按了没反应的快捷键比不印更糟。
+ */
+const queryRef = ref<{ focus: () => void } | null>(null);
+
+function onHotkey(e: KeyboardEvent) {
+  if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
+  e.preventDefault();
+  queryRef.value?.focus();
+}
+
 onMounted(async () => {
+  window.addEventListener("keydown", onHotkey);
   await Promise.all([loadAvailableSites(), loadDownloaders(), loadSiteCategories()]);
   // 尝试从缓存加载
   loadFromCache();
 });
+
+onUnmounted(() => window.removeEventListener("keydown", onHotkey));
 
 async function loadAvailableSites() {
   try {
@@ -333,6 +351,9 @@ async function doSearch() {
     const validSelected = selectedSites.value.filter((s) => availableSites.value.includes(s));
     selectedSites.value = validSelected;
     const sitesToSearch = validSelected.length > 0 ? validSelected : availableSites.value;
+    // 画板 bar-88 的 note 是「8 / 14 站点已返回」，分母得是这次真的问了多少站，
+    // 不能拿当前选择去算 —— 搜完再改选择那行字就会跟着变。
+    askedSiteCount.value = sitesToSearch.length;
     const req: MultiSiteSearchRequest = {
       keyword: searchKeyword.value.trim(),
       sites: sitesToSearch,
@@ -861,19 +882,19 @@ function discountTone(torrent: SearchTorrentItem): "ok" | "warn" | "dang" | "neu
 }
 
 /**
- * 画板 head 的 sub —— 标题下面那行实时摘要（11.5/400 t3）。
+ * 画板 bar-88 右端那行 note（11/400 t3）：「8 / 14 站点已返回 · 2 站超时」。
  *
- * 这一页的口径就是「这次搜索的战果」：命中数、有结果的站点数、耗时，失败站点补在末尾。
- * 还没搜过时返回空串（外壳里那一行 :empty 会自己收起来），不摆占位文案。
+ * 多站点聚合搜索里最该先说的不是命中多少条（gfoot 已经在说），而是**这份结果有多全**：
+ * 14 个站问了 8 个回来，剩下 6 个是超时还是失败，直接决定用户要不要重搜。
+ * 还没搜过时返回空串，不摆占位文案。
  */
-const headSub = computed(() => {
+const barNote = computed(() => {
   if (!searchedKeyword.value) return "";
   if (loading.value) return `正在搜索「${searchedKeyword.value}」`;
-  const hitSites = Object.values(siteResultCounts.value).filter((n) => n > 0).length;
-  const parts = [`命中 ${totalResults.value} 条`];
-  if (hitSites > 0) parts.push(`来自 ${hitSites} 个站点`);
-  parts.push(`耗时 ${searchTime.value} ms`);
-  if (searchErrors.value.length > 0) parts.push(`${searchErrors.value.length} 个站点失败`);
+  const asked = askedSiteCount.value;
+  if (asked === 0) return "";
+  const parts = [`${asked - searchErrors.value.length} / ${asked} 站点已返回`];
+  if (searchErrors.value.length > 0) parts.push(`${searchErrors.value.length} 站失败`);
   return parts.join(" · ");
 });
 
@@ -896,40 +917,39 @@ const footNote = computed(() => {
 
 <template>
   <div class="search-page">
-    <!-- 画板 head 的 sub：这次搜索的命中数与耗时，由本页把真实数字送进外壳页头 -->
-    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <!--
+      画板 15 的主区顶上是 search-head（328,0 1112×88），装的不是标题加摘要，
+      而是这一页自己的主控件：上排 38 高的查询框（720 宽）+ 74 宽的搜索按钮，
+      下排 24 高的筛选 chip 加一行提示。App.vue 的 OWN_TOP_ROUTES 已经让外壳
+      对本路由不画 .pt-head，所以页头由页面自己出。
+    -->
+    <header class="pt-band--head">
+      <div class="pt-band__row pt-band__row--query">
+        <el-input
+          ref="queryRef"
+          v-model="searchKeyword"
+          placeholder="输入关键词，回车即搜"
+          clearable
+          @keyup.enter="doSearch">
+          <template #prefix>
+            <PtIcon name="search" :size="15" />
+          </template>
+          <!-- 画板 kbd 34×20：快捷键提示紧贴在框内右侧 -->
+          <template #suffix>
+            <span class="pt-kbd">⌘K</span>
+          </template>
+        </el-input>
+        <el-button type="primary" :loading="loading" @click="doSearch">
+          <PtIcon v-if="!loading" name="search" :size="15" /><span>搜索</span>
+        </el-button>
+      </div>
 
-    <!-- 表格带：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
-    <div v-loading="loading" class="pt-band--grid" element-loading-text="正在聚合多站点搜索结果...">
       <!--
-        工具栏带 —— 画板 bar-88（40 高）：这里只留筛选类控件（站点、排序、方向、分类 chip），
-        右侧一个 28×28 图标钮。关键词与主搜索按钮按 search-head 的落法进页头。
+        画板 facet-0..3：站点 / 类型 / 排序 / 仅免费。本项目没有跨站统一的「类型」
+        与「仅免费」口径（分类是各站自己的，见工具栏里的分类 chip），所以这一排落的是
+        站点、排序、方向三个真的有数据支撑的筛选。
       -->
-      <PtToolbar band>
-        <!--
-          关键词 + 搜索。桌面送进页头 —— 画板 15 的 head 之所以是 88 高，就是因为
-          搜索条长在页头里。移动端外壳把整条页头藏了（shell.css ≤768 时 .pt-head 是
-          display:none），所以这里用 Teleport 的 disabled 让同一段控件原地落回工具栏，
-          否则手机上连搜索入口都没有。
-        -->
-        <Teleport to="#pt-head-acts" :disabled="isMobile">
-          <div class="hsearch">
-            <el-input
-              v-model="searchKeyword"
-              class="hsearch__kw"
-              placeholder="输入关键词，回车即搜"
-              clearable
-              @keyup.enter="doSearch">
-              <template #prefix>
-                <PtIcon name="search" :size="14" />
-              </template>
-            </el-input>
-            <el-button type="primary" :loading="loading" @click="doSearch">
-              <PtIcon v-if="!loading" name="search" :size="15" /><span>搜索</span>
-            </el-button>
-          </div>
-        </Teleport>
-
+      <div class="pt-band__row pt-band__row--facet">
         <!-- 站点多选：不选 = 搜全部，占位符直接把「全部 N 个站点」说出来，省掉一个标签 -->
         <el-tooltip
           :content="
@@ -986,74 +1006,86 @@ const footNote = computed(() => {
           <span>{{ orderDesc ? "降序" : "升序" }}</span>
         </el-button>
 
-        <!-- 支持分类的站点各给一枚 chip（画板 chip 24 高），按钮上带已选条数 -->
-        <template v-for="siteId in selectedSites" :key="siteId">
-          <el-popover
-            v-if="siteHasCategories(siteId)"
-            placement="bottom-start"
-            :width="400"
-            trigger="click">
-            <template #reference>
+        <!-- 画板 hint 11/400 t4：把这一页的两条操作前提说清楚 -->
+        <span class="pt-band__hint">⌘K 聚焦 · Enter 搜索 · 站点超时不阻塞其余结果</span>
+      </div>
+    </header>
+
+    <!--
+      工具栏带 —— 画板 bar-88（40 高）。它是表格带的**兄弟**，不能套在 .pt-band--grid
+      里面：套进去就变成表格内部的一行，和画板上那条独立的带不是一回事。
+    -->
+    <PtToolbar band>
+      <!-- 支持分类的站点各给一枚 chip（画板 chip 24 高），按钮上带已选条数 -->
+      <template v-for="siteId in selectedSites" :key="siteId">
+        <el-popover
+          v-if="siteHasCategories(siteId)"
+          placement="bottom-start"
+          :width="400"
+          trigger="click">
+          <template #reference>
+            <el-button size="small" :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'">
+              <PtIcon name="list-filter" :size="14" />
+              <span>{{ siteId }}</span>
+              <span v-if="getSiteFilterCount(siteId) > 0" class="cats__n">
+                {{ getSiteFilterCount(siteId) }}
+              </span>
+            </el-button>
+          </template>
+          <div class="cat">
+            <div class="cat__head">
+              <span class="cat__title">
+                {{ getSiteCategoriesConfig(siteId)?.site_name || siteId }} 分类筛选
+              </span>
               <el-button
+                v-if="getSiteFilterCount(siteId) > 0"
+                link
+                type="danger"
                 size="small"
-                :type="getSiteFilterCount(siteId) > 0 ? 'primary' : 'default'">
-                <PtIcon name="list-filter" :size="14" />
-                <span>{{ siteId }}</span>
-                <span v-if="getSiteFilterCount(siteId) > 0" class="cats__n">
-                  {{ getSiteFilterCount(siteId) }}
-                </span>
+                @click="clearSiteCategoryFilters(siteId)">
+                <PtIcon name="x" :size="13" /><span>清除</span>
               </el-button>
-            </template>
-            <div class="cat">
-              <div class="cat__head">
-                <span class="cat__title">
-                  {{ getSiteCategoriesConfig(siteId)?.site_name || siteId }} 分类筛选
-                </span>
-                <el-button
-                  v-if="getSiteFilterCount(siteId) > 0"
-                  link
-                  type="danger"
-                  size="small"
-                  @click="clearSiteCategoryFilters(siteId)">
-                  <PtIcon name="x" :size="13" /><span>清除</span>
-                </el-button>
-              </div>
-              <el-form label-position="top" class="pt-form">
-                <el-form-item
-                  v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
-                  :key="category.key"
-                  :label="category.name">
-                  <el-select
-                    :model-value="selectedCategoryFilters[siteId]?.[category.key]"
-                    placeholder="全部"
-                    clearable
-                    style="width: 100%"
-                    @update:model-value="updateSiteCategoryFilter(siteId, category.key, $event)">
-                    <el-option
-                      v-for="opt in category.options"
-                      :key="opt.value"
-                      :label="opt.name"
-                      :value="opt.value" />
-                  </el-select>
-                </el-form-item>
-              </el-form>
             </div>
-          </el-popover>
-        </template>
+            <el-form label-position="top" class="pt-form">
+              <el-form-item
+                v-for="category in getSiteCategoriesConfig(siteId)?.categories || []"
+                :key="category.key"
+                :label="category.name">
+                <el-select
+                  :model-value="selectedCategoryFilters[siteId]?.[category.key]"
+                  placeholder="全部"
+                  clearable
+                  style="width: 100%"
+                  @update:model-value="updateSiteCategoryFilter(siteId, category.key, $event)">
+                  <el-option
+                    v-for="opt in category.options"
+                    :key="opt.value"
+                    :label="opt.name"
+                    :value="opt.value" />
+                </el-select>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-popover>
+      </template>
 
-        <template #right>
-          <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="bottom">
-            <button
-              type="button"
-              class="pt-band__iconbtn"
-              aria-label="清除搜索缓存"
-              @click="clearCache">
-              <PtIcon name="rotate-ccw" :size="15" />
-            </button>
-          </el-tooltip>
-        </template>
-      </PtToolbar>
+      <template #right>
+        <!-- 画板 note：这份结果有多全，比命中多少条更该先说 -->
+        <span v-if="barNote" class="pt-band__note">{{ barNote }}</span>
+        <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="bottom">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="清除搜索缓存"
+            @click="clearCache">
+            <PtIcon name="rotate-ccw" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
+    </PtToolbar>
 
+    <!-- 表格带：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
+    <div v-loading="loading" class="pt-band--grid" element-loading-text="正在聚合多站点搜索结果...">
       <!--
         部分失败（§5 的 partial）：还有结果可看时不能用一整块状态图顶掉列表 ——
         那等于把已经拿到的数据也藏了。所以有结果时在结果上方挂这条提示，
@@ -1516,34 +1548,11 @@ const footNote = computed(() => {
 }
 
 /*
- * 关键词 + 搜索按钮。桌面落在页头右侧（画板 search-head 里的那条搜索条），
- * 手机上原地落回工具栏，所以宽度在断点里换成弹性的。
+ * 页头下排的三枚筛选 chip（画板 facet-0..3 是 24 高）。高度与底色由 atoms.css 的
+ * `.pt-band__row--facet` 统管，这里只定宽度：站点是多选，收窄了会只剩一个 +N。
  */
-.hsearch {
-  display: flex;
-  gap: var(--pt-space-2);
-  align-items: center;
-  min-width: 0;
-}
-
-.hsearch__kw {
-  width: 260px;
-}
-
-/* 画板：页头里的控件高 32 */
-.hsearch__kw :deep(.el-input__wrapper) {
-  height: 32px;
-}
-
-/* 工具栏里的控件按画板的 28 高：Element 默认的 32 会把 40 高的带顶满 */
 .tb__ctl {
   flex: 0 0 auto;
-}
-
-.tb__ctl :deep(.el-select__wrapper) {
-  min-height: 28px;
-  padding: 2px 8px;
-  font-size: var(--pt-fz-sm);
 }
 
 .tb__ctl--sites {
@@ -1555,8 +1564,7 @@ const footNote = computed(() => {
 }
 
 .tb__dir {
-  height: 28px;
-  margin: 0;
+  flex: 0 0 auto;
 }
 
 .site-head {
@@ -1753,16 +1761,7 @@ const footNote = computed(() => {
 }
 
 @media (max-width: 768px) {
-  /* 页头被外壳藏了，搜索那段控件原地落在工具栏里：占满一行，输入框吃掉剩余宽度 */
-  .hsearch {
-    flex: 1 1 100%;
-  }
-
-  .hsearch__kw {
-    flex: 1 1 auto;
-    width: auto;
-  }
-
+  /* 页头带在手机上照样在（它是页面自己的，不是被外壳藏掉的那条），只是要换行 */
   .tb__ctl--sites,
   .tb__ctl--sort {
     width: 140px;

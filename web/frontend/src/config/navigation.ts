@@ -43,7 +43,11 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/search", label: "种子搜索", icon: "search", rail: true },
       { path: "/tasks", label: "任务列表", icon: "list-checks", badge: "tasks", rail: true },
       { path: "/paused", label: "暂停任务", icon: "circle-pause", badge: "paused", rail: true },
-      { path: "/downloader-hub", label: "下载器 Web UI", icon: "app-window", external: true },
+      /*
+       * 画板 18 把控制台画在外壳里（head 64 → bar-64 → 左列 276 / 右 788），
+       * 不再是新标签页里的独立控制台，所以这一项走站内跳转。
+       */
+      { path: "/downloader-hub", label: "下载器 Web UI", icon: "app-window" },
       { path: "/downloaders", label: "下载器设置", icon: "server" },
     ],
   },

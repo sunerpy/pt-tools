@@ -4,7 +4,7 @@ import PtIcon from "@/components/PtIcon";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
-import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useIsMobile } from "@/composables/useIsMobile";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
@@ -20,6 +20,8 @@ const CHANNEL_META: Record<string, { label: string; icon: string; color: string 
 
 const route = useRoute();
 const router = useRouter();
+/* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
+const isMobile = useIsMobile();
 
 const id = computed(() => Number(route.params.id));
 
@@ -52,6 +54,9 @@ const testResult = ref<TestResult | null>(null);
 const testMessage = ref<string>("pt-tools 测试消息");
 
 const currentMeta = computed(() => CHANNEL_META[conf.channel_type] || CHANNEL_META.telegram);
+
+/** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
+const headSub = computed(() => `ID ${conf.id || "-"} · ${currentMeta.value.label}`);
 
 const quietHoursNote = computed(() => {
   const s = conf.quiet_hours_start;
@@ -291,35 +296,43 @@ function goBack() {
 </script>
 
 <template>
-  <div v-loading="loading" class="notify-detail-page">
-    <PtToolbar standalone :note="`ID ${conf.id || '-'}`">
-      <el-button size="small" @click="goBack">
-        <PtIcon name="arrow-left" :size="14" /><span>通道列表</span>
+  <!--
+    画板 23：head 88（详情页的面包屑页头，由外壳给）→ hero 1080×116 → c-basic 1080×262
+    → c-test 1080×250。通道身份落在 hero 卡里，ID 与类型走页头摘要，返回与启用开关
+    是页头右侧的动作。
+  -->
+  <div v-loading="loading" class="notify-detail-page pt-cards pt-cards--wide">
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button @click="goBack">
+        <PtIcon name="arrow-left" :size="15" /><span>通道列表</span>
       </el-button>
-      <span class="ident">
-        <span class="ident__icon" :style="{ '--ch-c': currentMeta.color }">
-          <PtIcon :name="currentMeta.icon" :size="15" />
-        </span>
-        <span class="ident__name">{{ conf.name || "未命名通道" }}</span>
-      </span>
-      <PtTag>{{ currentMeta.label }}</PtTag>
-      <PtStatusPill :tone="conf.enabled ? 'ok' : 'neutral'" size="sm">
-        {{ conf.enabled ? "运行中" : "已停用" }}
-      </PtStatusPill>
+      <!-- 开关直接落库：详情页顶上的这一枚是「上线 / 下线」按钮，不是待保存的表单项 -->
+      <label class="ctl">
+        <el-switch
+          v-model="conf.enabled"
+          :loading="saving"
+          data-testid="enable-switch"
+          @change="handleSaveBasic" />
+        <span>启用通道</span>
+      </label>
+    </Teleport>
 
-      <template #right>
-        <!-- 开关直接落库：详情页顶上的这一枚是「上线 / 下线」按钮，不是待保存的表单项 -->
-        <label class="ctl">
-          <el-switch
-            v-model="conf.enabled"
-            size="small"
-            :loading="saving"
-            data-testid="enable-switch"
-            @change="handleSaveBasic" />
-          <span>启用通道</span>
-        </label>
-      </template>
-    </PtToolbar>
+    <!-- 画板 hero 1080×116：通道身份 —— 色块图标 + 名字 + 类型 + 运行状态 -->
+    <section class="hero">
+      <span class="hero__icon" :style="{ '--ch-c': currentMeta.color }">
+        <PtIcon :name="currentMeta.icon" :size="20" />
+      </span>
+      <div class="hero__body">
+        <h2 class="hero__name">{{ conf.name || "未命名通道" }}</h2>
+        <div class="hero__meta">
+          <PtTag>{{ currentMeta.label }}</PtTag>
+          <PtStatusPill :tone="conf.enabled ? 'ok' : 'neutral'" size="sm">
+            {{ conf.enabled ? "运行中" : "已停用" }}
+          </PtStatusPill>
+        </div>
+      </div>
+    </section>
 
     <PtPanel title="基本信息" icon="settings" padding="none">
       <el-form
@@ -607,41 +620,53 @@ function goBack() {
 </template>
 
 <style scoped>
-.notify-detail-page {
+/* 内缩 16、卡间 16 由 .pt-cards--wide 给；画板这几张卡是 1080 通栏，不是 880 */
+
+/* 画板 hero 1080×116：卡片层的一块，所以和 PtPanel 同一套边框与圆角 */
+.hero {
   display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-4);
-  max-width: 880px;
-}
-
-/* 工具条里的通道身份：一枚色块 + 名字，和列表页卡片的头部同一个写法 */
-.ident {
-  display: inline-flex;
-  gap: var(--pt-space-2);
+  gap: var(--pt-space-3);
   align-items: center;
-  min-width: 0;
+  padding: var(--pt-pad);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-sm);
 }
 
-.ident__icon {
+.hero__icon {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 44px;
+  height: 44px;
   color: var(--ch-c);
   background: color-mix(in srgb, var(--ch-c) 12%, transparent);
-  border-radius: var(--pt-r-sm);
+  border-radius: var(--pt-r-md);
 }
 
-.ident__name {
+.hero__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
+}
+
+.hero__name {
+  margin: 0;
   overflow: hidden;
-  font-size: var(--pt-fz-body);
+  font-size: var(--pt-fz-h3);
   font-weight: 600;
   color: var(--pt-t1);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hero__meta {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
 }
 
 /* 开关 + 文字算一个整体控件，点文字也能切；label 天然带这个行为 */

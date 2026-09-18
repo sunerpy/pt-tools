@@ -314,37 +314,45 @@ function scrollToTop() {
 
 <template>
   <div class="log-viewer-page">
-    <PtPanel title="运行日志" icon="scroll-text" :count="`${logs.length} 行`" padding="none">
-      <template #actions>
-        <PtStatusPill v-if="truncated" tone="warn" size="sm">已截断（最近 5000 行）</PtStatusPill>
+    <!--
+      画板 29 的 bar-64 是一条独立的工具栏带（40 高，贴主区两侧），不是卡片内部的一行。
+      画板左边那一列 300 宽的卡（文件清单 / 级别筛选 / 归档）后端没有对应接口，
+      本页只落画板的 p-tail（日志正文），按通栏卡处理 —— 见设计文档 §5 的偏离记录。
+    -->
+    <PtToolbar band>
+      <el-checkbox v-model="autoScroll">自动滚动</el-checkbox>
+      <el-checkbox v-model="autoRefresh">自动刷新（15s）</el-checkbox>
+
+      <template v-if="logPath" #note>
+        <code class="log-path">{{ logPath }}</code>
       </template>
 
-      <PtToolbar>
-        <el-checkbox v-model="autoScroll">自动滚动</el-checkbox>
-        <el-checkbox v-model="autoRefresh">自动刷新（15s）</el-checkbox>
+      <template #right>
+        <el-button @click="scrollToTop">
+          <PtIcon name="chevron-up" :size="14" /><span>顶部</span>
+        </el-button>
+        <el-button @click="scrollToBottom">
+          <PtIcon name="chevron-down" :size="14" /><span>底部</span>
+        </el-button>
+        <el-button type="primary" :loading="loading" @click="loadLogs">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+      </template>
+    </PtToolbar>
 
-        <template v-if="logPath" #note>
-          <code class="log-path">{{ logPath }}</code>
+    <div class="pt-cards pt-cards--wide">
+      <PtPanel title="运行日志" icon="scroll-text" :count="`${logs.length} 行`" padding="none">
+        <template #actions>
+          <PtStatusPill v-if="truncated" tone="warn" size="sm">
+            已截断（最近 5000 行）
+          </PtStatusPill>
         </template>
 
-        <template #right>
-          <el-button @click="scrollToTop">
-            <PtIcon name="chevron-up" :size="14" /><span>顶部</span>
-          </el-button>
-          <el-button @click="scrollToBottom">
-            <PtIcon name="chevron-down" :size="14" /><span>底部</span>
-          </el-button>
-          <el-button type="primary" :loading="loading" @click="loadLogs">
-            <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-          </el-button>
-        </template>
-      </PtToolbar>
-
-      <div ref="logContainer" class="log-container" @scroll="onLogScroll">
-        <pre
-          v-if="logs.length"
-          class="log-content"
-          :style="{ height: `${logs.length * lineHeight}px` }">
+        <div ref="logContainer" class="log-container" @scroll="onLogScroll">
+          <pre
+            v-if="logs.length"
+            class="log-content"
+            :style="{ height: `${logs.length * lineHeight}px` }">
           <div class="virtual-spacer" :style="{ height: `${topSpacerHeight}px` }"></div>
           <code
             v-for="line in visibleLines"
@@ -353,9 +361,10 @@ function scrollToTop() {
             v-html="line.html || '&nbsp;'" />
           <div class="virtual-spacer" :style="{ height: `${bottomSpacerHeight}px` }"></div>
         </pre>
-        <pre v-else class="log-content"><code class="log-line">暂无日志</code></pre>
-      </div>
-    </PtPanel>
+          <pre v-else class="log-content"><code class="log-line">暂无日志</code></pre>
+        </div>
+      </PtPanel>
+    </div>
   </div>
 </template>
 

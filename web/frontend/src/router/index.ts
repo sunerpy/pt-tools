@@ -113,7 +113,7 @@ const router = createRouter({
       path: "/downloader-hub",
       name: "downloader-hub",
       component: () => import("@/views/DownloaderHub.vue"),
-      meta: { title: "下载器Web UI" },
+      meta: { title: "下载器 Web UI" },
     },
 
     {

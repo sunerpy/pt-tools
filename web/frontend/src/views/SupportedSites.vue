@@ -7,7 +7,11 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, ref } from "vue";
+
+/* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
+const isMobile = useIsMobile();
 
 /** 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有数据」 */
 const { loading, state, errorText, run } = useDataState({
@@ -66,6 +70,15 @@ const totalCount = computed(() => definitions.value.length);
 const filteredCount = computed(() => filtered.value.length);
 const unavailableCount = computed(() => definitions.value.filter((d) => d.unavailable).length);
 
+/** 画板 head 的 sub（11.5/400 t3）：内置了多少站点定义，其中几个临时不可用 */
+const headSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return "站点定义没加载出来";
+  if (totalCount.value === 0) return "";
+  const parts = [`内置 ${totalCount.value} 个站点定义`];
+  if (unavailableCount.value > 0) parts.push(`${unavailableCount.value} 个临时不可用`);
+  return parts.join(" · ");
+});
+
 function authMethodLabel(m?: string): string {
   switch (m) {
     case "cookie":
@@ -102,8 +115,22 @@ function clearFilters() {
 </script>
 
 <template>
+  <!--
+    画板 14：head 64 → bar-64（40）→ 四张卡（548 / 516 两栏）。这页没有表格带，
+    工具栏带是筛选条，卡片是站点定义卡。
+  -->
   <div class="supported-sites-page">
-    <PtToolbar standalone>
+    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="loadDefinitions">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
+      </el-button>
+      <el-button type="primary" @click="$router.push('/sites')">
+        <PtIcon name="settings" :size="15" /><span>站点管理</span>
+      </el-button>
+    </Teleport>
+
+    <PtToolbar band>
       <el-input
         v-model="search"
         placeholder="搜索：名称 / ID / 别名 / 域名"
@@ -124,25 +151,14 @@ function clearFilters() {
         <PtIcon name="x" :size="14" /><span>清空筛选</span>
       </el-button>
 
-      <template #note>
-        显示 {{ filteredCount }} / {{ totalCount }} 个站点
-        <template v-if="unavailableCount > 0">
-          ，其中
-          <span class="unavailable-hint">{{ unavailableCount }} 个临时不可用</span>
-        </template>
-      </template>
-
-      <template #right>
-        <el-button :loading="loading" @click="loadDefinitions">
-          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-        </el-button>
-        <el-button type="primary" @click="$router.push('/sites')">
-          <PtIcon name="settings" :size="14" /><span>站点管理</span>
-        </el-button>
-      </template>
+      <!--
+        「内置多少个 / 几个不可用」已经在页头摘要里，带上只说筛选后还剩多少 ——
+        两份一样的话叠在一起，40 高的带会被文字顶到换行（实测 65 高）。
+      -->
+      <template #note>筛选后 {{ filteredCount }} 个</template>
     </PtToolbar>
 
-    <PtDataState v-if="filtered.length === 0" :state="state" :sub="stateSub">
+    <PtDataState v-if="filtered.length === 0" class="sites-state" :state="state" :sub="stateSub">
       <template v-if="state === 'error'" #action>
         <el-button @click="loadDefinitions">
           <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
@@ -155,7 +171,7 @@ function clearFilters() {
       </template>
     </PtDataState>
 
-    <div v-else class="site-grid">
+    <div v-else class="site-grid pt-cards pt-cards--2">
       <article
         v-for="def in filtered"
         :key="def.id"
@@ -206,10 +222,10 @@ function clearFilters() {
 </template>
 
 <style scoped>
+/* 带与卡片层各自管留白，这一层只负责纵向堆叠 */
 .supported-sites-page {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-4);
 }
 
 .filter-input {
@@ -221,15 +237,11 @@ function clearFilters() {
   width: 180px;
 }
 
-.unavailable-hint {
-  color: var(--pt-dang);
-}
+/* 栏宽与间隔由 .pt-cards--2 给（画板 548 / 516 两栏，1181 以下退回单栏） */
 
-/* 320 下限：站点名 + 不可用胶囊 + 两行简介压在更窄的格子里会连续折行 */
-.site-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: var(--pt-space-4);
+/* 空态不在卡里，自己内缩 16 对齐卡片层 */
+.sites-state {
+  padding: var(--pt-pad);
 }
 
 .site-card {
@@ -337,10 +349,6 @@ function clearFilters() {
   .filter-select {
     max-width: none;
     width: 100%;
-  }
-
-  .site-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>
