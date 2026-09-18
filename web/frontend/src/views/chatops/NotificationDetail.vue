@@ -55,6 +55,23 @@ const testMessage = ref<string>("pt-tools 测试消息");
 
 const currentMeta = computed(() => CHANNEL_META[conf.channel_type] || CHANNEL_META.telegram);
 
+/**
+ * 画板 p-msg 700：这一页会弹的每一种提示。
+ * 每条都对应下面某个 ElMessage 的实参 —— 改文案要两处一起改，别让卡和真实提示对不上。
+ */
+const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; when: string }[] = [
+  { kind: "成功", tone: "ok", text: "保存成功", when: "改完基本信息或凭证并保存" },
+  { kind: "成功", tone: "ok", text: "连接测试成功", when: "「测试连接」拿到 2xx" },
+  { kind: "失败", tone: "dang", text: "保存失败", when: "保存请求非 2xx，后面跟后端的原话" },
+  { kind: "失败", tone: "dang", text: "连接测试失败", when: "测试请求失败，后面跟后端的原话" },
+  {
+    kind: "提示",
+    tone: "warn",
+    text: "凭证留空则保持不变",
+    when: "凭证字段留空保存时 —— 已存的值不会被空串覆盖",
+  },
+];
+
 /** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
 const headSub = computed(() => `ID ${conf.id || "-"} · ${currentMeta.value.label}`);
 
@@ -616,10 +633,57 @@ function goBack() {
         </transition>
       </div>
     </PtPanel>
+
+    <!--
+      画板 p-msg 700「ElMessage 全量文案」—— 这一页会弹出的每一种提示。
+      画板把它列出来是为了让人不必逐个触发就知道各种结果长什么样；这里照原意落地，
+      标题用面向用户的说法。文案与下面各处 ElMessage 的实参一字不差，改一处要改两处。
+    -->
+    <PtPanel class="msg-card" title="操作提示文案" icon="message-square">
+      <ul class="msg">
+        <li v-for="row in toastCopy" :key="row.text" class="msg__row">
+          <PtStatusPill :tone="row.tone" size="sm">{{ row.kind }}</PtStatusPill>
+          <span class="msg__t">{{ row.text }}</span>
+          <span class="msg__when">{{ row.when }}</span>
+        </li>
+      </ul>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
+/* 提示文案卡：一行一条，左胶囊右场景 */
+.msg-card {
+  max-width: 700px;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.msg__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-sm);
+}
+
+.msg__t {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.msg__when {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
 /* 内缩 16、卡间 16 由 .pt-cards--wide 给；画板这几张卡是 1080 通栏，不是 880 */
 
 /* 画板 hero 1080×116：卡片层的一块，所以和 PtPanel 同一套边框与圆角 */

@@ -314,6 +314,8 @@ const HUB_TORRENTS = Array.from({ length: 12 }, (_, i) => ({
 /** 路由（去掉查询串）→ 响应体。第一个前缀命中即用。 */
 export const FIXTURES = [
   ["/api/v2/userinfo/aggregated", AGGREGATED],
+  /* 单站点详情要排在列表之前：前缀匹配第一个命中即用 */
+  ...AGGREGATED.perSiteStats.map((row) => [`/api/v2/userinfo/sites/${row.site}`, row]),
   /* getSites 回的是 UserInfoResponse[]，不是站点名数组 */
   ["/api/v2/userinfo/sites", AGGREGATED.perSiteStats],
   /* getRegisteredSites 回的是 { sites: string[] } */
@@ -326,10 +328,18 @@ export const FIXTURES = [
       site_name: site,
       state: ["ok", "ok", "expiring", "expired"][i % 4],
       probe_mode: "auto",
-      last_probe_at: "2026-09-18T20:00:00Z",
-      expires_at: i % 4 === 2 ? "2026-09-25T00:00:00Z" : "",
-      last_error: i % 4 === 3 ? "302 → /login" : "",
+      /* last_probe_at 是 unix 秒，不是 ISO 串 —— 给成串会让页面印 Invalid Date */
+      last_probe_at: 1758200000 - i * 3600,
+      last_probe_status: i % 4 === 3 ? "fail" : "ok",
+      last_probe_error: i % 4 === 3 ? "302 → /login" : "",
+      consecutive_probe_failures: i % 4 === 3 ? 2 : 0,
+      ban_threshold_days: 30,
       remind_before_days: 7,
+      reminder_cron: "0 9 * * *",
+      notification_channel_ids: [1],
+      last_reminder_tier: "none",
+      days_remaining: [30, 21, 5, 0][i % 4],
+      tier: ["ok", "ok", "warn", "dang"][i % 4],
     })),
   ],
   [

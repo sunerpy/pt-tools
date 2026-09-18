@@ -10,7 +10,12 @@ import {
   type NotificationConfig,
   type RSSConfig,
   type SiteConfig,
+  type SiteLoginState,
   sitesApi,
+  type TaskItem,
+  tasksApi,
+  type UserInfoResponse,
+  userInfoApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -208,6 +213,7 @@ async function loadDetail() {
   filterRules.value = filterRuleList.filter((r) => r.enabled); // 只显示启用的过滤规则
   downloaderDirectories.value = directoriesData;
   availableConfs.value = (confList || []).filter((c) => c.enabled);
+  void loadSideCards();
 }
 
 // 获取指定下载器的目录列表
@@ -522,6 +528,86 @@ const TABS = computed(() => [
   { key: "rss" as const, label: "RSS 订阅", n: (form.value.rss || []).length },
 ]);
 
+/**
+ * 画板 13 右栏是四张常驻卡（p-cred 凭据 / p-keep 保号规则 / p-stat 统计 / p-danger
+ * 危险操作），左栏在 RSS 分区下是三张（p-rss 订阅 / p-push 最近推送 / p-tasks 任务）。
+ * 这里补齐除凭据之外的五张，数据全部来自已有接口：
+ *   保号规则  /api/sites/<name>/login-state（列表接口里筛这一站）
+ *   统计      /api/v2/userinfo/sites/<name>
+ *   任务/推送 /api/tasks?site=<name>[&pushed=1]
+ *   危险操作  /api/sites?name=<name>（删除）
+ */
+/** probe_mode 的取值来自 SiteLoginState，三档：auto / manual / disabled */
+const PROBE_LABEL: Record<string, string> = {
+  auto: "自动探测",
+  manual: "只手动探测",
+  disabled: "不探测",
+};
+
+const loginState = ref<SiteLoginState | null>(null);
+const siteStats = ref<UserInfoResponse | null>(null);
+const siteTasks = ref<TaskItem[]>([]);
+const sitePushed = ref<TaskItem[]>([]);
+const deleting = ref(false);
+
+async function loadSideCards() {
+  const name = siteName.value;
+  const [states, stats, tasks, pushed] = await Promise.all([
+    sitesApi.listLoginStates().catch(() => [] as SiteLoginState[]),
+    userInfoApi.getSite(name).catch(() => null),
+    tasksApi
+      .list(new URLSearchParams({ site: name, page: "1", page_size: "20" }))
+      .catch(() => null),
+    tasksApi
+      .list(new URLSearchParams({ site: name, pushed: "1", page: "1", page_size: "20" }))
+      .catch(() => null),
+  ]);
+  loginState.value = (states ?? []).find((st) => st.site_name === name) ?? null;
+  siteStats.value = stats;
+  siteTasks.value = tasks?.items ?? [];
+  sitePushed.value = pushed?.items ?? [];
+}
+
+/** 危险操作：删掉这个站点的配置。删完回列表页，别停在一个已经不存在的详情上 */
+async function deleteSite() {
+  try {
+    await ElMessageBox.confirm(
+      `删除站点「${siteName.value}」的配置？它的 RSS 订阅、Cookie 与限速设置会一起删掉，` +
+        `已经下载的种子不受影响。`,
+      "确认删除",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  deleting.value = true;
+  try {
+    await sitesApi.delete(siteName.value);
+    ElMessage.success("已删除");
+    router.push("/sites");
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "删除失败");
+  } finally {
+    deleting.value = false;
+  }
+}
+
+function formatWhen(unixSeconds?: number): string {
+  if (typeof unixSeconds !== "number" || !Number.isFinite(unixSeconds) || unixSeconds <= 0) {
+    return "-";
+  }
+  const d = new Date(unixSeconds * 1000);
+  /* 拿到非法值时印「-」而不是 Invalid Date —— 后者看着像功能坏了 */
+  return Number.isNaN(d.getTime()) ? "-" : d.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatTB(bytes?: number): string {
+  if (!bytes) return "-";
+  const tb = bytes / 1024 ** 4;
+  if (tb >= 1) return `${tb.toFixed(2)} TB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
 function downloaderNameOf(id: number | undefined): string {
   if (!id) return "默认";
   return downloaders.value.find((d) => d.id === id)?.name || "未知";
@@ -569,145 +655,270 @@ function ruleNameOf(id: number): string {
       </button>
     </nav>
 
+    <!--
+      画板 13 的卡片层是 700 + 16 + 364 两栏，两栏各自纵向堆卡。
+      必须分成两个容器：直接把 7 张卡丢进两栏栅格，右栏每张卡会去跟左栏那张高卡对行，
+      中间留出大片空白（实测右栏第 2 张卡被推到 680 以下）。
+    -->
     <div class="pt-cards pt-cards--main">
-      <!-- 画板 bn 344,144 700×58：登录状态失效一类的当前告警，压在左栏顶上 -->
-      <div v-if="form.unavailable" class="pt-note pt-note--warn site-bn">
-        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>{{ form.unavailable_reason || "该站点暂时不可用" }}</span>
-      </div>
+      <div class="sd-col">
+        <!-- 画板 bn 344,144 700×58：登录状态失效一类的当前告警，压在左栏顶上 -->
+        <div v-if="form.unavailable" class="pt-note pt-note--warn site-bn">
+          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+          <span>{{ form.unavailable_reason || "该站点暂时不可用" }}</span>
+        </div>
 
-      <PtPanel
-        v-show="tab === 'overview'"
-        v-loading="loading"
-        title="站点配置"
-        icon="sliders-horizontal"
-        padding="none">
-        <PtDataState v-if="loadFailed" :state="state" :sub="errorText">
-          <template v-if="state === 'error'" #action>
-            <el-button size="small" @click="loadDetail">
-              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-            </el-button>
-          </template>
-        </PtDataState>
+        <PtPanel
+          v-show="tab === 'overview'"
+          v-loading="loading"
+          title="站点配置"
+          icon="sliders-horizontal"
+          padding="none">
+          <PtDataState v-if="loadFailed" :state="state" :sub="errorText">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadDetail">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
 
-        <el-form v-else :model="form" label-position="top" class="pt-form settings-form">
-          <div class="pt-strip">
-            <PtIcon name="globe" :size="13" />
-            <span>基本信息</span>
-            <span class="pt-strip__end">{{ authMethodLabel }}</span>
-          </div>
-          <div class="settings-body">
-            <el-form-item label="启用站点">
-              <el-tooltip
-                :content="form.unavailable ? form.unavailable_reason : ''"
-                :disabled="!form.unavailable"
-                placement="top">
-                <span class="sw">
-                  <el-switch v-model="form.enabled" :disabled="form.unavailable" />
-                </span>
-              </el-tooltip>
-              <div class="field-tip">停用后该站点的 RSS 任务与登录探测都会跳过</div>
-            </el-form-item>
-
-            <el-form-item v-if="form.urls && form.urls.length > 0" label="站点地址">
-              <div class="urls">
-                <a v-for="url in form.urls" :key="url" :href="url" target="_blank" rel="noopener">
-                  <PtIcon name="external-link" :size="12" />
-                  <span>{{ url }}</span>
-                </a>
-              </div>
-              <div class="field-tip">地址由内置站点定义提供，切换镜像请更新站点定义</div>
-            </el-form-item>
-          </div>
-
-          <div class="pt-strip">
-            <PtIcon name="gauge" :size="13" />
-            <span>限速与容量</span>
-            <span class="pt-strip__end">0 = 不限制</span>
-          </div>
-          <div class="settings-body">
-            <div class="field-row">
-              <el-form-item label="上传限速（KB/s）">
-                <el-input-number
-                  v-model="form.upload_limit_kbs"
-                  :min="0"
-                  :max="1048576"
-                  :step="128"
-                  controls-position="right"
-                  style="width: 100%" />
-                <div class="field-tip">推送到下载器的每个种子都会套上这个上传上限</div>
+          <el-form v-else :model="form" label-position="top" class="pt-form settings-form">
+            <div class="pt-strip">
+              <PtIcon name="globe" :size="13" />
+              <span>基本信息</span>
+              <span class="pt-strip__end">{{ authMethodLabel }}</span>
+            </div>
+            <div class="settings-body">
+              <el-form-item label="启用站点">
+                <el-tooltip
+                  :content="form.unavailable ? form.unavailable_reason : ''"
+                  :disabled="!form.unavailable"
+                  placement="top">
+                  <span class="sw">
+                    <el-switch v-model="form.enabled" :disabled="form.unavailable" />
+                  </span>
+                </el-tooltip>
+                <div class="field-tip">停用后该站点的 RSS 任务与登录探测都会跳过</div>
               </el-form-item>
-              <el-form-item label="下载限速（KB/s）">
-                <el-input-number
-                  v-model="form.download_limit_kbs"
-                  :min="0"
-                  :max="1048576"
-                  :step="128"
-                  controls-position="right"
-                  style="width: 100%" />
-                <div class="field-tip">同上，0 表示沿用下载器的全局设置</div>
+
+              <el-form-item v-if="form.urls && form.urls.length > 0" label="站点地址">
+                <div class="urls">
+                  <a v-for="url in form.urls" :key="url" :href="url" target="_blank" rel="noopener">
+                    <PtIcon name="external-link" :size="12" />
+                    <span>{{ url }}</span>
+                  </a>
+                </div>
+                <div class="field-tip">地址由内置站点定义提供，切换镜像请更新站点定义</div>
               </el-form-item>
             </div>
-            <el-form-item label="刷流容量上限（GB）">
-              <el-input-number
-                v-model="form.seeding_capacity_gb"
-                :min="0"
-                :step="10"
-                controls-position="right"
-                style="width: 100%" />
-              <div class="field-tip">该站点做种总量到顶后就不再推新种，避免把盘塞满</div>
-            </el-form-item>
-          </div>
-        </el-form>
-      </PtPanel>
 
-      <!--
+            <div class="pt-strip">
+              <PtIcon name="gauge" :size="13" />
+              <span>限速与容量</span>
+              <span class="pt-strip__end">0 = 不限制</span>
+            </div>
+            <div class="settings-body">
+              <div class="field-row">
+                <el-form-item label="上传限速（KB/s）">
+                  <el-input-number
+                    v-model="form.upload_limit_kbs"
+                    :min="0"
+                    :max="1048576"
+                    :step="128"
+                    controls-position="right"
+                    style="width: 100%" />
+                  <div class="field-tip">推送到下载器的每个种子都会套上这个上传上限</div>
+                </el-form-item>
+                <el-form-item label="下载限速（KB/s）">
+                  <el-input-number
+                    v-model="form.download_limit_kbs"
+                    :min="0"
+                    :max="1048576"
+                    :step="128"
+                    controls-position="right"
+                    style="width: 100%" />
+                  <div class="field-tip">同上，0 表示沿用下载器的全局设置</div>
+                </el-form-item>
+              </div>
+              <el-form-item label="刷流容量上限（GB）">
+                <el-input-number
+                  v-model="form.seeding_capacity_gb"
+                  :min="0"
+                  :step="10"
+                  controls-position="right"
+                  style="width: 100%" />
+                <div class="field-tip">该站点做种总量到顶后就不再推新种，避免把盘塞满</div>
+              </el-form-item>
+            </div>
+          </el-form>
+        </PtPanel>
+
+        <PtPanel
+          v-show="tab === 'rss'"
+          class="rss-card"
+          title="RSS 订阅"
+          icon="rss"
+          :count="`${(form.rss || []).length} 条`">
+          <template #actions>
+            <el-button type="primary" size="small" @click="openAddRssDialog">
+              <PtIcon name="plus" :size="14" /><span>添加 RSS</span>
+            </el-button>
+          </template>
+
+          <div class="pt-note pt-note--warn">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>
+              没挂过滤规则时，RSS 订阅<strong>只会自动下载免费种子</strong>。
+              单纯刷流不用配规则；要追剧或抓非免费资源，才需要建规则并关掉「仅免费」。
+            </span>
+          </div>
+
+          <div v-if="showingExamples" class="pt-note">
+            <PtIcon name="info" :size="14" class="pt-note__icon" />
+            <span>下面是示例配置，只作参考、不会被执行。点「添加 RSS」建自己的订阅。</span>
+          </div>
+
+          <div v-if="displayRssList.length > 0" class="rss-grid">
+            <article
+              v-for="(row, $index) in displayRssList"
+              :key="row.id || `${row.url}-${$index}`"
+              class="rss"
+              :class="{ 'is-example': row.is_example }">
+              <header class="rss__head">
+                <span class="rss__name">{{ row.name }}</span>
+                <PtTag v-if="row.is_example">示例</PtTag>
+                <span class="rss__int">
+                  <PtIcon name="timer" :size="12" />
+                  {{ row.interval_minutes }} 分钟
+                </span>
+              </header>
+
+              <el-tooltip :content="row.url" placement="top">
+                <p class="rss__url">{{ row.url }}</p>
+              </el-tooltip>
+
+              <div v-if="row.category || row.tag || row.pause_on_free_end" class="rss__tags">
+                <PtTag v-if="row.category">{{ row.category }}</PtTag>
+                <PtTag v-if="row.tag">{{ row.tag }}</PtTag>
+                <PtStatusPill v-if="row.pause_on_free_end" tone="warn" size="sm">
+                  免费结束暂停
+                </PtStatusPill>
+              </div>
+
+              <dl class="rss__facts">
+                <div class="fact">
+                  <dt>下载器</dt>
+                  <dd>{{ row.is_example ? "默认" : downloaderNameOf(row.downloader_id) }}</dd>
+                </div>
+                <div class="fact">
+                  <dt>下载路径</dt>
+                  <dd>
+                    <el-tooltip
+                      v-if="!row.is_example && row.download_path"
+                      :content="row.download_path"
+                      placement="top">
+                      <span>{{ getPathDisplayName(row.download_path, row.downloader_id) }}</span>
+                    </el-tooltip>
+                    <span v-else>默认</span>
+                  </dd>
+                </div>
+                <div class="fact fact--wide">
+                  <dt>过滤规则</dt>
+                  <dd>
+                    <template
+                      v-if="
+                        !row.is_example && row.filter_rule_ids && row.filter_rule_ids.length > 0
+                      ">
+                      <span class="rules">
+                        <PtTag v-for="ruleId in row.filter_rule_ids.slice(0, 3)" :key="ruleId">
+                          {{ ruleNameOf(ruleId) }}
+                        </PtTag>
+                        <PtTag v-if="row.filter_rule_ids.length > 3">
+                          +{{ row.filter_rule_ids.length - 3 }}
+                        </PtTag>
+                      </span>
+                    </template>
+                    <span v-else-if="row.is_example">无</span>
+                    <span v-else class="only-free">仅免费</span>
+                  </dd>
+                </div>
+              </dl>
+
+              <footer class="rss__acts">
+                <span v-if="row.is_example" class="rss__hint">示例配置不可编辑</span>
+                <template v-else>
+                  <el-button link type="primary" size="small" @click="openEditRssDialog($index)">
+                    <PtIcon name="pencil" :size="14" /><span>编辑</span>
+                  </el-button>
+                  <el-button link type="danger" size="small" @click="deleteRss($index)">
+                    <PtIcon name="trash-2" :size="14" /><span>删除</span>
+                  </el-button>
+                </template>
+              </footer>
+            </article>
+          </div>
+
+          <PtDataState
+            v-else
+            state="empty"
+            title="还没有 RSS 订阅"
+            sub="订阅是自动下载的入口，先加一条 RSS 链接" />
+        </PtPanel>
+
+        <!-- 画板 p-push 700「最近推送」：这个站点已推送的任务 -->
+        <PtPanel
+          v-show="tab === 'rss'"
+          class="rss-card"
+          title="最近推送"
+          icon="send"
+          :count="`${sitePushed.length} 条`">
+          <ul v-if="sitePushed.length > 0" class="sd-list">
+            <li v-for="t in sitePushed.slice(0, 6)" :key="t.id" class="sd-list__row">
+              <span class="sd-list__t">{{ t.title }}</span>
+              <span class="sd-list__m">{{ t.createdAt?.slice(0, 16).replace("T", " ") }}</span>
+            </li>
+          </ul>
+          <p v-else class="sd-empty">这个站点还没有推送成功的任务。</p>
+          <p class="sd-foot">口径是 <code>/api/tasks?site=…&amp;pushed=1</code> 的前 20 条。</p>
+        </PtPanel>
+
+        <!-- 画板 p-tasks 700「任务」：这个站点的全部 RSS 任务 -->
+        <PtPanel
+          v-show="tab === 'rss'"
+          class="rss-card"
+          title="任务"
+          icon="list-checks"
+          :count="`${siteTasks.length} 个`">
+          <ul v-if="siteTasks.length > 0" class="sd-list">
+            <li v-for="t in siteTasks.slice(0, 6)" :key="t.id" class="sd-list__row">
+              <PtStatusPill :tone="t.isPushed ? 'ok' : t.isExpired ? 'neutral' : 'warn'" size="sm">
+                {{ t.isPushed ? "已推送" : t.isExpired ? "已过期" : "待处理" }}
+              </PtStatusPill>
+              <span class="sd-list__t">{{ t.title }}</span>
+            </li>
+          </ul>
+          <p v-else class="sd-empty">这个站点还没有任务记录。</p>
+          <p class="sd-foot">
+            完整列表、批量删除在
+            <el-button link type="primary" @click="router.push('/tasks')">任务列表</el-button>
+            里。
+          </p>
+        </PtPanel>
+      </div>
+
+      <div class="sd-col">
+        <!--
         画板 p-cred 1060,144 364×210「站点凭据」—— 凭据是这一页风险最高的一块，
         画板把它单独放在右栏而不是混在配置表里。它在两个分区下都在（画板 13 的
         激活分区是 RSS 订阅，右栏照样是这张卡）。
       -->
-      <PtPanel class="cred-card" title="站点凭据" icon="key-round">
-        <el-form :model="form" label-position="top" class="pt-form">
-          <div class="cred-kv">
-            <span class="cred-kv__k">认证方式</span>
-            <span class="cred-kv__v">{{ authMethodLabel }}</span>
-          </div>
-          <el-form-item v-if="form.auth_method === 'cookie'" label="Cookie">
-            <div v-if="savedCookieHidden" class="pt-note pt-note--ok cred-note">
-              <PtIcon name="shield" :size="14" class="pt-note__icon" />
-              <span>Cookie 已保存，出于安全原因不会回显；留空保存不会覆盖已存的值</span>
+        <PtPanel class="cred-card" title="站点凭据" icon="key-round">
+          <el-form :model="form" label-position="top" class="pt-form">
+            <div class="cred-kv">
+              <span class="cred-kv__k">认证方式</span>
+              <span class="cred-kv__v">{{ authMethodLabel }}</span>
             </div>
-            <el-input
-              v-model="form.cookie"
-              type="textarea"
-              :rows="3"
-              placeholder="从浏览器开发者工具中获取；已保存 Cookie 时可留空" />
-          </el-form-item>
-
-          <template v-if="form.auth_method === 'api_key'">
-            <el-form-item label="API Key">
-              <el-input
-                v-model="form.api_key"
-                type="password"
-                show-password
-                :placeholder="apiKeyPlaceholder" />
-              <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
-                前往站点「<a
-                  href="https://www.hddolby.com/getrss.php"
-                  target="_blank"
-                  rel="noopener">
-                  控制面板 - RSS 订阅 </a
-                >」页面，复制「本次加密密钥（RssKEY）」
-              </div>
-            </el-form-item>
-            <el-form-item label="API URL">
-              <el-input :model-value="form.api_url" disabled />
-              <div class="field-tip">由站点定义提供，不可修改</div>
-            </el-form-item>
-          </template>
-
-          <template v-if="form.auth_method === 'cookie_and_api_key'">
-            <el-form-item label="Cookie">
+            <el-form-item v-if="form.auth_method === 'cookie'" label="Cookie">
               <div v-if="savedCookieHidden" class="pt-note pt-note--ok cred-note">
                 <PtIcon name="shield" :size="14" class="pt-note__icon" />
                 <span>Cookie 已保存，出于安全原因不会回显；留空保存不会覆盖已存的值</span>
@@ -716,149 +927,161 @@ function ruleNameOf(id: number): string {
                 v-model="form.cookie"
                 type="textarea"
                 :rows="3"
-                placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）；已保存 Cookie 时可留空" />
+                placeholder="从浏览器开发者工具中获取；已保存 Cookie 时可留空" />
             </el-form-item>
-            <el-form-item label="API Key / RSS Key">
+
+            <template v-if="form.auth_method === 'api_key'">
+              <el-form-item label="API Key">
+                <el-input
+                  v-model="form.api_key"
+                  type="password"
+                  show-password
+                  :placeholder="apiKeyPlaceholder" />
+                <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
+                  前往站点「<a
+                    href="https://www.hddolby.com/getrss.php"
+                    target="_blank"
+                    rel="noopener">
+                    控制面板 - RSS 订阅 </a
+                  >」页面，复制「本次加密密钥（RssKEY）」
+                </div>
+              </el-form-item>
+              <el-form-item label="API URL">
+                <el-input :model-value="form.api_url" disabled />
+                <div class="field-tip">由站点定义提供，不可修改</div>
+              </el-form-item>
+            </template>
+
+            <template v-if="form.auth_method === 'cookie_and_api_key'">
+              <el-form-item label="Cookie">
+                <div v-if="savedCookieHidden" class="pt-note pt-note--ok cred-note">
+                  <PtIcon name="shield" :size="14" class="pt-note__icon" />
+                  <span>Cookie 已保存，出于安全原因不会回显；留空保存不会覆盖已存的值</span>
+                </div>
+                <el-input
+                  v-model="form.cookie"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="从浏览器开发者工具中获取（用于获取时魔等信息）；已保存 Cookie 时可留空" />
+              </el-form-item>
+              <el-form-item label="API Key / RSS Key">
+                <el-input
+                  v-model="form.api_key"
+                  type="password"
+                  show-password
+                  :placeholder="apiKeyPlaceholder" />
+                <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
+                  前往站点「<a
+                    href="https://www.hddolby.com/getrss.php"
+                    target="_blank"
+                    rel="noopener">
+                    控制面板 - RSS 订阅 </a
+                  >」页面，复制「本次加密密钥（RssKEY）」
+                </div>
+              </el-form-item>
+              <el-form-item label="API URL">
+                <el-input :model-value="form.api_url" disabled />
+                <div class="field-tip">由站点定义提供，不可修改</div>
+              </el-form-item>
+            </template>
+
+            <el-form-item v-if="form.auth_method === 'passkey'" label="Passkey">
               <el-input
-                v-model="form.api_key"
+                v-model="form.passkey"
                 type="password"
                 show-password
-                :placeholder="apiKeyPlaceholder" />
-              <div v-if="siteName.toLowerCase() === 'hddolby'" class="field-tip">
-                前往站点「<a
-                  href="https://www.hddolby.com/getrss.php"
-                  target="_blank"
-                  rel="noopener">
-                  控制面板 - RSS 订阅 </a
-                >」页面，复制「本次加密密钥（RssKEY）」
-              </div>
+                placeholder="从站点个人设置中获取 Passkey" />
+              <div class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
             </el-form-item>
-            <el-form-item label="API URL">
-              <el-input :model-value="form.api_url" disabled />
-              <div class="field-tip">由站点定义提供，不可修改</div>
-            </el-form-item>
-          </template>
+          </el-form>
+        </PtPanel>
 
-          <el-form-item v-if="form.auth_method === 'passkey'" label="Passkey">
-            <el-input
-              v-model="form.passkey"
-              type="password"
-              show-password
-              placeholder="从站点个人设置中获取 Passkey" />
-            <div class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
-          </el-form-item>
-        </el-form>
-      </PtPanel>
-
-      <PtPanel
-        v-show="tab === 'rss'"
-        class="rss-card"
-        title="RSS 订阅"
-        icon="rss"
-        :count="`${(form.rss || []).length} 条`">
-        <template #actions>
-          <el-button type="primary" size="small" @click="openAddRssDialog">
-            <PtIcon name="plus" :size="14" /><span>添加 RSS</span>
-          </el-button>
-        </template>
-
-        <div class="pt-note pt-note--warn">
-          <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-          <span>
-            没挂过滤规则时，RSS 订阅<strong>只会自动下载免费种子</strong>。
-            单纯刷流不用配规则；要追剧或抓非免费资源，才需要建规则并关掉「仅免费」。
-          </span>
-        </div>
-
-        <div v-if="showingExamples" class="pt-note">
-          <PtIcon name="info" :size="14" class="pt-note__icon" />
-          <span>下面是示例配置，只作参考、不会被执行。点「添加 RSS」建自己的订阅。</span>
-        </div>
-
-        <div v-if="displayRssList.length > 0" class="rss-grid">
-          <article
-            v-for="(row, $index) in displayRssList"
-            :key="row.id || `${row.url}-${$index}`"
-            class="rss"
-            :class="{ 'is-example': row.is_example }">
-            <header class="rss__head">
-              <span class="rss__name">{{ row.name }}</span>
-              <PtTag v-if="row.is_example">示例</PtTag>
-              <span class="rss__int">
-                <PtIcon name="timer" :size="12" />
-                {{ row.interval_minutes }} 分钟
+        <!-- 画板 p-keep 364「保号规则」：探测模式与提醒阈值，来自 login-state -->
+        <PtPanel class="cred-card" title="保号规则" icon="bell-ring">
+          <ul v-if="loginState" class="sd-kv">
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">探测模式</span>
+              <span class="sd-kv__v">{{
+                PROBE_LABEL[loginState.probe_mode] ?? loginState.probe_mode
+              }}</span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">封号阈值</span>
+              <span class="sd-kv__v">
+                {{
+                  loginState.ban_threshold_days ? `${loginState.ban_threshold_days} 天不活跃` : "-"
+                }}
               </span>
-            </header>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">提前提醒</span>
+              <span class="sd-kv__v">
+                {{ loginState.remind_before_days ? `${loginState.remind_before_days} 天` : "-" }}
+              </span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">剩余天数</span>
+              <span class="sd-kv__v" :class="{ 'is-warn': (loginState.days_remaining ?? 99) <= 7 }">
+                {{
+                  loginState.days_remaining === undefined ? "-" : `${loginState.days_remaining} 天`
+                }}
+              </span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">最近探测</span>
+              <span class="sd-kv__v">{{ formatWhen(loginState.last_probe_at) }}</span>
+            </li>
+          </ul>
+          <p v-else class="sd-empty">还没有这个站点的探测记录。</p>
+          <p class="sd-foot">
+            阈值与提醒在站点列表页按站点配置；这里只回显，避免同一份配置两个写入口。
+          </p>
+        </PtPanel>
 
-            <el-tooltip :content="row.url" placement="top">
-              <p class="rss__url">{{ row.url }}</p>
-            </el-tooltip>
+        <!-- 画板 p-stat 364「统计」：这个站点的用户数据 -->
+        <PtPanel class="cred-card" title="站点统计" icon="gauge">
+          <ul v-if="siteStats" class="sd-kv">
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">等级</span>
+              <span class="sd-kv__v">{{ siteStats.levelName || siteStats.rank || "-" }}</span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">上传 / 下载</span>
+              <span class="sd-kv__v">
+                {{ formatTB(siteStats.uploaded) }} / {{ formatTB(siteStats.downloaded) }}
+              </span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">分享率</span>
+              <span
+                class="sd-kv__v"
+                :class="{ 'is-warn': (siteStats.ratio ?? 0) > 0 && (siteStats.ratio ?? 0) < 1 }">
+                {{ (siteStats.ratio ?? 0).toFixed(2) }}
+              </span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">做种</span>
+              <span class="sd-kv__v">{{ siteStats.seeding }}</span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">更新于</span>
+              <span class="sd-kv__v">{{ formatWhen(siteStats.lastUpdate) }}</span>
+            </li>
+          </ul>
+          <p v-else class="sd-empty">还没有同步过这个站点的用户数据。</p>
+        </PtPanel>
 
-            <div v-if="row.category || row.tag || row.pause_on_free_end" class="rss__tags">
-              <PtTag v-if="row.category">{{ row.category }}</PtTag>
-              <PtTag v-if="row.tag">{{ row.tag }}</PtTag>
-              <PtStatusPill v-if="row.pause_on_free_end" tone="warn" size="sm">
-                免费结束暂停
-              </PtStatusPill>
-            </div>
-
-            <dl class="rss__facts">
-              <div class="fact">
-                <dt>下载器</dt>
-                <dd>{{ row.is_example ? "默认" : downloaderNameOf(row.downloader_id) }}</dd>
-              </div>
-              <div class="fact">
-                <dt>下载路径</dt>
-                <dd>
-                  <el-tooltip
-                    v-if="!row.is_example && row.download_path"
-                    :content="row.download_path"
-                    placement="top">
-                    <span>{{ getPathDisplayName(row.download_path, row.downloader_id) }}</span>
-                  </el-tooltip>
-                  <span v-else>默认</span>
-                </dd>
-              </div>
-              <div class="fact fact--wide">
-                <dt>过滤规则</dt>
-                <dd>
-                  <template
-                    v-if="!row.is_example && row.filter_rule_ids && row.filter_rule_ids.length > 0">
-                    <span class="rules">
-                      <PtTag v-for="ruleId in row.filter_rule_ids.slice(0, 3)" :key="ruleId">
-                        {{ ruleNameOf(ruleId) }}
-                      </PtTag>
-                      <PtTag v-if="row.filter_rule_ids.length > 3">
-                        +{{ row.filter_rule_ids.length - 3 }}
-                      </PtTag>
-                    </span>
-                  </template>
-                  <span v-else-if="row.is_example">无</span>
-                  <span v-else class="only-free">仅免费</span>
-                </dd>
-              </div>
-            </dl>
-
-            <footer class="rss__acts">
-              <span v-if="row.is_example" class="rss__hint">示例配置不可编辑</span>
-              <template v-else>
-                <el-button link type="primary" size="small" @click="openEditRssDialog($index)">
-                  <PtIcon name="pencil" :size="14" /><span>编辑</span>
-                </el-button>
-                <el-button link type="danger" size="small" @click="deleteRss($index)">
-                  <PtIcon name="trash-2" :size="14" /><span>删除</span>
-                </el-button>
-              </template>
-            </footer>
-          </article>
-        </div>
-
-        <PtDataState
-          v-else
-          state="empty"
-          title="还没有 RSS 订阅"
-          sub="订阅是自动下载的入口，先加一条 RSS 链接" />
-      </PtPanel>
+        <!-- 画板 p-danger 364「危险操作」 -->
+        <PtPanel class="cred-card" title="危险操作" icon="triangle-alert">
+          <p class="sd-danger__p">
+            删除这个站点的配置：它的 RSS 订阅、Cookie / API Key 与限速设置会一起删掉。
+            <strong>已经下载的种子和下载器里的任务不受影响。</strong>
+          </p>
+          <el-button type="danger" plain :loading="deleting" @click="deleteSite">
+            <PtIcon name="trash-2" :size="15" /><span>删除站点配置</span>
+          </el-button>
+        </PtPanel>
+      </div>
     </div>
 
     <el-dialog
@@ -1207,21 +1430,117 @@ function ruleNameOf(id: number): string {
   grid-column: 1 / -1;
 }
 
-@media (min-width: 1181px) {
-  .settings-form,
-  .rss-card {
-    grid-column: 1;
-  }
+/*
+ * 卡的宽度由所在栏容器给。这里刻意**不**写 align-self: start ——
+ * 在 flex 列里那句的意思是「按内容收缩」（交叉轴是横向），
+ * 内容短的那张卡（站点统计）会缩成 217 宽而不是跟着栏走 364。
+ */
 
-  /*
-   * 不写 grid-row：让它跟当前可见的那张主卡自动落在同一行。
-   * 写死 row 2 的话，bn 不在（站点可用）时主卡在第 1 行，凭据卡却被钉在第 2 行，
-   * 右栏顶上就空出一整张卡的高度。v-show 藏起来的卡是 display:none，不占格。
-   */
-  .cred-card {
-    grid-column: 2;
-    align-self: start;
-  }
+/* 两栏各自纵向堆卡 */
+.sd-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-pad);
+  align-self: start;
+  min-width: 0;
+}
+
+/* 画板 13 右栏三张卡与左栏两张列表卡的共用样式 */
+.sd-kv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sd-kv__row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--pt-fz-sm);
+}
+
+.sd-kv__k {
+  color: var(--pt-t3);
+}
+
+.sd-kv__v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--pt-t1);
+  text-align: right;
+}
+
+.sd-kv__v.is-warn {
+  color: var(--pt-warn);
+}
+
+.sd-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sd-list__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--pt-fz-sm);
+}
+
+.sd-list__t {
+  flex: 1;
+  overflow: hidden;
+  color: var(--pt-t2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sd-list__m {
+  flex: 0 0 auto;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.sd-empty {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.sd-danger__p {
+  margin: 0 0 var(--pt-space-3);
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.sd-foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t4);
+}
+
+.sd-foot code {
+  padding: 1px 4px;
+  font-family: var(--pt-font-mono);
+  background: var(--pt-hover);
+  border-radius: 3px;
+}
+
+.sd-foot :deep(.el-button) {
+  height: auto;
+  padding: 0;
+  font-size: inherit;
+  vertical-align: baseline;
 }
 
 /* 凭据卡顶上的「认证方式」是只读事实，不用做成表单项 */

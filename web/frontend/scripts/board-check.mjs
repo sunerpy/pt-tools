@@ -194,6 +194,18 @@ const EXPECT = {
     tabs: true, // tabs 带 40 高
     cards: [700, 700, 700, 364, 364, 364, 364], // 左列 p-rss/p-push/p-tasks · 右列 p-cred/p-keep/p-stat/p-danger
     minCards: 7, // 画板这一页的卡片张数（数据驱动的卡按下限算）
+    /*
+     * 画板 13 的激活分区是「RSS 订阅」，左栏那三张卡就是这个分区下的内容。
+     * 页面默认停在「概览」，所以先点一下分区带 —— 不点就只能量到右栏。
+     */
+    prepare: `(async () => {
+      const tab = [...document.querySelectorAll('.pt-band__tab')]
+        .find((b) => b.textContent.includes('RSS'));
+      if (!tab) return 'no-tab';
+      tab.click();
+      await new Promise((r) => setTimeout(r, 400));
+      return 'switched';
+    })()`,
   },
 };
 

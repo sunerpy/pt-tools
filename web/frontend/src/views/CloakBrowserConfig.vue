@@ -26,6 +26,54 @@ const resultTone = computed<"ok" | "warn" | "dang">(() => {
   return "dang";
 });
 
+/**
+ * 画板 p-life 1080「页面状态」：这一页可能处在哪几种状态、各自下一步做什么。
+ * 判定只用本页已有的事实（端点填了没、token 存了没、测过没、测的结果），不猜后端。
+ */
+const pageStates = computed(() => {
+  const hasEndpoint = Boolean(config.value.endpoint.trim());
+  const hasToken = config.value.has_token || Boolean(tokenInput.value.trim());
+  const tested = testResult.value !== null;
+  const ok = testResult.value?.category === "success";
+  return [
+    {
+      key: "unset",
+      label: "未配置",
+      desc: "端点还是空的，CloakBrowser 完全没参与探测。",
+      active: !hasEndpoint,
+      next: "填 Manager 端点，再填 auth token。",
+    },
+    {
+      key: "no-token",
+      label: "缺 token",
+      desc: "端点填了但没存过 token，Manager 会返回 401。",
+      active: hasEndpoint && !hasToken,
+      next: "用 openssl rand -hex 32 生成一个，填进去保存。",
+    },
+    {
+      key: "untested",
+      label: "已配置未测试",
+      desc: "端点与 token 都有了，但还没验证过能不能连上。",
+      active: hasEndpoint && hasToken && !tested,
+      next: "点「测试连接」确认一次。",
+    },
+    {
+      key: "fail",
+      label: "测试不通",
+      desc: "最近一次测试没通过，右边那张卡写着分类与原话。",
+      active: tested && !ok,
+      next: "按分类排查：DNS / 端口 / token / 版本。",
+    },
+    {
+      key: "ok",
+      label: "连通",
+      desc: "最近一次测试通过，Manager 版本也拿到了。",
+      active: tested && ok,
+      next: "无需动作。",
+    },
+  ];
+});
+
 const RESULT_ICONS: Record<"ok" | "warn" | "dang", string> = {
   ok: "circle-check",
   warn: "triangle-alert",
@@ -214,11 +262,111 @@ async function save() {
       </p>
       <p class="res__foot">后端不保存探测历史，这张卡只反映最近一次手动测试。</p>
     </PtPanel>
+
+    <!--
+      画板 p-life 1080「页面状态」：这一页的几种状态与各自的下一步。
+      判定只用本页已有的事实，不猜后端。
+    -->
+    <PtPanel class="pt-cards__full" title="页面状态" icon="workflow">
+      <ul class="life">
+        <li
+          v-for="st in pageStates"
+          :key="st.key"
+          class="life__row"
+          :class="{ 'is-on': st.active }">
+          <span class="life__dot" />
+          <div class="life__body">
+            <span class="life__k">
+              {{ st.label }}
+              <span v-if="st.active" class="life__now">当前</span>
+            </span>
+            <span class="life__d">{{ st.desc }}</span>
+            <span class="life__n">下一步：{{ st.next }}</span>
+          </div>
+        </li>
+      </ul>
+      <p class="res__foot">
+        CloakBrowser 的 schema 驱动在 <code>internal/cloakdriver/&lt;schema&gt;/</code> 下，
+        但登录探测的 CloakTransport 目前仍是占位实现 —— 也就是说这一页配好之后，
+        探测链路还没接上，连通性测试通过只代表 Manager 能连上。
+      </p>
+    </PtPanel>
   </div>
 </template>
 
 <style scoped>
 /* 内缩 16 与卡间 16 由 .pt-cards--wide 给；画板这几块是 1080 通栏，不是 640 */
+
+/* 页面状态卡：一列状态，当前那条高亮 */
+.life {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--pt-pad);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.life__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  padding: 10px 12px;
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-md);
+}
+
+.life__row.is-on {
+  background: var(--pt-p-soft);
+}
+
+.life__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  background: var(--pt-t4);
+  border-radius: 50%;
+}
+
+.life__row.is-on .life__dot {
+  background: var(--pt-p);
+}
+
+.life__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.life__k {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.life__now {
+  padding: 0 5px;
+  font-size: var(--pt-fz-foot);
+  font-weight: 500;
+  color: var(--pt-p);
+  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  border-radius: var(--pt-r-sm);
+}
+
+.life__d,
+.life__n {
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.life__n {
+  color: var(--pt-t3);
+}
 
 /* 右栏窄卡自己顶对齐，别被左边那张高卡拉长 */
 .res-card {
