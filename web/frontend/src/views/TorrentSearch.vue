@@ -25,6 +25,12 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { bucketOf, CATEGORY_OPTIONS, type CategoryBucket, categoryLabel } from "@/utils/category";
+import {
+  loadSavedSearches,
+  SAVED_MAX,
+  type SavedSearch,
+  writeSavedSearches,
+} from "@/utils/savedSearch";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
@@ -187,64 +193,19 @@ function rememberSearch(keyword: string, hits: number, ms: number) {
  * 存的是「关键词 + 站点 + 排序 + 方向 + 分类 + 仅免费」这一组条件，不存结果本体；
  * 点一下就把条件恢复并重搜。同样只落 localStorage，后端没有这份数据。
  */
-const SAVED_KEY = "pt-tools-search-saved-v2";
-/** v1 存的是站点原始分类名；v2 存桶 ID。读到 v1 就归一次桶再写进 v2 */
-const SAVED_KEY_V1 = "pt-tools-search-saved-v1";
-const SAVED_MAX = 12;
-
-interface SavedSearch {
-  name: string;
-  keyword: string;
-  sites: string[];
-  sortBy: string;
-  orderDesc: boolean;
-  /** v2 起是桶 ID（movie/tv/anime/music），空串表示不限 */
-  category: CategoryBucket;
-  freeOnly: boolean;
-}
-
-const savedSearches = ref<SavedSearch[]>(loadSaved());
-
 /**
- * 读已保存的搜索。
+ * 「保存搜索」的读写与 v1→v2 迁移都在 `@/utils/savedSearch` 里。
  *
- * v1 → v2 迁移是必须的：v1 的 category 存的是站点原始分类名（「电影/HD」这种），
- * 而筛选现在拿桶 ID 比较 —— 不迁移的话旧条目点开就是零结果，而且看不出为什么。
+ * 刻意不在这里写迁移：曾经写成 `ref(loadSaved())`，而 loadSaved 内部又去赋值那个
+ * 还在 TDZ 的 ref —— 本地存着 v1 数据的用户一进这一页就 ReferenceError、整页白屏，
+ * 而全新浏览器状态下这条路径根本不执行，验收也就照样全绿。
+ * 现在初值是纯函数的返回值，写入是显式调用，没有自引用的机会。
  */
-function loadSaved(): SavedSearch[] {
-  const fromV2 = readList(SAVED_KEY);
-  if (fromV2.length > 0) return fromV2;
-
-  const legacy = readList(SAVED_KEY_V1);
-  if (legacy.length === 0) return [];
-  const migrated = legacy.map((item) => ({ ...item, category: bucketOf(item.category) }));
-  persistSaved(migrated);
-  try {
-    localStorage.removeItem(SAVED_KEY_V1);
-  } catch {
-    /* 删不掉也无所谓：v2 有值之后就不会再读 v1 */
-  }
-  return migrated;
-}
-
-function readList(key: string): SavedSearch[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.slice(0, SAVED_MAX) : [];
-  } catch {
-    return [];
-  }
-}
+const savedSearches = ref<SavedSearch[]>(loadSavedSearches());
 
 function persistSaved(list: SavedSearch[]) {
   savedSearches.value = list;
-  try {
-    localStorage.setItem(SAVED_KEY, JSON.stringify(list));
-  } catch {
-    /* 隐私模式写不进去，本次会话内仍可用 */
-  }
+  writeSavedSearches(list);
 }
 
 function saveCurrentSearch() {
@@ -1104,6 +1065,18 @@ function discountTone(torrent: SearchTorrentItem): "ok" | "warn" | "dang" | "neu
  * 14 个站问了 8 个回来，剩下 6 个是超时还是失败，直接决定用户要不要重搜。
  * 还没搜过时返回空串，不摆占位文案。
  */
+/**
+ * 卡片层要不要出现。
+ * 三样任一有内容就出现 —— 漏掉「已保存的搜索」会让它在没搜过的情况下永远看不见，
+ * 而那正是用户打开这一页想先看一眼的东西（实测：铺了保存项、不搜索，卡片层是空的）。
+ */
+const hasResultCards = computed(
+  () =>
+    Object.keys(siteResultCounts.value).length > 0 ||
+    searchHistory.value.length > 0 ||
+    savedSearches.value.length > 0,
+);
+
 /** p-sites：各站点命中多少条 */
 const siteHitRows = computed<BreakdownRow[]>(() =>
   Object.entries(siteResultCounts.value)
@@ -1680,9 +1653,7 @@ const footNote = computed(() => {
       画板 15 的分析卡：p-sites 548（站点命中）/ p-alt 516（没返回的站点）两栏
       + p-hist 1080（搜索历史）通栏。三张都用已经在手的数据，不额外请求。
     -->
-    <div
-      v-if="Object.keys(siteResultCounts).length > 0 || searchHistory.length > 0"
-      class="pt-cards pt-cards--2">
+    <div v-if="hasResultCards" class="pt-cards pt-cards--2">
       <PtPanel
         title="站点命中"
         icon="layers"

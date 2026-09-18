@@ -398,6 +398,14 @@ node web/frontend/scripts/board-check.mjs http://127.0.0.1:18260
 五个固定桶的设计本身就是这个含义。要改成「按各站真实分类动态出档位」，
 那是设计决定，改画板即可，代码这边换一行。
 
+### 一处既有的驱动缺口（不是版面问题）
+
+搜索页那五个固定分类档位靠 `src/utils/category.ts` 把各站分类名归桶，规则按
+`mteamCategoryMap`（M-Team）与 `getCategoryName`（HDDolby）真实会回的值写，有单测钉住。
+但 **Gazelle 驱动本身不填 `Category`**（`site/v2/gazelle_driver.go` 的 `ParseSearch`），
+所以走 Gazelle 的站点（内置的 MooKo）在选中具体档位时结果会被筛掉 —— 它们的分类是空的。
+这是驱动的既有缺口，不是这次版面改动带来的；要修得在 Gazelle 的搜索解析里补上分类字段。
+
 ### 验收覆盖了什么
 
 `board-check.mjs` 逐路由检查：无横向溢出、无未解析组件（HTMLUnknownElement）、

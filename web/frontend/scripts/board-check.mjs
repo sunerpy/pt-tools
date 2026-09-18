@@ -75,7 +75,16 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080], // p-sites / p-alt / p-hist
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["站点命中", "没返回的站点", "搜索历史"],
+    titles: ["站点命中", "没返回的站点", "搜索历史", "已保存的搜索"],
+    /*
+     * 铺一条 v1 格式的「保存搜索」：它的 category 存的是站点原始分类名，
+     * 读取时要被迁移成桶 ID。这条分支只有老用户才会走到，必须显式铺出来。
+     */
+    seed: `localStorage.setItem(
+      'pt-tools-search-saved-v1',
+      JSON.stringify([{ name: 'Dune', keyword: 'Dune', sites: [], sortBy: 'seeders',
+        orderDesc: true, category: '电影/HD', freeOnly: false }]),
+    )`,
     needsSeg: true, // 画板 bar-88 的分类分段
     /* 画板 bar-88 的五个固定档位 + search-head 的 go/ha-0/ha-1 + chip-1 */
     controls: ["搜索", "保存搜索", "最近搜索", "仅免费", "电影", "剧集", "动漫", "音乐"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
@@ -518,6 +527,12 @@ const gapsUsed = new Set();
 for (const route of routes) {
   const want = EXPECT[route];
   consoleErrors = [];
+  /*
+   * 导航之前先铺状态。localStorage 里的历史数据会走到只有老用户才碰得到的分支
+   * （例如「保存搜索」的 v1→v2 迁移），而每条路由都用全新的 Chrome profile，
+   * 不铺就永远测不到那条路 —— 一次 review 正是从这里找出一个整页白屏的 TDZ。
+   */
+  if (want.seed) await ev(want.seed).catch(() => {});
   await goto(`${BASE}/#${route}`);
   await sleep(2400);
   if (want.prepare) {
