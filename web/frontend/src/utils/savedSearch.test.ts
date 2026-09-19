@@ -104,9 +104,23 @@ describe("loadSavedSearches", () => {
     expect(store.removeItem).not.toHaveBeenCalled();
   });
 
-  it("坏 JSON 当成空，不抛", () => {
-    store = makeStore({ [SAVED_KEY]: "{oops" });
+  it("v2 是空数组时就用空数组，不回头去读残留的 v1", () => {
+    /*
+     * 用户把保存项全删干净 → v2 落成 []。若把「空」当成「没有 v2」，
+     * 就会去读残留的 v1，删掉的东西自己回来了。
+     */
+    store = makeStore({
+      [SAVED_KEY]: "[]",
+      [SAVED_KEY_V1]: JSON.stringify([V1_ENTRY]),
+    });
     expect(loadSavedSearches(store)).toEqual([]);
+    expect(store.setItem).not.toHaveBeenCalled();
+    expect(store.data.has(SAVED_KEY_V1)).toBe(true); // 也不该顺手删掉 v1
+  });
+
+  it("坏 JSON 当成没有这个键，不抛；有 v1 时照旧迁移", () => {
+    store = makeStore({ [SAVED_KEY]: "{oops", [SAVED_KEY_V1]: JSON.stringify([V1_ENTRY]) });
+    expect(loadSavedSearches(store)[0].category).toBe("movie");
   });
 
   it("没有存储（隐私模式）时返回空，不抛", () => {

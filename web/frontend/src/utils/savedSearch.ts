@@ -42,15 +42,22 @@ function defaultStore(): Store | null {
   }
 }
 
-function readList(store: Store, key: string): SavedSearch[] {
+/**
+ * 读一个键。**分得清「没有这个键」和「这个键是空数组」**：
+ * 前者返回 null，后者返回 []。
+ *
+ * 混成一件事会出这样的错：用户把保存项全删了（v2 落成 `[]`），下次进来却被当成
+ * 「还没有 v2」，于是去读残留的 v1 —— 删掉的东西自己回来了。
+ */
+function readList(store: Store, key: string): SavedSearch[] | null {
   try {
     const raw = store.getItem(key);
-    if (!raw) return [];
+    if (raw === null) return null;
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return null;
     return parsed.slice(0, SAVED_MAX) as SavedSearch[];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -74,11 +81,12 @@ export function writeSavedSearches(list: SavedSearch[], store: Store | null = de
 export function loadSavedSearches(store: Store | null = defaultStore()): SavedSearch[] {
   if (!store) return [];
 
+  /* v2 存在就用它，哪怕是空数组 —— 空数组是「用户删干净了」这个事实 */
   const v2 = readList(store, SAVED_KEY);
-  if (v2.length > 0) return v2;
+  if (v2 !== null) return v2;
 
   const legacy = readList(store, SAVED_KEY_V1);
-  if (legacy.length === 0) return [];
+  if (legacy === null || legacy.length === 0) return [];
 
   const migrated = legacy.map((item) => ({ ...item, category: bucketOf(item.category) }));
   if (writeSavedSearches(migrated, store)) {
