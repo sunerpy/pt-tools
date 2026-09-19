@@ -1094,6 +1094,46 @@ function toggleSortOrder() {
   sortOrder.value = sortOrder.value === "asc" ? "desc" : "asc";
 }
 
+/** 导出当前这一页（画板 bar-64 的 bi-file-down）。列表分页，手上只有这一页 */
+function exportCsv() {
+  const head = [
+    "下载器",
+    "标题",
+    "状态",
+    "进度",
+    "大小",
+    "上传速度",
+    "下载速度",
+    "分享率",
+    "分类",
+    "标签",
+  ];
+  const lines = [head.join(",")];
+  for (const t of torrents.value) {
+    const cells = [
+      t.downloader_name,
+      t.title,
+      t.state,
+      `${Math.round((t.progress ?? 0) * 100)}%`,
+      formatSize(t.size ?? 0),
+      `${formatSize(t.upload_speed ?? 0)}/s`,
+      `${formatSize(t.download_speed ?? 0)}/s`,
+      String(t.ratio ?? 0),
+      t.category ?? "",
+      t.tags ?? "",
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pt-tools-downloader-tasks-p${page.value}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出本页 ${torrents.value.length} 条`);
+}
+
 function applyQuickState(state: string) {
   filters.value.state = state;
 }
@@ -1527,7 +1567,7 @@ function toggleSidebar() {
       </el-tooltip>
       <el-input
         v-model="filters.search"
-        placeholder="搜索标题"
+        placeholder="搜索标题、分类、标签…"
         clearable
         size="small"
         class="hub__search">
@@ -1564,6 +1604,17 @@ function toggleSidebar() {
             :disabled="!showAllTasks" />
         </el-tooltip>
         <!-- 画板 38 的 pop-col 是 260 宽（原来写成 264） -->
+        <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
+        <el-tooltip content="导出本页为 CSV" placement="bottom">
+          <button
+            type="button"
+            class="hub__ico"
+            aria-label="导出"
+            data-testid="hub-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
         <el-popover placement="bottom-end" :width="260" trigger="click">
           <template #reference>
             <button type="button" class="hub__ico" aria-label="显示列">

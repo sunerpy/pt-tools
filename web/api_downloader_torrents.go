@@ -256,10 +256,17 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if search != "" {
-				nameLower := strings.ToLower(t.Name)
-				hashLower := strings.ToLower(t.InfoHash)
-				dlNameLower := strings.ToLower(rec.Name)
-				if !strings.Contains(nameLower, search) && !strings.Contains(hashLower, search) && !strings.Contains(dlNameLower, search) {
+				// 画板 18 的 q 写的是「搜索标题、分类、标签…」，所以分类与标签也要参与匹配：
+				// 只匹配标题时那句占位文字是在许一个做不到的承诺。
+				haystacks := []string{t.Name, t.InfoHash, rec.Name, t.Category, t.Tags}
+				hit := false
+				for _, h := range haystacks {
+					if h != "" && strings.Contains(strings.ToLower(h), search) {
+						hit = true
+						break
+					}
+				}
+				if !hit {
 					continue
 				}
 			}
