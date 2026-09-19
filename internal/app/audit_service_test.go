@@ -43,6 +43,42 @@ func TestQuery_CommandAndResultFilters(t *testing.T) {
 	assert.Equal(t, "error", items[0].Result)
 }
 
+// 画板 25 的 q 写的是「筛选命令、触发用户…」：一个词要同时在命令与触发用户里模糊匹配。
+//
+// 为什么要在服务端：这个接口是分页的，前端在本页里筛会让页脚的 total 与表里的行数对不上，
+// 而且用户要找的那条很可能不在当前这一页。Command 那个精确匹配连「命令名写一半」都搜不到。
+func TestQuery_KeywordMatchesCommandOrChannelUser(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	rows := []models.ActionAudit{
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "alice", Command: "site list", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-3 * time.Minute)},
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "bob", Command: "task push", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-2 * time.Minute)},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+
+	// 命令名写一半也要命中（精确匹配做不到这件事）
+	items, total, err := svc.Query(context.Background(), AuditQuery{Keyword: "push"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "task push", items[0].Command)
+
+	// 按触发用户找
+	items, total, err = svc.Query(context.Background(), AuditQuery{Keyword: "ali"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "alice", items[0].ChannelUserID)
+
+	// 只有空白等于不筛
+	_, total, err = svc.Query(context.Background(), AuditQuery{Keyword: "   "})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+}
+
 func TestQuery_TimeWindowAndPaginationDefaults(t *testing.T) {
 	db := setupAuditTestDB(t)
 	svc := NewAuditService(db)

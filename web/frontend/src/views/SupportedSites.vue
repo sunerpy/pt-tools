@@ -18,15 +18,68 @@ const isMobile = useIsMobile();
 
 /** 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有数据」 */
 const { loading, state, errorText, run } = useDataState({
-  filtered: () => Boolean(search.value.trim() || schemaFilter.value),
+  filtered: () => Boolean(search.value.trim() || schemaFilter.value || addedFilter.value),
 });
 const definitions = ref<SupportedSiteDefinition[]>([]);
 const search = ref("");
 const schemaFilter = ref("");
 
+/*
+ * 画板 14 的 chip-0「已添加: 全部」与右端两枚视图钮（bi-layout-grid / bi-rows-3）。
+ *
+ * 「已添加」= 这个定义在 /api/sites 里已经启用 —— 这一页是「产品支持哪些站点」的清单，
+ * 用户最常问的就是「哪些我已经在用了」。所以要拿一次站点配置来比对。
+ */
+const addedFilter = ref<"" | "yes" | "no">("");
+const enabledNames = ref<Set<string>>(new Set());
+
+/** 画板右端的两枚视图钮：卡片（layout-grid）/ 紧凑列表（rows-3） */
+const VIEW_KEY = "pt-tools-supported-view-v1";
+
+function loadView(): "grid" | "rows" {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === "rows" ? "rows" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+const viewMode = ref<"grid" | "rows">(loadView());
+
+function setView(v: "grid" | "rows") {
+  viewMode.value = v;
+  try {
+    window.localStorage.setItem(VIEW_KEY, v);
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
+
+const isAdded = (id: string, name: string) =>
+  enabledNames.value.has(name) || enabledNames.value.has(id);
+
 onMounted(async () => {
-  await loadDefinitions();
+  await Promise.all([loadDefinitions(), loadEnabled()]);
 });
+
+/**
+ * 读一次站点配置，只为算「已添加」。
+ *
+ * 失败不影响这一页的主体（定义清单）—— 那一列会显示「未知」，筛选选项也不会骗人：
+ * 拿不到配置时把「已添加」筛选留空，而不是把所有站点当成没添加。
+ */
+async function loadEnabled() {
+  try {
+    const sites = await sitesApi.list();
+    const names = new Set<string>();
+    for (const [name, cfg] of Object.entries(sites)) {
+      if (cfg?.enabled) names.add(name);
+    }
+    enabledNames.value = names;
+  } catch {
+    enabledNames.value = new Set();
+  }
+}
 
 async function loadDefinitions() {
   const data = await run(() => sitesApi.listDefinitions());
@@ -52,6 +105,8 @@ const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
   return definitions.value.filter((d) => {
     if (schemaFilter.value && d.schema !== schemaFilter.value) return false;
+    if (addedFilter.value === "yes" && !isAdded(d.id, d.name)) return false;
+    if (addedFilter.value === "no" && isAdded(d.id, d.name)) return false;
     if (!q) return true;
     if (d.name.toLowerCase().includes(q)) return true;
     if (d.id.toLowerCase().includes(q)) return true;
@@ -162,6 +217,7 @@ function authMethodTone(m?: string): "primary" | "ok" | "warn" | "info" {
 function clearFilters() {
   search.value = "";
   schemaFilter.value = "";
+  addedFilter.value = "";
 }
 </script>
 
@@ -191,6 +247,19 @@ function clearFilters() {
           <PtIcon name="search" :size="14" />
         </template>
       </el-input>
+      <!-- 画板 14 的 chip-0「已添加: 全部」 -->
+      <el-select
+        v-model="addedFilter"
+        class="filter-select"
+        size="small"
+        placeholder="已添加: 全部"
+        clearable
+        data-testid="supported-added-filter">
+        <el-option label="已添加: 全部" value="" />
+        <el-option label="已添加: 是" value="yes" />
+        <el-option label="已添加: 否" value="no" />
+      </el-select>
+
       <el-select v-model="schemaFilter" placeholder="按架构筛选" clearable class="filter-select">
         <el-option
           v-for="opt in schemaOptions"
@@ -198,9 +267,40 @@ function clearFilters() {
           :label="`${opt.schema} (${opt.count})`"
           :value="opt.schema" />
       </el-select>
-      <el-button v-if="search || schemaFilter" @click="clearFilters">
+      <el-button v-if="search || schemaFilter || addedFilter" @click="clearFilters">
         <PtIcon name="x" :size="14" /><span>清空筛选</span>
       </el-button>
+
+      <template #right>
+        <!--
+          画板 14 的 bar-64 右端两枚视图钮：bi-layout-grid（卡片）/ bi-rows-3（紧凑列表）。
+          六十多个定义时卡片要滚很久，紧凑列表一屏能看完 —— 偏好存本地。
+        -->
+        <el-tooltip content="卡片视图" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            :class="{ 'is-active': viewMode === 'grid' }"
+            aria-label="卡片视图"
+            :aria-pressed="viewMode === 'grid'"
+            data-testid="supported-view-grid"
+            @click="setView('grid')">
+            <PtIcon name="layout-grid" :size="15" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="紧凑列表" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            :class="{ 'is-active': viewMode === 'rows' }"
+            aria-label="紧凑列表"
+            :aria-pressed="viewMode === 'rows'"
+            data-testid="supported-view-rows"
+            @click="setView('rows')">
+            <PtIcon name="rows-3" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
 
       <!--
         「内置多少个 / 几个不可用」已经在页头摘要里，带上只说筛选后还剩多少 ——
@@ -222,7 +322,14 @@ function clearFilters() {
       </template>
     </PtDataState>
 
-    <div v-else class="site-grid pt-cards pt-cards--2">
+    <!--
+      紧凑列表就是把两栏收成一栏、卡内边距收一档（画板 bi-rows-3 那个视图）。
+      六十多个定义时卡片视图要滚很久 —— 这两枚钮是画板画的，不是我加的花样。
+    -->
+    <div
+      v-else
+      class="site-grid pt-cards"
+      :class="viewMode === 'rows' ? 'pt-cards--wide is-rows' : 'pt-cards--2'">
       <article
         v-for="def in filtered"
         :key="def.id"
@@ -338,6 +445,16 @@ function clearFilters() {
 
 .filter-select {
   width: 180px;
+}
+
+/* 紧凑列表：一栏 + 卡内边距收一档，一屏能看完更多定义 */
+.site-grid.is-rows :deep(.pt-panel__body),
+.site-grid.is-rows :deep(.def) {
+  padding-block: var(--pt-space-2);
+}
+
+.site-grid.is-rows :deep(.def__desc) {
+  display: none;
 }
 
 /* 栏宽与间隔由 .pt-cards--2 给（画板 548 / 516 两栏，1181 以下退回单栏） */

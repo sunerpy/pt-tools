@@ -42,11 +42,39 @@ const detailRow = computed(() => logs.value.find((l) => l.id === detailId.value)
 
 const pagination = reactive({ page: 1, pageSize: 30, total: 0 });
 const filters = reactive({
+  /** 画板 26 的 q：同时模糊匹配站点名与种子 ID（服务端筛） */
+  q: "" as string,
   rss_id: "" as string,
   kind: "" as string,
   result: "" as string,
   conf_id: "" as number | string,
 });
+
+/** 导出当前这一页（画板 bar-64 的 bi-file-down）。接口分页，手上只有这一页的行 */
+function exportCsv() {
+  const head = ["时间", "站点", "种子 ID", "类型", "通道", "结果", "尝试"];
+  const lines = [head.join(",")];
+  for (const l of logs.value) {
+    const cells = [
+      l.created_at ?? "",
+      l.site_name ?? "",
+      l.torrent_id ?? "",
+      l.notify_kind ?? "",
+      String(l.notification_conf_id ?? ""),
+      l.result ?? "",
+      String(l.attempts ?? 0),
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pt-tools-rss-notifications-p${pagination.page}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出本页 ${logs.value.length} 条`);
+}
 
 const sentCount = computed(() => logs.value.filter((l) => l.result === "sent").length);
 const failedCount = computed(
@@ -223,6 +251,7 @@ async function fetchLogs() {
   const params = new URLSearchParams();
   params.append("page", String(pagination.page));
   params.append("page_size", String(pagination.pageSize));
+  if (filters.q) params.append("q", String(filters.q));
   if (filters.rss_id) params.append("rss_id", String(filters.rss_id));
   if (filters.kind) params.append("kind", String(filters.kind));
   if (filters.result) params.append("result", String(filters.result));
@@ -320,6 +349,24 @@ onBeforeUnmount(() => {
     <PtHeadSub>{{ headSub }}</PtHeadSub>
 
     <PtToolbar band>
+      <!--
+        画板 26 的 q「筛选站点、种子 ID…」。走服务端的 q（同时模糊匹配站点名与种子 ID）：
+        这个接口分页，在本页里筛会让页脚的 total 与表里的行数对不上，
+        而且要找的那条很可能不在当前这一页。
+      -->
+      <el-input
+        v-model="filters.q"
+        placeholder="筛选站点、种子 ID…"
+        clearable
+        class="f-q"
+        data-testid="rssnotify-search"
+        @keyup.enter="handleFilterChange"
+        @clear="handleFilterChange">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
+
       <el-input
         v-model="filters.rss_id"
         placeholder="RSS ID"
@@ -369,6 +416,18 @@ onBeforeUnmount(() => {
       </el-select>
 
       <template #right>
+        <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
+        <el-tooltip content="导出本页为 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="rssnotify-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+
         <el-tooltip content="每 10 秒重新拉一次当前列表" placement="bottom">
           <label class="ctl">
             <el-switch v-model="autoRefresh" size="small" />

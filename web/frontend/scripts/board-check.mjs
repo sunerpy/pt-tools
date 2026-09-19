@@ -134,7 +134,9 @@ const EXPECT = {
     bands: ["toolbar"], // bar-64，之后直接是卡
     cards: [548, 516, 1080], // g0..g3 两栏（数量随站点数变）+ p-cap 通栏
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["内置能力"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["内置能力"],
+    /* 画板 14 的 bar-64：seg（架构）+ q + chip-0「已添加: 全部」+ 右端两枚视图钮 */
+    controls: ["搜索", "已添加", "按架构筛选", "卡片视图", "紧凑列表"],
   },
   "/search": {
     board: "15 种子搜索",
@@ -542,7 +544,11 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080, 1080], // p-cmd / p-ch / p-fail / p-keep
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["命令分布", "渠道分布", "失败与被拒", "保留与清理"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["命令分布", "渠道分布", "失败与被拒", "保留与清理"],
+    /* 画板 25 的 bar-64：seg（全部/成功/拒绝/失败）+ q + chip 通道 + chip 时间 + 三枚图标钮 */
+    controls: ["筛选命令、触发用户", "全部通道", "全部结果", "导出"],
+    /* 画板 25 的表头 */
+    gridColumns: ["时间", "通道", "触发用户", "命令", "结果", "延迟"],
   },
   "/chatops/rss-notifications": {
     board: "26 RSS 通知日志",
@@ -550,7 +556,11 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 548, 516, 1080], // p-res / p-idem / p-site / p-quiet / p-retry
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["推送结果分布", "幂等与去重", "待重试与失败", "按站点分布", "安静时段"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["推送结果分布", "幂等与去重", "待重试与失败", "按站点分布", "安静时段"],
+    /* 画板 26 的 bar-64：seg（结果）+ q「筛选站点、种子 ID…」+ chip 通道 + 三枚图标钮 */
+    controls: ["筛选站点、种子 ID", "全部类型", "全部结果", "全部通道", "导出"],
+    /* 画板 26 的表头 */
+    gridColumns: ["时间", "站点", "种子 ID", "类型", "通道", "结果", "尝试", "操作"],
   },
   "/global": {
     board: "27 系统设置",
@@ -949,6 +959,15 @@ const MEASURE = `(() => {
         el.getAttribute('aria-label') ?? '',
         el.getAttribute('title') ?? '',
       ])
+      .concat(
+        /*
+         * 搜索框的身份是它的 placeholder（画板就是这么标的：「筛选命令、触发用户…」）。
+         * 不收进来的话「这一页少了搜索框」查不出来 —— input 既没有 textContent 也不是 button。
+         */
+        [...document.querySelectorAll('input[placeholder], textarea[placeholder]')].map(
+          (el) => el.getAttribute('placeholder') ?? '',
+        ),
+      )
       .filter(Boolean),
     hasSeg: Boolean(document.querySelector('.pt-seg, .el-segmented')),
     /* 表格带的列名与行高 —— 画板对表格页规定了列集合与 34 的行节奏 */

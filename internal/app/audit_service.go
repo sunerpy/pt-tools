@@ -32,6 +32,8 @@ type AuditEntry struct {
 }
 
 type AuditQuery struct {
+	// Keyword 模糊匹配命令与触发用户（画板 25 的 q）
+	Keyword       string
 	Since         time.Time
 	Until         time.Time
 	ChannelUserID string
@@ -152,6 +154,14 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 	}
 	if q.Result != "" {
 		tx = tx.Where("result = ?", q.Result)
+	}
+	// Keyword 是画板 25 的 q「筛选命令、触发用户…」：同时匹配命令与触发用户，模糊匹配。
+	//
+	// 为什么不让前端在本页里筛：这个接口是分页的，本地筛会让页脚的 total 与表里的行数
+	// 对不上；而且用户想找的那条很可能不在当前这一页。
+	if kw := strings.TrimSpace(q.Keyword); kw != "" {
+		like := "%" + kw + "%"
+		tx = tx.Where("command LIKE ? OR channel_user_id LIKE ?", like, like)
 	}
 
 	var total int64

@@ -206,7 +206,12 @@ async function fetchAuditLogs() {
     params.append("result", filters.result.join(","));
   }
   if (filters.command) {
-    params.append("command", filters.command);
+    /*
+     * 画板 25 的 q 写的是「筛选命令、触发用户…」，所以走服务端的 `q`（同时模糊匹配
+     * command 与 channel_user_id），不是只按 command 精确匹配 ——
+     * 后者连「命令名写一半」都搜不到，更别说按触发用户找。
+     */
+    params.append("q", filters.command);
   }
 
   /*
@@ -394,7 +399,7 @@ function exportCsv() {
 
       <el-input
         v-model="filters.command"
-        placeholder="搜索命令"
+        placeholder="筛选命令、触发用户…"
         clearable
         class="f-search"
         @keyup.enter="handleFilterChange"
