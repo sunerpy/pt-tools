@@ -360,6 +360,12 @@ async function onCardCommand(cmd: { act: string; name: string }) {
   else if (cmd.act === "delete") await deleteSite(cmd.name);
 }
 
+/** 窄屏「批量」菜单的两项 —— 与桌面那两枚按钮是同一个动作，不是另一套逻辑 */
+function onBulkCommand(cmd: "probe" | "open") {
+  if (cmd === "probe") return probeAllEnabled();
+  return openAllEnabled();
+}
+
 function getRssCount(site: SiteConfig): number {
   return site.rss?.length || 0;
 }
@@ -798,25 +804,57 @@ async function saveLoginConfig() {
           三枚按钮就地留在工具栏里 —— 这也正是它们原来的位置。
         -->
         <Teleport to="#pt-head-acts" :disabled="isMobile">
-          <el-tooltip
-            content="对所有已启用站点执行一次登录状态探测，最多 3 个并发"
-            placement="bottom">
+          <!--
+            桌面：三枚按钮平铺在页头动作区（画板 head 的右侧动作位）。
+            手机：画板 30 的顶栏与筛选行上**没有画这三个入口**，而平铺三枚 44 高的按钮会
+            各占一行，把筛选区顶到 240 高，第一张行卡被推到屏幕下半。
+            所以窄屏只留「新增站点」这一枚主操作，另两枚收进一个「批量」菜单 ——
+            入口一个都没少（用户验收退回过的是「重复」，不是「少」），高度从 240 降到一行。
+          -->
+          <el-dropdown v-if="isMobile" trigger="click" @command="onBulkCommand">
+            <el-button size="small" data-testid="site-bulk-menu">
+              <PtIcon name="ellipsis" :size="15" /><span>批量</span>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  command="probe"
+                  :disabled="loading || enabledCount === 0 || bulkProbing"
+                  data-testid="probe-all-enabled-button">
+                  <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测已启用</span>
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="open"
+                  :disabled="enabledCount === 0"
+                  data-testid="open-all-sites-btn">
+                  <PtIcon name="external-link" :size="14" class="dd-ico" /><span>打开已启用</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+
+          <template v-else>
+            <el-tooltip
+              content="对所有已启用站点执行一次登录状态探测，最多 3 个并发"
+              placement="bottom">
+              <el-button
+                size="small"
+                :loading="bulkProbing"
+                :disabled="loading || enabledCount === 0"
+                data-testid="probe-all-enabled-button"
+                @click="probeAllEnabled">
+                <PtIcon name="activity" :size="15" /><span>探测已启用</span>
+              </el-button>
+            </el-tooltip>
             <el-button
               size="small"
-              :loading="bulkProbing"
-              :disabled="loading || enabledCount === 0"
-              data-testid="probe-all-enabled-button"
-              @click="probeAllEnabled">
-              <PtIcon name="activity" :size="15" /><span>探测已启用</span>
+              :disabled="enabledCount === 0"
+              data-testid="open-all-sites-btn"
+              @click="openAllEnabled">
+              <PtIcon name="external-link" :size="15" /><span>打开已启用</span>
             </el-button>
-          </el-tooltip>
-          <el-button
-            size="small"
-            :disabled="enabledCount === 0"
-            data-testid="open-all-sites-btn"
-            @click="openAllEnabled">
-            <PtIcon name="external-link" :size="15" /><span>打开已启用</span>
-          </el-button>
+          </template>
+
           <el-button
             type="primary"
             size="small"

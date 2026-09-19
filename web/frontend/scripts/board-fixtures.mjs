@@ -528,19 +528,32 @@ export const FIXTURES = [
     })),
   ],
   /*
-   * 任务详情（画板 39 的抽屉与内联卡）。必须排在列表之前：`/api/downloader-torrents/1/t1`
-   * 会命中列表那条前缀，于是详情组件拿到 `{items,total,…}`，模板里
-   * `props.detail.torrent.title` 直接抛 TypeError —— 抽屉整块渲染不出来。
-   * 形状照后端的 TorrentDetailResponse：torrent / files / trackers / features。
+   * 任务详情（画板 39 的抽屉与内联卡）。两点都是踩过的坑：
+   *
+   * ① 必须排在列表之前 —— 否则命中列表那条前缀，详情组件拿到 `{items,total,…}`，
+   *    模板里 `props.detail.torrent.title` 直接抛 TypeError，抽屉整块渲染不出来。
+   * ② **地址要钉到精确路径**，不能用 `/api/downloader-torrents/1` 这种宽前缀：
+   *    宽前缀会把 `…/1/undefined` 也接住，于是「行数据字段名写错、拼不出 task_id」
+   *    这种缺陷被假数据兜住，画板 39 的探针在一条不存在的地址上拿到绿灯。
+   *
+   * 形状照后端：TorrentDetailResponse = torrent / files / trackers / features，
+   * 其中 files 有 index，trackers 的 status 是**数字**、并且有 seeds / leeches。
    */
   [
-    "/api/downloader-torrents/1",
+    `/api/downloader-torrents/${HUB_TORRENTS[0].downloader_id}/${HUB_TORRENTS[0].task_id}`,
     {
       torrent: HUB_TORRENTS[0],
       files: [
-        { name: "Some.Release.Name.S01E01.mkv", size: 4.2 * 1024 ** 3, progress: 1, priority: 1 },
         {
-          name: "Some.Release.Name.S01E02.mkv",
+          index: 0,
+          name: "Hub.Task.1.2160p.WEB-DL/E01.mkv",
+          size: 4.2 * 1024 ** 3,
+          progress: 1,
+          priority: 1,
+        },
+        {
+          index: 1,
+          name: "Hub.Task.1.2160p.WEB-DL/E02.mkv",
           size: 4.1 * 1024 ** 3,
           progress: 0.62,
           priority: 1,
@@ -549,8 +562,10 @@ export const FIXTURES = [
       trackers: [
         {
           url: "https://tracker.m-team.invalid/announce",
-          status: "working",
-          peers: 128,
+          status: 2,
+          peers: 132,
+          seeds: 128,
+          leeches: 4,
           message: "",
         },
       ],
@@ -629,6 +644,21 @@ export function emptyStubScript() {
     ["/api/chatops/audit", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/chatops/rss-notifications", { items: [], total: 0, page: 1, page_size: 50 }],
     ["/api/filter-rules", []],
+    /*
+     * 站点列表页与暂停任务页的数据源。少了它们，那两页在「空态趟」里其实还有数据，
+     * 断言「没有空态块」就成了对脚本自己的误判。
+     *
+     * 子路径必须排在 `/api/sites` 之前：匹配是前缀匹配，`/api/sites/login-state` 会命中
+     * `/api/sites` 那条、拿到一个对象 `{}`，而调用方按数组遍历 —— 直接抛
+     * 「object is not iterable」。这条坑这份文件里已经踩过三次（日志、通道详情、这里）。
+     */
+    ["/api/sites/login-state", []],
+    ["/api/sites/definitions", []],
+    ["/api/sites/templates", []],
+    ["/api/sites/downloader-summary", { sites: [] }],
+    ["/api/sites", {}],
+    ["/api/torrents/paused", { items: [], total: 0, page: 1, page_size: 20 }],
+    ["/api/torrents/archive", { items: [], total: 0, page: 1, page_size: 20 }],
     /* /api/logs/files 必须排在 /api/logs 之前：否则它命中前者的前缀，
        文件清单拿到的是正文的形状（没有 files 字段），页面直接抛 TypeError */
     ["/api/logs/files", { dir: "/config/.pt-tools/logs", files: [], max_age: 7, max_backups: 5 }],

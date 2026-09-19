@@ -207,6 +207,26 @@ const EXPECT = {
         })()`,
       },
       {
+        desc: "画板 38 的行右键菜单（180 宽）",
+        want: "宽 180",
+        js: `(async () => {
+          const row = document.querySelector('.hub__grid tbody tr, .vt-row');
+          if (!row) return 'no-row';
+          const r = row.getBoundingClientRect();
+          row.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true,
+            clientX: Math.round(r.left + 40),
+            clientY: Math.round(r.top + 8),
+          }));
+          await new Promise((res) => setTimeout(res, 600));
+          const menu = document.querySelector('.table-context-menu');
+          if (!menu) return 'no-ctx-menu';
+          const w = Math.round(menu.getBoundingClientRect().width);
+          document.body.click();
+          return '宽 ' + w;
+        })()`,
+      },
+      {
         desc: "画板 38 的添加种子弹窗（620 宽，卡头 42）",
         want: "宽 620|添加种子到下载器",
         js: `(async () => {
@@ -256,6 +276,11 @@ const EXPECT = {
           if (!(await openRow())) return 'no-detail-btn';
           const drawer = document.querySelector('.hub__drawer');
           const dw = drawer ? Math.round(drawer.getBoundingClientRect().width) : 0;
+          /*
+           * 只量宽度会让「详情请求打到一条错地址、被宽前缀假数据接住」也通过。
+           * 所以顺带核对抽屉里显示的确实是这一行的身份（标题 / info_hash）。
+           */
+          const dtext = drawer ? (drawer.textContent ?? '').replace(/\\s+/g, ' ') : '';
           esc();
           await wait(500);
           /* 下方：画板 39 的 inline-detail-card 772 宽 */
@@ -264,9 +289,13 @@ const EXPECT = {
           if (!(await openRow())) return 'no-detail-btn-2';
           const inline = document.querySelector('.hub__detail');
           const iw = inline ? Math.round(inline.getBoundingClientRect().width) : 0;
-          const ok = Math.abs(dw - 806) <= 4 && Math.abs(iw - 772) <= 12;
+          const first = document.querySelector('.hub__grid tbody tr, .vt-row');
+          const rowTitle = first ? (first.textContent ?? '').slice(0, 24) : '';
+          const identityOk = dtext.includes('Hub.Task.1') || dtext.includes('hub0000');
+          const ok = Math.abs(dw - 806) <= 4 && Math.abs(iw - 772) <= 12 && identityOk;
           return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
-            ' 抽屉 ' + dw + '（画板 806） | 内联 ' + iw + '（画板 772）';
+            ' 抽屉 ' + dw + '（画板 806） | 内联 ' + iw + '（画板 772） | 身份=' +
+            (identityOk ? '对上' : '没对上 ' + dtext.slice(0, 60) + ' / 行 ' + rowTitle);
         })()`,
       },
     ],
@@ -1576,7 +1605,17 @@ if (mobileRoutes.length > 0) {
  *   · 没有控制台报错（空数组最容易把 `arr[0].x` 这类写法打崩）；
  *   · 没有横向溢出。
  */
-const EMPTY_ROUTES = ["/tasks", "/chatops/notifications", "/chatops/audit", "/logs"];
+const EMPTY_ROUTES = [
+  "/tasks",
+  "/paused",
+  "/sites",
+  "/filter-rules",
+  "/chatops/notifications",
+  "/chatops/bindings",
+  "/chatops/audit",
+  "/chatops/rss-notifications",
+  "/logs",
+];
 
 const emptyRoutes = EMPTY_ROUTES.filter((r) => wanted.length === 0 || wanted.includes(r));
 
@@ -1632,6 +1671,16 @@ if (emptyRoutes.length > 0) {
     } else {
       const mute = got.states.filter((st) => !st.title);
       if (mute.length > 0) fail("empty.title", `有 ${mute.length} 个空态块没有标题文案`);
+      /*
+       * 说明文案也要有。画板 45 列的 13 处空态原文里每一处都有下一步动作
+       * （「添加第一个站点开始」这类）；只断言标题等于放过「有标题没说明」的半成品。
+       */
+      const noSub = got.states.filter((st) => st.title && !st.sub);
+      if (noSub.length > 0)
+        fail(
+          "empty.sub",
+          `这些空态块只有标题、没有说明：${noSub.map((st) => st.title).join("、")}`,
+        );
     }
   }
 }
