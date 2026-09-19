@@ -69,8 +69,17 @@ const { loading, state, errorText, run, hasPartialBanner } = useDataState({
   failed: () => (loginStatesFailed.value ? 1 : 0),
 });
 
-/** 搜索词把 0 行的含义从「库里没有」改成「筛掉了」，也就是 empty 与 zero 的分界 */
-const isFiltered = computed(() => searchKeyword.value.trim() !== "");
+/**
+ * 任何一项筛选在生效，0 行的含义就是「筛掉了」而不是「库里没有」—— empty 与 zero 的分界。
+ * 漏掉状态 / 认证 / 探测这三项的话，筛到 0 行时页面会说「还没有启用任何站点」，那是假话。
+ */
+const isFiltered = computed(
+  () =>
+    searchKeyword.value.trim() !== "" ||
+    statusFilter.value.size > 0 ||
+    authFilter.value !== "" ||
+    probeFilter.value !== "",
+);
 
 /**
  * 空态仍按视图模式分成两种文案（「已启用」空 = 去新增，「全部」空 = 内置清单本身没内容），
@@ -388,8 +397,187 @@ function matchesSearch(name: string, site: SiteConfig, q: string): boolean {
   return Boolean(site.urls?.some((u) => u.toLowerCase().includes(q)));
 }
 
+/*
+ * 画板 12 的 bar-64 上除了分段与搜索，还有两枚筛选 chip（「认证: 全部」「探测: 全部」），
+ * 以及画板 30 那排带计数的状态 chip（正常 / 异常 / 已禁用）。
+ * 三组都落在这里 —— 它们此前一个都没有，而画板把它们画在了同一条带上。
+ *
+ * 状态的判定口径（都用本页已经有的两份数据，没有新接口）：
+ *   已禁用  !site.enabled
+ *   异常    启用中，且「站点暂不可用」或最近一次探测不是 OK（含从未探测成功过）
+ *   正常    启用中且不异常
+ * 画板把状态画成四档分段（全部/正常/异常/已禁用），这里做成**可选的 chip**，
+ * 因为两边的「全部」不是一回事：画板那张图是 14 个已配置站点（12+2=14，已禁用另算 1），
+ * 而这个产品的 `/api/sites` 回的是**全部 66 个内置定义**（新装时一个都没启用）。
+ * 把「全部」改成 66 会让默认视图变成 66 行，所以保留原来的「已启用 / 全部」作视图范围，
+ * 状态与认证、探测一起做成叠加筛选。
+ */
+type SiteStatus = "ok" | "bad" | "off";
+
+function statusOf(name: string, site: SiteConfig): SiteStatus {
+  if (!site.enabled) return "off";
+  if (site.unavailable) return "bad";
+  const st = loginState(name)?.last_probe_status;
+  /* 从未探测过不算异常：那是「还不知道」，不是「坏了」 */
+  if (st !== undefined && st !== "" && !isProbeSuccess(st)) return "bad";
+  return "ok";
+}
+
+/* 探测模式的中文名：导出与筛选 chip 共用一份 */
+const PROBE_LABEL: Record<string, string> = { auto: "自动", manual: "手动", disabled: "不探测" };
+
+/*
+ * 画板 12 的 bar-64 右端两枚 28×28 图标钮：`bi-columns-3`（列设置）与 `bi-file-down`（导出）。
+ *
+ * 列设置存进 localStorage：这张表有十一列，谁关心哪几列是长期偏好，不该每次进来重设。
+ * 键里带 v1，将来列集合变了可以整批失效。
+ */
+const COLS_KEY = "pt-tools-sites-cols-v1";
+
+const OPTIONAL_COLS = [
+  { key: "auth", label: "认证" },
+  { key: "rss", label: "RSS" },
+  { key: "active", label: "判定活跃" },
+  { key: "days", label: "剩余天数" },
+  { key: "siteActive", label: "站点活跃" },
+  { key: "probe", label: "探测" },
+] as const;
+
+type OptionalCol = (typeof OPTIONAL_COLS)[number]["key"];
+
+/*
+ * 默认藏掉最边缘的两列，让默认视图接近画板 12 的列集合（# / 站点 / 状态 / 认证 /
+ * RSS / 探测 / 操作）。十一列全开时「探测」那一列会被固定在右侧的「操作」压掉一半 ——
+ * 实测如此。要看这两列在列设置里勾回来即可，偏好存本地。
+ */
+const DEFAULT_HIDDEN: OptionalCol[] = ["active", "siteActive"];
+
+function loadHiddenCols(): Set<OptionalCol> {
+  try {
+    const raw = window.localStorage.getItem(COLS_KEY);
+    if (!raw) return new Set(DEFAULT_HIDDEN);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set(DEFAULT_HIDDEN);
+    const known = new Set(OPTIONAL_COLS.map((c) => c.key as string));
+    return new Set(parsed.filter((k): k is OptionalCol => known.has(k)));
+  } catch {
+    /* 隐私模式下 localStorage 会抛；坏 JSON 当成没设置过 */
+    return new Set(DEFAULT_HIDDEN);
+  }
+}
+
+const hiddenCols = ref<Set<OptionalCol>>(loadHiddenCols());
+
+function toggleCol(key: OptionalCol) {
+  const next = new Set(hiddenCols.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  hiddenCols.value = next;
+  try {
+    window.localStorage.setItem(COLS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* 存不下就只在本次会话里生效，不影响功能 */
+  }
+}
+
+const colShown = (key: OptionalCol) => !hiddenCols.value.has(key);
+
+/**
+ * 导出当前表格（画板 bi-file-down）。
+ *
+ * 导的是**这一刻表格里的那批行**，不是整库：工具栏上那些筛选就是用来选这批行的，
+ * 导出跟着筛选走才对得上用户看到的东西。字段用 CSV，Excel 与 sed 都能读。
+ */
+function exportCsv() {
+  const head = ["站点", "状态", "认证方式", "RSS 订阅数", "剩余天数", "探测模式", "已启用"];
+  const lines = [head.join(",")];
+  for (const [name, site] of visibleEntries.value) {
+    const days = daysRemaining(name);
+    const cells = [
+      name,
+      STATUS_LABEL[statusOf(name, site)],
+      authMethodLabel(site.auth_method),
+      String(getRssCount(site)),
+      days === null ? "" : String(days),
+      PROBE_LABEL[probeModeOf(name)] ?? probeModeOf(name),
+      site.enabled ? "是" : "否",
+    ];
+    /* 站点名里可能有逗号或引号，按 CSV 规则转义 */
+    lines.push(cells.map((c) => `"${c.replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pt-tools-sites-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出 ${visibleEntries.value.length} 个站点`);
+}
+
+/** 勾中的状态。空集合 = 不筛（而不是全都不显示） */
+const statusFilter = ref<Set<SiteStatus>>(new Set());
+/** 认证方式筛选，空串 = 全部（画板 chip-0「认证: 全部」） */
+const authFilter = ref("");
+/** 探测方式筛选，空串 = 全部（画板 chip-1「探测: 全部」） */
+const probeFilter = ref("");
+
+const statusCounts = computed(() => {
+  const counts: Record<SiteStatus, number> = { ok: 0, bad: 0, off: 0 };
+  for (const [name, site] of allEntries.value) counts[statusOf(name, site)] += 1;
+  return counts;
+});
+
+const STATUS_LABEL: Record<SiteStatus, string> = { ok: "正常", bad: "异常", off: "已禁用" };
+
+/** 状态列与工具栏 chip 共用同一套语义色 */
+function statusTone(k: SiteStatus): "ok" | "dang" | "neutral" {
+  if (k === "ok") return "ok";
+  if (k === "bad") return "dang";
+  return "neutral";
+}
+
+const statusChips = computed(() =>
+  (["ok", "bad", "off"] as const).map((k) => ({
+    key: k,
+    label: `${STATUS_LABEL[k]} ${statusCounts.value[k]}`,
+    active: statusFilter.value.has(k),
+  })),
+);
+
+function toggleStatus(k: SiteStatus) {
+  const next = new Set(statusFilter.value);
+  if (next.has(k)) next.delete(k);
+  else next.add(k);
+  statusFilter.value = next;
+}
+
+/** 认证方式的可选项，只列**本页真的出现过**的，不列产品支持但一个站点都没用的 */
+const authOptions = computed(() => {
+  const seen = new Set<string>();
+  for (const [, site] of allEntries.value) {
+    if (site.auth_method) seen.add(site.auth_method);
+  }
+  return [...seen].map((v) => ({ value: v, label: authMethodLabel(v) }));
+});
+
+const probeOptions = computed(() => {
+  const seen = new Set<string>();
+  for (const [name] of allEntries.value) seen.add(probeModeOf(name));
+  return [...seen].map((v) => ({ value: v, label: PROBE_LABEL[v] ?? v }));
+});
+
 const visibleEntries = computed(() => {
-  const base = viewMode.value === "all" ? allEntries.value : enabledEntries.value;
+  let base = viewMode.value === "all" ? allEntries.value : enabledEntries.value;
+  if (statusFilter.value.size > 0) {
+    base = base.filter(([name, site]) => statusFilter.value.has(statusOf(name, site)));
+  }
+  if (authFilter.value) {
+    base = base.filter(([, site]) => site.auth_method === authFilter.value);
+  }
+  if (probeFilter.value) {
+    base = base.filter(([name]) => probeModeOf(name) === probeFilter.value);
+  }
   const q = searchKeyword.value.trim().toLowerCase();
   if (!q) return base;
   return base.filter(([name, site]) => matchesSearch(name, site, q));
@@ -778,8 +966,86 @@ async function saveLoginConfig() {
         </template>
       </el-input>
 
+      <!--
+        画板 30 那排带计数的状态 chip（正常 / 异常 / 已禁用）。可叠加：
+        「异常 + 已禁用」是「需要我处理的」这个真实组合，做成互斥就把它删掉了。
+      -->
+      <el-button
+        v-for="c in statusChips"
+        :key="c.key"
+        class="bar-chip__btn"
+        :type="c.active ? 'primary' : 'default'"
+        :plain="c.active"
+        :aria-pressed="c.active"
+        :data-testid="`site-status-chip-${c.key}`"
+        @click="toggleStatus(c.key)">
+        <span>{{ c.label }}</span>
+      </el-button>
+
+      <!-- 画板 12 的 chip-0「认证: 全部」/ chip-1「探测: 全部」：点开选一项 -->
+      <el-select
+        v-model="authFilter"
+        class="bar-chip"
+        size="small"
+        placeholder="认证: 全部"
+        clearable
+        data-testid="site-auth-filter">
+        <el-option label="认证: 全部" value="" />
+        <el-option
+          v-for="o in authOptions"
+          :key="o.value"
+          :label="`认证: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+      <el-select
+        v-model="probeFilter"
+        class="bar-chip"
+        size="small"
+        placeholder="探测: 全部"
+        clearable
+        data-testid="site-probe-filter">
+        <el-option label="探测: 全部" value="" />
+        <el-option
+          v-for="o in probeOptions"
+          :key="o.value"
+          :label="`探测: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+
       <template #right>
         <span v-if="isFiltered" class="pt-band__note">筛出 {{ visibleEntries.length }} 个</span>
+
+        <!-- 画板 bar-64 右端的 bi-columns-3：列设置（偏好存本地） -->
+        <el-popover placement="bottom-end" trigger="click" :width="180">
+          <template #reference>
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="列设置"
+              data-testid="sites-cols-btn">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="cols">
+            <label v-for="c in OPTIONAL_COLS" :key="c.key" class="cols__row">
+              <el-checkbox :model-value="colShown(c.key)" @change="toggleCol(c.key)" />
+              <span>{{ c.label }}</span>
+            </label>
+          </div>
+        </el-popover>
+
+        <!-- 画板 bar-64 右端的 bi-file-down：导出当前筛选出的这批行 -->
+        <el-tooltip content="按当前筛选导出 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="sites-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+
         <el-tooltip content="重新拉取站点清单与登录状态" placement="top">
           <button
             type="button"
@@ -894,23 +1160,44 @@ async function saveLoginConfig() {
           </PtDataState>
         </template>
 
+        <!--
+          画板 12 的 th-0「#」：行号。只用来「第几行」地对话，不参与排序 ——
+          排序换了顺序，行号就该跟着重排，所以取的是渲染下标而不是数据里的序号。
+        -->
+        <el-table-column label="#" width="56" align="center" class-name="pt-cell-muted">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
+
         <el-table-column label="站点" min-width="170" class-name="pt-cell-strong">
           <template #default="{ row }">
             <span class="site">
               <SiteAvatar :site-id="row[0]" :site-name="row[0]" :size="22" :no-fetch="true" />
               <span class="site__name">{{ row[0] }}</span>
-              <PtStatusPill v-if="row[1].unavailable" tone="dang" size="sm">暂不可用</PtStatusPill>
             </span>
           </template>
         </el-table-column>
 
-        <el-table-column label="认证" width="118">
+        <!--
+          画板 12 的 th-2「状态」：把「暂不可用」那枚胶囊从站点列独立出来，
+          并把它扩成三态（正常 / 异常 / 已禁用）—— 和工具栏那排状态 chip 同一套口径
+          （statusOf），否则筛选与显示会各说一套。
+        -->
+        <el-table-column label="状态" width="96" align="center">
+          <template #default="{ row }">
+            <PtStatusPill :tone="statusTone(statusOf(row[0], row[1]))" size="sm">
+              {{ STATUS_LABEL[statusOf(row[0], row[1])] }}
+            </PtStatusPill>
+          </template>
+        </el-table-column>
+
+        <el-table-column v-if="colShown('auth')" label="认证" width="118">
           <template #default="{ row }">
             <PtTag>{{ authMethodLabel(row[1].auth_method) }}</PtTag>
           </template>
         </el-table-column>
 
         <el-table-column
+          v-if="colShown('rss')"
           label="RSS"
           width="78"
           class-name="pt-cell-num"
@@ -923,7 +1210,7 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column min-width="104" class-name="pt-cell-muted">
+        <el-table-column v-if="colShown('active')" min-width="104" class-name="pt-cell-muted">
           <template #header>
             <el-tooltip
               content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；不是网页登录时间"
@@ -938,7 +1225,7 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column min-width="118">
+        <el-table-column v-if="colShown('days')" min-width="118">
           <template #header>
             <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
               <span class="th-help">剩余天数 <PtIcon name="info" :size="12" /></span>
@@ -956,7 +1243,7 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column min-width="104" class-name="pt-cell-muted">
+        <el-table-column v-if="colShown('siteActive')" min-width="104" class-name="pt-cell-muted">
           <template #header>
             <el-tooltip
               content="站点/API 返回的原始 last_access 或 lastBrowse 时间"
@@ -971,7 +1258,8 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column label="探测" width="104">
+        <!-- 「自动」那个下拉实测要 133，104 会把它裁掉 -->
+        <el-table-column v-if="colShown('probe')" label="探测" width="140">
           <template #default="{ row }">
             <el-select
               :model-value="probeModeOf(row[0])"
@@ -1806,6 +2094,41 @@ async function saveLoginConfig() {
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
   color: var(--pt-t4);
+}
+
+/* 列设置面板：一行一个勾选 */
+.cols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cols__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  cursor: pointer;
+}
+
+/* 画板 chip-*：24 高、11px —— 与任务列表那排筛选 chip 同一套写法 */
+.bar-chip__btn {
+  height: 24px;
+  padding: 0 10px;
+  margin: 0;
+  font-size: var(--pt-fz-label);
+}
+
+/* 画板 chip-0 / chip-1 是 72×24 的下拉 chip */
+.bar-chip {
+  flex: 0 0 auto;
+  width: 132px;
+}
+
+.bar-chip :deep(.el-select__wrapper) {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: var(--pt-fz-label);
 }
 
 /* 与表格里的 .site__name 一致：定义文件里是小写 id，首字母大写才像个名字 */

@@ -73,7 +73,52 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [364, 340, 344, 1080], // p-health / p-rss / p-ev / p-auth
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["探测健康", "RSS 订阅", "保号提醒", "认证方式"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["探测健康", "RSS 订阅", "保号提醒", "认证方式"],
+    /*
+     * 画板 12 的 bar-64 上除了分段与搜索，还有两枚筛选 chip（认证 / 探测），
+     * 画板 30 的移动稿上还有一排带计数的状态 chip（正常 / 异常 / 已禁用）。
+     * 这一条此前**完全没查**：EXPECT 里既没有 controls 也没有 needsSeg，
+     * 于是「工具栏少了三组筛选」在验收里看不出来。
+     */
+    needsSeg: true,
+    controls: [
+      "已启用",
+      "全部",
+      "正常",
+      "异常",
+      "已禁用",
+      "认证",
+      "探测",
+      /* 画板 bar-64 右端那两枚 28×28 图标钮 */
+      "列设置",
+      "导出",
+    ],
+    /* 画板 12 的表头（th-6/7/8「自动 / 手动 / 禁用」是探测模式那一列里的三段控件，不是列） */
+    gridColumns: ["#", "站点", "状态", "认证", "RSS", "探测", "操作"],
+    probes: [
+      {
+        desc: "状态 chip 真的在筛（点「已禁用」之后表格行数应当变成该档的计数）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const rows = () => document.querySelectorAll('.pt-band--grid tbody tr').length;
+          const chip = document.querySelector('[data-testid=site-status-chip-off]');
+          if (!chip) return 'no-chip';
+          const label = (chip.textContent ?? '').trim();
+          const want = Number((label.match(/(\\d+)/) ?? [])[1] ?? -1);
+          const before = rows();
+          chip.click();
+          await new Promise((r) => setTimeout(r, 600));
+          const after = rows();
+          chip.click();
+          await new Promise((r) => setTimeout(r, 400));
+          const restored = rows();
+          /* 视图范围是「已启用」，所以点「已禁用」应当筛到 0 行；再点一次要回到原样 */
+          const ok = after === 0 && restored === before && want >= 0;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
+            ' chip=' + label + ' 行数 ' + before + '→' + after + '→' + restored;
+        })()`,
+      },
+    ],
   },
   "/supported-sites": {
     board: "14 已支持站点",
@@ -562,6 +607,16 @@ const ALLOWED_GAPS = {
    * 所以行高已经压回画板的 34（不再登记偏离），只剩「列比画板多四列」这一条，
    * 而它现在是 owner 的决定，不是待决事项。
    */
+  /*
+   * /sites 的列集合：画板 12 是 `# / 站点 / 状态 / 认证方式 / RSS 订阅 / 探测模式 / 操作`，
+   * 落地多出「判定活跃 / 剩余天数 / 站点活跃 / 启用」四列 —— 与 /userinfo 那四列同一性质
+   * （保号相关的功能列），按 owner 定下的原则（用画板的样式，保留现有功能）保留。
+   * 这四列现在可以在「列设置」里自己关掉（画板 bar-64 右端的 bi-columns-3 就是它）。
+   */
+  "/sites grid.columns":
+    "画板 12 七列；落地十一列 —— 多出「判定活跃 / 剩余天数 / 站点活跃 / 启用」。" +
+    "按 owner 的原则保留（用画板的样式设计，但保留现有功能），并且已经做成可在列设置里关掉。",
+
   "/userinfo grid.columns":
     "画板十列；落地十四列 —— 多出「真实数据 / 入站 / 剩余天数 / 操作」。" +
     "**owner 已决定保留这四列**（原话：用画板的样式设计，但要保留现有的头像、未读角标、" +
@@ -572,9 +627,12 @@ const ALLOWED_GAPS = {
    * 移动画板 30 / 31 的筛选区与行卡走势图。两条都不是「忘了做」：
    */
   "/sites@375 filterRow":
-    "画板 30 的筛选只有一排 26 高的 chip（全部/正常/异常/已禁用 各带计数），落地是把桌面工具栏整条搬了过来：" +
-    "「已启用/全部」分段 + 搜索框 + 探测已启用 + 打开已启用 + 新增站点，换行堆到 240 高。" +
-    "画板的移动稿里没有画这三个入口，砍掉它们等于手机上少三个功能入口 —— 要收进菜单还是要留在页面上属于产品取舍，需 owner 拍板。",
+    "画板 30 的筛选是一排 26 高的 chip（全部/正常/异常/已禁用 各带计数）。" +
+    "落地现在是「已启用/全部」分段 + 三枚状态 chip（正常/异常/已禁用，带计数）+ 搜索 + " +
+    "「批量」菜单 + 新增站点，两行共 81 —— 比画板高，但已经从 240 压下来，且入口一个没少。" +
+    "还高的那部分是画板移动稿上根本没画的三个入口（探测已启用 / 打开已启用 / 新增站点）；" +
+    "「全部」两边也不是一回事：画板那张图是 14 个已配置站点，这个产品的 /api/sites 回的是" +
+    "全部 66 个内置定义，所以状态做成可叠加的 chip 而不是画板那种四档互斥分段。",
   "/tasks@375 filterRow":
     "画板 31 的筛选是一条 294×30 的分段器；落地是三个可叠加的筛选 chip + 搜索框 + 站点下拉。" +
     "那三个 chip 是可组合的（apiTasks 里逐个 AND），收成画板那条互斥分段器会删掉组合筛选能力 —— " +
@@ -796,7 +854,14 @@ const MEASURE = `(() => {
      * 纯图标钮没有文字，身份在 aria-label / title 上，所以三者都收 ——
      * 只看 textContent 会把画板上那些 32×32 的图标钮全都漏掉。
      */
-    controlText: [...document.querySelectorAll('button, .el-segmented__item, .pt-band__tab')]
+    /*
+     * 下拉型控件（画板把它们画成 chip-0「认证: 全部」这类）不是 button，
+     * 文案在 .el-select__placeholder / selected-item 上 —— 不收进来的话
+     * 「工具栏少了两枚筛选 chip」这种缺失照样查不出来。
+     */
+    controlText: [...document.querySelectorAll(
+      'button, .el-segmented__item, .pt-band__tab, .el-select__placeholder, .el-select__selected-item',
+    )]
       .flatMap((el) => [
         (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
         el.getAttribute('aria-label') ?? '',
@@ -1100,9 +1165,16 @@ for (const route of routes) {
     }
   }
   if (want.gridColumns) {
+    /*
+     * 列名比较**不能用 includes**：`站点活跃` 里含 `站点`，于是多出来的那一列会被当成
+     * 画板的「站点」列而躲过检查（实测漏报过）。规则收紧成「整个相等，或画板名后面紧跟
+     * `/` 或空格」—— 这样 `时魔/h` 仍能被画板的 `时魔` 认领，`站点活跃` 不会。
+     */
+    const matches = (header, col) =>
+      header === col || header.startsWith(`${col}/`) || header.startsWith(`${col} `);
     /* 画板的列必须都在 */
     for (const col of want.gridColumns) {
-      if (!got.gridColumns.some((c) => c.includes(col))) {
+      if (!got.gridColumns.some((c) => matches(c, col))) {
         fail("grid.columns", `表头里没有「${col}」；实测 ${got.gridColumns.join(" / ")}`);
       }
     }
@@ -1110,7 +1182,7 @@ for (const route of routes) {
      * 画板之外的列也要报。只查「缺了没」挡不住「多了几列」——
      * 而多列一样是与画板不一致，且会改变整表的列宽分配。
      */
-    const extra = got.gridColumns.filter((c) => !want.gridColumns.some((w) => c.includes(w)));
+    const extra = got.gridColumns.filter((c) => !want.gridColumns.some((w) => matches(c, w)));
     if (extra.length > 0) {
       fail("grid.columns", `多出画板之外的列：${extra.join(" / ")}`);
     }
