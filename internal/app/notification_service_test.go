@@ -990,3 +990,83 @@ func TestUpdateConf_NoChanges_DoesNotPublish(t *testing.T) {
 	case <-time.After(80 * time.Millisecond):
 	}
 }
+
+/*
+ * 钉子：通知通道页画板 22 那条分段器的「已连接 / 异常」。
+ *
+ * 这一档过去是记在偏离表里的「后端没有这个信号」——实际上有：启动时逐条 Init，
+ * 成功的进 map，失败的只记日志然后跳过（cmd.initEnabledChannels）。所以
+ * 「启用了却不在 map 里」本身就是初始化失败的样子，必须报异常而不是「未运行」。
+ */
+type stateNotifyManager struct {
+	mockNotifyManager
+	live map[uint]string
+}
+
+func (m *stateNotifyManager) ChannelState(confID uint) string { return m.live[confID] }
+
+func TestChannelRuntimeState(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		enabled bool
+		live    string
+		want    string
+	}{
+		{"启用且实例健康 → 已连接", true, ChannelStateConnected, ChannelStateConnected},
+		{"启用但实例自报不健康 → 异常", true, ChannelStateError, ChannelStateError},
+		{"启用却没有实例在跑（启动时 Init 失败被跳过）→ 异常", true, "", ChannelStateError},
+		{"停用 → 停用，不算故障", false, "", ChannelStateDisabled},
+		{"停用时即使还留着实例，也按停用报", false, ChannelStateConnected, ChannelStateDisabled},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, c.want, channelRuntimeState(c.enabled, c.live))
+		})
+	}
+}
+
+func TestListConfs_RuntimeStateFromManager(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	ok := models.NotificationConf{ChannelType: "telegram", Name: "跑着的", Enabled: true}
+	bad := models.NotificationConf{ChannelType: "telegram", Name: "起不来的", Enabled: true}
+	off := models.NotificationConf{ChannelType: "webhook", Name: "停用的", Enabled: false}
+	require.NoError(t, db.Create(&ok).Error)
+	require.NoError(t, db.Create(&bad).Error)
+	require.NoError(t, db.Create(&off).Error)
+	// Enabled 带 gorm default:true，Create 会跳过 Go 的零值 false —— 得显式写一次。
+	require.NoError(t, db.Model(&off).Update("enabled", false).Error)
+
+	mgr := &stateNotifyManager{live: map[uint]string{ok.ID: ChannelStateConnected}}
+	svc := NewNotificationService(db, mgr, 0)
+
+	list, err := svc.ListConfs(context.Background())
+	require.NoError(t, err)
+	got := map[string]string{}
+	for _, d := range list {
+		got[d.Name] = d.RuntimeState
+	}
+	assert.Equal(t, ChannelStateConnected, got["跑着的"])
+	assert.Equal(t, ChannelStateError, got["起不来的"])
+	assert.Equal(t, ChannelStateDisabled, got["停用的"])
+
+	detail, err := svc.GetConf(context.Background(), bad.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ChannelStateError, detail.RuntimeState, "详情页与列表必须给同一个状态")
+}
+
+func TestListConfs_RuntimeStateEmptyWithoutStater(t *testing.T) {
+	setupTestKey(t)
+	db := setupTestDB(t)
+	row := models.NotificationConf{ChannelType: "telegram", Name: "tg", Enabled: true}
+	require.NoError(t, db.Create(&row).Error)
+
+	// manager 不实现 ChannelStater：问不到状态就给空串，不能一律按「异常」报。
+	svc := NewNotificationService(db, &mockNotifyManager{}, 0)
+	list, err := svc.ListConfs(context.Background())
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Empty(t, list[0].RuntimeState)
+}

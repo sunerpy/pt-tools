@@ -1263,6 +1263,11 @@ export interface NotificationConfig {
   enabled: boolean;
   quiet_hours_start?: string;
   quiet_hours_end?: string;
+  /**
+   * 进程内实时运行态：connected / error / disabled。不落库，重启即重算。
+   * 后端问不到这个信号时缺省（不是 "error"）—— 前端据此不画状态点。
+   */
+  runtime_state?: "connected" | "error" | "disabled";
   // Dynamic fields (frontend form shape; backend stores under encrypted config_json)
   bot_token?: string;
   allowed_users?: string;
@@ -1286,6 +1291,7 @@ const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
   "enabled",
   "quiet_hours_start",
   "quiet_hours_end",
+  "runtime_state",
 ]);
 
 const NOTIFICATION_DYNAMIC_FIELDS = [
@@ -1348,6 +1354,7 @@ function unpackNotificationResponse(
     enabled: raw.enabled,
     quiet_hours_start: raw.quiet_hours_start,
     quiet_hours_end: raw.quiet_hours_end,
+    runtime_state: raw.runtime_state,
   };
   const sink = result as unknown as Record<string, unknown>;
   // Fields that may legitimately come back as arrays of user IDs (number[] / string[]).

@@ -9,6 +9,8 @@ import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { ElMessage } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
+import { hasParsableTime, withinWindow } from "./logTimeWindow";
+
 const loading = ref(false);
 const logs = shallowRef<string[]>([]);
 const logPath = ref("");
@@ -137,11 +139,23 @@ const activeLevels = ref<Set<LogLevel>>(new Set());
  * 一个日志查看器没有搜索，五千行只能靠眼睛找。这里补上搜索与级别分段
  * （分段与左栏那张卡共用 activeLevels，两处不会各说一套）。
  *
- * 「最近 1 小时」那枚没有落地：接口只 tail 当前文件的最后 5000 行，不按时间切片；
- * 行首的时间戳格式随编码器变（JSON 与 console 两种），按它切会在某些配置下静默失效。
- * 偏离登记在 ALLOWED_GAPS 里。
+ * 「最近 1 小时」那枚现在也落地了。原先记的偏离理由（「时间戳格式随编码器变」）
+ * 是错的：config/zap.go 里四个日志**文件**用的都是同一个 JSON 编码器，
+ * console 那套只写 stdout，而这一页 tail 的正是文件。判定与筛选在 logTimeWindow.ts。
  */
 const logQuery = ref("");
+
+/** 「最近 1 小时」开关。窗口起点每次取数时重算，所以它是滚动的一小时，不是点下那一刻的 */
+const lastHourOnly = ref(false);
+/** 随 logs 一起更新的时间基准：让 shownLogs 保持纯计算，不在 computed 里读 Date.now() */
+const nowStamp = ref(Date.now());
+
+/** 这批日志里一行时间戳都解析不出来时，这枚 chip 停用 —— 不能把整页筛空 */
+const timeFilterUsable = computed(() => hasParsableTime(logs.value));
+
+const windowSince = computed(() =>
+  lastHourOnly.value && timeFilterUsable.value ? nowStamp.value - 3600_000 : null,
+);
 
 const LEVEL_SEG = [
   { label: "全部", value: "" },
@@ -182,7 +196,13 @@ const shownLogs = computed(() => {
     /* 正文就在内存里（最多 5000 行），本地筛是对的：这个接口不分页 */
     rows = rows.filter((line) => line.toLowerCase().includes(q));
   }
-  return rows;
+  return withinWindow(rows, windowSince.value) as string[];
+});
+
+/* 搜索词或时间窗一变，命中集合就换了一批 —— 和切级别一样要回到结果顶部 */
+watch([logQuery, lastHourOnly], () => {
+  scrollTop.value = 0;
+  if (logContainer.value) logContainer.value.scrollTop = 0;
 });
 
 function toggleLevel(level: LogLevel) {
@@ -197,7 +217,18 @@ function toggleLevel(level: LogLevel) {
 
 const startIndex = computed(() => {
   const rawStart = Math.floor(scrollTop.value / lineHeight.value) - overscan;
-  return Math.max(0, rawStart);
+  /*
+   * 钳到最后一行：有行就一定画得出行。
+   *
+   * 起因是一次评审判「滚到底再搜索会渲染成空白」—— 起点按旧 scrollTop 算，行数变少后
+   * 可能越过表尾，slice 得到空数组，而模板因为 shownLogs 非空并不显示零态。
+   * **这个空白态我没能复现**：内容变矮时浏览器会自己把 scrollTop 钳住并派发一次
+   * scroll 事件，onLogScroll 随即把起点纠回来（按未钳位的构建实测过，1200 行、
+   * scrollTop 24965、命中 1 行，那一行照样画得出来）。
+   * 钳位仍然留着：它便宜，且不依赖浏览器一定会补派那次 scroll 事件。
+   */
+  const maxStart = Math.max(0, shownLogs.value.length - 1);
+  return Math.min(Math.max(0, rawStart), maxStart);
 });
 
 const visibleCount = computed(() => {
@@ -443,6 +474,8 @@ async function loadLogs() {
     }
     const lines = data.lines || [];
     logs.value = lines;
+    /* 每次取数重算时间基准：「最近 1 小时」因此是滚动的一小时，不是点下那一刻起的一小时 */
+    nowStamp.value = Date.now();
     logPath.value = data.path || "";
     truncated.value = data.truncated || false;
 
@@ -508,7 +541,22 @@ function scrollToTop() {
           <PtIcon name="search" :size="14" />
         </template>
       </el-input>
-      <!-- 画板 chip-0「跟随: 开」/ chip-1（最近 1 小时，见偏离表） -->
+      <!-- 画板 chip-1「最近 1 小时」：按行里的 JSON time 字段切 -->
+      <el-tooltip
+        :content="
+          timeFilterUsable
+            ? '只看最近一小时的日志'
+            : '这批日志里没有可解析的时间戳，按时间筛会把整页筛空'
+        "
+        placement="top">
+        <el-checkbox
+          v-model="lastHourOnly"
+          :disabled="!timeFilterUsable"
+          data-testid="logs-last-hour">
+          最近 1 小时
+        </el-checkbox>
+      </el-tooltip>
+      <!-- 画板 chip-0「跟随: 开」 -->
       <el-checkbox v-model="autoScroll">跟随尾部</el-checkbox>
       <el-checkbox v-model="autoRefresh">自动刷新（15s）</el-checkbox>
 

@@ -91,6 +91,12 @@ async function loadDefinitions() {
   definitions.value = data.slice().sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
 }
 
+/** 画板 bar-64 的架构分段：全部 + 每种架构（带该架构的定义数） */
+const schemaSeg = computed(() => [
+  { label: `全部 ${definitions.value.length}`, value: "" },
+  ...schemaOptions.value.map((o) => ({ label: `${o.schema} ${o.count}`, value: o.schema })),
+]);
+
 const schemaOptions = computed(() => {
   const counts = new Map<string, number>();
   for (const d of definitions.value) {
@@ -260,13 +266,17 @@ function clearFilters() {
         <el-option label="已添加: 否" value="no" />
       </el-select>
 
-      <el-select v-model="schemaFilter" placeholder="按架构筛选" clearable class="filter-select">
-        <el-option
-          v-for="opt in schemaOptions"
-          :key="opt.schema"
-          :label="`${opt.schema} (${opt.count})`"
-          :value="opt.schema" />
-      </el-select>
+      <!--
+        画板 14 的 bar-64 上架构筛选画的是**分段器**，不是下拉。
+        这一页适合照画板来：架构本来就是单选，档位数固定（内置定义一共五种架构），
+        摊开摆着还顺手把分布量出来了 —— 下拉得点开才知道有几种。
+      -->
+      <el-segmented
+        v-model="schemaFilter"
+        class="pt-seg ss-seg"
+        :options="schemaSeg"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="supported-schema-seg" />
       <el-button v-if="search || schemaFilter || addedFilter" @click="clearFilters">
         <PtIcon name="x" :size="14" /><span>清空筛选</span>
       </el-button>
@@ -441,6 +451,11 @@ function clearFilters() {
 .filter-input {
   flex: 1 1 240px;
   max-width: 320px;
+}
+
+/* 架构分段：档位多（全部 + 五种架构），字号压小一档才不把工具栏挤换行 */
+.ss-seg :deep(.el-segmented__item-label) {
+  font-size: var(--pt-fz-xs);
 }
 
 .filter-select {

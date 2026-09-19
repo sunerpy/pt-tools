@@ -568,7 +568,18 @@ const probeOptions = computed(() => {
 });
 
 const visibleEntries = computed(() => {
-  let base = viewMode.value === "all" ? allEntries.value : enabledEntries.value;
+  /*
+   * 状态 chip 比「已启用 / 全部」那个视图开关更具体，所以一旦按状态筛，基集取全部站点。
+   *
+   * 不这样做就是个假筛选：`statusOf` 里 `off` ⟺ 未启用、`ok`/`bad` ⟺ 已启用，
+   * 而 chip 上的计数从**全部**站点算。基集若停在「已启用」，点那枚非零的
+   * 「已禁用 N」必定筛出 0 行 —— 数字写着 N，表里一行都没有。
+   * 反过来也不会多筛：off 只可能是未启用的站点，ok/bad 只可能是已启用的。
+   */
+  let base =
+    statusFilter.value.size > 0 || viewMode.value === "all"
+      ? allEntries.value
+      : enabledEntries.value;
   if (statusFilter.value.size > 0) {
     base = base.filter(([name, site]) => statusFilter.value.has(statusOf(name, site)));
   }

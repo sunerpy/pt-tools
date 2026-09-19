@@ -921,6 +921,26 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
   width: 150px;
 }
 
+/* 画板 chip-1「优惠」那枚下拉：与 chip 同宽档，不抢搜索框的位置 */
+.tb__chip-sel {
+  width: 128px;
+}
+
+/* 列设置面板：一行一个勾选 */
+.tb__cols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tb__cols-row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  cursor: pointer;
+}
+
 /* 画板 head 的图标钮：32×32 fill hover r=4 icon16（外壳只给 el-button 定了 32 高） */
 .tl-headico {
   display: flex;

@@ -43,7 +43,6 @@ const INTENTIONAL = {
   "src/views/CloakBrowserConfig.vue .cloak-page": "布局由同节点的 pt-cards--main 给",
   "src/views/DownloaderSettings.vue .downloader-page": "布局由同节点的 pt-cards--wide 给",
   "src/views/DownloaderSettings.vue .dl-cards": "布局由同节点的 pt-cards--2 给",
-  "src/views/SupportedSites.vue .site-grid": "布局由同节点的 pt-cards--2 给",
   "src/views/chatops/Bindings.vue .bindings-page": "布局由同节点的 pt-cards--lead 给",
   "src/views/chatops/NotificationDetail.vue .notify-detail-page":
     "布局由同节点的 pt-cards--wide 给",

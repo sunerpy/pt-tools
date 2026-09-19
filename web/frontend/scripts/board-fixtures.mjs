@@ -630,10 +630,30 @@ export const FIXTURES = [
   [
     "/api/logs",
     {
-      lines: Array.from(
-        { length: 120 },
-        (_, i) => `2026-09-19 01:0${i % 10}:00 INFO  示例日志第 ${i + 1} 行`,
-      ),
+      /*
+       * 照真实格式来：config/zap.go 里四个日志**文件**用的都是 JSON 编码器
+       * （TimeKey "time" + ISO8601），console 那套只写 stdout。以前这里铺的是
+       * 「2026-09-19 01:00:00 INFO ...」这种纯文本，于是「最近 1 小时」那枚 chip
+       * 在验收里永远是停用态 —— 假数据自己造了一个不存在的日志格式。
+       *
+       * 时间戳一半在一小时内、一半在三小时前，让时间窗筛得出差别。
+       */
+      /*
+       * 1200 行而不是 120：接口最多 tail 5000 行，而 120 行在 1440×1024 下几乎撑不出
+       * 滚动条 —— 虚拟滚动的起点永远算成 0，于是「筛完之后起点越过表尾」这个真实缺陷
+       * 在验收里根本触发不了（第一次写探针时它在带缺陷的构建上照样绿）。
+       */
+      lines: Array.from({ length: 1200 }, (_, i) => {
+        const level = ["info", "info", "warn", "error", "debug"][i % 5];
+        const ageMin = i % 2 === 0 ? 5 + (i % 30) : 180 + i;
+        const ts = new Date(Date.now() - ageMin * 60_000).toISOString();
+        return JSON.stringify({
+          level,
+          time: ts,
+          caller: "scheduler/rss.go:120",
+          msg: `示例日志第 ${i + 1} 行`,
+        });
+      }),
       /* 与 /api/logs/files 里 is_active 的那个文件保持一致：两处不一样时页面上会出现
          「顶栏说 all.log、工具栏说 app.log」这种自相矛盾的画面 */
       path: "/config/.pt-tools/logs/all.log",

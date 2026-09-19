@@ -531,6 +531,53 @@ func TestApiTasks_Filters(t *testing.T) {
 	})
 }
 
+/*
+ * 钉子：画板 16 的 chip-1「优惠」必须按**库里真实存在的拼法**筛。
+ *
+ * free_level 这一列存过三代拼法：site/v2 的规范值（当前写入路径）、PHP 时代
+ * DiscountType 的字面量（"50%" / "none"）、以及建表默认值 normal。前端发的是规范值，
+ * 服务端若只做规范值等值匹配，存着 "50%" 的行在选「50%」时会静默消失 ——
+ * 页脚数字和表里的行一起少，用户看不出是筛错了还是真没有。
+ */
+func TestApiTasks_FreeLevelAliases(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	rows := []*models.TorrentInfo{
+		{SiteName: "a", TorrentID: "1", FreeLevel: "FREE"},       // 规范值
+		{SiteName: "a", TorrentID: "2", FreeLevel: "PERCENT_50"}, // 规范值
+		{SiteName: "a", TorrentID: "3", FreeLevel: "50%"},        // PHP 时代的同一档
+		{SiteName: "a", TorrentID: "4", FreeLevel: "30%"},        // PHP 时代
+		{SiteName: "a", TorrentID: "5", FreeLevel: "normal"},     // 建表默认值 = 没有优惠
+		{SiteName: "a", TorrentID: "6", FreeLevel: "none"},       // PHP 时代的「没有优惠」
+		{SiteName: "a", TorrentID: "7", FreeLevel: ""},           // 从来没写过
+		{SiteName: "a", TorrentID: "8", FreeLevel: "_2X_FREE"},   // M-Team 原始串
+	}
+	for _, row := range rows {
+		require.NoError(t, global.GlobalDB.DB.Create(row).Error)
+	}
+
+	total := func(t *testing.T, level string) int64 {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tasks?free_level="+level, nil)
+		srv.apiTasks(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var got struct {
+			Total int64 `json:"total"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got.Total
+	}
+
+	assert.Equal(t, int64(1), total(t, "FREE"))
+	assert.Equal(t, int64(2), total(t, "PERCENT_50"), `PERCENT_50 必须同时命中 "50%"`)
+	assert.Equal(t, int64(1), total(t, "PERCENT_30"), `PERCENT_30 必须命中 "30%"`)
+	assert.Equal(t, int64(3), total(t, "NONE"), "NONE 覆盖 normal / none / 空串")
+	assert.Equal(t, int64(1), total(t, "2XFREE"), "2XFREE 必须命中 _2X_FREE")
+	assert.Equal(t, int64(0), total(t, "PERCENT_70"), "没有这一档就该是 0，而不是全量")
+}
+
 // 画板 10 的 KPI 带要「活跃任务 / 今日推送 / 免费种子」三个全库计数，
 // 这条测试钉住三个口径：活跃 = 未过期；今日推送按本地零点切分；免费只数未过期的。
 func TestApiTaskStats(t *testing.T) {

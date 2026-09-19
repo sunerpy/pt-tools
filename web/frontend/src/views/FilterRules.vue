@@ -677,7 +677,11 @@ function decisionText(decision: string | undefined): string {
           </template>
         </el-table-column>
 
-        <el-table-column label="匹配范围" width="110" class-name="pt-cell-muted">
+        <el-table-column
+          v-if="ruleColShown('scope')"
+          label="匹配范围"
+          width="110"
+          class-name="pt-cell-muted">
           <template #default="{ row }">{{ getMatchFieldLabel(row.match_field) }}</template>
         </el-table-column>
 
@@ -1091,6 +1095,21 @@ function decisionText(decision: string | undefined): string {
 
 <style scoped>
 /* 画板 bar-64 里的控件：搜索 220，两枚 chip 各按内容 */
+/* 列设置面板：一行一个勾选（与站点页的 .cols 同一套写法） */
+.rules-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rules-cols__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  cursor: pointer;
+}
+
 .rules-q {
   width: 220px;
 }

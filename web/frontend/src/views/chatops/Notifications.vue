@@ -39,16 +39,30 @@ const notifications = ref<NotificationConfig[]>([]);
 /*
  * 画板 22 的 bar-64 的三组控件。
  *
- * seg 只做到「全部 / 启用中 / 已停用」：画板那四档里的「已连接 / 异常」需要逐通道的连通
- * 状态，后端没有这个信号（连通性测试是详情页上手动点的一次性动作，不落库）。
+ * seg 是画板的四档。「已连接 / 异常」读的是 DTO 上的 runtime_state ——
+ * 启动时逐条 Init，成功的留着实例、失败的只记日志跳过（cmd.initEnabledChannels），
+ * 所以「启用了却没有实例在跑」就是异常。它不落库，重启即重算。
  */
 const STATUS_SEG = [
   { label: "全部", value: "" },
-  { label: "启用中", value: "on" },
+  { label: "已连接", value: "connected" },
+  { label: "异常", value: "error" },
   { label: "已停用", value: "off" },
 ] as const;
 
-const statusSeg = ref<"" | "on" | "off">("");
+const statusSeg = ref<"" | "connected" | "error" | "off">("");
+
+/** 后端没给 runtime_state 时退回到 enabled —— 问不到不等于坏了 */
+function runtimeOf(n: NotificationConfig): "connected" | "error" | "disabled" | "" {
+  if (n.runtime_state) return n.runtime_state;
+  return n.enabled ? "" : "disabled";
+}
+
+const RUNTIME_LABEL: Record<string, string> = {
+  connected: "已连接",
+  error: "异常",
+  disabled: "已停用",
+};
 const typeFilter = ref("");
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -149,8 +163,9 @@ const statRows = computed<BreakdownRow[]>(() => {
 /** 表里这一批通道 = 状态筛 + 类型筛（两条都来自画板 bar-64） */
 const shownChannels = computed(() =>
   notifications.value.filter((n) => {
-    if (statusSeg.value === "on" && !n.enabled) return false;
     if (statusSeg.value === "off" && n.enabled) return false;
+    if (statusSeg.value === "connected" && runtimeOf(n) !== "connected") return false;
+    if (statusSeg.value === "error" && runtimeOf(n) !== "error") return false;
     if (typeFilter.value && n.channel_type !== typeFilter.value) return false;
     return true;
   }),
@@ -331,9 +346,9 @@ function getChannelLabel(type: string) {
       这条带此前**整条没有**（注释里写的是「通道数量个位数，不需要筛选」）——
       但类型筛选与两种视图是画板画的，通道多起来（四个以上）就用得上。
 
-      seg 只做到「全部 / 启用中 / 已停用」：画板那四档里的「已连接 / 异常」需要逐通道的
-      连通状态，而后端没有这个信号（连通性测试是详情页上手动点的一次性动作，不落库）。
-      这一条登记在 ALLOWED_GAPS 里。
+      「已连接 / 异常」两档读 DTO 上的 runtime_state。这一条曾按「后端没有这个信号」
+      记成偏离 —— 其实有：启动时逐条 Init，成功的留着实例在 map 里，失败的只记日志
+      然后跳过，所以「启用了却不在 map 里」正是异常的样子。
     -->
     <PtToolbar v-if="notifications.length > 0" band>
       <el-segmented
@@ -425,8 +440,20 @@ function getChannelLabel(type: string) {
 
         <div class="ch-card__meta">
           <PtTag>{{ getChannelLabel(item.channel_type) }}</PtTag>
-          <PtStatusPill :tone="item.enabled ? 'ok' : 'neutral'" size="sm">
-            {{ item.enabled ? "运行中" : "已停用" }}
+          <!--
+            状态胶囊说的是**实时运行态**，不是「配置里开着没开」：
+            启用了却没起来的那条必须显示异常，写「运行中」是一句假话。
+          -->
+          <PtStatusPill
+            :tone="
+              runtimeOf(item) === 'connected'
+                ? 'ok'
+                : runtimeOf(item) === 'error'
+                  ? 'dang'
+                  : 'neutral'
+            "
+            size="sm">
+            {{ RUNTIME_LABEL[runtimeOf(item)] ?? (item.enabled ? "运行中" : "已停用") }}
           </PtStatusPill>
         </div>
 

@@ -776,6 +776,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+/* 画板 26 的 q：这一排里最宽的那个，留给「筛选站点、种子 ID…」整句 */
+.f-q {
+  width: 208px;
+}
+
 .f-id {
   width: 130px;
 }

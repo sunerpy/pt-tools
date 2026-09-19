@@ -658,6 +658,27 @@ func (m *liveNotifyManager) SetChannels(channels map[uint]notify.Channel) {
 	m.channels = channels
 }
 
+// ChannelState 实现 app.ChannelStater：把这一条通道的实例状态告诉上层。
+//
+// 只有三种可能：map 里没有（启动时 Init 失败被跳过，或配置停用没去启动）、
+// 有实例但自报不健康、有实例且健康。前两种的区分交给 app 层 —— 那边才知道
+// 这条配置到底启不启用。
+func (m *liveNotifyManager) ChannelState(confID uint) string {
+	if m == nil {
+		return ""
+	}
+	m.mu.RLock()
+	ch, ok := m.channels[confID]
+	m.mu.RUnlock()
+	if !ok || ch == nil {
+		return ""
+	}
+	if ch.Healthy() {
+		return app.ChannelStateConnected
+	}
+	return app.ChannelStateError
+}
+
 func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notification) error {
 	if m == nil {
 		return errors.New("live notify manager 未初始化")

@@ -1206,13 +1206,18 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 	 *
 	 * 放在服务端而不是前端本地筛：这个接口是分页的，本地筛会让页脚的 total 与表里的行数
 	 * 对不上 —— 那正是搜索页踩过的「站点命中 12 条配一张少几行的表」。
-	 * `NONE` 当成「没有优惠」：库里既可能存字面量 NONE，也可能是空串。
+	 *
+	 * 按别名集合匹配而不是按规范值等值匹配：这一列存过三代拼法（规范的 PERCENT_50、
+	 * PHP 时代的 "50%"、建表默认的 normal），只认规范值会让存着 "50%" 的行在选「50%」
+	 * 时静默消失。别名表与 NONE 的语义都在 models.FreeLevelAliases 里。
 	 */
-	if free := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("free_level"))); free != "" {
-		if free == "NONE" {
-			tx = tx.Where("free_level = ? OR free_level = ? OR free_level IS NULL", "NONE", "")
+	if free := strings.TrimSpace(r.URL.Query().Get("free_level")); free != "" {
+		vals := models.FreeLevelQueryValues(free)
+		if models.CanonicalFreeLevel(free) == "NONE" {
+			/* 没写过的行可能是 NULL，UPPER(NULL) 不参与 IN 比较，得单列一条 */
+			tx = tx.Where("UPPER(COALESCE(free_level, '')) IN ?", vals)
 		} else {
-			tx = tx.Where("UPPER(free_level) = ?", free)
+			tx = tx.Where("UPPER(free_level) IN ?", vals)
 		}
 	}
 	var total int64

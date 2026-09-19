@@ -411,6 +411,9 @@ const headSub = computed(() => {
   const c = torrentStateCounters.value;
   if (c.downloading > 0) parts.push(`${c.downloading} 下载中`);
   if (c.seeding > 0) parts.push(`${c.seeding} 做种中`);
+  /* 画板 18 的 sub 示例是「37 个任务 · 12 下载中 · 19 做种中 · 6 已暂停 · ↓… ↑…」五段，
+     「已暂停」这一段此前漏了 —— 暂停着的任务恰恰是最需要在页头看见的那一类 */
+  if (c.paused > 0) parts.push(`${c.paused} 已暂停`);
   const t = transferStats.value;
   if (t) {
     parts.push(`↓${formatSize(t.total_download_speed)}/s`);

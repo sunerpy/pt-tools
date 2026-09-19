@@ -105,7 +105,13 @@ const EXPECT = {
     gridColumns: ["#", "站点", "状态", "认证", "RSS", "探测", "操作"],
     probes: [
       {
-        desc: "状态 chip 真的在筛（点「已禁用」之后表格行数应当变成该档的计数）",
+        /*
+         * 这条断言原先写的是 `after === 0`，而说明写的是「行数应当变成该档的计数」——
+         * 两者不是一回事，于是它把一个假筛选定义成了成功：计数从全部站点算、
+         * 筛却在「已启用」里筛，点非零的「已禁用 N」必定 0 行，断言照样通过。
+         * 现在断言的是 chip 上那个数字本身。
+         */
+        desc: "状态 chip 真的在筛（点「已禁用 N」之后表格行数应当正好是 N）",
         want: "verdict=ok",
         js: `(async () => {
           const rows = () => document.querySelectorAll('.pt-band--grid tbody tr').length;
@@ -120,10 +126,10 @@ const EXPECT = {
           chip.click();
           await new Promise((r) => setTimeout(r, 400));
           const restored = rows();
-          /* 视图范围是「已启用」，所以点「已禁用」应当筛到 0 行；再点一次要回到原样 */
-          const ok = after === 0 && restored === before && want >= 0;
+          /* want 必须 > 0，否则这条探针是空的：0 行等于 0 行，什么都没证明 */
+          const ok = want > 0 && after === want && restored === before;
           return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
-            ' chip=' + label + ' 行数 ' + before + '→' + after + '→' + restored;
+            ' chip=' + label + ' 期望 ' + want + ' 行数 ' + before + '→' + after + '→' + restored;
         })()`,
       },
     ],
@@ -136,7 +142,8 @@ const EXPECT = {
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["内置能力"],
     /* 画板 14 的 bar-64：seg（架构）+ q + chip-0「已添加: 全部」+ 右端两枚视图钮 */
-    controls: ["搜索", "已添加", "按架构筛选", "卡片视图", "紧凑列表"],
+    needsSeg: true,
+    controls: ["搜索", "已添加", "NexusPHP", "卡片视图", "紧凑列表"],
   },
   "/search": {
     board: "15 种子搜索",
@@ -268,7 +275,14 @@ const EXPECT = {
      * 工具栏里不再摆第二份（同一屏两份同样的入口正是用户退回过的事），
      * 所以这里只查那几档状态的标签在不在，不要求它们长在工具栏带里。
      */
-    controls: ["搜索标题、分类、标签", "列", "导出", "下载中", "做种中"],
+    controls: ["搜索标题、分类、标签", "列", "导出"],
+    /*
+     * 画板 18 的状态筛选画在「状态」那张卡里，不在 bar-64 上。
+     * 这里只写读回规格里确实有的词（sub 示例：「12 下载中 · 19 做种中 · 6 已暂停」）——
+     * 那张卡每一档的确切措辞不在读回规格里，所以「暂停」取的是公共子串，
+     * 「暂停」与「已暂停」都能对上，不拿我猜的措辞去当画板事实。
+     */
+    pageControls: ["全部", "下载中", "做种中", "暂停"],
     /*
      * 画板 38（弹窗与菜单）与 39（任务详情抽屉）的规格。它们只有点开才存在，
      * 所以用探针量：列 popover 260、添加种子弹窗 620、任务详情抽屉 56%（1440 上 ≈806）。
@@ -414,7 +428,44 @@ const EXPECT = {
     titles: ["匹配顺序", "试跑", "命中统计", "规则怎么生效"],
     needsSeg: true, // 画板 bar-64 的「全部 / 启用 / 禁用」分段
     /* 画板 20 的 bar-64：seg + q + chip-0「类型: 全部」+ chip-1「仅免费: 全部」+ 右端三枚图标钮 */
-    controls: ["全部", "启用", "禁用", "试跑这条", "类型", "仅免费", "列设置", "导出"],
+    controls: ["全部", "启用", "禁用", "类型", "仅免费", "列设置", "导出"],
+    /* 画板 20 的「试跑这条」画在 p-test 那张卡里，不在 bar-64 上 */
+    pageControls: ["试跑这条"],
+    /*
+     * 列设置里的每一项都必须真的能关掉那一列。
+     *
+     * 这条探针来自一个真实缺陷：「匹配范围」在列设置里列着、勾选状态也存进了
+     * localStorage，而表头那一列压根没接 ruleColShown('scope') —— 勾掉它什么都不会发生。
+     * 光看工具栏有没有「列设置」这枚钮是查不出无效控件的。
+     */
+    probes: [
+      {
+        desc: "列设置里勾掉「匹配范围」，表头那一列要真的消失（无效控件查不出来）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const heads = () => [...document.querySelectorAll('.pt-band--grid th .cell')]
+            .map((el) => (el.textContent ?? '').trim());
+          const before = heads();
+          if (!before.includes('匹配范围')) return 'no-column:' + before.join('/');
+          document.querySelector('[data-testid=rules-cols-btn]')?.click();
+          await wait(500);
+          const row = [...document.querySelectorAll('.rules-cols__row')]
+            .find((el) => (el.textContent ?? '').includes('匹配范围'));
+          if (!row) return 'no-row';
+          row.querySelector('.el-checkbox')?.click();
+          await wait(600);
+          const after = heads();
+          const ok = !after.includes('匹配范围') && after.length === before.length - 1;
+          /* 勾回去：这个偏好存 localStorage，留着会影响后面几趟（移动 / 空态）对同一页的量测 */
+          row.querySelector('.el-checkbox')?.click();
+          await wait(400);
+          const restored = heads();
+          return 'verdict=' + (ok && restored.includes('匹配范围') ? 'ok' : 'MISMATCH') +
+            ' 列数 ' + before.length + '→' + after.length + '→' + restored.length;
+        })()`,
+      },
+    ],
     /* 画板 20 的表头（落地多一列「启用」，是功能列，按 owner 原则保留） */
     gridColumns: [
       "序号",
@@ -506,7 +557,8 @@ const EXPECT = {
     /* 画板 22 的 bar-64：seg（全部/已连接/异常/已停用）+ chip「类型」+ 两枚视图钮 */
     needsSeg: true,
     /* 「已连接」按画板列进来，落地没有这一档 —— 让它红，原因在 ALLOWED_GAPS 里 */
-    controls: ["启用中", "已停用", "类型", "卡片视图", "紧凑列表", "已连接"],
+    /* 画板 22 的四档分段：全部 / 已连接 / 异常 / 已停用 —— 现在四档都落地了 */
+    controls: ["全部", "已连接", "异常", "已停用", "类型", "卡片视图", "紧凑列表"],
   },
   "/chatops/notifications/1": {
     board: "23 + 37 通道详情",
@@ -529,7 +581,8 @@ const EXPECT = {
      * 这一页的数据得真的落到表单里。假数据里通道详情曾与列表撞前缀，详情页拿到一个数组，
      * 画出来是「未命名通道 / ID -」—— 卡都在、标题都对，检查照样全绿。
      */
-    controls: ["保存基本信息", "保存凭证", "发送测试消息"],
+    /* 画板 23 的三枚钮都在卡里（c-basic / c-test 底部），这一页没有 bar-64 */
+    pageControls: ["保存基本信息", "保存凭证", "发送测试消息"],
     probes: [
       {
         desc: "通道详情的数据落进了表单（不是空壳）",
@@ -558,6 +611,8 @@ const EXPECT = {
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["命令分布", "渠道分布", "失败与被拒", "保留与清理"],
     /* 画板 25 的 bar-64：seg（全部/成功/拒绝/失败）+ q + chip 通道 + chip 时间 + 三枚图标钮 */
+    /* 分段器按画板列进来，落地是多选下拉 —— 让它红，原因在 ALLOWED_GAPS 里 */
+    needsSeg: true,
     controls: ["筛选命令、触发用户", "全部通道", "全部结果", "导出"],
     /* 画板 25 的表头 */
     gridColumns: ["时间", "通道", "触发用户", "命令", "结果", "延迟"],
@@ -570,6 +625,8 @@ const EXPECT = {
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["推送结果分布", "幂等与去重", "待重试与失败", "按站点分布", "安静时段"],
     /* 画板 26 的 bar-64：seg（结果）+ q「筛选站点、种子 ID…」+ chip 通道 + 三枚图标钮 */
+    /* 同 audit：画板是分段器，落地是多选下拉 —— 让它红，原因在 ALLOWED_GAPS 里 */
+    needsSeg: true,
     controls: ["筛选站点、种子 ID", "全部类型", "全部结果", "全部通道", "导出"],
     /* 画板 26 的表头 */
     gridColumns: ["时间", "站点", "种子 ID", "类型", "通道", "结果", "尝试", "操作"],
@@ -606,6 +663,85 @@ const EXPECT = {
       "ERROR",
       "DEBUG",
       "最近 1 小时",
+    ],
+    /*
+     * 正文搜索必须**真的画出命中的行**，而且是在滚到底的状态下搜。
+     *
+     * 说清这条探针证明了什么：一次评审判「滚到底再搜会渲染成空白」——
+     * 代码层面 startIndex 确实没钳位，但在真实浏览器里内容变矮时 scrollTop 会被
+     * 浏览器自己钳住并因此**真的派发一次 scroll 事件**，onLogScroll 随即把起点纠回来。
+     * 我按带缺陷的构建实测过（1200 行、scrollTop=24965、命中 1 行）：照样画得出那一行。
+     * 所以这条探针守的是「搜完能看见结果」这个行为，不是那个没能复现的空白态。
+     */
+    probes: [
+      {
+        desc: "先滚到底再搜索：命中的行要真的画出来（虚拟滚动起点不能停在旧位置）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const target = document.querySelector('.log-container');
+          if (!target) return 'no-scroller';
+          target.scrollTop = target.scrollHeight;
+          target.dispatchEvent(new Event('scroll'));
+          await wait(400);
+          const input = document.querySelector('[data-testid=logs-search] input')
+            ?? document.querySelector('input[data-testid=logs-search]')
+            ?? document.querySelector('.log-q input');
+          if (!input) return 'no-search';
+          /*
+           * 关键词必须**只命中很少几行**。第一版取的是行里第一个英文单词，
+           * JSON 行里那就是 "level" —— 每一行都有，命中集合不缩小，缺陷根本没被触发，
+           * 于是这条探针在带缺陷的构建上照样绿。这里取一行末尾那一小段（含行号），
+           * 并在命中数过多时直接判失败，不让它再退化成一条空探针。
+           */
+          const sample = document.querySelector('.log-line');
+          const text = (sample?.textContent ?? '').trim();
+          if (text.length < 12) return 'no-sample';
+          const word = text.slice(-10);
+          input.value = word;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          await wait(700);
+          const shown = document.querySelectorAll('.log-line').length;
+          const pre = document.querySelector('.log-content');
+          const hits = pre ? Math.round(parseFloat(pre.style.height || '0') / 24) : -1;
+          /* hits 少、shown 大于 0：命中集合确实缩小了，而且缩小之后照样画得出来 */
+          const ok = hits > 0 && hits <= 5 && shown > 0;
+          /* 清空搜索框：探针共用同一个页面状态，留着它下一条探针量的就是「搜索 ∩ 时间窗」 */
+          input.value = '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          await wait(400);
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
+            ' 搜「' + word + '」命中 ' + hits + ' 行、画出 ' + shown + ' 行';
+        })()`,
+      },
+      {
+        /*
+         * 「最近 1 小时」要真的少掉几行。假数据一半在一小时内、一半在三小时前，
+         * 所以总行数必须严格变小 —— 只断言「点得动」测不出它有没有在筛。
+         */
+        desc: "「最近 1 小时」真的按行里的时间戳筛（总行数要变小，且 chip 不是停用态）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const total = () => {
+            const pre = document.querySelector('.log-content');
+            return pre ? Math.round(parseFloat(pre.style.height || '0')) : -1;
+          };
+          const cb = document.querySelector('[data-testid=logs-last-hour]');
+          if (!cb) return 'no-chip';
+          if (cb.classList.contains('is-disabled')) return 'chip-disabled（这批日志解析不出时间戳）';
+          const before = total();
+          cb.querySelector('input')?.click();
+          await wait(700);
+          const after = total();
+          cb.querySelector('input')?.click();
+          await wait(500);
+          const restored = total();
+          const ok = before > 0 && after > 0 && after < before && restored === before;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
+            ' 内容高 ' + before + '→' + after + '→' + restored;
+        })()`,
+      },
     ],
   },
   "/password": {
@@ -650,6 +786,16 @@ const RAIL_GAP_REASON =
   "rail 再摆一遍就是同一屏里两份导航。用户当时定的三条硬约束（主题入口必须可见、" +
   "rail 快捷入口不能与导航列同时出现、导航列必须可收起）优先于画板，" +
   "所以这条不按画板改回去。导航列收起时这些入口照旧出现。";
+
+/*
+ * 「画板画了、落地没有」这一类偏离的前缀。
+ *
+ * 分出这个标记的原因：偏离表里其实混着三类东西 —— 技术上做不了的、owner 拍板保留的、
+ * 以及画板画了而确实没做的。三类混在一起打印，最后一类就被前两类稀释成了背景噪音，
+ * 而收尾那句仍然是「与画板一致」。一次评审正是判「设计缺项仍被验收放行」，判得对：
+ * 少了这个标记，脚本退 0 就等于替我说了一句没根据的话。
+ */
+const UNIMPL = "画板画了、落地没有：";
 
 const ALLOWED_GAPS = {
   /* 外壳级偏离：每条桌面路由都会量到，逐条登记（键必须逐条写，键里不能有通配） */
@@ -696,24 +842,33 @@ const ALLOWED_GAPS = {
    * RSS 流水：已下载 / 已推送 / 已过期，在 apiTasks 里是逐个 AND 的可叠加标记。
    * 两者不是同一套词汇 —— 那五档属于下载器控制台（画板 18），那一页确实有它们。
    */
-  "/chatops/notifications controls(已连接)":
-    "画板 22 的 seg 是四档（全部/已连接/异常/已停用）；落地只做到三档（全部/启用中/已停用）——" +
-    "「已连接 / 异常」需要逐通道的连通状态，后端没有这个信号：连通性测试是详情页上手动点的" +
-    "一次性动作，结果不落库。要做得先有按通道的健康记录。",
-
-  "/logs controls(最近 1 小时)":
-    "画板 29 的 chip-1 是「最近 1 小时」，落地没有：接口只 tail 当前文件的最后 5000 行，" +
-    "不按时间切片；而行首时间戳的格式随编码器变（JSON 与 console 两种），" +
-    "按它切会在某些配置下静默失效 —— 与其给一个有时不准的筛选，不如先不给。",
-
   "/userinfo controls(周期)":
+    UNIMPL +
     "画板 10 的 chip-0 是「周期: 本周」，落地没有：聚合接口只回当前快照，没有历史序列，" +
     "按周期筛在数据上不成立。要做得先有按时间的站点数据接口。",
 
   "/tasks controls.seg":
+    UNIMPL +
     "画板 16 的分段是五档下载器状态（全部/下载中/做种中/等待中/已暂停）；这一页是 RSS 流水，" +
     "只有已下载 / 已推送 / 已过期三个标记，而且它们是可叠加的（apiTasks 里逐个 AND）——" +
     "「已下载 + 已推送」= 推成功了的，收成互斥分段会把这个组合删掉。下载器状态在画板 18 那一页。",
+
+  /*
+   * 画板 25 / 26 的 bar-64 画的是分段器，落地是**多选**下拉。两条原因：
+   *   ① 分段是单选，换过去会删掉「成功 + 出错」这类组合筛选；
+   *   ② 这两条带上已经排了日期区间 + 两个下拉 + 搜索框，再插一条 4~6 档的分段会换行，
+   *      把带高从画板的 40 撑开。
+   * 供 owner 复核：要按画板改成单选分段，就得接受丢掉组合筛选（或把日期区间换成快捷 chip）。
+   */
+  "/chatops/audit controls.seg":
+    UNIMPL +
+    "画板 25 是四档结果分段（全部/成功/被拒绝/出错）；落地是多选下拉。" +
+    "分段单选，换过去会删掉「成功 + 出错」这类组合；而这条带上已经有日期区间 + 通道下拉 +" +
+    "结果下拉 + 搜索，再加四档分段会换行把带高撑过 40。",
+  "/chatops/rss-notifications controls.seg":
+    UNIMPL +
+    "画板 26 是五档结果分段；落地是多选下拉（sent/failed/suppressed/pending/throttled 五档" +
+    "外加「全部」是六格）。同 audit：组合筛选 + 带宽两条原因。",
 
   "/filter-rules grid.columns":
     "画板 20 九列；落地多一列「启用」——规则的开关本来就在表里改（画板把开关画进了操作列的省略菜单），" +
@@ -744,6 +899,7 @@ const ALLOWED_GAPS = {
     "那三个 chip 是可组合的（apiTasks 里逐个 AND），收成画板那条互斥分段器会删掉组合筛选能力 —— " +
     "这正是第九轮修掉的缺陷，不能为了对齐画板再改回去。",
   "/sites@375 rowCards.spark":
+    UNIMPL +
     "画板 30 的行卡里有一条 120×18 的 8 根柱走势图，落地没有：后端没有按站点的历史序列接口。" +
     "perSiteStats 只给当前快照（uploaded / ratio / seeding …），造一条假的走势比不画更糟。",
 
@@ -963,6 +1119,12 @@ const MEASURE = `(() => {
   };
   const one = (sel) => { const el = document.querySelector(sel); return el ? box(el) : null; };
   const inner = document.querySelector('.pt-shell__inner');
+  /*
+   * 「带」的范围：工具栏带 / 页头带 / 批量选择带。画板的 bar-64 就是这几条，
+   * 控件身份只在这里面采 —— 整页采会让卡片里或对话框里同名的按钮冒充工具栏控件。
+   */
+  const bars = [...document.querySelectorAll('.pt-band--toolbar, .pt-band--head, .pt-band--sel, .pt-head')];
+  const inBars = (sel) => bars.flatMap((b) => [...b.querySelectorAll(sel)]);
   return {
     head: one('.pt-head'),
     kpi: one('.pt-kpi'),
@@ -985,11 +1147,16 @@ const MEASURE = `(() => {
      * 文案在 .el-select__placeholder / selected-item 上 —— 不收进来的话
      * 「工具栏少了两枚筛选 chip」这种缺失照样查不出来。
      */
-    controlText: [...document.querySelectorAll(
+    /*
+     * 采集范围**限定在带里**（工具栏带 / 页头带 / 批量选择带），不是整页。
+     * 原先扫的是整个 document，于是一个写着「导出」的按钮不管在哪 —— 卡片里、
+     * 对话框里 —— 都能让「工具栏有导出」这条断言通过。那不是在查工具栏。
+     */
+    controlText: inBars(
       'button, .el-segmented__item, .pt-band__tab, .el-select__placeholder, .el-select__selected-item,' +
         /* 勾选框的文案也算控件身份：画板把「跟随: 开」这类画成 chip，落地是 el-checkbox */
         ' .el-checkbox__label, .el-radio__label',
-    )]
+    )
       .flatMap((el) => [
         (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
         el.getAttribute('aria-label') ?? '',
@@ -1000,12 +1167,35 @@ const MEASURE = `(() => {
          * 搜索框的身份是它的 placeholder（画板就是这么标的：「筛选命令、触发用户…」）。
          * 不收进来的话「这一页少了搜索框」查不出来 —— input 既没有 textContent 也不是 button。
          */
+        inBars('input[placeholder], textarea[placeholder]').map(
+          (el) => el.getAttribute('placeholder') ?? '',
+        ),
+      )
+      .filter(Boolean),
+    /*
+     * 整页那一层单独留着：画板也在卡片里画按钮（试跑那张卡的「试跑这条」、
+     * 通道详情三张卡的保存/测试钮、下载器控制台「状态」卡里的五档快捷筛选）。
+     * 它们同样是画板画了就得有的控件，只是不属于 bar-64 —— 分成两层之后，
+     * 「工具栏里有没有」和「这一页里有没有」各自说得清。
+     */
+    pageControlText: [...document.querySelectorAll(
+      'button, .el-segmented__item, .pt-band__tab, .el-select__placeholder, .el-select__selected-item,' +
+        ' .el-checkbox__label, .el-radio__label',
+    )]
+      .flatMap((el) => [
+        /* 这一整段在模板字符串里：反斜杠 s 必须写两个反斜杠，写一个注入出去会塌成字母 s */
+        (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
+        el.getAttribute('aria-label') ?? '',
+        el.getAttribute('title') ?? '',
+      ])
+      .concat(
         [...document.querySelectorAll('input[placeholder], textarea[placeholder]')].map(
           (el) => el.getAttribute('placeholder') ?? '',
         ),
       )
       .filter(Boolean),
-    hasSeg: Boolean(document.querySelector('.pt-seg, .el-segmented')),
+    /* 分段器也只认带里的那个：卡片内部的分段不是画板 bar-64 上那条 */
+    hasSeg: inBars('.pt-seg, .el-segmented').length > 0,
     /* 表格带的列名与行高 —— 画板对表格页规定了列集合与 34 的行节奏 */
     gridColumns: [...document.querySelectorAll('.pt-band--grid th .cell')]
       .map((el) => (el.textContent ?? '').replace(/\\s+/g, ' ').trim())
@@ -1237,6 +1427,7 @@ for (const route of routes) {
     const outcome = await ev(probe.js).catch((e) => `probe 失败：${e.message}`);
     const text = typeof outcome === "string" ? outcome : JSON.stringify(outcome);
     const missing = probeMiss(text, probe.want);
+    if (process.env.PT_PROBE_VERBOSE) console.log(`  probe> ${route} ${text}`);
     if (missing.length > 0) {
       fail(`probe(${probe.desc})`, `结果里缺「${missing.join("、")}」，实测 ${text}`);
     }
@@ -1346,7 +1537,13 @@ for (const route of routes) {
   }
   for (const label of want.controls ?? []) {
     if (!got.controlText.some((t) => t.includes(label))) {
-      fail(`controls(${label})`, `找不到写着「${label}」的控件`);
+      fail(`controls(${label})`, `带里（工具栏 / 页头 / 批量条）找不到写着「${label}」的控件`);
+    }
+  }
+  /* 画板画在卡片里的控件：不要求在带上，但这一页里必须有 */
+  for (const label of want.pageControls ?? []) {
+    if (!got.pageControlText.some((t) => t.includes(label))) {
+      fail(`pageControls(${label})`, `整页都找不到写着「${label}」的控件`);
     }
   }
 
@@ -2029,6 +2226,20 @@ for (const [reason, keys] of byReason) {
     keys.length > 3 ? `${keys.length} 条路由的 ${keys[0].split(" ")[1]}` : keys.join("、");
   console.log(`· 已记偏离 ${where} —— ${reason}`);
 }
+
+/*
+ * 「画板画了、落地没有」单独再报一遍。
+ *
+ * 混在上面那串「已记偏离」里等于藏起来：那串里大多数是外壳级的一条原因乘以 21 条路由，
+ * 真正的设计缺项被稀释掉了，而收尾那句还是「与画板一致」。
+ */
+const unimplemented = [...gapsUsed].filter((k) => ALLOWED_GAPS[k].startsWith(UNIMPL));
+if (unimplemented.length > 0) {
+  console.log(`\n⚠ 画板画了、落地没有（${unimplemented.length} 项，都是有意登记的，不是漏查）：`);
+  for (const k of unimplemented) {
+    console.log(`    ${k} —— ${ALLOWED_GAPS[k].slice(UNIMPL.length)}`);
+  }
+}
 for (const k of stale) {
   console.log(`? 偏离登记多余（这一项其实已经对上了，删掉它）：${k}`);
 }
@@ -2039,7 +2250,13 @@ const scope =
   (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
   (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
-  console.log(`\n${scope} 与画板一致（${gapsUsed.size} 条已记偏离）`);
+  /*
+   * 绝不单独输出「与画板一致」。退 0 只说明「没有未登记的差异」，
+   * 而登记在案的设计缺项一样是差异 —— 那句话得把它们带上才不算替我说谎。
+   */
+  const tail =
+    unimplemented.length > 0 ? `，其中 ${unimplemented.length} 项是画板画了而落地没有（见上）` : "";
+  console.log(`\n${scope}：没有未登记的差异；另有 ${gapsUsed.size} 条已记偏离${tail}`);
 } else {
   console.log(`\n${scope}：${failures.length} 处与画板不一致，${stale.length} 条偏离登记多余`);
 }
