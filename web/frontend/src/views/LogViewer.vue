@@ -512,9 +512,11 @@ function scrollToTop() {
       <el-checkbox v-model="autoScroll">跟随尾部</el-checkbox>
       <el-checkbox v-model="autoRefresh">自动刷新（15s）</el-checkbox>
 
-      <template v-if="logPath" #note>
-        <code class="log-path">{{ logPath }}</code>
-      </template>
+      <!--
+        路径不再挂在带上：它现在在页头摘要里（文件名 · 体积 · 跟随状态），
+        目录也在「日志文件」卡里写着。挂第三份的代价是它换行占掉两行宽度，
+        把搜索框挤成「搜索日志…」——实测如此。
+      -->
 
       <template #right>
         <el-button @click="scrollToTop">
@@ -661,7 +663,7 @@ function scrollToTop() {
 <style scoped>
 /* 画板 29 的 q：220 宽 */
 .log-q {
-  flex: 0 1 220px;
+  flex: 0 1 240px;
 }
 
 /*
