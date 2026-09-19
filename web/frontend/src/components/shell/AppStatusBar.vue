@@ -5,6 +5,7 @@ import { useRuntimeStore } from "../../stores/runtime";
 import { useVersionStore } from "../../stores/version";
 import VersionChecker from "../VersionChecker.vue";
 import PtIcon from "../PtIcon";
+import PtStatusPill from "../ui/PtStatusPill.vue";
 
 /**
  * 底部深色状态条（设计稿 G 的 `statusbar`，高 28）。
@@ -18,6 +19,13 @@ const schedulerIcon = computed(() => {
   if (runtimeStore.schedulerHint === "running") return "circle-check";
   if (runtimeStore.schedulerHint === "stopped") return "circle-pause";
   return "activity";
+});
+
+/** 浮层里那枚状态胶囊的语义色（画板 41 的 sched-pop 顶部 pill） */
+const schedulerTone = computed<"ok" | "warn" | "neutral">(() => {
+  if (runtimeStore.schedulerHint === "running") return "ok";
+  if (runtimeStore.schedulerHint === "stopped") return "warn";
+  return "neutral";
 });
 
 const schedulerColor = computed(() => {
@@ -155,7 +163,14 @@ const year = computed(() => {
 
 <template>
   <footer class="pt-status" aria-label="运行状态">
-    <el-popover placement="top-start" trigger="click" :width="200" :offset="10">
+    <!--
+      调度器开关的浮层。画板 41 的 sched-pop 是 300 宽、176 高：
+      「调度器」小标题 + 状态胶囊 + 分隔线 + 「最后同步 … · 间隔 N 分钟」+ 两个按钮。
+      原来只有两个按钮、200 宽 —— 点开之后看不出当前是什么状态，也看不出上次同步在什么时候，
+      而这两件事正是决定「要不要按停止」的依据。
+      画板还注明两个动作都先弹确认框：runtimeStore 的 confirmAnd 已经这么做了。
+    -->
+    <el-popover placement="top-start" trigger="click" :width="300" :offset="10">
       <template #reference>
         <button type="button" class="pt-status__cell pt-status__cell--btn">
           <PtIcon :name="schedulerIcon" :size="13" :style="{ color: schedulerColor }" />
@@ -164,6 +179,15 @@ const year = computed(() => {
         </button>
       </template>
       <div class="pt-status__menu">
+        <div class="pt-status__menu-head">
+          <span class="pt-status__menu-t">调度器</span>
+          <PtStatusPill :tone="schedulerTone" size="sm">{{
+            runtimeStore.schedulerText
+          }}</PtStatusPill>
+        </div>
+        <p class="pt-status__menu-sync">
+          最后同步 {{ runtimeStore.lastSyncText }} · 间隔 {{ runtimeStore.pollMinutes }} 分钟
+        </p>
         <el-button
           size="small"
           type="danger"

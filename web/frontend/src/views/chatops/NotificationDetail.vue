@@ -90,6 +90,19 @@ const basicRules: FormRules = {
   ],
 };
 
+/**
+ * 画板 37 的 p-map：四种 channel_type 各自的显示名与唯一必填项。
+ *
+ * 取值不是抄的：类型字符串是各适配器 `RegisterChannel` 的注册名
+ * （internal/notify/adapter/*），必填项与下面的 `credRules` 同源 —— 两处要一起改。
+ */
+const channelTypeMap = [
+  { type: "telegram", label: "Telegram", must: "bot_token" },
+  { type: "qq_onebot", label: "QQ (OneBot)", must: "listen_addr" },
+  { type: "webhook", label: "Webhook", must: "endpoint_url" },
+  { type: "wecom_webhook", label: "WeCom Webhook", must: "webhook_key" },
+] as const;
+
 const credRules = computed<FormRules>(() => {
   switch (conf.channel_type) {
     case "telegram":
@@ -654,6 +667,46 @@ function goBack() {
         </li>
       </ul>
     </PtPanel>
+
+    <!--
+      画板 37（通道详情 · 凭证 tab）的两张说明卡：p-sec 700「密钥与安全」、
+      p-map 364「channel_type 映射」。每句话都能在代码里核对：
+        · 加密在 internal/crypto（AES-256-GCM），密钥来自 base64 的
+          PT_TOOLS_SECRET_KEY 或 ~/.pt-tools/secret.key 里的十六进制文本；
+        · 列表 DTO 整体脱敏 ConfigJSON，只有这个鉴权后的详情页会解密回显；
+        · 映射表的四个取值来自各适配器的注册名（telegram / qq_onebot /
+          webhook / wecom_webhook），必填项来自本文件的 credRules。
+      画板那一版把四种类型做成 tab 并列展示，那是规格页的写法：一条已存在的通道类型不可改
+      （页头那句「类型不可修改，换类型请删除后重建」），所以这里只画当前类型的表单，
+      四种类型的差异改由这张映射卡交代。
+    -->
+    <PtPanel class="sec-card" title="密钥与安全" icon="shield-check">
+      <ul class="sec">
+        <li>
+          Bot Token、Access Token、HMAC Secret、Webhook Key 以及代理凭据都以
+          <strong>AES-256-GCM</strong> 加密后落库，不存明文。
+        </li>
+        <li>
+          列表接口整体脱敏 <code>config_json</code>，只有这一页（鉴权之后）会解密回显；
+          日志与审计不输出明文。
+        </li>
+        <li>
+          密钥取自 <code>PT_TOOLS_SECRET_KEY</code>（base64）或
+          <code>~/.pt-tools/secret.key</code>（十六进制文本）。密钥缺失或轮换之后，
+          旧凭证解不开，需要重新保存一次。
+        </li>
+      </ul>
+    </PtPanel>
+
+    <PtPanel class="map-card" title="channel_type 映射" icon="list-checks">
+      <ul class="cmap">
+        <li v-for="row in channelTypeMap" :key="row.type" class="cmap__row">
+          <code>{{ row.type }}</code>
+          <span class="cmap__label">{{ row.label }}</span>
+          <span class="cmap__must">必填 {{ row.must }}</span>
+        </li>
+      </ul>
+    </PtPanel>
   </div>
 </template>
 
@@ -661,6 +714,58 @@ function goBack() {
 /* 提示文案卡：一行一条，左胶囊右场景 */
 .msg-card {
   max-width: 700px;
+}
+
+/* 画板 37 的 p-sec 700 / p-map 364 */
+.sec-card {
+  max-width: 700px;
+}
+
+.map-card {
+  max-width: 364px;
+}
+
+.sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: var(--pt-space-4);
+  font-size: var(--pt-fz-sm);
+  line-height: 1.7;
+  color: var(--pt-t2);
+}
+
+.cmap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmap__row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 2px var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-label);
+}
+
+.cmap__row code {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t1);
+}
+
+.cmap__label {
+  color: var(--pt-t2);
+}
+
+/* 必填项另起一行，靠左对齐到类型名下方 */
+.cmap__must {
+  grid-column: 1 / -1;
+  color: var(--pt-t3);
 }
 
 .msg {

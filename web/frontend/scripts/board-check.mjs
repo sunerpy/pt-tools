@@ -108,19 +108,31 @@ const EXPECT = {
      */
     probes: [
       {
-        desc: "点「音乐」档位：没有分类的行被筛掉且条数有交代",
-        want: "没有分类信息",
+        desc: "分类 + 仅免费 + 一并显示：说明里的条数与表格真会多出来的行数一致",
+        want: "一致",
         js: `(async () => {
-          const seg = [...document.querySelectorAll('.el-segmented__item, .pt-seg__item, button')]
-            .find((b) => (b.textContent ?? '').trim() === '音乐');
-          if (!seg) return 'no-seg';
-          seg.click();
-          await new Promise((r) => setTimeout(r, 600));
-          const note = (document.querySelector('.pt-note.nocat')?.textContent ?? '')
-            .replace(/\\s+/g, ' ')
-            .trim();
-          const rows = document.querySelectorAll('.el-table__body tbody tr').length;
-          return note + ' | 表里 ' + rows + ' 行';
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const click = (pred) => {
+            const el = [...document.querySelectorAll('button, .el-segmented__item, .pt-seg__item, .el-checkbox')]
+              .find(pred);
+            if (!el) return false;
+            el.click();
+            return true;
+          };
+          /* 先开「仅免费」，再点「音乐」—— 两个筛选叠着才能测出计数用错集合 */
+          if (!click((b) => (b.textContent ?? '').trim().startsWith('仅免费'))) return 'no-free';
+          await wait(400);
+          if (!click((b) => (b.textContent ?? '').trim() === '音乐')) return 'no-seg';
+          await wait(600);
+          const noteText = (document.querySelector('.pt-note.nocat')?.textContent ?? '');
+          const said = Number((noteText.match(/(\\d+)\\s*条/) ?? [])[1] ?? -1);
+          const before = document.querySelectorAll('.el-table__body tbody tr').length;
+          if (!click((b) => (b.textContent ?? '').trim() === '一并显示')) return 'no-toggle:' + noteText;
+          await wait(600);
+          const after = document.querySelectorAll('.el-table__body tbody tr').length;
+          const delta = after - before;
+          return '说明 ' + said + ' 条 / 表格 ' + before + '→' + after +
+            (said >= 0 && delta === said ? ' 一致' : ' 不一致');
         })()`,
       },
     ],
@@ -191,6 +203,66 @@ const EXPECT = {
     cards: [1080], // p-main
     minCards: 1, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["自动删种"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    /*
+     * 画板 41（全局外壳）的两个浮层挂在外壳上，哪条路由都能验 —— 选这一页是因为它最轻
+     * （一张卡，没有表格与轮询），点开浮层不会和页面自己的请求抢时间。
+     *   user-pop  280 宽：头像 + admin + 「管理员 · 单用户模式」+ 偏好（外观 / 配色 / 日志级别）
+     *   sched-pop 300 宽：「调度器」+ 状态胶囊 + 最后同步与间隔 + 停止 / 启动
+     */
+    probes: [
+      {
+        desc: "rail 头像浮层 = 画板 41 的 user-pop（280 宽，含身份与三组偏好）",
+        want: "宽 280|单用户模式|配色|日志级别",
+        js: `(async () => {
+          const av = document.querySelector('.pt-rail__avatar');
+          if (!av) return 'no-avatar';
+          av.click();
+          await new Promise((r) => setTimeout(r, 500));
+          const pop = document.querySelector('.pt-prefs-popper');
+          if (!pop) return 'no-popper';
+          const w = Math.round(pop.getBoundingClientRect().width);
+          const text = (pop.textContent ?? '').replace(/\\s+/g, ' ');
+          document.body.click();
+          return '宽 ' + w + ' | ' + text;
+        })()`,
+      },
+      {
+        desc: "版本检查浮层 = 画板 42（420 宽，有更新时列出 release）",
+        want: "宽 420|v0.48.0",
+        js: `(async () => {
+          const host = document.querySelector('.pt-status__version');
+          if (!host) return 'no-version-host';
+          const btn = host.querySelector('button') ?? host.firstElementChild ?? host;
+          btn.click();
+          await new Promise((r) => setTimeout(r, 700));
+          const pops = [...document.querySelectorAll('.el-popper')]
+            .filter((el) => getComputedStyle(el).display !== 'none');
+          const pop = pops.find((el) => (el.textContent ?? '').includes('v0.4')) ?? pops[0];
+          if (!pop) return 'no-popper';
+          const w = Math.round(pop.getBoundingClientRect().width);
+          const text = (pop.textContent ?? '').replace(/\\s+/g, ' ').slice(0, 160);
+          document.body.click();
+          return '宽 ' + w + ' | ' + text;
+        })()`,
+      },
+      {
+        desc: "状态栏调度器浮层 = 画板 41 的 sched-pop（300 宽，含状态与同步口径）",
+        want: "宽 300|调度器|最后同步|停止所有任务|启动所有任务",
+        js: `(async () => {
+          const cell = document.querySelector('.pt-status__cell--btn');
+          if (!cell) return 'no-cell';
+          cell.click();
+          await new Promise((r) => setTimeout(r, 500));
+          const menu = document.querySelector('.pt-status__menu');
+          if (!menu) return 'no-menu';
+          const pop = menu.closest('.el-popper') ?? menu.parentElement;
+          const w = Math.round(pop.getBoundingClientRect().width);
+          const text = (menu.textContent ?? '').replace(/\\s+/g, ' ');
+          document.body.click();
+          return '宽 ' + w + ' | ' + text;
+        })()`,
+      },
+    ],
   },
   "/chatops/notifications": {
     board: "22 消息通知",
@@ -200,12 +272,22 @@ const EXPECT = {
     titles: ["投递策略", "最近投递统计", "最近的通知"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/chatops/notifications/1": {
-    board: "23 通道详情",
+    board: "23 + 37 通道详情",
     kind: CARD,
     detail: true, // head 88 带面包屑
-    cards: [1080, 1080, 1080, 700], // hero / c-basic / c-test / p-msg
-    minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["hero", "基本信息", "凭证与连接", "连通性测试", "操作提示文案"],
+    /* 画板 23 的 hero / c-basic / c-test / p-msg，外加画板 37 的 p-sec 700 与 p-map 364 */
+    cards: [1080, 1080, 1080, 700, 700, 364],
+    minCards: 6,
+    titles: [
+      "hero",
+      "基本信息",
+      "凭证与连接",
+      "连通性测试",
+      "操作提示文案",
+      /* 画板 37 的两张说明卡 */
+      "密钥与安全",
+      "channel_type 映射",
+    ],
     /*
      * 这一页的数据得真的落到表单里。假数据里通道详情曾与列表撞前缀，详情页拿到一个数组，
      * 画出来是「未命名通道 / ID -」—— 卡都在、标题都对，检查照样全绿。
@@ -719,6 +801,16 @@ const MEASURE = `(() => {
       (el) => getComputedStyle(el).display !== 'none',
     ).length,
     navDocked: document.querySelector('.pt-shell')?.classList.contains('is-nav-docked') ?? false,
+    /*
+     * 导航列顶部的版本行（画板 nav 的「v0.47.2 · 已是最新」11/400 t3）。
+     * 这里连着量出来是因为它曾经写成「vv0.47.2」—— version.Version 是 ldflags 从
+     * git describe 灌的，本仓库的 tag 自带 v，代码又无条件补了一个。
+     * （这段身处 MEASURE 的模板字符串里，不能用反引号。）
+     */
+    navVer: (() => {
+      const el = document.querySelector('.pt-nav__brand-ver');
+      return el ? (el.textContent ?? '').trim() : null;
+    })(),
     statusDl: (() => {
       const el = document.querySelector('.pt-status__dl');
       return el ? (el.textContent ?? '').replace(/\\s+/g, ' ').trim() : null;
@@ -786,8 +878,10 @@ for (const route of routes) {
   for (const probe of want.probes ?? []) {
     const outcome = await ev(probe.js).catch((e) => `probe 失败：${e.message}`);
     const text = typeof outcome === "string" ? outcome : JSON.stringify(outcome);
-    if (!text.includes(probe.want)) {
-      fail(`probe(${probe.desc})`, `期望结果里含「${probe.want}」，实测 ${text}`);
+    /* want 里用 | 分隔多个必须命中的片段 */
+    const missing = probe.want.split("|").filter((w) => !text.includes(w));
+    if (missing.length > 0) {
+      fail(`probe(${probe.desc})`, `结果里缺「${missing.join("、")}」，实测 ${text}`);
     }
   }
 
@@ -809,6 +903,8 @@ for (const route of routes) {
       "rail.items",
       `导航列钉住时 rail 上可见的快捷入口只有 ${got.railItems} 个，画板画了 8 个快捷入口 + 1 个运行日志入口`,
     );
+  if (got.navVer !== null && /^vv/.test(got.navVer))
+    fail("nav.version", `导航列版本行是「${got.navVer}」，多了一个 v`);
   if (got.statusDl === null) fail("statusbar.dl", "状态栏右端没有下载器身份格");
   else if (!got.statusDl.includes("qb-main") || !got.statusDl.includes("已连接"))
     fail("statusbar.dl", `状态栏那格是「${got.statusDl}」，画板要「名称 · 连接态」`);

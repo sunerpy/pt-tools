@@ -122,7 +122,7 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
       <el-popover
         placement="right-end"
         trigger="click"
-        :width="268"
+        :width="280"
         popper-class="pt-prefs-popper"
         :offset="12">
         <template #reference>
@@ -130,6 +130,20 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
             <PtIcon name="user" :size="16" />
           </button>
         </template>
+        <!--
+          画板 41 的 user-pop（280 宽）顶部是身份：头像 + 用户名 + 「管理员 · 单用户模式」，
+          下面才是偏好。导航列收起时这是唯一能看到「我是谁」的地方 ——
+          账号页脚长在导航列里，收起来就一起不见了。
+        -->
+        <div class="pt-prefs__who">
+          <span class="pt-prefs__who-av" aria-hidden="true">
+            <PtIcon name="user" :size="16" />
+          </span>
+          <span class="pt-prefs__who-txt">
+            <strong>admin</strong>
+            <small>管理员 · 单用户模式</small>
+          </span>
+        </div>
         <ThemePrefs />
       </el-popover>
     </div>

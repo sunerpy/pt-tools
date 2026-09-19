@@ -736,6 +736,68 @@
   gap: var(--pt-space-2);
 }
 
+/* 画板 41 的 sched-pop：小标题 + 状态胶囊一行，下面一行是同步口径 */
+.pt-status__menu-head {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pt-status__menu-t {
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.pt-status__menu-sync {
+  margin: 0 0 var(--pt-space-1);
+  padding-bottom: var(--pt-space-2);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+/* 画板 41 的 user-pop 顶部身份行 */
+.pt-prefs__who {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  padding-bottom: var(--pt-space-3);
+  margin-bottom: var(--pt-space-3);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-prefs__who-av {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+  border-radius: 50%;
+}
+
+.pt-prefs__who-txt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.pt-prefs__who-txt strong {
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.pt-prefs__who-txt small {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
 .pt-status__menu .el-button {
   width: 100%;
   margin: 0;

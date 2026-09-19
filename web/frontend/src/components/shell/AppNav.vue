@@ -36,7 +36,14 @@ const versionLine = computed(() => {
   const v = versionStore.currentVersion;
   // store 在拿到数据前返回字面量 "unknown"，那不是版本号，别显示成「vunknown」
   if (!v || v === "unknown") return "";
-  return versionStore.hasUpdate ? `v${v} · 有新版本` : `v${v} · 已是最新`;
+  /*
+   * 不能无条件加 "v"：`version.Version` 是 ldflags 从 `git describe` 灌进来的，
+   * 而本仓库的 tag 本身就带 v（v0.47.2），加了就成了「vv0.47.2」——
+   * 这一行在每个页面的导航列顶部，一直这么显示着。
+   * 两种形状都接受：带 v 原样用，不带 v 才补。
+   */
+  const label = v.startsWith("v") ? v : `v${v}`;
+  return versionStore.hasUpdate ? `${label} · 有新版本` : `${label} · 已是最新`;
 });
 
 function logout() {

@@ -381,18 +381,21 @@ const sortedResults = computed(() => {
 /**
  * 本地筛选：分类分段与「仅免费」都作用在已经拿到的结果上，不重新请求 ——
  * 一次多站点搜索要十几秒，为了换个分类再等一遍不合理。
+ *
+ * 分成两步是为了让「另有 N 条没有分类信息」这句话与表格**数的是同一批行**：
+ * 先过「仅免费」得到 freeFiltered，分类筛与那句说明都从它出发。
+ * 直接拿全量结果去数 unknown 会说谎 —— 开着「仅免费」时它报的条数里包含不免费的行，
+ * 点「一并显示」之后表格根本不会多出那么多（评审查出的就是这个）。
  */
+const freeFilteredResults = computed(() =>
+  freeOnly.value ? sortedResults.value.filter((r) => r.isFree) : sortedResults.value,
+);
+
 const filteredResults = computed(() => {
-  let rows = sortedResults.value;
-  if (activeCategory.value) {
-    rows = rows.filter((r) =>
-      matchesCategory(r, activeCategory.value, { includeUnknown: includeUnknown.value }),
-    );
-  }
-  if (freeOnly.value) {
-    rows = rows.filter((r) => r.isFree);
-  }
-  return rows;
+  if (!activeCategory.value) return freeFilteredResults.value;
+  return freeFilteredResults.value.filter((r) =>
+    matchesCategory(r, activeCategory.value, { includeUnknown: includeUnknown.value }),
+  );
 });
 
 /*
@@ -1154,13 +1157,15 @@ const barNote = computed(() => {
 /**
  * 选中具体档位时，那些「站点根本没给分类」的行要有人交代。
  *
- * 数的是**筛选之前**的结果，所以开关开关都报同一个数：关着时它说明「被筛掉了几条」，
- * 开着时它说明「多列出来的是哪几条」。两种情形都不让信息悄悄消失。
+ * 数的是**分类筛之前、但「仅免费」之后**的那一批，所以开关开着关着都报同一个数：
+ * 关着时它说明「被筛掉了几条」，开着时它说明「多列出来的是哪几条」，
+ * 而这个数恰好等于点开开关后表格真会多出来的行数。两种情形都不让信息悄悄消失。
  * 站点名取自表格「站点」列的值，用户能核对；没有分类的行在标题下方也看不到分类标签。
  */
 const unknownRows = computed(() => {
   if (!activeCategory.value) return [];
-  return sortedResults.value.filter((r) => verdictOfItem(r) === "unknown");
+  /* 与表格同源：从「仅免费」之后的那一批里数，否则报的数和点开之后多出来的行数不一致 */
+  return freeFilteredResults.value.filter((r) => verdictOfItem(r) === "unknown");
 });
 
 const unknownNote = computed(() => {

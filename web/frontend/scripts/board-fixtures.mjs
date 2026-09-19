@@ -184,8 +184,14 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
   leechers: i,
   snatched: 50 + i * 3,
   uploadedAt: 1758000000,
-  isFree: i % 3 === 0,
-  discountLevel: i % 3 === 0 ? "FREE" : "",
+  /*
+   * 免费行与「没有分类」的行**必须有交集**：没有分类的是 i % 3 === 1，
+   * 原来免费只给 i % 3 === 0，两组互不相交 —— 于是「分类 + 仅免费 + 一并显示」这个组合
+   * 在假数据里永远走不到，一条报错的计数也测不出来（评审正是从这里查出计数会说谎）。
+   * i % 6 === 1 让每两条没有分类的行里有一条是免费的。
+   */
+  isFree: i % 3 === 0 || i % 6 === 1,
+  discountLevel: i % 3 === 0 || i % 6 === 1 ? "FREE" : "",
   discountEndTime: 0,
   hasHR: i % 5 === 0,
   /*
@@ -470,6 +476,43 @@ export const FIXTURES = [
         error: i === 0 ? undefined : "dial tcp 10.0.0.9:9091: connect: connection refused",
       })),
     },
+  ],
+  /*
+   * 版本检查 —— 画板 42 的六个 popover 状态。空库下这一串接口回的是「没检查过」，
+   * 于是画板 42 里最主要的那个状态（hasUpdate · updates-list）根本走不到。
+   * 这里给一个「有更新」的响应，让状态栏那颗更新点与更新列表进验收。
+   */
+  ["/api/version/runtime", { is_docker: false, platform: "linux", arch: "amd64" }],
+  ["/api/version/upgrade", { status: "idle", percent: 0, message: "" }],
+  [
+    "/api/version/check",
+    {
+      current_version: "v0.47.2",
+      has_update: true,
+      changelog_url: "https://github.com/sunerpy/pt-tools/releases",
+      has_more_releases: false,
+      checked_at: 1758200000,
+      new_releases: [
+        {
+          version: "v0.48.0",
+          name: "v0.48.0",
+          changelog: "- 画板验收补移动端\n- 修下载器连接态误报",
+          url: "https://github.com/sunerpy/pt-tools/releases/tag/v0.48.0",
+          published_at: 1758100000,
+          assets: [
+            {
+              name: "pt-tools_linux_amd64",
+              download_url: "https://example.invalid/a",
+              size: 45_000_000,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  [
+    "/api/version",
+    { version: "v0.47.2", build_time: "2026-09-18T00:00:00Z", commit_id: "b31f660" },
   ],
   ["/api/downloader-torrents/meta", { categories: ["电影", "剧集"], tags: ["MT", "HDS"] }],
   [
