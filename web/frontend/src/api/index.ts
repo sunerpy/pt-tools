@@ -1171,6 +1171,8 @@ export interface DownloaderTransferStatItem {
   reachable: boolean;
   /** 两个探测都失败时的原因；取到数据时不返回这个字段 */
   error?: string;
+  /** 下载器自报的版本（画板 41 状态栏那格的第三段）。问不到就不返回这个字段 */
+  client_version?: string;
 }
 
 export interface DownloaderCapability {

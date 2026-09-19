@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -41,6 +42,15 @@ type Server struct {
 	chatopsDeps *ChatOpsDeps
 	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
 	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
+
+	// clientVersions 缓存每台下载器自报的版本号，键是「下载器 id + URL」。
+	//
+	// 为什么要缓存：状态栏那一格（画板 41 的 statusbar 右端「名称 · 连接态 · 版本」）
+	// 挂在 30 秒一拍的 transfer-stats 上，而 GetClientVersion 在两个实现里都是一次真实
+	// HTTP 往返，没有任何缓存。版本只在用户升级下载器时才变，为它每拍多拨一次不值得。
+	// 键里带 URL：换了地址就是换了一台机器，缓存必须失效。
+	clientVersionMu sync.RWMutex
+	clientVersions  map[string]string
 }
 
 // SetQAHook installs a callback invoked once during Serve, after all production
@@ -50,7 +60,13 @@ func (s *Server) SetQAHook(fn func(*http.ServeMux)) { s.qaHook = fn }
 
 func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 	t := template.Must(template.New("login").Parse(loginHTML))
-	return &Server{store: store, mgr: mgr, tpl: t, sessions: map[string]string{}}
+	return &Server{
+		store:          store,
+		mgr:            mgr,
+		tpl:            t,
+		sessions:       map[string]string{},
+		clientVersions: map[string]string{},
+	}
 }
 
 func (s *Server) ensureAdminFromEnv() {

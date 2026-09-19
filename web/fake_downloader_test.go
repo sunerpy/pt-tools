@@ -18,6 +18,10 @@ type fakeDownloader struct {
 	files    []downloader.TorrentFile
 	trackers []downloader.TorrentTracker
 
+	version      string
+	versionErr   error
+	versionCalls int
+
 	statusErr      error
 	freeSpaceErr   error
 	listErr        error
@@ -34,9 +38,16 @@ type fakeDownloader struct {
 	addErr         error
 }
 
-func (f *fakeDownloader) Authenticate() error               { return nil }
-func (f *fakeDownloader) Ping() (bool, error)               { return true, nil }
-func (f *fakeDownloader) GetClientVersion() (string, error) { return "test", nil }
+func (f *fakeDownloader) Authenticate() error { return nil }
+func (f *fakeDownloader) Ping() (bool, error) { return true, nil }
+func (f *fakeDownloader) GetClientVersion() (string, error) {
+	f.versionCalls++
+	if f.version == "" && f.versionErr == nil {
+		return "test", nil
+	}
+	return f.version, f.versionErr
+}
+
 func (f *fakeDownloader) GetClientStatus() (downloader.ClientStatus, error) {
 	return f.status, f.statusErr
 }

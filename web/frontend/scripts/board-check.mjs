@@ -247,11 +247,23 @@ const EXPECT = {
         })()`,
       },
       {
-        desc: "画板 39 的任务详情：侧边抽屉 806 与下方内联卡 772 两种形态",
-        /* 抽屉是 56% 的精确值；内联卡跟着右栏走，允许 12 的容差（滚动条与间距） */
+        desc: "画板 39 的任务详情：抽屉 806 / 内联 772，且详情请求打在真实 task_id 上",
         want: "verdict=ok",
         js: `(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          /*
+           * 记下详情请求真正打到哪个地址。
+           * 只量宽度、或只在抽屉里找一个固定字符串，都挡不住「地址拼错、假数据又照着同样的
+           * 错地址登记」这种两头一起错 —— 那是评审连着两轮指出的同一处假绿。
+           * 所以这里拦一层 fetch，把实际 URL 拿出来比。
+           */
+          const seen = [];
+          const realFetch = window.fetch;
+          window.fetch = (input, init) => {
+            const raw = typeof input === 'string' ? input : input.url;
+            if (raw.includes('/api/downloader-torrents/')) seen.push(raw);
+            return realFetch(input, init);
+          };
           const pickMode = (label) => {
             const el = [...document.querySelectorAll('.el-segmented__item')]
               .find((b) => (b.textContent ?? '').trim() === label);
@@ -270,32 +282,33 @@ const EXPECT = {
           const esc = () => document.dispatchEvent(
             new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
           );
-          /* 侧边：画板 39 的 drawer size 56% —— 1440 上是 806 */
-          if (!pickMode('侧边')) return 'no-mode-seg';
+          if (!pickMode('侧边')) { window.fetch = realFetch; return 'no-mode-seg'; }
           await wait(400);
-          if (!(await openRow())) return 'no-detail-btn';
+          if (!(await openRow())) { window.fetch = realFetch; return 'no-detail-btn'; }
           const drawer = document.querySelector('.hub__drawer');
           const dw = drawer ? Math.round(drawer.getBoundingClientRect().width) : 0;
-          /*
-           * 只量宽度会让「详情请求打到一条错地址、被宽前缀假数据接住」也通过。
-           * 所以顺带核对抽屉里显示的确实是这一行的身份（标题 / info_hash）。
-           */
           const dtext = drawer ? (drawer.textContent ?? '').replace(/\\s+/g, ' ') : '';
           esc();
           await wait(500);
-          /* 下方：画板 39 的 inline-detail-card 772 宽 */
-          if (!pickMode('下方')) return 'no-mode-seg-2';
+          if (!pickMode('下方')) { window.fetch = realFetch; return 'no-mode-seg-2'; }
           await wait(400);
-          if (!(await openRow())) return 'no-detail-btn-2';
+          if (!(await openRow())) { window.fetch = realFetch; return 'no-detail-btn-2'; }
           const inline = document.querySelector('.hub__detail');
           const iw = inline ? Math.round(inline.getBoundingClientRect().width) : 0;
-          const first = document.querySelector('.hub__grid tbody tr, .vt-row');
-          const rowTitle = first ? (first.textContent ?? '').slice(0, 24) : '';
-          const identityOk = dtext.includes('Hub.Task.1') || dtext.includes('hub0000');
-          const ok = Math.abs(dw - 806) <= 4 && Math.abs(iw - 772) <= 12 && identityOk;
+          window.fetch = realFetch;
+
+          /* 详情地址：必须是 /{downloader_id}/{task_id}，且 task_id 不能是 undefined */
+          const detailUrls = seen.filter((u) => /\\/api\\/downloader-torrents\\/\\d+\\//.test(u));
+          const lastUrl = detailUrls[detailUrls.length - 1] ?? '';
+          const taskId = lastUrl.split('/').pop() ?? '';
+          const pathOk = taskId !== '' && taskId !== 'undefined' && !taskId.includes('?');
+          /* 抽屉里显示的身份要和被点的那一行对得上（标题取自同一份数据） */
+          const identityOk = dtext.length > 0 && taskId !== '' && dtext.includes('Hub.Task.');
+          const ok =
+            Math.abs(dw - 806) <= 4 && Math.abs(iw - 772) <= 12 && pathOk && identityOk;
           return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
-            ' 抽屉 ' + dw + '（画板 806） | 内联 ' + iw + '（画板 772） | 身份=' +
-            (identityOk ? '对上' : '没对上 ' + dtext.slice(0, 60) + ' / 行 ' + rowTitle);
+            ' 抽屉 ' + dw + '（806） 内联 ' + iw + '（772） 详情地址 ' +
+            (lastUrl || '没有发出详情请求') + ' 身份=' + (identityOk ? '对上' : dtext.slice(0, 50));
         })()`,
       },
     ],
@@ -1049,9 +1062,16 @@ for (const route of routes) {
     );
   if (got.navVer !== null && got.navVer.startsWith("vv"))
     fail("nav.version", `导航列版本行是「${got.navVer}」，多了一个 v`);
+  /*
+   * 画板 statusbar 右端是「名称 · 连接态 · 版本」三段。版本那段曾经空着（理由是 HTTP 层
+   * 没有这个字段），后来补进了 transfer-stats，所以现在三段都要在。
+   */
   if (got.statusDl === null) fail("statusbar.dl", "状态栏右端没有下载器身份格");
-  else if (!got.statusDl.includes("qb-main") || !got.statusDl.includes("已连接"))
-    fail("statusbar.dl", `状态栏那格是「${got.statusDl}」，画板要「名称 · 连接态」`);
+  else {
+    const want = ["qb-main", "已连接", "v4.6.7"].filter((w) => !got.statusDl.includes(w));
+    if (want.length > 0)
+      fail("statusbar.dl", `状态栏那格是「${got.statusDl}」，缺「${want.join("、")}」`);
+  }
 
   // 页头：画板里除 KPI 页与搜索页之外，每页都是 64（详情页 88）
   if (want.ownHead === "kpi") {

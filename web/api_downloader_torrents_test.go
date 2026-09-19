@@ -419,6 +419,51 @@ func TestDownloaderTransferStats_UnreachableIsReported(t *testing.T) {
 	assert.Zero(t, resp.TotalUploadSpeed)
 }
 
+// 版本号只问一次：它是画板 41 状态栏那格的第三段，而 GetClientVersion 在两个实现里
+// 都是一次真实 HTTP 往返且自己不缓存。transfer-stats 是 30 秒一拍的接口，
+// 每拍多问一次等于白加一次往返。
+func TestDownloaderTransferStats_ClientVersionCachedOncePerMachine(t *testing.T) {
+	fake := &fakeDownloader{status: downloader.ClientStatus{UpSpeed: 1}, version: "v4.6.7"}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	for range 3 {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+		server.apiDownloaderTransferStats(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTransferStatsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Downloaders, 1)
+		assert.Equal(t, "v4.6.7", resp.Downloaders[0].ClientVersion)
+	}
+
+	assert.Equal(t, 1, fake.versionCalls, "三次请求只该问一次版本")
+}
+
+// 问不到版本就留空，并且**不缓存失败** —— 这台下次连上了应该能问到。
+func TestDownloaderTransferStats_VersionErrorLeavesFieldEmpty(t *testing.T) {
+	fake := &fakeDownloader{
+		status:     downloader.ClientStatus{UpSpeed: 1},
+		versionErr: assertErr("not supported"),
+	}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	for range 2 {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+		server.apiDownloaderTransferStats(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTransferStatsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Downloaders, 1)
+		assert.Empty(t, resp.Downloaders[0].ClientVersion)
+	}
+
+	assert.Equal(t, 2, fake.versionCalls, "失败不该被缓存，两次请求就该问两次")
+}
+
 // 只有剩余空间失败时仍算连得上：有的客户端拿不到磁盘信息，但机器是活的。
 func TestDownloaderTransferStats_FreeSpaceOnlyFailureStaysReachable(t *testing.T) {
 	fake := &fakeDownloader{

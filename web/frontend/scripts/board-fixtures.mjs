@@ -330,25 +330,40 @@ const DOWNLOADERS = [
   },
 ];
 
+/*
+ * 下载器控制台的任务行。**字段名必须与真实 DTO 一字不差**
+ * （web/api_downloader_torrents.go 的 DownloaderTorrentItem）：
+ * 这里原来写的是 `hash` / `peers`，真实字段是 `task_id` / `info_hash` / `connections` /
+ * `downloader_type`。
+ *
+ * 错在哪：`openDetail(row)` 用 `row.task_id` 拼详情地址，字段不存在就请求
+ * `/api/downloader-torrents/1/undefined` —— 而详情假数据的键又是从同一个 undefined 插值
+ * 出来的，于是**两边一起错到了同一个地址上**，请求命中、抽屉弹出、宽度也量得对，
+ * 画板 39 的探针在一条不存在的路径上拿到了绿灯。
+ * 一次评审两轮都指着这处说话，第一轮我以为改了（脚本在第二处断言失败、整个写入回滚了），
+ * 所以这段注释留在这里：**假数据不照真实 DTO 写，验收就会在自己造的世界里通过。**
+ */
 const HUB_TORRENTS = Array.from({ length: 12 }, (_, i) => ({
-  hash: `hub${String(i).padStart(37, "0")}`,
   downloader_id: (i % 2) + 1,
   downloader_name: i % 2 === 0 ? "qb-main" : "tr-backup",
+  downloader_type: i % 2 === 0 ? "qbittorrent" : "transmission",
+  task_id: `hub-task-${i + 1}`,
   title: `Hub.Task.${i + 1}.2160p.WEB-DL`,
-  size: (5 + i) * 1024 ** 3,
-  progress: i % 4 === 0 ? 1 : 0.1 * (i % 9),
+  info_hash: `hub${String(i).padStart(37, "0")}`,
   state: ["downloading", "seeding", "paused", "error"][i % 4],
+  progress: i % 4 === 0 ? 1 : 0.1 * (i % 9),
+  size: (5 + i) * 1024 ** 3,
   upload_speed: i * 120_000,
   download_speed: i % 4 === 0 ? 0 : i * 350_000,
   seeds: 3 + i,
-  peers: i,
+  connections: i,
   ratio: 1 + i * 0.3,
-  eta: 600 + i * 30,
-  category: ["电影", "剧集", ""][i % 3],
-  tags: i % 2 === 0 ? "MT" : "",
-  save_path: "/downloads",
   added_at: 1758000000,
   completed_at: i % 4 === 0 ? 1758003600 : 0,
+  save_path: "/downloads",
+  category: ["电影", "剧集", ""][i % 3],
+  tags: i % 2 === 0 ? "MT" : "",
+  eta: 600 + i * 30,
 }));
 
 /** 路由（去掉查询串）→ 响应体。第一个前缀命中即用。 */
@@ -473,6 +488,8 @@ export const FIXTURES = [
         session_downloaded: 20 * 1024 ** 3,
         free_space: i === 0 ? 1.6 * TB : 0.2 * TB,
         reachable: i === 0,
+        /* 画板 41 状态栏那格的第三段。后端按机器缓存，问不到时不返回这个字段 */
+        client_version: i === 0 ? "v4.6.7" : undefined,
         error: i === 0 ? undefined : "dial tcp 10.0.0.9:9091: connect: connection refused",
       })),
     },

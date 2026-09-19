@@ -37,10 +37,11 @@ const schedulerColor = computed(() => {
 /*
  * 「下载器身份」格（画板 statusbar 的右端）。
  *
- * 画板那格写的是「名称 · 连接态 · 版本」，这里只落前两段：版本在 HTTP 层拿不到。
- * `Downloader.GetClientVersion()` 只存在于 Go 侧的下载器接口，production 的 web
- * 处理器里没有任何地方调它（`/api/downloader-torrents/meta` 的响应结构只有
- * categories 与 tags），所以第三段没有真实来源。编一个版本号比空着更糟，就空着。
+ * 画板那格写的是「名称 · 连接态 · 版本」，三段都落了。
+ * 版本这一段曾经空着，理由是「HTTP 层拿不到」—— 后来把它补进了 transfer-stats：
+ * 后端按「下载器 id + URL」缓存 `GetClientVersion()` 的结果（那个调用在两个实现里都是
+ * 一次真实 HTTP 往返且自己不缓存，而这个接口 30 秒一拍），问不到就不返回这个字段，
+ * 前端也就不画第三段 —— 编一个版本号比空着更糟。
  *
  * 名称取 `/api/downloaders` 里 is_default 的那台 —— 这个接口纯读库、不碰下载器，
  * 而且后端已经把密码剔掉了。
@@ -62,6 +63,8 @@ const LINK_PROBE_MIN_GAP_MS = 120_000;
 const LINK_PROBE_TIMEOUT_MS = 8_000;
 
 const defaultDownloader = ref<DownloaderSetting | null>(null);
+/** 默认下载器自报的版本。空串 = 还没问到（后端问不到时不返回这个字段） */
+const defaultVersion = ref("");
 /** null = 还没探到结论（未探过，或这一轮失败了） */
 const defaultOnline = ref<boolean | null>(null);
 let lastProbeAt = 0;
@@ -95,6 +98,8 @@ async function probeLink() {
     const mine = stats.downloaders.find((d) => d.downloader_id === dl.id);
     /* 明细里没有这一台 = 这一轮连实例都没取到，同样算没连上（不是「未知」） */
     defaultOnline.value = mine ? mine.reachable : false;
+    /* 版本问不到时后端不返回这个字段 —— 保留上一次问到的值，不要闪成空 */
+    if (mine?.client_version) defaultVersion.value = mine.client_version;
   } catch {
     defaultOnline.value = null;
   } finally {
@@ -240,7 +245,10 @@ const year = computed(() => {
     <el-tooltip v-if="defaultDownloader" :content="linkTip" placement="top">
       <span class="pt-status__cell pt-status__dl" :class="{ 'is-stale': linkState === 'unknown' }">
         <PtIcon name="server" :size="13" :style="{ color: linkColor }" />
-        <span class="pt-status__dl-text">{{ defaultDownloader.name }} · {{ linkText }}</span>
+        <span class="pt-status__dl-text">
+          {{ defaultDownloader.name }} · {{ linkText
+          }}{{ defaultVersion ? ` · ${defaultVersion}` : "" }}
+        </span>
       </span>
     </el-tooltip>
 

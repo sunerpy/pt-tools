@@ -169,6 +169,8 @@ type downloaderRecord struct {
 	ID   uint
 	Name string
 	Type string
+	// URL 只用于「按机器缓存版本号」的键：换了地址就是换了一台机器（见 clientVersionOf）
+	URL string
 }
 
 func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
@@ -905,7 +907,7 @@ func (s *Server) listEnabledDownloaderRecords(filterID *uint) ([]downloaderRecor
 
 	result := make([]downloaderRecord, 0, len(settings))
 	for _, dl := range settings {
-		result = append(result, downloaderRecord{ID: dl.ID, Name: dl.Name, Type: dl.Type})
+		result = append(result, downloaderRecord{ID: dl.ID, Name: dl.Name, Type: dl.Type, URL: dl.URL})
 	}
 	return result, nil
 }
@@ -1093,6 +1095,40 @@ type DownloaderTransferStatItem struct {
 	Reachable bool `json:"reachable"`
 	// Error 是这一轮失败的原因（取到数据时为空）。给人看的诊断，不参与聚合。
 	Error string `json:"error,omitempty"`
+	// ClientVersion 是下载器自报的版本（画板 41 状态栏那格的第三段）。
+	//
+	// 取不到就留空：它是背景信息，不该让这个接口因为多问一句版本而变慢或失败。
+	// 值在 Server 上按「id + URL」缓存，所以每台只在第一次连上时问一次。
+	ClientVersion string `json:"client_version,omitempty"`
+}
+
+// clientVersionOf 返回下载器自报的版本，带缓存。
+//
+// 缓存键带 URL：换了地址就是换了一台机器，旧版本号不能再用。
+// 两个实现（qBittorrent 的 /api/v2/app/version、Transmission 的 session-get）都是一次
+// 真实 HTTP 往返且自己不缓存，而调用方是 30 秒一拍的 transfer-stats —— 不缓存就等于
+// 给每拍加一次往返。版本只在用户升级下载器时才变，缓存到进程结束足够。
+func (s *Server) clientVersionOf(id uint, url string, dl downloader.Downloader) string {
+	key := fmt.Sprintf("%d|%s", id, url)
+
+	s.clientVersionMu.RLock()
+	cached, ok := s.clientVersions[key]
+	s.clientVersionMu.RUnlock()
+	if ok {
+		return cached
+	}
+
+	v, err := dl.GetClientVersion()
+	if err != nil || strings.TrimSpace(v) == "" {
+		// 不缓存失败：下次这台连上了应该能问到
+		return ""
+	}
+	v = strings.TrimSpace(v)
+
+	s.clientVersionMu.Lock()
+	s.clientVersions[key] = v
+	s.clientVersionMu.Unlock()
+	return v
 }
 
 func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Request) {
@@ -1150,6 +1186,9 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		item.Reachable = statusErr == nil || fsErr == nil
 		if !item.Reachable {
 			item.Error = statusErr.Error()
+		} else {
+			// 只在连得上的时候问版本，且问到就缓存 —— 断线的那台不必为这一格再等一次超时
+			item.ClientVersion = s.clientVersionOf(rec.ID, rec.URL, dl)
 		}
 
 		resp.TotalUploadSpeed += item.UploadSpeed

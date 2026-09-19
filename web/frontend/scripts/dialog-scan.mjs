@@ -145,6 +145,9 @@ const NOT_ON_BOARD = {
     "列表页的只读详情弹窗，画板把通道详情画成了独立路由（板 23/37）",
   "components/shell/MobileChrome.vue":
     "底栏「我的」的上拉面板 —— 它的规格在画板 34（移动 · 我的），不在这张清点图里",
+  "views/chatops/RSSNotifications.vue#通知详情":
+    "移动端专用：行卡替代了桌面表格的展开行，详情只能放弹窗。画板 26 画的是桌面展开行，" +
+    "画板 40 定稿时移动端行卡还没落地，所以两张图上都没有它。桌面走展开行，不会用到这个弹窗。",
 };
 
 function walk(dir) {
@@ -178,16 +181,46 @@ for (const row of BOARD_40) {
   problems.push(`画板「${row.tile}」在 ${row.file} 里找不到锚点「${row.needle}」`);
 }
 
-/* ② 代码里有的 el-dialog / el-drawer，必须在画板清单里有一席 */
-const claimedFiles = new Set(BOARD_40.map((r) => r.file));
+/*
+ * ② 代码里的每一个 el-dialog / el-drawer **实例**都要有归属。
+ *
+ * 这里原来是按**文件**判的：只要某个文件因为任意一条（哪怕是一条 ElMessageBox）
+ * 进了 claimedFiles，整个文件的弹窗反扫就被跳过 —— 于是
+ * `RSSNotifications.vue` 的移动端「通知详情」弹窗既不在清单里、也没有说明，脚本照样报
+ * 「清点一致」。评审指着这一点说「这不能证明浮层数量按稿」，判得对。
+ *
+ * 改成按实例判：把每个弹窗开标签里的 title 抓出来当身份，
+ * 逐个要求它被 BOARD_40 的某条认领，或在 NOT_ON_BOARD 里写明为什么不在画板上。
+ */
+function dialogInstances(src) {
+  const out = [];
+  const re = /<el-(dialog|drawer)\b/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    /* 开标签可能跨多行，取到第一个 '>' 为止 */
+    const close = src.indexOf(">", m.index);
+    const tag = src.slice(m.index, close < 0 ? m.index + 400 : close);
+    const title = /:?title="([^"]*)"/.exec(tag)?.[1] ?? "";
+    out.push({ kind: m[1], title });
+  }
+  return out;
+}
+
 for (const [rel, src] of body) {
   if (!rel.endsWith(".vue")) continue;
-  const dialogs = (src.match(/<el-(dialog|drawer)/g) ?? []).length;
-  if (dialogs === 0) continue;
-  if (claimedFiles.has(rel)) continue;
-  const why = NOT_ON_BOARD[rel];
-  if (why) continue;
-  problems.push(`${rel} 里有 ${dialogs} 个弹窗/抽屉，画板 40 的清单里没有它，也没写为什么`);
+  for (const inst of dialogInstances(src)) {
+    const id = `${rel}#${inst.title || `(${inst.kind} 无 title)`}`;
+    /* 画板清单认领：同文件的某条锚点出现在这个实例的 title 里，或它就是抽屉那条 */
+    const claimed = BOARD_40.some((r) => {
+      if (r.file !== rel) return false;
+      if (r.needle === "<el-drawer") return inst.kind === "drawer";
+      const needle = r.needle.replace(/^title="|"$/g, "").replace(/^'|'$/g, "");
+      return inst.title !== "" && (inst.title.includes(needle) || needle.includes(inst.title));
+    });
+    if (claimed) continue;
+    if (NOT_ON_BOARD[id] || NOT_ON_BOARD[rel]) continue;
+    problems.push(`${id} 这个弹窗/抽屉画板 40 的清单里没有，也没写为什么`);
+  }
 }
 
 for (const p of problems) console.log(`✗ ${p}`);
