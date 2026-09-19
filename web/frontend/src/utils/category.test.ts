@@ -7,10 +7,21 @@
  * 一次 review 指出上一版的归桶「漏收 `影剧/综艺/HD` 与 `Animation`、
  * 误收 `TV游戏` 进剧集」，而当时的假数据只给了刚好能命中的「电影/剧集/动漫」，
  * 所以零偏离是假证明。这条测试就是补这个洞：漏收与误收各覆盖到。
+ *
+ * 第三个洞同理：`bucketOfItem` 的标签兜底原来是用 `["movie","1990s"]` 证明的，
+ * 那是造出来刚好能命中的形状。Gazelle 站点的真实形状在
+ * site/v2/definitions/mooko_fixture_test.go：tags 是 `["剧情","悬疑","传记"]` 这种题材词，
+ * 一个都归不进桶。所以这里钉的是真实形状 → unknown，且 unknown 不能被筛掉。
  */
 import { describe, expect, it } from "vitest";
 
-import { bucketOf, bucketOfItem, categoryLabel, CATEGORY_OPTIONS } from "./category";
+import {
+  bucketOf,
+  categoryLabel,
+  CATEGORY_OPTIONS,
+  matchesCategory,
+  verdictOfItem,
+} from "./category";
 
 describe("bucketOf：M-Team 的真实分类名", () => {
   it.each([
@@ -110,27 +121,67 @@ describe("CATEGORY_OPTIONS", () => {
   });
 });
 
-describe("bucketOfItem：分类优先、标签兜底", () => {
+describe("verdictOfItem：分类优先、标签兜底，且分「站点没给」与「给了但不在五桶」", () => {
   it("有分类就用分类，不看标签", () => {
-    expect(bucketOfItem({ category: "电影/HD", tags: ["anime"] })).toBe("movie");
+    expect(verdictOfItem({ category: "电影/HD", tags: ["anime"] })).toBe("movie");
   });
 
-  it("分类为空时看标签 —— Gazelle 的搜索响应没有分类字段", () => {
-    expect(bucketOfItem({ category: "", tags: ["movie", "1990s"] })).toBe("movie");
-    expect(bucketOfItem({ tags: ["tv.show"] })).toBe("tv");
-    expect(bucketOfItem({ tags: ["anime"] })).toBe("anime");
+  it("五桶各自照旧命中（M-Team / HDDolby 的真实分类名）", () => {
+    expect(verdictOfItem({ category: "电影/HD" })).toBe("movie");
+    expect(verdictOfItem({ category: "影剧/综艺/HD" })).toBe("tv");
+    expect(verdictOfItem({ category: "动画" })).toBe("anime");
+    expect(verdictOfItem({ category: "音乐(无损)" })).toBe("music");
+    expect(verdictOfItem({ category: "Animation" })).toBe("anime");
   });
 
-  it("标签里归不进任何桶的（音乐站的流派标签）返回空串", () => {
-    expect(bucketOfItem({ tags: ["electronic", "jazz", "1980s"] })).toBe("");
+  it("站点给了分类但不在五桶 → other（M-Team 的纪录片、TV游戏）", () => {
+    expect(verdictOfItem({ category: "纪录片" })).toBe("other");
+    expect(verdictOfItem({ category: "TV游戏" })).toBe("other");
+    expect(verdictOfItem({ category: "Documentary" })).toBe("other");
+    expect(verdictOfItem({ category: "Sports" })).toBe("other");
   });
 
-  it("分类与标签都没有时返回空串", () => {
-    expect(bucketOfItem({})).toBe("");
-    expect(bucketOfItem({ category: null, tags: null })).toBe("");
+  it("MooKo 的真实形状：没有分类 + 题材标签 → unknown", () => {
+    /* site/v2/definitions/mooko_fixture_test.go 的 mookoSearchFixture 就是这个 tags */
+    expect(verdictOfItem({ tags: ["剧情", "悬疑", "传记"] })).toBe("unknown");
   });
 
-  it("多个标签时取第一个能归桶的", () => {
-    expect(bucketOfItem({ tags: ["1990s", "comedy", "movie"] })).toBe("movie");
+  it("分类为空但标签能认出内容类型时照样归桶", () => {
+    expect(verdictOfItem({ category: "", tags: ["anime", "2020s"] })).toBe("anime");
+    expect(verdictOfItem({ tags: ["1990s", "comedy", "movie"] })).toBe("movie");
+  });
+
+  it("分类与标签都没有 → unknown，不是 other", () => {
+    expect(verdictOfItem({})).toBe("unknown");
+    expect(verdictOfItem({ category: null, tags: null })).toBe("unknown");
+    expect(verdictOfItem({ category: "   ", tags: [] })).toBe("unknown");
+  });
+
+  it("音乐站的流派标签认不出内容类型 → unknown", () => {
+    expect(verdictOfItem({ tags: ["electronic", "jazz", "1980s"] })).toBe("unknown");
+  });
+});
+
+describe("matchesCategory：只丢 other，留 unknown", () => {
+  it("选「全部」时全留，连 other 也留", () => {
+    expect(matchesCategory({ category: "纪录片" }, "")).toBe(true);
+    expect(matchesCategory({ tags: ["剧情"] }, "")).toBe(true);
+  });
+
+  it("选具体档位时命中的留、别的桶丢", () => {
+    expect(matchesCategory({ category: "电影/HD" }, "movie")).toBe(true);
+    expect(matchesCategory({ category: "影剧/综艺/HD" }, "movie")).toBe(false);
+  });
+
+  it("站点给了分类但不在五桶的丢掉 —— 五档之外不显示是画板的原意", () => {
+    expect(matchesCategory({ category: "纪录片" }, "movie")).toBe(false);
+    expect(matchesCategory({ category: "TV游戏" }, "tv")).toBe(false);
+  });
+
+  it("站点没给分类的留下 —— 否则 MooKo 的结果一选档位就整片消失", () => {
+    const mooko = { category: "", tags: ["剧情", "悬疑", "传记"] };
+    expect(matchesCategory(mooko, "movie")).toBe(true);
+    expect(matchesCategory(mooko, "music")).toBe(true);
+    expect(matchesCategory(mooko, "anime")).toBe(true);
   });
 });

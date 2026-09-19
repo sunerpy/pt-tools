@@ -159,13 +159,32 @@ func (dm *DownloaderManager) storeConfig(name string, config DownloaderConfig, i
 		return fmt.Errorf("invalid config for %s: %w", name, err)
 	}
 
+	// 只有配置真的变了（或本来还没有）才换代：换代等于作废已登记的实例，并让正在飞的
+	// 那次建连的结果不再允许入表。而 scheduler 的配置 reload 会对每个启用的下载器
+	// 无条件重新注册一遍，无差别换代会让保存任意配置（包括通知渠道这种毫不相关的）
+	// 都逼出一轮全体重连。
+	//
+	// 判据与 applySyncFromDB 里的 configChanged 保持一致，只是两边都是 DownloaderConfig。
+	if old, had := dm.configs[name]; !had || configValuesChanged(old, config) {
+		dm.bumpConfigGenLocked(name)
+	}
 	dm.configs[name] = config
-	// 配置换代：已登记的实例作废，正在飞的那次建连的结果也不再允许入表
-	dm.bumpConfigGenLocked(name)
 	if isDefault {
 		dm.defaultName = name
 	}
 	return nil
+}
+
+// configValuesChanged 比较两份配置里影响连接的字段，决定是否需要换代。
+//
+// isDefault 刻意不参与：defaultName 是独立于连接的状态，把某个下载器设成默认
+// 并不改变它连谁，没有理由把它已建好的连接作废。
+func configValuesChanged(oldConfig, newConfig DownloaderConfig) bool {
+	return oldConfig.GetType() != newConfig.GetType() ||
+		oldConfig.GetURL() != newConfig.GetURL() ||
+		oldConfig.GetUsername() != newConfig.GetUsername() ||
+		oldConfig.GetPassword() != newConfig.GetPassword() ||
+		oldConfig.GetAutoStart() != newConfig.GetAutoStart()
 }
 
 // SetSiteDownloader 设置站点使用的下载器
@@ -348,10 +367,18 @@ func (dm *DownloaderManager) doRevive(name string) (Downloader, uint64, error) {
 
 	// 退避序列最长约 31s，用户完全有时间在这期间改完配置点保存。
 	// 那样这个实例连的是旧端点，必须就地关掉，不能让它进实例表接收后续操作。
-	if !dm.storeInstance(name, dl, gen) {
+	superseded, ok := dm.storeInstance(name, dl, gen)
+	if !ok {
 		dl.Close()
 		sLogger().Warnf("Discarded downloader instance %s: config changed while connecting", name)
 		return nil, gen, errConfigSuperseded
+	}
+	// 被顶掉的那个旧实例只能在这里回收：它按上一代配置建出来，lookupInstance
+	// 已经不认它了，没有别的路径会关它。Close 触发网络 I/O，所以放在锁外。
+	if superseded != nil {
+		if err := superseded.Close(); err != nil {
+			sLogger().Warnf("Failed to close superseded downloader instance %s: %v", name, err)
+		}
 	}
 	sLogger().Infof("Created downloader instance: %s", name)
 	return dl, gen, nil
@@ -433,8 +460,9 @@ func (dm *DownloaderManager) genIsCurrent(name string, gen uint64) bool {
 //
 // 效果有两层：已登记的实例立刻被视为过期（lookupInstance 不再返回它），
 // 正在后台跑的那次建连即使成功也进不了实例表（storeInstance 会拒绝并关掉它）。
-// 保存配置、禁用、删除、整表同步都要调它 —— 只清失败冷却是不够的，
+// 配置内容真的变更、禁用、删除、整表同步都要调它 —— 只清失败冷却是不够的，
 // 冷却只影响「下一次尝试何时开始」，不影响「已经在飞的那一次会写回什么」。
+// 反过来，内容没变时不许调：那只会把健康实例白白作废（见 storeConfig）。
 func (dm *DownloaderManager) bumpConfigGenLocked(name string) {
 	dm.configGen[name]++
 }
@@ -461,18 +489,30 @@ func (dm *DownloaderManager) dropInstance(name string, dl Downloader) {
 // storeInstance 登记新建成功的实例。
 //
 // gen 是这次建连开始时读到的配置代次。期间配置若被改过（代次已经往前走），
-// 这个实例就是按旧配置建的，不能入表 —— 返回 false，由调用方关掉它。
-func (dm *DownloaderManager) storeInstance(name string, dl Downloader, gen uint64) bool {
+// 这个实例就是按旧配置建的，不能入表 —— 第二个返回值为 false，由调用方关掉它。
+//
+// 第一个返回值是被这次登记顶掉的旧实例（没有则为 nil），必须由调用方关闭。
+// 代次一抬升，lookupInstance 就把表里那个旧实例当作不存在，于是它既不会走
+// dropInstance、也不满足 applySyncFromDB 的「配置变更」关闭条件，只会在这里被
+// 静默覆盖；不交回去关就是一条连接泄漏。scheduler 的配置 reload 会对每个启用的
+// 下载器重新注册一遍，泄漏会按重连次数累积。
+// 不在这里直接关是因为 Close 会触发网络 I/O，不能在 dm.mu 里做。
+func (dm *DownloaderManager) storeInstance(name string, dl Downloader, gen uint64) (Downloader, bool) {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 	if dm.configGen[name] != gen {
-		return false
+		return nil, false
+	}
+	prev := dm.downloaders[name]
+	if prev == dl {
+		// 同一个实例重新登记（代次未变的重入），没有东西被顶掉
+		prev = nil
 	}
 	dm.downloaders[name] = dl
 	dm.instanceGen[name] = gen
 	dm.errorCounts[name] = 0
 	dm.lastHealthCheck[name] = time.Now()
-	return true
+	return prev, true
 }
 
 // resolveFactory 取出配置、对应工厂和当前配置代次，只在锁内读 map，不调用工厂

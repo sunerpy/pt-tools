@@ -431,6 +431,11 @@ func TestStaleInstanceNotServedAfterConfigChange(t *testing.T) {
 	assert.Equal(t, "http://new:9090", second.(*countingDownloader).url,
 		"配置变更后必须按新配置重建，不能复用旧实例")
 	assert.Equal(t, int32(2), built.Load())
+	// 代次一抬升，旧实例就从 lookupInstance 的视野里消失：dropInstance 看不到它，
+	// applySyncFromDB 的「配置变更」分支也遍历不到它，只会在重建时被静默覆盖。
+	// 不在覆盖处关掉就是一条泄漏，而 scheduler 每次配置 reload 都会走这条路。
+	assert.Equal(t, int32(1), closed.Load(),
+		"被新实例顶掉的旧实例必须被关闭，否则连接一直泄漏")
 }
 
 // TestRemovedDownloaderRejectsInFlightInstance 删除期间仍在飞的建连即使成功，
@@ -492,6 +497,65 @@ func TestSyncFromDBKeepsUnchangedInstances(t *testing.T) {
 	_, err = dm.GetDownloader("qbit")
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), built.Load(), "配置变了必须重建")
+}
+
+// TestRegisterConfigKeepsUnchangedInstance RegisterConfig 收到内容相同的配置时不得换代。
+//
+// 和 TestSyncFromDBKeepsUnchangedInstances 是同一个意图的另一条入口，而且是更常走的
+// 那条：scheduler 的配置 reload（scheduler/manager.go 的 RegisterConfig 循环）会对每个
+// 启用的下载器无条件重新注册，每次都新建一个配置对象，所以保存任意配置都会走到这里。
+// 无差别换代会把全部健康实例作废，逼出一轮毫无必要的重连。
+func TestRegisterConfigKeepsUnchangedInstance(t *testing.T) {
+	var built atomic.Int32
+	var closed atomic.Int32
+	dm := NewDownloaderManager()
+	dm.RegisterFactory(DownloaderQBittorrent, func(config DownloaderConfig, name string) (Downloader, error) {
+		built.Add(1)
+		return &countingDownloader{
+			MockDownloader: MockDownloader{name: name, dlType: config.GetType(), healthy: true},
+			url:            config.GetURL(),
+			closed:         &closed,
+		}, nil
+	})
+
+	// 每次都造一个新对象：reload 就是这么做的，判据不能依赖指针相等
+	sameConfig := func() DownloaderConfig {
+		return &MockConfig{
+			Type: DownloaderQBittorrent, URL: "http://same:8080",
+			Username: "u", Password: "p", AutoStart: true,
+		}
+	}
+
+	require.NoError(t, dm.RegisterConfig("qbit", sameConfig(), true))
+	first, err := dm.GetDownloader("qbit")
+	require.NoError(t, err)
+	require.Equal(t, int32(1), built.Load())
+
+	require.NoError(t, dm.RegisterConfig("qbit", sameConfig(), true))
+	require.NoError(t, dm.RegisterConfig("qbit", sameConfig(), true))
+	same, err := dm.GetDownloader("qbit")
+	require.NoError(t, err)
+	assert.Same(t, first, same, "配置内容没变不该重建实例")
+	assert.Equal(t, int32(1), built.Load(), "配置内容没变不该重建实例")
+	assert.Zero(t, closed.Load(), "没有实例被作废，就不该有 Close")
+
+	// 只改默认标记：defaultName 是独立状态，不影响这个下载器连谁
+	require.NoError(t, dm.RegisterConfig("qbit", sameConfig(), false))
+	stillSame, err := dm.GetDownloader("qbit")
+	require.NoError(t, err)
+	assert.Same(t, first, stillSame, "只改默认标记不该重建实例")
+	assert.Equal(t, int32(1), built.Load())
+
+	// URL 真的变了：必须重建，且被顶掉的旧实例要被关掉
+	require.NoError(t, dm.RegisterConfig("qbit", &MockConfig{
+		Type: DownloaderQBittorrent, URL: "http://moved:8080",
+		Username: "u", Password: "p", AutoStart: true,
+	}, true))
+	second, err := dm.GetDownloader("qbit")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), built.Load(), "配置变了必须重建")
+	assert.Equal(t, "http://moved:8080", second.(*countingDownloader).url)
+	assert.Equal(t, int32(1), closed.Load(), "被顶掉的旧实例必须被关闭")
 }
 
 // waitErr 有界地取后台调用方的返回值，避免代次检查失效时把测试挂死。

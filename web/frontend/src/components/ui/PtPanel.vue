@@ -4,7 +4,7 @@ import PtIcon from "../PtIcon";
 
 /**
  * 面板卡片 —— 设计稿 G 的 `panel()`，即 `k.card` 的 G 预设：
- * surface 底 + 1px border + 圆角 8（rLg）+ 一层浅阴影，页头 42 高，标题 13/600。
+ * surface 底 + 1px border + 圆角 8（rLg）+ 一层浅阴影，卡头 29 高，标题 13/600。
  *
  * 这是 G 方向上所有内容容器的唯一外框，取代旧的 `.table-card`/`.form-card`。
  * 表格类面板传 `padding="none"`，让网格自己贴边；表单类用默认的 16 内边距。
@@ -80,12 +80,20 @@ const hasCount = computed(() => props.count !== undefined && props.count !== "")
   box-shadow: none;
 }
 
+/*
+ * 画板「卡片 p-*」只给卡头 29 高，且 head-rule 正好落在 29：全局 box-sizing 是
+ * border-box，所以 height:29 + border-bottom:1 之后内容区剩 28，发丝线压在第 29 行。
+ * 28 的内容区靠 align-items:center 分配上下空隙，所以不给纵向内边距：实测 16 的图标
+ * 上下各 6，13/600 的标题行盒 17（13px × normal 行高）上下各 5.5，18 的计数徽标各 5。
+ * 16 的图标是卡头里最高的固定尺寸元素，它那 6 就是这里能有的最大余量，所以下面
+ * 把 actions 塞进来的控件压到 22 —— 那是还剩得下上下各 3 的上限。
+ */
 .pt-panel__head {
   display: flex;
   flex: 0 0 auto;
   gap: 9px;
   align-items: center;
-  height: 42px;
+  height: 29px;
   padding: 0 var(--pt-pad);
   border-bottom: 1px solid var(--pt-border);
 }
@@ -124,26 +132,54 @@ const hasCount = computed(() => props.count !== undefined && props.count !== "")
   flex: 1 1 auto;
 }
 
+/*
+ * 画板把卡头右侧动作定为 12/500 的强调色文字链，不是胶囊按钮：26 高的胶囊在 28 的
+ * 内容区里上下只剩 1px，hover 底会贴住发丝线。所以这里不给高度、不给 hover 底，
+ * 悬停时用下划线做反馈（只靠变色对弱视用户不够），键盘焦点仍走焦点环。
+ */
 .pt-panel__action {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 4px;
   align-items: center;
-  height: 26px;
-  padding: 0 8px;
+  padding: 0;
   font-family: inherit;
   font-size: var(--pt-fz-sm);
   font-weight: 500;
   color: var(--pt-p);
   background: transparent;
   border: 0;
-  border-radius: var(--pt-r-sm);
   cursor: pointer;
-  transition: background var(--pt-transition-fast);
+  transition: color var(--pt-transition-fast);
 }
 
 .pt-panel__action:hover {
-  background: var(--pt-p-soft);
+  text-decoration: underline;
+}
+
+.pt-panel__action:focus-visible {
+  border-radius: var(--pt-r-sm);
+  outline: 2px solid var(--pt-p);
+  outline-offset: 2px;
+}
+
+/*
+ * actions 插槽塞进来的按钮统一压到 22（28 的内容区上下各留 3）。Element 的 small
+ * 按钮是 24 高，只剩 2px 就顶满了；各页面自己写的图标钮多是 26，只剩 1px，hover
+ * 底会贴住 29 的发丝线。压在 PtPanel 这一处，二十多个 view 就不必各写一遍。
+ * 排除 .pt-panel__action：它已经是不带高度的文字链。
+ * padding 只给 el-button：图标钮靠固定宽居中，横向内边距会把图标挤出去。
+ */
+.pt-panel__head :deep(.el-button),
+.pt-panel__head :deep(button:not(.pt-panel__action)) {
+  height: 22px;
+  min-height: 22px;
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+}
+
+.pt-panel__head :deep(.el-button) {
+  padding: 0 8px;
 }
 
 .pt-panel__body {

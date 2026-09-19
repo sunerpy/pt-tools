@@ -210,8 +210,13 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
   /*
    * 每三条里有一条把分类留空、只给标签 —— Gazelle 的搜索响应就是这个形状
    * （没有分类字段，内容类型在 group 的 tags 上）。
+   *
+   * 标签用 MooKo 样本里的真实值（site/v2/definitions/mooko_fixture_test.go 的
+   * mookoSearchFixture）：Gazelle 的 tags 是**题材词**，一个都归不进画板那五个桶。
+   * 这里原来写的是 ["movie","1990s"]，那是造出来刚好能命中的形状，
+   * 正好掩盖了「选具体档位时这些行会被整片筛掉」这个缺陷 —— 本文件开头反对的就是这种假数据。
    */
-  tags: i % 3 === 1 ? ["movie", "1990s"] : [],
+  tags: i % 3 === 1 ? ["剧情", "悬疑", "传记"] : [],
 }));
 
 const SUPPORTED = SITES.map(([site], i) => ({

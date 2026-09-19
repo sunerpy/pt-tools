@@ -26,10 +26,11 @@ import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import {
   bucketOf,
-  bucketOfItem,
   CATEGORY_OPTIONS,
   type CategoryBucket,
   categoryLabel,
+  matchesCategory,
+  verdictOfItem,
 } from "@/utils/category";
 import {
   loadSavedSearches,
@@ -149,8 +150,11 @@ const CACHE_KEY = "pt-tools-search-cache";
  * （`影剧/综艺/HD`、`Animation`、`TV游戏` 这类），并有单测钉住漏收与误收两种情形 ——
  * 页内手写一版子串匹配已经错过一次。
  *
- * 筛选走 `bucketOfItem`（分类优先、标签兜底）而不是只看分类：Gazelle 的搜索响应里
- * 没有分类字段，走 Gazelle 的站点分类恒为空，只看分类就会被这条分段器全部筛掉。
+ * 筛选走 `matchesCategory` 的三态判定而不是「归不进桶就丢」：Gazelle 的搜索响应里
+ * 没有分类字段，MooKo 的真实 tags 是题材词（剧情/悬疑/传记），一个都归不进桶 ——
+ * 二态判定会把它整片筛掉，而「站点命中」卡报的是未筛选的后端计数，
+ * 画面就成了「MooKo 12 条」配一张空表格。所以只丢站点明确表过态的 other，留 unknown，
+ * 留下多少条由 unknownNote 说出来。
  */
 const activeCategory = ref<CategoryBucket>("");
 
@@ -365,7 +369,7 @@ const sortedResults = computed(() => {
 const filteredResults = computed(() => {
   let rows = sortedResults.value;
   if (activeCategory.value) {
-    rows = rows.filter((r) => bucketOfItem(r) === activeCategory.value);
+    rows = rows.filter((r) => matchesCategory(r, activeCategory.value));
   }
   if (freeOnly.value) {
     rows = rows.filter((r) => r.isFree);
@@ -1093,6 +1097,20 @@ const siteHitRows = computed<BreakdownRow[]>(() =>
     .map(([site, n]) => ({ key: site, label: site, value: n, tone: "primary" as const })),
 );
 
+/**
+ * 这张卡的行值来自后端回的 siteResults（search_orchestrator.go 按结果集逐条累加的），
+ * 而分类分段与「仅免费」都是本地筛选，不会回到后端重算 —— 两者本来就不是同一个口径。
+ * 不说清楚就成了「某站 12 条」配一张只剩几行的表格，看起来像哪一边算错了。
+ */
+const siteHitFoot = computed(() => {
+  const base = "柱长是该站点命中数占总命中数的比例。";
+  const local = [activeCategory.value ? "分类分段" : "", freeOnly.value ? "「仅免费」" : ""].filter(
+    Boolean,
+  );
+  if (local.length === 0) return base;
+  return `${base}这里是各站点返回的条数，${local.join("与")}是本地筛选，不改变这份计数。`;
+});
+
 /** p-alt：这次没返回结果的站点，附上真实原因 */
 const failedSiteRows = computed<BreakdownRow[]>(() =>
   searchErrors.value.map((e) => ({
@@ -1113,6 +1131,27 @@ const barNote = computed(() => {
   const parts = [`${asked - searchErrors.value.length} / ${asked} 站点已返回`];
   if (searchErrors.value.length > 0) parts.push(`${searchErrors.value.length} 站失败`);
   return parts.join(" · ");
+});
+
+/**
+ * 选中具体档位时，结果里那些「站点没给分类」的行要自己交代清楚。
+ *
+ * 它们是被 matchesCategory 故意留下来的（详见 @/utils/category），不说明的话用户看到的是
+ * 一堆看着与档位无关的结果，以为筛选坏了。说明里报条数和站点名，都是这份结果里能核对的：
+ * 站点名就是表格「站点」列的值，没有分类的行在标题下方也看不到分类标签。
+ */
+const unknownNote = computed(() => {
+  if (!activeCategory.value) return "";
+  const rows = filteredResults.value.filter((r) => verdictOfItem(r) === "unknown");
+  if (rows.length === 0) return "";
+  const sites = [...new Set(rows.map((r) => r.sourceSite).filter(Boolean))];
+  /* 站点多了不铺满一行：列三个，剩下的只报个数 */
+  const who =
+    sites.length > 3
+      ? `${sites.slice(0, 3).join("、")} 等 ${sites.length} 个站点`
+      : sites.join("、");
+  const from = who ? `（${who}）` : "";
+  return `其中 ${rows.length} 条没有可用的分类信息${from}，按分类筛不掉，一并列在这里。`;
 });
 
 /**
@@ -1376,6 +1415,15 @@ const footNote = computed(() => {
         <el-button size="small" :loading="loading" @click="doSearch">
           <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
         </el-button>
+      </div>
+
+      <!--
+        选中具体档位时，交代那些「站点没给分类」的行为什么还在这里 —— 它们是故意留下的。
+        不说的话用户会以为分类筛选是坏的。
+      -->
+      <div v-if="unknownNote" class="pt-note nocat">
+        <PtIcon name="info" :size="14" class="pt-note__icon" />
+        <span>{{ unknownNote }}</span>
       </div>
 
       <el-table
@@ -1667,10 +1715,7 @@ const footNote = computed(() => {
         title="站点命中"
         icon="layers"
         :count="`${Object.keys(siteResultCounts).length} 个站点`">
-        <PtBreakdown
-          :rows="siteHitRows"
-          :total="totalResults"
-          foot="柱长是该站点命中数占总命中数的比例。" />
+        <PtBreakdown :rows="siteHitRows" :total="totalResults" :foot="siteHitFoot" />
       </PtPanel>
 
       <PtPanel
@@ -2032,6 +2077,12 @@ const footNote = computed(() => {
   font-size: var(--pt-fz-label);
   color: var(--pt-t3);
   overflow-wrap: anywhere;
+}
+
+/* 无分类提示条：与部分失败条同一套留白，落在表格带内 */
+.nocat {
+  align-items: flex-start;
+  margin: var(--pt-space-3) var(--pt-pad);
 }
 
 /* 标题列是这张表的重心：标题一行、副标题一行、标签一行，其余列都只放一个数 */

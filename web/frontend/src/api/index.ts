@@ -1148,6 +1148,26 @@ export interface DownloaderTransferStats {
   free_space: number;
 }
 
+/**
+ * transfer-stats 里每台下载器的明细（对应后端 `DownloaderTransferStatItem`）。
+ *
+ * 后端遍历「已启用」的下载器，只有 manager 成功交出客户端的那台才会 append 进来，
+ * 拿不到客户端的直接 continue —— 所以「在不在这个数组里」就是这台的连接态，
+ * 不必再去拨 `/api/downloaders/{id}/health`（那个接口每次都真连下载器）。
+ */
+export interface DownloaderTransferStatItem {
+  downloader_id: number;
+  downloader_name: string;
+  downloader_type: string;
+  upload_speed: number;
+  download_speed: number;
+  uploaded: number;
+  downloaded: number;
+  session_uploaded: number;
+  session_downloaded: number;
+  free_space: number;
+}
+
 export interface DownloaderCapability {
   downloader_id: number;
   downloader_name: string;
@@ -1197,6 +1217,8 @@ export const downloaderTorrentsApi = {
       total_session_uploaded: number;
       total_session_downloaded: number;
       total_free_space: number;
+      /* 后端一直在返回每台的明细，这里以前漏了声明 */
+      downloaders: DownloaderTransferStatItem[];
     }>("/api/downloader-torrents/transfer-stats", { signal }),
 
   capabilities: () =>

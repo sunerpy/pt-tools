@@ -43,7 +43,10 @@ const EXPECT = {
     bands: ["toolbar", "grid", "foot"],
     cards: [548, 516, 1080], // p-up / p-dist / p-watch
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["上传构成", "等级分布", "需要关注"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["上传构成", "等级分布", "需要关注"],
+    /* 画板 10 的行高与十列（docs/design/webui-board-spec.md §6）；差异见 ALLOWED_GAPS */
+    gridRowHeight: 34,
+    gridColumns: ["站点", "等级", "数据量", "分享率", "做种", "做种体积", "积分", "时魔", "更新"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
   },
   "/userinfo/export": {
     board: "11 导出分享图",
@@ -252,6 +255,21 @@ const EXPECT = {
  */
 const ALLOWED_GAPS = {
   /*
+   * 用户统计表与画板 10 的四处差异。**都不是漏做，是与用户验收冲突后按用户决定保留的**：
+   * 提交 266625b 记着「站点有消息角标时展示不全」是真实浏览器验收退回的缺陷，
+   * 当时的修法就是把行高放到 48（.pt-grid--roomy）并让角标贴头像右上角向左生长。
+   * 按画板压回 34 + 纯文本站点列，等于把那次修复回滚掉。
+   * 那四个多出来的列（真实数据 / 入站 / 剩余天数 / 操作）是改版前就有的功能列，
+   * 砍列属于产品取舍。两件都要 owner 拍板，不由实现单方面决定。
+   */
+  "/userinfo grid.rowHeight":
+    "画板 34，落地 48（.pt-grid--roomy）：站点列有 32px 头像与未读角标，34 的行盒会把角标切掉 —— " +
+    "角标显示不全正是用户验收退回过的缺陷（266625b）。改回 34 需先由 owner 决定是否放弃角标与头像。",
+  "/userinfo grid.columns":
+    "画板十列且站点列为纯文本；落地多出「真实数据 / 入站 / 剩余天数 / 操作」四列，站点列带头像+角标+双行。" +
+    "那四列是改版前就有的功能列（计量差异、封禁提醒、打开/同步入口），砍掉属于产品取舍，需 owner 拍板。",
+
+  /*
    * 这张表现在是空的 —— 上一轮登记的偏离都实现掉了。
    * 再往里加一条就等于向 owner 承认「这里没按画板做」，所以原因必须写清是**为什么做不了**
    * （需要后端新接口、会造成重复写入口一类），不是「暂时不想做」。
@@ -437,6 +455,14 @@ const MEASURE = `(() => {
       ])
       .filter(Boolean),
     hasSeg: Boolean(document.querySelector('.pt-seg, .el-segmented')),
+    /* 表格带的列名与行高 —— 画板对表格页规定了列集合与 34 的行节奏 */
+    gridColumns: [...document.querySelectorAll('.pt-band--grid th .cell')]
+      .map((el) => (el.textContent ?? '').replace(/\\s+/g, ' ').trim())
+      .filter(Boolean),
+    gridRowHeight: (() => {
+      const row = document.querySelector('.pt-band--grid tbody tr td');
+      return row ? Math.round(row.getBoundingClientRect().height) : null;
+    })(),
     ownHead: one('.pt-band--head'),
     tabs: one('.pt-band--tabs'),
     toolbar: one('.pt-band--toolbar'),
@@ -472,6 +498,11 @@ const MEASURE = `(() => {
             (el.querySelector('.pt-panel__title')?.textContent ?? '').trim() ||
             el.dataset.card ||
             '',
+          /* 卡头高度：画板「卡片 p-*」规定发丝线在 29；没有卡头的块记 null */
+          head: (() => {
+            const h = el.querySelector('.pt-panel__head');
+            return h ? Math.round(h.getBoundingClientRect().height) : null;
+          })(),
         });
       };
       /* 只从最外层的卡片容器出发：里层容器的卡已经被外层的后代查询收进来了，
@@ -580,6 +611,41 @@ for (const route of routes) {
     const wantH = want.detail ? 88 : 64;
     if (!got.head) fail("head", "找不到 .pt-head");
     else if (!near(got.head.h, wantH, 2)) fail("head", `页头高 ${got.head.h}，画板 ${wantH}`);
+  }
+
+  /* 表格页的行节奏与列集合（画板对表格页规定了这两样） */
+  if (want.gridRowHeight && got.gridRowHeight !== null) {
+    if (!near(got.gridRowHeight, want.gridRowHeight, 3)) {
+      fail("grid.rowHeight", `行高 ${got.gridRowHeight}，画板 ${want.gridRowHeight}`);
+    }
+  }
+  if (want.gridColumns) {
+    /* 画板的列必须都在 */
+    for (const col of want.gridColumns) {
+      if (!got.gridColumns.some((c) => c.includes(col))) {
+        fail("grid.columns", `表头里没有「${col}」；实测 ${got.gridColumns.join(" / ")}`);
+      }
+    }
+    /*
+     * 画板之外的列也要报。只查「缺了没」挡不住「多了几列」——
+     * 而多列一样是与画板不一致，且会改变整表的列宽分配。
+     */
+    const extra = got.gridColumns.filter((c) => !want.gridColumns.some((w) => c.includes(w)));
+    if (extra.length > 0) {
+      fail("grid.columns", `多出画板之外的列：${extra.join(" / ")}`);
+    }
+  }
+
+  /*
+   * 卡头高度。画板「卡片 p-*」规定卡头发丝线在 29（docs/design/webui-board-spec.md）。
+   * 这是 85 个 PtPanel 实例共用的一个数，错了会系统性改变所有卡的内部比例，
+   * 而它在验收里一直没人看守 —— 实现曾经是 42，跑了很多轮都没红。
+   */
+  for (const card of got.cards) {
+    if (card.head === null) continue;
+    if (!near(card.head, 29, 3)) {
+      fail(`cards.head(${card.title || card.w})`, `卡头高 ${card.head}，画板 29`);
+    }
   }
 
   /*

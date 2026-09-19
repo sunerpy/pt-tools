@@ -699,6 +699,37 @@
   text-decoration: underline;
 }
 
+/*
+ * 下载器身份格（画板状态栏右端）。
+ *
+ * .pt-status 是 overflow:hidden，各格 flex:0 0 auto，769–1180 这一档本来就偏紧；
+ * 多这一格约 130px 会把版权挤出可视区。所以让它按「先收文字、再整格隐藏」让位：
+ * 1180 以下先把名称那段收成省略号（图标与连接态仍在），900 以下整格不画 ——
+ * 那个宽度上导航列已经是抽屉形态，状态栏能留下的只有全局聚合数字。
+ */
+.pt-status__dl {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.pt-status__dl-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .pt-status__dl {
+    max-width: 150px;
+  }
+}
+
+@media (max-width: 900px) {
+  .pt-status__dl {
+    display: none;
+  }
+}
+
 .pt-status__menu {
   display: flex;
   flex-direction: column;

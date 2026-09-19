@@ -17,8 +17,16 @@
  *   ② 误收：`TV游戏` 含 `tv`，裸的子串匹配会把 TV 游戏归进「剧集」。
  *      所以 `tv` 只在后面跟分隔符或到头时才算命中（`TV/HD` 命中，`TV游戏` 不命中）。
  *
- * 归不进任何一桶的（纪录片、运动、游戏、软件、电子书…）在选中具体档位时不显示 ——
- * 五个固定桶的设计本身就是这个含义，不为它们编一个「其他」档。
+ * 还有第三个坑，比上面两个更伤人：**有的站点根本不返回分类**。
+ * Gazelle 的 ParseSearch（site/v2/gazelle_driver.go）不填 `Category`，只带 group 的
+ * `tags`，而内置 MooKo 的真实样本里 tags 是 `["剧情","悬疑","传记"]` 这种**题材词** ——
+ * 它既不是分类，也归不进任何一桶。把这种行和「站点说了、但不属于五桶」的行
+ * （M-Team 的 `纪录片`、`TV游戏`）当成同一回事，一选具体档位就会把 MooKo 的结果整片筛掉，
+ * 而「站点命中」卡用的是未筛选的后端计数，于是画面变成「MooKo 12 条」配一张空表格。
+ *
+ * 所以归桶是**三态**（见 `CategoryVerdict`）：命中某桶 / `other` / `unknown`。
+ * 筛选只丢 `other`（纪录片、游戏照旧不显示，五个固定桶的设计就是这个含义），
+ * 保留 `unknown` —— 「站点没提供分类」不等于「不属于这个分类」。
  */
 
 /** 桶 ID。空串是「全部」，不参与匹配 */
@@ -65,7 +73,12 @@ const RULES: readonly { bucket: Exclude<CategoryBucket, "">; test: RegExp }[] = 
   },
 ];
 
-/** 把站点回的分类名归进画板那四个桶；归不进去返回空串 */
+/**
+ * 把一个分类名（或标签）归进画板那四个桶；归不进去返回空串。
+ *
+ * 这是**单个字符串**的匹配器，空串只表示「这个名字认不出来」，不表示「站点没给分类」。
+ * 要判断一条搜索结果，用下面的 `verdictOfItem` —— 那两件事必须分开。
+ */
 export function bucketOf(category: string | undefined | null): CategoryBucket {
   const name = (category ?? "").trim();
   if (!name) return "";
@@ -76,27 +89,54 @@ export function bucketOf(category: string | undefined | null): CategoryBucket {
 }
 
 /**
- * 按「分类 + 标签」归桶。
+ * 一条结果的归桶结论。
  *
- * 为什么要看标签：Gazelle 的搜索响应里**根本没有分类字段**
- * （`site/v2/gazelle_driver.go` 的 ParseSearch 因此不填 `Category`），
- * 它用 group 上的 `tags` 表达内容类型 —— 走 Gazelle 的站点（内置 MooKo）分类恒为空，
- * 一选具体档位就被全部筛掉，画板那条分段器对它等于失效。
+ * `other` 与 `unknown` 必须分开，因为筛选时要区别对待：
+ *   `other`   站点**给了**分类，只是不在五桶里（`纪录片`、`TV游戏`、`Sports`…）
+ *   `unknown` 站点连分类都没给，标签也认不出内容类型（Gazelle / MooKo）
+ */
+export type CategoryVerdict = Exclude<CategoryBucket, ""> | "other" | "unknown";
+
+/**
+ * 按「分类 + 标签」判定一条结果的归桶结论。
  *
  * 顺序是「分类优先、标签兜底」：分类是站点明确给出的归类，比标签准。
- * 标签里归不进任何桶的（音乐站的流派标签 electronic / jazz 之类）照旧返回空串。
+ * 只有分类是空的时候才翻标签 —— 标签兜底是为 Gazelle 那种没有分类字段的响应准备的，
+ * 不是用来推翻站点自己的归类。
+ *
+ * 站点给了分类却归不进任何桶，就是 `other`（这是站点的表态，可以照它筛）。
+ * 分类是空的且没有一个标签能归桶，就是 `unknown`（这不是表态，是信息缺失）。
  */
-export function bucketOfItem(item: {
+export function verdictOfItem(item: {
   category?: string | null;
   tags?: string[] | null;
-}): CategoryBucket {
-  const byCategory = bucketOf(item.category);
-  if (byCategory) return byCategory;
+}): CategoryVerdict {
+  const named = (item.category ?? "").trim();
+  if (named) {
+    const byCategory = bucketOf(named);
+    return byCategory === "" ? "other" : byCategory;
+  }
   for (const tag of item.tags ?? []) {
     const byTag = bucketOf(tag);
-    if (byTag) return byTag;
+    if (byTag !== "") return byTag;
   }
-  return "";
+  return "unknown";
+}
+
+/**
+ * 选中具体档位时这一行留不留。
+ *
+ * 留 `unknown`：把「站点没提供分类」筛成「不属于这个分类」，用户看到的是
+ * 「MooKo 命中 12 条」配一张空表格 —— 这比少筛几条更不诚实。表格上方那条说明
+ * （TorrentSearch.vue 的 unknownNote）负责把留下来的条数讲出来。
+ */
+export function matchesCategory(
+  item: { category?: string | null; tags?: string[] | null },
+  bucket: CategoryBucket,
+): boolean {
+  if (!bucket) return true;
+  const verdict = verdictOfItem(item);
+  return verdict === bucket || verdict === "unknown";
 }
 
 /** 桶 ID → 给人看的标签。用于「已保存的搜索」那类要回显条件的地方 */

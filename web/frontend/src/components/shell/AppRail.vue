@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RAIL_ITEMS } from "../../config/navigation";
+import { RAIL_FOOT_ITEM, RAIL_ITEMS } from "../../config/navigation";
 import { useThemeStore } from "../../stores/theme";
 import PtIcon from "../PtIcon";
 import PtLogo from "../PtLogo";
@@ -9,8 +9,9 @@ import ThemePrefs from "./ThemePrefs.vue";
 /**
  * 深色图标 rail（设计稿 G 的 `D.rail`，宽 64）。
  *
- * 结构是「品牌 / 快捷入口 / 明暗开关 / 头像」。两点与板 41 不同，都是验收反馈：
- *   · 快捷入口只在导航列收起时出现（CSS 在 shell.css 管），否则与导航列逐条重复；
+ * 结构是「品牌 / 快捷入口 / 运行日志 / 明暗开关 / 头像」。两点与板 41 不同，都是验收反馈：
+ *   · 导航入口只在导航列收起时出现（CSS 在 shell.css 管），否则与导航列逐条重复。
+ *     这条同样管住底部的运行日志 —— 它在导航列里叫「系统 › 运行日志」；
  *   · 明暗切换单独立一个按钮。板 41 把它塞进头像 popover 里，实测「看不到」——
  *     头像是个无字的人形图标，没人会为了换主题去点它。这里一键直切，
  *     popover 里的三段选择器（含跟随系统）保留，是它的超集。
@@ -72,8 +73,38 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
       </el-tooltip>
     </nav>
 
-    <!-- 画板底部一组：分隔线之下是日志入口与头像，和上面的导航入口分开 -->
+    <!--
+      画板底部一组（foot-rule 之下）：运行日志、明暗开关、头像。
+      画板只画了日志与头像，明暗开关是验收补的，排在日志之后 ——
+      这样日志入口随导航列开合出现或消失时，明暗按钮到底边的距离都不变，
+      不会换位置（它必须一眼能找到）。
+    -->
     <div class="pt-rail__foot">
+      <!--
+        运行日志。它在导航列里就是「系统 › 运行日志」，所以必须和主入口区那 8 项同一档：
+        带上 .pt-rail__item，让 shell.css 的 `.is-nav-docked .pt-rail__item` 在导航列
+        钉住时把它藏掉，否则两处常态重复。.pt-rail__tool 给的是画板 rail-log 的 32×32。
+
+        不加 is-active：那条选中条（3×40，left:-6px）的位置是按主入口区 52×40 的项盒
+        算出来的，那里项盒起于 x=6，条正好贴着 rail 左沿。底部这个 32×32 的盒子起于
+        x=16，同一条会落在 x=10，而且 40 高压在 32 高的盒子上还要下探 8px 到明暗按钮。
+        当前页由 aria-current 表达。
+      -->
+      <el-tooltip
+        v-if="RAIL_FOOT_ITEM"
+        :content="RAIL_FOOT_ITEM.label"
+        placement="right"
+        :offset="10"
+        :show-after="240">
+        <router-link
+          :to="RAIL_FOOT_ITEM.path"
+          class="pt-rail__tool pt-rail__item"
+          :aria-label="RAIL_FOOT_ITEM.label"
+          :aria-current="activePath === RAIL_FOOT_ITEM.path ? 'page' : undefined">
+          <PtIcon :name="RAIL_FOOT_ITEM.icon" :size="16" />
+        </router-link>
+      </el-tooltip>
+
       <el-tooltip :content="themeLabel" placement="right" :offset="10" :show-after="240">
         <button
           type="button"

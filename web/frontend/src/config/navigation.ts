@@ -13,7 +13,10 @@ export interface NavItem {
   external?: boolean;
   /** 右侧计数徽标取自哪个统计字段，没有就不显示 */
   badge?: "sites" | "tasks" | "paused";
-  /** 同时出现在深色 rail 上（设计稿 `D.rail` 的 8 个快捷入口） */
+  /**
+   * 同时出现在深色 rail 的**主入口区**（设计稿 `D.rail` 的 8 个快捷入口）。
+   * rail 底部分隔线之下那一格不走这个标记，见 RAIL_FOOT_ITEM。
+   */
   rail?: boolean;
 }
 
@@ -108,6 +111,21 @@ export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
  * 导航列钉在旁边时这排图标是重复的，由 shell.css 藏掉；收起后它就是唯一的导航。
  */
 export const RAIL_ITEMS: readonly NavItem[] = NAV_ITEMS.filter((i) => i.rail);
+
+/** rail 底部那一格指向的路由（设计稿 `D.rail` 的 `rail-log`，在 foot 分隔线之下） */
+export const RAIL_FOOT_PATH = "/logs";
+
+/**
+ * rail 底部分隔线之下那一个导航入口。
+ *
+ * 不给它打 `rail` 标记：带标记的项渲染在 rail 的主入口区（`.pt-rail__items`），
+ * 而画板把运行日志画在 foot-rule 之下的底部那一组里。label 与 icon 仍然从
+ * NAV_ITEMS 取，导航文案只有一处、不会漂移。
+ *
+ * 它和主入口区那 8 项同一档：导航列钉住时一起藏掉（shell.css 的
+ * `.is-nav-docked .pt-rail__item`），否则和导航列「系统 › 运行日志」常态重复。
+ */
+export const RAIL_FOOT_ITEM: NavItem | undefined = NAV_ITEMS.find((i) => i.path === RAIL_FOOT_PATH);
 
 /**
  * 路由 name → 导航项 path。详情页、子路由的 name 与导航 path 对不上，
