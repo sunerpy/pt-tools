@@ -11,9 +11,10 @@
     "lint:check": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "vitest run && node scripts/style-scan.mjs",
+    "test": "vitest run && node scripts/style-scan.mjs && node scripts/dialog-scan.mjs",
     "test:watch": "vitest",
-    "style:scan": "node scripts/style-scan.mjs"
+    "style:scan": "node scripts/style-scan.mjs",
+    "dialog:scan": "node scripts/dialog-scan.mjs"
   },
   "dependencies": {
     "@vueuse/core": "^14.4.0",
