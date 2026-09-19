@@ -11,8 +11,9 @@
     "lint:check": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run && node scripts/style-scan.mjs",
+    "test:watch": "vitest",
+    "style:scan": "node scripts/style-scan.mjs"
   },
   "dependencies": {
     "@vueuse/core": "^14.4.0",

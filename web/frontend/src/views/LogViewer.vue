@@ -575,8 +575,19 @@ function scrollToTop() {
 </template>
 
 <style scoped>
-/* 左栏窄卡顶对齐，别被右边那张很高的日志卡拉长 */
-.lv-card {
+/*
+ * 左栏的三张窄卡。`.lv-col` 此前**一条样式都没有** —— 于是它是个 display:block 的 div，
+ * 三张卡首尾相接（实测 120+156=276、276+289=565，一点缝都没有），
+ * 而画板的卡片层卡间是 16。
+ *
+ * 顶对齐要放在 `.lv-col` 上（它才是 .pt-cards 栅格的子项），不能放在 `.lv-card` 上：
+ * 父级一变成 flex column，子项的 `align-self: start` 就成了交叉轴上的「按内容收缩」，
+ * 卡片宽度会塌成文字宽度。
+ */
+.lv-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-pad);
   align-self: start;
 }
 
