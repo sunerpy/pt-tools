@@ -44,6 +44,14 @@ const EXPECT = {
     cards: [548, 516, 1080], // p-up / p-dist / p-watch
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["上传构成", "等级分布", "需要关注"],
+    /*
+     * 画板 10 的 bar-64：seg（全部站点/正常/异常/保号预警）+ q + chip-0「周期: 本周」
+     * + chip-1「排序: 分享率」+ 右端三枚图标钮。周期那枚没落地（聚合接口没有历史序列），
+     * 偏离见 ALLOWED_GAPS。
+     */
+    needsSeg: true,
+    /* 「周期」按画板列进来，落地没有 —— 让它红，原因在 ALLOWED_GAPS 里 */
+    controls: ["全部站点", "正常", "异常", "保号预警", "排序", "列设置", "导出", "周期"],
     /* 画板 10 的行高与十列（docs/design/webui-board-spec.md §6）；差异见 ALLOWED_GAPS */
     gridRowHeight: 34,
     /* 画板 10 的十列。「判定活跃」曾经漏在这张表外 —— 期望表自己漏列，检查就永远发现不了 */
@@ -654,6 +662,10 @@ const ALLOWED_GAPS = {
    * RSS 流水：已下载 / 已推送 / 已过期，在 apiTasks 里是逐个 AND 的可叠加标记。
    * 两者不是同一套词汇 —— 那五档属于下载器控制台（画板 18），那一页确实有它们。
    */
+  "/userinfo controls(周期)":
+    "画板 10 的 chip-0 是「周期: 本周」，落地没有：聚合接口只回当前快照，没有历史序列，" +
+    "按周期筛在数据上不成立。要做得先有按时间的站点数据接口。",
+
   "/tasks controls.seg":
     "画板 16 的分段是五档下载器状态（全部/下载中/做种中/等待中/已暂停）；这一页是 RSS 流水，" +
     "只有已下载 / 已推送 / 已过期三个标记，而且它们是可叠加的（apiTasks 里逐个 AND）——" +
@@ -861,6 +873,26 @@ async function goto(url) {
 }
 
 await goto(`${BASE}/`);
+/*
+ * 第一页都没打开就别往下跑了。
+ *
+ * 踩过一次：上一轮留下的 Chrome 还占着调试端口，新起的这个连不上，于是每条路由都在
+ * goto 里空转 80×250ms —— 四十趟加起来十几分钟，屏幕上一个字都没有，看着像卡死。
+ * 这里先确认首页真的加载出来了，否则立刻带着原因退出。
+ */
+{
+  const ready = await ev(
+    `document.readyState === 'complete' && !!document.querySelector('#app > *, form')`,
+  ).catch(() => false);
+  if (ready !== true) {
+    console.log(
+      `✗ 打不开 ${BASE}/ —— 服务没起来，或调试端口 ${PORT} 被上一次的 Chrome 占着。` +
+        `先确认服务在跑，再确认没有残留的 chrome 进程。`,
+    );
+    chrome.kill("SIGKILL");
+    process.exit(2);
+  }
+}
 await ev(
   `fetch('/login', { method: 'POST', body: new URLSearchParams({ username: ${JSON.stringify(USER)}, password: ${JSON.stringify(PASS)} }) })`,
 );

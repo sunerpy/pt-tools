@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useRouter } from "vue-router";
 import {
   type AggregatedStatsResponse,
   type SiteConfig,
@@ -35,6 +36,9 @@ import { ElMessage } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, onUnmounted, ref } from "vue";
+
+/* 「更多」菜单里那两项要跳路由 */
+const router = useRouter();
 
 const siteLevelsStore = useSiteLevelsStore();
 
@@ -300,7 +304,189 @@ const kpiItems = computed<KpiRow[]>(() => {
   return items;
 });
 
-const siteRows = computed(() => aggregatedStats.value?.perSiteStats ?? []);
+/*
+ * 画板 10 的 bar-64：seg（全部站点 / 正常 / 异常 / 保号预警）+ q（筛选站点、等级…）
+ * + chip-0「周期: 本周」+ chip-1「排序: 分享率」+ 右端三枚图标钮（列设置 / 导出 / 刷新）。
+ *
+ * 落地此前这条带上**只有动作按钮**，一个筛选都没有 —— 而这一页是十四列的表，
+ * 最需要的就是筛与排。现在补上 seg、搜索、排序 chip 与列设置、导出。
+ *
+ * 「周期」那枚 chip 没有落地：聚合接口只回当前快照，没有历史序列，
+ * 按周期筛在数据上不成立（登记在 ALLOWED_GAPS 里）。
+ */
+type SiteFilter = "all" | "ok" | "bad" | "warn";
+
+const SITE_FILTERS: { label: string; value: SiteFilter }[] = [
+  { label: "全部站点", value: "all" },
+  { label: "正常", value: "ok" },
+  { label: "异常", value: "bad" },
+  { label: "保号预警", value: "warn" },
+];
+
+const siteFilter = ref<SiteFilter>("all");
+const rowQuery = ref("");
+
+const SORT_OPTIONS = [
+  { label: "分享率", value: "ratio" },
+  { label: "上传量", value: "uploaded" },
+  { label: "做种数", value: "seeding" },
+  { label: "积分", value: "bonus" },
+  { label: "站点名", value: "site" },
+] as const;
+
+const rowSort = ref<(typeof SORT_OPTIONS)[number]["value"]>("ratio");
+
+const USERINFO_COLS_KEY = "pt-tools-userinfo-cols-v1";
+
+const OPTIONAL_USERINFO_COLS = [
+  { key: "trueData", label: "真实数据" },
+  { key: "seedSize", label: "做种体积" },
+  { key: "bonus", label: "积分" },
+  { key: "bph", label: "时魔/h" },
+  { key: "inbound", label: "入站" },
+  { key: "active", label: "判定活跃" },
+  { key: "days", label: "剩余天数" },
+  { key: "updated", label: "更新" },
+] as const;
+
+type OptionalUserinfoCol = (typeof OPTIONAL_USERINFO_COLS)[number]["key"];
+
+function loadHiddenUserinfoCols(): Set<OptionalUserinfoCol> {
+  try {
+    const raw = window.localStorage.getItem(USERINFO_COLS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    const known = new Set(OPTIONAL_USERINFO_COLS.map((c) => c.key as string));
+    return new Set(parsed.filter((k): k is OptionalUserinfoCol => known.has(k)));
+  } catch {
+    return new Set();
+  }
+}
+
+const hiddenUserinfoCols = ref<Set<OptionalUserinfoCol>>(loadHiddenUserinfoCols());
+
+function toggleUserinfoCol(key: OptionalUserinfoCol) {
+  const next = new Set(hiddenUserinfoCols.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  hiddenUserinfoCols.value = next;
+  try {
+    window.localStorage.setItem(USERINFO_COLS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
+
+const colShown = (key: OptionalUserinfoCol) => !hiddenUserinfoCols.value.has(key);
+
+/** 「更多」菜单里的四个低频动作 —— 与原来那四枚按钮是同一个动作，不是另一套逻辑 */
+function onMoreCommand(cmd: string) {
+  if (cmd === "autoRefresh") return toggleAutoRefresh();
+  if (cmd === "clearCache") return clearCache();
+  if (cmd === "openAll") return openAllSites();
+  if (cmd === "supported") return void router.push("/supported-sites");
+}
+
+/**
+ * 导出当前筛选出的这批站点（画板 bar-64 的 bi-file-down）。
+ *
+ * 列固定按画板那十列的口径导，不跟着「列设置」变：列设置是**看**的偏好，
+ * 而导出是拿数据走，少一列就是少一份信息。
+ */
+function exportCsv() {
+  const head = [
+    "站点",
+    "等级",
+    "上传",
+    "下载",
+    "分享率",
+    "做种",
+    "做种体积",
+    "积分",
+    "时魔/h",
+    "更新时间",
+  ];
+  const lines = [head.join(",")];
+  for (const r of siteRows.value) {
+    const cells = [
+      r.site,
+      r.levelName || r.rank || "",
+      formatBytes(r.uploaded),
+      formatBytes(r.downloaded),
+      formatRatio(r.ratio),
+      String(r.seeding ?? 0),
+      formatBytes(r.seederSize ?? 0),
+      String(r.bonus ?? 0),
+      String(r.bonusPerHour ?? 0),
+      r.lastUpdate ? new Date(r.lastUpdate * 1000).toLocaleString("zh-CN", { hour12: false }) : "",
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pt-tools-userinfo-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出 ${siteRows.value.length} 个站点`);
+}
+
+const allSiteRows = computed(() => aggregatedStats.value?.perSiteStats ?? []);
+
+/**
+ * 表格里这一批行 = 状态筛 + 搜索 + 排序。
+ *
+ * 状态的口径都用本页已有的数据：
+ *   异常      站点最近一次没能取到数据（unread/ratio 之类还在，但 lastUpdate 为 0）
+ *             或者保号档位已经到了 3 天内 / 即将封禁；
+ *   保号预警  保号档位在 30 天 / 14 天 / 7 天这几档；
+ *   正常      其余。
+ */
+const siteRows = computed(() => {
+  let rows = allSiteRows.value;
+  if (siteFilter.value !== "all") {
+    rows = rows.filter((r) => {
+      const tier = reminderTier(r.site);
+      const warn = tier === "pre-warn" || tier === "30d" || tier === "14d" || tier === "7d";
+      const bad = tier === "3d" || tier === "1d" || tier === "banned-imminent" || !r.lastUpdate;
+      if (siteFilter.value === "bad") return bad;
+      if (siteFilter.value === "warn") return warn && !bad;
+      return !bad && !warn;
+    });
+  }
+  const q = rowQuery.value.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(
+      (r) =>
+        r.site.toLowerCase().includes(q) ||
+        (r.rank ?? "").toLowerCase().includes(q) ||
+        (r.levelName ?? "").toLowerCase().includes(q),
+    );
+  }
+  const key = rowSort.value;
+  return [...rows].sort((a, b) => {
+    if (key === "site") return a.site.localeCompare(b.site);
+    const av =
+      key === "ratio"
+        ? a.ratio
+        : key === "uploaded"
+          ? a.uploaded
+          : key === "seeding"
+            ? a.seeding
+            : (a.bonus ?? 0);
+    const bv =
+      key === "ratio"
+        ? b.ratio
+        : key === "uploaded"
+          ? b.uploaded
+          : key === "seeding"
+            ? b.seeding
+            : (b.bonus ?? 0);
+    return bv - av;
+  });
+});
 
 /**
  * 画板 10 在 gfoot 之后还有三张分析卡：p-up 548（上传构成）、p-dist 516（等级分布）、
@@ -635,37 +821,99 @@ onUnmounted(() => {
 
     <!-- 站点详情表格：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
     <PtToolbar band>
+      <!--
+        画板 10 的 bar-64：seg（全部站点 / 正常 / 异常 / 保号预警）+ q + 排序 chip。
+        这条带此前只有动作按钮、一个筛选都没有 —— 而这是一张十四列的表。
+      -->
+      <el-segmented
+        v-model="siteFilter"
+        class="pt-seg"
+        :options="SITE_FILTERS"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="userinfo-status-seg" />
+      <el-input
+        v-model="rowQuery"
+        class="ui-q"
+        size="small"
+        placeholder="筛选站点、等级…"
+        clearable
+        data-testid="userinfo-search">
+        <template #prefix>
+          <PtIcon name="search" :size="15" />
+        </template>
+      </el-input>
+      <el-select v-model="rowSort" class="ui-chip" size="small" data-testid="userinfo-sort">
+        <el-option
+          v-for="o in SORT_OPTIONS"
+          :key="o.value"
+          :label="`排序: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+
       <template #right>
-        <el-tooltip
-          :content="autoRefreshEnabled ? '点击关闭自动刷新 (5分钟)' : '点击开启自动刷新'"
-          placement="top">
-          <el-button
-            size="small"
-            :type="autoRefreshEnabled ? 'success' : 'info'"
-            @click="toggleAutoRefresh">
-            <PtIcon name="timer" :size="14" />
-            <span>{{ autoRefreshEnabled ? "自动刷新中" : "自动刷新已关闭" }}</span>
-          </el-button>
+        <!-- 画板 bar-64 右端的 bi-columns-3：十四列里哪几列要看，自己定 -->
+        <el-popover placement="bottom-end" trigger="click" :width="180">
+          <template #reference>
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="列设置"
+              data-testid="userinfo-cols-btn">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="ui-cols">
+            <label v-for="c in OPTIONAL_USERINFO_COLS" :key="c.key" class="ui-cols__row">
+              <el-checkbox :model-value="colShown(c.key)" @change="toggleUserinfoCol(c.key)" />
+              <span>{{ c.label }}</span>
+            </label>
+          </div>
+        </el-popover>
+
+        <!-- 画板 bar-64 右端的 bi-file-down -->
+        <el-tooltip content="按当前筛选导出 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="userinfo-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
         </el-tooltip>
-        <el-button size="small" @click="clearCache">
-          <PtIcon name="trash-2" :size="14" />
-          <span>清除缓存</span>
-        </el-button>
-        <el-button
-          size="small"
-          data-testid="userinfo-open-all-btn"
-          :disabled="!siteRows.length"
-          @click="openAllSites">
-          <PtIcon name="external-link" :size="14" />
-          <span>一键打开站点</span>
-        </el-button>
+
+        <!--
+          画板 10 的 bar-64 右端只有三枚图标钮，这一页那六个动作按钮在画板上没有位置
+          （这一页用 KPI 带替代了页头，没有页头动作区）。全都平铺的结果是它们和左边的
+          筛选控件在 1112 里撞在一起 —— 实测「排序」下拉压住了「自动刷新中」。
+          所以低频的四个收进一个「更多」菜单，留下「导出分享」与主操作「同步全部」。
+        -->
+        <el-dropdown trigger="click" @command="onMoreCommand">
+          <el-button size="small" data-testid="userinfo-more-btn">
+            <PtIcon name="ellipsis" :size="14" /><span>更多</span>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="autoRefresh">
+                <PtIcon name="timer" :size="14" class="dd-ico" />
+                <span>{{ autoRefreshEnabled ? "关闭自动刷新" : "开启自动刷新（5 分钟）" }}</span>
+              </el-dropdown-item>
+              <el-dropdown-item command="clearCache">
+                <PtIcon name="trash-2" :size="14" class="dd-ico" /><span>清除缓存</span>
+              </el-dropdown-item>
+              <el-dropdown-item command="openAll" :disabled="!siteRows.length">
+                <PtIcon name="external-link" :size="14" class="dd-ico" /><span>一键打开站点</span>
+              </el-dropdown-item>
+              <el-dropdown-item command="supported">
+                <PtIcon name="list" :size="14" class="dd-ico" /><span>已支持站点</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
         <el-button size="small" type="info" @click="$router.push('/userinfo/export')">
           <PtIcon name="share-2" :size="14" />
           <span>导出分享</span>
-        </el-button>
-        <el-button size="small" @click="$router.push('/supported-sites')">
-          <PtIcon name="list" :size="14" />
-          <span>已支持站点</span>
         </el-button>
         <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
           <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
@@ -774,6 +1022,7 @@ onUnmounted(() => {
 
         <!-- 真实数据（如果不同） -->
         <el-table-column
+          v-if="colShown('trueData')"
           prop="trueUploaded"
           label="真实数据"
           min-width="170"
@@ -825,6 +1074,7 @@ onUnmounted(() => {
 
         <!-- 做种体积 -->
         <el-table-column
+          v-if="colShown('seedSize')"
           prop="seederSize"
           label="做种体积"
           min-width="110"
@@ -838,6 +1088,7 @@ onUnmounted(() => {
 
         <!-- 魔力值 + 做种积分 -->
         <el-table-column
+          v-if="colShown('bonus')"
           prop="bonus"
           label="积分"
           min-width="140"
@@ -857,6 +1108,7 @@ onUnmounted(() => {
 
         <!-- 时魔 -->
         <el-table-column
+          v-if="colShown('bph')"
           prop="bonusPerHour"
           label="时魔/h"
           min-width="100"
@@ -870,6 +1122,7 @@ onUnmounted(() => {
 
         <!-- 注册时间 -->
         <el-table-column
+          v-if="colShown('inbound')"
           prop="joinDate"
           label="入站"
           min-width="110"
@@ -885,14 +1138,19 @@ onUnmounted(() => {
         </el-table-column>
 
         <!-- 判定活跃 -->
-        <el-table-column label="判定活跃" min-width="110" align="center" class-name="pt-cell-muted">
+        <el-table-column
+          v-if="colShown('active')"
+          label="判定活跃"
+          min-width="110"
+          align="center"
+          class-name="pt-cell-muted">
           <template #default="{ row }">
             <span class="ts">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
           </template>
         </el-table-column>
 
         <!-- 封禁提醒 -->
-        <el-table-column min-width="120" align="center">
+        <el-table-column v-if="colShown('days')" min-width="120" align="center">
           <template #header>
             <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
               <span class="th-help">剩余天数</span>
@@ -912,6 +1170,7 @@ onUnmounted(() => {
 
         <!-- 更新时间 -->
         <el-table-column
+          v-if="colShown('updated')"
           prop="lastUpdate"
           label="更新"
           min-width="100"
@@ -1224,6 +1483,36 @@ onUnmounted(() => {
 
 .dash__note-x:hover {
   color: var(--pt-t2);
+}
+
+/* 画板 10 的 bar-64：q 220 宽、排序 chip、列设置面板 */
+.ui-q {
+  flex: 0 1 220px;
+}
+
+.ui-chip {
+  flex: 0 0 auto;
+  width: 150px;
+}
+
+.ui-chip :deep(.el-select__wrapper) {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: var(--pt-fz-label);
+}
+
+.ui-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-cols__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  cursor: pointer;
 }
 
 /* ---- 站点单元格（表格 + 卡片头共用） ---- */
