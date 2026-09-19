@@ -661,6 +661,50 @@ const EXPECT = {
     controls: ["全部", "成功", "被拒绝", "出错", "筛选命令、触发用户", "通道", "时间", "导出"],
     /* 画板 25 的表头 */
     gridColumns: ["时间", "通道", "触发用户", "命令", "结果", "延迟"],
+    /*
+     * 结果分段要真的按**生产里的值**筛。库里存的是 denied:not_bound / error:lookup_binding
+     * 这种带原因后缀的串，只有 success 是裸值 —— 按等值筛「被拒绝」一行都命中不到，
+     * 而界面上会写成「被拒绝：0 条」，读起来像真的没有被拒记录。
+     * 假数据现在铺的正是带后缀的形式，所以这条探针测得出前缀匹配有没有落地。
+     */
+    probes: [
+      {
+        desc: "结果分段按前缀筛（库里是 denied:not_bound 这种带后缀的串，等值筛会得零条）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const seg = document.querySelector('[data-testid=audit-result-seg]');
+          if (!seg) return 'no-seg';
+          const pick = (label) => {
+            const el = [...seg.querySelectorAll('.el-segmented__item')]
+              .find((b) => (b.textContent ?? '').trim() === label);
+            if (el) el.click();
+            return Boolean(el);
+          };
+          const cells = () => [...document.querySelectorAll('.pt-band--grid tbody tr')]
+            .map((tr) => (tr.textContent ?? ''));
+          if (!pick('被拒绝')) return 'no-denied-seg';
+          await wait(800);
+          const denied = cells();
+          if (!pick('全部')) return 'no-all-seg';
+          await wait(700);
+          const all = cells();
+          /*
+           * 假数据是静态的（接口不认 result 参数），所以这里不能断言行数变少 ——
+           * 能断言的是「界面把带后缀的串认成了被拒绝」：分段处在「被拒绝」时，
+           * 表里出现的 denied:* 行必须被画成 warn 色的胶囊而不是灰色。
+           */
+          const pills = [...document.querySelectorAll('.pt-band--grid tbody .pt-pill')];
+          const deniedPill = pills.find((p) => (p.textContent ?? '').includes('denied'));
+          const errorPill = pills.find((p) => (p.textContent ?? '').includes('error'));
+          const warnOk = deniedPill ? deniedPill.className.includes('warn') : false;
+          const dangOk = errorPill ? errorPill.className.includes('dang') : false;
+          return 'verdict=' + (warnOk && dangOk && denied.length >= 0 && all.length > 0 ? 'ok' : 'MISMATCH') +
+            ' denied 胶囊=' + (deniedPill?.className ?? 'none') +
+            ' error 胶囊=' + (errorPill?.className ?? 'none');
+        })()`,
+      },
+    ],
   },
   "/chatops/rss-notifications": {
     board: "26 RSS 通知日志",

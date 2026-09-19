@@ -49,6 +49,27 @@ type AuditQuery struct {
 }
 
 /*
+ * channelTypeAliases 把短名归一到**生产里真实写入的通道 ID**。
+ *
+ * ActionAudit.ChannelType 存的是适配器 Type() 的返回值 —— telegram / qq_onebot /
+ * webhook / wecom_webhook。审计页前端一度用 `qq`、`wecom` 这两个短名去筛，
+ * 于是选「QQ」会把真实的 QQ 审计记录筛成零条。前端已经改用真实 ID，
+ * 这张表让旧的短名也仍然能用，而不是静默返回空。
+ */
+var channelTypeAliases = map[string]string{
+	"qq":    "qq_onebot",
+	"wecom": "wecom_webhook",
+}
+
+func canonicalChannelType(raw string) string {
+	v := strings.TrimSpace(raw)
+	if c, ok := channelTypeAliases[strings.ToLower(v)]; ok {
+		return c
+	}
+	return v
+}
+
+/*
  * splitList 把「a,b,c」拆成可用于 IN 的切片；空项丢掉。
  * 单值进来就是单元素切片，所以调用方不必区分单选还是多选。
  */
@@ -172,11 +193,29 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 	if q.Command != "" {
 		tx = tx.Where("command = ?", q.Command)
 	}
+	/*
+	 * 结果按**前缀**匹配，不是等值。
+	 *
+	 * 库里存的是带原因后缀的形式：denied:not_bound / denied:rate_limit /
+	 * error:lookup_binding …（见 internal/chatops/message_chain.go），只有 success 是裸值。
+	 * 按等值筛「denied」一行都匹配不到 —— 界面上是「被拒绝：0 条」，而实际上全是被拒绝的。
+	 * 所以 `result = v OR result LIKE 'v:%'`：裸值与带后缀的都能命中。
+	 */
 	if vals := splitList(q.Result); len(vals) > 0 {
-		tx = tx.Where("result IN ?", vals)
+		conds := make([]string, 0, len(vals))
+		args := make([]any, 0, len(vals)*2)
+		for _, v := range vals {
+			conds = append(conds, "(result = ? OR result LIKE ?)")
+			args = append(args, v, v+":%")
+		}
+		tx = tx.Where(strings.Join(conds, " OR "), args...)
 	}
 	if vals := splitList(q.ChannelType); len(vals) > 0 {
-		tx = tx.Where("channel_type IN ?", vals)
+		normalized := make([]string, 0, len(vals))
+		for _, v := range vals {
+			normalized = append(normalized, canonicalChannelType(v))
+		}
+		tx = tx.Where("channel_type IN ?", normalized)
 	}
 	// Keyword 是画板 25 的 q「筛选命令、触发用户…」：同时匹配命令与触发用户，模糊匹配。
 	//

@@ -14,11 +14,18 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
+/*
+ * 键必须是**生产里真实写入的通道 ID**（各适配器 Type() 的返回值）。
+ *
+ * 原先写的是 `qq` / `wecom` 两个短名，而 ActionAudit.ChannelType 存的是
+ * `qq_onebot` / `wecom_webhook`。后果有两处：通道筛选接通之后选「QQ」会把真实的
+ * QQ 审计记录筛成零条；表里那一列也认不出通道，只能把原始串显示出来。
+ */
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: "Telegram",
-  qq: "QQ",
-  wecom: "企业微信",
+  qq_onebot: "QQ (OneBot)",
   webhook: "Webhook",
+  wecom_webhook: "企业微信",
 };
 
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {
@@ -26,6 +33,15 @@ const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {
   denied: "warn",
   error: "dang",
 };
+
+/*
+ * 结果在库里带原因后缀：denied:not_bound / error:lookup_binding …，只有 success 是裸值
+ * （见 internal/chatops/message_chain.go）。所以取色和分档都要按**冒号前那一段**来 ——
+ * 原先按整串查 RESULT_TONES，真实记录一条都对不上，全部落到 neutral 灰色。
+ */
+function resultKind(result: string): string {
+  return (result ?? "").split(":")[0]!.toLowerCase();
+}
 
 const isMobile = useIsMobile();
 const auditLogs = ref<AuditLog[]>([]);
@@ -71,19 +87,31 @@ const channelRows = computed<BreakdownRow[]>(() => {
     .map(([name, n]) => ({ key: name, label: name, value: n, tone: "info" as const }));
 });
 
-/** 失败与被拒的调用 —— 审计页真正要看的那一小撮 */
+/*
+ * 失败与被拒的调用 —— 审计页真正要看的那一小撮。
+ *
+ * 按 resultKind 分档：库里存的是 denied:not_bound / error:lookup_binding 这种带后缀的串，
+ * 拿整串比 "denied" 永远不等，于是被拒的调用会全部被画成「出错」。
+ * 提示里把原因后缀带上 —— 「为什么被拒」正是这张卡的用处。
+ */
 const failRows = computed<BreakdownRow[]>(() =>
   auditLogs.value
-    .filter((log) => log.result !== "success")
+    .filter((log) => resultKind(log.result) !== "success")
     .slice(0, 8)
-    .map((log) => ({
-      key: String(log.id),
-      label: log.command || "(空命令)",
-      value: log.result === "denied" ? "被拒" : "出错",
-      weight: 1,
-      tone: log.result === "denied" ? ("warn" as const) : ("dang" as const),
-      hint: `${log.channel_type} · ${log.channel_user_id} · ${log.latency_ms} ms`,
-    })),
+    .map((log) => {
+      const denied = resultKind(log.result) === "denied";
+      const reason = (log.result ?? "").split(":").slice(1).join(":");
+      return {
+        key: String(log.id),
+        label: log.command || "(空命令)",
+        value: denied ? "被拒" : "出错",
+        weight: 1,
+        tone: denied ? ("warn" as const) : ("dang" as const),
+        hint: [reason, channelLabel(log.channel_type), log.channel_user_id, `${log.latency_ms} ms`]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }),
 );
 
 const pagination = reactive({
@@ -359,7 +387,7 @@ function channelLabel(type: string) {
 }
 
 function resultTone(result: string) {
-  return RESULT_TONES[result?.toLowerCase()] || "neutral";
+  return RESULT_TONES[resultKind(result)] || "neutral";
 }
 
 function isArgsOpen(id: number) {

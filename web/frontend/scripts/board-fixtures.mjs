@@ -137,7 +137,12 @@ const AUDIT = Array.from({ length: 10 }, (_, i) => ({
   channel_type: ["telegram", "qq_onebot", "webhook"][i % 3],
   channel_user_id: `u${i}`,
   command: ["/status", "/sites", "/push", "/pause"][i % 4],
-  result: ["success", "success", "denied", "error"][i % 4],
+  /*
+   * 照生产链真实写入的形式：只有 success 是裸值，denied / error 都带原因后缀
+   * （internal/chatops/message_chain.go 里是 denied:not_bound、error:lookup_binding …）。
+   * 铺裸值等于给自己造一个「按等值就能筛到」的世界 —— 真实记录一条都筛不到。
+   */
+  result: ["success", "success", "denied:not_bound", "error:lookup_binding"][i % 4],
   latency_ms: 12 + i * 3,
   args_json: i % 2 === 0 ? '{"site":"M-Team"}' : "",
 }));
