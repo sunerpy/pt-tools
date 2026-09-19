@@ -226,7 +226,12 @@ const SUPPORTED = SITES.map(([site], i) => ({
   schema: ["NexusPHP", "M-Team", "Unit3D", "Gazelle"][i % 4],
   description: "示例站点定义，用于画板验收。",
   urls: [`https://${site.toLowerCase()}.invalid`],
-  authMethods: ["cookie"],
+  /*
+   * 字段名与真实响应对齐：后端是单数 `authMethod` 且 omitempty ——
+   * 实测 /api/sites/definitions 里多数条目根本没有这个字段。
+   * 这里也照这个形状造：三条有、一条没有，好让「没声明认证方式」这条路径进验收。
+   */
+  authMethod: i % 4 === 3 ? undefined : ["cookie", "api_key", "cookie_and_api_key"][i % 3],
   features: ["rss", "search"],
   unavailable: i === 7,
   unavailableReason: i === 7 ? "站点暂时关闭" : "",
@@ -408,6 +413,12 @@ export const FIXTURES = [
   ["/api/chatops/audit/stats", { todayCount: 42, successRate: 0.93, maxLatencyMs: 860 }],
   ["/api/chatops/audit", { items: AUDIT, total: 128, page: 1, page_size: 20 }],
   ["/api/chatops/rss-notifications", { items: RSS_LOGS, total: 64, page: 1, page_size: 20 }],
+  /*
+   * 通道详情必须排在列表**之前**：匹配是前缀匹配、先命中先返回，
+   * 否则 `/api/chatops/notifications/1` 会拿到列表那个数组，详情页把数组当对象读，
+   * 画出来就是「未命名通道 / ID -」—— 画板 23 的内容等于没进验收。
+   */
+  ["/api/chatops/notifications/1", CHANNELS[0]],
   ["/api/chatops/notifications", CHANNELS],
   ["/api/chatops/bindings", BINDINGS],
   /* 必须排在 /api/filter-rules 之前：前缀匹配第一个命中即用 */

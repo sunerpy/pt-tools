@@ -250,7 +250,13 @@ function clearFilters() {
 
         <div class="site-card__tags">
           <PtTag>{{ def.schema }}</PtTag>
-          <PtStatusPill :tone="authMethodTone(def.authMethod)" size="sm">
+          <!--
+            没声明认证方式的定义不画这个胶囊。`authMethod` 在后端是 omitempty，
+            实测 /api/sites/definitions 返回的多数条目根本没有这个字段 ——
+            照旧渲染的话每张卡上都会多一个写着「-」的胶囊，纯噪声。
+            这一层的口径与「内置能力」卡一致：那里把它们记成「未标注 N」。
+          -->
+          <PtStatusPill v-if="def.authMethod" :tone="authMethodTone(def.authMethod)" size="sm">
             {{ authMethodLabel(def.authMethod) }}
           </PtStatusPill>
           <PtStatusPill v-if="def.hrEnabled" tone="warn" size="sm">H&amp;R</PtStatusPill>

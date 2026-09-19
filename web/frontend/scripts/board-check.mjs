@@ -205,7 +205,24 @@ const EXPECT = {
     detail: true, // head 88 带面包屑
     cards: [1080, 1080, 1080, 700], // hero / c-basic / c-test / p-msg
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["hero", "基本信息", "凭证与连接", "连通性测试", "操作提示文案"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["hero", "基本信息", "凭证与连接", "连通性测试", "操作提示文案"],
+    /*
+     * 这一页的数据得真的落到表单里。假数据里通道详情曾与列表撞前缀，详情页拿到一个数组，
+     * 画出来是「未命名通道 / ID -」—— 卡都在、标题都对，检查照样全绿。
+     */
+    controls: ["保存基本信息", "保存凭证", "发送测试消息"],
+    probes: [
+      {
+        desc: "通道详情的数据落进了表单（不是空壳）",
+        want: "主 Telegram",
+        js: `(() => {
+          const heroEl = document.querySelector('[data-card]');
+          const hero = (heroEl?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+          const name = document.querySelector('.pt-cards input')?.value ?? '';
+          return hero + ' | 名称输入框=' + name;
+        })()`,
+      },
+    ],
   },
   "/chatops/bindings": {
     board: "24 ChatOps 绑定",
