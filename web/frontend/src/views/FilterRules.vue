@@ -80,6 +80,79 @@ const ruleType = ref("");
 /** "" 全部 · "yes" 仅免费 · "no" 不限免费 */
 const ruleFree = ref("");
 
+/*
+ * 画板 20 的 bar-64 右端两枚图标钮：bi-columns-3（列设置）与 bi-file-down（导出）。
+ * 列设置的偏好存本地；导出导的是「当前筛选出的这批规则」，跟着工具栏走。
+ */
+const RULE_COLS_KEY = "pt-tools-rules-cols-v1";
+
+const OPTIONAL_RULE_COLS = [
+  { key: "scope", label: "匹配范围" },
+  { key: "priority", label: "优先级" },
+  { key: "free", label: "仅免费" },
+  { key: "size", label: "大小范围" },
+] as const;
+
+type OptionalRuleCol = (typeof OPTIONAL_RULE_COLS)[number]["key"];
+
+function loadHiddenRuleCols(): Set<OptionalRuleCol> {
+  try {
+    const raw = window.localStorage.getItem(RULE_COLS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    const known = new Set(OPTIONAL_RULE_COLS.map((c) => c.key as string));
+    return new Set(parsed.filter((k): k is OptionalRuleCol => known.has(k)));
+  } catch {
+    return new Set();
+  }
+}
+
+const hiddenRuleCols = ref<Set<OptionalRuleCol>>(loadHiddenRuleCols());
+
+function toggleRuleCol(key: OptionalRuleCol) {
+  const next = new Set(hiddenRuleCols.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  hiddenRuleCols.value = next;
+  try {
+    window.localStorage.setItem(RULE_COLS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
+
+const ruleColShown = (key: OptionalRuleCol) => !hiddenRuleCols.value.has(key);
+
+/** 导出当前筛选出的这批规则（画板 bar-64 的 bi-file-down） */
+function exportCsv() {
+  const head = ["名称", "匹配模式", "类型", "匹配范围", "优先级", "仅免费", "大小范围", "启用"];
+  const lines = [head.join(",")];
+  for (const r of visibleRules.value) {
+    const size =
+      r.min_size_gb || r.max_size_gb ? `${r.min_size_gb ?? 0}–${r.max_size_gb ?? "∞"} GB` : "不限";
+    const cells = [
+      r.name,
+      r.pattern,
+      r.pattern_type,
+      r.match_field ?? "title",
+      String(r.priority ?? 0),
+      r.require_free ? "是" : "否",
+      size,
+      r.enabled ? "是" : "否",
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "pt-tools-filter-rules.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出 ${visibleRules.value.length} 条规则`);
+}
+
 const visibleRules = computed(() => {
   const q = ruleQuery.value.trim().toLowerCase();
   return rules.value.filter((r) => {
@@ -513,6 +586,36 @@ function decisionText(decision: string | undefined): string {
       <template #note>显示 {{ visibleRules.length }} / {{ rules.length }} 条</template>
 
       <template #right>
+        <!-- 画板 bar-64 右端的 bi-columns-3 / bi-file-down -->
+        <el-popover placement="bottom-end" trigger="click" :width="180">
+          <template #reference>
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="列设置"
+              data-testid="rules-cols-btn">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="rules-cols">
+            <label v-for="c in OPTIONAL_RULE_COLS" :key="c.key" class="rules-cols__row">
+              <el-checkbox :model-value="ruleColShown(c.key)" @change="toggleRuleCol(c.key)" />
+              <span>{{ c.label }}</span>
+            </label>
+          </div>
+        </el-popover>
+
+        <el-tooltip content="按当前筛选导出 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="rules-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+
         <el-tooltip content="重新拉取规则与数据源" placement="bottom">
           <button
             type="button"
@@ -553,6 +656,11 @@ function decisionText(decision: string | undefined): string {
           </PtDataState>
         </template>
 
+        <!-- 画板 20 的 th-0「序号」：行号，跟着排序重排 -->
+        <el-table-column label="序号" width="64" align="center" class-name="pt-cell-muted">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
+
         <el-table-column label="名称" min-width="140" class-name="pt-cell-strong">
           <template #default="{ row }">{{ row.name }}</template>
         </el-table-column>
@@ -574,6 +682,7 @@ function decisionText(decision: string | undefined): string {
         </el-table-column>
 
         <el-table-column
+          v-if="ruleColShown('priority')"
           label="优先级"
           width="80"
           class-name="pt-cell-num"
@@ -581,7 +690,7 @@ function decisionText(decision: string | undefined): string {
           <template #default="{ row }">{{ row.priority }}</template>
         </el-table-column>
 
-        <el-table-column label="仅免费" width="80">
+        <el-table-column v-if="ruleColShown('free')" label="仅免费" width="80">
           <template #default="{ row }">
             <PtStatusPill :tone="row.require_free ? 'ok' : 'neutral'" size="sm">
               {{ row.require_free ? "是" : "否" }}
@@ -589,7 +698,11 @@ function decisionText(decision: string | undefined): string {
           </template>
         </el-table-column>
 
-        <el-table-column label="大小范围" width="130" class-name="pt-cell-muted">
+        <el-table-column
+          v-if="ruleColShown('size')"
+          label="大小范围"
+          width="130"
+          class-name="pt-cell-muted">
           <template #default="{ row }">{{ formatSizeRange(row) }}</template>
         </el-table-column>
 

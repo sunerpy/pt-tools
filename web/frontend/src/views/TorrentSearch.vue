@@ -345,6 +345,60 @@ function buildSiteParams(): Record<string, SiteSearchParams> | undefined {
 }
 
 // 排序
+/*
+ * 画板 15 的 bar-88 上还有一枚 chip-0「做种数 ↓」（排序）与右端两枚图标钮
+ * （bi-columns-3 列设置、bi-refresh-cw 刷新）。排序原来只能点表头，
+ * 手机上没有表头（行卡），等于没有排序入口 —— 画板把它画成 chip 是有道理的。
+ */
+const SORT_OPTIONS = [
+  { label: "做种数", value: "seeders" },
+  { label: "下载数", value: "leechers" },
+  { label: "完成数", value: "snatched" },
+  { label: "大小", value: "size" },
+  { label: "发布时间", value: "publishTime" },
+  { label: "站点", value: "sourceSite" },
+] as const;
+
+const SEARCH_COLS_KEY = "pt-tools-search-cols-v1";
+
+const OPTIONAL_SEARCH_COLS = [
+  { key: "up", label: "上传" },
+  { key: "down", label: "下载" },
+  { key: "done", label: "完成" },
+  { key: "published", label: "发布时间" },
+] as const;
+
+type OptionalSearchCol = (typeof OPTIONAL_SEARCH_COLS)[number]["key"];
+
+function loadHiddenSearchCols(): Set<OptionalSearchCol> {
+  try {
+    const raw = window.localStorage.getItem(SEARCH_COLS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    const known = new Set(OPTIONAL_SEARCH_COLS.map((c) => c.key as string));
+    return new Set(parsed.filter((k): k is OptionalSearchCol => known.has(k)));
+  } catch {
+    return new Set();
+  }
+}
+
+const hiddenSearchCols = ref<Set<OptionalSearchCol>>(loadHiddenSearchCols());
+
+function toggleSearchCol(key: OptionalSearchCol) {
+  const next = new Set(hiddenSearchCols.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  hiddenSearchCols.value = next;
+  try {
+    window.localStorage.setItem(SEARCH_COLS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
+
+const searchColShown = (key: OptionalSearchCol) => !hiddenSearchCols.value.has(key);
+
 const sortBy = ref<"sourceSite" | "publishTime" | "size" | "seeders" | "leechers" | "snatched">(
   "sourceSite",
 );
@@ -1346,6 +1400,29 @@ const footNote = computed(() => {
         :options="categoryOptions"
         :props="{ label: 'label', value: 'value' }" />
 
+      <!--
+        画板 chip-0「做种数 ↓」：排序。原来只能点表头排 —— 手机上是行卡、没有表头，
+        等于没有排序入口，所以这枚 chip 不是装饰。
+      -->
+      <el-select v-model="sortBy" class="sc-chip-sel" size="small" data-testid="search-sort-select">
+        <el-option
+          v-for="o in SORT_OPTIONS"
+          :key="o.value"
+          :label="`排序: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+      <el-tooltip
+        :content="orderDesc ? '当前降序，点一下改升序' : '当前升序，点一下改降序'"
+        placement="top">
+        <el-button
+          class="sc-chip"
+          :aria-label="orderDesc ? '改为升序' : '改为降序'"
+          data-testid="search-order-toggle"
+          @click="orderDesc = !orderDesc">
+          <span>{{ orderDesc ? "↓" : "↑" }}</span>
+        </el-button>
+      </el-tooltip>
+
       <!-- 画板 chip-1「仅免费」 -->
       <el-button
         class="sc-chip"
@@ -1410,6 +1487,41 @@ const footNote = computed(() => {
       </template>
 
       <template #right>
+        <!-- 画板 bar-88 右端的 bi-columns-3 -->
+        <el-popover placement="bottom-end" trigger="click" :width="170">
+          <template #reference>
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="列设置"
+              data-testid="search-cols-btn">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="sc-cols">
+            <label v-for="c in OPTIONAL_SEARCH_COLS" :key="c.key" class="sc-cols__row">
+              <el-checkbox :model-value="searchColShown(c.key)" @change="toggleSearchCol(c.key)" />
+              <span>{{ c.label }}</span>
+            </label>
+          </div>
+        </el-popover>
+
+        <!-- 画板 bar-88 右端的 bi-refresh-cw：按当前条件重搜一次 -->
+        <el-tooltip content="按当前条件重新搜索" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            :disabled="loading || !searchKeyword.trim()"
+            aria-label="刷新"
+            data-testid="search-refresh-btn"
+            @click="doSearch">
+            <PtIcon
+              :name="loading ? 'loader-circle' : 'refresh-cw'"
+              :size="15"
+              :class="loading ? 'pt-spin' : undefined" />
+          </button>
+        </el-tooltip>
+
         <!-- 画板 note：这份结果有多全，比命中多少条更该先说 -->
         <span v-if="barNote" class="pt-band__note">{{ barNote }}</span>
         <el-tooltip content="丢掉服务端的搜索缓存，下次搜索重新请求各站点" placement="bottom">
@@ -1527,6 +1639,7 @@ const footNote = computed(() => {
         </el-table-column>
 
         <el-table-column
+          v-if="searchColShown('up')"
           label="上传"
           prop="seeders"
           width="84"
@@ -1540,6 +1653,7 @@ const footNote = computed(() => {
         </el-table-column>
 
         <el-table-column
+          v-if="searchColShown('down')"
           label="下载"
           prop="leechers"
           width="84"
@@ -1553,6 +1667,7 @@ const footNote = computed(() => {
         </el-table-column>
 
         <el-table-column
+          v-if="searchColShown('done')"
           label="完成"
           prop="snatched"
           width="84"
@@ -1564,6 +1679,7 @@ const footNote = computed(() => {
         </el-table-column>
 
         <el-table-column
+          v-if="searchColShown('published')"
           label="发布时间"
           prop="uploadedAt"
           width="152"
@@ -2039,6 +2155,31 @@ const footNote = computed(() => {
 }
 
 /* 画板 chip-1「仅免费」：工具栏里的 24 高 chip */
+.sc-chip-sel {
+  flex: 0 0 auto;
+  width: 148px;
+}
+
+.sc-chip-sel :deep(.el-select__wrapper) {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: var(--pt-fz-label);
+}
+
+.sc-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sc-cols__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  cursor: pointer;
+}
+
 .sc-chip {
   height: 24px;
   padding: 0 10px;
