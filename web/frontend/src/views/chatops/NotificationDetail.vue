@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { chatopsApi, type NotificationConfig } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -319,7 +320,7 @@ function goBack() {
     是页头右侧的动作。
   -->
   <div v-loading="loading" class="notify-detail-page pt-cards pt-cards--wide">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button @click="goBack">
         <PtIcon name="arrow-left" :size="15" /><span>通道列表</span>

@@ -3,6 +3,7 @@ import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -316,7 +317,7 @@ onBeforeUnmount(() => {
     三条带是彼此的兄弟，都不套在卡片里；表格标题与条数走页头，所以这页没有 PtPanel。
   -->
   <div class="rss-notify-page">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
 
     <PtToolbar band>
       <el-input

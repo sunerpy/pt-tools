@@ -3,6 +3,7 @@ import { ApiError, type SiteConfig, type SiteLoginState, chatopsApi, sitesApi } 
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -344,11 +345,16 @@ function manageSite(name: string) {
 }
 
 /**
- * 行卡「更多」菜单里的低频操作。
- * 桌面操作列是六个图标按钮，手机上一行放不下六个 44 高的按钮，
- * 前四个（停用/启用、打开、探测、配置）留在卡上，剩下三个折进菜单，一个都没丢。
+ * 行卡「更多」菜单里的操作。
+ *
+ * 桌面操作列是六个图标按钮。手机上按 §9 只留**一个主操作**（整卡可点 → 站点详情），
+ * 六个操作全部折进这个菜单：摊在卡上时一张卡 490 高，屏上只剩一张半。
+ * 折进来不等于丢掉，六个一个不少。
  */
 async function onCardCommand(cmd: { act: string; name: string }) {
+  if (cmd.act === "toggle") return toggleEnabled(cmd.name);
+  if (cmd.act === "open") return openSite(cmd.name);
+  if (cmd.act === "probe") return probeSite(cmd.name);
   if (cmd.act === "reminder") await sendTestReminder(cmd.name);
   else if (cmd.act === "login-config") await openConfigDialog(cmd.name);
   else if (cmd.act === "delete") await deleteSite(cmd.name);
@@ -709,7 +715,7 @@ async function saveLoginConfig() {
 <template>
   <div class="sites-page">
     <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
-    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
 
     <!--
       两条提示都不是带：画板 27 的落法是提示跟在顶部带（这里是外壳页头）之后、
@@ -1091,10 +1097,18 @@ async function saveLoginConfig() {
           </template>
         </PtDataState>
 
+        <!--
+          整卡可点 = 进站点详情（画板 32）。画板 30 的行卡上**一个按钮都没有**，
+          §9 也写的是「两行文本 + 一条进度 + 一个主操作」——
+          之前这里摊了四个按钮加一个「更多」，一张卡从画板的 88 涨到 490，
+          屏上只剩一张半卡。所以主操作交给整卡，其余全部折进「更多」。
+        -->
         <PtRowCard
           v-for="[name, site] in visibleEntries"
           :key="name"
-          :data-testid="`site-card-${name}`">
+          interactive
+          :data-testid="`site-card-${name}`"
+          @click="manageSite(name)">
           <template #lead>
             <SiteAvatar :site-id="name" :site-name="name" :size="28" :no-fetch="true" />
           </template>
@@ -1127,45 +1141,34 @@ async function saveLoginConfig() {
           </template>
 
           <template #actions>
-            <el-button
-              class="card-act"
-              size="small"
-              :disabled="site.unavailable"
-              :data-testid="`site-toggle-btn-${name}`"
-              @click="toggleEnabled(name)">
-              <PtIcon :name="site.enabled ? 'circle-pause' : 'circle-check'" :size="14" />
-              <span>{{ site.enabled ? "停用" : "启用" }}</span>
-            </el-button>
-
-            <el-button
-              class="card-act"
-              size="small"
-              :disabled="!siteUrlOf(name)"
-              :data-testid="`open-site-btn-${name}`"
-              @click="openSite(name)">
-              <PtIcon name="external-link" :size="14" /><span>打开</span>
-            </el-button>
-
-            <el-button
-              class="card-act"
-              size="small"
-              :loading="probing[name]"
-              :disabled="!site.enabled || probing[name]"
-              :data-testid="`probe-button-${name}`"
-              @click="probeSite(name)">
-              <PtIcon name="activity" :size="14" /><span>探测</span>
-            </el-button>
-
-            <el-button class="card-act" size="small" @click="manageSite(name)">
-              <PtIcon name="sliders-horizontal" :size="14" /><span>配置</span>
-            </el-button>
-
             <el-dropdown class="card-more" trigger="click" @command="onCardCommand">
-              <el-button size="small" :data-testid="`site-more-btn-${name}`">
+              <el-button size="small" :data-testid="`site-more-btn-${name}`" @click.stop>
                 <PtIcon name="ellipsis" :size="14" /><span>更多</span>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item
+                    :command="{ act: 'toggle', name }"
+                    :disabled="site.unavailable"
+                    :data-testid="`site-toggle-btn-${name}`">
+                    <PtIcon
+                      :name="site.enabled ? 'circle-pause' : 'circle-check'"
+                      :size="14"
+                      class="dd-ico" />
+                    <span>{{ site.enabled ? "停用" : "启用" }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    :command="{ act: 'open', name }"
+                    :disabled="!siteUrlOf(name)"
+                    :data-testid="`open-site-btn-${name}`">
+                    <PtIcon name="external-link" :size="14" class="dd-ico" /><span>打开</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    :command="{ act: 'probe', name }"
+                    :disabled="!site.enabled || probing[name]"
+                    :data-testid="`probe-button-${name}`">
+                    <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测</span>
+                  </el-dropdown-item>
                   <el-dropdown-item
                     :command="{ act: 'reminder', name }"
                     :disabled="!site.enabled || testingReminder[name]">
@@ -1773,14 +1776,16 @@ async function saveLoginConfig() {
 }
 
 /*
- * 等分与 ≥44 触控高度由 PtRowCard 的 :slotted 规则给。这里只处理本页特有的两点：
- * 「更多」是 el-dropdown 包了一层按钮，要让容器本身参与等分并撑满宽度。
+ * 「更多」是 el-dropdown 包了一层按钮，所以容器要自己声明高度。
+ *
+ * 不再撑满一行：卡上现在只剩这一个按钮（主操作是整卡可点），撑满会让它看着像
+ * 这张卡的主操作，而它装的全是低频动作。靠右放一个 44 高的小按钮就够了。
  */
 .pt-rowcard__actions .card-more {
   display: flex;
-  flex: 1 1 96px;
+  flex: 0 0 auto;
   min-height: var(--pt-m-touch);
-  margin: 0;
+  margin-left: auto;
 }
 
 .card-more :deep(.el-button) {

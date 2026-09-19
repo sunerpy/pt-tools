@@ -4,6 +4,7 @@ import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -170,7 +171,7 @@ function clearFilters() {
     工具栏带是筛选条，卡片是站点定义卡。
   -->
   <div class="supported-sites-page">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="loadDefinitions">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>

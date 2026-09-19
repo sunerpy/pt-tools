@@ -3,6 +3,7 @@ import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -260,7 +261,7 @@ function getChannelLabel(type: string) {
     本项目通道数量个位数，不需要筛选，所以带上只挂一行覆盖率说明。
   -->
   <div class="notifications-page">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="loadNotifications">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>

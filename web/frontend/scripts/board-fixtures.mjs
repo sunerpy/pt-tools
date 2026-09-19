@@ -504,6 +504,8 @@ export function stubScript() {
   Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
   Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
   const table = ${JSON.stringify(FIXTURES.map(([prefix, body]) => [prefix, JSON.stringify(body)]))};
+  /* 给验收脚本一个可探测的标记：它靠这个判断这一篇文档到底有没有铺上假数据 */
+  window.__ptStub = true;
   const real = window.fetch;
   window.fetch = (input, init) => {
     const raw = typeof input === 'string' ? input : input.url;

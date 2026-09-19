@@ -12,6 +12,7 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -668,7 +669,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
     下载目录、磁盘保护、站点绑定与日志，本页不重复一份，见设计文档 §5。
   -->
   <div class="downloader-page pt-cards pt-cards--wide">
-    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="loadDownloaders">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>

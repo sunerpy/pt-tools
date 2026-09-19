@@ -750,17 +750,27 @@
 }
 
 /*
- * 顶栏是深色 chrome，不跟主题变浅（round-2「深色 88px 顶栏 + 深色 72px 底栏」）。
+ * 顶栏是深色 chrome，不跟主题变浅（画板 30–35 的 topbar fill 恒为 #171a1f）。
  * 理由和桌面一样：外壳是「不变的东西」，内容区才是「在变的数据」，
  * 眼睛不用在两者之间重新适应对比度；手机版也因此一眼认得出是同一个产品。
  * --pt-chrome 在 8 套配色里恒为深色，所以这里的文字一律用 chrome 系文字色。
+ *
+ * 构成按画板是**一行**：左 h1 + sub 两行文本，右若干 30×30 图标钮。
+ * 原来做成了「44 的动作行 + 一行标题」两层，高 88，比画板里属于 app 的那 48 高一倍，
+ * 而且标题居中、摘要行整条丢失（桌面页头在 ≤768 是 display:none）。
  */
 .pt-mchrome {
   position: sticky;
   top: 0;
   z-index: 20;
-  flex-direction: column;
-  justify-content: center;
+  flex-direction: row;
+  /*
+   * 14 不是随手挑的：钮的可见方块 30，命中区左右各外扩 7 就是 44（见下面的 ::before）。
+   * 间距取 14 时相邻钮的命中区正好首尾相接而不重叠 —— 小于 14 就会有一条重叠带，
+   * 那里按下去命中的是哪个钮取决于 z 序，不取决于看到的方块。
+   */
+  gap: 14px;
+  align-items: center;
   height: var(--pt-m-topbar-h);
   padding: 0 var(--pt-space-4);
   color: var(--pt-chrome-t1);
@@ -768,59 +778,80 @@
   border-bottom: 1px solid var(--pt-chrome-border);
 }
 
-.pt-mchrome__row {
-  display: flex;
-  gap: var(--pt-space-2);
-  align-items: center;
-  height: 44px;
-}
-
-.pt-mchrome__icon {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: var(--pt-m-touch);
-  height: var(--pt-m-touch);
-  margin: 0 calc(var(--pt-space-2) * -1);
-  color: var(--pt-chrome-t2);
-  background: transparent;
-  border: 0;
-  border-radius: var(--pt-r-md);
-  cursor: pointer;
-}
-
-.pt-mchrome__icon:active {
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
-}
-
-.pt-mchrome__brand {
+/* 标题列。min-width:0 是为了让下面两行真的能省略号，而不是把钮挤出屏幕 */
+.pt-mchrome__group {
   display: flex;
   flex: 1;
-  gap: 6px;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
-  font-size: var(--pt-fz-body);
-  font-weight: 600;
-  color: var(--pt-chrome-t1);
+  min-width: 0;
 }
 
 .pt-mchrome__title {
   margin: 0;
   overflow: hidden;
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 28px;
+  font-size: var(--pt-fz-h1);
+  font-weight: 700;
+  line-height: 24px;
   color: var(--pt-chrome-t1);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 /*
+ * 摘要行（画板 sub 11/400）。空靶子不留白：Teleport 没往里送东西时它是个空 div，
+ * :empty 收掉行高，标题就回到整条顶栏的垂直居中位置。
+ */
+.pt-mchrome__sub {
+  overflow: hidden;
+  font-size: var(--pt-fz-label);
+  font-weight: 400;
+  line-height: 14px;
+  color: var(--pt-chrome-t2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pt-mchrome__sub:empty {
+  display: none;
+}
+
+/*
+ * 画板的钮是 30×30 r=4 fill chromeRaised。30 不满足 §9 的「触控目标 ≥ 44×44」，
+ * 两个都要满足就只能把可点区域和可见方块分开：方块 30，::before 把命中区撑到 44。
+ * 这样视觉照画板，手指按的还是 44。
+ */
+.pt-mchrome__icon {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--pt-chrome-t2);
+  background: var(--pt-chrome-raised);
+  border: 0;
+  border-radius: var(--pt-r-md);
+  cursor: pointer;
+}
+
+.pt-mchrome__icon::before {
+  position: absolute;
+  /* (44 - 30) / 2 = 7，四周各外扩 7 得到 44×44 的命中区 */
+  inset: calc((var(--pt-m-touch) - 30px) / -2);
+  content: "";
+}
+
+.pt-mchrome__icon:active {
+  color: var(--pt-chrome-t1);
+}
+
+/*
  * 底栏同样是深色 chrome，并且把桌面的状态行折进它的顶部
- * （round-2「G 深色 chrome 条 + 折进来的状态行」）。
- * 所以整块高度是 状态行 + tab 行，内容区的 padding-bottom 要按同一个式子让位。
+ * （画板 tabbar 里的 sb / sb-d 就是这一行）。
+ * 整块高度 = 状态行 24 + tab 行 48 = **72**，与画板 `tabbar 0,739 375x72` 对上；
+ * 内容区的 padding-bottom 按同一个式子让位。
  */
 .pt-mnav {
   position: fixed;
@@ -843,7 +874,8 @@
   height: var(--pt-m-statusrow-h);
   padding: 0 var(--pt-space-4);
   overflow: hidden;
-  font-size: var(--pt-fz-label);
+  /* 画板这一行是 10/400（sb），比桌面状态条的 11 小一号 */
+  font-size: var(--pt-fz-foot);
   line-height: 1;
   color: var(--pt-chrome-t2);
   white-space: nowrap;
@@ -864,8 +896,8 @@
 
 /* 稿上那个绿点：调度器在跑是绿的，停了是危险色，未知就是中性灰 */
 .pt-mnav__dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   background: var(--pt-t4);
   border-radius: 50%;
 }
@@ -885,6 +917,7 @@
 }
 
 .pt-mnav__tab {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -893,7 +926,7 @@
   justify-content: center;
   height: var(--pt-m-tabbar-h);
   font-family: inherit;
-  font-size: var(--pt-fz-label);
+  font-size: var(--pt-fz-foot);
   color: var(--pt-chrome-t2);
   background: transparent;
   border: 0;
@@ -903,6 +936,17 @@
 .pt-mnav__tab.is-active {
   font-weight: 600;
   color: var(--pt-p);
+}
+
+/* 画板 tabbar 的 `sel`：激活 tab 上沿 40×3 r=2 的强调色横条，不只是变色 */
+.pt-mnav__tab.is-active::before {
+  position: absolute;
+  top: 0;
+  width: 40px;
+  height: 3px;
+  content: "";
+  background: var(--pt-p);
+  border-radius: 2px;
 }
 
 .pt-msheet__body {
@@ -1066,8 +1110,9 @@
     );
   }
 
+  /* 画板 30–35 的内容列一律 x=16 宽 343，即左右各内缩 16（原来是 12） */
   .pt-shell__inner {
-    padding: var(--pt-space-3) var(--pt-space-3) var(--pt-space-6);
+    padding: var(--pt-space-3) var(--pt-space-4) var(--pt-space-6);
   }
 }
 

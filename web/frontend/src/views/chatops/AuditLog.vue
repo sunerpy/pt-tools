@@ -3,6 +3,7 @@ import { type AuditLog, chatopsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -343,7 +344,7 @@ function exportCsv() {
 <template>
   <div class="audit-page">
     <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
-    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
 
     <!--
       工具栏带 —— 画板 bar-64：40 高全宽白带。只读页没有主操作，所以这条带上

@@ -8,6 +8,7 @@ import {
 import PtIcon from "@/components/PtIcon";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
@@ -452,7 +453,7 @@ function decisionText(decision: string | undefined): string {
     顶上那条提示按画板 27 的落法放在页头之后、内缩 16。
   -->
   <div class="filter-rules-page">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="reloadAll">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>

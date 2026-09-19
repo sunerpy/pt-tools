@@ -19,6 +19,7 @@ import {
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -682,7 +683,7 @@ function ruleNameOf(id: number): string {
     /filter-rules），这一页只给有本地内容的两个分区，见设计文档 §5 的偏离记录。
   -->
   <div class="site-detail-page">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <PtStatusPill :tone="form.enabled ? 'ok' : 'neutral'" dot size="sm">
         {{ form.enabled ? "已启用" : "未启用" }}

@@ -2,6 +2,7 @@
 import { globalApi, type ArchiveTorrent, type PausedTorrent, pausedTorrentsApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -404,7 +405,7 @@ function formatProgress(progress: number): string {
 <template>
   <div class="paused-page">
     <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
-    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
 
     <!--
     画板 17 没有工具栏带，所以站点筛选与两个页面级开关都进页头动作区（高 32）。

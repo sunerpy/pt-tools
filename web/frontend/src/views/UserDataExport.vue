@@ -3,6 +3,7 @@ import { type AggregatedStatsResponse, userInfoApi } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import {
   formatBytes,
@@ -643,13 +644,13 @@ onMounted(() => {
       画板 11 是两栏卡片页：p-prev 700（预览）+ p-set 364（导出设置），
       head 之后直接进卡片层，没有工具栏带 —— 返回与两枚导出按钮在画板上是页头动作。
     -->
-    <Teleport to="#pt-head-sub">
+    <PtHeadSub>
       {{
         aggregatedStats
           ? `${aggregatedStats.siteCount} 个站点 · ${selectedSiteStats.length} 个入图`
           : "正在读取统计数据"
       }}
-    </Teleport>
+    </PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button @click="router.back()">
         <PtIcon name="arrow-left" :size="15" /><span>返回</span>

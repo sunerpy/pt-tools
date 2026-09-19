@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { type LogFilesResponse, logsApi, type LogsResponse } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
@@ -93,6 +94,21 @@ function formatBytes(n: number): string {
 function formatWhen(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString("zh-CN", { hour12: false });
 }
+
+/**
+ * 页头摘要行 —— 画板 35（移动）的 sub 写的是「pt-tools.log · 18.4 MB · 跟随尾部」，
+ * 即「在看哪个文件 · 多大 · 是不是跟着尾部」。这三样都是这一页的状态，外壳猜不出来。
+ *
+ * 文件清单拿不到时退回 `logPath`（正文接口自己带的路径），只是没有体积可报。
+ */
+const headSub = computed(() => {
+  const parts: string[] = [];
+  const active = activeFile.value;
+  if (active) parts.push(active.name, formatBytes(active.size));
+  else if (logPath.value) parts.push(logPath.value.split("/").pop() || logPath.value);
+  parts.push(autoScroll.value ? "跟随尾部" : "已停止跟随");
+  return parts.join(" · ");
+});
 
 /** 刷新按钮：正文与文件清单一起刷，否则清单会停在打开页面那一刻 */
 async function reloadAll() {
@@ -419,10 +435,12 @@ function scrollToTop() {
 
 <template>
   <div class="log-viewer-page">
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
+
     <!--
       画板 29 的 bar-64 是一条独立的工具栏带（40 高，贴主区两侧），不是卡片内部的一行。
-      画板左边那一列 300 宽的卡（文件清单 / 级别筛选 / 归档）后端没有对应接口，
-      本页只落画板的 p-tail（日志正文），按通栏卡处理 —— 见设计文档 §5 的偏离记录。
+      左边那一列 300 宽的卡（文件清单 / 级别筛选 / 归档）后来靠 /api/logs/files 落了 ——
+      这里原来的注释还写着「后端没有对应接口，本页只落 p-tail」，是过时的。
     -->
     <PtToolbar band>
       <el-checkbox v-model="autoScroll">自动滚动</el-checkbox>

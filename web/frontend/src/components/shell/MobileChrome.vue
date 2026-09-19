@@ -5,16 +5,33 @@ import { MOBILE_TABS, NAV_GROUPS } from "../../config/navigation";
 import { useRuntimeStore } from "../../stores/runtime";
 import { useThemeStore } from "../../stores/theme";
 import PtIcon from "../PtIcon";
-import PtLogo from "../PtLogo";
 import ThemePrefs from "./ThemePrefs.vue";
 
 /**
- * 移动端外壳（设计稿板 34 / §9）：顶栏 88 + 底部 5 个 tab 72。
- * 「我的」在设计稿上是一个设置聚合页，产品里没有这个路由，所以做成上拉抽屉，
+ * 移动端外壳（画板 30–35 与设计文档 §9）。
+ *
+ * 顶栏按画板是一行：左边「h1 19/700 + sub 11/400」两行文本，右边两个 30×30 的
+ * 图标钮（search、bell）。六块移动画板的 topbar 骨架完全一样，只有文案不同。
+ * sub 是每页自己的实时摘要（「14 个 · 12 正常 · 2 异常」这类），所以它跟桌面页头
+ * 一样是个 Teleport 靶子；桌面那个 `#pt-head-sub` 在移动端整条被 display:none 藏掉，
+ * 摘要就没地方落，于是这里给它一个移动端专用的靶子（见 PtHeadSub.vue）。
+ *
+ * 与画板的两处刻意不同（用户验收退回过的三条硬约束优先）：
+ *   · 左边多一个菜单钮。画板的移动稿没有任何打开导航列的控件，而五个 tab 只覆盖
+ *     五个路由，没有它就到不了其余十几个页面（约束③「导航列必须可收起」的反面：
+ *     收起之后要能再打开）。
+ *   · 右边多一个明暗切换钮（约束①「主题切换入口必须一眼看得见」）。折在「我的」
+ *     面板里的三段选择器仍在，那是它的超集。
+ *
+ * 「我的」在画板 34 上是一个设置聚合页，产品里没有这个路由，所以做成上拉抽屉，
  * 把「系统」「ChatOps」两组和偏好折进去 —— 行为等价且不新增路由。
  */
 const props = defineProps<{ activePath: string; title: string }>();
 const emit = defineEmits<{ "open-nav": [] }>();
+
+/** 画板顶栏右侧那两个钮的去处。都是真实路由，不是装饰 */
+const SEARCH_PATH = "/search";
+const BELL_PATH = "/chatops/notifications";
 
 const route = useRoute();
 const router = useRouter();
@@ -43,6 +60,10 @@ function onTab(path?: string) {
     sheetOpen.value = true;
     return;
   }
+  go(path);
+}
+
+function go(path: string) {
   if (route.path !== path) void router.push(path);
 }
 
@@ -54,36 +75,33 @@ function goFromSheet(path: string) {
 
 <template>
   <header class="pt-mchrome">
-    <div class="pt-mchrome__row">
-      <button
-        type="button"
-        class="pt-mchrome__icon"
-        aria-label="打开导航"
-        @click="emit('open-nav')">
-        <PtIcon name="menu" :size="20" />
-      </button>
-      <span class="pt-mchrome__brand">
-        <!-- 顶栏是深色 chrome（8 套配色里恒为深色），按 brand.md 取单色版，不随主题换 -->
-        <PtLogo variant="mono" :size="20" />
-        <span>pt-tools</span>
-      </span>
-      <!-- 明暗一键直切。折在「我的」面板里的三段选择器还在，那是它的超集 -->
-      <button
-        type="button"
-        class="pt-mchrome__icon"
-        :aria-label="themeLabel"
-        @click="themeStore.toggle">
-        <PtIcon :name="themeIcon" :size="20" />
-      </button>
-      <button
-        type="button"
-        class="pt-mchrome__icon"
-        aria-label="偏好与账户"
-        @click="sheetOpen = true">
-        <PtIcon name="user" :size="20" />
-      </button>
+    <button type="button" class="pt-mchrome__icon" aria-label="打开导航" @click="emit('open-nav')">
+      <PtIcon name="menu" :size="16" />
+    </button>
+
+    <div class="pt-mchrome__group">
+      <h1 class="pt-mchrome__title">{{ title }}</h1>
+      <!--
+        画板 topbar 的 sub。靶子空着时 CSS 的 :empty 会把它收掉（display:none），
+        所以 /userinfo、/search 这种自己画头的页面不会多出一条空行。
+      -->
+      <div id="pt-mhead-sub" class="pt-mchrome__sub" />
     </div>
-    <h1 class="pt-mchrome__title">{{ title }}</h1>
+
+    <button type="button" class="pt-mchrome__icon" aria-label="种子搜索" @click="go(SEARCH_PATH)">
+      <PtIcon name="search" :size="16" />
+    </button>
+    <button type="button" class="pt-mchrome__icon" aria-label="消息通知" @click="go(BELL_PATH)">
+      <PtIcon name="bell" :size="16" />
+    </button>
+    <!-- 明暗一键直切。折在「我的」面板里的三段选择器还在，那是它的超集 -->
+    <button
+      type="button"
+      class="pt-mchrome__icon"
+      :aria-label="themeLabel"
+      @click="themeStore.toggle">
+      <PtIcon :name="themeIcon" :size="16" />
+    </button>
   </header>
 
   <nav class="pt-mnav" aria-label="底部导航">

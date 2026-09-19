@@ -2,6 +2,7 @@
 import { globalApi, type GlobalSettings } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
@@ -144,7 +145,7 @@ async function save() {
   -->
   <div class="pt-cards pt-cards--wide">
     <!-- 页头摘要：口径是「当前生效的关键配置」，由本页把真实配置送进外壳页头 -->
-    <Teleport v-if="headSub" to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
 
     <!--
       主操作进页头（画板 head 右侧动作，高 32）。

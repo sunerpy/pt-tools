@@ -15,6 +15,7 @@ import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTor
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtProgress from "@/components/ui/PtProgress.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
@@ -1507,7 +1508,7 @@ function toggleSidebar() {
     与工具栏里的页内导航下拉都不再需要 —— 标题走外壳页头，导航走导航列。
   -->
   <div class="hub">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button type="primary" @click="openAddDialog">
         <PtIcon name="plus" :size="15" /><span>添加种子</span>

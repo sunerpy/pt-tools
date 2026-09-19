@@ -2,6 +2,7 @@
 import { chatopsApi, type ChatOpBinding, type NotificationConfig } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -248,7 +249,7 @@ function getConfNameByConfId(confId?: number) {
     右边那片空白上画的是发码弹窗的规格，不是页面内容。刷新与生成绑定码是页头动作。
   -->
   <div class="bindings-page pt-cards pt-cards--lead">
-    <Teleport to="#pt-head-sub">{{ headSub }}</Teleport>
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="loadData">
         <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>

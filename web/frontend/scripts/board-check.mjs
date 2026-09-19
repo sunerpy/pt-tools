@@ -270,6 +270,21 @@ const ALLOWED_GAPS = {
     "那四列是改版前就有的功能列（计量差异、封禁提醒、打开/同步入口），砍掉属于产品取舍，需 owner 拍板。",
 
   /*
+   * 移动画板 30 / 31 的筛选区与行卡走势图。两条都不是「忘了做」：
+   */
+  "/sites@375 filterRow":
+    "画板 30 的筛选只有一排 26 高的 chip（全部/正常/异常/已禁用 各带计数），落地是把桌面工具栏整条搬了过来：" +
+    "「已启用/全部」分段 + 搜索框 + 探测已启用 + 打开已启用 + 新增站点，换行堆到 240 高。" +
+    "画板的移动稿里没有画这三个入口，砍掉它们等于手机上少三个功能入口 —— 要收进菜单还是要留在页面上属于产品取舍，需 owner 拍板。",
+  "/tasks@375 filterRow":
+    "画板 31 的筛选是一条 294×30 的分段器；落地是三个可叠加的筛选 chip + 搜索框 + 站点下拉。" +
+    "那三个 chip 是可组合的（apiTasks 里逐个 AND），收成画板那条互斥分段器会删掉组合筛选能力 —— " +
+    "这正是第九轮修掉的缺陷，不能为了对齐画板再改回去。",
+  "/sites@375 rowCards.spark":
+    "画板 30 的行卡里有一条 120×18 的 8 根柱走势图，落地没有：后端没有按站点的历史序列接口。" +
+    "perSiteStats 只给当前快照（uploaded / ratio / seeding …），造一条假的走势比不画更糟。",
+
+  /*
    * 这张表现在是空的 —— 上一轮登记的偏离都实现掉了。
    * 再往里加一条就等于向 owner 承认「这里没按画板做」，所以原因必须写清是**为什么做不了**
    * （需要后端新接口、会造成重复写入口一类），不是「暂时不想做」。
@@ -365,6 +380,9 @@ const { sessionId } = await cdp.send("Target.attachToTarget", {
 });
 await cdp.send("Page.enable", {}, sessionId);
 await cdp.send("Runtime.enable", {}, sessionId);
+/** 假数据脚本装上了没有 —— 装上之后每条路由都要求当前文档真的铺到了（见 goto） */
+let stubInstalled = false;
+
 /* 控制台报错也算不一致：渲染崩了页面照样可能量不出东西，得说清是崩了还是没做 */
 let consoleErrors = [];
 cdp.onEvent = (m) => {
@@ -393,8 +411,7 @@ async function ev(expression) {
   return r.result.value;
 }
 
-async function goto(url) {
-  await cdp.send("Page.navigate", { url }, sessionId);
+async function waitReady() {
   for (let i = 0; i < 80; i++) {
     await sleep(250);
     const ready = await ev(
@@ -402,6 +419,26 @@ async function goto(url) {
     ).catch(() => false);
     if (ready === true) return;
   }
+}
+
+/**
+ * 跳到一条路由。
+ *
+ * 这里有一个会把整轮验收变成假绿的坑：路由是 hash 模式，`Page.navigate` 到
+ * `…/#/sites` 时如果当前文档已经是同一个路径，Chrome 只当成片段跳转，**不产生新文档**，
+ * 于是 `Page.addScriptToEvaluateOnNewDocument` 注册的假数据脚本一次都不执行 ——
+ * 页面拿到的是真后端的空库，量出来的「没有页脚带 / 卡片区是空的」看着像没实现。
+ * 所以导航后要确认这一篇文档确实铺上了假数据（stubScript 会挂 window.__ptStub），
+ * 没有就强制 reload 一次，reload 一定是新文档。
+ */
+async function goto(url) {
+  await cdp.send("Page.navigate", { url }, sessionId);
+  await waitReady();
+  if (!stubInstalled) return;
+  const stubbed = await ev(`window.__ptStub === true`).catch(() => false);
+  if (stubbed === true) return;
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
 }
 
 await goto(`${BASE}/`);
@@ -415,6 +452,7 @@ await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
  * 空库量出来的「没有页脚带」是没数据而不是没实现，不喂就分不开这两件事。
  */
 await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: stubScript() }, sessionId);
+stubInstalled = true;
 await cdp.send(
   "Emulation.setDeviceMetricsOverride",
   { width: 1440, height: 1024, deviceScaleFactor: 1, mobile: false },
@@ -753,10 +791,281 @@ for (const route of routes) {
   }
 }
 
+// ------------------------------------------------- 移动端（画板 30–35 与 §9）
+
+/*
+ * 桌面那 21 条路由之外，画板还有六块移动稿，此前完全没进验收 —— 脚本固定
+ * 1440×1024，于是「零偏离」只在桌面口径内成立，而文档没把这个口径写出来。
+ *
+ * 六块移动画板读回来的骨架完全一样（docs/design/webui-board-spec.md §10）：
+ *   topbar 0,0 375×88 fill chrome —— 但**前 36 是手机自己的状态栏**
+ *          （14:32 / 信号 / Wi-Fi / 电量），浏览器里不存在也不该画。属于 app 的是
+ *          40…88：左 h1 19/700 + sub 11/400，右两个 30×30 r=4 图标钮（search、bell）
+ *   内容   x=16 宽 343（左右各内缩 16）
+ *   tabbar 0,739 375×72 —— **状态行在这 72 之内**（sel 指示条在 765）
+ *   五个 tab：概览 / 站点 / 任务 / 搜索 / 我的
+ * §9 另外规定：触控目标 ≥ 44×44、桌面表格一律降级成行卡（不做横向滚动表格）、
+ * KPI 条降级成 2×2。
+ */
+const M_VIEWPORT = { width: 375, height: 812 };
+/** app 顶栏：画板属于 app 的那段是 48，落地 52（理由见 theme.scss 的注释） */
+const M_TOPBAR_H = 52;
+/** 底栏 = 状态行 24 + tab 行 48 = 72，与画板 tabbar 的 72 对上 */
+const M_NAV_H = 72;
+const M_TABS = ["概览", "站点", "任务", "搜索", "我的"];
+/** 内容列：画板一律 x=16 宽 343 */
+const M_INNER_X = 16;
+
+const MOBILE_EXPECT = {
+  "/sites": {
+    board: 30,
+    title: "站点",
+    sub: true,
+    rowCards: 1,
+    activeTab: "站点",
+    /* 画板 30 的筛选是一排 26 高的 chip（全部 14 / 正常 12 / 异常 2 / 已禁用 1） */
+    filterRowH: 26,
+    /* 画板 30 的行卡里有 120×18 的 8 根柱 */
+    rowSpark: true,
+  },
+  "/tasks": {
+    board: 31,
+    title: "任务",
+    sub: true,
+    rowCards: 1,
+    activeTab: "任务",
+    /* 画板 31 是一条 294×30 的分段器 */
+    filterRowH: 30,
+  },
+  "/sites/M-Team": { board: 32, title: "M-Team", sub: true },
+  "/chatops/notifications": { board: 33, title: "消息通知", sub: true },
+  "/logs": { board: 35, title: "运行日志", sub: true },
+  /* 画板 34「我的」在产品里没有对应路由（折成了上拉面板），换成 §9 的 KPI 2×2 规则 */
+  "/userinfo": { board: "§9", title: "用户统计", kpiCols: 2, activeTab: "概览" },
+};
+
+const MEASURE_M = `(() => {
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+  };
+  const one = (sel) => { const el = document.querySelector(sel); return el ? box(el) : null; };
+  const txt = (sel) => (document.querySelector(sel)?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+  const inner = document.querySelector('.pt-shell__inner');
+  return {
+    topbar: one('.pt-mchrome'),
+    title: txt('.pt-mchrome__title'),
+    sub: txt('#pt-mhead-sub'),
+    /*
+     * 顶栏图标钮量的是**命中区**，不是可见方块。画板给 30×30，而 §9 要 ≥44×44，
+     * 两者只能用「方块 30 + ::before 外扩到 44」同时满足 —— 伪元素量不到尺寸，
+     * 所以从中心朝四个方向各打一个 21px 的点，看命中的还是不是这个钮自己。
+     */
+    icons: [...document.querySelectorAll('.pt-mchrome__icon')].map((el) => {
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const owns = (x, y) => {
+        const hit = document.elementFromPoint(x, y);
+        return Boolean(hit && (hit === el || el.contains(hit)));
+      };
+      return {
+        label: el.getAttribute('aria-label') ?? '',
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        touch: owns(cx, cy - 21) && owns(cx, cy + 21) && owns(cx - 21, cy) && owns(cx + 21, cy),
+      };
+    }),
+    /* 工具栏带：画板 30 的筛选是一排 26 高的 chip，31 是一条 30 高的分段器 */
+    toolbar: one('.pt-band--toolbar'),
+    /* 行卡里有没有柱图（画板 30 的行卡带 120×18 的 8 根柱） */
+    rowCardsWithSpark: [...document.querySelectorAll('.pt-rowcard')]
+      .filter((el) => el.querySelector('.pt-bars, .pt-kpi__bars')).length,
+    nav: one('.pt-mnav'),
+    tabs: [...document.querySelectorAll('.pt-mnav__tab')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        label: (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        active: el.classList.contains('is-active'),
+      };
+    }),
+    /* 桌面外壳必须整套让位：375 下 rail 与桌面页头会把内容挤没 */
+    deskVisible: ['.pt-rail', '.pt-status', '.pt-head'].filter((sel) => {
+      const el = document.querySelector(sel);
+      return el && getComputedStyle(el).display !== 'none';
+    }),
+    /*
+     * 内容列的**内容边界**，不是元素边界。.pt-shell__inner 本身是整宽的，
+     * 16 的内缩在它的 padding 里 —— 量 getBoundingClientRect().left 永远得到 0，
+     * 那样的断言只会证明「元素贴着屏幕左边」，跟画板的内缩没关系。
+     * （这段注释身处一个模板字符串内部，所以不能用反引号引类名。）
+     */
+    inner: inner
+      ? (() => {
+          const r = inner.getBoundingClientRect();
+          const cs = getComputedStyle(inner);
+          const padL = parseFloat(cs.paddingLeft) || 0;
+          const padR = parseFloat(cs.paddingRight) || 0;
+          return {
+            x: Math.round(r.left + padL),
+            w: Math.round(r.width - padL - padR),
+          };
+        })()
+      : null,
+    /* 行卡：§9 要求桌面表格在移动端降级成行卡 */
+    rowCards: document.querySelectorAll('.pt-rowcard').length,
+    /*
+     * 还在横向滚的表格。§9 明确「不做横向滚动表格」，而一张 el-table 在 375 下默认
+     * 就是横向滚的 —— 它自己滚，不会让 documentElement 溢出，所以只看页面溢出量不出来。
+     */
+    scrollers: [...document.querySelectorAll('table, .el-table__body-wrapper, .pt-band--grid')]
+      .filter((el) => getComputedStyle(el).display !== 'none' && el.scrollWidth - el.clientWidth > 8)
+      .map((el) => String(el.className).split(' ')[0] || el.tagName.toLowerCase()),
+    /* 列数量在 .pt-kpi__grid 上，不在 .pt-kpi 上（外层是带，内层才是网格） */
+    kpiCols: (() => {
+      const grid = document.querySelector('.pt-kpi__grid');
+      if (!grid) return null;
+      return getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
+    })(),
+    kpiNoBars: [...document.querySelectorAll('.pt-kpi__cell')]
+      .filter((el) => !el.querySelector('.pt-kpi__bars'))
+      .map((el) => (el.querySelector('.pt-kpi__label')?.textContent ?? '').trim()),
+    /* 整页横向溢出：手机上出现横向滚动条等于这块画板完全不成立 */
+    docOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    unknown: [...new Set([...document.querySelectorAll('*')]
+      .filter((el) => el instanceof HTMLUnknownElement)
+      .map((el) => el.tagName.toLowerCase()))],
+  };
+})()`;
+
+const mobileRoutes = Object.keys(MOBILE_EXPECT).filter(
+  (r) => wanted.length === 0 || wanted.includes(r),
+);
+
+if (mobileRoutes.length > 0) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { ...M_VIEWPORT, deviceScaleFactor: 1, mobile: true },
+    sessionId,
+  );
+
+  for (const route of mobileRoutes) {
+    const want = MOBILE_EXPECT[route];
+    consoleErrors = [];
+    await goto(`${BASE}/#${route}`);
+    await sleep(2400);
+    const got = await ev(MEASURE_M);
+    /* 移动端的偏离键带 @375，桌面那份登记不会顺带豁免移动端 */
+    const fail = (key, msg) => {
+      const gapKey = `${route}@375 ${key}`;
+      if (ALLOWED_GAPS[gapKey]) {
+        gapsUsed.add(gapKey);
+        return;
+      }
+      failures.push({ route: `${route}@375`, board: want.board, key, msg });
+    };
+
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+    if (got.docOverflow > 0) fail("overflow", `整页横向溢出 ${got.docOverflow}px`);
+    if (got.unknown.length > 0) fail("unknown", `未解析组件 ${got.unknown.join(", ")}`);
+    if (got.deskVisible.length > 0)
+      fail("shell", `375 下桌面外壳没让位：${got.deskVisible.join(" / ")}`);
+
+    if (!got.topbar) fail("topbar", "找不到 .pt-mchrome");
+    else {
+      if (!near(got.topbar.h, M_TOPBAR_H, 2))
+        fail("topbar", `顶栏高 ${got.topbar.h}，应为 ${M_TOPBAR_H}`);
+      if (!near(got.topbar.w, M_VIEWPORT.width, 2))
+        fail("topbar", `顶栏宽 ${got.topbar.w}，应为 ${M_VIEWPORT.width}`);
+    }
+    if (!got.title.includes(want.title))
+      fail("topbar.title", `标题是「${got.title}」，画板 h1 是「${want.title}」`);
+    /*
+     * 摘要行。画板 30–35 每一块的 topbar 都有 sub，而它是页面 Teleport 进来的 ——
+     * 桌面页头在 ≤768 整条 display:none，这一行曾经在手机上完全消失。
+     */
+    if (want.sub && !got.sub) fail("topbar.sub", "画板 topbar 有 sub 摘要行，手机上是空的");
+
+    for (const icon of got.icons) {
+      if (!near(icon.w, 30, 2) || !near(icon.h, 30, 2))
+        fail(`topbar.icon(${icon.label})`, `钮 ${icon.w}×${icon.h}，画板 30×30`);
+      if (!icon.touch) fail(`topbar.touch(${icon.label})`, "命中区不足 44×44（§9 的触控目标下限）");
+    }
+    for (const label of ["种子搜索", "消息通知"]) {
+      if (!got.icons.some((i) => i.label.includes(label)))
+        fail(`topbar.icon(${label})`, `画板 topbar 右侧有这个钮，页面上找不到`);
+    }
+
+    if (!got.nav) fail("nav", "找不到 .pt-mnav");
+    else if (!near(got.nav.h, M_NAV_H, 2)) fail("nav", `底栏高 ${got.nav.h}，画板 ${M_NAV_H}`);
+    if (got.tabs.length !== M_TABS.length)
+      fail("nav.tabs", `底栏有 ${got.tabs.length} 个 tab，画板 ${M_TABS.length} 个`);
+    for (const label of M_TABS) {
+      if (!got.tabs.some((t) => t.label.includes(label)))
+        fail(
+          `nav.tab(${label})`,
+          `底栏里没有「${label}」；实测 ${got.tabs.map((t) => t.label).join(" / ")}`,
+        );
+    }
+    /* §9 的触控下限对 tab 同样成立：375/5 = 75 宽，高按 tab 行 48 */
+    for (const tab of got.tabs) {
+      if (tab.h < 44 || tab.w < 44)
+        fail(`nav.touch(${tab.label})`, `tab ${tab.w}×${tab.h}，§9 要求 ≥44×44`);
+    }
+    if (want.activeTab && !got.tabs.some((t) => t.active && t.label.includes(want.activeTab)))
+      fail(
+        "nav.active",
+        `这条路由应点亮「${want.activeTab}」tab；实测 ${
+          got.tabs
+            .filter((t) => t.active)
+            .map((t) => t.label)
+            .join(" / ") || "没有点亮的"
+        }`,
+      );
+
+    if (got.inner) {
+      if (!near(got.inner.x, M_INNER_X, 2))
+        fail("inner.x", `内容列 x=${got.inner.x}，画板 ${M_INNER_X}`);
+      /*
+       * 画板的内容宽度是 375 - 16*2 = 343。容差走默认的 12：模拟视口里的竖向滚动条
+       * 占掉 10 左右，实测 333 是滚动条占的，不是内缩写错了。
+       */
+      const wantW = M_VIEWPORT.width - M_INNER_X * 2;
+      if (!near(got.inner.w, wantW)) fail("inner.w", `内容列宽 ${got.inner.w}，画板 ${wantW}`);
+    }
+
+    if (want.rowCards && got.rowCards < want.rowCards)
+      fail("rowCards", `只有 ${got.rowCards} 张行卡，§9 要求表格降级成行卡`);
+    /*
+     * 筛选区的高度。画板在手机上只给一排 chip（30）或一条分段器（31），
+     * 落地是把桌面工具栏整条搬了过来，控件换行堆高 —— 812 的屏上第一张卡被推得很低。
+     */
+    if (want.filterRowH && got.toolbar && !near(got.toolbar.h, want.filterRowH, 14))
+      fail("filterRow", `筛选区高 ${got.toolbar.h}，画板 ${want.filterRowH}`);
+    if (want.rowSpark && got.rowCardsWithSpark === 0)
+      fail("rowCards.spark", "画板 30 的行卡里有 8 根柱的走势图，行卡里一个都没有");
+    if (got.scrollers.length > 0)
+      fail("scroller", `还有横向滚动的表格：${got.scrollers.join(" / ")}（§9 不允许）`);
+
+    if (want.kpiCols) {
+      if (got.kpiCols === null) fail("kpi", "找不到 .pt-kpi");
+      else if (got.kpiCols !== want.kpiCols)
+        fail("kpi.cols", `KPI 是 ${got.kpiCols} 列，§9 要求 ${want.kpiCols} 列（2×2）`);
+      if (got.kpiNoBars.length > 0)
+        fail("kpi.bars", `降级成 2×2 之后这些格丢了柱图：${got.kpiNoBars.join("、")}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 报告
 
 const stale = Object.keys(ALLOWED_GAPS).filter(
-  (k) => !gapsUsed.has(k) && (wanted.length === 0 || wanted.some((r) => k.startsWith(`${r} `))),
+  (k) =>
+    !gapsUsed.has(k) &&
+    /* --route 只跑子集时，别把没跑到的路由的偏离判成多余。移动端的键是 `<路由>@375 <项>` */
+    (wanted.length === 0 || wanted.some((r) => k.startsWith(`${r} `) || k.startsWith(`${r}@375 `))),
 );
 
 for (const f of failures) {
@@ -769,13 +1078,12 @@ for (const k of stale) {
   console.log(`? 偏离登记多余（这一项其实已经对上了，删掉它）：${k}`);
 }
 
-const checked = routes.length;
+/* 桌面与移动分开报数：把两者合成一个数字会让「覆盖了多少画板」重新变得含糊 */
+const scope = `桌面 ${routes.length} 条 + 移动 ${mobileRoutes.length} 条`;
 if (failures.length === 0 && stale.length === 0) {
-  console.log(`\n${checked} 条路由与画板一致（${gapsUsed.size} 条已记偏离）`);
+  console.log(`\n${scope} 与画板一致（${gapsUsed.size} 条已记偏离）`);
 } else {
-  console.log(
-    `\n${checked} 条路由：${failures.length} 处与画板不一致，${stale.length} 条偏离登记多余`,
-  );
+  console.log(`\n${scope}：${failures.length} 处与画板不一致，${stale.length} 条偏离登记多余`);
 }
 
 chrome.kill("SIGKILL");
