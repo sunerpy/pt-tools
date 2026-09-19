@@ -70,6 +70,21 @@ const RATIO_TONE: Record<ReturnType<typeof getRatioType>, PillTone> = {
   danger: "dang",
 };
 
+/**
+ * 积分单元格的 title：把各站自己的积分叫法与做种积分都写清楚。
+ *
+ * 画板 td-*-6 只有一个数字，34 的行里也塞不下单位与第二个数（实测「204.31万 魔」被裁），
+ * 但这两样不能丢 —— 各站的叫法不同（魔力 / 上传量 / 花粉…），做种积分也是真实数据。
+ */
+function bonusTitleOf(row: { site: string; bonus?: number; seedingBonus?: number }): string {
+  const parts = [`${getSiteBonusName(row.site)} ${formatNumber(row.bonus ?? 0)}`];
+  const seedName = getSiteSeedingBonusName(row.site);
+  if (row.seedingBonus && row.seedingBonus > 0 && seedName) {
+    parts.push(`${seedName} ${formatNumber(row.seedingBonus)}`);
+  }
+  return parts.join(" · ");
+}
+
 function ratioTone(ratio: number): PillTone {
   return RATIO_TONE[getRatioType(ratio)];
 }
@@ -661,11 +676,24 @@ onUnmounted(() => {
 
     <div v-loading="loading" class="pt-band--grid">
       <!-- 桌面端表格视图 -->
-      <!-- roomy：站点列有 32px 头像 + 未读角标，数据量/魔力列是双行，34px 装不下 -->
+      <!--
+        行高回到画板 10 的 34（owner 拍板：用画板的密集网格，但保留头像、未读角标，
+        以及真实数据 / 入站 / 剩余天数 / 操作四列）。
+        为了在 34 里装下这些，单元格按画板的形状收成单行：
+          · 头像 32 → 20，角标跟着缩一档并仍然贴头像右上角向左生长（不会被行盒裁掉）；
+          · 站点名单行，用户名移进 title（画板这一列本来就是纯文本，等级另有一列）；
+          · 数据量 / 真实数据 从上下两行改成画板那样的一行「↑38.4 TB ↓4.2 TB」；
+          · 积分按画板只显示数字，叫法与做种积分移进 title。
+        十四列在 1112 宽里放不下（min-width 合计 1764），所以这张表是**横向可滚**的。
+        `scrollbar-always-on` 是必须的：Element 默认只在悬停时显出滚动条，
+        实测右边那六列（积分 / 时魔 / 入站 / 判定活跃 / 剩余天数 / 更新）看不出还有内容 ——
+        「能滚」和「看得出能滚」是两件事。
+      -->
       <el-table
         v-if="!isMobile"
-        class="pt-grid pt-grid--roomy"
+        class="pt-grid"
         :data="siteRows"
+        scrollbar-always-on
         style="width: 100%"
         :default-sort="{ prop: 'uploaded', order: 'descending' }"
         highlight-current-row>
@@ -689,7 +717,7 @@ onUnmounted(() => {
                   class="site__av"
                   :aria-label="`同步 ${row.site}`"
                   @click.stop="syncSite(row.site)">
-                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="32" />
+                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="20" />
                   <PtIcon
                     v-if="syncingSite === row.site"
                     name="loader-circle"
@@ -697,16 +725,25 @@ onUnmounted(() => {
                     class="site__spin" />
                 </button>
               </el-badge>
-              <div class="site__txt">
-                <span class="site__name">{{ row.site }}</span>
-                <span class="site__user">{{ row.username }}</span>
-              </div>
+              <!--
+                画板这一列是纯文本单行。用户名不丢：挂在 title 上，鼠标停住就能看到 ——
+                34 的行盒放不下第二行，而等级、积分这些本来就各有自己的列。
+              -->
+              <span
+                class="site__name"
+                :title="row.username ? `${row.site} · ${row.username}` : row.site">
+                {{ row.site }}
+              </span>
             </div>
           </template>
         </el-table-column>
 
         <!-- 等级列 -->
-        <el-table-column prop="rank" label="等级" min-width="100" align="center">
+        <!--
+          画板这一列是纯文本 78 宽；落地是胶囊（带边框与内距），最长的等级名
+          「Extreme User」在 124 里会被裁成「Extreme User ..」，所以放到 140。
+        -->
+        <el-table-column prop="rank" label="等级" min-width="140" align="center">
           <template #default="{ row }">
             <LevelTooltip
               :site-id="row.site"
@@ -719,18 +756,18 @@ onUnmounted(() => {
         <el-table-column
           prop="uploaded"
           label="数据量"
-          min-width="140"
+          min-width="170"
           sortable
           align="right"
           class-name="pt-cell-num">
           <template #default="{ row }">
+            <!--
+              画板 td-*-2 的形状是一行「↑38.4 TB ↓4.2 TB」，箭头是**字符**不是图标 ——
+              收成单行之后 12px 的图标加上两个数就撑不住 170，数字会折行成「52.1 / TB」。
+            -->
             <div class="io">
-              <span class="io__r is-up">
-                <PtIcon name="upload" :size="12" />{{ formatBytes(row.uploaded) }}
-              </span>
-              <span class="io__r is-dn">
-                <PtIcon name="download" :size="12" />{{ formatBytes(row.downloaded) }}
-              </span>
+              <span class="io__r is-up">↑{{ formatBytes(row.uploaded) }}</span>
+              <span class="io__r is-dn">↓{{ formatBytes(row.downloaded) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -739,18 +776,14 @@ onUnmounted(() => {
         <el-table-column
           prop="trueUploaded"
           label="真实数据"
-          min-width="140"
+          min-width="170"
           sortable
           align="right"
           class-name="pt-cell-num">
           <template #default="{ row }">
             <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="io">
-              <span class="io__r is-up">
-                <PtIcon name="upload" :size="12" />{{ formatBytes(row.trueUploaded) }}
-              </span>
-              <span class="io__r is-dn">
-                <PtIcon name="download" :size="12" />{{ formatBytes(row.trueDownloaded ?? 0) }}
-              </span>
+              <span class="io__r is-up">↑{{ formatBytes(row.trueUploaded) }}</span>
+              <span class="io__r is-dn">↓{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
             </div>
             <span v-else class="nil">-</span>
           </template>
@@ -812,18 +845,13 @@ onUnmounted(() => {
           align="right"
           class-name="pt-cell-num">
           <template #default="{ row }">
-            <div class="bonus">
-              <span class="bonus__r">
-                <span class="bonus__v">{{ formatNumber(row.bonus ?? 0) }}</span>
-                <span class="bonus__l">{{ getSiteBonusName(row.site) }}</span>
-              </span>
-              <span
-                v-if="row.seedingBonus && row.seedingBonus > 0 && getSiteSeedingBonusName(row.site)"
-                class="bonus__r is-seed">
-                <span class="bonus__v">{{ formatNumber(row.seedingBonus) }}</span>
-                <span class="bonus__l">{{ getSiteSeedingBonusName(row.site) }}</span>
-              </span>
-            </div>
+            <!--
+              画板 td-*-6 只有一个数字（1,284,900）。各站的积分叫法与做种积分两个数都还在，
+              但挪进 title —— 塞在 34 的行里会把数字挤掉（实测「204.31万 魔」被裁）。
+            -->
+            <span class="bonus" :title="bonusTitleOf(row)">
+              {{ formatNumber(row.bonus ?? 0) }}
+            </span>
           </template>
         </el-table-column>
 
@@ -1201,7 +1229,7 @@ onUnmounted(() => {
 /* ---- 站点单元格（表格 + 卡片头共用） ---- */
 .site {
   display: flex;
-  gap: var(--pt-space-3);
+  gap: var(--pt-space-2);
   align-items: center;
   min-width: 0;
 }
@@ -1210,22 +1238,25 @@ onUnmounted(() => {
  * 未读消息角标压在头像右上角内侧。
  *
  * Element 默认把角标整个甩到头像外（right 偏移再 translateX(100%)），两位数就有
- * 十几像素探到间距外面，直接盖住站点名；上沿也要多出 9px，在表格里被 .cell 裁掉。
+ * 十几像素探到间距外面，直接盖住站点名；上沿也要多出 9px，在表格里被 .cell 裁掉 ——
+ * 「站点有消息角标时展示不全」就是这么来的（提交 266625b）。
  * 改成贴住头像右上角、向左生长（去掉 translateX，只留右偏移）：
  *   right -2  右沿只探出头像 2px，角标再宽也是往左长进头像里，
  *             永远吃不到和站点名之间那 8px 间距 —— 居中锚定会随位数左右扩，
- *             「99+」那种宽度足以横跨整个 32px 头像；
- *   top 4     上沿落在头像上方 4px，配合 .pt-grid--roomy 的 48px 行高，
- *             距单元格上边框还剩 4px，不会和行线糊在一起；
- *   16/11     Element 默认 18px 高、12px 字，在 32px 头像上显得抢戏，收小一档。
+ *             「99+」那种宽度足以横跨整个头像；
+ *   top 2     行高回到画板的 34 之后头像收到 20，角标贴头像右上角。
+ *             实测 top:0 时角标上沿比单元格上边还高 1px（会被 .cell 裁掉 1px），
+ *             所以往下压 2 —— 这个数是在真实浏览器里量出来的，不是推的：
+ *             改完实测 clippedTop 为负（完全在单元格内）。
+ *   14/10     跟着头像收一档，否则 20 的头像上顶着 16 的角标就成了角标带头像。
  */
 .site :deep(.el-badge__content.is-fixed) {
-  top: 4px;
+  top: 2px;
   right: -2px;
-  height: 16px;
+  height: 14px;
   padding: 0 4px;
-  font-size: var(--pt-fz-label);
-  line-height: 16px;
+  font-size: var(--pt-fz-foot);
+  line-height: 14px;
   transform: translateY(-50%);
 }
 
@@ -1265,19 +1296,15 @@ onUnmounted(() => {
   }
 }
 
+/*
+ * 双行只留给**移动端行卡**的卡头（那里头像 40、空间够）。
+ * 桌面表格按画板是单行，用户名挂在 title 上 —— 34 的行盒放不下第二行。
+ */
 .site__txt {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-}
-
-.site__name {
-  overflow: hidden;
-  font-weight: 600;
-  color: var(--pt-t1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .site__user {
@@ -1288,11 +1315,20 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* ---- 上传/下载两行 ---- */
+.site__name {
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 上传/下载：画板 td-*-2 是**一行**「↑38.4 TB ↓4.2 TB」 ---- */
 .io {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: nowrap;
+  gap: var(--pt-space-2);
+  justify-content: flex-end;
   align-items: flex-end;
 }
 
@@ -1353,11 +1389,13 @@ onUnmounted(() => {
 }
 
 /* ---- 积分：值在上、单位名在下 ---- */
+/* 积分也收成一行：「魔力 · 做种积分」两个数都留着，34 的行盒放不下第二行 */
 .bonus {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-end;
+  flex-wrap: nowrap;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  justify-content: flex-end;
 }
 
 .bonus__r {
