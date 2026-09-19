@@ -25,8 +25,11 @@
  * 而「站点命中」卡用的是未筛选的后端计数，于是画面变成「MooKo 12 条」配一张空表格。
  *
  * 所以归桶是**三态**（见 `CategoryVerdict`）：命中某桶 / `other` / `unknown`。
- * 筛选只丢 `other`（纪录片、游戏照旧不显示，五个固定桶的设计就是这个含义），
- * 保留 `unknown` —— 「站点没提供分类」不等于「不属于这个分类」。
+ * 三者在筛选里的待遇不同：
+ *   命中     留下
+ *   other    丢掉（站点表过态，纪录片与游戏照旧不在五个固定桶里）
+ *   unknown  默认也丢掉，但**必须被数出来并可一键请回**（见 `matchesCategory`）——
+ *            「站点没提供分类」不等于「不属于这个分类」，可它也不该在每个档位下都冒出来。
  */
 
 /** 桶 ID。空串是「全部」，不参与匹配 */
@@ -126,17 +129,25 @@ export function verdictOfItem(item: {
 /**
  * 选中具体档位时这一行留不留。
  *
- * 留 `unknown`：把「站点没提供分类」筛成「不属于这个分类」，用户看到的是
- * 「MooKo 命中 12 条」配一张空表格 —— 这比少筛几条更不诚实。表格上方那条说明
- * （TorrentSearch.vue 的 unknownNote）负责把留下来的条数讲出来。
+ * 默认**只留命中这个桶的**：档位选「音乐」就该只看到音乐，否则分段器对 Gazelle 那类
+ * 站点等于没有作用 —— 一次评审的原话是「只是从『所有分类下消失』改成『所有分类下都出现』」，
+ * 判得对。
+ *
+ * `includeUnknown` 用来把「站点没提供分类」的行请回来。它不是默认值，但也不能没有：
+ * MooKo 那种站点一条分类都不给，默认严格筛掉之后它的结果会整片消失，而「站点命中」卡
+ * 报的是未筛选的后端计数，画面就成了「MooKo 12 条」配一张空表格。所以调用方（搜索页）
+ * 始终把「被筛掉了几条没有分类的行」写在表格上方，并给一个一键请回来的开关：
+ * 筛得干净，但没有悄悄丢东西。
  */
 export function matchesCategory(
   item: { category?: string | null; tags?: string[] | null },
   bucket: CategoryBucket,
+  options: { includeUnknown?: boolean } = {},
 ): boolean {
   if (!bucket) return true;
   const verdict = verdictOfItem(item);
-  return verdict === bucket || verdict === "unknown";
+  if (verdict === bucket) return true;
+  return verdict === "unknown" && options.includeUnknown === true;
 }
 
 /** 桶 ID → 给人看的标签。用于「已保存的搜索」那类要回显条件的地方 */

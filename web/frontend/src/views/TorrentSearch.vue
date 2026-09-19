@@ -150,13 +150,29 @@ const CACHE_KEY = "pt-tools-search-cache";
  * （`影剧/综艺/HD`、`Animation`、`TV游戏` 这类），并有单测钉住漏收与误收两种情形 ——
  * 页内手写一版子串匹配已经错过一次。
  *
- * 筛选走 `matchesCategory` 的三态判定而不是「归不进桶就丢」：Gazelle 的搜索响应里
- * 没有分类字段，MooKo 的真实 tags 是题材词（剧情/悬疑/传记），一个都归不进桶 ——
- * 二态判定会把它整片筛掉，而「站点命中」卡报的是未筛选的后端计数，
- * 画面就成了「MooKo 12 条」配一张空表格。所以只丢站点明确表过态的 other，留 unknown，
- * 留下多少条由 unknownNote 说出来。
+ * 筛选走 `matchesCategory` 的三态判定。三种待遇不同：命中的留，站点表过态但不在五桶的
+ * （纪录片、TV游戏）丢，**站点根本没给分类的默认也丢，但要数出来并可一键请回**。
+ *
+ * 为什么不是「无条件留下」：Gazelle 的搜索响应没有分类字段，MooKo 的真实 tags 是题材词
+ * （剧情/悬疑/传记），一个都归不进桶 —— 无条件留下就等于它在电影、剧集、动漫、音乐
+ * 四个档位下全部出现，分段器对这类站点等于没有作用（评审原话：只是从「所有分类下消失」
+ * 改成「所有分类下都出现」）。
+ * 为什么不是「悄悄丢掉」：那样 MooKo 的结果一选档位就整片消失，而「站点命中」卡报的是
+ * 未筛选的后端计数，画面会变成「MooKo 12 条」配一张空表格。
+ * 所以：默认严格筛 + 明说「另有 N 条没有分类信息被筛掉」+ 一个把它们请回来的开关。
  */
 const activeCategory = ref<CategoryBucket>("");
+
+/**
+ * 是否把「站点没提供分类」的行也列进来（只在选了具体档位时才有意义）。
+ *
+ * 默认关：档位要真的起作用。换档位时重置 —— 上一个档位下点开过，不该悄悄影响下一个。
+ */
+const includeUnknown = ref(false);
+
+watch(activeCategory, () => {
+  includeUnknown.value = false;
+});
 
 const categoryOptions = computed(() => CATEGORY_OPTIONS.map((o) => ({ ...o })));
 
@@ -369,7 +385,9 @@ const sortedResults = computed(() => {
 const filteredResults = computed(() => {
   let rows = sortedResults.value;
   if (activeCategory.value) {
-    rows = rows.filter((r) => matchesCategory(r, activeCategory.value));
+    rows = rows.filter((r) =>
+      matchesCategory(r, activeCategory.value, { includeUnknown: includeUnknown.value }),
+    );
   }
   if (freeOnly.value) {
     rows = rows.filter((r) => r.isFree);
@@ -1134,15 +1152,19 @@ const barNote = computed(() => {
 });
 
 /**
- * 选中具体档位时，结果里那些「站点没给分类」的行要自己交代清楚。
+ * 选中具体档位时，那些「站点根本没给分类」的行要有人交代。
  *
- * 它们是被 matchesCategory 故意留下来的（详见 @/utils/category），不说明的话用户看到的是
- * 一堆看着与档位无关的结果，以为筛选坏了。说明里报条数和站点名，都是这份结果里能核对的：
- * 站点名就是表格「站点」列的值，没有分类的行在标题下方也看不到分类标签。
+ * 数的是**筛选之前**的结果，所以开关开关都报同一个数：关着时它说明「被筛掉了几条」，
+ * 开着时它说明「多列出来的是哪几条」。两种情形都不让信息悄悄消失。
+ * 站点名取自表格「站点」列的值，用户能核对；没有分类的行在标题下方也看不到分类标签。
  */
+const unknownRows = computed(() => {
+  if (!activeCategory.value) return [];
+  return sortedResults.value.filter((r) => verdictOfItem(r) === "unknown");
+});
+
 const unknownNote = computed(() => {
-  if (!activeCategory.value) return "";
-  const rows = filteredResults.value.filter((r) => verdictOfItem(r) === "unknown");
+  const rows = unknownRows.value;
   if (rows.length === 0) return "";
   const sites = [...new Set(rows.map((r) => r.sourceSite).filter(Boolean))];
   /* 站点多了不铺满一行：列三个，剩下的只报个数 */
@@ -1151,7 +1173,9 @@ const unknownNote = computed(() => {
       ? `${sites.slice(0, 3).join("、")} 等 ${sites.length} 个站点`
       : sites.join("、");
   const from = who ? `（${who}）` : "";
-  return `其中 ${rows.length} 条没有可用的分类信息${from}，按分类筛不掉，一并列在这里。`;
+  return includeUnknown.value
+    ? `已一并列出 ${rows.length} 条没有分类信息的结果${from}，它们不属于任何档位。`
+    : `另有 ${rows.length} 条结果没有分类信息${from}，按档位筛不进来，已不在下表中。`;
 });
 
 /**
@@ -1418,12 +1442,16 @@ const footNote = computed(() => {
       </div>
 
       <!--
-        选中具体档位时，交代那些「站点没给分类」的行为什么还在这里 —— 它们是故意留下的。
-        不说的话用户会以为分类筛选是坏的。
+        选中具体档位时，交代那些「站点根本没给分类」的行。默认它们被筛掉了（否则档位对
+        Gazelle 那类站点等于没作用），所以必须在这里报出条数，并给一个请回来的开关 ——
+        不说的话「站点命中 12 条」配一张少几行的表格就成了自相矛盾的画面。
       -->
       <div v-if="unknownNote" class="pt-note nocat">
         <PtIcon name="info" :size="14" class="pt-note__icon" />
         <span>{{ unknownNote }}</span>
+        <el-button size="small" text @click="includeUnknown = !includeUnknown">
+          {{ includeUnknown ? "只看有分类的" : "一并显示" }}
+        </el-button>
       </div>
 
       <el-table

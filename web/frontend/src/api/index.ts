@@ -1151,9 +1151,10 @@ export interface DownloaderTransferStats {
 /**
  * transfer-stats 里每台下载器的明细（对应后端 `DownloaderTransferStatItem`）。
  *
- * 后端遍历「已启用」的下载器，只有 manager 成功交出客户端的那台才会 append 进来，
- * 拿不到客户端的直接 continue —— 所以「在不在这个数组里」就是这台的连接态，
- * 不必再去拨 `/api/downloaders/{id}/health`（那个接口每次都真连下载器）。
+ * **不要拿「在不在这个数组里」当连接态**：后端只要能从 manager 取到实例就会 append，
+ * 取数失败时各字段留零值。实例可能是缓存来的，Transmission 的实现在普通 RPC 失败后
+ * 也不清 healthy 标志 —— 一台断线的客户端照样会出现在数组里。
+ * 连接态看 `reachable`（这一轮是否真的取到了状态或剩余空间），失败原因在 `error`。
  */
 export interface DownloaderTransferStatItem {
   downloader_id: number;
@@ -1166,6 +1167,10 @@ export interface DownloaderTransferStatItem {
   session_uploaded: number;
   session_downloaded: number;
   free_space: number;
+  /** 这一轮是否真的从这台取到了数据（状态或剩余空间任一成功） */
+  reachable: boolean;
+  /** 两个探测都失败时的原因；取到数据时不返回这个字段 */
+  error?: string;
 }
 
 export interface DownloaderCapability {

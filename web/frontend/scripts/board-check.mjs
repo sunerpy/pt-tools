@@ -46,7 +46,19 @@ const EXPECT = {
     titles: ["上传构成", "等级分布", "需要关注"],
     /* 画板 10 的行高与十列（docs/design/webui-board-spec.md §6）；差异见 ALLOWED_GAPS */
     gridRowHeight: 34,
-    gridColumns: ["站点", "等级", "数据量", "分享率", "做种", "做种体积", "积分", "时魔", "更新"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    /* 画板 10 的十列。「判定活跃」曾经漏在这张表外 —— 期望表自己漏列，检查就永远发现不了 */
+    gridColumns: [
+      "站点",
+      "等级",
+      "数据量",
+      "分享率",
+      "做种",
+      "做种体积",
+      "积分",
+      "时魔",
+      "判定活跃",
+      "更新",
+    ],
   },
   "/userinfo/export": {
     board: "11 导出分享图",
@@ -89,6 +101,29 @@ const EXPECT = {
         orderDesc: true, category: '电影/HD', freeOnly: false }]),
     )`,
     needsSeg: true, // 画板 bar-88 的分类分段
+    /*
+     * 分类分段器点下去到底有没有用。画板画了这五个档位，而它的作用只有点了才看得出来：
+     * 假数据里每三条有一条是 Gazelle 形状（没有分类、只有题材标签），这类行必须**不**
+     * 出现在具体档位下，并且被筛掉的条数要写在表格上方。
+     */
+    probes: [
+      {
+        desc: "点「音乐」档位：没有分类的行被筛掉且条数有交代",
+        want: "没有分类信息",
+        js: `(async () => {
+          const seg = [...document.querySelectorAll('.el-segmented__item, .pt-seg__item, button')]
+            .find((b) => (b.textContent ?? '').trim() === '音乐');
+          if (!seg) return 'no-seg';
+          seg.click();
+          await new Promise((r) => setTimeout(r, 600));
+          const note = (document.querySelector('.pt-note.nocat')?.textContent ?? '')
+            .replace(/\\s+/g, ' ')
+            .trim();
+          const rows = document.querySelectorAll('.el-table__body tbody tr').length;
+          return note + ' | 表里 ' + rows + ' 行';
+        })()`,
+      },
+    ],
     /* 画板 bar-88 的五个固定档位 + search-head 的 go/ha-0/ha-1 + chip-1 */
     controls: ["搜索", "保存搜索", "最近搜索", "仅免费", "电影", "剧集", "动漫", "音乐"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
     /*
@@ -253,7 +288,41 @@ const EXPECT = {
  * 加一条就等于向 owner 承认「这里没按画板做」，所以原因必须写清是**为什么做不了**，
  * 不是「暂时不想做」。想让某处通过检查，先实现它，不是往这张表里加一行。
  */
+const RAIL_GAP_REASON =
+  "画板 01/D.rail 画了八个快捷入口 + 运行日志入口，落地在导航列钉住时把它们全藏起来。" +
+  "这是用户在真实浏览器验收里退回过的：原话「有些重复了吧」—— 导航列已经列出同样的十几个入口，" +
+  "rail 再摆一遍就是同一屏里两份导航。用户当时定的三条硬约束（主题入口必须可见、" +
+  "rail 快捷入口不能与导航列同时出现、导航列必须可收起）优先于画板，" +
+  "所以这条不按画板改回去。导航列收起时这些入口照旧出现。";
+
 const ALLOWED_GAPS = {
+  /* 外壳级偏离：每条桌面路由都会量到，逐条登记（键必须逐条写，键里不能有通配） */
+  ...Object.fromEntries(
+    [
+      "/userinfo",
+      "/userinfo/export",
+      "/sites",
+      "/supported-sites",
+      "/search",
+      "/tasks",
+      "/paused",
+      "/downloader-hub",
+      "/downloaders",
+      "/filter-rules",
+      "/cleanup",
+      "/chatops/notifications",
+      "/chatops/notifications/1",
+      "/chatops/bindings",
+      "/chatops/audit",
+      "/chatops/rss-notifications",
+      "/global",
+      "/cloak-config",
+      "/logs",
+      "/password",
+      "/sites/M-Team",
+    ].map((r) => [`${r} rail.items`, RAIL_GAP_REASON]),
+  ),
+
   /*
    * 用户统计表与画板 10 的四处差异。**都不是漏做，是与用户验收冲突后按用户决定保留的**：
    * 提交 266625b 记着「站点有消息角标时展示不全」是真实浏览器验收退回的缺陷，
@@ -570,6 +639,73 @@ const MEASURE = `(() => {
       }
       return out;
     })(),
+    /*
+     * 纵向叠在一起的卡之间有没有缝。
+     *
+     * 画板的卡片层卡间一律 16。运行日志页的左栏容器 .lv-col 曾经一条样式都没有，
+     * 于是三张卡首尾相接（120+156=276、276+289=565），而这件事**所有门禁都看不见**：
+     * 带与栏宽都对，卡片张数与标题也都对，只有卡与卡之间那条缝没有人量。
+     * 这里按「同一个父节点下、左边对齐、上下相邻的两张卡」量缝，小于 8 就算贴住。
+     */
+    stackTight: (() => {
+      const out = [];
+      const boxes = [...document.querySelectorAll('.pt-cards')]
+        .filter((el) => !el.parentElement?.closest('.pt-cards'));
+      for (const box of boxes) {
+        const byParent = new Map();
+        for (const panel of box.querySelectorAll('.pt-panel')) {
+          /*
+           * 隐藏的卡不算。站点详情按分区用 v-show 藏掉非当前分区的卡，
+           * display:none 的元素 rect 全是 0 —— 两张藏起来的卡之间「只隔 0」，
+           * 那是这条断言自己的假阳性，不是缺陷。
+           */
+          const r = panel.getBoundingClientRect();
+          if (r.height === 0 || r.width === 0) continue;
+          if (getComputedStyle(panel).display === 'none') continue;
+          const list = byParent.get(panel.parentElement) ?? [];
+          list.push(panel);
+          byParent.set(panel.parentElement, list);
+        }
+        for (const list of byParent.values()) {
+          if (list.length < 2) continue;
+          const rows = list
+            .map((el) => ({ el, r: el.getBoundingClientRect() }))
+            .sort((a, b) => a.r.top - b.r.top);
+          for (let i = 1; i < rows.length; i += 1) {
+            const prev = rows[i - 1];
+            const cur = rows[i];
+            /* 只比同一列里上下相邻的两张：并排的两栏不该参与 */
+            if (Math.abs(prev.r.left - cur.r.left) > 4) continue;
+            const gap = Math.round(cur.r.top - prev.r.bottom);
+            if (gap < 8) {
+              const title = (cur.el.querySelector('.pt-panel__title')?.textContent ?? '').trim();
+              /* 这段身处 MEASURE 的模板字符串内部，不能再用反引号 */
+              out.push((title || '无标题卡') + ' 与上一张只隔 ' + gap);
+            }
+          }
+        }
+      }
+      return out;
+    })(),
+    /*
+     * 状态栏右端的下载器身份格（画板 statusbar 的「qb-main · 已连接 · v2.9.3」）。
+     * 它是外壳构件，每条路由都该在 —— 之前这一格既没实现也没人量，
+     * 而偏离表里却写着「已落」。
+     */
+    /*
+     * rail 上的快捷入口。画板 01/D.rail 明确画了八个快捷入口加一个运行日志入口，
+     * 而落地在导航列钉住时把它们全藏了（用户验收退回过「有些重复了吧」）。
+     * 这里照画板量，红了就去偏离表里读原因 —— 让这条偏离在验收里露头，
+     * 而不是只写在文档某一节里。
+     */
+    railItems: [...document.querySelectorAll('.pt-rail__item')].filter(
+      (el) => getComputedStyle(el).display !== 'none',
+    ).length,
+    navDocked: document.querySelector('.pt-shell')?.classList.contains('is-nav-docked') ?? false,
+    statusDl: (() => {
+      const el = document.querySelector('.pt-status__dl');
+      return el ? (el.textContent ?? '').replace(/\\s+/g, ' ').trim() : null;
+    })(),
     overflow: inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0,
     unknown: [...new Set([...document.querySelectorAll('*')]
       .filter((el) => el instanceof HTMLUnknownElement)
@@ -625,9 +761,40 @@ for (const route of routes) {
     failures.push({ route, board: want.board, key, msg });
   };
 
+  /*
+   * 交互探针。**放在静态测量之后**：探针会点控件、改页面状态，跑在前面会把带与卡片的
+   * 量测结果搅乱。带与栏宽量的是「构成对不对」，量不到「点下去有没有用」——
+   * 一次评审正是指出分类分段器对没有分类的站点不起作用，而验收从不点它。
+   */
+  for (const probe of want.probes ?? []) {
+    const outcome = await ev(probe.js).catch((e) => `probe 失败：${e.message}`);
+    const text = typeof outcome === "string" ? outcome : JSON.stringify(outcome);
+    if (!text.includes(probe.want)) {
+      fail(`probe(${probe.desc})`, `期望结果里含「${probe.want}」，实测 ${text}`);
+    }
+  }
+
   for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
   if (got.overflow > 0) fail("overflow", `主区横向溢出 ${got.overflow}px`);
   if (got.unknown.length > 0) fail("unknown", `未解析组件 ${got.unknown.join(", ")}`);
+  for (const tight of got.stackTight) fail("cards.gap", `卡片贴在一起（画板卡间 16）：${tight}`);
+  /*
+   * 状态栏那一格。画板给的是「名称 · 连接态 · 版本」，版本后端没有字段（见 ALLOWED_GAPS），
+   * 所以这里只要求名称与连接态，并且连接态必须是真判出来的 —— 假数据里默认下载器可达，
+   * 量到「未知」就说明这一格的判定链断了（比如 reachable 字段没读对）。
+   */
+  /*
+   * rail 的快捷入口。只在导航列钉住时才判：导航列收起时它们本来就该出现（也确实出现），
+   * 画板画的是「两者同时在」，这一条就是那个差异。
+   */
+  if (got.navDocked && got.railItems < 9)
+    fail(
+      "rail.items",
+      `导航列钉住时 rail 上可见的快捷入口只有 ${got.railItems} 个，画板画了 8 个快捷入口 + 1 个运行日志入口`,
+    );
+  if (got.statusDl === null) fail("statusbar.dl", "状态栏右端没有下载器身份格");
+  else if (!got.statusDl.includes("qb-main") || !got.statusDl.includes("已连接"))
+    fail("statusbar.dl", `状态栏那格是「${got.statusDl}」，画板要「名称 · 连接态」`);
 
   // 页头：画板里除 KPI 页与搜索页之外，每页都是 64（详情页 88）
   if (want.ownHead === "kpi") {
@@ -837,11 +1004,63 @@ const MOBILE_EXPECT = {
     /* 画板 31 是一条 294×30 的分段器 */
     filterRowH: 30,
   },
-  "/sites/M-Team": { board: 32, title: "M-Team", sub: true },
-  "/chatops/notifications": { board: 33, title: "消息通知", sub: true },
-  "/logs": { board: 35, title: "运行日志", sub: true },
-  /* 画板 34「我的」在产品里没有对应路由（折成了上拉面板），换成 §9 的 KPI 2×2 规则 */
-  "/userinfo": { board: "§9", title: "用户统计", kpiCols: 2, activeTab: "概览" },
+  "/sites/M-Team": {
+    board: 32,
+    title: "M-Team",
+    sub: true,
+    /* 画板 32：bn 横幅 + tabs + p-kv / p-rss / p-act 三张卡 */
+    minBlocks: 4,
+    anchors: ["站点凭据", "保号规则"],
+  },
+  "/chatops/notifications": {
+    board: 33,
+    title: "消息通知",
+    sub: true,
+    /* 画板 33：ch-0…3 四张通道卡 + 「最近投递」小节 */
+    minBlocks: 4,
+    anchors: ["投递策略", "最近的通知"],
+  },
+  "/logs": {
+    board: 35,
+    title: "运行日志",
+    sub: true,
+    /* 画板 35：seg + file + lg 正文 + kv */
+    minBlocks: 3,
+    anchors: ["日志文件", "级别筛选", "轮转归档"],
+  },
+  /*
+   * 画板 34「我的」在产品里没有对应路由：它是个设置聚合页，落地折成了底栏「我的」tab
+   * 打开的上拉面板。所以这一格挂在 /userinfo（概览 tab 指向的路由）上，
+   * 既验 §9 的 KPI 2×2，又把面板点开验画板 34 的内容 —— 否则画板 34 等于没进验收。
+   */
+  "/userinfo": {
+    board: "§9 + 34",
+    title: "用户统计",
+    kpiCols: 2,
+    activeTab: "概览",
+    probes: [
+      {
+        desc: "点底栏「我的」打开画板 34 的设置聚合面板",
+        /* 画板 34 的三组：通知与 ChatOps / 站点与下载 / 系统；外加偏好与退出 */
+        want: "系统|ChatOps|偏好",
+        js: `(async () => {
+          const tab = [...document.querySelectorAll('.pt-mnav__tab')]
+            .find((b) => (b.textContent ?? '').includes('我的'));
+          if (!tab) return 'no-tab';
+          tab.click();
+          await new Promise((r) => setTimeout(r, 700));
+          const sheet = document.querySelector('.pt-msheet');
+          if (!sheet) return 'no-sheet';
+          const text = (sheet.textContent ?? '').replace(/\\s+/g, ' ');
+          const groups = [...sheet.querySelectorAll('.pt-msheet__title')]
+            .map((el) => (el.textContent ?? '').trim());
+          const hasPrefs = text.includes('明亮') || text.includes('黑暗') || text.includes('主题');
+          return groups.join('|') + (hasPrefs ? '|偏好' : '') + '|项 ' +
+            sheet.querySelectorAll('.pt-msheet__item').length;
+        })()`,
+      },
+    ],
+  },
 };
 
 const MEASURE_M = `(() => {
@@ -857,25 +1076,54 @@ const MEASURE_M = `(() => {
     title: txt('.pt-mchrome__title'),
     sub: txt('#pt-mhead-sub'),
     /*
-     * 顶栏图标钮量的是**命中区**，不是可见方块。画板给 30×30，而 §9 要 ≥44×44，
-     * 两者只能用「方块 30 + ::before 外扩到 44」同时满足 —— 伪元素量不到尺寸，
-     * 所以从中心朝四个方向各打一个 21px 的点，看命中的还是不是这个钮自己。
+     * 顶栏图标钮：可见方块按画板是 30×30，而 §9 要求命中区 ≥44×44。两者只能靠
+     * 「方块 30 + ::before 四周外扩 7」同时满足，所以这里把外扩量算进来：
+     * 命中宽 = 方块宽 + |左| + |右|，高同理。
+     *
+     * 为什么不用 elementFromPoint 打点：那个结果取决于那一刻谁在最上层 ——
+     * 桌面那一轮留在 body 上的 popper/tooltip 会在切到 375 之后盖住顶栏一角，
+     * 于是同一份代码在整轮跑里通过、只跑三条路由时失败。几何算法没有这个问题。
      */
     icons: [...document.querySelectorAll('.pt-mchrome__icon')].map((el) => {
       const r = el.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-      const owns = (x, y) => {
-        const hit = document.elementFromPoint(x, y);
-        return Boolean(hit && (hit === el || el.contains(hit)));
+      const before = getComputedStyle(el, '::before');
+      const grow = (side) => {
+        if (before.content === 'none') return 0;
+        const v = parseFloat(before[side]);
+        /* 只有负的 inset 才是往外扩；正数是往里缩，不该算进命中区 */
+        return Number.isFinite(v) && v < 0 ? -v : 0;
       };
       return {
         label: el.getAttribute('aria-label') ?? '',
         w: Math.round(r.width),
         h: Math.round(r.height),
-        touch: owns(cx, cy - 21) && owns(cx, cy + 21) && owns(cx - 21, cy) && owns(cx + 21, cy),
+        touchW: Math.round(r.width + grow('left') + grow('right')),
+        touchH: Math.round(r.height + grow('top') + grow('bottom')),
       };
     }),
+    /*
+     * 内容列里的块：卡、行卡、以及显式标了 data-card 的块。
+     * 画板 30–35 的内容列一律 343 宽，块数各页不同 —— 只量「有没有 343 宽的块、够不够数」，
+     * 不量每块的高度：高度跟着真实数据变。
+     */
+    blocks: (() => {
+      const set = new Set(document.querySelectorAll('.pt-panel, .pt-rowcard, [data-card]'));
+      /*
+       * 手搓卡也算一块。通知页的四张通道卡是 .ch-card 而不是 PtPanel ——
+       * 只认 PtPanel 的话这一页在移动端会少数四块，断言就成了假红。
+       * 口径与桌面那份一致：卡片层的直接子节点里，自己不含 PtPanel 的也算一块。
+       */
+      for (const box of document.querySelectorAll('.pt-cards')) {
+        for (const child of box.children) {
+          if (child.querySelector('.pt-panel')) continue;
+          set.add(child);
+        }
+      }
+      return [...set]
+        .filter((el) => getComputedStyle(el).display !== 'none')
+        .map((el) => Math.round(el.getBoundingClientRect().width))
+        .filter((w) => w > 4);
+    })(),
     /* 工具栏带：画板 30 的筛选是一排 26 高的 chip，31 是一条 30 高的分段器 */
     toolbar: one('.pt-band--toolbar'),
     /* 行卡里有没有柱图（画板 30 的行卡带 120×18 的 8 根柱） */
@@ -932,6 +1180,8 @@ const MEASURE_M = `(() => {
     kpiNoBars: [...document.querySelectorAll('.pt-kpi__cell')]
       .filter((el) => !el.querySelector('.pt-kpi__bars'))
       .map((el) => (el.querySelector('.pt-kpi__label')?.textContent ?? '').trim()),
+    /* 内容区文本：用来核对画板上那几块的标题真的在（不必逐块定位） */
+    text: (document.querySelector('.pt-shell__content')?.textContent ?? '').replace(/\\s+/g, ' '),
     /* 整页横向溢出：手机上出现横向滚动条等于这块画板完全不成立 */
     docOverflow: document.documentElement.scrollWidth - window.innerWidth,
     unknown: [...new Set([...document.querySelectorAll('*')]
@@ -969,6 +1219,17 @@ if (mobileRoutes.length > 0) {
 
     for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
     if (got.docOverflow > 0) fail("overflow", `整页横向溢出 ${got.docOverflow}px`);
+    /*
+     * 交互探针放在静态测量之后：它会点控件、开浮层，跑在前面会把量测搅乱。
+     * want 里可以写多个候选（用 | 分隔），命中任一个即通过。
+     */
+    for (const probe of want.probes ?? []) {
+      const outcome = await ev(probe.js).catch((e) => `probe 失败：${e.message}`);
+      const text = typeof outcome === "string" ? outcome : JSON.stringify(outcome);
+      const missing = probe.want.split("|").filter((w) => !text.includes(w));
+      if (missing.length > 0)
+        fail(`probe(${probe.desc})`, `结果里缺「${missing.join("、")}」，实测 ${text}`);
+    }
     if (got.unknown.length > 0) fail("unknown", `未解析组件 ${got.unknown.join(", ")}`);
     if (got.deskVisible.length > 0)
       fail("shell", `375 下桌面外壳没让位：${got.deskVisible.join(" / ")}`);
@@ -991,7 +1252,11 @@ if (mobileRoutes.length > 0) {
     for (const icon of got.icons) {
       if (!near(icon.w, 30, 2) || !near(icon.h, 30, 2))
         fail(`topbar.icon(${icon.label})`, `钮 ${icon.w}×${icon.h}，画板 30×30`);
-      if (!icon.touch) fail(`topbar.touch(${icon.label})`, "命中区不足 44×44（§9 的触控目标下限）");
+      if (icon.touchW < 44 || icon.touchH < 44)
+        fail(
+          `topbar.touch(${icon.label})`,
+          `命中区 ${icon.touchW}×${icon.touchH}，§9 的触控目标下限是 44×44`,
+        );
     }
     for (const label of ["种子搜索", "消息通知"]) {
       if (!got.icons.some((i) => i.label.includes(label)))
@@ -1036,6 +1301,18 @@ if (mobileRoutes.length > 0) {
       if (!near(got.inner.w, wantW)) fail("inner.w", `内容列宽 ${got.inner.w}，画板 ${wantW}`);
     }
 
+    if (want.minBlocks) {
+      const wide = got.blocks.filter((w) => near(w, M_VIEWPORT.width - M_INNER_X * 2));
+      if (wide.length < want.minBlocks)
+        fail(
+          "blocks",
+          `内容列只有 ${wide.length} 个 343 宽的块，画板至少 ${want.minBlocks} 个；实测宽度 ${got.blocks.join(" / ")}`,
+        );
+    }
+    for (const anchor of want.anchors ?? []) {
+      if (!got.text.includes(anchor))
+        fail(`anchors(${anchor})`, `画板这一块上有「${anchor}」，页面上找不到`);
+    }
     if (want.rowCards && got.rowCards < want.rowCards)
       fail("rowCards", `只有 ${got.rowCards} 张行卡，§9 要求表格降级成行卡`);
     /*
@@ -1071,8 +1348,21 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
 for (const f of failures) {
   console.log(`✗ ${f.route.padEnd(28)} [画板 ${f.board}] ${f.key}: ${f.msg}`);
 }
+/*
+ * 同一条原因会被很多路由触发（rail 那条外壳级偏离每页都量得到），逐条打出来是 21 行
+ * 一样的话，真正的信息反而被埋了。按原因归并，列出受影响的检查项。
+ */
+const byReason = new Map();
 for (const k of gapsUsed) {
-  console.log(`· 已记偏离 ${k} —— ${ALLOWED_GAPS[k]}`);
+  const reason = ALLOWED_GAPS[k];
+  const list = byReason.get(reason) ?? [];
+  list.push(k);
+  byReason.set(reason, list);
+}
+for (const [reason, keys] of byReason) {
+  const where =
+    keys.length > 3 ? `${keys.length} 条路由的 ${keys[0].split(" ")[1]}` : keys.join("、");
+  console.log(`· 已记偏离 ${where} —— ${reason}`);
 }
 for (const k of stale) {
   console.log(`? 偏离登记多余（这一项其实已经对上了，删掉它）：${k}`);

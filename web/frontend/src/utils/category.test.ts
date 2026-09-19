@@ -8,10 +8,12 @@
  * 误收 `TV游戏` 进剧集」，而当时的假数据只给了刚好能命中的「电影/剧集/动漫」，
  * 所以零偏离是假证明。这条测试就是补这个洞：漏收与误收各覆盖到。
  *
- * 第三个洞同理：`bucketOfItem` 的标签兜底原来是用 `["movie","1990s"]` 证明的，
- * 那是造出来刚好能命中的形状。Gazelle 站点的真实形状在
- * site/v2/definitions/mooko_fixture_test.go：tags 是 `["剧情","悬疑","传记"]` 这种题材词，
- * 一个都归不进桶。所以这里钉的是真实形状 → unknown，且 unknown 不能被筛掉。
+ * 第三个洞同理：标签兜底原来是用 `["movie","1990s"]` 证明的，那是造出来刚好能命中的形状。
+ * Gazelle 站点的真实形状在 site/v2/definitions/mooko_fixture_test.go：
+ * tags 是 `["剧情","悬疑","传记"]` 这种题材词，一个都归不进桶。
+ * 所以这里钉的是真实形状 → unknown；而 unknown 在筛选里**默认丢掉、可显式请回** ——
+ * 一度改成「无条件留下」，评审指出那只是把「所有档位下消失」换成「所有档位下都出现」，
+ * 分段器对这类站点照样不起作用。
  */
 import { describe, expect, it } from "vitest";
 
@@ -162,7 +164,7 @@ describe("verdictOfItem：分类优先、标签兜底，且分「站点没给」
   });
 });
 
-describe("matchesCategory：只丢 other，留 unknown", () => {
+describe("matchesCategory：默认严格筛，unknown 要显式请回", () => {
   it("选「全部」时全留，连 other 也留", () => {
     expect(matchesCategory({ category: "纪录片" }, "")).toBe(true);
     expect(matchesCategory({ tags: ["剧情"] }, "")).toBe(true);
@@ -178,10 +180,21 @@ describe("matchesCategory：只丢 other，留 unknown", () => {
     expect(matchesCategory({ category: "TV游戏" }, "tv")).toBe(false);
   });
 
-  it("站点没给分类的留下 —— 否则 MooKo 的结果一选档位就整片消失", () => {
+  /*
+   * 默认丢掉没有分类的行：留着的话档位对 Gazelle 那类站点等于没作用 ——
+   * 一条 MooKo 的结果会在电影、剧集、动漫、音乐四个档位下全部出现。
+   */
+  it("默认把「站点没给分类」的行也筛掉，四个档位都不出现", () => {
     const mooko = { category: "", tags: ["剧情", "悬疑", "传记"] };
-    expect(matchesCategory(mooko, "movie")).toBe(true);
-    expect(matchesCategory(mooko, "music")).toBe(true);
-    expect(matchesCategory(mooko, "anime")).toBe(true);
+    for (const bucket of ["movie", "tv", "anime", "music"] as const) {
+      expect(matchesCategory(mooko, bucket)).toBe(false);
+    }
+  });
+
+  it("includeUnknown 打开时请回来 —— 但 other 仍然不回来", () => {
+    const mooko = { category: "", tags: ["剧情", "悬疑", "传记"] };
+    expect(matchesCategory(mooko, "music", { includeUnknown: true })).toBe(true);
+    /* 站点明确表过态的不属于「信息缺失」，开关管不到它 */
+    expect(matchesCategory({ category: "纪录片" }, "movie", { includeUnknown: true })).toBe(false);
   });
 });

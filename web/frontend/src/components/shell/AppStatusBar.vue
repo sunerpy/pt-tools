@@ -36,7 +36,12 @@ const schedulerColor = computed(() => {
  *
  * 名称取 `/api/downloaders` 里 is_default 的那台 —— 这个接口纯读库、不碰下载器，
  * 而且后端已经把密码剔掉了。
- * 连接态取 transfer-stats 明细里有没有这台（见 DownloaderTransferStatItem 的注释）。
+ *
+ * 连接态取 transfer-stats 明细里这一台的 `reachable`。
+ * **不能拿「在不在明细数组里」当连接态**：后端只要能取到实例就会 append 这一条，
+ * 取数失败时各字段留零值；实例可能是缓存来的，Transmission 的实现在普通 RPC 失败后
+ * 也不清 healthy 标志 —— 那样一台断线的客户端会被显示成「已连接」。这是评审查出来的
+ * 真缺陷，后端为此补了显式的 reachable 字段（见 api_downloader_torrents.go）。
  *
  * 刻意不碰 `/api/downloaders/{id}/health`：那个接口每次都真去连下载器。状态条是
  * 常驻构件，把它挂进轮询等于每拍额外拨一次下载器；下载器离线时请求会挂住，而浏览器
@@ -79,7 +84,9 @@ async function probeLink() {
     const stats = await downloaderTorrentsApi.transferStats(
       AbortSignal.timeout(LINK_PROBE_TIMEOUT_MS),
     );
-    defaultOnline.value = stats.downloaders.some((d) => d.downloader_id === dl.id);
+    const mine = stats.downloaders.find((d) => d.downloader_id === dl.id);
+    /* 明细里没有这一台 = 这一轮连实例都没取到，同样算没连上（不是「未知」） */
+    defaultOnline.value = mine ? mine.reachable : false;
   } catch {
     defaultOnline.value = null;
   } finally {
@@ -132,8 +139,8 @@ const linkColor = computed(() => {
 const linkTip = computed(() => {
   if (linkState.value === "disabled") return "默认下载器已停用，传输统计不包含它";
   if (linkState.value === "unknown") return "连接态未知：最近一次传输统计没有成功返回";
-  if (linkState.value === "online") return "默认下载器 · 最近一次传输统计取到了它";
-  return "默认下载器 · 最近一次传输统计没取到它";
+  if (linkState.value === "online") return "默认下载器 · 最近一次传输统计真的取到了它的数据";
+  return "默认下载器 · 最近一次传输统计没能从它取到数据";
 });
 
 /** 与旧页脚同一套算法：取浏览器年份与构建年份的较大值，机器时钟偏早时不显示过去的年份 */

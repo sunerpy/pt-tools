@@ -439,6 +439,25 @@ export const FIXTURES = [
       total_session_uploaded: 9 * 1024 ** 3,
       total_session_downloaded: 22 * 1024 ** 3,
       total_free_space: 1.8 * TB,
+      /*
+       * 逐台明细。**必须有**：状态栏右端那格（画板 statusbar 的「名称 · 连接态」）
+       * 就靠这里的 reachable 判连接态，数组缺了的话它永远显示「未知」，
+       * 那一格等于没进验收。第二台故意给不可达，覆盖「取到实例但连不上」这条路径。
+       */
+      downloaders: DOWNLOADERS.map((d, i) => ({
+        downloader_id: d.id,
+        downloader_name: d.name,
+        downloader_type: d.type,
+        upload_speed: i === 0 ? 27_000_000 : 1_300_000,
+        download_speed: i === 0 ? 93_800_000 : 4_600_000,
+        uploaded: i === 0 ? 380 * TB : 32 * TB,
+        downloaded: i === 0 ? 62 * TB : 16 * TB,
+        session_uploaded: 8 * 1024 ** 3,
+        session_downloaded: 20 * 1024 ** 3,
+        free_space: i === 0 ? 1.6 * TB : 0.2 * TB,
+        reachable: i === 0,
+        error: i === 0 ? undefined : "dial tcp 10.0.0.9:9091: connect: connection refused",
+      })),
     },
   ],
   ["/api/downloader-torrents/meta", { categories: ["电影", "剧集"], tags: ["MT", "HDS"] }],

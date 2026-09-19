@@ -385,6 +385,58 @@ func TestDownloaderTransferStats_WithStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
 	server.apiDownloaderTransferStats(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp DownloaderTransferStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Downloaders, 1)
+	assert.True(t, resp.Downloaders[0].Reachable)
+	assert.Empty(t, resp.Downloaders[0].Error)
+}
+
+// 两个探测都失败时，条目照样会被追加（前端要按台显示），但必须自报没连上。
+//
+// 这是一次评审指出的真缺陷：状态栏原来靠「这台出现在 downloaders 里」判「已连接」，
+// 而这个循环只要拿到实例就 append —— 取不到数据时各字段留零值。
+// acquireDownloader 可能命中缓存实例，Transmission 的实现在普通 RPC 失败后也不清
+// healthy 标志，于是一台断线的客户端照样被显示成「已连接」。
+func TestDownloaderTransferStats_UnreachableIsReported(t *testing.T) {
+	fake := &fakeDownloader{
+		statusErr:    assertErr("dial tcp: connection refused"),
+		freeSpaceErr: assertErr("dial tcp: connection refused"),
+	}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+	server.apiDownloaderTransferStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp DownloaderTransferStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Downloaders, 1, "取不到数据也要报这一台，否则前端分不清「没配」和「连不上」")
+	assert.False(t, resp.Downloaders[0].Reachable)
+	assert.Contains(t, resp.Downloaders[0].Error, "connection refused")
+	assert.Zero(t, resp.TotalUploadSpeed)
+}
+
+// 只有剩余空间失败时仍算连得上：有的客户端拿不到磁盘信息，但机器是活的。
+func TestDownloaderTransferStats_FreeSpaceOnlyFailureStaysReachable(t *testing.T) {
+	fake := &fakeDownloader{
+		status:       downloader.ClientStatus{UpSpeed: 1},
+		freeSpaceErr: assertErr("no such method"),
+	}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+	server.apiDownloaderTransferStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp DownloaderTransferStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Downloaders, 1)
+	assert.True(t, resp.Downloaders[0].Reachable)
+	assert.Zero(t, resp.Downloaders[0].FreeSpace)
 }
 
 // ==== merged from api_downloader_torrents_cov5_test.go ====

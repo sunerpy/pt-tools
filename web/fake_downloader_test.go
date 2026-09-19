@@ -18,6 +18,8 @@ type fakeDownloader struct {
 	files    []downloader.TorrentFile
 	trackers []downloader.TorrentTracker
 
+	statusErr      error
+	freeSpaceErr   error
 	listErr        error
 	getErr         error
 	pauseErr       error
@@ -36,11 +38,11 @@ func (f *fakeDownloader) Authenticate() error               { return nil }
 func (f *fakeDownloader) Ping() (bool, error)               { return true, nil }
 func (f *fakeDownloader) GetClientVersion() (string, error) { return "test", nil }
 func (f *fakeDownloader) GetClientStatus() (downloader.ClientStatus, error) {
-	return f.status, nil
+	return f.status, f.statusErr
 }
 
 func (f *fakeDownloader) GetClientFreeSpace(_ context.Context) (int64, error) {
-	return f.freSpace, nil
+	return f.freSpace, f.freeSpaceErr
 }
 
 func (f *fakeDownloader) GetIncompletePendingBytes(_ context.Context) (int64, error) {

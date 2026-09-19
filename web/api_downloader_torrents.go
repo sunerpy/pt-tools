@@ -1084,6 +1084,15 @@ type DownloaderTransferStatItem struct {
 	SessionUploaded   int64  `json:"session_uploaded"`
 	SessionDownloaded int64  `json:"session_downloaded"`
 	FreeSpace         int64  `json:"free_space"`
+	// Reachable 表示这一轮是否真的从这台下载器取到了数据（状态或剩余空间任一成功）。
+	//
+	// 为什么必须显式给出：本条目**只要能取到实例就会被追加**，取数失败时各字段留零值。
+	// 于是「出现在 downloaders 里」只证明实例构造成功，不证明客户端连得上 ——
+	// acquireDownloader 可能命中缓存实例，Transmission 的实现在普通 RPC 网络失败后
+	// 也不会清掉缓存的 healthy 标志。前端曾据此显示「已连接」，那是会说谎的。
+	Reachable bool `json:"reachable"`
+	// Error 是这一轮失败的原因（取到数据时为空）。给人看的诊断，不参与聚合。
+	Error string `json:"error,omitempty"`
 }
 
 func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Request) {
@@ -1134,6 +1143,13 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		freeSpace, fsErr := dl.GetClientFreeSpace(ctx)
 		if fsErr == nil {
 			item.FreeSpace = freeSpace
+		}
+
+		// 两个探测任一成功就算连得上：有的客户端（或权限配置）拿不到剩余空间，
+		// 但状态照样能回，那台机器是活的。两个都失败才是「这一轮没连上」。
+		item.Reachable = statusErr == nil || fsErr == nil
+		if !item.Reachable {
+			item.Error = statusErr.Error()
 		}
 
 		resp.TotalUploadSpeed += item.UploadSpeed
