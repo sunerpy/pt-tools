@@ -584,9 +584,17 @@ func TestApiTaskStats(t *testing.T) {
 	srv := setupServer(t)
 	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
 
+	/*
+	 * 「今天」必须按本地零点算，不能拿 now-2h 凑。
+	 *
+	 * 原先写的是 now.Add(-2 * time.Hour)：在 00:00–02:00 之间跑，这个时间点落在**昨天**，
+	 * 于是「今日推送」数成 0，测试每天凌晨那两小时必然失败。实测在 01:28 复现。
+	 * 现在贴着本地零点取，任何时刻跑都落在今天。
+	 */
 	now := time.Now()
-	todayPush := now.Add(-2 * time.Hour)
-	oldPush := now.AddDate(0, 0, -3)
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayPush := startOfToday.Add(time.Second)
+	oldPush := startOfToday.AddDate(0, 0, -3)
 
 	rows := []*models.TorrentInfo{
 		// 活跃 + 免费 + 今天推的

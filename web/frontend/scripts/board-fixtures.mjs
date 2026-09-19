@@ -738,12 +738,52 @@ export function emptyStubScript() {
 })()`;
 }
 
+/*
+ * 少数接口必须**按查询参数回不同的东西**。
+ *
+ * 默认的假数据是静态的：同一个路径永远回同一坨 JSON。对大多数页面够用，但它让
+ * 「这枚筛选到底有没有在筛」变成测不出来的事 —— 上一轮审计页那条探针就是这么变成假绿的：
+ * 说明写「按前缀筛」，而因为假数据不认 result 参数，能断言的只剩胶囊颜色。
+ *
+ * 所以这里给需要的路径挂一个过滤函数，**照服务端的语义写**（结果按前缀匹配、
+ * 通道走别名归一，见 internal/app/audit_service.go）。它测的是前端有没有把对的参数发出去、
+ * 并把回来的行画对；服务端那一侧由 Go 测试用生产值覆盖。
+ */
+const QUERY_AWARE = {
+  "/api/chatops/audit": `(body, params) => {
+    const alias = { qq: 'qq_onebot', wecom: 'wecom_webhook' };
+    const list = (raw) => (raw ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+    let items = body.items;
+    const results = list(params.get('result'));
+    if (results.length > 0) {
+      items = items.filter((it) =>
+        results.some((w) => it.result === w || String(it.result).startsWith(w + ':')));
+    }
+    const channels = list(params.get('channel_type'))
+      .map((v) => alias[v.toLowerCase()] ?? v);
+    if (channels.length > 0) {
+      items = items.filter((it) => channels.includes(it.channel_type));
+    }
+    const q = (params.get('q') ?? '').trim().toLowerCase();
+    if (q) {
+      items = items.filter((it) =>
+        String(it.command).toLowerCase().includes(q) ||
+        String(it.channel_user_id).toLowerCase().includes(q));
+    }
+    return Object.assign({}, body, { items: items, total: items.length });
+  }`,
+};
+
 export function stubScript() {
   return `(() => {
   /* 无头 Chrome 里 document.hidden 恒为 true，靠可见性判断的定时刷新不会跑 */
   Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
   Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
   const table = ${JSON.stringify(FIXTURES.map(([prefix, body]) => [prefix, JSON.stringify(body)]))};
+  /* 按查询参数回不同内容的那几个路径（照服务端语义写，见 QUERY_AWARE 的注释） */
+  const queryAware = { ${Object.entries(QUERY_AWARE)
+    .map(([prefix, fn]) => `${JSON.stringify(prefix)}: ${fn}`)
+    .join(", ")} };
   /* 给验收脚本一个可探测的标记：它靠这个判断这一篇文档到底有没有铺上假数据 */
   window.__ptStub = true;
   const real = window.fetch;
@@ -755,7 +795,13 @@ export function stubScript() {
     if (method === 'GET' || method === 'POST') {
       for (const [prefix, body] of table) {
         if (path === prefix || path.startsWith(prefix + '/')) {
-          return Promise.resolve(new Response(body, {
+          let out = body;
+          const fn = queryAware[prefix];
+          if (fn && path === prefix) {
+            const qs = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
+            out = JSON.stringify(fn(JSON.parse(body), new URLSearchParams(qs)));
+          }
+          return Promise.resolve(new Response(out, {
             status: 200, headers: { 'Content-Type': 'application/json' },
           }));
         }

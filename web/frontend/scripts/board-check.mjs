@@ -662,14 +662,19 @@ const EXPECT = {
     /* 画板 25 的表头 */
     gridColumns: ["时间", "通道", "触发用户", "命令", "结果", "延迟"],
     /*
-     * 结果分段要真的按**生产里的值**筛。库里存的是 denied:not_bound / error:lookup_binding
-     * 这种带原因后缀的串，只有 success 是裸值 —— 按等值筛「被拒绝」一行都命中不到，
-     * 而界面上会写成「被拒绝：0 条」，读起来像真的没有被拒记录。
-     * 假数据现在铺的正是带后缀的形式，所以这条探针测得出前缀匹配有没有落地。
+     * 结果分段必须真的**少掉行**，而不只是换个颜色。
+     *
+     * 这条探针的第一版是假绿，评审判得对：说明写「按前缀筛」，而当时的假数据不认 result
+     * 参数（同一路径永远回同一坨 JSON），所以能断言的只剩胶囊颜色 —— 筛没筛压根测不到，
+     * `denied.length >= 0` 还恒为真。现在假数据按服务端语义认 result / channel_type
+     * （见 board-fixtures.mjs 的 QUERY_AWARE），行数因此真的会变，可以拿来断言。
+     *
+     * 库里存的是 denied:not_bound / error:lookup_binding 这种带原因后缀的串，
+     * 只有 success 是裸值 —— 分段发的是裸 denied，按等值筛会得零条。
      */
     probes: [
       {
-        desc: "结果分段按前缀筛（库里是 denied:not_bound 这种带后缀的串，等值筛会得零条）",
+        desc: "结果分段真的按前缀筛（行数要变成该档的条数，而不只是胶囊换色）",
         want: "verdict=ok",
         js: `(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -681,27 +686,35 @@ const EXPECT = {
             if (el) el.click();
             return Boolean(el);
           };
-          const cells = () => [...document.querySelectorAll('.pt-band--grid tbody tr')]
+          const rows = () => [...document.querySelectorAll('.pt-band--grid tbody tr')]
             .map((tr) => (tr.textContent ?? ''));
+          const all = rows();
+          /* 期望值从页面自己算：全部档里有几行是 denied:* / error:*，筛完就该剩几行 */
+          const wantDenied = all.filter((t) => t.includes('denied')).length;
+          const wantError = all.filter((t) => t.includes('error')).length;
+          if (wantDenied === 0 || wantError === 0) return 'no-sample:' + all.length;
           if (!pick('被拒绝')) return 'no-denied-seg';
-          await wait(800);
-          const denied = cells();
+          await wait(900);
+          const denied = rows();
+          if (!pick('出错')) return 'no-error-seg';
+          await wait(900);
+          const err = rows();
           if (!pick('全部')) return 'no-all-seg';
-          await wait(700);
-          const all = cells();
-          /*
-           * 假数据是静态的（接口不认 result 参数），所以这里不能断言行数变少 ——
-           * 能断言的是「界面把带后缀的串认成了被拒绝」：分段处在「被拒绝」时，
-           * 表里出现的 denied:* 行必须被画成 warn 色的胶囊而不是灰色。
-           */
+          await wait(900);
+          const back = rows();
+          /* 颜色也一起验：denied:* 要 warn、error:* 要 dang（按整串查会全落灰色） */
           const pills = [...document.querySelectorAll('.pt-band--grid tbody .pt-pill')];
-          const deniedPill = pills.find((p) => (p.textContent ?? '').includes('denied'));
-          const errorPill = pills.find((p) => (p.textContent ?? '').includes('error'));
-          const warnOk = deniedPill ? deniedPill.className.includes('warn') : false;
-          const dangOk = errorPill ? errorPill.className.includes('dang') : false;
-          return 'verdict=' + (warnOk && dangOk && denied.length >= 0 && all.length > 0 ? 'ok' : 'MISMATCH') +
-            ' denied 胶囊=' + (deniedPill?.className ?? 'none') +
-            ' error 胶囊=' + (errorPill?.className ?? 'none');
+          const dPill = pills.find((p) => (p.textContent ?? '').includes('denied'));
+          const ePill = pills.find((p) => (p.textContent ?? '').includes('error'));
+          const colorOk = Boolean(dPill && dPill.className.includes('warn')) &&
+            Boolean(ePill && ePill.className.includes('dang'));
+          const ok = denied.length === wantDenied && denied.every((t) => t.includes('denied')) &&
+            err.length === wantError && err.every((t) => t.includes('error')) &&
+            back.length === all.length && denied.length < all.length && colorOk;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
+            ' 全部 ' + all.length + ' / 被拒绝 ' + denied.length + '(期望 ' + wantDenied + ')' +
+            ' / 出错 ' + err.length + '(期望 ' + wantError + ') / 回到 ' + back.length +
+            ' 颜色 ' + (colorOk ? 'ok' : 'bad');
         })()`,
       },
     ],
