@@ -75,6 +75,30 @@ export function bucketOf(category: string | undefined | null): CategoryBucket {
   return "";
 }
 
+/**
+ * 按「分类 + 标签」归桶。
+ *
+ * 为什么要看标签：Gazelle 的搜索响应里**根本没有分类字段**
+ * （`site/v2/gazelle_driver.go` 的 ParseSearch 因此不填 `Category`），
+ * 它用 group 上的 `tags` 表达内容类型 —— 走 Gazelle 的站点（内置 MooKo）分类恒为空，
+ * 一选具体档位就被全部筛掉，画板那条分段器对它等于失效。
+ *
+ * 顺序是「分类优先、标签兜底」：分类是站点明确给出的归类，比标签准。
+ * 标签里归不进任何桶的（音乐站的流派标签 electronic / jazz 之类）照旧返回空串。
+ */
+export function bucketOfItem(item: {
+  category?: string | null;
+  tags?: string[] | null;
+}): CategoryBucket {
+  const byCategory = bucketOf(item.category);
+  if (byCategory) return byCategory;
+  for (const tag of item.tags ?? []) {
+    const byTag = bucketOf(tag);
+    if (byTag) return byTag;
+  }
+  return "";
+}
+
 /** 桶 ID → 给人看的标签。用于「已保存的搜索」那类要回显条件的地方 */
 export function categoryLabel(bucket: string | undefined): string {
   if (!bucket) return LABEL_OF[""];

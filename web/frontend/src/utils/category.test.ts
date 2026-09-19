@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { bucketOf, categoryLabel, CATEGORY_OPTIONS } from "./category";
+import { bucketOf, bucketOfItem, categoryLabel, CATEGORY_OPTIONS } from "./category";
 
 describe("bucketOf：M-Team 的真实分类名", () => {
   it.each([
@@ -107,5 +107,30 @@ describe("categoryLabel", () => {
 describe("CATEGORY_OPTIONS", () => {
   it("就是画板 bar-88 的五档，顺序照画板", () => {
     expect(CATEGORY_OPTIONS.map((o) => o.label)).toEqual(["全部", "电影", "剧集", "动漫", "音乐"]);
+  });
+});
+
+describe("bucketOfItem：分类优先、标签兜底", () => {
+  it("有分类就用分类，不看标签", () => {
+    expect(bucketOfItem({ category: "电影/HD", tags: ["anime"] })).toBe("movie");
+  });
+
+  it("分类为空时看标签 —— Gazelle 的搜索响应没有分类字段", () => {
+    expect(bucketOfItem({ category: "", tags: ["movie", "1990s"] })).toBe("movie");
+    expect(bucketOfItem({ tags: ["tv.show"] })).toBe("tv");
+    expect(bucketOfItem({ tags: ["anime"] })).toBe("anime");
+  });
+
+  it("标签里归不进任何桶的（音乐站的流派标签）返回空串", () => {
+    expect(bucketOfItem({ tags: ["electronic", "jazz", "1980s"] })).toBe("");
+  });
+
+  it("分类与标签都没有时返回空串", () => {
+    expect(bucketOfItem({})).toBe("");
+    expect(bucketOfItem({ category: null, tags: null })).toBe("");
+  });
+
+  it("多个标签时取第一个能归桶的", () => {
+    expect(bucketOfItem({ tags: ["1990s", "comedy", "movie"] })).toBe("movie");
   });
 });

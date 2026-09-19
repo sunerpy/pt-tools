@@ -193,18 +193,25 @@ const SEARCH_RESULTS = Array.from({ length: 10 }, (_, i) => ({
    * 前者来自 mteamCategoryMap 与 HDDolby 的 getCategoryName，
    * 里面既有漏收过的（影剧/综艺、Animation）也有误收过的（TV游戏）。
    */
-  category: [
-    "电影/HD",
-    "影剧/综艺/HD",
-    "动画",
-    "Movies/UHD",
-    "TV/HD",
-    "Animation",
-    "音乐(无损)",
-    "TV游戏",
-    "纪录片",
-  ][i % 9],
-  tags: [],
+  category:
+    i % 3 === 1
+      ? ""
+      : [
+          "电影/HD",
+          "影剧/综艺/HD",
+          "动画",
+          "Movies/UHD",
+          "TV/HD",
+          "Animation",
+          "音乐(无损)",
+          "TV游戏",
+          "纪录片",
+        ][i % 9],
+  /*
+   * 每三条里有一条把分类留空、只给标签 —— Gazelle 的搜索响应就是这个形状
+   * （没有分类字段，内容类型在 group 的 tags 上）。
+   */
+  tags: i % 3 === 1 ? ["movie", "1990s"] : [],
 }));
 
 const SUPPORTED = SITES.map(([site], i) => ({

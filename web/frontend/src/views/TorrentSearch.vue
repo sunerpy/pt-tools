@@ -24,7 +24,13 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { bucketOf, CATEGORY_OPTIONS, type CategoryBucket, categoryLabel } from "@/utils/category";
+import {
+  bucketOf,
+  bucketOfItem,
+  CATEGORY_OPTIONS,
+  type CategoryBucket,
+  categoryLabel,
+} from "@/utils/category";
 import {
   loadSavedSearches,
   SAVED_MAX,
@@ -142,6 +148,9 @@ const CACHE_KEY = "pt-tools-search-cache";
  * 归桶规则与档位表在 `@/utils/category`，那里按各驱动**真实**会回的分类名写规则
  * （`影剧/综艺/HD`、`Animation`、`TV游戏` 这类），并有单测钉住漏收与误收两种情形 ——
  * 页内手写一版子串匹配已经错过一次。
+ *
+ * 筛选走 `bucketOfItem`（分类优先、标签兜底）而不是只看分类：Gazelle 的搜索响应里
+ * 没有分类字段，走 Gazelle 的站点分类恒为空，只看分类就会被这条分段器全部筛掉。
  */
 const activeCategory = ref<CategoryBucket>("");
 
@@ -356,7 +365,7 @@ const sortedResults = computed(() => {
 const filteredResults = computed(() => {
   let rows = sortedResults.value;
   if (activeCategory.value) {
-    rows = rows.filter((r) => bucketOf(r.category) === activeCategory.value);
+    rows = rows.filter((r) => bucketOfItem(r) === activeCategory.value);
   }
   if (freeOnly.value) {
     rows = rows.filter((r) => r.isFree);
