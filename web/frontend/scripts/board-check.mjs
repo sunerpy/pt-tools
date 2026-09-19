@@ -380,7 +380,8 @@ const EXPECT = {
       },
       {
         desc: "状态栏调度器浮层 = 画板 41 的 sched-pop（300 宽，含状态与同步口径）",
-        want: "宽 300|调度器|最后同步|停止所有任务|启动所有任务",
+        /* 胶囊里是状态本身（运行中 / 已停止 / 状态未知），不是又一遍「调度器」 */
+        want: "宽 300|调度器|状态未知|最后同步|停止所有任务|启动所有任务",
         js: `(async () => {
           const cell = document.querySelector('.pt-status__cell--btn');
           if (!cell) return 'no-cell';

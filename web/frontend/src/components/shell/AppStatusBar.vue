@@ -21,6 +21,13 @@ const schedulerIcon = computed(() => {
   return "activity";
 });
 
+/** 浮层里那枚胶囊的文案：只说状态本身 */
+const schedulerStateText = computed(() => {
+  if (runtimeStore.schedulerHint === "running") return "运行中";
+  if (runtimeStore.schedulerHint === "stopped") return "已停止";
+  return "状态未知";
+});
+
 /** 浮层里那枚状态胶囊的语义色（画板 41 的 sched-pop 顶部 pill） */
 const schedulerTone = computed<"ok" | "warn" | "neutral">(() => {
   if (runtimeStore.schedulerHint === "running") return "ok";
@@ -186,9 +193,11 @@ const year = computed(() => {
       <div class="pt-status__menu">
         <div class="pt-status__menu-head">
           <span class="pt-status__menu-t">调度器</span>
-          <PtStatusPill :tone="schedulerTone" size="sm">{{
-            runtimeStore.schedulerText
-          }}</PtStatusPill>
+          <!--
+            胶囊里只放状态，不放 schedulerText —— 后者在「还没拿到」时就是「调度器」四个字，
+            和左边的小标题一字不差，点开看到的是「调度器 调度器」。
+          -->
+          <PtStatusPill :tone="schedulerTone" size="sm">{{ schedulerStateText }}</PtStatusPill>
         </div>
         <p class="pt-status__menu-sync">
           最后同步 {{ runtimeStore.lastSyncText }} · 间隔 {{ runtimeStore.pollMinutes }} 分钟
