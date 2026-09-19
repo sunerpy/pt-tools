@@ -491,7 +491,9 @@ export const FIXTURES = [
         { length: 120 },
         (_, i) => `2026-09-19 01:0${i % 10}:00 INFO  示例日志第 ${i + 1} 行`,
       ),
-      path: "/config/.pt-tools/logs/app.log",
+      /* 与 /api/logs/files 里 is_active 的那个文件保持一致：两处不一样时页面上会出现
+         「顶栏说 all.log、工具栏说 app.log」这种自相矛盾的画面 */
+      path: "/config/.pt-tools/logs/all.log",
       truncated: false,
     },
   ],

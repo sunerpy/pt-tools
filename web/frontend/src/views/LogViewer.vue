@@ -580,6 +580,65 @@ function scrollToTop() {
   align-self: start;
 }
 
+/*
+ * 文件清单与归档列表（画板 29 的 p-files / p-arc）。
+ *
+ * 这几个类名之前只写在模板里，**一条样式都没有** —— 于是 <ul> 用浏览器默认的
+ * 圆点列表渲染，键和值之间没有间距，读出来是「当前文件all.log」「大小2.3 MB」。
+ * 移动端截图里一眼能看到，桌面验收查的是带与卡，量不到卡内部这种事。
+ */
+.lf {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lf__row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.lf__k {
+  flex: 0 0 auto;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/* 文件名当键用时它才是主角：左对齐、可省略，不跟着标签色 */
+.lf__k--file {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-family: var(--pt-font-mono, monospace);
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lf__v {
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  color: var(--pt-t1);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.lf__foot,
+.lf__empty {
+  margin: var(--pt-space-2) 0 0;
+  font-size: var(--pt-fz-label);
+  line-height: 1.6;
+  color: var(--pt-t3);
+}
+
 .lv {
   display: flex;
   flex-direction: column;
