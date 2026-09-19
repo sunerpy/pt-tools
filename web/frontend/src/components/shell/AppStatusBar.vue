@@ -6,6 +6,7 @@ import { useVersionStore } from "../../stores/version";
 import VersionChecker from "../VersionChecker.vue";
 import PtIcon from "../PtIcon";
 import PtStatusPill from "../ui/PtStatusPill.vue";
+import { type HeldVersion, nextHeldVersion, versionFor } from "./statusBarVersion";
 
 /**
  * 底部深色状态条（设计稿 G 的 `statusbar`，高 28）。
@@ -70,8 +71,17 @@ const LINK_PROBE_MIN_GAP_MS = 120_000;
 const LINK_PROBE_TIMEOUT_MS = 8_000;
 
 const defaultDownloader = ref<DownloaderSetting | null>(null);
-/** 默认下载器自报的版本。空串 = 还没问到（后端问不到时不返回这个字段） */
-const defaultVersion = ref("");
+/**
+ * 默认下载器自报的版本，**连着它属于哪一台一起记**。
+ *
+ * 只记一个字符串是会串台的：后端在问不到版本时合法地省掉这个字段，而换默认下载器时
+ * 身份会立刻更新 —— 于是「A 报过版本，切到问不到版本的 B」会显示成
+ * 「B · 状态 · A 的版本」。带上 id 之后，对不上就不画第三段。
+ */
+const defaultVersion = ref<HeldVersion | null>(null);
+
+/* 判定抽在 statusBarVersion.ts 里：那两条规则要能单测（见同名 .test.ts） */
+const versionText = computed(() => versionFor(defaultDownloader.value?.id, defaultVersion.value));
 /** null = 还没探到结论（未探过，或这一轮失败了） */
 const defaultOnline = ref<boolean | null>(null);
 let lastProbeAt = 0;
@@ -105,8 +115,11 @@ async function probeLink() {
     const mine = stats.downloaders.find((d) => d.downloader_id === dl.id);
     /* 明细里没有这一台 = 这一轮连实例都没取到，同样算没连上（不是「未知」） */
     defaultOnline.value = mine ? mine.reachable : false;
-    /* 版本问不到时后端不返回这个字段 —— 保留上一次问到的值，不要闪成空 */
-    if (mine?.client_version) defaultVersion.value = mine.client_version;
+    /*
+     * 版本问不到时后端不返回这个字段：保留**这一台**上一次问到的值，不要闪成空；
+     * 但一旦换了台，旧值就不能再用（versionText 按 id 比对）。
+     */
+    defaultVersion.value = nextHeldVersion(dl.id, mine?.client_version, defaultVersion.value);
   } catch {
     defaultOnline.value = null;
   } finally {
@@ -255,8 +268,7 @@ const year = computed(() => {
       <span class="pt-status__cell pt-status__dl" :class="{ 'is-stale': linkState === 'unknown' }">
         <PtIcon name="server" :size="13" :style="{ color: linkColor }" />
         <span class="pt-status__dl-text">
-          {{ defaultDownloader.name }} · {{ linkText
-          }}{{ defaultVersion ? ` · ${defaultVersion}` : "" }}
+          {{ defaultDownloader.name }} · {{ linkText }}{{ versionText ? ` · ${versionText}` : "" }}
         </span>
       </span>
     </el-tooltip>

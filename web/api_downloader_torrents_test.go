@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -417,6 +418,57 @@ func TestDownloaderTransferStats_UnreachableIsReported(t *testing.T) {
 	assert.False(t, resp.Downloaders[0].Reachable)
 	assert.Contains(t, resp.Downloaders[0].Error, "connection refused")
 	assert.Zero(t, resp.TotalUploadSpeed)
+}
+
+// 任务详情必须能从**前端真正用的那个地址**打开：路径形式
+// `/api/downloader-torrents/{downloader_id}/{task_id}`，而且要走真实 mux。
+//
+// 为什么这条测试必须存在：处理器原来只读查询串，于是真实入口恒定 400
+// 「downloader_id 和 task_id 不能为空」——「任务详情」在生产里根本打不开。
+// 而已有的成功用例是直接调处理器、用查询串传参的，正好绕过这个不一致。
+func TestDownloaderTorrentDetail_PathFormThroughMux(t *testing.T) {
+	fake := &fakeDownloader{torrents: sampleTorrents()}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	mux := http.NewServeMux()
+	server.registerDownloaderHubRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 会话 cookie：这些接口都在 s.auth 后面，直接往会话表里塞一条
+	const sid = "test-session"
+	server.sessions[sid] = "admin"
+	get := func(path string) *http.Response {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "session", Value: sid})
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		return resp
+	}
+
+	t.Run("路径形式（前端契约）", func(t *testing.T) {
+		resp := get("/api/downloader-torrents/1/" + url.PathEscape(sampleTorrents()[0].ID))
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "前端用的路径形式必须能取到详情")
+
+		var out TorrentDetailResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+		assert.Equal(t, sampleTorrents()[0].ID, out.Torrent.TaskID)
+	})
+
+	t.Run("查询串形式（保留给已有调用方）", func(t *testing.T) {
+		resp := get("/api/downloader-torrents/detail?downloader_id=1&task_id=" +
+			url.QueryEscape(sampleTorrents()[0].ID))
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("两者都没给才是 400", func(t *testing.T) {
+		resp := get("/api/downloader-torrents/detail")
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
 }
 
 // 版本号只问一次：它是画板 41 状态栏那格的第三段，而 GetClientVersion 在两个实现里

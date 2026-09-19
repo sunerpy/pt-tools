@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -367,14 +368,63 @@ func (s *Server) apiDownloaderCapabilities(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, DownloaderCapabilitiesResponse{Items: items})
 }
 
+// registerDownloaderHubRoutes 注册下载器控制台那一组接口。
+//
+// 单独抽出来是为了让测试能走**真实的 mux**：任务详情的地址是路径形式
+// `/api/downloader-torrents/{id}/{task_id}`，而处理器一度只读查询串 —— 直接调处理器的测试
+// 拿查询串传参，正好绕过了这个不一致，于是「详情打不开」在测试里看不出来。
+func (s *Server) registerDownloaderHubRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
+	mux.HandleFunc("/api/downloader-torrents/transfer-stats", s.auth(s.apiDownloaderTransferStats))
+	mux.HandleFunc("/api/downloader-torrents/capabilities", s.auth(s.apiDownloaderCapabilities))
+	mux.HandleFunc("/api/downloader-torrents/meta", s.auth(s.apiDownloaderTorrentMeta))
+	mux.HandleFunc("/api/downloader-torrents/batch-action", s.auth(s.apiDownloaderTorrentActions))
+	mux.HandleFunc("/api/downloader-torrents/add", s.auth(s.apiAddDownloaderTorrent))
+	mux.HandleFunc("/api/downloader-torrents/", s.auth(s.apiDownloaderTorrentDetail))
+}
+
+// detailTargetOf 解析任务详情的目标。
+//
+// 前端用的是**路径形式** `/api/downloader-torrents/{downloader_id}/{task_id}`
+// （api/index.ts 的 downloaderTorrentsApi.detail），而这个处理器原来只读查询串，
+// 于是真实入口恒定 400「downloader_id 和 task_id 不能为空」——「任务详情」在生产里
+// 根本打不开。两头从一开始就不一致（git blame 到 214b998），之所以一直没被发现：
+// 已有的成功用例直接调处理器并用查询串传参，绕过了 mux；浏览器验收那边又被假数据接住了。
+//
+// 两种形式都接：路径形式是前端契约，查询串形式保留给已有调用方与手工排查。
+func detailTargetOf(r *http.Request) (idStr, taskID string) {
+	idStr = strings.TrimSpace(r.URL.Query().Get("downloader_id"))
+	taskID = strings.TrimSpace(r.URL.Query().Get("task_id"))
+	if idStr != "" && taskID != "" {
+		return idStr, taskID
+	}
+
+	rest := strings.TrimPrefix(r.URL.Path, "/api/downloader-torrents/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 {
+		return idStr, taskID
+	}
+	if idStr == "" {
+		idStr = strings.TrimSpace(parts[0])
+	}
+	if taskID == "" {
+		// task_id 里可能有被转义的字符（前端用 encodeURIComponent 编过）
+		if decoded, err := url.PathUnescape(parts[1]); err == nil {
+			taskID = strings.TrimSpace(decoded)
+		} else {
+			taskID = strings.TrimSpace(parts[1])
+		}
+	}
+	return idStr, taskID
+}
+
 func (s *Server) apiDownloaderTorrentDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	downloaderIDStr := strings.TrimSpace(r.URL.Query().Get("downloader_id"))
-	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	downloaderIDStr, taskID := detailTargetOf(r)
 	if downloaderIDStr == "" || taskID == "" {
 		http.Error(w, "downloader_id 和 task_id 不能为空", http.StatusBadRequest)
 		return

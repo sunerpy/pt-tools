@@ -173,13 +173,7 @@ func (s *Server) Serve(addr string) error {
 	}
 
 	// Downloader Hub (mixed downloader management)
-	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
-	mux.HandleFunc("/api/downloader-torrents/transfer-stats", s.auth(s.apiDownloaderTransferStats))
-	mux.HandleFunc("/api/downloader-torrents/capabilities", s.auth(s.apiDownloaderCapabilities))
-	mux.HandleFunc("/api/downloader-torrents/meta", s.auth(s.apiDownloaderTorrentMeta))
-	mux.HandleFunc("/api/downloader-torrents/batch-action", s.auth(s.apiDownloaderTorrentActions))
-	mux.HandleFunc("/api/downloader-torrents/add", s.auth(s.apiAddDownloaderTorrent))
-	mux.HandleFunc("/api/downloader-torrents/", s.auth(s.apiDownloaderTorrentDetail))
+	s.registerDownloaderHubRoutes(mux)
 	// Torrent download proxy API
 	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
 	// Static UI - Vue 3 SPA
