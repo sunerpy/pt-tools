@@ -243,12 +243,21 @@ const SUPPORTED = SITES.map(([site], i) => ({
   unavailableReason: i === 7 ? "站点暂时关闭" : "",
 }));
 
+/*
+ * runtime_state 必须照真实 DTO 铺：它是画板 22 那条分段器「已连接 / 异常」两档的数据源。
+ * 上一轮补这个字段时假数据里压根没有它，于是那两档在验收里筛的是一批全都没有状态的通道 ——
+ * 又是「假数据自己造了一个不存在的世界」。
+ *
+ * 四档各铺一个：connected（QQ 那种确认对端接上了）、running（在跑但连通性未知，
+ * 四个适配器的 Healthy() 只到这一层）、error（启用了却没起来）、disabled（配置停用）。
+ */
 const CHANNELS = [
   {
     id: 1,
     name: "主 Telegram",
     channel_type: "telegram",
     enabled: true,
+    runtime_state: "running",
     config_json: "",
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-18T00:00:00Z",
@@ -258,6 +267,7 @@ const CHANNELS = [
     name: "运维群",
     channel_type: "qq_onebot",
     enabled: true,
+    runtime_state: "connected",
     config_json: "",
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-18T00:00:00Z",
@@ -267,6 +277,7 @@ const CHANNELS = [
     name: "告警 Webhook",
     channel_type: "webhook",
     enabled: false,
+    runtime_state: "disabled",
     config_json: "",
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-18T00:00:00Z",
@@ -276,6 +287,7 @@ const CHANNELS = [
     name: "企业微信",
     channel_type: "wecom_webhook",
     enabled: true,
+    runtime_state: "error",
     config_json: "",
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-18T00:00:00Z",

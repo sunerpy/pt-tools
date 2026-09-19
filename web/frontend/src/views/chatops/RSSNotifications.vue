@@ -28,6 +28,16 @@ const RESULT_META: Record<string, { label: string; tone: "ok" | "warn" | "dang" 
 
 const RESULT_OPTIONS = ["sent", "failed", "suppressed", "pending", "throttled"];
 
+/*
+ * 画板 26 的 bar-64 上结果筛选画的是**分段器**，落地原先是下拉。
+ * 这里可以照画板改：那个下拉本来就是单选（没有 multiple），换成分段一点能力都不丢，
+ * 而且五档摊开摆着比「点开才知道有哪几档」顺手。
+ */
+const RESULT_SEG = [
+  { label: "全部", value: "" },
+  ...RESULT_OPTIONS.map((r) => ({ label: RESULT_META[r]!.label, value: r })),
+];
+
 const isMobile = useIsMobile();
 const logs = ref<RSSNotificationLog[]>([]);
 const confs = ref<NotificationConfig[]>([]);
@@ -81,8 +91,9 @@ const failedCount = computed(
   () => logs.value.filter((l) => l.result === "failed" || l.result === "pending").length,
 );
 
+/* q 也算筛选：漏了它，搜索后零命中会画成「还没有通知记录」而不是「没有匹配的记录」 */
 const hasFilter = computed(() =>
-  Boolean(filters.rss_id || filters.kind || filters.result || filters.conf_id),
+  Boolean(filters.q || filters.rss_id || filters.kind || filters.result || filters.conf_id),
 );
 
 /*
@@ -367,40 +378,51 @@ onBeforeUnmount(() => {
         </template>
       </el-input>
 
-      <el-input
-        v-model="filters.rss_id"
-        placeholder="RSS ID"
-        clearable
-        class="f-id"
-        @keyup.enter="handleFilterChange"
-        @clear="handleFilterChange">
-        <template #prefix>
-          <PtIcon name="hash" :size="14" />
+      <!--
+        画板 26 的 bar-64 只有「seg + q + chip 通道 + 三枚图标钮」——
+        RSS ID 与「类型」是落地多出来的两个筛选，摆在带上会把它挤到换行（实测带高 65，
+        画板是 40）。按 owner 的原则：功能留着，形态按画板 —— 收进一枚「更多筛选」里。
+      -->
+      <el-popover placement="bottom-start" trigger="click" :width="260">
+        <template #reference>
+          <el-button size="small" class="f-more" data-testid="rssnotify-more-filters">
+            <PtIcon name="list-filter" :size="14" /><span>更多筛选</span>
+          </el-button>
         </template>
-      </el-input>
+        <div class="rn-more">
+          <label class="rn-more__row">
+            <span class="rn-more__k">RSS ID</span>
+            <el-input
+              v-model="filters.rss_id"
+              placeholder="RSS ID"
+              clearable
+              size="small"
+              @keyup.enter="handleFilterChange"
+              @clear="handleFilterChange" />
+          </label>
+          <label class="rn-more__row">
+            <span class="rn-more__k">类型</span>
+            <el-select
+              v-model="filters.kind"
+              placeholder="全部类型"
+              clearable
+              size="small"
+              @change="handleFilterChange">
+              <el-option label="全部新种（简略）" value="all" />
+              <el-option label="仅匹配的（详细）" value="filtered" />
+            </el-select>
+          </label>
+        </div>
+      </el-popover>
 
-      <el-select
-        v-model="filters.kind"
-        placeholder="全部类型"
-        clearable
-        class="f-sel"
-        @change="handleFilterChange">
-        <el-option label="全部新种（简略）" value="all" />
-        <el-option label="仅匹配的（详细）" value="filtered" />
-      </el-select>
-
-      <el-select
+      <!-- 画板 26 的 seg：结果五档 + 全部。原先是单选下拉，换成分段一点能力都不丢 -->
+      <el-segmented
         v-model="filters.result"
-        placeholder="全部结果"
-        clearable
-        class="f-sel"
-        @change="handleFilterChange">
-        <el-option
-          v-for="r in RESULT_OPTIONS"
-          :key="r"
-          :label="`${resultMeta(r).label}（${r}）`"
-          :value="r" />
-      </el-select>
+        class="pt-seg rn-seg"
+        :options="RESULT_SEG"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="rssnotify-result-seg"
+        @change="handleFilterChange" />
 
       <el-select
         v-model="filters.conf_id"
@@ -783,6 +805,34 @@ onBeforeUnmount(() => {
 
 .f-id {
   width: 130px;
+}
+
+/* 结果分段六格（全部 + 五档），字号压小一档才不把工具栏挤换行 */
+.rn-seg :deep(.el-segmented__item-label) {
+  font-size: var(--pt-fz-xs);
+}
+
+/* 「更多筛选」里的两项：一行一个，标签固定宽，控件占满 */
+.rn-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.rn-more__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+}
+
+.rn-more__k {
+  flex: 0 0 56px;
+  color: var(--pt-t3);
+}
+
+.f-more {
+  flex: 0 0 auto;
 }
 
 .f-sel {

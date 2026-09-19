@@ -835,3 +835,19 @@ func TestPaginator_GC(t *testing.T) {
 	pg.gc(time.Now().Add(2 * time.Hour))
 	assert.False(t, pg.HasSession("conf-x", "u1"))
 }
+
+/*
+ * 钉子：QQ 的连通态不能拿 Healthy() 顶替。
+ *
+ * 真实缺陷（评审查出）：通知通道页把任意 Healthy() 映射成「已连接」，而 QQ 在
+ * 监听端口一绑上就 healthy=true —— 那时候 NapCat 还没握手，发送会返回
+ * 「QQ 通道未连接 (NapCat 尚未握手)」。界面上那句「已连接」是假的。
+ */
+func TestQQChannel_LinkStateNeedsHandshake(t *testing.T) {
+	q := &QQChannel{}
+	q.healthy.Store(true)
+
+	// 还没有 caller：端口可能已经绑上，但 NapCat 没握手 —— 只能说「等待接入」
+	assert.Equal(t, notify.LinkWaiting, q.LinkState())
+	assert.True(t, q.Healthy(), "Healthy 仍是 true —— 正是它不足以当「已连接」的原因")
+}

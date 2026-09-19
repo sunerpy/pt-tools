@@ -660,9 +660,12 @@ func (m *liveNotifyManager) SetChannels(channels map[uint]notify.Channel) {
 
 // ChannelState 实现 app.ChannelStater：把这一条通道的实例状态告诉上层。
 //
-// 只有三种可能：map 里没有（启动时 Init 失败被跳过，或配置停用没去启动）、
-// 有实例但自报不健康、有实例且健康。前两种的区分交给 app 层 —— 那边才知道
-// 这条配置到底启不启用。
+// **不把 Healthy() 当「已连接」**：这四个适配器的 Healthy() 含义都只是构造/启动成功
+// （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败；Telegram 造出 bot 就 true；
+// Webhook 只判 config != nil；WeCom 恒 true）。所以 Healthy() 只够说「运行中」。
+// 只有实现了 notify.LinkStater 且确认对端接上的通道，才报「已连接」。
+//
+// map 里没有这一条时返回空串，由 app 层结合「配置启不启用」判成异常还是停用。
 func (m *liveNotifyManager) ChannelState(confID uint) string {
 	if m == nil {
 		return ""
@@ -673,10 +676,17 @@ func (m *liveNotifyManager) ChannelState(confID uint) string {
 	if !ok || ch == nil {
 		return ""
 	}
-	if ch.Healthy() {
-		return app.ChannelStateConnected
+	if !ch.Healthy() {
+		return app.ChannelStateError
 	}
-	return app.ChannelStateError
+	if stater, ok := ch.(notify.LinkStater); ok {
+		if stater.LinkState() == notify.LinkConnected {
+			return app.ChannelStateConnected
+		}
+		/* 在跑、但对端还没接上（QQ 等 NapCat 握手）—— 不是故障，也还不是「已连接」 */
+		return app.ChannelStateRunning
+	}
+	return app.ChannelStateRunning
 }
 
 func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notification) error {

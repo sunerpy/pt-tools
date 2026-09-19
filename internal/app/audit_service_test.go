@@ -489,3 +489,55 @@ func TestAuditQuery_PageSizeClampMax(t *testing.T) {
 	_, _, err := svc.Query(context.Background(), AuditQuery{PageSize: 9999})
 	require.NoError(t, err)
 }
+
+/*
+ * 钉子：结果与通道筛选要能接住多值，而且通道筛选得真的起作用。
+ *
+ * 两个真实缺陷（评审查出）：
+ *   ① 前端的多选把「success,error」逗号拼起来发过来，服务端按单值 `result = ?` 匹配，
+ *      于是这个组合一行都匹配不到 —— 界面上是「筛完什么都没有」，读起来像真的没有记录；
+ *   ② handler 压根没读 channel_type，那枚通道筛选是个纯装饰的空控件。
+ */
+func TestQuery_ResultAndChannelTypeAcceptLists(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	rows := []models.ActionAudit{
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "a", Command: "c1", ArgsJSON: "{}", Result: "success", CreatedAt: now.Add(-5 * time.Minute)},
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "b", Command: "c2", ArgsJSON: "{}", Result: "denied", CreatedAt: now.Add(-4 * time.Minute)},
+		{NotificationConfID: 2, ChannelType: "qq", ChannelUserID: "c", Command: "c3", ArgsJSON: "{}", Result: "error", CreatedAt: now.Add(-3 * time.Minute)},
+		{NotificationConfID: 2, ChannelType: "qq", ChannelUserID: "d", Command: "c4", ArgsJSON: "{}", Result: "success", CreatedAt: now.Add(-2 * time.Minute)},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+
+	// 单值照旧
+	_, total, err := svc.Query(context.Background(), AuditQuery{Result: "success"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+
+	// 多值：这正是原先一行都匹配不到的那种入参
+	_, total, err = svc.Query(context.Background(), AuditQuery{Result: "success,error"})
+	require.NoError(t, err)
+	assert.Equal(t, 3, total, "「成功 + 出错」要拿到三条，不是零条")
+
+	// 通道筛选真的在筛
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "qq"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "telegram,qq"})
+	require.NoError(t, err)
+	assert.Equal(t, 4, total)
+
+	// 两条筛选叠着走 AND
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "qq", Result: "success"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+
+	// 空白项丢掉，不会退化成「匹配空字符串」
+	_, total, err = svc.Query(context.Background(), AuditQuery{Result: " , "})
+	require.NoError(t, err)
+	assert.Equal(t, 4, total, "全是空白等于不筛")
+}

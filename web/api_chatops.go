@@ -354,6 +354,7 @@ func (h *chatopsHandlers) queryAudit(w http.ResponseWriter, r *http.Request) {
 		Command:       q.Get("command"),
 		Keyword:       q.Get("q"),
 		Result:        q.Get("result"),
+		ChannelType:   q.Get("channel_type"),
 		Page:          page,
 		PageSize:      pageSize,
 	})

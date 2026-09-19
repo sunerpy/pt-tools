@@ -1264,10 +1264,13 @@ export interface NotificationConfig {
   quiet_hours_start?: string;
   quiet_hours_end?: string;
   /**
-   * 进程内实时运行态：connected / error / disabled。不落库，重启即重算。
-   * 后端问不到这个信号时缺省（不是 "error"）—— 前端据此不画状态点。
+   * 进程内实时运行态，不落库，重启即重算。后端问不到这个信号时缺省（不是 "error"）。
+   *
+   * 四档而不是三档：`connected` 只给「适配器确认对端真的接上了」的通道（目前只有 QQ
+   * 能给出这个判断）；其余在跑的是 `running` —— 四个适配器的 Healthy() 都只代表
+   * 构造/启动成功，拿它写「已连接」是在界面上说假话。
    */
-  runtime_state?: "connected" | "error" | "disabled";
+  runtime_state?: "connected" | "running" | "error" | "disabled";
   // Dynamic fields (frontend form shape; backend stores under encrypted config_json)
   bot_token?: string;
   allowed_users?: string;

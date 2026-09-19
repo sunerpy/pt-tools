@@ -1013,7 +1013,8 @@ func TestChannelRuntimeState(t *testing.T) {
 		live    string
 		want    string
 	}{
-		{"启用且实例健康 → 已连接", true, ChannelStateConnected, ChannelStateConnected},
+		{"启用且适配器确认对端接上 → 已连接", true, ChannelStateConnected, ChannelStateConnected},
+		{"启用、实例在跑但连通性未知 → 运行中（不是「已连接」）", true, ChannelStateRunning, ChannelStateRunning},
 		{"启用但实例自报不健康 → 异常", true, ChannelStateError, ChannelStateError},
 		{"启用却没有实例在跑（启动时 Init 失败被跳过）→ 异常", true, "", ChannelStateError},
 		{"停用 → 停用，不算故障", false, "", ChannelStateDisabled},
@@ -1039,7 +1040,7 @@ func TestListConfs_RuntimeStateFromManager(t *testing.T) {
 	// Enabled 带 gorm default:true，Create 会跳过 Go 的零值 false —— 得显式写一次。
 	require.NoError(t, db.Model(&off).Update("enabled", false).Error)
 
-	mgr := &stateNotifyManager{live: map[uint]string{ok.ID: ChannelStateConnected}}
+	mgr := &stateNotifyManager{live: map[uint]string{ok.ID: ChannelStateRunning}}
 	svc := NewNotificationService(db, mgr, 0)
 
 	list, err := svc.ListConfs(context.Background())
@@ -1048,7 +1049,7 @@ func TestListConfs_RuntimeStateFromManager(t *testing.T) {
 	for _, d := range list {
 		got[d.Name] = d.RuntimeState
 	}
-	assert.Equal(t, ChannelStateConnected, got["跑着的"])
+	assert.Equal(t, ChannelStateRunning, got["跑着的"])
 	assert.Equal(t, ChannelStateError, got["起不来的"])
 	assert.Equal(t, ChannelStateDisabled, got["停用的"])
 

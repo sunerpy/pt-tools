@@ -38,9 +38,29 @@ type AuditQuery struct {
 	Until         time.Time
 	ChannelUserID string
 	Command       string
-	Result        string
-	Page          int
-	PageSize      int
+	// Result / ChannelType 支持逗号分隔的多值（前端的多选筛选就是这么发的）。
+	// 原先 Result 按单值等值匹配，于是「成功,出错」被当成一个字面量，一行都匹配不到 ——
+	// 界面上是「筛完什么都没有」，读起来像真的没有记录。ChannelType 更彻底：
+	// handler 压根没读这个参数，那枚通道筛选是个空控件。
+	Result      string
+	ChannelType string
+	Page        int
+	PageSize    int
+}
+
+/*
+ * splitList 把「a,b,c」拆成可用于 IN 的切片；空项丢掉。
+ * 单值进来就是单元素切片，所以调用方不必区分单选还是多选。
+ */
+func splitList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 type AuditDTO struct {
@@ -152,8 +172,11 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 	if q.Command != "" {
 		tx = tx.Where("command = ?", q.Command)
 	}
-	if q.Result != "" {
-		tx = tx.Where("result = ?", q.Result)
+	if vals := splitList(q.Result); len(vals) > 0 {
+		tx = tx.Where("result IN ?", vals)
+	}
+	if vals := splitList(q.ChannelType); len(vals) > 0 {
+		tx = tx.Where("channel_type IN ?", vals)
 	}
 	// Keyword 是画板 25 的 q「筛选命令、触发用户…」：同时匹配命令与触发用户，模糊匹配。
 	//

@@ -52,14 +52,27 @@ const STATUS_SEG = [
 
 const statusSeg = ref<"" | "connected" | "error" | "off">("");
 
+/*
+ * 通道热重载是异步的（events.ConfigChanged → cmd.reloadChatOpsChannels 全量重建），
+ * 改完开关立刻重取会拿到重建前的运行态。这个等待时长只影响「多久看到新状态」，
+ * 拿不到也不会显示错的东西 —— 上面会先把这一行的 runtime_state 清掉。
+ */
+const reloadSettleMs = 1200;
+
 /** 后端没给 runtime_state 时退回到 enabled —— 问不到不等于坏了 */
-function runtimeOf(n: NotificationConfig): "connected" | "error" | "disabled" | "" {
+function runtimeOf(n: NotificationConfig): "connected" | "running" | "error" | "disabled" | "" {
   if (n.runtime_state) return n.runtime_state;
   return n.enabled ? "" : "disabled";
 }
 
+/*
+ * 「运行中」与「已连接」分开写，不是啰嗦：四个适配器的 Healthy() 都只代表构造/启动成功
+ * （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败），只有 QQ 能判断对端真的接上。
+ * 把在跑的一律写成「已连接」会在界面上说一件不存在的事 —— 那是评审查出来的缺陷。
+ */
 const RUNTIME_LABEL: Record<string, string> = {
   connected: "已连接",
+  running: "运行中",
   error: "异常",
   disabled: "已停用",
 };
@@ -252,6 +265,18 @@ async function handleToggle(row: NotificationConfig) {
   try {
     await chatopsApi.notifications.update(row.id, { enabled: row.enabled });
     ElMessage.success(`${row.enabled ? "已启用" : "已停用"} ${row.name}`);
+    /*
+     * 运行态必须跟着走一遍，否则界面会拿旧值继续说话：停掉一个「已连接」的通道之后
+     * 胶囊仍写「已连接」，启用一个停用的通道之后仍写「已停用」，直到手工刷新。
+     *
+     * 先就地清掉这一行的 runtime_state（胶囊退回按开关说话，不再声称连通性），
+     * 再等热重载落地后重取一次 —— 通道是由 events.ConfigChanged（source=notification）
+     * 异步全量重建的（cmd.reloadChatOpsChannels），立刻重取会拿到重建前的状态。
+     */
+    row.runtime_state = undefined;
+    window.setTimeout(() => {
+      void loadNotifications();
+    }, reloadSettleMs);
   } catch (e: unknown) {
     row.enabled = !row.enabled; // 回滚开关，避免界面和后端不一致
     ElMessage.error((e as Error).message || "操作失败");

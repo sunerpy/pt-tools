@@ -17,6 +17,9 @@
  * 用法（需要一个已经跑起来的 pt-tools 服务，前端 dist 必须是当前源码构建出来的）：
  *   node scripts/board-check.mjs http://127.0.0.1:8080 [--port 19400] [--route /tasks]
  *
+ * 退出码：0 = 与画板一致且没有未落地的设计项；2 = 结构一致但还有 N 项画板画了没落地
+ * （需 owner 逐项接受，确认后加 --accept-unimpl 压成 0）；1 = 有未登记差异或登记多余。
+ *
  * 依赖：只用 Chrome 的 CDP，不装任何浏览器自动化包。Chrome 路径可用 PT_CHROME 覆盖。
  */
 import { spawn } from "node:child_process";
@@ -559,6 +562,49 @@ const EXPECT = {
     /* 「已连接」按画板列进来，落地没有这一档 —— 让它红，原因在 ALLOWED_GAPS 里 */
     /* 画板 22 的四档分段：全部 / 已连接 / 异常 / 已停用 —— 现在四档都落地了 */
     controls: ["全部", "已连接", "异常", "已停用", "类型", "卡片视图", "紧凑列表"],
+    /*
+     * 分段的四档必须**真的按运行态筛**，而不只是画在那里。
+     * 假数据四个通道各占一档（running / connected / disabled / error），
+     * 所以「已连接」应当剩 1 张、「异常」应当剩 1 张，且胶囊上的字要对得上 ——
+     * 上一轮补 runtime_state 时假数据里压根没有这个字段，那两档筛的是一批空状态。
+     */
+    probes: [
+      {
+        desc: "运行态分段真的在筛（已连接 / 异常各剩一张，且胶囊文字对得上）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const cards = () => [...document.querySelectorAll('.ch-card')];
+          const seg = document.querySelector('[data-testid=channels-status-seg]');
+          if (!seg) return 'no-seg';
+          const pick = (label) => {
+            const el = [...seg.querySelectorAll('.el-segmented__item')]
+              .find((b) => (b.textContent ?? '').trim() === label);
+            if (el) el.click();
+            return Boolean(el);
+          };
+          const all = cards().length;
+          if (!pick('已连接')) return 'no-connected-seg';
+          await wait(500);
+          const conn = cards();
+          const connPill = conn.map((c) =>
+            (c.querySelector('.pt-pill')?.textContent ?? '').trim());
+          if (!pick('异常')) return 'no-error-seg';
+          await wait(500);
+          const err = cards();
+          const errPill = err.map((c) =>
+            (c.querySelector('.pt-pill')?.textContent ?? '').trim());
+          pick('全部');
+          await wait(400);
+          const back = cards().length;
+          const ok = all === 4 && conn.length === 1 && err.length === 1 && back === all &&
+            connPill.every((t) => t.includes('已连接')) && errPill.every((t) => t.includes('异常'));
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
+            ' 全部 ' + all + ' / 已连接 ' + conn.length + '(' + connPill.join(',') + ')' +
+            ' / 异常 ' + err.length + '(' + errPill.join(',') + ') / 回到 ' + back;
+        })()`,
+      },
+    ],
   },
   "/chatops/notifications/1": {
     board: "23 + 37 通道详情",
@@ -610,10 +656,9 @@ const EXPECT = {
     cards: [548, 516, 1080, 1080], // p-cmd / p-ch / p-fail / p-keep
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["命令分布", "渠道分布", "失败与被拒", "保留与清理"],
-    /* 画板 25 的 bar-64：seg（全部/成功/拒绝/失败）+ q + chip 通道 + chip 时间 + 三枚图标钮 */
-    /* 分段器按画板列进来，落地是多选下拉 —— 让它红，原因在 ALLOWED_GAPS 里 */
+    /* 画板 25 的 bar-64：seg（全部/成功/被拒绝/出错）+ q + chip 通道 + chip 时间 + 三枚图标钮 */
     needsSeg: true,
-    controls: ["筛选命令、触发用户", "全部通道", "全部结果", "导出"],
+    controls: ["全部", "成功", "被拒绝", "出错", "筛选命令、触发用户", "通道", "时间", "导出"],
     /* 画板 25 的表头 */
     gridColumns: ["时间", "通道", "触发用户", "命令", "结果", "延迟"],
   },
@@ -624,10 +669,9 @@ const EXPECT = {
     cards: [548, 516, 548, 516, 1080], // p-res / p-idem / p-site / p-quiet / p-retry
     minCards: 5, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["推送结果分布", "幂等与去重", "待重试与失败", "按站点分布", "安静时段"],
-    /* 画板 26 的 bar-64：seg（结果）+ q「筛选站点、种子 ID…」+ chip 通道 + 三枚图标钮 */
-    /* 同 audit：画板是分段器，落地是多选下拉 —— 让它红，原因在 ALLOWED_GAPS 里 */
+    /* 画板 26 的 bar-64：seg（结果五档）+ q「筛选站点、种子 ID…」+ chip 通道 + 三枚图标钮 */
     needsSeg: true,
-    controls: ["筛选站点、种子 ID", "全部类型", "全部结果", "全部通道", "导出"],
+    controls: ["筛选站点、种子 ID", "已发送", "失败", "被限流", "全部通道", "更多筛选", "导出"],
     /* 画板 26 的表头 */
     gridColumns: ["时间", "站点", "种子 ID", "类型", "通道", "结果", "尝试", "操作"],
   },
@@ -852,23 +896,6 @@ const ALLOWED_GAPS = {
     "画板 16 的分段是五档下载器状态（全部/下载中/做种中/等待中/已暂停）；这一页是 RSS 流水，" +
     "只有已下载 / 已推送 / 已过期三个标记，而且它们是可叠加的（apiTasks 里逐个 AND）——" +
     "「已下载 + 已推送」= 推成功了的，收成互斥分段会把这个组合删掉。下载器状态在画板 18 那一页。",
-
-  /*
-   * 画板 25 / 26 的 bar-64 画的是分段器，落地是**多选**下拉。两条原因：
-   *   ① 分段是单选，换过去会删掉「成功 + 出错」这类组合筛选；
-   *   ② 这两条带上已经排了日期区间 + 两个下拉 + 搜索框，再插一条 4~6 档的分段会换行，
-   *      把带高从画板的 40 撑开。
-   * 供 owner 复核：要按画板改成单选分段，就得接受丢掉组合筛选（或把日期区间换成快捷 chip）。
-   */
-  "/chatops/audit controls.seg":
-    UNIMPL +
-    "画板 25 是四档结果分段（全部/成功/被拒绝/出错）；落地是多选下拉。" +
-    "分段单选，换过去会删掉「成功 + 出错」这类组合；而这条带上已经有日期区间 + 通道下拉 +" +
-    "结果下拉 + 搜索，再加四档分段会换行把带高撑过 40。",
-  "/chatops/rss-notifications controls.seg":
-    UNIMPL +
-    "画板 26 是五档结果分段；落地是多选下拉（sent/failed/suppressed/pending/throttled 五档" +
-    "外加「全部」是六格）。同 audit：组合筛选 + 带宽两条原因。",
 
   "/filter-rules grid.columns":
     "画板 20 九列；落地多一列「启用」——规则的开关本来就在表里改（画板把开关画进了操作列的省略菜单），" +
@@ -2261,5 +2288,31 @@ if (failures.length === 0 && stale.length === 0) {
   console.log(`\n${scope}：${failures.length} 处与画板不一致，${stale.length} 条偏离登记多余`);
 }
 
+/*
+ * 退出码三档，而不是两档。
+ *
+ * 一次评审判「完成门禁继续把未实现设计当成功」—— 判得对：只要还有画板画了而落地没有的项，
+ * 退 0 就等于替我说了一句「按设计稿实现完了」。但也不该一律退 1：那会把「结构对不上」
+ * 和「结构对上了、只剩几项待 owner 拍板」混成一件事，前者是缺陷，后者是待决范围。
+ *
+ *   0 —— 没有未登记差异，且没有「画板画了、落地没有」的项。只有这一档能当「按稿完成」。
+ *   2 —— 结构与画板一致，但还有 N 项未落地的设计项等 owner 逐项接受。
+ *   1 —— 有未登记的差异，或偏离登记多余。
+ *
+ * `--accept-unimpl` 把 2 压成 0：给「owner 已逐项接受」这个明确动作一个开关，
+ * 而不是让脚本默默替 owner 接受。
+ */
+const acceptUnimpl = process.argv.includes("--accept-unimpl");
+let code = 0;
+if (failures.length > 0 || stale.length > 0) {
+  code = 1;
+} else if (unimplemented.length > 0 && !acceptUnimpl) {
+  code = 2;
+  console.log(
+    `退出码 2：结构与画板一致，但还有 ${unimplemented.length} 项画板画了而落地没有 —— ` +
+      "需要 owner 逐项接受（确认后可加 --accept-unimpl）。",
+  );
+}
+
 chrome.kill("SIGKILL");
-process.exit(failures.length === 0 && stale.length === 0 ? 0 : 1);
+process.exit(code);

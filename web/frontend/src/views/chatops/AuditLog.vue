@@ -102,10 +102,78 @@ const filters = reactive({
 const hasFilter = computed(
   () =>
     Boolean(filters.dateRange) ||
+    timeQuick.value !== "" ||
     filters.channelType.length > 0 ||
     filters.result.length > 0 ||
     Boolean(filters.command),
 );
+
+/*
+ * 画板 25 的 bar-64 是「seg 四档 + q + chip 通道 + chip 时间 + 三枚图标钮」。
+ *
+ * 落地此前是「日期区间选择器（380 宽）+ 通道多选 + 结果多选 + 搜索」：
+ *   · 画板上没有日期区间选择器，它是一枚 chip；那 380 宽也正是塞不进分段器的原因；
+ *   · 结果多选把「success,error」逗号拼起来发给按单值等值匹配的服务端 ——
+ *     这个组合一行都匹配不到（现在服务端改成 IN 了，但画板要的本来就是单选分段）；
+ *   · 通道多选发出去的 channel_type 后端压根没读，是个纯装饰的空控件。
+ * 所以这里按画板改：结果收成四档分段，通道与时间各收成一枚 chip，
+ * 自定义时间区间保留在「自定义…」里，不丢能力。
+ */
+const RESULT_SEG = [
+  { label: "全部", value: "" },
+  { label: "成功", value: "success" },
+  { label: "被拒绝", value: "denied" },
+  { label: "出错", value: "error" },
+] as const;
+
+/** 分段是单选；服务端仍支持逗号多值，所以这里只是不再从界面上产生多选 */
+const resultSeg = computed({
+  get: () => (filters.result.length === 1 ? filters.result[0]! : ""),
+  set: (v: string) => {
+    filters.result = v === "" ? [] : [v];
+    handleFilterChange();
+  },
+});
+
+const channelChip = computed({
+  get: () => (filters.channelType.length === 1 ? filters.channelType[0]! : ""),
+  set: (v: string) => {
+    filters.channelType = v === "" ? [] : [v];
+    handleFilterChange();
+  },
+});
+
+/** 画板 chip「时间」：快捷档 + 「自定义…」。空串 = 不限 */
+const TIME_QUICK = [
+  { label: "时间: 不限", value: "" },
+  { label: "最近 1 小时", value: "1h" },
+  { label: "最近 24 小时", value: "24h" },
+  { label: "最近 7 天", value: "7d" },
+  { label: "自定义…", value: "custom" },
+] as const;
+
+const timeQuick = ref("");
+/** 选了「自定义…」才露出那个区间选择器 —— 画板上没有它，但自定义区间是真能力，不能删 */
+const showRange = computed(() => timeQuick.value === "custom");
+
+const QUICK_HOURS: Record<string, number> = { "1h": 1, "24h": 24, "7d": 24 * 7 };
+
+function applyTimeQuick(v: string) {
+  timeQuick.value = v;
+  if (v === "custom") {
+    /* 保留已有的自定义区间，等用户自己选 */
+    return;
+  }
+  const hours = QUICK_HOURS[v];
+  if (hours === undefined) {
+    filters.dateRange = null;
+  } else {
+    const end = new Date();
+    const start = new Date(end.getTime() - hours * 3600_000);
+    filters.dateRange = [start.toISOString(), end.toISOString()];
+  }
+  handleFilterChange();
+}
 
 /**
  * 六态状态机（设计文档 §5）。
@@ -356,46 +424,13 @@ function exportCsv() {
       只有筛选控件 + 右侧 28×28 图标钮，#pt-head-acts 保持空着。
     -->
     <PtToolbar band>
-      <el-date-picker
-        v-model="filters.dateRange"
-        type="datetimerange"
-        range-separator="至"
-        start-placeholder="开始时间"
-        end-placeholder="结束时间"
-        format="YYYY-MM-DD HH:mm:ss"
-        value-format="YYYY-MM-DDTHH:mm:ssZ"
-        class="f-date"
-        @change="handleFilterChange" />
-
-      <el-select
-        v-model="filters.channelType"
-        placeholder="全部通道"
-        multiple
-        collapse-tags
-        collapse-tags-tooltip
-        clearable
-        class="f-sel"
-        @change="handleFilterChange">
-        <el-option
-          v-for="(label, value) in CHANNEL_LABELS"
-          :key="value"
-          :label="label"
-          :value="value" />
-      </el-select>
-
-      <el-select
-        v-model="filters.result"
-        placeholder="全部结果"
-        multiple
-        collapse-tags
-        collapse-tags-tooltip
-        clearable
-        class="f-sel"
-        @change="handleFilterChange">
-        <el-option label="成功" value="success" />
-        <el-option label="被拒绝" value="denied" />
-        <el-option label="出错" value="error" />
-      </el-select>
+      <!-- 画板 25 的 seg：结果四档（单选）。服务端仍支持逗号多值 -->
+      <el-segmented
+        v-model="resultSeg"
+        class="pt-seg"
+        :options="RESULT_SEG"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="audit-result-seg" />
 
       <el-input
         v-model="filters.command"
@@ -408,6 +443,45 @@ function exportCsv() {
           <PtIcon name="search" :size="14" />
         </template>
       </el-input>
+
+      <!-- 画板 chip「通道」：单选。多选那版发出去的 channel_type 后端压根没读 -->
+      <el-select
+        v-model="channelChip"
+        class="f-chip"
+        size="small"
+        placeholder="通道: 全部"
+        clearable
+        data-testid="audit-channel-chip">
+        <el-option label="通道: 全部" value="" />
+        <el-option
+          v-for="(label, value) in CHANNEL_LABELS"
+          :key="value"
+          :label="`通道: ${label}`"
+          :value="value" />
+      </el-select>
+
+      <!-- 画板 chip「时间」：快捷档；「自定义…」才露出区间选择器 -->
+      <el-select
+        :model-value="timeQuick"
+        class="f-chip"
+        size="small"
+        placeholder="时间: 不限"
+        data-testid="audit-time-chip"
+        @update:model-value="applyTimeQuick">
+        <el-option v-for="t in TIME_QUICK" :key="t.value" :label="t.label" :value="t.value" />
+      </el-select>
+
+      <el-date-picker
+        v-if="showRange"
+        v-model="filters.dateRange"
+        type="datetimerange"
+        range-separator="至"
+        start-placeholder="开始时间"
+        end-placeholder="结束时间"
+        format="YYYY-MM-DD HH:mm:ss"
+        value-format="YYYY-MM-DDTHH:mm:ssZ"
+        class="f-date"
+        @change="handleFilterChange" />
 
       <template #right>
         <el-tooltip content="刷新" placement="top">
@@ -690,8 +764,9 @@ function exportCsv() {
   width: 340px;
 }
 
-.f-sel {
-  width: 150px;
+/* 画板 chip-*：通道与时间两枚，窄一档，给分段器与搜索框腾位置 */
+.f-chip {
+  width: 132px;
 }
 
 .f-search {
@@ -800,7 +875,7 @@ function exportCsv() {
 
 @media (max-width: 768px) {
   .f-date,
-  .f-sel,
+  .f-chip,
   .f-search {
     width: 100%;
   }
