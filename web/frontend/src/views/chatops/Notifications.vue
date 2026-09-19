@@ -5,6 +5,7 @@ import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue"
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
@@ -34,6 +35,50 @@ const router = useRouter();
 /* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
 const isMobile = useIsMobile();
 const notifications = ref<NotificationConfig[]>([]);
+
+/*
+ * 画板 22 的 bar-64 的三组控件。
+ *
+ * seg 只做到「全部 / 启用中 / 已停用」：画板那四档里的「已连接 / 异常」需要逐通道的连通
+ * 状态，后端没有这个信号（连通性测试是详情页上手动点的一次性动作，不落库）。
+ */
+const STATUS_SEG = [
+  { label: "全部", value: "" },
+  { label: "启用中", value: "on" },
+  { label: "已停用", value: "off" },
+] as const;
+
+const statusSeg = ref<"" | "on" | "off">("");
+const typeFilter = ref("");
+
+const CHANNEL_LABELS: Record<string, string> = {
+  telegram: "Telegram",
+  qq_onebot: "QQ (OneBot)",
+  webhook: "Webhook",
+  wecom_webhook: "WeCom Webhook",
+};
+
+/** 画板右端两枚视图钮（bi-layout-grid / bi-rows-3），偏好存本地 */
+const CH_VIEW_KEY = "pt-tools-channels-view-v1";
+
+function loadChView(): "grid" | "rows" {
+  try {
+    return window.localStorage.getItem(CH_VIEW_KEY) === "rows" ? "rows" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+const viewMode = ref<"grid" | "rows">(loadChView());
+
+function setView(v: "grid" | "rows") {
+  viewMode.value = v;
+  try {
+    window.localStorage.setItem(CH_VIEW_KEY, v);
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
 
 /**
  * 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有通知通道」，
@@ -101,6 +146,16 @@ const statRows = computed<BreakdownRow[]>(() => {
 });
 
 /** 画板 head 的 sub（11.5/400 t3）：共几个通道、几个启用、都是什么类型 */
+/** 表里这一批通道 = 状态筛 + 类型筛（两条都来自画板 bar-64） */
+const shownChannels = computed(() =>
+  notifications.value.filter((n) => {
+    if (statusSeg.value === "on" && !n.enabled) return false;
+    if (statusSeg.value === "off" && n.enabled) return false;
+    if (typeFilter.value && n.channel_type !== typeFilter.value) return false;
+    return true;
+  }),
+);
+
 const headSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return "通知通道没加载出来";
   if (notifications.value.length === 0) return "";
@@ -271,6 +326,67 @@ function getChannelLabel(type: string) {
       </el-button>
     </Teleport>
 
+    <!--
+      画板 22 的 bar-64：seg（全部/已连接/异常/已停用）+ chip「类型: 全部」+ 右端两枚视图钮。
+      这条带此前**整条没有**（注释里写的是「通道数量个位数，不需要筛选」）——
+      但类型筛选与两种视图是画板画的，通道多起来（四个以上）就用得上。
+
+      seg 只做到「全部 / 启用中 / 已停用」：画板那四档里的「已连接 / 异常」需要逐通道的
+      连通状态，而后端没有这个信号（连通性测试是详情页上手动点的一次性动作，不落库）。
+      这一条登记在 ALLOWED_GAPS 里。
+    -->
+    <PtToolbar v-if="notifications.length > 0" band>
+      <el-segmented
+        v-model="statusSeg"
+        class="pt-seg"
+        :options="STATUS_SEG"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="channels-status-seg" />
+      <el-select
+        v-model="typeFilter"
+        class="ch-chip"
+        size="small"
+        placeholder="类型: 全部"
+        clearable
+        data-testid="channels-type-filter">
+        <el-option label="类型: 全部" value="" />
+        <el-option
+          v-for="(label, value) in CHANNEL_LABELS"
+          :key="value"
+          :label="`类型: ${label}`"
+          :value="value" />
+      </el-select>
+
+      <template #right>
+        <el-tooltip content="卡片视图" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            :class="{ 'is-active': viewMode === 'grid' }"
+            aria-label="卡片视图"
+            :aria-pressed="viewMode === 'grid'"
+            data-testid="channels-view-grid"
+            @click="setView('grid')">
+            <PtIcon name="layout-grid" :size="15" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="紧凑列表" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            :class="{ 'is-active': viewMode === 'rows' }"
+            aria-label="紧凑列表"
+            :aria-pressed="viewMode === 'rows'"
+            data-testid="channels-view-rows"
+            @click="setView('rows')">
+            <PtIcon name="rows-3" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
+
+      <template #note>{{ shownChannels.length }} / {{ notifications.length }} 个通道</template>
+    </PtToolbar>
+
     <PtDataState
       v-if="notifications.length === 0"
       class="ch-state"
@@ -289,9 +405,12 @@ function getChannelLabel(type: string) {
       </template>
     </PtDataState>
 
-    <div v-else class="ch-grid pt-cards pt-cards--2">
+    <div
+      v-else
+      class="ch-grid pt-cards"
+      :class="viewMode === 'rows' ? 'pt-cards--wide is-rows' : 'pt-cards--2'">
       <article
-        v-for="item in notifications"
+        v-for="item in shownChannels"
         :key="item.id"
         class="ch-card"
         :class="{ 'is-off': !item.enabled }"
@@ -462,6 +581,22 @@ function getChannelLabel(type: string) {
 </template>
 
 <style scoped>
+/* 画板 22 的 chip-0「类型: 全部」与紧凑列表视图 */
+.ch-chip {
+  flex: 0 0 auto;
+  width: 170px;
+}
+
+.ch-chip :deep(.el-select__wrapper) {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: var(--pt-fz-label);
+}
+
+.ch-grid.is-rows .ch-card__acts {
+  padding-top: var(--pt-space-2);
+}
+
 /* 投递策略卡：一行一个通道 */
 .pol {
   display: flex;

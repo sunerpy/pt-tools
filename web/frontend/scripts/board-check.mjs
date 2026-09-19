@@ -492,9 +492,14 @@ const EXPECT = {
   "/chatops/notifications": {
     board: "22 消息通知",
     kind: CARD,
+    bands: ["toolbar"], // 画板 22 在通道卡之前有一条 bar-64
     cards: [548, 516, 548, 516, 1080], // nt0..nt3 两栏 + p-policy/p-stat + p-recent
     minCards: 7, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["投递策略", "最近投递统计", "最近的通知"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["投递策略", "最近投递统计", "最近的通知"],
+    /* 画板 22 的 bar-64：seg（全部/已连接/异常/已停用）+ chip「类型」+ 两枚视图钮 */
+    needsSeg: true,
+    /* 「已连接」按画板列进来，落地没有这一档 —— 让它红，原因在 ALLOWED_GAPS 里 */
+    controls: ["启用中", "已停用", "类型", "卡片视图", "紧凑列表", "已连接"],
   },
   "/chatops/notifications/1": {
     board: "23 + 37 通道详情",
@@ -583,6 +588,18 @@ const EXPECT = {
     cards: [300, 300, 300, 764], // 左列 p-files/p-lv/p-arc / 右 p-tail
     minCards: 4, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["日志文件", "级别筛选", "轮转归档", "运行日志"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    /* 画板 29 的 bar-64：seg（全部/INFO/WARN/ERROR/DEBUG）+ q + 跟随 + 刷新 */
+    needsSeg: true,
+    controls: [
+      "搜索日志内容",
+      "跟随尾部",
+      "自动刷新",
+      "INFO",
+      "WARN",
+      "ERROR",
+      "DEBUG",
+      "最近 1 小时",
+    ],
   },
   "/password": {
     board: "44 修改密码",
@@ -672,6 +689,16 @@ const ALLOWED_GAPS = {
    * RSS 流水：已下载 / 已推送 / 已过期，在 apiTasks 里是逐个 AND 的可叠加标记。
    * 两者不是同一套词汇 —— 那五档属于下载器控制台（画板 18），那一页确实有它们。
    */
+  "/chatops/notifications controls(已连接)":
+    "画板 22 的 seg 是四档（全部/已连接/异常/已停用）；落地只做到三档（全部/启用中/已停用）——" +
+    "「已连接 / 异常」需要逐通道的连通状态，后端没有这个信号：连通性测试是详情页上手动点的" +
+    "一次性动作，结果不落库。要做得先有按通道的健康记录。",
+
+  "/logs controls(最近 1 小时)":
+    "画板 29 的 chip-1 是「最近 1 小时」，落地没有：接口只 tail 当前文件的最后 5000 行，" +
+    "不按时间切片；而行首时间戳的格式随编码器变（JSON 与 console 两种），" +
+    "按它切会在某些配置下静默失效 —— 与其给一个有时不准的筛选，不如先不给。",
+
   "/userinfo controls(周期)":
     "画板 10 的 chip-0 是「周期: 本周」，落地没有：聚合接口只回当前快照，没有历史序列，" +
     "按周期筛在数据上不成立。要做得先有按时间的站点数据接口。",
@@ -952,7 +979,9 @@ const MEASURE = `(() => {
      * 「工具栏少了两枚筛选 chip」这种缺失照样查不出来。
      */
     controlText: [...document.querySelectorAll(
-      'button, .el-segmented__item, .pt-band__tab, .el-select__placeholder, .el-select__selected-item',
+      'button, .el-segmented__item, .pt-band__tab, .el-select__placeholder, .el-select__selected-item,' +
+        /* 勾选框的文案也算控件身份：画板把「跟随: 开」这类画成 chip，落地是 el-checkbox */
+        ' .el-checkbox__label, .el-radio__label',
     )]
       .flatMap((el) => [
         (el.textContent ?? '').replace(/\\s+/g, ' ').trim(),

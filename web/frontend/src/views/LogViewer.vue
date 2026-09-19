@@ -129,6 +129,42 @@ async function loadLogFiles() {
 /** 勾中的级别。空集合 = 不筛，全都显示（而不是全都不显示） */
 const activeLevels = ref<Set<LogLevel>>(new Set());
 
+/*
+ * 画板 29 的 bar-64：seg（全部 / INFO / WARN / ERROR / DEBUG）+ q「搜索日志内容…」
+ * + chip「跟随: 开」+ chip「最近 1 小时」+ 右端两枚图标钮。
+ *
+ * 落地此前工具栏上只有两个勾选框，级别筛选在左栏的卡里，**正文没有任何搜索** ——
+ * 一个日志查看器没有搜索，五千行只能靠眼睛找。这里补上搜索与级别分段
+ * （分段与左栏那张卡共用 activeLevels，两处不会各说一套）。
+ *
+ * 「最近 1 小时」那枚没有落地：接口只 tail 当前文件的最后 5000 行，不按时间切片；
+ * 行首的时间戳格式随编码器变（JSON 与 console 两种），按它切会在某些配置下静默失效。
+ * 偏离登记在 ALLOWED_GAPS 里。
+ */
+const logQuery = ref("");
+
+const LEVEL_SEG = [
+  { label: "全部", value: "" },
+  { label: "INFO", value: "info" },
+  { label: "WARN", value: "warn" },
+  { label: "ERROR", value: "error" },
+  { label: "DEBUG", value: "debug" },
+] as const;
+
+/** 分段是单选，左栏那张卡是多选 —— 单选时把集合收成这一档 */
+const levelSeg = computed({
+  get: () => {
+    const set = activeLevels.value;
+    if (set.size !== 1) return "";
+    return [...set][0] as string;
+  },
+  set: (v: string) => {
+    activeLevels.value = v === "" ? new Set() : new Set([v as LogLevel]);
+    scrollTop.value = 0;
+    if (logContainer.value) logContainer.value.scrollTop = 0;
+  },
+});
+
 const levelCounts = computed(() => {
   const counts: Record<LogLevel, number> = { error: 0, warn: 0, info: 0, debug: 0, other: 0 };
   for (const line of logs.value) counts[levelOf(line)] += 1;
@@ -137,8 +173,16 @@ const levelCounts = computed(() => {
 
 /** 真正渲染的行。虚拟滚动的所有换算都走这一份，不是原始的 logs */
 const shownLogs = computed(() => {
-  if (activeLevels.value.size === 0) return logs.value;
-  return logs.value.filter((line) => activeLevels.value.has(levelOf(line)));
+  let rows = logs.value;
+  if (activeLevels.value.size > 0) {
+    rows = rows.filter((line) => activeLevels.value.has(levelOf(line)));
+  }
+  const q = logQuery.value.trim().toLowerCase();
+  if (q) {
+    /* 正文就在内存里（最多 5000 行），本地筛是对的：这个接口不分页 */
+    rows = rows.filter((line) => line.toLowerCase().includes(q));
+  }
+  return rows;
 });
 
 function toggleLevel(level: LogLevel) {
@@ -445,7 +489,27 @@ function scrollToTop() {
       这里原来的注释还写着「后端没有对应接口，本页只落 p-tail」，是过时的。
     -->
     <PtToolbar band>
-      <el-checkbox v-model="autoScroll">自动滚动</el-checkbox>
+      <!-- 画板 29 的 seg：级别单选，与左栏那张多选卡共用同一个集合 -->
+      <el-segmented
+        v-model="levelSeg"
+        class="pt-seg"
+        :options="LEVEL_SEG"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="logs-level-seg" />
+      <!-- 画板 29 的 q：五千行只能靠眼睛找是不行的 -->
+      <el-input
+        v-model="logQuery"
+        class="log-q"
+        size="small"
+        placeholder="搜索日志内容…"
+        clearable
+        data-testid="logs-search">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
+      <!-- 画板 chip-0「跟随: 开」/ chip-1（最近 1 小时，见偏离表） -->
+      <el-checkbox v-model="autoScroll">跟随尾部</el-checkbox>
       <el-checkbox v-model="autoRefresh">自动刷新（15s）</el-checkbox>
 
       <template v-if="logPath" #note>
@@ -595,6 +659,11 @@ function scrollToTop() {
 </template>
 
 <style scoped>
+/* 画板 29 的 q：220 宽 */
+.log-q {
+  flex: 0 1 220px;
+}
+
 /*
  * 左栏的三张窄卡。`.lv-col` 此前**一条样式都没有** —— 于是它是个 display:block 的 div，
  * 三张卡首尾相接（实测 120+156=276、276+289=565，一点缝都没有），
