@@ -38,6 +38,73 @@ const tableRef = ref<TableInstance>();
  */
 type StatusKey = "downloaded" | "pushed" | "expired";
 
+/*
+ * 画板 16 的 bar-64 上除了分段与搜索，还有两枚 chip（「站点: 全部」「优惠: Free」）
+ * 和右端三枚 28×28 图标钮（列设置 / 导出 / 刷新）。站点那枚早就有了，
+ * 这里补上「优惠」那枚与列设置、导出 —— 画板画了，落地一直没有。
+ *
+ * 画板的 seg 是五档下载器状态（全部/下载中/做种中/等待中/已暂停），
+ * 而这一页的记录是 RSS 流水（已下载 / 已推送 / 已过期 三个可叠加的标记，
+ * 在 apiTasks 里是逐个 AND 的），两者不是同一套词汇 —— 那五档属于下载器控制台（画板 18）。
+ * 所以这里保留三枚可叠加 chip，偏离记在 ALLOWED_GAPS 里。
+ */
+const DISCOUNT_OPTIONS = [
+  { label: "Free", value: "FREE" },
+  { label: "2xFree", value: "2XFREE" },
+  { label: "50%", value: "PERCENT_50" },
+  { label: "30%", value: "PERCENT_30" },
+  { label: "70%", value: "PERCENT_70" },
+  { label: "无优惠", value: "NONE" },
+] as const;
+
+/** 空串 = 全部（画板 chip-1「优惠: Free」的默认态是选中某一档，这里默认不筛） */
+const discountFilter = ref("");
+
+const TASK_COLS_KEY = "pt-tools-tasks-cols-v1";
+
+const OPTIONAL_TASK_COLS = [
+  { key: "hash", label: "Hash" },
+  { key: "size", label: "大小" },
+  { key: "progress", label: "进度" },
+  { key: "freeEnd", label: "免费结束" },
+  { key: "checked", label: "最后检查" },
+  { key: "pushed", label: "推送时间" },
+] as const;
+
+type OptionalTaskCol = (typeof OPTIONAL_TASK_COLS)[number]["key"];
+
+/* 画板 16 的表头里没有 Hash 与推送时间，所以这两列默认收起来（要看在列设置里勾回来） */
+const DEFAULT_HIDDEN_TASK_COLS: OptionalTaskCol[] = ["hash", "pushed"];
+
+function loadHiddenTaskCols(): Set<OptionalTaskCol> {
+  try {
+    const raw = window.localStorage.getItem(TASK_COLS_KEY);
+    if (!raw) return new Set(DEFAULT_HIDDEN_TASK_COLS);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set(DEFAULT_HIDDEN_TASK_COLS);
+    const known = new Set(OPTIONAL_TASK_COLS.map((c) => c.key as string));
+    return new Set(parsed.filter((k): k is OptionalTaskCol => known.has(k)));
+  } catch {
+    return new Set(DEFAULT_HIDDEN_TASK_COLS);
+  }
+}
+
+const hiddenTaskCols = ref<Set<OptionalTaskCol>>(loadHiddenTaskCols());
+
+function toggleTaskCol(key: OptionalTaskCol) {
+  const next = new Set(hiddenTaskCols.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  hiddenTaskCols.value = next;
+  try {
+    window.localStorage.setItem(TASK_COLS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
+
+const taskColShown = (key: OptionalTaskCol) => !hiddenTaskCols.value.has(key);
+
 const STATUS_OPTIONS: { label: string; value: StatusKey }[] = [
   { label: "已下载", value: "downloaded" },
   { label: "已推送", value: "pushed" },
@@ -210,6 +277,8 @@ async function loadTasks() {
   params.set("page_size", pageSize.value.toString());
   if (filters.value.q) params.set("q", filters.value.q);
   if (filters.value.site) params.set("site", filters.value.site);
+  /* 优惠档位走服务端筛：本地筛会让页脚的 total 与表里的行数对不上（分页接口） */
+  if (discountFilter.value) params.set("free_level", discountFilter.value);
   for (const key of activeStatusKeys.value) params.set(key, "1");
 
   const data = await run<TaskListResponse>(() => tasksApi.list(params));
@@ -231,8 +300,42 @@ function applyFilters() {
 function clearFilters() {
   filters.value = { q: "", site: "" };
   status.value = { downloaded: false, pushed: false, expired: false };
+  discountFilter.value = "";
   page.value = 1;
   loadTasks();
+}
+
+/**
+ * 导出当前这一页（画板 bar-64 的 bi-file-down）。
+ *
+ * 导的是**表里这一页的行**，不是整库：这个接口是分页的，一次只有这些行在手上；
+ * 标题里写明页码与筛选，免得下载下来分不清是哪一批。
+ */
+function exportCsv() {
+  const head = ["站点", "优惠", "标题", "Hash", "大小", "进度", "免费结束", "最后检查", "状态"];
+  const lines = [head.join(",")];
+  for (const t of tasks.value) {
+    const cells = [
+      t.siteName || "",
+      getDiscount(t).text,
+      t.title || "",
+      t.torrentHash || "",
+      formatSize(t.torrentSize ?? 0),
+      t.progress === undefined ? "" : `${Math.round(t.progress)}%`,
+      t.freeEndTime || "",
+      t.lastCheckTime || "",
+      getStatusText(t),
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pt-tools-tasks-p${page.value}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出本页 ${tasks.value.length} 条`);
 }
 
 function handlePageChange(newPage: number) {
@@ -451,7 +554,55 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
         <el-option v-for="site in siteOptions" :key="site" :label="site" :value="site" />
       </el-select>
 
+      <!-- 画板 16 的 chip-1「优惠: Free」：走服务端筛，页脚计数才跟着变 -->
+      <el-select
+        v-model="discountFilter"
+        class="tb__chip-sel"
+        size="small"
+        placeholder="优惠: 全部"
+        clearable
+        data-testid="task-discount-filter"
+        @change="applyFilters">
+        <el-option label="优惠: 全部" value="" />
+        <el-option
+          v-for="o in DISCOUNT_OPTIONS"
+          :key="o.value"
+          :label="`优惠: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+
       <template #right>
+        <!-- 画板 bar-64 右端的 bi-columns-3 -->
+        <el-popover placement="bottom-end" trigger="click" :width="180">
+          <template #reference>
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="列设置"
+              data-testid="tasks-cols-btn">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="tb__cols">
+            <label v-for="c in OPTIONAL_TASK_COLS" :key="c.key" class="tb__cols-row">
+              <el-checkbox :model-value="taskColShown(c.key)" @change="toggleTaskCol(c.key)" />
+              <span>{{ c.label }}</span>
+            </label>
+          </div>
+        </el-popover>
+
+        <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
+        <el-tooltip content="按当前筛选导出本页 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="tasks-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+
         <el-tooltip content="重置筛选" placement="top">
           <button
             type="button"
@@ -528,7 +679,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column label="Hash" width="120">
+        <el-table-column v-if="taskColShown('hash')" label="Hash" width="120">
           <template #default="{ row }">
             <el-tooltip v-if="row.torrentHash" :content="row.torrentHash" placement="top">
               <code class="hash-cell">{{ row.torrentHash.slice(0, 8) }}</code>
@@ -538,6 +689,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
         </el-table-column>
 
         <el-table-column
+          v-if="taskColShown('size')"
           label="大小"
           width="96"
           class-name="pt-cell-num"
@@ -545,7 +697,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           <template #default="{ row }">{{ formatSize(row.torrentSize) }}</template>
         </el-table-column>
 
-        <el-table-column label="进度" width="170">
+        <el-table-column v-if="taskColShown('progress')" label="进度" width="170">
           <template #default="{ row }">
             <div v-if="row.torrentSize > 0" class="progress-cell">
               <el-progress
@@ -562,7 +714,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column label="免费结束" width="150">
+        <el-table-column v-if="taskColShown('freeEnd')" label="免费结束" width="150">
           <template #default="{ row }">
             <span :class="row.isExpired ? 'cell-dang' : 'cell-mute'">
               {{ formatTime(row.freeEndTime) }}
@@ -570,11 +722,15 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column label="最后检查" width="150" class-name="pt-cell-muted">
+        <el-table-column
+          v-if="taskColShown('checked')"
+          label="最后检查"
+          width="150"
+          class-name="pt-cell-muted">
           <template #default="{ row }">{{ formatTime(row.lastCheckTime) }}</template>
         </el-table-column>
 
-        <el-table-column label="推送时间" width="150">
+        <el-table-column v-if="taskColShown('pushed')" label="推送时间" width="150">
           <template #default="{ row }">
             <span v-if="row.isPushed" class="cell-ok">{{ formatTime(row.pushTime) }}</span>
             <span v-else class="cell-dim">-</span>

@@ -1201,6 +1201,20 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 	if expired {
 		tx = tx.Where("is_expired = ?", true)
 	}
+	/*
+	 * 优惠档位筛选（画板 16 的 chip-1「优惠: Free」）。
+	 *
+	 * 放在服务端而不是前端本地筛：这个接口是分页的，本地筛会让页脚的 total 与表里的行数
+	 * 对不上 —— 那正是搜索页踩过的「站点命中 12 条配一张少几行的表」。
+	 * `NONE` 当成「没有优惠」：库里既可能存字面量 NONE，也可能是空串。
+	 */
+	if free := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("free_level"))); free != "" {
+		if free == "NONE" {
+			tx = tx.Where("free_level = ? OR free_level = ? OR free_level IS NULL", "NONE", "")
+		} else {
+			tx = tx.Where("UPPER(free_level) = ?", free)
+		}
+	}
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
