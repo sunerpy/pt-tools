@@ -17,8 +17,8 @@
  * 用法（需要一个已经跑起来的 pt-tools 服务，前端 dist 必须是当前源码构建出来的）：
  *   node scripts/board-check.mjs http://127.0.0.1:8080 [--port 19400] [--route /tasks]
  *
- * 退出码：0 = 与画板一致且没有未落地的设计项；2 = 结构一致但还有 N 项画板画了没落地
- * （需 owner 逐项接受，确认后加 --accept-unimpl 压成 0）；1 = 有未登记差异或登记多余。
+ * 退出码：0 = 与画板一致，且没有等 owner 拍板的未落地设计项；2 = 结构一致但还有 N 项
+ * 画板画了没落地、等 owner 逐项接受；1 = 有未登记差异或登记多余。
  *
  * 依赖：只用 Chrome 的 CDP，不装任何浏览器自动化包。Chrome 路径可用 PT_CHROME 覆盖。
  */
@@ -885,6 +885,22 @@ const RAIL_GAP_REASON =
  */
 const UNIMPL = "画板画了、落地没有：";
 
+/*
+ * 「画板画了、落地没有，而且 owner 已经逐项看过并接受」。
+ *
+ * 与 UNIMPL 的区别只在一件事：范围已经定了。所以这一类不再让脚本退 2 ——
+ * 退 2 的意思是「等 owner 拍板」，拍完了就不该继续拦着。但它们照样每次都打印出来，
+ * 接受不等于消失。
+ *
+ * 逐项记在这里，而不是给一个「全盘接受」的命令行开关：以后再冒出新的未落地项时，
+ * 它不在这张表里，验收会照旧退 2 —— 开关做不到这一点，它会把新项一起蒙过去。
+ */
+const OWNER_OK = "画板画了、落地没有（owner 已逐项接受）：";
+
+/** 逐项接受的出处，附在每条原因末尾 —— 免得以后有人把它当成还没人看过的待办 */
+const OWNER_DECISION =
+  " owner 2026-09-20 的决定：这三项都按偏离接受、不做（原话「都按偏离接受，不做」，问的是「还剩三项画板画了但没落地的设计项，每一项都需要新增后端能力，要我实现哪些」）。";
+
 const ALLOWED_GAPS = {
   /* 外壳级偏离：每条桌面路由都会量到，逐条登记（键必须逐条写，键里不能有通配） */
   ...Object.fromEntries(
@@ -931,15 +947,19 @@ const ALLOWED_GAPS = {
    * 两者不是同一套词汇 —— 那五档属于下载器控制台（画板 18），那一页确实有它们。
    */
   "/userinfo controls(周期)":
-    UNIMPL +
+    OWNER_OK +
     "画板 10 的 chip-0 是「周期: 本周」，落地没有：聚合接口只回当前快照，没有历史序列，" +
-    "按周期筛在数据上不成立。要做得先有按时间的站点数据接口。",
+    "按周期筛在数据上不成立 —— 产品一条历史快照都不存，要做得新增快照表 + 采集任务 + 迁移。" +
+    OWNER_DECISION,
 
   "/tasks controls.seg":
-    UNIMPL +
+    OWNER_OK +
     "画板 16 的分段是五档下载器状态（全部/下载中/做种中/等待中/已暂停）；这一页是 RSS 流水，" +
     "只有已下载 / 已推送 / 已过期三个标记，而且它们是可叠加的（apiTasks 里逐个 AND）——" +
-    "「已下载 + 已推送」= 推成功了的，收成互斥分段会把这个组合删掉。下载器状态在画板 18 那一页。",
+    "「已下载 + 已推送」= 推成功了的，收成互斥分段会把这个组合删掉（注意：这里的组合在 " +
+    "apiTasks 里逐个 AND、是真的在工作的，与审计页那个假组合不同）。下载器状态在画板 18 那一页；" +
+    "要按画板做就得把下载器实时状态按 hash 关联进列表页，等于每次翻页多一次下载器往返。" +
+    OWNER_DECISION,
 
   "/filter-rules grid.columns":
     "画板 20 九列；落地多一列「启用」——规则的开关本来就在表里改（画板把开关画进了操作列的省略菜单），" +
@@ -970,9 +990,11 @@ const ALLOWED_GAPS = {
     "那三个 chip 是可组合的（apiTasks 里逐个 AND），收成画板那条互斥分段器会删掉组合筛选能力 —— " +
     "这正是第九轮修掉的缺陷，不能为了对齐画板再改回去。",
   "/sites@375 rowCards.spark":
-    UNIMPL +
+    OWNER_OK +
     "画板 30 的行卡里有一条 120×18 的 8 根柱走势图，落地没有：后端没有按站点的历史序列接口。" +
-    "perSiteStats 只给当前快照（uploaded / ratio / seeding …），造一条假的走势比不画更糟。",
+    "perSiteStats 只给当前快照（uploaded / ratio / seeding …），造一条假的走势比不画更糟。" +
+    "依赖与「周期」那条同一套历史快照。" +
+    OWNER_DECISION,
 
   /*
    * 这张表现在是空的 —— 上一轮登记的偏离都实现掉了。
@@ -2305,10 +2327,17 @@ for (const [reason, keys] of byReason) {
  * 真正的设计缺项被稀释掉了，而收尾那句还是「与画板一致」。
  */
 const unimplemented = [...gapsUsed].filter((k) => ALLOWED_GAPS[k].startsWith(UNIMPL));
+const ownerAccepted = [...gapsUsed].filter((k) => ALLOWED_GAPS[k].startsWith(OWNER_OK));
 if (unimplemented.length > 0) {
-  console.log(`\n⚠ 画板画了、落地没有（${unimplemented.length} 项，都是有意登记的，不是漏查）：`);
+  console.log(`\n⚠ 画板画了、落地没有，等 owner 拍板（${unimplemented.length} 项）：`);
   for (const k of unimplemented) {
     console.log(`    ${k} —— ${ALLOWED_GAPS[k].slice(UNIMPL.length)}`);
+  }
+}
+if (ownerAccepted.length > 0) {
+  console.log(`\n· 画板画了、落地没有，owner 已逐项接受（${ownerAccepted.length} 项）：`);
+  for (const k of ownerAccepted) {
+    console.log(`    ${k} —— ${ALLOWED_GAPS[k].slice(OWNER_OK.length)}`);
   }
 }
 for (const k of stale) {
@@ -2325,9 +2354,14 @@ if (failures.length === 0 && stale.length === 0) {
    * 绝不单独输出「与画板一致」。退 0 只说明「没有未登记的差异」，
    * 而登记在案的设计缺项一样是差异 —— 那句话得把它们带上才不算替我说谎。
    */
-  const tail =
-    unimplemented.length > 0 ? `，其中 ${unimplemented.length} 项是画板画了而落地没有（见上）` : "";
-  console.log(`\n${scope}：没有未登记的差异；另有 ${gapsUsed.size} 条已记偏离${tail}`);
+  const tail = [
+    unimplemented.length > 0 ? `${unimplemented.length} 项等 owner 拍板` : "",
+    ownerAccepted.length > 0 ? `${ownerAccepted.length} 项未落地但 owner 已逐项接受` : "",
+  ].filter(Boolean);
+  console.log(
+    `\n${scope}：没有未登记的差异；另有 ${gapsUsed.size} 条已记偏离` +
+      (tail.length > 0 ? `，其中 ${tail.join("、")}（见上）` : ""),
+  );
 } else {
   console.log(`\n${scope}：${failures.length} 处与画板不一致，${stale.length} 条偏离登记多余`);
 }
@@ -2339,22 +2373,21 @@ if (failures.length === 0 && stale.length === 0) {
  * 退 0 就等于替我说了一句「按设计稿实现完了」。但也不该一律退 1：那会把「结构对不上」
  * 和「结构对上了、只剩几项待 owner 拍板」混成一件事，前者是缺陷，后者是待决范围。
  *
- *   0 —— 没有未登记差异，且没有「画板画了、落地没有」的项。只有这一档能当「按稿完成」。
+ *   0 —— 没有未登记差异，且没有「等 owner 拍板」的未落地项。
  *   2 —— 结构与画板一致，但还有 N 项未落地的设计项等 owner 逐项接受。
  *   1 —— 有未登记的差异，或偏离登记多余。
  *
- * `--accept-unimpl` 把 2 压成 0：给「owner 已逐项接受」这个明确动作一个开关，
- * 而不是让脚本默默替 owner 接受。
+ * owner 拍过板的项记在 ALLOWED_GAPS 里（OWNER_OK 前缀），不再计入退 2 ——
+ * 逐项记，而不是给一个全盘接受的开关：新冒出来的未落地项不在那张表里，照旧退 2。
  */
-const acceptUnimpl = process.argv.includes("--accept-unimpl");
 let code = 0;
 if (failures.length > 0 || stale.length > 0) {
   code = 1;
-} else if (unimplemented.length > 0 && !acceptUnimpl) {
+} else if (unimplemented.length > 0) {
   code = 2;
   console.log(
     `退出码 2：结构与画板一致，但还有 ${unimplemented.length} 项画板画了而落地没有 —— ` +
-      "需要 owner 逐项接受（确认后可加 --accept-unimpl）。",
+      "需要 owner 逐项接受（接受后把那几条的前缀从 UNIMPL 换成 OWNER_OK）。",
   );
 }
 
