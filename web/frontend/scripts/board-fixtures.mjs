@@ -527,6 +527,44 @@ export const FIXTURES = [
       force_start: d.type === "qbittorrent",
     })),
   ],
+  /*
+   * 任务详情（画板 39 的抽屉与内联卡）。必须排在列表之前：`/api/downloader-torrents/1/t1`
+   * 会命中列表那条前缀，于是详情组件拿到 `{items,total,…}`，模板里
+   * `props.detail.torrent.title` 直接抛 TypeError —— 抽屉整块渲染不出来。
+   * 形状照后端的 TorrentDetailResponse：torrent / files / trackers / features。
+   */
+  [
+    "/api/downloader-torrents/1",
+    {
+      torrent: HUB_TORRENTS[0],
+      files: [
+        { name: "Some.Release.Name.S01E01.mkv", size: 4.2 * 1024 ** 3, progress: 1, priority: 1 },
+        {
+          name: "Some.Release.Name.S01E02.mkv",
+          size: 4.1 * 1024 ** 3,
+          progress: 0.62,
+          priority: 1,
+        },
+      ],
+      trackers: [
+        {
+          url: "https://tracker.m-team.invalid/announce",
+          status: "working",
+          peers: 128,
+          message: "",
+        },
+      ],
+      features: {
+        downloader_id: 1,
+        downloader_name: "qb-main",
+        type: "qbittorrent",
+        set_location: true,
+        set_category: true,
+        set_tags: true,
+        force_start: true,
+      },
+    },
+  ],
   [
     "/api/downloader-torrents",
     { items: HUB_TORRENTS, total: 12, page: 1, page_size: 100, failures: [] },
@@ -573,6 +611,49 @@ export const FIXTURES = [
 ];
 
 /** 注入页面的脚本：拦 fetch，命中前缀就回假数据，其余照常走后端 */
+/**
+ * 空数据桩 —— 画板 45 的空态那一层。
+ *
+ * 画板 45 列了全站 13 处空态文案。落地把 el-empty 全换成了 PtDataState（六态组件），
+ * 但**空库下每个列表页到底画出了什么，从来没有人量**：正常数据那一轮永远走不到空态分支。
+ *
+ * 这个桩装在正常桩之后，包住它自己那层 fetch：所有列表接口回空集合，
+ * 其余仍走前一层的假数据（例如站点配置、能力表），于是页面结构照旧、只有数据是空的。
+ */
+export function emptyStubScript() {
+  const EMPTY = [
+    ["/api/tasks", { items: [], total: 0, page: 1, page_size: 50 }],
+    ["/api/downloader-torrents", { items: [], total: 0, page: 1, page_size: 100, failures: [] }],
+    ["/api/chatops/notifications", []],
+    ["/api/chatops/bindings", []],
+    ["/api/chatops/audit", { items: [], total: 0, page: 1, page_size: 50 }],
+    ["/api/chatops/rss-notifications", { items: [], total: 0, page: 1, page_size: 50 }],
+    ["/api/filter-rules", []],
+    /* /api/logs/files 必须排在 /api/logs 之前：否则它命中前者的前缀，
+       文件清单拿到的是正文的形状（没有 files 字段），页面直接抛 TypeError */
+    ["/api/logs/files", { dir: "/config/.pt-tools/logs", files: [], max_age: 7, max_backups: 5 }],
+    ["/api/logs", { path: "/config/.pt-tools/logs/all.log", lines: [], truncated: false }],
+  ];
+  return `(() => {
+  window.__ptEmptyStub = true;
+  const table = ${JSON.stringify(EMPTY.map(([p, b]) => [p, JSON.stringify(b)]))};
+  const inner = window.fetch;
+  window.fetch = (input, init) => {
+    const raw = typeof input === 'string' ? input : input.url;
+    const path = raw.split('?')[0].replace(location.origin, '');
+    for (const [prefix, body] of table) {
+      if (path === prefix || path.startsWith(prefix + '/')) {
+        return Promise.resolve(new Response(body, {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+    }
+    return inner(input, init);
+  };
+  return 'empty-stubbed';
+})()`;
+}
+
 export function stubScript() {
   return `(() => {
   /* 无头 Chrome 里 document.hidden 恒为 true，靠可见性判断的定时刷新不会跑 */

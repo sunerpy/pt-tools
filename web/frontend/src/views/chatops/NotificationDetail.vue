@@ -680,33 +680,36 @@ function goBack() {
       （页头那句「类型不可修改，换类型请删除后重建」），所以这里只画当前类型的表单，
       四种类型的差异改由这张映射卡交代。
     -->
-    <PtPanel class="sec-card" title="密钥与安全" icon="shield-check">
-      <ul class="sec">
-        <li>
-          Bot Token、Access Token、HMAC Secret、Webhook Key 以及代理凭据都以
-          <strong>AES-256-GCM</strong> 加密后落库，不存明文。
-        </li>
-        <li>
-          列表接口整体脱敏 <code>config_json</code>，只有这一页（鉴权之后）会解密回显；
-          日志与审计不输出明文。
-        </li>
-        <li>
-          密钥取自 <code>PT_TOOLS_SECRET_KEY</code>（base64）或
-          <code>~/.pt-tools/secret.key</code>（十六进制文本）。密钥缺失或轮换之后，
-          旧凭证解不开，需要重新保存一次。
-        </li>
-      </ul>
-    </PtPanel>
+    <!-- 画板 37 把这两张并排：p-sec 700 + p-map 364，所以套一层 .pt-cards--main -->
+    <div class="pt-cards pt-cards--main">
+      <PtPanel title="密钥与安全" icon="shield-check">
+        <ul class="sec">
+          <li>
+            Bot Token、Access Token、HMAC Secret、Webhook Key 以及代理凭据都以
+            <strong>AES-256-GCM</strong> 加密后落库，不存明文。
+          </li>
+          <li>
+            列表接口整体脱敏 <code>config_json</code>，只有这一页（鉴权之后）会解密回显；
+            日志与审计不输出明文。
+          </li>
+          <li>
+            密钥取自 <code>PT_TOOLS_SECRET_KEY</code>（base64）或
+            <code>~/.pt-tools/secret.key</code>（十六进制文本）。密钥缺失或轮换之后，
+            旧凭证解不开，需要重新保存一次。
+          </li>
+        </ul>
+      </PtPanel>
 
-    <PtPanel class="map-card" title="channel_type 映射" icon="list-checks">
-      <ul class="cmap">
-        <li v-for="row in channelTypeMap" :key="row.type" class="cmap__row">
-          <code>{{ row.type }}</code>
-          <span class="cmap__label">{{ row.label }}</span>
-          <span class="cmap__must">必填 {{ row.must }}</span>
-        </li>
-      </ul>
-    </PtPanel>
+      <PtPanel title="channel_type 映射" icon="list-checks">
+        <ul class="cmap">
+          <li v-for="row in channelTypeMap" :key="row.type" class="cmap__row">
+            <code>{{ row.type }}</code>
+            <span class="cmap__label">{{ row.label }}</span>
+            <span class="cmap__must">必填 {{ row.must }}</span>
+          </li>
+        </ul>
+      </PtPanel>
+    </div>
   </div>
 </template>
 
@@ -716,15 +719,7 @@ function goBack() {
   max-width: 700px;
 }
 
-/* 画板 37 的 p-sec 700 / p-map 364 */
-.sec-card {
-  max-width: 700px;
-}
-
-.map-card {
-  max-width: 364px;
-}
-
+/* 画板 37 的 p-sec 700 / p-map 364：栏宽由外面那层 .pt-cards--main 给 */
 .sec {
   display: flex;
   flex-direction: column;

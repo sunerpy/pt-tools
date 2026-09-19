@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stubScript } from "./board-fixtures.mjs";
+import { emptyStubScript, stubScript } from "./board-fixtures.mjs";
 
 // ---------------------------------------------------------------- 画板事实
 
@@ -109,7 +109,7 @@ const EXPECT = {
     probes: [
       {
         desc: "分类 + 仅免费 + 一并显示：说明里的条数与表格真会多出来的行数一致",
-        want: "一致",
+        want: "verdict=ok",
         js: `(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
           const click = (pred) => {
@@ -131,8 +131,13 @@ const EXPECT = {
           await wait(600);
           const after = document.querySelectorAll('.el-table__body tbody tr').length;
           const delta = after - before;
-          return '说明 ' + said + ' 条 / 表格 ' + before + '→' + after +
-            (said >= 0 && delta === said ? ' 一致' : ' 不一致');
+          /*
+           * 哨兵必须互不包含：原来返回「一致 / 不一致」而断言用 includes('一致')——
+           * 失败串「不一致」里也含「一致」，于是这条探针**失败也会通过**。
+           * 这正是这份脚本一直在抓的那类假绿，自己却踩了一次。
+           */
+          return 'verdict=' + (said >= 0 && delta === said ? 'ok' : 'MISMATCH') +
+            ' 说明 ' + said + ' 条 / 表格 ' + before + '→' + after;
         })()`,
       },
     ],
@@ -178,7 +183,93 @@ const EXPECT = {
     bands: ["toolbar"],
     cards: [276, 276, 276, 788, 386, 386], // 左列三卡 / 右上 p-grid / 右下 p-rate + p-note
     minCards: 6, // 画板这一页的卡片张数（数据驱动的卡按下限算）
-    titles: ["传输", "状态", "筛选", "任务列表", "速率", "这一页的口径"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    titles: ["传输", "状态", "筛选", "任务列表", "速率", "这一页的口径"],
+    /*
+     * 画板 38（弹窗与菜单）与 39（任务详情抽屉）的规格。它们只有点开才存在，
+     * 所以用探针量：列 popover 260、添加种子弹窗 620、任务详情抽屉 56%（1440 上 ≈806）。
+     */
+    probes: [
+      {
+        desc: "画板 38 的列 popover（260 宽）",
+        want: "宽 260",
+        js: `(async () => {
+          const btn = document.querySelector('.hub__ico[aria-label=显示列]');
+          if (!btn) return 'no-col-btn';
+          btn.click();
+          await new Promise((r) => setTimeout(r, 500));
+          const pop = [...document.querySelectorAll('.el-popper')]
+            .filter((el) => getComputedStyle(el).display !== 'none')
+            .find((el) => (el.textContent ?? '').includes('列'));
+          if (!pop) return 'no-popper';
+          const w = Math.round(pop.getBoundingClientRect().width);
+          document.body.click();
+          return '宽 ' + w;
+        })()`,
+      },
+      {
+        desc: "画板 38 的添加种子弹窗（620 宽，卡头 42）",
+        want: "宽 620|添加种子到下载器",
+        js: `(async () => {
+          const btn = [...document.querySelectorAll('button')]
+            .find((b) => (b.textContent ?? '').includes('添加种子'));
+          if (!btn) return 'no-add-btn';
+          btn.click();
+          await new Promise((r) => setTimeout(r, 600));
+          const dlg = [...document.querySelectorAll('.el-dialog')]
+            .find((el) => (el.textContent ?? '').includes('添加种子到下载器'));
+          if (!dlg) return 'no-dialog';
+          const w = Math.round(dlg.getBoundingClientRect().width);
+          const title = (dlg.querySelector('.el-dialog__title')?.textContent ?? '').trim();
+          const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+          document.dispatchEvent(esc);
+          await new Promise((r) => setTimeout(r, 400));
+          return '宽 ' + w + ' | ' + title;
+        })()`,
+      },
+      {
+        desc: "画板 39 的任务详情：侧边抽屉 806 与下方内联卡 772 两种形态",
+        /* 抽屉是 56% 的精确值；内联卡跟着右栏走，允许 12 的容差（滚动条与间距） */
+        want: "verdict=ok",
+        js: `(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const pickMode = (label) => {
+            const el = [...document.querySelectorAll('.el-segmented__item')]
+              .find((b) => (b.textContent ?? '').trim() === label);
+            if (!el) return false;
+            el.click();
+            return true;
+          };
+          const openRow = async () => {
+            const btn = [...document.querySelectorAll('button')]
+              .find((b) => (b.textContent ?? '').trim() === '详情');
+            if (!btn) return false;
+            btn.click();
+            await wait(900);
+            return true;
+          };
+          const esc = () => document.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+          );
+          /* 侧边：画板 39 的 drawer size 56% —— 1440 上是 806 */
+          if (!pickMode('侧边')) return 'no-mode-seg';
+          await wait(400);
+          if (!(await openRow())) return 'no-detail-btn';
+          const drawer = document.querySelector('.hub__drawer');
+          const dw = drawer ? Math.round(drawer.getBoundingClientRect().width) : 0;
+          esc();
+          await wait(500);
+          /* 下方：画板 39 的 inline-detail-card 772 宽 */
+          if (!pickMode('下方')) return 'no-mode-seg-2';
+          await wait(400);
+          if (!(await openRow())) return 'no-detail-btn-2';
+          const inline = document.querySelector('.hub__detail');
+          const iw = inline ? Math.round(inline.getBoundingClientRect().width) : 0;
+          const ok = Math.abs(dw - 806) <= 4 && Math.abs(iw - 772) <= 12;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
+            ' 抽屉 ' + dw + '（画板 806） | 内联 ' + iw + '（画板 772）';
+        })()`,
+      },
+    ],
   },
   "/downloaders": {
     board: "19 下载器设置",
@@ -555,17 +646,29 @@ let stubInstalled = false;
 let consoleErrors = [];
 cdp.onEvent = (m) => {
   if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
+    const top = m.params.stackTrace?.callFrames?.[0];
+    const at = top
+      ? ` @ ${top.functionName || "(anonymous)"} ${top.url.split("/").pop()}:${top.lineNumber}`
+      : "";
     consoleErrors.push(
-      (m.params.args ?? [])
-        .map((a) => a.value ?? a.description ?? "")
-        .join(" ")
-        .slice(0, 220),
+      ((m.params.args ?? []).map((a) => a.value ?? a.description ?? "").join(" ") + at).slice(
+        0,
+        260,
+      ),
     );
   }
   if (m.method === "Runtime.exceptionThrown") {
-    consoleErrors.push(
-      (m.params.exceptionDetails?.exception?.description ?? "未捕获异常").slice(0, 220),
-    );
+    const d = m.params.exceptionDetails;
+    /*
+     * 带上最上面那一帧。只报「TypeError: Cannot read properties of undefined」
+     * 等于知道崩了但不知道在哪 —— 打包后的文件名+行列虽然不是源码位置，
+     * 至少能定位到是哪个 chunk（各页面是分开打包的）。
+     */
+    const top = d?.stackTrace?.callFrames?.[0];
+    const at = top
+      ? ` @ ${top.functionName || "(anonymous)"} ${top.url.split("/").pop()}:${top.lineNumber}`
+      : "";
+    consoleErrors.push(((d?.exception?.description ?? "未捕获异常") + at).slice(0, 260));
   }
 };
 
@@ -830,6 +933,19 @@ const TOL = 12;
 
 const near = (a, b, tol = TOL) => a !== null && a !== undefined && Math.abs(a - b) <= tol;
 
+/**
+ * 探针结果判定。
+ *
+ * 除了「要命中的片段」之外，还挡一层**明确的失败标记**：探针自己返回的
+ * `no-xxx`（没找到触发器）、`probe 失败`（脚本抛了）、`MISMATCH`（探针自己算出不符）
+ * 一律算失败，哪怕期望片段恰好还在串里。
+ * 起因是一次真实的假绿：期望写「一致」，而失败串是「不一致」—— includes 照样通过。
+ */
+function probeMiss(text, want) {
+  if (/^no-|probe 失败|MISMATCH/.test(text)) return [text.slice(0, 80)];
+  return want.split("|").filter((w) => !text.includes(w));
+}
+
 // ---------------------------------------------------------------- 逐路由检查
 
 /** --route 可以给逗号分隔的子集，调试时只跑几条 */
@@ -878,8 +994,7 @@ for (const route of routes) {
   for (const probe of want.probes ?? []) {
     const outcome = await ev(probe.js).catch((e) => `probe 失败：${e.message}`);
     const text = typeof outcome === "string" ? outcome : JSON.stringify(outcome);
-    /* want 里用 | 分隔多个必须命中的片段 */
-    const missing = probe.want.split("|").filter((w) => !text.includes(w));
+    const missing = probeMiss(text, probe.want);
     if (missing.length > 0) {
       fail(`probe(${probe.desc})`, `结果里缺「${missing.join("、")}」，实测 ${text}`);
     }
@@ -903,7 +1018,7 @@ for (const route of routes) {
       "rail.items",
       `导航列钉住时 rail 上可见的快捷入口只有 ${got.railItems} 个，画板画了 8 个快捷入口 + 1 个运行日志入口`,
     );
-  if (got.navVer !== null && /^vv/.test(got.navVer))
+  if (got.navVer !== null && got.navVer.startsWith("vv"))
     fail("nav.version", `导航列版本行是「${got.navVer}」，多了一个 v`);
   if (got.statusDl === null) fail("statusbar.dl", "状态栏右端没有下载器身份格");
   else if (!got.statusDl.includes("qb-main") || !got.statusDl.includes("已连接"))
@@ -1339,7 +1454,7 @@ if (mobileRoutes.length > 0) {
     for (const probe of want.probes ?? []) {
       const outcome = await ev(probe.js).catch((e) => `probe 失败：${e.message}`);
       const text = typeof outcome === "string" ? outcome : JSON.stringify(outcome);
-      const missing = probe.want.split("|").filter((w) => !text.includes(w));
+      const missing = probeMiss(text, probe.want);
       if (missing.length > 0)
         fail(`probe(${probe.desc})`, `结果里缺「${missing.join("、")}」，实测 ${text}`);
     }
@@ -1449,6 +1564,167 @@ if (mobileRoutes.length > 0) {
   }
 }
 
+// ------------------------------------------------- 空态（画板 45）
+
+/*
+ * 画板 45 列了全站 13 处空态文案。落地把 el-empty 全换成了 PtDataState（六态组件），
+ * 但**空库下每个列表页画出了什么，一直没有人量**：正常数据那一轮永远走不到空态分支，
+ * 而空态恰恰是「什么都没有的时候页面还说不说人话」这件事。
+ *
+ * 这一段装第二层假数据（列表接口回空集合），再走几条列表页，要求：
+ *   · 真的出现了空态块（.pt-state），标题与说明都不是空字符串；
+ *   · 没有控制台报错（空数组最容易把 `arr[0].x` 这类写法打崩）；
+ *   · 没有横向溢出。
+ */
+const EMPTY_ROUTES = ["/tasks", "/chatops/notifications", "/chatops/audit", "/logs"];
+
+const emptyRoutes = EMPTY_ROUTES.filter((r) => wanted.length === 0 || wanted.includes(r));
+
+if (emptyRoutes.length > 0) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1440, height: 1024, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: emptyStubScript() }, sessionId);
+
+  const MEASURE_EMPTY = `(() => {
+    const states = [...document.querySelectorAll('.pt-state')]
+      .filter((el) => getComputedStyle(el).display !== 'none')
+      .map((el) => ({
+        title: (el.querySelector('.pt-state__title')?.textContent ?? '').trim(),
+        sub: (el.querySelector('.pt-state__sub')?.textContent ?? '').trim(),
+      }));
+    const inner = document.querySelector('.pt-shell__inner');
+    return {
+      states,
+      overflow: inner ? inner.scrollWidth - Math.round(inner.getBoundingClientRect().width) : 0,
+      unknown: [...new Set([...document.querySelectorAll('*')]
+        .filter((el) => el instanceof HTMLUnknownElement)
+        .map((el) => el.tagName.toLowerCase()))],
+    };
+  })()`;
+
+  for (const route of emptyRoutes) {
+    consoleErrors = [];
+    /* reload 一次，保证空数据桩这一层真的装上了（同 goto 里的理由） */
+    await goto(`${BASE}/#${route}`);
+    if ((await ev(`window.__ptEmptyStub === true`).catch(() => false)) !== true) {
+      await cdp.send("Page.reload", {}, sessionId);
+      await sleep(2000);
+    }
+    await sleep(2200);
+    const got = await ev(MEASURE_EMPTY);
+    const fail = (key, msg) => {
+      const gapKey = `${route}@empty ${key}`;
+      if (ALLOWED_GAPS[gapKey]) {
+        gapsUsed.add(gapKey);
+        return;
+      }
+      failures.push({ route: `${route}@empty`, board: "45 空态", key, msg });
+    };
+
+    for (const err of [...new Set(consoleErrors)].slice(0, 3)) fail("console", err);
+    if (got.overflow > 0) fail("overflow", `主区横向溢出 ${got.overflow}px`);
+    if (got.unknown.length > 0) fail("unknown", `未解析组件 ${got.unknown.join(", ")}`);
+    if (got.states.length === 0) {
+      fail("empty", "空数据下没有出现任何空态块（.pt-state）—— 页面只是一片空白");
+    } else {
+      const mute = got.states.filter((st) => !st.title);
+      if (mute.length > 0) fail("empty.title", `有 ${mute.length} 个空态块没有标题文案`);
+    }
+  }
+}
+
+// ------------------------------------------------- 登录页（画板 43）
+
+/*
+ * 画板 43：桌面 1440×1024，左半 600 品牌区，右侧 400 宽的卡居中；失败态**卡内联**
+ * （画板原话「建议改为卡内联，替换现有 alert()」）；移动端同一张卡、左右各 20 边距。
+ *
+ * 登录页在 SPA 之外（Go 模板），所以放在最后单独一趟：清掉 cookie 再打开它。
+ * 这一趟跑完 cookie 就没了，后面不能再验别的路由 —— 所以它必须是最后一段。
+ * Go 侧已有 login_page_test.go 断言模板内容与「没有 alert(」；这里补的是**真实渲染**：
+ * 卡宽、失败态出现在卡里、以及 375 下不横向溢出。
+ */
+const doLogin = wanted.length === 0 || wanted.includes("/login");
+
+if (doLogin) {
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 1440, height: 1024, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  await cdp.send("Network.enable", {}, sessionId).catch(() => {});
+  await cdp.send("Network.clearBrowserCookies", {}, sessionId).catch(() => {});
+  consoleErrors = [];
+  await goto(`${BASE}/login`);
+  await sleep(600);
+
+  const loginFail = (key, msg) => {
+    const gapKey = `/login ${key}`;
+    if (ALLOWED_GAPS[gapKey]) {
+      gapsUsed.add(gapKey);
+      return;
+    }
+    failures.push({ route: "/login", board: "43 登录", key, msg });
+  };
+
+  const card = await ev(`(() => {
+    const el = document.querySelector('.login-card');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  })()`);
+  if (!card) loginFail("card", "找不到 .login-card");
+  else if (!near(card.w, 400, 8)) loginFail("card", `登录卡宽 ${card.w}，画板 400`);
+
+  /* 失败态：填错密码提交，错误必须出现在卡里（不是 alert） */
+  const failState = await ev(`(async () => {
+    const form = document.querySelector('.login-form');
+    if (!form) return 'no-form';
+    const setVal = (el, v) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(el, v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const inputs = [...form.querySelectorAll('input')];
+    if (inputs.length < 2) return 'no-inputs';
+    setVal(inputs[0], 'admin');
+    setVal(inputs[1], 'definitely-wrong-password');
+    let alerted = false;
+    const realAlert = window.alert;
+    window.alert = () => { alerted = true; };
+    /*
+     * 用 requestSubmit 而不是点第一个 button：表单里第一个 button 是「显示密码」，
+     * 点它只会切 input.type，根本不会提交 —— 那样这条探针永远量到「没有失败态」。
+     */
+    form.requestSubmit();
+    await new Promise((r) => setTimeout(r, 2000));
+    window.alert = realAlert;
+    const box = document.querySelector('.login-alert');
+    /* 这个盒子一直在 DOM 里，靠 is-open 显形（见 server.go 的 showError） */
+    const shown = box ? box.classList.contains('is-open') : false;
+    const text = box ? (box.textContent ?? '').replace(/\\s+/g, ' ').trim() : '';
+    return 'verdict=' + (shown && !alerted ? 'ok' : 'MISMATCH') +
+      ' 卡内联=' + shown + ' alert=' + alerted + ' 文案=' + text.slice(0, 40);
+  })()`).catch((e) => `probe 失败：${e.message}`);
+  const miss = probeMiss(String(failState), "verdict=ok");
+  if (miss.length > 0) loginFail("failState", `失败态没有卡内联：${failState}`);
+
+  /* 移动端同一张卡，左右各 20 —— 375 下不该横向溢出 */
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: 375, height: 812, deviceScaleFactor: 1, mobile: true },
+    sessionId,
+  );
+  await goto(`${BASE}/login`);
+  await sleep(600);
+  const mOverflow = await ev(`document.documentElement.scrollWidth - window.innerWidth`);
+  if (mOverflow > 0) loginFail("overflow", `375 下登录页横向溢出 ${mOverflow}px`);
+  for (const err of [...new Set(consoleErrors)].slice(0, 3)) loginFail("console", err);
+}
+
 // ---------------------------------------------------------------- 报告
 
 const stale = Object.keys(ALLOWED_GAPS).filter(
@@ -1482,7 +1758,10 @@ for (const k of stale) {
 }
 
 /* 桌面与移动分开报数：把两者合成一个数字会让「覆盖了多少画板」重新变得含糊 */
-const scope = `桌面 ${routes.length} 条 + 移动 ${mobileRoutes.length} 条`;
+const scope =
+  `桌面 ${routes.length} 条 + 移动 ${mobileRoutes.length} 条` +
+  (emptyRoutes.length > 0 ? ` + 空态 ${emptyRoutes.length} 条` : "") +
+  (doLogin ? " + 登录页" : "");
 if (failures.length === 0 && stale.length === 0) {
   console.log(`\n${scope} 与画板一致（${gapsUsed.size} 条已记偏离）`);
 } else {

@@ -1563,7 +1563,8 @@ function toggleSidebar() {
             :options="renderOptions"
             :disabled="!showAllTasks" />
         </el-tooltip>
-        <el-popover placement="bottom-end" :width="264" trigger="click">
+        <!-- 画板 38 的 pop-col 是 260 宽（原来写成 264） -->
+        <el-popover placement="bottom-end" :width="260" trigger="click">
           <template #reference>
             <button type="button" class="hub__ico" aria-label="显示列">
               <PtIcon name="columns-3" :size="15" />

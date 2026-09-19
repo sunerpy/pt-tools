@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { type LogFilesResponse, logsApi, type LogsResponse } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
@@ -80,8 +81,9 @@ function levelOf(line: string): LogLevel {
  */
 const logFiles = ref<LogFilesResponse | null>(null);
 
-const activeFile = computed(() => logFiles.value?.files.find((f) => f.is_active) ?? null);
-const rotatedFiles = computed(() => logFiles.value?.files.filter((f) => f.rotated) ?? []);
+/* `?.files?.` 而不是 `?.files.`：响应里缺 files 时也只是「没有清单」，不该整页崩掉 */
+const activeFile = computed(() => logFiles.value?.files?.find((f) => f.is_active) ?? null);
+const rotatedFiles = computed(() => logFiles.value?.files?.filter((f) => f.rotated) ?? []);
 const rotatedBytes = computed(() => rotatedFiles.value.reduce((n, f) => n + f.size, 0));
 
 function formatBytes(n: number): string {
@@ -475,7 +477,7 @@ function scrollToTop() {
           class="lv-card"
           title="日志文件"
           icon="files"
-          :count="logFiles ? `${logFiles.files.length} 个` : '—'">
+          :count="logFiles?.files ? `${logFiles.files.length} 个` : '—'">
           <ul v-if="activeFile" class="lf">
             <li class="lf__row">
               <span class="lf__k">当前文件</span>
@@ -567,7 +569,25 @@ function scrollToTop() {
             v-html="line.html || '&nbsp;'" />
           <div class="virtual-spacer" :style="{ height: `${bottomSpacerHeight}px` }"></div>
         </pre>
-          <pre v-else class="log-content"><code class="log-line">暂无日志</code></pre>
+          <!--
+            空态走六态组件（画板 45：全站空态统一形态），不再是一行灰字。
+            两种空的含义不同，文案也不同：一行都没读到 vs 筛选把所有行筛掉了。
+          -->
+          <PtDataState
+            v-else
+            :state="logs.length === 0 ? 'empty' : 'zero'"
+            :title="logs.length === 0 ? '还没有日志' : '这些级别下没有日志'"
+            :sub="
+              logs.length === 0
+                ? '服务刚启动或日志文件刚轮转过，写入之后这里会自动刷新。'
+                : '取消上面的级别筛选就能看到其余行。'
+            ">
+            <template v-if="logs.length > 0" #action>
+              <el-button size="small" @click="activeLevels = new Set()">
+                <PtIcon name="x" :size="14" /><span>清空级别筛选</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </div>
       </PtPanel>
     </div>
