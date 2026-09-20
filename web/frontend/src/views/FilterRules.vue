@@ -811,9 +811,19 @@ function decisionText(decision: string | undefined): string {
       <span>优先级数字越小越先匹配，命中即停</span>
     </div>
 
-    <!-- 画板 20 的分析卡：p-order 548（匹配顺序）+ p-hint 1080（口径说明） -->
-    <div v-if="rules.length > 0" class="pt-cards pt-cards--2">
-      <PtPanel title="匹配顺序" icon="list-ordered" :count="`${rules.length} 条`">
+    <!--
+      画板 20 的分析卡：p-order 548（匹配顺序）+ p-test 516 + p-hit 1080 + p-hint 1080。
+      **只有一个 .pt-cards 容器**，`v-if` 下沉到每张卡上。
+      上一版为了让「规则怎么生效」在零规则时也显示，把它拆成相邻的第二个容器 ——
+      两个容器各带 16 的内边距，桌面上「命中统计」与它之间就变成 32；移动端两个容器的
+      内边距都被清掉，又变成 0。画板规定卡片上下一律 16，这是我拆容器拆出来的回归。
+    -->
+    <div class="pt-cards pt-cards--2">
+      <PtPanel
+        v-if="rules.length > 0"
+        title="匹配顺序"
+        icon="list-ordered"
+        :count="`${rules.length} 条`">
         <PtBreakdown
           :rows="orderRows"
           foot="按优先级从小到大排，命中即停；停用的规则不参与匹配（柱子画短一截）。" />
@@ -823,7 +833,7 @@ function decisionText(decision: string | undefined): string {
         画板 p-test 516：试跑入口。完整试跑（选数据源、看命中清单）在对话框里，
         这张卡是入口加口径说明 —— 卡里塞不下一份命中清单。
       -->
-      <PtPanel title="试跑" icon="flask-conical">
+      <PtPanel v-if="rules.length > 0" title="试跑" icon="flask-conical">
         <p class="rules-test__p">
           挑一条规则，拿真实的 RSS 数据跑一遍，看它会命中哪些种子。只读，不推送不写库。
         </p>
@@ -856,22 +866,23 @@ function decisionText(decision: string | undefined): string {
       </PtPanel>
 
       <!-- 画板 p-hit 1080：真实命中统计 -->
-      <PtPanel class="pt-cards__full" title="命中统计" icon="target" :count="`${totalHits} 次`">
+      <PtPanel
+        v-if="rules.length > 0"
+        class="pt-cards__full"
+        title="命中统计"
+        icon="target"
+        :count="`${totalHits} 次`">
         <PtBreakdown
           :rows="hitRows"
           cols
           foot="口径是「这条规则命中并入库的种子数」（TorrentInfo.filter_rule_id 的分组计数），不是试跑的模拟命中；免费自动下载的种子不记规则，不计入。" />
       </PtPanel>
-    </div>
 
-    <!--
-      「规则怎么生效」这张卡**不能跟着规则列表一起藏**。
-      它原来在 `v-if="rules.length > 0"` 的卡片容器里 —— 一条规则都没有的新用户既看不到它，
-      也看不到我删掉的那条顶部黄条，于是「关联规则之后未命中的免费种也会跳过」这件事
-      在最需要知道它的时刻反而读不到。一次评审指出这一点，判得对：
-      我说的「信息一点没少」在零规则状态下不成立。
-    -->
-    <div class="pt-cards pt-cards--wide">
+      <!--
+        「规则怎么生效」这张卡**不跟着规则列表一起藏**：一条规则都没有的新用户既看不到它，
+        也看不到我删掉的那条顶部黄条，于是「关联规则之后未命中的免费种也会跳过」这件事
+        在最需要知道它的时刻反而读不到。它没有 `v-if`，零规则时就是这一页唯一的那张卡。
+      -->
       <PtPanel class="pt-cards__full" title="规则怎么生效" icon="info">
         <ul class="rules-hint">
           <li>没给某个 RSS 关联规则时，它按<strong>免费种子</strong>自动下载，适合日常刷流。</li>

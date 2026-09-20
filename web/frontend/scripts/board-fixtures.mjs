@@ -105,16 +105,26 @@ const TASKS = Array.from({ length: 12 }, (_, i) => ({
   updatedAt: "2026-09-19T01:00:00Z",
 }));
 
+/*
+ * 字段名照 PausedTorrent 的 DTO 写。
+ *
+ * 原来这里写的是 `size_bytes`，而 DTO/界面读的是 `torrent_size` —— 于是「大小」列与进度里的
+ * 「已下载 / 总量」始终是「-」和「- / -」。一次评审把这一点记成非阻断的验证缺口，说得对：
+ * 我把进度列从 180 收到 140 之后拿截图当证据，而那张截图里根本没有真实体积文本，
+ * 等于没验过这一列在有数据时装不装得下。这是第四次栽在假数据的字段名上。
+ */
 const PAUSED = Array.from({ length: 6 }, (_, i) => ({
   id: i + 1,
   site_name: SITES[i % SITES.length][0],
   title: `Paused.Title.${i + 1}.1080p.BluRay.REMUX`,
   torrent_hash: `paused${String(i).padStart(34, "0")}`,
-  size_bytes: (10 + i) * 1024 ** 3,
+  torrent_size: (10 + i) * 1024 ** 3,
   progress: 0.2 + i * 0.1,
   downloader_name: "qb-main",
+  downloader_task_id: `paused-task-${i + 1}`,
   pause_reason: "免费期结束",
   paused_at: "2026-09-18T22:10:00Z",
+  created_at: "2026-09-18T22:10:00Z",
   state: "paused",
 }));
 

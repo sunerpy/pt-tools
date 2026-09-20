@@ -605,6 +605,20 @@ function exportCsv() {
                   <span>敏感字段已脱敏</span>
                 </span>
               </div>
+              <!--
+                结果的完整原值放在**展开行**里。
+                表里那一列只放短标签（画板 25 的胶囊就是 Success / Denied 一词标签），
+                原值 `denied:not_bound` 塞进 96 宽的列会被切断；而只把它挂在胶囊的 tooltip
+                上是不够的 —— 胶囊是个不可聚焦的 span，el-tooltip 默认又只认 hover，
+                键盘用户根本取不到。展开行由行首那个展开钮打开，Tab 到得了。
+                一次评审两轮都指着这一条，判得对。
+              -->
+              <p class="args__result">
+                结果原值：<code>{{ row.result }}</code>
+                <span v-if="resultReason(row.result)" class="args__reason">
+                  （原因 {{ resultReason(row.result) }}）
+                </span>
+              </p>
               <pre class="args__json">{{ formatJson(row.args_json) }}</pre>
             </div>
           </template>
@@ -879,6 +893,22 @@ function exportCsv() {
 .pt-band__iconbtn:focus-visible {
   outline: 2px solid var(--pt-p);
   outline-offset: 1px;
+}
+
+/* 展开行里的结果原值：与命令参数同一档的说明文字 */
+.args__result {
+  margin: 0 0 var(--pt-space-2);
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.args__result code {
+  font-family: var(--pt-font-mono);
+  color: var(--pt-t1);
+}
+
+.args__reason {
+  color: var(--pt-t3);
 }
 
 /* 触发用户：13/400 t2（画板 25 的 td-0-2「@sunerpy」是正文号，不是标签号） */

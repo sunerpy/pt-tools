@@ -1339,6 +1339,55 @@ const MEASURE = `(() => {
         ),
       )
       .filter(Boolean),
+    /*
+     * **被裁掉的横向溢出**（桌面这一趟也查）。
+     *
+     * 移动那趟先有了这条，抓出过一张七列 nowrap 的表；后来在 1440 下又撞见同一类事
+     * —— 审计页「失败与被拒」那张卡第四列的说明被卡片边缘切掉，而所有断言全绿。
+     * 判据与移动那份一致：自己或任一祖先可横向滚动不算，带省略号或多行夹断的截断不算
+     * （那是有意的），剩下的就是「没有任何提示、内容直接消失」。
+     */
+    clipped: (() => {
+      const out = [];
+      for (const root of document.querySelectorAll('.pt-panel, .pt-cards, [data-card], .ch-card')) {
+        for (const el of root.querySelectorAll('*')) {
+          if (el.scrollWidth - el.clientWidth <= 2 || el.clientWidth <= 0) continue;
+          let scrollable = false;
+          for (let a = el; a && a !== document.body; a = a.parentElement) {
+            const ox = getComputedStyle(a).overflowX;
+            if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
+          }
+          if (scrollable) continue;
+          const cs = getComputedStyle(el);
+          if (cs.textOverflow === 'ellipsis') continue;
+          if (cs.webkitLineClamp && cs.webkitLineClamp !== 'none') continue;
+          /*
+           * Element 的表格把表头与表体拆成两个 wrapper，表头那个恒被裁 —— 它的滚动由
+           * 表体的滚动条同步驱动，而那个滚动条是它的**兄弟**不是祖先，上面那圈祖先检查
+           * 看不到。内容并没有丢，跳过。
+           */
+          if (el.classList.contains('el-table__header-wrapper')) continue;
+          /*
+           * 必须真有**装不下的内容**。两种算：
+           *   ① 有一个直接子元素比容器内容盒还宽（表格塞进窄 wrapper 就是这种）；
+           *   ② 自己没有子元素、纯文本装不下（长串不换行的文字被切掉）。
+           * 两者都不是，就说明 scrollWidth 是**绝对定位**的东西撑出来的 ——
+           * 导出海报那块光晕正是这样（容器 632 < 948，而没有一个子元素超宽），
+           * 那是 overflow:hidden 有意裁掉装饰，不是内容消失。
+           *
+           * ② 这一条不能漏：第一版只写了 ①，而文本节点不算 children，
+           * 于是「一个定宽 span 里长文本被硬切」这种最常见的丢字反而查不出来。
+           */
+          const kids = [...el.children];
+          const wideKid = kids.some((c) => c.getBoundingClientRect().width > el.clientWidth + 2);
+          const textOverflows = kids.length === 0 && (el.textContent ?? '').trim().length > 0;
+          if (!wideKid && !textOverflows) continue;
+          out.push((el.className || el.tagName).toString().slice(0, 40) +
+            ' ' + el.clientWidth + '<' + el.scrollWidth);
+        }
+      }
+      return [...new Set(out)].slice(0, 6);
+    })(),
     /* 分段器也只认带里的那个：卡片内部的分段不是画板 bar-64 上那条 */
     hasSeg: inBars('.pt-seg, .el-segmented').length > 0,
     /* 表格带的列名与行高 —— 画板对表格页规定了列集合与 34 的行节奏 */
@@ -1677,6 +1726,10 @@ for (const route of routes) {
    * 关键控件。画板上画了一枚按钮或一条分段器，少了就不算按稿落地 ——
    * 光量带高与栏宽看不出「工具栏里少了分类分段」这种事。
    */
+  if (got.clipped.length > 0) {
+    fail("clipped", `卡内有被裁掉的横向溢出：${got.clipped.join(" / ")}`);
+  }
+
   if (want.needsSeg && !got.hasSeg) {
     fail("controls.seg", "画板这一页有分段器，页面上找不到");
   }
@@ -1969,6 +2022,16 @@ const MEASURE_M = `(() => {
             if (ecs.textOverflow === 'ellipsis') continue;
             /* 多行夹断（-webkit-line-clamp）也是有意截断，它自己会加省略号 */
             if (ecs.webkitLineClamp && ecs.webkitLineClamp !== 'none') continue;
+            /* Element 的表头 wrapper 恒被裁，滚动由表体的滚动条同步驱动（兄弟不是祖先） */
+            if (el.classList.contains('el-table__header-wrapper')) continue;
+            /*
+             * 必须真有装不下的内容：① 有子元素比容器还宽，或 ② 自己是纯文本且装不下。
+             * 两者都不是就是绝对定位的装饰被 overflow:hidden 裁掉，不算。
+             */
+            const kids = [...el.children];
+            const wideKid = kids.some((c) => c.getBoundingClientRect().width > el.clientWidth + 2);
+            const textOverflows = kids.length === 0 && (el.textContent ?? '').trim().length > 0;
+            if (!wideKid && !textOverflows) continue;
             out.push((el.className || el.tagName).toString().slice(0, 40) +
               ' ' + el.clientWidth + '<' + el.scrollWidth);
           }
