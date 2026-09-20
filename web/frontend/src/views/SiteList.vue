@@ -30,9 +30,6 @@ const testingReminder = reactive<Record<string, boolean>>({});
 const bulkProbing = ref(false);
 const updatingMode = reactive<Record<string, boolean>>({});
 
-/* 风险提示只在本次会话里可关：它讲的是探测机制的固有局限，不是一条会过期的通知 */
-const riskHintOpen = ref(true);
-
 const {
   loginState,
   effectiveLastActive,
@@ -940,22 +937,6 @@ async function saveLoginConfig() {
       <el-button link type="primary" size="small" @click="loadSites">重试</el-button>
     </div>
 
-    <div v-if="riskHintOpen" class="pt-note pt-note--warn page-note">
-      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-      <span class="page-note__text">
-        活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
-        但少数站点按
-        last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，别只看这里的数字。
-      </span>
-      <button
-        type="button"
-        class="page-note__x"
-        aria-label="关闭提示"
-        @click="riskHintOpen = false">
-        <PtIcon name="x" :size="14" />
-      </button>
-    </div>
-
     <!--
       画板 12 的主区：bar-64（40 高工具栏带）+ grid（438 高表格带）都是全宽平铺的带，
       不是圆角描边卡片，所以表格不再包在 PtPanel 里。
@@ -1201,9 +1182,14 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column v-if="colShown('auth')" label="认证" width="118">
+        <!-- 画板 12 的认证方式单元是纯文本 13/400（td-0-3「Cookie」），一行只有状态是胶囊 -->
+        <el-table-column
+          v-if="colShown('auth')"
+          label="认证"
+          width="118"
+          class-name="pt-cell-muted">
           <template #default="{ row }">
-            <PtTag>{{ authMethodLabel(row[1].auth_method) }}</PtTag>
+            {{ authMethodLabel(row[1].auth_method) }}
           </template>
         </el-table-column>
 
@@ -1237,17 +1223,38 @@ async function saveLoginConfig() {
         </el-table-column>
 
         <el-table-column v-if="colShown('days')" min-width="118">
+          <!--
+            列头的 popover 里连带说清「活跃时间是怎么来的」——
+            这段话原来是页面顶上一条常驻黄条（约 60px），而画板 12 的板上没有任何常驻通告，
+            画板 45 给这类口径说明的形态正是挂在列上的 popover。文字一个字没删。
+          -->
           <template #header>
-            <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
-              <span class="th-help">剩余天数 <PtIcon name="info" :size="12" /></span>
-            </el-tooltip>
+            <el-popover placement="top" :width="330" trigger="hover">
+              <template #reference>
+                <span class="th-help">剩余天数 <PtIcon name="info" :size="12" /></span>
+              </template>
+              <p class="th-help__p">距离站点封禁阈值的剩余天数；负数表示已超过阈值。</p>
+              <p class="th-help__p th-help__p--warn">
+                活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
+                但少数站点按 last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，
+                别只看这里的数字。
+              </p>
+            </el-popover>
           </template>
+          <!--
+            一格里原来叠着两枚胶囊（「30 天」+「未知」）—— 画板从头到尾一行只给一枚胶囊，
+            叠两枚之后这一列比真正的状态列还响。天数改成带语义字色的纯文本；
+            档位胶囊只在**确实需要关注**时出现，「正常 / 未知」不画。
+          -->
           <template #default="{ row }">
             <span class="days">
               <span :data-testid="`days-remaining-cell-${row[0]}`" :class="daysCellClass(row[0])">
                 {{ daysRemaining(row[0]) === null ? "—" : `${daysRemaining(row[0])} 天` }}
               </span>
-              <PtStatusPill :tone="tierTone(reminderTier(row[0]))" size="sm">
+              <PtStatusPill
+                v-if="ATTENTION_TIERS.has(reminderTier(row[0]))"
+                :tone="tierTone(reminderTier(row[0]))"
+                size="sm">
                 {{ tierLabel(reminderTier(row[0])) }}
               </PtStatusPill>
             </span>
@@ -1905,6 +1912,24 @@ async function saveLoginConfig() {
   align-items: center;
   cursor: help;
   border-bottom: 1px dotted var(--pt-t4);
+}
+
+/* 列头 popover 里的说明段：13/1.6，比表格正文松一档，长句才读得下去 */
+.th-help__p {
+  margin: 0;
+  font-size: var(--pt-fz-body);
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--pt-t2);
+  text-align: left;
+}
+
+/* 第二段是探测机制的固有局限（原来页面顶上那条黄条），用 warn 色与上一段分开 */
+.th-help__p--warn {
+  padding-top: var(--pt-space-2);
+  margin-top: var(--pt-space-2);
+  color: var(--pt-warn);
+  border-top: 1px solid var(--pt-border);
 }
 
 .ts {

@@ -537,19 +537,44 @@ function getChannelLabel(type: string) {
         title="最近的通知"
         icon="history"
         :count="`${recentLogs.length} 条`">
-        <ul v-if="recentLogs.length > 0" class="rec">
-          <li v-for="log in recentLogs.slice(0, 8)" :key="log.id" class="rec__row">
-            <PtStatusPill
-              :tone="log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'"
-              size="sm">
-              {{ log.result }}
-            </PtStatusPill>
-            <span class="rec__site">{{ log.site_name || "未知站点" }}</span>
-            <code class="rec__tid">{{ log.torrent_id }}</code>
-            <span class="rec__ch">{{ channelNameOf(log.notification_conf_id) }}</span>
-            <span class="rec__when">{{ formatWhen(log.created_at) }}</span>
-          </li>
-        </ul>
+        <!--
+          画板 22 的 p-recent 是一张**带表头的小表**（时间 / 通道 / 事件 / 站点 / 结果 /
+          延迟 / 重试，正文 12.5、只有「结果」是胶囊），不是一排 chip。
+          落地此前是无列名的 chip 串：一行里三枚色块，而且看不出哪个字段是什么。
+          「延迟」那列没有对应数据（RSS 通知日志不记投递耗时），所以不画 —— 不造数。
+        -->
+        <table v-if="recentLogs.length > 0" class="rec">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>通道</th>
+              <th>类型</th>
+              <th>站点</th>
+              <th>种子 ID</th>
+              <th>结果</th>
+              <th class="rec__num">尝试</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="log in recentLogs.slice(0, 8)" :key="log.id">
+              <td class="rec__when">{{ formatWhen(log.created_at) }}</td>
+              <td>{{ channelNameOf(log.notification_conf_id) }}</td>
+              <td>{{ log.notify_kind === "filtered" ? "仅匹配的" : "全部新种" }}</td>
+              <td>{{ log.site_name || "未知站点" }}</td>
+              <td>{{ log.torrent_id }}</td>
+              <td>
+                <PtStatusPill
+                  :tone="
+                    log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'
+                  "
+                  size="sm">
+                  {{ log.result }}
+                </PtStatusPill>
+              </td>
+              <td class="rec__num">{{ log.attempts ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
         <p v-else class="pol__empty">还没有通知记录。</p>
         <p class="pol__foot">
           完整清单、重试与取消在
@@ -727,42 +752,48 @@ function getChannelLabel(type: string) {
 }
 
 /* 最近的通知：一行一条，站点 + 种子 ID + 通道 + 时间 */
+/*
+ * 最近投递的小表 —— 画板 22 的 p-recent：表头 11/600 #7C8695 + 1px 行线，
+ * 正文 12.5，时间列 500/t1（它是这一行的身份），其余 400/t2，只有「结果」是胶囊。
+ * 卡内的小表比带里的主表轻一档：没有列竖线，也不铺表头底色。
+ */
 .rec {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
 }
 
-.rec__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--pt-space-2);
-  align-items: center;
-  font-size: var(--pt-fz-sm);
+.rec th {
+  padding: 0 var(--pt-space-2) 6px 0;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.rec td {
+  padding: 6px var(--pt-space-2) 6px 0;
+  font-size: 12.5px;
+  font-weight: 400;
   color: var(--pt-t2);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--pt-border);
 }
 
-.rec__site {
+.rec tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* 时间是这一行的身份，按画板的 td-0-0 走 500 + t1 */
+.rec td.rec__when {
   font-weight: 500;
   color: var(--pt-t1);
 }
 
-.rec__tid {
-  font-family: var(--pt-font-mono);
-  font-size: var(--pt-fz-label);
-}
-
-.rec__ch,
-.rec__when {
-  font-size: var(--pt-fz-label);
-  color: var(--pt-t3);
-}
-
-.rec__when {
-  margin-left: auto;
+.rec .rec__num {
+  text-align: right;
 }
 
 /* 带与卡片层各自管自己的留白，这一层只负责纵向堆叠 */
@@ -813,24 +844,30 @@ function getChannelLabel(type: string) {
 }
 
 /* 图标底色由 --ch-c 兑 12% 出来，四个通道的身份就靠这一枚色块 */
+/*
+ * 图标盘：画板 22 的 nt0 里那块 `ring` 是 **40×40、圆角 12、12% 语义色底**。
+ * 落地此前是 30×30 / r6 —— 小一号又方一档，卡头的重心压不住 14/700 的标题。
+ * 12 不在 4/6/8 那套里，但它是画板给这块盘定的值（盘越大圆角越大，是同一套比例）。
+ */
 .ch-card__icon {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   color: var(--ch-c);
   background: color-mix(in srgb, var(--ch-c) 12%, transparent);
-  border-radius: var(--pt-r-md);
+  border-radius: 12px;
 }
 
+/* 通道名：画板 nt0 的 `n` 是 14/700（比区块标题小一号、但更重） */
 .ch-card__name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  font-size: var(--pt-fz-h2);
-  font-weight: 600;
+  font-size: var(--pt-fz-body-lg);
+  font-weight: 700;
   color: var(--pt-t1);
   text-overflow: ellipsis;
   white-space: nowrap;
