@@ -1925,6 +1925,17 @@ const MEASURE_M = `(() => {
               if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
             }
             if (scrollable) continue;
+            /*
+             * 带省略号的截断是**有意的**，不算裁切：画板自己也这么截长标题
+             * （画板 16 的 td 就是「Dune.Part.Two.2024.2160p.UHD.BluRay.REMUX…」）。
+             * 要抓的是「没有任何提示、内容直接消失」那一类。
+             * 把这一条挪出 minBlocks 之后它立刻在 /tasks@375 报了三处省略号截断，
+             * 说明少了这个排除。
+             */
+            const ecs = getComputedStyle(el);
+            if (ecs.textOverflow === 'ellipsis') continue;
+            /* 多行夹断（-webkit-line-clamp）也是有意截断，它自己会加省略号 */
+            if (ecs.webkitLineClamp && ecs.webkitLineClamp !== 'none') continue;
             out.push((el.className || el.tagName).toString().slice(0, 40) +
               ' ' + el.clientWidth + '<' + el.scrollWidth);
           }
@@ -2130,13 +2141,19 @@ if (mobileRoutes.length > 0) {
       if (!near(got.inner.w, wantW)) fail("inner.w", `内容列宽 ${got.inner.w}，画板 ${wantW}`);
     }
 
+    /*
+     * 裁切与残留表格这两条**对每条移动路由都查**，不挂在 minBlocks 下面。
+     * 第一版放在 `if (want.minBlocks)` 里，于是只有配了 minBlocks 的路由受查 ——
+     * 评审指出我「全站生效」的说法过宽，说得对；这里把它挪出来，让说法成真。
+     */
+    if (got.clipped.length > 0) {
+      fail("clipped", `375 下卡内有被裁掉的横向溢出：${got.clipped.join(" / ")}`);
+    }
+    if (got.tables.length > 0) {
+      fail("tables", `375 下还有表格没降级成行卡（§9）：${got.tables.join(" / ")}`);
+    }
+
     if (want.minBlocks) {
-      if (got.clipped.length > 0) {
-        fail("clipped", `375 下卡内有被裁掉的横向溢出：${got.clipped.join(" / ")}`);
-      }
-      if (got.tables.length > 0) {
-        fail("tables", `375 下还有表格没降级成行卡（§9）：${got.tables.join(" / ")}`);
-      }
       const wide = got.blocks.filter((w) => near(w, M_VIEWPORT.width - M_INNER_X * 2));
       if (wide.length < want.minBlocks)
         fail(

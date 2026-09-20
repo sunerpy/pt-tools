@@ -1467,3 +1467,24 @@ bn-\*-banner，或移动端 40 高的 alert，或画板 45 的 popover）。落�
 
 验收：board-check 退出码 0、Tests 255 passed、style-scan / dialog-scan 全绿、
 `make fmt-check` 通过。
+
+### 28.1 拿到 PASS 之后又改的两处（评审 NOTES）
+
+PASS 的报告里有两条 note，都动手处理了 —— 一条是我说过头的话，一条是真实的坏链接：
+
+**「全站生效」这句话当时不成立。** 新加的裁切与残留表格两条断言写在
+`if (want.minBlocks)` 里面，也就是只有配了 `minBlocks` 的路由受查。评审说得对，
+现在把它们挪到了那个分支外面，对每条移动路由都查。
+
+挪出来之后它立刻在 `/tasks@375` 报了三处 —— **全是假红**，于是补齐了判据：
+带省略号（`text-overflow: ellipsis`）或多行夹断（`-webkit-line-clamp`）的截断是**有意的**，
+画板自己也这么截长标题（画板 16 的 td 就是「Dune.Part.Two.…REMUX…」），不算裁切；
+要抓的是「没有任何提示、内容直接消失」那一类。加上之前那条「自己或任一祖先可横向滚动
+就不算」，判据现在是三条排除。
+
+**并且重新证了一次它会红**：把移动端那份列表关掉（让七列表在 375 下重新渲染），实测两条
+断言同时报 —— `clipped: pt-panel pt-cards__full 331<518` 与 `tables: rec`。
+
+**`href="/sites"` 在 hash 路由下是坏的。** 这个应用是 `createWebHashHistory`，
+`href="/sites"` 会打到服务端的 `/sites` 而不是这一页。评审把它记成 pre-existing note，
+顺手改成 `RouterLink`。

@@ -65,7 +65,11 @@ function dismiss() {
         <span v-if="!isMobile || detailOpen" class="v2-deprecation-detail">
           v1 的「批量打开标签页同步」功能已移除，请使用浏览器扩展 popup 中的「一键打开站点」按钮；
           新功能与站点登录管理已迁移至
-          <ElLink type="primary" href="/sites" :underline="false">站点与 RSS</ElLink>
+          <!--
+            应用是 hash 路由（createWebHashHistory），`href="/sites"` 会落到
+            服务端的 /sites 而不是这一页 —— 评审把它记成 pre-existing note，顺手修掉。
+          -->
+          <RouterLink class="v2-deprecation-link" to="/sites">站点与 RSS</RouterLink>
           页面。
         </span>
         <button
@@ -123,6 +127,16 @@ function dismiss() {
 /* 正文段：窄屏由 v-if 控制收起/展开，样式上和句子其余部分一致（顺着排） */
 .v2-deprecation-detail {
   color: inherit;
+}
+
+/* 站内跳转用 RouterLink，样式对齐 ElLink 的 primary */
+.v2-deprecation-link {
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+.v2-deprecation-link:hover {
+  text-decoration: underline;
 }
 
 /* 窄屏的「详情」是按钮不是链接：它就地展开正文，不跳出去 */
