@@ -769,7 +769,7 @@ function exportCsv() {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 /* 分析卡里「这一页都成功了」的正面结论 */

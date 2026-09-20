@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PtIcon from "@/components/PtIcon";
-import { ElButton, ElLink } from "element-plus";
+import { ElLink } from "element-plus";
 import { onMounted, ref } from "vue";
 
 const STORAGE_KEY = "pt_tools_v2_banner_dismissed_v1";
@@ -34,36 +34,39 @@ function dismiss() {
     data-testid="v2-deprecation-banner"
     role="status"
     aria-live="polite">
+    <!--
+      一条流式的通告，不是「标题 + 段落 + 动作行」三层。
+      画板的页面板上没有任何常驻横幅（通告在画板里是 58 高的 toast 或移动端 40 高的 alert），
+      而这条按三层排会占掉 96px —— 每次打开首页先看 96px 的公告再看数据。
+      文字一个字没删，只是让它顺着排、动作跟在句末，高度减半。
+    -->
     <div class="pt-note v2-deprecation-alert">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
-      <div class="v2-deprecation-body">
-        <strong class="v2-deprecation-title">pt-tools v2.0 升级完成</strong>
-        <p>
-          v1 的「批量打开标签页同步」功能已移除。请使用浏览器扩展 popup 中的「一键打开站点」按钮。
-          新功能与站点登录管理已迁移至
-          <ElLink type="primary" href="/sites" :underline="false">站点与 RSS</ElLink>
-          页面。
-        </p>
-        <div class="v2-deprecation-actions">
-          <ElLink
-            type="primary"
-            href="https://github.com/sunerpy/pt-tools#v20-部署说明"
-            target="_blank"
-            rel="noopener"
-            :underline="false">
-            了解 v2 详情
-          </ElLink>
-          <ElButton
-            size="small"
-            type="primary"
-            plain
-            data-testid="v2-deprecation-dismiss"
-            @click="dismiss">
-            <PtIcon name="check" :size="13" />
-            <span style="margin-left: 4px">我知道了</span>
-          </ElButton>
-        </div>
-      </div>
+      <span class="v2-deprecation-body">
+        <strong class="pt-note__title">pt-tools v2.0 升级完成</strong>
+        <span class="v2-deprecation-sep">·</span>
+        v1 的「批量打开标签页同步」功能已移除，请使用浏览器扩展 popup 中的「一键打开站点」按钮；
+        新功能与站点登录管理已迁移至
+        <ElLink type="primary" href="/sites" :underline="false">站点与 RSS</ElLink>
+        页面。
+        <ElLink
+          class="v2-deprecation-more"
+          type="primary"
+          href="https://github.com/sunerpy/pt-tools#v20-部署说明"
+          target="_blank"
+          rel="noopener"
+          :underline="false">
+          了解 v2 详情
+        </ElLink>
+      </span>
+      <button
+        type="button"
+        class="v2-deprecation-x"
+        aria-label="我知道了"
+        data-testid="v2-deprecation-dismiss"
+        @click="dismiss">
+        <PtIcon name="check" :size="14" />
+      </button>
     </div>
   </div>
 </template>
@@ -73,22 +76,38 @@ function dismiss() {
   margin-bottom: var(--pt-space-4);
 }
 
+/* 顺着排，不分层：标题、正文、链接在同一段里流动 */
 .v2-deprecation-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-2);
   min-width: 0;
 }
 
-.v2-deprecation-title {
-  font-size: var(--pt-fz-sm);
-  font-weight: 600;
-  color: var(--pt-t1);
+.v2-deprecation-sep {
+  margin: 0 4px;
+  color: var(--pt-t4);
 }
 
-.v2-deprecation-actions {
-  display: flex;
-  gap: var(--pt-space-3);
+.v2-deprecation-more {
+  margin-left: 6px;
+}
+
+/* 关闭钮与其他通告条上的 × 同一套（dash__note-x）：24×24、hover 才显底 */
+.v2-deprecation-x {
+  display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--pt-t3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-r-sm);
+}
+
+.v2-deprecation-x:hover {
+  color: var(--pt-t1);
+  background: var(--pt-hover);
 }
 </style>

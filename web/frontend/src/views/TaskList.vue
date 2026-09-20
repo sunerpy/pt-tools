@@ -653,17 +653,23 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           width="46"
           :selectable="(row: Record<string, any>) => !row.isPushed" />
 
-        <el-table-column label="站点" prop="siteName" width="110">
-          <template #default="{ row }">
-            <PtTag>{{ row.siteName || "-" }}</PtTag>
-          </template>
-        </el-table-column>
+        <!--
+            站点名是纯文本：画板 15 / 16 的首列是 13/500 #10141A，画板 26 的站点列是
+            13/400 #4E5765 —— 一行只有「状态 / 结果」那一列是胶囊。
+            站点名包成描边胶囊之后，每行有两三枚色块在抢注意力，反而看不出哪个是状态。
+          -->
+        <el-table-column label="站点" prop="siteName" width="110" class-name="pt-cell-strong" />
 
+        <!--
+          画板 16 的优惠单元是**纯文本** 13/400（td-0-1「Free」），只有「状态」那一列是胶囊。
+          优惠是种子的属性，不是任务状态；两列都画成色块之后，一眼扫过去分不出
+          哪个才是「这条任务现在怎么了」。语义仍然留在字色上。
+        -->
         <el-table-column label="优惠" width="86">
           <template #default="{ row }">
-            <PtStatusPill :tone="getDiscount(row).tone" size="sm">
+            <span class="tl-free" :class="`is-${getDiscount(row).tone}`">
               {{ getDiscount(row).text }}
-            </PtStatusPill>
+            </span>
           </template>
         </el-table-column>
 
@@ -919,6 +925,28 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 .tl-site {
   flex: 0 0 auto;
   width: 150px;
+}
+
+/*
+ * 优惠列：纯文本 + 语义字色（画板 td-0-1 是 13/400 #4E5765）。
+ * free / 2xfree 用 ok 色标出来，其余保持正文色 —— 免费是这一列唯一值得抬眼的信息。
+ */
+.tl-free {
+  font-weight: 400;
+  color: var(--pt-t2);
+}
+
+.tl-free.is-ok {
+  font-weight: 500;
+  color: var(--pt-ok);
+}
+
+.tl-free.is-warn {
+  color: var(--pt-warn);
+}
+
+.tl-free.is-info {
+  color: var(--pt-info);
 }
 
 /* 画板 chip-1「优惠」那枚下拉：与 chip 同宽档，不抢搜索框的位置 */

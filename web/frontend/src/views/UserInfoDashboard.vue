@@ -60,9 +60,11 @@ const loginStates = ref<Record<string, SiteLoginState>>({});
 const isMobile = useIsMobile();
 const { effectiveLastActive, daysRemaining, reminderTier, tierLabel } = useLoginState(loginStates);
 
-/** 两条顶部说明各自可关，关掉后本次会话不再出现（不落盘：换页回来仍要提醒） */
+/**
+ * 顶部那条扩展推荐可关，关掉后本次会话不再出现（不落盘：换页回来仍要提醒）。
+ * 活跃时间的口径说明原来也是一条常驻黄条，现在挂到「判定活跃」列头的 popover 上了。
+ */
 const extHintOpen = ref(true);
-const riskHintOpen = ref(true);
 
 type PillTone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
@@ -803,22 +805,6 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div v-if="riskHintOpen" class="pt-note pt-note--warn dash__note">
-      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-      <span>
-        活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；
-        但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，
-        请勿仅依赖此处数据。
-      </span>
-      <button
-        type="button"
-        class="dash__note-x"
-        aria-label="关闭提示"
-        @click="riskHintOpen = false">
-        <PtIcon name="x" :size="14" />
-      </button>
-    </div>
-
     <!-- 站点详情表格：画板 grid 是全宽平铺的带，不是圆角描边卡片 -->
     <PtToolbar band>
       <!--
@@ -1039,11 +1025,16 @@ onUnmounted(() => {
         </el-table-column>
 
         <!-- 分享率 -->
+        <!--
+          画板 10 的分享率单元是**纯文本** 13/400（td-0-3「9.14」），不是胶囊。
+          十四列的表里每格都套一个胶囊，读起来是一片色块而不是一列数字 ——
+          所以去掉壳、留下语义色：分享率低到危险时仍然靠字色示警，只是不再画框。
+        -->
         <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
           <template #default="{ row }">
-            <PtStatusPill :tone="ratioTone(row.ratio)" size="sm">
+            <span class="num-tone" :class="`is-${ratioTone(row.ratio)}`">
               {{ formatRatio(row.ratio) }}
-            </PtStatusPill>
+            </span>
           </template>
         </el-table-column>
 
@@ -1051,7 +1042,8 @@ onUnmounted(() => {
         <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
           <template #default="{ row }">
             <div class="seed">
-              <PtStatusPill tone="ok" size="sm">{{ row.seeding }}</PtStatusPill>
+              <!-- 画板 td-0-4「286」是纯文本；做种数本身不是状态，不需要胶囊 -->
+              <span class="num-tone">{{ row.seeding }}</span>
               <div v-if="hasHnR(row)" class="hnr">
                 <el-tooltip
                   v-if="row.hnrPreWarning > 0"
@@ -1137,13 +1129,32 @@ onUnmounted(() => {
           </template>
         </el-table-column>
 
-        <!-- 判定活跃 -->
+        <!--
+          判定活跃：口径说明挂在**列头**上，不再占页面顶部一整条。
+          原来那条常驻黄色提示有三行、约 90px，每次打开这一页都得先读它 ——
+          而画板的页面板上没有任何常驻横幅，画板 45 给这类说明的形态正是列上的 popover
+          （那张板上「落地要点 · LevelTooltip」就是同一个套路）。说明一个字没删。
+        -->
         <el-table-column
           v-if="colShown('active')"
-          label="判定活跃"
           min-width="110"
           align="center"
           class-name="pt-cell-muted">
+          <template #header>
+            <el-popover placement="top" :width="330" trigger="hover">
+              <template #reference>
+                <span class="th-help th-help--warn">
+                  判定活跃
+                  <PtIcon name="triangle-alert" :size="12" />
+                </span>
+              </template>
+              <p class="th-help__p">
+                活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；
+                但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，
+                请勿仅依赖此处数据。
+              </p>
+            </el-popover>
+          </template>
           <template #default="{ row }">
             <span class="ts">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
           </template>
@@ -1641,6 +1652,35 @@ onUnmounted(() => {
   color: var(--pt-t4);
 }
 
+/*
+ * 表里的数字：画板的单元是纯文本 13/400 #4E5765（td-0-*），所以默认就是正文色。
+ * 语义只落在**字色**上，不再画胶囊 —— 分享率危险时字变红，正常时和别的数字一样安静。
+ * 这是「去掉壳、留下信号」：十四列每格一个色块的版本，远看是一片颜色不是一张表。
+ */
+.num-tone {
+  font-weight: 400;
+  color: var(--pt-t2);
+}
+
+.num-tone.is-ok {
+  color: var(--pt-ok);
+}
+
+.num-tone.is-warn {
+  font-weight: 500;
+  color: var(--pt-warn);
+}
+
+.num-tone.is-dang {
+  font-weight: 500;
+  color: var(--pt-dang);
+}
+
+/* info 档（分享率偏低但不危险）不改色：它不是要示警，改色反而抢注意力 */
+.num-tone.is-info {
+  color: var(--pt-t2);
+}
+
 /* ---- 做种数 + H&R ---- */
 .seed {
   display: inline-flex;
@@ -1719,6 +1759,21 @@ onUnmounted(() => {
   align-items: center;
   cursor: help;
   border-bottom: 1px dotted var(--pt-t4);
+}
+
+/* 带告警口径的列头：图标用 warn 色，让「这一列有前提」在表头就看得见 */
+.th-help--warn :deep(svg) {
+  color: var(--pt-warn);
+}
+
+/* popover 里的说明段：13/1.6，比表格正文松一档，长句才读得下去 */
+.th-help__p {
+  margin: 0;
+  font-size: var(--pt-fz-body);
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--pt-t2);
+  text-align: left;
 }
 
 .days {

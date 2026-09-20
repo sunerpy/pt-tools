@@ -62,9 +62,14 @@
   height: var(--pt-row-h-roomy);
 }
 
-/* 每列一条竖发丝线，grid 变体的电子表格观感就来自这里 */
-.pt-grid.el-table th.el-table__cell:not(:first-child),
-.pt-grid.el-table td.el-table__cell:not(:first-child) {
+/*
+ * 列竖线**只画在表头**。
+ *
+ * 画板 10 / 12 / 16 / 25 四张表一致：竖线全是 30 高（正好一个表头），表体只有横向行线。
+ * 之前两处都画（表头 + 每个单元格），于是整张表变成一张网格纸 —— 线比数据还密。
+ * 表头有竖线就够分列，表体靠行线与对齐读，看上去轻得多，这也正是画板的样子。
+ */
+.pt-grid.el-table th.el-table__cell:not(:first-child) {
   border-left: 1px solid var(--pt-border);
 }
 
@@ -107,6 +112,21 @@
 .pt-grid.el-table td.pt-cell-strong .cell {
   font-weight: 500;
   color: var(--pt-t1);
+}
+
+/*
+ * 表内的站点名：纯文本。画板 15 / 16 的首列是 13/500 #10141A，画板 26 的站点列是
+ * 13/400 #4E5765，一行里只有「状态 / 结果」那一列是胶囊。
+ * 加 `is-muted` 用于站点名不在首列的表（那时候它只是一个普通字段，不是这一行的身份）。
+ */
+.pt-cell-site {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.pt-cell-site.is-muted {
+  font-weight: 400;
+  color: var(--pt-t2);
 }
 
 .pt-grid.el-table td.pt-cell-num .cell {
@@ -153,8 +173,14 @@
   line-height: var(--pt-lh-body);
   color: var(--pt-t2);
   background: color-mix(in srgb, var(--pt-note-c) 8%, transparent);
-  border-left: 2px solid var(--pt-note-c);
-  border-radius: 0 var(--pt-r-sm) var(--pt-r-sm) 0;
+  /*
+   * 画板 07 / 19 的 bn-*-banner 规格：8% 语义色底 + **1px 同色整圈边** + 圆角 8，无阴影
+   * （标题 13/600 走语义色，正文 12/400 走 t2 —— 字色这两条本来就对上了）。
+   * 之前是「左边一条 2px 色条 + 右侧 r4」：那是另一套惯例，在白带上左边缘会跟
+   * 主区的内缩线对不齐，右侧两个圆角又让它看着像被裁掉一半。
+   */
+  border: 1px solid color-mix(in srgb, var(--pt-note-c) 55%, transparent);
+  border-radius: var(--pt-r-lg);
 }
 
 .pt-note--ok {
@@ -167,6 +193,13 @@
 
 .pt-note--dang {
   --pt-note-c: var(--pt-dang);
+}
+
+/* 通告标题：画板 bn-* 里是 13/600 且走语义色（正文才是 12/400 t2） */
+.pt-note__title {
+  font-size: var(--pt-fz-body);
+  font-weight: 600;
+  color: var(--pt-note-c);
 }
 
 .pt-note__icon {
@@ -182,7 +215,7 @@
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 /*
@@ -311,6 +344,26 @@
 
 .pt-seg.el-segmented .el-segmented__item-selected {
   box-shadow: var(--pt-shadow-sm);
+}
+
+/* 选中那档是 600（画板 seg 里「全部站点」12/600，其余 12/500）——
+   只靠颜色分辨哪一档选中，在 12px 上读起来很弱 */
+.pt-seg.el-segmented .el-segmented__item.is-selected {
+  font-weight: 600;
+}
+
+/*
+ * 工具栏里的输入框与下拉：画板 bar-64 上这些控件统一是**圆角 4 + #EDF0F4 底 + 1px 发丝边**
+ * （q 是 220×28、r4、stroke #DDE2E9）。落地此前是 r6、没有边 —— 没有边的填色块在白带上
+ * 边界含糊，尤其挨着 seg 时两者看起来不是一套东西。
+ * 只作用于带里：表单里的输入框仍走全局的 r6，那不是同一个场景。
+ */
+.pt-band--toolbar .el-input__wrapper,
+.pt-band--toolbar .el-select__wrapper,
+.pt-band--sel .el-input__wrapper,
+.pt-band--sel .el-select__wrapper {
+  border-radius: var(--pt-r-sm);
+  box-shadow: inset 0 0 0 1px var(--pt-border);
 }
 
 /*

@@ -874,7 +874,7 @@ function scrollToTop() {
   padding: 1px 4px;
   font-family: var(--pt-font-mono);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 .log-path {
@@ -882,7 +882,7 @@ function scrollToTop() {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 /*

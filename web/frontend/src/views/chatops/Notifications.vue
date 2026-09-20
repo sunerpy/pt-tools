@@ -716,7 +716,7 @@ function getChannelLabel(type: string) {
   padding: 1px 4px;
   font-family: var(--pt-font-mono);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 .pol__foot :deep(.el-button) {

@@ -149,9 +149,15 @@ function reloadLevels() {
 <template>
   <el-popover placement="bottom" :width="420" trigger="hover" popper-class="level-tooltip-popper">
     <template #reference>
-      <el-tag size="small" type="info" class="level-tag">
+      <!--
+        画板 10 的等级单元是**纯文本** 13/400 #4E5765（td-0-1「Crazy User」），不是胶囊。
+        但它要能点开等级详情，所以留一个克制的可交互提示：虚线下划线，hover 变实、字色抬到 t1。
+        原来那枚全圆角的 primary 色胶囊还带 hover 上浮 —— 一张十四列的表里，
+        每行一个跳动的彩色药丸，比它承载的信息响得多。
+      -->
+      <span class="level-ref" role="button" tabindex="0">
         {{ currentLevelName || "-" }}
-      </el-tag>
+      </span>
     </template>
 
     <div class="level-tooltip-content">

@@ -474,7 +474,7 @@ function formatProgress(progress: number): string {
           <el-table-column type="selection" width="46" />
           <el-table-column label="站点" prop="site_name" width="110">
             <template #default="{ row }">
-              <PtTag>{{ row.site_name || "-" }}</PtTag>
+              <span class="pt-cell-site">{{ row.site_name || "-" }}</span>
             </template>
           </el-table-column>
           <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
@@ -552,7 +552,7 @@ function formatProgress(progress: number): string {
             <template #title>{{ row.title || "-" }}</template>
 
             <template #meta>
-              <PtTag>{{ row.site_name || "-" }}</PtTag>
+              <span class="pt-cell-site">{{ row.site_name || "-" }}</span>
               <span>{{ formatSize(row.torrent_size) }}</span>
               <span>
                 <PtIcon name="hard-drive" :size="11" />
@@ -644,7 +644,7 @@ function formatProgress(progress: number): string {
 
           <el-table-column label="站点" prop="site_name" width="110">
             <template #default="{ row }">
-              <PtTag>{{ row.site_name || "-" }}</PtTag>
+              <span class="pt-cell-site">{{ row.site_name || "-" }}</span>
             </template>
           </el-table-column>
           <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
@@ -693,7 +693,7 @@ function formatProgress(progress: number): string {
             <template #title>{{ row.title || "-" }}</template>
 
             <template #meta>
-              <PtTag>{{ row.site_name || "-" }}</PtTag>
+              <span class="pt-cell-site">{{ row.site_name || "-" }}</span>
               <span>
                 <PtIcon name="hard-drive" :size="11" />
                 {{ row.downloader_name || "-" }}

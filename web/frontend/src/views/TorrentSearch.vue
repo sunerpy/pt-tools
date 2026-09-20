@@ -1594,7 +1594,7 @@ const footNote = computed(() => {
 
         <el-table-column label="站点" prop="sourceSite" width="90" align="center" sortable="custom">
           <template #default="{ row }">
-            <PtTag>{{ row.sourceSite }}</PtTag>
+            <span class="pt-cell-site">{{ row.sourceSite }}</span>
           </template>
         </el-table-column>
 

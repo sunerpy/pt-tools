@@ -1676,7 +1676,7 @@ function ruleNameOf(id: number): string {
   padding: 1px 4px;
   font-family: var(--pt-font-mono);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 .sd-foot :deep(.el-button) {

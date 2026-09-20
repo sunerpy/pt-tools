@@ -602,7 +602,7 @@ function getConfNameByConfId(confId?: number) {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 /* 栏宽 612、内缩 16、卡间 16 都由 .pt-cards--lead 给 */

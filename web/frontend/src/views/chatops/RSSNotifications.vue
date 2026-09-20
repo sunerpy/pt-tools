@@ -495,7 +495,7 @@ onBeforeUnmount(() => {
 
         <el-table-column prop="site_name" label="站点" width="110">
           <template #default="{ row }">
-            <PtTag>{{ row.site_name || "-" }}</PtTag>
+            <span class="pt-cell-site is-muted">{{ row.site_name || "-" }}</span>
           </template>
         </el-table-column>
 
@@ -763,7 +763,7 @@ onBeforeUnmount(() => {
   padding: 1px 4px;
   font-family: var(--pt-font-mono);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 /* 幂等口径卡：固定说明，条目之间留 8 */
@@ -783,7 +783,7 @@ onBeforeUnmount(() => {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 .idem-ok {

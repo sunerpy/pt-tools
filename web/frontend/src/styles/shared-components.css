@@ -516,18 +516,24 @@
   text-decoration: underline;
 }
 
-.level-tag {
+/*
+ * 等级单元：画板是纯文本 13/400 #4E5765。这里只加一条虚线下划线表示「点得开」——
+ * 之前是全圆角 primary 胶囊 + hover 上浮，一张十四列的表里每行一枚彩色药丸在跳。
+ */
+.level-ref {
   cursor: pointer;
-  border-radius: var(--pt-radius-full);
-  border-color: color-mix(in srgb, var(--pt-color-primary) 30%, transparent);
-  color: var(--pt-color-primary-active);
-  background: color-mix(in srgb, var(--pt-color-primary) 12%, transparent);
-  transition: all var(--pt-transition-fast);
+  color: var(--pt-t2);
+  text-decoration: underline dotted color-mix(in srgb, var(--pt-t3) 60%, transparent);
+  text-underline-offset: 3px;
+  transition:
+    color var(--pt-transition-fast),
+    text-decoration-color var(--pt-transition-fast);
 }
 
-.level-tag:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--pt-shadow-sm);
+.level-ref:hover,
+.level-ref:focus-visible {
+  color: var(--pt-t1);
+  text-decoration-color: var(--pt-p);
 }
 
 .level-tooltip-content {
@@ -832,10 +838,6 @@ html.dark .version-content .release-item {
 
 html.dark .version-content .release-changelog-wrapper {
   background: color-mix(in srgb, var(--pt-bg-surface-muted) 84%, var(--pt-bg-surface));
-}
-
-html.dark .level-tag {
-  color: var(--pt-color-primary-hover);
 }
 
 html.dark .level-tooltip-content .level-item.special {

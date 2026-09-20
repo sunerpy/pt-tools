@@ -48,10 +48,16 @@ withDefaults(
   font-size: var(--pt-fz-label);
 }
 
+/*
+ * sm = **表内状态胶囊**：画板 10 / 16 的 st-* 是 50×18、r4、14% 底、文字 11/500 同色。
+ * 落地此前是 17 高 + 10px（脚注号）—— 10px 的中文在表格里已经偏小，
+ * 而画板给表内状态留的就是 11 号（表头也是 11）。
+ * KPI 带那枚 delta 才是 17 高 + 10px（画板 d*），它在 PtKpiBar 里单独压回去。
+ */
 .pt-pill--sm {
-  height: 17px;
+  height: 18px;
   padding: 0 6px;
-  font-size: var(--pt-fz-foot);
+  font-size: var(--pt-fz-label);
 }
 
 .pt-pill__dot {

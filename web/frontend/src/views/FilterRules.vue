@@ -1166,7 +1166,7 @@ function decisionText(decision: string | undefined): string {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   background: var(--pt-hover);
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
 }
 
 /* 带之间不留间隔（画板上它们连着）；顶部那条提示自己内缩 16 */

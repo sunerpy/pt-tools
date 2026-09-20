@@ -136,7 +136,21 @@ function hue(i: number) {
   min-height: var(--pt-kpi-h);
   padding: var(--pt-space-2) var(--pt-pad);
   border-top: 1px solid var(--pt-border);
-  border-left: 1px solid var(--pt-border);
+  /*
+   * 格间竖线**上下各留 14px**（画板 kpibar 的 vh1..vh5 是 y=14、高 36，在 64 高的带里）。
+   * 通栏到底的竖线会把这条带切成一格格盒子；留白的短线只起分隔作用，轻得多。
+   * 用背景渐变而不是 ::before：这样仍然靠外层「往左上挪 1px + overflow 裁掉」那套规则
+   * 消掉最左那条线，格数与换行都不用改规则。
+   */
+  background-image: linear-gradient(
+    to bottom,
+    transparent 0 14px,
+    var(--pt-border) 14px calc(100% - 14px),
+    transparent calc(100% - 14px)
+  );
+  background-repeat: no-repeat;
+  background-position: left top;
+  background-size: 1px 100%;
 }
 
 .pt-kpi__top {
@@ -148,6 +162,15 @@ function hue(i: number) {
 
 .pt-kpi__icon {
   flex: 0 0 auto;
+}
+
+/*
+ * KPI 的变化胶囊：画板 kpibar 的 d* 是 17 高、文字 10/500（比表内状态那枚小一档）。
+ * 公用的 .pt-pill--sm 按画板的**表内**规格是 18/11，所以这里压回 KPI 自己的尺寸。
+ */
+.pt-kpi__cell :deep(.pt-pill--sm) {
+  height: 17px;
+  font-size: var(--pt-fz-foot);
 }
 
 .pt-kpi__label {

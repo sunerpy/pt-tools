@@ -54,7 +54,7 @@
   color: #ffffff;
   background: #be123c;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--pt-r-sm);
   font-weight: 700;
 }
 
