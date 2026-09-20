@@ -689,9 +689,15 @@ const EXPECT = {
           const rows = () => [...document.querySelectorAll('.pt-band--grid tbody tr')]
             .map((tr) => (tr.textContent ?? ''));
           const all = rows();
-          /* 期望值从页面自己算：全部档里有几行是 denied:* / error:*，筛完就该剩几行 */
-          const wantDenied = all.filter((t) => t.includes('denied')).length;
-          const wantError = all.filter((t) => t.includes('error')).length;
+          /*
+           * 期望值从页面自己算：全部档里有几行的结果胶囊写着「被拒」/「出错」，筛完就该剩几行。
+           * 原来按行文本里的 denied / error 字样算（注意：这段在模板字符串里，不能写反引号）——
+           * 后来胶囊改成短标签（画板 25 的胶囊里是 Success / Denied 这种一词标签，
+           * 原始值 denied:not_bound 在 96 宽的列里会被切断），那个判据就失效了，
+           * 这条探针当场报了 no-sample。按显示的标签算才稳。
+           */
+          const wantDenied = all.filter((t) => t.includes('被拒')).length;
+          const wantError = all.filter((t) => t.includes('出错')).length;
           if (wantDenied === 0 || wantError === 0) return 'no-sample:' + all.length;
           if (!pick('被拒绝')) return 'no-denied-seg';
           await wait(900);
@@ -704,12 +710,12 @@ const EXPECT = {
           const back = rows();
           /* 颜色也一起验：denied:* 要 warn、error:* 要 dang（按整串查会全落灰色） */
           const pills = [...document.querySelectorAll('.pt-band--grid tbody .pt-pill')];
-          const dPill = pills.find((p) => (p.textContent ?? '').includes('denied'));
-          const ePill = pills.find((p) => (p.textContent ?? '').includes('error'));
+          const dPill = pills.find((p) => (p.textContent ?? '').includes('被拒'));
+          const ePill = pills.find((p) => (p.textContent ?? '').includes('出错'));
           const colorOk = Boolean(dPill && dPill.className.includes('warn')) &&
             Boolean(ePill && ePill.className.includes('dang'));
-          const ok = denied.length === wantDenied && denied.every((t) => t.includes('denied')) &&
-            err.length === wantError && err.every((t) => t.includes('error')) &&
+          const ok = denied.length === wantDenied && denied.every((t) => t.includes('被拒')) &&
+            err.length === wantError && err.every((t) => t.includes('出错')) &&
             back.length === all.length && denied.length < all.length && colorOk;
           return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
             ' 全部 ' + all.length + ' / 被拒绝 ' + denied.length + '(期望 ' + wantDenied + ')' +

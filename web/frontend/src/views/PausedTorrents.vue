@@ -512,17 +512,30 @@ function formatProgress(progress: number): string {
           <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
             <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
           </el-table-column>
-          <el-table-column label="暂停时间" width="150" class-name="pt-cell-muted">
+          <!--
+            时间单行截断（画板 17 的 td 就是「2026/9/16 14:…」）：让它换行会把行顶高，
+            而且第二行正好藏在右侧 fixed 操作列的覆盖层底下 —— 看起来像数据缺了一截。
+          -->
+          <el-table-column label="暂停时间" width="150" class-name="pt-cell-muted pt-cell-1line">
             <template #default="{ row }">{{ formatTime(row.paused_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right" class-name="pt-cell-act">
+          <!--
+            操作列只放图标。列宽合计 1192 > 容器 1078，这一列是 fixed 覆盖层，
+            带文字的两个按钮在 120 里放不下 —— 实测「删除」被切成「删」。
+            画板 12 的 ops 列只有 63 宽，本来就是图标列；tooltip 补回文字。
+          -->
+          <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="resumeTorrent(row)">
-                <PtIcon name="play" :size="14" /><span>恢复</span>
-              </el-button>
-              <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
-                <PtIcon name="trash-2" :size="14" /><span>删除</span>
-              </el-button>
+              <el-tooltip content="恢复" placement="top">
+                <el-button link type="primary" size="small" @click="resumeTorrent(row)">
+                  <PtIcon name="play" :size="15" />
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="删除" placement="top">
+                <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
+                  <PtIcon name="trash-2" :size="15" />
+                </el-button>
+              </el-tooltip>
             </template>
           </el-table-column>
         </el-table>

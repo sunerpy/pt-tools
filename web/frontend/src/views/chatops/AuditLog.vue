@@ -28,6 +28,17 @@ const CHANNEL_LABELS: Record<string, string> = {
   wecom_webhook: "企业微信",
 };
 
+/*
+ * 表格里的通道用短名：画板 25 的 td-0-1 是「Telegram」单行，而「QQ (OneBot)」在 110 宽的
+ * 列里会折成两行，把那几行顶高一截。筛选下拉里仍是全名，那里不缺地方。
+ */
+const CHANNEL_SHORT: Record<string, string> = {
+  telegram: "Telegram",
+  qq_onebot: "QQ",
+  webhook: "Webhook",
+  wecom_webhook: "企业微信",
+};
+
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {
   success: "ok",
   denied: "warn",
@@ -386,8 +397,32 @@ function channelLabel(type: string) {
   return CHANNEL_LABELS[type] || type;
 }
 
+function channelShort(type: string) {
+  return CHANNEL_SHORT[type] ?? channelLabel(type);
+}
+
 function resultTone(result: string) {
   return RESULT_TONES[resultKind(result)] || "neutral";
+}
+
+/** 冒号后面那段原因（没有就是空串）—— 有原因才挂 tooltip */
+function resultReason(result: string): string {
+  return (result ?? "").split(":").slice(1).join(":");
+}
+
+/*
+ * 胶囊里的短标签。画板 25 用的是 Success / Denied 这种一词标签，
+ * 而库里是 `denied:not_bound` 这种带原因的串 —— 原样塞进 96 宽的列会被切断。
+ */
+const RESULT_LABEL: Record<string, string> = {
+  success: "成功",
+  denied: "被拒",
+  error: "出错",
+};
+
+function resultLabel(result: string): string {
+  const kind = resultKind(result);
+  return RESULT_LABEL[kind] ?? kind ?? "-";
 }
 
 function isArgsOpen(id: number) {
@@ -579,29 +614,49 @@ function exportCsv() {
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
 
-        <el-table-column prop="channel_type" label="通道" width="110">
+        <!--
+          画板 25 这一行里**只有「结果」是胶囊**：通道是纯文本 13/400「Telegram」、
+          触发用户是「@sunerpy」、命令是「/search Dune Part Tw…」，都没有壳。
+          落地此前通道包 PtTag、触发用户与命令各包一个 code 片 —— 一行四枚色块，
+          真正的状态（结果）反而不突出。命令仍用等宽字体，那是它的身份，不需要底色。
+        -->
+        <el-table-column prop="channel_type" label="通道" width="110" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ channelShort(row.channel_type) }}</template>
+        </el-table-column>
+
+        <el-table-column
+          prop="channel_user_id"
+          label="触发用户"
+          min-width="140"
+          class-name="pt-cell-muted pt-cell-1line">
           <template #default="{ row }">
-            <PtTag>{{ channelLabel(row.channel_type) }}</PtTag>
+            <span class="uid">{{ row.channel_user_id || "-" }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="channel_user_id" label="触发用户" min-width="140">
+        <el-table-column
+          prop="command"
+          label="命令"
+          min-width="140"
+          class-name="pt-cell-strong pt-cell-1line">
           <template #default="{ row }">
-            <code class="uid">{{ row.channel_user_id || "-" }}</code>
+            <span class="cmd">{{ row.command }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="command" label="命令" min-width="140" class-name="pt-cell-strong">
-          <template #default="{ row }">
-            <code class="cmd">{{ row.command }}</code>
-          </template>
-        </el-table-column>
-
+        <!--
+          画板 25 的结果胶囊里是**短标签**（「Success」63×18 / 「Denied」57×18），
+          而库里存的是带原因后缀的 `denied:not_bound`、`error:lookup_binding` ——
+          原样塞进 96 宽的列里会被切成「denied:not_b…」，读不出是什么原因也读不完。
+          胶囊只放短标签，完整值（含原因）挂 tooltip；原因本身在「失败与被拒」卡里有专栏。
+        -->
         <el-table-column prop="result" label="结果" width="96">
           <template #default="{ row }">
-            <PtStatusPill :tone="resultTone(row.result)" size="sm">
-              {{ row.result }}
-            </PtStatusPill>
+            <el-tooltip :content="row.result" placement="top" :disabled="!resultReason(row.result)">
+              <PtStatusPill :tone="resultTone(row.result)" size="sm">
+                {{ resultLabel(row.result) }}
+              </PtStatusPill>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -823,13 +878,13 @@ function exportCsv() {
 }
 
 /* 命令自己带 / 前缀，做成一枚 primary 底的小胶囊，扫一列就能看出执行了什么 */
+/*
+ * 命令：画板 25 的 td-0-3 是「/search Dune Part Tw…」纯文本 13/400。
+ * 等宽字体留着（那是命令的身份），底色与内边距去掉 —— 一行里只有「结果」该有底色。
+ */
 .cmd {
-  padding: 1px 6px;
   font-family: var(--pt-font-mono);
-  font-size: var(--pt-fz-label);
-  color: var(--pt-p);
-  background: var(--pt-p-soft);
-  border-radius: var(--pt-r-sm);
+  color: var(--pt-t1);
 }
 
 .lat--slow {

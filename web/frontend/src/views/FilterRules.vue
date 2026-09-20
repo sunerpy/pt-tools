@@ -502,6 +502,20 @@ function getPatternTypeLabel(type: string) {
   return patternTypes.find((t) => t.value === type)?.label || type;
 }
 
+/*
+ * 表格里的类型用短名。画板 20 的 td-0-3 是「正则」，而表单里那组单选需要「正则表达式」
+ * 这种说得清的全名 —— 96 宽的列装不下全名，实测被截成「正则表达式 …」。
+ */
+const SHORT_TYPE: Record<string, string> = {
+  keyword: "关键词",
+  wildcard: "通配符",
+  regex: "正则",
+};
+
+function getShortTypeLabel(type: string) {
+  return SHORT_TYPE[type] ?? getPatternTypeLabel(type);
+}
+
 function getMatchFieldLabel(field: string | undefined) {
   return matchFields.find((f) => f.value === field)?.label || "标题和标签";
 }
@@ -536,22 +550,11 @@ function decisionText(decision: string | undefined): string {
       </el-button>
     </Teleport>
 
-    <div class="pt-note pt-note--warn rules-intro">
-      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-      <div class="note-body">
-        <strong>过滤规则等于精准下载，不是「免费之外再多下一些」</strong>
-        <p>
-          没有关联过滤规则时，RSS 订阅默认自动下载免费种子，适合日常刷流。一旦给某个 RSS
-          关联了规则，系统就认为你要精准下载：只有命中规则的种子会被推送，其余种子即使免费也会跳过。
-        </p>
-        <p>
-          想要「规则命中的下、所有免费的也下」这种旧行为，把该 RSS 的下载模式留在
-          <code>跟随全局</code>，并在全局设置里选 <code>仅免费（忽略过滤规则）</code>；或者干脆不给
-          这个 RSS 关联规则。
-        </p>
-      </div>
-    </div>
-
+    <!--
+      顶部那条 80px 的常驻黄条删掉了：它讲的三点与下面「规则怎么生效」那张卡**逐条重复**，
+      而画板 20 的板上没有任何常驻通告 —— 这类说明的位置就是 p-hint 那张卡。
+      信息一点没少，只是不再在每次打开这一页时先占掉一屏的十二分之一。
+    -->
     <!-- 画板 20 的 bar-64：分段 + 搜索 + 两枚 chip + 右侧图标钮，全部是本地筛选 -->
     <PtToolbar band>
       <el-segmented
@@ -665,16 +668,19 @@ function decisionText(decision: string | undefined): string {
           <template #default="{ row }">{{ row.name }}</template>
         </el-table-column>
 
-        <el-table-column label="匹配模式" min-width="200">
+        <!--
+          画板 20 的这一行里**一枚胶囊都没有**：匹配模式「2160p.*REMUX」、类型「正则」、
+          仅免费「是」全是 13/400 纯文本。落地此前是 code 片 + PtTag + 胶囊三枚色块，
+          而这一列里真正要读的是模式本身。匹配模式保留等宽字体（那是它的身份），去掉底色。
+        -->
+        <el-table-column label="匹配模式" min-width="200" class-name="pt-cell-1line">
           <template #default="{ row }">
-            <code class="pattern">{{ row.pattern }}</code>
+            <span class="pattern">{{ row.pattern }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column label="类型" width="96">
-          <template #default="{ row }">
-            <PtTag>{{ getPatternTypeLabel(row.pattern_type) }}</PtTag>
-          </template>
+        <el-table-column label="类型" width="96" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ getShortTypeLabel(row.pattern_type) }}</template>
         </el-table-column>
 
         <el-table-column
@@ -694,12 +700,12 @@ function decisionText(decision: string | undefined): string {
           <template #default="{ row }">{{ row.priority }}</template>
         </el-table-column>
 
-        <el-table-column v-if="ruleColShown('free')" label="仅免费" width="80">
-          <template #default="{ row }">
-            <PtStatusPill :tone="row.require_free ? 'ok' : 'neutral'" size="sm">
-              {{ row.require_free ? "是" : "否" }}
-            </PtStatusPill>
-          </template>
+        <el-table-column
+          v-if="ruleColShown('free')"
+          label="仅免费"
+          width="80"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">{{ row.require_free ? "是" : "否" }}</template>
         </el-table-column>
 
         <el-table-column
@@ -716,14 +722,22 @@ function decisionText(decision: string | undefined): string {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="120" fixed="right" class-name="pt-cell-act">
+        <!--
+          操作列只放图标：画板 20 的 ops-* 是 63 宽的图标列，而带文字的两个按钮在 120 里
+          放不下 —— 实测「删除」被切成「删」。tooltip 补回文字。
+        -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEditDialog(row)">
-              <PtIcon name="pencil" :size="14" /><span>编辑</span>
-            </el-button>
-            <el-button link type="danger" size="small" @click="deleteRule(row)">
-              <PtIcon name="trash-2" :size="14" /><span>删除</span>
-            </el-button>
+            <el-tooltip content="编辑" placement="top">
+              <el-button link type="primary" size="small" @click="openEditDialog(row)">
+                <PtIcon name="pencil" :size="15" />
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <el-button link type="danger" size="small" @click="deleteRule(row)">
+                <PtIcon name="trash-2" :size="15" />
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -1173,26 +1187,6 @@ function decisionText(decision: string | undefined): string {
 .filter-rules-page {
   display: flex;
   flex-direction: column;
-}
-
-.rules-intro {
-  margin: var(--pt-pad) var(--pt-pad) 0;
-}
-
-/* 说明块里的多段正文：.pt-note 只管容器，段落间距归页面 */
-.note-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.note-body strong {
-  color: var(--pt-t1);
-}
-
-.note-body p {
-  margin: 0;
 }
 
 .pattern {
