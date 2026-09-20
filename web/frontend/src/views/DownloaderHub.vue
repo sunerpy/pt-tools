@@ -2070,7 +2070,7 @@ function toggleSidebar() {
                   </template>
 
                   <template #status>
-                    <PtStatusPill :tone="rowStateTone(row)" size="sm">
+                    <PtStatusPill dot :tone="rowStateTone(row)" size="sm">
                       {{ rowStateLabel(row) }}
                     </PtStatusPill>
                   </template>

@@ -424,7 +424,7 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
           </template>
 
           <template #status>
-            <PtStatusPill :tone="site.enabled ? 'ok' : 'neutral'" size="sm">
+            <PtStatusPill dot :tone="site.enabled ? 'ok' : 'neutral'" size="sm">
               {{ site.enabled ? "已启用" : "未启用" }}
             </PtStatusPill>
           </template>
@@ -745,7 +745,7 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad) 0;
 }
 
 /* 表格贴边，所以面板内的提示条要自己补一圈外边距 */

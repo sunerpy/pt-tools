@@ -43,8 +43,17 @@ export function useLoginState(loginStates: Ref<Record<string, SiteLoginState>>) 
     return (loginState(name)?.probe_mode as "auto" | "manual" | "disabled") ?? "auto";
   }
 
+  /*
+   * 只有**明确的** none（后端算出来「离阈值还远」）才回空串（= 正常 / 绿）。
+   * 认不出来的档位一律走 info：它和 unknown 同一档，界面上是中性灰。
+   * 此前 default 回空串，于是任何没见过的档位字符串都被染成绿色的「正常」，
+   * 而 tierLabel 的 default 印的是「未知」—— 一枚绿底的「未知」胶囊，
+   * 把「没有数据」说成了「站点健康」。后端将来新加一档就会踩到。
+   */
   function tierTagType(tier: ReminderTier): "" | "info" | "primary" | "warning" | "danger" {
     switch (tier) {
+      case "none":
+        return "";
       case "30d":
       case "pre-warn":
         return "primary";
@@ -56,9 +65,8 @@ export function useLoginState(loginStates: Ref<Record<string, SiteLoginState>>) 
       case "banned-imminent":
         return "danger";
       case "unknown":
-        return "info";
       default:
-        return "";
+        return "info";
     }
   }
 

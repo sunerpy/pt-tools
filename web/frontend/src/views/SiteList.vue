@@ -1476,45 +1476,59 @@ async function saveLoginConfig() {
               <PtIcon name="clock" :size="11" />
               活跃 {{ formatTimeAgo(effectiveLastActive(name)) }}
             </span>
-            <span :data-testid="`days-remaining-cell-${name}`" :class="daysCellClass(name)">
-              {{ daysRemaining(name) === null ? "剩余 —" : `剩余 ${daysRemaining(name)} 天` }}
-            </span>
             <!--
+              剩余天数和它的口径 ⓘ 必须是**同一个 flex 项**：ⓘ 的触控区是 44 宽，
+              单独当一项时 meta 那行放不下它，它就自己换到第三行去，卡上多出一整行空白
+              还看着像个断了的控件。包一层之后它跟着数字走，换行也是一起换。
+
               口径说明在移动端的入口。桌面把它挂在「剩余天数」列头的 popover 上，
               而移动端是行卡、没有列头 —— 一次评审查出这段说明对移动用户**完全不可达**，
               判得对：压缩高度不能变成拿掉信息。这里给一个 ⓘ，点/聚焦都能打开同一段话。
             -->
-            <el-popover placement="top" :width="300" trigger="click">
-              <template #reference>
-                <button
-                  type="button"
-                  class="card-why"
-                  :aria-label="`${name} 的活跃时间口径说明`"
-                  @click.stop>
-                  <PtIcon name="info" :size="12" />
-                </button>
-              </template>
-              <p class="th-help__p">距离站点封禁阈值的剩余天数；负数表示已超过阈值。</p>
-              <p class="th-help__p th-help__p--warn">
-                活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
-                但少数站点按 last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，
-                别只看这里的数字。
-              </p>
-            </el-popover>
+            <span class="card-days">
+              <span :data-testid="`days-remaining-cell-${name}`" :class="daysCellClass(name)">
+                {{ daysRemaining(name) === null ? "剩余 —" : `剩余 ${daysRemaining(name)} 天` }}
+              </span>
+              <el-popover placement="top" :width="300" trigger="click">
+                <template #reference>
+                  <button
+                    type="button"
+                    class="card-why"
+                    :aria-label="`${name} 的活跃时间口径说明`"
+                    @click.stop>
+                    <PtIcon name="info" :size="12" />
+                  </button>
+                </template>
+                <p class="th-help__p">距离站点封禁阈值的剩余天数；负数表示已超过阈值。</p>
+                <p class="th-help__p th-help__p--warn">
+                  活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
+                  但少数站点按 last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，
+                  别只看这里的数字。
+                </p>
+              </el-popover>
+            </span>
           </template>
 
-          <!-- 暂不可用时它比保号档位更要紧：站点用不了，档位也就没有意义 -->
+          <!--
+            暂不可用时它比保号档位更要紧：站点用不了，档位也就没有意义。
+            「更多」也挤在这一行的右端：画板 30 的行卡高 88，而把它单独放进 #actions
+            就要多一条分隔线加一个 44 的按钮行，实测把卡撑到 142 —— 一屏从 5 张掉到 3 张。
+            那一格里装的全是低频动作，不值这个价钱；图标钮的 44 触控靠负 margin 压回去，
+            视觉上只占 28，触控仍是 §9 要求的 44。
+          -->
           <template #status>
-            <PtStatusPill v-if="site.unavailable" tone="dang" size="sm">暂不可用</PtStatusPill>
-            <PtStatusPill v-else :tone="tierTone(reminderTier(name))" size="sm">
+            <PtStatusPill v-if="site.unavailable" dot tone="dang" size="sm">暂不可用</PtStatusPill>
+            <PtStatusPill v-else dot :tone="tierTone(reminderTier(name))" size="sm">
               {{ tierLabel(reminderTier(name)) }}
             </PtStatusPill>
-          </template>
-
-          <template #actions>
             <el-dropdown class="card-more" trigger="click" @command="onCardCommand">
-              <el-button size="small" :data-testid="`site-more-btn-${name}`" @click.stop>
-                <PtIcon name="ellipsis" :size="14" /><span>更多</span>
+              <el-button
+                size="small"
+                text
+                :aria-label="`${name} 的更多操作`"
+                :data-testid="`site-more-btn-${name}`"
+                @click.stop>
+                <PtIcon name="ellipsis" :size="16" />
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -1933,9 +1947,24 @@ async function saveLoginConfig() {
 }
 
 /* 带 tooltip 的表头：虚线下划线提示「这里有解释」，比只放个图标更好点中 */
+/* 「剩余 N 天 + ⓘ」作为一个整体参与 meta 的换行（见模板里那段注释） */
+.card-days {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
 /*
  * 行卡上的 ⓘ：触控目标按 §9 的「≥ 44×44」给足，视觉上只有 12 的图标。
  * 它是移动端读到「活跃时间口径」的唯一入口，所以不能只做成 hover。
+ *
+ * 44 就老老实实占 44 宽。两种「让它看起来小一点」的写法都试过，都错：
+ *   · 负 margin（-14px -16px）只把后面的兄弟挪走，自己那 44 的盒子还在，
+ *     .card-days / __status / __top 三层都真的横向溢出；
+ *   · 绝对定位的 ::before（inset: -12px）也一样 —— 绝对定位的后代照样算进
+ *     祖先的 scrollable overflow，连自己都溢出（card-why 20<32）。
+ * 两次都是裁切检测抓出来的。所以宽度不缩，只用纵向负 margin 把 44 高压回文字行；
+ * 换行问题交给外面那层 .card-days（它和天数一起换行，不会剩一个孤零零的 ⓘ）。
  */
 .card-why {
   display: inline-flex;
@@ -2096,7 +2125,7 @@ async function saveLoginConfig() {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-pad);
+  padding: var(--pt-pad) 0;
 }
 
 /* ---- 表格下方的分析卡 ---- */
@@ -2236,21 +2265,26 @@ async function saveLoginConfig() {
 }
 
 /*
- * 「更多」是 el-dropdown 包了一层按钮，所以容器要自己声明高度。
+ * 「更多」挤在状态胶囊右边，不再单独占一行 #actions。
  *
- * 不再撑满一行：卡上现在只剩这一个按钮（主操作是整卡可点），撑满会让它看着像
- * 这张卡的主操作，而它装的全是低频动作。靠右放一个 44 高的小按钮就够了。
+ * 它装的全是低频动作（主操作是整卡可点），不值一条分隔线加一个 44 高的按钮行 ——
+ * 那样一张卡从画板 30 的 88 涨到 142，一屏从 5 张掉到 3 张。
+ * 图标钮就按 44×44 占位（横向缩不得，理由见 .card-why 上面那段注释），
+ * 只用 -13 = (44 − 18)/2 的**纵向**负 margin 把方框压在胶囊中线上 ——
+ * 纵向负 margin 不产生横向溢出，裁切检测只量横向。
  */
-.pt-rowcard__actions .card-more {
+.pt-rowcard__status .card-more {
   display: flex;
   flex: 0 0 auto;
-  min-height: var(--pt-m-touch);
-  margin-left: auto;
+  margin-top: -13px;
+  margin-bottom: -13px;
 }
 
 .card-more :deep(.el-button) {
-  width: 100%;
+  width: var(--pt-m-touch);
   min-height: var(--pt-m-touch);
+  padding: 0;
+  color: var(--pt-t3);
 }
 
 /* 下拉项的图标与文字间距。菜单被 teleport 到 body，但 scoped 是属性选择器，照样生效 */

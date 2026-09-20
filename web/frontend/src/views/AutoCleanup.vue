@@ -858,7 +858,9 @@ async function executeClean() {
             </template>
 
             <template #status>
-              <PtStatusPill :tone="previewTone(row)" size="sm">{{ previewText(row) }}</PtStatusPill>
+              <PtStatusPill dot :tone="previewTone(row)" size="sm">{{
+                previewText(row)
+              }}</PtStatusPill>
             </template>
 
             <template v-if="row.dirUsedBytes > 0" #progress>
@@ -968,7 +970,7 @@ async function executeClean() {
             </template>
 
             <template #status>
-              <PtStatusPill :tone="cleanTone(row)" size="sm">{{ cleanText(row) }}</PtStatusPill>
+              <PtStatusPill dot :tone="cleanTone(row)" size="sm">{{ cleanText(row) }}</PtStatusPill>
             </template>
 
             <template v-if="row.dirUsedBytes > 0" #progress>
@@ -1135,7 +1137,7 @@ async function executeClean() {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad) 0;
 }
 
 /* 备注独占一行：整类拒绝的原因带着路径，挤在 meta 的数字之间根本读不出来 */

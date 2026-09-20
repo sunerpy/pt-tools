@@ -1845,8 +1845,9 @@ onUnmounted(() => {
 .cards {
   display: flex;
   flex-direction: column;
-  gap: var(--pt-space-3);
-  padding: var(--pt-pad);
+  /* 卡间距跟画板 30 / 31 一样是 8；这里原来是 12，全站十二个行卡列表里只有它一个不一样 */
+  gap: var(--pt-space-2);
+  padding: var(--pt-pad) 0;
 }
 
 .card {

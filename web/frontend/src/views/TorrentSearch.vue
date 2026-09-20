@@ -2342,7 +2342,7 @@ const footNote = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-pad);
+  padding: var(--pt-pad) 0;
 }
 
 .card-link {

@@ -895,6 +895,119 @@ const RAIL_GAP_REASON =
   "所以这条不按画板改回去。导航列收起时这些入口照旧出现。";
 
 /*
+ * **有意裁剪**的白名单：按类名显式列出，每条写明为什么它被裁不算丢内容。
+ *
+ * 为什么用白名单而不是「聪明的判据」：上一版我为了消掉这两个误报，把条件收成
+ * 「必须有一个子元素比容器还宽，或者自己是纯文本」—— 一次评审当场指出这**削弱了断言**：
+ * 一行 nowrap 的 flex 里两个各 60 宽的子项塞进 100 宽的容器（100<120），
+ * 两个子项都不单独超宽，于是整类「多个兄弟合计超宽」和「文本与元素混排」的溢出都漏掉了，
+ * 而这些在收紧之前是会红的。判得对：为了两个误报放走一整类真问题不是等价交换。
+ *
+ * 所以判据回到宽的那一版，误报按名字一个个排除 —— 名单短、每条有理由、新出现的裁切
+ * 不在名单里就会红。
+ */
+const CLIP_ALLOW_ENTRIES = [
+  [
+    "el-table__header-wrapper",
+    "Element 把表头与表体拆成两个 wrapper，表头那个恒被裁 —— 它的滚动由表体的滚动条同步驱动，" +
+      "而那个滚动条是它的兄弟不是祖先，祖先检查看不到。内容没丢。",
+  ],
+  [
+    "poster",
+    "导出分享图的装饰光晕是 `.poster::before`：absolute、200% 宽的径向渐变，" +
+      "靠 overflow:hidden 裁掉正是它的实现方式。伪元素枚举不到，所以只能按名字排除。",
+  ],
+];
+const CLIP_ALLOW_NAMES = CLIP_ALLOW_ENTRIES.map(([n]) => n);
+
+/*
+ * 「被裁掉的横向溢出」检测器 —— 注入进两份 MEASURE，也用于下面那个自检。
+ *
+ * 抽成一个函数的原因：这条断言被我弱化过一次（为了消两个误报，把条件收成「必须有子元素
+ * 超宽」，于是「多个兄弟合计超宽」整类漏掉）。检测器一旦是个独立函数，就能拿合成 DOM
+ * 反向验它 —— 见 CLIP_SELFTEST。
+ *
+ * 判为裁切：scrollWidth 明显超过 clientWidth，且
+ *   · 自己与所有祖先都不能横向滚（能滚就是有意的可滚区域）；
+ *   · 没有省略号、也没有多行夹断（那两种是有意的截断，画板自己也这么截长标题）；
+ *   · 类名不在有意裁剪白名单里。
+ */
+const CLIP_FN = `
+  const CLIP_ALLOW = new Set(${JSON.stringify(CLIP_ALLOW_NAMES)});
+  const clipIn = (roots) => {
+    const out = [];
+    for (const root of roots) {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.scrollWidth - el.clientWidth <= 2 || el.clientWidth <= 0) continue;
+        let scrollable = false;
+        for (let a = el; a && a !== document.body; a = a.parentElement) {
+          const ox = getComputedStyle(a).overflowX;
+          if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
+        }
+        if (scrollable) continue;
+        const cs = getComputedStyle(el);
+        if (cs.textOverflow === 'ellipsis') continue;
+        if (cs.webkitLineClamp && cs.webkitLineClamp !== 'none') continue;
+        if ([...el.classList].some((c) => CLIP_ALLOW.has(c))) continue;
+        out.push((el.className || el.tagName).toString().slice(0, 40) +
+          ' ' + el.clientWidth + '<' + el.scrollWidth);
+      }
+    }
+    return [...new Set(out)];
+  };
+`;
+
+/*
+ * 检测器的**反向自检**：往页面里塞几个合成的溢出样本，看 clipIn 是不是都抓得到，
+ * 再塞两个「有意截断」的样本，看它是不是都放过。跑完立刻把沙盒删掉。
+ *
+ * 为什么需要它：这条断言被我弱化过一次 —— 为了消掉两个误报，我把条件收成
+ * 「必须有一个子元素比容器还宽」，于是「多个兄弟合计超宽」「文本与元素混排」整类漏掉，
+ * 而 board-check 照旧退 0。一次评审当场判这是 assertion weakening。
+ * 判据现在回到宽的那一版 + 具名白名单，而这个自检就是拦住下一次弱化的那道闸：
+ * 谁再把判据收窄，这里会立刻红。
+ */
+const CLIP_SELFTEST = `${CLIP_FN}
+(() => {
+  const box = document.createElement('div');
+  box.id = 'pt-clip-selftest';
+  box.style.cssText = 'position:fixed;left:-9999px;top:0;width:400px';
+  box.innerHTML = [
+    /* ① 单个子元素超宽（表格塞进窄 wrapper 就是这种） */
+    '<div class="t-one pt-panel" style="width:100px;overflow:hidden">' +
+      '<div style="width:300px;height:8px"></div></div>',
+    /* ② 多个兄弟合计超宽 —— 每个都不单独超宽，正是被弱化的那一版漏掉的形状 */
+    '<div class="t-sum pt-panel" style="width:100px;overflow:hidden;display:flex;flex-wrap:nowrap">' +
+      '<div style="flex:0 0 60px;height:8px"></div><div style="flex:0 0 60px;height:8px"></div></div>',
+    /* ③ 文本与元素混排：一个子元素 + 一段长文本，合起来装不下 */
+    '<div class="t-mix pt-panel" style="width:100px;overflow:hidden;white-space:nowrap">' +
+      '<span style="display:inline-block;width:60px"></span>' +
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</div>',
+    /* ④ 纯文本装不下 */
+    '<div class="t-text pt-panel" style="width:100px;overflow:hidden;white-space:nowrap">' +
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</div>',
+    /* ⑤ 带省略号的截断 —— 有意的，必须放过 */
+    '<div class="t-ell pt-panel" style="width:100px;overflow:hidden;white-space:nowrap;' +
+      'text-overflow:ellipsis">ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</div>',
+    /* ⑥ 自己能横向滚 —— 有意的，必须放过 */
+    '<div class="t-scroll pt-panel" style="width:100px;overflow-x:auto;white-space:nowrap">' +
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</div>',
+  ].join('');
+  document.body.appendChild(box);
+  const hits = clipIn(box.querySelectorAll('.pt-panel')).join(' | ');
+  /* clipIn 从 root 的**后代**里找，所以把每个样本自己也当一次 root */
+  const own = clipIn([box]).join(' | ');
+  const all = hits + ' | ' + own;
+  box.remove();
+  const caught = (k) => all.includes(k);
+  const want = ['t-one', 't-sum', 't-mix', 't-text'];
+  const reject = ['t-ell', 't-scroll'];
+  const missed = want.filter((k) => !caught(k));
+  const wrong = reject.filter((k) => caught(k));
+  return { ok: missed.length === 0 && wrong.length === 0, missed, wrong, all: all.slice(0, 200) };
+})()`;
+
+/*
  * 「画板画了、落地没有」这一类偏离的前缀。
  *
  * 分出这个标记的原因：偏离表里其实混着三类东西 —— 技术上做不了的、owner 拍板保留的、
@@ -1268,6 +1381,7 @@ const MEASURE = `(() => {
    * 「带」的范围：工具栏带 / 页头带 / 批量选择带。画板的 bar-64 就是这几条，
    * 控件身份只在这里面采 —— 整页采会让卡片里或对话框里同名的按钮冒充工具栏控件。
    */
+  ${CLIP_FN}
   const bars = [...document.querySelectorAll('.pt-band--toolbar, .pt-band--head, .pt-band--sel, .pt-head')];
   const inBars = (sel) => bars.flatMap((b) => [...b.querySelectorAll(sel)]);
   return {
@@ -1347,47 +1461,9 @@ const MEASURE = `(() => {
      * 判据与移动那份一致：自己或任一祖先可横向滚动不算，带省略号或多行夹断的截断不算
      * （那是有意的），剩下的就是「没有任何提示、内容直接消失」。
      */
-    clipped: (() => {
-      const out = [];
-      for (const root of document.querySelectorAll('.pt-panel, .pt-cards, [data-card], .ch-card')) {
-        for (const el of root.querySelectorAll('*')) {
-          if (el.scrollWidth - el.clientWidth <= 2 || el.clientWidth <= 0) continue;
-          let scrollable = false;
-          for (let a = el; a && a !== document.body; a = a.parentElement) {
-            const ox = getComputedStyle(a).overflowX;
-            if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
-          }
-          if (scrollable) continue;
-          const cs = getComputedStyle(el);
-          if (cs.textOverflow === 'ellipsis') continue;
-          if (cs.webkitLineClamp && cs.webkitLineClamp !== 'none') continue;
-          /*
-           * Element 的表格把表头与表体拆成两个 wrapper，表头那个恒被裁 —— 它的滚动由
-           * 表体的滚动条同步驱动，而那个滚动条是它的**兄弟**不是祖先，上面那圈祖先检查
-           * 看不到。内容并没有丢，跳过。
-           */
-          if (el.classList.contains('el-table__header-wrapper')) continue;
-          /*
-           * 必须真有**装不下的内容**。两种算：
-           *   ① 有一个直接子元素比容器内容盒还宽（表格塞进窄 wrapper 就是这种）；
-           *   ② 自己没有子元素、纯文本装不下（长串不换行的文字被切掉）。
-           * 两者都不是，就说明 scrollWidth 是**绝对定位**的东西撑出来的 ——
-           * 导出海报那块光晕正是这样（容器 632 < 948，而没有一个子元素超宽），
-           * 那是 overflow:hidden 有意裁掉装饰，不是内容消失。
-           *
-           * ② 这一条不能漏：第一版只写了 ①，而文本节点不算 children，
-           * 于是「一个定宽 span 里长文本被硬切」这种最常见的丢字反而查不出来。
-           */
-          const kids = [...el.children];
-          const wideKid = kids.some((c) => c.getBoundingClientRect().width > el.clientWidth + 2);
-          const textOverflows = kids.length === 0 && (el.textContent ?? '').trim().length > 0;
-          if (!wideKid && !textOverflows) continue;
-          out.push((el.className || el.tagName).toString().slice(0, 40) +
-            ' ' + el.clientWidth + '<' + el.scrollWidth);
-        }
-      }
-      return [...new Set(out)].slice(0, 6);
-    })(),
+    clipped: clipIn(
+      document.querySelectorAll('.pt-panel, .pt-cards, [data-card], .ch-card'),
+    ).slice(0, 6),
     /* 分段器也只认带里的那个：卡片内部的分段不是画板 bar-64 上那条 */
     hasSeg: inBars('.pt-seg, .el-segmented').length > 0,
     /* 表格带的列名与行高 —— 画板对表格页规定了列集合与 34 的行节奏 */
@@ -1943,6 +2019,7 @@ const MOBILE_EXPECT = {
 };
 
 const MEASURE_M = `(() => {
+  ${CLIP_FN}
   const box = (el) => {
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
@@ -1994,51 +2071,9 @@ const MEASURE_M = `(() => {
      * §9 的房规是「桌面表格一律降级成行卡，不做横向滚动表格」，所以顺带把窄屏里
      * 还活着的 table 也报出来。
      */
-    clipped: (() => {
-      const out = [];
-      const roots = document.querySelectorAll('.pt-panel, .pt-rowcard, [data-card], .ch-card, .pt-cards');
-      for (const root of roots) {
-        for (const el of root.querySelectorAll('*')) {
-          if (el.scrollWidth - el.clientWidth > 2 && el.clientWidth > 0) {
-            /*
-             * 自己或**任一祖先**能横向滚就不算裁切：那是有意的可滚区域。
-             * 只看自己会误报 —— 日志页那个 <pre> 溢出，而滚动条在它的父容器上，
-             * 内容其实滚得到。第一版就这么报了一处假红。
-             */
-            let scrollable = false;
-            for (let a = el; a && a !== document.body; a = a.parentElement) {
-              const ox = getComputedStyle(a).overflowX;
-              if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
-            }
-            if (scrollable) continue;
-            /*
-             * 带省略号的截断是**有意的**，不算裁切：画板自己也这么截长标题
-             * （画板 16 的 td 就是「Dune.Part.Two.2024.2160p.UHD.BluRay.REMUX…」）。
-             * 要抓的是「没有任何提示、内容直接消失」那一类。
-             * 把这一条挪出 minBlocks 之后它立刻在 /tasks@375 报了三处省略号截断，
-             * 说明少了这个排除。
-             */
-            const ecs = getComputedStyle(el);
-            if (ecs.textOverflow === 'ellipsis') continue;
-            /* 多行夹断（-webkit-line-clamp）也是有意截断，它自己会加省略号 */
-            if (ecs.webkitLineClamp && ecs.webkitLineClamp !== 'none') continue;
-            /* Element 的表头 wrapper 恒被裁，滚动由表体的滚动条同步驱动（兄弟不是祖先） */
-            if (el.classList.contains('el-table__header-wrapper')) continue;
-            /*
-             * 必须真有装不下的内容：① 有子元素比容器还宽，或 ② 自己是纯文本且装不下。
-             * 两者都不是就是绝对定位的装饰被 overflow:hidden 裁掉，不算。
-             */
-            const kids = [...el.children];
-            const wideKid = kids.some((c) => c.getBoundingClientRect().width > el.clientWidth + 2);
-            const textOverflows = kids.length === 0 && (el.textContent ?? '').trim().length > 0;
-            if (!wideKid && !textOverflows) continue;
-            out.push((el.className || el.tagName).toString().slice(0, 40) +
-              ' ' + el.clientWidth + '<' + el.scrollWidth);
-          }
-        }
-      }
-      return [...new Set(out)].slice(0, 6);
-    })(),
+    clipped: clipIn(
+      document.querySelectorAll('.pt-panel, .pt-rowcard, [data-card], .ch-card, .pt-cards'),
+    ).slice(0, 6),
     /* 窄屏里还活着的表格（§9：桌面表格一律降级成行卡） */
     tables: [...document.querySelectorAll('.pt-panel table, [data-card] table, .ch-card table')]
       .map((t) => (t.className || 'table').toString().slice(0, 30)),
@@ -2100,6 +2135,57 @@ const MEASURE_M = `(() => {
       : null,
     /* 行卡：§9 要求桌面表格在移动端降级成行卡 */
     rowCards: document.querySelectorAll('.pt-rowcard').length,
+    /*
+     * 行卡本体的形状。画板 30 / 31 量出来的一套：343 宽、r8、1px #DDE2E9、
+     * 横向内边距 14（于是内容起点落在屏幕 x=30，两块板都是 30）、卡间 8，
+     * 而且卡是摆在 #F2F4F7 画布上的 —— 白卡压在白色表格面上只剩一根边框，层次全平。
+     * 状态胶囊左边还有一枚 5px 圆点（st > dot），这是行卡上唯一的状态标记。
+     */
+    rowCard: (() => {
+      const cards = [...document.querySelectorAll('.pt-rowcard')];
+      if (!cards.length) return null;
+      const el = cards[0];
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const band = el.parentElement?.parentElement ?? null;
+      const gaps = [];
+      for (let i = 1; i < cards.length; i++) {
+        const prev = cards[i - 1].getBoundingClientRect();
+        const cur = cards[i].getBoundingClientRect();
+        if (cur.top >= prev.bottom - 1) gaps.push(Math.round(cur.top - prev.bottom));
+      }
+      const withStatus = cards.filter((c) => c.querySelector('.pt-rowcard__status .pt-pill'));
+      return {
+        w: Math.round(r.width),
+        padX: Math.round(parseFloat(cs.paddingLeft) || 0),
+        contentX: Math.round(r.left + (parseFloat(cs.paddingLeft) || 0)),
+        radius: Math.round(parseFloat(cs.borderTopLeftRadius) || 0),
+        gaps: [...new Set(gaps)],
+        /* 承载行卡的那条带还是白的吗？画板要的是透出画布 */
+        onSurface: band ? getComputedStyle(band).backgroundColor === 'rgb(255, 255, 255)' : false,
+        statusPills: withStatus.length,
+        statusDots: withStatus.filter((c) =>
+          c.querySelector('.pt-rowcard__status .pt-pill__dot')).length,
+        /*
+         * 卡内图标钮的**命中区**：视觉可以只有 20/28，44 由 ::before 的负 inset 往外撑。
+         * 用负 margin 撑是错的 —— 盒子还是 44，只是把兄弟挪走，父级会真的溢出（裁切那条会抓）。
+         */
+        touch: [...el.querySelectorAll('button, .el-button')].map((b) => {
+          const br = b.getBoundingClientRect();
+          const bf = getComputedStyle(b, '::before');
+          const grow = (side) => {
+            if (bf.content === 'none') return 0;
+            const v = parseFloat(bf[side]);
+            return Number.isFinite(v) && v < 0 ? -v : 0;
+          };
+          return {
+            label: b.getAttribute('aria-label') || (b.textContent ?? '').trim().slice(0, 8) || '?',
+            w: Math.round(br.width + grow('left') + grow('right')),
+            h: Math.round(br.height + grow('top') + grow('bottom')),
+          };
+        }),
+      };
+    })(),
     /*
      * 还在横向滚的表格。§9 明确「不做横向滚动表格」，而一张 el-table 在 375 下默认
      * 就是横向滚的 —— 它自己滚，不会让 documentElement 溢出，所以只看页面溢出量不出来。
@@ -2271,6 +2357,41 @@ if (mobileRoutes.length > 0) {
       fail("filterRow", `筛选区高 ${got.toolbar.h}，画板 ${want.filterRowH}`);
     if (want.rowSpark && got.rowCardsWithSpark === 0)
       fail("rowCards.spark", "画板 30 的行卡里有 8 根柱的走势图，行卡里一个都没有");
+    /*
+     * 行卡的形状按画板 30 / 31 量。不挂在任何 want.* 开关下 —— 有行卡就查，
+     * 因为这些数（343 / 14 / 8 / 圆点 / 灰画布）在两块板上完全一致，是全站行卡的规格。
+     */
+    if (got.rowCard) {
+      const rc = got.rowCard;
+      /* 宽度走默认容差：模拟视口的竖向滚动条占掉 10 左右，和 inner.w 那条同一个原因 */
+      if (!near(rc.w, M_VIEWPORT.width - M_INNER_X * 2))
+        fail("rowCard.w", `行卡 ${rc.w} 宽，画板 30 / 31 都是 343（外壳 16 槽之内的整宽）`);
+      if (rc.padX !== 14) fail("rowCard.padX", `行卡横向内边距 ${rc.padX}，画板是 14`);
+      if (!near(rc.contentX, M_INNER_X + 14, 2))
+        fail("rowCard.contentX", `卡内容起点在屏幕 x=${rc.contentX}，画板 30 / 31 都是 30`);
+      if (rc.radius !== 8) fail("rowCard.radius", `行卡圆角 ${rc.radius}，画板是 8`);
+      if (rc.gaps.some((g) => g !== 8))
+        fail("rowCard.gap", `卡间距 ${rc.gaps.join(" / ")}，画板是 8`);
+      if (rc.onSurface)
+        fail(
+          "rowCard.canvas",
+          "行卡摆在白色表格面上：画板 30 / 31 是白卡压 #F2F4F7 画布，压在白面上只剩一根边框",
+        );
+      if (rc.statusPills > 0 && rc.statusDots !== rc.statusPills)
+        fail(
+          "rowCard.statusDot",
+          `${rc.statusPills} 张卡有状态胶囊，只有 ${rc.statusDots} 张带 5px 圆点（画板 30 / 31 的 st 都带 dot）`,
+        );
+      for (const t of rc.touch) {
+        if (t.w < 44 || t.h < 44)
+          fail(
+            `rowCard.touch(${t.label})`,
+            `卡内按钮命中区 ${t.w}×${t.h}，§9 的下限是 44×44。` +
+              "卡内**不要**用负 margin 或绝对定位的 ::before 去撑命中区 —— 两种都会让祖先真的横向溢出，" +
+              "裁切那条会抓（card-why 20<32 就是这么来的）。老老实实占满 44 宽，再用纵向负 margin 压高度。",
+          );
+      }
+    }
     if (got.scrollers.length > 0)
       fail("scroller", `还有横向滚动的表格：${got.scrollers.join(" / ")}（§9 不允许）`);
 
@@ -2373,6 +2494,32 @@ if (emptyRoutes.length > 0) {
           `这些空态块只有标题、没有说明：${noSub.map((st) => st.title).join("、")}`,
         );
     }
+  }
+}
+
+/*
+ * 裁切检测器的自检 —— 放在所有路由之后、登录页之前（这时还是登录态，页面随便用）。
+ * 它不依赖任何一条路由，只需要一个能跑 JS 的文档。红了就说明判据被收窄过。
+ */
+{
+  const r = await ev(CLIP_SELFTEST).catch((e) => ({
+    ok: false,
+    missed: [`自检没跑起来：${e.message}`],
+  }));
+  if (!r?.ok) {
+    failures.push({
+      route: "(自检)",
+      board: "裁切检测器",
+      key: "clip.selftest",
+      msg:
+        `合成样本没抓到：${(r?.missed ?? []).join("、") || "无"}；` +
+        `误报（该放过却报了）：${(r?.wrong ?? []).join("、") || "无"}。` +
+        `实测：${r?.all ?? "-"}`,
+    });
+  } else {
+    console.log(
+      "· 裁切检测器自检通过：单子元素 / 多兄弟合计 / 文本混排 / 纯文本 四类都抓到，省略号与可滚区域都放过",
+    );
   }
 }
 

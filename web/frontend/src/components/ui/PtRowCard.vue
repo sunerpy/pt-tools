@@ -59,7 +59,12 @@ withDefaults(
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  /*
+   * 画板 30 / 31 的行卡：343 宽、8 圆角、1px #DDE2E9 边框，内容起点在屏幕 x=30。
+   * 卡片本身从 x=16 开始（外壳的 16 槽），所以横向内边距是 14 而不是 12 ——
+   * 14 不是间距梯度上的值，但它是画板量出来的数，两块板一致。
+   */
+  padding: var(--pt-space-3) 14px;
   background: var(--pt-raised);
   border: 1px solid var(--pt-border);
   border-radius: var(--pt-r-lg);
@@ -148,8 +153,16 @@ withDefaults(
   min-width: 0;
 }
 
+/*
+ * 状态位。可以不止一枚胶囊：画板 30 的行卡右端只有状态，但有些页还要在同一行
+ * 挤一个溢出菜单（比另开一整行 #actions 便宜得多）。flex-start 是为了让胶囊贴着
+ * 标题那一行，而不是被 44 的图标钮撑到垂直居中。
+ */
 .pt-rowcard__status {
+  display: inline-flex;
   flex: 0 0 auto;
+  gap: 4px;
+  align-items: flex-start;
 }
 
 .pt-rowcard__progress {

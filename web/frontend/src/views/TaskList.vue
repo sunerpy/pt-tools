@@ -790,7 +790,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
 
           <template #status>
-            <PtStatusPill :tone="getStatusTone(task)" size="sm">
+            <PtStatusPill dot :tone="getStatusTone(task)" size="sm">
               {{ getStatusText(task) }}
             </PtStatusPill>
           </template>
@@ -1131,7 +1131,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-pad);
+  padding: var(--pt-pad) 0;
 }
 
 @media (max-width: 768px) {

@@ -758,7 +758,7 @@ function formatProgress(progress: number): string {
             </template>
 
             <template #status>
-              <PtStatusPill :tone="row.is_completed ? 'ok' : 'warn'" size="sm">
+              <PtStatusPill dot :tone="row.is_completed ? 'ok' : 'warn'" size="sm">
                 {{ row.is_completed ? "已完成" : "未完成" }}
               </PtStatusPill>
             </template>
@@ -875,7 +875,7 @@ function formatProgress(progress: number): string {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-pad);
+  padding: var(--pt-pad) 0;
 }
 
 /* 多选条里的按钮由 .pt-band--sel 统一压到 30 高，图标与文字要跟着居中 */

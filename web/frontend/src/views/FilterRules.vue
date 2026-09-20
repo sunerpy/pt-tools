@@ -775,7 +775,8 @@ function decisionText(decision: string | undefined): string {
           <template #title>{{ rule.name }}</template>
 
           <template #meta>
-            <PtTag>{{ getPatternTypeLabel(rule.pattern_type) }}</PtTag>
+            <!-- 短名，和桌面那一列同一套：343 宽的卡上「正则表达式」要挤掉后面的匹配范围 -->
+            <PtTag>{{ getShortTypeLabel(rule.pattern_type) }}</PtTag>
             <span>{{ getMatchFieldLabel(rule.match_field) }}</span>
             <span>{{ formatSizeRange(rule) }}</span>
             <span>优先级 {{ rule.priority }}</span>
@@ -785,7 +786,7 @@ function decisionText(decision: string | undefined): string {
           </template>
 
           <template #status>
-            <PtStatusPill :tone="rule.enabled ? 'ok' : 'neutral'" size="sm">
+            <PtStatusPill dot :tone="rule.enabled ? 'ok' : 'neutral'" size="sm">
               {{ rule.enabled ? "已启用" : "已停用" }}
             </PtStatusPill>
           </template>
@@ -1248,7 +1249,7 @@ function decisionText(decision: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad) 0;
 }
 </style>
 

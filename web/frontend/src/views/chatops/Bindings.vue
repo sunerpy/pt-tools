@@ -667,7 +667,7 @@ function getConfNameByConfId(confId?: number) {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad) 0;
 }
 
 /* 发码结果：一屏里只有这串码值得看，所以给它整块居中和最大的字号 */

@@ -794,6 +794,34 @@
   background: var(--pt-surface);
 }
 
+/*
+ * 行卡里的 <code>：只留等宽字体，把全局 code 的灰底 + 1px 边 + 内边距去掉。
+ *
+ * 画板 25 的命令列是「/search Dune Part Tw…」纯文本，画板 26 的种子标题也是纯文本 ——
+ * 一张卡上该有底色的只有状态胶囊那一枚（一行只有一枚胶囊，在行卡上同样成立）。
+ * 落地此前命令、触发用户 id、失败原因、匹配模式、下载器地址全都套着 code 的灰框，
+ * 审计那张卡上一口气四个灰块，真正的状态胶囊反而被淹了。
+ * 页面自己声明了底色的（如 ChatOps 绑定码 .code，它就是要长得像个可复制的码）权重更高，不受影响。
+ */
+.pt-rowcard code {
+  padding: 0;
+  font-size: inherit;
+  background: none;
+  border: 0;
+}
+
+/*
+ * 窄屏：表格带里装的不再是表格，而是行卡列表（`.cards`），此时它**不是一张表格面**。
+ * 画板 30 / 31 把 343 宽的白卡直接摆在 #F2F4F7 画布上，靠 1px #DDE2E9 边框 + 8 的间隙分隔；
+ * 落地此前把行卡摊在 .pt-band--grid 的白底上，白卡压白面只剩一根边框，层次全平。
+ * 只在真的装着 `.cards` 时让底色透出去 —— 空态、下载器控制台那类还留在白面上的内容不受影响。
+ */
+@media (max-width: 768px) {
+  .pt-band--grid:has(> .cards) {
+    background: transparent;
+  }
+}
+
 /* 表格页脚带：画板 gfoot —— 34 高、顶部 1px 边框，左说明右分页 */
 .pt-band--foot {
   display: flex;

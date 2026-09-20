@@ -408,8 +408,17 @@ export const FIXTURES = [
     "/api/sites/login-state",
     SITES.map(([site], i) => ({
       site_name: site,
-      state: ["ok", "ok", "expiring", "expired"][i % 4],
+      enabled: i % 7 !== 6,
       probe_mode: "auto",
+      /*
+       * 页面上的「活跃 …」读的是 effective_last_active_at，此前这个字段整个没给 ——
+       * 卡上永远印「活跃 -」，等于验收从来没量过真实那串时间的宽度与换行。
+       * 顺带删掉原来那个 `state: "ok"|"expiring"|…`：SiteLoginStateResponse 里没有这个字段，
+       * 是凭空造的（见 web/api_site_login.go）。
+       */
+      last_login_at: 1758200000 - i * 86400,
+      last_access_at: 1758200000 - i * 43200,
+      effective_last_active_at: 1758200000 - i * 43200,
       /* last_probe_at 是 unix 秒，不是 ISO 串 —— 给成串会让页面印 Invalid Date */
       last_probe_at: 1758200000 - i * 3600,
       last_probe_status: i % 4 === 3 ? "fail" : "ok",
@@ -421,7 +430,14 @@ export const FIXTURES = [
       notification_channel_ids: [1],
       last_reminder_tier: "none",
       days_remaining: [30, 21, 5, 0][i % 4],
-      tier: ["ok", "ok", "warn", "dang"][i % 4],
+      /*
+       * tier 的取值必须是后端 scheduler/login_reminder_monitor.go 的那套档位
+       * （none / pre-warn / 30d / 14d / 7d / 3d / 1d / banned-imminent），
+       * 不是语气名。这里原来给的是 "ok" / "warn" / "dang" —— 前端 tierLabel
+       * 把它们全落到 default 印「未知」，tierTagType 却落到 default 给了空串，
+       * 于是卡上出现「绿底的未知」，而验收脚本只看颜色不看语义，一路放过。
+       */
+      tier: ["none", "30d", "7d", "banned-imminent"][i % 4],
     })),
   ],
   [

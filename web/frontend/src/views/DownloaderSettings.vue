@@ -847,7 +847,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
           </template>
 
           <template #status>
-            <PtStatusPill :tone="healthMeta(dl).tone" size="sm">
+            <PtStatusPill dot :tone="healthMeta(dl).tone" size="sm">
               {{ healthMeta(dl).text }}
             </PtStatusPill>
           </template>
@@ -1351,7 +1351,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad) 0;
 }
 
 /* 对话框正文已经有 16 内边距，卡片列表不再叠一层 */

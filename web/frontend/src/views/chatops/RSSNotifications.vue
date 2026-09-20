@@ -589,7 +589,7 @@ onBeforeUnmount(() => {
           </template>
 
           <template #status>
-            <PtStatusPill :tone="resultMeta(row.result).tone" size="sm">
+            <PtStatusPill dot :tone="resultMeta(row.result).tone" size="sm">
               {{ resultMeta(row.result).label }}
             </PtStatusPill>
           </template>
@@ -913,7 +913,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-space-3);
+  padding: var(--pt-pad) 0;
 }
 
 /* 种子 ID 在标题里用等宽，字号和粗细跟着标题走 */

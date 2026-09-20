@@ -730,11 +730,21 @@ function exportCsv() {
               <PtIcon name="timer" :size="11" />
               {{ row.latency_ms }} ms
             </span>
+            <!--
+              冒号后面那段原因。桌面把它放在 expand 行里（胶囊是个 span，挂不住 focus，
+              tooltip 在触屏上也打不开），手机上卡片本来就是纵向的，直接铺一行最省事 ——
+              不然移动端只剩「被拒」两个字，为什么被拒无处可查。
+            -->
+            <span v-if="resultReason(row.result)" class="card-reason">
+              <PtIcon name="info" :size="11" />
+              <code class="uid">{{ resultReason(row.result) }}</code>
+            </span>
           </template>
 
+          <!-- 胶囊里放短标签（成功 / 被拒 / 出错）；原样的 `denied:not_bound` 归上面那行 -->
           <template #status>
-            <PtStatusPill :tone="resultTone(row.result)" size="sm">
-              {{ row.result }}
+            <PtStatusPill dot :tone="resultTone(row.result)" size="sm">
+              {{ resultLabel(row.result) }}
             </PtStatusPill>
           </template>
 
@@ -918,6 +928,16 @@ function exportCsv() {
   color: var(--pt-t2);
 }
 
+/* 行卡上的失败原因：跟着 meta 的字号走，长原因允许断行，别把卡片撑破 */
+.card-reason {
+  overflow-wrap: anywhere;
+}
+
+.card-reason .uid {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
 /*
  * 命令：画板 25 的 td-0-3 是「/search Dune Part Tw…」纯文本 13/400。
  * 等宽字体留着（那是命令的身份），底色与内边距去掉 —— 一行里只有「结果」该有底色。
@@ -981,7 +1001,7 @@ function exportCsv() {
   display: flex;
   flex-direction: column;
   gap: var(--pt-space-2);
-  padding: var(--pt-pad);
+  padding: var(--pt-pad) 0;
 }
 
 /*
