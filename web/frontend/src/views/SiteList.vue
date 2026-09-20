@@ -1461,8 +1461,13 @@ async function saveLoginConfig() {
             <span class="card-name">{{ name }}</span>
           </template>
 
+          <!--
+            画板 30 的行卡里只有一枚胶囊（状态），其余是 11.5/500 #4E5765 的纯文本统计
+            （「上传 ↑38.4 TB」「分享率 9.14」「RSS 2 条」）。认证方式原来是一枚 PtTag ——
+            加上右上角的状态胶囊就是一行两枚色块，和桌面表格同一个毛病。
+          -->
           <template #meta>
-            <PtTag>{{ authMethodLabel(site.auth_method) }}</PtTag>
+            <span class="card-auth">{{ authMethodLabel(site.auth_method) }}</span>
             <span class="rss" :class="{ 'is-zero': getRssCount(site) === 0 }">
               <PtIcon name="rss" :size="11" />
               {{ getRssCount(site) }} 条 RSS
@@ -1906,6 +1911,12 @@ async function saveLoginConfig() {
 }
 
 /* 带 tooltip 的表头：虚线下划线提示「这里有解释」，比只放个图标更好点中 */
+/* 行卡里的认证方式：纯文本，与同一排的 RSS / 活跃 / 剩余同一档（画板 30 是 11.5/500） */
+.card-auth {
+  font-weight: 500;
+  color: var(--pt-t2);
+}
+
 .th-help {
   display: inline-flex;
   gap: 3px;
@@ -2166,6 +2177,12 @@ async function saveLoginConfig() {
   padding: 0 8px;
   font-size: var(--pt-fz-label);
 }
+
+/*
+ * 试过在窄屏让两枚 chip 并排（省约 40px），**撤掉了**：它们与状态 chip 混在同一个
+ * wrap 流里，实测「认证: 全部」被挤成「认证: …」。读不全的标签比多 40px 更糟。
+ * 移动端筛选区比画板 30 的一排 26 高 chip 要高，这一条已登记在 ALLOWED_GAPS 里。
+ */
 
 /* 与表格里的 .site__name 一致：定义文件里是小写 id，首字母大写才像个名字 */
 .card-name {

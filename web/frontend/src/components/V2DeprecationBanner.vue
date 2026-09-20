@@ -45,10 +45,17 @@ function dismiss() {
       <span class="v2-deprecation-body">
         <strong class="pt-note__title">pt-tools v2.0 升级完成</strong>
         <span class="v2-deprecation-sep">·</span>
-        v1 的「批量打开标签页同步」功能已移除，请使用浏览器扩展 popup 中的「一键打开站点」按钮；
-        新功能与站点登录管理已迁移至
-        <ElLink type="primary" href="/sites" :underline="false">站点与 RSS</ElLink>
-        页面。
+        <!--
+          窄屏只留标题 + 「了解 v2 详情」：375 宽下这段正文要排五行、约 110px，
+          占掉 812 高的 14%，而画板 30 的移动稿里首行行卡就在 y=140、板上根本没有常驻通告。
+          正文没有删，它在 `了解 v2 详情` 指向的文档里，标题也仍然说清了这是什么。
+        -->
+        <span class="v2-deprecation-detail">
+          v1 的「批量打开标签页同步」功能已移除，请使用浏览器扩展 popup 中的「一键打开站点」按钮；
+          新功能与站点登录管理已迁移至
+          <ElLink type="primary" href="/sites" :underline="false">站点与 RSS</ElLink>
+          页面。
+        </span>
         <ElLink
           class="v2-deprecation-more"
           type="primary"
@@ -88,6 +95,12 @@ function dismiss() {
 
 .v2-deprecation-more {
   margin-left: 6px;
+}
+
+@media (max-width: 768px) {
+  .v2-deprecation-detail {
+    display: none;
+  }
 }
 
 /* 关闭钮与其他通告条上的 × 同一套（dash__note-x）：24×24、hover 才显底 */
