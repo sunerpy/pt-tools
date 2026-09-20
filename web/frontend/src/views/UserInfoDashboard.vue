@@ -1348,8 +1348,32 @@ onUnmounted(() => {
               <span class="stat__l"><PtIcon name="calendar" :size="11" />入站</span>
               <span class="stat__v">{{ formatJoinDuration(row.joinDate ?? 0) }}</span>
             </div>
+            <!--
+              口径说明在移动端的入口。桌面挂在「判定活跃」列头的 popover 上，
+              而移动端是行卡、没有列头 —— 一次评审查出这段说明对移动用户**完全不可达**，
+              判得对。这里给一个 ⓘ，点/聚焦都能打开同一段话。
+            -->
             <div class="stat">
-              <span class="stat__l"><PtIcon name="clock" :size="11" />判定活跃</span>
+              <span class="stat__l">
+                <PtIcon name="clock" :size="11" />判定活跃
+                <el-popover placement="top" :width="300" trigger="click">
+                  <template #reference>
+                    <button
+                      type="button"
+                      class="stat__why"
+                      aria-label="活跃时间口径说明"
+                      @click.stop>
+                      <PtIcon name="info" :size="11" />
+                    </button>
+                  </template>
+                  <p class="th-help__p">
+                    活跃时间通过 cookie/API 探测获取，可刷新多数站点的
+                    last_access（最近动向）以保号； 但少数站点按
+                    last_login（实际登录）或做种活跃度清理，
+                    此类站点仍需定期手动登录，请勿仅依赖此处数据。
+                  </p>
+                </el-popover>
+              </span>
               <span class="stat__v">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
             </div>
             <div class="stat">
@@ -1759,6 +1783,29 @@ onUnmounted(() => {
   align-items: center;
   cursor: help;
   border-bottom: 1px dotted var(--pt-t4);
+}
+
+/*
+ * 行卡统计里的 ⓘ：触控目标按 §9 的「≥ 44×44」给足（用负外边距抵消，不撑高这一行），
+ * 视觉上只有 11 的图标。它是移动端读到「活跃时间口径」的唯一入口，不能只做成 hover。
+ */
+.stat__why {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -16px -14px;
+  color: var(--pt-t3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-r-sm);
+}
+
+.stat__why:hover,
+.stat__why:focus-visible {
+  color: var(--pt-p);
 }
 
 /* 带告警口径的列头：图标用 warn 色，让「这一列有前提」在表头就看得见 */

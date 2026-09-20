@@ -543,7 +543,34 @@ function getChannelLabel(type: string) {
           落地此前是无列名的 chip 串：一行里三枚色块，而且看不出哪个字段是什么。
           「延迟」那列没有对应数据（RSS 通知日志不记投递耗时），所以不画 —— 不造数。
         -->
-        <table v-if="recentLogs.length > 0" class="rec">
+        <!--
+          窄屏降级成列表，不做横向滚动表格 —— 这是设计文档 §9 的四方向共用规则，
+          画板 33 给这一块的形态也正是「圆点 6 + 双行文本 + 右侧时间 + 分隔线」、节奏 54。
+          上一版在所有视口都渲染这张七列表（单元格还都 nowrap），375 下右边两列直接被裁掉：
+          外层是 overflow hidden，滚都滚不出来。一次评审查出这点，判得对。
+        -->
+        <ul v-if="isMobile && recentLogs.length > 0" class="recm">
+          <li v-for="log in recentLogs.slice(0, 8)" :key="log.id" class="recm__row">
+            <span
+              class="recm__dot"
+              :class="`is-${log.result === 'sent' ? 'ok' : log.result === 'failed' ? 'dang' : 'neutral'}`"
+              aria-hidden="true" />
+            <span class="recm__body">
+              <span class="recm__l1">
+                {{ log.site_name || "未知站点" }}
+                <span class="recm__tid">{{ log.torrent_id }}</span>
+              </span>
+              <span class="recm__l2">
+                {{ channelNameOf(log.notification_conf_id) }} ·
+                {{ log.notify_kind === "filtered" ? "仅匹配的" : "全部新种" }} · {{ log.result
+                }}<template v-if="(log.attempts ?? 0) > 1"> · 第 {{ log.attempts }} 次</template>
+              </span>
+            </span>
+            <span class="recm__when">{{ formatWhen(log.created_at) }}</span>
+          </li>
+        </ul>
+
+        <table v-else-if="recentLogs.length > 0" class="rec">
           <thead>
             <tr>
               <th>时间</th>
@@ -794,6 +821,79 @@ function getChannelLabel(type: string) {
 
 .rec .rec__num {
   text-align: right;
+}
+
+/*
+ * 窄屏的同一块数据：画板 33 的「最近投递」是四行「圆点 6 + 双行文本 + 右侧时间 +
+ * 329×1 分隔线」，节奏 54。圆点承载结果的语义色 —— 一行里不再需要胶囊。
+ */
+.recm {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recm__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: flex-start;
+  min-height: 54px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.recm__row:last-child {
+  border-bottom: 0;
+}
+
+.recm__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  background: var(--pt-t4);
+  border-radius: var(--pt-radius-full);
+}
+
+.recm__dot.is-ok {
+  background: var(--pt-ok);
+}
+
+.recm__dot.is-dang {
+  background: var(--pt-dang);
+}
+
+.recm__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recm__l1 {
+  overflow: hidden;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recm__tid {
+  font-weight: 400;
+  color: var(--pt-t3);
+}
+
+.recm__l2 {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.recm__when {
+  flex: 0 0 auto;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
 }
 
 /* 带与卡片层各自管自己的留白，这一层只负责纵向堆叠 */

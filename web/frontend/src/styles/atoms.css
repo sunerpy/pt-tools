@@ -358,12 +358,27 @@
  * 边界含糊，尤其挨着 seg 时两者看起来不是一套东西。
  * 只作用于带里：表单里的输入框仍走全局的 r6，那不是同一个场景。
  */
-.pt-band--toolbar .el-input__wrapper,
-.pt-band--toolbar .el-select__wrapper,
-.pt-band--sel .el-input__wrapper,
-.pt-band--sel .el-select__wrapper {
-  border-radius: var(--pt-r-sm);
-  box-shadow: inset 0 0 0 1px var(--pt-border);
+/*
+ * **焦点态必须自己接回来。**
+ *
+ * Element 的焦点环走的也是 `box-shadow`（`.el-input__wrapper.is-focus` /
+ * `.el-select__wrapper.is-focused`，权重 0,2,0），而这个文件在 Element 的 CSS 之后加载，
+ * 同权重后来者胜 —— 上面那条只要碰 box-shadow 就会把焦点环一起压掉，而 Element 的 input
+ * 内部又是 `outline: none`，键盘 Tab 到工具栏搜索框时**没有任何可见反馈**。
+ *
+ * 一次评审查出这件事，判得对；不过真凶不是我新加的那条（它同权重但在前，被后面的
+ * `box-shadow: none` 压掉了，是死代码），而是那条**早就存在**的 `none` ——
+ * 焦点环在这一轮之前就已经不可见了。现在发丝边并进了那一条，焦点态由这里接回来。
+ */
+.pt-band--toolbar .el-input__wrapper.is-focus,
+.pt-band--toolbar .el-select__wrapper.is-focused,
+.pt-band--sel .el-input__wrapper.is-focus,
+.pt-band--sel .el-select__wrapper.is-focused,
+.pt-band--toolbar .el-input__wrapper:focus-within,
+.pt-band--toolbar .el-select__wrapper:focus-within,
+.pt-band--sel .el-input__wrapper:focus-within,
+.pt-band--sel .el-select__wrapper:focus-within {
+  box-shadow: inset 0 0 0 1px var(--pt-p);
 }
 
 /*
@@ -553,10 +568,23 @@
  * 三个页面各自用 :deep 压过一遍高度，收到这里来。
  */
 .pt-band--toolbar .el-input__wrapper,
-.pt-band--toolbar .el-select__wrapper {
+.pt-band--toolbar .el-select__wrapper,
+.pt-band--sel .el-input__wrapper,
+.pt-band--sel .el-select__wrapper {
   min-height: 28px;
+  border-radius: var(--pt-r-sm);
   background: var(--pt-hover);
-  box-shadow: none;
+  /*
+   * 画板 bar-64 的 q 是「#EDF0F4 底 + 1px #DDE2E9 发丝边 + r4」。这里原来是 `none` ——
+   * 没有边的填色块在白带上边界含糊，尤其挨着 seg 时两者看着不是一套东西。
+   *
+   * 这条规则必须**就是这一条**：Element 的焦点环走的也是 box-shadow
+   * （`.el-input__wrapper.is-focus`，权重 0,2,0），而这个文件在 Element 之后加载，
+   * 同权重后来者胜 —— 上面若另起一条 `.pt-band--toolbar .el-input__wrapper`，
+   * 无论写 `none` 还是写边框，都会把焦点环一起压掉。焦点态由下面那条
+   * 带 `.is-focus` / `:focus-within` 的规则（权重更高）接回来。
+   */
+  box-shadow: inset 0 0 0 1px var(--pt-border);
 }
 
 .pt-band--toolbar .el-input,

@@ -1479,6 +1479,28 @@ async function saveLoginConfig() {
             <span :data-testid="`days-remaining-cell-${name}`" :class="daysCellClass(name)">
               {{ daysRemaining(name) === null ? "剩余 —" : `剩余 ${daysRemaining(name)} 天` }}
             </span>
+            <!--
+              口径说明在移动端的入口。桌面把它挂在「剩余天数」列头的 popover 上，
+              而移动端是行卡、没有列头 —— 一次评审查出这段说明对移动用户**完全不可达**，
+              判得对：压缩高度不能变成拿掉信息。这里给一个 ⓘ，点/聚焦都能打开同一段话。
+            -->
+            <el-popover placement="top" :width="300" trigger="click">
+              <template #reference>
+                <button
+                  type="button"
+                  class="card-why"
+                  :aria-label="`${name} 的活跃时间口径说明`"
+                  @click.stop>
+                  <PtIcon name="info" :size="12" />
+                </button>
+              </template>
+              <p class="th-help__p">距离站点封禁阈值的剩余天数；负数表示已超过阈值。</p>
+              <p class="th-help__p th-help__p--warn">
+                活跃时间来自 cookie/API 探测，能刷新多数站点的 last_access（最近动向）用于保号；
+                但少数站点按 last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，
+                别只看这里的数字。
+              </p>
+            </el-popover>
           </template>
 
           <!-- 暂不可用时它比保号档位更要紧：站点用不了，档位也就没有意义 -->
@@ -1911,6 +1933,30 @@ async function saveLoginConfig() {
 }
 
 /* 带 tooltip 的表头：虚线下划线提示「这里有解释」，比只放个图标更好点中 */
+/*
+ * 行卡上的 ⓘ：触控目标按 §9 的「≥ 44×44」给足，视觉上只有 12 的图标。
+ * 它是移动端读到「活跃时间口径」的唯一入口，所以不能只做成 hover。
+ */
+.card-why {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -14px 0;
+  color: var(--pt-t3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-r-sm);
+}
+
+.card-why:hover,
+.card-why:focus-visible {
+  color: var(--pt-p);
+  background: var(--pt-hover);
+}
+
 /* 行卡里的认证方式：纯文本，与同一排的 RSS / 活跃 / 剩余同一档（画板 30 是 11.5/500） */
 .card-auth {
   font-weight: 500;

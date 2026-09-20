@@ -3,8 +3,20 @@ import PtIcon from "@/components/PtIcon";
 import { ElLink } from "element-plus";
 import { onMounted, ref } from "vue";
 
+import { useIsMobile } from "@/composables/useIsMobile";
+
 const STORAGE_KEY = "pt_tools_v2_banner_dismissed_v1";
 const visible = ref(false);
+
+/*
+ * 窄屏默认收起正文，点「详情」就地展开 —— 不是隐藏。
+ *
+ * 一次评审指出：正文在 ≤768 被 `display: none` 藏掉之后，剩下那个链接指向 README 的
+ * `#v20-部署说明`，而 README 里**没有这一节**，移动用户于是什么都读不到。
+ * 「压缩高度」不能变成「拿掉信息」，所以改成可展开。
+ */
+const isMobile = useIsMobile();
+const detailOpen = ref(false);
 
 onMounted(() => {
   try {
@@ -46,24 +58,35 @@ function dismiss() {
         <strong class="pt-note__title">pt-tools v2.0 升级完成</strong>
         <span class="v2-deprecation-sep">·</span>
         <!--
-          窄屏只留标题 + 「了解 v2 详情」：375 宽下这段正文要排五行、约 110px，
-          占掉 812 高的 14%，而画板 30 的移动稿里首行行卡就在 y=140、板上根本没有常驻通告。
-          正文没有删，它在 `了解 v2 详情` 指向的文档里，标题也仍然说清了这是什么。
+          窄屏默认收起这段正文（375 宽下它要排五行、约 110px，占掉 812 高的 14%，
+          而画板 30 的移动稿里首张行卡就在 y=140、板上根本没有常驻通告），
+          但**收起不是拿掉** —— 点后面那个「详情」就地展开。
         -->
-        <span class="v2-deprecation-detail">
+        <span v-if="!isMobile || detailOpen" class="v2-deprecation-detail">
           v1 的「批量打开标签页同步」功能已移除，请使用浏览器扩展 popup 中的「一键打开站点」按钮；
           新功能与站点登录管理已迁移至
           <ElLink type="primary" href="/sites" :underline="false">站点与 RSS</ElLink>
           页面。
         </span>
+        <button
+          v-if="isMobile && !detailOpen"
+          type="button"
+          class="v2-deprecation-toggle"
+          @click="detailOpen = true">
+          详情
+        </button>
+        <!--
+          锚点改成 README 里确实存在的「快速开始」：原来那个 `#v20-部署说明`
+          在 README 的标题集合里不存在，点过去落在页首。
+        -->
         <ElLink
+          v-else
           class="v2-deprecation-more"
           type="primary"
-          href="https://github.com/sunerpy/pt-tools#v20-部署说明"
+          href="https://github.com/sunerpy/pt-tools#快速开始"
           target="_blank"
-          rel="noopener"
-          :underline="false">
-          了解 v2 详情
+          rel="noopener">
+          部署说明
         </ElLink>
       </span>
       <button
@@ -97,10 +120,22 @@ function dismiss() {
   margin-left: 6px;
 }
 
-@media (max-width: 768px) {
-  .v2-deprecation-detail {
-    display: none;
-  }
+/* 正文段：窄屏由 v-if 控制收起/展开，样式上和句子其余部分一致（顺着排） */
+.v2-deprecation-detail {
+  color: inherit;
+}
+
+/* 窄屏的「详情」是按钮不是链接：它就地展开正文，不跳出去 */
+.v2-deprecation-toggle {
+  padding: 0;
+  margin-left: 6px;
+  font-size: inherit;
+  color: var(--pt-p);
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-r-sm);
 }
 
 /* 关闭钮与其他通告条上的 × 同一套（dash__note-x）：24×24、hover 才显底 */

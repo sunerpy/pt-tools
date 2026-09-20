@@ -1202,7 +1202,13 @@ await goto(`${BASE}/`);
 await ev(
   `fetch('/login', { method: 'POST', body: new URLSearchParams({ username: ${JSON.stringify(USER)}, password: ${JSON.stringify(PASS)} }) })`,
 );
-// v2 升级横幅不在任何画板的构成里，关掉它才能量到画板的坐标
+/*
+ * v2 升级横幅不在任何画板的构成里，关掉它才能量到画板的坐标。
+ *
+ * **代价要说清**：关掉它之后，这份验收就完全看不见它对首屏的影响了 ——
+ * 一次评审正是指出「开场那 252px」一路绿灯，原因就在这一行。所以下面单独量一次
+ * 它在首屏的高度（`bannerCost`），让这笔账出现在报告里，而不是被这一行悄悄抹掉。
+ */
 await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
 /*
  * 喂假数据 —— 画板的页脚带、多选条和一部分卡片只有有数据时才渲染，
@@ -1893,6 +1899,42 @@ const MEASURE_M = `(() => {
      * 画板 30–35 的内容列一律 343 宽，块数各页不同 —— 只量「有没有 343 宽的块、够不够数」，
      * 不量每块的高度：高度跟着真实数据变。
      */
+    /*
+     * **被裁掉的横向溢出**。页面级的 docOverflow 量不到它：外层 overflow: hidden 时
+     * 溢出的内容既不产生文档滚动条，也不会被 clientWidth 察觉 —— 它只是消失。
+     * 一次评审正是查出通知页在 375 下渲染了一张七列 nowrap 的表，右边两列直接没了，
+     * 而所有断言全绿（块数与标题都对得上）。
+     * 判据：任何块内出现 scrollWidth 明显超过 clientWidth 的元素就算裁切。
+     * §9 的房规是「桌面表格一律降级成行卡，不做横向滚动表格」，所以顺带把窄屏里
+     * 还活着的 table 也报出来。
+     */
+    clipped: (() => {
+      const out = [];
+      const roots = document.querySelectorAll('.pt-panel, .pt-rowcard, [data-card], .ch-card, .pt-cards');
+      for (const root of roots) {
+        for (const el of root.querySelectorAll('*')) {
+          if (el.scrollWidth - el.clientWidth > 2 && el.clientWidth > 0) {
+            /*
+             * 自己或**任一祖先**能横向滚就不算裁切：那是有意的可滚区域。
+             * 只看自己会误报 —— 日志页那个 <pre> 溢出，而滚动条在它的父容器上，
+             * 内容其实滚得到。第一版就这么报了一处假红。
+             */
+            let scrollable = false;
+            for (let a = el; a && a !== document.body; a = a.parentElement) {
+              const ox = getComputedStyle(a).overflowX;
+              if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
+            }
+            if (scrollable) continue;
+            out.push((el.className || el.tagName).toString().slice(0, 40) +
+              ' ' + el.clientWidth + '<' + el.scrollWidth);
+          }
+        }
+      }
+      return [...new Set(out)].slice(0, 6);
+    })(),
+    /* 窄屏里还活着的表格（§9：桌面表格一律降级成行卡） */
+    tables: [...document.querySelectorAll('.pt-panel table, [data-card] table, .ch-card table')]
+      .map((t) => (t.className || 'table').toString().slice(0, 30)),
     blocks: (() => {
       const set = new Set(document.querySelectorAll('.pt-panel, .pt-rowcard, [data-card]'));
       /*
@@ -2089,6 +2131,12 @@ if (mobileRoutes.length > 0) {
     }
 
     if (want.minBlocks) {
+      if (got.clipped.length > 0) {
+        fail("clipped", `375 下卡内有被裁掉的横向溢出：${got.clipped.join(" / ")}`);
+      }
+      if (got.tables.length > 0) {
+        fail("tables", `375 下还有表格没降级成行卡（§9）：${got.tables.join(" / ")}`);
+      }
       const wide = got.blocks.filter((w) => near(w, M_VIEWPORT.width - M_INNER_X * 2));
       if (wide.length < want.minBlocks)
         fail(
@@ -2215,6 +2263,36 @@ if (emptyRoutes.length > 0) {
   }
 }
 
+/*
+ * 单独量一次 v2 横幅的首屏代价。
+ *
+ * 上面为了对齐画板坐标把它关掉了，代价是这份验收完全看不见它 —— 而真实的首次访问
+ * 是带着它的。这里把 localStorage 那把开关放回去、重进一次 /userinfo，量两个数：
+ * 横幅自己多高、表格带因此被推到哪里。只报数不判失败：它是一条已登记的偏离，
+ * 但数字必须出现在报告里，不能被那一行 setItem 抹掉。
+ */
+let bannerCost = null;
+if (!wanted.length || wanted.includes("/userinfo")) {
+  await ev(`localStorage.removeItem('pt_tools_v2_banner_dismissed_v1')`);
+  await goto(`${BASE}/#/userinfo`);
+  /*
+   * 必须真的重载：横幅的 visible 是在 onMounted 里读 localStorage 定的，
+   * 而 hash 导航不会重新挂载 App.vue —— 只清掉那个键、不重载，量到的永远是 0。
+   */
+  await cdp.send("Page.reload", {}, sessionId);
+  await waitReady();
+  await sleep(2600);
+  bannerCost = await ev(`(() => {
+    const b = document.querySelector('.v2-deprecation-banner');
+    const grid = document.querySelector('.pt-band--grid');
+    return {
+      banner: b ? Math.round(b.getBoundingClientRect().height) : 0,
+      firstContentTop: grid ? Math.round(grid.getBoundingClientRect().top) : null,
+    };
+  })()`);
+  await ev(`localStorage.setItem('pt_tools_v2_banner_dismissed_v1', '1')`);
+}
+
 // ------------------------------------------------- 登录页（画板 43）
 
 /*
@@ -2315,6 +2393,12 @@ const stale = Object.keys(ALLOWED_GAPS).filter(
 
 for (const f of failures) {
   console.log(`✗ ${f.route.padEnd(28)} [画板 ${f.board}] ${f.key}: ${f.msg}`);
+}
+if (bannerCost) {
+  console.log(
+    `· v2 横幅的首屏代价：横幅 ${bannerCost.banner}px，表格带被推到 ` +
+      `${bannerCost.firstContentTop}（画板 104）。上面的几何是在关掉它之后量的。`,
+  );
 }
 /*
  * 同一条原因会被很多路由触发（rail 那条外壳级偏离每页都量得到），逐条打出来是 21 行
