@@ -620,7 +620,8 @@ function exportCsv() {
           落地此前通道包 PtTag、触发用户与命令各包一个 code 片 —— 一行四枚色块，
           真正的状态（结果）反而不突出。命令仍用等宽字体，那是它的身份，不需要底色。
         -->
-        <el-table-column prop="channel_type" label="通道" width="110" class-name="pt-cell-muted">
+        <!-- 不加 pt-cell-muted：那个类是 t3，而画板的正文单元是 t2（表格默认色） -->
+        <el-table-column prop="channel_type" label="通道" width="110">
           <template #default="{ row }">{{ channelShort(row.channel_type) }}</template>
         </el-table-column>
 
@@ -628,7 +629,7 @@ function exportCsv() {
           prop="channel_user_id"
           label="触发用户"
           min-width="140"
-          class-name="pt-cell-muted pt-cell-1line">
+          class-name="pt-cell-1line">
           <template #default="{ row }">
             <span class="uid">{{ row.channel_user_id || "-" }}</span>
           </template>
@@ -652,8 +653,17 @@ function exportCsv() {
         -->
         <el-table-column prop="result" label="结果" width="96">
           <template #default="{ row }">
+            <!--
+              完整原值（含原因）不能只挂在 tooltip 上：胶囊不可聚焦，键盘用户拿不到它。
+              所以同时给 `title`（读屏与键盘都读得到）并在胶囊上标 `aria-label` ——
+              一次评审指出这一点，判得对。展开那一行也能看到完整参数。
+            -->
             <el-tooltip :content="row.result" placement="top" :disabled="!resultReason(row.result)">
-              <PtStatusPill :tone="resultTone(row.result)" size="sm">
+              <PtStatusPill
+                :tone="resultTone(row.result)"
+                size="sm"
+                :title="row.result"
+                :aria-label="`结果 ${row.result}`">
                 {{ resultLabel(row.result) }}
               </PtStatusPill>
             </el-tooltip>
@@ -871,13 +881,13 @@ function exportCsv() {
   outline-offset: 1px;
 }
 
+/* 触发用户：13/400 t2（画板 25 的 td-0-2「@sunerpy」是正文号，不是标签号） */
 .uid {
   font-family: var(--pt-font-mono);
-  font-size: var(--pt-fz-label);
-  color: var(--pt-t3);
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
 }
 
-/* 命令自己带 / 前缀，做成一枚 primary 底的小胶囊，扫一列就能看出执行了什么 */
 /*
  * 命令：画板 25 的 td-0-3 是「/search Dune Part Tw…」纯文本 13/400。
  * 等宽字体留着（那是命令的身份），底色与内边距去掉 —— 一行里只有「结果」该有底色。

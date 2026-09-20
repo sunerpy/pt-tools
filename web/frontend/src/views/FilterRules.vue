@@ -553,7 +553,7 @@ function decisionText(decision: string | undefined): string {
     <!--
       顶部那条 80px 的常驻黄条删掉了：它讲的三点与下面「规则怎么生效」那张卡**逐条重复**，
       而画板 20 的板上没有任何常驻通告 —— 这类说明的位置就是 p-hint 那张卡。
-      信息一点没少，只是不再在每次打开这一页时先占掉一屏的十二分之一。
+      那张卡现在**不跟着规则列表藏**（见下面的注释），所以零规则时也读得到。
     -->
     <!-- 画板 20 的 bar-64：分段 + 搜索 + 两枚 chip + 右侧图标钮，全部是本地筛选 -->
     <PtToolbar band>
@@ -679,7 +679,8 @@ function decisionText(decision: string | undefined): string {
           </template>
         </el-table-column>
 
-        <el-table-column label="类型" width="96" class-name="pt-cell-muted">
+        <!-- 不加 pt-cell-muted：那个类是 t3，而画板的正文单元是 t2（表格默认色） -->
+        <el-table-column label="类型" width="96">
           <template #default="{ row }">{{ getShortTypeLabel(row.pattern_type) }}</template>
         </el-table-column>
 
@@ -700,11 +701,7 @@ function decisionText(decision: string | undefined): string {
           <template #default="{ row }">{{ row.priority }}</template>
         </el-table-column>
 
-        <el-table-column
-          v-if="ruleColShown('free')"
-          label="仅免费"
-          width="80"
-          class-name="pt-cell-muted">
+        <el-table-column v-if="ruleColShown('free')" label="仅免费" width="80">
           <template #default="{ row }">{{ row.require_free ? "是" : "否" }}</template>
         </el-table-column>
 
@@ -727,14 +724,29 @@ function decisionText(decision: string | undefined): string {
           放不下 —— 实测「删除」被切成「删」。tooltip 补回文字。
         -->
         <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
+          <!--
+            纯图标按钮必须自带**可访问名称**：PtIcon 是 aria-hidden 的，而 el-tooltip
+            只给视觉提示，不进无障碍名 —— 少了 aria-label，读屏软件念出来是两个空按钮，
+            相邻的「编辑」和「删除」分不开。名字里带上规则名，列表里才定位得到是哪一条。
+          -->
           <template #default="{ row }">
             <el-tooltip content="编辑" placement="top">
-              <el-button link type="primary" size="small" @click="openEditDialog(row)">
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :aria-label="`编辑规则 ${row.name}`"
+                @click="openEditDialog(row)">
                 <PtIcon name="pencil" :size="15" />
               </el-button>
             </el-tooltip>
             <el-tooltip content="删除" placement="top">
-              <el-button link type="danger" size="small" @click="deleteRule(row)">
+              <el-button
+                link
+                type="danger"
+                size="small"
+                :aria-label="`删除规则 ${row.name}`"
+                @click="deleteRule(row)">
                 <PtIcon name="trash-2" :size="15" />
               </el-button>
             </el-tooltip>
@@ -850,7 +862,16 @@ function decisionText(decision: string | undefined): string {
           cols
           foot="口径是「这条规则命中并入库的种子数」（TorrentInfo.filter_rule_id 的分组计数），不是试跑的模拟命中；免费自动下载的种子不记规则，不计入。" />
       </PtPanel>
+    </div>
 
+    <!--
+      「规则怎么生效」这张卡**不能跟着规则列表一起藏**。
+      它原来在 `v-if="rules.length > 0"` 的卡片容器里 —— 一条规则都没有的新用户既看不到它，
+      也看不到我删掉的那条顶部黄条，于是「关联规则之后未命中的免费种也会跳过」这件事
+      在最需要知道它的时刻反而读不到。一次评审指出这一点，判得对：
+      我说的「信息一点没少」在零规则状态下不成立。
+    -->
+    <div class="pt-cards pt-cards--wide">
       <PtPanel class="pt-cards__full" title="规则怎么生效" icon="info">
         <ul class="rules-hint">
           <li>没给某个 RSS 关联规则时，它按<strong>免费种子</strong>自动下载，适合日常刷流。</li>
@@ -1189,9 +1210,14 @@ function decisionText(decision: string | undefined): string {
   flex-direction: column;
 }
 
+/*
+ * 匹配模式：**13/400 t2**（画板 20 的 td-0-2「2160p.*REMUX」就是正文号）。
+ * 去掉 code 底色时只改了壳，字号还留在 11 —— 那是标签号，不是正文号，
+ * 一次评审把这一点单列出来，判得对：去壳不等于对齐排版。
+ */
 .pattern {
   font-family: var(--pt-font-mono);
-  font-size: var(--pt-fz-label);
+  font-size: var(--pt-fz-body);
   color: var(--pt-t2);
   word-break: break-all;
 }

@@ -397,6 +397,20 @@ function formatTime(timeStr: string | undefined): string {
   }
 }
 
+/*
+ * 表格里的时间用紧凑格式：画板 25 的 td-0-0 是「09-15 14:32:08」—— **不带年**。
+ * 落地原来走 `toLocaleString("zh-CN")`，出来是「2026/9/17 16:00:00」十九个字符，
+ * 在 8 列挤 1078 宽的表里要么换行把行顶高，要么被压成「2026/9/1…」连日期都读不出。
+ * 行卡上仍用完整格式（那里不缺宽度，而且跨年时年份有意义）。
+ */
+function formatTimeShort(timeStr: string | undefined): string {
+  if (!timeStr || timeStr === "0001-01-01T00:00:00Z") return "-";
+  const d = new Date(timeStr);
+  if (Number.isNaN(d.getTime())) return timeStr;
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
 function formatProgress(progress: number): string {
   return `${progress.toFixed(1)}%`;
 }
@@ -484,7 +498,12 @@ function formatProgress(progress: number): string {
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="进度" width="180">
+          <!--
+            进度列从 180 收到 140：列宽合计原来 1118 > 容器 1078，多出来的 40 全落在
+            右端的「暂停时间」上，把它压成「09-19 06…」连时间都读不全。
+            这一列里是一条进度条加一行「- / - · 0.2%」，140 够放。
+          -->
+          <el-table-column label="进度" width="140">
             <template #default="{ row }">
               <div class="progress-cell">
                 <el-progress
@@ -516,8 +535,10 @@ function formatProgress(progress: number): string {
             时间单行截断（画板 17 的 td 就是「2026/9/16 14:…」）：让它换行会把行顶高，
             而且第二行正好藏在右侧 fixed 操作列的覆盖层底下 —— 看起来像数据缺了一截。
           -->
-          <el-table-column label="暂停时间" width="150" class-name="pt-cell-muted pt-cell-1line">
-            <template #default="{ row }">{{ formatTime(row.paused_at) }}</template>
+          <el-table-column label="暂停时间" width="112" class-name="pt-cell-muted pt-cell-1line">
+            <template #default="{ row }">
+              <span :title="formatTime(row.paused_at)">{{ formatTimeShort(row.paused_at) }}</span>
+            </template>
           </el-table-column>
           <!--
             操作列只放图标。列宽合计 1192 > 容器 1078，这一列是 fixed 覆盖层，
@@ -525,14 +546,28 @@ function formatProgress(progress: number): string {
             画板 12 的 ops 列只有 63 宽，本来就是图标列；tooltip 补回文字。
           -->
           <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
+            <!--
+              纯图标按钮必须自带可访问名称：PtIcon 是 aria-hidden 的，el-tooltip 只给视觉提示。
+              少了 aria-label，读屏软件念出来是两个空按钮，而其中一个是删除。
+            -->
             <template #default="{ row }">
               <el-tooltip content="恢复" placement="top">
-                <el-button link type="primary" size="small" @click="resumeTorrent(row)">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`恢复 ${row.title}`"
+                  @click="resumeTorrent(row)">
                   <PtIcon name="play" :size="15" />
                 </el-button>
               </el-tooltip>
               <el-tooltip content="删除" placement="top">
-                <el-button link type="danger" size="small" @click="openDeleteDialog(row)">
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :aria-label="`删除 ${row.title}`"
+                  @click="openDeleteDialog(row)">
                   <PtIcon name="trash-2" :size="15" />
                 </el-button>
               </el-tooltip>
@@ -687,8 +722,12 @@ function formatProgress(progress: number): string {
           <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
             <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
           </el-table-column>
-          <el-table-column label="归档时间" width="150" class-name="pt-cell-muted">
-            <template #default="{ row }">{{ formatTime(row.archived_at) }}</template>
+          <el-table-column label="归档时间" width="112" class-name="pt-cell-muted pt-cell-1line">
+            <template #default="{ row }">
+              <span :title="formatTime(row.archived_at)">
+                {{ formatTimeShort(row.archived_at) }}
+              </span>
+            </template>
           </el-table-column>
         </el-table>
 

@@ -1042,6 +1042,33 @@ if (!existsSync(CHROME)) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/*
+ * 起 Chrome 之前先看调试端口有没有人占着。
+ *
+ * 这一步值 40 分钟：上一次有个三小时前的孤儿 Chrome（父进程已经是 init）还占着 19400，
+ * 新起的那个绑不上端口就自己退了，而脚本的 CDP 连上了**那个旧 Chrome** ——
+ * 它是个能正常开页面的浏览器，所以「第一页打不开就退出」那道闸拦不住它，
+ * 于是 37 条路由对着一个 cookie 与假数据全不对的浏览器空转了四十分钟，屏幕上一个字都没有。
+ *
+ * 端口被占时立刻退 2 并把占用者报出来：清掉它比猜为什么慢便宜得多。
+ */
+{
+  const probe = await fetch(`http://127.0.0.1:${PORT}/json/version`, {
+    signal: AbortSignal.timeout(1500),
+  }).catch(() => null);
+  if (probe?.ok) {
+    console.error(
+      `✗ 调试端口 ${PORT} 已被占用 —— 很可能是上一次留下的 Chrome（孤儿进程）。\n` +
+        `  它是个能开页面的浏览器，所以不会在「第一页打不开」那道闸上被拦住，\n` +
+        `  但它的 cookie 与假数据都不是这一轮的，跑下去只会空转。\n` +
+        `  查占用者：ss -ltnp | grep ${PORT}；按 PID 清掉（别用 pkill -f，那会连自己的 shell 一起杀）。\n` +
+        `  或者换个端口：--port <其他端口>。`,
+    );
+    process.exit(2);
+  }
+}
+
 const profile = mkdtempSync(join(tmpdir(), "ptboard-"));
 const chrome = spawn(
   CHROME,
