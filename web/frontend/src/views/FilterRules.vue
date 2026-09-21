@@ -780,8 +780,13 @@ function decisionText(decision: string | undefined): string {
             <span>{{ getMatchFieldLabel(rule.match_field) }}</span>
             <span>{{ formatSizeRange(rule) }}</span>
             <span>优先级 {{ rule.priority }}</span>
-            <!-- 仅免费只在开着的时候出现：关掉是默认值，画个「否」的胶囊只是噪声 -->
-            <PtStatusPill v-if="rule.require_free" tone="ok" size="sm">仅免费</PtStatusPill>
+            <!--
+              仅免费只在开着的时候出现：关掉是默认值，画个「否」只是噪声。
+              它是规则的属性不是状态，用中性 PtTag（和左边的类型 chip 同一档）——
+              原来是一枚 ok 色的胶囊，和右上角「已启用」并排就成了一卡两枚状态胶囊，
+              桌面那一列早已改成纯文本「是」，手机上没道理反而更响。
+            -->
+            <PtTag v-if="rule.require_free">仅免费</PtTag>
             <code class="pattern pattern--row">{{ rule.pattern }}</code>
           </template>
 
