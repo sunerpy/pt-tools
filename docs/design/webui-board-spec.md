@@ -1883,3 +1883,43 @@ AppRail 里三段注释还在描述已删掉的 `display:none` 机制，改掉�
   而桌面那一列早已改成纯文本「是」。它是属性不是状态，改成和类型同一档的中性 PtTag。
 
 截图在 /tmp/ptshot/fr-final2/（不入库）。
+
+## 32 侧栏的面跟主题走，logo 用彩色版
+
+用户第二次看过侧栏之后的两条（2026-09-21）：「明亮主题下 侧栏导航也应该是浅色吧」、
+「侧栏的图标 logo 能否使用彩色 logo 而不是黑白」。
+
+### 32.1 侧栏面：新增 `--pt-shell-*` 一族
+
+§31 把整块侧栏放到 chrome（深色）上，在明亮主题里就是一块黑板贴着白色页面。现在侧栏的面
+**跟主题走**：八套配色各给六枚 `--pt-shell-bg / raised / border / t1 / t2 / p`，
+浅色配色映射到 surface 那一族（白底、hover 面、border、t1 / t2），深色配色等于 chrome 那一族。
+`shell.css` 里从 `.pt-side` 到 `.pt-nav__empty` 的整段只吃 shell-_，一个 chrome-_ 都不留
+（`shellTokens.test.ts` 守着这条，以及「浅色配色的 shell-bg 亮度 > 0.5、深色 < 0.2」和三组对比度）。
+
+| 配色       | shell-bg | shell-p             | 说明                                  |
+| ---------- | -------- | ------------------- | ------------------------------------- |
+| cockpit 浅 | #FFFFFF  | #0B7488（p-active） | p #0E8FA8 在白底上 4.26，差一点到 4.5 |
+| atlas 浅   | #FFFFFF  | #7C3AED（= p）      | 5.6                                   |
+| deck 浅    | #FFFFFF  | #18181B（= p）      | 单色系，选中就是黑字黑条              |
+| halo 浅    | #FFFFFF  | #B04E14（p-active） | p #D2601F 在白底上 3.7                |
+| 四套深色   | = chrome | = chrome-p          | 与 §31 一样                           |
+
+明亮主题下这正好回到画板 41 画的白色 nav（#FFF 底、#DDE2E9 边）—— 区别只在 rail 也是白的、两者是一块。
+**状态栏与移动端顶栏 / 底栏仍是 chrome**：用户只说了侧栏；浅色侧栏 + 深色状态条是常见的组合
+（VS Code 浅色主题即如此）。要不要跟着变浅，留给 owner 决定。
+
+### 32.2 logo：彩色版
+
+rail 与 nav 的 logo 都换成 `plated`（自带 #0B1220 底板的彩色版：青色尖括号 + 橙色光标）。
+brand.md 的变体表把「深色导航栏」指向单色版，但那是**选型建议**，不在硬性规则里；
+硬性规则（不改色、不加效果、不变形、留白 ≥ 25%）一条没碰。明亮主题下侧栏本来就是浅色导航栏、
+按表该用彩色版；深色主题下底板 #0B1220 与 chrome 只差一档，读出来是深底上的彩色字形。
+
+### 32.3 验收
+
+- `shellTokens.test.ts` 30 条（+17）：八套 shell-* 齐全、明暗归属正确、t1 ≥ 7 / t2 ≥ 4.5 / p ≥ 4.5、
+  侧栏 CSS 区段不吃 chrome-* 与 --pt-p；状态栏 / 移动 tab 仍吃 chrome-p。
+- cockpit 明亮（钉住 / 收起）与 cockpit 深色（钉住）三张侧栏截图实际看过：浅色下白底 + 彩色 logo + 深青强调；
+  深色下 chrome + 彩色 logo + 青色强调。
+- board-check 全量、Tests 285 passed、style-scan / dialog-scan、fmt、oxlint 见提交说明。

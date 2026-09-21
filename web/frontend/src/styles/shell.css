@@ -1,14 +1,16 @@
 /*
  * 应用外壳 —— Penpot 页面 G Cockpit 的结构：
- *   侧栏 side（深色 chrome，一块，两个宽度）│ main（页头 + 内容）
+ *   侧栏 side（一块，两个宽度，面跟主题走）│ main（页头 + 内容）
  *   底部通栏 status 28（深色）
  *
  * 画板 41 画的是 rail 64（深色）+ nav 264（浅色）两列并排。落地已经按用户的决定改成**一块侧栏**：
  * 钉住时 rail 除了品牌与底部两个钮全空，一条黑色空条贴着一列白色导航，两枚 logo、两个头像，
  * 用户原话「展开时也应该是一体的而不是一个黑色侧栏 + 一个白色侧栏导航」。
  * 于是：
- *   收起 64   rail —— 品牌 + 8 个快捷入口 + 日志 / 明暗 / 头像（这一态用户认可，一个像素没动）
+ *   收起 64   rail —— 品牌 + 8 个快捷入口 + 日志 / 明暗 / 头像
  *   展开 264  nav  —— 品牌 + 版本 + 跳转框 + 6 组 19 项 + 账号行（明暗钮、偏好浮层都在这一行）
+ * 侧栏的面**跟主题走**（--pt-shell-*）：明亮主题下是白底浅色面，深色主题下是 chrome ——
+ * 用户第二次反馈「明亮主题下 侧栏导航也应该是浅色吧」。状态栏与移动端顶栏 / 底栏仍是 chrome。
  * 两者叠在同一个格子里，logo 与头像钉在同一个位置，中间的内容交叉淡入淡出；
  * 格子宽度本身做过渡，主区跟着平移 —— 此前是栅格列数 2↔3 一步跳到位、导航列另起一个滑动，
  * 用户原话「切换动画也很割裂」。
@@ -70,7 +72,7 @@
   grid-area: side;
   z-index: 50;
   min-width: 0;
-  background: var(--pt-chrome);
+  background: var(--pt-shell-bg);
 }
 
 @media (min-width: 1181px) {
@@ -112,8 +114,8 @@
 .pt-shell__nav-col {
   width: var(--pt-nav-w);
   visibility: hidden;
-  background: var(--pt-chrome);
-  border-right: 1px solid var(--pt-chrome-border);
+  background: var(--pt-shell-bg);
+  border-right: 1px solid var(--pt-shell-border);
   opacity: 0;
   transform: translateX(-8px);
 }
@@ -177,7 +179,7 @@
   gap: 8px;
   padding: 14px 0 12px;
   /* 底色由 .pt-side 给；这里只画收起态的外沿 */
-  border-right: 1px solid var(--pt-chrome-border);
+  border-right: 1px solid var(--pt-shell-border);
 }
 
 .pt-rail__brand {
@@ -186,13 +188,13 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-chrome-t1);
+  color: var(--pt-shell-t1);
   border-radius: var(--pt-r-md);
   transition: background var(--pt-transition-fast);
 }
 
 .pt-rail__brand:hover {
-  background: var(--pt-chrome-raised);
+  background: var(--pt-shell-raised);
 }
 
 .pt-rail__items {
@@ -224,7 +226,7 @@
   width: 52px;
   height: 40px;
   padding: 0;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   background: transparent;
   border: 0;
   border-radius: var(--pt-r-md);
@@ -237,8 +239,8 @@
 .pt-rail__item:hover,
 .pt-rail__tool:hover,
 .pt-rail__avatar:hover {
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-raised);
 }
 
 /*
@@ -248,10 +250,10 @@
  */
 
 .pt-rail__item.is-active {
-  /* --pt-chrome-p 而不是 --pt-p：deck 浅色的 p 与 chrome 同值，选中项会整个消失（theme.scss 有注） */
-  color: var(--pt-chrome-p);
+  /* --pt-shell-p 而不是 --pt-p：侧栏面跟主题走，强调色要对着这块面校过对比（theme.scss 有注） */
+  color: var(--pt-shell-p);
   /* 画板 sel-bg：cyan@0.14 */
-  background: color-mix(in srgb, var(--pt-chrome-p) 14%, transparent);
+  background: color-mix(in srgb, var(--pt-shell-p) 14%, transparent);
 }
 
 /* 画板 sel：3×40 贴 rail 左沿（x=0），与项等高 —— 深色底上单靠色相区分不够 */
@@ -261,7 +263,7 @@
   width: 3px;
   height: 40px;
   content: "";
-  background: var(--pt-chrome-p);
+  background: var(--pt-shell-p);
   border-radius: 0 1.5px 1.5px 0;
 }
 
@@ -274,7 +276,7 @@
   align-items: center;
   width: 40px;
   padding-top: 12px;
-  border-top: 1px solid var(--pt-chrome-border);
+  border-top: 1px solid var(--pt-shell-border);
 }
 
 /* 画板 rail-log 16,916 32×32 r=4 */
@@ -288,26 +290,26 @@
 .pt-rail__avatar {
   width: 30px;
   height: 30px;
-  background: var(--pt-chrome-raised);
+  background: var(--pt-shell-raised);
   border-radius: var(--pt-radius-full, 50%);
 }
 
 /* ===========================================================================
- * nav —— 导航列。坐在 chrome（深色）上，和 rail 是同一块侧栏的展开态
+ * nav —— 导航列。和 rail 是同一块侧栏的展开态，坐在同一块面（--pt-shell-*）上
  *
- * 画板 41 把它画成浅色（#FFF 底、t1/t2 字、hover 面），落地按用户的决定改成 chrome：
- * 黑色 rail 贴着白色导航列不是一体的。字色、hover、分隔线全部换成 chrome-* 这一组令牌，
- * 八套配色里 chrome 都是深色，所以标志、徽标、选中态在每一套里都成立。
+ * 画板 41 把它画成浅色（#FFF 底、t1/t2 字、hover 面）—— 明亮主题下现在正是这个样子；
+ * 深色主题下整块侧栏是 chrome。字色、hover、分隔线全部走 shell-* 这一组令牌，
+ * 八套配色各自校过对比度（shellTokens.test.ts）。
  * =========================================================================== */
 .pt-nav {
-  /* 「比 chrome-t2 再淡一档」只此一个值：组标题、外链角标都用它，别各写一个 0.7x */
-  --pt-chrome-dim: 0.72;
+  /* 「比 shell-t2 再淡一档」只此一个值：组标题、外链角标都用它，别各写一个 0.7x */
+  --pt-shell-dim: 0.72;
 
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
 }
 
 /*
@@ -322,7 +324,7 @@
   flex-direction: column;
   height: 98px;
   padding: 14px 12px 0 16px;
-  border-bottom: 1px solid var(--pt-chrome-border);
+  border-bottom: 1px solid var(--pt-shell-border);
 }
 
 .pt-nav__brand {
@@ -339,13 +341,13 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-chrome-t1);
+  color: var(--pt-shell-t1);
   border-radius: var(--pt-r-md);
   transition: background var(--pt-transition-fast);
 }
 
 .pt-nav__logo:hover {
-  background: var(--pt-chrome-raised);
+  background: var(--pt-shell-raised);
 }
 
 .pt-nav__brand-text {
@@ -361,7 +363,7 @@
   font-weight: 700;
   line-height: 18px;
   letter-spacing: 0.01em;
-  color: var(--pt-chrome-t1);
+  color: var(--pt-shell-t1);
 }
 
 /* 画板 ver 116,34 10.5/400 t3：版本与「已是最新 / 有新版本」贴在品牌下面 */
@@ -369,7 +371,7 @@
   overflow: hidden;
   font-size: 10.5px;
   line-height: 13px;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -382,7 +384,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   background: transparent;
   border: 0;
   border-radius: var(--pt-r-sm);
@@ -393,8 +395,8 @@
 }
 
 .pt-nav__close:hover {
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-raised);
 }
 
 .pt-nav__jump {
@@ -407,25 +409,25 @@
  * Element 的输入框颜色走它自己的变量，这里在这一小块里覆盖掉，别动全局。
  */
 .pt-nav__jump .el-input {
-  --el-input-text-color: var(--pt-chrome-t1);
-  --el-input-icon-color: var(--pt-chrome-t2);
-  --el-input-placeholder-color: var(--pt-chrome-t2);
-  --el-input-clear-hover-color: var(--pt-chrome-t1);
+  --el-input-text-color: var(--pt-shell-t1);
+  --el-input-icon-color: var(--pt-shell-t2);
+  --el-input-placeholder-color: var(--pt-shell-t2);
+  --el-input-clear-hover-color: var(--pt-shell-t1);
 }
 
 .pt-nav__jump .el-input__wrapper {
   height: 30px;
-  background: var(--pt-chrome-raised);
+  background: var(--pt-shell-raised);
   border-radius: var(--pt-r-sm);
   box-shadow: none;
 }
 
 .pt-nav__jump .el-input__wrapper.is-focus {
-  box-shadow: inset 0 0 0 1px var(--pt-chrome-p);
+  box-shadow: inset 0 0 0 1px var(--pt-shell-p);
 }
 
 .pt-nav__jump .el-input__prefix {
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
 }
 
 .pt-nav__scroll {
@@ -435,7 +437,7 @@
   padding: 0 6px var(--pt-space-4);
   overflow: hidden auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--pt-chrome-border) transparent;
+  scrollbar-color: var(--pt-shell-border) transparent;
 }
 
 .pt-nav__group + .pt-nav__group {
@@ -449,8 +451,8 @@
   font-size: 10px;
   font-weight: 600;
   line-height: 22px;
-  color: var(--pt-chrome-t2);
-  opacity: var(--pt-chrome-dim);
+  color: var(--pt-shell-t2);
+  opacity: var(--pt-shell-dim);
 }
 
 /* 画板：项高 30、节奏 30；图标 x=80（内缩 16）、文字 x=106、12.5 号 */
@@ -462,7 +464,7 @@
   height: 30px;
   padding: 0 10px;
   font-size: 12.5px;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   text-decoration: none;
   border-radius: var(--pt-r-md);
   transition:
@@ -471,8 +473,8 @@
 }
 
 .pt-nav__item:hover {
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-raised);
 }
 
 /*
@@ -481,8 +483,8 @@
  */
 .pt-nav__item.is-active {
   font-weight: 600;
-  color: var(--pt-chrome-p);
-  background: color-mix(in srgb, var(--pt-chrome-p) 14%, transparent);
+  color: var(--pt-shell-p);
+  background: color-mix(in srgb, var(--pt-shell-p) 14%, transparent);
 }
 
 .pt-nav__item.is-active::before {
@@ -491,7 +493,7 @@
   width: 3px;
   height: 20px;
   content: "";
-  background: var(--pt-chrome-p);
+  background: var(--pt-shell-p);
   border-radius: 0 1.5px 1.5px 0;
 }
 
@@ -509,15 +511,15 @@
   font-size: 10.5px;
   font-weight: 600;
   line-height: 16px;
-  color: var(--pt-chrome-p);
+  color: var(--pt-shell-p);
   text-align: center;
-  background: color-mix(in srgb, var(--pt-chrome-p) 16%, transparent);
+  background: color-mix(in srgb, var(--pt-shell-p) 16%, transparent);
   border-radius: 8px;
 }
 
 .pt-nav__ext {
-  color: var(--pt-chrome-t2);
-  opacity: var(--pt-chrome-dim);
+  color: var(--pt-shell-t2);
+  opacity: var(--pt-shell-dim);
 }
 
 /* ===========================================================================
@@ -532,7 +534,7 @@
   align-items: center;
   height: 56px;
   padding: 0 12px 0 16px;
-  border-top: 1px solid var(--pt-chrome-border);
+  border-top: 1px solid var(--pt-shell-border);
 }
 
 /* 头像 + 名称是一个按钮：点开偏好与账户浮层（画板 41 user-pop），和 rail 头像同一份 */
@@ -555,7 +557,7 @@
 }
 
 .pt-nav__account-who:hover {
-  background: var(--pt-chrome-raised);
+  background: var(--pt-shell-raised);
 }
 
 .pt-nav__account-av {
@@ -565,8 +567,8 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-raised);
   border-radius: var(--pt-radius-full);
 }
 
@@ -581,14 +583,14 @@
   font-size: 12.5px;
   font-weight: 600;
   line-height: 15px;
-  color: var(--pt-chrome-t1);
+  color: var(--pt-shell-t1);
 }
 
 .pt-nav__account-role {
   overflow: hidden;
   font-size: 10.5px;
   line-height: 13px;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -601,7 +603,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   background: transparent;
   border: 0;
   border-radius: var(--pt-r-sm);
@@ -612,8 +614,8 @@
 }
 
 .pt-nav__account-btn:hover {
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-raised);
 }
 
 /* 登出是这一行里唯一的破坏性动作：hover 才给危险色，平时和别的钮一样安静 */
@@ -625,7 +627,7 @@
 .pt-nav__empty {
   margin: var(--pt-space-4) 0 0;
   font-size: var(--pt-fz-sm);
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   text-align: center;
 }
 

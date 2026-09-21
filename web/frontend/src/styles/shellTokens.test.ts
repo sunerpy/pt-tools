@@ -70,15 +70,72 @@ describe("chrome 上的强调色", () => {
     });
   }
 
-  it("shell.css 里 chrome 上的选中态与徽标用 --pt-chrome-p，不用 --pt-p", () => {
-    const railActive = shell.match(/\.pt-rail__item\.is-active \{[^}]*\}/)?.[0] ?? "";
-    const navActive = shell.match(/\.pt-nav__item\.is-active \{[^}]*\}/)?.[0] ?? "";
-    const badge = shell.match(/\.pt-nav__badge \{[^}]*\}/)?.[0] ?? "";
-    for (const block of [railActive, navActive, badge]) {
+  it("shell.css 里仍坐在 chrome 上的状态栏链接与移动 tab 选中态用 --pt-chrome-p，不用 --pt-p", () => {
+    const tab = shell.match(/\.pt-mnav__tab\.is-active \{[^}]*\}/)?.[0] ?? "";
+    const copy = shell.match(/\.pt-status__copy a \{[^}]*\}/)?.[0] ?? "";
+    for (const block of [tab, copy]) {
       expect(block).not.toBe("");
       expect(block).not.toMatch(/var\(--pt-p\)/);
       expect(block).toMatch(/var\(--pt-chrome-p\)/);
     }
+  });
+});
+
+/*
+ * 侧栏跟主题走：明亮主题下是浅色面，深色主题下是 chrome。用户原话「明亮主题下 侧栏导航也应该是浅色吧」。
+ * 所以侧栏不再直接吃 chrome-*，而是吃一组 shell-*：浅色配色里映射到 surface / hover / border / t1 / t2，
+ * 深色配色里映射到 chrome 那一族。每套配色都必须给全，且字与强调色对底 ≥ 4.5:1。
+ */
+describe("侧栏面（shell-*）跟主题走", () => {
+  const all = schemes();
+  const KEYS = [
+    "pt-shell-bg",
+    "pt-shell-raised",
+    "pt-shell-border",
+    "pt-shell-t1",
+    "pt-shell-t2",
+    "pt-shell-p",
+  ];
+
+  for (const s of all) {
+    const light = s.name.startsWith("html.light");
+    it(`${s.name} 六枚 shell-* 都在，且 ${light ? "是浅色面" : "是深色面"}`, () => {
+      for (const k of KEYS) expect(s.vars[k], `缺 --${k}`).toMatch(/^#[0-9a-f]{6}$/i);
+      const bgLum = luminance(s.vars["pt-shell-bg"]!);
+      if (light) expect(bgLum).toBeGreaterThan(0.5);
+      else expect(bgLum).toBeLessThan(0.2);
+    });
+    it(`${s.name} 侧栏文字与强调色对底 ≥ 4.5`, () => {
+      const bg = s.vars["pt-shell-bg"]!;
+      expect(contrast(s.vars["pt-shell-t1"]!, bg)).toBeGreaterThanOrEqual(7);
+      expect(contrast(s.vars["pt-shell-t2"]!, bg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(s.vars["pt-shell-p"]!, bg)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  it("shell.css 的侧栏（.pt-side / rail / nav）只吃 shell-*，不直接吃 chrome-* 或 --pt-p", () => {
+    const code = shell.replace(/\/\*[\s\S]*?\*\//g, "");
+    // 从「网格骨架」里的 .pt-side 起，到 nav 账号页脚 .pt-nav__empty 结束，是侧栏的全部规则
+    const start = code.indexOf(".pt-side {");
+    const end = code.indexOf(".pt-nav__empty {");
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const side = code.slice(start, end);
+    expect(side).not.toMatch(/var\(--pt-chrome/);
+    expect(side).not.toMatch(/var\(--pt-p\)/);
+    for (const sel of [
+      ".pt-side {",
+      ".pt-rail__item.is-active {",
+      ".pt-nav__item.is-active {",
+      ".pt-nav__badge {",
+    ]) {
+      expect(side).toContain(sel);
+    }
+    const railActive = side.match(/\.pt-rail__item\.is-active \{[^}]*\}/)?.[0] ?? "";
+    const navActive = side.match(/\.pt-nav__item\.is-active \{[^}]*\}/)?.[0] ?? "";
+    const badge = side.match(/\.pt-nav__badge \{[^}]*\}/)?.[0] ?? "";
+    for (const block of [railActive, navActive, badge])
+      expect(block).toMatch(/var\(--pt-shell-p\)/);
   });
 });
 

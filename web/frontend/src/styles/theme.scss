@@ -125,6 +125,19 @@ html.light[data-theme-style="cockpit"] {
    * （src/styles/shellTokens.test.ts 守着）。这一套取 p-hover：p #0e8fa8 在 #171a1f 上只有 4.2。
    */
   --pt-chrome-p: #12a6c2;
+  /*
+   * 侧栏（rail + nav）的面。它**跟主题走**：浅色配色里是 surface 那一族（白底、hover 面、
+   * border、t1/t2），深色配色里等于 chrome 那一族 —— 用户原话「明亮主题下 侧栏导航也应该是浅色吧」。
+   * 状态栏与移动端顶栏 / 底栏仍是 chrome（八套里都是深色），不走这一组。
+   * shell-p 是侧栏上可用的强调色，与 shell-bg ≥ 4.5:1：这一套取 p-active（p #0e8fa8 在白底上只有 4.26）。
+   * 八套都必须给全，shellTokens.test.ts 守着明暗归属与对比度。
+   */
+  --pt-shell-bg: #ffffff;
+  --pt-shell-raised: #edf0f4;
+  --pt-shell-border: #dde2e9;
+  --pt-shell-t1: #10141a;
+  --pt-shell-t2: #4e5765;
+  --pt-shell-p: #0b7488;
 
   --pt-t1: #10141a;
   --pt-t2: #4e5765;
@@ -166,6 +179,12 @@ html.dark[data-theme-style="cockpit"] {
   --pt-chrome-t1: #e8ebef;
   --pt-chrome-t2: #99a0ac;
   --pt-chrome-p: #12a6c2;
+  --pt-shell-bg: #12151a;
+  --pt-shell-raised: #21252c;
+  --pt-shell-border: #2c313a;
+  --pt-shell-t1: #e8ebef;
+  --pt-shell-t2: #99a0ac;
+  --pt-shell-p: #12a6c2;
 
   --pt-t1: #e8ebef;
   --pt-t2: #99a0ac;
@@ -209,6 +228,12 @@ html.light[data-theme-style="atlas"] {
   --pt-chrome-t1: #eceef4;
   --pt-chrome-t2: #9aa0af;
   --pt-chrome-p: #a78bfa;
+  --pt-shell-bg: #ffffff;
+  --pt-shell-raised: #f4f5f8;
+  --pt-shell-border: #e4e6ec;
+  --pt-shell-t1: #14161c;
+  --pt-shell-t2: #565d6d;
+  --pt-shell-p: #7c3aed;
 
   --pt-t1: #14161c;
   --pt-t2: #565d6d;
@@ -249,6 +274,12 @@ html.dark[data-theme-style="atlas"] {
   --pt-chrome-t1: #f4f5f8;
   --pt-chrome-t2: #a9b0be;
   --pt-chrome-p: #a78bfa;
+  --pt-shell-bg: #0a0b0f;
+  --pt-shell-raised: #1e2129;
+  --pt-shell-border: #2a2e38;
+  --pt-shell-t1: #f4f5f8;
+  --pt-shell-t2: #a9b0be;
+  --pt-shell-p: #a78bfa;
 
   --pt-t1: #f4f5f8;
   --pt-t2: #a9b0be;
@@ -292,6 +323,12 @@ html.dark[data-theme-style="deck"] {
   --pt-chrome-t1: #fafafa;
   --pt-chrome-t2: #9b9ba3;
   --pt-chrome-p: #fafafa;
+  --pt-shell-bg: #08080a;
+  --pt-shell-raised: #18181b;
+  --pt-shell-border: #202024;
+  --pt-shell-t1: #fafafa;
+  --pt-shell-t2: #9b9ba3;
+  --pt-shell-p: #fafafa;
 
   --pt-t1: #fafafa;
   --pt-t2: #9b9ba3;
@@ -332,6 +369,12 @@ html.light[data-theme-style="deck"] {
   --pt-chrome-t1: #fafafa;
   --pt-chrome-t2: #a1a1aa;
   --pt-chrome-p: #fafafa;
+  --pt-shell-bg: #ffffff;
+  --pt-shell-raised: #f4f4f5;
+  --pt-shell-border: #e4e4e7;
+  --pt-shell-t1: #0a0a0b;
+  --pt-shell-t2: #52525b;
+  --pt-shell-p: #18181b;
 
   --pt-t1: #0a0a0b;
   --pt-t2: #52525b;
@@ -375,6 +418,12 @@ html.dark[data-theme-style="halo"] {
   --pt-chrome-t1: #f6f1eb;
   --pt-chrome-t2: #b3a79b;
   --pt-chrome-p: #ff8a4c;
+  --pt-shell-bg: #16120f;
+  --pt-shell-raised: #241f1b;
+  --pt-shell-border: #2a2521;
+  --pt-shell-t1: #f6f1eb;
+  --pt-shell-t2: #b3a79b;
+  --pt-shell-p: #ff8a4c;
 
   --pt-t1: #f6f1eb;
   --pt-t2: #b3a79b;
@@ -415,6 +464,12 @@ html.light[data-theme-style="halo"] {
   --pt-chrome-t1: #f6f1eb;
   --pt-chrome-t2: #b3a79b;
   --pt-chrome-p: #e5713a;
+  --pt-shell-bg: #ffffff;
+  --pt-shell-raised: #f5efe9;
+  --pt-shell-border: #eae0d6;
+  --pt-shell-t1: #221a13;
+  --pt-shell-t2: #6b5a4b;
+  --pt-shell-p: #b04e14;
 
   --pt-t1: #221a13;
   --pt-t2: #6b5a4b;
