@@ -182,19 +182,18 @@
   border-right: 1px solid var(--pt-shell-border);
 }
 
+/*
+ * 品牌盒 32×32。里面是自带底板的彩色 logo（plated），brand.md：「自带底板，不要再套一层背景」——
+ * 所以这里**没有 hover 底**，只保留键盘焦点环。外部留白按 brand.md 从底板边缘量、内缩不算：
+ * 上下左右到相邻元素都 ≥ 28 × 25% = 7（左 2 + 16、上 2 + 14、下 2 + 8 到开关钮）。
+ */
 .pt-rail__brand {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-shell-t1);
   border-radius: var(--pt-r-md);
-  transition: background var(--pt-transition-fast);
-}
-
-.pt-rail__brand:hover {
-  background: var(--pt-shell-raised);
 }
 
 .pt-rail__items {
@@ -331,13 +330,18 @@
   border-bottom: 1px solid var(--pt-shell-border);
 }
 
+/*
+ * 品牌行的间距 8 而不是 4：彩色 logo 的底板到「pt-tools」字标要有 ≥ 28 × 25% = 7 的**外部**留白
+ * （brand.md：内缩不算留白），4 时只有 (32 − 28) / 2 + 4 = 6。8 时是 10，字标落在 x=56（画板 52，
+ * 画板的 logo 盒是 28、这里为了和 rail 同位用 32，差的正是这 4）。
+ */
 .pt-nav__brand {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   align-items: flex-start;
 }
 
-/* 和 .pt-rail__brand 完全同一个盒子：32×32、r6、hover 用 chromeRaised，收/展时 logo 不动 */
+/* 和 .pt-rail__brand 完全同一个盒子：32×32、r6，收/展时 logo 不动；同样不给 hover 底（见 rail 那段） */
 .pt-nav__logo {
   display: flex;
   flex: 0 0 auto;
@@ -345,13 +349,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-shell-t1);
   border-radius: var(--pt-r-md);
-  transition: background var(--pt-transition-fast);
-}
-
-.pt-nav__logo:hover {
-  background: var(--pt-shell-raised);
 }
 
 .pt-nav__brand-text {
@@ -406,6 +404,13 @@
 .pt-nav__jump {
   flex: 0 0 auto;
   margin: 9px 0 0 -4px;
+}
+
+/* 键盘焦点仍然要看得见：两个品牌链接没有 hover 底了，焦点环单独给 */
+.pt-rail__brand:focus-visible,
+.pt-nav__logo:focus-visible {
+  outline: 2px solid var(--pt-shell-p);
+  outline-offset: 2px;
 }
 
 /*

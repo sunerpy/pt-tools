@@ -171,6 +171,24 @@ describe("侧栏面（shell-*）跟主题走", () => {
   });
 });
 
+/*
+ * brand.md 硬性规则落在侧栏上的两条：彩色版「自带底板，不要再套一层背景」；
+ * 「四周留白 ≥ 标志高度的 25%，从底板边缘量起，彩色版自身的 12.5% 内缩不算」。
+ * 32 的盒装 28 的 logo，外部留白 = 2 + 间距，要 ≥ 7 就得间距 ≥ 5；品牌行的 gap 用 8。
+ */
+describe("侧栏里的彩色 logo 守 brand.md 的硬性规则", () => {
+  const code = shell.replace(/\/\*[\s\S]*?\*\//g, "");
+  it("品牌盒没有 hover 底", () => {
+    expect(code).not.toMatch(/\.pt-rail__brand:hover/);
+    expect(code).not.toMatch(/\.pt-nav__logo:hover/);
+  });
+  it("品牌行的间距 ≥ 5，使底板到字标的外部留白 ≥ 7", () => {
+    const brand = code.match(/\.pt-nav__brand \{[^}]*\}/)?.[0] ?? "";
+    const gap = Number.parseInt(brand.match(/gap:\s*(\d+)px/)?.[1] ?? "0", 10);
+    expect(gap).toBeGreaterThanOrEqual(5);
+  });
+});
+
 describe("外壳过渡简写", () => {
   it("时长令牌存在", () => {
     expect(theme).toMatch(/--pt-dur-normal:\s*\d+ms;/);
