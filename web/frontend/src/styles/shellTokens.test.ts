@@ -1,0 +1,102 @@
+/**
+ * 外壳令牌的两枚钉子。都来自 d698e90 那一轮评审里被证实的缺陷：
+ *
+ * 1. 强调色 --pt-p 直接压在 chrome（深色侧栏）上：deck 浅色里 p 与 chrome 是同一个色值
+ *    （#18181b），选中项的字、徽标、3px 条全部消失；atlas 浅色的紫色在深底上只有 2.6:1。
+ *    每套配色都必须给一个 --pt-chrome-p，且与该套的 --pt-chrome 对比 ≥ 4.5:1（12.5px 正文）。
+ *
+ * 2. `visibility 0s linear var(--pt-transition-normal)`：令牌展开是「240ms cubic-bezier(…)」，
+ *    一条 <single-transition> 里就有了两个缓动函数，整条 transition 简写在计算值阶段作废 ——
+ *    实测 rail 的 transitionDuration 是 0s，交叉淡入淡出只在四个方向里的一个成立。
+ *    所以时长要单独成令牌（--pt-dur-*），shell.css 里不允许再把 --pt-transition-* 当时长用。
+ */
+/// <reference types="node" />
+/*
+ * 这里必须直接读文件：vitest 把所有样式 import（连 `?raw`）都换成空串，而 views.*.test.ts
+ * 那招 `import.meta.glob(..., { query: "?raw" })` 只对 .vue 有效。tsconfig.app.json 的 types
+ * 只有 vite/client，所以用三斜线指令把 @types/node（tsconfig.node.json 已依赖）拉进来。
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+const theme = read("./theme.scss");
+const shell = read("./shell.css");
+
+/** 把 theme.scss 按 `html.xxx[...] {` 块切开，取每块里的令牌 */
+function schemes(): Array<{ name: string; vars: Record<string, string> }> {
+  const out: Array<{ name: string; vars: Record<string, string> }> = [];
+  const re = /^(html\.[^\n{]+)\{([\s\S]*?)^\}/gm;
+  for (const m of theme.matchAll(re)) {
+    const vars: Record<string, string> = {};
+    for (const v of m[2]!.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) vars[v[1]!] = v[2]!.trim();
+    if (vars["pt-chrome"]) out.push({ name: m[1]!.trim(), vars });
+  }
+  return out;
+}
+
+function luminance(hex: string): number {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  const [r, g, b] = [0, 2, 4].map((i) => Number.parseInt(full.slice(i, i + 2), 16) / 255);
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r!) + 0.7152 * lin(g!) + 0.0722 * lin(b!);
+}
+
+function contrast(a: string, b: string): number {
+  const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (l1! + 0.05) / (l2! + 0.05);
+}
+
+describe("chrome 上的强调色", () => {
+  const all = schemes();
+
+  it("八套配色都在", () => {
+    expect(all.length).toBe(8);
+  });
+
+  for (const s of all) {
+    it(`${s.name} 有 --pt-chrome-p 且与 chrome 对比 ≥ 4.5`, () => {
+      const p = s.vars["pt-chrome-p"];
+      expect(p, "缺 --pt-chrome-p").toMatch(/^#[0-9a-f]{6}$/i);
+      expect(contrast(p!, s.vars["pt-chrome"]!)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  it("shell.css 里 chrome 上的选中态与徽标用 --pt-chrome-p，不用 --pt-p", () => {
+    const railActive = shell.match(/\.pt-rail__item\.is-active \{[^}]*\}/)?.[0] ?? "";
+    const navActive = shell.match(/\.pt-nav__item\.is-active \{[^}]*\}/)?.[0] ?? "";
+    const badge = shell.match(/\.pt-nav__badge \{[^}]*\}/)?.[0] ?? "";
+    for (const block of [railActive, navActive, badge]) {
+      expect(block).not.toBe("");
+      expect(block).not.toMatch(/var\(--pt-p\)/);
+      expect(block).toMatch(/var\(--pt-chrome-p\)/);
+    }
+  });
+});
+
+describe("外壳过渡简写", () => {
+  it("时长令牌存在", () => {
+    expect(theme).toMatch(/--pt-dur-normal:\s*\d+ms;/);
+  });
+
+  it("shell.css 不把 --pt-transition-* 当时长/延迟塞进 visibility 简写", () => {
+    // `visibility 0s … var(--pt-transition-normal)` 展开后有两个缓动函数 → 整条作废。
+    // 注释里会原样引用这个错误写法来解释它，所以先把注释剥掉再查。
+    const code = shell.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/visibility\s+0s[^;,]*var\(--pt-transition-/);
+  });
+
+  it("rail 的露出态也覆盖了 visibility 的延迟（否则先透明 240ms 再弹出）", () => {
+    expect(shell).toMatch(
+      /\.pt-shell:not\(\.is-nav-docked\):not\(\.is-nav-open\)\s+\.pt-rail\s*\{[^}]*visibility 0s/,
+    );
+  });
+});

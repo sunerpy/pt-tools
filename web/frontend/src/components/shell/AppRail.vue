@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { RAIL_FOOT_ITEM, RAIL_ITEMS } from "../../config/navigation";
 import { useThemeStore } from "../../stores/theme";
 import PtIcon from "../PtIcon";
@@ -25,6 +25,14 @@ defineProps<{
 
 const emit = defineEmits<{ "toggle-nav": [] }>();
 
+const toggleRef = ref<HTMLButtonElement>();
+/** 钉住→收起之后把焦点交到这枚开关上；原因见 AppNav.focusToggle */
+defineExpose({
+  focusToggle() {
+    toggleRef.value?.focus();
+  },
+});
+
 const themeStore = useThemeStore();
 
 /** 图标表示「点了会变成什么」：当前是深色就给太阳 */
@@ -45,6 +53,7 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
     -->
     <el-tooltip :content="navToggleLabel" placement="right" :offset="10" :show-after="240">
       <button
+        ref="toggleRef"
         type="button"
         class="pt-rail__tool pt-rail__tool--nav"
         :aria-label="navToggleLabel"
@@ -82,8 +91,9 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
     <div class="pt-rail__foot">
       <!--
         运行日志。它在导航列里就是「系统 › 运行日志」，所以必须和主入口区那 8 项同一档：
-        带上 .pt-rail__item，让 shell.css 的 `.is-nav-docked .pt-rail__item` 在导航列
-        钉住时把它藏掉，否则两处常态重复。.pt-rail__tool 给的是画板 rail-log 的 32×32。
+        带上 .pt-rail__item，验收脚本按这个类数「导航列钉住时 rail 上还剩几个入口」。
+        （钉住时整条 rail 淡出，见 shell.css 网格骨架那段；这里不再有单独的 display:none。）
+        .pt-rail__tool 给的是画板 rail-log 的 32×32。
 
         不加 is-active：那条选中条（3×40，left:-6px）的位置是按主入口区 52×40 的项盒
         算出来的，那里项盒起于 x=6，条正好贴着 rail 左沿。底部这个 32×32 的盒子起于
@@ -108,7 +118,7 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
       <el-tooltip :content="themeLabel" placement="right" :offset="10" :show-after="240">
         <button
           type="button"
-          class="pt-rail__tool"
+          class="pt-rail__tool pt-rail__tool--theme"
           :aria-label="themeLabel"
           @click="themeStore.toggle">
           <PtIcon :name="themeIcon" :size="16" />

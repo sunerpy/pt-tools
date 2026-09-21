@@ -22,7 +22,8 @@ const props = defineProps<{
   /** 此刻是否真的看得见。收起后清空跳转框，下次打开是干净的 */
   visible?: boolean;
 }>();
-const emit = defineEmits<{ navigate: []; "toggle-nav": [] }>();
+/** navigate = 点了某个链接（路由自己会动焦点）；close = 抽屉的关闭钮（焦点要交回开关） */
+const emit = defineEmits<{ navigate: []; close: []; "toggle-nav": [] }>();
 
 const router = useRouter();
 const runtimeStore = useRuntimeStore();
@@ -60,6 +61,7 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
 
 const query = ref("");
 const inputRef = ref<InputInstance>();
+const toggleRef = ref<HTMLButtonElement>();
 
 /** 跳转框（⌘K）：按中文文案或路径过滤，空查询时显示完整分组 */
 const matches = computed<NavItem[]>(() => {
@@ -96,6 +98,14 @@ defineExpose({
     await nextTick();
     inputRef.value?.focus();
   },
+  /**
+   * 把焦点交到头部那枚钮上（钉住时是「收起」，抽屉时是「关闭」—— 同一个 ref，v-if/v-else 只挂一个）。
+   * 收起→钉住：开关自己长在会淡出的那一块里，不交接的话点完开关焦点就掉到 body。
+   * 抽屉打开：打开它的开关（rail 上的）跟着 rail 一起淡出了，焦点同样会掉，所以进抽屉先落在关闭钮上。
+   */
+  focusToggle() {
+    toggleRef.value?.focus();
+  },
 });
 
 // 看不见了就清空查询，下次露出来是干净的
@@ -127,14 +137,16 @@ watch(
         <!-- 抽屉里是「关闭」，钉住时是「收起」：同一个位置、一个按钮，语义随形态变 -->
         <button
           v-if="drawer"
+          ref="toggleRef"
           type="button"
           class="pt-nav__close"
           aria-label="关闭导航"
-          @click="emit('navigate')">
+          @click="emit('close')">
           <PtIcon name="x" :size="16" />
         </button>
         <button
           v-else
+          ref="toggleRef"
           type="button"
           class="pt-nav__close"
           aria-label="收起导航"
@@ -199,7 +211,11 @@ watch(
         popper-class="pt-prefs-popper"
         :offset="12">
         <template #reference>
-          <button type="button" class="pt-nav__account-who" aria-label="偏好与账户">
+          <!--
+            可访问名就是看得见的那两行 + 一段只读给读屏的后缀，不用 aria-label 盖掉可见文字
+            （WCAG 2.5.3 Label in Name：说「admin」的语音用户要能命中它）。
+          -->
+          <button type="button" class="pt-nav__account-who">
             <span class="pt-nav__account-av" aria-hidden="true">
               <PtIcon name="user" :size="16" />
             </span>
@@ -207,6 +223,7 @@ watch(
               <span class="pt-nav__account-name">admin</span>
               <span class="pt-nav__account-role">管理员 · 本地账号</span>
             </span>
+            <span class="pt-sr-only">，偏好与账户</span>
           </button>
         </template>
         <div class="pt-prefs__who">
@@ -222,12 +239,16 @@ watch(
       </el-popover>
       <button
         type="button"
-        class="pt-nav__account-out"
+        class="pt-nav__account-btn pt-nav__account-btn--theme"
         :aria-label="themeLabel"
         @click="themeStore.toggle">
         <PtIcon :name="themeIcon" :size="15" />
       </button>
-      <button type="button" class="pt-nav__account-out" aria-label="退出登录" @click="logout">
+      <button
+        type="button"
+        class="pt-nav__account-btn pt-nav__account-btn--out"
+        aria-label="退出登录"
+        @click="logout">
         <PtIcon name="log-out" :size="15" />
       </button>
     </footer>

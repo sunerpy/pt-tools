@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import PtIcon from "./components/PtIcon";
 import AppNav from "./components/shell/AppNav.vue";
@@ -27,6 +27,7 @@ const runtimeStore = useRuntimeStore();
 
 const navOpen = ref(false);
 const navRef = ref<InstanceType<typeof AppNav> | null>(null);
+const railRef = ref<InstanceType<typeof AppRail> | null>(null);
 
 /**
  * 导航列的两种形态。
@@ -55,13 +56,47 @@ function setCollapsed(v: boolean) {
   localStorage.setItem(NAV_COLLAPSED_KEY, v ? "1" : "0");
 }
 
-/** 页头只有一个按钮，语义随形态变：钉住→收起，宽屏收起→展开，窄屏→开合抽屉 */
-function toggleNav() {
+/**
+ * 侧栏的开关。语义随形态变：钉住→收起，宽屏收起→展开，窄屏→开合抽屉。
+ *
+ * 开关自己长在会淡出的那一块里（收起钮在 nav 头部、展开钮在 rail 上），点完之后
+ * 原来聚焦的按钮就 visibility:hidden 了，焦点会掉回 body —— 键盘用户得从页头重新 Tab。
+ * 所以状态一变就把焦点交给对面那枚：露出态的规则是 `visibility 0s`，同一个 tick 就能 focus 上。
+ */
+async function toggleNav() {
   if (!wide.value) {
-    navOpen.value = !navOpen.value;
+    if (navOpen.value) await closeDrawer();
+    else await openDrawer();
     return;
   }
   setCollapsed(!navCollapsed.value);
+  await nextTick();
+  if (navDocked.value) navRef.value?.focusToggle();
+  else railRef.value?.focusToggle();
+}
+
+/** 抽屉打开：焦点进抽屉、落在关闭钮上 —— 打开它的 rail 开关跟着 rail 一起淡出了，不接就掉到 body */
+async function openDrawer() {
+  if (navOpen.value) return;
+  navOpen.value = true;
+  await nextTick();
+  navRef.value?.focusToggle();
+}
+
+/** 抽屉被 Esc / 遮罩 / 关闭钮收掉：焦点交回打开它的那枚开关（≤768 时 rail 不在，交给顶栏） */
+async function closeDrawer() {
+  if (!navOpen.value) return;
+  navOpen.value = false;
+  await nextTick();
+  railRef.value?.focusToggle();
+  /*
+   * ≤768 时 rail 是 display:none，上面那一下 focus 是空操作；而此刻焦点还停在正在淡出的
+   * 抽屉关闭钮上（visibility 要 240ms 后才变 hidden），不能用「焦点是否在 body」来判 ——
+   * 直接看焦点有没有落到 rail 开关上，没有就交给顶栏。
+   */
+  if (!document.activeElement?.classList.contains("pt-rail__tool--nav")) {
+    document.querySelector<HTMLElement>(".pt-mchrome__icon[aria-controls='pt-nav-col']")?.focus();
+  }
 }
 
 const navToggleIcon = computed(() => {
@@ -162,7 +197,7 @@ function onKeydown(e: KeyboardEvent) {
     navRef.value?.focusSearch();
     return;
   }
-  if (e.key === "Escape" && navOpen.value) navOpen.value = false;
+  if (e.key === "Escape" && navOpen.value) void closeDrawer();
 }
 
 onMounted(() => {
@@ -225,6 +260,7 @@ watch(
     -->
     <div class="pt-side">
       <AppRail
+        ref="railRef"
         :active-path="activePath"
         :nav-toggle-icon="navToggleIcon"
         :nav-toggle-label="navToggleLabel"
@@ -237,12 +273,13 @@ watch(
           :drawer="!navDocked"
           :visible="navDocked || navOpen"
           @navigate="navOpen = false"
+          @close="closeDrawer"
           @toggle-nav="toggleNav" />
       </div>
     </div>
 
     <main class="pt-shell__main">
-      <MobileChrome :active-path="activePath" :title="pageTitle" @open-nav="navOpen = true" />
+      <MobileChrome :active-path="activePath" :title="pageTitle" @open-nav="openDrawer" />
 
       <!--
         页头 —— 画板 head：列表页 64 高「标题 19/700 + 实时摘要 11.5/400」，
@@ -295,6 +332,6 @@ watch(
       type="button"
       class="pt-shell__scrim"
       aria-label="关闭导航"
-      @click="navOpen = false" />
+      @click="closeDrawer" />
   </div>
 </template>

@@ -62,6 +62,19 @@ a:hover {
   color: color-mix(in srgb, var(--pt-p) 82%, var(--pt-t1));
 }
 
+/* 只给读屏的文字：把按钮里看不见的后缀（「，偏好与账户」）留给可访问名，不占布局 */
+.pt-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
+}
+
 /* 行内代码：底色走 hover 面，比 raised 更贴近「嵌在正文里」的感觉 */
 code {
   padding: 0.2em 0.4em;

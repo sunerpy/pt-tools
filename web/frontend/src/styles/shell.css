@@ -60,25 +60,32 @@
 
 /*
  * 侧栏格子。rail 与 nav 都绝对定位在它里面、左沿对齐，靠 opacity/visibility 交叉切换。
- * overflow hidden 是给过渡用的：格子收窄时 264 宽的 nav 被从右边裁掉，文字不回流；
- * 抽屉态要盖到主区上去，那时放开。
+ * 只在宽屏（能钉住的那一档）裁切：格子在 64↔264 之间收窄时，264 宽的 nav 要被从右边裁掉、
+ * 文字不回流。≤1180 时格子恒为 64、nav 只以抽屉形态盖在主区上 —— 那里不能裁，
+ * 否则抽屉关闭那一帧 is-nav-open 一掉、overflow 立刻回到 hidden，264 的抽屉被切成 64 一条再淡出。
+ * （overflow 是离散属性、没法过渡，所以不能靠「打开时放开」这种写法。）
  */
 .pt-side {
   position: relative;
   grid-area: side;
   z-index: 50;
   min-width: 0;
-  overflow: hidden;
   background: var(--pt-chrome);
 }
 
-.pt-shell.is-nav-open .pt-side {
-  overflow: visible;
+@media (min-width: 1181px) {
+  .pt-side {
+    overflow: hidden;
+  }
 }
 
 /*
  * 两块内容的显隐。visibility 让藏起来的那块不可聚焦、不可点，
  * 但它的切换要等 opacity 走完（藏）或立刻（露），否则要么闪一下要么淡不出来。
+ *
+ * 延迟必须用只含时长的 --pt-dur-normal：写成 `visibility 0s linear var(--pt-transition-normal)`
+ * 展开后一条里有两个缓动函数（linear + 令牌里的 cubic-bezier），整条 transition 简写在计算值阶段作废 ——
+ * 实测 rail 的 transitionDuration 是 0s，四个方向里只有 nav 露出那一个在动。shellTokens.test.ts 守着这条。
  */
 .pt-rail,
 .pt-shell__nav-col {
@@ -89,7 +96,16 @@
   transition:
     opacity var(--pt-transition-normal),
     transform var(--pt-transition-normal),
-    visibility 0s linear var(--pt-transition-normal);
+    box-shadow var(--pt-transition-normal),
+    visibility 0s linear var(--pt-dur-normal);
+}
+
+/* rail 的露出态：visibility 立刻可见，再淡入 —— 和下面 nav 露出态那条同一个道理 */
+.pt-shell:not(.is-nav-docked):not(.is-nav-open) .pt-rail {
+  transition:
+    opacity var(--pt-transition-normal),
+    transform var(--pt-transition-normal),
+    visibility 0s;
 }
 
 /* 藏着的时候往左退 8px：露出来是「从左边靠过来」，收起来是「往左退走」，和格子的收窄同向 */
@@ -109,6 +125,7 @@
   transition:
     opacity var(--pt-transition-normal),
     transform var(--pt-transition-normal),
+    box-shadow var(--pt-transition-normal),
     visibility 0s;
   transform: none;
 }
@@ -132,11 +149,18 @@
   min-height: 0;
 }
 
-/* 系统要求减少动效时，侧栏的宽度过渡与交叉淡入淡出全部取消，直接到位 */
+/*
+ * 系统要求减少动效时，侧栏的宽度过渡与交叉淡入淡出全部取消，直接到位。
+ * 露出态那两条规则是复合选择器（.pt-shell.is-nav-docked .pt-shell__nav-col），
+ * 权重压得过单类名 —— 所以这里必须把它们一并列出来，否则 nav 露出仍然会动。
+ */
 @media (prefers-reduced-motion: reduce) {
   .pt-shell,
   .pt-rail,
-  .pt-shell__nav-col {
+  .pt-shell__nav-col,
+  .pt-shell:not(.is-nav-docked):not(.is-nav-open) .pt-rail,
+  .pt-shell.is-nav-docked .pt-shell__nav-col,
+  .pt-shell.is-nav-open .pt-shell__nav-col {
     transition: none;
   }
 }
@@ -224,9 +248,10 @@
  */
 
 .pt-rail__item.is-active {
-  color: var(--pt-p);
+  /* --pt-chrome-p 而不是 --pt-p：deck 浅色的 p 与 chrome 同值，选中项会整个消失（theme.scss 有注） */
+  color: var(--pt-chrome-p);
   /* 画板 sel-bg：cyan@0.14 */
-  background: color-mix(in srgb, var(--pt-p) 14%, transparent);
+  background: color-mix(in srgb, var(--pt-chrome-p) 14%, transparent);
 }
 
 /* 画板 sel：3×40 贴 rail 左沿（x=0），与项等高 —— 深色底上单靠色相区分不够 */
@@ -236,7 +261,7 @@
   width: 3px;
   height: 40px;
   content: "";
-  background: var(--pt-p);
+  background: var(--pt-chrome-p);
   border-radius: 0 1.5px 1.5px 0;
 }
 
@@ -275,6 +300,9 @@
  * 八套配色里 chrome 都是深色，所以标志、徽标、选中态在每一套里都成立。
  * =========================================================================== */
 .pt-nav {
+  /* 「比 chrome-t2 再淡一档」只此一个值：组标题、外链角标都用它，别各写一个 0.7x */
+  --pt-chrome-dim: 0.72;
+
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -393,7 +421,7 @@
 }
 
 .pt-nav__jump .el-input__wrapper.is-focus {
-  box-shadow: inset 0 0 0 1px var(--pt-p);
+  box-shadow: inset 0 0 0 1px var(--pt-chrome-p);
 }
 
 .pt-nav__jump .el-input__prefix {
@@ -422,7 +450,7 @@
   font-weight: 600;
   line-height: 22px;
   color: var(--pt-chrome-t2);
-  opacity: 0.72;
+  opacity: var(--pt-chrome-dim);
 }
 
 /* 画板：项高 30、节奏 30；图标 x=80（内缩 16）、文字 x=106、12.5 号 */
@@ -453,8 +481,8 @@
  */
 .pt-nav__item.is-active {
   font-weight: 600;
-  color: var(--pt-p);
-  background: color-mix(in srgb, var(--pt-p) 14%, transparent);
+  color: var(--pt-chrome-p);
+  background: color-mix(in srgb, var(--pt-chrome-p) 14%, transparent);
 }
 
 .pt-nav__item.is-active::before {
@@ -463,7 +491,7 @@
   width: 3px;
   height: 20px;
   content: "";
-  background: var(--pt-p);
+  background: var(--pt-chrome-p);
   border-radius: 0 1.5px 1.5px 0;
 }
 
@@ -481,15 +509,15 @@
   font-size: 10.5px;
   font-weight: 600;
   line-height: 16px;
-  color: var(--pt-p);
+  color: var(--pt-chrome-p);
   text-align: center;
-  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  background: color-mix(in srgb, var(--pt-chrome-p) 16%, transparent);
   border-radius: 8px;
 }
 
 .pt-nav__ext {
   color: var(--pt-chrome-t2);
-  opacity: 0.7;
+  opacity: var(--pt-chrome-dim);
 }
 
 /* ===========================================================================
@@ -565,7 +593,8 @@
   text-overflow: ellipsis;
 }
 
-.pt-nav__account-out {
+/* 账号行右侧的 28×28 图标钮：明暗、登出共用盒模型，角色靠修饰类，不靠 aria-label 文案选择 */
+.pt-nav__account-btn {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -582,15 +611,15 @@
     background var(--pt-transition-fast);
 }
 
-.pt-nav__account-out:hover {
+.pt-nav__account-btn:hover {
   color: var(--pt-chrome-t1);
   background: var(--pt-chrome-raised);
 }
 
 /* 登出是这一行里唯一的破坏性动作：hover 才给危险色，平时和别的钮一样安静 */
-.pt-nav__account-out[aria-label="退出登录"]:hover {
+.pt-nav__account-btn--out:hover {
   color: var(--pt-dang);
-  background: color-mix(in srgb, var(--pt-dang) 16%, transparent);
+  background: var(--pt-dang-soft);
 }
 
 .pt-nav__empty {
@@ -823,7 +852,7 @@
 
 .pt-status__copy a {
   font-weight: 600;
-  color: var(--pt-p);
+  color: var(--pt-chrome-p);
   text-decoration: none;
 }
 
@@ -1129,7 +1158,7 @@
 
 .pt-mnav__tab.is-active {
   font-weight: 600;
-  color: var(--pt-p);
+  color: var(--pt-chrome-p);
 }
 
 /* 画板 tabbar 的 `sel`：激活 tab 上沿 40×3 r=2 的强调色横条，不只是变色 */
@@ -1139,7 +1168,7 @@
   width: 40px;
   height: 3px;
   content: "";
-  background: var(--pt-p);
+  background: var(--pt-chrome-p);
   border-radius: 2px;
 }
 

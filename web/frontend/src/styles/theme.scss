@@ -89,6 +89,14 @@
   --pt-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --pt-transition-normal: 240ms cubic-bezier(0.4, 0, 0.2, 1);
   --pt-transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  /*
+   * 只含时长的令牌。要给 visibility 这种离散属性写「0s 时长 + 一段延迟」时用它们：
+   * `visibility 0s linear var(--pt-transition-normal)` 展开后一条里有两个缓动函数，
+   * 整条 transition 简写会在计算值阶段作废（实测 transitionDuration 变成 0s）。
+   */
+  --pt-dur-fast: 150ms;
+  --pt-dur-normal: 240ms;
+  --pt-dur-slow: 400ms;
 }
 
 /* ===========================================================================
@@ -110,6 +118,13 @@ html.light[data-theme-style="cockpit"] {
   --pt-chrome-border: #2c313a;
   --pt-chrome-t1: #e8ebef;
   --pt-chrome-t2: #99a0ac;
+  /*
+   * chrome（深色外壳）上可用的强调色。--pt-p 是给浅色表面定的，压在 chrome 上
+   * 在 deck 浅色里与底色同值（#18181b）、在 atlas 浅色里只有 2.6:1 ——
+   * 侧栏选中项、徽标、3px 条一律用这一枚。每套配色都必须给，且与 --pt-chrome ≥ 4.5:1
+   * （src/styles/shellTokens.test.ts 守着）。这一套取 p-hover：p #0e8fa8 在 #171a1f 上只有 4.2。
+   */
+  --pt-chrome-p: #12a6c2;
 
   --pt-t1: #10141a;
   --pt-t2: #4e5765;
@@ -150,6 +165,7 @@ html.dark[data-theme-style="cockpit"] {
   --pt-chrome-border: #2c313a;
   --pt-chrome-t1: #e8ebef;
   --pt-chrome-t2: #99a0ac;
+  --pt-chrome-p: #12a6c2;
 
   --pt-t1: #e8ebef;
   --pt-t2: #99a0ac;
@@ -192,6 +208,7 @@ html.light[data-theme-style="atlas"] {
   --pt-chrome-border: #32353f;
   --pt-chrome-t1: #eceef4;
   --pt-chrome-t2: #9aa0af;
+  --pt-chrome-p: #a78bfa;
 
   --pt-t1: #14161c;
   --pt-t2: #565d6d;
@@ -231,6 +248,7 @@ html.dark[data-theme-style="atlas"] {
   --pt-chrome-border: #2a2e38;
   --pt-chrome-t1: #f4f5f8;
   --pt-chrome-t2: #a9b0be;
+  --pt-chrome-p: #a78bfa;
 
   --pt-t1: #f4f5f8;
   --pt-t2: #a9b0be;
@@ -273,6 +291,7 @@ html.dark[data-theme-style="deck"] {
   --pt-chrome-border: #202024;
   --pt-chrome-t1: #fafafa;
   --pt-chrome-t2: #9b9ba3;
+  --pt-chrome-p: #fafafa;
 
   --pt-t1: #fafafa;
   --pt-t2: #9b9ba3;
@@ -312,6 +331,7 @@ html.light[data-theme-style="deck"] {
   --pt-chrome-border: #35353a;
   --pt-chrome-t1: #fafafa;
   --pt-chrome-t2: #a1a1aa;
+  --pt-chrome-p: #fafafa;
 
   --pt-t1: #0a0a0b;
   --pt-t2: #52525b;
@@ -354,6 +374,7 @@ html.dark[data-theme-style="halo"] {
   --pt-chrome-border: #2a2521;
   --pt-chrome-t1: #f6f1eb;
   --pt-chrome-t2: #b3a79b;
+  --pt-chrome-p: #ff8a4c;
 
   --pt-t1: #f6f1eb;
   --pt-t2: #b3a79b;
@@ -393,6 +414,7 @@ html.light[data-theme-style="halo"] {
   --pt-chrome-border: #3f372f;
   --pt-chrome-t1: #f6f1eb;
   --pt-chrome-t2: #b3a79b;
+  --pt-chrome-p: #e5713a;
 
   --pt-t1: #221a13;
   --pt-t2: #6b5a4b;

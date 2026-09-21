@@ -75,7 +75,12 @@ function goFromSheet(path: string) {
 
 <template>
   <header class="pt-mchrome">
-    <button type="button" class="pt-mchrome__icon" aria-label="打开导航" @click="emit('open-nav')">
+    <button
+      type="button"
+      class="pt-mchrome__icon"
+      aria-label="打开导航"
+      aria-controls="pt-nav-col"
+      @click="emit('open-nav')">
       <PtIcon name="menu" :size="16" />
     </button>
 

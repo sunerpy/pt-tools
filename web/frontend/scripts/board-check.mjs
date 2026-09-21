@@ -1655,8 +1655,9 @@ const MEASURE = `(() => {
         railLogo: box(document.querySelector('.pt-rail__brand')),
         navAvatar: box(document.querySelector('.pt-nav__account-av')),
         railAvatar: box(document.querySelector('.pt-rail__avatar')),
-        themeBtn: Boolean([...document.querySelectorAll('.pt-nav__account-out, .pt-rail__tool')]
-          .find((b) => /切换到(明亮|黑暗)模式/.test(b.getAttribute('aria-label') ?? '') && cs(b).visibility !== 'hidden')),
+        /* 按角色类找，不按 aria-label 文案找：文案改一个字不该让这条断言失明 */
+        themeBtn: Boolean([...document.querySelectorAll('.pt-nav__account-btn--theme, .pt-rail__tool--theme')]
+          .find((b) => cs(b).visibility !== 'hidden' && cs(b).display !== 'none')),
       };
     })(),
     /*
