@@ -55,6 +55,19 @@ function contrast(a: string, b: string): number {
   return (l1! + 0.05) / (l2! + 0.05);
 }
 
+/** 把 fg 以 alpha 叠在 bg 上得到的实际颜色（sRGB 分量线性插值，和浏览器合成 opacity / color-mix 一致） */
+function blend(fg: string, bg: string, alpha: number): string {
+  const ch = (hex: string) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+  const [f, b] = [ch(fg), ch(bg)];
+  return (
+    "#" +
+    f
+      .map((v, i) => Math.round(v * alpha + b[i]! * (1 - alpha)))
+      .map((v) => v.toString(16).padStart(2, "0"))
+      .join("")
+  );
+}
+
 describe("chrome 上的强调色", () => {
   const all = schemes();
 
@@ -105,11 +118,26 @@ describe("侧栏面（shell-*）跟主题走", () => {
       if (light) expect(bgLum).toBeGreaterThan(0.5);
       else expect(bgLum).toBeLessThan(0.2);
     });
-    it(`${s.name} 侧栏文字与强调色对底 ≥ 4.5`, () => {
+    it(`${s.name} 侧栏文字与强调色对**实际渲染面** ≥ 4.5`, () => {
       const bg = s.vars["pt-shell-bg"]!;
+      const p = s.vars["pt-shell-p"]!;
       expect(contrast(s.vars["pt-shell-t1"]!, bg)).toBeGreaterThanOrEqual(7);
       expect(contrast(s.vars["pt-shell-t2"]!, bg)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(s.vars["pt-shell-p"]!, bg)).toBeGreaterThanOrEqual(4.5);
+      /*
+       * 选中项的字与徽标的字不是坐在裸底上，而是坐在 shell-p 自己 14% / 16% 的淡染上 ——
+       * 上一版只对裸底量，cockpit / halo / atlas 浅色实际是 4.24–4.48，测试却全绿。
+       * 选中项里的徽标翻成实底（p 底 + bg 字），所以不存在 16% 叠 14% 的情形，另测一条 bg 对 p。
+       */
+      expect(contrast(p, blend(p, bg, 0.14)), "选中项字对 14% 淡染").toBeGreaterThanOrEqual(4.5);
+      expect(contrast(p, blend(p, bg, 0.16)), "徽标字对 16% 淡染").toBeGreaterThanOrEqual(4.5);
+      expect(contrast(bg, p), "选中项里翻成实底的徽标：bg 字对 p 底").toBeGreaterThanOrEqual(4.5);
+      /* 组标题是 shell-t2 叠 --pt-shell-dim 的 opacity；10px/600 是小字，按混合后的实际颜色量 */
+      const dim = Number.parseFloat(shell.match(/--pt-shell-dim:\s*(0?\.\d+|1)/)?.[1] ?? "NaN");
+      expect(dim, "shell.css 里要有 --pt-shell-dim").not.toBeNaN();
+      expect(
+        contrast(blend(s.vars["pt-shell-t2"]!, bg, dim), bg),
+        "组标题（t2 × dim）对底",
+      ).toBeGreaterThanOrEqual(4.5);
     });
   }
 
@@ -136,6 +164,10 @@ describe("侧栏面（shell-*）跟主题走", () => {
     const badge = side.match(/\.pt-nav__badge \{[^}]*\}/)?.[0] ?? "";
     for (const block of [railActive, navActive, badge])
       expect(block).toMatch(/var\(--pt-shell-p\)/);
+    // 选中项里的徽标翻成实底，避免 16% 淡染叠在 14% 淡染上把对比再压掉一档
+    expect(side).toMatch(
+      /\.pt-nav__item\.is-active \.pt-nav__badge \{[^}]*color: var\(--pt-shell-bg\)[^}]*background: var\(--pt-shell-p\)/s,
+    );
   });
 });
 

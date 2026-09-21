@@ -9,9 +9,10 @@ import { computed, defineComponent, h, type PropType } from "vue";
  * 等比缩放，描边宽和圆角都不需要像 Penpot 那样手工修正。
  *
  * 两种变体，按 `docs/brand.md`「用哪个变体」选，判断标准是**表面明暗**：
- *   mono   —— 单色，继承 currentColor，用在深色表面（rail 取 --pt-chrome-t1、
- *             深色模式下的导航头与移动顶栏取 --pt-t1）
- *   plated —— logo.svg 的等价物：自带深色底板 + 品牌原色，用在浅色表面
+ *   mono   —— 单色，继承 currentColor，用在没法放彩色底板的地方（登录页深色品牌区等）
+ *   plated —— logo.svg 的等价物：自带深色底板 + 品牌原色。侧栏（rail / nav）现在用的是它：
+ *            用户要求彩色 logo，且侧栏的面跟主题走、明亮主题下本来就是浅色导航栏。
+ *            它不读 currentColor，所以包着它的盒子写什么 color 都不影响标志本身。
  *
  * brand.md 的硬性规则里禁止改色，所以这里没有「跟着配色走」的双色变体：
  * 人字恒为 #14B8A6、光标恒为 #F97316，只有 mono 这一种整体单色的例外。

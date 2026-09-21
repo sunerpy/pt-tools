@@ -893,7 +893,7 @@ const EXPECT = {
  */
 const RAIL_GAP_REASON =
   "画板 01/D.rail 画了八个快捷入口 + 运行日志入口，落地在导航列钉住时把它们全藏起来" +
-  "（现在是整条 rail 淡出：侧栏是一块，钉住时只剩 264 宽的深色 nav —— 用户原话" +
+  "（现在是整条 rail 淡出：侧栏是一块，钉住时只剩 264 宽的 nav —— 用户原话" +
   "「展开时也应该是一体的而不是一个黑色侧栏 + 一个白色侧栏导航」）。" +
   "这是用户在真实浏览器验收里退回过的：原话「有些重复了吧」—— 导航列已经列出同样的十几个入口，" +
   "rail 再摆一遍就是同一屏里两份导航。用户当时定的三条硬约束（主题入口必须可见、" +
@@ -1145,7 +1145,7 @@ const ALLOWED_GAPS = {
 
 /*
  * 主区左边界与宽度。画板里所有带都是 x=328 w=1112（rail 64 + nav 264 两列并排）。
- * 落地按用户的决定改成**一块**侧栏：钉住时只有 264 宽的 nav（rail 淡出、不再占位），
+ * 落地按用户的决定改成**一块**侧栏：钉住时只有 264 宽的 nav（rail 淡出、不再占位；面跟主题走，明亮下是浅色），
  * 用户原话「展开时也应该是一体的而不是一个黑色侧栏 + 一个白色侧栏导航」。
  * 所以主区从 x=264 起、宽 1176；这不是页面各自漂了 64，而是外壳的一条偏离，
  * 在 shell.* 那组断言里单独量侧栏，这里只按新几何算主区。
@@ -1634,7 +1634,7 @@ const MEASURE = `(() => {
     }).length,
     navDocked: document.querySelector('.pt-shell')?.classList.contains('is-nav-docked') ?? false,
     /*
-     * 侧栏这一块的几何。用户定的形态：钉住 = 一块 264 宽的深色 nav，rail 淡出；
+     * 侧栏这一块的几何。用户定的形态：钉住 = 一块 264 宽的 nav（面跟主题走），rail 淡出；
      * 品牌 logo 与账号头像在收/展两态里位置不变（这是过渡不割裂的前提）。
      */
     side: (() => {
@@ -1781,7 +1781,7 @@ for (const route of routes) {
   if (got.navDocked && got.side) {
     const sd = got.side;
     if (!near(sd.w, SIDE_DOCKED_W, 1))
-      fail("shell.side", `钉住时侧栏 ${sd.w} 宽，应为一块 ${SIDE_DOCKED_W} 的深色 nav`);
+      fail("shell.side", `钉住时侧栏 ${sd.w} 宽，应为一块 ${SIDE_DOCKED_W} 宽的 nav`);
     if (sd.railVisible)
       fail("shell.rail", "钉住时 rail 仍然可见：黑色空条贴着导航列，正是用户退回的那个样子");
     if (!sd.navVisible) fail("shell.nav", "钉住时导航列不可见");
