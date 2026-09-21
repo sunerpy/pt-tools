@@ -9,6 +9,7 @@ import { useVersionStore } from "../../stores/version";
 import PtIcon from "../PtIcon";
 import PtLogo from "../PtLogo";
 import NavLink from "./NavLink.vue";
+import ThemePrefs from "./ThemePrefs.vue";
 
 /**
  * 导航列（设计稿 G 的 `D.nav`，宽 264，浅色）：品牌行 + 跳转框 + 6 组 19 项。
@@ -21,7 +22,7 @@ const props = defineProps<{
   /** 此刻是否真的看得见。收起后清空跳转框，下次打开是干净的 */
   visible?: boolean;
 }>();
-const emit = defineEmits<{ navigate: [] }>();
+const emit = defineEmits<{ navigate: []; "toggle-nav": [] }>();
 
 const router = useRouter();
 const runtimeStore = useRuntimeStore();
@@ -51,11 +52,11 @@ function logout() {
 }
 
 /*
- * 导航列坐在 --pt-surface 上，明暗随模式变，所以标志变体也得跟着换表面：
- * brand.md 的规则是浅色表面用自带底板的彩色版、深色表面用单色版。
- * 这不是改色，改色是被禁的那条；这里换的是变体。
+ * 明暗开关。导航列钉住时 rail 整块淡出，rail 上那枚明暗钮就跟着不见了 ——
+ * 而「主题入口必须一眼看得见」是用户定的硬约束，所以账号行里再放一枚，同一份 store。
  */
-const logoVariant = computed(() => (themeStore.isDark ? "mono" : "plated"));
+const themeIcon = computed(() => (themeStore.isDark ? "sun" : "moon"));
+const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" : "切换到黑暗模式"));
 
 const query = ref("");
 const inputRef = ref<InputInstance>();
@@ -108,14 +109,22 @@ watch(
 
 <template>
   <div class="pt-nav">
-    <!-- 画板：品牌 + 版本行 + 跳转框是一个 98 高的整块，分隔线在它们之后 -->
+    <!--
+      画板：品牌 + 版本行 + 跳转框是一个 98 高的整块，分隔线在它们之后。
+      logo 放在和 rail 品牌**同一个** 32×32 盒子里（x=16, y=14）：侧栏收起/展开是同一块
+      在两个宽度之间过渡，logo 钉在原位不动，只有右边的文字淡入淡出。
+      导航列现在坐在 chrome（深色）上，所以和 rail 一样用单色版标志（brand.md：深色表面用 mono）。
+    -->
     <div class="pt-nav__head">
       <div class="pt-nav__brand">
-        <PtLogo :variant="logoVariant" :size="28" />
+        <router-link to="/userinfo" class="pt-nav__logo" aria-label="pt-tools 首页">
+          <PtLogo variant="mono" :size="28" />
+        </router-link>
         <span class="pt-nav__brand-text">
           <span class="pt-nav__brand-name">pt-tools</span>
           <span class="pt-nav__brand-ver">{{ versionLine }}</span>
         </span>
+        <!-- 抽屉里是「关闭」，钉住时是「收起」：同一个位置、一个按钮，语义随形态变 -->
         <button
           v-if="drawer"
           type="button"
@@ -123,6 +132,15 @@ watch(
           aria-label="关闭导航"
           @click="emit('navigate')">
           <PtIcon name="x" :size="16" />
+        </button>
+        <button
+          v-else
+          type="button"
+          class="pt-nav__close"
+          aria-label="收起导航"
+          aria-controls="pt-nav-col"
+          @click="emit('toggle-nav')">
+          <PtIcon name="panel-left-close" :size="16" />
         </button>
       </div>
 
@@ -168,14 +186,47 @@ watch(
     </nav>
 
     <!-- 画板 nav 底部的账号页脚：头像 + 名称/角色 + 登出 -->
+    <!--
+      账号行。头像与 rail 底部的头像同一个位置（中心 x=32、离底 28），点开的也是同一份
+      「偏好与账户」浮层（画板 41 的 user-pop）—— 钉住时 rail 不在，这里就是唯一入口。
+      明暗钮同理（见 themeIcon 上面的注释）。
+    -->
     <footer class="pt-nav__account">
-      <span class="pt-nav__account-av" aria-hidden="true">
-        <PtIcon name="user" :size="16" />
-      </span>
-      <span class="pt-nav__account-text">
-        <span class="pt-nav__account-name">admin</span>
-        <span class="pt-nav__account-role">管理员 · 本地账号</span>
-      </span>
+      <el-popover
+        placement="right-end"
+        trigger="click"
+        :width="280"
+        popper-class="pt-prefs-popper"
+        :offset="12">
+        <template #reference>
+          <button type="button" class="pt-nav__account-who" aria-label="偏好与账户">
+            <span class="pt-nav__account-av" aria-hidden="true">
+              <PtIcon name="user" :size="16" />
+            </span>
+            <span class="pt-nav__account-text">
+              <span class="pt-nav__account-name">admin</span>
+              <span class="pt-nav__account-role">管理员 · 本地账号</span>
+            </span>
+          </button>
+        </template>
+        <div class="pt-prefs__who">
+          <span class="pt-prefs__who-av" aria-hidden="true">
+            <PtIcon name="user" :size="16" />
+          </span>
+          <span class="pt-prefs__who-txt">
+            <strong>admin</strong>
+            <small>管理员 · 单用户模式</small>
+          </span>
+        </div>
+        <ThemePrefs />
+      </el-popover>
+      <button
+        type="button"
+        class="pt-nav__account-out"
+        :aria-label="themeLabel"
+        @click="themeStore.toggle">
+        <PtIcon :name="themeIcon" :size="15" />
+      </button>
       <button type="button" class="pt-nav__account-out" aria-label="退出登录" @click="logout">
         <PtIcon name="log-out" :size="15" />
       </button>

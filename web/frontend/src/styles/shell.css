@@ -1,15 +1,24 @@
 /*
- * 应用外壳 —— Penpot 页面 G Cockpit 的三段式结构：
- *   rail 64（深色，只有图标）│ nav 264（浅色，19 个路由）│ main（页头 + 内容）
+ * 应用外壳 —— Penpot 页面 G Cockpit 的结构：
+ *   侧栏 side（深色 chrome，一块，两个宽度）│ main（页头 + 内容）
  *   底部通栏 status 28（深色）
  *
- * 尺寸全部走 theme.scss 的结构令牌，这里不写死像素，改一个数四套配色一起动。
+ * 画板 41 画的是 rail 64（深色）+ nav 264（浅色）两列并排。落地已经按用户的决定改成**一块侧栏**：
+ * 钉住时 rail 除了品牌与底部两个钮全空，一条黑色空条贴着一列白色导航，两枚 logo、两个头像，
+ * 用户原话「展开时也应该是一体的而不是一个黑色侧栏 + 一个白色侧栏导航」。
+ * 于是：
+ *   收起 64   rail —— 品牌 + 8 个快捷入口 + 日志 / 明暗 / 头像（这一态用户认可，一个像素没动）
+ *   展开 264  nav  —— 品牌 + 版本 + 跳转框 + 6 组 19 项 + 账号行（明暗钮、偏好浮层都在这一行）
+ * 两者叠在同一个格子里，logo 与头像钉在同一个位置，中间的内容交叉淡入淡出；
+ * 格子宽度本身做过渡，主区跟着平移 —— 此前是栅格列数 2↔3 一步跳到位、导航列另起一个滑动，
+ * 用户原话「切换动画也很割裂」。
+ *
+ * 尺寸全部走 theme.scss 的结构令牌，这里不写死像素，改一个数八套配色一起动。
  *
  * 导航列有两种存在方式，由 App.vue 的 is-nav-docked 决定，不由媒体查询决定：
- *   钉住（默认，>1180 且未收起）  在栅格里占一列 264，rail 上的快捷入口藏起来
- *                                 —— 两者逐条重复，同时出现是冗余
- *   浮起（收起，或 ≤1180）        变成抽屉，is-nav-open 控制开合；
- *                                 这时 rail 的图标就是唯一的导航，不再重复
+ *   钉住（默认，>1180 且未收起）  侧栏格子放宽到 264，nav 露出，rail 淡出
+ *   浮起（收起，或 ≤1180）        格子停在 64 只有 rail；is-nav-open 时 nav 作为抽屉
+ *                                 从 x=0 盖上来（盖住 rail，而不是贴在它右边再拼一块）
  * 只有一个断点仍然是纯宽度的：
  *   ≤768   整套换成移动端外壳，rail/nav/status 全部让位 ——
  *          深色顶栏 88 + 深色底栏（状态行 24 折在 tab 72 之上）
@@ -22,12 +31,13 @@
  * 网格骨架
  * =========================================================================== */
 .pt-shell {
+  --pt-side-w: var(--pt-rail-w);
+
   display: grid;
-  /* 基线是「导航列浮着」：钉住是加上来的状态，不是默认 */
   grid-template-areas:
-    "rail main"
+    "side main"
     "status status";
-  grid-template-columns: var(--pt-rail-w) minmax(0, 1fr);
+  grid-template-columns: var(--pt-side-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) var(--pt-status-h);
   width: 100%;
   height: 100vh;
@@ -37,41 +47,81 @@
   font-family: var(--pt-font-family);
   color: var(--pt-t1);
   background: var(--pt-canvas);
+  /*
+   * 列数始终是 2、两个轨道类型不变（长度 + minmax），所以 grid-template-columns 可以插值：
+   * 侧栏 64↔264 的过程里主区是被平滑推开的，不是跳的。
+   */
+  transition: grid-template-columns var(--pt-transition-normal);
 }
 
 .pt-shell.is-nav-docked {
-  grid-template-areas:
-    "rail nav main"
-    "status status status";
-  grid-template-columns: var(--pt-rail-w) var(--pt-nav-w) minmax(0, 1fr);
+  --pt-side-w: var(--pt-nav-w);
 }
 
-/* 浮起态：固定定位、贴着 rail 右侧滑出，关着的时候整块推到屏外 */
-.pt-shell__nav-col {
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: var(--pt-rail-w);
+/*
+ * 侧栏格子。rail 与 nav 都绝对定位在它里面、左沿对齐，靠 opacity/visibility 交叉切换。
+ * overflow hidden 是给过渡用的：格子收窄时 264 宽的 nav 被从右边裁掉，文字不回流；
+ * 抽屉态要盖到主区上去，那时放开。
+ */
+.pt-side {
+  position: relative;
+  grid-area: side;
   z-index: 50;
   min-width: 0;
+  overflow: hidden;
+  background: var(--pt-chrome);
+}
+
+.pt-shell.is-nav-open .pt-side {
+  overflow: visible;
+}
+
+/*
+ * 两块内容的显隐。visibility 让藏起来的那块不可聚焦、不可点，
+ * 但它的切换要等 opacity 走完（藏）或立刻（露），否则要么闪一下要么淡不出来。
+ */
+.pt-rail,
+.pt-shell__nav-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  transition:
+    opacity var(--pt-transition-normal),
+    transform var(--pt-transition-normal),
+    visibility 0s linear var(--pt-transition-normal);
+}
+
+/* 藏着的时候往左退 8px：露出来是「从左边靠过来」，收起来是「往左退走」，和格子的收窄同向 */
+.pt-shell__nav-col {
   width: var(--pt-nav-w);
-  background: var(--pt-surface);
-  border-right: 1px solid var(--pt-border);
-  box-shadow: var(--pt-shadow-lg);
-  transition: transform var(--pt-transition-normal);
-  transform: translateX(calc(-100% - var(--pt-rail-w)));
+  visibility: hidden;
+  background: var(--pt-chrome);
+  border-right: 1px solid var(--pt-chrome-border);
+  opacity: 0;
+  transform: translateX(-8px);
 }
 
+.pt-shell.is-nav-docked .pt-shell__nav-col,
 .pt-shell.is-nav-open .pt-shell__nav-col {
+  visibility: visible;
+  opacity: 1;
+  transition:
+    opacity var(--pt-transition-normal),
+    transform var(--pt-transition-normal),
+    visibility 0s;
   transform: none;
 }
 
-.pt-shell.is-nav-docked .pt-shell__nav-col {
-  position: static;
-  grid-area: nav;
-  width: auto;
-  box-shadow: none;
-  transform: none;
+/* 抽屉态：盖在主区上，才需要投影；钉住时它就是页面的一部分，不投影 */
+.pt-shell.is-nav-open:not(.is-nav-docked) .pt-shell__nav-col {
+  box-shadow: var(--pt-shadow-lg);
+}
+
+.pt-shell.is-nav-docked .pt-rail,
+.pt-shell.is-nav-open .pt-rail {
+  visibility: hidden;
+  opacity: 0;
 }
 
 .pt-shell__main {
@@ -82,6 +132,15 @@
   min-height: 0;
 }
 
+/* 系统要求减少动效时，侧栏的宽度过渡与交叉淡入淡出全部取消，直接到位 */
+@media (prefers-reduced-motion: reduce) {
+  .pt-shell,
+  .pt-rail,
+  .pt-shell__nav-col {
+    transition: none;
+  }
+}
+
 /* ===========================================================================
  * rail —— 深色外壳，8 个快捷入口
  * =========================================================================== */
@@ -89,11 +148,11 @@
 .pt-rail {
   display: flex;
   flex-direction: column;
-  grid-area: rail;
   align-items: center;
+  width: var(--pt-rail-w);
   gap: 8px;
   padding: 14px 0 12px;
-  background: var(--pt-chrome);
+  /* 底色由 .pt-side 给；这里只画收起态的外沿 */
   border-right: 1px solid var(--pt-chrome-border);
 }
 
@@ -159,12 +218,10 @@
 }
 
 /*
- * 导航列钉在旁边时，rail 这 8 个入口和导航列里的同名项逐条重复，藏掉。
- * 只藏链接、留住 .pt-rail__items —— 它的 flex:1 是把头像顶到底部的撑杆。
+ * 导航列钉住时 rail **整块**淡出（见网格骨架那段），8 个快捷入口自然不会和导航列里的
+ * 同名项并排出现 —— 用户定的「rail 快捷入口不能与导航列同时出现」由此成立，
+ * 不再需要单独 display:none 这些链接。
  */
-.pt-shell.is-nav-docked .pt-rail__item {
-  display: none;
-}
 
 .pt-rail__item.is-active {
   color: var(--pt-p);
@@ -211,33 +268,56 @@
 }
 
 /* ===========================================================================
- * nav —— 浅色导航列
+ * nav —— 导航列。坐在 chrome（深色）上，和 rail 是同一块侧栏的展开态
+ *
+ * 画板 41 把它画成浅色（#FFF 底、t1/t2 字、hover 面），落地按用户的决定改成 chrome：
+ * 黑色 rail 贴着白色导航列不是一体的。字色、hover、分隔线全部换成 chrome-* 这一组令牌，
+ * 八套配色里 chrome 都是深色，所以标志、徽标、选中态在每一套里都成立。
  * =========================================================================== */
 .pt-nav {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  color: var(--pt-chrome-t2);
 }
 
 /*
  * 画板：品牌 y=14、版本行 y=34、跳转框 y=56 高 30、分隔线 y=98。
  * 也就是「品牌 + 版本 + 跳转框」是一个整块，分隔线在它们**之后** ——
  * 之前把分隔线放在品牌行之后、跳转框落到线外，和稿子不符。
+ * 左内边距 16 是为了让 logo 盒子落在 x=16 —— 和 rail 的品牌盒子同一个位置。
  */
 .pt-nav__head {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
   height: 98px;
-  padding: 14px 12px 0;
-  border-bottom: 1px solid var(--pt-border);
+  padding: 14px 12px 0 16px;
+  border-bottom: 1px solid var(--pt-chrome-border);
 }
 
 .pt-nav__brand {
   display: flex;
-  gap: var(--pt-space-2);
+  gap: 4px;
   align-items: flex-start;
+}
+
+/* 和 .pt-rail__brand 完全同一个盒子：32×32、r6、hover 用 chromeRaised，收/展时 logo 不动 */
+.pt-nav__logo {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--pt-chrome-t1);
+  border-radius: var(--pt-r-md);
+  transition: background var(--pt-transition-fast);
+}
+
+.pt-nav__logo:hover {
+  background: var(--pt-chrome-raised);
 }
 
 .pt-nav__brand-text {
@@ -245,6 +325,7 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  padding-top: 1px;
 }
 
 .pt-nav__brand-name {
@@ -252,7 +333,7 @@
   font-weight: 700;
   line-height: 18px;
   letter-spacing: 0.01em;
-  color: var(--pt-t1);
+  color: var(--pt-chrome-t1);
 }
 
 /* 画板 ver 116,34 10.5/400 t3：版本与「已是最新 / 有新版本」贴在品牌下面 */
@@ -260,44 +341,63 @@
   overflow: hidden;
   font-size: 10.5px;
   line-height: 13px;
-  color: var(--pt-t3);
+  color: var(--pt-chrome-t2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* 抽屉里是关闭、钉住时是收起 —— 同一个位置、同一个盒子（画板 rail 的 32×32 工具钮那一档） */
 .pt-nav__close {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--pt-t3);
+  width: 32px;
+  height: 32px;
+  color: var(--pt-chrome-t2);
   background: transparent;
   border: 0;
   border-radius: var(--pt-r-sm);
   cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    background var(--pt-transition-fast);
 }
 
 .pt-nav__close:hover {
-  color: var(--pt-t1);
-  background: var(--pt-hover);
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
 }
 
 .pt-nav__jump {
   flex: 0 0 auto;
-  margin-top: 9px;
+  margin: 9px 0 0 -4px;
 }
 
-/* 画板 jump 240×30 fill hover r=4 */
+/*
+ * 画板 jump 240×30 fill hover r=4。深色底上「hover 面」对应的是 chromeRaised；
+ * Element 的输入框颜色走它自己的变量，这里在这一小块里覆盖掉，别动全局。
+ */
+.pt-nav__jump .el-input {
+  --el-input-text-color: var(--pt-chrome-t1);
+  --el-input-icon-color: var(--pt-chrome-t2);
+  --el-input-placeholder-color: var(--pt-chrome-t2);
+  --el-input-clear-hover-color: var(--pt-chrome-t1);
+}
+
 .pt-nav__jump .el-input__wrapper {
   height: 30px;
-  background: var(--pt-hover);
+  background: var(--pt-chrome-raised);
   border-radius: var(--pt-r-sm);
   box-shadow: none;
 }
 
+.pt-nav__jump .el-input__wrapper.is-focus {
+  box-shadow: inset 0 0 0 1px var(--pt-p);
+}
+
 .pt-nav__jump .el-input__prefix {
-  color: var(--pt-t3);
+  color: var(--pt-chrome-t2);
 }
 
 .pt-nav__scroll {
@@ -306,20 +406,23 @@
   /* 画板激活底 x=70 而 nav x=64 → 项左右各内缩 6 */
   padding: 0 6px var(--pt-space-4);
   overflow: hidden auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pt-chrome-border) transparent;
 }
 
 .pt-nav__group + .pt-nav__group {
   margin-top: var(--pt-space-4);
 }
 
-/* 画板 grp-* 10/600 t4：比表头再小一档，颜色是最浅的那一层 */
+/* 画板 grp-* 10/600 t4：比表头再小一档，颜色是最浅的那一层 —— 深色底上就是 t2 再压一点 */
 .pt-nav__group-title {
   margin: 0;
   padding: 0 10px;
   font-size: 10px;
   font-weight: 600;
   line-height: 22px;
-  color: var(--pt-t4);
+  color: var(--pt-chrome-t2);
+  opacity: 0.72;
 }
 
 /* 画板：项高 30、节奏 30；图标 x=80（内缩 16）、文字 x=106、12.5 号 */
@@ -331,7 +434,7 @@
   height: 30px;
   padding: 0 10px;
   font-size: 12.5px;
-  color: var(--pt-t2);
+  color: var(--pt-chrome-t2);
   text-decoration: none;
   border-radius: var(--pt-r-md);
   transition:
@@ -340,19 +443,18 @@
 }
 
 .pt-nav__item:hover {
-  color: var(--pt-t1);
-  background: var(--pt-hover);
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
 }
 
 /*
- * 画板 sel-0-0 / selbar-0-0：底是 cyan@0.08，另有一条 3×20 的强调条贴在 nav 左沿。
- * 文字是 t1 而**不是**强调色 —— 强调靠左条和底色表达，文字保持墨黑，
- * 这样一屏 19 项里「当前在哪」一眼可见，又不会让标签本身变刺眼。
+ * 选中：和 rail 的 sel-bg 同一个写法 —— 强调色 14% 底 + 强调色字 + 左沿 3px 条。
+ * 画板 41 在浅色底上用的是 8%，深色底上 8% 看不出来，取 rail 那一档。
  */
 .pt-nav__item.is-active {
   font-weight: 600;
-  color: var(--pt-t1);
-  background: color-mix(in srgb, var(--pt-p) 8%, transparent);
+  color: var(--pt-p);
+  background: color-mix(in srgb, var(--pt-p) 14%, transparent);
 }
 
 .pt-nav__item.is-active::before {
@@ -372,7 +474,6 @@
   text-overflow: ellipsis;
 }
 
-/* 画板 nb-*：24×16 r=8，底 cyan@0.16，无描边。之前那版带边框的灰徽标比稿子重得多 */
 .pt-nav__badge {
   min-width: 24px;
   height: 16px;
@@ -387,21 +488,46 @@
 }
 
 .pt-nav__ext {
-  color: var(--pt-t4);
+  color: var(--pt-chrome-t2);
+  opacity: 0.7;
 }
 
 /* ===========================================================================
  * 画板 nav 底部的账号页脚：分隔线 + 32 圆头像 + 名称/角色两行 + 28 登出钮。
- * 之前账号只存在于 rail 头像的 popover 里，导航列底部是空的，和稿子差一整块。
+ * 头像盒子和 rail 底部的头像同一个中心（x=32、离底 28），收/展时它也不动。
+ * 明暗钮排在登出钮左边 —— 钉住时 rail 不在，主题入口必须仍然一眼可见（用户硬约束）。
  * =========================================================================== */
 .pt-nav__account {
   display: flex;
   flex: 0 0 auto;
-  gap: 10px;
+  gap: 6px;
   align-items: center;
   height: 56px;
-  padding: 0 12px;
-  border-top: 1px solid var(--pt-border);
+  padding: 0 12px 0 16px;
+  border-top: 1px solid var(--pt-chrome-border);
+}
+
+/* 头像 + 名称是一个按钮：点开偏好与账户浮层（画板 41 user-pop），和 rail 头像同一份 */
+.pt-nav__account-who {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  height: 40px;
+  margin-left: -4px;
+  padding: 0 4px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pt-r-md);
+  cursor: pointer;
+  transition: background var(--pt-transition-fast);
+}
+
+.pt-nav__account-who:hover {
+  background: var(--pt-chrome-raised);
 }
 
 .pt-nav__account-av {
@@ -411,8 +537,8 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--pt-t2);
-  background: var(--pt-hover);
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
   border-radius: var(--pt-radius-full);
 }
 
@@ -427,14 +553,14 @@
   font-size: 12.5px;
   font-weight: 600;
   line-height: 15px;
-  color: var(--pt-t1);
+  color: var(--pt-chrome-t1);
 }
 
 .pt-nav__account-role {
   overflow: hidden;
   font-size: 10.5px;
   line-height: 13px;
-  color: var(--pt-t3);
+  color: var(--pt-chrome-t2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -446,8 +572,8 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  color: var(--pt-t3);
-  background: var(--pt-hover);
+  color: var(--pt-chrome-t2);
+  background: transparent;
   border: 0;
   border-radius: var(--pt-r-sm);
   cursor: pointer;
@@ -457,14 +583,20 @@
 }
 
 .pt-nav__account-out:hover {
+  color: var(--pt-chrome-t1);
+  background: var(--pt-chrome-raised);
+}
+
+/* 登出是这一行里唯一的破坏性动作：hover 才给危险色，平时和别的钮一样安静 */
+.pt-nav__account-out[aria-label="退出登录"]:hover {
   color: var(--pt-dang);
-  background: var(--pt-dang-soft);
+  background: color-mix(in srgb, var(--pt-dang) 16%, transparent);
 }
 
 .pt-nav__empty {
   margin: var(--pt-space-4) 0 0;
   font-size: var(--pt-fz-sm);
-  color: var(--pt-t3);
+  color: var(--pt-chrome-t2);
   text-align: center;
 }
 
@@ -1075,8 +1207,7 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
-.pt-shell.is-immersive > .pt-rail,
-.pt-shell.is-immersive > .pt-shell__nav-col,
+.pt-shell.is-immersive > .pt-side,
 .pt-shell.is-immersive > .pt-status,
 .pt-shell.is-immersive .pt-head,
 .pt-shell.is-immersive .pt-mchrome,
@@ -1147,10 +1278,22 @@
     display: none;
   }
 
-  .pt-shell__nav-col {
+  /*
+   * 侧栏格子不在移动栅格里了，把它钉成一条 0 宽的固定层当抽屉的锚点；
+   * 抽屉本身照旧靠 is-nav-open 的 opacity/visibility 露出，只是宽度换成手机那一档。
+   */
+  .pt-side {
+    position: fixed;
+    top: 0;
+    bottom: 0;
     left: 0;
+    width: 0;
+    overflow: visible;
+    background: transparent;
+  }
+
+  .pt-shell__nav-col {
     width: min(300px, 86vw);
-    transform: translateX(-100%);
   }
 
   .pt-head {

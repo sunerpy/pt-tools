@@ -216,19 +216,29 @@ watch(
       'is-nav-docked': navDocked,
       'is-nav-open': navOpen,
     }">
-    <AppRail
-      :active-path="activePath"
-      :nav-toggle-icon="navToggleIcon"
-      :nav-toggle-label="navToggleLabel"
-      @toggle-nav="toggleNav" />
-
-    <div id="pt-nav-col" class="pt-shell__nav-col">
-      <AppNav
-        ref="navRef"
+    <!--
+      侧栏是**一块**，只有两个宽度：收起 64（rail：品牌 + 8 个快捷入口 + 日志 / 明暗 / 头像），
+      展开 264（nav：品牌 + 跳转框 + 6 组 19 项 + 账号行）。两者叠在同一个格子里交叉淡入淡出，
+      格子本身的宽度过渡 —— 主区跟着平移，而不是一步跳到位。
+      此前是 rail 64 + nav 264 两列并排：钉住时 rail 除了品牌和底部两个钮全空，
+      黑色空条贴着白色导航列，两枚 logo、两个头像；用户原话「应该是一体的」。
+    -->
+    <div class="pt-side">
+      <AppRail
         :active-path="activePath"
-        :drawer="!navDocked"
-        :visible="navDocked || navOpen"
-        @navigate="navOpen = false" />
+        :nav-toggle-icon="navToggleIcon"
+        :nav-toggle-label="navToggleLabel"
+        @toggle-nav="toggleNav" />
+
+      <div id="pt-nav-col" class="pt-shell__nav-col">
+        <AppNav
+          ref="navRef"
+          :active-path="activePath"
+          :drawer="!navDocked"
+          :visible="navDocked || navOpen"
+          @navigate="navOpen = false"
+          @toggle-nav="toggleNav" />
+      </div>
     </div>
 
     <main class="pt-shell__main">

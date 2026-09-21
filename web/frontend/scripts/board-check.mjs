@@ -349,7 +349,7 @@ const EXPECT = {
         })()`,
       },
       {
-        desc: "画板 39 的任务详情：抽屉 806 / 内联 772，且详情请求打在真实 task_id 上",
+        desc: "画板 39 的任务详情：抽屉 56% 视口 / 内联 772（主区内、与视口无关），且详情请求打在真实 task_id 上",
         want: "verdict=ok",
         js: `(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -407,9 +407,9 @@ const EXPECT = {
           /* 抽屉里显示的身份要和被点的那一行对得上（标题取自同一份数据） */
           const identityOk = dtext.length > 0 && taskId !== '' && dtext.includes('Hub.Task.');
           const ok =
-            Math.abs(dw - 806) <= 4 && Math.abs(iw - 772) <= 12 && pathOk && identityOk;
+            Math.abs(dw - Math.round(window.innerWidth * 0.56)) <= 4 && Math.abs(iw - 772) <= 12 && pathOk && identityOk;
           return 'verdict=' + (ok ? 'ok' : 'MISMATCH') +
-            ' 抽屉 ' + dw + '（806） 内联 ' + iw + '（772） 详情地址 ' +
+            ' 抽屉 ' + dw + '（' + Math.round(window.innerWidth * 0.56) + '） 内联 ' + iw + '（772） 详情地址 ' +
             (lastUrl || '没有发出详情请求') + ' 身份=' + (identityOk ? '对上' : dtext.slice(0, 50));
         })()`,
       },
@@ -496,14 +496,18 @@ const EXPECT = {
      */
     probes: [
       {
-        desc: "rail 头像浮层 = 画板 41 的 user-pop（280 宽，含身份与三组偏好）",
+        desc: "头像浮层 = 画板 41 的 user-pop（280 宽，含身份与三组偏好）",
         want: "宽 280|单用户模式|配色|日志级别",
         js: `(async () => {
-          const av = document.querySelector('.pt-rail__avatar');
+          /* 钉住时 rail 淡出、入口是 nav 账号行的头像；收起时才是 rail 头像。点看得见的那个 */
+          const av = [...document.querySelectorAll('.pt-nav__account-who, .pt-rail__avatar')]
+            .find((el) => getComputedStyle(el).visibility !== 'hidden');
           if (!av) return 'no-avatar';
           av.click();
           await new Promise((r) => setTimeout(r, 500));
-          const pop = document.querySelector('.pt-prefs-popper');
+          /* rail 与 nav 各挂一个同类浮层（persistent），没打开的那个宽 0；取铺开了的那个 */
+          const pop = [...document.querySelectorAll('.pt-prefs-popper')]
+            .find((el) => el.getBoundingClientRect().width > 0);
           if (!pop) return 'no-popper';
           const w = Math.round(pop.getBoundingClientRect().width);
           const text = (pop.textContent ?? '').replace(/\\s+/g, ' ');
@@ -888,7 +892,9 @@ const EXPECT = {
  * 不是「暂时不想做」。想让某处通过检查，先实现它，不是往这张表里加一行。
  */
 const RAIL_GAP_REASON =
-  "画板 01/D.rail 画了八个快捷入口 + 运行日志入口，落地在导航列钉住时把它们全藏起来。" +
+  "画板 01/D.rail 画了八个快捷入口 + 运行日志入口，落地在导航列钉住时把它们全藏起来" +
+  "（现在是整条 rail 淡出：侧栏是一块，钉住时只剩 264 宽的深色 nav —— 用户原话" +
+  "「展开时也应该是一体的而不是一个黑色侧栏 + 一个白色侧栏导航」）。" +
   "这是用户在真实浏览器验收里退回过的：原话「有些重复了吧」—— 导航列已经列出同样的十几个入口，" +
   "rail 再摆一遍就是同一屏里两份导航。用户当时定的三条硬约束（主题入口必须可见、" +
   "rail 快捷入口不能与导航列同时出现、导航列必须可收起）优先于画板，" +
@@ -1137,6 +1143,25 @@ const ALLOWED_GAPS = {
 
 // ---------------------------------------------------------------- CDP 夹具
 
+/*
+ * 主区左边界与宽度。画板里所有带都是 x=328 w=1112（rail 64 + nav 264 两列并排）。
+ * 落地按用户的决定改成**一块**侧栏：钉住时只有 264 宽的 nav（rail 淡出、不再占位），
+ * 用户原话「展开时也应该是一体的而不是一个黑色侧栏 + 一个白色侧栏导航」。
+ * 所以主区从 x=264 起、宽 1176；这不是页面各自漂了 64，而是外壳的一条偏离，
+ * 在 shell.* 那组断言里单独量侧栏，这里只按新几何算主区。
+ */
+const SIDE_DOCKED_W = 264;
+const MAIN_X = SIDE_DOCKED_W;
+const MAIN_W = 1112;
+/*
+ * 桌面视口 = 侧栏 264 + 主区 1112 = 1376，而不是画板画布的 1440。
+ * 页面里的卡是流式的：主区多出 64，两张并排的卡各分一截、三张各分一截，
+ * 「516 / 548 / 1080」这些画板数就全对不上了。画板对页面内容的规格是按 1112 宽的主区画的，
+ * 所以把主区量回 1112 —— 侧栏窄了是外壳的偏离，不该让每一页的卡跟着重新登记一遍。
+ * 登录页没有侧栏，仍按画板 43 的 1440 量。
+ */
+const D_VIEWPORT = { width: SIDE_DOCKED_W + MAIN_W, height: 1024 };
+
 const BASE = process.argv[2] ?? "http://127.0.0.1:8080";
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -1364,7 +1389,7 @@ await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: stubScript() }
 stubInstalled = true;
 await cdp.send(
   "Emulation.setDeviceMetricsOverride",
-  { width: 1440, height: 1024, deviceScaleFactor: 1, mobile: false },
+  { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
   sessionId,
 );
 
@@ -1602,10 +1627,38 @@ const MEASURE = `(() => {
      * 这里照画板量，红了就去偏离表里读原因 —— 让这条偏离在验收里露头，
      * 而不是只写在文档某一节里。
      */
-    railItems: [...document.querySelectorAll('.pt-rail__item')].filter(
-      (el) => getComputedStyle(el).display !== 'none',
-    ).length,
+    railItems: [...document.querySelectorAll('.pt-rail__item')].filter((el) => {
+      const cs = getComputedStyle(el);
+      /* 钉住时整条 rail 是 visibility:hidden 淡出的，不是 display:none；两种都算不可见 */
+      return cs.display !== 'none' && cs.visibility !== 'hidden';
+    }).length,
     navDocked: document.querySelector('.pt-shell')?.classList.contains('is-nav-docked') ?? false,
+    /*
+     * 侧栏这一块的几何。用户定的形态：钉住 = 一块 264 宽的深色 nav，rail 淡出；
+     * 品牌 logo 与账号头像在收/展两态里位置不变（这是过渡不割裂的前提）。
+     */
+    side: (() => {
+      const side = document.querySelector('.pt-side');
+      const nav = document.querySelector('.pt-shell__nav-col');
+      const rail = document.querySelector('.pt-rail');
+      if (!side || !nav || !rail) return null;
+      const box = (el) => { const r = el?.getBoundingClientRect(); return r ? { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } : null; };
+      const cs = (el) => getComputedStyle(el);
+      return {
+        w: box(side).w,
+        sideBg: cs(side).backgroundColor,
+        navBg: cs(nav).backgroundColor,
+        railVisible: cs(rail).visibility !== 'hidden' && parseFloat(cs(rail).opacity) > 0.5,
+        navVisible: cs(nav).visibility !== 'hidden' && parseFloat(cs(nav).opacity) > 0.5,
+        shellTransition: cs(document.querySelector('.pt-shell')).transitionProperty,
+        navLogo: box(document.querySelector('.pt-nav__logo')),
+        railLogo: box(document.querySelector('.pt-rail__brand')),
+        navAvatar: box(document.querySelector('.pt-nav__account-av')),
+        railAvatar: box(document.querySelector('.pt-rail__avatar')),
+        themeBtn: Boolean([...document.querySelectorAll('.pt-nav__account-out, .pt-rail__tool')]
+          .find((b) => /切换到(明亮|黑暗)模式/.test(b.getAttribute('aria-label') ?? '') && cs(b).visibility !== 'hidden')),
+      };
+    })(),
     /*
      * 导航列顶部的版本行（画板 nav 的「v0.47.2 · 已是最新」11/400 t3）。
      * 这里连着量出来是因为它曾经写成「vv0.47.2」—— version.Version 是 ldflags 从
@@ -1627,9 +1680,6 @@ const MEASURE = `(() => {
   };
 })()`;
 
-/** 主区左边界与宽度：画板里所有带都是 x=328 w=1112，卡片层内缩 16 */
-const MAIN_X = 328;
-const MAIN_W = 1112;
 /** 容差：滚动条会让宽度少 10 左右，1px 的发丝线也会让高度差 1 */
 const TOL = 12;
 
@@ -1723,6 +1773,52 @@ for (const route of routes) {
     );
   if (got.navVer !== null && got.navVer.startsWith("vv"))
     fail("nav.version", `导航列版本行是「${got.navVer}」，多了一个 v`);
+  /*
+   * 侧栏是一块（用户决定，见 MAIN_X 上面那段）。钉住时只量一次就够，不用每条路由都量 ——
+   * 但这里每条都量的代价只是几个 getBoundingClientRect，换来的是任何一页把外壳撑坏都会被抓。
+   */
+  if (got.navDocked && got.side) {
+    const sd = got.side;
+    if (!near(sd.w, SIDE_DOCKED_W, 1))
+      fail("shell.side", `钉住时侧栏 ${sd.w} 宽，应为一块 ${SIDE_DOCKED_W} 的深色 nav`);
+    if (sd.railVisible)
+      fail("shell.rail", "钉住时 rail 仍然可见：黑色空条贴着导航列，正是用户退回的那个样子");
+    if (!sd.navVisible) fail("shell.nav", "钉住时导航列不可见");
+    if (sd.sideBg !== sd.navBg)
+      fail(
+        "shell.tone",
+        `侧栏格子底色 ${sd.sideBg} 与导航列底色 ${sd.navBg} 不一致，收/展会闪一下`,
+      );
+    if (!/grid-template-columns/.test(sd.shellTransition))
+      fail(
+        "shell.motion",
+        `.pt-shell 没有对 grid-template-columns 做过渡（实测 ${sd.shellTransition}），收/展会一步跳到位`,
+      );
+    /* logo 与头像两态同位：rail 的盒子此刻虽然淡出了，几何还在，可以直接比 */
+    if (
+      sd.navLogo &&
+      sd.railLogo &&
+      (Math.abs(sd.navLogo.x - sd.railLogo.x) > 1 || Math.abs(sd.navLogo.y - sd.railLogo.y) > 1)
+    )
+      fail(
+        "shell.logo",
+        `nav 的 logo 在 (${sd.navLogo.x},${sd.navLogo.y})，rail 的在 (${sd.railLogo.x},${sd.railLogo.y})：收/展时 logo 会跳`,
+      );
+    if (sd.navAvatar && sd.railAvatar) {
+      const cx = (b) => b.x + b.w / 2;
+      const cy = (b) => b.y + b.h / 2;
+      if (
+        Math.abs(cx(sd.navAvatar) - cx(sd.railAvatar)) > 1.5 ||
+        Math.abs(cy(sd.navAvatar) - cy(sd.railAvatar)) > 1.5
+      )
+        fail(
+          "shell.avatar",
+          `nav 头像中心 (${cx(sd.navAvatar)},${cy(sd.navAvatar)})，rail 头像中心 (${cx(sd.railAvatar)},${cy(sd.railAvatar)})：收/展时头像会跳`,
+        );
+    }
+    if (!sd.themeBtn)
+      fail("shell.theme", "钉住时找不到可见的明暗开关 —— 用户硬约束：主题入口必须一眼看得见");
+  }
   /*
    * 画板 statusbar 右端是「名称 · 连接态 · 版本」三段。版本那段曾经空着（理由是 HTTP 层
    * 没有这个字段），后来补进了 transfer-stats，所以现在三段都要在。
@@ -2434,7 +2530,7 @@ const emptyRoutes = EMPTY_ROUTES.filter((r) => wanted.length === 0 || wanted.inc
 if (emptyRoutes.length > 0) {
   await cdp.send(
     "Emulation.setDeviceMetricsOverride",
-    { width: 1440, height: 1024, deviceScaleFactor: 1, mobile: false },
+    { ...D_VIEWPORT, deviceScaleFactor: 1, mobile: false },
     sessionId,
   );
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: emptyStubScript() }, sessionId);
