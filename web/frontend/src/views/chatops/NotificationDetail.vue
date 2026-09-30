@@ -63,7 +63,8 @@ const currentMeta = computed(() => CHANNEL_META[conf.channel_type] || CHANNEL_ME
 const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; when: string }[] = [
   /*
    * 之前这张卡列的是「保存成功 / 连接测试成功 / 连接测试失败 / 凭证留空则保持不变」—— 这页根本不弹前三条，
-   * 第四条还是错的：凭证字段会回显当前值、按原样提交，清空再保存就是用空串覆盖。现在逐条对着下面的 ElMessage。
+   * 第四条还是错的：凭证字段会回显当前值、按原样提交，清空再保存就是用空串覆盖。现在逐条对着下面的 ElMessage，
+   * 带 ${…} 的那条用「…」代替插值；toastCopy.test.ts 核对两边一条不多、一条不少。
    */
   { kind: "成功", tone: "ok", text: "已保存基本信息", when: "改完名称或静默时段并保存" },
   {
@@ -79,7 +80,25 @@ const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; whe
     text: "已触发测试，但返回结果异常",
     when: "测试请求发出了，但返回的不是预期结构",
   },
-  { kind: "失败", tone: "dang", text: "保存失败", when: "保存请求非 2xx，后面跟后端的原话" },
+  {
+    kind: "失败",
+    tone: "dang",
+    text: "测试消息发送失败：…",
+    when: "测试请求失败 —— 冒号后是后端给的原因，停留 8 秒、可手动关闭",
+  },
+  {
+    kind: "失败",
+    tone: "dang",
+    text: "保存失败",
+    when: "保存请求失败 —— 后端有原话时直接显示原话",
+  },
+  {
+    kind: "失败",
+    tone: "dang",
+    text: "加载详情失败",
+    when: "打开这一页时读不到通道详情 —— 后端有原话时直接显示原话",
+  },
+  { kind: "失败", tone: "dang", text: "无效的通道 ID", when: "地址里的通道 ID 不是有效的数字" },
 ];
 
 /** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
