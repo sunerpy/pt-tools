@@ -10,7 +10,8 @@
  *   收起 64   rail —— 品牌 + 8 个快捷入口 + 日志 / 明暗 / 头像
  *   展开 264  nav  —— 品牌 + 版本 + 跳转框 + 6 组 19 项 + 账号行（明暗钮、偏好浮层都在这一行）
  * 侧栏的面**跟主题走**（--pt-shell-*）：明亮主题下是白底浅色面，深色主题下是 chrome ——
- * 用户第二次反馈「明亮主题下 侧栏导航也应该是浅色吧」。状态栏与移动端顶栏 / 底栏仍是 chrome。
+ * 用户第二次反馈「明亮主题下 侧栏导航也应该是浅色吧」。状态栏与移动端顶栏 / 底栏后来也跟着主题走
+ * （发布前 owner 的决定：「改为跟随主题的浅色」）。
  * 两者叠在同一个格子里，logo 与头像钉在同一个位置，中间的内容交叉淡入淡出；
  * 格子宽度本身做过渡，主区跟着平移 —— 此前是栅格列数 2↔3 一步跳到位、导航列另起一个滑动，
  * 用户原话「切换动画也很割裂」。
@@ -811,9 +812,9 @@
   padding: 0 var(--pt-space-4);
   overflow: hidden;
   font-size: var(--pt-fz-label);
-  color: var(--pt-chrome-t2);
-  background: var(--pt-chrome);
-  border-top: 1px solid var(--pt-chrome-border);
+  color: var(--pt-shell-t2);
+  background: var(--pt-shell-bg);
+  border-top: 1px solid var(--pt-shell-border);
 }
 
 .pt-status__cell {
@@ -846,12 +847,12 @@
 }
 
 .pt-status__cell--btn:hover {
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-raised);
 }
 
 .pt-status__caret {
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   opacity: 0.7;
 }
 
@@ -861,25 +862,21 @@
 
 .pt-status__version {
   flex: 0 0 auto;
-  color: var(--pt-chrome-t2);
-}
-
-.pt-status__copy {
-  gap: var(--pt-space-2);
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
 }
 
 /*
- * 版权字按画板弱化（画板里是最浅一档）；链接不跟着压 —— 之前整格 opacity 0.75，
- * pt-tools 链接在深色 cockpit 上只剩 4.06:1。--pt-chrome-p 本身在 chrome 上 ≥ 4.5（shellTokens.test.ts 守着）。
+ * 版权字不再压 opacity。画板里它是最浅一档，但发布前 owner 定了「承载信息的文字都到 AA」：
+ * 之前整格 0.75 时 pt-tools 链接只剩 3.54–4.47，只压文字那一版也还有 4.21–4.45。
  */
-.pt-status__copy > span {
-  opacity: 0.75;
+.pt-status__copy {
+  gap: var(--pt-space-2);
+  color: var(--pt-shell-t2);
 }
 
 .pt-status__copy a {
   font-weight: 600;
-  color: var(--pt-chrome-p);
+  color: var(--pt-shell-p);
   text-decoration: none;
 }
 
@@ -1000,10 +997,9 @@
 }
 
 /*
- * 顶栏是深色 chrome，不跟主题变浅（画板 30–35 的 topbar fill 恒为 #171a1f）。
- * 理由和桌面一样：外壳是「不变的东西」，内容区才是「在变的数据」，
- * 眼睛不用在两者之间重新适应对比度；手机版也因此一眼认得出是同一个产品。
- * --pt-chrome 在 8 套配色里恒为深色，所以这里的文字一律用 chrome 系文字色。
+ * 顶栏跟主题走（--pt-shell-*）：明亮主题下是白底，深色主题下是 chrome，与侧栏、状态栏一致。
+ * 画板 30–35 的 topbar fill 恒为 #171a1f（深色）—— 这是一条偏离：原先的理由是「外壳不变、内容在变」，
+ * 发布前 owner 改定为「改为跟随主题的浅色」，侧栏早一步已经这样做了。
  *
  * 构成按画板是**一行**：左 h1 + sub 两行文本，右若干 30×30 图标钮。
  * 原来做成了「44 的动作行 + 一行标题」两层，高 88，比画板里属于 app 的那 48 高一倍，
@@ -1023,9 +1019,9 @@
   align-items: center;
   height: var(--pt-m-topbar-h);
   padding: 0 var(--pt-space-4);
-  color: var(--pt-chrome-t1);
-  background: var(--pt-chrome);
-  border-bottom: 1px solid var(--pt-chrome-border);
+  color: var(--pt-shell-t1);
+  background: var(--pt-shell-bg);
+  border-bottom: 1px solid var(--pt-shell-border);
 }
 
 /* 标题列。min-width:0 是为了让下面两行真的能省略号，而不是把钮挤出屏幕 */
@@ -1043,7 +1039,7 @@
   font-size: var(--pt-fz-h1);
   font-weight: 700;
   line-height: 24px;
-  color: var(--pt-chrome-t1);
+  color: var(--pt-shell-t1);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1057,7 +1053,7 @@
   font-size: var(--pt-fz-label);
   font-weight: 400;
   line-height: 14px;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1079,8 +1075,8 @@
   justify-content: center;
   width: 30px;
   height: 30px;
-  color: var(--pt-chrome-t2);
-  background: var(--pt-chrome-raised);
+  color: var(--pt-shell-t2);
+  background: var(--pt-shell-raised);
   border: 0;
   border-radius: var(--pt-r-md);
   cursor: pointer;
@@ -1094,11 +1090,11 @@
 }
 
 .pt-mchrome__icon:active {
-  color: var(--pt-chrome-t1);
+  color: var(--pt-shell-t1);
 }
 
 /*
- * 底栏同样是深色 chrome，并且把桌面的状态行折进它的顶部
+ * 底栏同样跟主题走（--pt-shell-*），并且把桌面的状态行折进它的顶部
  * （画板 tabbar 里的 sb / sb-d 就是这一行）。
  * 整块高度 = 状态行 24 + tab 行 48 = **72**，与画板 `tabbar 0,739 375x72` 对上；
  * 内容区的 padding-bottom 按同一个式子让位。
@@ -1112,8 +1108,8 @@
   flex-direction: column;
   height: calc(var(--pt-m-statusrow-h) + var(--pt-m-tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
-  background: var(--pt-chrome);
-  border-top: 1px solid var(--pt-chrome-border);
+  background: var(--pt-shell-bg);
+  border-top: 1px solid var(--pt-shell-border);
 }
 
 .pt-mnav__status {
@@ -1127,9 +1123,9 @@
   /* 画板这一行是 10/400（sb），比桌面状态条的 11 小一号 */
   font-size: var(--pt-fz-foot);
   line-height: 1;
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   white-space: nowrap;
-  border-bottom: 1px solid var(--pt-chrome-border);
+  border-bottom: 1px solid var(--pt-shell-border);
 }
 
 .pt-mnav__status-cell {
@@ -1177,7 +1173,7 @@
   height: var(--pt-m-tabbar-h);
   font-family: inherit;
   font-size: var(--pt-fz-foot);
-  color: var(--pt-chrome-t2);
+  color: var(--pt-shell-t2);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -1185,7 +1181,7 @@
 
 .pt-mnav__tab.is-active {
   font-weight: 600;
-  color: var(--pt-chrome-p);
+  color: var(--pt-shell-p);
 }
 
 /* 画板 tabbar 的 `sel`：激活 tab 上沿 40×3 r=2 的强调色横条，不只是变色 */
@@ -1195,7 +1191,7 @@
   width: 40px;
   height: 3px;
   content: "";
-  background: var(--pt-chrome-p);
+  background: var(--pt-shell-p);
   border-radius: 2px;
 }
 

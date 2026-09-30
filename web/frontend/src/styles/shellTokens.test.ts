@@ -83,14 +83,26 @@ describe("chrome 上的强调色", () => {
     });
   }
 
-  it("shell.css 里仍坐在 chrome 上的状态栏链接与移动 tab 选中态用 --pt-chrome-p，不用 --pt-p", () => {
+  /*
+   * 状态栏链接与移动 tab 选中态原先坐在 chrome 上、用 --pt-chrome-p。发布前 owner 定了状态栏与移动端顶栏 / 底栏
+   * 「改为跟随主题的浅色」，它们改走 --pt-shell-p（深色配色里就是 chrome-p 的值）—— 仍然不许直接用 --pt-p。
+   */
+  it("状态栏链接与移动 tab 选中态用 --pt-shell-p，不用 --pt-p", () => {
     const tab = shell.match(/\.pt-mnav__tab\.is-active \{[^}]*\}/)?.[0] ?? "";
     const copy = shell.match(/\.pt-status__copy a \{[^}]*\}/)?.[0] ?? "";
     for (const block of [tab, copy]) {
       expect(block).not.toBe("");
       expect(block).not.toMatch(/var\(--pt-p\)/);
-      expect(block).toMatch(/var\(--pt-chrome-p\)/);
+      expect(block).toMatch(/var\(--pt-shell-p\)/);
     }
+  });
+
+  it("状态栏与移动端顶栏 / 底栏只吃 shell-*，不直接吃 chrome-*（明亮主题下跟着变浅）", () => {
+    const code = shell.replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = [...code.matchAll(/(\.pt-(?:status|mchrome|mnav)[^{}]*)\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(10);
+    const leaks = rules.filter((m) => /var\(--pt-chrome/.test(m[2]!)).map((m) => m[1]!.trim());
+    expect(leaks).toEqual([]);
   });
 });
 

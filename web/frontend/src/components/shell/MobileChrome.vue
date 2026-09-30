@@ -112,7 +112,7 @@ function goFromSheet(path: string) {
 
   <nav class="pt-mnav" aria-label="底部导航">
     <!--
-      桌面状态条折进底栏顶部（round-2「深色 chrome 条 + 折进来的状态行」）。
+      桌面状态条折进底栏顶部（round-2 的「chrome 条 + 折进来的状态行」；这条现在跟主题走，明亮主题下是浅色）。
       之前这些数字只藏在「我的」抽屉里，手机上等于看不到调度器和速率。
     -->
     <div class="pt-mnav__status" :class="{ 'is-stale': runtimeStore.stale }">

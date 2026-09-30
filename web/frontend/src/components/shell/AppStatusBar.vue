@@ -39,7 +39,7 @@ const schedulerTone = computed<"ok" | "warn" | "neutral">(() => {
 const schedulerColor = computed(() => {
   if (runtimeStore.schedulerHint === "running") return "var(--pt-ok)";
   if (runtimeStore.schedulerHint === "stopped") return "var(--pt-warn)";
-  return "var(--pt-chrome-t2)";
+  return "var(--pt-shell-t2)";
 });
 
 /*
@@ -166,7 +166,7 @@ const linkText = computed(() => {
 const linkColor = computed(() => {
   if (linkState.value === "online") return "var(--pt-ok)";
   if (linkState.value === "offline") return "var(--pt-warn)";
-  return "var(--pt-chrome-t2)";
+  return "var(--pt-shell-t2)";
 });
 
 const linkTip = computed(() => {
