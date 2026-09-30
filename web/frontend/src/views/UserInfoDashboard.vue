@@ -88,10 +88,29 @@ const isMobile = useIsMobile();
 const { effectiveLastActive, daysRemaining, reminderTier, tierLabel } = useLoginState(loginStates);
 
 /**
- * 顶部那条扩展推荐可关，关掉后本次会话不再出现（不落盘：换页回来仍要提醒）。
+ * 顶部那条扩展推荐可关。原先关掉只在这一次挂载里生效（换页回来又顶在站点表上方）；
+ * 现在关掉后 7 天内不再出现，过期再提醒一次 —— 既不天天挤占站点表的位置，也不一关就永远看不到。
  * 活跃时间的口径说明原来也是一条常驻黄条，现在挂到「判定活跃」列头的 popover 上了。
  */
-const extHintOpen = ref(true);
+const EXT_HINT_KEY = "pt-userinfo-ext-hint-dismissed-at";
+const EXT_HINT_SNOOZE_MS = 7 * 24 * 3600_000;
+function extHintSnoozed(): boolean {
+  try {
+    const at = Number(window.localStorage.getItem(EXT_HINT_KEY));
+    return Number.isFinite(at) && at > 0 && Date.now() - at < EXT_HINT_SNOOZE_MS;
+  } catch {
+    return false;
+  }
+}
+const extHintOpen = ref(!extHintSnoozed());
+function closeExtHint() {
+  extHintOpen.value = false;
+  try {
+    window.localStorage.setItem(EXT_HINT_KEY, String(Date.now()));
+  } catch {
+    /* 存不下就只在这一次挂载里关掉 */
+  }
+}
 
 type PillTone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
@@ -925,7 +944,7 @@ onUnmounted(() => {
           了解更多
         </a>
       </span>
-      <button type="button" class="dash__note-x" aria-label="关闭提示" @click="extHintOpen = false">
+      <button type="button" class="dash__note-x" aria-label="关闭提示" @click="closeExtHint">
         <PtIcon name="x" :size="14" />
       </button>
     </div>
