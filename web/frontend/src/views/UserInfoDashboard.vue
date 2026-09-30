@@ -53,6 +53,21 @@ const { loading, state, errorText, run, hasPartialBanner } = useDataState({
 const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
+
+/** 账户总量卡的 7 项（KPI 带里已有的总上传、平均分享率不重复），取值与格式沿用 main 那一排汇总卡 */
+const totalsRows = computed(() => {
+  const s = aggregatedStats.value;
+  if (!s) return [];
+  return [
+    { label: "总下载量", value: formatBytes(s.totalDownloaded) },
+    { label: "做种数", value: String(s.totalSeeding) },
+    { label: "下载中", value: String(s.totalLeeching) },
+    { label: "做种体积", value: formatBytes(s.totalSeederSize ?? 0) },
+    { label: "总魔力值", value: formatNumber(s.totalBonus) },
+    { label: "总时魔/h", value: formatNumber(s.totalBonusPerHour ?? 0) },
+    { label: "总做种积分", value: formatNumber(s.totalSeedingBonus ?? 0) },
+  ];
+});
 /** 全库任务计数，画板 KPI 六格里有三格来自这里 */
 const taskStats = ref<TaskStatsResponse | null>(null);
 const sitesByName = ref<Record<string, SiteConfig>>({});
@@ -1486,11 +1501,53 @@ onUnmounted(() => {
           foot="判定口径：分享率低于 1、有未读站内信、或者一个种都没做。" />
         <p v-else class="dash__ok">所有站点的分享率都在 1 以上、没有未读站内信、也都在做种。</p>
       </PtPanel>
+
+      <!--
+        账户总量。KPI 带按画板 10 换成了 6 项（站点、活跃任务、今日推送、免费种子、总上传、平均分享率），
+        main 上那一排汇总里的另外 7 个数 —— 总下载、做种数、下载中、总魔力、时魔/h、做种积分、做种体积 ——
+        于是在整页上都看不到了（下载中全站都没有）。按 owner 定的原则「用画板的样式，保留现有数据」，
+        把它们收成一张通栏卡；KPI 带里已有的两项不重复。
+      -->
+      <PtPanel
+        v-if="totalsRows.length > 0"
+        class="pt-cards__full"
+        title="账户总量"
+        icon="sigma"
+        :count="`${aggregatedStats?.siteCount ?? 0} 个站点合计`">
+        <dl class="dash__totals" data-testid="userinfo-totals">
+          <div v-for="t in totalsRows" :key="t.label" class="dash__total">
+            <dt>{{ t.label }}</dt>
+            <dd>{{ t.value }}</dd>
+          </div>
+        </dl>
+      </PtPanel>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* 账户总量：标签 11/500 t3 在上、数值 15/600 t1 在下，等宽数字；宽度够就一行排开 */
+.dash__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--pt-space-3) var(--pt-space-4);
+  margin: 0;
+}
+
+.dash__total dt {
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t3);
+}
+
+.dash__total dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t1);
+}
+
 /* 需要关注的站点一个都没有时的正面结论，不摆一张空卡 */
 .dash__ok {
   margin: 0;
