@@ -542,15 +542,33 @@ onBeforeUnmount(() => {
           class-name="pt-cell-num"
           label-class-name="pt-cell-num" />
 
-        <el-table-column label="操作" width="130" fixed="right" class-name="pt-cell-act">
+        <!--
+          操作列只放图标（与站点列表 / 暂停任务一致）：两枚带字按钮要 152 宽，列只有 130，
+          「取消」被切掉半个字。aria-label 带上站点与种子 ID，读屏在列表里分得清是哪一条。
+        -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
             <template v-if="canAct(row.result)">
-              <el-button link type="primary" size="small" @click="handleRetry(row)">
-                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-              </el-button>
-              <el-button link type="danger" size="small" @click="handleCancel(row)">
-                <PtIcon name="circle-x" :size="14" /><span>取消</span>
-              </el-button>
+              <el-tooltip content="重试" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`重试 ${row.site_name || '未知站点'} ${row.torrent_id}`"
+                  @click="handleRetry(row)">
+                  <PtIcon name="refresh-cw" :size="15" />
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="取消" placement="top">
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :aria-label="`取消 ${row.site_name || '未知站点'} ${row.torrent_id}`"
+                  @click="handleCancel(row)">
+                  <PtIcon name="circle-x" :size="15" />
+                </el-button>
+              </el-tooltip>
             </template>
             <span v-else class="no-act">—</span>
           </template>

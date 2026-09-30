@@ -437,14 +437,29 @@ function getConfNameByConfId(confId?: number) {
           <template #default="{ row }">{{ formatDate(row.last_active) }}</template>
         </el-table-column>
 
-        <el-table-column label="操作" width="150" fixed="right" class-name="pt-cell-act">
+        <!-- 操作列只放图标（与站点列表 / 暂停任务一致），aria-label 带上被操作的用户 -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="handleToggleLang(row)">
-              <PtIcon name="globe" :size="14" /><span>语言</span>
-            </el-button>
-            <el-button link type="danger" size="small" @click="handleDelete(row.id)">
-              <PtIcon name="trash-2" :size="14" /><span>撤销</span>
-            </el-button>
+            <el-tooltip content="切换回复语言" placement="top">
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :aria-label="`切换 ${maskUserId(row.channel_user_id)} 的回复语言`"
+                @click="handleToggleLang(row)">
+                <PtIcon name="globe" :size="15" />
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="撤销绑定" placement="top">
+              <el-button
+                link
+                type="danger"
+                size="small"
+                :aria-label="`撤销 ${maskUserId(row.channel_user_id)} 的绑定`"
+                @click="handleDelete(row.id)">
+                <PtIcon name="trash-2" :size="15" />
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>

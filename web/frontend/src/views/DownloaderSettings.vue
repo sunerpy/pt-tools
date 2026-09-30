@@ -782,25 +782,67 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="250" fixed="right" class-name="pt-cell-act">
+        <!--
+          操作列只放图标，与站点列表 / 暂停任务 / 过滤规则一致（设计文档 §29）。原来四枚带字按钮
+          要 292 宽，列只有 250 —— 「删除」只剩一个垃圾桶，字被卡片边缘切掉。
+          图标按钮自带 aria-label（PtIcon 是 aria-hidden 的，tooltip 不进无障碍名）；
+          四枚都包一层 span（与站点列表同一写法）：「检查」停用时按钮 disabled 收不到指针事件，
+          要靠 span 让 tooltip 照样出来；其余三枚也包，免得 Element 给相邻按钮加的 12px margin
+          让间距一个 8 两个 20。
+        -->
+        <el-table-column label="操作" width="136" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
-            <el-button
-              link
-              type="primary"
-              size="small"
-              :disabled="!row.enabled"
-              @click="checkHealth(row)">
-              <PtIcon name="activity" :size="14" /><span>检查</span>
-            </el-button>
-            <el-button link type="primary" size="small" @click="openDirDialog(row)">
-              <PtIcon name="folder" :size="14" /><span>目录</span>
-            </el-button>
-            <el-button link type="primary" size="small" @click="openEditDialog(row)">
-              <PtIcon name="pencil" :size="14" /><span>编辑</span>
-            </el-button>
-            <el-button link type="danger" size="small" @click="deleteDownloader(row)">
-              <PtIcon name="trash-2" :size="14" /><span>删除</span>
-            </el-button>
+            <el-tooltip
+              :content="row.enabled ? '检查连通性' : '已停用，先启用再检查'"
+              placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`检查 ${row.name} 的连通性`"
+                  :disabled="!row.enabled"
+                  @click="checkHealth(row)">
+                  <PtIcon name="activity" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+            <el-tooltip content="下载目录" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`${row.name} 的下载目录`"
+                  @click="openDirDialog(row)">
+                  <PtIcon name="folder" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+            <el-tooltip content="编辑" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`编辑 ${row.name}`"
+                  @click="openEditDialog(row)">
+                  <PtIcon name="pencil" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :aria-label="`删除 ${row.name}`"
+                  @click="deleteDownloader(row)">
+                  <PtIcon name="trash-2" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -1084,14 +1126,29 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="140" fixed="right" class-name="pt-cell-act">
+        <!-- 同主表：图标 + tooltip + aria-label（两枚带字按钮在 140 里放不下，「删除」被切） -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEditDirDialog(row)">
-              <PtIcon name="pencil" :size="14" /><span>编辑</span>
-            </el-button>
-            <el-button link type="danger" size="small" @click="deleteDirectory(row)">
-              <PtIcon name="trash-2" :size="14" /><span>删除</span>
-            </el-button>
+            <el-tooltip content="编辑" placement="top">
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :aria-label="`编辑目录 ${row.alias || row.path}`"
+                @click="openEditDirDialog(row)">
+                <PtIcon name="pencil" :size="15" />
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <el-button
+                link
+                type="danger"
+                size="small"
+                :aria-label="`删除目录 ${row.alias || row.path}`"
+                @click="deleteDirectory(row)">
+                <PtIcon name="trash-2" :size="15" />
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
