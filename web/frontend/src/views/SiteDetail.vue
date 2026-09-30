@@ -255,7 +255,20 @@ function getPathDisplayName(path: string, downloaderId: number | undefined): str
   return parts.length > 0 ? (parts[parts.length - 1] as string) : path;
 }
 
+/*
+ * 这一页的三处写操作（保存配置、添加 RSS、编辑 RSS）都是把**整份** form 交给后端，
+ * 而后端 UpsertSiteWithRSS 会先删光该站点的全部 RSS 再按提交内容重建。
+ * 详情没加载成功时 form 是默认值 —— 这时放行任何一处写操作，都会用空列表把真实订阅整批删掉。
+ * 之前只锁了「保存配置」一个按钮，「添加 RSS」照样能点。所以守卫下沉到函数里，三处共用。
+ */
+function blockedByLoadFailure(): boolean {
+  if (!loadFailed.value) return false;
+  ElMessage.warning("站点详情没有加载成功，先重试加载再修改，避免覆盖现有配置");
+  return true;
+}
+
 async function save() {
+  if (blockedByLoadFailure()) return;
   saving.value = true;
   try {
     // 根据认证方式清空互斥字段，避免后端校验失败
@@ -296,6 +309,7 @@ function openAddRssDialog() {
 }
 
 async function addRss() {
+  if (blockedByLoadFailure()) return;
   if (!newRss.name || !newRss.url) {
     ElMessage.error("名称和链接为必填");
     return;
@@ -414,6 +428,7 @@ function openEditRssDialog(index: number) {
 }
 
 async function updateRss() {
+  if (blockedByLoadFailure()) return;
   if (!editingRss.name || !editingRss.url) {
     ElMessage.error("名称和链接为必填");
     return;
@@ -817,7 +832,7 @@ function ruleNameOf(id: number): string {
           icon="rss"
           :count="`${(form.rss || []).length} 条`">
           <template #actions>
-            <el-button type="primary" size="small" @click="openAddRssDialog">
+            <el-button type="primary" size="small" :disabled="loadFailed" @click="openAddRssDialog">
               <PtIcon name="plus" :size="14" /><span>添加 RSS</span>
             </el-button>
           </template>
