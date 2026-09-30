@@ -14,13 +14,17 @@
   color: #be123c;
 }
 
+/*
+ * 弱化那一档（null、标点、debug）走 --pt-t3，不再写死 #64748b / #7a8a89：写死的色在 8 套配色的
+ * 正文底上只有 3.6–4.4:1（发布前扫描抓出来的），t3 由 paletteContrast.test.ts 保证在四种底上 ≥ 4.5。
+ */
 .log-viewer-page .json-null {
-  color: #64748b;
+  color: var(--pt-t3);
   font-style: italic;
 }
 
 .log-viewer-page .json-punct {
-  color: #64748b;
+  color: var(--pt-t3);
 }
 
 .log-viewer-page .json-time {
@@ -32,7 +36,7 @@
 }
 
 .log-viewer-page .log-debug {
-  color: #64748b;
+  color: var(--pt-t3);
 }
 
 .log-viewer-page .log-info {
@@ -40,8 +44,9 @@
   font-weight: 700;
 }
 
+/* 浅色的 warn 取配色自己的 --pt-warn：写死的 #b45309 在 halo 浅色的暖底上只有 4.4 */
 .log-viewer-page .log-warn {
-  color: #b45309;
+  color: var(--pt-warn);
   font-weight: 700;
 }
 
@@ -72,12 +77,6 @@ html.dark .log-viewer-page .json-number {
 
 html.dark .log-viewer-page .json-boolean {
   color: #fb7185;
-}
-
-html.dark .log-viewer-page .json-null,
-html.dark .log-viewer-page .json-punct,
-html.dark .log-viewer-page .log-debug {
-  color: #7a8a89;
 }
 
 html.dark .log-viewer-page .json-time {

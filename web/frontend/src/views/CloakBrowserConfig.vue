@@ -348,12 +348,16 @@ async function save() {
   color: var(--pt-t1);
 }
 
+/*
+ * 「当前」徽标翻成实底：它坐在当前行的 p-soft（12%）上，再叠一层主色淡染就是淡染套淡染，
+ * 主色字在八套配色里只剩 3.7–4.1:1。实底上 on-p 对 p ≥ 4.5 由 paletteContrast.test.ts 保证。
+ */
 .life__now {
   padding: 0 5px;
   font-size: var(--pt-fz-foot);
   font-weight: 500;
-  color: var(--pt-p);
-  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  color: var(--pt-on-p);
+  background: var(--pt-p);
   border-radius: var(--pt-r-sm);
 }
 
@@ -366,6 +370,11 @@ async function save() {
 
 .life__n {
   color: var(--pt-t3);
+}
+
+/* 当前行的底是 p-soft：t3 在那上面只有 3.8–4.5，这一行的「下一步」提到 t2 */
+.life__row.is-on .life__n {
+  color: var(--pt-t2);
 }
 
 /* 右栏窄卡自己顶对齐，别被左边那张高卡拉长 */

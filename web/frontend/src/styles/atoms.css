@@ -795,13 +795,14 @@
 }
 
 /* 画板 tb-*：标签后面那枚 10/600 的计数 */
+/* 底取 14%（与胶囊同一档）：16% 时主色字在几套配色里只有 4.45–4.48，paletteContrast.test.ts 守的是 14% */
 .pt-band__tab-n {
   padding: 0 5px;
   font-size: 10px;
   font-weight: 600;
   line-height: 16px;
   color: var(--pt-p);
-  background: color-mix(in srgb, var(--pt-p) 16%, transparent);
+  background: color-mix(in srgb, var(--pt-p) 14%, transparent);
   border-radius: 8px;
 }
 
