@@ -839,7 +839,7 @@ function decisionText(decision: string | undefined): string {
         画板 p-test 516：试跑入口。完整试跑（选数据源、看命中清单）在对话框里，
         这张卡是入口加口径说明 —— 卡里塞不下一份命中清单。
       -->
-      <PtPanel v-if="rules.length > 0" title="试跑" icon="flask-conical">
+      <PtPanel v-if="rules.length > 0" title="试跑" icon="zap">
         <p class="rules-test__p">
           挑一条规则，拿真实的 RSS 数据跑一遍，看它会命中哪些种子。只读，不推送不写库。
         </p>
@@ -860,7 +860,7 @@ function decisionText(decision: string | undefined): string {
           :disabled="!testRuleId"
           :loading="testing"
           @click="testSelectedRule">
-          <PtIcon v-if="!testing" name="flask-conical" :size="15" /><span>试跑这条</span>
+          <PtIcon v-if="!testing" name="zap" :size="15" /><span>试跑这条</span>
         </el-button>
         <p class="rules-test__foot">
           数据源来自各站点的 RSS 配置；{{

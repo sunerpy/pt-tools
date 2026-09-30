@@ -805,7 +805,7 @@ function exportCsv() {
       <PtPanel
         class="pt-cards__full"
         title="失败与被拒"
-        icon="shield-x"
+        icon="triangle-alert"
         :count="failRows.length > 0 ? `${failRows.length} 条` : '暂无'">
         <PtBreakdown
           v-if="failRows.length > 0"

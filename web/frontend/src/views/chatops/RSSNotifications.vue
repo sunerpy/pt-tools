@@ -639,7 +639,7 @@ onBeforeUnmount(() => {
           foot="统计的是当前这一页的记录；接口不回全库的分组计数。" />
       </PtPanel>
 
-      <PtPanel title="幂等与去重口径" icon="copy-check">
+      <PtPanel title="幂等与去重口径" icon="shield-check">
         <ul class="idem">
           <li>每条「RSS + 种子 + 通道」只会留一条记录，调度器重跑同一轮不会重复推送。</li>
           <li>被安静时段或每小时配额挡下的记为 <code>suppressed</code>，不算失败。</li>

@@ -614,7 +614,7 @@ function scrollToTop() {
         <PtPanel
           class="lv-card"
           title="日志文件"
-          icon="files"
+          icon="folder-open"
           :count="logFiles?.files ? `${logFiles.files.length} 个` : '—'">
           <ul v-if="activeFile" class="lf">
             <li class="lf__row">

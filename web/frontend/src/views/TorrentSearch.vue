@@ -1870,7 +1870,7 @@ const footNote = computed(() => {
       <PtPanel
         v-if="Object.keys(siteResultCounts).length > 0"
         title="没返回的站点"
-        icon="plug-zap"
+        icon="signal"
         :count="searchErrors.length > 0 ? `${searchErrors.length} 个` : '全部返回'">
         <PtBreakdown
           v-if="searchErrors.length > 0"
