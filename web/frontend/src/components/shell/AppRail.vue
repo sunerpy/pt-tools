@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PopoverInstance } from "element-plus";
 import { computed, ref } from "vue";
 import { RAIL_FOOT_ITEM, RAIL_ITEMS } from "../../config/navigation";
 import { useThemeStore } from "../../stores/theme";
@@ -31,7 +32,19 @@ defineExpose({
   focusToggle() {
     toggleRef.value?.focus();
   },
+  hidePrefs,
 });
+
+/* 头像点开的「偏好与账户」浮层：Esc 时由 App 先收它（el-popover 自己不响应 Esc），见 AppNav.hidePrefs */
+const prefsPop = ref<PopoverInstance>();
+const prefsAvatar = ref<HTMLButtonElement>();
+const prefsOpen = ref(false);
+function hidePrefs(): boolean {
+  if (!prefsOpen.value) return false;
+  prefsPop.value?.hide();
+  prefsAvatar.value?.focus();
+  return true;
+}
 
 const themeStore = useThemeStore();
 
@@ -134,13 +147,16 @@ const themeLabel = computed(() => (themeStore.isDark ? "切换到明亮模式" :
         会互相抢 click/hover/focus 与 aria 属性。这里只留 aria-label。
       -->
       <el-popover
+        ref="prefsPop"
         placement="right-end"
         trigger="click"
         :width="280"
         popper-class="pt-prefs-popper"
-        :offset="12">
+        :offset="12"
+        @before-enter="prefsOpen = true"
+        @before-leave="prefsOpen = false">
         <template #reference>
-          <button type="button" class="pt-rail__avatar" aria-label="偏好与账户">
+          <button ref="prefsAvatar" type="button" class="pt-rail__avatar" aria-label="偏好与账户">
             <PtIcon name="user" :size="16" />
           </button>
         </template>

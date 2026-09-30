@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { InputInstance } from "element-plus";
+import type { InputInstance, PopoverInstance } from "element-plus";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { NAV_GROUPS, NAV_ITEMS, type NavItem } from "../../config/navigation";
@@ -106,7 +106,25 @@ defineExpose({
   focusToggle() {
     toggleRef.value?.focus();
   },
+  hidePrefs,
 });
+
+/*
+ * 账号行的「偏好与账户」浮层。Element 2.14 的 el-popover 不响应 Esc，而 App 的 Esc 会收抽屉 ——
+ * 之前抽屉开着时按 Esc，收掉的是抽屉，浮层却悬在原处（触发它的账号行已随抽屉藏起）。
+ * 现在 App 先调这里：浮层开着就只收浮层并返回 true，再按一次 Esc 才收抽屉。
+ * 开合状态挂在 before-enter / before-leave 上：2.14 的 el-popover 没有 show / hide 事件。
+ */
+const prefsPop = ref<PopoverInstance>();
+const prefsWho = ref<HTMLButtonElement>();
+const prefsOpen = ref(false);
+function hidePrefs(): boolean {
+  if (!prefsOpen.value) return false;
+  prefsPop.value?.hide();
+  // 焦点若在浮层里（Tab 进去的），浮层一收它就掉回 body —— 交回触发它的账号行
+  prefsWho.value?.focus();
+  return true;
+}
 
 // 看不见了就清空查询，下次露出来是干净的
 watch(
@@ -205,17 +223,20 @@ watch(
     -->
     <footer class="pt-nav__account">
       <el-popover
+        ref="prefsPop"
         placement="right-end"
         trigger="click"
         :width="280"
         popper-class="pt-prefs-popper"
-        :offset="12">
+        :offset="12"
+        @before-enter="prefsOpen = true"
+        @before-leave="prefsOpen = false">
         <template #reference>
           <!--
             可访问名就是看得见的那两行 + 一段只读给读屏的后缀，不用 aria-label 盖掉可见文字
             （WCAG 2.5.3 Label in Name：说「admin」的语音用户要能命中它）。
           -->
-          <button type="button" class="pt-nav__account-who">
+          <button ref="prefsWho" type="button" class="pt-nav__account-who">
             <span class="pt-nav__account-av" aria-hidden="true">
               <PtIcon name="user" :size="16" />
             </span>

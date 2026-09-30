@@ -95,6 +95,30 @@ const EXPECT = {
           return 'verdict=' + (nb <= bt ? 'ok' : 'MISMATCH') + ' 通知下沿 ' + Math.round(nb) + ' / 状态条上沿 ' + Math.round(bt);
         })()`,
       },
+      {
+        /*
+         * el-popover 自己不响应 Esc；App 的 Esc 先收「偏好与账户」浮层。窄屏抽屉里之前是反过来的：
+         * Esc 收掉抽屉、浮层悬在原处。这里在钉住的导航列上验「Esc 收浮层」这条接线。
+         */
+        desc: "「偏好与账户」浮层按 Esc 收起",
+        want: "verdict=ok",
+        js: `(async () => {
+          const until = async (fn, ms) => {
+            const t0 = performance.now();
+            while (performance.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); }
+            return fn();
+          };
+          const shown = () => [...document.querySelectorAll('.pt-prefs-popper')]
+            .some((p) => getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().height > 0);
+          const who = document.querySelector('.pt-nav__account-who');
+          if (!who) return 'no-account-row';
+          who.click();
+          if (!(await until(shown, 3000))) return 'popover-not-opened';
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+          const closed = await until(() => !shown(), 2000);
+          return 'verdict=' + (closed ? 'ok' : 'MISMATCH') + (closed ? '' : '（按 Esc 后浮层仍开着）');
+        })()`,
+      },
     ],
   },
   "/userinfo/export": {

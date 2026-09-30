@@ -211,7 +211,11 @@ function onKeydown(e: KeyboardEvent) {
     navRef.value?.focusSearch();
     return;
   }
-  if (e.key === "Escape" && navOpen.value) void closeDrawer();
+  if (e.key === "Escape") {
+    /* 先收最里层的「偏好与账户」浮层（导航列与 rail 各一份），它开着时这一下 Esc 不收抽屉 */
+    if (navRef.value?.hidePrefs() || railRef.value?.hidePrefs()) return;
+    if (navOpen.value) void closeDrawer();
+  }
 }
 
 onMounted(() => {
