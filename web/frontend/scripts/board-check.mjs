@@ -678,6 +678,52 @@ const EXPECT = {
      */
     probes: [
       {
+        /*
+         * 时间 chip 真的在筛。前端曾经发 start_time / end_time，而后端（web/api_chatops.go）
+         * 只读 since / until —— 「最近 1 小时」点得动、页头也写着已筛选，返回的却是全量。
+         * 假数据的前 4 条落在最近 1 小时里（board-fixtures.mjs 的 AUDIT_NOW），并按 since / until 过滤；
+         * 参数名一错，行数就不会变，这条会红。
+         */
+        desc: "时间 chip「最近 1 小时」真的按 since / until 筛（行数变少且都在一小时内，选回不限恢复）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const until = async (cond, ms) => {
+            const t0 = Date.now();
+            while (Date.now() - t0 < ms) { if (cond()) return true; await new Promise((r) => setTimeout(r, 100)); }
+            return false;
+          };
+          const rows = () => [...document.querySelectorAll('.pt-band--grid tbody tr')];
+          const chip = document.querySelector('[data-testid=audit-time-chip]');
+          if (!chip) return 'no-time-chip';
+          const choose = async (label) => {
+            (chip.querySelector('.el-select__wrapper') ?? chip).click();
+            const ok = await until(() => [...document.querySelectorAll('.el-select-dropdown__item')]
+              .some((o) => (o.textContent ?? '').trim() === label && o.offsetParent !== null), 3000);
+            if (!ok) return false;
+            [...document.querySelectorAll('.el-select-dropdown__item')]
+              .find((o) => (o.textContent ?? '').trim() === label && o.offsetParent !== null).click();
+            return true;
+          };
+          const all = rows().length;
+          if (all < 2) return 'no-sample:' + all;
+          if (!(await choose('最近 1 小时'))) return 'no-1h-option';
+          await until(() => rows().length !== all, 3000);
+          const recent = rows();
+          /* 每行的时间单元格格式是 YYYY/MM/DD HH:mm:ss（本地时区），按本地时间解析 */
+          const stamps = recent.map((tr) => {
+            const m = (tr.textContent ?? '').match(/(\\d{4})\\/(\\d{2})\\/(\\d{2}) (\\d{2}):(\\d{2}):(\\d{2})/);
+            return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : NaN;
+          });
+          const inHour = stamps.every((t) => Number.isFinite(t) && Date.now() - t <= 3600_000 + 60_000);
+          if (!(await choose('时间: 不限'))) return 'no-any-option';
+          await until(() => rows().length === all, 3000);
+          const back = rows().length;
+          const ok = recent.length > 0 && recent.length < all && inHour && back === all;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 全部 ' + all + ' / 最近 1 小时 ' + recent.length +
+            (inHour ? '' : '（有超出一小时的行）') + ' / 回到 ' + back;
+        })()`,
+      },
+      {
         desc: "结果分段真的按前缀筛（行数要变成该档的条数，而不只是胶囊换色）",
         want: "verdict=ok",
         js: `(async () => {

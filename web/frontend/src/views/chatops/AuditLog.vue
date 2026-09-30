@@ -176,8 +176,9 @@ const resultSeg = computed({
 
 const channelChip = computed({
   get: () => (filters.channelType.length === 1 ? filters.channelType[0]! : ""),
-  set: (v: string) => {
-    filters.channelType = v === "" ? [] : [v];
+  set: (v: string | undefined) => {
+    /* el-select 点清除给的是 undefined 不是 ""：之前那样写会存成 [undefined]，页面误判为「已筛选」 */
+    filters.channelType = v ? [v] : [];
     handleFilterChange();
   },
 });
@@ -303,8 +304,9 @@ async function fetchAuditLogs() {
   params.append("page_size", pagination.pageSize.toString());
 
   if (filters.dateRange && filters.dateRange.length === 2) {
-    params.append("start_time", filters.dateRange[0]);
-    params.append("end_time", filters.dateRange[1]);
+    // 后端（web/api_chatops.go）读的是 since / until；之前发 start_time / end_time，时间筛选从来没生效过
+    params.append("since", filters.dateRange[0]);
+    params.append("until", filters.dateRange[1]);
   }
   if (filters.channelType.length > 0) {
     params.append("channel_type", filters.channelType.join(","));

@@ -141,9 +141,18 @@ const ARCHIVE = Array.from({ length: 4 }, (_, i) => ({
   archived_at: "2026-09-17T08:00:00Z",
 }));
 
+/*
+ * 审计记录的时间：前 4 条落在「最近 1 小时」里，其余在 1–3 天前。
+ * 之前 10 条全钉在同一个过去的时刻，任何「最近 N 小时」都只会筛成 0 条 ——
+ * 于是时间筛选发错了参数名（start_time / end_time，后端读 since / until）也照样测不出来。
+ * 相对 harness 启动时刻算，跟日志假数据「一半在这一小时里」是同一个办法。
+ */
+const AUDIT_NOW = Date.now();
 const AUDIT = Array.from({ length: 10 }, (_, i) => ({
   id: i + 1,
-  created_at: "2026-09-18T20:00:00Z",
+  created_at: new Date(
+    AUDIT_NOW - (i < 4 ? (i + 1) * 5 * 60_000 : (i - 3) * 20 * 3600_000),
+  ).toISOString(),
   channel_type: ["telegram", "qq_onebot", "webhook"][i % 3],
   channel_user_id: `u${i}`,
   command: ["/status", "/sites", "/push", "/pause"][i % 4],
@@ -796,6 +805,11 @@ const QUERY_AWARE = {
         String(it.command).toLowerCase().includes(q) ||
         String(it.channel_user_id).toLowerCase().includes(q));
     }
+    /* 与 web/api_chatops.go 同名同义：since / until 是 RFC3339，闭区间 */
+    const since = params.get('since');
+    const until = params.get('until');
+    if (since) items = items.filter((it) => Date.parse(it.created_at) >= Date.parse(since));
+    if (until) items = items.filter((it) => Date.parse(it.created_at) <= Date.parse(until));
     return Object.assign({}, body, { items: items, total: items.length });
   }`,
 };
