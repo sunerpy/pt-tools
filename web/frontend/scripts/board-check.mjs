@@ -70,6 +70,32 @@ const EXPECT = {
       "判定活跃",
       "更新",
     ],
+    probes: [
+      {
+        /*
+         * 「发现新版本」通知（duration 0、不会自己消失）不能压在底部状态条上 ——
+         * 状态条右端就是版本按钮，看到提示后要点的正是那一格。假数据里一直有 v0.48.0，每次进页面都会弹。
+         */
+        desc: "「发现新版本」通知不压底部状态条",
+        want: "verdict=ok",
+        js: `(async () => {
+          const t0 = performance.now();
+          let n = null;
+          while (performance.now() - t0 < 5000) {
+            n = [...document.querySelectorAll('.el-notification')]
+              .find((e) => (e.textContent ?? '').includes('发现新版本') && e.getBoundingClientRect().height > 0);
+            if (n) break;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          if (!n) return 'no-notification';
+          const bar = document.querySelector('.pt-status');
+          if (!bar) return 'no-status-bar';
+          const nb = n.getBoundingClientRect().bottom;
+          const bt = bar.getBoundingClientRect().top;
+          return 'verdict=' + (nb <= bt ? 'ok' : 'MISMATCH') + ' 通知下沿 ' + Math.round(nb) + ' / 状态条上沿 ' + Math.round(bt);
+        })()`,
+      },
+    ],
   },
   "/userinfo/export": {
     board: "11 导出分享图",
