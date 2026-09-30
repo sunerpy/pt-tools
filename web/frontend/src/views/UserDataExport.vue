@@ -1292,5 +1292,32 @@ onMounted(() => {
   .poster__sites-grid {
     grid-template-columns: 1fr;
   }
+
+  /*
+   * 单栏的站点卡在 375 宽的手机上只有 ~230：「128.49万」在「万」前折行、「魔力」竖成两行，
+   * 等级「Crazy User」也折两行。数值与单位不折，右边不让宽；左边的身份区让出宽度，等级名省略。
+   * 只影响手机上的预览 —— 导出的 PNG 是 Canvas 按 640 宽画的。
+   */
+  .pcard__bonus,
+  .pcard__bonus-unit,
+  .pcard__user,
+  .pcard__level {
+    white-space: nowrap;
+  }
+
+  .pcard__row--head > .pcard__r {
+    flex: 0 0 auto;
+  }
+
+  .pcard__l,
+  .pcard__ident,
+  .pcard__meta {
+    min-width: 0;
+  }
+
+  .pcard__level {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 </style>
