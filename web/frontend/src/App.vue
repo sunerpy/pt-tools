@@ -189,10 +189,16 @@ const crumbs = computed(() => {
 });
 
 function onKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+  /* Chrome 选自动填充建议时派发的 keydown 没有 key，直接 toLowerCase 会抛 TypeError */
+  if ((e.metaKey || e.ctrlKey) && e.key?.toLowerCase() === "k") {
     e.preventDefault();
-    // 跳转框长在导航列里，先让它可见再送焦点：宽屏展开回栅格，窄屏拉出抽屉
-    if (wide.value) setCollapsed(false);
+    /*
+     * 跳转框长在导航列里，先让它可见再送焦点：宽屏展开回栅格，窄屏拉出抽屉。
+     * 宽屏只在内存里展开、不落盘 —— 之前调的是 setCollapsed(false)，会把「收起」偏好写回 localStorage，
+     * 收起过导航的用户用一次快捷跳转，之后每次刷新导航都是展开的。宽屏没有抽屉形态可用
+     * （≥1181 的侧栏格子为了宽度过渡是裁切的），所以是展开而不是拉抽屉。
+     */
+    if (wide.value) navCollapsed.value = false;
     else navOpen.value = true;
     navRef.value?.focusSearch();
     return;

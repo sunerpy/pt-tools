@@ -549,7 +549,8 @@ function loadFromCache() {
 const queryRef = ref<{ focus: () => void } | null>(null);
 
 function onHotkey(e: KeyboardEvent) {
-  if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
+  /* Chrome 选自动填充建议时派发的 keydown 没有 key，直接 toLowerCase 会抛 TypeError */
+  if (e.key?.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
   e.preventDefault();
   queryRef.value?.focus();
 }
