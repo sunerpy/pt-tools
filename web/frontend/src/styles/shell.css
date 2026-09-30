@@ -828,8 +828,13 @@
   white-space: nowrap;
 }
 
+/*
+ * 陈旧态（首拍还没回来，或 transfer-stats 拉取失败）：保留上一次的数字，但字色降一档到 t3，不再压 opacity ——
+ * opacity 0.5 合成后只有 2.2–2.9:1。t3 在 shell-bg 上 ≥ 4.5（paletteContrast.test.ts 守着）；
+ * 「旧了」还由「最后同步」的时间与下载器那格的「未知」一起表达，不只靠颜色。
+ */
 .pt-status__cell.is-stale {
-  opacity: 0.5;
+  color: var(--pt-t3);
 }
 
 .pt-status__cell--btn {
@@ -1135,9 +1140,9 @@
   align-items: center;
 }
 
-/* 拉取失败时整行变淡，和桌面状态条的 is-stale 一致 */
+/* 拉取失败时整行字色降到 t3，和桌面状态条的 is-stale 一致（不用 opacity，理由同上） */
 .pt-mnav__status.is-stale .pt-mnav__status-cell--live {
-  opacity: 0.5;
+  color: var(--pt-t3);
 }
 
 /* 稿上那个绿点：调度器在跑是绿的，停了是危险色，未知就是中性灰 */

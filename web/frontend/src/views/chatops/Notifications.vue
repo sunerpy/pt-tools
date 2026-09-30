@@ -935,10 +935,16 @@ function getChannelLabel(type: string) {
   box-shadow: var(--pt-shadow-md);
 }
 
-/* 停用的通道压暗，但操作按钮照常可点：删掉它也是一种操作 */
-.ch-card.is-off .ch-card__icon,
-.ch-card.is-off .ch-card__name {
+/*
+ * 停用的通道压暗，但操作按钮照常可点：删掉它也是一种操作。
+ * 图标照旧压 opacity；名称是承载信息的字，改成降一档字色（t3 ≥ 4.5）—— opacity 0.6 下 halo 浅色只剩 4.51。
+ */
+.ch-card.is-off .ch-card__icon {
   opacity: 0.6;
+}
+
+.ch-card.is-off .ch-card__name {
+  color: var(--pt-t3);
 }
 
 .ch-card__head {

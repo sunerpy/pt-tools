@@ -1799,10 +1799,12 @@ function ruleNameOf(id: number): string {
   border-color: var(--pt-p);
 }
 
-/* 示例卡整体压暗并换成虚线框：一眼看出它不参与调度 */
+/*
+ * 示例卡换成虚线框、标题旁挂「示例」标签：一眼看出它不参与调度。
+ * 之前还整体压 opacity 0.72，卡里的 t2 / t3 字合成后只有 2.9–4.8:1，承载信息的字不能这样压。
+ */
 .rss.is-example {
   border-style: dashed;
-  opacity: 0.72;
 }
 
 .rss.is-example:hover {
