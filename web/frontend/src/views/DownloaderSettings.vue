@@ -910,7 +910,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
         <p v-else class="dl-empty">全局配置没取到，这里只能留空。</p>
         <p class="dl-foot">
           推送前会拿「下载器剩余空间 − 未完成体积 − 本进程已预留」和这个阈值比，不够就不推。
-          开启时读不到剩余空间会**拒绝推送**而不是放行。这是全局配置，改在
+          开启时读不到剩余空间会<strong>拒绝推送</strong>而不是放行。这是全局配置，改在
           <el-button link type="primary" @click="$router.push('/global')">系统设置</el-button>。
         </p>
       </PtPanel>

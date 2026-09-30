@@ -1093,10 +1093,15 @@ function ruleNameOf(id: number): string {
               <div class="field-tip">Passkey 用于 RSS 订阅认证，从站点个人设置页面获取</div>
             </el-form-item>
           </el-form>
+          <!--
+            之前这里笼统地写「留空保存不会覆盖已存的值」—— 只对 Cookie 成立（core/config_store.go 里未携带 cookie 就保留已存的）。
+            API Key 与 Passkey 会回显当前值，清空再保存会被后端以「不能为空」拒掉，并不是「保持不变」。
+          -->
           <p class="sd-foot">
-            改完要点页头的「保存配置」才会落库。留空保存<strong>不会</strong>覆盖已存的值 —— 已存的
-            Cookie 会原样保留（也照样算通过非空校验）。这一页没有「清空凭据」的操作：
-            填空白等于留空。要换就直接填新值；不想让这个站点参与任务，关掉「启用站点」。
+            改完要点页头的「保存配置」才会落库。Cookie
+            不回显：留空保存会原样保留已存的那份（也照样算通过非空校验）。 API Key 与 Passkey
+            会回显当前值，清空后保存会被拒绝 —— 这两项不能为空。要换就直接填新值；
+            不想让这个站点参与任务，关掉「启用站点」。
           </p>
         </PtPanel>
       </div>

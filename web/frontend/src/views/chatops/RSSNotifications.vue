@@ -642,7 +642,16 @@ onBeforeUnmount(() => {
       <PtPanel title="幂等与去重口径" icon="shield-check">
         <ul class="idem">
           <li>每条「RSS + 种子 + 通道」只会留一条记录，调度器重跑同一轮不会重复推送。</li>
-          <li>被安静时段或每小时配额挡下的记为 <code>suppressed</code>，不算失败。</li>
+          <!--
+            之前写的是「被安静时段或每小时配额挡下的记为 suppressed」—— 与 internal/app/rss_notifier.go 不符：
+            安静时段里的保持 pending、推迟到时段结束补发；超配额的记 throttled；suppressed 是被同一种子的
+            「仅匹配」通知取代（或手动标记取消）的那条。
+          -->
+          <li>
+            安静时段里的先挂起（<code>pending</code>），时段结束后补发；超过每小时配额的记为
+            <code>throttled</code>、不补发；被同一种子的「仅匹配」通知取代的那条记为
+            <code>suppressed</code>。
+          </li>
           <li>合并推送（digest）会把同一轮的多条并成一条消息，日志里仍然一条种子一条记录。</li>
           <li>手动点「重试」只会把这条重新入队，不会新建一条记录，尝试次数 +1。</li>
         </ul>
@@ -683,8 +692,7 @@ onBeforeUnmount(() => {
         </ul>
         <p v-else class="idem-ok">还没有配置通知通道。</p>
         <p class="quiet__foot">
-          落在安静时段里的通知记为 <code>suppressed</code>，不算失败、也不会攒着补发。
-          时段在「消息通知」里按通道配置。
+          落在安静时段里的通知先挂起，等时段结束再补发，不算失败。 时段在「消息通知」里按通道配置。
         </p>
       </PtPanel>
     </div>

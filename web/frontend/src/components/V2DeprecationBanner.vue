@@ -69,7 +69,7 @@ function dismiss() {
             应用是 hash 路由（createWebHashHistory），`href="/sites"` 会落到
             服务端的 /sites 而不是这一页 —— 评审把它记成 pre-existing note，顺手修掉。
           -->
-          <RouterLink class="v2-deprecation-link" to="/sites">站点与 RSS</RouterLink>
+          <RouterLink class="v2-deprecation-link" to="/sites">站点列表</RouterLink>
           页面。
         </span>
         <button

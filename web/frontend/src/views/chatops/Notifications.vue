@@ -516,8 +516,8 @@ function getChannelLabel(type: string) {
           </li>
         </ul>
         <p class="pol__foot">
-          安静时段里的通知记为 <code>suppressed</code>，不算失败也不补发； 每条 RSS
-          还能单独设「每小时最多几条」，超出的记为 <code>throttled</code>。
+          安静时段里的通知先挂起（<code>pending</code>），到时段结束再发；每条 RSS
+          还能单独设「每小时最多几条」，超出的记为 <code>throttled</code>、不再补发。
         </p>
       </PtPanel>
 

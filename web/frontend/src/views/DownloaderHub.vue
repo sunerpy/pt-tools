@@ -2225,8 +2225,8 @@ function toggleSidebar() {
           <PtPanel class="hub__card" title="这一页的口径" icon="info">
             <ul class="hub__note">
               <li>
-                这里列的是**下载器里的任务**，不是 pt-tools 的 RSS 任务；后者在「任务列表」。
-                删除动作直接落到下载器，pt-tools 不做二次确认之外的拦截。
+                这里列的是<strong>下载器里的任务</strong>，不是 pt-tools 的 RSS
+                任务；后者在「任务列表」。 删除动作直接落到下载器，pt-tools 不做二次确认之外的拦截。
               </li>
               <li>
                 「全部下载器」视图会逐台请求再合并；某台连不上时列表照常显示其余各台，
@@ -2266,7 +2266,7 @@ function toggleSidebar() {
               :label="`${item.name} (${item.type})`"
               :value="item.id" />
           </el-select>
-          <div class="field-tip">留空则不提交；可同时投递到多个下载器。</div>
+          <div class="field-tip">留空则投递到所有已启用的下载器；也可以只勾其中几个。</div>
         </el-form-item>
         <div class="field-row">
           <el-form-item label="种子 URL">

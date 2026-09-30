@@ -61,16 +61,25 @@ const currentMeta = computed(() => CHANNEL_META[conf.channel_type] || CHANNEL_ME
  * 每条都对应下面某个 ElMessage 的实参 —— 改文案要两处一起改，别让卡和真实提示对不上。
  */
 const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; when: string }[] = [
-  { kind: "成功", tone: "ok", text: "保存成功", when: "改完基本信息或凭证并保存" },
-  { kind: "成功", tone: "ok", text: "连接测试成功", when: "「测试连接」拿到 2xx" },
-  { kind: "失败", tone: "dang", text: "保存失败", when: "保存请求非 2xx，后面跟后端的原话" },
-  { kind: "失败", tone: "dang", text: "连接测试失败", when: "测试请求失败，后面跟后端的原话" },
+  /*
+   * 之前这张卡列的是「保存成功 / 连接测试成功 / 连接测试失败 / 凭证留空则保持不变」—— 这页根本不弹前三条，
+   * 第四条还是错的：凭证字段会回显当前值、按原样提交，清空再保存就是用空串覆盖。现在逐条对着下面的 ElMessage。
+   */
+  { kind: "成功", tone: "ok", text: "已保存基本信息", when: "改完名称或静默时段并保存" },
+  {
+    kind: "成功",
+    tone: "ok",
+    text: "已保存凭证",
+    when: "改完凭证并保存 —— 清空的字段会按空值保存",
+  },
+  { kind: "成功", tone: "ok", text: "测试消息发送成功", when: "「发送测试消息」送达" },
   {
     kind: "提示",
     tone: "warn",
-    text: "凭证留空则保持不变",
-    when: "凭证字段留空保存时 —— 已存的值不会被空串覆盖",
+    text: "已触发测试，但返回结果异常",
+    when: "测试请求发出了，但返回的不是预期结构",
   },
+  { kind: "失败", tone: "dang", text: "保存失败", when: "保存请求非 2xx，后面跟后端的原话" },
 ];
 
 /** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
