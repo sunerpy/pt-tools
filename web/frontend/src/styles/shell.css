@@ -867,6 +867,13 @@
 .pt-status__copy {
   gap: var(--pt-space-2);
   color: var(--pt-chrome-t2);
+}
+
+/*
+ * 版权字按画板弱化（画板里是最浅一档）；链接不跟着压 —— 之前整格 opacity 0.75，
+ * pt-tools 链接在深色 cockpit 上只剩 4.06:1。--pt-chrome-p 本身在 chrome 上 ≥ 4.5（shellTokens.test.ts 守着）。
+ */
+.pt-status__copy > span {
   opacity: 0.75;
 }
 
