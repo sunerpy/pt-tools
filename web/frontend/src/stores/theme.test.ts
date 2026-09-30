@@ -122,6 +122,24 @@ describe("切换明暗", () => {
     expect(localStorage.getItem("theme")).toBe("light");
   });
 
+  /*
+   * 默认模式已经是明亮（stores/theme.ts 的 readMode），上面那条 setMode('light') 其实是空操作：
+   * setMode 或它后面的 watch 坏了它照样通过。这一条从默认切到深色，改动才真的发生。
+   */
+  it("setMode('dark') 从默认的明亮切过去：class、colorScheme 与存档一起变", async () => {
+    const theme = useThemeStore();
+    expect(theme.isDark).toBe(false);
+
+    theme.setMode("dark");
+    await nextTick();
+
+    expect(theme.isDark).toBe(true);
+    expect(root().classList.contains("dark")).toBe(true);
+    expect(root().classList.contains("light")).toBe(false);
+    expect(root().style.colorScheme).toBe("dark");
+    expect(localStorage.getItem("theme")).toBe("dark");
+  });
+
   it("toggle 在明暗之间来回，不会停在 auto", () => {
     const theme = useThemeStore();
 
@@ -199,6 +217,19 @@ describe("切换配色", () => {
     theme.setPalette("rainbow");
 
     expect(theme.palette).toBe("cockpit");
+  });
+
+  it("配色与明暗互不影响：深色下换配色仍是深色", async () => {
+    const theme = useThemeStore();
+    theme.setMode("dark");
+    await nextTick();
+
+    theme.setPalette("halo");
+    await nextTick();
+
+    expect(theme.isDark).toBe(true);
+    expect(root().classList.contains("dark")).toBe(true);
+    expect(root().getAttribute("data-theme-style")).toBe("halo");
   });
 
   it("配色与明暗互不影响：换配色不会把 light 顶回 dark", async () => {
