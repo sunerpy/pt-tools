@@ -715,7 +715,7 @@
   min-width: 0;
   overflow: hidden;
   font-size: var(--pt-fz-label);
-  color: var(--pt-t4);
+  color: var(--pt-t3);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

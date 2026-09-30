@@ -1065,7 +1065,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 }
 
 .cell-dim {
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .cell-ok {
@@ -1116,7 +1116,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 分析卡里「一条都不用管」的正面结论 */

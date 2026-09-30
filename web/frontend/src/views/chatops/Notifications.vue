@@ -739,7 +739,7 @@ function getChannelLabel(type: string) {
 
 .pol__v.is-off {
   font-weight: 400;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .pol__tag {
@@ -765,7 +765,7 @@ function getChannelLabel(type: string) {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .pol__foot code {

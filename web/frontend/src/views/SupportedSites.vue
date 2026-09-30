@@ -439,7 +439,7 @@ function clearFilters() {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 带与卡片层各自管留白，这一层只负责纵向堆叠 */

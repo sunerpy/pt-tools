@@ -884,7 +884,7 @@ function scrollToTop() {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .lv__foot code {

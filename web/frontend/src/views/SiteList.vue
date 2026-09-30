@@ -1884,7 +1884,7 @@ async function saveLoginConfig() {
 .page-note__x {
   flex-shrink: 0;
   padding: 0;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
   cursor: pointer;
   background: none;
   border: 0;
@@ -1964,7 +1964,7 @@ async function saveLoginConfig() {
 }
 
 .rss.is-zero {
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 带 tooltip 的表头：虚线下划线提示「这里有解释」，比只放个图标更好点中 */
@@ -2236,7 +2236,7 @@ async function saveLoginConfig() {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 列设置面板：一行一个勾选 */

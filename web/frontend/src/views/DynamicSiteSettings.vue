@@ -737,7 +737,7 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
   font-weight: 400;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
@@ -757,7 +757,7 @@ function authMethodTone(method: string): "primary" | "ok" | "warn" | "info" {
 .card-id {
   font-family: var(--pt-font-mono);
   font-size: var(--pt-fz-label);
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 描述比其他 meta 项长，单独占满一行再折行，不跟标签挤在同一排 */

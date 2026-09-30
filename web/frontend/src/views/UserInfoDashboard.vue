@@ -1614,7 +1614,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   padding: 0;
   margin-left: auto;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
   cursor: pointer;
   background: none;
   border: 0;
@@ -1777,7 +1777,7 @@ onUnmounted(() => {
 
 /* 缺值统一用最弱的文字色，避免和真实数字抢注意力 */
 .nil {
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /*
@@ -1873,7 +1873,7 @@ onUnmounted(() => {
 
 .bonus__l {
   font-size: var(--pt-fz-foot);
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* ---- 时间戳与表头提示 ---- */

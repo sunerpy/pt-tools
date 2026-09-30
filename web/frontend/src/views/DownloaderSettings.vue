@@ -1318,7 +1318,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .dl-foot :deep(.el-button) {
@@ -1394,7 +1394,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
   width: 26px;
   height: 26px;
   padding: 0;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
   cursor: pointer;
   background: none;
   border: 0;

@@ -1224,7 +1224,7 @@ function decisionText(decision: string | undefined): string {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 口径说明卡：固定文案 */
@@ -1363,7 +1363,7 @@ function decisionText(decision: string | undefined): string {
 .pt-dialog .mrow__idx {
   font-size: var(--pt-fz-label);
   font-variant-numeric: tabular-nums;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .pt-dialog .mrow__size {
@@ -1390,6 +1390,6 @@ function decisionText(decision: string | undefined): string {
 
 .pt-dialog .mrow__meta > span {
   flex: 0 0 auto;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 </style>

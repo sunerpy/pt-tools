@@ -1692,7 +1692,7 @@ function ruleNameOf(id: number): string {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .sd-foot code {
@@ -1868,7 +1868,7 @@ function ruleNameOf(id: number): string {
 .fact dt {
   margin-bottom: 2px;
   font-size: var(--pt-fz-label);
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .fact dd {
@@ -1901,6 +1901,6 @@ function ruleNameOf(id: number): string {
 
 .rss__hint {
   font-size: var(--pt-fz-label);
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 </style>

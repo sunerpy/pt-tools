@@ -2109,7 +2109,7 @@ const footNote = computed(() => {
 
 .site-head__hint {
   font-size: var(--pt-fz-label);
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .site-opt {
@@ -2225,7 +2225,7 @@ const footNote = computed(() => {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .search-ok {

@@ -2440,7 +2440,7 @@ function toggleSidebar() {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .hub__note {
@@ -2858,7 +2858,7 @@ function toggleSidebar() {
 }
 
 .hub__order-item.is-off {
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 表头右键菜单被 teleport 到 body，配色只能用全局令牌 */

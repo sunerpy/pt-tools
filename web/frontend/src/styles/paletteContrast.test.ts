@@ -10,7 +10,7 @@
  * t4 不在这里：它只留给装饰（分隔点）与禁用态，承载信息的地方都已改用 t3。
  * 算法与 shellTokens.test.ts 相同（sRGB 相对亮度；淡染按 sRGB 分量线性合成，和浏览器的 color-mix 一致）。
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -92,4 +92,44 @@ describe("八套配色的文字对比度 ≥ 4.5", () => {
       }
     });
   }
+});
+
+/*
+ * t4 只给装饰与禁用：分隔符、排序箭头、禁用态。承载信息的文字一律 t3 ——
+ * 发布前的审阅里 35 处提示 / 脚注 / 标签 / 空值「-」用的是 t4（1.8–2.3:1），全部改成了 t3。
+ */
+describe("t4 不用来写承载信息的文字", () => {
+  const SFC = import.meta.glob("/src/**/*.vue", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+  const stylesDir = fileURLToPath(new URL(".", import.meta.url));
+  const sources: Array<[string, string]> = [
+    ...readdirSync(stylesDir)
+      .filter((f) => /\.(css|scss)$/.test(f))
+      .map((f) => [`styles/${f}`, readFileSync(`${stylesDir}/${f}`, "utf8")] as [string, string]),
+    ...Object.entries(SFC).map(([f, src]) => [f.replace("/src/", ""), src] as [string, string]),
+  ];
+  const ALLOWED = /sep\b|:disabled|caret/;
+
+  it("每一处 color: var(--pt-t4) 都落在分隔符 / 禁用态 / 排序箭头上", () => {
+    const bad: string[] = [];
+    for (const [file, src] of sources) {
+      const lines = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " ")).split("\n");
+      lines.forEach((line, i) => {
+        if (!/(^|[\s;{])color:\s*var\(--pt-t4\)/.test(line)) return;
+        let selector = "";
+        for (let j = i; j >= 0; j--) {
+          const t = lines[j]!.trim();
+          if (t.endsWith("{")) {
+            selector = t.slice(0, -1).trim();
+            break;
+          }
+        }
+        if (!ALLOWED.test(selector)) bad.push(`${file}:${i + 1} ${selector}`);
+      });
+    }
+    expect(bad).toEqual([]);
+  });
 });

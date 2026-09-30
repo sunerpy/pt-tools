@@ -749,7 +749,7 @@ onBeforeUnmount(() => {
 
 .quiet__v.is-off {
   font-weight: 400;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .quiet__note {
@@ -764,7 +764,7 @@ onBeforeUnmount(() => {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .quiet__foot code {
@@ -865,7 +865,7 @@ onBeforeUnmount(() => {
 }
 
 .no-act {
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 .detail {

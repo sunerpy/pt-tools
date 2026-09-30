@@ -146,7 +146,7 @@ function barWidth(row: BreakdownRow): string {
   grid-column: 1 / -1;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 卡片脚注：说明口径，10/400 t4（画板脚注字号） */
@@ -154,6 +154,6 @@ function barWidth(row: BreakdownRow): string {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 </style>

@@ -663,7 +663,7 @@ function getConfNameByConfId(confId?: number) {
 }
 
 .cd--expired {
-  color: var(--pt-t4);
+  color: var(--pt-t3);
   text-decoration: line-through;
 }
 

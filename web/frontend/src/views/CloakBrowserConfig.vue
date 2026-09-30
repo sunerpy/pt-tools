@@ -419,7 +419,7 @@ async function save() {
   margin: var(--pt-space-3) 0 0;
   font-size: var(--pt-fz-foot);
   line-height: 1.5;
-  color: var(--pt-t4);
+  color: var(--pt-t3);
 }
 
 /* 测试结果紧跟在最后一个字段之后，不再多留 el-form-item 的一档间距 */
