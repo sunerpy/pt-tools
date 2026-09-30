@@ -247,8 +247,11 @@ function getConfNameByConfId(confId?: number) {
   <!--
     画板 24：head 64 之后是靠左的一栏 612 宽的卡（p-pending / p-active / p-note），
     右边那片空白上画的是发码弹窗的规格，不是页面内容。刷新与生成绑定码是页头动作。
+    落地偏离画板：卡宽用 1080（.pt-cards--form，宽屏也停在 1080）。两张表的列宽合计
+    840 / 946，612 的卡里只能横滚，「回复语言 / 管理员 / 最后活跃」挤在右边看不到，
+    列头「回复语言」还被固定的操作列盖住一半。
   -->
-  <div class="bindings-page pt-cards pt-cards--lead">
+  <div class="bindings-page pt-cards pt-cards--wide pt-cards--form">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button :loading="loading" @click="loadData">
@@ -625,7 +628,7 @@ function getConfNameByConfId(confId?: number) {
   border-radius: var(--pt-r-sm);
 }
 
-/* 栏宽 612、内缩 16、卡间 16 都由 .pt-cards--lead 给 */
+/* 栏宽 1080、内缩 16、卡间 16 都由 .pt-cards--wide / --form 给 */
 
 /* 码 + 复制按钮是一个整体，别让复制按钮掉到第二行 */
 .code-cell {

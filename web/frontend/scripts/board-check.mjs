@@ -757,9 +757,31 @@ const EXPECT = {
   "/chatops/bindings": {
     board: "24 ChatOps 绑定",
     kind: CARD,
-    cards: [612, 612, 612], // p-pending / p-active / p-note
+    cards: [612, 612, 612], // p-pending / p-active / p-note（落地 1080，偏离见 ALLOWED_GAPS）
     minCards: 3, // 画板这一页的卡片张数（数据驱动的卡按下限算）
     titles: ["待绑定", "已绑定", "绑定是怎么走的"], // 画板这一页的卡（标题身份，防同宽卡互相顶替）
+    probes: [
+      {
+        /*
+         * 卡宽偏离画板（612 → 1080）的理由就是这一条：两张表的列放得下、不再横滚。
+         * 偏离登记之后栏宽检查不再管这一页，所以要有一条正面断言钉住落地值，
+         * 否则哪天卡又窄回去、表又横滚，检查照样全绿。空表也有列宽，假数据没有绑定照样量得到。
+         */
+        desc: "绑定页两张表在 1080 的卡里不横滚",
+        want: "verdict=ok",
+        js: `(() => {
+          const widths = [...document.querySelectorAll('.bindings-page > section.pt-panel')].map((c) => c.offsetWidth);
+          const tables = [...document.querySelectorAll('.bindings-page .el-table')];
+          if (tables.length < 2) return 'no-tables:' + tables.length;
+          const scroll = tables.map((t) => {
+            const w = t.querySelector('.el-table__body-wrapper .el-scrollbar__wrap');
+            return w ? w.scrollWidth - w.clientWidth : -1;
+          });
+          const ok = scroll.every((d) => d >= 0 && d <= 1) && widths.length >= 3 && widths.every((w) => Math.abs(w - 1080) <= 1);
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 卡宽 ' + widths.join('/') + ' 表横滚 ' + scroll.join('/');
+        })()`,
+      },
+    ],
   },
   "/chatops/audit": {
     board: "25 操作审计",
@@ -1294,6 +1316,20 @@ const ALLOWED_GAPS = {
     "apiTasks 里逐个 AND、是真的在工作的，与审计页那个假组合不同）。下载器状态在画板 18 那一页；" +
     "要按画板做就得把下载器实时状态按 hash 关联进列表页，等于每次翻页多一次下载器往返。" +
     OWNER_DECISION,
+
+  /*
+   * 画板 24 的三张卡都是 612 宽（右边那片画的是弹窗规格）。落地改成 1080：「已绑定」那张表有
+   * 渠道 / 渠道用户 ID / 备注 / 回复语言 / 管理员 / 最后活跃 / 操作七列，列宽合计 946，
+   * 「待绑定」五列合计 840 —— 在 612 的卡里只能横滚，右端几列看不到，列头「回复语言」
+   * 还被固定的操作列盖住一半。收窄到 612 放得下就得删列。落地值由本页的探针钉住。
+   */
+  ...Object.fromEntries(
+    ["cards.612", "cards.612#2", "cards.612#3"].map((k) => [
+      `/chatops/bindings ${k}`,
+      "画板 24 的卡 612 宽；两张表列宽合计 840 / 946，612 里只能横滚、右端的列看不到，" +
+        "落地用 1080（宽屏也停在 1080）。2026-09-30 用户要求逐页审计美化时改的。",
+    ]),
+  ),
 
   "/filter-rules grid.columns":
     "画板 20 九列；落地多一列「启用」——规则的开关本来就在表里改（画板把开关画进了操作列的省略菜单），" +

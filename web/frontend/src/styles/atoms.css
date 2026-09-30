@@ -1010,12 +1010,3 @@
   grid-template-columns: minmax(0, 520px);
   justify-content: center;
 }
-
-/*
- * 靠左的窄内容栏（画板 24 ChatOps 绑定：p-pending / p-active / p-note 都是 612 宽，
- * 右边那片空白上画的是弹窗规格，不是页面内容）。绑定页的正文是一份待认领的短码清单，
- * 拉到 1080 每行都会剩下半行空白。
- */
-.pt-cards--lead {
-  grid-template-columns: minmax(0, 612px);
-}
