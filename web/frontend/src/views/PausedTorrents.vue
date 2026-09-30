@@ -509,7 +509,8 @@ function formatProgress(progress: number): string {
           <!--
             进度列从 180 收到 140：列宽合计原来 1118 > 容器 1078，多出来的 40 全落在
             右端的「暂停时间」上，把它压成「09-19 06…」连时间都读不全。
-            这一列里是一条进度条加一行「- / - · 0.2%」，140 够放。
+            这一列里是一条进度条加一行「已下载 · 百分比」。分母不写：「20.48 MB / 10.00 GB」
+            在 140 里会折成两行（整格三层高），而分母就是右边一列的「大小」；完整值挂在 title 上。
           -->
           <el-table-column label="进度" width="140">
             <template #default="{ row }">
@@ -519,16 +520,22 @@ function formatProgress(progress: number): string {
                   :stroke-width="4"
                   :show-text="false"
                   :color="getProgressColor(row.progress)" />
-                <span class="progress-info">
-                  <span>{{ getDownloadedSize(row) }} / {{ formatSize(row.torrent_size) }}</span>
+                <span
+                  class="progress-info"
+                  :title="`${getDownloadedSize(row)} / ${formatSize(row.torrent_size)}`">
+                  <span>{{ getDownloadedSize(row) }}</span>
                   <span class="progress-pct">{{ formatProgress(row.progress) }}</span>
                 </span>
               </div>
             </template>
           </el-table-column>
+          <!--
+            大小 110：≥1600 字号升到 14px，96 里「10.00 GB」折成两行。多出的 14 从「暂停原因」的
+            最小宽度里扣（140 → 126，「免费期结束」照样一行），1376 下合计仍是 1078。
+          -->
           <el-table-column
             label="大小"
-            width="96"
+            width="110"
             class-name="pt-cell-num"
             label-class-name="pt-cell-num">
             <template #default="{ row }">{{ formatSize(row.torrent_size) }}</template>
@@ -536,14 +543,20 @@ function formatProgress(progress: number): string {
           <el-table-column label="下载器" width="110" class-name="pt-cell-muted">
             <template #default="{ row }">{{ row.downloader_name || "-" }}</template>
           </el-table-column>
-          <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
+          <el-table-column label="暂停原因" min-width="126" class-name="pt-cell-muted">
             <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
           </el-table-column>
           <!--
             时间单行截断（画板 17 的 td 就是「2026/9/16 14:…」）：让它换行会把行顶高，
             而且第二行正好藏在右侧 fixed 操作列的覆盖层底下 —— 看起来像数据缺了一截。
+            用 min-width 不用 width：1376 下各列合计正好 1078，它就是 112；
+            ≥1600 字号升到 14px，112 又会把「09-19 06:10」切成「09-19 06…」，
+            这时主区多出来的宽度按最小宽度分给标题 / 暂停原因 / 暂停时间三列，时间列跟着变宽。
           -->
-          <el-table-column label="暂停时间" width="112" class-name="pt-cell-muted pt-cell-1line">
+          <el-table-column
+            label="暂停时间"
+            min-width="112"
+            class-name="pt-cell-muted pt-cell-1line">
             <template #default="{ row }">
               <span :title="formatTime(row.paused_at)">{{ formatTimeShort(row.paused_at) }}</span>
             </template>
@@ -730,7 +743,11 @@ function formatProgress(progress: number): string {
           <el-table-column label="暂停原因" min-width="140" class-name="pt-cell-muted">
             <template #default="{ row }">{{ row.pause_reason || "-" }}</template>
           </el-table-column>
-          <el-table-column label="归档时间" width="112" class-name="pt-cell-muted pt-cell-1line">
+          <!-- 与「暂停时间」同理：min-width，宽屏下分到余宽 -->
+          <el-table-column
+            label="归档时间"
+            min-width="112"
+            class-name="pt-cell-muted pt-cell-1line">
             <template #default="{ row }">
               <span :title="formatTime(row.archived_at)">
                 {{ formatTimeShort(row.archived_at) }}
@@ -871,6 +888,7 @@ function formatProgress(progress: number): string {
   justify-content: space-between;
   font-size: var(--pt-fz-foot);
   color: var(--pt-t3);
+  white-space: nowrap;
 }
 
 .progress-pct {
