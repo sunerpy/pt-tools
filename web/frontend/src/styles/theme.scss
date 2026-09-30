@@ -815,7 +815,11 @@ html.dark {
   --el-table-header-text-color: var(--pt-t2);
   --el-table-text-color: var(--pt-t1);
   --el-table-row-hover-bg-color: var(--pt-hover);
-  --el-table-current-row-bg-color: var(--pt-p-soft);
+  /*
+   * 选中行的底必须不透明：固定列（fixed="left" / "right"）是 sticky 单元格、背景 inherit 自行，
+   * 之前用 p-soft（12% 混透明）时，横滚到操作列底下的「-」「1年前」会透出来。预先混到 surface 上。
+   */
+  --el-table-current-row-bg-color: color-mix(in srgb, var(--pt-p) 12%, var(--pt-surface));
   --el-table-border-color: var(--pt-border);
   --el-table-bg-color: var(--pt-surface);
   --el-table-tr-bg-color: var(--pt-surface);

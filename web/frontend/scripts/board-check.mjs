@@ -97,6 +97,33 @@ const EXPECT = {
       },
       {
         /*
+         * 用户原话「右侧操作列背景透明，底层文字内容会透出来」：固定列是 sticky 单元格、背景 inherit 自行，
+         * 选中行的底之前是 12% 混透明。点选一行、横滚一段，再量每个固定单元格的背景 alpha。
+         */
+        desc: "选中行时固定操作列的背景不透明（横滚时底下的字不透出来）",
+        want: "verdict=ok",
+        js: `(async () => {
+          const alpha = (c) => {
+            const m = c.match(/rgba?\\(([^)]+)\\)/);
+            if (m) { const p = m[1].split(',').map((x) => x.trim()); return p.length > 3 ? Number(p[3]) : 1; }
+            const k = c.match(/\\/\\s*([0-9.]+)\\s*\\)/);
+            return k ? Number(k[1]) : 1;
+          };
+          const rows = [...document.querySelectorAll('.dash .pt-grid .el-table__body tr.el-table__row')];
+          if (rows.length < 2) return 'no-rows';
+          rows[1].querySelector('td:nth-child(3)').click();
+          const wrap = document.querySelector('.dash .pt-grid .el-table__body-wrapper .el-scrollbar__wrap');
+          if (wrap) { wrap.scrollLeft = 200; wrap.dispatchEvent(new Event('scroll')); }
+          await new Promise((r) => setTimeout(r, 300));
+          const cells = [...document.querySelectorAll('.dash .pt-grid .el-table__body td.el-table-fixed-column--right')];
+          if (!cells.length) return 'no-fixed-column';
+          const low = cells.map((c) => alpha(getComputedStyle(c).backgroundColor)).filter((a) => a < 0.999);
+          const selected = !!document.querySelector('.dash .pt-grid tr.current-row');
+          return 'verdict=' + (selected && low.length === 0 ? 'ok' : 'MISMATCH') + ' 选中行 ' + selected + '，半透明格 ' + low.length + ' / ' + cells.length;
+        })()`,
+      },
+      {
+        /*
          * el-popover 自己不响应 Esc；App 的 Esc 先收「偏好与账户」浮层。窄屏抽屉里之前是反过来的：
          * Esc 收掉抽屉、浮层悬在原处。这里在钉住的导航列上验「Esc 收浮层」这条接线。
          */
