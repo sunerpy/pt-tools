@@ -735,6 +735,7 @@
 }
 
 .site-avatar {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -755,14 +756,23 @@
   box-shadow: var(--pt-shadow-sm);
 }
 
+/* 图标叠在首字母上面，加载成功才显出来（SiteAvatar.vue 的 imageLoaded） */
 .avatar-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: color-mix(in srgb, var(--pt-bg-surface) 90%, #fff);
+  opacity: 0;
   transition:
+    opacity var(--pt-dur-fast) ease,
     transform var(--pt-transition-fast),
     filter var(--pt-transition-fast);
+}
+
+.avatar-image.is-loaded {
+  opacity: 1;
 }
 
 .site-avatar.has-image .avatar-image {

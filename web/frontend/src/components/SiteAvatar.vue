@@ -16,6 +16,12 @@ const props = withDefaults(
 );
 
 const imageError = ref(false);
+/*
+ * 图标真的画出来之前一直显示首字母：之前有图标地址时只渲染 <img>，而图标要走 /api/favicon
+ * 取（首次会去站点抓），加载完成前那一块是近白的空方块 —— 用户统计与站点列表里常见一排白块。
+ * 现在字母常驻在下层，<img> 叠在上面，load 成功才淡入。
+ */
+const imageLoaded = ref(false);
 
 const faviconUrl = computed(() => {
   if (imageError.value) return null;
@@ -32,6 +38,7 @@ const avatarLetter = computed(() => {
 
 function handleImageError() {
   imageError.value = true;
+  imageLoaded.value = false;
 }
 
 /*
@@ -44,28 +51,22 @@ function handleImageLoad(e: Event) {
   const img = e.target as HTMLImageElement;
   if (img.naturalWidth <= 1 || img.naturalHeight <= 1) {
     imageError.value = true;
+    return;
   }
+  imageLoaded.value = true;
 }
 </script>
 
 <template>
   <div
     class="site-avatar"
-    :class="{ 'has-image': !!faviconUrl && !imageError, 'is-fallback': !faviconUrl || imageError }"
+    :class="{ 'has-image': imageLoaded && !imageError, 'is-fallback': !imageLoaded || imageError }"
     :style="{
       width: size + 'px',
       height: size + 'px',
       minWidth: size + 'px',
     }">
-    <img
-      v-if="faviconUrl && !imageError"
-      :src="faviconUrl"
-      :alt="siteName"
-      class="avatar-image"
-      @error="handleImageError"
-      @load="handleImageLoad" />
     <span
-      v-else
       class="avatar-letter"
       :style="{
         fontSize: size * 0.5 + 'px',
@@ -73,5 +74,13 @@ function handleImageLoad(e: Event) {
       }">
       {{ avatarLetter }}
     </span>
+    <img
+      v-if="faviconUrl && !imageError"
+      :src="faviconUrl"
+      :alt="siteName"
+      class="avatar-image"
+      :class="{ 'is-loaded': imageLoaded }"
+      @error="handleImageError"
+      @load="handleImageLoad" />
   </div>
 </template>
