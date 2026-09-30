@@ -455,7 +455,7 @@ function clearFilters() {
 
 /* 架构分段：档位多（全部 + 五种架构），字号压小一档才不把工具栏挤换行 */
 .ss-seg :deep(.el-segmented__item-label) {
-  font-size: var(--pt-fz-xs);
+  font-size: var(--pt-fz-label);
 }
 
 .filter-select {

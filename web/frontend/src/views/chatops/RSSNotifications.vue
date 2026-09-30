@@ -809,7 +809,7 @@ onBeforeUnmount(() => {
 
 /* 结果分段六格（全部 + 五档），字号压小一档才不把工具栏挤换行 */
 .rn-seg :deep(.el-segmented__item-label) {
-  font-size: var(--pt-fz-xs);
+  font-size: var(--pt-fz-label);
 }
 
 /* 「更多筛选」里的两项：一行一个，标签固定宽，控件占满 */

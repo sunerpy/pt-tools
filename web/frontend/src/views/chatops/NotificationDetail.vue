@@ -823,11 +823,12 @@ function goBack() {
   min-width: 0;
 }
 
+/* 画板 23 的 hero name 是 19/700。之前写的 --pt-fz-h3 从来没定义过，整条声明失效，回落成 13 号 */
 .hero__name {
   margin: 0;
   overflow: hidden;
-  font-size: var(--pt-fz-h3);
-  font-weight: 600;
+  font-size: var(--pt-fz-h1);
+  font-weight: 700;
   color: var(--pt-t1);
   text-overflow: ellipsis;
   white-space: nowrap;
