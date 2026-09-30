@@ -10,6 +10,7 @@ import { ElMessage } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
 import { hasParsableTime, withinWindow } from "./logTimeWindow";
+import { LEVELS, type LogLevel, levelOf } from "./logLevel";
 
 const loading = ref(false);
 const logs = shallowRef<string[]>([]);
@@ -34,15 +35,7 @@ let scrollFrameId: number | null = null;
 let refreshTimer: number | null = null;
 let loadTaskId = 0;
 
-/**
- * 日志级别 —— 画板 29 左栏的 p-lv（级别筛选）。
- *
- * 后端只给一整段文本（单文件 tail），没有结构化的级别字段，所以级别只能从行里认：
- * 结构化日志是 `"level":"error"`，Zap 的 console 编码器是行里一个裸的 `ERROR`。
- * 认不出来的归到「其他」，不静默丢掉 —— 一条都不显示比显示错级别更糟。
- */
-const LEVELS = ["error", "warn", "info", "debug", "other"] as const;
-type LogLevel = (typeof LEVELS)[number];
+/* 日志级别的判定在 ./logLevel.ts（有 JSON level 字段就只认它），这里只管显示 */
 
 const LEVEL_LABEL: Record<LogLevel, string> = {
   error: "ERROR",
@@ -59,22 +52,6 @@ const LEVEL_TONE: Record<LogLevel, "dang" | "warn" | "info" | "primary" | "mute"
   debug: "mute",
   other: "mute",
 };
-
-const levelCache = new Map<string, LogLevel>();
-
-function levelOf(line: string): LogLevel {
-  const hit = levelCache.get(line);
-  if (hit !== undefined) return hit;
-  const lower = line.toLowerCase();
-  let level: LogLevel = "other";
-  if (lower.includes('"level":"error"') || /\berror\b/i.test(line)) level = "error";
-  else if (lower.includes('"level":"warn"') || /\bwarn(ing)?\b/i.test(line)) level = "warn";
-  else if (lower.includes('"level":"info"') || /\binfo\b/i.test(line)) level = "info";
-  else if (lower.includes('"level":"debug"') || /\bdebug\b/i.test(line)) level = "debug";
-  if (levelCache.size > maxCacheEntries) levelCache.clear();
-  levelCache.set(line, level);
-  return level;
-}
 
 /**
  * 日志目录清单 —— 画板 29 左栏的 p-files（文件清单）与 p-arc（归档）。
