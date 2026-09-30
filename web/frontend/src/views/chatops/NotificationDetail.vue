@@ -358,9 +358,9 @@ function goBack() {
   <!--
     画板 23：head 88（详情页的面包屑页头，由外壳给）→ hero 1080×116 → c-basic 1080×262
     → c-test 1080×250。通道身份落在 hero 卡里，ID 与类型走页头摘要，返回与启用开关
-    是页头右侧的动作。
+    是页头右侧的动作。宽屏下卡宽停在 1080（.pt-cards--form）。
   -->
-  <div v-loading="loading" class="notify-detail-page pt-cards pt-cards--wide">
+  <div v-loading="loading" class="notify-detail-page pt-cards pt-cards--wide pt-cards--form">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button @click="goBack">

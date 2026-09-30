@@ -414,8 +414,9 @@ async function executeClean() {
   <!--
     画板 21（p-main 344,84 1080×882）与画板 36（p-workdir 1080×570）都是通栏卡：
     head 之后直接进卡片层，左右各内缩 16，卡片之间间隔 16。本页没有表格带。
+    宽屏下卡宽停在 1080（.pt-cards--form），卡脚的「保存设置」不会跑到屏幕最右边。
   -->
-  <div class="cleanup-page pt-cards pt-cards--wide">
+  <div class="cleanup-page pt-cards pt-cards--wide pt-cards--form">
     <PtPanel v-loading="loading" title="自动删种" icon="trash-2" padding="none">
       <template #actions>
         <PtStatusPill :tone="form.cleanup_enabled ? 'ok' : 'neutral'" size="sm">

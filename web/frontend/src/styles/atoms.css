@@ -289,11 +289,25 @@
   border-top: 0;
 }
 
-/* 两列字段：窄屏自动退回单列 */
+/*
+ * 两列字段：窄屏自动退回单列；宽屏每栏最宽 440，不再各占半张卡。
+ *
+ * 宽屏下控件也不再横跨整张卡：1920 的屏上「种子下载目录」原来有 1580 宽、「刷流容量上限」1000 宽，
+ * 两栏字段相距 800，读一行要扫半块屏（用户原话「页面整体样式…整体美观度不足」）。
+ * 单栏控件最宽 720，数字框最宽 240；窄屏与对话框里本来就不到这个宽度，照旧撑满。
+ */
 .pt-form .field-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 440px));
   gap: 0 var(--pt-space-4);
+}
+
+.pt-form .el-form-item__content {
+  max-width: 720px;
+}
+
+.pt-form .el-input-number {
+  max-width: 240px;
 }
 
 /*
@@ -917,6 +931,16 @@
  */
 .pt-cards--wide {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/*
+ * 表单页（全局设置 / 自动清理 / 通知通道详情）：宽屏下整张卡不再跟着主区拉宽，
+ * 停在画板的 1080（画板 21 / 23 / 27 的卡都是 1080 宽），靠左与页头对齐。
+ * 1920 下原来卡宽 1622：字段全在左边 900 以内，卡脚的「保存设置」却在 x≈1830，
+ * 改完一项要横扫半屏才点得到保存。1376 下主区本来就是 1112，这条不起作用。
+ */
+.pt-cards--form {
+  max-width: calc(1080px + 2 * var(--pt-pad));
 }
 
 /*

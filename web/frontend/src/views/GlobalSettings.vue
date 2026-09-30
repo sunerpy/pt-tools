@@ -141,9 +141,9 @@ async function save() {
     画板 27（系统设置）的主区只有两件东西：head 之后的提示，和一张通栏大卡片
     （warn 344,80 1080×58 → p-cfg 344,154 1080×812）。两者都在卡片层 ——
     左右各内缩 16、彼此间隔 16 —— 所以容器直接用 .pt-cards--wide，本页不再自己排版。
-    这一页没有表格，也就没有工具栏带 / 表格带 / 页脚带。
+    这一页没有表格，也就没有工具栏带 / 表格带 / 页脚带。宽屏下卡宽停在 1080（.pt-cards--form）。
   -->
-  <div class="pt-cards pt-cards--wide">
+  <div class="pt-cards pt-cards--wide pt-cards--form">
     <!-- 页头摘要：口径是「当前生效的关键配置」，由本页把真实配置送进外壳页头 -->
     <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
 
