@@ -534,6 +534,16 @@
   border-bottom: 1px solid var(--pt-border);
 }
 
+/*
+ * 工具栏里没选值时的下拉（「认证: 全部」「类型: 全部」「已添加: 全部」）在画板上是 chip 标签：
+ * 11/500、t2（dir-g-pages.js 的 bar() 里 k.tag(... color: P.t2)）。落地是 el-select 的占位文字，
+ * 走的是全局占位色 —— 那是给输入框的提示色，压在 hover 底上更浅，之前实测只有 1.8–2.3:1，
+ * 读起来像禁用。这里只在带里把它提回 chip 标签的 t2。
+ */
+.pt-band--toolbar .el-select__placeholder.is-transparent {
+  color: var(--pt-t2);
+}
+
 /* 右侧那组图标钮之前的弹性间隔 */
 .pt-band__spacer {
   flex: 1;

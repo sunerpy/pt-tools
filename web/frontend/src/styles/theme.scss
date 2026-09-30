@@ -770,7 +770,12 @@ html.dark {
   --el-text-color-primary: var(--pt-t1);
   --el-text-color-regular: var(--pt-t2);
   --el-text-color-secondary: var(--pt-t3);
-  --el-text-color-placeholder: var(--pt-t4);
+  /*
+   * 占位文字走 t3 而不是 t4：画板 k.field 的占位色就是 t3（「筛选站点、地址…」这类），
+   * t4 是给禁用与装饰用的最浅一档 —— 之前落地用 t4，搜索框占位在白底上只有约 2:1。
+   * 工具栏里那种「认证: 全部」的下拉在画板上是 t2 的 chip 标签，见 atoms.css 的 .pt-band--toolbar。
+   */
+  --el-text-color-placeholder: var(--pt-t3);
   --el-text-color-disabled: var(--pt-t4);
 
   --el-font-family: var(--pt-font-family);
