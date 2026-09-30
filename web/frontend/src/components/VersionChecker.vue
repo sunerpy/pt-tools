@@ -8,6 +8,8 @@ import { marked } from "marked";
 import { storeToRefs } from "pinia";
 import { onMounted, ref } from "vue";
 
+import { useIsMobile } from "@/composables/useIsMobile";
+
 const versionStore = useVersionStore();
 const {
   currentVersion,
@@ -119,12 +121,15 @@ function prereleaseLabelText(label?: string): string {
  * popover 内容完全不变（板 42 就是这一版 420 宽的面板）。
  */
 defineProps<{ compact?: boolean }>();
+
+/* 420 宽的面板在 375 的屏上会溢出：手机上改成随屏宽（左右各留 16） */
+const isMobile = useIsMobile();
 </script>
 
 <template>
   <el-popover
     :placement="compact ? 'top-end' : 'bottom'"
-    :width="420"
+    :width="isMobile ? 'calc(100vw - 32px)' : 420"
     trigger="click"
     popper-class="version-popover">
     <template #reference>

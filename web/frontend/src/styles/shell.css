@@ -1205,6 +1205,15 @@
   gap: var(--pt-space-2);
 }
 
+/* 版本行：左标题、右边是 VersionChecker 自己的按钮（点开是画板 42 的那张面板） */
+.pt-msheet__ver {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--pt-m-touch);
+}
+
 .pt-msheet__title {
   margin: 0;
   font-size: var(--pt-fz-label);

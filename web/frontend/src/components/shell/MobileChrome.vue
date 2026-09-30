@@ -5,6 +5,7 @@ import { MOBILE_TABS, NAV_GROUPS } from "../../config/navigation";
 import { useRuntimeStore } from "../../stores/runtime";
 import { useThemeStore } from "../../stores/theme";
 import PtIcon from "../PtIcon";
+import VersionChecker from "../VersionChecker.vue";
 import ThemePrefs from "./ThemePrefs.vue";
 
 /**
@@ -150,6 +151,16 @@ function goFromSheet(path: string) {
 
   <el-drawer v-model="sheetOpen" direction="btt" size="auto" :with-header="false" class="pt-msheet">
     <div class="pt-msheet__body">
+      <!--
+        版本与更新（画板 34 个人卡右侧的「v0.47.2 已最新」）。桌面上它挂在底部状态条，而状态条在 ≤768
+        整条隐藏 —— 之前手机上没有任何检查更新 / 自升级 / 忽略版本的入口，启动时弹出的「发现新版本」通知
+        也无处可点。main 上它挂在移动端顶栏，这次重构把它弄丢了。
+      -->
+      <div class="pt-msheet__ver">
+        <span class="pt-msheet__title">版本与更新</span>
+        <VersionChecker />
+      </div>
+
       <section v-for="group in sheetGroups" :key="group.title" class="pt-msheet__group">
         <h2 class="pt-msheet__title">{{ group.title }}</h2>
         <div class="pt-msheet__items">
