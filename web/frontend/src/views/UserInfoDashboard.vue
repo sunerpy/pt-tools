@@ -32,10 +32,10 @@ import {
   getSiteBonusName,
   getSiteSeedingBonusName,
 } from "@/utils/format";
-import { ElMessage } from "element-plus";
+import { ElMessage, type TableInstance } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 /* 「更多」菜单里那两项要跳路由 */
 const router = useRouter();
@@ -336,7 +336,31 @@ const SORT_OPTIONS = [
   { label: "站点名", value: "site" },
 ] as const;
 
-const rowSort = ref<(typeof SORT_OPTIONS)[number]["value"]>("ratio");
+type RowSortKey = (typeof SORT_OPTIONS)[number]["value"];
+const rowSort = ref<RowSortKey>("ratio");
+
+/*
+ * 桌面表格的排序跟着「排序」下拉走。
+ *
+ * 之前表格写死了 default-sort（数据量降序），各列又是 sortable —— Element 每次拿到数据都按它自己的
+ * 排序重排，于是下拉在桌面上完全没效果，默认值还和下拉的「分享率」对不上；导出 CSV 却按下拉的顺序。
+ * 现在下拉一变就调表格的 sort()，点表头排序时反过来把下拉同步过去（列的 prop 与下拉的值一一对应）。
+ */
+const SORT_ORDER: Record<RowSortKey, "ascending" | "descending"> = {
+  ratio: "descending",
+  uploaded: "descending",
+  seeding: "descending",
+  bonus: "descending",
+  site: "ascending",
+};
+const siteTable = ref<TableInstance>();
+watch(rowSort, (key) => siteTable.value?.sort(key, SORT_ORDER[key]));
+
+function onTableSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (order && (SORT_OPTIONS as readonly { value: string }[]).some((o) => o.value === prop)) {
+    rowSort.value = prop as RowSortKey;
+  }
+}
 
 const USERINFO_COLS_KEY = "pt-tools-userinfo-cols-v1";
 
@@ -925,12 +949,14 @@ onUnmounted(() => {
       -->
       <el-table
         v-if="!isMobile"
+        ref="siteTable"
         class="pt-grid"
         :data="siteRows"
         scrollbar-always-on
         style="width: 100%"
-        :default-sort="{ prop: 'uploaded', order: 'descending' }"
-        highlight-current-row>
+        :default-sort="{ prop: rowSort, order: SORT_ORDER[rowSort] }"
+        highlight-current-row
+        @sort-change="onTableSortChange">
         <!-- 站点列：带消息徽章和悬停效果 -->
         <el-table-column
           prop="site"
