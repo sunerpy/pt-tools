@@ -498,9 +498,19 @@ function clearFilters() {
   box-shadow: var(--pt-shadow-md);
 }
 
-/* 不可用站点压暗而不是隐藏：用户需要知道它存在、以及为什么用不了 */
-.site-card.is-unavailable {
-  opacity: 0.66;
+/*
+ * 不可用站点压暗而不是隐藏：用户需要知道它存在、以及为什么用不了。
+ * 只弱化身份（头像去色、站点名降到 t2），「不可用」胶囊、原因说明和正文保持原色。
+ * 之前是整张卡 opacity 0.66 —— 恰恰把解释「为什么用不了」的胶囊和原因说明一起压到了
+ * 2.7–3.1 的对比度，描述文字更低到 2.0–2.7（发布前 8 套配色的对比度扫描抓出来的）。
+ */
+.site-card.is-unavailable :deep(.site-avatar) {
+  opacity: 0.6;
+  filter: grayscale(1);
+}
+
+.site-card.is-unavailable .site-card__name > span:not(.pt-pill) {
+  color: var(--pt-t2);
 }
 
 .site-card__head {
