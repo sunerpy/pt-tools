@@ -663,7 +663,8 @@ function scrollToTop() {
           :count="`${rotatedFiles.length} 份`">
           <ul v-if="rotatedFiles.length > 0" class="lf">
             <li v-for="f in rotatedFiles.slice(0, 6)" :key="f.name" class="lf__row">
-              <span class="lf__k lf__k--file">{{ f.name }}</span>
+              <!-- 左栏 300 宽，1376 下「all-2026-09-17T03-00-00.000.log」会被省略，全名挂 title -->
+              <span class="lf__k lf__k--file" :title="f.name">{{ f.name }}</span>
               <span class="lf__v">{{ formatBytes(f.size) }}</span>
             </li>
           </ul>
