@@ -7,6 +7,9 @@
  * 发布前 owner 让「你来决定实施」，于是只动不达标的令牌、只动 OKLCH 明度（色相与彩度不变），
  * 挪到刚好过线 —— 新旧值对照见 docs/design/webui-board-spec.md 的「发布前对比度调整」。
  *
+ * 胶囊按它常驻的两种底校：表格与卡片里是 surface，手机行卡与浮层里是 raised。行 hover / 按下是
+ * 瞬时的整行高亮，不作为约束（把它也算进去要再动 27 枚令牌，离画板更远）。
+ *
  * t4 不在这里：它只留给装饰（分隔点）与禁用态，承载信息的地方都已改用 t3。
  * 算法与 shellTokens.test.ts 相同（sRGB 相对亮度；淡染按 sRGB 分量线性合成，和浏览器的 color-mix 一致）。
  */
@@ -67,16 +70,21 @@ describe("八套配色的文字对比度 ≥ 4.5", () => {
       return low.length ? low.map(([k, r]) => `${k} ${r.toFixed(2)}`).join("、") : null;
     };
 
-    it(`${name}：t2 / t3 在四种底色上`, () => {
+    /** 胶囊：字色压在自己 14% 的淡染上，淡染叠在 surface / raised 上 */
+    const pillOk = (c: string) =>
+      ["pt-surface", "pt-raised"].every((bg) => contrast(c, blend(c, v[bg]!, 0.14)) >= AA);
+
+    it(`${name}：t2 / t3 在四种底色上，t2 作中性胶囊`, () => {
       expect(worst(v["pt-t2"]!, surfaces as Array<[string, string]>)).toBeNull();
       expect(worst(v["pt-t3"]!, surfaces as Array<[string, string]>)).toBeNull();
+      expect(pillOk(v["pt-t2"]!), "中性胶囊").toBe(true);
     });
 
     it(`${name}：主色作文字、作胶囊，主按钮三态上的字`, () => {
       const p = v["pt-p"]!;
       const onp = ref(v["pt-on-p"]!);
       expect(worst(p, surfaces as Array<[string, string]>)).toBeNull();
-      expect(contrast(p, blend(p, v["pt-surface"]!, 0.14))).toBeGreaterThanOrEqual(AA);
+      expect(pillOk(p), "主色胶囊").toBe(true);
       for (const k of ["pt-p", "pt-p-hover", "pt-p-active"]) {
         expect(contrast(onp, v[k]!), `on-p 压在 ${k} 上`).toBeGreaterThanOrEqual(AA);
       }
@@ -86,9 +94,7 @@ describe("八套配色的文字对比度 ≥ 4.5", () => {
       for (const t of ["ok", "warn", "dang", "info"]) {
         const c = v[`pt-${t}`]!;
         expect(worst(c, surfaces as Array<[string, string]>), `${t} 作文字`).toBeNull();
-        expect(contrast(c, blend(c, v["pt-surface"]!, 0.14)), `${t} 胶囊`).toBeGreaterThanOrEqual(
-          AA,
-        );
+        expect(pillOk(c), `${t} 胶囊`).toBe(true);
       }
     });
   }

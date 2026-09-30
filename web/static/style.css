@@ -102,19 +102,19 @@ html.dark[data-theme-style="cockpit"] {
   --pt-shell-p: #12a6c2;
 
   --pt-t1: #e8ebef;
-  --pt-t2: #99a0ac;
+  --pt-t2: #a8afbb;
   --pt-t3: #929aa8;
   --pt-t4: #5f6774;
 
-  --pt-p: #22adc9;
+  --pt-p: #3abcd9;
   --pt-p-hover: #22bcd8;
   --pt-p-active: #269bb4;
   --pt-on-p: #052a33;
 
   --pt-ok: #34c77b;
   --pt-warn: #e0a32e;
-  --pt-dang: #f7776e;
-  --pt-info: #5fa1fd;
+  --pt-dang: #ff8b81;
+  --pt-info: #6eb1ff;
 
   --pt-kpi-1: #5b9df9;
   --pt-kpi-2: #34c77b;
@@ -346,7 +346,7 @@ html.dark[data-theme-style="halo"] {
 
   --pt-ok: #5bd08a;
   --pt-warn: #eab308;
-  --pt-dang: #ff5c77;
+  --pt-dang: #ff617b;
   --pt-info: #6ab8ff;
 
   --pt-kpi-1: #6ab8ff;
