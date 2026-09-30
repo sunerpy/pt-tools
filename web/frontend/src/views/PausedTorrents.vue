@@ -69,7 +69,8 @@ const {
   run: runArchive,
 } = useDataState({ filtered: () => hasFilters.value });
 
-/** 工具条上的刷新按钮不关心是哪个 tab 在加载 */
+/** 页头上的刷新按钮不关心是哪个列表在加载，任一个在加载就转圈 */
+const anyLoading = computed(() => pausedLoading.value || archiveLoading.value);
 
 /** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
 const pausedStateSub = computed(() => {
@@ -453,6 +454,13 @@ function formatProgress(progress: number): string {
           <span>免费结束自动删除</span>
         </label>
       </el-tooltip>
+      <!--
+        画板 17 页头最右端的主色「刷新」（refresh-cw）。它一度被删，只剩 30 秒自动刷新与出错时的「重试」——
+        删除、恢复之后归档那张表不会跟着更新，只能开自动刷新或整页刷新。两个列表一起重载，走 reloadAll。
+      -->
+      <el-button type="primary" :loading="anyLoading" @click="reloadAll">
+        <PtIcon v-if="!anyLoading" name="refresh-cw" :size="14" /><span>刷新</span>
+      </el-button>
     </Teleport>
 
     <!--
