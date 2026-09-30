@@ -18,7 +18,10 @@
  */
 withDefaults(
   defineProps<{
-    /** 整卡可点时传 true：加 hover 反馈并允许键盘聚焦 */
+    /**
+     * 整卡可点时传 true：只加按下反馈。它**不**让整卡可键盘聚焦 —— 卡里常有自己的按钮，
+     * 整卡再当按钮会成嵌套交互控件；键盘可达的入口由调用页另给（例如「更多」菜单里的一项）。
+     */
     interactive?: boolean;
   }>(),
   { interactive: false },

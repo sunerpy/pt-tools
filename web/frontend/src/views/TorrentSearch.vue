@@ -1917,7 +1917,11 @@ const footNote = computed(() => {
               {{ item.sites.length > 0 ? `${item.sites.length} 个站点` : "全部站点" }} ·
               {{ categoryLabel(item.category) }}{{ item.freeOnly ? " · 仅免费" : "" }}
             </span>
-            <el-button link type="danger" @click="removeSaved(item.name)">
+            <el-button
+              link
+              type="danger"
+              :aria-label="`删除已保存的搜索「${item.name}」`"
+              @click="removeSaved(item.name)">
               <PtIcon name="x" :size="13" />
             </el-button>
           </li>

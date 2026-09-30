@@ -358,6 +358,7 @@ function manageSite(name: string) {
  * 折进来不等于丢掉，六个一个不少。
  */
 async function onCardCommand(cmd: { act: string; name: string }) {
+  if (cmd.act === "detail") return manageSite(cmd.name);
   if (cmd.act === "toggle") return toggleEnabled(cmd.name);
   if (cmd.act === "open") return openSite(cmd.name);
   if (cmd.act === "probe") return probeSite(cmd.name);
@@ -1532,6 +1533,15 @@ async function saveLoginConfig() {
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <!--
+                    整卡可点只对指针有效：行卡是 article、不是按钮（卡里还有「更多」「ⓘ」两个按钮，
+                    整卡再当按钮就成了嵌套交互控件）。键盘用户进站点详情走这一项。
+                  -->
+                  <el-dropdown-item :command="{ act: 'detail', name }">
+                    <PtIcon name="sliders-horizontal" :size="14" class="dd-ico" /><span
+                      >站点详情</span
+                    >
+                  </el-dropdown-item>
                   <el-dropdown-item
                     :command="{ act: 'toggle', name }"
                     :disabled="site.unavailable"

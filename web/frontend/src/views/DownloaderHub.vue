@@ -1564,7 +1564,7 @@ function toggleSidebar() {
     -->
     <PtToolbar band>
       <el-tooltip v-if="!sidebarVisible" content="展开侧栏" placement="bottom">
-        <button type="button" class="hub__ico" @click="toggleSidebar">
+        <button type="button" class="hub__ico" aria-label="展开侧栏" @click="toggleSidebar">
           <PtIcon name="panel-left-open" :size="15" />
         </button>
       </el-tooltip>
@@ -1584,7 +1584,11 @@ function toggleSidebar() {
           :value="item.value" />
       </el-select>
       <el-tooltip :content="sortOrder === 'asc' ? '升序，点击改降序' : '降序，点击改升序'">
-        <button type="button" class="hub__ico" @click="toggleSortOrder">
+        <button
+          type="button"
+          class="hub__ico"
+          :aria-label="sortOrder === 'asc' ? '升序，点击改降序' : '降序，点击改升序'"
+          @click="toggleSortOrder">
           <PtIcon :name="sortOrder === 'asc' ? 'chevron-up' : 'chevron-down'" :size="15" />
         </button>
       </el-tooltip>
@@ -1673,7 +1677,7 @@ function toggleSidebar() {
         <PtPanel class="hub__card" title="传输" icon="activity">
           <template #actions>
             <el-tooltip content="收起侧栏" placement="right">
-              <button type="button" class="hub__ico" @click="toggleSidebar">
+              <button type="button" class="hub__ico" aria-label="收起侧栏" @click="toggleSidebar">
                 <PtIcon name="panel-left-close" :size="14" />
               </button>
             </el-tooltip>
@@ -1849,22 +1853,34 @@ function toggleSidebar() {
           <template #footer>
             <div class="hub__side-foot">
               <el-tooltip content="保存当前布局" placement="top">
-                <button type="button" class="hub__ico" @click="saveLayoutPreset">
+                <button
+                  type="button"
+                  class="hub__ico"
+                  aria-label="保存当前布局"
+                  @click="saveLayoutPreset">
                   <PtIcon name="save" :size="15" />
                 </button>
               </el-tooltip>
               <el-tooltip content="载入已保存布局" placement="top">
-                <button type="button" class="hub__ico" @click="loadLayoutPreset">
+                <button
+                  type="button"
+                  class="hub__ico"
+                  aria-label="载入已保存布局"
+                  @click="loadLayoutPreset">
                   <PtIcon name="folder-open" :size="15" />
                 </button>
               </el-tooltip>
               <el-tooltip content="立即刷新" placement="top">
-                <button type="button" class="hub__ico" @click="loadTorrents">
+                <button type="button" class="hub__ico" aria-label="立即刷新" @click="loadTorrents">
                   <PtIcon name="refresh-cw" :size="15" />
                 </button>
               </el-tooltip>
               <el-tooltip content="添加种子" placement="top">
-                <button type="button" class="hub__ico is-primary" @click="openAddDialog">
+                <button
+                  type="button"
+                  class="hub__ico is-primary"
+                  aria-label="添加种子"
+                  @click="openAddDialog">
                   <PtIcon name="plus" :size="15" />
                 </button>
               </el-tooltip>
