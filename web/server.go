@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1378,6 +1379,13 @@ func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
 	}{Hits: hits})
 }
 
+// lumberjackBackupRe 认 lumberjack 轮转出来的备份：<名>-2006-01-02T15-04-05.000.log，压缩后再带 .gz。
+//
+// 不能用「不是 all.log 就是备份」：日志器同时写 all / debug / info / error 四个基础文件
+// （config/zap.go），它们都是正在写的文件，清理程序也把它们列为受保护。之前那样判，
+// 新装的机器上「轮转归档」就显示 3 份，页面还说清理会删掉它们。
+var lumberjackBackupRe = regexp.MustCompile(`^[\w.-]+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}\.log(\.gz)?$`)
+
 // 日志目录清单：当前文件加轮转备份。
 //
 // 画板 29 的左栏要「文件清单」与「归档」两张卡，而日志是 lumberjack 轮转的 ——
@@ -1415,13 +1423,15 @@ func (s *Server) apiLogFiles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := e.Name()
-		// lumberjack 的备份名是 <base>-<时间戳>.log，当前文件没有时间戳那一段
+		// lumberjack 的备份名是 <base>-<时间戳>.log，当前文件没有时间戳那一段。
+		// IsActive 只标页面 tail 的那一个（all.log）；debug / info / error.log 同样是正在写的基础文件，
+		// 既不是「当前显示」也不是「轮转备份」。
 		active := name == "all.log"
 		files = append(files, fileRow{
 			Name:     name,
 			Size:     info.Size(),
 			ModTime:  info.ModTime().Unix(),
-			Rotated:  !active,
+			Rotated:  lumberjackBackupRe.MatchString(name),
 			IsActive: active,
 		})
 	}

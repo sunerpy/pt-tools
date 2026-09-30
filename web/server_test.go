@@ -2264,3 +2264,49 @@ func TestSetDefaultDownloader_Additional(t *testing.T) {
 		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
 	})
 }
+
+// 日志器同时写 all / debug / info / error 四个基础文件（config/zap.go），它们都是正在写的文件，
+// 清理程序也把它们列为受保护（internal/maintenance/cleaner.go 的红线）。之前只认 all.log 是当前文件，
+// 其余三个被标成「轮转备份」—— 新装的机器上「轮转归档」就显示 3 份，还说清理会删掉它们。
+// 轮转与否按 lumberjack 备份的命名判：<名>-2006-01-02T15-04-05.000.log，压缩后再带 .gz。
+func TestApiLogFiles_BaseFilesAreNotRotated(t *testing.T) {
+	srv := setupServer(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for _, name := range []string{
+		"all.log", "debug.log", "info.log", "error.log",
+		"all-2026-09-01T00-00-00.000.log", "error-2026-08-30T12-30-00.123.log.gz",
+		"notes.txt",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644))
+	}
+
+	w := httptest.NewRecorder()
+	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Files []struct {
+			Name     string `json:"name"`
+			Rotated  bool   `json:"rotated"`
+			IsActive bool   `json:"is_active"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	rotated := map[string]bool{}
+	active := map[string]bool{}
+	for _, f := range got.Files {
+		rotated[f.Name] = f.Rotated
+		active[f.Name] = f.IsActive
+	}
+	for _, base := range []string{"all.log", "debug.log", "info.log", "error.log", "notes.txt"} {
+		assert.False(t, rotated[base], "%s 不是轮转备份", base)
+	}
+	assert.True(t, rotated["all-2026-09-01T00-00-00.000.log"])
+	assert.True(t, rotated["error-2026-08-30T12-30-00.123.log.gz"])
+	assert.True(t, active["all.log"], "页面 tail 的是 all.log")
+	assert.False(t, active["debug.log"])
+}
