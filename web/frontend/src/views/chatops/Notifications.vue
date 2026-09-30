@@ -11,7 +11,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 /*
@@ -58,6 +58,9 @@ const statusSeg = ref<"" | "connected" | "error" | "off">("");
  * 拿不到也不会显示错的东西 —— 上面会先把这一行的 runtime_state 清掉。
  */
 const reloadSettleMs = 1200;
+/* 开关之后那一次延迟重取的定时器：离开页面时要清掉，否则会向已卸载的组件写状态 */
+let settleTimer: number | undefined;
+onBeforeUnmount(() => window.clearTimeout(settleTimer));
 
 /** 后端没给 runtime_state 时退回到 enabled —— 问不到不等于坏了 */
 function runtimeOf(n: NotificationConfig): "connected" | "running" | "error" | "disabled" | "" {
@@ -274,7 +277,8 @@ async function handleToggle(row: NotificationConfig) {
      * 异步全量重建的（cmd.reloadChatOpsChannels），立刻重取会拿到重建前的状态。
      */
     row.runtime_state = undefined;
-    window.setTimeout(() => {
+    window.clearTimeout(settleTimer);
+    settleTimer = window.setTimeout(() => {
       void loadNotifications();
     }, reloadSettleMs);
   } catch (e: unknown) {
