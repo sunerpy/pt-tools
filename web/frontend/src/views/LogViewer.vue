@@ -10,7 +10,7 @@ import { ElMessage } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
 import { hasParsableTime, withinWindow } from "./logTimeWindow";
-import { LEVELS, type LogLevel, levelOf } from "./logLevel";
+import { LEVELS, type LogLevel, levelOf, levelSegValue } from "./logLevel";
 
 const loading = ref(false);
 const logs = shallowRef<string[]>([]);
@@ -159,11 +159,8 @@ const LEVEL_SEG = [
 
 /** 分段是单选，左栏那张卡是多选 —— 单选时把集合收成这一档 */
 const levelSeg = computed({
-  get: () => {
-    const set = activeLevels.value;
-    if (set.size !== 1) return "";
-    return [...set][0] as string;
-  },
+  /* 多选时一格都不亮，点「全部」才是一次真的切换 —— 见 levelSegValue 的注释 */
+  get: () => levelSegValue(activeLevels.value),
   set: (v: string) => {
     activeLevels.value = v === "" ? new Set() : new Set([v as LogLevel]);
     scrollTop.value = 0;

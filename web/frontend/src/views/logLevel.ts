@@ -46,3 +46,18 @@ export function levelOf(line: string): LogLevel {
   cache.set(line, level);
   return level;
 }
+
+/**
+ * 工具栏级别分段（单选）此刻该亮哪一格。左栏那张卡是多选，两处共用同一个集合：
+ * 一个都没勾 → ""（「全部」）；只勾一个 → 那一档；勾了两个以上 → 一个不对应任何分段选项的值，一格都不亮。
+ *
+ * 多选时不能回 ""：分段会把「全部」画成选中，而 el-segmented 的切换挂在原生 radio 的 change 上，
+ * 点一个已经选中的 radio 不触发 change —— 列表明明按两个级别筛着，「全部」却亮着、点了也没反应。
+ */
+export const LEVEL_SEG_MIXED = "mixed";
+
+export function levelSegValue(active: ReadonlySet<LogLevel>): string {
+  if (active.size === 0) return "";
+  if (active.size === 1) return [...active][0]!;
+  return LEVEL_SEG_MIXED;
+}

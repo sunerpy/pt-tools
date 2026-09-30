@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { levelOf } from "./logLevel";
+import { LEVEL_SEG_MIXED, LEVELS, levelOf, levelSegValue } from "./logLevel";
 
 describe("levelOf", () => {
   it("JSON 行只认 level 字段，不被消息里的字样带偏", () => {
@@ -36,5 +36,19 @@ describe("levelOf", () => {
 
   it("未知的 level 值不硬猜", () => {
     expect(levelOf('{"level":"trace","msg":"error"}')).toBe("other");
+  });
+});
+
+describe("levelSegValue", () => {
+  it("没勾 = 全部，只勾一档 = 那一档", () => {
+    expect(levelSegValue(new Set())).toBe("");
+    expect(levelSegValue(new Set(["warn"] as const))).toBe("warn");
+  });
+
+  it("多选时不对应任何分段选项，也不是「全部」", () => {
+    const v = levelSegValue(new Set(["error", "warn"] as const));
+    expect(v).toBe(LEVEL_SEG_MIXED);
+    expect(v).not.toBe("");
+    expect((LEVELS as readonly string[]).includes(v)).toBe(false);
   });
 });

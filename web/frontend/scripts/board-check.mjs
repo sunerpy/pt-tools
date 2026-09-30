@@ -899,6 +899,48 @@ const EXPECT = {
             ' 内容高 ' + before + '→' + after + '→' + restored;
         })()`,
       },
+      {
+        /*
+         * 左栏多选两个级别后，工具栏的级别分段不能再亮着「全部」，点「全部」要真的清空。
+         * el-segmented 的切换挂在原生 radio 的 change 上，点一个已经选中的 radio 不触发 change ——
+         * 多选时若仍回 ""，「全部」亮着、列表却按两个级别筛着，点它也毫无反应。
+         */
+        desc: "左栏多选两个级别后分段不亮「全部」，点「全部」清空筛选",
+        want: "verdict=ok",
+        js: `(async () => {
+          const until = async (fn, ms) => {
+            const t0 = performance.now();
+            while (performance.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); }
+            return fn();
+          };
+          const total = () => {
+            const pre = document.querySelector('.log-content');
+            return pre ? Math.round(parseFloat(pre.style.height || '0')) : -1;
+          };
+          const btns = [...document.querySelectorAll('.lv__btn')];
+          const count = (b) => Number((b.querySelector('.lv__n')?.textContent ?? '0').trim()) || 0;
+          const all = btns.reduce((s, b) => s + count(b), 0);
+          /* 挑两档有行、合起来又不是全部的级别，这样「筛了」与「没筛」的行数一定不同 */
+          const picks = btns.filter((b) => count(b) > 0).sort((a, b) => count(a) - count(b)).slice(0, 2);
+          if (picks.length < 2 || count(picks[0]) + count(picks[1]) >= all) return 'no-sample';
+          const before = total();
+          for (const b of picks) b.click();
+          await until(() => total() < before, 3000);
+          const mixed = total();
+          const seg = document.querySelector('[data-testid=logs-level-seg]');
+          const lit = seg?.querySelector('.el-segmented__item.is-selected')?.textContent?.trim() ?? '';
+          const allItem = [...(seg?.querySelectorAll('.el-segmented__item') ?? [])]
+            .find((i) => (i.textContent ?? '').trim() === '全部');
+          if (!allItem) return 'no-all-item';
+          allItem.click();
+          await until(() => total() === before, 3000);
+          const back = total();
+          const pressed = document.querySelectorAll('.lv__btn[aria-pressed="true"]').length;
+          const ok = mixed < before && lit === '' && back === before && pressed === 0;
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 内容高 ' + before + '→' + mixed + '→' + back +
+            (lit ? '（多选时分段亮着「' + lit + '」）' : '') + (pressed ? '（点「全部」后仍有 ' + pressed + ' 档勾着）' : '');
+        })()`,
+      },
     ],
   },
   "/password": {
