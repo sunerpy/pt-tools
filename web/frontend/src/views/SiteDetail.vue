@@ -947,7 +947,10 @@ function ruleNameOf(id: number): string {
           <ul v-if="sitePushed.length > 0" class="sd-list">
             <li v-for="t in sitePushed.slice(0, 6)" :key="t.id" class="sd-list__row">
               <span class="sd-list__t">{{ t.title }}</span>
-              <span class="sd-list__m">{{ t.createdAt?.slice(0, 16).replace("T", " ") }}</span>
+              <!-- 这张卡叫「最近推送」，时间就该是推送时间；之前显示的是任务的创建时间 -->
+              <span class="sd-list__m">
+                {{ (t.pushTime || t.createdAt)?.slice(0, 16).replace("T", " ") }}
+              </span>
             </li>
           </ul>
           <p v-else class="sd-empty">这个站点还没有推送成功的任务。</p>

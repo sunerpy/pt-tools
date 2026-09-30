@@ -1117,7 +1117,7 @@ function exportCsv() {
       t.downloader_name,
       t.title,
       t.state,
-      `${Math.round((t.progress ?? 0) * 100)}%`,
+      `${Math.round(t.progress ?? 0)}%`, // 接口已换算成 0–100（api_downloader_torrents.go），别再乘 100
       formatSize(t.size ?? 0),
       `${formatSize(t.upload_speed ?? 0)}/s`,
       `${formatSize(t.download_speed ?? 0)}/s`,

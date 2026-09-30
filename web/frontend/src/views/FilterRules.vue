@@ -130,7 +130,7 @@ function exportCsv() {
   const lines = [head.join(",")];
   for (const r of visibleRules.value) {
     const size =
-      r.min_size_gb || r.max_size_gb ? `${r.min_size_gb ?? 0}–${r.max_size_gb ?? "∞"} GB` : "不限";
+      r.min_size_gb || r.max_size_gb ? `${r.min_size_gb ?? 0}–${r.max_size_gb || "∞"} GB` : "不限"; // 上限 0 = 不限
     const cells = [
       r.name,
       r.pattern,
@@ -299,6 +299,23 @@ const testForm = ref({
   test_is_free: null as boolean | null,
   global_size: 0,
   filter_mode: "auto_free" as "auto_free" | "filter_only" | "free_only",
+});
+
+/*
+ * 「模拟免费状态」三选一。Element Plus 2.14 的 el-radio 把 :value="null" 当成没传值（isPropAbsent），
+ * 实际值落成 undefined，和模型里的 null 永远不相等 —— 打开试跑时三个选项一个都不亮。
+ * 所以单选用字符串哨兵，这里映射回 test_is_free 的 null / true / false。
+ */
+const testFreeChoice = computed({
+  get: () =>
+    testForm.value.test_is_free === null
+      ? "real"
+      : testForm.value.test_is_free
+        ? "free"
+        : "nonfree",
+  set: (v: string) => {
+    testForm.value.test_is_free = v === "real" ? null : v === "free";
+  },
 });
 
 const filterModeOptions = [
@@ -1042,10 +1059,10 @@ function decisionText(decision: string | undefined): string {
         </div>
 
         <el-form-item label="模拟免费状态">
-          <el-radio-group v-model="testForm.test_is_free">
-            <el-radio :value="null">用真实值</el-radio>
-            <el-radio :value="true">免费</el-radio>
-            <el-radio :value="false">非免费</el-radio>
+          <el-radio-group v-model="testFreeChoice">
+            <el-radio value="real">用真实值</el-radio>
+            <el-radio value="free">免费</el-radio>
+            <el-radio value="nonfree">非免费</el-radio>
           </el-radio-group>
         </el-form-item>
 
