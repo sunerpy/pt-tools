@@ -127,7 +127,15 @@ const isDetail = computed(() => typeof route.name === "string" && DETAIL_ROUTES.
  * 那是页面自己的控件，不是外壳的标题栏，所以页头交给页面画。
  */
 const OWN_TOP_ROUTES = new Set(["userinfo", "search"]);
-const hasHead = computed(() => !(typeof route.name === "string" && OWN_TOP_ROUTES.has(route.name)));
+/*
+ * 首次导航完成之前 route.matched 是空的、route.name 是 undefined —— 之前那一刻 hasHead 判成 true，
+ * 冷启动打开 /userinfo 或 /search 时先画出一条 64px 的「pt-tools」页头，懒加载的页面到了再消失，
+ * 内容整体往上跳 64。路由还没解析出来时先不画页头。
+ */
+const hasHead = computed(
+  () =>
+    route.matched.length > 0 && !(typeof route.name === "string" && OWN_TOP_ROUTES.has(route.name)),
+);
 
 /*
  * 沉浸模式（整屏让给页面、藏掉 rail / 导航列 / 页头 / 状态条）目前没有页面在用。
