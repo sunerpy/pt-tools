@@ -16,6 +16,7 @@ import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue"
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtKpiBar from "@/components/ui/PtKpiBar.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtResizeHandle from "@/components/ui/PtResizeHandle.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { type ReminderTier, useLoginState } from "@/composables/useLoginState";
@@ -35,7 +36,8 @@ import {
 import { ElMessage, type TableInstance } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useResizableHeight } from "@/composables/useResizableHeight";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 /* 「更多」菜单里那两项要跳路由 */
 const router = useRouter();
@@ -379,6 +381,68 @@ const SORT_ORDER: Record<RowSortKey, "ascending" | "descending"> = {
   site: "ascending",
 };
 const siteTable = ref<TableInstance>();
+
+/*
+ * 站点表的高度（用户原话「站点区域面板尺寸偏小，需要扩大；支持下拉 / 上拉拖拽方式动态调整面板高度」）。
+ * 默认自适应：内容少就贴合内容，多了就正好填满首屏剩下的高度（表头吸顶、表体内部滚动）——
+ * 1080 高的屏上约 20 行；不按固定比例算，是为了在矮屏上不出现「表体的滚动区伸到首屏外」的套娃滚动。
+ * 拖过把手就用用户定的高度，存在本地，双击把手（或 Enter）恢复。
+ *
+ * 只用 max-height，不在 height / max-height 之间切换：Element 的 setHeight 收到 undefined 时什么也不做，
+ * 不会清掉上一次写在表格根节点上的内联样式 —— 实测从自适应切到手动后，残留的 max-height: 883px
+ * 把用户拖到的 1083 封死了。始终传数字，每次都会覆盖。手动高度因此是「最多这么高」：行少时贴合内容。
+ */
+const viewportH = ref(window.innerHeight);
+/** 内容滚动区的可视高度，与表格在滚动区里的纵向位置（不随滚动变） */
+const scrollerH = ref(window.innerHeight);
+const siteTableTop = ref(0);
+function measureSiteTableTop() {
+  const el = siteTable.value?.$el as HTMLElement | undefined;
+  const scroller = el?.closest(".pt-shell__content");
+  if (!el || !scroller) return;
+  scrollerH.value = scroller.clientHeight;
+  siteTableTop.value =
+    el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+}
+/* 首屏里表格下面还要放：把手 14 + 页脚带 34 + 余量 16 */
+const siteTableAutoMax = computed(() =>
+  Math.max(320, Math.round(scrollerH.value - siteTableTop.value - 14 - 34 - 16)),
+);
+const siteTableBounds = () => ({ min: 200, max: Math.max(900, Math.round(viewportH.value * 1.5)) });
+const {
+  manual: siteTableManual,
+  set: setSiteTableHeight,
+  reset: resetSiteTableHeight,
+} = useResizableHeight("pt-userinfo-sites-height-v1", siteTableBounds);
+/** 表格此刻的实际高度：把手从这里开始算拖了多少 */
+const siteTableHeight = ref(0);
+let siteTableObserver: ResizeObserver | null = null;
+watch(
+  () => siteTable.value?.$el as HTMLElement | undefined,
+  (el) => {
+    siteTableObserver?.disconnect();
+    if (!el || typeof ResizeObserver === "undefined") return;
+    siteTableObserver = new ResizeObserver(() => {
+      siteTableHeight.value = el.offsetHeight;
+      measureSiteTableTop();
+    });
+    siteTableObserver.observe(el);
+    siteTableHeight.value = el.offsetHeight;
+    measureSiteTableTop();
+  },
+);
+/* 乐观更新：先把把手读到的高度改成新值，ResizeObserver 之后按实际渲染校正（见 PtResizeHandle 的注释） */
+function onSiteTableResize(h: number) {
+  setSiteTableHeight(h, false);
+  siteTableHeight.value = h;
+}
+
+function onViewportResize() {
+  viewportH.value = window.innerHeight;
+  measureSiteTableTop();
+}
+/* 扩展提示关掉后表格上移，首屏剩下的高度跟着变 */
+watch(extHintOpen, () => void nextTick(measureSiteTableTop));
 watch(rowSort, (key) => siteTable.value?.sort(key, SORT_ORDER[key]));
 
 function onTableSortChange({ prop, order }: { prop: string; order: string | null }) {
@@ -794,6 +858,7 @@ function hasHnR(row: any): boolean {
 }
 
 onMounted(() => {
+  window.addEventListener("resize", onViewportResize);
   loadData();
   // 预加载所有站点的等级信息
   siteLevelsStore.loadAll();
@@ -804,6 +869,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopAutoRefresh();
+  window.removeEventListener("resize", onViewportResize);
+  siteTableObserver?.disconnect();
 });
 </script>
 
@@ -973,338 +1040,351 @@ onUnmounted(() => {
         实测右边那六列（积分 / 时魔 / 入站 / 判定活跃 / 剩余天数 / 更新）看不出还有内容 ——
         「能滚」和「看得出能滚」是两件事。
       -->
-      <el-table
-        v-if="!isMobile"
-        ref="siteTable"
-        class="pt-grid"
-        :data="siteRows"
-        scrollbar-always-on
-        style="width: 100%"
-        :default-sort="{ prop: rowSort, order: SORT_ORDER[rowSort] }"
-        highlight-current-row
-        @sort-change="onTableSortChange">
-        <!-- 站点列：带消息徽章和悬停效果 -->
-        <el-table-column
-          prop="site"
-          label="站点"
-          min-width="160"
-          sortable
-          fixed="left"
-          class-name="pt-cell-overflow">
-          <template #default="{ row }">
-            <div class="site">
-              <el-badge
-                :value="row.unreadMessageCount"
-                :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
-                :max="99"
-                type="danger">
-                <button
-                  type="button"
-                  class="site__av"
-                  :aria-label="`同步 ${row.site}`"
-                  @click.stop="syncSite(row.site)">
-                  <SiteAvatar :site-name="row.site" :site-id="row.site" :size="20" />
-                  <PtIcon
-                    v-if="syncingSite === row.site"
-                    name="loader-circle"
-                    :size="14"
-                    class="site__spin" />
-                </button>
-              </el-badge>
-              <!--
+      <template v-if="!isMobile">
+        <el-table
+          ref="siteTable"
+          class="pt-grid"
+          :data="siteRows"
+          :max-height="siteTableManual ?? siteTableAutoMax"
+          scrollbar-always-on
+          style="width: 100%"
+          :default-sort="{ prop: rowSort, order: SORT_ORDER[rowSort] }"
+          highlight-current-row
+          @sort-change="onTableSortChange">
+          <!-- 站点列：带消息徽章和悬停效果 -->
+          <el-table-column
+            prop="site"
+            label="站点"
+            min-width="160"
+            sortable
+            fixed="left"
+            class-name="pt-cell-overflow">
+            <template #default="{ row }">
+              <div class="site">
+                <el-badge
+                  :value="row.unreadMessageCount"
+                  :hidden="!row.unreadMessageCount || row.unreadMessageCount === 0"
+                  :max="99"
+                  type="danger">
+                  <button
+                    type="button"
+                    class="site__av"
+                    :aria-label="`同步 ${row.site}`"
+                    @click.stop="syncSite(row.site)">
+                    <SiteAvatar :site-name="row.site" :site-id="row.site" :size="20" />
+                    <PtIcon
+                      v-if="syncingSite === row.site"
+                      name="loader-circle"
+                      :size="14"
+                      class="site__spin" />
+                  </button>
+                </el-badge>
+                <!--
                 画板这一列是纯文本单行。用户名不丢：挂在 title 上，鼠标停住就能看到 ——
                 34 的行盒放不下第二行，而等级、积分这些本来就各有自己的列。
               -->
-              <span
-                class="site__name"
-                :title="row.username ? `${row.site} · ${row.username}` : row.site">
-                {{ row.site }}
-              </span>
-            </div>
-          </template>
-        </el-table-column>
+                <span
+                  class="site__name"
+                  :title="row.username ? `${row.site} · ${row.username}` : row.site">
+                  {{ row.site }}
+                </span>
+              </div>
+            </template>
+          </el-table-column>
 
-        <!-- 等级列 -->
-        <!--
+          <!-- 等级列 -->
+          <!--
           画板这一列是纯文本 78 宽；落地是胶囊（带边框与内距），最长的等级名
           「Extreme User」在 124 里会被裁成「Extreme User ..」，所以放到 140。
         -->
-        <el-table-column prop="rank" label="等级" min-width="140" align="center">
-          <template #default="{ row }">
-            <LevelTooltip
-              :site-id="row.site"
-              :current-level-name="row.levelName || row.rank || '-'"
-              :current-level-id="row.levelId" />
-          </template>
-        </el-table-column>
+          <el-table-column prop="rank" label="等级" min-width="140" align="center">
+            <template #default="{ row }">
+              <LevelTooltip
+                :site-id="row.site"
+                :current-level-name="row.levelName || row.rank || '-'"
+                :current-level-id="row.levelId" />
+            </template>
+          </el-table-column>
 
-        <!-- 上传/下载量：双行布局带图标 -->
-        <el-table-column
-          prop="uploaded"
-          label="数据量"
-          min-width="170"
-          sortable
-          align="right"
-          class-name="pt-cell-num">
-          <template #default="{ row }">
-            <!--
+          <!-- 上传/下载量：双行布局带图标 -->
+          <el-table-column
+            prop="uploaded"
+            label="数据量"
+            min-width="170"
+            sortable
+            align="right"
+            class-name="pt-cell-num">
+            <template #default="{ row }">
+              <!--
               画板 td-*-2 的形状是一行「↑38.4 TB ↓4.2 TB」，箭头是**字符**不是图标 ——
               收成单行之后 12px 的图标加上两个数就撑不住 170，数字会折行成「52.1 / TB」。
             -->
-            <div class="io">
-              <span class="io__r is-up">↑{{ formatBytes(row.uploaded) }}</span>
-              <span class="io__r is-dn">↓{{ formatBytes(row.downloaded) }}</span>
-            </div>
-          </template>
-        </el-table-column>
+              <div class="io">
+                <span class="io__r is-up">↑{{ formatBytes(row.uploaded) }}</span>
+                <span class="io__r is-dn">↓{{ formatBytes(row.downloaded) }}</span>
+              </div>
+            </template>
+          </el-table-column>
 
-        <!-- 真实数据（如果不同） -->
-        <el-table-column
-          v-if="colShown('trueData')"
-          prop="trueUploaded"
-          label="真实数据"
-          min-width="170"
-          sortable
-          align="right"
-          class-name="pt-cell-num">
-          <template #default="{ row }">
-            <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="io">
-              <span class="io__r is-up">↑{{ formatBytes(row.trueUploaded) }}</span>
-              <span class="io__r is-dn">↓{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
-            </div>
-            <span v-else class="nil">-</span>
-          </template>
-        </el-table-column>
+          <!-- 真实数据（如果不同） -->
+          <el-table-column
+            v-if="colShown('trueData')"
+            prop="trueUploaded"
+            label="真实数据"
+            min-width="170"
+            sortable
+            align="right"
+            class-name="pt-cell-num">
+            <template #default="{ row }">
+              <div v-if="row.trueUploaded && row.trueUploaded !== row.uploaded" class="io">
+                <span class="io__r is-up">↑{{ formatBytes(row.trueUploaded) }}</span>
+                <span class="io__r is-dn">↓{{ formatBytes(row.trueDownloaded ?? 0) }}</span>
+              </div>
+              <span v-else class="nil">-</span>
+            </template>
+          </el-table-column>
 
-        <!-- 分享率 -->
-        <!--
+          <!-- 分享率 -->
+          <!--
           画板 10 的分享率单元是**纯文本** 13/400（td-0-3「9.14」），不是胶囊。
           十四列的表里每格都套一个胶囊，读起来是一片色块而不是一列数字 ——
           所以去掉壳、留下语义色：分享率低到危险时仍然靠字色示警，只是不再画框。
         -->
-        <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
-          <template #default="{ row }">
-            <span class="num-tone" :class="`is-${ratioTone(row.ratio)}`">
-              {{ formatRatio(row.ratio) }}
-            </span>
-          </template>
-        </el-table-column>
+          <el-table-column prop="ratio" label="分享率" min-width="90" sortable align="center">
+            <template #default="{ row }">
+              <span class="num-tone" :class="`is-${ratioTone(row.ratio)}`">
+                {{ formatRatio(row.ratio) }}
+              </span>
+            </template>
+          </el-table-column>
 
-        <!-- 做种数 + H&R -->
-        <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
-          <template #default="{ row }">
-            <div class="seed">
-              <!-- 画板 td-0-4「286」是纯文本；做种数本身不是状态，不需要胶囊 -->
-              <span class="num-tone">{{ row.seeding }}</span>
-              <div v-if="hasHnR(row)" class="hnr">
-                <el-tooltip
-                  v-if="row.hnrPreWarning > 0"
-                  :content="`H&R 预警: ${row.hnrPreWarning}`">
-                  <span class="hnr__i is-warn">
-                    <PtIcon name="triangle-alert" :size="12" />{{ row.hnrPreWarning }}
-                  </span>
-                </el-tooltip>
-                <el-tooltip
-                  v-if="row.hnrUnsatisfied > 0"
-                  :content="`H&R 未满足: ${row.hnrUnsatisfied}`">
-                  <span class="hnr__i is-dang">
-                    <PtIcon name="circle-x" :size="12" />{{ row.hnrUnsatisfied }}
-                  </span>
-                </el-tooltip>
+          <!-- 做种数 + H&R -->
+          <el-table-column prop="seeding" label="做种" min-width="110" sortable align="center">
+            <template #default="{ row }">
+              <div class="seed">
+                <!-- 画板 td-0-4「286」是纯文本；做种数本身不是状态，不需要胶囊 -->
+                <span class="num-tone">{{ row.seeding }}</span>
+                <div v-if="hasHnR(row)" class="hnr">
+                  <el-tooltip
+                    v-if="row.hnrPreWarning > 0"
+                    :content="`H&R 预警: ${row.hnrPreWarning}`">
+                    <span class="hnr__i is-warn">
+                      <PtIcon name="triangle-alert" :size="12" />{{ row.hnrPreWarning }}
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip
+                    v-if="row.hnrUnsatisfied > 0"
+                    :content="`H&R 未满足: ${row.hnrUnsatisfied}`">
+                    <span class="hnr__i is-dang">
+                      <PtIcon name="circle-x" :size="12" />{{ row.hnrUnsatisfied }}
+                    </span>
+                  </el-tooltip>
+                </div>
               </div>
-            </div>
-          </template>
-        </el-table-column>
+            </template>
+          </el-table-column>
 
-        <!-- 做种体积 -->
-        <el-table-column
-          v-if="colShown('seedSize')"
-          prop="seederSize"
-          label="做种体积"
-          min-width="110"
-          sortable
-          align="right"
-          class-name="pt-cell-num">
-          <template #default="{ row }">
-            <span class="is-ok">{{ formatBytes(row.seederSize ?? 0) }}</span>
-          </template>
-        </el-table-column>
+          <!-- 做种体积 -->
+          <el-table-column
+            v-if="colShown('seedSize')"
+            prop="seederSize"
+            label="做种体积"
+            min-width="110"
+            sortable
+            align="right"
+            class-name="pt-cell-num">
+            <template #default="{ row }">
+              <span class="is-ok">{{ formatBytes(row.seederSize ?? 0) }}</span>
+            </template>
+          </el-table-column>
 
-        <!-- 魔力值 + 做种积分 -->
-        <el-table-column
-          v-if="colShown('bonus')"
-          prop="bonus"
-          label="积分"
-          min-width="140"
-          sortable
-          align="right"
-          class-name="pt-cell-num">
-          <template #default="{ row }">
-            <!--
+          <!-- 魔力值 + 做种积分 -->
+          <el-table-column
+            v-if="colShown('bonus')"
+            prop="bonus"
+            label="积分"
+            min-width="140"
+            sortable
+            align="right"
+            class-name="pt-cell-num">
+            <template #default="{ row }">
+              <!--
               画板 td-*-6 只有一个数字（1,284,900）。各站的积分叫法与做种积分两个数都还在，
               但挪进 title —— 塞在 34 的行里会把数字挤掉（实测「204.31万 魔」被裁）。
             -->
-            <span class="bonus" :title="bonusTitleOf(row)">
-              {{ formatNumber(row.bonus ?? 0) }}
-            </span>
-          </template>
-        </el-table-column>
+              <span class="bonus" :title="bonusTitleOf(row)">
+                {{ formatNumber(row.bonus ?? 0) }}
+              </span>
+            </template>
+          </el-table-column>
 
-        <!-- 时魔 -->
-        <el-table-column
-          v-if="colShown('bph')"
-          prop="bonusPerHour"
-          label="时魔/h"
-          min-width="100"
-          sortable
-          align="right"
-          class-name="pt-cell-num">
-          <template #default="{ row }">
-            <span class="is-warn">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
-          </template>
-        </el-table-column>
+          <!-- 时魔 -->
+          <el-table-column
+            v-if="colShown('bph')"
+            prop="bonusPerHour"
+            label="时魔/h"
+            min-width="100"
+            sortable
+            align="right"
+            class-name="pt-cell-num">
+            <template #default="{ row }">
+              <span class="is-warn">{{ formatNumber(row.bonusPerHour ?? 0) }}</span>
+            </template>
+          </el-table-column>
 
-        <!-- 注册时间 -->
-        <el-table-column
-          v-if="colShown('inbound')"
-          prop="joinDate"
-          label="入站"
-          min-width="110"
-          sortable
-          align="center"
-          class-name="pt-cell-muted">
-          <template #default="{ row }">
-            <el-tooltip v-if="row.joinDate" :content="formatDate(row.joinDate)" placement="top">
-              <span class="ts">{{ formatJoinDuration(row.joinDate) }}</span>
-            </el-tooltip>
-            <span v-else class="nil">-</span>
-          </template>
-        </el-table-column>
+          <!-- 注册时间 -->
+          <el-table-column
+            v-if="colShown('inbound')"
+            prop="joinDate"
+            label="入站"
+            min-width="110"
+            sortable
+            align="center"
+            class-name="pt-cell-muted">
+            <template #default="{ row }">
+              <el-tooltip v-if="row.joinDate" :content="formatDate(row.joinDate)" placement="top">
+                <span class="ts">{{ formatJoinDuration(row.joinDate) }}</span>
+              </el-tooltip>
+              <span v-else class="nil">-</span>
+            </template>
+          </el-table-column>
 
-        <!--
+          <!--
           判定活跃：口径说明挂在**列头**上，不再占页面顶部一整条。
           原来那条常驻黄色提示有三行、约 90px，每次打开这一页都得先读它 ——
           而画板的页面板上没有任何常驻横幅，画板 45 给这类说明的形态正是列上的 popover
           （那张板上「落地要点 · LevelTooltip」就是同一个套路）。说明一个字没删。
         -->
-        <el-table-column
-          v-if="colShown('active')"
-          min-width="110"
-          align="center"
-          class-name="pt-cell-muted">
-          <template #header>
-            <el-popover placement="top" :width="330" trigger="hover">
-              <template #reference>
-                <span class="th-help th-help--warn">
-                  判定活跃
-                  <PtIcon name="triangle-alert" :size="12" />
-                </span>
-              </template>
-              <p class="th-help__p">
-                活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；
-                但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，
-                请勿仅依赖此处数据。
-              </p>
-            </el-popover>
-          </template>
-          <template #default="{ row }">
-            <span class="ts">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
-          </template>
-        </el-table-column>
+          <el-table-column
+            v-if="colShown('active')"
+            min-width="110"
+            align="center"
+            class-name="pt-cell-muted">
+            <template #header>
+              <el-popover placement="top" :width="330" trigger="hover">
+                <template #reference>
+                  <span class="th-help th-help--warn">
+                    判定活跃
+                    <PtIcon name="triangle-alert" :size="12" />
+                  </span>
+                </template>
+                <p class="th-help__p">
+                  活跃时间通过 cookie/API 探测获取，可刷新多数站点的 last_access（最近动向）以保号；
+                  但少数站点按 last_login（实际登录）或做种活跃度清理，此类站点仍需定期手动登录，
+                  请勿仅依赖此处数据。
+                </p>
+              </el-popover>
+            </template>
+            <template #default="{ row }">
+              <span class="ts">{{ formatTimeAgo(effectiveLastActive(row.site)) }}</span>
+            </template>
+          </el-table-column>
 
-        <!-- 封禁提醒 -->
-        <el-table-column v-if="colShown('days')" min-width="120" align="center">
-          <template #header>
-            <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
-              <span class="th-help">剩余天数</span>
-            </el-tooltip>
-          </template>
-          <template #default="{ row }">
-            <div class="days">
-              <span class="days__v">
-                {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
-              </span>
-              <PtStatusPill :tone="tierTone(row.site)" size="sm">
-                {{ tierLabel(reminderTier(row.site)) }}
-              </PtStatusPill>
-            </div>
-          </template>
-        </el-table-column>
-
-        <!-- 更新时间 -->
-        <el-table-column
-          v-if="colShown('updated')"
-          prop="lastUpdate"
-          label="更新"
-          min-width="100"
-          sortable
-          align="center"
-          class-name="pt-cell-muted">
-          <template #default="{ row }">
-            <el-tooltip :content="formatTime(row.lastUpdate)" placement="top">
-              <span class="ts">{{ formatTimeAgo(row.lastUpdate) }}</span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-
-        <!-- 操作列 -->
-        <el-table-column
-          label="操作"
-          width="150"
-          align="center"
-          fixed="right"
-          class-name="pt-cell-act">
-          <template #default="{ row }">
-            <div class="acts">
-              <el-tooltip
-                content="未配置站点地址"
-                placement="top"
-                :disabled="!!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)">
-                <span>
-                  <el-button
-                    link
-                    type="primary"
-                    :disabled="
-                      !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
-                    "
-                    :data-testid="`userinfo-open-site-${row.site}`"
-                    @click="openSite(row.site)">
-                    <PtIcon name="external-link" :size="14" /><span>打开</span>
-                  </el-button>
-                </span>
+          <!-- 封禁提醒 -->
+          <el-table-column v-if="colShown('days')" min-width="120" align="center">
+            <template #header>
+              <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
+                <span class="th-help">剩余天数</span>
               </el-tooltip>
-              <el-button
-                link
-                type="primary"
-                :loading="syncingSite === row.site"
-                @click="syncSite(row.site)">
-                <PtIcon v-if="syncingSite !== row.site" name="refresh-cw" :size="14" />
-                <span>同步</span>
-              </el-button>
-            </div>
+            </template>
+            <template #default="{ row }">
+              <div class="days">
+                <span class="days__v">
+                  {{ daysRemaining(row.site) === null ? "—" : `${daysRemaining(row.site)} 天` }}
+                </span>
+                <PtStatusPill :tone="tierTone(row.site)" size="sm">
+                  {{ tierLabel(reminderTier(row.site)) }}
+                </PtStatusPill>
+              </div>
+            </template>
+          </el-table-column>
+
+          <!-- 更新时间 -->
+          <el-table-column
+            v-if="colShown('updated')"
+            prop="lastUpdate"
+            label="更新"
+            min-width="100"
+            sortable
+            align="center"
+            class-name="pt-cell-muted">
+            <template #default="{ row }">
+              <el-tooltip :content="formatTime(row.lastUpdate)" placement="top">
+                <span class="ts">{{ formatTimeAgo(row.lastUpdate) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+
+          <!-- 操作列 -->
+          <el-table-column
+            label="操作"
+            width="150"
+            align="center"
+            fixed="right"
+            class-name="pt-cell-act">
+            <template #default="{ row }">
+              <div class="acts">
+                <el-tooltip
+                  content="未配置站点地址"
+                  placement="top"
+                  :disabled="
+                    !!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)
+                  ">
+                  <span>
+                    <el-button
+                      link
+                      type="primary"
+                      :disabled="
+                        !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
+                      "
+                      :data-testid="`userinfo-open-site-${row.site}`"
+                      @click="openSite(row.site)">
+                      <PtIcon name="external-link" :size="14" /><span>打开</span>
+                    </el-button>
+                  </span>
+                </el-tooltip>
+                <el-button
+                  link
+                  type="primary"
+                  :loading="syncingSite === row.site"
+                  @click="syncSite(row.site)">
+                  <PtIcon v-if="syncingSite !== row.site" name="refresh-cw" :size="14" />
+                  <span>同步</span>
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <PtDataState :state="state" :sub="stateSub">
+              <template v-if="state === 'error'" #action>
+                <el-button size="small" @click="loadData">
+                  <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+                </el-button>
+              </template>
+              <template v-else-if="state === 'zero'" #action>
+                <el-button size="small" @click="clearSiteFilters">
+                  <PtIcon name="x" :size="14" /><span>清空筛选</span>
+                </el-button>
+              </template>
+              <template v-else-if="state === 'empty'" #action>
+                <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
+                  <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
+                  <span>同步全部</span>
+                </el-button>
+              </template>
+            </PtDataState>
           </template>
-        </el-table-column>
-        <template #empty>
-          <PtDataState :state="state" :sub="stateSub">
-            <template v-if="state === 'error'" #action>
-              <el-button size="small" @click="loadData">
-                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
-              </el-button>
-            </template>
-            <template v-else-if="state === 'zero'" #action>
-              <el-button size="small" @click="clearSiteFilters">
-                <PtIcon name="x" :size="14" /><span>清空筛选</span>
-              </el-button>
-            </template>
-            <template v-else-if="state === 'empty'" #action>
-              <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
-                <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
-                <span>同步全部</span>
-              </el-button>
-            </template>
-          </PtDataState>
-        </template>
-      </el-table>
+        </el-table>
+        <PtResizeHandle
+          v-if="siteRows.length > 0"
+          :height="siteTableHeight"
+          :min="siteTableBounds().min"
+          :max="siteTableBounds().max"
+          label="站点表高度"
+          @resize="onSiteTableResize"
+          @commit="(h) => setSiteTableHeight(h)"
+          @reset="resetSiteTableHeight" />
+      </template>
 
       <!--
         移动端卡片视图：13 列的表格在手机上横向滚动没法用，所以 <768px 换成一站一卡。

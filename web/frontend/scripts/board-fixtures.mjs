@@ -841,6 +841,19 @@ export function stubScript() {
             const qs = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
             out = JSON.stringify(fn(JSON.parse(body), new URLSearchParams(qs)));
           }
+          /*
+           * 验收用的「站点很多」模式：localStorage 设了 pt-fixture-many-sites 就把聚合接口的站点扩到 40 个
+           * （复制的那些名字后面带 -2 / -3 …）。站点表的自适应封顶与拖拽调高只有行数多到溢出时才看得出来。
+           */
+          if (path === '/api/v2/userinfo/aggregated' && localStorage.getItem('pt-fixture-many-sites') === '1') {
+            const agg = JSON.parse(out);
+            const base = agg.perSiteStats;
+            agg.perSiteStats = Array.from({ length: 40 }, (_, i) => {
+              const row = base[i % base.length];
+              return i < base.length ? row : { ...row, site: row.site + '-' + (Math.floor(i / base.length) + 1), unreadMessageCount: 0 };
+            });
+            out = JSON.stringify(agg);
+          }
           return Promise.resolve(new Response(out, {
             status: 200, headers: { 'Content-Type': 'application/json' },
           }));

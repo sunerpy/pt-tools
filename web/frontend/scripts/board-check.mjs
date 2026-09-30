@@ -124,6 +124,37 @@ const EXPECT = {
       },
       {
         /*
+         * 站点表把手（用户原话「支持下拉 / 上拉拖拽方式动态调整面板高度」）。页面 JS 合成的指针事件没有活动指针，
+         * 这里走键盘：↑ 一步变矮 24，Enter 回到自适应（高度回到原值、localStorage 里的记录清掉）。
+         */
+        desc: "站点表把手：键盘 ↑ 变矮一步，Enter 恢复自适应",
+        want: "verdict=ok",
+        js: `(async () => {
+          const until = async (fn, ms) => {
+            const t0 = performance.now();
+            while (performance.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); }
+            return fn();
+          };
+          const table = document.querySelector('.dash .pt-grid');
+          const handle = document.querySelector('[data-testid=pt-resize-handle]');
+          if (!table || !handle) return 'no-handle';
+          localStorage.removeItem('pt-userinfo-sites-height-v1');
+          const h0 = table.offsetHeight;
+          handle.focus();
+          handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+          await until(() => table.offsetHeight !== h0, 2000);
+          const h1 = table.offsetHeight;
+          const stored = localStorage.getItem('pt-userinfo-sites-height-v1');
+          handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          await until(() => table.offsetHeight === h0, 2000);
+          const h2 = table.offsetHeight;
+          const cleared = localStorage.getItem('pt-userinfo-sites-height-v1') === null;
+          const ok = h0 - h1 === 24 && stored === String(h1) && h2 === h0 && cleared && handle.getAttribute('role') === 'separator';
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 高度 ' + h0 + '→' + h1 + '→' + h2 + '，存 ' + stored + '，清掉 ' + cleared;
+        })()`,
+      },
+      {
+        /*
          * el-popover 自己不响应 Esc；App 的 Esc 先收「偏好与账户」浮层。窄屏抽屉里之前是反过来的：
          * Esc 收掉抽屉、浮层悬在原处。这里在钉住的导航列上验「Esc 收浮层」这条接线。
          */
