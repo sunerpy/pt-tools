@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { DownloaderTorrentItem } from "@/api";
+import { formatShortDateTime } from "@/utils/format";
 import { computed, ref, watch } from "vue";
 
 type RowAction =
@@ -147,10 +148,11 @@ function cellValue(row: DownloaderTorrentItem, key: string): string {
       return `${formatSize(row.upload_speed)}/s`;
     case "download_speed":
       return `${formatSize(row.download_speed)}/s`;
+    /* 紧凑格式单行（toLocaleString 的 19 个字符在 170 宽里放大字号就折行），完整时间在格子的 title */
     case "added_at":
-      return formatDate(row.added_at);
+      return formatShortDateTime(row.added_at * 1000);
     case "completed_at":
-      return formatDate(row.completed_at);
+      return formatShortDateTime(row.completed_at * 1000);
     case "ratio":
       return formatRatio(row.ratio);
     case "state":
@@ -295,7 +297,12 @@ watch(
         :class="[
           `align-${column.align || 'left'}`,
           column.key === 'status_bar' ? rowStateClass(row) : '',
-        ]">
+        ]"
+        :title="
+          column.key === 'added_at' || column.key === 'completed_at'
+            ? formatDate(row[column.key])
+            : undefined
+        ">
         <template v-if="column.key === 'status_bar'">
           <div class="status-bar" :class="rowStateClass(row)" />
         </template>

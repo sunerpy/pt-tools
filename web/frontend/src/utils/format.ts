@@ -61,6 +61,25 @@ export function formatDate(timestamp: number): string {
 }
 
 /**
+ * 表格单元格用的紧凑时间：当年显示「09-30 20:00」，跨年才带年份「2025-09-30 20:00」。
+ *
+ * 表格里原来用 toLocaleString("zh-CN") 的「2026/9/30 20:00:00」—— 19 个字符在 150 宽的列里正好压线，
+ * 一放大字号就折成两行，带时间的那几行比别的行高一截（任务列表的「免费结束」）。完整时间放进 title。
+ * 接受 ISO 字符串、毫秒时间戳或 Date；零值 / 解析不了返回「-」。
+ */
+export function formatShortDateTime(
+  input: string | number | Date | null | undefined,
+  now = new Date(),
+): string {
+  if (input == null || input === "" || input === 0 || input === "0001-01-01T00:00:00Z") return "-";
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return "-";
+  const p = (n: number) => String(n).padStart(2, "0");
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}-${md}`;
+}
+
+/**
  * 格式化 Unix 时间戳为相对时间描述
  * @param timestamp Unix 时间戳（秒）
  * @returns 相对时间描述，如 "5分钟前", "2小时前", "3天前"

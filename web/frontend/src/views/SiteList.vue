@@ -1198,8 +1198,8 @@ async function saveLoginConfig() {
         <el-table-column
           v-if="colShown('auth')"
           label="认证"
-          width="118"
-          class-name="pt-cell-muted">
+          width="136"
+          class-name="pt-cell-muted pt-cell-1line">
           <template #default="{ row }">
             {{ authMethodLabel(row[1].auth_method) }}
           </template>
@@ -1234,7 +1234,7 @@ async function saveLoginConfig() {
           </template>
         </el-table-column>
 
-        <el-table-column v-if="colShown('days')" min-width="118">
+        <el-table-column v-if="colShown('days')" min-width="150">
           <!--
             列头的 popover 里连带说清「活跃时间是怎么来的」——
             这段话原来是页面顶上一条常驻黄条（约 60px），而画板 12 的板上没有任何常驻通告，
@@ -2043,11 +2043,16 @@ async function saveLoginConfig() {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * 天数与档位胶囊一行排开。之前是上下叠（flex-direction: column），带胶囊的那几行比其他行高一截，
+ * 整张表的行高参差不齐；列宽 118 → 150 正好放下「30 天」+「即将封禁」。
+ */
 .days {
   display: inline-flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: var(--pt-space-2);
+  align-items: center;
+  white-space: nowrap;
 }
 
 .days-remaining-value {

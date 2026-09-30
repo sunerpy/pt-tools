@@ -489,7 +489,11 @@ onBeforeUnmount(() => {
           </template>
         </el-table-column>
 
-        <el-table-column prop="created_at" label="时间" width="170" class-name="pt-cell-muted">
+        <el-table-column
+          prop="created_at"
+          label="时间"
+          width="186"
+          class-name="pt-cell-muted pt-cell-1line">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
 

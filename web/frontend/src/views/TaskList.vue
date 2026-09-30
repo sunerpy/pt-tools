@@ -12,6 +12,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
@@ -673,7 +674,11 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column label="标题" min-width="280" class-name="pt-cell-strong">
+        <!--
+          1376 下列宽合计原来 1184 > 表宽 1102，横滚 82：标题最小宽度 280 → 240，
+          三列时间 150 → 124（换成「09-30 20:00」紧凑格式之后 150 是按旧的长格式留的），合计 1092。
+        -->
+        <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
           <template #default="{ row }">
             <div class="title-cell">
               <span class="title-text">{{ row.title || "-" }}</span>
@@ -720,10 +725,13 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column v-if="taskColShown('freeEnd')" label="免费结束" width="150">
+        <el-table-column v-if="taskColShown('freeEnd')" label="免费结束" width="124">
           <template #default="{ row }">
-            <span :class="row.isExpired ? 'cell-dang' : 'cell-mute'">
-              {{ formatTime(row.freeEndTime) }}
+            <!-- 紧凑格式单行显示（之前「2026/9/30 20:00:00」在 150 宽里折两行），完整时间在 title -->
+            <span
+              :class="row.isExpired ? 'cell-dang' : 'cell-mute'"
+              :title="formatTime(row.freeEndTime)">
+              {{ formatShortDateTime(row.freeEndTime) }}
             </span>
           </template>
         </el-table-column>
@@ -731,14 +739,20 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
         <el-table-column
           v-if="taskColShown('checked')"
           label="最后检查"
-          width="150"
+          width="124"
           class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatTime(row.lastCheckTime) }}</template>
+          <template #default="{ row }">
+            <span :title="formatTime(row.lastCheckTime)">{{
+              formatShortDateTime(row.lastCheckTime)
+            }}</span>
+          </template>
         </el-table-column>
 
-        <el-table-column v-if="taskColShown('pushed')" label="推送时间" width="150">
+        <el-table-column v-if="taskColShown('pushed')" label="推送时间" width="124">
           <template #default="{ row }">
-            <span v-if="row.isPushed" class="cell-ok">{{ formatTime(row.pushTime) }}</span>
+            <span v-if="row.isPushed" class="cell-ok" :title="formatTime(row.pushTime)">
+              {{ formatShortDateTime(row.pushTime) }}
+            </span>
             <span v-else class="cell-dim">-</span>
           </template>
         </el-table-column>

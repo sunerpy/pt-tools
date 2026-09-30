@@ -3,6 +3,7 @@ import type { DownloaderTorrentItem } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtProgress from "@/components/ui/PtProgress.vue";
 import PtTag from "@/components/ui/PtTag.vue";
+import { formatShortDateTime } from "@/utils/format";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 type SortChangePayload = {
@@ -357,7 +358,11 @@ watch(
           width="170"
           sortable="custom"
           class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatDate(row.added_at) }}</template>
+          <template #default="{ row }">
+            <span :title="formatDate(row.added_at)">{{
+              formatShortDateTime(row.added_at * 1000)
+            }}</span>
+          </template>
         </el-table-column>
         <el-table-column
           v-else-if="columnKey === 'completed_at' && isVisible('completed_at')"
@@ -366,7 +371,11 @@ watch(
           width="170"
           sortable="custom"
           class-name="pt-cell-muted">
-          <template #default="{ row }">{{ formatDate(row.completed_at) }}</template>
+          <template #default="{ row }">
+            <span :title="formatDate(row.completed_at)">
+              {{ formatShortDateTime(row.completed_at * 1000) }}
+            </span>
+          </template>
         </el-table-column>
         <el-table-column
           v-else-if="columnKey === 'ratio' && isVisible('ratio')"
@@ -383,6 +392,7 @@ watch(
           prop="state"
           width="120"
           sortable="custom"
+          class-name="pt-cell-1line"
           :show-overflow-tooltip="false" />
         <el-table-column
           v-else-if="columnKey === 'eta' && isVisible('eta')"
