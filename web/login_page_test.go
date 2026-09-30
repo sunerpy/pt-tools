@@ -173,3 +173,67 @@ func TestDisplayVersion(t *testing.T) {
 		})
 	}
 }
+
+/*
+登录页 <head> 里那段首帧主题脚本自称与 stores/theme.ts 的读取逻辑「一一对应」，
+但两边是两份代码：SPA 后来把默认模式从深色改成了明亮，这里没跟上，
+于是没有存储偏好的新用户先看到深色登录页、登录后又是浅色界面。
+这条测试把「没有偏好时的默认模式 / 默认配色、认得的配色清单、旧配色迁移表」四件事钉住。
+*/
+func TestLoginThemeScriptMatchesThemeStore(t *testing.T) {
+	raw, err := os.ReadFile("frontend/src/stores/theme.ts")
+	require.NoError(t, err)
+	store := string(raw)
+
+	fnBody := func(name string) string {
+		i := strings.Index(store, "function "+name+"(")
+		require.GreaterOrEqual(t, i, 0, "theme.ts 里找不到 %s", name)
+		j := strings.Index(store[i:], "\n}\n")
+		require.Greater(t, j, 0)
+		return store[i : i+j]
+	}
+	lastReturn := func(body string) string {
+		m := regexp.MustCompile(`return "([a-z]+)";`).FindAllStringSubmatch(body, -1)
+		require.NotEmpty(t, m)
+		return m[len(m)-1][1]
+	}
+	storeMode := lastReturn(fnBody("readMode"))
+	storePalette := lastReturn(fnBody("readPalette"))
+
+	var storePalettes []string
+	for _, m := range regexp.MustCompile(`value: "([a-z]+)",\n\s+label:`).FindAllStringSubmatch(
+		store[strings.Index(store, "export const PALETTES"):strings.Index(store, "export const MODES")], -1,
+	) {
+		storePalettes = append(storePalettes, m[1])
+	}
+	require.NotEmpty(t, storePalettes)
+
+	legacyBlock := store[strings.Index(store, "const LEGACY_PALETTE"):]
+	legacyBlock = legacyBlock[:strings.Index(legacyBlock, "};")]
+	storeLegacy := map[string]string{}
+	for _, m := range regexp.MustCompile(`(\w+): "(\w+)"`).FindAllStringSubmatch(legacyBlock, -1) {
+		storeLegacy[m[1]] = m[2]
+	}
+	require.NotEmpty(t, storeLegacy)
+
+	script := loginHTML[strings.Index(loginHTML, "<script>"):strings.Index(loginHTML, "</script>")]
+	pick := func(re string) string {
+		m := regexp.MustCompile(re).FindStringSubmatch(script)
+		require.Len(t, m, 2, "登录页脚本里找不到 %s", re)
+		return m[1]
+	}
+	assert.Equal(t, storeMode, pick(`var mode = '([a-z]+)';`), "没有存储偏好时的默认模式")
+	assert.Equal(t, storePalette, pick(`var palette = '([a-z]+)';`), "没有存储偏好时的默认配色")
+
+	var loginPalettes []string
+	for _, m := range regexp.MustCompile(`'([a-z]+)'`).FindAllStringSubmatch(pick(`var PALETTES = \[([^\]]*)\]`), -1) {
+		loginPalettes = append(loginPalettes, m[1])
+	}
+	assert.Equal(t, storePalettes, loginPalettes, "认得的配色清单")
+
+	loginLegacy := map[string]string{}
+	for _, m := range regexp.MustCompile(`(\w+): '(\w+)'`).FindAllStringSubmatch(pick(`var LEGACY = \{([^}]*)\}`), -1) {
+		loginLegacy[m[1]] = m[2]
+	}
+	assert.Equal(t, storeLegacy, loginLegacy, "旧配色迁移表")
+}

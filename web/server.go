@@ -514,7 +514,8 @@ const loginHTML = `{{define "login"}}
   var PALETTES = ['cockpit', 'atlas', 'deck', 'halo'];
   var LEGACY = { default: 'cockpit', ocean: 'cockpit', contrast: 'atlas', graphite: 'deck', emerald: 'cockpit' };
   var palette = 'cockpit';
-  var mode = 'dark';
+  /* 与 stores/theme.ts 的 readMode 一致：没有存储偏好时默认明亮（TestLoginThemeScriptMatchesThemeStore 守着） */
+  var mode = 'light';
   try {
     var rawPalette = localStorage.getItem('theme-style');
     if (rawPalette && PALETTES.indexOf(rawPalette) >= 0) palette = rawPalette;
