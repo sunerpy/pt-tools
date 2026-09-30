@@ -79,6 +79,17 @@ const isFiltered = computed(
 );
 
 /**
+ * 筛空时的「放宽条件」：四项一起清。之前空态按钮只清搜索词 ——
+ * 用状态 chip 或认证 / 探测下拉筛成 0 行时，点「清空搜索」什么都不会变。
+ */
+function clearAllFilters() {
+  searchKeyword.value = "";
+  statusFilter.value = new Set();
+  authFilter.value = "";
+  probeFilter.value = "";
+}
+
+/**
  * 空态仍按视图模式分成两种文案（「已启用」空 = 去新增，「全部」空 = 内置清单本身没内容），
  * 所以这里只接管 useDataState 判出的非空态，空态自己按 viewMode 与搜索词决定。
  */
@@ -109,7 +120,7 @@ const stateSub = computed(() => {
       return "从「新增站点」里挑一个开始，启用后才会参与 RSS 与统计";
     default:
       return isFiltered.value
-        ? "换个站点名或域名再搜，或切到「全部」看未启用的站点"
+        ? "放宽筛选条件（站点名、状态、认证、探测），或切到「全部」看未启用的站点"
         : "站点清单来自内置定义，装上浏览器扩展可以帮助适配新站";
   }
 });
@@ -1141,8 +1152,8 @@ async function saveLoginConfig() {
             </template>
             <!-- 筛出 0 行时该做的是放宽条件，不是去新增一个已经存在的站点 -->
             <template v-else-if="isFiltered" #action>
-              <el-button size="small" @click="searchKeyword = ''">
-                <PtIcon name="x" :size="14" /><span>清空搜索</span>
+              <el-button size="small" @click="clearAllFilters">
+                <PtIcon name="x" :size="14" /><span>清空筛选</span>
               </el-button>
             </template>
             <template v-else-if="tableState === 'empty'" #action>
@@ -1431,8 +1442,8 @@ async function saveLoginConfig() {
             </el-button>
           </template>
           <template v-else-if="isFiltered" #action>
-            <el-button size="small" @click="searchKeyword = ''">
-              <PtIcon name="x" :size="14" /><span>清空搜索</span>
+            <el-button size="small" @click="clearAllFilters">
+              <PtIcon name="x" :size="14" /><span>清空筛选</span>
             </el-button>
           </template>
           <template v-else-if="tableState === 'empty'" #action>

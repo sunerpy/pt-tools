@@ -258,9 +258,11 @@ const headSub = computed(() => {
 });
 
 /** perm 不给重试：没权限点重试没有意义，该去要权限 */
-const stateAction = computed<"retry" | "add" | "none">(() => {
+/* 筛空（zero）该做的是放宽筛选，不是再去添加一条 —— 之前 zero 也给「添加规则」 */
+const stateAction = computed<"retry" | "add" | "clear" | "none">(() => {
   if (state.value === "error" || state.value === "partial") return "retry";
   if (state.value === "loading" || state.value === "perm") return "none";
+  if (state.value === "zero") return "clear";
   return "add";
 });
 
@@ -669,6 +671,9 @@ function decisionText(decision: string | undefined): string {
               <el-button v-if="stateAction === 'retry'" size="small" @click="reloadAll">
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
               </el-button>
+              <el-button v-else-if="stateAction === 'clear'" size="small" @click="clearRuleFilters">
+                <PtIcon name="x" :size="14" /><span>清空筛选</span>
+              </el-button>
               <el-button v-else size="small" type="primary" @click="openAddDialog">
                 <PtIcon name="plus" :size="14" /><span>添加规则</span>
               </el-button>
@@ -777,10 +782,14 @@ function decisionText(decision: string | undefined): string {
         卡上留的是真正要看的：名称 + 类型/范围/大小/优先级 + 匹配模式 + 启用状态 + 三个操作。
       -->
       <div v-else class="cards">
-        <PtDataState v-if="!rules.length" :state="state" :sub="stateSub">
+        <!-- 按筛完的行数判，不按全量：之前是 !rules.length，筛成 0 行时移动端什么提示都没有 -->
+        <PtDataState v-if="!visibleRules.length" :state="state" :sub="stateSub">
           <template v-if="stateAction !== 'none'" #action>
             <el-button v-if="stateAction === 'retry'" size="small" @click="reloadAll">
               <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+            <el-button v-else-if="stateAction === 'clear'" size="small" @click="clearRuleFilters">
+              <PtIcon name="x" :size="14" /><span>清空筛选</span>
             </el-button>
             <el-button v-else size="small" type="primary" @click="openAddDialog">
               <PtIcon name="plus" :size="14" /><span>添加规则</span>

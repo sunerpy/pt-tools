@@ -124,6 +124,21 @@ const logQuery = ref("");
 
 /** 「最近 1 小时」开关。窗口起点每次取数时重算，所以它是滚动的一小时，不是点下那一刻的 */
 const lastHourOnly = ref(false);
+
+/** 筛空空态里列出正在起作用的条件，按钮一次放开 */
+const activeFilterNames = computed(() => {
+  const out: string[] = [];
+  if (activeLevels.value.size > 0) out.push("级别");
+  if (logQuery.value.trim()) out.push(`搜索「${logQuery.value.trim()}」`);
+  if (lastHourOnly.value) out.push("最近 1 小时");
+  return out.length > 0 ? out : ["筛选条件"];
+});
+
+function clearLogFilters() {
+  activeLevels.value = new Set();
+  logQuery.value = "";
+  lastHourOnly.value = false;
+}
 /** 随 logs 一起更新的时间基准：让 shownLogs 保持纯计算，不在 computed 里读 Date.now() */
 const nowStamp = ref(Date.now());
 
@@ -688,18 +703,22 @@ function scrollToTop() {
             空态走六态组件（画板 45：全站空态统一形态），不再是一行灰字。
             两种空的含义不同，文案也不同：一行都没读到 vs 筛选把所有行筛掉了。
           -->
+          <!--
+            筛空时有三种条件可能是原因：级别、搜索词、「最近 1 小时」。之前不管是哪一个都说「这些级别下没有日志」、
+            按钮只清级别 —— 搜索没命中时点了也不会变。现在文案说清是哪几项，按钮一次把三项都放开。
+          -->
           <PtDataState
             v-else
             :state="logs.length === 0 ? 'empty' : 'zero'"
-            :title="logs.length === 0 ? '还没有日志' : '这些级别下没有日志'"
+            :title="logs.length === 0 ? '还没有日志' : '当前筛选下没有日志'"
             :sub="
               logs.length === 0
                 ? '服务刚启动或日志文件刚轮转过，写入之后这里会自动刷新。'
-                : '取消上面的级别筛选就能看到其余行。'
+                : `放宽筛选就能看到其余行：${activeFilterNames.join('、')}。`
             ">
             <template v-if="logs.length > 0" #action>
-              <el-button size="small" @click="activeLevels = new Set()">
-                <PtIcon name="x" :size="14" /><span>清空级别筛选</span>
+              <el-button size="small" @click="clearLogFilters">
+                <PtIcon name="x" :size="14" /><span>清空筛选</span>
               </el-button>
             </template>
           </PtDataState>

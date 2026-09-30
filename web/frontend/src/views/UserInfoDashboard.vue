@@ -43,13 +43,23 @@ const router = useRouter();
 const siteLevelsStore = useSiteLevelsStore();
 
 /**
- * 六态状态机（设计文档 §5）。这一页没有筛选，所以 0 行只会是 empty / error / perm，
- * 不会出现 zero；partial 留给「聚合成功但有站点没同步上」，由 failedSites 决定。
+ * 六态状态机（设计文档 §5）。partial 留给「聚合成功但有站点没同步上」，由 failedSites 决定。
+ *
+ * 这一页**有**筛选（状态分段 + 搜索框，画板 10 的 bar-64），筛成 0 行是 zero 不是 empty。
+ * 之前这里写着「这一页没有筛选」、没传 filtered —— 于是筛空时显示「还没有数据 / 同步全部」，
+ * 把「筛掉了」说成「库里没有」。siteFilter / rowQuery 在下面才声明，但 filtered 是在渲染时才调用的闭包，
+ * 那时它们早已初始化，不存在 TDZ。
  */
 const failedSites = ref(0);
 const { loading, state, errorText, run, hasPartialBanner } = useDataState({
   failed: () => failedSites.value,
+  filtered: () => siteFilter.value !== "all" || rowQuery.value.trim() !== "",
 });
+
+function clearSiteFilters() {
+  siteFilter.value = "all";
+  rowQuery.value = "";
+}
 const syncing = ref(false);
 const syncingSite = ref<string | null>(null);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
@@ -600,6 +610,7 @@ const watchRows = computed<BreakdownRow[]>(() => {
 /** 状态块副标题：失败时给真实错误，空态时给下一步动作 */
 const stateSub = computed(() => {
   if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "zero") return "当前筛选下没有站点，放宽状态筛选或清空搜索";
   return "同步任意站点后这里会出现统计";
 });
 
@@ -1280,6 +1291,11 @@ onUnmounted(() => {
                 <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
               </el-button>
             </template>
+            <template v-else-if="state === 'zero'" #action>
+              <el-button size="small" @click="clearSiteFilters">
+                <PtIcon name="x" :size="14" /><span>清空筛选</span>
+              </el-button>
+            </template>
             <template v-else-if="state === 'empty'" #action>
               <el-button type="primary" size="small" :loading="syncing" @click="syncAll">
                 <PtIcon v-if="!syncing" name="refresh-cw" :size="14" />
@@ -1299,6 +1315,11 @@ onUnmounted(() => {
           <template v-if="state === 'error'" #action>
             <el-button size="small" @click="loadData">
               <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+          <template v-else-if="state === 'zero'" #action>
+            <el-button size="small" @click="clearSiteFilters">
+              <PtIcon name="x" :size="14" /><span>清空筛选</span>
             </el-button>
           </template>
           <template v-else-if="state === 'empty'" #action>
