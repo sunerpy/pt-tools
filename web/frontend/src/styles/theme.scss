@@ -77,10 +77,11 @@
   --pt-icon-status: 13px;
 
   /* 全站单一字族（§1）。不内嵌字体文件：自托管部署常在内网，
-   * 拉外链会白等；Noto Sans SC 装了就用，没装退到系统 UI 字族。 */
+   * 拉外链会白等；Noto Sans SC 装了就用，没装退到系统 UI 字族。
+   * Windows 上优先 Microsoft YaHei UI —— 它是为界面调过 hinting 的那一版，小字号比 Microsoft YaHei 清楚。 */
   --pt-font-family:
     "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Roboto, sans-serif;
   --pt-font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, monospace;
 
   /* 字间距一律 0（§1：CJK 收紧字距会掉可读性） */
