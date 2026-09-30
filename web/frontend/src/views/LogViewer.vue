@@ -566,16 +566,40 @@ function scrollToTop() {
         把搜索框挤成「搜索日志…」——实测如此。
       -->
 
+      <!--
+        画板 29 的 bar 右端是纯图标钮（icons: columns-3 / refresh-cw），不是带字按钮。
+        之前落成三枚带字按钮（顶部 / 底部 / 刷新，共 250 宽），左组 904 + 右组 250 超过
+        1376 下有滚动条时的 1070，整条带被折成两行（81 高，画板 40）。改成图标钮后右组 100。
+      -->
       <template #right>
-        <el-button @click="scrollToTop">
-          <PtIcon name="chevron-up" :size="14" /><span>顶部</span>
-        </el-button>
-        <el-button @click="scrollToBottom">
-          <PtIcon name="chevron-down" :size="14" /><span>底部</span>
-        </el-button>
-        <el-button type="primary" :loading="loading" @click="reloadAll">
-          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
-        </el-button>
+        <el-tooltip content="回到顶部" placement="top">
+          <button type="button" class="pt-band__iconbtn" aria-label="回到顶部" @click="scrollToTop">
+            <PtIcon name="chevron-up" :size="15" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="跳到底部" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="跳到底部"
+            @click="scrollToBottom">
+            <PtIcon name="chevron-down" :size="15" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="重新读取日志与文件列表" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新"
+            :disabled="loading"
+            data-testid="logs-refresh-btn"
+            @click="reloadAll">
+            <PtIcon
+              :name="loading ? 'loader-circle' : 'refresh-cw'"
+              :size="15"
+              :class="{ 'pt-spin': loading }" />
+          </button>
+        </el-tooltip>
       </template>
     </PtToolbar>
 

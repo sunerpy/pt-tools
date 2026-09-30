@@ -622,6 +622,14 @@
   min-height: 28px;
 }
 
+/*
+ * 勾选框也压到 28（Element 是 var(--el-checkbox-height, 32px)）。带有了上下各 6 的内边距以后，
+ * 32 高的勾选框会把 40 高的带顶到 45 —— /logs 的「最近 1 小时 / 跟随尾部 / 自动刷新」就是这么顶高的。
+ */
+.pt-band--toolbar .el-checkbox {
+  --el-checkbox-height: 28px;
+}
+
 /* 画板 note：工具栏右侧那行说明字 11/400 t3 */
 .pt-band__note {
   flex: 0 0 auto;

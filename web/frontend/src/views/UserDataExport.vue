@@ -1262,8 +1262,19 @@ onMounted(() => {
   margin-top: var(--pt-space-2);
 }
 
-/* 单栏是 .pt-cards--main 自己在 1181 以下做的；这里只取消右栏的吸顶 */
+/*
+ * 1181 以下单栏，并取消右栏的吸顶。
+ *
+ * 这一页不能靠 .pt-cards--main 退栏：那个变体只在 ≥1181 给 700 / 364 的比例，1181 以下落回
+ * .pt-cards 的 auto-fit(320px)，1024 下就成了两等分 —— 预览只剩 440 宽，分享图的 DOM 预览随之折行
+ * （「412.6 / TB」），站点卡右列被切。导出的 PNG 是 Canvas 按固定 640 宽画的，不受影响，
+ * 但预览不再是所见即所得。单栏时预览有整条主区宽，640 的分享图原样放得下。
+ */
 @media (max-width: 1180px) {
+  .export-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .export-side {
     position: static;
   }

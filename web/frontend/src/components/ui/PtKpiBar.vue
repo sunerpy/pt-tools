@@ -56,7 +56,7 @@ function hue(i: number) {
 
 <template>
   <div class="pt-kpi" :class="{ 'is-band': band }">
-    <div class="pt-kpi__grid" :style="{ '--pt-kpi-cols': cols }">
+    <div class="pt-kpi__grid" :data-cols="cols" :style="{ '--pt-kpi-cols': cols }">
       <div v-for="(it, i) in props.items" :key="it.label" class="pt-kpi__cell">
         <div class="pt-kpi__top">
           <PtIcon
@@ -99,6 +99,8 @@ function hue(i: number) {
 
 <style scoped>
 .pt-kpi {
+  /* 换列按 KPI 带自己的宽度判，不按视口 —— 见文件末尾那条 @container */
+  container-type: inline-size;
   min-height: var(--pt-kpi-h);
   overflow: hidden;
   background: var(--pt-surface);
@@ -208,14 +210,38 @@ function hue(i: number) {
   color: var(--pt-t3);
 }
 
+/*
+ * 柱图按画板 48 宽，但格子紧的时候先让柱收窄（最窄 40），不先把读数挤出格子：
+ * 读数是主信息、不能截断，柱只是走势示意。1376 下主区出现 10px 滚动条时 6 格只剩 183，
+ * 「412.6 TB」那格要 187，柱收到 45 就放得下，不用为这 4px 把整条带折成两行。
+ */
 .pt-kpi__bars {
-  flex: 0 0 auto;
-  width: 48px;
+  flex: 0 1 48px;
+  min-width: 40px;
 }
 
 /* 中屏三列、手机两列（设计文档 §9：KPI 条在手机上退化成 2×N 网格） */
 @media (max-width: 1180px) {
   .pt-kpi__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * 6 列那一档按**主区实际宽度**退 3 列，不按视口。
+ *
+ * 一格要放下「读数 + 8 间距 + 柱」再加左右 16 的内边距。「412.6 TB」这种最长的读数约 99 宽，
+ * 柱收到最窄 40 时一格要 179，6 列就得 ≥ 1074（再留一点余量取 1070 以下才退）。
+ * 上面那条 @media 按视口 ≤1180 退 3 列，是侧栏还是两列（64 + 264）时的算法；
+ * 侧栏改成一块之后，钉住时 1181–1375 这一段的主区只有 917–1111，比 ≤1180 收起时（主区 1116）
+ * 还窄，于是 1280 下「总上传量」那格的柱被切掉一截。发布前 1280 / 1024 扫描抓出来的。
+ *
+ * 阈值不能取 1110：1376 下主区 1112，但内容一长出滚动条（.pt-shell__content 的 10px），
+ * KPI 带就只剩 1102 —— 取 1110 会让画板基准宽度下的 6 格一行变成 3×2（board-check 抓到带高 128）。
+ * 下限 740 是为了不碰 ≤768 那条移动端 2×N（画板 §9）。
+ */
+@container (min-width: 740px) and (max-width: 1069px) {
+  .pt-kpi__grid[data-cols="6"] {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -228,6 +254,14 @@ function hue(i: number) {
   .pt-kpi__cell {
     gap: 4px;
     padding: var(--pt-space-3);
+  }
+
+  /*
+   * 2 列时一格的读数行在 375 宽下只有 148（360 宽的安卓机约 140），「412.6 TB」加 8 间距就要 107，
+   * 柱最窄 40 刚好压线、窄一点的屏就溢出 —— 手机上再让柱收到 32。
+   */
+  .pt-kpi__bars {
+    min-width: 32px;
   }
 }
 </style>
