@@ -466,10 +466,18 @@ const OPTIONAL_USERINFO_COLS = [
 
 type OptionalUserinfoCol = (typeof OPTIONAL_USERINFO_COLS)[number]["key"];
 
+/*
+ * 没设过列偏好的用户，默认先收起三列低频列：真实数据（多数站点不报，整列是「-」）、入站日期、剩余天数
+ * （保号预警另有「需要关注的站点」卡与「保号预警」分段）。用户原话「表格列数量过多」——
+ * 14 列 min-width 合计约 1780，1920 宽也要横滚；收起后 11 列，与画板 10 的十列 + 操作一致。
+ * 这三列仍在「列设置」里，勾上就回来；已经存过偏好的用户按他们自己的来。
+ */
+const DEFAULT_HIDDEN_USERINFO_COLS: OptionalUserinfoCol[] = ["trueData", "inbound", "days"];
+
 function loadHiddenUserinfoCols(): Set<OptionalUserinfoCol> {
   try {
     const raw = window.localStorage.getItem(USERINFO_COLS_KEY);
-    if (!raw) return new Set();
+    if (!raw) return new Set(DEFAULT_HIDDEN_USERINFO_COLS);
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return new Set();
     const known = new Set(OPTIONAL_USERINFO_COLS.map((c) => c.key as string));
@@ -1281,7 +1289,7 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 封禁提醒 -->
-          <el-table-column v-if="colShown('days')" min-width="120" align="center">
+          <el-table-column v-if="colShown('days')" min-width="150" align="center">
             <template #header>
               <el-tooltip content="距离站点封禁阈值的剩余天数；负数表示已超过阈值" placement="top">
                 <span class="th-help">剩余天数</span>
@@ -1316,41 +1324,49 @@ onUnmounted(() => {
           </el-table-column>
 
           <!-- 操作列 -->
+          <!--
+            操作列收成两枚图标钮（打开站点 / 同步），150 → 88 宽：列已经很多，操作列又是 fixed="right"，
+            它越宽、横滚时压住的内容越多。文字挪进 tooltip 与 aria-label，键盘与读屏照旧可用。
+          -->
           <el-table-column
             label="操作"
-            width="150"
+            width="88"
             align="center"
             fixed="right"
             class-name="pt-cell-act">
             <template #default="{ row }">
               <div class="acts">
                 <el-tooltip
-                  content="未配置站点地址"
-                  placement="top"
-                  :disabled="
-                    !!(sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url)
-                  ">
+                  :content="
+                    sitesByName[row.site]?.urls?.[0] || loginStates[row.site]?.base_url
+                      ? '打开站点'
+                      : '未配置站点地址'
+                  "
+                  placement="top">
                   <span>
                     <el-button
                       link
                       type="primary"
+                      :aria-label="`打开 ${row.site}`"
                       :disabled="
                         !sitesByName[row.site]?.urls?.[0] && !loginStates[row.site]?.base_url
                       "
                       :data-testid="`userinfo-open-site-${row.site}`"
                       @click="openSite(row.site)">
-                      <PtIcon name="external-link" :size="14" /><span>打开</span>
+                      <PtIcon name="external-link" :size="15" />
                     </el-button>
                   </span>
                 </el-tooltip>
-                <el-button
-                  link
-                  type="primary"
-                  :loading="syncingSite === row.site"
-                  @click="syncSite(row.site)">
-                  <PtIcon v-if="syncingSite !== row.site" name="refresh-cw" :size="14" />
-                  <span>同步</span>
-                </el-button>
+                <el-tooltip content="同步这个站点" placement="top">
+                  <el-button
+                    link
+                    type="primary"
+                    :aria-label="`同步 ${row.site}`"
+                    :loading="syncingSite === row.site"
+                    @click="syncSite(row.site)">
+                    <PtIcon v-if="syncingSite !== row.site" name="refresh-cw" :size="15" />
+                  </el-button>
+                </el-tooltip>
               </div>
             </template>
           </el-table-column>
@@ -2007,10 +2023,13 @@ onUnmounted(() => {
   text-align: left;
 }
 
+/* 「21 天」与状态胶囊一行排开：之前列被压窄时数字和「天」断成两行，胶囊还被操作列压住 */
 .days {
   display: inline-flex;
+  flex-wrap: nowrap;
   gap: var(--pt-space-2);
   align-items: center;
+  white-space: nowrap;
 }
 
 .days__v {
@@ -2023,6 +2042,26 @@ onUnmounted(() => {
   display: inline-flex;
   gap: var(--pt-space-2);
   align-items: center;
+}
+
+/*
+ * 表格操作列的图标钮给足 28×28 的点击区（link 按钮默认只有图标那么大），悬停补一块底色；
+ * 两枚 28 的钮之间 4 就够。只限表格：手机行卡的 .card__foot 也用 .acts，那里是
+ * 「打开站点 / 同步」两枚带字按钮，套上 28 宽会被压扁（发布扫描在 768 / 375 下抓到过 26<47 的裁切）。
+ */
+.pt-grid .acts {
+  gap: var(--pt-space-1);
+}
+
+.pt-grid .acts :deep(.el-button) {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  border-radius: var(--pt-r-sm);
+}
+
+.pt-grid .acts :deep(.el-button:not(.is-disabled):hover) {
+  background: var(--pt-hover);
 }
 
 /* ---- 移动端卡片 ---- */
