@@ -816,3 +816,123 @@ html.dark {
   --el-menu-active-color: var(--pt-p);
   --el-menu-hover-bg-color: var(--pt-hover);
 }
+
+/* ===========================================================================
+ * ④ 实心填充上的字色
+ *
+ * Element 在实心按钮、单选 / 复选按钮的选中态、徽标、深色标签上一律用 --el-color-white 当字色。
+ * 浅色配色里强调色与语义色都够深，白字没问题；但深色配色里它们是浅色（要在深底上当字色用），
+ * 白字压上去就看不清：deck 深色的主按钮是 #fff 压 #fafafa，1.04:1，字完全看不见；
+ * cockpit / atlas / halo 深色 2.3–2.9，语义色 1.9–3.0。发布前那次 8 套主题扫描抓出来的。
+ *
+ * 每套配色本来就定义了 --pt-on-p（专门给实心强调色用的字色，深色配色里是深色），这里只是接上；
+ * 语义色（成功 / 警告 / 危险 / 信息）用 --pt-on-solid：浅色配色 = 白，深色配色 = 该配色的 chrome 那一档近黑。
+ * 改完后深色四套主按钮 5.2–19.0、语义色 6.3–10.4；浅色四套一个像素不变。
+ *
+ * 权重是刻意的：这些选择器与 Element 自己的同名规则同权重，而本文件在 element-plus 的 CSS 之后加载，
+ * 所以只覆盖实心形态；plain / text / link 形态在 Element 里是双类选择器，权重更高，字色照旧是强调色。
+ * =========================================================================== */
+html.light {
+  --pt-on-solid: #ffffff;
+}
+
+html.dark {
+  --pt-on-solid: var(--pt-chrome);
+}
+
+.el-button--primary {
+  --el-button-text-color: var(--pt-on-p);
+  --el-button-hover-text-color: var(--pt-on-p);
+  --el-button-active-text-color: var(--pt-on-p);
+  --el-button-disabled-text-color: var(--pt-on-p);
+}
+
+.el-button--success,
+.el-button--warning,
+.el-button--danger,
+.el-button--info {
+  --el-button-text-color: var(--pt-on-solid);
+  --el-button-hover-text-color: var(--pt-on-solid);
+  --el-button-active-text-color: var(--pt-on-solid);
+  --el-button-disabled-text-color: var(--pt-on-solid);
+}
+
+/* plain 形态悬停 / 按下时底色会变成实心强调色，那一刻的字色也要换 */
+.el-button--primary.is-plain {
+  --el-button-hover-text-color: var(--pt-on-p);
+  --el-button-active-text-color: var(--pt-on-p);
+}
+
+.el-button--success.is-plain,
+.el-button--warning.is-plain,
+.el-button--danger.is-plain,
+.el-button--info.is-plain {
+  --el-button-hover-text-color: var(--pt-on-solid);
+  --el-button-active-text-color: var(--pt-on-solid);
+}
+
+.el-radio-button {
+  --el-radio-button-checked-text-color: var(--pt-on-p);
+}
+
+.el-checkbox-button {
+  --el-checkbox-button-checked-text-color: var(--pt-on-p);
+}
+
+.el-badge__content {
+  color: var(--pt-on-solid);
+}
+
+.el-badge__content--primary {
+  color: var(--pt-on-p);
+}
+
+.el-tag--dark {
+  --el-tag-text-color: var(--pt-on-p);
+}
+
+.el-tag--dark.el-tag--success,
+.el-tag--dark.el-tag--warning,
+.el-tag--dark.el-tag--danger,
+.el-tag--dark.el-tag--info {
+  --el-tag-text-color: var(--pt-on-solid);
+}
+
+/* 勾选框的勾、单选圆点、开关打开时的滑块：同样是白色画在实心强调色上 */
+.el-checkbox {
+  --el-checkbox-checked-icon-color: var(--pt-on-p);
+}
+
+.el-radio__input.is-checked .el-radio__inner::after {
+  background-color: var(--pt-on-p);
+}
+
+.el-switch.is-checked .el-switch__core .el-switch__action {
+  background-color: var(--pt-on-p);
+}
+
+/*
+ * 轻提示（ElMessage）的底色。Element 取 --el-color-*-light-9，而 ③ 为了让浅底状态色能叠在任意面上，
+ * 把语义色的 light-9 映射成了 12% 透明的 --pt-*-soft —— 对嵌在卡片里的东西没问题，但 toast 是
+ * position: fixed 浮在页面上的，透明底让它的字直接压在底下的标题 / KPI 数字上。
+ * 这里只给 toast 换成不透明底（同样 12% 的语义色，叠在 raised 面上），别的组件不动。
+ */
+.el-message {
+  --el-message-bg-color: color-mix(in srgb, var(--pt-info) 12%, var(--pt-raised));
+}
+
+.el-message--success {
+  --el-message-bg-color: color-mix(in srgb, var(--pt-ok) 12%, var(--pt-raised));
+}
+
+.el-message--warning {
+  --el-message-bg-color: color-mix(in srgb, var(--pt-warn) 12%, var(--pt-raised));
+}
+
+.el-message--error {
+  --el-message-bg-color: color-mix(in srgb, var(--pt-dang) 12%, var(--pt-raised));
+}
+
+.el-message--info {
+  --el-message-bg-color: color-mix(in srgb, var(--pt-info) 12%, var(--pt-raised));
+}
