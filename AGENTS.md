@@ -129,7 +129,7 @@ CGO_ENABLED=1 go test ./path/to/pkg -count=1
 make toolchain-check
 make fmt-check
 make lint
-make test                 # frontend build + Go race tests
+make test                 # frontend build + frontend tests + Go race tests
 make build                # real frontend + production binary
 make coverage-gate        # race tests + filtered 90% project gate
 make check                # toolchain + format + lint + test + build

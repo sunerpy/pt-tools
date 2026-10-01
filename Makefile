@@ -346,7 +346,10 @@ build: build-frontend
 	-X github.com/sunerpy/pt-tools/version.BuildArch=$(shell go env GOARCH)" \
 	-o $(DIST_DIR)/$(IMAGE_NAME) .
 
+# 前端测试（vitest + style-scan + dialog-scan）与 CI frontend-build 的 Test 步骤是同一条命令，
+# 放在前端构建之后、Go 测试之前：它跑得快，先失败先停。
 test: build-frontend
+	pnpm --dir web/frontend test
 	CGO_ENABLED=1 go test -mod=readonly ./... -count=1 -race
 
 # 供 CI 的 go-lint / go-security job 使用：用占位产物满足 go:embed，
