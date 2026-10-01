@@ -1,6 +1,6 @@
 # pt-tools 文档
 
-[返回项目首页](../README.md) · 文档站：[pt-tools.firlab.app](https://pt-tools.firlab.app)（中文）· [English](https://pt-tools.firlab.app/en/)
+[返回项目首页](../README.md) · 文档站：[firlab.app/pt-tools](https://firlab.app/pt-tools/)（中文）· [English](https://firlab.app/pt-tools/en/)
 
 本目录是文档站的内容源：中文页在 `docs/`，英文页在 `docs/en/` 的同一路径下，同一份文件在 GitHub 上也能直接阅读。这个文件本身是 GitHub 上的目录索引，不发布到文档站。
 
@@ -56,9 +56,11 @@
 
 ## 维护文档站
 
-文档站的文字都在本目录；VitePress 配置、主题、组件和部署在 [sunerpy/firlab](https://github.com/sunerpy/firlab) 的 `pt-tools/` 下（那里的 `README.md` 说明归属与一次性配置）。
+文档站的文字都在本目录；VitePress 配置、主题、组件和部署在 [sunerpy/firlab](https://github.com/sunerpy/firlab) 的 `pt-tools/` 下（那里的 `README.md` 说明归属与一次性配置）。站点没有单独的域名，随 firlab.app 一起由 GitHub Pages 发布在 `/pt-tools/` 路径下。
 
 ### 目录与站点路径
+
+下表的站点路径都相对于 `https://firlab.app/pt-tools/`，例如 `/en/` 就是 `https://firlab.app/pt-tools/en/`。
 
 | 本目录中的路径                                                                                        | 站点路径                      | 说明                                                     |
 | ----------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------- |
@@ -73,9 +75,9 @@
 
 ### 一次修改怎么上线
 
-1. 改动本目录的 PR 会触发 `.github/workflows/docs-site.yml`：检出公开的 firlab 仓库，把本目录同步进去并构建一次站点。死链、未注册的组件、只有一种语言的页面、禁用词或不合格的首页数据都会让这一步失败。它不读取任何密钥，fork 的 PR 也能运行。
+1. 改动本目录的 PR 会触发 `.github/workflows/docs-site.yml`：检出公开的 firlab 仓库，把本目录同步进去，构建一次站点并运行 firlab 的 `pt-tools/scripts/check-dist.sh`。死链、未注册的组件、只有一种语言的页面、禁用词、不合格的首页数据，或指向 `/pt-tools/` 以外的站内链接都会让这一步失败。它不读取任何密钥，fork 的 PR 也能运行。
 2. 合并到 `main` 后，`.github/workflows/publish-docs-site.yml` 运行 firlab 的 `pt-tools/scripts/sync-pt-tools-docs.sh`，把结果以 `docs(pt-tools): sync from pt-tools@<sha>` 提交到 firlab 的 `main`。这一步需要仓库密钥 `FIRLAB_DOCS_TOKEN`（见 `.github/README-secrets.md`）。
-3. firlab 的 `deploy-pt-tools.yml` 构建站点并部署到 Cloudflare Pages。
+3. firlab 的 `deploy.yml` 构建主站和本站点，检查后把本站点放进主站的 `pt-tools/` 目录，一起部署到 GitHub Pages。
 
 每个页面的页脚都写着内容来自 pt-tools 的哪个提交。
 
@@ -84,7 +86,7 @@
 ```bash
 git clone https://github.com/sunerpy/firlab ../firlab    # 只需一次
 ../firlab/pt-tools/scripts/sync-pt-tools-docs.sh "$PWD"
-cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev
+cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://localhost:5173/pt-tools/
 ```
 
 每次修改后重新运行同步脚本。它会在页面缺少另一种语言的版本、使用了站点未注册的组件或使用了禁用词时停下并给出原因；从未提交的工作区同步时，页脚的提交号带 `-dirty`。提交前另外运行 `make docs-check`，它检查本目录内所有相对链接和锚点。

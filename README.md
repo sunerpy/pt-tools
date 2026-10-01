@@ -12,7 +12,7 @@
 [![Codecov](https://codecov.io/gh/sunerpy/pt-tools/branch/main/graph/badge.svg)](https://codecov.io/gh/sunerpy/pt-tools)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-[文档站](https://pt-tools.firlab.app) · [功能](#功能) · [快速开始](#快速开始) · [初次配置](#初次配置) · [文档](#文档) · [开发](#开发) · [社区](#社区)
+[文档站](https://firlab.app/pt-tools/) · [功能](#功能) · [快速开始](#快速开始) · [初次配置](#初次配置) · [文档](#文档) · [开发](#开发) · [社区](#社区)
 
 </div>
 
@@ -130,7 +130,7 @@ QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/t
 
 ## 文档
 
-完整文档发布在 **[pt-tools.firlab.app](https://pt-tools.firlab.app)**（中文，[English](https://pt-tools.firlab.app/en/)），内容与本仓库 `docs/` 目录同步。在 GitHub 上也可以从[文档中心](docs/README.md)按主题浏览。常用入口：
+完整文档发布在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**（中文，[English](https://firlab.app/pt-tools/en/)），内容与本仓库 `docs/` 目录同步。在 GitHub 上也可以从[文档中心](docs/README.md)按主题浏览。常用入口：
 
 | 文档                                           | 用途                                 |
 | ---------------------------------------------- | ------------------------------------ |
