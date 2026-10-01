@@ -853,3 +853,34 @@ func TestNotConfiguredErrorIsRecognizableThroughEveryLayer(t *testing.T) {
 		assert.NotErrorIs(t, err, ErrDownloaderNotConfigured)
 	})
 }
+
+// TestFlightRecoversFactoryPanic 建连跑在 manager 自己起的 goroutine 里，工厂（或 Ping）
+// 一旦 panic，上面没有任何东西接得住 —— 原先它跑在 net/http 的请求 goroutine 里，
+// panic 会被 http.Server 吞掉；挪进 flight 之后会直接带崩整个进程。
+// 判据：等待者拿到错误而不是干等到预算耗尽；flight 照常摘掉；和普通失败一样进冷却。
+func TestFlightRecoversFactoryPanic(t *testing.T) {
+	var calls atomic.Int32
+	dm := managerWithFactory(t, "boom", func(DownloaderConfig, string) (Downloader, error) {
+		calls.Add(1)
+		panic("factory exploded")
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := dm.GetDownloaderContext(ctx, "boom")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, context.DeadlineExceeded, "panic 之后 flight 必须照常广播结果，调用方不能干等到预算耗尽")
+	assert.Contains(t, err.Error(), "panic")
+	assert.Contains(t, err.Error(), "factory exploded", "panic 的内容要进错误信息，否则日志里查不到原因")
+
+	dm.flightsMu.Lock()
+	_, stillInFlight := dm.flights["boom"]
+	dm.flightsMu.Unlock()
+	assert.False(t, stillInFlight, "panic 的那一飞必须被摘掉，否则后来者会一直等在它上面")
+
+	// 和普通的建连失败一样进失败冷却：冷却期内不再调用工厂
+	_, err = dm.GetDownloaderContext(ctx, "boom")
+	require.ErrorContains(t, err, "factory exploded")
+	assert.EqualValues(t, 1, calls.Load(), "冷却期内不应再次调用工厂")
+}

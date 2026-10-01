@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -282,15 +283,38 @@ func (dm *DownloaderManager) joinFlight(name string) (*createFlight, bool) {
 // runFlight 跑完一次创建尝试并广播结果。
 // 用 context.Background 而不是发起者的 ctx：尝试的生命周期属于 manager，
 // 不属于某一个 Web 请求 —— 请求可以放弃等待，重连不该因此半途而废。
+//
+// 这是 manager 自己起的 goroutine，工厂或 Ping 在这里 panic 时上面没有任何东西接得住
+// （原先建连跑在 net/http 的请求 goroutine 里，panic 会被 http.Server 吞掉），
+// 会直接带崩整个进程。所以 defer 里兜住：panic 转成错误，照常结算 flight 并广播 ——
+// 否则 flight 记录永远摘不掉，等在 done 上的调用方只能干等到各自的预算耗尽。
 func (dm *DownloaderManager) runFlight(name string, flight *createFlight) {
-	dl, gen, err := dm.doRevive(name)
+	// panic 时 doRevive 来不及交回它实际依据的代次，就用发起时读到的这一代记冷却。
+	// 这一代只会比实际用的旧、不会更新：配置若在中途变了，这条冷却在读取侧按代次比对会被丢掉，
+	// 挡不住新配置；配置没变，它就和普通的建连失败一样冷却，不会每次轮询都再 panic 一遍。
+	_, _, startGen, _ := dm.resolveFactory(name)
 
-	flight.dl = dl
-	flight.err = err
+	var (
+		dl  Downloader
+		gen uint64
+		err error
+	)
+	defer func() {
+		if r := recover(); r != nil {
+			dl, gen = nil, startGen
+			err = fmt.Errorf("下载器 %s 建连时发生 panic: %v", name, r)
+			sLogger().Errorf("%v\n%s", err, debug.Stack())
+		}
 
-	dm.settleFlight(name, flight, gen, err)
+		flight.dl = dl
+		flight.err = err
 
-	close(flight.done)
+		dm.settleFlight(name, flight, gen, err)
+
+		close(flight.done)
+	}()
+
+	dl, gen, err = dm.doRevive(name)
 }
 
 // settleFlight 收尾一次尝试：摘掉 flight 记录，并按结果记/清失败冷却。
