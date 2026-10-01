@@ -118,7 +118,7 @@ Windows、systemd 与源码构建示例见[二进制运行指南](examples/binar
 
 ## ChatOps 与浏览器扩展
 
-QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/bind`、`/unbind`、`/addrss` 和 `/delrss` 等命令，并提供管理员白名单、绑定码、操作审计和 RSS 上新通知。
+QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/bind`、`/unbind`、`/addrss` 和 `/delrss` 等命令，并提供绑定码、Telegram 发送者白名单、操作审计和 RSS 上新通知。目前每个完成绑定的账号都拥有管理员权限，绑定码只发给信任的人。
 
 - [ChatOps 快速开始](docs/guide/chatops-quickstart.md)
 - [QQ OneBot（NapCat）配置](docs/guide/chatops-qq-napcat.md)
