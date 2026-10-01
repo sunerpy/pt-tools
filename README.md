@@ -12,7 +12,7 @@
 [![Codecov](https://codecov.io/gh/sunerpy/pt-tools/branch/main/graph/badge.svg)](https://codecov.io/gh/sunerpy/pt-tools)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-[功能](#功能) · [快速开始](#快速开始) · [初次配置](#初次配置) · [文档](#文档) · [开发](#开发) · [社区](#社区)
+[文档站](https://pt-tools.firlab.app) · [功能](#功能) · [快速开始](#快速开始) · [初次配置](#初次配置) · [文档](#文档) · [开发](#开发) · [社区](#社区)
 
 </div>
 
@@ -130,7 +130,7 @@ QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/t
 
 ## 文档
 
-从[文档中心](docs/README.md)按部署、站点、RSS、ChatOps、维护、开发和设计主题浏览全部文档。常用入口：
+完整文档发布在 **[pt-tools.firlab.app](https://pt-tools.firlab.app)**（中文，[English](https://pt-tools.firlab.app/en/)），内容与本仓库 `docs/` 目录同步。在 GitHub 上也可以从[文档中心](docs/README.md)按主题浏览。常用入口：
 
 | 文档                                           | 用途                                 |
 | ---------------------------------------------- | ------------------------------------ |
@@ -138,6 +138,9 @@ QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/t
 | [常见问题](docs/faq.md)                        | 认证、RSS、下载器与数据库排障        |
 | [支持站点](docs/sites.md)                      | 66 个内置站点及认证方式              |
 | [请求新增站点](docs/guide/request-new-site.md) | 使用扩展采集并脱敏提交站点数据       |
+| [升级与备份](docs/guide/upgrade.md)            | 各安装方式的升级、备份与恢复         |
+| [命令行](docs/reference/cli.md)                | web、secret、clean 等子命令与参数    |
+| [数据与安全](docs/reference/security.md)       | 数据位置、加密范围、外连与部署建议   |
 | [开发指南](docs/development.md)                | 工具链、构建、测试、站点适配与发版   |
 | [品牌标识](docs/brand.md)                      | 标志文件、变体选择、最小尺寸与留白   |
 

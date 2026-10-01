@@ -57,6 +57,7 @@ pt-tools/
 | Change site login monitoring | `internal/sitelogin/`, `scheduler/login_reminder_monitor.go` | Keep all I/O behind site/v2 or Cloak drivers and keep the shared per-site single-flight gate                          |
 | Change browser helper        | `tools/browser-extension/`                                   | Run extension typecheck/tests plus `make check-sites`                                                                 |
 | Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`      | Do not claim a transport/server exists; the current package is contract-only                                          |
+| Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths       | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`     |
 
 ## Runtime Wiring
 
@@ -133,6 +134,7 @@ make test                 # frontend build + frontend tests + Go race tests
 make build                # real frontend + production binary
 make coverage-gate        # race tests + filtered 90% project gate
 make check                # toolchain + format + lint + test + build
+make docs-check           # relative links and anchors under docs/
 
 # Frontend
 pnpm --dir web/frontend test

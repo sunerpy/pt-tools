@@ -29,6 +29,20 @@ GitHub Release、二进制、扩展、校验和与容器镜像属于发布门禁
 
 变量缺失或不是精确字符串 `false` 时保持默认启用。
 
+## 文档站
+
+| Secret              | 用途                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `FIRLAB_DOCS_TOKEN` | `publish-docs-site.yml` 把 `docs/` 同步到 `sunerpy/firlab` 时使用的 fine-grained PAT，只授权 `sunerpy/firlab` 的 Contents 读写 |
+
+GitHub 没有创建 fine-grained PAT 的 API，只能在 **Settings → Developer settings → Personal access tokens → Fine-grained tokens** 中手工创建：Repository access 只选 `sunerpy/firlab`，Permissions 只给 Contents: Read and write，然后：
+
+```bash
+gh secret set FIRLAB_DOCS_TOKEN --repo sunerpy/pt-tools
+```
+
+缺少这个 secret 时，`publish-docs-site.yml` 在检出 firlab 一步失败，文档站保持上一次同步的内容；PR 上的 `docs-site.yml` 不读取任何 secret，不受影响。token 到期后重新创建并覆盖同名 secret。
+
 ## CRX 私钥一次性初始化
 
 ```bash
