@@ -611,7 +611,7 @@ const loginHTML = `{{define "login"}}
         <button id="loginSubmit" type="submit" class="login-button">登录</button>
       </form>
 
-      <p class="login-foot">首次启动会自动创建 admin / adminadmin，登录后请立刻在「修改密码」里更换。</p>
+      <p class="login-foot">首次登录的初始账号见安装文档；登录后请立刻在「修改密码」里更换。</p>
     </div>
   </main>
 </div>

@@ -116,7 +116,7 @@ func TestLoginPageRendersBoardContent(t *testing.T) {
 		"ChatOps 双向指令",
 		"单用户模式",
 		"欢迎登录",
-		"首次启动会自动创建 admin / adminadmin，登录后请立刻在「修改密码」里更换。",
+		loginFootNote,
 		`src="/wordmark.svg"`,
 		`src="/logo.svg"`,
 		`id="loginAlert"`,
@@ -128,12 +128,19 @@ func TestLoginPageRendersBoardContent(t *testing.T) {
 	// 失败态必须走卡内联，不能再回到 alert()
 	assert.NotContains(t, body, "alert(")
 
+	// 未登录就能看到这一页：不能把默认口令印在上面。何况设置了 PT_ADMIN_USER / PT_ADMIN_PASS
+	// 时，「会自动创建 admin / adminadmin」这句话本身就是错的。
+	assert.NotContains(t, body, "adminadmin", "登录页不能公开默认密码")
+
 	// 主题必须在首帧之前定下来，且读的是 SPA 存的那两个键
 	assert.Contains(t, body, "localStorage.getItem('theme-style')")
 	assert.Contains(t, body, "localStorage.getItem('theme')")
 	assert.Contains(t, body, "(prefers-color-scheme: dark)")
 	assert.Contains(t, body, "data-theme-style")
 }
+
+// loginFootNote 是登录卡底部的提示：只指路、不写口令字面量。
+const loginFootNote = "首次登录的初始账号见安装文档；登录后请立刻在「修改密码」里更换。"
 
 func TestLoginBrandAssetsAreNotBehindAuth(t *testing.T) {
 	srv := NewServer(nil, nil)
