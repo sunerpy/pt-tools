@@ -4,12 +4,12 @@
 
 ## 安装
 
-| 方式                  | 说明                                                                                                                                                                                                                                         |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Edge 扩展商店（推荐） | 在 [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 中搜索「PT Tools Helper」。可以自动更新；每次发布约有一周的商店审核延迟。Chrome 等 Chromium 内核浏览器也可以从这里安装 |
-| 手动安装              | 从[发布页面](https://github.com/sunerpy/pt-tools/releases)下载 `pt-tools-helper.zip` 并解压到固定目录，在 `chrome://extensions` 或 `edge://extensions` 中开启「开发者模式」，点击「加载已解压的扩展程序」。不会自动更新                      |
-| Chrome 签名包         | 同一发布页面中的 `pt-tools-helper.crx`                                                                                                                                                                                                       |
-| Firefox               | 在 `about:debugging#/runtime/this-firefox` 中「临时载入附加组件」，选择解压目录中的 `manifest.json`。浏览器重启后需要重新载入                                                                                                                |
+| 方式                            | 说明                                                                                                                                                                                                                                    |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edge 扩展商店（推荐 Edge 使用） | 在 Microsoft Edge 中打开 [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea)，搜索「PT Tools Helper」。可以自动更新；每次发布约有一周的商店审核延迟。这个商店只面向 Edge |
+| 手动安装（适用于 Chrome）       | 从[发布页面](https://github.com/sunerpy/pt-tools/releases)下载 `pt-tools-helper.zip` 并解压到固定目录，在 `chrome://extensions` 或 `edge://extensions` 中开启「开发者模式」，点击「加载已解压的扩展程序」。不会自动更新                 |
+| 签名的 `.crx` 包                | 同一发布页面中的 `pt-tools-helper.crx`，用固定密钥签名，扩展 ID 在各版本间不变。Chrome 在 Windows 和 macOS 上不允许安装 Chrome 应用商店以外的 `.crx` 文件，在这两个系统上请用手动安装                                                   |
+| Firefox                         | 在 `about:debugging#/runtime/this-firefox` 中「临时载入附加组件」，选择解压目录中的 `manifest.json`。浏览器重启后需要重新载入                                                                                                           |
 
 首次点击扩展图标时，点击「授权并启用」授予所需权限。
 
