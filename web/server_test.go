@@ -679,6 +679,44 @@ func TestApiLogFiles_MissingDir(t *testing.T) {
 	assert.Empty(t, got.Files)
 }
 
+// 目录还不存在与已存在两支必须回同一份结构。原先不存在那支只回 dir 与 files，
+// 前端读不到保留策略，页面显示成「保留最近 份、 天」。
+func TestApiLogFiles_BothBranchesReturnSameShape(t *testing.T) {
+	srv := setupServer(t)
+	cases := []struct {
+		name    string
+		makeDir bool
+	}{
+		{name: "日志目录还不存在", makeDir: false},
+		{name: "日志目录已存在但为空", makeDir: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			if tc.makeDir {
+				require.NoError(t, os.MkdirAll(filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory), 0o755))
+			}
+
+			w := httptest.NewRecorder()
+			srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+			require.Equal(t, http.StatusOK, w.Code)
+
+			// 解进 map 看键在不在：解进结构体时缺的字段会变成 0，分不出「没回」和「配置成 0」
+			var got map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			keys := make([]string, 0, len(got))
+			for k := range got {
+				keys = append(keys, k)
+			}
+			assert.ElementsMatch(t, []string{"dir", "files", "max_age", "max_backups"}, keys)
+			assert.JSONEq(t, "[]", string(got["files"]))
+			assert.Equal(t, strconv.Itoa(config.DefaultZapConfig.MaxAge), string(got["max_age"]))
+			assert.Equal(t, strconv.Itoa(config.DefaultZapConfig.MaxBackups), string(got["max_backups"]))
+		})
+	}
+}
+
 // 目录里有当前文件与轮转备份时，按修改时间倒序返回，并标出哪个是当前文件。
 func TestApiLogFiles_ListsRotated(t *testing.T) {
 	srv := setupServer(t)

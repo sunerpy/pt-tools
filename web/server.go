@@ -1402,25 +1402,36 @@ var lumberjackBackupRe = regexp.MustCompile(`^[\w.-]+-\d{4}-\d{2}-\d{2}T\d{2}-\d
 func (s *Server) apiLogFiles(w http.ResponseWriter, r *http.Request) {
 	homeDir, _ := os.UserHomeDir()
 	dir := filepath.Join(homeDir, models.WorkDir, config.DefaultZapConfig.Directory)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		// 目录还没建起来（一条日志都没写过）不是错误，回空清单
-		if os.IsNotExist(err) {
-			writeJSON(w, struct {
-				Dir   string `json:"dir"`
-				Files []any  `json:"files"`
-			}{Dir: dir, Files: []any{}})
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	type fileRow struct {
 		Name     string `json:"name"`
 		Size     int64  `json:"size"`
 		ModTime  int64  `json:"mod_time"`
 		Rotated  bool   `json:"rotated"`
 		IsActive bool   `json:"is_active"`
+	}
+	// 目录在不在，回的都是这一份结构：保留策略来自日志配置、与目录无关，
+	// 前端靠它显示「保留最近 N 份、M 天」，缺了就成了「保留最近 份、 天」。
+	type logFilesResponse struct {
+		Dir        string    `json:"dir"`
+		Files      []fileRow `json:"files"`
+		MaxAge     int       `json:"max_age"`
+		MaxBackups int       `json:"max_backups"`
+	}
+	resp := logFilesResponse{
+		Dir:        dir,
+		Files:      []fileRow{},
+		MaxAge:     config.DefaultZapConfig.MaxAge,
+		MaxBackups: config.DefaultZapConfig.MaxBackups,
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// 目录还没建起来（一条日志都没写过）不是错误，回空清单
+		if os.IsNotExist(err) {
+			writeJSON(w, resp)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	files := make([]fileRow, 0, len(entries))
 	for _, e := range entries {
@@ -1445,17 +1456,8 @@ func (s *Server) apiLogFiles(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].ModTime > files[j].ModTime })
-	writeJSON(w, struct {
-		Dir        string    `json:"dir"`
-		Files      []fileRow `json:"files"`
-		MaxAge     int       `json:"max_age"`
-		MaxBackups int       `json:"max_backups"`
-	}{
-		Dir:        dir,
-		Files:      files,
-		MaxAge:     config.DefaultZapConfig.MaxAge,
-		MaxBackups: config.DefaultZapConfig.MaxBackups,
-	})
+	resp.Files = files
+	writeJSON(w, resp)
 }
 
 // 日志查看接口：最多返回 5000 行，实时读取当前日志文件
