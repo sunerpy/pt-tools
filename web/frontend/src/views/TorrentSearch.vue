@@ -475,6 +475,21 @@ watch(
   },
 );
 
+/**
+ * 筛选变了就按新的筛选结果修剪已选。
+ *
+ * 桌面 el-table 换数据时自己会清空勾选；手机上的行卡是这一页自己维护 selectedTorrents，
+ * 切换分类分段、「仅免费」或「一并显示」之后，被筛掉的那几条还留在里面 ——
+ * 「已选 2 个」配一张只剩 1 张卡的列表，批量推送 / 打包下载会把看不见的种子一起发出去。
+ * 只剪不补：放宽筛选后重新露出来的行不会自己勾回去。按对象身份比对，理由同 isSelected。
+ */
+watch(filteredResults, (rows) => {
+  if (selectedTorrents.value.length === 0) return;
+  const visible = new Set(rows);
+  const kept = selectedTorrents.value.filter((t) => visible.has(t));
+  if (kept.length !== selectedTorrents.value.length) selectedTorrents.value = kept;
+});
+
 // 当前页的种子列表
 const pagedTorrents = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
