@@ -31,5 +31,6 @@ jobs:
             test
             build
             ci
+            deps
             style
             revert
