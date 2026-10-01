@@ -36,12 +36,20 @@ const {
 const settingsFailed = computed(
   () => settingsState.value === "error" || settingsState.value === "perm",
 );
+/** 配置真的读回来过一次。在那之前表单里是前端默认值，不是服务端的删种策略 */
+const settingsLoaded = ref(false);
+/**
+ * 两颗「保存设置」共用的锁，与系统设置页一致：加载中或加载失败时不给保存。
+ * save() 会先 GET 现有配置、再用表单整段覆盖删种字段 —— 表单是默认值时，等于把真实策略换成默认值。
+ */
+const saveLocked = computed(() => loading.value || settingsFailed.value || !settingsLoaded.value);
 
+/* 保存键在这两种状态下都是停用的（saveLocked），提示要说的是「为什么点不了」，而不是「点了会怎样」 */
 const settingsAlertText = computed(() => {
   if (settingsState.value === "perm") {
-    return "没有权限读取全局配置。下面显示的是默认值，保存会覆盖服务端现有配置。";
+    return "没有权限读取全局配置。下面显示的是默认值，不是服务端的配置，所以保存已停用。";
   }
-  return `配置加载失败：${settingsErrorText.value}。下面显示的是默认值，请先重试成功再保存，否则会用默认值覆盖服务端配置。`;
+  return `配置加载失败：${settingsErrorText.value}。下面显示的是默认值，重试成功之前保存已停用，免得用默认值覆盖服务端配置。`;
 });
 
 const saving = ref(false);
@@ -217,9 +225,12 @@ async function loadSettings() {
   form.value.cleanup_scope_tags = tagsToArray(d.cleanup_scope_tags as string);
   form.value.cleanup_protect_tags = tagsToArray(d.cleanup_protect_tags as string);
   detectPreset();
+  settingsLoaded.value = true;
 }
 
 async function save() {
+  // 按钮已经按 saveLocked 禁用；这里是按钮之外的最后一道
+  if (saveLocked.value) return;
   saving.value = true;
   try {
     const current = await globalApi.get();
@@ -693,7 +704,7 @@ async function executeClean() {
 
       <template #footer>
         <span class="pt-foot-note">删除动作不可撤销，改完记得保存</span>
-        <el-button type="primary" :loading="saving" @click="save">
+        <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
           <PtIcon name="save" :size="14" /><span>保存设置</span>
         </el-button>
       </template>
@@ -732,7 +743,7 @@ async function executeClean() {
 
       <template #footer>
         <span class="pt-foot-note">与自动删种共用同一个保存按钮的配置表</span>
-        <el-button type="primary" :loading="saving" @click="save">
+        <el-button type="primary" :loading="saving" :disabled="saveLocked" @click="save">
           <PtIcon name="save" :size="14" /><span>保存设置</span>
         </el-button>
       </template>
