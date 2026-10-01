@@ -225,7 +225,7 @@ function applyTimeQuick(v: string) {
  * failed 接的是统计接口：它只喂页头摘要里的三个读数，挂了不该把已经拿到的日志
  * 一起丢掉，所以记一个失败数让状态落到 partial，表格照常渲染。
  */
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   filtered: () => hasFilter.value,
   failed: () => statsFailed.value,
 });
@@ -327,25 +327,22 @@ async function fetchAuditLogs() {
    * 两个数据源分开判：原来是 Promise.all，统计接口一挂整页就当失败，
    * 明明拿到手的日志也被丢掉。改成 allSettled —— 列表是主数据源，它失败才算失败；
    * 统计失败只记 failed，让状态落到 partial。
+   *
+   * 统计结果随列表一起交回来，确认这一份没过期之后才写：写在 run 里面的话，
+   * 被顶掉的旧请求照样会改统计读数，它的统计失败还会把新页面标成 partial。
+   * 列表失败时不写统计也不丢东西：页头摘要只在读到过列表时才出现，error 态也压过 partial。
    */
-  const data = await run(async () => {
+  const pending = run(async () => {
     const [listRes, statsRes] = await Promise.allSettled([
       chatopsApi.audit.list(params),
       chatopsApi.audit.stats(),
     ]);
-
-    if (statsRes.status === "fulfilled") {
-      statsFailed.value = 0;
-      stats.todayCount = statsRes.value.today_count || 0;
-      stats.successRate = statsRes.value.success_rate || 0;
-      stats.maxLatencyMs = statsRes.value.max_latency_ms || 0;
-    } else {
-      statsFailed.value = 1;
-    }
-
     if (listRes.status === "rejected") throw listRes.reason;
-    return listRes.value;
+    return { page: listRes.value, statsRes };
   });
+  const data = await pending;
+  // 连点筛选 / 翻页时晚到的旧请求：不清新结果，也不弹「获取审计日志失败」
+  if (isStale(pending)) return;
 
   if (!data) {
     // 失败时清空：留着上一次的日志配一个「加载失败」的状态块更让人误解
@@ -357,8 +354,17 @@ async function fetchAuditLogs() {
     return;
   }
 
-  auditLogs.value = data.items || [];
-  pagination.total = data.total || 0;
+  if (data.statsRes.status === "fulfilled") {
+    statsFailed.value = 0;
+    stats.todayCount = data.statsRes.value.today_count || 0;
+    stats.successRate = data.statsRes.value.success_rate || 0;
+    stats.maxLatencyMs = data.statsRes.value.max_latency_ms || 0;
+  } else {
+    statsFailed.value = 1;
+  }
+
+  auditLogs.value = data.page.items || [];
+  pagination.total = data.page.total || 0;
   expandedIds.value = [];
   loadedOnce.value = true;
 }

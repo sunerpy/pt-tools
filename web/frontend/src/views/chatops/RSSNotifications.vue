@@ -103,7 +103,9 @@ const hasFilter = computed(() =>
  * 表格停在 empty 上，用户看到的是「还没有通知记录」，而真相是请求挂了。
  * 401/403 也要单独画成「无权访问」，否则用户会一直点重试。
  */
-const { loading, state, errorText, run } = useDataState({ filtered: () => hasFilter.value });
+const { loading, state, errorText, run, isStale } = useDataState({
+  filtered: () => hasFilter.value,
+});
 
 /** 请求没拿到数据（失败或无权）：这时候所有读数都不能当真 */
 const loadFailed = computed(() => state.value === "error" || state.value === "perm");
@@ -268,7 +270,10 @@ async function fetchLogs() {
   if (filters.result) params.append("result", String(filters.result));
   if (filters.conf_id) params.append("conf_id", String(filters.conf_id));
 
-  const res = await run(() => chatopsApi.rssNotifications.list(params));
+  const pending = run(() => chatopsApi.rssNotifications.list(params));
+  const res = await pending;
+  // 自动刷新撞上换筛选 / 翻页时，晚到的旧请求不能把新结果清掉
+  if (isStale(pending)) return;
   if (!res) {
     /* 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解。
        这里故意不弹 toast —— 错误已经常驻在表格/卡片里，而自动刷新每 10 秒

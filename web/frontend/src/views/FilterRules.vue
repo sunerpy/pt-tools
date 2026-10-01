@@ -45,7 +45,7 @@ const TEST_ZERO_SUB = "没有种子命中这条规则，放宽模式或换个数
  * 这页不接 filtered：规则表没有搜索/筛选，0 行只可能是「一条都还没建」，永远是 empty。
  * partial 接的是次要数据源 —— 规则拿到了但试跑用的 RSS 列表没拿到。
  */
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   failed: () => (rssFailed.value ? 1 : 0),
   /* 画板 20 的 bar-64 带来了本地筛选：筛掉之后 0 行是 zero，不是「一条都还没建」 */
   filtered: () => ruleFilterOn.value,
@@ -361,7 +361,9 @@ async function reloadAll() {
 }
 
 async function loadRules() {
-  const data = await run(() => filterRulesApi.list());
+  const pending = run(() => filterRulesApi.list());
+  const data = await pending;
+  if (isStale(pending)) return;
   if (!data) {
     // 失败时清空：留着上一次的规则再配一个「加载失败」的空态更让人误解
     rules.value = [];

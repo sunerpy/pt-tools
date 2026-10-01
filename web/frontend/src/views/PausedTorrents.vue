@@ -60,6 +60,7 @@ const {
   state: pausedState,
   errorText: pausedErrorText,
   run: runPaused,
+  isStale: isPausedStale,
 } = useDataState({ filtered: () => hasFilters.value });
 
 const {
@@ -67,6 +68,7 @@ const {
   state: archiveState,
   errorText: archiveErrorText,
   run: runArchive,
+  isStale: isArchiveStale,
 } = useDataState({ filtered: () => hasFilters.value });
 
 /** 页头上的刷新按钮不关心是哪个列表在加载，任一个在加载就转圈 */
@@ -186,9 +188,12 @@ watch(autoRefresh, (val) => {
 });
 
 async function loadPausedTorrents() {
-  const data = await runPaused(() =>
+  const pending = runPaused(() =>
     pausedTorrentsApi.list(pausedPage.value, pausedPageSize.value, siteFilter.value || undefined),
   );
+  const data = await pending;
+  // 30 秒自动刷新撞上换页 / 换站点时，晚到的旧请求不能把新列表清掉
+  if (isPausedStale(pending)) return;
   if (!data) {
     // 失败时清空列表：留着上一次的数据配一个「加载失败」的空态更让人误解
     pausedTorrents.value = [];
@@ -202,13 +207,15 @@ async function loadPausedTorrents() {
 }
 
 async function loadArchiveTorrents() {
-  const data = await runArchive(() =>
+  const pending = runArchive(() =>
     pausedTorrentsApi.listArchive(
       archivePage.value,
       archivePageSize.value,
       siteFilter.value || undefined,
     ),
   );
+  const data = await pending;
+  if (isArchiveStale(pending)) return;
   if (!data) {
     archiveTorrents.value = [];
     archiveTotal.value = 0;

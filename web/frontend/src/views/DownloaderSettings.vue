@@ -91,7 +91,7 @@ const defaultDownloader = computed(() => {
  * 主表的 partial 来自连通性探测：列表本体成功、附带的健康检查有几台没探到。
  * zero 在这三张表上到不了，因为它们都没有筛选/搜索入口（0 行只能是 empty）。
  */
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   failed: () => healthFailedIds.value.length,
 });
 
@@ -215,7 +215,9 @@ onMounted(async () => {
 
 async function loadDownloaders() {
   healthFailedIds.value = [];
-  const data = await run(() => downloadersApi.list());
+  const pending = run(() => downloadersApi.list());
+  const data = await pending;
+  if (isStale(pending)) return;
   if (!data) {
     // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
     downloaders.value = [];
@@ -468,6 +470,7 @@ const {
   state: dirState,
   errorText: dirErrorText,
   run: runDirs,
+  isStale: isDirsStale,
 } = useDataState();
 
 const dirStateSub = computed(() => {
@@ -488,7 +491,13 @@ async function openDirDialog(dl: DownloaderSetting) {
 }
 
 async function loadDirectories(downloaderId: number) {
-  const data = await runDirs(() => downloaderDirectoriesApi.list(downloaderId));
+  const pending = runDirs(() => downloaderDirectoriesApi.list(downloaderId));
+  const data = await pending;
+  /*
+   * 关掉 A 的目录弹窗马上打开 B 的：A 的列表晚到时不能写进 B 的弹窗，
+   * 也不能因为它「返回了 null」把 B 的目录清空再弹一条「加载目录失败」。
+   */
+  if (isDirsStale(pending)) return;
   if (!data) {
     directories.value = [];
     ElMessage.error(dirErrorText.value || "加载目录失败");
@@ -587,6 +596,7 @@ const {
   state: syncState,
   errorText: syncErrorText,
   run: runSyncSites,
+  isStale: isSyncSitesStale,
 } = useDataState();
 
 const syncStateSub = computed(() => {
@@ -611,7 +621,9 @@ async function openSyncDialog(dl: DownloaderSetting) {
  * 对话框一闪而过只留个 toast，用户既不知道同步做没做，也没有入口重试。
  */
 async function loadSyncSites() {
-  const data = await runSyncSites(() => dynamicSitesApi.getDownloaderSummary());
+  const pending = runSyncSites(() => dynamicSitesApi.getDownloaderSummary());
+  const data = await pending;
+  if (isSyncSitesStale(pending)) return;
   if (!data) {
     syncSites.value = [];
     selectedSiteIds.value = [];

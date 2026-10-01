@@ -72,7 +72,7 @@ const totalResults = ref(0);
  * 多站点搜索天生会部分失败，所以 failed 接的是失败站点数：
  * 还有结果时挂一条部分失败提示（hasPartialBanner），一条结果都没有时 partial 成为主状态。
  */
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   filtered: () => searchedKeyword.value !== "",
   failed: () => searchErrors.value.length,
 });
@@ -611,7 +611,7 @@ async function doSearch() {
   searchedKeyword.value = searchKeyword.value.trim();
 
   // 站点列表也套在 run 里：它在请求之前，不然这段时间面板上没有加载态
-  const resp = await run(async () => {
+  const pending = run(async () => {
     await loadAvailableSites();
     const validSelected = selectedSites.value.filter((s) => availableSites.value.includes(s));
     selectedSites.value = validSelected;
@@ -629,6 +629,13 @@ async function doSearch() {
     };
     return await searchApi.multiSite(req);
   });
+  const resp = await pending;
+
+  /*
+   * 上一次搜索还没回来就又搜了一次：晚到的这一份已经过期。不 return 的话，
+   * 它会走下面的失败分支，把新搜索的结果清空，再弹一条「搜索失败」。
+   */
+  if (isStale(pending)) return;
 
   if (!resp) {
     // 失败时清空：留着上一次的结果配一个「加载失败」的状态块更让人误解

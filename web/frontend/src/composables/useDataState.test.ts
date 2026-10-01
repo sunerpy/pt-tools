@@ -125,6 +125,100 @@ describe("useDataState", () => {
     expect(s.state.value).toBe("partial");
   });
 
+  /*
+   * 竞态。连点筛选、翻页、自动刷新撞上手动刷新，都会让同一个 run 同时有两次在飞。
+   * 没有请求序号时，谁最后落地谁说了算：慢的旧请求 A 晚到，会把快的新请求 B 的结果顶掉，
+   * A 失败还会把一个已经成功的页面改成「加载失败」。规则是只有最新一次能写 loading / error，
+   * 被顶掉的那次返回 null、一个状态都不动。
+   */
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it("慢请求 A 先发、快请求 B 后发：B 先完成、A 后完成，状态与返回值都归 B", async () => {
+    const s = useDataState();
+    const a = deferred<string>();
+    const b = deferred<string>();
+    const pA = s.run(() => a.promise);
+    const pB = s.run(() => b.promise);
+    expect(s.state.value).toBe("loading");
+
+    b.resolve("B");
+    expect(await pB).toBe("B");
+    // B 是最新一次，它落地后就不在加载了 —— 不能等着已经过期的 A
+    expect(s.loading.value).toBe(false);
+
+    a.resolve("A");
+    // 过期的 A 不交出结果，调用方拿到 null 后不该写任何东西
+    expect(await pA).toBeNull();
+    expect(s.loading.value).toBe(false);
+    expect(s.error.value).toBeNull();
+    expect(s.state.value).toBe("empty");
+  });
+
+  it("过期的 A 晚到且失败：不能把 B 已经成功的页面改成「加载失败」", async () => {
+    const s = useDataState();
+    const a = deferred<string>();
+    const pA = s.run(() => a.promise);
+    const pB = s.run(() => Promise.resolve("B"));
+    expect(await pB).toBe("B");
+
+    a.reject(new Error("A 超时"));
+    expect(await pA).toBeNull();
+    expect(s.error.value).toBeNull();
+    expect(s.errorText.value).toBe("");
+    expect(s.state.value).toBe("empty");
+  });
+
+  it("过期的 A 先落地：B 还在飞时 loading 不能被它提前关掉，错误也不能写上去", async () => {
+    const s = useDataState();
+    const a = deferred<string>();
+    const b = deferred<string>();
+    const pA = s.run(() => a.promise);
+    const pB = s.run(() => b.promise);
+
+    a.reject(new Error("A 失败"));
+    expect(await pA).toBeNull();
+    expect(s.loading.value).toBe(true);
+    expect(s.error.value).toBeNull();
+    expect(s.state.value).toBe("loading");
+
+    b.resolve("B");
+    expect(await pB).toBe("B");
+    expect(s.loading.value).toBe(false);
+    expect(s.state.value).toBe("empty");
+  });
+
+  it("isStale 区分「被顶掉」和「真失败 / 真返回 null」：只有前者调用方可以什么都不做", async () => {
+    const s = useDataState();
+    const a = deferred<string>();
+    const pA = s.run(() => a.promise);
+    const pB = s.run(() => Promise.resolve("B"));
+    await pB;
+    a.resolve("A");
+    await pA;
+    expect(s.isStale(pA)).toBe(true);
+    expect(s.isStale(pB)).toBe(false);
+
+    // 最新一次真失败：不是 stale，调用方照旧清数据、留错误
+    const pC = s.run(() => Promise.reject(new Error("boom")));
+    expect(await pC).toBeNull();
+    expect(s.isStale(pC)).toBe(false);
+    expect(s.state.value).toBe("error");
+
+    // 最新一次成功但接口回了 null（Go 的 nil 切片编码成 null）：也不是 stale
+    const pD = s.run(() => Promise.resolve(null));
+    expect(await pD).toBeNull();
+    expect(s.isStale(pD)).toBe(false);
+    expect(s.state.value).toBe("empty");
+  });
+
   it("filtered 透传给 0 行时的 empty/zero 判定（getter 必须读响应式来源）", () => {
     const filtered = ref(false);
     const s = useDataState({ filtered: () => filtered.value });

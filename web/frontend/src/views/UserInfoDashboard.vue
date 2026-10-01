@@ -53,7 +53,7 @@ const siteLevelsStore = useSiteLevelsStore();
  * 那时它们早已初始化，不存在 TDZ。
  */
 const failedSites = ref(0);
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   failed: () => failedSites.value,
   filtered: () => siteFilter.value !== "all" || rowQuery.value.trim() !== "",
 });
@@ -724,7 +724,9 @@ const stateSub = computed(() => {
  */
 async function loadData() {
   failedSites.value = 0;
-  const agg = await run(() => userInfoApi.getAggregated());
+  const pending = run(() => userInfoApi.getAggregated());
+  const agg = await pending;
+  if (isStale(pending)) return;
   if (!agg) {
     aggregatedStats.value = null;
     return;

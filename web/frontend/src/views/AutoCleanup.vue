@@ -30,6 +30,7 @@ const {
   state: settingsState,
   errorText: settingsErrorText,
   run: runSettings,
+  isStale: isSettingsStale,
 } = useDataState();
 
 const settingsFailed = computed(
@@ -198,7 +199,9 @@ onMounted(async () => {
 });
 
 async function loadSettings() {
-  const data = await runSettings(() => globalApi.get());
+  const pending = runSettings(() => globalApi.get());
+  const data = await pending;
+  if (isSettingsStale(pending)) return;
   if (!data) {
     // toast 照旧弹，但状态留在页面上的那条提示才是用户两秒后还能看到的东西
     ElMessage.error(settingsErrorText.value || "加载失败");
@@ -281,6 +284,7 @@ const {
   state: previewState,
   errorText: previewErrorText,
   run: runPreview,
+  isStale: isPreviewStale,
   hasPartialBanner: previewPartial,
 } = useDataState({ failed: () => previewFailed.value });
 
@@ -290,6 +294,7 @@ const {
   state: cleanState,
   errorText: cleanErrorText,
   run: runClean,
+  isStale: isCleanStale,
   hasPartialBanner: cleanPartial,
 } = useDataState({
   filtered: () => workdirCategories.value.length < workdirCategoryOptions.length,
@@ -356,7 +361,10 @@ async function loadPreview() {
   previewAsked.value = true;
   // 先清空再请求：这两张表没有面板级 loading 遮罩，留着旧数据的话 loading 态根本看不见
   cleanPreview.value = null;
-  const data = await runPreview(() => maintenanceApi.preview());
+  const pending = runPreview(() => maintenanceApi.preview());
+  const data = await pending;
+  // 清理完成后的自动预览撞上手动预览：晚到的旧请求不弹「预览失败」
+  if (isPreviewStale(pending)) return;
   if (!data) {
     ElMessage.error(previewErrorText.value || "预览失败");
     return;
@@ -392,13 +400,15 @@ async function executeClean() {
 
   cleanAsked.value = true;
   cleanResult.value = null;
-  const res = await runClean(() =>
+  const pending = runClean(() =>
     maintenanceApi.clean({
       categories: workdirCategories.value,
       dryRun: false,
       keepBackups: keepBackups.value,
     }),
   );
+  const res = await pending;
+  if (isCleanStale(pending)) return;
   if (!res) {
     // 失败时不留旧结果：上一次的「已删 12 项」配一块「清理失败」比什么都不显示更误导
     ElMessage.error(cleanErrorText.value || "清理失败");

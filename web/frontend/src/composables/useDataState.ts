@@ -83,8 +83,23 @@ export interface UseDataStateReturn {
   /**
    * 跑一次加载：自动管 loading、清上次的错误、记这次的错误。
    * 失败时返回 null 并把错误留在 error 上，不吞掉 —— 调用方想弹 toast 照旧可以。
+   *
+   * 同一个 run 同时有几次在飞时（连点筛选、翻页、自动刷新撞上手动刷新），**只有最新一次**
+   * 能写 loading / error；更早的那几次被顶掉，落地时返回 null，一个状态都不动。
+   * 所以 null 有三种来源：被顶掉了、真失败了、接口真的回了 null —— 前一种要用 `isStale`
+   * 认出来直接 return，否则调用方的失败分支会把新请求刚写好的数据清空。
    */
   run: <T>(fn: () => Promise<T>) => Promise<T | null>;
+  /**
+   * 这一次 run（传它返回的那个 promise）之后是否又发起过新的 run。是的话它的结果已经过期，
+   * 调用方什么都不该写，交给更新的那一次：
+   *
+   *   const pending = run(() => api.list());
+   *   const data = await pending;
+   *   if (isStale(pending)) return;
+   *   if (!data) { ...失败分支：清数据 / 弹 toast }
+   */
+  isStale: (pending: Promise<unknown>) => boolean;
   /** 手动清错误，比如用户点了「重试」之前 */
   clearError: () => void;
 }
@@ -121,17 +136,36 @@ export function useDataState(opts: UseDataStateOptions = {}): UseDataStateReturn
     return count > 0 && (opts.failed?.() ?? 0) > 0;
   }
 
-  async function run<T>(fn: () => Promise<T>): Promise<T | null> {
+  /*
+   * 请求序号。每次 run 领一个号，落地时号码不是最新的就说明期间又发起过新的 run ——
+   * 没有这个号，谁最后落地谁说了算：慢的旧请求晚到会把新请求的结果顶掉，
+   * 旧请求失败还会把一个已经成功的页面改成「加载失败」。
+   */
+  let seq = 0;
+  const tokenOf = new WeakMap<Promise<unknown>, number>();
+
+  function run<T>(fn: () => Promise<T>): Promise<T | null> {
+    const token = ++seq;
     loading.value = true;
     error.value = null;
-    try {
-      return await fn();
-    } catch (e) {
-      error.value = e;
-      return null;
-    } finally {
-      loading.value = false;
-    }
+    const pending = (async (): Promise<T | null> => {
+      try {
+        const value = await fn();
+        return token === seq ? value : null;
+      } catch (e) {
+        if (token === seq) error.value = e;
+        return null;
+      } finally {
+        if (token === seq) loading.value = false;
+      }
+    })();
+    tokenOf.set(pending, token);
+    return pending;
+  }
+
+  function isStale(pending: Promise<unknown>): boolean {
+    const token = tokenOf.get(pending);
+    return token !== undefined && token !== seq;
   }
 
   return {
@@ -141,6 +175,7 @@ export function useDataState(opts: UseDataStateOptions = {}): UseDataStateReturn
     hasPartialBanner,
     errorText,
     run,
+    isStale,
     clearError: () => {
       error.value = null;
     },

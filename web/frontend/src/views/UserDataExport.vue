@@ -28,7 +28,7 @@ const isMobile = useIsMobile();
  * 六态（设计文档 §5）：以前拉取失败只弹 toast，页面随后画成「还没有可导出的统计」。
  * 这一页没有筛选，也只有一个数据源，所以只会出现 loading / empty / error / perm。
  */
-const { loading, state, errorText, run } = useDataState();
+const { loading, state, errorText, run, isStale } = useDataState();
 
 /** 状态块副标题：失败给真实错误，空态给下一步动作 */
 const stateSub = computed(() => {
@@ -309,7 +309,9 @@ async function preloadSiteLogos() {
 }
 
 async function loadData() {
-  const data = await run(() => userInfoApi.getAggregated());
+  const pending = run(() => userInfoApi.getAggregated());
+  const data = await pending;
+  if (isStale(pending)) return;
   if (!data) {
     aggregatedStats.value = null;
     return;

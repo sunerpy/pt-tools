@@ -62,7 +62,7 @@ const loginStatesFailed = ref(false);
  * 这一页的 partial 是真实存在的：站点清单和登录状态是两个接口，登录状态挂了但清单
  * 拿到了，表格照常渲染，只是「判定活跃 / 剩余天数 / 探测模式」三列没有依据。
  */
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   failed: () => (loginStatesFailed.value ? 1 : 0),
 });
 
@@ -132,7 +132,7 @@ onMounted(async () => {
 async function loadSites() {
   loginStatesFailed.value = false;
 
-  const data = await run(async () => {
+  const pending = run(async () => {
     // allSettled 而不是 all：登录状态单独挂掉时站点清单还能用，不该整页变成 error
     const [siteRes, stateRes] = await Promise.allSettled([
       sitesApi.list(),
@@ -140,12 +140,16 @@ async function loadSites() {
     ]);
     // 站点清单是主数据，它失败就没有「部分可用」可言，抛出去让状态机判 error / perm
     if (siteRes.status === "rejected") throw siteRes.reason;
-    loginStatesFailed.value = stateRes.status === "rejected";
     return {
       siteMap: siteRes.value,
       states: stateRes.status === "fulfilled" ? stateRes.value : [],
+      // 留到确认这一份没过期之后再写：旧请求的登录态失败不该把新列表标成 partial
+      statesFailed: stateRes.status === "rejected",
     };
   });
+  const data = await pending;
+  // 期间又刷新了一次（比如保存后重载）：晚到的旧请求不清新列表，也不弹「加载失败」
+  if (isStale(pending)) return;
 
   if (!data) {
     // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
@@ -156,6 +160,7 @@ async function loadSites() {
   }
 
   sites.value = data.siteMap;
+  loginStatesFailed.value = data.statesFailed;
   const byName: Record<string, SiteLoginState> = {};
   for (const st of data.states ?? []) {
     byName[st.site_name] = st;

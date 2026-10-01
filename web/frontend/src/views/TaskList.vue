@@ -156,7 +156,9 @@ const hasFilters = computed(() => {
  * 表格停在 empty 上，用户看到的是「还没有数据」。请求失败必须留在页面上，
  * 而且 401/403 要画成「无权访问」，否则用户会一直点重试。
  */
-const { loading, state, errorText, run } = useDataState({ filtered: () => hasFilters.value });
+const { loading, state, errorText, run, isStale } = useDataState({
+  filtered: () => hasFilters.value,
+});
 
 const emptySub = computed(() =>
   hasFilters.value ? "换个关键词，或用工具栏右侧的重置清掉筛选" : "RSS 任务跑过之后这里会出现记录",
@@ -282,7 +284,10 @@ async function loadTasks() {
   if (discountFilter.value) params.set("free_level", discountFilter.value);
   for (const key of activeStatusKeys.value) params.set(key, "1");
 
-  const data = await run<TaskListResponse>(() => tasksApi.list(params));
+  const pending = run<TaskListResponse>(() => tasksApi.list(params));
+  const data = await pending;
+  // 期间又换了筛选 / 页码：这一份已经过期，结果交给更新的那次去写
+  if (isStale(pending)) return;
   if (!data) {
     // 失败时清空列表：留着上一次的数据配一个「加载失败」的空态更让人误解
     tasks.value = [];

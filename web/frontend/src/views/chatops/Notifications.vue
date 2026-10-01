@@ -114,7 +114,7 @@ function setView(v: "grid" | "rows") {
  * 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有通知通道」，
  * 用户会以为通道被清空了，去重新配一遍。这一页没有筛选，所以不会出现 zero。
  */
-const { loading, state, errorText, run } = useDataState();
+const { loading, state, errorText, run, isStale } = useDataState();
 
 /**
  * 画板 22 在四张通道卡之后还有三张：
@@ -219,7 +219,9 @@ onMounted(async () => {
 });
 
 async function loadNotifications() {
-  const data = await run(() => chatopsApi.notifications.list());
+  const pending = run(() => chatopsApi.notifications.list());
+  const data = await pending;
+  if (isStale(pending)) return;
   if (!data) {
     // 失败时清空：留着旧列表配一个「加载失败」更让人误解
     notifications.value = [];

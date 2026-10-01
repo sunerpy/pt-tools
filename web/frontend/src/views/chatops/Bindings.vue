@@ -41,7 +41,7 @@ const configs = ref<NotificationConfig[]>([]);
  * 发码对话框的通道下拉也会是空的 —— 这件事必须写在页面上，光让通道名变成编号没人看得懂。
  */
 const configsFailed = ref(0);
-const { loading, state, errorText, run, hasPartialBanner } = useDataState({
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
   failed: () => configsFailed.value,
 });
 
@@ -86,18 +86,24 @@ onUnmounted(() => {
 
 async function loadData() {
   configsFailed.value = 0;
-  const data = await run(async () => {
+  /*
+   * 渠道配置随绑定列表一起交回来，确认这一份没过期之后才写：写在 run 里面的话，
+   * 被顶掉的旧请求照样会改通道名，它的渠道配置失败还会把新页面标成 partial。
+   */
+  const pending = run(async () => {
+    let confsFailed = false;
     const [bindingsRes, configsRes] = await Promise.all([
       chatopsApi.bindings.list(),
       // 渠道配置只用来把 conf_id 显示成通道名、以及填发码下拉，单独失败不该把整页判死
       chatopsApi.notifications.list().catch(() => {
-        configsFailed.value += 1;
+        confsFailed = true;
         return [] as NotificationConfig[];
       }),
     ]);
-    configs.value = configsRes || [];
-    return bindingsRes;
+    return { bindingsRes, configsRes: configsRes || [], confsFailed };
   });
+  const data = await pending;
+  if (isStale(pending)) return;
 
   if (!data) {
     // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
@@ -105,8 +111,10 @@ async function loadData() {
     activeBindings.value = [];
     return;
   }
-  pendingBindings.value = data.pending || [];
-  activeBindings.value = data.bindings || [];
+  configs.value = data.configsRes;
+  configsFailed.value = data.confsFailed ? 1 : 0;
+  pendingBindings.value = data.bindingsRes.pending || [];
+  activeBindings.value = data.bindingsRes.bindings || [];
 }
 
 function getCountdown(expiresAt?: string) {

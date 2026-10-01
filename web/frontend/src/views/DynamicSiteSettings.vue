@@ -85,6 +85,7 @@ const {
   state: sitesState,
   errorText: sitesErrorText,
   run: runSites,
+  isStale: isSitesStale,
   hasPartialBanner: sitesPartialBanner,
 } = useDataState({ failed: () => (downloadersFailed.value ? 1 : 0) });
 
@@ -93,6 +94,7 @@ const {
   state: tplState,
   errorText: tplErrorText,
   run: runTemplates,
+  isStale: isTemplatesStale,
 } = useDataState();
 
 /** 面板遮罩和刷新按钮看的是「还有请求在飞」 */
@@ -115,13 +117,17 @@ onMounted(async () => {
 });
 
 async function loadSites() {
-  const data = await runSites(() => dynamicSitesApi.list());
+  const pending = runSites(() => dynamicSitesApi.list());
+  const data = await pending;
+  if (isSitesStale(pending)) return;
   // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
   dynamicSites.value = data ?? [];
 }
 
 async function loadTemplates() {
-  const data = await runTemplates(() => templatesApi.list());
+  const pending = runTemplates(() => templatesApi.list());
+  const data = await pending;
+  if (isTemplatesStale(pending)) return;
   templates.value = data ?? [];
 }
 

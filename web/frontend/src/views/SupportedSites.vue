@@ -17,7 +17,7 @@ import { computed, onMounted, ref } from "vue";
 const isMobile = useIsMobile();
 
 /** 六态（设计文档 §5）：以前加载失败只弹一个 toast，列表随后画成「还没有数据」 */
-const { loading, state, errorText, run } = useDataState({
+const { loading, state, errorText, run, isStale } = useDataState({
   filtered: () => Boolean(search.value.trim() || schemaFilter.value || addedFilter.value),
 });
 const definitions = ref<SupportedSiteDefinition[]>([]);
@@ -82,7 +82,9 @@ async function loadEnabled() {
 }
 
 async function loadDefinitions() {
-  const data = await run(() => sitesApi.listDefinitions());
+  const pending = run(() => sitesApi.listDefinitions());
+  const data = await pending;
+  if (isStale(pending)) return;
   if (!data) {
     // 失败时清空：留着旧列表配一个「加载失败」更让人误解
     definitions.value = [];

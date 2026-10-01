@@ -17,7 +17,7 @@ import { computed, onMounted, ref } from "vue";
  * 前端默认值，用户照着点「保存」会把服务端的真实配置覆盖掉。所以失败时用状态块
  * 顶掉表单，并且不给保存入口。
  */
-const { loading, state, errorText, run } = useDataState();
+const { loading, state, errorText, run, isStale } = useDataState();
 const saving = ref(false);
 const showWarning = ref(false);
 /** 配置真的读回来过一次，摘要行才有意义（默认值不是配置） */
@@ -98,7 +98,9 @@ const headSub = computed(() => {
 });
 
 async function loadData() {
-  const data = await run(() => globalApi.get());
+  const pending = run(() => globalApi.get());
+  const data = await pending;
+  if (isStale(pending)) return;
   if (!data) {
     loaded.value = false;
     return;
