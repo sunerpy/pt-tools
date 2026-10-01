@@ -559,18 +559,19 @@ function getConfNameByConfId(confId?: number) {
         <!--
           之前这里写「管理员身份在通道凭证里配置，绑上不等于是管理员」—— 与代码相反：
           internal/app/binding_service.go 的 ConsumeCode 给每个新绑定写 PtAdmin: true，
-          MessageChain 判管理员命令只看这个字段。通道凭证里的名单只有 Telegram 用来过滤谁能和
-          机器人说话（adapter/telegram/inbound.go 的 permitted）；QQ 的 admin_qq_users /
-          allowed_qq_users 只用来挑测试消息的收件人。
+          MessageChain 判管理员命令只看这个字段。通道凭证里的两栏名单只决定谁能和机器人说话：
+          Telegram 见 adapter/telegram/inbound.go 的 permitted（不在名单里回一条拒绝），
+          QQ 见 adapter/qq/inbound.go 的 isUserAllowed（不在名单里直接忽略）。
         -->
         <li>
           绑定之后这个聊天账号才能发命令，而且目前<strong>每个完成绑定的账号都拥有管理员权限</strong>，
           可以暂停、删除种子和管理 RSS 订阅。绑定码只发给信任的人，不再需要的绑定及时撤销。
         </li>
         <li>
-          Telegram 通道凭证里的 <code>admin_users</code> /
-          <code>allowed_users</code> 决定谁能和机器人说话；QQ 通道目前不按
-          <code>admin_qq_users</code> / <code>allowed_qq_users</code> 过滤消息。
+          通道凭证里的两栏名单（Telegram 的 <code>admin_users</code> /
+          <code>allowed_users</code>，QQ 的 <code>admin_qq_users</code> /
+          <code>allowed_qq_users</code>）只决定谁能和机器人说话，
+          两栏都空时谁都用不了；它们不决定谁是管理员。
         </li>
       </ol>
     </PtPanel>

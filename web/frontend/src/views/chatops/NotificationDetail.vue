@@ -581,10 +581,13 @@ function goBack() {
                 :rows="2"
                 placeholder="逗号分隔的 QQ 号" />
               <!--
-                QQ 适配器把这两栏读进来之后没有任何地方用它们过滤或授权（adapter/qq/adapter.go），
-                唯一的用处是 app/notification_service.go 的 qqTestChatID 挑测试消息的收件人。
+                两栏都是对话白名单：adapter/qq/inbound.go 的 isUserAllowed 只放行出现在其中一栏的号码，
+                其余消息直接忽略。它们不决定管理员权限（看绑定上的 PtAdmin）；另外
+                app/notification_service.go 的 qqTestChatID 把测试消息发给这一栏的第一个号码。
               -->
-              <div class="field-tip">目前只用来决定测试消息发给谁（第一个号码）</div>
+              <div class="field-tip">
+                这里和下面「允许 QQ」里的号码才能与机器人对话；测试消息发给这里的第一个号码
+              </div>
             </el-form-item>
             <el-form-item label="允许 QQ（allowed_qq_users）">
               <el-input
@@ -593,7 +596,7 @@ function goBack() {
                 :rows="2"
                 placeholder="逗号分隔的 QQ 号" />
               <div class="field-tip">
-                目前不用于过滤消息：只有完成绑定的账号能执行命令，而且都拥有管理权限
+                同样能与机器人对话；两栏都留空时，任何人发来的消息都会被忽略。管理命令目前对每个完成绑定的账号开放
               </div>
             </el-form-item>
           </template>
