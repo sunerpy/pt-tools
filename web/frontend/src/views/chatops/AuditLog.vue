@@ -198,20 +198,27 @@ const showRange = computed(() => timeQuick.value === "custom");
 
 const QUICK_HOURS: Record<string, number> = { "1h": 1, "24h": 24, "7d": 24 * 7 };
 
+/*
+ * 快捷档是「从现在往回数」的窗口：不落进 dateRange，由 fetchAuditLogs 每次请求按当时重算 since，
+ * 而且不发 until。原来点选时就把 [那一刻 - N 小时, 那一刻] 写死进 dateRange，之后翻页、刷新
+ * 都带着那个旧 until，新产生的记录永远看不到。只有「自定义…」选出来的区间才是两头都定死的。
+ */
 function applyTimeQuick(v: string) {
+  const prevHours = QUICK_HOURS[timeQuick.value];
   timeQuick.value = v;
   if (v === "custom") {
-    /* 保留已有的自定义区间，等用户自己选 */
+    /*
+     * 保留已有的自定义区间，等用户自己选。从快捷档切过来、还没有自定义区间时，
+     * 用刚才那个窗口当初值 —— 选择器与表格说的是同一段时间。
+     */
+    if (!filters.dateRange && prevHours !== undefined) {
+      const end = new Date();
+      const start = new Date(end.getTime() - prevHours * 3600_000);
+      filters.dateRange = [start.toISOString(), end.toISOString()];
+    }
     return;
   }
-  const hours = QUICK_HOURS[v];
-  if (hours === undefined) {
-    filters.dateRange = null;
-  } else {
-    const end = new Date();
-    const start = new Date(end.getTime() - hours * 3600_000);
-    filters.dateRange = [start.toISOString(), end.toISOString()];
-  }
+  filters.dateRange = null;
   handleFilterChange();
 }
 
@@ -252,6 +259,10 @@ function shortTime(input: string | number | Date) {
  * 写成「全部日志的时间跨度」是编的：接口只回当前这一页，最早一条在哪不知道。
  */
 const timeRangeText = computed(() => {
+  /* 快捷档没有定死的端点，报档位本身（「最近 1 小时」），它就是用户此刻在看的范围 */
+  if (QUICK_HOURS[timeQuick.value] !== undefined) {
+    return TIME_QUICK.find((t) => t.value === timeQuick.value)?.label ?? "";
+  }
   if (filters.dateRange && filters.dateRange.length === 2) {
     const from = shortTime(filters.dateRange[0]);
     const to = shortTime(filters.dateRange[1]);
@@ -303,8 +314,12 @@ async function fetchAuditLogs() {
   params.append("page", pagination.page.toString());
   params.append("page_size", pagination.pageSize.toString());
 
-  if (filters.dateRange && filters.dateRange.length === 2) {
-    // 后端（web/api_chatops.go）读的是 since / until；之前发 start_time / end_time，时间筛选从来没生效过
+  // 后端（web/api_chatops.go）读的是 since / until；之前发 start_time / end_time，时间筛选从来没生效过
+  const quickHours = QUICK_HOURS[timeQuick.value];
+  if (quickHours !== undefined) {
+    /* 快捷档：按这一次请求的时刻往回数，不发 until（后端 until 为空即不设上限） */
+    params.append("since", new Date(Date.now() - quickHours * 3600_000).toISOString());
+  } else if (timeQuick.value === "custom" && filters.dateRange && filters.dateRange.length === 2) {
     params.append("since", filters.dateRange[0]);
     params.append("until", filters.dateRange[1]);
   }
