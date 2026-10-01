@@ -87,6 +87,10 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 2. In the channel list, click the new channel to open its details.
 3. Under **Credentials and connection (凭证与连接)**, fill in the fields below and click **Save credentials (保存凭证)**. The channel reconnects with the new settings as soon as they are saved.
 
+![The dialog for adding a notification channel](../../guide/images/chatops/chatops-add-channel-dialog.webp)
+
+> The Add channel (添加通道) dialog: choose the channel type, enter a name and the bot token, and click Create channel (创建通道).
+
 ### What the fields mean
 
 | Field             | Purpose                                                                                               |
@@ -114,7 +118,7 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 
 The long-polling timeout is fixed at 30 seconds; there is nothing to set.
 
-![The Telegram channel's credentials in pt-tools](../../guide/images/chatops/chatops-telegram-detail.png)
+![The Telegram channel's credentials in pt-tools](../../guide/images/chatops/chatops-telegram-detail.webp)
 
 > Web UI → the Telegram channel's details → Credentials and connection, showing every field, including the proxy URL.
 
@@ -138,7 +142,7 @@ In the web UI, open ChatOps → ChatOps binding (ChatOps 绑定) and click **Gen
 - Leave the validity at 5 minutes (the default)
 - Click Generate
 
-![The dialog for generating a binding code](../../guide/images/chatops/chatops-bindings-dialog.png)
+![The dialog for generating a binding code](../../guide/images/chatops/chatops-bindings-dialog.webp)
 
 > Once generated, the code appears in the Pending (待绑定) list: 8 characters, without easily confused characters such as 0/O/1/I/L.
 
@@ -150,7 +154,7 @@ Copy the 8-character code (such as `A3F7KP2M`) and send it to the bot in a priva
 
 When the bot replies 绑定成功 ("linked"), you are done. Your account then appears in the Linked users (已绑定用户) list.
 
-![The list of linked accounts](../../guide/images/chatops/chatops-bindings-list.png)
+![The list of linked accounts](../../guide/images/chatops/chatops-bindings-list.webp)
 
 > After linking, the account appears in the Linked users list with the channel type, the user ID (partly hidden) and the admin flag.
 

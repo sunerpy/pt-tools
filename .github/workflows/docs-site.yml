@@ -10,6 +10,7 @@ on:
     paths:
       - "docs/**"
       - "!docs/README.md"
+      - "!docs/readme/**"
       - "!docs/brand.md"
       - "!docs/design/webui-board-spec.md"
       - "web/frontend/public/logo.svg"
