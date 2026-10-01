@@ -142,6 +142,30 @@ func TestLoginPageRendersBoardContent(t *testing.T) {
 // loginFootNote 是登录卡底部的提示：只指路、不写口令字面量。
 const loginFootNote = "首次登录的初始账号见安装文档；登录后请立刻在「修改密码」里更换。"
 
+/*
+提示框的两枚图标和密码框的两只眼睛都是 <svg>。SVGElement 没有 hidden 这个 IDL 属性
+（它只定义在 HTMLElement 上），`svg.hidden = true` 只是给 JS 对象挂了个普通属性，
+DOM 上的 hidden 特性纹丝不动 —— 于是用户不存在时 warn 图标出不来，点眼睛也切不过去。
+要改的是特性本身：toggleAttribute('hidden', cond)。
+*/
+func TestLoginScriptTogglesSvgHiddenAttribute(t *testing.T) {
+	start := strings.Index(loginHTML, `<script>`+"\n(function () {\n  var form")
+	require.GreaterOrEqual(t, start, 0, "找不到登录表单脚本")
+	script := loginHTML[start:]
+	script = script[:strings.Index(script, "</script>")]
+
+	assert.NotRegexp(t, regexp.MustCompile(`\.hidden\s*=[^=]`), script,
+		"SVG 元素上给 .hidden 赋值不会改 DOM 特性，图标切换会失效")
+	for _, want := range []string{
+		"iconDang.toggleAttribute('hidden', missing)",
+		"iconWarn.toggleAttribute('hidden', !missing)",
+		`btn.querySelector('[data-eye="on"]').toggleAttribute('hidden', reveal)`,
+		`btn.querySelector('[data-eye="off"]').toggleAttribute('hidden', !reveal)`,
+	} {
+		assert.Contains(t, script, want)
+	}
+}
+
 func TestLoginBrandAssetsAreNotBehindAuth(t *testing.T) {
 	srv := NewServer(nil, nil)
 	mux := http.NewServeMux()

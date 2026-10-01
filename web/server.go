@@ -633,8 +633,10 @@ const loginHTML = `{{define "login"}}
     boxText.textContent = msg;
     if (missing) box.classList.add('login-alert--warn');
     else box.classList.remove('login-alert--warn');
-    iconDang.hidden = missing;
-    iconWarn.hidden = !missing;
+    /* 两枚图标都是 <svg>：SVGElement 没有 hidden 这个 IDL 属性，赋值 .hidden 不会改特性，
+       必须直接切 hidden 特性（style.css 里有 svg[hidden] { display: none } 兜着） */
+    iconDang.toggleAttribute('hidden', missing);
+    iconWarn.toggleAttribute('hidden', !missing);
     box.classList.add('is-open');
   }
 
@@ -644,8 +646,8 @@ const loginHTML = `{{define "login"}}
       var reveal = input.type === 'password';
       input.type = reveal ? 'text' : 'password';
       btn.setAttribute('aria-label', reveal ? '隐藏密码' : '显示密码');
-      btn.querySelector('[data-eye="on"]').hidden = reveal;
-      btn.querySelector('[data-eye="off"]').hidden = !reveal;
+      btn.querySelector('[data-eye="on"]').toggleAttribute('hidden', reveal);
+      btn.querySelector('[data-eye="off"]').toggleAttribute('hidden', !reveal);
       input.focus();
     });
   });
