@@ -407,9 +407,11 @@ const siteTable = ref<TableInstance>();
  * 1080 高的屏上约 20 行；不按固定比例算，是为了在矮屏上不出现「表体的滚动区伸到首屏外」的套娃滚动。
  * 拖过把手就用用户定的高度，存在本地，双击把手（或 Enter）恢复。
  *
- * 只用 max-height，不在 height / max-height 之间切换：Element 的 setHeight 收到 undefined 时什么也不做，
+ * Element 的 height / max-height 两个属性之间不切换：setHeight 收到 undefined 时什么也不做，
  * 不会清掉上一次写在表格根节点上的内联样式 —— 实测从自适应切到手动后，残留的 max-height: 883px
- * 把用户拖到的 1083 封死了。始终传数字，每次都会覆盖。手动高度因此是「最多这么高」：行少时贴合内容。
+ * 把用户拖到的 1083 封死了。所以 max-height 始终传数字，每次都会覆盖。
+ * 手动高度另由 siteTableStyle 在根节点写一个确定的 height（Vue 管的 style，回到自适应时它自己摘掉）：
+ * 只靠 max-height 的话，站点少、表贴合内容时它只是个上限，往下拉面板纹丝不动。
  */
 const viewportH = ref(window.innerHeight);
 /** 内容滚动区的可视高度，与表格在滚动区里的纵向位置（不随滚动变） */
@@ -433,6 +435,13 @@ const {
   set: setSiteTableHeight,
   reset: resetSiteTableHeight,
 } = useResizableHeight("pt-userinfo-sites-height-v1", siteTableBounds);
+/*
+ * 手动高度是「就这么高」：行少时行下面留白，横向滚动条仍贴着面板底边
+ * （根节点高度确定之后，Element 内层 height: 100% 的滚动区才撑得满）。
+ */
+const siteTableStyle = computed(() =>
+  siteTableManual.value == null ? undefined : { height: `${siteTableManual.value}px` },
+);
 /** 表格此刻的实际高度：把手从这里开始算拖了多少 */
 const siteTableHeight = ref(0);
 let siteTableObserver: ResizeObserver | null = null;
@@ -1075,6 +1084,7 @@ onUnmounted(() => {
           :max-height="siteTableManual ?? siteTableAutoMax"
           scrollbar-always-on
           style="width: 100%"
+          :style="siteTableStyle"
           :default-sort="{ prop: rowSort, order: SORT_ORDER[rowSort] }"
           highlight-current-row
           @sort-change="onTableSortChange">

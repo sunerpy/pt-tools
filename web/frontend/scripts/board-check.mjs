@@ -125,9 +125,11 @@ const EXPECT = {
       {
         /*
          * 站点表把手（用户原话「支持下拉 / 上拉拖拽方式动态调整面板高度」）。页面 JS 合成的指针事件没有活动指针，
-         * 这里走键盘：↑ 一步变矮 24，Enter 回到自适应（高度回到原值、localStorage 里的记录清掉）。
+         * 这里走键盘：↓ 一步变高 24、↑ 一步变矮 24，Enter 回到自适应（高度回到原值、localStorage 里的记录清掉）。
+         * ↓ 必须查：假数据 8 个站点，表是贴合内容的高度 —— 手动高度只写 max-height 时它只是上限，
+         * 往下拉纹丝不动（评审抓到的缺陷），只查 ↑ 是查不出来的。
          */
-        desc: "站点表把手：键盘 ↑ 变矮一步，Enter 恢复自适应",
+        desc: "站点表把手：键盘 ↓ 变高、↑ 变矮，Enter 恢复自适应",
         want: "verdict=ok",
         js: `(async () => {
           const until = async (fn, ms) => {
@@ -138,19 +140,27 @@ const EXPECT = {
           const table = document.querySelector('.dash .pt-grid');
           const handle = document.querySelector('[data-testid=pt-resize-handle]');
           if (!table || !handle) return 'no-handle';
-          localStorage.removeItem('pt-userinfo-sites-height-v1');
+          const KEY = 'pt-userinfo-sites-height-v1';
+          localStorage.removeItem(KEY);
           const h0 = table.offsetHeight;
           handle.focus();
-          handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
-          await until(() => table.offsetHeight !== h0, 2000);
-          const h1 = table.offsetHeight;
-          const stored = localStorage.getItem('pt-userinfo-sites-height-v1');
-          handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-          await until(() => table.offsetHeight === h0, 2000);
-          const h2 = table.offsetHeight;
-          const cleared = localStorage.getItem('pt-userinfo-sites-height-v1') === null;
-          const ok = h0 - h1 === 24 && stored === String(h1) && h2 === h0 && cleared && handle.getAttribute('role') === 'separator';
-          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 高度 ' + h0 + '→' + h1 + '→' + h2 + '，存 ' + stored + '，清掉 ' + cleared;
+          const press = async (key, until_) => {
+            handle.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            await until(until_, 2000);
+            return table.offsetHeight;
+          };
+          const hDown = await press('ArrowDown', () => table.offsetHeight !== h0);
+          const storedDown = localStorage.getItem(KEY);
+          const hBack1 = await press('Enter', () => table.offsetHeight === h0);
+          const hUp = await press('ArrowUp', () => table.offsetHeight !== h0);
+          const storedUp = localStorage.getItem(KEY);
+          const hBack2 = await press('Enter', () => table.offsetHeight === h0);
+          const cleared = localStorage.getItem(KEY) === null;
+          const ok = hDown - h0 === 24 && storedDown === String(hDown) && hBack1 === h0 &&
+            h0 - hUp === 24 && storedUp === String(hUp) && hBack2 === h0 && cleared &&
+            handle.getAttribute('role') === 'separator';
+          return 'verdict=' + (ok ? 'ok' : 'MISMATCH') + ' 高度 ' + h0 + ' ↓' + hDown + ' ⏎' + hBack1 +
+            ' ↑' + hUp + ' ⏎' + hBack2 + '，存 ' + storedDown + ' / ' + storedUp + '，清掉 ' + cleared;
         })()`,
       },
       {
