@@ -24,7 +24,7 @@ import PtTag from "@/components/ui/PtTag.vue";
 import PtToolbar from "@/components/ui/PtToolbar.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const COLUMN_STORAGE_KEY = "downloader-hub-visible-columns-v1";
@@ -1351,6 +1351,37 @@ function selectedCanUse(
   });
 }
 
+/**
+ * 删除前的确认。删除直接落到下载器上，没有回收站；「删除+文件」连磁盘上已下载的数据一起删，
+ * 不可恢复 —— 原来批量条和右键菜单点下去就直接发请求，一次误点就是整批数据没了。
+ * 返回 false 表示用户取消或关掉了对话框，调用方一个请求都不发。
+ */
+async function confirmDelete(
+  action: "delete" | "delete_with_files",
+  count: number,
+  title?: string,
+): Promise<boolean> {
+  const withFiles = action === "delete_with_files";
+  const target = count === 1 && title ? `1 个任务「${title}」` : `${count} 个任务`;
+  try {
+    await ElMessageBox.confirm(
+      withFiles
+        ? `将从下载器删除 ${target}，并删除已下载到磁盘上的文件。文件删除后无法恢复，确认删除？`
+        : `将从下载器删除 ${target}，已下载的文件留在磁盘上。确认删除？`,
+      withFiles ? "删除任务和文件" : "删除任务",
+      {
+        type: withFiles ? "error" : "warning",
+        confirmButtonText: withFiles ? "删除任务和文件" : "删除任务",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function batchAction(
   action: "pause" | "resume" | "delete" | "delete_with_files" | "recheck",
 ) {
@@ -1358,11 +1389,22 @@ async function batchAction(
     ElMessage.warning("请先选择任务");
     return;
   }
+  /*
+   * 目标在弹确认之前定下来：对话框开着时 5 秒一拍的静默刷新照样会重放勾选，
+   * 确认之后再读选择，发出去的可能和对话框里写的条数对不上。确认的是哪几条就删哪几条。
+   */
+  const targets = targetsFromSelection();
+  if (
+    (action === "delete" || action === "delete_with_files") &&
+    !(await confirmDelete(action, targets.length, selectedRows.value[0]?.title))
+  ) {
+    return;
+  }
   actionLoading.value = true;
   try {
     const resp = await downloaderTorrentsApi.batchAction({
       action,
-      targets: targetsFromSelection(),
+      targets,
     });
     ElMessage.success(`完成: 成功 ${resp.success_count}，失败 ${resp.failed_count}`);
     await loadTorrents();
@@ -1520,6 +1562,13 @@ async function handleContextAction(payload: {
     ElMessage.info(
       `${payload.action === "set_category" ? "设置分类" : "设置标签"} - ${payload.row.title} (暂未实现后端接口)`,
     );
+    return;
+  }
+  /* 两种表格（普通 / 虚拟滚动）的右键菜单都走到这里，确认只需要在这一处 */
+  if (
+    (payload.action === "delete" || payload.action === "delete_with_files") &&
+    !(await confirmDelete(payload.action, 1, payload.row.title))
+  ) {
     return;
   }
 
@@ -2242,7 +2291,8 @@ function toggleSidebar() {
             <ul class="hub__note">
               <li>
                 这里列的是<strong>下载器里的任务</strong>，不是 pt-tools 的 RSS
-                任务；后者在「任务列表」。 删除动作直接落到下载器，pt-tools 不做二次确认之外的拦截。
+                任务；后者在「任务列表」。删除直接落到下载器、没有回收站：「删除」和「删除+文件」
+                都会先弹确认框写明条数，确认后才发出；「删除+文件」连磁盘上的数据一起删，不可恢复。
               </li>
               <li>
                 「全部下载器」视图会逐台请求再合并；某台连不上时列表照常显示其余各台，
