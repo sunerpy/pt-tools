@@ -1,0 +1,92 @@
+# Pushes the pages of pt-tools.firlab.app into sunerpy/firlab, which builds and deploys the site
+# (firlab: `pt-tools/`, `.github/workflows/deploy-pt-tools.yml`). docs/README.md describes the
+# whole path.
+#
+# The sync pushes instead of the site pulling: the event that should update the site, a merge
+# here, happens in this repository, and the credential stays here and reaches firlab only. The
+# copy rules and checks live in firlab's sync script, which a local preview runs too, so this
+# workflow and a preview produce the same tree.
+#
+# Needs FIRLAB_DOCS_TOKEN: a fine-grained personal access token for sunerpy/firlab only, with
+# Contents read and write and nothing else. GitHub has no API that creates one, so it is made by
+# hand (.github/README-secrets.md).
+name: Publish docs site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      # Not pages of the site: the index GitHub shows for the folder, the brand notes, the
+      # redesign log. A change to them alone has nothing to publish.
+      - "!docs/README.md"
+      - "!docs/brand.md"
+      - "!docs/design/webui-board-spec.md"
+      - "web/frontend/public/logo.svg"
+      - ".github/workflows/publish-docs-site.yml"
+  workflow_dispatch:
+
+# Queue, never cancel: a cancelled run could leave a pushed sync without its successor.
+concurrency:
+  group: publish-docs-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Push the site's pages to firlab
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout pt-tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pt-tools
+          persist-credentials: false
+
+      # Full history, so a rejected push can rebase onto a newer main.
+      - name: Checkout firlab
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: sunerpy/firlab
+          token: ${{ secrets.FIRLAB_DOCS_TOKEN }}
+          path: firlab
+          fetch-depth: 0
+
+      - name: Sync the pages
+        run: ./firlab/pt-tools/scripts/sync-pt-tools-docs.sh "$GITHUB_WORKSPACE/pt-tools"
+
+      - name: Commit and push
+        working-directory: firlab
+        env:
+          PT_TOOLS_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # `git status`, not `git diff`: a new page is an untracked file, which `git diff` misses.
+          if [ -z "$(git status --porcelain -- pt-tools/src)" ]; then
+            echo "the site is already up to date; nothing to push"
+            exit 0
+          fi
+
+          # The sync writes nowhere else; staging the tree by name keeps anything else out.
+          git add -- pt-tools/src
+          git -c user.name='pt-tools-docs[bot]' \
+              -c user.email='pt-tools-docs@users.noreply.github.com' \
+              commit -m "docs(pt-tools): sync from pt-tools@${PT_TOOLS_SHA:0:7}" \
+                     -m "Source: https://github.com/sunerpy/pt-tools/commit/${PT_TOOLS_SHA}"
+
+          # The Zuno and Voltip syncs push to the same branch. They touch different
+          # directories, so a rejected push rebases onto the new tip and tries again.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push rejected (attempt ${attempt}); rebasing onto origin/main"
+            git -c user.name='pt-tools-docs[bot]' \
+                -c user.email='pt-tools-docs@users.noreply.github.com' \
+                pull --rebase origin main
+          done
+          echo "::error::the sync commit could not be pushed after 3 attempts"
+          exit 1
