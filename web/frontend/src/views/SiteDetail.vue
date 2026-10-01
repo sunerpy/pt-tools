@@ -43,6 +43,13 @@ const siteName = computed(() => route.params.name as string);
 const { loading, state, errorText, run } = useDataState();
 /** 加载失败（含无权限）时锁住表单与保存 */
 const loadFailed = computed(() => state.value === "error" || state.value === "perm");
+/**
+ * 详情至少成功读回来过一次。在那之前 form 是默认空表单 —— 首次加载中、失败后点重试又在加载中，
+ * 都不是 error / perm，只看 loadFailed 的话写操作照样放行，一点就用空配置覆盖站点、删光订阅。
+ */
+const loaded = ref(false);
+/** 三处写操作（保存配置、添加 RSS、编辑 RSS）共用的锁：没加载成功过、正在加载、加载失败 */
+const writeLocked = computed(() => !loaded.value || loading.value || loadFailed.value);
 const saving = ref(false);
 const addingRss = ref(false);
 const rssDialogVisible = ref(false);
@@ -213,9 +220,10 @@ async function loadDetail() {
       chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
     ]),
   );
-  if (!data) return; // 失败：form 保持原样但被 loadFailed 锁住，绝不能拿默认值去覆盖
+  if (!data) return; // 失败：form 保持原样但被 writeLocked 锁住，绝不能拿默认值去覆盖
   const [siteData, downloaderList, filterRuleList, directoriesData, confList] = data;
   form.value = siteData;
+  loaded.value = true;
   downloaders.value = downloaderList; // 显示所有下载器，不过滤
   allFilterRules.value = filterRuleList;
   filterRules.value = filterRuleList.filter((r) => r.enabled); // 下拉只给启用的
@@ -259,16 +267,22 @@ function getPathDisplayName(path: string, downloaderId: number | undefined): str
  * 这一页的三处写操作（保存配置、添加 RSS、编辑 RSS）都是把**整份** form 交给后端，
  * 而后端 UpsertSiteWithRSS 会先删光该站点的全部 RSS 再按提交内容重建。
  * 详情没加载成功时 form 是默认值 —— 这时放行任何一处写操作，都会用空列表把真实订阅整批删掉。
- * 之前只锁了「保存配置」一个按钮，「添加 RSS」照样能点。所以守卫下沉到函数里，三处共用。
+ * 之前只锁了「保存配置」一个按钮，「添加 RSS」照样能点。所以守卫下沉到函数里，三处共用；
+ * 按钮也照同一个 writeLocked 禁用，守卫是按钮之外的最后一道。
+ * 「没加载成功」包括还在加载：首次加载中、失败后重试中，form 同样是默认值。
  */
-function blockedByLoadFailure(): boolean {
-  if (!loadFailed.value) return false;
-  ElMessage.warning("站点详情没有加载成功，先重试加载再修改，避免覆盖现有配置");
+function blockedByLoadState(): boolean {
+  if (!writeLocked.value) return false;
+  ElMessage.warning(
+    loading.value
+      ? "站点详情还在加载，等加载完成再修改，避免用空表单覆盖现有配置"
+      : "站点详情没有加载成功，先重试加载再修改，避免覆盖现有配置",
+  );
   return true;
 }
 
 async function save() {
-  if (blockedByLoadFailure()) return;
+  if (blockedByLoadState()) return;
   saving.value = true;
   try {
     // 根据认证方式清空互斥字段，避免后端校验失败
@@ -309,7 +323,7 @@ function openAddRssDialog() {
 }
 
 async function addRss() {
-  if (blockedByLoadFailure()) return;
+  if (blockedByLoadState()) return;
   if (!newRss.name || !newRss.url) {
     ElMessage.error("名称和链接为必填");
     return;
@@ -428,7 +442,7 @@ function openEditRssDialog(index: number) {
 }
 
 async function updateRss() {
-  if (blockedByLoadFailure()) return;
+  if (blockedByLoadState()) return;
   if (!editingRss.name || !editingRss.url) {
     ElMessage.error("名称和链接为必填");
     return;
@@ -706,8 +720,8 @@ function ruleNameOf(id: number): string {
       <el-button @click="goBack">
         <PtIcon name="arrow-left" :size="15" /><span>站点列表</span>
       </el-button>
-      <!-- 没加载成功就不给保存：那会把默认值写回去，覆盖掉真实配置 -->
-      <el-button type="primary" :loading="saving" :disabled="loadFailed" @click="save">
+      <!-- 没加载成功（含还在加载）就不给保存：那会把默认值写回去，覆盖掉真实配置 -->
+      <el-button type="primary" :loading="saving" :disabled="writeLocked" @click="save">
         <PtIcon name="save" :size="15" /><span>保存配置</span>
       </el-button>
     </Teleport>
@@ -832,7 +846,11 @@ function ruleNameOf(id: number): string {
           icon="rss"
           :count="`${(form.rss || []).length} 条`">
           <template #actions>
-            <el-button type="primary" size="small" :disabled="loadFailed" @click="openAddRssDialog">
+            <el-button
+              type="primary"
+              size="small"
+              :disabled="writeLocked"
+              @click="openAddRssDialog">
               <PtIcon name="plus" :size="14" /><span>添加 RSS</span>
             </el-button>
           </template>
@@ -919,7 +937,12 @@ function ruleNameOf(id: number): string {
               <footer class="rss__acts">
                 <span v-if="row.is_example" class="rss__hint">示例配置不可编辑</span>
                 <template v-else>
-                  <el-button link type="primary" size="small" @click="openEditRssDialog($index)">
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    :disabled="writeLocked"
+                    @click="openEditRssDialog($index)">
                     <PtIcon name="pencil" :size="14" /><span>编辑</span>
                   </el-button>
                   <el-button link type="danger" size="small" @click="deleteRss($index)">
@@ -1399,7 +1422,9 @@ function ruleNameOf(id: number): string {
 
       <template #footer>
         <el-button @click="rssDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="addingRss" @click="addRss">添加</el-button>
+        <el-button type="primary" :loading="addingRss" :disabled="writeLocked" @click="addRss">
+          添加
+        </el-button>
       </template>
     </el-dialog>
 
@@ -1563,7 +1588,9 @@ function ruleNameOf(id: number): string {
 
       <template #footer>
         <el-button @click="editRssDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="updatingRss" @click="updateRss">保存</el-button>
+        <el-button type="primary" :loading="updatingRss" :disabled="writeLocked" @click="updateRss">
+          保存
+        </el-button>
       </template>
     </el-dialog>
   </div>
