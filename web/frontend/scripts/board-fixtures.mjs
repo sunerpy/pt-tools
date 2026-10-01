@@ -816,12 +816,22 @@ const QUERY_AWARE = {
   }`,
 };
 
-export function stubScript() {
+/*
+ * overrides：{ 路径前缀: 响应体 }。同名前缀替换 FIXTURES 里那一项；新前缀排在最前，
+ * 好让更具体的详情路径先于列表路径命中。验收脚本不传，拿到的就是原样的 FIXTURES；
+ * 文档截图（docs-screens.mjs）用它换掉版本号、补上通道凭证这类只为截图准备的数据。
+ */
+export function stubScript(overrides = {}) {
+  const known = new Set(FIXTURES.map(([prefix]) => prefix));
+  const entries = [
+    ...Object.entries(overrides).filter(([prefix]) => !known.has(prefix)),
+    ...FIXTURES.map(([prefix, body]) => [prefix, prefix in overrides ? overrides[prefix] : body]),
+  ];
   return `(() => {
   /* 无头 Chrome 里 document.hidden 恒为 true，靠可见性判断的定时刷新不会跑 */
   Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
   Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-  const table = ${JSON.stringify(FIXTURES.map(([prefix, body]) => [prefix, JSON.stringify(body)]))};
+  const table = ${JSON.stringify(entries.map(([prefix, body]) => [prefix, JSON.stringify(body)]))};
   /* 按查询参数回不同内容的那几个路径（照服务端语义写，见 QUERY_AWARE 的注释） */
   const queryAware = { ${Object.entries(QUERY_AWARE)
     .map(([prefix, fn]) => `${JSON.stringify(prefix)}: ${fn}`)
