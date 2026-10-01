@@ -8,40 +8,53 @@
 
 [![CI](https://github.com/sunerpy/pt-tools/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sunerpy/pt-tools/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/sunerpy/pt-tools)](https://github.com/sunerpy/pt-tools/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/sunerpy/pt-tools.svg)](https://hub.docker.com/r/sunerpy/pt-tools)
+[![Docker Pulls](https://img.shields.io/docker/pulls/sunerpy/pt-tools)](https://hub.docker.com/r/sunerpy/pt-tools)
 [![Codecov](https://codecov.io/gh/sunerpy/pt-tools/branch/main/graph/badge.svg)](https://codecov.io/gh/sunerpy/pt-tools)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-[文档站](https://firlab.app/pt-tools/) · [功能](#功能) · [快速开始](#快速开始) · [初次配置](#初次配置) · [文档](#文档) · [开发](#开发) · [社区](#社区)
+[文档站](https://firlab.app/pt-tools/) · [功能](#功能) · [安装](#安装) · [快速开始](#快速开始) · [用法](#用法) · [文档](#文档) · [开发](#开发)
+
+[**简体中文**](./README.md) · [English](./docs/readme/README.en.md)
 
 </div>
 
 ---
 
-`pt-tools` 提供 RSS 自动下载、多站点搜索、用户数据统计、下载器管理与 ChatOps，让多个 PT 站点可以在一个 Web 界面中统一配置和维护。支持 Docker、Linux 与 Windows；当前内置适配 **66 个站点**。
+按 RSS 订阅自动下载免费种子，汇总各站点的数据与登录状态，统一管理 qBittorrent 和 Transmission，并可以在 QQ 和 Telegram 里查看和控制。内置 66 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
 
-![用户信息页面](docs/images/user-info.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/home-dark.webp" />
+  <img src="./docs/public/screens/home-light.webp" alt="pt-tools 的用户统计页：各站点的上传量、分享率、做种数、积分和等级" width="1440" />
+</picture>
 
 <details>
-<summary>查看任务列表示例</summary>
+<summary>站点列表与手机界面</summary>
 
-![任务列表](docs/images/task-list.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/sites-dark.webp" />
+  <img src="./docs/public/screens/sites-light.webp" alt="站点列表：每个站点的认证方式、登录探测、RSS 订阅数和保号提醒" width="1440" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/home-mobile-dark.webp" />
+  <img src="./docs/public/screens/home-mobile-light.webp" alt="手机上的用户统计页：顶部是汇总指标，每个站点一张卡片" width="300" />
+</picture>
 
 </details>
 
 ## 功能
 
-- **RSS 自动化**：定时拉取订阅，支持关键词、通配符与正则过滤；未配置规则时默认只下载免费种子。
-- **统一站点管理**：跨站点搜索、用户数据统计、等级进度与登录状态监控；内置站点见[支持站点列表](docs/sites.md)。
-- **下载器管理**：支持 qBittorrent 与 Transmission，可配置多实例、下载目录、免费结束暂停和安全自动删种。
-- **Web 与 ChatOps**：通过 Web UI 管理任务，也可使用 QQ OneBot 或 Telegram 私聊命令与 RSS 上新通知。
-- **浏览器扩展**：PT Tools Helper 可同步 Cookie、批量刷新登录状态，并采集脱敏页面数据用于新增站点适配。
-- **升级与维护**：二进制部署支持 Web 自升级；提供工作目录清理、日志轮转、备份与代理配置。
+- **站点与数据**：66 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey。在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器；长期未登录导致封号之前会提醒。
+- **RSS 自动下载**：定时拉取订阅，用关键词、通配符或正则过滤标题来追剧；免费期结束时尚未下载完成的种子自动暂停。
+- **下载器**：可以添加多个 qBittorrent 和 Transmission，按 RSS 订阅、站点、默认下载器的顺序决定推送到哪一个。推送前检查剩余空间，按做种时长、分享率等条件清理旧种子，并保护 H&R 种子。
+- **通知与 ChatOps**：在 QQ（OneBot）和 Telegram 里查看状态、暂停或删除种子、增删 RSS 订阅，每条命令都记入操作审计；RSS 上新通知支持静默时段、合并摘要、失败重试和每小时配额。企业微信与通用 Webhook 是实验性的出站通道。
+- **浏览器扩展**：[PT Tools Helper](tools/browser-extension/README.md) 一键同步站点 Cookie，并采集脱敏后的页面数据，用于申请新增站点。
+- **部署与维护**：Docker 镜像（amd64、arm64）与 Linux、Windows 二进制；二进制部署可以在 Web 界面升级；日志、暂存种子和旧备份先预览再清理；访问站点和下载器可以走 HTTP、HTTPS 或 SOCKS5 代理。
 
 > [!WARNING]
-> RSS 未关联任何过滤规则时，pt-tools **只会下载免费种子**。追剧或下载特定非免费资源时，请创建过滤规则并按需关闭「仅免费」。
+> RSS 未关联任何过滤规则时，pt-tools **只会下载免费种子**。追剧或下载特定的非免费资源时，请创建过滤规则并按需关闭「仅免费」。
 
-## 快速开始
+## 安装
 
 ### Docker Compose（推荐）
 
@@ -66,89 +79,82 @@ services:
         max-file: "3"
 ```
 
-保存为 `compose.yml` 后启动：
-
-```bash
-docker compose up -d
-```
-
-访问 <http://localhost:8080>，使用初始账号 `admin` / `adminadmin` 登录，并立即修改密码。
+保存为 `compose.yml` 后运行 `docker compose up -d`。镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`），都包含 amd64 与 arm64。
 
 > [!IMPORTANT]
-> 必须持久化 `/app/.pt-tools`。该目录包含数据库、配置和用于加密站点凭证的 `secret.key`；删除或丢失密钥后，已保存的 Cookie 无法恢复。
+> 必须持久化 `/app/.pt-tools`。这个目录里有数据库、配置和用来加密站点凭证的 `secret.key`；密钥丢失后，已保存的 Cookie 无法恢复。
 
-更多 Docker 参数、NAS 日志轮转和代理示例见[配置说明](docs/configuration.md)与[完整 Docker 示例](examples/docker-run.md)。
+### 安装脚本
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 | iex
+```
+
+脚本会下载最新版本的压缩包和同一版本的 `checksums.txt`，SHA-256 不一致时拒绝安装。用 `TOOL_VERSION` 指定版本（例如 `TOOL_VERSION=v0.48.0`），Linux 上用 `TOOL_INSTALL_DIR` 指定安装目录（默认 `~/.local/bin`）。
 
 ### 预编译二进制
 
-从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 下载当前版本：
+从 [Releases](https://github.com/sunerpy/pt-tools/releases) 下载。每个版本都附带 `checksums.txt` 和构建来源证明，`gh attestation verify` 的用法写在每个 Release 的说明里：
 
-| 系统    | 架构  | 资产                             |
+| 系统    | 架构  | 文件                             |
 | ------- | ----- | -------------------------------- |
 | Linux   | amd64 | `pt-tools-linux-amd64.tar.gz`    |
 | Linux   | arm64 | `pt-tools-linux-arm64.tar.gz`    |
 | Windows | amd64 | `pt-tools-windows-amd64.exe.zip` |
 | Windows | arm64 | `pt-tools-windows-arm64.exe.zip` |
 
-每个 Release 都提供 `checksums.txt`。安装脚本会从同一 tag 下载归档与校验和，SHA-256 不匹配时拒绝安装；固定版本的命令可直接从对应 Release 的安装说明复制。项目暂不提供 macOS 二进制，macOS 用户请使用 Docker。
+解压后运行 `pt-tools web --host 0.0.0.0 --port 8080`。没有 macOS 二进制，macOS 请使用 Docker。systemd 服务、Windows 与更多 Docker 示例见[安装](https://firlab.app/pt-tools/guide/install)、[二进制运行指南](examples/binary-run.md)和[Docker 示例](examples/docker-run.md)。
 
-二进制启动：
+### 从源码构建
 
-```bash
-pt-tools web --host 0.0.0.0 --port 8080
-```
+需要 Go `1.26.7`、Node.js `25.2.0` 和 pnpm `10.25.0`，运行 `make build-local`，详见[开发指南](docs/development.md)。
 
-Windows、systemd 与源码构建示例见[二进制运行指南](examples/binary-run.md)。
+## 快速开始
 
-## 初次配置
+1. 打开 <http://localhost:8080>，用初始账号 `admin` / `adminadmin` 登录，并立即修改密码。
+2. 在「下载器设置」中添加 qBittorrent 或 Transmission，并检查连通性。
+3. 添加站点认证：Cookie 站点用 [PT Tools Helper](tools/browser-extension/README.md) 同步，API Key 和 Passkey 站点按[获取 Cookie 与 API Key](https://firlab.app/pt-tools/guide/get-cookie-apikey) 填写。
+4. 添加 RSS 订阅，选好下载器、保存目录和免费结束后的处理方式。默认只下免费种子，不需要过滤规则。
+5. 备份 `secret.key`，并确认数据目录已有外部备份。
 
-1. 登录 Web UI 并修改初始密码。
-2. 添加 qBittorrent 或 Transmission 下载器并测试连接。
-3. 添加站点认证：Cookie 站点推荐使用 [PT Tools Helper](tools/browser-extension/README.md)；API Key / Passkey 站点按[认证信息指南](docs/guide/get-cookie-apikey.md)配置。
-4. 添加 RSS 订阅并选择下载器、目录与免费结束策略。
-5. 按需添加过滤规则；默认免费刷流不需要规则。
-6. 备份 `~/.pt-tools/secret.key`，并确认数据库和数据目录已有外部备份。
+逐步说明见文档站的[快速开始](https://firlab.app/pt-tools/guide/quick-start)。
 
-详细流程：
+## 用法
 
-- [RSS 订阅配置](docs/guide/rss-subscription.md)
-- [过滤规则与追剧](docs/guide/filter-rules-tv-series.md)
-- [自动删种与磁盘保护](docs/guide/auto-cleanup.md)
-- [站点登录状态与密钥备份](docs/guide/site-login-monitoring.md)
-
-## ChatOps 与浏览器扩展
-
-QQ OneBot 与 Telegram 均支持 `/help`、`/status`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/bind`、`/unbind`、`/addrss` 和 `/delrss` 等命令，并提供发送者白名单、绑定码、操作审计和 RSS 上新通知。目前每个完成绑定的账号都拥有管理员权限，绑定码只发给信任的人。
-
-- [ChatOps 快速开始](docs/guide/chatops-quickstart.md)
-- [QQ OneBot（NapCat）配置](docs/guide/chatops-qq-napcat.md)
-- [Telegram Bot 配置](docs/guide/chatops-telegram.md)
-- [RSS 上新通知](docs/guide/chatops-rss-notify.md)
-- [PT Tools Helper 浏览器扩展](tools/browser-extension/README.md)
-
-企业微信群机器人和通用 Webhook 目前仅为实验性出站通道，尚未完成端到端验证。
+- **Web 界面**：站点、RSS、过滤规则、下载器、自动清理和通知都在 Web 界面里配置。
+- **ChatOps**：QQ 和 Telegram 支持 `/help`、`/status`、`/tasks`、`/sites`、`/torrents`、`/pause`、`/resume`、`/delete`、`/addrss`、`/delrss`、`/bind` 和 `/unbind`。通道的两栏名单决定谁能与机器人对话；用绑定码完成绑定的账号都能执行管理命令，所以绑定码只发给信任的人。见 [ChatOps 快速开始](https://firlab.app/pt-tools/guide/chatops-quickstart)。
+- **命令行**：`pt-tools web` 启动服务，`pt-tools secret` 导出、导入加密密钥，`pt-tools clean` 预览并清理已轮转的日志、暂存种子和旧备份，见[命令行](https://firlab.app/pt-tools/reference/cli)。
 
 ## 文档
 
-完整文档发布在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**（中文，[English](https://firlab.app/pt-tools/en/)），内容与本仓库 `docs/` 目录同步。在 GitHub 上也可以从[文档中心](docs/README.md)按主题浏览。常用入口：
+文档站 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**（中文，[English](https://firlab.app/pt-tools/en/)）的内容来自本仓库的 `docs/` 目录，在 GitHub 上也可以从[文档中心](docs/README.md)按主题浏览。
 
-| 文档                                           | 用途                                 |
-| ---------------------------------------------- | ------------------------------------ |
-| [配置说明](docs/configuration.md)              | 环境变量、代理、下载器、持久化与日志 |
-| [常见问题](docs/faq.md)                        | 认证、RSS、下载器与数据库排障        |
-| [支持站点](docs/sites.md)                      | 66 个内置站点及认证方式              |
-| [请求新增站点](docs/guide/request-new-site.md) | 使用扩展采集并脱敏提交站点数据       |
-| [升级与备份](docs/guide/upgrade.md)            | 各安装方式的升级、备份与恢复         |
-| [命令行](docs/reference/cli.md)                | web、secret、clean 等子命令与参数    |
-| [数据与安全](docs/reference/security.md)       | 数据位置、加密范围、外连与部署建议   |
-| [开发指南](docs/development.md)                | 工具链、构建、测试、站点适配与发版   |
-| [品牌标识](docs/brand.md)                      | 标志文件、变体选择、最小尺寸与留白   |
+| 文档                                                                       | 内容                                 |
+| -------------------------------------------------------------------------- | ------------------------------------ |
+| [安装](https://firlab.app/pt-tools/guide/install)                          | Docker、二进制、systemd 与首次登录   |
+| [配置说明](https://firlab.app/pt-tools/configuration)                      | 环境变量、代理、下载器、持久化与日志 |
+| [RSS 订阅](https://firlab.app/pt-tools/guide/rss-subscription)             | 订阅、下载器选择、免费结束策略       |
+| [过滤规则与追剧](https://firlab.app/pt-tools/guide/filter-rules-tv-series) | 关键词、通配符与正则规则             |
+| [自动删种与磁盘保护](https://firlab.app/pt-tools/guide/auto-cleanup)       | 清理条件、H&R 保护与剩余空间检查     |
+| [站点登录监控](https://firlab.app/pt-tools/guide/site-login-monitoring)    | 登录探测、保号提醒与密钥备份         |
+| [ChatOps](https://firlab.app/pt-tools/guide/chatops-quickstart)            | QQ、Telegram、绑定与 RSS 上新通知    |
+| [升级与备份](https://firlab.app/pt-tools/guide/upgrade)                    | 各安装方式的升级、备份与恢复         |
+| [数据与安全](https://firlab.app/pt-tools/reference/security)               | 数据位置、加密范围、外连与部署建议   |
+| [支持站点](https://firlab.app/pt-tools/sites)                              | 66 个内置站点及认证方式              |
+| [请求新增站点](https://firlab.app/pt-tools/guide/request-new-site)         | 用扩展采集并脱敏提交站点数据         |
+| [常见问题](https://firlab.app/pt-tools/faq)                                | 认证、RSS、下载器与数据库排障        |
 
-每个版本的功能、修复和升级说明以 [Releases](https://github.com/sunerpy/pt-tools/releases) 与 [CHANGELOG](CHANGELOG.md) 为准。
+每个版本的功能、修复和升级说明见 [Releases](https://github.com/sunerpy/pt-tools/releases) 与 [CHANGELOG](CHANGELOG.md)。
 
 ## 开发
 
-仓库固定使用 Go `1.26.7`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整本地门禁：
+仓库固定使用 Go `1.26.7`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地门禁：
 
 ```bash
 make check
@@ -159,12 +165,13 @@ make check
 ```bash
 make fmt             # Go 与前端格式化
 make lint            # Go、前端 lint 与类型检查
-make unit-test       # Go race + coverage
-make build-local     # 构建前端和当前平台二进制
+make test            # 前端构建与单测，Go race 测试
+make docs-check      # 仓库内 Markdown 的相对链接与锚点
+make build-local     # 构建前端和当前平台的二进制
 make build-extension # 校验站点并打包浏览器扩展
 ```
 
-贡献前请阅读[开发指南](docs/development.md)和当前目录下的 `AGENTS.md`。提交与 PR 标题遵循 Conventional Commits；新增站点请只在 `site/v2/definitions/` 添加定义并补齐 fixture 测试。
+贡献前请阅读[开发指南](docs/development.md)和仓库根目录的 `AGENTS.md`。提交与 PR 标题遵循 Conventional Commits；新增站点只在 `site/v2/definitions/` 添加定义，并补齐 fixture 测试。文档站的写作约定与上线流程见 [docs/README.md](docs/README.md)。
 
 ## 社区
 
@@ -179,4 +186,4 @@ make build-extension # 校验站点并打包浏览器扩展
 
 ---
 
-**免责声明**：本工具仅供学习和研究使用。请遵守各 PT 站点规则并自行评估自动化访问风险。
+**免责声明**：本工具仅供学习和研究使用。请遵守各 PT 站点的规则，并自行评估自动化访问的风险。
