@@ -181,11 +181,19 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 	}
 
 	tx := s.db.WithContext(ctx).Model(&models.ActionAudit{})
+	/*
+	 * 时间窗绑定前先转成本地时区。
+	 *
+	 * created_at 由 Record 的 time.Now() 写入，是进程本地时区；Since / Until 来自前端的
+	 * toISOString()，通常是 UTC。glebarez/sqlite 按值自带的时区把 time.Time 格式化成
+	 * 「2006-01-02 15:04:05.999999999-07:00」文本，比较是逐字符的字符串比较，偏移量不参与换算 ——
+	 * 两边时区不一致，窗口就整体错开一个时差（TZ=Asia/Shanghai 时是 8 小时）。
+	 */
 	if !q.Since.IsZero() {
-		tx = tx.Where("created_at >= ?", q.Since)
+		tx = tx.Where("created_at >= ?", q.Since.Local())
 	}
 	if !q.Until.IsZero() {
-		tx = tx.Where("created_at < ?", q.Until)
+		tx = tx.Where("created_at < ?", q.Until.Local())
 	}
 	if q.ChannelUserID != "" {
 		tx = tx.Where("channel_user_id = ?", q.ChannelUserID)

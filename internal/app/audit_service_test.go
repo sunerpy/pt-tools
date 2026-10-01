@@ -106,6 +106,56 @@ func TestQuery_TimeWindowAndPaginationDefaults(t *testing.T) {
 	assert.Equal(t, 1, total)
 }
 
+/*
+ * 审计页的时间窗来自前端 toISOString()，到这里是 UTC 的 time.Time；
+ * 而 Record 用 time.Now() 写库，是进程本地时区。glebarez/sqlite 绑定 time.Time 时
+ * 按值自带的时区格式化成「2006-01-02 15:04:05.999999999-07:00」文本，再做字符串比较 ——
+ * 两边时区不同，窗口就整体错开一个时差。官方镜像 TZ=Asia/Shanghai 时错 8 小时：
+ * 「最近 1 小时」里查不到刚写入的记录，反而会查到 8 小时前的。
+ *
+ * 改 time.Local 是进程级全局状态：这条测试不能 t.Parallel，结束时由 t.Cleanup 还原。
+ */
+func TestQuery_UTCWindowMatchesRowsWrittenInLocalZone(t *testing.T) {
+	origLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	t.Cleanup(func() { time.Local = origLocal })
+
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	ctx := context.Background()
+
+	require.NoError(t, svc.Record(ctx, AuditEntry{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "fresh", Result: "success",
+	}))
+	// 8 小时前写入的旧记录：时区按错时，它恰好会落进 UTC 表示的「最近 1 小时」
+	require.NoError(t, db.Create(&models.ActionAudit{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "stale", ArgsJSON: "{}", Result: "success",
+		CreatedAt: time.Now().Add(-8 * time.Hour),
+	}).Error)
+
+	commandsIn := func(since, until time.Time) []string {
+		t.Helper()
+		items, total, err := svc.Query(ctx, AuditQuery{Since: since, Until: until})
+		require.NoError(t, err)
+		require.Len(t, items, total)
+		out := make([]string, 0, len(items))
+		for _, it := range items {
+			out = append(out, it.Command)
+		}
+		return out
+	}
+
+	now := time.Now().UTC()
+	assert.Equal(t, []string{"fresh"}, commandsIn(now.Add(-time.Hour), now.Add(time.Minute)),
+		"UTC 的「最近 1 小时」必须查到刚写入的记录，且不能混进 8 小时前的记录")
+	assert.Empty(t, commandsIn(now.Add(-2*time.Hour), now.Add(-time.Hour)),
+		"窗口外（2 小时前到 1 小时前）没有记录")
+	assert.Equal(t, []string{"stale"}, commandsIn(now.Add(-9*time.Hour), now.Add(-7*time.Hour)),
+		"8 小时前的记录只能落在它自己的时间窗里")
+}
+
 func TestRecord_NilArgs(t *testing.T) {
 	db := setupAuditTestDB(t)
 	svc := NewAuditService(db)
