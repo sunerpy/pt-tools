@@ -9,6 +9,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { formatShortDateTime } from "@/utils/format";
 import { ElMessage, ElMessageBox, type TableInstance } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
@@ -405,20 +406,6 @@ function formatTime(timeStr: string | undefined): string {
   }
 }
 
-/*
- * 表格里的时间用紧凑格式：画板 25 的 td-0-0 是「09-15 14:32:08」—— **不带年**。
- * 落地原来走 `toLocaleString("zh-CN")`，出来是「2026/9/17 16:00:00」十九个字符，
- * 在 8 列挤 1078 宽的表里要么换行把行顶高，要么被压成「2026/9/1…」连日期都读不出。
- * 行卡上仍用完整格式（那里不缺宽度，而且跨年时年份有意义）。
- */
-function formatTimeShort(timeStr: string | undefined): string {
-  if (!timeStr || timeStr === "0001-01-01T00:00:00Z") return "-";
-  const d = new Date(timeStr);
-  if (Number.isNaN(d.getTime())) return timeStr;
-  const p2 = (n: number) => String(n).padStart(2, "0");
-  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-}
-
 function formatProgress(progress: number): string {
   return `${progress.toFixed(1)}%`;
 }
@@ -559,13 +546,20 @@ function formatProgress(progress: number): string {
             用 min-width 不用 width：1376 下各列合计正好 1078，它就是 112；
             ≥1600 字号升到 14px，112 又会把「09-19 06:10」切成「09-19 06…」，
             这时主区多出来的宽度按最小宽度分给标题 / 暂停原因 / 暂停时间三列，时间列跟着变宽。
+
+            内容用紧凑格式（画板 25 的 td 是「09-15 14:32」）：toLocaleString 的「2026/9/17 16:00:00」
+            十九个字符在这一列里被压成「2026/9/1…」。但不能永远省掉年份 —— 原来那样写，
+            去年 12-31 暂停的和今年 12-31 暂停的两行一模一样。formatShortDateTime 当年省年份、
+            跨年才带上；完整时间在 title 里，行卡上用完整格式。
           -->
           <el-table-column
             label="暂停时间"
             min-width="112"
             class-name="pt-cell-muted pt-cell-1line">
             <template #default="{ row }">
-              <span :title="formatTime(row.paused_at)">{{ formatTimeShort(row.paused_at) }}</span>
+              <span :title="formatTime(row.paused_at)">{{
+                formatShortDateTime(row.paused_at)
+              }}</span>
             </template>
           </el-table-column>
           <!--
@@ -757,7 +751,7 @@ function formatProgress(progress: number): string {
             class-name="pt-cell-muted pt-cell-1line">
             <template #default="{ row }">
               <span :title="formatTime(row.archived_at)">
-                {{ formatTimeShort(row.archived_at) }}
+                {{ formatShortDateTime(row.archived_at) }}
               </span>
             </template>
           </el-table-column>
