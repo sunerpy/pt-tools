@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/signal"
 	"strings"
@@ -643,19 +644,55 @@ type liveNotifyManager struct {
 }
 
 func newLiveNotifyManager(channels map[uint]notify.Channel) *liveNotifyManager {
-	if channels == nil {
-		channels = make(map[uint]notify.Channel)
-	}
-	return &liveNotifyManager{channels: channels}
+	m := &liveNotifyManager{}
+	m.SetChannels(channels)
+	return m
 }
 
+// SetChannels 换上一张新的通道表。存的是**副本**，不是调用方传进来的那张 map。
+//
+// 这里的读者（ChannelState / Send / Reply）只拿读锁：它防得住 SetChannels 的整表替换，
+// 防不住别人不拿锁地原地改同一个 map。bootstrapChatOps 曾把同一张 map 同时交给
+// chatopsBootstrap.channels 和这里，热重载又在那张 map 上原地 delete / insert ——
+// 与读者并发就是 fatal error: concurrent map read and map write。存副本之后，
+// 调用方手里那张 map 怎么改都碰不到这里。
 func (m *liveNotifyManager) SetChannels(channels map[uint]notify.Channel) {
-	if channels == nil {
-		channels = make(map[uint]notify.Channel)
-	}
+	next := make(map[uint]notify.Channel, len(channels))
+	maps.Copy(next, channels)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.channels = channels
+	m.channels = next
+}
+
+// ChannelState 实现 app.ChannelStater：把这一条通道的实例状态告诉上层。
+//
+// **不把 Healthy() 当「已连接」**：这四个适配器的 Healthy() 含义都只是构造/启动成功
+// （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败；Telegram 造出 bot 就 true；
+// Webhook 只判 config != nil；WeCom 恒 true）。所以 Healthy() 只够说「运行中」。
+// 只有实现了 notify.LinkStater 且确认对端接上的通道，才报「已连接」。
+//
+// map 里没有这一条时返回空串，由 app 层结合「配置启不启用」判成异常还是停用。
+func (m *liveNotifyManager) ChannelState(confID uint) string {
+	if m == nil {
+		return ""
+	}
+	m.mu.RLock()
+	ch, ok := m.channels[confID]
+	m.mu.RUnlock()
+	if !ok || ch == nil {
+		return ""
+	}
+	if !ch.Healthy() {
+		return app.ChannelStateError
+	}
+	if stater, ok := ch.(notify.LinkStater); ok {
+		if stater.LinkState() == notify.LinkConnected {
+			return app.ChannelStateConnected
+		}
+		/* 在跑、但对端还没接上（QQ 等 NapCat 握手）—— 不是故障，也还不是「已连接」 */
+		return app.ChannelStateRunning
+	}
+	return app.ChannelStateRunning
 }
 
 func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notification) error {
@@ -886,22 +923,24 @@ func reloadChatOpsChannels(
 		}
 		stepCancel()
 	}
-	for confID := range bs.channels {
-		delete(bs.channels, confID)
-	}
 
+	// 不在旧 map 上原地 delete / insert，而是整张换新：旧 map 此刻可能仍被别处读着。
+	// initEnabledChannels 每次都返回一张新建的 map，填好之后再一次性换上去。
 	var inbound notify.InboundHandler
 	if bs.chain != nil {
 		inbound = bs.chain.Process
 	}
-	newChannels, err := initEnabledChannels(ctx, db, bs.registry, inbound, log)
+	next, err := initEnabledChannels(ctx, db, bs.registry, inbound, log)
 	if err != nil {
-		bs.manager.SetChannels(bs.channels)
+		// 旧实例上面已经全部关掉：换上一张空表，不能再让 manager 往已关闭的通道投递
+		empty := make(map[uint]notify.Channel)
+		bs.channels = empty
+		bs.manager.SetChannels(empty)
 		return err
 	}
 
 	if callbackActions != nil {
-		for _, ch := range newChannels {
+		for _, ch := range next {
 			if setter, ok := ch.(interface {
 				SetCallbackActionHandler(telegramadapter.CallbackActionHandler)
 			}); ok {
@@ -910,9 +949,7 @@ func reloadChatOpsChannels(
 		}
 	}
 
-	for confID, ch := range newChannels {
-		bs.channels[confID] = ch
-	}
-	bs.manager.SetChannels(bs.channels)
+	bs.channels = next
+	bs.manager.SetChannels(next)
 	return nil
 }

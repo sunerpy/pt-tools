@@ -385,3 +385,17 @@ func (nopLogger) Warnf(string, ...interface{})  {}
 func init() {
 	notify.RegisterChannel(channelType, func() notify.Channel { return New() })
 }
+
+/*
+ * LinkState 实现 notify.LinkStater —— QQ 是这几个适配器里唯一能判断「对端真的接上了」的：
+ * NapCat 握手成功时 wsHandshakeHandler 会存下 caller，发送也正是靠它。
+ *
+ * Healthy() 不够用：它在监听端口一绑上就翻成 true，那时候发送会返回
+ * 「QQ 通道未连接 (NapCat 尚未握手)」—— 界面若照 Healthy() 写「已连接」就是在说假话。
+ */
+func (q *QQChannel) LinkState() string {
+	if q.activeCaller() != nil {
+		return notify.LinkConnected
+	}
+	return notify.LinkWaiting
+}

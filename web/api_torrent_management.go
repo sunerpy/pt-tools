@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -201,11 +202,20 @@ func (s *Server) apiDeletePausedTorrents(w http.ResponseWriter, r *http.Request)
 	for _, t := range torrents {
 		// 从下载器删除
 		if t.DownloaderTaskID != "" && t.DownloaderName != "" {
-			dl, err := dlMgr.GetDownloader(t.DownloaderName)
-			if err != nil {
+			dl, err := acquireDownloader(r.Context(), dlMgr, t.DownloaderName)
+			switch {
+			case errors.Is(err, downloader.ErrDownloaderNotConfigured):
+				// 这台下载器已经不在配置里（被删除或停用），它名下的记录是孤儿：只清数据库
+				global.GetSlogger().Warnf("下载器 %s 已不在配置中，仅删除数据库记录 (种子:%s)", t.DownloaderName, t.Title)
+			case err != nil:
+				// 获取超时、失败冷却、建连失败：下载器里的任务和数据都还在。
+				// 这时删库会让 pt-tools 不再追踪一个仍然存在的任务，所以计失败、保留记录
 				global.GetSlogger().Warnf("获取下载器失败 (种子:%s): %v", t.Title, err)
-				// 即使获取下载器失败，也尝试从数据库删除记录
-			} else {
+				failed++
+				failedIDs = append(failedIDs, t.ID)
+				failedErrors = append(failedErrors, t.Title+": 获取下载器失败: "+err.Error())
+				continue
+			default:
 				if err := dl.RemoveTorrent(t.DownloaderTaskID, req.RemoveData); err != nil {
 					// 记录错误但继续处理
 					global.GetSlogger().Warnf("从下载器删除种子失败 (种子:%s): %v", t.Title, err)
@@ -432,7 +442,7 @@ func (s *Server) apiResumeTorrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dl, err := dlMgr.GetDownloader(torrent.DownloaderName)
+	dl, err := acquireDownloader(r.Context(), dlMgr, torrent.DownloaderName)
 	if err != nil {
 		http.Error(w, "获取下载器失败: "+err.Error(), http.StatusInternalServerError)
 		return

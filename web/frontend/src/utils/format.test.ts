@@ -6,6 +6,7 @@ import {
   formatDate,
   formatNumber,
   formatRatio,
+  formatShortDateTime,
   formatTime,
   getAvatarColor,
   getRatioType,
@@ -263,5 +264,54 @@ describe("checkIntervalRequirement", () => {
 
     // 2 weeks ago should not satisfy P5W requirement
     expect(checkIntervalRequirement(twoWeeksAgo, "P5W")).toBe(false);
+  });
+});
+
+describe("formatShortDateTime", () => {
+  const now = new Date(2026, 8, 30, 12, 0);
+
+  it("当年省掉年份，月日与时分都补零", () => {
+    expect(formatShortDateTime(new Date(2026, 8, 30, 20, 0), now)).toBe("09-30 20:00");
+    expect(formatShortDateTime(new Date(2026, 0, 5, 7, 3), now)).toBe("01-05 07:03");
+  });
+
+  it("跨年带上年份", () => {
+    expect(formatShortDateTime(new Date(2025, 8, 16, 13, 20), now)).toBe("2025-09-16 13:20");
+  });
+
+  it("接受 ISO 字符串与毫秒时间戳", () => {
+    const d = new Date(2026, 8, 30, 20, 0);
+    expect(formatShortDateTime(d.toISOString(), now)).toBe("09-30 20:00");
+    expect(formatShortDateTime(d.getTime(), now)).toBe("09-30 20:00");
+  });
+
+  it("零值与解析不了的都显示「-」", () => {
+    expect(formatShortDateTime("", now)).toBe("-");
+    expect(formatShortDateTime(null, now)).toBe("-");
+    expect(formatShortDateTime(0, now)).toBe("-");
+    expect(formatShortDateTime("0001-01-01T00:00:00Z", now)).toBe("-");
+    expect(formatShortDateTime("not a date", now)).toBe("-");
+  });
+
+  /*
+   * qB 对未完成的任务回 completion_on = -1，下载器表格按秒乘 1000 传进来就是 -1000。
+   * 只把 0 当零值时，它被格式化成「1970-01-01 07:59」（东八区）挂在「完成日期」里。
+   */
+  it("数值 ≤ 0 都是「没有这个时间」：qB 未完成任务的 -1 秒不能显示成 1970", () => {
+    expect(formatShortDateTime(-1, now)).toBe("-");
+    expect(formatShortDateTime(-1000, now)).toBe("-");
+    expect(formatShortDateTime(0, now)).toBe("-");
+    expect(formatShortDateTime(-0, now)).toBe("-");
+  });
+
+  it("Date 对象与字符串不走数值的零值规则（1970 之前的真实日期照常显示）", () => {
+    expect(formatShortDateTime(new Date(1969, 11, 31, 23, 0), now)).toBe("1969-12-31 23:00");
+    expect(formatShortDateTime(new Date(1969, 11, 31, 23, 0).toISOString(), now)).toBe(
+      "1969-12-31 23:00",
+    );
+  });
+
+  it("结果不超过 16 个字符，放得进 150 宽的列", () => {
+    expect(formatShortDateTime(new Date(2025, 11, 31, 23, 59), now).length).toBeLessThanOrEqual(16);
   });
 });

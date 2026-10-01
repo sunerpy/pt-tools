@@ -1,0 +1,75 @@
+# Builds the documentation site (https://firlab.app/pt-tools/) from a pull request's pages against
+# firlab's public main, so a dead link, an unknown component, a page missing in one language, a
+# banned word, a malformed home page or a link that leaves /pt-tools/ fails before the merge
+# rather than in publish-docs-site.yml after it. Nothing is published and no secret is read, so a
+# fork's pull request runs it the same way. Advisory: not part of CI Success.
+name: Docs site
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "!docs/README.md"
+      - "!docs/brand.md"
+      - "!docs/design/webui-board-spec.md"
+      - "web/frontend/public/logo.svg"
+      - ".github/workflows/docs-site.yml"
+      - ".github/workflows/publish-docs-site.yml"
+
+concurrency:
+  group: docs-site-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Docs site · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout pt-tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pt-tools
+          persist-credentials: false
+
+      - name: Checkout firlab
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: sunerpy/firlab
+          path: firlab
+          persist-credentials: false
+
+      # The site installs on its own (its package.json pins pnpm); pnpm before setup-node so the
+      # pnpm cache resolves.
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: firlab/pt-tools/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: firlab/.node-version
+          cache: pnpm
+          cache-dependency-path: firlab/pt-tools/pnpm-lock.yaml
+
+      - name: Sync the pages
+        run: ./firlab/pt-tools/scripts/sync-pt-tools-docs.sh "$GITHUB_WORKSPACE/pt-tools"
+
+      - name: Install the site's dependencies
+        working-directory: firlab/pt-tools
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: firlab/pt-tools
+        run: pnpm build
+
+      # The same check firlab's deploy runs before it publishes the site: both languages were
+      # emitted (a misconfigured locale emits only the root one, which still looks like a green
+      # build), and every link, asset and sitemap entry stays under /pt-tools/.
+      - name: Check both languages and the /pt-tools/ base
+        working-directory: firlab/pt-tools
+        run: ./scripts/check-dist.sh dist

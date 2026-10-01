@@ -1,18 +1,6 @@
 # ChatOps 快速开始
 
-[返回首页](../../README.md)
-
 pt-tools 内置了一套 ChatOps 层，让你可以通过 **QQ 私聊** 或 **Telegram 私聊** 随时查看下载状态、控制任务、接收事件通知，不需要打开浏览器。
-
----
-
-## 目录
-
-- [简介](#简介)
-- [支持的通道](#支持的通道)
-- [选择哪个通道？](#选择哪个通道)
-- [内置命令清单](#内置命令清单)
-- [开始配置](#开始配置)
 
 ---
 
@@ -23,8 +11,8 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 功能亮点：
 
 - **13 个内置命令**，覆盖状态查询、种子控制、任务管理
-- **管理员白名单**，陌生人发的命令全部静默丢弃
-- **绑定码机制**，8 字符一次性码，5 分钟 TTL，通过 Web UI 生成再发给需要绑定的用户
+- **绑定后才能使用**，只有用绑定码完成绑定的账号才能执行命令；QQ 和 Telegram 通道还会先按通道里的名单过滤发送者
+- **绑定码机制**，8 字符一次性码，默认 5 分钟有效（可选 1 小时到永久），通过 Web UI 生成再发给需要绑定的用户
 - **操作审计**，每条命令的执行结果、延迟、触发用户全部记录到 `action_audit` 表
 - **AES-GCM 加密落库**，Bot Token / Access Token 等凭证加密存储，截图不泄漏明文
 - **出站推送**，除命令回复外，还能把系统事件（种子推送成功、磁盘告警等）主动推送到 IM
@@ -78,11 +66,14 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 | `/resume <hash>` | `/resume <hash>` | 恢复指定种子                                                                | 管理员 |
 | `/delete <hash>` | `/delete <hash>` | 删除种子（带二次确认）                                                      | 管理员 |
 | `/bind <code>`   | `/bind <code>`   | 凭 8 字符绑定码将当前账号绑定到 pt-tools                                    | 任何人 |
-| `/unbind`        | `/unbind`        | 解除当前账号的绑定                                                          | 普通   |
+| `/unbind`        | `/unbind`        | 解除当前账号的绑定                                                          | 管理员 |
 | `/addrss`        | `/addrss`        | 互动添加 RSS 订阅（文本向导，或单行 `/addrss 站点 \| 名 \| URL \| 下载器`） | 管理员 |
 | `/delrss`        | `/delrss`        | 互动删除 RSS 订阅（先列出，再按名称/ID/序号选择删除）                       | 管理员 |
 
 > **速率限制**：默认每用户每分钟最多 10 条命令，超出后静默丢弃（不回复错误，防止信息泄露）。
+
+> [!IMPORTANT]
+> 目前**每个完成绑定的账号都拥有管理员权限**，表中标为「管理员」的命令对所有已绑定账号可用。请只把绑定码发给你信任的账号，不再需要时在 ChatOps → ChatOps 绑定 中撤销。
 
 ---
 
@@ -93,15 +84,15 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 - **QQ (NapCat)** → [chatops-qq-napcat.md](chatops-qq-napcat.md)
 - **Telegram** → [chatops-telegram.md](chatops-telegram.md)
 
-配置完成后，建议访问 Web UI 的审计日志页面（`/chatops/audit`）确认命令正常执行并被记录。
+配置完成后，建议打开 Web UI 的操作审计页面（`/chatops/audit`），确认命令正常执行并被记录。
 
 ![ChatOps 通知通道列表](images/chatops/chatops-notifications-list.png)
 
-> Web UI → ChatOps → 通知通道，可以看到已配置的 QQ 和 Telegram 通道
+> Web UI → ChatOps → 消息通知，可以看到已配置的 QQ 和 Telegram 通道
 
 ![ChatOps 审计日志](images/chatops/chatops-audit-stats.png)
 
-> Web UI → ChatOps → 审计日志，展示今日命令数、成功率和最近记录
+> Web UI → ChatOps → 操作审计，展示今日命令数、成功率和最近记录
 
 ---
 

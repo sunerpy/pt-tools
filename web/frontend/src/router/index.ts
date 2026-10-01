@@ -23,6 +23,7 @@ const router = createRouter({
       path: "/global",
       name: "global",
       component: () => import("@/views/GlobalSettings.vue"),
+      meta: { title: "全局设置" },
     },
     {
       path: "/cloak-config",
@@ -34,6 +35,7 @@ const router = createRouter({
       path: "/cleanup",
       name: "cleanup",
       component: () => import("@/views/AutoCleanup.vue"),
+      meta: { title: "自动清理" },
     },
     // 旧的 qBittorrent 设置页面（已隐藏）
     // {
@@ -45,11 +47,13 @@ const router = createRouter({
       path: "/downloaders",
       name: "downloaders",
       component: () => import("@/views/DownloaderSettings.vue"),
+      meta: { title: "下载器设置" },
     },
     {
       path: "/sites",
       name: "sites",
       component: () => import("@/views/SiteList.vue"),
+      meta: { title: "站点列表" },
     },
     {
       path: "/supported-sites",
@@ -73,16 +77,19 @@ const router = createRouter({
       path: "/sites/:name",
       name: "site-detail",
       component: () => import("@/views/SiteDetail.vue"),
+      meta: { title: "站点详情" },
     },
     {
       path: "/filter-rules",
       name: "filter-rules",
       component: () => import("@/views/FilterRules.vue"),
+      meta: { title: "过滤规则" },
     },
     {
       path: "/tasks",
       name: "tasks",
       component: () => import("@/views/TaskList.vue"),
+      meta: { title: "任务列表" },
     },
     {
       path: "/paused",
@@ -94,17 +101,19 @@ const router = createRouter({
       path: "/logs",
       name: "logs",
       component: () => import("@/views/LogViewer.vue"),
+      meta: { title: "运行日志" },
     },
     {
       path: "/password",
       name: "password",
       component: () => import("@/views/ChangePassword.vue"),
+      meta: { title: "修改密码" },
     },
     {
       path: "/downloader-hub",
       name: "downloader-hub",
       component: () => import("@/views/DownloaderHub.vue"),
-      meta: { title: "下载器Web UI" },
+      meta: { title: "下载器 Web UI" },
     },
 
     {

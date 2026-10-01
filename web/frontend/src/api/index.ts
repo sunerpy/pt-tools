@@ -41,7 +41,8 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  /** options 用于给轮询类请求挂 AbortSignal：拿不到就主动放弃，别一直占着浏览器的连接槽 */
+  get: <T>(path: string, options?: ApiOptions) => request<T>(path, options),
   post: <T>(path: string, data?: unknown) =>
     request<T>(path, {
       method: "POST",
@@ -241,7 +242,7 @@ export interface SiteLoginState {
 }
 
 export const sitesApi = {
-  list: () => api.get<Record<string, SiteConfig>>("/api/sites"),
+  list: (signal?: AbortSignal) => api.get<Record<string, SiteConfig>>("/api/sites", { signal }),
   listLoginStates: () => api.get<SiteLoginState[]>("/api/sites/login-state"),
   get: (name: string) => api.get<SiteConfig>(`/api/sites/${name}`),
   save: (name: string, data: SiteConfig) => api.post<void>(`/api/sites/${name}`, data),
@@ -274,13 +275,34 @@ export const sitesApi = {
     api.post<{ success: boolean; message: string }>(`/api/sites/${name}/login-state/test-reminder`),
 };
 
+/** 全库任务计数 —— 画板 10 的 KPI 格「活跃任务 / 今日推送 / 免费种子」 */
+export interface TaskStatsResponse {
+  total: number;
+  active: number;
+  pushedToday: number;
+  free: number;
+  /** 最近 7 天按天计数，供 KPI 柱图与任务页的吞吐卡使用 */
+  daily: { date: string; created: number; pushed: number; free: number }[];
+}
+
 export const tasksApi = {
-  list: (params: URLSearchParams) => api.get<TaskListResponse>(`/api/tasks?${params.toString()}`),
+  list: (params: URLSearchParams, signal?: AbortSignal) =>
+    api.get<TaskListResponse>(`/api/tasks?${params.toString()}`, { signal }),
+  stats: () => api.get<TaskStatsResponse>("/api/tasks/stats"),
   batchDelete: (ids: number[]) => api.post<DeleteTasksResponse>("/api/tasks/batch-delete", { ids }),
 };
 
+/** 日志目录清单 —— 画板 29 左栏的「文件清单 / 归档」 */
+export interface LogFilesResponse {
+  dir: string;
+  files: { name: string; size: number; mod_time: number; rotated: boolean; is_active: boolean }[];
+  max_age: number;
+  max_backups: number;
+}
+
 export const logsApi = {
   get: () => api.get<LogsResponse>("/api/logs"),
+  files: () => api.get<LogFilesResponse>("/api/logs/files"),
 };
 
 export const controlApi = {
@@ -476,6 +498,8 @@ export const filterRulesApi = {
       body: JSON.stringify(data),
     }),
   delete: (id: number) => api.delete<void>(`/api/filter-rules/${id}`),
+  /** 各规则真实命中过多少个种子（TorrentInfo.filter_rule_id 的分组计数） */
+  hits: () => api.get<{ hits: Record<string, number> }>("/api/filter-rules/hits"),
   test: (data: FilterRuleTestRequest) =>
     api.post<FilterRuleTestResponse>("/api/filter-rules/test", data),
 };
@@ -943,12 +967,12 @@ export interface ArchiveTorrentsResponse {
 }
 
 export const pausedTorrentsApi = {
-  list: (page = 1, pageSize = 50, site?: string) => {
+  list: (page = 1, pageSize = 50, site?: string, signal?: AbortSignal) => {
     const params = new URLSearchParams();
     params.set("page", page.toString());
     params.set("page_size", pageSize.toString());
     if (site) params.set("site", site);
-    return api.get<PausedTorrentsResponse>(`/api/torrents/paused?${params.toString()}`);
+    return api.get<PausedTorrentsResponse>(`/api/torrents/paused?${params.toString()}`, { signal });
   },
   delete: (req: DeletePausedRequest) =>
     api.post<DeletePausedResponse>("/api/torrents/delete-paused", req),
@@ -1074,11 +1098,20 @@ export interface DownloaderTorrentItem {
   eta: number;
 }
 
+/** 某台下载器没取到数据。非空即「部分失败」：列表里的数据是真的，但不完整 */
+export interface DownloaderFailure {
+  downloader_id: number;
+  downloader_name: string;
+  error: string;
+}
+
 export interface TorrentListResponse {
   items: DownloaderTorrentItem[];
   total: number;
   page: number;
   page_size: number;
+  /** 后端逐台上报的失败，用来驱动 partial 态；全部成功时字段缺省 */
+  failures?: DownloaderFailure[];
 }
 
 export interface TorrentFileInfo {
@@ -1095,6 +1128,8 @@ export interface TorrentTrackerInfo {
   seeds: number;
   peers: number;
   leeches: number;
+  /** tracker 返回的失败原因。后端 TorrentDetailTracker 一直带着它，这里以前漏了声明 */
+  message?: string;
 }
 
 export interface TorrentDetailResponse {
@@ -1111,6 +1146,33 @@ export interface DownloaderTransferStats {
   total_downloaded: number;
   total_uploaded: number;
   free_space: number;
+}
+
+/**
+ * transfer-stats 里每台下载器的明细（对应后端 `DownloaderTransferStatItem`）。
+ *
+ * **不要拿「在不在这个数组里」当连接态**：后端只要能从 manager 取到实例就会 append，
+ * 取数失败时各字段留零值。实例可能是缓存来的，Transmission 的实现在普通 RPC 失败后
+ * 也不清 healthy 标志 —— 一台断线的客户端照样会出现在数组里。
+ * 连接态看 `reachable`（这一轮是否真的取到了状态或剩余空间），失败原因在 `error`。
+ */
+export interface DownloaderTransferStatItem {
+  downloader_id: number;
+  downloader_name: string;
+  downloader_type: string;
+  upload_speed: number;
+  download_speed: number;
+  uploaded: number;
+  downloaded: number;
+  session_uploaded: number;
+  session_downloaded: number;
+  free_space: number;
+  /** 这一轮是否真的从这台取到了数据（状态或剩余空间任一成功） */
+  reachable: boolean;
+  /** 两个探测都失败时的原因；取到数据时不返回这个字段 */
+  error?: string;
+  /** 下载器自报的版本（画板 41 状态栏那格的第三段）。问不到就不返回这个字段 */
+  client_version?: string;
 }
 
 export interface DownloaderCapability {
@@ -1153,7 +1215,7 @@ export const downloaderTorrentsApi = {
       delete_files: deleteFiles,
     }),
 
-  transferStats: () =>
+  transferStats: (signal?: AbortSignal) =>
     api.get<{
       total_upload_speed: number;
       total_download_speed: number;
@@ -1162,7 +1224,9 @@ export const downloaderTorrentsApi = {
       total_session_uploaded: number;
       total_session_downloaded: number;
       total_free_space: number;
-    }>("/api/downloader-torrents/transfer-stats"),
+      /* 后端一直在返回每台的明细，这里以前漏了声明 */
+      downloaders: DownloaderTransferStatItem[];
+    }>("/api/downloader-torrents/transfer-stats", { signal }),
 
   capabilities: () =>
     api.get<{ items: DownloaderCapability[] }>("/api/downloader-torrents/capabilities"),
@@ -1199,6 +1263,14 @@ export interface NotificationConfig {
   enabled: boolean;
   quiet_hours_start?: string;
   quiet_hours_end?: string;
+  /**
+   * 进程内实时运行态，不落库，重启即重算。后端问不到这个信号时缺省（不是 "error"）。
+   *
+   * 四档而不是三档：`connected` 只给「适配器确认对端真的接上了」的通道（目前只有 QQ
+   * 能给出这个判断）；其余在跑的是 `running` —— 四个适配器的 Healthy() 都只代表
+   * 构造/启动成功，拿它写「已连接」是在界面上说假话。
+   */
+  runtime_state?: "connected" | "running" | "error" | "disabled";
   // Dynamic fields (frontend form shape; backend stores under encrypted config_json)
   bot_token?: string;
   allowed_users?: string;
@@ -1222,6 +1294,7 @@ const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
   "enabled",
   "quiet_hours_start",
   "quiet_hours_end",
+  "runtime_state",
 ]);
 
 const NOTIFICATION_DYNAMIC_FIELDS = [
@@ -1284,6 +1357,7 @@ function unpackNotificationResponse(
     enabled: raw.enabled,
     quiet_hours_start: raw.quiet_hours_start,
     quiet_hours_end: raw.quiet_hours_end,
+    runtime_state: raw.runtime_state,
   };
   const sink = result as unknown as Record<string, unknown>;
   // Fields that may legitimately come back as arrays of user IDs (number[] / string[]).

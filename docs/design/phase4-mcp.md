@@ -1,7 +1,7 @@
 # Phase 4 — MCP Server 接口契约
 
 > **状态**：Design — 仅契约与文档，**不含运行时实现**。  
-> **代码入口**：[`internal/mcp/contract.go`](../../internal/mcp/contract.go)（零外部依赖）  
+> **代码入口**：[`internal/mcp/contract.go`](https://github.com/sunerpy/pt-tools/blob/main/internal/mcp/contract.go)（零外部依赖）  
 > **关联设计**：[`chatops-mcp-agent.md`](chatops-mcp-agent.md) §8
 
 ---
@@ -76,7 +76,7 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
 ## 5. Tool Inventory（10 个工具）
 
 > 以下为 `internal/mcp/contract.go` 中 `ContractTools` 的权威 schema 摘要。完整 `map[string]any` 形式见源码。  
-> 工具与 [`internal/chatops/commands/`](../../internal/chatops/commands) 的命令一一对应（少数为 web 独有）。
+> 工具与 [`internal/chatops/commands/`](https://github.com/sunerpy/pt-tools/tree/main/internal/chatops/commands) 的命令一一对应（少数为 web 独有）。
 
 ### 5.1 `list_tasks`（read-only）
 

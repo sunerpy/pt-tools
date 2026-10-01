@@ -1,20 +1,34 @@
 <script setup lang="ts">
-import { type NotificationConfig, chatopsApi } from "@/api";
-import { ArrowLeft, ChatDotRound, ChatSquare, Connection, Link } from "@element-plus/icons-vue";
+import { chatopsApi, type NotificationConfig } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import { useIsMobile } from "@/composables/useIsMobile";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+/* 图标与色相与通道列表页保持同一套：同一个通道在两个页面必须长一个样 */
+const CHANNEL_META: Record<string, { label: string; icon: string; color: string }> = {
+  telegram: { label: "Telegram", icon: "send", color: "var(--pt-info)" },
+  qq_onebot: { label: "QQ (OneBot)", icon: "message-square", color: "var(--pt-ok)" },
+  webhook: { label: "Webhook", icon: "link", color: "var(--pt-p)" },
+  wecom_webhook: { label: "WeCom Webhook", icon: "message-circle", color: "var(--pt-warn)" },
+};
+
 const route = useRoute();
 const router = useRouter();
+/* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
+const isMobile = useIsMobile();
 
 const id = computed(() => Number(route.params.id));
 
 const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
-const activeTab = ref<"basic" | "credentials" | "test">("basic");
 
 const formRef = ref<FormInstance>();
 const credFormRef = ref<FormInstance>();
@@ -40,17 +54,62 @@ interface TestResult {
 const testResult = ref<TestResult | null>(null);
 const testMessage = ref<string>("pt-tools 测试消息");
 
-const channelTypeMeta: Record<
-  string,
-  { label: string; icon: unknown; tagType: "primary" | "success" | "warning" | "info" | "danger" }
-> = {
-  telegram: { label: "Telegram", icon: ChatDotRound, tagType: "primary" },
-  qq_onebot: { label: "QQ (OneBot)", icon: ChatSquare, tagType: "warning" },
-  webhook: { label: "Webhook", icon: Link, tagType: "info" },
-  wecom_webhook: { label: "WeCom Webhook", icon: Connection, tagType: "success" },
-};
+const currentMeta = computed(() => CHANNEL_META[conf.channel_type] || CHANNEL_META.telegram);
 
-const currentMeta = computed(() => channelTypeMeta[conf.channel_type] || channelTypeMeta.telegram);
+/**
+ * 画板 p-msg 700：这一页会弹的每一种提示。
+ * 每条都对应下面某个 ElMessage 的实参 —— 改文案要两处一起改，别让卡和真实提示对不上。
+ */
+const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; when: string }[] = [
+  /*
+   * 之前这张卡列的是「保存成功 / 连接测试成功 / 连接测试失败 / 凭证留空则保持不变」—— 这页根本不弹前三条，
+   * 第四条还是错的：凭证字段会回显当前值、按原样提交，清空再保存就是用空串覆盖。现在逐条对着下面的 ElMessage，
+   * 带 ${…} 的那条用「…」代替插值；toastCopy.test.ts 核对两边一条不多、一条不少。
+   */
+  { kind: "成功", tone: "ok", text: "已保存基本信息", when: "改完名称或静默时段并保存" },
+  {
+    kind: "成功",
+    tone: "ok",
+    text: "已保存凭证",
+    when: "改完凭证并保存 —— 清空的字段会按空值保存",
+  },
+  { kind: "成功", tone: "ok", text: "测试消息发送成功", when: "「发送测试消息」送达" },
+  {
+    kind: "提示",
+    tone: "warn",
+    text: "已触发测试，但返回结果异常",
+    when: "测试请求发出了，但返回的不是预期结构",
+  },
+  {
+    kind: "失败",
+    tone: "dang",
+    text: "测试消息发送失败：…",
+    when: "测试请求失败 —— 冒号后是后端给的原因，停留 8 秒、可手动关闭",
+  },
+  {
+    kind: "失败",
+    tone: "dang",
+    text: "保存失败",
+    when: "保存请求失败 —— 后端有原话时直接显示原话",
+  },
+  {
+    kind: "失败",
+    tone: "dang",
+    text: "加载详情失败",
+    when: "打开这一页时读不到通道详情 —— 后端有原话时直接显示原话",
+  },
+  { kind: "失败", tone: "dang", text: "无效的通道 ID", when: "地址里的通道 ID 不是有效的数字" },
+];
+
+/** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
+const headSub = computed(() => `ID ${conf.id || "-"} · ${currentMeta.value.label}`);
+
+const quietHoursNote = computed(() => {
+  const s = conf.quiet_hours_start;
+  const e = conf.quiet_hours_end;
+  if (!s || !e) return "未设置，任何时段都会立即推送";
+  return `${s} → ${e}${s > e ? "（跨午夜）" : ""}`;
+});
 
 const basicRules: FormRules = {
   name: [
@@ -58,6 +117,19 @@ const basicRules: FormRules = {
     { min: 1, max: 64, message: "名称长度需在 1~64 字符之间", trigger: "blur" },
   ],
 };
+
+/**
+ * 画板 37 的 p-map：四种 channel_type 各自的显示名与唯一必填项。
+ *
+ * 取值不是抄的：类型字符串是各适配器 `RegisterChannel` 的注册名
+ * （internal/notify/adapter/*），必填项与下面的 `credRules` 同源 —— 两处要一起改。
+ */
+const channelTypeMap = [
+  { type: "telegram", label: "Telegram", must: "bot_token" },
+  { type: "qq_onebot", label: "QQ (OneBot)", must: "listen_addr" },
+  { type: "webhook", label: "Webhook", must: "endpoint_url" },
+  { type: "wecom_webhook", label: "WeCom Webhook", must: "webhook_key" },
+] as const;
 
 const credRules = computed<FormRules>(() => {
   switch (conf.channel_type) {
@@ -243,7 +315,7 @@ async function handleTest() {
     testResult.value = {
       success: ok,
       message: ok ? "测试消息发送成功，请在目标账号查收。" : "测试消息可能未送达，请检查日志",
-      at: new Date().toLocaleString(),
+      at: new Date().toLocaleString("zh-CN", { hour12: false }),
     };
     if (ok) {
       ElMessage.success("测试消息发送成功");
@@ -264,7 +336,7 @@ async function handleTest() {
     testResult.value = {
       success: false,
       message: reason,
-      at: new Date().toLocaleString(),
+      at: new Date().toLocaleString("zh-CN", { hour12: false }),
     };
     ElMessage({
       type: "error",
@@ -283,51 +355,63 @@ function goBack() {
 </script>
 
 <template>
-  <div class="page-container" v-loading="loading">
-    <!-- Hero / 头部 -->
-    <div class="hero-block">
-      <div class="hero-back">
-        <el-button text @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          返回通道列表
-        </el-button>
-      </div>
-      <div class="hero-main">
-        <div class="hero-brand">
-          <el-icon class="brand-icon"><component :is="currentMeta.icon" /></el-icon>
-          <div class="brand-text">
-            <div class="brand-type">
-              <el-tag :type="currentMeta.tagType" size="small">{{ currentMeta.label }}</el-tag>
-              <el-tag v-if="conf.enabled" type="success" size="small" effect="plain">运行中</el-tag>
-              <el-tag v-else type="info" size="small" effect="plain">已停用</el-tag>
-            </div>
-            <h1 class="brand-name">{{ conf.name || "未命名通道" }}</h1>
-            <p class="brand-id">ID: {{ conf.id || "-" }}</p>
-          </div>
-        </div>
-        <div class="hero-actions">
-          <span class="enable-label">启用</span>
-          <el-switch
-            v-model="conf.enabled"
-            :loading="saving"
-            data-testid="enable-switch"
-            @change="handleSaveBasic" />
-        </div>
-      </div>
-    </div>
+  <!--
+    画板 23：head 88（详情页的面包屑页头，由外壳给）→ hero 1080×116 → c-basic 1080×262
+    → c-test 1080×250。通道身份落在 hero 卡里，ID 与类型走页头摘要，返回与启用开关
+    是页头右侧的动作。宽屏下卡宽停在 1080（.pt-cards--form）。
+  -->
+  <div v-loading="loading" class="notify-detail-page pt-cards pt-cards--wide pt-cards--form">
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button @click="goBack">
+        <PtIcon name="arrow-left" :size="15" /><span>通道列表</span>
+      </el-button>
+      <!-- 开关直接落库：详情页顶上的这一枚是「上线 / 下线」按钮，不是待保存的表单项 -->
+      <label class="ctl">
+        <el-switch
+          v-model="conf.enabled"
+          :loading="saving"
+          data-testid="enable-switch"
+          @change="handleSaveBasic" />
+        <span>启用通道</span>
+      </label>
+    </Teleport>
 
-    <!-- Tabs -->
-    <el-card class="content-card" shadow="never">
-      <el-tabs v-model="activeTab" class="detail-tabs">
-        <!-- 基本信息 -->
-        <el-tab-pane label="基本信息" name="basic">
-          <el-form
-            ref="formRef"
-            :model="conf"
-            :rules="basicRules"
-            label-position="top"
-            class="form-grid"
-            @submit.prevent>
+    <!-- 画板 hero 1080×116：通道身份 —— 色块图标 + 名字 + 类型 + 运行状态 -->
+    <!--
+      data-card 是给验收用的身份标签：这块是卡片层的一员，但它没有 PtPanel 的标题，
+      验收就没法认出它、删掉也不会红（review 实测这一点）。凡是卡片层里没有标题的块
+      都要带上它，值用画板上的图层名。
+    -->
+    <section class="hero" data-card="hero">
+      <span class="hero__icon" :style="{ '--ch-c': currentMeta.color }">
+        <PtIcon :name="currentMeta.icon" :size="20" />
+      </span>
+      <div class="hero__body">
+        <h2 class="hero__name">{{ conf.name || "未命名通道" }}</h2>
+        <div class="hero__meta">
+          <PtTag>{{ currentMeta.label }}</PtTag>
+          <PtStatusPill :tone="conf.enabled ? 'ok' : 'neutral'" size="sm">
+            {{ conf.enabled ? "运行中" : "已停用" }}
+          </PtStatusPill>
+        </div>
+      </div>
+    </section>
+
+    <PtPanel title="基本信息" icon="settings" padding="none">
+      <el-form
+        ref="formRef"
+        :model="conf"
+        :rules="basicRules"
+        label-position="top"
+        class="pt-form settings-form"
+        @submit.prevent>
+        <div class="pt-strip">
+          <PtIcon name="id-card" :size="13" />
+          <span>身份</span>
+        </div>
+        <div class="settings-body">
+          <div class="field-row">
             <el-form-item label="通道名称" prop="name">
               <el-input
                 v-model="conf.name"
@@ -335,120 +419,148 @@ function goBack() {
                 show-word-limit
                 placeholder="例如：我的 Telegram 机器人"
                 data-testid="name-input" />
+              <div class="field-tip">只用于在列表里区分通道，随时可改</div>
             </el-form-item>
             <el-form-item label="通道类型">
               <el-input :model-value="currentMeta.label" disabled />
-              <div class="form-hint">通道类型不可修改，如需更换请删除后重建。</div>
+              <div class="field-tip">类型不可修改，换类型请删除后重建</div>
             </el-form-item>
-            <el-form-item label="启用状态">
-              <el-switch
-                v-model="conf.enabled"
-                active-text="启用"
-                inactive-text="停用"
-                inline-prompt />
-            </el-form-item>
-            <el-form-item label="静默时段">
+          </div>
+        </div>
+
+        <div class="pt-strip">
+          <PtIcon name="clock" :size="13" />
+          <span>静默时段</span>
+          <span class="pt-strip__end">{{ quietHoursNote }}</span>
+        </div>
+        <div class="settings-body">
+          <el-form-item label="不打扰的时间范围">
+            <span class="quiet-row">
               <el-time-picker
                 v-model="conf.quiet_hours_start"
                 format="HH:mm"
                 value-format="HH:mm"
-                placeholder="开始 (HH:MM)"
+                placeholder="开始"
                 clearable
-                style="width: 130px" />
-              <span style="margin: 0 8px">→</span>
+                class="quiet-row__pick" />
+              <PtIcon name="arrow-right" :size="14" class="quiet-row__sep" />
               <el-time-picker
                 v-model="conf.quiet_hours_end"
                 format="HH:mm"
                 value-format="HH:mm"
-                placeholder="结束 (HH:MM)"
+                placeholder="结束"
                 clearable
-                style="width: 130px" />
-              <div class="form-hint">
-                在此时段内通道不会主动发送通知，待静默结束后由 retry worker 投递。支持跨午夜（如
-                22:00 → 08:00）。
+                class="quiet-row__pick" />
+            </span>
+            <div class="field-tip">
+              这段时间内通道不主动发通知，静默结束后由 retry worker 补投；支持跨午夜（如 22:00 →
+              08:00）
+            </div>
+          </el-form-item>
+        </div>
+      </el-form>
+
+      <template #footer>
+        <span class="pt-foot-note">名称、启用状态与静默时段</span>
+        <el-button
+          type="primary"
+          :loading="saving"
+          data-testid="save-basic-btn"
+          @click="handleSaveBasic">
+          <PtIcon name="save" :size="14" /><span>保存基本信息</span>
+        </el-button>
+      </template>
+    </PtPanel>
+
+    <PtPanel title="凭证与连接" icon="key-round" padding="none">
+      <el-form
+        ref="credFormRef"
+        :model="conf"
+        :rules="credRules"
+        label-position="top"
+        class="pt-form settings-form"
+        @submit.prevent>
+        <div class="pt-strip">
+          <PtIcon name="shield-check" :size="13" />
+          <span>{{ currentMeta.label }} 凭证</span>
+          <span class="pt-strip__end">仅在保存时上传</span>
+        </div>
+        <div class="settings-body">
+          <div class="pt-note pt-note--warn cred-note">
+            <PtIcon name="lock" :size="14" class="pt-note__icon" />
+            <span>回显已脱敏。请妥善保管，不要把凭证截图发给第三方。</span>
+          </div>
+
+          <!-- Telegram -->
+          <template v-if="conf.channel_type === 'telegram'">
+            <el-form-item label="Bot Token" prop="bot_token">
+              <el-input
+                v-model="conf.bot_token"
+                type="password"
+                show-password
+                placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                data-testid="bot-token-input" />
+              <div class="field-tip">找 <code>@BotFather</code> 创建机器人后拿到的 token</div>
+            </el-form-item>
+
+            <div class="field-head">谁可以用这个机器人</div>
+
+            <el-form-item label="允许用户（allowed_users）">
+              <el-input
+                v-model="tgForm.allowed_users_text"
+                type="textarea"
+                :rows="2"
+                placeholder="逗号分隔的 Telegram user_id，例如：123456789,987654321" />
+              <!--
+                原来写「留空表示允许所有人」「发非管理员命令」，两句都与代码不符：
+                adapter/telegram/inbound.go 的 permitted 只放行两栏里出现的 user_id，两栏都空就谁都不放；
+                管理员命令看的是绑定上的 PtAdmin，而 ConsumeCode 给每个新绑定都写 true。
+              -->
+              <div class="field-tip">
+                这里和下面「管理员用户」里的 user_id
+                才能与机器人对话；两栏都留空时，任何人发来的消息都会被拒绝
               </div>
             </el-form-item>
-            <div class="form-actions">
-              <el-button
-                type="primary"
-                :loading="saving"
-                data-testid="save-basic-btn"
-                @click="handleSaveBasic">
-                保存基本信息
-              </el-button>
-            </div>
-          </el-form>
-        </el-tab-pane>
+            <el-form-item label="管理员用户（admin_users）">
+              <el-input
+                v-model="tgForm.admin_users_text"
+                type="textarea"
+                :rows="2"
+                placeholder="逗号分隔的 Telegram user_id，例如：123456789" />
+              <div class="field-tip">
+                与「允许用户」一样放行发消息；管理命令（<code>/pause</code> <code>/delete</code>
+                等）目前对每个完成绑定的账号开放
+              </div>
+            </el-form-item>
 
-        <!-- 凭证 -->
-        <el-tab-pane label="凭证" name="credentials">
-          <el-alert
-            type="warning"
-            :closable="false"
-            class="cred-alert"
-            title="敏感凭证仅在保存时上传，回显已脱敏。请妥善保管，不要将凭证截图分享给第三方。" />
-          <el-form
-            ref="credFormRef"
-            :model="conf"
-            :rules="credRules"
-            label-position="top"
-            class="form-grid"
-            @submit.prevent>
-            <!-- Telegram -->
-            <template v-if="conf.channel_type === 'telegram'">
-              <el-form-item label="Bot Token" prop="bot_token">
-                <el-input
-                  v-model="conf.bot_token"
-                  type="password"
-                  show-password
-                  placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-                  data-testid="bot-token-input" />
-              </el-form-item>
-              <el-form-item label="允许用户 (allowed_users)">
-                <el-input
-                  v-model="tgForm.allowed_users_text"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="逗号分隔的 Telegram user_id 列表，例如：123456789,987654321（留空表示允许所有）" />
-                <div class="form-hint">
-                  仅这些 Telegram
-                  用户可与机器人交互（接收消息、发送非管理员命令）。留空表示允许所有用户。
-                </div>
-              </el-form-item>
-              <el-form-item label="管理员用户 (admin_users)">
-                <el-input
-                  v-model="tgForm.admin_users_text"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="逗号分隔的 Telegram user_id 列表，例如：123456789" />
-                <div class="form-hint">
-                  管理员可执行 /unbind /pause /resume /delete 等管理命令。
-                </div>
-              </el-form-item>
+            <div class="field-head">出站推送</div>
+
+            <div class="field-row">
               <el-form-item label="默认 Chat ID">
                 <el-input
                   v-model="tgForm.default_chat_id_text"
-                  placeholder="主动推送时使用的 chat_id（数字 user_id 或 @channelusername）" />
-                <div class="form-hint">
-                  出站推送目标。可填用户 user_id（数字）或 @channelusername（公开频道）。
-                </div>
+                  placeholder="数字 user_id 或 @channelusername" />
+                <div class="field-tip">主动推送的目标；公开频道填 @channelusername</div>
               </el-form-item>
               <el-form-item label="代理 URL（可选）" prop="proxy_url">
                 <el-input
                   v-model="conf.proxy_url"
                   placeholder="http://127.0.0.1:1080 或 socks5://user:pass@host:1080"
                   clearable />
-                <div class="form-hint">
-                  留空则使用系统环境变量 HTTPS_PROXY / HTTP_PROXY；填写后该通道单独走此代理。
+                <div class="field-tip">
+                  留空走系统的 <code>HTTPS_PROXY</code> /
+                  <code>HTTP_PROXY</code>；填了则本通道单独走它
                 </div>
               </el-form-item>
-            </template>
+            </div>
+          </template>
 
-            <!-- QQ OneBot -->
-            <template v-if="conf.channel_type === 'qq_onebot'">
-              <el-form-item label="监听地址 (listen_addr)" prop="listen_addr">
+          <!-- QQ OneBot -->
+          <template v-if="conf.channel_type === 'qq_onebot'">
+            <div class="field-row">
+              <el-form-item label="监听地址（listen_addr）" prop="listen_addr">
                 <el-input v-model="conf.listen_addr" placeholder="0.0.0.0:8081" />
-                <div class="form-hint">OneBot 反向 WebSocket 监听地址。</div>
+                <div class="field-tip">OneBot 反向 WebSocket 的监听地址</div>
               </el-form-item>
               <el-form-item label="Access Token">
                 <el-input
@@ -456,27 +568,45 @@ function goBack() {
                   type="password"
                   show-password
                   placeholder="OneBot access_token" />
+                <div class="field-tip">与 OneBot 实现里配置的 token 一致</div>
               </el-form-item>
-              <el-form-item label="管理员 QQ (admin_qq_users)">
-                <el-input
-                  v-model="conf.admin_qq_users"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="逗号分隔的 QQ 号列表" />
-              </el-form-item>
-              <el-form-item label="允许 QQ (allowed_qq_users)">
-                <el-input
-                  v-model="conf.allowed_qq_users"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="逗号分隔的 QQ 号列表，留空表示允许所有" />
-              </el-form-item>
-            </template>
+            </div>
 
-            <!-- Webhook -->
-            <template v-if="conf.channel_type === 'webhook'">
+            <div class="field-head">谁可以用这个机器人</div>
+
+            <el-form-item label="管理员 QQ（admin_qq_users）">
+              <el-input
+                v-model="conf.admin_qq_users"
+                type="textarea"
+                :rows="2"
+                placeholder="逗号分隔的 QQ 号" />
+              <!--
+                两栏都是对话白名单：adapter/qq/inbound.go 的 isUserAllowed 只放行出现在其中一栏的号码，
+                其余消息直接忽略。它们不决定管理员权限（看绑定上的 PtAdmin）；另外
+                app/notification_service.go 的 qqTestChatID 把测试消息发给这一栏的第一个号码。
+              -->
+              <div class="field-tip">
+                这里和下面「允许 QQ」里的号码才能与机器人对话；测试消息发给这里的第一个号码
+              </div>
+            </el-form-item>
+            <el-form-item label="允许 QQ（allowed_qq_users）">
+              <el-input
+                v-model="conf.allowed_qq_users"
+                type="textarea"
+                :rows="2"
+                placeholder="逗号分隔的 QQ 号" />
+              <div class="field-tip">
+                同样能与机器人对话；两栏都留空时，任何人发来的消息都会被忽略。管理命令目前对每个完成绑定的账号开放
+              </div>
+            </el-form-item>
+          </template>
+
+          <!-- Webhook -->
+          <template v-if="conf.channel_type === 'webhook'">
+            <div class="field-row">
               <el-form-item label="Endpoint URL" prop="endpoint_url">
                 <el-input v-model="conf.endpoint_url" placeholder="https://example.com/notify" />
+                <div class="field-tip">pt-tools 会向这个地址 POST JSON</div>
               </el-form-item>
               <el-form-item label="HMAC Secret">
                 <el-input
@@ -484,271 +614,372 @@ function goBack() {
                   type="password"
                   show-password
                   placeholder="用于签名的密钥（可选）" />
+                <div class="field-tip">填了会给请求体签名，接收端可校验来源</div>
               </el-form-item>
-              <el-form-item label="自定义 Headers (JSON)">
-                <el-input
-                  v-model="conf.headers"
-                  type="textarea"
-                  :rows="3"
-                  placeholder='{"Authorization": "Bearer xxx"}' />
-                <div class="form-hint">JSON 对象格式，将随请求一起发送。</div>
-              </el-form-item>
-            </template>
-
-            <!-- WeCom -->
-            <template v-if="conf.channel_type === 'wecom_webhook'">
-              <el-form-item label="Webhook Key" prop="webhook_key">
-                <el-input
-                  v-model="conf.webhook_key"
-                  type="password"
-                  show-password
-                  placeholder="企业微信群机器人 webhook key" />
-                <div class="form-hint">来自企业微信群机器人 URL `?key=` 之后的部分。</div>
-              </el-form-item>
-            </template>
-
-            <div class="form-actions">
-              <el-button
-                type="primary"
-                :loading="saving"
-                data-testid="save-cred-btn"
-                @click="handleSaveCredentials">
-                保存凭证
-              </el-button>
             </div>
-          </el-form>
-        </el-tab-pane>
+            <el-form-item label="自定义 Headers（JSON）">
+              <el-input
+                v-model="conf.headers"
+                type="textarea"
+                :rows="3"
+                placeholder='{"Authorization": "Bearer xxx"}' />
+              <div class="field-tip">JSON 对象格式，随请求一起发送</div>
+            </el-form-item>
+          </template>
 
-        <!-- 测试 -->
-        <el-tab-pane label="测试" name="test">
-          <div class="test-pane">
-            <p class="test-desc">
-              点击下方按钮立即向 <strong>{{ conf.name || "当前通道" }}</strong> 发送一条测试消息，
-              用于验证凭证与连通性。
-            </p>
-            <el-form label-position="top" @submit.prevent>
-              <el-form-item label="测试消息内容（仅展示用，由后端生成）">
-                <el-input v-model="testMessage" :disabled="true" />
-              </el-form-item>
-            </el-form>
-            <div class="form-actions">
-              <el-button
-                type="primary"
-                size="large"
-                :loading="testing"
-                data-testid="run-test-btn"
-                @click="handleTest">
-                发送测试消息
-              </el-button>
-            </div>
+          <!-- WeCom -->
+          <template v-if="conf.channel_type === 'wecom_webhook'">
+            <el-form-item label="Webhook Key" prop="webhook_key">
+              <el-input
+                v-model="conf.webhook_key"
+                type="password"
+                show-password
+                placeholder="企业微信群机器人的 key" />
+              <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
+            </el-form-item>
+          </template>
+        </div>
+      </el-form>
 
-            <transition name="fade">
-              <div
-                v-if="testResult"
-                class="test-result"
-                :class="{ 'is-success': testResult.success, 'is-error': !testResult.success }">
-                <div class="result-header">
-                  <el-tag :type="testResult.success ? 'success' : 'danger'" effect="dark">
-                    {{ testResult.success ? "成功" : "失败" }}
-                  </el-tag>
-                  <span class="result-time">{{ testResult.at }}</span>
-                </div>
-                <div class="result-body">{{ testResult.message }}</div>
-              </div>
-            </transition>
+      <template #footer>
+        <span class="pt-foot-note">保存后会立即用新凭证重连通道</span>
+        <el-button
+          type="primary"
+          :loading="saving"
+          data-testid="save-cred-btn"
+          @click="handleSaveCredentials">
+          <PtIcon name="save" :size="14" /><span>保存凭证</span>
+        </el-button>
+      </template>
+    </PtPanel>
+
+    <PtPanel title="连通性测试" icon="zap">
+      <div class="test">
+        <p class="test__desc">
+          向
+          <strong>{{ conf.name || "当前通道" }}</strong> 发一条测试消息，用来验证凭证与网络是否通。
+        </p>
+
+        <el-form label-position="top" class="pt-form" @submit.prevent>
+          <el-form-item label="消息内容">
+            <el-input v-model="testMessage" disabled />
+            <div class="field-tip">内容由后端生成，这里只是预览</div>
+          </el-form-item>
+        </el-form>
+
+        <div class="test__acts">
+          <el-button
+            type="primary"
+            :loading="testing"
+            data-testid="run-test-btn"
+            @click="handleTest">
+            <PtIcon name="send" :size="14" /><span>发送测试消息</span>
+          </el-button>
+          <span class="test__hint">停用状态下也能试，但大概率发不出去</span>
+        </div>
+
+        <transition name="fade">
+          <div
+            v-if="testResult"
+            class="pt-note test__result"
+            :class="testResult.success ? 'pt-note--ok' : 'pt-note--dang'">
+            <PtIcon
+              :name="testResult.success ? 'circle-check' : 'circle-x'"
+              :size="14"
+              class="pt-note__icon" />
+            <span class="test__result-body">
+              <span>{{ testResult.message }}</span>
+              <span class="test__result-at">{{ testResult.at }}</span>
+            </span>
           </div>
-        </el-tab-pane>
-      </el-tabs>
-    </el-card>
+        </transition>
+      </div>
+    </PtPanel>
+
+    <!--
+      画板 p-msg 700「ElMessage 全量文案」—— 这一页会弹出的每一种提示。
+      画板把它列出来是为了让人不必逐个触发就知道各种结果长什么样；这里照原意落地，
+      标题用面向用户的说法。文案与下面各处 ElMessage 的实参一字不差，改一处要改两处。
+    -->
+    <PtPanel class="msg-card" title="操作提示文案" icon="message-square">
+      <ul class="msg">
+        <li v-for="row in toastCopy" :key="row.text" class="msg__row">
+          <PtStatusPill :tone="row.tone" size="sm">{{ row.kind }}</PtStatusPill>
+          <span class="msg__t">{{ row.text }}</span>
+          <span class="msg__when">{{ row.when }}</span>
+        </li>
+      </ul>
+    </PtPanel>
+
+    <!--
+      画板 37（通道详情 · 凭证 tab）的两张说明卡：p-sec 700「密钥与安全」、
+      p-map 364「channel_type 映射」。每句话都能在代码里核对：
+        · 加密在 internal/crypto（AES-256-GCM），密钥来自 base64 的
+          PT_TOOLS_SECRET_KEY 或 ~/.pt-tools/secret.key 里的十六进制文本；
+        · 列表 DTO 整体脱敏 ConfigJSON，只有这个鉴权后的详情页会解密回显；
+        · 映射表的四个取值来自各适配器的注册名（telegram / qq_onebot /
+          webhook / wecom_webhook），必填项来自本文件的 credRules。
+      画板那一版把四种类型做成 tab 并列展示，那是规格页的写法：一条已存在的通道类型不可改
+      （页头那句「类型不可修改，换类型请删除后重建」），所以这里只画当前类型的表单，
+      四种类型的差异改由这张映射卡交代。
+    -->
+    <!-- 画板 37 把这两张并排：p-sec 700 + p-map 364，所以套一层 .pt-cards--main -->
+    <div class="pt-cards pt-cards--main">
+      <PtPanel title="密钥与安全" icon="shield-check">
+        <ul class="sec">
+          <li>
+            Bot Token、Access Token、HMAC Secret、Webhook Key 以及代理凭据都以
+            <strong>AES-256-GCM</strong> 加密后落库，不存明文。
+          </li>
+          <li>
+            列表接口整体脱敏 <code>config_json</code>，只有这一页（鉴权之后）会解密回显；
+            日志与审计不输出明文。
+          </li>
+          <li>
+            密钥取自 <code>PT_TOOLS_SECRET_KEY</code>（base64）或
+            <code>~/.pt-tools/secret.key</code>（十六进制文本）。密钥缺失或轮换之后，
+            旧凭证解不开，需要重新保存一次。
+          </li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel title="channel_type 映射" icon="list-checks">
+        <ul class="cmap">
+          <li v-for="row in channelTypeMap" :key="row.type" class="cmap__row">
+            <code>{{ row.type }}</code>
+            <span class="cmap__label">{{ row.label }}</span>
+            <span class="cmap__must">必填 {{ row.must }}</span>
+          </li>
+        </ul>
+      </PtPanel>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page-container {
-  padding: 16px 24px 32px;
+/* 提示文案卡：一行一条，左胶囊右场景 */
+.msg-card {
+  max-width: 700px;
 }
 
-/* Hero */
-.hero-block {
-  position: relative;
-  padding: 24px;
-  margin-bottom: 24px;
-  border-radius: var(--pt-radius-xl, 16px);
-  background:
-    radial-gradient(
-      ellipse at top right,
-      color-mix(in oklab, var(--pt-color-primary) 15%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(to right, rgb(128 128 128 / 8%) 1px, transparent 1px) 0 0 / 32px 32px,
-    linear-gradient(to bottom, rgb(128 128 128 / 8%) 1px, transparent 1px) 0 0 / 32px 32px,
-    var(--pt-bg-surface);
-  border: 1px solid var(--pt-border-color);
-  overflow: hidden;
-}
-
-.hero-back {
-  margin-bottom: 12px;
-}
-
-.hero-main {
+/* 画板 37 的 p-sec 700 / p-map 364：栏宽由外面那层 .pt-cards--main 给 */
+.sec {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.hero-brand {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  flex: 1;
-}
-
-.brand-icon {
-  font-size: 28px;
-  color: var(--pt-color-primary);
-  background: color-mix(in oklab, var(--pt-color-primary) 12%, transparent);
-  padding: 14px;
-  border-radius: 12px;
-  flex-shrink: 0;
-}
-
-.brand-text {
-  min-width: 0;
-}
-
-.brand-type {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 6px;
-  flex-wrap: wrap;
-}
-
-.brand-name {
-  font-size: 24px;
-  font-weight: 700;
+  flex-direction: column;
+  gap: var(--pt-space-2);
   margin: 0;
-  color: var(--pt-text-primary);
-  letter-spacing: -0.01em;
-  word-break: break-word;
+  padding-left: var(--pt-space-4);
+  font-size: var(--pt-fz-sm);
+  line-height: 1.7;
+  color: var(--pt-t2);
 }
 
-.brand-id {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-  margin: 4px 0 0 0;
-  font-family: var(--el-font-family-monospace, ui-monospace, monospace);
-}
-
-.hero-actions {
+.cmap {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmap__row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 2px var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-label);
+}
+
+.cmap__row code {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t1);
+}
+
+.cmap__label {
+  color: var(--pt-t2);
+}
+
+/* 必填项另起一行，靠左对齐到类型名下方 */
+.cmap__must {
+  grid-column: 1 / -1;
+  color: var(--pt-t3);
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.msg__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-sm);
+}
+
+.msg__t {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.msg__when {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/* 内缩 16、卡间 16 由 .pt-cards--wide 给；画板这几张卡是 1080 通栏，不是 880 */
+
+/* 画板 hero 1080×116：卡片层的一块，所以和 PtPanel 同一套边框与圆角 */
+.hero {
+  display: flex;
+  gap: var(--pt-space-3);
   align-items: center;
-  gap: 8px;
-}
-
-.enable-label {
-  font-size: 14px;
-  color: var(--pt-text-secondary);
-}
-
-/* Content card */
-.content-card {
-  border-radius: var(--pt-radius-lg, 12px);
-  background: color-mix(in oklab, var(--pt-bg-surface) 70%, transparent);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
+  padding: var(--pt-pad);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
   box-shadow: var(--pt-shadow-sm);
 }
 
-.detail-tabs :deep(.el-tabs__item.is-active) {
-  color: var(--pt-color-primary);
-}
-
-.detail-tabs :deep(.el-tabs__active-bar) {
-  background-color: var(--pt-color-primary);
-}
-
-.form-grid {
-  max-width: 640px;
-}
-
-.form-hint {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-  margin-top: 4px;
-  line-height: 1.4;
-}
-
-.form-actions {
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in oklab, var(--pt-border-color) 50%, transparent);
-}
-
-.cred-alert {
-  margin-bottom: 20px;
-}
-
-/* Test pane */
-.test-pane {
-  max-width: 640px;
-}
-
-.test-desc {
-  font-size: 14px;
-  color: var(--pt-text-secondary);
-  line-height: 1.6;
-  margin: 0 0 20px 0;
-}
-
-.test-result {
-  margin-top: 24px;
-  padding: 16px;
-  border-radius: var(--pt-radius-md, 10px);
-  border: 1px solid var(--pt-border-color);
-  background: var(--pt-bg-surface);
-}
-
-.test-result.is-success {
-  border-color: color-mix(in oklab, var(--pt-color-success) 40%, var(--pt-border-color));
-  background: color-mix(in oklab, var(--pt-color-success) 5%, var(--pt-bg-surface));
-}
-
-.test-result.is-error {
-  border-color: color-mix(in oklab, var(--pt-color-danger) 40%, var(--pt-border-color));
-  background: color-mix(in oklab, var(--pt-color-danger) 5%, var(--pt-bg-surface));
-}
-
-.result-header {
-  display: flex;
+.hero__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--ch-c);
+  background: color-mix(in srgb, var(--ch-c) 12%, transparent);
+  border-radius: var(--pt-r-md);
 }
 
-.result-time {
-  font-size: 12px;
-  color: var(--pt-text-secondary);
-  font-family: var(--el-font-family-monospace, ui-monospace, monospace);
+.hero__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
-.result-body {
-  font-size: 14px;
-  color: var(--pt-text-primary);
-  line-height: 1.5;
+/* 画板 23 的 hero name 是 19/700。之前写的 --pt-fz-h3 从来没定义过，整条声明失效，回落成 13 号 */
+.hero__name {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--pt-fz-h1);
+  font-weight: 700;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero__meta {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+/* 开关 + 文字算一个整体控件，点文字也能切；label 天然带这个行为 */
+.ctl {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 第一条区块条紧贴面板页头，两条发丝线会叠成 2px */
+.settings-form > .pt-strip:first-child {
+  border-top: 0;
+}
+
+/* 下内边距留 0：末个字段自带的 16 下外边距正好等于 --pt-pad，凑成段尾留白 */
+.settings-body {
+  padding: var(--pt-pad) var(--pt-pad) 0;
+}
+
+.cred-note {
+  margin-bottom: var(--pt-space-4);
+}
+
+/* 两个时间选择器 + 一枚箭头是一个整体，别让 el-form-item 把它们拆成三行 */
+.quiet-row {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+.quiet-row__pick {
+  width: 128px;
+}
+
+.quiet-row__sep {
+  flex: 0 0 auto;
+  color: var(--pt-t4);
+}
+
+.test__desc {
+  margin: 0 0 var(--pt-space-4);
+  font-size: var(--pt-fz-body);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.test__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-3);
+  align-items: center;
+}
+
+.test__hint {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.test__result {
+  margin-top: var(--pt-space-4);
+}
+
+.test__result-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
   word-break: break-word;
+}
+
+.test__result-at {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 200ms ease;
+  transition: opacity var(--pt-transition-fast);
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+@media (max-width: 768px) {
+  .quiet-row__pick {
+    width: 100%;
+  }
+
+  .quiet-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    width: 100%;
+  }
 }
 </style>

@@ -5,21 +5,283 @@ import {
   type FilterRuleTestResponse,
   type RSSConfig,
 } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
-const loading = ref(false);
+const isMobile = useIsMobile();
 const saving = ref(false);
-const testing = ref(false);
 const showDialog = ref(false);
 const showTestDialog = ref(false);
 const editMode = ref(false);
 const loadingRss = ref(false);
+/** 试跑用的 RSS 数据源列表没拿到。规则表本身不受影响，所以这是「部分失败」而不是失败 */
+const rssFailed = ref(false);
 
 const rules = ref<FilterRule[]>([]);
 const rssList = ref<{ id: number; name: string; site_name: string }[]>([]);
 const testResult = ref<FilterRuleTestResponse | null>(null);
 const selectedRssId = ref<number | undefined>(undefined);
+
+const TEST_ZERO_SUB = "没有种子命中这条规则，放宽模式或换个数据源";
+
+/**
+ * 规则表的六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，加载失败弹个 toast 就完事 —— 两秒后 toast 消失，
+ * 表格停在 empty 上，用户看到的是「一条规则都还没建」，于是又去建一条重复的。
+ * 请求失败必须留在页面上，401/403 还要单独画成「无权访问」，否则用户会一直点重试。
+ *
+ * 这页不接 filtered：规则表没有搜索/筛选，0 行只可能是「一条都还没建」，永远是 empty。
+ * partial 接的是次要数据源 —— 规则拿到了但试跑用的 RSS 列表没拿到。
+ */
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
+  failed: () => (rssFailed.value ? 1 : 0),
+  /* 画板 20 的 bar-64 带来了本地筛选：筛掉之后 0 行是 zero，不是「一条都还没建」 */
+  filtered: () => ruleFilterOn.value,
+});
+
+/** 状态块的副标题：失败时给真实错误，空态时给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return "规则读到了，但试跑用的 RSS 数据源列表没读到";
+  /* zero 是「筛掉了」而不是「一条都还没建」，下一步动作完全不同 */
+  if (state.value === "zero") return "当前筛选下没有规则，放宽筛选或清空它";
+  return "加一条规则，让 RSS 只下你要的资源";
+});
+
+/**
+ * 画板 20 的 bar-64：分段（全部 / 启用 / 禁用）+ 220 宽搜索框 + 两枚 chip
+ * （类型、仅免费）+ 右侧刷新图标钮。规则表整份在前端，所以这些筛选都是本地的，
+ * 不重新请求。
+ */
+type RuleStatus = "all" | "on" | "off";
+
+const STATUS_SEG: { label: string; value: RuleStatus }[] = [
+  { label: "全部", value: "all" },
+  { label: "启用", value: "on" },
+  { label: "禁用", value: "off" },
+];
+
+const ruleStatus = ref<RuleStatus>("all");
+const ruleQuery = ref("");
+/** 空串 = 全部；其余是 pattern_type 的取值 */
+const ruleType = ref("");
+/** "" 全部 · "yes" 仅免费 · "no" 不限免费 */
+const ruleFree = ref("");
+
+/*
+ * 画板 20 的 bar-64 右端两枚图标钮：bi-columns-3（列设置）与 bi-file-down（导出）。
+ * 列设置的偏好存本地；导出导的是「当前筛选出的这批规则」，跟着工具栏走。
+ */
+const RULE_COLS_KEY = "pt-tools-rules-cols-v1";
+
+const OPTIONAL_RULE_COLS = [
+  { key: "scope", label: "匹配范围" },
+  { key: "priority", label: "优先级" },
+  { key: "free", label: "仅免费" },
+  { key: "size", label: "大小范围" },
+] as const;
+
+type OptionalRuleCol = (typeof OPTIONAL_RULE_COLS)[number]["key"];
+
+function loadHiddenRuleCols(): Set<OptionalRuleCol> {
+  try {
+    const raw = window.localStorage.getItem(RULE_COLS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    const known = new Set(OPTIONAL_RULE_COLS.map((c) => c.key as string));
+    return new Set(parsed.filter((k): k is OptionalRuleCol => known.has(k)));
+  } catch {
+    return new Set();
+  }
+}
+
+const hiddenRuleCols = ref<Set<OptionalRuleCol>>(loadHiddenRuleCols());
+
+function toggleRuleCol(key: OptionalRuleCol) {
+  const next = new Set(hiddenRuleCols.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  hiddenRuleCols.value = next;
+  try {
+    window.localStorage.setItem(RULE_COLS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* 存不下就只在本次会话里生效 */
+  }
+}
+
+const ruleColShown = (key: OptionalRuleCol) => !hiddenRuleCols.value.has(key);
+
+/** 导出当前筛选出的这批规则（画板 bar-64 的 bi-file-down） */
+function exportCsv() {
+  const head = ["名称", "匹配模式", "类型", "匹配范围", "优先级", "仅免费", "大小范围", "启用"];
+  const lines = [head.join(",")];
+  for (const r of visibleRules.value) {
+    const size =
+      r.min_size_gb || r.max_size_gb ? `${r.min_size_gb ?? 0}–${r.max_size_gb || "∞"} GB` : "不限"; // 上限 0 = 不限
+    const cells = [
+      r.name,
+      r.pattern,
+      r.pattern_type,
+      r.match_field ?? "title",
+      String(r.priority ?? 0),
+      r.require_free ? "是" : "否",
+      size,
+      r.enabled ? "是" : "否",
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "pt-tools-filter-rules.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出 ${visibleRules.value.length} 条规则`);
+}
+
+const visibleRules = computed(() => {
+  const q = ruleQuery.value.trim().toLowerCase();
+  return rules.value.filter((r) => {
+    if (ruleStatus.value === "on" && !r.enabled) return false;
+    if (ruleStatus.value === "off" && r.enabled) return false;
+    if (ruleType.value && r.pattern_type !== ruleType.value) return false;
+    if (ruleFree.value === "yes" && !r.require_free) return false;
+    if (ruleFree.value === "no" && r.require_free) return false;
+    if (!q) return true;
+    return r.name.toLowerCase().includes(q) || r.pattern.toLowerCase().includes(q);
+  });
+});
+
+const ruleFilterOn = computed(
+  () =>
+    ruleStatus.value !== "all" ||
+    Boolean(ruleQuery.value.trim()) ||
+    Boolean(ruleType.value) ||
+    Boolean(ruleFree.value),
+);
+
+function clearRuleFilters() {
+  ruleStatus.value = "all";
+  ruleQuery.value = "";
+  ruleType.value = "";
+  ruleFree.value = "";
+}
+
+/**
+ * 规则命中数 —— 画板 p-hit 1080。
+ * 口径是 TorrentInfo.filter_rule_id 的分组计数（`/api/filter-rules/hits`）：
+ * 「这条规则真的把种子下下来过几次」，不是试跑的模拟命中。
+ */
+const ruleHits = ref<Record<string, number>>({});
+
+async function loadHits() {
+  try {
+    const res = await filterRulesApi.hits();
+    ruleHits.value = res.hits ?? {};
+  } catch {
+    /* 命中数是附带信息，取不到就让卡里说明「没取到」，不影响规则表 */
+    ruleHits.value = {};
+  }
+}
+
+const hitRows = computed<BreakdownRow[]>(() =>
+  [...rules.value]
+    .map((r) => ({ rule: r, hits: ruleHits.value[String(r.id ?? "")] ?? 0 }))
+    .sort((a, b) => b.hits - a.hits)
+    .map(({ rule, hits }) => ({
+      key: String(rule.id ?? rule.name),
+      label: rule.name,
+      value: hits,
+      tone: hits > 0 ? ("ok" as const) : ("mute" as const),
+      hint: hits > 0 ? undefined : "还没命中过任何种子",
+    })),
+);
+
+const totalHits = computed(() => Object.values(ruleHits.value).reduce((n, v) => n + v, 0));
+
+/**
+ * 画板 p-test 516 的入口。
+ * 试跑本身是「按某条规则的模式跑一遍数据源」（testPattern 读的是 form 里的模式），
+ * 所以这里选中一条规则后把它填进 form 再复用同一条路径 —— 不另写一份试跑逻辑。
+ */
+const testRuleId = ref<number | undefined>(undefined);
+
+function testSelectedRule() {
+  const rule = rules.value.find((r) => r.id === testRuleId.value);
+  if (!rule) return;
+  form.value = { ...rule };
+  selectedRssId.value = undefined;
+  testPattern();
+}
+
+/**
+ * 画板 20 在 gfoot 之后有四张卡：p-order 548（匹配顺序）、p-test 516（试跑）、
+ * p-hit 1080（命中统计）、p-hint 1080（口径说明）。
+ *
+ * 这里落 p-order 与 p-hint：顺序由规则表现算，口径是固定说明。
+ * p-test 的试跑已经有一个对话框（要选数据源、看命中清单，卡片里放不下），
+ * p-hit 要历史命中计数，后端没有这份统计。
+ */
+const orderRows = computed<BreakdownRow[]>(() =>
+  [...rules.value]
+    .sort((a, b) => a.priority - b.priority)
+    .map((r) => ({
+      key: String(r.id ?? r.name),
+      label: `${r.priority} · ${r.name}`,
+      value: r.enabled ? "启用" : "停用",
+      weight: r.enabled ? 1 : 0.35,
+      tone: r.enabled ? ("ok" as const) : ("mute" as const),
+      hint: `${r.pattern_type} · ${r.pattern}${r.require_free ? " · 仅免费" : ""}`,
+    })),
+);
+
+/** 画板 head 的 sub（11.5/400 t3）：共几条规则、启用几条 */
+const headSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return "规则列表没加载出来";
+  if (rules.value.length === 0) return "";
+  const on = rules.value.filter((r) => r.enabled).length;
+  return `${rules.value.length} 条规则 · ${on} 条启用 · ${rules.value.length - on} 条停用`;
+});
+
+/** perm 不给重试：没权限点重试没有意义，该去要权限 */
+/* 筛空（zero）该做的是放宽筛选，不是再去添加一条 —— 之前 zero 也给「添加规则」 */
+const stateAction = computed<"retry" | "add" | "clear" | "none">(() => {
+  if (state.value === "error" || state.value === "partial") return "retry";
+  if (state.value === "loading" || state.value === "perm") return "none";
+  if (state.value === "zero") return "clear";
+  return "add";
+});
+
+/**
+ * 试跑命中列表也是一张列表，同样走六态。
+ * 之前它失败时对话框根本不打开，只留一个 toast；现在先开对话框，把状态留在里面。
+ * filtered 恒为 true：命中 0 条永远是「筛掉了」而不是「库里没数据」。
+ */
+const {
+  loading: testing,
+  state: testState,
+  errorText: testErrorText,
+  run: runTest,
+} = useDataState({ filtered: () => true });
+
+const testStateSub = computed(() => {
+  if (testState.value === "error" || testState.value === "perm") return testErrorText.value;
+  return TEST_ZERO_SUB;
+});
 
 const form = ref<FilterRule>({
   name: "",
@@ -39,6 +301,23 @@ const testForm = ref({
   test_is_free: null as boolean | null,
   global_size: 0,
   filter_mode: "auto_free" as "auto_free" | "filter_only" | "free_only",
+});
+
+/*
+ * 「模拟免费状态」三选一。Element Plus 2.14 的 el-radio 把 :value="null" 当成没传值（isPropAbsent），
+ * 实际值落成 undefined，和模型里的 null 永远不相等 —— 打开试跑时三个选项一个都不亮。
+ * 所以单选用字符串哨兵，这里映射回 test_is_free 的 null / true / false。
+ */
+const testFreeChoice = computed({
+  get: () =>
+    testForm.value.test_is_free === null
+      ? "real"
+      : testForm.value.test_is_free
+        ? "free"
+        : "nonfree",
+  set: (v: string) => {
+    testForm.value.test_is_free = v === "real" ? null : v === "free";
+  },
 });
 
 const filterModeOptions = [
@@ -73,25 +352,32 @@ const currentPatternTip = computed(() => {
 });
 
 onMounted(async () => {
-  await loadRules();
-  await loadRssList();
+  await reloadAll();
 });
 
+/** 刷新/重试都同时拉两个数据源，否则 partial 提示点了重试也消不掉 */
+async function reloadAll() {
+  await Promise.all([loadRules(), loadRssList(), loadHits()]);
+}
+
 async function loadRules() {
-  loading.value = true;
-  try {
-    rules.value = await filterRulesApi.list();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载失败");
-  } finally {
-    loading.value = false;
+  const pending = run(() => filterRulesApi.list());
+  const data = await pending;
+  if (isStale(pending)) return;
+  if (!data) {
+    // 失败时清空：留着上一次的规则再配一个「加载失败」的空态更让人误解
+    rules.value = [];
+    return;
   }
+  rules.value = data;
 }
 
 async function loadRssList() {
   loadingRss.value = true;
+  rssFailed.value = false;
   try {
     const response = await fetch("/api/sites");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const sites = await response.json();
     const list: { id: number; name: string; site_name: string }[] = [];
     for (const [siteName, siteConfig] of Object.entries(sites)) {
@@ -106,6 +392,9 @@ async function loadRssList() {
     }
     rssList.value = list;
   } catch (e: unknown) {
+    // 次要数据源：规则表照常渲染，失败只记一个标记，由 partial 提示告诉用户少了什么
+    rssFailed.value = true;
+    rssList.value = [];
     console.error("加载 RSS 列表失败:", e);
   } finally {
     loadingRss.value = false;
@@ -206,10 +495,12 @@ async function testPattern() {
     return;
   }
 
-  testing.value = true;
   testResult.value = null;
-  try {
-    testResult.value = await filterRulesApi.test({
+  // 先开对话框再发请求：加载中和失败的状态都要留在这块列表上，而不是只弹一个 toast
+  showTestDialog.value = true;
+
+  const data = await runTest(() =>
+    filterRulesApi.test({
       pattern: form.value.pattern,
       pattern_type: form.value.pattern_type,
       match_field: form.value.match_field || "both",
@@ -222,288 +513,584 @@ async function testPattern() {
       filter_mode: testForm.value.filter_mode,
       rss_id: selectedRssId.value,
       limit: 20,
-    });
-    showTestDialog.value = true;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "测试失败");
-  } finally {
-    testing.value = false;
-  }
+    }),
+  );
+  if (!data) return;
+  testResult.value = data;
 }
 
 function getPatternTypeLabel(type: string) {
   return patternTypes.find((t) => t.value === type)?.label || type;
 }
 
-function getPatternTypeTag(type: string) {
-  switch (type) {
-    case "keyword":
-      return "success";
-    case "wildcard":
-      return "warning";
-    case "regex":
-      return "danger";
-    default:
-      return "info";
-  }
+/*
+ * 表格里的类型用短名。画板 20 的 td-0-3 是「正则」，而表单里那组单选需要「正则表达式」
+ * 这种说得清的全名 —— 96 宽的列装不下全名，实测被截成「正则表达式 …」。
+ */
+const SHORT_TYPE: Record<string, string> = {
+  keyword: "关键词",
+  wildcard: "通配符",
+  regex: "正则",
+};
+
+function getShortTypeLabel(type: string) {
+  return SHORT_TYPE[type] ?? getPatternTypeLabel(type);
 }
 
 function getMatchFieldLabel(field: string | undefined) {
   return matchFields.find((f) => f.value === field)?.label || "标题和标签";
 }
+
+function formatSizeRange(rule: FilterRule): string {
+  if (!rule.min_size_gb && !rule.max_size_gb) return "不限";
+  return `${rule.min_size_gb || 0} ~ ${rule.max_size_gb ? rule.max_size_gb : "∞"} GB`;
+}
+
+/** 命中一条种子后的最终动作：会下载 / 会跳过 / 只是匹配上了 */
+function decisionText(decision: string | undefined): string {
+  if (decision === "downloaded") return "会下载";
+  if (decision === "skipped") return "会跳过";
+  return "匹配成功";
+}
 </script>
 
 <template>
-  <div class="page-container filter-rules-page">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">过滤规则</h1>
-        <p class="page-subtitle">配置 RSS 订阅的自动过滤和下载规则</p>
-      </div>
-    </div>
-    <el-card v-loading="loading" shadow="never" class="rules-main-card">
-      <template #header>
-        <div class="card-header">
-          <span class="header-title">过滤规则管理</span>
-          <el-button type="primary" :icon="'Plus'" class="add-rule-btn" @click="openAddDialog">
-            添加规则
-          </el-button>
-        </div>
-      </template>
+  <!--
+    画板 20 是带式表格页：head 64 → bar-64（40）→ grid（234）→ gfoot（338）。
+    表格标题与条数走页头，刷新/添加是页头右侧那两枚 32 高的按钮，所以这页没有 PtPanel。
+    顶上那条提示按画板 27 的落法放在页头之后、内缩 16。
+  -->
+  <div class="filter-rules-page">
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="reloadAll">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
+      </el-button>
+      <el-button type="primary" @click="openAddDialog">
+        <PtIcon name="plus" :size="15" /><span>添加规则</span>
+      </el-button>
+    </Teleport>
 
-      <el-alert
-        class="rules-alert rules-alert-warning"
-        type="warning"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 16px">
-        <template #title>
-          <strong>过滤规则 = 精准下载，而非"叠加免费自动下"</strong>
+    <!--
+      顶部那条 80px 的常驻黄条删掉了：它讲的三点与下面「规则怎么生效」那张卡**逐条重复**，
+      而画板 20 的板上没有任何常驻通告 —— 这类说明的位置就是 p-hint 那张卡。
+      那张卡现在**不跟着规则列表藏**（见下面的注释），所以零规则时也读得到。
+    -->
+    <!-- 画板 20 的 bar-64：分段 + 搜索 + 两枚 chip + 右侧图标钮，全部是本地筛选 -->
+    <PtToolbar band>
+      <el-segmented
+        v-model="ruleStatus"
+        class="pt-seg"
+        :options="STATUS_SEG"
+        :props="{ label: 'label', value: 'value' }" />
+
+      <el-input v-model="ruleQuery" class="rules-q" placeholder="筛选规则名、匹配模式…" clearable>
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
         </template>
-        <template #default>
-          <div style="line-height: 1.8">
-            未启用过滤规则时，RSS 订阅<strong>默认自动下载免费种子</strong>（适合日常刷流）。
-            <br />
-            一旦给 RSS
-            关联了过滤规则（v0.26.0+），系统会认为你需要<strong>精准下载</strong>：仅下载匹配规则的种子，其他种子（即便免费）将被忽略。
-            <br />
-            如果希望"既下载规则匹配的，又下载所有免费种子"的旧行为，请在具体 RSS
-            的"下载模式"中保持默认
-            <code>跟随全局</code>，并在<strong>全局设置</strong>里将下载模式设为
-            <code>仅免费（忽略过滤规则）</code>；或对该 RSS 不关联任何过滤规则。
+      </el-input>
+
+      <el-select v-model="ruleType" class="rules-chip" placeholder="类型: 全部">
+        <el-option label="类型: 全部" value="" />
+        <el-option label="关键词" value="keyword" />
+        <el-option label="通配符" value="wildcard" />
+        <el-option label="正则" value="regex" />
+      </el-select>
+
+      <el-select v-model="ruleFree" class="rules-chip" placeholder="仅免费: 全部">
+        <el-option label="仅免费: 全部" value="" />
+        <el-option label="只看要求免费的" value="yes" />
+        <el-option label="只看不限免费的" value="no" />
+      </el-select>
+
+      <el-button v-if="ruleFilterOn" @click="clearRuleFilters">
+        <PtIcon name="x" :size="14" /><span>清空筛选</span>
+      </el-button>
+
+      <template #note>显示 {{ visibleRules.length }} / {{ rules.length }} 条</template>
+
+      <template #right>
+        <!-- 画板 bar-64 右端的 bi-columns-3 / bi-file-down -->
+        <el-popover placement="bottom-end" trigger="click" :width="180">
+          <template #reference>
+            <button
+              type="button"
+              class="pt-band__iconbtn"
+              aria-label="列设置"
+              data-testid="rules-cols-btn">
+              <PtIcon name="columns-3" :size="15" />
+            </button>
+          </template>
+          <div class="rules-cols">
+            <label v-for="c in OPTIONAL_RULE_COLS" :key="c.key" class="rules-cols__row">
+              <el-checkbox :model-value="ruleColShown(c.key)" @change="toggleRuleCol(c.key)" />
+              <span>{{ c.label }}</span>
+            </label>
           </div>
+        </el-popover>
+
+        <el-tooltip content="按当前筛选导出 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="rules-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+
+        <el-tooltip content="重新拉取规则与数据源" placement="bottom">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新"
+            :disabled="loading"
+            @click="reloadAll">
+            <PtIcon name="refresh-cw" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
+    </PtToolbar>
+
+    <div v-loading="loading" class="pt-band--grid">
+      <!--
+        partial（§5）：规则读到了但试跑数据源没读到。有数据可看时不该用一整块状态图
+        顶掉表格，那等于把已经拿到的规则也藏了，所以挂一条提示，表格照常渲染。
+      -->
+      <div v-if="hasPartialBanner(rules.length)" class="pt-note pt-note--warn partial-banner">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>
+          试跑用的 RSS
+          数据源列表没读到，规则本身不受影响；编辑弹窗里的「数据源」会是空的，点刷新可重试。
+        </span>
+      </div>
+
+      <el-table v-if="!isMobile" :data="visibleRules" class="pt-grid" style="width: 100%">
+        <template #empty>
+          <PtDataState :state="state" dense :sub="stateSub">
+            <template v-if="stateAction !== 'none'" #action>
+              <el-button v-if="stateAction === 'retry'" size="small" @click="reloadAll">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+              <el-button v-else-if="stateAction === 'clear'" size="small" @click="clearRuleFilters">
+                <PtIcon name="x" :size="14" /><span>清空筛选</span>
+              </el-button>
+              <el-button v-else size="small" type="primary" @click="openAddDialog">
+                <PtIcon name="plus" :size="14" /><span>添加规则</span>
+              </el-button>
+            </template>
+          </PtDataState>
         </template>
-      </el-alert>
 
-      <el-alert
-        class="rules-alert rules-alert-info"
-        type="info"
-        :closable="false"
-        style="margin-bottom: 16px">
-        <template #title>
-          过滤规则用于自动下载匹配的种子。规则按优先级排序，数字越小优先级越高。
-        </template>
-      </el-alert>
+        <!-- 画板 20 的 th-0「序号」：行号，跟着排序重排 -->
+        <el-table-column label="序号" width="64" align="center" class-name="pt-cell-muted">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
 
-      <el-table :data="rules" style="width: 100%" class="rules-table">
-        <el-table-column type="index" label="序号" width="60" align="center" />
+        <el-table-column label="名称" min-width="140" class-name="pt-cell-strong">
+          <template #default="{ row }">{{ row.name }}</template>
+        </el-table-column>
 
-        <el-table-column label="名称" min-width="120">
+        <!--
+          画板 20 的这一行里**一枚胶囊都没有**：匹配模式「2160p.*REMUX」、类型「正则」、
+          仅免费「是」全是 13/400 纯文本。落地此前是 code 片 + PtTag + 胶囊三枚色块，
+          而这一列里真正要读的是模式本身。匹配模式保留等宽字体（那是它的身份），去掉底色。
+        -->
+        <el-table-column label="匹配模式" min-width="200" class-name="pt-cell-1line">
           <template #default="{ row }">
-            <div class="rule-name-cell">
-              <span :class="['rule-status-dot', row.enabled ? 'is-enabled' : 'is-disabled']"></span>
-              <span class="rule-name">{{ row.name }}</span>
-              <el-tag
-                :type="row.enabled ? 'success' : 'info'"
+            <span class="pattern">{{ row.pattern }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 不加 pt-cell-muted：那个类是 t3，而画板的正文单元是 t2（表格默认色） -->
+        <el-table-column label="类型" width="96">
+          <template #default="{ row }">{{ getShortTypeLabel(row.pattern_type) }}</template>
+        </el-table-column>
+
+        <el-table-column
+          v-if="ruleColShown('scope')"
+          label="匹配范围"
+          width="110"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">{{ getMatchFieldLabel(row.match_field) }}</template>
+        </el-table-column>
+
+        <el-table-column
+          v-if="ruleColShown('priority')"
+          label="优先级"
+          width="80"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num">
+          <template #default="{ row }">{{ row.priority }}</template>
+        </el-table-column>
+
+        <el-table-column v-if="ruleColShown('free')" label="仅免费" width="80">
+          <template #default="{ row }">{{ row.require_free ? "是" : "否" }}</template>
+        </el-table-column>
+
+        <el-table-column
+          v-if="ruleColShown('size')"
+          label="大小范围"
+          width="130"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">{{ formatSizeRange(row) }}</template>
+        </el-table-column>
+
+        <el-table-column label="启用" width="70">
+          <template #default="{ row }">
+            <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
+          </template>
+        </el-table-column>
+
+        <!--
+          操作列只放图标：画板 20 的 ops-* 是 63 宽的图标列，而带文字的两个按钮在 120 里
+          放不下 —— 实测「删除」被切成「删」。tooltip 补回文字。
+        -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
+          <!--
+            纯图标按钮必须自带**可访问名称**：PtIcon 是 aria-hidden 的，而 el-tooltip
+            只给视觉提示，不进无障碍名 —— 少了 aria-label，读屏软件念出来是两个空按钮，
+            相邻的「编辑」和「删除」分不开。名字里带上规则名，列表里才定位得到是哪一条。
+          -->
+          <template #default="{ row }">
+            <el-tooltip content="编辑" placement="top">
+              <el-button
+                link
+                type="primary"
                 size="small"
-                effect="light"
-                class="rule-status-tag">
-                {{ row.enabled ? "启用" : "停用" }}
-              </el-tag>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="匹配模式" min-width="200">
-          <template #default="{ row }">
-            <code class="pattern-text">{{ row.pattern }}</code>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="类型" min-width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="getPatternTypeTag(row.pattern_type)" size="small" effect="plain">
-              {{ getPatternTypeLabel(row.pattern_type) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="匹配范围" min-width="100" align="center">
-          <template #default="{ row }">
-            <span>{{ getMatchFieldLabel(row.match_field) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="优先级" min-width="80" align="center">
-          <template #default="{ row }">
-            <span>{{ row.priority }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="仅免费" min-width="80" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.require_free ? 'success' : 'info'" size="small">
-              {{ row.require_free ? "是" : "否" }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="大小范围" min-width="120" align="center">
-          <template #default="{ row }">
-            <span v-if="!row.min_size_gb && !row.max_size_gb">不限</span>
-            <span v-else>
-              {{ row.min_size_gb || 0 }} ~ {{ row.max_size_gb ? row.max_size_gb : "∞" }} GB
-            </span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="操作" min-width="200" align="center">
-          <template #default="{ row }">
-            <el-space class="rule-actions">
-              <el-switch :model-value="row.enabled" size="small" @change="toggleEnabled(row)" />
-              <el-button type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
-              <el-button type="danger" size="small" @click="deleteRule(row)">删除</el-button>
-            </el-space>
+                :aria-label="`编辑规则 ${row.name}`"
+                @click="openEditDialog(row)">
+                <PtIcon name="pencil" :size="15" />
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <el-button
+                link
+                type="danger"
+                size="small"
+                :aria-label="`删除规则 ${row.name}`"
+                @click="deleteRule(row)">
+                <PtIcon name="trash-2" :size="15" />
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="rules.length === 0" description="暂无过滤规则，点击上方按钮添加" />
-    </el-card>
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 9 列，手机上横着滚既看不到列头又和页面纵向滚动打架。
+        卡上留的是真正要看的：名称 + 类型/范围/大小/优先级 + 匹配模式 + 启用状态 + 三个操作。
+      -->
+      <div v-else class="cards">
+        <!-- 按筛完的行数判，不按全量：之前是 !rules.length，筛成 0 行时移动端什么提示都没有 -->
+        <PtDataState v-if="!visibleRules.length" :state="state" :sub="stateSub">
+          <template v-if="stateAction !== 'none'" #action>
+            <el-button v-if="stateAction === 'retry'" size="small" @click="reloadAll">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+            <el-button v-else-if="stateAction === 'clear'" size="small" @click="clearRuleFilters">
+              <PtIcon name="x" :size="14" /><span>清空筛选</span>
+            </el-button>
+            <el-button v-else size="small" type="primary" @click="openAddDialog">
+              <PtIcon name="plus" :size="14" /><span>添加规则</span>
+            </el-button>
+          </template>
+        </PtDataState>
 
-    <!-- 添加/编辑对话框 -->
+        <PtRowCard v-for="rule in visibleRules" :key="rule.id">
+          <template #title>{{ rule.name }}</template>
+
+          <template #meta>
+            <!-- 短名，和桌面那一列同一套：343 宽的卡上「正则表达式」要挤掉后面的匹配范围 -->
+            <PtTag>{{ getShortTypeLabel(rule.pattern_type) }}</PtTag>
+            <span>{{ getMatchFieldLabel(rule.match_field) }}</span>
+            <span>{{ formatSizeRange(rule) }}</span>
+            <span>优先级 {{ rule.priority }}</span>
+            <!--
+              仅免费只在开着的时候出现：关掉是默认值，画个「否」只是噪声。
+              它是规则的属性不是状态，用中性 PtTag（和左边的类型 chip 同一档）——
+              原来是一枚 ok 色的胶囊，和右上角「已启用」并排就成了一卡两枚状态胶囊，
+              桌面那一列早已改成纯文本「是」，手机上没道理反而更响。
+            -->
+            <PtTag v-if="rule.require_free">仅免费</PtTag>
+            <code class="pattern pattern--row">{{ rule.pattern }}</code>
+          </template>
+
+          <template #status>
+            <PtStatusPill dot :tone="rule.enabled ? 'ok' : 'neutral'" size="sm">
+              {{ rule.enabled ? "已启用" : "已停用" }}
+            </PtStatusPill>
+          </template>
+
+          <!-- 桌面那个 el-switch 只有 20 高，够不到 44 触控；行卡上换成按钮 -->
+          <template #actions>
+            <el-button size="small" @click="toggleEnabled(rule)">
+              <PtIcon :name="rule.enabled ? 'pause' : 'play'" :size="14" />
+              <span>{{ rule.enabled ? "停用" : "启用" }}</span>
+            </el-button>
+            <el-button size="small" @click="openEditDialog(rule)">
+              <PtIcon name="pencil" :size="14" /><span>编辑</span>
+            </el-button>
+            <el-button size="small" type="danger" plain @click="deleteRule(rule)">
+              <PtIcon name="trash-2" :size="14" /><span>删除</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
+    </div>
+
+    <div v-if="rules.length > 0" class="pt-band--foot">
+      <span>优先级数字越小越先匹配，命中即停</span>
+    </div>
+
+    <!--
+      画板 20 的分析卡：p-order 548（匹配顺序）+ p-test 516 + p-hit 1080 + p-hint 1080。
+      **只有一个 .pt-cards 容器**，`v-if` 下沉到每张卡上。
+      上一版为了让「规则怎么生效」在零规则时也显示，把它拆成相邻的第二个容器 ——
+      两个容器各带 16 的内边距，桌面上「命中统计」与它之间就变成 32；移动端两个容器的
+      内边距都被清掉，又变成 0。画板规定卡片上下一律 16，这是我拆容器拆出来的回归。
+    -->
+    <div class="pt-cards pt-cards--2">
+      <PtPanel
+        v-if="rules.length > 0"
+        title="匹配顺序"
+        icon="list-ordered"
+        :count="`${rules.length} 条`">
+        <PtBreakdown
+          :rows="orderRows"
+          foot="按优先级从小到大排，命中即停；停用的规则不参与匹配（柱子画短一截）。" />
+      </PtPanel>
+
+      <!--
+        画板 p-test 516：试跑入口。完整试跑（选数据源、看命中清单）在对话框里，
+        这张卡是入口加口径说明 —— 卡里塞不下一份命中清单。
+      -->
+      <PtPanel v-if="rules.length > 0" title="试跑" icon="zap">
+        <p class="rules-test__p">
+          挑一条规则，拿真实的 RSS 数据跑一遍，看它会命中哪些种子。只读，不推送不写库。
+        </p>
+        <el-select
+          v-model="testRuleId"
+          class="rules-test__sel"
+          placeholder="选一条规则"
+          :disabled="rules.length === 0">
+          <el-option
+            v-for="r in rules"
+            :key="r.id"
+            :label="`${r.name}（${r.pattern_type}）`"
+            :value="r.id" />
+        </el-select>
+        <el-button
+          type="primary"
+          class="rules-test__btn"
+          :disabled="!testRuleId"
+          :loading="testing"
+          @click="testSelectedRule">
+          <PtIcon v-if="!testing" name="zap" :size="15" /><span>试跑这条</span>
+        </el-button>
+        <p class="rules-test__foot">
+          数据源来自各站点的 RSS 配置；{{
+            rssFailed
+              ? "这次没取到，试跑面板里的数据源下拉会是空的。"
+              : `当前有 ${rssList.length} 条可选。`
+          }}结果与命中清单在弹出的面板里。
+        </p>
+      </PtPanel>
+
+      <!-- 画板 p-hit 1080：真实命中统计 -->
+      <PtPanel
+        v-if="rules.length > 0"
+        class="pt-cards__full"
+        title="命中统计"
+        icon="target"
+        :count="`${totalHits} 次`">
+        <PtBreakdown
+          :rows="hitRows"
+          cols
+          foot="口径是「这条规则命中并入库的种子数」（TorrentInfo.filter_rule_id 的分组计数），不是试跑的模拟命中；免费自动下载的种子不记规则，不计入。" />
+      </PtPanel>
+
+      <!--
+        「规则怎么生效」这张卡**不跟着规则列表一起藏**：一条规则都没有的新用户既看不到它，
+        也看不到我删掉的那条顶部黄条，于是「关联规则之后未命中的免费种也会跳过」这件事
+        在最需要知道它的时刻反而读不到。它没有 `v-if`，零规则时就是这一页唯一的那张卡。
+      -->
+      <PtPanel class="pt-cards__full" title="规则怎么生效" icon="info">
+        <ul class="rules-hint">
+          <li>没给某个 RSS 关联规则时，它按<strong>免费种子</strong>自动下载，适合日常刷流。</li>
+          <li>
+            一旦关联了规则，这个 RSS 就变成<strong>精准下载</strong>：只有命中规则的种子会推送，
+            其余种子即使免费也跳过。
+          </li>
+          <li>
+            想要「命中的下、所有免费的也下」，把该 RSS
+            的下载模式留在<code>跟随全局</code>，并在全局设置里选<code>仅免费（忽略过滤规则）</code>。
+          </li>
+          <li>规则里的大小范围与「仅免费」是 AND 关系，三者都满足才算命中。</li>
+        </ul>
+      </PtPanel>
+    </div>
+
     <el-dialog
       v-model="showDialog"
+      class="pt-dialog"
       :title="editMode ? '编辑过滤规则' : '添加过滤规则'"
-      width="600px"
-      class="rule-dialog">
-      <el-form :model="form" label-width="100px" label-position="right" class="rule-form">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="例如: 4K电影" />
-        </el-form-item>
+      width="640px"
+      align-center>
+      <el-form :model="form" class="pt-form" label-position="top">
+        <div class="field-head">规则</div>
 
-        <el-form-item label="模式类型" required>
-          <el-select v-model="form.pattern_type" style="width: 100%">
-            <el-option v-for="t in patternTypes" :key="t.value" :label="t.label" :value="t.value" />
-          </el-select>
-          <div class="form-tip">{{ currentPatternTip }}</div>
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="名称" required>
+            <el-input v-model="form.name" placeholder="例如 4K 电影" />
+          </el-form-item>
+
+          <el-form-item label="优先级">
+            <el-input-number v-model="form.priority" :min="1" :max="9999" style="width: 100%" />
+            <div class="field-tip">越小越先匹配，默认 100</div>
+          </el-form-item>
+        </div>
+
+        <div class="field-row">
+          <el-form-item label="模式类型" required>
+            <el-select v-model="form.pattern_type" style="width: 100%">
+              <el-option
+                v-for="t in patternTypes"
+                :key="t.value"
+                :label="t.label"
+                :value="t.value" />
+            </el-select>
+            <div class="field-tip">{{ currentPatternTip }}</div>
+          </el-form-item>
+
+          <el-form-item label="匹配范围">
+            <el-select v-model="form.match_field" style="width: 100%">
+              <el-option
+                v-for="f in matchFields"
+                :key="f.value"
+                :label="f.label"
+                :value="f.value" />
+            </el-select>
+            <div class="field-tip">从标题、标签还是两者里找</div>
+          </el-form-item>
+        </div>
 
         <el-form-item label="匹配模式" required>
-          <el-input v-model="form.pattern" placeholder="输入匹配模式" :rows="2" type="textarea" />
-        </el-form-item>
-
-        <el-form-item label="匹配范围">
-          <el-select v-model="form.match_field" style="width: 100%">
-            <el-option v-for="f in matchFields" :key="f.value" :label="f.label" :value="f.value" />
-          </el-select>
-          <div class="form-tip">选择从标题、标签还是两者中进行匹配</div>
+          <el-input v-model="form.pattern" type="textarea" :rows="2" placeholder="输入匹配模式" />
         </el-form-item>
 
         <el-form-item label="常用模板">
-          <div class="template-list">
-            <el-tag
+          <div class="tpl-list">
+            <button
               v-for="tpl in templates"
               :key="tpl.name"
-              class="template-tag"
-              effect="plain"
+              type="button"
+              class="tpl"
               @click="applyTemplate(tpl)">
               {{ tpl.name }}
-            </el-tag>
+            </button>
           </div>
+          <div class="field-tip">点一下会填好匹配模式和模式类型，名称为空时也一并带上</div>
         </el-form-item>
 
-        <el-form-item label="优先级">
-          <el-input-number v-model="form.priority" :min="1" :max="9999" />
-          <div class="form-tip">数字越小优先级越高，默认100</div>
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="最小大小（GB）">
+            <el-input-number v-model="form.min_size_gb" :min="0" :max="99999" style="width: 100%" />
+            <div class="field-tip">小于该值不通过，0 表示不限</div>
+          </el-form-item>
 
-        <el-form-item label="仅免费">
-          <el-switch v-model="form.require_free" />
-          <div class="form-tip">开启后仅下载免费种子</div>
-        </el-form-item>
-
-        <el-form-item label="最小大小 (GB)">
-          <el-input-number v-model="form.min_size_gb" :min="0" :max="99999" />
-          <div class="form-tip">种子大小小于该值时不通过此规则，0 = 不限制</div>
-        </el-form-item>
-
-        <el-form-item label="最大大小 (GB)">
-          <el-input-number v-model="form.max_size_gb" :min="0" :max="99999" />
-          <div class="form-tip">
-            种子大小大于该值时不通过此规则，0 = 不限制；规则上限不能突破全局设置
-          </div>
-        </el-form-item>
+          <el-form-item label="最大大小（GB）">
+            <el-input-number v-model="form.max_size_gb" :min="0" :max="99999" style="width: 100%" />
+            <div class="field-tip">大于该值不通过，0 表示不限；不能突破全局上限</div>
+          </el-form-item>
+        </div>
 
         <el-form-item label="规则用途" prop="purpose">
           <el-select v-model="form.purpose" style="width: 100%" placeholder="选择用途">
-            <el-option label="下载（控制是否推送到下载器）" value="download" />
-            <el-option label="通知（控制是否触发上新推送）" value="notify" />
-            <el-option label="两者（同时控制下载与通知）" value="both" />
+            <el-option label="下载 —— 控制是否推送到下载器" value="download" />
+            <el-option label="通知 —— 控制是否触发上新推送" value="notify" />
+            <el-option label="两者 —— 同时控制下载与通知" value="both" />
           </el-select>
-          <div class="form-tip">
-            决定规则匹配后的行为：仅作下载控制 / 仅作通知触发 / 两者皆控制。默认 download。
-          </div>
         </el-form-item>
 
-        <el-form-item label="启用">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="仅免费">
+            <el-switch v-model="form.require_free" />
+            <div class="field-tip">开启后只下免费种子</div>
+          </el-form-item>
 
-        <el-form-item label="测试数据源">
+          <el-form-item label="启用规则">
+            <el-switch v-model="form.enabled" />
+            <div class="field-tip">关掉后规则保留但不参与匹配</div>
+          </el-form-item>
+        </div>
+
+        <div class="field-head">试跑（下面几项只影响这次测试，不会保存）</div>
+
+        <el-form-item label="数据源">
           <el-select
             v-model="selectedRssId"
-            placeholder="选择 RSS 订阅进行测试（可选）"
+            placeholder="不选则用历史记录"
             clearable
             style="width: 100%"
             :loading="loadingRss">
             <el-option
               v-for="rss in rssList"
               :key="rss.id"
-              :label="`${rss.name} (${rss.site_name})`"
+              :label="`${rss.name}（${rss.site_name}）`"
               :value="rss.id" />
           </el-select>
-          <div class="form-tip">选择 RSS 订阅从实时数据中测试，不选则从历史记录中测试</div>
+          <div v-if="rssFailed" class="field-tip field-tip--warn">
+            数据源列表没读到，这里会是空的；先不选也能用历史记录试跑
+          </div>
+          <div v-else class="field-tip">选一个 RSS 会现拉一次实时数据来试</div>
         </el-form-item>
 
-        <el-form-item label="模拟大小 (GB)">
-          <el-input-number v-model="testForm.test_size_gb" :min="0" :step="0.5" :precision="2" />
-          <div class="form-tip">覆盖种子实际大小以测试大小规则，0 = 使用种子真实大小</div>
-        </el-form-item>
+        <div class="field-row">
+          <el-form-item label="模拟大小（GB）">
+            <el-input-number
+              v-model="testForm.test_size_gb"
+              :min="0"
+              :step="0.5"
+              :precision="2"
+              style="width: 100%" />
+            <div class="field-tip">0 表示用种子真实大小</div>
+          </el-form-item>
+
+          <el-form-item label="模拟全局上限（GB）">
+            <el-input-number
+              v-model="testForm.global_size"
+              :min="0"
+              :max="99999"
+              style="width: 100%" />
+            <div class="field-tip">0 表示无上限</div>
+          </el-form-item>
+        </div>
 
         <el-form-item label="模拟免费状态">
-          <el-radio-group v-model="testForm.test_is_free">
-            <el-radio :label="null">使用真实值</el-radio>
-            <el-radio :label="true">免费</el-radio>
-            <el-radio :label="false">非免费</el-radio>
+          <el-radio-group v-model="testFreeChoice">
+            <el-radio value="real">用真实值</el-radio>
+            <el-radio value="free">免费</el-radio>
+            <el-radio value="nonfree">非免费</el-radio>
           </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="模拟全局上限 (GB)">
-          <el-input-number v-model="testForm.global_size" :min="0" :max="99999" />
-          <div class="form-tip">模拟全局 TorrentSizeGB 上限，0 = 无上限</div>
         </el-form-item>
 
         <el-form-item label="下载模式">
-          <el-radio-group v-model="testForm.filter_mode">
-            <el-radio-button v-for="m in filterModeOptions" :key="m.value" :label="m.value">
-              {{ m.label }}
-            </el-radio-button>
-          </el-radio-group>
+          <el-select v-model="testForm.filter_mode" style="width: 100%">
+            <el-option
+              v-for="m in filterModeOptions"
+              :key="m.value"
+              :label="m.label"
+              :value="m.value" />
+          </el-select>
         </el-form-item>
 
         <el-form-item>
-          <el-button type="info" :loading="testing" @click="testPattern">测试匹配</el-button>
+          <el-button :loading="testing" @click="testPattern">
+            <PtIcon name="target" :size="14" /><span>测试匹配</span>
+          </el-button>
         </el-form-item>
       </el-form>
 
@@ -515,111 +1102,296 @@ function getMatchFieldLabel(field: string | undefined) {
       </template>
     </el-dialog>
 
-    <!-- 测试结果对话框 -->
-    <el-dialog v-model="showTestDialog" title="匹配测试结果" width="800px" class="test-dialog">
-      <div v-if="testResult" v-loading="testing" class="test-result-panel">
-        <div class="test-result-header">
-          <el-alert
-            :type="testResult.match_count > 0 ? 'success' : 'warning'"
-            :closable="false"
-            class="test-summary-alert">
-            <template #title>
-              <div class="test-summary-text">
-                共测试 {{ testResult.total_count }} 条记录，匹配到
-                <span class="test-summary-count">
-                  {{ testResult.match_count }}
-                </span>
-                条
-              </div>
-            </template>
-          </el-alert>
-
-          <el-radio-group v-model="form.match_field" size="small" class="test-scope-switch">
-            <el-radio-button v-for="f in matchFields" :key="f.value" :label="f.value">
-              {{ f.label }}
-            </el-radio-button>
-          </el-radio-group>
+    <el-dialog
+      v-model="showTestDialog"
+      class="pt-dialog"
+      title="匹配测试结果"
+      width="760px"
+      align-center>
+      <div v-if="testResult">
+        <div class="pt-note" :class="testResult.match_count > 0 ? 'pt-note--ok' : 'pt-note--warn'">
+          <PtIcon
+            :name="testResult.match_count > 0 ? 'circle-check' : 'triangle-alert'"
+            :size="14"
+            class="pt-note__icon" />
+          <span>
+            共测试 {{ testResult.total_count }} 条记录，命中
+            <strong>{{ testResult.match_count }}</strong> 条
+          </span>
         </div>
 
-        <div v-if="testResult.matches && testResult.matches.length > 0" class="match-list">
-          <el-card
-            v-for="(match, idx) in testResult.matches"
-            :key="idx"
-            class="match-item"
-            shadow="hover">
-            <template #header>
-              <div class="match-header">
-                <span class="match-index">#{{ idx + 1 }}</span>
-                <el-tag
-                  size="small"
-                  :type="match.decision === 'downloaded' ? 'success' : 'danger'"
-                  effect="plain">
-                  {{
-                    match.decision === "downloaded"
-                      ? "会下载"
-                      : match.decision === "skipped"
-                        ? "会跳过"
-                        : "匹配成功"
-                  }}
-                </el-tag>
-                <el-tag v-if="match.is_free" size="small" type="warning" effect="plain">
-                  免费
-                </el-tag>
-                <el-tag v-else size="small" type="info" effect="plain">非免费</el-tag>
-                <el-tag
-                  v-if="match.source === 'filter_rule'"
-                  size="small"
-                  type="primary"
-                  effect="plain">
-                  过滤规则通道
-                </el-tag>
-                <el-tag
-                  v-else-if="match.source === 'free_download'"
-                  size="small"
-                  type="success"
-                  effect="plain">
-                  免费通道
-                </el-tag>
-                <span v-if="match.size_gb" class="match-size">
-                  {{ match.size_gb.toFixed(2) }} GB
-                </span>
-              </div>
-            </template>
-
-            <div class="match-content">
-              <div class="match-section">
-                <div class="match-label">标题</div>
-                <div class="match-title">{{ match.title }}</div>
-              </div>
-
-              <div v-if="match.tag" class="match-section">
-                <div class="match-label">标签</div>
-                <div class="match-tag-content">{{ match.tag }}</div>
-              </div>
-
-              <div v-if="match.reason" class="match-section">
-                <div class="match-label">原因</div>
-                <div class="match-reason">{{ match.reason }}</div>
-              </div>
-            </div>
-          </el-card>
+        <div class="scope-row">
+          <span class="scope-row__label">匹配范围</span>
+          <el-segmented v-model="form.match_field" class="pt-seg" :options="matchFields" />
+          <span class="scope-row__tip">改完点「重新测试」</span>
         </div>
-        <el-empty v-else description="没有匹配的种子" />
+
+        <div v-if="testResult.matches && testResult.matches.length > 0" class="mlist">
+          <article v-for="(match, idx) in testResult.matches" :key="idx" class="mrow">
+            <header class="mrow__head">
+              <span class="mrow__idx">#{{ idx + 1 }}</span>
+              <PtStatusPill :tone="match.decision === 'downloaded' ? 'ok' : 'dang'" size="sm">
+                {{ decisionText(match.decision) }}
+              </PtStatusPill>
+              <PtStatusPill :tone="match.is_free ? 'ok' : 'neutral'" size="sm">
+                {{ match.is_free ? "免费" : "非免费" }}
+              </PtStatusPill>
+              <PtTag v-if="match.source === 'filter_rule'">过滤规则通道</PtTag>
+              <PtTag v-else-if="match.source === 'free_download'">免费通道</PtTag>
+              <span v-if="match.size_gb" class="mrow__size">
+                {{ match.size_gb.toFixed(2) }} GB
+              </span>
+            </header>
+
+            <p class="mrow__title">{{ match.title }}</p>
+            <p v-if="match.tag" class="mrow__meta"><span>标签</span>{{ match.tag }}</p>
+            <p v-if="match.reason" class="mrow__meta"><span>原因</span>{{ match.reason }}</p>
+          </article>
+        </div>
+        <PtDataState v-else state="zero" dense :sub="TEST_ZERO_SUB" />
       </div>
 
+      <!--
+        命中列表的 loading / error / perm（§5）。以前失败时这个对话框根本不打开，
+        只留一个两秒就没的 toast，用户不知道是没命中还是请求挂了。
+      -->
+      <PtDataState v-else :state="testState" :sub="testStateSub">
+        <template v-if="testState === 'error'" #action>
+          <el-button size="small" @click="testPattern">
+            <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+          </el-button>
+        </template>
+      </PtDataState>
+
       <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="showTestDialog = false">关闭</el-button>
-          <el-button type="primary" :loading="testing" @click="testPattern">重新测试</el-button>
-        </div>
+        <el-button @click="showTestDialog = false">关闭</el-button>
+        <el-button type="primary" :loading="testing" @click="testPattern">
+          <PtIcon name="refresh-cw" :size="14" /><span>重新测试</span>
+        </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/table-page.css";
-@import "@/styles/form-page.css";
-@import "@/styles/filter-rules-page.css";
+/* 画板 bar-64 里的控件：搜索 220，两枚 chip 各按内容 */
+/* 列设置面板：一行一个勾选（与站点页的 .cols 同一套写法） */
+.rules-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rules-cols__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  cursor: pointer;
+}
+
+.rules-q {
+  width: 220px;
+}
+
+.rules-chip {
+  width: 132px;
+}
+
+@media (max-width: 768px) {
+  .rules-q,
+  .rules-chip {
+    width: 100%;
+  }
+}
+
+/* 试跑卡：下拉与按钮各占一行，卡只有 516 宽 */
+.rules-test__sel {
+  width: 100%;
+}
+
+.rules-test__btn {
+  margin-top: var(--pt-space-3);
+}
+
+/* 试跑卡 */
+.rules-test__p {
+  margin: 0 0 var(--pt-space-3);
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.rules-test__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t3);
+}
+
+/* 口径说明卡：固定文案 */
+.rules-hint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.rules-hint code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+}
+
+/* 带之间不留间隔（画板上它们连着）；顶部那条提示自己内缩 16 */
+.filter-rules-page {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 匹配模式：**13/400 t2**（画板 20 的 td-0-2「2160p.*REMUX」就是正文号）。
+ * 去掉 code 底色时只改了壳，字号还留在 11 —— 那是标签号，不是正文号，
+ * 一次评审把这一点单列出来，判得对：去壳不等于对齐排版。
+ */
+.pattern {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
+  word-break: break-all;
+}
+
+/* 匹配模式是规则的正文，挤在 meta 那排小胶囊里根本读不了，让它独占一行 */
+.pattern--row {
+  flex: 1 1 100%;
+}
+
+/* 部分失败提示：面板 padding="none"，留白由这里给 */
+.partial-banner {
+  margin: var(--pt-space-3) var(--pt-space-3) 0;
+}
+
+/* 移动端行卡列表：同上，面板贴边，所以留白归页面 */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-pad) 0;
+}
+</style>
+
+<style>
+/* 两个对话框都 teleport 到 body，scoped 到不了；这些类只在本页的对话框里出现 */
+
+/* 模板胶囊用 button 而不是 el-tag：它是可点的动作，键盘要能聚焦 */
+.pt-dialog .tpl-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+}
+
+.pt-dialog .tpl {
+  padding: 2px 9px;
+  font-family: inherit;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    border-color var(--pt-transition-fast);
+}
+
+.pt-dialog .tpl:hover {
+  color: var(--pt-p);
+  border-color: var(--pt-p);
+}
+
+/* 数据源没读到时，说明文字要看得出是个警告，不能和普通提示一个色 */
+.pt-dialog .field-tip.field-tip--warn {
+  color: var(--pt-warn);
+}
+
+.pt-dialog .scope-row {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  margin: var(--pt-space-4) 0 var(--pt-space-3);
+}
+
+.pt-dialog .scope-row__label {
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  color: var(--pt-t2);
+}
+
+.pt-dialog .scope-row__tip {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/* 命中列表自己滚：20 条结果不该把对话框顶到屏幕外 */
+.pt-dialog .mlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  max-height: 48vh;
+  overflow-y: auto;
+}
+
+.pt-dialog .mrow {
+  padding: var(--pt-space-3);
+  background: var(--pt-canvas);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
+.pt-dialog .mrow__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.pt-dialog .mrow__idx {
+  font-size: var(--pt-fz-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t3);
+}
+
+.pt-dialog .mrow__size {
+  margin-left: auto;
+  font-size: var(--pt-fz-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-t3);
+}
+
+.pt-dialog .mrow__title {
+  margin: 0;
+  font-weight: 500;
+  color: var(--pt-t1);
+  word-break: break-all;
+}
+
+.pt-dialog .mrow__meta {
+  display: flex;
+  gap: 6px;
+  margin: 3px 0 0;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.pt-dialog .mrow__meta > span {
+  flex: 0 0 auto;
+  color: var(--pt-t3);
+}
 </style>

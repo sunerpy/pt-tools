@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -531,6 +533,223 @@ func TestApiTasks_Filters(t *testing.T) {
 	})
 }
 
+/*
+ * 钉子：画板 16 的 chip-1「优惠」必须按**库里真实存在的拼法**筛。
+ *
+ * free_level 这一列存过三代拼法：site/v2 的规范值（当前写入路径）、PHP 时代
+ * DiscountType 的字面量（"50%" / "none"）、以及建表默认值 normal。前端发的是规范值，
+ * 服务端若只做规范值等值匹配，存着 "50%" 的行在选「50%」时会静默消失 ——
+ * 页脚数字和表里的行一起少，用户看不出是筛错了还是真没有。
+ */
+func TestApiTasks_FreeLevelAliases(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	rows := []*models.TorrentInfo{
+		{SiteName: "a", TorrentID: "1", FreeLevel: "FREE"},       // 规范值
+		{SiteName: "a", TorrentID: "2", FreeLevel: "PERCENT_50"}, // 规范值
+		{SiteName: "a", TorrentID: "3", FreeLevel: "50%"},        // PHP 时代的同一档
+		{SiteName: "a", TorrentID: "4", FreeLevel: "30%"},        // PHP 时代
+		{SiteName: "a", TorrentID: "5", FreeLevel: "normal"},     // 建表默认值 = 没有优惠
+		{SiteName: "a", TorrentID: "6", FreeLevel: "none"},       // PHP 时代的「没有优惠」
+		{SiteName: "a", TorrentID: "7", FreeLevel: ""},           // 从来没写过
+		{SiteName: "a", TorrentID: "8", FreeLevel: "_2X_FREE"},   // M-Team 原始串
+	}
+	for _, row := range rows {
+		require.NoError(t, global.GlobalDB.DB.Create(row).Error)
+	}
+
+	total := func(t *testing.T, level string) int64 {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tasks?free_level="+level, nil)
+		srv.apiTasks(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var got struct {
+			Total int64 `json:"total"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got.Total
+	}
+
+	assert.Equal(t, int64(1), total(t, "FREE"))
+	assert.Equal(t, int64(2), total(t, "PERCENT_50"), `PERCENT_50 必须同时命中 "50%"`)
+	assert.Equal(t, int64(1), total(t, "PERCENT_30"), `PERCENT_30 必须命中 "30%"`)
+	assert.Equal(t, int64(3), total(t, "NONE"), "NONE 覆盖 normal / none / 空串")
+	assert.Equal(t, int64(1), total(t, "2XFREE"), "2XFREE 必须命中 _2X_FREE")
+	assert.Equal(t, int64(0), total(t, "PERCENT_70"), "没有这一档就该是 0，而不是全量")
+}
+
+// 画板 10 的 KPI 带要「活跃任务 / 今日推送 / 免费种子」三个全库计数，
+// 这条测试钉住三个口径：活跃 = 未过期；今日推送按本地零点切分；免费只数未过期的。
+func TestApiTaskStats(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	/*
+	 * 「今天」必须按本地零点算，不能拿 now-2h 凑。
+	 *
+	 * 原先写的是 now.Add(-2 * time.Hour)：在 00:00–02:00 之间跑，这个时间点落在**昨天**，
+	 * 于是「今日推送」数成 0，测试每天凌晨那两小时必然失败。实测在 01:28 复现。
+	 * 现在贴着本地零点取，任何时刻跑都落在今天。
+	 */
+	now := time.Now()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayPush := startOfToday.Add(time.Second)
+	oldPush := startOfToday.AddDate(0, 0, -3)
+
+	rows := []*models.TorrentInfo{
+		// 活跃 + 免费 + 今天推的
+		{SiteName: "a", TorrentID: "1", IsFree: true, PushTime: &todayPush},
+		// 活跃 + 免费，没推过
+		{SiteName: "a", TorrentID: "2", IsFree: true},
+		// 活跃、不免费、三天前推的
+		{SiteName: "b", TorrentID: "3", PushTime: &oldPush},
+		// 已过期的免费种子：既不算活跃，也不算「现在能下的免费种子」
+		{SiteName: "b", TorrentID: "4", IsFree: true, IsExpired: true},
+	}
+	for _, row := range rows {
+		require.NoError(t, global.GlobalDB.DB.Create(row).Error)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/stats", nil)
+	srv.apiTaskStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Total       int64 `json:"total"`
+		Active      int64 `json:"active"`
+		PushedToday int64 `json:"pushedToday"`
+		Free        int64 `json:"free"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, int64(4), got.Total)
+	assert.Equal(t, int64(3), got.Active, "过期的那条不算活跃")
+	assert.Equal(t, int64(1), got.PushedToday, "三天前推的那条不算今天")
+	assert.Equal(t, int64(2), got.Free, "过期的免费种子不算")
+}
+
+// 画板 20 的 p-hit 要「哪条规则真的命中过」，口径是 TorrentInfo.FilterRuleID 的分组计数。
+func TestApiFilterRuleHits(t *testing.T) {
+	srv := setupServer(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+	one := uint(1)
+	two := uint(2)
+	rows := []*models.TorrentInfo{
+		{SiteName: "a", TorrentID: "1", FilterRuleID: &one},
+		{SiteName: "a", TorrentID: "2", FilterRuleID: &one},
+		{SiteName: "b", TorrentID: "3", FilterRuleID: &two},
+		// 没命中规则的（免费自动下载）不该出现在计数里
+		{SiteName: "b", TorrentID: "4"},
+	}
+	for _, row := range rows {
+		require.NoError(t, global.GlobalDB.DB.Create(row).Error)
+	}
+
+	w := httptest.NewRecorder()
+	srv.apiFilterRuleHits(w, httptest.NewRequest(http.MethodGet, "/api/filter-rules/hits", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Hits map[string]int64 `json:"hits"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, int64(2), got.Hits["1"])
+	assert.Equal(t, int64(1), got.Hits["2"])
+	assert.Len(t, got.Hits, 2, "没有 filter_rule_id 的行不计入")
+}
+
+// 日志目录还不存在时（一条日志都没写过）要回空清单而不是 500。
+func TestApiLogFiles_MissingDir(t *testing.T) {
+	srv := setupServer(t)
+	t.Setenv("HOME", t.TempDir())
+
+	w := httptest.NewRecorder()
+	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Dir   string `json:"dir"`
+		Files []any  `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.NotEmpty(t, got.Dir)
+	assert.Empty(t, got.Files)
+}
+
+// 目录还不存在与已存在两支必须回同一份结构。原先不存在那支只回 dir 与 files，
+// 前端读不到保留策略，页面显示成「保留最近 份、 天」。
+func TestApiLogFiles_BothBranchesReturnSameShape(t *testing.T) {
+	srv := setupServer(t)
+	cases := []struct {
+		name    string
+		makeDir bool
+	}{
+		{name: "日志目录还不存在", makeDir: false},
+		{name: "日志目录已存在但为空", makeDir: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			if tc.makeDir {
+				require.NoError(t, os.MkdirAll(filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory), 0o755))
+			}
+
+			w := httptest.NewRecorder()
+			srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+			require.Equal(t, http.StatusOK, w.Code)
+
+			// 解进 map 看键在不在：解进结构体时缺的字段会变成 0，分不出「没回」和「配置成 0」
+			var got map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			keys := make([]string, 0, len(got))
+			for k := range got {
+				keys = append(keys, k)
+			}
+			assert.ElementsMatch(t, []string{"dir", "files", "max_age", "max_backups"}, keys)
+			assert.JSONEq(t, "[]", string(got["files"]))
+			assert.Equal(t, strconv.Itoa(config.DefaultZapConfig.MaxAge), string(got["max_age"]))
+			assert.Equal(t, strconv.Itoa(config.DefaultZapConfig.MaxBackups), string(got["max_backups"]))
+		})
+	}
+}
+
+// 目录里有当前文件与轮转备份时，按修改时间倒序返回，并标出哪个是当前文件。
+func TestApiLogFiles_ListsRotated(t *testing.T) {
+	srv := setupServer(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "all.log"), []byte("now"), 0o644))
+	old := filepath.Join(dir, "all-2026-09-01T00-00-00.000.log")
+	require.NoError(t, os.WriteFile(old, []byte("older"), 0o644))
+	require.NoError(t, os.Chtimes(old, time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour)))
+
+	w := httptest.NewRecorder()
+	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Files []struct {
+			Name     string `json:"name"`
+			Rotated  bool   `json:"rotated"`
+			IsActive bool   `json:"is_active"`
+		} `json:"files"`
+		MaxBackups int `json:"max_backups"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got.Files, 2)
+	assert.Equal(t, "all.log", got.Files[0].Name, "按修改时间倒序，当前文件最新")
+	assert.True(t, got.Files[0].IsActive)
+	assert.True(t, got.Files[1].Rotated)
+	assert.Positive(t, got.MaxBackups)
+}
+
 // ==== merged from server_cov_test.go ====
 func TestSetQAHook(t *testing.T) {
 	s := &Server{}
@@ -991,6 +1210,79 @@ func TestServe_StaticAndAuthedRoutes(t *testing.T) {
 	case <-errCh:
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not shut down")
+	}
+}
+
+/*
+ * index.html 的 <head> 引用了几枚根路径图标（favicon.ico / favicon-32x32.png / favicon-16x16.png /
+ * apple-touch-icon.png），登录页另外引用 logo.svg 与 wordmark.svg。它们都不在 /assets/ 下，
+ * 只能在 "/" 兜底之前单独开路由：漏掉的那几个，未登录时被兜底 302 到 /login，
+ * 登录后又被同一条兜底换成 index.html —— 浏览器拿到的永远不是图片。
+ *
+ * 这里走真实的 Serve() 路由表，不另外注册一份路由再断言；清单从 frontend/index.html 里抽，
+ * index.html 以后再加图标，这条测试会提醒同步白名单。
+ */
+func TestServe_RootIconsAreServedOutsideAuth(t *testing.T) {
+	raw, err := os.ReadFile("frontend/index.html")
+	require.NoError(t, err)
+	var icons []string
+	for _, m := range regexp.MustCompile(`<link[^>]*\shref="(/[^"/]+\.(?:ico|png|svg))"`).FindAllStringSubmatch(string(raw), -1) {
+		icons = append(icons, m[1])
+	}
+	require.Subset(t, icons, []string{"/favicon.ico", "/favicon-32x32.png", "/favicon-16x16.png", "/apple-touch-icon.png"},
+		"index.html 引用的图标清单变了，请核对这条测试与 Serve() 里的免鉴权白名单")
+	icons = append(icons, "/logo.svg", "/wordmark.svg") // 登录页的品牌图
+
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	const sid = "root-icon-session"
+	srv.sessions[sid] = "admin" // 在 Serve 起 goroutine 之前写入，不与处理器并发
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(addr) }()
+	t.Cleanup(func() {
+		require.NoError(t, srv.Shutdown(context.Background()))
+		select {
+		case <-errCh:
+		case <-time.After(3 * time.Second):
+			t.Error("server did not shut down")
+		}
+	})
+
+	client := &http.Client{
+		Timeout:       3 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	base := "http://" + addr
+	waitReady(t, client, base+"/api/ping")
+
+	distFS := mustSub(staticFS, "static/dist")
+	for _, path := range icons {
+		// make embed-placeholder 构出来的 dist 里没有这些文件，那时 404 是对的；302 与 index.html 才是错的
+		_, statErr := fs.Stat(distFS, strings.TrimPrefix(path, "/"))
+		for _, withSession := range []bool{false, true} {
+			req, err := http.NewRequest(http.MethodGet, base+path, nil)
+			require.NoError(t, err)
+			if withSession {
+				req.AddCookie(&http.Cookie{Name: "session", Value: sid})
+			}
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			assert.NotEqual(t, http.StatusFound, resp.StatusCode, "%s（已登录=%v）被重定向到了登录页", path, withSession)
+			assert.NotContains(t, resp.Header.Get("Content-Type"), "text/html",
+				"%s（已登录=%v）拿到的是 index.html，不是图标", path, withSession)
+			if statErr == nil {
+				assert.Equal(t, http.StatusOK, resp.StatusCode, "%s（已登录=%v）", path, withSession)
+			}
+		}
 	}
 }
 
@@ -2084,4 +2376,50 @@ func TestSetDefaultDownloader_Additional(t *testing.T) {
 		srv.setDefaultDownloader(rr, req, strconv.Itoa(int(dl.ID)))
 		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
 	})
+}
+
+// 日志器同时写 all / debug / info / error 四个基础文件（config/zap.go），它们都是正在写的文件，
+// 清理程序也把它们列为受保护（internal/maintenance/cleaner.go 的红线）。之前只认 all.log 是当前文件，
+// 其余三个被标成「轮转备份」—— 新装的机器上「轮转归档」就显示 3 份，还说清理会删掉它们。
+// 轮转与否按 lumberjack 备份的命名判：<名>-2006-01-02T15-04-05.000.log，压缩后再带 .gz。
+func TestApiLogFiles_BaseFilesAreNotRotated(t *testing.T) {
+	srv := setupServer(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	for _, name := range []string{
+		"all.log", "debug.log", "info.log", "error.log",
+		"all-2026-09-01T00-00-00.000.log", "error-2026-08-30T12-30-00.123.log.gz",
+		"notes.txt",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644))
+	}
+
+	w := httptest.NewRecorder()
+	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got struct {
+		Files []struct {
+			Name     string `json:"name"`
+			Rotated  bool   `json:"rotated"`
+			IsActive bool   `json:"is_active"`
+		} `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	rotated := map[string]bool{}
+	active := map[string]bool{}
+	for _, f := range got.Files {
+		rotated[f.Name] = f.Rotated
+		active[f.Name] = f.IsActive
+	}
+	for _, base := range []string{"all.log", "debug.log", "info.log", "error.log", "notes.txt"} {
+		assert.False(t, rotated[base], "%s 不是轮转备份", base)
+	}
+	assert.True(t, rotated["all-2026-09-01T00-00-00.000.log"])
+	assert.True(t, rotated["error-2026-08-30T12-30-00.123.log.gz"])
+	assert.True(t, active["all.log"], "页面 tail 的是 all.log")
+	assert.False(t, active["debug.log"])
 }

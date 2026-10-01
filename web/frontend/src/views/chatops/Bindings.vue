@@ -1,229 +1,75 @@
-<template>
-  <div class="bindings-page">
-    <div class="hero-block">
-      <div class="hero-content">
-        <span class="hero-eyebrow">CHATOPS · BINDINGS</span>
-        <h1 class="hero-title">绑定管理</h1>
-        <p class="hero-subtitle">
-          为聊天客户端用户颁发一次性绑定码，将通知通道用户与 pt-tools 账户关联。
-        </p>
-        <div class="hero-actions">
-          <el-button type="primary" size="large" class="delta-cta" @click="openGenerateDialog">
-            生成绑定码
-          </el-button>
-          <span class="hero-meta">
-            待绑定 {{ pendingBindings.length }} · 已绑定 {{ activeBindings.length }}
-          </span>
-        </div>
-      </div>
-    </div>
-
-    <section class="glass-card">
-      <header class="card-section-header">
-        <div class="title-block">
-          <h2 class="section-title">待绑定 Code</h2>
-          <p class="section-desc">展示当前有效期内未被使用的绑定码</p>
-        </div>
-        <el-tag round type="warning" effect="plain" size="default">
-          {{ pendingBindings.length }} 条待激活
-        </el-tag>
-      </header>
-
-      <el-table
-        :data="pendingBindings"
-        v-loading="loading"
-        class="bindings-table"
-        :empty-text="loading ? '加载中...' : '暂无待绑定 Code'">
-        <el-table-column prop="code" label="绑定码" width="220">
-          <template #default="{ row }">
-            <div class="code-cell">
-              <span class="bind-code">{{ row.code }}</span>
-              <el-button
-                link
-                type="primary"
-                :icon="CopyDocument"
-                @click="copyToClipboard(row.code)"
-                aria-label="复制绑定码"></el-button>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="关联渠道" width="180">
-          <template #default="{ row }">
-            <el-tag round size="small" effect="plain">
-              {{ getConfNameByConfId(row.conf_id) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="label" label="备注" min-width="140">
-          <template #default="{ row }">
-            <span class="meta-text">{{ row.label || "-" }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="180">
-          <template #default="{ row }">
-            <span class="meta-text">{{ formatDate(row.created_at) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="剩余有效时间" min-width="140">
-          <template #default="{ row }">
-            <span :class="getCountdownClass(row.expires_at)">
-              {{ getCountdown(row.expires_at) }}
-            </span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
-
-    <section class="glass-card">
-      <header class="card-section-header">
-        <div class="title-block">
-          <h2 class="section-title">已绑定列表</h2>
-          <p class="section-desc">已激活的聊天客户端用户绑定</p>
-        </div>
-        <el-tag round type="success" effect="plain" size="default">
-          {{ activeBindings.length }} 个已绑定
-        </el-tag>
-      </header>
-
-      <el-table
-        :data="activeBindings"
-        v-loading="loading"
-        class="bindings-table"
-        :empty-text="loading ? '加载中...' : '暂无绑定，先生成绑定码'">
-        <el-table-column prop="channel_type" label="渠道类型" width="120">
-          <template #default="{ row }">
-            <el-tag round size="small">{{ row.channel_type }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="渠道用户ID" width="180">
-          <template #default="{ row }">
-            <span class="mono-text">{{ maskUserId(row.channel_user_id) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="label" label="备注" min-width="140">
-          <template #default="{ row }">
-            <span class="meta-text">{{ row.label || "-" }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="reply_lang" label="回复语言" width="110">
-          <template #default="{ row }">
-            <el-tag round size="small" :type="row.reply_lang === 'zh' ? 'success' : 'info'">
-              {{ row.reply_lang === "zh" ? "中文" : "English" }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="admin" label="管理员" width="90">
-          <template #default="{ row }">
-            <el-tag round size="small" :type="row.admin ? 'danger' : 'info'" effect="plain">
-              {{ row.admin ? "是" : "否" }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="最后活跃" width="180">
-          <template #default="{ row }">
-            <span class="meta-text">{{ formatDate(row.last_active) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right" align="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="handleToggleLang(row)">切换语言</el-button>
-            <el-button link type="danger" @click="handleDelete(row.id)">撤销</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
-
-    <el-dialog
-      v-model="generateDialogVisible"
-      title="生成绑定码"
-      width="440px"
-      class="delta-dialog"
-      :before-close="handleCloseGenerateDialog">
-      <div v-if="!generatedCode">
-        <p class="dialog-desc">选择要绑定的渠道配置和绑定码有效期。</p>
-        <el-form label-width="76px" label-position="left">
-          <el-form-item label="渠道配置">
-            <el-select v-model="selectedConfId" placeholder="请选择配置" style="width: 100%">
-              <el-option
-                v-for="conf in configs"
-                :key="conf.id"
-                :label="conf.name + ' (' + conf.channel_type + ')'"
-                :value="conf.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="有效期">
-            <el-select v-model="selectedTTL" placeholder="选择有效期" style="width: 100%">
-              <el-option
-                v-for="opt in ttlOptions"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value" />
-            </el-select>
-          </el-form-item>
-        </el-form>
-        <div class="dialog-actions">
-          <el-button @click="handleCloseGenerateDialog">取消</el-button>
-          <el-button
-            type="primary"
-            class="delta-cta"
-            :loading="generating"
-            @click="handleGenerateCode">
-            生成
-          </el-button>
-        </div>
-      </div>
-      <div v-else class="code-display">
-        <p class="dialog-desc">请在 Chat 客户端中发送以下绑定码完成绑定：</p>
-        <div class="code-bubble">
-          <span class="big-code">{{ generatedCode }}</span>
-        </div>
-        <el-button
-          type="primary"
-          class="delta-cta"
-          :icon="CopyDocument"
-          @click="copyToClipboard(generatedCode)">
-          复制绑定码
-        </el-button>
-        <p class="expiry-hint">
-          {{
-            generatedExpiresAt
-              ? `过期时间：${formatDate(generatedExpiresAt)}`
-              : "永久有效（无过期时间）"
-          }}
-        </p>
-        <div class="dialog-actions">
-          <el-button @click="handleCloseGenerateDialog">完成</el-button>
-        </div>
-      </div>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
 import { chatopsApi, type ChatOpBinding, type NotificationConfig } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { CopyDocument } from "@element-plus/icons-vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
-const loading = ref(false);
-const pendingBindings = ref<ChatOpBinding[]>([]);
-const activeBindings = ref<ChatOpBinding[]>([]);
-const configs = ref<NotificationConfig[]>([]);
-
-const generateDialogVisible = ref(false);
-const selectedConfId = ref<number | null>(null);
-const selectedTTL = ref<number>(300);
-const ttlOptions = [
+const TTL_OPTIONS = [
   { label: "5 分钟", value: 300 },
   { label: "1 小时", value: 3600 },
   { label: "1 天", value: 86400 },
   { label: "30 天", value: 2592000 },
   { label: "永久", value: 0 },
 ];
+
+const isMobile = useIsMobile();
+
+/** 画板 head 的 sub（11.5/400 t3）：待绑定与已绑定各几条 */
+const headSub = computed(
+  () => `待绑定 ${pendingBindings.value.length} · 已绑定 ${activeBindings.value.length}`,
+);
+const pendingBindings = ref<ChatOpBinding[]>([]);
+const activeBindings = ref<ChatOpBinding[]>([]);
+const configs = ref<NotificationConfig[]>([]);
+
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败时弹个 toast 就完事 —— 两秒后 toast 消失，
+ * 两张表都停在 empty 上，用户看到的是「还没有人绑定」，而真相是请求失败了。
+ *
+ * 这一页没有筛选框，所以 0 行只会是 empty / error / perm / partial，不会出现 zero。
+ * partial 留给「绑定列表拿到了、渠道配置没拿到」：通道名只能退化成 `#3`，
+ * 发码对话框的通道下拉也会是空的 —— 这件事必须写在页面上，光让通道名变成编号没人看得懂。
+ */
+const configsFailed = ref(0);
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
+  failed: () => configsFailed.value,
+});
+
+const PARTIAL_SUB = "绑定列表已就绪，但渠道配置没取到，通道名称只能显示编号";
+
+/** 状态块副标题：失败给真实错误，部分失败说清缺了什么，空态给下一步动作 */
+function subFor(emptySub: string) {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return PARTIAL_SUB;
+  return emptySub;
+}
+
+const pendingSub = computed(() => subFor("生成一个绑定码，再去聊天客户端里把它发给机器人"));
+const activeSub = computed(() => subFor("还没有用户完成绑定，先生成一个绑定码"));
+
+/** 有绑定数据但渠道配置没拿到：在内容上方挂一条提示，而不是假装一切正常 */
+const showPartialNote = computed(() =>
+  hasPartialBanner(pendingBindings.value.length + activeBindings.value.length),
+);
+
+const generateDialogVisible = ref(false);
+const selectedConfId = ref<number | null>(null);
+const selectedTTL = ref<number>(300);
 const generatedCode = ref<string | null>(null);
 const generatedExpiresAt = ref<string | null>(null);
 const generating = ref(false);
 
+/* 秒级心跳只为倒计时那一列：绑定码 5 分钟就过期，分钟级刷新看不出快到点了 */
 const now = ref(Date.now());
 let timer: ReturnType<typeof setInterval>;
 
@@ -239,20 +85,36 @@ onUnmounted(() => {
 });
 
 async function loadData() {
-  loading.value = true;
-  try {
+  configsFailed.value = 0;
+  /*
+   * 渠道配置随绑定列表一起交回来，确认这一份没过期之后才写：写在 run 里面的话，
+   * 被顶掉的旧请求照样会改通道名，它的渠道配置失败还会把新页面标成 partial。
+   */
+  const pending = run(async () => {
+    let confsFailed = false;
     const [bindingsRes, configsRes] = await Promise.all([
       chatopsApi.bindings.list(),
-      chatopsApi.notifications.list(),
+      // 渠道配置只用来把 conf_id 显示成通道名、以及填发码下拉，单独失败不该把整页判死
+      chatopsApi.notifications.list().catch(() => {
+        confsFailed = true;
+        return [] as NotificationConfig[];
+      }),
     ]);
-    pendingBindings.value = bindingsRes.pending || [];
-    activeBindings.value = bindingsRes.bindings || [];
-    configs.value = configsRes || [];
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "获取绑定列表失败");
-  } finally {
-    loading.value = false;
+    return { bindingsRes, configsRes: configsRes || [], confsFailed };
+  });
+  const data = await pending;
+  if (isStale(pending)) return;
+
+  if (!data) {
+    // 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解
+    pendingBindings.value = [];
+    activeBindings.value = [];
+    return;
   }
+  configs.value = data.configsRes;
+  configsFailed.value = data.confsFailed ? 1 : 0;
+  pendingBindings.value = data.bindingsRes.pending || [];
+  activeBindings.value = data.bindingsRes.bindings || [];
 }
 
 function getCountdown(expiresAt?: string) {
@@ -266,20 +128,19 @@ function getCountdown(expiresAt?: string) {
   return `${m} 分 ${s.toString().padStart(2, "0")} 秒`;
 }
 
+/* 不到一分钟标红：这一列是「还来不来得及去客户端发码」，红字比动画更好读 */
 function getCountdownClass(expiresAt?: string) {
-  if (!expiresAt) return "countdown countdown--permanent";
+  if (!expiresAt) return "cd cd--forever";
   const text = getCountdown(expiresAt);
-  if (text === "已过期") return "countdown countdown--expired";
-  if (text === "-") return "countdown";
+  if (text === "已过期") return "cd cd--expired";
   const diff = new Date(expiresAt).getTime() - now.value;
-  if (diff < 60000) return "countdown countdown--urgent";
-  return "countdown countdown--active";
+  if (diff < 60000) return "cd cd--urgent";
+  return "cd cd--live";
 }
 
 function formatDate(dateStr?: string) {
   if (!dateStr) return "-";
-  const d = new Date(dateStr);
-  return d.toLocaleString();
+  return new Date(dateStr).toLocaleString("zh-CN", { hour12: false });
 }
 
 function maskUserId(userId?: string) {
@@ -357,26 +218,36 @@ function handleCloseGenerateDialog() {
   generatedExpiresAt.value = null;
 }
 
+/*
+ * 确认框与删除请求分成两段 try：原来包在同一个 try 里，catch 一律当成「用户取消」吞掉，
+ * 接口真的报错（404 / 500）时页面一声不吭，绑定还在，用户却以为已经撤销了。
+ * 确认框被取消或关掉时 reject 的是动作名（'cancel' / 'close'），只有这一段是静默的。
+ */
 async function handleDelete(id: number) {
   try {
-    await ElMessageBox.confirm("确定要撤销该绑定吗？", "警告", {
+    await ElMessageBox.confirm("确定要撤销该绑定吗？撤销后该用户需要重新拿码绑定。", "撤销绑定", {
       type: "warning",
-      confirmButtonText: "确定",
+      confirmButtonText: "确定撤销",
       cancelButtonText: "取消",
     });
-    await chatopsApi.bindings.delete(id);
-    ElMessage.success("绑定已撤销");
-    loadData();
-  } catch (_e) {
-    /* user cancelled */
+  } catch {
+    return;
   }
+  try {
+    await chatopsApi.bindings.delete(id);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "撤销绑定失败");
+    return;
+  }
+  ElMessage.success("绑定已撤销");
+  loadData();
 }
 
 async function handleToggleLang(row: ChatOpBinding) {
   const newLang = row.reply_lang === "zh" ? "en" : "zh";
   try {
     await chatopsApi.bindings.update(row.id, { reply_lang: newLang });
-    ElMessage.success(`已切换语言至 ${newLang}`);
+    ElMessage.success(`已切换回复语言至 ${newLang === "zh" ? "中文" : "English"}`);
     row.reply_lang = newLang;
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "切换语言失败");
@@ -390,374 +261,500 @@ function getConfNameByConfId(confId?: number) {
 }
 </script>
 
+<template>
+  <!--
+    画板 24：head 64 之后是靠左的一栏 612 宽的卡（p-pending / p-active / p-note），
+    右边那片空白上画的是发码弹窗的规格，不是页面内容。刷新与生成绑定码是页头动作。
+    落地偏离画板：卡宽用 1080（.pt-cards--form，宽屏也停在 1080）。两张表的列宽合计
+    840 / 946，612 的卡里只能横滚，「回复语言 / 管理员 / 最后活跃」挤在右边看不到，
+    列头「回复语言」还被固定的操作列盖住一半。
+  -->
+  <div class="bindings-page pt-cards pt-cards--wide pt-cards--form">
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button :loading="loading" @click="loadData">
+        <PtIcon name="refresh-cw" :size="15" /><span>刷新</span>
+      </el-button>
+      <el-button type="primary" @click="openGenerateDialog">
+        <PtIcon name="plus" :size="15" /><span>生成绑定码</span>
+      </el-button>
+    </Teleport>
+
+    <!-- 部分失败（§5 partial）：绑定拿到了、渠道配置没拿到，说清缺的是什么而不是静默降级 -->
+    <div v-if="showPartialNote" class="pt-note pt-note--warn">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        渠道配置没取到：通道名称只能显示为编号，发码对话框里的通道下拉也会是空的。
+        <el-button link type="primary" @click="loadData">重试</el-button>
+      </span>
+    </div>
+
+    <PtPanel
+      v-loading="loading"
+      title="待绑定绑定码"
+      icon="key-round"
+      :count="`${pendingBindings.length} 条`"
+      padding="none">
+      <el-table
+        v-if="!isMobile"
+        :data="pendingBindings"
+        class="pt-grid"
+        row-key="code"
+        style="width: 100%">
+        <template #empty>
+          <PtDataState :state="state" dense :sub="pendingSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadData">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
+        </template>
+
+        <el-table-column prop="code" label="绑定码" width="220" class-name="pt-cell-strong">
+          <template #default="{ row }">
+            <span class="code-cell">
+              <code class="code">{{ row.code }}</code>
+              <el-button
+                link
+                type="primary"
+                size="small"
+                aria-label="复制绑定码"
+                @click="copyToClipboard(row.code)">
+                <PtIcon name="copy" :size="14" />
+              </el-button>
+            </span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="关联通道" width="170">
+          <template #default="{ row }">
+            <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="label" label="备注" min-width="140" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ row.label || "-" }}</template>
+        </el-table-column>
+
+        <el-table-column label="创建时间" width="170" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        </el-table-column>
+
+        <el-table-column
+          label="剩余有效时间"
+          min-width="140"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num">
+          <template #default="{ row }">
+            <span :class="getCountdownClass(row.expires_at)">
+              {{ getCountdown(row.expires_at) }}
+            </span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        卡上留的是真正要做的事：把码复制走。所以码本身当标题，
+        倒计时进 status（红字表示快过期了），复制做成一个撑满的主操作 —— 表格里那个
+        16px 的链接图标在手机上根本点不准。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!pendingBindings.length" :state="state" :sub="pendingSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in pendingBindings" :key="row.code ?? row.id">
+          <template #title>
+            <code class="code">{{ row.code }}</code>
+          </template>
+
+          <template #meta>
+            <PtTag>{{ getConfNameByConfId(row.conf_id) }}</PtTag>
+            <span v-if="row.label">{{ row.label }}</span>
+            <span v-if="row.created_at">
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.created_at) }}
+            </span>
+          </template>
+
+          <template #status>
+            <span :class="getCountdownClass(row.expires_at)">
+              {{ getCountdown(row.expires_at) }}
+            </span>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="copyToClipboard(row.code ?? '')">
+              <PtIcon name="copy" :size="14" /><span>复制绑定码</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
+
+      <template v-if="pendingBindings.length > 0" #footer>
+        <span class="pt-foot-note">绑定码一次有效，过期或用掉后会从这里消失</span>
+      </template>
+    </PtPanel>
+
+    <PtPanel
+      v-loading="loading"
+      title="已绑定用户"
+      icon="user-check"
+      :count="`${activeBindings.length} 个`"
+      padding="none">
+      <el-table
+        v-if="!isMobile"
+        :data="activeBindings"
+        class="pt-grid"
+        row-key="id"
+        style="width: 100%">
+        <template #empty>
+          <PtDataState :state="state" dense :sub="activeSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="loadData">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
+        </template>
+
+        <el-table-column prop="channel_type" label="渠道" width="120">
+          <template #default="{ row }">
+            <PtTag>{{ row.channel_type }}</PtTag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="渠道用户 ID" width="160" class-name="pt-cell-strong">
+          <template #default="{ row }">
+            <code class="uid">{{ maskUserId(row.channel_user_id) }}</code>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="label" label="备注" min-width="140" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ row.label || "-" }}</template>
+        </el-table-column>
+
+        <el-table-column prop="reply_lang" label="回复语言" width="110">
+          <template #default="{ row }">
+            <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="admin" label="管理员" width="96">
+          <template #default="{ row }">
+            <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
+              {{ row.admin ? "是" : "否" }}
+            </PtStatusPill>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="最后活跃" width="170" class-name="pt-cell-muted">
+          <template #default="{ row }">{{ formatDate(row.last_active) }}</template>
+        </el-table-column>
+
+        <!-- 操作列只放图标（与站点列表 / 暂停任务一致），aria-label 带上被操作的用户 -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
+          <template #default="{ row }">
+            <el-tooltip content="切换回复语言" placement="top">
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :aria-label="`切换 ${maskUserId(row.channel_user_id)} 的回复语言`"
+                @click="handleToggleLang(row)">
+                <PtIcon name="globe" :size="15" />
+              </el-button>
+            </el-tooltip>
+            <el-tooltip content="撤销绑定" placement="top">
+              <el-button
+                link
+                type="danger"
+                size="small"
+                :aria-label="`撤销 ${maskUserId(row.channel_user_id)} 的绑定`"
+                @click="handleDelete(row.id)">
+                <PtIcon name="trash-2" :size="15" />
+              </el-button>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!--
+        移动端行卡。管理员那一栏在卡上不能沿用表格的「是 / 否」—— 卡片没有列头，
+        脱离表头的「否」读不出是在说什么，所以换成自解释的「管理员 / 普通」。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!activeBindings.length" :state="state" :sub="activeSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in activeBindings" :key="row.id">
+          <template #title>
+            <code class="uid uid--card">{{ maskUserId(row.channel_user_id) }}</code>
+          </template>
+
+          <template #meta>
+            <PtTag>{{ row.channel_type }}</PtTag>
+            <PtTag>{{ row.reply_lang === "zh" ? "中文" : "English" }}</PtTag>
+            <span v-if="row.label">{{ row.label }}</span>
+            <span v-if="row.last_active">
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.last_active) }}
+            </span>
+          </template>
+
+          <template #status>
+            <PtStatusPill :tone="row.admin ? 'warn' : 'neutral'" size="sm">
+              {{ row.admin ? "管理员" : "普通" }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="handleToggleLang(row)">
+              <PtIcon name="globe" :size="14" /><span>切换语言</span>
+            </el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">
+              <PtIcon name="trash-2" :size="14" /><span>撤销</span>
+            </el-button>
+          </template>
+        </PtRowCard>
+      </div>
+
+      <template v-if="activeBindings.length > 0" #footer>
+        <span class="pt-foot-note">
+          绑定时一律写入管理员身份，这一列只做展示；不再需要的绑定请撤销
+        </span>
+      </template>
+    </PtPanel>
+
+    <!--
+      画板 p-note 612：绑定流程说明。内容按代码核过 ——
+      绑定码是 8 位、只存 bcrypt 哈希（models.BotToken.CodeOrTokenHash）、有 UsedAt 与
+      ExpiresAt 两个状态；兑换走的是 ChatOps 的 `/bind <绑定码>` 命令
+      （internal/chatops/commands/bind.go）。
+    -->
+    <PtPanel title="绑定是怎么走的" icon="info">
+      <ol class="bind-note">
+        <li>在这一页点「生成绑定码」，选好通道，拿到一个 8 位的码。</li>
+        <li>
+          在对应的聊天里发 <code>/bind &lt;绑定码&gt;</code>。机器人拿这个码换绑定关系，
+          成功后这条记录从「待绑定」挪到「已绑定」。
+        </li>
+        <!--
+          之前这里写的是「码只存哈希，关掉就再也看不到」—— 两句都不成立：绑定码按原文存
+          （internal/app/binding_service.go 的 CodeOrTokenHash 字段存的就是码本身），下面「待绑定」表里一直能看到、能复制。
+          一句不成立的安全声明比不写更糟，这里只写实际行为。
+        -->
+        <li>码在到期或用掉之前，都能在下面的「待绑定」列表里看到和复制；用过或到期后自动失效。</li>
+        <!--
+          之前这里写「管理员身份在通道凭证里配置，绑上不等于是管理员」—— 与代码相反：
+          internal/app/binding_service.go 的 ConsumeCode 给每个新绑定写 PtAdmin: true，
+          MessageChain 判管理员命令只看这个字段。通道凭证里的两栏名单只决定谁能和机器人说话：
+          Telegram 见 adapter/telegram/inbound.go 的 permitted（不在名单里回一条拒绝），
+          QQ 见 adapter/qq/inbound.go 的 isUserAllowed（不在名单里直接忽略）。
+        -->
+        <li>
+          绑定之后这个聊天账号才能发命令，而且目前<strong>每个完成绑定的账号都拥有管理员权限</strong>，
+          可以暂停、删除种子和管理 RSS 订阅。绑定码只发给信任的人，不再需要的绑定及时撤销。
+        </li>
+        <li>
+          通道凭证里的两栏名单（Telegram 的 <code>admin_users</code> /
+          <code>allowed_users</code>，QQ 的 <code>admin_qq_users</code> /
+          <code>allowed_qq_users</code>）只决定谁能和机器人说话，
+          两栏都空时谁都用不了；它们不决定谁是管理员。
+        </li>
+      </ol>
+    </PtPanel>
+
+    <el-dialog
+      v-model="generateDialogVisible"
+      class="pt-dialog"
+      title="生成绑定码"
+      width="440px"
+      align-center
+      :before-close="handleCloseGenerateDialog">
+      <template v-if="!generatedCode">
+        <el-form class="pt-form" label-position="top" @submit.prevent>
+          <el-form-item label="关联通道">
+            <el-select v-model="selectedConfId" placeholder="请选择通道" style="width: 100%">
+              <el-option
+                v-for="conf in configs"
+                :key="conf.id"
+                :label="`${conf.name}（${conf.channel_type}）`"
+                :value="conf.id" />
+            </el-select>
+            <div class="field-tip">绑定码只能在这个通道里使用</div>
+          </el-form-item>
+          <el-form-item label="有效期">
+            <el-select v-model="selectedTTL" placeholder="选择有效期" style="width: 100%">
+              <el-option
+                v-for="opt in TTL_OPTIONS"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value" />
+            </el-select>
+            <div class="field-tip">越短越安全；「永久」适合自建的私有机器人</div>
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <div v-else class="issued">
+        <p class="issued__desc">在聊天客户端里把下面这串码发给机器人即可完成绑定：</p>
+        <div class="issued__code">{{ generatedCode }}</div>
+        <p class="issued__hint">
+          {{
+            generatedExpiresAt
+              ? `过期时间：${formatDate(generatedExpiresAt)}`
+              : "永久有效，无过期时间"
+          }}
+        </p>
+        <el-button type="primary" @click="copyToClipboard(generatedCode)">
+          <PtIcon name="copy" :size="14" /><span>复制绑定码</span>
+        </el-button>
+      </div>
+
+      <template #footer>
+        <template v-if="!generatedCode">
+          <el-button @click="handleCloseGenerateDialog">取消</el-button>
+          <el-button type="primary" :loading="generating" @click="handleGenerateCode">
+            生成
+          </el-button>
+        </template>
+        <el-button v-else @click="handleCloseGenerateDialog">完成</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
 <style scoped>
-/* delta-ui-origin polish layer — scoped to chatops/Bindings */
-.bindings-page {
-  --chatops-brand: oklch(0.66 0.16 50);
-  --chatops-brand-hover: oklch(0.6 0.18 50);
-  --chatops-brand-soft: oklch(0.95 0.04 60);
-  --chatops-stone-muted: oklch(0.55 0.02 60);
-  --chatops-radius-sm: 8px;
-  --chatops-radius-md: 12px;
-  --chatops-radius-lg: 18px;
-  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
-  --chatops-shadow-md: 0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
-  --chatops-shadow-lg: 0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
-  --chatops-glass-bg: oklch(1 0 0 / 0.72);
-  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
-  --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
-  --chatops-grid-color: oklch(0.36 0.006 50 / 0.05);
-  --chatops-bloom-color: oklch(0.66 0.16 50 / 0.1);
-}
-:global(.dark) .bindings-page,
-:global(html.dark) .bindings-page {
-  --chatops-brand: oklch(0.72 0.15 55);
-  --chatops-brand-hover: oklch(0.78 0.13 55);
-  --chatops-brand-soft: oklch(0.3 0.05 55 / 0.4);
-  --chatops-stone-muted: oklch(0.65 0.02 70);
-  --chatops-glass-bg: var(--chatops-glass-bg-dk);
-  --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
-  --chatops-grid-color: oklch(0.95 0.005 80 / 0.04);
-  --chatops-bloom-color: oklch(0.72 0.15 55 / 0.14);
-}
-
-.bindings-page {
-  padding: 16px 24px 32px;
-  background-color: var(--pt-bg-base);
-  color: var(--pt-text-primary);
-  min-height: 100%;
-}
-
-.hero-block {
-  position: relative;
-  padding: 24px 28px;
-  margin-bottom: 24px;
-  border-radius: 14px;
-  background: var(--chatops-glass-bg);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  border: 1px solid var(--pt-border-color);
-  overflow: hidden;
-  box-shadow: var(--chatops-shadow-md);
-}
-
-@media (min-width: 768px) {
-  .hero-block {
-    padding: 28px 32px;
-  }
-}
-
-.hero-block::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, var(--chatops-grid-color) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--chatops-grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
-  pointer-events: none;
-  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  z-index: 0;
-}
-
-.hero-block::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 90% 10%, var(--chatops-bloom-color) 0%, transparent 40%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.hero-block > * {
-  position: relative;
-  z-index: 1;
-}
-
-.hero-content {
-  position: relative;
-  z-index: 1;
+/* 绑定流程说明卡：有序步骤 */
+.bind-note {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 700px;
-}
-
-.hero-eyebrow {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--chatops-brand);
-  text-transform: uppercase;
-}
-
-.hero-title {
-  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
-  font-size: 1.625rem;
-  font-weight: 700;
+  gap: var(--pt-space-2);
   margin: 0;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
-  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  padding-left: 20px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
 }
 
-@media (min-width: 768px) {
-  .hero-title {
-    font-size: 2rem;
-  }
+.bind-note code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
 }
 
-.hero-subtitle {
-  font-size: 0.95rem;
-  color: var(--chatops-stone-muted);
-  margin: 4px 0 0;
-  max-width: 580px;
-  line-height: 1.6;
-}
+/* 栏宽 1080、内缩 16、卡间 16 都由 .pt-cards--wide / --form 给 */
 
-.hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
-.hero-meta {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-}
-
-/* Primary CTA — delta accent (light touch) */
-.delta-cta.el-button--primary {
-  background: linear-gradient(180deg, var(--chatops-brand), var(--chatops-brand-hover));
-  border-color: var(--chatops-brand);
-  box-shadow: 0 4px 12px oklch(0.66 0.16 50 / 0.3);
-  transition:
-    transform 150ms ease,
-    box-shadow 150ms ease,
-    filter 150ms ease;
-}
-.delta-cta.el-button--primary:hover {
-  filter: brightness(1.04);
-  box-shadow: 0 6px 16px oklch(0.66 0.16 50 / 0.38);
-}
-.delta-cta.el-button--primary:active {
-  transform: translateY(1px);
-}
-
-.glass-card {
-  margin-bottom: 24px;
-  padding: 24px;
-  border-radius: var(--chatops-radius-md);
-  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-  transition:
-    box-shadow 200ms ease,
-    transform 200ms ease;
-}
-
-.glass-card:hover {
-  box-shadow: var(--chatops-shadow-md);
-}
-
-.card-section-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
-}
-
-.title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.section-title {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--pt-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.section-desc {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  margin: 0;
-}
-
-.bindings-table :deep(.el-table) {
-  background: transparent;
-  --el-table-row-hover-bg-color: color-mix(in oklab, var(--chatops-brand) 4%, transparent);
-}
-
-.bindings-table :deep(.el-table tr) {
-  background: transparent;
-  transition: background 200ms ease;
-}
-
-.bindings-table :deep(.el-table th.el-table__cell) {
-  background: color-mix(in oklab, var(--pt-text-primary) 4%, transparent);
-  color: var(--chatops-stone-muted);
-  font-weight: 500;
-  font-size: 12.5px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.bindings-table :deep(.el-tag) {
-  border-radius: var(--chatops-radius-sm);
-}
-
+/* 码 + 复制按钮是一个整体，别让复制按钮掉到第二行 */
 .code-cell {
-  display: flex;
+  display: inline-flex;
+  gap: var(--pt-space-2);
   align-items: center;
-  gap: 10px;
 }
 
-.bind-code {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 17px;
+.code {
+  padding: 2px 8px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-body);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--chatops-brand);
-  background: color-mix(in oklab, var(--chatops-brand) 10%, transparent);
-  padding: 5px 12px;
-  border-radius: var(--chatops-radius-sm);
+  letter-spacing: 0.08em;
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+  border-radius: var(--pt-r-sm);
 }
 
-.mono-text {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
+.uid {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
 }
 
-.meta-text {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
+/* 行卡标题位上的用户 ID：等宽体保留，但要用正文字号和主文色，
+   不能沿用表格里那个 11 号次要色 —— 在卡上它是标题，不是次要信息 */
+.uid--card {
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t1);
 }
 
-.countdown {
+.cd {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-sm);
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  font-weight: 500;
 }
 
-.countdown--active {
-  color: var(--chatops-brand);
+.cd--live {
+  color: var(--pt-t1);
 }
 
-.countdown--urgent {
-  color: #ef4444;
+.cd--urgent {
   font-weight: 600;
-  animation: blink 1.5s ease-in-out infinite;
+  color: var(--pt-dang);
 }
 
-.countdown--expired {
-  color: var(--chatops-stone-muted);
+.cd--forever {
+  color: var(--pt-ok);
+}
+
+.cd--expired {
+  color: var(--pt-t3);
   text-decoration: line-through;
 }
 
-.countdown--permanent {
-  color: var(--pt-color-success, #10b981);
-  font-weight: 600;
-}
-
-@keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.55;
-  }
-}
-
-/* Generate dialog — delta skin */
-:deep(.delta-dialog .el-dialog) {
-  border-radius: var(--chatops-radius-lg);
-  box-shadow: var(--chatops-shadow-lg);
-  overflow: hidden;
-}
-:deep(.delta-dialog .el-dialog__header) {
-  background: linear-gradient(135deg, var(--chatops-brand-soft), transparent);
-  margin: 0;
-  padding: 18px 22px;
-  border-bottom: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
-}
-:deep(.delta-dialog .el-dialog__title) {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-:deep(.delta-dialog .el-dialog__body) {
-  padding: 22px;
-}
-
-.dialog-desc {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  line-height: 1.65;
-  margin: 0 0 16px;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 24px;
-}
-
-.code-display {
-  text-align: center;
-  padding: 8px 0;
+/* 移动端行卡列表：面板 padding="none"，所以留白由这里给 */
+.cards {
   display: flex;
   flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-pad) 0;
+}
+
+/* 发码结果：一屏里只有这串码值得看，所以给它整块居中和最大的字号 */
+.issued {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
   align-items: center;
-  gap: 14px;
+  text-align: center;
 }
 
-.code-bubble {
-  width: 100%;
-  padding: 28px;
-  border-radius: 16px;
-  background:
-    radial-gradient(
-      ellipse at center,
-      color-mix(in oklab, var(--chatops-brand) 14%, transparent),
-      transparent 70%
-    ),
-    color-mix(in oklab, var(--chatops-brand) 6%, transparent);
-  border: 1px solid color-mix(in oklab, var(--chatops-brand) 26%, transparent);
-}
-
-.big-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 38px;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  color: var(--chatops-brand);
-}
-
-.expiry-hint {
-  font-size: 12px;
-  color: var(--chatops-stone-muted);
+.issued__desc {
   margin: 0;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
 }
 
-.w-full {
+.issued__code {
   width: 100%;
+  padding: var(--pt-space-4);
+  font-family: var(--pt-font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--pt-p);
+  word-break: break-all;
+  background: var(--pt-p-soft);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
+.issued__hint {
+  margin: 0;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
 }
 </style>

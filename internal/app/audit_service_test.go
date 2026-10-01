@@ -43,6 +43,42 @@ func TestQuery_CommandAndResultFilters(t *testing.T) {
 	assert.Equal(t, "error", items[0].Result)
 }
 
+// 画板 25 的 q 写的是「筛选命令、触发用户…」：一个词要同时在命令与触发用户里模糊匹配。
+//
+// 为什么要在服务端：这个接口是分页的，前端在本页里筛会让页脚的 total 与表里的行数对不上，
+// 而且用户要找的那条很可能不在当前这一页。Command 那个精确匹配连「命令名写一半」都搜不到。
+func TestQuery_KeywordMatchesCommandOrChannelUser(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	rows := []models.ActionAudit{
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "alice", Command: "site list", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-3 * time.Minute)},
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "bob", Command: "task push", ArgsJSON: "{}", Result: "ok", CreatedAt: now.Add(-2 * time.Minute)},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+
+	// 命令名写一半也要命中（精确匹配做不到这件事）
+	items, total, err := svc.Query(context.Background(), AuditQuery{Keyword: "push"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "task push", items[0].Command)
+
+	// 按触发用户找
+	items, total, err = svc.Query(context.Background(), AuditQuery{Keyword: "ali"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, "alice", items[0].ChannelUserID)
+
+	// 只有空白等于不筛
+	_, total, err = svc.Query(context.Background(), AuditQuery{Keyword: "   "})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+}
+
 func TestQuery_TimeWindowAndPaginationDefaults(t *testing.T) {
 	db := setupAuditTestDB(t)
 	svc := NewAuditService(db)
@@ -68,6 +104,56 @@ func TestQuery_TimeWindowAndPaginationDefaults(t *testing.T) {
 	_, total, err = svc.Query(context.Background(), AuditQuery{Until: now.Add(-5 * time.Minute)})
 	require.NoError(t, err)
 	assert.Equal(t, 1, total)
+}
+
+/*
+ * 审计页的时间窗来自前端 toISOString()，到这里是 UTC 的 time.Time；
+ * 而 Record 用 time.Now() 写库，是进程本地时区。glebarez/sqlite 绑定 time.Time 时
+ * 按值自带的时区格式化成「2006-01-02 15:04:05.999999999-07:00」文本，再做字符串比较 ——
+ * 两边时区不同，窗口就整体错开一个时差。官方镜像 TZ=Asia/Shanghai 时错 8 小时：
+ * 「最近 1 小时」里查不到刚写入的记录，反而会查到 8 小时前的。
+ *
+ * 改 time.Local 是进程级全局状态：这条测试不能 t.Parallel，结束时由 t.Cleanup 还原。
+ */
+func TestQuery_UTCWindowMatchesRowsWrittenInLocalZone(t *testing.T) {
+	origLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	t.Cleanup(func() { time.Local = origLocal })
+
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	ctx := context.Background()
+
+	require.NoError(t, svc.Record(ctx, AuditEntry{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "fresh", Result: "success",
+	}))
+	// 8 小时前写入的旧记录：时区按错时，它恰好会落进 UTC 表示的「最近 1 小时」
+	require.NoError(t, db.Create(&models.ActionAudit{
+		NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "u1",
+		Command: "stale", ArgsJSON: "{}", Result: "success",
+		CreatedAt: time.Now().Add(-8 * time.Hour),
+	}).Error)
+
+	commandsIn := func(since, until time.Time) []string {
+		t.Helper()
+		items, total, err := svc.Query(ctx, AuditQuery{Since: since, Until: until})
+		require.NoError(t, err)
+		require.Len(t, items, total)
+		out := make([]string, 0, len(items))
+		for _, it := range items {
+			out = append(out, it.Command)
+		}
+		return out
+	}
+
+	now := time.Now().UTC()
+	assert.Equal(t, []string{"fresh"}, commandsIn(now.Add(-time.Hour), now.Add(time.Minute)),
+		"UTC 的「最近 1 小时」必须查到刚写入的记录，且不能混进 8 小时前的记录")
+	assert.Empty(t, commandsIn(now.Add(-2*time.Hour), now.Add(-time.Hour)),
+		"窗口外（2 小时前到 1 小时前）没有记录")
+	assert.Equal(t, []string{"stale"}, commandsIn(now.Add(-9*time.Hour), now.Add(-7*time.Hour)),
+		"8 小时前的记录只能落在它自己的时间窗里")
 }
 
 func TestRecord_NilArgs(t *testing.T) {
@@ -452,4 +538,93 @@ func TestAuditQuery_PageSizeClampMax(t *testing.T) {
 	svc := NewAuditService(db)
 	_, _, err := svc.Query(context.Background(), AuditQuery{PageSize: 9999})
 	require.NoError(t, err)
+}
+
+/*
+ * 钉子：结果与通道筛选必须按**生产里真实存在的值**筛。
+ *
+ * 四个真实缺陷，都是「控件在，但筛出来是空」这一类：
+ *   ① 前端多选把「success,error」逗号拼起来发过来，服务端按单值 `result = ?` 匹配，
+ *      这个组合一行都匹配不到 —— 界面上「筛完什么都没有」，读起来像真的没有记录；
+ *   ② handler 压根没读 channel_type，那枚通道筛选是个纯装饰的空控件；
+ *   ③ 接通之后前端发的是 `qq` / `wecom`，而生产写入的是适配器 Type() 的返回值
+ *      `qq_onebot` / `wecom_webhook` —— 选「QQ」把真实 QQ 记录筛成零条；
+ *   ④ 结果在生产里带原因后缀（`denied:not_bound` / `error:lookup_binding`，
+ *      只有 success 是裸值），按等值筛 `denied` 同样零条。
+ *
+ * 所以这里的造数**只用生产链真实写入的值**（见 internal/chatops/message_chain.go
+ * 与各适配器的 Type()）—— 上一版用 "qq" / 裸 "denied" 造数，等于在自己造的世界里通过。
+ */
+func TestQuery_ResultAndChannelTypeUseProductionValues(t *testing.T) {
+	db := setupAuditTestDB(t)
+	svc := NewAuditService(db)
+	now := time.Now()
+	rows := []models.ActionAudit{
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "a", Command: "c1", ArgsJSON: "{}", Result: "success", CreatedAt: now.Add(-6 * time.Minute)},
+		{NotificationConfID: 1, ChannelType: "telegram", ChannelUserID: "b", Command: "c2", ArgsJSON: "{}", Result: "denied:not_bound", CreatedAt: now.Add(-5 * time.Minute)},
+		{NotificationConfID: 2, ChannelType: "qq_onebot", ChannelUserID: "c", Command: "c3", ArgsJSON: "{}", Result: "error:lookup_binding", CreatedAt: now.Add(-4 * time.Minute)},
+		{NotificationConfID: 2, ChannelType: "qq_onebot", ChannelUserID: "d", Command: "c4", ArgsJSON: "{}", Result: "success", CreatedAt: now.Add(-3 * time.Minute)},
+		{NotificationConfID: 3, ChannelType: "wecom_webhook", ChannelUserID: "e", Command: "c5", ArgsJSON: "{}", Result: "denied:rate_limit", CreatedAt: now.Add(-2 * time.Minute)},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+
+	// 裸值照旧
+	_, total, err := svc.Query(context.Background(), AuditQuery{Result: "success"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+
+	// 带后缀的要按前缀命中 —— 这是分段器上「被拒绝」那一档
+	_, total, err = svc.Query(context.Background(), AuditQuery{Result: "denied"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total, "denied 要命中 denied:not_bound / denied:rate_limit")
+
+	_, total, err = svc.Query(context.Background(), AuditQuery{Result: "error"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total, "error 要命中 error:lookup_binding")
+
+	// 多值：原先一行都匹配不到的那种入参
+	_, total, err = svc.Query(context.Background(), AuditQuery{Result: "success,error"})
+	require.NoError(t, err)
+	assert.Equal(t, 3, total, "「成功 + 出错」要拿到三条，不是零条")
+
+	// 通道筛选按生产 ID 筛
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "qq_onebot"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "wecom_webhook"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+
+	// 旧短名也归一到生产 ID，而不是静默返回空
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "qq"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total, "短名 qq 要归一到 qq_onebot")
+
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "wecom"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total, "短名 wecom 要归一到 wecom_webhook")
+
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "telegram,qq_onebot"})
+	require.NoError(t, err)
+	assert.Equal(t, 4, total)
+
+	// 两条筛选叠着走 AND
+	_, total, err = svc.Query(context.Background(), AuditQuery{ChannelType: "qq_onebot", Result: "success"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+
+	// 空白项丢掉，不会退化成「匹配空字符串」
+	_, total, err = svc.Query(context.Background(), AuditQuery{Result: " , "})
+	require.NoError(t, err)
+	assert.Equal(t, 5, total, "全是空白等于不筛")
+
+	// 前缀匹配不能扩大：denied 不许把 error:* 也捞进来
+	items, _, err := svc.Query(context.Background(), AuditQuery{Result: "denied"})
+	require.NoError(t, err)
+	for _, it := range items {
+		assert.True(t, strings.HasPrefix(it.Result, "denied"), "命中了不该命中的 %q", it.Result)
+	}
 }

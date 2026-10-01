@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/extension"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
 // ==== merged from api_mixed_cov4_test.go ====
@@ -518,6 +520,92 @@ func TestApiDeletePausedTorrents_RemoveError(t *testing.T) {
 	var resp DeletePausedResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, 1, resp.Failed)
+}
+
+// 删除暂停种子时拿不到下载器，只有「这台下载器已经不在配置里」才允许只删库。
+//
+// acquireDownloader 有 3s 预算，manager 还有 60s 失败冷却：下载器只是暂时连不上也会拿到错误。
+// 这时若照样删库，下载器里的任务和数据都还在，pt-tools 却从此不再追踪它，还把这次删除报成成功。
+func TestApiDeletePausedTorrents_AcquireFailureOnlyCleansOrphans(t *testing.T) {
+	post := func(t *testing.T, server *Server, ctx context.Context) DeletePausedResponse {
+		t.Helper()
+		body, _ := json.Marshal(DeletePausedRequest{RemoveData: true})
+		req := httptest.NewRequest(http.MethodPost, "/api/torrents/delete-paused", bytes.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		server.apiDeletePausedTorrents(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp DeletePausedResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp
+	}
+	pausedRow := func(t *testing.T, title, downloaderName string) models.TorrentInfo {
+		t.Helper()
+		now := time.Now()
+		row := models.TorrentInfo{
+			SiteName: "hdsky", TorrentID: title, Title: title, IsPausedBySystem: true,
+			PausedAt: &now, DownloaderName: downloaderName, DownloaderTaskID: "task-" + title,
+		}
+		require.NoError(t, global.GlobalDB.DB.Create(&row).Error)
+		return row
+	}
+	rowCount := func(t *testing.T, id uint) int64 {
+		t.Helper()
+		var cnt int64
+		require.NoError(t, global.GlobalDB.DB.Model(&models.TorrentInfo{}).Where("id = ?", id).Count(&cnt).Error)
+		return cnt
+	}
+
+	t.Run("下载器已被删除：只清孤儿记录并计成功", func(t *testing.T) {
+		server, _ := setupServerWithFakeDownloader(t, &fakeDownloader{})
+		require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+		dm := server.getDownloaderManager()
+		require.NoError(t, dm.RegisterConfig("qb-old", downloader.NewGenericConfig(
+			downloader.DownloaderQBittorrent, "http://127.0.0.1:8081", "u", "p", true,
+		), false))
+		require.NoError(t, dm.RemoveDownloader("qb-old"))
+		row := pausedRow(t, "Orphan", "qb-old")
+
+		resp := post(t, server, context.Background())
+		assert.Equal(t, 1, resp.Success)
+		assert.Zero(t, resp.Failed)
+		assert.Zero(t, rowCount(t, row.ID), "下载器已不存在，孤儿记录应当被清掉")
+	})
+
+	t.Run("下载器暂时连不上：计失败且不删库", func(t *testing.T) {
+		server, _ := setupServerWithFakeDownloader(t, &fakeDownloader{})
+		require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
+
+		// 一台建连卡住的下载器，测试收尾时才放行
+		dm := server.getDownloaderManager()
+		release := make(chan struct{})
+		dm.RegisterFactory(downloader.DownloaderTransmission, func(_ downloader.DownloaderConfig, name string) (downloader.Downloader, error) {
+			<-release
+			return &fakeDownloader{name: name, dlType: downloader.DownloaderTransmission}, nil
+		})
+		require.NoError(t, dm.RegisterConfig("tr-slow", downloader.NewGenericConfig(
+			downloader.DownloaderTransmission, "http://127.0.0.1:9091", "u", "p", true,
+		), false))
+		t.Cleanup(func() {
+			close(release)
+			// 等后台那次建连收尾，别让它的日志落进后面的测试
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, _ = dm.GetDownloaderContext(ctx, "tr-slow")
+		})
+		row := pausedRow(t, "Unreachable", "tr-slow")
+
+		// 请求自带短预算：与 acquireDownloader 的 3s 超时走同一条路径，只是不必真等 3s
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		resp := post(t, server, ctx)
+
+		assert.Zero(t, resp.Success, "拿不到下载器不能报成删除成功")
+		assert.Equal(t, 1, resp.Failed)
+		assert.Equal(t, []uint{row.ID}, resp.FailedIDs)
+		require.Len(t, resp.FailedErrors, 1)
+		assert.Contains(t, resp.FailedErrors[0], "Unreachable")
+		assert.EqualValues(t, 1, rowCount(t, row.ID), "下载器里的任务还在，库里的记录必须保留")
+	})
 }
 
 func TestApiDeleteTasks_SkipsPushed(t *testing.T) {

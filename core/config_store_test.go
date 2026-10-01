@@ -808,6 +808,32 @@ func TestDeleteSite_ValidateAndDelete(t *testing.T) {
 	assert.NoError(t, s.DeleteSite("custom"))
 }
 
+// 内置站点不能删：判定要看行上的 IsBuiltin，不能只认硬编码的那三个名字 ——
+// SyncSites 会把站点定义注册表里的每个站点都标上 IsBuiltin，漏掉的话别的内置站点
+// 从任何入口调进来都会被真删掉，连它的 RSS 订阅一起没。
+func TestDeleteSite_RefusesBuiltinByFlag(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	e := true
+	_, err = s.UpsertSite(models.SiteGroup("cmct"), models.SiteConfig{
+		Enabled: &e, AuthMethod: "cookie", Cookie: "c",
+	})
+	require.NoError(t, err)
+
+	// 模拟 SyncSites 打上的内置标记（名字不在硬编码的三个里）
+	require.NoError(t,
+		db.DB.Model(&models.SiteSetting{}).Where("name = ?", "cmct").
+			Update("is_builtin", true).Error)
+
+	require.Error(t, s.DeleteSite("cmct"), "内置站点必须拒绝删除")
+
+	var still int64
+	require.NoError(t,
+		db.DB.Model(&models.SiteSetting{}).Where("name = ?", "cmct").Count(&still).Error)
+	assert.Equal(t, int64(1), still, "拒绝之后这一行必须还在")
+}
+
 func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	db, err := NewTempDBDir(t.TempDir())
 	require.NoError(t, err)

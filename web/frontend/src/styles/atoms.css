@@ -1,0 +1,1012 @@
+/*
+ * 原子件的全局样式层 —— 承载没法放进 SFC scoped 样式里的两件事：
+ *   1. `.pt-grid`：设计稿 G 的 k.table 'grid' 变体，挂在 el-table 上；
+ *   2. 表格单元格与区块条的工具类，需要被 el-table 的 class-name 透传引用。
+ *
+ * 为什么不做一个 PtGrid 组件：14 个页面已经在用 el-table 的排序、筛选、展开行、
+ * 多选，换类名是一行改动，换组件要重写这些行为。所以 G 的网格是一层皮肤。
+ *
+ * 选择器权重是刻意的：`.pt-grid.el-table td.el-table__cell` 是 (0,3,1)，
+ * 压得住旧样式里的 `.table-card .el-table .el-table__cell`（0,3,0），
+ * 于是两套语言可以在 phase ⑤ 逐页替换期间共存，不依赖 import 顺序。
+ */
+
+/*
+ * el-button 里塞 lucide 图标时的间距：Element 的规则是
+ * `[class*=el-icon]+span`，认不出 .pt-icon，所以自己补一条。
+ * 图标后面的文字要包在 <span> 里，纯文本节点选不中。
+ */
+.el-button .pt-icon + span {
+  margin-left: 6px;
+}
+
+.pt-grid.el-table {
+  --el-table-border-color: var(--pt-border);
+  --el-table-bg-color: var(--pt-surface);
+  --el-table-tr-bg-color: var(--pt-surface);
+  --el-table-header-bg-color: var(--pt-hover);
+  --el-table-header-text-color: var(--pt-t3);
+  --el-table-text-color: var(--pt-t2);
+  --el-table-row-hover-bg-color: var(--pt-hover);
+  /*
+   * 选中行的底必须不透明：固定列（fixed="left" / "right"）是 sticky 单元格、背景 inherit 自行，
+   * 之前用 p-soft（12% 混透明）时，横滚到操作列底下的「-」「1年前」会透出来。预先混到 surface 上。
+   */
+  --el-table-current-row-bg-color: color-mix(in srgb, var(--pt-p) 12%, var(--pt-surface));
+
+  font-size: var(--pt-fz-body);
+  /* 整表等宽数字：统计表里数字列对不齐是最刺眼的毛病，只影响数字，CJK 不受影响 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 表头 30 高 / 11 号 / 600；下沿走 borderStrong —— 13 号正文与 11 号表头
+   之间需要一条读得出的边界，用 border 会被行线糊掉（设计文档 §3） */
+.pt-grid.el-table th.el-table__cell {
+  height: var(--pt-row-head-h);
+  padding: 0;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+  border-bottom: 1px solid var(--pt-border-strong);
+}
+
+.pt-grid.el-table td.el-table__cell {
+  height: var(--pt-row-h);
+  padding: 0;
+  border-bottom: 1px solid var(--pt-border);
+}
+
+/*
+ * 宽松行变体 —— 34px 是为纯文本行定的，行内一旦出现 32px 头像、角标或双行数字
+ * 就正好卡在边界上：内容盒和行高一样高，任何溢出都会被裁掉。这类表格加
+ * `pt-grid--roomy`，只换行高，其余（发丝线、字号、等宽数字）完全照旧。
+ */
+.pt-grid--roomy.el-table td.el-table__cell {
+  height: var(--pt-row-h-roomy);
+}
+
+/*
+ * 列竖线**只画在表头**。
+ *
+ * 画板 10 / 12 / 16 / 25 四张表一致：竖线全是 30 高（正好一个表头），表体只有横向行线。
+ * 之前两处都画（表头 + 每个单元格），于是整张表变成一张网格纸 —— 线比数据还密。
+ * 表头有竖线就够分列，表体靠行线与对齐读，看上去轻得多，这也正是画板的样子。
+ */
+.pt-grid.el-table th.el-table__cell:not(:first-child) {
+  border-left: 1px solid var(--pt-border);
+}
+
+.pt-grid.el-table .cell {
+  padding: 0 var(--pt-pad);
+  line-height: var(--pt-lh-row);
+  word-break: break-word;
+}
+
+/* Element 自带的表体下沿线会和末行的 border-bottom 叠成 2px */
+.pt-grid.el-table .el-table__inner-wrapper::before,
+.pt-grid.el-table::before {
+  display: none;
+}
+
+.pt-grid.el-table .caret-wrapper {
+  color: var(--pt-t4);
+}
+
+.pt-grid.el-table .el-table__expanded-cell {
+  padding: var(--pt-space-4) var(--pt-pad);
+  background: var(--pt-canvas);
+}
+
+/* 空态由 PtDataState 自己控制留白，Element 的 100px 最小高度会多出一截 */
+.pt-grid.el-table .el-table__empty-block {
+  min-height: auto;
+}
+
+.pt-grid.el-table .el-table__empty-text {
+  width: 100%;
+  line-height: inherit;
+}
+
+/*
+ * 单元格工具类 —— 通过 el-table-column 的 class-name / label-class-name 透传。
+ * 主列不自动加粗：带多选列的表格里首列是复选框，靠 :first-child 猜会猜错，
+ * 所以哪一列是主列由页面显式声明。
+ */
+.pt-grid.el-table td.pt-cell-strong .cell {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+/*
+ * 单行截断的单元格。画板对长值的处理就是单行加省略号（画板 17 的 td 是
+ * 「2026/9/16 14:…」），而默认的 `word-break: break-word` 会让它换行把行顶高 ——
+ * 在有右侧 fixed 列的表里，第二行还正好藏在覆盖层底下，看起来像数据缺了一截。
+ */
+.pt-grid.el-table td.pt-cell-1line .cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * 表内的站点名：纯文本。画板 15 / 16 的首列是 13/500 #10141A，画板 26 的站点列是
+ * 13/400 #4E5765，一行里只有「状态 / 结果」那一列是胶囊。
+ * 加 `is-muted` 用于站点名不在首列的表（那时候它只是一个普通字段，不是这一行的身份）。
+ */
+.pt-cell-site {
+  font-weight: 500;
+  color: var(--pt-t1);
+}
+
+.pt-cell-site.is-muted {
+  font-weight: 400;
+  color: var(--pt-t2);
+}
+
+.pt-grid.el-table td.pt-cell-num .cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pt-grid.el-table th.pt-cell-num .cell {
+  text-align: right;
+}
+
+.pt-grid.el-table td.pt-cell-muted .cell {
+  color: var(--pt-t3);
+}
+
+/*
+ * 允许内容探出单元格：Element 的 `.cell` 是 overflow:hidden（给文本省略号用的），
+ * 头像右上角的 el-badge 角标会被连角一起切掉。需要角标的列显式声明这个类，
+ * 别全表放开 —— 其他列还指望那个省略号。
+ */
+.pt-grid.el-table td.pt-cell-overflow .cell {
+  overflow: visible;
+}
+
+/* 操作列：按钮组贴右，行高 34 里不能再有额外的上下内边距 */
+.pt-grid.el-table td.pt-cell-act .cell {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+/*
+ * 说明块 —— 页面顶部的功能前提、注意事项、测试结果回显。
+ * 替代 el-alert：Element 的警告条自带 8px 圆角、居中图标和一套自己的配色变量，
+ * 在 G 的发丝线语言里显得又厚又跳；这里用「左侧 2px 色条 + 8% 底色」表达语义色。
+ */
+.pt-note {
+  --pt-note-c: var(--pt-info);
+
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+  background: color-mix(in srgb, var(--pt-note-c) 8%, transparent);
+  /*
+   * 画板 07 / 19 的 bn-*-banner 规格：8% 语义色底 + **1px 同色整圈边** + 圆角 8，无阴影
+   * （标题 13/600 走语义色，正文 12/400 走 t2 —— 字色这两条本来就对上了）。
+   * 之前是「左边一条 2px 色条 + 右侧 r4」：那是另一套惯例，在白带上左边缘会跟
+   * 主区的内缩线对不齐，右侧两个圆角又让它看着像被裁掉一半。
+   */
+  border: 1px solid color-mix(in srgb, var(--pt-note-c) 55%, transparent);
+  border-radius: var(--pt-r-lg);
+}
+
+.pt-note--ok {
+  --pt-note-c: var(--pt-ok);
+}
+
+.pt-note--warn {
+  --pt-note-c: var(--pt-warn);
+}
+
+.pt-note--dang {
+  --pt-note-c: var(--pt-dang);
+}
+
+/* 通告标题：画板 bn-* 里是 13/600 且走语义色（正文才是 12/400 t2） */
+.pt-note__title {
+  font-size: var(--pt-fz-body);
+  font-weight: 600;
+  color: var(--pt-note-c);
+}
+
+.pt-note__icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--pt-note-c);
+}
+
+/* 行内代码：说明块与字段提示里出现的路径、命令、配置键 */
+.pt-note code,
+.field-tip code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+}
+
+/*
+ * 表单皮肤 —— 设计稿 G 的表单块：标签 12/500 压在字段上方，字段间距 16。
+ * 和 .pt-grid 一样是挂在 el-form 上的一层皮肤，不是新组件：11 个设置页已经在用
+ * el-form 的校验、prop 联动和 disabled 传递，换类名是一行，换组件要重写这些。
+ *
+ * 标签走 top 而不是稿上的左侧对齐：本项目的标签长度从「启用」到「CloakBrowser 服务地址」
+ * 差了 5 倍，左对齐要么截断要么留一条很宽的空列，手机上更是直接挤没。
+ */
+.pt-form .el-form-item {
+  margin-bottom: var(--pt-space-4);
+}
+
+.pt-form .el-form-item__label {
+  height: auto;
+  padding-bottom: 4px;
+  font-size: var(--pt-fz-sm);
+  font-weight: 500;
+  line-height: var(--pt-lh-row);
+  color: var(--pt-t2);
+}
+
+/* 字段说明：跟在控件下方，11 号 t3，不占 el-form-item 的错误位 */
+.pt-form .field-tip {
+  width: 100%;
+  margin-top: 4px;
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t3);
+}
+
+/* 字段组之间的分隔发丝线，替代 el-divider 的 24 上下外边距 */
+.pt-form .field-rule {
+  height: 1px;
+  margin: 0 0 var(--pt-space-4);
+  background: var(--pt-border);
+}
+
+/*
+ * 带标题的字段组分隔：同 .field-rule 的一条线，外加一行 11/600 的小节名。
+ * 长表单（尤其对话框里的）需要它来分「这条规则是什么」和「拿什么试跑」，
+ * 光靠一条线读者分不出后面几个字段属于哪一组。
+ */
+.pt-form .field-head {
+  margin-bottom: var(--pt-space-3);
+  padding-top: var(--pt-space-4);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t3);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-form .field-head:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/*
+ * 两列字段：窄屏自动退回单列；宽屏每栏最宽 440，不再各占半张卡。
+ *
+ * 宽屏下控件也不再横跨整张卡：1920 的屏上「种子下载目录」原来有 1580 宽、「刷流容量上限」1000 宽，
+ * 两栏字段相距 800，读一行要扫半块屏（用户原话「页面整体样式…整体美观度不足」）。
+ * 单栏控件最宽 720，数字框最宽 240；窄屏与对话框里本来就不到这个宽度，照旧撑满。
+ */
+.pt-form .field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 440px));
+  gap: 0 var(--pt-space-4);
+}
+
+.pt-form .el-form-item__content {
+  max-width: 720px;
+}
+
+.pt-form .el-input-number {
+  max-width: 240px;
+}
+
+/*
+ * 面板页脚里的说明文字：把右侧的按钮组顶到尾部。
+ * 放全局层而不是 PtPanel 的 scoped 样式里，因为它落在 footer 插槽的内容上，
+ * 属于页面而不是组件 —— 组件的 scoped 选择器选不中插槽外传进来的节点的子孙。
+ */
+.pt-foot-note {
+  margin-right: auto;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+/*
+ * 区块条（设计稿 G 的 `strip()`）：30 高、hover 底、上沿发丝线。
+ * 用于网格内的分组标题，或面板正文里的小节分隔。
+ */
+.pt-strip {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  height: var(--pt-row-head-h);
+  padding: 0 var(--pt-pad);
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-strip__end {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--pt-t3);
+}
+
+/*
+ * 分段选择器 —— 设计稿 G 的 `seg()`：hover 底的凹槽里托一枚 surface 底的选中块。
+ * 挂在 el-segmented 上，用它而不是 el-tabs：G 的语言里「切换看哪一份数据」是
+ * 工具条上的一枚控件，而 el-tabs 会再带一条 48 高的页头和一根下划线，
+ * 跟 PtPanel 的页头叠起来就成了两层标题。
+ *
+ * 选中块默认是 primary 实底配白字，这里换成 surface + t1：四套配色里
+ * ok/warn 这类浅色上压白字对比度不够，抬起一块「纸」比刷一块色更稳。
+ */
+.pt-seg.el-segmented {
+  --el-segmented-bg-color: var(--pt-hover);
+  --el-segmented-color: var(--pt-t3);
+  --el-segmented-item-selected-color: var(--pt-t1);
+  --el-segmented-item-selected-bg-color: var(--pt-surface);
+  --el-segmented-item-hover-color: var(--pt-t1);
+  --el-segmented-item-hover-bg-color: transparent;
+  --el-border-radius-base: var(--pt-r-sm);
+
+  min-height: 28px;
+  font-size: var(--pt-fz-sm);
+}
+
+.pt-seg.el-segmented .el-segmented__item {
+  padding: 0 12px;
+  font-weight: 500;
+}
+
+.pt-seg.el-segmented .el-segmented__item-selected {
+  box-shadow: var(--pt-shadow-sm);
+}
+
+/* 选中那档是 600（画板 seg 里「全部站点」12/600，其余 12/500）——
+   只靠颜色分辨哪一档选中，在 12px 上读起来很弱 */
+.pt-seg.el-segmented .el-segmented__item.is-selected {
+  font-weight: 600;
+}
+
+/*
+ * 工具栏里的输入框与下拉：画板 bar-64 上这些控件统一是**圆角 4 + #EDF0F4 底 + 1px 发丝边**
+ * （q 是 220×28、r4、stroke #DDE2E9）。落地此前是 r6、没有边 —— 没有边的填色块在白带上
+ * 边界含糊，尤其挨着 seg 时两者看起来不是一套东西。
+ * 只作用于带里：表单里的输入框仍走全局的 r6，那不是同一个场景。
+ */
+/*
+ * **焦点态必须自己接回来。**
+ *
+ * Element 的焦点环走的也是 `box-shadow`（`.el-input__wrapper.is-focus` /
+ * `.el-select__wrapper.is-focused`，权重 0,2,0），而这个文件在 Element 的 CSS 之后加载，
+ * 同权重后来者胜 —— 上面那条只要碰 box-shadow 就会把焦点环一起压掉，而 Element 的 input
+ * 内部又是 `outline: none`，键盘 Tab 到工具栏搜索框时**没有任何可见反馈**。
+ *
+ * 一次评审查出这件事，判得对；不过真凶不是我新加的那条（它同权重但在前，被后面的
+ * `box-shadow: none` 压掉了，是死代码），而是那条**早就存在**的 `none` ——
+ * 焦点环在这一轮之前就已经不可见了。现在发丝边并进了那一条，焦点态由这里接回来。
+ */
+.pt-band--toolbar .el-input__wrapper.is-focus,
+.pt-band--toolbar .el-select__wrapper.is-focused,
+.pt-band--sel .el-input__wrapper.is-focus,
+.pt-band--sel .el-select__wrapper.is-focused,
+.pt-band--toolbar .el-input__wrapper:focus-within,
+.pt-band--toolbar .el-select__wrapper:focus-within,
+.pt-band--sel .el-input__wrapper:focus-within,
+.pt-band--sel .el-select__wrapper:focus-within {
+  box-shadow: inset 0 0 0 1px var(--pt-p);
+}
+
+/*
+ * 对话框 —— el-dialog 会 teleport 到 body，SFC 的 scoped 选择器到不了，
+ * 所以皮肤必须挂在全局层。
+ *
+ * 页头 42 高：**不再与 PtPanel 的卡头一致**（那个按画板「卡片 p-*」的规格是 29）。
+ * 画板没有给弹窗页头的高度，所以这里保持 42 —— 不为了对齐一个没有画板依据的数值
+ * 去动弹窗。两者来源不同，不是漂移。
+ * 页脚同样用一条上沿线收口，正文自己控制内边距。
+ */
+.pt-dialog.el-dialog {
+  --el-dialog-bg-color: var(--pt-surface);
+  --el-dialog-border-radius: var(--pt-r-lg);
+  --el-dialog-padding-primary: var(--pt-pad);
+  --el-dialog-title-font-size: var(--pt-fz-body);
+
+  padding: 0;
+  border: 1px solid var(--pt-border);
+  box-shadow: var(--pt-shadow-xl);
+}
+
+.pt-dialog.el-dialog .el-dialog__header {
+  display: flex;
+  align-items: center;
+  height: 42px;
+  margin: 0;
+  padding: 0 var(--pt-pad);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-dialog.el-dialog .el-dialog__title {
+  font-size: var(--pt-fz-body);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.pt-dialog.el-dialog .el-dialog__headerbtn {
+  top: 0;
+  width: 42px;
+  height: 42px;
+}
+
+.pt-dialog.el-dialog .el-dialog__body {
+  padding: var(--pt-pad);
+  font-size: var(--pt-fz-body);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+}
+
+.pt-dialog.el-dialog .el-dialog__footer {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--pt-space-3) var(--pt-pad);
+  border-top: 1px solid var(--pt-border);
+}
+
+/*
+ * 分页条 —— 挂在 el-pagination 上的一层皮肤，落在 PtPanel 的页脚里。
+ * Element 默认的 32 高按钮和 14 号字在 34 高的页脚里会把页脚顶开，
+ * 所以按钮收到 26、字号降到 12，并让页码方块跟着 G 的 rSm 圆角。
+ *
+ * 与 .pt-foot-note 搭配：说明文字的 margin-right:auto 把分页推到右侧。
+ */
+.pt-pager.el-pagination {
+  --el-pagination-font-size: var(--pt-fz-sm);
+  --el-pagination-button-height: 26px;
+  --el-pagination-button-width: 26px;
+  --el-pagination-text-color: var(--pt-t2);
+  --el-pagination-bg-color: transparent;
+  --el-pagination-button-color: var(--pt-t2);
+  --el-pagination-button-bg-color: transparent;
+  --el-pagination-hover-color: var(--pt-p);
+
+  gap: 4px;
+  padding: 0;
+  font-weight: 400;
+}
+
+.pt-pager.el-pagination .el-pager li,
+.pt-pager.el-pagination .btn-prev,
+.pt-pager.el-pagination .btn-next {
+  border-radius: var(--pt-r-sm);
+}
+
+.pt-pager.el-pagination .el-pager li:hover {
+  background: var(--pt-hover);
+}
+
+.pt-pager.el-pagination .el-pager li.is-active {
+  color: var(--pt-p);
+  background: var(--pt-p-soft);
+}
+
+.pt-pager.el-pagination .el-pagination__total,
+.pt-pager.el-pagination .el-pagination__jump {
+  color: var(--pt-t3);
+}
+
+/* 手机上宽表格横向滚动，不硬压列宽（整表退化成行卡片是 phase ⑤ 逐页的事） */
+@media (max-width: 768px) {
+  .pt-grid.el-table .cell {
+    padding: 0 var(--pt-space-3);
+  }
+}
+
+/*
+ * 转圈：Element 的 `.el-icon.is-loading` 动画绑在 `.el-icon` 上，PtIcon 渲染的是裸 svg，
+ * 拿不到那条动画，所以 lucide 的 loader-circle 需要这一个类自己转。
+ */
+.pt-spin {
+  animation: pt-spin 1s linear infinite;
+}
+
+@keyframes pt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===========================================================================
+ * 带式版面 —— 画板主区的真实构成
+ *
+ * 每个路由画板的主区（x=328 宽 1112）都是一串全宽横向带，而不是一片带内边距的
+ * 卡片画布：
+ *   head 64 → toolbar 40 → grid（表格，全宽平铺）→ selband 44 → gfoot 34 → 卡片
+ * 表格带贴着主区两侧，没有外边距也没有圆角、不描边；只有表格下方的分析卡片才
+ * 内缩 16 并带 r=8 + 1px 边 + 一层很淡的投影。
+ * =========================================================================== */
+
+/* 工具栏带：画板 bar-64 —— 40 高、白底、底部 1px 边框，内容左右内缩 16 */
+.pt-band--toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-height: var(--pt-toolbar-h);
+  padding: 0 var(--pt-pad);
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+/*
+ * 工具栏里没选值时的下拉（「认证: 全部」「类型: 全部」「已添加: 全部」）在画板上是 chip 标签：
+ * 11/500、t2（dir-g-pages.js 的 bar() 里 k.tag(... color: P.t2)）。落地是 el-select 的占位文字，
+ * 走的是全局占位色 —— 那是给输入框的提示色，压在 hover 底上更浅，之前实测只有 1.8–2.3:1，
+ * 读起来像禁用。这里只在带里把它提回 chip 标签的 t2。
+ */
+.pt-band--toolbar .el-select__placeholder.is-transparent {
+  color: var(--pt-t2);
+}
+
+/* 右侧那组图标钮之前的弹性间隔 */
+.pt-band__spacer {
+  flex: 1;
+}
+
+/* 画板 bi-*：28×28 fill hover r=4 icon15，节奏 34 */
+.pt-band__iconbtn {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+  border: 0;
+  border-radius: var(--pt-r-sm);
+  cursor: pointer;
+  transition:
+    color var(--pt-transition-fast),
+    background var(--pt-transition-fast);
+}
+
+.pt-band__iconbtn:hover {
+  color: var(--pt-t1);
+  background: var(--pt-border);
+}
+
+.pt-band__iconbtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pt-band__iconbtn:disabled:hover {
+  color: var(--pt-t2);
+  background: var(--pt-hover);
+}
+
+/*
+ * 工具栏里的控件一律 28 高 —— 画板 bar-64 的分段、搜索框、下拉都是 28，
+ * 而 Element 默认 32，塞进 40 高的带里会把带顶满、看不出上下留白。
+ * 三个页面各自用 :deep 压过一遍高度，收到这里来。
+ */
+.pt-band--toolbar .el-input__wrapper,
+.pt-band--toolbar .el-select__wrapper,
+.pt-band--sel .el-input__wrapper,
+.pt-band--sel .el-select__wrapper {
+  min-height: 28px;
+  border-radius: var(--pt-r-sm);
+  background: var(--pt-hover);
+  /*
+   * 画板 bar-64 的 q 是「#EDF0F4 底 + 1px #DDE2E9 发丝边 + r4」。这里原来是 `none` ——
+   * 没有边的填色块在白带上边界含糊，尤其挨着 seg 时两者看着不是一套东西。
+   *
+   * 这条规则必须**就是这一条**：Element 的焦点环走的也是 box-shadow
+   * （`.el-input__wrapper.is-focus`，权重 0,2,0），而这个文件在 Element 之后加载，
+   * 同权重后来者胜 —— 上面若另起一条 `.pt-band--toolbar .el-input__wrapper`，
+   * 无论写 `none` 还是写边框，都会把焦点环一起压掉。焦点态由下面那条
+   * 带 `.is-focus` / `:focus-within` 的规则（权重更高）接回来。
+   */
+  box-shadow: inset 0 0 0 1px var(--pt-border);
+}
+
+.pt-band--toolbar .el-input,
+.pt-band--toolbar .el-select {
+  --el-component-size: 28px;
+}
+
+.pt-band--toolbar .el-button {
+  height: 28px;
+  margin: 0;
+}
+
+.pt-band--toolbar .el-segmented {
+  min-height: 28px;
+}
+
+/*
+ * 勾选框也压到 28（Element 是 var(--el-checkbox-height, 32px)）。带有了上下各 6 的内边距以后，
+ * 32 高的勾选框会把 40 高的带顶到 45 —— /logs 的「最近 1 小时 / 跟随尾部 / 自动刷新」就是这么顶高的。
+ */
+.pt-band--toolbar .el-checkbox {
+  --el-checkbox-height: 28px;
+}
+
+/* 画板 note：工具栏右侧那行说明字 11/400 t3 */
+.pt-band__note {
+  flex: 0 0 auto;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/*
+ * 页面自带的页头带 —— 画板 15 的 search-head（328,0 1112×88）。
+ * 这类路由外壳不画 .pt-head（App.vue 的 OWN_TOP_ROUTES）：画板里这个带装的不是
+ * 标题加摘要，而是页面自己的主控件。两行撑出 88：
+ *   上排 y14..52（38 高）：720 宽查询框 + 74 宽主按钮
+ *   下排 y58..82（24 高）：4 枚筛选 chip + 一行提示
+ * 14 + 38 + 6 + 24 + 6 = 88。
+ */
+.pt-band--head {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  /* 14 + 38 + 6 + 24 + 5 + 1px 下沿 = 88，与画板 search-head 等高 */
+  padding: 14px var(--pt-pad) 5px;
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-band__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * 上排：画板 q 720×38 / go 74×38，比工具栏里的控件高一档。
+ * 高度写死而不是只给 min-height：el-input 带 prefix/suffix 时内容盒会把
+ * min-height 撑到 42，那一行就比画板高 4，整条带跟着高 4。
+ */
+.pt-band__row--query .el-input {
+  --el-component-size: 38px;
+
+  max-width: 720px;
+  height: 38px;
+}
+
+.pt-band__row--query .el-input__wrapper {
+  height: 38px;
+  min-height: 38px;
+}
+
+.pt-band__row--query .el-button {
+  height: 38px;
+  min-height: 38px;
+}
+
+/* 下排：画板 facet-* 是 24 高的 chip，提示文字 11/400 t4 */
+.pt-band__row--facet {
+  min-height: 24px;
+  font-size: var(--pt-fz-label);
+}
+
+.pt-band__row--facet .el-input__wrapper,
+.pt-band__row--facet .el-select__wrapper {
+  min-height: 24px;
+  background: var(--pt-hover);
+  box-shadow: none;
+}
+
+.pt-band__row--facet .el-select,
+.pt-band__row--facet .el-input {
+  --el-component-size: 24px;
+}
+
+.pt-band__row--facet .el-button {
+  height: 24px;
+  padding: 0 8px;
+  margin: 0;
+  font-size: var(--pt-fz-label);
+}
+
+.pt-band__hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 画板 kbd：34×20 hover 底，装 ⌘K 提示 */
+.pt-kbd {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+}
+
+/* 窄屏：查询框吃满整行，筛选 chip 换行 */
+@media (max-width: 768px) {
+  .pt-band--head {
+    padding: var(--pt-space-3) var(--pt-space-3);
+  }
+
+  .pt-band__row {
+    flex-wrap: wrap;
+  }
+
+  .pt-band__row--query .el-input {
+    max-width: none;
+  }
+
+  .pt-band__hint {
+    display: none;
+  }
+}
+
+/*
+ * 分区带 —— 画板 13 的 tabs（328,88 1112×40，下沿 1px 线）。
+ * 不用 el-tabs：它自带一条 48 高的页头、一根贯穿下划线和自己的一套间距，
+ * 和这条 40 高的带叠起来会变成两层标题。这里只要「文字 13 号 + 2px 指示条」。
+ * 激活项 13/600 t1，其余 13/500 t3；每项之间 22 的间隔（画板 344 / 395 / 508…）。
+ */
+.pt-band--tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 22px;
+  align-items: stretch;
+  min-height: 40px;
+  padding: 0 var(--pt-pad);
+  overflow-x: auto;
+  background: var(--pt-surface);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-band__tab {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  padding: 0;
+  font-size: var(--pt-fz-body);
+  font-weight: 500;
+  color: var(--pt-t3);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--pt-transition-fast);
+}
+
+.pt-band__tab:hover {
+  color: var(--pt-t1);
+}
+
+.pt-band__tab.is-on {
+  font-weight: 600;
+  color: var(--pt-t1);
+  border-bottom-color: var(--pt-p);
+}
+
+/* 画板 tb-*：标签后面那枚 10/600 的计数 */
+/* 底取 14%（与胶囊同一档）：16% 时主色字在几套配色里只有 4.45–4.48，paletteContrast.test.ts 守的是 14% */
+.pt-band__tab-n {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--pt-p);
+  background: color-mix(in srgb, var(--pt-p) 14%, transparent);
+  border-radius: 8px;
+}
+
+/* 表格带：全宽平铺，白底，没有圆角与描边 */
+.pt-band--grid {
+  flex: 0 0 auto;
+  min-width: 0;
+  background: var(--pt-surface);
+}
+
+/*
+ * 行卡里的 <code>：只留等宽字体，把全局 code 的灰底 + 1px 边 + 内边距去掉。
+ *
+ * 画板 25 的命令列是「/search Dune Part Tw…」纯文本，画板 26 的种子标题也是纯文本 ——
+ * 一张卡上该有底色的只有状态胶囊那一枚（一行只有一枚胶囊，在行卡上同样成立）。
+ * 落地此前命令、触发用户 id、失败原因、匹配模式、下载器地址全都套着 code 的灰框，
+ * 审计那张卡上一口气四个灰块，真正的状态胶囊反而被淹了。
+ * 页面自己声明了底色的（如 ChatOps 绑定码 .code，它就是要长得像个可复制的码）权重更高，不受影响。
+ */
+.pt-rowcard code {
+  padding: 0;
+  font-size: inherit;
+  background: none;
+  border: 0;
+}
+
+/*
+ * 窄屏：表格带里装的不再是表格，而是行卡列表（`.cards`），此时它**不是一张表格面**。
+ * 画板 30 / 31 把 343 宽的白卡直接摆在 #F2F4F7 画布上，靠 1px #DDE2E9 边框 + 8 的间隙分隔；
+ * 落地此前把行卡摊在 .pt-band--grid 的白底上，白卡压白面只剩一根边框，层次全平。
+ * 只在真的装着 `.cards` 时让底色透出去 —— 空态、下载器控制台那类还留在白面上的内容不受影响。
+ */
+@media (max-width: 768px) {
+  .pt-band--grid:has(> .cards) {
+    background: transparent;
+  }
+}
+
+/* 表格页脚带：画板 gfoot —— 34 高、顶部 1px 边框，左说明右分页 */
+.pt-band--foot {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-3);
+  align-items: center;
+  min-height: 34px;
+  padding: 0 var(--pt-pad);
+  font-size: 11.5px;
+  color: var(--pt-t3);
+  background: var(--pt-surface);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-band--foot .pt-band__spacer {
+  flex: 1;
+}
+
+/* 窄屏放不下「左说明 + 右分页」两段，让它换行并放开固定高度 */
+@media (max-width: 768px) {
+  .pt-band--foot {
+    flex-wrap: wrap;
+    gap: var(--pt-space-2);
+    min-height: auto;
+    padding: var(--pt-space-2) var(--pt-pad);
+  }
+
+  .pt-band--foot .pt-band__spacer {
+    flex-basis: 100%;
+  }
+}
+
+/* 多选条：画板 selband —— 44 高、强调色 6% 底、顶部 1px 边框，按钮高 30 */
+.pt-band--sel {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--pt-space-2);
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--pt-pad);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pt-t1);
+  background: color-mix(in srgb, var(--pt-p) 6%, transparent);
+  border-top: 1px solid var(--pt-border);
+}
+
+.pt-band--sel .el-button {
+  height: 30px;
+  margin: 0;
+}
+
+/*
+ * 卡片区 —— 表格带下方的分析面板。画板里卡片 x=344（主区 328 + 16），
+ * 右端 1424，所以左右各内缩 16；卡片之间与上方留白同为 16。
+ * 两栏 548 + 16 + 516，三栏 364 / 340 / 344（都按内容宽度分，不是等分）。
+ */
+.pt-cards {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--pt-pad);
+  padding: var(--pt-pad);
+}
+
+/*
+ * 通栏卡：`minmax(0, 1fr)` 而不是 `1fr` —— `1fr` 的最小轨道是 min-content，
+ * 卡里装一张列宽加起来超过 1080 的 el-table 时轨道会被顶宽，整个主区横向溢出
+ * （画板 17 实测被顶出 112px）。`minmax(0, …)` 让表格自己横向滚动。
+ */
+.pt-cards--wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/*
+ * 表单页（全局设置 / 自动清理 / 通知通道详情）：宽屏下整张卡不再跟着主区拉宽，
+ * 停在画板的 1080（画板 21 / 23 / 27 的卡都是 1080 宽），靠左与页头对齐。
+ * 1920 下原来卡宽 1622：字段全在左边 900 以内，卡脚的「保存设置」却在 x≈1830，
+ * 改完一项要横扫半屏才点得到保存。1376 下主区本来就是 1112，这条不起作用。
+ */
+.pt-cards--form {
+  max-width: calc(1080px + 2 * var(--pt-pad));
+}
+
+/*
+ * 卡片容器套卡片容器时里层不再内缩：外层已经给了 16，里层再给一次卡就窄了 32
+ * （下载器设置页实测 548 的卡缩成 532）。间隔照旧由里层自己给。
+ */
+.pt-cards .pt-cards {
+  padding: 0;
+}
+
+/*
+ * 分栏变体 —— 画板的栏宽**不是等分**，每种页型有自己的比例（设计文档 §6）：
+ *   --2     548 / 516   表格页下方的两张分析卡
+ *   --main  700 / 364   主从页：左边是内容，右边是凭据/危险操作一类的窄栏
+ *   --side  300 / 764   左边是筛选/文件列表，右边是正文（运行日志）
+ *   --rail  276 / 788   左边是一列控制面板，右边是数据表（下载器控制台）
+ *   --3     364 / 340 / 344  三张并排的分析卡
+ * 窄于 1181 一律退回单栏：700 + 16 + 364 在 1180 以下就开始挤字。
+ * 需要通栏的卡片加 `.pt-cards__full`，它跨满所有栏。
+ */
+@media (min-width: 1181px) {
+  .pt-cards--2 {
+    grid-template-columns: minmax(0, 548fr) minmax(0, 516fr);
+  }
+
+  .pt-cards--main {
+    grid-template-columns: minmax(0, 700fr) minmax(0, 364fr);
+  }
+
+  .pt-cards--side {
+    grid-template-columns: minmax(0, 300fr) minmax(0, 764fr);
+  }
+
+  .pt-cards--rail {
+    grid-template-columns: minmax(0, 276fr) minmax(0, 788fr);
+  }
+
+  .pt-cards--3 {
+    grid-template-columns: minmax(0, 364fr) minmax(0, 340fr) minmax(0, 344fr);
+  }
+}
+
+/*
+ * 移动端（≤768）的卡片层。两处必须改，否则画板 30–35 的内容列根本对不上：
+ *
+ * ① `repeat(auto-fit, minmax(320px, 1fr))` 的 320 在 375 的屏上比容器内容宽还大 ——
+ *    栅格轨道被撑到 320，卡片于是溢出自己的父节点（实测容器内容宽 301、卡片 320）。
+ * ② 外层 `.pt-shell__inner` 已经按画板给了 16 的内缩，这里再来一层 16 就是双重内缩：
+ *    画板的内容列是 x=16 宽 343，双重内缩之后只剩 301。
+ */
+@media (max-width: 768px) {
+  .pt-cards {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
+  }
+}
+
+.pt-cards__full {
+  grid-column: 1 / -1;
+}
+
+/*
+ * 居中窄卡（画板 44 修改密码：p-acct 624,92 520×456）—— 只有一张卡的设置页，
+ * 拉通 1080 会让 6 个字段横铺在一片空白里。
+ */
+.pt-cards--narrow {
+  grid-template-columns: minmax(0, 520px);
+  justify-content: center;
+}

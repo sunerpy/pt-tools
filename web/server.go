@@ -17,9 +17,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/core"
@@ -27,6 +32,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/version"
 )
 
 type Server struct {
@@ -37,6 +43,15 @@ type Server struct {
 	chatopsDeps *ChatOpsDeps
 	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
 	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
+
+	// clientVersions 缓存每台下载器自报的版本号，键是「下载器 id + URL」。
+	//
+	// 为什么要缓存：状态栏那一格（画板 41 的 statusbar 右端「名称 · 连接态 · 版本」）
+	// 挂在 30 秒一拍的 transfer-stats 上，而 GetClientVersion 在两个实现里都是一次真实
+	// HTTP 往返，没有任何缓存。版本只在用户升级下载器时才变，为它每拍多拨一次不值得。
+	// 键里带 URL：换了地址就是换了一台机器，缓存必须失效。
+	clientVersionMu sync.RWMutex
+	clientVersions  map[string]string
 }
 
 // SetQAHook installs a callback invoked once during Serve, after all production
@@ -46,7 +61,13 @@ func (s *Server) SetQAHook(fn func(*http.ServeMux)) { s.qaHook = fn }
 
 func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 	t := template.Must(template.New("login").Parse(loginHTML))
-	return &Server{store: store, mgr: mgr, tpl: t, sessions: map[string]string{}}
+	return &Server{
+		store:          store,
+		mgr:            mgr,
+		tpl:            t,
+		sessions:       map[string]string{},
+		clientVersions: map[string]string{},
+	}
 }
 
 func (s *Server) ensureAdminFromEnv() {
@@ -83,6 +104,9 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/sites/", s.auth(s.apiSiteDetail))
 	mux.HandleFunc("/api/password", s.auth(s.apiPassword))
 	mux.HandleFunc("/api/tasks", s.auth(s.apiTasks))
+	mux.HandleFunc("/api/tasks/stats", s.auth(s.apiTaskStats))
+	mux.HandleFunc("/api/filter-rules/hits", s.auth(s.apiFilterRuleHits))
+	mux.HandleFunc("/api/logs/files", s.auth(s.apiLogFiles))
 	mux.HandleFunc("/api/tasks/batch-delete", s.auth(s.apiDeleteTasks))
 	mux.HandleFunc("/api/logs", s.auth(s.apiLogs))
 	mux.HandleFunc("/api/control/stop", s.auth(s.apiStopAll))
@@ -150,19 +174,28 @@ func (s *Server) Serve(addr string) error {
 	}
 
 	// Downloader Hub (mixed downloader management)
-	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
-	mux.HandleFunc("/api/downloader-torrents/transfer-stats", s.auth(s.apiDownloaderTransferStats))
-	mux.HandleFunc("/api/downloader-torrents/capabilities", s.auth(s.apiDownloaderCapabilities))
-	mux.HandleFunc("/api/downloader-torrents/meta", s.auth(s.apiDownloaderTorrentMeta))
-	mux.HandleFunc("/api/downloader-torrents/batch-action", s.auth(s.apiDownloaderTorrentActions))
-	mux.HandleFunc("/api/downloader-torrents/add", s.auth(s.apiAddDownloaderTorrent))
-	mux.HandleFunc("/api/downloader-torrents/", s.auth(s.apiDownloaderTorrentDetail))
+	s.registerDownloaderHubRoutes(mux)
 	// Torrent download proxy API
 	mux.HandleFunc("/api/site/", s.auth(s.apiSiteRouter))
 	// Static UI - Vue 3 SPA
 	distFS := mustSub(staticFS, "static/dist")
 	assetsServer := http.FileServer(http.FS(distFS))
 	mux.Handle("/assets/", assetsServer)
+	// 登录页是未认证入口，走不了下面那条 "/" 兜底（它会把未登录请求 302 回 /login），
+	// 所以它引用的品牌矢量与站点图标单独开路由。文件仍然只有 dist 里那一份，
+	// 不在 web/static 下再复制一遍，避免两份资产漂移。
+	//
+	// index.html 的 <head> 引用的根路径图标也必须在这里：漏掉的那几个，未登录被 302，
+	// 登录后又被 "/" 兜底换成 index.html，浏览器永远拿不到图片。
+	// 清单与 web/frontend/index.html 的 <link> 保持一致（TestServe_RootIconsAreServedOutsideAuth 守着）。
+	for _, asset := range []string{
+		"logo.svg", "wordmark.svg", "favicon.ico",
+		"favicon-32x32.png", "favicon-16x16.png", "apple-touch-icon.png",
+	} {
+		mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFileFS(w, r, distFS, asset)
+		})
+	}
 	// Legacy static files (for login page CSS) with proper MIME types
 	legacyFS := mustSub(staticFS, "static")
 	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
@@ -260,10 +293,29 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// displayVersion 返回登录页页脚用的版本号。
+func displayVersion() string { return displayVersionOf(version.GetVersionInfo().Version) }
+
+// displayVersionOf 规整版本号：ldflags 没注入时 version.Version 是 "unknown"，
+// 这种情况返回空串，让模板整段省掉版本，而不是在登录页上印一个假版本。
+func displayVersionOf(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" || v == "unknown" {
+		return ""
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
+}
+
 func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		_ = s.tpl.ExecuteTemplate(w, "login", nil)
+		_ = s.tpl.ExecuteTemplate(w, "login", loginPageData{
+			Version: displayVersion(),
+			Year:    time.Now().Year(),
+		})
 	case http.MethodPost:
 		user, pass, err := readLogin(r)
 		if err != nil {
@@ -435,42 +487,201 @@ func verifyLegacyPassword(stored, pw string) bool {
 	return stored == hex.EncodeToString(h[:])
 }
 
+// loginPageData 是 loginHTML 的模板数据。登录页在 SPA 之外，拿不到 /api/version，
+// 所以页脚要的版本号只能在渲染时塞进来。
+type loginPageData struct {
+	// Version 已带 v 前缀；ldflags 没注入时为空串，此时页脚不显示版本段，
+	// 不写一个假版本上去。
+	Version string
+	Year    int
+}
+
+/*
+loginHTML 是登录页模板，设计来源：Penpot 文件 pt-tools / 页面 G Cockpit / 画板 43。
+
+这一页不在 Vue 里，样式走 /static/style.css（那份文件带了与 theme.scss 逐字一致
+的 8 套调色板副本）。<head> 里的内联脚本负责在首帧之前把 SPA 存的主题选择读出来
+落到 <html> 上，所以登录页与主界面永远是同一套明暗与配色。
+
+图标是 lucide 的 24 栅格路径，与 src/icons/lucide.ts 里同名图标逐字相同；
+描边宽 1.75 是 viewBox 用户单位的常数，浏览器按 viewBox 缩放时会自己按比例收，
+不要再乘一遍 size/24（同 PtIcon.ts 的注释）。
+*/
 const loginHTML = `{{define "login"}}
-<!doctype html><html><head><meta charset="utf-8"><title>登录</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/style.css"></head>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>登录 · pt-tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/static/style.css">
+<script>
+/* 首帧之前定主题：与 stores/theme.ts 的读取逻辑一一对应（含旧配色名的迁移表） */
+(function () {
+  var PALETTES = ['cockpit', 'atlas', 'deck', 'halo'];
+  var LEGACY = { default: 'cockpit', ocean: 'cockpit', contrast: 'atlas', graphite: 'deck', emerald: 'cockpit' };
+  var palette = 'cockpit';
+  /* 与 stores/theme.ts 的 readMode 一致：没有存储偏好时默认明亮（TestLoginThemeScriptMatchesThemeStore 守着） */
+  var mode = 'light';
+  try {
+    var rawPalette = localStorage.getItem('theme-style');
+    if (rawPalette && PALETTES.indexOf(rawPalette) >= 0) palette = rawPalette;
+    else if (rawPalette && LEGACY[rawPalette]) palette = LEGACY[rawPalette];
+    var rawMode = localStorage.getItem('theme');
+    if (rawMode === 'light' || rawMode === 'dark' || rawMode === 'auto') mode = rawMode;
+  } catch (e) {
+    /* 隐私模式下 localStorage 会抛，用默认值即可 */
+  }
+  var dark = mode === 'auto'
+    ? (window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : true)
+    : mode === 'dark';
+  var root = document.documentElement;
+  root.classList.add(dark ? 'dark' : 'light');
+  root.setAttribute('data-theme-style', palette);
+  root.style.colorScheme = dark ? 'dark' : 'light';
+})();
+</script>
+</head>
 <body class="login-page">
-<main class="login-layout">
-  <div class="login-card">
-    <header class="login-card__header">
+<div class="login-layout">
+  <aside class="login-brand">
+    <img class="login-brand__mark" src="/wordmark.svg" width="232" height="60" alt="pt-tools">
+    <img class="login-brand__badge login-brand__badge--plated" src="/logo.svg" width="52" height="52" alt="pt-tools">
+    <svg class="login-brand__badge login-brand__badge--mono" width="52" height="52" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="pt-tools"><path d="M192 320 L384 512 L192 704" fill="none" stroke="currentColor" stroke-width="128" stroke-linecap="round" stroke-linejoin="round"/><rect x="576" y="384" width="320" height="256" fill="currentColor"/></svg>
+    <p class="login-brand__tagline">集中管理站点、RSS 与下载任务</p>
+    <ul class="login-brand__features">
+      <li class="login-feature">
+        <span class="login-feature__tile" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"/></svg>
+        </span>
+        <span>
+          <p class="login-feature__title">RSS 自动推送</p>
+          <p class="login-feature__desc">按站点规则抓取、过滤，推送到绑定的下载器</p>
+        </span>
+      </li>
+      <li class="login-feature">
+        <span class="login-feature__tile" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        </span>
+        <span>
+          <p class="login-feature__title">磁盘与容量守门</p>
+          <p class="login-feature__desc">推送前校验剩余空间与站点做种上限，失败即拒</p>
+        </span>
+      </li>
+      <li class="login-feature">
+        <span class="login-feature__tile" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
+        </span>
+        <span>
+          <p class="login-feature__title">ChatOps 双向指令</p>
+          <p class="login-feature__desc">Telegram / 企业微信 等通道收发与操作审计</p>
+        </span>
+      </li>
+    </ul>
+    <p class="login-brand__foot">{{if .Version}}{{.Version}} · {{end}}单用户模式 · © {{.Year}} pt-tools</p>
+  </aside>
+
+  <main class="login-main">
+    <div class="login-card">
       <p class="login-eyebrow">PT TOOLS</p>
       <h1 class="login-title">欢迎登录</h1>
       <p class="login-subtitle">集中管理站点、RSS 与下载任务</p>
-    </header>
-    <form id="loginForm" method="post" class="login-form">
-      <label for="username" class="login-label">用户名</label>
-      <input id="username" name="username" placeholder="用户名" value="admin" autocomplete="username"/>
-      <label for="password" class="login-label">密码</label>
-      <input id="password" name="password" type="password" placeholder="密码" autocomplete="current-password"/>
-      <div class="login-actions">
-        <button type="submit" class="login-button">登录</button>
+
+      <div id="loginAlert" class="login-alert" role="alert">
+        <svg id="loginAlertDang" class="login-alert__icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        <svg id="loginAlertWarn" class="login-alert__icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <span id="loginAlertText"></span>
       </div>
-    </form>
-  </div>
-</main>
+
+      <form id="loginForm" method="post" class="login-form">
+        <div class="login-field">
+          <label class="login-label" for="username">用户名<span class="login-label__req" aria-hidden="true">*</span></label>
+          <div class="login-input">
+            <svg class="login-input__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <input id="username" name="username" value="admin" required autocomplete="username" placeholder="用户名">
+          </div>
+        </div>
+
+        <div class="login-field">
+          <label class="login-label" for="password">密码<span class="login-label__req" aria-hidden="true">*</span></label>
+          <div class="login-input login-input--pass">
+            <svg class="login-input__icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="密码">
+            <button type="button" class="login-reveal" data-for="password" aria-label="显示密码">
+              <svg data-eye="on" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg data-eye="off" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <button id="loginSubmit" type="submit" class="login-button">登录</button>
+      </form>
+
+      <p class="login-foot">首次登录的初始账号见安装文档；登录后请立刻在「修改密码」里更换。</p>
+    </div>
+  </main>
+</div>
 <script>
-  const form = document.getElementById('loginForm');
-  form.addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    const fd = new FormData(form);
-    try{
-      const r = await fetch('/login', {method:'POST', body: fd});
-      if(!r.ok){ const msg = await r.text(); alert(msg || '密码错误'); return; }
-      location.href = '/';
-    }catch(err){ alert('登录失败: '+(err?.message||'未知错误')); }
+(function () {
+  var form = document.getElementById('loginForm');
+  var submit = document.getElementById('loginSubmit');
+  var box = document.getElementById('loginAlert');
+  var boxText = document.getElementById('loginAlertText');
+  var iconDang = document.getElementById('loginAlertDang');
+  var iconWarn = document.getElementById('loginAlertWarn');
+
+  /* 画板 43 的两个失败态：用户不存在走 warn + triangle-alert，其余走 dang + circle-alert。
+     后端返回的是纯文本，除这两条以外原样显示（例如「用户名或密码为空」）。 */
+  function showError(raw) {
+    var msg = (raw || '').trim();
+    var missing = msg.indexOf('用户不存在') >= 0;
+    if (msg === '' || msg === '密码错误') msg = '用户名或密码错误';
+    boxText.textContent = msg;
+    if (missing) box.classList.add('login-alert--warn');
+    else box.classList.remove('login-alert--warn');
+    /* 两枚图标都是 <svg>：SVGElement 没有 hidden 这个 IDL 属性，赋值 .hidden 不会改特性，
+       必须直接切 hidden 特性（style.css 里有 svg[hidden] { display: none } 兜着） */
+    iconDang.toggleAttribute('hidden', missing);
+    iconWarn.toggleAttribute('hidden', !missing);
+    box.classList.add('is-open');
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.login-reveal'), function (btn) {
+    btn.addEventListener('click', function () {
+      var input = document.getElementById(btn.getAttribute('data-for'));
+      var reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      btn.setAttribute('aria-label', reveal ? '隐藏密码' : '显示密码');
+      btn.querySelector('[data-eye="on"]').toggleAttribute('hidden', reveal);
+      btn.querySelector('[data-eye="off"]').toggleAttribute('hidden', !reveal);
+      input.focus();
+    });
   });
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    box.classList.remove('is-open');
+    submit.disabled = true;
+    fetch('/login', { method: 'POST', body: new FormData(form) })
+      .then(function (r) {
+        if (r.ok) {
+          location.href = '/';
+          return null;
+        }
+        return r.text().then(showError);
+      })
+      .catch(function (err) {
+        showError('登录失败：' + ((err && err.message) || '网络不可达'));
+      })
+      .then(function () {
+        submit.disabled = false;
+      });
+  });
+})();
 </script>
-</body></html>{{end}}`
+</body>
+</html>{{end}}`
 
 // JSON APIs
 func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
@@ -1001,6 +1212,25 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 	if expired {
 		tx = tx.Where("is_expired = ?", true)
 	}
+	/*
+	 * 优惠档位筛选（画板 16 的 chip-1「优惠: Free」）。
+	 *
+	 * 放在服务端而不是前端本地筛：这个接口是分页的，本地筛会让页脚的 total 与表里的行数
+	 * 对不上 —— 那正是搜索页踩过的「站点命中 12 条配一张少几行的表」。
+	 *
+	 * 按别名集合匹配而不是按规范值等值匹配：这一列存过三代拼法（规范的 PERCENT_50、
+	 * PHP 时代的 "50%"、建表默认的 normal），只认规范值会让存着 "50%" 的行在选「50%」
+	 * 时静默消失。别名表与 NONE 的语义都在 models.FreeLevelAliases 里。
+	 */
+	if free := strings.TrimSpace(r.URL.Query().Get("free_level")); free != "" {
+		vals := models.FreeLevelQueryValues(free)
+		if models.CanonicalFreeLevel(free) == "NONE" {
+			/* 没写过的行可能是 NULL，UPPER(NULL) 不参与 IN 比较，得单列一条 */
+			tx = tx.Where("UPPER(COALESCE(free_level, '')) IN ?", vals)
+		} else {
+			tx = tx.Where("UPPER(free_level) IN ?", vals)
+		}
+	}
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1023,6 +1253,211 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 		Page  int                  `json:"page"`
 		Size  int                  `json:"page_size"`
 	}{Items: items, Total: total, Page: page, Size: size})
+}
+
+// 任务计数接口：只回几个整数，供总览页的 KPI 带使用。
+//
+// 为什么不复用 /api/tasks：那个接口是分页列表，拿计数要请求三次、每次都带回一页行，
+// 而 KPI 带要的只是「全库有多少」。三个口径都是设计稿 G 画板 10 的 KPI 格：
+// 活跃任务、今日推送、免费种子。
+func (s *Server) apiTaskStats(w http.ResponseWriter, r *http.Request) {
+	db := global.GlobalDB.DB
+	count := func(scope func(*gorm.DB) *gorm.DB) (int64, error) {
+		var n int64
+		err := scope(db.Model(&models.TorrentInfo{})).Count(&n).Error
+		return n, err
+	}
+
+	// 活跃 = 免费期还没过：过期的种子既不会再推也不用管，不该算进「活跃」
+	active, err := count(func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("is_expired = ?", false)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 今日推送按本地零点切分：用户看的是自己这一天推了多少，不是 UTC 的一天
+	dayStart := time.Now().Truncate(24 * time.Hour)
+	if loc := time.Now().Location(); loc != nil {
+		now := time.Now()
+		dayStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	}
+	pushedToday, err := count(func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("push_time IS NOT NULL AND push_time >= ?", dayStart)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 免费种子只数还在免费期内的：过期的免费种子对「现在能下什么」没有意义
+	free, err := count(func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("is_free = ? AND is_expired = ?", true, false)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	total, err := count(func(tx *gorm.DB) *gorm.DB { return tx })
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	/*
+	 * 最近 7 天的按天计数。KPI 格右侧那张 48×22 柱图和任务页的「吞吐」卡都要它 ——
+	 * 没有这一段就只能画「按站点的构成」，画不出「随时间的走势」。
+	 * 按本地日切分，逐天一条 Count 查询：7 次 COUNT 比一次 GROUP BY 好在不依赖
+	 * SQLite 的日期函数，也不受时区函数差异影响。
+	 */
+	type dailyRow struct {
+		Date    string `json:"date"`
+		Created int64  `json:"created"`
+		Pushed  int64  `json:"pushed"`
+		Free    int64  `json:"free"`
+	}
+	daily := make([]dailyRow, 0, 7)
+	for i := 6; i >= 0; i-- {
+		from := dayStart.AddDate(0, 0, -i)
+		to := from.AddDate(0, 0, 1)
+		created, err := count(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("created_at >= ? AND created_at < ?", from, to)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		pushedDay, err := count(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("push_time >= ? AND push_time < ?", from, to)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		freeDay, err := count(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("is_free = ? AND created_at >= ? AND created_at < ?", true, from, to)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		daily = append(daily, dailyRow{
+			Date:    from.Format("2006-01-02"),
+			Created: created,
+			Pushed:  pushedDay,
+			Free:    freeDay,
+		})
+	}
+
+	writeJSON(w, struct {
+		Total       int64      `json:"total"`
+		Active      int64      `json:"active"`
+		PushedToday int64      `json:"pushedToday"`
+		Free        int64      `json:"free"`
+		Daily       []dailyRow `json:"daily"`
+	}{Total: total, Active: active, PushedToday: pushedToday, Free: free, Daily: daily})
+}
+
+// 过滤规则命中数：哪条规则真的把种子下下来了。
+//
+// TorrentInfo.FilterRuleID 记的是命中的规则，所以这是一次 GROUP BY 就能拿到的数；
+// 规则列表接口回的是 []FilterRule，不好塞这个额外字段，于是单独开一个只回计数的接口。
+func (s *Server) apiFilterRuleHits(w http.ResponseWriter, r *http.Request) {
+	type row struct {
+		FilterRuleID uint  `json:"filter_rule_id"`
+		Hits         int64 `json:"hits"`
+	}
+	var rows []row
+	err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Select("filter_rule_id, COUNT(*) AS hits").
+		Where("filter_rule_id IS NOT NULL").
+		Group("filter_rule_id").
+		Scan(&rows).Error
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	hits := make(map[string]int64, len(rows))
+	for _, it := range rows {
+		hits[strconv.FormatUint(uint64(it.FilterRuleID), 10)] = it.Hits
+	}
+	writeJSON(w, struct {
+		Hits map[string]int64 `json:"hits"`
+	}{Hits: hits})
+}
+
+// lumberjackBackupRe 认 lumberjack 轮转出来的备份：<名>-2006-01-02T15-04-05.000.log，压缩后再带 .gz。
+//
+// 不能用「不是 all.log 就是备份」：日志器同时写 all / debug / info / error 四个基础文件
+// （config/zap.go），它们都是正在写的文件，清理程序也把它们列为受保护。之前那样判，
+// 新装的机器上「轮转归档」就显示 3 份，页面还说清理会删掉它们。
+var lumberjackBackupRe = regexp.MustCompile(`^[\w.-]+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}\.log(\.gz)?$`)
+
+// 日志目录清单：当前文件加轮转备份。
+//
+// 画板 29 的左栏要「文件清单」与「归档」两张卡，而日志是 lumberjack 轮转的 ——
+// 目录里除了 all.log 还有一串带时间戳的备份。这个接口只读目录，不读内容。
+func (s *Server) apiLogFiles(w http.ResponseWriter, r *http.Request) {
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, models.WorkDir, config.DefaultZapConfig.Directory)
+	type fileRow struct {
+		Name     string `json:"name"`
+		Size     int64  `json:"size"`
+		ModTime  int64  `json:"mod_time"`
+		Rotated  bool   `json:"rotated"`
+		IsActive bool   `json:"is_active"`
+	}
+	// 目录在不在，回的都是这一份结构：保留策略来自日志配置、与目录无关，
+	// 前端靠它显示「保留最近 N 份、M 天」，缺了就成了「保留最近 份、 天」。
+	type logFilesResponse struct {
+		Dir        string    `json:"dir"`
+		Files      []fileRow `json:"files"`
+		MaxAge     int       `json:"max_age"`
+		MaxBackups int       `json:"max_backups"`
+	}
+	resp := logFilesResponse{
+		Dir:        dir,
+		Files:      []fileRow{},
+		MaxAge:     config.DefaultZapConfig.MaxAge,
+		MaxBackups: config.DefaultZapConfig.MaxBackups,
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// 目录还没建起来（一条日志都没写过）不是错误，回空清单
+		if os.IsNotExist(err) {
+			writeJSON(w, resp)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	files := make([]fileRow, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		name := e.Name()
+		// lumberjack 的备份名是 <base>-<时间戳>.log，当前文件没有时间戳那一段。
+		// IsActive 只标页面 tail 的那一个（all.log）；debug / info / error.log 同样是正在写的基础文件，
+		// 既不是「当前显示」也不是「轮转备份」。
+		active := name == "all.log"
+		files = append(files, fileRow{
+			Name:     name,
+			Size:     info.Size(),
+			ModTime:  info.ModTime().Unix(),
+			Rotated:  lumberjackBackupRe.MatchString(name),
+			IsActive: active,
+		})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].ModTime > files[j].ModTime })
+	resp.Files = files
+	writeJSON(w, resp)
 }
 
 // 日志查看接口：最多返回 5000 行，实时读取当前日志文件

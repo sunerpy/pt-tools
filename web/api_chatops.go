@@ -352,7 +352,9 @@ func (h *chatopsHandlers) queryAudit(w http.ResponseWriter, r *http.Request) {
 		Until:         until,
 		ChannelUserID: q.Get("channel_user_id"),
 		Command:       q.Get("command"),
+		Keyword:       q.Get("q"),
 		Result:        q.Get("result"),
+		ChannelType:   q.Get("channel_type"),
 		Page:          page,
 		PageSize:      pageSize,
 	})
@@ -473,6 +475,14 @@ func (h *chatopsHandlers) listRSSNotifications(w http.ResponseWriter, r *http.Re
 	}
 	if v := q.Get("result"); v != "" {
 		db = db.Where("result = ?", v)
+	}
+	// 画板 26 的 q「筛选站点、种子 ID…」：一个词同时匹配站点名与种子 ID。
+	//
+	// 放在服务端：这个接口分页，前端在本页里筛会让页脚的 total 与表里的行数对不上，
+	// 而且要找的那条很可能不在当前这一页。
+	if kw := strings.TrimSpace(q.Get("q")); kw != "" {
+		like := "%" + kw + "%"
+		db = db.Where("site_name LIKE ? OR torrent_id LIKE ?", like, like)
 	}
 	if v := q.Get("conf_id"); v != "" {
 		db = db.Where("notification_conf_id = ?", v)

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { type AggregatedStatsResponse, userInfoApi } from "@/api";
+import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
 import {
   formatBytes,
   formatNumber,
@@ -11,12 +15,27 @@ import {
   getAvatarColor,
 } from "@/utils/format";
 import { ElMessage } from "element-plus";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, ref, nextTick } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+/* ≤768 时外壳隐藏页头，页头动作得原地落回页面（Teleport 的 disabled） */
+const isMobile = useIsMobile();
 
-const loading = ref(false);
+/**
+ * 六态（设计文档 §5）：以前拉取失败只弹 toast，页面随后画成「还没有可导出的统计」。
+ * 这一页没有筛选，也只有一个数据源，所以只会出现 loading / empty / error / perm。
+ */
+const { loading, state, errorText, run, isStale } = useDataState();
+
+/** 状态块副标题：失败给真实错误，空态给下一步动作 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "loading") return "正在读取统计数据";
+  return "先到数据面板刷新一次各站点数据，再回来出图";
+});
 const exporting = ref(false);
 const copying = ref(false);
 const aggregatedStats = ref<AggregatedStatsResponse | null>(null);
@@ -68,6 +87,10 @@ const earliestJoinDate = computed(() => {
   return Math.min(...dates);
 });
 
+/*
+ * 卡片里这些取色是写死的十六进制，不是 token —— 它导出成一张 PNG，
+ * 落在别人的聊天窗口里，跟本站当前是亮色还是暗色主题没有关系。
+ */
 const summaryStats = computed(() => {
   if (!aggregatedStats.value) return [];
   const stats = aggregatedStats.value;
@@ -101,6 +124,28 @@ const summaryStats = computed(() => {
   }
   return items;
 });
+
+const activeThemeName = computed(() => {
+  const hit = presetThemes.find((t) => isActiveTheme(t));
+  return hit ? hit.name : "自定义";
+});
+
+/* 打码开关摘要挂在区块条右端：三个开关折起来时也能一眼看出隐私档位 */
+const maskNote = computed(() => {
+  const on = [
+    exportConfig.value.blurUsernames ? "用户名" : "",
+    exportConfig.value.blurSiteNames ? "站点名" : "",
+    exportConfig.value.blurLogos ? "图标" : "",
+  ].filter(Boolean);
+  return on.length === 0 ? "全部明文" : `已打码：${on.join(" / ")}`;
+});
+
+function isActiveTheme(theme: (typeof presetThemes)[0]) {
+  return (
+    exportConfig.value.backgroundColor.toLowerCase() === theme.bg &&
+    exportConfig.value.gradientEnd.toLowerCase() === theme.end
+  );
+}
 
 function getMosaicText(text: string, blur: boolean): string {
   if (!blur || !text) return text;
@@ -264,18 +309,18 @@ async function preloadSiteLogos() {
 }
 
 async function loadData() {
-  loading.value = true;
-  try {
-    aggregatedStats.value = await userInfoApi.getAggregated();
-    if (exportConfig.value.selectedSites.length === 0) {
-      exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
-    }
-    await preloadSiteLogos();
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载数据失败");
-  } finally {
-    loading.value = false;
+  const pending = run(() => userInfoApi.getAggregated());
+  const data = await pending;
+  if (isStale(pending)) return;
+  if (!data) {
+    aggregatedStats.value = null;
+    return;
   }
+  aggregatedStats.value = data;
+  if (exportConfig.value.selectedSites.length === 0) {
+    exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
+  }
+  await preloadSiteLogos();
 }
 
 function applyTheme(theme: (typeof presetThemes)[0]) {
@@ -585,7 +630,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-container">
+  <div class="export-page">
+    <!-- 打码用的 SVG 滤镜容器：本身不可见，只供 .pcard__logo.is-pixelated 引用 -->
     <svg class="svg-filters" xmlns="http://www.w3.org/2000/svg">
       <filter id="mosaic-filter">
         <feFlood x="4" y="4" height="2" width="2" />
@@ -596,54 +642,78 @@ onMounted(() => {
       </filter>
     </svg>
 
-    <div class="export-page">
-      <div class="export-preview-section">
-        <div class="preview-header">
-          <h2>预览</h2>
-          <div class="preview-actions">
-            <el-button @click="router.back()">
-              <el-icon><Back /></el-icon>
-              返回
-            </el-button>
-            <el-button :loading="copying" @click="copyToClipboard">
-              <el-icon><CopyDocument /></el-icon>
-              复制图片
-            </el-button>
-            <el-button type="primary" :loading="exporting" @click="exportImage">
-              <el-icon><Download /></el-icon>
-              下载图片
-            </el-button>
-          </div>
-        </div>
+    <!--
+      画板 11 是两栏卡片页：p-prev 700（预览）+ p-set 364（导出设置），
+      head 之后直接进卡片层，没有工具栏带 —— 返回与两枚导出按钮在画板上是页头动作。
+    -->
+    <PtHeadSub>
+      {{
+        aggregatedStats
+          ? `${aggregatedStats.siteCount} 个站点 · ${selectedSiteStats.length} 个入图`
+          : "正在读取统计数据"
+      }}
+    </PtHeadSub>
+    <Teleport to="#pt-head-acts" :disabled="isMobile">
+      <el-button @click="router.back()">
+        <PtIcon name="arrow-left" :size="15" /><span>返回</span>
+      </el-button>
+      <el-button :loading="copying" :disabled="!aggregatedStats" @click="copyToClipboard">
+        <PtIcon name="copy" :size="15" /><span>复制图片</span>
+      </el-button>
+      <el-button
+        type="primary"
+        :loading="exporting"
+        :disabled="!aggregatedStats"
+        @click="exportImage">
+        <PtIcon name="download" :size="15" /><span>下载图片</span>
+      </el-button>
+    </Teleport>
 
-        <div class="preview-scroll-container">
+    <div class="export-cols pt-cards pt-cards--main">
+      <PtPanel
+        v-loading="loading"
+        title="预览"
+        icon="eye"
+        :count="exportConfig.showSiteDetails ? `${selectedSiteStats.length} 个站点入图` : '仅汇总'">
+        <PtDataState
+          v-if="!aggregatedStats"
+          :state="state"
+          :title="state === 'empty' ? '还没有可导出的统计' : ''"
+          :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button @click="loadData">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <!-- 预览用 DOM 复刻画布，不是画布本身：导出走 canvas，两边的排版规则要手动对齐 -->
+        <div v-else class="stage">
           <div
-            v-loading="loading"
-            id="export-card"
-            class="export-card"
+            class="poster"
             :style="{
               background: `linear-gradient(135deg, ${exportConfig.backgroundColor}, ${exportConfig.gradientEnd})`,
             }">
-            <div class="export-card-header">
-              <h1 class="export-title">{{ exportConfig.title }}</h1>
-              <p v-if="aggregatedStats" class="export-subtitle">
+            <div class="poster__head">
+              <h1 class="poster__title">{{ exportConfig.title }}</h1>
+              <p v-if="aggregatedStats" class="poster__sub">
                 {{ aggregatedStats.siteCount }} 个站点 · 更新于
                 {{ new Date().toLocaleDateString("zh-CN") }}
               </p>
             </div>
 
-            <div v-if="earliestJoinDate" class="export-user-info">
-              <span class="user-info-icon">🎂</span>
-              <span class="user-info-item">入站时间: {{ formatDate(earliestJoinDate) }}</span>
-              <span class="user-info-divider">·</span>
-              <span class="user-info-item">已入站 {{ formatJoinDuration(earliestJoinDate) }}</span>
+            <div v-if="earliestJoinDate" class="poster__join">
+              <span class="poster__join-icon">🎂</span>
+              <span>入站时间: {{ formatDate(earliestJoinDate) }}</span>
+              <span class="poster__join-sep">·</span>
+              <span>已入站 {{ formatJoinDuration(earliestJoinDate) }}</span>
             </div>
 
-            <div v-if="aggregatedStats" class="export-summary-grid">
-              <div v-for="stat in summaryStats" :key="stat.label" class="export-summary-item">
-                <div class="summary-value" :style="{ color: stat.color }">{{ stat.value }}</div>
-                <div class="summary-label">
-                  <span class="summary-icon">{{ stat.icon }}</span>
+            <div v-if="aggregatedStats" class="poster__stats">
+              <div v-for="stat in summaryStats" :key="stat.label" class="pstat">
+                <div class="pstat__v" :style="{ color: stat.color }">{{ stat.value }}</div>
+                <div class="pstat__l">
+                  <span class="pstat__i">{{ stat.icon }}</span>
                   {{ stat.label }}
                 </div>
               </div>
@@ -651,135 +721,605 @@ onMounted(() => {
 
             <div
               v-if="exportConfig.showSiteDetails && selectedSiteStats.length > 0"
-              class="export-sites-section">
-              <h3 class="export-section-title">站点详情</h3>
-              <div class="export-sites-grid">
-                <div v-for="site in selectedSiteStats" :key="site.site" class="export-site-card">
-                  <div class="site-card-row site-card-header-row">
-                    <div class="site-card-left">
-                      <div
-                        class="site-avatar-wrapper"
-                        :class="{ pixelated: exportConfig.blurLogos }">
+              class="poster__sites">
+              <h3 class="poster__sites-title">站点详情</h3>
+              <div class="poster__sites-grid">
+                <div v-for="site in selectedSiteStats" :key="site.site" class="pcard">
+                  <div class="pcard__row pcard__row--head">
+                    <div class="pcard__l">
+                      <div class="pcard__logo" :class="{ 'is-pixelated': exportConfig.blurLogos }">
                         <SiteAvatar :site-name="site.site" :site-id="site.site" :size="20" />
                       </div>
-                      <div class="site-card-info">
+                      <div class="pcard__ident">
                         <span
-                          class="site-card-name"
-                          :class="{ 'mosaic-text': exportConfig.blurSiteNames }">
+                          class="pcard__name"
+                          :class="{ 'is-mosaic': exportConfig.blurSiteNames }">
                           {{ getMosaicText(site.site, exportConfig.blurSiteNames) }}
                         </span>
-                        <div class="site-card-meta">
+                        <div class="pcard__meta">
                           <span
                             v-if="site.username"
-                            class="site-card-username"
-                            :class="{ 'mosaic-text': exportConfig.blurUsernames }">
+                            class="pcard__user"
+                            :class="{ 'is-mosaic': exportConfig.blurUsernames }">
                             @{{ getMosaicText(site.username, exportConfig.blurUsernames) }}
                           </span>
-                          <span v-if="site.levelName || site.rank" class="site-card-level">
+                          <span v-if="site.levelName || site.rank" class="pcard__level">
                             {{ site.levelName || site.rank }}
                           </span>
                         </div>
                       </div>
                     </div>
-                    <div class="site-card-right">
-                      <span class="site-bonus">{{ formatNumber(site.bonus ?? 0) }}</span>
-                      <span class="site-bonus-label">{{ getSiteBonusName(site.site) }}</span>
+                    <div class="pcard__r">
+                      <span class="pcard__bonus">{{ formatNumber(site.bonus ?? 0) }}</span>
+                      <span class="pcard__bonus-unit">{{ getSiteBonusName(site.site) }}</span>
                     </div>
                   </div>
-                  <div class="site-card-row site-card-stats-row">
-                    <div class="site-card-left">
-                      <span class="stat-upload">↑{{ formatBytes(site.uploaded) }}</span>
-                      <span class="stat-download">↓{{ formatBytes(site.downloaded) }}</span>
+
+                  <div class="pcard__row pcard__row--num">
+                    <div class="pcard__l">
+                      <span class="pcard__up">↑{{ formatBytes(site.uploaded) }}</span>
+                      <span class="pcard__down">↓{{ formatBytes(site.downloaded) }}</span>
                     </div>
-                    <div class="site-card-right">
-                      <span class="stat-ratio">R: {{ formatRatio(site.ratio) }}</span>
-                      <span v-if="site.bonusPerHour" class="stat-bonus-hour"
-                        >{{ formatNumber(site.bonusPerHour) }}/h</span
-                      >
+                    <div class="pcard__r">
+                      <span class="pcard__ratio">R: {{ formatRatio(site.ratio) }}</span>
+                      <span v-if="site.bonusPerHour" class="pcard__rate">
+                        {{ formatNumber(site.bonusPerHour) }}/h
+                      </span>
                     </div>
                   </div>
-                  <div v-if="site.joinDate" class="site-card-row site-card-footer-row">
-                    <span class="site-join-time"
-                      >{{ formatDate(site.joinDate) }} ·
-                      {{ formatJoinDuration(site.joinDate) }}</span
-                    >
+
+                  <div v-if="site.joinDate" class="pcard__row pcard__row--foot">
+                    <span>
+                      {{ formatDate(site.joinDate) }} · {{ formatJoinDuration(site.joinDate) }}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="export-footer">
+            <div class="poster__foot">
               Generated by pt-tools · {{ new Date().toLocaleString("zh-CN") }}
             </div>
           </div>
         </div>
-      </div>
+      </PtPanel>
 
-      <div class="export-settings-section">
-        <div class="settings-card">
-          <h3>导出设置</h3>
-
-          <div class="setting-group">
-            <label>标题</label>
+      <PtPanel class="export-side" title="导出设置" icon="settings" padding="none">
+        <div class="pt-form settings-form">
+          <div class="pt-strip"><PtIcon name="type" :size="14" /><span>标题</span></div>
+          <div class="settings-body">
             <el-input v-model="exportConfig.title" placeholder="输入标题" />
+            <div class="field-tip">印在图片最上方，导出后就固定在图里了</div>
           </div>
 
-          <div class="setting-group">
-            <label>主题颜色</label>
-            <div class="theme-presets">
-              <div
+          <div class="pt-strip">
+            <PtIcon name="palette" :size="14" /><span>配色</span>
+            <span class="pt-strip__end">{{ activeThemeName }}</span>
+          </div>
+          <div class="settings-body">
+            <!-- 预设色块自己就是自己的图例，配上文字标签只会让这一排变成两行 -->
+            <div class="swatches">
+              <button
                 v-for="theme in presetThemes"
                 :key="theme.name"
-                class="theme-preset"
+                type="button"
+                class="swatch"
+                :class="{ 'is-on': isActiveTheme(theme) }"
                 :style="{ background: `linear-gradient(135deg, ${theme.bg}, ${theme.end})` }"
                 :title="theme.name"
-                @click="applyTheme(theme)" />
+                :aria-label="`使用${theme.name}配色`"
+                @click="applyTheme(theme)">
+                <PtIcon v-if="isActiveTheme(theme)" name="check" :size="16" />
+              </button>
             </div>
-            <div class="color-pickers">
-              <div class="color-picker-item">
+            <div class="picks">
+              <label class="pick">
                 <span>起始色</span>
                 <el-color-picker v-model="exportConfig.backgroundColor" />
-              </div>
-              <div class="color-picker-item">
+              </label>
+              <label class="pick">
                 <span>结束色</span>
                 <el-color-picker v-model="exportConfig.gradientEnd" />
+              </label>
+            </div>
+            <div class="field-tip">左上到右下的两色渐变，手调后上面会显示「自定义」</div>
+          </div>
+
+          <div class="pt-strip">
+            <PtIcon name="shield" :size="14" /><span>内容与打码</span>
+            <span class="pt-strip__end">{{ maskNote }}</span>
+          </div>
+          <div class="settings-body">
+            <div class="toggles">
+              <label class="tg">
+                <el-switch v-model="exportConfig.showSiteDetails" size="small" />
+                <span>附上逐站明细</span>
+              </label>
+              <label class="tg">
+                <el-switch v-model="exportConfig.blurUsernames" size="small" />
+                <span>打码用户名</span>
+              </label>
+              <label class="tg">
+                <el-switch v-model="exportConfig.blurSiteNames" size="small" />
+                <span>打码站点名</span>
+              </label>
+              <label class="tg">
+                <el-switch v-model="exportConfig.blurLogos" size="small" />
+                <span>打码站点图标</span>
+              </label>
+            </div>
+            <div class="field-tip">
+              打码只保留首字符，导出的 PNG 里也是真马赛克，不是能还原的模糊
+            </div>
+          </div>
+
+          <template v-if="exportConfig.showSiteDetails">
+            <div class="pt-strip">
+              <PtIcon name="list-checks" :size="14" /><span>入图站点</span>
+              <span class="pt-strip__end">
+                {{ exportConfig.selectedSites.length }} / {{ allSites.length }}
+              </span>
+            </div>
+            <div class="settings-body">
+              <el-checkbox-group v-model="exportConfig.selectedSites" class="sites">
+                <el-checkbox v-for="site in allSites" :key="site" :value="site" :label="site">
+                  {{ site }}
+                </el-checkbox>
+              </el-checkbox-group>
+              <div class="sites__acts">
+                <el-button size="small" @click="exportConfig.selectedSites = [...allSites]">
+                  全选
+                </el-button>
+                <el-button size="small" @click="exportConfig.selectedSites = []">清空</el-button>
+              </div>
+              <div class="field-tip">
+                一个都不选时按默认取前 {{ exportConfig.maxSitesToShow }} 个
               </div>
             </div>
-          </div>
-
-          <div class="setting-group">
-            <label>显示选项</label>
-            <el-switch v-model="exportConfig.showSiteDetails" active-text="显示站点详情" />
-          </div>
-
-          <div class="setting-group">
-            <label>隐私保护</label>
-            <el-switch v-model="exportConfig.blurUsernames" active-text="模糊用户名" />
-            <el-switch v-model="exportConfig.blurSiteNames" active-text="模糊站点名" />
-            <el-switch v-model="exportConfig.blurLogos" active-text="模糊站点图标" />
-          </div>
-
-          <div v-if="exportConfig.showSiteDetails" class="setting-group">
-            <label>选择站点 ({{ exportConfig.selectedSites.length }}/{{ allSites.length }})</label>
-            <el-checkbox-group v-model="exportConfig.selectedSites" class="site-checkbox-group">
-              <el-checkbox v-for="site in allSites" :key="site" :value="site" :label="site">
-                {{ site }}
-              </el-checkbox>
-            </el-checkbox-group>
-            <div class="site-select-actions">
-              <el-button size="small" @click="exportConfig.selectedSites = [...allSites]">
-                全选
-              </el-button>
-              <el-button size="small" @click="exportConfig.selectedSites = []">清空</el-button>
-            </div>
-          </div>
+          </template>
         </div>
-      </div>
+      </PtPanel>
     </div>
   </div>
 </template>
 
 <style scoped>
-@import "@/styles/common-page.css";
-@import "@/styles/export.css";
+/* 卡片层的内缩与间隔由 .pt-cards--main 给；这一层只用来挂 SVG 滤镜与 Teleport */
+
+/* 滤镜容器：占位为 0，但不能 display:none，否则 Safari 里 url(#…) 引用失效 */
+.svg-filters {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 栏宽（700 / 364）与间隔由 .pt-cards--main 给；这里只让两栏顶对齐 */
+.export-cols {
+  align-items: start;
+}
+
+/* 设置栏跟随滚动：改一个开关就想立刻看预览，不该先滚回去 */
+.export-side {
+  position: sticky;
+  top: var(--pt-space-4);
+}
+
+/* ── 预览舞台 ─────────────────────────────────────────────── */
+
+/* 海报是纯白字压在自选渐变上，得给它一层中性底衬，否则亮色主题里边缘糊在一起 */
+.stage {
+  display: flex;
+  justify-content: center;
+  padding: var(--pt-space-4);
+  background: var(--pt-hover);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
+/*
+ * 以下 .poster / .pstat / .pcard 全部写死颜色和像素值，故意不用 token：
+ * 它们是 createExportCanvas() 那张 640 宽 PNG 的 DOM 复刻，
+ * 必须跟画布逐像素对上，而画布不认识本站的主题变量。
+ */
+.poster {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  overflow: hidden;
+  padding: 28px;
+  color: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 20px 45px rgb(2 6 23 / 28%);
+}
+
+.poster::before {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  content: "";
+  background: radial-gradient(circle, rgb(255 255 255 / 8%) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.poster__head {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.poster__title {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 4px rgb(0 0 0 / 10%);
+}
+
+.poster__sub {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.poster__join {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  font-size: 12px;
+  background: rgb(255 255 255 / 10%);
+  border-radius: 10px;
+}
+
+.poster__join-icon {
+  font-size: 14px;
+}
+
+.poster__join-sep {
+  opacity: 0.5;
+}
+
+.poster__stats {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.pstat {
+  padding: 10px 8px;
+  text-align: center;
+  background: rgb(255 255 255 / 10%);
+  border-radius: 8px;
+}
+
+.pstat__v {
+  margin-bottom: 2px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pstat__l {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.pstat__i {
+  font-size: 9px;
+}
+
+.poster__sites {
+  position: relative;
+  z-index: 1;
+}
+
+.poster__sites-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.poster__sites-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.pcard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgb(255 255 255 / 8%);
+  border-radius: 8px;
+}
+
+.pcard__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pcard__row--head {
+  align-items: flex-start;
+}
+
+.pcard__row--num {
+  font-size: 10px;
+}
+
+.pcard__row--foot {
+  font-size: 9px;
+  opacity: 0.4;
+}
+
+.pcard__l,
+.pcard__r {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pcard__r {
+  text-align: right;
+}
+
+.pcard__ident {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pcard__meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pcard__name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pcard__user {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.pcard__level {
+  font-size: 10px;
+  font-weight: 500;
+  color: #2dd4bf;
+}
+
+.pcard__bonus {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.pcard__bonus-unit {
+  font-size: 9px;
+  opacity: 0.5;
+}
+
+.pcard__up {
+  color: #4ade80;
+}
+
+.pcard__down {
+  color: #f87171;
+}
+
+.pcard__ratio {
+  color: #93c5fd;
+}
+
+.pcard__rate {
+  font-size: 9px;
+  color: #fb923c;
+  opacity: 0.7;
+}
+
+.pcard__logo {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.pcard__logo.is-pixelated {
+  filter: url("#mosaic-filter");
+  image-rendering: pixelated;
+}
+
+/* 文字打码：字符已经在 getMosaicText() 里换成方块，这里只把字距拉开对齐画布 */
+.is-mosaic {
+  font-family: var(--pt-font-mono);
+  letter-spacing: 1px;
+}
+
+.poster__foot {
+  position: relative;
+  z-index: 1;
+  margin-top: 20px;
+  padding-top: 14px;
+  font-size: 10px;
+  text-align: center;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  opacity: 0.4;
+}
+
+/* ── 导出设置 ─────────────────────────────────────────────── */
+
+.settings-form > .pt-strip:first-child {
+  border-top: 0;
+}
+
+/* 这里的正文不走 el-form-item，所以四边都要自己给内边距 */
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  padding: var(--pt-pad);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pt-space-2);
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  color: #ffffff;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: var(--pt-r-md);
+  transition:
+    border-color var(--pt-transition-fast),
+    transform var(--pt-transition-fast);
+}
+
+.swatch:hover {
+  transform: translateY(-1px);
+  border-color: var(--pt-border);
+}
+
+.swatch.is-on {
+  border-color: var(--pt-t1);
+}
+
+.picks {
+  display: flex;
+  gap: var(--pt-space-4);
+  margin-top: var(--pt-space-3);
+}
+
+.pick {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  cursor: pointer;
+}
+
+/* 开关 + 文字算一个整体控件，点文字也能切；label 天然带这个行为 */
+.toggles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.tg {
+  display: inline-flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 站点可以有几十个，勾选区自己滚，别把整块设置面板撑成一屏 */
+.sites {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 208px;
+  overflow-y: auto;
+  padding: var(--pt-space-2);
+  background: var(--pt-hover);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+}
+
+.sites__acts {
+  display: flex;
+  gap: var(--pt-space-2);
+  margin-top: var(--pt-space-2);
+}
+
+/*
+ * 1181 以下单栏，并取消右栏的吸顶。
+ *
+ * 这一页不能靠 .pt-cards--main 退栏：那个变体只在 ≥1181 给 700 / 364 的比例，1181 以下落回
+ * .pt-cards 的 auto-fit(320px)，1024 下就成了两等分 —— 预览只剩 440 宽，分享图的 DOM 预览随之折行
+ * （「412.6 / TB」），站点卡右列被切。导出的 PNG 是 Canvas 按固定 640 宽画的，不受影响，
+ * 但预览不再是所见即所得。单栏时预览有整条主区宽，640 的分享图原样放得下。
+ */
+@media (max-width: 1180px) {
+  .export-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .export-side {
+    position: static;
+  }
+}
+
+@media (max-width: 540px) {
+  .poster {
+    padding: 18px;
+  }
+
+  .poster__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .poster__sites-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /*
+   * 单栏的站点卡在 375 宽的手机上只有 ~230：「128.49万」在「万」前折行、「魔力」竖成两行，
+   * 等级「Crazy User」也折两行。数值与单位不折，右边不让宽；左边的身份区让出宽度，等级名省略。
+   * 只影响手机上的预览 —— 导出的 PNG 是 Canvas 按 640 宽画的。
+   */
+  .pcard__bonus,
+  .pcard__bonus-unit,
+  .pcard__user,
+  .pcard__level {
+    white-space: nowrap;
+  }
+
+  .pcard__row--head > .pcard__r {
+    flex: 0 0 auto;
+  }
+
+  .pcard__l,
+  .pcard__ident,
+  .pcard__meta {
+    min-width: 0;
+  }
+
+  .pcard__level {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
 </style>

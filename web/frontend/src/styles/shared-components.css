@@ -81,8 +81,49 @@
   color: var(--pt-color-warning);
 }
 
-.is-checking {
-  animation: version-rotate 1.5s linear infinite;
+/* 紧凑触发器：底部状态条 28px 高，去掉图标底圈和「版本」二字，颜色随外壳继承 */
+.version-btn.is-compact {
+  height: 20px;
+  padding: 0 6px;
+  color: inherit;
+}
+
+.version-btn.is-compact:hover {
+  color: inherit;
+  background: color-mix(in srgb, currentcolor 14%, transparent);
+  border-color: transparent;
+}
+
+.version-btn.is-compact .btn-content {
+  gap: 5px;
+}
+
+.version-btn.is-compact .version-icon-wrap {
+  width: 14px;
+  height: 14px;
+  color: inherit;
+  background: transparent;
+}
+
+/* PtIcon 渲染的是裸 svg，尺寸靠 width/height 而不是 font-size */
+.version-btn.is-compact .version-icon-wrap .pt-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.version-btn.is-compact .version-text {
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: inherit;
+}
+
+.version-btn.is-compact .update-dot {
+  top: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .version-content {
@@ -281,12 +322,10 @@
   letter-spacing: 0.08em;
 }
 
-.version-content .prerelease-notice {
-  border-radius: var(--pt-radius-md);
-}
-
-.version-content .prerelease-notice strong {
+/* 「非必要请等待正式版」这句是整块里唯一需要抢注意力的，比标题再重一档 */
+.version-content .prerelease-notice .note-body span strong {
   font-weight: 700;
+  color: var(--pt-warn);
 }
 
 .version-content .prerelease-toggle-row {
@@ -402,6 +441,24 @@
   margin-bottom: var(--pt-space-2);
 }
 
+/* 说明块正文：标题一行、正文一段、要点一列，全局 reset 清掉了 ul 的缩进要补回来 */
+.version-content .note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.version-content .note-body > strong:first-child {
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.version-content .note-body ul {
+  padding-left: 1.1em;
+}
+
 .version-content .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
@@ -459,18 +516,24 @@
   text-decoration: underline;
 }
 
-.level-tag {
+/*
+ * 等级单元：画板是纯文本 13/400 #4E5765。这里只加一条虚线下划线表示「点得开」——
+ * 之前是全圆角 primary 胶囊 + hover 上浮，一张十四列的表里每行一枚彩色药丸在跳。
+ */
+.level-ref {
   cursor: pointer;
-  border-radius: var(--pt-radius-full);
-  border-color: color-mix(in srgb, var(--pt-color-primary) 30%, transparent);
-  color: var(--pt-color-primary-active);
-  background: color-mix(in srgb, var(--pt-color-primary) 12%, transparent);
-  transition: all var(--pt-transition-fast);
+  color: var(--pt-t2);
+  text-decoration: underline dotted color-mix(in srgb, var(--pt-t3) 60%, transparent);
+  text-underline-offset: 3px;
+  transition:
+    color var(--pt-transition-fast),
+    text-decoration-color var(--pt-transition-fast);
 }
 
-.level-tag:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--pt-shadow-sm);
+.level-ref:hover,
+.level-ref:focus-visible {
+  color: var(--pt-t1);
+  text-decoration-color: var(--pt-p);
 }
 
 .level-tooltip-content {
@@ -672,6 +735,7 @@
 }
 
 .site-avatar {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -692,14 +756,23 @@
   box-shadow: var(--pt-shadow-sm);
 }
 
+/* 图标叠在首字母上面，加载成功才显出来（SiteAvatar.vue 的 imageLoaded） */
 .avatar-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: color-mix(in srgb, var(--pt-bg-surface) 90%, #fff);
+  opacity: 0;
   transition:
+    opacity var(--pt-dur-fast) ease,
     transform var(--pt-transition-fast),
     filter var(--pt-transition-fast);
+}
+
+.avatar-image.is-loaded {
+  opacity: 1;
 }
 
 .site-avatar.has-image .avatar-image {
@@ -777,10 +850,6 @@ html.dark .version-content .release-changelog-wrapper {
   background: color-mix(in srgb, var(--pt-bg-surface-muted) 84%, var(--pt-bg-surface));
 }
 
-html.dark .level-tag {
-  color: var(--pt-color-primary-hover);
-}
-
 html.dark .level-tooltip-content .level-item.special {
   background: color-mix(in srgb, var(--pt-color-warning) 18%, var(--pt-bg-surface));
 }
@@ -797,12 +866,4 @@ html.dark .site-avatar {
   border-color: color-mix(in srgb, var(--pt-border-color) 78%, transparent);
 }
 
-@keyframes version-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* 转圈动画统一在 atoms.css 的 .pt-spin */

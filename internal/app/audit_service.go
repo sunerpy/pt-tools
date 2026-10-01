@@ -32,13 +32,56 @@ type AuditEntry struct {
 }
 
 type AuditQuery struct {
+	// Keyword 模糊匹配命令与触发用户（画板 25 的 q）
+	Keyword       string
 	Since         time.Time
 	Until         time.Time
 	ChannelUserID string
 	Command       string
-	Result        string
-	Page          int
-	PageSize      int
+	// Result / ChannelType 支持逗号分隔的多值（前端的多选筛选就是这么发的）。
+	// 原先 Result 按单值等值匹配，于是「成功,出错」被当成一个字面量，一行都匹配不到 ——
+	// 界面上是「筛完什么都没有」，读起来像真的没有记录。ChannelType 更彻底：
+	// handler 压根没读这个参数，那枚通道筛选是个空控件。
+	Result      string
+	ChannelType string
+	Page        int
+	PageSize    int
+}
+
+/*
+ * channelTypeAliases 把短名归一到**生产里真实写入的通道 ID**。
+ *
+ * ActionAudit.ChannelType 存的是适配器 Type() 的返回值 —— telegram / qq_onebot /
+ * webhook / wecom_webhook。审计页前端一度用 `qq`、`wecom` 这两个短名去筛，
+ * 于是选「QQ」会把真实的 QQ 审计记录筛成零条。前端已经改用真实 ID，
+ * 这张表让旧的短名也仍然能用，而不是静默返回空。
+ */
+var channelTypeAliases = map[string]string{
+	"qq":    "qq_onebot",
+	"wecom": "wecom_webhook",
+}
+
+func canonicalChannelType(raw string) string {
+	v := strings.TrimSpace(raw)
+	if c, ok := channelTypeAliases[strings.ToLower(v)]; ok {
+		return c
+	}
+	return v
+}
+
+/*
+ * splitList 把「a,b,c」拆成可用于 IN 的切片；空项丢掉。
+ * 单值进来就是单元素切片，所以调用方不必区分单选还是多选。
+ */
+func splitList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 type AuditDTO struct {
@@ -138,11 +181,19 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 	}
 
 	tx := s.db.WithContext(ctx).Model(&models.ActionAudit{})
+	/*
+	 * 时间窗绑定前先转成本地时区。
+	 *
+	 * created_at 由 Record 的 time.Now() 写入，是进程本地时区；Since / Until 来自前端的
+	 * toISOString()，通常是 UTC。glebarez/sqlite 按值自带的时区把 time.Time 格式化成
+	 * 「2006-01-02 15:04:05.999999999-07:00」文本，比较是逐字符的字符串比较，偏移量不参与换算 ——
+	 * 两边时区不一致，窗口就整体错开一个时差（TZ=Asia/Shanghai 时是 8 小时）。
+	 */
 	if !q.Since.IsZero() {
-		tx = tx.Where("created_at >= ?", q.Since)
+		tx = tx.Where("created_at >= ?", q.Since.Local())
 	}
 	if !q.Until.IsZero() {
-		tx = tx.Where("created_at < ?", q.Until)
+		tx = tx.Where("created_at < ?", q.Until.Local())
 	}
 	if q.ChannelUserID != "" {
 		tx = tx.Where("channel_user_id = ?", q.ChannelUserID)
@@ -150,8 +201,37 @@ func (s *auditService) Query(ctx context.Context, q AuditQuery) ([]AuditDTO, int
 	if q.Command != "" {
 		tx = tx.Where("command = ?", q.Command)
 	}
-	if q.Result != "" {
-		tx = tx.Where("result = ?", q.Result)
+	/*
+	 * 结果按**前缀**匹配，不是等值。
+	 *
+	 * 库里存的是带原因后缀的形式：denied:not_bound / denied:rate_limit /
+	 * error:lookup_binding …（见 internal/chatops/message_chain.go），只有 success 是裸值。
+	 * 按等值筛「denied」一行都匹配不到 —— 界面上是「被拒绝：0 条」，而实际上全是被拒绝的。
+	 * 所以 `result = v OR result LIKE 'v:%'`：裸值与带后缀的都能命中。
+	 */
+	if vals := splitList(q.Result); len(vals) > 0 {
+		conds := make([]string, 0, len(vals))
+		args := make([]any, 0, len(vals)*2)
+		for _, v := range vals {
+			conds = append(conds, "(result = ? OR result LIKE ?)")
+			args = append(args, v, v+":%")
+		}
+		tx = tx.Where(strings.Join(conds, " OR "), args...)
+	}
+	if vals := splitList(q.ChannelType); len(vals) > 0 {
+		normalized := make([]string, 0, len(vals))
+		for _, v := range vals {
+			normalized = append(normalized, canonicalChannelType(v))
+		}
+		tx = tx.Where("channel_type IN ?", normalized)
+	}
+	// Keyword 是画板 25 的 q「筛选命令、触发用户…」：同时匹配命令与触发用户，模糊匹配。
+	//
+	// 为什么不让前端在本页里筛：这个接口是分页的，本地筛会让页脚的 total 与表里的行数
+	// 对不上；而且用户想找的那条很可能不在当前这一页。
+	if kw := strings.TrimSpace(q.Keyword); kw != "" {
+		like := "%" + kw + "%"
+		tx = tx.Where("command LIKE ? OR channel_user_id LIKE ?", like, like)
 	}
 
 	var total int64

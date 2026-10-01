@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,11 +44,27 @@ type DownloaderTorrentItem struct {
 	ETA            int64   `json:"eta"`
 }
 
+// DownloaderFailure 记录一台没能取到数据的下载器。
+//
+// 为什么要有它：这个接口会聚合多台下载器，以前某一台连不上就静默 continue，
+// 然后照样返回 200 —— 前端看到的是一份「少了一台下载器的种子」的完整列表，
+// 既没法提示用户，也无从判断数字为什么不对。设计文档 §5 的 partial 态
+// （「14 个站点里 12 个成功时，页面既不该整体报错也不该假装正常」）就是为这种情形定的，
+// 而要表达它，响应里必须带上失败信息。
+type DownloaderFailure struct {
+	DownloaderID   uint   `json:"downloader_id"`
+	DownloaderName string `json:"downloader_name"`
+	Error          string `json:"error"`
+}
+
 type DownloaderTorrentsResponse struct {
 	Items    []DownloaderTorrentItem `json:"items"`
 	Total    int                     `json:"total"`
 	Page     int                     `json:"page"`
 	PageSize int                     `json:"page_size"`
+	// Failures 为空表示所有已启用的下载器都取到了数据。非空即 partial：
+	// Items 里的数据是真的，但不完整。
+	Failures []DownloaderFailure `json:"failures,omitempty"`
 }
 
 type TorrentActionTarget struct {
@@ -153,6 +170,8 @@ type downloaderRecord struct {
 	ID   uint
 	Name string
 	Type string
+	// URL 只用于「按机器缓存版本号」的键：换了地址就是换了一台机器（见 clientVersionOf）
+	URL string
 }
 
 func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
@@ -210,16 +229,24 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]DownloaderTorrentItem, 0)
+	// 逐台记录失败而不是只打日志：不上报的话前端拿到的是一份静默缺料的列表
+	failures := make([]DownloaderFailure, 0)
 	for _, rec := range records {
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
 		if dlErr != nil {
 			global.GetSlogger().Warnf("[DownloaderTorrents] 获取下载器失败: name=%s, err=%v", rec.Name, dlErr)
+			failures = append(failures, DownloaderFailure{
+				DownloaderID: rec.ID, DownloaderName: rec.Name, Error: dlErr.Error(),
+			})
 			continue
 		}
 
 		torrents, listErr := dl.GetAllTorrents()
 		if listErr != nil {
 			global.GetSlogger().Warnf("[DownloaderTorrents] 获取种子失败: downloader=%s, err=%v", rec.Name, listErr)
+			failures = append(failures, DownloaderFailure{
+				DownloaderID: rec.ID, DownloaderName: rec.Name, Error: listErr.Error(),
+			})
 			continue
 		}
 
@@ -229,10 +256,17 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if search != "" {
-				nameLower := strings.ToLower(t.Name)
-				hashLower := strings.ToLower(t.InfoHash)
-				dlNameLower := strings.ToLower(rec.Name)
-				if !strings.Contains(nameLower, search) && !strings.Contains(hashLower, search) && !strings.Contains(dlNameLower, search) {
+				// 画板 18 的 q 写的是「搜索标题、分类、标签…」，所以分类与标签也要参与匹配：
+				// 只匹配标题时那句占位文字是在许一个做不到的承诺。
+				haystacks := []string{t.Name, t.InfoHash, rec.Name, t.Category, t.Tags}
+				hit := false
+				for _, h := range haystacks {
+					if h != "" && strings.Contains(strings.ToLower(h), search) {
+						hit = true
+						break
+					}
+				}
+				if !hit {
 					continue
 				}
 			}
@@ -317,6 +351,7 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
+		Failures: failures,
 	})
 }
 
@@ -340,14 +375,63 @@ func (s *Server) apiDownloaderCapabilities(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, DownloaderCapabilitiesResponse{Items: items})
 }
 
+// registerDownloaderHubRoutes 注册下载器控制台那一组接口。
+//
+// 单独抽出来是为了让测试能走**真实的 mux**：任务详情的地址是路径形式
+// `/api/downloader-torrents/{id}/{task_id}`，而处理器一度只读查询串 —— 直接调处理器的测试
+// 拿查询串传参，正好绕过了这个不一致，于是「详情打不开」在测试里看不出来。
+func (s *Server) registerDownloaderHubRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/downloader-torrents", s.auth(s.apiDownloaderTorrents))
+	mux.HandleFunc("/api/downloader-torrents/transfer-stats", s.auth(s.apiDownloaderTransferStats))
+	mux.HandleFunc("/api/downloader-torrents/capabilities", s.auth(s.apiDownloaderCapabilities))
+	mux.HandleFunc("/api/downloader-torrents/meta", s.auth(s.apiDownloaderTorrentMeta))
+	mux.HandleFunc("/api/downloader-torrents/batch-action", s.auth(s.apiDownloaderTorrentActions))
+	mux.HandleFunc("/api/downloader-torrents/add", s.auth(s.apiAddDownloaderTorrent))
+	mux.HandleFunc("/api/downloader-torrents/", s.auth(s.apiDownloaderTorrentDetail))
+}
+
+// detailTargetOf 解析任务详情的目标。
+//
+// 前端用的是**路径形式** `/api/downloader-torrents/{downloader_id}/{task_id}`
+// （api/index.ts 的 downloaderTorrentsApi.detail），而这个处理器原来只读查询串，
+// 于是真实入口恒定 400「downloader_id 和 task_id 不能为空」——「任务详情」在生产里
+// 根本打不开。两头从一开始就不一致（git blame 到 214b998），之所以一直没被发现：
+// 已有的成功用例直接调处理器并用查询串传参，绕过了 mux；浏览器验收那边又被假数据接住了。
+//
+// 两种形式都接：路径形式是前端契约，查询串形式保留给已有调用方与手工排查。
+func detailTargetOf(r *http.Request) (idStr, taskID string) {
+	idStr = strings.TrimSpace(r.URL.Query().Get("downloader_id"))
+	taskID = strings.TrimSpace(r.URL.Query().Get("task_id"))
+	if idStr != "" && taskID != "" {
+		return idStr, taskID
+	}
+
+	rest := strings.TrimPrefix(r.URL.Path, "/api/downloader-torrents/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 {
+		return idStr, taskID
+	}
+	if idStr == "" {
+		idStr = strings.TrimSpace(parts[0])
+	}
+	if taskID == "" {
+		// task_id 里可能有被转义的字符（前端用 encodeURIComponent 编过）
+		if decoded, err := url.PathUnescape(parts[1]); err == nil {
+			taskID = strings.TrimSpace(decoded)
+		} else {
+			taskID = strings.TrimSpace(parts[1])
+		}
+	}
+	return idStr, taskID
+}
+
 func (s *Server) apiDownloaderTorrentDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	downloaderIDStr := strings.TrimSpace(r.URL.Query().Get("downloader_id"))
-	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	downloaderIDStr, taskID := detailTargetOf(r)
 	if downloaderIDStr == "" || taskID == "" {
 		http.Error(w, "downloader_id 和 task_id 不能为空", http.StatusBadRequest)
 		return
@@ -377,7 +461,7 @@ func (s *Server) apiDownloaderTorrentDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	dl, err := dm.GetDownloader(rec.Name)
+	dl, err := acquireDownloader(r.Context(), dm, rec.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -512,7 +596,7 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
 		if dlErr != nil {
 			for _, target := range targets {
 				resp.FailedCount++
@@ -709,7 +793,7 @@ func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request)
 
 	resp := AddDownloaderTorrentResponse{Results: make([]AddDownloaderTorrentResult, 0, len(records))}
 	for _, rec := range records {
-		dl, err := dm.GetDownloader(rec.Name)
+		dl, err := acquireDownloader(r.Context(), dm, rec.Name)
 		if err != nil {
 			resp.FailedCount++
 			resp.Results = append(resp.Results, AddDownloaderTorrentResult{
@@ -833,6 +917,28 @@ func reserveDownloaderAddDiskBudget(ctx context.Context, dl downloader.Downloade
 	return torrentSize, nil
 }
 
+// downloaderAcquireTimeout 是 Web 请求获取下载器实例的预算上限。
+//
+// 下载器连不上时，manager 会在后台按重连策略跑最长约 31s 的退避序列。HTTP 请求
+// 不能等它：前端每 30s 全局轮询一次，浏览器对同一来源只有 6 个并发连接，几个卡住
+// 的请求就能把连接池占满，整个页面随之取不到任何数据。所以这里只给一个短预算，
+// 拿不到就跳过这台下载器，让后台那次尝试自己跑完并缓存结果。
+const downloaderAcquireTimeout = 3 * time.Second
+
+// acquireDownloader 在有界预算内获取下载器实例，供所有 HTTP 处理器使用。
+//
+// 与 dm.GetDownloader 的区别只在「等多久」：已就绪的实例照样瞬时返回，
+// 需要新建连时最多等 downloaderAcquireTimeout，也受请求自身取消的约束。
+func acquireDownloader(
+	ctx context.Context,
+	dm *downloader.DownloaderManager,
+	name string,
+) (downloader.Downloader, error) {
+	acquireCtx, cancel := context.WithTimeout(ctx, downloaderAcquireTimeout)
+	defer cancel()
+	return dm.GetDownloaderContext(acquireCtx, name)
+}
+
 func (s *Server) getDownloaderRecordMap() (map[uint]downloaderRecord, error) {
 	var settings []models.DownloaderSetting
 	if err := global.GlobalDB.DB.Where("enabled = ?", true).Find(&settings).Error; err != nil {
@@ -858,7 +964,7 @@ func (s *Server) listEnabledDownloaderRecords(filterID *uint) ([]downloaderRecor
 
 	result := make([]downloaderRecord, 0, len(settings))
 	for _, dl := range settings {
-		result = append(result, downloaderRecord{ID: dl.ID, Name: dl.Name, Type: dl.Type})
+		result = append(result, downloaderRecord{ID: dl.ID, Name: dl.Name, Type: dl.Type, URL: dl.URL})
 	}
 	return result, nil
 }
@@ -972,7 +1078,7 @@ func (s *Server) apiDownloaderTorrentMeta(w http.ResponseWriter, r *http.Request
 	tagSet := make(map[string]struct{})
 
 	for _, rec := range records {
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
 		if dlErr != nil {
 			continue
 		}
@@ -1037,6 +1143,49 @@ type DownloaderTransferStatItem struct {
 	SessionUploaded   int64  `json:"session_uploaded"`
 	SessionDownloaded int64  `json:"session_downloaded"`
 	FreeSpace         int64  `json:"free_space"`
+	// Reachable 表示这一轮是否真的从这台下载器取到了数据（状态或剩余空间任一成功）。
+	//
+	// 为什么必须显式给出：本条目**只要能取到实例就会被追加**，取数失败时各字段留零值。
+	// 于是「出现在 downloaders 里」只证明实例构造成功，不证明客户端连得上 ——
+	// acquireDownloader 可能命中缓存实例，Transmission 的实现在普通 RPC 网络失败后
+	// 也不会清掉缓存的 healthy 标志。前端曾据此显示「已连接」，那是会说谎的。
+	Reachable bool `json:"reachable"`
+	// Error 是这一轮失败的原因（取到数据时为空）。给人看的诊断，不参与聚合。
+	Error string `json:"error,omitempty"`
+	// ClientVersion 是下载器自报的版本（画板 41 状态栏那格的第三段）。
+	//
+	// 取不到就留空：它是背景信息，不该让这个接口因为多问一句版本而变慢或失败。
+	// 值在 Server 上按「id + URL」缓存，所以每台只在第一次连上时问一次。
+	ClientVersion string `json:"client_version,omitempty"`
+}
+
+// clientVersionOf 返回下载器自报的版本，带缓存。
+//
+// 缓存键带 URL：换了地址就是换了一台机器，旧版本号不能再用。
+// 两个实现（qBittorrent 的 /api/v2/app/version、Transmission 的 session-get）都是一次
+// 真实 HTTP 往返且自己不缓存，而调用方是 30 秒一拍的 transfer-stats —— 不缓存就等于
+// 给每拍加一次往返。版本只在用户升级下载器时才变，缓存到进程结束足够。
+func (s *Server) clientVersionOf(id uint, url string, dl downloader.Downloader) string {
+	key := fmt.Sprintf("%d|%s", id, url)
+
+	s.clientVersionMu.RLock()
+	cached, ok := s.clientVersions[key]
+	s.clientVersionMu.RUnlock()
+	if ok {
+		return cached
+	}
+
+	v, err := dl.GetClientVersion()
+	if err != nil || strings.TrimSpace(v) == "" {
+		// 不缓存失败：下次这台连上了应该能问到
+		return ""
+	}
+	v = strings.TrimSpace(v)
+
+	s.clientVersionMu.Lock()
+	s.clientVersions[key] = v
+	s.clientVersionMu.Unlock()
+	return v
 }
 
 func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Request) {
@@ -1063,7 +1212,7 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 
 	ctx := r.Context()
 	for _, rec := range records {
-		dl, dlErr := dm.GetDownloader(rec.Name)
+		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
 			continue
 		}
@@ -1087,6 +1236,16 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		freeSpace, fsErr := dl.GetClientFreeSpace(ctx)
 		if fsErr == nil {
 			item.FreeSpace = freeSpace
+		}
+
+		// 两个探测任一成功就算连得上：有的客户端（或权限配置）拿不到剩余空间，
+		// 但状态照样能回，那台机器是活的。两个都失败才是「这一轮没连上」。
+		item.Reachable = statusErr == nil || fsErr == nil
+		if !item.Reachable {
+			item.Error = statusErr.Error()
+		} else {
+			// 只在连得上的时候问版本，且问到就缓存 —— 断线的那台不必为这一格再等一次超时
+			item.ClientVersion = s.clientVersionOf(rec.ID, rec.URL, dl)
 		}
 
 		resp.TotalUploadSpeed += item.UploadSpeed

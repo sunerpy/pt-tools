@@ -13,6 +13,21 @@ import {
 const DISMISSED_VERSIONS_KEY = "pt-tools-dismissed-versions";
 const SHOW_PRERELEASE_KEY = "pt-tools-show-prerelease";
 
+/**
+ * 右下角的通知要让开底部那条 chrome：桌面是状态条，手机是底栏（状态行 + tab 行，再加安全区）。
+ * Element 把 offset 当作离视口底边的距离，自己再加 16 的间距（默认 offset 0 就是 bottom: 16px）——
+ * 之前没传 offset，「发现新版本」（duration 0、不会自己消失）一直压在状态条右端的版本按钮上，
+ * 恰好是看到提示后要点的那一格；手机上则压住底栏的状态行。
+ * 按实际渲染出来的高度量，不抄令牌：底栏还有一截 env(safe-area-inset-bottom)，令牌里没有。
+ * 两套外壳都常驻 DOM、由媒体查询决定显示哪套，所以挑 getClientRects 非空的那一个。
+ */
+function bottomNotifyOffset(): number {
+  const chrome = [...document.querySelectorAll<HTMLElement>(".pt-status, .pt-mnav")].find(
+    (el) => el.getClientRects().length > 0,
+  );
+  return chrome ? Math.ceil(chrome.getBoundingClientRect().height) : 0;
+}
+
 export const useVersionStore = defineStore("version", () => {
   const versionInfo = ref<VersionInfo | null>(null);
   const checkResult = ref<VersionCheckResult | null>(null);
@@ -216,6 +231,7 @@ export const useVersionStore = defineStore("version", () => {
             type: "info",
             duration: 0,
             position: "bottom-right",
+            offset: bottomNotifyOffset(),
           });
         }
       }
@@ -228,6 +244,7 @@ export const useVersionStore = defineStore("version", () => {
           type: "warning",
           duration: 5000,
           position: "bottom-right",
+          offset: bottomNotifyOffset(),
         });
       }
     } finally {

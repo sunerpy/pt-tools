@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -385,6 +386,154 @@ func TestDownloaderTransferStats_WithStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
 	server.apiDownloaderTransferStats(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp DownloaderTransferStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Downloaders, 1)
+	assert.True(t, resp.Downloaders[0].Reachable)
+	assert.Empty(t, resp.Downloaders[0].Error)
+}
+
+// 两个探测都失败时，条目照样会被追加（前端要按台显示），但必须自报没连上。
+//
+// 这是一次评审指出的真缺陷：状态栏原来靠「这台出现在 downloaders 里」判「已连接」，
+// 而这个循环只要拿到实例就 append —— 取不到数据时各字段留零值。
+// acquireDownloader 可能命中缓存实例，Transmission 的实现在普通 RPC 失败后也不清
+// healthy 标志，于是一台断线的客户端照样被显示成「已连接」。
+func TestDownloaderTransferStats_UnreachableIsReported(t *testing.T) {
+	fake := &fakeDownloader{
+		statusErr:    assertErr("dial tcp: connection refused"),
+		freeSpaceErr: assertErr("dial tcp: connection refused"),
+	}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+	server.apiDownloaderTransferStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp DownloaderTransferStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Downloaders, 1, "取不到数据也要报这一台，否则前端分不清「没配」和「连不上」")
+	assert.False(t, resp.Downloaders[0].Reachable)
+	assert.Contains(t, resp.Downloaders[0].Error, "connection refused")
+	assert.Zero(t, resp.TotalUploadSpeed)
+}
+
+// 任务详情必须能从**前端真正用的那个地址**打开：路径形式
+// `/api/downloader-torrents/{downloader_id}/{task_id}`，而且要走真实 mux。
+//
+// 为什么这条测试必须存在：处理器原来只读查询串，于是真实入口恒定 400
+// 「downloader_id 和 task_id 不能为空」——「任务详情」在生产里根本打不开。
+// 而已有的成功用例是直接调处理器、用查询串传参的，正好绕过这个不一致。
+func TestDownloaderTorrentDetail_PathFormThroughMux(t *testing.T) {
+	fake := &fakeDownloader{torrents: sampleTorrents()}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	mux := http.NewServeMux()
+	server.registerDownloaderHubRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 会话 cookie：这些接口都在 s.auth 后面，直接往会话表里塞一条
+	const sid = "test-session"
+	server.sessions[sid] = "admin"
+	get := func(path string) *http.Response {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "session", Value: sid})
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		return resp
+	}
+
+	t.Run("路径形式（前端契约）", func(t *testing.T) {
+		resp := get("/api/downloader-torrents/1/" + url.PathEscape(sampleTorrents()[0].ID))
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "前端用的路径形式必须能取到详情")
+
+		var out TorrentDetailResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+		assert.Equal(t, sampleTorrents()[0].ID, out.Torrent.TaskID)
+	})
+
+	t.Run("查询串形式（保留给已有调用方）", func(t *testing.T) {
+		resp := get("/api/downloader-torrents/detail?downloader_id=1&task_id=" +
+			url.QueryEscape(sampleTorrents()[0].ID))
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("两者都没给才是 400", func(t *testing.T) {
+		resp := get("/api/downloader-torrents/detail")
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+// 版本号只问一次：它是画板 41 状态栏那格的第三段，而 GetClientVersion 在两个实现里
+// 都是一次真实 HTTP 往返且自己不缓存。transfer-stats 是 30 秒一拍的接口，
+// 每拍多问一次等于白加一次往返。
+func TestDownloaderTransferStats_ClientVersionCachedOncePerMachine(t *testing.T) {
+	fake := &fakeDownloader{status: downloader.ClientStatus{UpSpeed: 1}, version: "v4.6.7"}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	for range 3 {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+		server.apiDownloaderTransferStats(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTransferStatsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Downloaders, 1)
+		assert.Equal(t, "v4.6.7", resp.Downloaders[0].ClientVersion)
+	}
+
+	assert.Equal(t, 1, fake.versionCalls, "三次请求只该问一次版本")
+}
+
+// 问不到版本就留空，并且**不缓存失败** —— 这台下次连上了应该能问到。
+func TestDownloaderTransferStats_VersionErrorLeavesFieldEmpty(t *testing.T) {
+	fake := &fakeDownloader{
+		status:     downloader.ClientStatus{UpSpeed: 1},
+		versionErr: assertErr("not supported"),
+	}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	for range 2 {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+		server.apiDownloaderTransferStats(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTransferStatsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Downloaders, 1)
+		assert.Empty(t, resp.Downloaders[0].ClientVersion)
+	}
+
+	assert.Equal(t, 2, fake.versionCalls, "失败不该被缓存，两次请求就该问两次")
+}
+
+// 只有剩余空间失败时仍算连得上：有的客户端拿不到磁盘信息，但机器是活的。
+func TestDownloaderTransferStats_FreeSpaceOnlyFailureStaysReachable(t *testing.T) {
+	fake := &fakeDownloader{
+		status:       downloader.ClientStatus{UpSpeed: 1},
+		freeSpaceErr: assertErr("no such method"),
+	}
+	server, _ := setupServerWithFakeDownloader(t, fake)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/downloader-torrents/transfer-stats", nil)
+	server.apiDownloaderTransferStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp DownloaderTransferStatsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Downloaders, 1)
+	assert.True(t, resp.Downloaders[0].Reachable)
+	assert.Zero(t, resp.Downloaders[0].FreeSpace)
 }
 
 // ==== merged from api_downloader_torrents_cov5_test.go ====
@@ -1189,5 +1338,63 @@ func TestApiDownloaderTorrentActions_SetLocation(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/downloader-torrents/batch-action", bytes.NewReader(body))
 		server.apiDownloaderTorrentActions(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// TestApiDownloaderTorrents_ReportsPerDownloaderFailures 聚合接口必须逐台上报失败。
+//
+// 回归背景：以前某台下载器连不上或列表取不到，处理器只打一行日志然后 continue，
+// 照样返回 200。前端因此拿到一份「少了一台下载器的任务」的列表，既无法提示用户，
+// 也无从解释数字为什么不对 —— 设计文档 §5 的 partial 态就无法表达。
+func TestApiDownloaderTorrents_ReportsPerDownloaderFailures(t *testing.T) {
+	t.Run("列表失败要出现在 failures 里", func(t *testing.T) {
+		fake := &fakeDownloader{listErr: errors.New("listfail")}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTorrentsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, 0, resp.Total)
+		require.Len(t, resp.Failures, 1, "列表失败必须被上报，而不是静默跳过")
+		assert.Equal(t, "qb1", resp.Failures[0].DownloaderName)
+		assert.Contains(t, resp.Failures[0].Error, "listfail")
+	})
+
+	t.Run("拿不到下载器实例同样要上报", func(t *testing.T) {
+		fake := &fakeDownloader{torrents: sampleTorrents()}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+		// 库里再加一台已启用但没注册进 manager 的下载器：acquireDownloader 会失败
+		require.NoError(t, global.GlobalDB.DB.Create(&models.DownloaderSetting{
+			Name: "phantom", Type: "qbittorrent", URL: "http://127.0.0.1:2", Enabled: true,
+		}).Error)
+
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents?page_size=0", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp DownloaderTorrentsResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		// 健康那台的任务照常返回 —— partial 的要点是「不整体报错、也不假装正常」
+		assert.Positive(t, resp.Total)
+		require.Len(t, resp.Failures, 1)
+		assert.Equal(t, "phantom", resp.Failures[0].DownloaderName)
+		assert.NotEmpty(t, resp.Failures[0].Error)
+	})
+
+	t.Run("全部成功时 failures 不出现在 JSON 里", func(t *testing.T) {
+		fake := &fakeDownloader{torrents: sampleTorrents()}
+		server, _ := setupServerWithFakeDownloader(t, fake)
+
+		w := httptest.NewRecorder()
+		server.apiDownloaderTorrents(w, httptest.NewRequest(http.MethodGet, "/api/downloader-torrents?page_size=0", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+		_, present := raw["failures"]
+		assert.False(t, present, "没有失败时不该多出一个空数组字段，响应体应保持干净")
 	})
 }

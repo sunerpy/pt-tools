@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import type { DownloaderTorrentItem } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtProgress from "@/components/ui/PtProgress.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import { formatShortDateTime } from "@/utils/format";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 type SortChangePayload = {
@@ -55,6 +59,20 @@ function rowStateClass(row: DownloaderTorrentItem): string {
   if (state.includes("pause") || state.includes("stop")) return "state-paused";
   if (state.includes("error")) return "state-error";
   return "state-unknown";
+}
+
+/* 进度条跟着任务状态换色：错误红、暂停黄、做种绿、其余走主色 */
+function progressTone(row: DownloaderTorrentItem): "primary" | "ok" | "warn" | "dang" {
+  switch (rowStateClass(row)) {
+    case "state-error":
+      return "dang";
+    case "state-paused":
+      return "warn";
+    case "state-seeding":
+      return "ok";
+    default:
+      return "primary";
+  }
 }
 
 function formatSize(bytes: number): string {
@@ -228,13 +246,12 @@ watch(
 </script>
 
 <template>
-  <div class="dtt-dark-wrapper">
+  <div class="dtt">
     <el-table
       :data="props.data"
       :size="tableSize()"
+      class="pt-grid"
       :class="tableClassName()"
-      border
-      stripe
       :max-height="props.maxHeight"
       :row-key="(row: DownloaderTorrentItem) => `${row.downloader_id}:${row.task_id}`"
       :row-class-name="rowClassName"
@@ -264,7 +281,7 @@ watch(
           <template #default="{ row }">
             <div class="dl-cell">
               <span class="dl-name">{{ row.downloader_name }}</span>
-              <el-tag size="small" effect="plain">{{ row.downloader_type }}</el-tag>
+              <PtTag>{{ row.downloader_type }}</PtTag>
             </div>
           </template>
         </el-table-column>
@@ -275,7 +292,7 @@ watch(
           min-width="300"
           sortable="custom"
           :show-overflow-tooltip="false"
-          class-name="title-cell">
+          class-name="title-cell pt-cell-strong">
           <template #default="{ row }">
             <span class="title-text">{{ row.title }}</span>
           </template>
@@ -287,7 +304,10 @@ watch(
           width="170"
           sortable="custom">
           <template #default="{ row }">
-            <el-progress :percentage="Math.round(row.progress)" :stroke-width="8" />
+            <div class="pg">
+              <PtProgress :percent="row.progress" :tone="progressTone(row)" />
+              <span class="pg__n">{{ Math.round(row.progress) }}%</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column
@@ -336,16 +356,26 @@ watch(
           label="添加日期"
           prop="added_at"
           width="170"
-          sortable="custom">
-          <template #default="{ row }">{{ formatDate(row.added_at) }}</template>
+          sortable="custom"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">
+            <span :title="formatDate(row.added_at)">{{
+              formatShortDateTime(row.added_at * 1000)
+            }}</span>
+          </template>
         </el-table-column>
         <el-table-column
           v-else-if="columnKey === 'completed_at' && isVisible('completed_at')"
           label="完成日期"
           prop="completed_at"
           width="170"
-          sortable="custom">
-          <template #default="{ row }">{{ formatDate(row.completed_at) }}</template>
+          sortable="custom"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">
+            <span :title="formatDate(row.completed_at)">
+              {{ formatShortDateTime(row.completed_at * 1000) }}
+            </span>
+          </template>
         </el-table-column>
         <el-table-column
           v-else-if="columnKey === 'ratio' && isVisible('ratio')"
@@ -362,6 +392,7 @@ watch(
           prop="state"
           width="120"
           sortable="custom"
+          class-name="pt-cell-1line"
           :show-overflow-tooltip="false" />
         <el-table-column
           v-else-if="columnKey === 'eta' && isVisible('eta')"
@@ -385,9 +416,11 @@ watch(
           sortable="custom"
           :show-overflow-tooltip="false" />
       </template>
-      <el-table-column label="操作" width="92" class-name="action-column">
+      <el-table-column label="操作" width="92" class-name="action-column pt-cell-act">
         <template #default="{ row }">
-          <el-button text type="primary" @click="emitDetail(row)">详情</el-button>
+          <el-button link type="primary" @click="emitDetail(row)">
+            <PtIcon name="info" :size="14" /><span>详情</span>
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -429,225 +462,181 @@ watch(
 </template>
 
 <style scoped>
+/*
+ * 表格本体走全局的 .pt-grid 皮肤，这里只补三件皮肤管不到的事：
+ * 密度切换的行高、状态色条/标题列的贴边，以及两个 teleport 出去的浮层。
+ * 原先那一大段非作用域覆盖是为了把表强制染成深绿，换皮肤后整表跟着主题走，
+ * 不需要再钉住 el-table 的内部变量。
+ */
+.dtt {
+  min-width: 0;
+}
+
+/* 长列表滚动时把重排限制在表内，原来的非作用域块里带着这条，不能丢 */
+.pt-grid {
+  contain: layout style paint;
+}
+
+/* 状态色条：下载=ok、做种=info、暂停=warn、错误=dang，其余走最弱的文字色 */
 .status-bar {
-  width: 4px;
-  height: 26px;
-  border-radius: 999px;
+  width: 3px;
+  height: 22px;
+  border-radius: var(--pt-radius-full);
   margin: 0 auto;
 }
 
 .state-downloading {
-  background: #7aca47;
+  background: var(--pt-ok);
 }
 
 .state-seeding {
-  background: #00b3fa;
+  background: var(--pt-info);
 }
 
 .state-paused {
-  background: #f57c00;
+  background: var(--pt-warn);
 }
 
 .state-error {
-  background: #d32f2f;
+  background: var(--pt-dang);
 }
 
 .state-unknown {
-  background: #616161;
+  background: var(--pt-t4);
 }
 
 .dl-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--pt-space-2);
+  min-width: 0;
 }
 
 .dl-name {
-  font-weight: 600;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--pt-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* 进度：细条在左、百分比贴右，数字不换行才能和右侧数字列对齐 */
+.pg {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+}
+
+.pg__n {
+  min-width: 34px;
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t2);
+  text-align: right;
+}
+
+/* 密度开关只改行高：.pt-grid 的行高走 --pt-row-h，覆盖变量比覆盖内边距干净 */
+.pt-grid.table-compact {
+  --pt-row-h: 32px;
+}
+
+.pt-grid.table-comfortable {
+  --pt-row-h: 44px;
+}
+
+/* 状态色条列宽 8，不能留 .pt-grid 的 16 内边距，否则色条被挤出格 */
+.pt-grid :deep(td.el-table__cell .cell:has(.status-bar)) {
+  padding: 0;
+}
+
+/* 标题列单行截断：这一列关掉了 Element 的 tooltip，改用跟随鼠标的自绘提示 */
+.pt-grid :deep(.el-table__cell.title-cell) {
+  overflow: hidden;
+}
+
+.pt-grid :deep(.title-text) {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 行左缘的状态渐变：让下载/做种/错误三种行在长列表里能被扫出来 */
+.pt-grid :deep(.torrent-row.state-downloading td.el-table__cell:first-child) {
+  box-shadow: inset 2px 0 0 var(--pt-ok);
+}
+
+.pt-grid :deep(.torrent-row.state-seeding td.el-table__cell:first-child) {
+  box-shadow: inset 2px 0 0 var(--pt-info);
+}
+
+.pt-grid :deep(.torrent-row.state-error td.el-table__cell:first-child) {
+  box-shadow: inset 2px 0 0 var(--pt-dang);
+}
+
+/* 右键菜单被 teleport 到 body，但仍带作用域属性；配色只能用全局令牌 */
 .table-context-menu {
   position: fixed;
   z-index: 3000;
   min-width: 180px;
-  background: #306052;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
+  padding: var(--pt-space-1);
+  background: var(--pt-raised);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-lg);
+  box-shadow: var(--pt-shadow-lg);
 }
 
 .menu-group-title {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  padding: var(--pt-space-2) var(--pt-space-2) var(--pt-space-1);
+  font-size: var(--pt-fz-label);
   font-weight: 600;
-  padding: 4px 8px 2px;
-  letter-spacing: 0.3px;
+  color: var(--pt-t3);
 }
 
 .menu-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  margin: 2px 0;
+  margin: var(--pt-space-1) 0;
+  background: var(--pt-border);
 }
 
 .table-context-menu button {
   text-align: left;
   border: none;
   background: transparent;
-  color: #e0e0e0;
-  border-radius: 8px;
-  padding: 8px 10px;
+  color: var(--pt-t1);
+  font-size: var(--pt-fz-sm);
+  border-radius: var(--pt-r-sm);
+  padding: 6px var(--pt-space-2);
   cursor: pointer;
 }
 
 .table-context-menu button:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--pt-hover);
 }
 
 .table-context-menu button.danger {
-  color: var(--el-color-danger);
-}
-</style>
-
-<!-- NON-SCOPED: overrides Element Plus el-table internal CSS variables -->
-<style>
-.dtt-dark-wrapper {
-  --el-fill-color-blank: #2f5e50;
-  --el-bg-color: #2f5e50;
-  --el-color-white: #2f5e50;
+  color: var(--pt-dang);
 }
 
-.dtt-dark-wrapper .el-table {
-  contain: layout style paint;
-  --el-table-bg-color: #2f5e50;
-  --el-table-tr-bg-color: rgba(255, 255, 255, 0.01);
-  --el-table-expanded-cell-bg-color: #2f5e50;
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.08);
-  --el-table-header-text-color: #eefaf4;
-  --el-table-text-color: #e5f3ec;
-  --el-table-border-color: rgba(255, 255, 255, 0.14);
-  --el-table-row-hover-bg-color: rgba(100, 206, 170, 0.12);
-  --el-table-current-row-bg-color: rgba(100, 206, 170, 0.16);
-  background-color: #2f5e50;
-}
-
-.dtt-dark-wrapper .el-table td.el-table__cell,
-.dtt-dark-wrapper .el-table th.el-table__cell {
-  background-color: transparent !important;
-}
-
-.dtt-dark-wrapper .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
-  background-color: rgba(255, 255, 255, 0.03) !important;
-}
-
-.dtt-dark-wrapper .el-table__body tr:hover > td.el-table__cell {
-  background-color: rgba(100, 206, 170, 0.12) !important;
-}
-
-.dtt-dark-wrapper .el-table__body tr.current-row > td.el-table__cell {
-  background-color: rgba(100, 206, 170, 0.16) !important;
-}
-
-.dtt-dark-wrapper .el-table__inner-wrapper,
-.dtt-dark-wrapper .el-table__header-wrapper,
-.dtt-dark-wrapper .el-table__body-wrapper,
-.dtt-dark-wrapper .el-table__fixed,
-.dtt-dark-wrapper .el-table__fixed-right,
-.dtt-dark-wrapper .el-table__fixed-body-wrapper {
-  background-color: #2f5e50 !important;
-}
-
-.dtt-dark-wrapper .el-table__empty-block,
-.dtt-dark-wrapper .el-table__empty-text {
-  background-color: #2f5e50;
-  color: #e5f3ec;
-}
-
-.dtt-dark-wrapper .el-table__inner-wrapper::before {
-  background-color: rgba(255, 255, 255, 0.14) !important;
-}
-
-.dtt-dark-wrapper .el-table.table-compact .el-table__cell {
-  padding-top: 5px;
-  padding-bottom: 5px;
-}
-
-.dtt-dark-wrapper .el-table.table-comfortable .el-table__cell {
-  padding-top: 9px;
-  padding-bottom: 9px;
-}
-
-.dtt-dark-wrapper .el-table .torrent-row.state-downloading .el-table__cell {
-  background: linear-gradient(90deg, rgba(122, 202, 71, 0.06), transparent 20%) !important;
-}
-
-.dtt-dark-wrapper .el-table .torrent-row.state-seeding .el-table__cell {
-  background: linear-gradient(90deg, rgba(0, 179, 250, 0.06), transparent 20%) !important;
-}
-
-.dtt-dark-wrapper .el-table .torrent-row.state-error .el-table__cell {
-  background: linear-gradient(90deg, rgba(211, 47, 47, 0.06), transparent 20%) !important;
-  background: linear-gradient(90deg, rgba(211, 47, 47, 0.06), transparent 20%) !important;
-}
-
+/* 跟随鼠标的单元格提示：同样被 teleport 出去 */
 .cell-follow-tooltip {
   position: fixed;
   z-index: 9999;
   max-width: 420px;
-  padding: 8px 14px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #f0fff8;
-  background: #1a3d32;
-  border: 1px solid rgba(100, 206, 170, 0.3);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
+  padding: var(--pt-space-2) var(--pt-space-3);
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t1);
   word-break: break-all;
   white-space: pre-wrap;
-}
-
-.dtt-dark-wrapper .el-progress__text {
-  color: #e8f6ef !important;
-  font-weight: 700;
-  font-size: 12px !important;
-}
-
-.dtt-dark-wrapper .el-progress-bar__outer {
-  background-color: rgba(255, 255, 255, 0.14) !important;
-}
-
-.dtt-dark-wrapper .el-progress-bar__inner {
-  background-color: #64ceaa !important;
-}
-
-.dtt-dark-wrapper .el-table td.action-column,
-.dtt-dark-wrapper .el-table th.action-column,
-.dtt-dark-wrapper .el-table__fixed-right-patch,
-.dtt-dark-wrapper .el-table__fixed-right .el-table__cell,
-.dtt-dark-wrapper .el-table__fixed-right td.el-table__cell,
-.dtt-dark-wrapper .el-table__fixed-right th.el-table__cell {
-  background-color: #2f5e50 !important;
-}
-
-.dtt-dark-wrapper .el-table .el-table__row:hover td.action-column,
-.dtt-dark-wrapper .el-table__fixed-right .el-table__row:hover > td.el-table__cell {
-  background-color: #2f6b58 !important;
-}
-
-.dtt-dark-wrapper .el-table .el-table__cell.title-cell {
-  overflow: hidden;
-}
-
-.dtt-dark-wrapper .el-table .title-text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
+  pointer-events: none;
+  background: var(--pt-raised);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+  box-shadow: var(--pt-shadow-lg);
 }
 </style>

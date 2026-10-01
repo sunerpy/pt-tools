@@ -1,194 +1,129 @@
-<template>
-  <div class="audit-log-page">
-    <div class="hero-block">
-      <div class="hero-content">
-        <span class="hero-eyebrow">CHATOPS · AUDIT</span>
-        <h1 class="hero-title">操作审计日志</h1>
-        <p class="hero-subtitle">查询与追踪 ChatOps 机器人的所有命令执行记录，敏感参数已脱敏。</p>
-      </div>
-    </div>
-
-    <div class="stats-row">
-      <div class="stat-chip stat-chip--brand">
-        <div class="stat-icon">
-          <el-icon><DataLine /></el-icon>
-        </div>
-        <div class="stat-info">
-          <div class="stat-label">今日执行命令</div>
-          <div class="stat-value">{{ stats.todayCount }}</div>
-        </div>
-      </div>
-      <div class="stat-chip stat-chip--success">
-        <div class="stat-icon stat-icon--success">
-          <el-icon><Check /></el-icon>
-        </div>
-        <div class="stat-info">
-          <div class="stat-label">整体成功率</div>
-          <div class="stat-value">{{ formatSuccessRate(stats.successRate) }}</div>
-        </div>
-      </div>
-      <div class="stat-chip stat-chip--warning">
-        <div class="stat-icon stat-icon--warning">
-          <el-icon><Timer /></el-icon>
-        </div>
-        <div class="stat-info">
-          <div class="stat-label">最高延迟</div>
-          <div class="stat-value">{{ stats.maxLatencyMs }}<span class="stat-unit">ms</span></div>
-        </div>
-      </div>
-    </div>
-
-    <section class="glass-card">
-      <header class="card-section-header">
-        <div class="title-block">
-          <h2 class="section-title">日志记录</h2>
-          <p class="section-desc">展开行可查看脱敏后的完整命令参数</p>
-        </div>
-      </header>
-
-      <div class="filter-bar">
-        <el-date-picker
-          v-model="filters.dateRange"
-          type="datetimerange"
-          range-separator="至"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
-          format="YYYY-MM-DD HH:mm:ss"
-          value-format="YYYY-MM-DDTHH:mm:ssZ"
-          class="filter-item filter-item--date"
-          @change="handleFilterChange" />
-
-        <el-select
-          v-model="filters.channelType"
-          placeholder="通道类型"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          class="filter-item"
-          @change="handleFilterChange">
-          <el-option label="Telegram" value="telegram" />
-          <el-option label="QQ" value="qq" />
-          <el-option label="企业微信" value="wecom" />
-          <el-option label="Webhook" value="webhook" />
-        </el-select>
-
-        <el-select
-          v-model="filters.result"
-          placeholder="执行结果"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          class="filter-item"
-          @change="handleFilterChange">
-          <el-option label="Success" value="success" />
-          <el-option label="Denied" value="denied" />
-          <el-option label="Error" value="error" />
-        </el-select>
-
-        <el-input
-          v-model="filters.command"
-          placeholder="搜索命令..."
-          clearable
-          class="filter-item filter-item--search"
-          @keyup.enter="handleFilterChange"
-          @clear="handleFilterChange">
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-      </div>
-
-      <el-table
-        v-loading="loading"
-        :data="auditLogs"
-        class="audit-table"
-        row-key="id"
-        :empty-text="loading ? '加载中...' : '暂无符合条件的审计记录'">
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <div class="args-expand">
-              <div class="args-header">
-                <h4>命令参数</h4>
-                <el-tag size="small" round type="warning" effect="plain" class="redacted-tag">
-                  <el-icon><Lock /></el-icon> 部分敏感数据已脱敏 (Redacted)
-                </el-tag>
-              </div>
-              <pre class="args-json">{{ formatJson(row.args_json) }}</pre>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="created_at" label="时间" min-width="170">
-          <template #default="{ row }">
-            <span class="meta-text">{{ formatDate(row.created_at) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="channel_type" label="通道" width="110">
-          <template #default="{ row }">
-            <el-tag round :type="getChannelTagType(row.channel_type)" size="small" effect="plain">
-              {{ row.channel_type }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="channel_user_id" label="触发用户" min-width="140">
-          <template #default="{ row }">
-            <span class="user-id">{{ row.channel_user_id }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="command" label="命令" min-width="140">
-          <template #default="{ row }">
-            <code class="cmd-badge">{{ row.command }}</code>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="result" label="结果" width="110">
-          <template #default="{ row }">
-            <el-tag round :type="getResultTagType(row.result)" size="small" effect="light">
-              {{ row.result.toUpperCase() }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="latency_ms" label="延迟" width="100" align="right">
-          <template #default="{ row }">
-            <span :class="['latency', row.latency_ms > 1000 ? 'high-latency' : '']">
-              {{ row.latency_ms }} ms
-            </span>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          :page-size="pagination.pageSize"
-          :total="pagination.total"
-          layout="total, prev, pager, next"
-          @current-change="handlePageChange" />
-      </div>
-    </section>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted } from "vue";
-import { DataLine, Check, Timer, Search, Lock } from "@element-plus/icons-vue";
-import { chatopsApi, type AuditLog } from "@/api";
+import { type AuditLog, chatopsApi } from "@/api";
+import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage } from "element-plus";
+import { computed, onMounted, reactive, ref } from "vue";
 
-const loading = ref(false);
+/*
+ * 键必须是**生产里真实写入的通道 ID**（各适配器 Type() 的返回值）。
+ *
+ * 原先写的是 `qq` / `wecom` 两个短名，而 ActionAudit.ChannelType 存的是
+ * `qq_onebot` / `wecom_webhook`。后果有两处：通道筛选接通之后选「QQ」会把真实的
+ * QQ 审计记录筛成零条；表里那一列也认不出通道，只能把原始串显示出来。
+ */
+const CHANNEL_LABELS: Record<string, string> = {
+  telegram: "Telegram",
+  qq_onebot: "QQ (OneBot)",
+  webhook: "Webhook",
+  wecom_webhook: "企业微信",
+};
+
+/*
+ * 表格里的通道用短名：画板 25 的 td-0-1 是「Telegram」单行，而「QQ (OneBot)」在 110 宽的
+ * 列里会折成两行，把那几行顶高一截。筛选下拉里仍是全名，那里不缺地方。
+ */
+const CHANNEL_SHORT: Record<string, string> = {
+  telegram: "Telegram",
+  qq_onebot: "QQ",
+  webhook: "Webhook",
+  wecom_webhook: "企业微信",
+};
+
+const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {
+  success: "ok",
+  denied: "warn",
+  error: "dang",
+};
+
+/*
+ * 结果在库里带原因后缀：denied:not_bound / error:lookup_binding …，只有 success 是裸值
+ * （见 internal/chatops/message_chain.go）。所以取色和分档都要按**冒号前那一段**来 ——
+ * 原先按整串查 RESULT_TONES，真实记录一条都对不上，全部落到 neutral 灰色。
+ */
+function resultKind(result: string): string {
+  return (result ?? "").split(":")[0]!.toLowerCase();
+}
+
+const isMobile = useIsMobile();
 const auditLogs = ref<AuditLog[]>([]);
+/** 移动端展开了参数的行 id（桌面这活儿由 el-table 的 expand 列自己管） */
+const expandedIds = ref<number[]>([]);
+
+/** 是否已经成功读过一次列表：没读过就不往页头摘要里写数字（宁缺勿造） */
+const loadedOnce = ref(false);
 
 const stats = reactive({
   todayCount: 0,
   successRate: 0,
   maxLatencyMs: 0,
 });
+
+/** 统计接口是不是没拿到：0 = 正常，1 = 失败（喂给 useDataState 的 failed） */
+const statsFailed = ref(0);
+
+/**
+ * 画板 25 在 gfoot 之后有三张分析卡：p-cmd 548（命令分布）、p-ch 516（渠道分布）、
+ * p-fail 1080（失败清单）。三张都由当前这页的行现算，没有额外请求；
+ * 口径写在脚注里 —— 接口不回全库的分组计数，当页的分布不能当成全库的分布。
+ */
+const cmdRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const log of auditLogs.value) {
+    const name = log.command || "(空命令)";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "primary" as const }));
+});
+
+const channelRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const log of auditLogs.value) {
+    const name = log.channel_type || "未知渠道";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "info" as const }));
+});
+
+/*
+ * 失败与被拒的调用 —— 审计页真正要看的那一小撮。
+ *
+ * 按 resultKind 分档：库里存的是 denied:not_bound / error:lookup_binding 这种带后缀的串，
+ * 拿整串比 "denied" 永远不等，于是被拒的调用会全部被画成「出错」。
+ * 提示里把原因后缀带上 —— 「为什么被拒」正是这张卡的用处。
+ */
+const failRows = computed<BreakdownRow[]>(() =>
+  auditLogs.value
+    .filter((log) => resultKind(log.result) !== "success")
+    .slice(0, 8)
+    .map((log) => {
+      const denied = resultKind(log.result) === "denied";
+      const reason = (log.result ?? "").split(":").slice(1).join(":");
+      return {
+        key: String(log.id),
+        label: log.command || "(空命令)",
+        value: denied ? "被拒" : "出错",
+        weight: 1,
+        tone: denied ? ("warn" as const) : ("dang" as const),
+        hint: [reason, channelLabel(log.channel_type), log.channel_user_id, `${log.latency_ms} ms`]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }),
+);
 
 const pagination = reactive({
   page: 1,
@@ -203,62 +138,265 @@ const filters = reactive({
   command: "",
 });
 
+const hasFilter = computed(
+  () =>
+    Boolean(filters.dateRange) ||
+    timeQuick.value !== "" ||
+    filters.channelType.length > 0 ||
+    filters.result.length > 0 ||
+    Boolean(filters.command),
+);
+
+/*
+ * 画板 25 的 bar-64 是「seg 四档 + q + chip 通道 + chip 时间 + 三枚图标钮」。
+ *
+ * 落地此前是「日期区间选择器（380 宽）+ 通道多选 + 结果多选 + 搜索」：
+ *   · 画板上没有日期区间选择器，它是一枚 chip；那 380 宽也正是塞不进分段器的原因；
+ *   · 结果多选把「success,error」逗号拼起来发给按单值等值匹配的服务端 ——
+ *     这个组合一行都匹配不到（现在服务端改成 IN 了，但画板要的本来就是单选分段）；
+ *   · 通道多选发出去的 channel_type 后端压根没读，是个纯装饰的空控件。
+ * 所以这里按画板改：结果收成四档分段，通道与时间各收成一枚 chip，
+ * 自定义时间区间保留在「自定义…」里，不丢能力。
+ */
+const RESULT_SEG = [
+  { label: "全部", value: "" },
+  { label: "成功", value: "success" },
+  { label: "被拒绝", value: "denied" },
+  { label: "出错", value: "error" },
+] as const;
+
+/** 分段是单选；服务端仍支持逗号多值，所以这里只是不再从界面上产生多选 */
+const resultSeg = computed({
+  get: () => (filters.result.length === 1 ? filters.result[0]! : ""),
+  set: (v: string) => {
+    filters.result = v === "" ? [] : [v];
+    handleFilterChange();
+  },
+});
+
+const channelChip = computed({
+  get: () => (filters.channelType.length === 1 ? filters.channelType[0]! : ""),
+  set: (v: string | undefined) => {
+    /* el-select 点清除给的是 undefined 不是 ""：之前那样写会存成 [undefined]，页面误判为「已筛选」 */
+    filters.channelType = v ? [v] : [];
+    handleFilterChange();
+  },
+});
+
+/** 画板 chip「时间」：快捷档 + 「自定义…」。空串 = 不限 */
+const TIME_QUICK = [
+  { label: "时间: 不限", value: "" },
+  { label: "最近 1 小时", value: "1h" },
+  { label: "最近 24 小时", value: "24h" },
+  { label: "最近 7 天", value: "7d" },
+  { label: "自定义…", value: "custom" },
+] as const;
+
+const timeQuick = ref("");
+/** 选了「自定义…」才露出那个区间选择器 —— 画板上没有它，但自定义区间是真能力，不能删 */
+const showRange = computed(() => timeQuick.value === "custom");
+
+const QUICK_HOURS: Record<string, number> = { "1h": 1, "24h": 24, "7d": 24 * 7 };
+
+/*
+ * 快捷档是「从现在往回数」的窗口：不落进 dateRange，由 fetchAuditLogs 每次请求按当时重算 since，
+ * 而且不发 until。原来点选时就把 [那一刻 - N 小时, 那一刻] 写死进 dateRange，之后翻页、刷新
+ * 都带着那个旧 until，新产生的记录永远看不到。只有「自定义…」选出来的区间才是两头都定死的。
+ */
+function applyTimeQuick(v: string) {
+  const prevHours = QUICK_HOURS[timeQuick.value];
+  timeQuick.value = v;
+  if (v === "custom") {
+    /*
+     * 保留已有的自定义区间，等用户自己选。从快捷档切过来、还没有自定义区间时，
+     * 用刚才那个窗口当初值 —— 选择器与表格说的是同一段时间。
+     */
+    if (!filters.dateRange && prevHours !== undefined) {
+      const end = new Date();
+      const start = new Date(end.getTime() - prevHours * 3600_000);
+      filters.dateRange = [start.toISOString(), end.toISOString()];
+    }
+    return;
+  }
+  filters.dateRange = null;
+  handleFilterChange();
+}
+
+/**
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败就弹个 toast —— 两秒后 toast 没了，表格停在
+ * 「还没有数据」上，用户看到的是「机器人一条命令都没执行过」，而真相是请求失败了。
+ * 审计页尤其不能这样：日志为空是「没人用过机器人」，请求失败是「查不到证据」。
+ *
+ * failed 接的是统计接口：它只喂页头摘要里的三个读数，挂了不该把已经拿到的日志
+ * 一起丢掉，所以记一个失败数让状态落到 partial，表格照常渲染。
+ */
+const { loading, state, errorText, run, isStale, hasPartialBanner } = useDataState({
+  filtered: () => hasFilter.value,
+  failed: () => statsFailed.value,
+});
+
+/** 状态块的副标题：失败给真实错误，partial 说清缺了哪一半，空态给下一步 */
+const stateSub = computed(() => {
+  if (state.value === "error" || state.value === "perm") return errorText.value;
+  if (state.value === "partial") return "统计读数没拿到，日志列表本身确实是空的";
+  return hasFilter.value ? "换个时间段或清掉筛选再看" : "机器人执行过的每条命令都会记录在这里";
+});
+
+/** 「09-18 12:03」这种短时间：摘要行要在一行里放下两个时间点，整段日期太长 */
+function shortTime(input: string | number | Date) {
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * 摘要行里的时间范围。
+ *
+ * 筛了时间就报筛选区间（那是用户此刻在看的范围）；没筛就报本页最早到最新那条 ——
+ * 写成「全部日志的时间跨度」是编的：接口只回当前这一页，最早一条在哪不知道。
+ */
+const timeRangeText = computed(() => {
+  /* 快捷档没有定死的端点，报档位本身（「最近 1 小时」），它就是用户此刻在看的范围 */
+  if (QUICK_HOURS[timeQuick.value] !== undefined) {
+    return TIME_QUICK.find((t) => t.value === timeQuick.value)?.label ?? "";
+  }
+  if (filters.dateRange && filters.dateRange.length === 2) {
+    const from = shortTime(filters.dateRange[0]);
+    const to = shortTime(filters.dateRange[1]);
+    if (from && to) return `${from} ~ ${to}`;
+  }
+
+  const times = auditLogs.value
+    .map((row) => new Date(row.created_at).getTime())
+    .filter((t) => !Number.isNaN(t));
+  if (times.length === 0) return "";
+  return `本页 ${shortTime(new Date(Math.min(...times)))} ~ ${shortTime(new Date(Math.max(...times)))}`;
+});
+
+/**
+ * 画板 head 的 sub —— 标题下面那行实时摘要（11.5/400 t3），由本页 Teleport 进外壳页头。
+ *
+ * 这一页原来在主区顶上摆了一条三格 KPI 带，但画板 25 的构成是
+ * head 64 → toolbar 40 → grid → gfoot 34，顶上那条带的位置就是 head 本身。
+ * 所以三个读数搬进摘要行：条数、时间范围在前（本页的主角是日志条目），
+ * 今日条数 / 成功率 / 最高延迟在后。统计没拿到就直说「未取到」，不摆 0 充数。
+ */
+const headSub = computed(() => {
+  if (!loadedOnce.value) return "";
+
+  const parts = [hasFilter.value ? `筛选后 ${pagination.total} 条` : `${pagination.total} 条记录`];
+  if (timeRangeText.value) parts.push(timeRangeText.value);
+
+  if (statsFailed.value === 0) {
+    parts.push(`今日 ${stats.todayCount} 条`);
+    parts.push(`成功率 ${stats.successRate.toFixed(1)}%`);
+    parts.push(`最高延迟 ${stats.maxLatencyMs} ms`);
+  } else {
+    parts.push("统计读数未取到");
+  }
+
+  return parts.join(" · ");
+});
+
+/** gfoot 左侧的口径：本页在总数里的位置（画板 tasks 是「37 个任务 · 显示 1–10 · 每页 20」） */
+const rangeFrom = computed(() => (pagination.page - 1) * pagination.pageSize + 1);
+const rangeTo = computed(() => rangeFrom.value + auditLogs.value.length - 1);
+
 onMounted(() => {
   fetchAuditLogs();
 });
 
-const fetchAuditLogs = async () => {
-  loading.value = true;
-  try {
-    const params = new URLSearchParams();
-    params.append("page", pagination.page.toString());
-    params.append("page_size", pagination.pageSize.toString());
+async function fetchAuditLogs() {
+  const params = new URLSearchParams();
+  params.append("page", pagination.page.toString());
+  params.append("page_size", pagination.pageSize.toString());
 
-    if (filters.dateRange && filters.dateRange.length === 2) {
-      params.append("start_time", filters.dateRange[0]);
-      params.append("end_time", filters.dateRange[1]);
-    }
-    if (filters.channelType.length > 0) {
-      params.append("channel_type", filters.channelType.join(","));
-    }
-    if (filters.result.length > 0) {
-      params.append("result", filters.result.join(","));
-    }
-    if (filters.command) {
-      params.append("command", filters.command);
-    }
+  // 后端（web/api_chatops.go）读的是 since / until；之前发 start_time / end_time，时间筛选从来没生效过
+  const quickHours = QUICK_HOURS[timeQuick.value];
+  if (quickHours !== undefined) {
+    /* 快捷档：按这一次请求的时刻往回数，不发 until（后端 until 为空即不设上限） */
+    params.append("since", new Date(Date.now() - quickHours * 3600_000).toISOString());
+  } else if (timeQuick.value === "custom" && filters.dateRange && filters.dateRange.length === 2) {
+    params.append("since", filters.dateRange[0]);
+    params.append("until", filters.dateRange[1]);
+  }
+  if (filters.channelType.length > 0) {
+    params.append("channel_type", filters.channelType.join(","));
+  }
+  if (filters.result.length > 0) {
+    params.append("result", filters.result.join(","));
+  }
+  if (filters.command) {
+    /*
+     * 画板 25 的 q 写的是「筛选命令、触发用户…」，所以走服务端的 `q`（同时模糊匹配
+     * command 与 channel_user_id），不是只按 command 精确匹配 ——
+     * 后者连「命令名写一半」都搜不到，更别说按触发用户找。
+     */
+    params.append("q", filters.command);
+  }
 
-    const [listRes, statsRes] = await Promise.all([
+  /*
+   * 两个数据源分开判：原来是 Promise.all，统计接口一挂整页就当失败，
+   * 明明拿到手的日志也被丢掉。改成 allSettled —— 列表是主数据源，它失败才算失败；
+   * 统计失败只记 failed，让状态落到 partial。
+   *
+   * 统计结果随列表一起交回来，确认这一份没过期之后才写：写在 run 里面的话，
+   * 被顶掉的旧请求照样会改统计读数，它的统计失败还会把新页面标成 partial。
+   * 列表失败时不写统计也不丢东西：页头摘要只在读到过列表时才出现，error 态也压过 partial。
+   */
+  const pending = run(async () => {
+    const [listRes, statsRes] = await Promise.allSettled([
       chatopsApi.audit.list(params),
       chatopsApi.audit.stats(),
     ]);
+    if (listRes.status === "rejected") throw listRes.reason;
+    return { page: listRes.value, statsRes };
+  });
+  const data = await pending;
+  // 连点筛选 / 翻页时晚到的旧请求：不清新结果，也不弹「获取审计日志失败」
+  if (isStale(pending)) return;
 
-    auditLogs.value = listRes.items || [];
-    pagination.total = listRes.total || 0;
-    stats.todayCount = statsRes.today_count || 0;
-    stats.successRate = statsRes.success_rate || 0;
-    stats.maxLatencyMs = statsRes.max_latency_ms || 0;
-  } catch (err: unknown) {
-    ElMessage.error((err as Error).message || "获取审计日志失败");
-  } finally {
-    loading.value = false;
+  if (!data) {
+    // 失败时清空：留着上一次的日志配一个「加载失败」的状态块更让人误解
+    auditLogs.value = [];
+    pagination.total = 0;
+    expandedIds.value = [];
+    loadedOnce.value = false;
+    ElMessage.error(errorText.value || "获取审计日志失败");
+    return;
   }
-};
 
-const handleFilterChange = () => {
+  if (data.statsRes.status === "fulfilled") {
+    statsFailed.value = 0;
+    stats.todayCount = data.statsRes.value.today_count || 0;
+    stats.successRate = data.statsRes.value.success_rate || 0;
+    stats.maxLatencyMs = data.statsRes.value.max_latency_ms || 0;
+  } else {
+    statsFailed.value = 1;
+  }
+
+  auditLogs.value = data.page.items || [];
+  pagination.total = data.page.total || 0;
+  expandedIds.value = [];
+  loadedOnce.value = true;
+}
+
+function handleFilterChange() {
   pagination.page = 1;
   fetchAuditLogs();
-};
+}
 
-const handlePageChange = (page: number) => {
+function handlePageChange(page: number) {
   pagination.page = page;
   fetchAuditLogs();
-};
+}
 
-const formatDate = (dateStr: string) => {
+function formatDate(dateStr: string) {
   if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  return date.toLocaleString("zh-CN", {
+  return new Date(dateStr).toLocaleString("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -267,474 +405,663 @@ const formatDate = (dateStr: string) => {
     second: "2-digit",
     hour12: false,
   });
-};
+}
 
-const formatJson = (jsonStr?: string) => {
+function formatJson(jsonStr?: string) {
   if (!jsonStr) return "无参数";
   try {
-    const obj = JSON.parse(jsonStr);
-    return JSON.stringify(obj, null, 2);
-  } catch (_e) {
+    return JSON.stringify(JSON.parse(jsonStr), null, 2);
+  } catch {
     return jsonStr;
   }
+}
+
+function channelLabel(type: string) {
+  return CHANNEL_LABELS[type] || type;
+}
+
+function channelShort(type: string) {
+  return CHANNEL_SHORT[type] ?? channelLabel(type);
+}
+
+function resultTone(result: string) {
+  return RESULT_TONES[resultKind(result)] || "neutral";
+}
+
+/** 冒号后面那段原因（没有就是空串）—— 有原因才挂 tooltip */
+function resultReason(result: string): string {
+  return (result ?? "").split(":").slice(1).join(":");
+}
+
+/*
+ * 胶囊里的短标签。画板 25 用的是 Success / Denied 这种一词标签，
+ * 而库里是 `denied:not_bound` 这种带原因的串 —— 原样塞进 96 宽的列会被切断。
+ */
+const RESULT_LABEL: Record<string, string> = {
+  success: "成功",
+  denied: "被拒",
+  error: "出错",
 };
 
-const formatSuccessRate = (rate: number) => `${rate.toFixed(2)}%`;
+function resultLabel(result: string): string {
+  const kind = resultKind(result);
+  return RESULT_LABEL[kind] ?? kind ?? "-";
+}
 
-const getChannelTagType = (type: string) => {
-  const map: Record<string, "" | "success" | "warning" | "info" | "danger"> = {
-    telegram: "",
-    qq: "warning",
-    wecom: "success",
-    webhook: "info",
-  };
-  return map[type] || "info";
-};
+function isArgsOpen(id: number) {
+  return expandedIds.value.includes(id);
+}
 
-const getResultTagType = (result: string) => {
-  const map: Record<string, "" | "success" | "warning" | "info" | "danger"> = {
-    success: "success",
-    denied: "warning",
-    error: "danger",
-  };
-  return map[result.toLowerCase()] || "info";
-};
+/** 行卡上的参数展开：桌面靠 expand 列，手机上卡片没有那一列，自己维护一份 id */
+function toggleArgs(id: number) {
+  const i = expandedIds.value.indexOf(id);
+  if (i === -1) expandedIds.value.push(id);
+  else expandedIds.value.splice(i, 1);
+}
+
+/** CSV 单元格：一律加引号并把内部引号翻倍，参数 JSON 里的逗号与换行才不会撕开列 */
+function csvCell(value: unknown) {
+  const s = value === null || value === undefined ? "" : String(value);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+/**
+ * 导出 —— 后端没有导出接口，所以只能导**当前这一页**已经拿到的行，
+ * 按钮提示里也是这么写的。悄悄导成「全部日志」会让人拿着 30 条当完整证据。
+ */
+function exportCsv() {
+  if (auditLogs.value.length === 0) {
+    ElMessage.info("当前页没有可导出的日志");
+    return;
+  }
+
+  // 两处都显式写成 string[]：混进 number 会让 [head, ...rows] 变成联合数组类型，.map 就不可调用了
+  const head: string[] = ["时间", "通道", "触发用户", "命令", "结果", "延迟(ms)", "命令参数"];
+  const rows: string[][] = auditLogs.value.map((row) => [
+    formatDate(row.created_at),
+    channelLabel(row.channel_type),
+    row.channel_user_id || "",
+    row.command,
+    row.result,
+    String(row.latency_ms),
+    formatJson(row.args_json),
+  ]);
+  const body = [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+  // 开头的 BOM 不能省：Excel 不认没有 BOM 的 UTF-8，中文表头会变成乱码
+  const csv = `\uFEFF${body}`;
+
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `chatops-audit-p${pagination.page}-${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出本页 ${auditLogs.value.length} 条`);
+}
 </script>
 
+<template>
+  <div class="audit-page">
+    <!-- 画板 head 的 sub：标题下面那行实时摘要，由本页把真实数字送进外壳页头 -->
+    <PtHeadSub v-if="headSub">{{ headSub }}</PtHeadSub>
+
+    <!--
+      工具栏带 —— 画板 bar-64：40 高全宽白带。只读页没有主操作，所以这条带上
+      只有筛选控件 + 右侧 28×28 图标钮，#pt-head-acts 保持空着。
+    -->
+    <PtToolbar band>
+      <!-- 画板 25 的 seg：结果四档（单选）。服务端仍支持逗号多值 -->
+      <el-segmented
+        v-model="resultSeg"
+        class="pt-seg"
+        :options="RESULT_SEG"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="audit-result-seg" />
+
+      <el-input
+        v-model="filters.command"
+        placeholder="筛选命令、触发用户…"
+        clearable
+        class="f-search"
+        @keyup.enter="handleFilterChange"
+        @clear="handleFilterChange">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
+
+      <!-- 画板 chip「通道」：单选。多选那版发出去的 channel_type 后端压根没读 -->
+      <el-select
+        v-model="channelChip"
+        class="f-chip"
+        size="small"
+        placeholder="通道: 全部"
+        clearable
+        data-testid="audit-channel-chip">
+        <el-option label="通道: 全部" value="" />
+        <el-option
+          v-for="(label, value) in CHANNEL_LABELS"
+          :key="value"
+          :label="`通道: ${label}`"
+          :value="value" />
+      </el-select>
+
+      <!-- 画板 chip「时间」：快捷档；「自定义…」才露出区间选择器 -->
+      <el-select
+        :model-value="timeQuick"
+        class="f-chip"
+        size="small"
+        placeholder="时间: 不限"
+        data-testid="audit-time-chip"
+        @update:model-value="applyTimeQuick">
+        <el-option v-for="t in TIME_QUICK" :key="t.value" :label="t.label" :value="t.value" />
+      </el-select>
+
+      <el-date-picker
+        v-if="showRange"
+        v-model="filters.dateRange"
+        type="datetimerange"
+        range-separator="至"
+        start-placeholder="开始时间"
+        end-placeholder="结束时间"
+        format="YYYY-MM-DD HH:mm:ss"
+        value-format="YYYY-MM-DDTHH:mm:ssZ"
+        class="f-date"
+        @change="handleFilterChange" />
+
+      <template #right>
+        <el-tooltip content="刷新" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="刷新"
+            :disabled="loading"
+            @click="fetchAuditLogs">
+            <PtIcon name="refresh-cw" :size="15" :class="{ 'pt-spin': loading }" />
+          </button>
+        </el-tooltip>
+        <el-tooltip content="导出本页为 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出本页为 CSV"
+            :disabled="!auditLogs.length"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+      </template>
+    </PtToolbar>
+
+    <!--
+      partial：日志拿到了但统计没拿到，别用一整块状态图顶掉已经拿到的日志。
+      提示不是全宽带 —— 画板 27 的落法是在顶部带之后、左右各内缩 16。
+    -->
+    <div v-if="hasPartialBanner(auditLogs.length)" class="pt-note pt-note--warn partial-note">
+      <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+      <span>
+        统计读数这次没拿到，标题下的摘要里少了「今日条数 / 成功率 / 最高延迟」；
+        下面的审计日志是完整的，点工具栏右侧的刷新可以再试一次。
+      </span>
+    </div>
+
+    <!-- 表格带 —— 画板 grid：全宽平铺，没有圆角也没有外边距，不再包在卡片里 -->
+    <div v-loading="loading" class="pt-band--grid">
+      <el-table v-if="!isMobile" :data="auditLogs" class="pt-grid" row-key="id" style="width: 100%">
+        <template #empty>
+          <PtDataState :state="state" dense :sub="stateSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="fetchAuditLogs">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
+        </template>
+
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="args">
+              <div class="args__head">
+                <span class="args__title">命令参数</span>
+                <span class="args__redacted">
+                  <PtIcon name="lock" :size="12" />
+                  <span>敏感字段已脱敏</span>
+                </span>
+              </div>
+              <!--
+                结果的完整原值放在**展开行**里。
+                表里那一列只放短标签（画板 25 的胶囊就是 Success / Denied 一词标签），
+                原值 `denied:not_bound` 塞进 96 宽的列会被切断；而只把它挂在胶囊的 tooltip
+                上是不够的 —— 胶囊是个不可聚焦的 span，el-tooltip 默认又只认 hover，
+                键盘用户根本取不到。展开行由行首那个展开钮打开，Tab 到得了。
+                一次评审两轮都指着这一条，判得对。
+              -->
+              <p class="args__result">
+                结果原值：<code>{{ row.result }}</code>
+                <span v-if="resultReason(row.result)" class="args__reason">
+                  （原因 {{ resultReason(row.result) }}）
+                </span>
+              </p>
+              <pre class="args__json">{{ formatJson(row.args_json) }}</pre>
+            </div>
+          </template>
+        </el-table-column>
+
+        <!-- 日志要秒级完整时间，所以不换短格式：170 → 186 并锁单行，宽屏 14 号字时不再折行 -->
+        <el-table-column
+          prop="created_at"
+          label="时间"
+          width="186"
+          class-name="pt-cell-muted pt-cell-1line">
+          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        </el-table-column>
+
+        <!--
+          画板 25 这一行里**只有「结果」是胶囊**：通道是纯文本 13/400「Telegram」、
+          触发用户是「@sunerpy」、命令是「/search Dune Part Tw…」，都没有壳。
+          落地此前通道包 PtTag、触发用户与命令各包一个 code 片 —— 一行四枚色块，
+          真正的状态（结果）反而不突出。命令仍用等宽字体，那是它的身份，不需要底色。
+        -->
+        <!-- 不加 pt-cell-muted：那个类是 t3，而画板的正文单元是 t2（表格默认色） -->
+        <el-table-column prop="channel_type" label="通道" width="110">
+          <template #default="{ row }">{{ channelShort(row.channel_type) }}</template>
+        </el-table-column>
+
+        <el-table-column
+          prop="channel_user_id"
+          label="触发用户"
+          min-width="140"
+          class-name="pt-cell-1line">
+          <template #default="{ row }">
+            <span class="uid">{{ row.channel_user_id || "-" }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          prop="command"
+          label="命令"
+          min-width="140"
+          class-name="pt-cell-strong pt-cell-1line">
+          <template #default="{ row }">
+            <span class="cmd">{{ row.command }}</span>
+          </template>
+        </el-table-column>
+
+        <!--
+          画板 25 的结果胶囊里是**短标签**（「Success」63×18 / 「Denied」57×18），
+          而库里存的是带原因后缀的 `denied:not_bound`、`error:lookup_binding` ——
+          原样塞进 96 宽的列里会被切成「denied:not_b…」，读不出是什么原因也读不完。
+          胶囊只放短标签，完整值（含原因）挂 tooltip；原因本身在「失败与被拒」卡里有专栏。
+        -->
+        <el-table-column prop="result" label="结果" width="96">
+          <template #default="{ row }">
+            <!--
+              完整原值（含原因）不能只挂在 tooltip 上：胶囊不可聚焦，键盘用户拿不到它。
+              所以同时给 `title`（读屏与键盘都读得到）并在胶囊上标 `aria-label` ——
+              一次评审指出这一点，判得对。展开那一行也能看到完整参数。
+            -->
+            <el-tooltip :content="row.result" placement="top" :disabled="!resultReason(row.result)">
+              <PtStatusPill
+                :tone="resultTone(row.result)"
+                size="sm"
+                :title="row.result"
+                :aria-label="`结果 ${row.result}`">
+                {{ resultLabel(row.result) }}
+              </PtStatusPill>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          prop="latency_ms"
+          label="延迟"
+          width="96"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num">
+          <template #default="{ row }">
+            <span :class="{ 'lat--slow': row.latency_ms > 1000 }">{{ row.latency_ms }} ms</span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 6 列加一个展开列，手机上横着滚既看不到列头，也和页面纵向滚动打架。
+        卡上留的是审计要看的四件事：谁（触发用户）在什么时候、从哪个通道、执行了什么命令，
+        结果与延迟进右上角和第二行；完整参数保留成一个展开按钮，不然手机上就查不到证据了。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!auditLogs.length" :state="state" :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="fetchAuditLogs">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in auditLogs" :key="row.id">
+          <template #title>
+            <code class="cmd">{{ row.command }}</code>
+          </template>
+
+          <template #meta>
+            <span>
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.created_at) }}
+            </span>
+            <PtTag>{{ channelLabel(row.channel_type) }}</PtTag>
+            <span>
+              <PtIcon name="user" :size="11" />
+              <code class="uid">{{ row.channel_user_id || "-" }}</code>
+            </span>
+            <span :class="{ 'lat--slow': row.latency_ms > 1000 }">
+              <PtIcon name="timer" :size="11" />
+              {{ row.latency_ms }} ms
+            </span>
+            <!--
+              冒号后面那段原因。桌面把它放在 expand 行里（胶囊是个 span，挂不住 focus，
+              tooltip 在触屏上也打不开），手机上卡片本来就是纵向的，直接铺一行最省事 ——
+              不然移动端只剩「被拒」两个字，为什么被拒无处可查。
+            -->
+            <span v-if="resultReason(row.result)" class="card-reason">
+              <PtIcon name="info" :size="11" />
+              <code class="uid">{{ resultReason(row.result) }}</code>
+            </span>
+          </template>
+
+          <!-- 胶囊里放短标签（成功 / 被拒 / 出错）；原样的 `denied:not_bound` 归上面那行 -->
+          <template #status>
+            <PtStatusPill dot :tone="resultTone(row.result)" size="sm">
+              {{ resultLabel(row.result) }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button size="small" text @click="toggleArgs(row.id)">
+              <PtIcon :name="isArgsOpen(row.id) ? 'chevron-up' : 'chevron-down'" :size="14" />
+              <span>{{ isArgsOpen(row.id) ? "收起参数" : "命令参数" }}</span>
+            </el-button>
+            <div v-if="isArgsOpen(row.id)" class="card-args">
+              <span class="args__redacted">
+                <PtIcon name="lock" :size="12" />
+                <span>敏感字段已脱敏</span>
+              </span>
+              <pre class="args__json">{{ formatJson(row.args_json) }}</pre>
+            </div>
+          </template>
+        </PtRowCard>
+      </div>
+    </div>
+
+    <!-- 画板 gfoot 34：左边本页口径 + 提示，右边分页 -->
+    <div v-if="pagination.total > 0" class="pt-band--foot foot">
+      <span>
+        {{ pagination.total }} 条 · 显示 {{ rangeFrom }}–{{ rangeTo }} · 每页
+        {{ pagination.pageSize }}
+      </span>
+      <span class="foot__hint">
+        {{
+          isMobile
+            ? "点卡片上的「命令参数」看脱敏后的完整参数"
+            : "展开一行可以看脱敏后的完整命令参数"
+        }}
+      </span>
+      <span class="pt-band__spacer" />
+      <el-pagination
+        v-model:current-page="pagination.page"
+        class="pt-pager"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        :pager-count="5"
+        layout="prev, pager, next"
+        @current-change="handlePageChange" />
+    </div>
+
+    <!-- 画板 25 的分析卡：p-cmd 548 / p-ch 516 两栏 + p-fail 1080 通栏 -->
+    <div v-if="auditLogs.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="命令分布" icon="terminal" :count="`${cmdRows.length} 种`">
+        <PtBreakdown
+          :rows="cmdRows"
+          :total="auditLogs.length"
+          foot="统计的是当前这一页的调用；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel title="渠道分布" icon="message-square" :count="`${channelRows.length} 个`">
+        <PtBreakdown :rows="channelRows" :total="auditLogs.length" />
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="失败与被拒"
+        icon="triangle-alert"
+        :count="failRows.length > 0 ? `${failRows.length} 条` : '暂无'">
+        <PtBreakdown
+          v-if="failRows.length > 0"
+          :rows="failRows"
+          cols
+          foot="只列当前这一页里 result 不是 success 的调用，最多 8 条。" />
+        <p v-else class="audit-ok">当前这一页的调用都成功了。</p>
+      </PtPanel>
+
+      <!--
+        画板 p-keep 1080：保留与清理。内容按代码核过 —— 审计表是 models.ActionAudit
+        （表名 action_audit），`internal/maintenance` 的 Cleaner 只管 logs / staging /
+        backups 三类，**不碰审计表**，所以这里说的是「不会自动删」而不是某个保留天数。
+      -->
+      <PtPanel class="pt-cards__full" title="保留与清理" icon="archive">
+        <ul class="audit-keep">
+          <li>
+            审计记录写在本机库的 <code>action_audit</code> 表里，<strong>没有自动清理</strong>：
+            <code>pt-tools clean</code> 只清日志轮转备份、暂存目录与旧备份，不动这张表。
+          </li>
+          <li>
+            每条记录只留命令、参数、渠道、发起人、结果与耗时。参数在写入前脱敏，
+            页面上展开看到的就是脱敏后的那份。
+          </li>
+          <li>
+            记录会一直攒着。要缩库就直接删表里的旧行（先备份
+            <code>~/.pt-tools</code>），删掉不影响任何运行中的功能。
+          </li>
+        </ul>
+      </PtPanel>
+    </div>
+  </div>
+</template>
+
 <style scoped>
-/* delta-ui-origin polish layer — scoped to chatops/AuditLog */
-.audit-log-page {
-  --chatops-brand: oklch(0.66 0.16 50);
-  --chatops-brand-hover: oklch(0.6 0.18 50);
-  --chatops-brand-soft: oklch(0.95 0.04 60);
-  --chatops-stone-muted: oklch(0.55 0.02 60);
-  --chatops-radius-sm: 8px;
-  --chatops-radius-md: 12px;
-  --chatops-radius-lg: 18px;
-  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
-  --chatops-shadow-md: 0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
-  --chatops-shadow-lg: 0 10px 24px -6px oklch(0 0 0 / 0.1), 0 16px 32px -8px oklch(0 0 0 / 0.12);
-  --chatops-glass-bg: oklch(1 0 0 / 0.72);
-  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
-  --chatops-dot-color: oklch(0.66 0.16 50 / 0.1);
-  --chatops-grid-color: oklch(0.36 0.006 50 / 0.05);
-  --chatops-bloom-color: oklch(0.66 0.16 50 / 0.1);
-}
-:global(.dark) .audit-log-page,
-:global(html.dark) .audit-log-page {
-  --chatops-brand: oklch(0.72 0.15 55);
-  --chatops-brand-hover: oklch(0.78 0.13 55);
-  --chatops-brand-soft: oklch(0.3 0.05 55 / 0.4);
-  --chatops-stone-muted: oklch(0.65 0.02 70);
-  --chatops-glass-bg: var(--chatops-glass-bg-dk);
-  --chatops-dot-color: oklch(0.72 0.15 55 / 0.18);
-  --chatops-grid-color: oklch(0.95 0.005 80 / 0.04);
-  --chatops-bloom-color: oklch(0.72 0.15 55 / 0.14);
-}
-
-.audit-log-page {
-  padding: 16px 24px 32px;
-  background-color: var(--pt-bg-base);
-  min-height: calc(100vh - 60px);
-}
-
-.hero-block {
-  position: relative;
-  padding: 24px 28px;
-  margin-bottom: 24px;
-  border-radius: 14px;
-  background: var(--chatops-glass-bg);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  border: 1px solid var(--pt-border-color);
-  overflow: hidden;
-  box-shadow: var(--chatops-shadow-md);
-}
-
-@media (min-width: 768px) {
-  .hero-block {
-    padding: 28px 32px;
-  }
-}
-
-.hero-block::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, var(--chatops-grid-color) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--chatops-grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
-  pointer-events: none;
-  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  z-index: 0;
-}
-
-.hero-block::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 90% 10%, var(--chatops-bloom-color) 0%, transparent 40%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.hero-block > * {
-  position: relative;
-  z-index: 1;
-}
-
-.hero-content {
-  position: relative;
-  z-index: 1;
+/* 保留与清理说明卡 */
+.audit-keep {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 720px;
-}
-
-.hero-eyebrow {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--chatops-brand);
-  text-transform: uppercase;
-}
-
-.hero-title {
-  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
-  font-size: 1.625rem;
-  font-weight: 700;
+  gap: var(--pt-space-2);
   margin: 0;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
-  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
 }
 
-@media (min-width: 768px) {
-  .hero-title {
-    font-size: 2rem;
-  }
+.audit-keep code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
 }
 
-.hero-subtitle {
-  font-size: 0.95rem;
-  color: var(--chatops-stone-muted);
-  margin: 4px 0 0;
-  max-width: 600px;
-  line-height: 1.6;
+/* 分析卡里「这一页都成功了」的正面结论 */
+.audit-ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-@media (min-width: 720px) {
-  .stats-row {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.stat-chip {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  border-radius: var(--chatops-radius-md);
-  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-  transition:
-    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  overflow: hidden;
-}
-
-/* Distinct top accent stripes per metric */
-.stat-chip::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  opacity: 0.9;
-}
-.stat-chip--brand::before {
-  background: linear-gradient(
-    90deg,
-    var(--chatops-brand) 0%,
-    color-mix(in oklab, var(--chatops-brand) 30%, transparent) 100%
-  );
-}
-.stat-chip--success::before {
-  background: linear-gradient(
-    90deg,
-    oklch(0.65 0.13 145) 0%,
-    color-mix(in oklab, oklch(0.65 0.13 145) 30%, transparent) 100%
-  );
-}
-.stat-chip--warning::before {
-  background: linear-gradient(
-    90deg,
-    oklch(0.74 0.15 70) 0%,
-    color-mix(in oklab, oklch(0.74 0.15 70) 30%, transparent) 100%
-  );
-}
-
-.stat-chip:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--chatops-shadow-md);
-}
-
-.stat-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  font-size: 22px;
-  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
-  color: var(--chatops-brand);
-}
-
-.stat-icon--success {
-  background: color-mix(in oklab, #16a34a 14%, transparent);
-  color: #16a34a;
-}
-
-.stat-icon--warning {
-  background: color-mix(in oklab, #f59e0b 16%, transparent);
-  color: #d97706;
-}
-
-.stat-info {
+/*
+ * 画板主区是一串全宽横向带（toolbar → grid → gfoot），带与带之间没有间距，
+ * 所以这里不给 gap；需要内缩的东西（提示、移动端行卡）自己带 16 的留白。
+ */
+.audit-page {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
-.stat-label {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  font-weight: 500;
+.f-date {
+  width: 340px;
 }
 
-.stat-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--pt-text-primary);
-  line-height: 1.05;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+/* 画板 chip-*：通道与时间两枚，窄一档，给分段器与搜索框腾位置 */
+.f-chip {
+  width: 132px;
 }
 
-.stat-unit {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--chatops-stone-muted);
-  margin-left: 4px;
+.f-search {
+  width: 200px;
 }
 
-.glass-card {
-  padding: 24px;
-  border-radius: var(--chatops-radius-md);
-  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-  transition: box-shadow 200ms ease;
+/* 工具栏右侧的图标钮：不可用时只掉色，不从带上消失（位置稳定比隐藏更好认） */
+.pt-band__iconbtn:disabled {
+  color: var(--pt-t4);
+  cursor: not-allowed;
 }
 
-.glass-card:hover {
-  box-shadow: var(--chatops-shadow-md);
+.pt-band__iconbtn:disabled:hover {
+  background: var(--pt-hover);
 }
 
-.card-section-header {
-  display: flex;
-  justify-content: space-between;
+.pt-band__iconbtn:focus-visible {
+  outline: 2px solid var(--pt-p);
+  outline-offset: 1px;
+}
+
+/* 展开行里的结果原值：与命令参数同一档的说明文字 */
+.args__result {
+  margin: 0 0 var(--pt-space-2);
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.args__result code {
+  font-family: var(--pt-font-mono);
+  color: var(--pt-t1);
+}
+
+.args__reason {
+  color: var(--pt-t3);
+}
+
+/* 触发用户：13/400 t2（画板 25 的 td-0-2「@sunerpy」是正文号，不是标签号） */
+.uid {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-body);
+  color: var(--pt-t2);
+}
+
+/* 行卡上的失败原因：跟着 meta 的字号走，长原因允许断行，别把卡片撑破 */
+.card-reason {
+  overflow-wrap: anywhere;
+}
+
+.card-reason .uid {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+/*
+ * 命令：画板 25 的 td-0-3 是「/search Dune Part Tw…」纯文本 13/400。
+ * 等宽字体留着（那是命令的身份），底色与内边距去掉 —— 一行里只有「结果」该有底色。
+ */
+.cmd {
+  font-family: var(--pt-font-mono);
+  color: var(--pt-t1);
+}
+
+.lat--slow {
+  font-weight: 600;
+  color: var(--pt-dang);
+}
+
+/* 提示不是全宽带：画板里它在卡片层，左右各内缩 16 */
+.partial-note {
   align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
+  margin: var(--pt-pad);
 }
 
-.title-block {
+.args__head {
+  display: flex;
+  gap: var(--pt-space-3);
+  align-items: center;
+  margin-bottom: var(--pt-space-2);
+}
+
+.args__title {
+  font-size: var(--pt-fz-label);
+  font-weight: 600;
+  color: var(--pt-t2);
+}
+
+.args__redacted {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--pt-fz-label);
+  color: var(--pt-warn);
+}
+
+/* 参数体自己滚：一条 /search 的参数可以有几十行，不该把整张表撑开 */
+.args__json {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--pt-space-3);
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+}
+
+/* 移动端行卡列表：表格带本身不留白，行卡的 16 内缩由这里给 */
+.cards {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--pt-space-2);
+  padding: var(--pt-pad) 0;
 }
 
-.section-title {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--pt-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.section-desc {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  margin: 0;
-}
-
-.filter-bar {
+/*
+ * 展开的参数块占满 actions 那一行的整宽：actions 是 flex-wrap，
+ * 不给 100% 基宽它会挤在按钮右边被压成一条。
+ */
+.card-args {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 18px;
-  padding: 14px;
-  border-radius: 14px;
-  background: color-mix(in oklab, var(--pt-bg-base) 60%, transparent);
-  border: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
+  flex: 1 0 100%;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  min-width: 0;
 }
 
-.filter-bar :deep(.el-form-item__label),
-.filter-bar :deep(.el-input__inner::placeholder),
-.filter-bar :deep(.el-select__placeholder) {
-  color: var(--chatops-stone-muted);
-}
+@media (max-width: 768px) {
+  .f-date,
+  .f-chip,
+  .f-search {
+    width: 100%;
+  }
 
-.filter-item {
-  min-width: 200px;
-}
+  /*
+   * 34 高的页脚带在手机上装不下「口径 + 提示 + 分页」，允许换行；
+   * 提示那句在窄屏是废话（卡片上就写着按钮名），直接收掉。
+   */
+  .foot {
+    flex-wrap: wrap;
+    padding: var(--pt-space-2) var(--pt-space-3);
+  }
 
-.filter-item--date {
-  min-width: 360px;
-}
-
-.filter-item--search {
-  width: 240px;
-}
-
-.filter-item :deep(.el-input__wrapper),
-.filter-item :deep(.el-select__wrapper) {
-  border-radius: 999px;
-}
-
-.filter-item--date :deep(.el-input__wrapper) {
-  border-radius: 14px;
-}
-
-.audit-table :deep(.el-table) {
-  background: transparent;
-  --el-table-row-hover-bg-color: color-mix(in oklab, var(--chatops-brand) 4%, transparent);
-}
-
-.audit-table :deep(.el-table tr) {
-  background: transparent;
-  transition: background 200ms ease;
-}
-
-.audit-table :deep(.el-table th.el-table__cell) {
-  background: color-mix(in oklab, var(--pt-text-primary) 4%, transparent);
-  color: var(--chatops-stone-muted);
-  font-weight: 500;
-  font-size: 12.5px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.audit-table :deep(.el-tag) {
-  border-radius: var(--chatops-radius-sm);
-  font-weight: 600;
-}
-
-.meta-text {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.user-id {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-}
-
-.cmd-badge {
-  background: color-mix(in oklab, var(--chatops-brand) 10%, transparent);
-  color: var(--chatops-brand);
-  padding: 4px 10px;
-  border-radius: var(--chatops-radius-sm);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.latency {
-  font-variant-numeric: tabular-nums;
-  color: var(--chatops-stone-muted);
-  font-size: 13px;
-}
-
-.high-latency {
-  color: #ef4444;
-  font-weight: 600;
-}
-
-.args-expand {
-  padding: 16px 20px;
-  margin: 8px 16px 16px;
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--pt-bg-base) 80%, transparent);
-  border: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
-}
-
-.args-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.args-header h4 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--pt-text-primary);
-}
-
-.redacted-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.args-json {
-  margin: 0;
-  padding: 14px;
-  background: color-mix(in oklab, var(--pt-bg-surface) 90%, transparent);
-  border: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
-  border-radius: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--pt-text-primary);
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-.pagination-wrapper {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
+  .foot__hint {
+    display: none;
+  }
 }
 </style>

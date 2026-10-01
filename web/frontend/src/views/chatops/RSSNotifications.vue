@@ -1,253 +1,231 @@
-<template>
-  <div class="rss-notify-page">
-    <div class="hero-block">
-      <div class="hero-content">
-        <span class="hero-eyebrow">CHATOPS · RSS NOTIFY</span>
-        <h1 class="hero-title">RSS 通知日志</h1>
-        <p class="hero-subtitle">查看 RSS 上新通知的投递结果，对失败/待发送条目执行重试或取消。</p>
-      </div>
-    </div>
-
-    <div class="stats-row">
-      <div class="stat-chip stat-chip--brand">
-        <div class="stat-icon">
-          <el-icon><DataLine /></el-icon>
-        </div>
-        <div class="stat-info">
-          <div class="stat-label">总记录数</div>
-          <div class="stat-value">{{ pagination.total }}</div>
-        </div>
-      </div>
-      <div class="stat-chip stat-chip--success">
-        <div class="stat-icon stat-icon--success">
-          <el-icon><Check /></el-icon>
-        </div>
-        <div class="stat-info">
-          <div class="stat-label">已发送 (本页)</div>
-          <div class="stat-value">{{ sentCount }}</div>
-        </div>
-      </div>
-      <div class="stat-chip stat-chip--warning">
-        <div class="stat-icon stat-icon--warning">
-          <el-icon><Warning /></el-icon>
-        </div>
-        <div class="stat-info">
-          <div class="stat-label">失败 / 待重试 (本页)</div>
-          <div class="stat-value">{{ failedCount }}</div>
-        </div>
-      </div>
-    </div>
-
-    <section class="glass-card">
-      <header class="card-section-header">
-        <div class="title-block">
-          <h2 class="section-title">通知记录</h2>
-          <p class="section-desc">展开行可查看 last_error 详情，失败行可手动触发重试</p>
-        </div>
-        <div class="header-actions">
-          <el-switch v-model="autoRefresh" active-text="自动刷新 10s" inline-prompt size="small" />
-          <el-button :icon="Refresh" circle @click="fetchLogs" />
-        </div>
-      </header>
-
-      <div class="filter-bar">
-        <el-input
-          v-model="filters.rss_id"
-          placeholder="RSS ID"
-          clearable
-          class="filter-item filter-item--search"
-          @keyup.enter="handleFilterChange"
-          @clear="handleFilterChange" />
-
-        <el-select
-          v-model="filters.kind"
-          placeholder="通知类型"
-          clearable
-          class="filter-item"
-          @change="handleFilterChange">
-          <el-option label="全部新种（简略） (all)" value="all" />
-          <el-option label="只通知匹配的（详细） (filtered)" value="filtered" />
-        </el-select>
-
-        <el-select
-          v-model="filters.result"
-          placeholder="结果"
-          clearable
-          class="filter-item"
-          @change="handleFilterChange">
-          <el-option label="sent" value="sent" />
-          <el-option label="failed" value="failed" />
-          <el-option label="suppressed" value="suppressed" />
-          <el-option label="pending" value="pending" />
-          <el-option label="throttled" value="throttled" />
-        </el-select>
-
-        <el-select
-          v-model="filters.conf_id"
-          placeholder="通道"
-          clearable
-          class="filter-item"
-          @change="handleFilterChange">
-          <el-option
-            v-for="c in confs"
-            :key="c.id"
-            :label="`${c.name} (${c.channel_type})`"
-            :value="c.id" />
-        </el-select>
-      </div>
-
-      <el-table
-        v-loading="loading"
-        :data="logs"
-        class="rss-notify-table"
-        row-key="id"
-        :empty-text="loading ? '加载中...' : '暂无符合条件的通知记录'">
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <div class="args-expand">
-              <div class="args-header">
-                <h4>详细信息</h4>
-              </div>
-              <div class="row-detail">
-                <div><strong>last_error:</strong> {{ row.last_error || "(空)" }}</div>
-                <div><strong>next_retry_at:</strong> {{ row.next_retry_at || "-" }}</div>
-                <div><strong>delivered_at:</strong> {{ row.delivered_at || "-" }}</div>
-                <pre class="args-json">{{ formatJson(row.payload_json) }}</pre>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="created_at" label="时间" min-width="170">
-          <template #default="{ row }">
-            <span class="meta-text">{{ formatDate(row.created_at) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="site_name" label="站点" width="110">
-          <template #default="{ row }">
-            <el-tag round size="small" effect="plain">{{ row.site_name }}</el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="torrent_id" label="种子 ID" min-width="120">
-          <template #default="{ row }">
-            <code class="cmd-badge">{{ row.torrent_id }}</code>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="notify_kind" label="类型" width="100">
-          <template #default="{ row }">
-            <el-tag
-              round
-              :type="row.notify_kind === 'filtered' ? 'success' : ''"
-              size="small"
-              effect="plain">
-              {{ row.notify_kind }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="notification_conf_id" label="通道" width="140">
-          <template #default="{ row }">
-            <span class="meta-text">{{ confLabel(row.notification_conf_id) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="result" label="结果" width="110">
-          <template #default="{ row }">
-            <el-tag round :type="resultTagType(row.result)" size="small" effect="light">
-              {{ row.result.toUpperCase() }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="attempts" label="尝试" width="80" align="right">
-          <template #default="{ row }">
-            <span class="meta-text">{{ row.attempts }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <div class="row-actions">
-              <el-button
-                v-if="row.result === 'failed' || row.result === 'pending'"
-                size="small"
-                type="primary"
-                plain
-                @click="handleRetry(row)">
-                重试
-              </el-button>
-              <el-button
-                v-if="row.result === 'pending' || row.result === 'failed'"
-                size="small"
-                type="danger"
-                plain
-                @click="handleCancel(row)">
-                取消
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          :page-size="pagination.pageSize"
-          :total="pagination.total"
-          layout="total, prev, pager, next"
-          @current-change="handlePageChange" />
-      </div>
-    </section>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { chatopsApi, type NotificationConfig, type RSSNotificationLog } from "@/api";
-import { Check, DataLine, Refresh, Warning } from "@element-plus/icons-vue";
+import PtIcon from "@/components/PtIcon";
+import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
+import PtDataState from "@/components/ui/PtDataState.vue";
+import PtHeadSub from "@/components/ui/PtHeadSub.vue";
+import PtPanel from "@/components/ui/PtPanel.vue";
+import PtRowCard from "@/components/ui/PtRowCard.vue";
+import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import PtTag from "@/components/ui/PtTag.vue";
+import PtToolbar from "@/components/ui/PtToolbar.vue";
+import { useDataState } from "@/composables/useDataState";
+import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-const loading = ref(false);
+/*
+ * 结果状态用中文 + 语义色胶囊，不再直接甩 sent/failed 这些原始值：
+ * 筛选下拉里保留原值，因为它就是接口参数，改成中文会让人对不上 API 文档。
+ */
+const RESULT_META: Record<string, { label: string; tone: "ok" | "warn" | "dang" | "neutral" }> = {
+  sent: { label: "已发送", tone: "ok" },
+  failed: { label: "失败", tone: "dang" },
+  throttled: { label: "被限流", tone: "warn" },
+  suppressed: { label: "已取消", tone: "neutral" },
+  pending: { label: "待发送", tone: "warn" },
+};
+
+const RESULT_OPTIONS = ["sent", "failed", "suppressed", "pending", "throttled"];
+
+/*
+ * 画板 26 的 bar-64 上结果筛选画的是**分段器**，落地原先是下拉。
+ * 这里可以照画板改：那个下拉本来就是单选（没有 multiple），换成分段一点能力都不丢，
+ * 而且五档摊开摆着比「点开才知道有哪几档」顺手。
+ */
+const RESULT_SEG = [
+  { label: "全部", value: "" },
+  ...RESULT_OPTIONS.map((r) => ({ label: RESULT_META[r]!.label, value: r })),
+];
+
+const isMobile = useIsMobile();
 const logs = ref<RSSNotificationLog[]>([]);
 const confs = ref<NotificationConfig[]>([]);
 const autoRefresh = ref(false);
 let timer: ReturnType<typeof setInterval> | null = null;
 
+/* 移动端行卡没有展开行，详情走弹窗。按 id 记而不是存整行：
+   自动刷新每 10 秒换一批对象，存引用会让弹窗停在旧数据上 */
+const detailVisible = ref(false);
+const detailId = ref<number | null>(null);
+const detailRow = computed(() => logs.value.find((l) => l.id === detailId.value) ?? null);
+
 const pagination = reactive({ page: 1, pageSize: 30, total: 0 });
 const filters = reactive({
+  /** 画板 26 的 q：同时模糊匹配站点名与种子 ID（服务端筛） */
+  q: "" as string,
   rss_id: "" as string,
   kind: "" as string,
   result: "" as string,
   conf_id: "" as number | string,
 });
 
+/** 导出当前这一页（画板 bar-64 的 bi-file-down）。接口分页，手上只有这一页的行 */
+function exportCsv() {
+  const head = ["时间", "站点", "种子 ID", "类型", "通道", "结果", "尝试"];
+  const lines = [head.join(",")];
+  for (const l of logs.value) {
+    const cells = [
+      l.created_at ?? "",
+      l.site_name ?? "",
+      l.torrent_id ?? "",
+      l.notify_kind ?? "",
+      String(l.notification_conf_id ?? ""),
+      l.result ?? "",
+      String(l.attempts ?? 0),
+    ];
+    lines.push(cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","));
+  }
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pt-tools-rss-notifications-p${pagination.page}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success(`已导出本页 ${logs.value.length} 条`);
+}
+
 const sentCount = computed(() => logs.value.filter((l) => l.result === "sent").length);
 const failedCount = computed(
   () => logs.value.filter((l) => l.result === "failed" || l.result === "pending").length,
 );
 
-function confLabel(id: number): string {
-  const c = confs.value.find((x) => x.id === id);
-  return c ? `${c.name}` : `#${id}`;
+/* q 也算筛选：漏了它，搜索后零命中会画成「还没有通知记录」而不是「没有匹配的记录」 */
+const hasFilter = computed(() =>
+  Boolean(filters.q || filters.rss_id || filters.kind || filters.result || filters.conf_id),
+);
+
+/*
+ * 六态状态机（设计文档 §5）。
+ *
+ * 以前这里只有一个 loading ref，失败时弹个 toast 就完事 —— 两秒后 toast 消失，
+ * 表格停在 empty 上，用户看到的是「还没有通知记录」，而真相是请求挂了。
+ * 401/403 也要单独画成「无权访问」，否则用户会一直点重试。
+ */
+const { loading, state, errorText, run, isStale } = useDataState({
+  filtered: () => hasFilter.value,
+});
+
+/** 请求没拿到数据（失败或无权）：这时候所有读数都不能当真 */
+const loadFailed = computed(() => state.value === "error" || state.value === "perm");
+
+/** 状态块副标题：失败时给真实错误，空态时给下一步动作 */
+const stateSub = computed(() => {
+  if (loadFailed.value) return errorText.value;
+  return hasFilter.value ? "换个筛选条件再看" : "RSS 上新推送的每一次投递都会记录在这里";
+});
+
+/* 本页统计只反映当前 30 条，标签里写清楚「本页」，免得被当成全局口径。
+   加载失败时读数写「—」：这时候摆一排 0 会被读成「库里真的没有记录」 */
+/**
+ * 画板 head 的 sub（11.5/400 t3）。
+ *
+ * 画板 26 是带式表格页：head 64 → bar-64 → grid → gfoot，**没有 KPI 带**
+ * （KPI 带只在画板 02 工作台与 10 用户统计的主区顶上）。原来这页顶着一条 3 格
+ * KPI，数字挪到摘要行，信息一条没少，版面回到画板的样子。
+ */
+const headSub = computed(() => {
+  if (loadFailed.value) return "通知日志没加载出来";
+  const parts = [`${pagination.total} 条记录`];
+  if (logs.value.length > 0) {
+    parts.push(`本页已发送 ${sentCount.value}`);
+    parts.push(`失败 / 待重试 ${failedCount.value}`);
+  }
+  return parts.join(" · ");
+});
+
+/**
+ * 画板 26 在 gfoot 之后有分析卡：p-res 548（结果分布）、p-idem 516（幂等口径）、
+ * p-retry 1080（待重试队列）。结果分布与待重试由当前这页的行现算；
+ * 幂等那张是固定说明 —— 它讲的是这套日志为什么不会重复推送，没有可查的数据。
+ */
+const resultRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const row of logs.value) {
+    buckets.set(row.result, (buckets.get(row.result) ?? 0) + 1);
+  }
+  const toneOf: Record<string, BreakdownRow["tone"]> = {
+    sent: "ok",
+    failed: "dang",
+    pending: "warn",
+    suppressed: "mute",
+    throttled: "warn",
+  };
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => ({
+      key,
+      label: resultMeta(key).label,
+      value: n,
+      tone: toneOf[key] ?? "primary",
+    }));
+});
+
+/** p-site：这一页的通知按站点分布 */
+const siteRows = computed<BreakdownRow[]>(() => {
+  const buckets = new Map<string, number>();
+  for (const row of logs.value) {
+    const name = row.site_name || "未知站点";
+    buckets.set(name, (buckets.get(name) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "primary" as const }));
+});
+
+/**
+ * p-quiet：每个通道的安静时段。
+ * 数据来自通道配置本身（NotificationConf 的 quiet_hours_start / quiet_hours_end），
+ * 这一页已经为了把 conf_id 显示成通道名而拉过 confs，不额外请求。
+ * start > end 表示跨午夜（models/chatops_models.go 上的注释就是这么定义的）。
+ */
+interface QuietRow {
+  id: number;
+  name: string;
+  window: string;
+  crossesMidnight: boolean;
 }
 
-function resultTagType(r: string): "" | "success" | "warning" | "info" | "danger" {
-  switch (r) {
-    case "sent":
-      return "success";
-    case "failed":
-      return "danger";
-    case "throttled":
-      return "warning";
-    case "suppressed":
-      return "info";
-    case "pending":
-    default:
-      return "";
-  }
+const quietRows = computed<QuietRow[]>(() =>
+  confs.value.map((c) => {
+    const start = c.quiet_hours_start ?? "";
+    const end = c.quiet_hours_end ?? "";
+    const on = Boolean(start && end);
+    return {
+      id: c.id,
+      name: c.name,
+      window: on ? `${start} – ${end}` : "未设置",
+      crossesMidnight: on && start > end,
+    };
+  }),
+);
+
+/** 还会再发一次的那些：failed / pending，按尝试次数排 */
+const retryRows = computed<BreakdownRow[]>(() =>
+  logs.value
+    .filter((row) => row.result === "failed" || row.result === "pending")
+    .sort((a, b) => b.attempts - a.attempts)
+    .slice(0, 8)
+    .map((row) => ({
+      key: String(row.id),
+      label: `${row.site_name || "未知站点"} · ${row.torrent_id}`,
+      value: `${row.attempts} 次`,
+      weight: row.attempts,
+      tone: row.result === "failed" ? ("dang" as const) : ("warn" as const),
+      hint:
+        row.last_error ||
+        (row.next_retry_at ? `下次重试 ${formatDate(row.next_retry_at)}` : "排队中"),
+    })),
+);
+
+function confLabel(id: number): string {
+  const c = confs.value.find((x) => x.id === id);
+  return c ? c.name : `#${id}`;
+}
+
+function resultMeta(r: string) {
+  return RESULT_META[r] || { label: r, tone: "neutral" as const };
 }
 
 function formatDate(s?: string): string {
@@ -268,24 +246,44 @@ function formatJson(s?: string): string {
   }
 }
 
+/** 展开行 / 详情弹窗共用的键值行，避免两处各写一遍 */
+function detailItems(row: RSSNotificationLog) {
+  return [
+    { k: "失败原因", v: row.last_error || "（无）", err: Boolean(row.last_error) },
+    { k: "下次重试", v: formatDate(row.next_retry_at), err: false },
+    { k: "投递完成", v: formatDate(row.delivered_at), err: false },
+  ];
+}
+
+function openDetail(row: RSSNotificationLog) {
+  detailId.value = row.id;
+  detailVisible.value = true;
+}
+
 async function fetchLogs() {
-  loading.value = true;
-  try {
-    const params = new URLSearchParams();
-    params.append("page", String(pagination.page));
-    params.append("page_size", String(pagination.pageSize));
-    if (filters.rss_id) params.append("rss_id", String(filters.rss_id));
-    if (filters.kind) params.append("kind", String(filters.kind));
-    if (filters.result) params.append("result", String(filters.result));
-    if (filters.conf_id) params.append("conf_id", String(filters.conf_id));
-    const res = await chatopsApi.rssNotifications.list(params);
-    logs.value = res.items || [];
-    pagination.total = res.total || 0;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "加载日志失败");
-  } finally {
-    loading.value = false;
+  const params = new URLSearchParams();
+  params.append("page", String(pagination.page));
+  params.append("page_size", String(pagination.pageSize));
+  if (filters.q) params.append("q", String(filters.q));
+  if (filters.rss_id) params.append("rss_id", String(filters.rss_id));
+  if (filters.kind) params.append("kind", String(filters.kind));
+  if (filters.result) params.append("result", String(filters.result));
+  if (filters.conf_id) params.append("conf_id", String(filters.conf_id));
+
+  const pending = run(() => chatopsApi.rssNotifications.list(params));
+  const res = await pending;
+  // 自动刷新撞上换筛选 / 翻页时，晚到的旧请求不能把新结果清掉
+  if (isStale(pending)) return;
+  if (!res) {
+    /* 失败时清空：留着上一次的数据配一个「加载失败」的状态块更让人误解。
+       这里故意不弹 toast —— 错误已经常驻在表格/卡片里，而自动刷新每 10 秒
+       失败一次会把 toast 刷成一片。 */
+    logs.value = [];
+    pagination.total = 0;
+    return;
   }
+  logs.value = res.items || [];
+  pagination.total = res.total || 0;
 }
 
 async function fetchConfs() {
@@ -335,6 +333,10 @@ function handlePageChange(p: number) {
   fetchLogs();
 }
 
+function canAct(result: string) {
+  return result === "failed" || result === "pending";
+}
+
 watch(autoRefresh, (v) => {
   if (timer) {
     clearInterval(timer);
@@ -354,288 +356,622 @@ onBeforeUnmount(() => {
 });
 </script>
 
+<template>
+  <!--
+    画板 26 的主区构成：head 64 → bar-64（40）→ grid（表格，全宽平铺）→ gfoot（34）。
+    三条带是彼此的兄弟，都不套在卡片里；表格标题与条数走页头，所以这页没有 PtPanel。
+  -->
+  <div class="rss-notify-page">
+    <PtHeadSub>{{ headSub }}</PtHeadSub>
+
+    <PtToolbar band>
+      <!--
+        画板 26 的 q「筛选站点、种子 ID…」。走服务端的 q（同时模糊匹配站点名与种子 ID）：
+        这个接口分页，在本页里筛会让页脚的 total 与表里的行数对不上，
+        而且要找的那条很可能不在当前这一页。
+      -->
+      <el-input
+        v-model="filters.q"
+        placeholder="筛选站点、种子 ID…"
+        clearable
+        class="f-q"
+        data-testid="rssnotify-search"
+        @keyup.enter="handleFilterChange"
+        @clear="handleFilterChange">
+        <template #prefix>
+          <PtIcon name="search" :size="14" />
+        </template>
+      </el-input>
+
+      <!--
+        画板 26 的 bar-64 只有「seg + q + chip 通道 + 三枚图标钮」——
+        RSS ID 与「类型」是落地多出来的两个筛选，摆在带上会把它挤到换行（实测带高 65，
+        画板是 40）。按 owner 的原则：功能留着，形态按画板 —— 收进一枚「更多筛选」里。
+      -->
+      <el-popover placement="bottom-start" trigger="click" :width="260">
+        <template #reference>
+          <el-button size="small" class="f-more" data-testid="rssnotify-more-filters">
+            <PtIcon name="list-filter" :size="14" /><span>更多筛选</span>
+          </el-button>
+        </template>
+        <div class="rn-more">
+          <label class="rn-more__row">
+            <span class="rn-more__k">RSS ID</span>
+            <el-input
+              v-model="filters.rss_id"
+              placeholder="RSS ID"
+              clearable
+              size="small"
+              @keyup.enter="handleFilterChange"
+              @clear="handleFilterChange" />
+          </label>
+          <label class="rn-more__row">
+            <span class="rn-more__k">类型</span>
+            <el-select
+              v-model="filters.kind"
+              placeholder="全部类型"
+              clearable
+              size="small"
+              @change="handleFilterChange">
+              <el-option label="全部新种（简略）" value="all" />
+              <el-option label="仅匹配的（详细）" value="filtered" />
+            </el-select>
+          </label>
+        </div>
+      </el-popover>
+
+      <!-- 画板 26 的 seg：结果五档 + 全部。原先是单选下拉，换成分段一点能力都不丢 -->
+      <el-segmented
+        v-model="filters.result"
+        class="pt-seg rn-seg"
+        :options="RESULT_SEG"
+        :props="{ label: 'label', value: 'value' }"
+        data-testid="rssnotify-result-seg"
+        @change="handleFilterChange" />
+
+      <el-select
+        v-model="filters.conf_id"
+        placeholder="全部通道"
+        clearable
+        class="f-sel"
+        @change="handleFilterChange">
+        <el-option
+          v-for="c in confs"
+          :key="c.id"
+          :label="`${c.name}（${c.channel_type}）`"
+          :value="c.id" />
+      </el-select>
+
+      <template #right>
+        <!-- 画板 bar-64 右端的 bi-file-down：导出当前这一页 -->
+        <el-tooltip content="导出本页为 CSV" placement="top">
+          <button
+            type="button"
+            class="pt-band__iconbtn"
+            aria-label="导出"
+            data-testid="rssnotify-export-btn"
+            @click="exportCsv">
+            <PtIcon name="file-down" :size="15" />
+          </button>
+        </el-tooltip>
+
+        <el-tooltip content="每 10 秒重新拉一次当前列表" placement="bottom">
+          <label class="ctl">
+            <el-switch v-model="autoRefresh" size="small" />
+            <span>自动刷新</span>
+          </label>
+        </el-tooltip>
+        <el-button size="small" :loading="loading" @click="fetchLogs">
+          <PtIcon name="refresh-cw" :size="14" /><span>刷新</span>
+        </el-button>
+      </template>
+    </PtToolbar>
+
+    <div v-loading="loading" class="pt-band--grid">
+      <el-table v-if="!isMobile" :data="logs" class="pt-grid" row-key="id" style="width: 100%">
+        <template #empty>
+          <PtDataState :state="state" dense :sub="stateSub">
+            <template v-if="state === 'error'" #action>
+              <el-button size="small" @click="fetchLogs">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+            </template>
+          </PtDataState>
+        </template>
+
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="detail">
+              <div v-for="it in detailItems(row)" :key="it.k" class="detail__kv">
+                <span class="detail__k">{{ it.k }}</span>
+                <span :class="{ 'detail__v--err': it.err }">{{ it.v }}</span>
+              </div>
+              <div class="detail__kv">
+                <span class="detail__k">消息内容</span>
+                <pre class="detail__json">{{ formatJson(row.payload_json) }}</pre>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          prop="created_at"
+          label="时间"
+          width="186"
+          class-name="pt-cell-muted pt-cell-1line">
+          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        </el-table-column>
+
+        <el-table-column prop="site_name" label="站点" width="110">
+          <template #default="{ row }">
+            <span class="pt-cell-site is-muted">{{ row.site_name || "-" }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          prop="torrent_id"
+          label="种子 ID"
+          min-width="120"
+          class-name="pt-cell-strong">
+          <template #default="{ row }">
+            <code class="tid">{{ row.torrent_id }}</code>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="notify_kind" label="类型" width="100">
+          <template #default="{ row }">
+            <PtTag>{{ row.notify_kind === "filtered" ? "仅匹配" : "全部新种" }}</PtTag>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          prop="notification_conf_id"
+          label="通道"
+          width="140"
+          class-name="pt-cell-muted">
+          <template #default="{ row }">{{ confLabel(row.notification_conf_id) }}</template>
+        </el-table-column>
+
+        <el-table-column prop="result" label="结果" width="96">
+          <template #default="{ row }">
+            <PtStatusPill :tone="resultMeta(row.result).tone" size="sm">
+              {{ resultMeta(row.result).label }}
+            </PtStatusPill>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          prop="attempts"
+          label="尝试"
+          width="72"
+          class-name="pt-cell-num"
+          label-class-name="pt-cell-num" />
+
+        <!--
+          操作列只放图标（与站点列表 / 暂停任务一致）：两枚带字按钮要 152 宽，列只有 130，
+          「取消」被切掉半个字。aria-label 带上站点与种子 ID，读屏在列表里分得清是哪一条。
+        -->
+        <el-table-column label="操作" width="84" fixed="right" class-name="pt-cell-act">
+          <template #default="{ row }">
+            <template v-if="canAct(row.result)">
+              <el-tooltip content="重试" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :aria-label="`重试 ${row.site_name || '未知站点'} ${row.torrent_id}`"
+                  @click="handleRetry(row)">
+                  <PtIcon name="refresh-cw" :size="15" />
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="取消" placement="top">
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :aria-label="`取消 ${row.site_name || '未知站点'} ${row.torrent_id}`"
+                  @click="handleCancel(row)">
+                  <PtIcon name="circle-x" :size="15" />
+                </el-button>
+              </el-tooltip>
+            </template>
+            <span v-else class="no-act">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!--
+        移动端行卡（§9：桌面表格一律降级成行卡，不做横向滚动表格）。
+        这张表桌面有 8 列 + 展开行，手机上横着滚既看不到列头，也和页面纵向滚动打架。
+        卡上留真正要看的：站点+种子 ID 当标题，时间/类型/通道/尝试次数当第二行，
+        结果状态挂右上角，失败原因直接摊在卡上（不用点开就能判断要不要重试）。
+      -->
+      <div v-else class="cards">
+        <PtDataState v-if="!logs.length" :state="state" :sub="stateSub">
+          <template v-if="state === 'error'" #action>
+            <el-button size="small" @click="fetchLogs">
+              <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+            </el-button>
+          </template>
+        </PtDataState>
+
+        <PtRowCard v-for="row in logs" :key="row.id">
+          <template #title>
+            {{ row.site_name || "未知站点" }} ·
+            <code class="tid-title">{{ row.torrent_id }}</code>
+          </template>
+
+          <template #meta>
+            <span>
+              <PtIcon name="clock" :size="11" />
+              {{ formatDate(row.created_at) }}
+            </span>
+            <PtTag>{{ row.notify_kind === "filtered" ? "仅匹配" : "全部新种" }}</PtTag>
+            <span>
+              <PtIcon name="send" :size="11" />
+              {{ confLabel(row.notification_conf_id) }}
+            </span>
+            <span>尝试 {{ row.attempts }} 次</span>
+            <span v-if="row.last_error" class="meta-err">{{ row.last_error }}</span>
+          </template>
+
+          <template #status>
+            <PtStatusPill dot :tone="resultMeta(row.result).tone" size="sm">
+              {{ resultMeta(row.result).label }}
+            </PtStatusPill>
+          </template>
+
+          <template #actions>
+            <el-button size="small" @click="openDetail(row)">
+              <PtIcon name="file-text" :size="14" /><span>详情</span>
+            </el-button>
+            <template v-if="canAct(row.result)">
+              <el-button size="small" type="primary" plain @click="handleRetry(row)">
+                <PtIcon name="refresh-cw" :size="14" /><span>重试</span>
+              </el-button>
+              <el-button size="small" type="danger" plain @click="handleCancel(row)">
+                <PtIcon name="circle-x" :size="14" /><span>取消</span>
+              </el-button>
+            </template>
+          </template>
+        </PtRowCard>
+      </div>
+    </div>
+
+    <div v-if="pagination.total > 0" class="pt-band--foot">
+      <span>
+        {{
+          isMobile
+            ? "点卡片上的详情可以看下次重试时间和推送出去的消息内容"
+            : "展开一行可以看失败原因和推送出去的消息内容"
+        }}
+      </span>
+      <span class="pt-band__spacer" />
+      <el-pagination
+        v-model:current-page="pagination.page"
+        class="pt-pager"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        :pager-count="5"
+        layout="prev, pager, next"
+        @current-change="handlePageChange" />
+    </div>
+
+    <!-- 画板 26 的分析卡：p-res 548 / p-idem 516 两栏 + p-retry 1080 通栏 -->
+    <div v-if="logs.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="推送结果分布" icon="chart-pie" :count="`${logs.length} 条（本页）`">
+        <PtBreakdown
+          :rows="resultRows"
+          :total="logs.length"
+          foot="统计的是当前这一页的记录；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel title="幂等与去重口径" icon="shield-check">
+        <ul class="idem">
+          <li>每条「RSS + 种子 + 通道」只会留一条记录，调度器重跑同一轮不会重复推送。</li>
+          <!--
+            之前写的是「被安静时段或每小时配额挡下的记为 suppressed」—— 与 internal/app/rss_notifier.go 不符：
+            安静时段里的保持 pending、推迟到时段结束补发；超配额的记 throttled；suppressed 是被同一种子的
+            「仅匹配」通知取代（或手动标记取消）的那条。
+          -->
+          <li>
+            安静时段里的先挂起（<code>pending</code>），时段结束后补发；超过每小时配额的记为
+            <code>throttled</code>、不补发；被同一种子的「仅匹配」通知取代的那条记为
+            <code>suppressed</code>。
+          </li>
+          <li>合并推送（digest）会把同一轮的多条并成一条消息，日志里仍然一条种子一条记录。</li>
+          <li>手动点「重试」只会把这条重新入队，不会新建一条记录，尝试次数 +1。</li>
+        </ul>
+      </PtPanel>
+
+      <PtPanel
+        class="pt-cards__full"
+        title="待重试与失败"
+        icon="refresh-cw"
+        :count="retryRows.length > 0 ? `${retryRows.length} 条` : '暂无'">
+        <PtBreakdown
+          v-if="retryRows.length > 0"
+          :rows="retryRows"
+          cols
+          foot="只列当前这一页里 failed 与 pending 的记录，按尝试次数排，最多 8 条。" />
+        <p v-else class="idem-ok">当前这一页没有失败或待重试的记录。</p>
+      </PtPanel>
+    </div>
+
+    <!-- 画板 p-site 548（按站点分布）/ p-quiet 516（各通道的安静时段）两栏 -->
+    <div v-if="logs.length > 0" class="pt-cards pt-cards--2">
+      <PtPanel title="按站点分布" icon="globe" :count="`${siteRows.length} 个站点`">
+        <PtBreakdown
+          :rows="siteRows"
+          :total="logs.length"
+          foot="统计的是当前这一页的记录；接口不回全库的分组计数。" />
+      </PtPanel>
+
+      <PtPanel title="安静时段" icon="moon" :count="`${quietRows.length} 个通道`">
+        <ul v-if="quietRows.length > 0" class="quiet">
+          <li v-for="row in quietRows" :key="row.id" class="quiet__row">
+            <span class="quiet__k">{{ row.name }}</span>
+            <span class="quiet__v" :class="{ 'is-off': row.window === '未设置' }">
+              {{ row.window }}
+            </span>
+            <span v-if="row.crossesMidnight" class="quiet__note">跨午夜</span>
+          </li>
+        </ul>
+        <p v-else class="idem-ok">还没有配置通知通道。</p>
+        <p class="quiet__foot">
+          落在安静时段里的通知先挂起，等时段结束再补发，不算失败。 时段在「消息通知」里按通道配置。
+        </p>
+      </PtPanel>
+    </div>
+
+    <!-- 行卡替代了展开行，详情放弹窗；桌面走表格展开，不会用到这里 -->
+    <el-dialog v-model="detailVisible" title="通知详情" width="92%" align-center>
+      <div v-if="detailRow" class="detail">
+        <div v-for="it in detailItems(detailRow)" :key="it.k" class="detail__kv">
+          <span class="detail__k">{{ it.k }}</span>
+          <span :class="{ 'detail__v--err': it.err }">{{ it.v }}</span>
+        </div>
+        <div class="detail__kv">
+          <span class="detail__k">消息内容</span>
+          <pre class="detail__json">{{ formatJson(detailRow.payload_json) }}</pre>
+        </div>
+      </div>
+      <p v-else class="detail-gone">这条记录已经不在当前列表里了，刷新后重新打开。</p>
+    </el-dialog>
+  </div>
+</template>
+
 <style scoped>
-.rss-notify-page {
-  --chatops-brand: oklch(0.66 0.16 50);
-  --chatops-stone-muted: oklch(0.55 0.02 60);
-  --chatops-radius-md: 12px;
-  --chatops-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04), 0 1px 3px oklch(0 0 0 / 0.06);
-  --chatops-shadow-md: 0 4px 6px -2px oklch(0 0 0 / 0.05), 0 8px 16px -4px oklch(0 0 0 / 0.08);
-  --chatops-glass-bg: oklch(1 0 0 / 0.72);
-  --chatops-glass-bg-dk: oklch(0.18 0.01 60 / 0.65);
-  --chatops-grid-color: oklch(0.36 0.006 50 / 0.05);
-  --chatops-bloom-color: oklch(0.66 0.16 50 / 0.1);
-  padding: 16px 24px 32px;
-  background-color: var(--pt-bg-base);
-  min-height: calc(100vh - 60px);
-}
-:global(.dark) .rss-notify-page,
-:global(html.dark) .rss-notify-page {
-  --chatops-brand: oklch(0.72 0.15 55);
-  --chatops-stone-muted: oklch(0.65 0.02 70);
-  --chatops-glass-bg: var(--chatops-glass-bg-dk);
-  --chatops-grid-color: oklch(0.95 0.005 80 / 0.04);
-  --chatops-bloom-color: oklch(0.72 0.15 55 / 0.14);
+/* 安静时段卡：一行一个通道 */
+.quiet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.hero-block {
-  position: relative;
-  padding: 24px 28px;
-  margin-bottom: 24px;
-  border-radius: 14px;
-  background: var(--chatops-glass-bg);
-  backdrop-filter: blur(10px) saturate(140%);
-  border: 1px solid var(--pt-border-color);
+.quiet__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: baseline;
+  font-size: var(--pt-fz-sm);
+}
+
+.quiet__k {
+  flex: 1;
   overflow: hidden;
-  box-shadow: var(--chatops-shadow-md);
-}
-.hero-block::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, var(--chatops-grid-color) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--chatops-grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
-  pointer-events: none;
-  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-}
-.hero-block::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 90% 10%, var(--chatops-bloom-color) 0%, transparent 40%);
-  pointer-events: none;
-}
-.hero-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 720px;
-}
-.hero-eyebrow {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--chatops-brand);
-  text-transform: uppercase;
-}
-.hero-title {
-  font-family: "Playfair Display", "Noto Serif SC", Georgia, "Songti SC", serif;
-  font-size: 1.625rem;
-  font-weight: 700;
-  margin: 0;
-  letter-spacing: -0.025em;
-  background: linear-gradient(135deg, var(--chatops-brand), oklch(0.55 0.18 30));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-.hero-subtitle {
-  font-size: 0.95rem;
-  color: var(--chatops-stone-muted);
-  margin: 4px 0 0;
+  color: var(--pt-t2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-@media (min-width: 720px) {
-  .stats-row {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-.stat-chip {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  border-radius: var(--chatops-radius-md);
-  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-}
-.stat-chip::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  opacity: 0.9;
-}
-.stat-chip--brand::before {
-  background: linear-gradient(90deg, var(--chatops-brand) 0%, transparent 100%);
-}
-.stat-chip--success::before {
-  background: linear-gradient(90deg, oklch(0.65 0.13 145) 0%, transparent 100%);
-}
-.stat-chip--warning::before {
-  background: linear-gradient(90deg, oklch(0.74 0.15 70) 0%, transparent 100%);
-}
-.stat-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  font-size: 22px;
-  background: color-mix(in oklab, var(--chatops-brand) 12%, transparent);
-  color: var(--chatops-brand);
-}
-.stat-icon--success {
-  background: color-mix(in oklab, #16a34a 14%, transparent);
-  color: #16a34a;
-}
-.stat-icon--warning {
-  background: color-mix(in oklab, #f59e0b 16%, transparent);
-  color: #d97706;
-}
-.stat-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.stat-label {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-}
-.stat-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--pt-text-primary);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+.quiet__v {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  font-weight: 500;
+  color: var(--pt-t1);
 }
 
-.glass-card {
-  padding: 24px;
-  border-radius: var(--chatops-radius-md);
-  background: color-mix(in oklab, var(--pt-bg-surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--pt-border-color);
-  box-shadow: var(--chatops-shadow-sm);
-}
-.card-section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid color-mix(in oklab, var(--pt-border-color) 60%, transparent);
-}
-.title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.section-title {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--pt-text-primary);
-}
-.section-desc {
-  font-size: 13px;
-  color: var(--chatops-stone-muted);
-  margin: 0;
-}
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.quiet__v.is-off {
+  font-weight: 400;
+  color: var(--pt-t3);
 }
 
-.filter-bar {
+.quiet__note {
+  padding: 0 5px;
+  font-size: var(--pt-fz-foot);
+  color: var(--pt-warn);
+  background: color-mix(in srgb, var(--pt-warn) 14%, transparent);
+  border-radius: var(--pt-r-sm);
+}
+
+.quiet__foot {
+  margin: var(--pt-space-3) 0 0;
+  font-size: var(--pt-fz-foot);
+  line-height: 1.5;
+  color: var(--pt-t3);
+}
+
+.quiet__foot code {
+  padding: 1px 4px;
+  font-family: var(--pt-font-mono);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
+}
+
+/* 幂等口径卡：固定说明，条目之间留 8 */
+.idem {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 18px;
-  padding: 14px;
-  border-radius: 14px;
-  background: color-mix(in oklab, var(--pt-bg-base) 60%, transparent);
-  border: 1px solid color-mix(in oklab, var(--pt-border-color) 70%, transparent);
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--pt-fz-sm);
+  line-height: var(--pt-lh-body);
+  color: var(--pt-t2);
 }
-.filter-item {
-  min-width: 160px;
+
+.idem code {
+  padding: 1px 5px;
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  background: var(--pt-hover);
+  border-radius: var(--pt-r-sm);
 }
-.filter-item--search {
+
+.idem-ok {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+/* 带之间没有间隔（画板上它们是连着的），所以这里不再是带 gap 的 flex 列 */
+.rss-notify-page {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 画板 26 的 q：这一排里最宽的那个，留给「筛选站点、种子 ID…」整句 */
+.f-q {
+  width: 208px;
+}
+
+.f-id {
+  width: 130px;
+}
+
+/* 结果分段六格（全部 + 五档），字号压小一档才不把工具栏挤换行 */
+.rn-seg :deep(.el-segmented__item-label) {
+  font-size: var(--pt-fz-label);
+}
+
+/* 「更多筛选」里的两项：一行一个，标签固定宽，控件占满 */
+.rn-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+}
+
+.rn-more__row {
+  display: flex;
+  gap: var(--pt-space-2);
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+}
+
+.rn-more__k {
+  flex: 0 0 56px;
+  color: var(--pt-t3);
+}
+
+.f-more {
+  flex: 0 0 auto;
+}
+
+.f-sel {
   width: 160px;
 }
-.filter-item :deep(.el-input__wrapper),
-.filter-item :deep(.el-select__wrapper) {
-  border-radius: 999px;
+
+/* 开关 + 文字算一个整体控件，点文字也能切；label 天然带这个行为 */
+.ctl {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+  cursor: pointer;
+  user-select: none;
 }
 
-.rss-notify-table :deep(.el-table) {
-  background: transparent;
-  --el-table-row-hover-bg-color: color-mix(in oklab, var(--chatops-brand) 4%, transparent);
+.tid {
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t2);
 }
-.rss-notify-table :deep(.el-table tr) {
-  background: transparent;
+
+.no-act {
+  color: var(--pt-t3);
 }
-.cmd-badge {
-  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
-  background: color-mix(in oklab, var(--chatops-brand) 8%, transparent);
-  padding: 2px 8px;
-  border-radius: 6px;
-  color: var(--pt-text-primary);
-}
-.meta-text {
-  color: var(--chatops-stone-muted);
-  font-size: 13px;
-}
-.row-actions {
-  display: flex;
-  gap: 6px;
-}
-.args-expand {
-  padding: 12px 16px;
-  background: color-mix(in oklab, var(--pt-bg-base) 80%, transparent);
-  border-radius: 10px;
-}
-.args-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.args-header h4 {
-  margin: 0;
-  font-size: 14px;
-}
-.row-detail {
+
+.detail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--pt-text-primary);
+  gap: var(--pt-space-2);
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
 }
-.args-json {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in oklab, #000 6%, transparent);
-  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
-  white-space: pre-wrap;
+
+/* 键宽固定 72：四行标签宽度差不多，对齐后值列才成一条直线 */
+.detail__kv {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: var(--pt-space-3);
+  align-items: start;
+}
+
+.detail__k {
+  font-size: var(--pt-fz-label);
+  color: var(--pt-t3);
+}
+
+.detail__v--err {
+  color: var(--pt-dang);
   word-break: break-word;
 }
-.pagination-wrapper {
+
+/* 消息体自己滚：一条详细通知的 payload 可以有几十行 */
+.detail__json {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--pt-space-3);
+  font-family: var(--pt-font-mono);
+  font-size: var(--pt-fz-label);
+  line-height: var(--pt-lh-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-sm);
+}
+
+.detail-gone {
+  margin: 0;
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t3);
+}
+
+/* 移动端行卡列表：面板 padding="none"，留白由这里给 */
+.cards {
   display: flex;
-  justify-content: center;
-  margin-top: 18px;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-pad) 0;
+}
+
+/* 种子 ID 在标题里用等宽，字号和粗细跟着标题走 */
+.tid-title {
+  font-family: var(--pt-font-mono);
+  font-size: inherit;
+  color: inherit;
+}
+
+/* 失败原因摊在 meta 最后一行：可以很长，所以允许断词并只留两行 */
+.meta-err {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--pt-dang);
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@media (max-width: 768px) {
+  .f-id,
+  .f-sel {
+    width: 100%;
+  }
 }
 </style>

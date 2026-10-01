@@ -270,6 +270,59 @@ func TestReloadChatOpsChannels_RebuildsFromDB(t *testing.T) {
 	require.NoError(t, bs.Shutdown(shutdownCtx))
 }
 
+// TestReloadChatOpsChannels_ConcurrentWithChannelState 热重载与通道状态读取、实时投递并发。
+//
+// bootstrapChatOps 曾把同一个 map 同时交给 bs.channels 与 liveNotifyManager，reload 又不拿锁地
+// 原地 delete / insert 这个 map；而 ChannelState（通知页的通道状态）与 Send 在读锁下读它 ——
+// 读锁防不住不拿锁的写，运行时会直接 fatal error: concurrent map read and map write。
+// 这里走生产的装配路径（bootstrapChatOps），在 -race 下能稳定暴露那次读写竞争。
+func TestReloadChatOpsChannels_ConcurrentWithChannelState(t *testing.T) {
+	db := newChatOpsTestDB(t)
+	tdb := &models.TorrentDB{DB: db}
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	bs, err := bootstrapChatOps(ctx, tdb, mgr, core.NewConfigStore(tdb))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		shutdownCtx, sc := context.WithTimeout(context.Background(), 2*time.Second)
+		defer sc()
+		_ = bs.Shutdown(shutdownCtx)
+	})
+
+	// 换成测试用的通道工厂，让每次重载都真的删一条、建一条
+	reg := notify.NewRegistry()
+	reg.Register("racestub", func() notify.Channel { return &stubNotifyChannel{} })
+	bs.registry = reg
+	conf := models.NotificationConf{ChannelType: "racestub", Name: "race", Enabled: true}
+	require.NoError(t, db.Create(&conf).Error)
+
+	stop := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = bs.manager.ChannelState(conf.ID)
+			_ = bs.manager.Send(ctx, conf.ID+1, app.Notification{Text: "x"}) // 不存在的通道：只读 map、不投递
+		}
+	}()
+	for range 30 {
+		require.NoError(t, reloadChatOpsChannels(ctx, db, bs, nil))
+	}
+	close(stop)
+	<-readerDone
+
+	assert.Equal(t, app.ChannelStateRunning, bs.manager.ChannelState(conf.ID), "重载后的通道要对 ChannelState 可见")
+	assert.Equal(t, 1, bs.ChannelCount())
+}
+
 func TestRunChatOpsChannelReloader_ExitsOnCancel(t *testing.T) {
 	db := newChatOpsTestDB(t)
 	global.GlobalDB = &models.TorrentDB{DB: db}

@@ -57,6 +57,7 @@ pt-tools/
 | Change site login monitoring | `internal/sitelogin/`, `scheduler/login_reminder_monitor.go` | Keep all I/O behind site/v2 or Cloak drivers and keep the shared per-site single-flight gate                          |
 | Change browser helper        | `tools/browser-extension/`                                   | Run extension typecheck/tests plus `make check-sites`                                                                 |
 | Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`      | Do not claim a transport/server exists; the current package is contract-only                                          |
+| Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths       | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`     |
 
 ## Runtime Wiring
 
@@ -88,7 +89,7 @@ Important startup properties:
 
 - SQLite is the source of truth. Use `core.ConfigStore`; do not resurrect `GlobalCfg` or a parallel config file.
 - Site cookies are stored in `SiteSetting.CookieEncrypted`; plaintext exists only at trusted boundaries through `ConfigStore.EncryptCookie`/`DecryptCookie`.
-- The AES-256 key comes from base64 `PT_TOOLS_SECRET_KEY` or hex text in `~/.pt-tools/secret.key`. The current `secret import` implementation writes raw bytes instead of the loader's hex format; do not rely on restore until that mismatch is fixed and round-trip tested.
+- The AES-256 key comes from base64 `PT_TOOLS_SECRET_KEY` or hex text in `~/.pt-tools/secret.key`. `secret export` prints base64; `secret import` reads base64 and writes the loader's 64-character hex format atomically (`cmd/secret_import_test.go` pins the format).
 - Config mutations publish `events.ConfigChanged`; consumers must tolerate dropped duplicate events and reload from DB.
 
 ### Site and RSS execution
@@ -129,10 +130,11 @@ CGO_ENABLED=1 go test ./path/to/pkg -count=1
 make toolchain-check
 make fmt-check
 make lint
-make test                 # frontend build + Go race tests
+make test                 # frontend build + frontend tests + Go race tests
 make build                # real frontend + production binary
 make coverage-gate        # race tests + filtered 90% project gate
 make check                # toolchain + format + lint + test + build
+make docs-check           # relative links and anchors under docs/
 
 # Frontend
 pnpm --dir web/frontend test

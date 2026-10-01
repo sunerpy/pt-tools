@@ -44,6 +44,68 @@ type NotifyManager interface {
 	Send(ctx context.Context, confID uint, n Notification) error
 }
 
+/*
+ * 运行态取值。落到前端是通知通道页画板 22 那条分段器。
+ *
+ * 四档而不是三档，是因为「在跑」和「接上了」不是一回事：
+ * 四个适配器的 Healthy() 含义都只是**构造/启动成功**（QQ 绑上端口就 true，而 NapCat
+ * 没握手时发送会明确失败；Telegram 造出 bot 就 true，没做任何网络确认；Webhook 只判
+ * config != nil；WeCom 恒 true）。把 Healthy() 直接说成「已连接」就是在界面上说假话 ——
+ * 这正是上一轮评审查出的缺陷。
+ *
+ * 所以只有实现了 notify.LinkStater 并确认对端接上的通道才配 Connected；
+ * 其余在跑的一律 Running（界面写「运行中」，不承诺连通性）。
+ */
+const (
+	// ChannelStateConnected 实例在跑，且适配器确认对端真的接上了。
+	ChannelStateConnected = "connected"
+	// ChannelStateRunning 实例在跑，但连通性未知（适配器给不出这个判断）。
+	ChannelStateRunning = "running"
+	// ChannelStateError 该跑却没跑起来，或实例自报不健康。
+	ChannelStateError = "error"
+	// ChannelStateDisabled 配置本身停用了 —— 没跑不是故障。
+	ChannelStateDisabled = "disabled"
+)
+
+// ChannelStater 由持有实时通道实例的一方实现（cmd 层的 liveNotifyManager）。
+// 返回 Connected / Running / Error，或空串表示这一条没有实例在跑。
+//
+// 做成可选能力而不是塞进 NotifyManager：测试里的假 manager 只关心 Send，
+// 不该被迫编造运行态。
+type ChannelStater interface {
+	ChannelState(confID uint) string
+}
+
+// channelRuntimeState 把「配置启用与否」和「实例处于什么状态」合成一个对外状态。
+//
+// 关键的一档是 enabled 却没有实例：启动时逐条 Init，失败的那条只记日志然后跳过
+// （见 cmd.initEnabledChannels），所以「启用了但不在 map 里」正是初始化失败的样子，
+// 对用户来说就是异常，不是「未运行」。
+func channelRuntimeState(enabled bool, live string) string {
+	if !enabled {
+		return ChannelStateDisabled
+	}
+	switch live {
+	case ChannelStateConnected:
+		return ChannelStateConnected
+	case ChannelStateRunning:
+		return ChannelStateRunning
+	default:
+		/* 包括 Error 与空串：启用了却问不到实例，就是没起来 */
+		return ChannelStateError
+	}
+}
+
+// confRuntimeState 是 DTO 用的那一份：manager 不提供这个信号时给空串
+// （不能一律按「异常」报 —— 那会把「问不到」说成「坏了」）。
+func (s *notificationService) confRuntimeState(enabled bool, confID uint) string {
+	stater, ok := s.manager.(ChannelStater)
+	if !ok || stater == nil {
+		return ""
+	}
+	return channelRuntimeState(enabled, stater.ChannelState(confID))
+}
+
 // NotificationConfDTO 是对 models.NotificationConf 的对外只读视图，不含密文字段。
 type NotificationConfDTO struct {
 	ID              uint            `json:"id"`
@@ -55,6 +117,10 @@ type NotificationConfDTO struct {
 	ConfigJSON      json.RawMessage `json:"config_json,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+	// RuntimeState 是进程内的实时运行态：connected / error / disabled。
+	// 不落库 —— 它描述的是「现在这个进程里跑着什么」，重启即重算。
+	// manager 不提供这个信号时为空串（前端据此不画那枚状态点）。
+	RuntimeState string `json:"runtime_state,omitempty"`
 }
 
 // CreateConfReq 创建通知通道的请求；ConfigJSON 为通道原始配置，进入 service 后会被 AES-GCM 加密落库。
@@ -122,6 +188,7 @@ func (s *notificationService) ListConfs(ctx context.Context) ([]NotificationConf
 			QuietHoursEnd:   r.QuietHoursEnd,
 			CreatedAt:       r.CreatedAt,
 			UpdatedAt:       r.UpdatedAt,
+			RuntimeState:    s.confRuntimeState(r.Enabled, r.ID),
 		})
 	}
 	return out, nil
@@ -149,6 +216,7 @@ func (s *notificationService) GetConf(ctx context.Context, id uint) (Notificatio
 		QuietHoursEnd:   row.QuietHoursEnd,
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
+		RuntimeState:    s.confRuntimeState(row.Enabled, row.ID),
 	}
 	if row.ConfigJSON != "" {
 		plain, derr := crypto.Decrypt(row.ConfigJSON)
