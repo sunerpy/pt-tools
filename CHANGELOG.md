@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0](https://github.com/sunerpy/pt-tools/compare/v0.47.3...v0.48.0) (2026-10-01)
+
+
+### Features
+
+* **brand:** 新增 pt-tools 标志与应用图标 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **webui:** 按 Penpot G 设计稿重构 Web UI，提供四种配色方案与明暗主题 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **webui:** 用户统计、任务列表与下载器控制台补齐筛选、排序、列设置与导出 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **webui:** 用户统计站点表可拖拽调整高度，默认收起低频列 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **webui:** 移动端列表改为行卡布局，宽屏下放大正文字号与表格行高 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **webui:** 运行日志支持正文搜索与按级别筛选 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+
+
+### Bug Fixes
+
+* **chatops:** 审计日志的时间窗按本地时区比较 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **chatops:** 通道热重载不再与读取方并发改写同一张通道表 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **downloader:** 下载器暂时连不上时删除暂停任务会报错并保留记录，不再只删数据库记录 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+* **web:** 下载器控制台的任务详情不再恒定返回 400 ([b23ef31](https://github.com/sunerpy/pt-tools/commit/b23ef315c96e1910e1e12260ba8da902e404c8ff))
+
 ## [0.47.3](https://github.com/sunerpy/pt-tools/compare/v0.47.2...v0.47.3) (2026-09-14)
 
 
