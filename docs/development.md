@@ -2,27 +2,6 @@
 
 本文档面向希望参与 pt-tools 开发或从源码构建的开发者。
 
-[返回首页](../README.md)
-
-## 目录
-
-- [环境要求](#环境要求)
-- [从源码构建](#从源码构建)
-  - [克隆仓库](#克隆仓库)
-  - [构建前端](#构建前端)
-  - [构建后端](#构建后端)
-  - [使用 Makefile](#使用-makefile)
-- [开发模式](#开发模式)
-- [技术架构](#技术架构)
-  - [项目结构](#项目结构)
-  - [性能优化](#性能优化)
-- [贡献指南](#贡献指南)
-  - [提交 Issue](#提交-issue)
-  - [提交 Pull Request](#提交-pull-request)
-  - [添加新站点支持](#添加新站点支持)
-- [代码规范](#代码规范)
-- [浏览器扩展开发与发布](#浏览器扩展开发与发布)
-
 ## 环境要求
 
 | 依赖        | 版本要求 | 说明                                   |
@@ -629,7 +608,7 @@ cd ../..
 make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 ```
 
-`make check-sites` 会比较 Go 站点定义与扩展 `KNOWN_SITES`；新增站点时必须保持两处一致。详见[扩展 README](../tools/browser-extension/README.md)。
+`make check-sites` 会比较 Go 站点定义与扩展 `KNOWN_SITES`；新增站点时必须保持两处一致。详见[扩展 README](https://github.com/sunerpy/pt-tools/blob/main/tools/browser-extension/README.md)。
 
 ### 发布模型
 
@@ -656,5 +635,3 @@ Edge 商店发布需要仓库 Secrets：
 ---
 
 如有开发相关问题，欢迎在 [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions) 讨论。
-
-[返回首页](../README.md)

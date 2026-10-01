@@ -1,20 +1,6 @@
 # Telegram Bot 配置指南
 
-[← 返回 ChatOps 快速开始](chatops-quickstart.md) | [返回首页](../../README.md)
-
 本文介绍如何通过 **Telegram Bot API（长轮询模式）** 将 Telegram 接入 pt-tools，实现私聊命令控制和系统通知推送。
-
----
-
-## 目录
-
-1. [前置条件](#1-前置条件)
-2. [用 BotFather 创建 bot](#2-用-botfather-创建-bot)
-3. [获取你自己的 chat_id](#3-获取你自己的-chat_id)
-4. [Web UI 创建 Telegram 通道](#4-web-ui-创建-telegram-通道)
-5. [验证、绑定与测试命令](#5-验证绑定与测试命令)
-6. [代理配置详解](#6-代理配置详解)
-7. [常见问题 FAQ](#7-常见问题-faq)
 
 ---
 
@@ -22,8 +8,8 @@
 
 - 一个 Telegram 账号
 - **国内大陆用户**：需要代理才能访问 `api.telegram.org`。pt-tools 支持两种代理方式（见第 6 节）。
-  - commit `598adf7` 把 HTTP 客户端切到了 `net/http`，支持读取系统环境变量 `HTTPS_PROXY`
-  - commit `54ef209` 支持在通道配置里填写 `proxy_url`，每个通道独立走不同代理
+  - 读取系统环境变量 `HTTPS_PROXY`；
+  - 在通道配置里填写 `proxy_url`，每个通道可以使用不同的代理。
 
 ---
 
@@ -89,59 +75,50 @@
 
 > 💡 在返回的 JSON 中找 `from.id` 或 `chat.id`，那个数字就是你的 Telegram user_id。
 
-> **没有 result？** 说明 bot 还没有收到任何消息，先去给 bot 发一条 `hello` 再访问 getUpdates。
+> **没有 result？** 说明 bot 尚未收到任何消息，先去给 bot 发一条 `hello` 再访问 getUpdates。
 
 ---
 
 ## 4. Web UI 创建 Telegram 通道
 
-打开 pt-tools Web UI，进入「ChatOps → 通知通道」，点「**添加通道**」。
+打开 pt-tools Web UI，进入 ChatOps → 消息通知，点「**添加通道**」：
 
-选择通道类型：**Telegram**
-
-填写基本信息后点确定，系统会创建通道并跳转到详情页。进入「**凭证**」标签，填写：
+1. 通道类型选择 **Telegram**，填写通道名称和 Bot Token，点「**创建通道**」。
+2. 在通道列表中点击刚创建的通道，进入通道详情。
+3. 在「**凭证与连接**」中填写下面的字段，点「**保存凭证**」。保存后通道会立即用新配置重连。
 
 ### 字段语义说明
 
-Telegram 通道有两个白名单字段，语义不同：
+| 字段              | 作用                                                                       |
+| ----------------- | -------------------------------------------------------------------------- |
+| `allowed_users`   | 允许与 bot 对话的 TG user_id 列表                                          |
+| `admin_users`     | 同样允许与 bot 对话；测试消息在没有填写 `default_chat_id` 时发给其中第一个 |
+| `default_chat_id` | 主动推送的目标：pt-tools 主动发通知时投递到此 chat_id                      |
 
-| 字段              | 谁能使用                        | 权限                                                                                                                                                                                             |
-| ----------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `admin_users`     | 管理员的 TG user_id 列表        | 可发送全部命令（含管理员命令 `/unbind` `/delete` `/pause` `/resume`）；可收消息                                                                                                                  |
-| `allowed_users`   | 允许互动的普通用户 user_id 列表 | 可与 bot 发普通对话和大多数命令（`/help` `/status` `/version` `/tasks` `/sites` `/torrents` `/bind`）；**不能**使用管理员命令（`/unbind` `/delete` `/pause` `/resume`，会被回复 "需管理员权限"） |
-| `default_chat_id` | 主动推送目标                    | 当 pt-tools 主动发通知时投递到此 chat_id                                                                                                                                                         |
+- **入站消息**：只有出现在 `allowed_users` 或 `admin_users` 里的 user_id 能与 bot 对话，其他人会收到一条拒绝消息（`denied:not_in_whitelist`）。**两者都留空时，任何人的消息都会被拒绝**；出站推送不受影响。
+- **命令权限**：能对话之后，还要用绑定码完成绑定才能执行命令。目前**每个完成绑定的账号都拥有管理员权限**，可以执行 `/pause`、`/resume`、`/delete`、`/addrss`、`/delrss` 和 `/unbind`，与它在 `allowed_users` 还是 `admin_users` 里无关。所以绑定码只发给你信任的人。
 
-**单人自用场景**：只填 `admin_users = [你的 user_id]` + `default_chat_id = 你的 user_id` 即可，`allowed_users` 留空。这样：
+**单人自用场景**：`admin_users = 你的 user_id`，`default_chat_id = 你的 user_id`，`allowed_users` 留空，然后用绑定码绑定自己的账号。
 
-- 出站推送：通过 `default_chat_id` 投递（不依赖白名单）
-- 入站命令：通过 `admin_users` 鉴权（你能发全部命令；其他人发被拒绝）
-
-**多人共享场景**：
-
-- 管理员 user_id 加入 `admin_users`
-- 普通成员 user_id 加入 `allowed_users`
-- 普通成员可以收推送、回普通话给 bot、发查询类命令（`/help` `/status` 等）和 `/bind`；但不能执行管理员命令
-
-**两者都空**：任何 TG 用户给 bot 发消息都会被拒绝（`denied:not_in_whitelist`）；出站推送仍然有效（不走白名单）。
+**多人共享场景**：把需要与 bot 对话的成员的 user_id 加入 `allowed_users`，只给需要发命令的成员发绑定码；没有绑定的成员发命令时，会收到「请先 /bind <绑定码> 完成绑定」的回复。
 
 ### 凭证字段
 
-| 字段                                | 填写值                  | 说明                                         |
-| ----------------------------------- | ----------------------- | -------------------------------------------- |
-| Bot Token                           | `123456789:ABCdef...`   | 从 BotFather 拿到的 token                    |
-| 管理员用户（admin_users）           | `[你的user_id]`         | 见上方「字段语义说明」                       |
-| 允许用户（allowed_users）           | `[你的user_id]`         | 见上方「字段语义说明」（可留空）             |
-| 默认 Chat ID                        | `你的user_id`           | 见上方「字段语义说明」（必填）               |
-| 轮询超时（polling_timeout_seconds） | `30`                    | 长轮询超时，推荐 30，网络好的情况可以调高    |
-| 代理 URL（可选）                    | `http://127.0.0.1:1080` | 如果需要代理才能访问 TG，填这里（见第 6 节） |
+| 字段                      | 填写值                   | 说明                                          |
+| ------------------------- | ------------------------ | --------------------------------------------- |
+| Bot Token                 | `123456789:ABCdef...`    | 从 BotFather 拿到的 token                     |
+| 允许用户（allowed_users） | 留空或其他成员的 user_id | 逗号分隔，见上方「字段语义说明」              |
+| 管理员用户（admin_users） | `你的user_id`            | 逗号分隔，见上方「字段语义说明」              |
+| 默认 Chat ID              | `你的user_id`            | 数字 user_id，或公开频道的 `@channelusername` |
+| 代理 URL（可选）          | `http://127.0.0.1:1080`  | 如果需要代理才能访问 TG，填这里（见第 6 节）  |
 
-填好后点「**保存凭证**」。
+长轮询超时固定为 30 秒，不需要设置。
 
 ![pt-tools Telegram 通道凭证配置](images/chatops/chatops-telegram-detail.png)
 
-> Web UI → Telegram 通道 → 凭证标签，展示所有字段包括代理 URL
+> Web UI → Telegram 通道详情 → 凭证与连接，展示所有字段包括代理 URL
 
-通道状态应变为「运行中」，说明长轮询已经成功连上 Telegram 服务器。
+保存后通道状态显示「运行中」，表示通道已经启动；能否连上 Telegram 服务器，以下一节的测试消息为准。
 
 ---
 
@@ -149,21 +126,21 @@ Telegram 通道有两个白名单字段，语义不同：
 
 ### 发送测试消息
 
-在通道列表点「**测试**」，或进入通道详情的「测试」标签，点「发送测试消息」。
+在通道列表中点通道卡片上的「**发测试消息**」，或在通道详情的「连通性测试」中点「**发送测试消息**」。
 
 如果你的 Telegram 里收到了一条来自 bot 的测试消息，说明出站推送正常。
 
 ### 生成绑定码并绑定
 
-在 Web UI 打开「ChatOps → 绑定管理」，点「**生成绑定码**」：
+在 Web UI 打开 ChatOps → ChatOps 绑定，点「**生成绑定码**」：
 
 - 选择刚配置的 Telegram 通道
-- 有效期选 5 分钟
+- 有效期选 5 分钟（默认）
 - 点「生成」
 
 ![生成绑定码对话框](images/chatops/chatops-bindings-dialog.png)
 
-> 绑定码生成后出现在「待绑定 Code」列表，8 字符，视觉友好（不含 0/O/1/l/I 等易混淆字符）
+> 绑定码生成后出现在「待绑定」列表，8 字符，不含 0/O/1/I/L 等容易混淆的字符
 
 复制生成的 8 字符绑定码（如 `A3F7KP2M`），在 Telegram 私聊给 bot 发：
 
@@ -171,17 +148,11 @@ Telegram 通道有两个白名单字段，语义不同：
 /bind A3F7KP2M
 ```
 
-bot 应该回复：
-
-```
-✅ 绑定成功！你已绑定到 pt-tools。发送 /help 查看可用命令。
-```
-
-绑定完成后可以在「已绑定列表」看到你的账号。
+bot 回复「绑定成功」即表示完成。绑定完成后可以在「已绑定用户」列表看到你的账号。
 
 ![绑定管理列表](images/chatops/chatops-bindings-list.png)
 
-> 绑定成功后，账号出现在「已绑定列表」，显示通道类型、用户 ID（部分隐藏）、管理员标记
+> 绑定成功后，账号出现在「已绑定用户」列表，显示通道类型、用户 ID（部分隐藏）和管理员标记
 
 ### 测试命令
 
@@ -213,7 +184,7 @@ environment:
 
 ### 方式二：通道级 proxy_url（推荐）
 
-在 Telegram 通道的「凭证」标签里填写 `proxy_url`，只有这个通道走代理，不影响其他通道和站点请求。
+在 Telegram 通道详情的「凭证与连接」里填写代理 URL（`proxy_url`），只有这个通道走代理，不影响其他通道和站点请求。
 
 支持的代理格式：
 
@@ -246,7 +217,7 @@ environment:
 
 ---
 
-### Q: 通道状态一直显示「初始化中」或连接失败
+### Q: 通道状态显示「异常」，或测试消息发不出去
 
 **原因一**：网络不通到 `api.telegram.org`，需要配置代理（见第 6 节）。
 
@@ -276,9 +247,9 @@ curl -x http://127.0.0.1:1080 https://api.telegram.org/bot<TOKEN>/getMe
 
 ### Q: bot_token 解密失败，日志出现「illegal base64 at input byte 0」
 
-**原因**：这是旧版本存在的一个 double-decrypt bug，commit `f20501e` 已修复。
+**原因**：ChatOps 正式发布（v0.31.0）之前的测试构建存在重复解密的问题，正式版本已修复。
 
-**解决**：升级到包含 `f20501e` 的版本，然后删除并重新创建 Telegram 通道，重新填入 token（旧的加密存储数据已损坏，必须重建）。
+**解决**：升级到最新版本，然后删除并重新创建 Telegram 通道，重新填入 token（旧的加密存储数据已损坏，必须重建）。
 
 ---
 
@@ -295,6 +266,6 @@ curl -x http://127.0.0.1:1080 https://api.telegram.org/bot<TOKEN>/getMe
 1. 把 bot 拉进群组
 2. 在群里发一条消息（或 `@bot` 发命令，取决于 bot 的隐私模式设置）
 3. 访问 getUpdates，找到 `chat.id`（群组的 chat_id 是负整数，如 `-1001234567890`）
-4. 把 `default_chat_id` 填为群的 chat_id，`allowed_users` 里填群成员的 user_id
+4. 把 `default_chat_id` 填为群的 chat_id，`allowed_users` 里填需要与 bot 对话的群成员的 user_id
 
 注意：隐私模式开启时，bot 在群组里只能看到发给它的命令（以 `/` 开头或 `@botname` 提及）；关闭隐私模式才能看到所有消息。pt-tools 的使用场景推荐保持隐私模式开启（默认）。
