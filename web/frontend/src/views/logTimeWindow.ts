@@ -11,11 +11,17 @@
  * 一批日志里一行时间戳都解析不出来时，这枚 chip 不能把整页筛空，只能停用。
  */
 
-/** 只认 JSON 编码器写出来的 `"time":"…"`；取不到返回 null（而不是 0 或 NaN） */
+/**
+ * 只认 JSON 编码器写出来的 `"time":"…"`；取不到返回 null（而不是 0 或 NaN）。
+ *
+ * zap 的 ISO8601 编码器把时区写成 `+0800`（没有冒号），而 ECMAScript 规定的格式是 `+08:00`。
+ * V8 宽松地认了前者，Safari 按规范解析成 NaN —— 于是在 Safari 上每一行都「没有时间戳」，
+ * 「最近 1 小时」整枚停用。所以解析前先把末尾的 `±HHMM` 规范成 `±HH:MM`。
+ */
 export function lineTime(line: string): number | null {
   const m = /"time"\s*:\s*"([^"]+)"/.exec(line);
   if (!m) return null;
-  const t = Date.parse(m[1]!);
+  const t = Date.parse(m[1]!.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
   return Number.isNaN(t) ? null : t;
 }
 
