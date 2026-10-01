@@ -102,6 +102,41 @@ describe("bucketOf：边界", () => {
     expect(bucketOf("movies/hd")).toBe("movie");
     expect(bucketOf("ANIME")).toBe("anime");
   });
+
+  /*
+   * 误收：音乐规则里的 ape（Monkey's Audio 的格式名）原来是裸子串，
+   * 「Escape Room」「Landscape」「Paper」这种单词里都含 ape，于是被归进了音乐。
+   * 格式名只在作为独立的词出现时才算（site/v2/site_categories.go 的音频编码选项就叫 `APE`）。
+   */
+  it.each([["Escape Room"], ["Landscape"], ["Paper Towns"], ["Grapes"]])(
+    "%s 里的 ape 是单词的一部分，不归音乐",
+    (input) => {
+      expect(bucketOf(input)).toBe("");
+    },
+  );
+
+  it.each([
+    ["APE", "music"],
+    ["Music/APE", "music"],
+    ["无损/APE", "music"],
+    ["APE无损", "music"],
+    ["FLAC", "music"],
+    ["MP3", "music"],
+  ])("独立出现的音频格式名 %s → %s", (input, want) => {
+    expect(bucketOf(input)).toBe(want);
+  });
+
+  /*
+   * 漏收：NexusPHP 站点常见的 `HDTV` 分类。`\btv` 要求 tv 前面是词边界，
+   * 而 HDTV 里 tv 紧跟在 D 后面，整类剧集被漏掉。
+   */
+  it.each([["HDTV"], ["HDTV/1080i"], ["综合/HDTV"], ["hdtv"]])("%s → tv", (input) => {
+    expect(bucketOf(input)).toBe("tv");
+  });
+
+  it("HDTV 照样不吃掉「TV游戏」那条规则：紧跟中文的仍不算", () => {
+    expect(bucketOf("HDTV游戏")).toBe("");
+  });
 });
 
 describe("categoryLabel", () => {

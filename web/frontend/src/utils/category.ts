@@ -64,15 +64,20 @@ const LABEL_OF: Record<CategoryBucket, string> = {
  */
 const RULES: readonly { bucket: Exclude<CategoryBucket, "">; test: RegExp }[] = [
   { bucket: "anime", test: /动漫|动画|卡通|anime|animation|comic/i },
-  { bucket: "music", test: /音乐|原声|music|flac|ape|mp3|album/i },
+  /*
+   * `ape`（Monkey's Audio 的格式名）必须是独立的词：裸子串会把「Escape Room」「Landscape」
+   * 这类单词归进音乐。`\b` 只认 ASCII 单词字符，所以「APE无损」「无损/APE」照样命中。
+   */
+  { bucket: "music", test: /音乐|原声|music|flac|\bape\b|mp3|album/i },
   { bucket: "movie", test: /电影|movies?|film/i },
   {
     bucket: "tv",
     /*
-     * `\btv(?=[\s/\-_.]|$)`：`TV/HD`、`TV - HD`、末尾的 `TV` 都算，`TV游戏` 不算。
+     * `\b(?:hd)?tv(?=[\s/\-_.]|$)`：`TV/HD`、`TV - HD`、末尾的 `TV` 都算，`TV游戏` 不算。
+     * `HDTV` 单列一个可选前缀：tv 紧跟在 D 后面没有词边界，只写 `\btv` 会把这一整类漏掉。
      * 中文侧收「影剧 / 剧集 / 电视剧 / 连续剧 / 综艺」—— M-Team 把综艺和影剧归在一类。
      */
-    test: /影剧|剧集|电视剧|连续剧|综艺|series|\bshow\b|\btv(?=[\s/\-_.]|$)/i,
+    test: /影剧|剧集|电视剧|连续剧|综艺|series|\bshow\b|\b(?:hd)?tv(?=[\s/\-_.]|$)/i,
   },
 ];
 
