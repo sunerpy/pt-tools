@@ -218,6 +218,11 @@ function handleCloseGenerateDialog() {
   generatedExpiresAt.value = null;
 }
 
+/*
+ * 确认框与删除请求分成两段 try：原来包在同一个 try 里，catch 一律当成「用户取消」吞掉，
+ * 接口真的报错（404 / 500）时页面一声不吭，绑定还在，用户却以为已经撤销了。
+ * 确认框被取消或关掉时 reject 的是动作名（'cancel' / 'close'），只有这一段是静默的。
+ */
 async function handleDelete(id: number) {
   try {
     await ElMessageBox.confirm("确定要撤销该绑定吗？撤销后该用户需要重新拿码绑定。", "撤销绑定", {
@@ -225,12 +230,17 @@ async function handleDelete(id: number) {
       confirmButtonText: "确定撤销",
       cancelButtonText: "取消",
     });
-    await chatopsApi.bindings.delete(id);
-    ElMessage.success("绑定已撤销");
-    loadData();
-  } catch (_e) {
-    /* user cancelled */
+  } catch {
+    return;
   }
+  try {
+    await chatopsApi.bindings.delete(id);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "撤销绑定失败");
+    return;
+  }
+  ElMessage.success("绑定已撤销");
+  loadData();
 }
 
 async function handleToggleLang(row: ChatOpBinding) {
