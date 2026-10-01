@@ -66,12 +66,17 @@ export function formatDate(timestamp: number): string {
  * 表格里原来用 toLocaleString("zh-CN") 的「2026/9/30 20:00:00」—— 19 个字符在 150 宽的列里正好压线，
  * 一放大字号就折成两行，带时间的那几行比别的行高一截（任务列表的「免费结束」）。完整时间放进 title。
  * 接受 ISO 字符串、毫秒时间戳或 Date；零值 / 解析不了返回「-」。
+ *
+ * 数值 ≤ 0 一律当「没有这个时间」：qB 对未完成的任务回 completion_on = -1，
+ * 下载器表格乘 1000 后传进来是 -1000，只认 0 的话会显示成「1970-01-01 07:59」。
+ * 时间戳表示的都是 1970 之后的事件，这条规则不会吞掉真实时间；Date 与字符串仍按原逻辑解析。
  */
 export function formatShortDateTime(
   input: string | number | Date | null | undefined,
   now = new Date(),
 ): string {
-  if (input == null || input === "" || input === 0 || input === "0001-01-01T00:00:00Z") return "-";
+  if (input == null || input === "" || input === "0001-01-01T00:00:00Z") return "-";
+  if (typeof input === "number" && input <= 0) return "-";
   const d = input instanceof Date ? input : new Date(input);
   if (Number.isNaN(d.getTime())) return "-";
   const p = (n: number) => String(n).padStart(2, "0");
