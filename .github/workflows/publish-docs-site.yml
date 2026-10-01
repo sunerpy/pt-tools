@@ -1,6 +1,6 @@
-# Pushes the pages of pt-tools.firlab.app into sunerpy/firlab, which builds and deploys the site
-# (firlab: `pt-tools/`, `.github/workflows/deploy-pt-tools.yml`). docs/README.md describes the
-# whole path.
+# Pushes the pages of the documentation site into sunerpy/firlab, which builds it and publishes
+# it inside firlab.app at https://firlab.app/pt-tools/ (firlab: `pt-tools/`,
+# `.github/workflows/deploy.yml`). docs/README.md describes the whole path.
 #
 # The sync pushes instead of the site pulling: the event that should update the site, a merge
 # here, happens in this repository, and the credential stays here and reaches firlab only. The

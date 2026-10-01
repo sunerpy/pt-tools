@@ -1,8 +1,8 @@
-# Builds pt-tools.firlab.app from a pull request's pages against firlab's public main, so a dead
-# link, an unknown component, a page missing in one language, a banned word or a malformed home
-# page fails before the merge rather than in publish-docs-site.yml after it. Nothing is
-# published and no secret is read, so a fork's pull request runs it the same way. Advisory: not
-# part of CI Success.
+# Builds the documentation site (https://firlab.app/pt-tools/) from a pull request's pages against
+# firlab's public main, so a dead link, an unknown component, a page missing in one language, a
+# banned word, a malformed home page or a link that leaves /pt-tools/ fails before the merge
+# rather than in publish-docs-site.yml after it. Nothing is published and no secret is read, so a
+# fork's pull request runs it the same way. Advisory: not part of CI Success.
 name: Docs site
 
 on:
@@ -67,14 +67,9 @@ jobs:
         working-directory: firlab/pt-tools
         run: pnpm build
 
-      # A misconfigured locale emits only the root one, which still looks like a green build.
-      - name: Check both languages were emitted
+      # The same check firlab's deploy runs before it publishes the site: both languages were
+      # emitted (a misconfigured locale emits only the root one, which still looks like a green
+      # build), and every link, asset and sitemap entry stays under /pt-tools/.
+      - name: Check both languages and the /pt-tools/ base
         working-directory: firlab/pt-tools
-        run: |
-          set -euo pipefail
-          test -f dist/index.html || { echo "::error::the Chinese home page is missing"; exit 1; }
-          test -f dist/en/index.html || { echo "::error::the English home page is missing"; exit 1; }
-          zh=$(find dist -name '*.html' -not -path 'dist/en/*' | wc -l)
-          en=$(find dist/en -name '*.html' | wc -l)
-          echo "emitted ${zh} Chinese and ${en} English pages"
-          test "${en}" -ge 20 || { echo "::error::only ${en} English pages were emitted"; exit 1; }
+        run: ./scripts/check-dist.sh dist
