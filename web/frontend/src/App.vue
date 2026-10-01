@@ -197,6 +197,12 @@ const crumbs = computed(() => {
 });
 
 function onKeydown(e: KeyboardEvent) {
+  /*
+   * 页面已经接管了这个键（种子搜索页的 ⌘K 聚焦查询框）就让路。页面在 window 的捕获阶段
+   * 注册并 preventDefault，捕获先于这里的冒泡执行；不让路的话，下面那次 nextTick 之后的
+   * focusSearch 总是最后生效，页面的快捷键形同虚设。
+   */
+  if (e.defaultPrevented) return;
   /* Chrome 选自动填充建议时派发的 keydown 没有 key，直接 toLowerCase 会抛 TypeError */
   if ((e.metaKey || e.ctrlKey) && e.key?.toLowerCase() === "k") {
     e.preventDefault();

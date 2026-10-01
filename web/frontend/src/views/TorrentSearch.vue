@@ -551,18 +551,26 @@ const queryRef = ref<{ focus: () => void } | null>(null);
 function onHotkey(e: KeyboardEvent) {
   /* Chrome 选自动填充建议时派发的 keydown 没有 key，直接 toLowerCase 会抛 TypeError */
   if (e.key?.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
+  /* preventDefault 同时是给外壳的信号：App.vue 见到 defaultPrevented 就不去聚焦导航跳转框 */
   e.preventDefault();
   queryRef.value?.focus();
 }
 
+/*
+ * 外壳 App.vue 也在 window 上听 ⌘K（聚焦导航跳转框）。两边都挂冒泡阶段时谁后执行谁赢，
+ * 而外壳在 nextTick 之后才送焦点，永远是它赢。所以这里挂**捕获**阶段：window 的捕获监听
+ * 先于任何冒泡监听执行，与两边谁先注册无关。摘监听时也必须带同样的 capture，否则摘不掉。
+ */
+const HOTKEY_OPTS = { capture: true } as const;
+
 onMounted(async () => {
-  window.addEventListener("keydown", onHotkey);
+  window.addEventListener("keydown", onHotkey, HOTKEY_OPTS);
   await Promise.all([loadAvailableSites(), loadDownloaders(), loadSiteCategories()]);
   // 尝试从缓存加载
   loadFromCache();
 });
 
-onUnmounted(() => window.removeEventListener("keydown", onHotkey));
+onUnmounted(() => window.removeEventListener("keydown", onHotkey, HOTKEY_OPTS));
 
 async function loadAvailableSites() {
   try {
