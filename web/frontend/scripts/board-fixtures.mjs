@@ -430,7 +430,9 @@ export const FIXTURES = [
       effective_last_active_at: 1758200000 - i * 43200,
       /* last_probe_at 是 unix 秒，不是 ISO 串 —— 给成串会让页面印 Invalid Date */
       last_probe_at: 1758200000 - i * 3600,
-      last_probe_status: i % 4 === 3 ? "fail" : "ok",
+      /* 探测状态码是后端的枚举（internal/sitelogin/result.go）："ok" / "fail" 都不是合法值，
+         前端 isProbeSuccess 只认 "OK"，原来那样写会让每个站点都显示成「异常」 */
+      last_probe_status: i % 4 === 3 ? "SESSION_EXPIRED" : "OK",
       last_probe_error: i % 4 === 3 ? "302 → /login" : "",
       consecutive_probe_failures: i % 4 === 3 ? 2 : 0,
       ban_threshold_days: 30,
