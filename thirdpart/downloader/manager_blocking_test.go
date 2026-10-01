@@ -713,3 +713,143 @@ func (dm *DownloaderManager) dropCachedInstanceForTest(name string) {
 	delete(dm.downloaders, name)
 	delete(dm.instanceGen, name)
 }
+
+// ---------------------------------------------------------------------------
+// 「这台下载器不在配置里」必须能被 errors.Is 认出来
+//
+// Web 层删除暂停种子时靠它区分两件事：下载器已被删掉（只清 pt-tools 里的孤儿记录），
+// 和下载器暂时连不上（3s 获取预算超时、60s 失败冷却）。后者若也当孤儿删库，
+// 下载器里的任务和数据都还在，pt-tools 却从此不再追踪它，还报告删除成功。
+// 所以哨兵要能穿过 GetDownloaderContext、flight 与失败冷却的每一层包装，
+// 而其余错误一个都不能被它认领。
+// ---------------------------------------------------------------------------
+
+// pingGatedDownloader 自报不健康，Ping 卡住直到放行：用来把「删除配置」精确插进
+// doRevive 的 Ping 与重新读配置之间，复现「建连途中下载器被删掉」。
+type pingGatedDownloader struct {
+	MockDownloader
+	pinging chan struct{}
+	release chan struct{}
+}
+
+func (d *pingGatedDownloader) IsHealthy() bool { return false }
+
+func (d *pingGatedDownloader) Ping() (bool, error) {
+	d.pinging <- struct{}{}
+	<-d.release
+	return false, errors.New("ping 失败")
+}
+
+// Close 什么都不写：删除配置与重建路径会从两个 goroutine 各关一次
+func (d *pingGatedDownloader) Close() error { return nil }
+
+func TestNotConfiguredErrorIsRecognizableThroughEveryLayer(t *testing.T) {
+	t.Run("从未注册", func(t *testing.T) {
+		dm := NewDownloaderManager()
+		_, err := dm.GetDownloaderContext(context.Background(), "ghost")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDownloaderNotConfigured)
+		assert.Contains(t, err.Error(), "ghost", "错误信息里要带上下载器名")
+	})
+
+	t.Run("已删除", func(t *testing.T) {
+		dm := managerWithFactory(t, "gone", MockDownloaderFactory)
+		require.NoError(t, dm.RemoveDownloader("gone"))
+		_, err := dm.GetDownloaderContext(context.Background(), "gone")
+		assert.ErrorIs(t, err, ErrDownloaderNotConfigured)
+	})
+
+	t.Run("从库同步时已移除", func(t *testing.T) {
+		dm := managerWithFactory(t, "synced", MockDownloaderFactory)
+		dm.SyncFromDB(nil)
+		_, err := dm.GetDownloaderContext(context.Background(), "synced")
+		assert.ErrorIs(t, err, ErrDownloaderNotConfigured)
+	})
+
+	t.Run("建连途中被删除，由 flight 带回", func(t *testing.T) {
+		gated := &pingGatedDownloader{
+			MockDownloader: MockDownloader{name: "racing", dlType: DownloaderQBittorrent},
+			pinging:        make(chan struct{}, 1),
+			release:        make(chan struct{}),
+		}
+		dm := managerWithFactory(t, "racing", func(DownloaderConfig, string) (Downloader, error) {
+			return gated, nil
+		})
+		// 先登记一个实例。它自报不健康，下一次获取会进 flight 去 Ping 它
+		_, err := dm.GetDownloader("racing")
+		require.NoError(t, err)
+
+		got := make(chan error, 1)
+		go func() {
+			_, getErr := dm.GetDownloaderContext(context.Background(), "racing")
+			got <- getErr
+		}()
+		select {
+		case <-gated.pinging:
+		case <-time.After(3 * time.Second):
+			t.Fatal("等待 flight 进入 Ping 超时")
+		}
+		// Ping 还没返回，用户就把这台下载器删了
+		require.NoError(t, dm.RemoveDownloader("racing"))
+		close(gated.release)
+
+		err = waitErr(t, got)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDownloaderNotConfigured, "flight 带回来的错误也要认得出来，实际: %v", err)
+	})
+
+	t.Run("失败冷却的包装", func(t *testing.T) {
+		dm := managerWithFactory(t, "cool", MockDownloaderFactory)
+		_, _, gen, err := dm.resolveFactory("cool")
+		require.NoError(t, err)
+		dm.settleFlight("cool", nil, gen, fmt.Errorf("%w: cool", ErrDownloaderNotConfigured))
+
+		err = dm.cooldownError("cool", gen)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDownloaderNotConfigured)
+	})
+
+	// 反例：下面这些都是「下载器还在、只是现在用不了」，绝不能被认成未配置
+	t.Run("连不上与冷却期内都不算未配置", func(t *testing.T) {
+		dm := NewDownloaderManagerWithConfig(ReconnectConfig{
+			MaxRetries:     0,
+			InitialBackoff: time.Millisecond,
+			MaxBackoff:     time.Millisecond,
+			Multiplier:     1.0,
+		})
+		dm.RegisterFactory(DownloaderQBittorrent, func(DownloaderConfig, string) (Downloader, error) {
+			return nil, errors.New("连接被拒绝")
+		})
+		require.NoError(t, dm.RegisterConfig("dead",
+			&MockConfig{Type: DownloaderQBittorrent, URL: "http://10.255.255.1:40909"}, true))
+
+		_, err := dm.GetDownloaderContext(context.Background(), "dead")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrDownloaderNotConfigured)
+
+		_, err = dm.GetDownloaderContext(context.Background(), "dead")
+		require.ErrorContains(t, err, "暂不可用", "第二次应当命中失败冷却")
+		assert.NotErrorIs(t, err, ErrDownloaderNotConfigured)
+	})
+
+	t.Run("等待超预算不算未配置", func(t *testing.T) {
+		f := newBlockingFactory()
+		defer close(f.release)
+		dm := managerWithFactory(t, "slow", f.factory)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := dm.GetDownloaderContext(ctx, "slow")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NotErrorIs(t, err, ErrDownloaderNotConfigured)
+	})
+
+	t.Run("类型没有工厂不算未配置", func(t *testing.T) {
+		dm := NewDownloaderManager()
+		require.NoError(t, dm.RegisterConfig("tr",
+			&MockConfig{Type: DownloaderTransmission, URL: "http://127.0.0.1:9091"}, true))
+		_, err := dm.GetDownloaderContext(context.Background(), "tr")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrDownloaderNotConfigured)
+	})
+}

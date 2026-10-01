@@ -515,6 +515,15 @@ func (dm *DownloaderManager) storeInstance(name string, dl Downloader, gen uint6
 	return prev, true
 }
 
+// ErrDownloaderNotConfigured 表示 manager 里根本没有这个名字的下载器配置：
+// 从未注册、已被删除，或在从库同步时已被移除 / 禁用。
+//
+// 它说的是「这台下载器不在了」，不是「暂时连不上」。调用方要据此区分两种处理 ——
+// 例如删除暂停种子时，只有这种情况才允许只清 pt-tools 里的孤儿记录；获取超时、
+// 失败冷却、建连失败都意味着下载器里的任务还在，不能当孤儿处理。
+// 必须用 errors.Is 判断：它会被 flight 与失败冷却层层包装。
+var ErrDownloaderNotConfigured = errors.New("no config found for downloader")
+
 // resolveFactory 取出配置、对应工厂和当前配置代次，只在锁内读 map，不调用工厂
 func (dm *DownloaderManager) resolveFactory(
 	name string,
@@ -524,7 +533,8 @@ func (dm *DownloaderManager) resolveFactory(
 
 	config, exists := dm.configs[name]
 	if !exists {
-		return nil, nil, 0, fmt.Errorf("no config found for downloader: %s", name)
+		// 文本与原先的 "no config found for downloader: <name>" 一致，只是现在能被 errors.Is 认出
+		return nil, nil, 0, fmt.Errorf("%w: %s", ErrDownloaderNotConfigured, name)
 	}
 	factory, exists := dm.factories[config.GetType()]
 	if !exists {
