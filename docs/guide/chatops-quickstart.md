@@ -86,11 +86,11 @@ ChatOps 的核心思路和 Hermes / MoviePilot 类似：在你熟悉的 IM 里�
 
 配置完成后，建议打开 Web UI 的操作审计页面（`/chatops/audit`），确认命令正常执行并被记录。
 
-![ChatOps 通知通道列表](images/chatops/chatops-notifications-list.png)
+![ChatOps 通知通道列表](images/chatops/chatops-notifications-list.webp)
 
 > Web UI → ChatOps → 消息通知，可以看到已配置的 QQ 和 Telegram 通道
 
-![ChatOps 审计日志](images/chatops/chatops-audit-stats.png)
+![ChatOps 审计日志](images/chatops/chatops-audit-stats.webp)
 
 > Web UI → ChatOps → 操作审计，展示今日命令数、成功率和最近记录
 
