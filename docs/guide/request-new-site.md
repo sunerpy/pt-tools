@@ -33,7 +33,9 @@ pt-tools 适配一个新站点需要了解该站点的页面结构。你需要�
 
 在 Microsoft Edge 中前往 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea)，搜索 "PT Tools Helper" 直接安装。这个商店只面向 Edge，Chrome 无法从这里安装。
 
-**Chrome 及其他浏览器：手动安装（不自动更新，需手动更新）**
+**Chrome 或 Edge：手动安装（不自动更新，需手动更新）**
+
+Firefox 只能临时载入，步骤见[浏览器扩展](browser-extension.md)。
 
 1. 从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 下载最新的 `pt-tools-helper.zip`
 2. 解压到一个固定目录

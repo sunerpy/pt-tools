@@ -80,4 +80,4 @@
 
 > **扩展站点支持**：如需支持其他站点，欢迎提交 [Issue](https://github.com/sunerpy/pt-tools/issues) 或 [Pull Request](https://github.com/sunerpy/pt-tools/pulls)。
 >
-> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](guide/browser-extension.md)（Edge 可以从 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 安装，支持自动更新；Chrome 等浏览器从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 下载后手动加载），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)
+> **没有编程经验？** 没关系！安装 [PT Tools Helper 浏览器扩展](guide/browser-extension.md)（Edge 可以从 [Edge Add-ons 商店](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea) 安装，支持自动更新；Chrome 从 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 下载 zip 后手动加载，Firefox 见浏览器扩展页），在站点页面一键采集数据后提交即可。详见 👉 [请求新增站点支持指南](guide/request-new-site.md)

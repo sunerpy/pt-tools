@@ -35,7 +35,9 @@ The extension's labels follow your browser's language; this page gives the Engli
 
 In Microsoft Edge, go to [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/pt-tools-helper/pgicnjkmgenmjfhlclodbpbedjmojbea), find "PT Tools Helper" and install it. The store is for Edge only; Chrome cannot install from it.
 
-**Chrome and other browsers: install it by hand (it does not update itself, so you update it by hand)**
+**Chrome or Edge: install it by hand (it does not update itself, so you update it by hand)**
+
+Firefox can only load it temporarily; the steps are in [Browser extension](browser-extension.md).
 
 1. Download the latest `pt-tools-helper.zip` from [GitHub Releases](https://github.com/sunerpy/pt-tools/releases)
 2. Unpack it to a folder you keep
