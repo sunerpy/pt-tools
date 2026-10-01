@@ -56,7 +56,7 @@ When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; 
 
 - Do not expose the web port directly to the internet. For remote access, put it behind a reverse proxy with HTTPS, or reach it over a VPN. The session cookie is not marked Secure, so over plain HTTP someone on the same network could capture it.
 - Back up `torrents.db` and `secret.key` together and encrypt the backup; see [Upgrades and backups](../guide/upgrade.md).
-- ChatOps runs commands only from accounts linked with a binding code, and a Telegram channel also checks the sender against its allow lists first. At present every linked account has admin rights and can pause or delete torrents and manage subscriptions, so give binding codes only to people you trust. Every command is recorded in the audit log, with arguments such as tokens and passkeys redacted before they are written.
+- ChatOps runs commands only from accounts linked with a binding code, and QQ and Telegram channels also check the sender against the channel's allow lists first. At present every linked account has admin rights and can pause or delete torrents and manage subscriptions, so give binding codes only to people you trust. Every command is recorded in the audit log, with arguments such as tokens and passkeys redacted before they are written.
 
 ## The risk of automated access
 

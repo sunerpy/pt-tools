@@ -162,7 +162,7 @@ home:
         body: Pause a torrent; a hash prefix is enough
       - command: /addrss
         body: Add an RSS feed step by step
-    caption: Only accounts linked with a binding code can send commands, and at present every linked account has admin rights, so give binding codes only to people you trust. A Telegram channel's lists only decide who may talk to the bot, and a QQ channel's lists play no part in permissions; each account is limited to 10 commands a minute by default.
+    caption: Only accounts linked with a binding code can send commands, and at present every linked account has admin rights, so give binding codes only to people you trust. The allow lists of a QQ or Telegram channel only decide who may talk to the bot, not who has admin rights; each account is limited to 10 commands a minute by default.
 
   shots:
     sites:

@@ -11,7 +11,7 @@ The idea is the same as in Hermes or MoviePilot: you send a command to a bot in 
 Highlights:
 
 - **13 built-in commands** covering status queries, torrent control and task management
-- **Linked accounts only**: only an account linked with a binding code can run commands; a Telegram channel also checks the sender against its allow lists first
+- **Linked accounts only**: only an account linked with a binding code can run commands; QQ and Telegram channels also check the sender against the channel's allow lists first
 - **Binding codes**: an 8-character one-time code, valid for 5 minutes by default (from 1 hour up to no expiry if you choose), generated in the web UI and sent to the person whose account you want to link
 - **An audit trail**: the result, latency and sender of every command are recorded in the `action_audit` table
 - **Encryption at rest**: credentials such as the bot token and the access token are stored encrypted with AES-GCM, so a screenshot never shows them in plain text
