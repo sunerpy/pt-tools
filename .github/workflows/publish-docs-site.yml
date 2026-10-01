@@ -17,9 +17,10 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      # Not pages of the site: the index GitHub shows for the folder, the brand notes, the
-      # redesign log. A change to them alone has nothing to publish.
+      # Not pages of the site: the index GitHub shows for the folder, the English README, the
+      # brand notes, the redesign log. A change to them alone has nothing to publish.
       - "!docs/README.md"
+      - "!docs/readme/**"
       - "!docs/brand.md"
       - "!docs/design/webui-board-spec.md"
       - "web/frontend/public/logo.svg"
