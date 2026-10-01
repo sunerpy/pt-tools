@@ -30,16 +30,26 @@ const saving = ref(false);
 const showDialog = ref(false);
 const editMode = ref(false);
 const healthTimeoutMs = 5000;
+/** 超时那一档的说明：表格 tooltip、手机行卡、连通性检查卡、手动「检查」的提示共用同一句 */
+const HEALTH_TIMEOUT_DETAIL = `检查超时：${healthTimeoutMs / 1000} 秒内没有响应，下载器可能离线，或网络不通`;
 
 const downloaders = ref<DownloaderSetting[]>([]);
 const healthStatus = ref<Record<number, DownloaderHealthResponse>>({});
 /**
- * 连通性探测**本身**失败（超时 / 请求没发出去 / 非 2xx）的下载器 id。
+ * 连通性检查请求**本身**没成功（请求没发出去 / pt-tools 自己的接口非 2xx）的下载器 id。
  *
  * 和「下载器回报 is_healthy: false」要分开：后者是拿到了结论，前者是没拿到。
  * 这一份就是这张表的 partial 数据源 —— 列表本体拿到了，附带的连通性只探到一部分。
  */
 const healthFailedIds = ref<number[]>([]);
+/**
+ * 5 秒内没有回音（前端主动中止）的下载器 id，单列一档「超时」。
+ *
+ * 它不算「没探到」：后端的 qB 客户端要等 30 秒才放弃，下载器离线时最常见的样子正是前端先超时 ——
+ * 这是「多半连不上」的信号，不能和请求没发出去一起归成「未知」再配一句「不代表下载器有问题」。
+ * 与 origin/main 上「检查超时」（红色、算检查失败）的语义一致。
+ */
+const healthTimeoutIds = ref<number[]>([]);
 
 // 目录管理相关
 const showDirDialog = ref(false);
@@ -177,8 +187,18 @@ const healthRows = computed<BreakdownRow[]>(() =>
     .filter((d) => d.id !== undefined)
     .map((d) => {
       const id = d.id as number;
-      const probeFailed = healthFailedIds.value.includes(id);
       const res = healthStatus.value[id];
+      if (healthTimeoutIds.value.includes(id)) {
+        return {
+          key: String(id),
+          label: d.name,
+          value: "超时",
+          weight: 1,
+          tone: "dang" as const,
+          hint: HEALTH_TIMEOUT_DETAIL,
+        };
+      }
+      const probeFailed = healthFailedIds.value.includes(id);
       const ok = res?.is_healthy === true;
       return {
         key: String(id),
@@ -186,9 +206,7 @@ const healthRows = computed<BreakdownRow[]>(() =>
         value: probeFailed ? "未知" : ok ? "正常" : "异常",
         weight: 1,
         tone: probeFailed ? ("mute" as const) : ok ? ("ok" as const) : ("dang" as const),
-        hint: probeFailed
-          ? "这一次没探到（超时或请求失败），不代表下载器有问题"
-          : res?.message || "—",
+        hint: probeFailed ? `检查请求没成功：${res?.message || "检查失败"}` : res?.message || "—",
       };
     }),
 );
@@ -215,6 +233,7 @@ onMounted(async () => {
 
 async function loadDownloaders() {
   healthFailedIds.value = [];
+  healthTimeoutIds.value = [];
   const pending = run(() => downloadersApi.list());
   const data = await pending;
   if (isStale(pending)) return;
@@ -253,18 +272,35 @@ async function fetchHealthStatus(downloaderId: number): Promise<DownloaderHealth
   }
 }
 
+/* fetch 被 AbortController 中止时 reject 的是 name 为 AbortError 的 DOMException */
+function isHealthTimeout(error: unknown): boolean {
+  return (error as { name?: string } | null)?.name === "AbortError";
+}
+
 function getHealthErrorMessage(error: unknown) {
-  if (error instanceof Error && error.name === "AbortError") {
+  if (isHealthTimeout(error)) {
     return "检查超时";
   }
   return (error as Error)?.message || "检查失败";
 }
 
-/** 记下 / 抹掉「这台的连通性没探到」，partial 提示条按这份清单计数 */
-function markHealthProbeFailed(id: number, failed: boolean) {
-  const i = healthFailedIds.value.indexOf(id);
-  if (failed && i === -1) healthFailedIds.value.push(id);
-  else if (!failed && i !== -1) healthFailedIds.value.splice(i, 1);
+function toggleId(list: number[], id: number, on: boolean) {
+  const i = list.indexOf(id);
+  if (on && i === -1) list.push(id);
+  else if (!on && i !== -1) list.splice(i, 1);
+}
+
+/**
+ * 记下这台这一次检查的结果属于哪一档：拿到结论（ok）、超时、请求本身失败。
+ * partial 提示条只数「请求本身失败」那一档 —— 超时是一个结论，不是没探到。
+ */
+function markHealthProbe(id: number, outcome: "ok" | "timeout" | "failed") {
+  toggleId(healthTimeoutIds.value, id, outcome === "timeout");
+  toggleId(healthFailedIds.value, id, outcome === "failed");
+}
+
+function probeOutcome(error: unknown): "timeout" | "failed" {
+  return isHealthTimeout(error) ? "timeout" : "failed";
 }
 
 function loadHealthStatuses(list: DownloaderSetting[]) {
@@ -274,7 +310,7 @@ function loadHealthStatuses(list: DownloaderSetting[]) {
       fetchHealthStatus(dl.id!).then(
         (response) => {
           healthStatus.value[dl.id!] = response;
-          markHealthProbeFailed(dl.id!, false);
+          markHealthProbe(dl.id!, "ok");
         },
         (error) => {
           healthStatus.value[dl.id!] = {
@@ -282,7 +318,7 @@ function loadHealthStatuses(list: DownloaderSetting[]) {
             is_healthy: false,
             message: getHealthErrorMessage(error),
           };
-          markHealthProbeFailed(dl.id!, true);
+          markHealthProbe(dl.id!, probeOutcome(error));
         },
       ),
     );
@@ -384,18 +420,18 @@ async function toggleEnabled(dl: DownloaderSetting) {
     if (newEnabled) {
       try {
         healthStatus.value[dl.id] = await fetchHealthStatus(dl.id);
-        markHealthProbeFailed(dl.id, false);
+        markHealthProbe(dl.id, "ok");
       } catch (error: unknown) {
         healthStatus.value[dl.id] = {
           name: dl.name,
           is_healthy: false,
           message: getHealthErrorMessage(error),
         };
-        markHealthProbeFailed(dl.id, true);
+        markHealthProbe(dl.id, probeOutcome(error));
       }
     } else {
-      // 停用的不再探测，也就不该继续算进「没探到」的计数里
-      markHealthProbeFailed(dl.id, false);
+      // 停用的不再探测，也就不该继续算进「没探到」或「超时」里
+      markHealthProbe(dl.id, "ok");
     }
   } catch (e: unknown) {
     ElMessage.error((e as Error).message || "保存失败");
@@ -418,7 +454,7 @@ async function checkHealth(dl: DownloaderSetting) {
   if (!dl.id) return;
   try {
     healthStatus.value[dl.id] = await fetchHealthStatus(dl.id);
-    markHealthProbeFailed(dl.id, false);
+    markHealthProbe(dl.id, "ok");
     const status = healthStatus.value[dl.id];
     if (status && status.is_healthy) {
       ElMessage.success("连接正常");
@@ -428,8 +464,8 @@ async function checkHealth(dl: DownloaderSetting) {
   } catch (e: unknown) {
     const message = getHealthErrorMessage(e);
     healthStatus.value[dl.id] = { name: dl.name, is_healthy: false, message };
-    markHealthProbeFailed(dl.id, true);
-    ElMessage.error(message);
+    markHealthProbe(dl.id, probeOutcome(e));
+    ElMessage.error(isHealthTimeout(e) ? HEALTH_TIMEOUT_DETAIL : message);
   }
 }
 
@@ -447,12 +483,23 @@ function healthMeta(dl: DownloaderSetting): {
   const status = healthStatus.value[dl.id];
   if (!status) return { tone: "warn", text: "未检查", detail: "" };
   /*
-   * 探测本身失败（超时 / 请求没发出去）时画成红色「异常」是在冤枉机器：
+   * 超时单列一档，红色：5 秒内没有回音，下载器离线时最常见的就是这个样子（后端要等 30 秒才放弃）。
+   * 把它归进「未知」再说一句「不代表下载器有问题」，等于把最该提醒的情形说成了没事。
+   */
+  if (healthTimeoutIds.value.includes(dl.id)) {
+    return { tone: "dang", text: "超时", detail: HEALTH_TIMEOUT_DETAIL };
+  }
+  /*
+   * 检查请求本身没成功（没发出去 / pt-tools 自己的接口报错）时画成红色「异常」是在冤枉机器：
    * 我们并没有拿到「它不健康」这个结论，只是没问到。所以单独一档 warn「未知」，
    * 和上方的 partial 提示条对应，用户看到的原因才不矛盾。
    */
   if (healthFailedIds.value.includes(dl.id)) {
-    return { tone: "warn", text: "未知", detail: status.message || "连通性检查没成功" };
+    return {
+      tone: "warn",
+      text: "未知",
+      detail: `检查请求没成功：${status.message || "检查失败"}`,
+    };
   }
   return status.is_healthy
     ? { tone: "ok", text: "正常", detail: "" }
@@ -704,7 +751,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
       <div v-if="hasPartialBanner(downloaders.length)" class="pt-note pt-note--warn partial-note">
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <span>
-          有 {{ healthFailedIds.length }} 个下载器的连通性没探到（超时或请求失败），
+          有 {{ healthFailedIds.length }} 个下载器的连通性检查请求没成功（没发出去或接口报错），
           它们在表里显示为「未知」而不是「异常」。列表本身是完整的，可以单独点「检查」重试。
         </span>
       </div>
@@ -982,7 +1029,7 @@ function toggleSiteSelection(siteId: number, checked: boolean) {
         <PtBreakdown
           :rows="healthRows"
           cols
-          foot="打开页面时自动探一次，每台 5 秒超时。「未知」是这一次没探到（超时或请求没发出去），不等于下载器坏了 —— 可以点表格里的「检查」单独重试。" />
+          foot="打开页面时自动探一次，每台 5 秒超时。「超时」是 5 秒内没有响应，下载器多半离线或网络不通；「未知」是检查请求本身没成功（没发出去或接口报错）。都可以点表格里的「检查」单独重试。" />
       </PtPanel>
     </div>
 
