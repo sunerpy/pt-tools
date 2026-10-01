@@ -143,11 +143,11 @@ WebSocket 路径固定为 `/onebot/v11/ws`，与 NapCat URL 中的路径一致�
 
 保存后，通道状态先显示「运行中」（端口已开始监听），NapCat 连上之后变为「已连接」。
 
-![pt-tools 通知通道列表](images/chatops/chatops-notifications-list.png)
+![pt-tools 通知通道列表](images/chatops/chatops-notifications-list.webp)
 
 > Web UI → ChatOps → 消息通知，添加完成后可以看到 QQ 通道已启用
 
-![pt-tools QQ 通道凭证配置](images/chatops/chatops-qq-detail.png)
+![pt-tools QQ 通道凭证配置](images/chatops/chatops-qq-detail.webp)
 
 > QQ 通道详情的「凭证与连接」，可以查看和修改监听地址、Access Token 和管理员列表
 
@@ -179,7 +179,7 @@ QQ 适配器(1): [wss] 连接Websocket服务器: 172.18.0.3:41526 成功, 账号
 - 有效期选「5 分钟」（默认）
 - 点「生成」
 
-![生成绑定码对话框](images/chatops/chatops-bindings-dialog.png)
+![生成绑定码对话框](images/chatops/chatops-bindings-dialog.webp)
 
 > 生成绑定码时需要选择关联的通道和有效期（5 分钟 / 1 小时 / 1 天 / 30 天 / 永久）
 

@@ -1,5 +1,7 @@
 # 本地二进制运行 pt-tools
 
+> 完整的安装说明（安装脚本、手动下载、systemd 与首次登录）见文档站的[安装](https://firlab.app/pt-tools/guide/install)，这里是二进制运行与源码构建的补充示例。
+
 ## 功能特性
 
 - RSS 自动订阅下载免费种子

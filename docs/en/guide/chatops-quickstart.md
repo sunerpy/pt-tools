@@ -86,11 +86,11 @@ Continue with the guide for the channel you chose:
 
 Once it is set up, open the audit log page of the web UI (`/chatops/audit`) to confirm that commands run and are recorded.
 
-![The notification channel list in the web UI](../../guide/images/chatops/chatops-notifications-list.png)
+![The notification channel list in the web UI](../../guide/images/chatops/chatops-notifications-list.webp)
 
 > Web UI → ChatOps → Notifications (消息通知) shows the QQ and Telegram channels you have configured.
 
-![The ChatOps audit log](../../guide/images/chatops/chatops-audit-stats.png)
+![The ChatOps audit log](../../guide/images/chatops/chatops-audit-stats.webp)
 
 > Web UI → ChatOps → Audit log (操作审计) shows today's command count, the success rate and the latest records.
 

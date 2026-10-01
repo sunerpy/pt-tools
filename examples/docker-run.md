@@ -1,5 +1,7 @@
 # 使用 Docker 运行 pt-tools
 
+> 完整的安装说明（Docker Compose、二进制、systemd 与首次登录）见文档站的[安装](https://firlab.app/pt-tools/guide/install)，这里是更多 `docker run` 示例。
+
 ## 功能特性
 
 - RSS 自动订阅下载免费种子

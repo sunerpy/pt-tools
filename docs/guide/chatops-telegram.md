@@ -87,6 +87,10 @@
 2. 在通道列表中点击刚创建的通道，进入通道详情。
 3. 在「**凭证与连接**」中填写下面的字段，点「**保存凭证**」。保存后通道会立即用新配置重连。
 
+![添加通知通道对话框](images/chatops/chatops-add-channel-dialog.webp)
+
+> 「添加通道」对话框：选好通道类型，填通道名称和 Bot Token，点「创建通道」
+
 ### 字段语义说明
 
 | 字段              | 作用                                                                       |
@@ -114,7 +118,7 @@
 
 长轮询超时固定为 30 秒，不需要设置。
 
-![pt-tools Telegram 通道凭证配置](images/chatops/chatops-telegram-detail.png)
+![pt-tools Telegram 通道凭证配置](images/chatops/chatops-telegram-detail.webp)
 
 > Web UI → Telegram 通道详情 → 凭证与连接，展示所有字段包括代理 URL
 
@@ -138,7 +142,7 @@
 - 有效期选 5 分钟（默认）
 - 点「生成」
 
-![生成绑定码对话框](images/chatops/chatops-bindings-dialog.png)
+![生成绑定码对话框](images/chatops/chatops-bindings-dialog.webp)
 
 > 绑定码生成后出现在「待绑定」列表，8 字符，不含 0/O/1/I/L 等容易混淆的字符
 
@@ -150,7 +154,7 @@
 
 bot 回复「绑定成功」即表示完成。绑定完成后可以在「已绑定用户」列表看到你的账号。
 
-![绑定管理列表](images/chatops/chatops-bindings-list.png)
+![绑定管理列表](images/chatops/chatops-bindings-list.webp)
 
 > 绑定成功后，账号出现在「已绑定用户」列表，显示通道类型、用户 ID（部分隐藏）和管理员标记
 
