@@ -88,7 +88,7 @@ Important startup properties:
 
 - SQLite is the source of truth. Use `core.ConfigStore`; do not resurrect `GlobalCfg` or a parallel config file.
 - Site cookies are stored in `SiteSetting.CookieEncrypted`; plaintext exists only at trusted boundaries through `ConfigStore.EncryptCookie`/`DecryptCookie`.
-- The AES-256 key comes from base64 `PT_TOOLS_SECRET_KEY` or hex text in `~/.pt-tools/secret.key`. The current `secret import` implementation writes raw bytes instead of the loader's hex format; do not rely on restore until that mismatch is fixed and round-trip tested.
+- The AES-256 key comes from base64 `PT_TOOLS_SECRET_KEY` or hex text in `~/.pt-tools/secret.key`. `secret export` prints base64; `secret import` reads base64 and writes the loader's 64-character hex format atomically (`cmd/secret_import_test.go` pins the format).
 - Config mutations publish `events.ConfigChanged`; consumers must tolerate dropped duplicate events and reload from DB.
 
 ### Site and RSS execution
