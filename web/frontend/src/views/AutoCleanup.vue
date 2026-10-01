@@ -735,7 +735,7 @@ async function executeClean() {
           <el-form-item>
             <el-checkbox v-model="form.peer_ratio_remove_data">直接删除种子及数据</el-checkbox>
             <div class="field-tip">
-              开启则超标种子连文件一起删；关闭只暂停，可以在「已暂停种子」页手动恢复
+              开启则超标种子连文件一起删；关闭只暂停，可以在「暂停任务」页手动恢复
             </div>
           </el-form-item>
         </div>
@@ -770,7 +770,8 @@ async function executeClean() {
 
           <el-form-item label="保留最近备份数量">
             <el-input-number v-model="keepBackups" :min="0" :max="100" :step="1" />
-            <div class="field-tip">清旧备份时留最近的 N 份，其余删除；0 表示全清</div>
+            <!-- 后端 maintenance.Cleaner 把 keep<=0 当成默认 5 份（internal/maintenance/cleaner.go），不是「全清」 -->
+            <div class="field-tip">清旧备份时留最近的 N 份，其余删除；填 0 按默认的 5 份保留</div>
           </el-form-item>
         </el-form>
 

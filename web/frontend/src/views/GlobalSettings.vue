@@ -297,7 +297,7 @@ async function save() {
           <el-form-item label="免费结束自动删除">
             <el-switch v-model="form.auto_delete_on_free_end" />
             <div class="field-tip">
-              开启后，免费期结束时未下载完成的种子将自动从下载器中删除（含数据文件）；关闭时仅暂停，可在「暂停任务管理」页手动恢复或删除
+              开启后，免费期结束时未下载完成的种子将自动从下载器中删除（含数据文件）；关闭时仅暂停，可在「暂停任务」页手动恢复或删除
             </div>
             <div v-if="form.auto_delete_on_free_end" class="pt-note pt-note--dang mode-note">
               <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
