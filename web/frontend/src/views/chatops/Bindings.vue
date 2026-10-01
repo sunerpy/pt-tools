@@ -532,7 +532,7 @@ function getConfNameByConfId(confId?: number) {
 
       <template v-if="activeBindings.length > 0" #footer>
         <span class="pt-foot-note">
-          管理员身份在通道的凭证里配置（admin_users / admin_qq_users），这里只展示
+          绑定时一律写入管理员身份，这一列只做展示；不再需要的绑定请撤销
         </span>
       </template>
     </PtPanel>
@@ -556,11 +556,21 @@ function getConfNameByConfId(confId?: number) {
           一句不成立的安全声明比不写更糟，这里只写实际行为。
         -->
         <li>码在到期或用掉之前，都能在下面的「待绑定」列表里看到和复制；用过或到期后自动失效。</li>
+        <!--
+          之前这里写「管理员身份在通道凭证里配置，绑上不等于是管理员」—— 与代码相反：
+          internal/app/binding_service.go 的 ConsumeCode 给每个新绑定写 PtAdmin: true，
+          MessageChain 判管理员命令只看这个字段。通道凭证里的名单只有 Telegram 用来过滤谁能和
+          机器人说话（adapter/telegram/inbound.go 的 permitted）；QQ 的 admin_qq_users /
+          allowed_qq_users 只用来挑测试消息的收件人。
+        -->
         <li>
-          绑定之后这个聊天账号才能发命令。管理员身份是另一回事 —— 它在通道的凭证里配置 （<code
-            >admin_users</code
-          >
-          / <code>admin_qq_users</code>），上面那张表只做展示， 绑上不等于是管理员。
+          绑定之后这个聊天账号才能发命令，而且目前<strong>每个完成绑定的账号都拥有管理员权限</strong>，
+          可以暂停、删除种子和管理 RSS 订阅。绑定码只发给信任的人，不再需要的绑定及时撤销。
+        </li>
+        <li>
+          Telegram 通道凭证里的 <code>admin_users</code> /
+          <code>allowed_users</code> 决定谁能和机器人说话；QQ 通道目前不按
+          <code>admin_qq_users</code> / <code>allowed_qq_users</code> 过滤消息。
         </li>
       </ol>
     </PtPanel>

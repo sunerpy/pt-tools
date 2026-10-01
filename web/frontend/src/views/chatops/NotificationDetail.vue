@@ -511,8 +511,14 @@ function goBack() {
                 type="textarea"
                 :rows="2"
                 placeholder="逗号分隔的 Telegram user_id，例如：123456789,987654321" />
+              <!--
+                原来写「留空表示允许所有人」「发非管理员命令」，两句都与代码不符：
+                adapter/telegram/inbound.go 的 permitted 只放行两栏里出现的 user_id，两栏都空就谁都不放；
+                管理员命令看的是绑定上的 PtAdmin，而 ConsumeCode 给每个新绑定都写 true。
+              -->
               <div class="field-tip">
-                只有这些用户能与机器人交互（收消息、发非管理员命令）；留空表示允许所有人
+                这里和下面「管理员用户」里的 user_id
+                才能与机器人对话；两栏都留空时，任何人发来的消息都会被拒绝
               </div>
             </el-form-item>
             <el-form-item label="管理员用户（admin_users）">
@@ -522,8 +528,8 @@ function goBack() {
                 :rows="2"
                 placeholder="逗号分隔的 Telegram user_id，例如：123456789" />
               <div class="field-tip">
-                管理员可执行 <code>/unbind</code> <code>/pause</code> <code>/resume</code>
-                <code>/delete</code> 等管理命令
+                与「允许用户」一样放行发消息；管理命令（<code>/pause</code> <code>/delete</code>
+                等）目前对每个完成绑定的账号开放
               </div>
             </el-form-item>
 
@@ -574,7 +580,11 @@ function goBack() {
                 type="textarea"
                 :rows="2"
                 placeholder="逗号分隔的 QQ 号" />
-              <div class="field-tip">管理员可执行管理类命令</div>
+              <!--
+                QQ 适配器把这两栏读进来之后没有任何地方用它们过滤或授权（adapter/qq/adapter.go），
+                唯一的用处是 app/notification_service.go 的 qqTestChatID 挑测试消息的收件人。
+              -->
+              <div class="field-tip">目前只用来决定测试消息发给谁（第一个号码）</div>
             </el-form-item>
             <el-form-item label="允许 QQ（allowed_qq_users）">
               <el-input
@@ -582,7 +592,9 @@ function goBack() {
                 type="textarea"
                 :rows="2"
                 placeholder="逗号分隔的 QQ 号" />
-              <div class="field-tip">留空表示允许所有人</div>
+              <div class="field-tip">
+                目前不用于过滤消息：只有完成绑定的账号能执行命令，而且都拥有管理权限
+              </div>
             </el-form-item>
           </template>
 
