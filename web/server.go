@@ -184,7 +184,14 @@ func (s *Server) Serve(addr string) error {
 	// 登录页是未认证入口，走不了下面那条 "/" 兜底（它会把未登录请求 302 回 /login），
 	// 所以它引用的品牌矢量与站点图标单独开路由。文件仍然只有 dist 里那一份，
 	// 不在 web/static 下再复制一遍，避免两份资产漂移。
-	for _, asset := range []string{"logo.svg", "wordmark.svg", "favicon.ico"} {
+	//
+	// index.html 的 <head> 引用的根路径图标也必须在这里：漏掉的那几个，未登录被 302，
+	// 登录后又被 "/" 兜底换成 index.html，浏览器永远拿不到图片。
+	// 清单与 web/frontend/index.html 的 <link> 保持一致（TestServe_RootIconsAreServedOutsideAuth 守着）。
+	for _, asset := range []string{
+		"logo.svg", "wordmark.svg", "favicon.ico",
+		"favicon-32x32.png", "favicon-16x16.png", "apple-touch-icon.png",
+	} {
 		mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, distFS, asset)
 		})

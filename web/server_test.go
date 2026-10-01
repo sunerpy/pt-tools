@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -1170,6 +1172,79 @@ func TestServe_StaticAndAuthedRoutes(t *testing.T) {
 	case <-errCh:
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not shut down")
+	}
+}
+
+/*
+ * index.html 的 <head> 引用了几枚根路径图标（favicon.ico / favicon-32x32.png / favicon-16x16.png /
+ * apple-touch-icon.png），登录页另外引用 logo.svg 与 wordmark.svg。它们都不在 /assets/ 下，
+ * 只能在 "/" 兜底之前单独开路由：漏掉的那几个，未登录时被兜底 302 到 /login，
+ * 登录后又被同一条兜底换成 index.html —— 浏览器拿到的永远不是图片。
+ *
+ * 这里走真实的 Serve() 路由表，不另外注册一份路由再断言；清单从 frontend/index.html 里抽，
+ * index.html 以后再加图标，这条测试会提醒同步白名单。
+ */
+func TestServe_RootIconsAreServedOutsideAuth(t *testing.T) {
+	raw, err := os.ReadFile("frontend/index.html")
+	require.NoError(t, err)
+	var icons []string
+	for _, m := range regexp.MustCompile(`<link[^>]*\shref="(/[^"/]+\.(?:ico|png|svg))"`).FindAllStringSubmatch(string(raw), -1) {
+		icons = append(icons, m[1])
+	}
+	require.Subset(t, icons, []string{"/favicon.ico", "/favicon-32x32.png", "/favicon-16x16.png", "/apple-touch-icon.png"},
+		"index.html 引用的图标清单变了，请核对这条测试与 Serve() 里的免鉴权白名单")
+	icons = append(icons, "/logo.svg", "/wordmark.svg") // 登录页的品牌图
+
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+	const sid = "root-icon-session"
+	srv.sessions[sid] = "admin" // 在 Serve 起 goroutine 之前写入，不与处理器并发
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(addr) }()
+	t.Cleanup(func() {
+		require.NoError(t, srv.Shutdown(context.Background()))
+		select {
+		case <-errCh:
+		case <-time.After(3 * time.Second):
+			t.Error("server did not shut down")
+		}
+	})
+
+	client := &http.Client{
+		Timeout:       3 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	base := "http://" + addr
+	waitReady(t, client, base+"/api/ping")
+
+	distFS := mustSub(staticFS, "static/dist")
+	for _, path := range icons {
+		// make embed-placeholder 构出来的 dist 里没有这些文件，那时 404 是对的；302 与 index.html 才是错的
+		_, statErr := fs.Stat(distFS, strings.TrimPrefix(path, "/"))
+		for _, withSession := range []bool{false, true} {
+			req, err := http.NewRequest(http.MethodGet, base+path, nil)
+			require.NoError(t, err)
+			if withSession {
+				req.AddCookie(&http.Cookie{Name: "session", Value: sid})
+			}
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			assert.NotEqual(t, http.StatusFound, resp.StatusCode, "%s（已登录=%v）被重定向到了登录页", path, withSession)
+			assert.NotContains(t, resp.Header.Get("Content-Type"), "text/html",
+				"%s（已登录=%v）拿到的是 index.html，不是图标", path, withSession)
+			if statErr == nil {
+				assert.Equal(t, http.StatusOK, resp.StatusCode, "%s（已登录=%v）", path, withSession)
+			}
+		}
 	}
 }
 
