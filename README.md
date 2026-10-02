@@ -179,6 +179,9 @@ make build-extension # 校验站点并打包浏览器扩展
 - [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions)
 - [Telegram](https://t.me/+7YK2kmWIX0s1Nzdl)
 - QQ 群：`274984594`
+- 微信公众号：六月水蓝，微信扫描下方二维码关注
+
+<img src="docs/public/community/wechat-official-account.jpg" alt="微信公众号「六月水蓝」的二维码" width="160">
 
 ## 许可证
 

@@ -181,6 +181,9 @@ Before contributing, read the [development guide](../development.md) (in Chinese
 - [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions)
 - [Telegram](https://t.me/+7YK2kmWIX0s1Nzdl)
 - QQ group: `274984594`
+- WeChat Official Account: 六月水蓝 (scan the QR code below with WeChat to follow)
+
+<img src="../public/community/wechat-official-account.jpg" alt="QR code of the WeChat Official Account 六月水蓝" width="160">
 
 ## License
 
