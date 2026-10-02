@@ -310,3 +310,11 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 The install scripts download the latest release and check it against the same release's `checksums.txt` before unpacking. The [install guide](/en/guide/install) covers each option in full, including how to pin a version.
 
 <HomeRoadmap />
+
+## Community
+
+- Bug reports and feature requests: [GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
+- Questions and discussion: [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions), the [Telegram group](https://t.me/+7YK2kmWIX0s1Nzdl), or QQ group 274984594
+- WeChat Official Account: 六月水蓝
+
+<QrCode src="/community/wechat-official-account.jpg" alt="QR code of the WeChat Official Account 六月水蓝" caption="Scan with WeChat to follow" />
