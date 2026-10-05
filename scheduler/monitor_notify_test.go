@@ -202,3 +202,43 @@ func TestMonitorNotifier_StartStopIdempotent(t *testing.T) {
 	n.Stop()
 	n.Stop()
 }
+
+// slowSender 模拟耗时的 PushSync：每发一条，时钟前进 step。
+type slowSender struct {
+	clock *sitelogin.FakeClock
+	step  time.Duration
+	sent  []uint
+}
+
+func (s *slowSender) Send(_ context.Context, confID uint, _, _ string) error {
+	s.sent = append(s.sent, confID)
+	s.clock.Advance(s.step)
+	return nil
+}
+
+// 同一批里前几条发送耗时，让后面的行轮到时已进入静默时段：按此刻的时间判断，顺延到静默结束且不计尝试。
+func TestMonitorNotifier_QuietRecheckedPerRowWithinBatch(t *testing.T) {
+	start := time.Date(2026, 5, 18, 22, 58, 0, 0, time.UTC)
+	db := newReminderTestDB(t)
+	conf := quietConf(1, "23:00", "08:00")
+	require.NoError(t, db.Create(&conf).Error)
+	clock := sitelogin.NewFakeClock(start)
+	sender := &slowSender{clock: clock, step: 3 * time.Minute}
+	n := NewMonitorNotifier(db, sender, clock, zap.NewNop().Sugar())
+
+	first := sampleEntry()
+	second := sampleEntry()
+	second.EventKey = "tier:7d:2"
+	for _, e := range []MonitorNotifyEntry{first, second} {
+		_, err := n.Enqueue(context.Background(), e)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 1, n.DeliverDue(context.Background()), "the second row comes up at 23:01, inside the quiet window")
+	assert.Equal(t, []uint{1}, sender.sent)
+	var deferred models.MonitorNotificationLog
+	require.NoError(t, db.Where("event_key = ?", second.EventKey).First(&deferred).Error)
+	assert.Equal(t, models.MonitorNotifyPending, deferred.Result)
+	assert.Equal(t, 0, deferred.Attempts)
+	assert.True(t, deferred.NextRetryAt.Equal(time.Date(2026, 5, 19, 8, 0, 0, 0, time.UTC)), "got %v", deferred.NextRetryAt)
+}

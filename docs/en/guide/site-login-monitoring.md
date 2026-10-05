@@ -58,19 +58,19 @@ These two statuses send no request to the site, do not count as consecutive fail
 
 ## CloakBrowser fallback
 
-When a site sits behind Cloudflare or a similar anti-bot service, the cookie request may not reach the profile page. With CloakBrowser configured, such probes try again by opening the site's profile page in CloakBrowser.
+A probe normally sends a direct request to the site, carrying the cookie or API key that the site's sign-in method needs. When a site sits behind Cloudflare or a similar anti-bot service, that request may not reach the profile page. With CloakBrowser configured, such probes try again by opening the site's profile page in CloakBrowser.
 
 - Under System (系统) → CloakBrowser, fill in CloakBrowser-Manager endpoint (CloakBrowser-Manager 端点), Auth Token and Profile ID. The fallback is used only when all three are set. You deploy CloakBrowser-Manager (`cloakhq/cloakbrowser-manager`) yourself and create the profile there. Test connection (测试连接) checks the endpoint and token only, not the profile ID.
-- The fallback runs only when the cookie request ends as Blocked by anti-bot (被反爬拦截), network error or rate limited. Credential problems such as an expired session or a key error do not use it. A Cloudflare challenge page from the site is recorded as Blocked by anti-bot, not as an expired cookie.
-- When the fallback finds the session OK, its result is used. When the fallback does not succeed either, the cookie request's result is kept and the reason the fallback failed is appended to the failure reason, which the message after Probe now (立即探测) shows.
-- The fallback opens the same site address as the cookie request (your custom address when the site settings have one) and loads the site's cookies into the browser:
+- The fallback runs only when the direct request ends as Blocked by anti-bot (被反爬拦截), network error or rate limited. Credential problems such as an expired session or a key error do not use it. A Cloudflare challenge page from the site is recorded as Blocked by anti-bot, not as a credential failure.
+- When the fallback finds the session OK, its result is used. When the fallback does not succeed either, the direct request's result is kept and the reason the fallback failed is appended to the failure reason, which the message after Probe now (立即探测) shows.
+- The fallback uses only the site's cookie: a site without a cookie (for example, one with only an API key) gets no fallback. It opens the same site address as the direct request (your custom address when the site settings have one) and loads the site's cookies into the browser:
 
 | Site framework | Page opened                     | Requirement                                                                   |
 | -------------- | ------------------------------- | ----------------------------------------------------------------------------- |
 | NexusPHP       | `/userdetails.php?id=<user ID>` | The site has been probed successfully at least once, so its user ID is known  |
 | Unit3D         | `/users/<username>`             | The site has been probed successfully at least once, so its username is known |
 | Gazelle        | `/user.php?id=<user ID>`        | The site has been probed successfully at least once, so its user ID is known  |
-| M-Team         | `/profile` on the web site      | The site has a cookie configured                                              |
+| M-Team         | `/profile` on the web site      | No other requirement                                                          |
 | HDDolby, Rousi | No fallback                     | —                                                                             |
 
 - All sites share this one profile, so only one fallback probe runs at a time and the others wait. Waiting and the fallback both count toward the 150-second limit of a single probe.

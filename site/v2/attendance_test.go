@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -236,7 +237,7 @@ func TestAttendanceConfig_MatchEdgeCases(t *testing.T) {
 }
 
 func TestNexusPHPDriver_AttendEdgeCases(t *testing.T) {
-	_, err := attendanceRequest("%zz")
+	_, err := attendanceRequest(&AttendanceConfig{Path: "%zz"})
 	assert.Error(t, err)
 
 	bad := &SiteDefinition{ID: "bad", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Path: "%zz"}}
@@ -274,4 +275,42 @@ func TestBaseSite_AttendEdgeCases(t *testing.T) {
 	_, err = site.Attend(ctx)
 	assert.ErrorContains(t, err, "rate limit", "a cancelled wait on the limiter is reported")
 	assert.Equal(t, int32(1), hits.Load())
+}
+
+// 签到配置可以指定请求方法：默认 GET；POST 时把 Path 里的查询参数作为表单提交。
+func TestNexusPHPDriver_AttendMethod(t *testing.T) {
+	type seen struct {
+		method, query, contentType, body, cookie string
+	}
+	var got seen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = seen{r.Method, r.URL.RawQuery, r.Header.Get("Content-Type"), string(body), r.Header.Get("Cookie")}
+		_, _ = w.Write([]byte(attendanceSuccessPage))
+	}))
+	t.Cleanup(srv.Close)
+
+	get := &SiteDefinition{ID: "qa", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Path: "/attendance.php?type=1"}}
+	res, err := newAttendanceDriver(srv.URL, get).Attend(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, AttendSigned, res.Status)
+	assert.Equal(t, http.MethodGet, got.method)
+	assert.Equal(t, "type=1", got.query)
+
+	post := &SiteDefinition{ID: "qa", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Path: "/attendance-ajax.php?act=sign&days=1", Method: http.MethodPost}}
+	res, err = newAttendanceDriver(srv.URL, post).Attend(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, AttendSigned, res.Status)
+	assert.Equal(t, http.MethodPost, got.method)
+	assert.Empty(t, got.query, "POST sends the parameters in the body")
+	assert.Equal(t, "application/x-www-form-urlencoded", got.contentType)
+	assert.Equal(t, "act=sign&days=1", got.body)
+	assert.Equal(t, "uid=1; pass=2", got.cookie)
+
+	assert.Equal(t, http.MethodGet, ResolveAttendanceConfig(&SiteDefinition{Schema: SchemaNexusPHP}).Method, "the default is GET")
+	assert.Equal(t, http.MethodPost, ResolveAttendanceConfig(post).Method)
+
+	bad := &SiteDefinition{ID: "qa", Schema: SchemaNexusPHP, Attendance: &AttendanceConfig{Method: "DELETE"}}
+	_, err = newAttendanceDriver(srv.URL, bad).Attend(context.Background())
+	assert.ErrorContains(t, err, "DELETE")
 }

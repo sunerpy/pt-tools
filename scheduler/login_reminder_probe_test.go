@@ -497,6 +497,31 @@ func TestProbe_AccessStaleSinceTracksNonAdvancingAccess(t *testing.T) {
 	assert.Nil(t, loadState(t, m, "HDSKY").AccessStaleSince, "advancing last_access clears the flag")
 }
 
+// 站点返回的最近访问时间倒退（比上次还早）不算前进，「访问未生效」不被清除。
+func TestProbe_AccessStaleSinceKeptWhenAccessGoesBackwards(t *testing.T) {
+	db := newReminderTestDB(t)
+	t0 := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	m := newReminderMonitorForTest(db, t0)
+	createSite(t, m, cookieSite("HDSKY"))
+	access := t0.Add(-72 * time.Hour)
+	site := &fakeReminderSite{info: v2.UserInfo{LastAccess: access.Unix()}}
+	m.resolver = &fakeReminderResolver{def: nexusDef(), site: site}
+
+	m.RunProbeOnce(context.Background())
+	advanceClock(m, 6*time.Hour)
+	m.RunProbeOnce(context.Background())
+	st := loadState(t, m, "HDSKY")
+	require.NotNil(t, st.AccessStaleSince)
+	staleSince := *st.AccessStaleSince
+
+	site.info.LastAccess = access.Add(-time.Hour).Unix()
+	advanceClock(m, 6*time.Hour)
+	m.RunProbeOnce(context.Background())
+	st = loadState(t, m, "HDSKY")
+	require.NotNil(t, st.AccessStaleSince, "an older last_access is not progress")
+	assert.True(t, st.AccessStaleSince.Equal(staleSince))
+}
+
 func TestReminder_AccessStaleHintInText(t *testing.T) {
 	db := newReminderTestDB(t)
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
