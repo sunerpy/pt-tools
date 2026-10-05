@@ -1044,9 +1044,11 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		global.GetSlogger().Infof("[RSS] 站点配置保存成功: site=%s", name)
 		// 异步重新加载并触发任务重启，让 API 快速返回
 		go func() {
-			// 刷新 UserInfoService 站点注册
+			// 刷新 UserInfoService 站点注册，成功后再请求一次登录探测
 			if err := RefreshSiteRegistrations(s.store); err != nil {
 				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
+			} else {
+				s.requestLoginProbe(string(sg))
 			}
 			cfg, _ := s.store.Load()
 			if cfg != nil {

@@ -6,6 +6,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -64,11 +65,22 @@ func (r loginReminderResolver) Resolve(setting models.SiteSetting) (*v2.SiteDefi
 	return def, site, nil
 }
 
+// loginReminderUserInfo 把可能为空的 UserInfoService 转成接口；直接赋值会把 nil 指针装进非空接口。
+func loginReminderUserInfo(svc *v2.UserInfoService) sitelogin.UserInfoFetcher {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
+// wireLoginReminderMonitor 构造并启动登录提醒监控。userInfo 非空时探测经它进行（共用站点实例与限速器，
+// 顺带刷新用户统计）；为空（仓库初始化失败）时退回 resolver 每次新建站点实例。
 func wireLoginReminderMonitor(
 	mgr *scheduler.Manager,
 	store *core.ConfigStore,
 	siteRegistry *v2.SiteRegistry,
 	bs *chatopsBootstrap,
+	userInfo *v2.UserInfoService,
 ) {
 	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
 		global.GetSlogger().Warn("登录提醒监控器跳过初始化：数据库未就绪")
@@ -87,6 +99,7 @@ func wireLoginReminderMonitor(
 	mon := scheduler.NewLoginReminderMonitor(scheduler.LoginReminderConfig{
 		DB:        db,
 		Notifier:  notifier,
+		UserInfo:  loginReminderUserInfo(userInfo),
 		Resolver:  resolver,
 		Decryptor: decryptor,
 		Logger:    global.GetSlogger(),

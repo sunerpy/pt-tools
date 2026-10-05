@@ -105,7 +105,7 @@ type CredentialDecryptor interface {
 //	配置接口：ban_threshold_days、remind_before_days、reminder_cron、
 //	  notification_channel_ids、probe_mode
 //	访问上报：last_visit_at
-//	探测请求：probe_requested_at
+//	探测请求（RequestProbe）：probe_requested_at
 //
 // The monitor never issues raw HTTP itself; all site I/O passes through the
 // site/v2 driver layer (which inherits the project's circuit breaker and
@@ -118,6 +118,7 @@ type LoginReminderMonitor struct {
 	running              bool
 	db                   *gorm.DB
 	notifier             *MonitorNotifier
+	userInfo             sitelogin.UserInfoFetcher
 	resolver             SiteResolver
 	decryptor            CredentialDecryptor
 	clock                sitelogin.Clock
@@ -153,7 +154,10 @@ type probeSlot struct {
 type LoginReminderConfig struct {
 	DB *gorm.DB
 	// Notifier 为空时只记录提醒决策，不投递（没有可用的通知服务）。
-	Notifier     *MonitorNotifier
+	Notifier *MonitorNotifier
+	// UserInfo 非空时探测经 UserInfoService.FetchAndSave 进行：用与搜索共用的站点实例和限速器，
+	// 成功时顺带刷新用户统计，也不再调用 Resolver。为空（仓库初始化失败）时退回 Resolver 新建实例。
+	UserInfo     sitelogin.UserInfoFetcher
 	Resolver     SiteResolver
 	Decryptor    CredentialDecryptor
 	Clock        sitelogin.Clock
@@ -196,6 +200,7 @@ func NewLoginReminderMonitor(cfg LoginReminderConfig) *LoginReminderMonitor {
 		cancel:           cancel,
 		db:               cfg.DB,
 		notifier:         cfg.Notifier,
+		userInfo:         cfg.UserInfo,
 		resolver:         cfg.Resolver,
 		decryptor:        cfg.Decryptor,
 		clock:            cfg.Clock,
@@ -518,6 +523,31 @@ func (m *LoginReminderMonitor) runProbe(ctx context.Context, setting models.Site
 	if missing := missingCredential(setting); missing != "" {
 		return &sitelogin.ProbeResult{Status: sitelogin.NOT_CONFIGURED, Diagnostic: missing}
 	}
+
+	budget := m.probeBudget
+	if budget <= 0 {
+		budget = loginProbeBudget
+	}
+	primaryTimeout := m.primaryTimeout
+	if primaryTimeout <= 0 {
+		primaryTimeout = loginProbePrimaryTimeout
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	if m.userInfo != nil {
+		// 站点 ID 与 RefreshSiteRegistrations 注册时一致，就是站点配置名。
+		primary := timeoutTransport{
+			inner:   sitelogin.UserInfoServiceTransport{Service: m.userInfo, SiteID: setting.Name},
+			timeout: primaryTimeout,
+		}
+		result, _ := sitelogin.ProbeWithFallback(probeCtx, knownDef, nil, m.clock, primary, nil)
+		if result == nil {
+			result = &sitelogin.ProbeResult{Status: sitelogin.UNKNOWN, Diagnostic: "nil result"}
+		}
+		return result
+	}
+
 	if m.resolver == nil {
 		return &sitelogin.ProbeResult{Status: sitelogin.UNKNOWN, Diagnostic: "站点解析器未初始化"}
 	}
@@ -534,16 +564,6 @@ func (m *LoginReminderMonitor) runProbe(ctx context.Context, setting models.Site
 		def = knownDef
 	}
 
-	budget := m.probeBudget
-	if budget <= 0 {
-		budget = loginProbeBudget
-	}
-	primaryTimeout := m.primaryTimeout
-	if primaryTimeout <= 0 {
-		primaryTimeout = loginProbePrimaryTimeout
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
 	primary := timeoutTransport{inner: sitelogin.HTTPTransport{}, timeout: primaryTimeout}
 	result, _ := sitelogin.ProbeWithFallback(probeCtx, def, site, m.clock, primary, nil)
 	if result == nil {
@@ -733,6 +753,22 @@ func effectiveProbeMode(mode string) string {
 		return ProbeModeAuto
 	}
 	return mode
+}
+
+// RequestProbe 记录一次探测请求：auto 模式下探测循环会在一分钟内探测该站，不在调用方的请求里同步探测。
+// 用监控自己的时钟写 probe_requested_at，与 last_probe_started_at 可比。凭证与站点配置入口
+// 按「写库 → 刷新站点注册 → RequestProbe」调用，所以请求早于某次探测开始时，那次探测一定读到新配置；
+// 晚于开始时，该站在那次探测之后仍然到期。
+func (m *LoginReminderMonitor) RequestProbe(siteName string) error {
+	if m == nil || m.db == nil {
+		return nil
+	}
+	if _, err := m.loadOrInitState(siteName); err != nil {
+		return err
+	}
+	return models.NewSiteLoginStateRepository(m.db).UpdateColumns(siteName, map[string]any{
+		"probe_requested_at": m.clock.Now().UTC(),
+	})
 }
 
 // probeRequested 报告是否有人在最近一次探测开始之后请求过探测。

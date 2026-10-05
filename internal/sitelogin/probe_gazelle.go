@@ -15,8 +15,12 @@ func ProbeGazelle(ctx context.Context, site sitev2.Site, clock Clock) (*ProbeRes
 	}
 
 	info, err := site.GetUserInfo(ctx)
+	return classifyGazelleResult(info, err), nil
+}
+
+func classifyGazelleResult(info sitev2.UserInfo, err error) *ProbeResult {
 	if err != nil {
-		return classifyGazelleError(err), nil
+		return classifyGazelleError(err)
 	}
 
 	if info.LastAccess == 0 {
@@ -24,7 +28,7 @@ func ProbeGazelle(ctx context.Context, site sitev2.Site, clock Clock) (*ProbeRes
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPCookie,
 			Diagnostic: "gazelle response missing stats.LastAccess",
-		}, nil
+		}
 	}
 
 	access := time.Unix(info.LastAccess, 0).UTC()
@@ -33,7 +37,7 @@ func ProbeGazelle(ctx context.Context, site sitev2.Site, clock Clock) (*ProbeRes
 		Source:       ProbeSourceHTTPCookie,
 		LastAccessAt: &access,
 		LastLoginAt:  nil,
-	}, nil
+	}
 }
 
 func classifyGazelleError(err error) *ProbeResult {
