@@ -622,6 +622,14 @@ make build-extension  # 站点一致性检查 + 构建 + 打包 zip
 > [!IMPORTANT]
 > 不要手工创建 release tag，也不要通过 `ext-v*` tag 发布扩展。普通发版由 release-please 管理；`workflow_dispatch` 只用于重建一个**已经存在且仍为 draft** 的 tag。
 
+#### 预览版（RC）
+
+`release-please-config.json` 根包里的 `"prerelease": true` 是预览版开关，与 `"versioning": "prerelease"`、`"prerelease-type": "rc.1"` 配合使用：
+
+- 开启时，release PR 的版本带 `-rc.N`：从稳定版开始取下一个版本的 `rc.1`（`0.48.0` → `0.49.0-rc.1`），之后只递增 `N`（`0.49.0-rc.1` → `0.49.0-rc.2`）。draft 标为预发布，公开时不设为 Latest；安装说明使用 `.github/release-notes/rc-footer.md`；不提交 Edge 商店；容器镜像只推版本号标签，不更新 `latest` 与 `主.次`、`主` 标签。
+- 删除 `"prerelease": true` 即回到稳定版：下一个 release PR 去掉后缀（`0.49.0-rc.2` → `0.49.0`），另外两项可以保留。
+- 扩展 manifest 的版本只能从 `rc.N`（N 为 1–65534）推导（`.github/scripts/extension-version.sh`），所以 `prerelease-type` 必须是 `rc.1`，不能写成 `rc` 或 `beta`。
+
 Edge 商店发布需要仓库 Secrets：
 
 | Secret            | 用途                  |
