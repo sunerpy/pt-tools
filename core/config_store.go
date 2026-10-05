@@ -576,6 +576,11 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		}
 	} else {
 		hasStoredCookie = strings.TrimSpace(existingSite.CookieEncrypted) != "" || strings.TrimSpace(existingSite.Cookie) != ""
+		// 内置站点的地址由站点定义管理：界面只读，启动时 SyncSitesFromRegistry 按定义对齐。
+		// 改成别的地址直接拒绝，免得写进去之后下次启动又悄悄恢复。
+		if isRegistered && strings.TrimSpace(sc.APIUrl) != strings.TrimSpace(existingSite.APIUrl) {
+			return errors.New("内置站点的地址由站点定义管理，不能修改")
+		}
 	}
 
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
