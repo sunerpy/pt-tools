@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0-rc.5](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.4...v0.49.0-rc.5) (2026-10-05)
+
+
+### Bug Fixes
+
+* **config:** 拒绝修改内置站点的地址 ([#579](https://github.com/sunerpy/pt-tools/issues/579)) ([a4479c6](https://github.com/sunerpy/pt-tools/commit/a4479c64e634218d315d8eb01c293ff6b193e525))
+* **config:** 站点 Cookie 只以密文落库，并迁移清除存量明文 ([#578](https://github.com/sunerpy/pt-tools/issues/578)) ([c625d87](https://github.com/sunerpy/pt-tools/commit/c625d87a8332328a7281c8cb7a26c4d0cd49ef6d))
+
 ## [0.49.0-rc.4](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.3...v0.49.0-rc.4) (2026-10-05)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "pt-tools-browser-extension",
-  "version": "0.49.0-rc.4",
+  "version": "0.49.0-rc.5",
   "private": true,
   "description": "PT Tools Helper browser extension",
   "type": "module",
