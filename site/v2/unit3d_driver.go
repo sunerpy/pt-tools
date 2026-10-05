@@ -173,6 +173,10 @@ func (d *Unit3DDriver) Execute(ctx context.Context, req Unit3DRequest) (Unit3DRe
 		StatusCode: resp.StatusCode,
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials
 	}

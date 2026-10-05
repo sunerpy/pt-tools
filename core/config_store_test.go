@@ -1116,13 +1116,13 @@ func TestSaveCloakConfig_CreateUpdateClear(t *testing.T) {
 	db := newCloakDB(t)
 	s := NewConfigStore(db)
 
-	require.NoError(t, s.SaveCloakConfig("https://a", "tok-a", false))
+	require.NoError(t, s.SaveCloakConfig("https://a", "tok-a", false, nil))
 	cfg, err := s.GetCloakConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://a", cfg.Endpoint)
 	assert.True(t, cfg.HasToken)
 
-	require.NoError(t, s.SaveCloakConfig("https://b", "", false))
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, nil))
 	tok, err := s.GetCloakToken()
 	require.NoError(t, err)
 	assert.Equal(t, "tok-a", tok)
@@ -1130,10 +1130,54 @@ func TestSaveCloakConfig_CreateUpdateClear(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://b", ep)
 
-	require.NoError(t, s.SaveCloakConfig("https://b", "ignored", true))
+	require.NoError(t, s.SaveCloakConfig("https://b", "ignored", true, nil))
 	cfg, err = s.GetCloakConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.HasToken)
+}
+
+// M1d：profile ID 与 token 一样是部分更新：nil 保持不变，空串清除，前后空白去掉。
+func TestSaveCloakConfig_ProfileID(t *testing.T) {
+	writeTestSecretKey(t)
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+
+	profile := "  profile-1  "
+	require.NoError(t, s.SaveCloakConfig("https://a", "tok", false, &profile))
+	cfg, err := s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "profile-1", cfg.ProfileID)
+
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, nil))
+	cfg, err = s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "profile-1", cfg.ProfileID, "nil keeps the stored profile")
+	assert.True(t, cfg.HasToken)
+
+	empty := ""
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, &empty))
+	cfg, err = s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.ProfileID)
+}
+
+// 后备注入浏览器的 Cookie 与 ListSites 给主通道的取法一致：有密文解密，没有密文用旧版明文列。
+func TestSiteCookiePlaintext(t *testing.T) {
+	writeTestSecretKey(t)
+	s := NewConfigStore(newCloakDB(t))
+
+	cipher, err := s.EncryptCookie("uid=1; pass=abc")
+	require.NoError(t, err)
+	got, err := s.SiteCookiePlaintext(models.SiteSetting{CookieEncrypted: cipher, Cookie: "stale=1"})
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=abc", got)
+
+	got, err = s.SiteCookiePlaintext(models.SiteSetting{Cookie: "legacy=1"})
+	require.NoError(t, err)
+	assert.Equal(t, "legacy=1", got)
+
+	_, err = s.SiteCookiePlaintext(models.SiteSetting{CookieEncrypted: "not-a-ciphertext"})
+	assert.Error(t, err)
 }
 
 func TestSetCloakToken_CreateWithToken(t *testing.T) {
@@ -1416,7 +1460,7 @@ func TestConfigStore_ErrorPaths_ClosedDB(t *testing.T) {
 	assert.Error(t, err)
 	assert.Error(t, s.SetCloakEndpoint("https://y"))
 	assert.Error(t, s.SetCloakToken("tok"))
-	assert.Error(t, s.SaveCloakConfig("https://y", "tok", false))
+	assert.Error(t, s.SaveCloakConfig("https://y", "tok", false, nil))
 	_, err = s.GetGlobalOnly()
 	assert.NoError(t, err)
 }
@@ -1483,7 +1527,7 @@ func TestCloakToken_EncryptErrorPaths(t *testing.T) {
 	s := NewConfigStore(db)
 
 	require.Error(t, s.SetCloakToken("plaintext"))
-	require.Error(t, s.SaveCloakConfig("https://x", "plaintext", false))
+	require.Error(t, s.SaveCloakConfig("https://x", "plaintext", false, nil))
 
 	require.NoError(t, db.DB.Create(&models.CloakSettings{Endpoint: "https://pre"}).Error)
 	require.Error(t, s.SetCloakToken("plaintext"))

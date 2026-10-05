@@ -42,6 +42,8 @@ func classifyGazelleResult(info sitev2.UserInfo, err error) *ProbeResult {
 
 func classifyGazelleError(err error) *ProbeResult {
 	switch {
+	case errors.Is(err, sitev2.ErrCloudflareChallenge):
+		return &ProbeResult{Status: CHALLENGE, Source: ProbeSourceHTTPCookie, RawError: err, Diagnostic: err.Error()}
 	case errors.Is(err, sitev2.ErrSessionExpired), errors.Is(err, sitev2.ErrInvalidCredentials), errors.Is(err, sitev2.ErrAuthFailed):
 		return &ProbeResult{Status: SESSION_EXPIRED, Source: ProbeSourceHTTPCookie, RawError: err, Diagnostic: err.Error()}
 	case errors.Is(err, sitev2.ErrCircuitOpen), errors.Is(err, sitev2.ErrRateLimited):

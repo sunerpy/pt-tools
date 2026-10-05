@@ -10,7 +10,12 @@ const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
 
-const config = ref<CloakConfig>({ endpoint: "", has_token: false, manager_version: null });
+const config = ref<CloakConfig>({
+  endpoint: "",
+  has_token: false,
+  profile_id: "",
+  manager_version: null,
+});
 const tokenInput = ref("");
 const testResult = ref<CloakTestResult | null>(null);
 
@@ -33,6 +38,7 @@ const resultTone = computed<"ok" | "warn" | "dang">(() => {
 const pageStates = computed(() => {
   const hasEndpoint = Boolean(config.value.endpoint.trim());
   const hasToken = config.value.has_token || Boolean(tokenInput.value.trim());
+  const hasProfile = Boolean(config.value.profile_id.trim());
   const tested = testResult.value !== null;
   const ok = testResult.value?.category === "success";
   return [
@@ -49,6 +55,13 @@ const pageStates = computed(() => {
       desc: "端点填了但没存过 token，Manager 会返回 401。",
       active: hasEndpoint && !hasToken,
       next: "用 openssl rand -hex 32 生成一个，填进去保存。",
+    },
+    {
+      key: "no-profile",
+      label: "缺 Profile ID",
+      desc: "端点与 token 都有了，但没填 Profile ID，登录探测不会用 CloakBrowser 后备。",
+      active: hasEndpoint && hasToken && !hasProfile,
+      next: "在 CloakBrowser-Manager 里建一个 profile，把它的 ID 填进来保存。",
     },
     {
       key: "untested",
@@ -139,7 +152,10 @@ async function save() {
   if (saving.value) return;
   saving.value = true;
   try {
-    const payload: { endpoint: string; token?: string } = { endpoint: config.value.endpoint };
+    const payload: { endpoint: string; token?: string; profile_id: string } = {
+      endpoint: config.value.endpoint,
+      profile_id: config.value.profile_id.trim(),
+    };
     if (tokenInput.value) payload.token = tokenInput.value;
     await cloakApi.updateConfig(payload);
     ElMessage.success("配置已保存");
@@ -165,9 +181,9 @@ async function save() {
     <div class="pt-note pt-cards__full" data-card="intro">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
       <span>
-        CloakBrowser 为可选功能。默认探测路径仍为 cookie HTTP 直连；仅当某站点开启「使用
-        CloakBrowser 后备」开关后才会走此路径。需先自行部署
-        <code>cloakhq/cloakbrowser-manager</code>，详见 README 的 v2.0 升级章节。
+        CloakBrowser 为可选功能。登录探测默认用 Cookie 直连；端点、token、Profile ID
+        三项都填好后，站点被反爬拦截、网络错误或请求过于频繁时，改用 CloakBrowser
+        打开站点个人页再判定一次。需先自行部署 <code>cloakhq/cloakbrowser-manager</code>。
       </span>
     </div>
 
@@ -209,6 +225,21 @@ async function save() {
           </el-input>
           <div class="field-tip">
             使用 <code>openssl rand -hex 32</code> 生成，保存后会以 AES-GCM 加密落库
+          </div>
+        </el-form-item>
+
+        <el-form-item label="Profile ID">
+          <el-input
+            v-model="config.profile_id"
+            data-testid="cloak-profile-input"
+            placeholder="CloakBrowser-Manager 中的 profile ID"
+            clearable>
+            <template #prefix>
+              <PtIcon name="user" :size="14" />
+            </template>
+          </el-input>
+          <div class="field-tip">
+            所有站点共用这个 profile，同一时间只跑一个后备探测；留空即不使用后备
           </div>
         </el-form-item>
 
@@ -286,9 +317,8 @@ async function save() {
         </li>
       </ul>
       <p class="res__foot">
-        CloakBrowser 的 schema 驱动在 <code>internal/cloakdriver/&lt;schema&gt;/</code> 下，
-        但登录探测的 CloakTransport 目前仍是占位实现 —— 也就是说这一页配好之后，
-        探测链路还没接上，连通性测试通过只代表 Manager 能连上。
+        「测试连接」只检查端点与 token，不检查 Profile ID。后备支持 NexusPHP、Unit3D、Gazelle 与
+        M-Team：前三类需要该站至少成功探测过一次（用来确定个人页地址），M-Team 需要配置 Cookie。
       </p>
     </PtPanel>
   </div>

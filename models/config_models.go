@@ -181,11 +181,13 @@ type QbitSettings struct {
 // 单行表（约定 ID=1）。Token 仅以 AES-GCM 密文形式落库，
 // 字段名 `TokenEncrypted` 与 SiteSetting.CookieEncrypted 保持一致。
 type CloakSettings struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Endpoint       string    `gorm:"size:512" json:"endpoint"`
-	TokenEncrypted string    `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	Endpoint       string `gorm:"size:512" json:"endpoint"`
+	TokenEncrypted string `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
+	// ProfileID 是登录探测后备使用的 CloakBrowser profile；与 Endpoint、Token 三项齐全才启用后备。
+	ProfileID string    `gorm:"size:128" json:"profile_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // SiteSetting 站点设置（统一表，合并原 DynamicSiteSetting）

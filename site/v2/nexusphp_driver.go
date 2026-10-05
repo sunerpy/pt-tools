@@ -307,6 +307,10 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		StatusCode: resp.StatusCode,
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	// Check for authentication errors
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials
@@ -1094,8 +1098,8 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 
 	res, err := d.Execute(ctx, req)
 	if err != nil {
-		// Return critical errors like session expired
-		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) {
+		// Return critical errors like session expired; a Cloudflare challenge blocks every page as well
+		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrCloudflareChallenge) {
 			return result, err
 		}
 		return result, nil // Ignore other errors, return empty result

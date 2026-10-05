@@ -1578,6 +1578,8 @@ export const chatopsApi = {
 export interface CloakConfig {
   endpoint: string;
   has_token: boolean;
+  /** 登录探测后备使用的 profile；与端点、token 三项齐全才启用后备 */
+  profile_id: string;
   manager_version: string | null;
 }
 
@@ -1600,7 +1602,7 @@ export interface CloakTestResult {
 
 export const cloakApi = {
   getConfig: () => api.get<CloakConfig>("/api/cloak/config"),
-  updateConfig: (data: { endpoint: string; token?: string }) =>
+  updateConfig: (data: { endpoint: string; token?: string; profile_id?: string }) =>
     api.put<void>("/api/cloak/config", data),
   testConnection: (data?: { endpoint?: string; token?: string }) =>
     api.post<CloakTestResult>("/api/cloak/test", data ?? {}),

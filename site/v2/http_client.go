@@ -124,6 +124,19 @@ func (r *HTTPResponse) IsSuccess() bool {
 	return r.StatusCode >= 200 && r.StatusCode < 300
 }
 
+// IsCloudflareChallenge 判断响应是不是 Cloudflare 的质询页（403/503）：Cloudflare 给质询响应加的
+// cf-mitigated: challenge 头，或质询页特有的 cf_chl_opt 脚本变量、/cdn-cgi/challenge-platform/ 资源路径。
+// 这类响应不能当成凭证无效处理。
+func (r *HTTPResponse) IsCloudflareChallenge() bool {
+	if r == nil || (r.StatusCode != http.StatusForbidden && r.StatusCode != http.StatusServiceUnavailable) {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Headers.Get("Cf-Mitigated")), "challenge") {
+		return true
+	}
+	return bytes.Contains(r.Body, []byte("cf_chl_opt")) || bytes.Contains(r.Body, []byte("/cdn-cgi/challenge-platform/"))
+}
+
 // IsError returns true if status code is 4xx or 5xx
 func (r *HTTPResponse) IsError() bool {
 	return r.StatusCode >= 400

@@ -110,3 +110,31 @@ func TestCDPContextCancellationIntegration(t *testing.T) {
 	}
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+// M1d：后备注入的 Cookie 来自站点配置里的 Cookie 串（http.ParseCookie），没有 Domain 与 Path，
+// 必须按要打开的地址设置，否则 Chrome 拒绝 Network.setCookie。
+func TestCDPCookieInjectionFromCookieHeader(t *testing.T) {
+	cdpURL := cdpURLOrSkip(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sess, err := NewCDPSession(ctx, cdpURL)
+	require.NoError(t, err)
+	defer sess.Close()
+
+	cookies, err := http.ParseCookie("c_secure_uid=93012; c_secure_pass=abc")
+	require.NoError(t, err)
+	target := "https://tracker.example/userdetails.php?id=93012"
+	require.NoError(t, sess.InjectCookies(sess.TaskContext(), target, cookies))
+
+	got, err := sess.GetCookies(sess.TaskContext(), target)
+	require.NoError(t, err)
+	byName := map[string]string{}
+	for _, c := range got {
+		byName[c.Name] = c.Value
+		assert.Equal(t, "tracker.example", c.Domain, c.Name)
+		assert.Equal(t, "/", c.Path, c.Name)
+	}
+	assert.Equal(t, "93012", byName["c_secure_uid"])
+	assert.Equal(t, "abc", byName["c_secure_pass"])
+}

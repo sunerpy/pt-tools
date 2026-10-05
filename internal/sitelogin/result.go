@@ -58,6 +58,8 @@ type ProbeResult struct {
 	Status       ProbeStatus
 	LastLoginAt  *time.Time
 	LastAccessAt *time.Time
+	// FallbackNote 记录后备通道没有成功时的说明（保留主通道结果时附带），写进 LastProbeError。
+	FallbackNote string
 	Source       ProbeSource
 	RawError     error
 	Diagnostic   string

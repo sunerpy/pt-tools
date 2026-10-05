@@ -197,8 +197,10 @@ var (
 		"上次登录", "上次登錄",
 		"last login", "last seen",
 	}
+	// 「最近动向」是多数站点 userdetails 页的访问时间，站点定义（hdsky、btschool 等）也按它取。
 	lastAccessHeaders = []string{
 		"上次访问", "上次訪問",
+		"最近动向", "最近動向",
 		"last access", "last action",
 	}
 )
@@ -229,6 +231,17 @@ func parseTimestamp(s string) (time.Time, bool) {
 	if s == "" {
 		return time.Time{}, false
 	}
+	if t, ok := parseTimestampExact(s); ok {
+		return t, true
+	}
+	// 站点常在时间后面附相对时间，例如「2026-10-02 10:00:00 (3天前)」，按站点定义的 split " (" 规则去掉。
+	if i := strings.Index(s, " ("); i > 0 {
+		return parseTimestampExact(strings.TrimSpace(s[:i]))
+	}
+	return time.Time{}, false
+}
+
+func parseTimestampExact(s string) (time.Time, bool) {
 	for _, layout := range timeLayouts {
 		if strings.ContainsAny(layout, "Z") {
 			if t, err := time.Parse(layout, s); err == nil {

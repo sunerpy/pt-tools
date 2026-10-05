@@ -71,6 +71,13 @@ var probeStatusLabels = map[sitelogin.ProbeStatus]string{
 	sitelogin.UNSUPPORTED:     "暂不支持探测",
 }
 
+// FallbackProvider 返回本次探测可用的后备通道（CloakBrowser）。每次探测前调用一次，实现方每次从库里读配置，
+// 改配置不需要重启；配置不全、架构不支持、缺 Cookie 或缺身份信息时返回 nil，探测只用主通道。
+// 只有主通道被拦截、网络错误或限流时才会真正用到它（见 sitelogin.ProbeWithFallback）。
+type FallbackProvider interface {
+	FallbackFor(ctx context.Context, setting models.SiteSetting, def *v2.SiteDefinition) sitelogin.Transport
+}
+
 // SiteResolver wires a SiteSetting row into a v2.Site instance plus its
 // SiteDefinition. It is injected so that tests can substitute fake sites
 // without touching the global site registry or HTTP layer.
@@ -119,6 +126,7 @@ type LoginReminderMonitor struct {
 	db                   *gorm.DB
 	notifier             *MonitorNotifier
 	userInfo             sitelogin.UserInfoFetcher
+	fallback             FallbackProvider
 	resolver             SiteResolver
 	decryptor            CredentialDecryptor
 	clock                sitelogin.Clock
@@ -157,7 +165,9 @@ type LoginReminderConfig struct {
 	Notifier *MonitorNotifier
 	// UserInfo 非空时探测经 UserInfoService.FetchAndSave 进行：用与搜索共用的站点实例和限速器，
 	// 成功时顺带刷新用户统计，也不再调用 Resolver。为空（仓库初始化失败）时退回 Resolver 新建实例。
-	UserInfo     sitelogin.UserInfoFetcher
+	UserInfo sitelogin.UserInfoFetcher
+	// Fallback 为空时不用后备通道。
+	Fallback     FallbackProvider
 	Resolver     SiteResolver
 	Decryptor    CredentialDecryptor
 	Clock        sitelogin.Clock
@@ -201,6 +211,7 @@ func NewLoginReminderMonitor(cfg LoginReminderConfig) *LoginReminderMonitor {
 		db:               cfg.DB,
 		notifier:         cfg.Notifier,
 		userInfo:         cfg.UserInfo,
+		fallback:         cfg.Fallback,
 		resolver:         cfg.Resolver,
 		decryptor:        cfg.Decryptor,
 		clock:            cfg.Clock,
@@ -534,6 +545,10 @@ func (m *LoginReminderMonitor) runProbe(ctx context.Context, setting models.Site
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
+	var fallback sitelogin.Transport
+	if m.fallback != nil {
+		fallback = m.fallback.FallbackFor(probeCtx, setting, knownDef)
+	}
 
 	if m.userInfo != nil {
 		// 站点 ID 与 RefreshSiteRegistrations 注册时一致，就是站点配置名。
@@ -541,7 +556,7 @@ func (m *LoginReminderMonitor) runProbe(ctx context.Context, setting models.Site
 			inner:   sitelogin.UserInfoServiceTransport{Service: m.userInfo, SiteID: setting.Name},
 			timeout: primaryTimeout,
 		}
-		result, _ := sitelogin.ProbeWithFallback(probeCtx, knownDef, nil, m.clock, primary, nil)
+		result, _ := sitelogin.ProbeWithFallback(probeCtx, knownDef, nil, m.clock, primary, fallback)
 		if result == nil {
 			result = &sitelogin.ProbeResult{Status: sitelogin.UNKNOWN, Diagnostic: "nil result"}
 		}
@@ -565,7 +580,7 @@ func (m *LoginReminderMonitor) runProbe(ctx context.Context, setting models.Site
 	}
 
 	primary := timeoutTransport{inner: sitelogin.HTTPTransport{}, timeout: primaryTimeout}
-	result, _ := sitelogin.ProbeWithFallback(probeCtx, def, site, m.clock, primary, nil)
+	result, _ := sitelogin.ProbeWithFallback(probeCtx, def, site, m.clock, primary, fallback)
 	if result == nil {
 		result = &sitelogin.ProbeResult{Status: sitelogin.UNKNOWN, Diagnostic: "nil result"}
 	}
@@ -701,13 +716,20 @@ func (m *LoginReminderMonitor) recordProbeResult(name string, prev *models.SiteL
 }
 
 func probeErrorText(result *sitelogin.ProbeResult) string {
-	if result.RawError != nil {
-		return result.RawError.Error()
+	text := ""
+	switch {
+	case result.RawError != nil:
+		text = result.RawError.Error()
+	case result.Status != sitelogin.OK:
+		text = result.Diagnostic
 	}
-	if result.Status != sitelogin.OK {
-		return result.Diagnostic
+	if result.FallbackNote != "" {
+		if text != "" {
+			text += "；"
+		}
+		text += result.FallbackNote
 	}
-	return ""
+	return text
 }
 
 // nextProbeDelay 返回本次结果之后到下一次定时探测的间隔。failures 是本次之后的连续失败次数。
