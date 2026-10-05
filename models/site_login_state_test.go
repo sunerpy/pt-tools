@@ -102,6 +102,8 @@ func TestSiteLoginStateClampLastVisit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// 每个用例从空值开始：last_visit_at 只前进，复用同一行会让后面的较早时间被忽略。
+			require.NoError(t, db.Model(&SiteLoginState{}).Where("site_name = ?", siteName).Update("last_visit_at", nil).Error)
 			err := repo.ClampLastVisit(siteName, tt.inputTS, now)
 			require.NoError(t, err)
 
@@ -109,7 +111,7 @@ func TestSiteLoginStateClampLastVisit(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, state)
 			require.NotNil(t, state.LastVisitAt, "LastVisitAt should be set")
-			assert.Equal(t, tt.expectedPersis, *state.LastVisitAt, "failure: %s", tt.desc)
+			assert.True(t, tt.expectedPersis.Equal(*state.LastVisitAt), "failure: %s (got %v)", tt.desc, *state.LastVisitAt)
 		})
 	}
 }
@@ -202,7 +204,84 @@ func TestSiteLoginState_IncrResetClamp(t *testing.T) {
 	require.NoError(t, repo.ClampLastVisit("hdsky", past, now))
 	st, err = repo.GetLoginState("hdsky")
 	require.NoError(t, err)
-	assert.WithinDuration(t, past, *st.LastVisitAt, 2*time.Second)
+	assert.WithinDuration(t, now, *st.LastVisitAt, 2*time.Second, "an older visit never moves last_visit_at backwards")
+}
+
+func TestSiteLoginState_ClampLastVisitOnlyMovesForward(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	repo := NewSiteLoginStateRepository(db)
+	require.NoError(t, repo.EnsureLoginStateRow(DefaultSiteLoginState("hdsky")))
+
+	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	newer := now.Add(-time.Hour)
+	older := now.Add(-48 * time.Hour)
+	require.NoError(t, repo.ClampLastVisit("hdsky", newer, now))
+	require.NoError(t, repo.ClampLastVisit("hdsky", older, now))
+	st, err := repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	require.NotNil(t, st.LastVisitAt)
+	assert.True(t, st.LastVisitAt.Equal(newer), "got %v", st.LastVisitAt)
+
+	// 历史数据可能以本地时区写入：比较必须按时刻，不能按字符串。
+	loc := time.FixedZone("CST", 8*3600)
+	require.NoError(t, db.Model(&SiteLoginState{}).Where("site_name = ?", "hdsky").
+		Update("last_visit_at", now.Add(-30*time.Minute).In(loc)).Error)
+	require.NoError(t, repo.ClampLastVisit("hdsky", now.Add(-40*time.Minute), now))
+	st, err = repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.True(t, st.LastVisitAt.Equal(now.Add(-30*time.Minute)), "an earlier instant written in UTC must not win over a later local-time value")
+
+	// 缺行时不建行、不报错。
+	require.NoError(t, repo.ClampLastVisit("ghost", now, now))
+	_, err = repo.GetLoginState("ghost")
+	assert.Error(t, err)
+}
+
+func TestSiteLoginState_EnsureRowIsIdempotent(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	repo := NewSiteLoginStateRepository(db)
+	defaults := DefaultSiteLoginState("hdsky")
+	defaults.BanThresholdDays = 45
+	require.NoError(t, repo.EnsureLoginStateRow(defaults))
+	require.NoError(t, repo.UpsertLoginState("hdsky", map[string]any{"ProbeMode": "manual"}))
+	require.NoError(t, repo.EnsureLoginStateRow(DefaultSiteLoginState("hdsky")), "an existing row is left untouched")
+
+	st, err := repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, 45, st.BanThresholdDays)
+	assert.Equal(t, "manual", st.ProbeMode)
+	var count int64
+	require.NoError(t, db.Model(&SiteLoginState{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+	assert.Error(t, repo.EnsureLoginStateRow(SiteLoginState{}))
+}
+
+func TestSiteLoginState_UpsertOnlyWritesGivenColumns(t *testing.T) {
+	db := newMemDB(t, &SiteLoginState{})
+	repo := NewSiteLoginStateRepository(db)
+	require.NoError(t, repo.EnsureLoginStateRow(DefaultSiteLoginState("hdsky")))
+
+	// 模拟探测在配置接口读取之后写入的列。
+	access := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, repo.UpdateColumns("hdsky", map[string]any{
+		"last_access_at": access, "last_probe_status": "OK", "consecutive_probe_failures": 2,
+	}))
+	require.NoError(t, repo.UpsertLoginState("hdsky", map[string]any{
+		"ProbeMode": "disabled", "BanThresholdDays": 60, "Unknown": "ignored", "RemindBeforeDays": 3.5,
+	}))
+
+	st, err := repo.GetLoginState("hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, "disabled", st.ProbeMode)
+	assert.Equal(t, 60, st.BanThresholdDays)
+	assert.Equal(t, 10, st.RemindBeforeDays, "values of unsupported types are ignored")
+	require.NotNil(t, st.LastAccessAt)
+	assert.True(t, st.LastAccessAt.Equal(access), "probe-owned columns are not rewritten by a config update")
+	assert.Equal(t, "OK", st.LastProbeStatus)
+	assert.Equal(t, 2, st.ConsecutiveProbeFailures)
+
+	require.NoError(t, repo.UpdateColumns("hdsky", nil))
+	assert.Error(t, repo.UpdateColumns("", map[string]any{"probe_mode": "auto"}))
 }
 
 func TestSiteLoginState_ListAndUpdateProbe(t *testing.T) {
