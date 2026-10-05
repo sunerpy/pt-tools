@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0-rc.3](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.2...v0.49.0-rc.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **site-login:** 修正投递静默判断、访问未生效清除与签到请求方法 ([#573](https://github.com/sunerpy/pt-tools/issues/573)) ([64f04db](https://github.com/sunerpy/pt-tools/commit/64f04db6a12d304c728f15b11c8fa9ceeea7a5ba))
+
 ## [0.49.0-rc.2](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.1...v0.49.0-rc.2) (2026-10-05)
 
 
