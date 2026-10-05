@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0-rc.6](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.5...v0.49.0-rc.6) (2026-10-05)
+
+
+### Bug Fixes
+
+* **web:** 自动停用不可用站点时保留凭证 ([#583](https://github.com/sunerpy/pt-tools/issues/583)) ([c92f2cb](https://github.com/sunerpy/pt-tools/commit/c92f2cbf6cc148b85a5ecc43ab34c97b2bc26729))
+
 ## [0.49.0-rc.5](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.4...v0.49.0-rc.5) (2026-10-05)
 
 
