@@ -506,6 +506,34 @@ func TestUpsertSiteWithRSS_PreservesLoginStateCookieForAPIKeySite(t *testing.T) 
 	require.Equal(t, loginCookie, loaded.Cookie)
 }
 
+// 站点 Cookie 只以密文落库：两种保存方式都不再把明文写进旧的 cookie 列，读取照常得到明文。
+func TestUpsertSite_StoresCookieOnlyEncrypted(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	enabled := true
+	cookie := "uid=1; pass=secret"
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: cookie, APIUrl: "http://api",
+	}))
+	_, err = s.UpsertSite(models.SiteGroup("hdsky"), models.SiteConfig{Enabled: &enabled, AuthMethod: "cookie", Cookie: cookie})
+	require.NoError(t, err)
+
+	for _, name := range []string{"springsunday", "hdsky"} {
+		var row models.SiteSetting
+		require.NoError(t, db.DB.Where("name = ?", name).First(&row).Error)
+		require.Empty(t, row.Cookie, name)
+		plain, err := s.DecryptCookie(row.CookieEncrypted)
+		require.NoError(t, err, name)
+		require.Equal(t, cookie, plain, name)
+		sc, err := s.GetSiteConf(models.SiteGroup(name))
+		require.NoError(t, err, name)
+		require.Equal(t, cookie, sc.Cookie, name)
+	}
+}
+
 func TestUpsertSiteWithRSS_CookieAuthStillEncryptsCookie(t *testing.T) {
 	writeTestSecretKey(t)
 	db, err := NewTempDBDir(t.TempDir())

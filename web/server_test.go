@@ -1421,7 +1421,7 @@ func TestAPISiteDetailDoesNotExposeCookieFields(t *testing.T) {
 
 	var site models.SiteSetting
 	require.NoError(t, global.GlobalDB.DB.Where("name = ?", "hdsky").First(&site).Error)
-	require.Equal(t, plainCookie, site.Cookie)
+	require.Empty(t, site.Cookie, "the cookie is stored only encrypted")
 	require.NotEmpty(t, site.CookieEncrypted)
 
 	recorder := httptest.NewRecorder()

@@ -96,9 +96,12 @@ func migrateCmctToSpringSunday(db *gorm.DB) error {
 			return updateErr
 		}
 
-		// 2. 如果 cmct 有用户配置但 springsunday 没有，则复制过来
-		if cmctSite.Cookie != "" && springSite.Cookie == "" {
+		// 2. 如果 cmct 有用户配置但 springsunday 没有，则复制过来。Cookie 看密文与旧明文两列，一起复制。
+		cmctHasCookie := cmctSite.CookieEncrypted != "" || cmctSite.Cookie != ""
+		springHasCookie := springSite.CookieEncrypted != "" || springSite.Cookie != ""
+		if cmctHasCookie && !springHasCookie {
 			springSite.Cookie = cmctSite.Cookie
+			springSite.CookieEncrypted = cmctSite.CookieEncrypted
 		}
 		if cmctSite.APIKey != "" && springSite.APIKey == "" {
 			springSite.APIKey = cmctSite.APIKey
