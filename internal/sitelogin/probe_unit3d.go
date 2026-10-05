@@ -24,6 +24,11 @@ func ProbeUnit3D(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, 
 	}
 
 	info, err := site.GetUserInfo(ctx)
+	_ = clock
+	return classifyUnit3DResult(info, err), nil
+}
+
+func classifyUnit3DResult(info v2.UserInfo, err error) *ProbeResult {
 	if err != nil {
 		status, diagnostic := classifyDriverError(err)
 		return &ProbeResult{
@@ -31,7 +36,7 @@ func ProbeUnit3D(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, 
 			Source:     ProbeSourceHTTPCookie,
 			RawError:   err,
 			Diagnostic: diagnostic,
-		}, nil
+		}
 	}
 
 	if info.LastLogin == 0 && info.LastAccess == 0 {
@@ -39,7 +44,7 @@ func ProbeUnit3D(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, 
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPCookie,
 			Diagnostic: "Unit3D driver returned UserInfo without last_login or last_action",
-		}, nil
+		}
 	}
 
 	res := &ProbeResult{Status: OK, Source: ProbeSourceHTTPCookie}
@@ -51,8 +56,7 @@ func ProbeUnit3D(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, 
 		t := time.Unix(info.LastAccess, 0).UTC()
 		res.LastAccessAt = &t
 	}
-	_ = clock
-	return res, nil
+	return res
 }
 
 // classifyDriverError maps a driver error to a ProbeStatus using sentinel
