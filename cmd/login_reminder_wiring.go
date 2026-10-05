@@ -6,6 +6,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/cloakdriver/transport"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
@@ -73,6 +74,38 @@ func loginReminderUserInfo(svc *v2.UserInfoService) sitelogin.UserInfoFetcher {
 	return svc
 }
 
+// loginReminderFallback 构造 CloakBrowser 后备：每次探测从库里读三项配置（改配置不需要重启）；
+// Cookie 与主通道同一取法（ConfigStore.SiteCookiePlaintext）；身份信息取最近一次成功探测保存的用户信息。
+func loginReminderFallback(store *core.ConfigStore, userInfo *v2.UserInfoService) scheduler.FallbackProvider {
+	if store == nil {
+		return nil
+	}
+	return &transport.Provider{
+		Settings: func() (transport.Settings, error) {
+			snap, err := store.GetCloakConfig()
+			if err != nil || !snap.HasToken || snap.Endpoint == "" || snap.ProfileID == "" {
+				return transport.Settings{}, err
+			}
+			token, err := store.GetCloakToken()
+			if err != nil {
+				return transport.Settings{}, err
+			}
+			return transport.Settings{Endpoint: snap.Endpoint, Token: token, ProfileID: snap.ProfileID}, nil
+		},
+		Identity: func(ctx context.Context, siteName string) (transport.Identity, bool) {
+			if userInfo == nil {
+				return transport.Identity{}, false
+			}
+			info, err := userInfo.GetUserInfo(ctx, siteName)
+			if err != nil {
+				return transport.Identity{}, false
+			}
+			return transport.Identity{UserID: info.UserID, Username: info.Username}, true
+		},
+		Cookie: store.SiteCookiePlaintext,
+	}
+}
+
 // wireLoginReminderMonitor 构造并启动登录提醒监控。userInfo 非空时探测经它进行（共用站点实例与限速器，
 // 顺带刷新用户统计）；为空（仓库初始化失败）时退回 resolver 每次新建站点实例。
 func wireLoginReminderMonitor(
@@ -102,6 +135,7 @@ func wireLoginReminderMonitor(
 		UserInfo:  loginReminderUserInfo(userInfo),
 		Resolver:  resolver,
 		Decryptor: decryptor,
+		Fallback:  loginReminderFallback(store, userInfo),
 		Logger:    global.GetSlogger(),
 	})
 	mgr.SetLoginReminderMonitor(mon)

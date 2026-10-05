@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/cloakdriver/transport"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
@@ -297,4 +301,118 @@ func TestWireLoginReminderMonitor_WiresAttendance(t *testing.T) {
 func TestLoginReminderUserInfo_NilStaysNil(t *testing.T) {
 	assert.Nil(t, loginReminderUserInfo(nil), "a nil service must not become a non-nil interface")
 	assert.NotNil(t, loginReminderUserInfo(v2.NewUserInfoService(v2.UserInfoServiceConfig{})))
+}
+
+// M1d：生产接线把 CloakBrowser 后备交给监控。主通道用真实的 NexusPHP 驱动，站点返回 Cloudflare 质询页时
+// 记为被拦截，按库里的三项配置向 Manager 启动 profile（带上 token）；Manager 拒绝时保留主通道的状态并附上后备的原因。
+// 没有 Profile ID 时不走后备。
+func TestWireLoginReminderMonitor_UsesCloakFallback(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("all_proxy", "")
+	var trackerHits atomic.Int32
+	tracker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		trackerHits.Add(1)
+		w.Header().Set("Cf-Mitigated", "challenge")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><title>Just a moment...</title>`))
+	}))
+	t.Cleanup(tracker.Close)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.SiteLoginState{}, &models.NotificationConf{},
+		&models.MigrationState{}, &models.MonitorNotificationLog{}, &models.SiteAttendanceLog{}, &models.SettingsGlobal{},
+		&models.CloakSettings{}))
+	prevDB := global.GlobalDB
+	global.GlobalDB = &models.TorrentDB{DB: db}
+	t.Cleanup(func() { global.GlobalDB = prevDB })
+	require.NoError(t, db.Create(&models.SiteSetting{
+		Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "uid=93012; pass=abc", APIUrl: tracker.URL,
+	}).Error)
+
+	var launches atomic.Int32
+	var gotPath, gotAuth atomic.Value
+	manager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		launches.Add(1)
+		gotPath.Store(r.URL.Path)
+		gotAuth.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(manager.Close)
+	store := core.NewConfigStore(global.GlobalDB)
+	profile := "profile-1"
+	require.NoError(t, store.SaveCloakConfig(manager.URL, "cloak-token", false, &profile))
+
+	repo := v2.NewInMemoryUserInfoRepo()
+	require.NoError(t, repo.Save(context.Background(), v2.UserInfo{Site: "hdsky", UserID: "93012", Username: "tester"}))
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: repo})
+	registry := v2.NewSiteRegistry(global.GetLogger())
+	site, err := registry.CreateSite("hdsky", v2.SiteCredentials{Cookie: "uid=93012; pass=abc"}, tracker.URL)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = site.Close() })
+	svc.RegisterSite(site)
+
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	wireLoginReminderMonitor(mgr, store, registry, nil, svc)
+	mon := mgr.GetLoginReminderMonitor()
+	require.NotNil(t, mon)
+
+	require.True(t, mon.RunProbeOnceForSite(context.Background(), "hdsky"))
+	assert.Positive(t, trackerHits.Load(), "the primary probe reached the site")
+	assert.Equal(t, int32(1), launches.Load())
+	assert.Equal(t, "/api/profiles/profile-1/launch", gotPath.Load())
+	assert.Equal(t, "Bearer cloak-token", gotAuth.Load())
+	var st models.SiteLoginState
+	require.NoError(t, db.Where("site_name = ?", "hdsky").First(&st).Error)
+	assert.Equal(t, "CHALLENGE", st.LastProbeStatus)
+	assert.Contains(t, st.LastProbeError, "cloudflare challenge")
+	assert.Contains(t, st.LastProbeError, "CloakBrowser 后备未成功")
+	assert.Contains(t, st.LastProbeError, "KEY_ERROR")
+
+	empty := ""
+	require.NoError(t, store.SaveCloakConfig(manager.URL, "", false, &empty))
+	require.True(t, mon.RunProbeOnceForSite(context.Background(), "hdsky"))
+	assert.Equal(t, int32(1), launches.Load(), "no profile ID, no fallback")
+	require.NoError(t, db.Where("site_name = ?", "hdsky").First(&st).Error)
+	assert.NotContains(t, st.LastProbeError, "CloakBrowser")
+}
+
+// 后备提供者的三个依赖都来自库与用户信息服务：Cookie 与主通道同一取法，身份信息缺失时不给 NexusPHP 后备。
+func TestLoginReminderFallback_ReadsStoreAndUserInfo(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.CloakSettings{}))
+	store := core.NewConfigStore(&models.TorrentDB{DB: db})
+	assert.Nil(t, loginReminderFallback(nil, nil))
+
+	def, ok := v2.GetDefinitionRegistry().Get("hdsky")
+	require.True(t, ok)
+	cipher, err := store.EncryptCookie("uid=93012; pass=abc")
+	require.NoError(t, err)
+	setting := models.SiteSetting{Name: "hdsky", CookieEncrypted: cipher}
+	repo := v2.NewInMemoryUserInfoRepo()
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: repo})
+
+	provider := loginReminderFallback(store, svc)
+	require.NotNil(t, provider)
+	assert.Nil(t, provider.FallbackFor(context.Background(), setting, def), "nothing configured yet")
+
+	profile := "profile-1"
+	require.NoError(t, store.SaveCloakConfig("http://cloak:8080", "tok", false, &profile))
+	assert.Nil(t, provider.FallbackFor(context.Background(), setting, def), "NexusPHP needs a known user ID")
+
+	require.NoError(t, repo.Save(context.Background(), v2.UserInfo{Site: "hdsky", UserID: "93012"}))
+	tr, ok := provider.FallbackFor(context.Background(), setting, def).(*transport.Transport)
+	require.True(t, ok)
+	assert.Equal(t, strings.TrimRight(def.URLs[0], "/")+"/userdetails.php?id=93012", tr.URL)
+	assert.Equal(t, "profile-1", tr.ProfileID)
+	require.Len(t, tr.Cookies, 2)
+	assert.Equal(t, "uid", tr.Cookies[0].Name)
+
+	assert.Nil(t, loginReminderFallback(store, nil).FallbackFor(context.Background(), setting, def),
+		"without the user info service only M-Team could fall back")
 }
