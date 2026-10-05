@@ -25,6 +25,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
+import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -618,6 +619,17 @@ const PROBE_LABEL: Record<string, string> = {
   disabled: "不探测",
 };
 
+/** 判定活跃的依据，与站点列表的说明一致 */
+const ACTIVE_SOURCE_LABEL: Record<string, string> = {
+  last_access: "站点最近访问",
+  api_last_login: "站点最近登录",
+  cookie_last_login: "站点最近登录",
+  last_login: "站点最近登录",
+  last_visit: "浏览器访问",
+  none: "-",
+  unknown: "-",
+};
+
 const loginState = ref<SiteLoginState | null>(null);
 const siteStats = ref<UserInfoResponse | null>(null);
 const siteTasks = ref<TaskItem[]>([]);
@@ -1195,6 +1207,39 @@ function ruleNameOf(id: number): string {
             <li class="sd-kv__row">
               <span class="sd-kv__k">最近探测</span>
               <span class="sd-kv__v">{{ formatWhen(loginState.last_probe_at) }}</span>
+            </li>
+            <li v-if="loginState.last_probe_status" class="sd-kv__row">
+              <span class="sd-kv__k">探测结果</span>
+              <span
+                class="sd-kv__v"
+                :class="{ 'is-warn': !isProbeSuccess(loginState.last_probe_status) }"
+                data-testid="sd-probe-status">
+                {{ probeStatusLabel(loginState.last_probe_status) }}
+              </span>
+            </li>
+            <li class="sd-kv__row">
+              <span class="sd-kv__k">判定依据</span>
+              <span class="sd-kv__v" data-testid="sd-active-source">
+                {{ ACTIVE_SOURCE_LABEL[loginState.effective_source ?? "none"] ?? "-" }}
+              </span>
+            </li>
+            <li v-if="loginState.probe_mode === 'auto'" class="sd-kv__row">
+              <span class="sd-kv__k">下次探测</span>
+              <span class="sd-kv__v" data-testid="sd-next-probe">{{
+                formatWhen(loginState.next_probe_at)
+              }}</span>
+            </li>
+            <li v-if="(loginState.first_failure_at ?? 0) > 0" class="sd-kv__row">
+              <span class="sd-kv__k">连续失败自</span>
+              <span class="sd-kv__v is-warn" data-testid="sd-failing-since">{{
+                formatWhen(loginState.first_failure_at)
+              }}</span>
+            </li>
+            <li v-if="(loginState.access_stale_since ?? 0) > 0" class="sd-kv__row">
+              <span class="sd-kv__k">访问状态</span>
+              <span class="sd-kv__v is-warn" data-testid="sd-access-stale">
+                访问未生效，需要手动登录
+              </span>
             </li>
           </ul>
           <p v-else class="sd-empty">还没有这个站点的探测记录。</p>
