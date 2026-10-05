@@ -201,8 +201,9 @@ func TestWireLoginReminderMonitor_WithoutChatOpsRecordsOnly(t *testing.T) {
 
 // wiringProbeSite 是注册进 UserInfoService 的假站点，不发网络请求。
 type wiringProbeSite struct {
-	calls atomic.Int32
-	info  v2.UserInfo
+	calls   atomic.Int32
+	attends atomic.Int32
+	info    v2.UserInfo
 }
 
 func (s *wiringProbeSite) ID() string                                       { return "hdsky" }
@@ -219,6 +220,13 @@ func (s *wiringProbeSite) Search(context.Context, v2.SearchQuery) ([]v2.TorrentI
 func (s *wiringProbeSite) GetUserInfo(context.Context) (v2.UserInfo, error) {
 	s.calls.Add(1)
 	return s.info, nil
+}
+
+func (s *wiringProbeSite) SupportsAttendance() bool { return true }
+
+func (s *wiringProbeSite) Attend(context.Context) (v2.AttendResult, error) {
+	s.attends.Add(1)
+	return v2.AttendResult{Status: v2.AttendSigned, Message: "签到成功"}, nil
 }
 
 // M1b：生产接线把 UserInfoService 交给监控，探测走已注册的共享实例并刷新统计。
@@ -251,6 +259,39 @@ func TestWireLoginReminderMonitor_ProbesThroughUserInfoService(t *testing.T) {
 	var st models.SiteLoginState
 	require.NoError(t, db.Where("site_name = ?", "hdsky").First(&st).Error)
 	assert.Equal(t, "OK", st.LastProbeStatus)
+}
+
+// M1c：接线同时启动每日签到监控，签到用 UserInfoService 里的共享实例。
+func TestWireLoginReminderMonitor_WiresAttendance(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.SiteLoginState{}, &models.NotificationConf{},
+		&models.MigrationState{}, &models.MonitorNotificationLog{}, &models.SiteAttendanceLog{}, &models.SettingsGlobal{}))
+	prevDB := global.GlobalDB
+	global.GlobalDB = &models.TorrentDB{DB: db}
+	t.Cleanup(func() { global.GlobalDB = prevDB })
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "c=1"}).Error)
+
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: v2.NewInMemoryUserInfoRepo()})
+	site := &wiringProbeSite{}
+	svc.RegisterSite(site)
+
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), nil, svc)
+	att := mgr.GetAttendanceMonitor()
+	require.NotNil(t, att)
+
+	row, err := att.SignNow(context.Background(), "hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, models.AttendanceSigned, row.Status)
+	assert.Equal(t, int32(1), site.attends.Load())
+
+	_, ok := attendanceSites(nil).AttendanceSite("hdsky")
+	assert.False(t, ok)
+	_, ok = attendanceSites(svc).AttendanceSite("missing")
+	assert.False(t, ok)
 }
 
 func TestLoginReminderUserInfo_NilStaysNil(t *testing.T) {

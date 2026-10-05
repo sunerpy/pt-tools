@@ -107,4 +107,36 @@ func wireLoginReminderMonitor(
 	mgr.SetLoginReminderMonitor(mon)
 	mon.Start()
 	global.GetSlogger().Info("登录提醒监控器已初始化并启动")
+
+	// 每日签到与登录探测共用单站锁和通知投递器。
+	var window scheduler.AttendanceWindowSource
+	if store != nil {
+		window = store
+	}
+	att := scheduler.NewAttendanceMonitor(scheduler.AttendanceMonitorConfig{
+		DB:       db,
+		Sites:    attendanceSites(userInfo),
+		Window:   window,
+		Locker:   mon,
+		Notifier: notifier,
+		Logger:   global.GetSlogger(),
+	})
+	mgr.SetAttendanceMonitor(att)
+	att.Start()
+	global.GetSlogger().Info("每日签到监控器已初始化并启动")
+}
+
+// attendanceSites 从 UserInfoService 取已注册的共享站点实例签到，与搜索、登录探测共用限速器。
+func attendanceSites(svc *v2.UserInfoService) scheduler.AttendanceSites {
+	return scheduler.AttendanceSitesFunc(func(name string) (v2.AttendanceCapable, bool) {
+		if svc == nil {
+			return nil, false
+		}
+		site, ok := svc.GetSite(name)
+		if !ok {
+			return nil, false
+		}
+		capable, ok := site.(v2.AttendanceCapable)
+		return capable, ok
+	})
 }
