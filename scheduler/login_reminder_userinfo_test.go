@@ -268,3 +268,23 @@ func TestRequestProbe_SchedulesImmediateProbe(t *testing.T) {
 	var nilMonitor *LoginReminderMonitor
 	assert.NoError(t, nilMonitor.RequestProbe("hdsky"))
 }
+
+// 预算为 0 时用默认的 150 秒和 60 秒，经 UserInfoService 的探测照常完成。
+func TestProbe_UserInfoPathWithDefaultBudgets(t *testing.T) {
+	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	m := newReminderMonitorForTest(newReminderTestDB(t), now)
+	m.probeBudget = 0
+	m.primaryTimeout = 0
+	createSite(t, m, cookieSite("hdsky"))
+	m.userInfo = &fakeUserInfo{info: okUserInfo(now)}
+	m.RunProbeOnce(context.Background())
+	assert.Equal(t, "OK", loadState(t, m, "hdsky").LastProbeStatus)
+}
+
+// 登录状态表不可用时 RequestProbe 返回错误，调用方据此记告警。
+func TestRequestProbe_ReportsStateErrors(t *testing.T) {
+	db := newReminderTestDB(t)
+	require.NoError(t, db.Migrator().DropTable(&models.SiteLoginState{}))
+	m := newReminderMonitorForTest(db, time.Now())
+	assert.Error(t, m.RequestProbe("hdsky"))
+}

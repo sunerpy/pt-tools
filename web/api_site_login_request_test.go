@@ -97,3 +97,18 @@ func TestSiteConfigSaveThroughMux_RequestsProbe(t *testing.T) {
 	mon.RunDueProbes(context.Background())
 	assert.Equal(t, int32(1), fetch.calls.Load())
 }
+
+// requestLoginProbe 在没有管理器、没有登录监控或写库失败时都只记告警，不影响请求本身。
+func TestRequestLoginProbe_Guards(t *testing.T) {
+	var nilServer *Server
+	nilServer.requestLoginProbe("hdsky")
+	(&Server{}).requestLoginProbe("hdsky")
+
+	srv := setupServer(t)
+	srv.requestLoginProbe("hdsky") // 管理器里还没有登录监控
+
+	mon := scheduler.NewLoginReminderMonitor(scheduler.LoginReminderConfig{DB: global.GlobalDB.DB})
+	srv.mgr.SetLoginReminderMonitor(mon)
+	srv.requestLoginProbe("hdsky") // site_login_states 表不存在：写库失败只记告警
+	assert.False(t, global.GlobalDB.DB.Migrator().HasTable(&models.SiteLoginState{}))
+}

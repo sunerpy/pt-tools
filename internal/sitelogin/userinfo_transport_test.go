@@ -99,3 +99,32 @@ func TestProbeMTorrent_ReportsLastLogin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, res.LastLoginAt, "no last login reported, none recorded")
 }
+
+// 两条主通道共用的归类按架构分派，来源与原来的 HTTP 主通道一致。
+func TestClassifyUserInfo_RoutesBySchema(t *testing.T) {
+	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	info := v2.UserInfo{Username: "u", LastAccess: now.Add(-time.Hour).Unix(), LastLogin: now.Add(-2 * time.Hour).Unix()}
+	cases := []struct {
+		schema     v2.Schema
+		wantStatus ProbeStatus
+		wantSource ProbeSource
+	}{
+		{v2.SchemaNexusPHP, OK, ProbeSourceHTTPCookie},
+		{v2.SchemaHDDolby, OK, ProbeSourceHTTPCookie},
+		{v2.SchemaRousi, OK, ProbeSourceHTTPAPIKey},
+		{v2.SchemaMTorrent, OK, ProbeSourceHTTPAPIKey},
+		{v2.SchemaGazelle, OK, ProbeSourceHTTPCookie},
+		{v2.SchemaUnit3D, OK, ProbeSourceHTTPCookie},
+		{v2.Schema("Unknown"), UNKNOWN, ""},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.schema), func(t *testing.T) {
+			res := ClassifyUserInfo(&v2.SiteDefinition{ID: "x", Schema: tc.schema}, info, nil, NewFakeClock(now))
+			require.NotNil(t, res)
+			assert.Equal(t, tc.wantStatus, res.Status)
+			assert.Equal(t, tc.wantSource, res.Source)
+		})
+	}
+	res := ClassifyUserInfo(nil, info, nil, NewFakeClock(now))
+	assert.Equal(t, UNKNOWN, res.Status)
+}
