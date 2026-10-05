@@ -3,40 +3,28 @@ package cmd
 import (
 	"context"
 
-	"gorm.io/gorm"
-
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
-	"github.com/sunerpy/pt-tools/internal/crypto"
-	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
-type loginReminderConfLister struct {
-	db *gorm.DB
-}
-
-func (l loginReminderConfLister) ListNotificationConfs(ctx context.Context) ([]models.NotificationConf, error) {
-	var confs []models.NotificationConf
-	if err := l.db.WithContext(ctx).Where("enabled = ?", true).Find(&confs).Error; err != nil {
-		return nil, err
+// loginReminderSender 把登录监控的通知交给 ChatOps 的 live 通道同步发送（PushSync）。
+//
+// 不自建 notify.Router：Router 会按通道配置 registry.Make 出新实例，QQ 会在已被占用的
+// listen_addr 上再开反向 WS 服务（收不到 NapCat 连接），Telegram 会用同一个 bot token
+// 再起一个长轮询，与 ChatOps 争抢更新并丢掉被它取走的命令。
+// 也不用 Push：它在 live 发送失败后转写 outbox 并返回 nil，重试应由 MonitorNotificationLog 负责。
+func loginReminderSender(bs *chatopsBootstrap) scheduler.MonitorSender {
+	if bs == nil || bs.deps == nil || bs.deps.NotificationSvc == nil {
+		return nil
 	}
-	out := make([]models.NotificationConf, 0, len(confs))
-	for i := range confs {
-		conf := confs[i]
-		if conf.ConfigJSON != "" {
-			plain, derr := crypto.Decrypt(conf.ConfigJSON)
-			if derr != nil {
-				global.GetSlogger().Warnf("登录提醒通道配置解密失败 conf_id=%d type=%s: %v", conf.ID, conf.ChannelType, derr)
-				continue
-			}
-			conf.ConfigJSON = string(plain)
-		}
-		out = append(out, conf)
-	}
-	return out, nil
+	svc := bs.deps.NotificationSvc
+	return scheduler.MonitorSenderFunc(func(ctx context.Context, confID uint, title, text string) error {
+		return svc.PushSync(ctx, app.Notification{Title: title, Text: text, SourceConfID: confID})
+	})
 }
 
 type loginReminderDecryptor struct {
@@ -88,18 +76,17 @@ func wireLoginReminderMonitor(
 	}
 	db := global.GlobalDB.DB
 
-	registry := notify.DefaultRegistry()
-	if bs != nil && bs.registry != nil {
-		registry = bs.registry
+	notifier := scheduler.NewMonitorNotifier(db, loginReminderSender(bs), nil, global.GetSlogger())
+	if !notifier.Enabled() {
+		global.GetSlogger().Warn("登录提醒监控器：ChatOps 通知服务不可用，提醒只记录决策、不发送")
 	}
-	router := notify.NewRouter(registry, nil, loginReminderConfLister{db: db})
 
 	decryptor := loginReminderDecryptor{store: store}
 	resolver := loginReminderResolver{registry: siteRegistry, decryptor: decryptor}
 
 	mon := scheduler.NewLoginReminderMonitor(scheduler.LoginReminderConfig{
 		DB:        db,
-		Router:    router,
+		Notifier:  notifier,
 		Resolver:  resolver,
 		Decryptor: decryptor,
 		Logger:    global.GetSlogger(),
