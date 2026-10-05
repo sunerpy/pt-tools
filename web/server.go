@@ -954,10 +954,11 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// disableUnavailableSites 关掉站点定义标为不可用的站点。只改启用开关，凭证和其他配置都保留，
+// 站点恢复可用后重新启用即可。
 func (s *Server) disableUnavailableSites(sites []models.SiteGroup) {
 	for _, sg := range sites {
-		disabled := models.SiteConfig{Enabled: func() *bool { f := false; return &f }()}
-		if _, err := s.store.UpsertSite(sg, disabled); err != nil {
+		if err := s.store.SetSiteEnabled(sg, false); err != nil {
 			global.GetSlogger().Warnf("[Site] 禁用不可用站点失败: %s, err=%v", sg, err)
 			continue
 		}
