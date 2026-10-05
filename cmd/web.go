@@ -487,6 +487,7 @@ func bootstrapChatOps(
 		RSSWizard:  &chatopsRSSWizardService{store: store, db: db},
 		Bindings:   &commandsBindingResolver{lookup: bindings},
 		Sessions:   sessionStore,
+		Attendance: attendanceCommands{mgr: mgr},
 	})
 
 	chain := chatops.NewMessageChain(

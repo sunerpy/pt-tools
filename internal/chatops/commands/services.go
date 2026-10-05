@@ -25,6 +25,23 @@ type Services struct {
 	RSSWizard  RSSWizardService
 	Bindings   BindingResolver
 	Sessions   chatops.SessionStoreAPI
+	Attendance AttendanceService
+}
+
+// AttendanceService 是 /signin 用到的每日签到能力。
+type AttendanceService interface {
+	// SignIn 立即签到一个站点。
+	SignIn(ctx context.Context, site string) (AttendanceOutcome, error)
+	// SignInAll 对开启了自动签到、当天还没有结果的站点各签到一次，返回这些站点当天的结果。
+	SignInAll(ctx context.Context) ([]AttendanceOutcome, error)
+}
+
+// AttendanceOutcome 是一个站点当天的签到结果；Status 取 signed、already、failed、unsupported、pending。
+type AttendanceOutcome struct {
+	Site    string
+	Status  string
+	Message string
+	Error   string
 }
 
 type RSSWizardService interface {
