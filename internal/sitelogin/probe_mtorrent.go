@@ -43,6 +43,8 @@ func classifyMTorrentResult(info v2.UserInfo, err error) *ProbeResult {
 
 func classifyMTorrentError(err error) *ProbeResult {
 	switch {
+	case errors.Is(err, v2.ErrCloudflareChallenge):
+		return &ProbeResult{Status: CHALLENGE, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrSessionExpired):
 		return &ProbeResult{Status: SESSION_EXPIRED, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrCircuitOpen), errors.Is(err, v2.ErrRateLimited):

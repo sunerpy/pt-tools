@@ -61,12 +61,14 @@ func classifyUnit3DResult(info v2.UserInfo, err error) *ProbeResult {
 
 // classifyDriverError maps a driver error to a ProbeStatus using sentinel
 // errors via errors.Is wherever possible. Sentinel errors are preferred over
-// string matching; the only string-based fallback is for Cloudflare/challenge
-// indicators since site/v2 does not yet expose a dedicated sentinel for that.
+// string matching; the string-based fallback for Cloudflare/challenge
+// indicators covers errors that do not wrap v2.ErrCloudflareChallenge.
 func classifyDriverError(err error) (ProbeStatus, string) {
 	switch {
 	case err == nil:
 		return OK, ""
+	case errors.Is(err, v2.ErrCloudflareChallenge):
+		return CHALLENGE, "cloudflare challenge"
 	case errors.Is(err, v2.ErrSessionExpired):
 		return SESSION_EXPIRED, "session expired"
 	case errors.Is(err, v2.ErrInvalidCredentials):

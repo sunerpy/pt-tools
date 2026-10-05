@@ -99,13 +99,3 @@ func (t UserInfoServiceTransport) FetchUserInfo(ctx context.Context, def *v2.Sit
 	}
 	return ClassifyUserInfo(def, info, err, clock), nil
 }
-
-// CloakTransport is a placeholder for T11-T14, when concrete CloakBrowser
-// schema drivers are wired under internal/cloakdriver/<schema>/.
-type CloakTransport struct{}
-
-func (CloakTransport) Name() string { return "cloak" }
-
-func (CloakTransport) FetchUserInfo(context.Context, *v2.SiteDefinition, v2.Site, Clock) (*ProbeResult, error) {
-	return &ProbeResult{Status: UNKNOWN, Diagnostic: "cloak transport pending T11-T14 implementation"}, nil
-}
