@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { globalApi, type GlobalSettings } from "@/api";
+import { type AttendanceSettings, attendanceApi, globalApi, type GlobalSettings } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -44,6 +44,13 @@ const form = ref<GlobalSettings>({
   free_end_advance_minutes: 0,
   default_filter_mode: "auto_free",
 });
+
+/**
+ * 每日签到时间窗走自己的接口（只写这两列），和全局配置一起读、一起保存。
+ * 读不回来时保留默认值，但不当成「改过」去保存。
+ */
+const attendanceForm = ref<AttendanceSettings>({ window_start: "08:00", window_end: "10:00" });
+const attendanceSaved = ref<AttendanceSettings | null>(null);
 
 /** short 是给页头摘要用的短名：摘要行是单行截断的，装不下带括号的完整标签 */
 const filterModeOptions = [
@@ -111,6 +118,13 @@ async function loadData() {
   };
   loaded.value = true;
   showWarning.value = !form.value.download_dir;
+  try {
+    const att = await attendanceApi.getSettings();
+    attendanceForm.value = { ...att };
+    attendanceSaved.value = { ...att };
+  } catch {
+    attendanceSaved.value = null;
+  }
 }
 
 onMounted(loadData);
@@ -121,6 +135,11 @@ async function save() {
     showWarning.value = true;
     return;
   }
+  const att = attendanceForm.value;
+  if (!(att.window_start < att.window_end)) {
+    ElMessage.error("签到时间窗的开始时间必须早于结束时间");
+    return;
+  }
 
   saving.value = true;
   try {
@@ -128,6 +147,10 @@ async function save() {
       ...form.value,
       default_interval_minutes: Math.max(5, form.value.default_interval_minutes),
     });
+    const saved = attendanceSaved.value;
+    if (saved && (saved.window_start !== att.window_start || saved.window_end !== att.window_end)) {
+      attendanceSaved.value = await attendanceApi.saveSettings({ ...att });
+    }
     ElMessage.success("保存成功");
     showWarning.value = false;
   } catch (e: unknown) {
@@ -312,6 +335,37 @@ async function save() {
               表示到点处理（默认）。建议 ≥5 分钟。
             </div>
           </el-form-item>
+        </div>
+
+        <div class="pt-strip">
+          <PtIcon name="calendar-check" :size="13" />
+          <span>每日签到</span>
+        </div>
+        <div class="settings-body">
+          <div class="field-row">
+            <el-form-item label="签到时间窗开始">
+              <el-time-select
+                v-model="attendanceForm.window_start"
+                start="00:00"
+                step="00:15"
+                end="23:45"
+                :clearable="false"
+                data-testid="attendance-window-start" />
+              <div class="field-tip">
+                开启了每日自动签到的站点，每天在这个时间段内随机选一个时刻签到（服务器时区）
+              </div>
+            </el-form-item>
+            <el-form-item label="签到时间窗结束">
+              <el-time-select
+                v-model="attendanceForm.window_end"
+                start="00:15"
+                step="00:15"
+                end="23:45"
+                :clearable="false"
+                data-testid="attendance-window-end" />
+              <div class="field-tip">在站点列表的「保号配置」里按站点开启每日自动签到</div>
+            </el-form-item>
+          </div>
         </div>
       </el-form>
 

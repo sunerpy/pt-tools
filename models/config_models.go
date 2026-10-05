@@ -108,6 +108,11 @@ type SettingsGlobal struct {
 	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`   // 检查间隔（分钟）
 	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"` // 超标时删除种子及数据（否则仅暂停）
 
+	// 每日签到时间窗（HH:MM，进程时区）：各站每天在窗口内随机取一个时刻签到。
+	// 只经 ConfigStore.SaveAttendanceWindow 写；SaveGlobalSettings 不改这两列。
+	AttendanceWindowStart string `json:"attendance_window_start" gorm:"size:5;default:'08:00'"`
+	AttendanceWindowEnd   string `json:"attendance_window_end" gorm:"size:5;default:'10:00'"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -201,7 +206,8 @@ type SiteSetting struct {
 	ParserConfig      string    `gorm:"type:text" json:"parser_config,omitempty"`
 	UploadLimitKBs    int       `gorm:"default:0" json:"upload_limit_kbs"`
 	DownloadLimitKBs  int       `gorm:"default:0" json:"download_limit_kbs"`
-	SeedingCapacityGB float64   `gorm:"default:0" json:"seeding_capacity_gb"` // 单站点刷流容量上限(GB)，0=不限制 (#405)
+	SeedingCapacityGB float64   `gorm:"default:0" json:"seeding_capacity_gb"`    // 单站点刷流容量上限(GB)，0=不限制 (#405)
+	AttendanceEnabled bool      `gorm:"default:false" json:"attendance_enabled"` // 每日自动签到，默认关闭；只经 ConfigStore.SetSiteAttendanceEnabled 写
 	IsBuiltin         bool      `json:"is_builtin"`
 	TemplateID        *uint     `gorm:"index" json:"template_id,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`

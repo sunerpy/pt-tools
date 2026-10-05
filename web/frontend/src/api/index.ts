@@ -257,6 +257,42 @@ export interface SiteLoginState {
   probe_mode: string;
 }
 
+/** 当天的签到状态：pending 之外都是最终结果；没有记录时为空串 */
+export type AttendanceStatus = "" | "pending" | "signed" | "already" | "failed" | "unsupported";
+
+/** GET /api/sites/attendance 的一项：能否签到、开关与当天的结果（时间为 Unix 秒） */
+export interface SiteAttendance {
+  site_name: string;
+  site_enabled: boolean;
+  attendance_enabled: boolean;
+  supported: boolean;
+  unsupported_reason?: string;
+  day: string;
+  status: AttendanceStatus;
+  attempts: number;
+  message?: string;
+  last_error?: string;
+  scheduled_at?: number;
+  next_attempt_at?: number;
+  last_attempt_at?: number;
+}
+
+/** 每日签到时间窗（HH:MM，服务端时区） */
+export interface AttendanceSettings {
+  window_start: string;
+  window_end: string;
+}
+
+export const attendanceApi = {
+  list: () => api.get<SiteAttendance[]>("/api/sites/attendance"),
+  signNow: (name: string) => api.post<SiteAttendance>(`/api/sites/${name}/attendance`),
+  setEnabled: (name: string, enabled: boolean) =>
+    api.put<SiteAttendance>(`/api/sites/${name}/attendance`, { enabled }),
+  getSettings: () => api.get<AttendanceSettings>("/api/sites/attendance/settings"),
+  saveSettings: (data: AttendanceSettings) =>
+    api.put<AttendanceSettings>("/api/sites/attendance/settings", data),
+};
+
 export const sitesApi = {
   list: (signal?: AbortSignal) => api.get<Record<string, SiteConfig>>("/api/sites", { signal }),
   listLoginStates: () => api.get<SiteLoginState[]>("/api/sites/login-state"),

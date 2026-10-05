@@ -1,6 +1,6 @@
 # Login status and key backup
 
-pt-tools periodically visits each site's profile with the cookie or API key you configured, reads the `last_access` / `last_login` information the site provides, and works out how many days remain before the site's inactivity limit. When an account gets close to the limit, it sends a reminder through the notification channels you have configured. Cookies can be synced with PT Tools Helper.
+pt-tools periodically visits each site's profile with the cookie or API key you configured, reads the `last_access` / `last_login` information the site provides, and works out how many days remain before the site's inactivity limit. When an account gets close to the limit, it sends a reminder through the notification channels you have configured; [daily sign-in](#daily-sign-in) can also be turned on per site. Cookies can be synced with PT Tools Helper.
 
 ## How to use it
 
@@ -94,6 +94,28 @@ Reminders start once the days left are no more than Days ahead to remind:
 - Inactivity reminders with 1 day or less left (including past the limit) and Test reminder ignore quiet hours.
 - A failed delivery is retried after 1, 5 and 30 minutes; after the 4th failure it is given up. A retry that falls in quiet hours also waits until they end.
 - Reminders are sent through the channels ChatOps already has connected; QQ and Telegram do not open a second connection. When the notification service has not started (the log shows a warning), reminders are recorded but not sent.
+
+## Daily sign-in
+
+pt-tools can sign in to a site once a day (the sign-in plugin of NexusPHP sites, a request to `attendance.php`). It is off by default.
+
+- Turning it on: click Keep-alive settings (保号配置) on the site's row in the site list and turn on Daily automatic sign-in (每日自动签到). Sites that do not support it cannot be turned on; the reason is shown under the switch.
+- Timing: each day the site is signed in at a random moment within the window set under Global settings → Daily sign-in (每日签到), `08:00`–`10:00` by default, in the server's time zone (`TZ` in Docker). If the window has already passed when you turn it on or when pt-tools starts, the sign-in happens within the next 10 minutes.
+- Results: once the sign-in succeeds, or the site says you already signed in today, no more requests are made that day. A failure is retried after 10 and then 30 minutes; if the third attempt fails too, the day is recorded as a failure (签到失败) and the next day starts afresh.
+- Sign-in shares the site connection and rate limit with login probes, and a site is never probed and signed in at the same time.
+- Notification: once every site with sign-in turned on has a result for the day, one summary goes to every enabled notification channel; a channel in its quiet hours waits until they end.
+- Signing in by hand: Sign in now (立即签到, the calendar icon) on the site's row, Sign in now on the Keep-alive rules (保号规则) card of the site's detail page, and the ChatOps command `/signin [site]` (without a site, it signs in every site with automatic sign-in turned on that has no result today). Signing in by hand does not require automatic sign-in to be turned on, and a failure does not use up the automatic retries.
+
+Hover over Sign in now in the site list to see today's sign-in status. These built-in sites do not support automatic sign-in:
+
+| Site                               | Reason                                                 |
+| ---------------------------------- | ------------------------------------------------------ |
+| 52PT, PTCHDBits, U2                | Signing in requires answering a question               |
+| HDSky, OpenCD                      | Signing in requires a captcha                          |
+| HDArea, BTSCHOOL                   | Signing in works differently from usual NexusPHP sites |
+| M-Team, HD Dolby, Rousi Pro, MooKo | Not NexusPHP sites; sign-in is not supported yet       |
+
+Signing in adds one request to the site every day; make sure the site's rules allow automatic sign-in before turning it on.
 
 ## Backing up the encryption key
 

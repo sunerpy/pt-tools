@@ -197,7 +197,7 @@ When the bot replies 绑定成功 ("linked"), you are done.
 
 ### Trying `/help`
 
-Once linked, send `/help`; the bot lists all 13 commands.
+Once linked, send `/help`; the bot lists every command.
 
 A linked account has admin rights, so it can use admin commands such as `/pause`, `/resume` and `/delete`.
 

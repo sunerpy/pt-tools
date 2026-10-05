@@ -28,6 +28,7 @@ var HdareaDefinition = &v2.SiteDefinition{
 	Aka:            []string{"高清视界", "High Definition Area"},
 	Description:    "HDArea 高清设备交流分享平台",
 	Schema:         v2.SchemaNexusPHP,
+	Attendance:     &v2.AttendanceConfig{Unsupported: "签到方式与常见 NexusPHP 站点不同（提交表单），暂不支持自动签到"},
 	URLs:           []string{"https://hdarea.club/"},
 	FaviconURL:     "https://hdarea.club/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,

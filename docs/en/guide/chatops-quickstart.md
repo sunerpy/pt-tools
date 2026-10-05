@@ -10,7 +10,7 @@ The idea is the same as in Hermes or MoviePilot: you send a command to a bot in 
 
 Highlights:
 
-- **13 built-in commands** covering status queries, torrent control and task management
+- **Built-in commands** covering status queries, torrent control, task management and site sign-in
 - **Linked accounts only**: only an account linked with a binding code can run commands; QQ and Telegram channels also check the sender against the channel's allow lists first
 - **Binding codes**: an 8-character one-time code, valid for 5 minutes by default (from 1 hour up to no expiry if you choose), generated in the web UI and sent to the person whose account you want to link
 - **An audit trail**: the result, latency and sender of every command are recorded in the `action_audit` table
@@ -65,6 +65,7 @@ Every command starts with `/` and is sent in the private chat. Commands are case
 | `/pause <hash>`  | Pauses a torrent (a prefix of the hash is enough)                                                                | Admin      |
 | `/resume <hash>` | Resumes a torrent                                                                                                | Admin      |
 | `/delete <hash>` | Deletes a torrent, after a confirmation                                                                          | Admin      |
+| `/signin [site]` | Signs in now; without a site, signs in every site with automatic sign-in enabled that has no result today        | Admin      |
 | `/bind <code>`   | Links the current account to pt-tools with an 8-character binding code                                           | Anyone     |
 | `/unbind`        | Unlinks the current account                                                                                      | Admin      |
 | `/addrss`        | Adds an RSS subscription interactively (a text wizard, or one line: `/addrss site \| name \| URL \| downloader`) | Admin      |

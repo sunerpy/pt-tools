@@ -15,6 +15,7 @@ var PTerClubDefinition = &v2.SiteDefinition{
 	Aka:            []string{"猫站", "PTer", "PT之友"},
 	Description:    "综合性 PT 站点",
 	Schema:         v2.SchemaNexusPHP,
+	Attendance:     &v2.AttendanceConfig{Path: "/attendance-ajax.php"},
 	URLs:           []string{"https://pterclub.net/"},
 	FaviconURL:     "https://pterclub.net/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,
