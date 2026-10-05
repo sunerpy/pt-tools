@@ -49,6 +49,7 @@ func TestAttendanceDefinitions(t *testing.T) {
 			want = "/attendance-ajax.php"
 		}
 		assert.Equal(t, want, cfg.Path, def.ID)
+		assert.Contains(t, []string{http.MethodGet, http.MethodPost}, cfg.Method, def.ID)
 	}
 	for id := range attendanceUnsupported {
 		assert.True(t, seen[id], "%s is listed as unsupported but has no definition", id)

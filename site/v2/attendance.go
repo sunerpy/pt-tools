@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -12,12 +13,14 @@ import (
 	"unicode"
 )
 
-// AttendanceConfig 描述站点的每日签到：GET 请求 Path，按返回页面的文字判断结果。
+// AttendanceConfig 描述站点的每日签到：按 Method 请求 Path，按返回页面的文字判断结果。
 // NexusPHP 站点不配置时使用 DefaultNexusPHPAttendance；没有签到、签到要验证码或答题的站点
 // 设置 Unsupported，值是界面上显示的原因。
 type AttendanceConfig struct {
 	// Path 是签到请求的路径，可以带查询参数（如 /attendance-ajax.php?act=sign）。
 	Path string `json:"path,omitempty"`
+	// Method 是请求方法，GET（默认）或 POST；POST 时 Path 里的查询参数作为表单提交。
+	Method string `json:"method,omitempty"`
 	// SuccessPatterns 匹配「本次签到成功」的页面文字（正则）；为空时用 NexusPHP 的默认规则。
 	SuccessPatterns []string `json:"successPatterns,omitempty"`
 	// AlreadyPatterns 匹配「今天已经签到过」的页面文字（正则）；为空时用 NexusPHP 的默认规则。
@@ -49,6 +52,7 @@ var (
 func DefaultNexusPHPAttendance() *AttendanceConfig {
 	return &AttendanceConfig{
 		Path:            defaultAttendancePath,
+		Method:          http.MethodGet,
 		SuccessPatterns: append([]string(nil), nexusPHPAttendanceSuccess...),
 		AlreadyPatterns: append([]string(nil), nexusPHPAttendanceAlready...),
 	}
@@ -72,6 +76,9 @@ func ResolveAttendanceConfig(def *SiteDefinition) *AttendanceConfig {
 	}
 	if cfg.Path == "" {
 		cfg.Path = defaultAttendancePath
+	}
+	if cfg.Method == "" {
+		cfg.Method = http.MethodGet
 	}
 	if len(cfg.SuccessPatterns) == 0 {
 		cfg.SuccessPatterns = append([]string(nil), nexusPHPAttendanceSuccess...)
@@ -211,19 +218,26 @@ func attendanceSnippet(text string, loc []int) string {
 	return strings.TrimSpace(string(runes[start:end]))
 }
 
-func attendanceRequest(path string) (NexusPHPRequest, error) {
-	u, err := url.Parse(path)
-	if err != nil {
-		return NexusPHPRequest{}, fmt.Errorf("invalid attendance path %q: %w", path, err)
+func attendanceRequest(cfg *AttendanceConfig) (NexusPHPRequest, error) {
+	method := strings.ToUpper(strings.TrimSpace(cfg.Method))
+	if method == "" {
+		method = http.MethodGet
 	}
-	req := NexusPHPRequest{Path: u.Path}
+	if method != http.MethodGet && method != http.MethodPost {
+		return NexusPHPRequest{}, fmt.Errorf("unsupported attendance method %q", cfg.Method)
+	}
+	u, err := url.Parse(cfg.Path)
+	if err != nil {
+		return NexusPHPRequest{}, fmt.Errorf("invalid attendance path %q: %w", cfg.Path, err)
+	}
+	req := NexusPHPRequest{Path: u.Path, Method: method}
 	if q := u.Query(); len(q) > 0 {
 		req.Params = q
 	}
 	return req, nil
 }
 
-// Attend 按站点的签到配置发一次 GET 请求，按页面文字判断结果。请求经驱动的 Execute，
+// Attend 按站点的签到配置发一次请求，按页面文字判断结果。请求经驱动的 Execute，
 // 会话失效、权限错误等与其他页面请求的判断一致。
 func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
 	cfg := ResolveAttendanceConfig(d.attendanceDefinition())
@@ -233,7 +247,7 @@ func (d *NexusPHPDriver) Attend(ctx context.Context) (AttendResult, error) {
 	if cfg.Unsupported != "" {
 		return AttendResult{}, fmt.Errorf("%w: %s", ErrAttendanceUnsupported, cfg.Unsupported)
 	}
-	req, err := attendanceRequest(cfg.Path)
+	req, err := attendanceRequest(cfg)
 	if err != nil {
 		return AttendResult{}, err
 	}
