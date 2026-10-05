@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0-rc.4](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.3...v0.49.0-rc.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **site-login:** 探测认证方式说明补上 Passkey ([#575](https://github.com/sunerpy/pt-tools/issues/575)) ([91dfd8d](https://github.com/sunerpy/pt-tools/commit/91dfd8dc2e0c5f40ae6903ed138698110047ce31))
+
 ## [0.49.0-rc.3](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.2...v0.49.0-rc.3) (2026-10-05)
 
 
