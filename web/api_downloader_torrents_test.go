@@ -59,7 +59,7 @@ func TestApiCloakTest_TokenFromStoreOnly(t *testing.T) {
 	})
 	defer mock.Close()
 
-	require.NoError(t, store.SaveCloakConfig(mock.URL, "stored-tok", false))
+	require.NoError(t, store.SaveCloakConfig(mock.URL, "stored-tok", false, nil))
 
 	// Provide endpoint in request but NO token -> token loaded from store.
 	body := map[string]any{"endpoint": mock.URL}

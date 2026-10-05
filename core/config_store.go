@@ -948,6 +948,12 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	return sc, nil
 }
 
+// SiteCookiePlaintext 按 ListSites 的同一规则取站点 Cookie 明文：有密文时解密，否则用旧版明文列。
+// 只给可信边界（CloakBrowser 后备注入浏览器）用，不要写进响应或日志。
+func (s *ConfigStore) SiteCookiePlaintext(site models.SiteSetting) (string, error) {
+	return s.cookiePlaintextForSite(site)
+}
+
 func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, error) {
 	if strings.TrimSpace(site.CookieEncrypted) == "" {
 		return site.Cookie, nil
@@ -963,8 +969,9 @@ func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, e
 // 仅在 ConfigStore 内部及调用方使用；HTTP 层通过 web.api_cloak.go 暴露的响应类型
 // 控制对外字段，token 永远不会以明文出现在 API 响应里。
 type CloakConfigSnapshot struct {
-	Endpoint string
-	HasToken bool
+	Endpoint  string
+	HasToken  bool
+	ProfileID string
 }
 
 // GetCloakConfig 返回 endpoint + 是否已设置 token。永远不返回 token 明文。
@@ -975,8 +982,9 @@ func (s *ConfigStore) GetCloakConfig() (CloakConfigSnapshot, error) {
 		return CloakConfigSnapshot{}, err
 	}
 	return CloakConfigSnapshot{
-		Endpoint: row.Endpoint,
-		HasToken: strings.TrimSpace(row.TokenEncrypted) != "",
+		Endpoint:  row.Endpoint,
+		HasToken:  strings.TrimSpace(row.TokenEncrypted) != "",
+		ProfileID: row.ProfileID,
 	}, nil
 }
 
@@ -1055,9 +1063,10 @@ func (s *ConfigStore) SetCloakToken(plaintext string) error {
 	return db.Save(&row).Error
 }
 
-// SaveCloakConfig 在单次事务里同时更新 endpoint + token；
+// SaveCloakConfig 在单次事务里同时更新 endpoint + token + profile ID；
 // emptyToken=true 时显式清空 token，否则 plaintextToken=="" 表示保持不变（部分更新）。
-func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool) error {
+// profileID 为 nil 表示保持不变，指向空串表示清除。
+func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool, profileID *string) error {
 	endpoint = strings.TrimSpace(endpoint)
 	return s.db.WithTransaction(func(tx *gorm.DB) error {
 		var row models.CloakSettings
@@ -1080,6 +1089,9 @@ func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToke
 				return encErr
 			}
 			row.TokenEncrypted = cipherText
+		}
+		if profileID != nil {
+			row.ProfileID = strings.TrimSpace(*profileID)
 		}
 		if isNew {
 			return tx.Create(&row).Error

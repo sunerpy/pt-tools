@@ -127,7 +127,7 @@ func TestApiFaviconList_ListsCachedEnabled(t *testing.T) {
 func TestHandleCloakConfigGet_Success(t *testing.T) {
 	srv, store, cleanup := newCloakTestServer(t)
 	defer cleanup()
-	require.NoError(t, store.SaveCloakConfig("http://m:8080", "tok", false))
+	require.NoError(t, store.SaveCloakConfig("http://m:8080", "tok", false, nil))
 
 	w := httptest.NewRecorder()
 	srv.handleCloakConfigGet(w, cloakAuthedReq(http.MethodGet, "/api/cloak/config", nil))

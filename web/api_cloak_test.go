@@ -36,7 +36,7 @@ func TestApiCloakTest_LoadsFromStore(t *testing.T) {
 	})
 	defer mock.Close()
 
-	require.NoError(t, store.SaveCloakConfig(mock.URL, "stored-token", false))
+	require.NoError(t, store.SaveCloakConfig(mock.URL, "stored-token", false, nil))
 
 	rec := httptest.NewRecorder()
 	srv.apiCloakTest(rec, cloakAuthedReq(http.MethodPost, "/api/cloak/test", nil))
@@ -205,7 +205,7 @@ func TestApiCloakConfigGet_NoTokenInResponse(t *testing.T) {
 	srv, store, cleanup := newCloakTestServer(t)
 	defer cleanup()
 
-	require.NoError(t, store.SaveCloakConfig("http://manager.local:8080", "secret-token-XYZ", false))
+	require.NoError(t, store.SaveCloakConfig("http://manager.local:8080", "secret-token-XYZ", false, nil))
 
 	rec := httptest.NewRecorder()
 	srv.apiCloakConfig(rec, cloakAuthedReq(http.MethodGet, "/api/cloak/config", nil))
@@ -243,6 +243,45 @@ func TestApiCloakConfigPut_TokenEncrypted(t *testing.T) {
 	assert.NotEmpty(t, row.TokenEncrypted)
 	assert.NotEqual(t, "abc123", row.TokenEncrypted, "token must not be stored as plaintext")
 	assert.NotContains(t, row.TokenEncrypted, "abc123")
+}
+
+// M1d：配置页能保存与读回 profile ID；不带该字段的 PUT 保持原值，空串清除，非法字符被拒绝且不落库。
+func TestApiCloakConfig_ProfileID(t *testing.T) {
+	srv, _, cleanup := newCloakTestServer(t)
+	defer cleanup()
+
+	put := func(payload map[string]any) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.apiCloakConfig(rec, cloakAuthedReq(http.MethodPut, "/api/cloak/config", payload))
+		return rec
+	}
+	profileOf := func() string {
+		rec := httptest.NewRecorder()
+		srv.apiCloakConfig(rec, cloakAuthedReq(http.MethodGet, "/api/cloak/config", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+		require.Contains(t, out, "profile_id")
+		return out["profile_id"].(string)
+	}
+
+	rec := put(map[string]any{"endpoint": "http://m:8080", "token": "tok", "profile_id": " 4f1c-profile_2.a "})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, "4f1c-profile_2.a", profileOf())
+
+	rec = put(map[string]any{"endpoint": "http://m:9090"})
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "4f1c-profile_2.a", profileOf(), "a PUT without profile_id keeps the stored value")
+
+	for _, bad := range []string{"../admin", "a/b", "id?x=1", "空格 id", strings.Repeat("a", 129)} {
+		rec = put(map[string]any{"endpoint": "http://m:9090", "profile_id": bad})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, bad)
+	}
+	assert.Equal(t, "4f1c-profile_2.a", profileOf(), "rejected values are not stored")
+
+	rec = put(map[string]any{"endpoint": "http://m:9090", "profile_id": ""})
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, profileOf())
 }
 
 func newCloakManagerMock(t *testing.T, h http.HandlerFunc) *httptest.Server {
