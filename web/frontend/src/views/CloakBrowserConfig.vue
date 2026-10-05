@@ -181,9 +181,9 @@ async function save() {
     <div class="pt-note pt-cards__full" data-card="intro">
       <PtIcon name="info" :size="14" class="pt-note__icon" />
       <span>
-        CloakBrowser 为可选功能。登录探测默认直接请求站点（按认证方式带 Cookie 或 API Key）；
-        端点、token、Profile ID 三项都填好后，站点被反爬拦截、网络错误或请求过于频繁时， 改用
-        CloakBrowser 带着站点的 Cookie 打开个人页再判定一次。需先自行部署
+        CloakBrowser 为可选功能。登录探测默认直接请求站点（按认证方式带 Cookie、API Key 或
+        Passkey）； 端点、token、Profile ID 三项都填好后，站点被反爬拦截、网络错误或请求过于频繁时，
+        改用 CloakBrowser 带着站点的 Cookie 打开个人页再判定一次。需先自行部署
         <code>cloakhq/cloakbrowser-manager</code>。
       </span>
     </div>

@@ -1,6 +1,6 @@
 # 站点登录状态与密钥备份
 
-pt-tools 用你配置的 Cookie 或 API Key 定时访问站点的个人信息，读取站点提供的 `last_access` / `last_login`，算出距离不活跃封号还剩几天，快到期限时通过已配置的通知通道提醒；也可以按站点开启[每日签到](#每日签到)。Cookie 可以用 PT Tools Helper 同步。
+pt-tools 用你配置的 Cookie、API Key 或 Passkey 定时访问站点的个人信息，读取站点提供的 `last_access` / `last_login`，算出距离不活跃封号还剩几天，快到期限时通过已配置的通知通道提醒；也可以按站点开启[每日签到](#每日签到)。Cookie 可以用 PT Tools Helper 同步。
 
 ## 使用流程
 
@@ -58,12 +58,12 @@ pt-tools 用你配置的 Cookie 或 API Key 定时访问站点的个人信息，
 
 ## CloakBrowser 后备
 
-探测平时直接请求站点（按站点的认证方式带 Cookie 或 API Key）。站点开了 Cloudflare 等反爬时，直接请求可能拿不到个人页。配置 CloakBrowser 之后，这类探测会改用 CloakBrowser 打开站点的个人页再判定一次。
+探测平时直接请求站点（按站点的认证方式带 Cookie、API Key 或 Passkey）。站点开了 Cloudflare 等反爬时，直接请求可能拿不到个人页。配置 CloakBrowser 之后，这类探测会改用 CloakBrowser 打开站点的个人页再判定一次。
 
 - 在 系统 → CloakBrowser 填写「CloakBrowser-Manager 端点」「Auth Token」和「Profile ID」，三项都填好才使用后备。CloakBrowser-Manager（`cloakhq/cloakbrowser-manager`）需要自行部署，并在其中建好 profile。「测试连接」只检查端点和 token，不检查 Profile ID。
 - 只有直接请求的结果是「被反爬拦截」「网络错误」「请求过于频繁」时才使用后备；会话过期、密钥错误这类凭证问题不使用。站点返回 Cloudflare 的质询页时记为「被反爬拦截」，不会当成凭证失效。
 - 后备判定为正常时，采用后备的结果。后备也没有成功时，保留直接请求的结果，后备失败的原因接在失败原因后面，点「立即探测」后的提示里可以看到。
-- 后备只用站点的 Cookie：没有配置 Cookie 的站点（例如只填了 API Key）不使用后备。它打开的页面与直接请求访问同一个站点地址（站点配置里填了自定义地址时就用它），并把站点的 Cookie 带进浏览器：
+- 后备只用站点的 Cookie：没有配置 Cookie 的站点（例如只填了 API Key 或 Passkey）不使用后备。它打开的页面与直接请求访问同一个站点地址（站点配置里填了自定义地址时就用它），并把站点的 Cookie 带进浏览器：
 
 | 站点架构       | 打开的页面                      | 前提                                |
 | -------------- | ------------------------------- | ----------------------------------- |
@@ -170,7 +170,7 @@ volumes:
 
 ## 合规边界
 
-此功能使用用户自己的 Cookie 或 API Key 周期访问站点页面或 profile API。启用前请确认站点规则允许自动化访问，并根据个人风险偏好设置探测频率：
+此功能使用用户自己的 Cookie、API Key 或 Passkey 周期访问站点页面或 profile API。启用前请确认站点规则允许自动化访问，并根据个人风险偏好设置探测频率：
 
 - 部分站点可能把频繁脚本访问视为违规。
 - 登录状态字段由站点提供，可能缺失、延迟或语义不同。
