@@ -582,6 +582,13 @@ func (d *MTorrentDriver) ParseUserInfo(res MTorrentResponse) (UserInfo, error) {
 		}
 	}
 
+	// 最近登录：登录探测把它写进 API 登录时间
+	if userData.MemberStatus.LastLogin != "" {
+		if loginTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastLogin); err == nil {
+			info.LastLogin = loginTime.Unix()
+		}
+	}
+
 	// Parse last access from lastBrowse
 	if userData.MemberStatus.LastBrowse != "" {
 		if accessTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastBrowse); err == nil {

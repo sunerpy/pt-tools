@@ -375,3 +375,46 @@ func TestUserInfoService_FetchAndSaveAllWithConcurrency_Empty(t *testing.T) {
 // ---------------------------------------------------------------------------
 // createHDDolbySite — factory path
 // ---------------------------------------------------------------------------
+
+// M1b：用户名为空时返回 ErrEmptyUsername，登录探测据此记为解析失败；不保存。
+func TestUserInfoService_FetchAndSave_EmptyUsername(t *testing.T) {
+	service := NewUserInfoService(UserInfoServiceConfig{})
+	ctx := context.Background()
+
+	mockSite := &MockSite{}
+	mockSite.On("ID").Return("hdsky")
+	mockSite.On("GetUserInfo", ctx).Return(UserInfo{Site: "hdsky", LastAccess: 1700000000}, nil)
+	service.RegisterSite(mockSite)
+
+	_, err := service.FetchAndSave(ctx, "hdsky")
+	require.ErrorIs(t, err, ErrEmptyUsername)
+	_, err = service.GetUserInfo(ctx, "hdsky")
+	assert.Error(t, err, "nothing is saved or cached")
+}
+
+type failingSaveRepo struct {
+	UserInfoRepo
+	err error
+}
+
+func (r failingSaveRepo) Save(context.Context, UserInfo) error { return r.err }
+
+// M1b：保存失败时同时返回取到的数据和包装 ErrUserInfoPersist 的错误，站点可达这一事实不丢；失败的保存不进缓存。
+func TestUserInfoService_FetchAndSave_PersistFailureReturnsInfo(t *testing.T) {
+	repo := failingSaveRepo{UserInfoRepo: NewInMemoryUserInfoRepo(), err: errors.New("disk full")}
+	service := NewUserInfoService(UserInfoServiceConfig{Repo: repo})
+	ctx := context.Background()
+
+	want := UserInfo{Site: "hdsky", Username: "tester", LastAccess: 1700000000}
+	mockSite := &MockSite{}
+	mockSite.On("ID").Return("hdsky")
+	mockSite.On("GetUserInfo", ctx).Return(want, nil)
+	service.RegisterSite(mockSite)
+
+	info, err := service.FetchAndSave(ctx, "hdsky")
+	require.ErrorIs(t, err, ErrUserInfoPersist)
+	assert.ErrorContains(t, err, "disk full")
+	assert.Equal(t, want, info)
+	_, err = service.GetUserInfo(ctx, "hdsky")
+	assert.Error(t, err, "a failed save is not cached")
+}

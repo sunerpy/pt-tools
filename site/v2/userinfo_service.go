@@ -98,7 +98,9 @@ func (s *UserInfoService) ListSites() []string {
 	return ids
 }
 
-// FetchAndSave fetches user info from a site and saves it
+// FetchAndSave fetches user info from a site and saves it.
+// 站点没注册时错误包装 ErrSiteNotFound，用户名为空时包装 ErrEmptyUsername；
+// 保存失败时同时返回取到的 UserInfo 和包装 ErrUserInfoPersist 的错误（不更新缓存）。
 func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (UserInfo, error) {
 	s.mu.RLock()
 	site, ok := s.sites[siteID]
@@ -120,7 +122,7 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, err)
 	}
 	if strings.TrimSpace(info.Username) == "" {
-		return UserInfo{}, fmt.Errorf("fetch user info from %s: parsed empty username", siteID)
+		return UserInfo{}, fmt.Errorf("fetch user info from %s: %w", siteID, ErrEmptyUsername)
 	}
 
 	// Save to repository
@@ -132,7 +134,8 @@ func (s *UserInfoService) FetchAndSave(ctx context.Context, siteID string) (User
 			zap.String("site", siteID),
 			zap.Error(err),
 		)
-		return UserInfo{}, fmt.Errorf("save user info for %s: %w", siteID, err)
+		// 站点本身是可达的：把取到的数据一并返回，调用方（如登录探测）可以按它判断站点状态。
+		return info, fmt.Errorf("save user info for %s: %w: %w", siteID, ErrUserInfoPersist, err)
 	}
 
 	// Update cache
