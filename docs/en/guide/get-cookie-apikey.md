@@ -256,6 +256,8 @@ After saving, the Status (状态) column of the site list shows how the site is 
 | **Problem (异常)**    | The site is unavailable, or the last login probe failed                        |
 | **Disabled (已禁用)** | The site is not enabled                                                        |
 
+A site that its definition marks as unavailable is turned off automatically. The saved cookie, API key and other settings are kept, so once the site is available again you only need to turn it back on.
+
 Click Probe now (立即探测) on the row to check the login status at once; see [Login status and key backup](site-login-monitoring.md).
 
 ## The methods compared
