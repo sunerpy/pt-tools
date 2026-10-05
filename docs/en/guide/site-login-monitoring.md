@@ -1,6 +1,6 @@
 # Login status and key backup
 
-pt-tools periodically visits each site's profile with the cookie or API key you configured, reads the `last_access` / `last_login` information the site provides, and works out how many days remain before the site's inactivity limit. When an account gets close to the limit, it sends a reminder through the notification channels you have configured; [daily sign-in](#daily-sign-in) can also be turned on per site. Cookies can be synced with PT Tools Helper.
+pt-tools periodically visits each site's profile with the cookie, API key or passkey you configured, reads the `last_access` / `last_login` information the site provides, and works out how many days remain before the site's inactivity limit. When an account gets close to the limit, it sends a reminder through the notification channels you have configured; [daily sign-in](#daily-sign-in) can also be turned on per site. Cookies can be synced with PT Tools Helper.
 
 ## How to use it
 
@@ -58,12 +58,12 @@ These two statuses send no request to the site, do not count as consecutive fail
 
 ## CloakBrowser fallback
 
-A probe normally sends a direct request to the site, carrying the cookie or API key that the site's sign-in method needs. When a site sits behind Cloudflare or a similar anti-bot service, that request may not reach the profile page. With CloakBrowser configured, such probes try again by opening the site's profile page in CloakBrowser.
+A probe normally sends a direct request to the site, carrying the cookie, API key or passkey that the site's sign-in method needs. When a site sits behind Cloudflare or a similar anti-bot service, that request may not reach the profile page. With CloakBrowser configured, such probes try again by opening the site's profile page in CloakBrowser.
 
 - Under System (系统) → CloakBrowser, fill in CloakBrowser-Manager endpoint (CloakBrowser-Manager 端点), Auth Token and Profile ID. The fallback is used only when all three are set. You deploy CloakBrowser-Manager (`cloakhq/cloakbrowser-manager`) yourself and create the profile there. Test connection (测试连接) checks the endpoint and token only, not the profile ID.
 - The fallback runs only when the direct request ends as Blocked by anti-bot (被反爬拦截), network error or rate limited. Credential problems such as an expired session or a key error do not use it. A Cloudflare challenge page from the site is recorded as Blocked by anti-bot, not as a credential failure.
 - When the fallback finds the session OK, its result is used. When the fallback does not succeed either, the direct request's result is kept and the reason the fallback failed is appended to the failure reason, which the message after Probe now (立即探测) shows.
-- The fallback uses only the site's cookie: a site without a cookie (for example, one with only an API key) gets no fallback. It opens the same site address as the direct request (your custom address when the site settings have one) and loads the site's cookies into the browser:
+- The fallback uses only the site's cookie: a site without a cookie (for example, one with only an API key or a passkey) gets no fallback. It opens the same site address as the direct request (your custom address when the site settings have one) and loads the site's cookies into the browser:
 
 | Site framework | Page opened                     | Requirement                                                                   |
 | -------------- | ------------------------------- | ----------------------------------------------------------------------------- |
@@ -170,7 +170,7 @@ Deleting `./data` loses the database and the key together. Back up the key and t
 
 ## Limits and compliance
 
-This feature periodically visits a site's pages or profile API with your own cookie or API key. Before turning it on, make sure the site's rules allow automated access, and choose how often to probe according to the risk you are willing to take:
+This feature periodically visits a site's pages or profile API with your own cookie, API key or passkey. Before turning it on, make sure the site's rules allow automated access, and choose how often to probe according to the risk you are willing to take:
 
 - Some sites may treat frequent scripted access as a violation.
 - The login status fields come from the site and may be missing, delayed or mean something different.
