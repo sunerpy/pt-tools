@@ -140,6 +140,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/userinfo/registered", s.auth(s.apiUserInfoRegisteredSites))
 	mux.HandleFunc("/api/v2/userinfo/cache/clear", s.auth(s.apiUserInfoClearCache))
 	s.registerLoginStateRoutes(mux)
+	s.registerAttendanceRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
@@ -972,6 +973,10 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/sites/")
 	// 拦截 RESTful 形态的 login-state 子路径：/api/sites/{name}/login-state[/{action}]
 	// 转发到既有的 login-state 处理器，保持与 apiSiteLoginStateRouter 行为一致（siteName 原样传递）。
+	if siteName, ok := strings.CutSuffix(name, "/attendance"); ok && siteName != "" && !strings.Contains(siteName, "/") {
+		s.handleSiteAttendance(w, r, siteName)
+		return
+	}
 	if idx := strings.Index(name, "/login-state"); idx >= 0 {
 		siteName := name[:idx]
 		action := strings.TrimPrefix(name[idx:], "/login-state")
