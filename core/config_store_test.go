@@ -1623,3 +1623,22 @@ func TestSetSiteEnabled_OnlyTogglesEnabled(t *testing.T) {
 
 	assert.ErrorContains(t, s.SetSiteEnabled(models.SiteGroup("missing"), false), "不存在")
 }
+
+// 读写数据库出错时把错误交回调用方，不吞掉。
+func TestSetSiteEnabled_PropagatesDBErrors(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	enabled := true
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "c", APIUrl: "http://api",
+	}))
+
+	require.NoError(t, db.DB.Exec("CREATE TRIGGER deny_site_update BEFORE UPDATE ON site_settings BEGIN SELECT RAISE(ABORT, 'site_settings is read-only'); END;").Error)
+	assert.ErrorContains(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), false), "read-only")
+	require.NoError(t, db.DB.Exec("DROP TRIGGER deny_site_update").Error)
+
+	require.NoError(t, db.DB.Migrator().DropTable(&models.SiteSetting{}))
+	assert.Error(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), false))
+}

@@ -828,7 +828,8 @@ func TestDisableUnavailableSites_KeepsCredentials(t *testing.T) {
 		Enabled: &enabled, AuthMethod: "api_key", APIKey: "key-keep", APIUrl: "https://api.m-team.cc",
 	}))
 
-	srv.disableUnavailableSites([]models.SiteGroup{"hdsky", "mteam"})
+	// 列表里混进一个不存在的站点：记一条警告，其他站点照常停用。
+	srv.disableUnavailableSites([]models.SiteGroup{"no-such-site", "hdsky", "mteam"})
 
 	hd, err := srv.store.GetSiteConf(models.SiteGroup("hdsky"))
 	require.NoError(t, err)
