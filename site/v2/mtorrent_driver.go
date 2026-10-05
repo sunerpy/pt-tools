@@ -446,6 +446,10 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 		fmt.Printf("[DEBUG MTorrent] genDlToken response: StatusCode=%d, Body=%s\n", resp.StatusCode, string(resp.Body))
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	// Check for authentication errors
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials

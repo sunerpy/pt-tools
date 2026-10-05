@@ -37,6 +37,8 @@ var (
 	ErrEmptyUsername = errors.New("parsed empty username")
 	// ErrUserInfoPersist 表示用户信息已经取到、但保存失败；UserInfoService.FetchAndSave 此时会同时返回取到的数据。
 	ErrUserInfoPersist = errors.New("persist user info failed")
+	// ErrCloudflareChallenge 表示站点返回的是 Cloudflare 质询页：请求被反爬拦截，凭证本身未必有问题。
+	ErrCloudflareChallenge = errors.New("cloudflare challenge")
 )
 
 // SiteKind represents the type of PT site architecture
