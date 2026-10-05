@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  attendanceApi,
   chatopsApi,
   downloaderDirectoriesApi,
   type DownloaderDirectory,
@@ -9,6 +10,7 @@ import {
   filterRulesApi,
   type NotificationConfig,
   type RSSConfig,
+  type SiteAttendance,
   type SiteConfig,
   type SiteLoginState,
   sitesApi,
@@ -26,6 +28,8 @@ import PtTag from "@/components/ui/PtTag.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
+import { attendanceView } from "@/utils/attendanceStatus";
+import { formatShortDateTime } from "@/utils/format";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -631,6 +635,22 @@ const ACTIVE_SOURCE_LABEL: Record<string, string> = {
 };
 
 const loginState = ref<SiteLoginState | null>(null);
+const siteAttendance = ref<SiteAttendance | null>(null);
+const attendanceShown = computed(() => attendanceView(siteAttendance.value ?? undefined));
+/** 卡片里只放「状态（时间）」，整句提示放进 title，长句不会把行标签挤成两行 */
+const attendanceToday = computed(() => {
+  const a = siteAttendance.value;
+  const v = attendanceShown.value;
+  if (!a) return v.label;
+  const when =
+    a.status === "pending"
+      ? (a.next_attempt_at ?? a.scheduled_at)
+      : a.status === ""
+        ? undefined
+        : a.last_attempt_at;
+  return when ? `${v.label}（${formatShortDateTime(when * 1000)}）` : v.label;
+});
+const signing = ref(false);
 const siteStats = ref<UserInfoResponse | null>(null);
 const siteTasks = ref<TaskItem[]>([]);
 const sitePushed = ref<TaskItem[]>([]);
@@ -638,8 +658,9 @@ const deleting = ref(false);
 
 async function loadSideCards() {
   const name = siteName.value;
-  const [states, stats, tasks, pushed] = await Promise.all([
+  const [states, attendanceList, stats, tasks, pushed] = await Promise.all([
     sitesApi.listLoginStates().catch(() => [] as SiteLoginState[]),
+    attendanceApi.list().catch(() => [] as SiteAttendance[]),
     userInfoApi.getSite(name).catch(() => null),
     tasksApi
       .list(new URLSearchParams({ site: name, page: "1", page_size: "20" }))
@@ -649,9 +670,27 @@ async function loadSideCards() {
       .catch(() => null),
   ]);
   loginState.value = (states ?? []).find((st) => st.site_name === name) ?? null;
+  siteAttendance.value = (attendanceList ?? []).find((a) => a.site_name === name) ?? null;
   siteStats.value = stats;
   siteTasks.value = tasks?.items ?? [];
   sitePushed.value = pushed?.items ?? [];
+}
+
+/** 立即签到一次；结果写回卡片，不必重新加载整页 */
+async function signNow() {
+  if (signing.value) return;
+  signing.value = true;
+  try {
+    const res = await attendanceApi.signNow(siteName.value);
+    siteAttendance.value = res;
+    const v = attendanceView(res);
+    if (res.status === "signed" || res.status === "already") ElMessage.success(v.detail);
+    else ElMessage.warning(`签到未成功：${res.last_error || v.detail}`);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "签到失败");
+  } finally {
+    signing.value = false;
+  }
 }
 
 /**
@@ -1241,10 +1280,43 @@ function ruleNameOf(id: number): string {
                 访问未生效，需要手动登录
               </span>
             </li>
+            <li v-if="siteAttendance" class="sd-kv__row">
+              <span class="sd-kv__k">每日签到</span>
+              <span class="sd-kv__v" data-testid="sd-attendance-enabled">
+                {{
+                  !siteAttendance.supported
+                    ? "不支持"
+                    : siteAttendance.attendance_enabled
+                      ? "已开启"
+                      : "未开启"
+                }}
+              </span>
+            </li>
+            <li v-if="siteAttendance" class="sd-kv__row">
+              <span class="sd-kv__k">今日签到</span>
+              <span
+                class="sd-kv__v"
+                :class="{
+                  'is-warn': attendanceShown.tone === 'dang' || attendanceShown.tone === 'warn',
+                }"
+                :title="attendanceShown.detail"
+                data-testid="sd-attendance-today">
+                {{ attendanceToday }}
+              </span>
+            </li>
           </ul>
           <p v-else class="sd-empty">还没有这个站点的探测记录。</p>
           <p class="sd-foot">
             阈值与提醒在站点列表页按站点配置；这里只回显，避免同一份配置两个写入口。
+            <el-button
+              v-if="attendanceShown.canSign"
+              link
+              type="primary"
+              :loading="signing"
+              data-testid="sd-attend-now"
+              @click="signNow">
+              立即签到
+            </el-button>
           </p>
         </PtPanel>
 

@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { ApiError, type SiteConfig, type SiteLoginState, chatopsApi, sitesApi } from "@/api";
+import {
+  ApiError,
+  type SiteAttendance,
+  type SiteConfig,
+  type SiteLoginState,
+  attendanceApi,
+  chatopsApi,
+  sitesApi,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -15,6 +23,7 @@ import { useRouter } from "vue-router";
 
 import { formatShortDateTime, formatTimeAgo } from "@/utils/format";
 import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
+import { attendanceView } from "@/utils/attendanceStatus";
 import { type DataStateKey, useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { useLoginState } from "@/composables/useLoginState";
@@ -27,6 +36,9 @@ const sites = ref<Record<string, SiteConfig>>({});
 const loginStates = ref<Record<string, SiteLoginState>>({});
 const probing = reactive<Record<string, boolean>>({});
 const testingReminder = reactive<Record<string, boolean>>({});
+/** 每日签到：当天的状态按站点名索引；签到接口失败时为空，不影响站点列表 */
+const attendance = ref<Record<string, SiteAttendance>>({});
+const signing = reactive<Record<string, boolean>>({});
 const bulkProbing = ref(false);
 const updatingMode = reactive<Record<string, boolean>>({});
 
@@ -139,15 +151,17 @@ async function loadSites() {
 
   const pending = run(async () => {
     // allSettled 而不是 all：登录状态单独挂掉时站点清单还能用，不该整页变成 error
-    const [siteRes, stateRes] = await Promise.allSettled([
+    const [siteRes, stateRes, attendanceRes] = await Promise.allSettled([
       sitesApi.list(),
       sitesApi.listLoginStates(),
+      attendanceApi.list(),
     ]);
     // 站点清单是主数据，它失败就没有「部分可用」可言，抛出去让状态机判 error / perm
     if (siteRes.status === "rejected") throw siteRes.reason;
     return {
       siteMap: siteRes.value,
       states: stateRes.status === "fulfilled" ? stateRes.value : [],
+      attendance: attendanceRes.status === "fulfilled" ? attendanceRes.value : [],
       // 留到确认这一份没过期之后再写：旧请求的登录态失败不该把新列表标成 partial
       statesFailed: stateRes.status === "rejected",
     };
@@ -171,6 +185,35 @@ async function loadSites() {
     byName[st.site_name] = st;
   }
   loginStates.value = byName;
+  const attendanceByName: Record<string, SiteAttendance> = {};
+  for (const a of data.attendance ?? []) attendanceByName[a.site_name] = a;
+  attendance.value = attendanceByName;
+}
+
+/** 签到按钮的 tooltip：当天的状态和一句说明 */
+function attendanceTip(name: string): string {
+  const a = attendance.value[name];
+  if (!a) return "立即签到";
+  const v = attendanceView(a);
+  return `签到：${v.label}（${v.detail}）`;
+}
+
+async function signSite(name: string) {
+  if (signing[name]) return;
+  signing[name] = true;
+  try {
+    const res = await attendanceApi.signNow(name);
+    attendance.value = { ...attendance.value, [name]: res };
+    const v = attendanceView(res);
+    if (res.status === "signed" || res.status === "already")
+      ElMessage.success(`${name}：${v.detail}`);
+    else if (res.status === "unsupported") ElMessage.info(`${name}：${v.detail}`);
+    else ElMessage.warning(`${name} 签到未成功：${res.last_error || v.detail}`);
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || "签到失败");
+  } finally {
+    signing[name] = false;
+  }
 }
 
 async function toggleEnabled(name: string) {
@@ -383,6 +426,7 @@ async function onCardCommand(cmd: { act: string; name: string }) {
   if (cmd.act === "toggle") return toggleEnabled(cmd.name);
   if (cmd.act === "open") return openSite(cmd.name);
   if (cmd.act === "probe") return probeSite(cmd.name);
+  if (cmd.act === "attend") return signSite(cmd.name);
   if (cmd.act === "reminder") await sendTestReminder(cmd.name);
   else if (cmd.act === "login-config") await openConfigDialog(cmd.name);
   else if (cmd.act === "delete") await deleteSite(cmd.name);
@@ -894,6 +938,7 @@ interface LoginConfigForm {
   reminder_cron: string;
   notification_channel_ids: number[];
   probe_mode: "auto" | "manual" | "disabled";
+  attendance_enabled: boolean;
 }
 
 const configDialogVisible = ref(false);
@@ -906,7 +951,11 @@ const configForm = reactive<LoginConfigForm>({
   reminder_cron: "0 10,22 * * *",
   notification_channel_ids: [],
   probe_mode: "auto",
+  attendance_enabled: false,
 });
+
+/** 对话框里正在编辑的站点能否开启自动签到；不能时给出原因 */
+const configAttendance = computed(() => attendance.value[configSiteName.value]);
 
 async function loadNotifyChannels() {
   if (notifyChannels.value.length > 0) return;
@@ -926,6 +975,7 @@ async function openConfigDialog(name: string) {
   configForm.reminder_cron = st?.reminder_cron || "0 10,22 * * *";
   configForm.notification_channel_ids = [...(st?.notification_channel_ids ?? [])];
   configForm.probe_mode = probeModeOf(name);
+  configForm.attendance_enabled = attendance.value[name]?.attendance_enabled ?? false;
   configDialogVisible.value = true;
   await loadNotifyChannels();
 }
@@ -949,6 +999,14 @@ async function saveLoginConfig() {
       st.reminder_cron = configForm.reminder_cron;
       st.notification_channel_ids = [...configForm.notification_channel_ids];
       st.probe_mode = configForm.probe_mode;
+    }
+    const att = attendance.value[name];
+    if (att && att.attendance_enabled !== configForm.attendance_enabled) {
+      const res = await attendanceApi.setEnabled(name, configForm.attendance_enabled);
+      attendance.value = {
+        ...attendance.value,
+        [name]: { ...att, attendance_enabled: res.attendance_enabled },
+      };
     }
     ElMessage.success("保号配置已更新");
     configDialogVisible.value = false;
@@ -1402,7 +1460,7 @@ async function saveLoginConfig() {
           一行有六个动作，写上文字就要 400 宽，把前面几列挤成两行。
           这里只留图标 + tooltip，图标顺序按使用频率排：先看站点、再探测，删除放最后。
         -->
-        <el-table-column label="操作" width="212" fixed="right" class-name="pt-cell-act">
+        <el-table-column label="操作" width="240" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
             <el-tooltip
               :content="siteUrlOf(row[0]) ? '打开站点' : '未配置站点地址'"
@@ -1433,6 +1491,22 @@ async function saveLoginConfig() {
                   :data-testid="`probe-button-${row[0]}`"
                   @click="probeSite(row[0])">
                   <PtIcon name="activity" :size="15" />
+                </el-button>
+              </span>
+            </el-tooltip>
+
+            <el-tooltip :content="attendanceTip(row[0])" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  aria-label="立即签到"
+                  :loading="signing[row[0]]"
+                  :disabled="!attendanceView(attendance[row[0]]).canSign || signing[row[0]]"
+                  :data-testid="`attend-button-${row[0]}`"
+                  @click="signSite(row[0])">
+                  <PtIcon name="calendar-check" :size="15" />
                 </el-button>
               </span>
             </el-tooltip>
@@ -1646,6 +1720,12 @@ async function saveLoginConfig() {
                     :disabled="!site.enabled || probing[name]"
                     :data-testid="`probe-button-${name}`">
                     <PtIcon name="activity" :size="14" class="dd-ico" /><span>探测</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    :command="{ act: 'attend', name }"
+                    :disabled="!attendanceView(attendance[name]).canSign || signing[name]"
+                    :data-testid="`attend-button-${name}`">
+                    <PtIcon name="calendar-check" :size="14" class="dd-ico" /><span>立即签到</span>
                   </el-dropdown-item>
                   <el-dropdown-item
                     :command="{ act: 'reminder', name }"
@@ -1912,6 +1992,20 @@ async function saveLoginConfig() {
             <el-option label="禁用" value="disabled" />
           </el-select>
           <div class="field-tip">自动 = 跟随定时任务；手动 = 只在点「立即探测」时执行</div>
+        </el-form-item>
+
+        <el-form-item label="每日自动签到">
+          <el-switch
+            v-model="configForm.attendance_enabled"
+            :disabled="!configAttendance?.supported"
+            data-testid="login-config-attendance" />
+          <div class="field-tip">
+            {{
+              configAttendance && !configAttendance.supported
+                ? configAttendance.unsupported_reason
+                : "每天在全局设置的签到时间窗内随机签到一次，失败最多重试 2 次"
+            }}
+          </div>
         </el-form-item>
       </el-form>
 
