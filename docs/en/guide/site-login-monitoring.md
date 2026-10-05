@@ -33,15 +33,17 @@ Enabled sites whose probe mode is Auto are probed in the background:
 
 - Once a minute, pt-tools checks which sites are due and probes them one after another.
 - Each site has a fixed random offset between 1 second and 6 hours. Existing sites after an upgrade and newly added sites get their first probe at that offset, so the first round is spread over 6 hours. A restart does not probe every site again; sites that are not due keep waiting.
+- After you update a site's credentials (including a cookie synced by the browser extension) or save its settings, the site is probed within a minute instead of waiting for the next scheduled probe (except for sites whose probe mode is Manual or Disabled).
+- Probes share the site connection and rate limit with user statistics and search; a successful probe also refreshes the site's upload, download, bonus and other figures in user statistics.
 - After each probe, the next one is scheduled by the result:
 
-| Result of this probe                                                                         | Next probe                                                                                                                                     |
-| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| OK (正常)                                                                                    | In about 6 hours (plus or minus 10%)                                                                                                           |
-| Session expired (会话已过期), key error (密钥错误)                                           | In 24 hours, so an invalid credential does not keep hitting the site                                                                           |
-| Blocked by anti-bot (被反爬拦截), network error, rate limited, parse failure, unknown status | 1, 2 and 4 hours after the 1st, 2nd and 3rd failure in a row, then every 6 hours                                                               |
-| Credentials missing (未配置凭证)                                                             | No request to the site; after 6 hours pt-tools checks locally whether the credentials have been added; once added you can also click Probe now |
-| Probing not supported (暂不支持探测)                                                         | No request to the site; checked again after 24 hours                                                                                           |
+| Result of this probe                                                                         | Next probe                                                                                                                                       |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OK (正常)                                                                                    | In about 6 hours (plus or minus 10%)                                                                                                             |
+| Session expired (会话已过期), key error (密钥错误)                                           | In 24 hours, so an invalid credential does not keep hitting the site                                                                             |
+| Blocked by anti-bot (被反爬拦截), network error, rate limited, parse failure, unknown status | 1, 2 and 4 hours after the 1st, 2nd and 3rd failure in a row, then every 6 hours                                                                 |
+| Credentials missing (未配置凭证)                                                             | No request to the site; once the credentials are added the site is probed within a minute, otherwise pt-tools checks again locally after 6 hours |
+| Probing not supported (暂不支持探测)                                                         | No request to the site; checked again after 24 hours                                                                                             |
 
 Probe now is not bound by this table; after it runs, the next probe is rescheduled by its result.
 
