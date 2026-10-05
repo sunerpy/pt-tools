@@ -37,13 +37,15 @@ The notification channel list never returns credentials; they are decrypted and 
 
 ## What it connects to
 
-| Destination                          | Why                                                                                           |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status                       |
-| The downloaders you configure        | Pushing torrents and reading tasks and free space                                             |
-| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                             |
-| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                           |
-| A CloakBrowser Manager               | Only when you have configured one and turned it on for a site, as a fallback for login checks |
+| Destination                          | Why                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------- |
+| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status               |
+| The downloaders you configure        | Pushing torrents and reading tasks and free space                                     |
+| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                     |
+| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                   |
+| A CloakBrowser Manager               | Only after you set its endpoint, token and profile ID, as a fallback for login checks |
+
+The [CloakBrowser fallback](../guide/site-login-monitoring.md#cloakbrowser-fallback) hands the site's cookies to the CloakBrowser you deploy, which then opens the site's pages.
 
 When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; `ALL_PROXY` applies only to site access and downloader connections. pt-tools has no analytics or telemetry and sends no usage data to anyone.
 
