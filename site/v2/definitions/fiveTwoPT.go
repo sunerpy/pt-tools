@@ -10,6 +10,7 @@ var FiveTwoPTDefinition = &v2.SiteDefinition{
 	Aka:             []string{"我爱PT"},
 	Description:     "低调地在这个PT校园快乐成长 快乐分享",
 	Schema:          v2.SchemaNexusPHP,
+	Attendance:      &v2.AttendanceConfig{Unsupported: "签到需要答题，暂不支持自动签到"},
 	URLs:            []string{"https://52pt.site/"},
 	FaviconURL:      "https://52pt.site/favicon.ico",
 	TimezoneOffset:  "+0800",

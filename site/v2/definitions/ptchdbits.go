@@ -14,6 +14,7 @@ var PTCHDBitsDefinition = &v2.SiteDefinition{
 	Aka:            []string{"CHD", "彩虹岛"},
 	Description:    "CHDBits 综合性 PT 站点",
 	Schema:         v2.SchemaNexusPHP,
+	Attendance:     &v2.AttendanceConfig{Unsupported: "签到需要答题，暂不支持自动签到"},
 	URLs:           []string{"https://ptchdbits.co/"},
 	FaviconURL:     "https://ptchdbits.co/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,
