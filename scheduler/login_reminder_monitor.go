@@ -664,13 +664,15 @@ func (m *LoginReminderMonitor) recordProbeResult(name string, prev *models.SiteL
 		cols["first_failure_at"] = nil
 		cols["last_success_at"] = nowUTC
 		if result.LastAccessAt != nil {
+			// 只有最近访问时间前进才清除「访问未生效」；不变或倒退都不算前进。
 			access := result.LastAccessAt.UTC()
-			stale := prev.LastAccessAt != nil && prev.LastAccessAt.Equal(access) && nowUTC.Sub(access) >= accessStaleAfter
+			advanced := prev.LastAccessAt == nil || access.After(*prev.LastAccessAt)
+			stale := !advanced && prev.LastAccessAt.Equal(access) && nowUTC.Sub(access) >= accessStaleAfter
 			switch {
+			case advanced:
+				cols["access_stale_since"] = nil
 			case stale && prev.AccessStaleSince == nil:
 				cols["access_stale_since"] = nowUTC
-			case !stale:
-				cols["access_stale_since"] = nil
 			}
 		}
 	case result.Status.IsFailure():
