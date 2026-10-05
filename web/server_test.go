@@ -814,6 +814,40 @@ func TestDisableUnavailableSites(t *testing.T) {
 	assert.False(t, *sc.Enabled)
 }
 
+// 自动禁用不可用站点只关掉开关：认证方式、Cookie、API Key、地址、限速和 RSS 都保留，站点恢复可用后重新启用即可。
+func TestDisableUnavailableSites_KeepsCredentials(t *testing.T) {
+	writeWebTestSecretKey(t)
+	srv := setupServer(t)
+
+	enabled := true
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("hdsky"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: "uid=1; pass=keep", APIUrl: "https://hdsky.me",
+		UploadLimitKBs: 512, RSS: []models.RSSConfig{{Name: "r", URL: "https://hdsky.me/rss", IntervalMinutes: 10}},
+	}))
+	require.NoError(t, srv.store.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "api_key", APIKey: "key-keep", APIUrl: "https://api.m-team.cc",
+	}))
+
+	srv.disableUnavailableSites([]models.SiteGroup{"hdsky", "mteam"})
+
+	hd, err := srv.store.GetSiteConf(models.SiteGroup("hdsky"))
+	require.NoError(t, err)
+	require.NotNil(t, hd.Enabled)
+	assert.False(t, *hd.Enabled)
+	assert.Equal(t, "cookie", hd.AuthMethod)
+	assert.Equal(t, "uid=1; pass=keep", hd.Cookie)
+	assert.Equal(t, "https://hdsky.me", hd.APIUrl)
+	assert.Equal(t, 512, hd.UploadLimitKBs)
+	require.Len(t, hd.RSS, 1)
+
+	mt, err := srv.store.GetSiteConf(models.SiteGroup("mteam"))
+	require.NoError(t, err)
+	require.NotNil(t, mt.Enabled)
+	assert.False(t, *mt.Enabled)
+	assert.Equal(t, "api_key", mt.AuthMethod)
+	assert.Equal(t, "key-keep", mt.APIKey)
+}
+
 func TestHashAndVerifyPassword_Roundtrip(t *testing.T) {
 	hashed := hashPassword("mypassword")
 	assert.True(t, verifyPassword(hashed, "mypassword"))

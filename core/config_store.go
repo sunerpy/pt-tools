@@ -446,6 +446,24 @@ func (s *ConfigStore) SaveQbitSettings(q models.QbitSettings) error {
 	return nil
 }
 
+// SetSiteEnabled 只改站点的启用开关，认证方式、凭证、地址、限速和 RSS 都不动。
+func (s *ConfigStore) SetSiteEnabled(site models.SiteGroup, enabled bool) error {
+	var count int64
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("name = ?", string(site)).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("站点 %s 不存在", site)
+	}
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("name = ?", string(site)).Update("enabled", enabled).Error; err != nil {
+		return err
+	}
+	events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+	return nil
+}
+
+// UpsertSite 整体覆盖站点的认证信息：sc 里为空的认证方式、Cookie、API Key、地址和 Passkey 会清掉已存的值。
+// 只想改启用开关时用 SetSiteEnabled。
 func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (uint, error) {
 	db := s.db.DB
 	var row models.SiteSetting
