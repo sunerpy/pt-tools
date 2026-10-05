@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -44,7 +45,7 @@ func TestWireLoginReminderMonitor_RegistersNonNil(t *testing.T) {
 	require.Nil(t, mgr.GetLoginReminderMonitor(),
 		"precondition: monitor must be nil before wiring (this nil is the 503 cause)")
 
-	wireLoginReminderMonitor(mgr, store, siteRegistry, nil)
+	wireLoginReminderMonitor(mgr, store, siteRegistry, nil, nil)
 
 	require.NotNil(t, mgr.GetLoginReminderMonitor(),
 		"after wiring, GetLoginReminderMonitor must be non-nil so the probe endpoint stops returning 503")
@@ -164,7 +165,7 @@ func TestWireLoginReminderMonitor_UsesLiveChannelsNotNewInstances(t *testing.T) 
 
 	mgr := scheduler.NewManager()
 	t.Cleanup(mgr.StopAll)
-	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), bs)
+	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), bs, nil)
 	mon := mgr.GetLoginReminderMonitor()
 	require.NotNil(t, mon)
 	require.True(t, mon.Notifier().Enabled())
@@ -189,11 +190,70 @@ func TestWireLoginReminderMonitor_WithoutChatOpsRecordsOnly(t *testing.T) {
 
 	mgr := scheduler.NewManager()
 	t.Cleanup(mgr.StopAll)
-	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), nil)
+	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), nil, nil)
 	mon := mgr.GetLoginReminderMonitor()
 	require.NotNil(t, mon)
 	assert.False(t, mon.Notifier().Enabled())
 	assert.Nil(t, loginReminderSender(nil))
 	assert.Nil(t, loginReminderSender(&chatopsBootstrap{}))
 	assert.ErrorContains(t, mon.SendTestReminder(context.Background(), "hdsky"), "通知")
+}
+
+// wiringProbeSite 是注册进 UserInfoService 的假站点，不发网络请求。
+type wiringProbeSite struct {
+	calls atomic.Int32
+	info  v2.UserInfo
+}
+
+func (s *wiringProbeSite) ID() string                                       { return "hdsky" }
+func (s *wiringProbeSite) Name() string                                     { return "HDSky" }
+func (s *wiringProbeSite) Kind() v2.SiteKind                                { return v2.SiteNexusPHP }
+func (s *wiringProbeSite) Login(context.Context, v2.Credentials) error      { return nil }
+func (s *wiringProbeSite) Download(context.Context, string) ([]byte, error) { return nil, nil }
+func (s *wiringProbeSite) Close() error                                     { return nil }
+
+func (s *wiringProbeSite) Search(context.Context, v2.SearchQuery) ([]v2.TorrentItem, error) {
+	return nil, nil
+}
+
+func (s *wiringProbeSite) GetUserInfo(context.Context) (v2.UserInfo, error) {
+	s.calls.Add(1)
+	return s.info, nil
+}
+
+// M1b：生产接线把 UserInfoService 交给监控，探测走已注册的共享实例并刷新统计。
+func TestWireLoginReminderMonitor_ProbesThroughUserInfoService(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.SiteLoginState{}, &models.NotificationConf{},
+		&models.MigrationState{}, &models.MonitorNotificationLog{}))
+	prevDB := global.GlobalDB
+	global.GlobalDB = &models.TorrentDB{DB: db}
+	t.Cleanup(func() { global.GlobalDB = prevDB })
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie", Cookie: "c=1"}).Error)
+
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: v2.NewInMemoryUserInfoRepo()})
+	site := &wiringProbeSite{info: v2.UserInfo{Site: "hdsky", Username: "tester", Uploaded: 7, LastAccess: time.Now().Add(-time.Hour).Unix()}}
+	svc.RegisterSite(site)
+
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), nil, svc)
+	mon := mgr.GetLoginReminderMonitor()
+	require.NotNil(t, mon)
+
+	require.True(t, mon.RunProbeOnceForSite(context.Background(), "hdsky"))
+	assert.Equal(t, int32(1), site.calls.Load(), "the registered shared instance was used")
+	got, err := svc.GetUserInfo(context.Background(), "hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), got.Uploaded)
+	var st models.SiteLoginState
+	require.NoError(t, db.Where("site_name = ?", "hdsky").First(&st).Error)
+	assert.Equal(t, "OK", st.LastProbeStatus)
+}
+
+func TestLoginReminderUserInfo_NilStaysNil(t *testing.T) {
+	assert.Nil(t, loginReminderUserInfo(nil), "a nil service must not become a non-nil interface")
+	assert.NotNil(t, loginReminderUserInfo(v2.NewUserInfoService(v2.UserInfoServiceConfig{})))
 }

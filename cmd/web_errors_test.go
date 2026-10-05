@@ -61,7 +61,7 @@ func TestWireLoginReminderMonitor_NilDB(t *testing.T) {
 
 	mgr := scheduler.NewManager()
 	t.Cleanup(mgr.StopAll)
-	wireLoginReminderMonitor(mgr, nil, nil, nil)
+	wireLoginReminderMonitor(mgr, nil, nil, nil, nil)
 	assert.Nil(t, mgr.GetLoginReminderMonitor(), "nil DB must skip monitor wiring")
 }
 
