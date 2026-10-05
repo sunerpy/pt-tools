@@ -116,8 +116,17 @@ func TestMigrationV8ToV9Happy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("解密站点 %s 失败: %v", site.Name, err)
 		}
-		if plain != site.Cookie {
-			t.Fatalf("站点 %s 解密结果 = %q, want %q", site.Name, plain, site.Cookie)
+		// setupV8MigrationDB 写入的明文是 uid=<序号>; token=abc（mteam 是序号 0）。
+		idx := 0
+		if site.Name != "mteam" {
+			_, _ = fmt.Sscanf(site.Name, "site-%d", &idx)
+		}
+		if want := fmt.Sprintf("uid=%d; token=abc", idx); plain != want {
+			t.Fatalf("站点 %s 解密结果 = %q, want %q", site.Name, plain, want)
+		}
+		// 迁移链会继续跑到 v11，v11 清掉明文列。
+		if site.Cookie != "" {
+			t.Fatalf("站点 %s 明文 Cookie 应被 v11 清除，实际 %q", site.Name, site.Cookie)
 		}
 	}
 

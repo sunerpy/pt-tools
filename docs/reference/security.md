@@ -23,6 +23,8 @@
 
 密钥在首次启动时自动生成；也可以通过环境变量 `PT_TOOLS_SECRET_KEY` 提供 base64 形式的密钥，它的优先级高于 `secret.key` 文件。
 
+此前的版本会在数据库的 `site_settings` 表里另存一份 Cookie 明文。升级后第一次启动时，pt-tools 会先给只有明文的 Cookie 补上密文，再清掉这份明文；这一步不另写备份。更早的版本升级时在 `~/.pt-tools/backups/` 留下的 `site_settings_v8_to_v9_*.json` 里也有 Cookie 明文，确认升级后一切正常，可以删除这些文件。
+
 > [!WARNING]
 > 站点的 **API Key 和 Passkey 目前以明文保存在数据库中**。数据目录和它的备份都应当只允许运行 pt-tools 的用户读取，不要放在共享目录或公开的网盘中。
 

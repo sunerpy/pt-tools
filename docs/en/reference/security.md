@@ -23,6 +23,8 @@ These are encrypted with AES-256-GCM, using the key in `secret.key`, before they
 
 The key is generated on first start. You can also supply a base64 key in the environment variable `PT_TOOLS_SECRET_KEY`, which takes precedence over the `secret.key` file.
 
+Earlier versions also kept a plaintext copy of each cookie in the `site_settings` table. On the first start after upgrading, pt-tools encrypts any cookie that only had the plaintext copy and then clears the plaintext; it writes no backup for this step. Backups that older upgrades left in `~/.pt-tools/backups/` (`site_settings_v8_to_v9_*.json`) contain plaintext cookies too; once the upgrade looks fine, you can delete them.
+
 > [!WARNING]
 > Site **API keys and passkeys are currently stored in the database in plain text**. Make the data folder and its backups readable only by the user running pt-tools, and keep them out of shared folders and public cloud storage.
 

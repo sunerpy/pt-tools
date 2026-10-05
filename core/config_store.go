@@ -456,7 +456,8 @@ func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (u
 		row.Enabled = *sc.Enabled
 	}
 	row.AuthMethod = sc.AuthMethod
-	row.Cookie = sc.Cookie
+	// Cookie 只以密文落库；旧的明文列不再写入，存量明文由 v11 迁移清除。
+	row.Cookie = ""
 	if strings.TrimSpace(sc.Cookie) == "" {
 		row.CookieEncrypted = ""
 	} else {
@@ -641,17 +642,16 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			row.Enabled = *sc.Enabled
 		}
 		row.AuthMethod = sc.AuthMethod
+		// Cookie 只以密文落库；旧的明文列不再写入，存量明文由 v11 迁移清除。
+		row.Cookie = ""
 		if strings.TrimSpace(sc.Cookie) != "" {
-			row.Cookie = sc.Cookie
 			cookieCipherText, err := s.EncryptCookie(sc.Cookie)
 			if err != nil {
 				return err
 			}
 			row.CookieEncrypted = cookieCipherText
-		} else {
-			// 本次保存未携带 cookie：保留已存储的登录态 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
-			row.Cookie = ""
 		}
+		// 本次保存未携带 cookie：保留已存储的密文 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
 		row.APIKey = sc.APIKey
 		row.APIUrl = sc.APIUrl
 		row.Passkey = sc.Passkey
