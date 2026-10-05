@@ -254,11 +254,14 @@ func newProbeSingleFlightServer(t *testing.T, resolveDelay time.Duration) (*Serv
 	resolver := &slowResolver{delay: resolveDelay}
 	mon := scheduler.NewLoginReminderMonitor(scheduler.LoginReminderConfig{
 		DB:        db,
-		Router:    nil,
 		Resolver:  resolver,
 		Decryptor: stubDecryptor{},
 		Clock:     sitelogin.NewFakeClock(time.Now()),
 		Logger:    zap.NewNop().Sugar(),
+		// 测试站点名不在定义注册表里；这里只关心单飞锁，统一视为内置站点。
+		DefinitionLookup: func(name string) (*v2.SiteDefinition, bool) {
+			return &v2.SiteDefinition{ID: name, Schema: v2.SchemaNexusPHP}, true
+		},
 	})
 
 	mgr := scheduler.NewManager()

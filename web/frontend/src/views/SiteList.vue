@@ -13,7 +13,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
-import { formatTimeAgo } from "@/utils/format";
+import { formatShortDateTime, formatTimeAgo } from "@/utils/format";
 import { isProbeSuccess, probeStatusLabel, probeStatusSeverity } from "@/utils/probeStatus";
 import { type DataStateKey, useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
@@ -34,6 +34,11 @@ const {
   loginState,
   effectiveLastActive,
   lastAccess,
+  activeSourceLabel,
+  accessStale,
+  probeNote,
+  nextProbeAt,
+  failingSince,
   daysRemaining,
   reminderTier,
   probeModeOf,
@@ -432,9 +437,33 @@ function statusOf(name: string, site: SiteConfig): SiteStatus {
   if (!site.enabled) return "off";
   if (site.unavailable) return "bad";
   const st = loginState(name)?.last_probe_status;
-  /* 从未探测过不算异常：那是「还不知道」，不是「坏了」 */
-  if (st !== undefined && st !== "" && !isProbeSuccess(st)) return "bad";
+  /* 从未探测过不算异常：那是「还不知道」，不是「坏了」。
+     中性档（不适用、动态站点暂不支持探测）同理，它们不是故障。 */
+  if (st !== undefined && st !== "" && !isProbeSuccess(st) && probeStatusSeverity(st) !== "info")
+    return "bad";
   return "ok";
+}
+
+/**
+ * 「判定活跃」的补充说明：最近一次探测为何没成功、依据哪一列、下次什么时候探、失败从什么时候开始、访问是否已不生效。
+ * 桌面挂在「剩余天数」与「判定活跃」两格的 tooltip 上，移动端放进行卡里同一个口径 popover。没有可说的就回空数组。
+ */
+function activeNotes(name: string): string[] {
+  const notes: string[] = [];
+  const probe = probeNote(name);
+  if (probe) notes.push(probe);
+  const source = activeSourceLabel(name);
+  if (source) notes.push(`依据：${source}`);
+  const next = nextProbeAt(name);
+  if (next > 0 && probeModeOf(name) === "auto") {
+    notes.push(`下次探测：${formatShortDateTime(next * 1000)}`);
+  }
+  const since = failingSince(name);
+  if (since > 0) notes.push(`连续失败自：${formatShortDateTime(since * 1000)}`);
+  if (accessStale(name)) {
+    notes.push("访问未生效：探测成功，但站点的最近访问时间没有更新，需要手动登录该站");
+  }
+  return notes;
 }
 
 /* 探测模式的中文名：导出与筛选 chip 共用一份 */
@@ -1193,9 +1222,18 @@ async function saveLoginConfig() {
         -->
         <el-table-column label="状态" width="96" align="center">
           <template #default="{ row }">
-            <PtStatusPill :tone="statusTone(statusOf(row[0], row[1]))" size="sm">
-              {{ STATUS_LABEL[statusOf(row[0], row[1])] }}
-            </PtStatusPill>
+            <!-- 「异常」「正常」背后的探测结果（如未配置凭证、暂不支持探测）放在 tooltip 里 -->
+            <el-tooltip
+              :disabled="!probeNote(row[0])"
+              :content="probeNote(row[0])"
+              placement="top"
+              :show-after="200">
+              <span :data-testid="`site-status-${row[0]}`">
+                <PtStatusPill :tone="statusTone(statusOf(row[0], row[1]))" size="sm">
+                  {{ STATUS_LABEL[statusOf(row[0], row[1])] }}
+                </PtStatusPill>
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -1227,15 +1265,23 @@ async function saveLoginConfig() {
         <el-table-column v-if="colShown('active')" min-width="104" class-name="pt-cell-muted">
           <template #header>
             <el-tooltip
-              content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；不是网页登录时间"
+              content="用于封禁提醒判定的有效活跃时间，优先使用站点返回的 last_access；探测失败时，浏览器扩展上报的较新访问也算。不是网页登录时间"
               placement="top">
               <span class="th-help">判定活跃 <PtIcon name="info" :size="12" /></span>
             </el-tooltip>
           </template>
           <template #default="{ row }">
-            <span :data-testid="`last-login-cell-${row[0]}`" class="ts">
-              {{ formatTimeAgo(effectiveLastActive(row[0])) }}
-            </span>
+            <el-tooltip
+              :disabled="activeNotes(row[0]).length === 0"
+              placement="top"
+              :show-after="200">
+              <template #content>
+                <div v-for="note in activeNotes(row[0])" :key="note">{{ note }}</div>
+              </template>
+              <span :data-testid="`last-login-cell-${row[0]}`" class="ts">
+                {{ formatTimeAgo(effectiveLastActive(row[0])) }}
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -1263,18 +1309,38 @@ async function saveLoginConfig() {
             叠两枚之后这一列比真正的状态列还响。天数改成带语义字色的纯文本；
             档位胶囊只在**确实需要关注**时出现，「正常 / 未知」不画。
           -->
+          <!--
+            「判定活跃」列默认是藏着的，所以判定依据、下次探测、失败开始时间这些说明挂在这一格的
+            tooltip 上，默认视图也看得到。一格仍然最多一枚胶囊：「访问未生效」比档位更要紧 ——
+            它说明自动访问对这个站无效、只能手动登录，紧急程度已经由天数的字色表达。
+          -->
           <template #default="{ row }">
-            <span class="days">
-              <span :data-testid="`days-remaining-cell-${row[0]}`" :class="daysCellClass(row[0])">
-                {{ daysRemaining(row[0]) === null ? "—" : `${daysRemaining(row[0])} 天` }}
+            <el-tooltip
+              :disabled="activeNotes(row[0]).length === 0"
+              placement="top"
+              :show-after="200">
+              <template #content>
+                <div v-for="note in activeNotes(row[0])" :key="note">{{ note }}</div>
+              </template>
+              <span class="days">
+                <span :data-testid="`days-remaining-cell-${row[0]}`" :class="daysCellClass(row[0])">
+                  {{ daysRemaining(row[0]) === null ? "—" : `${daysRemaining(row[0])} 天` }}
+                </span>
+                <PtStatusPill
+                  v-if="accessStale(row[0])"
+                  :data-testid="`access-stale-${row[0]}`"
+                  tone="warn"
+                  size="sm">
+                  访问未生效
+                </PtStatusPill>
+                <PtStatusPill
+                  v-else-if="ATTENTION_TIERS.has(reminderTier(row[0]))"
+                  :tone="tierTone(reminderTier(row[0]))"
+                  size="sm">
+                  {{ tierLabel(reminderTier(row[0])) }}
+                </PtStatusPill>
               </span>
-              <PtStatusPill
-                v-if="ATTENTION_TIERS.has(reminderTier(row[0]))"
-                :tone="tierTone(reminderTier(row[0]))"
-                size="sm">
-                {{ tierLabel(reminderTier(row[0])) }}
-              </PtStatusPill>
-            </span>
+            </el-tooltip>
           </template>
         </el-table-column>
 
@@ -1522,6 +1588,7 @@ async function saveLoginConfig() {
                   但少数站点按 last_login（实际登录）或做种活跃度清理，这类站点仍需定期手动登录，
                   别只看这里的数字。
                 </p>
+                <p v-for="note in activeNotes(name)" :key="note" class="th-help__p">{{ note }}</p>
               </el-popover>
             </span>
           </template>

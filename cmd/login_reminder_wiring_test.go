@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -12,10 +13,12 @@ import (
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
-	"github.com/sunerpy/pt-tools/internal/crypto"
+	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/web"
 )
 
 func TestWireLoginReminderMonitor_RegistersNonNil(t *testing.T) {
@@ -45,33 +48,6 @@ func TestWireLoginReminderMonitor_RegistersNonNil(t *testing.T) {
 
 	require.NotNil(t, mgr.GetLoginReminderMonitor(),
 		"after wiring, GetLoginReminderMonitor must be non-nil so the probe endpoint stops returning 503")
-}
-
-func TestLoginReminderConfLister_DecryptsConfigJSON(t *testing.T) {
-	global.InitLogger(zap.NewNop())
-
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.NotificationConf{}))
-
-	plaintext := `{"bot_token":"123:ABC","chat_id":"456"}`
-	cipher, err := crypto.Encrypt([]byte(plaintext))
-	require.NoError(t, err)
-	require.NotEqual(t, plaintext, cipher, "stored ConfigJSON must be ciphertext")
-
-	require.NoError(t, db.Create(&models.NotificationConf{
-		ChannelType: "telegram",
-		Name:        "tg-test",
-		ConfigJSON:  cipher,
-		Enabled:     true,
-	}).Error)
-
-	lister := loginReminderConfLister{db: db}
-	confs, err := lister.ListNotificationConfs(context.Background())
-	require.NoError(t, err)
-	require.Len(t, confs, 1)
-	require.Equal(t, plaintext, confs[0].ConfigJSON,
-		"ConfLister must return DECRYPTED plaintext; the telegram adapter json.Unmarshals it directly, so ciphertext here reproduces the 'invalid character T' regression")
 }
 
 func TestLoginReminderDecryptor_Decrypt(t *testing.T) {
@@ -137,26 +113,87 @@ func TestLoginReminderResolver_Resolve_UnknownSite(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoginReminderConfLister_SkipsUndecryptable(t *testing.T) {
-	global.InitLogger(zap.NewNop())
-	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+// fakeNotificationSvc 只实现 PushSync / Push；其余方法沿用嵌入的 nil 接口，被调用就会 panic，
+// 用来证明登录监控只走 PushSync。
+type fakeNotificationSvc struct {
+	app.NotificationService
+	pushSync atomic.Int32
+	push     atomic.Int32
+	lastConf atomic.Uint32
+}
 
+func (f *fakeNotificationSvc) PushSync(_ context.Context, n app.Notification) error {
+	f.pushSync.Add(1)
+	f.lastConf.Store(uint32(n.SourceConfID))
+	return nil
+}
+
+func (f *fakeNotificationSvc) Push(context.Context, app.Notification) error {
+	f.push.Add(1)
+	return nil
+}
+
+type countingChannel struct{}
+
+func (countingChannel) Type() string                                         { return "counting" }
+func (countingChannel) Init(context.Context, *models.NotificationConf) error { return nil }
+func (countingChannel) SupportsInbound() bool                                { return false }
+func (countingChannel) Send(context.Context, notify.Notification) error      { return nil }
+func (countingChannel) OnInbound(notify.InboundHandler)                      {}
+func (countingChannel) Close(context.Context) error                          { return nil }
+func (countingChannel) Healthy() bool                                        { return true }
+
+// M1 问题 12：登录监控经 ChatOps 的 live 通道发送，不再用 registry.Make 另起通道实例。
+func TestWireLoginReminderMonitor_UsesLiveChannelsNotNewInstances(t *testing.T) {
+	global.InitLogger(zap.NewNop())
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.NotificationConf{}))
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.SiteLoginState{}, &models.NotificationConf{},
+		&models.MigrationState{}, &models.MonitorNotificationLog{}))
+	prevDB := global.GlobalDB
+	global.GlobalDB = &models.TorrentDB{DB: db}
+	t.Cleanup(func() { global.GlobalDB = prevDB })
+	require.NoError(t, db.Create(&models.NotificationConf{ChannelType: "counting", Name: "c", Enabled: true}).Error)
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true, AuthMethod: "cookie"}).Error)
 
-	// Enabled conf with garbage ConfigJSON is skipped (decrypt fails).
-	require.NoError(t, db.Create(&models.NotificationConf{
-		ChannelType: "telegram", Name: "bad", ConfigJSON: "garbage", Enabled: true,
-	}).Error)
-	// Enabled conf with empty ConfigJSON passes through untouched.
-	require.NoError(t, db.Create(&models.NotificationConf{
-		ChannelType: "qq_onebot", Name: "empty", ConfigJSON: "", Enabled: true,
-	}).Error)
+	var makes atomic.Int32
+	registry := notify.NewRegistry()
+	registry.Register("counting", func() notify.Channel { makes.Add(1); return countingChannel{} })
+	svc := &fakeNotificationSvc{}
+	bs := &chatopsBootstrap{registry: registry, deps: &web.ChatOpsDeps{NotificationSvc: svc}}
 
-	lister := loginReminderConfLister{db: db}
-	confs, err := lister.ListNotificationConfs(t.Context())
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), bs)
+	mon := mgr.GetLoginReminderMonitor()
+	require.NotNil(t, mon)
+	require.True(t, mon.Notifier().Enabled())
+
+	require.NoError(t, mon.SendTestReminder(context.Background(), "hdsky"))
+	assert.Equal(t, int32(1), svc.pushSync.Load(), "delivered through the live manager")
+	assert.Equal(t, int32(0), svc.push.Load(), "Push would fall back to the outbox, which cannot drive QQ/Telegram")
+	assert.Equal(t, int32(0), makes.Load(), "no channel instance is created for login notifications")
+	assert.Equal(t, uint32(1), svc.lastConf.Load())
+}
+
+func TestWireLoginReminderMonitor_WithoutChatOpsRecordsOnly(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.Len(t, confs, 1, "undecryptable conf should be skipped")
-	assert.Equal(t, "empty", confs[0].Name)
+	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.SiteLoginState{}, &models.NotificationConf{},
+		&models.MigrationState{}, &models.MonitorNotificationLog{}))
+	prevDB := global.GlobalDB
+	global.GlobalDB = &models.TorrentDB{DB: db}
+	t.Cleanup(func() { global.GlobalDB = prevDB })
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdsky", Enabled: true}).Error)
+
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	wireLoginReminderMonitor(mgr, core.NewConfigStore(global.GlobalDB), v2.NewSiteRegistry(global.GetLogger()), nil)
+	mon := mgr.GetLoginReminderMonitor()
+	require.NotNil(t, mon)
+	assert.False(t, mon.Notifier().Enabled())
+	assert.Nil(t, loginReminderSender(nil))
+	assert.Nil(t, loginReminderSender(&chatopsBootstrap{}))
+	assert.ErrorContains(t, mon.SendTestReminder(context.Background(), "hdsky"), "通知")
 }

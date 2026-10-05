@@ -1,5 +1,6 @@
 import type { Ref } from "vue";
 import type { SiteLoginState } from "@/api";
+import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
 
 export type ReminderTier =
   | "none"
@@ -37,6 +38,42 @@ export function useLoginState(loginStates: Ref<Record<string, SiteLoginState>>) 
 
   function reminderTier(name: string): ReminderTier {
     return (loginState(name)?.tier as ReminderTier) ?? "unknown";
+  }
+
+  /** 判定活跃的依据，用于提示；没有依据时回空串 */
+  function activeSourceLabel(name: string): string {
+    switch (loginState(name)?.effective_source) {
+      case "last_access":
+        return "站点最近访问";
+      case "api_last_login":
+      case "cookie_last_login":
+      case "last_login":
+        return "站点最近登录";
+      case "last_visit":
+        return "浏览器访问";
+      default:
+        return "";
+    }
+  }
+
+  /** 探测成功但站点的最近访问时间不再前进：自动访问对该站无效 */
+  function accessStale(name: string): boolean {
+    return (loginState(name)?.access_stale_since ?? 0) > 0;
+  }
+
+  /** 最近一次探测没有成功时的结果说明，如「探测结果：未配置凭证 (NOT_CONFIGURED)」；成功或从未探测回空串 */
+  function probeNote(name: string): string {
+    const status = loginState(name)?.last_probe_status;
+    if (!status || isProbeSuccess(status)) return "";
+    return `探测结果：${probeStatusLabel(status)}`;
+  }
+
+  function nextProbeAt(name: string): number {
+    return loginState(name)?.next_probe_at ?? 0;
+  }
+
+  function failingSince(name: string): number {
+    return loginState(name)?.first_failure_at ?? 0;
   }
 
   function probeModeOf(name: string): "auto" | "manual" | "disabled" {
@@ -107,6 +144,11 @@ export function useLoginState(loginStates: Ref<Record<string, SiteLoginState>>) 
     effectiveLastActive,
     lastAccess,
     lastLogin,
+    activeSourceLabel,
+    accessStale,
+    probeNote,
+    nextProbeAt,
+    failingSince,
     daysRemaining,
     reminderTier,
     probeModeOf,

@@ -226,7 +226,23 @@ export interface SiteLoginState {
   last_access_at?: number;
   last_visit_at?: number;
   effective_last_active_at?: number;
+  /** 判定活跃取自哪一列；探测失败时可能是浏览器扩展上报的访问（last_visit） */
+  effective_source?:
+    | "last_access"
+    | "api_last_login"
+    | "cookie_last_login"
+    | "last_login"
+    | "last_visit"
+    | "none"
+    | "unknown";
   last_probe_at?: number;
+  /** 下一次定时探测的时间（只对自动模式有意义） */
+  next_probe_at?: number;
+  last_success_at?: number;
+  /** 当前失败连续段的开始时间，探测成功后清空 */
+  first_failure_at?: number;
+  /** 探测成功但站点的最近访问时间超过 48 小时没有前进：自动访问对该站无效 */
+  access_stale_since?: number;
   last_probe_status?: string;
   last_probe_error?: string;
   consecutive_probe_failures: number;
