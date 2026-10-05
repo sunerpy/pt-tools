@@ -1006,6 +1006,7 @@ func TestEffectiveLastActiveV2Semantic(t *testing.T) {
 	cookieLastLoginAt := now.Add(-1 * 24 * time.Hour)
 	legacyLastLoginAt := now.Add(-3 * 24 * time.Hour)
 	lastVisitAt := now.Add(-4 * 24 * time.Hour)
+	recentVisitAt := now.Add(-time.Hour)
 	staleProbeAt := now.Add(-13 * time.Hour)
 	freshProbeAt := now.Add(-2 * time.Hour)
 
@@ -1062,6 +1063,17 @@ func TestEffectiveLastActiveV2Semantic(t *testing.T) {
 			name:  "ok_probe_ignores_last_visit",
 			state: &models.SiteLoginState{LastVisitAt: &lastVisitAt, LastProbeStatus: "OK"},
 			want:  time.Time{},
+		},
+		{
+			// Unit3D 只给登录时间：探测正常时用它，即使浏览器访问更新也不看。
+			name:  "ok_probe_login_only_unit3d_ignores_newer_visit",
+			state: &models.SiteLoginState{ApiLastLoginAt: &apiLastLoginAt, LastVisitAt: &recentVisitAt, LastProbeStatus: "OK"},
+			want:  apiLastLoginAt,
+		},
+		{
+			name:  "failed_probe_login_only_takes_newer_visit",
+			state: &models.SiteLoginState{ApiLastLoginAt: &apiLastLoginAt, LastVisitAt: &recentVisitAt, LastProbeStatus: "NETWORK_ERROR"},
+			want:  recentVisitAt,
 		},
 		{
 			name:  "all_empty_returns_zero",
