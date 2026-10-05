@@ -171,7 +171,8 @@ func (n *MonitorNotifier) DeliverDue(ctx context.Context) int {
 		if ctx.Err() != nil {
 			break
 		}
-		if n.deliverRow(ctx, row, now) == nil {
+		// 每行按此刻的时间判断静默：前面的发送可能耗时，批次开始时的时间会过时。
+		if n.deliverRow(ctx, row, n.clock.Now()) == nil {
 			sent++
 		}
 	}
@@ -197,9 +198,8 @@ func (n *MonitorNotifier) DeliverNow(ctx context.Context, e MonitorNotifyEntry) 
 		return errors.New("没有可用的通知通道")
 	}
 	var firstErr error
-	now := n.clock.Now()
 	for _, row := range rows {
-		if err := n.deliverRow(ctx, row, now); err != nil && firstErr == nil {
+		if err := n.deliverRow(ctx, row, n.clock.Now()); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
