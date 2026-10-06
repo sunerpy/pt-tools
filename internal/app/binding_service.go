@@ -20,7 +20,9 @@ const (
 var (
 	ErrTooManyActiveCodes = errors.New("too many active bind codes for this admin")
 	ErrCodeUsedOrExpired  = errors.New("bind code is invalid, expired, or already used")
-	ErrInvalidReplyLang   = errors.New("invalid reply_lang; only 'zh' or 'en' allowed")
+	// ErrCodeWrongChannel 表示绑定码不是这个通知通道签发的：绑定码只能在签发它的通道上兑换。
+	ErrCodeWrongChannel = errors.New("bind code was issued for a different notification channel")
+	ErrInvalidReplyLang = errors.New("invalid reply_lang; only 'zh' or 'en' allowed")
 )
 
 type BindCodeDTO struct {
@@ -47,7 +49,7 @@ type BindingDTO struct {
 type BindingService interface {
 	IssueCode(ctx context.Context, confID uint, label string, ttl time.Duration) (BindCodeDTO, error)
 	ListPendingCodes(ctx context.Context) ([]BindCodeDTO, error)
-	ConsumeCode(ctx context.Context, code, channelType, channelUserID string) (BindingDTO, error)
+	ConsumeCode(ctx context.Context, code string, confID uint, channelType, channelUserID string) (BindingDTO, error)
 	ListBindings(ctx context.Context) ([]BindingDTO, error)
 	Revoke(ctx context.Context, bindingID uint) error
 	SetReplyLang(ctx context.Context, bindingID uint, lang string) error
@@ -142,8 +144,8 @@ func (s *bindingService) ListPendingCodes(ctx context.Context) ([]BindCodeDTO, e
 	return out, nil
 }
 
-func (s *bindingService) ConsumeCode(ctx context.Context, code, channelType, channelUserID string) (BindingDTO, error) {
-	if code == "" || channelType == "" || channelUserID == "" {
+func (s *bindingService) ConsumeCode(ctx context.Context, code string, confID uint, channelType, channelUserID string) (BindingDTO, error) {
+	if code == "" || confID == 0 || channelType == "" || channelUserID == "" {
 		return BindingDTO{}, ErrCodeUsedOrExpired
 	}
 
@@ -162,6 +164,22 @@ func (s *bindingService) ConsumeCode(ctx context.Context, code, channelType, cha
 			return fmt.Errorf("lookup bind code: %w", err)
 		}
 
+		// 绑定码只能在签发它的通知通道上兑换，且通道类型要与消息来源一致；不符时不消耗绑定码。
+		scopeConfID, label := parseBindScope(token.Scope)
+		if scopeConfID != confID {
+			return ErrCodeWrongChannel
+		}
+		var conf models.NotificationConf
+		if err := tx.Select("id", "channel_type").First(&conf, confID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrCodeWrongChannel
+			}
+			return fmt.Errorf("lookup notification conf: %w", err)
+		}
+		if conf.ChannelType != channelType {
+			return ErrCodeWrongChannel
+		}
+
 		// Atomic mark-used: race-safe via WHERE used_at IS NULL.
 		res := tx.Model(&models.BotToken{}).
 			Where("id = ? AND used_at IS NULL", token.ID).
@@ -173,7 +191,6 @@ func (s *bindingService) ConsumeCode(ctx context.Context, code, channelType, cha
 			return ErrCodeUsedOrExpired
 		}
 
-		confID, label := parseBindScope(token.Scope)
 		binding = models.ChannelBinding{
 			NotificationConfID: confID,
 			ChannelType:        channelType,

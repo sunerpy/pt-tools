@@ -467,7 +467,7 @@ func (m *mockBindingService) ListPendingCodes(_ context.Context) ([]app.BindCode
 	return nil, nil
 }
 
-func (m *mockBindingService) ConsumeCode(_ context.Context, code, _, _ string) (app.BindingDTO, error) {
+func (m *mockBindingService) ConsumeCode(_ context.Context, code string, _ uint, _, _ string) (app.BindingDTO, error) {
 	if m.consumeErr != nil {
 		return app.BindingDTO{}, m.consumeErr
 	}
@@ -492,7 +492,7 @@ type mockBindingResolver struct {
 	err error
 }
 
-func (m *mockBindingResolver) FindByChannelUser(_ context.Context, _, _ string) (uint, bool, error) {
+func (m *mockBindingResolver) FindByChannelUser(_ context.Context, _ uint, _, _ string) (uint, bool, error) {
 	return m.id, m.ok, m.err
 }
 

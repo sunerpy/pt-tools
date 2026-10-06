@@ -195,6 +195,8 @@ From your **personal QQ account** (not the bot's), send the bot a **private mess
 
 When the bot replies 绑定成功 ("linked"), you are done.
 
+> A link belongs to the channel you picked when you generated the code. The code works only with that channel's bot; sending it to another bot fails. To send commands through several channels, link the QQ account on each of them.
+
 ### Trying `/help`
 
 Once linked, send `/help`; the bot lists every command.

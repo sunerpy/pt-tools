@@ -154,6 +154,8 @@ Copy the 8-character code (such as `A3F7KP2M`) and send it to the bot in a priva
 
 When the bot replies 绑定成功 ("linked"), you are done. Your account then appears in the Linked users (已绑定用户) list.
 
+> A link belongs to the channel you picked when you generated the code. The code works only with that channel's bot; sending it to another bot fails. To send commands through several channels, link the account on each of them.
+
 ![The list of linked accounts](../../guide/images/chatops/chatops-bindings-list.webp)
 
 > After linking, the account appears in the Linked users list with the channel type, the user ID (partly hidden) and the admin flag.

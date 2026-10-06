@@ -137,13 +137,13 @@ type addrssBindingLookup struct {
 	ok   bool
 }
 
-func (l *addrssBindingLookup) FindByChannelUser(context.Context, string, string) (chatops.BindingInfo, bool, error) {
+func (l *addrssBindingLookup) FindByChannelUser(context.Context, uint, string, string) (chatops.BindingInfo, bool, error) {
 	return l.info, l.ok, nil
 }
 
 type addrssBindCoder struct{}
 
-func (addrssBindCoder) ConsumeCode(context.Context, string, string, string) error { return nil }
+func (addrssBindCoder) ConsumeCode(context.Context, string, uint, string, string) error { return nil }
 
 type addrssAuditRecorder struct{}
 

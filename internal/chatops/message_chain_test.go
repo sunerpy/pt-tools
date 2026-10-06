@@ -108,13 +108,15 @@ type stubBindings struct {
 	binding  BindingInfo
 	exists   bool
 	err      error
+	lastConf uint
 	lastChan string
 	lastUser string
 }
 
-func (s *stubBindings) FindByChannelUser(_ context.Context, channelType, channelUserID string) (BindingInfo, bool, error) {
+func (s *stubBindings) FindByChannelUser(_ context.Context, confID uint, channelType, channelUserID string) (BindingInfo, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.lastConf = confID
 	s.lastChan = channelType
 	s.lastUser = channelUserID
 	if s.err != nil {
@@ -233,6 +235,7 @@ func (s *stubAudit) snapshot() []AuditEntry {
 
 type consumeArgs struct {
 	code, channelType, channelUserID string
+	confID                           uint
 }
 
 type stubBindCoder struct {
@@ -241,10 +244,10 @@ type stubBindCoder struct {
 	err      error
 }
 
-func (s *stubBindCoder) ConsumeCode(_ context.Context, code, channelType, channelUserID string) error {
+func (s *stubBindCoder) ConsumeCode(_ context.Context, code string, confID uint, channelType, channelUserID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.consumed = append(s.consumed, consumeArgs{code, channelType, channelUserID})
+	s.consumed = append(s.consumed, consumeArgs{code: code, confID: confID, channelType: channelType, channelUserID: channelUserID})
 	return s.err
 }
 
@@ -312,6 +315,7 @@ func TestProcess_NotBound_OnlyBindAllowed(t *testing.T) {
 	require.Len(t, entries, 1)
 	assert.Equal(t, "denied:not_bound", entries[0].Result)
 	assert.Equal(t, "status", entries[0].Command)
+	assert.Equal(t, uint(7), f.bindings.lastConf, "按消息来源的通知通道配置查绑定")
 
 	reply, ok := f.replier.lastReply()
 	require.True(t, ok)
@@ -327,6 +331,7 @@ func TestProcess_NotBound_BindAllowed(t *testing.T) {
 
 	require.Len(t, f.bindCoder.consumed, 1)
 	assert.Equal(t, "ABCD2345", f.bindCoder.consumed[0].code)
+	assert.Equal(t, uint(7), f.bindCoder.consumed[0].confID, "绑定码按消息来源的通道配置兑换")
 	assert.Equal(t, "telegram", f.bindCoder.consumed[0].channelType)
 	assert.Equal(t, "u-999", f.bindCoder.consumed[0].channelUserID)
 
