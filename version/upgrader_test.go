@@ -761,6 +761,94 @@ func TestPerformUpgrade_RequiresChecksumAsset(t *testing.T) {
 	assert.Zero(t, hits, "缺校验清单时不下载安装包")
 }
 
+// 校验清单拿不到、拿到了但不能用时都不安装：每种情况都在下载安装包之前失败。
+func TestFetchExpectedChecksum_Failures(t *testing.T) {
+	clearProxyForUpgrade(t)
+	const asset = "pt-tools-linux-amd64.tar.gz"
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantErr string
+	}{
+		{"http error", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }, "HTTP 404"},
+		{"asset missing", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, "%s  pt-tools-windows-amd64.exe.zip\n", strings.Repeat("ab", 32))
+		}, "没有 " + asset},
+		{"too large", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(strings.Repeat("x", maxChecksumFileBytes+1)))
+		}, "过大"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(tc.handler)
+			defer srv.Close()
+			_, err := NewUpgrader().fetchExpectedChecksum(context.Background(), srv.URL+"/checksums.txt", asset, "")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+
+	t.Run("unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		url := srv.URL + "/checksums.txt"
+		srv.Close()
+		_, err := NewUpgrader().fetchExpectedChecksum(context.Background(), url, asset, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "下载校验清单失败")
+	})
+
+	t.Run("bad url", func(t *testing.T) {
+		_, err := NewUpgrader().fetchExpectedChecksum(context.Background(), "http://[::1", asset, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "下载校验清单失败")
+	})
+}
+
+// 清单下载失败时整个升级失败，安装包一次都不请求。
+func TestPerformUpgrade_ChecksumDownloadFailureStopsBeforeArchive(t *testing.T) {
+	clearProxyForUpgrade(t)
+	env := DetectEnvironment()
+	assetName := GetAssetNameForPlatform(env.OS, env.Arch)
+	if assetName == "" {
+		t.Skip("unsupported platform")
+	}
+	var archiveHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+checksumAssetName {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		archiveHits++
+	}))
+	defer srv.Close()
+
+	u := NewUpgrader()
+	u.performUpgrade(context.Background(), &ReleaseInfo{
+		Version: "v9.9.9",
+		Assets: []ReleaseAsset{
+			{Name: assetName, DownloadURL: srv.URL + "/asset"},
+			{Name: checksumAssetName, DownloadURL: srv.URL + "/" + checksumAssetName},
+		},
+	}, "")
+	p := u.GetProgress()
+	assert.Equal(t, UpgradeStatusFailed, p.Status)
+	assert.Contains(t, p.Error, "校验清单")
+	assert.Zero(t, archiveHits)
+}
+
+func TestVerifyFileSHA256_Errors(t *testing.T) {
+	err := verifyFileSHA256(filepath.Join(t.TempDir(), "missing"), strings.Repeat("ab", 32))
+	require.ErrorIs(t, err, ErrChecksumMismatch)
+
+	// 目录能打开但读不出内容
+	err = verifyFileSHA256(t.TempDir(), strings.Repeat("ab", 32))
+	require.ErrorIs(t, err, ErrChecksumMismatch)
+
+	f := filepath.Join(t.TempDir(), "a")
+	require.NoError(t, os.WriteFile(f, []byte("abc"), 0o600))
+	require.NoError(t, verifyFileSHA256(f, strings.ToUpper(sha256Hex([]byte("abc")))), "摘要大小写不敏感")
+}
+
 func TestLookupChecksum(t *testing.T) {
 	sum := strings.Repeat("0a", 32)
 	list := []byte("\n" + strings.Repeat("ff", 32) + "  pt-tools-windows-amd64.exe.zip\n" +
