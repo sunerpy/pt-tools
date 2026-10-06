@@ -3,11 +3,14 @@ package v2
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -766,6 +769,80 @@ func TestMTorrentDriver_ParseDownload_Full(t *testing.T) {
 	} else {
 		assert.NotEmpty(t, data)
 	}
+}
+
+// genDlToken 的响应就是带 sign 的下载地址，不能无条件打印到 stdout。
+func TestMTorrentDriver_Execute_DoesNotPrintDownloadToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":"0","message":"SUCCESS","data":"https://api.m-team.cc/api/rss/dlv2?sign=TOPSECRET"}`))
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	req, err := d.PrepareDownload("123")
+	require.NoError(t, err)
+
+	out := captureStdout(t, func() {
+		_, err = d.Execute(context.Background(), req)
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, out, "TOPSECRET")
+	assert.NotContains(t, out, "genDlToken")
+}
+
+// 拉种子文件的第二段请求要有超时，签名地址卡住时不能一直挂着。
+func TestMTorrentDriver_ParseDownload_FetchTimesOut(t *testing.T) {
+	old := mteamTorrentFetchTimeout
+	mteamTorrentFetchTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { mteamTorrentFetchTimeout = old })
+
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	start := time.Now()
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl?sign=TOPSECRET"`)})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second)
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
+// 错误信息里的签名地址要脱敏，避免随日志泄露可复用的下载链接。
+func TestMTorrentDriver_ParseDownload_RedactsSignedURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.m-team.cc", APIKey: "k"})
+	_, err := d.ParseDownload(MTorrentResponse{Code: "0", Data: []byte(`"` + server.URL + `/dl?sign=TOPSECRET"`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 403")
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	fn()
+
+	require.NoError(t, w.Close())
+	os.Stdout = orig
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
 }
 
 func TestMTorrentDriver_ParseDownload_APIError(t *testing.T) {
