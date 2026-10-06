@@ -8,11 +8,12 @@
 # 占位产物仅供静态检查，绝不可用于对外发布的二进制。
 name: CI
 
+# v1.0.0-rc 是 1.0 预览版的集成分支：功能 PR 先合到这里验收，审核通过后再合回 main。
 on:
   push:
-    branches: [main]
+    branches: [main, v1.0.0-rc]
   pull_request:
-    branches: [main]
+    branches: [main, v1.0.0-rc]
   merge_group:
 
 concurrency:

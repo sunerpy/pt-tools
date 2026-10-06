@@ -10,9 +10,10 @@
 # 而 release 有上百个的原因）。
 name: Release
 
+# v1.0.0-rc 是 1.0 预览版的集成分支：rc 预发布从这里发，main 停在最近的稳定版，审核通过后再合回。
 on:
   push:
-    branches: [main]
+    branches: [main, v1.0.0-rc]
   workflow_dispatch:
     inputs:
       tag_name:
@@ -50,6 +51,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # 发布 PR 开在触发这次运行的分支上（默认会开到仓库默认分支 main）
+          target-branch: ${{ github.ref_name }}
 
       - name: Checkout release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,12 +60,13 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      # 该脚本要求 github.ref_protected == true，且只允许在默认分支上运行。
+      # 该脚本要求 github.ref_protected == true，且只允许在 DEFAULT_BRANCH 上运行：
+      # 只认 main 与受保护的集成分支 v1.0.0-rc，其他分支（包括从别的分支手动触发）一律拒绝。
       - name: Resolve release gate
         id: gate
         shell: bash
         env:
-          DEFAULT_BRANCH: main
+          DEFAULT_BRANCH: ${{ github.ref_name == 'v1.0.0-rc' && 'v1.0.0-rc' || 'main' }}
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag_name }}
