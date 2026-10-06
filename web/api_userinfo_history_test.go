@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -173,4 +174,110 @@ func TestUserInfoSummaryAndTrends_SiteConfigErrorIs500(t *testing.T) {
 	w = httptest.NewRecorder()
 	srv.apiUserInfoTrends(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/trends?days=3", nil))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// stubHistoryUserInfoRepo 同时是 UserInfoRepo 与 UserInfoHistoryRepo，按字段回错误，走接口的 500 分支。
+type stubHistoryUserInfoRepo struct {
+	*v2.InMemoryUserInfoRepo
+	today       string
+	listErr     error
+	baselineErr error
+}
+
+func (s stubHistoryUserInfoRepo) ListSnapshots(context.Context, string, string, string) ([]v2.UserInfoDailySnapshot, error) {
+	return nil, s.listErr
+}
+
+func (s stubHistoryUserInfoRepo) SnapshotBaselines(context.Context, string) (map[string]v2.UserInfoDailySnapshot, error) {
+	return nil, s.baselineErr
+}
+
+func (s stubHistoryUserInfoRepo) PruneSnapshots(context.Context, string) (int64, error) {
+	return 0, nil
+}
+
+func (s stubHistoryUserInfoRepo) Today() string { return s.today }
+
+func useUserInfoService(t *testing.T, svc *v2.UserInfoService) {
+	t.Helper()
+	prev := userInfoService
+	userInfoService = svc
+	t.Cleanup(func() { userInfoService = prev })
+}
+
+func TestUserInfoHistoryAPIs_Unavailable(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	call := func(h http.HandlerFunc, target string) int {
+		w := httptest.NewRecorder()
+		h(w, httptest.NewRequest(http.MethodGet, target, nil))
+		return w.Code
+	}
+	useUserInfoService(t, nil)
+	assert.Equal(t, http.StatusServiceUnavailable, call(srv.apiUserInfoHistory, "/api/v2/userinfo/history?site=hdsky"))
+	assert.Equal(t, http.StatusServiceUnavailable, call(srv.apiUserInfoSummary, "/api/v2/userinfo/summary"))
+	assert.Equal(t, http.StatusServiceUnavailable, call(srv.apiUserInfoTrends, "/api/v2/userinfo/trends"))
+
+	// 内存仓库没有每日快照
+	useUserInfoService(t, v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: v2.NewInMemoryUserInfoRepo(), Logger: zap.NewNop()}))
+	assert.Equal(t, http.StatusServiceUnavailable, call(srv.apiUserInfoHistory, "/api/v2/userinfo/history?site=hdsky"))
+	assert.Equal(t, http.StatusServiceUnavailable, call(srv.apiUserInfoTrends, "/api/v2/userinfo/trends?days=3"))
+
+	for _, h := range []http.HandlerFunc{srv.apiUserInfoHistory, srv.apiUserInfoSummary, srv.apiUserInfoTrends} {
+		w := httptest.NewRecorder()
+		h(w, httptest.NewRequest(http.MethodPost, "/api/v2/userinfo/x", nil))
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+func TestUserInfoHistoryAPIs_StoreErrorsAre500(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	boom := errors.New("disk I/O error")
+	call := func(h http.HandlerFunc, target string) int {
+		w := httptest.NewRecorder()
+		h(w, httptest.NewRequest(http.MethodGet, target, nil))
+		return w.Code
+	}
+	svcWith := func(repo stubHistoryUserInfoRepo) {
+		repo.InMemoryUserInfoRepo = v2.NewInMemoryUserInfoRepo()
+		useUserInfoService(t, v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: repo, Logger: zap.NewNop()}))
+	}
+
+	svcWith(stubHistoryUserInfoRepo{today: "2026-10-06", listErr: boom})
+	assert.Equal(t, http.StatusInternalServerError, call(srv.apiUserInfoHistory, "/api/v2/userinfo/history?site=hdsky"))
+	assert.Equal(t, http.StatusInternalServerError, call(srv.apiUserInfoSummary, "/api/v2/userinfo/summary?range=7d"))
+	assert.Equal(t, http.StatusInternalServerError, call(srv.apiUserInfoTrends, "/api/v2/userinfo/trends?days=3"))
+
+	svcWith(stubHistoryUserInfoRepo{today: "2026-10-06", baselineErr: boom})
+	assert.Equal(t, http.StatusInternalServerError, call(srv.apiUserInfoHistory, "/api/v2/userinfo/history?site=hdsky"))
+
+	// 仓库的「今天」坏了：算不出区间
+	svcWith(stubHistoryUserInfoRepo{today: "bad"})
+	assert.Equal(t, http.StatusInternalServerError, call(srv.apiUserInfoHistory, "/api/v2/userinfo/history?site=hdsky"))
+	assert.Equal(t, http.StatusBadRequest, call(srv.apiUserInfoSummary, "/api/v2/userinfo/summary"), "区间换算失败按参数错误回")
+}
+
+func TestDailyReportSettingsAPI_Errors(t *testing.T) {
+	srv, db := setupTestServer(t)
+	require.NoError(t, db.AutoMigrate(&models.NotificationConf{}))
+
+	w := httptest.NewRecorder()
+	srv.apiDailyReportSettings(w, httptest.NewRequest(http.MethodPut, "/api/v2/userinfo/daily-report", bytes.NewBufferString("{")))
+	assert.Equal(t, http.StatusBadRequest, w.Code, "JSON 坏了")
+
+	w = httptest.NewRecorder()
+	srv.apiDailyReportSettings(w, httptest.NewRequest(http.MethodPut, "/api/v2/userinfo/daily-report", bytes.NewBufferString(`{"enabled":false,"time":"25:00"}`)))
+	assert.Equal(t, http.StatusBadRequest, w.Code, "时刻格式错误")
+
+	noStore := &Server{}
+	w = httptest.NewRecorder()
+	noStore.apiDailyReportSettings(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/daily-report", nil))
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	require.NoError(t, global.GlobalDB.DB.Migrator().DropTable(&models.SettingsGlobal{}))
+	w = httptest.NewRecorder()
+	srv.apiDailyReportSettings(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/daily-report", nil))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	assert.True(t, isDailyReportValidationError(core.ErrDailyReportNoChannel))
+	assert.False(t, isDailyReportValidationError(errors.New("disk I/O error")))
 }
