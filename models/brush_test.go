@@ -232,3 +232,76 @@ func TestBrushRepository_RecordAddedRejectsOtherTasksTorrent(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, seen["9"])
 }
+
+// 读写失败（这里用删掉表来模拟）时每个方法都把错误返回给调用方，不当成「没有」。
+func TestBrushRepository_ReturnsDatabaseErrors(t *testing.T) {
+	day := "2026-10-06"
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	fresh := func(t *testing.T) (*gorm.DB, *BrushRepository, *BrushTask, *BrushTorrent) {
+		t.Helper()
+		db := newBrushTestDB(t)
+		repo := NewBrushRepository(db)
+		task := &BrushTask{Name: "a", SiteName: "hdsky", DownloaderID: 1, IntervalMin: 10}
+		require.NoError(t, repo.SaveTask(task))
+		bt := &BrushTorrent{TaskID: task.ID, InfoHash: "h", SiteName: "hdsky", TorrentID: "1", AddedAt: now, State: BrushTorrentActive}
+		require.NoError(t, repo.RecordAdded(bt, day))
+		require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: now, Uploaded: 1}, 0, 0, 0, time.UTC))
+		return db, repo, task, bt
+	}
+	sample := BrushTorrentSample{At: now.Add(time.Minute), Uploaded: 2}
+
+	t.Run("tasks", func(t *testing.T) {
+		db, repo, task, _ := fresh(t)
+		tasks, err := repo.ListTasks()
+		require.NoError(t, err)
+		require.Len(t, tasks, 1)
+		require.NoError(t, db.Migrator().DropTable(&BrushTask{}))
+		_, err = repo.ListTasks()
+		assert.Error(t, err)
+		_, err = repo.GetTask(task.ID)
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrBrushTaskNotFound)
+		assert.Error(t, repo.SaveTask(&BrushTask{Name: "b"}))
+		assert.Error(t, repo.SaveTask(task))
+		assert.Error(t, repo.MarkRun(task.ID, now, "", ""))
+		assert.Error(t, repo.DeleteTask(task.ID))
+	})
+	t.Run("torrents", func(t *testing.T) {
+		db, repo, task, bt := fresh(t)
+		require.NoError(t, db.Migrator().DropTable(&BrushTorrent{}))
+		_, err := repo.ActiveTorrents(task.ID)
+		assert.Error(t, err)
+		_, err = repo.CountActive(task.ID)
+		assert.Error(t, err)
+		_, _, err = repo.ListTorrents(task.ID, BrushTorrentActive, 1, 10)
+		assert.Error(t, err)
+		_, err = repo.SeenSiteTorrentIDs("hdsky")
+		assert.Error(t, err)
+		assert.Error(t, repo.RecordAdded(&BrushTorrent{TaskID: task.ID, InfoHash: "h2", SiteName: "hdsky", TorrentID: "2", AddedAt: now}, day))
+		assert.Error(t, repo.RecordSample(bt, sample, 0, 0, 0, time.UTC))
+		assert.Error(t, repo.MarkEnded(bt, BrushTorrentRemoved, "x", now, day))
+		assert.Error(t, repo.DeleteTask(task.ID))
+	})
+	t.Run("samples", func(t *testing.T) {
+		db, repo, task, bt := fresh(t)
+		require.NoError(t, db.Migrator().DropTable(&BrushTorrentSample{}))
+		assert.Error(t, repo.RecordSample(bt, sample, 0, 0, 0, time.UTC))
+		_, err := repo.SamplesSince(bt.ID, now)
+		assert.Error(t, err)
+		_, err = repo.PruneSamples(now)
+		assert.Error(t, err)
+		assert.Error(t, repo.DeleteTask(task.ID))
+	})
+	t.Run("daily stats", func(t *testing.T) {
+		db, repo, task, bt := fresh(t)
+		require.NoError(t, db.Migrator().DropTable(&BrushDailyStat{}))
+		assert.Error(t, repo.RecordAdded(&BrushTorrent{TaskID: task.ID, InfoHash: "h2", SiteName: "hdsky", TorrentID: "2", AddedAt: now}, day))
+		assert.Error(t, repo.RecordSample(bt, sample, 0, 0, 0, time.UTC))
+		assert.Error(t, repo.MarkEnded(bt, BrushTorrentRemoved, "x", now, day))
+		_, err := repo.DailyStats(0, day, day)
+		assert.Error(t, err)
+		_, err = repo.TaskTotals()
+		assert.Error(t, err)
+		assert.Error(t, repo.DeleteTask(task.ID))
+	})
+}
