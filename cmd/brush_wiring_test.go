@@ -20,7 +20,10 @@ func TestWireBrushMonitor(t *testing.T) {
 	t.Cleanup(func() { global.GlobalDB = prevDB })
 
 	global.GlobalDB = nil
-	assert.Nil(t, wireBrushMonitor(scheduler.NewManager(), nil), "没有数据库时不接线")
+	// 每个 Manager 都有一个订阅 ConfigChanged 的协程，会读 global.GlobalDB：用完必须 StopAll，否则后面的测试改写它时竞态
+	noDB := scheduler.NewManager()
+	t.Cleanup(noDB.StopAll)
+	assert.Nil(t, wireBrushMonitor(noDB, nil), "没有数据库时不接线")
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
