@@ -466,10 +466,36 @@ func TestGazelleDriver_GetUserInfo(t *testing.T) {
 
 func TestGazelleDriver_ParseDownload(t *testing.T) {
 	d := NewGazelleDriver(GazelleDriverConfig{BaseURL: "https://x.com"})
-	data, err := d.ParseDownload(GazelleResponse{RawBody: []byte("torrent")})
+	data, err := d.ParseDownload(GazelleResponse{RawBody: testTorrentBytes})
 	require.NoError(t, err)
-	assert.Equal(t, []byte("torrent"), data)
+	assert.Equal(t, testTorrentBytes, data)
 
 	_, err = d.ParseDownload(GazelleResponse{})
 	assert.ErrorIs(t, err, ErrParseError)
+
+	// 站点以 200 返回登录页时报解析错误，不把 HTML 当种子交出去
+	_, err = d.ParseDownload(GazelleResponse{RawBody: []byte("<html>login</html>")})
+	assert.ErrorIs(t, err, ErrParseError)
+}
+
+var testTorrentBytes = []byte("d8:announce4:test4:infod4:name4:teste")
+
+// 下载接口返回 bencode 字节，Execute 不能先按 JSON 解析，否则下载必然失败。
+func TestGazelleDriver_Download_ReturnsTorrentBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "download", r.URL.Query().Get("action"))
+		assert.Equal(t, "5001", r.URL.Query().Get("id"))
+		w.Header().Set("Content-Type", "application/x-bittorrent")
+		_, _ = w.Write(testTorrentBytes)
+	}))
+	defer server.Close()
+
+	d := NewGazelleDriver(GazelleDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	req, err := d.PrepareDownload("5001")
+	require.NoError(t, err)
+	res, err := d.Execute(context.Background(), req)
+	require.NoError(t, err)
+	data, err := d.ParseDownload(res)
+	require.NoError(t, err)
+	assert.Equal(t, testTorrentBytes, data)
 }

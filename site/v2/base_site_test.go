@@ -367,6 +367,23 @@ func TestBaseSite_DownloadWithHash_NoHashDownloader(t *testing.T) {
 	assert.Equal(t, []byte("data"), data)
 }
 
+// 驱动不支持按 hash 下载时回退普通下载，整个过程只能取一次限速令牌。
+func TestBaseSite_DownloadWithHash_FallbackTakesOneToken(t *testing.T) {
+	driver := &MockDriver{}
+	// 突发 1、每秒 0.001 个令牌：第二次 Wait 要等约 1000 秒，2 秒的 deadline 内必然失败
+	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, RateLimit: 0.001, RateBurst: 1, Logger: zap.NewNop()})
+
+	driver.On("PrepareDownload", "12345").Return("req", nil)
+	driver.On("Execute", mock.Anything, "req").Return("resp", nil)
+	driver.On("ParseDownload", "resp").Return([]byte("data"), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	data, err := site.DownloadWithHash(ctx, "12345", "hashval")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("data"), data)
+}
+
 func TestBaseSite_GetDetailFetcher_Nil(t *testing.T) {
 	driver := &MockDriver{}
 	site := NewBaseSite(driver, BaseSiteConfig{ID: "t", Name: "T", Kind: SiteNexusPHP, Logger: zap.NewNop()})

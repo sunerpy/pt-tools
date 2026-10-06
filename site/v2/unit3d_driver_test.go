@@ -358,12 +358,34 @@ func TestUnit3DDriver_GetUserInfo(t *testing.T) {
 
 func TestUnit3DDriver_ParseDownload(t *testing.T) {
 	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: "https://x.com", APIKey: "k"})
-	data, err := d.ParseDownload(Unit3DResponse{RawBody: []byte("torrent")})
+	data, err := d.ParseDownload(Unit3DResponse{RawBody: testTorrentBytes})
 	require.NoError(t, err)
-	assert.Equal(t, []byte("torrent"), data)
+	assert.Equal(t, testTorrentBytes, data)
 
 	_, err = d.ParseDownload(Unit3DResponse{})
 	assert.ErrorIs(t, err, ErrParseError)
+
+	_, err = d.ParseDownload(Unit3DResponse{RawBody: []byte(`{"message":"Unauthenticated."}`)})
+	assert.ErrorIs(t, err, ErrParseError)
+}
+
+// 下载接口返回 bencode 字节，Execute 不能先按 JSON 解析，否则下载必然失败。
+func TestUnit3DDriver_Download_ReturnsTorrentBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/torrents/42/download", r.URL.Path)
+		w.Header().Set("Content-Type", "application/x-bittorrent")
+		_, _ = w.Write(testTorrentBytes)
+	}))
+	defer server.Close()
+
+	d := NewUnit3DDriver(Unit3DDriverConfig{BaseURL: server.URL, APIKey: "k"})
+	req, err := d.PrepareDownload("42")
+	require.NoError(t, err)
+	res, err := d.Execute(context.Background(), req)
+	require.NoError(t, err)
+	data, err := d.ParseDownload(res)
+	require.NoError(t, err)
+	assert.Equal(t, testTorrentBytes, data)
 }
 
 func TestParseUnit3DTimestamp(t *testing.T) {

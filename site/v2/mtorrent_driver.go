@@ -11,9 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sunerpy/requests"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // mteamCategoryMap maps M-Team category IDs to human-readable names
@@ -426,11 +427,6 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 		"x-api-key":    d.APIKey,
 	}
 
-	// Debug log for download requests
-	if strings.Contains(req.Endpoint, "genDlToken") {
-		fmt.Printf("[DEBUG MTorrent] genDlToken request: URL=%s, ContentType=%s, Body=%s\n", fullURL, contentType, string(bodyBytes))
-	}
-
 	resp, err := d.httpClient.Post(ctx, fullURL, bodyBytes, headers)
 	if err != nil {
 		return MTorrentResponse{}, fmt.Errorf("execute request: %w", err)
@@ -439,11 +435,6 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 	result := MTorrentResponse{
 		RawBody:    resp.Body,
 		StatusCode: resp.StatusCode,
-	}
-
-	// Debug log for download response
-	if strings.Contains(req.Endpoint, "genDlToken") {
-		fmt.Printf("[DEBUG MTorrent] genDlToken response: StatusCode=%d, Body=%s\n", resp.StatusCode, string(resp.Body))
 	}
 
 	if resp.IsCloudflareChallenge() {
@@ -670,28 +661,58 @@ func (d *MTorrentDriver) ParseDownload(res MTorrentResponse) ([]byte, error) {
 		return nil, fmt.Errorf("empty download URL in response (data: %s)", string(res.Data))
 	}
 
-	// Debug log
+	// 签名下载地址本身就是凭证（sign 参数），日志和错误信息里只出现脱敏后的地址。
+	safeURL := utils.SanitizeURL(downloadURL)
 	if DebugUserInfo {
-		fmt.Printf("[DEBUG MTorrent] Download URL: %s\n", downloadURL)
+		fmt.Printf("[DEBUG MTorrent] Download URL: %s\n", safeURL)
 	}
 
-	// Fetch the actual torrent file using requests library
-	resp, err := requests.Get(downloadURL, requests.WithHeader("User-Agent", d.userAgent))
+	// 第二段请求同样走驱动的 HTTP 客户端（代理设置一致），并设上限超时：
+	// ParseDownload 拿不到调用方 ctx，此前用 requests.Get 默认会话，没有超时，可能一直挂住。
+	ctx, cancel := context.WithTimeout(context.Background(), mteamTorrentFetchTimeout)
+	defer cancel()
+	resp, err := d.httpClient.Get(ctx, downloadURL, map[string]string{
+		"User-Agent": d.userAgent,
+		"Accept":     "application/x-bittorrent, */*",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("fetch torrent file: %w", err)
+		return nil, fmt.Errorf("fetch torrent file from %s: %w", safeURL, redactURLInError(err, downloadURL, safeURL))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, downloadURL)
+		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, safeURL)
 	}
 
-	data := resp.Bytes()
+	data := resp.Body
 	if err := ValidateTorrentFile(data); err != nil {
-		return nil, fmt.Errorf("invalid torrent response from %s: size=%d, preview=%q, err=%w", downloadURL, len(data), torrentResponsePreview(data), err)
+		return nil, fmt.Errorf("invalid torrent response from %s: size=%d, preview=%q, err=%w", safeURL, len(data), torrentResponsePreview(data), err)
 	}
 
 	return data, nil
 }
+
+// mteamTorrentFetchTimeout 是取签名下载地址之后拉种子文件的超时；测试里会调小。
+var mteamTorrentFetchTimeout = 30 * time.Second
+
+// redactURLInError 把错误文本里的原始地址换成脱敏地址，保留原错误链供 errors.Is 判断。
+func redactURLInError(err error, rawURL, safeURL string) error {
+	if err == nil || rawURL == safeURL || !strings.Contains(err.Error(), rawURL) {
+		return err
+	}
+	return &urlRedactedError{err: err, rawURL: rawURL, safeURL: safeURL}
+}
+
+type urlRedactedError struct {
+	err     error
+	rawURL  string
+	safeURL string
+}
+
+func (e *urlRedactedError) Error() string {
+	return strings.ReplaceAll(e.err.Error(), e.rawURL, e.safeURL)
+}
+
+func (e *urlRedactedError) Unwrap() error { return e.err }
 
 func torrentResponsePreview(data []byte) string {
 	preview := strings.ToValidUTF8(string(data), "")

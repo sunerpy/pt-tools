@@ -188,7 +188,11 @@ func (b *BaseSite[Req, Res]) Download(ctx context.Context, torrentID string) ([]
 	if err := b.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit: %w", err)
 	}
+	return b.download(ctx, torrentID)
+}
 
+// download 执行一次下载，不取限速令牌；调用方负责先 limiter.Wait，保证一次下载只消耗一个令牌。
+func (b *BaseSite[Req, Res]) download(ctx context.Context, torrentID string) ([]byte, error) {
 	startTime := time.Now()
 	b.logger.Debug(
 		"Downloading torrent",
@@ -257,7 +261,8 @@ func (b *BaseSite[Req, Res]) DownloadWithHash(ctx context.Context, torrentID, ha
 	if hd, ok := any(b.driver).(HashDownloader); ok {
 		return hd.DownloadWithHash(ctx, torrentID, hash)
 	}
-	return b.Download(ctx, torrentID)
+	// 上面已取过令牌，回退路径不能再走 Download，否则一次下载会等两次限速。
+	return b.download(ctx, torrentID)
 }
 
 func (b *BaseSite[Req, Res]) GetDetailFetcher() TorrentDetailFetcher {
