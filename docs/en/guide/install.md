@@ -50,7 +50,7 @@ docker compose up -d
 
 The `logging` section caps the container's standard output log. Without it, Docker's log file keeps growing for as long as the container runs, which matters on a NAS in particular; see [Configuration](../configuration.md).
 
-The image is published on Docker Hub (`sunerpy/pt-tools`) and on GHCR (`ghcr.io/sunerpy/pt-tools`, with a build attestation); both are the same image.
+The image is published on Docker Hub (`sunerpy/pt-tools`) and on GHCR (`ghcr.io/sunerpy/pt-tools`, with a build attestation); both are the same image. If pulling from Docker Hub is slow where you are, set `registry-mirrors` in Docker's `daemon.json`; the image name stays the same.
 
 ## docker run
 

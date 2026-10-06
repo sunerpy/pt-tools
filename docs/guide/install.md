@@ -50,7 +50,7 @@ docker compose up -d
 
 `logging` 一节限制容器标准输出日志的大小。不设置时，长时间运行会让 Docker 的日志文件持续增长，NAS 用户尤其需要注意，详见[配置说明](../configuration.md)。
 
-镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`，附带构建证明），两者内容相同。
+镜像同时发布在 Docker Hub（`sunerpy/pt-tools`）和 GHCR（`ghcr.io/sunerpy/pt-tools`，附带构建证明），两者内容相同。国内拉取 Docker Hub 较慢时，可以在 Docker 的 `daemon.json` 里配置 `registry-mirrors`（镜像加速地址），镜像名不用改。
 
 ## docker run
 
