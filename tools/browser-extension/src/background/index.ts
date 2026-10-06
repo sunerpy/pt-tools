@@ -20,6 +20,7 @@ import {
   setLastSync,
   setLastVisit,
   setTabStatus,
+  updateConnection,
 } from "../core/storage";
 import type {
   CapturedPage,
@@ -297,11 +298,8 @@ async function syncKnownSite(site: KnownSite): Promise<void> {
 
   const syncedAt = new Date().toISOString();
   await setLastSync(site.id, syncedAt);
-  await setConnection({
-    ...connection,
-    connected: true,
-    lastSync: syncedAt,
-  });
+  // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
+  await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
 }
 
 async function maybeAutoSyncByDomain(domain: string): Promise<void> {
