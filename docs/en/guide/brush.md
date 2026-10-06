@@ -28,9 +28,9 @@ Each round requests the site's torrent list once (subject to the site's own rate
 - **At most N seeders** and **at least N leechers**: pick busy torrents with little competition.
 - **Published within**: only take recent torrents; 0 means no limit.
 - **Title includes / excludes**: one per line or comma separated, case-insensitive, matched against the title and subtitle.
-- **Exclude H&R**: on by default. When the site has site-wide H&R enabled, every torrent from it counts as H&R (the same rule RSS downloads use).
+- **Exclude H&R**: on by default. When the site has site-wide H&R enabled, every torrent from it counts as H&R (the same rule RSS downloads use). With the option off, only H&R torrents whose required seeding time the site definition can compute are taken: without a known requirement, the removal rules cannot tell when a torrent may go.
 
-Matching torrents are added in order of most leechers, then fewest seeders. A torrent the task has pushed before (including ones already removed) is never added again, and torrents already in the downloader are skipped.
+Matching torrents are added in order of most leechers, then fewest seeders. A torrent any brush task has pushed from this site before (including ones already removed) is never added again, so two tasks never add the same torrent; torrents already in the downloader are skipped too.
 
 ## Limits
 
@@ -40,7 +40,7 @@ Matching torrents are added in order of most leechers, then fewest seeders. A to
 | Total size           | Maximum combined size of the task's active torrents; 0 means no limit   |
 | Added per day        | Maximum combined size of torrents added today; 0 means no limit         |
 
-Pushes go through the same entry point as RSS downloads, so the disk-space protection and per-site seeding capacity checks still apply. When either check rejects a torrent, the round stops adding and tries again next round.
+Pushes go through the same entry point as RSS downloads, so the disk-space protection and per-site seeding capacity checks still apply. When either check rejects a torrent, the round stops adding and tries again next round. The round also stops when three torrent files in a row fail to download, or when a torrent reaches the downloader but its local record cannot be written (that torrent is removed again).
 
 ## Removal rules
 
@@ -54,7 +54,9 @@ A torrent is removed as soon as any rule matches. By default its data is deleted
 
 H&R torrents are never removed before they reach the site's required seeding time, including when the free period ends before they finish downloading.
 
-Brushing only touches torrents that carry the task's tag and were added by the task. If you remove the task tag from a torrent, it is handed back to you and brushing stops removing it; torrents removed by hand or by other means are marked "no longer in the downloader".
+A download counts as complete when it is at 100% and not in a checking or error state; torrents being checked or with missing files are not complete.
+
+Brushing only touches torrents that carry the task's tag and were added by the task. If you remove the task tag from a torrent, it is handed back to you and brushing stops removing it; torrents removed by hand or by other means are marked "no longer in the downloader". After you switch a task to another downloader, the torrents it already added are still sampled and removed in their original downloader; if that downloader is temporarily unreachable, those torrents are left alone for the round.
 
 ## Relation to auto cleanup
 
@@ -63,11 +65,12 @@ All brush torrents carry the `pt-tools-brush` tag. The regular **Auto cleanup** 
 ## Turning off and deleting a task
 
 - **Turn off**: no new torrents are added. Torrents already added keep being handled by the removal rules until they are all gone.
-- **Delete**: the task, its statistics, and its torrent records are deleted. The torrents stay in the downloader and are no longer managed by brushing (the regular auto cleanup rules still skip them; handle them by hand if needed). A task cannot be deleted while a round is running; try again shortly.
+- **Delete**: the task, its statistics, and its torrent records are deleted. The torrents stay in the downloader and are no longer managed by brushing (the regular auto cleanup rules still skip them; handle them by hand if needed).
+- A task cannot be deleted or edited while a round is running; try again shortly (a round uses the settings read when it started).
 
 ## Earnings and the daily report
 
-The top of the brush page shows active torrents, today's upload and download, and the overall ratio; the **30-day earnings** card plots the daily upload of all tasks. Earnings are the difference between two consecutive samples of each brush torrent's total upload and download in the downloader, grouped by day in the server time zone.
+The top of the brush page shows active torrents, today's upload and download, and the overall ratio; the **30-day earnings** card plots the daily upload of all tasks. Earnings are the difference between two consecutive samples of each brush torrent's total upload and download in the downloader, grouped by day in the server time zone; when two samples straddle midnight, the increment is split between the two days by duration.
 
 With the [daily report](user-stats.md#daily-report) on, a report sent on a day with brush earnings gains a "Brush today" section: total upload, download, added, and removed, plus one line per task when there is more than one.
 
@@ -87,12 +90,12 @@ pt-tools does not support Vertex's custom script rules. For more complex conditi
 
 ## API
 
-| Endpoint                                                         | Purpose                                                        |
-| ---------------------------------------------------------------- | -------------------------------------------------------------- |
-| `GET` / `POST /api/brush/tasks`                                  | List tasks (with active torrents and earnings) / create a task |
-| `GET` / `PUT` / `DELETE /api/brush/tasks/<id>`                   | Read, update, or delete a task                                 |
-| `POST /api/brush/tasks/<id>/run`                                 | Run one round now and return its result                        |
-| `GET /api/brush/tasks/<id>/torrents?state=active\|removed\|gone` | The task's torrents                                            |
-| `GET /api/brush/stats?days=<1–90>`                               | Daily earnings per task and in total for recent days           |
+| Endpoint                                                         | Purpose                                                                                                              |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `GET` / `POST /api/brush/tasks`                                  | List tasks (with active torrents and earnings) / create a task                                                       |
+| `GET` / `PUT` / `DELETE /api/brush/tasks/<id>`                   | Read, update, or delete a task                                                                                       |
+| `POST /api/brush/tasks/<id>/run`                                 | Run one round now and return its result; returns 502 when the site or downloader failed and the round did not finish |
+| `GET /api/brush/tasks/<id>/torrents?state=active\|removed\|gone` | The task's torrents                                                                                                  |
+| `GET /api/brush/stats?days=<1–90>`                               | Daily earnings per task and in total for recent days                                                                 |
 
 All of these require a logged-in session.
