@@ -89,3 +89,44 @@ func TestConfigStore_EnabledSiteNames(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"hdsky": true}, got)
 }
+
+// 全局设置行还不存在：读回默认值、偏移为 0、保存时提示先初始化；表坏了时如实报错。
+func TestDailyReportSettings_EdgeCases(t *testing.T) {
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, db.DB.AutoMigrate(&models.NotificationConf{}))
+	store := NewConfigStore(db)
+
+	got, err := store.DailyReportSettings()
+	require.NoError(t, err)
+	assert.Equal(t, DefaultDailyReportTime, got.Time)
+	off, err := store.DailyReportOffset(func(int64) int64 { return 1 })
+	require.NoError(t, err)
+	assert.Zero(t, off)
+	err = store.SaveDailyReportSettings(DailyReportSettings{Time: "22:00"})
+	require.ErrorContains(t, err, "尚未初始化")
+
+	// 通道列表重复的 ID 只算一次；通道 JSON 坏了时按空列表读
+	require.NoError(t, store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10}))
+	conf := models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true}
+	require.NoError(t, db.DB.Create(&conf).Error)
+	require.NoError(t, store.SaveDailyReportSettings(DailyReportSettings{Enabled: true, Time: "22:00", ChannelIDs: []uint{conf.ID, conf.ID}}))
+	got, err = store.DailyReportSettings()
+	require.NoError(t, err)
+	assert.Equal(t, []uint{conf.ID}, got.ChannelIDs)
+	require.NoError(t, db.DB.Model(&models.SettingsGlobal{}).Where("1 = 1").Update("daily_report_channel_ids", "{bad").Error)
+	got, err = store.DailyReportSettings()
+	require.NoError(t, err)
+	assert.Empty(t, got.ChannelIDs)
+	assert.Empty(t, parseChannelIDs("  "))
+
+	require.NoError(t, db.DB.Migrator().DropTable(&models.NotificationConf{}))
+	require.ErrorContains(t, store.SaveDailyReportSettings(DailyReportSettings{Time: "22:00", ChannelIDs: []uint{1}}), "检查通知通道失败")
+
+	require.NoError(t, db.DB.Migrator().DropTable(&models.SettingsGlobal{}))
+	_, err = store.DailyReportSettings()
+	require.ErrorContains(t, err, "读取每日战报设置失败")
+	_, err = store.DailyReportOffset(func(int64) int64 { return 1 })
+	require.ErrorContains(t, err, "读取战报偏移失败")
+	require.ErrorContains(t, store.SaveDailyReportSettings(DailyReportSettings{Time: "22:00"}), "读取全局设置失败")
+}
