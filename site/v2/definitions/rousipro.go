@@ -232,6 +232,10 @@ func (d *rousiDriver) Execute(ctx context.Context, req rousiRequest) (rousiRespo
 		return result, v2.ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", v2.ErrRateLimited)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if len(resp.Body) > 0 {
 			_ = json.Unmarshal(resp.Body, &result)

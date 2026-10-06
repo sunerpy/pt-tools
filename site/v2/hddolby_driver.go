@@ -192,6 +192,10 @@ func (d *HDDolbyDriver) Execute(ctx context.Context, req HDDolbyRequest) (HDDolb
 		StatusCode: resp.StatusCode,
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyStr := string(body)
 		if strings.Contains(bodyStr, "Just a moment") || strings.Contains(bodyStr, "cf_chl_opt") {

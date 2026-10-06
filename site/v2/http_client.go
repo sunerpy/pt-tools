@@ -190,7 +190,9 @@ func (c *SiteHTTPClient) DoRequest(ctx context.Context, method, url string, body
 
 	resp, err := activeSession.DoWithContext(ctx, req)
 	if err != nil {
-		return nil, err
+		// 传输层失败（DNS、拒绝连接、超时、断开）统一带上 ErrNetworkError，登录探测据此判为网络错误、
+		// 允许走 CloakBrowser 后备；原错误链保留，errors.As 仍能取到 *url.Error。
+		return nil, fmt.Errorf("%w: %w", ErrNetworkError, err)
 	}
 
 	return &HTTPResponse{
