@@ -25,6 +25,8 @@ services:
       PT_HOST: "0.0.0.0"
       PT_PORT: "8080"
       TZ: "Asia/Shanghai"
+      PUID: "1000"
+      PGID: "1000"
     ports:
       - "8080:8080"
     volumes:
@@ -78,7 +80,7 @@ docker run -d \
 
 The `deploy/` folder in the repository has app definitions for 1Panel, Unraid and fnOS. The steps below install from those files directly, without an app store. All three map the data folder to `/app/.pt-tools` in the container; keep that folder across upgrades and reinstalls, and back up the `secret.key` inside it.
 
-The container runs as the user given by `PUID` and `PGID`, and hands the files under `/app` to that user on startup. Group ID 100, common on NAS systems, already exists in the image (the `users` group) and is used as is.
+The container runs as the user given by `PUID` and `PGID`, and hands the files under `/app` to that user on startup. Group ID 100, common on NAS systems, already exists in the image (the `users` group) and is used as is. This needs image 1.0.0-rc.4 or later: earlier images fail to start when `PGID` is a group that already exists in the image (the log says `addgroup: gid in use`).
 
 ### 1Panel
 

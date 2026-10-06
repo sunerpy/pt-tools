@@ -25,6 +25,8 @@ services:
       PT_HOST: "0.0.0.0"
       PT_PORT: "8080"
       TZ: "Asia/Shanghai"
+      PUID: "1000"
+      PGID: "1000"
     ports:
       - "8080:8080"
     volumes:
@@ -78,7 +80,7 @@ docker run -d \
 
 仓库的 `deploy/` 目录里有 1Panel、Unraid 和飞牛 fnOS 的应用定义，下面是不经应用商店、直接用这些文件安装的方法。三者都把数据目录映射到容器的 `/app/.pt-tools`，升级、重装时保留这个目录并备份其中的 `secret.key`。
 
-容器以 `PUID`、`PGID` 指定的用户运行，启动时把 `/app` 下的文件交给这个用户。NAS 上常用的组 ID 100 在镜像里已经存在（`users` 组），直接沿用。
+容器以 `PUID`、`PGID` 指定的用户运行，启动时把 `/app` 下的文件交给这个用户。NAS 上常用的组 ID 100 在镜像里已经存在（`users` 组），直接沿用。这需要 1.0.0-rc.4 或更新的镜像：更早的版本在 `PGID` 是镜像里已有的组时启动失败（日志里是 `addgroup: gid in use`）。
 
 ### 1Panel
 
