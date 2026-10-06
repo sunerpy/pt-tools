@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -51,7 +52,14 @@ type rssNotifier struct {
 	now       func() time.Time
 	digestBuf *notify.DigestBuffer
 	quietFn   QuietLookupFunc
+	// quotaMu 把「数配额 → 写日志行」串成一个临界区：RSS 管线多个 worker 并发处理不同种子时，
+	// 分开做会都读到未超限，然后一起写入，突破每小时上限。只在设置了上限时加锁。
+	quotaMu sync.Mutex
 }
+
+// rssDigestHold 是交给 DigestBuffer 的行暂不参与重试的时长：比合并窗口长，
+// 窗口内由摘要统一发送；进程在刷写前退出时，过了这段时间重试 worker 会逐条补发。
+const rssDigestHold = notify.DigestWindow + time.Minute
 
 func NewRSSNotifier(db *gorm.DB, notifySvc NotificationServiceForRSS) RSSNotifier {
 	return &rssNotifier{db: db, notifySvc: notifySvc, now: time.Now}
@@ -81,6 +89,10 @@ func (r *rssNotifier) NotifyNewItem(ctx context.Context, ev RSSItemEvent) error 
 	}
 	if len(confIDs) == 0 {
 		return nil
+	}
+	if ev.RSS.MaxNotificationsPerHour > 0 {
+		r.quotaMu.Lock()
+		defer r.quotaMu.Unlock()
 	}
 	if exceeded, qerr := r.exceededHourlyQuota(ctx, ev.RSS); qerr != nil {
 		return qerr
@@ -117,6 +129,10 @@ func (r *rssNotifier) NotifyFilteredItem(ctx context.Context, ev RSSFilteredEven
 	}
 	if len(confIDs) == 0 {
 		return nil
+	}
+	if ev.RSS.MaxNotificationsPerHour > 0 {
+		r.quotaMu.Lock()
+		defer r.quotaMu.Unlock()
 	}
 	if exceeded, qerr := r.exceededHourlyQuota(ctx, ev.RSS); qerr != nil {
 		return qerr
@@ -191,6 +207,13 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 	}
 
 	if r.digestBuf != nil {
+		// 交给摘要之前先把重试时间推到合并窗口之后：否则这行仍是到期的 pending，
+		// 每 10 秒一轮的重试 worker 会在窗口内先逐条发一遍，摘要刷写时再发一遍。
+		if err := r.db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+			Where("id = ?", row.ID).
+			Updates(map[string]any{"next_retry_at": now.Add(rssDigestHold), "updated_at": r.now()}).Error; err != nil {
+			return err
+		}
 		r.digestBuf.Add(sp.ConfID, notify.DigestItem{
 			LogID: row.ID,
 			Title: sp.Title,
@@ -202,10 +225,7 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 	err := r.notifySvc.Push(ctx, Notification{
 		Title: sp.Title, Text: sp.Text,
 		SourceConfID: sp.ConfID,
-		Buttons: [][]notify.Button{{
-			{Text: "立即下载", CallbackData: fmt.Sprintf("dl:%d", row.ID)},
-			{Text: "忽略", CallbackData: fmt.Sprintf("ig:%d", row.ID)},
-		}},
+		Buttons:      rssItemButtons(row.ID),
 	})
 	upd := map[string]any{"updated_at": r.now(), "attempts": 1}
 	if err != nil {
@@ -217,6 +237,88 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 	}
 	return r.db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
 		Where("id = ?", row.ID).Updates(upd).Error
+}
+
+// rssItemButtons 是单条 RSS 通知附带的「立即下载 / 忽略」按钮（Telegram 回调处理）。
+func rssItemButtons(logID uint) [][]notify.Button {
+	return [][]notify.Button{{
+		{Text: "立即下载", CallbackData: fmt.Sprintf("dl:%d", logID)},
+		{Text: "忽略", CallbackData: fmt.Sprintf("ig:%d", logID)},
+	}}
+}
+
+// NewRSSDigestFlush 返回 DigestBuffer 的刷写函数。
+//   - 只发送仍是 pending 的行：被 filtered 通知抑制（suppressed）或已由其他路径发出的行跳过，
+//     DigestBuffer 里的内存条目不会再把它们发出去
+//   - 只剩一条时按单条通知发送并保留「立即下载 / 忽略」按钮
+//   - 成功后把这些行条件更新为 sent；失败时 5 秒后交回重试 worker 逐条重试
+func NewRSSDigestFlush(db *gorm.DB, notifySvc NotificationServiceForRSS, logf func(format string, args ...any)) notify.DigestFlushFunc {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	return func(ctx context.Context, confID uint, items []notify.DigestItem) {
+		ids := make([]uint, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.LogID)
+		}
+		var live []uint
+		if err := db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+			Where("id IN ? AND result = ?", ids, "pending").
+			Pluck("id", &live).Error; err != nil {
+			logf("RSS digest 查询待发送记录失败 conf_id=%d: %v", confID, err)
+			return
+		}
+		keep := make(map[uint]bool, len(live))
+		for _, id := range live {
+			keep[id] = true
+		}
+		eligible := make([]notify.DigestItem, 0, len(live))
+		for _, it := range items {
+			if keep[it.LogID] {
+				eligible = append(eligible, it)
+			}
+		}
+		if len(eligible) == 0 {
+			return
+		}
+
+		n := Notification{SourceConfID: confID}
+		if len(eligible) == 1 {
+			n.Title, n.Text = eligible[0].Title, eligible[0].Text
+			n.Buttons = rssItemButtons(eligible[0].LogID)
+		} else {
+			n.Title, n.Text = notify.CombineDigest(eligible)
+		}
+		err := notifySvc.Push(ctx, n)
+		now := time.Now()
+		if err == nil {
+			if uerr := db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+				Where("id IN ? AND result = ?", live, "pending").
+				Updates(map[string]any{
+					"result":       "sent",
+					"delivered_at": now,
+					"updated_at":   now,
+					"attempts":     gorm.Expr("attempts + 1"),
+				}).Error; uerr != nil {
+				logf("RSS digest 已投递但更新记录失败 conf_id=%d items=%d: %v", confID, len(eligible), uerr)
+				return
+			}
+			logf("RSS digest 已投递 conf_id=%d items=%d", confID, len(eligible))
+			return
+		}
+		if uerr := db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
+			Where("id IN ? AND result = ?", live, "pending").
+			Updates(map[string]any{
+				"attempts":      gorm.Expr("attempts + 1"),
+				"next_retry_at": now.Add(5 * time.Second),
+				"last_error":    err.Error(),
+				"updated_at":    now,
+			}).Error; uerr != nil {
+			logf("RSS digest 投递失败且更新记录失败 conf_id=%d: %v / %v", confID, err, uerr)
+			return
+		}
+		logf("RSS digest 投递失败 conf_id=%d items=%d err=%v", confID, len(eligible), err)
+	}
 }
 
 func (r *rssNotifier) exceededHourlyQuota(ctx context.Context, rss *models.RSSConfig) (bool, error) {

@@ -163,40 +163,8 @@ var webCmd = &cobra.Command{
 			}
 
 			notifySvc := bs.Deps().NotificationSvc
-			db := global.GlobalDB.DB
-			digestFlush := func(ctx context.Context, confID uint, items []notify.DigestItem) {
-				title, text := notify.CombineDigest(items)
-				err := notifySvc.Push(ctx, app.Notification{
-					Title: title, Text: text, SourceConfID: confID,
-				})
-				now := time.Now()
-				ids := make([]uint, len(items))
-				for i, it := range items {
-					ids[i] = it.LogID
-				}
-				if err == nil {
-					db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
-						Where("id IN ?", ids).
-						Updates(map[string]any{
-							"result":       "sent",
-							"delivered_at": now,
-							"updated_at":   now,
-							"attempts":     gorm.Expr("attempts + 1"),
-						})
-					chatopsLogger().Infof("RSS digest 已投递 conf_id=%d items=%d", confID, len(items))
-					return
-				}
-				nextRetry := now.Add(5 * time.Second)
-				db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
-					Where("id IN ?", ids).
-					Updates(map[string]any{
-						"attempts":      gorm.Expr("attempts + 1"),
-						"next_retry_at": nextRetry,
-						"last_error":    err.Error(),
-						"updated_at":    now,
-					})
-				chatopsLogger().Warnf("RSS digest 投递失败 conf_id=%d items=%d err=%v", confID, len(items), err)
-			}
+			// 摘要刷写只发送仍是 pending 的行：被 filtered 抑制或已发出的不再发，只剩一条时保留按钮
+			digestFlush := app.NewRSSDigestFlush(global.GlobalDB.DB, notifySvc, chatopsLogger().Infof)
 			digestBuf := notify.NewDigestBuffer(runtimeCtx, digestFlush)
 
 			if rn, ok := rssNotifier.(interface {
@@ -208,6 +176,7 @@ var webCmd = &cobra.Command{
 			}
 
 			retryWorker := app.NewRSSRetryWorker(global.GlobalDB.DB, notifySvc)
+			retryWorker.SetLogf(chatopsLogger().Warnf)
 			go retryWorker.Run(runtimeCtx)
 
 			fetcher := func(ctx context.Context, siteName, torrentID string) ([]byte, error) {
