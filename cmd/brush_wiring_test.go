@@ -12,6 +12,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 func TestWireBrushMonitor(t *testing.T) {
@@ -45,4 +46,12 @@ func TestWireBrushMonitor(t *testing.T) {
 	_, name, err := mgr.BrushDownloader(ds.ID)
 	require.ErrorContains(t, err, "未启用")
 	assert.Equal(t, "qb", name)
+}
+
+func TestBrushSites(t *testing.T) {
+	_, ok := brushSites(nil).BrushSite("hdsky")
+	assert.False(t, ok, "用户数据服务没起来时取不到站点")
+	svc := v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: v2.NewInMemoryUserInfoRepo(), Logger: zap.NewNop()})
+	_, ok = brushSites(svc).BrushSite("hdsky")
+	assert.False(t, ok, "没注册的站点取不到")
 }

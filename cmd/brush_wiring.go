@@ -14,13 +14,8 @@ func wireBrushMonitor(mgr *scheduler.Manager, svc *v2.UserInfoService) *schedule
 		return nil
 	}
 	mon := scheduler.NewBrushMonitor(scheduler.BrushMonitorConfig{
-		DB: global.GlobalDB.DB,
-		Sites: scheduler.BrushSitesFunc(func(name string) (v2.Site, bool) {
-			if svc == nil {
-				return nil, false
-			}
-			return svc.GetSite(name)
-		}),
+		DB:          global.GlobalDB.DB,
+		Sites:       brushSites(svc),
 		Downloaders: mgr,
 		Logger:      global.GetSlogger(),
 	})
@@ -28,4 +23,14 @@ func wireBrushMonitor(mgr *scheduler.Manager, svc *v2.UserInfoService) *schedule
 	mon.Start()
 	global.GetSlogger().Info("刷流监控已启动")
 	return mon
+}
+
+// brushSites 从 UserInfoService 取已注册的共享站点实例（与搜索、登录探测共用限速器）；服务没起来时一个都取不到。
+func brushSites(svc *v2.UserInfoService) scheduler.BrushSites {
+	return scheduler.BrushSitesFunc(func(name string) (v2.Site, bool) {
+		if svc == nil {
+			return nil, false
+		}
+		return svc.GetSite(name)
+	})
 }
