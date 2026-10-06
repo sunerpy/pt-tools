@@ -184,7 +184,7 @@ func TestBrushAPI_RunTorrentsAndStats(t *testing.T) {
 		SizeBytes: 100, AddedAt: now, State: models.BrushTorrentActive, Progress: 0.5,
 	}
 	require.NoError(t, repo.RecordAdded(bt, day))
-	require.NoError(t, repo.RecordSample(bt, models.BrushTorrentSample{At: now, Uploaded: 300, Downloaded: 50}, 0.5, 6, 0, day))
+	require.NoError(t, repo.RecordSample(bt, models.BrushTorrentSample{At: now, Uploaded: 300, Downloaded: 50}, 0.5, 6, 0, time.Local))
 
 	mon := scheduler.NewBrushMonitor(scheduler.BrushMonitorConfig{
 		DB:    global.GlobalDB.DB,
@@ -245,12 +245,47 @@ func TestBrushAPI_RunTorrentsAndStats(t *testing.T) {
 	w = serveAuthed(mux, http.MethodPost, "/api/brush/stats", "")
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 
-	// 运行中删除任务被拒（409）
+	// 运行中删除、修改任务被拒（409）
 	require.NoError(t, mon.WithTaskLock(task.ID, func() error {
 		w = serveAuthed(mux, http.MethodDelete, fmt.Sprintf("/api/brush/tasks/%d", task.ID), "")
 		assert.Equal(t, http.StatusConflict, w.Code)
 		w = serveAuthed(mux, http.MethodPost, runPath, "")
 		assert.Equal(t, http.StatusConflict, w.Code)
+		w = serveAuthed(mux, http.MethodPut, fmt.Sprintf("/api/brush/tasks/%d", task.ID), brushBody("t", ds.ID, nil))
+		assert.Equal(t, http.StatusConflict, w.Code)
 		return nil
 	}))
+
+	// 这一轮没跑完（下载器不可用）：502，原因在正文里
+	srv.mgr.SetBrushMonitor(scheduler.NewBrushMonitor(scheduler.BrushMonitorConfig{
+		DB:    global.GlobalDB.DB,
+		Sites: scheduler.BrushSitesFunc(func(string) (v2.Site, bool) { return brushStubSite{}, true }),
+		Downloaders: scheduler.BrushDownloadersFunc(func(uint) (downloader.Downloader, string, error) {
+			return nil, "", fmt.Errorf("connection refused")
+		}),
+	}))
+	w = serveAuthed(mux, http.MethodPost, runPath, "")
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "下载器不可用")
+}
+
+// 开启的任务要求站点与下载器都已启用；关闭的任务可以先存成草稿。读库失败回 500。
+func TestBrushAPI_EnabledRequiresEnabledDeps(t *testing.T) {
+	_, mux, ds := newBrushServer(t)
+	db := global.GlobalDB.DB
+	require.NoError(t, db.Create(&models.SiteSetting{Name: "hdtime", Enabled: false, AuthMethod: "cookie", IsBuiltin: true}).Error)
+	w := serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("draft", ds.ID, func(m map[string]any) { m["site_name"] = "hdtime" }))
+	assert.Equal(t, http.StatusCreated, w.Code, "关闭的任务可以选未启用的站点")
+	w = serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("on", ds.ID, func(m map[string]any) { m["site_name"] = "hdtime"; m["enabled"] = true }))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "未启用")
+
+	require.NoError(t, db.Model(&models.DownloaderSetting{}).Where("id = ?", ds.ID).Update("enabled", false).Error)
+	w = serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("on2", ds.ID, func(m map[string]any) { m["enabled"] = true }))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "下载器未启用")
+
+	require.NoError(t, db.Migrator().DropTable(&models.DownloaderSetting{}))
+	w = serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("x", ds.ID, nil))
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "读库失败不是参数错误")
 }

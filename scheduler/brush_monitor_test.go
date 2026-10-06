@@ -525,3 +525,126 @@ func TestBrushMonitor_StopsAfterConsecutiveFetchFailures(t *testing.T) {
 	assert.Len(t, res.Errors, 3)
 	assert.Contains(t, res.Stopped, "连续 3 个种子文件下载失败")
 }
+
+// 任务换了下载器：旧下载器里的种子照样按它自己的下载器采样、删种，不会被当成已经没了。
+func TestBrushMonitor_ManagesTorrentsInPreviousDownloader(t *testing.T) {
+	r := newBrushRig(t)
+	old := newSchedFakeDownloader("qb-old")
+	r.mon.cfg.Downloaders = BrushDownloadersFunc(func(id uint) (downloader.Downloader, string, error) {
+		switch id {
+		case 1:
+			return r.dl, "qb", nil
+		case 9:
+			return old, "qb-old", nil
+		}
+		return nil, "", errors.New("no such downloader")
+	})
+	task := r.task(t, func(bt *models.BrushTask) { bt.Enabled = false; bt.RemoveRatio = 2 })
+	repo := models.NewBrushRepository(r.db.DB)
+	tag := models.BrushTaskTag(task.ID)
+	require.NoError(t, repo.RecordAdded(&models.BrushTorrent{
+		TaskID: task.ID, InfoHash: "h-old", SiteName: "hdsky", TorrentID: "1",
+		AddedAt: r.clock.Now(), State: models.BrushTorrentActive, DownloaderID: 9,
+	}, "2026-10-06"))
+	old.torrents = []downloader.Torrent{{ID: "o1", InfoHash: "h-old", Tags: tag, Progress: 1, State: downloader.TorrentSeeding, Ratio: 3}}
+
+	res, err := r.mon.RunTask(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Gone, "不在任务当前下载器里不等于没了")
+	assert.Equal(t, 1, res.Removed)
+	assert.Equal(t, []string{"o1"}, old.removedSingle, "在它自己的下载器里删")
+
+	// 旧下载器连不上：它名下的种子这一轮不动，也不记成没了
+	require.NoError(t, repo.RecordAdded(&models.BrushTorrent{
+		TaskID: task.ID, InfoHash: "h-gone-dl", SiteName: "hdsky", TorrentID: "2",
+		AddedAt: r.clock.Now(), State: models.BrushTorrentActive, DownloaderID: 7,
+	}, "2026-10-06"))
+	r.clock.Advance(10 * time.Minute)
+	res, err = r.mon.RunTask(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Gone)
+	assert.Contains(t, res.Errors[0], "下载器 7 不可用")
+	n, err := repo.CountActive(task.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+}
+
+// 同一个站点种子只会被一个刷流任务加入：另一个任务（另一个下载器）跳过它。
+func TestBrushMonitor_SkipsTorrentsOfOtherTasksOnSameSite(t *testing.T) {
+	r := newBrushRig(t)
+	a := r.task(t, func(bt *models.BrushTask) { bt.Name = "a"; bt.Enabled = false })
+	b := r.task(t, func(bt *models.BrushTask) { bt.Name = "b"; bt.MaxDownloading = 5 })
+	r.addItem(t, "1", nil)
+	r.addItem(t, "2", nil)
+	require.NoError(t, models.NewBrushRepository(r.db.DB).RecordAdded(&models.BrushTorrent{
+		TaskID: a.ID, InfoHash: "elsewhere", SiteName: "hdsky",
+		TorrentID: "1", AddedAt: r.clock.Now(), State: models.BrushTorrentActive, DownloaderID: 3,
+	}, "2026-10-06"))
+	r.mon.cfg.Downloaders = BrushDownloadersFunc(func(id uint) (downloader.Downloader, string, error) {
+		if id == 3 {
+			return newSchedFakeDownloader("other"), "other", nil
+		}
+		return r.dl, "qb", nil
+	})
+	res, err := r.mon.RunTask(context.Background(), b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Added)
+	require.Len(t, r.pushes, 1)
+	assert.Equal(t, "2", r.pushes[0].TorrentID)
+}
+
+// 推送成功但记录写不进库：把刚加的种子从下载器撤回，本轮停止加种。
+func TestBrushMonitor_RollsBackPushWhenRecordFails(t *testing.T) {
+	r := newBrushRig(t)
+	task := r.task(t, func(bt *models.BrushTask) { bt.MaxDownloading = 5 })
+	hash := r.addItem(t, "1", nil)
+	r.addItem(t, "2", nil)
+	require.NoError(t, r.db.DB.Exec(`CREATE TRIGGER fail_brush_insert BEFORE INSERT ON brush_torrents
+		BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`).Error)
+	res, err := r.mon.RunTask(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Added)
+	assert.Contains(t, res.Stopped, "记录种子失败")
+	require.Len(t, r.pushes, 1, "第一个失败后不再继续")
+	assert.Equal(t, []string{hash}, r.dl.removedSingle)
+	assert.Equal(t, []bool{true}, r.dl.removeDataFlags)
+}
+
+// blockingSite 的 Search 一直等到 ctx 结束。
+type blockingSite struct {
+	*fakeBrushSite
+	entered chan struct{}
+}
+
+func (s blockingSite) Search(ctx context.Context, _ v2.SearchQuery) ([]v2.TorrentItem, error) {
+	close(s.entered)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// Stop 取消正在跑的手动运行并等它退出；之后再运行拿到 ErrBrushStopped。
+func TestBrushMonitor_StopCancelsManualRun(t *testing.T) {
+	r := newBrushRig(t)
+	task := r.task(t, nil)
+	site := blockingSite{fakeBrushSite: r.site, entered: make(chan struct{})}
+	r.mon.cfg.Sites = BrushSitesFunc(func(string) (v2.Site, bool) { return site, true })
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.mon.RunTask(context.Background(), task.ID)
+		done <- err
+	}()
+	<-site.entered
+	r.mon.Stop()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+	default:
+		t.Fatal("Stop 返回时手动运行还没退出")
+	}
+	_, err := r.mon.RunTask(context.Background(), task.ID)
+	assert.ErrorIs(t, err, ErrBrushStopped)
+	r.mon.Start() // 停止之后不再启动
+	assert.False(t, r.mon.running)
+}

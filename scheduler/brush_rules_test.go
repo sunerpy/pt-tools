@@ -32,6 +32,7 @@ func TestAdmitBrushItem(t *testing.T) {
 		task   func(*models.BrushTask)
 		item   func(*v2.TorrentItem)
 		siteHR bool
+		hr     int
 		ok     bool
 		reason string
 	}{
@@ -57,7 +58,9 @@ func TestAdmitBrushItem(t *testing.T) {
 		{name: "种子带 H&R", item: func(i *v2.TorrentItem) { i.HasHR = true }, reason: "有 H&R"},
 		// M-Team 列表不填 HasHR：站点级开启 H&R 时整站视为 H&R，与 RSS 路径同一规则
 		{name: "HasHR 为空但站点级 H&R", siteHR: true, reason: "有 H&R"},
-		{name: "不排除 H&R 时放行", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, ok: true},
+		{name: "不排除 H&R 时放行", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, hr: 20, ok: true},
+		// 要求时长算不出来（站点开了 H&R 却没有时长规则）：删种规则判断不了什么时候能删，宁可不收
+		{name: "不排除 H&R 但要求时长未知：不收", task: func(t *models.BrushTask) { t.ExcludeHR = false }, siteHR: true, reason: "H&R 要求的做种时长未知"},
 		{name: "包含词命中副标题（大小写不敏感）", task: func(t *models.BrushTask) { t.IncludeKeywords = "国语\nREMUX" }, item: func(i *v2.TorrentItem) { i.Subtitle = "国语中字" }, ok: true},
 		{name: "包含词都不命中", task: func(t *models.BrushTask) { t.IncludeKeywords = "remux, 2160p" }, reason: "标题不含任何包含词"},
 		{name: "排除词命中", task: func(t *models.BrushTask) { t.ExcludeKeywords = "web-dl" }, reason: "标题含排除词 web-dl"},
@@ -69,7 +72,7 @@ func TestAdmitBrushItem(t *testing.T) {
 			if tc.task != nil {
 				tc.task(&task)
 			}
-			ok, reason := admitBrushItem(task, brushItem(tc.item), tc.siteHR, brushNow)
+			ok, reason := admitBrushItem(task, brushItem(tc.item), tc.siteHR, tc.hr, brushNow)
 			assert.Equal(t, tc.ok, ok, reason)
 			if !tc.ok {
 				assert.Contains(t, reason, tc.reason)
@@ -150,6 +153,23 @@ func TestBrushRemoval(t *testing.T) {
 		},
 		{name: "长时间没有活动", task: func(t *models.BrushTask) { t.RemoveInactiveH = 6 }, bt: models.BrushTorrent{LastActivityAt: &idle}, tor: downloader.Torrent{Progress: 1}, remove: true, reason: "已 7.0 小时没有上传或下载"},
 		{name: "没开任何规则：不删", tor: downloader.Torrent{Progress: 1, Ratio: 99, SeedingTime: 1 << 30}},
+		{
+			name: "H&R 要求时长未知（0）：一律不删", task: func(t *models.BrushTask) { t.RemoveRatio = 1 },
+			bt: models.BrushTorrent{HasHR: true}, tor: downloader.Torrent{Progress: 1, Ratio: 5, SeedingTime: 1 << 30},
+		},
+		{
+			name: "累计上传比窗口起点小（计数清零）：这一轮不按低速删", task: func(t *models.BrushTask) { t.RemoveLowSpeedKBs = 100; t.RemoveLowSpeedWindowMin = 30 },
+			tor:     downloader.Torrent{Progress: 1, SeedingTime: 3600, TotalUploaded: 10},
+			samples: []models.BrushTorrentSample{{At: brushNow.Add(-31 * time.Minute), Uploaded: 1 << 30}},
+		},
+		{
+			name: "进度 100% 但还在校验：不当成已完成，免费到期照样删", bt: models.BrushTorrent{FreeEndAt: &freeEnd},
+			tor: downloader.Torrent{Progress: 1, State: downloader.TorrentChecking}, remove: true, reason: "免费即将到期",
+		},
+		{
+			name: "进度 100% 但出错（文件丢失）：做种时长规则不判", task: func(t *models.BrushTask) { t.RemoveSeedTimeH = 1 },
+			tor: downloader.Torrent{Progress: 1, State: downloader.TorrentError, SeedingTime: 7200},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -164,6 +184,14 @@ func TestBrushRemoval(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBrushCompleted(t *testing.T) {
+	assert.True(t, brushCompleted(downloader.Torrent{Progress: 1, State: downloader.TorrentSeeding}))
+	assert.True(t, brushCompleted(downloader.Torrent{Progress: 1, State: downloader.TorrentPaused}), "暂停的已完成种子算完成")
+	assert.False(t, brushCompleted(downloader.Torrent{Progress: 1, State: downloader.TorrentChecking}))
+	assert.False(t, brushCompleted(downloader.Torrent{Progress: 1, State: downloader.TorrentError}))
+	assert.False(t, brushCompleted(downloader.Torrent{Progress: 0.99, State: downloader.TorrentSeeding}))
 }
 
 func TestHasTag(t *testing.T) {

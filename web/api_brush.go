@@ -212,7 +212,13 @@ func (s *Server) brushTaskCRUD(w http.ResponseWriter, r *http.Request, repo *mod
 			http.Error(w, err.Error(), status)
 			return
 		}
-		if err := repo.SaveTask(task); err != nil {
+		// 一轮运行用的是开始时读到的配置：正在运行时不改，免得关掉的任务在这一轮里还接着加种
+		err = s.brushMonitor().WithTaskLock(id, func() error { return repo.SaveTask(task) })
+		switch {
+		case errors.Is(err, scheduler.ErrBrushBusy):
+			http.Error(w, "任务正在运行一轮，稍后再保存", http.StatusConflict)
+			return
+		case err != nil:
 			http.Error(w, brushSaveError(err), brushSaveStatus(err))
 			return
 		}
@@ -270,12 +276,16 @@ func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *mode
 	case errors.Is(err, models.ErrBrushTaskNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
+	case errors.Is(err, scheduler.ErrBrushStopped):
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	case err != nil:
+		// 这一轮没跑完（站点或下载器出错）：原因写进了任务的「上次运行」，这里如实回 502
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
 	}
-	resp := BrushRunResponse{Result: res}
-	if err != nil {
-		resp.Error = err.Error()
-	}
-	writeJSON(w, resp)
+	// 跑完了：个别种子下载或删除失败记在 result.errors 里
+	writeJSON(w, BrushRunResponse{Result: res})
 }
 
 func listBrushTorrents(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
@@ -448,8 +458,8 @@ func decodeBrushTask(r *http.Request, into *models.BrushTask) (*models.BrushTask
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 64<<10)).Decode(&req); err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("请求格式错误: %w", err)
 	}
-	if err := validateBrushTask(&req); err != nil {
-		return nil, http.StatusBadRequest, err
+	if status, err := validateBrushTask(&req); err != nil {
+		return nil, status, err
 	}
 	t := into
 	t.Name, t.Enabled, t.SiteName, t.DownloaderID = req.Name, req.Enabled, req.SiteName, req.DownloaderID
@@ -465,7 +475,11 @@ func decodeBrushTask(r *http.Request, into *models.BrushTask) (*models.BrushTask
 }
 
 // validateBrushTask 校验并规整请求（去空白、把优惠类型写成大写、窗口缺省 30 分钟）。
-func validateBrushTask(req *BrushTaskRequest) error {
+// 返回的状态码区分参数错误（400）与读库失败（500）。开启的任务要求站点和下载器都已启用；关闭的任务可以先存成草稿。
+func validateBrushTask(req *BrushTaskRequest) (int, error) {
+	bad := func(format string, args ...any) (int, error) {
+		return http.StatusBadRequest, fmt.Errorf(format, args...)
+	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.SiteName = strings.TrimSpace(req.SiteName)
 	req.SavePath = strings.TrimSpace(req.SavePath)
@@ -473,36 +487,44 @@ func validateBrushTask(req *BrushTaskRequest) error {
 	req.Tags = strings.TrimSpace(req.Tags)
 	switch n := utf8.RuneCountInString(req.Name); {
 	case n == 0:
-		return errors.New("任务名称不能为空")
+		return bad("任务名称不能为空")
 	case n > 64:
-		return errors.New("任务名称不能超过 64 个字")
+		return bad("任务名称不能超过 64 个字")
 	}
 	if req.SiteName == "" {
-		return errors.New("请选择站点")
+		return bad("请选择站点")
 	}
 	if _, ok := v2.GetDefinitionRegistry().Get(req.SiteName); !ok {
-		return fmt.Errorf("站点 %s 没有内置定义，刷流只支持内置站点", req.SiteName)
+		return bad("站点 %s 没有内置定义，刷流只支持内置站点", req.SiteName)
 	}
-	if err := global.GlobalDB.DB.Select("id").Where("name = ?", req.SiteName).First(&models.SiteSetting{}).Error; err != nil {
+	var site models.SiteSetting
+	if err := global.GlobalDB.DB.Select("id", "enabled").Where("name = ?", req.SiteName).First(&site).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("站点 %s 还没有配置", req.SiteName)
+			return bad("站点 %s 还没有配置", req.SiteName)
 		}
-		return fmt.Errorf("读取站点失败: %w", err)
+		return http.StatusInternalServerError, fmt.Errorf("读取站点失败: %w", err)
 	}
 	if req.DownloaderID == 0 {
-		return errors.New("请选择下载器")
+		return bad("请选择下载器")
 	}
-	if err := global.GlobalDB.DB.Select("id").First(&models.DownloaderSetting{}, req.DownloaderID).Error; err != nil {
+	var dl models.DownloaderSetting
+	if err := global.GlobalDB.DB.Select("id", "enabled").First(&dl, req.DownloaderID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("选中的下载器已经不存在")
+			return bad("选中的下载器已经不存在")
 		}
-		return fmt.Errorf("读取下载器失败: %w", err)
+		return http.StatusInternalServerError, fmt.Errorf("读取下载器失败: %w", err)
+	}
+	if req.Enabled && !site.Enabled {
+		return bad("站点 %s 未启用，先在站点列表里启用再开启任务", req.SiteName)
+	}
+	if req.Enabled && !dl.Enabled {
+		return bad("选中的下载器未启用，先启用它再开启任务")
 	}
 	if req.IntervalMin < 5 || req.IntervalMin > 1440 {
-		return errors.New("检查间隔应为 5–1440 分钟")
+		return bad("检查间隔应为 5–1440 分钟")
 	}
 	if req.MaxDownloading < 1 || req.MaxDownloading > 50 {
-		return errors.New("同时下载数应为 1–50")
+		return bad("同时下载数应为 1–50")
 	}
 	var levels []string
 	allowed := map[string]bool{}
@@ -515,7 +537,7 @@ func validateBrushTask(req *BrushTaskRequest) error {
 			continue
 		}
 		if !allowed[lv] {
-			return fmt.Errorf("不认识的优惠类型 %s", lv)
+			return bad("不认识的优惠类型 %s", lv)
 		}
 		levels = append(levels, lv)
 	}
@@ -525,30 +547,30 @@ func validateBrushTask(req *BrushTaskRequest) error {
 		"做种时长": req.RemoveSeedTimeH, "分享率": req.RemoveRatio, "上传速度阈值": req.RemoveLowSpeedKBs, "无活动时长": req.RemoveInactiveH,
 	} {
 		if v < 0 {
-			return fmt.Errorf("%s不能是负数", name)
+			return bad("%s不能是负数", name)
 		}
 	}
 	for name, v := range map[string]int{"免费剩余时间": req.MinFreeRemainMin, "做种人数上限": req.MaxSeeders, "下载人数下限": req.MinLeechers, "发布时长上限": req.MaxPublishAgeMin} {
 		if v < 0 {
-			return fmt.Errorf("%s不能是负数", name)
+			return bad("%s不能是负数", name)
 		}
 	}
 	if req.MaxSizeGB > 0 && req.MinSizeGB > req.MaxSizeGB {
-		return errors.New("最小体积不能大于最大体积")
+		return bad("最小体积不能大于最大体积")
 	}
 	if req.RemoveLowSpeedWindowMin == 0 {
 		req.RemoveLowSpeedWindowMin = 30
 	}
 	if req.RemoveLowSpeedKBs > 0 && (req.RemoveLowSpeedWindowMin < 5 || req.RemoveLowSpeedWindowMin > 1440) {
-		return errors.New("低速判断的时间窗应为 5–1440 分钟")
+		return bad("低速判断的时间窗应为 5–1440 分钟")
 	}
 	if utf8.RuneCountInString(req.IncludeKeywords) > 1000 || utf8.RuneCountInString(req.ExcludeKeywords) > 1000 {
-		return errors.New("关键词不能超过 1000 个字")
+		return bad("关键词不能超过 1000 个字")
 	}
 	if utf8.RuneCountInString(req.Tags) > 200 || utf8.RuneCountInString(req.Category) > 120 || utf8.RuneCountInString(req.SavePath) > 500 {
-		return errors.New("标签、分类或保存路径太长")
+		return bad("标签、分类或保存路径太长")
 	}
-	return nil
+	return 0, nil
 }
 
 func brushLookupStatus(err error) int {

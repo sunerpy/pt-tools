@@ -70,21 +70,21 @@ func TestBrushRepository_RecordSampleAccumulatesDeltas(t *testing.T) {
 	bt := &BrushTorrent{TaskID: 1, InfoHash: "abc", SiteName: "hdsky", TorrentID: "11", AddedAt: t0, State: BrushTorrentActive}
 	require.NoError(t, repo.RecordAdded(bt, "2026-10-06"))
 
-	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(time.Minute), Uploaded: 50, Downloaded: 200}, 0.5, 0.25, 0, "2026-10-06"))
-	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(2 * time.Minute), Uploaded: 80, Downloaded: 400}, 1, 0.2, 60, "2026-10-06"))
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(time.Minute), Uploaded: 50, Downloaded: 200}, 0.5, 0.25, 0, time.UTC))
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(2 * time.Minute), Uploaded: 80, Downloaded: 400}, 1, 0.2, 60, time.UTC))
 	activity := *bt.LastActivityAt
 	// 下载器重启后累计值变小：按 0 计，不倒扣
-	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(3 * time.Minute), Uploaded: 70, Downloaded: 400}, 1, 0.17, 120, "2026-10-06"))
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(3 * time.Minute), Uploaded: 70, Downloaded: 400}, 1, 0.17, 120, time.UTC))
 	assert.True(t, bt.LastActivityAt.Equal(activity), "没有增长时活动时间不前进")
-	// 次日的增量记到次日
-	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(24 * time.Hour), Uploaded: 170, Downloaded: 400}, 1, 0.42, 3600, "2026-10-07"))
+	// 跨到次日的这一段（01:03 → 次日 01:00）按时长分摊：次日只占 1 小时
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: t0.Add(24 * time.Hour), Uploaded: 170, Downloaded: 400}, 1, 0.42, 3600, time.UTC))
 
 	stats, err := repo.DailyStats(1, "2026-10-06", "2026-10-07")
 	require.NoError(t, err)
 	require.Len(t, stats, 2)
-	assert.EqualValues(t, 80, stats[0].Uploaded)
+	assert.EqualValues(t, 80+95, stats[0].Uploaded)
 	assert.EqualValues(t, 400, stats[0].Downloaded)
-	assert.EqualValues(t, 100, stats[1].Uploaded)
+	assert.EqualValues(t, 5, stats[1].Uploaded)
 	assert.EqualValues(t, 0, stats[1].Downloaded)
 
 	var row BrushTorrent
@@ -137,7 +137,7 @@ func TestBrushRepository_DeleteTaskCascades(t *testing.T) {
 	require.NoError(t, repo.SaveTask(task))
 	bt := &BrushTorrent{TaskID: task.ID, InfoHash: "a", SiteName: "hdsky", TorrentID: "1", AddedAt: time.Now(), State: BrushTorrentActive}
 	require.NoError(t, repo.RecordAdded(bt, "2026-10-06"))
-	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: time.Now(), Uploaded: 1}, 0, 0, 0, "2026-10-06"))
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: time.Now(), Uploaded: 1}, 0, 0, 0, time.UTC))
 
 	require.NoError(t, repo.DeleteTask(task.ID))
 	for _, model := range []any{&BrushTask{}, &BrushTorrent{}, &BrushTorrentSample{}, &BrushDailyStat{}} {
@@ -154,11 +154,44 @@ func TestBrushRepository_TaskTotals(t *testing.T) {
 	for i, day := range []string{"2026-10-05", "2026-10-06"} {
 		bt := &BrushTorrent{TaskID: 3, InfoHash: day, SiteName: "s", TorrentID: day, AddedAt: now, State: BrushTorrentActive}
 		require.NoError(t, repo.RecordAdded(bt, day))
-		require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: now.Add(time.Duration(i) * time.Hour), Uploaded: 10, Downloaded: 5}, 1, 2, 0, day))
+		require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: now.Add(time.Duration(i) * time.Hour), Uploaded: 10, Downloaded: 5}, 1, 2, 0, time.UTC))
 	}
 	totals, err := repo.TaskTotals()
 	require.NoError(t, err)
 	assert.EqualValues(t, 20, totals[3].Uploaded)
 	assert.EqualValues(t, 10, totals[3].Downloaded)
 	assert.Equal(t, 2, totals[3].Added)
+}
+
+// 跨午夜的两次采样：差值按时长分摊到两天，合计不变。
+func TestBrushRepository_RecordSampleSplitsAcrossMidnight(t *testing.T) {
+	repo := NewBrushRepository(newBrushTestDB(t))
+	added := time.Date(2026, 10, 6, 23, 50, 0, 0, time.UTC)
+	bt := &BrushTorrent{TaskID: 1, InfoHash: "abc", SiteName: "s", TorrentID: "1", AddedAt: added, State: BrushTorrentActive}
+	require.NoError(t, repo.RecordAdded(bt, "2026-10-06"))
+	// 第一次采样在 23:55，从加入时刻算起：全部记在 10-06
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: added.Add(5 * time.Minute), Uploaded: 100}, 1, 0, 0, time.UTC))
+	// 23:55 → 00:05：600 在两天之间各一半
+	require.NoError(t, repo.RecordSample(bt, BrushTorrentSample{At: added.Add(15 * time.Minute), Uploaded: 700}, 1, 0, 0, time.UTC))
+	stats, err := repo.DailyStats(1, "2026-10-06", "2026-10-07")
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+	assert.EqualValues(t, 100+300, stats[0].Uploaded)
+	assert.EqualValues(t, 300, stats[1].Uploaded)
+}
+
+func TestSplitByDay(t *testing.T) {
+	loc := time.FixedZone("CST", 8*3600)
+	from := time.Date(2026, 10, 6, 23, 0, 0, 0, loc)
+	to := time.Date(2026, 10, 8, 1, 0, 0, 0, loc)
+	parts := splitByDay(from, to, 2600, 26, loc)
+	require.Len(t, parts, 3)
+	assert.Equal(t, []string{"2026-10-06", "2026-10-07", "2026-10-08"}, []string{parts[0].day, parts[1].day, parts[2].day})
+	assert.EqualValues(t, 100, parts[0].up)
+	assert.EqualValues(t, 2400, parts[1].up)
+	assert.EqualValues(t, 2600, parts[0].up+parts[1].up+parts[2].up, "零头归最后一天，合计不变")
+	assert.EqualValues(t, 26, parts[0].down+parts[1].down+parts[2].down)
+	same := splitByDay(to, to, 5, 1, loc)
+	require.Len(t, same, 1)
+	assert.Equal(t, "2026-10-08", same[0].day)
 }

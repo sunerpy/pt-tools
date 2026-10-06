@@ -50,7 +50,9 @@ const gib = 1024 * 1024 * 1024
 
 // admitBrushItem 判断一条搜索结果能不能进入刷流。siteHR 是站点定义的整站 H&R（与 RSS 路径同一规则：
 // hasHR = item.HasHR || def.HREnabled）。M-Team 的搜索忽略 FreeOnly、结果里会混入非免费种，所以优惠类型一律在这里判。
-func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, now time.Time) (bool, string) {
+//
+// hrSeedTimeH 是这个种子的 H&R 做种要求（小时，站点定义按体积算出）；有 H&R 但算不出时拒收。
+func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, hrSeedTimeH int, now time.Time) (bool, string) {
 	if item.ID == "" {
 		return false, "没有种子 ID"
 	}
@@ -95,6 +97,10 @@ func admitBrushItem(task models.BrushTask, item v2.TorrentItem, siteHR bool, now
 	if task.ExcludeHR && (item.HasHR || siteHR) {
 		return false, "有 H&R"
 	}
+	if (item.HasHR || siteHR) && hrSeedTimeH <= 0 {
+		// 不排除 H&R 时也只收算得出做种要求的：要求时长未知，删种规则就没法判断什么时候可以删
+		return false, "H&R 要求的做种时长未知"
+	}
 	text := strings.ToLower(item.Title + " " + item.Subtitle)
 	if inc := splitKeywords(task.IncludeKeywords); len(inc) > 0 {
 		hit := false
@@ -136,10 +142,11 @@ func sortBrushCandidates(items []v2.TorrentItem) {
 // H&R 保护与自动清理（cleanup_monitor 的 hrInfo）同一判断：有 H&R 且要求的做种时长还没满时一律不删，
 // 包括免费到期还没下完的情况 —— 删掉未完成的 H&R 种子同样会被站点记一次 H&R。
 func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.Torrent, samples []models.BrushTorrentSample, now time.Time) (bool, string) {
-	if bt.HasHR && bt.HRSeedTimeH > 0 && t.SeedingTime < int64(bt.HRSeedTimeH)*3600 {
+	// 要求时长未知（<= 0）时按未满处理，一律不删（fail-closed）；入场时已经拒收这类种子，这里兜底
+	if bt.HasHR && (bt.HRSeedTimeH <= 0 || t.SeedingTime < int64(bt.HRSeedTimeH)*3600) {
 		return false, ""
 	}
-	completed := t.IsCompleted || t.Progress >= 1
+	completed := brushCompleted(t)
 	if task.RemoveFreeExpiredIncomplete && !completed && bt.FreeEndAt != nil {
 		// 下一轮检查之前就会到期的，这一轮就删：等到下一轮，到期之后那段已经按非免费计了下载
 		interval := time.Duration(max(task.IntervalMin, 1)) * time.Minute
@@ -156,8 +163,9 @@ func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.To
 	if task.RemoveLowSpeedKBs > 0 && completed && task.RemoveLowSpeedWindowMin > 0 && len(samples) > 0 {
 		window := time.Duration(task.RemoveLowSpeedWindowMin) * time.Minute
 		start := samples[0]
-		// 整个窗口都在做种、而且采样覆盖了整个窗口才判：刚下完或刚开始采样的种子不算
-		if t.SeedingTime >= int64(window.Seconds()) && !start.At.After(now.Add(-window)) {
+		// 整个窗口都在做种、而且采样覆盖了整个窗口才判：刚下完或刚开始采样的种子不算。
+		// 累计上传比窗口起点还小，是下载器重启或种子重新加入后计数清零了：这一轮不判，等新的完整窗口
+		if t.SeedingTime >= int64(window.Seconds()) && !start.At.After(now.Add(-window)) && t.TotalUploaded >= start.Uploaded {
 			elapsed := now.Sub(start.At).Seconds()
 			if elapsed > 0 {
 				speed := float64(t.TotalUploaded-start.Uploaded) / elapsed / 1024
@@ -174,6 +182,19 @@ func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.To
 		}
 	}
 	return false, ""
+}
+
+// brushCompleted 报告种子是否已经下完：进度 100%，并且不在校验、出错这类进度还不可信的状态里
+// （qBittorrent 的 checkingResumeData、missingFiles 也可能报 100%）。暂停的已完成种子算完成。
+func brushCompleted(t downloader.Torrent) bool {
+	if t.Progress < 1 {
+		return false
+	}
+	switch t.State {
+	case downloader.TorrentChecking, downloader.TorrentError:
+		return false
+	}
+	return true
 }
 
 // hasTag 报告种子的标签（qB tags / TR labels，逗号分隔）里是否有 tag（大小写不敏感）。

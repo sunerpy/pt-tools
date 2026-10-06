@@ -113,13 +113,21 @@ type BrushMonitor struct {
 	cfg  BrushMonitorConfig
 	repo *models.BrushRepository
 
+	// root 在 Stop 时取消：定时与手动运行的每一轮都挂在它下面，Stop 等它们全部退出
+	root       context.Context
+	rootCancel context.CancelFunc
+	runs       sync.WaitGroup
+
 	mu        sync.Mutex
 	running   bool
-	cancel    context.CancelFunc
+	stopped   bool
 	wg        sync.WaitGroup
 	busy      map[uint]bool
 	lastPrune time.Time
 }
+
+// ErrBrushStopped 表示刷流监控已经停止（进程正在退出）。
+var ErrBrushStopped = errors.New("刷流服务已停止")
 
 // NewBrushMonitor 构造刷流监控，不启动；调用 Start 开始调度。
 func NewBrushMonitor(cfg BrushMonitorConfig) *BrushMonitor {
@@ -138,40 +146,43 @@ func NewBrushMonitor(cfg BrushMonitorConfig) *BrushMonitor {
 	if cfg.Push == nil {
 		cfg.Push = ptinternal.PushTorrentToDownloader
 	}
-	return &BrushMonitor{cfg: cfg, repo: models.NewBrushRepository(cfg.DB), busy: map[uint]bool{}}
+	root, cancel := context.WithCancel(context.Background())
+	return &BrushMonitor{
+		cfg: cfg, repo: models.NewBrushRepository(cfg.DB), busy: map[uint]bool{},
+		root: root, rootCancel: cancel,
+	}
 }
 
-// Start 启动调度循环；重复调用无效果。
+// Start 启动调度循环；重复调用、Stop 之后再调用都无效果。
 func (m *BrushMonitor) Start() {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.running {
+	if m.running || m.stopped {
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
 	m.running = true
-	m.wg.Go(func() { m.loop(ctx) })
+	m.wg.Go(func() { m.loop(m.root) })
 }
 
-// Stop 停止调度循环并等正在跑的一轮退出。
+// Stop 停止调度、取消正在跑的定时或手动的一轮，并等它们全部退出；之后的 RunTask 返回 ErrBrushStopped。
 func (m *BrushMonitor) Stop() {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
-	if !m.running {
+	if m.stopped {
 		m.mu.Unlock()
 		return
 	}
+	m.stopped = true
 	m.running = false
-	cancel := m.cancel
 	m.mu.Unlock()
-	cancel()
+	m.rootCancel()
 	m.wg.Wait()
+	m.runs.Wait()
 }
 
 func (m *BrushMonitor) loop(ctx context.Context) {
@@ -222,7 +233,11 @@ func (m *BrushMonitor) RunOnce(ctx context.Context) {
 				continue
 			}
 		}
-		if _, err := m.RunTask(ctx, task.ID); err != nil && !errors.Is(err, ErrBrushBusy) {
+		_, err := m.RunTask(ctx, task.ID)
+		switch {
+		case errors.Is(err, ErrBrushStopped):
+			return
+		case err != nil && !errors.Is(err, ErrBrushBusy):
 			m.cfg.Logger.Warnf("[刷流] 任务 %s 运行失败: %v", task.Name, err)
 		}
 	}
@@ -253,7 +268,7 @@ func (m *BrushMonitor) maybePrune(now time.Time) {
 }
 
 // WithTaskLock 在任务没有运行时执行 fn（期间定时与手动运行都会拿到 ErrBrushBusy）；任务正在运行时返回 ErrBrushBusy。
-// 删除任务走这里，免得一轮运行在删除之后还往已删的任务名下记种子。
+// 删除与修改任务走这里：一轮运行用的是开始时读到的配置，改动不能落在一轮的中途。
 func (m *BrushMonitor) WithTaskLock(taskID uint, fn func() error) error {
 	if m == nil {
 		return fn()
@@ -273,24 +288,30 @@ func (m *BrushMonitor) WithTaskLock(taskID uint, fn func() error) error {
 	return fn()
 }
 
-// RunTask 立即运行一轮（定时调度与「立即运行」接口共用）；同一任务正在运行时返回 ErrBrushBusy。
-// 关闭的任务也能手动运行：删种照常执行，加种只在任务开启时进行。
+// RunTask 立即运行一轮（定时调度与「立即运行」接口共用）；同一任务正在运行时返回 ErrBrushBusy，
+// 监控已停止时返回 ErrBrushStopped。关闭的任务也能手动运行：删种照常执行，加种只在任务开启时进行。
 func (m *BrushMonitor) RunTask(ctx context.Context, taskID uint) (BrushRunResult, error) {
 	res := BrushRunResult{TaskID: taskID}
 	if m == nil || m.cfg.DB == nil {
 		return res, errors.New("刷流服务不可用")
 	}
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return res, ErrBrushStopped
+	}
 	if m.busy[taskID] {
 		m.mu.Unlock()
 		return res, ErrBrushBusy
 	}
 	m.busy[taskID] = true
+	m.runs.Add(1)
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
 		delete(m.busy, taskID)
 		m.mu.Unlock()
+		m.runs.Done()
 	}()
 
 	task, err := m.repo.GetTask(taskID)
@@ -299,6 +320,8 @@ func (m *BrushMonitor) RunTask(ctx context.Context, taskID uint) (BrushRunResult
 	}
 	ctx, cancel := context.WithTimeout(ctx, brushRunTimeout)
 	defer cancel()
+	stopWithRoot := context.AfterFunc(m.root, cancel)
+	defer stopWithRoot()
 
 	runErr := m.run(ctx, task, &res)
 	now := m.cfg.Clock.Now()
@@ -322,38 +345,65 @@ func (m *BrushMonitor) run(ctx context.Context, task *models.BrushTask, res *Bru
 	if m.cfg.Downloaders == nil {
 		return errors.New("下载器服务不可用")
 	}
-	dl, dlName, err := m.cfg.Downloaders.BrushDownloader(task.DownloaderID)
-	if err != nil {
-		return fmt.Errorf("下载器不可用: %w", err)
-	}
-	torrents, err := dl.GetAllTorrents()
-	if err != nil {
-		return fmt.Errorf("读取下载器 %s 的种子失败: %w", dlName, err)
-	}
-	byHash := make(map[string]downloader.Torrent, len(torrents))
-	for _, t := range torrents {
-		if t.InfoHash != "" {
-			byHash[strings.ToLower(t.InfoHash)] = t
-		}
-	}
-
-	active, err := m.sampleAndRemove(task, dl, byHash, res)
+	rows, err := m.repo.ActiveTorrents(task.ID)
 	if err != nil {
 		return err
+	}
+	// 种子按它们各自加入时的下载器管理：任务换了下载器之后，旧下载器里的种子照样采样、按规则删除
+	groups := map[uint][]models.BrushTorrent{}
+	for _, bt := range rows {
+		id := bt.DownloaderID
+		if id == 0 {
+			id = task.DownloaderID
+		}
+		groups[id] = append(groups[id], bt)
+	}
+	if _, ok := groups[task.DownloaderID]; !ok {
+		groups[task.DownloaderID] = nil
+	}
+	var active []models.BrushTorrent
+	var current downloader.Downloader
+	var currentByHash map[string]downloader.Torrent
+	for id, list := range groups {
+		dl, name, err := m.cfg.Downloaders.BrushDownloader(id)
+		if err != nil {
+			if id == task.DownloaderID {
+				return fmt.Errorf("下载器不可用: %w", err)
+			}
+			// 旧下载器暂时连不上：它名下的种子保持原状，不当成已经没了
+			res.Errors = append(res.Errors, fmt.Sprintf("下载器 %d 不可用，它名下的 %d 个种子这一轮没处理: %v", id, len(list), err))
+			active = append(active, list...)
+			continue
+		}
+		torrents, err := dl.GetAllTorrents()
+		if err != nil {
+			if id == task.DownloaderID {
+				return fmt.Errorf("读取下载器 %s 的种子失败: %w", name, err)
+			}
+			res.Errors = append(res.Errors, fmt.Sprintf("读取下载器 %s 的种子失败: %v", name, err))
+			active = append(active, list...)
+			continue
+		}
+		byHash := make(map[string]downloader.Torrent, len(torrents))
+		for _, t := range torrents {
+			if t.InfoHash != "" {
+				byHash[strings.ToLower(t.InfoHash)] = t
+			}
+		}
+		if id == task.DownloaderID {
+			current, currentByHash = dl, byHash
+		}
+		active = append(active, m.sampleAndRemove(task, dl, list, byHash, res)...)
 	}
 	if !task.Enabled {
 		res.Stopped = "任务已关闭，不加种"
 		return nil
 	}
-	return m.admit(ctx, task, active, byHash, res)
+	return m.admit(ctx, task, current, active, currentByHash, res)
 }
 
-// sampleAndRemove 给任务名下仍在做的种子采样并按规则删除；返回删完之后仍在做的种子。
-func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Downloader, byHash map[string]downloader.Torrent, res *BrushRunResult) ([]models.BrushTorrent, error) {
-	rows, err := m.repo.ActiveTorrents(task.ID)
-	if err != nil {
-		return nil, err
-	}
+// sampleAndRemove 给一个下载器里的刷流种子采样并按规则删除；返回删完之后仍在做的种子（含这轮没法判断的）。
+func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Downloader, rows []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) []models.BrushTorrent {
 	taskTag := models.BrushTaskTag(task.ID)
 	kept := make([]models.BrushTorrent, 0, len(rows))
 	for i := range rows {
@@ -377,13 +427,14 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 			continue
 		}
 		sample := models.BrushTorrentSample{At: now, Uploaded: t.TotalUploaded, Downloaded: t.TotalDownloaded}
-		if sampleErr := m.repo.RecordSample(&bt, sample, t.Progress, t.Ratio, t.SeedingTime, day); sampleErr != nil {
+		if sampleErr := m.repo.RecordSample(&bt, sample, t.Progress, t.Ratio, t.SeedingTime, m.cfg.Location); sampleErr != nil {
 			res.Errors = append(res.Errors, sampleErr.Error())
 		} else {
 			res.Sampled++
 		}
 		var samples []models.BrushTorrentSample
 		if task.RemoveLowSpeedKBs > 0 && task.RemoveLowSpeedWindowMin > 0 {
+			var err error
 			samples, err = m.repo.SamplesSince(bt.ID, now.Add(-time.Duration(task.RemoveLowSpeedWindowMin)*time.Minute))
 			if err != nil {
 				res.Errors = append(res.Errors, err.Error())
@@ -391,30 +442,42 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 		}
 		remove, reason := brushRemoval(*task, bt, t, samples, now)
 		if !remove {
-			kept = append(kept, bt)
+			kept = append(kept, withProgress(bt, t))
 			continue
 		}
 		if err := dl.RemoveTorrent(t.ID, task.RemoveWithData); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("删除 %s 失败: %v", bt.Title, err))
-			kept = append(kept, bt)
+			kept = append(kept, withProgress(bt, t))
 			continue
 		}
 		res.Removed++
 		m.cfg.Logger.Infof("[刷流] %s 删除 %s：%s", task.Name, bt.Title, reason)
-		if err := m.repo.MarkEnded(&bt, models.BrushTorrentRemoved, reason, now, day); err != nil {
-			res.Errors = append(res.Errors, err.Error())
+		if markErr := m.repo.MarkEnded(&bt, models.BrushTorrentRemoved, reason, now, day); markErr != nil {
+			res.Errors = append(res.Errors, markErr.Error())
 		}
 	}
-	return kept, nil
+	return kept
+}
+
+// withProgress 记下这一轮看到的完成状态，供限额计算用（Progress 字段用 brushCompleted 的口径：没真正下完就小于 1）。
+func withProgress(bt models.BrushTorrent, t downloader.Torrent) models.BrushTorrent {
+	if brushCompleted(t) {
+		bt.Progress = 1
+	} else if t.Progress >= 1 {
+		bt.Progress = 0.999
+	} else {
+		bt.Progress = t.Progress
+	}
+	return bt
 }
 
 // admit 在限额之内从站点的免费列表里加种。
-func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, active []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) error {
+func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl downloader.Downloader, active []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) error {
 	downloading := 0
 	var totalSize int64
 	for _, bt := range active {
 		totalSize += bt.SizeBytes
-		if t, ok := byHash[bt.InfoHash]; ok && !(t.IsCompleted || t.Progress >= 1) {
+		if bt.Progress < 1 {
 			downloading++
 		}
 	}
@@ -449,7 +512,8 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, active
 		def = d
 	}
 	siteHR := def != nil && def.HREnabled
-	seen, err := m.repo.SeenTorrentIDs(task.ID)
+	// 任何刷流任务在这个站点加过的种子都不再加：两个任务各加一份会争用同一条 TorrentInfo 记录
+	seen, err := m.repo.SeenSiteTorrentIDs(task.SiteName)
 	if err != nil {
 		return err
 	}
@@ -463,7 +527,11 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, active
 				continue
 			}
 		}
-		if ok, _ := admitBrushItem(*task, it, siteHR, now); ok {
+		hr := 0
+		if (it.HasHR || siteHR) && def != nil {
+			hr = def.CalcHRSeedTimeH(it.SizeBytes)
+		}
+		if ok, _ := admitBrushItem(*task, it, siteHR, hr, now); ok {
 			candidates = append(candidates, it)
 		}
 	}
@@ -560,7 +628,14 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, active
 			DownloaderID: task.DownloaderID, State: models.BrushTorrentActive, AddedAt: now.UTC(),
 		}
 		if err := m.repo.RecordAdded(bt, m.dayOf(now)); err != nil {
-			res.Errors = append(res.Errors, err.Error())
+			// 记不下来就撤回：没有记录的刷流种子既不归刷流管，也被常规清理跳过，会一直留在下载器里
+			res.Errors = append(res.Errors, fmt.Sprintf("%s 已加入下载器但记录失败，已撤回: %v", it.Title, err))
+			if rmErr := dl.RemoveTorrent(hash, true); rmErr != nil {
+				m.cfg.Logger.Errorf("[刷流] %s 撤回 %s（%s）失败，需要手动删除: %v", task.Name, it.Title, hash, rmErr)
+				res.Errors = append(res.Errors, fmt.Sprintf("撤回 %s 失败，需要在下载器里手动删除: %v", it.Title, rmErr))
+			}
+			res.Stopped = "记录种子失败，本轮停止加种"
+			return nil
 		}
 		res.Added++
 		downloading++

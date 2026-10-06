@@ -276,6 +276,20 @@ func (r *BrushRepository) ListTorrents(taskID uint, state string, page, pageSize
 	return rows, total, nil
 }
 
+// SeenSiteTorrentIDs 返回所有刷流任务在这个站点推送过的种子 ID（不论哪个任务、现在什么状态）：
+// 同一个站点种子不会被两个任务各加一份（两份会争用同一条 TorrentInfo 记录）。
+func (r *BrushRepository) SeenSiteTorrentIDs(siteName string) (map[string]bool, error) {
+	var ids []string
+	if err := r.db.Model(&BrushTorrent{}).Where("site_name = ?", siteName).Pluck("torrent_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
 // SeenTorrentIDs 返回任务推送过的站点种子 ID（不论现在的状态），避免把删掉的种子再加回来。
 func (r *BrushRepository) SeenTorrentIDs(taskID uint) (map[string]bool, error) {
 	var ids []string
@@ -306,13 +320,20 @@ func (r *BrushRepository) RecordAdded(bt *BrushTorrent, day string) error {
 	})
 }
 
-// RecordSample 写一次采样，更新种子的最近状态，并把与上次采样的差值（只计正数）累加到当天的统计里。
-func (r *BrushRepository) RecordSample(bt *BrushTorrent, sample BrushTorrentSample, progress, ratio float64, seedingSec int64, day string) error {
+// RecordSample 写一次采样，更新种子的最近状态，并把与上次采样的差值（只计正数）累加到每日统计里。
+// 差值按时间比例分摊到它跨过的每一天（loc 是分天的时区）：23:55 与次日 00:05 之间的量不会全记到次日。
+// 第一次采样从加入时刻算起：推送前下载器里没有这个种子，累计值本身就是这段时间的量。
+func (r *BrushRepository) RecordSample(bt *BrushTorrent, sample BrushTorrentSample, progress, ratio float64, seedingSec int64, loc *time.Location) error {
+	if loc == nil {
+		loc = time.Local
+	}
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		up := sample.Uploaded - bt.Uploaded
 		down := sample.Downloaded - bt.Downloaded
-		if bt.LastSampleAt == nil {
-			// 第一次采样：推送前下载器里没有这个种子，累计值本身就是这段时间的量
+		from := bt.AddedAt
+		if bt.LastSampleAt != nil {
+			from = *bt.LastSampleAt
+		} else {
 			up, down = sample.Uploaded, sample.Downloaded
 		}
 		if up < 0 {
@@ -350,9 +371,50 @@ func (r *BrushRepository) RecordSample(bt *BrushTorrent, sample BrushTorrentSamp
 		if up == 0 && down == 0 {
 			return nil
 		}
-		return addDailyStat(tx, bt.TaskID, day, BrushDailyStat{Uploaded: up, Downloaded: down})
+		for _, part := range splitByDay(from, sample.At, up, down, loc) {
+			if err := addDailyStat(tx, bt.TaskID, part.day, BrushDailyStat{Uploaded: part.up, Downloaded: part.down}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
+
+type dayShare struct {
+	day      string
+	up, down int64
+}
+
+// splitByDay 把 [from, to] 这段时间里的 up、down 按每天占的时长分摊（时区 loc）；to 不晚于 from 时整段记在 to 那天。
+// 舍入的零头都归到最后一天，合计与输入相等。
+func splitByDay(from, to time.Time, up, down int64, loc *time.Location) []dayShare {
+	from, to = from.In(loc), to.In(loc)
+	if !to.After(from) || from.Format(dateLayout) == to.Format(dateLayout) {
+		return []dayShare{{day: to.Format(dateLayout), up: up, down: down}}
+	}
+	total := to.Sub(from).Seconds()
+	var out []dayShare
+	var usedUp, usedDown int64
+	cur := from
+	for cur.Before(to) {
+		y, m, d := cur.Date()
+		next := time.Date(y, m, d+1, 0, 0, 0, 0, loc)
+		if next.After(to) {
+			next = to
+		}
+		frac := next.Sub(cur).Seconds() / total
+		share := dayShare{day: cur.Format(dateLayout), up: int64(float64(up) * frac), down: int64(float64(down) * frac)}
+		usedUp += share.up
+		usedDown += share.down
+		out = append(out, share)
+		cur = next
+	}
+	out[len(out)-1].up += up - usedUp
+	out[len(out)-1].down += down - usedDown
+	return out
+}
+
+const dateLayout = "2006-01-02"
 
 // MarkEnded 把种子记为终态（removed 或 gone）；removed 时计入当天的删除数。
 func (r *BrushRepository) MarkEnded(bt *BrushTorrent, state, reason string, at time.Time, day string) error {
