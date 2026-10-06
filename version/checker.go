@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sunerpy/pt-tools/utils/httpclient"
+
 	"github.com/sunerpy/requests"
 )
 
@@ -193,13 +195,13 @@ func (c *Checker) fetchGitHubReleases(ctx context.Context, proxyURL string) ([]G
 
 	var resp *requests.Response
 	if proxyURL != "" {
-		session := requests.NewSession().
+		session := httpclient.NewSession().
 			WithProxy(proxyURL).
 			WithTimeout(RequestTimeout)
 		defer session.Close()
 		resp, err = session.Do(req)
 	} else {
-		session := requests.NewSession().WithTimeout(RequestTimeout)
+		session := httpclient.NewSession().WithTimeout(RequestTimeout)
 		defer session.Close()
 		resp, err = session.Do(req)
 	}

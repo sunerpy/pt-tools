@@ -194,7 +194,7 @@ func (fs *FaviconService) fetchAndSave(siteID, siteName, faviconURL string) erro
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	session := requests.NewSession().WithTimeout(30 * time.Second)
+	session := httpclient.NewSession().WithTimeout(30 * time.Second)
 	// 始终显式设置代理（即使为空）。requests 库的 Session 从全局 transport 池
 	// 复用 *http.Transport，若仅在有代理时调用 WithProxy，池中残留的代理配置
 	// 会污染后续对 NO_PROXY 主机（如 127.0.0.1）的请求，导致其错误地走代理。

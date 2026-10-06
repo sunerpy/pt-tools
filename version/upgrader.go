@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sunerpy/pt-tools/utils/httpclient"
+
 	"github.com/sunerpy/requests"
 )
 
@@ -235,7 +237,7 @@ func (u *Upgrader) findAssetURL(release *ReleaseInfo, assetName string) string {
 }
 
 func (u *Upgrader) downloadFile(ctx context.Context, downloadURL, destPath, proxyURL string) error {
-	session := requests.NewSession().WithTimeout(10 * time.Minute)
+	session := httpclient.NewSession().WithTimeout(10 * time.Minute)
 	// 显式设置代理（proxyURL 为空时清空）。requests 会话底层复用池化的 *http.Transport，
 	// 上一个使用者若设置过代理，Close() 归还时不会清除 tr.Proxy；此处不显式归零就会继承
 	// 陈旧代理，导致本应直连（含环回）的请求被误路由。始终显式设置以保证代理状态可预期。
@@ -277,7 +279,7 @@ func (u *Upgrader) downloadFile(ctx context.Context, downloadURL, destPath, prox
 
 // fetchExpectedChecksum 下载 Release 的校验清单，返回 assetName 对应的 SHA-256（小写十六进制）。
 func (u *Upgrader) fetchExpectedChecksum(ctx context.Context, checksumURL, assetName, proxyURL string) (string, error) {
-	session := requests.NewSession().WithTimeout(time.Minute)
+	session := httpclient.NewSession().WithTimeout(time.Minute)
 	session = session.WithProxy(proxyURL)
 	defer session.Close()
 

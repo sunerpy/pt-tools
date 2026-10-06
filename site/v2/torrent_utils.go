@@ -266,7 +266,7 @@ func GetRemoteTorrent(torrentURL, cookie string) (*ParsedTorrent, error) {
 
 // GetRemoteTorrentWithRequests fetches a torrent file from a URL using requests library
 func GetRemoteTorrentWithRequests(torrentURL, cookie string) (*ParsedTorrent, error) {
-	session := requests.NewSession().WithTimeout(30 * time.Second)
+	session := httpclient.NewSession().WithTimeout(30 * time.Second)
 	if proxyURL := httpclient.ResolveProxyFromEnvironment(torrentURL); proxyURL != "" {
 		session = session.WithProxy(proxyURL)
 	}
