@@ -293,19 +293,6 @@ func (r *BrushRepository) SeenSiteTorrentIDs(siteName string) (map[string]bool, 
 	return out, nil
 }
 
-// SeenTorrentIDs 返回任务推送过的站点种子 ID（不论现在的状态），避免把删掉的种子再加回来。
-func (r *BrushRepository) SeenTorrentIDs(taskID uint) (map[string]bool, error) {
-	var ids []string
-	if err := r.db.Model(&BrushTorrent{}).Where("task_id = ?", taskID).Pluck("torrent_id", &ids).Error; err != nil {
-		return nil, err
-	}
-	out := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		out[id] = true
-	}
-	return out, nil
-}
-
 // ErrBrushTorrentTaken 表示这个站点种子已经由别的刷流任务加入过（site_name + torrent_id 唯一）。
 var ErrBrushTorrentTaken = errors.New("这个种子已经由别的刷流任务加入")
 

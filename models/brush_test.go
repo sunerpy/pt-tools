@@ -80,7 +80,7 @@ func TestBrushRepository_RecordAddedIsIdempotent(t *testing.T) {
 	assert.Equal(t, 1, stats[0].Added, "同一个种子只记一次")
 	assert.EqualValues(t, 100, stats[0].AddedBytes)
 
-	seen, err := repo.SeenTorrentIDs(1)
+	seen, err := repo.SeenSiteTorrentIDs("hdsky")
 	require.NoError(t, err)
 	assert.True(t, seen["11"])
 }
