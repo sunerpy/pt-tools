@@ -312,3 +312,97 @@ func TestDailyReport_NoBaselineSaysSo(t *testing.T) {
 	assert.NotContains(t, text, "今日合计")
 	assert.Contains(t, text, "暂无可比")
 }
+
+// 构造时补默认值；Start/Stop 可重复调用，nil 接收者安全。
+func TestDailyReport_LifecycleAndDefaults(t *testing.T) {
+	j := NewDailyReportJob(DailyReportJobConfig{})
+	require.NotNil(t, j.cfg.Clock)
+	require.NotNil(t, j.cfg.Logger)
+	assert.Equal(t, dailyReportTick, j.cfg.Tick)
+	assert.Equal(t, time.Local, j.cfg.Location)
+	j.RunOnce(context.Background()) // 没有 History：什么也不做
+
+	j.Start()
+	j.Start()
+	j.Stop()
+	j.Stop()
+
+	var nilJob *DailyReportJob
+	nilJob.Start()
+	nilJob.Stop()
+	nilJob.RunOnce(context.Background())
+	assert.Zero(t, DailyReportRand(0))
+	assert.Less(t, DailyReportRand(10), int64(10))
+}
+
+// 设置读不出、时刻无效、算不出增量、写不进日志：这一轮都不发，也不记成「今天已发」。
+func TestDailyReport_ErrorsSkipRound(t *testing.T) {
+	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true})
+
+	f.cfg.Settings = func() (bool, string, []uint, error) { return false, "", nil, errors.New("db locked") }
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	assert.Empty(t, reportRows(t, f.db))
+
+	f.cfg.Settings = func() (bool, string, []uint, error) { return true, "25:99", []uint{1}, nil }
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	assert.Empty(t, reportRows(t, f.db))
+
+	f.cfg.Settings = func() (bool, string, []uint, error) { return true, "21:00", []uint{1}, nil }
+	f.cfg.History = stubHistory{today: "2026-10-06", listErr: errors.New("disk I/O error")}
+	j := NewDailyReportJob(f.cfg)
+	j.RunOnce(context.Background())
+	assert.Empty(t, reportRows(t, f.db))
+	assert.Empty(t, j.doneDay)
+
+	f.cfg.History = f.repo
+	require.NoError(t, f.db.Migrator().DropTable(&models.MonitorNotificationLog{}))
+	j = NewDailyReportJob(f.cfg)
+	j.RunOnce(context.Background())
+	assert.Empty(t, j.doneDay, "写日志失败：下一轮重试")
+}
+
+// 读不出登录状态或签到结果时这两段省略，战报照发。
+func TestDailyReport_MissingSectionsAreOmitted(t *testing.T) {
+	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true})
+	require.NoError(t, f.db.Migrator().DropTable(&models.SiteLoginState{}))
+	require.NoError(t, f.db.Migrator().DropTable(&models.SiteAttendanceLog{}))
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	text := reportText(t, rows[0])
+	assert.NotContains(t, text, "登录状态异常")
+	assert.NotContains(t, text, "今日签到")
+}
+
+type stubHistory struct {
+	today   string
+	listErr error
+}
+
+func (s stubHistory) ListSnapshots(context.Context, string, string, string) ([]v2.UserInfoDailySnapshot, error) {
+	return nil, s.listErr
+}
+
+func (s stubHistory) SnapshotBaselines(context.Context, string) (map[string]v2.UserInfoDailySnapshot, error) {
+	return nil, nil
+}
+func (s stubHistory) PruneSnapshots(context.Context, string) (int64, error) { return 0, nil }
+func (s stubHistory) Today() string                                         { return s.today }
+
+func TestManager_DailyReportJobReplacedAndStopped(t *testing.T) {
+	m := &Manager{}
+	first := NewDailyReportJob(DailyReportJobConfig{})
+	first.Start()
+	m.SetDailyReportJob(first)
+	second := NewDailyReportJob(DailyReportJobConfig{})
+	second.Start()
+	m.SetDailyReportJob(second)
+	assert.False(t, first.running, "换上新任务时停掉旧的")
+	m.SetDailyReportJob(second)
+	assert.True(t, second.running, "同一个任务不重复停")
+	m.StopAll()
+	assert.False(t, second.running)
+	assert.Nil(t, m.dailyReportJob)
+}
