@@ -31,7 +31,7 @@ import { isProbeSuccess, probeStatusLabel } from "@/utils/probeStatus";
 import { attendanceView } from "@/utils/attendanceStatus";
 import { formatShortDateTime } from "@/utils/format";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const route = useRoute();
@@ -73,18 +73,23 @@ const downloaderDirectories = ref<Record<number, DownloaderDirectory[]>>({});
 const newRssUseCustomPath = ref(false);
 const editRssUseCustomPath = ref(false);
 
-const form = ref<SiteConfig>({
-  enabled: false,
-  auth_method: "cookie",
-  cookie: "",
-  api_key: "",
-  api_url: "",
-  passkey: "",
-  upload_limit_kbs: 0,
-  download_limit_kbs: 0,
-  seeding_capacity_gb: 0,
-  rss: [],
-});
+/** 详情读回来之前的默认空表单（首次加载与切站时用） */
+function emptySiteForm(): SiteConfig {
+  return {
+    enabled: false,
+    auth_method: "cookie",
+    cookie: "",
+    api_key: "",
+    api_url: "",
+    passkey: "",
+    upload_limit_kbs: 0,
+    download_limit_kbs: 0,
+    seeding_capacity_gb: 0,
+    rss: [],
+  };
+}
+
+const form = ref<SiteConfig>(emptySiteForm());
 const savedCookieHidden = computed(() => form.value.has_cookie === true && !form.value.cookie);
 
 // 示例 RSS 配置（不存入数据库，仅用于展示）
@@ -214,6 +219,26 @@ const editingRssConfIDs = computed<number[]>({
 
 onMounted(loadDetail);
 
+/*
+ * 只改路由参数（/sites/A → /sites/B）时 Vue Router 复用这个组件，onMounted 不会再跑。
+ * 不重新加载的话页面上还是 A 的表单、loaded 仍为真，点「保存配置」就把 A 的整份配置写到 B。
+ * 切站时先上锁、清空表单（A 的订阅行不能挂在 B 的页面上被删改）、关掉弹窗、清掉右栏 A 的数据，
+ * 再加载 B；A 还没回来的请求由 run 的请求序号作废。
+ */
+watch(siteName, (name, prev) => {
+  if (!name || name === prev) return;
+  loaded.value = false;
+  form.value = emptySiteForm();
+  rssDialogVisible.value = false;
+  editRssDialogVisible.value = false;
+  loginState.value = null;
+  siteAttendance.value = null;
+  siteStats.value = null;
+  siteTasks.value = [];
+  sitePushed.value = [];
+  void loadDetail();
+});
+
 async function loadDetail() {
   // 并行加载站点配置、下载器列表、过滤规则列表、下载器目录、通知通道列表
   const data = await run(() =>
@@ -286,6 +311,25 @@ function blockedByLoadState(): boolean {
   return true;
 }
 
+/**
+ * RSS 写操作成功之后重新读一次详情，拿到数据库里的真实 ID。
+ * 读取失败不等于写操作失败：不报「添加失败 / 删除失败」，只提示刷新，返回 false 让调用方把本地列表补成已生效的样子。
+ * 读取期间切到了别的站点时丢弃结果（返回 true，没有本地列表需要补）。
+ */
+async function reloadSiteForm(): Promise<boolean> {
+  const name = siteName.value;
+  try {
+    const data = await sitesApi.get(name);
+    if (name !== siteName.value) return true;
+    form.value = { ...data, rss: data.rss || [] };
+    return true;
+  } catch {
+    if (name !== siteName.value) return true;
+    ElMessage.warning("操作已生效，但重新读取站点详情失败，请刷新页面后再继续修改");
+    return false;
+  }
+}
+
 async function save() {
   if (blockedByLoadState()) return;
   saving.value = true;
@@ -348,12 +392,15 @@ async function addRss() {
   }
 
   addingRss.value = true;
-  console.log("[RSS] 开始添加 RSS:", newRss.name, newRss.url);
+  // 只记名称：RSS 链接通常带 passkey，不能进控制台
+  console.log("[RSS] 开始添加 RSS:", newRss.name);
+  // 保存期间可能切到别的站点（form 会换成新站点的对象），失败回退只动这一站的表单
+  const target = form.value;
   try {
-    if (!form.value.rss) {
-      form.value.rss = [];
+    if (!target.rss) {
+      target.rss = [];
     }
-    form.value.rss.push({
+    target.rss.push({
       ...newRss,
       interval_minutes: Math.max(5, Math.min(1440, newRss.interval_minutes || 10)),
       downloader_id: newRss.downloader_id || undefined,
@@ -365,19 +412,18 @@ async function addRss() {
       notify_conf_ids: newRss.notify_conf_ids || "[]",
       max_notifications_per_hour: newRss.max_notifications_per_hour ?? 100,
     });
-    await sitesApi.save(siteName.value, form.value);
-    // 重新加载数据以获取数据库中的真实 ID
-    const data = await sitesApi.get(siteName.value);
-    form.value = {
-      ...data,
-      rss: data.rss || [],
-    };
+    try {
+      await sitesApi.save(siteName.value, target);
+    } catch (e: unknown) {
+      // 添加失败时，移除刚添加的 RSS
+      target.rss.pop();
+      ElMessage.error((e as Error).message || "添加失败");
+      return;
+    }
     ElMessage.success("RSS 添加成功");
     rssDialogVisible.value = false;
-  } catch (e: unknown) {
-    // 添加失败时，移除刚添加的 RSS
-    form.value.rss.pop();
-    ElMessage.error((e as Error).message || "添加失败");
+    // 重新加载数据以获取数据库中的真实 ID；读取失败时本地列表里已经有这条，和库里一致
+    await reloadSiteForm();
   } finally {
     addingRss.value = false;
   }
@@ -396,20 +442,22 @@ async function deleteRss(index: number) {
 
     console.log("[RSS] 开始删除 RSS:", rss.name, "id:", rss.id);
     if (rss.id) {
+      const target = form.value;
       await sitesApi.deleteRss(siteName.value, rss.id);
       console.log("[RSS] 删除 RSS 成功:", rss.name);
-      // 重新加载数据以确保数据一致性
-      const data = await sitesApi.get(siteName.value);
-      form.value = {
-        ...data,
-        rss: data.rss || [],
-      };
+      ElMessage.success("已删除");
+      // 重新加载数据以确保数据一致性。读取失败时从本地列表移除这条：
+      // 否则它还挂在表单里，之后点「保存配置」会把刚删掉的订阅重新建回去
+      if (!(await reloadSiteForm())) {
+        const i = target.rss.indexOf(rss);
+        if (i >= 0) target.rss.splice(i, 1);
+      }
     } else {
       // 没有 ID 的 RSS（未保存到数据库），直接从前端列表移除
       console.log("[RSS] RSS 无 ID，仅从前端移除:", rss.name);
       form.value.rss.splice(index, 1);
+      ElMessage.success("已删除");
     }
-    ElMessage.success("已删除");
   } catch (e: unknown) {
     if ((e as string) !== "cancel") {
       console.error("[RSS] 删除 RSS 失败:", e);
@@ -468,11 +516,15 @@ async function updateRss() {
   }
 
   updatingRss.value = true;
-  console.log("[RSS] 开始更新 RSS:", editingRss.name, editingRss.url);
+  // 只记名称：RSS 链接通常带 passkey，不能进控制台
+  console.log("[RSS] 开始更新 RSS:", editingRss.name);
+  const target = form.value;
+  const index = editingRssIndex.value;
+  const previous = target.rss[index];
 
   try {
     // 更新本地数据
-    form.value.rss[editingRssIndex.value] = {
+    target.rss[index] = {
       id: editingRss.id,
       name: editingRss.name,
       url: editingRss.url,
@@ -490,19 +542,21 @@ async function updateRss() {
     };
 
     // 保存到服务器
-    await sitesApi.save(siteName.value, form.value);
+    try {
+      await sitesApi.save(siteName.value, target);
+    } catch (e: unknown) {
+      console.error("[RSS] 更新 RSS 失败:", e);
+      ElMessage.error((e as Error).message || "更新失败");
+      // 没保存成功：本地也退回原值，免得之后点「保存配置」把这次没保存上的改动带上去
+      if (previous) target.rss[index] = previous;
+      return;
+    }
     ElMessage.success("RSS 更新成功");
     editRssDialogVisible.value = false;
-  } catch (e: unknown) {
-    console.error("[RSS] 更新 RSS 失败:", e);
-    ElMessage.error((e as Error).message || "更新失败");
+    // 重新加载数据以确保数据一致性；读取失败时本地已是保存成功的值
+    await reloadSiteForm();
   } finally {
-    // 无论成功或失败，都重新加载数据以确保数据一致性
-    const data = await sitesApi.get(siteName.value);
-    form.value = {
-      ...data,
-      rss: data.rss || [],
-    };
+    // 读取失败也要复位，否则保存键一直转圈
     updatingRss.value = false;
   }
 }
@@ -669,6 +723,8 @@ async function loadSideCards() {
       .list(new URLSearchParams({ site: name, pushed: "1", page: "1", page_size: "20" }))
       .catch(() => null),
   ]);
+  // 请求期间已切到别的站点：这是上一站的数据，不能落到当前页面上
+  if (name !== siteName.value) return;
   loginState.value = (states ?? []).find((st) => st.site_name === name) ?? null;
   siteAttendance.value = (attendanceList ?? []).find((a) => a.site_name === name) ?? null;
   siteStats.value = stats;
