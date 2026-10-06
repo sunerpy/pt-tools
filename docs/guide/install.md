@@ -90,7 +90,7 @@ docker run -d \
 
 ### 飞牛 fnOS
 
-在 fnOS 的 Docker 应用里新建一个 Compose 项目，内容用[上面的 Compose 文件](#docker-compose-推荐)，把 `./data` 换成共享文件夹里的一个目录（例如 `/vol1/1000/docker/pt-tools`），再按这个目录所属用户设置 `PUID`、`PGID`（用 `ls -n` 查看）。`deploy/fnos` 是提交给第三方应用中心 fnos-apps 的打包配置。
+在 fnOS 的 Docker 应用里新建一个 Compose 项目，内容用[上面的 Compose 文件](#docker-compose推荐)，把 `./data` 换成共享文件夹里的一个目录（例如 `/vol1/1000/docker/pt-tools`），再按这个目录所属用户设置 `PUID`、`PGID`（用 `ls -n` 查看）。`deploy/fnos` 是提交给第三方应用中心 fnos-apps 的打包配置。
 
 ## Linux 二进制
 
