@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 
-import { STORAGE_KEYS } from "../../core/constants";
 import { t } from "../../core/i18n";
-import { get, set } from "../../core/storage";
 import CookieStatus from "./CookieStatus.vue";
 import SiteLoginStatusPanel from "./SiteLoginStatusPanel.vue";
 import type { KnownSiteStatus, PtToolsConnection } from "../../core/types";
@@ -30,7 +28,6 @@ const form = reactive({
 
 const selectedSiteIds = ref<Set<string>>(new Set());
 const allSelected = ref(false);
-const autoOpenTabsOnSync = ref(true);
 const confirmVisible = ref(false);
 const onlyWithCookie = ref(false);
 
@@ -46,15 +43,6 @@ watch(
     }
   },
 );
-
-watch(autoOpenTabsOnSync, async (value) => {
-  await set(STORAGE_KEYS.autoOpenTabsOnSync, value);
-});
-
-onMounted(async () => {
-  const stored = await get<boolean>(STORAGE_KEYS.autoOpenTabsOnSync);
-  autoOpenTabsOnSync.value = stored ?? true;
-});
 
 const syncableSites = (): KnownSiteStatus[] =>
   props.sites.filter(
@@ -118,7 +106,8 @@ function handleBatchSync(): void {
 
 const confirmText = computed((): string => {
   const n = selectedSiteIds.value.size;
-  return `将打开 ${n} 个站点标签页同步 cookie，确认继续？`;
+  // 批量同步只把浏览器里已有的 Cookie 发给 pt-tools，不打开标签页；要刷新登录态用「批量打开」
+  return `将把 ${n} 个站点的 Cookie 同步到 pt-tools，确认继续？`;
 });
 
 function confirmBatchSync(): void {
@@ -178,10 +167,6 @@ function cancelBatchSync(): void {
           <span>{{ t("settings.selectAll") }}</span>
         </label>
       </div>
-      <label class="check-row auto-open-row">
-        <input v-model="autoOpenTabsOnSync" type="checkbox" />
-        <span>同步时自动打开标签页（全部站点）</span>
-      </label>
       <label class="check-row only-cookie-row">
         <input v-model="onlyWithCookie" type="checkbox" data-testid="only-with-cookie" />
         <span>仅显示已获取 cookie 的站点</span>
@@ -261,12 +246,8 @@ function cancelBatchSync(): void {
   gap: 8px;
 }
 
-.auto-open-row {
-  margin-top: 8px;
-}
-
 .only-cookie-row {
-  margin-top: 4px;
+  margin-top: 8px;
   margin-bottom: 4px;
 }
 
