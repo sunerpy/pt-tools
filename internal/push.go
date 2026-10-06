@@ -58,11 +58,12 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		return nil, fmt.Errorf("下载器 %s 未启用", dlSetting.Name)
 	}
 
-	// 创建下载器实例
-	dl, err := createDownloaderInstanceForPush(dlSetting)
+	// 创建下载器实例：每次推送单独建一个，用完关闭，批量推送时不再一路累积会话
+	dl, err := newPushDownloader(dlSetting)
 	if err != nil {
 		return nil, fmt.Errorf("创建下载器实例失败: %w", err)
 	}
+	defer func() { _ = dl.Close() }()
 
 	// 计算种子哈希
 	torrentHash, err := qbit.ComputeTorrentHash(req.TorrentData)
@@ -279,17 +280,32 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	// downloader.GetIncompletePendingBytes 在 qBit 可见性窗口内双重计数
 	// （Issue #299 race，详见 disk_budget.go 顶部注释）。
 
-	// 推送成功，更新数据库状态
+	// 推送成功，更新数据库状态。下载器信息与 RSS 路径一致地写上：免费到期进度更新、
+	// 自动删种的「数据库」范围都按 downloader_name 找任务，缺了就管不到手动推送的种子。
 	pushed := true
+	taskID := result.Hash
+	if taskID == "" {
+		taskID = torrentHash
+	}
+	dlID := dlSetting.ID
 	err = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
 		Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
 		Updates(map[string]any{
-			"is_pushed":  &pushed,
-			"push_time":  time.Now(),
-			"last_error": nil,
+			"is_pushed":          &pushed,
+			"push_time":          time.Now(),
+			"last_error":         nil,
+			"downloader_id":      &dlID,
+			"downloader_name":    dlSetting.Name,
+			"downloader_task_id": taskID,
 		}).Error
 	if err != nil {
-		sLogger().Warnf("更新推送状态失败: %v", err)
+		// 种子已经加进下载器，不能报推送失败；把本地记账失败明确告诉调用方
+		sLogger().Errorf("[PushTorrent] 种子已推送，但更新本地记录失败: site=%s, id=%s, %v", req.SiteID, req.TorrentID, err)
+		return &PushTorrentResult{
+			Success:     true,
+			TorrentHash: result.Hash,
+			Message:     fmt.Sprintf("已推送到下载器，但本地记录更新失败: %v", err),
+		}, nil
 	}
 
 	sLogger().Infof("[PushTorrent] 种子推送成功: site=%s, id=%s, hash=%s, downloader=%s",
@@ -300,6 +316,9 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		TorrentHash: result.Hash,
 	}, nil
 }
+
+// newPushDownloader 创建手动推送用的下载器实例；测试里替换为假实现。
+var newPushDownloader = createDownloaderInstanceForPush
 
 // recordPushDiskProtectError 将手动推送的磁盘保护拒绝原因写入 last_error，
 // 与 RSS 路径记账口径一致；不累加 retry_count（拒绝非本种子之过）。
