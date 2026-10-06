@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -66,4 +67,23 @@ func TestDrivers_429IsRateLimited(t *testing.T) {
 	_, err = NewHDDolbyDriver(HDDolbyDriverConfig{BaseURL: srv.URL, APIURL: srv.URL, APIKey: "k"}).
 		Execute(ctx, HDDolbyRequest{Endpoint: "/api/v1/user", Method: "POST"})
 	assert.ErrorIs(t, err, ErrRateLimited, "hddolby")
+}
+
+// 按站点定义取用户信息时，每一页都连不上：报网络错误（探测据此判为 NETWORK_ERROR、可走后备），
+// 而不是拿一份空的用户信息回去、被当成「没有用户名」的解析失败。
+func TestNexusPHPDefinitionUserInfo_AllPagesUnreachableIsNetworkError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	closed := "http://" + ln.Addr().String()
+	require.NoError(t, ln.Close())
+
+	def, ok := GetDefinitionRegistry().Get("hdsky")
+	require.True(t, ok)
+	require.NotNil(t, def.UserInfo, "hdsky 走站点定义的用户信息流程")
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: closed, Cookie: "c=1"})
+	d.SetSiteDefinition(def)
+
+	_, err = d.GetUserInfo(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNetworkError)
 }

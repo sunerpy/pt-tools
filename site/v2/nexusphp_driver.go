@@ -934,6 +934,8 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 	// Store parsed values for use in subsequent requests
 	parsedValues := make(map[string]any)
 	var mu sync.Mutex // Protect parsedValues and info
+	// 第一个传输层失败：单页失败不让整次获取失败，但一页都没取到、连用户名都没有时按它报网络错误
+	var netErr error
 
 	// First pass: identify which processes have dependencies
 	independentProcesses := []int{}
@@ -970,7 +972,15 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 			g.Go(func() error {
 				values, err := d.executeProcess(gctx, uiConfig, uiConfig.Process[idx], parsedValues)
 				if err != nil {
-					return err // Return critical errors like session expired
+					var partial partialFetchError
+					if !errors.As(err, &partial) {
+						return err // Return critical errors like session expired
+					}
+					mu.Lock()
+					if netErr == nil {
+						netErr = partial.err
+					}
+					mu.Unlock()
 				}
 				mu.Lock()
 				for k, v := range values {
@@ -1022,7 +1032,15 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 			g.Go(func() error {
 				values, err := d.executeProcess(gctx, uiConfig, uiConfig.Process[idx], parsedValues)
 				if err != nil {
-					return err // Return critical errors like session expired
+					var partial partialFetchError
+					if !errors.As(err, &partial) {
+						return err // Return critical errors like session expired
+					}
+					mu.Lock()
+					if netErr == nil {
+						netErr = partial.err
+					}
+					mu.Unlock()
 				}
 				mu.Lock()
 				for k, v := range values {
@@ -1070,6 +1088,10 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 		fmt.Printf("[DEBUG] Phase 2 completed in %v\n", time.Since(phase2Start))
 	}
 
+	if info.Username == "" && netErr != nil {
+		return UserInfo{}, fmt.Errorf("获取用户信息失败: %w", netErr)
+	}
+
 	// Calculate ratio if not set
 	if info.Ratio == 0 && info.Downloaded > 0 {
 		info.Ratio = float64(info.Uploaded) / float64(info.Downloaded)
@@ -1081,6 +1103,12 @@ func (d *NexusPHPDriver) getUserInfoWithDefinition(ctx context.Context) (UserInf
 
 	return info, nil
 }
+
+// partialFetchError 是单个请求的传输层失败：不让整次获取失败，只在最后连用户名都没取到时作为结果报出去。
+type partialFetchError struct{ err error }
+
+func (e partialFetchError) Error() string { return e.err.Error() }
+func (e partialFetchError) Unwrap() error { return e.err }
 
 // executeProcess executes a single process and returns the parsed values
 func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoConfig, process UserInfoProcess, parsedValues map[string]any) (map[string]string, error) {
@@ -1118,6 +1146,10 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		// Return critical errors like session expired; a Cloudflare challenge blocks every page as well
 		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrCloudflareChallenge) {
 			return result, err
+		}
+		// 传输层失败交给调用方记下：少一页数据照样能用，全都取不到时才报网络错误
+		if errors.Is(err, ErrNetworkError) {
+			return result, partialFetchError{err: err}
 		}
 		return result, nil // Ignore other errors, return empty result
 	}
