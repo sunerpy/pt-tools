@@ -76,6 +76,10 @@ home:
             body: 用关键词、通配符或正则匹配标题，可以限定体积和是否只要免费种子。
             status: available
             link: /guide/filter-rules-tv-series
+          - title: 刷流任务
+            body: 从站点的免费列表里按条件挑新种做种，按做种时长、分享率、上传速度等规则删除，限定同时下载数和体积，默认关闭。
+            status: available
+            link: /guide/brush
           - title: 免费结束自动暂停
             body: 种子的免费期结束时如果尚未下载完成，自动暂停，避免计入下载量。
             status: available
