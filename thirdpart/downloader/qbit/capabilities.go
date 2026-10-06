@@ -2,6 +2,7 @@ package qbit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +16,33 @@ import (
 var (
 	_ downloader.TorrentExporter = (*QbitClient)(nil)
 	_ downloader.TrackerEditor   = (*QbitClient)(nil)
+	_ downloader.TrackerReader   = (*QbitClient)(nil)
 )
+
+// GetTorrentTrackersContext 读取种子的 tracker 列表；请求受 ctx 约束，ctx 取消时一起取消。
+func (q *QbitClient) GetTorrentTrackersContext(ctx context.Context, id string) ([]downloader.TorrentTracker, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.baseURL+"/api/v2/torrents/trackers?hash="+url.QueryEscape(id), nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	resp, err := q.doRequestWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("读取 tracker 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w：%s", downloader.ErrTorrentNotFound, id)
+	}
+	if !q.isSuccessStatus(resp.StatusCode) {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("读取 tracker 失败: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var items []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return nil, fmt.Errorf("解析 tracker 失败: %w", err)
+	}
+	return parseQbitTrackers(items), nil
+}
 
 // maxExportedTorrentBytes 是导出种子文件的大小上限；PT 种子文件通常只有几十 KB 到几 MB。
 const maxExportedTorrentBytes = 32 << 20

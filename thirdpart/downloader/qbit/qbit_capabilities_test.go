@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,4 +83,29 @@ func TestQbitEditTracker(t *testing.T) {
 	assert.ErrorIs(t, err, downloader.ErrTrackerNotFound)
 
 	assert.Error(t, c.EditTracker(context.Background(), "abc", "", "https://new/announce"), "地址不能为空")
+}
+
+func TestQbitGetTorrentTrackersContext(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("hash") == "slow" {
+			<-block
+			return
+		}
+		_, _ = w.Write([]byte(`[{"url":"https://t.example/announce","status":4,"msg":"Unregistered torrent"}]`))
+	}))
+	defer srv.Close()
+	defer close(block)
+
+	c := coverageTestClient(srv.URL, false)
+	var r downloader.TrackerReader = c
+	trs, err := r.GetTorrentTrackersContext(context.Background(), "abc")
+	require.NoError(t, err)
+	require.Len(t, trs, 1)
+	assert.Equal(t, "Unregistered torrent", trs[0].Message)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err = c.GetTorrentTrackersContext(ctx, "slow")
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "ctx 到期时底层请求一起取消")
 }

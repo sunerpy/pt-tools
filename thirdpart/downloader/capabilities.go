@@ -25,3 +25,15 @@ type TorrentExporter interface {
 type TrackerEditor interface {
 	EditTracker(ctx context.Context, hash, oldURL, newURL string) error
 }
+
+// TrackerReader 按 ctx 读取一个种子的 tracker 列表：ctx 取消时底层请求也一起取消。
+// 不实现它的下载器只能用不可取消的 GetTorrentTrackers。
+type TrackerReader interface {
+	GetTorrentTrackersContext(ctx context.Context, id string) ([]TorrentTracker, error)
+}
+
+// BulkTrackerReader 一次读出全部种子的 tracker 列表（键是小写 info hash）。
+// Transmission 的 torrent-get 能一次带回 trackerStats；qBittorrent 只能逐个读，不实现。
+type BulkTrackerReader interface {
+	GetAllTorrentTrackers(ctx context.Context) (map[string][]TorrentTracker, error)
+}

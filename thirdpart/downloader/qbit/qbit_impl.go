@@ -1619,7 +1619,10 @@ func (q *QbitClient) GetTorrentTrackers(id string) ([]downloader.TorrentTracker,
 	if err := q.getJSON(fmt.Sprintf("/api/v2/torrents/trackers?hash=%s", url.QueryEscape(id)), &qTrackers); err != nil {
 		return nil, err
 	}
+	return parseQbitTrackers(qTrackers), nil
+}
 
+func parseQbitTrackers(qTrackers []map[string]any) []downloader.TorrentTracker {
 	trackers := make([]downloader.TorrentTracker, 0, len(qTrackers))
 	for _, item := range qTrackers {
 		tracker := downloader.TorrentTracker{}
@@ -1645,8 +1648,7 @@ func (q *QbitClient) GetTorrentTrackers(id string) ([]downloader.TorrentTracker,
 		}
 		trackers = append(trackers, tracker)
 	}
-
-	return trackers, nil
+	return trackers
 }
 
 // GetDiskInfo 获取磁盘信息

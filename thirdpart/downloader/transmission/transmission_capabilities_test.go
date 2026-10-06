@@ -92,3 +92,47 @@ func TestTransmissionEditTracker_LegacyReplace(t *testing.T) {
 	err := c.EditTracker(context.Background(), "abc", "https://old/announce", "https://new/announce")
 	assert.ErrorIs(t, err, downloader.ErrTorrentNotFound)
 }
+
+func TestTransmissionTrackerReaders(t *testing.T) {
+	stats := []any{map[string]any{"announce": "https://t.example/announce", "lastAnnounceResult": "Unregistered torrent", "lastAnnounceSucceeded": false}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") != "sid" {
+			w.Header().Set("X-Transmission-Session-Id", "sid")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			Method    string         `json:"method"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		args := map[string]any{}
+		if req.Method == "torrent-get" {
+			args["torrents"] = []any{
+				map[string]any{"id": 1, "hashString": "AAAA", "trackerStats": stats},
+				map[string]any{"id": 2, "hashString": "bbbb", "trackerStats": []any{}},
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": "success", "arguments": args})
+	}))
+	defer srv.Close()
+	c := newCapabilityClient(t, srv.URL)
+
+	var bulk downloader.BulkTrackerReader = c
+	all, err := bulk.GetAllTorrentTrackers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	require.Len(t, all["aaaa"], 1, "键是小写 hash")
+	assert.Equal(t, 4, all["aaaa"][0].Status)
+	assert.Equal(t, "Unregistered torrent", all["aaaa"][0].Message)
+
+	var one downloader.TrackerReader = c
+	trs, err := one.GetTorrentTrackersContext(context.Background(), "1")
+	require.NoError(t, err)
+	assert.NotEmpty(t, trs)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = c.GetAllTorrentTrackers(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
+}
