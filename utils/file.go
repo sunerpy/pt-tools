@@ -93,6 +93,7 @@ var sensitiveParams = map[string]bool{
 	"pwd":          true,
 	"rsskey":       true,
 	"torrent_pass": true,
+	"credential":   true,
 }
 
 // SanitizeURL 对 URL 中的敏感查询参数进行脱敏处理
