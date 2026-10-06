@@ -896,17 +896,16 @@ func boolPtr(b bool) *bool                    { return &b }
 // 已弃用：由各业务按需读取 DB 并更新目录缓存
 // ListSites 从 DB 读取站点与 RSS 配置（不依赖 global.GlobalCfg）
 // EnabledSiteNames 返回已启用站点名（小写）的集合。用户数据的增量、走势与每日战报只算这些站点，
-// 与 /api/v2/userinfo/aggregated 口径一致。
+// 与 /api/v2/userinfo/aggregated 口径一致。只读 name 与 enabled 两列：不经过 ListSites，
+// 密钥缺失或 Cookie 解不开时照样能用。
 func (s *ConfigStore) EnabledSiteNames() (map[string]bool, error) {
-	sites, err := s.ListSites()
-	if err != nil {
-		return nil, err
+	var names []string
+	if err := s.db.DB.Model(&models.SiteSetting{}).Where("enabled = ?", true).Pluck("name", &names).Error; err != nil {
+		return nil, fmt.Errorf("读取已启用站点失败: %w", err)
 	}
-	out := make(map[string]bool, len(sites))
-	for group, cfg := range sites {
-		if cfg.Enabled != nil && *cfg.Enabled {
-			out[strings.ToLower(string(group))] = true
-		}
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[strings.ToLower(n)] = true
 	}
 	return out, nil
 }

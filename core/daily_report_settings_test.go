@@ -79,4 +79,13 @@ func TestConfigStore_EnabledSiteNames(t *testing.T) {
 	got, err := store.EnabledSiteNames()
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"hdsky": true}, got)
+
+	// Cookie 解不开（密钥换了或丢了）时 ListSites 会失败，只看启用状态的这里不受影响
+	require.NoError(t, store.db.DB.Model(&models.SiteSetting{}).Where("name = ?", "HDSky").
+		Updates(map[string]any{"cookie": "", "cookie_encrypted": "not-a-ciphertext"}).Error)
+	_, listErr := store.ListSites()
+	require.Error(t, listErr)
+	got, err = store.EnabledSiteNames()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"hdsky": true}, got)
 }
