@@ -21,6 +21,11 @@ func NewTrackerResolver() *TrackerResolver {
 	return newTrackerResolver(GetDefinitionRegistry().GetAll())
 }
 
+// NewTrackerResolverFrom 用给定的站点定义建一个解析器（测试与只关心部分站点的调用方用）。
+func NewTrackerResolverFrom(defs ...*SiteDefinition) *TrackerResolver {
+	return newTrackerResolver(defs)
+}
+
 func newTrackerResolver(defs []*SiteDefinition) *TrackerResolver {
 	r := &TrackerResolver{byHost: map[string][]string{}, byDomain: map[string][]string{}, defs: map[string]*SiteDefinition{}}
 	for _, def := range defs {

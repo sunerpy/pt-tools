@@ -13,6 +13,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	sm "github.com/sunerpy/pt-tools/mocks"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -32,9 +33,23 @@ func TestSumSiteSeedingSizeWithHashes_CountsRecordedTorrents(t *testing.T) {
 		{InfoHash: "", TotalSize: 80},
 	}
 	hashes := map[string]struct{}{"aaaa": {}, "": {}}
-	assert.Equal(t, int64(30), sumSiteSeedingSizeWithHashes("springsunday", torrents, hashes),
+	assert.Equal(t, int64(30), sumSiteSeedingSizeWithHashes("springsunday", torrents, hashes, nil),
 		"记录过的种子（大小写不敏感）+ 分类命中站点名的种子；空 hash 不算")
 	assert.Equal(t, int64(20), sumSiteSeedingSize("springsunday", torrents), "不带记录时只按分类和标签")
+}
+
+// 手动添加、没打站点分类或标签的种子按 tracker 归属站点，也计入站点做种总量。
+func TestSumSiteSeedingSize_CountsByTracker(t *testing.T) {
+	resolver := v2.NewTrackerResolverFrom(&v2.SiteDefinition{ID: "springsunday", Schema: v2.SchemaNexusPHP, URLs: []string{"https://springsunday.net/"}})
+	torrents := []downloader.Torrent{
+		{InfoHash: "a", TotalSize: 10, Tracker: "https://on.springsunday.net/announce.php?passkey=x"},
+		{InfoHash: "b", TotalSize: 20, Tracker: "https://tracker.other.org/announce"},
+		{InfoHash: "c", TotalSize: 40, Category: "springsunday", Tracker: "https://on.springsunday.net/announce.php"},
+		{InfoHash: "d", TotalSize: 80},
+	}
+	assert.Equal(t, int64(50), sumSiteSeedingSizeWithHashes("springsunday", torrents, nil, resolver),
+		"按 tracker 命中的 10 + 分类命中的 40，同一个种子不重复计")
+	assert.Equal(t, int64(40), sumSiteSeedingSizeWithHashes("springsunday", torrents, nil, nil), "不给解析器时只按分类和标签")
 }
 
 func TestGetSiteSeedingSizeBytes_UsesRecordedHashes(t *testing.T) {
