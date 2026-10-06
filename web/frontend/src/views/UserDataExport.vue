@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { type AggregatedStatsResponse, userInfoApi } from "@/api";
+import {
+  type AggregatedStatsResponse,
+  type DeltaSummary,
+  userInfoApi,
+  type UserInfoRange,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -17,7 +22,7 @@ import {
 import { ElMessage } from "element-plus";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
-import { computed, onMounted, ref, nextTick } from "vue";
+import { computed, onMounted, ref, nextTick, watch } from "vue";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
@@ -53,7 +58,34 @@ const exportConfig = ref({
   blurSiteNames: true,
   blurLogos: true,
   maxSitesToShow: 10,
+  /* 周期增量（每日快照算出来的）：今日 / 本周 / 本月 */
+  showIncrements: true,
+  incrementRange: "7d" as UserInfoRange,
 });
+
+const INCREMENT_RANGES: { label: string; value: UserInfoRange }[] = [
+  { label: "今日", value: "today" },
+  { label: "本周", value: "7d" },
+  { label: "本月", value: "30d" },
+];
+const incrementLabel = computed(
+  () => INCREMENT_RANGES.find((r) => r.value === exportConfig.value.incrementRange)?.label ?? "",
+);
+/** 所选周期的增量；拿不到或还没有可比快照时不往海报上放 */
+const incrementSummary = ref<DeltaSummary | null>(null);
+let incrementSeq = 0;
+async function loadIncrements() {
+  const seq = ++incrementSeq;
+  const sum = await userInfoApi.getSummary(exportConfig.value.incrementRange).catch(() => null);
+  if (seq === incrementSeq) incrementSummary.value = sum;
+}
+watch(
+  () => exportConfig.value.incrementRange,
+  () => void loadIncrements(),
+);
+const hasIncrements = computed(() =>
+  (incrementSummary.value?.sites ?? []).some((d) => d.hasBaseline),
+);
 
 const presetThemes = [
   { name: "森林绿", bg: "#134e5e", end: "#71b280" },
@@ -121,6 +153,30 @@ const summaryStats = computed(() => {
       color: "#4ade80",
       icon: "✦",
     });
+  }
+  const inc = incrementSummary.value;
+  if (exportConfig.value.showIncrements && inc && hasIncrements.value) {
+    const name = incrementLabel.value;
+    items.push(
+      {
+        label: `${name}上传`,
+        value: `+${formatBytes(inc.totalUploaded)}`,
+        color: "#4ade80",
+        icon: "↗",
+      },
+      {
+        label: `${name}下载`,
+        value: `+${formatBytes(inc.totalDownloaded)}`,
+        color: "#f87171",
+        icon: "↘",
+      },
+      {
+        label: `${name}魔力`,
+        value: `+${formatNumber(Math.round(inc.totalBonus))}`,
+        color: "#fbbf24",
+        icon: "✧",
+      },
+    );
   }
   return items;
 });
@@ -317,6 +373,7 @@ async function loadData() {
     return;
   }
   aggregatedStats.value = data;
+  void loadIncrements();
   if (exportConfig.value.selectedSites.length === 0) {
     exportConfig.value.selectedSites = allSites.value.slice(0, exportConfig.value.maxSitesToShow);
   }
@@ -340,7 +397,9 @@ function createExportCanvas(): HTMLCanvasElement {
   const padding = 28;
   const headerHeight = 90;
   const userInfoHeight = earliestJoinDate.value ? 50 : 0;
-  const summaryRowHeight = 100;
+  /* 汇总卡每行 4 张、每张 42 高加 8 间距；行数随卡片数走（原来写死 100，卡片超过两行会被裁掉） */
+  const summaryPerRow = Math.max(1, Math.min(summaryStats.value.length, 4));
+  const summaryRowHeight = Math.max(2, Math.ceil(summaryStats.value.length / summaryPerRow)) * 50;
   const siteCardHeight = 72;
   const sitesCount = selectedSiteStats.value.length;
   const siteRows = Math.ceil(sitesCount / 2);
@@ -847,6 +906,25 @@ onMounted(() => {
                 <el-switch v-model="exportConfig.blurLogos" size="small" />
                 <span>打码站点图标</span>
               </label>
+              <label class="tg">
+                <el-switch
+                  v-model="exportConfig.showIncrements"
+                  size="small"
+                  data-testid="export-increments" />
+                <span>附上周期增量</span>
+              </label>
+              <el-select
+                v-if="exportConfig.showIncrements"
+                v-model="exportConfig.incrementRange"
+                size="small"
+                class="tg-range"
+                data-testid="export-increment-range">
+                <el-option
+                  v-for="r in INCREMENT_RANGES"
+                  :key="r.value"
+                  :label="`周期: ${r.label}`"
+                  :value="r.value" />
+              </el-select>
             </div>
             <div class="field-tip">
               打码只保留首字符，导出的 PNG 里也是真马赛克，不是能还原的模糊
@@ -884,6 +962,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 周期下拉跟在「附上周期增量」开关后面，与开关同一行高 */
+.tg-range {
+  width: 120px;
+}
+
 /* 卡片层的内缩与间隔由 .pt-cards--main 给；这一层只用来挂 SVG 滤镜与 Teleport */
 
 /* 滤镜容器：占位为 0，但不能 display:none，否则 Safari 里 url(#…) 引用失效 */
