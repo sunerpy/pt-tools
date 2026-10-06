@@ -1,11 +1,11 @@
 module github.com/sunerpy/pt-tools
 
-go 1.26.7
+go 1.27
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/RomiChan/websocket v1.4.3-0.20251002072000-d3eb41798438
-	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
+	github.com/chromedp/cdproto v0.157.2
 	github.com/chromedp/chromedp v0.16.0
 	github.com/fatih/color v1.19.0
 	github.com/glebarez/sqlite v1.11.0
@@ -38,7 +38,6 @@ require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
-	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fumiama/orbyte v0.0.0-20251002065953-3bb358367eb5 // indirect
