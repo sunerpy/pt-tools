@@ -81,6 +81,8 @@ Disk space protection works in **two ways**:
 
 > **Note**: emergency cleanup strictly respects the management scope. If the deletable torrents within the scope cannot free enough space, nothing outside the scope is deleted; push blocking then keeps new torrents out, so the disk fills no further.
 
+Emergency cleanup deletes extra torrents only when deleting the data files is turned on: removing a task from the downloader alone frees no disk space. When working out how much space is still missing, it counts the torrents the deletion conditions already selected, so it does not delete more than needed.
+
 ### Protection rules
 
 These torrents are not deleted, even when they meet the deletion conditions:

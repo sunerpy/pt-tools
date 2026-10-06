@@ -650,7 +650,8 @@ async function executeClean() {
             <el-form-item v-if="form.cleanup_disk_protect" label="最低剩余空间（GB）">
               <el-input-number v-model="form.cleanup_min_disk_space_gb" :min="1" :max="10000" />
               <div class="field-tip">
-                低于这个值时：RSS 停止推送新种子，同时按优先级强制删种腾空间
+                低于这个值时：RSS
+                停止推送新种子，同时按优先级强制删种腾空间（需开启「删除时连数据文件一起删」，只移除任务不会释放空间）
               </div>
             </el-form-item>
           </div>

@@ -826,6 +826,39 @@ func TestEmergencyCleanup_SkipsAlreadyMarked(t *testing.T) {
 	assert.Equal(t, 1, ids["2"])
 }
 
+// 按常规规则已要删的种子也会释放空间：先算进去，够了就不再额外删。
+func TestEmergencyCleanup_CountsAlreadyMarkedSpace(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMinDiskSpaceGB = 100 // 目标 = 100 + 缓冲 20 = 120 GB
+
+	already := []downloader.Torrent{{ID: "old", TotalSize: 70 << 30, State: downloader.TorrentSeeding}}
+	candidates := []downloader.Torrent{
+		already[0],
+		{ID: "extra", TotalSize: 50 << 30, State: downloader.TorrentPaused, Ratio: 3},
+	}
+
+	// 当前 60 GB，还差 60 GB；已选中的 70 GB 已经够了
+	result := cm.emergencyCleanup(cfg, candidates, already, 60)
+	require.Len(t, result, 1)
+	assert.Equal(t, "old", result[0].ID, "不再额外删除")
+}
+
+// 保留数据文件时紧急清理释放不了空间，不额外删任务。
+func TestEmergencyCleanup_SkipsExtrasWhenKeepingData(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMinDiskSpaceGB = 100
+	cfg.CleanupRemoveData = false
+
+	already := []downloader.Torrent{{ID: "rule", TotalSize: 10 << 30}}
+	candidates := []downloader.Torrent{already[0], {ID: "extra", TotalSize: 500 << 30, State: downloader.TorrentPaused}}
+
+	result := cm.emergencyCleanup(cfg, candidates, already, 5)
+	require.Len(t, result, 1)
+	assert.Equal(t, "rule", result[0].ID, "只保留按删除条件选中的种子")
+}
+
 func TestSplitTags(t *testing.T) {
 	tests := []struct {
 		input    string
