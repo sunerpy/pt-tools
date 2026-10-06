@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UserInfoRecord represents the database model for user info
@@ -123,31 +124,123 @@ func FromUserInfo(info UserInfo) UserInfoRecord {
 // DBUserInfoRepo is a database-backed implementation of UserInfoRepo
 type DBUserInfoRepo struct {
 	db *gorm.DB
+	// now / loc 决定快照的日期（进程时区）；测试用 SetClock 换掉
+	now func() time.Time
+	loc *time.Location
 }
+
+var _ UserInfoHistoryRepo = (*DBUserInfoRepo)(nil)
 
 // NewDBUserInfoRepo creates a new database-backed user info repository
 func NewDBUserInfoRepo(db *gorm.DB) (*DBUserInfoRepo, error) {
 	// Auto-migrate the table
-	if err := db.AutoMigrate(&UserInfoRecord{}); err != nil {
+	if err := db.AutoMigrate(&UserInfoRecord{}, &UserInfoDailySnapshot{}); err != nil {
 		return nil, err
 	}
-	return &DBUserInfoRepo{db: db}, nil
+	return &DBUserInfoRepo{db: db, now: time.Now, loc: time.Local}, nil
+}
+
+// SetClock 换掉取当前时间的函数与计算日期的时区（测试用）。
+func (r *DBUserInfoRepo) SetClock(now func() time.Time, loc *time.Location) {
+	if now != nil {
+		r.now = now
+	}
+	if loc != nil {
+		r.loc = loc
+	}
+}
+
+func (r *DBUserInfoRepo) clock() time.Time {
+	if r.now == nil {
+		return time.Now()
+	}
+	return r.now()
+}
+
+func (r *DBUserInfoRepo) dayOf(t time.Time) string {
+	loc := r.loc
+	if loc == nil {
+		loc = time.Local
+	}
+	return t.In(loc).Format(dateLayout)
+}
+
+// Today 是仓库时区的当天日期（YYYY-MM-DD）。
+func (r *DBUserInfoRepo) Today() string {
+	return r.dayOf(r.clock())
 }
 
 // Save stores user info for a site (upsert)
+//
+// 记录与当天的快照在同一个事务里写：快照写失败时记录也回滚，调用方（UserInfoService.FetchAndSave）
+// 据此返回 ErrUserInfoPersist。同一天之后任意一次成功获取都会再次 upsert 当天的快照。
 func (r *DBUserInfoRepo) Save(ctx context.Context, info UserInfo) error {
 	if info.Site == "" {
 		return ErrSiteNotFound
 	}
 
-	info.LastUpdate = time.Now().Unix()
+	now := r.clock()
+	info.LastUpdate = now.Unix()
 	record := FromUserInfo(info)
+	snapshot := UserInfoDailySnapshot{
+		Site:       info.Site,
+		Date:       r.dayOf(now),
+		Uploaded:   info.Uploaded,
+		Downloaded: info.Downloaded,
+		Bonus:      info.Bonus,
+		Ratio:      info.Ratio,
+		Seeding:    info.Seeding,
+		SeederSize: info.SeederSize,
+		CapturedAt: now.Unix(),
+	}
 
-	// Use upsert: update if exists, insert if not
-	return r.db.WithContext(ctx).
-		Where("site = ?", info.Site).
-		Assign(record).
-		FirstOrCreate(&record).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Use upsert: update if exists, insert if not
+		if err := tx.Where("site = ?", info.Site).Assign(record).FirstOrCreate(&record).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "site"}, {Name: "date"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"uploaded", "downloaded", "bonus", "ratio", "seeding", "seeder_size", "captured_at", "updated_at",
+			}),
+		}).Create(&snapshot).Error
+	})
+}
+
+// ListSnapshots 返回 [from, to]（含两端）之间的快照，按站点、日期升序；site 为空时返回所有站点。
+func (r *DBUserInfoRepo) ListSnapshots(ctx context.Context, site, from, to string) ([]UserInfoDailySnapshot, error) {
+	q := r.db.WithContext(ctx).Where("date >= ? AND date <= ?", from, to)
+	if site != "" {
+		q = q.Where("site = ?", site)
+	}
+	var out []UserInfoDailySnapshot
+	if err := q.Order("site ASC, date ASC").Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SnapshotBaselines 返回每站在 before 之前（不含）最近的一份快照。
+func (r *DBUserInfoRepo) SnapshotBaselines(ctx context.Context, before string) (map[string]UserInfoDailySnapshot, error) {
+	var rows []UserInfoDailySnapshot
+	err := r.db.WithContext(ctx).Raw(`SELECT s.* FROM user_info_daily_snapshot s
+		WHERE s.date = (SELECT MAX(date) FROM user_info_daily_snapshot WHERE site = s.site AND date < ?)`, before).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]UserInfoDailySnapshot, len(rows))
+	for _, row := range rows {
+		out[row.Site] = row
+	}
+	return out, nil
+}
+
+// PruneSnapshots 删除日期早于 before 的快照，返回删除的行数。
+func (r *DBUserInfoRepo) PruneSnapshots(ctx context.Context, before string) (int64, error) {
+	res := r.db.WithContext(ctx).Where("date < ?", before).Delete(&UserInfoDailySnapshot{})
+	return res.RowsAffected, res.Error
 }
 
 // Get retrieves user info for a specific site
