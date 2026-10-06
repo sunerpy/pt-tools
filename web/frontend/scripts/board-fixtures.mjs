@@ -402,9 +402,65 @@ const HUB_TORRENTS = Array.from({ length: 12 }, (_, i) => ({
   eta: 600 + i * 30,
 }));
 
+const GB = 1024 ** 3;
+/** 每日快照算出来的走势与周期增量（/api/v2/userinfo/trends、summary）：8 天，按站点量级给出 */
+const TREND_DATES = Array.from(
+  { length: 8 },
+  (_, i) => `2026-09-${String(19 + i).padStart(2, "0")}`,
+);
+const TRENDS = {
+  days: 8,
+  from: TREND_DATES[0],
+  to: TREND_DATES.at(-1),
+  dates: TREND_DATES,
+  sites: Object.fromEntries(
+    SITES.map(([site, , up], s) => [
+      site,
+      TREND_DATES.map((date, d) => ({
+        date,
+        uploaded: Math.round(up * GB * (0.6 + ((d * 7 + s * 3) % 9) / 10)),
+        downloaded: Math.round(up * GB * 0.08),
+        bonus: 1200 + d * 40,
+      })),
+    ]),
+  ),
+};
+TRENDS.totals = TREND_DATES.map((date, d) =>
+  Object.values(TRENDS.sites).reduce(
+    (acc, series) => ({
+      date,
+      uploaded: acc.uploaded + series[d].uploaded,
+      downloaded: acc.downloaded + series[d].downloaded,
+      bonus: acc.bonus + series[d].bonus,
+    }),
+    { date, uploaded: 0, downloaded: 0, bonus: 0 },
+  ),
+);
+const SUMMARY_SITES = Object.entries(TRENDS.sites).map(([site, series]) => ({
+  site,
+  from: TREND_DATES[0],
+  to: TREND_DATES.at(-1),
+  uploaded: series.slice(-7).reduce((n, p) => n + p.uploaded, 0),
+  downloaded: series.slice(-7).reduce((n, p) => n + p.downloaded, 0),
+  bonus: series.slice(-7).reduce((n, p) => n + p.bonus, 0),
+  hasBaseline: true,
+  negative: false,
+}));
+const SUMMARY = {
+  range: "7d",
+  from: TREND_DATES[1],
+  to: TREND_DATES.at(-1),
+  sites: SUMMARY_SITES,
+  totalUploaded: SUMMARY_SITES.reduce((n, d) => n + d.uploaded, 0),
+  totalDownloaded: SUMMARY_SITES.reduce((n, d) => n + d.downloaded, 0),
+  totalBonus: SUMMARY_SITES.reduce((n, d) => n + d.bonus, 0),
+};
+
 /** 路由（去掉查询串）→ 响应体。第一个前缀命中即用。 */
 export const FIXTURES = [
   ["/api/v2/userinfo/aggregated", AGGREGATED],
+  ["/api/v2/userinfo/trends", TRENDS],
+  ["/api/v2/userinfo/summary", SUMMARY],
   /* 单站点详情要排在列表之前：前缀匹配第一个命中即用 */
   ...AGGREGATED.perSiteStats.map((row) => [`/api/v2/userinfo/sites/${row.site}`, row]),
   /* getSites 回的是 UserInfoResponse[]，不是站点名数组 */
