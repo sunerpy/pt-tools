@@ -341,14 +341,16 @@ func validateURL(rawURL string) error {
 }
 
 type SiteDefinition struct {
-	ID                string           `json:"id"`
-	Name              string           `json:"name"`
-	Aka               []string         `json:"aka,omitempty"`
-	Description       string           `json:"description,omitempty"`
-	Schema            Schema           `json:"schema"`
-	URLs              []string         `json:"urls"`
-	WebURL            string           `json:"webUrl,omitempty"`
-	LegacyURLs        []string         `json:"legacyUrls,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Aka         []string `json:"aka,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Schema      Schema   `json:"schema"`
+	URLs        []string `json:"urls"`
+	WebURL      string   `json:"webUrl,omitempty"`
+	LegacyURLs  []string `json:"legacyUrls,omitempty"`
+	// TrackerHosts 是 tracker 用的主机名或可注册域，只在它们与站点地址的可注册域不同时才需要写。
+	TrackerHosts      []string         `json:"trackerHosts,omitempty"`
 	FaviconURL        string           `json:"faviconUrl,omitempty"`
 	Unavailable       bool             `json:"unavailable,omitempty"`
 	UnavailableReason string           `json:"unavailableReason,omitempty"`
