@@ -38,6 +38,10 @@ type CleanupMonitor struct {
 	downloaderMgr *downloader.DownloaderManager
 	logger        *zap.SugaredLogger
 	running       bool
+	// wg 跟踪 runLoop：Stop 返回前等它退出，被替换的旧实例不会再执行一轮删种或暂停。
+	wg sync.WaitGroup
+	// startDelay 是启动后第一次检查前的等待，测试里调小。
+	startDelay time.Duration
 }
 
 func NewCleanupMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManager) *CleanupMonitor {
@@ -49,6 +53,7 @@ func NewCleanupMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManager)
 		db:            db,
 		downloaderMgr: downloaderMgr,
 		logger:        logger,
+		startDelay:    10 * time.Second,
 	}
 }
 
@@ -61,25 +66,36 @@ func (c *CleanupMonitor) Start() error {
 	}
 	c.running = true
 
-	go c.runLoop()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.runLoop()
+	}()
 	c.logger.Info("[自动删种] 监控服务已启动")
 	return nil
 }
 
 func (c *CleanupMonitor) Stop() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.running {
+		c.mu.Unlock()
 		return
 	}
 	c.cancel()
 	c.running = false
+	c.mu.Unlock()
+	// 锁外等待：正在执行的这一轮跑完、循环退出后才返回
+	c.wg.Wait()
 	c.logger.Info("[自动删种] 监控服务已停止")
 }
 
 func (c *CleanupMonitor) runLoop() {
-	time.Sleep(10 * time.Second)
+	// 启动后稍等再开始；可被 Stop 打断，不会在停止之后醒来再跑一轮
+	select {
+	case <-c.ctx.Done():
+		return
+	case <-time.After(c.startDelay):
+	}
 
 	_, eventCh, cancelSub := events.Subscribe(8)
 	defer cancelSub()
