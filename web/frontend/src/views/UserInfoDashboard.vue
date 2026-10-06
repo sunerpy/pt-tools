@@ -183,6 +183,8 @@ interface KpiRow {
   series?: number[];
   /** 柱图画的是什么 —— 每格含义不同，必须说出来，否则读者只能猜 */
   seriesHint?: string;
+  /** 每日增量这类 0 就是没有的序列用 zero（见 PtBars 的 baseline） */
+  seriesBaseline?: "range" | "zero";
 }
 
 /**
@@ -331,8 +333,9 @@ const kpiItems = computed<KpiRow[]>(() => {
           label: "总上传量",
           value: formatBytes(stats.totalUploaded),
           icon: "upload",
-          series: (trends.value?.totals ?? []).map((p) => p.uploaded),
+          series: uploadTrendSeries.value,
           seriesHint: "每根一天：最近 7 天每天全部站点的上传增量",
+          seriesBaseline: "zero" as const,
           delta: `${periodLabel.value} +${formatBytes(summary.value.totalUploaded)}`,
           deltaTone: summary.value.totalUploaded > 0 ? ("ok" as const) : ("neutral" as const),
         }
@@ -434,6 +437,12 @@ async function loadTrends() {
 }
 
 watch(period, () => void loadPeriod());
+
+/** KPI「总上传量」的柱：最近 7 天每天的上传增量；一天都没有增量时不画（全是 0 画出来像持平的走势） */
+const uploadTrendSeries = computed(() => {
+  const values = (trends.value?.totals ?? []).map((p) => p.uploaded);
+  return values.some((v) => v > 0) ? values : undefined;
+});
 
 /** 周期内有可比基线的站点（只有一份快照的站点算不出增量，不进构成） */
 const periodSites = computed(() => (summary.value?.sites ?? []).filter((d) => d.hasBaseline));

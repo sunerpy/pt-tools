@@ -1427,6 +1427,7 @@ function ruleNameOf(id: number): string {
               <span class="sd-kv__k">30 天上传 +{{ formatTB(uploadTrendTotal) }}</span>
               <PtBars
                 :values="uploadTrend"
+                baseline="zero"
                 :count="30"
                 :bar-width="4"
                 :gap="2"

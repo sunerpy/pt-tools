@@ -30,6 +30,8 @@ interface KpiItem {
   series?: number[];
   /** 柱图画的是什么（鼠标悬停与读屏都用它） */
   seriesHint?: string;
+  /** 柱图的归一化方式，见 PtBars 的 baseline；每日增量这类 0 就是没有的序列传 zero */
+  seriesBaseline?: "range" | "zero";
 }
 
 const props = withDefaults(
@@ -82,6 +84,7 @@ function hue(i: number) {
           <PtBars
             v-if="it.series && it.series.length"
             :values="it.series"
+            :baseline="it.seriesBaseline ?? 'range'"
             :hue="hue(i)"
             :count="7"
             :op0="0.5"

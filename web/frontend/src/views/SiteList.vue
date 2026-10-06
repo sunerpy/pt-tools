@@ -1649,11 +1649,12 @@ async function saveLoginConfig() {
           <template #meta>
             <span class="card-auth">{{ authMethodLabel(site.auth_method) }}</span>
             <span
-              v-if="uploadSpark(name).length"
+              v-if="uploadSpark(name).some((v) => v > 0)"
               class="card-spark"
               :title="`${name} 最近 8 天每天的上传增量`">
               <PtBars
                 :values="uploadSpark(name)"
+                baseline="zero"
                 :count="8"
                 :bar-width="12"
                 :gap="3"
