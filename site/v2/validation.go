@@ -3,6 +3,7 @@ package v2
 
 import (
 	"errors"
+	"fmt"
 	"html"
 	"net/url"
 	"regexp"
@@ -222,6 +223,18 @@ func ValidateTorrentFile(data []byte) error {
 	}
 
 	return nil
+}
+
+// parseRawTorrentDownload 校验下载接口返回的原始字节确实是种子文件。
+// 站点在凭证失效等情况下常以 200 返回 HTML 或 JSON，原样交出去会让推送和网页下载拿到坏文件。
+func parseRawTorrentDownload(body []byte) ([]byte, error) {
+	if len(body) == 0 {
+		return nil, ErrParseError
+	}
+	if err := ValidateTorrentFile(body); err != nil {
+		return nil, fmt.Errorf("%w: %v (size=%d, preview=%q)", ErrParseError, err, len(body), torrentResponsePreview(body))
+	}
+	return body, nil
 }
 
 // ValidateCookie validates a cookie string

@@ -21,6 +21,8 @@ type Unit3DRequest struct {
 	Method string
 	// Params are the query parameters
 	Params url.Values
+	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析
+	RawBody bool
 }
 
 // Unit3DResponse represents a response from Unit3D API
@@ -157,8 +159,12 @@ func (d *Unit3DDriver) Execute(ctx context.Context, req Unit3DRequest) (Unit3DRe
 		fullURL += "?" + req.Params.Encode()
 	}
 
+	accept := "application/json"
+	if req.RawBody {
+		accept = "application/x-bittorrent, */*"
+	}
 	headers := map[string]string{
-		"Accept":        "application/json",
+		"Accept":        accept,
 		"User-Agent":    d.userAgent,
 		"Authorization": "Bearer " + d.APIKey,
 	}
@@ -183,6 +189,10 @@ func (d *Unit3DDriver) Execute(ctx context.Context, req Unit3DRequest) (Unit3DRe
 
 	if resp.StatusCode != http.StatusOK {
 		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+
+	if req.RawBody {
+		return result, nil
 	}
 
 	if err := json.Unmarshal(resp.Body, &result); err != nil {
@@ -326,15 +336,13 @@ func (d *Unit3DDriver) PrepareDownload(torrentID string) (Unit3DRequest, error) 
 	return Unit3DRequest{
 		Endpoint: fmt.Sprintf("/api/torrents/%s/download", torrentID),
 		Method:   "GET",
+		RawBody:  true,
 	}, nil
 }
 
 // ParseDownload extracts torrent file data from the response
 func (d *Unit3DDriver) ParseDownload(res Unit3DResponse) ([]byte, error) {
-	if len(res.RawBody) == 0 {
-		return nil, ErrParseError
-	}
-	return res.RawBody, nil
+	return parseRawTorrentDownload(res.RawBody)
 }
 
 // parseUnit3DDiscount parses Unit3D freeleech status to DiscountLevel

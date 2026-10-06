@@ -19,6 +19,8 @@ type GazelleRequest struct {
 	Action string
 	// Params are the query parameters
 	Params url.Values
+	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析
+	RawBody bool
 }
 
 // GazelleResponse represents a response from Gazelle API
@@ -185,8 +187,12 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 
 	fullURL := d.BaseURL + "/ajax.php?" + params.Encode()
 
+	accept := "application/json"
+	if req.RawBody {
+		accept = "application/x-bittorrent, */*"
+	}
 	headers := map[string]string{
-		"Accept":     "application/json",
+		"Accept":     accept,
 		"User-Agent": d.userAgent,
 	}
 
@@ -218,6 +224,10 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 
 	if resp.StatusCode != http.StatusOK {
 		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+
+	if req.RawBody {
+		return result, nil
 	}
 
 	if err := json.Unmarshal(resp.Body, &result); err != nil {
@@ -340,17 +350,15 @@ func (d *GazelleDriver) PrepareDownload(torrentID string) (GazelleRequest, error
 	params.Set("id", torrentID)
 
 	return GazelleRequest{
-		Action: "download",
-		Params: params,
+		Action:  "download",
+		Params:  params,
+		RawBody: true,
 	}, nil
 }
 
 // ParseDownload extracts torrent file data from the response
 func (d *GazelleDriver) ParseDownload(res GazelleResponse) ([]byte, error) {
-	if len(res.RawBody) == 0 {
-		return nil, ErrParseError
-	}
-	return res.RawBody, nil
+	return parseRawTorrentDownload(res.RawBody)
 }
 
 type gazelleTorrentDetailResponse struct {
