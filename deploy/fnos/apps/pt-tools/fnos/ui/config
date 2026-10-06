@@ -1,0 +1,15 @@
+{
+    ".url": {
+        "pt-tools.Application":
+        {
+            "title": "pt-tools",
+            "desc": "PT 站点自动化管理",
+            "icon": "images/{0}.png",
+            "type": "url",
+            "port": "8080",
+            "protocol": "http",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}

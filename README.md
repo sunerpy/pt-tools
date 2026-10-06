@@ -4,7 +4,7 @@
 
 # pt-tools
 
-### 面向 PT 站点的自动化管理工具
+### PT 站点自动化：RSS 下载、签到、保号、刷流与数据统计
 
 [![CI](https://github.com/sunerpy/pt-tools/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sunerpy/pt-tools/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/sunerpy/pt-tools)](https://github.com/sunerpy/pt-tools/releases)
@@ -20,7 +20,7 @@
 
 ---
 
-按 RSS 订阅自动下载免费种子，汇总各站点的数据与登录状态，统一管理 qBittorrent 和 Transmission，并可以在 QQ 和 Telegram 里查看和控制。内置 66 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
+按 RSS 订阅自动下载免费种子，每天签到、在封号前提醒保号，按规则刷流，汇总各站点的数据并发每日战报，统一管理 qBittorrent 和 Transmission，并可以在 QQ 和 Telegram 里查看和控制。内置 66 个站点，支持 Docker、Linux 和 Windows。完整文档在 **[firlab.app/pt-tools](https://firlab.app/pt-tools/)**。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/public/screens/home-dark.webp" />
@@ -44,7 +44,7 @@
 
 ## 功能
 
-- **站点与数据**：66 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey。在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器；长期未登录导致封号之前会提醒。
+- **站点与数据**：66 个内置站点，覆盖 NexusPHP、mTorrent、Gazelle、HDDolby 和 Rousi 等架构，支持 Cookie、API Key 和 Passkey。在一个页面查看所有站点的上传量、分享率、做种、积分和等级进度；跨站点搜索的结果可以直接推送到下载器；长期未登录导致封号之前会提醒（保号），可以按站点开启每日签到。每天存一份数据快照，按日、周、月看增量，并可以把当天的增量发成每日战报，见[数据统计与每日战报](https://firlab.app/pt-tools/guide/user-stats)。
 - **RSS 自动下载**：定时拉取订阅，用关键词、通配符或正则过滤标题来追剧；免费期结束时尚未下载完成的种子自动暂停。
 - **刷流**：从站点的免费列表里按优惠、体积、做种与下载人数挑新种，按做种时长、分享率、上传速度删除，限定同时下载数与体积；收益按天统计并进每日战报。见[刷流任务](https://firlab.app/pt-tools/guide/brush)。
 - **下载器**：可以添加多个 qBittorrent 和 Transmission，按 RSS 订阅、站点、默认下载器的顺序决定推送到哪一个。推送前检查剩余空间，按做种时长、分享率等条件清理旧种子，并保护 H&R 种子。

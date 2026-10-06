@@ -1,0 +1,13 @@
+{
+    "port-config": {
+        "protocol-file": "pt-tools.sc"
+    },
+    "docker-project": {
+        "projects": [
+            {
+                "name": "pt-tools",
+                "path": "docker"
+            }
+        ]
+    }
+}

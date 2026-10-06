@@ -4,7 +4,7 @@
 
 # pt-tools
 
-### Automation for private trackers
+### Private tracker automation: RSS downloads, check-in, account keep-alive, seed boosting and statistics
 
 [![CI](https://github.com/sunerpy/pt-tools/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sunerpy/pt-tools/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/sunerpy/pt-tools)](https://github.com/sunerpy/pt-tools/releases)
@@ -20,7 +20,7 @@
 
 ---
 
-Download freeleech torrents from your RSS feeds, follow every site's statistics and login status, manage qBittorrent and Transmission in one place, and check on all of it from QQ or Telegram. It supports 66 sites out of the box and runs in Docker, on Linux and on Windows. The full documentation is at **[firlab.app/pt-tools/en](https://firlab.app/pt-tools/en/)**.
+Download freeleech torrents from your RSS feeds, check in daily and get reminded before an inactive account is disabled, boost your ratio with rule-based seeding, follow every site's statistics with a daily report, manage qBittorrent and Transmission in one place, and check on all of it from QQ or Telegram. It supports 66 sites out of the box and runs in Docker, on Linux and on Windows. The full documentation is at **[firlab.app/pt-tools/en](https://firlab.app/pt-tools/en/)**.
 
 The web interface is in Chinese; the screenshots below show it with demo data.
 
@@ -46,7 +46,7 @@ The web interface is in Chinese; the screenshots below show it with demo data.
 
 ## Features
 
-- **Sites and statistics**: 66 built-in sites on NexusPHP, mTorrent, Gazelle, HDDolby, Rousi and other platforms, signed in with a cookie, an API key or a passkey. One page shows upload, download, ratio, seeding, bonus points and class progress for every site; search several sites at once and push results straight to a downloader; get a reminder before an inactive account is disabled.
+- **Sites and statistics**: 66 built-in sites on NexusPHP, mTorrent, Gazelle, HDDolby, Rousi and other platforms, signed in with a cookie, an API key or a passkey. One page shows upload, download, ratio, seeding, bonus points and class progress for every site; search several sites at once and push results straight to a downloader; get a reminder before an inactive account is disabled, and turn on daily check-in per site. A daily snapshot of every site gives daily, weekly and monthly increments and an optional daily report; see [Statistics and the daily report](https://firlab.app/pt-tools/en/guide/user-stats).
 - **RSS downloads**: feeds are fetched on a schedule, and filter rules match titles with keywords, wildcards or regular expressions to follow TV series. A torrent still downloading when its free period ends is paused.
 - **Seed boosting (brush)**: pick fresh torrents from a site's free list by discount, size, seeders and leechers, remove them by seeding time, ratio or upload speed, and cap concurrent downloads and size; earnings are tracked per day and included in the daily report. See [Brush tasks](https://firlab.app/pt-tools/en/guide/brush).
 - **Downloaders**: add several qBittorrent and Transmission instances; a torrent goes to the one bound to its RSS feed, then its site, then the default. Free space is checked before every push, and old torrents are removed by seeding time, ratio and other conditions, with H&R torrents kept.

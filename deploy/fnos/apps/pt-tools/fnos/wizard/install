@@ -1,0 +1,15 @@
+[
+    {
+        "stepTitle": "安装设置",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "pt-tools 是 PT 站点的自动化管理工具：RSS 自动下载、多站点搜索与数据统计、签到、登录保号提醒、刷流。<br>默认登录账号：<b>admin</b> / 密码：<b>adminadmin</b>，请在首次登录后修改密码。"
+            },
+            {
+                "type": "tips",
+                "helpText": "数据目录里的 <code>secret.key</code> 用来加密站点 Cookie，请务必备份；丢失后已保存的 Cookie 需要重新同步。"
+            }
+        ]
+    }
+]
