@@ -17,7 +17,17 @@ describe("downloaderAssistant utils", () => {
         skipped: [{ hash: "a", error: "x" }],
         failed: [{ hash: "b", name: "B", error: "409" }],
       }),
-    ).toBe("替换 1 个，跳过 1 个，失败 1 个（B：409）");
+    ).toBe("替换 1 个，跳过 1 个（a：x），失败 1 个（B：409）");
+    expect(
+      applySummary("删除", {
+        done: 0,
+        skipped: [
+          { hash: "c", name: "C", error: "tracker 又正常了，没有删除" },
+          { hash: "d", error: "y" },
+        ],
+        failed: [],
+      }),
+    ).toBe("删除 0 个，跳过 2 个（C：tracker 又正常了，没有删除）");
   });
 
   it("picks a tone", () => {

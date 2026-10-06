@@ -9,14 +9,13 @@ export function deadReasonLabel(reason: AssistantDeadReason | string): string {
   return DEAD_REASON_LABEL[reason as AssistantDeadReason] ?? reason;
 }
 
-/** 执行结果的一句话：成功几个、跳过几个、失败几个，再带上第一条失败原因 */
+/** 执行结果的一句话：成功几个、跳过几个、失败几个，跳过和失败各带上第一条原因 */
 export function applySummary(verb: string, res: AssistantApplyResult): string {
   const parts = [`${verb} ${res.done} 个`];
-  if (res.skipped.length) parts.push(`跳过 ${res.skipped.length} 个`);
-  if (res.failed.length) {
-    const first = res.failed[0];
-    parts.push(`失败 ${res.failed.length} 个（${first.name || first.hash}：${first.error}）`);
-  }
+  const first = (items: AssistantApplyResult["skipped"]) =>
+    `（${items[0].name || items[0].hash}：${items[0].error}）`;
+  if (res.skipped.length) parts.push(`跳过 ${res.skipped.length} 个${first(res.skipped)}`);
+  if (res.failed.length) parts.push(`失败 ${res.failed.length} 个${first(res.failed)}`);
   return parts.join("，");
 }
 
