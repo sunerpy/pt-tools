@@ -88,6 +88,11 @@ pt-tools secret import --force < secret.b64
 
 Instead of a file, you can also supply the base64 key in the environment variable `PT_TOOLS_SECRET_KEY`, which takes precedence over `secret.key`.
 
+pt-tools checks the key at startup and refuses to start, with the reason in the log, in two cases:
+
+- `secret.key` exists but cannot be read or is not in the expected format (64 hex characters). pt-tools does not overwrite it; put the right file back, or restore your backup with `secret import`.
+- `secret.key` does not exist, yet the database already holds encrypted cookies or notification credentials. This usually means only the database was restored, or the data directory is not mounted correctly; put the original `secret.key` back and start again. If the original key is really lost, start once with the environment variable `PT_TOOLS_ACCEPT_NEW_SECRET_KEY=1`: pt-tools switches to a new key, and you then enter the site cookies and notification credentials again.
+
 ## Removing old logs and staged files
 
 Logs, staged `.torrent` files and old configuration backups build up over time. Preview and remove them under Clean the work folder (清理工作目录) at the bottom of Rules → Auto cleanup (规则 → 自动清理), or from the command line:
