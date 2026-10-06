@@ -66,7 +66,7 @@ type IDNameOption struct {
 
 // BindingResolver 用于 /unbind 命令解析自身 binding ID。
 type BindingResolver interface {
-	FindByChannelUser(ctx context.Context, channelType, channelUserID string) (uint, bool, error)
+	FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (uint, bool, error)
 }
 
 var (

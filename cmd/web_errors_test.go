@@ -29,14 +29,14 @@ func emptyDB(t *testing.T) *gorm.DB {
 
 func TestDBBindingLookup_FindByChannelUser_QueryError(t *testing.T) {
 	lookup := &dbBindingLookup{db: emptyDB(t)}
-	_, ok, err := lookup.FindByChannelUser(context.Background(), "telegram", "u")
+	_, ok, err := lookup.FindByChannelUser(context.Background(), 1, "telegram", "u")
 	require.Error(t, err)
 	assert.False(t, ok)
 }
 
 func TestCommandsBindingResolver_QueryError(t *testing.T) {
 	resolver := &commandsBindingResolver{lookup: &dbBindingLookup{db: emptyDB(t)}}
-	_, ok, err := resolver.FindByChannelUser(context.Background(), "telegram", "u")
+	_, ok, err := resolver.FindByChannelUser(context.Background(), 1, "telegram", "u")
 	require.Error(t, err)
 	assert.False(t, ok)
 }

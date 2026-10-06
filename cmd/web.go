@@ -771,8 +771,8 @@ type dbBindingLookup struct {
 	db *gorm.DB
 }
 
-func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, channelType, channelUserID string) (chatops.BindingInfo, bool, error) {
-	row, ok, err := l.findRow(ctx, channelType, channelUserID)
+func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (chatops.BindingInfo, bool, error) {
+	row, ok, err := l.findRow(ctx, confID, channelType, channelUserID)
 	if err != nil || !ok {
 		return chatops.BindingInfo{}, ok, err
 	}
@@ -787,10 +787,10 @@ func (l *dbBindingLookup) FindByChannelUser(ctx context.Context, channelType, ch
 	}, true, nil
 }
 
-func (l *dbBindingLookup) findRow(ctx context.Context, channelType, channelUserID string) (models.ChannelBinding, bool, error) {
+func (l *dbBindingLookup) findRow(ctx context.Context, confID uint, channelType, channelUserID string) (models.ChannelBinding, bool, error) {
 	var row models.ChannelBinding
 	err := l.db.WithContext(ctx).
-		Where("channel_type = ? AND channel_user_id = ?", channelType, channelUserID).
+		Where("notification_conf_id = ? AND channel_type = ? AND channel_user_id = ?", confID, channelType, channelUserID).
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return models.ChannelBinding{}, false, nil
@@ -807,8 +807,8 @@ type commandsBindingResolver struct {
 	lookup *dbBindingLookup
 }
 
-func (r *commandsBindingResolver) FindByChannelUser(ctx context.Context, channelType, channelUserID string) (uint, bool, error) {
-	row, ok, err := r.lookup.findRow(ctx, channelType, channelUserID)
+func (r *commandsBindingResolver) FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (uint, bool, error) {
+	row, ok, err := r.lookup.findRow(ctx, confID, channelType, channelUserID)
 	if err != nil || !ok {
 		return 0, ok, err
 	}
@@ -821,8 +821,8 @@ type bindingConsumerAdapter struct {
 	svc app.BindingService
 }
 
-func (a *bindingConsumerAdapter) ConsumeCode(ctx context.Context, code, channelType, channelUserID string) error {
-	_, err := a.svc.ConsumeCode(ctx, code, channelType, channelUserID)
+func (a *bindingConsumerAdapter) ConsumeCode(ctx context.Context, code string, confID uint, channelType, channelUserID string) error {
+	_, err := a.svc.ConsumeCode(ctx, code, confID, channelType, channelUserID)
 	return err
 }
 

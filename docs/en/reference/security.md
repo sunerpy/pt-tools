@@ -56,7 +56,7 @@ When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; 
 ## Which ports it listens on
 
 - The web interface and API: `8080` by default.
-- The QQ OneBot channel: once enabled, a second port that NapCat connects to over a reverse WebSocket, for example `/onebot/v11/ws` on `0.0.0.0:6701`. Give it an access token and open it only on your local network.
+- The QQ OneBot channel: once enabled, a second port that NapCat connects to over a reverse WebSocket, for example `/onebot/v11/ws` on `0.0.0.0:6701`. When the listen address is not a loopback address (127.0.0.1, localhost) an access token is required, otherwise the channel does not start. Open the port only on your local network.
 
 ## Deployment advice
 

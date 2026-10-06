@@ -830,7 +830,7 @@ func (s *stubBindingSvc) ListPendingCodes(ctx context.Context) ([]app.BindCodeDT
 	return nil, nil
 }
 
-func (s *stubBindingSvc) ConsumeCode(ctx context.Context, code, channelType, channelUserID string) (app.BindingDTO, error) {
+func (s *stubBindingSvc) ConsumeCode(ctx context.Context, code string, _ uint, channelType, channelUserID string) (app.BindingDTO, error) {
 	return app.BindingDTO{}, nil
 }
 

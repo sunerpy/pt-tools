@@ -119,13 +119,18 @@ func TestDBBindingLookup_FindByChannelUser(t *testing.T) {
 	lookup := &dbBindingLookup{db: db}
 	ctx := context.Background()
 
-	info, ok, err := lookup.FindByChannelUser(ctx, "telegram", "u1")
+	info, ok, err := lookup.FindByChannelUser(ctx, 7, "telegram", "u1")
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, uint(7), info.ConfID)
 	assert.True(t, info.PtAdmin)
 
-	_, ok, err = lookup.FindByChannelUser(ctx, "telegram", "missing")
+	_, ok, err = lookup.FindByChannelUser(ctx, 7, "telegram", "missing")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// 绑定属于通知通道配置 7：同一用户经另一个 Bot（配置 8）发来的消息找不到这条绑定
+	_, ok, err = lookup.FindByChannelUser(ctx, 8, "telegram", "u1")
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -137,12 +142,16 @@ func TestCommandsBindingResolver_FindByChannelUser(t *testing.T) {
 	}).Error)
 	resolver := &commandsBindingResolver{lookup: &dbBindingLookup{db: db}}
 
-	id, ok, err := resolver.FindByChannelUser(context.Background(), "qq_onebot", "abc")
+	id, ok, err := resolver.FindByChannelUser(context.Background(), 1, "qq_onebot", "abc")
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, uint(42), id)
 
-	_, ok, err = resolver.FindByChannelUser(context.Background(), "qq_onebot", "none")
+	_, ok, err = resolver.FindByChannelUser(context.Background(), 2, "qq_onebot", "abc")
+	require.NoError(t, err)
+	assert.False(t, ok, "别的通道配置下没有这条绑定")
+
+	_, ok, err = resolver.FindByChannelUser(context.Background(), 1, "qq_onebot", "none")
 	require.NoError(t, err)
 	assert.False(t, ok)
 }

@@ -56,7 +56,7 @@
 ## 会监听哪些端口
 
 - Web 界面和接口：默认 `8080`。
-- QQ OneBot 通道：启用后另外监听一个端口，供 NapCat 以反向 WebSocket 连接，例如 `0.0.0.0:6701` 的 `/onebot/v11/ws`。请为它设置 Access Token，并只在内网开放。
+- QQ OneBot 通道：启用后另外监听一个端口，供 NapCat 以反向 WebSocket 连接，例如 `0.0.0.0:6701` 的 `/onebot/v11/ws`。监听地址不是本机地址（127.0.0.1、localhost）时必须设置 Access Token，否则通道不会启动；该端口只在内网开放。
 
 ## 部署建议
 

@@ -132,7 +132,7 @@ Open the pt-tools web UI, go to ChatOps → Notifications (消息通知) and cli
 | Field                                  | Value                               | Notes                                                                                                            |
 | -------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Listen address (监听地址, listen_addr) | `0.0.0.0:6701`                      | The address the reverse WebSocket listens on; the port must match NapCat's                                       |
-| Access Token                           | `ptqa_2026_secret`                  | Exactly the same token as in NapCat                                                                              |
+| Access Token                           | `ptqa_2026_secret`                  | Exactly the same token as in NapCat; required when the listen address is not a loopback address                  |
 | Admin QQ (管理员 QQ, admin_qq_users)   | `your QQ number`                    | QQ numbers separated by commas; they may talk to the bot, and the test message goes to the first one (see below) |
 | Allowed QQ (允许 QQ, allowed_qq_users) | Empty, or other people's QQ numbers | QQ numbers separated by commas; they may talk to the bot as well (see below)                                     |
 
@@ -194,6 +194,8 @@ From your **personal QQ account** (not the bot's), send the bot a **private mess
 ```
 
 When the bot replies 绑定成功 ("linked"), you are done.
+
+> A link belongs to the channel you picked when you generated the code. The code works only with that channel's bot; sending it to another bot fails. To send commands through several channels, link the QQ account on each of them.
 
 ### Trying `/help`
 

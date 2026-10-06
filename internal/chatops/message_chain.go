@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // BindingInfo is the subset of binding data needed by the chain.
@@ -57,14 +58,16 @@ type Replier interface {
 	Reply(ctx context.Context, msg notify.InboundMessage, reply Reply) error
 }
 
-// BindingLookup resolves a (channel, user) pair to a BindingInfo.
+// BindingLookup resolves a (notification conf, channel, user) triple to a BindingInfo.
+// 绑定属于具体的通知通道配置：同一个用户在另一个 Bot/通道上发消息，不能沿用这里的绑定。
 type BindingLookup interface {
-	FindByChannelUser(ctx context.Context, channelType, channelUserID string) (BindingInfo, bool, error)
+	FindByChannelUser(ctx context.Context, confID uint, channelType, channelUserID string) (BindingInfo, bool, error)
 }
 
 // BindCodeConsumer consumes a /bind <code> request. Implemented by app.BindingService.
+// confID 是消息来源的通知通道配置，绑定码只能在签发它的那个通道上兑换。
 type BindCodeConsumer interface {
-	ConsumeCode(ctx context.Context, code, channelType, channelUserID string) error
+	ConsumeCode(ctx context.Context, code string, confID uint, channelType, channelUserID string) error
 }
 
 // AuditRecorder writes a single audit row. Implemented by app.AuditService.
@@ -118,7 +121,7 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	text := strings.TrimSpace(msg.Text)
 	cmdName, args := parseCommand(text)
 
-	binding, hasBinding, err := mc.bindings.FindByChannelUser(ctx, msg.ChannelType, msg.ChannelUserID)
+	binding, hasBinding, err := mc.bindings.FindByChannelUser(ctx, msg.SourceConfID, msg.ChannelType, msg.ChannelUserID)
 	if err != nil {
 		mc.recordAudit(ctx, msg, 0, cmdName, args, "error:lookup_binding", start)
 		mc.tryReply(ctx, msg, Reply{Text: "内部错误，请稍后重试"})
@@ -217,7 +220,7 @@ func (mc *MessageChain) executeBind(ctx context.Context, msg notify.InboundMessa
 		mc.recordAudit(ctx, msg, 0, "bind", args, "error:no_binding_service", start)
 		return errors.New("binding service unavailable")
 	}
-	if err := mc.bindCoder.ConsumeCode(ctx, code, msg.ChannelType, msg.ChannelUserID); err != nil {
+	if err := mc.bindCoder.ConsumeCode(ctx, code, msg.SourceConfID, msg.ChannelType, msg.ChannelUserID); err != nil {
 		mc.recordAudit(ctx, msg, 0, "bind", args, "error:bind_failed", start)
 		mc.tryReply(ctx, msg, Reply{Text: "绑定失败：" + err.Error()})
 		return nil
@@ -234,7 +237,7 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 	latency := mc.now().Sub(start).Milliseconds()
 	argsMap := map[string]any{}
 	if len(args) > 0 {
-		argsMap["args"] = args
+		argsMap["args"] = auditArgs(command, args)
 	}
 	_ = mc.auditSvc.Record(ctx, AuditEntry{
 		NotificationConfID: confID,
@@ -245,6 +248,23 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 		Result:             result,
 		LatencyMs:          latency,
 	})
+}
+
+// auditArgs 返回写进审计的参数副本：/bind 的绑定码整体隐去，像 URL 的参数（如 /addrss 带的 RSS 地址）
+// 把 passkey、token 等查询参数脱敏。审计的键名脱敏只看键名，管不到位置参数里的内容。
+func auditArgs(command string, args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		switch {
+		case command == "bind":
+			out[i] = "[REDACTED]"
+		case strings.Contains(a, "://"):
+			out[i] = utils.SanitizeURL(a)
+		default:
+			out[i] = a
+		}
+	}
+	return out
 }
 
 func (mc *MessageChain) tryReply(ctx context.Context, msg notify.InboundMessage, reply Reply) {
