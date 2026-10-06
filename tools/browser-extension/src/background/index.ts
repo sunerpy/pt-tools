@@ -11,6 +11,7 @@ import {
   getLastSyncMap,
   getTabStatus,
   getTabStatusMap,
+  remove,
   removeTabStatus,
   saveSession,
   set,
@@ -20,6 +21,7 @@ import {
   setLastSync,
   setLastVisit,
   setTabStatus,
+  updateConnection,
 } from "../core/storage";
 import type {
   CapturedPage,
@@ -32,10 +34,21 @@ import type {
   TabSiteStatus,
   UnknownSiteStatus,
 } from "../core/types";
-import { PtToolsApiClient, checkCookieHealth, friendlyErrorMessage } from "../modules/sync";
+import {
+  PtToolsApiClient,
+  checkCookieHealth,
+  fetchWithTimeout,
+  friendlyErrorMessage,
+} from "../modules/sync";
 import type { SiteLoginStateRecord } from "../modules/sync";
 import { autoCollect } from "../modules/collector/auto-collector";
 import { extractDomain, matchKnownSite } from "../utils";
+import {
+  type BackendPendingAction,
+  createPendingActionPoller,
+  isPendingActionArray,
+} from "./pending-actions";
+import { createTabGenerations } from "./tab-generation";
 
 interface MessageResponse<T> {
   ok: boolean;
@@ -80,20 +93,21 @@ function toCurrentSite(status: TabSiteStatus): SiteInfo | null {
   return null;
 }
 
-async function updateBadge(status: TabSiteStatus): Promise<void> {
+/** Badge 按标签页设置：不带 tabId 改的是全局默认值，后台标签页加载完 PT 站，当前标签页的图标也跟着变 */
+async function updateBadge(tabId: number, status: TabSiteStatus): Promise<void> {
   if (status.mode === "known") {
-    await chrome.action.setBadgeText({ text: "✓" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#1f8a70" });
+    await chrome.action.setBadgeText({ tabId, text: "✓" });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: "#1f8a70" });
     return;
   }
 
   if (status.mode === "unknown") {
-    await chrome.action.setBadgeText({ text: "?" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#e6a23c" });
+    await chrome.action.setBadgeText({ tabId, text: "?" });
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: "#e6a23c" });
     return;
   }
 
-  await chrome.action.setBadgeText({ text: "" });
+  await chrome.action.setBadgeText({ tabId, text: "" });
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | null> {
@@ -179,19 +193,17 @@ async function detectViaContent(tabId: number): Promise<SiteDetectedPayload | nu
 
 async function setTabMode(tabId: number, status: TabSiteStatus): Promise<TabSiteStatus> {
   await setTabStatus(tabId, status);
-  await updateBadge(status);
+  await updateBadge(tabId, status);
   await publishStatus();
   return status;
 }
 
-async function resolveTabSiteStatus(tabId: number, url: string): Promise<TabSiteStatus> {
+const tabGenerations = createTabGenerations();
+
+async function detectTabSiteStatus(tabId: number, url: string): Promise<TabSiteStatus> {
   const known = matchKnownSite(url);
   if (known) {
-    const knownStatus = await buildKnownSiteStatus(known);
-    return setTabMode(tabId, {
-      mode: "known",
-      known: knownStatus,
-    });
+    return { mode: "known", known: await buildKnownSiteStatus(known) };
   }
 
   const detected = await detectViaContent(tabId);
@@ -201,10 +213,20 @@ async function resolveTabSiteStatus(tabId: number, url: string): Promise<TabSite
       pageType: detected.pageType,
       url: detected.url,
     };
-    return setTabMode(tabId, { mode: "unknown", unknown });
+    return { mode: "unknown", unknown };
   }
 
-  return setTabMode(tabId, { mode: "none" });
+  return { mode: "none" };
+}
+
+async function resolveTabSiteStatus(tabId: number, url: string): Promise<TabSiteStatus> {
+  const isCurrent = tabGenerations.begin(tabId);
+  const status = await detectTabSiteStatus(tabId, url);
+  if (!isCurrent()) {
+    // 同一标签页已经开始了更新的解析（比如已经离开这个页面）：这次的结果作废，不写状态、不动 Badge
+    return status;
+  }
+  return setTabMode(tabId, status);
 }
 
 async function resolveCurrentTabStatus(): Promise<TabSiteStatus> {
@@ -297,11 +319,8 @@ async function syncKnownSite(site: KnownSite): Promise<void> {
 
   const syncedAt = new Date().toISOString();
   await setLastSync(site.id, syncedAt);
-  await setConnection({
-    ...connection,
-    connected: true,
-    lastSync: syncedAt,
-  });
+  // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
+  await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
 }
 
 async function maybeAutoSyncByDomain(domain: string): Promise<void> {
@@ -599,6 +618,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  tabGenerations.forget(tabId);
   void removeTabStatus(tabId);
 });
 
@@ -689,37 +709,15 @@ if (chrome.webNavigation?.onHistoryStateUpdated) {
 // ---- end webNavigation visit tracking ----
 
 // ---- Pending action polling (T17) ----
-// Backend queues "open SiteX tab" actions; extension polls every 30s,
-// executes via chrome.tabs.create on KNOWN_SITES only, then acks.
-// Replaces v1 batchOpenTabsForSync (push-on-demand model). R-EC10 enforces
-// 24h TTL server-side. R28 forbids setInterval — we use chrome.alarms.
+// 动作的取回、执行与 ack 见 ./pending-actions；这里只接 chrome API、存储与网络。
+// R28 forbids setInterval — we use chrome.alarms.
 
 const POLL_ALARM_NAME = "pt-tools-poll";
 const POLL_PERIOD_MINUTES = 0.5;
-const POLL_LAST_TIMESTAMP_KEY = "pt_tools_pending_actions_since";
-const POLL_MAX_ACTION_AGE_MS = 24 * 60 * 60 * 1000;
-
-interface BackendPendingAction {
-  id: number;
-  type: string;
-  target_url: string;
-  site_name?: string;
-  reason?: string;
-  created_at?: string;
-  expires_at?: string;
-}
-
-function isPendingActionArray(value: unknown): value is BackendPendingAction[] {
-  if (!Array.isArray(value)) return false;
-  return value.every(
-    (item) =>
-      typeof item === "object" &&
-      item !== null &&
-      typeof (item as { id?: unknown }).id === "number" &&
-      typeof (item as { type?: unknown }).type === "string" &&
-      typeof (item as { target_url?: unknown }).target_url === "string",
-  );
-}
+/** 旧版本按 since 游标取动作，已不再使用；启动时清掉 */
+const LEGACY_POLL_SINCE_KEY = "pt_tools_pending_actions_since";
+/** 已打开标签页、还没 ack 成功的动作 ID */
+const POLL_OPENED_IDS_KEY = "pt_tools_pending_actions_opened";
 
 function urlMatchesKnownSite(rawURL: string): KnownSite | null {
   let host: string;
@@ -739,14 +737,6 @@ function urlMatchesKnownSite(rawURL: string): KnownSite | null {
   return null;
 }
 
-function actionTimestampMs(action: BackendPendingAction): number {
-  if (action.created_at) {
-    const t = Date.parse(action.created_at);
-    if (!Number.isNaN(t)) return t;
-  }
-  return Date.now();
-}
-
 class PendingAuthError extends Error {
   constructor() {
     super("pending poll unauthorized");
@@ -754,12 +744,10 @@ class PendingAuthError extends Error {
   }
 }
 
-async function fetchPending(baseUrl: string, since: number): Promise<BackendPendingAction[]> {
-  const url = new URL(`${baseUrl.replace(/\/+$/, "")}/api/extension/actions/pending`);
-  if (since > 0) {
-    url.searchParams.set("since", String(since));
-  }
-  const response = await fetch(url.toString(), {
+async function fetchPending(baseUrl: string): Promise<BackendPendingAction[]> {
+  const url = `${baseUrl.replace(/\/+$/, "")}/api/extension/actions/pending`;
+  // 带超时：请求卡住时不让一轮轮询一直挂着
+  const response = await fetchWithTimeout(url, {
     method: "GET",
     headers: { Accept: "application/json" },
     credentials: "include",
@@ -784,7 +772,7 @@ async function ackAction(baseUrl: string, actionId: number): Promise<void> {
   const url = `${baseUrl.replace(/\/+$/, "")}/api/extension/actions/${encodeURIComponent(
     String(actionId),
   )}/ack`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     credentials: "include",
@@ -795,13 +783,18 @@ async function ackAction(baseUrl: string, actionId: number): Promise<void> {
   }
 }
 
-async function getPollSince(): Promise<number> {
-  return (await get<number>(POLL_LAST_TIMESTAMP_KEY)) ?? 0;
-}
-
-async function setPollSince(unixSeconds: number): Promise<void> {
-  await set(POLL_LAST_TIMESTAMP_KEY, unixSeconds);
-}
+const pendingPoller = createPendingActionPoller({
+  fetchPending,
+  ack: ackAction,
+  openTab: async (url) => {
+    await chrome.tabs.create({ url, active: false });
+  },
+  isKnownSiteUrl: (url) => urlMatchesKnownSite(url) !== null,
+  loadOpenedIds: async () => (await get<number[]>(POLL_OPENED_IDS_KEY)) ?? [],
+  saveOpenedIds: (ids) => set(POLL_OPENED_IDS_KEY, ids),
+  now: () => Date.now(),
+  log: logger,
+});
 
 export async function pollPendingActions(): Promise<void> {
   const connection = await getConnection();
@@ -809,75 +802,16 @@ export async function pollPendingActions(): Promise<void> {
   if (!baseUrl || !connection.connected) {
     return;
   }
-  let actions: BackendPendingAction[];
   try {
-    const since = await getPollSince();
-    actions = await fetchPending(baseUrl, since);
+    await pendingPoller.poll(baseUrl);
   } catch (error: unknown) {
     if (error instanceof PendingAuthError) {
       await clearPollAlarm();
-      await setConnection({ ...connection, connected: false });
+      await updateConnection(baseUrl, { connected: false });
       logger.warn("pollPendingActions unauthorized; pausing poll until re-login");
       return;
     }
     logger.warn("pollPendingActions fetch failed", error);
-    return;
-  }
-  if (actions.length === 0) {
-    return;
-  }
-  const now = Date.now();
-  let maxCreatedSec = 0;
-  for (const action of actions) {
-    const createdMs = actionTimestampMs(action);
-    if (now - createdMs > POLL_MAX_ACTION_AGE_MS) {
-      logger.info("pollPendingActions skipping expired action", { id: action.id });
-      continue;
-    }
-    if (action.type !== "open_tab") {
-      logger.info("pollPendingActions skipping unsupported action type", {
-        id: action.id,
-        type: action.type,
-      });
-      try {
-        await ackAction(baseUrl, action.id);
-      } catch (error: unknown) {
-        logger.warn("ack of unsupported action failed", { id: action.id, error });
-      }
-      const createdSec = Math.floor(createdMs / 1000);
-      if (createdSec > maxCreatedSec) maxCreatedSec = createdSec;
-      continue;
-    }
-    const matched = urlMatchesKnownSite(action.target_url);
-    if (!matched) {
-      logger.warn("pollPendingActions skipping non-known-site URL", {
-        id: action.id,
-        url: action.target_url,
-      });
-      try {
-        await ackAction(baseUrl, action.id);
-      } catch (error: unknown) {
-        logger.warn("ack of skipped action failed", { id: action.id, error });
-      }
-      const createdSec = Math.floor(createdMs / 1000);
-      if (createdSec > maxCreatedSec) maxCreatedSec = createdSec;
-      continue;
-    }
-    try {
-      await chrome.tabs.create({ url: action.target_url, active: false });
-      await ackAction(baseUrl, action.id);
-      logger.info("pollPendingActions executed open_tab", {
-        id: action.id,
-        siteId: matched.id,
-      });
-      const createdSec = Math.floor(createdMs / 1000);
-      if (createdSec > maxCreatedSec) maxCreatedSec = createdSec;
-    } catch (error: unknown) {
-      logger.warn("pollPendingActions open_tab failed", { id: action.id, error });
-    }
-  }
-  if (maxCreatedSec > 0) {
-    await setPollSince(maxCreatedSec);
   }
 }
 
@@ -917,6 +851,7 @@ void (async () => {
     await clearPollAlarm();
   }
   void STORAGE_KEYS.batchTabQueue;
+  await remove(LEGACY_POLL_SINCE_KEY);
   const tab = await getActiveTab();
   if (tab?.id && tab.url) {
     await resolveTabSiteStatus(tab.id, tab.url);

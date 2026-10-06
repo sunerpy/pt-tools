@@ -655,7 +655,6 @@ export const STORAGE_KEYS = {
   autoSyncMap: "pt_tools_auto_sync_map",
   lastSyncMap: "pt_tools_last_sync_map",
   lastVisitMap: "pt_tools_last_visit_map",
-  autoOpenTabsOnSync: "pt_tools_auto_open_tabs",
   batchTabQueue: "pt_tools_batch_tab_queue",
 } as const;
 
