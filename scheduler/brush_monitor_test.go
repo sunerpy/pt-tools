@@ -563,7 +563,7 @@ func TestBrushMonitor_ManagesTorrentsInPreviousDownloader(t *testing.T) {
 	res, err = r.mon.RunTask(context.Background(), task.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 0, res.Gone)
-	assert.Contains(t, res.Errors[0], "下载器 7 不可用")
+	assert.Contains(t, res.Errors[0], "下载器 7 名下的 1 个种子这一轮没处理")
 	n, err := repo.CountActive(task.ID)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n)
@@ -647,4 +647,76 @@ func TestBrushMonitor_StopCancelsManualRun(t *testing.T) {
 	assert.ErrorIs(t, err, ErrBrushStopped)
 	r.mon.Start() // 停止之后不再启动
 	assert.False(t, r.mon.running)
+}
+
+// 任务当前的下载器不可用：旧下载器里的种子照样处理（按下载器 ID 顺序，不受 map 遍历顺序影响）；关闭的任务根本不需要当前下载器。
+func TestBrushMonitor_CurrentDownloaderDownStillManagesOldOnes(t *testing.T) {
+	for round := range 5 {
+		r := newBrushRig(t)
+		old := newSchedFakeDownloader("qb-old")
+		r.mon.cfg.Downloaders = BrushDownloadersFunc(func(id uint) (downloader.Downloader, string, error) {
+			if id == 9 {
+				return old, "qb-old", nil
+			}
+			return nil, "", errors.New("current downloader disabled")
+		})
+		task := r.task(t, func(bt *models.BrushTask) { bt.RemoveRatio = 2; bt.Enabled = round%2 == 0 })
+		require.NoError(t, models.NewBrushRepository(r.db.DB).RecordAdded(&models.BrushTorrent{
+			TaskID: task.ID, InfoHash: "h-old", SiteName: "hdsky",
+			TorrentID: "1", AddedAt: r.clock.Now(), State: models.BrushTorrentActive, DownloaderID: 9,
+		}, "2026-10-06"))
+		old.torrents = []downloader.Torrent{{ID: "o1", InfoHash: "h-old", Tags: models.BrushTaskTag(task.ID), Progress: 1, State: downloader.TorrentSeeding, Ratio: 3}}
+
+		res, err := r.mon.RunTask(context.Background(), task.ID)
+		assert.Equal(t, []string{"o1"}, old.removedSingle, "第 %d 次：旧下载器里的种子照常删", round)
+		assert.Equal(t, 1, res.Removed)
+		if task.Enabled {
+			assert.ErrorContains(t, err, "下载器不可用", "开启的任务要加种，当前下载器不可用就报错")
+		} else {
+			assert.NoError(t, err, "关闭的任务不需要当前下载器")
+		}
+	}
+}
+
+// 同一站点的两个任务同时运行：加种串行，两边不会加同一个种子。
+func TestBrushMonitor_SameSiteTasksDoNotAddTheSameTorrent(t *testing.T) {
+	r := newBrushRig(t)
+	a := r.task(t, func(bt *models.BrushTask) { bt.Name = "a"; bt.MaxDownloading = 1 })
+	b := r.task(t, func(bt *models.BrushTask) { bt.Name = "b"; bt.MaxDownloading = 1; bt.DownloaderID = 2 })
+	r.addItem(t, "1", nil)
+	r.addItem(t, "2", nil)
+	second := newSchedFakeDownloader("qb2")
+	r.mon.cfg.Downloaders = BrushDownloadersFunc(func(id uint) (downloader.Downloader, string, error) {
+		if id == 2 {
+			return second, "qb2", nil
+		}
+		return r.dl, "qb", nil
+	})
+	var mu sync.Mutex
+	pushed := map[string]int{}
+	release := make(chan struct{})
+	first := true
+	r.mon.cfg.Push = func(_ context.Context, req ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error) {
+		mu.Lock()
+		pushed[req.TorrentID]++
+		wait := first
+		first = false
+		mu.Unlock()
+		if wait {
+			<-release // 第一个推送卡住，另一个任务这时也在运行
+		}
+		h, _ := qbit.ComputeTorrentHash(req.TorrentData)
+		return &ptinternal.PushTorrentResult{Success: true, TorrentHash: h}, nil
+	}
+	var wg sync.WaitGroup
+	for _, id := range []uint{a.ID, b.ID} {
+		wg.Go(func() {
+			_, err := r.mon.RunTask(context.Background(), id)
+			assert.NoError(t, err)
+		})
+	}
+	time.Sleep(200 * time.Millisecond) // 让第二个任务也走到加种这一步（被站点锁挡住）
+	close(release)
+	wg.Wait()
+	assert.Equal(t, map[string]int{"1": 1, "2": 1}, pushed, "两个任务各加了不同的种子")
 }

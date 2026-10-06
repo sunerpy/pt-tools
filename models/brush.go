@@ -100,11 +100,12 @@ func (t BrushTask) TagList() []string {
 
 // BrushTorrent 是刷流任务推送过的一个种子；(task_id, info_hash) 唯一。
 type BrushTorrent struct {
-	ID        uint   `gorm:"primaryKey" json:"id"`
-	TaskID    uint   `gorm:"not null;uniqueIndex:idx_brush_task_hash,priority:1;index" json:"task_id"`
-	InfoHash  string `gorm:"size:64;not null;uniqueIndex:idx_brush_task_hash,priority:2" json:"info_hash"`
-	SiteName  string `gorm:"size:64;not null" json:"site_name"`
-	TorrentID string `gorm:"size:128;not null;index" json:"torrent_id"`
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	TaskID   uint   `gorm:"not null;uniqueIndex:idx_brush_task_hash,priority:1;index" json:"task_id"`
+	InfoHash string `gorm:"size:64;not null;uniqueIndex:idx_brush_task_hash,priority:2" json:"info_hash"`
+	// (site_name, torrent_id) 唯一：同一个站点种子只由一个刷流任务加入一次（删掉之后也不再加回来）
+	SiteName  string `gorm:"size:64;not null;uniqueIndex:idx_brush_site_torrent,priority:1" json:"site_name"`
+	TorrentID string `gorm:"size:128;not null;uniqueIndex:idx_brush_site_torrent,priority:2" json:"torrent_id"`
 	Title     string `gorm:"size:512;default:''" json:"title"`
 	SizeBytes int64  `gorm:"not null;default:0" json:"size_bytes"`
 	// Discount 是推送时的优惠类型（DiscountLevel）。
@@ -303,18 +304,26 @@ func (r *BrushRepository) SeenTorrentIDs(taskID uint) (map[string]bool, error) {
 	return out, nil
 }
 
-// RecordAdded 记下一个推送成功的种子，并把当天的加入数与体积记进统计；同一任务同一 hash 已有记录时不重复记。
+// ErrBrushTorrentTaken 表示这个站点种子已经由别的刷流任务加入过（site_name + torrent_id 唯一）。
+var ErrBrushTorrentTaken = errors.New("这个种子已经由别的刷流任务加入")
+
+// RecordAdded 记下一个推送成功的种子，并把当天的加入数与体积记进统计。同一任务同一 hash 已有记录时不重复记；
+// 这个站点种子已经归别的任务时返回 ErrBrushTorrentTaken（调用方应撤回刚加的这一份）。
 func (r *BrushRepository) RecordAdded(bt *BrushTorrent, day string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "task_id"}, {Name: "info_hash"}},
-			DoNothing: true,
-		}).Create(bt)
+		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(bt)
 		if res.Error != nil {
 			return fmt.Errorf("记录刷流种子失败: %w", res.Error)
 		}
 		if res.RowsAffected == 0 {
-			return nil
+			var mine int64
+			if err := tx.Model(&BrushTorrent{}).Where("task_id = ? AND info_hash = ?", bt.TaskID, bt.InfoHash).Count(&mine).Error; err != nil {
+				return fmt.Errorf("记录刷流种子失败: %w", err)
+			}
+			if mine > 0 {
+				return nil
+			}
+			return ErrBrushTorrentTaken
 		}
 		return addDailyStat(tx, bt.TaskID, day, BrushDailyStat{Added: 1, AddedBytes: bt.SizeBytes})
 	})

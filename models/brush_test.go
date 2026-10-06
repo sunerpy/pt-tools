@@ -195,3 +195,18 @@ func TestSplitByDay(t *testing.T) {
 	require.Len(t, same, 1)
 	assert.Equal(t, "2026-10-08", same[0].day)
 }
+
+// 同一个站点种子只能归一个任务：另一个任务再记它返回 ErrBrushTorrentTaken，不写统计。
+func TestBrushRepository_RecordAddedRejectsOtherTasksTorrent(t *testing.T) {
+	repo := NewBrushRepository(newBrushTestDB(t))
+	now := time.Now()
+	require.NoError(t, repo.RecordAdded(&BrushTorrent{TaskID: 1, InfoHash: "h", SiteName: "hdsky", TorrentID: "9", AddedAt: now, State: BrushTorrentActive}, "2026-10-06"))
+	err := repo.RecordAdded(&BrushTorrent{TaskID: 2, InfoHash: "h", SiteName: "hdsky", TorrentID: "9", AddedAt: now, State: BrushTorrentActive}, "2026-10-06")
+	require.ErrorIs(t, err, ErrBrushTorrentTaken)
+	stats, err := repo.DailyStats(2, "2026-10-06", "2026-10-06")
+	require.NoError(t, err)
+	assert.Empty(t, stats)
+	seen, err := repo.SeenSiteTorrentIDs("hdsky")
+	require.NoError(t, err)
+	assert.True(t, seen["9"])
+}
