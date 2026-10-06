@@ -93,6 +93,11 @@ type upgradeRequest struct {
 	ProxyURL string `json:"proxy_url"`
 }
 
+// upgradeContext 返回升级任务用的 ctx：保留请求里的值，但不随请求结束而取消。
+// 处理器启动后台下载后立即返回，请求 ctx 随之取消；直接用它，下载刚开始就会被中断。
+// 主动取消仍走 Upgrader.Cancel。
+func upgradeContext(r *http.Request) context.Context { return context.WithoutCancel(r.Context()) }
+
 func (s *Server) apiUpgradeStart(w http.ResponseWriter, r *http.Request) {
 	upgrader := version.GetUpgrader()
 
@@ -137,7 +142,7 @@ func (s *Server) apiUpgradeStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := upgrader.Upgrade(r.Context(), targetRelease, req.ProxyURL); err != nil {
+	if err := upgrader.Upgrade(upgradeContext(r), targetRelease, req.ProxyURL); err != nil {
 		writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

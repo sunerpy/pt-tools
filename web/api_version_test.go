@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -136,6 +137,18 @@ func TestApiUpgradeStart_BadInput(t *testing.T) {
 			assert.Contains(t, resp, "error")
 		})
 	}
+}
+
+// 升级任务的 ctx 不能随请求结束而取消：处理器启动后台下载后立即返回，用请求 ctx 下载会被马上中断。
+func TestUpgradeContext_SurvivesRequestCancel(t *testing.T) {
+	type ctxKey struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKey{}, "v"))
+	req := httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil).WithContext(ctx)
+
+	uctx := upgradeContext(req)
+	cancel()
+	assert.NoError(t, uctx.Err())
+	assert.Equal(t, "v", uctx.Value(ctxKey{}), "保留请求里的值")
 }
 
 func TestApiUpgradeProgress(t *testing.T) {
