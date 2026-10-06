@@ -115,7 +115,7 @@ func (s *Server) registerBrushRoutes(mux *http.ServeMux) {
 
 func brushRepo(w http.ResponseWriter) (*models.BrushRepository, bool) {
 	if global.GlobalDB == nil {
-		writeJSONError(w, "数据库未初始化", http.StatusServiceUnavailable)
+		http.Error(w, "数据库未初始化", http.StatusServiceUnavailable)
 		return nil, false
 	}
 	return models.NewBrushRepository(global.GlobalDB.DB), true
@@ -138,23 +138,23 @@ func (s *Server) apiBrushTasks(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		tasks, err := repo.ListTasks()
 		if err != nil {
-			writeJSONError(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		views, err := brushTaskViews(tasks)
 		if err != nil {
-			writeJSONError(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, views)
 	case http.MethodPost:
 		task, status, err := decodeBrushTask(r, &models.BrushTask{})
 		if err != nil {
-			writeJSONError(w, err.Error(), status)
+			http.Error(w, err.Error(), status)
 			return
 		}
 		if err := repo.SaveTask(task); err != nil {
-			writeJSONError(w, brushSaveError(err), brushSaveStatus(err))
+			http.Error(w, brushSaveError(err), brushSaveStatus(err))
 			return
 		}
 		s.writeBrushTask(w, repo, task.ID, http.StatusCreated)
@@ -173,7 +173,7 @@ func (s *Server) apiBrushTaskDetail(w http.ResponseWriter, r *http.Request) {
 	idPart, action, _ := strings.Cut(rest, "/")
 	id64, err := strconv.ParseUint(idPart, 10, 64)
 	if err != nil || id64 == 0 {
-		writeJSONError(w, "无效的刷流任务 ID", http.StatusBadRequest)
+		http.Error(w, "无效的刷流任务 ID", http.StatusBadRequest)
 		return
 	}
 	id := uint(id64)
@@ -193,7 +193,7 @@ func (s *Server) apiBrushTaskDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		listBrushTorrents(w, r, repo, id)
 	default:
-		writeJSONError(w, "未知的刷流接口", http.StatusNotFound)
+		http.Error(w, "未知的刷流接口", http.StatusNotFound)
 	}
 }
 
@@ -204,16 +204,16 @@ func (s *Server) brushTaskCRUD(w http.ResponseWriter, r *http.Request, repo *mod
 	case http.MethodPut:
 		existing, err := repo.GetTask(id)
 		if err != nil {
-			writeJSONError(w, err.Error(), brushLookupStatus(err))
+			http.Error(w, err.Error(), brushLookupStatus(err))
 			return
 		}
 		task, status, err := decodeBrushTask(r, existing)
 		if err != nil {
-			writeJSONError(w, err.Error(), status)
+			http.Error(w, err.Error(), status)
 			return
 		}
 		if err := repo.SaveTask(task); err != nil {
-			writeJSONError(w, brushSaveError(err), brushSaveStatus(err))
+			http.Error(w, brushSaveError(err), brushSaveStatus(err))
 			return
 		}
 		s.writeBrushTask(w, repo, id, http.StatusOK)
@@ -221,11 +221,11 @@ func (s *Server) brushTaskCRUD(w http.ResponseWriter, r *http.Request, repo *mod
 		err := s.brushMonitor().WithTaskLock(id, func() error { return repo.DeleteTask(id) })
 		switch {
 		case errors.Is(err, scheduler.ErrBrushBusy):
-			writeJSONError(w, err.Error(), http.StatusConflict)
+			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, models.ErrBrushTaskNotFound):
-			writeJSONError(w, err.Error(), http.StatusNotFound)
+			http.Error(w, err.Error(), http.StatusNotFound)
 		case err != nil:
-			writeJSONError(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
 			writeJSON(w, map[string]any{"success": true})
 		}
@@ -237,12 +237,12 @@ func (s *Server) brushTaskCRUD(w http.ResponseWriter, r *http.Request, repo *mod
 func (s *Server) writeBrushTask(w http.ResponseWriter, repo *models.BrushRepository, id uint, status int) {
 	task, err := repo.GetTask(id)
 	if err != nil {
-		writeJSONError(w, err.Error(), brushLookupStatus(err))
+		http.Error(w, err.Error(), brushLookupStatus(err))
 		return
 	}
 	views, err := brushTaskViews([]models.BrushTask{*task})
 	if err != nil {
-		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -253,11 +253,11 @@ func (s *Server) writeBrushTask(w http.ResponseWriter, repo *models.BrushReposit
 func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
 	mon := s.brushMonitor()
 	if mon == nil {
-		writeJSONError(w, "刷流服务未启动", http.StatusServiceUnavailable)
+		http.Error(w, "刷流服务未启动", http.StatusServiceUnavailable)
 		return
 	}
 	if _, err := repo.GetTask(id); err != nil {
-		writeJSONError(w, err.Error(), brushLookupStatus(err))
+		http.Error(w, err.Error(), brushLookupStatus(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), brushRunAPITimeout)
@@ -265,10 +265,10 @@ func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *mode
 	res, err := mon.RunTask(ctx, id)
 	switch {
 	case errors.Is(err, scheduler.ErrBrushBusy):
-		writeJSONError(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	case errors.Is(err, models.ErrBrushTaskNotFound):
-		writeJSONError(w, err.Error(), http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	resp := BrushRunResponse{Result: res}
@@ -280,7 +280,7 @@ func (s *Server) runBrushTask(w http.ResponseWriter, r *http.Request, repo *mode
 
 func listBrushTorrents(w http.ResponseWriter, r *http.Request, repo *models.BrushRepository, id uint) {
 	if _, err := repo.GetTask(id); err != nil {
-		writeJSONError(w, err.Error(), brushLookupStatus(err))
+		http.Error(w, err.Error(), brushLookupStatus(err))
 		return
 	}
 	q := r.URL.Query()
@@ -288,7 +288,7 @@ func listBrushTorrents(w http.ResponseWriter, r *http.Request, repo *models.Brus
 	switch state {
 	case "", models.BrushTorrentActive, models.BrushTorrentRemoved, models.BrushTorrentGone:
 	default:
-		writeJSONError(w, "state 只能是 active、removed 或 gone", http.StatusBadRequest)
+		http.Error(w, "state 只能是 active、removed 或 gone", http.StatusBadRequest)
 		return
 	}
 	page, _ := strconv.Atoi(q.Get("page"))
@@ -301,7 +301,7 @@ func listBrushTorrents(w http.ResponseWriter, r *http.Request, repo *models.Brus
 	}
 	rows, total, err := repo.ListTorrents(id, state, page, pageSize)
 	if err != nil {
-		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"items": rows, "total": total, "page": page, "page_size": pageSize})
@@ -321,14 +321,14 @@ func (s *Server) apiBrushStats(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("days"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 1 || v > maxBrushStatDays {
-			writeJSONError(w, fmt.Sprintf("days 应为 1–%d 的整数", maxBrushStatDays), http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("days 应为 1–%d 的整数", maxBrushStatDays), http.StatusBadRequest)
 			return
 		}
 		days = v
 	}
 	resp, err := buildBrushStats(repo, time.Now(), days)
 	if err != nil {
-		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, resp)
