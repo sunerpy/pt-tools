@@ -1071,14 +1071,22 @@ onUnmounted(() => {
           <PtIcon name="search" :size="15" />
         </template>
       </el-input>
-      <el-select v-model="period" class="ui-chip" size="small" data-testid="userinfo-period">
+      <el-select
+        v-model="period"
+        class="ui-chip ui-chip--period"
+        size="small"
+        data-testid="userinfo-period">
         <el-option
           v-for="o in PERIOD_OPTIONS"
           :key="o.value"
           :label="`周期: ${o.label}`"
           :value="o.value" />
       </el-select>
-      <el-select v-model="rowSort" class="ui-chip" size="small" data-testid="userinfo-sort">
+      <el-select
+        v-model="rowSort"
+        class="ui-chip ui-chip--sort"
+        size="small"
+        data-testid="userinfo-sort">
         <el-option
           v-for="o in SORT_OPTIONS"
           :key="o.value"
@@ -1863,6 +1871,18 @@ onUnmounted(() => {
 .ui-chip {
   flex: 0 0 auto;
   width: 150px;
+}
+
+/*
+ * 加了「周期」之后两枚 chip 按文字收窄：「周期: 本周」「排序: 分享率」各自放得下就够。
+ * 都按 150 时左组 788 + 右组 340 超过 1376 下的 1070，右组被挤到第二行、带高 77（画板 40）。
+ */
+.ui-chip--period {
+  width: 104px;
+}
+
+.ui-chip--sort {
+  width: 116px;
 }
 
 .ui-chip :deep(.el-select__wrapper) {
