@@ -188,3 +188,50 @@ func TestPushTorrentToDownloader_ReportsBookkeepingFailure(t *testing.T) {
 	assert.True(t, res.Success, "种子已经在下载器里")
 	assert.Contains(t, res.Message, "本地记录更新失败")
 }
+
+// 刷流推送带上来源与种子信息：download_source、H&R、体积写进记录（自动清理的 H&R 保护要用）；
+// 之后不带信息的手动推送不清掉这些列，来源回到 manual_push。
+func TestPushTorrentToDownloader_SourceAndMeta(t *testing.T) {
+	db := setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	ds := models.DownloaderSetting{Name: "qb-main", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
+	require.NoError(t, db.DB.Create(&ds).Error)
+	disableDiskProtect(t, db)
+
+	ctrl := gomock.NewController(t)
+	dl := sm.NewMockDownloader(ctrl)
+	dl.EXPECT().CheckTorrentExists(gomock.Any()).Return(false, nil).Times(2)
+	dl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).Return(downloader.AddTorrentResult{Success: true, Hash: "h"}, nil).Times(2)
+	dl.EXPECT().Close().Return(nil).Times(2)
+	restore := SwapPushDownloaderFactory(func(models.DownloaderSetting) (downloader.Downloader, error) { return dl, nil })
+	t.Cleanup(restore)
+
+	freeEnd := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	data := makeSizedTorrentBytes(t, "z", gb)
+	res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+		SiteID: "hdsky", TorrentID: "b1", TorrentData: data, DownloaderID: ds.ID, Source: "brush",
+		Meta: &PushTorrentMeta{SizeBytes: gb, HasHR: true, HRSeedTimeH: 72, IsFree: true, FreeLevel: "FREE", FreeEndTime: &freeEnd},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Success)
+
+	var got models.TorrentInfo
+	require.NoError(t, db.DB.Where("site_name = ? AND torrent_id = ?", "hdsky", "b1").First(&got).Error)
+	assert.Equal(t, "brush", got.DownloadSource)
+	assert.True(t, got.HasHR)
+	assert.Equal(t, 72, got.HRSeedTimeH)
+	assert.EqualValues(t, gb, got.TorrentSize)
+	assert.True(t, got.IsFree)
+	assert.Equal(t, "FREE", got.FreeLevel)
+	require.NotNil(t, got.FreeEndTime)
+	assert.True(t, got.FreeEndTime.Equal(freeEnd))
+
+	_, err = PushTorrentToDownloader(context.Background(), PushTorrentRequest{
+		SiteID: "hdsky", TorrentID: "b1", TorrentData: data, DownloaderID: ds.ID,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.DB.Where("site_name = ? AND torrent_id = ?", "hdsky", "b1").First(&got).Error)
+	assert.Equal(t, "manual_push", got.DownloadSource)
+	assert.True(t, got.HasHR, "不带种子信息的推送不清掉已有的 H&R")
+	assert.EqualValues(t, gb, got.TorrentSize)
+}
