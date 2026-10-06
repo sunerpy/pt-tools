@@ -51,9 +51,13 @@ home:
             status: available
             link: /en/sites
           - title: Statistics across sites
-            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, also exportable as an image to share.
+            body: Upload, download, ratio, seeding, bonus points and progress to the next class for every site on one page, with increments and trends for today, this week and this month, also exportable as an image to share.
             status: available
-            link: /en/guide/what-is-pt-tools
+            link: /en/guide/user-stats
+          - title: Daily report
+            body: Each day at a set time, sends every site's upload, download and bonus increments and any login problems to the channels you choose. Off by default.
+            status: available
+            link: /en/guide/user-stats#daily-report
           - title: Search across sites
             body: Search several sites at once, filter and sort by size, seeders and freeleech, and send results straight to a downloader.
             status: available

@@ -51,9 +51,13 @@ home:
             status: available
             link: /sites
           - title: 用户数据统计
-            body: 在一个页面查看所有站点的上传量、下载量、分享率、做种、积分和等级进度，也可以导出为分享图。
+            body: 在一个页面查看所有站点的上传量、下载量、分享率、做种、积分和等级进度，按今日、本周、本月看增量和走势，也可以导出为分享图。
             status: available
-            link: /guide/what-is-pt-tools
+            link: /guide/user-stats
+          - title: 每日战报
+            body: 每天定时把各站当天的上传、下载、魔力增量和登录异常发到选定的通知通道，默认关闭。
+            status: available
+            link: /guide/user-stats#每日战报
           - title: 跨站点搜索
             body: 一次搜索多个站点，按体积、做种数和优惠筛选排序，结果可以直接推送到下载器。
             status: available
