@@ -41,6 +41,10 @@ type Manager struct {
 	attendanceMonitor    *AttendanceMonitor
 	eventCancel          func()
 	stopped              bool
+	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
+	// 手动启动后配置变更照常重启任务；手动停止后配置变更不再把任务拉起来，直到再次手动启动。
+	jobsWanted bool
+	jobsPaused bool
 }
 
 func NewManager() *Manager {
@@ -135,7 +139,13 @@ func (m *Manager) Start(site models.SiteGroup, r models.RSSConfig, runner func(c
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.jobs[k] = &job{cancel: cancel, startedAt: time.Now()}
-	go runner(ctx)
+	// 在启动协程之前登记：等待方（Reload/StopJobs/StopAll）随时 Wait 都能等到这个任务，
+	// 不会出现计数还是 0、Wait 已返回而旧任务稍后才开始运行的窗口。
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		runner(ctx)
+	}()
 }
 
 func (m *Manager) Stop(site models.SiteGroup, rssName string) {
@@ -181,29 +191,28 @@ func (m *Manager) Reload(cfg *models.Config) {
 		global.GetSlogger().Warn("配置未就绪：数据库未初始化，任务不启动")
 		return
 	}
+	// 先停掉旧任务再判断新配置：旧任务带着旧配置，新配置不让运行（下载目录清空等）时它们也必须停下。
+	m.mu.Lock()
+	wasRunning := len(m.jobs) > 0
+	m.mu.Unlock()
+	m.cancelJobsAndWait()
+
 	if cfg == nil || cfg.Global.DownloadDir == "" {
 		global.GetSlogger().Warn("配置未就绪：下载目录为空，任务不启动")
 		return
 	}
-	if !cfg.Global.AutoStart {
+	m.mu.Lock()
+	paused, wanted := m.jobsPaused, m.jobsWanted
+	m.mu.Unlock()
+	if paused {
+		global.GetSlogger().Info("任务已在调度器中手动停止，配置变更后不自动启动")
+		return
+	}
+	// 自动启动只管程序启动时要不要跑；用户手动启动过（或任务正在运行）时，配置变更要按新配置重启。
+	if !cfg.Global.AutoStart && !wanted && !wasRunning {
 		global.GetSlogger().Info("任务设置为手动启动，跳过自动启动")
 		return
 	}
-	// 简化：等待当前执行中的任务结束或超时后重启
-	m.mu.Lock()
-	for _, j := range m.jobs {
-		j.cancel()
-	}
-	done := make(chan struct{})
-	go func() { m.wg.Wait(); close(done) }()
-	m.mu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-	}
-	m.mu.Lock()
-	m.jobs = map[string]*job{}
-	m.mu.Unlock()
 
 	// 初始化下载器管理器
 	m.initDownloaderManager()
@@ -244,7 +253,7 @@ func (m *Manager) Reload(cfg *models.Config) {
 					continue
 				}
 				rr := r
-				m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJobUnified(ctx, rr, impl) })
+				m.Start(site, rr, func(ctx context.Context) { runRSSJobUnified(ctx, rr, impl) })
 			}
 		}
 	}
@@ -427,22 +436,42 @@ func validRSS(raw string) bool {
 	return true
 }
 
-// StopAll 取消所有任务并等待当前执行结束
-func (m *Manager) StopAll() {
+// cancelJobsAndWait 取消全部 RSS 任务，等它们退出（最多 30 秒）后清空任务表。
+func (m *Manager) cancelJobsAndWait() {
 	m.mu.Lock()
-	m.stopped = true
 	for _, j := range m.jobs {
 		j.cancel()
 	}
+	m.mu.Unlock()
 	done := make(chan struct{})
 	go func() { m.wg.Wait(); close(done) }()
-	m.mu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
+		global.GetSlogger().Warn("等待 RSS 任务退出超时（30 秒），继续执行")
 	}
 	m.mu.Lock()
 	m.jobs = map[string]*job{}
+	m.mu.Unlock()
+}
+
+// StopJobs 停止全部 RSS 任务（调度器里的「停止所有任务」）。免费到期、自动删种、竞争度、
+// 登录提醒和签到监控继续运行，配置热重载也照常；之后的配置变更不会把任务重新拉起，直到 StartAll。
+func (m *Manager) StopJobs() {
+	m.mu.Lock()
+	m.jobsPaused, m.jobsWanted = true, false
+	m.mu.Unlock()
+	m.cancelJobsAndWait()
+}
+
+// StopAll 是进程退出前的最终关闭：取消所有任务并等待结束，停掉全部监控器和配置事件订阅。
+// 之后不能再用 StartAll 恢复；调度器里的「停止所有任务」用 StopJobs。
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	m.cancelJobsAndWait()
+	m.mu.Lock()
 	if m.freeEndMonitor != nil {
 		m.freeEndMonitor.Stop()
 		m.freeEndMonitor = nil
@@ -470,8 +499,11 @@ func (m *Manager) StopAll() {
 	m.mu.Unlock()
 }
 
-// StartAll 按配置启动所有任务（不做停止）
+// StartAll 按配置启动所有任务（不做停止），并记下用户要求运行任务。
 func (m *Manager) StartAll(cfg *models.Config) {
+	m.mu.Lock()
+	m.jobsPaused, m.jobsWanted = false, true
+	m.mu.Unlock()
 	for site, sc := range cfg.Sites {
 		if sc.Enabled != nil && *sc.Enabled {
 			// 使用统一的工厂函数创建站点实现
@@ -486,7 +518,7 @@ func (m *Manager) StartAll(cfg *models.Config) {
 					continue
 				}
 				rr := r
-				m.Start(site, rr, func(ctx context.Context) { m.wg.Add(1); defer m.wg.Done(); runRSSJobUnified(ctx, rr, impl) })
+				m.Start(site, rr, func(ctx context.Context) { runRSSJobUnified(ctx, rr, impl) })
 			}
 		}
 	}

@@ -29,6 +29,10 @@ type PeerRatioMonitor struct {
 	downloaderMgr *downloader.DownloaderManager
 	logger        *zap.SugaredLogger
 	running       bool
+	// wg 跟踪 runLoop：Stop 返回前等它退出，被替换的旧实例不会再执行一轮删种或暂停。
+	wg sync.WaitGroup
+	// startDelay 是启动后第一次检查前的等待，测试里调小。
+	startDelay time.Duration
 }
 
 func NewPeerRatioMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManager) *PeerRatioMonitor {
@@ -40,6 +44,7 @@ func NewPeerRatioMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManage
 		db:            db,
 		downloaderMgr: downloaderMgr,
 		logger:        logger,
+		startDelay:    15 * time.Second,
 	}
 }
 
@@ -52,25 +57,36 @@ func (p *PeerRatioMonitor) Start() error {
 	}
 	p.running = true
 
-	go p.runLoop()
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.runLoop()
+	}()
 	p.logger.Info("[竞争度监控] 服务已启动")
 	return nil
 }
 
 func (p *PeerRatioMonitor) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if !p.running {
+		p.mu.Unlock()
 		return
 	}
 	p.cancel()
 	p.running = false
+	p.mu.Unlock()
+	// 锁外等待：正在执行的这一轮跑完、循环退出后才返回
+	p.wg.Wait()
 	p.logger.Info("[竞争度监控] 服务已停止")
 }
 
 func (p *PeerRatioMonitor) runLoop() {
-	time.Sleep(15 * time.Second)
+	// 启动后稍等再开始；可被 Stop 打断，不会在停止之后醒来再跑一轮
+	select {
+	case <-p.ctx.Done():
+		return
+	case <-time.After(p.startDelay):
+	}
 
 	_, eventCh, cancelSub := events.Subscribe(8)
 	defer cancelSub()
