@@ -1438,7 +1438,10 @@ func setupServer(t *testing.T) *Server {
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
 	mgr := newTestManager(t)
-	return NewServer(core.NewConfigStore(db), mgr)
+	srv := NewServer(core.NewConfigStore(db), mgr)
+	// 后注册先执行：等后台任务结束，再由 TempDir 清理数据库目录
+	t.Cleanup(srv.background.Wait)
+	return srv
 }
 
 func TestAPISiteDetailDoesNotExposeCookieFields(t *testing.T) {

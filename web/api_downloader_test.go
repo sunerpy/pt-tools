@@ -1138,6 +1138,7 @@ func setupTestServer(t *testing.T) (*Server, *gorm.DB) {
 
 	store := core.NewConfigStore(global.GlobalDB)
 	server := NewServer(store, nil)
+	t.Cleanup(server.background.Wait)
 
 	return server, db
 }

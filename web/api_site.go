@@ -194,7 +194,7 @@ func (s *Server) listDynamicSites(w http.ResponseWriter, _ *http.Request) {
 		responses[i] = resp
 	}
 	if len(sitesToDisable) > 0 {
-		go s.disableUnavailableSites(sitesToDisable)
+		s.goBackground(func() { s.disableUnavailableSites(sitesToDisable) })
 	}
 
 	writeJSON(w, responses)

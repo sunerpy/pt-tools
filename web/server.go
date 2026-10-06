@@ -55,7 +55,13 @@ type Server struct {
 	// 键里带 URL：换了地址就是换了一台机器，缓存必须失效。
 	clientVersionMu sync.RWMutex
 	clientVersions  map[string]string
+
+	// background 跟踪处理器派生的后台任务（如自动禁用不可用站点），测试据此等任务结束再清理临时目录。
+	background sync.WaitGroup
 }
+
+// goBackground 在后台执行 fn，并计入 background。
+func (s *Server) goBackground(fn func()) { s.background.Go(fn) }
 
 // SetQAHook installs a callback invoked once during Serve, after all production
 // routes are registered. Used by the qa build tag (cmd/web_qa.go) to attach
@@ -975,7 +981,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			result[sg] = resp
 		}
 		if len(sitesToDisable) > 0 {
-			go s.disableUnavailableSites(sitesToDisable)
+			s.goBackground(func() { s.disableUnavailableSites(sitesToDisable) })
 		}
 		writeJSON(w, result)
 	case http.MethodDelete:
