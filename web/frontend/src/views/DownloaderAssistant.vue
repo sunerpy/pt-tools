@@ -160,7 +160,12 @@ async function deleteDead() {
         ? `删除选中的 ${n} 个种子，并删除它们的数据文件（共 ${formatBytes(deadSize.value)}）？删除后无法恢复。`
         : `从下载器里删除选中的 ${n} 个种子？数据文件保留在磁盘上。`,
       "删除失效种子",
-      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+      {
+        type: "warning",
+        confirmButtonText: "删除",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+      },
     );
   } catch {
     return;
@@ -457,8 +462,10 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="站点 / 加上的标签" width="170">
           <template #default="{ row }">
-            <div class="da-name">{{ row.site_name }}</div>
-            <PtTag>{{ row.site }}</PtTag>
+            <div class="da-site">
+              <PtTag>{{ row.site }}</PtTag
+              ><span class="da-sub">{{ row.site_name }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="现有标签 / 分类" min-width="180" class-name="pt-cell-1line">
@@ -696,6 +703,13 @@ onMounted(() => {
 .da-sub {
   font-size: 12px;
   color: var(--pt-t3);
+}
+
+.da-site {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 
 .da-url {
