@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.3](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.2...v1.0.0-rc.3) (2026-10-06)
+
+
+### Features
+
+* **brush:** 刷流任务：按条件选种、按规则删种、收益统计 ([#605](https://github.com/sunerpy/pt-tools/issues/605)) ([d30ace9](https://github.com/sunerpy/pt-tools/commit/d30ace94359d5a964f1d11c6c5203657b9b0bc50))
+* **userinfo:** 站点数据每日快照、周期增量与每日战报 ([#602](https://github.com/sunerpy/pt-tools/issues/602)) ([4b8c86b](https://github.com/sunerpy/pt-tools/commit/4b8c86bfd4070e02417f66bf1d900395c579494c))
+
+
+### Bug Fixes
+
+* **site:** 走过代理的请求之后，没配代理的请求不再被带进那个代理 ([#604](https://github.com/sunerpy/pt-tools/issues/604)) ([e7ecce2](https://github.com/sunerpy/pt-tools/commit/e7ecce23b1d4946f931eaac9dbe327a6b4cb0dda))
+
 ## [1.0.0-rc.2](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-10-06)
 
 
