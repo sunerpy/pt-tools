@@ -429,3 +429,33 @@ func TestDailyReport_IncludesBrush(t *testing.T) {
 	assert.Contains(t, text, "· 天空刷流：上传 10.00 GiB")
 	assert.Less(t, strings.Index(text, "馒头刷流"), strings.Index(text, "天空刷流"), "按上传排序")
 }
+
+// 刷流一节的边界：没有表、当天全是零、只有一个任务有收益、超过 5 个任务、任务名缺失、读库失败。
+func TestDailyReport_BrushLinesEdgeCases(t *testing.T) {
+	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now)
+	job := NewDailyReportJob(f.cfg)
+	ctx, day := context.Background(), "2026-10-06"
+	assert.Nil(t, job.brushLines(ctx, day), "没有刷流表")
+
+	require.NoError(t, f.db.AutoMigrate(&models.BrushTask{}, &models.BrushDailyStat{}))
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 1, Day: day}).Error)
+	assert.Nil(t, job.brushLines(ctx, day), "当天全是零")
+
+	gib := int64(1 << 30)
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 2, Day: day, Uploaded: gib}).Error)
+	assert.Equal(t, []string{"🚀 今日刷流：上传 1.00 GiB · 下载 0 B · 加入 0 · 删除 0"}, job.brushLines(ctx, day),
+		"只有一个任务有收益时不逐个列出")
+
+	for id := uint(3); id <= 7; id++ {
+		require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: id, Day: day, Uploaded: int64(id) * gib}).Error)
+	}
+	lines := job.brushLines(ctx, day)
+	require.Len(t, lines, 1+5+1)
+	assert.Equal(t, "· 任务 7：上传 7.00 GiB · 下载 0 B", lines[1], "没有任务名时写编号")
+	assert.Equal(t, "· 其余 1 个刷流任务省略", lines[6])
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	assert.Nil(t, job.brushLines(cancelled, day), "读库失败时这一节不出")
+}
