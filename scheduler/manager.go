@@ -669,6 +669,13 @@ func (m *Manager) SetDeadTorrentMonitor(mon *DeadTorrentMonitor) {
 	m.deadTorrentMonitor = mon
 }
 
+// GetDeadTorrentMonitor 返回失效种子定时扫描（未接线时为 nil）。
+func (m *Manager) GetDeadTorrentMonitor() *DeadTorrentMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deadTorrentMonitor
+}
+
 // SetBrushMonitor 登记刷流监控；替换旧实例时先停掉旧的。
 func (m *Manager) SetBrushMonitor(mon *BrushMonitor) {
 	m.mu.Lock()
