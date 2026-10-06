@@ -282,6 +282,7 @@ type DeadTorrent struct {
 	Size        int64      `json:"size"`
 	Progress    float64    `json:"progress"`
 	Site        string     `json:"site,omitempty"`
+	SiteName    string     `json:"site_name,omitempty"`
 	TrackerHost string     `json:"tracker_host"`
 	Reason      DeadReason `json:"reason"`
 	Message     string     `json:"message"`
@@ -364,7 +365,10 @@ func ScanDeadTorrents(ctx context.Context, dl downloader.Downloader, r *v2.Track
 			urls = append(urls, tr.URL)
 		}
 		if site, host, ok := resolveSite(r, t, urls); ok {
-			d.Site, d.TrackerHost = site, host
+			d.Site, d.SiteName, d.TrackerHost = site, site, host
+			if def, ok := r.Definition(site); ok && def.Name != "" {
+				d.SiteName = def.Name
+			}
 		} else {
 			d.TrackerHost = firstHost(urls)
 		}

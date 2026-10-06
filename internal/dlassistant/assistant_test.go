@@ -195,7 +195,7 @@ func TestScanAndDeleteDeadTorrents(t *testing.T) {
 	got, err := ScanDeadTorrents(context.Background(), f, resolver())
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	assert.Equal(t, DeadTorrent{Hash: "dead", Name: "dead one", Size: 9, Site: "hdsky", TrackerHost: "tracker.hdsky.me", Reason: DeadUnregistered, Message: "Unregistered torrent"}, got[0])
+	assert.Equal(t, DeadTorrent{Hash: "dead", Name: "dead one", Size: 9, Site: "hdsky", SiteName: "HDSky", TrackerHost: "tracker.hdsky.me", Reason: DeadUnregistered, Message: "Unregistered torrent"}, got[0])
 
 	res, err := DeleteDeadTorrents(context.Background(), f, []string{"DEAD", "ok", "gone", "err"}, true)
 	require.NoError(t, err)
