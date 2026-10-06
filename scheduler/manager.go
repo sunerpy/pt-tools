@@ -39,6 +39,7 @@ type Manager struct {
 	peerRatioMonitor     *PeerRatioMonitor
 	loginReminderMonitor *LoginReminderMonitor
 	attendanceMonitor    *AttendanceMonitor
+	dailyReportJob       *DailyReportJob
 	eventCancel          func()
 	stopped              bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
@@ -484,6 +485,10 @@ func (m *Manager) StopAll() {
 		m.peerRatioMonitor.Stop()
 		m.peerRatioMonitor = nil
 	}
+	if m.dailyReportJob != nil {
+		m.dailyReportJob.Stop()
+		m.dailyReportJob = nil
+	}
 	if m.attendanceMonitor != nil {
 		m.attendanceMonitor.Stop()
 		m.attendanceMonitor = nil
@@ -630,6 +635,16 @@ func (m *Manager) SetAttendanceMonitor(mon *AttendanceMonitor) {
 		m.attendanceMonitor.Stop()
 	}
 	m.attendanceMonitor = mon
+}
+
+// SetDailyReportJob 登记每日战报任务；替换旧实例时先停掉旧的。
+func (m *Manager) SetDailyReportJob(job *DailyReportJob) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.dailyReportJob != nil && m.dailyReportJob != job {
+		m.dailyReportJob.Stop()
+	}
+	m.dailyReportJob = job
 }
 
 // GetAttendanceMonitor 返回每日签到监控，没有接线时为 nil。
