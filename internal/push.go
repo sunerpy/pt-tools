@@ -146,8 +146,13 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 
 		pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
 		if pendingErr != nil {
-			sLogger().Warnf("[磁盘保护] %s: 查询 in-flight pending 失败，仅以 reserved 推算: %v", dlSetting.Name, pendingErr)
-			pendingBytes = 0
+			// fail-closed：读不到下载中任务的待占用空间时，可用空间会被高估这部分体积
+			sLogger().Warnf("[磁盘保护] %s: 查询下载中任务的待占用空间失败，磁盘保护启用故拒绝推送: %v", dlSetting.Name, pendingErr)
+			return &PushTorrentResult{
+				Success:     false,
+				TorrentHash: torrentHash,
+				Message:     fmt.Sprintf("无法读取下载中任务的待占用空间，已拒绝推送: %v", pendingErr),
+			}, nil
 		}
 		budget := GetDiskBudget()
 		effectiveFreeBytes := freeSpace - pendingBytes - budget.Reserved()

@@ -480,8 +480,10 @@ func processSingleTorrentWithDownloader(
 
 		pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
 		if pendingErr != nil {
-			sLogger().Warnf("[磁盘保护] %s: 查询 in-flight pending 失败，仅以 reserved 推算: %v", dl.GetName(), pendingErr)
-			pendingBytes = 0
+			// 同样 fail-closed：下载中任务的待占用量读不到时，可用空间会被高估这部分体积，
+			// 一批推送就可能越过保底线。拒绝本轮，种子文件留到下一轮再试。
+			sLogger().Warnf("[磁盘保护] %s: 查询下载中任务的待占用空间失败，磁盘保护启用故拒绝推送: %v", dl.GetName(), pendingErr)
+			return downloader.ErrInsufficientSpace
 		}
 		budget := GetDiskBudget()
 		effectiveFreeBytes := freeSpace - pendingBytes - budget.Reserved()
