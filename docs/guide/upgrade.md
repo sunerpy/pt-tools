@@ -88,6 +88,11 @@ pt-tools secret import --force < secret.b64
 
 也可以不写文件，通过环境变量 `PT_TOOLS_SECRET_KEY` 提供 base64 形式的密钥，它的优先级高于 `secret.key`。
 
+启动时 pt-tools 会检查密钥，以下两种情况拒绝启动，日志里写明原因：
+
+- `secret.key` 存在但读不出或格式不对（应为 64 位十六进制）。pt-tools 不会覆盖它，请换回正确的文件，或用 `secret import` 导入备份。
+- `secret.key` 不存在，数据库里却已有加密保存的 Cookie 或通知凭证，通常是只恢复了数据库或数据目录没挂载对。把原来的 `secret.key` 放回去再启动即可。确认原密钥已经丢失时，设置环境变量 `PT_TOOLS_ACCEPT_NEW_SECRET_KEY=1` 启动一次，pt-tools 会启用新密钥，之后重新填写站点 Cookie 和通知凭证。
+
 ## 清理日志与暂存文件
 
 日志、暂存的 `.torrent` 文件和旧的配置备份会随时间累积。可以在「规则 → 自动清理」页面底部的「清理工作目录」中先预览、再清理，也可以使用命令行：

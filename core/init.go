@@ -40,6 +40,11 @@ func InitRuntime() (*zap.Logger, error) {
 		global.GlobalLogger = logger
 		global.GetSlogger().Info("日志系统初始化完成")
 
+		if keyErr := checkSecretKeyFile(); keyErr != nil {
+			initErr = keyErr
+			return
+		}
+
 		gormLg := zapgorm2.Logger{
 			ZapLogger:     global.GlobalLogger,
 			LogLevel:      glogger.Silent,
@@ -61,6 +66,11 @@ func InitRuntime() (*zap.Logger, error) {
 			return
 		}
 		global.GetSlogger().Info("数据库初始化完成")
+
+		if keyErr := checkGeneratedSecretKey(global.GlobalDB.DB); keyErr != nil {
+			initErr = keyErr
+			return
+		}
 
 		migrationService := migration.NewMigrationService(global.GlobalDB.DB)
 		if migrationService.IsMigrationNeeded() {
