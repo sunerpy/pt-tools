@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // validateAndNormalizeRSS checks an entry against existing RSS entries; callers handle whole-list error context.
@@ -19,7 +20,7 @@ func validateAndNormalizeRSS(existing []models.RSSConfig, entry models.RSSConfig
 	normalized := strings.TrimSpace(strings.ToLower(entry.URL))
 	for _, r := range existing {
 		if strings.TrimSpace(strings.ToLower(r.URL)) == normalized {
-			return models.RSSConfig{}, fmt.Errorf("RSS 的 URL 与已有订阅重复: %s", entry.URL)
+			return models.RSSConfig{}, fmt.Errorf("RSS 的 URL 与已有订阅重复: %s", utils.SanitizeURL(entry.URL))
 		}
 	}
 	if entry.IntervalMinutes < models.MinIntervalMinutes {

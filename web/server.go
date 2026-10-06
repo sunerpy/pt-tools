@@ -33,6 +33,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/utils"
 	"github.com/sunerpy/pt-tools/version"
 )
 
@@ -1095,7 +1096,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		global.GetSlogger().Infof("[RSS] 保存站点配置: site=%s, rss_count=%d", name, len(sc.RSS))
 		for i, r := range sc.RSS {
-			global.GetSlogger().Infof("[RSS] RSS[%d]: name=%s, url=%s", i, r.Name, r.URL)
+			global.GetSlogger().Infof("[RSS] RSS[%d]: name=%s, url=%s", i, r.Name, utils.SanitizeURL(r.URL))
 		}
 		if err := s.store.UpsertSiteWithRSS(sg, sc); err != nil {
 			global.GetSlogger().Errorf("[RSS] 保存站点配置失败: site=%s, err=%v", name, err)
@@ -1143,7 +1144,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		// 先查询要删除的 RSS 信息用于日志
 		var rssToDelete models.RSSSubscription
 		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).First(&rssToDelete).Error; err == nil {
-			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, rssToDelete.URL)
+			global.GetSlogger().Infof("[RSS] 删除 RSS 详情: name=%s, url=%s", rssToDelete.Name, utils.SanitizeURL(rssToDelete.URL))
 		}
 		if err := db.Where("site_id = ? AND id = ?", site.ID, uint(rid)).Delete(&models.RSSSubscription{}).Error; err != nil {
 			global.GetSlogger().Errorf("[RSS] 删除 RSS 失败: site=%s, rss_id=%d, err=%v", name, rid, err)

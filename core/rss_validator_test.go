@@ -38,6 +38,13 @@ func TestValidateAndNormalizeRSS(t *testing.T) {
 			wantErr:  "RSS 的 URL 与已有订阅重复: http://rss.example/feed",
 		},
 		{
+			// 错误会回给界面并写进日志，订阅地址里的 passkey 要脱敏
+			name:     "duplicate url error redacts passkey",
+			existing: []models.RSSConfig{{Name: "old", URL: "https://pt.example/torrentrss.php?passkey=TOPSECRET"}},
+			entry:    models.RSSConfig{Name: "new", URL: "https://pt.example/torrentrss.php?passkey=TOPSECRET", IntervalMinutes: 10},
+			wantErr:  "RSS 的 URL 与已有订阅重复: https://pt.example/torrentrss.php?passkey=%2A%2A%2A",
+		},
+		{
 			name:     "interval clamped to min",
 			existing: nil,
 			entry: models.RSSConfig{

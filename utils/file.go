@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -122,4 +123,15 @@ func SanitizeURL(rawURL string) string {
 
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+// RedactURLError 把错误链里 *url.Error 的地址换成脱敏后的地址，返回原错误。
+// net/http 的传输错误会把完整请求地址（RSS、种子下载地址常带 passkey）写进错误文本。
+// 要在包装之前调用：fmt.Errorf 包装时就把错误文本定下了。
+func RedactURLError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.URL != "" {
+		uerr.URL = SanitizeURL(uerr.URL)
+	}
+	return err
 }
