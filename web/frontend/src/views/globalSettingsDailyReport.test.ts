@@ -143,4 +143,20 @@ describe("系统设置：每日战报", () => {
     await vi.waitFor(() => expect(ui.success).toHaveBeenCalled());
     expect(api.saveReport).not.toHaveBeenCalled();
   });
+
+  it("战报设置读不回来：整段禁用并说明，保存时不会谎称战报已保存", async () => {
+    api.getReport.mockRejectedValue(new Error("502"));
+    api.saveGlobal.mockResolvedValue(undefined);
+    const Page = (await import("./GlobalSettings.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid=daily-report-load-failed]")).toBeTruthy(),
+    );
+    const sw = document.querySelector<HTMLElement>("[data-testid=daily-report-enabled]")!;
+    expect(sw.classList.contains("is-disabled")).toBe(true);
+    sw.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sw.classList.contains("is-checked")).toBe(false);
+    expect(api.saveReport).not.toHaveBeenCalled();
+  });
 });

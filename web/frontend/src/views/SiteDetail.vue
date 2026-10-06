@@ -16,12 +16,13 @@ import {
   sitesApi,
   type TaskItem,
   tasksApi,
-  type DailyPoint,
+  type UserInfoHistoryResponse,
   type UserInfoResponse,
   userInfoApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
+import { dailyUploadSeries } from "@/utils/dailySeries";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -236,7 +237,7 @@ watch(siteName, (name, prev) => {
   loginState.value = null;
   siteAttendance.value = null;
   siteStats.value = null;
-  siteHistory.value = [];
+  siteHistory.value = null;
   siteTasks.value = [];
   sitePushed.value = [];
   void loadDetail();
@@ -709,15 +710,18 @@ const attendanceToday = computed(() => {
 });
 const signing = ref(false);
 const siteStats = ref<UserInfoResponse | null>(null);
-/** 最近 30 天每天的数据与增量（每日快照）；拿不到时为空，卡片里就不画走势 */
-const siteHistory = ref<DailyPoint[]>([]);
-/** 30 天内每天的上传增量，用来画走势柱；第一天没有基线时不算 */
-const uploadTrend = computed(() =>
-  siteHistory.value.filter((p) => p.spanDays > 0).map((p) => p.deltaUploaded),
+/** 最近 30 天每天的数据与增量（每日快照）；拿不到时为 null，卡片里就不画走势 */
+const siteHistory = ref<UserInfoHistoryResponse | null>(null);
+/** 30 天每天一格的上传增量：缺快照的日子补 0，柱子之间的间隔就是真实的天数 */
+const uploadTrend = computed(() => {
+  const h = siteHistory.value;
+  return h ? dailyUploadSeries(h.points, h.from, h.to) : [];
+});
+/** 至少有一天算得出增量才画（只有一份快照时没有可比的基线） */
+const hasUploadTrend = computed(() =>
+  (siteHistory.value?.points ?? []).some((p) => p.spanDays > 0),
 );
-const uploadTrendTotal = computed(() =>
-  siteHistory.value.filter((p) => p.spanDays > 0).reduce((n, p) => n + p.deltaUploaded, 0),
-);
+const uploadTrendTotal = computed(() => uploadTrend.value.reduce((n, v) => n + v, 0));
 const siteTasks = ref<TaskItem[]>([]);
 const sitePushed = ref<TaskItem[]>([]);
 const deleting = ref(false);
@@ -741,7 +745,7 @@ async function loadSideCards() {
   loginState.value = (states ?? []).find((st) => st.site_name === name) ?? null;
   siteAttendance.value = (attendanceList ?? []).find((a) => a.site_name === name) ?? null;
   siteStats.value = stats;
-  siteHistory.value = history?.points ?? [];
+  siteHistory.value = history;
   siteTasks.value = tasks?.items ?? [];
   sitePushed.value = pushed?.items ?? [];
 }
@@ -1419,10 +1423,7 @@ function ruleNameOf(id: number): string {
               <span class="sd-kv__k">更新于</span>
               <span class="sd-kv__v">{{ formatWhen(siteStats.lastUpdate) }}</span>
             </li>
-            <li
-              v-if="uploadTrend.length > 1"
-              class="sd-kv__row sd-trend"
-              data-testid="site-upload-trend">
+            <li v-if="hasUploadTrend" class="sd-kv__row sd-trend" data-testid="site-upload-trend">
               <span class="sd-kv__k">30 天上传 +{{ formatTB(uploadTrendTotal) }}</span>
               <PtBars
                 :values="uploadTrend"

@@ -60,6 +60,8 @@ const form = ref<GlobalSettings>({
  */
 const attendanceForm = ref<AttendanceSettings>({ window_start: "08:00", window_end: "10:00" });
 const attendanceSaved = ref<AttendanceSettings | null>(null);
+/** 签到时间窗读不回来：这一段禁用并说明，免得用户改了、点保存、看到「保存成功」却什么都没写 */
+const attendanceLoadFailed = ref(false);
 
 /**
  * 每日战报也走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第三步。
@@ -68,6 +70,8 @@ const attendanceSaved = ref<AttendanceSettings | null>(null);
 const reportForm = ref<DailyReportSettings>({ enabled: false, time: "22:00", channel_ids: [] });
 const reportSaved = ref<DailyReportSettings | null>(null);
 const reportChannels = ref<NotificationConfig[]>([]);
+/** 同上：战报设置读不回来时整段禁用 */
+const reportLoadFailed = ref(false);
 
 function sameReport(a: DailyReportSettings, b: DailyReportSettings): boolean {
   return (
@@ -147,8 +151,10 @@ async function loadData() {
     const att = await attendanceApi.getSettings();
     attendanceForm.value = { ...att };
     attendanceSaved.value = { ...att };
+    attendanceLoadFailed.value = false;
   } catch {
     attendanceSaved.value = null;
+    attendanceLoadFailed.value = true;
   }
   const [report, channels] = await Promise.all([
     userInfoApi.getDailyReport().catch(() => null),
@@ -158,8 +164,10 @@ async function loadData() {
   if (report) {
     reportForm.value = { ...report, channel_ids: [...(report.channel_ids ?? [])] };
     reportSaved.value = { ...report, channel_ids: [...(report.channel_ids ?? [])] };
+    reportLoadFailed.value = false;
   } else {
     reportSaved.value = null;
+    reportLoadFailed.value = true;
   }
 }
 
@@ -412,10 +420,18 @@ async function save() {
           <span>每日签到</span>
         </div>
         <div class="settings-body">
+          <div
+            v-if="attendanceLoadFailed"
+            class="pt-note pt-note--warn"
+            data-testid="attendance-load-failed">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>签到时间窗读取失败，这一段暂时不能修改；刷新页面重试</span>
+          </div>
           <div class="field-row">
             <el-form-item label="签到时间窗开始">
               <el-time-select
                 v-model="attendanceForm.window_start"
+                :disabled="attendanceLoadFailed"
                 start="00:00"
                 step="00:15"
                 end="23:45"
@@ -428,6 +444,7 @@ async function save() {
             <el-form-item label="签到时间窗结束">
               <el-time-select
                 v-model="attendanceForm.window_end"
+                :disabled="attendanceLoadFailed"
                 start="00:15"
                 step="00:15"
                 end="23:45"
@@ -443,8 +460,18 @@ async function save() {
           <span>每日战报</span>
         </div>
         <div class="settings-body">
+          <div
+            v-if="reportLoadFailed"
+            class="pt-note pt-note--warn"
+            data-testid="daily-report-load-failed">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>每日战报设置读取失败，这一段暂时不能修改；刷新页面重试</span>
+          </div>
           <el-form-item label="开启每日战报">
-            <el-switch v-model="reportForm.enabled" data-testid="daily-report-enabled" />
+            <el-switch
+              v-model="reportForm.enabled"
+              :disabled="reportLoadFailed"
+              data-testid="daily-report-enabled" />
             <div class="field-tip">
               每天在设定时刻（再错开几分钟）把当天各站的上传、下载、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
             </div>
@@ -453,6 +480,7 @@ async function save() {
             <el-form-item label="发送时刻">
               <el-time-select
                 v-model="reportForm.time"
+                :disabled="reportLoadFailed"
                 start="00:00"
                 step="00:15"
                 end="23:45"
@@ -463,6 +491,7 @@ async function save() {
             <el-form-item label="接收通道">
               <el-select
                 v-model="reportForm.channel_ids"
+                :disabled="reportLoadFailed"
                 multiple
                 collapse-tags
                 placeholder="选择通知通道"
