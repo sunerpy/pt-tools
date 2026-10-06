@@ -43,6 +43,9 @@ type Reply struct {
 	Text       string
 	Buttons    [][]Button
 	SilentDrop bool
+	// Failed 表示命令没做成（参数不对、服务不可用、执行出错），Text 里写了原因。
+	// 处理器照常返回 nil error 让回复发出去，审计据此记为失败而不是 success。
+	Failed bool
 }
 
 type CommandReply = Reply
