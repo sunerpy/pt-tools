@@ -4,20 +4,22 @@
 
 每项都先扫描或预览，勾选要处理的种子后才执行；执行时 pt-tools 会逐个重新核对，预览之后种子有了变化的会跳过，结果里会写明跳过和失败的原因。页面上方选择要处理的下载器，只列出已启用的下载器。
 
-tracker 地址里带着 passkey。页面上显示的地址已经把 passkey、`credential` 一类参数和路径里的长串密钥遮住，替换时用的是下载器里的完整地址。
+一次扫描或预览最多检查 20000 个种子，种子更多时页面会写明只检查了前 20000 个。同一台下载器同一时间只能进行一项扫描或执行；一次操作超过 10 分钟会停止，已经做完的修改不会撤回。
+
+tracker 地址里带着 passkey。页面上显示的地址已经把 passkey、`credential` 一类参数和路径里的长串密钥遮住，tracker 消息里的地址和密钥也一样；替换时用的是下载器里的完整地址。
 
 ## 失效种子
 
 站点删除了种子或者换了种之后，下载器里的这个种子再也连不上 tracker，tracker 会回复「未注册」或「种子不存在」。点「扫描」后，pt-tools 逐个读取种子的 tracker 状态，满足以下两条的列为失效种子：
 
-- 至少一个 tracker 回复未注册（unregistered、torrent not registered、未注册）或不存在（torrent not found、种子不存在、种子已被删除等）；
+- 至少一个 tracker 回复未注册（unregistered torrent、torrent not registered、未注册）或不存在（torrent not found、种子不存在、种子已被删除等）；
 - 没有任何 tracker 在正常工作。
 
-回复里提到 passkey、用户、账号、分享率或封禁的不算失效：那是账号的问题，种子本身还在，删掉它会丢掉做种记录。
+回复里提到 passkey、用户、账号、分享率、封禁或客户端的不算失效：那是账号的问题，种子本身还在，删掉它会丢掉做种记录。
 
 勾选后点「删除选中 N 个」。默认只从下载器里删除种子、保留数据文件；勾上「同时删除数据文件」时连文件一起删，删除后无法恢复。删除前会逐个重新读取 tracker 状态，已经恢复正常的种子不删。
 
-扫描要为每个种子请求一次下载器，种子多时需要几十秒。
+qBittorrent 要逐个种子读取 tracker 状态，种子多时扫描需要几十秒；Transmission 一次读完。
 
 ## 补站点标签
 
@@ -27,17 +29,18 @@ pt-tools 按 tracker 地址认出种子属于哪个站点（见下文[按 tracke
 
 ## 替换 tracker
 
-站点换了 tracker 域名，或者重置了 passkey 之后，下载器里旧种子的 tracker 地址需要改成新的。填写「原内容」和「替换成」后点「预览」，列出 tracker 地址里含有原内容的种子，以及替换后的地址。
+站点换了 tracker 域名，或者重置了 passkey 之后，下载器里旧种子的 tracker 地址需要改成新的。填写「原内容」和「替换成」后点「预览」，逐条列出含有原内容的 tracker 地址和替换后的地址，一个种子有几个这样的地址就列几行。勾选要替换的地址后点「替换选中 N 个地址」，只改勾选的这些；预览之后地址有了变化的不改。
 
 - 原内容至少 3 个字，替换的是地址里第一次出现的原内容。
 - 替换后的地址必须仍是 http、https 或 udp 地址，否则这一项报错、不修改。
 - 改了原内容或替换成之后，要重新预览才能执行，防止按没有预览过的内容替换。
+- 一个种子的几个地址逐个修改。中途失败时，结果里会写明这个种子已经改了几个地址。
 
 qBittorrent 和 Transmission 都支持修改 tracker：Transmission 4.0 起整份更新 tracker 列表（分层保持不变），更早的版本逐个替换。下载器不支持时页面会提示只能预览。
 
 ## 定时扫描
 
-在「定时扫描」里开启后，pt-tools 按设定的间隔（6–168 小时，默认 24 小时）扫描所有已启用的下载器，发现新的失效种子时发一条通知到选定的通道。开启时至少要选一个通知通道。
+在「定时扫描」里开启后，pt-tools 按设定的间隔（6–168 小时，默认 24 小时）扫描所有已启用的下载器，发现新的失效种子时发一条通知到选定的通道。开启时至少要选一个已启用的通知通道。
 
 - 只发通知，不会自动删除任何种子。
 - 同一批失效种子只通知一次；出现新的失效种子时再发一条，列出全部。失效种子只是变少时不再通知。
@@ -51,14 +54,14 @@ pt-tools 先按主机名比对 tracker 地址和内置站点的地址，再比�
 
 ## 接口
 
-| 方法与路径                                                        | 说明                                                      |
-| ----------------------------------------------------------------- | --------------------------------------------------------- |
-| `GET /api/downloader-assistant/dead?downloader_id=`               | 扫描失效种子                                              |
-| `POST /api/downloader-assistant/dead`                             | 删除 `{downloader_id, hashes, remove_data}`               |
-| `GET /api/downloader-assistant/site-tags?downloader_id=`          | 列出缺站点标签的种子                                      |
-| `POST /api/downloader-assistant/site-tags`                        | 补标签 `{downloader_id, items: [{hash, site}]}`           |
-| `GET /api/downloader-assistant/trackers?downloader_id=&from=&to=` | 预览替换；`supported` 为 false 表示下载器不支持修改       |
-| `POST /api/downloader-assistant/trackers`                         | 执行替换 `{downloader_id, from, to, hashes}`              |
-| `GET`、`PUT /api/downloader-assistant/dead-scan`                  | 读写定时扫描设置 `{enabled, interval_hours, channel_ids}` |
+| 方法与路径                                                        | 说明                                                                          |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `GET /api/downloader-assistant/dead?downloader_id=`               | 扫描失效种子                                                                  |
+| `POST /api/downloader-assistant/dead`                             | 删除 `{downloader_id, hashes, remove_data}`                                   |
+| `GET /api/downloader-assistant/site-tags?downloader_id=`          | 列出缺站点标签的种子                                                          |
+| `POST /api/downloader-assistant/site-tags`                        | 补标签 `{downloader_id, items: [{hash, site}]}`                               |
+| `GET /api/downloader-assistant/trackers?downloader_id=&from=&to=` | 预览替换；`supported` 为 false 表示下载器不支持修改                           |
+| `POST /api/downloader-assistant/trackers`                         | 执行替换 `{downloader_id, from, to, selections: [{hash, id}]}`，`id` 取自预览 |
+| `GET`、`PUT /api/downloader-assistant/dead-scan`                  | 读写定时扫描设置 `{enabled, interval_hours, channel_ids}`                     |
 
-都要求登录，一次最多处理 2000 个种子。执行接口返回 `{done, skipped, failed}`，后两项逐个写明种子和原因。
+都要求登录。扫描和预览返回的 `total`、`scanned` 是下载器里的种子总数和这次检查的个数。执行接口一次最多处理 2000 项，返回 `{done, skipped, failed}`，后两项逐个写明种子和原因。同一台下载器已有操作在进行时返回 409，超过时限返回 504。
