@@ -1884,6 +1884,7 @@ export interface AssistantDeadTorrent {
   size: number;
   progress: number;
   site?: string;
+  site_name?: string;
   tracker_host: string;
   reason: AssistantDeadReason;
   message: string;

@@ -306,7 +306,7 @@ onMounted(() => {
         :options="TABS"
         :props="{ label: 'label', value: 'value' }"
         data-testid="da-tabs" />
-      <template v-if="currentDownloader" #note>{{ currentDownloader.name }}</template>
+      <template v-if="currentDownloader && !isMobile" #note>{{ currentDownloader.name }}</template>
     </PtToolbar>
 
     <!-- 失效种子 -->
@@ -362,7 +362,9 @@ onMounted(() => {
         <el-table-column label="种子" min-width="260" class-name="pt-cell-strong">
           <template #default="{ row }">
             <div class="da-name">{{ row.name }}</div>
-            <div class="da-sub">{{ row.site || "未识别的站点" }} · {{ row.tracker_host }}</div>
+            <div class="da-sub">
+              {{ row.site_name || row.site || "未识别的站点" }} · {{ row.tracker_host }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column
@@ -394,7 +396,7 @@ onMounted(() => {
           <template #title>{{ d.name }}</template>
           <template #meta>
             <PtTag>{{ deadReasonLabel(d.reason) }}</PtTag>
-            <span>{{ d.site || d.tracker_host }}</span>
+            <span>{{ d.site_name || d.site || d.tracker_host }}</span>
             <span>{{ formatBytes(d.size) }}</span>
             <span class="da-row-full">{{ d.message }}</span>
           </template>
@@ -453,9 +455,10 @@ onMounted(() => {
             <div class="da-sub">{{ row.tracker_host }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="站点" width="140">
+        <el-table-column label="站点 / 加上的标签" width="170">
           <template #default="{ row }">
-            <PtTag>{{ row.site_name }}</PtTag>
+            <div class="da-name">{{ row.site_name }}</div>
+            <PtTag>{{ row.site }}</PtTag>
           </template>
         </el-table-column>
         <el-table-column label="现有标签 / 分类" min-width="180" class-name="pt-cell-1line">
@@ -476,8 +479,8 @@ onMounted(() => {
           </template>
           <template #title>{{ t.name }}</template>
           <template #meta>
-            <PtTag>{{ t.site_name }}</PtTag>
-            <span>{{ t.tracker_host }}</span>
+            <PtTag>{{ t.site }}</PtTag>
+            <span>{{ t.site_name }} · {{ t.tracker_host }}</span>
             <span>{{ [t.tags, t.category].filter(Boolean).join(" · ") || "无标签" }}</span>
           </template>
         </PtRowCard>
@@ -553,8 +556,8 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="原地址 → 新地址" min-width="360">
           <template #default="{ row }">
-            <div class="da-url">{{ row.old }}</div>
-            <div class="da-url da-url--new">{{ row.new }}</div>
+            <div class="da-url"><span class="da-url__k">原</span>{{ row.old }}</div>
+            <div class="da-url da-url--new"><span class="da-url__k">新</span>{{ row.new }}</div>
           </template>
         </el-table-column>
       </el-table>
@@ -570,8 +573,10 @@ onMounted(() => {
           </template>
           <template #title>{{ m.name }}</template>
           <template #meta>
-            <span class="da-url da-row-full">{{ m.old }}</span>
-            <span class="da-url da-url--new da-row-full">{{ m.new }}</span>
+            <span class="da-url da-row-full"><span class="da-url__k">原</span>{{ m.old }}</span>
+            <span class="da-url da-url--new da-row-full"
+              ><span class="da-url__k">新</span>{{ m.new }}</span
+            >
           </template>
         </PtRowCard>
       </div>
@@ -702,6 +707,12 @@ onMounted(() => {
 
 .da-url--new {
   color: var(--pt-t1);
+}
+
+.da-url__k {
+  margin-right: 6px;
+  font-family: var(--pt-font-family);
+  color: var(--pt-t3);
 }
 
 .da-cards {
