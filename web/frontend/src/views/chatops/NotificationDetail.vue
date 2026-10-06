@@ -6,6 +6,7 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
+import { isLoopbackListenAddr } from "@/utils/listenAddr";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
@@ -140,6 +141,20 @@ const credRules = computed<FormRules>(() => {
     case "qq_onebot":
       return {
         listen_addr: [{ required: true, message: "请填写监听地址", trigger: "blur" }],
+        access_token: [
+          {
+            /* 后端在监听非本机地址且 token 为空时拒绝启动通道：反向 WS 的 user_id 由连接方自报，
+               没有 token，能连上端口的人就能冒充管理员发命令 */
+            validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+              if (!value?.trim() && !isLoopbackListenAddr(conf.listen_addr || "")) {
+                callback(new Error("监听地址不是本机地址时必须填写 Access Token"));
+              } else {
+                callback();
+              }
+            },
+            trigger: "blur",
+          },
+        ],
       };
     case "webhook":
       return {
@@ -562,13 +577,15 @@ function goBack() {
                 <el-input v-model="conf.listen_addr" placeholder="0.0.0.0:8081" />
                 <div class="field-tip">OneBot 反向 WebSocket 的监听地址</div>
               </el-form-item>
-              <el-form-item label="Access Token">
+              <el-form-item label="Access Token" prop="access_token">
                 <el-input
                   v-model="conf.access_token"
                   type="password"
                   show-password
                   placeholder="OneBot access_token" />
-                <div class="field-tip">与 OneBot 实现里配置的 token 一致</div>
+                <div class="field-tip">
+                  与 OneBot 实现里配置的 token 一致；监听地址不是 127.0.0.1 / localhost 时必填
+                </div>
               </el-form-item>
             </div>
 

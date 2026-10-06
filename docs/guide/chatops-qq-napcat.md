@@ -132,7 +132,7 @@ pt-tools 使用**反向 WebSocket（Reverse WS）**模式：NapCat 主动连接�
 | 字段                        | 填写值               | 说明                                                                |
 | --------------------------- | -------------------- | ------------------------------------------------------------------- |
 | 监听地址（listen_addr）     | `0.0.0.0:6701`       | 反向 WebSocket 的监听地址，端口与 NapCat 里配置的一致               |
-| Access Token                | `ptqa_2026_secret`   | 与 NapCat 里填的 token 完全一致                                     |
+| Access Token                | `ptqa_2026_secret`   | 与 NapCat 里填的 token 完全一致；监听地址不是本机地址时必填         |
 | 管理员 QQ（admin_qq_users） | `你的QQ号`           | 逗号分隔的 QQ 号；能与 bot 对话，测试消息发给其中第一个，见下方说明 |
 | 允许 QQ（allowed_qq_users） | 留空或其他人的 QQ 号 | 逗号分隔的 QQ 号；同样能与 bot 对话，见下方说明                     |
 
