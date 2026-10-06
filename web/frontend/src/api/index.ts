@@ -1867,8 +1867,9 @@ export interface AssistantSiteTag {
   category: string;
 }
 
-/** 下载器助手：要替换的 tracker 地址（已脱敏） */
+/** 下载器助手：要替换的 tracker 地址（已脱敏）。id 是这条「原地址 → 新地址」的指纹，执行时按它核对 */
 export interface AssistantTrackerMatch {
+  id: string;
   hash: string;
   name: string;
   old: string;
@@ -1903,6 +1904,12 @@ export interface AssistantApplyResult {
   failed: AssistantItemError[];
 }
 
+/** 扫描检查了多少种子：scanned 小于 total 时说明种子太多，只检查了一部分 */
+export interface AssistantScanInfo {
+  total: number;
+  scanned: number;
+}
+
 /** 失效种子定时扫描的设置（只通知、不删种） */
 export interface DeadTorrentScanSettings {
   enabled: boolean;
@@ -1912,7 +1919,7 @@ export interface DeadTorrentScanSettings {
 
 export const downloaderAssistantApi = {
   siteTags: (downloaderId: number) =>
-    api.get<{ items: AssistantSiteTag[] }>(
+    api.get<{ items: AssistantSiteTag[] } & AssistantScanInfo>(
       `/api/downloader-assistant/site-tags?downloader_id=${downloaderId}`,
     ),
   applySiteTags: (downloaderId: number, items: { hash: string; site: string }[]) =>
@@ -1921,18 +1928,23 @@ export const downloaderAssistantApi = {
       items,
     }),
   previewTrackers: (downloaderId: number, from: string, to: string) =>
-    api.get<{ items: AssistantTrackerMatch[]; supported: boolean }>(
+    api.get<{ items: AssistantTrackerMatch[]; supported: boolean } & AssistantScanInfo>(
       `/api/downloader-assistant/trackers?downloader_id=${downloaderId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     ),
-  applyTrackers: (downloaderId: number, from: string, to: string, hashes: string[]) =>
+  applyTrackers: (
+    downloaderId: number,
+    from: string,
+    to: string,
+    selections: { hash: string; id: string }[],
+  ) =>
     api.post<AssistantApplyResult>("/api/downloader-assistant/trackers", {
       downloader_id: downloaderId,
       from,
       to,
-      hashes,
+      selections,
     }),
   dead: (downloaderId: number) =>
-    api.get<{ items: AssistantDeadTorrent[] }>(
+    api.get<{ items: AssistantDeadTorrent[] } & AssistantScanInfo>(
       `/api/downloader-assistant/dead?downloader_id=${downloaderId}`,
     ),
   deleteDead: (downloaderId: number, hashes: string[], removeData: boolean) =>

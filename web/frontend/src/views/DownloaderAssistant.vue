@@ -6,6 +6,7 @@
  */
 import {
   type AssistantDeadTorrent,
+  type AssistantScanInfo,
   type AssistantSiteTag,
   type AssistantTrackerMatch,
   chatopsApi,
@@ -48,8 +49,15 @@ const currentDownloader = computed(() =>
   downloaders.value.find((d) => d.id === downloaderId.value),
 );
 
+/** 种子太多、只检查了一部分时的提示；否则为空 */
+function truncatedNote(info: AssistantScanInfo | null): string {
+  if (!info || info.scanned >= info.total) return "";
+  return `下载器里有 ${info.total} 个种子，这次只检查了前 ${info.scanned} 个。`;
+}
+
 // ---- 失效种子 ----
 const deadDS = useDataState();
+const deadInfo = ref<AssistantScanInfo | null>(null);
 const dead = ref<AssistantDeadTorrent[]>([]);
 const deadScanned = ref(false);
 const deadSel = ref<string[]>([]);
@@ -61,6 +69,7 @@ const deadSize = computed(() =>
 
 // ---- 补站点标签 ----
 const tagDS = useDataState();
+const tagInfo = ref<AssistantScanInfo | null>(null);
 const tags = ref<AssistantSiteTag[]>([]);
 const tagsScanned = ref(false);
 const tagSel = ref<string[]>([]);
@@ -68,11 +77,13 @@ const tagging = ref(false);
 
 // ---- 替换 tracker ----
 const trDS = useDataState();
+const trInfo = ref<AssistantScanInfo | null>(null);
 const trFrom = ref("");
 const trTo = ref("");
 const previewed = ref<{ from: string; to: string } | null>(null);
 const matches = ref<AssistantTrackerMatch[]>([]);
 const trSupported = ref(true);
+/** 选中的是一条条地址（按指纹），不是整个种子：同一种子有多条匹配时只改勾上的那几条 */
 const trSel = ref<string[]>([]);
 const replacing = ref(false);
 const trChanged = computed(
@@ -81,6 +92,9 @@ const trChanged = computed(
     (previewed.value.from !== trFrom.value || previewed.value.to !== trTo.value),
 );
 const matchHashes = computed(() => [...new Set(matches.value.map((m) => m.hash))]);
+const trSelHashes = computed(
+  () => new Set(matches.value.filter((m) => trSel.value.includes(m.id)).map((m) => m.hash)).size,
+);
 
 // ---- 定时扫描 ----
 const scanForm = ref<DeadTorrentScanSettings>({
@@ -146,6 +160,7 @@ async function scanDead() {
   const data = await pending;
   if (deadDS.isStale(pending) || id !== downloaderId.value) return;
   dead.value = data?.items ?? [];
+  deadInfo.value = data ? { total: data.total, scanned: data.scanned } : null;
   deadScanned.value = data !== null;
   deadSel.value = [];
 }
@@ -189,6 +204,7 @@ async function scanTags() {
   const data = await pending;
   if (tagDS.isStale(pending) || id !== downloaderId.value) return;
   tags.value = data?.items ?? [];
+  tagInfo.value = data ? { total: data.total, scanned: data.scanned } : null;
   tagsScanned.value = data !== null;
   tagSel.value = [];
 }
@@ -220,6 +236,7 @@ async function previewTrackers() {
   const data = await pending;
   if (trDS.isStale(pending) || id !== downloaderId.value) return;
   matches.value = data?.items ?? [];
+  trInfo.value = data ? { total: data.total, scanned: data.scanned } : null;
   trSupported.value = data?.supported ?? true;
   previewed.value = data ? { from, to } : null;
   trSel.value = [];
@@ -231,7 +248,7 @@ async function applyTrackers() {
   if (!id || !p || trChanged.value || !trSel.value.length) return;
   try {
     await ElMessageBox.confirm(
-      `把选中的 ${trSel.value.length} 个种子的 tracker 地址里的「${p.from}」换成「${p.to}」？`,
+      `把选中的 ${trSel.value.length} 个地址（${trSelHashes.value} 个种子）里的「${p.from}」换成「${p.to}」？`,
       "替换 tracker",
       { type: "warning", confirmButtonText: "替换", cancelButtonText: "取消" },
     );
@@ -240,7 +257,10 @@ async function applyTrackers() {
   }
   replacing.value = true;
   try {
-    const res = await downloaderAssistantApi.applyTrackers(id, p.from, p.to, trSel.value);
+    const selections = matches.value
+      .filter((m) => trSel.value.includes(m.id))
+      .map((m) => ({ hash: m.hash, id: m.id }));
+    const res = await downloaderAssistantApi.applyTrackers(id, p.from, p.to, selections);
     ElMessage({ type: applyTone(res), message: applySummary("替换", res), duration: 5000 });
     await previewTrackers();
   } catch (e) {
@@ -344,6 +364,10 @@ onMounted(() => {
           >
         </el-button>
       </div>
+      <div v-if="truncatedNote(deadInfo)" class="pt-note pt-note--warn">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>{{ truncatedNote(deadInfo) }}</span>
+      </div>
       <p class="da-tip">
         tracker 报告「未注册」或「种子不存在」、并且没有任何 tracker 在正常工作的种子。提到 passkey
         或账号的报错不算失效。删除前会逐个重新确认，已经恢复正常的不删。
@@ -433,6 +457,10 @@ onMounted(() => {
             >给选中的{{ tagSel.length ? ` ${tagSel.length} 个` : "" }}打标签</span
           >
         </el-button>
+      </div>
+      <div v-if="truncatedNote(tagInfo)" class="pt-note pt-note--warn">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>{{ truncatedNote(tagInfo) }}</span>
       </div>
       <p class="da-tip">
         按 tracker
@@ -527,13 +555,17 @@ onMounted(() => {
           :disabled="!trSel.length || trChanged || !trSupported"
           data-testid="da-tr-apply"
           @click="applyTrackers">
-          <span>替换选中{{ trSel.length ? ` ${trSel.length} 个` : "" }}</span>
+          <span>替换选中{{ trSel.length ? ` ${trSel.length} 个地址` : "" }}</span>
         </el-button>
       </div>
       <p class="da-tip">
         把 tracker 地址里第一处「原内容」换成「替换成」，常用于站点换域名或重置 passkey。原内容至少
         3 个字；预览里的 passkey 已遮住，替换时用的是下载器里的完整地址。
       </p>
+      <div v-if="truncatedNote(trInfo)" class="pt-note pt-note--warn">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>{{ truncatedNote(trInfo) }}</span>
+      </div>
       <div v-if="previewed && !trSupported" class="pt-note pt-note--warn">
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
         <span>这台下载器不支持修改 tracker，只能预览。</span>
@@ -554,9 +586,8 @@ onMounted(() => {
         v-else-if="!isMobile"
         :data="matches"
         class="pt-grid"
-        @selection-change="
-          (rows: AssistantTrackerMatch[]) => (trSel = [...new Set(rows.map((r) => r.hash))])
-        ">
+        row-key="id"
+        @selection-change="(rows: AssistantTrackerMatch[]) => (trSel = rows.map((r) => r.id))">
         <el-table-column type="selection" width="44" />
         <el-table-column label="种子" min-width="200" class-name="pt-cell-strong">
           <template #default="{ row }">{{ row.name }}</template>
@@ -569,13 +600,13 @@ onMounted(() => {
         </el-table-column>
       </el-table>
       <div v-else class="da-cards">
-        <PtRowCard v-for="(m, i) in matches" :key="`${m.hash}-${i}`">
+        <PtRowCard v-for="m in matches" :key="m.id">
           <template #lead>
             <el-checkbox
-              :model-value="trSel.includes(m.hash)"
+              :model-value="trSel.includes(m.id)"
               :aria-label="`选择 ${m.name}`"
               @update:model-value="
-                (v: string | number | boolean) => toggle(trSel, m.hash, Boolean(v))
+                (v: string | number | boolean) => toggle(trSel, m.id, Boolean(v))
               " />
           </template>
           <template #title>{{ m.name }}</template>

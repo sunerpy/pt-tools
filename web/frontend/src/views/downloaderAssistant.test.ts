@@ -134,6 +134,8 @@ describe("下载器助手", () => {
   it("失效种子：扫描、勾选后删除，带上是否删除数据", async () => {
     await mountPage();
     api.dead.mockResolvedValue({
+      total: 1,
+      scanned: 1,
       items: [
         {
           hash: "aa",
@@ -170,7 +172,7 @@ describe("下载器助手", () => {
     );
   });
 
-  it("替换 tracker：执行用预览过的内容；不支持时只能预览", async () => {
+  it("替换 tracker：执行用预览过的内容，按地址勾选；不支持时只能预览", async () => {
     await mountPage();
     await chooseTab("替换 Tracker");
     setInput("da-tr-from", "old.hdsky.me");
@@ -178,8 +180,11 @@ describe("下载器助手", () => {
     await flush();
     api.previewTrackers.mockResolvedValue({
       supported: false,
+      total: 1,
+      scanned: 1,
       items: [
         {
+          id: "f1",
           hash: "aa",
           name: "A",
           old: "https://old.hdsky.me/announce.php?passkey=***",
@@ -196,12 +201,29 @@ describe("下载器助手", () => {
 
     api.previewTrackers.mockResolvedValue({
       supported: true,
+      total: 30000,
+      scanned: 20000,
       items: [
-        { hash: "aa", name: "A", old: "https://old.hdsky.me/a", new: "https://tracker.hdsky.me/a" },
+        {
+          id: "f1",
+          hash: "aa",
+          name: "A",
+          old: "https://old.hdsky.me/a",
+          new: "https://tracker.hdsky.me/a",
+        },
+        {
+          id: "f2",
+          hash: "aa",
+          name: "A",
+          old: "https://old.hdsky.me/b",
+          new: "https://tracker.hdsky.me/b",
+        },
       ],
     });
     testid("da-tr-preview").click();
     await vi.waitFor(() => expect(document.body.textContent).not.toContain("只能预览"));
+    expect(document.body.textContent).toContain("这次只检查了前 20000 个");
+    // 同一种子两条地址，只勾第一条
     document.querySelector<HTMLInputElement>(".el-table__body .el-checkbox__original")!.click();
     await flush();
     setInput("da-tr-to", "t2.hdsky.me");
@@ -215,8 +237,11 @@ describe("下载器助手", () => {
     api.applyTrackers.mockResolvedValue({ done: 1, skipped: [], failed: [] });
     testid("da-tr-apply").click();
     await vi.waitFor(() =>
-      expect(api.applyTrackers).toHaveBeenCalledWith(2, "old.hdsky.me", "tracker.hdsky.me", ["aa"]),
+      expect(api.applyTrackers).toHaveBeenCalledWith(2, "old.hdsky.me", "tracker.hdsky.me", [
+        { hash: "aa", id: "f1" },
+      ]),
     );
+    expect(ui.confirm.mock.calls.at(-1)![0]).toContain("1 个地址（1 个种子）");
   });
 
   it("补站点标签：勾选后按站点提交", async () => {
