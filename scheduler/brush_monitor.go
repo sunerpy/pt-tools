@@ -31,6 +31,8 @@ const (
 	brushSampleRetention = 48 * time.Hour
 	brushPruneEvery      = time.Hour
 	brushSource          = "brush"
+	// 一轮里连续这么多个种子文件下载或解析失败就停止加种
+	brushMaxFetchFailures = 3
 )
 
 // ErrBrushBusy 表示这个任务正在运行（定时一轮与手动「立即运行」不会同时跑）。
@@ -468,9 +470,15 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, active
 	res.Eligible = len(candidates)
 	sortBrushCandidates(candidates)
 
+	fetchFailures := 0
 	for _, it := range candidates {
 		if ctx.Err() != nil {
 			res.Stopped = "本轮时间用完"
+			return nil
+		}
+		// 连着几个种子都下不下来（站点出错、返回的不是种子文件）：这一轮不再继续，免得把整张列表都下一遍
+		if fetchFailures >= brushMaxFetchFailures {
+			res.Stopped = fmt.Sprintf("连续 %d 个种子文件下载失败，本轮停止加种", fetchFailures)
 			return nil
 		}
 		if stop := brushLimitReached(task, downloading, totalSize, todayAdded, it.SizeBytes); stop != "" {
@@ -479,14 +487,17 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, active
 		}
 		data, err := m.fetchTorrent(ctx, site, it)
 		if err != nil {
+			fetchFailures++
 			res.Errors = append(res.Errors, fmt.Sprintf("下载 %s 的种子文件失败: %v", it.Title, err))
 			continue
 		}
 		hash, err := qbit.ComputeTorrentHash(data)
 		if err != nil {
+			fetchFailures++
 			res.Errors = append(res.Errors, fmt.Sprintf("%s 的种子文件无法解析: %v", it.Title, err))
 			continue
 		}
+		fetchFailures = 0
 		hash = strings.ToLower(hash)
 		if _, inDL := byHash[hash]; inDL {
 			res.Skipped = append(res.Skipped, it.Title+"：下载器里已经有了")

@@ -507,3 +507,21 @@ func TestBrushMonitor_WithTaskLock(t *testing.T) {
 	var nilMon *BrushMonitor
 	assert.NoError(t, nilMon.WithTaskLock(1, func() error { return nil }))
 }
+
+// 站点连着几个种子文件都下不下来：这一轮停止加种，不把整张列表都下一遍。
+func TestBrushMonitor_StopsAfterConsecutiveFetchFailures(t *testing.T) {
+	r := newBrushRig(t)
+	task := r.task(t, func(bt *models.BrushTask) { bt.MaxDownloading = 10 })
+	for i := range 6 {
+		id := fmt.Sprintf("x%d", i)
+		r.site.items = append(r.site.items, v2.TorrentItem{
+			ID: id, Title: "T" + id, SizeBytes: gib, Leechers: 10, DiscountLevel: v2.DiscountFree,
+		})
+		r.site.files[id] = []byte("not a torrent")
+	}
+	res, err := r.mon.RunTask(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.Len(t, r.site.downloads, 3)
+	assert.Len(t, res.Errors, 3)
+	assert.Contains(t, res.Stopped, "连续 3 个种子文件下载失败")
+}
