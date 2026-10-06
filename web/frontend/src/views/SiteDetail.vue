@@ -16,10 +16,12 @@ import {
   sitesApi,
   type TaskItem,
   tasksApi,
+  type DailyPoint,
   type UserInfoResponse,
   userInfoApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
+import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -234,6 +236,7 @@ watch(siteName, (name, prev) => {
   loginState.value = null;
   siteAttendance.value = null;
   siteStats.value = null;
+  siteHistory.value = [];
   siteTasks.value = [];
   sitePushed.value = [];
   void loadDetail();
@@ -706,16 +709,26 @@ const attendanceToday = computed(() => {
 });
 const signing = ref(false);
 const siteStats = ref<UserInfoResponse | null>(null);
+/** 最近 30 天每天的数据与增量（每日快照）；拿不到时为空，卡片里就不画走势 */
+const siteHistory = ref<DailyPoint[]>([]);
+/** 30 天内每天的上传增量，用来画走势柱；第一天没有基线时不算 */
+const uploadTrend = computed(() =>
+  siteHistory.value.filter((p) => p.spanDays > 0).map((p) => p.deltaUploaded),
+);
+const uploadTrendTotal = computed(() =>
+  siteHistory.value.filter((p) => p.spanDays > 0).reduce((n, p) => n + p.deltaUploaded, 0),
+);
 const siteTasks = ref<TaskItem[]>([]);
 const sitePushed = ref<TaskItem[]>([]);
 const deleting = ref(false);
 
 async function loadSideCards() {
   const name = siteName.value;
-  const [states, attendanceList, stats, tasks, pushed] = await Promise.all([
+  const [states, attendanceList, stats, history, tasks, pushed] = await Promise.all([
     sitesApi.listLoginStates().catch(() => [] as SiteLoginState[]),
     attendanceApi.list().catch(() => [] as SiteAttendance[]),
     userInfoApi.getSite(name).catch(() => null),
+    userInfoApi.getHistory(name, 30).catch(() => null),
     tasksApi
       .list(new URLSearchParams({ site: name, page: "1", page_size: "20" }))
       .catch(() => null),
@@ -728,6 +741,7 @@ async function loadSideCards() {
   loginState.value = (states ?? []).find((st) => st.site_name === name) ?? null;
   siteAttendance.value = (attendanceList ?? []).find((a) => a.site_name === name) ?? null;
   siteStats.value = stats;
+  siteHistory.value = history?.points ?? [];
   siteTasks.value = tasks?.items ?? [];
   sitePushed.value = pushed?.items ?? [];
 }
@@ -1405,6 +1419,19 @@ function ruleNameOf(id: number): string {
               <span class="sd-kv__k">更新于</span>
               <span class="sd-kv__v">{{ formatWhen(siteStats.lastUpdate) }}</span>
             </li>
+            <li
+              v-if="uploadTrend.length > 1"
+              class="sd-kv__row sd-trend"
+              data-testid="site-upload-trend">
+              <span class="sd-kv__k">30 天上传 +{{ formatTB(uploadTrendTotal) }}</span>
+              <PtBars
+                :values="uploadTrend"
+                :count="30"
+                :bar-width="4"
+                :gap="2"
+                :height="22"
+                hue="var(--pt-kpi-1)" />
+            </li>
           </ul>
           <p v-else class="sd-empty">还没有同步过这个站点的用户数据。</p>
         </PtPanel>
@@ -1770,6 +1797,11 @@ function ruleNameOf(id: number): string {
 </template>
 
 <style scoped>
+/* 站点统计卡里 30 天上传走势：标签在左、柱在右，与上面几行同一个 kv 节奏 */
+.sd-trend {
+  align-items: flex-end;
+}
+
 /* 带与卡片层各自管留白，这一层只负责纵向堆叠 */
 .site-detail-page {
   display: flex;

@@ -7,12 +7,15 @@ import {
   attendanceApi,
   chatopsApi,
   sitesApi,
+  type UserInfoTrendsResponse,
+  userInfoApi,
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import SiteAvatar from "@/components/SiteAvatar.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
+import PtBars from "@/components/ui/PtBars.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
@@ -145,6 +148,26 @@ const stateSub = computed(() => {
 onMounted(async () => {
   await loadSites();
 });
+
+/*
+ * 画板 30 的行卡里那条 120×18 的 8 根柱：每站最近 8 天每天的上传增量（每日快照算出来的）。
+ * 拿不到就不画 —— 没有历史数据时造一条假的走势比不画更糟。
+ */
+const trends = ref<UserInfoTrendsResponse | null>(null);
+onMounted(() => {
+  void userInfoApi
+    .getTrends(8)
+    .then((t) => {
+      trends.value = t;
+    })
+    .catch(() => {
+      trends.value = null;
+    });
+});
+
+function uploadSpark(name: string): number[] {
+  return (trends.value?.sites?.[name] ?? []).map((p) => p.uploaded);
+}
 
 async function loadSites() {
   loginStatesFailed.value = false;
@@ -1625,6 +1648,17 @@ async function saveLoginConfig() {
           -->
           <template #meta>
             <span class="card-auth">{{ authMethodLabel(site.auth_method) }}</span>
+            <span
+              v-if="uploadSpark(name).length"
+              class="card-spark"
+              :title="`${name} 最近 8 天每天的上传增量`">
+              <PtBars
+                :values="uploadSpark(name)"
+                :count="8"
+                :bar-width="12"
+                :gap="3"
+                :height="18" />
+            </span>
             <span class="rss" :class="{ 'is-zero': getRssCount(site) === 0 }">
               <PtIcon name="rss" :size="11" />
               {{ getRssCount(site) }} 条 RSS
@@ -2171,6 +2205,14 @@ async function saveLoginConfig() {
 .card-why:focus-visible {
   color: var(--pt-p);
   background: var(--pt-hover);
+}
+
+/* 画板 30 行卡里的 120×18 走势柱：跟在 meta 那行里，不另起一行把卡撑高 */
+.card-spark {
+  display: inline-flex;
+  align-items: flex-end;
+  width: 120px;
+  height: 18px;
 }
 
 /* 行卡里的认证方式：纯文本，与同一排的 RSS / 活跃 / 剩余同一档（画板 30 是 11.5/500） */
