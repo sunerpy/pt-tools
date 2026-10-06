@@ -46,6 +46,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/search", label: "种子搜索", icon: "search", rail: true },
       { path: "/tasks", label: "任务列表", icon: "list-checks", badge: "tasks", rail: true },
       { path: "/paused", label: "暂停任务", icon: "circle-pause", badge: "paused", rail: true },
+      /* 路线图 M3：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/brush", label: "刷流任务", icon: "trending-up" },
       /*
        * 画板 18 把控制台画在外壳里（head 64 → bar-64 → 左列 276 / 右 788），
        * 不再是新标签页里的独立控制台，所以这一项走站内跳转。

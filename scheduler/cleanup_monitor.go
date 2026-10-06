@@ -227,6 +227,10 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 
 	var toDelete []downloader.Torrent
 	for _, t := range candidates {
+		// 刷流种子由刷流任务自己的删种规则管，常规规则不碰，免得两套规则争抢；紧急清理仍然覆盖它们
+		if hasTag(t, models.BrushTagAll) {
+			continue
+		}
 		if c.isPausedForPeerRatio(t.InfoHash) {
 			continue
 		}

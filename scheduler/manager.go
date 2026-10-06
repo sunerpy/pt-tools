@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -40,6 +42,7 @@ type Manager struct {
 	loginReminderMonitor *LoginReminderMonitor
 	attendanceMonitor    *AttendanceMonitor
 	dailyReportJob       *DailyReportJob
+	brushMonitor         *BrushMonitor
 	eventCancel          func()
 	stopped              bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
@@ -485,6 +488,10 @@ func (m *Manager) StopAll() {
 		m.peerRatioMonitor.Stop()
 		m.peerRatioMonitor = nil
 	}
+	if m.brushMonitor != nil {
+		m.brushMonitor.Stop()
+		m.brushMonitor = nil
+	}
 	if m.dailyReportJob != nil {
 		m.dailyReportJob.Stop()
 		m.dailyReportJob = nil
@@ -645,6 +652,42 @@ func (m *Manager) SetDailyReportJob(job *DailyReportJob) {
 		m.dailyReportJob.Stop()
 	}
 	m.dailyReportJob = job
+}
+
+// SetBrushMonitor 登记刷流监控；替换旧实例时先停掉旧的。
+func (m *Manager) SetBrushMonitor(mon *BrushMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.brushMonitor != nil && m.brushMonitor != mon {
+		m.brushMonitor.Stop()
+	}
+	m.brushMonitor = mon
+}
+
+// GetBrushMonitor 返回刷流监控，没有接线时为 nil。
+func (m *Manager) GetBrushMonitor() *BrushMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.brushMonitor
+}
+
+// BrushDownloader 按下载器 ID 取管理器里的实例（刷流列种子、删种用）；下载器不存在或未启用时返回错误。
+func (m *Manager) BrushDownloader(id uint) (downloader.Downloader, string, error) {
+	if global.GlobalDB == nil {
+		return nil, "", errors.New("数据库未初始化")
+	}
+	var ds models.DownloaderSetting
+	if err := global.GlobalDB.DB.First(&ds, id).Error; err != nil {
+		return nil, "", fmt.Errorf("下载器 %d 不存在: %w", id, err)
+	}
+	if !ds.Enabled {
+		return nil, ds.Name, fmt.Errorf("下载器 %s 未启用", ds.Name)
+	}
+	dl, err := m.downloaderManager.GetDownloader(ds.Name)
+	if err != nil {
+		return nil, ds.Name, err
+	}
+	return dl, ds.Name, nil
 }
 
 // GetAttendanceMonitor 返回每日签到监控，没有接线时为 nil。

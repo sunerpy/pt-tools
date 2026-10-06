@@ -32,6 +32,21 @@ type PushTorrentRequest struct {
 	Tags         string // 标签
 	SavePath     string // 保存路径（可选）
 	DownloaderID uint   // 下载器ID
+	// Source 写入 TorrentInfo.DownloadSource（如 brush）；为空时是 manual_push。
+	Source string
+	// Meta 是调用方已经知道的种子信息（刷流从搜索结果里带来）；为空时不覆盖库里已有的值。
+	Meta *PushTorrentMeta
+}
+
+// PushTorrentMeta 是推送时一并写进 TorrentInfo 的种子信息。H&R 与体积会被自动清理的 H&R 保护用到
+// （scheduler/cleanup_monitor.go 的 getHRInfoMap 按 has_hr、hr_seed_time_h、torrent_size 判断）。
+type PushTorrentMeta struct {
+	SizeBytes   int64
+	HasHR       bool
+	HRSeedTimeH int
+	IsFree      bool
+	FreeLevel   string
+	FreeEndTime *time.Time
 }
 
 // PushTorrentResult 推送种子结果
@@ -89,6 +104,10 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 
 	// 创建或更新数据库记录
 	now := time.Now()
+	source := req.Source
+	if source == "" {
+		source = "manual_push"
+	}
 	torrentInfo := &models.TorrentInfo{
 		SiteName:       req.SiteID,
 		TorrentID:      req.TorrentID,
@@ -98,14 +117,26 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		Category:       req.Category,
 		IsDownloaded:   true,
 		LastCheckTime:  &now,
-		DownloadSource: "manual_push",
+		DownloadSource: source,
+	}
+	updateCols := []string{"torrent_hash", "title", "tag", "category", "is_downloaded", "last_check_time", "download_source"}
+	if m := req.Meta; m != nil {
+		torrentInfo.TorrentSize = m.SizeBytes
+		torrentInfo.HasHR = m.HasHR
+		torrentInfo.HRSeedTimeH = m.HRSeedTimeH
+		torrentInfo.IsFree = m.IsFree
+		torrentInfo.FreeEndTime = m.FreeEndTime
+		if m.FreeLevel != "" {
+			torrentInfo.FreeLevel = m.FreeLevel
+		}
+		updateCols = append(updateCols, "torrent_size", "has_hr", "hr_seed_time_h", "is_free", "free_level", "free_end_time")
 	}
 
 	err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
 		// 使用 upsert 创建或更新记录
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"torrent_hash", "title", "tag", "category", "is_downloaded", "last_check_time", "download_source"}),
+			DoUpdates: clause.AssignmentColumns(updateCols),
 		}).Create(torrentInfo).Error
 	})
 	if err != nil {
@@ -319,6 +350,14 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 
 // newPushDownloader 创建手动推送用的下载器实例；测试里替换为假实现。
 var newPushDownloader = createDownloaderInstanceForPush
+
+// SwapPushDownloaderFactory 只给其他包的测试用：把推送用的下载器实例换成假实现，返回还原函数。
+// 刷流等调用 PushTorrentToDownloader 的后台任务靠它在测试里走真实的磁盘与站点容量闸门。
+func SwapPushDownloaderFactory(f func(models.DownloaderSetting) (downloader.Downloader, error)) (restore func()) {
+	orig := newPushDownloader
+	newPushDownloader = f
+	return func() { newPushDownloader = orig }
+}
 
 // recordPushDiskProtectError 将手动推送的磁盘保护拒绝原因写入 last_error，
 // 与 RSS 路径记账口径一致；不累加 retry_count（拒绝非本种子之过）。

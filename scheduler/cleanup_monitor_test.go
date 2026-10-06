@@ -1205,3 +1205,37 @@ func TestGetHRInfoMap_FromDefinitionAndDB(t *testing.T) {
 		assert.True(t, m["bbbb2222"].HasHR)
 	}
 }
+
+// 刷流种子（带 pt-tools-brush 标签）由刷流任务自己的规则删除，全局自动清理的常规规则不碰它们；
+// 低空间紧急清理仍然覆盖全部种子。
+func TestProcessDownloader_BrushTorrentsOnlyInEmergency(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	cm := newCleanupMonitorWithFake(t, fake)
+	cfg := baseCfg()
+	cfg.CleanupScope = "all"
+	cfg.CleanupMaxSeedTimeH = 72
+	cfg.CleanupProtectDL = false
+	cfg.CleanupProtectHR = false
+	cfg.CleanupDiskProtect = false
+
+	brush := seedingTorrent("b1", "hashbrush", "Brush", 100, 1.0)
+	brush.Tags = "hdsky,pt-tools-brush,pt-brush-1"
+	plain := seedingTorrent("p1", "hashplain", "Plain", 100, 1.0)
+	fake.torrents = []downloader.Torrent{brush, plain}
+
+	cm.processDownloader(cfg, fake, "qb1")
+	require.Len(t, fake.removedBatch, 1)
+	assert.Equal(t, []string{"p1"}, fake.removedBatch[0], "刷流种子不进常规规则")
+
+	// 低空间紧急清理：刷流种子也在候选里
+	fake.removedBatch = nil
+	fake.torrents = []downloader.Torrent{brush}
+	cfg.CleanupMaxSeedTimeH = 0
+	cfg.CleanupDiskProtect = true
+	cfg.CleanupMinDiskSpaceGB = 100
+	cfg.CleanupRemoveData = true
+	fake.diskInfo = downloader.DiskInfo{FreeSpace: 1 << 30}
+	cm.processDownloader(cfg, fake, "qb1")
+	require.Len(t, fake.removedBatch, 1)
+	assert.Equal(t, []string{"b1"}, fake.removedBatch[0])
+}

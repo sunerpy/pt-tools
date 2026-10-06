@@ -76,6 +76,10 @@ home:
             body: Match titles with keywords, wildcards or regular expressions, limited by size and by whether a torrent must be free.
             status: available
             link: /en/guide/filter-rules-tv-series
+          - title: Brush tasks
+            body: Pick fresh torrents from a site's free list by your conditions, seed them, and remove them by seeding time, ratio or upload speed, within limits on concurrent downloads and size. Off by default.
+            status: available
+            link: /en/guide/brush
           - title: Pause when freeleech ends
             body: A torrent still downloading when its free period ends is paused, so it does not count against your download.
             status: available

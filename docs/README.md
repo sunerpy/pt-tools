@@ -26,6 +26,7 @@
 - [RSS 订阅配置](guide/rss-subscription.md)：订阅地址、选项、下载模式与故障排查。
 - [过滤规则与追剧](guide/filter-rules-tv-series.md)：关键词、通配符、正则和组合规则。
 - [自动删种与磁盘保护](guide/auto-cleanup.md)：清理范围、H&R 保护、磁盘门禁和工作目录清理。
+- [刷流任务](guide/brush.md)：从站点的免费列表挑种做种、按规则删种，限额与收益统计，以及从 Vertex 迁移。
 - [数据统计与每日战报](guide/user-stats.md)：每日快照、增量口径、走势图与每日战报。
 
 ## ChatOps 与通知
