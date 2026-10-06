@@ -45,7 +45,12 @@ type Server struct {
 	logins      *loginLimiter // 登录失败计数与口令校验并发上限
 	chatopsDeps *ChatOpsDeps
 	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
-	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
+
+	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
+	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
+	lifecycleMu  sync.Mutex
+	httpServer   *http.Server // active server, set in Serve, used by Shutdown
+	shuttingDown bool         // Shutdown 调用过：之后的 Serve 不再监听
 
 	// clientVersions 缓存每台下载器自报的版本号，键是「下载器 id + URL」。
 	//
@@ -239,7 +244,14 @@ func (s *Server) Serve(addr string) error {
 		ReadTimeout:       5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
+	s.lifecycleMu.Lock()
+	if s.shuttingDown {
+		// 关闭信号在 Serve 起来之前就到了：不再监听，否则进程收到信号后仍会一直运行
+		s.lifecycleMu.Unlock()
+		return nil
+	}
 	s.httpServer = srv
+	s.lifecycleMu.Unlock()
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -247,12 +259,21 @@ func (s *Server) Serve(addr string) error {
 }
 
 // Shutdown gracefully stops the underlying http.Server so Serve returns.
-// Safe to call before Serve (no-op) and concurrent with Serve.
+// Safe to call before Serve (the later Serve returns without listening) and
+// concurrent with Serve.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s == nil || s.httpServer == nil {
+	if s == nil {
 		return nil
 	}
-	return s.httpServer.Shutdown(ctx)
+	s.lifecycleMu.Lock()
+	s.shuttingDown = true
+	srv := s.httpServer
+	s.lifecycleMu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	// Serve 拿到 srv 之后、ListenAndServe 之前被关闭也没关系：http.Server 关闭后 ListenAndServe 直接返回 ErrServerClosed
+	return srv.Shutdown(ctx)
 }
 
 type statusRecorder struct {
