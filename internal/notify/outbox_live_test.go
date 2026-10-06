@@ -104,3 +104,29 @@ func TestOutbox_FallbackDecryptsConfigAndClosesChannel(t *testing.T) {
 	require.NoError(t, db.First(&got, outbox.ID).Error)
 	assert.Equal(t, "sent", got.Status)
 }
+
+// 回退路径解密失败时按发送失败退避，不拿密文去初始化通道。
+func TestOutbox_FallbackDecryptFailureBacksOff(t *testing.T) {
+	now := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	withFixedNow(t, now)
+	db := newOutboxTestDB(t)
+	outbox := seedOutbox(t, db, 0, now)
+	require.NoError(t, db.Model(&models.NotificationConf{}).Where("id = ?", outbox.NotificationConfID).
+		Update("config_json", "CIPHERTEXT").Error)
+
+	ch := &initRecordingChannel{}
+	registry := NewRegistry()
+	registry.Register("mock", func() Channel { return ch })
+	worker := NewOutboxWorker(db, registry, 10*time.Millisecond)
+	worker.SetConfigDecrypter(func(string) (string, error) { return "", errors.New("密钥不匹配") })
+
+	require.NoError(t, worker.Tick(context.Background()))
+
+	assert.Empty(t, ch.gotConfig, "解密失败时不初始化通道")
+	assert.Zero(t, ch.calls)
+	var got models.NotificationOutbox
+	require.NoError(t, db.First(&got, outbox.ID).Error)
+	assert.Equal(t, "pending", got.Status)
+	assert.Equal(t, 1, got.RetryCount)
+	assert.Contains(t, got.ErrorMsg, "解密通知通道配置失败")
+}

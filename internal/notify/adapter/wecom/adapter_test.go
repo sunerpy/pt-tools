@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 
@@ -366,4 +367,15 @@ func TestWecom_Registered(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ch)
 	assert.Equal(t, "wecom_webhook", ch.Type())
+}
+
+// 无法识别的长响应只取前 200 字节写进错误，整页代理错误不会塞进日志和重试记录。
+func TestCheckWeComResult_TruncatesLongBody(t *testing.T) {
+	err := checkWeComResult([]byte(strings.Repeat("x", 300)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), strings.Repeat("x", 200)+"...")
+	assert.NotContains(t, err.Error(), strings.Repeat("x", 201))
+
+	require.NoError(t, checkWeComResult([]byte("  ")), "空响应按成功处理")
+	require.NoError(t, checkWeComResult([]byte(`{"errcode":0,"errmsg":"ok"}`)))
 }

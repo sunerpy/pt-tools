@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -178,4 +179,230 @@ func TestRSSNotifier_HourlyQuotaHoldsUnderConcurrency(t *testing.T) {
 	var delivered int64
 	require.NoError(t, db.Model(&models.RSSNotificationLog{}).Where("result IN ?", []string{"pending", "sent"}).Count(&delivered).Error)
 	assert.EqualValues(t, 2, delivered, "并发时也不突破每小时上限")
+}
+
+// logRecorder 收集注入的日志函数输出，供断言写回失败是否被记录。
+type logRecorder struct {
+	mu   sync.Mutex
+	logs []string
+}
+
+func (l *logRecorder) logf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.logs = append(l.logs, fmt.Sprintf(format, args...))
+}
+
+func (l *logRecorder) joined() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.logs, "\n")
+}
+
+func seedPendingRSSLog(t *testing.T, db *gorm.DB, torrentID, payload string) models.RSSNotificationLog {
+	t.Helper()
+	past := time.Now().Add(-time.Minute)
+	row := models.RSSNotificationLog{
+		RSSID: 1, SiteName: "s", TorrentID: torrentID, NotifyKind: "all", NotificationConfID: 7,
+		Result: "pending", PayloadJSON: payload, NextRetryAt: &past,
+	}
+	require.NoError(t, db.Create(&row).Error)
+	return row
+}
+
+// 交给摘要前推迟重试时间失败时不放进摘要：这行保持到期的 pending，由重试 worker 逐条补发一次。
+func TestRSSNotifier_DigestHoldFailureFallsBackToRetry(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	push := &capturePushService{}
+	notifier, buf := newDigestNotifier(t, db, push)
+	require.NoError(t, db.Exec(`CREATE TRIGGER fail_hold BEFORE UPDATE OF next_retry_at ON rss_notification_log
+		BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`).Error)
+
+	rss := &models.RSSConfig{ID: 1, NotifyMode: "all", NotifyConfIDs: "[7]"}
+	require.NoError(t, notifier.NotifyNewItem(context.Background(), RSSItemEvent{
+		RSS: rss, FeedItem: newFeedItem(), SiteName: "example", TorrentID: "1",
+	}))
+	buf.FlushAll()
+	assert.Zero(t, push.callCount(), "没有放进摘要")
+
+	require.NoError(t, db.Exec(`DROP TRIGGER fail_hold`).Error)
+	require.NoError(t, NewRSSRetryWorker(db, push).drainOnce(context.Background()))
+	assert.Equal(t, 1, push.callCount(), "重试 worker 补发一次")
+}
+
+// 查不到待发送记录（查询失败或都已不是 pending）时不发送。
+func TestRSSDigestFlush_SkipsWhenNothingPending(t *testing.T) {
+	t.Run("query failure", func(t *testing.T) {
+		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+		require.NoError(t, err)
+		push := &capturePushService{}
+		rec := &logRecorder{}
+		flush := NewRSSDigestFlush(db, push, rec.logf)
+
+		flush(context.Background(), 7, []notify.DigestItem{{LogID: 1, Title: "T", Text: "B"}})
+
+		assert.Zero(t, push.callCount())
+		assert.Contains(t, rec.joined(), "查询待发送记录失败")
+	})
+	t.Run("no pending rows", func(t *testing.T) {
+		db := setupRSSNotifierDB(t)
+		push := &capturePushService{}
+		rec := &logRecorder{}
+		flush := NewRSSDigestFlush(db, push, rec.logf)
+
+		flush(context.Background(), 7, []notify.DigestItem{{LogID: 99, Title: "T", Text: "B"}})
+
+		assert.Zero(t, push.callCount())
+		assert.Empty(t, rec.joined())
+	})
+}
+
+// 摘要投递失败时这些行 5 秒后交回重试 worker：仍是 pending，attempts 加一，记下错误。
+func TestRSSDigestFlush_PushFailureHandsRowsBackToRetry(t *testing.T) {
+	db := setupRSSNotifierDB(t)
+	push := &capturePushService{err: errors.New("通道未运行")}
+	rec := &logRecorder{}
+	a := seedPendingRSSLog(t, db, "1", `{"title":"A","text":"a"}`)
+	b := seedPendingRSSLog(t, db, "2", `{"title":"B","text":"b"}`)
+	flush := NewRSSDigestFlush(db, push, rec.logf)
+
+	before := time.Now()
+	flush(context.Background(), 7, []notify.DigestItem{
+		{LogID: a.ID, Title: "A", Text: "a"},
+		{LogID: b.ID, Title: "B", Text: "b"},
+	})
+
+	require.Equal(t, 1, push.callCount(), "两条合并成一条摘要")
+	assert.Empty(t, push.calls[0].Buttons, "多条合并的摘要不带单条按钮")
+	var rows []models.RSSNotificationLog
+	require.NoError(t, db.Order("id").Find(&rows).Error)
+	require.Len(t, rows, 2)
+	for _, row := range rows {
+		assert.Equal(t, "pending", row.Result)
+		assert.Equal(t, 1, row.Attempts)
+		assert.Contains(t, row.LastError, "通道未运行")
+		require.NotNil(t, row.NextRetryAt)
+		assert.False(t, row.NextRetryAt.Before(before.Add(5*time.Second)), "5 秒后才交回重试")
+	}
+	assert.Contains(t, rec.joined(), "RSS digest 投递失败")
+}
+
+// 摘要发送后写回记录失败时记日志，不静默吞掉。
+func TestRSSDigestFlush_LogsWriteBackFailures(t *testing.T) {
+	cases := []struct {
+		name, trigger, want string
+		pushErr             error
+	}{
+		{
+			name: "sent write-back",
+			trigger: `CREATE TRIGGER fail_write BEFORE UPDATE OF result ON rss_notification_log
+				WHEN NEW.result = 'sent' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+			want: "已投递但更新记录失败",
+		},
+		{
+			name: "retry write-back",
+			trigger: `CREATE TRIGGER fail_write BEFORE UPDATE OF last_error ON rss_notification_log
+				BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+			want:    "投递失败且更新记录失败",
+			pushErr: errors.New("通道未运行"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupRSSNotifierDB(t)
+			push := &capturePushService{err: tc.pushErr}
+			rec := &logRecorder{}
+			row := seedPendingRSSLog(t, db, "1", `{"title":"A","text":"a"}`)
+			require.NoError(t, db.Exec(tc.trigger).Error)
+
+			NewRSSDigestFlush(db, push, rec.logf)(context.Background(), 7, []notify.DigestItem{{LogID: row.ID, Title: "A", Text: "a"}})
+
+			require.Equal(t, 1, push.callCount())
+			assert.Contains(t, rec.joined(), tc.want)
+		})
+	}
+}
+
+// 重试 worker 的各处写回失败都记日志：占用失败时不发送，避免在没占住的情况下重复投递。
+func TestRSSRetryWorker_LogsDBWriteFailures(t *testing.T) {
+	cases := []struct {
+		name, payload, trigger, want string
+		pushErr                      error
+		wantCalls                    int
+	}{
+		{
+			name:    "claim",
+			payload: `{"title":"T","text":"B"}`,
+			trigger: `CREATE TRIGGER fail_write BEFORE UPDATE OF next_retry_at ON rss_notification_log
+				BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+			want: "占用记录失败",
+		},
+		{
+			name:    "retry result",
+			payload: `{"title":"T","text":"B"}`,
+			trigger: `CREATE TRIGGER fail_write BEFORE UPDATE OF last_error ON rss_notification_log
+				BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+			want:      "重试结果写回失败",
+			pushErr:   errors.New("通道未运行"),
+			wantCalls: 1,
+		},
+		{
+			name:    "mark failed",
+			payload: "{not valid json",
+			trigger: `CREATE TRIGGER fail_write BEFORE UPDATE OF result ON rss_notification_log
+				WHEN NEW.result = 'failed' BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`,
+			want: "标记失败时写回出错",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupRSSNotifierDB(t)
+			push := &capturePushService{err: tc.pushErr}
+			rec := &logRecorder{}
+			seedPendingRSSLog(t, db, "1", tc.payload)
+			require.NoError(t, db.Exec(tc.trigger).Error)
+			worker := NewRSSRetryWorker(db, push)
+			worker.SetLogf(rec.logf)
+
+			require.NoError(t, worker.drainOnce(context.Background()))
+
+			assert.Equal(t, tc.wantCalls, push.callCount())
+			assert.Contains(t, rec.joined(), tc.want)
+		})
+	}
+}
+
+// 周期扫描查询失败时记日志，循环继续运行，ctx 取消后退出。
+func TestRSSRetryWorker_RunLogsScanFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	worker := NewRSSRetryWorker(db, &capturePushService{})
+	worker.interval = 5 * time.Millisecond
+	logged := make(chan string, 1)
+	worker.SetLogf(func(format string, args ...any) {
+		select {
+		case logged <- fmt.Sprintf(format, args...):
+		default:
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		worker.Run(ctx)
+	}()
+
+	select {
+	case msg := <-logged:
+		assert.Contains(t, msg, "重试扫描失败")
+	case <-time.After(5 * time.Second):
+		t.Fatal("扫描失败没有记录日志")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ctx 取消后 Run 没有退出")
+	}
 }
