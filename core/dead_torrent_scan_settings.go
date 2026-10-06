@@ -32,6 +32,9 @@ const (
 // ErrDeadTorrentScanNoChannel 表示开启了定时扫描却没有选通道。
 var ErrDeadTorrentScanNoChannel = errors.New("开启失效种子定时扫描至少要选一个通知通道")
 
+// ErrDeadTorrentScanInvalid 标记用户输入有误（与存储故障区分）。
+var ErrDeadTorrentScanInvalid = errors.New("失效种子扫描设置有误")
+
 // DeadTorrentScanSettings 读出定时扫描配置；全局设置行还不存在时返回默认值（关闭、24 小时、无通道）。
 func (s *ConfigStore) DeadTorrentScanSettings() (DeadTorrentScanSettings, error) {
 	out := DeadTorrentScanSettings{IntervalHours: DefaultDeadTorrentScanIntervalH, ChannelIDs: []uint{}}
@@ -54,7 +57,7 @@ func (s *ConfigStore) DeadTorrentScanSettings() (DeadTorrentScanSettings, error)
 // SaveDeadTorrentScanSettings 保存定时扫描配置，只写这三列。开启时必须选了通道，且通道都存在。
 func (s *ConfigStore) SaveDeadTorrentScanSettings(in DeadTorrentScanSettings) error {
 	if in.IntervalHours < minDeadTorrentScanIntervalH || in.IntervalHours > maxDeadTorrentScanIntervalH {
-		return fmt.Errorf("扫描间隔应为 %d–%d 小时", minDeadTorrentScanIntervalH, maxDeadTorrentScanIntervalH)
+		return fmt.Errorf("%w：扫描间隔应为 %d–%d 小时", ErrDeadTorrentScanInvalid, minDeadTorrentScanIntervalH, maxDeadTorrentScanIntervalH)
 	}
 	ids := dedupUint(in.ChannelIDs)
 	if in.Enabled && len(ids) == 0 {
@@ -66,7 +69,7 @@ func (s *ConfigStore) SaveDeadTorrentScanSettings(in DeadTorrentScanSettings) er
 			return fmt.Errorf("检查通知通道失败: %w", err)
 		}
 		if int(n) != len(ids) {
-			return errors.New("选中的通知通道有的已经不存在，请重新选择")
+			return fmt.Errorf("%w：选中的通知通道有的已经不存在，请重新选择", ErrDeadTorrentScanInvalid)
 		}
 	}
 	raw, err := json.Marshal(ids)
@@ -76,7 +79,7 @@ func (s *ConfigStore) SaveDeadTorrentScanSettings(in DeadTorrentScanSettings) er
 	var gs models.SettingsGlobal
 	if err := s.db.DB.Select("id").First(&gs).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("全局设置尚未初始化，请先保存一次全局设置")
+			return fmt.Errorf("%w：全局设置尚未初始化，请先保存一次全局设置", ErrDeadTorrentScanInvalid)
 		}
 		return fmt.Errorf("读取全局设置失败: %w", err)
 	}

@@ -35,9 +35,9 @@ func TestDeadTorrentScanSettings_DefaultsAndRoundTrip(t *testing.T) {
 func TestSaveDeadTorrentScanSettings_Validation(t *testing.T) {
 	store := newDailyReportStore(t)
 	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: true, IntervalHours: 24}), ErrDeadTorrentScanNoChannel)
-	assert.Error(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{IntervalHours: 5}))
-	assert.Error(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{IntervalHours: 169}))
-	assert.Error(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: true, IntervalHours: 24, ChannelIDs: []uint{999}}))
+	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{IntervalHours: 5}), ErrDeadTorrentScanInvalid)
+	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{IntervalHours: 169}), ErrDeadTorrentScanInvalid)
+	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: true, IntervalHours: 24, ChannelIDs: []uint{999}}), ErrDeadTorrentScanInvalid)
 
 	empty := NewConfigStore(func() *models.TorrentDB {
 		db, err := NewTempDBDir(t.TempDir())
