@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
@@ -148,7 +149,9 @@ type CallbackActionHandler interface {
 
 type updateSource func(ctx context.Context) (<-chan telego.Update, error)
 
-type botFactory func(cfg *Config) (botAPI, updateSource, error)
+// botFactory 构造 bot 与长轮询来源。reportPoll 由生产实现挂在 HTTP 传输层上，
+// 每次 getUpdates 之后回报结果（nil 表示成功），见 pollHealthTransport。
+type botFactory func(cfg *Config, reportPoll func(error)) (botAPI, updateSource, error)
 
 // TelegramChannel implements notify.Channel for Telegram.
 type TelegramChannel struct {
@@ -163,6 +166,13 @@ type TelegramChannel struct {
 	pollCtx    context.Context
 	pollCancel context.CancelFunc
 	pollDone   chan struct{}
+	// pollFailing / pollErrLoggedAt 用于长轮询失败日志限频：持续失败时每 pollErrorLogInterval 记一条
+	pollFailing     bool
+	pollErrLoggedAt time.Time
+
+	// restartBase / restartMax 是长轮询意外结束后重启的退避区间，0 取默认值（测试里调小）
+	restartBase time.Duration
+	restartMax  time.Duration
 
 	factory       botFactory
 	actionHandler CallbackActionHandler
@@ -231,7 +241,7 @@ func (c *TelegramChannel) Init(ctx context.Context, conf *models.NotificationCon
 		return errors.New("telegram: bot_token 不能为空")
 	}
 
-	bot, src, err := c.factory(cfg)
+	bot, src, err := c.factory(cfg, c.reportPoll)
 	if err != nil {
 		c.markUnhealthy()
 		return fmt.Errorf("telegram: 创建 bot 失败: %w", err)
@@ -258,11 +268,12 @@ func (c *TelegramChannel) Close(ctx context.Context) error {
 	cancel := c.pollCancel
 	done := c.pollDone
 	c.healthy = false
-	c.mu.Unlock()
-
+	// 在锁内取消：重启长轮询与 reportPoll 都在锁内检查 poll context，取消之后不会再把通道标回健康
 	if cancel != nil {
 		cancel()
 	}
+	c.mu.Unlock()
+
 	if done != nil {
 		select {
 		case <-done:
