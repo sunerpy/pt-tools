@@ -64,12 +64,21 @@ func (s *ConfigStore) SaveDeadTorrentScanSettings(in DeadTorrentScanSettings) er
 		return ErrDeadTorrentScanNoChannel
 	}
 	if len(ids) > 0 {
-		var n int64
-		if err := s.db.DB.Model(&models.NotificationConf{}).Where("id IN ?", ids).Count(&n).Error; err != nil {
+		var confs []models.NotificationConf
+		if err := s.db.DB.Select("id", "enabled").Where("id IN ?", ids).Find(&confs).Error; err != nil {
 			return fmt.Errorf("检查通知通道失败: %w", err)
 		}
-		if int(n) != len(ids) {
+		if len(confs) != len(ids) {
 			return fmt.Errorf("%w：选中的通知通道有的已经不存在，请重新选择", ErrDeadTorrentScanInvalid)
+		}
+		enabled := 0
+		for _, c := range confs {
+			if c.Enabled {
+				enabled++
+			}
+		}
+		if in.Enabled && enabled == 0 {
+			return fmt.Errorf("%w：选中的通知通道都已停用，至少要有一个启用的通道", ErrDeadTorrentScanInvalid)
 		}
 	}
 	raw, err := json.Marshal(ids)

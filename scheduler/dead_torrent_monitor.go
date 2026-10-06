@@ -181,6 +181,7 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 }
 
 // notify 在有新的失效种子时写一条通知；同一批种子的 EventKey 相同，不会重复发。
+// 只有通知真的写进了投递表才记下这一批：写失败或没有可投递的通道时，下一轮还会再试。
 func (m *DeadTorrentMonitor) notify(ctx context.Context, dlName string, dead []dlassistant.DeadTorrent, channels []uint) bool {
 	current := make(map[string]struct{}, len(dead))
 	hashes := make([]string, 0, len(dead))
@@ -197,7 +198,10 @@ func (m *DeadTorrentMonitor) notify(ctx context.Context, dlName string, dead []d
 			break
 		}
 	}
-	m.notified[dlName] = current
+	if !fresh {
+		// 只是变少了（用户删了一部分）：记下现在这批，之后再出现新的才通知
+		m.notified[dlName] = current
+	}
 	m.mu.Unlock()
 	if !fresh || m.cfg.Notifier == nil {
 		return false
@@ -218,18 +222,26 @@ func (m *DeadTorrentMonitor) notify(ctx context.Context, dlName string, dead []d
 	}
 	text := fmt.Sprintf("%s 里有 %d 个种子（共 %s）的 tracker 报告未注册或不存在。到「下载器助手 → 失效种子」确认后再删除，这里不会自动删。\n%s",
 		dlName, len(dead), utils.FormatBytes(total), strings.Join(lines, "\n"))
-	_, err := m.cfg.Notifier.Enqueue(ctx, MonitorNotifyEntry{
+	key := hex.EncodeToString(sum[:8])
+	inserted, err := m.cfg.Notifier.Enqueue(ctx, MonitorNotifyEntry{
 		Source:   deadTorrentNotifySource,
 		Subject:  dlName,
 		Kind:     "dead_torrents",
-		EventKey: hex.EncodeToString(sum[:8]),
+		EventKey: key,
 		Title:    "下载器助手：发现失效种子",
 		Text:     text,
 		ConfIDs:  channels,
 	})
-	if err != nil {
-		m.cfg.Logger.Warnf("[失效种子] 写入通知失败: %v", err)
+	switch {
+	case err != nil:
+		m.cfg.Logger.Warnf("[失效种子] 写入通知失败，下一轮再试: %v", err)
+		return false
+	case inserted == 0 && !m.cfg.Notifier.Logged(ctx, deadTorrentNotifySource, dlName, "dead_torrents", key):
+		m.cfg.Logger.Warnf("[失效种子] 选中的通知通道都不可用（停用或已删除），这次没有发出通知")
 		return false
 	}
-	return true
+	m.mu.Lock()
+	m.notified[dlName] = current
+	m.mu.Unlock()
+	return inserted > 0
 }

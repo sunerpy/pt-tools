@@ -38,6 +38,12 @@ func TestSaveDeadTorrentScanSettings_Validation(t *testing.T) {
 	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{IntervalHours: 5}), ErrDeadTorrentScanInvalid)
 	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{IntervalHours: 169}), ErrDeadTorrentScanInvalid)
 	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: true, IntervalHours: 24, ChannelIDs: []uint{999}}), ErrDeadTorrentScanInvalid)
+	off := models.NotificationConf{ChannelType: "webhook", Name: "off", Enabled: true}
+	require.NoError(t, store.db.DB.Create(&off).Error)
+	require.NoError(t, store.db.DB.Model(&off).Update("enabled", false).Error)
+	assert.ErrorIs(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: true, IntervalHours: 24, ChannelIDs: []uint{off.ID}}), ErrDeadTorrentScanInvalid,
+		"选中的通道都停用了")
+	require.NoError(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: false, IntervalHours: 24, ChannelIDs: []uint{off.ID}}), "关闭时可以留着停用的通道")
 
 	empty := NewConfigStore(func() *models.TorrentDB {
 		db, err := NewTempDBDir(t.TempDir())

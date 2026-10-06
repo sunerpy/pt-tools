@@ -118,3 +118,45 @@ func TestDeadTorrentMonitor_Lifecycle(t *testing.T) {
 	mgr.StopAll()
 	assert.Nil(t, mgr.deadTorrentMonitor)
 }
+
+// 通道都停用、或者写投递表失败时不记作已通知：下一轮还会再试。
+func TestDeadTorrentMonitor_RetriesWhenNotDelivered(t *testing.T) {
+	now := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	notifier, _, clock, db := newNotifierForTest(t, now, models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true})
+	var conf models.NotificationConf
+	require.NoError(t, db.First(&conf).Error)
+	require.NoError(t, db.Model(&conf).Update("enabled", false).Error)
+	dl := newSchedFakeDownloader("qb")
+	dl.trackers = map[string][]downloader.TorrentTracker{}
+	deadTorrent(dl, "aa")
+	mon := NewDeadTorrentMonitor(DeadTorrentMonitorConfig{
+		Settings: func() (bool, time.Duration, []uint, error) { return true, time.Hour, []uint{conf.ID}, nil },
+		Downloaders: func(context.Context) ([]DeadTorrentDownloader, []error) {
+			return []DeadTorrentDownloader{{Name: "qb", DL: dl}}, nil
+		},
+		Notifier: notifier,
+		Resolver: func() *v2.TrackerResolver { return v2.NewTrackerResolverFrom() },
+		Clock:    clock,
+	})
+	assert.Zero(t, mon.RunOnce(context.Background()), "通道停用：没有发出")
+	assert.Empty(t, notifyRows(t, db))
+
+	require.NoError(t, db.Model(&conf).Update("enabled", true).Error)
+	clock.Advance(2 * time.Hour)
+	assert.Equal(t, 1, mon.RunOnce(context.Background()), "通道恢复后同一批还会通知")
+	assert.Len(t, notifyRows(t, db), 1)
+	assert.True(t, notifier.Logged(context.Background(), "downloader_assistant", "qb", "dead_torrents", notifyRows(t, db)[0].EventKey))
+
+	// 重启后（内存里的记录没了）同一批不会重复写
+	mon2 := NewDeadTorrentMonitor(mon.cfg)
+	assert.Zero(t, mon2.RunOnce(context.Background()))
+	assert.Len(t, notifyRows(t, db), 1)
+
+	deadTorrent(dl, "bb")
+	require.NoError(t, db.Migrator().DropTable(&models.MonitorNotificationLog{}))
+	clock.Advance(2 * time.Hour)
+	assert.Zero(t, mon2.RunOnce(context.Background()), "写不进投递表：这次不算")
+	require.NoError(t, db.AutoMigrate(&models.MonitorNotificationLog{}))
+	clock.Advance(2 * time.Hour)
+	assert.Equal(t, 1, mon2.RunOnce(context.Background()), "下一轮重试成功")
+}

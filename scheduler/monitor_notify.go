@@ -135,6 +135,18 @@ func (n *MonitorNotifier) Enqueue(ctx context.Context, e MonitorNotifyEntry) (in
 	return inserted, nil
 }
 
+// Logged 报告同一决策（Source、Subject、Kind、EventKey）是否已经写过投递行，任何通道都算。
+func (n *MonitorNotifier) Logged(ctx context.Context, source, subject, kind, eventKey string) bool {
+	if !n.Enabled() {
+		return false
+	}
+	var count int64
+	err := n.db.WithContext(ctx).Model(&models.MonitorNotificationLog{}).
+		Where("source = ? AND subject = ? AND kind = ? AND event_key = ?", source, subject, kind, eventKey).
+		Count(&count).Error
+	return err == nil && count > 0
+}
+
 func (n *MonitorNotifier) targetConfs(ctx context.Context, ids []uint) ([]models.NotificationConf, error) {
 	var confs []models.NotificationConf
 	q := n.db.WithContext(ctx).
