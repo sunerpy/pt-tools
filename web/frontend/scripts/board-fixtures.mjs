@@ -456,11 +456,49 @@ const SUMMARY = {
   totalBonus: SUMMARY_SITES.reduce((n, d) => n + d.bonus, 0),
 };
 
+/*
+ * 单站 30 天历史（/api/v2/userinfo/history?site=&days=30，site/v2/userinfo_history.go 的 DailyPoint）。
+ * 第 3 个站点每 3 天才有一份快照（spanDays=3），用来量「缺快照的日子补 0」那条走势；
+ * 第一份快照没有更早的可比，spanDays=0、增量记 0。按查询串的 site 选，见 QUERY_AWARE。
+ */
+const HISTORY_DATES = Array.from({ length: 30 }, (_, i) => {
+  const d = new Date(Date.UTC(2026, 7, 28 + i));
+  return d.toISOString().slice(0, 10);
+});
+const HISTORY = {
+  bySite: Object.fromEntries(
+    SITES.map(([site, , up, down, , seeding], s) => {
+      const step = s === 2 ? 3 : 1;
+      const dates = HISTORY_DATES.filter((_, i) => i % step === 0);
+      let total = up * TB;
+      const points = dates.map((date, i) => {
+        const deltaUploaded =
+          i === 0 ? 0 : Math.round(up * GB * step * (0.5 + ((i * 5 + s) % 7) / 10));
+        total += deltaUploaded;
+        return {
+          date,
+          uploaded: Math.round(total),
+          downloaded: Math.round(down * TB),
+          bonus: 100000 + i * 900,
+          seeding,
+          deltaUploaded,
+          deltaDownloaded: i === 0 ? 0 : Math.round(GB * step),
+          deltaBonus: i === 0 ? 0 : 900,
+          spanDays: i === 0 ? 0 : step,
+          negative: false,
+        };
+      });
+      return [site, { site, days: 30, from: HISTORY_DATES[0], to: HISTORY_DATES.at(-1), points }];
+    }),
+  ),
+};
+
 /** 路由（去掉查询串）→ 响应体。第一个前缀命中即用。 */
 export const FIXTURES = [
   ["/api/v2/userinfo/aggregated", AGGREGATED],
   ["/api/v2/userinfo/trends", TRENDS],
   ["/api/v2/userinfo/summary", SUMMARY],
+  ["/api/v2/userinfo/history", HISTORY],
   /* 单站点详情要排在列表之前：前缀匹配第一个命中即用 */
   ...AGGREGATED.perSiteStats.map((row) => [`/api/v2/userinfo/sites/${row.site}`, row]),
   /* getSites 回的是 UserInfoResponse[]，不是站点名数组 */
@@ -518,6 +556,35 @@ export const FIXTURES = [
         downloader_name: i % 3 === 2 ? "" : i % 2 === 0 ? "qb-main" : "tr-backup",
       })),
     },
+  ],
+  /*
+   * 签到（M1c）：列表回 SiteAttendanceResponse[]（web/api_site_attendance.go）。
+   * 漏了它时 `/api/sites/attendance` 命中下面的 `/api/sites`，拿到站点配置对象，
+   * 站点列表 `for…of` 抛「object is not iterable」、详情页 `.find` 不是函数。
+   * settings 是 attendance 的子路径，要排在它前面；状态取后端那套枚举（"" / pending / signed / already / failed / unsupported）。
+   */
+  ["/api/sites/attendance/settings", { window_start: "08:00", window_end: "10:00" }],
+  [
+    "/api/sites/attendance",
+    SITES.map(([site], i) => {
+      const status = ["signed", "already", "pending", "failed", "unsupported", ""][i % 6];
+      return {
+        site_name: site,
+        site_enabled: i % 7 !== 6,
+        attendance_enabled: status !== "" && status !== "unsupported",
+        supported: status !== "unsupported",
+        ...(status === "unsupported" ? { unsupported_reason: "站点没有签到页" } : {}),
+        day: "2026-09-26",
+        status,
+        attempts: status === "" ? 0 : status === "failed" ? 3 : 1,
+        ...(status === "failed" ? { last_error: "签到页返回 502" } : {}),
+        ...(status === "pending"
+          ? { scheduled_at: 1758848400, next_attempt_at: 1758848400 }
+          : status === ""
+            ? {}
+            : { last_attempt_at: 1758844800 - i * 60 }),
+      };
+    }),
   ],
   /* 站点详情取的是单个站点：必须排在 /api/sites 之前，前缀匹配是第一个命中即用 */
   ...SITES.map(([site]) => [`/api/sites/${site}`, SITE_CONFIGS[site]]),
@@ -800,6 +867,8 @@ export function emptyStubScript() {
      * 「object is not iterable」。这条坑这份文件里已经踩过三次（日志、通道详情、这里）。
      */
     ["/api/sites/login-state", []],
+    ["/api/sites/attendance/settings", { window_start: "08:00", window_end: "10:00" }],
+    ["/api/sites/attendance", []],
     ["/api/sites/definitions", []],
     ["/api/sites/templates", []],
     ["/api/sites/downloader-summary", { sites: [] }],
@@ -843,6 +912,11 @@ export function emptyStubScript() {
  * 并把回来的行画对；服务端那一侧由 Go 测试用生产值覆盖。
  */
 const QUERY_AWARE = {
+  /* 与 web/api_userinfo_history.go 同义：按 site 回该站的历史；没有快照的站点回空 points */
+  "/api/v2/userinfo/history": `(body, params) => {
+    const site = params.get('site') ?? '';
+    return body.bySite[site] ?? { site, days: 30, from: '', to: '', points: [] };
+  }`,
   "/api/chatops/audit": `(body, params) => {
     const alias = { qq: 'qq_onebot', wecom: 'wecom_webhook' };
     const list = (raw) => (raw ?? '').split(',').map((v) => v.trim()).filter(Boolean);
