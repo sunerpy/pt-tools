@@ -252,7 +252,19 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 		ConfigJSON:  cipherStr,
 		Enabled:     req.Enabled,
 	}
-	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		// Enabled 列带 gorm 默认值 true：Create 会跳过零值 false，库里存成启用。停用的要显式写一次
+		if !req.Enabled {
+			if err := tx.Model(&row).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			row.Enabled = false
+		}
+		return nil
+	}); err != nil {
 		return NotificationConfDTO{}, fmt.Errorf("创建通知通道失败: %w", err)
 	}
 	publishNotificationConfigChanged()

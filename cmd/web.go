@@ -583,6 +583,7 @@ func bootstrapChatOps(
 		sessionStore,
 		liveManager,
 	)
+	chain.SetLogf(log.Warnf)
 
 	channels, err := initEnabledChannels(ctx, db, registry, chain.Process, log)
 	if err != nil {

@@ -416,6 +416,8 @@ export interface SiteValidationRequest {
 
 export interface SiteValidationResponse {
   valid: boolean;
+  /** 是否真的连接站点验证过凭证；目前只检查必填字段，恒为 false */
+  verified?: boolean;
   message: string;
   free_torrents?: string[];
 }

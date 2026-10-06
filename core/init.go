@@ -75,15 +75,7 @@ func InitRuntime() (*zap.Logger, error) {
 		migrationService := migration.NewMigrationService(global.GlobalDB.DB)
 		if migrationService.IsMigrationNeeded() {
 			global.GetSlogger().Info("检测到需要迁移配置，开始执行迁移...")
-			result := migrationService.MigrateV1ToV2()
-			if result.Success {
-				global.GetSlogger().Infof("配置迁移成功: 迁移了 %d 个下载器, %d 个站点", result.DownloadersMigrated, result.SitesMigrated)
-			} else {
-				global.GetSlogger().Errorf("配置迁移失败: %s", result.Message)
-				for _, e := range result.Errors {
-					global.GetSlogger().Errorf("迁移错误: %s", e)
-				}
-			}
+			logMigrationResult(global.GetSlogger(), migrationService.MigrateV1ToV2())
 		}
 
 		dispatchV2BroadcastIfReady(global.GlobalDB.DB, global.GetSlogger())
@@ -106,4 +98,20 @@ func dispatchV2BroadcastIfReady(db *gorm.DB, logger *zap.SugaredLogger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = MaybeSendV2Broadcast(ctx, db, bc, logger, time.Now().UTC())
+}
+
+// logMigrationResult 记录 v1→v2 迁移结果。迁移成功时 Errors 里也可能有单个站点更新失败，
+// 两种情况都逐条打印，原来只在失败分支打印，成功分支只说「配置迁移成功」。
+func logMigrationResult(log *zap.SugaredLogger, result *migration.MigrationResult) {
+	if result == nil {
+		return
+	}
+	if result.Success {
+		log.Infof("配置迁移完成: 迁移了 %d 个下载器, %d 个站点, %d 处出错", result.DownloadersMigrated, result.SitesMigrated, len(result.Errors))
+	} else {
+		log.Errorf("配置迁移失败: %s", result.Message)
+	}
+	for _, e := range result.Errors {
+		log.Errorf("迁移错误: %s", e)
+	}
 }

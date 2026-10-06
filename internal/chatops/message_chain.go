@@ -87,7 +87,11 @@ type MessageChain struct {
 	sessions    SessionStoreAPI
 	replier     Replier
 	now         func() time.Time
+	logf        func(format string, args ...any)
 }
+
+// SetLogf 注入日志函数，用于记录审计写入失败。
+func (mc *MessageChain) SetLogf(fn func(format string, args ...any)) { mc.logf = fn }
 
 // NewMessageChain wires the dependencies. replier may be nil when there is
 // no outbound channel (e.g. CLI debugging).
@@ -160,8 +164,11 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 		if state.Handler != nil {
 			reply, herr := state.Handler(ctx, []string{text}, src)
 			result := "success"
-			if herr != nil {
+			switch {
+			case herr != nil:
 				result = "error:session_handler"
+			case reply.Failed:
+				result = "error:session_failed"
 			}
 			mc.recordAudit(ctx, msg, binding.ConfID, "session:"+state.Step, args, result, start)
 			mc.tryReply(ctx, msg, reply)
@@ -201,8 +208,12 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	}
 	reply, herr := spec.Handler(ctx, args, src)
 	result := "success"
-	if herr != nil {
+	switch {
+	case herr != nil:
 		result = "error:handler"
+	case reply.Failed:
+		// 处理器把业务错误写进回复、返回 nil error：按回复的 Failed 记失败
+		result = "error:command_failed"
 	}
 	mc.recordAudit(ctx, msg, binding.ConfID, spec.Name, args, result, start)
 	mc.tryReply(ctx, msg, reply)
@@ -239,7 +250,7 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 	if len(args) > 0 {
 		argsMap["args"] = auditArgs(command, args)
 	}
-	_ = mc.auditSvc.Record(ctx, AuditEntry{
+	if err := mc.auditSvc.Record(ctx, AuditEntry{
 		NotificationConfID: confID,
 		ChannelType:        msg.ChannelType,
 		ChannelUserID:      msg.ChannelUserID,
@@ -247,7 +258,11 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 		Args:               argsMap,
 		Result:             result,
 		LatencyMs:          latency,
-	})
+	}); err != nil && mc.logf != nil {
+		// 命令可能已经生效（比如已经暂停了种子），审计却没写进去：至少留一条日志
+		mc.logf("ChatOps 审计写入失败 command=%s result=%s channel=%s user=%s: %v",
+			command, result, msg.ChannelType, msg.ChannelUserID, err)
+	}
 }
 
 // auditArgs 返回写进审计的参数副本：/bind 的绑定码整体隐去，像 URL 的参数（如 /addrss 带的 RSS 地址）

@@ -14,8 +14,9 @@ func tr(lang, zh, en string) string {
 	return zh
 }
 
+// errReply 是命令没做成时的回复：带上原因，并标记 Failed，审计记为失败。
 func errReply(lang, zh, en string, args ...any) chatops.Reply {
-	return chatops.Reply{Text: fmt.Sprintf(tr(lang, zh, en), args...)}
+	return chatops.Reply{Text: fmt.Sprintf(tr(lang, zh, en), args...), Failed: true}
 }
 
 func okReply(text string) chatops.Reply {

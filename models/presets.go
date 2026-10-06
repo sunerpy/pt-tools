@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -70,27 +71,35 @@ func SyncSitesFromRegistry(db *gorm.DB, registeredSites []RegisteredSite) error 
 
 // migrateCmctToSpringSunday 将旧的 cmct 站点迁移到 springsunday
 // 包括：站点设置、种子信息、用户信息
+//
+// 全部读写在一个事务里：任一步失败整体回滚，下次启动重试。原来后面几步不在事务里、错误也不检查，
+// 种子记录改名撞唯一索引时 cmct 站点照样删掉，种子记录还挂在 cmct 下，用户数据只迁了一半。
 func migrateCmctToSpringSunday(db *gorm.DB) error {
 	// 检查是否存在 cmct 站点
 	var cmctSite SiteSetting
 	err := db.Where("name = ?", "cmct").First(&cmctSite).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// 没有 cmct 站点，无需迁移
 		return nil
 	}
 	if err != nil {
 		return err
 	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		return migrateCmctTx(tx, cmctSite)
+	})
+}
 
+func migrateCmctTx(tx *gorm.DB, cmctSite SiteSetting) error {
 	// 检查是否已存在 springsunday 站点
 	var springSite SiteSetting
-	err = db.Where("name = ?", "springsunday").First(&springSite).Error
+	err := tx.Where("name = ?", "springsunday").First(&springSite).Error
 
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		// springsunday 已存在，需要合并数据
 		// 1. 将 cmct 的 RSS 关联到 springsunday
-		if updateErr := db.Model(&RSSSubscription{}).
+		if updateErr := tx.Model(&RSSSubscription{}).
 			Where("site_id = ?", cmctSite.ID).
 			Update("site_id", springSite.ID).Error; updateErr != nil {
 			return updateErr
@@ -109,46 +118,61 @@ func migrateCmctToSpringSunday(db *gorm.DB) error {
 		if cmctSite.Enabled && !springSite.Enabled {
 			springSite.Enabled = cmctSite.Enabled
 		}
-		if saveErr := db.Save(&springSite).Error; saveErr != nil {
+		if saveErr := tx.Save(&springSite).Error; saveErr != nil {
 			return saveErr
 		}
 
 		// 3. 删除 cmct 站点
-		if delErr := db.Delete(&cmctSite).Error; delErr != nil {
+		if delErr := tx.Delete(&cmctSite).Error; delErr != nil {
 			return delErr
 		}
-	case gorm.ErrRecordNotFound:
+	case errors.Is(err, gorm.ErrRecordNotFound):
 		// springsunday 不存在，直接重命名 cmct
 		cmctSite.Name = "springsunday"
-		if saveErr := db.Save(&cmctSite).Error; saveErr != nil {
+		if saveErr := tx.Save(&cmctSite).Error; saveErr != nil {
 			return saveErr
 		}
 	default:
 		return err
 	}
 
-	// 更新 torrent_infos 表
-	if db.Migrator().HasTable("torrent_infos") {
-		db.Table("torrent_infos").Where("site_name = ?", "cmct").Update("site_name", "springsunday")
+	// 更新 torrent_infos 表。(site_name, torrent_id) 唯一：springsunday 已有同一种子 ID 的记录时
+	// 保留它、删掉 cmct 那条重复，其余改名，否则整批改名会撞唯一索引
+	if tx.Migrator().HasTable("torrent_infos") {
+		if err := tx.Exec(`DELETE FROM torrent_infos WHERE site_name = ? AND torrent_id IN
+			(SELECT torrent_id FROM torrent_infos WHERE site_name = ?)`, "cmct", "springsunday").Error; err != nil {
+			return err
+		}
+		if err := tx.Table("torrent_infos").Where("site_name = ?", "cmct").
+			Update("site_name", "springsunday").Error; err != nil {
+			return err
+		}
 	}
 
 	// 更新 user_info 表：如果 springsunday 已存在且有数据，保留；否则从 cmct 迁移
-	if db.Migrator().HasTable("user_info") {
+	if tx.Migrator().HasTable("user_info") {
 		// 检查 springsunday 是否有有效数据
 		var springUserInfo struct {
 			Username string
 		}
-		err := db.Table("user_info").Where("site = ?", "springsunday").Select("username").First(&springUserInfo).Error
+		err := tx.Table("user_info").Where("site = ?", "springsunday").Select("username").First(&springUserInfo).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 
-		if err == gorm.ErrRecordNotFound || springUserInfo.Username == "" {
+		if errors.Is(err, gorm.ErrRecordNotFound) || springUserInfo.Username == "" {
 			// springsunday 没有有效数据，从 cmct 迁移
 			// 先删除空的 springsunday 记录（如果存在）
-			db.Table("user_info").Where("site = ?", "springsunday").Delete(nil)
+			if err := tx.Exec("DELETE FROM user_info WHERE site = ?", "springsunday").Error; err != nil {
+				return err
+			}
 			// 将 cmct 重命名为 springsunday
-			db.Table("user_info").Where("site = ?", "cmct").Update("site", "springsunday")
-		} else {
+			if err := tx.Table("user_info").Where("site = ?", "cmct").Update("site", "springsunday").Error; err != nil {
+				return err
+			}
+		} else if err := tx.Exec("DELETE FROM user_info WHERE site = ?", "cmct").Error; err != nil {
 			// springsunday 有有效数据，删除 cmct 的记录
-			db.Table("user_info").Where("site = ?", "cmct").Delete(nil)
+			return err
 		}
 	}
 
