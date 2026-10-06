@@ -1323,6 +1323,8 @@ export interface DownloaderCapability {
   can_set_location: boolean;
   can_recheck: boolean;
   can_add_torrent: boolean;
+  can_export_torrent: boolean;
+  can_edit_trackers: boolean;
   categories: string[];
   tags: string[];
 }

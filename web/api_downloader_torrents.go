@@ -91,6 +91,10 @@ type DownloaderCapability struct {
 	CanRecheck        bool   `json:"can_recheck"`
 	CanViewFiles      bool   `json:"can_view_files"`
 	CanViewTrackers   bool   `json:"can_view_trackers"`
+	// CanExportTorrent 表示能把种子导出成 .torrent（qBittorrent 4.5 起；实际版本在调用时再核对）。
+	CanExportTorrent bool `json:"can_export_torrent"`
+	// CanEditTrackers 表示能修改种子的 tracker 地址（qBittorrent 与 Transmission 都支持）。
+	CanEditTrackers bool `json:"can_edit_trackers"`
 }
 
 type DownloaderCapabilitiesResponse struct {
@@ -983,6 +987,8 @@ func downloaderCapabilityFromRecord(rec downloaderRecord) DownloaderCapability {
 		CanRecheck:        true,
 		CanViewFiles:      true,
 		CanViewTrackers:   true,
+		CanExportTorrent:  rec.Type == string(downloader.DownloaderQBittorrent),
+		CanEditTrackers:   true,
 	}
 }
 

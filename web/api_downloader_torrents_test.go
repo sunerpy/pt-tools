@@ -645,6 +645,12 @@ func TestDownloaderCapabilityFromRecord(t *testing.T) {
 	assert.True(t, cap.CanResume)
 	assert.True(t, cap.CanAddTorrent)
 	assert.True(t, cap.CanViewTrackers)
+	assert.True(t, cap.CanExportTorrent, "qBittorrent 4.5 起能导出种子")
+	assert.True(t, cap.CanEditTrackers)
+
+	tr := downloaderCapabilityFromRecord(downloaderRecord{ID: 4, Name: "tr", Type: "transmission"})
+	assert.False(t, tr.CanExportTorrent, "Transmission 没有导出种子的接口")
+	assert.True(t, tr.CanEditTrackers)
 }
 
 func TestListEnabledDownloaderRecords(t *testing.T) {
