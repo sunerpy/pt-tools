@@ -495,7 +495,7 @@ function progressText(t: BrushTorrent): string {
               @change="toggleEnabled(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="148" fixed="right" class-name="pt-cell-act">
+        <el-table-column label="操作" width="184" fixed="right" class-name="pt-cell-act">
           <template #default="{ row }">
             <el-tooltip content="立即运行一轮" placement="top">
               <el-button
@@ -1066,7 +1066,15 @@ function progressText(t: BrushTorrent): string {
 </style>
 
 <style>
-/* 对话框 teleport 到 body，scoped 到不了 */
+/*
+ * 对话框 teleport 到 body，scoped 到不了。
+ * 全局 .field-row 是 repeat(auto-fit, minmax(220px, 440px))：auto-fit 按上限 440 数列数，
+ * 720 宽的对话框里只排得下一列，「站点 / 下载器」被拆成上下两行。这里固定两列、三列。
+ */
+.brush-dialog .pt-form .field-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .brush-dialog .pt-form .field-row--3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1076,6 +1084,7 @@ function progressText(t: BrushTorrent): string {
 }
 
 @media (max-width: 768px) {
+  .brush-dialog .pt-form .field-row,
   .brush-dialog .pt-form .field-row--3 {
     grid-template-columns: minmax(0, 1fr);
   }
