@@ -80,6 +80,10 @@ pt-tools 在 RSS 自动下载之外，还可以把"上新"事件通过 **QQ 私�
 - `last_error`：最近一次错误（用于排查）
 - `payload_json`：实际发送的标题 / 正文
 
+![RSS 通知日志](images/chatops/chatops-rss-notifications.webp)
+
+> Web UI → ChatOps → RSS 通知日志：按结果筛选，展开一行可以看失败原因和推送出去的消息内容
+
 ---
 
 ## 四种通知模式详解
