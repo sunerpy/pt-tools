@@ -102,6 +102,10 @@ home:
             body: 为每个下载器预设多个保存目录，推送时选择其中一个。
             status: available
             link: /configuration
+          - title: 下载器助手
+            body: 找出站点已删除的失效种子、按 tracker 给种子补站点标签、批量替换 tracker 地址，都是先预览再执行。
+            status: available
+            link: /guide/downloader-assistant
       - name: 通知与 ChatOps
         items:
           - title: QQ 与 Telegram 命令
