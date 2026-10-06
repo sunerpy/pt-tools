@@ -58,6 +58,20 @@ func TestBrushAPI_RequiresSession(t *testing.T) {
 	}
 }
 
+// 新建时关掉的开关原样保存：删种不删文件、不排除 H&R、免费到期不删。
+func TestBrushAPI_CreateKeepsSwitchesOff(t *testing.T) {
+	_, mux, ds := newBrushServer(t)
+	w := serveAuthed(mux, http.MethodPost, "/api/brush/tasks", brushBody("keep files", ds.ID, func(m map[string]any) {
+		m["exclude_hr"], m["remove_free_expired_incomplete"], m["remove_with_data"] = false, false, false
+	}))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var created BrushTaskView
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	assert.False(t, created.ExcludeHR)
+	assert.False(t, created.RemoveFreeExpiredIncomplete)
+	assert.False(t, created.RemoveWithData, "删种时不删文件")
+}
+
 func TestBrushAPI_CRUD(t *testing.T) {
 	_, mux, ds := newBrushServer(t)
 

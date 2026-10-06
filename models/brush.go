@@ -28,6 +28,8 @@ func BrushTaskTag(taskID uint) string {
 
 // BrushTask 是一个刷流任务：从一个站点的免费列表里按入场条件挑种子推给一个下载器，再按删种规则删掉。
 // 默认关闭。时长、体积的 0 一律表示「不限」。
+// 列的默认值一律是零值：GORM 新建时会把零值换成 default，非零的默认值会让关掉的开关（如删种不删文件）存成打开；
+// 新任务的默认取值在前端表单里。
 type BrushTask struct {
 	ID           uint   `gorm:"primaryKey" json:"id"`
 	Name         string `gorm:"size:64;not null;uniqueIndex" json:"name"`
@@ -38,7 +40,7 @@ type BrushTask struct {
 	Category     string `gorm:"size:128;default:''" json:"category"`
 	// Tags 是用户额外加的标签（逗号分隔）；站点名、pt-tools-brush 和任务标签总会带上。
 	Tags        string `gorm:"size:256;default:''" json:"tags"`
-	IntervalMin int    `gorm:"not null;default:10" json:"interval_min"`
+	IntervalMin int    `gorm:"not null;default:0" json:"interval_min"`
 
 	// 入场条件
 	// Discounts 是允许的优惠类型（逗号分隔的 DiscountLevel，如 FREE,2XFREE）；为空时只收免费（FREE、2XFREE）。
@@ -49,13 +51,13 @@ type BrushTask struct {
 	MaxSeeders       int     `gorm:"not null;default:0" json:"max_seeders"`
 	MinLeechers      int     `gorm:"not null;default:0" json:"min_leechers"`
 	MaxPublishAgeMin int     `gorm:"not null;default:0" json:"max_publish_age_min"`
-	ExcludeHR        bool    `gorm:"not null;default:true" json:"exclude_hr"`
+	ExcludeHR        bool    `gorm:"not null;default:false" json:"exclude_hr"`
 	// IncludeKeywords / ExcludeKeywords 按行或逗号分隔，大小写不敏感地匹配标题与副标题。
 	IncludeKeywords string `gorm:"size:1024;default:''" json:"include_keywords"`
 	ExcludeKeywords string `gorm:"size:1024;default:''" json:"exclude_keywords"`
 
 	// 限额
-	MaxDownloading     int     `gorm:"not null;default:3" json:"max_downloading"`
+	MaxDownloading     int     `gorm:"not null;default:0" json:"max_downloading"`
 	MaxTotalSizeGB     float64 `gorm:"not null;default:0" json:"max_total_size_gb"`
 	MaxDailyDownloadGB float64 `gorm:"not null;default:0" json:"max_daily_download_gb"`
 
@@ -64,10 +66,10 @@ type BrushTask struct {
 	RemoveRatio     float64 `gorm:"not null;default:0" json:"remove_ratio"`
 	// RemoveLowSpeedKBs 与 RemoveLowSpeedWindowMin 一起用：已完成的种子最近 N 分钟的平均上传速度低于阈值时删。
 	RemoveLowSpeedKBs           float64 `gorm:"not null;default:0" json:"remove_low_speed_kbs"`
-	RemoveLowSpeedWindowMin     int     `gorm:"not null;default:30" json:"remove_low_speed_window_min"`
+	RemoveLowSpeedWindowMin     int     `gorm:"not null;default:0" json:"remove_low_speed_window_min"`
 	RemoveInactiveH             float64 `gorm:"not null;default:0" json:"remove_inactive_h"`
-	RemoveFreeExpiredIncomplete bool    `gorm:"not null;default:true" json:"remove_free_expired_incomplete"`
-	RemoveWithData              bool    `gorm:"not null;default:true" json:"remove_with_data"`
+	RemoveFreeExpiredIncomplete bool    `gorm:"not null;default:false" json:"remove_free_expired_incomplete"`
+	RemoveWithData              bool    `gorm:"not null;default:false" json:"remove_with_data"`
 
 	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
 	LastError  string     `gorm:"size:1024;default:''" json:"last_error"`

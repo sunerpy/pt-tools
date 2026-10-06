@@ -45,6 +45,28 @@ func TestBrushRepository_SaveTaskKeepsRunColumns(t *testing.T) {
 	assert.ErrorIs(t, err, ErrBrushTaskNotFound)
 }
 
+// 新建时的零值（关掉的开关、0 表示不限）原样写入，不被列的默认值顶掉：
+// remove_with_data=false 被存成 true 就会在删种时连文件一起删。
+func TestBrushRepository_CreateKeepsZeroValues(t *testing.T) {
+	repo := NewBrushRepository(newBrushTestDB(t))
+	task := &BrushTask{Name: "keep", SiteName: "hdsky", DownloaderID: 1, IntervalMin: 10}
+	require.NoError(t, repo.SaveTask(task))
+	require.NotZero(t, task.ID)
+
+	got, err := repo.GetTask(task.ID)
+	require.NoError(t, err)
+	assert.False(t, got.ExcludeHR)
+	assert.False(t, got.RemoveFreeExpiredIncomplete)
+	assert.False(t, got.RemoveWithData)
+	assert.Zero(t, got.MaxDownloading)
+	assert.Zero(t, got.RemoveLowSpeedWindowMin)
+	assert.False(t, got.CreatedAt.IsZero())
+
+	second := &BrushTask{Name: "second", SiteName: "hdsky", DownloaderID: 1, IntervalMin: 10}
+	require.NoError(t, repo.SaveTask(second))
+	assert.Greater(t, second.ID, task.ID)
+}
+
 func TestBrushRepository_RecordAddedIsIdempotent(t *testing.T) {
 	repo := NewBrushRepository(newBrushTestDB(t))
 	bt := &BrushTorrent{TaskID: 1, InfoHash: "abc", SiteName: "hdsky", TorrentID: "11", SizeBytes: 100, AddedAt: time.Now(), State: BrushTorrentActive}
