@@ -47,6 +47,9 @@ func classifyMTorrentError(err error) *ProbeResult {
 		return &ProbeResult{Status: CHALLENGE, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrSessionExpired):
 		return &ProbeResult{Status: SESSION_EXPIRED, Source: ProbeSourceHTTPAPIKey, RawError: err}
+	case errors.Is(err, v2.ErrInvalidCredentials):
+		// M-Team 用 API Key 认证，401/403 是密钥失效
+		return &ProbeResult{Status: KEY_ERROR, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrCircuitOpen), errors.Is(err, v2.ErrRateLimited):
 		return &ProbeResult{Status: RATE_LIMITED, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, v2.ErrNetworkError):

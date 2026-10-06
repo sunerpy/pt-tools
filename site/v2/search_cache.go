@@ -186,8 +186,10 @@ func (c *CachedSearchOrchestrator) Search(ctx context.Context, query MultiSiteSe
 		return nil, err
 	}
 
-	// Cache the result
-	c.cache.Set(query, result)
+	// 有站点出错（超时、限流等）的结果不缓存：否则站点恢复后，同样的查询在 TTL 内仍拿到旧的失败
+	if len(result.Errors) == 0 {
+		c.cache.Set(query, result)
+	}
 
 	return result, nil
 }

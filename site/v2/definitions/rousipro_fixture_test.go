@@ -659,6 +659,18 @@ func TestRousiDriver_Execute_Unauthorized(t *testing.T) {
 	assert.ErrorIs(t, err, v2.ErrInvalidCredentials)
 }
 
+// 429 映射成 ErrRateLimited，登录探测据此判为限流。
+func TestRousiDriver_Execute_TooManyRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	d := newTestRousiDriverWithURL(server.URL)
+	_, err := d.Execute(context.Background(), rousiRequest{Endpoint: "/api/v1/profile"})
+	assert.ErrorIs(t, err, v2.ErrRateLimited)
+}
+
 func TestRousiDriver_Execute_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

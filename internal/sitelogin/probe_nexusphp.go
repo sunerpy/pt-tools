@@ -41,9 +41,16 @@ func classifyNexusPHPResult(info v2.UserInfo, err error, clock Clock, source Pro
 	switch {
 	case errors.Is(err, v2.ErrSessionExpired):
 		result.Status = SESSION_EXPIRED
-	case errors.Is(err, v2.ErrCircuitOpen):
+	case errors.Is(err, v2.ErrInvalidCredentials), errors.Is(err, v2.ErrAuthFailed):
+		// 驱动把 401/403 映射成凭证无效：Cookie 来源算会话过期，API Key 来源（HDDolby、Rousi）算密钥错误
+		if source == ProbeSourceHTTPAPIKey {
+			result.Status = KEY_ERROR
+		} else {
+			result.Status = SESSION_EXPIRED
+		}
+	case errors.Is(err, v2.ErrCircuitOpen), errors.Is(err, v2.ErrRateLimited):
 		result.Status = RATE_LIMITED
-	case errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, v2.ErrNetworkError):
 		result.Status = NETWORK_ERROR
 	case isChallengeError(err):
 		result.Status = CHALLENGE

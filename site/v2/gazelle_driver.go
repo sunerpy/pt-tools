@@ -222,6 +222,10 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 		return result, ErrInvalidCredentials
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return result, fmt.Errorf("HTTP 429: %w", ErrRateLimited)
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
