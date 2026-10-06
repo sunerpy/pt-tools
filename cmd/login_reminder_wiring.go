@@ -179,9 +179,10 @@ func wireDailyReportJob(mgr *scheduler.Manager, store *core.ConfigStore, userInf
 		Offset: func() (time.Duration, error) {
 			return store.DailyReportOffset(scheduler.DailyReportRand)
 		},
-		History:  history,
-		Notifier: notifier,
-		Logger:   global.GetSlogger(),
+		EnabledSites: store.EnabledSiteNames,
+		History:      history,
+		Notifier:     notifier,
+		Logger:       global.GetSlogger(),
 	})
 	mgr.SetDailyReportJob(job)
 	job.Start()

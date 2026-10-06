@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -203,6 +204,24 @@ func SummarizeDeltas(rangeName, from, to string, baselines map[string]UserInfoDa
 		sum.Sites = append(sum.Sites, d)
 	}
 	return sum
+}
+
+// Filter 只保留 keep 里的站点（按小写站点名匹配）并重算合计；keep 为 nil 时原样返回。
+func (s DeltaSummary) Filter(keep map[string]bool) DeltaSummary {
+	if keep == nil {
+		return s
+	}
+	out := DeltaSummary{Range: s.Range, From: s.From, To: s.To, Sites: make([]SiteDelta, 0, len(s.Sites))}
+	for _, d := range s.Sites {
+		if !keep[strings.ToLower(d.Site)] {
+			continue
+		}
+		out.Sites = append(out.Sites, d)
+		out.TotalUploaded += d.Uploaded
+		out.TotalDownloaded += d.Downloaded
+		out.TotalBonus += d.Bonus
+	}
+	return out
 }
 
 // LoadDeltaSummary 从仓库读出区间 range 的增量汇总。

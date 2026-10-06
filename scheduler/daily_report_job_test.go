@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -190,4 +191,124 @@ func TestDailyReport_PrunesOldSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, left, 1)
 	assert.Equal(t, now.AddDate(0, 0, -10).Format("2006-01-02"), left[0].Date)
+}
+
+// 发送时刻按当地墙上时间算：夏令时开始那天（少一小时）22:00 仍是 22:00，不会被推到 23:00。
+func TestDailyReport_DueTimeUsesWallClockOnDSTDay(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	f := newDailyReportFixture(t, time.Date(2026, 3, 8, 22, 4, 0, 0, ny), quietConf(1, "", ""))
+	f.cfg.Location = ny
+	f.repo.SetClock(f.clock.Now, ny)
+	job := NewDailyReportJob(f.cfg)
+
+	job.RunOnce(context.Background())
+	assert.Empty(t, reportRows(t, f.db), "22:00 + 5 分钟之前不发")
+	f.clock.Advance(2 * time.Minute)
+	job.RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1, "当地 22:06 已经过了发送时刻")
+	assert.Equal(t, "2026-03-08", rows[0].EventKey)
+}
+
+// 偏移读不出来（首次分配时写库失败）时这一轮不发，不当成 0 偏移提前发。
+func TestDailyReport_OffsetErrorSkipsRound(t *testing.T) {
+	f := newDailyReportFixture(t, time.Date(2026, 10, 6, 22, 1, 0, 0, time.UTC), quietConf(1, "", ""))
+	offsetErr := errors.New("database is locked")
+	f.cfg.Offset = func() (time.Duration, error) {
+		if offsetErr != nil {
+			return 0, offsetErr
+		}
+		return time.Minute, nil
+	}
+	job := NewDailyReportJob(f.cfg)
+
+	job.RunOnce(context.Background())
+	assert.Empty(t, reportRows(t, f.db), "偏移读取失败：本轮不发")
+	offsetErr = nil
+	f.clock.Advance(time.Minute)
+	job.RunOnce(context.Background())
+	assert.Len(t, reportRows(t, f.db), 1)
+}
+
+// pruneFailOnce 第一次清理返回错误，之后照常。
+type pruneFailOnce struct {
+	v2.UserInfoHistoryRepo
+	calls int
+}
+
+func (p *pruneFailOnce) PruneSnapshots(ctx context.Context, before string) (int64, error) {
+	p.calls++
+	if p.calls == 1 {
+		return 0, errors.New("disk I/O error")
+	}
+	return p.UserInfoHistoryRepo.PruneSnapshots(ctx, before)
+}
+
+// 清理失败时同一天下一轮再试，成功之后当天不再清理。
+func TestDailyReport_PruneRetriesAfterFailure(t *testing.T) {
+	f := newDailyReportFixture(t, time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC), quietConf(1, "", ""))
+	f.enabled = false
+	repo := &pruneFailOnce{UserInfoHistoryRepo: f.repo}
+	f.cfg.History = repo
+	job := NewDailyReportJob(f.cfg)
+
+	job.RunOnce(context.Background())
+	job.RunOnce(context.Background())
+	job.RunOnce(context.Background())
+	assert.Equal(t, 2, repo.calls, "失败后重试一次，成功后当天不再清理")
+}
+
+// 战报只算已启用的站点：已禁用站点的增量、残留的登录异常与签到结果都不出现；
+// 探测模式为「禁用」的站点，残留的探测状态也不算登录异常。
+func TestDailyReport_OnlyEnabledSites(t *testing.T) {
+	now := time.Date(2026, 10, 6, 22, 30, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	f.cfg.EnabledSites = func() (map[string]bool, error) {
+		return map[string]bool{"hdsky": true, "audiences": true}, nil
+	}
+	gib := int64(1 << 30)
+	yesterday := now.Add(-24 * time.Hour)
+	f.saveAt(t, yesterday, "hdsky", 10*gib, 2*gib, 1000)
+	f.saveAt(t, now.Add(-time.Hour), "hdsky", 15*gib, 3*gib, 1500)
+	f.saveAt(t, yesterday, "pterclub", 8*gib, gib, 500)
+	f.saveAt(t, now.Add(-time.Hour), "pterclub", 20*gib, gib, 600)
+	require.NoError(t, f.db.Create(&models.SiteLoginState{SiteName: "pterclub", LastProbeStatus: "SESSION_EXPIRED"}).Error)
+	require.NoError(t, f.db.Create(&models.SiteLoginState{SiteName: "audiences", LastProbeStatus: "NETWORK_ERROR", ProbeMode: ProbeModeDisabled}).Error)
+	require.NoError(t, f.db.Create(&models.SiteAttendanceLog{SiteName: "pterclub", Day: "2026-10-06", Status: models.AttendanceFailed}).Error)
+	require.NoError(t, f.db.Create(&models.SiteAttendanceLog{SiteName: "hdsky", Day: "2026-10-06", Status: models.AttendanceSigned}).Error)
+
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	text := reportText(t, rows[0])
+	assert.Contains(t, text, "上传 5.00 GiB", "合计只算已启用的 hdsky")
+	assert.NotContains(t, text, "PTerClub")
+	assert.NotContains(t, text, "pterclub")
+	assert.NotContains(t, text, "登录状态异常", "已禁用站点与探测模式为禁用的站点都不算")
+	assert.Contains(t, text, "成功 1 · 已签 0 · 失败 0")
+}
+
+// 站点读不出来时这一轮不发，免得把已禁用的站点算进去。
+func TestDailyReport_EnabledSitesErrorSkipsRound(t *testing.T) {
+	f := newDailyReportFixture(t, time.Date(2026, 10, 6, 22, 30, 0, 0, time.UTC), quietConf(1, "", ""))
+	f.cfg.EnabledSites = func() (map[string]bool, error) { return nil, errors.New("no such table") }
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	assert.Empty(t, reportRows(t, f.db))
+}
+
+// 只有今天一份快照、算不出增量时，说明还没有可比的数据，不报一排 0。
+func TestDailyReport_NoBaselineSaysSo(t *testing.T) {
+	now := time.Date(2026, 10, 6, 22, 30, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, quietConf(1, "", ""))
+	f.saveAt(t, now.Add(-time.Hour), "hdsky", 15<<30, 3<<30, 1500)
+
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	text := reportText(t, rows[0])
+	assert.NotContains(t, text, "今日合计")
+	assert.Contains(t, text, "还没有可比")
 }

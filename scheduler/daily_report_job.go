@@ -34,6 +34,9 @@ type DailyReportJobConfig struct {
 	Settings func() (enabled bool, hhmm string, channelIDs []uint, err error)
 	// Offset 返回本安装固定的发送偏移（core.ConfigStore.DailyReportOffset）。
 	Offset func() (time.Duration, error)
+	// EnabledSites 返回已启用站点名（小写）。战报只算这些站点：已禁用站点的增量、残留的登录状态与签到结果都不出现。
+	// 为空时不过滤；返回错误时这一轮不发。
+	EnabledSites func() (map[string]bool, error)
 	// History 为空（用户数据仓库没起来）时不发战报，也不清理快照。
 	History v2.UserInfoHistoryRepo
 	// Notifier 为空时不发。
@@ -156,14 +159,21 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 	}
 	due, err := j.dueAt(now, hhmm)
 	if err != nil {
-		j.cfg.Logger.Warnf("每日战报时间无效: %v", err)
+		j.cfg.Logger.Warnf("计算每日战报发送时刻失败: %v", err)
 		return
 	}
 	if now.Before(due) {
 		return
 	}
+	var enabledSites map[string]bool
+	if j.cfg.EnabledSites != nil {
+		if enabledSites, err = j.cfg.EnabledSites(); err != nil {
+			j.cfg.Logger.Warnf("每日战报读取站点配置失败: %v", err)
+			return
+		}
+	}
 
-	title, text, err := j.buildReport(ctx, today)
+	title, text, err := j.buildReport(ctx, today, enabledSites)
 	if err != nil {
 		j.cfg.Logger.Warnf("生成每日战报失败: %v", err)
 		return
@@ -185,42 +195,51 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 	j.mu.Unlock()
 }
 
-// dueAt 是当天的发送时刻：设定时刻加本安装的偏移，最晚当天 23:59，偏移跨过午夜时不会漏掉这一天。
+// dueAt 是当天的发送时刻：设定时刻（当地墙上时间，夏令时切换日也不偏）加本安装的偏移，最晚当天 23:59，
+// 偏移跨过午夜时不会漏掉这一天。偏移读不出来时返回错误，这一轮不发，不当成 0 偏移提前发。
 func (j *DailyReportJob) dueAt(now time.Time, hhmm string) (time.Time, error) {
 	at, err := time.Parse("15:04", hhmm)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, fmt.Errorf("发送时刻 %q 无效: %w", hhmm, err)
 	}
-	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	due := day.Add(time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute)
+	y, m, d := now.Date()
+	due := time.Date(y, m, d, at.Hour(), at.Minute(), 0, 0, now.Location())
 	if j.cfg.Offset != nil {
-		if offset, oerr := j.cfg.Offset(); oerr == nil {
-			due = due.Add(offset)
+		offset, oerr := j.cfg.Offset()
+		if oerr != nil {
+			return time.Time{}, fmt.Errorf("读取发送偏移失败: %w", oerr)
 		}
+		due = due.Add(offset)
 	}
-	if latest := day.Add(23*time.Hour + 59*time.Minute); due.After(latest) {
+	if latest := time.Date(y, m, d, 23, 59, 0, 0, now.Location()); due.After(latest) {
 		due = latest
 	}
 	return due, nil
 }
 
+// pruneOnce 每天清理一次旧快照；失败时下一轮再试，成功之后当天不再清理。RunOnce 只在调度循环里串行调用。
 func (j *DailyReportJob) pruneOnce(ctx context.Context, today string) {
 	j.mu.Lock()
-	if j.prunedDay == today {
-		j.mu.Unlock()
+	done := j.prunedDay == today
+	j.mu.Unlock()
+	if done {
 		return
 	}
-	j.prunedDay = today
-	j.mu.Unlock()
 	before, err := v2.AddDays(today, -v2.SnapshotRetentionDays)
 	if err != nil {
 		return
 	}
-	if n, err := j.cfg.History.PruneSnapshots(ctx, before); err != nil {
-		j.cfg.Logger.Warnf("清理用户数据快照失败: %v", err)
-	} else if n > 0 {
+	n, err := j.cfg.History.PruneSnapshots(ctx, before)
+	if err != nil {
+		j.cfg.Logger.Warnf("清理用户数据快照失败，下一轮重试: %v", err)
+		return
+	}
+	if n > 0 {
 		j.cfg.Logger.Infof("清理了 %d 条 %s 以前的用户数据快照", n, before)
 	}
+	j.mu.Lock()
+	j.prunedDay = today
+	j.mu.Unlock()
 }
 
 func siteDisplayName(id string) string {
@@ -244,18 +263,22 @@ func formatBonus(v float64) string {
 	return fmt.Sprintf("+%.0f", v)
 }
 
-// buildReport 生成当天的战报。
-func (j *DailyReportJob) buildReport(ctx context.Context, today string) (string, string, error) {
+// buildReport 生成当天的战报；enabled 不为 nil 时只算其中的站点。
+func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled map[string]bool) (string, string, error) {
 	sum, err := v2.LoadDeltaSummary(ctx, j.cfg.History, "today")
 	if err != nil {
 		return "", "", err
 	}
+	sum = sum.Filter(enabled)
 	title := fmt.Sprintf("📊 每日战报 %s", today)
 	var b strings.Builder
 
-	if len(sum.Sites) == 0 {
+	switch {
+	case len(sum.Sites) == 0:
 		b.WriteString("今天还没有同步到站点数据（登录探测成功或手动同步之后才有）。")
-	} else {
+	case countWithBaseline(sum.Sites) == 0:
+		b.WriteString("今天还没有可比的数据：站点要有今天之前的一份快照才算得出增量，明天起就有。")
+	default:
 		fmt.Fprintf(&b, "今日合计：上传 %s · 下载 %s · 魔力 %s",
 			utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded), formatBonus(sum.TotalBonus))
 		sites := append([]v2.SiteDelta(nil), sum.Sites...)
@@ -284,10 +307,10 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string) (string,
 		}
 	}
 
-	if abnormal := j.abnormalSites(ctx); len(abnormal) > 0 {
+	if abnormal := j.abnormalSites(ctx, enabled); len(abnormal) > 0 {
 		fmt.Fprintf(&b, "\n⚠️ 登录状态异常：%s", strings.Join(abnormal, "、"))
 	}
-	if line := j.attendanceLine(ctx, today); line != "" {
+	if line := j.attendanceLine(ctx, today, enabled); line != "" {
 		b.WriteString("\n")
 		b.WriteString(line)
 	}
@@ -304,7 +327,13 @@ func countWithBaseline(sites []v2.SiteDelta) int {
 	return n
 }
 
-func (j *DailyReportJob) abnormalSites(ctx context.Context) []string {
+// inSites 报告 site 是否在 enabled 里；enabled 为 nil 表示不过滤。
+func inSites(enabled map[string]bool, site string) bool {
+	return enabled == nil || enabled[strings.ToLower(site)]
+}
+
+// abnormalSites 列出登录状态异常的站点。探测模式为「禁用」的站点不再探测，残留的旧状态不算。
+func (j *DailyReportJob) abnormalSites(ctx context.Context, enabled map[string]bool) []string {
 	if j.cfg.DB == nil {
 		return nil
 	}
@@ -313,19 +342,23 @@ func (j *DailyReportJob) abnormalSites(ctx context.Context) []string {
 	for k := range probeStatusText {
 		statuses = append(statuses, k)
 	}
-	if err := j.cfg.DB.WithContext(ctx).Where("last_probe_status IN ?", statuses).
+	if err := j.cfg.DB.WithContext(ctx).
+		Where("last_probe_status IN ? AND (probe_mode IS NULL OR probe_mode <> ?)", statuses, ProbeModeDisabled).
 		Order("site_name").Find(&states).Error; err != nil {
 		j.cfg.Logger.Warnf("每日战报读取登录状态失败: %v", err)
 		return nil
 	}
 	out := make([]string, 0, len(states))
 	for _, st := range states {
+		if !inSites(enabled, st.SiteName) {
+			continue
+		}
 		out = append(out, fmt.Sprintf("%s（%s）", siteDisplayName(st.SiteName), probeStatusText[st.LastProbeStatus]))
 	}
 	return out
 }
 
-func (j *DailyReportJob) attendanceLine(ctx context.Context, today string) string {
+func (j *DailyReportJob) attendanceLine(ctx context.Context, today string, enabled map[string]bool) string {
 	if j.cfg.DB == nil || !j.cfg.DB.Migrator().HasTable(&models.SiteAttendanceLog{}) {
 		return ""
 	}
@@ -336,7 +369,9 @@ func (j *DailyReportJob) attendanceLine(ctx context.Context, today string) strin
 	}
 	counts := map[string]int{}
 	for _, l := range logs {
-		counts[l.Status]++
+		if inSites(enabled, l.SiteName) {
+			counts[l.Status]++
+		}
 	}
 	if counts[models.AttendanceSigned]+counts[models.AttendanceAlready]+counts[models.AttendanceFailed] == 0 {
 		return ""

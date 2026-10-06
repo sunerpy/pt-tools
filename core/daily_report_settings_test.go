@@ -67,3 +67,16 @@ func TestDailyReportOffset_AssignedOnceAndPersisted(t *testing.T) {
 	assert.Equal(t, first, second, "分配之后固定不变")
 	assert.Equal(t, 1, calls)
 }
+
+func TestConfigStore_EnabledSiteNames(t *testing.T) {
+	store := newDailyReportStore(t)
+	on, off := true, false
+	_, err := store.UpsertSite("HDSky", models.SiteConfig{Enabled: &on, AuthMethod: "cookie", Cookie: "c"})
+	require.NoError(t, err)
+	_, err = store.UpsertSite("pterclub", models.SiteConfig{Enabled: &off, AuthMethod: "cookie", Cookie: "c"})
+	require.NoError(t, err)
+
+	got, err := store.EnabledSiteNames()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"hdsky": true}, got)
+}
