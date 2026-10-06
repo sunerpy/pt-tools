@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,4 +87,51 @@ func TestNexusPHPDefinitionUserInfo_AllPagesUnreachableIsNetworkError(t *testing
 	_, err = d.GetUserInfo(context.Background())
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrNetworkError)
+}
+
+// 依赖页（这里是 userdetails）连接被掐断：只是少了这一页的字段，已取到的用户名与 ID 照样返回，不报错。
+func TestNexusPHPDefinitionUserInfo_DependentPageFailureKeepsPartialData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails") {
+			hj, ok := w.(http.Hijacker)
+			require.True(t, ok)
+			conn, _, err := hj.Hijack()
+			require.NoError(t, err)
+			_ = conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a id="uid" href="userdetails.php?id=888">tester</a></body></html>`))
+	}))
+	defer server.Close()
+
+	def := &SiteDefinition{
+		ID: "testsite",
+		UserInfo: &UserInfoConfig{
+			Process: []UserInfoProcess{
+				{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+				{
+					RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"},
+					Assertion:     map[string]string{"id": "params.id"},
+					Fields:        []string{"uploaded"},
+				},
+			},
+			Selectors: map[string]FieldSelector{
+				"id":       {Selector: []string{"#uid"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+				"name":     {Selector: []string{"#uid"}},
+				"uploaded": {Selector: []string{"#up"}},
+			},
+		},
+	}
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+	d.SetSiteDefinition(def)
+
+	info, err := d.GetUserInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "tester", info.Username)
+	assert.Equal(t, "888", info.UserID)
+	assert.Zero(t, info.Uploaded, "掐断的那一页没有数据")
+
+	pe := partialFetchError{err: ErrNetworkError}
+	assert.Equal(t, ErrNetworkError.Error(), pe.Error())
+	assert.ErrorIs(t, pe, ErrNetworkError)
 }
