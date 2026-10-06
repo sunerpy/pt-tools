@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,7 +16,10 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
+	"golang.org/x/net/publicsuffix"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // NexusPHPRequest represents a request to a NexusPHP site
@@ -1411,15 +1415,9 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 		return nil, fmt.Errorf("no download URL found in detail page")
 	}
 
-	// Build full download URL
-	downloadURL := detail.DownloadURL
-	if !strings.HasPrefix(downloadURL, "http") {
-		// Relative URL - prepend base URL
-		if strings.HasPrefix(downloadURL, "/") {
-			downloadURL = d.BaseURL + downloadURL
-		} else {
-			downloadURL = d.BaseURL + "/" + downloadURL
-		}
+	downloadURL, sameSite, err := d.resolveDetailDownloadURL(detail.DownloadURL)
+	if err != nil {
+		return nil, err
 	}
 
 	// Fetch the actual torrent file
@@ -1427,11 +1425,15 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 	defer cancel()
 
 	headers := map[string]string{
-		"Cookie":          d.Cookie,
 		"User-Agent":      d.userAgent,
 		"Accept":          "application/x-bittorrent,*/*",
 		"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 		"Referer":         d.BaseURL + "/",
+	}
+	// 链接取自详情页，简介等区域是用户内容；只有指向站点自己的域名时才附带 Cookie，
+	// 外域链接照常请求（passkey 下载链接不依赖 Cookie），但不把站点 Cookie 交给第三方。
+	if sameSite {
+		headers["Cookie"] = d.Cookie
 	}
 
 	resp, err := d.httpClient.Get(ctx, downloadURL, headers)
@@ -1440,7 +1442,7 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, downloadURL)
+		return nil, fmt.Errorf("HTTP %d fetching torrent from %s", resp.StatusCode, utils.SanitizeURL(downloadURL))
 	}
 
 	if len(resp.Body) == 0 {
@@ -1451,6 +1453,56 @@ func (d *NexusPHPDriver) ParseDownload(res NexusPHPResponse) ([]byte, error) {
 }
 
 // Helper functions
+
+// resolveDetailDownloadURL 把详情页里的下载链接补成绝对地址，并判断它是否指向站点自己的域名。
+// 相对链接沿用原来的拼接方式；绝对链接只接受 http/https。
+func (d *NexusPHPDriver) resolveDetailDownloadURL(href string) (string, bool, error) {
+	href = strings.TrimSpace(href)
+	if u, err := url.Parse(href); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+		return u.String(), d.isSiteHost(u.Hostname()), nil
+	} else if err == nil && u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
+		return "", false, fmt.Errorf("unsupported download URL scheme %q", u.Scheme)
+	}
+	if strings.HasPrefix(href, "/") {
+		return d.BaseURL + href, true, nil
+	}
+	return d.BaseURL + "/" + href, true, nil
+}
+
+// isSiteHost 判断 host 是否属于本站：与 BaseURL 或站点定义里任一地址同主机，或同属一个可注册域名
+// （如 pt.example.com 与 dl.example.com）。IP 地址只做精确匹配。
+func (d *NexusPHPDriver) isSiteHost(host string) bool {
+	candidates := []string{d.BaseURL}
+	if d.siteDefinition != nil {
+		candidates = append(candidates, d.siteDefinition.URLs...)
+	}
+	target := registrableDomain(host)
+	for _, c := range candidates {
+		u, err := url.Parse(c)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		if strings.EqualFold(u.Hostname(), host) {
+			return true
+		}
+		if target != "" && strings.EqualFold(registrableDomain(u.Hostname()), target) {
+			return true
+		}
+	}
+	return false
+}
+
+// registrableDomain 返回 host 的可注册域名（eTLD+1）；IP 或无法判断时返回空串。
+func registrableDomain(host string) string {
+	if host == "" || net.ParseIP(host) != nil {
+		return ""
+	}
+	domain, err := publicsuffix.EffectiveTLDPlusOne(strings.ToLower(host))
+	if err != nil {
+		return ""
+	}
+	return domain
+}
 
 // extractTorrentID extracts the torrent ID from a URL
 func extractTorrentID(href string) string {

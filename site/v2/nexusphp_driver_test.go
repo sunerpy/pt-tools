@@ -1085,10 +1085,13 @@ func TestNexusPHPDriver_ParseDownload_NoURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "no download URL")
 }
 
+// 详情页里指向外域的绝对链接照常下载，但不能把站点 Cookie 发给外域。
 func TestNexusPHPDriver_ParseDownload_AbsoluteURL(t *testing.T) {
 	var hits int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var gotCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
+		gotCookie = r.Header.Get("Cookie")
 		_, _ = w.Write([]byte("d4:info"))
 	}))
 	defer server.Close()
@@ -1100,6 +1103,49 @@ func TestNexusPHPDriver_ParseDownload_AbsoluteURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("d4:info"), data)
 	assert.Equal(t, 1, hits)
+	assert.Empty(t, gotCookie, "外域下载链接不能带站点 Cookie")
+}
+
+// 指向站点自己域名的绝对链接照旧附带 Cookie。
+func TestNexusPHPDriver_ParseDownload_SameSiteAbsoluteURLKeepsCookie(t *testing.T) {
+	var gotCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCookie = r.Header.Get("Cookie")
+		_, _ = w.Write([]byte("d4:info"))
+	}))
+	defer server.Close()
+
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+	html := `<html><body><a href="` + server.URL + `/download.php?id=1">dl</a></body></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	_, err := d.ParseDownload(NexusPHPResponse{Document: doc})
+	require.NoError(t, err)
+	assert.Equal(t, "c=1", gotCookie)
+}
+
+func TestNexusPHPDriver_ParseDownload_RejectsNonHTTPScheme(t *testing.T) {
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com", Cookie: "c=1"})
+	html := `<html><body><a href="file:///etc/download.php?id=1">dl</a></body></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	_, err := d.ParseDownload(NexusPHPResponse{Document: doc})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported download URL scheme")
+}
+
+func TestNexusPHPDriver_IsSiteHost(t *testing.T) {
+	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://pt.example.com", Cookie: "c=1"})
+	assert.True(t, d.isSiteHost("pt.example.com"))
+	assert.True(t, d.isSiteHost("dl.example.com"), "同一可注册域名下的子域属于本站")
+	assert.False(t, d.isSiteHost("example.com.evil.net"))
+	assert.False(t, d.isSiteHost("evil.com"))
+	assert.False(t, d.isSiteHost("mirror.example.net"))
+
+	d.siteDefinition = &SiteDefinition{URLs: []string{"https://mirror.example.net/"}}
+	assert.True(t, d.isSiteHost("mirror.example.net"), "站点定义里的备用域名也算本站")
+
+	ip := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "http://192.168.1.2:8080"})
+	assert.True(t, ip.isSiteHost("192.168.1.2"))
+	assert.False(t, ip.isSiteHost("192.168.1.3"))
 }
 
 func TestNexusPHPDriver_ParseDownload_HTTPError(t *testing.T) {
