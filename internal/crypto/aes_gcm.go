@@ -74,15 +74,25 @@ func initKey() {
 		panic(fmt.Sprintf("failed to create .pt-tools directory: %v", err))
 	}
 
-	keyHex := hex.EncodeToString(key)
-	// O_EXCL：只在文件确实不存在时创建，绝不覆盖别处同时写入的密钥。
-	f, createErr := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	createErr := writeNewKeyFile(keyFile, hex.EncodeToString(key))
 	if errors.Is(createErr, fs.ErrExist) {
+		// 检查与创建之间别处写入了密钥文件：读它，不覆盖
 		loadExistingKey(keyFile)
 		return
 	}
 	if createErr != nil {
 		panic(fmt.Sprintf("failed to write secret key to %s: %v", keyFile, createErr))
+	}
+
+	encryptor = &AESGCMEncryptor{key: key}
+	keyGenerated = true
+}
+
+// writeNewKeyFile 以 O_EXCL 创建密钥文件：文件（含悬空的符号链接）已存在时返回 fs.ErrExist，绝不覆盖。
+func writeNewKeyFile(keyFile, keyHex string) error {
+	f, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
 	}
 	_, werr := f.WriteString(keyHex)
 	if cerr := f.Close(); werr == nil {
@@ -90,11 +100,8 @@ func initKey() {
 	}
 	if werr != nil {
 		_ = os.Remove(keyFile)
-		panic(fmt.Sprintf("failed to write secret key to %s: %v", keyFile, werr))
 	}
-
-	encryptor = &AESGCMEncryptor{key: key}
-	keyGenerated = true
+	return werr
 }
 
 // loadExistingKey 读取已存在的密钥文件；读不出或格式不对时只记录错误，不覆盖。

@@ -115,3 +115,36 @@ func TestDiscardGeneratedKey_KeepsExistingFile(t *testing.T) {
 	_, encErr := Encrypt([]byte("x"))
 	assert.NoError(t, encErr)
 }
+
+// 检查时文件不存在、创建时却已存在（这里用悬空的符号链接模拟别处同时写入）：不覆盖，按已有文件处理。
+func TestInitKey_CreateRaceDoesNotOverwrite(t *testing.T) {
+	home := useTempHome(t)
+	dir := filepath.Join(home, ".pt-tools")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	keyFile := filepath.Join(dir, "secret.key")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "missing-target"), keyFile))
+
+	initKey()
+
+	_, generated, err := KeyStatus()
+	assert.False(t, generated)
+	require.Error(t, err, "链接指向的文件读不出，记录错误而不是另写一个")
+	target, lerr := os.Readlink(keyFile)
+	require.NoError(t, lerr)
+	assert.Equal(t, filepath.Join(dir, "missing-target"), target, "原链接保持不变")
+}
+
+func TestWriteNewKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "secret.key")
+	require.NoError(t, writeNewKeyFile(keyFile, "abc"))
+	got, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", string(got))
+
+	assert.ErrorIs(t, writeNewKeyFile(keyFile, "def"), os.ErrExist, "已存在时不覆盖")
+	got, _ = os.ReadFile(keyFile)
+	assert.Equal(t, "abc", string(got))
+
+	assert.Error(t, writeNewKeyFile(filepath.Join(dir, "no-such-dir", "secret.key"), "x"))
+}

@@ -91,3 +91,24 @@ func TestCheckGeneratedSecretKey_FreshInstallAndExistingKey(t *testing.T) {
 	keyTestHome(t, []byte(hex.EncodeToString(make([]byte, 32))))
 	assert.NoError(t, checkGeneratedSecretKey(keyCheckDB(t, true)))
 }
+
+// 查不了库（列不存在等）时报错拒绝启动，不当作「没有密文」放行。
+func TestCheckGeneratedSecretKey_QueryError(t *testing.T) {
+	keyTestHome(t, nil)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TABLE site_settings (id integer primary key)").Error)
+
+	err = checkGeneratedSecretKey(db)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "检查已加密数据失败")
+}
+
+// 新生成的密钥文件已被别的进程删掉时，删除失败只记日志，照样拒绝启动。
+func TestCheckGeneratedSecretKey_DiscardFailureStillRejects(t *testing.T) {
+	home := keyTestHome(t, nil)
+	require.NoError(t, os.Remove(filepath.Join(home, ".pt-tools", "secret.key")))
+
+	err := checkGeneratedSecretKey(keyCheckDB(t, true))
+	require.ErrorIs(t, err, ErrSecretKeyRegenerated)
+}
