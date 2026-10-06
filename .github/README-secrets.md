@@ -29,6 +29,28 @@ GitHub Release、二进制、扩展、校验和与容器镜像属于发布门禁
 
 变量缺失或不是精确字符串 `false` 时保持默认启用。
 
+## 国内镜像（阿里云 ACR，可选）
+
+| Secret                     | 用途                                                 |
+| -------------------------- | ---------------------------------------------------- |
+| `ALIYUN_REGISTRY_USERNAME` | 阿里云容器镜像服务的登录用户名                       |
+| `ALIYUN_REGISTRY_PASSWORD` | 容器镜像服务的固定密码（在控制台「访问凭证」里设置） |
+
+| 变量          | 用途                                                                                    |
+| ------------- | --------------------------------------------------------------------------------------- |
+| `PUBLISH_ACR` | 只有精确字符串 `true` 时才推送到 ACR；缺失或其他值时不推                                |
+| `ACR_IMAGE`   | 镜像地址，缺省为 `registry.cn-hangzhou.aliyuncs.com/sunerpy/pt-tools`，登录地址取第一段 |
+
+开启前先在 ACR 个人版控制台建好命名空间 `sunerpy`（推送不会自动建），再设置两个 secret 和变量：
+
+```bash
+gh secret set ALIYUN_REGISTRY_USERNAME --repo sunerpy/pt-tools
+gh secret set ALIYUN_REGISTRY_PASSWORD --repo sunerpy/pt-tools
+gh variable set PUBLISH_ACR --repo sunerpy/pt-tools --body true
+```
+
+标签与 Docker Hub、GHCR 相同（版本号；稳定版另有 `latest` 等）。推送失败时镜像 job 失败，Release 保持 draft，与 Docker Hub 推送失败的处理一样。
+
 ## 文档站
 
 | Secret              | 用途                                                                                                                           |

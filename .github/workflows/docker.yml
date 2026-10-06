@@ -22,8 +22,8 @@
 #
 # 与 github-project-scaffold 的 docker-ghcr-reusable.yml 的差异（已在
 # .github/scaffold.json 的 drift_allow 登记）：
-#   1. 双注册表——GHCR（attested 主体）+ Docker Hub（sunerpy/pt-tools，
-#      对外既有交付面）；
+#   1. 多注册表——GHCR（attested 主体）+ Docker Hub（sunerpy/pt-tools，
+#      对外既有交付面）+ 可选的阿里云 ACR（vars.PUBLISH_ACR 为 'true' 时）；
 #   2. build-args 对齐 pt-tools 的 Dockerfile（TAG / BUILD_TIME / COMMIT_ID /
 #      BUILD_ENV），而非模板的 VERSION；
 #   3. 下载同一 release run 的 GoReleaser 归档，将 Linux 二进制放进 Dockerfile
@@ -184,13 +184,36 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      # 国内镜像（阿里云 ACR）：仓库变量 PUBLISH_ACR 为 'true' 时才推。没有凭证时推送必然失败，所以默认不推；
+      # ACR 个人版的命名空间要先在控制台手动建好。
+      - name: Resolve ACR image
+        id: acr
+        if: vars.PUBLISH_ACR == 'true'
+        shell: bash
+        env:
+          ACR_IMAGE: ${{ vars.ACR_IMAGE || 'registry.cn-hangzhou.aliyuncs.com/sunerpy/pt-tools' }}
+        run: |
+          set -euo pipefail
+          echo "image=${ACR_IMAGE}" >>"$GITHUB_OUTPUT"
+          echo "registry=${ACR_IMAGE%%/*}" >>"$GITHUB_OUTPUT"
+
+      - name: Log in to Aliyun ACR
+        if: vars.PUBLISH_ACR == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ steps.acr.outputs.registry }}
+          username: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+
       - name: Derive image metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
+          # ACR 一行在 PUBLISH_ACR 不是 'true' 时为空，metadata-action 忽略空行
           images: |
             ${{ steps.image.outputs.name }}
             sunerpy/pt-tools
+            ${{ steps.acr.outputs.image }}
           # prerelease 不会命中 latest：metadata-action 的 semver pattern
           # 只对稳定版本发出 latest。
           tags: |
