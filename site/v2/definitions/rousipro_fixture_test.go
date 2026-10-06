@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -432,6 +433,8 @@ func TestRousiDriver_ParsePromotion_UntilLayouts(t *testing.T) {
 
 	_, end2 := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "2025-02-01 00:00:00"})
 	assert.False(t, end2.IsZero())
+	// 不带时区的时间是北京时间：2025-02-01 00:00 CST 即 2025-01-31 16:00 UTC
+	assert.True(t, end2.Equal(time.Date(2025, 1, 31, 16, 0, 0, 0, time.UTC)), "got %s", end2.UTC())
 
 	_, end3 := d.parsePromotion(&rousiPromotion{IsActive: true, Type: 2, Until: "garbage"})
 	assert.True(t, end3.IsZero())
@@ -536,10 +539,10 @@ func TestRousiDriver_PrepareSearch(t *testing.T) {
 	assert.Equal(t, "1", req.Params["page"])
 	assert.Equal(t, "100", req.Params["page_size"])
 
-	// page > 0 -> page+1
+	// SearchQuery.Page 与 API 都从 1 开始：第 2 页就是 page=2
 	req2, err := d.PrepareSearch(v2.SearchQuery{Page: 2})
 	require.NoError(t, err)
-	assert.Equal(t, "3", req2.Params["page"])
+	assert.Equal(t, "2", req2.Params["page"])
 	_, hasKeyword := req2.Params["keyword"]
 	assert.False(t, hasKeyword)
 }
@@ -554,12 +557,70 @@ func TestRousiDriver_PrepareDownload(t *testing.T) {
 
 func TestRousiDriver_ParseDownload(t *testing.T) {
 	d := newTestRousiDriverWithURL("https://rousi.pro")
-	data, err := d.ParseDownload(rousiResponse{RawBody: []byte("torrentbytes")})
+	data, err := d.ParseDownload(rousiResponse{RawBody: rousiTestTorrent})
 	require.NoError(t, err)
-	assert.Equal(t, []byte("torrentbytes"), data)
+	assert.Equal(t, rousiTestTorrent, data)
 
 	_, err = d.ParseDownload(rousiResponse{})
 	assert.Error(t, err)
+
+	// 站点返回登录页等非种子内容时直接报错，不把 HTML 当种子交出去
+	_, err = d.ParseDownload(rousiResponse{RawBody: []byte("<html>login</html>")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "有效的种子文件")
+}
+
+var rousiTestTorrent = []byte("d8:announce4:test4:infod4:name4:teste")
+
+// 下载接口返回的是 bencode 字节，Execute 不能按 JSON 解析，否则网页下载和搜索页推送都会失败。
+func TestRousiDriver_Download_ReturnsTorrentBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/torrent/uuid-1/download/FAKE_TEST_PASSKEY_1234", r.URL.Path)
+		w.Header().Set("Content-Type", "application/x-bittorrent")
+		_, _ = w.Write(rousiTestTorrent)
+	}))
+	defer server.Close()
+
+	d := newTestRousiDriverWithURL(server.URL)
+	req, err := d.PrepareDownload("uuid-1")
+	require.NoError(t, err)
+	res, err := d.Execute(context.Background(), req)
+	require.NoError(t, err)
+	data, err := d.ParseDownload(res)
+	require.NoError(t, err)
+	assert.Equal(t, rousiTestTorrent, data)
+}
+
+// 下载地址的路径里带 passkey，连接失败时错误文本不能把它带进日志。
+func TestRousiDriver_Execute_RedactsPasskeyInTransportError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, _, err := hj.Hijack()
+		require.NoError(t, err)
+		_ = conn.Close()
+	}))
+	defer server.Close()
+
+	d := newTestRousiDriverWithURL(server.URL)
+	req, err := d.PrepareDownload("uuid-1")
+	require.NoError(t, err)
+	_, err = d.Execute(context.Background(), req)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "FAKE_TEST_PASSKEY_1234")
+	assert.Contains(t, err.Error(), "***")
+}
+
+// 搜索结果里的下载地址只能是 pt-tools 的代理地址，不能带 passkey。
+func TestRousiDriver_ParseSearch_DownloadURLStaysServerSide(t *testing.T) {
+	resp := DecodeFixtureJSON[rousiResponse](t, "rousi_search", rousiSearchFixtureJSON)
+	items, err := newTestRousiDriver().ParseSearch(resp)
+	require.NoError(t, err)
+	require.NotEmpty(t, items)
+	for _, item := range items {
+		assert.Equal(t, "/api/site/rousipro/torrent/"+item.ID+"/download", item.DownloadURL)
+		assert.NotContains(t, item.DownloadURL, "FAKE_TEST_PASSKEY_1234")
+	}
 }
 
 func TestExtractUUIDFromLink(t *testing.T) {

@@ -80,6 +80,8 @@ type rousiRequest struct {
 	Endpoint string
 	Method   string
 	Params   map[string]string
+	// RawBody 为 true 时响应体按原始字节返回（种子文件下载），不按 JSON 解析。
+	RawBody bool
 }
 
 type rousiResponse struct {
@@ -217,7 +219,8 @@ func (d *rousiDriver) Execute(ctx context.Context, req rousiRequest) (rousiRespo
 
 	resp, err := d.httpClient.DoRequest(ctx, method, fullURL, nil, headers)
 	if err != nil {
-		return rousiResponse{}, fmt.Errorf("request failed: %w", err)
+		// 下载地址的路径里带 passkey，传输层错误会原样带出完整 URL，这里先隐去再返回。
+		return rousiResponse{}, fmt.Errorf("request failed: %w", d.redactPasskey(err))
 	}
 
 	result := rousiResponse{
@@ -236,6 +239,10 @@ func (d *rousiDriver) Execute(ctx context.Context, req rousiRequest) (rousiRespo
 		return result, fmt.Errorf("API error: HTTP %d - %s", resp.StatusCode, result.Message)
 	}
 
+	if req.RawBody {
+		return result, nil
+	}
+
 	if len(resp.Body) > 0 {
 		if err := json.Unmarshal(resp.Body, &result); err != nil {
 			return result, fmt.Errorf("parse response: %w", err)
@@ -252,9 +259,9 @@ func (d *rousiDriver) PrepareSearch(query v2.SearchQuery) (rousiRequest, error) 
 	if query.Keyword != "" {
 		params["keyword"] = query.Keyword
 	}
-	// API page starts from 1, not 0
+	// SearchQuery.Page 与 Rousi API 都从 1 开始，直接透传
 	if query.Page > 0 {
-		params["page"] = strconv.Itoa(query.Page + 1)
+		params["page"] = strconv.Itoa(query.Page)
 	} else {
 		params["page"] = "1"
 	}
@@ -294,8 +301,9 @@ func (d *rousiDriver) ParseSearch(res rousiResponse) ([]v2.TorrentItem, error) {
 			DiscountEndTime: discountEnd,
 			Category:        t.CategoryName,
 			URL:             fmt.Sprintf("%s/torrent/%s", d.BaseURL, t.UUID),
-			DownloadURL:     fmt.Sprintf("%s/api/torrent/%s/download/%s", d.BaseURL, t.UUID, d.Passkey),
-			SourceSite:      siteID,
+			// 下载走 pt-tools 的代理地址，passkey 只在服务端拼接，不随搜索结果下发给浏览器。
+			DownloadURL: fmt.Sprintf("/api/site/%s/torrent/%s/download", siteID, t.UUID),
+			SourceSite:  siteID,
 		}
 
 		if t.CreatedAt != "" {
@@ -329,10 +337,12 @@ func (d *rousiDriver) parsePromotion(promo *rousiPromotion) (v2.DiscountLevel, t
 			"2006-01-02T15:04:05-0700",
 			"2006-01-02 15:04:05",
 		} {
-			if t, err := time.Parse(layout, promo.Until); err == nil {
-				if layout == "2006-01-02 15:04:05" {
-					t = t.In(time.FixedZone("CST", 8*3600))
-				}
+			parse := time.Parse
+			if layout == "2006-01-02 15:04:05" {
+				// 不带时区的时间按北京时间解释；time.Parse 会当成 UTC，事后 In(CST) 只改显示时区，时刻会晚 8 小时。
+				parse = v2.ParseTimeInCST
+			}
+			if t, err := parse(layout, promo.Until); err == nil {
 				endTime = t
 				break
 			}
@@ -440,6 +450,7 @@ func (d *rousiDriver) PrepareDownload(torrentID string) (rousiRequest, error) {
 	return rousiRequest{
 		Endpoint: fmt.Sprintf("/api/torrent/%s/download/%s", torrentID, d.Passkey),
 		Method:   http.MethodGet,
+		RawBody:  true,
 	}, nil
 }
 
@@ -447,8 +458,28 @@ func (d *rousiDriver) ParseDownload(res rousiResponse) ([]byte, error) {
 	if len(res.RawBody) == 0 {
 		return nil, fmt.Errorf("empty download response")
 	}
+	if err := v2.ValidateTorrentFile(res.RawBody); err != nil {
+		return nil, fmt.Errorf("下载内容不是有效的种子文件: %w", err)
+	}
 	return res.RawBody, nil
 }
+
+// redactPasskey 把错误文本里的 passkey 换成 ***，同时保留原错误链，errors.Is 仍可用。
+func (d *rousiDriver) redactPasskey(err error) error {
+	if err == nil || d.Passkey == "" || !strings.Contains(err.Error(), d.Passkey) {
+		return err
+	}
+	return &redactedError{err: err, secret: d.Passkey}
+}
+
+type redactedError struct {
+	err    error
+	secret string
+}
+
+func (e *redactedError) Error() string { return strings.ReplaceAll(e.err.Error(), e.secret, "***") }
+
+func (e *redactedError) Unwrap() error { return e.err }
 
 func (d *rousiDriver) getSiteID() string {
 	if d.siteDefinition != nil {
