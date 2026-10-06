@@ -363,3 +363,12 @@ func (s *UserInfoService) FetchAndSaveAllWithConcurrency(
 
 	return results, errors
 }
+
+// History 返回带每日快照的仓库；内存仓库没有历史数据，返回 false。
+func (s *UserInfoService) History() (UserInfoHistoryRepo, bool) {
+	if s == nil || s.repo == nil {
+		return nil, false
+	}
+	h, ok := s.repo.(UserInfoHistoryRepo)
+	return h, ok
+}

@@ -662,8 +662,90 @@ export interface SyncResponse {
 }
 
 // 用户信息 API
+/** 周期：今日、近 7 天（本周）、近 30 天（本月） */
+export type UserInfoRange = "today" | "7d" | "30d";
+
+/** 某站在区间内的增量；回退的那一项按 0 计、negative 为 true */
+export interface SiteDelta {
+  site: string;
+  from: string;
+  to: string;
+  uploaded: number;
+  downloaded: number;
+  bonus: number;
+  hasBaseline: boolean;
+  negative: boolean;
+}
+
+export interface DeltaSummary {
+  range: UserInfoRange;
+  from: string;
+  to: string;
+  sites: SiteDelta[];
+  totalUploaded: number;
+  totalDownloaded: number;
+  totalBonus: number;
+}
+
+/** 某站某天的数据与相对上一份快照的增量 */
+export interface DailyPoint {
+  date: string;
+  uploaded: number;
+  downloaded: number;
+  bonus: number;
+  seeding: number;
+  deltaUploaded: number;
+  deltaDownloaded: number;
+  deltaBonus: number;
+  /** 增量覆盖的天数：上一份快照不是前一天时大于 1；没有更早的快照时为 0 */
+  spanDays: number;
+  negative: boolean;
+}
+
+export interface UserInfoHistoryResponse {
+  site: string;
+  days: number;
+  from: string;
+  to: string;
+  points: DailyPoint[];
+}
+
+export interface TrendPoint {
+  date: string;
+  uploaded: number;
+  downloaded: number;
+  bonus: number;
+}
+
+export interface UserInfoTrendsResponse {
+  days: number;
+  from: string;
+  to: string;
+  dates: string[];
+  totals: TrendPoint[];
+  sites: Record<string, TrendPoint[]>;
+}
+
+/** 每日战报设置 */
+export interface DailyReportSettings {
+  enabled: boolean;
+  /** HH:MM，服务器时区 */
+  time: string;
+  channel_ids: number[];
+}
+
 export const userInfoApi = {
   getAggregated: () => api.get<AggregatedStatsResponse>("/api/v2/userinfo/aggregated"),
+  getHistory: (site: string, days = 30) =>
+    api.get<UserInfoHistoryResponse>(
+      `/api/v2/userinfo/history?site=${encodeURIComponent(site)}&days=${days}`,
+    ),
+  getSummary: (range: UserInfoRange) =>
+    api.get<DeltaSummary>(`/api/v2/userinfo/summary?range=${range}`),
+  getTrends: (days = 8) => api.get<UserInfoTrendsResponse>(`/api/v2/userinfo/trends?days=${days}`),
+  getDailyReport: () => api.get<DailyReportSettings>("/api/v2/userinfo/daily-report"),
+  saveDailyReport: (data: DailyReportSettings) =>
+    api.put<DailyReportSettings>("/api/v2/userinfo/daily-report", data),
   getSites: () => api.get<UserInfoResponse[]>("/api/v2/userinfo/sites"),
   getSite: (siteId: string) => api.get<UserInfoResponse>(`/api/v2/userinfo/sites/${siteId}`),
   syncSite: (siteId: string) => api.post<UserInfoResponse>(`/api/v2/userinfo/sites/${siteId}`),

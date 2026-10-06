@@ -30,6 +30,8 @@ interface KpiItem {
   series?: number[];
   /** 柱图画的是什么（鼠标悬停与读屏都用它） */
   seriesHint?: string;
+  /** 柱图的归一化方式，见 PtBars 的 baseline；每日增量这类 0 就是没有的序列传 zero */
+  seriesBaseline?: "range" | "zero";
 }
 
 const props = withDefaults(
@@ -82,6 +84,7 @@ function hue(i: number) {
           <PtBars
             v-if="it.series && it.series.length"
             :values="it.series"
+            :baseline="it.seriesBaseline ?? 'range'"
             :hue="hue(i)"
             :count="7"
             :op0="0.5"
@@ -254,6 +257,20 @@ function hue(i: number) {
   .pt-kpi__cell {
     gap: 4px;
     padding: var(--pt-space-3);
+  }
+
+  /*
+   * 手机上一格只有 140 多宽，「本周 +974 GB」这类周期增量胶囊会把标签挤成「总上…」。
+   * 标签不再让位，放不下时胶囊折到下一行；标签自己比一行还长时才省略。
+   */
+  .pt-kpi__top {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .pt-kpi__label {
+    flex-shrink: 0;
+    max-width: 100%;
   }
 
   /*

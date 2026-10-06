@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { type AttendanceSettings, attendanceApi, globalApi, type GlobalSettings } from "@/api";
+import {
+  type AttendanceSettings,
+  attendanceApi,
+  chatopsApi,
+  type DailyReportSettings,
+  globalApi,
+  type GlobalSettings,
+  type NotificationConfig,
+  userInfoApi,
+} from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtDataState from "@/components/ui/PtDataState.vue";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
@@ -51,6 +60,26 @@ const form = ref<GlobalSettings>({
  */
 const attendanceForm = ref<AttendanceSettings>({ window_start: "08:00", window_end: "10:00" });
 const attendanceSaved = ref<AttendanceSettings | null>(null);
+/** 签到时间窗读不回来：这一段禁用并说明，免得用户改了、点保存、看到「保存成功」却什么都没写 */
+const attendanceLoadFailed = ref(false);
+
+/**
+ * 每日战报也走自己的接口（只写这三列），和全局配置一起读、一起保存，是保存的第三步。
+ * 读不回来时不当成「改过」去保存。通道下拉只给启用的通道。
+ */
+const reportForm = ref<DailyReportSettings>({ enabled: false, time: "22:00", channel_ids: [] });
+const reportSaved = ref<DailyReportSettings | null>(null);
+const reportChannels = ref<NotificationConfig[]>([]);
+/** 同上：战报设置读不回来时整段禁用 */
+const reportLoadFailed = ref(false);
+
+function sameReport(a: DailyReportSettings, b: DailyReportSettings): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.time === b.time &&
+    [...a.channel_ids].sort().join(",") === [...b.channel_ids].sort().join(",")
+  );
+}
 
 /** short 是给页头摘要用的短名：摘要行是单行截断的，装不下带括号的完整标签 */
 const filterModeOptions = [
@@ -122,8 +151,23 @@ async function loadData() {
     const att = await attendanceApi.getSettings();
     attendanceForm.value = { ...att };
     attendanceSaved.value = { ...att };
+    attendanceLoadFailed.value = false;
   } catch {
     attendanceSaved.value = null;
+    attendanceLoadFailed.value = true;
+  }
+  const [report, channels] = await Promise.all([
+    userInfoApi.getDailyReport().catch(() => null),
+    chatopsApi.notifications.list().catch(() => [] as NotificationConfig[]),
+  ]);
+  reportChannels.value = (channels ?? []).filter((c) => c.enabled);
+  if (report) {
+    reportForm.value = { ...report, channel_ids: [...(report.channel_ids ?? [])] };
+    reportSaved.value = { ...report, channel_ids: [...(report.channel_ids ?? [])] };
+    reportLoadFailed.value = false;
+  } else {
+    reportSaved.value = null;
+    reportLoadFailed.value = true;
   }
 }
 
@@ -138,6 +182,11 @@ async function save() {
   const att = attendanceForm.value;
   if (!(att.window_start < att.window_end)) {
     ElMessage.error("签到时间窗的开始时间必须早于结束时间");
+    return;
+  }
+  const report = reportForm.value;
+  if (report.enabled && report.channel_ids.length === 0) {
+    ElMessage.error("开启每日战报至少要选一个通知通道");
     return;
   }
 
@@ -164,6 +213,21 @@ async function save() {
       } catch (e: unknown) {
         ElMessage.warning(
           `全局配置已保存，签到时间窗没有保存：${(e as Error).message || "请求失败"}`,
+        );
+        return;
+      }
+    }
+    /* 每日战报是第三步：前两步已经落库，失败时同样说清哪些保存了 */
+    const savedReport = reportSaved.value;
+    if (savedReport && !sameReport(savedReport, report)) {
+      try {
+        reportSaved.value = await userInfoApi.saveDailyReport({
+          ...report,
+          channel_ids: [...report.channel_ids],
+        });
+      } catch (e: unknown) {
+        ElMessage.warning(
+          `全局配置与签到时间窗已保存，每日战报设置没有保存：${(e as Error).message || "请求失败"}`,
         );
         return;
       }
@@ -356,10 +420,18 @@ async function save() {
           <span>每日签到</span>
         </div>
         <div class="settings-body">
+          <div
+            v-if="attendanceLoadFailed"
+            class="pt-note pt-note--warn"
+            data-testid="attendance-load-failed">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>签到时间窗读取失败，这一段暂时不能修改；刷新页面重试</span>
+          </div>
           <div class="field-row">
             <el-form-item label="签到时间窗开始">
               <el-time-select
                 v-model="attendanceForm.window_start"
+                :disabled="attendanceLoadFailed"
                 start="00:00"
                 step="00:15"
                 end="23:45"
@@ -372,12 +444,61 @@ async function save() {
             <el-form-item label="签到时间窗结束">
               <el-time-select
                 v-model="attendanceForm.window_end"
+                :disabled="attendanceLoadFailed"
                 start="00:15"
                 step="00:15"
                 end="23:45"
                 :clearable="false"
                 data-testid="attendance-window-end" />
               <div class="field-tip">在站点列表的「保号配置」里按站点开启每日自动签到</div>
+            </el-form-item>
+          </div>
+        </div>
+
+        <div class="pt-strip">
+          <PtIcon name="chart-column" :size="13" />
+          <span>每日战报</span>
+        </div>
+        <div class="settings-body">
+          <div
+            v-if="reportLoadFailed"
+            class="pt-note pt-note--warn"
+            data-testid="daily-report-load-failed">
+            <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+            <span>每日战报设置读取失败，这一段暂时不能修改；刷新页面重试</span>
+          </div>
+          <el-form-item label="开启每日战报">
+            <el-switch
+              v-model="reportForm.enabled"
+              :disabled="reportLoadFailed"
+              data-testid="daily-report-enabled" />
+            <div class="field-tip">
+              每天在设定时刻（再错开几分钟）把当天各站的上传、下载、魔力增量，以及登录状态异常的站点和签到结果，发到选定的通知通道
+            </div>
+          </el-form-item>
+          <div class="field-row">
+            <el-form-item label="发送时刻">
+              <el-time-select
+                v-model="reportForm.time"
+                :disabled="reportLoadFailed"
+                start="00:00"
+                step="00:15"
+                end="23:45"
+                :clearable="false"
+                data-testid="daily-report-time" />
+              <div class="field-tip">服务器时区；通道处在静默时段时顺延到静默结束</div>
+            </el-form-item>
+            <el-form-item label="接收通道">
+              <el-select
+                v-model="reportForm.channel_ids"
+                :disabled="reportLoadFailed"
+                multiple
+                collapse-tags
+                placeholder="选择通知通道"
+                data-testid="daily-report-channels">
+                <el-option v-for="c in reportChannels" :key="c.id" :label="c.name" :value="c.id" />
+              </el-select>
+              <div class="field-tip">开启时至少选一个；没有通道时先去「消息通知」里添加</div>
             </el-form-item>
           </div>
         </div>

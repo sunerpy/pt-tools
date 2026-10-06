@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"time"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
@@ -158,6 +159,34 @@ func wireLoginReminderMonitor(
 	mgr.SetAttendanceMonitor(att)
 	att.Start()
 	global.GetSlogger().Info("每日签到监控器已初始化并启动")
+
+	wireDailyReportJob(mgr, store, userInfo, notifier)
+}
+
+// wireDailyReportJob 构造并启动每日战报任务：与登录提醒共用通知投递器；用户数据仓库没起来时不启动。
+func wireDailyReportJob(mgr *scheduler.Manager, store *core.ConfigStore, userInfo *v2.UserInfoService, notifier *scheduler.MonitorNotifier) {
+	history, ok := userInfo.History()
+	if !ok || store == nil {
+		global.GetSlogger().Warn("每日战报跳过初始化：用户数据仓库不可用")
+		return
+	}
+	job := scheduler.NewDailyReportJob(scheduler.DailyReportJobConfig{
+		DB: global.GlobalDB.DB,
+		Settings: func() (bool, string, []uint, error) {
+			s, err := store.DailyReportSettings()
+			return s.Enabled, s.Time, s.ChannelIDs, err
+		},
+		Offset: func() (time.Duration, error) {
+			return store.DailyReportOffset(scheduler.DailyReportRand)
+		},
+		EnabledSites: store.EnabledSiteNames,
+		History:      history,
+		Notifier:     notifier,
+		Logger:       global.GetSlogger(),
+	})
+	mgr.SetDailyReportJob(job)
+	job.Start()
+	global.GetSlogger().Info("每日战报任务已初始化并启动")
 }
 
 // attendanceSites 从 UserInfoService 取已注册的共享站点实例签到，与搜索、登录探测共用限速器。

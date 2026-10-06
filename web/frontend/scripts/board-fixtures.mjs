@@ -402,9 +402,181 @@ const HUB_TORRENTS = Array.from({ length: 12 }, (_, i) => ({
   eta: 600 + i * 30,
 }));
 
+const GB = 1024 ** 3;
+/** 每日快照算出来的走势与周期增量（/api/v2/userinfo/trends、summary）：8 天，按站点量级给出 */
+const TREND_DATES = Array.from(
+  { length: 8 },
+  (_, i) => `2026-09-${String(19 + i).padStart(2, "0")}`,
+);
+const TRENDS = {
+  days: 8,
+  from: TREND_DATES[0],
+  to: TREND_DATES.at(-1),
+  dates: TREND_DATES,
+  sites: Object.fromEntries(
+    SITES.map(([site, , up], s) => [
+      site,
+      TREND_DATES.map((date, d) => ({
+        date,
+        uploaded: Math.round(up * GB * (0.6 + ((d * 7 + s * 3) % 9) / 10)),
+        downloaded: Math.round(up * GB * 0.08),
+        bonus: 1200 + d * 40,
+      })),
+    ]),
+  ),
+};
+TRENDS.totals = TREND_DATES.map((date, d) =>
+  Object.values(TRENDS.sites).reduce(
+    (acc, series) => ({
+      date,
+      uploaded: acc.uploaded + series[d].uploaded,
+      downloaded: acc.downloaded + series[d].downloaded,
+      bonus: acc.bonus + series[d].bonus,
+    }),
+    { date, uploaded: 0, downloaded: 0, bonus: 0 },
+  ),
+);
+const SUMMARY_SITES = Object.entries(TRENDS.sites).map(([site, series]) => ({
+  site,
+  from: TREND_DATES[0],
+  to: TREND_DATES.at(-1),
+  uploaded: series.slice(-7).reduce((n, p) => n + p.uploaded, 0),
+  downloaded: series.slice(-7).reduce((n, p) => n + p.downloaded, 0),
+  bonus: series.slice(-7).reduce((n, p) => n + p.bonus, 0),
+  hasBaseline: true,
+  negative: false,
+}));
+const SUMMARY = {
+  range: "7d",
+  from: TREND_DATES[1],
+  to: TREND_DATES.at(-1),
+  sites: SUMMARY_SITES,
+  totalUploaded: SUMMARY_SITES.reduce((n, d) => n + d.uploaded, 0),
+  totalDownloaded: SUMMARY_SITES.reduce((n, d) => n + d.downloaded, 0),
+  totalBonus: SUMMARY_SITES.reduce((n, d) => n + d.bonus, 0),
+};
+
+/*
+ * 单站 30 天历史（/api/v2/userinfo/history?site=&days=30，site/v2/userinfo_history.go 的 DailyPoint）。
+ * 第 3 个站点每 3 天才有一份快照（spanDays=3），用来量「缺快照的日子补 0」那条走势；
+ * 第一份快照没有更早的可比，spanDays=0、增量记 0。按查询串的 site 选，见 QUERY_AWARE。
+ */
+const HISTORY_DATES = Array.from({ length: 30 }, (_, i) => {
+  const d = new Date(Date.UTC(2026, 7, 28 + i));
+  return d.toISOString().slice(0, 10);
+});
+const HISTORY = {
+  bySite: Object.fromEntries(
+    SITES.map(([site, , up, down, , seeding], s) => {
+      const step = s === 2 ? 3 : 1;
+      const dates = HISTORY_DATES.filter((_, i) => i % step === 0);
+      const deltas = dates.map((_, i) =>
+        i === 0 ? 0 : Math.round(up * GB * step * (0.5 + ((i * 5 + s) % 7) / 10)),
+      );
+      /* 最后一个点等于聚合接口的当前值（up × TB），往前倒推：两个接口说的是同一个账号 */
+      const current = AGGREGATED.perSiteStats.find((r) => r.site === site);
+      let uploaded = Math.round(current ? current.uploaded : up * TB);
+      let downloaded = Math.round(current ? current.downloaded : down * TB);
+      let bonus = Math.round(current ? current.bonus : 100000);
+      const points = [];
+      for (let i = dates.length - 1; i >= 0; i--) {
+        points.unshift({
+          date: dates[i],
+          uploaded,
+          downloaded,
+          bonus,
+          seeding,
+          deltaUploaded: deltas[i],
+          deltaDownloaded: i === 0 ? 0 : Math.round(GB * step),
+          deltaBonus: i === 0 ? 0 : 900,
+          spanDays: i === 0 ? 0 : step,
+          negative: false,
+        });
+        uploaded -= deltas[i];
+        downloaded -= i === 0 ? 0 : Math.round(GB * step);
+        bonus -= i === 0 ? 0 : 900;
+      }
+      return [site, { site, days: 30, from: HISTORY_DATES[0], to: HISTORY_DATES.at(-1), points }];
+    }),
+  ),
+};
+
+/** 签到当天：2026-09-26 08:00（Asia/Shanghai）起的 Unix 秒 */
+const ATT_DAY = "2026-09-26";
+const ATT_T0 = Date.UTC(2026, 8, 26, 0, 0, 0) / 1000;
+const ATT_UNSUPPORTED = {
+  "M-Team": "该站点的架构暂不支持签到",
+  HDSky: "签到需要验证码，暂不支持自动签到",
+};
+const ATTENDANCE = SITES.map(([site], i) => {
+  const base = {
+    site_name: site,
+    site_enabled: i % 7 !== 6,
+    attendance_enabled: false,
+    supported: true,
+    day: ATT_DAY,
+    status: "",
+    attempts: 0,
+  };
+  if (ATT_UNSUPPORTED[site]) {
+    return { ...base, supported: false, unsupported_reason: ATT_UNSUPPORTED[site] };
+  }
+  const scheduled = ATT_T0 + 3600 + i * 420;
+  switch (i % 5) {
+    case 0:
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "signed",
+        attempts: 1,
+        message: "签到成功，获得 10 魔力",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 2,
+      };
+    case 1:
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "already",
+        attempts: 1,
+        message: "今天已经签到过了",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 3,
+      };
+    case 2:
+      /* 第一次失败后等 10 分钟重试 */
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "pending",
+        attempts: 1,
+        last_error: "签到页返回 502",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 1,
+        next_attempt_at: scheduled + 601,
+      };
+    case 3:
+      return {
+        ...base,
+        attendance_enabled: true,
+        status: "failed",
+        attempts: 3,
+        last_error: "签到页返回 502",
+        scheduled_at: scheduled,
+        last_attempt_at: scheduled + 2401,
+      };
+    default:
+      /* 没开自动签到、今天也没手动签过：没有当天记录 */
+      return base;
+  }
+});
+
 /** 路由（去掉查询串）→ 响应体。第一个前缀命中即用。 */
 export const FIXTURES = [
   ["/api/v2/userinfo/aggregated", AGGREGATED],
+  ["/api/v2/userinfo/trends", TRENDS],
+  ["/api/v2/userinfo/summary", SUMMARY],
+  ["/api/v2/userinfo/history", HISTORY],
   /* 单站点详情要排在列表之前：前缀匹配第一个命中即用 */
   ...AGGREGATED.perSiteStats.map((row) => [`/api/v2/userinfo/sites/${row.site}`, row]),
   /* getSites 回的是 UserInfoResponse[]，不是站点名数组 */
@@ -463,6 +635,17 @@ export const FIXTURES = [
       })),
     },
   ],
+  /*
+   * 签到（M1c）：列表回 SiteAttendanceResponse[]（web/api_site_attendance.go 的 buildAttendanceResponse）。
+   * 漏了它时 `/api/sites/attendance` 命中下面的 `/api/sites`，拿到站点配置对象，
+   * 站点列表 `for…of` 抛「object is not iterable」、详情页 `.find` 不是函数。
+   * settings 是 attendance 的子路径，要排在它前面。
+   * 值照后端语义造：能否签到由站点定义决定（M-Team 是 mTorrent 架构、HDSky 要验证码，都不支持，
+   * 不支持的站点没有当天记录、status 为空）；status 取 "" / pending / signed / already / failed；
+   * 时间戳都落在 day 当天（2026-09-26，Asia/Shanghai），重试中的 pending 带着上一次的错误与晚于首次计划的下次时刻。
+   */
+  ["/api/sites/attendance/settings", { window_start: "08:00", window_end: "10:00" }],
+  ["/api/sites/attendance", ATTENDANCE],
   /* 站点详情取的是单个站点：必须排在 /api/sites 之前，前缀匹配是第一个命中即用 */
   ...SITES.map(([site]) => [`/api/sites/${site}`, SITE_CONFIGS[site]]),
   ["/api/sites", SITE_CONFIGS],
@@ -744,6 +927,8 @@ export function emptyStubScript() {
      * 「object is not iterable」。这条坑这份文件里已经踩过三次（日志、通道详情、这里）。
      */
     ["/api/sites/login-state", []],
+    ["/api/sites/attendance/settings", { window_start: "08:00", window_end: "10:00" }],
+    ["/api/sites/attendance", []],
     ["/api/sites/definitions", []],
     ["/api/sites/templates", []],
     ["/api/sites/downloader-summary", { sites: [] }],
@@ -787,6 +972,11 @@ export function emptyStubScript() {
  * 并把回来的行画对；服务端那一侧由 Go 测试用生产值覆盖。
  */
 const QUERY_AWARE = {
+  /* 与 web/api_userinfo_history.go 同义：按 site 回该站的历史；没有快照的站点回空 points */
+  "/api/v2/userinfo/history": `(body, params) => {
+    const site = params.get('site') ?? '';
+    return body.bySite[site] ?? { site, days: 30, from: '', to: '', points: [] };
+  }`,
   "/api/chatops/audit": `(body, params) => {
     const alias = { qq: 'qq_onebot', wecom: 'wecom_webhook' };
     const list = (raw) => (raw ?? '').split(',').map((v) => v.trim()).filter(Boolean);

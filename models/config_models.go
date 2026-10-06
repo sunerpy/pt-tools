@@ -113,6 +113,15 @@ type SettingsGlobal struct {
 	AttendanceWindowStart string `json:"attendance_window_start" gorm:"size:5;default:'08:00'"`
 	AttendanceWindowEnd   string `json:"attendance_window_end" gorm:"size:5;default:'10:00'"`
 
+	// 每日战报：每天在设定时刻（HH:MM，进程时区）加上本安装固定的偏移后，把当天的数据增量发到选定的通道。
+	// 只经 ConfigStore.SaveDailyReportSettings 写；SaveGlobalSettings 不改这几列。
+	DailyReportEnabled    bool   `json:"daily_report_enabled" gorm:"default:false"`
+	DailyReportTime       string `json:"daily_report_time" gorm:"size:5;default:'22:00'"`
+	DailyReportChannelIDs string `json:"daily_report_channel_ids" gorm:"size:512;default:'[]'"`
+	// DailyReportOffsetSeconds 是本安装固定的 1–600 秒偏移，首次用到时随机分配；0 表示还没分配。
+	// 各安装错开发送时刻，不在同一分钟一起打通知接口。
+	DailyReportOffsetSeconds int `json:"-" gorm:"default:0"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

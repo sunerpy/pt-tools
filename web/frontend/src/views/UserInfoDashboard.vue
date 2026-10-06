@@ -2,12 +2,15 @@
 import { useRouter } from "vue-router";
 import {
   type AggregatedStatsResponse,
+  type DeltaSummary,
   type SiteConfig,
   type SiteLoginState,
   sitesApi,
   tasksApi,
   type TaskStatsResponse,
   userInfoApi,
+  type UserInfoRange,
+  type UserInfoTrendsResponse,
 } from "@/api";
 import LevelTooltip from "@/components/LevelTooltip.vue";
 import PtIcon from "@/components/PtIcon";
@@ -180,6 +183,8 @@ interface KpiRow {
   series?: number[];
   /** 柱图画的是什么 —— 每格含义不同，必须说出来，否则读者只能猜 */
   seriesHint?: string;
+  /** 每日增量这类 0 就是没有的序列用 zero（见 PtBars 的 baseline） */
+  seriesBaseline?: "range" | "zero";
 }
 
 /**
@@ -252,7 +257,8 @@ function deltaPill(
  * 后三项里的任务口径来自 `/api/tasks/stats`（站点统计接口没有这些数）。
  *
  * 柱图的含义每格不同，都是真数据，没有一格是编的：
- *   站点数量 / 总上传量 / 平均分享率 → 按站点的构成（perSiteStats）
+ *   站点数量 / 平均分享率 → 按站点的构成（perSiteStats）
+ *   总上传量 → 有每日快照时是最近 7 天每天的上传增量（trends），pill 是所选周期的增量；还没有可比快照时退回按站点的构成
  *   活跃任务 / 今日推送 / 免费种子   → 最近 7 天按天（tasks/stats 的 daily）
  * pill 同理：任务那三格能跟「今天 / 昨天」比，站点那三格只能跟上次查看比。
  */
@@ -322,14 +328,29 @@ const kpiItems = computed<KpiRow[]>(() => {
       delta: today ? `今日新增 ${today.free}` : "无数据",
       deltaTone: today && today.free > 0 ? "ok" : "neutral",
     },
-    {
-      label: "总上传量",
-      value: formatBytes(stats.totalUploaded),
-      icon: "upload",
-      series: topN((r) => r.uploaded),
-      seriesHint: "每根一个站点：上传量构成",
-      ...uploadPill,
-    },
+    periodSites.value.length > 0 && summary.value
+      ? {
+          label: "总上传量",
+          value: formatBytes(stats.totalUploaded),
+          icon: "upload",
+          ...(uploadTrendSeries.value
+            ? {
+                series: uploadTrendSeries.value,
+                seriesHint: "每根一天：最近 7 天每天全部站点的上传增量",
+                seriesBaseline: "zero" as const,
+              }
+            : { series: topN((r) => r.uploaded), seriesHint: "每根一个站点：上传量构成" }),
+          delta: `${periodLabel.value} +${formatBytes(summary.value.totalUploaded)}`,
+          deltaTone: summary.value.totalUploaded > 0 ? ("ok" as const) : ("neutral" as const),
+        }
+      : {
+          label: "总上传量",
+          value: formatBytes(stats.totalUploaded),
+          icon: "upload",
+          series: topN((r) => r.uploaded),
+          seriesHint: "每根一个站点：上传量构成",
+          ...uploadPill,
+        },
     {
       label: "平均分享率",
       value: formatRatio(stats.averageRatio),
@@ -359,8 +380,7 @@ const kpiItems = computed<KpiRow[]>(() => {
  * 落地此前这条带上**只有动作按钮**，一个筛选都没有 —— 而这一页是十四列的表，
  * 最需要的就是筛与排。现在补上 seg、搜索、排序 chip 与列设置、导出。
  *
- * 「周期」那枚 chip 没有落地：聚合接口只回当前快照，没有历史序列，
- * 按周期筛在数据上不成立（登记在 ALLOWED_GAPS 里）。
+ * 「周期」那枚 chip 现在由每日快照支撑（见 PERIOD_OPTIONS），不再登记在 ALLOWED_GAPS 里。
  */
 type SiteFilter = "all" | "ok" | "bad" | "warn";
 
@@ -384,6 +404,56 @@ const SORT_OPTIONS = [
 
 type RowSortKey = (typeof SORT_OPTIONS)[number]["value"];
 const rowSort = ref<RowSortKey>("ratio");
+
+/**
+ * 画板 10 的 chip-0「周期: 本周」。周期决定 KPI 带「总上传量」那一格的增量与柱图、
+ * 以及「上传构成」卡按哪段时间的增量排；数据来自每日快照（/api/v2/userinfo/summary、trends）。
+ */
+const PERIOD_OPTIONS: { label: string; value: UserInfoRange }[] = [
+  { label: "今日", value: "today" },
+  { label: "本周", value: "7d" },
+  { label: "本月", value: "30d" },
+];
+const period = ref<UserInfoRange>("7d");
+const periodLabel = computed(
+  () => PERIOD_OPTIONS.find((o) => o.value === period.value)?.label ?? "",
+);
+/** 周期内各站的增量；接口失败时为 null，KPI 与上传构成退回只看当前值 */
+const summary = ref<DeltaSummary | null>(null);
+/** 最近 7 天每天的增量，KPI 柱图用。柱图固定画 7 根（PtKpiBar 的 count），跟所选周期无关 */
+const trends = ref<UserInfoTrendsResponse | null>(null);
+let periodSeq = 0;
+let trendsSeq = 0;
+
+async function loadPeriod() {
+  const seq = ++periodSeq;
+  const sum = await userInfoApi.getSummary(period.value).catch(() => null);
+  // 切换周期期间旧请求回来：丢掉，免得把上一档的数字配到这一档的标签上
+  if (seq !== periodSeq) return;
+  summary.value = sum;
+}
+
+async function loadTrends() {
+  const seq = ++trendsSeq;
+  const tr = await userInfoApi.getTrends(7).catch(() => null);
+  if (seq !== trendsSeq) return;
+  trends.value = tr;
+}
+
+watch(period, () => void loadPeriod());
+
+/**
+ * KPI「总上传量」的柱：最近 7 天每天的上传增量，按 0 基线画（没有增量的日子只有 2px 的底）。
+ * 全是 0 也照画 —— 画板要求每格都有柱，0 基线下它读作「这几天没有增量」，不会被看成持平的走势；
+ * 只有走势接口没拿到时才是 undefined，那一格回落到按站点的上传构成。
+ */
+const uploadTrendSeries = computed(() => {
+  const values = (trends.value?.totals ?? []).map((p) => p.uploaded);
+  return values.length > 0 ? values : undefined;
+});
+
+/** 周期内有可比基线的站点（只有一份快照的站点算不出增量，不进构成） */
+const periodSites = computed(() => (summary.value?.sites ?? []).filter((d) => d.hasBaseline));
 
 /*
  * 桌面表格的排序跟着「排序」下拉走。
@@ -645,8 +715,28 @@ const siteRows = computed(() => {
  * 不额外请求接口 —— 聚合接口没有历史序列，所以这里画的是「当前的构成」而不是趋势。
  */
 
-/** p-up：上传量最大的几个站点占了多少 */
+/**
+ * p-up：周期内上传增量最大的几个站点占了多少；还没有可比的快照（刚装好、只同步过一次）时，
+ * 退回当前累计上传量的构成。
+ */
+const uploadByPeriod = computed(() => periodSites.value.length > 0);
+
 const uploadRows = computed<BreakdownRow[]>(() => {
+  if (uploadByPeriod.value) {
+    return [...periodSites.value]
+      .sort((a, b) => b.uploaded - a.uploaded)
+      .slice(0, 6)
+      .map((d) => ({
+        key: d.site,
+        label: d.site,
+        value: `+${formatBytes(d.uploaded)}`,
+        weight: d.uploaded,
+        tone: "primary" as const,
+        hint:
+          `下载 +${formatBytes(d.downloaded)} · ${getSiteBonusName(d.site)} +${formatNumber(Math.round(d.bonus))}` +
+          (d.negative ? " · 有数值回退，按 0 计" : ""),
+      }));
+  }
   const rows = [...siteRows.value].sort((a, b) => b.uploaded - a.uploaded).slice(0, 6);
   return rows.map((r) => ({
     key: r.site,
@@ -658,7 +748,11 @@ const uploadRows = computed<BreakdownRow[]>(() => {
   }));
 });
 
-const uploadTotal = computed(() => siteRows.value.reduce((n, r) => n + r.uploaded, 0));
+const uploadTotal = computed(() =>
+  uploadByPeriod.value
+    ? (summary.value?.totalUploaded ?? 0)
+    : siteRows.value.reduce((n, r) => n + r.uploaded, 0),
+);
 
 /** p-dist：等级分布。等级名是站点各自的说法，按名字归组就是画板那张分布 */
 const levelRows = computed<BreakdownRow[]>(() => {
@@ -734,6 +828,8 @@ async function loadData() {
   aggregatedStats.value = agg;
   /* 写新快照，但不动本次读到的 prevSnapshot —— 否则这次渲染就没得比了 */
   saveSnapshot(agg);
+  void loadPeriod();
+  void loadTrends();
 
   const [siteMap, states, stats] = await Promise.all([
     sitesApi.list().catch(() => {
@@ -983,7 +1079,22 @@ onUnmounted(() => {
           <PtIcon name="search" :size="15" />
         </template>
       </el-input>
-      <el-select v-model="rowSort" class="ui-chip" size="small" data-testid="userinfo-sort">
+      <el-select
+        v-model="period"
+        class="ui-chip ui-chip--period"
+        size="small"
+        data-testid="userinfo-period">
+        <el-option
+          v-for="o in PERIOD_OPTIONS"
+          :key="o.value"
+          :label="`周期: ${o.label}`"
+          :value="o.value" />
+      </el-select>
+      <el-select
+        v-model="rowSort"
+        class="ui-chip ui-chip--sort"
+        size="small"
+        data-testid="userinfo-sort">
         <el-option
           v-for="o in SORT_OPTIONS"
           :key="o.value"
@@ -1623,11 +1734,20 @@ onUnmounted(() => {
       三张都由 perSiteStats 现算，没有额外请求。
     -->
     <div v-if="siteRows.length > 0" class="pt-cards pt-cards--2">
-      <PtPanel title="上传构成" icon="upload" :count="formatBytes(uploadTotal)">
+      <PtPanel
+        title="上传构成"
+        icon="upload"
+        :count="
+          uploadByPeriod ? `${periodLabel} +${formatBytes(uploadTotal)}` : formatBytes(uploadTotal)
+        ">
         <PtBreakdown
           :rows="uploadRows"
           :total="uploadTotal"
-          foot="柱长是该站点上传量占全部站点上传量的比例，只列前 6 个。" />
+          :foot="
+            uploadByPeriod
+              ? `柱长是该站点${periodLabel}的上传增量占全部站点的比例，只列前 6 个；数值回退（站点重置、魔力兑换）的那一项按 0 计。`
+              : '还没有可比的历史快照，先按当前累计上传量排；每天同步一次之后这里改看所选周期的增量。只列前 6 个。'
+          " />
       </PtPanel>
 
       <PtPanel title="等级分布" icon="award" :count="`${levelRows.length} 种`">
@@ -1759,6 +1879,18 @@ onUnmounted(() => {
 .ui-chip {
   flex: 0 0 auto;
   width: 150px;
+}
+
+/*
+ * 加了「周期」之后两枚 chip 按文字收窄：「周期: 本周」「排序: 分享率」各自放得下就够。
+ * 都按 150 时左组 788 + 右组 340 超过 1376 下的 1070，右组被挤到第二行、带高 77（画板 40）。
+ */
+.ui-chip--period {
+  width: 104px;
+}
+
+.ui-chip--sort {
+  width: 116px;
 }
 
 .ui-chip :deep(.el-select__wrapper) {
