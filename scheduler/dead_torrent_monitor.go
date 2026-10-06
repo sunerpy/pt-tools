@@ -168,7 +168,7 @@ func (m *DeadTorrentMonitor) RunOnce(ctx context.Context) int {
 		if ctx.Err() != nil {
 			break
 		}
-		dead, err := dlassistant.ScanDeadTorrents(ctx, d.DL, resolver)
+		dead, _, err := dlassistant.ScanDeadTorrents(ctx, d.DL, resolver)
 		if err != nil {
 			m.cfg.Logger.Warnf("[失效种子] 扫描 %s 失败: %v", d.Name, err)
 			continue

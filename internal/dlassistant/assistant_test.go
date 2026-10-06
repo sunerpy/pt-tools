@@ -79,8 +79,9 @@ func TestFindAndApplySiteTags(t *testing.T) {
 	}
 	f.trackers["d"] = []downloader.TorrentTracker{{URL: "** [DHT] **", Status: 2}, {URL: "https://t.audiences.me/announce?passkey=2", Status: 4}}
 
-	got, err := FindMissingSiteTags(context.Background(), f, resolver())
+	got, info, err := FindMissingSiteTags(context.Background(), f, resolver())
 	require.NoError(t, err)
+	assert.Equal(t, ScanInfo{Total: 5, Scanned: 5}, info)
 	require.Len(t, got, 2)
 	assert.Equal(t, SiteTagSuggestion{Hash: "d", Name: "no main tracker", Site: "audiences", SiteName: "Audiences", TrackerHost: "t.audiences.me"}, got[0])
 	assert.Equal(t, "b", got[1].Hash)
@@ -112,48 +113,97 @@ func TestTrackerReplace(t *testing.T) {
 	f := newFake()
 	f.torrents = []downloader.Torrent{
 		{ID: "a", InfoHash: "a", Name: "match", Tracker: "https://old.hdsky.me/announce.php?passkey=SECRET"},
-		{ID: "b", InfoHash: "b", Name: "other", Tracker: "https://tracker.audiences.me/announce"},
+		{ID: "b", InfoHash: "b", Name: "secondary", Tracker: "https://tracker.audiences.me/announce"},
 		{ID: "c", InfoHash: "c", Name: "no main"},
 	}
-	f.trackers["a"] = []downloader.TorrentTracker{{URL: "https://old.hdsky.me/announce.php?passkey=SECRET"}}
+	f.trackers["a"] = []downloader.TorrentTracker{{URL: "https://old.hdsky.me/announce.php?passkey=SECRET"}, {URL: "https://old.hdsky.me/announce.php?passkey=SECRET"}}
+	// 主 tracker 不含原内容，第二个 tracker 含：也要列出来
+	f.trackers["b"] = []downloader.TorrentTracker{{URL: "https://tracker.audiences.me/announce"}, {URL: "https://old.hdsky.me/backup"}}
 	f.trackers["c"] = []downloader.TorrentTracker{{URL: "udp://old.hdsky.me:8080/announce"}}
 
-	_, err := PreviewTrackerReplace(context.Background(), f, "ol", "new")
+	_, _, err := PreviewTrackerReplace(context.Background(), f, "ol", "new")
 	assert.ErrorContains(t, err, "至少 3 个字")
-	_, err = PreviewTrackerReplace(context.Background(), f, "old.hdsky.me", "")
+	_, _, err = PreviewTrackerReplace(context.Background(), f, "old.hdsky.me", "")
 	assert.Error(t, err)
-	_, err = PreviewTrackerReplace(context.Background(), f, "old.hdsky.me", "old.hdsky.me")
+	_, _, err = PreviewTrackerReplace(context.Background(), f, "old.hdsky.me", "old.hdsky.me")
 	assert.Error(t, err)
 
-	got, err := PreviewTrackerReplace(context.Background(), f, "old.hdsky.me", "tracker.hdsky.me")
+	got, info, err := PreviewTrackerReplace(context.Background(), f, "old.hdsky.me", "tracker.hdsky.me")
 	require.NoError(t, err)
-	require.Len(t, got, 2)
-	assert.Equal(t, TrackerMatch{Hash: "a", Name: "match", Old: "https://old.hdsky.me/announce.php?passkey=***", New: "https://tracker.hdsky.me/announce.php?passkey=***"}, got[0])
-	assert.Equal(t, "udp://tracker.hdsky.me:8080/announce", got[1].New)
+	assert.Equal(t, 3, info.Scanned)
+	require.Len(t, got, 3, "重复的地址只列一次")
+	byName := map[string]TrackerMatch{}
 	for _, m := range got {
-		assert.NotContains(t, m.Old+m.New, "SECRET", "预览里不出现 passkey")
+		byName[m.Name] = m
+		assert.NotContains(t, m.Old+m.New+m.ID, "SECRET", "预览里不出现 passkey")
+		assert.NotEmpty(t, m.ID)
 	}
+	assert.Equal(t, "https://old.hdsky.me/announce.php?passkey=***", byName["match"].Old)
+	assert.Equal(t, "https://tracker.hdsky.me/announce.php?passkey=***", byName["match"].New)
+	assert.Equal(t, "https://tracker.hdsky.me/backup", byName["secondary"].New)
+	assert.Equal(t, "udp://tracker.hdsky.me:8080/announce", byName["no main"].New)
 
-	_, err = ApplyTrackerReplace(context.Background(), f, "old.hdsky.me", "tracker.hdsky.me", []string{"a"})
+	sel := func(names ...string) []TrackerSelection {
+		out := []TrackerSelection{}
+		for _, n := range names {
+			out = append(out, TrackerSelection{Hash: byName[n].Hash, ID: byName[n].ID})
+		}
+		return out
+	}
+	_, err = ApplyTrackerReplace(context.Background(), f, "old.hdsky.me", "tracker.hdsky.me", sel("match"))
 	assert.ErrorIs(t, err, downloader.ErrCapabilityUnsupported)
 
 	e := editorDL{f}
-	res, err := ApplyTrackerReplace(context.Background(), e, "old.hdsky.me", "tracker.hdsky.me", []string{"A", "b", "c", "gone"})
+	// 预览之后 c 的地址被别人改了：指纹对不上，不改
+	f.trackers["c"] = []downloader.TorrentTracker{{URL: "udp://old.hdsky.me:9090/announce"}}
+	res, err := ApplyTrackerReplace(context.Background(), e, "old.hdsky.me", "tracker.hdsky.me",
+		append(sel("match", "no main"), TrackerSelection{Hash: "gone", ID: "x"}))
 	require.NoError(t, err)
-	assert.Equal(t, 2, res.Done)
+	assert.Equal(t, 1, res.Done)
 	assert.Equal(t, [][3]string{
 		{"a", "https://old.hdsky.me/announce.php?passkey=SECRET", "https://tracker.hdsky.me/announce.php?passkey=SECRET"},
-		{"c", "udp://old.hdsky.me:8080/announce", "udp://tracker.hdsky.me:8080/announce"},
-	}, f.edits, "替换用下载器里的原地址，passkey 保留")
-	assert.Len(t, res.Skipped, 2)
+	}, f.edits, "只改选中且没变的地址；重复地址只改一次；passkey 保留")
+	require.Len(t, res.Skipped, 2)
+	assert.Contains(t, res.Skipped[1].Error+res.Skipped[0].Error, "预览之后 tracker 地址变了")
+	assert.NotContains(t, f.edits, [3]string{"b", "https://old.hdsky.me/backup", "https://tracker.hdsky.me/backup"}, "没选中的不改")
 
+	f.edits = nil
 	f.editErr = errors.New("409")
-	res, err = ApplyTrackerReplace(context.Background(), e, "old.hdsky.me", "tracker.hdsky.me", []string{"a"})
+	res, err = ApplyTrackerReplace(context.Background(), e, "old.hdsky.me", "tracker.hdsky.me", sel("secondary"))
 	require.NoError(t, err)
 	require.Len(t, res.Failed, 1)
 
 	_, err = ReplaceTrackerURL("https://old.hdsky.me/announce", "https://old.hdsky.me", "ftp://x")
 	assert.Error(t, err, "替换后必须仍是 tracker 地址")
+}
+
+// 同一种子选了两条地址，改完第一条后第二条失败：写明已经改了几条。
+func TestTrackerReplacePartialFailure(t *testing.T) {
+	f := newFake()
+	f.torrents = []downloader.Torrent{{ID: "a", InfoHash: "a", Name: "two"}}
+	f.trackers["a"] = []downloader.TorrentTracker{{URL: "https://old.example.org/1"}, {URL: "https://old.example.org/2"}}
+	got, _, err := PreviewTrackerReplace(context.Background(), f, "old.example.org", "new.example.org")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	e := &failSecondEditor{fakeDL: f}
+	res, err := ApplyTrackerReplace(context.Background(), e, "old.example.org", "new.example.org",
+		[]TrackerSelection{{Hash: "a", ID: got[0].ID}, {Hash: "a", ID: got[1].ID}})
+	require.NoError(t, err)
+	require.Len(t, res.Failed, 1)
+	assert.Contains(t, res.Failed[0].Error, "已改 1 个地址，之后失败")
+}
+
+type failSecondEditor struct {
+	*fakeDL
+	calls int
+}
+
+func (e *failSecondEditor) EditTracker(context.Context, string, string, string) error {
+	e.calls++
+	if e.calls > 1 {
+		return errors.New("network down")
+	}
+	return nil
 }
 
 func TestClassifyTrackerMessage(t *testing.T) {
@@ -186,23 +236,99 @@ func TestScanAndDeleteDeadTorrents(t *testing.T) {
 		{ID: "acct", InfoHash: "acct", Name: "passkey problem"},
 		{ID: "err", InfoHash: "err", Name: "cannot read"},
 	}
-	f.trackers["dead"] = []downloader.TorrentTracker{{URL: "** [DHT] **", Status: 2}, {URL: "https://tracker.hdsky.me/announce.php?passkey=x", Status: 4, Message: "Unregistered torrent"}}
+	f.trackers["dead"] = []downloader.TorrentTracker{{URL: "** [DHT] **", Status: 2}, {URL: "https://tracker.hdsky.me/announce.php?passkey=x", Status: 4, Message: "Unregistered torrent: https://tracker.hdsky.me/announce.php?passkey=TOPSECRET"}}
 	f.trackers["ok"] = []downloader.TorrentTracker{{URL: "https://tracker.hdsky.me/announce.php", Status: 2}}
 	f.trackers["mixed"] = []downloader.TorrentTracker{{URL: "https://a.example/announce", Status: 4, Message: "torrent not found"}, {URL: "https://b.example/announce", Status: 2}}
 	f.trackers["acct"] = []downloader.TorrentTracker{{URL: "https://tracker.hdsky.me/announce.php", Status: 4, Message: "Invalid passkey"}}
 	f.trackerErr["err"] = errors.New("timeout")
 
-	got, err := ScanDeadTorrents(context.Background(), f, resolver())
+	got, info, err := ScanDeadTorrents(context.Background(), f, resolver())
 	require.NoError(t, err)
+	assert.Equal(t, ScanInfo{Total: 5, Scanned: 5}, info)
 	require.Len(t, got, 1)
-	assert.Equal(t, DeadTorrent{Hash: "dead", Name: "dead one", Size: 9, Site: "hdsky", SiteName: "HDSky", TrackerHost: "tracker.hdsky.me", Reason: DeadUnregistered, Message: "Unregistered torrent"}, got[0])
+	assert.Equal(t, DeadTorrent{
+		Hash: "dead", Name: "dead one", Size: 9, Site: "hdsky", SiteName: "HDSky", TrackerHost: "tracker.hdsky.me", Reason: DeadUnregistered,
+		Message: "Unregistered torrent: https://tracker.hdsky.me/announce.php?passkey=***",
+	}, got[0], "tracker 回复里的凭证也遮住")
 
-	res, err := DeleteDeadTorrents(context.Background(), f, []string{"DEAD", "ok", "gone", "err"}, true)
+	res, err := DeleteDeadTorrents(context.Background(), f, []string{"DEAD", "dead", "ok", "gone", "err"}, true)
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Done)
 	assert.Equal(t, map[string]bool{"dead": true}, f.removed)
 	assert.Len(t, res.Skipped, 2, "已恢复正常的和已不在的不删")
 	assert.Len(t, res.Failed, 1, "读不到状态的不删")
+}
+
+func TestRedactTrackerMessage(t *testing.T) {
+	assert.Equal(t, "Unregistered torrent (passkey=*** authkey=***)", RedactTrackerMessage("Unregistered torrent (passkey=abc authkey=def)"))
+	assert.Equal(t, "see https://u3d.example/announce/*** now", RedactTrackerMessage("see https://u3d.example/announce/0123456789abcdef0123 now"))
+	assert.Equal(t, "token ***", RedactTrackerMessage("token 0123456789abcdef0123456789"))
+	assert.Equal(t, "种子不存在", RedactTrackerMessage("种子不存在"))
+}
+
+func TestLimitTorrents(t *testing.T) {
+	all := make([]downloader.Torrent, MaxScanTorrents+5)
+	got, info := limitTorrents(all)
+	assert.Len(t, got, MaxScanTorrents)
+	assert.Equal(t, ScanInfo{Total: MaxScanTorrents + 5, Scanned: MaxScanTorrents}, info)
+	got, info = limitTorrents(all[:3])
+	assert.Len(t, got, 3)
+	assert.Equal(t, ScanInfo{Total: 3, Scanned: 3}, info)
+}
+
+// 能按 ctx 读 tracker 的下载器走可取消的接口；能一次读全部的下载器只请求一次。
+type readerDL struct {
+	*fakeDL
+	ctxCalls  int
+	bulkCalls int
+	bulkErr   error
+}
+
+func (r *readerDL) GetTorrentTrackersContext(ctx context.Context, id string) ([]downloader.TorrentTracker, error) {
+	r.ctxCalls++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.trackers[id], nil
+}
+
+func (r *readerDL) GetAllTorrentTrackers(context.Context) (map[string][]downloader.TorrentTracker, error) {
+	r.bulkCalls++
+	if r.bulkErr != nil {
+		return nil, r.bulkErr
+	}
+	return r.trackers, nil
+}
+
+func TestTrackerReaders(t *testing.T) {
+	f := newFake()
+	f.torrents = []downloader.Torrent{{ID: "a", InfoHash: "a", Name: "dead"}, {ID: "b", InfoHash: "b", Name: "untagged"}}
+	f.trackers["a"] = []downloader.TorrentTracker{{URL: "https://tracker.hdsky.me/a", Status: 4, Message: "Torrent not found"}}
+	f.trackers["b"] = []downloader.TorrentTracker{{URL: "https://tracker.hdsky.me/b", Status: 2}}
+	r := &readerDL{fakeDL: f}
+
+	dead, _, err := ScanDeadTorrents(context.Background(), r, resolver())
+	require.NoError(t, err)
+	require.Len(t, dead, 1)
+	assert.Equal(t, 1, r.bulkCalls, "一次读全部")
+	assert.Zero(t, r.ctxCalls)
+
+	tags, _, err := FindMissingSiteTags(context.Background(), r, resolver())
+	require.NoError(t, err)
+	assert.Len(t, tags, 2)
+	assert.Equal(t, 2, r.bulkCalls)
+
+	r.bulkErr = errors.New("too big")
+	_, _, err = ScanDeadTorrents(context.Background(), r, resolver())
+	require.NoError(t, err)
+	assert.Equal(t, 2, r.ctxCalls, "一次读失败时退回逐个读")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = getTrackers(ctx, r, "a")
+	assert.ErrorIs(t, err, context.Canceled)
+	_, _, err = ScanDeadTorrents(ctx, r, resolver())
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestRedactTrackerURL(t *testing.T) {

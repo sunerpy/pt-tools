@@ -6,6 +6,8 @@ package dlassistant
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -28,6 +30,24 @@ const trackerFetchTimeout = 15 * time.Second
 
 // minTrackerPatternLen 是替换 tracker 时「原内容」的最短长度，太短容易误伤（比如只写一个点）。
 const minTrackerPatternLen = 3
+
+// MaxScanTorrents 是一次扫描或预览最多检查的种子数：种子更多时只检查前这么多个，结果里写明。
+const MaxScanTorrents = 20000
+
+// ScanInfo 说明一次扫描检查了多少种子：Scanned 小于 Total 时说明种子太多，只检查了一部分。
+type ScanInfo struct {
+	Total   int `json:"total"`
+	Scanned int `json:"scanned"`
+}
+
+func limitTorrents(all []downloader.Torrent) ([]downloader.Torrent, ScanInfo) {
+	info := ScanInfo{Total: len(all), Scanned: len(all)}
+	if len(all) > MaxScanTorrents {
+		info.Scanned = MaxScanTorrents
+		return all[:MaxScanTorrents], info
+	}
+	return all, info
+}
 
 // ItemError 是执行时没成功的一项。
 type ItemError struct {
@@ -76,12 +96,16 @@ type SiteTagItem struct {
 }
 
 // FindMissingSiteTags 列出按 tracker 能认出站点、但分类和标签里都没有这个站点的种子。
-func FindMissingSiteTags(ctx context.Context, dl downloader.Downloader, r *v2.TrackerResolver) ([]SiteTagSuggestion, error) {
-	torrents, err := dl.GetAllTorrents()
+func FindMissingSiteTags(ctx context.Context, dl downloader.Downloader, r *v2.TrackerResolver) ([]SiteTagSuggestion, ScanInfo, error) {
+	all, err := dl.GetAllTorrents()
 	if err != nil {
-		return nil, fmt.Errorf("读取下载器种子失败: %w", err)
+		return nil, ScanInfo{}, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
+	torrents, info := limitTorrents(all)
 	trackers := fetchTrackers(ctx, dl, torrents, func(t downloader.Torrent) bool { return t.Tracker == "" })
+	if err := ctx.Err(); err != nil {
+		return nil, info, err
+	}
 	out := make([]SiteTagSuggestion, 0)
 	for _, t := range torrents {
 		site, host, ok := resolveSite(r, t, trackers[hashKey(t)])
@@ -100,7 +124,7 @@ func FindMissingSiteTags(ctx context.Context, dl downloader.Downloader, r *v2.Tr
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out, info, nil
 }
 
 // ApplySiteTags 给种子加上站点标签。执行前重新核对：种子还在、tracker 仍属于这个站点、还没有这个标签。
@@ -112,11 +136,16 @@ func ApplySiteTags(ctx context.Context, dl downloader.Downloader, r *v2.TrackerR
 		return res, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
 	byHash := indexTorrents(torrents)
+	seen := map[string]bool{}
 	for _, it := range items {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
 		hash := strings.ToLower(strings.TrimSpace(it.Hash))
+		if seen[hash] {
+			continue
+		}
+		seen[hash] = true
 		t, ok := byHash[hash]
 		if !ok {
 			res.skip(hash, "", "种子已不在下载器里")
@@ -146,12 +175,26 @@ func ApplySiteTags(ctx context.Context, dl downloader.Downloader, r *v2.TrackerR
 
 // ---------- 替换 tracker ----------
 
-// TrackerMatch 是一个要改的 tracker 地址（脱敏后展示）。
+// TrackerMatch 是一个要改的 tracker 地址（脱敏后展示）。ID 是这条「原地址 → 新地址」的指纹，
+// 执行时只改指纹仍然对得上的地址：预览之后新加的、被改过的地址都不会被动到。
 type TrackerMatch struct {
+	ID   string `json:"id"`
 	Hash string `json:"hash"`
 	Name string `json:"name"`
 	Old  string `json:"old"`
 	New  string `json:"new"`
+}
+
+// TrackerSelection 是执行替换时选中的一条：种子与预览时那条地址的指纹。
+type TrackerSelection struct {
+	Hash string `json:"hash"`
+	ID   string `json:"id"`
+}
+
+// trackerFingerprint 是「种子、原地址、新地址」的指纹；不含明文，不会把 passkey 带出去。
+func trackerFingerprint(hash, oldURL, newURL string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(hash) + "\n" + oldURL + "\n" + newURL))
+	return hex.EncodeToString(sum[:12])
 }
 
 // ValidateTrackerReplace 校验替换参数：原内容至少 3 个字，替换后要仍是 http(s) 或 udp 地址（在 ReplaceTrackerURL 里逐个核对）。
@@ -178,40 +221,40 @@ func ReplaceTrackerURL(raw, from, to string) (string, error) {
 	return out, nil
 }
 
-// PreviewTrackerReplace 列出 tracker 地址里含 from 的种子和替换后的地址。主 tracker 已知且不含 from 的种子
-// 不再逐个读 tracker 列表（PT 种子通常只有一个 tracker）。
-func PreviewTrackerReplace(ctx context.Context, dl downloader.Downloader, from, to string) ([]TrackerMatch, error) {
+// PreviewTrackerReplace 列出 tracker 地址里含 from 的种子和替换后的地址（读每个种子完整的 tracker 列表）。
+func PreviewTrackerReplace(ctx context.Context, dl downloader.Downloader, from, to string) ([]TrackerMatch, ScanInfo, error) {
 	if err := ValidateTrackerReplace(from, to); err != nil {
-		return nil, err
+		return nil, ScanInfo{}, err
 	}
-	torrents, err := dl.GetAllTorrents()
+	all, err := dl.GetAllTorrents()
 	if err != nil {
-		return nil, fmt.Errorf("读取下载器种子失败: %w", err)
+		return nil, ScanInfo{}, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
-	trackers := fetchTrackers(ctx, dl, torrents, func(t downloader.Torrent) bool {
-		return t.Tracker == "" || strings.Contains(t.Tracker, from)
-	})
+	torrents, info := limitTorrents(all)
+	stats := fetchTrackerStats(ctx, dl, torrents)
+	if err := ctx.Err(); err != nil {
+		return nil, info, err
+	}
 	out := make([]TrackerMatch, 0)
 	for _, t := range torrents {
-		for _, u := range trackers[hashKey(t)] {
+		for _, u := range uniqueTrackerURLs(stats[hashKey(t)]) {
 			if !strings.Contains(u, from) {
 				continue
 			}
-			m := TrackerMatch{Hash: hashKey(t), Name: t.Name, Old: RedactTrackerURL(u)}
-			if nu, err := ReplaceTrackerURL(u, from, to); err == nil {
-				m.New = RedactTrackerURL(nu)
-			} else {
-				m.New = err.Error()
+			nu, err := ReplaceTrackerURL(u, from, to)
+			if err != nil {
+				continue // 替换后不是有效地址的不列（执行时也不会改）
 			}
-			out = append(out, m)
+			out = append(out, TrackerMatch{ID: trackerFingerprint(hashKey(t), u, nu), Hash: hashKey(t), Name: t.Name, Old: RedactTrackerURL(u), New: RedactTrackerURL(nu)})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, info, nil
 }
 
-// ApplyTrackerReplace 对选中的种子执行替换：重新读 tracker 列表，含 from 的地址逐个改成替换后的地址。
-func ApplyTrackerReplace(ctx context.Context, dl downloader.Downloader, from, to string, hashes []string) (ApplyResult, error) {
+// ApplyTrackerReplace 只改预览时选中的那几条地址：逐个种子重新读 tracker 列表，地址与替换结果的指纹
+// 仍和预览时一致才改；对不上的（预览之后地址变了）跳过。同一种子改到一半失败时写明已经改了几条。
+func ApplyTrackerReplace(ctx context.Context, dl downloader.Downloader, from, to string, selected []TrackerSelection) (ApplyResult, error) {
 	res := newResult()
 	if err := ValidateTrackerReplace(from, to); err != nil {
 		return res, err
@@ -225,39 +268,64 @@ func ApplyTrackerReplace(ctx context.Context, dl downloader.Downloader, from, to
 		return res, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
 	byHash := indexTorrents(torrents)
-	for _, h := range hashes {
+	want := map[string]map[string]bool{}
+	order := make([]string, 0)
+	for _, sel := range selected {
+		hash := strings.ToLower(strings.TrimSpace(sel.Hash))
+		if hash == "" || sel.ID == "" {
+			continue
+		}
+		if want[hash] == nil {
+			want[hash] = map[string]bool{}
+			order = append(order, hash)
+		}
+		want[hash][sel.ID] = true
+	}
+	for _, hash := range order {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		hash := strings.ToLower(strings.TrimSpace(h))
 		t, ok := byHash[hash]
 		if !ok {
 			res.skip(hash, "", "种子已不在下载器里")
 			continue
 		}
-		changed := 0
+		fctx, cancel := context.WithTimeout(ctx, trackerFetchTimeout)
+		trs, err := getTrackers(fctx, dl, t.ID)
+		cancel()
+		if err != nil {
+			res.fail(hash, t.Name, fmt.Errorf("读取 tracker 失败: %w", err))
+			continue
+		}
+		changed, matched := 0, 0
 		var itemErr error
-		for _, u := range trackerURLs(ctx, dl, t) {
+		for _, u := range uniqueTrackerURLs(trs) {
 			if !strings.Contains(u, from) {
 				continue
 			}
 			nu, err := ReplaceTrackerURL(u, from, to)
-			if err == nil {
-				err = editor.EditTracker(ctx, t.ID, u, nu)
+			if err != nil || !want[hash][trackerFingerprint(hash, u, nu)] {
+				continue
 			}
-			if err != nil {
+			matched++
+			if err := editor.EditTracker(ctx, t.ID, u, nu); err != nil {
 				itemErr = err
 				break
 			}
 			changed++
 		}
 		switch {
+		case itemErr != nil && changed > 0:
+			res.fail(hash, t.Name, fmt.Errorf("已改 %d 个地址，之后失败: %w", changed, itemErr))
 		case itemErr != nil:
 			res.fail(hash, t.Name, itemErr)
-		case changed == 0:
-			res.skip(hash, t.Name, "tracker 地址里已经没有要替换的内容")
+		case matched == 0:
+			res.skip(hash, t.Name, "预览之后 tracker 地址变了，没有修改")
 		default:
 			res.Done++
+			if matched < len(want[hash]) {
+				res.skip(hash, t.Name, fmt.Sprintf("有 %d 个选中的地址预览之后变了，没有修改", len(want[hash])-matched))
+			}
 		}
 	}
 	return res, nil
@@ -289,18 +357,19 @@ type DeadTorrent struct {
 }
 
 var (
-	unregisteredMarks = []string{"unregistered torrent", "torrent not registered", "not registered with this tracker", "unregistered", "未注册"}
+	unregisteredMarks = []string{"unregistered torrent", "torrent not registered", "torrent is not registered", "not registered with this tracker", "未注册"}
 	notFoundMarks     = []string{
 		"torrent not found", "torrent does not exist", "torrent not exist", "infohash not found", "info_hash not found",
 		"torrent has been deleted", "torrent deleted", "种子不存在", "该种子不存在", "种子已被删除", "种子已删除", "种子被删除",
 	}
 	// accountMarks 出现时是账号或 passkey 的问题，不是种子失效，不能删种
-	accountMarks = []string{"passkey", "user", "用户", "账号", "帐号", "banned", "封禁", "流量", "ratio"}
+	accountMarks = []string{"passkey", "user", "用户", "账号", "帐号", "banned", "封禁", "流量", "ratio", "client", "客户端"}
 )
 
 // classifyTrackerMessage 判断一条 tracker 消息是不是在说种子失效。
 func classifyTrackerMessage(msg string) (DeadReason, bool) {
-	m := strings.ToLower(strings.TrimSpace(msg))
+	// 消息里带的地址（常含 passkey=…）不参与判断，免得把地址里的字当成账号问题
+	m := strings.ToLower(strings.TrimSpace(messageURL.ReplaceAllString(msg, " ")))
 	if m == "" {
 		return "", false
 	}
@@ -343,14 +412,15 @@ func classifyDead(trackers []downloader.TorrentTracker) (DeadReason, string, boo
 }
 
 // ScanDeadTorrents 逐个读取种子的 tracker 状态，列出失效种子。
-func ScanDeadTorrents(ctx context.Context, dl downloader.Downloader, r *v2.TrackerResolver) ([]DeadTorrent, error) {
-	torrents, err := dl.GetAllTorrents()
+func ScanDeadTorrents(ctx context.Context, dl downloader.Downloader, r *v2.TrackerResolver) ([]DeadTorrent, ScanInfo, error) {
+	all, err := dl.GetAllTorrents()
 	if err != nil {
-		return nil, fmt.Errorf("读取下载器种子失败: %w", err)
+		return nil, ScanInfo{}, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
+	torrents, info := limitTorrents(all)
 	stats := fetchTrackerStats(ctx, dl, torrents)
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, info, err
 	}
 	out := make([]DeadTorrent, 0)
 	for _, t := range torrents {
@@ -359,7 +429,7 @@ func ScanDeadTorrents(ctx context.Context, dl downloader.Downloader, r *v2.Track
 		if !dead {
 			continue
 		}
-		d := DeadTorrent{Hash: hashKey(t), Name: t.Name, Size: t.TotalSize, Progress: t.Progress, Reason: reason, Message: msg}
+		d := DeadTorrent{Hash: hashKey(t), Name: t.Name, Size: t.TotalSize, Progress: t.Progress, Reason: reason, Message: RedactTrackerMessage(msg)}
 		urls := make([]string, 0, len(trs))
 		for _, tr := range trs {
 			urls = append(urls, tr.URL)
@@ -375,7 +445,7 @@ func ScanDeadTorrents(ctx context.Context, dl downloader.Downloader, r *v2.Track
 		out = append(out, d)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return out, info, nil
 }
 
 // DeleteDeadTorrents 删除选中的失效种子；删除前逐个重新读取 tracker 状态，已经恢复正常的不删。
@@ -386,11 +456,16 @@ func DeleteDeadTorrents(ctx context.Context, dl downloader.Downloader, hashes []
 		return res, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
 	byHash := indexTorrents(torrents)
+	seen := map[string]bool{}
 	for _, h := range hashes {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
 		hash := strings.ToLower(strings.TrimSpace(h))
+		if seen[hash] {
+			continue
+		}
+		seen[hash] = true
 		t, ok := byHash[hash]
 		if !ok {
 			res.skip(hash, "", "种子已不在下载器里")
@@ -447,6 +522,20 @@ func redactTrackerURL(raw string) string {
 
 // secretSegment 是 Unit3D 一类把 passkey 放在路径里的长串（16 位以上的字母数字）。
 var secretSegment = regexp.MustCompile(`^[A-Za-z0-9]{16,}$`)
+
+var (
+	messageURL    = regexp.MustCompile(`(?i)\b(?:https?|udp)://[^\s"'<>]+`)
+	messageSecret = regexp.MustCompile(`(?i)\b(passkey|authkey|torrent_pass|credential|token|apikey|api_key|sign|secret|rsskey|key)=([^&\s"'<>(),;]+)`)
+	messageLong   = regexp.MustCompile(`\b[A-Za-z0-9]{24,}\b`)
+)
+
+// RedactTrackerMessage 遮住 tracker 回复里可能带的凭证：里面的地址按 RedactTrackerURL 处理，
+// 再遮 passkey=… 一类参数和 24 位以上的长串。
+func RedactTrackerMessage(msg string) string {
+	msg = messageURL.ReplaceAllStringFunc(msg, RedactTrackerURL)
+	msg = messageSecret.ReplaceAllString(msg, "$1=***")
+	return messageLong.ReplaceAllString(msg, "***")
+}
 
 func isRealTracker(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -529,6 +618,10 @@ func firstHost(urls []string) string {
 }
 
 func getTrackers(ctx context.Context, dl downloader.Downloader, id string) ([]downloader.TorrentTracker, error) {
+	if r, ok := dl.(downloader.TrackerReader); ok {
+		return r.GetTorrentTrackersContext(ctx, id)
+	}
+	// 不支持 ctx 的下载器：ctx 到期时先返回，底层请求自己跑完
 	type result struct {
 		trs []downloader.TorrentTracker
 		err error
@@ -566,8 +659,25 @@ func trackerURLs(ctx context.Context, dl downloader.Downloader, t downloader.Tor
 	return urls
 }
 
-// fetchTrackers 对 need 为真的种子并发读取 tracker 地址；其他种子用主 tracker。
+// fetchTrackers 对 need 为真的种子读取 tracker 地址（能一次读全部的下载器一次读）；其他种子用主 tracker。
 func fetchTrackers(ctx context.Context, dl downloader.Downloader, torrents []downloader.Torrent, need func(downloader.Torrent) bool) map[string][]string {
+	if _, ok := dl.(downloader.BulkTrackerReader); ok {
+		needed := make([]downloader.Torrent, 0)
+		out := make(map[string][]string, len(torrents))
+		for _, t := range torrents {
+			if need(t) {
+				needed = append(needed, t)
+			} else if t.Tracker != "" {
+				out[hashKey(t)] = []string{t.Tracker}
+			}
+		}
+		if len(needed) > 0 {
+			for h, trs := range fetchTrackerStats(ctx, dl, needed) {
+				out[h] = uniqueTrackerURLs(trs)
+			}
+		}
+		return out
+	}
 	out := make(map[string][]string, len(torrents))
 	var mu sync.Mutex
 	forEachLimited(ctx, torrents, func(t downloader.Torrent) {
@@ -584,8 +694,36 @@ func fetchTrackers(ctx context.Context, dl downloader.Downloader, torrents []dow
 	return out
 }
 
-// fetchTrackerStats 并发读取全部种子的 tracker 状态；读不到的种子没有条目（不会被当成失效）。
+// uniqueTrackerURLs 返回 tracker 列表里去重后的真实地址（不含 DHT、PeX、LSD）。
+func uniqueTrackerURLs(trs []downloader.TorrentTracker) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(trs))
+	for _, tr := range trs {
+		u := strings.TrimSpace(tr.URL)
+		if !isRealTracker(u) || seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+// fetchTrackerStats 读取种子的 tracker 状态：下载器能一次读全部的（Transmission）就一次读，否则逐个并发读；
+// 读不到的种子没有条目（不会被当成失效）。
 func fetchTrackerStats(ctx context.Context, dl downloader.Downloader, torrents []downloader.Torrent) map[string][]downloader.TorrentTracker {
+	if bulk, ok := dl.(downloader.BulkTrackerReader); ok {
+		all, err := bulk.GetAllTorrentTrackers(ctx)
+		if err == nil {
+			out := make(map[string][]downloader.TorrentTracker, len(torrents))
+			for _, t := range torrents {
+				if trs, ok := all[hashKey(t)]; ok {
+					out[hashKey(t)] = trs
+				}
+			}
+			return out
+		}
+	}
 	out := make(map[string][]downloader.TorrentTracker, len(torrents))
 	var mu sync.Mutex
 	forEachLimited(ctx, torrents, func(t downloader.Torrent) {

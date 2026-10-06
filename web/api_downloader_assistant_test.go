@@ -134,7 +134,14 @@ func TestAssistantAPI_TrackersAndDead(t *testing.T) {
 	w = serveAuthed(mux, http.MethodGet, fmt.Sprintf("/api/downloader-assistant/trackers?downloader_id=%d&from=x&to=y", id), "")
 	assert.Equal(t, http.StatusBadRequest, w.Code, "原内容太短")
 
-	w = serveAuthed(mux, http.MethodPost, "/api/downloader-assistant/trackers", fmt.Sprintf(`{"downloader_id":%d,"from":"tracker.hdsky.me","to":"tracker2.hdsky.me","hashes":["h1"]}`, id))
+	var h1 dlassistant.TrackerMatch
+	for _, m := range prev.Items {
+		if m.Hash == "h1" {
+			h1 = m
+		}
+	}
+	require.NotEmpty(t, h1.ID)
+	w = serveAuthed(mux, http.MethodPost, "/api/downloader-assistant/trackers", fmt.Sprintf(`{"downloader_id":%d,"from":"tracker.hdsky.me","to":"tracker2.hdsky.me","selections":[{"hash":"h1","id":%q}]}`, id, h1.ID))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Len(t, fake.edits, 1)
 	assert.Equal(t, "https://tracker2.hdsky.me/announce.php?passkey=SECRET", fake.edits[0][2])
@@ -142,10 +149,14 @@ func TestAssistantAPI_TrackersAndDead(t *testing.T) {
 	w = serveAuthed(mux, http.MethodGet, fmt.Sprintf("/api/downloader-assistant/dead?downloader_id=%d", id), "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var dead struct {
-		Items []dlassistant.DeadTorrent `json:"items"`
+		Items   []dlassistant.DeadTorrent `json:"items"`
+		Total   int                       `json:"total"`
+		Scanned int                       `json:"scanned"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &dead))
 	require.Len(t, dead.Items, 1)
+	assert.Equal(t, 2, dead.Total)
+	assert.Equal(t, 2, dead.Scanned)
 	assert.Equal(t, "h2", dead.Items[0].Hash)
 	assert.Equal(t, "hdsky", dead.Items[0].Site)
 
@@ -162,7 +173,7 @@ func TestAssistantAPI_TrackersUnsupported(t *testing.T) {
 	w := serveAuthed(mux, http.MethodGet, fmt.Sprintf("/api/downloader-assistant/trackers?downloader_id=%d&from=tracker.hdsky.me&to=t2.hdsky.me", id), "")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"supported":false`)
-	w = serveAuthed(mux, http.MethodPost, "/api/downloader-assistant/trackers", fmt.Sprintf(`{"downloader_id":%d,"from":"tracker.hdsky.me","to":"t2.hdsky.me","hashes":["h1"]}`, id))
+	w = serveAuthed(mux, http.MethodPost, "/api/downloader-assistant/trackers", fmt.Sprintf(`{"downloader_id":%d,"from":"tracker.hdsky.me","to":"t2.hdsky.me","selections":[{"hash":"h1","id":"x"}]}`, id))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "不支持修改 tracker")
 }
@@ -196,4 +207,20 @@ func TestAssistantAPI_DeadScanSettings(t *testing.T) {
 	server.store = nil
 	w = serveAuthed(mux, http.MethodGet, "/api/downloader-assistant/dead-scan", "")
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+// 同一台下载器同一时间只跑一个助手操作：另一个请求回 409；时限到了回 504。
+func TestAssistantAPI_SingleFlightAndTimeout(t *testing.T) {
+	_, mux, id := newAssistantServer(t, &fakeDownloader{})
+	release, ok := acquireAssistant(httptest.NewRecorder(), id)
+	require.True(t, ok)
+	w := serveAuthed(mux, http.MethodGet, fmt.Sprintf("/api/downloader-assistant/dead?downloader_id=%d", id), "")
+	assert.Equal(t, http.StatusConflict, w.Code)
+	release()
+	w = serveAuthed(mux, http.MethodGet, fmt.Sprintf("/api/downloader-assistant/dead?downloader_id=%d", id), "")
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	rec := httptest.NewRecorder()
+	writeAssistantError(rec, context.DeadlineExceeded)
+	assert.Equal(t, http.StatusGatewayTimeout, rec.Code)
 }
