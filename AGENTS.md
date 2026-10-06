@@ -81,7 +81,7 @@ Important startup properties:
 - Site definitions and notification adapters are registered by side-effect imports from `cmd/`.
 - Scheduler auto-start reload is dispatched asynchronously; an unreachable downloader must not delay HTTP listen.
 - A bad notification channel is logged and skipped rather than taking down the Web service.
-- SIGINT/SIGTERM shuts down channel adapters, outbox/session workers, then the HTTP server with bounded timeouts.
+- SIGINT/SIGTERM is trapped before `Serve` starts. Shutdown cancels the runtime context and waits for the RSS retry worker and channel hot-reloader, then stops the scheduler (RSS jobs and monitors) and downloaders, then channel adapters and outbox/session workers, and closes the HTTP server last; every step is time-bounded (`cmd/web.go` `shutdownPlan`).
 
 ## Core Contracts
 

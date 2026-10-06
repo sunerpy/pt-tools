@@ -13,7 +13,7 @@ import (
 
 const defaultPollingTimeoutSeconds = 30
 
-func defaultBotFactory(cfg *Config) (botAPI, updateSource, error) {
+func defaultBotFactory(cfg *Config, reportPoll func(error)) (botAPI, updateSource, error) {
 	opts := []telego.BotOption{telego.WithDiscardLogger()}
 	if cfg.APIServer != "" {
 		opts = append(opts, telego.WithAPIServer(cfg.APIServer))
@@ -32,7 +32,8 @@ func defaultBotFactory(cfg *Config) (botAPI, updateSource, error) {
 	}
 
 	httpClient := &http.Client{
-		Transport: &http.Transport{
+		// getUpdates 的结果经 pollHealthTransport 回报给通道，作为健康状态的依据
+		Transport: pollHealthTransport{report: reportPoll, next: &http.Transport{
 			Proxy:                 proxyFn,
 			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
@@ -40,7 +41,7 @@ func defaultBotFactory(cfg *Config) (botAPI, updateSource, error) {
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-		},
+		}},
 		Timeout: 0,
 	}
 	opts = append(opts, telego.WithHTTPClient(httpClient))

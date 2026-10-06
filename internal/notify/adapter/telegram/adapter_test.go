@@ -123,7 +123,7 @@ func (s *fakeSource) close() { close(s.ch) }
 func newChannelWithFakes(t *testing.T, cfg *Config, bot *fakeBot, src *fakeSource, plain []byte) *TelegramChannel {
 	t.Helper()
 	c := New()
-	c.factory = func(_ *Config) (botAPI, updateSource, error) {
+	c.factory = func(_ *Config, _ func(error)) (botAPI, updateSource, error) {
 		return bot, src.source(), nil
 	}
 	t.Cleanup(func() {
@@ -441,7 +441,7 @@ func TestDefaultBotFactory_ProxyURL(t *testing.T) {
 				BotToken: validToken,
 				ProxyURL: tc.proxyURL,
 			}
-			bot, src, err := defaultBotFactory(cfg)
+			bot, src, err := defaultBotFactory(cfg, nil)
 			if tc.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.errSub)
@@ -597,23 +597,32 @@ func TestTelegram_ReplyDenied_Path(t *testing.T) {
 
 // TestTelegram_RunInbound_SourceError covers the long-poll start failure path:
 // the source returns an error, runInbound marks the channel unhealthy and
-// closes the done channel.
+// retries with backoff instead of giving up; cancelling the poll context (what
+// Close does) ends the loop and closes the done channel.
 func TestTelegram_RunInbound_SourceError(t *testing.T) {
 	c := New()
 	c.logger = sLogger()
+	c.healthy = true
 	c.pollDone = make(chan struct{})
+	c.restartBase = time.Millisecond
+	var calls atomic.Int32
 	failing := func(_ context.Context) (<-chan telego.Update, error) {
+		calls.Add(1)
 		return nil, errors.New("poll boom")
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 
-	go c.runInbound(context.Background(), failing)
+	go c.runInbound(ctx, failing)
 
+	require.Eventually(t, func() bool { return calls.Load() >= 2 }, time.Second, time.Millisecond,
+		"启动失败后要重试")
+	assert.False(t, c.Healthy())
+	cancel()
 	select {
 	case <-c.pollDone:
 	case <-time.After(time.Second):
-		t.Fatal("runInbound never finished after source error")
+		t.Fatal("runInbound never finished after cancel")
 	}
-	assert.False(t, c.Healthy())
 }
 
 // TestTelegram_RunInbound_NilSource covers the nil-source early return.
@@ -631,19 +640,23 @@ func TestTelegram_RunInbound_NilSource(t *testing.T) {
 
 // TestTelegram_RunInbound_ChannelClosed drives runInbound over a real source
 // channel directly (no Init, to avoid a second poll goroutine): one update is
-// handled, then closing the channel ends the loop and closes pollDone.
+// handled; closing the channel no longer ends the loop (the long-poll is
+// restarted, see inbound_supervisor_test.go), cancelling the poll context does.
 func TestTelegram_RunInbound_ChannelClosed(t *testing.T) {
 	src := newFakeSource()
 	c := New()
 	c.logger = sLogger()
 	c.cfg = &Config{}
 	c.pollDone = make(chan struct{})
+	c.restartBase = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
 
-	go c.runInbound(context.Background(), src.source())
+	go c.runInbound(ctx, src.source())
 	src.push(telego.Update{Message: &telego.Message{
 		From: &telego.User{ID: 111}, Chat: telego.Chat{ID: 555}, Text: "/ping",
 	}})
 	src.close()
+	cancel()
 
 	select {
 	case <-c.pollDone:

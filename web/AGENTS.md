@@ -36,7 +36,7 @@ web/
 - Default admin credentials come from `PT_ADMIN_USER`/`PT_ADMIN_PASS`; `PT_ADMIN_RESET=1` performs a startup reset.
 - Extension origins receive narrowly scoped CORS handling in `logMiddleware`.
 - ChatOps routes are registered only when dependencies were injected.
-- `Shutdown(ctx)` must remain safe before/concurrent with `Serve`.
+- `Shutdown(ctx)` must remain safe before/concurrent with `Serve`; a `Shutdown` that runs before `Serve` makes the later `Serve` return without listening.
 
 ## Adding a Route
 

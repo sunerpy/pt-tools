@@ -44,7 +44,9 @@ internal/notify/
 
 ## Stateful Adapter Warning
 
-Do not create a second live Telegram or QQ listener for outbox delivery: it can collide on polling, ports, or connection ownership. Reuse the production live-channel manager for stateful transports. The current outbox factory path is reliable for stateless webhook adapters; changes here require explicit lifecycle tests.
+Do not create a second live Telegram or QQ listener for outbox delivery: it can collide on polling, ports, or connection ownership. Outbox retries go through the production live-channel manager (`OutboxWorker.SetLiveSender`); the factory path is only a fallback for stateless webhook adapters and decrypts `ConfigJSON` first. Changes here require explicit lifecycle tests.
+
+Telegram `Healthy()` follows the latest `getUpdates` result (`pollHealthTransport`): telego retries a failing long poll internally without closing the updates channel, so transport-level results are the only signal. `runInbound` restarts the long poll with backoff if the updates channel closes while the poll context is alive.
 
 ## Adding an Adapter
 

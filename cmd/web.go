@@ -149,6 +149,9 @@ var webCmd = &cobra.Command{
 
 		runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 		defer runtimeCancel()
+		// background 跟踪依赖 runtimeCtx 的后台 goroutine（RSS 重试、通道热重载）：
+		// 关闭时先取消 context 并等它们退出，之后就不会再有人重建通知通道
+		var background sync.WaitGroup
 
 		if bs != nil {
 			rssNotifier := app.NewRSSNotifier(global.GlobalDB.DB, bs.Deps().NotificationSvc)
@@ -177,7 +180,7 @@ var webCmd = &cobra.Command{
 
 			retryWorker := app.NewRSSRetryWorker(global.GlobalDB.DB, notifySvc)
 			retryWorker.SetLogf(chatopsLogger().Warnf)
-			go retryWorker.Run(runtimeCtx)
+			background.Go(func() { retryWorker.Run(runtimeCtx) })
 
 			fetcher := func(ctx context.Context, siteName, torrentID string) ([]byte, error) {
 				orchestrator := web.GetSearchOrchestrator()
@@ -192,21 +195,21 @@ var webCmd = &cobra.Command{
 			}
 			callbackActions := app.NewRSSCallbackActions(global.GlobalDB.DB, fetcher)
 			registeredCallbackChannels := 0
-			for _, ch := range bs.channels {
+			bs.eachChannel(func(ch notify.Channel) {
 				if setter, ok := ch.(interface {
 					SetCallbackActionHandler(telegramadapter.CallbackActionHandler)
 				}); ok {
 					setter.SetCallbackActionHandler(callbackActions)
 					registeredCallbackChannels++
 				}
-			}
+			})
 
 			internal.SetRSSNotifier(&rssNotifierAdapter{inner: rssNotifier})
 			chatopsLogger().Infof("RSS notifier 已就绪")
 			chatopsLogger().Infof("RSS retry worker 已启动")
 			chatopsLogger().Infof("RSS callback actions 已注册 channels=%d", registeredCallbackChannels)
 
-			go runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions)
+			background.Go(func() { runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions) })
 		}
 
 		wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
@@ -220,7 +223,20 @@ var webCmd = &cobra.Command{
 			maybeAutoStartReload(mgr, cfg)
 		}
 
-		shutdownDone := installShutdownHandler(srv, bs)
+		plan := shutdownPlan{
+			stopBackground: func() {
+				runtimeCancel()
+				bootCancel()
+				background.Wait()
+			},
+			scheduler: mgr,
+			bs:        bs,
+			srv:       srv,
+		}
+		if dm := mgr.GetDownloaderManager(); dm != nil {
+			plan.downloaders = dm
+		}
+		shutdownDone := installShutdownHandler(plan)
 
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
 		go startVersionChecker()
@@ -311,36 +327,101 @@ func startVersionChecker() {
 	}
 }
 
-// installShutdownHandler traps SIGINT/SIGTERM and tears down the ChatOps
-// subsystem in reverse-dependency order, then shuts down the main HTTP server
-// so Serve returns and the process exits cleanly without os.Exit.
-// Returns a done channel closed after both shutdowns complete; main should
-// block on it after Serve returns to ensure shutdown logs are flushed.
-func installShutdownHandler(srv *web.Server, bs *chatopsBootstrap) <-chan struct{} {
+// shutdownPlan 是收到 SIGINT/SIGTERM 之后依次执行的关闭步骤，每一步都有时限：
+//  1. stopBackground：取消 runtime 与 boot context，等 RSS 重试、通道热重载这些后台 goroutine 退出，
+//     之后不会再有人往通知通道里发、也不会再把通道重建起来
+//  2. scheduler：停掉 RSS 任务与各个监控器
+//  3. downloaders：关闭下载器实例
+//  4. bs：关闭通知通道、outbox 与会话
+//  5. srv：HTTP 最后关，前面几步执行期间进行中的请求还能拿到响应
+//
+// 原来只做第 4、5 步：RSS 任务、监控器和下载器都没停，热重载还可能在关闭途中把通道建回来。
+type shutdownPlan struct {
+	stopBackground func()
+	scheduler      interface{ StopAll() }
+	downloaders    interface{ CloseAll() }
+	bs             *chatopsBootstrap
+	srv            interface {
+		Shutdown(ctx context.Context) error
+	}
+	// stepTimeout 是单步的等待上限，0 取 chatopsShutdownPerStep。
+	stepTimeout time.Duration
+}
+
+// installShutdownHandler 注册 SIGINT/SIGTERM，收到后按 plan 关闭，返回的 channel 在关闭完成后关闭；
+// main 在 Serve 返回后等它，保证关闭日志写完。
+// signal.Notify 在返回之前注册：信号若在 Serve 起来之前到达，同样会被这里接住，
+// 而 web.Server.Shutdown 会让之后的 Serve 不再监听。
+func installShutdownHandler(plan shutdownPlan) <-chan struct{} {
 	done := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		defer close(done)
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		ctx, cancel := context.WithTimeout(context.Background(), chatopsShutdownBudget)
 		defer cancel()
-		if bs != nil {
-			if err := bs.Shutdown(ctx); err != nil {
-				global.GetSlogger().Warnf("ChatOps 子系统关闭出现错误: %v", err)
-			} else {
-				global.GetSlogger().Info("ChatOps 子系统已优雅关闭")
-			}
-		}
-		if srv != nil {
-			if err := srv.Shutdown(ctx); err != nil {
-				global.GetSlogger().Warnf("Web 服务关闭出现错误: %v", err)
-			} else {
-				global.GetSlogger().Info("Web 服务已优雅关闭")
-			}
-		}
+		runShutdown(ctx, plan)
 	}()
 	return done
+}
+
+func runShutdown(ctx context.Context, plan shutdownPlan) {
+	log := global.GetSlogger()
+	step := plan.stepTimeout
+	if step <= 0 {
+		step = chatopsShutdownPerStep
+	}
+	if plan.stopBackground != nil {
+		if !runBounded(ctx, step, plan.stopBackground) {
+			log.Warnf("等待后台任务退出超时（%s），继续关闭", step)
+		}
+	}
+	if plan.scheduler != nil {
+		if runBounded(ctx, step, plan.scheduler.StopAll) {
+			log.Info("调度器已停止")
+		} else {
+			log.Warnf("调度器停止超时（%s），RSS 任务或监控器仍在收尾，继续关闭", step)
+		}
+	}
+	if plan.downloaders != nil {
+		if !runBounded(ctx, step, plan.downloaders.CloseAll) {
+			log.Warnf("关闭下载器超时（%s），继续关闭", step)
+		}
+	}
+	if plan.bs != nil {
+		if err := plan.bs.Shutdown(ctx); err != nil {
+			log.Warnf("ChatOps 子系统关闭出现错误: %v", err)
+		} else {
+			log.Info("ChatOps 子系统已优雅关闭")
+		}
+	}
+	if plan.srv != nil {
+		if err := plan.srv.Shutdown(ctx); err != nil {
+			log.Warnf("Web 服务关闭出现错误: %v", err)
+		} else {
+			log.Info("Web 服务已优雅关闭")
+		}
+	}
+}
+
+// runBounded 执行 fn，最多等 timeout 或 ctx 结束；等不到时返回 false，fn 留在后台跑完。
+func runBounded(ctx context.Context, timeout time.Duration, fn func()) bool {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // chatopsBootstrap holds wired ChatOps + Notify subsystem handles so the web
@@ -349,15 +430,24 @@ func installShutdownHandler(srv *web.Server, bs *chatopsBootstrap) <-chan struct
 // of the system must remain available even when a single notification channel
 // is misconfigured.
 type chatopsBootstrap struct {
-	deps      *web.ChatOpsDeps
-	registry  *notify.Registry
-	outbox    *notify.OutboxWorker
-	manager   *liveNotifyManager
-	channels  map[uint]notify.Channel
-	sessions  *chatops.SessionStore
-	chain     *chatops.MessageChain
+	deps     *web.ChatOpsDeps
+	registry *notify.Registry
+	outbox   *notify.OutboxWorker
+	manager  *liveNotifyManager
+	sessions *chatops.SessionStore
+	chain    *chatops.MessageChain
+
+	// mu 保护 channels 与 closed：热重载在后台 goroutine 里关旧建新、整表替换，
+	// Shutdown 在信号处理 goroutine 里遍历关闭，原来两边都不加锁。
+	mu       sync.Mutex
+	channels map[uint]notify.Channel
+	closed   bool // Shutdown 之后为真：热重载不再建通道
+
 	closeOnce sync.Once
 }
+
+// errChatOpsShutDown 表示 ChatOps 已关闭，热重载不再执行。
+var errChatOpsShutDown = errors.New("ChatOps 已关闭，跳过通道热重载")
 
 func (b *chatopsBootstrap) Deps() *web.ChatOpsDeps {
 	if b == nil {
@@ -377,7 +467,21 @@ func (b *chatopsBootstrap) ChannelCount() int {
 	if b == nil {
 		return 0
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return len(b.channels)
+}
+
+// eachChannel 在锁内逐个访问当前的通道实例。
+func (b *chatopsBootstrap) eachChannel(fn func(notify.Channel)) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.channels {
+		fn(ch)
+	}
 }
 
 // Shutdown closes adapters first, then stops the outbox worker, then the
@@ -390,7 +494,16 @@ func (b *chatopsBootstrap) Shutdown(ctx context.Context) error {
 	var firstErr error
 	b.closeOnce.Do(func() {
 		log := chatopsLogger()
-		for confID, ch := range b.channels {
+		// 先在锁内摘下通道表并标记关闭：之后的热重载直接返回，live 投递也不再拿到这些实例
+		b.mu.Lock()
+		b.closed = true
+		channels := b.channels
+		b.channels = map[uint]notify.Channel{}
+		if b.manager != nil {
+			b.manager.SetChannels(nil)
+		}
+		b.mu.Unlock()
+		for confID, ch := range channels {
 			stepCtx, cancel := context.WithTimeout(ctx, chatopsShutdownPerStep)
 			if err := ch.Close(stepCtx); err != nil {
 				log.Warnf("ChatOps 通道关闭失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
@@ -639,9 +752,9 @@ func (m *liveNotifyManager) SetChannels(channels map[uint]notify.Channel) {
 
 // ChannelState 实现 app.ChannelStater：把这一条通道的实例状态告诉上层。
 //
-// **不把 Healthy() 当「已连接」**：这四个适配器的 Healthy() 含义都只是构造/启动成功
-// （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败；Telegram 造出 bot 就 true；
-// Webhook 只判 config != nil；WeCom 恒 true）。所以 Healthy() 只够说「运行中」。
+// **不把 Healthy() 当「已连接」**：这四个适配器的 Healthy() 含义大多只是构造/启动成功
+// （QQ 绑上端口就 true，而 NapCat 没握手时发送会明确失败；Telegram 跟着最近一次 getUpdates 的结果，
+// 令牌失效、网络断开时为 false；Webhook 只判 config != nil；WeCom 恒 true）。所以 Healthy() 只够说「运行中」。
 // 只有实现了 notify.LinkStater 且确认对端接上的通道，才报「已连接」。
 //
 // map 里没有这一条时返回空串，由 app 层结合「配置启不启用」判成异常还是停用。
@@ -900,6 +1013,13 @@ func reloadChatOpsChannels(
 	callbackActions telegramadapter.CallbackActionHandler,
 ) error {
 	log := chatopsLogger()
+
+	// 整个「关旧、建新、换表」在锁内完成，不和 Shutdown 交错；Shutdown 之后不再建通道
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	if bs.closed {
+		return errChatOpsShutDown
+	}
 
 	for confID, ch := range bs.channels {
 		stepCtx, stepCancel := context.WithTimeout(ctx, chatopsShutdownPerStep)
