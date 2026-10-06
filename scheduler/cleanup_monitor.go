@@ -500,6 +500,13 @@ func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent) bool {
 }
 
 func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates, alreadyMarked []downloader.Torrent, currentFreeGB float64) []downloader.Torrent {
+	if !cfg.CleanupRemoveData {
+		// 只从下载器移除任务、不删数据文件，磁盘空间一点也不会释放；
+		// 继续按体积挑种子只会一轮轮删掉任务和做种状态，空间照样不够。
+		c.logger.Warnf("[自动删种] 磁盘空间不足，但「删除时连数据文件一起删」未开启，紧急清理释放不了空间，跳过额外删除")
+		return alreadyMarked
+	}
+
 	markedSet := make(map[string]struct{})
 	for _, t := range alreadyMarked {
 		markedSet[t.ID] = struct{}{}
@@ -532,7 +539,11 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates
 	}
 	targetGB := cfg.CleanupMinDiskSpaceGB + bufferGB
 	neededBytes := (targetGB - currentFreeGB) * 1024 * 1024 * 1024
+	// 按常规规则已经要删的种子也会释放空间，先算进去，免得再多删
 	var freedBytes float64
+	for _, t := range alreadyMarked {
+		freedBytes += float64(t.TotalSize)
+	}
 
 	for _, e := range extras {
 		if freedBytes >= neededBytes {
