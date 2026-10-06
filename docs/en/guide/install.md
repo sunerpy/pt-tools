@@ -8,6 +8,7 @@ This page covers installing pt-tools with Docker, as a Linux binary or as a Wind
 | `docker run`   | The same                    | A single command, handy for trying it out                |
 | Linux binary   | Linux amd64 and arm64       | The install script checks SHA-256; can run under systemd |
 | Windows binary | Windows amd64 and arm64     | A PowerShell install script, or unpack it yourself       |
+| NAS            | 1Panel, Unraid and fnOS     | Install from the app definitions in `deploy/`            |
 
 There is no macOS binary; use Docker on macOS.
 
@@ -72,6 +73,24 @@ docker run -d \
 | `PT_ADMIN_PASS`   | Initial admin password                                         | `adminadmin`    |
 | `PT_ADMIN_RESET`  | Set to `1` to reset the admin password to the two values above | Not set         |
 | `HTTP_PROXY` etc. | Proxies; see [Configuration](../configuration.md)              | Not set         |
+
+## NAS
+
+The `deploy/` folder in the repository has app definitions for 1Panel, Unraid and fnOS. The steps below install from those files directly, without an app store. All three map the data folder to `/app/.pt-tools` in the container; keep that folder across upgrades and reinstalls, and back up the `secret.key` inside it.
+
+The container runs as the user given by `PUID` and `PGID`, and hands the files under `/app` to that user on startup. Group ID 100, common on NAS systems, already exists in the image (the `users` group) and is used as is.
+
+### 1Panel
+
+Copy the whole `deploy/1panel/pt-tools` folder to `/opt/1panel/resource/apps/local/pt-tools` on the server, refresh the local app list in the 1Panel app store, then install pt-tools and fill in the web port and time zone. Data lives in `data/` under the app folder.
+
+### Unraid
+
+Download `deploy/unraid/pt-tools.xml` to `/boot/config/plugins/dockerMan/templates-user/my-pt-tools.xml` on the flash drive, click **Add Container** on the Docker page and pick pt-tools from the Template list. The template defaults to `PUID=99` and `PGID=100` (Unraid's nobody and users), with data in `/mnt/user/appdata/pt-tools`.
+
+### fnOS
+
+Create a Compose project in the fnOS Docker app using [the Compose file above](#docker-compose-recommended). Replace `./data` with a folder in a shared folder (for example `/vol1/1000/docker/pt-tools`) and set `PUID` and `PGID` to the owner of that folder (check with `ls -n`). `deploy/fnos` is the packaging for the third-party app center fnos-apps.
 
 ## Linux binary
 
