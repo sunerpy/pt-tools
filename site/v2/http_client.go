@@ -90,7 +90,7 @@ func NewSiteHTTPClient(config SiteHTTPClientConfig) *SiteHTTPClient {
 		config.Logger = zap.NewNop()
 	}
 
-	session := requests.NewSession().
+	session := httpclient.NewSession().
 		WithTimeout(config.Timeout).
 		WithIdleTimeout(config.IdleConnTimeout).
 		WithMaxIdleConns(config.MaxIdleConns).
@@ -178,7 +178,7 @@ func (c *SiteHTTPClient) DoRequest(ctx context.Context, method, url string, body
 	if c.proxyURL == "" {
 		envProxyURL := httpclient.ResolveProxyFromEnvironment(url)
 		if envProxyURL != "" {
-			activeSession = requests.NewSession().
+			activeSession = httpclient.NewSession().
 				WithTimeout(c.timeout).
 				WithIdleTimeout(c.idleTime).
 				WithMaxIdleConns(c.maxIdle).
@@ -268,7 +268,7 @@ func (p *HTTPClientPool) GetSession(siteID string) requests.Session {
 		return session
 	}
 
-	session = requests.NewSession().
+	session = httpclient.NewSession().
 		WithTimeout(p.config.Timeout).
 		WithIdleTimeout(p.config.IdleConnTimeout).
 		WithMaxIdleConns(p.config.MaxIdleConns).
@@ -647,7 +647,7 @@ func NewRequestsClient(config HTTPClientConfig, retryConfig RetryConfig, logger 
 		logger = zap.NewNop()
 	}
 
-	session := requests.NewSession().
+	session := httpclient.NewSession().
 		WithTimeout(config.Timeout).
 		WithIdleTimeout(config.IdleConnTimeout).
 		WithMaxIdleConns(config.MaxIdleConns).
