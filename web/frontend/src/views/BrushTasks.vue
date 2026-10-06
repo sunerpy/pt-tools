@@ -206,14 +206,17 @@ async function runNow(task: BrushTask) {
   if (running[task.id]) return;
   running[task.id] = true;
   try {
+    // 跑完了回 200（个别种子的错误在 result.errors 里）；这一轮没跑完时接口回 502，走下面的 catch
     const res = await brushApi.run(task.id);
-    const msg = runMessage(res.result, res.error);
+    const msg = runMessage(res.result);
     if (msg.tone === "error") ElMessage.error(`${task.name}：${msg.text}`);
     else if (msg.tone === "warn") ElMessage.warning(`${task.name}：${msg.text}`);
     else ElMessage.success(`${task.name}：${msg.text}`);
     await loadAll();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "运行失败");
+    ElMessage.error(`${task.name}：运行失败：${((e as Error).message || "未知错误").trim()}`);
+    // 失败原因也写进了任务的「上次运行」，刷新一下让列表里看得到
+    void loadAll();
   } finally {
     running[task.id] = false;
   }
@@ -343,24 +346,28 @@ async function openTorrents(task: BrushTask) {
   await loadTorrents();
 }
 
+/** 抽屉请求的序号：只有最新一次能写列表、错误与 loading（成功、失败、finally 三处都判） */
+let drawerSeq = 0;
+
 async function loadTorrents() {
   const task = drawerTask.value;
   if (!task) return;
+  const token = ++drawerSeq;
   drawerLoading.value = true;
   drawerError.value = "";
-  const wantState = drawerState.value;
   try {
-    const res = await brushApi.torrents(task.id, wantState, 1, 100);
+    const res = await brushApi.torrents(task.id, drawerState.value, 1, 100);
     // 期间切到了别的标签或别的任务：这是旧请求，不落到页面上
-    if (drawerTask.value?.id !== task.id || drawerState.value !== wantState) return;
+    if (token !== drawerSeq) return;
     drawerRows.value = res.items ?? [];
     drawerTotal.value = res.total ?? 0;
   } catch (e: unknown) {
+    if (token !== drawerSeq) return;
     drawerRows.value = [];
     drawerTotal.value = 0;
     drawerError.value = (e as Error).message || "读取失败";
   } finally {
-    drawerLoading.value = false;
+    if (token === drawerSeq) drawerLoading.value = false;
   }
 }
 

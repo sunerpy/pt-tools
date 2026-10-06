@@ -204,10 +204,7 @@ describe("刷流任务页", () => {
       expect(ui.success).toHaveBeenCalledWith(expect.stringContaining("加入 1 个")),
     );
 
-    api.run.mockResolvedValueOnce({
-      result: { task_id: 1, sampled: 0, removed: 0, gone: 0, listed: 0, eligible: 0, added: 0 },
-      error: "站点 502",
-    });
+    api.run.mockRejectedValueOnce(new Error("读取 hdsky 的种子列表失败: 站点 502"));
     await flush();
     runBtn().click();
     await vi.waitFor(() =>
@@ -276,5 +273,50 @@ describe("刷流任务页", () => {
     });
     await flush();
     expect(document.body.textContent).not.toContain("Stale.Active");
+  });
+
+  it("种子抽屉：旧请求晚到的失败也不覆盖新标签的列表与 loading", async () => {
+    await mountPage([task()]);
+    let failActive!: (e: unknown) => void;
+    api.torrents.mockImplementation((_id: number, state: string) =>
+      state === "active"
+        ? new Promise((_resolve, reject) => {
+            failActive = reject;
+          })
+        : Promise.resolve({
+            items: [
+              {
+                id: 7,
+                title: "Gone.One",
+                state: "gone",
+                remove_reason: "下载器里已经没有这个种子",
+                size_bytes: 1,
+                discount: "FREE",
+                progress: 1,
+                ratio: 1,
+                uploaded: 1,
+                added_at: "2026-10-06T08:00:00Z",
+                removed_at: "2026-10-06T09:00:00Z",
+                has_hr: false,
+              },
+            ],
+            total: 1,
+          }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector("[aria-label='HDSky 刷流 的种子']")).not.toBeNull(),
+    );
+    document.querySelector<HTMLButtonElement>("[aria-label='HDSky 刷流 的种子']")!.click();
+    await vi.waitFor(() => expect(api.torrents).toHaveBeenCalledWith(1, "active", 1, 100));
+    const tab = [...document.querySelectorAll<HTMLElement>(".el-segmented__item")].find((e) =>
+      e.textContent?.includes("已不在下载器"),
+    );
+    tab!.click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Gone.One"));
+
+    failActive(new Error("旧请求失败"));
+    await flush();
+    expect(document.body.textContent).toContain("Gone.One");
+    expect(document.body.textContent).not.toContain("旧请求失败");
   });
 });
