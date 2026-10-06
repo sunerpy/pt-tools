@@ -92,6 +92,12 @@ const router = createRouter({
       meta: { title: "任务列表" },
     },
     {
+      path: "/brush",
+      name: "brush",
+      component: () => import("@/views/BrushTasks.vue"),
+      meta: { title: "刷流任务" },
+    },
+    {
       path: "/paused",
       name: "paused",
       component: () => import("@/views/PausedTorrents.vue"),

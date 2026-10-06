@@ -135,6 +135,8 @@ const BOARD_40 = [
  * 这不是豁免：它同样会被打印出来给 owner 看。
  */
 const NOT_ON_BOARD = {
+  "views/BrushTasks.vue":
+    "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗与种子抽屉都不在那张清点图里",
   "views/DynamicSiteSettings.vue":
     "动态站点两个弹窗：路由在 router/index.ts 里已注释掉，画板刻意不画（design-system.md 的说明）",
   "views/SiteList.vue#导入站点模板":

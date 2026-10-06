@@ -1726,3 +1726,129 @@ export const maintenanceApi = {
   // 执行清理（dryRun:false 才会实际删除）
   clean: (data: CleanRequest) => api.post<CleanResult>("/api/maintenance/clean", data),
 };
+
+// ---------------------------------------------------------------- 刷流（M3）
+
+/** 刷流任务的配置（与 models.BrushTask 同名字段；体积单位 GB，时长单位见字段名） */
+export interface BrushTaskConfig {
+  name: string;
+  enabled: boolean;
+  site_name: string;
+  downloader_id: number;
+  save_path: string;
+  category: string;
+  /** 额外标签，逗号分隔；站点名、pt-tools-brush 与任务标签总会带上 */
+  tags: string;
+  interval_min: number;
+  /** 允许的优惠类型，逗号分隔（FREE,2XFREE…）；空 = 只收免费 */
+  discounts: string;
+  min_free_remain_min: number;
+  min_size_gb: number;
+  max_size_gb: number;
+  max_seeders: number;
+  min_leechers: number;
+  max_publish_age_min: number;
+  exclude_hr: boolean;
+  include_keywords: string;
+  exclude_keywords: string;
+  max_downloading: number;
+  max_total_size_gb: number;
+  max_daily_download_gb: number;
+  remove_seed_time_h: number;
+  remove_ratio: number;
+  remove_low_speed_kbs: number;
+  remove_low_speed_window_min: number;
+  remove_inactive_h: number;
+  remove_free_expired_incomplete: boolean;
+  remove_with_data: boolean;
+}
+
+export interface BrushStat {
+  uploaded: number;
+  downloaded: number;
+  added: number;
+  removed: number;
+}
+
+/** GET /api/brush/tasks 的一项：配置 + 运行状态 + 收益 */
+export interface BrushTask extends BrushTaskConfig {
+  id: number;
+  last_run_at?: string;
+  last_error: string;
+  last_result: string;
+  created_at: string;
+  updated_at: string;
+  downloader_name: string;
+  site_enabled: boolean;
+  active_count: number;
+  downloading_count: number;
+  active_size_bytes: number;
+  today: BrushStat;
+  total: BrushStat;
+}
+
+export type BrushTorrentState = "active" | "removed" | "gone";
+
+export interface BrushTorrent {
+  id: number;
+  task_id: number;
+  info_hash: string;
+  site_name: string;
+  torrent_id: string;
+  title: string;
+  size_bytes: number;
+  discount: string;
+  free_end_at?: string;
+  has_hr: boolean;
+  state: BrushTorrentState;
+  added_at: string;
+  removed_at?: string;
+  remove_reason: string;
+  uploaded: number;
+  downloaded: number;
+  progress: number;
+  ratio: number;
+  seeding_time_sec: number;
+  last_activity_at?: string;
+}
+
+export interface BrushRunResult {
+  task_id: number;
+  sampled: number;
+  removed: number;
+  gone: number;
+  listed: number;
+  eligible: number;
+  added: number;
+  skipped?: string[];
+  errors?: string[];
+  stopped?: string;
+}
+
+export interface BrushStatsPoint extends BrushStat {
+  date: string;
+}
+
+export interface BrushStatsResponse {
+  days: number;
+  from: string;
+  to: string;
+  dates: string[];
+  tasks: { task_id: number; name: string; series: BrushStatsPoint[] }[];
+  totals: BrushStatsPoint[];
+}
+
+export const brushApi = {
+  list: () => api.get<BrushTask[]>("/api/brush/tasks"),
+  get: (id: number) => api.get<BrushTask>(`/api/brush/tasks/${id}`),
+  create: (data: BrushTaskConfig) => api.post<BrushTask>("/api/brush/tasks", data),
+  update: (id: number, data: BrushTaskConfig) => api.put<BrushTask>(`/api/brush/tasks/${id}`, data),
+  remove: (id: number) => api.delete<{ success: boolean }>(`/api/brush/tasks/${id}`),
+  run: (id: number) =>
+    api.post<{ result: BrushRunResult; error?: string }>(`/api/brush/tasks/${id}/run`),
+  torrents: (id: number, state: BrushTorrentState | "" = "", page = 1, pageSize = 50) =>
+    api.get<{ items: BrushTorrent[]; total: number; page: number; page_size: number }>(
+      `/api/brush/tasks/${id}/torrents?state=${state}&page=${page}&page_size=${pageSize}`,
+    ),
+  stats: (days = 30) => api.get<BrushStatsResponse>(`/api/brush/stats?days=${days}`),
+};
