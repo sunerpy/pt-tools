@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -39,7 +40,8 @@ type Server struct {
 	store       *core.ConfigStore
 	mgr         *scheduler.Manager
 	tpl         *template.Template
-	sessions    map[string]string // sessionID -> username
+	sessions    *sessionStore // sessionID -> username，并发安全
+	logins      *loginLimiter // 登录失败计数与口令校验并发上限
 	chatopsDeps *ChatOpsDeps
 	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
 	httpServer  *http.Server         // active server, set in Serve, used by Shutdown
@@ -65,7 +67,8 @@ func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 		store:          store,
 		mgr:            mgr,
 		tpl:            t,
-		sessions:       map[string]string{},
+		sessions:       newSessionStore(),
+		logins:         newLoginLimiter(),
 		clientVersions: map[string]string{},
 	}
 }
@@ -212,7 +215,7 @@ func (s *Server) Serve(addr string) error {
 	// SPA fallback - serve index.html for all routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
-		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+		if err != nil || !s.sessions.valid(sid.Value) {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
@@ -220,7 +223,15 @@ func (s *Server) Serve(addr string) error {
 		http.ServeFileFS(w, r, distFS, "index.html")
 	})
 	handler := logMiddleware(mux)
-	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	// ReadTimeout 限制读完整个请求（含请求体）的时间，避免慢速发送长期占住连接；
+	// 不设 WriteTimeout：批量下载等响应可能较久。
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
 	s.httpServer = srv
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
@@ -273,7 +284,7 @@ func logMiddleware(next http.Handler) http.Handler {
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
-		if err != nil || sid.Value == "" || s.sessions[sid.Value] == "" {
+		if err != nil || !s.sessions.valid(sid.Value) {
 			// 对 API 请求返回 401 + JSON，避免浏览器扩展/CLI 客户端
 			// 因 fetch 默认 follow 302 跳转到 /login → GET /login → 405
 			// 而看不到真正的 "未登录" 提示。
@@ -318,6 +329,12 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			Year:    time.Now().Year(),
 		})
 	case http.MethodPost:
+		ip := clientIP(r)
+		if wait, blocked := s.logins.blocked(ip); blocked {
+			http.Error(w, fmt.Sprintf("登录失败次数过多，请 %d 分钟后再试", int(math.Ceil(wait.Minutes()))), http.StatusTooManyRequests)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, loginMaxBodyBytes)
 		user, pass, err := readLogin(r)
 		if err != nil {
 			http.Error(w, "请求体错误", http.StatusBadRequest)
@@ -337,6 +354,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		global.GetSlogger().Infof("login_admin_lookup username=%s found=%t err=%v", user, u != nil, err)
 		if err != nil {
 			if strings.Contains(err.Error(), "record not found") {
+				s.logins.fail(ip)
 				http.Error(w, "用户不存在", http.StatusUnauthorized)
 				return
 			}
@@ -344,20 +362,29 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if u == nil {
+			s.logins.fail(ip)
 			http.Error(w, "用户不存在", http.StatusUnauthorized)
 			return
 		}
-		if !verifyPassword(u.PasswordHash, pass) {
-			if verifyLegacyPassword(u.PasswordHash, pass) {
-				u.PasswordHash = hashPassword(pass)
-				_ = s.store.UpdateAdmin(u)
-			} else {
-				http.Error(w, "密码错误", http.StatusUnauthorized)
-				return
-			}
+		release, err := s.logins.acquireVerify(r.Context())
+		if err != nil {
+			http.Error(w, "请求已取消", http.StatusServiceUnavailable)
+			return
 		}
-		sid := randomID()
-		s.sessions[sid] = u.Username
+		passOK := verifyPassword(u.PasswordHash, pass)
+		if !passOK && verifyLegacyPassword(u.PasswordHash, pass) {
+			u.PasswordHash = hashPassword(pass)
+			_ = s.store.UpdateAdmin(u)
+			passOK = true
+		}
+		release()
+		if !passOK {
+			s.logins.fail(ip)
+			http.Error(w, "密码错误", http.StatusUnauthorized)
+			return
+		}
+		s.logins.succeed(ip)
+		sid := s.sessions.create(u.Username)
 		cookie := &http.Cookie{Name: "session", Value: sid, HttpOnly: true, SameSite: http.SameSiteLaxMode, Path: "/"}
 		http.SetCookie(w, cookie)
 
@@ -415,7 +442,7 @@ func isJSONRequest(r *http.Request) bool {
 
 func (s *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("session"); err == nil {
-		delete(s.sessions, c.Value)
+		s.sessions.remove(c.Value)
 		c.MaxAge = -1
 		http.SetCookie(w, c)
 	}
@@ -820,6 +847,18 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// qbitSettingsResponse 是 /api/qbit 的 GET 响应：字段与 models.QbitSettings 相同，密码留空，用 has_password 表示是否已设置。
+type qbitSettingsResponse struct {
+	ID          uint      `json:"id"`
+	Enabled     bool      `json:"enabled"`
+	URL         string    `json:"url"`
+	User        string    `json:"user"`
+	Password    string    `json:"password"`
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -829,12 +868,28 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, qb)
+		// 不回传下载器密码，只告诉调用方是否已经设置过。
+		writeJSON(w, qbitSettingsResponse{
+			ID:          qb.ID,
+			Enabled:     qb.Enabled,
+			URL:         qb.URL,
+			User:        qb.User,
+			Password:    "",
+			HasPassword: qb.Password != "",
+			CreatedAt:   qb.CreatedAt,
+			UpdatedAt:   qb.UpdatedAt,
+		})
 	case http.MethodPost:
 		var qb models.QbitSettings
 		if err := json.NewDecoder(r.Body).Decode(&qb); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		// GET 不再返回密码，提交空密码表示沿用已保存的密码。
+		if qb.Password == "" {
+			if cur, err := s.store.GetQbitSettings(); err == nil {
+				qb.Password = cur.Password
+			}
 		}
 		if err := s.store.SaveQbitSettings(qb); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1119,22 +1174,51 @@ func (s *Server) apiPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct{ Username, Old, New string }
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, loginMaxBodyBytes)).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// 登录时会去掉口令首尾空白，这里同样处理，否则带空格的新口令永远对不上。
+	// 空口令会让账号再也登录不了（登录页拒绝空口令），直接拒绝。
+	newPassword := strings.TrimSpace(body.New)
+	if newPassword == "" {
+		http.Error(w, "新密码不能为空", http.StatusBadRequest)
+		return
+	}
+	if len(newPassword) > maxPasswordBytes {
+		http.Error(w, "新密码过长", http.StatusBadRequest)
+		return
+	}
+	release, err := s.logins.acquireVerify(r.Context())
+	if err != nil {
+		http.Error(w, "请求已取消", http.StatusServiceUnavailable)
+		return
+	}
 	u, err := s.store.GetAdmin(body.Username)
-	if err != nil || u == nil || !verifyPassword(u.PasswordHash, body.Old) {
+	oldOK := err == nil && u != nil && verifyPassword(u.PasswordHash, body.Old)
+	if oldOK {
+		u.PasswordHash = hashPassword(newPassword)
+	}
+	release()
+	if !oldOK {
 		http.Error(w, "原密码错误", http.StatusUnauthorized)
 		return
 	}
-	u.PasswordHash = hashPassword(body.New)
 	if err := s.store.UpdateAdmin(u); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// 改密码后其他浏览器、设备上的旧会话立即失效，只保留发起修改的这个会话。
+	keep := ""
+	if c, err := r.Cookie("session"); err == nil {
+		keep = c.Value
+	}
+	s.sessions.removeAllExcept(keep)
 	writeJSON(w, map[string]string{"status": "ok"})
 }
+
+// maxPasswordBytes 是管理员口令的长度上限。
+const maxPasswordBytes = 256
 
 // 控制接口：一键停止/启动任务
 func (s *Server) apiStopAll(w http.ResponseWriter, r *http.Request) {

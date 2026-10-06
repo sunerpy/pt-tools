@@ -182,7 +182,7 @@ func newCloakTestServer(t *testing.T) (*Server, *core.ConfigStore, func()) {
 	store := core.NewConfigStore(tdb)
 	srv := &Server{
 		store:    store,
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 	cleanup := func() { global.GlobalDB = prevDB }
 	return srv, store, cleanup

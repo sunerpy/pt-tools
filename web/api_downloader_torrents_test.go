@@ -437,7 +437,7 @@ func TestDownloaderTorrentDetail_PathFormThroughMux(t *testing.T) {
 
 	// 会话 cookie：这些接口都在 s.auth 后面，直接往会话表里塞一条
 	const sid = "test-session"
-	server.sessions[sid] = "admin"
+	server.sessions.put(sid, "admin")
 	get := func(path string) *http.Response {
 		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 		require.NoError(t, err)

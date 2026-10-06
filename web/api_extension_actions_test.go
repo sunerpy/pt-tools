@@ -100,7 +100,7 @@ func newExtensionActionTestServer(t *testing.T) (*Server, func()) {
 	prevDB := global.GlobalDB
 	global.GlobalDB = &models.TorrentDB{DB: db}
 
-	srv := &Server{sessions: map[string]string{"sess-test": "admin"}}
+	srv := &Server{sessions: sessionsWith("sess-test", "admin")}
 	cleanup := func() { global.GlobalDB = prevDB }
 	return srv, cleanup
 }

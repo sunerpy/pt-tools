@@ -662,7 +662,7 @@ func setupFilterRuleTestServer(t *testing.T) (*Server, func()) {
 	global.GlobalLogger = zapLogger
 
 	server := &Server{
-		sessions: map[string]string{"test-session": "admin"},
+		sessions: sessionsWith("test-session", "admin"),
 	}
 
 	cleanup := func() {

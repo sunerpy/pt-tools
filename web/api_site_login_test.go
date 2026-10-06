@@ -52,7 +52,7 @@ func newRouteTestServer(t *testing.T) (*http.ServeMux, func()) {
 
 	srv := &Server{
 		mgr:      mgr,
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 
 	mux := http.NewServeMux()
@@ -269,7 +269,7 @@ func newProbeSingleFlightServer(t *testing.T, resolveDelay time.Duration) (*Serv
 
 	srv := &Server{
 		mgr:      mgr,
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 	cleanup := func() {
 		mgr.SetLoginReminderMonitor(nil)
@@ -497,7 +497,7 @@ func TestApiSiteLoginStateList_NilDB(t *testing.T) {
 	global.GlobalDB = nil
 	t.Cleanup(func() { global.GlobalDB = prev })
 
-	srv := &Server{sessions: map[string]string{"sess-test": "admin"}}
+	srv := &Server{sessions: sessionsWith("sess-test", "admin")}
 	rec := httptest.NewRecorder()
 	srv.apiSiteLoginStateList(rec, authedRequest(http.MethodGet, "/api/sites/login-state", nil))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
@@ -887,7 +887,7 @@ func newSiteLoginTestServer(t *testing.T) (*Server, func()) {
 	global.GlobalDB = &models.TorrentDB{DB: db}
 
 	srv := &Server{
-		sessions: map[string]string{"sess-test": "admin"},
+		sessions: sessionsWith("sess-test", "admin"),
 	}
 	cleanup := func() { global.GlobalDB = prevDB }
 	return srv, cleanup

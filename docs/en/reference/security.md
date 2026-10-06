@@ -34,6 +34,8 @@ The notification channel list never returns credentials; they are decrypted and 
 
 - pt-tools has a single admin account. The password is stored as a salted SHA-256 digest iterated 100,000 times; there is no plain-text password in the database.
 - A signed-in session is kept in the process's memory and identified by a cookie named `session` (HttpOnly, SameSite=Lax). After pt-tools restarts you sign in again.
+- A session with no requests for 30 days expires. At most 256 sessions are kept; beyond that the one unused for longest is dropped. Changing the password ends every other session on other browsers and devices; the session that made the change stays signed in.
+- After 10 failed sign-ins from one IP within 15 minutes (unknown usernames included), that IP cannot sign in for 15 minutes. Behind a reverse proxy pt-tools sees only the proxy's address, so failures from everyone behind it are counted together.
 - Apart from the sign-in page, static files and the health check `/api/ping`, every page and API requires you to be signed in. `/api/ping` returns only the status and the version.
 - The initial account is described in [Install](../guide/install.md); change its password the first time you sign in. If you forget it, reset it with `PT_ADMIN_RESET`, as described in [Configuration](../configuration.md).
 

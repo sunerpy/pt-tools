@@ -39,7 +39,7 @@ func TestApiSiteLoginStateList_ExposesScheduleAndSource(t *testing.T) {
 	srv.registerLoginStateRoutes(mux)
 	req := httptest.NewRequest(http.MethodGet, "/api/sites/login-state", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: "sess-test"})
-	srv.sessions["sess-test"] = "admin"
+	srv.sessions.put("sess-test", "admin")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

@@ -82,5 +82,5 @@ func (s *Server) sessionChecker(_ http.ResponseWriter, r *http.Request) bool {
 	if err != nil || sid.Value == "" {
 		return false
 	}
-	return s.sessions[sid.Value] != ""
+	return s.sessions.valid(sid.Value)
 }

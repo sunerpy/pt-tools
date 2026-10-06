@@ -1271,7 +1271,7 @@ func TestServe_RootIconsAreServedOutsideAuth(t *testing.T) {
 	writeWebTestSecretKey(t)
 	srv := setupServer(t)
 	const sid = "root-icon-session"
-	srv.sessions[sid] = "admin" // 在 Serve 起 goroutine 之前写入，不与处理器并发
+	srv.sessions.put(sid, "admin") // 在 Serve 起 goroutine 之前写入，不与处理器并发
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -1527,7 +1527,7 @@ func TestServer_AuthAndLogin(t *testing.T) {
 	t.Run("logout clears session", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/logout", nil)
-		srv.sessions["sid1"] = "admin"
+		srv.sessions.put("sid1", "admin")
 		req.AddCookie(&http.Cookie{Name: "session", Value: "sid1"})
 		srv.logoutHandler(rr, req)
 		assert.True(t, rr.Code == http.StatusFound || rr.Code == 0)
@@ -1543,7 +1543,7 @@ func TestServer_AuthAndLogin(t *testing.T) {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/global", nil)
 		sid := "sid-ok"
-		srv.sessions[sid] = "admin"
+		srv.sessions.put(sid, "admin")
 		req.AddCookie(&http.Cookie{Name: "session", Value: sid})
 		h := srv.auth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 		h(rr, req)
@@ -1910,7 +1910,7 @@ func TestServe_RootRedirectAndStatic(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sid, err := r.Cookie("session")
-		if err != nil || sid.Value == "" || srv.sessions[sid.Value] == "" {
+		if err != nil || sid.Value == "" || !srv.sessions.valid(sid.Value) {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}

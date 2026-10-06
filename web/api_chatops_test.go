@@ -214,7 +214,7 @@ func TestRegisterChatOpsIfWired(t *testing.T) {
 	})
 
 	t.Run("with deps registers routes", func(t *testing.T) {
-		s := &Server{sessions: map[string]string{}}
+		s := &Server{sessions: newSessionStore()}
 		store := newStubBotTokenStore()
 		s.SetChatOpsDeps(&ChatOpsDeps{
 			NotificationSvc: &stubNotificationSvc{},
