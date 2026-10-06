@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.2](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.1...v1.0.0-rc.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **cmd:** 关闭流程按顺序停后台任务、调度器与下载器，Telegram 健康跟随长轮询 ([#599](https://github.com/sunerpy/pt-tools/issues/599)) ([da78bac](https://github.com/sunerpy/pt-tools/commit/da78bacf70d7329b78901105f6d91b28692a57f3))
+* **extension:** 采集脱敏、多域 Cookie、Pending Action 与存储并发的问题 ([#601](https://github.com/sunerpy/pt-tools/issues/601)) ([00646b6](https://github.com/sunerpy/pt-tools/commit/00646b6d3bccbb53d696290658b5afefef44a696))
+* **frontend:** 详情页切换参数时重新加载，RSS 链接不进控制台，保存与轮询的错误处理 ([#598](https://github.com/sunerpy/pt-tools/issues/598)) ([415cad4](https://github.com/sunerpy/pt-tools/commit/415cad477ae486aba98439bb55e64b8177b81074))
+* **internal:** 推送闸门补齐 RSS 站点容量与待占用空间 fail-closed ([#594](https://github.com/sunerpy/pt-tools/issues/594)) ([06b00ff](https://github.com/sunerpy/pt-tools/commit/06b00ff0c8fdef3b6856f2eb69e36baea475cf3f))
+* **notify:** 通知投递去重、outbox 经运行中通道重试、企业微信识别业务错误 ([#596](https://github.com/sunerpy/pt-tools/issues/596)) ([e41bd35](https://github.com/sunerpy/pt-tools/commit/e41bd35611fb4ef508578ebd92f0be6618daaa99))
+* **scheduler:** 停止任务只停 RSS，修复重载、任务计数与监控停止的竞态 ([#591](https://github.com/sunerpy/pt-tools/issues/591)) ([5d005f8](https://github.com/sunerpy/pt-tools/commit/5d005f8f9ab8ce5dc9d4616f6555e2316a92a68e))
+* **scheduler:** 免费到期监控不关共享下载器、防重复处理、批次轮转 ([#592](https://github.com/sunerpy/pt-tools/issues/592)) ([4f59eb8](https://github.com/sunerpy/pt-tools/commit/4f59eb895568ab236ad808389fdd2ee9ca824184))
+* **scheduler:** 紧急清理计入已选中种子，保留数据时不再额外删种 ([#595](https://github.com/sunerpy/pt-tools/issues/595)) ([03c4181](https://github.com/sunerpy/pt-tools/commit/03c41814594a1d821c842a2b6f379ef26cdb682a))
+* **sitelogin:** 登录探测按哨兵错误归类失败原因，出错的搜索结果不进缓存 ([#597](https://github.com/sunerpy/pt-tools/issues/597)) ([6233a03](https://github.com/sunerpy/pt-tools/commit/6233a03c9f0d92241512a85a0376b57a72010f3d))
+* 迁移原子化、批量下载限额、验证接口与审计如实报告结果 ([#600](https://github.com/sunerpy/pt-tools/issues/600)) ([aad1a6e](https://github.com/sunerpy/pt-tools/commit/aad1a6e950b080fa9d3aa337c057e756af20f86d))
+
 ## [1.0.0-rc.1](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.6...v1.0.0-rc.1) (2026-10-06)
 
 
