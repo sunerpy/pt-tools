@@ -132,3 +132,29 @@ func TestDailyReportSettingsAPI(t *testing.T) {
 	srv.apiDailyReportSettings(w, httptest.NewRequest(http.MethodDelete, "/api/v2/userinfo/daily-report", nil))
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
+
+func TestUserInfoTrendsAPI(t *testing.T) {
+	srv, repo := historyFixture(t)
+	saveOn(t, repo, "2026-10-04", "hdsky", 100, 10, 1)
+	saveOn(t, repo, "2026-10-05", "hdsky", 150, 10, 1)
+	saveOn(t, repo, "2026-10-06", "hdsky", 400, 20, 2)
+	saveOn(t, repo, "2026-10-05", "disabledsite", 1, 1, 1)
+	saveOn(t, repo, "2026-10-06", "disabledsite", 999, 999, 999)
+	repo.SetClock(func() time.Time { return time.Date(2026, 10, 6, 20, 0, 0, 0, time.UTC) }, time.UTC)
+
+	w := httptest.NewRecorder()
+	srv.apiUserInfoTrends(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/trends?days=3", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp UserInfoTrendsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, []string{"2026-10-04", "2026-10-05", "2026-10-06"}, resp.Dates)
+	require.Contains(t, resp.Sites, "hdsky")
+	assert.NotContains(t, resp.Sites, "disabledsite", "未启用的站点不计入")
+	assert.EqualValues(t, 0, resp.Sites["hdsky"][0].Uploaded, "区间第一天之前没有快照：第一天不算增量")
+	assert.EqualValues(t, 50, resp.Sites["hdsky"][1].Uploaded)
+	assert.EqualValues(t, 250, resp.Totals[2].Uploaded)
+
+	w = httptest.NewRecorder()
+	srv.apiUserInfoTrends(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/trends?days=61", nil))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

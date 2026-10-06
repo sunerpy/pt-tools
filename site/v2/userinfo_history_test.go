@@ -193,3 +193,26 @@ func TestRangeBounds(t *testing.T) {
 	_, _, err = RangeBounds("1y", "2026-10-06")
 	require.Error(t, err)
 }
+
+// 走势：每天一格，没有快照的那天记 0；合计只加非负增量。
+func TestBuildTrends(t *testing.T) {
+	dates := []string{"2026-10-04", "2026-10-05", "2026-10-06"}
+	baselines := map[string]UserInfoDailySnapshot{"hdsky": snap("hdsky", "2026-10-03", 100, 10, 1)}
+	snaps := []UserInfoDailySnapshot{
+		snap("hdsky", "2026-10-04", 150, 10, 2),
+		snap("hdsky", "2026-10-06", 250, 20, 1), // 05 缺一天；魔力回退
+		snap("pter", "2026-10-05", 50, 5, 5),    // 没有基线：第一天不算增量
+		snap("pter", "2026-10-06", 80, 5, 6),
+	}
+
+	totals, sites := BuildTrends(dates, baselines, snaps)
+
+	require.Len(t, totals, 3)
+	assert.Equal(t, []int64{50, 0, 100}, []int64{sites["hdsky"][0].Uploaded, sites["hdsky"][1].Uploaded, sites["hdsky"][2].Uploaded})
+	assert.Equal(t, []int64{0, 0, 30}, []int64{sites["pter"][0].Uploaded, sites["pter"][1].Uploaded, sites["pter"][2].Uploaded})
+	assert.EqualValues(t, 50, totals[0].Uploaded)
+	assert.EqualValues(t, 0, totals[1].Uploaded)
+	assert.EqualValues(t, 130, totals[2].Uploaded)
+	assert.InDelta(t, 0+1, totals[2].Bonus, 1e-9, "回退的魔力按 0 计")
+	assert.Equal(t, "2026-10-06", totals[2].Date)
+}

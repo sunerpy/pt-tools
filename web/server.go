@@ -156,6 +156,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/userinfo/cache/clear", s.auth(s.apiUserInfoClearCache))
 	mux.HandleFunc("/api/v2/userinfo/history", s.auth(s.apiUserInfoHistory))
 	mux.HandleFunc("/api/v2/userinfo/summary", s.auth(s.apiUserInfoSummary))
+	mux.HandleFunc("/api/v2/userinfo/trends", s.auth(s.apiUserInfoTrends))
 	mux.HandleFunc("/api/v2/userinfo/daily-report", s.auth(s.apiDailyReportSettings))
 	s.registerLoginStateRoutes(mux)
 	s.registerAttendanceRoutes(mux)

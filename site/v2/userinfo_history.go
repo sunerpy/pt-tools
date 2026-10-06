@@ -221,3 +221,76 @@ func LoadDeltaSummary(ctx context.Context, repo UserInfoHistoryRepo, rangeName s
 	}
 	return SummarizeDeltas(rangeName, from, to, baselines, inRange), nil
 }
+
+// TrendPoint 是某天的增量。
+type TrendPoint struct {
+	Date       string  `json:"date"`
+	Uploaded   int64   `json:"uploaded"`
+	Downloaded int64   `json:"downloaded"`
+	Bonus      float64 `json:"bonus"`
+}
+
+// BuildTrends 按 dates（升序、连续的日期）给出每站每天的增量与各站合计。没有快照的那天记 0；
+// 一份快照跨了好几天时，增量记在快照所在的那天。数值回退的项按 0 计。
+func BuildTrends(dates []string, baselines map[string]UserInfoDailySnapshot, snaps []UserInfoDailySnapshot) ([]TrendPoint, map[string][]TrendPoint) {
+	index := make(map[string]int, len(dates))
+	totals := make([]TrendPoint, len(dates))
+	for i, d := range dates {
+		index[d] = i
+		totals[i].Date = d
+	}
+	bySite := map[string][]UserInfoDailySnapshot{}
+	for _, s := range snaps {
+		bySite[s.Site] = append(bySite[s.Site], s)
+	}
+	sites := make(map[string][]TrendPoint, len(bySite))
+	for site, list := range bySite {
+		series := make([]TrendPoint, len(dates))
+		for i, d := range dates {
+			series[i].Date = d
+		}
+		var baseline *UserInfoDailySnapshot
+		if b, ok := baselines[site]; ok {
+			baseline = &b
+		}
+		for _, p := range BuildDailyPoints(list, baseline) {
+			i, ok := index[p.Date]
+			if !ok || p.SpanDays == 0 {
+				continue
+			}
+			series[i] = TrendPoint{Date: p.Date, Uploaded: p.DeltaUploaded, Downloaded: p.DeltaDownloaded, Bonus: p.DeltaBonus}
+			totals[i].Uploaded += p.DeltaUploaded
+			totals[i].Downloaded += p.DeltaDownloaded
+			totals[i].Bonus += p.DeltaBonus
+		}
+		sites[site] = series
+	}
+	return totals, sites
+}
+
+// LoadTrends 从仓库读出最近 days 天（含今天）的走势。
+func LoadTrends(ctx context.Context, repo UserInfoHistoryRepo, days int) ([]string, []TrendPoint, map[string][]TrendPoint, error) {
+	to := repo.Today()
+	from, err := AddDays(to, -(days - 1))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dates := make([]string, 0, days)
+	for i := 0; i < days; i++ {
+		d, derr := AddDays(from, i)
+		if derr != nil {
+			return nil, nil, nil, derr
+		}
+		dates = append(dates, d)
+	}
+	baselines, err := repo.SnapshotBaselines(ctx, from)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	snaps, err := repo.ListSnapshots(ctx, "", from, to)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	totals, sites := BuildTrends(dates, baselines, snaps)
+	return dates, totals, sites, nil
+}

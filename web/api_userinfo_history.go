@@ -211,3 +211,68 @@ func isDailyReportValidationError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "HH:MM") || strings.Contains(msg, "已经不存在") || strings.Contains(msg, "尚未初始化")
 }
+
+// maxTrendDays 是 /api/v2/userinfo/trends 一次最多取的天数（走势柱图用不了更多）。
+const maxTrendDays = 60
+
+// UserInfoTrendsResponse 是最近若干天每天的增量：各站一条序列，加上各站合计。
+type UserInfoTrendsResponse struct {
+	Days   int                        `json:"days"`
+	From   string                     `json:"from"`
+	To     string                     `json:"to"`
+	Dates  []string                   `json:"dates"`
+	Totals []v2.TrendPoint            `json:"totals"`
+	Sites  map[string][]v2.TrendPoint `json:"sites"`
+}
+
+// apiUserInfoTrends handles GET /api/v2/userinfo/trends?days=
+//
+// 站点列表行卡与 KPI 带的柱图用：每站最近 days 天每天的增量，只算已启用的站点。
+func (s *Server) apiUserInfoTrends(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	days := 8
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > maxTrendDays {
+			http.Error(w, "days 应为 1–60 的整数", http.StatusBadRequest)
+			return
+		}
+		days = v
+	}
+	repo, ok := userInfoHistoryRepo(w)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	dates, _, sites, err := v2.LoadTrends(ctx, repo, days)
+	if err != nil {
+		global.GetSlogger().Errorf("[UserInfo] 计算走势失败: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	enabled := s.enabledSiteSet()
+	resp := UserInfoTrendsResponse{Days: days, Dates: dates, Sites: map[string][]v2.TrendPoint{}}
+	if len(dates) > 0 {
+		resp.From, resp.To = dates[0], dates[len(dates)-1]
+	}
+	resp.Totals = make([]v2.TrendPoint, len(dates))
+	for i, d := range dates {
+		resp.Totals[i].Date = d
+	}
+	for site, series := range sites {
+		if enabled != nil && !enabled[strings.ToLower(site)] {
+			continue
+		}
+		resp.Sites[site] = series
+		for i, p := range series {
+			resp.Totals[i].Uploaded += p.Uploaded
+			resp.Totals[i].Downloaded += p.Downloaded
+			resp.Totals[i].Bonus += p.Bonus
+		}
+	}
+	writeJSON(w, resp)
+}
