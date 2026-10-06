@@ -96,6 +96,7 @@ func TestPushTorrent_AddResultNotSuccessBranch(t *testing.T) {
 	assert.False(t, res.Success)
 }
 
+// 读不到下载中任务的待占用空间时 fail-closed（此前当作 0 继续推送）。
 func TestPushTorrent_DiskProtectPendingBytesError(t *testing.T) {
 	db := setupDB(t)
 	t.Cleanup(func() { global.GlobalDB = nil })
@@ -131,7 +132,8 @@ func TestPushTorrent_DiskProtectPendingBytesError(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.True(t, res.Success, "pending-bytes read failure is non-fatal (treated as 0)")
+	assert.False(t, res.Success, "读不到待占用空间时拒绝推送")
+	assert.Contains(t, res.Message, "待占用空间")
 }
 
 func TestPushTorrent_DiskProtectReservedMakesNegativeClamped(t *testing.T) {

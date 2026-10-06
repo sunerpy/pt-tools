@@ -219,6 +219,7 @@ type pushLoopResult struct {
 	failed          int
 	skippedTooLarge int
 	diskFull        bool
+	capacityFull    bool
 }
 
 // runPushLoop 遍历暂存目录中的 .torrent 逐个推送，并按磁盘保护语义分类处理：
@@ -253,6 +254,11 @@ LOOP:
 			sLogger().Warnf("[磁盘保护] 种子过大跳过，继续处理后续: %s", file)
 			result.skippedTooLarge++
 			continue
+		case errors.Is(err, ErrSiteCapacityExceeded):
+			// 站点容量满了，同一站点后面的种子也推不进去；文件留在暂存目录，下一轮再试
+			sLogger().Warnf("[站点容量] %s: 已达容量上限，停止本轮推送剩余 %d 个种子", siteName, len(filePaths)-i-1)
+			result.capacityFull = true
+			break LOOP
 		default:
 			sLogger().Errorf("处理种子失败: %s, %v", file, err)
 			result.failed++
@@ -465,7 +471,12 @@ func processSingleTorrentWithDownloader(
 	//   effective_free = client_free - in_flight_pending - pre_reserved
 	//   gate           = effective_free - thisTorrentSize >= threshold
 	var reservedTorrentSize int64
-	if glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0 {
+	var torrentSize int64
+	if torrent != nil {
+		torrentSize = torrent.TorrentSize
+	}
+	diskProtectOn := glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0
+	if diskProtectOn {
 		mu := PushMutex()
 		mu.Lock()
 		defer mu.Unlock()
@@ -480,17 +491,15 @@ func processSingleTorrentWithDownloader(
 
 		pendingBytes, pendingErr := dl.GetIncompletePendingBytes(ctx)
 		if pendingErr != nil {
-			sLogger().Warnf("[磁盘保护] %s: 查询 in-flight pending 失败，仅以 reserved 推算: %v", dl.GetName(), pendingErr)
-			pendingBytes = 0
+			// 同样 fail-closed：下载中任务的待占用量读不到时，可用空间会被高估这部分体积，
+			// 一批推送就可能越过保底线。拒绝本轮，种子文件留到下一轮再试。
+			sLogger().Warnf("[磁盘保护] %s: 查询下载中任务的待占用空间失败，磁盘保护启用故拒绝推送: %v", dl.GetName(), pendingErr)
+			return downloader.ErrInsufficientSpace
 		}
 		budget := GetDiskBudget()
 		effectiveFreeBytes := freeSpace - pendingBytes - budget.Reserved()
 		if effectiveFreeBytes < 0 {
 			effectiveFreeBytes = 0
-		}
-		var torrentSize int64
-		if torrent != nil {
-			torrentSize = torrent.TorrentSize
 		}
 		if torrentSize <= 0 {
 			if torrentData, readErr := os.ReadFile(filePath); readErr == nil {
@@ -525,6 +534,24 @@ func processSingleTorrentWithDownloader(
 		default:
 			budget.Reserve(torrentSize)
 			reservedTorrentSize = torrentSize
+		}
+	}
+
+	// 站点容量闸门（与手动推送同一规则）：推送后该站点做种总量会超过 SeedingCapacityGB 时跳过，
+	// 读不到做种总量时 fail-closed。接在磁盘保护之后、推送之前，磁盘保护关闭时自行加锁。
+	if capGB := siteSeedingCapacityGB(string(siteName)); capGB > 0 {
+		if !diskProtectOn {
+			mu := PushMutex()
+			mu.Lock()
+			defer mu.Unlock()
+		}
+		if capErr := checkSiteCapacity(ctx, string(siteName), dl, capGB, torrentSize, filePath); capErr != nil {
+			if reservedTorrentSize > 0 {
+				GetDiskBudget().Release(reservedTorrentSize)
+			}
+			recordDiskProtectError(siteName, torrentHash, capErr.Error())
+			sLogger().Warnf("[站点容量] %s: %v，跳过推送: %s", siteName, capErr, filePath)
+			return capErr
 		}
 	}
 
