@@ -160,6 +160,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/userinfo/daily-report", s.auth(s.apiDailyReportSettings))
 	s.registerLoginStateRoutes(mux)
 	s.registerAttendanceRoutes(mux)
+	s.registerBrushRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
