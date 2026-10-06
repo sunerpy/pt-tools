@@ -143,18 +143,32 @@ async function save() {
 
   saving.value = true;
   try {
-    await globalApi.save({
-      ...form.value,
-      default_interval_minutes: Math.max(5, form.value.default_interval_minutes),
-    });
+    try {
+      await globalApi.save({
+        ...form.value,
+        default_interval_minutes: Math.max(5, form.value.default_interval_minutes),
+      });
+    } catch (e: unknown) {
+      ElMessage.error((e as Error).message || "保存失败");
+      return;
+    }
+    showWarning.value = false;
+    /*
+     * 签到时间窗走自己的接口，是第二步。它失败时全局配置已经落库了：
+     * 不能再报一句笼统的「保存失败」，让人以为什么都没改。
+     */
     const saved = attendanceSaved.value;
     if (saved && (saved.window_start !== att.window_start || saved.window_end !== att.window_end)) {
-      attendanceSaved.value = await attendanceApi.saveSettings({ ...att });
+      try {
+        attendanceSaved.value = await attendanceApi.saveSettings({ ...att });
+      } catch (e: unknown) {
+        ElMessage.warning(
+          `全局配置已保存，签到时间窗没有保存：${(e as Error).message || "请求失败"}`,
+        );
+        return;
+      }
     }
     ElMessage.success("保存成功");
-    showWarning.value = false;
-  } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败");
   } finally {
     saving.value = false;
   }
