@@ -210,8 +210,15 @@ func (m *BrushMonitor) RunOnce(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if !task.Enabled || !brushDue(task, now) {
+		if !brushDue(task, now) {
 			continue
+		}
+		if !task.Enabled {
+			// 关闭的任务不再加种，但已经加入的种子仍按删种规则处理，直到删完
+			n, err := m.repo.CountActive(task.ID)
+			if err != nil || n == 0 {
+				continue
+			}
 		}
 		if _, err := m.RunTask(ctx, task.ID); err != nil && !errors.Is(err, ErrBrushBusy) {
 			m.cfg.Logger.Warnf("[刷流] 任务 %s 运行失败: %v", task.Name, err)
@@ -241,6 +248,27 @@ func (m *BrushMonitor) maybePrune(now time.Time) {
 	} else if n > 0 {
 		m.cfg.Logger.Debugf("[刷流] 清理了 %d 条过期采样", n)
 	}
+}
+
+// WithTaskLock 在任务没有运行时执行 fn（期间定时与手动运行都会拿到 ErrBrushBusy）；任务正在运行时返回 ErrBrushBusy。
+// 删除任务走这里，免得一轮运行在删除之后还往已删的任务名下记种子。
+func (m *BrushMonitor) WithTaskLock(taskID uint, fn func() error) error {
+	if m == nil {
+		return fn()
+	}
+	m.mu.Lock()
+	if m.busy[taskID] {
+		m.mu.Unlock()
+		return ErrBrushBusy
+	}
+	m.busy[taskID] = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.busy, taskID)
+		m.mu.Unlock()
+	}()
+	return fn()
 }
 
 // RunTask 立即运行一轮（定时调度与「立即运行」接口共用）；同一任务正在运行时返回 ErrBrushBusy。

@@ -246,6 +246,13 @@ func (r *BrushRepository) ActiveTorrents(taskID uint) ([]BrushTorrent, error) {
 	return rows, nil
 }
 
+// CountActive 返回任务名下仍在做的种子数。
+func (r *BrushRepository) CountActive(taskID uint) (int64, error) {
+	var n int64
+	err := r.db.Model(&BrushTorrent{}).Where("task_id = ? AND state = ?", taskID, BrushTorrentActive).Count(&n).Error
+	return n, err
+}
+
 // ListTorrents 分页列出任务的种子；state 为空时列全部，新的在前。
 func (r *BrushRepository) ListTorrents(taskID uint, state string, page, pageSize int) ([]BrushTorrent, int64, error) {
 	q := r.db.Model(&BrushTorrent{}).Where("task_id = ?", taskID)

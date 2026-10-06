@@ -463,3 +463,47 @@ func TestBrushMonitor_RealPushGates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, active, 1)
 }
+
+// 关闭的任务还有在做的种子时照样定时运行（只删不加），删完就不再运行。
+func TestBrushMonitor_DisabledTaskKeepsRemoving(t *testing.T) {
+	r := newBrushRig(t)
+	task := r.task(t, func(bt *models.BrushTask) { bt.Enabled = false; bt.RemoveRatio = 1 })
+	repo := models.NewBrushRepository(r.db.DB)
+	require.NoError(t, repo.RecordAdded(&models.BrushTorrent{
+		TaskID: task.ID, InfoHash: "h1", SiteName: "hdsky", TorrentID: "1",
+		AddedAt: r.clock.Now(), State: models.BrushTorrentActive,
+	}, "2026-10-06"))
+	r.dl.torrents = []downloader.Torrent{{ID: "id1", InfoHash: "h1", Tags: models.BrushTaskTag(task.ID), Progress: 1, Ratio: 1.5}}
+
+	r.mon.RunOnce(context.Background())
+	assert.Equal(t, []string{"id1"}, r.dl.removedSingle)
+	assert.Empty(t, r.site.searches, "关闭的任务不加种")
+	n, err := repo.CountActive(task.ID)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+
+	r.clock.Advance(time.Hour)
+	before, _ := repo.GetTask(task.ID)
+	r.mon.RunOnce(context.Background())
+	after, _ := repo.GetTask(task.ID)
+	assert.True(t, before.LastRunAt.Equal(*after.LastRunAt), "删完之后不再运行")
+}
+
+func TestBrushMonitor_WithTaskLock(t *testing.T) {
+	r := newBrushRig(t)
+	task := r.task(t, nil)
+	ran := false
+	require.NoError(t, r.mon.WithTaskLock(task.ID, func() error {
+		_, err := r.mon.RunTask(context.Background(), task.ID)
+		assert.ErrorIs(t, err, ErrBrushBusy, "持锁期间运行拿到 busy")
+		ran = true
+		return nil
+	}))
+	assert.True(t, ran)
+	r.mon.mu.Lock()
+	r.mon.busy[task.ID] = true
+	r.mon.mu.Unlock()
+	assert.ErrorIs(t, r.mon.WithTaskLock(task.ID, func() error { return nil }), ErrBrushBusy)
+	var nilMon *BrushMonitor
+	assert.NoError(t, nilMon.WithTaskLock(1, func() error { return nil }))
+}
