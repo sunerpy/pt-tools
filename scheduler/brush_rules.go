@@ -144,7 +144,7 @@ func brushRemoval(task models.BrushTask, bt models.BrushTorrent, t downloader.To
 		// 下一轮检查之前就会到期的，这一轮就删：等到下一轮，到期之后那段已经按非免费计了下载
 		interval := time.Duration(max(task.IntervalMin, 1)) * time.Minute
 		if !now.Before(bt.FreeEndAt.Add(-interval)) {
-			return true, "免费即将到期，还没下完"
+			return true, "免费即将到期，尚未下完"
 		}
 	}
 	if task.RemoveSeedTimeH > 0 && completed && float64(t.SeedingTime) >= task.RemoveSeedTimeH*3600 {
