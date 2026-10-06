@@ -59,7 +59,7 @@ var errShutdown = errors.New("shutdown boom")
 func TestInstallShutdownHandler_ShutdownErrorsLogged(t *testing.T) {
 	global.InitLogger(zap.NewNop())
 	bs := &chatopsBootstrap{channels: map[uint]notify.Channel{1: &closeRecordingChannel{closeErr: errShutdown}}}
-	done := installShutdownHandler(nil, bs)
+	done := installShutdownHandler(shutdownPlan{bs: bs})
 
 	proc, err := os.FindProcess(os.Getpid())
 	if err != nil {
@@ -69,11 +69,11 @@ func TestInstallShutdownHandler_ShutdownErrorsLogged(t *testing.T) {
 }
 
 // TestInstallShutdownHandler_NilServerAndBootstrap verifies the handler installs
-// its signal trap, then unwinds cleanly when both srv and bs are nil after a
-// SIGTERM is delivered (both nil-guard branches taken).
+// its signal trap, then unwinds cleanly when every step is nil after a SIGTERM
+// is delivered (all nil-guard branches taken).
 func TestInstallShutdownHandler_NilServerAndBootstrap(t *testing.T) {
 	global.InitLogger(zap.NewNop())
-	done := installShutdownHandler(nil, nil)
+	done := installShutdownHandler(shutdownPlan{})
 
 	proc, err := os.FindProcess(os.Getpid())
 	if err != nil {
@@ -82,27 +82,17 @@ func TestInstallShutdownHandler_NilServerAndBootstrap(t *testing.T) {
 	waitShutdownAfterSIGTERM(t, proc, done)
 }
 
-// waitShutdownAfterSIGTERM 等待 installShutdownHandler 的 goroutine 先注册
-// signal.Notify，再发送 SIGTERM。注册前 SIGTERM 的默认动作会直接终止进程
-// （signal: terminated），故先给一小段时间让 Notify 生效；注册后 SIGTERM 被捕获，
-// 此时周期性重发可覆盖首个信号仍偶发早到的情况，确保被处理而非丢失或杀进程。
+// waitShutdownAfterSIGTERM 在 installShutdownHandler 返回之后立刻发一次 SIGTERM。
+// signal.Notify 在 installShutdownHandler 返回之前就已注册，所以不需要先等一会儿、
+// 也不需要重发：要是信号到达时还没注册，SIGTERM 的默认动作会直接终止测试进程。
 func waitShutdownAfterSIGTERM(t *testing.T, proc *os.Process, done <-chan struct{}) {
 	t.Helper()
-	time.Sleep(200 * time.Millisecond)
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal: %v", err)
 	}
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			_ = proc.Signal(syscall.SIGTERM)
-		case <-deadline:
-			t.Fatal("shutdown handler did not complete after SIGTERM")
-		}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown handler did not complete after SIGTERM")
 	}
 }

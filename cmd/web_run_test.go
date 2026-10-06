@@ -37,9 +37,6 @@ func freeTCPPort(t *testing.T) int {
 // tears everything down and Serve returns. Version checking is pointed at a
 // blackhole proxy so no real external network egress occurs.
 func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
-	if raceEnabled {
-		t.Skip("skips under -race: web.Server.Serve/Shutdown has a pre-existing httpServer field race owned by the web package")
-	}
 	// Blackhole any outbound version-check HTTP so the background goroutine
 	// fails fast instead of reaching GitHub.
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
