@@ -67,6 +67,8 @@ Always load the `pt-add-site` skill first. The complete change is normally more 
 
 Do not edit `registry.go` to add one site. Do not add a driver branch for a selector difference that the definition model can express.
 
+For a new site request, the matching site definition in [PT-depiler](https://github.com/pt-plugins/PT-depiler) (MIT) is a quick source for URLs, selectors, user classes and discount markers. Check every value against the requester's sanitized page capture, and keep the fixture and `make check-sites`; record PT-depiler's copyright in `NOTICE` when a definition copies a substantial part of it. Do not port code from GPL projects (MoviePilot and its plugins).
+
 ## Request and Error Rules
 
 - All tracker requests use the shared site HTTP/driver layer. It supplies retry, rate limit, failover, and circuit breaking.
