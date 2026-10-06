@@ -333,9 +333,13 @@ const kpiItems = computed<KpiRow[]>(() => {
           label: "总上传量",
           value: formatBytes(stats.totalUploaded),
           icon: "upload",
-          series: uploadTrendSeries.value,
-          seriesHint: "每根一天：最近 7 天每天全部站点的上传增量",
-          seriesBaseline: "zero" as const,
+          ...(uploadTrendSeries.value
+            ? {
+                series: uploadTrendSeries.value,
+                seriesHint: "每根一天：最近 7 天每天全部站点的上传增量",
+                seriesBaseline: "zero" as const,
+              }
+            : { series: topN((r) => r.uploaded), seriesHint: "每根一个站点：上传量构成" }),
           delta: `${periodLabel.value} +${formatBytes(summary.value.totalUploaded)}`,
           deltaTone: summary.value.totalUploaded > 0 ? ("ok" as const) : ("neutral" as const),
         }
@@ -438,10 +442,14 @@ async function loadTrends() {
 
 watch(period, () => void loadPeriod());
 
-/** KPI「总上传量」的柱：最近 7 天每天的上传增量；一天都没有增量时不画（全是 0 画出来像持平的走势） */
+/**
+ * KPI「总上传量」的柱：最近 7 天每天的上传增量，按 0 基线画（没有增量的日子只有 2px 的底）。
+ * 全是 0 也照画 —— 画板要求每格都有柱，0 基线下它读作「这几天没有增量」，不会被看成持平的走势；
+ * 只有走势接口没拿到时才是 undefined，那一格回落到按站点的上传构成。
+ */
 const uploadTrendSeries = computed(() => {
   const values = (trends.value?.totals ?? []).map((p) => p.uploaded);
-  return values.some((v) => v > 0) ? values : undefined;
+  return values.length > 0 ? values : undefined;
 });
 
 /** 周期内有可比基线的站点（只有一份快照的站点算不出增量，不进构成） */

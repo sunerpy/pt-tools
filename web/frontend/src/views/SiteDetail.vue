@@ -1426,6 +1426,7 @@ function ruleNameOf(id: number): string {
             <li v-if="hasUploadTrend" class="sd-kv__row sd-trend" data-testid="site-upload-trend">
               <span class="sd-kv__k">30 天上传 +{{ formatTB(uploadTrendTotal) }}</span>
               <PtBars
+                v-if="uploadTrend.some((v) => v > 0)"
                 :values="uploadTrend"
                 baseline="zero"
                 :count="30"

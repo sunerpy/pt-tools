@@ -44,6 +44,15 @@ describe("PtBars", () => {
     ]);
   });
 
+  it("zero：一点点增量只比底高一点（3px），不被抬成最大值的五分之一", () => {
+    expect(heights({ values: [1, 100], baseline: "zero", height: 20, count: 2 })).toEqual([3, 20]);
+  });
+
+  it("zero：负值按 0 画，单点画满高", () => {
+    expect(heights({ values: [-5, 10], baseline: "zero", height: 20, count: 2 })).toEqual([2, 20]);
+    expect(heights({ values: [5], baseline: "zero", height: 20, count: 1 })).toEqual([20]);
+  });
+
   it("range（默认）：最低点仍抬到 34%", () => {
     expect(heights({ values: [0, 10], height: 20, count: 2 })).toEqual([7, 20]);
   });

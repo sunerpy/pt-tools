@@ -59,7 +59,9 @@ const bars = computed(() => {
     const last = i === n - 1;
     const op = last || n === 1 ? 1 : props.op0 + (1 - props.op0 - 0.16) * (i / (n - 1)) ** 1.5;
     if (props.baseline === "zero") {
-      const h = v > 0 && hi > 0 ? Math.max(props.min, Math.round((v / hi) * props.height)) : 2;
+      // 0 与负值只画 2px 的底；正值按占最大值的比例，最矮 3px —— 只比底高一点，能和「没有」分开，
+      // 又不像 range 模式的 min=4 那样把一点点增量抬成最大值的五分之一
+      const h = v > 0 && hi > 0 ? Math.max(3, Math.round((v / hi) * props.height)) : 2;
       return { h, top: op, bottom: op * props.foot };
     }
     // 序列基本持平（跨度 < 0.02）时全部取 0.62，否则会被放大成一堆噪声

@@ -188,4 +188,55 @@ describe("用户统计：周期", () => {
     expect(document.body.textContent).not.toContain("+18 GB");
     expect(document.body.textContent).toContain("今日 +2 GB");
   });
+
+  /** 「总上传量」那一格的柱：每根的高度（px）与读屏说明 */
+  function uploadKpiBars() {
+    const cell = [...document.querySelectorAll<HTMLElement>(".pt-kpi__cell")].find((c) =>
+      (c.textContent ?? "").includes("总上传量"),
+    );
+    const bars = cell?.querySelector<HTMLElement>(".pt-kpi__bars");
+    return {
+      hint: bars?.getAttribute("aria-label") ?? null,
+      heights: [...(bars?.querySelectorAll<HTMLElement>("i") ?? [])].map((i) =>
+        Number.parseInt(i.style.height, 10),
+      ),
+    };
+  }
+
+  it("最近 7 天一天增量都没有：柱照画（每根 2px 的底），不丢掉画板要求的柱图", async () => {
+    api.getSummary.mockResolvedValue(summaryOf("7d", 0, 0));
+    const dates = [
+      "2026-09-30",
+      "2026-10-01",
+      "2026-10-02",
+      "2026-10-03",
+      "2026-10-04",
+      "2026-10-05",
+      "2026-10-06",
+    ];
+    api.getTrends.mockResolvedValue({
+      days: 7,
+      from: dates[0],
+      to: dates.at(-1),
+      dates,
+      totals: dates.map((date) => ({ date, uploaded: 0, downloaded: 0, bonus: 0 })),
+      sites: {},
+    });
+    await mountDashboard();
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("本周 +0 B"));
+    await vi.waitFor(() => expect(uploadKpiBars().heights.length).toBe(7));
+    expect(uploadKpiBars().heights).toEqual([2, 2, 2, 2, 2, 2, 2]);
+    expect(uploadKpiBars().hint).toContain("每天全部站点的上传增量");
+  });
+
+  it("走势接口没拿到：那一格回落到按站点的上传构成，柱图仍在", async () => {
+    api.getSummary.mockResolvedValue(summaryOf("7d", 3 * GiB, 1 * GiB));
+    api.getTrends.mockRejectedValue(new Error("boom"));
+    await mountDashboard();
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("本周 +4 GB"));
+    await vi.waitFor(() => expect(uploadKpiBars().heights.length).toBeGreaterThan(0));
+    expect(uploadKpiBars().hint).toContain("上传量构成");
+  });
 });
