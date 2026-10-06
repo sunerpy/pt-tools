@@ -51,7 +51,7 @@ func newProbeRequestServer(t *testing.T) (*Server, *http.ServeMux, *scheduler.Lo
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sites/", srv.auth(srv.apiSiteDetail))
-	srv.sessions["sess-test"] = "admin"
+	srv.sessions.put("sess-test", "admin")
 	return srv, mux, mon, fetch
 }
 

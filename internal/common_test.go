@@ -197,6 +197,38 @@ func TestAttemptDownloadWithContext_HTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 状态码错误")
 }
 
+// closingServer 接受连接后直接断开，客户端拿到的是带完整请求地址的传输层错误。
+func closingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, _, err := hj.Hijack()
+		require.NoError(t, err)
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// 种子下载地址常带 passkey，连接失败时错误文本（会写进日志）不能带出来。
+func TestAttemptDownloadWithContext_TransportErrorRedactsPasskey(t *testing.T) {
+	srv := closingServer(t)
+	_, err := attemptDownloadWithContext(context.Background(), srv.URL+"/download.php?id=1&passkey=TOPSECRET", "t", t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "下载种子失败")
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
+// RSS 地址常带 passkey，拉取失败时错误文本（会写进日志）不能带出来。
+func TestFetchRSSFeed_TransportErrorRedactsPasskey(t *testing.T) {
+	srv := closingServer(t)
+	_, err := fetchRSSFeedWithContext(context.Background(), srv.URL+"/torrentrss.php?passkey=TOPSECRET&rows=10")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "解析 RSS 失败")
+	assert.NotContains(t, err.Error(), "TOPSECRET")
+}
+
 func TestAttemptDownloadWithContext_InvalidTorrent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

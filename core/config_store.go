@@ -636,7 +636,7 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		for i, r := range sc.RSS {
 			normalizedURL := strings.TrimSpace(strings.ToLower(r.URL))
 			if urlSet[normalizedURL] {
-				return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, r.URL)
+				return fmt.Errorf("第 %d 条 RSS 的 URL 与之前的重复: %s", i+1, utils.SanitizeURL(r.URL))
 			}
 			urlSet[normalizedURL] = true
 		}

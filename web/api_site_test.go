@@ -36,7 +36,7 @@ func closedDBServer(t *testing.T) *Server {
 	prev := global.GlobalDB
 	global.GlobalDB = &models.TorrentDB{DB: db}
 	t.Cleanup(func() { global.GlobalDB = prev })
-	return &Server{sessions: map[string]string{"sess-test": "admin"}}
+	return &Server{sessions: sessionsWith("sess-test", "admin")}
 }
 
 func TestListDynamicSites_DBError(t *testing.T) {

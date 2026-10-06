@@ -1,11 +1,15 @@
 package utils
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -207,4 +211,29 @@ func TestResolveDownloadBase_ExistingAbs(t *testing.T) {
 	base, err := ResolveDownloadBase("/ignored-home", "ignored-work", dir)
 	require.NoError(t, err)
 	require.Equal(t, dir, base)
+}
+
+// 传输层错误会把完整请求地址带进错误文本，写日志前要把其中的 passkey 等参数脱敏。
+func TestRedactURLError(t *testing.T) {
+	raw := &url.Error{Op: "Get", URL: "https://pt.example/torrentrss.php?passkey=TOPSECRET&rows=10", Err: errors.New("EOF")}
+
+	got := RedactURLError(raw)
+	assert.Same(t, raw, got, "返回原错误，错误链不变")
+	assert.NotContains(t, got.Error(), "TOPSECRET")
+	assert.Contains(t, got.Error(), "rows=10")
+
+	// 先脱敏再包装：fmt.Errorf 包装时就把文本定下了
+	wrapped := fmt.Errorf("fetch rss: %w", got)
+	assert.NotContains(t, wrapped.Error(), "TOPSECRET")
+	var uerr *url.Error
+	assert.True(t, errors.As(wrapped, &uerr), "仍可按 *url.Error 判断")
+
+	// 错误链里更深处的 url.Error 也能找到并脱敏
+	inner := &url.Error{Op: "Get", URL: "https://pt.example/rss?authkey=K2", Err: errors.New("EOF")}
+	RedactURLError(fmt.Errorf("outer: %w", inner))
+	assert.NotContains(t, inner.Error(), "K2")
+
+	plain := errors.New("passkey=TOPSECRET")
+	assert.Same(t, plain, RedactURLError(plain), "不是 url.Error 时原样返回")
+	assert.NoError(t, RedactURLError(nil))
 }

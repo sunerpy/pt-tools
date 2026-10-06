@@ -178,7 +178,7 @@ async function submit() {
         <ul class="pw-list">
           <li>
             新口令至少 6 位 —— 这是<strong>本页表单</strong>的下限。
-            <code>/api/password</code> 自己不查长度也不查复杂度，只核对身份后落库。
+            <code>/api/password</code> 只拒绝空口令，不查复杂度；首尾空白会被去掉（登录时也一样）。
           </li>
           <li>新口令与确认口令必须一致，否则不提交。</li>
           <li>强度条只估「这个口令有多难猜」，不是提交条件，也不代表口令安全。</li>
@@ -192,8 +192,8 @@ async function submit() {
       <PtPanel title="改完会发生什么" icon="log-out">
         <ul class="pw-list">
           <li>
-            新口令立刻生效（接口只更新口令哈希）。<strong>当前会话不会被踢掉</strong>，
-            手上这个登录态继续有效，下次登录才用新口令。
+            新口令立刻生效。<strong>当前会话不会被踢掉</strong>，手上这个登录态继续有效；
+            其他浏览器和设备上的登录会话全部失效，需要用新口令重新登录。
           </li>
           <li>站点 Cookie、下载器口令、CloakBrowser token 都不受影响，它们是另一套凭据。</li>
           <li>

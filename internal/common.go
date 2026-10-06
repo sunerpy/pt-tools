@@ -625,7 +625,7 @@ func attemptDownloadWithContext(ctx context.Context, url, title, downloadDir str
 	// 使用 requests 库下载，支持 context
 	resp, err := requests.Get(url, requests.WithContext(ctx), requests.WithTimeout(30*time.Second))
 	if err != nil {
-		return "", fmt.Errorf("下载种子失败: %v", err)
+		return "", fmt.Errorf("下载种子失败: %v", utils.RedactURLError(err))
 	}
 	// 检查 HTTP 状态码
 	if resp.StatusCode != http.StatusOK {
@@ -1314,7 +1314,7 @@ func fetchRSSFeedWithContext(ctx context.Context, url string) (*gofeed.Feed, err
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("解析 RSS 失败: %w", err)
+		return nil, fmt.Errorf("解析 RSS 失败: %w", utils.RedactURLError(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 

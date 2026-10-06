@@ -63,7 +63,7 @@ func newAttendanceServer(t *testing.T, withMonitor bool) (*Server, *http.ServeMu
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sites/", srv.auth(srv.apiSiteDetail))
 	srv.registerAttendanceRoutes(mux)
-	srv.sessions["sess-test"] = "admin"
+	srv.sessions.put("sess-test", "admin")
 	return srv, mux, probe
 }
 
