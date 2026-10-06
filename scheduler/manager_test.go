@@ -218,7 +218,6 @@ func TestReload_FullStartupWaitsForExistingJobs(t *testing.T) {
 	}
 	require.NotPanics(t, func() { m.Reload(cfg) })
 	assert.NotNil(t, m.GetFreeEndMonitor())
-	time.Sleep(100 * time.Millisecond) // 等 StartAll 派生的 runner 执行 wg.Add(1) 后再 StopAll，避免 -race 竞态
 	m.StopAll()
 }
 
@@ -1323,7 +1322,6 @@ func TestManager_StartAll_ValidSiteStartsJob(t *testing.T) {
 		},
 	}
 	require.NotPanics(t, func() { m.StartAll(cfg) })
-	time.Sleep(100 * time.Millisecond) // 等 runner 执行 wg.Add(1) 后再 StopAll，避免 -race 竞态
 	m.StopAll()
 }
 
@@ -1394,7 +1392,6 @@ func TestManager_Reload_FullStartupWithHealthyDownloader(t *testing.T) {
 	}
 	require.NotPanics(t, func() { m.Reload(cfg) })
 	assert.NotNil(t, m.GetFreeEndMonitor(), "healthy reload should wire the free-end monitor")
-	time.Sleep(100 * time.Millisecond) // 等 StartAll 派生的 runner 执行 wg.Add(1) 后再 StopAll，避免 -race 竞态
 	m.StopAll()
 }
 

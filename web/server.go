@@ -1233,7 +1233,9 @@ func (s *Server) apiStopAll(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	s.mgr.StopAll()
+	// 只停 RSS 任务：免费到期、自动删种等监控和配置热重载继续运行，「启动所有任务」可以恢复。
+	// StopAll 是进程退出用的最终关闭，停掉后无法再启动。
+	s.mgr.StopJobs()
 	writeJSON(w, map[string]string{"status": "stopped"})
 }
 
