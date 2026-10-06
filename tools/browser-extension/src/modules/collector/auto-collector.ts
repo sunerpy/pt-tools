@@ -1,6 +1,6 @@
 import type { CapturedPage, PageType, SiteSchema } from "../../core/types";
 import { t } from "../../core/i18n";
-import { sanitizeHtml } from "./sanitizer";
+import { sanitizeHtml, sanitizeUrl } from "./sanitizer";
 
 /**
  * Delay between consecutive page fetches. Go-side site definitions run at
@@ -214,7 +214,7 @@ function makeCapturedPage(
 ): CapturedPage {
   return {
     pageType,
-    url,
+    url: sanitizeUrl(url),
     html: sanitizeHtml(html),
     capturedAt: new Date().toISOString(),
     detectedSchema: schema,
