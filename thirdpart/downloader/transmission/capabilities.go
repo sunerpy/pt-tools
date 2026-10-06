@@ -70,7 +70,7 @@ func (t *TransmissionClient) EditTracker(ctx context.Context, hash, oldURL, newU
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	resp, err := t.doRequest("torrent-get", torrentGetArgs{
+	resp, err := t.doRequestContext(ctx, "torrent-get", torrentGetArgs{
 		IDs:    normalizeTransmissionIDs([]string{hash}),
 		Fields: []string{"id", "hashString", "trackers", "trackerList"},
 	})
@@ -125,7 +125,7 @@ func (t *TransmissionClient) EditTracker(ctx context.Context, hash, oldURL, newU
 		}
 		args["trackerReplace"] = []any{trackerID, newURL}
 	}
-	if _, err := t.doRequest("torrent-set", args); err != nil {
+	if _, err := t.doRequestContext(ctx, "torrent-set", args); err != nil {
 		return fmt.Errorf("修改 tracker 失败: %w", err)
 	}
 	return nil
