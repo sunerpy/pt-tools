@@ -158,3 +158,19 @@ func TestUserInfoTrendsAPI(t *testing.T) {
 	srv.apiUserInfoTrends(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/trends?days=61", nil))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// 站点配置读不出来时 summary/trends 返回 500，不把故障伪装成「没有数据」。
+func TestUserInfoSummaryAndTrends_SiteConfigErrorIs500(t *testing.T) {
+	srv, repo := historyFixture(t)
+	saveOn(t, repo, "2026-10-05", "hdsky", 100, 10, 1)
+	saveOn(t, repo, "2026-10-06", "hdsky", 300, 30, 5)
+	repo.SetClock(func() time.Time { return time.Date(2026, 10, 6, 20, 0, 0, 0, time.UTC) }, time.UTC)
+	require.NoError(t, global.GlobalDB.DB.Migrator().DropTable(&models.SiteSetting{}))
+
+	w := httptest.NewRecorder()
+	srv.apiUserInfoSummary(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/summary?range=today", nil))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	w = httptest.NewRecorder()
+	srv.apiUserInfoTrends(w, httptest.NewRequest(http.MethodGet, "/api/v2/userinfo/trends?days=3", nil))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}

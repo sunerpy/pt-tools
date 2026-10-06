@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,44 +125,27 @@ func (s *Server) apiUserInfoSummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, filterSummaryByEnabledSites(sum, s.enabledSiteSet()))
-}
-
-// enabledSiteSet 返回已启用站点名（小写）。读不到站点配置时返回空表（什么都不算），
-// 与 /api/v2/userinfo/aggregated 的口径一致，两处的合计才对得上；没有配置存储时返回 nil，不过滤。
-func (s *Server) enabledSiteSet() map[string]bool {
-	if s.store == nil {
-		return nil
-	}
-	out := map[string]bool{}
-	sites, err := s.store.ListSites()
+	enabled, err := s.enabledSiteSet()
 	if err != nil {
-		global.GetSlogger().Warnf("[UserInfo] 读取站点配置失败，增量按没有已启用站点处理: %v", err)
-		return out
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	for group, cfg := range sites {
-		if cfg.Enabled != nil && *cfg.Enabled {
-			out[strings.ToLower(string(group))] = true
-		}
-	}
-	return out
+	writeJSON(w, sum.Filter(enabled))
 }
 
-func filterSummaryByEnabledSites(sum v2.DeltaSummary, enabled map[string]bool) v2.DeltaSummary {
-	if enabled == nil {
-		return sum
+// enabledSiteSet 返回已启用站点名（小写），与 /api/v2/userinfo/aggregated 一样只算已启用的站点，
+// 两处的合计才对得上。读不到站点配置时返回错误（由调用方回 500，不把故障当成「没有数据」）；
+// 没有配置存储时返回 nil，不过滤。
+func (s *Server) enabledSiteSet() (map[string]bool, error) {
+	if s.store == nil {
+		return nil, nil
 	}
-	out := v2.DeltaSummary{Range: sum.Range, From: sum.From, To: sum.To, Sites: make([]v2.SiteDelta, 0, len(sum.Sites))}
-	for _, d := range sum.Sites {
-		if !enabled[strings.ToLower(d.Site)] {
-			continue
-		}
-		out.Sites = append(out.Sites, d)
-		out.TotalUploaded += d.Uploaded
-		out.TotalDownloaded += d.Downloaded
-		out.TotalBonus += d.Bonus
+	enabled, err := s.store.EnabledSiteNames()
+	if err != nil {
+		global.GetSlogger().Errorf("[UserInfo] 读取站点配置失败: %v", err)
+		return nil, fmt.Errorf("读取站点配置失败: %w", err)
 	}
-	return out
+	return enabled, nil
 }
 
 // apiDailyReportSettings handles GET/PUT /api/v2/userinfo/daily-report
@@ -254,7 +238,11 @@ func (s *Server) apiUserInfoTrends(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	enabled := s.enabledSiteSet()
+	enabled, err := s.enabledSiteSet()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	resp := UserInfoTrendsResponse{Days: days, Dates: dates, Sites: map[string][]v2.TrendPoint{}}
 	if len(dates) > 0 {
 		resp.From, resp.To = dates[0], dates[len(dates)-1]
