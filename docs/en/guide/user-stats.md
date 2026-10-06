@@ -32,7 +32,7 @@ Right after installation there is no history yet; increments appear once a secon
 
 Turn it on under "Daily report" in System Settings, then set the send time (default `22:00`, server time zone) and the receiving channels. At least one notification channel is required when it is enabled; it is never sent to all channels by default.
 
-Each day at the send time, plus a fixed per-installation offset of 1–10 minutes (no later than 23:59), pt-tools sends one report for the day:
+Each day at the send time, plus a fixed per-installation offset of up to 10 minutes (picked at random the first time it is needed and then kept, no later than 23:59), pt-tools sends one report for the day:
 
 - upload, download and bonus increments per site and in total, listing up to 10 sites by upload;
 - sites whose login state is abnormal (session expired, key error, challenged, network error and so on);
