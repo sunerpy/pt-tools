@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -405,4 +406,26 @@ func TestManager_DailyReportJobReplacedAndStopped(t *testing.T) {
 	m.StopAll()
 	assert.False(t, second.running)
 	assert.Nil(t, m.dailyReportJob)
+}
+
+// 当天有刷流收益时战报加一节：合计，多个任务时逐个列出。
+func TestDailyReport_IncludesBrush(t *testing.T) {
+	now := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
+	f := newDailyReportFixture(t, now, models.NotificationConf{ChannelType: "webhook", Name: "w", Enabled: true})
+	require.NoError(t, f.db.AutoMigrate(&models.BrushTask{}, &models.BrushDailyStat{}))
+	require.NoError(t, f.db.Create(&models.BrushTask{ID: 1, Name: "馒头刷流", SiteName: "mteam", DownloaderID: 1}).Error)
+	require.NoError(t, f.db.Create(&models.BrushTask{ID: 2, Name: "天空刷流", SiteName: "hdsky", DownloaderID: 1}).Error)
+	gib := int64(1 << 30)
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 1, Day: "2026-10-06", Uploaded: 30 * gib, Downloaded: 5 * gib, Added: 3, Removed: 1}).Error)
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 2, Day: "2026-10-06", Uploaded: 10 * gib, Downloaded: 2 * gib, Added: 1}).Error)
+	require.NoError(t, f.db.Create(&models.BrushDailyStat{TaskID: 2, Day: "2026-10-05", Uploaded: 99 * gib}).Error)
+
+	NewDailyReportJob(f.cfg).RunOnce(context.Background())
+	rows := reportRows(t, f.db)
+	require.Len(t, rows, 1)
+	text := reportText(t, rows[0])
+	assert.Contains(t, text, "🚀 今日刷流：上传 40.00 GiB · 下载 7.00 GiB · 加入 4 · 删除 1")
+	assert.Contains(t, text, "· 馒头刷流：上传 30.00 GiB")
+	assert.Contains(t, text, "· 天空刷流：上传 10.00 GiB")
+	assert.Less(t, strings.Index(text, "馒头刷流"), strings.Index(text, "天空刷流"), "按上传排序")
 }

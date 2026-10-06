@@ -314,6 +314,10 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 		b.WriteString("\n")
 		b.WriteString(line)
 	}
+	if lines := j.brushLines(ctx, today); len(lines) > 0 {
+		b.WriteString("\n")
+		b.WriteString(strings.Join(lines, "\n"))
+	}
 	return title, b.String(), nil
 }
 
@@ -378,6 +382,61 @@ func (j *DailyReportJob) attendanceLine(ctx context.Context, today string, enabl
 	}
 	return fmt.Sprintf("✅ 今日签到：成功 %d · 已签 %d · 失败 %d",
 		counts[models.AttendanceSigned], counts[models.AttendanceAlready], counts[models.AttendanceFailed])
+}
+
+// dailyReportMaxBrushTasks 是战报里逐个列出的刷流任务数（按上传排序），其余只算进合计。
+const dailyReportMaxBrushTasks = 5
+
+// brushLines 是当天刷流的收益：合计一行，任务多于一个时再逐个列出（最多 5 个）。没有刷流表或当天没有收益时为空。
+func (j *DailyReportJob) brushLines(ctx context.Context, today string) []string {
+	if j.cfg.DB == nil || !j.cfg.DB.Migrator().HasTable(&models.BrushDailyStat{}) {
+		return nil
+	}
+	var stats []models.BrushDailyStat
+	if err := j.cfg.DB.WithContext(ctx).Where("day = ?", today).Find(&stats).Error; err != nil {
+		j.cfg.Logger.Warnf("每日战报读取刷流收益失败: %v", err)
+		return nil
+	}
+	var total models.BrushDailyStat
+	active := stats[:0]
+	for _, st := range stats {
+		if st.Uploaded == 0 && st.Downloaded == 0 && st.Added == 0 && st.Removed == 0 {
+			continue
+		}
+		total.Uploaded += st.Uploaded
+		total.Downloaded += st.Downloaded
+		total.Added += st.Added
+		total.Removed += st.Removed
+		active = append(active, st)
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	lines := []string{fmt.Sprintf("🚀 今日刷流：上传 %s · 下载 %s · 加入 %d · 删除 %d",
+		utils.FormatBytes(total.Uploaded), utils.FormatBytes(total.Downloaded), total.Added, total.Removed)}
+	if len(active) < 2 {
+		return lines
+	}
+	names := map[uint]string{}
+	var tasks []models.BrushTask
+	if err := j.cfg.DB.WithContext(ctx).Select("id", "name").Find(&tasks).Error; err == nil {
+		for _, t := range tasks {
+			names[t.ID] = t.Name
+		}
+	}
+	sort.SliceStable(active, func(a, c int) bool { return active[a].Uploaded > active[c].Uploaded })
+	for i, st := range active {
+		if i == dailyReportMaxBrushTasks {
+			lines = append(lines, fmt.Sprintf("· 其余 %d 个刷流任务省略", len(active)-i))
+			break
+		}
+		name := names[st.TaskID]
+		if name == "" {
+			name = fmt.Sprintf("任务 %d", st.TaskID)
+		}
+		lines = append(lines, fmt.Sprintf("· %s：上传 %s · 下载 %s", name, utils.FormatBytes(st.Uploaded), utils.FormatBytes(st.Downloaded)))
+	}
+	return lines
 }
 
 // DailyReportRand 是生产环境分配偏移用的随机数。
