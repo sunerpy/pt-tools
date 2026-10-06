@@ -36,8 +36,11 @@ type FreeEndMonitor struct {
 	downloaderMgr *downloader.DownloaderManager
 	checkInterval time.Duration
 	pendingTasks  map[uint]*monitorTask
-	wg            sync.WaitGroup
-	running       bool
+	// inFlight 记录正在处理的种子：独立定时器与周期巡检可能同时拿到同一个到期种子，
+	// 只让先到的那个处理，避免重复暂停、删除和改写状态。
+	inFlight map[uint]struct{}
+	wg       sync.WaitGroup
+	running  bool
 }
 
 type monitorTask struct {
@@ -55,7 +58,28 @@ func NewFreeEndMonitor(db *gorm.DB, downloaderMgr *downloader.DownloaderManager)
 		downloaderMgr: downloaderMgr,
 		checkInterval: defaultCheckInterval,
 		pendingTasks:  make(map[uint]*monitorTask),
+		inFlight:      make(map[uint]struct{}),
 	}
+}
+
+// beginProcessing 占用种子的处理权；已有协程在处理时返回 false。
+func (m *FreeEndMonitor) beginProcessing(id uint) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.inFlight == nil {
+		m.inFlight = make(map[uint]struct{})
+	}
+	if _, busy := m.inFlight[id]; busy {
+		return false
+	}
+	m.inFlight[id] = struct{}{}
+	return true
+}
+
+func (m *FreeEndMonitor) endProcessing(id uint) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.inFlight, id)
 }
 
 func (m *FreeEndMonitor) advanceDuration() time.Duration {
@@ -278,10 +302,11 @@ func (m *FreeEndMonitor) periodicProgressUpdate() {
 
 func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 	var torrents []models.TorrentInfo
+	// 按上次检查时间轮转：每批处理最久没更新的，任务多于一批时后面的也能轮到。
 	err := m.db.Where(
 		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND downloader_task_id != ''",
 		true, false, false,
-	).Limit(progressUpdateBatchSize).Find(&torrents).Error
+	).Order("last_check_time ASC, id ASC").Limit(progressUpdateBatchSize).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询待更新进度的种子失败: %v", err)
 		return
@@ -293,12 +318,8 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 
 	global.GetSlogger().Debugf("开始更新 %d 个种子的下载进度", len(torrents))
 
+	// 缓存的是 DownloaderManager 持有的共享实例，用完不能 Close。
 	downloaderCache := make(map[string]downloader.Downloader)
-	defer func() {
-		for _, dl := range downloaderCache {
-			dl.Close()
-		}
-	}()
 
 	for _, t := range torrents {
 		dl, ok := downloaderCache[t.DownloaderName]
@@ -307,6 +328,7 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 			dl, err = m.getDownloader(t)
 			if err != nil {
 				global.GetSlogger().Warnf("获取下载器失败 (种子:%s): %v", t.Title, err)
+				m.touchCheckTime(t.ID)
 				continue
 			}
 			downloaderCache[t.DownloaderName] = dl
@@ -320,6 +342,7 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 				continue
 			}
 			global.GetSlogger().Warnf("获取种子信息失败 (种子:%s, TaskID:%s): %v", t.Title, t.DownloaderTaskID, err)
+			m.touchCheckTime(t.ID)
 			continue
 		}
 
@@ -427,10 +450,15 @@ func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(cutoff time.Time) {
 	// Cap the scan like updateAllMonitoredProgress: rows beyond the batch are
 	// reconciled by the next 5-min periodicCheck (idempotent), so capping here
 	// bounds a restart-time mass load without dropping any torrent permanently.
-	err := m.db.Where(
+	// 已在内存里预约过的种子在 SQL 里排除：否则前 50 条都已预约时，每一批都只拿到它们，后面的永远补不上。
+	query := m.db.Where(
 		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time > ? AND downloader_task_id != ''",
 		true, false, false, cutoff,
-	).Limit(progressUpdateBatchSize).Find(&torrents).Error
+	)
+	if pending := m.pendingTaskIDs(); len(pending) > 0 {
+		query = query.Where("id NOT IN ?", pending)
+	}
+	err := query.Order("free_end_time ASC, id ASC").Limit(progressUpdateBatchSize).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询待补预约种子失败: %v", err)
 		return
@@ -455,9 +483,34 @@ func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(cutoff time.Time) {
 	}
 }
 
+// touchCheckTime 只更新检查时间：这一轮没能更新进度的任务也排到队尾，
+// 否则持续失败的任务会一直占着每批最前面的名额。
+func (m *FreeEndMonitor) touchCheckTime(id uint) {
+	if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", id).Update("last_check_time", time.Now()).Error; err != nil {
+		global.GetSlogger().Warnf("更新检查时间失败 (ID:%d): %v", id, err)
+	}
+}
+
+// pendingTaskIDs 返回当前已在内存里预约的种子 ID。
+func (m *FreeEndMonitor) pendingTaskIDs() []uint {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]uint, 0, len(m.pendingTasks))
+	for id := range m.pendingTasks {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 	global.GetSlogger().Debugf("[FreeEndMonitor] 开始处理免费期结束的种子: ID=%d, Title=%s, TaskID=%s, Downloader=%s",
 		torrent.ID, torrent.Title, torrent.DownloaderTaskID, torrent.DownloaderName)
+
+	if !m.beginProcessing(torrent.ID) {
+		global.GetSlogger().Debugf("[FreeEndMonitor] 种子正在处理中，跳过 (种子:%s, ID:%d)", torrent.Title, torrent.ID)
+		return
+	}
+	defer m.endProcessing(torrent.ID)
 
 	advanced := m.advanceDuration() > 0
 
@@ -465,8 +518,8 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 	delete(m.pendingTasks, torrent.ID)
 	m.mu.Unlock()
 
-	// 使用数据库原子更新获取处理锁，防止独立定时器和周期检查同时处理同一个种子
-	// 只有当种子仍处于待处理状态时才继续处理
+	// 种子仍处于待处理状态才继续：已被前一次处理暂停或标记完成的直接跳过。
+	// 同时处理同一个种子由上面的 inFlight 挡住，这个条件更新只更新 last_check_time，挡不住并发。
 	result := m.db.Model(&models.TorrentInfo{}).
 		Where("id = ? AND is_paused_by_system = ? AND is_completed = ?", torrent.ID, false, false).
 		Update("last_check_time", time.Now())
@@ -486,7 +539,7 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 		m.markRetry(torrent, fmt.Sprintf("获取下载器失败: %v", err))
 		return
 	}
-	defer dl.Close()
+	// dl 是 DownloaderManager 持有的共享实例，不能 Close：关掉会断开其他调用方正在用的会话。
 
 	global.GetSlogger().Debugf("[FreeEndMonitor] 成功获取下载器: %s (类型:%s)", dl.GetName(), dl.GetType())
 
@@ -838,10 +891,11 @@ func (m *FreeEndMonitor) periodicAllTasksProgressUpdate() {
 func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 	var torrents []models.TorrentInfo
 	pushed := true
+	// 按上次检查时间轮转：每批处理最久没更新的，任务多于一批时后面的也能轮到。
 	err := m.db.Where(
 		"is_pushed = ? AND is_completed = ? AND is_paused_by_system = ? AND downloader_task_id != ''",
 		&pushed, false, false,
-	).Limit(progressUpdateBatchSize).Find(&torrents).Error
+	).Order("last_check_time ASC, id ASC").Limit(progressUpdateBatchSize).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询待更新进度的任务失败: %v", err)
 		return
@@ -854,18 +908,15 @@ func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 
 	global.GetSlogger().Infof("开始更新 %d 个已推送任务的下载进度", len(torrents))
 
+	// 缓存的是 DownloaderManager 持有的共享实例，用完不能 Close。
 	downloaderCache := make(map[string]downloader.Downloader)
-	defer func() {
-		for _, dl := range downloaderCache {
-			dl.Close()
-		}
-	}()
 
 	updated := 0
 	skipped := 0
 	for _, t := range torrents {
 		if t.DownloaderName == "" {
 			global.GetSlogger().Warnf("任务缺少下载器名称 (ID:%d, Title:%s, TaskID:%s)", t.ID, t.Title, t.DownloaderTaskID)
+			m.touchCheckTime(t.ID)
 			skipped++
 			continue
 		}
@@ -876,6 +927,7 @@ func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 			dl, err = m.getDownloader(t)
 			if err != nil {
 				global.GetSlogger().Warnf("获取下载器失败 (ID:%d, Title:%s, Downloader:%s): %v", t.ID, t.Title, t.DownloaderName, err)
+				m.touchCheckTime(t.ID)
 				skipped++
 				continue
 			}
@@ -892,6 +944,7 @@ func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 				continue
 			}
 			global.GetSlogger().Warnf("获取种子信息失败 (ID:%d, Title:%s, TaskID:%s): %v", t.ID, t.Title, t.DownloaderTaskID, err)
+			m.touchCheckTime(t.ID)
 			skipped++
 			continue
 		}
