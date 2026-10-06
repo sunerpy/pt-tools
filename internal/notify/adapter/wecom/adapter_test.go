@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 
@@ -286,7 +287,35 @@ func TestWecom_Send_DefaultMsgType(t *testing.T) {
 	assert.Equal(t, "markdown", payload["msgtype"])
 }
 
-// TestWecom_Init_Errors covers all Init validation branches.
+// 企业微信的业务错误以 HTTP 200 + 非零 errcode 返回，要当作发送失败，才会进入重试。
+func TestWecom_Send_BusinessErrorIsFailure(t *testing.T) {
+	installRedirect()
+	cases := []struct {
+		name, body, wantErr string
+	}{
+		{"invalid key", `{"errcode":93000,"errmsg":"invalid webhook url"}`, "errcode=93000"},
+		{"rate limited", `{"errcode":45009,"errmsg":"api freq out of limit"}`, "45009"},
+		{"not json", `<html>proxy error</html>`, "无法识别的响应"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			setRedirect(server.URL)
+			defer clearRedirect()
+
+			ch := newWecom(t, `{"webhook_key":"k"}`)
+			err := ch.Send(context.Background(), notify.Notification{Title: "T", Text: "B"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// TestWecom_Init_Errors covers all Init validation branches.// TestWecom_Init_Errors covers all Init validation branches.
 func TestWecom_Init_Errors(t *testing.T) {
 	t.Run("nil conf", func(t *testing.T) {
 		ch := &WeComChannel{}
@@ -338,4 +367,15 @@ func TestWecom_Registered(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ch)
 	assert.Equal(t, "wecom_webhook", ch.Type())
+}
+
+// 无法识别的长响应只取前 200 字节写进错误，整页代理错误不会塞进日志和重试记录。
+func TestCheckWeComResult_TruncatesLongBody(t *testing.T) {
+	err := checkWeComResult([]byte(strings.Repeat("x", 300)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), strings.Repeat("x", 200)+"...")
+	assert.NotContains(t, err.Error(), strings.Repeat("x", 201))
+
+	require.NoError(t, checkWeComResult([]byte("  ")), "空响应按成功处理")
+	require.NoError(t, checkWeComResult([]byte(`{"errcode":0,"errmsg":"ok"}`)))
 }

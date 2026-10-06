@@ -191,6 +191,20 @@ func TestLiveNotifyManager_Send(t *testing.T) {
 	})
 }
 
+// outbox 的重试经运行中的通道实例投递，标题、正文、按钮原样带过去。
+func TestOutboxLiveSender_ForwardsToLiveChannel(t *testing.T) {
+	ch := &stubNotifyChannel{}
+	sender := outboxLiveSender{m: newLiveNotifyManager(map[uint]notify.Channel{5: ch})}
+	buttons := [][]notify.Button{{{Text: "立即下载", CallbackData: "dl:1"}}}
+	require.NoError(t, sender.Send(context.Background(), 5, notify.Notification{Title: "t", Text: "body", Buttons: buttons}))
+	require.Len(t, ch.recorded, 1)
+	assert.Equal(t, "body", ch.recorded[0].Text)
+	assert.Equal(t, uint(5), ch.recorded[0].SourceConfID)
+	assert.Equal(t, buttons, ch.recorded[0].Buttons)
+
+	require.Error(t, sender.Send(context.Background(), 9, notify.Notification{Text: "x"}), "通道没在运行时返回错误，留给 outbox 退避重试")
+}
+
 func TestLiveNotifyManager_SetChannels_NilResets(t *testing.T) {
 	m := newLiveNotifyManager(map[uint]notify.Channel{1: &stubNotifyChannel{}})
 	m.SetChannels(nil)

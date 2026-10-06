@@ -32,12 +32,28 @@ type OutboxWorker struct {
 	db       *gorm.DB
 	registry *Registry
 	interval time.Duration
+	// live 经运行中的通道实例投递（生产环境注入）。有状态通道不能另起实例：QQ 会抢监听端口，
+	// Telegram 会多开一个长轮询和正在运行的实例抢更新；ConfigJSON 在库里也是密文。
+	live LiveSender
+	// decrypt 解密 NotificationConf.ConfigJSON，只在没有 live 时的回退路径使用。
+	decrypt func(string) (string, error)
 
 	startOnce sync.Once
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 }
+
+// LiveSender 经运行中的通道实例投递一条通知。
+type LiveSender interface {
+	Send(ctx context.Context, confID uint, n Notification) error
+}
+
+// SetLiveSender 让重试经运行中的通道投递，不再按配置另建实例。须在 Start 之前调用。
+func (w *OutboxWorker) SetLiveSender(s LiveSender) { w.live = s }
+
+// SetConfigDecrypter 设置回退路径解密 ConfigJSON 的函数。须在 Start 之前调用。
+func (w *OutboxWorker) SetConfigDecrypter(fn func(string) (string, error)) { w.decrypt = fn }
 
 // NewOutboxWorker creates a worker. interval defaults to 10s when <= 0.
 func NewOutboxWorker(db *gorm.DB, registry *Registry, interval time.Duration) *OutboxWorker {
@@ -149,15 +165,6 @@ func (w *OutboxWorker) deliverOne(ctx context.Context, row models.NotificationOu
 		return w.markFailure(ctx, row, now, fmt.Errorf("加载通知通道配置失败: %w", err))
 	}
 
-	// TODO(stateful-channels): for qq_onebot/telegram, outbox should reuse the live channel instead of registry.Make() to avoid port/connection collisions. Currently the live notify manager handles immediate delivery for these channels; outbox only services webhook/wecom_webhook reliably.
-	ch, err := w.registry.Make(conf.ChannelType)
-	if err != nil {
-		return w.markFailure(ctx, row, now, err)
-	}
-	if err := ch.Init(ctx, &conf); err != nil {
-		return w.markFailure(ctx, row, now, err)
-	}
-
 	var notification Notification
 	if err := json.Unmarshal([]byte(row.PayloadJSON), &notification); err != nil {
 		return w.markFailure(ctx, row, now, fmt.Errorf("解析通知 payload 失败: %w", err))
@@ -169,7 +176,11 @@ func (w *OutboxWorker) deliverOne(ctx context.Context, row models.NotificationOu
 		notification.SourceConfID = conf.ID
 	}
 
-	if err := ch.Send(ctx, notification); err != nil {
+	if w.live != nil {
+		if err := w.live.Send(ctx, conf.ID, notification); err != nil {
+			return w.markFailure(ctx, row, now, err)
+		}
+	} else if err := w.sendViaNewChannel(ctx, conf, notification); err != nil {
 		return w.markFailure(ctx, row, now, err)
 	}
 
@@ -180,6 +191,27 @@ func (w *OutboxWorker) deliverOne(ctx context.Context, row models.NotificationOu
 			"sent_at":   now,
 			"error_msg": "",
 		}).Error
+}
+
+// sendViaNewChannel 是没有注入 LiveSender 时的回退：按配置新建一个通道实例发送，用完关闭。
+// 只适合无状态通道（webhook、企业微信），有状态通道在生产环境走 LiveSender。
+func (w *OutboxWorker) sendViaNewChannel(ctx context.Context, conf models.NotificationConf, n Notification) error {
+	if w.decrypt != nil && conf.ConfigJSON != "" {
+		plain, err := w.decrypt(conf.ConfigJSON)
+		if err != nil {
+			return fmt.Errorf("解密通知通道配置失败: %w", err)
+		}
+		conf.ConfigJSON = plain
+	}
+	ch, err := w.registry.Make(conf.ChannelType)
+	if err != nil {
+		return err
+	}
+	if err := ch.Init(ctx, &conf); err != nil {
+		return err
+	}
+	defer func() { _ = ch.Close(ctx) }()
+	return ch.Send(ctx, n)
 }
 
 func (w *OutboxWorker) markFailure(ctx context.Context, row models.NotificationOutbox, now time.Time, cause error) error {

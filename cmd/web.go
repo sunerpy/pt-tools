@@ -163,40 +163,8 @@ var webCmd = &cobra.Command{
 			}
 
 			notifySvc := bs.Deps().NotificationSvc
-			db := global.GlobalDB.DB
-			digestFlush := func(ctx context.Context, confID uint, items []notify.DigestItem) {
-				title, text := notify.CombineDigest(items)
-				err := notifySvc.Push(ctx, app.Notification{
-					Title: title, Text: text, SourceConfID: confID,
-				})
-				now := time.Now()
-				ids := make([]uint, len(items))
-				for i, it := range items {
-					ids[i] = it.LogID
-				}
-				if err == nil {
-					db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
-						Where("id IN ?", ids).
-						Updates(map[string]any{
-							"result":       "sent",
-							"delivered_at": now,
-							"updated_at":   now,
-							"attempts":     gorm.Expr("attempts + 1"),
-						})
-					chatopsLogger().Infof("RSS digest 已投递 conf_id=%d items=%d", confID, len(items))
-					return
-				}
-				nextRetry := now.Add(5 * time.Second)
-				db.WithContext(ctx).Model(&models.RSSNotificationLog{}).
-					Where("id IN ?", ids).
-					Updates(map[string]any{
-						"attempts":      gorm.Expr("attempts + 1"),
-						"next_retry_at": nextRetry,
-						"last_error":    err.Error(),
-						"updated_at":    now,
-					})
-				chatopsLogger().Warnf("RSS digest 投递失败 conf_id=%d items=%d err=%v", confID, len(items), err)
-			}
+			// 摘要刷写只发送仍是 pending 的行：被 filtered 抑制或已发出的不再发，只剩一条时保留按钮
+			digestFlush := app.NewRSSDigestFlush(global.GlobalDB.DB, notifySvc, chatopsLogger().Infof)
 			digestBuf := notify.NewDigestBuffer(runtimeCtx, digestFlush)
 
 			if rn, ok := rssNotifier.(interface {
@@ -208,6 +176,7 @@ var webCmd = &cobra.Command{
 			}
 
 			retryWorker := app.NewRSSRetryWorker(global.GlobalDB.DB, notifySvc)
+			retryWorker.SetLogf(chatopsLogger().Warnf)
 			go retryWorker.Run(runtimeCtx)
 
 			fetcher := func(ctx context.Context, siteName, torrentID string) ([]byte, error) {
@@ -470,6 +439,8 @@ func bootstrapChatOps(
 	torrentSvc := app.NewTorrentService(mgr.GetDownloaderManager())
 
 	outbox := notify.NewOutboxWorker(db, registry, chatopsOutboxInterval)
+	// 重试经运行中的通道投递：按配置另建实例会抢 QQ 端口、和 Telegram 长轮询抢更新，库里的配置也是密文
+	outbox.SetLiveSender(outboxLiveSender{m: liveManager})
 	outbox.Start(ctx)
 
 	rateLimiter := chatops.NewRateLimiter()
@@ -720,6 +691,20 @@ func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notific
 	}
 	chatopsLogger().Infof("实时通知投递成功 conf_id=%d type=%s", confID, ch.Type())
 	return nil
+}
+
+// outboxLiveSender 让 notify.OutboxWorker 经 liveNotifyManager 投递重试。
+type outboxLiveSender struct{ m *liveNotifyManager }
+
+func (s outboxLiveSender) Send(ctx context.Context, confID uint, n notify.Notification) error {
+	return s.m.Send(ctx, confID, app.Notification{
+		Title:        n.Title,
+		Text:         n.Text,
+		SourceConfID: confID,
+		UserID:       n.UserID,
+		Targets:      n.Targets,
+		Buttons:      n.Buttons,
+	})
 }
 
 // Reply implements chatops.Replier — sends a reply to the inbound user via the
