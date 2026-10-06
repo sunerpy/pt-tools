@@ -470,6 +470,8 @@ func bootstrapChatOps(
 	torrentSvc := app.NewTorrentService(mgr.GetDownloaderManager())
 
 	outbox := notify.NewOutboxWorker(db, registry, chatopsOutboxInterval)
+	// 重试经运行中的通道投递：按配置另建实例会抢 QQ 端口、和 Telegram 长轮询抢更新，库里的配置也是密文
+	outbox.SetLiveSender(outboxLiveSender{m: liveManager})
 	outbox.Start(ctx)
 
 	rateLimiter := chatops.NewRateLimiter()
@@ -720,6 +722,20 @@ func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notific
 	}
 	chatopsLogger().Infof("实时通知投递成功 conf_id=%d type=%s", confID, ch.Type())
 	return nil
+}
+
+// outboxLiveSender 让 notify.OutboxWorker 经 liveNotifyManager 投递重试。
+type outboxLiveSender struct{ m *liveNotifyManager }
+
+func (s outboxLiveSender) Send(ctx context.Context, confID uint, n notify.Notification) error {
+	return s.m.Send(ctx, confID, app.Notification{
+		Title:        n.Title,
+		Text:         n.Text,
+		SourceConfID: confID,
+		UserID:       n.UserID,
+		Targets:      n.Targets,
+		Buttons:      n.Buttons,
+	})
 }
 
 // Reply implements chatops.Replier — sends a reply to the inbound user via the
