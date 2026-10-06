@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>pt-tools</Name>
+  <Repository>sunerpy/pt-tools:latest</Repository>
+  <Registry>https://hub.docker.com/r/sunerpy/pt-tools</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/sunerpy/pt-tools/issues</Support>
+  <Project>https://github.com/sunerpy/pt-tools</Project>
+  <Overview>Automation for private tracker (PT) sites: download free torrents from RSS feeds, multi-site search and statistics, check-in, login keep-alive reminders, seed boosting (brush tasks), qBittorrent and Transmission management, and QQ / Telegram ChatOps.&#xD;
+PT 站点自动化管理：RSS 自动下载、多站点搜索与数据统计、签到、登录保号提醒、刷流，统一管理 qBittorrent 和 Transmission，支持 QQ 与 Telegram ChatOps。&#xD;
+Default login: admin / adminadmin. Back up secret.key in the appdata folder.</Overview>
+  <Category>Downloaders: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/sunerpy/pt-tools/main/deploy/unraid/pt-tools.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/sunerpy/pt-tools/main/web/frontend/public/logo.png</Icon>
+  <ExtraParams>--log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Web UI port inside the container is 8080." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Data" Target="/app/.pt-tools" Default="/mnt/user/appdata/pt-tools" Mode="rw" Description="Database, encryption key (secret.key), logs and staged torrents. Keep this folder and back up secret.key." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/pt-tools</Config>
+  <Config Name="TZ" Target="TZ" Default="Asia/Shanghai" Mode="" Description="Time zone used for schedules, daily reports and statistics." Type="Variable" Display="always" Required="false" Mask="false">Asia/Shanghai</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID the app runs as (Unraid default nobody = 99)." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID the app runs as (Unraid default users = 100)." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="PT_TOOLS_SECRET_KEY" Target="PT_TOOLS_SECRET_KEY" Default="" Mode="" Description="Optional: base64 AES-256 key exported with `pt-tools secret export`. Leave empty to use secret.key in the data folder." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+</Container>
