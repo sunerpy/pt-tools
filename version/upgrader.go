@@ -3,8 +3,12 @@ package version
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +32,15 @@ var (
 	ErrReplacementFailed    = errors.New("替换可执行文件失败")
 	ErrPermissionDenied     = errors.New("权限不足，无法替换可执行文件")
 	ErrVersionAlreadyLatest = errors.New("当前已是最新版本")
+	ErrChecksumMismatch     = errors.New("安装包校验失败")
 )
+
+// checksumAssetName 是发布流水线（release.yml 的 assemble-checksums）随每个 Release 上传的
+// SHA-256 清单，格式与 sha256sum 输出相同。升级前用它核对下载的安装包。
+const checksumAssetName = "checksums.txt"
+
+// maxChecksumFileBytes 是校验清单的大小上限，正常只有几行。
+const maxChecksumFileBytes = 64 << 10
 
 type UpgradeStatus string
 
@@ -162,6 +174,16 @@ func (u *Upgrader) performUpgrade(ctx context.Context, release *ReleaseInfo, pro
 		err = fmt.Errorf("%w: %s", ErrNoAssetFound, assetName)
 		return
 	}
+	// 安装包下载后直接替换当前可执行文件，必须先能核对：没有校验清单的版本不升级。
+	checksumURL := u.findAssetURL(release, checksumAssetName)
+	if checksumURL == "" {
+		err = fmt.Errorf("%w: 该版本没有 %s，无法核对安装包", ErrChecksumMismatch, checksumAssetName)
+		return
+	}
+	expectedSum, err := u.fetchExpectedChecksum(ctx, checksumURL, assetName, proxyURL)
+	if err != nil {
+		return
+	}
 
 	tempDir, err := os.MkdirTemp("", "pt-tools-upgrade-*")
 	if err != nil {
@@ -172,6 +194,9 @@ func (u *Upgrader) performUpgrade(ctx context.Context, release *ReleaseInfo, pro
 
 	archivePath := filepath.Join(tempDir, assetName)
 	if err = u.downloadFile(ctx, downloadURL, archivePath, proxyURL); err != nil {
+		return
+	}
+	if err = verifyFileSHA256(archivePath, expectedSum); err != nil {
 		return
 	}
 
@@ -247,6 +272,74 @@ func (u *Upgrader) downloadFile(ctx context.Context, downloadURL, destPath, prox
 		return fmt.Errorf("%w: %v", ErrDownloadFailed, err)
 	}
 
+	return nil
+}
+
+// fetchExpectedChecksum 下载 Release 的校验清单，返回 assetName 对应的 SHA-256（小写十六进制）。
+func (u *Upgrader) fetchExpectedChecksum(ctx context.Context, checksumURL, assetName, proxyURL string) (string, error) {
+	session := requests.NewSession().WithTimeout(time.Minute)
+	session = session.WithProxy(proxyURL)
+	defer session.Close()
+
+	req, err := requests.NewGet(checksumURL).
+		WithContext(ctx).
+		WithHeader("User-Agent", "pt-tools/"+Version).
+		Build()
+	if err != nil {
+		return "", fmt.Errorf("%w: 下载校验清单失败: %v", ErrDownloadFailed, err)
+	}
+	resp, err := session.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%w: 下载校验清单失败: %v", ErrDownloadFailed, err)
+	}
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("%w: 下载校验清单失败: HTTP %d", ErrDownloadFailed, resp.StatusCode)
+	}
+	body := resp.Bytes()
+	if len(body) > maxChecksumFileBytes {
+		return "", fmt.Errorf("%w: 校验清单过大", ErrChecksumMismatch)
+	}
+	sum, ok := lookupChecksum(body, assetName)
+	if !ok {
+		return "", fmt.Errorf("%w: 校验清单里没有 %s", ErrChecksumMismatch, assetName)
+	}
+	return sum, nil
+}
+
+// lookupChecksum 在 sha256sum 格式的清单（"<hex>  <name>"，二进制模式为 "<hex> *<name>"）里找 name 的摘要。
+func lookupChecksum(list []byte, name string) (string, bool) {
+	sc := bufio.NewScanner(bytes.NewReader(list))
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		sum, file := strings.ToLower(fields[0]), strings.TrimPrefix(fields[1], "*")
+		if file != name {
+			continue
+		}
+		if decoded, err := hex.DecodeString(sum); err != nil || len(decoded) != sha256.Size {
+			return "", false
+		}
+		return sum, true
+	}
+	return "", false
+}
+
+// verifyFileSHA256 核对文件的 SHA-256 与清单一致。
+func verifyFileSHA256(path, expected string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrChecksumMismatch, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("%w: %v", ErrChecksumMismatch, err)
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != strings.ToLower(expected) {
+		return fmt.Errorf("%w: 安装包的 SHA-256 与发布清单不一致", ErrChecksumMismatch)
+	}
 	return nil
 }
 

@@ -27,7 +27,7 @@ The upgrade button in the web interface does not work inside a container; upgrad
 
 ### Linux and Windows binaries
 
-When a new release is out, the web interface says so next to the version number at the top left. From there you can read the release notes and start the upgrade: pt-tools downloads the new version, replaces its own executable and then shows "Upgrade complete, please restart" (升级完成，请重启应用).
+When a new release is out, the web interface says so next to the version number at the top left. From there you can read the release notes and start the upgrade: pt-tools downloads the new version, checks its SHA-256 against that release's `checksums.txt`, and only then replaces its own executable and shows "Upgrade complete, please restart" (升级完成，请重启应用). If the checksum does not match, or the release has no `checksums.txt`, the upgrade fails and the running program is left as it was.
 
 - Under systemd, run `sudo systemctl restart pt-tools`.
 - If you started it by hand, stop the process and run `pt-tools web` again.
