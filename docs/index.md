@@ -310,3 +310,11 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 安装脚本会下载最新版本，并按同一版本的 `checksums.txt` 校验 SHA-256 后再解压。[安装指南](/guide/install)介绍了各种方式的完整步骤，以及如何固定版本。
 
 <HomeRoadmap />
+
+## 社区
+
+- 报告问题、提出功能建议：[GitHub Issues](https://github.com/sunerpy/pt-tools/issues)
+- 使用交流：[GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions)、[Telegram 群](https://t.me/+7YK2kmWIX0s1Nzdl)、QQ 群 274984594
+- 微信公众号：六月水蓝
+
+<QrCode src="/community/wechat-official-account.jpg" alt="微信公众号「六月水蓝」的二维码" caption="微信扫码关注" />

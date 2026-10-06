@@ -1004,6 +1004,27 @@ func TestMTorrentDriver_GetUserInfo(t *testing.T) {
 	assert.Greater(t, info.LastAccess, int64(0))
 }
 
+// M1b：memberStatus.lastLogin 映射到 UserInfo.LastLogin（按站点时区 CST 解析）；访问时间的取法不变。
+func TestMTorrentDriver_ParseUserInfo_LastLogin(t *testing.T) {
+	d := NewMTorrentDriver(MTorrentDriverConfig{BaseURL: "https://api.example", APIKey: "k"})
+	info, err := d.ParseUserInfo(MTorrentResponse{
+		Code: "0",
+		Data: []byte(`{"id":"1001","username":"tester","role":"2",
+			"memberStatus":{"lastLogin":"2024-06-01 10:00:00","lastBrowse":"2024-06-01 12:00:00"}}`),
+	})
+	require.NoError(t, err)
+	login, err := ParseTimeInCST("2006-01-02 15:04:05", "2024-06-01 10:00:00")
+	require.NoError(t, err)
+	browse, err := ParseTimeInCST("2006-01-02 15:04:05", "2024-06-01 12:00:00")
+	require.NoError(t, err)
+	assert.Equal(t, login.Unix(), info.LastLogin)
+	assert.Equal(t, browse.Unix(), info.LastAccess)
+
+	info, err = d.ParseUserInfo(MTorrentResponse{Code: "0", Data: []byte(`{"id":"1","username":"t","memberStatus":{"lastLogin":"not-a-time"}}`)})
+	require.NoError(t, err)
+	assert.Zero(t, info.LastLogin, "an unparsable lastLogin is left empty")
+}
+
 func TestMTorrentDriver_GetUserInfo_ProfileError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"code":"1","message":"denied"}`))

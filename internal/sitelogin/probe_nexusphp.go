@@ -63,6 +63,9 @@ func isChallengeError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, v2.ErrCloudflareChallenge) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "cloudflare") || strings.Contains(msg, "challenge")
 }

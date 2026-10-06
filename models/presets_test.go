@@ -337,3 +337,26 @@ func TestMigrateExampleRSS(t *testing.T) {
 	require.NoError(t, db.Where("name = ?", "real").First(&real).Error)
 	assert.False(t, real.IsExample)
 }
+
+// cmct 并入已有的 springsunday 时，Cookie 只在密文列（v11 之后的常态）也要复制过去，否则删掉 cmct 就丢了凭证。
+func TestMigrateCmctToSpringSunday_MergeCopiesEncryptedCookie(t *testing.T) {
+	db := newMemDB(t, &SiteSetting{}, &RSSSubscription{}, &TorrentInfo{})
+	require.NoError(t, db.Create(&SiteSetting{Name: "cmct", AuthMethod: "cookie", CookieEncrypted: "enc-cmct", Enabled: true}).Error)
+	require.NoError(t, db.Create(&SiteSetting{Name: "springsunday", AuthMethod: "cookie"}).Error)
+
+	require.NoError(t, SyncSitesFromRegistry(db, nil))
+
+	var spring SiteSetting
+	require.NoError(t, db.Where("name = ?", "springsunday").First(&spring).Error)
+	assert.Equal(t, "enc-cmct", spring.CookieEncrypted)
+	assert.Empty(t, spring.Cookie)
+	assert.True(t, spring.Enabled)
+
+	// springsunday 自己已有 Cookie（无论在哪一列）时保留它。
+	db2 := newMemDB(t, &SiteSetting{}, &RSSSubscription{}, &TorrentInfo{})
+	require.NoError(t, db2.Create(&SiteSetting{Name: "cmct", AuthMethod: "cookie", CookieEncrypted: "enc-cmct"}).Error)
+	require.NoError(t, db2.Create(&SiteSetting{Name: "springsunday", AuthMethod: "cookie", CookieEncrypted: "enc-spring"}).Error)
+	require.NoError(t, SyncSitesFromRegistry(db2, nil))
+	require.NoError(t, db2.Where("name = ?", "springsunday").First(&spring).Error)
+	assert.Equal(t, "enc-spring", spring.CookieEncrypted)
+}

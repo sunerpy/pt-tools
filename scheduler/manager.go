@@ -38,6 +38,7 @@ type Manager struct {
 	cleanupMonitor       *CleanupMonitor
 	peerRatioMonitor     *PeerRatioMonitor
 	loginReminderMonitor *LoginReminderMonitor
+	attendanceMonitor    *AttendanceMonitor
 	eventCancel          func()
 	stopped              bool
 }
@@ -454,6 +455,10 @@ func (m *Manager) StopAll() {
 		m.peerRatioMonitor.Stop()
 		m.peerRatioMonitor = nil
 	}
+	if m.attendanceMonitor != nil {
+		m.attendanceMonitor.Stop()
+		m.attendanceMonitor = nil
+	}
 	if m.loginReminderMonitor != nil {
 		m.loginReminderMonitor.Stop()
 		m.loginReminderMonitor = nil
@@ -583,4 +588,21 @@ func (m *Manager) GetLoginReminderMonitor() *LoginReminderMonitor {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.loginReminderMonitor
+}
+
+// SetAttendanceMonitor 登记每日签到监控；替换旧实例时先停掉旧的。
+func (m *Manager) SetAttendanceMonitor(mon *AttendanceMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.attendanceMonitor != nil && m.attendanceMonitor != mon {
+		m.attendanceMonitor.Stop()
+	}
+	m.attendanceMonitor = mon
+}
+
+// GetAttendanceMonitor 返回每日签到监控，没有接线时为 nil。
+func (m *Manager) GetAttendanceMonitor() *AttendanceMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attendanceMonitor
 }

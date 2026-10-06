@@ -18,6 +18,9 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
+// loginProbeRequestTimeout 与监控单次探测的总预算一致（HTTP 主通道 60 秒，CloakBrowser 后备最多 90 秒）。
+const loginProbeRequestTimeout = 150 * time.Second
+
 // SiteLoginStateResponse is the API representation of a site_login_state row.
 // Cookie / CookieEncrypted MUST never appear here — the row is enriched with
 // computed fields (effective_last_active, days_remaining, tier) at read time.
@@ -30,7 +33,12 @@ type SiteLoginStateResponse struct {
 	LastAccessAt             *int64 `json:"last_access_at,omitempty"`
 	LastVisitAt              *int64 `json:"last_visit_at,omitempty"`
 	EffectiveLastActiveAt    *int64 `json:"effective_last_active_at,omitempty"`
+	EffectiveSource          string `json:"effective_source"`
 	LastProbeAt              *int64 `json:"last_probe_at,omitempty"`
+	NextProbeAt              *int64 `json:"next_probe_at,omitempty"`
+	LastSuccessAt            *int64 `json:"last_success_at,omitempty"`
+	FirstFailureAt           *int64 `json:"first_failure_at,omitempty"`
+	AccessStaleSince         *int64 `json:"access_stale_since,omitempty"`
 	LastProbeStatus          string `json:"last_probe_status,omitempty"`
 	LastProbeError           string `json:"last_probe_error,omitempty"`
 	ConsecutiveProbeFailures int    `json:"consecutive_probe_failures"`
@@ -233,7 +241,7 @@ func (s *Server) handleLoginStateProbe(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	defer release()
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), loginProbeRequestTimeout)
 	defer cancel()
 	mon.RunProbeOnceForSiteLocked(ctx, siteName)
 	state, err := loadOrInitLoginState(db, siteName)
@@ -353,6 +361,10 @@ func buildLoginStateResponse(site models.SiteSetting, state models.SiteLoginStat
 		LastAccessAt:             timestampPtr(state.LastAccessAt),
 		LastVisitAt:              timestampPtr(state.LastVisitAt),
 		LastProbeAt:              timestampPtr(state.LastProbeAt),
+		NextProbeAt:              timestampPtr(state.NextProbeAt),
+		LastSuccessAt:            timestampPtr(state.LastSuccessAt),
+		FirstFailureAt:           timestampPtr(state.FirstFailureAt),
+		AccessStaleSince:         timestampPtr(state.AccessStaleSince),
 		LastProbeStatus:          state.LastProbeStatus,
 		LastProbeError:           state.LastProbeError,
 		ConsecutiveProbeFailures: state.ConsecutiveProbeFailures,
@@ -374,6 +386,7 @@ func buildLoginStateResponse(site models.SiteSetting, state models.SiteLoginStat
 	} else {
 		resp.Tier = "unknown"
 	}
+	resp.EffectiveSource = scheduler.EffectiveActiveSource(&state, effective)
 	return resp
 }
 
@@ -395,19 +408,11 @@ func loadOrInitLoginState(db *gorm.DB, siteName string) (*models.SiteLoginState,
 }
 
 func ensureLoginStateRow(db *gorm.DB, siteName string) error {
-	repo := models.NewSiteLoginStateRepository(db)
-	if _, err := repo.GetLoginState(siteName); err == nil {
-		return nil
-	}
 	banDays, remindDays, _ := models.ApplyPresetIfMissing(siteName)
-	row := &models.SiteLoginState{
-		SiteName:         siteName,
-		BanThresholdDays: banDays,
-		RemindBeforeDays: remindDays,
-		ReminderCron:     "0 10,22 * * *",
-		LastReminderTier: "none",
-	}
-	return db.Create(row).Error
+	defaults := models.DefaultSiteLoginState(siteName)
+	defaults.BanThresholdDays = banDays
+	defaults.RemindBeforeDays = remindDays
+	return models.NewSiteLoginStateRepository(db).EnsureLoginStateRow(defaults)
 }
 
 func parseChannelIDs(raw string) []uint {

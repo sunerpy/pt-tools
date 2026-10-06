@@ -140,6 +140,7 @@ func (s *Server) Serve(addr string) error {
 	mux.HandleFunc("/api/v2/userinfo/registered", s.auth(s.apiUserInfoRegisteredSites))
 	mux.HandleFunc("/api/v2/userinfo/cache/clear", s.auth(s.apiUserInfoClearCache))
 	s.registerLoginStateRoutes(mux)
+	s.registerAttendanceRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
@@ -972,6 +973,10 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/sites/")
 	// 拦截 RESTful 形态的 login-state 子路径：/api/sites/{name}/login-state[/{action}]
 	// 转发到既有的 login-state 处理器，保持与 apiSiteLoginStateRouter 行为一致（siteName 原样传递）。
+	if siteName, ok := strings.CutSuffix(name, "/attendance"); ok && siteName != "" && !strings.Contains(siteName, "/") {
+		s.handleSiteAttendance(w, r, siteName)
+		return
+	}
 	if idx := strings.Index(name, "/login-state"); idx >= 0 {
 		siteName := name[:idx]
 		action := strings.TrimPrefix(name[idx:], "/login-state")
@@ -1044,9 +1049,11 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 		global.GetSlogger().Infof("[RSS] 站点配置保存成功: site=%s", name)
 		// 异步重新加载并触发任务重启，让 API 快速返回
 		go func() {
-			// 刷新 UserInfoService 站点注册
+			// 刷新 UserInfoService 站点注册，成功后再请求一次登录探测
 			if err := RefreshSiteRegistrations(s.store); err != nil {
 				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
+			} else {
+				s.requestLoginProbe(string(sg))
 			}
 			cfg, _ := s.store.Load()
 			if cfg != nil {

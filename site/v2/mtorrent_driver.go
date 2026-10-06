@@ -446,6 +446,10 @@ func (d *MTorrentDriver) executeDirectly(ctx context.Context, req MTorrentReques
 		fmt.Printf("[DEBUG MTorrent] genDlToken response: StatusCode=%d, Body=%s\n", resp.StatusCode, string(resp.Body))
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	// Check for authentication errors
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials
@@ -579,6 +583,13 @@ func (d *MTorrentDriver) ParseUserInfo(res MTorrentResponse) (UserInfo, error) {
 	if userData.CreatedDate != "" {
 		if joinTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.CreatedDate); err == nil {
 			info.JoinDate = joinTime.Unix()
+		}
+	}
+
+	// 最近登录：登录探测把它写进 API 登录时间
+	if userData.MemberStatus.LastLogin != "" {
+		if loginTime, err := ParseTimeInCST("2006-01-02 15:04:05", userData.MemberStatus.LastLogin); err == nil {
+			info.LastLogin = loginTime.Unix()
 		}
 	}
 

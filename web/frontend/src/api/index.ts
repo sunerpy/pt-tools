@@ -226,7 +226,23 @@ export interface SiteLoginState {
   last_access_at?: number;
   last_visit_at?: number;
   effective_last_active_at?: number;
+  /** 判定活跃取自哪一列；探测失败时可能是浏览器扩展上报的访问（last_visit） */
+  effective_source?:
+    | "last_access"
+    | "api_last_login"
+    | "cookie_last_login"
+    | "last_login"
+    | "last_visit"
+    | "none"
+    | "unknown";
   last_probe_at?: number;
+  /** 下一次定时探测的时间（只对自动模式有意义） */
+  next_probe_at?: number;
+  last_success_at?: number;
+  /** 当前失败连续段的开始时间，探测成功后清空 */
+  first_failure_at?: number;
+  /** 探测成功但站点的最近访问时间超过 48 小时没有前进：自动访问对该站无效 */
+  access_stale_since?: number;
   last_probe_status?: string;
   last_probe_error?: string;
   consecutive_probe_failures: number;
@@ -240,6 +256,42 @@ export interface SiteLoginState {
   tier: string;
   probe_mode: string;
 }
+
+/** 当天的签到状态：pending 之外都是最终结果；没有记录时为空串 */
+export type AttendanceStatus = "" | "pending" | "signed" | "already" | "failed" | "unsupported";
+
+/** GET /api/sites/attendance 的一项：能否签到、开关与当天的结果（时间为 Unix 秒） */
+export interface SiteAttendance {
+  site_name: string;
+  site_enabled: boolean;
+  attendance_enabled: boolean;
+  supported: boolean;
+  unsupported_reason?: string;
+  day: string;
+  status: AttendanceStatus;
+  attempts: number;
+  message?: string;
+  last_error?: string;
+  scheduled_at?: number;
+  next_attempt_at?: number;
+  last_attempt_at?: number;
+}
+
+/** 每日签到时间窗（HH:MM，服务端时区） */
+export interface AttendanceSettings {
+  window_start: string;
+  window_end: string;
+}
+
+export const attendanceApi = {
+  list: () => api.get<SiteAttendance[]>("/api/sites/attendance"),
+  signNow: (name: string) => api.post<SiteAttendance>(`/api/sites/${name}/attendance`),
+  setEnabled: (name: string, enabled: boolean) =>
+    api.put<SiteAttendance>(`/api/sites/${name}/attendance`, { enabled }),
+  getSettings: () => api.get<AttendanceSettings>("/api/sites/attendance/settings"),
+  saveSettings: (data: AttendanceSettings) =>
+    api.put<AttendanceSettings>("/api/sites/attendance/settings", data),
+};
 
 export const sitesApi = {
   list: (signal?: AbortSignal) => api.get<Record<string, SiteConfig>>("/api/sites", { signal }),
@@ -1526,6 +1578,8 @@ export const chatopsApi = {
 export interface CloakConfig {
   endpoint: string;
   has_token: boolean;
+  /** 登录探测后备使用的 profile；与端点、token 三项齐全才启用后备 */
+  profile_id: string;
   manager_version: string | null;
 }
 
@@ -1548,7 +1602,7 @@ export interface CloakTestResult {
 
 export const cloakApi = {
   getConfig: () => api.get<CloakConfig>("/api/cloak/config"),
-  updateConfig: (data: { endpoint: string; token?: string }) =>
+  updateConfig: (data: { endpoint: string; token?: string; profile_id?: string }) =>
     api.put<void>("/api/cloak/config", data),
   testConnection: (data?: { endpoint?: string; token?: string }) =>
     api.post<CloakTestResult>("/api/cloak/test", data ?? {}),

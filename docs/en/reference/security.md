@@ -23,6 +23,8 @@ These are encrypted with AES-256-GCM, using the key in `secret.key`, before they
 
 The key is generated on first start. You can also supply a base64 key in the environment variable `PT_TOOLS_SECRET_KEY`, which takes precedence over the `secret.key` file.
 
+Earlier versions also kept a plaintext copy of each cookie in the `site_settings` table. On the first start after upgrading, pt-tools encrypts any cookie that only had the plaintext copy and then clears the plaintext; it writes no backup for this step. Backups that older upgrades left in `~/.pt-tools/backups/` (`site_settings_v8_to_v9_*.json`) contain plaintext cookies too; once the upgrade looks fine, you can delete them.
+
 > [!WARNING]
 > Site **API keys and passkeys are currently stored in the database in plain text**. Make the data folder and its backups readable only by the user running pt-tools, and keep them out of shared folders and public cloud storage.
 
@@ -37,13 +39,15 @@ The notification channel list never returns credentials; they are decrypted and 
 
 ## What it connects to
 
-| Destination                          | Why                                                                                           |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status                       |
-| The downloaders you configure        | Pushing torrents and reading tasks and free space                                             |
-| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                             |
-| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                           |
-| A CloakBrowser Manager               | Only when you have configured one and turned it on for a site, as a fallback for login checks |
+| Destination                          | Why                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------- |
+| The trackers you add                 | Fetching feeds, searching, reading statistics and checking login status               |
+| The downloaders you configure        | Pushing torrents and reading tasks and free space                                     |
+| The notification channels you enable | Sending notifications; Telegram receives commands by long polling                     |
+| GitHub (api.github.com)              | Checking for new releases; downloading one when the binary upgrades                   |
+| A CloakBrowser Manager               | Only after you set its endpoint, token and profile ID, as a fallback for login checks |
+
+The [CloakBrowser fallback](../guide/site-login-monitoring.md#cloakbrowser-fallback) hands the site's cookies to the CloakBrowser you deploy, which then opens the site's pages.
 
 When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; `ALL_PROXY` applies only to site access and downloader connections. pt-tools has no analytics or telemetry and sends no usage data to anyone.
 

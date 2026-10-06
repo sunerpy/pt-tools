@@ -1,6 +1,6 @@
 # PT Tools Helper 浏览器扩展
 
-PT 站点数据采集助手，一键采集站点数据、同步 Cookie 到 pt-tools。
+PT 站点数据采集助手，一键采集站点数据、同步 Cookie 到 pt-tools。完整说明见文档站的[浏览器扩展](https://firlab.app/pt-tools/guide/browser-extension)。
 
 ## 安装
 

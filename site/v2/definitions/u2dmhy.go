@@ -22,6 +22,7 @@ var U2DMHYDefinition = &v2.SiteDefinition{
 	Aka:            []string{"U2", "動漫花園"},
 	Description:    "以动漫资源为主的 PT 站点，使用 UCoin 经济体系",
 	Schema:         v2.SchemaNexusPHP,
+	Attendance:     &v2.AttendanceConfig{Unsupported: "签到需要答题，暂不支持自动签到"},
 	URLs:           []string{"https://u2.dmhy.org/"},
 	FaviconURL:     "https://u2.dmhy.org/favicon.ico",
 	AuthMethod:     v2.AuthMethodCookie,

@@ -69,7 +69,7 @@
 | `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`     | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录） |
 | `public/screens/`                                                                                     | `/screens/*.webp`             | 首页截图，见下文「截图」                                 |
 | `guide/images/`                                                                                       | 随页面发布                    | 页面引用的图片                                           |
-| `README.md`、`brand.md`、`design/webui-board-spec.md`、`guide/chatops-mcp-agent-design.md`、`images/` | 不发布                        | 仓库内资料                                               |
+| `README.md`、`brand.md`、`design/webui-board-spec.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版           |
 
 `web/frontend/public/logo.svg` 也会同步过去，作为站点图标。
 
@@ -134,7 +134,7 @@ cd ../firlab/pt-tools && pnpm install --frozen-lockfile && pnpm dev    # http://
 
 ### 截图
 
-截图是 `public/screens/` 下的 WebP 文件，来自真实的 Web UI 加载验收假数据（`web/frontend/scripts/board-fixtures.mjs`）后的画面，不会出现真实账号或地址：
+截图是 `public/screens/` 和 `guide/images/chatops/` 下的 WebP 文件，来自真实的 Web UI 加载验收假数据（`web/frontend/scripts/board-fixtures.mjs`）后的画面，不会出现真实账号或地址：
 
 ```bash
 make build-frontend
@@ -143,4 +143,4 @@ HOME=$(mktemp -d) /tmp/pt-tools web --host 127.0.0.1 --port 18310 &
 node web/frontend/scripts/docs-screens.mjs http://127.0.0.1:18310
 ```
 
-脚本用 Chrome 的 CDP 截取桌面 1440 × 900 的用户统计页和站点列表、手机 375 × 812 的用户统计页，明暗主题各一张，写回 `public/screens/`。Chrome 路径可用 `PT_CHROME` 指定。改了截图尺寸要同步修改两个首页中的 `width` 和 `height`；提交前逐张检查图片。界面的文字或布局变化后重新截图。
+脚本用 Chrome 的 CDP 截取桌面 1440 × 900 的用户统计页和站点列表、手机 375 × 812 的用户统计页，明暗主题各一张，写回 `public/screens/`；再用明亮主题截取 ChatOps 指南的 8 张配图（通道列表、添加通道、Telegram 与 QQ 的凭证、绑定列表与生成绑定码、操作审计、RSS 通知日志），写回 `guide/images/chatops/`。凭证里的 Token 和用户 ID 是脚本里的示例值；截图里的版本号取 `.release-please-manifest.json` 的当前版本。仓库根目录的 README 与 `readme/README.en.md` 用的也是 `public/screens/` 这几张。Chrome 路径可用 `PT_CHROME` 指定。改了截图尺寸要同步修改两个首页中的 `width` 和 `height`；提交前逐张检查图片。界面的文字或布局变化后重新截图。

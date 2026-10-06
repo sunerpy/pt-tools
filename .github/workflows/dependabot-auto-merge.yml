@@ -7,32 +7,57 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: read
+
+# Dependabot 推新 head 时取消还在等旧 head 的那一轮
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   auto-merge:
     name: Auto-merge Dependabot PR
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     if: github.actor == 'dependabot[bot]'
 
     steps:
       - name: Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # 仅自动合并 patch 和 minor 更新，major 更新需要人工审核
-      - name: Auto-merge minor and patch updates
+      # 仅自动合并 patch 和 minor 更新，major 更新需要人工审核。
+      # 仓库没有必需检查，`gh pr merge --auto` 会立刻合并、不等 CI（#563 在 CI 跑完前就进了 main），
+      # 所以这里等这个 head 上的 CI Success：成功才合并，失败或 40 分钟内没有结果就留给人工。
+      # 用 GITHUB_TOKEN 合并不会再触发 main 上的 workflow；PR 上的 CI 验的就是这个 head。
+      - name: Merge minor and patch updates after CI Success
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         env:
           DEP_NAMES: ${{ steps.metadata.outputs.dependency-names }}
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Auto-merging ${DEP_NAMES} (${UPDATE_TYPE})"
-          gh pr merge --auto --squash "$PR_URL"
+          set -euo pipefail
+          echo "Waiting for CI Success on ${HEAD_SHA} before merging ${DEP_NAMES} (${UPDATE_TYPE})"
+          deadline=$((SECONDS + 2400))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            result=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?check_name=CI%20Success" \
+              --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // ""')
+            case "$result" in
+              success)
+                gh pr merge --squash --match-head-commit "$HEAD_SHA" "$PR_URL"
+                exit 0 ;;
+              "") sleep 20 ;;
+              *)
+                echo "::warning::CI Success concluded '${result}' on ${HEAD_SHA}; leaving the PR for review."
+                exit 0 ;;
+            esac
+          done
+          echo "::warning::CI Success did not finish within 40 minutes; leaving the PR for review."
 
       - name: Skip major updates
         if: steps.metadata.outputs.update-type == 'version-update:semver-major'

@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0-rc.5](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.4...v0.49.0-rc.5) (2026-10-05)
+
+
+### Bug Fixes
+
+* **config:** 拒绝修改内置站点的地址 ([#579](https://github.com/sunerpy/pt-tools/issues/579)) ([a4479c6](https://github.com/sunerpy/pt-tools/commit/a4479c64e634218d315d8eb01c293ff6b193e525))
+* **config:** 站点 Cookie 只以密文落库，并迁移清除存量明文 ([#578](https://github.com/sunerpy/pt-tools/issues/578)) ([c625d87](https://github.com/sunerpy/pt-tools/commit/c625d87a8332328a7281c8cb7a26c4d0cd49ef6d))
+
+## [0.49.0-rc.4](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.3...v0.49.0-rc.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **site-login:** 探测认证方式说明补上 Passkey ([#575](https://github.com/sunerpy/pt-tools/issues/575)) ([91dfd8d](https://github.com/sunerpy/pt-tools/commit/91dfd8dc2e0c5f40ae6903ed138698110047ce31))
+
+## [0.49.0-rc.3](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.2...v0.49.0-rc.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **site-login:** 修正投递静默判断、访问未生效清除与签到请求方法 ([#573](https://github.com/sunerpy/pt-tools/issues/573)) ([64f04db](https://github.com/sunerpy/pt-tools/commit/64f04db6a12d304c728f15b11c8fa9ceeea7a5ba))
+
+## [0.49.0-rc.2](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.1...v0.49.0-rc.2) (2026-10-05)
+
+
+### Features
+
+* **site-login:** 登录探测接通 CloakBrowser 后备 ([#571](https://github.com/sunerpy/pt-tools/issues/571)) ([74d2e9f](https://github.com/sunerpy/pt-tools/commit/74d2e9f4e3ea05cc865685607a8228edee22bf78))
+
+## [0.49.0-rc.1](https://github.com/sunerpy/pt-tools/compare/v0.48.0...v0.49.0-rc.1) (2026-10-05)
+
+
+### Features
+
+* **site-login:** 新增每日签到与 /signin 命令 ([#569](https://github.com/sunerpy/pt-tools/issues/569)) ([ad17f58](https://github.com/sunerpy/pt-tools/commit/ad17f582cebe0a90fb53a114f6246e3df948d07c))
+
+
+### Bug Fixes
+
+* **site-login:** 登录探测复用用户信息服务并在凭证更新后即时探测 ([#568](https://github.com/sunerpy/pt-tools/issues/568)) ([bc86dd7](https://github.com/sunerpy/pt-tools/commit/bc86dd7039a54cd2b1259d249d1b9c2a2dea97ab))
+* **site-login:** 登录探测改为到期调度并修复提醒投递与判定活跃 ([#566](https://github.com/sunerpy/pt-tools/issues/566)) ([b2a6f8d](https://github.com/sunerpy/pt-tools/commit/b2a6f8da2d36389f901dd3e9f7aec100af4b07f4))
+
 ## [0.48.0](https://github.com/sunerpy/pt-tools/compare/v0.47.3...v0.48.0) (2026-10-01)
 
 

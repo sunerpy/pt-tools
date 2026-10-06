@@ -85,11 +85,12 @@ var webCmd = &cobra.Command{
 		mgr := scheduler.NewManager()
 		mgr.InitFreeEndMonitor()
 
+		var userInfoService *v2.UserInfoService
 		userInfoRepo, err := v2.NewDBUserInfoRepo(global.GlobalDB.DB)
 		if err != nil {
 			global.GetSlogger().Warnf("初始化 UserInfoRepo 失败: %v", err)
 		} else {
-			userInfoService := v2.NewUserInfoService(v2.UserInfoServiceConfig{
+			userInfoService = v2.NewUserInfoService(v2.UserInfoServiceConfig{
 				Repo:     userInfoRepo,
 				CacheTTL: 5 * time.Minute,
 				Logger:   global.GetLogger(),
@@ -239,7 +240,7 @@ var webCmd = &cobra.Command{
 			go runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions)
 		}
 
-		wireLoginReminderMonitor(mgr, store, siteRegistry, bs)
+		wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
 
 		srv := web.NewServer(store, mgr)
 		if bs != nil {
@@ -486,6 +487,7 @@ func bootstrapChatOps(
 		RSSWizard:  &chatopsRSSWizardService{store: store, db: db},
 		Bindings:   &commandsBindingResolver{lookup: bindings},
 		Sessions:   sessionStore,
+		Attendance: attendanceCommands{mgr: mgr},
 	})
 
 	chain := chatops.NewMessageChain(

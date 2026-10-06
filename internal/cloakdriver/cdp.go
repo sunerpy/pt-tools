@@ -31,9 +31,20 @@ func NewCDPSession(parent context.Context, cdpURL string) (*CDPSession, error) {
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(parent, cdpURL)
 	taskCtx, taskCancel := chromedp.NewContext(allocCtx)
 
-	verifyCtx, verifyCancel := context.WithTimeout(taskCtx, 5*time.Second)
-	defer verifyCancel()
-	if err := chromedp.Run(verifyCtx); err != nil {
+	// chromedp 把第一次 Run 用的 ctx 当作标签页的生命周期：在它上面套超时并在返回时取消，
+	// 会把刚建好的标签页一起关掉，之后每次 Run 都报 context canceled。所以第一次 Run 直接用 taskCtx，
+	// 连接时限由计时器负责。
+	connected := make(chan error, 1)
+	go func() { connected <- chromedp.Run(taskCtx) }()
+	timer := time.NewTimer(cdpConnectTimeout)
+	defer timer.Stop()
+	var err error
+	select {
+	case err = <-connected:
+	case <-timer.C:
+		err = context.DeadlineExceeded
+	}
+	if err != nil {
 		taskCancel()
 		allocCancel()
 		return nil, fmt.Errorf("cdp connect failed: %w", err)
@@ -45,6 +56,9 @@ func NewCDPSession(parent context.Context, cdpURL string) (*CDPSession, error) {
 		taskCancel:  taskCancel,
 	}, nil
 }
+
+// cdpConnectTimeout 是 NewCDPSession 连上浏览器并建好标签页的时限。
+const cdpConnectTimeout = 5 * time.Second
 
 // Close releases allocator and task contexts. Safe to call multiple times.
 func (s *CDPSession) Close() {
@@ -67,7 +81,10 @@ func (s *CDPSession) TaskContext() context.Context {
 // InjectCookies enforces R35: clear all browser cookies first, then set
 // the supplied cookies. This prevents stale-cookie pollution from prior
 // sessions in the persistent CloakBrowser profile.
-func (s *CDPSession) InjectCookies(ctx context.Context, _ string, cookies []*http.Cookie) error {
+//
+// 从站点配置的 Cookie 串解析出的 Cookie 没有 Domain 与 Path，这类 Cookie 按 targetURL 设置
+// （Chrome 由 url 推出域名），Path 取 "/"；否则 Network.setCookie 会因缺少 url 与 domain 而失败。
+func (s *CDPSession) InjectCookies(ctx context.Context, targetURL string, cookies []*http.Cookie) error {
 	return chromedp.Run(
 		ctx,
 		network.ClearBrowserCookies(),
@@ -76,12 +93,20 @@ func (s *CDPSession) InjectCookies(ctx context.Context, _ string, cookies []*htt
 				if c == nil {
 					continue
 				}
-				err := network.SetCookie(c.Name, c.Value).
-					WithDomain(c.Domain).
-					WithPath(c.Path).
+				path := c.Path
+				if path == "" {
+					path = "/"
+				}
+				set := network.SetCookie(c.Name, c.Value).
+					WithPath(path).
 					WithHTTPOnly(c.HttpOnly).
-					WithSecure(c.Secure).
-					Do(ctx)
+					WithSecure(c.Secure)
+				if c.Domain != "" {
+					set = set.WithDomain(c.Domain)
+				} else {
+					set = set.WithURL(targetURL)
+				}
+				err := set.Do(ctx)
 				if err != nil {
 					return fmt.Errorf("set cookie %s: %w", c.Name, err)
 				}

@@ -15,6 +15,7 @@ var OpenCDDefinition = &v2.SiteDefinition{
 	Aka:            []string{"OCD", "皇后"},
 	Description:    "OpenCD 音樂 PT 站點",
 	Schema:         v2.SchemaNexusPHP,
+	Attendance:     &v2.AttendanceConfig{Unsupported: "签到需要验证码，暂不支持自动签到"},
 	URLs:           []string{"https://open.cd/"},
 	FaviconURL:     "https://open.cd/favicon.ico",
 	TimezoneOffset: "+0800",

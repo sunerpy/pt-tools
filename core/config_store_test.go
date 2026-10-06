@@ -506,6 +506,34 @@ func TestUpsertSiteWithRSS_PreservesLoginStateCookieForAPIKeySite(t *testing.T) 
 	require.Equal(t, loginCookie, loaded.Cookie)
 }
 
+// 站点 Cookie 只以密文落库：两种保存方式都不再把明文写进旧的 cookie 列，读取照常得到明文。
+func TestUpsertSite_StoresCookieOnlyEncrypted(t *testing.T) {
+	writeTestSecretKey(t)
+	db, err := NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	s := NewConfigStore(db)
+	enabled := true
+	cookie := "uid=1; pass=secret"
+
+	require.NoError(t, s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{
+		Enabled: &enabled, AuthMethod: "cookie", Cookie: cookie, APIUrl: "http://api",
+	}))
+	_, err = s.UpsertSite(models.SiteGroup("hdsky"), models.SiteConfig{Enabled: &enabled, AuthMethod: "cookie", Cookie: cookie})
+	require.NoError(t, err)
+
+	for _, name := range []string{"springsunday", "hdsky"} {
+		var row models.SiteSetting
+		require.NoError(t, db.DB.Where("name = ?", name).First(&row).Error)
+		require.Empty(t, row.Cookie, name)
+		plain, err := s.DecryptCookie(row.CookieEncrypted)
+		require.NoError(t, err, name)
+		require.Equal(t, cookie, plain, name)
+		sc, err := s.GetSiteConf(models.SiteGroup(name))
+		require.NoError(t, err, name)
+		require.Equal(t, cookie, sc.Cookie, name)
+	}
+}
+
 func TestUpsertSiteWithRSS_CookieAuthStillEncryptsCookie(t *testing.T) {
 	writeTestSecretKey(t)
 	db, err := NewTempDBDir(t.TempDir())
@@ -843,15 +871,19 @@ func TestUpsertSiteWithRSS_Validation(t *testing.T) {
 	// 预置站点（SpringSunday）不需要 APIUrl，由后端常量提供
 	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.NoError(t, err) // 预置站点允许空 APIUrl
-	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
+	// 之后的保存带回已存的地址（空）：内置站点的地址由站点定义管理，不能改。
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.Error(t, err)
 	err = s.UpsertSiteWithRSS(models.SiteGroup("mteam"), models.SiteConfig{AuthMethod: "api_key", APIUrl: "http://api", Cookie: "c", APIKey: "k", RSS: []models.RSSConfig{{Name: "r", URL: "u"}}})
 	assert.NoError(t, err)
 	// RSS 列表允许为空
-	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{}})
 	assert.NoError(t, err)
-	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "", Cookie: "c", RSS: []models.RSSConfig{{Name: "r", URL: "http://rss"}}})
 	assert.NoError(t, err)
+	// 改成别的地址被拒绝。
+	err = s.UpsertSiteWithRSS(models.SiteGroup("springsunday"), models.SiteConfig{AuthMethod: "cookie", APIUrl: "http://api", Cookie: "c"})
+	assert.ErrorContains(t, err, "内置站点的地址由站点定义管理")
 }
 
 func TestListSites_ApplyDefaults(t *testing.T) {
@@ -1116,13 +1148,13 @@ func TestSaveCloakConfig_CreateUpdateClear(t *testing.T) {
 	db := newCloakDB(t)
 	s := NewConfigStore(db)
 
-	require.NoError(t, s.SaveCloakConfig("https://a", "tok-a", false))
+	require.NoError(t, s.SaveCloakConfig("https://a", "tok-a", false, nil))
 	cfg, err := s.GetCloakConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://a", cfg.Endpoint)
 	assert.True(t, cfg.HasToken)
 
-	require.NoError(t, s.SaveCloakConfig("https://b", "", false))
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, nil))
 	tok, err := s.GetCloakToken()
 	require.NoError(t, err)
 	assert.Equal(t, "tok-a", tok)
@@ -1130,10 +1162,54 @@ func TestSaveCloakConfig_CreateUpdateClear(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://b", ep)
 
-	require.NoError(t, s.SaveCloakConfig("https://b", "ignored", true))
+	require.NoError(t, s.SaveCloakConfig("https://b", "ignored", true, nil))
 	cfg, err = s.GetCloakConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.HasToken)
+}
+
+// M1d：profile ID 与 token 一样是部分更新：nil 保持不变，空串清除，前后空白去掉。
+func TestSaveCloakConfig_ProfileID(t *testing.T) {
+	writeTestSecretKey(t)
+	db := newCloakDB(t)
+	s := NewConfigStore(db)
+
+	profile := "  profile-1  "
+	require.NoError(t, s.SaveCloakConfig("https://a", "tok", false, &profile))
+	cfg, err := s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "profile-1", cfg.ProfileID)
+
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, nil))
+	cfg, err = s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "profile-1", cfg.ProfileID, "nil keeps the stored profile")
+	assert.True(t, cfg.HasToken)
+
+	empty := ""
+	require.NoError(t, s.SaveCloakConfig("https://b", "", false, &empty))
+	cfg, err = s.GetCloakConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.ProfileID)
+}
+
+// 后备注入浏览器的 Cookie 与 ListSites 给主通道的取法一致：有密文解密，没有密文用旧版明文列。
+func TestSiteCookiePlaintext(t *testing.T) {
+	writeTestSecretKey(t)
+	s := NewConfigStore(newCloakDB(t))
+
+	cipher, err := s.EncryptCookie("uid=1; pass=abc")
+	require.NoError(t, err)
+	got, err := s.SiteCookiePlaintext(models.SiteSetting{CookieEncrypted: cipher, Cookie: "stale=1"})
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=abc", got)
+
+	got, err = s.SiteCookiePlaintext(models.SiteSetting{Cookie: "legacy=1"})
+	require.NoError(t, err)
+	assert.Equal(t, "legacy=1", got)
+
+	_, err = s.SiteCookiePlaintext(models.SiteSetting{CookieEncrypted: "not-a-ciphertext"})
+	assert.Error(t, err)
 }
 
 func TestSetCloakToken_CreateWithToken(t *testing.T) {
@@ -1416,7 +1492,7 @@ func TestConfigStore_ErrorPaths_ClosedDB(t *testing.T) {
 	assert.Error(t, err)
 	assert.Error(t, s.SetCloakEndpoint("https://y"))
 	assert.Error(t, s.SetCloakToken("tok"))
-	assert.Error(t, s.SaveCloakConfig("https://y", "tok", false))
+	assert.Error(t, s.SaveCloakConfig("https://y", "tok", false, nil))
 	_, err = s.GetGlobalOnly()
 	assert.NoError(t, err)
 }
@@ -1483,7 +1559,7 @@ func TestCloakToken_EncryptErrorPaths(t *testing.T) {
 	s := NewConfigStore(db)
 
 	require.Error(t, s.SetCloakToken("plaintext"))
-	require.Error(t, s.SaveCloakConfig("https://x", "plaintext", false))
+	require.Error(t, s.SaveCloakConfig("https://x", "plaintext", false, nil))
 
 	require.NoError(t, db.DB.Create(&models.CloakSettings{Endpoint: "https://pre"}).Error)
 	require.Error(t, s.SetCloakToken("plaintext"))

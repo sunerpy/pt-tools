@@ -143,11 +143,11 @@ The WebSocket path is always `/onebot/v11/ws`; make sure the path in NapCat's UR
 
 After saving, the channel's status first shows Running (运行中: the port is listening), then Connected (已连接) once NapCat has connected.
 
-![The notification channel list in pt-tools](../../guide/images/chatops/chatops-notifications-list.png)
+![The notification channel list in pt-tools](../../guide/images/chatops/chatops-notifications-list.webp)
 
 > Web UI → ChatOps → Notifications: once added, the QQ channel shows as enabled.
 
-![The QQ channel's credentials in pt-tools](../../guide/images/chatops/chatops-qq-detail.png)
+![The QQ channel's credentials in pt-tools](../../guide/images/chatops/chatops-qq-detail.webp)
 
 > Credentials and connection, on the QQ channel's details page, is where you see and change the listen address, the access token and the admin list.
 
@@ -179,7 +179,7 @@ In the web UI, open ChatOps → ChatOps binding (ChatOps 绑定) and click **Gen
 - Leave the validity at 5 minutes (the default)
 - Click Generate
 
-![The dialog for generating a binding code](../../guide/images/chatops/chatops-bindings-dialog.png)
+![The dialog for generating a binding code](../../guide/images/chatops/chatops-bindings-dialog.webp)
 
 > When generating a binding code, you choose the channel it is for and how long it is valid (5 minutes, 1 hour, 1 day, 30 days or no expiry).
 
@@ -197,7 +197,7 @@ When the bot replies 绑定成功 ("linked"), you are done.
 
 ### Trying `/help`
 
-Once linked, send `/help`; the bot lists all 13 commands.
+Once linked, send `/help`; the bot lists every command.
 
 A linked account has admin rights, so it can use admin commands such as `/pause`, `/resume` and `/delete`.
 

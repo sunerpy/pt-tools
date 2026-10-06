@@ -371,6 +371,8 @@ type SiteDefinition struct {
 	LevelRequirements []SiteLevelRequirement    `json:"levelRequirements,omitempty"`
 	Selectors         *SiteSelectors            `json:"selectors,omitempty"`
 	DetailParser      *DetailParserConfig       `json:"detailParser,omitempty"`
+	// Attendance 是每日签到配置；为空时 NexusPHP 站点用 DefaultNexusPHPAttendance，其他架构不支持签到。
+	Attendance *AttendanceConfig `json:"attendance,omitempty"`
 
 	// CreateDriver is an optional custom driver factory for this site.
 	// If nil, the driver is created based on Schema field.

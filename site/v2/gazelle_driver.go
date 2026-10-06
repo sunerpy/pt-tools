@@ -208,6 +208,10 @@ func (d *GazelleDriver) Execute(ctx context.Context, req GazelleRequest) (Gazell
 		StatusCode: resp.StatusCode,
 	}
 
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
+	}
+
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return result, ErrInvalidCredentials
 	}

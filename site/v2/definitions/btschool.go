@@ -10,6 +10,7 @@ var BTSchoolDefinition = &v2.SiteDefinition{
 	Aka:             []string{"学校", "BTS"},
 	Description:     "汇聚每一个人的影响力",
 	Schema:          v2.SchemaNexusPHP,
+	Attendance:      &v2.AttendanceConfig{Unsupported: "签到方式与常见 NexusPHP 站点不同，暂不支持自动签到"},
 	URLs:            []string{"https://pt.btschool.club/"},
 	LegacyURLs:      []string{"https://pt.btschool.net/"},
 	FaviconURL:      "https://pt.btschool.club/favicon.ico",

@@ -280,8 +280,9 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		method = "GET"
 	}
 
+	post := strings.EqualFold(method, http.MethodPost)
 	fullURL := baseURL + req.Path
-	if len(req.Params) > 0 {
+	if len(req.Params) > 0 && !post {
 		fullURL += "?" + req.Params.Encode()
 	}
 
@@ -297,7 +298,15 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 		fmt.Printf("\n[CURL] %s\n", buildCurlCommand(method, fullURL, headers))
 	}
 
-	resp, err := d.httpClient.Get(ctx, fullURL, headers)
+	var resp *HTTPResponse
+	var err error
+	if post {
+		// POST 时参数作为表单提交（目前只有配置了 POST 的签到会走这里）。
+		headers["Content-Type"] = "application/x-www-form-urlencoded"
+		resp, err = d.httpClient.Post(ctx, fullURL, []byte(req.Params.Encode()), headers)
+	} else {
+		resp, err = d.httpClient.Get(ctx, fullURL, headers)
+	}
 	if err != nil {
 		return NexusPHPResponse{}, fmt.Errorf("execute request: %w", err)
 	}
@@ -305,6 +314,10 @@ func (d *NexusPHPDriver) executeDirectly(ctx context.Context, req NexusPHPReques
 	result := NexusPHPResponse{
 		RawBody:    resp.Body,
 		StatusCode: resp.StatusCode,
+	}
+
+	if resp.IsCloudflareChallenge() {
+		return result, fmt.Errorf("HTTP %d: %w", resp.StatusCode, ErrCloudflareChallenge)
 	}
 
 	// Check for authentication errors
@@ -1094,8 +1107,8 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 
 	res, err := d.Execute(ctx, req)
 	if err != nil {
-		// Return critical errors like session expired
-		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) {
+		// Return critical errors like session expired; a Cloudflare challenge blocks every page as well
+		if errors.Is(err, ErrSessionExpired) || errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrCloudflareChallenge) {
 			return result, err
 		}
 		return result, nil // Ignore other errors, return empty result

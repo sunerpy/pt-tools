@@ -78,6 +78,10 @@ ChatOps → RSS notification log (RSS 通知日志) shows, for every notificatio
 - `last_error`: the latest error (for troubleshooting)
 - `payload_json`: the title and text actually sent
 
+![The RSS notification log](../../guide/images/chatops/chatops-rss-notifications.webp)
+
+> Web UI → ChatOps → RSS notification log (RSS 通知日志): filter by result, and expand a row to see why a delivery failed and the message that was sent.
+
 ---
 
 ## The four modes in detail

@@ -131,8 +131,9 @@ func TestMigrationV9ToV10Forward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("获取版本失败: %v", err)
 	}
-	if version != 10 {
-		t.Fatalf("schema version = %d, want 10", version)
+	// 迁移链会继续跑到最新版本（v11 起清除明文 Cookie）。
+	if version != CurrentSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, CurrentSchemaVersion)
 	}
 	if hooks.backupCalls.Load() < 1 {
 		t.Fatal("backup hook 未调用")

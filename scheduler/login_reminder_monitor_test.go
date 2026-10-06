@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -139,31 +138,6 @@ func TestEffectiveSourceForLog_AllBranches(t *testing.T) {
 	assert.Equal(t, "unknown", effectiveSourceForLog(&models.SiteLoginState{}, other))
 }
 
-func TestMaybeNotifyProbeFailure_Branches(t *testing.T) {
-	db := newReminderTestDB(t)
-	m := newReminderMonitorForTest(db, time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
-	ctx := context.Background()
-	setting := models.SiteSetting{Name: "HDSKY"}
-
-	// OK status → no-op (router nil, no panic).
-	m.maybeNotifyProbeFailure(ctx, setting, &models.SiteLoginState{}, &sitelogin.ProbeResult{Status: sitelogin.OK})
-
-	// Non-session-expired with nil LastProbeAt → returns early.
-	m.maybeNotifyProbeFailure(ctx, setting, &models.SiteLoginState{}, &sitelogin.ProbeResult{Status: sitelogin.NETWORK_ERROR})
-
-	// Non-session-expired but recent probe (< warn threshold) → early.
-	recent := m.clock.Now().Add(-time.Minute)
-	m.maybeNotifyProbeFailure(ctx, setting, &models.SiteLoginState{LastProbeAt: &recent},
-		&sitelogin.ProbeResult{Status: sitelogin.NETWORK_ERROR})
-
-	// SESSION_EXPIRED with router set → routes.
-	rec := &captureRouter{}
-	m.router = newCapturingRouter(rec)
-	state := &models.SiteLoginState{NotificationChannelIDs: "[1]"}
-	m.maybeNotifyProbeFailure(ctx, setting, state, &sitelogin.ProbeResult{Status: sitelogin.SESSION_EXPIRED})
-	assert.Equal(t, int32(1), rec.count.Load())
-}
-
 func TestDaysRemaining_DefaultThreshold(t *testing.T) {
 	now := time.Now()
 	effective := now.Add(-10 * 24 * time.Hour)
@@ -255,7 +229,6 @@ func TestProbeSiteInternal_UnknownModeSkips(t *testing.T) {
 
 func TestEvaluateReminder_FullRouteAndSave(t *testing.T) {
 	db := newReminderTestDB(t)
-	recorder := &captureRouter{}
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Create(&models.SiteSetting{Name: "HDSKY", Enabled: true}).Error)
 	access := now.Add(-29 * 24 * time.Hour) // 1 day remaining → imminent
@@ -266,8 +239,9 @@ func TestEvaluateReminder_FullRouteAndSave(t *testing.T) {
 	}).Error)
 
 	m := newReminderMonitorForTest(db, now)
-	m.router = newCapturingRouter(recorder)
+	recorder := attachCaptureNotifier(t, m, db)
 	m.evaluateReminder(context.Background(), models.SiteSetting{Name: "HDSKY"}, now)
+	m.notifier.DeliverDue(context.Background())
 
 	assert.Equal(t, int32(1), recorder.count.Load())
 	var state models.SiteLoginState
@@ -310,9 +284,9 @@ func TestEvaluateReminder_TierNoneSkips(t *testing.T) {
 		ReminderCron: "0 10,22 * * *", LastAccessAt: &access,
 	}).Error)
 	m := newReminderMonitorForTest(db, now)
-	recorder := &captureRouter{}
-	m.router = newCapturingRouter(recorder)
+	recorder := attachCaptureNotifier(t, m, db)
 	m.evaluateReminder(context.Background(), models.SiteSetting{Name: "HDSKY"}, now)
+	m.notifier.DeliverDue(context.Background())
 	assert.Equal(t, int32(0), recorder.count.Load())
 }
 
@@ -356,7 +330,7 @@ func TestProbeSiteInternal_ManualBypassesDisabledMode(t *testing.T) {
 	require.NotNil(t, state.LastProbeAt)
 }
 
-func TestProbeSiteInternal_ResolveFailureSkips(t *testing.T) {
+func TestProbeSiteInternal_ResolveFailureRecorded(t *testing.T) {
 	db := newReminderTestDB(t)
 	require.NoError(t, db.Create(&models.SiteSetting{Name: "HDSKY", Enabled: true}).Error)
 	m := newReminderMonitorForTest(db, time.Now())
@@ -365,7 +339,9 @@ func TestProbeSiteInternal_ResolveFailureSkips(t *testing.T) {
 
 	var state models.SiteLoginState
 	require.NoError(t, db.Where("site_name = ?", "HDSKY").First(&state).Error)
-	assert.Nil(t, state.LastProbeAt, "resolve failure must skip before persisting probe result")
+	require.NotNil(t, state.LastProbeAt, "resolve failures are recorded so the UI can show why")
+	assert.Equal(t, "UNKNOWN", state.LastProbeStatus)
+	assert.Contains(t, state.LastProbeError, errSendBoom.Error())
 }
 
 func TestUpdateAllMonitoredProgress_UpdatesProgress(t *testing.T) {
@@ -392,7 +368,6 @@ func TestUpdateAllMonitoredProgress_UpdatesProgress(t *testing.T) {
 
 func TestSendTestReminder_HappyPath(t *testing.T) {
 	db := newReminderTestDB(t)
-	recorder := &captureRouter{}
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	access := now.Add(-5 * 24 * time.Hour)
 	require.NoError(t, db.Create(&models.SiteSetting{Name: "HDSKY", Enabled: true}).Error)
@@ -401,7 +376,7 @@ func TestSendTestReminder_HappyPath(t *testing.T) {
 		NotificationChannelIDs: "[1]", LastAccessAt: &access,
 	}).Error)
 	m := newReminderMonitorForTest(db, now)
-	m.router = newCapturingRouter(recorder)
+	recorder := attachCaptureNotifier(t, m, db)
 	require.NoError(t, m.SendTestReminder(context.Background(), "HDSKY"))
 	assert.Equal(t, int32(1), recorder.count.Load())
 }
@@ -450,11 +425,14 @@ func TestEvaluateReminder_QuietHoursSkipsNonImminent(t *testing.T) {
 		ReminderCron: "0 3 * * *", LastReminderTier: tierNone, LastAccessAt: &access,
 	}).Error)
 	m := newReminderMonitorForTest(db, now)
-	m.quietHours = QuietHours{Start: "00:00", End: "07:00"}
-	recorder := &captureRouter{}
-	m.router = newCapturingRouter(recorder)
+	recorder := attachCaptureNotifier(t, m, db, quietConf(1, "00:00", "07:00"))
 	m.evaluateReminder(context.Background(), models.SiteSetting{Name: "HDSKY"}, now)
-	assert.Equal(t, int32(0), recorder.count.Load(), "quiet-hours must suppress non-imminent tier")
+	m.notifier.DeliverDue(context.Background())
+	assert.Equal(t, int32(0), recorder.count.Load(), "channel quiet hours must defer a non-imminent tier")
+
+	advanceClock(m, 4*time.Hour+time.Minute) // 07:01, quiet window over
+	m.notifier.DeliverDue(context.Background())
+	assert.Equal(t, int32(1), recorder.count.Load(), "deferred reminder is delivered once the channel's quiet window ends")
 }
 
 func TestEvaluateReminder_WindowAlreadySentSkips(t *testing.T) {
@@ -469,9 +447,9 @@ func TestEvaluateReminder_WindowAlreadySentSkips(t *testing.T) {
 		LastReminderSentAt: &sent, LastAccessAt: &access,
 	}).Error)
 	m := newReminderMonitorForTest(db, now)
-	recorder := &captureRouter{}
-	m.router = newCapturingRouter(recorder)
+	recorder := attachCaptureNotifier(t, m, db)
 	m.evaluateReminder(context.Background(), models.SiteSetting{Name: "HDSKY"}, now)
+	m.notifier.DeliverDue(context.Background())
 	assert.Equal(t, int32(0), recorder.count.Load(), "already sent in window must skip")
 }
 
@@ -508,8 +486,59 @@ func newReminderTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.SiteSetting{}, &models.SiteLoginState{}, &models.MigrationState{}))
+	require.NoError(t, db.AutoMigrate(
+		&models.SiteSetting{}, &models.SiteLoginState{}, &models.MigrationState{},
+		&models.NotificationConf{}, &models.MonitorNotificationLog{},
+	))
 	return db
+}
+
+// captureSender 记录经 live 通道发送的通知；err 非空时每次发送都失败。
+type captureSender struct {
+	mu        sync.Mutex
+	count     atomic.Int32
+	err       error
+	lastConf  uint
+	lastTitle string
+	lastText  string
+}
+
+func (c *captureSender) Send(_ context.Context, confID uint, title, text string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return c.err
+	}
+	c.count.Add(1)
+	c.lastConf, c.lastTitle, c.lastText = confID, title, text
+	return nil
+}
+
+func (c *captureSender) lastMessage() (string, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastTitle, c.lastText
+}
+
+func quietConf(id uint, start, end string) models.NotificationConf {
+	return models.NotificationConf{
+		ID: id, ChannelType: "capture", Name: fmt.Sprintf("capture-%d", id), Enabled: true,
+		QuietHoursStart: start, QuietHoursEnd: end,
+	}
+}
+
+// attachCaptureNotifier 建通知通道（默认一个无静默的通道 1），并给监控装上用假发送方的投递器。
+func attachCaptureNotifier(t *testing.T, m *LoginReminderMonitor, db *gorm.DB, confs ...models.NotificationConf) *captureSender {
+	t.Helper()
+	if len(confs) == 0 {
+		confs = []models.NotificationConf{quietConf(1, "", "")}
+	}
+	for i := range confs {
+		require.NoError(t, db.Create(&confs[i]).Error)
+	}
+	sender := &captureSender{}
+	m.notifier = NewMonitorNotifier(db, sender, m.clock, zap.NewNop().Sugar())
+	return sender
 }
 
 type fakeReminderSite struct {
@@ -549,43 +578,6 @@ type fakeDecryptor struct{}
 
 func (fakeDecryptor) Decrypt(setting models.SiteSetting) (string, error) {
 	return setting.Cookie, nil
-}
-
-type captureRouter struct {
-	count atomic.Int32
-	last  notify.Notification
-}
-
-func (c *captureRouter) ListNotificationConfs(context.Context) ([]models.NotificationConf, error) {
-	return []models.NotificationConf{{ID: 1, ChannelType: "capture", Name: "capture", Enabled: true}}, nil
-}
-
-type captureChannel struct {
-	sink *captureRouter
-}
-
-func (c *captureChannel) Type() string { return "capture" }
-
-func (c *captureChannel) Init(context.Context, *models.NotificationConf) error { return nil }
-
-func (c *captureChannel) SupportsInbound() bool { return false }
-
-func (c *captureChannel) Send(_ context.Context, n notify.Notification) error {
-	c.sink.last = n
-	c.sink.count.Add(1)
-	return nil
-}
-
-func (c *captureChannel) OnInbound(notify.InboundHandler) {}
-
-func (c *captureChannel) Close(context.Context) error { return nil }
-
-func (c *captureChannel) Healthy() bool { return true }
-
-func newCapturingRouter(c *captureRouter) *notify.Router {
-	registry := notify.NewRegistry()
-	registry.Register("capture", func() notify.Channel { return &captureChannel{sink: c} })
-	return notify.NewRouter(registry, nil, c)
 }
 
 type spyMonitor struct {
@@ -636,13 +628,15 @@ func TestEffectiveLastActiveProbeWins(t *testing.T) {
 	state := &models.SiteLoginState{
 		LastAccessAt:             &probe,
 		LastVisitAt:              &visit,
+		LastProbeStatus:          "OK",
 		ConsecutiveProbeFailures: 0,
 	}
 	got := EffectiveLastActive(state, now)
 	assert.Equal(t, probe, got, "fresh probe should win even though visit is newer")
 }
 
-func TestEffectiveLastActiveFallbackToVisit(t *testing.T) {
+// 探测失败时站点数据可能已过时：浏览器扩展上报的较新访问要计入判定（M1 问题 4）。
+func TestEffectiveLastActiveVisitWinsWhileProbeFailing(t *testing.T) {
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	probe := now.Add(-30 * 24 * time.Hour)
 	visit := now.Add(-2 * 24 * time.Hour)
@@ -652,13 +646,14 @@ func TestEffectiveLastActiveFallbackToVisit(t *testing.T) {
 		LastAccessAt:             &probe,
 		LastVisitAt:              &visit,
 		LastProbeAt:              &staleProbeAt,
+		LastProbeStatus:          "SESSION_EXPIRED",
 		ConsecutiveProbeFailures: 5,
 	}
 	got := EffectiveLastActive(state, now)
-	assert.Equal(t, probe, got, "last_access should win over extension visit even after stale probe failures")
+	assert.Equal(t, visit, got, "a newer browser visit must count once probes are failing")
 }
 
-func TestEffectiveLastActiveFallbackOnlyAfterStaleness(t *testing.T) {
+func TestEffectiveLastActiveVisitCountsRightAfterFailure(t *testing.T) {
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	probe := now.Add(-30 * 24 * time.Hour)
 	visit := now.Add(-2 * 24 * time.Hour)
@@ -668,10 +663,15 @@ func TestEffectiveLastActiveFallbackOnlyAfterStaleness(t *testing.T) {
 		LastAccessAt:             &probe,
 		LastVisitAt:              &visit,
 		LastProbeAt:              &freshProbeAt,
+		LastProbeStatus:          "NETWORK_ERROR",
 		ConsecutiveProbeFailures: 1,
 	}
 	got := EffectiveLastActive(state, now)
-	assert.Equal(t, probe, got, "1h failure shouldn't trigger fallback (need 12h+)")
+	assert.Equal(t, visit, got, "any non-OK latest probe lets the newer visit count; there is no 12h wait any more")
+
+	older := now.Add(-40 * 24 * time.Hour)
+	state.LastVisitAt = &older
+	assert.Equal(t, probe, EffectiveLastActive(state, now), "an older visit never moves the judgement backwards")
 }
 
 func TestRunReminderOnceCronWindowDedup(t *testing.T) {
@@ -740,7 +740,7 @@ func TestRunReminderOnceQuietHoursOverride(t *testing.T) {
 
 	imminent := time.Date(2026, 5, 18, 3, 0, 0, 0, time.UTC)
 	monitor := newReminderMonitorForTest(db, imminent)
-	monitor.quietHours = QuietHours{Start: "23:00", End: "08:00"}
+	recorder := attachCaptureNotifier(t, monitor, db, quietConf(1, "23:00", "08:00"))
 
 	stateAccess := time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Create(&models.SiteLoginState{
@@ -758,6 +758,8 @@ func TestRunReminderOnceQuietHoursOverride(t *testing.T) {
 	require.NoError(t, db.Where("site_name = ?", "HDSKY").First(&imminentRow).Error)
 	require.NotNil(t, imminentRow.LastReminderSentAt, "banned-imminent must override quiet hours")
 	assert.Equal(t, tierImminent, imminentRow.LastReminderTier)
+	monitor.notifier.DeliverDue(context.Background())
+	assert.Equal(t, int32(1), recorder.count.Load(), "banned-imminent is delivered even inside the channel's quiet window")
 }
 
 func TestRunReminderOnceQuietHoursNonImminent(t *testing.T) {
@@ -766,7 +768,7 @@ func TestRunReminderOnceQuietHoursNonImminent(t *testing.T) {
 
 	atQuiet := time.Date(2026, 5, 18, 3, 0, 0, 0, time.UTC)
 	monitor := newReminderMonitorForTest(db, atQuiet)
-	monitor.quietHours = QuietHours{Start: "23:00", End: "08:00"}
+	recorder := attachCaptureNotifier(t, monitor, db, quietConf(1, "23:00", "08:00"))
 
 	stateAccess := time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC)
 	require.NoError(t, db.Create(&models.SiteLoginState{
@@ -782,7 +784,13 @@ func TestRunReminderOnceQuietHoursNonImminent(t *testing.T) {
 
 	var row models.SiteLoginState
 	require.NoError(t, db.Where("site_name = ?", "HDSKY").First(&row).Error)
-	assert.Nil(t, row.LastReminderSentAt, "non-imminent tier in quiet hours must NOT fire")
+	require.NotNil(t, row.LastReminderSentAt, "the reminder decision is recorded even when its channel is quiet")
+	monitor.notifier.DeliverDue(context.Background())
+	assert.Equal(t, int32(0), recorder.count.Load(), "non-imminent tier must NOT be delivered inside the channel's quiet window")
+
+	advanceClock(monitor, 5*time.Hour) // 08:00
+	monitor.notifier.DeliverDue(context.Background())
+	assert.Equal(t, int32(1), recorder.count.Load(), "deferred reminder is delivered when the quiet window ends")
 }
 
 func TestReminderSilenceWindowAfterMigration(t *testing.T) {
@@ -844,7 +852,6 @@ func TestReminderResumesAfter24h(t *testing.T) {
 
 func TestSendTestReminderRoutesWithoutMutatingReminderState(t *testing.T) {
 	db := newReminderTestDB(t)
-	recorder := &captureRouter{}
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	recent := now.Add(-5 * 24 * time.Hour)
 	sentAt := now.Add(-2 * time.Hour)
@@ -861,15 +868,16 @@ func TestSendTestReminderRoutesWithoutMutatingReminderState(t *testing.T) {
 	}).Error)
 
 	monitor := newReminderMonitorForTest(db, now)
-	monitor.router = newCapturingRouter(recorder)
+	recorder := attachCaptureNotifier(t, monitor, db)
 
 	require.NoError(t, monitor.SendTestReminder(context.Background(), "HDSKY"))
 	require.NoError(t, monitor.SendTestReminder(context.Background(), "HDSKY"))
 
-	assert.Equal(t, int32(2), recorder.count.Load(), "test reminders should bypass router dedupe")
-	assert.Equal(t, "[pt-tools][测试] 站点 HDSKY 登录提醒", recorder.last.Title)
-	assert.Contains(t, recorder.last.Text, "这是一条测试提醒")
-	assert.Contains(t, recorder.last.Text, "tier=none")
+	assert.Equal(t, int32(2), recorder.count.Load(), "each test reminder is its own delivery")
+	title, text := recorder.lastMessage()
+	assert.Equal(t, "[pt-tools][测试] 站点 HDSKY 登录提醒", title)
+	assert.Contains(t, text, "这是一条测试提醒")
+	assert.Contains(t, text, "tier=none")
 
 	var after models.SiteLoginState
 	require.NoError(t, db.Where("site_name = ?", "HDSKY").First(&after).Error)
@@ -963,17 +971,23 @@ func TestTierIsHigher(t *testing.T) {
 func newReminderMonitorForTest(db *gorm.DB, now time.Time) *LoginReminderMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &LoginReminderMonitor{
-		ctx:          ctx,
-		cancel:       cancel,
-		db:           db,
-		router:       nil,
-		resolver:     &fakeReminderResolver{def: &v2.SiteDefinition{ID: "fake"}, site: &fakeReminderSite{}},
-		decryptor:    fakeDecryptor{},
-		clock:        sitelogin.NewFakeClock(now),
-		logger:       zap.NewNop().Sugar(),
-		probeEvery:   6 * time.Hour,
-		reminderTick: time.Minute,
-		probeLocks:   make(map[string]*probeSlot),
+		ctx:            ctx,
+		cancel:         cancel,
+		db:             db,
+		resolver:       &fakeReminderResolver{def: &v2.SiteDefinition{ID: "fake"}, site: &fakeReminderSite{}},
+		decryptor:      fakeDecryptor{},
+		clock:          sitelogin.NewFakeClock(now),
+		logger:         zap.NewNop().Sugar(),
+		probeEvery:     6 * time.Hour,
+		probeTick:      time.Minute,
+		reminderTick:   time.Minute,
+		probeBudget:    loginProbeBudget,
+		primaryTimeout: loginProbePrimaryTimeout,
+		// 测试里的站点名（HDSKY 等）不在定义注册表里，统一视为内置站点。
+		lookupDefinition: func(name string) (*v2.SiteDefinition, bool) {
+			return &v2.SiteDefinition{ID: strings.ToLower(name), Schema: v2.SchemaNexusPHP}, true
+		},
+		probeLocks: make(map[string]*probeSlot),
 	}
 }
 
@@ -992,6 +1006,7 @@ func TestEffectiveLastActiveV2Semantic(t *testing.T) {
 	cookieLastLoginAt := now.Add(-1 * 24 * time.Hour)
 	legacyLastLoginAt := now.Add(-3 * 24 * time.Hour)
 	lastVisitAt := now.Add(-4 * 24 * time.Hour)
+	recentVisitAt := now.Add(-time.Hour)
 	staleProbeAt := now.Add(-13 * time.Hour)
 	freshProbeAt := now.Add(-2 * time.Hour)
 
@@ -1040,9 +1055,25 @@ func TestEffectiveLastActiveV2Semantic(t *testing.T) {
 			want: lastVisitAt,
 		},
 		{
-			name:  "last_visit_healthy_probe_returns_zero",
+			name:  "last_visit_only_without_ok_probe_returns_visit",
 			state: &models.SiteLoginState{LastVisitAt: &lastVisitAt, ConsecutiveProbeFailures: 0},
+			want:  lastVisitAt,
+		},
+		{
+			name:  "ok_probe_ignores_last_visit",
+			state: &models.SiteLoginState{LastVisitAt: &lastVisitAt, LastProbeStatus: "OK"},
 			want:  time.Time{},
+		},
+		{
+			// Unit3D 只给登录时间：探测正常时用它，即使浏览器访问更新也不看。
+			name:  "ok_probe_login_only_unit3d_ignores_newer_visit",
+			state: &models.SiteLoginState{ApiLastLoginAt: &apiLastLoginAt, LastVisitAt: &recentVisitAt, LastProbeStatus: "OK"},
+			want:  apiLastLoginAt,
+		},
+		{
+			name:  "failed_probe_login_only_takes_newer_visit",
+			state: &models.SiteLoginState{ApiLastLoginAt: &apiLastLoginAt, LastVisitAt: &recentVisitAt, LastProbeStatus: "NETWORK_ERROR"},
+			want:  recentVisitAt,
 		},
 		{
 			name:  "all_empty_returns_zero",
@@ -1055,6 +1086,7 @@ func TestEffectiveLastActiveV2Semantic(t *testing.T) {
 				LastAccessAt:             &lastAccessAt,
 				LastVisitAt:              &lastVisitAt,
 				LastProbeAt:              &freshProbeAt,
+				LastProbeStatus:          "OK",
 				ConsecutiveProbeFailures: 0,
 			},
 			want: lastAccessAt,
@@ -1072,7 +1104,6 @@ func TestEffectiveLastActiveV2Semantic(t *testing.T) {
 func TestReminderMessageContainsLoginSuggestion(t *testing.T) {
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	lastAccessAt := now.Add(-5 * 24 * time.Hour)
-	channel := &capturingReminderChannel{}
 
 	db := newReminderTestDB(t)
 	require.NoError(t, db.Create(&models.SiteSetting{Name: "HDSKY", Enabled: true}).Error)
@@ -1086,10 +1117,12 @@ func TestReminderMessageContainsLoginSuggestion(t *testing.T) {
 	}).Error)
 
 	monitor := newReminderMonitorForTest(db, now)
-	monitor.router = newReminderRouterForTest(channel)
+	recorder := attachCaptureNotifier(t, monitor, db)
 	monitor.RunReminderOnce(context.Background())
+	monitor.notifier.DeliverDue(context.Background())
 
-	notificationText := channel.lastNotificationText(t)
+	_, notificationText := recorder.lastMessage()
+	require.NotEmpty(t, strings.TrimSpace(notificationText), "expected reminder notification text")
 	for _, phrase := range []string{"建议", "访问", "浏览", "页面", "刷新", lastAccessAt.Format(time.RFC3339)} {
 		assert.Contains(t, notificationText, phrase)
 	}
@@ -1123,50 +1156,6 @@ func TestEffectiveLastActiveV1Compat(t *testing.T) {
 			assert.Equal(t, tc.wantTier, gotTier)
 		})
 	}
-}
-
-type reminderConfLister struct{}
-
-func (reminderConfLister) ListNotificationConfs(context.Context) ([]models.NotificationConf, error) {
-	return []models.NotificationConf{{ID: 1, ChannelType: "capture-reminder", Name: "capture", Enabled: true}}, nil
-}
-
-type capturingReminderChannel struct {
-	mu           sync.Mutex
-	notification notify.Notification
-}
-
-func (c *capturingReminderChannel) Type() string { return "capture-reminder" }
-
-func (c *capturingReminderChannel) Init(context.Context, *models.NotificationConf) error { return nil }
-
-func (c *capturingReminderChannel) SupportsInbound() bool { return false }
-
-func (c *capturingReminderChannel) Send(_ context.Context, notification notify.Notification) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.notification = notification
-	return nil
-}
-
-func (c *capturingReminderChannel) OnInbound(notify.InboundHandler) {}
-
-func (c *capturingReminderChannel) Close(context.Context) error { return nil }
-
-func (c *capturingReminderChannel) Healthy() bool { return true }
-
-func (c *capturingReminderChannel) lastNotificationText(t *testing.T) string {
-	t.Helper()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	require.False(t, strings.TrimSpace(c.notification.Text) == "", "expected reminder notification text")
-	return c.notification.Text
-}
-
-func newReminderRouterForTest(channel *capturingReminderChannel) *notify.Router {
-	registry := notify.NewRegistry()
-	registry.Register("capture-reminder", func() notify.Channel { return channel })
-	return notify.NewRouter(registry, nil, reminderConfLister{})
 }
 
 func TestProbeSourceDispatch_HTTPCookie(t *testing.T) {

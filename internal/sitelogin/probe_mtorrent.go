@@ -12,8 +12,12 @@ import (
 func ProbeMTorrent(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult, error) {
 	_ = clock
 	info, err := site.GetUserInfo(ctx)
+	return classifyMTorrentResult(info, err), nil
+}
+
+func classifyMTorrentResult(info v2.UserInfo, err error) *ProbeResult {
 	if err != nil {
-		return classifyMTorrentError(err), nil
+		return classifyMTorrentError(err)
 	}
 
 	if info.LastAccess <= 0 {
@@ -21,19 +25,26 @@ func ProbeMTorrent(ctx context.Context, site v2.Site, clock Clock) (*ProbeResult
 			Status:     PARSE_ERROR,
 			Source:     ProbeSourceHTTPAPIKey,
 			Diagnostic: "M-Team profile returned no lastModifiedDate / lastBrowse",
-		}, nil
+		}
 	}
 
 	accessAt := time.Unix(info.LastAccess, 0).UTC()
-	return &ProbeResult{
+	result := &ProbeResult{
 		Status:       OK,
 		Source:       ProbeSourceHTTPAPIKey,
 		LastAccessAt: &accessAt,
-	}, nil
+	}
+	if info.LastLogin > 0 {
+		loginAt := time.Unix(info.LastLogin, 0).UTC()
+		result.LastLoginAt = &loginAt
+	}
+	return result
 }
 
 func classifyMTorrentError(err error) *ProbeResult {
 	switch {
+	case errors.Is(err, v2.ErrCloudflareChallenge):
+		return &ProbeResult{Status: CHALLENGE, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrSessionExpired):
 		return &ProbeResult{Status: SESSION_EXPIRED, Source: ProbeSourceHTTPAPIKey, RawError: err}
 	case errors.Is(err, v2.ErrCircuitOpen), errors.Is(err, v2.ErrRateLimited):

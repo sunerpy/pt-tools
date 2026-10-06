@@ -26,12 +26,37 @@ func Probe(ctx context.Context, def *v2.SiteDefinition, site v2.Site, clock Cloc
 // ProbeWithFallback runs the primary transport first and invokes fallback only
 // for statuses that indicate transport-level blocking rather than invalid user
 // credentials. It never runs both transports concurrently.
+//
+// 后备只在返回 OK 时替换主通道的结果；后备返回其他状态（包括 NOT_APPLICABLE）或出错时，
+// 保留主通道的状态，只把后备的说明记进 FallbackNote。所以 NOT_APPLICABLE 不会成为站点状态。
 func ProbeWithFallback(ctx context.Context, def *v2.SiteDefinition, site v2.Site, clock Clock, primary, fallback Transport) (*ProbeResult, error) {
 	result, err := probeWithTransport(ctx, def, site, clock, primary)
 	if err != nil || result == nil || fallback == nil || !isFallbackEligible(result.Status) {
 		return result, err
 	}
-	return probeWithTransport(ctx, def, site, clock, fallback)
+	fbResult, fbErr := probeWithTransport(ctx, def, site, clock, fallback)
+	if fbErr == nil && fbResult != nil && fbResult.Status == OK {
+		return fbResult, nil
+	}
+	result.FallbackNote = fallbackNote(fbResult, fbErr)
+	return result, nil
+}
+
+func fallbackNote(res *ProbeResult, err error) string {
+	detail := ""
+	switch {
+	case err != nil:
+		detail = err.Error()
+	case res == nil:
+		detail = "无结果"
+	case res.Diagnostic != "":
+		detail = fmt.Sprintf("%s，%s", res.Status, res.Diagnostic)
+	case res.RawError != nil:
+		detail = fmt.Sprintf("%s，%s", res.Status, res.RawError.Error())
+	default:
+		detail = string(res.Status)
+	}
+	return "CloakBrowser 后备未成功：" + detail
 }
 
 func probeWithTransport(ctx context.Context, def *v2.SiteDefinition, site v2.Site, clock Clock, transport Transport) (result *ProbeResult, err error) {

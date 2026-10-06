@@ -108,6 +108,11 @@ type SettingsGlobal struct {
 	PeerRatioIntervalMin int     `json:"peer_ratio_interval_min" gorm:"default:10"`   // 检查间隔（分钟）
 	PeerRatioRemoveData  bool    `json:"peer_ratio_remove_data" gorm:"default:false"` // 超标时删除种子及数据（否则仅暂停）
 
+	// 每日签到时间窗（HH:MM，进程时区）：各站每天在窗口内随机取一个时刻签到。
+	// 只经 ConfigStore.SaveAttendanceWindow 写；SaveGlobalSettings 不改这两列。
+	AttendanceWindowStart string `json:"attendance_window_start" gorm:"size:5;default:'08:00'"`
+	AttendanceWindowEnd   string `json:"attendance_window_end" gorm:"size:5;default:'10:00'"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -176,11 +181,13 @@ type QbitSettings struct {
 // 单行表（约定 ID=1）。Token 仅以 AES-GCM 密文形式落库，
 // 字段名 `TokenEncrypted` 与 SiteSetting.CookieEncrypted 保持一致。
 type CloakSettings struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Endpoint       string    `gorm:"size:512" json:"endpoint"`
-	TokenEncrypted string    `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	Endpoint       string `gorm:"size:512" json:"endpoint"`
+	TokenEncrypted string `gorm:"size:1024" json:"-"` // 永远不出现在 JSON
+	// ProfileID 是登录探测后备使用的 CloakBrowser profile；与 Endpoint、Token 三项齐全才启用后备。
+	ProfileID string    `gorm:"size:128" json:"profile_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // SiteSetting 站点设置（统一表，合并原 DynamicSiteSetting）
@@ -201,7 +208,8 @@ type SiteSetting struct {
 	ParserConfig      string    `gorm:"type:text" json:"parser_config,omitempty"`
 	UploadLimitKBs    int       `gorm:"default:0" json:"upload_limit_kbs"`
 	DownloadLimitKBs  int       `gorm:"default:0" json:"download_limit_kbs"`
-	SeedingCapacityGB float64   `gorm:"default:0" json:"seeding_capacity_gb"` // 单站点刷流容量上限(GB)，0=不限制 (#405)
+	SeedingCapacityGB float64   `gorm:"default:0" json:"seeding_capacity_gb"`    // 单站点刷流容量上限(GB)，0=不限制 (#405)
+	AttendanceEnabled bool      `gorm:"default:false" json:"attendance_enabled"` // 每日自动签到，默认关闭；只经 ConfigStore.SetSiteAttendanceEnabled 写
 	IsBuiltin         bool      `json:"is_builtin"`
 	TemplateID        *uint     `gorm:"index" json:"template_id,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`

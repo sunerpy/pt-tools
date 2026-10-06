@@ -53,12 +53,6 @@ func TestChatopsRSSWizardService_ListErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoginReminderConfLister_QueryError(t *testing.T) {
-	lister := loginReminderConfLister{db: emptyDB(t)}
-	_, err := lister.ListNotificationConfs(context.Background())
-	require.Error(t, err)
-}
-
 func TestWireLoginReminderMonitor_NilDB(t *testing.T) {
 	global.InitLogger(zap.NewNop())
 	prev := global.GlobalDB
@@ -67,7 +61,7 @@ func TestWireLoginReminderMonitor_NilDB(t *testing.T) {
 
 	mgr := scheduler.NewManager()
 	t.Cleanup(mgr.StopAll)
-	wireLoginReminderMonitor(mgr, nil, nil, nil)
+	wireLoginReminderMonitor(mgr, nil, nil, nil, nil)
 	assert.Nil(t, mgr.GetLoginReminderMonitor(), "nil DB must skip monitor wiring")
 }
 

@@ -456,7 +456,8 @@ func (s *ConfigStore) UpsertSite(site models.SiteGroup, sc models.SiteConfig) (u
 		row.Enabled = *sc.Enabled
 	}
 	row.AuthMethod = sc.AuthMethod
-	row.Cookie = sc.Cookie
+	// Cookie 只以密文落库；旧的明文列不再写入，存量明文由 v11 迁移清除。
+	row.Cookie = ""
 	if strings.TrimSpace(sc.Cookie) == "" {
 		row.CookieEncrypted = ""
 	} else {
@@ -576,6 +577,11 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 		}
 	} else {
 		hasStoredCookie = strings.TrimSpace(existingSite.CookieEncrypted) != "" || strings.TrimSpace(existingSite.Cookie) != ""
+		// 内置站点的地址由站点定义管理：界面只读，启动时 SyncSitesFromRegistry 按定义对齐。
+		// 改成别的地址直接拒绝，免得写进去之后下次启动又悄悄恢复。
+		if isRegistered && strings.TrimSpace(sc.APIUrl) != strings.TrimSpace(existingSite.APIUrl) {
+			return errors.New("内置站点的地址由站点定义管理，不能修改")
+		}
 	}
 
 	apiKeyEmpty := strings.TrimSpace(sc.APIKey) == ""
@@ -641,17 +647,16 @@ func (s *ConfigStore) UpsertSiteWithRSS(site models.SiteGroup, sc models.SiteCon
 			row.Enabled = *sc.Enabled
 		}
 		row.AuthMethod = sc.AuthMethod
+		// Cookie 只以密文落库；旧的明文列不再写入，存量明文由 v11 迁移清除。
+		row.Cookie = ""
 		if strings.TrimSpace(sc.Cookie) != "" {
-			row.Cookie = sc.Cookie
 			cookieCipherText, err := s.EncryptCookie(sc.Cookie)
 			if err != nil {
 				return err
 			}
 			row.CookieEncrypted = cookieCipherText
-		} else {
-			// 本次保存未携带 cookie：保留已存储的登录态 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
-			row.Cookie = ""
 		}
+		// 本次保存未携带 cookie：保留已存储的密文 cookie（含 api_key/passkey 站点），不因 auth_method 清除。
 		row.APIKey = sc.APIKey
 		row.APIUrl = sc.APIUrl
 		row.Passkey = sc.Passkey
@@ -948,6 +953,12 @@ func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, err
 	return sc, nil
 }
 
+// SiteCookiePlaintext 按 ListSites 的同一规则取站点 Cookie 明文：有密文时解密，否则用旧版明文列。
+// 只给可信边界（CloakBrowser 后备注入浏览器）用，不要写进响应或日志。
+func (s *ConfigStore) SiteCookiePlaintext(site models.SiteSetting) (string, error) {
+	return s.cookiePlaintextForSite(site)
+}
+
 func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, error) {
 	if strings.TrimSpace(site.CookieEncrypted) == "" {
 		return site.Cookie, nil
@@ -963,8 +974,9 @@ func (s *ConfigStore) cookiePlaintextForSite(site models.SiteSetting) (string, e
 // 仅在 ConfigStore 内部及调用方使用；HTTP 层通过 web.api_cloak.go 暴露的响应类型
 // 控制对外字段，token 永远不会以明文出现在 API 响应里。
 type CloakConfigSnapshot struct {
-	Endpoint string
-	HasToken bool
+	Endpoint  string
+	HasToken  bool
+	ProfileID string
 }
 
 // GetCloakConfig 返回 endpoint + 是否已设置 token。永远不返回 token 明文。
@@ -975,8 +987,9 @@ func (s *ConfigStore) GetCloakConfig() (CloakConfigSnapshot, error) {
 		return CloakConfigSnapshot{}, err
 	}
 	return CloakConfigSnapshot{
-		Endpoint: row.Endpoint,
-		HasToken: strings.TrimSpace(row.TokenEncrypted) != "",
+		Endpoint:  row.Endpoint,
+		HasToken:  strings.TrimSpace(row.TokenEncrypted) != "",
+		ProfileID: row.ProfileID,
 	}, nil
 }
 
@@ -1055,9 +1068,10 @@ func (s *ConfigStore) SetCloakToken(plaintext string) error {
 	return db.Save(&row).Error
 }
 
-// SaveCloakConfig 在单次事务里同时更新 endpoint + token；
+// SaveCloakConfig 在单次事务里同时更新 endpoint + token + profile ID；
 // emptyToken=true 时显式清空 token，否则 plaintextToken=="" 表示保持不变（部分更新）。
-func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool) error {
+// profileID 为 nil 表示保持不变，指向空串表示清除。
+func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToken bool, profileID *string) error {
 	endpoint = strings.TrimSpace(endpoint)
 	return s.db.WithTransaction(func(tx *gorm.DB) error {
 		var row models.CloakSettings
@@ -1080,6 +1094,9 @@ func (s *ConfigStore) SaveCloakConfig(endpoint, plaintextToken string, clearToke
 				return encErr
 			}
 			row.TokenEncrypted = cipherText
+		}
+		if profileID != nil {
+			row.ProfileID = strings.TrimSpace(*profileID)
 		}
 		if isNew {
 			return tx.Create(&row).Error

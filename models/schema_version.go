@@ -3,6 +3,7 @@ package models
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -20,7 +21,7 @@ type SchemaVersion struct {
 
 // 当前数据库架构版本
 // 每次添加新的迁移时递增此值
-const CurrentSchemaVersion = 10
+const CurrentSchemaVersion = 11
 
 // 架构版本历史：
 // v1: 初始版本（无版本表的旧应用）
@@ -142,6 +143,13 @@ func (sm *SchemaManager) registerMigrations() {
 		Version:     10,
 		Description: "site_login_state: add 4 columns (ApiLastLoginAt, CookieLastLoginAt, ProbeMode, LastConsistencyCheck)",
 		Up:          sm.migrateV9ToV10,
+	})
+
+	// v10 -> v11: 清除 site_settings.cookie 里的明文 Cookie，只保留密文
+	sm.migrations = append(sm.migrations, Migration{
+		Version:     11,
+		Description: "site_settings: encrypt remaining plaintext cookies and clear the plaintext column",
+		Up:          sm.migrateV10ToV11,
 	})
 }
 
@@ -648,4 +656,61 @@ func (sm *SchemaManager) recordV10MigrationState(db *gorm.DB) error {
 		return fmt.Errorf("v9→v10: record migration state: %w", err)
 	}
 	return nil
+}
+
+// migrateV10ToV11 清除 site_settings.cookie 里的明文 Cookie：v9 加密存量 Cookie 时没有清掉明文列，
+// 之后的保存入口也一直把明文写在密文旁边。没有密文、或密文解不开的行先用明文重新加密，
+// 避免丢掉唯一能用的副本；已有可用密文的行只清明文。整批在一个事务里，任何一行失败都回滚。
+//
+// 这一步不做表备份：备份文件会把要清除的明文再写一份到磁盘。每行清除前都已确认密文能解出可用的 Cookie，
+// 运行时本来就优先读密文，所以清掉明文不改变任何站点实际使用的 Cookie。
+func (sm *SchemaManager) migrateV10ToV11(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&SiteSetting{}) {
+		return nil
+	}
+	type cookieRow struct {
+		ID              uint
+		Name            string
+		Cookie          string
+		CookieEncrypted string
+	}
+	var rows []cookieRow
+	if err := db.Raw(
+		"SELECT id, name, cookie, cookie_encrypted FROM site_settings WHERE cookie IS NOT NULL AND cookie != ''",
+	).Scan(&rows).Error; err != nil {
+		return fmt.Errorf("v10→v11: query plaintext cookies: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	if sm.EncryptCookie == nil || sm.DecryptCookie == nil {
+		return errors.New("v11 migration requires crypto hooks")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, row := range rows {
+			updates := map[string]any{"cookie": ""}
+			usable := strings.TrimSpace(row.CookieEncrypted) != ""
+			if usable {
+				if _, err := sm.DecryptCookie(row.CookieEncrypted); err != nil {
+					usable = false
+				}
+			}
+			if !usable {
+				cipherText, err := sm.EncryptCookie(row.Cookie)
+				if err != nil {
+					return fmt.Errorf("v10→v11: encrypt cookie for site %s: %w", row.Name, err)
+				}
+				plain, err := sm.DecryptCookie(cipherText)
+				if err != nil || plain != row.Cookie {
+					return fmt.Errorf("v10→v11: decrypt check failed for site %s", row.Name)
+				}
+				updates["cookie_encrypted"] = cipherText
+			}
+			if err := tx.Model(&SiteSetting{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("v10→v11: clear plaintext cookie for site %s: %w", row.Name, err)
+			}
+		}
+		return nil
+	})
 }
