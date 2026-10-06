@@ -1854,3 +1854,93 @@ export const brushApi = {
     ),
   stats: (days = 30) => api.get<BrushStatsResponse>(`/api/brush/stats?days=${days}`),
 };
+
+/** 下载器助手：缺站点标签的种子（按 tracker 认出了站点） */
+export interface AssistantSiteTag {
+  hash: string;
+  name: string;
+  size: number;
+  site: string;
+  site_name: string;
+  tracker_host: string;
+  tags: string;
+  category: string;
+}
+
+/** 下载器助手：要替换的 tracker 地址（已脱敏） */
+export interface AssistantTrackerMatch {
+  hash: string;
+  name: string;
+  old: string;
+  new: string;
+}
+
+export type AssistantDeadReason = "unregistered" | "not_found";
+
+/** 下载器助手：tracker 报告未注册或不存在的种子 */
+export interface AssistantDeadTorrent {
+  hash: string;
+  name: string;
+  size: number;
+  progress: number;
+  site?: string;
+  tracker_host: string;
+  reason: AssistantDeadReason;
+  message: string;
+}
+
+export interface AssistantItemError {
+  hash: string;
+  name?: string;
+  error: string;
+}
+
+/** 下载器助手：一次执行的结果 */
+export interface AssistantApplyResult {
+  done: number;
+  skipped: AssistantItemError[];
+  failed: AssistantItemError[];
+}
+
+/** 失效种子定时扫描的设置（只通知、不删种） */
+export interface DeadTorrentScanSettings {
+  enabled: boolean;
+  interval_hours: number;
+  channel_ids: number[];
+}
+
+export const downloaderAssistantApi = {
+  siteTags: (downloaderId: number) =>
+    api.get<{ items: AssistantSiteTag[] }>(
+      `/api/downloader-assistant/site-tags?downloader_id=${downloaderId}`,
+    ),
+  applySiteTags: (downloaderId: number, items: { hash: string; site: string }[]) =>
+    api.post<AssistantApplyResult>("/api/downloader-assistant/site-tags", {
+      downloader_id: downloaderId,
+      items,
+    }),
+  previewTrackers: (downloaderId: number, from: string, to: string) =>
+    api.get<{ items: AssistantTrackerMatch[]; supported: boolean }>(
+      `/api/downloader-assistant/trackers?downloader_id=${downloaderId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+  applyTrackers: (downloaderId: number, from: string, to: string, hashes: string[]) =>
+    api.post<AssistantApplyResult>("/api/downloader-assistant/trackers", {
+      downloader_id: downloaderId,
+      from,
+      to,
+      hashes,
+    }),
+  dead: (downloaderId: number) =>
+    api.get<{ items: AssistantDeadTorrent[] }>(
+      `/api/downloader-assistant/dead?downloader_id=${downloaderId}`,
+    ),
+  deleteDead: (downloaderId: number, hashes: string[], removeData: boolean) =>
+    api.post<AssistantApplyResult>("/api/downloader-assistant/dead", {
+      downloader_id: downloaderId,
+      hashes,
+      remove_data: removeData,
+    }),
+  getDeadScan: () => api.get<DeadTorrentScanSettings>("/api/downloader-assistant/dead-scan"),
+  saveDeadScan: (data: DeadTorrentScanSettings) =>
+    api.put<DeadTorrentScanSettings>("/api/downloader-assistant/dead-scan", data),
+};
