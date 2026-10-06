@@ -21,7 +21,7 @@ A scan asks the downloader once per torrent, so it can take tens of seconds when
 
 ## Site tags
 
-pt-tools recognises the site of a torrent from its tracker address (see [Recognising sites by tracker](#recognising-sites-by-tracker)). Torrents whose category and tags do not contain that site are listed; tick them and click Tag the selected (给选中的…打标签) to add the site name as a tag. Existing tags are kept.
+pt-tools recognises the site of a torrent from its tracker address (see [Recognising sites by tracker](#recognising-sites-by-tracker)). Torrents whose category and tags do not contain that site are listed; tick them and click Tag the selected (给选中的…打标签) to add the site tag (the site ID such as `hdsky`, shown in the tag column). Existing tags are kept.
 
 With the site tag in place, the site seeding capacity, the scope of automatic cleanup and the site filter in the downloader web UI all recognise these torrents.
 
