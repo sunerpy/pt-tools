@@ -6,6 +6,7 @@ package chatops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -320,6 +321,30 @@ func TestProcess_NotBound_OnlyBindAllowed(t *testing.T) {
 	reply, ok := f.replier.lastReply()
 	require.True(t, ok)
 	assert.Contains(t, reply.Text, "/bind")
+}
+
+// 审计不能保存 RSS 地址里的 passkey，也不保存绑定码。
+func TestProcess_AuditRedactsSensitiveArgs(t *testing.T) {
+	f := newChain(t, CommandSpec{Name: "addrss", Handler: func(context.Context, []string, Source) (Reply, error) {
+		return Reply{Text: "ok"}, nil
+	}})
+	f.bindings.exists = true
+	f.bindings.binding = BindingInfo{ID: 1, ConfID: 7, Allowed: true, PtAdmin: true}
+
+	require.NoError(t, f.chain.Process(context.Background(),
+		mkMsg("/addrss hdsky | 电影 | https://hdsky.me/torrentrss.php?passkey=TOPSECRET&rows=10")))
+
+	entries := f.audit.snapshot()
+	require.NotEmpty(t, entries)
+	raw := fmt.Sprintf("%v", entries[len(entries)-1].Args)
+	assert.NotContains(t, raw, "TOPSECRET")
+	assert.Contains(t, raw, "rows=10")
+	assert.Contains(t, raw, "hdsky")
+
+	f.bindings.exists = false
+	require.NoError(t, f.chain.Process(context.Background(), mkMsg("/bind ABCD2345")))
+	entries = f.audit.snapshot()
+	assert.NotContains(t, fmt.Sprintf("%v", entries[len(entries)-1].Args), "ABCD2345")
 }
 
 func TestProcess_NotBound_BindAllowed(t *testing.T) {

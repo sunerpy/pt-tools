@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // BindingInfo is the subset of binding data needed by the chain.
@@ -236,7 +237,7 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 	latency := mc.now().Sub(start).Milliseconds()
 	argsMap := map[string]any{}
 	if len(args) > 0 {
-		argsMap["args"] = args
+		argsMap["args"] = auditArgs(command, args)
 	}
 	_ = mc.auditSvc.Record(ctx, AuditEntry{
 		NotificationConfID: confID,
@@ -247,6 +248,23 @@ func (mc *MessageChain) recordAudit(ctx context.Context, msg notify.InboundMessa
 		Result:             result,
 		LatencyMs:          latency,
 	})
+}
+
+// auditArgs 返回写进审计的参数副本：/bind 的绑定码整体隐去，像 URL 的参数（如 /addrss 带的 RSS 地址）
+// 把 passkey、token 等查询参数脱敏。审计的键名脱敏只看键名，管不到位置参数里的内容。
+func auditArgs(command string, args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		switch {
+		case command == "bind":
+			out[i] = "[REDACTED]"
+		case strings.Contains(a, "://"):
+			out[i] = utils.SanitizeURL(a)
+		default:
+			out[i] = a
+		}
+	}
+	return out
 }
 
 func (mc *MessageChain) tryReply(ctx context.Context, msg notify.InboundMessage, reply Reply) {
