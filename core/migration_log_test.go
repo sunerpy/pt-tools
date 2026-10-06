@@ -38,3 +38,9 @@ func TestLogMigrationResult_Failure(t *testing.T) {
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Message, "配置迁移失败")
 }
+
+func TestLogMigrationResult_NilIsNoop(t *testing.T) {
+	observed, logs := observer.New(zapcore.DebugLevel)
+	logMigrationResult(zap.New(observed).Sugar(), nil)
+	assert.Zero(t, logs.Len())
+}

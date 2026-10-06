@@ -72,3 +72,28 @@ func TestProcess_AuditWriteFailureIsLogged(t *testing.T) {
 	assert.Contains(t, logs[0], "status")
 	assert.Contains(t, logs[0], "database is locked")
 }
+
+// 处理器返回 error 时仍按 error:handler / error:session_handler 记录，优先于回复里的 Failed。
+func TestProcess_HandlerErrorsAudited(t *testing.T) {
+	t.Run("command", func(t *testing.T) {
+		f := newChain(t, CommandSpec{Name: "status", Handler: func(context.Context, []string, Source) (Reply, error) {
+			return Reply{Text: "x", Failed: true}, errors.New("boom")
+		}})
+		f.bindings.exists = true
+		f.bindings.binding = BindingInfo{ID: 1, ConfID: 7, Allowed: true}
+
+		require.NoError(t, f.chain.Process(context.Background(), mkMsg("/status")))
+		assert.Equal(t, "error:handler", lastResult(f.audit.snapshot()))
+	})
+	t.Run("session", func(t *testing.T) {
+		f := newChain(t)
+		f.bindings.exists = true
+		f.bindings.binding = BindingInfo{ID: 1, ConfID: 7, Allowed: true}
+		f.sessions.Set("telegram", 7, "u-999", SessionState{Step: "addrss:url", Handler: func(context.Context, []string, Source) (Reply, error) {
+			return Reply{Text: "x"}, errors.New("boom")
+		}}, time.Minute)
+
+		require.NoError(t, f.chain.Process(context.Background(), mkMsg("anything")))
+		assert.Equal(t, "error:session_handler", lastResult(f.audit.snapshot()))
+	})
+}
