@@ -310,5 +310,5 @@ func TestDailyReport_NoBaselineSaysSo(t *testing.T) {
 	require.Len(t, rows, 1)
 	text := reportText(t, rows[0])
 	assert.NotContains(t, text, "今日合计")
-	assert.Contains(t, text, "还没有可比")
+	assert.Contains(t, text, "暂无可比")
 }

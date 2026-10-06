@@ -277,7 +277,7 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 	case len(sum.Sites) == 0:
 		b.WriteString("今天还没有同步到站点数据（登录探测成功或手动同步之后才有）。")
 	case countWithBaseline(sum.Sites) == 0:
-		b.WriteString("今天还没有可比的数据：站点要有今天之前的一份快照才算得出增量，明天起就有。")
+		b.WriteString("今天暂无可比的数据：站点要有今天之前的一份快照才算得出增量，明天起就有。")
 	default:
 		fmt.Fprintf(&b, "今日合计：上传 %s · 下载 %s · 魔力 %s",
 			utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded), formatBonus(sum.TotalBonus))
