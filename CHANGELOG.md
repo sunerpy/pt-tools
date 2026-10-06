@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.1](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.6...v1.0.0-rc.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **chatops:** 绑定按通道隔离，QQ 通道鉴权与连接管理加固 ([#588](https://github.com/sunerpy/pt-tools/issues/588)) ([789434a](https://github.com/sunerpy/pt-tools/commit/789434a4412ad29f1e022ba022fd82a58a9a7872))
+* **core:** 密钥文件损坏时不再被覆盖，密钥与库里密文对不上时拒绝启动 ([#590](https://github.com/sunerpy/pt-tools/issues/590)) ([b927ea2](https://github.com/sunerpy/pt-tools/commit/b927ea231d29d030692d9a63d5d468d3cc597767))
+* **site:** 修复站点驱动的凭证外泄与种子下载失败 ([#585](https://github.com/sunerpy/pt-tools/issues/585)) ([7783387](https://github.com/sunerpy/pt-tools/commit/77833871155286cb83558ddbf9e94d5567d63c37))
+* **version:** 自升级核对 checksums.txt，Web 发起的升级不再被取消 ([#589](https://github.com/sunerpy/pt-tools/issues/589)) ([6e8c599](https://github.com/sunerpy/pt-tools/commit/6e8c59931548c2abaa66529ca95c7638c22b2de8))
+* **web:** 会话与登录加固，日志里的订阅地址脱敏 ([#587](https://github.com/sunerpy/pt-tools/issues/587)) ([380a25d](https://github.com/sunerpy/pt-tools/commit/380a25d0042736ad9644bb88fefa1dbfa37e0d26))
+
 ## [0.49.0-rc.6](https://github.com/sunerpy/pt-tools/compare/v0.49.0-rc.5...v0.49.0-rc.6) (2026-10-05)
 
 
