@@ -9,7 +9,7 @@ import { useIsMobile } from "@/composables/useIsMobile";
 import { isLoopbackListenAddr } from "@/utils/listenAddr";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 /* 图标与色相与通道列表页保持同一套：同一个通道在两个页面必须长一个样 */
@@ -30,6 +30,12 @@ const id = computed(() => Number(route.params.id));
 const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
+/** 当前路由上的这条通道读回来过一次。没读回来（首次加载中、刚切到别的通道）时 conf 不是它的配置 */
+const loaded = ref(false);
+/** 保存与测试都按 conf.id 发出：没读回来或正在读时一律不放行 */
+const locked = computed(() => !loaded.value || loading.value);
+/** 每次加载换一个序号：切走之后才回来的旧响应作废 */
+let loadSeq = 0;
 
 const formRef = ref<FormInstance>();
 const credFormRef = ref<FormInstance>();
@@ -173,14 +179,39 @@ onMounted(async () => {
   await loadDetail();
 });
 
+/*
+ * 只改路由参数（/chatops/notifications/1 → /2）时 Vue Router 复用这个组件，onMounted 不会再跑。
+ * 不重新加载的话页面上还是 1 号，保存按 conf.id 发给 1 号；只 Object.assign 新数据也不够，
+ * 2 号没配的字段会留着 1 号的值，保存凭证时一并写进 2 号。所以先清空再加载。
+ */
+watch(id, (next, prev) => {
+  if (next === prev) return;
+  resetConf();
+  void loadDetail();
+});
+
+function resetConf() {
+  loaded.value = false;
+  const sink = conf as unknown as Record<string, unknown>;
+  for (const key of Object.keys(sink)) delete sink[key];
+  Object.assign(conf, { id: 0, channel_type: "telegram", name: "", enabled: true });
+  tgForm.admin_users_text = "";
+  tgForm.allowed_users_text = "";
+  tgForm.default_chat_id_text = "";
+  testResult.value = null;
+}
+
 async function loadDetail() {
+  const seq = ++loadSeq;
   if (!id.value) {
+    loading.value = false;
     ElMessage.error("无效的通道 ID");
     return;
   }
   loading.value = true;
   try {
     const data = await chatopsApi.notifications.get(id.value);
+    if (seq !== loadSeq) return;
     Object.assign(conf, data);
     // 后端返回的 config_json 是解密后的对象（如 { bot_token, admin_users, default_chat_id, ... }），
     // 必须 flatten 到 conf 上，否则编辑表单的 v-model 输入框是空的，提交时会把已有字段覆盖丢失。
@@ -202,10 +233,12 @@ async function loadDetail() {
       const dcid = sink.default_chat_id;
       tgForm.default_chat_id_text = dcid != null && dcid !== "" ? String(dcid) : "";
     }
+    loaded.value = true;
   } catch (e: unknown) {
+    if (seq !== loadSeq) return;
     ElMessage.error((e as Error).message || "加载详情失败");
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
 }
 
@@ -232,7 +265,7 @@ function userIdListToText(raw: unknown): string {
 }
 
 async function handleSaveBasic() {
-  if (!formRef.value) return;
+  if (locked.value || !formRef.value) return;
   const valid = await formRef.value.validate().catch(() => false);
   if (!valid) return;
 
@@ -253,7 +286,7 @@ async function handleSaveBasic() {
 }
 
 async function handleSaveCredentials() {
-  if (!credFormRef.value) return;
+  if (locked.value || !credFormRef.value) return;
   const valid = await credFormRef.value.validate().catch(() => false);
   if (!valid) return;
 
@@ -307,6 +340,7 @@ async function handleSaveCredentials() {
 }
 
 async function handleTest() {
+  if (locked.value) return;
   if (!conf.enabled) {
     try {
       await ElMessageBox.confirm(
@@ -386,6 +420,7 @@ function goBack() {
         <el-switch
           v-model="conf.enabled"
           :loading="saving"
+          :disabled="locked"
           data-testid="enable-switch"
           @change="handleSaveBasic" />
         <span>启用通道</span>
@@ -480,6 +515,7 @@ function goBack() {
         <el-button
           type="primary"
           :loading="saving"
+          :disabled="locked"
           data-testid="save-basic-btn"
           @click="handleSaveBasic">
           <PtIcon name="save" :size="14" /><span>保存基本信息</span>
@@ -663,6 +699,7 @@ function goBack() {
         <el-button
           type="primary"
           :loading="saving"
+          :disabled="locked"
           data-testid="save-cred-btn"
           @click="handleSaveCredentials">
           <PtIcon name="save" :size="14" /><span>保存凭证</span>
@@ -688,6 +725,7 @@ function goBack() {
           <el-button
             type="primary"
             :loading="testing"
+            :disabled="locked"
             data-testid="run-test-btn"
             @click="handleTest">
             <PtIcon name="send" :size="14" /><span>发送测试消息</span>
