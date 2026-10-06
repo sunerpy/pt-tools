@@ -43,6 +43,27 @@ jobs:
       tag_name: ${{ steps.gate.outputs.tag_name }}
       version: ${{ steps.gate.outputs.version }}
     steps:
+      # release-please 持有写权限，会建发布 PR、标签和 draft：先确认这次运行在受保护的发布分支上，
+      # 不让它在分支保护失效（规则集被改、分支被删后重建）时先写仓库、事后才被闸门拦下。
+      - name: Require a protected release branch
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          case "$RUN_REF" in
+          refs/heads/main | refs/heads/v1.0.0-rc) ;;
+          *)
+            echo "::error title=Release branch::releases run only from main or v1.0.0-rc, not ${RUN_REF}"
+            exit 1
+            ;;
+          esac
+          if [ "$REF_PROTECTED" != true ]; then
+            echo "::error title=Release branch::${RUN_REF} is not protected; restore the protect-main ruleset first"
+            exit 1
+          fi
+
       - name: Run release-please
         id: release
         if: github.event_name == 'push'
