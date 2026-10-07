@@ -229,6 +229,11 @@ func NewDBWithVersionAndHooks(
 		&ReseedRecord{},
 		// CookieCloud 导入（M7）
 		&CookieCloudSetting{},
+		// 媒体识别（M9）
+		&MediaSetting{},
+		&MediaWordRule{},
+		&MediaOverride{},
+		&MediaCache{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
