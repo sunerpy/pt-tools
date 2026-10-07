@@ -4,9 +4,7 @@ import { transferStateLabel } from "@/utils/transfer";
 type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
 /** 一条辅种记录的结果：没建成任务的是失败；建成的看任务状态（任务记录清除后看记录里留下的结果） */
-export function reseedRecordResult(
-  r: Pick<ReseedRecord, "state" | "job_state" | "job_missing">,
-): {
+export function reseedRecordResult(r: Pick<ReseedRecord, "state" | "job_state" | "job_missing">): {
   label: string;
   tone: Tone;
 } {
