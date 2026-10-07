@@ -32,7 +32,7 @@ With the site tag in place, the site seeding capacity, the scope of automatic cl
 After a site moves its tracker to a new domain or you reset your passkey, the tracker address of the old torrents needs to change. Fill in the text to replace and the replacement, then click Preview (预览): the page lists every tracker address that contains the text, with the address after the change, one row per address, so a torrent with two such addresses gets two rows. Tick the addresses and click Replace the selected (替换选中 N 个地址); only the ticked addresses change, and an address that changed after the preview is left alone.
 
 - The text to replace needs at least 3 characters; the first occurrence in the address is replaced.
-- The new address must still be an http, https or udp address. Otherwise that item reports an error and is left unchanged.
+- The new address must still be an http, https or udp address. An address that would not be is still listed, with the reason, but cannot be ticked and is left unchanged.
 - After you edit either field, preview again before running the replacement, so it never uses text you have not previewed.
 - The addresses of a torrent are changed one at a time. When one fails, the result says how many addresses of that torrent were already changed.
 
