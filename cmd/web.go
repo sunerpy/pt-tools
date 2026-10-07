@@ -214,6 +214,7 @@ var webCmd = &cobra.Command{
 
 		wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
 		wireBrushMonitor(mgr, userInfoService)
+		wireTransferWorker(mgr, userInfoService)
 
 		srv := web.NewServer(store, mgr)
 		if bs != nil {
