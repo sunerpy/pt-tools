@@ -356,6 +356,9 @@ func (m *Manager) initFreeEndMonitor() {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.stopped {
+		return // StopAll 以后不再起新的监控
+	}
 
 	if m.freeEndMonitor != nil {
 		m.freeEndMonitor.Stop()
@@ -377,8 +380,14 @@ func (m *Manager) initFreeEndMonitor() {
 	})
 }
 
+// initCleanupMonitor 换上新的自动删种监控。持锁做：配置变更时的重载在别的 goroutine 里，会和 StopAll 同时进行。
 func (m *Manager) initCleanupMonitor() {
 	if global.GlobalDB == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped {
 		return
 	}
 
@@ -392,8 +401,14 @@ func (m *Manager) initCleanupMonitor() {
 	}
 }
 
+// initPeerRatioMonitor 换上新的竞争度监控，持锁的原因同 initCleanupMonitor。
 func (m *Manager) initPeerRatioMonitor() {
 	if global.GlobalDB == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped {
 		return
 	}
 

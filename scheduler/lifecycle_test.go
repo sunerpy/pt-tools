@@ -137,3 +137,26 @@ func TestReload_RespectsManualStop(t *testing.T) {
 	m.StartAll(cfg)
 	assert.Len(t, m.ListJobs(), 1)
 }
+
+// 配置变更的重载在别的 goroutine 里换监控，可能和 StopAll 同时进行：不能有数据竞争（-race 下检查），
+// StopAll 以后也不再起新的监控。
+func TestManager_InitMonitorsConcurrentWithStopAll(t *testing.T) {
+	setupLifecycleDB(t)
+	for range 20 {
+		m := NewManager()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			m.initFreeEndMonitor()
+			m.initCleanupMonitor()
+			m.initPeerRatioMonitor()
+		}()
+		m.StopAll()
+		<-done
+		m.mu.Lock()
+		assert.Nil(t, m.freeEndMonitor)
+		assert.Nil(t, m.cleanupMonitor)
+		assert.Nil(t, m.peerRatioMonitor)
+		m.mu.Unlock()
+	}
+}
