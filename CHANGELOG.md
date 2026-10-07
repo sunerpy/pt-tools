@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.5](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.4...v1.0.0-rc.5) (2026-10-07)
+
+
+### Features
+
+* **downloader:** 下载器能力扩展与下载器助手（M4） ([#622](https://github.com/sunerpy/pt-tools/issues/622)) ([6289db4](https://github.com/sunerpy/pt-tools/commit/6289db4d27a04b1b192bab9ece89ace8dc9e8550))
+
 ## [1.0.0-rc.4](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.3...v1.0.0-rc.4) (2026-10-06)
 
 
