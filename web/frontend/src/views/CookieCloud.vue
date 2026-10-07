@@ -180,7 +180,7 @@ onMounted(loadSettings);
 </script>
 
 <template>
-  <div class="cc-page">
+  <div class="pt-cards pt-cards--wide">
     <PtHeadSub>从自建的 CookieCloud 服务取回浏览器同步的 Cookie，在本机解密后写进站点</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="cc-refresh" @click="refresh">
@@ -367,12 +367,6 @@ onMounted(loadSettings);
 </template>
 
 <style scoped>
-.cc-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .cc-form {
   max-width: 640px;
 }
