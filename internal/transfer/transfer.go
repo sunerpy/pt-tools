@@ -33,6 +33,8 @@ const (
 	MaxItems = 500
 	// TransferSource 写进推送请求的来源。
 	TransferSource = "transfer"
+	// ReseedSource 是辅种的推送来源，也写进新种子记录的 download_source。
+	ReseedSource = "reseed"
 )
 
 var (
@@ -341,9 +343,9 @@ func (s *Service) Cancel(ctx context.Context, id uint) error {
 	return ErrNotCancelable
 }
 
-// ClearFinished 删除已经结束的任务记录，返回删除的条数。
-func (s *Service) ClearFinished(ctx context.Context) (int64, error) {
-	res := s.cfg.DB.WithContext(ctx).
+// ClearFinished 删除这一种已经结束的任务记录，返回删除的条数。
+func (s *Service) ClearFinished(ctx context.Context, kind string) (int64, error) {
+	res := s.cfg.DB.WithContext(ctx).Where("kind = ?", kind).
 		Where("state IN ?", []string{models.TransferDone, models.TransferRolledBack, models.TransferFailed, models.TransferCanceled}).
 		Delete(&models.TorrentTransferJob{})
 	if res.Error != nil {
@@ -496,18 +498,18 @@ func (s *Service) add(ctx context.Context, j *models.TorrentTransferJob) error {
 		TorrentData:       j.TorrentData,
 		Title:             j.Name,
 		Category:          j.Category,
-		Tags:              withTransferTag(j.Tags),
+		Tags:              withOwnerTag(j.Tags, j.Kind),
 		SavePath:          j.TargetSavePath,
 		DownloaderID:      j.TargetDownloaderID,
-		Source:            TransferSource,
+		Source:            pushSource(j.Kind),
 		ReuseExistingData: true,
 	})
 	switch {
 	case pushErr != nil:
 		// 推送报错时种子也可能已经加进去了（例如响应超时）：目标里有带标签的这个种子才接着校验
 		if t, found, err := findTorrent(target, j.InfoHash); err == nil && found {
-			if !owned(t) {
-				return s.fail(ctx, j, notOursMessage)
+			if !owned(j, t) {
+				return s.fail(ctx, j, notOurs(j))
 			}
 			return s.startChecking(ctx, j)
 		}
@@ -540,10 +542,10 @@ func (s *Service) resumeAdding(ctx context.Context, j *models.TorrentTransferJob
 		return fmt.Errorf("检查目标下载器失败: %w", err)
 	}
 	switch {
-	case found && owned(t):
+	case found && owned(j, t):
 		return s.startChecking(ctx, j)
 	case found:
-		return s.fail(ctx, j, notOursMessage)
+		return s.fail(ctx, j, notOurs(j))
 	}
 	return s.moveTo(ctx, j, models.TransferExported, "")
 }
@@ -569,8 +571,8 @@ func (s *Service) check(ctx context.Context, j *models.TorrentTransferJob) error
 		}
 		return s.fail(ctx, j, "目标下载器里找不到加入的种子；源下载器里的种子没动")
 	}
-	if !owned(t) {
-		return s.fail(ctx, j, notOursMessage)
+	if !owned(j, t) {
+		return s.fail(ctx, j, notOurs(j))
 	}
 	if !j.RecheckIssued {
 		if err := target.RecheckTorrent(t.ID); err != nil {
@@ -617,8 +619,8 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 	if !found {
 		return s.fail(ctx, j, "目标下载器里的种子不见了；源下载器里的种子没动")
 	}
-	if !owned(t) {
-		return s.fail(ctx, j, notOursMessage)
+	if !owned(j, t) {
+		return s.fail(ctx, j, notOurs(j))
 	}
 	if !checkDone(t) {
 		// 校验完成之后目标又在校验，或者数据不完整了：不收尾，退回校验重新计时；源绝不移除
@@ -629,6 +631,11 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 	}
 	if rErr := target.ResumeTorrent(t.ID); rErr != nil {
 		return fmt.Errorf("恢复目标里的种子失败: %w", rErr)
+	}
+	if j.Kind == models.JobKindReseed {
+		// 辅种：数据与原来的种子共用，不移除任何种子；记下这个新种子，站点容量与清理都认得它
+		s.recordReseed(ctx, j, targetSet)
+		return s.moveTo(ctx, j, models.TransferDone, "")
 	}
 	src, srcSet, err := s.cfg.Downloaders.TransferDownloader(ctx, j.SourceDownloaderID)
 	if err != nil {
@@ -814,23 +821,40 @@ func stillChecking(t downloader.Torrent) bool {
 	return false
 }
 
-// notOursMessage 是目标里有同一个种子、却不是这次转移加的（没有 pt-tools-transfer 标签）时的说明。
-const notOursMessage = "目标下载器里已经有这个种子，但不是这次转移加的（没有 " + models.TransferTag + " 标签）；没有动它，源下载器里的种子也没动"
+// notOurs 是目标里有同一个种子、却不是这次加的（没有归属标签）时的说明。
+func notOurs(j *models.TorrentTransferJob) string {
+	if j.Kind == models.JobKindReseed {
+		return "下载器里已经有这个种子，但不是辅种加的（没有 " + models.ReseedTag + " 标签）；没有动它"
+	}
+	return "目标下载器里已经有这个种子，但不是这次转移加的（没有 " + models.TransferTag + " 标签）；没有动它，源下载器里的种子也没动"
+}
 
-// owned 报告目标里的种子是不是转移做种加的（带 pt-tools-transfer 标签）。
-func owned(t downloader.Torrent) bool {
-	return hasTag(t.Tags, models.TransferTag)
+// owned 报告目标里的种子是不是这个任务加的（带这一种任务的归属标签）。
+func owned(j *models.TorrentTransferJob, t downloader.Torrent) bool {
+	return hasTag(t.Tags, models.JobOwnerTag(j.Kind))
 }
 
 // withTransferTag 在原有标签后面加上 pt-tools-transfer。
-func withTransferTag(tags string) string {
-	if hasTag(tags, models.TransferTag) {
+func withTransferTag(tags string) string { return withOwnerTag(tags, models.JobKindTransfer) }
+
+// withOwnerTag 在原有标签后面加上这一种任务的归属标签。
+func withOwnerTag(tags, kind string) string {
+	tag := models.JobOwnerTag(kind)
+	if hasTag(tags, tag) {
 		return tags
 	}
 	if strings.TrimSpace(tags) == "" {
-		return models.TransferTag
+		return tag
 	}
-	return tags + "," + models.TransferTag
+	return tags + "," + tag
+}
+
+// pushSource 是写进推送请求的来源。
+func pushSource(kind string) string {
+	if kind == models.JobKindReseed {
+		return ReseedSource
+	}
+	return TransferSource
 }
 
 func checkTimeout(size int64) time.Duration {

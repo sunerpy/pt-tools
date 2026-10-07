@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -637,7 +638,7 @@ func TestTransferCancel(t *testing.T) {
 	require.Equal(t, models.TransferChecking, e.job(jc.ID).State)
 	assert.ErrorIs(t, e.svc.Cancel(ctx, jc.ID), ErrNotCancelable)
 
-	n, err := e.svc.ClearFinished(ctx)
+	n, err := e.svc.ClearFinished(ctx, models.JobKindTransfer)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, n)
 
@@ -935,4 +936,65 @@ func TestWithTransferTag(t *testing.T) {
 	assert.Equal(t, models.TransferTag, withTransferTag(""))
 	assert.Equal(t, "a,"+models.TransferTag, withTransferTag("a"))
 	assert.Equal(t, "a, "+models.TransferTag, withTransferTag("a, "+models.TransferTag), "已经有就不重复加")
+}
+
+// 辅种任务：源与目标是同一台下载器，暂停加入（带 pt-tools-reseed 标签）、校验到 100% 才开始做种，不移除任何种子，
+// 完成后写一条新种子的记录；目标里同一种子不是辅种加的就不动。
+func TestReseedJob(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	data := torrentFile(t, "Movie.Reseed")
+	h, err := qbit.ComputeTorrentHash(data)
+	require.NoError(t, err)
+	j := models.TorrentTransferJob{
+		TargetDownloaderID: dstID, InfoHash: strings.ToUpper(h), Name: "Movie.Reseed", TotalSize: 1 << 30,
+		SiteName: "hdsky", TorrentID: "321", TargetSavePath: "/data/movies", SourceSavePath: "/data/movies", Category: "movies", Tags: "hdsky", TorrentData: data,
+	}
+	require.NoError(t, e.svc.EnqueueReseed(ctx, &j))
+	assert.Equal(t, models.TransferExported, j.State)
+	assert.Equal(t, uint(dstID), j.SourceDownloaderID)
+	dup := j
+	dup.ID = 0
+	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &dup), ErrJobActive)
+	assert.ErrorIs(t, e.svc.EnqueueReseed(ctx, &models.TorrentTransferJob{TargetDownloaderID: dstID}), ErrInvalid)
+
+	e.svc.RunOnce(ctx) // 加入
+	require.Len(t, e.pushes, 1)
+	p := e.pushes[0]
+	assert.True(t, p.ReuseExistingData)
+	assert.Equal(t, "/data/movies", p.SavePath)
+	assert.Equal(t, "hdsky,"+models.ReseedTag, p.Tags)
+	assert.Equal(t, ReseedSource, p.Source)
+	e.svc.RunOnce(ctx) // 校验
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx)
+	e.svc.RunOnce(ctx)
+	got := e.job(j.ID)
+	assert.Equal(t, models.TransferDone, got.State, got.Message)
+	assert.Equal(t, []string{h}, e.dst.resumed)
+	assert.Empty(t, e.dst.removed, "辅种不移除任何种子")
+	var rec models.TorrentInfo
+	require.NoError(t, e.db.Where("site_name = ? AND torrent_id = ?", "hdsky", "321").First(&rec).Error)
+	require.NotNil(t, rec.TorrentHash)
+	assert.Equal(t, h, *rec.TorrentHash)
+	assert.Equal(t, "tr-dst", rec.DownloaderName)
+	assert.Equal(t, ReseedSource, rec.DownloadSource)
+
+	jobs, err := e.svc.ListJobs(ctx, "", models.JobKindReseed)
+	require.NoError(t, err)
+	assert.Len(t, jobs, 1)
+	n, err := e.svc.ClearFinished(ctx, models.JobKindTransfer)
+	require.NoError(t, err)
+	assert.Zero(t, n, "清除转移任务不碰辅种任务")
+
+	// 同一种子已在下载器里、却没有 pt-tools-reseed 标签：不接管
+	e2 := newEnv(t)
+	j2 := models.TorrentTransferJob{TargetDownloaderID: dstID, InfoHash: h, TorrentData: data, State: models.TransferAdding}
+	require.NoError(t, e2.svc.EnqueueReseed(ctx, &j2))
+	require.NoError(t, e2.db.Model(&j2).Update("state", models.TransferAdding).Error)
+	e2.dst.put(downloader.Torrent{InfoHash: h, Tags: models.TransferTag})
+	e2.svc.RunOnce(ctx)
+	got2 := e2.job(j2.ID)
+	assert.Equal(t, models.TransferFailed, got2.State)
+	assert.Contains(t, got2.Message, "不是辅种加的")
 }

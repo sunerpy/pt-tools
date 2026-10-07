@@ -31,9 +31,9 @@ const (
 	MaxPathMaps = 50
 )
 
-// ListJobs 返回最新的任务；status 为 active 只列未结束的，finished 只列已结束的，其他值列全部。
-func (s *Service) ListJobs(ctx context.Context, status string) ([]models.TorrentTransferJob, error) {
-	q := s.cfg.DB.WithContext(ctx).Omit("torrent_data").Order("id DESC").Limit(MaxJobsListed)
+// ListJobs 返回最新的这一种任务；status 为 active 只列未结束的，finished 只列已结束的，其他值列全部。
+func (s *Service) ListJobs(ctx context.Context, status, kind string) ([]models.TorrentTransferJob, error) {
+	q := s.cfg.DB.WithContext(ctx).Omit("torrent_data").Where("kind = ?", kind).Order("id DESC").Limit(MaxJobsListed)
 	switch status {
 	case JobsActive:
 		q = q.Where("state IN ?", models.TransferActiveStates)

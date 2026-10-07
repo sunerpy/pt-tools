@@ -169,7 +169,7 @@ func (s *Server) apiTransferJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		jobs, err := svc.ListJobs(r.Context(), r.URL.Query().Get("status"))
+		jobs, err := svc.ListJobs(r.Context(), r.URL.Query().Get("status"), models.JobKindTransfer)
 		if err != nil {
 			writeTransferError(w, err)
 			return
@@ -192,7 +192,7 @@ func (s *Server) apiTransferJobs(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"created": transferJobViews(r.Context(), created), "skipped": skipped})
 	case http.MethodDelete:
-		n, err := svc.ClearFinished(r.Context())
+		n, err := svc.ClearFinished(r.Context(), models.JobKindTransfer)
 		if err != nil {
 			writeTransferError(w, err)
 			return
