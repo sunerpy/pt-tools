@@ -62,6 +62,12 @@ const router = createRouter({
       meta: { title: "已支持站点" },
     },
     {
+      path: "/cookiecloud",
+      name: "cookiecloud",
+      component: () => import("@/views/CookieCloud.vue"),
+      meta: { title: "CookieCloud 导入" },
+    },
+    {
       path: "/search",
       name: "search",
       component: () => import("@/views/TorrentSearch.vue"),
