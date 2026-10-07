@@ -147,15 +147,22 @@ func (s *Service) SaveRule(ctx context.Context, r models.TransferRule) (models.T
 		}
 		return r, nil
 	}
-	old, err := s.GetRule(ctx, r.ID)
-	if err != nil {
-		return r, err
+	// 只写配置列：运行时间与结果由运行那一方写，修改规则不碰它们（读写之间刚记下的结果不会被盖掉）
+	res := s.cfg.DB.WithContext(ctx).Model(&models.TransferRule{}).Where("id = ?", r.ID).
+		Select(ruleConfigColumns).Updates(&r)
+	if res.Error != nil {
+		return r, fmt.Errorf("保存转移规则失败: %w", res.Error)
 	}
-	r.LastRunAt, r.LastResult, r.CreatedAt = old.LastRunAt, old.LastResult, old.CreatedAt
-	if err := s.cfg.DB.WithContext(ctx).Select("*").Save(&r).Error; err != nil {
-		return r, fmt.Errorf("保存转移规则失败: %w", err)
+	if res.RowsAffected == 0 {
+		return r, ErrRuleNotFound
 	}
-	return r, nil
+	return s.GetRule(ctx, r.ID)
+}
+
+// ruleConfigColumns 是修改规则时写的列。
+var ruleConfigColumns = []string{
+	"name", "enabled", "source_downloader_id", "target_downloader_id", "category", "tag", "site_name",
+	"min_seeding_hours", "max_per_run", "interval_min",
 }
 
 // DeleteRule 删除规则；它建过的任务保留。

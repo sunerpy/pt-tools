@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -109,4 +110,30 @@ func TestHasTag(t *testing.T) {
 func TestRuleResultSummary(t *testing.T) {
 	assert.Equal(t, "符合条件 3 个，建了 1 个任务，跳过 1 个（X：已经有进行中的转移任务）",
 		RuleResult{Matched: 3, Created: 1, Skipped: []string{"X：已经有进行中的转移任务"}}.Summary())
+}
+
+// 修改规则只写配置列：读出旧规则之后别人刚记下的运行结果不会被盖掉。
+func TestSaveRuleKeepsConcurrentRunRecord(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	r, err := e.svc.SaveRule(ctx, models.TransferRule{Name: "r", SourceDownloaderID: srcID, TargetDownloaderID: dstID})
+	require.NoError(t, err)
+	// 在更新语句执行前插一条「后台刚运行完」的写入（同一事务里，模拟读与写之间的并发）
+	ran := e.now.Add(time.Minute)
+	require.NoError(t, e.db.Callback().Update().Before("gorm:update").Register("test:concurrent-run", func(tx *gorm.DB) {
+		if tx.Statement.Table == "transfer_rules" {
+			_, _ = tx.Statement.ConnPool.ExecContext(tx.Statement.Context,
+				"UPDATE transfer_rules SET last_result = ?, last_run_at = ? WHERE id = ?", "concurrent", ran, r.ID)
+		}
+	}))
+	t.Cleanup(func() { _ = e.db.Callback().Update().Remove("test:concurrent-run") })
+	r.Tag = "keep"
+	saved, err := e.svc.SaveRule(ctx, r)
+	require.NoError(t, err)
+	assert.Equal(t, "keep", saved.Tag)
+	got, err := e.svc.GetRule(ctx, r.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "keep", got.Tag)
+	assert.Equal(t, "concurrent", got.LastResult, "运行结果不被修改规则盖掉")
+	require.NotNil(t, got.LastRunAt)
 }

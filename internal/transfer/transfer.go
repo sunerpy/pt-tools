@@ -145,6 +145,8 @@ func (s *Service) Preview(ctx context.Context, targetID uint, items []Item) ([]P
 func (s *Service) preview(ctx context.Context, targetID uint, items []Item) ([]PreviewItem, error) {
 	items = normalizeItems(items)
 	switch {
+	case targetID == 0:
+		return nil, fmt.Errorf("%w：要选目标下载器", ErrInvalid)
 	case len(items) == 0:
 		return nil, fmt.Errorf("%w：没有选中任何种子", ErrInvalid)
 	case len(items) > MaxItems:
