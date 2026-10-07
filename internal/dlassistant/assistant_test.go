@@ -3,6 +3,7 @@ package dlassistant
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -279,13 +280,13 @@ func TestLimitTorrents(t *testing.T) {
 // 能按 ctx 读 tracker 的下载器走可取消的接口；能一次读全部的下载器只请求一次。
 type readerDL struct {
 	*fakeDL
-	ctxCalls  int
-	bulkCalls int
+	ctxCalls  atomic.Int32 // 逐个读是并发的
+	bulkCalls atomic.Int32
 	bulkErr   error
 }
 
 func (r *readerDL) GetTorrentTrackersContext(ctx context.Context, id string) ([]downloader.TorrentTracker, error) {
-	r.ctxCalls++
+	r.ctxCalls.Add(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -293,7 +294,7 @@ func (r *readerDL) GetTorrentTrackersContext(ctx context.Context, id string) ([]
 }
 
 func (r *readerDL) GetAllTorrentTrackers(context.Context) (map[string][]downloader.TorrentTracker, error) {
-	r.bulkCalls++
+	r.bulkCalls.Add(1)
 	if r.bulkErr != nil {
 		return nil, r.bulkErr
 	}
@@ -310,18 +311,18 @@ func TestTrackerReaders(t *testing.T) {
 	dead, _, err := ScanDeadTorrents(context.Background(), r, resolver())
 	require.NoError(t, err)
 	require.Len(t, dead, 1)
-	assert.Equal(t, 1, r.bulkCalls, "一次读全部")
-	assert.Zero(t, r.ctxCalls)
+	assert.EqualValues(t, 1, r.bulkCalls.Load(), "一次读全部")
+	assert.Zero(t, r.ctxCalls.Load())
 
 	tags, _, err := FindMissingSiteTags(context.Background(), r, resolver())
 	require.NoError(t, err)
 	assert.Len(t, tags, 2)
-	assert.Equal(t, 2, r.bulkCalls)
+	assert.EqualValues(t, 2, r.bulkCalls.Load())
 
 	r.bulkErr = errors.New("too big")
 	_, _, err = ScanDeadTorrents(context.Background(), r, resolver())
 	require.NoError(t, err)
-	assert.Equal(t, 2, r.ctxCalls, "一次读失败时退回逐个读")
+	assert.EqualValues(t, 2, r.ctxCalls.Load(), "一次读失败时退回逐个读")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
