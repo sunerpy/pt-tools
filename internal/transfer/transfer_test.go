@@ -785,3 +785,38 @@ func TestTransferFinishUpdatesSourceRecordsOnly(t *testing.T) {
 	assert.Equal(t, "elsewhere", rows[1].DownloaderName, "别的下载器上的记录不动")
 	assert.Equal(t, "tr-dst", rows[2].DownloaderName, "只有名称的旧记录按源下载器名称认")
 }
+
+// 100% 但下载器报告「排队做种」：算校验完成，收尾也认它，不在 checking 与 verified 之间来回。
+// 状态说不清（unknown）时一直等，到时限回滚。
+func TestTransferQueuedOrUnknownAtFull(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	h := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
+	id := e.create(Item{srcID, h})[0].ID
+	for range 3 {
+		e.svc.RunOnce(ctx)
+	}
+	e.dst.afterRecheck = func(t *downloader.Torrent) { t.State = downloader.TorrentQueued }
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferVerified, e.job(id).State)
+	e.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferDone, e.job(id).State, "排队做种的 100% 种子直接收尾")
+
+	e2 := newEnv(t)
+	h2 := e2.seed(e2.src.fakeDL, "Movie.B", 1<<30, true)
+	id2 := e2.create(Item{srcID, h2})[0].ID
+	for range 3 {
+		e2.svc.RunOnce(ctx)
+	}
+	e2.dst.afterRecheck = func(t *downloader.Torrent) { t.State = downloader.TorrentUnknown }
+	e2.dst.finishCheck(h2)
+	for range 4 {
+		e2.svc.RunOnce(ctx)
+		assert.Equal(t, models.TransferChecking, e2.job(id2).State, "状态说不清时等着")
+	}
+	e2.now = e2.now.Add(40 * time.Minute)
+	e2.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferRolledBack, e2.job(id2).State, "到时限回滚")
+	assert.Empty(t, e2.src.removed)
+}

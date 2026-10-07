@@ -582,9 +582,9 @@ func (s *Service) check(ctx context.Context, j *models.TorrentTransferJob) error
 	j.Progress = t.Progress
 	pct := t.Progress * 100
 	switch {
-	case completed(t) && t.State != downloader.TorrentChecking:
+	case checkDone(t):
 		return s.moveTo(ctx, j, models.TransferVerified, "校验完成")
-	case inProgressState(t.State):
+	case stillChecking(t):
 		if j.Deadline != nil && now.After(*j.Deadline) {
 			return s.rollback(ctx, j, target, t, fmt.Sprintf("校验超过时限（到 %.1f%%）", pct))
 		}
@@ -620,7 +620,7 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 	if !owned(t) {
 		return s.fail(ctx, j, notOursMessage)
 	}
-	if !completed(t) || inProgressState(t.State) {
+	if !checkDone(t) {
 		// 校验完成之后目标又在校验，或者数据不完整了：不收尾，退回校验重新计时；源绝不移除
 		now := s.cfg.Now()
 		deadline := now.Add(checkTimeout(j.TotalSize))
@@ -797,9 +797,21 @@ func completed(t downloader.Torrent) bool {
 	return t.IsCompleted || t.Progress >= 1
 }
 
-// inProgressState 报告下载器是不是还在校验或排队校验（状态说不清的也按还在进行算，等到时限）。
-func inProgressState(state downloader.TorrentState) bool {
-	return state == downloader.TorrentChecking || state == downloader.TorrentQueued || state == downloader.TorrentUnknown
+// checkDone 报告目标校验完了并且数据完整：100%，而且不在校验、状态说得清（排队做种的 100% 种子也算）。
+func checkDone(t downloader.Torrent) bool {
+	return completed(t) && t.State != downloader.TorrentChecking && t.State != downloader.TorrentUnknown
+}
+
+// stillChecking 报告目标是不是还在校验或排队等校验：正在校验、状态说不清，或者不到 100% 还在排队。
+// 这几种都等到时限，不按「校验完不到 100%」回滚。
+func stillChecking(t downloader.Torrent) bool {
+	switch t.State {
+	case downloader.TorrentChecking, downloader.TorrentUnknown:
+		return true
+	case downloader.TorrentQueued:
+		return !completed(t)
+	}
+	return false
 }
 
 // notOursMessage 是目标里有同一个种子、却不是这次转移加的（没有 pt-tools-transfer 标签）时的说明。
