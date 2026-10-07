@@ -46,6 +46,7 @@ type Manager struct {
 	deadTorrentMonitor   *DeadTorrentMonitor
 	transferWorker       *TransferWorker
 	reseedWorker         *ReseedWorker
+	cookieCloudWorker    *CookieCloudWorker
 	eventCancel          func()
 	stopped              bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
@@ -503,6 +504,10 @@ func (m *Manager) StopAll() {
 		m.reseedWorker.Stop()
 		m.reseedWorker = nil
 	}
+	if m.cookieCloudWorker != nil {
+		m.cookieCloudWorker.Stop()
+		m.cookieCloudWorker = nil
+	}
 	if m.transferWorker != nil {
 		m.transferWorker.Stop()
 		m.transferWorker = nil
@@ -718,6 +723,23 @@ func (m *Manager) GetReseedWorker() *ReseedWorker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.reseedWorker
+}
+
+// SetCookieCloudWorker 登记 CookieCloud 定时同步；替换旧实例时先停掉旧的。
+func (m *Manager) SetCookieCloudWorker(w *CookieCloudWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cookieCloudWorker != nil && m.cookieCloudWorker != w {
+		m.cookieCloudWorker.Stop()
+	}
+	m.cookieCloudWorker = w
+}
+
+// GetCookieCloudWorker 返回 CookieCloud 定时同步（未接线时为 nil）。
+func (m *Manager) GetCookieCloudWorker() *CookieCloudWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cookieCloudWorker
 }
 
 // TransferDownloader 按下载器 ID 取管理器里的实例与配置（转移做种用）；下载器不存在、未启用或连不上时返回错误。
