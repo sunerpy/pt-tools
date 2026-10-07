@@ -66,6 +66,10 @@ home:
             body: 按站点设置探测方式和提醒阈值，在长期未登录导致封号之前发出提醒。
             status: available
             link: /guide/site-login-monitoring
+          - title: CookieCloud 导入
+            body: 从自建的 CookieCloud 服务取回浏览器同步的 Cookie，在本机解密，预览后写进站点；也可以定时同步。
+            status: available
+            link: /guide/cookiecloud
       - name: RSS 自动下载
         items:
           - title: RSS 订阅
@@ -152,7 +156,7 @@ home:
       - title: 添加下载器
         body: 在「下载器设置」中添加 qBittorrent 或 Transmission，并检查连通性。
       - title: 添加站点认证
-        body: 用浏览器扩展同步 Cookie，或者在站点设置中填写 API Key、Passkey。
+        body: 用浏览器扩展同步 Cookie、从 CookieCloud 导入，或者在站点设置中填写 API Key、Passkey。
       - title: 订阅 RSS
         body: 为站点添加 RSS 订阅并选择下载器。未关联过滤规则时，只下载免费种子。
 
@@ -275,9 +279,9 @@ pt-tools 定时拉取每个 RSS 订阅，把符合条件的种子推送到下载
 
 用户统计页汇总每个站点的上传量、分享率、做种和等级进度；站点列表显示每个站点的认证方式、登录状态，以及距离长期未登录封禁阈值还剩多少天。
 
-Cookie 站点可以用浏览器扩展一键同步，M-Team 这类站点使用 API Key，Rousi Pro 使用 Passkey。
+Cookie 站点可以用浏览器扩展一键同步，也可以从 CookieCloud 导入；M-Team 这类站点使用 API Key，Rousi Pro 使用 Passkey。
 
-[支持站点](/sites) · [获取 Cookie 与 API Key](/guide/get-cookie-apikey) · [登录状态与密钥备份](/guide/site-login-monitoring)
+[支持站点](/sites) · [获取 Cookie 与 API Key](/guide/get-cookie-apikey) · [CookieCloud 导入](/guide/cookiecloud) · [登录状态与密钥备份](/guide/site-login-monitoring)
 
 </SplitBlock>
 

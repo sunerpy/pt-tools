@@ -19,6 +19,7 @@
 - [获取 Cookie / API Key](guide/get-cookie-apikey.md)：浏览器扩展同步与手动获取认证信息。
 - [浏览器扩展](guide/browser-extension.md)：PT Tools Helper 的安装、Cookie 同步与站点采集。
 - [站点登录状态与密钥备份](guide/site-login-monitoring.md)：登录状态监控、提醒策略、`secret.key` 备份与合规边界。
+- [CookieCloud 导入](guide/cookiecloud.md)：从自建的 CookieCloud 服务取回 Cookie，在本机解密后写进站点，可选定时同步。
 - [请求新增站点](guide/request-new-site.md)：采集、脱敏并提交新站点适配资料。
 
 ## RSS 与下载
