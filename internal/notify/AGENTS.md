@@ -2,7 +2,7 @@
 
 ## Role
 
-This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, and WeCom webhook.
+This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, WeCom webhook, and the outbound-only Bark, ServerChan, ntfy, DingTalk, and Feishu adapters.
 
 ## Core Interface
 
@@ -32,7 +32,10 @@ internal/notify/
     ├── telegram/                # Inbound/outbound + callback actions
     ├── qq/                      # OneBot/NapCat inbound/outbound
     ├── webhook/                 # Stateless generic webhook
-    └── wecom/                   # WeCom webhook
+    ├── wecom/                   # WeCom webhook
+    ├── bark/ serverchan/ ntfy/  # Outbound-only push services
+    ├── dingtalk/ feishu/        # Outbound-only group bots (optional signing)
+    └── outbound/                # Shared JSON POST helper; errors never include the request URL
 ```
 
 ## Delivery Paths
