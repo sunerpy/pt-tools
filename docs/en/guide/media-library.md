@@ -89,7 +89,7 @@ Characters not allowed in paths (`\ / * ? " < > |`) become spaces and colons bec
 - Video files: mkv, mp4, m4v, avi, ts, m2ts, mts, mov, wmv, flv, rmvb, rm, webm, mpg, mpeg.
 - Skipped: files in Sample, Trailers, Featurettes, Extras, SPs and similar folders, file names ending in sample or trailer, NCOP and NCED openings and endings, and files smaller than Minimum video size (视频最小体积, 50 MB by default). The Specials folder holds season 0 episodes and is organised as usual.
 - Discs (BDMV and VIDEO_TS folders) and ISO images are not organised.
-- Subtitles (srt, ass, ssa, sub, idx, sup, vtt) go with their video and get a language suffix from the file name: `zh-CN` simplified Chinese, `zh-TW` traditional Chinese, `zh` Chinese, `en` English, `ja` Japanese, `ko` Korean. When a torrent has several videos, subtitles are matched by file name prefix or by season and episode.
+- Subtitles (srt, ass, ssa, sub, idx, sup, vtt) go with their video (except those in extras or sample folders) and get a language suffix from the file name: `zh-CN` simplified Chinese, `zh-TW` traditional Chinese, `zh` Chinese, `en` English, `ja` Japanese, `ko` Korean. When a torrent has several videos, subtitles are matched by file name prefix or by season and episode.
 - Season and episode numbers come from each file name, with [recognition words](media-recognize.md#recognition-words) applied (episode offsets included); single-file torrents use the torrent name.
 
 Recognition uses the torrent name (and the site title as a subtitle when it differs), looking up the site's IMDb ID first when there is one.
@@ -106,7 +106,7 @@ Automatic organising and periodic scans only take torrents in the scope: downloa
 
 Manual organising shows a preview first: the recognized title, the chosen library and where each file goes. When the match is wrong, enter a TMDB ID (choose movie or TV) or pick another library of the same type, click Preview again (重新预览), then organise. A torrent organised before keeps the title it was organised with (the preview says 沿用之前整理用的条目); to change it, enter a TMDB ID or delete its records first. Copying large files can take a while; the dialog waits 20 seconds, the work continues in the background and the result appears in the history.
 
-Each file is organised once: repeated completion events or several triggers at the same time never organise it twice. When the library already has this file (the same inode, or a symbolic link to the source), it counts as done. When another file is at the target, it is not overwritten and the record says skipped.
+Each file is organised once: repeated completion events or several triggers at the same time never organise it twice. When the library already has this file (the same inode, or a symbolic link to the source), it counts as done. When another file is at the target, it is not overwritten and the record says skipped (copied and moved files cannot be told apart from someone else's, so an existing target is always skipped). Subtitles that fail are noted in the record and added the next time the torrent is organised (a retry or another manual run).
 
 ## Scraping
 
@@ -129,7 +129,7 @@ After organising, pt-tools asks the media servers to scan the new folders. Organ
 | Refresh       | Scan only the organised folders (default), or refresh the whole library                                                                 |
 | Path prefixes | When the media server sees different paths, fill in both prefixes, for example pt-tools' `/media` is `/data/media` in Emby              |
 
-Click Test (测试) to check the address and key. The list shows the result of the last notification; a failed notification does not affect organising.
+Click Test (测试) to check the address and key. The list shows the result of the last notification; a failed notification does not affect organising. With path prefixes set, a folder outside them is not sent to that server as a pt-tools path; the list says why.
 
 ## Notifications
 
@@ -146,13 +146,13 @@ There is one record per video file, showing where it went, how, which trigger or
 | Skipped (跳过)   | Another file is at the target, or the torrent is a disc or has no video to organise                                                                                                                                                                                      |
 | Removed (已删除) | The files in the library have been deleted                                                                                                                                                                                                                               |
 
-Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): only files still confirmed to be the ones pt-tools created are deleted (hard links and copies by file ID, symbolic links by their target), along with the NFO files and images of the same name, and the folder's posters, NFO files and empty folders once no video is left. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
+Retry (重试) organises the whole torrent of the record again; use it after changing recognition words, corrections or libraries. When deleting, you can check Also delete the organised files in the library (同时删除库里整理出的文件): videos and subtitles are deleted only when still confirmed to be the files pt-tools created (hard links and copies by file ID: device, inode, size and modification time; symbolic links by their target); NFO files and images only when they are the copies pt-tools wrote, so edited or replaced ones stay, and the folder's posters, backgrounds and NFO files only once no video is left; empty folders go last. Moved files are the only copy and are never deleted here. Files in the download folder are never touched.
 
 ## Interaction with auto cleanup
 
 Once a torrent is hard-linked into the library, deleting it with its data frees no space (the library link still holds it), so the low-space emergency cleanup does not pick hard-linked torrents. Regular cleanup rules still apply: delete the torrent when it has seeded enough and the library file stays watchable.
 
-Delete library links when torrents are deleted (删种时一并删除入库链接) is off by default. When on, pt-tools checks every 10 minutes for torrents that are gone from the downloader and whose source files are gone too (deleted with data), deletes the hard links and symbolic links organised from them and marks the records removed; copies and moved files stay. With it on, the emergency cleanup also picks hard-linked torrents, since deleting them now frees space. Nothing is deleted while the library folder is missing (for example not mounted) or the downloader cannot be reached.
+Delete library links when torrents are deleted (删种时一并删除入库链接) is off by default. When on, pt-tools checks every 10 minutes for torrents that are gone from the downloader and whose source files are gone too (deleted with data), deletes the hard links and symbolic links organised from them and marks the records removed; copies and moved files stay. With it on, the emergency cleanup also picks hard-linked torrents, since deleting them now frees space. Nothing is deleted while the torrent's save folder or the library folder is missing (for example not mounted) or the downloader cannot be reached.
 
 ## Troubleshooting
 
