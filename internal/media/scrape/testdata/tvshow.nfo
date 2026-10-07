@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+  <title>最后生还者</title>
+  <originaltitle>The Last of Us</originaltitle>
+  <year>2023</year>
+  <premiered>2023-01-15</premiered>
+  <plot>末日之后……</plot>
+  <runtime>50</runtime>
+  <ratings>
+    <rating name="themoviedb" max="10" default="true">
+      <value>8.6</value>
+    </rating>
+  </ratings>
+  <uniqueid type="tmdb" default="true">100088</uniqueid>
+  <uniqueid type="imdb">tt3581920</uniqueid>
+  <tmdbid>100088</tmdbid>
+  <imdbid>tt3581920</imdbid>
+  <genre>剧情</genre>
+</tvshow>
