@@ -2300,6 +2300,11 @@ export interface TMDBItem {
   original_language?: string;
   imdb_id?: string;
   seasons?: number;
+  backdrop_path?: string;
+  /** TMDB 的类型编号（16 是动画）与名称 */
+  genre_ids?: number[];
+  genres?: string[];
+  runtime?: number;
 }
 
 export interface MediaCandidate extends TMDBItem {
@@ -2368,6 +2373,233 @@ export const mediaApi = {
   updateWord: (id: number, data: MediaWordInput) =>
     api.put<MediaWordRule>(`/api/media/words/${id}`, data),
   deleteWord: (id: number) => api.delete<{ ok: boolean }>(`/api/media/words/${id}`),
+};
+
+// 整理入库（M10）：媒体服务器的 Token 只写不读
+export type MediaMode = "hardlink" | "copy" | "symlink" | "move";
+
+export interface OrganizeSettings {
+  auto_enabled: boolean;
+  /** 打开自动整理的时间：只整理之后下载完成的种子 */
+  auto_since?: string;
+  scan_enabled: boolean;
+  scan_interval_min: number;
+  downloaders: number[];
+  categories: string[];
+  tags: string[];
+  save_paths: string[];
+  min_video_mb: number;
+  notify_channels: number[];
+  delete_links_on_remove: boolean;
+}
+
+export type OrganizeSettingsInput = Omit<OrganizeSettings, "auto_since">;
+
+export interface MediaLibraryInput {
+  name: string;
+  kind: MediaKind;
+  /** 只收动画（TMDB 类型里有「动画」的条目） */
+  anime: boolean;
+  path: string;
+  /** 命名模板；空串用默认模板 */
+  template: string;
+  mode: MediaMode;
+  scrape: boolean;
+  scrape_overwrite: boolean;
+  enabled: boolean;
+}
+
+export interface MediaLibrary extends MediaLibraryInput {
+  id: number;
+  created_at: string;
+  updated_at: string;
+  /** 实际用的模板与示例渲染的结果 */
+  effective_template: string;
+  preview: string;
+}
+
+export interface MediaCheckItem {
+  name: string;
+  ok: boolean;
+  message?: string;
+}
+
+export interface MediaPathMapInput {
+  downloader_id: number;
+  downloader_prefix: string;
+  local_prefix: string;
+}
+
+export interface MediaPathMap extends MediaPathMapInput {
+  id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MediaServerKind = "emby" | "jellyfin" | "plex";
+export type MediaRefreshMode = "path" | "library";
+
+export interface MediaServerInput {
+  name: string;
+  kind: MediaServerKind;
+  url: string;
+  /** 不传时保留原来的 Token；新建时必须填 */
+  token?: string;
+  enabled: boolean;
+  refresh_mode: MediaRefreshMode;
+  local_prefix: string;
+  server_prefix: string;
+}
+
+export interface MediaServer extends Omit<MediaServerInput, "token"> {
+  id: number;
+  has_token: boolean;
+  last_error: string;
+  last_refresh_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaServerInfo {
+  name: string;
+  version: string;
+  libraries?: number;
+}
+
+export interface OrganizeRequest {
+  downloader_id: number;
+  hash: string;
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  library_id?: number;
+}
+
+export type OrganizeItemStatus = "pending" | "done" | "exists" | "failed";
+
+export interface OrganizePlanItem {
+  rel: string;
+  source: string;
+  size: number;
+  target?: string;
+  season?: number;
+  episode?: number;
+  episode_end?: number;
+  episode_title?: string;
+  subtitles?: { source: string; target: string }[];
+  status: OrganizeItemStatus;
+  message?: string;
+  history_id?: number;
+}
+
+export interface OrganizePlan {
+  downloader_id: number;
+  downloader_name: string;
+  hash: string;
+  task_id: string;
+  name: string;
+  save_path: string;
+  local_path: string;
+  mapped: boolean;
+  match?: TMDBItem;
+  source?: MediaRecognizeResult["source"] | "manual";
+  library?: MediaLibraryInput & { id: number };
+  mode?: MediaMode;
+  items: OrganizePlanItem[];
+  skipped?: { file: { rel: string; path: string; size: number }; reason: string }[];
+  /** 整个种子整理不了的原因 */
+  problem?: string;
+}
+
+export interface OrganizeResult {
+  plan?: OrganizePlan;
+  created: number;
+  done: number;
+  skipped: number;
+  failed: number;
+  messages?: string[];
+  /** 整理还在后台进行（复制大文件时），稍后在整理历史里看 */
+  queued?: boolean;
+}
+
+export type MediaTransferStatus = "done" | "failed" | "skipped" | "removed";
+
+export interface MediaHistoryItem {
+  id: number;
+  downloader_id: number;
+  downloader_name: string;
+  info_hash: string;
+  task_id: string;
+  torrent_name: string;
+  library_id: number;
+  library_name?: string;
+  source_path: string;
+  target_path: string;
+  mode: MediaMode;
+  media_type: "" | MediaKind;
+  tmdb_id: number;
+  title: string;
+  year: number;
+  season: number;
+  episode: number;
+  episode_end: number;
+  size: number;
+  status: MediaTransferStatus;
+  message: string;
+  attempts: number;
+  next_retry_at?: string;
+  trigger: "auto" | "scan" | "manual";
+  subtitles: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaHistoryPage {
+  items: MediaHistoryItem[];
+  total: number;
+}
+
+export const organizeApi = {
+  settings: () => api.get<OrganizeSettings>("/api/media/organize/settings"),
+  saveSettings: (data: OrganizeSettingsInput) =>
+    api.put<OrganizeSettings>("/api/media/organize/settings", data),
+  preview: (data: OrganizeRequest) => api.post<OrganizePlan>("/api/media/organize/preview", data),
+  organize: (data: OrganizeRequest) => api.post<OrganizeResult>("/api/media/organize", data),
+  libraries: () => api.get<MediaLibrary[]>("/api/media/libraries"),
+  createLibrary: (data: MediaLibraryInput) => api.post<MediaLibrary>("/api/media/libraries", data),
+  updateLibrary: (id: number, data: MediaLibraryInput) =>
+    api.put<MediaLibrary>(`/api/media/libraries/${id}`, data),
+  deleteLibrary: (id: number) => api.delete<{ ok: boolean }>(`/api/media/libraries/${id}`),
+  checkLibrary: (data: { path: string; mode: MediaMode }) =>
+    api.post<MediaCheckItem[]>("/api/media/libraries/check", data),
+  templatePreview: (data: { kind: MediaKind; template: string }) =>
+    api.post<{ template: string; preview: string; error?: string }>(
+      "/api/media/libraries/template-preview",
+      data,
+    ),
+  pathMaps: () => api.get<MediaPathMap[]>("/api/media/path-maps"),
+  createPathMap: (data: MediaPathMapInput) => api.post<MediaPathMap>("/api/media/path-maps", data),
+  updatePathMap: (id: number, data: MediaPathMapInput) =>
+    api.put<MediaPathMap>(`/api/media/path-maps/${id}`, data),
+  deletePathMap: (id: number) => api.delete<{ ok: boolean }>(`/api/media/path-maps/${id}`),
+  servers: () => api.get<MediaServer[]>("/api/media/servers"),
+  createServer: (data: MediaServerInput) => api.post<MediaServer>("/api/media/servers", data),
+  updateServer: (id: number, data: MediaServerInput) =>
+    api.put<MediaServer>(`/api/media/servers/${id}`, data),
+  deleteServer: (id: number) => api.delete<{ ok: boolean }>(`/api/media/servers/${id}`),
+  testServer: (data: { id?: number; kind: MediaServerKind; url: string; token?: string }) =>
+    api.post<MediaServerInfo>("/api/media/servers/test", data),
+  history: (q: { status?: string; q?: string; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.status) params.set("status", q.status);
+    if (q.q) params.set("q", q.q);
+    if (q.limit) params.set("limit", String(q.limit));
+    if (q.offset) params.set("offset", String(q.offset));
+    const qs = params.toString();
+    return api.get<MediaHistoryPage>(`/api/media/history${qs ? `?${qs}` : ""}`);
+  },
+  retry: (id: number) => api.post<OrganizeResult>(`/api/media/history/${id}/retry`),
+  deleteHistory: (id: number, files = false) =>
+    api.delete<{ ok: boolean }>(`/api/media/history/${id}${files ? "?files=1" : ""}`),
 };
 
 export const reseedApi = {

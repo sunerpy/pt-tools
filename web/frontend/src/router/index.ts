@@ -74,6 +74,18 @@ const router = createRouter({
       meta: { title: "媒体识别" },
     },
     {
+      path: "/media/library",
+      name: "media-library",
+      component: () => import("@/views/MediaLibrary.vue"),
+      meta: { title: "媒体库" },
+    },
+    {
+      path: "/media/history",
+      name: "media-history",
+      component: () => import("@/views/MediaHistory.vue"),
+      meta: { title: "整理历史" },
+    },
+    {
       path: "/search",
       name: "search",
       component: () => import("@/views/TorrentSearch.vue"),
