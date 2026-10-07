@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1180,35 +1179,6 @@ func (t *TransmissionClient) SetTorrentCategory(id, category string) error {
 		return fmt.Errorf("failed to set torrent category: %w", err)
 	}
 
-	return nil
-}
-
-// RemoveTag 从种子的 labels 里去掉 tag；种子不在了、或者没有这个标签时什么也不做。
-func (t *TransmissionClient) RemoveTag(id, tag string) error {
-	tor, err := t.GetTorrent(id)
-	if errors.Is(err, downloader.ErrTorrentNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	labels := splitLabels(tor.Tags)
-	kept := make([]string, 0, len(labels))
-	for _, l := range labels {
-		if l != tag {
-			kept = append(kept, l)
-		}
-	}
-	if len(kept) == len(labels) {
-		return nil
-	}
-	ids := normalizeTransmissionIDs([]string{tor.ID})
-	if len(ids) == 0 {
-		return nil
-	}
-	if _, err := t.doRequest("torrent-set", map[string]any{"ids": ids, "labels": kept}); err != nil {
-		return fmt.Errorf("failed to remove torrent tag: %w", err)
-	}
 	return nil
 }
 
