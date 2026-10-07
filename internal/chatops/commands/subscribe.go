@@ -153,14 +153,14 @@ func subPickHandler(ctx context.Context, args []string, src chatops.Source, stat
 		n, _ = strconv.Atoi(fields[0])
 	}
 	if n < 1 || n > len(found) || len(fields) > 2 {
-		return okReply(tr(src.ReplyLang, "已取消订阅", "cancelled")), nil
+		return okReply(tr(src.ReplyLang, "已取消订阅", "canceled")), nil
 	}
 	c := found[n-1]
 	season := 0
 	if len(fields) == 2 {
 		s, err := strconv.Atoi(fields[1])
 		if err != nil || s < 1 || c.Kind != "tv" {
-			return okReply(tr(src.ReplyLang, "季号不对（只有剧集可以写季号），已取消", "invalid season, cancelled")), nil
+			return okReply(tr(src.ReplyLang, "季号不对（只有剧集可以写季号），已取消", "invalid season, canceled")), nil
 		}
 		season = s
 	}
