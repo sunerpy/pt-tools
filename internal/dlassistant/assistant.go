@@ -177,12 +177,14 @@ func ApplySiteTags(ctx context.Context, dl downloader.Downloader, r *v2.TrackerR
 
 // TrackerMatch 是一个要改的 tracker 地址（脱敏后展示）。ID 是这条「原地址 → 新地址」的指纹，
 // 执行时只改指纹仍然对得上的地址：预览之后新加的、被改过的地址都不会被动到。
+// 替换后不是有效地址的那条 ID 为空、Error 写明原因，不能执行。
 type TrackerMatch struct {
-	ID   string `json:"id"`
-	Hash string `json:"hash"`
-	Name string `json:"name"`
-	Old  string `json:"old"`
-	New  string `json:"new"`
+	ID    string `json:"id"`
+	Hash  string `json:"hash"`
+	Name  string `json:"name"`
+	Old   string `json:"old"`
+	New   string `json:"new"`
+	Error string `json:"error,omitempty"`
 }
 
 // TrackerSelection 是执行替换时选中的一条：种子与预览时那条地址的指纹。
@@ -241,11 +243,13 @@ func PreviewTrackerReplace(ctx context.Context, dl downloader.Downloader, from, 
 			if !strings.Contains(u, from) {
 				continue
 			}
-			nu, err := ReplaceTrackerURL(u, from, to)
-			if err != nil {
-				continue // 替换后不是有效地址的不列（执行时也不会改）
+			m := TrackerMatch{Hash: hashKey(t), Name: t.Name, Old: RedactTrackerURL(u)}
+			if nu, err := ReplaceTrackerURL(u, from, to); err != nil {
+				m.Error = err.Error() // 照样列出，但没有指纹，执行时不会改
+			} else {
+				m.ID, m.New = trackerFingerprint(hashKey(t), u, nu), RedactTrackerURL(nu)
 			}
-			out = append(out, TrackerMatch{ID: trackerFingerprint(hashKey(t), u, nu), Hash: hashKey(t), Name: t.Name, Old: RedactTrackerURL(u), New: RedactTrackerURL(nu)})
+			out = append(out, m)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })

@@ -178,6 +178,27 @@ func TestTrackerReplace(t *testing.T) {
 	assert.Error(t, err, "替换后必须仍是 tracker 地址")
 }
 
+// 替换后不是有效地址的那条照样列出来并写明原因，但没有指纹，不能执行。
+func TestTrackerReplaceInvalidResult(t *testing.T) {
+	f := newFake()
+	f.torrents = []downloader.Torrent{{ID: "a", InfoHash: "a", Name: "bad"}}
+	f.trackers["a"] = []downloader.TorrentTracker{{URL: "https://old.example.org/announce?passkey=SECRET"}}
+	got, _, err := PreviewTrackerReplace(context.Background(), f, "https://old.example.org", "ftp://x")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].ID, "不能勾选")
+	assert.Empty(t, got[0].New)
+	assert.Contains(t, got[0].Error, "不是有效的 tracker 地址")
+	assert.NotContains(t, got[0].Error+got[0].Old, "SECRET")
+
+	e := editorDL{f}
+	res, err := ApplyTrackerReplace(context.Background(), e, "https://old.example.org", "ftp://x",
+		[]TrackerSelection{{Hash: "a", ID: got[0].ID}})
+	require.NoError(t, err)
+	assert.Zero(t, res.Done)
+	assert.Empty(t, f.edits)
+}
+
 // 同一种子选了两条地址，改完第一条后第二条失败：写明已经改了几条。
 func TestTrackerReplacePartialFailure(t *testing.T) {
 	f := newFake()
