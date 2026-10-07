@@ -139,7 +139,7 @@ func (q *QbitClient) postFormContext(ctx context.Context, endpoint string, form 
 	}
 	if resp.StatusCode == http.StatusForbidden {
 		resp.Body.Close()
-		if authErr := q.Authenticate(); authErr != nil {
+		if authErr := q.AuthenticateWithContext(ctx); authErr != nil {
 			return nil, fmt.Errorf("re-authentication failed: %w", authErr)
 		}
 		if resp, err = send(); err != nil {

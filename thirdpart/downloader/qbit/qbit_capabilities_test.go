@@ -109,3 +109,40 @@ func TestQbitGetTorrentTrackersContext(t *testing.T) {
 	_, err = c.GetTorrentTrackersContext(ctx, "slow")
 	assert.ErrorIs(t, err, context.DeadlineExceeded, "ctx 到期时底层请求一起取消")
 }
+
+// 会话过期（403）后的重新登录也受请求的 ctx 约束：下载器卡在登录上时不会一直占着请求。
+func TestQbitReauthHonorsContext(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/auth/login" {
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			case <-time.After(5 * time.Second): // 不受 ctx 约束时也别把测试挂住
+			}
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	defer close(release)
+	c := coverageTestClient(srv.URL, false)
+
+	for name, call := range map[string]func(context.Context) error{
+		"trackers": func(ctx context.Context) error {
+			_, err := c.GetTorrentTrackersContext(ctx, "abc")
+			return err
+		},
+		"editTracker": func(ctx context.Context) error {
+			return c.EditTracker(ctx, "abc", "https://old/announce", "https://new/announce")
+		},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		start := time.Now()
+		err := call(ctx)
+		cancel()
+		assert.ErrorIs(t, err, context.DeadlineExceeded, name)
+		assert.Less(t, time.Since(start), 3*time.Second, name)
+		assert.True(t, c.IsHealthy(), "%s：调用方取消不算下载器出了问题", name)
+	}
+}

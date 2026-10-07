@@ -183,6 +183,10 @@ func (q *QbitClient) AuthenticateWithContext(ctx context.Context) error {
 
 	resp, err := q.client.Do(req)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// 调用方取消或到时，不代表下载器连不上
+			return fmt.Errorf("登录未完成: %w", ctxErr)
+		}
 		q.healthy = false
 		return q.wrapConnectionError(err)
 	}
@@ -344,7 +348,8 @@ func (q *QbitClient) doRequestWithRetry(req *http.Request) (*http.Response, erro
 
 	if resp.StatusCode == http.StatusForbidden {
 		resp.Body.Close()
-		if authErr := q.Authenticate(); authErr != nil {
+		// 重新登录也受这次请求的 ctx 约束
+		if authErr := q.AuthenticateWithContext(req.Context()); authErr != nil {
 			return nil, fmt.Errorf("re-authentication failed: %w", authErr)
 		}
 		newReq := req.Clone(req.Context())
