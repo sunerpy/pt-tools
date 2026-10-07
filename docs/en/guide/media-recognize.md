@@ -27,7 +27,7 @@ pt-tools looks for the TMDB entry in this order:
 
 1. A corrected name uses the entry it was corrected to.
 2. With an IMDb ID, it looks the ID up.
-3. It searches by the Chinese and the English name and accepts a result only when the name matches and the year fits (later seasons of a show may be later than its first air year).
+3. It searches by the Chinese and the English name and accepts a result only when the name matches and the year fits (later seasons of a show may be later than its first air year). When the name matches only partly, sequel numbers must agree (Inside Out is not taken for Inside Out 2) and the result must clearly beat the next candidate. A title with a year but no season or episode marker is searched as a movie first, then as a show when no movie matches.
 
 When nothing is accepted, the page lists candidates. Click Pick this (选这个), or correct it by TMDB ID. The ID is in the TMDB page address, such as `278` in `themoviedb.org/movie/278`.
 
@@ -35,7 +35,7 @@ Search results are cached for a day and entry details for a week. Without an API
 
 ## Corrections
 
-A correction applies to the parsed name (plus the year for movies, not for shows): other titles with the same name, such as a different resolution or release group, are recognized as the corrected entry. Delete it under Corrections (手动纠正) to search by name again.
+A correction applies to the parsed name (plus the year for movies, not for shows): other titles with the same name, such as a different resolution or release group, are recognized as the corrected entry. It is keyed by the English name when there is one, with the Chinese name as an alias, so it applies whether or not the subtitle has the Chinese name. Delete it under Corrections (手动纠正) to search by name again.
 
 ## Recognition words
 
@@ -51,6 +51,6 @@ Plain text matches ignore case; with regex matching (按正则匹配) the patter
 
 ## IMDb and Douban IDs
 
-pt-tools records the IMDb and Douban IDs a site provides: from the M-Team API, and from the IMDb and Douban links on NexusPHP detail pages. RSS downloads and brush pushes store them with the torrent, and recognition uses them first.
+pt-tools records the IMDb and Douban IDs a site provides: from the M-Team API, and from the IMDb and Douban links on NexusPHP detail pages. RSS downloads and brush pushes store them with the torrent, so that the upcoming library organisation and subscriptions can recognize torrents by ID. An IMDb ID entered in the recognition preview is also looked up first.
 
 Douban IDs are for the upcoming Douban wishlist (想看) subscriptions; pt-tools does not call Douban's API.
