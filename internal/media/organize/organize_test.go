@@ -588,8 +588,33 @@ func TestReplacedLibraryFileIsNotDone(t *testing.T) {
 	assert.Contains(t, p.Items[0].Message, "已经不是当初整理出的那个")
 	_, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
 	require.NoError(t, err)
-	assert.Equal(t, models.MediaTransferSkipped, e.history()[0].Status)
+	skipped := e.history()[0]
+	assert.Equal(t, models.MediaTransferSkipped, skipped.Status)
 	assert.Equal(t, "another version", readFile(t, row.TargetPath))
+	// 之前整理出的字幕还记在记录里，删除记录时照样清理
+	require.NotEmpty(t, row.Extras)
+	assert.Equal(t, row.Extras, skipped.Extras)
+	assert.Equal(t, row.TargetFileID, skipped.TargetFileID)
+
+	// 换掉以后又整理不了（这里是没有启用的电影媒体库）：不算已在库里，记成失败，记着的文件也留着
+	require.NoError(t, e.db.Model(&models.MediaLibrary{}).Where("1 = 1").Update("enabled", false).Error)
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Done)
+	assert.Equal(t, 1, res.Failed)
+	failed := e.history()[0]
+	assert.Equal(t, models.MediaTransferFailed, failed.Status)
+	assert.Equal(t, row.Extras, failed.Extras)
+	assert.Equal(t, row.TargetPath, failed.TargetPath)
+	assert.Equal(t, row.LibraryID, failed.LibraryID)
+	page, err := e.svc.History(e.ctx, HistoryQuery{})
+	require.NoError(t, err)
+	assert.True(t, page.Items[0].HasFiles, "跳过、失败的记录也可以连文件删")
+	kept, err := e.svc.DeleteHistory(e.ctx, failed.ID, true)
+	require.NoError(t, err)
+	assert.Len(t, kept, 1, "换掉的视频留着并写明")
+	assert.Equal(t, "another version", readFile(t, row.TargetPath))
+	assert.False(t, exists(strings.TrimSuffix(row.TargetPath, ".mkv")+".zh-CN.ass"), "整理的字幕删掉")
 }
 
 // 复制与移动方式下，之前整理好的字幕按记录认出来，没整理成的下次补上；移动以后源文件不在了也不挡

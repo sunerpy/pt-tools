@@ -257,6 +257,7 @@ func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 
 	w = serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id+"?files=1", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "kept", "都删掉了，没有留着的文件")
 	_, err = os.Stat(target)
 	assert.ErrorIs(t, err, os.ErrNotExist, "连库里的文件一起删")
 	assert.Equal(t, http.StatusNotFound, serveAuthed(e.mux, http.MethodDelete, "/api/media/history/"+id, "").Code)

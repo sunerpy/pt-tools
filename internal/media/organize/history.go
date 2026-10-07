@@ -23,11 +23,12 @@ type HistoryQuery struct {
 	Offset  int
 }
 
-// HistoryItem 是一条整理记录，带上媒体库的名字与字幕数。
+// HistoryItem 是一条整理记录，带上媒体库的名字、字幕数，以及库里有没有记着的、可以一起删的文件。
 type HistoryItem struct {
 	models.MediaTransferHistory
 	LibraryName string `json:"library_name,omitempty"`
 	Subtitles   int    `json:"subtitles"`
+	HasFiles    bool   `json:"has_files"`
 }
 
 // HistoryPage 是一页整理记录。
@@ -89,7 +90,7 @@ func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, err
 				subs++
 			}
 		}
-		page.Items = append(page.Items, HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs})
+		page.Items = append(page.Items, HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs, HasFiles: hasLibraryFiles(&r)})
 	}
 	return page, nil
 }
@@ -118,28 +119,38 @@ func (s *Service) Retry(ctx context.Context, id uint) (*Result, error) {
 	return s.Organize(ctx, req)
 }
 
+// hasLibraryFiles 报告记录里有没有记着 pt-tools 放进库的文件：已整理的，或者之后变成跳过、失败（例如库里的视频被换掉了），
+// 但之前整理出过文件的。
+func hasLibraryFiles(r *models.MediaTransferHistory) bool {
+	if r == nil || r.Status == models.MediaTransferRemoved {
+		return false
+	}
+	return (r.Status == models.MediaTransferDone && r.TargetPath != "") || r.TargetFileID != "" || len(decodeExtras(r.Extras)) > 0
+}
+
 // DeleteHistory 删除一条整理记录。files 为真时连库里整理出的文件一起删：视频、字幕、同名的 NFO 与图片，
-// 目录里不再有视频时再删目录级的海报与 NFO 和空目录。只删确认还是当初整理出的那个文件；
-// 移动整理的文件是唯一的一份，不在这里删。
-func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) error {
+// 目录里不再有视频时再删目录级的海报与 NFO 和空目录。只删确认还是当初整理出的那个文件，换掉或改过的留着，
+// 返回留着的文件的说明；移动整理的文件是唯一的一份，不在这里删。
+func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row, err := s.historyRow(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if files && row.Status == models.MediaTransferDone && row.TargetPath != "" {
+	var kept []string
+	if files && hasLibraryFiles(&row) {
 		if row.Mode == models.MediaModeMove {
-			return fmt.Errorf("%w: 移动整理的文件是唯一的一份，不在这里删除；只删记录时去掉「同时删除库里的文件」", ErrInvalid)
+			return nil, fmt.Errorf("%w: 移动整理的文件是唯一的一份，不在这里删除；只删记录时去掉「同时删除库里的文件」", ErrInvalid)
 		}
-		if err := s.removeLibraryFiles(ctx, row); err != nil {
-			return err
+		if kept, err = s.removeLibraryFiles(ctx, row); err != nil {
+			return nil, err
 		}
 	}
 	if err := s.cfg.DB.WithContext(ctx).Delete(&models.MediaTransferHistory{}, row.ID).Error; err != nil {
-		return fmt.Errorf("删除整理记录失败: %w", err)
+		return nil, fmt.Errorf("删除整理记录失败: %w", err)
 	}
-	return nil
+	return kept, nil
 }
 
 var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
@@ -170,47 +181,64 @@ func hasVideo(dir string) bool {
 }
 
 // removeLibraryFiles 删掉一条记录在库里整理出的文件（调用方持有 s.mu）：视频与字幕按文件编号或软链接指向确认；
-// 刮削写的文件只删记录里有、文件编号还对得上的，目录里的那几个要等目录里不再有视频时才删。最后删空目录。
-func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransferHistory) error {
-	if err := transfer.RemoveIfOurs(row.TargetPath, row.Mode, row.TargetFileID, row.SourcePath); err != nil {
+// 刮削写的文件只删记录里有、文件编号还对得上的，目录里的那几个要等目录里不再有视频时才删，还有视频时转给目录里另一条记录。
+// 最后删空目录。换掉或改过的文件留着，返回它们的说明；转交失败时返回错误，调用方不要删记录。
+func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransferHistory) ([]string, error) {
+	var kept []string
+	var errs []error
+	remove := func(target, mode, fileID, src string) error {
+		err := transfer.RemoveIfOurs(target, mode, fileID, src)
+		if errors.Is(err, transfer.ErrNotOurs) {
+			kept = append(kept, err.Error())
+			return nil
+		}
 		return err
 	}
-	var errs []error
+	if row.TargetPath != "" {
+		if err := remove(row.TargetPath, row.Mode, row.TargetFileID, row.SourcePath); err != nil {
+			return nil, err
+		}
+	}
 	var shared []extra
 	for _, e := range decodeExtras(row.Extras) {
 		switch {
 		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)):
 			shared = append(shared, e)
 		case e.Kind == extraMeta:
-			// 刮削写的文件是普通文件：按文件编号确认（软链接方式整理的视频也一样）；改过或换掉的留着
-			if err := transfer.RemoveIfOurs(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+			// 刮削写的文件是普通文件：按文件编号确认（软链接方式整理的视频也一样）
+			if err := remove(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil {
 				errs = append(errs, err)
 			}
 		default:
-			if err := transfer.RemoveIfOurs(e.Target, row.Mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+			if err := remove(e.Target, row.Mode, e.FileID, e.Source); err != nil {
 				errs = append(errs, err)
 			}
 		}
 	}
 	var lib models.MediaLibrary
-	if err := s.cfg.DB.WithContext(ctx).Where("id = ?", row.LibraryID).Limit(1).Find(&lib).Error; err != nil || lib.ID == 0 {
-		return errors.Join(errs...)
+	if err := s.cfg.DB.WithContext(ctx).Where("id = ?", row.LibraryID).Limit(1).Find(&lib).Error; err != nil {
+		return nil, fmt.Errorf("读取媒体库失败: %w", err)
 	}
-	var kept []extra
+	if lib.ID == 0 {
+		return kept, errors.Join(errs...)
+	}
+	var stay []extra
 	for _, e := range shared {
 		d := filepath.Dir(e.Target)
 		if !transfer.Within(lib.Path, d) {
 			continue
 		}
 		if hasVideo(d) {
-			kept = append(kept, e)
+			stay = append(stay, e)
 			continue
 		}
-		if err := transfer.RemoveIfOurs(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+		if err := remove(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	s.handOver(ctx, row, kept)
+	if err := s.handOver(ctx, row, stay); err != nil {
+		return nil, err
+	}
 	dirs := []string{filepath.Dir(row.TargetPath)}
 	if sd := showDir(&lib, row.TargetPath); sd != "" && sd != dirs[0] {
 		dirs = append(dirs, sd)
@@ -220,23 +248,22 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 			transfer.RemoveEmptyDirs(d, lib.Path)
 		}
 	}
-	return errors.Join(errs...)
+	return kept, errors.Join(errs...)
 }
 
 // handOver 把目录里还有视频、这次没删的刮削文件转给这个目录里另一条已整理的记录，删到最后一个视频时还能删掉。
-func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory, kept []extra) {
-	if len(kept) == 0 {
-		return
+func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory, stay []extra) error {
+	if len(stay) == 0 {
+		return nil
 	}
 	var rows []models.MediaTransferHistory
 	if err := s.cfg.DB.WithContext(ctx).
 		Where("library_id = ? AND status = ? AND id <> ?", row.LibraryID, models.MediaTransferDone, row.ID).
 		Order("id").Find(&rows).Error; err != nil {
-		s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", err)
-		return
+		return fmt.Errorf("读取整理记录失败: %w", err)
 	}
 	add := map[uint][]extra{}
-	for _, e := range kept {
+	for _, e := range stay {
 		d := filepath.Dir(e.Target)
 		for _, r := range rows {
 			if transfer.Within(d, r.TargetPath) {
@@ -251,9 +278,10 @@ func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory,
 		}
 		b, _ := json.Marshal(mergeExtras(decodeExtras(r.Extras), add[r.ID]))
 		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", r.ID).Update("extras", string(b)).Error; err != nil {
-			s.cfg.Logger.Warnf("[整理入库] 转交刮削文件失败: %v", err)
+			return fmt.Errorf("把目录里的刮削文件转给其他整理记录失败: %w", err)
 		}
 	}
+	return nil
 }
 
 // Reconcile 用在打开了「删种时一并删除入库链接」时：种子已经不在下载器里、源文件也没了（连数据删掉了）的，
@@ -310,20 +338,48 @@ func (s *Service) Reconcile(ctx context.Context) int {
 				continue // 库目录不在（例如没挂载），不动记录
 			}
 			s.mu.Lock()
-			err := s.removeLibraryFiles(ctx, r)
+			ok, err := s.reconcileRow(ctx, r.ID)
 			s.mu.Unlock()
 			if err != nil {
 				s.cfg.Logger.Warnf("[整理入库] 清理入库链接失败 (%s): %v", r.TargetPath, err)
 				continue
 			}
-			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", r.ID).Updates(map[string]any{
-				"status": models.MediaTransferRemoved, "message": "种子与数据已删除，库里的链接一并删除", "updated_at": s.cfg.Now(),
-			})
-			removed++
+			if ok {
+				removed++
+			}
 		}
 	}
 	if removed > 0 {
 		s.cfg.Logger.Infof("[整理入库] 种子连数据删掉后，清理了 %d 个入库链接", removed)
 	}
 	return removed
+}
+
+// reconcileRow 清理一条记录在库里的链接并把记录改成 removed（调用方持有 s.mu）。按编号重新读一遍：
+// 同一轮里前面的记录可能刚把目录级的刮削文件转给了这一条，这一条也可能刚被删掉或重新整理过。
+func (s *Service) reconcileRow(ctx context.Context, id uint) (bool, error) {
+	row, err := s.historyRow(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if row.Status != models.MediaTransferDone {
+		return false, nil
+	}
+	kept, err := s.removeLibraryFiles(ctx, row)
+	if err != nil {
+		return false, err
+	}
+	msg := "种子与数据已删除，库里的链接一并删除"
+	if len(kept) > 0 {
+		msg += "；" + strings.Join(kept, "；")
+	}
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Updates(map[string]any{
+		"status": models.MediaTransferRemoved, "message": truncate(msg, 1024), "updated_at": s.cfg.Now(),
+	}).Error; err != nil {
+		return false, fmt.Errorf("更新整理记录失败: %w", err)
+	}
+	return true, nil
 }

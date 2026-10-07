@@ -427,9 +427,14 @@ func (s *Server) apiMediaHistoryDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := svc.DeleteHistory(r.Context(), id, r.URL.Query().Get("files") == "1"); err != nil {
+	kept, err := svc.DeleteHistory(r.Context(), id, r.URL.Query().Get("files") == "1")
+	if err != nil {
 		writeOrganizeError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true})
+	out := map[string]any{"ok": true}
+	if len(kept) > 0 {
+		out["kept"] = kept
+	}
+	writeJSON(w, out)
 }

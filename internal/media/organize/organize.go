@@ -842,8 +842,8 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 	}
 	for i := range p.Items {
 		it := &p.Items[i]
-		// 已经整理好的文件不因为这次识别失败改成失败
-		if it.row != nil && it.row.Status == models.MediaTransferDone {
+		// 已经整理好、库里还是那个文件的（plan 标成了 ItemDone）不因为这次识别失败改成失败
+		if it.Status == ItemDone {
 			res.Done++
 			continue
 		}
@@ -871,6 +871,11 @@ func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, st
 	if len(extras) > 0 {
 		b, _ := json.Marshal(extras)
 		row.Extras = string(b)
+	}
+	// 没整理成时保留记录里之前整理出的文件（视频的位置、方式与文件编号，字幕与刮削写的文件）：删除记录时还要按它们清理
+	if status != models.MediaTransferDone && hasLibraryFiles(it.row) {
+		prior := it.row
+		row.LibraryID, row.TargetPath, row.Mode, row.TargetFileID, row.Extras = prior.LibraryID, prior.TargetPath, prior.Mode, prior.TargetFileID, prior.Extras
 	}
 	attempts := 0
 	if it.row != nil {

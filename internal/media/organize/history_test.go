@@ -1,6 +1,8 @@
 package organize
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -55,23 +58,23 @@ func TestHistoryListRetryDelete(t *testing.T) {
 	// 删除记录并删除库里的文件：视频、字幕、NFO、目录里的图片与空目录
 	movie := e.history()[0]
 	require.Equal(t, models.MediaTransferDone, movie.Status)
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, movie.ID, true))
+	require.NoError(t, e.del(movie.ID, true))
 	assert.False(t, exists(movie.TargetPath))
 	assert.False(t, exists(filepath.Dir(movie.TargetPath)), "电影目录里没别的视频了，连目录一起删")
 	assert.True(t, exists(movie.SourcePath), "下载目录里的源文件不动")
 	assert.True(t, exists(e.movies))
-	require.ErrorIs(t, e.svc.DeleteHistory(e.ctx, movie.ID, true), ErrNotFound)
+	require.ErrorIs(t, e.del(movie.ID, true), ErrNotFound)
 
 	// 只删记录
 	var ep models.MediaTransferHistory
 	require.NoError(t, e.db.Where("episode = ?", 1).First(&ep).Error)
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, ep.ID, false))
+	require.NoError(t, e.del(ep.ID, false))
 	assert.True(t, exists(ep.TargetPath))
 
 	// 剧集目录里还有别的视频：只删这一集
 	var ep2 models.MediaTransferHistory
 	require.NoError(t, e.db.Where("episode = ?", 2).First(&ep2).Error)
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, ep2.ID, true))
+	require.NoError(t, e.del(ep2.ID, true))
 	assert.False(t, exists(ep2.TargetPath))
 	assert.False(t, exists(strings.TrimSuffix(ep2.TargetPath, ".mkv")+".nfo"))
 	assert.False(t, exists(strings.TrimSuffix(ep2.TargetPath, ".mkv")+".en.srt"))
@@ -79,7 +82,8 @@ func TestHistoryListRetryDelete(t *testing.T) {
 	assert.True(t, exists(filepath.Join(show, "tvshow.nfo")), "剧集目录里还有第 1 集")
 }
 
-func TestDeleteHistoryRefusesReplacedFileAndMove(t *testing.T) {
+// 库里的视频被换掉了：连文件删除时视频留着并写明，pt-tools 整理的字幕与刮削写的 NFO 照删；移动整理的不连文件删
+func TestDeleteHistoryKeepsReplacedVideoRefusesMove(t *testing.T) {
 	e := newEnv(t)
 	e.defaultLibraries()
 	e.settings(SettingsInput{MinVideoMB: 1})
@@ -87,19 +91,26 @@ func TestDeleteHistoryRefusesReplacedFileAndMove(t *testing.T) {
 	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
 	require.NoError(t, err)
 	row := e.history()[0]
-	require.NoError(t, os.Remove(row.TargetPath))
-	require.NoError(t, os.WriteFile(row.TargetPath, []byte("replaced by user"), 0o644))
-	err = e.svc.DeleteHistory(e.ctx, row.ID, true)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "换成了别的文件")
-	assert.Equal(t, "replaced by user", readFile(t, row.TargetPath))
-	assert.Len(t, e.history(), 1, "没删成时记录也留着")
 
 	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Update("mode", models.MediaModeMove).Error)
-	err = e.svc.DeleteHistory(e.ctx, row.ID, true)
+	_, err = e.svc.DeleteHistory(e.ctx, row.ID, true)
 	require.ErrorIs(t, err, ErrInvalid)
 	assert.Contains(t, err.Error(), "唯一的一份")
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, row.ID, false))
+	assert.True(t, exists(row.TargetPath), "移动整理的不删")
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Update("mode", models.MediaModeHardlink).Error)
+
+	require.NoError(t, os.Remove(row.TargetPath))
+	require.NoError(t, os.WriteFile(row.TargetPath, []byte("replaced by user"), 0o644))
+	kept, err := e.svc.DeleteHistory(e.ctx, row.ID, true)
+	require.NoError(t, err)
+	require.Len(t, kept, 1)
+	assert.Contains(t, kept[0], "换成了别的文件")
+	assert.Equal(t, "replaced by user", readFile(t, row.TargetPath), "换掉的视频留着")
+	stem := strings.TrimSuffix(row.TargetPath, ".mkv")
+	assert.False(t, exists(stem+".zh-CN.ass"), "整理的字幕删掉")
+	assert.False(t, exists(stem+".nfo"), "刮削写的 NFO 删掉")
+	assert.True(t, exists(filepath.Join(filepath.Dir(row.TargetPath), "poster.jpg")), "目录里还有视频，海报留着")
+	assert.Empty(t, e.history())
 }
 
 func TestReconcileDeletesLinksAfterTorrentRemoved(t *testing.T) {
@@ -172,7 +183,7 @@ func TestDeleteHistoryBracketedShowDir(t *testing.T) {
 	require.Equal(t, 1, res.Created, res.Plan.Problem)
 	show := filepath.Join(e.tv, "最后生还者 (2023) [tmdbid-100088]")
 	require.True(t, exists(filepath.Join(show, "season01-poster.jpg")))
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, e.history()[0].ID, true))
+	require.NoError(t, e.del(e.history()[0].ID, true))
 	assert.False(t, exists(show), "季海报也删掉，剧集目录删干净")
 	assert.True(t, exists(e.tv))
 }
@@ -190,7 +201,7 @@ func TestDeleteHistoryKeepsUserFiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "my poster", readFile(t, filepath.Join(dir, "poster.jpg")), "不覆盖时不动用户的海报")
 	row := e.history()[0]
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, row.ID, true))
+	require.NoError(t, e.del(row.ID, true))
 	assert.False(t, exists(row.TargetPath))
 	assert.False(t, exists(filepath.Join(dir, "fanart.jpg")), "刮削写的背景删掉")
 	assert.False(t, exists(strings.TrimSuffix(row.TargetPath, ".mkv")+".nfo"), "刮削写的 NFO 删掉")
@@ -204,7 +215,7 @@ func TestDeleteHistoryKeepsUserFiles(t *testing.T) {
 	nfo := strings.TrimSuffix(row.TargetPath, ".mkv") + ".nfo"
 	require.NoError(t, os.Remove(nfo))
 	require.NoError(t, os.WriteFile(nfo, []byte("<movie>mine</movie>"), 0o644))
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, row.ID, true))
+	require.NoError(t, e.del(row.ID, true))
 	assert.Equal(t, "<movie>mine</movie>", readFile(t, nfo))
 }
 
@@ -226,6 +237,12 @@ func TestReconcileNeedsSaveRoot(t *testing.T) {
 	require.NoError(t, os.RemoveAll(filepath.Join(e.dlDir, oppName)))
 	assert.Equal(t, 1, e.svc.Reconcile(e.ctx))
 	assert.False(t, exists(row.TargetPath))
+}
+
+// del 删除一条整理记录，只看错误（留着的文件的说明不看）。
+func (e *env) del(id uint, files bool) error {
+	_, err := e.svc.DeleteHistory(e.ctx, id, files)
+	return err
 }
 
 func sql1(t *testing.T, e *env, q string) string {
@@ -251,8 +268,65 @@ func TestDeleteHistoryHandsOverSharedFiles(t *testing.T) {
 	require.True(t, exists(filepath.Join(show, "tvshow.nfo")))
 	rows := e.history()
 	require.Len(t, rows, 2)
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, rows[0].ID, true))
+	require.NoError(t, e.del(rows[0].ID, true))
 	assert.True(t, exists(filepath.Join(show, "tvshow.nfo")), "还有第 2 集，目录级的文件留着")
-	require.NoError(t, e.svc.DeleteHistory(e.ctx, rows[1].ID, true))
+	require.NoError(t, e.del(rows[1].ID, true))
 	assert.False(t, exists(show), "最后一集删掉时，转过来的目录级文件一起删，目录删干净")
+}
+
+// twoEpisodes 把两集分别作为两个种子整理进同一个剧集目录，返回剧集目录。
+func (e *env) twoEpisodes() (string, []string) {
+	e.t.Helper()
+	hashes := []string{"8888888888888888888888888888888888888888", "9999999999999999999999999999999999999999"}
+	for i, h := range hashes {
+		name := fmt.Sprintf("The.Last.of.Us.S01E0%d.2160p.mkv", i+1)
+		e.addTorrent(h, name, map[string]int{name: 2}, nil)
+		res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: h})
+		require.NoError(e.t, err)
+		require.Equal(e.t, 1, res.Created, res.Plan.Problem)
+	}
+	show := filepath.Join(e.tv, "最后生还者 (2023)")
+	require.True(e.t, exists(filepath.Join(show, "tvshow.nfo")))
+	return show, hashes
+}
+
+// 两个种子连数据一起删掉、同一轮清理里处理：前一条转过来的目录级文件，后一条删最后一集时一起删掉
+func TestReconcileHandsOverWithinOnePass(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1, DeleteLinksOnRemove: true})
+	show, hashes := e.twoEpisodes()
+	for i, h := range hashes {
+		e.dl.remove(h)
+		require.NoError(t, os.Remove(filepath.Join(e.dlDir, fmt.Sprintf("The.Last.of.Us.S01E0%d.2160p.mkv", i+1))))
+	}
+	assert.Equal(t, 2, e.svc.Reconcile(e.ctx))
+	assert.False(t, exists(show), "目录级文件与空目录都删掉")
+}
+
+// 把目录级文件转给另一条记录时写数据库失败：返回错误、记录留着；之后再删还能转交，删到最后一集时删干净
+func TestDeleteHistoryHandOverFailureKeepsRecord(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	show, _ := e.twoEpisodes()
+	rows := e.history()
+	boom := errors.New("database is locked")
+	cb := e.db.Callback().Update()
+	require.NoError(t, cb.Before("gorm:update").Register("test:fail_extras", func(tx *gorm.DB) {
+		if m, ok := tx.Statement.Dest.(map[string]any); ok {
+			if _, ok := m["extras"]; ok {
+				_ = tx.AddError(boom)
+			}
+		}
+	}))
+	_, err := e.svc.DeleteHistory(e.ctx, rows[0].ID, true)
+	require.ErrorIs(t, err, boom)
+	assert.Len(t, e.history(), 2, "转交没成，记录留着")
+	require.NoError(t, cb.Remove("test:fail_extras"))
+
+	require.NoError(t, e.del(rows[0].ID, true))
+	assert.Contains(t, sql1(t, e, fmt.Sprintf("SELECT extras FROM media_transfer_histories WHERE id = %d", rows[1].ID)), "tvshow.nfo")
+	require.NoError(t, e.del(rows[1].ID, true))
+	assert.False(t, exists(show))
 }
