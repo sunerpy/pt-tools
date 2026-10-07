@@ -2067,6 +2067,8 @@ func (d *NexusPHPDriver) GetTorrentDetail(ctx context.Context, guid, link, _ str
 		DiscountEndTime: detailInfo.DiscountEnd,
 		HasHR:           detailInfo.HasHR,
 		SourceSite:      d.getSiteID(),
+		IMDbID:          detailInfo.IMDbID,
+		DoubanID:        detailInfo.DoubanID,
 	}
 
 	return item, nil

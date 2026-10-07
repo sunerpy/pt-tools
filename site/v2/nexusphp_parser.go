@@ -21,7 +21,15 @@ type NexusPHPParserConfig struct {
 	EndTimeSelector  string
 	SizeSelector     string
 	SizeRegex        string
+	IMDbRegex        string
+	DoubanRegex      string
 }
+
+// 详情页里 IMDb 与豆瓣链接的默认格式（链接上或简介正文里，如「◎IMDb链接」「◎豆瓣链接」）
+const (
+	defaultIMDbRegex   = `imdb\.com/title/(tt\d{5,10})`
+	defaultDoubanRegex = `movie\.douban\.com/subject/(\d{4,12})`
+)
 
 // DefaultNexusPHPParserConfig 返回默认配置，适用于大多数 NexusPHP 站点
 func DefaultNexusPHPParserConfig() NexusPHPParserConfig {
@@ -36,6 +44,8 @@ func DefaultNexusPHPParserConfig() NexusPHPParserConfig {
 		EndTimeSelector:  "h1 span[title]",
 		SizeSelector:     "td.rowhead:contains('基本信息')",
 		SizeRegex:        `大小：[^\d]*([\d.]+)\s*(GB|MB|KB|TB)`,
+		IMDbRegex:        defaultIMDbRegex,
+		DoubanRegex:      defaultDoubanRegex,
 	}
 }
 
@@ -67,6 +77,8 @@ type TorrentDetailInfo struct {
 	DiscountLevel DiscountLevel
 	DiscountEnd   time.Time
 	HasHR         bool
+	IMDbID        string
+	DoubanID      string
 }
 
 // NexusPHPDetailParser 接口定义
@@ -80,8 +92,10 @@ type NexusPHPDetailParser interface {
 
 // NexusPHPParser 通用 NexusPHP 详情页解析器
 type NexusPHPParser struct {
-	config    NexusPHPParserConfig
-	sizeRegex *regexp.Regexp
+	config      NexusPHPParserConfig
+	sizeRegex   *regexp.Regexp
+	imdbRegex   *regexp.Regexp
+	doubanRegex *regexp.Regexp
 }
 
 // NewNexusPHPParser 创建通用解析器
@@ -90,9 +104,15 @@ func NewNexusPHPParser(options ...NexusPHPParserOption) *NexusPHPParser {
 	for _, opt := range options {
 		opt(&config)
 	}
+	return newNexusPHPParser(config)
+}
+
+func newNexusPHPParser(config NexusPHPParserConfig) *NexusPHPParser {
 	return &NexusPHPParser{
-		config:    config,
-		sizeRegex: regexp.MustCompile(config.SizeRegex),
+		config:      config,
+		sizeRegex:   regexp.MustCompile(config.SizeRegex),
+		imdbRegex:   regexp.MustCompile(config.IMDbRegex),
+		doubanRegex: regexp.MustCompile(config.DoubanRegex),
 	}
 }
 
@@ -133,11 +153,14 @@ func NewNexusPHPParserFromDefinition(def *SiteDefinition) *NexusPHPParser {
 	if dp.SizeRegex != "" {
 		config.SizeRegex = dp.SizeRegex
 	}
-
-	return &NexusPHPParser{
-		config:    config,
-		sizeRegex: regexp.MustCompile(config.SizeRegex),
+	if dp.IMDbRegex != "" {
+		config.IMDbRegex = dp.IMDbRegex
 	}
+	if dp.DoubanRegex != "" {
+		config.DoubanRegex = dp.DoubanRegex
+	}
+
+	return newNexusPHPParser(config)
 }
 
 func (p *NexusPHPParser) ParseTitleAndID(doc *goquery.Selection) (title, torrentID string) {
@@ -291,9 +314,25 @@ func (p *NexusPHPParser) ParseSizeMB(doc *goquery.Selection) float64 {
 	return sizeMB
 }
 
+// ParseExternalIDs 在详情页 HTML 里找 IMDb 与豆瓣编号（各取第一处匹配），并规整成 tt… 与数字编号。
+func (p *NexusPHPParser) ParseExternalIDs(doc *goquery.Selection) (imdbID, doubanID string) {
+	html, err := doc.Html()
+	if err != nil {
+		return "", ""
+	}
+	if m := p.imdbRegex.FindStringSubmatch(html); len(m) > 1 {
+		imdbID = NormalizeIMDbID(m[1])
+	}
+	if m := p.doubanRegex.FindStringSubmatch(html); len(m) > 1 {
+		doubanID = NormalizeDoubanID(m[1])
+	}
+	return imdbID, doubanID
+}
+
 func (p *NexusPHPParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo {
 	title, torrentID := p.ParseTitleAndID(doc)
 	discount, endTime := p.ParseDiscount(doc)
+	imdbID, doubanID := p.ParseExternalIDs(doc)
 	return &TorrentDetailInfo{
 		TorrentID:     torrentID,
 		Title:         title,
@@ -301,6 +340,8 @@ func (p *NexusPHPParser) ParseAll(doc *goquery.Selection) *TorrentDetailInfo {
 		DiscountLevel: discount,
 		DiscountEnd:   endTime,
 		HasHR:         p.ParseHR(doc),
+		IMDbID:        imdbID,
+		DoubanID:      doubanID,
 	}
 }
 
