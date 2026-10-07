@@ -298,13 +298,6 @@ func (s *Service) Reconcile(ctx context.Context) int {
 	for _, r := range rows {
 		byDL[r.DownloaderID] = append(byDL[r.DownloaderID], r)
 	}
-	libRoots := map[uint]string{}
-	var libs []models.MediaLibrary
-	if err := s.cfg.DB.WithContext(ctx).Find(&libs).Error; err == nil {
-		for _, l := range libs {
-			libRoots[l.ID] = l.Path
-		}
-	}
 	removed := 0
 	for dlID, list := range byDL {
 		dl, _, err := s.cfg.Downloaders.Get(ctx, dlID)
@@ -323,22 +316,8 @@ func (s *Service) Reconcile(ctx context.Context) int {
 			if present[r.InfoHash] {
 				continue
 			}
-			// 保存目录不在（例如下载目录没挂载）时认不出数据是不是真的删了，不动
-			if info, err := os.Stat(r.SaveRoot); r.SaveRoot == "" || err != nil || !info.IsDir() {
-				continue
-			}
-			if _, err := os.Lstat(r.SourcePath); !errors.Is(err, os.ErrNotExist) {
-				continue // 数据还在（只删了种子、没删数据，或者移走了）
-			}
-			root, ok := libRoots[r.LibraryID]
-			if !ok {
-				continue
-			}
-			if info, err := os.Stat(root); err != nil || !info.IsDir() {
-				continue // 库目录不在（例如没挂载），不动记录
-			}
 			s.mu.Lock()
-			ok, err := s.reconcileRow(ctx, r.ID)
+			ok, err := s.reconcileRow(ctx, r)
 			s.mu.Unlock()
 			if err != nil {
 				s.cfg.Logger.Warnf("[整理入库] 清理入库链接失败 (%s): %v", r.TargetPath, err)
@@ -355,18 +334,36 @@ func (s *Service) Reconcile(ctx context.Context) int {
 	return removed
 }
 
-// reconcileRow 清理一条记录在库里的链接并把记录改成 removed（调用方持有 s.mu）。按编号重新读一遍：
-// 同一轮里前面的记录可能刚把目录级的刮削文件转给了这一条，这一条也可能刚被删掉或重新整理过。
-func (s *Service) reconcileRow(ctx context.Context, id uint) (bool, error) {
-	row, err := s.historyRow(ctx, id)
+// reconcileRow 清理一条记录在库里的链接并把记录改成 removed（调用方持有 s.mu）。snap 是查种子在不在时用的那份记录；
+// 这里按编号重新读一遍再判断：同一轮里前面的记录可能刚把目录级的刮削文件转给了这一条（只有 Extras 变了，照常清理）；
+// 记录被删掉，或者期间被重新整理过（目标、方式、来源变了，例如改成了移动）的不动，留给下一轮重新判断。
+func (s *Service) reconcileRow(ctx context.Context, snap models.MediaTransferHistory) (bool, error) {
+	row, err := s.historyRow(ctx, snap.ID)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if row.Status != models.MediaTransferDone {
+	if row.Status != models.MediaTransferDone || (row.Mode != models.MediaModeHardlink && row.Mode != models.MediaModeSymlink) ||
+		row.Mode != snap.Mode || row.TargetPath != snap.TargetPath || row.TargetFileID != snap.TargetFileID ||
+		row.SourcePath != snap.SourcePath || row.LibraryID != snap.LibraryID ||
+		row.DownloaderID != snap.DownloaderID || row.InfoHash != snap.InfoHash {
 		return false, nil
+	}
+	// 保存目录不在（例如下载目录没挂载）时认不出数据是不是真的删了，不动
+	if info, serr := os.Stat(row.SaveRoot); row.SaveRoot == "" || serr != nil || !info.IsDir() {
+		return false, nil
+	}
+	if _, serr := os.Lstat(row.SourcePath); !errors.Is(serr, os.ErrNotExist) {
+		return false, nil // 数据还在（只删了种子、没删数据，或者移走了）
+	}
+	var lib models.MediaLibrary
+	if err = s.cfg.DB.WithContext(ctx).Where("id = ?", row.LibraryID).Limit(1).Find(&lib).Error; err != nil {
+		return false, fmt.Errorf("读取媒体库失败: %w", err)
+	}
+	if info, serr := os.Stat(lib.Path); lib.ID == 0 || serr != nil || !info.IsDir() {
+		return false, nil // 库目录不在（例如没挂载），不动记录
 	}
 	kept, err := s.removeLibraryFiles(ctx, row)
 	if err != nil {

@@ -330,3 +330,44 @@ func TestDeleteHistoryHandOverFailureKeepsRecord(t *testing.T) {
 	require.NoError(t, e.del(rows[1].ID, true))
 	assert.False(t, exists(show))
 }
+
+// 不持锁检查过以后、清理前，这条记录被重新整理过（这里模拟成改成移动、换了目标）：不删新的目标，记录也不改成已删除
+func TestReconcileRowSkipsRowChangedSinceCheck(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1, DeleteLinksOnRemove: true})
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	snap := e.history()[0]
+	require.NoError(t, os.RemoveAll(filepath.Join(e.dlDir, oppName)))
+
+	moved := filepath.Join(filepath.Dir(snap.TargetPath), "moved.mkv")
+	require.NoError(t, os.WriteFile(moved, []byte("the only copy"), 0o644))
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", snap.ID).
+		Updates(map[string]any{"mode": models.MediaModeMove, "target_path": moved}).Error)
+	e.svc.mu.Lock()
+	ok, err := e.svc.reconcileRow(e.ctx, snap)
+	e.svc.mu.Unlock()
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Equal(t, "the only copy", readFile(t, moved), "移动过去的唯一一份不删")
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+
+	// 只是目标换了（方式没变）也不动；记录恢复成检查时那样、源文件确实不在时照常清理
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", snap.ID).
+		Updates(map[string]any{"mode": snap.Mode, "target_path": moved}).Error)
+	e.svc.mu.Lock()
+	ok, err = e.svc.reconcileRow(e.ctx, snap)
+	e.svc.mu.Unlock()
+	require.NoError(t, err)
+	assert.False(t, ok)
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", snap.ID).Update("target_path", snap.TargetPath).Error)
+	e.svc.mu.Lock()
+	ok, err = e.svc.reconcileRow(e.ctx, snap)
+	e.svc.mu.Unlock()
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.False(t, exists(snap.TargetPath))
+	assert.True(t, exists(moved), "不是这条记录的文件不动")
+}
