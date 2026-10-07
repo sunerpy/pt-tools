@@ -234,6 +234,12 @@ func NewDBWithVersionAndHooks(
 		&MediaWordRule{},
 		&MediaOverride{},
 		&MediaCache{},
+		// 整理入库（M10）
+		&MediaLibrary{},
+		&MediaPathMap{},
+		&MediaServer{},
+		&MediaOrganizeSetting{},
+		&MediaTransferHistory{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
