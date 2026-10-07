@@ -410,7 +410,11 @@ onBeforeUnmount(() => {
             }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="说明" min-width="220" class-name="pt-cell-1line">
+        <el-table-column
+          label="说明"
+          min-width="220"
+          class-name="pt-cell-1line"
+          show-overflow-tooltip>
           <template #default="{ row }">{{ row.message }}</template>
         </el-table-column>
         <el-table-column label="更新时间" width="120">
@@ -568,7 +572,11 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="上次运行" min-width="220" class-name="pt-cell-1line">
+        <el-table-column
+          label="上次运行"
+          min-width="220"
+          class-name="pt-cell-1line"
+          show-overflow-tooltip>
           <template #default="{ row }">
             <template v-if="row.last_run_at"
               >{{ formatShortDateTime(row.last_run_at) }} · {{ row.last_result }}</template
