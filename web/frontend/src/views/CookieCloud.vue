@@ -72,6 +72,9 @@ async function save(clearPassword = false) {
       interval_hours: form.value.interval_hours,
     });
     if (s) fill(s);
+    // 设置变了，上次读到的可能是别的账户的数据：清掉，要重新读取才能导入
+    preview.value = null;
+    selected.value = [];
     ElMessage.success("已保存");
   } catch (e) {
     ElMessage.error((e as Error).message || "保存失败");

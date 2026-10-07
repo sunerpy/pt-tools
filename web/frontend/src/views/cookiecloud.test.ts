@@ -182,6 +182,19 @@ describe("CookieCloud 导入", () => {
     expect(api.preview).toHaveBeenCalledTimes(2);
   });
 
+  it("保存设置后清掉上次读到的列表，要重新读取才能导入", async () => {
+    await mountPage(configured);
+    api.preview.mockResolvedValue(previewData);
+    testid("cc-preview").click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("hdsky.me"));
+    api.saveSettings.mockResolvedValue(configured);
+    testid("cc-save").click();
+    await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalled());
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain("hdsky.me"));
+    expect(document.body.textContent).toContain("还没读取");
+    expect((testid("cc-import") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("读取失败时留着上次的列表，并写明是旧的", async () => {
     await mountPage(configured);
     api.preview.mockResolvedValue(previewData);
