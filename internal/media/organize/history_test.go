@@ -372,3 +372,30 @@ func TestReconcileRowSkipsRowChangedSinceCheck(t *testing.T) {
 	assert.False(t, exists(snap.TargetPath))
 	assert.True(t, exists(moved), "不是这条记录的文件不动")
 }
+
+// 洗版：换成更好的版本以后删掉旧版本库里的文件，记录改成已删除并写明原因；移动整理的不删
+func TestRetire(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	row := e.history()[0]
+	kept, err := e.svc.Retire(e.ctx, row.ID, "洗版：换成了 X")
+	require.NoError(t, err)
+	assert.Empty(t, kept)
+	assert.False(t, exists(row.TargetPath))
+	got := e.history()[0]
+	assert.Equal(t, models.MediaTransferRemoved, got.Status)
+	assert.Contains(t, got.Message, "洗版")
+	kept, err = e.svc.Retire(e.ctx, row.ID, "again")
+	require.NoError(t, err, "不是已整理的不动")
+	assert.Nil(t, kept)
+
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Updates(map[string]any{"status": models.MediaTransferDone, "mode": models.MediaModeMove}).Error)
+	_, err = e.svc.Retire(e.ctx, row.ID, "x")
+	require.ErrorIs(t, err, ErrInvalid)
+	_, err = e.svc.Retire(e.ctx, 999, "x")
+	require.ErrorIs(t, err, ErrNotFound)
+}

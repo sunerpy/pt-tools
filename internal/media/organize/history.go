@@ -153,6 +153,37 @@ func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) ([]str
 	return kept, nil
 }
 
+// Retire 用在洗版：换成了更好的版本以后，删掉一条已整理记录在库里整理出的文件（规则同连文件删除记录，只删确认是自己放的），
+// 记录改成已删除并写明原因。移动整理的文件是唯一的一份，不删，返回 ErrInvalid。不是已整理的记录不动。
+func (s *Service) Retire(ctx context.Context, id uint, reason string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, err := s.historyRow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row.Status != models.MediaTransferDone {
+		return nil, nil
+	}
+	if row.Mode == models.MediaModeMove {
+		return nil, fmt.Errorf("%w: 移动整理的文件是唯一的一份，洗版时不删", ErrInvalid)
+	}
+	kept, err := s.removeLibraryFiles(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	msg := reason
+	if len(kept) > 0 {
+		msg += "；" + strings.Join(kept, "；")
+	}
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Updates(map[string]any{
+		"status": models.MediaTransferRemoved, "message": truncate(msg, 1024), "updated_at": s.cfg.Now(),
+	}).Error; err != nil {
+		return nil, fmt.Errorf("更新整理记录失败: %w", err)
+	}
+	return kept, nil
+}
+
 var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
 
 // isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、tvshow.nfo、season.nfo、季海报）。
