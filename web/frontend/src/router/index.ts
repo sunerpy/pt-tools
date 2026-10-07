@@ -104,6 +104,12 @@ const router = createRouter({
       meta: { title: "下载器助手" },
     },
     {
+      path: "/transfer",
+      name: "transfer",
+      component: () => import("@/views/TorrentTransfer.vue"),
+      meta: { title: "转移做种" },
+    },
+    {
       path: "/paused",
       name: "paused",
       component: () => import("@/views/PausedTorrents.vue"),
