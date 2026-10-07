@@ -185,6 +185,8 @@ type env struct {
 	pushErr  error
 	addOnErr bool
 	site     *fakeSite
+	// onPush 不为空时代替默认的推送行为
+	onPush func(req ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error)
 }
 
 const (
@@ -228,6 +230,9 @@ func newEnv(t *testing.T) *env {
 		},
 		Push: func(_ context.Context, req ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error) {
 			e.pushes = append(e.pushes, req)
+			if e.onPush != nil {
+				return e.onPush(req)
+			}
 			if e.pushErr != nil {
 				if e.addOnErr {
 					e.addToTarget(req)
@@ -249,7 +254,7 @@ func newEnv(t *testing.T) *env {
 func (e *env) addToTarget(req ptinternal.PushTorrentRequest) {
 	h, err := qbit.ComputeTorrentHash(req.TorrentData)
 	require.NoError(e.t, err)
-	e.dst.put(downloader.Torrent{InfoHash: h, Name: req.Title, SavePath: req.SavePath, State: downloader.TorrentPaused})
+	e.dst.put(downloader.Torrent{InfoHash: h, Name: req.Title, SavePath: req.SavePath, State: downloader.TorrentPaused, Tags: req.Tags})
 }
 
 // seed 在源下载器里放一个已下完的种子，返回 hash。
@@ -388,7 +393,7 @@ func TestTransferHappyPath(t *testing.T) {
 	assert.Equal(t, TransferSource, p.Source)
 	assert.Equal(t, "hdsky", p.SiteID)
 	assert.Equal(t, "movies", p.Category)
-	assert.Equal(t, "hdsky,4k", p.Tags)
+	assert.Equal(t, "hdsky,4k,"+models.TransferTag, p.Tags, "原有标签加上转移标签")
 	require.NotNil(t, j.Deadline)
 	assert.Equal(t, e.now.Add(30*time.Minute+512*time.Second), *j.Deadline, "30 分钟 + 10 GiB / 20 MiB/s")
 
@@ -463,7 +468,7 @@ func TestTransferResumesAfterRestart(t *testing.T) {
 	added := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
 	notAdded := e.seed(e.src.fakeDL, "Movie.B", 1<<30, true)
 	data := torrentFile(t, "Movie.B")
-	e.dst.put(downloader.Torrent{InfoHash: added, State: downloader.TorrentPaused})
+	e.dst.put(downloader.Torrent{InfoHash: added, State: downloader.TorrentPaused, Tags: models.TransferTag}) // 退出前已经加进去了
 	j1 := models.TorrentTransferJob{SourceDownloaderID: srcID, TargetDownloaderID: dstID, InfoHash: added, State: models.TransferAdding}
 	j2 := models.TorrentTransferJob{SourceDownloaderID: srcID, TargetDownloaderID: 99, InfoHash: notAdded, State: models.TransferAdding, TorrentData: data}
 	require.NoError(t, e.db.Create(&j1).Error)
@@ -676,4 +681,107 @@ func TestCheckTimeout(t *testing.T) {
 	assert.Equal(t, 30*time.Minute, checkTimeout(0))
 	assert.Equal(t, 30*time.Minute, checkTimeout(-1))
 	assert.Equal(t, 30*time.Minute+51*time.Second, checkTimeout(1<<30))
+}
+
+// 校验完成之后、收尾之前目标又开始校验或数据不完整：不收尾，退回校验；源绝不移除。
+func TestTransferFinishRechecksTarget(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	h := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
+	id := e.create(Item{srcID, h})[0].ID
+	for range 3 {
+		e.svc.RunOnce(ctx)
+	}
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferVerified, e.job(id).State)
+	e.dst.set(h, func(t *downloader.Torrent) { t.Progress, t.IsCompleted = 0.6, false })
+	e.svc.RunOnce(ctx)
+	j := e.job(id)
+	assert.Equal(t, models.TransferChecking, j.State, "目标不再是 100%：退回校验")
+	assert.Empty(t, e.src.removed, "源不动")
+	assert.Empty(t, e.dst.resumed, "也不恢复目标")
+	e.dst.set(h, func(t *downloader.Torrent) { t.Progress, t.IsCompleted, t.State = 1, true, downloader.TorrentPaused })
+	e.svc.RunOnce(ctx)
+	e.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferDone, e.job(id).State)
+}
+
+// 加入目标时带上 pt-tools-transfer 标签；目标里同 hash 的种子没有这个标签时不是这次加的：不接管、不移除。
+func TestTransferOwnership(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	h := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
+	id := e.create(Item{srcID, h})[0].ID
+	e.svc.RunOnce(ctx)
+	e.svc.RunOnce(ctx)
+	require.Len(t, e.pushes, 1)
+	assert.Contains(t, e.pushes[0].Tags, models.TransferTag)
+	assert.Equal(t, models.TransferChecking, e.job(id).State)
+
+	// 重启前停在 adding：目标里有同 hash 的种子，但不是带标签加的
+	e2 := newEnv(t)
+	h2 := e2.seed(e2.src.fakeDL, "Movie.B", 1<<30, true)
+	e2.dst.put(downloader.Torrent{InfoHash: h2, Tags: "user"})
+	j2 := models.TorrentTransferJob{SourceDownloaderID: srcID, TargetDownloaderID: dstID, InfoHash: h2, State: models.TransferAdding}
+	require.NoError(t, e2.db.Create(&j2).Error)
+	e2.svc.RunOnce(ctx)
+	got := e2.job(j2.ID)
+	assert.Equal(t, models.TransferFailed, got.State)
+	assert.Contains(t, got.Message, "不是这次转移加的")
+	_, still := e2.dst.get(h2)
+	assert.True(t, still, "别人的种子不动")
+
+	// 推送报错，目标里却有一个不带标签的同 hash 种子：不接管
+	e3 := newEnv(t)
+	h3 := e3.seed(e3.src.fakeDL, "Movie.C", 1<<30, true)
+	id3 := e3.create(Item{srcID, h3})[0].ID
+	e3.svc.RunOnce(ctx)
+	e3.onPush = func(ptinternal.PushTorrentRequest) (*ptinternal.PushTorrentResult, error) {
+		e3.dst.put(downloader.Torrent{InfoHash: h3, Tags: "user"})
+		return nil, errors.New("timeout")
+	}
+	e3.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferFailed, e3.job(id3).State)
+	_, still = e3.dst.get(h3)
+	assert.True(t, still)
+
+	// 校验期间目标里的种子被换成了别人加的：失败、不移除
+	e4 := newEnv(t)
+	h4 := e4.seed(e4.src.fakeDL, "Movie.D", 1<<30, true)
+	id4 := e4.create(Item{srcID, h4})[0].ID
+	for range 3 {
+		e4.svc.RunOnce(ctx)
+	}
+	e4.dst.set(h4, func(t *downloader.Torrent) { t.Tags = "user"; t.State, t.Progress = downloader.TorrentPaused, 0.1 })
+	e4.now = e4.now.Add(10 * time.Minute)
+	e4.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferFailed, e4.job(id4).State)
+	assert.Empty(t, e4.dst.removed, "不是这次加的不移除")
+	assert.Empty(t, e4.src.removed)
+}
+
+// 完成后只改源下载器上的那条种子记录；别的下载器上的同 hash 记录不动。
+func TestTransferFinishUpdatesSourceRecordsOnly(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	h := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
+	src, other := uint(srcID), uint(77)
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "hdsky", TorrentID: "1", TorrentHash: &h, DownloaderID: &src, DownloaderName: "qb-src"}).Error)
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "ourbits", TorrentID: "2", TorrentHash: &h, DownloaderID: &other, DownloaderName: "elsewhere"}).Error)
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "audiences", TorrentID: "3", TorrentHash: &h, DownloaderName: "qb-src"}).Error)
+	id := e.create(Item{srcID, h})[0].ID
+	for range 3 {
+		e.svc.RunOnce(ctx)
+	}
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx)
+	e.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferDone, e.job(id).State)
+	var rows []models.TorrentInfo
+	require.NoError(t, e.db.Order("torrent_id").Find(&rows).Error)
+	require.Len(t, rows, 3)
+	assert.Equal(t, "tr-dst", rows[0].DownloaderName, "源下载器上的记录改到目标")
+	assert.Equal(t, "elsewhere", rows[1].DownloaderName, "别的下载器上的记录不动")
+	assert.Equal(t, "tr-dst", rows[2].DownloaderName, "只有名称的旧记录按源下载器名称认")
 }

@@ -494,7 +494,7 @@ func (s *Service) add(ctx context.Context, j *models.TorrentTransferJob) error {
 		TorrentData:       j.TorrentData,
 		Title:             j.Name,
 		Category:          j.Category,
-		Tags:              j.Tags,
+		Tags:              withTransferTag(j.Tags),
 		SavePath:          j.TargetSavePath,
 		DownloaderID:      j.TargetDownloaderID,
 		Source:            TransferSource,
@@ -502,8 +502,11 @@ func (s *Service) add(ctx context.Context, j *models.TorrentTransferJob) error {
 	})
 	switch {
 	case pushErr != nil:
-		// 推送报错时种子也可能已经加进去了（例如响应超时）：看一眼目标再定
-		if added, err := target.CheckTorrentExists(j.InfoHash); err == nil && added {
+		// 推送报错时种子也可能已经加进去了（例如响应超时）：目标里有带标签的这个种子才接着校验
+		if t, found, err := findTorrent(target, j.InfoHash); err == nil && found {
+			if !owned(t) {
+				return s.fail(ctx, j, notOursMessage)
+			}
 			return s.startChecking(ctx, j)
 		}
 		return s.fail(ctx, j, "加入目标下载器失败: "+pushErr.Error())
@@ -530,12 +533,15 @@ func (s *Service) resumeAdding(ctx context.Context, j *models.TorrentTransferJob
 	if err != nil {
 		return fmt.Errorf("目标下载器不可用: %w", err)
 	}
-	exists, err := target.CheckTorrentExists(j.InfoHash)
+	t, found, err := findTorrent(target, j.InfoHash)
 	if err != nil {
 		return fmt.Errorf("检查目标下载器失败: %w", err)
 	}
-	if exists {
+	switch {
+	case found && owned(t):
 		return s.startChecking(ctx, j)
+	case found:
+		return s.fail(ctx, j, notOursMessage)
 	}
 	return s.moveTo(ctx, j, models.TransferExported, "")
 }
@@ -561,6 +567,9 @@ func (s *Service) check(ctx context.Context, j *models.TorrentTransferJob) error
 		}
 		return s.fail(ctx, j, "目标下载器里找不到加入的种子；源下载器里的种子没动")
 	}
+	if !owned(t) {
+		return s.fail(ctx, j, notOursMessage)
+	}
 	if !j.RecheckIssued {
 		if err := target.RecheckTorrent(t.ID); err != nil {
 			return fmt.Errorf("让目标校验失败: %w", err)
@@ -573,7 +582,7 @@ func (s *Service) check(ctx context.Context, j *models.TorrentTransferJob) error
 	switch {
 	case completed(t) && t.State != downloader.TorrentChecking:
 		return s.moveTo(ctx, j, models.TransferVerified, "校验完成")
-	case t.State == downloader.TorrentChecking || t.State == downloader.TorrentQueued || t.State == downloader.TorrentUnknown:
+	case inProgressState(t.State):
 		if j.Deadline != nil && now.After(*j.Deadline) {
 			return s.rollback(ctx, j, target, t, fmt.Sprintf("校验超过时限（到 %.1f%%）", pct))
 		}
@@ -606,10 +615,20 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 	if !found {
 		return s.fail(ctx, j, "目标下载器里的种子不见了；源下载器里的种子没动")
 	}
+	if !owned(t) {
+		return s.fail(ctx, j, notOursMessage)
+	}
+	if !completed(t) || inProgressState(t.State) {
+		// 校验完成之后目标又在校验，或者数据不完整了：不收尾，退回校验重新计时；源绝不移除
+		now := s.cfg.Now()
+		deadline := now.Add(checkTimeout(j.TotalSize))
+		j.CheckStartedAt, j.Deadline, j.RecheckIssued, j.Progress = &now, &deadline, true, t.Progress
+		return s.moveTo(ctx, j, models.TransferChecking, "目标里的种子不再是 100%，重新等待校验")
+	}
 	if rErr := target.ResumeTorrent(t.ID); rErr != nil {
 		return fmt.Errorf("恢复目标里的种子失败: %w", rErr)
 	}
-	src, _, err := s.cfg.Downloaders.TransferDownloader(ctx, j.SourceDownloaderID)
+	src, srcSet, err := s.cfg.Downloaders.TransferDownloader(ctx, j.SourceDownloaderID)
 	if err != nil {
 		return fmt.Errorf("目标已开始做种，源下载器不可用，下一轮再从源移除: %w", err)
 	}
@@ -622,9 +641,12 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 			return fmt.Errorf("目标已开始做种，从源移除失败，下一轮再试: %w", err)
 		}
 	}
+	// 只改源下载器上的记录：同一个 hash 在别的下载器上（如另一站的辅种）的记录不动；
+	// 早期只记了下载器名称、没记 ID 的记录按名称认
 	taskID := j.InfoHash
 	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Model(&models.TorrentInfo{}).
 		Where("LOWER(torrent_hash) = ?", j.InfoHash).
+		Where("downloader_id = ? OR (downloader_id IS NULL AND downloader_name = ?)", j.SourceDownloaderID, srcSet.Name).
 		Updates(map[string]any{"downloader_id": targetSet.ID, "downloader_name": targetSet.Name, "downloader_task_id": taskID}).Error; err != nil {
 		s.cfg.Logger.Warnf("[转移做种] 任务 %d 已完成，更新种子记录的下载器失败: %v", j.ID, err)
 	}
@@ -771,6 +793,30 @@ func findTorrent(dl downloader.Downloader, hash string) (downloader.Torrent, boo
 
 func completed(t downloader.Torrent) bool {
 	return t.IsCompleted || t.Progress >= 1
+}
+
+// inProgressState 报告下载器是不是还在校验或排队校验（状态说不清的也按还在进行算，等到时限）。
+func inProgressState(state downloader.TorrentState) bool {
+	return state == downloader.TorrentChecking || state == downloader.TorrentQueued || state == downloader.TorrentUnknown
+}
+
+// notOursMessage 是目标里有同一个种子、却不是这次转移加的（没有 pt-tools-transfer 标签）时的说明。
+const notOursMessage = "目标下载器里已经有这个种子，但不是这次转移加的（没有 " + models.TransferTag + " 标签）；没有动它，源下载器里的种子也没动"
+
+// owned 报告目标里的种子是不是转移做种加的（带 pt-tools-transfer 标签）。
+func owned(t downloader.Torrent) bool {
+	return hasTag(t.Tags, models.TransferTag)
+}
+
+// withTransferTag 在原有标签后面加上 pt-tools-transfer。
+func withTransferTag(tags string) string {
+	if hasTag(tags, models.TransferTag) {
+		return tags
+	}
+	if strings.TrimSpace(tags) == "" {
+		return models.TransferTag
+	}
+	return tags + "," + models.TransferTag
 }
 
 func checkTimeout(size int64) time.Duration {

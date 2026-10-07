@@ -28,6 +28,10 @@ const (
 	TransferCanceled = "canceled"
 )
 
+// TransferTag 是转移做种加入目标时带上的标签：恢复、回滚、收尾前都要确认目标里的种子带着它，
+// 证明是这次转移加的，不去动用户自己加的同一个种子。
+const TransferTag = "pt-tools-transfer"
+
 // TransferStateFinal 报告状态是不是终态。
 func TransferStateFinal(state string) bool {
 	switch state {
