@@ -107,8 +107,11 @@ type Result struct {
 	Queued bool `json:"queued,omitempty"`
 }
 
-// 来源：手动指定的 TMDB 条目。
-const sourceManual = "manual"
+// 来源：手动指定的 TMDB 条目；沿用之前整理这些文件时用的条目。
+const (
+	sourceManual  = "manual"
+	sourceHistory = "history"
+)
 
 // cleanRel 检查下载器给的相对路径：不能是绝对路径，不能有 .. 这一级。
 func cleanRel(name string) (string, bool) {
@@ -130,8 +133,42 @@ func stemOf(name string) string {
 }
 
 // plan 算出一个种子怎么整理，不改动任何文件。只有请求本身不对、下载器或数据库出错时返回错误；
-// 种子整理不了的原因写在 Plan.Problem 里。
+// 种子整理不了的原因写在 Plan.Problem 里，这时库里已经有的文件标成「已在库里」，其余标成「整理不了」。
 func (s *Service) plan(ctx context.Context, req Request) (*Plan, error) {
+	p, err := s.buildPlan(ctx, req)
+	if err != nil || p.Problem == "" {
+		return p, err
+	}
+	for i := range p.Items {
+		it := &p.Items[i]
+		if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.TargetPath != "" {
+			if _, statErr := os.Lstat(it.row.TargetPath); statErr == nil {
+				it.Status, it.Target = ItemDone, it.row.TargetPath
+				continue
+			}
+		}
+		it.Status = ItemFailed
+	}
+	return p, nil
+}
+
+// priorEntry 是之前整理这些文件时用的条目：先看已经整理好的记录，再看手动整理时指定过条目的记录。
+func priorEntry(p *Plan) (string, int) {
+	for _, done := range []bool{true, false} {
+		for _, it := range p.Items {
+			r := it.row
+			if r == nil || r.TMDBID <= 0 || (r.MediaType != tmdb.KindMovie && r.MediaType != tmdb.KindTV) {
+				continue
+			}
+			if done && r.Status == models.MediaTransferDone || !done && r.Trigger == models.MediaTriggerManual {
+				return r.MediaType, r.TMDBID
+			}
+		}
+	}
+	return "", 0
+}
+
+func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	if req.DownloaderID == 0 || strings.TrimSpace(req.Hash) == "" {
 		return nil, fmt.Errorf("%w: 要指定下载器与种子", ErrInvalid)
 	}
@@ -244,12 +281,23 @@ func (s *Service) loadRows(ctx context.Context, p *Plan) error {
 // recognize 识别种子对应的条目：指定了 TMDB 编号时直接取详情，否则用种子名（站点标题作副标题）与 IMDb 编号识别。
 func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloader.Torrent) bool {
 	c, err := s.cfg.Recognizer.TMDB(ctx)
+	if errors.Is(err, tmdb.ErrNoKey) {
+		p.Problem = "没有填写 TMDB API Key：先在「媒体识别」里填写"
+		return false
+	}
 	if err == nil {
 		p.tmdbClient = c
 	}
 	var info models.TorrentInfo
 	_ = s.cfg.DB.WithContext(ctx).Where("LOWER(torrent_hash) = ?", p.Hash).Order("id DESC").Limit(1).Find(&info).Error
 	p.siteName = info.SiteName
+	source := sourceManual
+	if req.TMDBID == 0 {
+		// 之前整理过（比如手动指定过条目）：沿用那个条目，库里的文件名与重新整理时一致
+		if kind, id := priorEntry(p); id > 0 {
+			req.MediaType, req.TMDBID, source = kind, id, sourceHistory
+		}
+	}
 	if req.TMDBID > 0 {
 		if err != nil {
 			p.Problem = "识别失败：" + err.Error()
@@ -261,7 +309,7 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 			return false
 		}
 		p.meta, _ = s.cfg.Recognizer.Parse(ctx, t.Name, "")
-		p.Match, p.Source = d, sourceManual
+		p.Match, p.Source = d, source
 		return true
 	}
 	in := recognize.Input{Title: t.Name, IMDbID: info.IMDbID}
@@ -278,11 +326,13 @@ func (s *Service) recognize(ctx context.Context, p *Plan, req Request, t downloa
 	case res.Error != "":
 		p.Problem, p.retryable = "识别失败："+res.Error, true
 		return false
-	case res.Match == nil && res.Message != "":
-		p.Problem = "没有识别出来：" + res.Message
-		return false
 	case res.Match == nil:
-		p.Problem = "没有识别出来：可以在「媒体识别」里加纠正，或手动整理时填 TMDB 编号"
+		p.Problem = "没有识别出来：TMDB 上没有可靠的匹配"
+		if len(res.Candidates) > 0 {
+			c := res.Candidates[0]
+			p.Problem += fmt.Sprintf("（最接近的是「%s」）", firstNonEmpty(c.Title, c.OriginalTitle))
+		}
+		p.Problem += "。手动整理时填 TMDB 编号，或到「媒体识别」里加纠正、识别词"
 		return false
 	}
 	p.Match, p.Source = res.Match, res.Source

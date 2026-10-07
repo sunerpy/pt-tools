@@ -457,3 +457,54 @@ func TestCleanRelAndTruncate(t *testing.T) {
 	assert.Equal(t, "ab", truncate("ab", 5))
 	assert.Equal(t, "奥", truncate("奥本", 4), "不切开汉字")
 }
+
+func TestPlanReusesPriorEntryAndMarksItems(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.addTorrent("7777777777777777777777777777777777777777", "Mystery.Thing.2020.1080p.mkv", map[string]int{"Mystery.Thing.2020.1080p.mkv": 2}, nil)
+	req := Request{DownloaderID: 1, Hash: "7777777777777777777777777777777777777777"}
+
+	p, err := e.svc.Preview(e.ctx, req)
+	require.NoError(t, err)
+	assert.Contains(t, p.Problem, "没有识别出来：TMDB 上没有可靠的匹配。手动整理时填 TMDB 编号")
+	require.Len(t, p.Items, 1)
+	assert.Equal(t, ItemFailed, p.Items[0].Status, "整理不了时不写「待整理」")
+
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: req.Hash, MediaType: tmdb.KindMovie, TMDBID: 872585})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created)
+
+	// 之后不指定条目再预览：沿用之前整理用的条目，库里已经有了
+	p, err = e.svc.Preview(e.ctx, req)
+	require.NoError(t, err)
+	require.Empty(t, p.Problem)
+	assert.Equal(t, sourceHistory, p.Source)
+	assert.Equal(t, 872585, p.Match.ID)
+	assert.Equal(t, ItemDone, p.Items[0].Status)
+
+	// 整理不了（没有启用的电影库）时，已经在库里的文件标成「已在库里」
+	lib, err := e.svc.Libraries(e.ctx)
+	require.NoError(t, err)
+	for _, l := range lib {
+		_, saveErr := e.svc.SaveLibrary(e.ctx, l.ID, LibraryInput{Name: l.Name, Kind: l.Kind, Path: l.Path, Mode: l.Mode, Enabled: false})
+		require.NoError(t, saveErr)
+	}
+	p, err = e.svc.Preview(e.ctx, req)
+	require.NoError(t, err)
+	assert.Contains(t, p.Problem, "没有启用的电影媒体库")
+	assert.Equal(t, ItemDone, p.Items[0].Status)
+}
+
+func TestPlanWithoutTMDBKey(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	empty := ""
+	_, err := e.rec.SaveSettings(e.ctx, recognize.SettingsInput{TMDBKey: &empty})
+	require.NoError(t, err)
+	e.oppenheimer()
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, "没有填写 TMDB API Key：先在「媒体识别」里填写", p.Problem)
+}
