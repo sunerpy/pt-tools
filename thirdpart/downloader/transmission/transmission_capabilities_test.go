@@ -172,3 +172,25 @@ func TestTransmissionEditTracker_HonorsContext(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 3*time.Second)
 }
+
+// 去掉任务独有的标签：只改这个种子的 labels，其余标签和顺序不变；种子不在了或没有这个标签时不改。
+func TestTransmissionRemoveTag(t *testing.T) {
+	f := &fakeTrackerRPC{torrent: map[string]any{
+		"id": 9, "hashString": "abc", "labels": []any{"movies", "hdsky", "pt-tools-reseed", "pt-tools-reseed-12"},
+	}}
+	srv := f.server(t)
+	defer srv.Close()
+	c := newCapabilityClient(t, srv.URL)
+	var _ downloader.TagRemover = c
+
+	require.NoError(t, c.RemoveTag("abc", "pt-tools-reseed-12"))
+	require.Len(t, f.sets, 1)
+	assert.Equal(t, []any{float64(9)}, f.sets[0]["ids"])
+	assert.Equal(t, []any{"movies", "hdsky", "pt-tools-reseed"}, f.sets[0]["labels"])
+
+	require.NoError(t, c.RemoveTag("abc", "not-there"))
+	assert.Len(t, f.sets, 1, "没有这个标签时不改")
+	f.torrent = nil
+	require.NoError(t, c.RemoveTag("abc", "pt-tools-reseed-12"), "种子不在了")
+	assert.Len(t, f.sets, 1)
+}

@@ -32,6 +32,12 @@ type TrackerReader interface {
 	GetTorrentTrackersContext(ctx context.Context, id string) ([]TorrentTracker, error)
 }
 
+// TagRemover 从种子上去掉一个标签，只用于 pt-tools 自己加的、每个任务独有的标签。
+// qBittorrent 用 torrents/deleteTags：标签从所有种子和标签列表里一起删掉（id 不用）；Transmission 改写这个种子的 labels，种子不在了什么也不做。
+type TagRemover interface {
+	RemoveTag(id, tag string) error
+}
+
 // BulkTrackerReader 一次读出全部种子的 tracker 列表（键是小写 info hash）。
 // Transmission 的 torrent-get 能一次带回 trackerStats；qBittorrent 只能逐个读，不实现。
 type BulkTrackerReader interface {
