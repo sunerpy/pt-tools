@@ -66,29 +66,32 @@ func cookieCloudSites(store *core.ConfigStore, registry *v2.SiteRegistry) func(c
 	}
 }
 
-// applySiteCookies 写入站点 Cookie 并启用站点，之后刷新站点实例、请求登录探测、重新加载任务（与浏览器扩展同步凭据相同）。
-// 返回写不进去的站点；写进去的照常刷新。
+// applySiteCookies 批量写入站点 Cookie 并启用站点（只改 Cookie 与启用，不动 RSS 等设置；一次配置变更事件，调度随之重新加载），
+// 之后刷新站点实例、请求登录探测，与浏览器扩展同步凭据相同。返回写不进去的站点；写进去的照常刷新。
 func applySiteCookies(store *core.ConfigStore, mgr *scheduler.Manager) func(context.Context, map[string]string) map[string]error {
-	return func(_ context.Context, cookies map[string]string) map[string]error {
-		names := make([]string, 0, len(cookies))
-		for n := range cookies {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+	return func(ctx context.Context, cookies map[string]string) map[string]error {
 		failed := map[string]error{}
-		saved := make([]string, 0, len(names))
-		for _, n := range names {
-			sg := models.SiteGroup(n)
-			sc, err := store.GetSiteConf(sg)
-			if err != nil {
-				failed[n] = fmt.Errorf("读取站点设置失败: %w", err)
-				continue
+		failAll := func(err error) map[string]error {
+			for n := range cookies {
+				failed[n] = err
 			}
-			sc.Cookie = cookies[n]
-			enabled := true
-			sc.Enabled = &enabled
-			if err := store.UpsertSiteWithRSS(sg, sc); err != nil {
-				failed[n] = fmt.Errorf("保存站点设置失败: %w", err)
+			return failed
+		}
+		if err := ctx.Err(); err != nil {
+			return failAll(fmt.Errorf("已超时，没有写入: %w", err))
+		}
+		batch := make(map[models.SiteGroup]string, len(cookies))
+		for n, c := range cookies {
+			batch[models.SiteGroup(n)] = c
+		}
+		bad, err := store.SetSiteCookies(ctx, batch)
+		if err != nil {
+			return failAll(fmt.Errorf("保存站点 Cookie 失败: %w", err))
+		}
+		saved := make([]string, 0, len(cookies))
+		for n := range cookies {
+			if e, ok := bad[models.SiteGroup(n)]; ok {
+				failed[n] = e
 				continue
 			}
 			saved = append(saved, n)
@@ -96,6 +99,7 @@ func applySiteCookies(store *core.ConfigStore, mgr *scheduler.Manager) func(cont
 		if len(saved) == 0 {
 			return failed
 		}
+		sort.Strings(saved)
 		global.GetSlogger().Infof("[CookieCloud] 已写入 %d 个站点的 Cookie: %v", len(saved), saved)
 		if err := web.RefreshSiteRegistrations(store); err != nil {
 			global.GetSlogger().Warnf("[CookieCloud] 刷新站点注册失败: %v", err)
@@ -105,9 +109,6 @@ func applySiteCookies(store *core.ConfigStore, mgr *scheduler.Manager) func(cont
 					global.GetSlogger().Warnf("[CookieCloud] 请求登录探测失败: site=%s err=%v", n, err)
 				}
 			}
-		}
-		if cfg, _ := store.Load(); cfg != nil {
-			mgr.Reload(cfg)
 		}
 		return failed
 	}

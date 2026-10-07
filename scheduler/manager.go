@@ -477,7 +477,13 @@ func (m *Manager) StopJobs() {
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	m.stopped = true
+	// CookieCloud 同步写完 Cookie 后会回调 Manager（取登录探测），要在锁外停，否则停止时互相等待
+	ccw := m.cookieCloudWorker
+	m.cookieCloudWorker = nil
 	m.mu.Unlock()
+	if ccw != nil {
+		ccw.Stop()
+	}
 	m.cancelJobsAndWait()
 	m.mu.Lock()
 	if m.freeEndMonitor != nil {
@@ -503,10 +509,6 @@ func (m *Manager) StopAll() {
 	if m.reseedWorker != nil {
 		m.reseedWorker.Stop()
 		m.reseedWorker = nil
-	}
-	if m.cookieCloudWorker != nil {
-		m.cookieCloudWorker.Stop()
-		m.cookieCloudWorker = nil
 	}
 	if m.transferWorker != nil {
 		m.transferWorker.Stop()
@@ -725,14 +727,15 @@ func (m *Manager) GetReseedWorker() *ReseedWorker {
 	return m.reseedWorker
 }
 
-// SetCookieCloudWorker 登记 CookieCloud 定时同步；替换旧实例时先停掉旧的。
+// SetCookieCloudWorker 登记 CookieCloud 定时同步；替换旧实例时先停掉旧的（在锁外停，理由见 StopAll）。
 func (m *Manager) SetCookieCloudWorker(w *CookieCloudWorker) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.cookieCloudWorker != nil && m.cookieCloudWorker != w {
-		m.cookieCloudWorker.Stop()
-	}
+	old := m.cookieCloudWorker
 	m.cookieCloudWorker = w
+	m.mu.Unlock()
+	if old != nil && old != w {
+		old.Stop()
+	}
 }
 
 // GetCookieCloudWorker 返回 CookieCloud 定时同步（未接线时为 nil）。
