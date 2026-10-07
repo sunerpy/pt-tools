@@ -247,7 +247,7 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 			if freeGB < cfg.CleanupMinDiskSpaceGB {
 				c.logger.Warnf("[自动删种] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，启动紧急清理",
 					dlName, freeGB, cfg.CleanupMinDiskSpaceGB)
-				toDelete = c.emergencyCleanup(cfg, sharing, candidates, toDelete, freeGB)
+				toDelete = c.emergencyCleanup(cfg, sharing, c.withoutLinked(candidates, dlName), toDelete, freeGB)
 			}
 		}
 	}
@@ -623,6 +623,41 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, sharing *d
 		currentFreeGB, targetGB, cfg.CleanupMinDiskSpaceGB, bufferGB, freedGB, len(result)-len(alreadyMarked))
 
 	return result
+}
+
+// withoutLinked 去掉已经硬链接整理进媒体库的种子：删掉它们连数据也腾不出空间（库里的链接还占着），
+// 紧急清理不挑它们。打开了「删种时一并删除入库链接」时不去掉：删种后链接也会被清理，空间能腾出来。
+func (c *CleanupMonitor) withoutLinked(candidates []downloader.Torrent, dlName string) []downloader.Torrent {
+	if c.db == nil || len(candidates) == 0 || !c.db.Migrator().HasTable(&models.MediaTransferHistory{}) {
+		return candidates
+	}
+	var set models.MediaOrganizeSetting
+	if err := c.db.Where("id = ?", 1).Limit(1).Find(&set).Error; err == nil && set.DeleteLinksOnRemove {
+		return candidates
+	}
+	var hashes []string
+	if err := c.db.Model(&models.MediaTransferHistory{}).
+		Where("status = ? AND mode = ? AND downloader_name = ?", models.MediaTransferDone, models.MediaModeHardlink, dlName).
+		Distinct().Pluck("info_hash", &hashes).Error; err != nil || len(hashes) == 0 {
+		return candidates
+	}
+	linked := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		linked[strings.ToLower(h)] = true
+	}
+	out := make([]downloader.Torrent, 0, len(candidates))
+	skipped := 0
+	for _, t := range candidates {
+		if linked[strings.ToLower(t.InfoHash)] {
+			skipped++
+			continue
+		}
+		out = append(out, t)
+	}
+	if skipped > 0 {
+		c.logger.Infof("[自动删种] %s: %d 个种子已经硬链接整理进媒体库，删掉也腾不出空间，紧急清理不挑它们", dlName, skipped)
+	}
+	return out
 }
 
 func (c *CleanupMonitor) calcPriority(t downloader.Torrent) float64 {

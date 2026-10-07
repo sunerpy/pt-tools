@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -355,14 +356,17 @@ func (m *FreeEndMonitor) updateAllMonitoredProgress() {
 			"check_count":     gorm.Expr("check_count + 1"),
 		}
 
-		if isTorrentTrulyCompleted(info) {
+		completed := isTorrentTrulyCompleted(info)
+		if completed {
 			updates["is_completed"] = true
 			updates["completed_at"] = time.Now()
 			global.GetSlogger().Infof("种子已完成下载: %s (ID:%d, state=%s)", t.Title, t.ID, info.State)
 		}
 
-		if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", t.ID).Updates(updates).Error; err != nil {
-			global.GetSlogger().Errorf("更新种子进度失败 (种子:%s): %v", t.Title, err)
+		if res := m.progressUpdate(t.ID, completed).Updates(updates); res.Error != nil {
+			global.GetSlogger().Errorf("更新种子进度失败 (种子:%s): %v", t.Title, res.Error)
+		} else if completed && res.RowsAffected > 0 {
+			publishCompleted(t, info.InfoHash)
 		}
 	}
 
@@ -700,8 +704,40 @@ func (m *FreeEndMonitor) markCompleted(torrent models.TorrentInfo, totalSize int
 		"torrent_size":    totalSize,
 		"last_check_time": now,
 	}
-	if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", torrent.ID).Updates(updates).Error; err != nil {
-		global.GetSlogger().Errorf("更新种子完成状态失败 (种子:%s): %v", torrent.Title, err)
+	res := m.progressUpdate(torrent.ID, true).Updates(updates)
+	if res.Error != nil {
+		global.GetSlogger().Errorf("更新种子完成状态失败 (种子:%s): %v", torrent.Title, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		publishCompleted(torrent, "")
+	}
+}
+
+// progressUpdate 是更新一个种子进度的语句。标记完成时只更新还没完成的记录：两个进度循环与免费到期处理
+// 可能同时看到同一个种子下载完，只有真正把它改成完成的那一次发布完成事件。
+func (m *FreeEndMonitor) progressUpdate(id uint, completing bool) *gorm.DB {
+	q := m.db.Model(&models.TorrentInfo{}).Where("id = ?", id)
+	if completing {
+		q = q.Where("is_completed = ?", false)
+	}
+	return q
+}
+
+// publishCompleted 发布下载完成事件（整理入库订阅）。hash 为空时用记录里的。
+func publishCompleted(t models.TorrentInfo, hash string) {
+	if hash == "" && t.TorrentHash != nil {
+		hash = *t.TorrentHash
+	}
+	payload := events.TorrentCompletedPayload{
+		TorrentID: t.TorrentID, SiteName: t.SiteName, Title: t.Title,
+		DownloaderName: t.DownloaderName, TaskID: t.DownloaderTaskID, InfoHash: strings.ToLower(hash),
+	}
+	if t.DownloaderID != nil {
+		payload.DownloaderID = *t.DownloaderID
+	}
+	if err := events.PublishWithPayload(events.EvtTorrentCompleted, payload); err != nil {
+		global.GetSlogger().Warnf("发布下载完成事件失败 (种子:%s): %v", t.Title, err)
 	}
 }
 
@@ -985,15 +1021,20 @@ func (m *FreeEndMonitor) updateAllPushedTasksProgress() {
 			"check_count":     gorm.Expr("check_count + 1"),
 		}
 
-		if isTorrentTrulyCompleted(info) {
+		completed := isTorrentTrulyCompleted(info)
+		if completed {
 			updates["is_completed"] = true
 			updates["completed_at"] = time.Now()
 			global.GetSlogger().Infof("任务已完成下载 (ID:%d, Title:%s, state=%s)", t.ID, t.Title, info.State)
 		}
 
-		if err := m.db.Model(&models.TorrentInfo{}).Where("id = ?", t.ID).Updates(updates).Error; err != nil {
-			global.GetSlogger().Errorf("更新任务进度失败 (ID:%d): %v", t.ID, err)
+		res := m.progressUpdate(t.ID, completed).Updates(updates)
+		if res.Error != nil {
+			global.GetSlogger().Errorf("更新任务进度失败 (ID:%d): %v", t.ID, res.Error)
 			continue
+		}
+		if completed && res.RowsAffected > 0 {
+			publishCompleted(t, info.InfoHash)
 		}
 		updated++
 	}
