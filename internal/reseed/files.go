@@ -11,6 +11,7 @@ import (
 	"github.com/zeebo/bencode"
 
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+	"github.com/sunerpy/pt-tools/utils"
 )
 
 // FileEntry 是种子里的一个文件：相对保存路径的路径（用 / 分隔）与大小。
@@ -72,10 +73,15 @@ func SameFiles(a, b []FileEntry) (bool, string) {
 			return false, fmt.Sprintf("文件不同（%s 与 %s）", x[i].Path, y[i].Path)
 		}
 		if x[i].Size != y[i].Size {
-			return false, fmt.Sprintf("%s 的大小不同（%d 与 %d）", x[i].Path, x[i].Size, y[i].Size)
+			return false, fmt.Sprintf("%s 的大小不同（%s 与 %s）", x[i].Path, readableSize(x[i].Size), readableSize(y[i].Size))
 		}
 	}
 	return true, ""
+}
+
+// readableSize 写成 GiB/MiB 这样的大小，后面带上字节数，差一点的也看得出来。
+func readableSize(n int64) string {
+	return fmt.Sprintf("%s，%d 字节", utils.FormatBytes(n), n)
 }
 
 func sorted(in []FileEntry) []FileEntry {
