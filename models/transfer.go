@@ -97,30 +97,24 @@ type DownloaderPathMap struct {
 func (DownloaderPathMap) TableName() string { return "downloader_path_maps" }
 
 // MapTransferPath 把源下载器里的路径换算成目标下载器里的路径：取最长的匹配前缀（按路径分段匹配，
-// /data 不匹配 /database）；没有匹配时原样返回，第二个返回值为 false。前缀两边一个是 Windows 路径、
-// 一个是 Unix 路径时，余下部分的分隔符换成目标的写法。
+// /data 不匹配 /database）；没有匹配时原样返回，第二个返回值为 false。
+// Windows 路径（盘符或 \\ 开头）不区分大小写，/ 与 \ 都认；Unix 路径区分大小写。
+// 前缀两边一个是 Windows 路径、一个是 Unix 路径时，余下部分的分隔符换成目标的写法。
 func MapTransferPath(maps []DownloaderPathMap, src string) (string, bool) {
 	best, bestLen := -1, -1
 	for i, m := range maps {
-		p := strings.TrimRight(m.SourcePrefix, "/\\")
-		switch {
-		case strings.TrimSpace(m.SourcePrefix) == "":
-			continue
-		case p == "": // 前缀是根目录，匹配所有绝对路径
-			if !strings.HasPrefix(src, "/") && !strings.HasPrefix(src, "\\") {
-				continue
-			}
-		case src != p && !strings.HasPrefix(src, p+"/") && !strings.HasPrefix(src, p+"\\"):
+		raw := strings.TrimSpace(m.SourcePrefix)
+		if raw == "" {
 			continue
 		}
-		if len(p) > bestLen {
-			best, bestLen = i, len(p)
+		if n, ok := matchPathPrefix(src, raw); ok && n > bestLen {
+			best, bestLen = i, n
 		}
 	}
 	if best < 0 {
 		return src, false
 	}
-	target := strings.TrimRight(maps[best].TargetPrefix, "/\\")
+	target := strings.TrimRight(strings.TrimSpace(maps[best].TargetPrefix), "/\\")
 	rest := src[bestLen:]
 	switch {
 	case strings.Contains(target, "\\") && !strings.Contains(target, "/"):
@@ -129,6 +123,42 @@ func MapTransferPath(maps []DownloaderPathMap, src string) (string, bool) {
 		rest = strings.ReplaceAll(rest, "\\", "/")
 	}
 	return target + rest, true
+}
+
+// matchPathPrefix 报告 prefix 是不是 src 的整段目录前缀，返回 src 里被前缀占去的字节数。
+func matchPathPrefix(src, prefix string) (int, bool) {
+	win := isWindowsPath(prefix) || isWindowsPath(src)
+	if win {
+		// 换分隔符不改变字节数，算出的长度可以直接用在原串上
+		src, prefix = strings.ReplaceAll(src, "\\", "/"), strings.ReplaceAll(prefix, "\\", "/")
+	}
+	p := strings.TrimRight(prefix, "/")
+	if p == "" { // 前缀是根目录，匹配所有绝对路径
+		if strings.HasPrefix(src, "/") {
+			return 0, true
+		}
+		return 0, false
+	}
+	if len(src) < len(p) {
+		return 0, false
+	}
+	head := src[:len(p)]
+	same := head == p
+	if win {
+		same = strings.EqualFold(head, p)
+	}
+	if !same || (len(src) > len(p) && src[len(p)] != '/') {
+		return 0, false
+	}
+	return len(p), true
+}
+
+// isWindowsPath 报告路径是不是 Windows 写法：盘符（D:）或网络路径（\\server）。
+func isWindowsPath(p string) bool {
+	if strings.HasPrefix(p, "\\\\") {
+		return true
+	}
+	return len(p) >= 2 && p[1] == ':' && (p[0]|0x20) >= 'a' && (p[0]|0x20) <= 'z'
 }
 
 // TransferRule 是定时转移规则：按间隔把源下载器里符合条件、已经做完种的种子建成转移任务。默认关闭。

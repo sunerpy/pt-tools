@@ -31,8 +31,23 @@ func TestMapTransferPath(t *testing.T) {
 		assert.Equal(t, c.ok, ok, c.src)
 	}
 
+	// Windows 路径不区分大小写，/ 与 \ 都认；Unix 路径仍区分大小写
+	win := []DownloaderPathMap{{SourcePrefix: `D:\PT`, TargetPrefix: "/volume1/pt"}, {SourcePrefix: `\\nas\share`, TargetPrefix: "/mnt/share"}}
+	for src, want := range map[string]string{
+		`d:\pt\Movie`:       "/volume1/pt/Movie",
+		`D:/PT/Movie/a.mkv`: "/volume1/pt/Movie/a.mkv",
+		`\\NAS\Share\TV`:    "/mnt/share/TV",
+		`D:\PTX\Movie`:      `D:\PTX\Movie`,
+	} {
+		got, _ := MapTransferPath(win, src)
+		assert.Equal(t, want, got, src)
+	}
+	got, ok := MapTransferPath([]DownloaderPathMap{{SourcePrefix: "/downloads", TargetPrefix: "/data"}}, "/Downloads/x")
+	assert.False(t, ok, "Unix 路径区分大小写")
+	assert.Equal(t, "/Downloads/x", got)
+
 	root := []DownloaderPathMap{{SourcePrefix: "/", TargetPrefix: "/mnt/nas"}}
-	got, ok := MapTransferPath(root, "/downloads/a")
+	got, ok = MapTransferPath(root, "/downloads/a")
 	assert.True(t, ok)
 	assert.Equal(t, "/mnt/nas/downloads/a", got)
 	got, ok = MapTransferPath(nil, "/x")
