@@ -420,6 +420,11 @@ func (m *BrushMonitor) run(ctx context.Context, task *models.BrushTask, res *Bru
 func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Downloader, rows []models.BrushTorrent, byHash map[string]downloader.Torrent, res *BrushRunResult) []models.BrushTorrent {
 	taskTag := models.BrushTaskTag(task.ID)
 	kept := make([]models.BrushTorrent, 0, len(rows))
+	all := make([]downloader.Torrent, 0, len(byHash))
+	for _, t := range byHash {
+		all = append(all, t)
+	}
+	removed := map[string]bool{} // 这一轮已删掉的（键见 downloader.TorrentKey）
 	for i := range rows {
 		bt := rows[i]
 		now := m.cfg.Clock.Now()
@@ -459,11 +464,17 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 			kept = append(kept, withProgress(bt, t))
 			continue
 		}
-		if err := dl.RemoveTorrent(t.ID, task.RemoveWithData); err != nil {
+		// 数据还被别的种子用着（如给它加的辅种）时只删种子、保留数据
+		withData := task.RemoveWithData && !downloader.SharesData(all, t, removed)
+		if task.RemoveWithData && !withData {
+			reason += "；数据还被别的种子用着，保留数据"
+		}
+		if err := dl.RemoveTorrent(t.ID, withData); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("删除 %s 失败: %v", bt.Title, err))
 			kept = append(kept, withProgress(bt, t))
 			continue
 		}
+		removed[downloader.TorrentKey(t)] = true
 		res.Removed++
 		m.cfg.Logger.Infof("[刷流] %s 删除 %s：%s", task.Name, bt.Title, reason)
 		if markErr := m.repo.MarkEnded(&bt, models.BrushTorrentRemoved, reason, now, day); markErr != nil {

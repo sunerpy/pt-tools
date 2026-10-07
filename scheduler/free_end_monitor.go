@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -565,7 +566,17 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 	if m.isAutoDeleteEnabled() {
 		global.GetSlogger().Infof("[FreeEndMonitor] 准备自动删除种子: %s (进度:%.1f%%, TaskID:%s)", torrent.Title, progress, torrent.DownloaderTaskID)
 
-		if err := dl.RemoveTorrent(torrent.DownloaderTaskID, true); err != nil {
+		// 数据还被别的种子用着（如辅种）时只删种子、保留数据；读不到种子列表就下次再试
+		withData, err := dataNotShared(dl, torrent.DownloaderTaskID)
+		if err != nil {
+			global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除前读取种子列表失败 (种子:%s): %v", torrent.Title, err)
+			m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
+			return
+		}
+		if !withData {
+			global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 的数据还被别的种子用着，只删种子、保留数据", torrent.Title)
+		}
+		if err := dl.RemoveTorrent(torrent.DownloaderTaskID, withData); err != nil {
 			if !errors.Is(err, downloader.ErrTorrentNotFound) {
 				global.GetSlogger().Errorf("[FreeEndMonitor] 自动删除种子失败 (种子:%s): %v", torrent.Title, err)
 				m.markRetry(torrent, fmt.Sprintf("自动删除失败: %v", err))
@@ -588,6 +599,21 @@ func (m *FreeEndMonitor) handleFreeEndedTorrent(torrent models.TorrentInfo) {
 
 	m.markPaused(torrent, progress, totalSize, advanced)
 	global.GetSlogger().Infof("[FreeEndMonitor] 种子 %s 已暂停 (进度:%.1f%%, 原因:免费期结束)", torrent.Title, progress)
+}
+
+// dataNotShared 报告删除下载器里的这个种子时能不能连数据一起删：没有别的种子用着它的数据。
+// 种子已不在列表里时返回 true（删除会报种子不存在）。
+func dataNotShared(dl downloader.Downloader, taskID string) (bool, error) {
+	all, err := dl.GetAllTorrents()
+	if err != nil {
+		return false, fmt.Errorf("读取下载器种子失败: %w", err)
+	}
+	for _, t := range all {
+		if t.ID == taskID || strings.EqualFold(t.InfoHash, taskID) {
+			return !downloader.SharesData(all, t, nil), nil
+		}
+	}
+	return true, nil
 }
 
 // TestHandleFreeEndedTorrent 暴露给测试/调试命令使用

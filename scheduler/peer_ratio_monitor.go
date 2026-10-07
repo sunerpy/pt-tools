@@ -161,6 +161,7 @@ func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName st
 	}
 
 	var acted int
+	removed := map[string]bool{} // 这一轮已删掉的（键见 downloader.TorrentKey）
 	for _, t := range managed {
 		if p.ctx.Err() != nil {
 			return
@@ -194,11 +195,14 @@ func (p *PeerRatioMonitor) processDownloader(dl downloader.Downloader, dlName st
 		}
 
 		if removeData {
-			p.logger.Infof("[竞争度监控] 删除: %s (S/L=%d/%d=%.1f > %.1f)", t.Name, seeds, leeches, ratio, maxSL)
-			if err := dl.RemoveTorrent(t.ID, true); err != nil {
+			// 数据还被别的种子用着（如辅种）时只删种子、保留数据
+			withData := !downloader.SharesData(allTorrents, t, removed)
+			p.logger.Infof("[竞争度监控] 删除: %s (S/L=%d/%d=%.1f > %.1f, 删除数据=%v)", t.Name, seeds, leeches, ratio, maxSL, withData)
+			if err := dl.RemoveTorrent(t.ID, withData); err != nil {
 				p.logger.Errorf("[竞争度监控] 删除失败: %s: %v", t.Name, err)
 				continue
 			}
+			removed[downloader.TorrentKey(t)] = true
 			p.markDeletedForPeerRatio(t.InfoHash, seeds, leeches)
 		} else {
 			p.logger.Infof("[竞争度监控] 暂停: %s (S/L=%d/%d=%.1f > %.1f)", t.Name, seeds, leeches, ratio, maxSL)

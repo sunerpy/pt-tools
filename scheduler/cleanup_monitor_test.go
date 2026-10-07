@@ -796,7 +796,7 @@ func TestEmergencyCleanup_DeletesUntilSpaceSufficient(t *testing.T) {
 	}
 
 	// Given: 60GB free, need 100GB → need 40GB more
-	result := cm.emergencyCleanup(cfg, candidates, nil, 60)
+	result := cm.emergencyCleanup(cfg, candidates, candidates, nil, 60)
 	totalFreed := int64(0)
 	for _, t := range result {
 		totalFreed += t.TotalSize
@@ -817,7 +817,7 @@ func TestEmergencyCleanup_SkipsAlreadyMarked(t *testing.T) {
 		{ID: "2", Name: "New", TotalSize: 50 << 30, State: downloader.TorrentSeeding},
 	}
 
-	result := cm.emergencyCleanup(cfg, candidates, already, 60)
+	result := cm.emergencyCleanup(cfg, candidates, candidates, already, 60)
 	ids := make(map[string]int)
 	for _, t := range result {
 		ids[t.ID]++
@@ -839,7 +839,7 @@ func TestEmergencyCleanup_CountsAlreadyMarkedSpace(t *testing.T) {
 	}
 
 	// 当前 60 GB，还差 60 GB；已选中的 70 GB 已经够了
-	result := cm.emergencyCleanup(cfg, candidates, already, 60)
+	result := cm.emergencyCleanup(cfg, candidates, candidates, already, 60)
 	require.Len(t, result, 1)
 	assert.Equal(t, "old", result[0].ID, "不再额外删除")
 }
@@ -854,7 +854,7 @@ func TestEmergencyCleanup_SkipsExtrasWhenKeepingData(t *testing.T) {
 	already := []downloader.Torrent{{ID: "rule", TotalSize: 10 << 30}}
 	candidates := []downloader.Torrent{already[0], {ID: "extra", TotalSize: 500 << 30, State: downloader.TorrentPaused}}
 
-	result := cm.emergencyCleanup(cfg, candidates, already, 5)
+	result := cm.emergencyCleanup(cfg, candidates, candidates, already, 5)
 	require.Len(t, result, 1)
 	assert.Equal(t, "rule", result[0].ID, "只保留按删除条件选中的种子")
 }
