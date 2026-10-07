@@ -169,3 +169,26 @@ func TestEmergencyCleanup_PicksSharedGroup(t *testing.T) {
 	}
 	assert.Equal(t, []string{"c"}, ids)
 }
+
+// 紧急清理：同一目录下文件不同的平铺种子不是同一份数据，空间各算各的，够了就不再多删。
+func TestEmergencyCleanup_FlatTorrentsCountedSeparately(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMinDiskSpaceGB = 100 // 目标 120 GB，当前 60 GB，还差 60 GB
+
+	flat := func(id string, ratio float64) downloader.Torrent {
+		return downloader.Torrent{ID: id, InfoHash: id, Name: id, SavePath: "/data", ContentPath: "/data", TotalSize: 40 << 30, State: downloader.TorrentSeeding, Ratio: ratio}
+	}
+	a, b, c := flat("a", 3), flat("b", 2), flat("c", 1)
+	files := func(t downloader.Torrent) ([]downloader.TorrentFile, error) {
+		return []downloader.TorrentFile{{Name: t.ID + ".mkv", Size: t.TotalSize}}, nil
+	}
+	all := []downloader.Torrent{a, b, c}
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing(all, files), all, nil, 60)
+	ids := []string{}
+	for _, r := range result {
+		ids = append(ids, r.ID)
+	}
+	assert.Len(t, ids, 2, "删两个 40 GB 就够了：%v", ids)
+	assert.NotContains(t, ids, "c", "分享率最低的留下")
+}

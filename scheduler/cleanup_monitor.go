@@ -538,18 +538,19 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, sharing *d
 		markedSet[t.ID] = struct{}{}
 		deleting[downloader.TorrentKey(t)] = true
 	}
-	// freed 是删掉 t 能腾出的空间：数据还被不删的种子用着的不算，同一份数据只算一次
+	// freed 是删掉 t 能腾出的空间：数据还被不删的种子用着的不算；共用同一份数据的种子只算一个
+	//（同一目录下文件不同的平铺种子不是同一份数据，各算各的）
 	counted := map[string]bool{}
 	freed := func(t downloader.Torrent) float64 {
 		if sharing.Shares(t, deleting) {
 			return 0
 		}
-		if p := downloader.DataPath(t); p != "" {
-			if counted[p] {
+		for _, o := range sharing.Sharers(t) {
+			if counted[downloader.TorrentKey(o)] {
 				return 0
 			}
-			counted[p] = true
 		}
+		counted[downloader.TorrentKey(t)] = true
 		return float64(t.TotalSize)
 	}
 
