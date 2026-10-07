@@ -300,7 +300,15 @@ describe("媒体识别", () => {
     q("media-word-enabled-3")!.click();
     await vi.waitFor(() => expect(api.updateWord).toHaveBeenCalledTimes(1));
     expect(api.updateWord.mock.calls[0]![0]).toBe(3);
-    expect(api.updateWord.mock.calls[0]![1]).toMatchObject({ enabled: false });
+    expect(api.updateWord.mock.calls[0]![1], "只发接口收的字段，不带 id").toEqual({
+      kind: "replace",
+      pattern: "TSR",
+      replacement: "The.Shawshank.Redemption",
+      offset: 0,
+      is_regex: false,
+      enabled: false,
+      note: "",
+    });
 
     ui.confirm.mockRejectedValueOnce("cancel");
     q("media-word-del-3")!.click();

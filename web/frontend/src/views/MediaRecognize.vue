@@ -228,19 +228,22 @@ async function loadWords() {
   }
 }
 
+/** 接口只收这几个字段（严格解析）：不能把整条记录（带 id、时间）发回去 */
+function toInput(r: MediaWordRule): MediaWordInput {
+  return {
+    kind: r.kind,
+    pattern: r.pattern,
+    replacement: r.replacement,
+    offset: r.offset,
+    is_regex: r.is_regex,
+    enabled: r.enabled,
+    note: r.note,
+  };
+}
+
 function openWord(r?: MediaWordRule) {
   editingID.value = r?.id ?? null;
-  wordForm.value = r
-    ? {
-        kind: r.kind,
-        pattern: r.pattern,
-        replacement: r.replacement,
-        offset: r.offset,
-        is_regex: r.is_regex,
-        enabled: r.enabled,
-        note: r.note,
-      }
-    : blankWord();
+  wordForm.value = r ? toInput(r) : blankWord();
   wordDialog.value = true;
 }
 
@@ -270,7 +273,7 @@ async function saveWord() {
 
 async function toggleWord(r: MediaWordRule, enabled: boolean) {
   try {
-    await mediaApi.updateWord(r.id, { ...r, enabled });
+    await mediaApi.updateWord(r.id, { ...toInput(r), enabled });
     await loadWords();
   } catch (e) {
     ElMessage.error(errText(e, "保存失败"));
