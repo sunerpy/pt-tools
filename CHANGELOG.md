@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.10](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.9...v1.0.0-rc.10) (2026-10-07)
+
+
+### Features
+
+* **media:** 媒体识别：标题解析、TMDB 匹配与 IMDb、豆瓣编号 ([#632](https://github.com/sunerpy/pt-tools/issues/632)) ([85102ed](https://github.com/sunerpy/pt-tools/commit/85102ed652cd1be8735c699416a6f916de3b9020))
+
 ## [1.0.0-rc.9](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.8...v1.0.0-rc.9) (2026-10-07)
 
 

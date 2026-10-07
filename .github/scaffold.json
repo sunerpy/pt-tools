@@ -13,7 +13,7 @@
     "PACKAGE_NAME": "pt-tools",
     "OWNER": "sunerpy",
     "REPO": "pt-tools",
-    "CURRENT_VERSION": "1.0.0-rc.9"
+    "CURRENT_VERSION": "1.0.0-rc.10"
   },
   "drift_allow": [
     ".github/workflows/ci.yml",
