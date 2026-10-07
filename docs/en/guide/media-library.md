@@ -41,6 +41,8 @@ Each library takes one kind of title. Create one for movies and one for TV shows
 | Symbolic link | No extra space; the media server must reach the download folder by the same path, and the link breaks when the torrent's data is deleted |
 | Move          | The files move into the library and the torrent can no longer seed; only paused torrents are organised                                   |
 
+When a move cannot delete the source file (for example because the download folder is read-only), the copy already placed in the library is still recorded as organised, with the mode it actually has, copy (across file systems) or hard link, and a note that the source file is still in the download folder; delete it yourself if needed.
+
 Click Check (检查) while editing a library: it confirms the folder exists and is writable, and for hard links it creates a file in the pt-tools path of each path mapping and tries to hard-link it into the library, which confirms they are on the same file system. The test files are removed afterwards.
 
 ## Naming templates
