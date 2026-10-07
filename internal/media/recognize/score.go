@@ -26,6 +26,9 @@ const (
 
 var foldMarks = runes.Remove(runes.In(unicode.Mn))
 
+// Normalize 规整名字用于比较（订阅对种子标题时也用），规则见 normalize。
+func Normalize(s string) string { return normalize(s) }
+
 // normalize 规整名字用于比较：去掉重音（Shōgun → shogun）、转小写、只留字母和数字（含汉字）。
 func normalize(s string) string {
 	t := transform.Chain(norm.NFD, foldMarks, norm.NFC)
