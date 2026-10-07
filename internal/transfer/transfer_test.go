@@ -1077,3 +1077,35 @@ func TestReseedJob(t *testing.T) {
 	assert.Equal(t, models.TransferFailed, got2.State)
 	assert.Contains(t, got2.Message, "不是这个辅种任务加的")
 }
+
+// 辅种开始做种后写种子记录失败：任务留在 verified，下一轮再写，写成了才算完成。
+func TestReseedJobRetriesRecord(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	data := torrentFile(t, "Movie.Record")
+	h, err := qbit.ComputeTorrentHash(data)
+	require.NoError(t, err)
+	j := models.TorrentTransferJob{
+		TargetDownloaderID: dstID, InfoHash: h, Name: "Movie.Record", TotalSize: 1 << 30,
+		SiteName: "hdsky", TorrentID: "654", TargetSavePath: "/data/movies", SourceSavePath: "/data/movies", TorrentData: data,
+	}
+	require.NoError(t, e.svc.EnqueueReseed(ctx, &j))
+	e.svc.RunOnce(ctx) // 加入
+	e.svc.RunOnce(ctx) // 校验
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx) // verified
+	require.Equal(t, models.TransferVerified, e.job(j.ID).State)
+
+	require.NoError(t, e.db.Migrator().DropTable(&models.TorrentInfo{}))
+	e.svc.RunOnce(ctx)
+	got := e.job(j.ID)
+	assert.Equal(t, models.TransferVerified, got.State, "记录没写成，不算完成")
+	assert.Contains(t, got.Message, "写种子记录失败")
+
+	require.NoError(t, e.db.AutoMigrate(&models.TorrentInfo{}))
+	e.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferDone, e.job(j.ID).State, e.job(j.ID).Message)
+	var rec models.TorrentInfo
+	require.NoError(t, e.db.Where("site_name = ? AND torrent_id = ?", "hdsky", "654").First(&rec).Error)
+	assert.Equal(t, ReseedSource, rec.DownloadSource)
+}

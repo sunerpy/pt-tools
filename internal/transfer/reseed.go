@@ -45,9 +45,10 @@ func (s *Service) EnqueueReseed(ctx context.Context, j *models.TorrentTransferJo
 }
 
 // recordReseed 为辅种成功的新种子写一条种子记录（站点 + 站内 ID），站点做种容量、免费到期与清理都按它认种子。
-func (s *Service) recordReseed(ctx context.Context, j *models.TorrentTransferJob, target models.DownloaderSetting) {
+// 写不进去时返回错误：任务留在 verified，下一轮再写，免得新种子没有记录、清理与容量都认不出它。
+func (s *Service) recordReseed(ctx context.Context, j *models.TorrentTransferJob, target models.DownloaderSetting) error {
 	if j.SiteName == "" || j.TorrentID == "" {
-		return
+		return nil
 	}
 	now := s.cfg.Now()
 	pushed := true
@@ -67,6 +68,7 @@ func (s *Service) recordReseed(ctx context.Context, j *models.TorrentTransferJob
 		Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
 		DoUpdates: clause.AssignmentColumns(cols),
 	}).Create(&row).Error; err != nil {
-		s.cfg.Logger.Warnf("[辅种] 任务 %d 已完成，写种子记录失败: %v", j.ID, err)
+		return fmt.Errorf("写种子记录失败: %w", err)
 	}
+	return nil
 }

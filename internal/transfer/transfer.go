@@ -637,7 +637,9 @@ func (s *Service) finish(ctx context.Context, j *models.TorrentTransferJob) erro
 	}
 	if j.Kind == models.JobKindReseed {
 		// 辅种：数据与原来的种子共用，不移除任何种子；记下这个新种子，站点容量与清理都认得它
-		s.recordReseed(ctx, j, targetSet)
+		if recErr := s.recordReseed(ctx, j, targetSet); recErr != nil {
+			return fmt.Errorf("辅种已开始做种，%w，下一轮再试", recErr)
+		}
 		return s.moveTo(ctx, j, models.TransferDone, "")
 	}
 	src, srcSet, err := s.cfg.Downloaders.TransferDownloader(ctx, j.SourceDownloaderID)
