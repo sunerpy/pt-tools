@@ -2550,6 +2550,8 @@ export interface MediaHistoryItem {
   next_retry_at?: string;
   trigger: "auto" | "scan" | "manual";
   subtitles: number;
+  /** 记录里记着 pt-tools 放进库的文件（跳过、失败的记录也可能有），可以连文件删 */
+  has_files: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -2599,8 +2601,11 @@ export const organizeApi = {
     return api.get<MediaHistoryPage>(`/api/media/history${qs ? `?${qs}` : ""}`);
   },
   retry: (id: number) => api.post<OrganizeResult>(`/api/media/history/${id}/retry`),
+  /** kept 是换掉或改过、没有删的文件的说明 */
   deleteHistory: (id: number, files = false) =>
-    api.delete<{ ok: boolean }>(`/api/media/history/${id}${files ? "?files=1" : ""}`),
+    api.delete<{ ok: boolean; kept?: string[] }>(
+      `/api/media/history/${id}${files ? "?files=1" : ""}`,
+    ),
 };
 
 export const reseedApi = {

@@ -80,10 +80,7 @@ const deleting = ref(false);
 const delTarget = ref<MediaHistoryItem | null>(null);
 const delFiles = ref(false);
 const canDeleteFiles = computed(
-  () =>
-    delTarget.value?.status === "done" &&
-    delTarget.value.mode !== "move" &&
-    Boolean(delTarget.value.target_path),
+  () => delTarget.value?.has_files === true && delTarget.value.mode !== "move",
 );
 
 function askDelete(r: MediaHistoryItem) {
@@ -96,8 +93,12 @@ async function confirmDelete() {
   if (!delTarget.value) return;
   deleting.value = true;
   try {
-    await organizeApi.deleteHistory(delTarget.value.id, delFiles.value && canDeleteFiles.value);
-    ElMessage.success(delFiles.value ? "已删除记录与库里的文件" : "已删除记录");
+    const res = await organizeApi.deleteHistory(
+      delTarget.value.id,
+      delFiles.value && canDeleteFiles.value,
+    );
+    if (res.kept?.length) ElMessage.warning(`已删除记录；这些文件留着：${res.kept.join("；")}`);
+    else ElMessage.success(delFiles.value ? "已删除记录与库里的文件" : "已删除记录");
     delDialog.value = false;
     await load();
   } catch (e) {

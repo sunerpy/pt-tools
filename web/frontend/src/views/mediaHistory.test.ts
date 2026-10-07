@@ -68,6 +68,7 @@ const row = (over: Record<string, unknown>) => ({
   attempts: 0,
   trigger: "auto",
   subtitles: 1,
+  has_files: true,
   created_at: "2026-10-07T12:00:00Z",
   updated_at: "2026-10-07T12:00:00Z",
   ...over,
@@ -86,10 +87,16 @@ async function mountPage(fail = false) {
           attempts: 1,
           next_retry_at: "2026-10-07T12:10:00Z",
           target_path: "",
+          has_files: false,
         }),
         row({ id: 3, mode: "move" }),
+        row({
+          id: 4,
+          status: "skipped",
+          message: "库里的文件已经不是当初整理出的那个（换成了别的文件或改过），不会覆盖",
+        }),
       ],
-      total: 3,
+      total: 4,
     });
   const Page = (await import("./MediaHistory.vue")).default;
   view = mountView(Page);
@@ -178,6 +185,33 @@ describe("整理历史", () => {
     expect(document.body.textContent).toContain("移动整理的文件是唯一的一份");
     q("mh-del-confirm")!.click();
     await vi.waitFor(() => expect(api.deleteHistory).toHaveBeenCalledWith(3, false));
+
+    q("mh-del-2")!.click();
+    await flush();
+    expect(q("mh-del-files")!.classList.contains("is-disabled"), "没整理出文件的不能选").toBe(true);
+    expect(document.body.textContent).toContain("这条记录没有整理出文件");
+  });
+
+  it("删除：跳过的记录记着之前整理出的文件时也能连文件删，换掉的文件写明留着", async () => {
+    await mountPage();
+    api.deleteHistory.mockResolvedValue({
+      ok: true,
+      kept: [
+        "已经不是当初整理出的文件：库里的 最后生还者 - S01E01.mkv 已经换成了别的文件或改过，没有删除",
+      ],
+    });
+    q("mh-del-4")!.click();
+    await flush();
+    const box = q("mh-del-files")!;
+    expect(box.classList.contains("is-disabled")).toBe(false);
+    box.querySelector("input")!.click();
+    await flush();
+    q("mh-del-confirm")!.click();
+    await vi.waitFor(() => expect(api.deleteHistory).toHaveBeenCalledWith(4, true));
+    await vi.waitFor(() =>
+      expect(ui.warning).toHaveBeenCalledWith(expect.stringContaining("这些文件留着")),
+    );
+    expect(ui.success).not.toHaveBeenCalled();
   });
 
   it("读不到时写明原因", async () => {
