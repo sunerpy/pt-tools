@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/internal/transfer"
 	"github.com/sunerpy/pt-tools/models"
@@ -140,4 +141,39 @@ func TestTransferWorker_RunRuleNowSharesLock(t *testing.T) {
 	var nilWorker *TransferWorker
 	_, err = nilWorker.RunRuleNow(context.Background(), r.ID)
 	assert.Error(t, err)
+}
+
+// TransferDownloader 按 ID 取管理器里的实例与配置：不存在、未启用、管理器里没有实例都报错。
+func TestManager_TransferDownloader(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	m := &Manager{downloaderManager: downloader.NewDownloaderManager()}
+	ctx := context.Background()
+	_, _, err := m.TransferDownloader(ctx, 5)
+	assert.ErrorContains(t, err, "不存在")
+
+	ds := models.DownloaderSetting{Name: "qb1", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
+	require.NoError(t, db.DB.Create(&ds).Error)
+	registerFakeDownloader(t, m.downloaderManager, newSchedFakeDownloader("qb1"), true)
+	dl, set, err := m.TransferDownloader(ctx, ds.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, dl)
+	assert.Equal(t, "qb1", set.Name)
+	assert.Equal(t, ds.ID, set.ID)
+
+	require.NoError(t, db.DB.Model(&ds).Update("enabled", false).Error)
+	_, set, err = m.TransferDownloader(ctx, ds.ID)
+	assert.ErrorContains(t, err, "未启用")
+	assert.Equal(t, "qb1", set.Name)
+
+	other := models.DownloaderSetting{Name: "not-registered", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true}
+	require.NoError(t, db.DB.Create(&other).Error)
+	_, _, err = m.TransferDownloader(ctx, other.ID)
+	assert.Error(t, err)
+
+	saved := global.GlobalDB
+	global.GlobalDB = nil
+	_, _, err = m.TransferDownloader(ctx, ds.ID)
+	assert.ErrorContains(t, err, "数据库未初始化")
+	global.GlobalDB = saved
 }
