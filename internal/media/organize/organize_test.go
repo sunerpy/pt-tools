@@ -1,6 +1,7 @@
 package organize
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -700,4 +702,62 @@ func TestMoveSourceKept(t *testing.T) {
 	assert.Empty(t, kept)
 	assert.False(t, exists(row.TargetPath), "按复制记下的可以连文件删")
 	assert.True(t, exists(filepath.Join(srcDir, oppName+".mkv")))
+}
+
+// 整理记录写不进数据库：这次复制进库的视频与字幕撤回（源文件还在），记为失败；之后能正常整理
+func TestRecordFailureUndoesPlacedFiles(t *testing.T) {
+	e := newEnv(t)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: models.MediaModeCopy})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.addTorrent(oppHash, oppName, map[string]int{
+		oppName + "/" + oppName + ".mkv":     2,
+		oppName + "/" + oppName + ".chs.ass": 0,
+	}, nil)
+	boom := errors.New("disk I/O error")
+	cb := e.db.Callback().Create()
+	require.NoError(t, cb.Before("gorm:create").Register("test:fail_history", func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "media_transfer_histories" {
+			_ = tx.AddError(boom)
+		}
+	}))
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Created)
+	assert.Equal(t, 1, res.Failed)
+	assert.Contains(t, strings.Join(res.Messages, " "), "整理记录写不进去")
+	target := res.Plan.Items[0].Target
+	require.NotEmpty(t, target)
+	assert.False(t, exists(target), "库里不留没人认领的文件")
+	assert.False(t, exists(strings.TrimSuffix(target, ".mkv")+".zh-CN.ass"))
+	assert.True(t, exists(filepath.Join(e.dlDir, oppName, oppName+".mkv")), "源文件不动")
+	assert.Empty(t, e.history())
+	require.NoError(t, cb.Remove("test:fail_history"))
+
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	assert.True(t, exists(target))
+}
+
+// 媒体库后来改成了移动：已经按复制整理好的条目再整理时，补上的字幕也按复制放（源文件不删），记录的方式不变
+func TestSubtitlesFollowRecordedMode(t *testing.T) {
+	e := newEnv(t)
+	lib := e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: models.MediaModeCopy})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	paused := func(t *downloader.Torrent) { t.State = downloader.TorrentPaused }
+	e.addTorrent(oppHash, oppName, map[string]int{oppName + "/" + oppName + ".mkv": 2}, paused)
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created)
+
+	require.NoError(t, e.db.Model(&models.MediaLibrary{}).Where("id = ?", lib.ID).Update("mode", models.MediaModeMove).Error)
+	e.addTorrent(oppHash, oppName, map[string]int{oppName + "/" + oppName + ".mkv": 2, oppName + "/" + oppName + ".chs.ass": 0}, paused)
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.Empty(t, res.Plan.Problem)
+	assert.Equal(t, 1, res.Done)
+	row := e.history()[0]
+	assert.Equal(t, models.MediaModeCopy, row.Mode)
+	assert.Len(t, decodeExtras(row.Extras), 1, "补上了字幕")
+	assert.True(t, exists(filepath.Join(e.dlDir, oppName, oppName+".chs.ass")), "按复制放，下载目录里的字幕还在")
 }

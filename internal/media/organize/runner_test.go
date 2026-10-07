@@ -339,3 +339,24 @@ func TestRetryKeptOnDownloaderError(t *testing.T) {
 	assert.Equal(t, 1, e.drain())
 	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
 }
+
+// 到期重试时这个种子已经在队列里（别的触发方式排上的）：重试时间恢复成下一拍，不因为那个任务出错而丢掉
+func TestRetryDueWhenAlreadyQueued(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerScan}))
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx)
+	row := e.history()[0]
+	require.NotNil(t, row.NextRetryAt, "没排上，重试时间留着")
+	assert.True(t, row.NextRetryAt.After(e.Now()))
+
+	e.dl.getErr = assert.AnError
+	e.drain()
+	assert.NotNil(t, e.history()[0].NextRetryAt, "排着的那个任务出错也不丢")
+}

@@ -55,22 +55,33 @@ func jobKey(dlID uint, dlName, hash string) string {
 
 // enqueue 把种子放进队列；已经在队列里的不重复放。队列满时返回 false。
 func (s *Service) enqueue(j job) bool {
+	return s.put(j) != queueFull
+}
+
+const (
+	queueAdded = iota
+	queueDup
+	queueFull
+)
+
+// put 把任务放进队列，报告是新放进去了、已经在队列里（这个任务没放），还是队列满了。
+func (s *Service) put(j job) int {
 	key := jobKey(j.req.DownloaderID, j.dlName, j.req.Hash)
 	s.qmu.Lock()
 	if s.queued[key] && j.done == nil {
 		s.qmu.Unlock()
-		return true
+		return queueDup
 	}
 	s.queued[key] = true
 	s.qmu.Unlock()
 	select {
 	case s.jobs <- j:
-		return true
+		return queueAdded
 	default:
 		s.qmu.Lock()
 		delete(s.queued, key)
 		s.qmu.Unlock()
-		return false
+		return queueFull
 	}
 }
 
@@ -355,9 +366,12 @@ func (s *Service) retryDue(ctx context.Context) {
 		if trigger == models.MediaTriggerManual && r.TMDBID > 0 {
 			req.MediaType, req.TMDBID, req.LibraryID = r.MediaType, r.TMDBID, r.LibraryID
 		}
-		if !s.enqueue(job{req: req, trigger: trigger, retryIDs: ids}) {
+		// 没排上（队列满了，或者这个种子已经在队列里、那个任务不带这些记录）时，恢复成下一拍再看；
+		// 只恢复还空着的：那个任务已经写了记录的不覆盖
+		if s.put(job{req: req, trigger: trigger, retryIDs: ids}) != queueAdded {
 			next := s.cfg.Now().Add(tickInterval)
-			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", &next)
+			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
+				Where("id IN ? AND status = ? AND next_retry_at IS NULL", ids, models.MediaTransferFailed).Update("next_retry_at", &next)
 		}
 	}
 }

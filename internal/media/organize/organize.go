@@ -697,9 +697,10 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.Mode != "" {
 				it.mode = it.row.Mode // 库里这份是当初按这个方式放的（媒体库后来换了方式、移动时留下了源文件也一样）
 			}
-			subs, msgs, added := s.transferSubtitles(it, p.Mode, rowExtras(it.row))
-			res.Messages = append(res.Messages, msgs...)
-			if it.row == nil || it.row.Status != models.MediaTransferDone || added > 0 || len(msgs) > 0 {
+			// 字幕跟视频用同一个方式，和记录里的方式一致（删除时按它确认）
+			mode := firstNonEmpty(it.mode, p.Mode)
+			subs, newSubs, msgs := s.transferSubtitles(it, mode, rowExtras(it.row))
+			if it.row == nil || it.row.Status != models.MediaTransferDone || len(newSubs) > 0 || len(msgs) > 0 {
 				fileID := ""
 				if it.row != nil && it.row.Status == models.MediaTransferDone {
 					fileID = it.row.TargetFileID
@@ -707,8 +708,14 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 				if fileID == "" {
 					fileID, _ = transfer.FileID(it.Target)
 				}
-				s.record(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), subs))
+				if err := s.writeRecord(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), subs)); err != nil {
+					unplace(it, mode, "", false, newSubs)
+					res.Failed++
+					res.Messages = append(res.Messages, fmt.Sprintf("%s：整理记录写不进去，这次补上的字幕已撤回（%v）", filepath.Base(it.Source), err))
+					continue
+				}
 			}
+			res.Messages = append(res.Messages, msgs...)
 			res.Done++
 			continue
 		}
@@ -739,14 +746,22 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			s.record(ctx, p, it, trigger, status, terr.Error(), retry, "", nil)
 			continue
 		}
+		mode := firstNonEmpty(it.mode, p.Mode)
 		fileID, _ := transfer.FileID(it.Target)
-		extras, msgs, _ := s.transferSubtitles(it, p.Mode, rowExtras(it.row))
+		extras, newSubs, msgs := s.transferSubtitles(it, mode, rowExtras(it.row))
 		if keptNote != "" {
 			msgs = append([]string{keptNote}, msgs...)
 		}
+		if err := s.writeRecord(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), extras)); err != nil {
+			// 记录写不进去时库里的文件没人认领：源文件还在的撤回这次放进去的（移动过去的是唯一的一份，留着）
+			unplace(it, mode, fileID, out == transfer.Created, newSubs)
+			it.Status, it.Message = ItemFailed, fmt.Sprintf("整理记录写不进去：%v", err)
+			res.Failed++
+			res.Messages = append(res.Messages, fmt.Sprintf("%s：%s", filepath.Base(it.Source), it.Message))
+			continue
+		}
 		res.Messages = append(res.Messages, msgs...)
 		it.Status = ItemDone
-		s.record(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), extras))
 		if out == transfer.AlreadyDone {
 			res.Done++
 			continue
@@ -767,11 +782,10 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 }
 
 // transferSubtitles 用同样的方式整理字幕；失败的记在消息里（写进整理记录），不影响视频，下次整理时再试。
-// 返回整理好的字幕（含之前就在的）、失败的消息与这次新放进库的个数。
-func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([]extra, []string, int) {
-	var out []extra
+// 返回整理好的字幕（含之前就在的）、这次新放进库的字幕与失败的消息。
+func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([]extra, []extra, []string) {
+	var out, created []extra
 	var msgs []string
-	added := 0
 	for _, sub := range it.Subtitles {
 		// 之前整理好的（复制与移动认不出来历，按记录里的文件编号认）
 		if i := slices.IndexFunc(prior, func(e extra) bool { return e.Kind == "" && e.Target == sub.Target }); i >= 0 && extraOurs(prior[i], mode) {
@@ -788,13 +802,28 @@ func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([
 			msgs = append(msgs, fmt.Sprintf("字幕 %s：%v", filepath.Base(sub.Source), err))
 			continue
 		}
-		if res == transfer.Created {
-			added++
-		}
 		id, _ := transfer.FileID(sub.Target)
-		out = append(out, extra{Source: sub.Source, Target: sub.Target, FileID: id})
+		e := extra{Source: sub.Source, Target: sub.Target, FileID: id}
+		out = append(out, e)
+		if res == transfer.Created {
+			created = append(created, e)
+		}
 	}
-	return out, msgs, added
+	return out, created, msgs
+}
+
+// unplace 撤回这次放进库里、但整理记录没写进去的文件（视频要 placed 为真）：源文件还在，按文件编号或指向确认是自己放的才删；
+// 移动过去的是唯一的一份，不撤。
+func unplace(it *PlanItem, mode, fileID string, placed bool, subs []extra) {
+	if mode == models.MediaModeMove {
+		return
+	}
+	if placed {
+		_ = transfer.RemoveIfOurs(it.Target, mode, fileID, it.Source)
+	}
+	for _, e := range subs {
+		_ = transfer.RemoveIfOurs(e.Target, mode, e.FileID, e.Source)
+	}
 }
 
 // recordScraped 把刮削写出的文件与文件编号记进对应视频的整理记录：和视频同名的记给这个视频，
@@ -871,8 +900,13 @@ func (s *Service) recordProblem(ctx context.Context, p *Plan, trigger string, re
 	}
 }
 
-// record 写一个文件的整理记录（按源文件更新或新建）。
+// record 写一个文件的整理记录（按源文件更新或新建）；写不进去时只记日志（不认领库里文件的情况用）。
 func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, status, msg string, retry bool, fileID string, extras []extra) {
+	_ = s.writeRecord(ctx, p, it, trigger, status, msg, retry, fileID, extras)
+}
+
+// writeRecord 写一个文件的整理记录并返回错误：整理出文件以后用，写不进去时调用方要撤回。
+func (s *Service) writeRecord(ctx context.Context, p *Plan, it *PlanItem, trigger, status, msg string, retry bool, fileID string, extras []extra) error {
 	now := s.cfg.Now()
 	row := models.MediaTransferHistory{
 		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, InfoHash: p.Hash, TaskID: p.TaskID,
@@ -919,7 +953,7 @@ func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, st
 	}).Create(&row).Error
 	if err != nil {
 		s.cfg.Logger.Errorf("[整理入库] 写整理记录失败 (%s): %v", it.Source, err)
-		return
+		return fmt.Errorf("写整理记录失败: %w", err)
 	}
 	if it.HistoryID == 0 {
 		var saved models.MediaTransferHistory
@@ -927,6 +961,7 @@ func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, st
 			it.HistoryID = saved.ID
 		}
 	}
+	return nil
 }
 
 func truncate(s string, n int) string {
