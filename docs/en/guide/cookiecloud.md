@@ -16,7 +16,7 @@ Both encryption modes of the extension are supported: the original default, and 
 
 | Setting                     | Meaning                                                                                                              |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Server address (服务地址)   | The CookieCloud server, starting with `http://` or `https://`                                                        |
+| Server address (服务地址)   | The CookieCloud server, starting with `http://` or `https://`, without a user name and password, a query or `#`      |
 | User KEY (用户 KEY（UUID）) | The user KEY in the extension                                                                                        |
 | Password (端对端加密密码)   | The password in the extension; left empty, the saved one stays; Clear (清除) deletes it and turns scheduled sync off |
 | Scheduled sync (定时同步)   | Syncs at the interval when on, updating only enabled sites whose cookie changed; it never enables a site             |
@@ -28,7 +28,9 @@ The result of each sync shows as Last sync (上次同步) below the settings.
 
 1. Click Read CookieCloud (读取 CookieCloud): pt-tools fetches and decrypts the data on this machine and lists the sites it can import, the cookie names and each site's state. Nothing is written, and the cookie contents are not shown.
 2. Tick the sites to import, or click Select changed (选中有变化的) for the enabled sites whose cookie changed.
-3. Click Import selected (导入选中) and confirm: the selected sites get the cookies from CookieCloud, and sites not enabled yet are enabled. pt-tools then refreshes these sites and checks their login once, as it does when the browser extension syncs a cookie.
+3. Click Import selected (导入选中) and confirm: the selected sites get the cookies from CookieCloud, and sites not enabled yet are enabled; only the cookie and the enabled state change, RSS and other settings stay. pt-tools then refreshes these sites and checks their login once, as it does when the browser extension syncs a cookie.
+
+Importing fetches the data again instead of using the preview. Saving a new server address, UUID or password clears the list read before, so read it again; changing them while a read or a sync is in progress makes that one write nothing. For a site that also needs an API key, enter the API key in the site settings before importing.
 
 A site's state is one of: not enabled (enabled by the import), cookie changed, or unchanged (importing it writes nothing).
 
