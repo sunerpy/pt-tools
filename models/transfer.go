@@ -48,7 +48,9 @@ var TransferActiveStates = []string{TransferPending, TransferExported, TransferA
 // → 校验到 100% → 恢复目标 → 从源移除（不删数据）。状态持久化，进程重启后接着做。
 // 列的默认值一律是零值（GORM 新建时会把零值换成 default）。
 type TorrentTransferJob struct {
-	ID                 uint   `gorm:"primaryKey" json:"id"`
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Kind 是任务种类：空串是转移做种，reseed 是辅种（源与目标是同一台下载器，不移除任何种子）。
+	Kind               string `gorm:"size:16;not null;default:'';index" json:"kind"`
 	SourceDownloaderID uint   `gorm:"not null;index" json:"source_downloader_id"`
 	TargetDownloaderID uint   `gorm:"not null;index" json:"target_downloader_id"`
 	InfoHash           string `gorm:"size:64;not null;index" json:"info_hash"`
