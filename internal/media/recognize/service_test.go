@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,12 @@ func fakeTMDB(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"results":[
 				{"id":278,"title":"肖申克的救赎","original_title":"The Shawshank Redemption","release_date":"1994-09-23","popularity":100},
 				{"id":5000,"title":"Shawshank: The Redeeming Feature","original_title":"Shawshank: The Redeeming Feature","release_date":"2001-01-01","popularity":2}]}`))
+		case r.URL.Path == "/3/search/movie" && strings.Contains(q, "Inside Out"):
+			_, _ = w.Write([]byte(`{"results":[
+				{"id":1022789,"title":"头脑特工队2","original_title":"Inside Out 2","release_date":"2024-06-11","popularity":500},
+				{"id":150540,"title":"头脑特工队","original_title":"Inside Out","release_date":"2015-06-09","popularity":200}]}`))
+		case r.URL.Path == "/3/search/movie" && (strings.Contains(q, "Oppenheimer") || strings.Contains(q, "奥本海默")):
+			_, _ = w.Write([]byte(`{"results":[]}`))
 		case r.URL.Path == "/3/search/tv" && strings.Contains(q, "Game of Thrones"):
 			_, _ = w.Write([]byte(`{"results":[{"id":1399,"name":"权力的游戏","original_name":"Game of Thrones","first_air_date":"2011-04-17","popularity":300}]}`))
 		case strings.HasPrefix(r.URL.Path, "/3/search/"):
@@ -283,6 +290,95 @@ func TestWords(t *testing.T) {
 	assert.ErrorIs(t, s.DeleteWord(ctx, w.ID), ErrNotFound)
 }
 
+// 只靠年份判成电影的标题，电影里没有可靠匹配时补搜剧集。
+func TestRecognizeFallsBackToTV(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	res, err := s.Recognize(context.Background(), Input{Title: "Game.of.Thrones.2019.1080p.BluRay"})
+	require.NoError(t, err)
+	assert.Equal(t, meta.TypeMovie, res.Meta.Type, "解析只看到年份")
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 1399, res.Match.ID)
+	assert.Equal(t, tmdb.KindTV, res.Match.MediaType)
+}
+
+// 续集编号对不上（Inside Out 对 Inside Out 2）不算名字相同；同名的旧片年份差太多也不认定。
+func TestRecognizeSequelNumbers(t *testing.T) {
+	s, _ := newService(t)
+	withKey(t, s)
+	res, err := s.Recognize(context.Background(), Input{Title: "Inside.Out.2024.1080p.WEB-DL"})
+	require.NoError(t, err)
+	assert.Nil(t, res.Match)
+	require.Len(t, res.Candidates, 2)
+	res, err = s.Recognize(context.Background(), Input{Title: "Inside.Out.2.2024.1080p.WEB-DL"})
+	require.NoError(t, err)
+	require.NotNil(t, res.Match)
+	assert.Equal(t, 1022789, res.Match.ID)
+}
+
+// 纠正保存英文名为主键、中文名为别名：同一个标题有没有中文副标题都命中；只有中文名的标题也命中。
+func TestOverrideAliases(t *testing.T) {
+	s, db := newService(t)
+	ctx := context.Background()
+	withKey(t, s)
+	// 先只按中文名纠正过一次
+	cnOnly, err := s.SetOverride(ctx, OverrideInput{Title: "奥本海默 2023 1080p", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.NoError(t, err)
+	assert.Equal(t, "movie|奥本海默|2023", cnOnly.Key)
+
+	ov, err := s.SetOverride(ctx, OverrideInput{Title: "Oppenheimer.2023.1080p.BluRay", Subtitle: "奥本海默 | 中字", TMDBID: 278, MediaType: tmdb.KindMovie})
+	require.NoError(t, err)
+	assert.Equal(t, "movie|oppenheimer|2023", ov.Key)
+	assert.Equal(t, "movie|奥本海默|2023", ov.AltKey)
+	var n int64
+	require.NoError(t, db.Model(&models.MediaOverride{}).Count(&n).Error)
+	assert.EqualValues(t, 1, n, "带英文名的纠正取代了只按中文名的那条")
+
+	for _, in := range []Input{
+		{Title: "Oppenheimer.2023.2160p.WEB-DL"},
+		{Title: "Oppenheimer.2023.2160p.WEB-DL", Subtitle: "奥本海默 | 国语"},
+		{Title: "奥本海默 2023 2160p WEB-DL"},
+	} {
+		res, err := s.Recognize(ctx, in)
+		require.NoError(t, err)
+		assert.Equal(t, SourceOverride, res.Source, in.Title+" "+in.Subtitle)
+		assert.Equal(t, ov.ID, res.OverrideID)
+	}
+}
+
+// 所有 TMDB 客户端共用服务的限速额度：每次识别新建客户端也不会重置。
+func TestSharedLimiter(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaSetting{}, &models.MediaWordRule{}, &models.MediaOverride{}, &models.MediaCache{}))
+	srv := fakeTMDB(t)
+	s := New(Config{DB: db, Cipher: fakeCipher{}, BaseURL: srv.URL + "/3", RatePerSecond: 0.5})
+	withKey(t, s)
+	require.NoError(t, s.TestTMDB(context.Background()))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	assert.Error(t, s.TestTMDB(ctx), "第二次要等限速，100ms 内等不到")
+	c1, err := s.client(context.Background())
+	require.NoError(t, err)
+	c2, err := s.client(context.Background())
+	require.NoError(t, err)
+	assert.NotSame(t, c1, c2)
+}
+
+func TestPick(t *testing.T) {
+	m := meta.Meta{NameEN: "The Office US", Year: 2005, Type: meta.TypeTV}
+	us := Candidate{Result: tmdb.Result{Title: "The Office", Year: 2005, MediaType: tmdb.KindTV}, Score: 1.15}
+	uk := Candidate{Result: tmdb.Result{Title: "The Office", Year: 2001, MediaType: tmdb.KindTV}, Score: 1.1}
+	assert.Nil(t, pick(m, []Candidate{us, uk}), "名字只是部分相同、和第二名差不到 0.1：只列候选")
+	uk.Score = 0.5
+	assert.NotNil(t, pick(m, []Candidate{us, uk}))
+	exact := meta.Meta{NameEN: "Dune", Year: 2021, Type: meta.TypeMovie}
+	a := Candidate{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 1.4}
+	b := Candidate{Result: tmdb.Result{Title: "Dune", Year: 2021}, Score: 1.35}
+	assert.NotNil(t, pick(exact, []Candidate{a, b}), "名字完全相同时不看分差")
+	assert.Nil(t, pick(exact, nil))
+}
+
 func TestScore(t *testing.T) {
 	m := meta.Meta{NameEN: "Shogun", Year: 2024, Type: meta.TypeTV, Season: 1}
 	assert.Equal(t, 1.0, titleScore(m, tmdb.Result{Title: "幕府将军", OriginalTitle: "Shōgun"}), "去掉重音再比")
@@ -298,16 +394,27 @@ func TestScore(t *testing.T) {
 	tv := meta.Meta{NameEN: "House of the Dragon", Year: 2024, Type: meta.TypeTV, Season: 2}
 	assert.InDelta(t, 1.15, score(tv, tmdb.Result{Title: "House of the Dragon", Year: 2022, MediaType: tmdb.KindTV}, 0), 0.001, "后面几季不扣分")
 
-	assert.True(t, accepted(movie, Candidate{Result: tmdb.Result{Title: "Dune"}, Score: 1.0}))
-	assert.False(t, accepted(movie, Candidate{Result: tmdb.Result{Title: "Dune"}, Score: 0.9}))
-	assert.False(t, accepted(movie, Candidate{Result: tmdb.Result{Title: "Other"}, Score: 2}), "名字对不上分再高也不认")
+	assert.NotNil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 1.0}}))
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Dune"}, Score: 0.9}}))
+	assert.Nil(t, pick(movie, []Candidate{{Result: tmdb.Result{Title: "Other"}, Score: 2}}), "名字对不上分再高也不认")
+
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameEN: "Inside Out"}, tmdb.Result{Title: "Inside Out 2"}), "续集编号对不上")
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameEN: "The Wandering Earth"}, tmdb.Result{Title: "The Wandering Earth II"}))
+	assert.Equal(t, 0.0, titleScore(meta.Meta{NameCN: "流浪地球"}, tmdb.Result{Title: "流浪地球2"}))
+	assert.Equal(t, 0.75, titleScore(meta.Meta{NameEN: "Blade Runner 2049 Final"}, tmdb.Result{Title: "Blade Runner 2049"}))
 }
 
 func TestOverrideKey(t *testing.T) {
-	assert.Empty(t, overrideKey(meta.Meta{Year: 2020}))
-	assert.Equal(t, "movie|dune||2021", overrideKey(meta.Meta{NameEN: "Dune", Year: 2021, Type: meta.TypeMovie}))
-	assert.Equal(t, "tv|houseofthedragon|", overrideKey(meta.Meta{NameEN: "House of the Dragon", Year: 2024, Type: meta.TypeTV}), "剧集不带年份")
-	long := overrideKey(meta.Meta{NameEN: strings.Repeat("a", 300)})
+	p, a := overrideKeys(meta.Meta{Year: 2020})
+	assert.Empty(t, p)
+	assert.Empty(t, a)
+	p, a = overrideKeys(meta.Meta{NameEN: "Dune", NameCN: "沙丘", Year: 2021, Type: meta.TypeMovie})
+	assert.Equal(t, "movie|dune|2021", p)
+	assert.Equal(t, "movie|沙丘|2021", a)
+	p, a = overrideKeys(meta.Meta{NameCN: "繁花", Year: 2023, Type: meta.TypeTV})
+	assert.Equal(t, "tv|繁花", p, "剧集不带年份")
+	assert.Empty(t, a)
+	long := overrideKey(meta.Meta{NameEN: strings.Repeat("a", 300)}, strings.Repeat("a", 300))
 	assert.True(t, strings.HasPrefix(long, "h|"))
 	assert.LessOrEqual(t, len(long), 255)
 }

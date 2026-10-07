@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -216,6 +217,43 @@ func TestCache(t *testing.T) {
 	require.NoError(t, cache.Purge())
 	require.NoError(t, db.Model(&models.MediaCache{}).Count(&n).Error)
 	assert.Zero(t, n, "清掉过期的")
+}
+
+// 缓存条数有上限：超出时按到期时间删掉最早的。
+func TestCacheCap(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.MediaCache{}))
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	cache := NewDBCache(db)
+	cache.now = func() time.Time { return now }
+	cache.maxRows = 3
+	for i := range 5 {
+		cache.Set("k"+strconv.Itoa(i), []byte("v"), time.Duration(i+1)*time.Hour)
+	}
+	require.NoError(t, cache.Purge())
+	var keys []string
+	require.NoError(t, db.Model(&models.MediaCache{}).Order("key").Pluck("key", &keys).Error)
+	assert.Equal(t, []string{"k2", "k3", "k4"}, keys, "删掉最早到期的两条")
+}
+
+// 共用一个限速器的两个客户端共用额度。
+func TestSharedLimiter(t *testing.T) {
+	f := newFake(t)
+	lim := NewLimiter(0.5)
+	a := newClient(t, f, func(o *Options) { o.Limiter = lim })
+	b := newClient(t, f, func(o *Options) { o.Limiter = lim })
+	require.NoError(t, a.Validate(context.Background()))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	require.Error(t, b.Validate(ctx), "另一个客户端也要等同一份额度")
+	assert.EqualValues(t, 1, f.hits.Load())
+	hc, err := NewHTTPClient("")
+	require.NoError(t, err)
+	c := newClient(t, f, func(o *Options) { o.HTTPClient = hc; o.ProxyURL = "ftp://ignored" })
+	assert.Same(t, hc, c.http, "给了 http.Client 时不再按代理地址建")
+	_, err = NewHTTPClient("ftp://x")
+	assert.Error(t, err)
 }
 
 func TestRateLimit(t *testing.T) {

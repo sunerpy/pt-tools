@@ -37,10 +37,12 @@ type MediaWordRule struct {
 
 func (MediaWordRule) TableName() string { return "media_word_rules" }
 
-// MediaOverride 是手动纠正：解析结果相同（类型、中英文名，电影另加年份）的标题固定识别成这个 TMDB 条目。
+// MediaOverride 是手动纠正：解析结果相同（类型、名字，电影另加年份）的标题固定识别成这个 TMDB 条目。
 type MediaOverride struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Key       string    `gorm:"size:255;not null;uniqueIndex" json:"key"`
+	ID  uint   `gorm:"primaryKey" json:"id"`
+	Key string `gorm:"size:255;not null;uniqueIndex" json:"key"`
+	// AltKey 是用中文名算出的别名（有英文名时 Key 用英文名）：副标题里有没有中文名都能命中
+	AltKey    string    `gorm:"size:255;not null;default:'';index" json:"alt_key"`
 	Label     string    `gorm:"size:255;not null;default:''" json:"label"`
 	TMDBID    int       `gorm:"column:tmdb_id;not null;default:0" json:"tmdb_id"`
 	MediaType string    `gorm:"size:8;not null;default:''" json:"media_type"`

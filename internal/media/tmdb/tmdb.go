@@ -83,8 +83,46 @@ type Options struct {
 	Language string // 为空时用 zh-CN
 	ProxyURL string // 为空时用环境变量里的代理
 	Cache    Cache  // 为空时不缓存
-	// RatePerSecond 是每秒最多几个请求（为 0 时 8 个）；读缓存不算。
+	// RatePerSecond 是每秒最多几个请求（为 0 时 8 个）；读缓存不算。Limiter 不为空时不用它。
 	RatePerSecond float64
+	// Limiter 不为空时用它限速：同一个服务建的多个客户端共用一份额度。
+	Limiter *rate.Limiter
+	// HTTPClient 不为空时用它发请求（ProxyURL 不再生效）：同一个代理的客户端共用连接池。
+	HTTPClient *http.Client
+}
+
+// DefaultRatePerSecond 是默认限速（每秒请求数）。
+const DefaultRatePerSecond = 8
+
+// NewLimiter 建一个限速器（perSec 为 0 时用 DefaultRatePerSecond）。
+func NewLimiter(perSec float64) *rate.Limiter {
+	if perSec <= 0 {
+		perSec = DefaultRatePerSecond
+	}
+	return rate.NewLimiter(rate.Limit(perSec), max(int(perSec), 1))
+}
+
+// NewHTTPClient 建一个访问 TMDB 的 http.Client：走 proxyURL，为空时用环境变量里的代理。
+func NewHTTPClient(proxyURL string) (*http.Client, error) {
+	var proxy func(*http.Request) (*url.URL, error)
+	if p := strings.TrimSpace(proxyURL); p != "" {
+		u, err := ParseProxyURL(p)
+		if err != nil {
+			return nil, err
+		}
+		proxy = http.ProxyURL(u)
+	} else {
+		proxy = func(r *http.Request) (*url.URL, error) {
+			if s := httpclient.ResolveProxyFromEnvironment(r.URL.String()); s != "" {
+				return url.Parse(s)
+			}
+			return nil, nil
+		}
+	}
+	return &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: &http.Transport{Proxy: proxy, TLSHandshakeTimeout: 10 * time.Second, IdleConnTimeout: 90 * time.Second},
+	}, nil
 }
 
 // Client 是 TMDB 客户端。
@@ -104,19 +142,11 @@ func New(o Options) (*Client, error) {
 	if key == "" {
 		return nil, ErrNoKey
 	}
-	var proxy func(*http.Request) (*url.URL, error)
-	if p := strings.TrimSpace(o.ProxyURL); p != "" {
-		u, err := ParseProxyURL(p)
-		if err != nil {
+	hc := o.HTTPClient
+	if hc == nil {
+		var err error
+		if hc, err = NewHTTPClient(o.ProxyURL); err != nil {
 			return nil, err
-		}
-		proxy = http.ProxyURL(u)
-	} else {
-		proxy = func(r *http.Request) (*url.URL, error) {
-			if s := httpclient.ResolveProxyFromEnvironment(r.URL.String()); s != "" {
-				return url.Parse(s)
-			}
-			return nil, nil
 		}
 	}
 	base := strings.TrimRight(strings.TrimSpace(o.BaseURL), "/")
@@ -127,22 +157,18 @@ func New(o Options) (*Client, error) {
 	if lang == "" {
 		lang = "zh-CN"
 	}
-	perSec := o.RatePerSecond
-	if perSec <= 0 {
-		perSec = 8
+	limiter := o.Limiter
+	if limiter == nil {
+		limiter = NewLimiter(o.RatePerSecond)
 	}
-	burst := max(int(perSec), 1)
 	return &Client{
 		base:     base,
 		key:      key,
 		bearer:   strings.HasPrefix(key, "eyJ"),
 		language: lang,
-		http: &http.Client{
-			Timeout:   20 * time.Second,
-			Transport: &http.Transport{Proxy: proxy, TLSHandshakeTimeout: 10 * time.Second, IdleConnTimeout: 90 * time.Second},
-		},
-		cache:   o.Cache,
-		limiter: rate.NewLimiter(rate.Limit(perSec), burst),
+		http:     hc,
+		cache:    o.Cache,
+		limiter:  limiter,
 	}, nil
 }
 

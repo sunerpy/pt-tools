@@ -3,6 +3,8 @@ package recognize
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -16,7 +18,11 @@ import (
 )
 
 // AcceptScore 是认定为匹配的最低分；名字至少要部分相同（titleScore ≥ 0.75）。
-const AcceptScore = 0.95
+// 名字只是部分相同时，第一名还要比第二名高出 AcceptMargin，否则只列候选。
+const (
+	AcceptScore  = 0.95
+	AcceptMargin = 0.1
+)
 
 var foldMarks = runes.Remove(runes.In(unicode.Mn))
 
@@ -36,7 +42,27 @@ func normalize(s string) string {
 	return b.String()
 }
 
-// titleScore 比较解析出的中英文名与条目的名字、原名：相同 1.0；一个包含另一个且长度相近（短的不少于长的六成）0.75。
+var (
+	digitsRe = regexp.MustCompile(`\d+`)
+	wordsRe  = regexp.MustCompile(`[\p{L}\p{N}]+`)
+	romanRe  = regexp.MustCompile(`^(ii|iii|iv|v|vi|vii|viii|ix|x)$`)
+)
+
+// sequelNumbers 是名字里的数字与罗马数字（续集编号）：Inside Out 2 → "2"，The Wandering Earth II → "ii"。
+func sequelNumbers(s string) string {
+	low := strings.ToLower(s)
+	nums := digitsRe.FindAllString(low, -1)
+	for _, w := range wordsRe.FindAllString(low, -1) {
+		if romanRe.MatchString(w) {
+			nums = append(nums, w)
+		}
+	}
+	sort.Strings(nums)
+	return strings.Join(nums, " ")
+}
+
+// titleScore 比较解析出的中英文名与条目的名字、原名：相同 1.0；一个包含另一个、长度相近（短的不少于长的六成）
+// 且数字一样（续集编号对得上，Inside Out 不算包含于 Inside Out 2）0.75。
 func titleScore(m meta.Meta, r tmdb.Result) float64 {
 	best := 0.0
 	for _, a := range []string{m.NameCN, m.NameEN} {
@@ -54,7 +80,7 @@ func titleScore(m meta.Meta, r tmdb.Result) float64 {
 			}
 			la, lb := len([]rune(na)), len([]rune(nb))
 			short, long := min(la, lb), max(la, lb)
-			if (strings.Contains(na, nb) || strings.Contains(nb, na)) && short*10 >= long*6 {
+			if (strings.Contains(na, nb) || strings.Contains(nb, na)) && short*10 >= long*6 && sequelNumbers(a) == sequelNumbers(b) {
 				best = 0.75
 			}
 		}
@@ -90,19 +116,30 @@ func score(m meta.Meta, r tmdb.Result, rank int) float64 {
 	return s
 }
 
-// accepted 判断一个候选是否可以认定为匹配。
-func accepted(m meta.Meta, c Candidate) bool {
-	return titleScore(m, c.Result) >= 0.75 && c.Score >= AcceptScore
+// pick 返回可以认定的候选（候选已按分数从高到低排好）：名字至少部分相同、总分过线；
+// 名字只是部分相同时还要比第二名高出 AcceptMargin。没有时返回 nil。
+func pick(m meta.Meta, cands []Candidate) *Candidate {
+	if len(cands) == 0 {
+		return nil
+	}
+	ts := titleScore(m, cands[0].Result)
+	if ts < 0.75 || cands[0].Score < AcceptScore {
+		return nil
+	}
+	if ts < 1 && len(cands) > 1 && cands[0].Score-cands[1].Score < AcceptMargin {
+		return nil
+	}
+	return &cands[0]
 }
 
-// overrideKey 是手动纠正用的键：类型、中英文名，电影另加年份（同名的翻拍片按年份区分）；剧集不加年份（各季年份不同）。
-// 解析不出名字时为空串。
-func overrideKey(m meta.Meta) string {
-	en, cn := normalize(m.NameEN), normalize(m.NameCN)
-	if en == "" && cn == "" {
+// overrideKey 是用一个名字算出的纠正键：类型、名字，电影另加年份（同名的翻拍片按年份区分）；
+// 剧集不加年份（各季年份不同）。名字为空时为空串。
+func overrideKey(m meta.Meta, name string) string {
+	n := normalize(name)
+	if n == "" {
 		return ""
 	}
-	k := string(m.Type) + "|" + en + "|" + cn
+	k := string(m.Type) + "|" + n
 	if m.Type != meta.TypeTV && m.Year > 0 {
 		k += "|" + strconv.Itoa(m.Year)
 	}
@@ -111,4 +148,14 @@ func overrideKey(m meta.Meta) string {
 		k = "h|" + hex.EncodeToString(sum[:])
 	}
 	return k
+}
+
+// overrideKeys 是保存纠正用的主键与别名：有英文名时主键用英文名、中文名作别名，否则主键用中文名。
+// 这样同一个标题有没有中文副标题都能命中。解析不出名字时主键为空串。
+func overrideKeys(m meta.Meta) (primary, alt string) {
+	en, cn := overrideKey(m, m.NameEN), overrideKey(m, m.NameCN)
+	if en != "" {
+		return en, cn
+	}
+	return cn, ""
 }

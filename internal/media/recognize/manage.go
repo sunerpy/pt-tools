@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
@@ -37,7 +38,7 @@ func (s *Service) SetOverride(ctx context.Context, in OverrideInput) (*models.Me
 	if err != nil {
 		return nil, err
 	}
-	key := overrideKey(m)
+	key, alt := overrideKeys(m)
 	if key == "" {
 		return nil, fmt.Errorf("%w: 解析不出名字，不能纠正", ErrInvalid)
 	}
@@ -56,13 +57,21 @@ func (s *Service) SetOverride(ctx context.Context, in OverrideInput) (*models.Me
 	if m.NameCN != "" && m.NameCN != m.NameEN && !strings.Contains(label, m.NameCN) {
 		label = m.NameCN + " / " + label
 	}
-	row := models.MediaOverride{Key: key, Label: label, TMDBID: in.TMDBID, MediaType: in.MediaType, Title: d.Title}
+	row := models.MediaOverride{Key: key, AltKey: alt, Label: label, TMDBID: in.TMDBID, MediaType: in.MediaType, Title: d.Title}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"label", "tmdb_id", "media_type", "title", "updated_at"}),
-	}).Create(&row).Error; err != nil {
+	if err := s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 之前只按中文名纠正过同一个名字：新的纠正（带英文名）取代它
+		if alt != "" {
+			if err := tx.Where("key = ?", alt).Delete(&models.MediaOverride{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"alt_key", "label", "tmdb_id", "media_type", "title", "updated_at"}),
+		}).Create(&row).Error
+	}); err != nil {
 		return nil, fmt.Errorf("保存手动纠正失败: %w", err)
 	}
 	var saved models.MediaOverride

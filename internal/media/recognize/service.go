@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"slices"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -52,11 +54,34 @@ type Service struct {
 	cfg   Config
 	cache *tmdb.DBCache
 	mu    sync.Mutex // 串行化设置、纠正与识别词的写入
+	// limiter 是所有 TMDB 请求共用的限速额度：每次识别都会新建客户端，额度不能跟着重置
+	limiter *rate.Limiter
+	// httpMu 保护按代理地址缓存的 http.Client（同一个代理共用连接池）
+	httpMu    sync.Mutex
+	httpProxy string
+	httpOne   *http.Client
 }
 
-// New 建一个服务。
+// New 建一个服务，顺便清掉过期的 TMDB 缓存。
 func New(cfg Config) *Service {
-	return &Service{cfg: cfg, cache: tmdb.NewDBCache(cfg.DB)}
+	s := &Service{cfg: cfg, cache: tmdb.NewDBCache(cfg.DB), limiter: tmdb.NewLimiter(cfg.RatePerSecond)}
+	_ = s.cache.Purge()
+	return s
+}
+
+// httpClient 是走 proxy 的 http.Client：代理没变时复用上一次的。
+func (s *Service) httpClient(proxy string) (*http.Client, error) {
+	s.httpMu.Lock()
+	defer s.httpMu.Unlock()
+	if s.httpOne != nil && s.httpProxy == proxy {
+		return s.httpOne, nil
+	}
+	hc, err := tmdb.NewHTTPClient(proxy)
+	if err != nil {
+		return nil, err
+	}
+	s.httpOne, s.httpProxy = hc, proxy
+	return hc, nil
 }
 
 // Languages 是可选的 TMDB 语言（第一个是默认值）。
@@ -203,9 +228,13 @@ func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
 			return nil, fmt.Errorf("解密代理地址失败: %w", err)
 		}
 	}
+	hc, err := s.httpClient(proxy)
+	if err != nil {
+		return nil, err
+	}
 	return tmdb.New(tmdb.Options{
-		APIKey: key, BaseURL: s.cfg.BaseURL, Language: s.view(row).Language, ProxyURL: proxy,
-		Cache: s.cache, RatePerSecond: s.cfg.RatePerSecond,
+		APIKey: key, BaseURL: s.cfg.BaseURL, Language: s.view(row).Language,
+		Cache: s.cache, Limiter: s.limiter, HTTPClient: hc,
 	})
 }
 
@@ -305,42 +334,91 @@ func (s *Service) Recognize(ctx context.Context, in Input) (*Result, error) {
 }
 
 func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb string, res *Result) error {
-	if key := overrideKey(m); key != "" {
-		var ov models.MediaOverride
-		if err := s.cfg.DB.WithContext(ctx).Where("key = ?", key).Limit(1).Find(&ov).Error; err != nil {
-			return fmt.Errorf("读取手动纠正失败: %w", err)
+	ov, err := s.findOverride(ctx, m)
+	if err != nil {
+		return err
+	}
+	if ov.ID != 0 {
+		d, detailErr := c.Details(ctx, ov.MediaType, ov.TMDBID)
+		if detailErr != nil {
+			return detailErr
 		}
-		if ov.ID != 0 {
-			d, err := c.Details(ctx, ov.MediaType, ov.TMDBID)
-			if err != nil {
-				return err
-			}
-			res.Match, res.Source, res.OverrideID = d, SourceOverride, ov.ID
-			return nil
-		}
+		res.Match, res.Source, res.OverrideID = d, SourceOverride, ov.ID
+		return nil
 	}
 	if imdb != "" {
-		found, err := c.Find(ctx, imdb)
-		if err != nil && !errors.Is(err, tmdb.ErrNotFound) {
-			return err
+		found, findErr := c.Find(ctx, imdb)
+		if findErr != nil && !errors.Is(findErr, tmdb.ErrNotFound) {
+			return findErr
 		}
 		if r := pickFound(m, found); r != nil {
 			res.Match, res.Source = s.details(ctx, c, *r), SourceIMDb
 			return nil
 		}
 	}
-	cands, err := s.search(ctx, c, m)
+	cands, err := s.search(ctx, c, m, primaryKinds(m))
 	if err != nil {
 		return err
 	}
-	if len(cands) > 0 && accepted(m, cands[0]) {
-		res.Match, res.Source, res.Score = s.details(ctx, c, cands[0].Result), SourceSearch, cands[0].Score
+	// 只靠年份判成电影的（没有季集标记）也可能是剧集：电影里没有可靠匹配时补搜剧集（电影的搜索读缓存）
+	if pick(m, cands) == nil && m.Type == meta.TypeMovie {
+		if cands, err = s.search(ctx, c, m, []string{tmdb.KindMovie, tmdb.KindTV}); err != nil {
+			return err
+		}
+	}
+	if best := pick(m, cands); best != nil {
+		res.Match, res.Source, res.Score = s.details(ctx, c, best.Result), SourceSearch, best.Score
 	}
 	if len(cands) > 5 {
 		cands = cands[:5]
 	}
 	res.Candidates = cands
 	return nil
+}
+
+// findOverride 找这个解析结果的手动纠正：先按英文名、再按中文名找主键，最后按中文名找别名。没有时返回零值。
+func (s *Service) findOverride(ctx context.Context, m meta.Meta) (models.MediaOverride, error) {
+	en, cn := overrideKey(m, m.NameEN), overrideKey(m, m.NameCN)
+	var keys []string
+	for _, k := range []string{en, cn} {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return models.MediaOverride{}, nil
+	}
+	q := s.cfg.DB.WithContext(ctx).Where("key IN ?", keys)
+	if cn != "" {
+		q = q.Or("alt_key = ?", cn)
+	}
+	var rows []models.MediaOverride
+	if err := q.Find(&rows).Error; err != nil {
+		return models.MediaOverride{}, fmt.Errorf("读取手动纠正失败: %w", err)
+	}
+	for _, want := range []func(models.MediaOverride) bool{
+		func(o models.MediaOverride) bool { return en != "" && o.Key == en },
+		func(o models.MediaOverride) bool { return cn != "" && o.Key == cn },
+		func(o models.MediaOverride) bool { return cn != "" && o.AltKey == cn },
+	} {
+		for _, o := range rows {
+			if want(o) {
+				return o, nil
+			}
+		}
+	}
+	return models.MediaOverride{}, nil
+}
+
+// primaryKinds 是先搜的类型：剧集只搜剧集，电影先搜电影，类型不明时都搜。
+func primaryKinds(m meta.Meta) []string {
+	switch m.Type {
+	case meta.TypeMovie:
+		return []string{tmdb.KindMovie}
+	case meta.TypeTV:
+		return []string{tmdb.KindTV}
+	}
+	return []string{tmdb.KindMovie, tmdb.KindTV}
 }
 
 // details 用详情补全匹配到的条目（搜索与查找结果里没有 IMDb 编号，中文简介为空时详情里有英文的）；
@@ -369,15 +447,8 @@ func pickFound(m meta.Meta, found []tmdb.Result) *tmdb.Result {
 	return &found[0]
 }
 
-// search 用中文名与英文名分别搜索（类型不明时电影、剧集都搜），合并后打分排序。
-func (s *Service) search(ctx context.Context, c *tmdb.Client, m meta.Meta) ([]Candidate, error) {
-	kinds := []string{tmdb.KindMovie, tmdb.KindTV}
-	switch m.Type {
-	case meta.TypeMovie:
-		kinds = []string{tmdb.KindMovie}
-	case meta.TypeTV:
-		kinds = []string{tmdb.KindTV}
-	}
+// search 用中文名与英文名分别搜索 kinds 里的类型，合并后打分排序。
+func (s *Service) search(ctx context.Context, c *tmdb.Client, m meta.Meta, kinds []string) ([]Candidate, error) {
 	var names []string
 	for _, n := range []string{m.NameCN, m.NameEN} {
 		if n = strings.TrimSpace(n); n != "" && !slices.Contains(names, n) {
