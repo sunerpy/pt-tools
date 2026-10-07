@@ -2238,6 +2238,138 @@ export const cookieCloudApi = {
     api.post<CookieCloudImportResult>("/api/cookiecloud/import", { sites }),
 };
 
+// 媒体识别（M9）：TMDB 的 API Key 与代理地址只写不读（代理地址里的密码换成 ***）
+export interface MediaSettings {
+  has_tmdb_key: boolean;
+  language: string;
+  proxy_url: string;
+}
+
+/** 保存设置：tmdb_api_key、proxy_url 不传时不改，传空串时清除 */
+export interface MediaSettingsUpdate {
+  tmdb_api_key?: string;
+  language: string;
+  proxy_url?: string;
+}
+
+/** 标题解析结果（internal/media/meta）：没解析出来的字段不出现 */
+export interface MediaMeta {
+  name_cn?: string;
+  name_en?: string;
+  year?: number;
+  type?: "" | "movie" | "tv";
+  season?: number;
+  season_end?: number;
+  episode?: number;
+  episode_end?: number;
+  total_episodes?: number;
+  complete?: boolean;
+  resolution?: string;
+  source?: string;
+  remux?: boolean;
+  platform?: string;
+  video_codec?: string;
+  bit_depth?: number;
+  fps?: number;
+  hdr?: string[];
+  audio?: string[];
+  channels?: string;
+  group?: string;
+  edition?: string[];
+  version?: string;
+  three_d?: boolean;
+  chinese_subs?: boolean;
+  mandarin?: boolean;
+  cantonese?: boolean;
+}
+
+export type MediaKind = "movie" | "tv";
+
+/** TMDB 上的一个电影或剧集条目 */
+export interface TMDBItem {
+  id: number;
+  media_type: MediaKind;
+  title: string;
+  original_title: string;
+  year?: number;
+  date?: string;
+  overview?: string;
+  poster_path?: string;
+  popularity?: number;
+  vote_average?: number;
+  original_language?: string;
+  imdb_id?: string;
+  seasons?: number;
+}
+
+export interface MediaCandidate extends TMDBItem {
+  score: number;
+}
+
+export interface MediaRecognizeResult {
+  meta: MediaMeta;
+  summary: string;
+  rule_hits?: number[];
+  match?: TMDBItem;
+  /** 匹配从哪来：手动纠正、IMDb 编号、按名字搜索；none 是没有匹配 */
+  source: "none" | "override" | "imdb" | "search";
+  score?: number;
+  candidates?: MediaCandidate[];
+  override_id?: number;
+  message?: string;
+  /** TMDB 出错时的原因（解析结果照样有） */
+  error?: string;
+}
+
+export interface MediaOverride {
+  id: number;
+  key: string;
+  label: string;
+  tmdb_id: number;
+  media_type: MediaKind;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MediaWordKind = "block" | "replace" | "offset";
+
+export interface MediaWordRule {
+  id: number;
+  kind: MediaWordKind;
+  pattern: string;
+  replacement: string;
+  offset: number;
+  is_regex: boolean;
+  enabled: boolean;
+  note: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type MediaWordInput = Omit<MediaWordRule, "id" | "created_at" | "updated_at">;
+
+export const mediaApi = {
+  settings: () => api.get<MediaSettings>("/api/media/settings"),
+  saveSettings: (data: MediaSettingsUpdate) => api.put<MediaSettings>("/api/media/settings", data),
+  testTMDB: () => api.post<{ ok: boolean }>("/api/media/settings/test"),
+  recognize: (data: { title: string; subtitle?: string; imdb_id?: string }) =>
+    api.post<MediaRecognizeResult>("/api/media/recognize", data),
+  overrides: () => api.get<MediaOverride[]>("/api/media/overrides"),
+  setOverride: (data: {
+    title: string;
+    subtitle?: string;
+    tmdb_id: number;
+    media_type: MediaKind;
+  }) => api.post<MediaOverride>("/api/media/overrides", data),
+  deleteOverride: (id: number) => api.delete<{ ok: boolean }>(`/api/media/overrides/${id}`),
+  words: () => api.get<MediaWordRule[]>("/api/media/words"),
+  createWord: (data: MediaWordInput) => api.post<MediaWordRule>("/api/media/words", data),
+  updateWord: (id: number, data: MediaWordInput) =>
+    api.put<MediaWordRule>(`/api/media/words/${id}`, data),
+  deleteWord: (id: number) => api.delete<{ ok: boolean }>(`/api/media/words/${id}`),
+};
+
 export const reseedApi = {
   settings: () => api.get<ReseedSettings>("/api/reseed/settings"),
   saveSettings: (data: ReseedSettingsUpdate) =>

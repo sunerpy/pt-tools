@@ -68,6 +68,12 @@ const router = createRouter({
       meta: { title: "CookieCloud 导入" },
     },
     {
+      path: "/media/recognize",
+      name: "media-recognize",
+      component: () => import("@/views/MediaRecognize.vue"),
+      meta: { title: "媒体识别" },
+    },
+    {
       path: "/search",
       name: "search",
       component: () => import("@/views/TorrentSearch.vue"),
