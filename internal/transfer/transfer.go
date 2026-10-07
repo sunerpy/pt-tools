@@ -42,6 +42,8 @@ var (
 	ErrNotCancelable = errors.New("任务已经加入目标下载器，不能取消")
 	// ErrJobNotFound 表示任务不存在。
 	ErrJobNotFound = errors.New("转移任务不存在")
+	// ErrTargetUnavailable 表示目标下载器不存在、未启用或连不上。
+	ErrTargetUnavailable = errors.New("目标下载器不可用")
 )
 
 // Downloaders 按 ID 取下载器实例与配置；下载器不存在、未启用或连不上时返回错误。
@@ -150,7 +152,7 @@ func (s *Service) preview(ctx context.Context, targetID uint, items []Item) ([]P
 	}
 	target, _, err := s.cfg.Downloaders.TransferDownloader(ctx, targetID)
 	if err != nil {
-		return nil, fmt.Errorf("目标下载器不可用: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrTargetUnavailable, err)
 	}
 	hashes := make([]string, 0, len(items))
 	for _, it := range items {

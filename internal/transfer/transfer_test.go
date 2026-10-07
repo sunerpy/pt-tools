@@ -350,7 +350,8 @@ func TestPreview(t *testing.T) {
 	_, err = e.svc.Preview(context.Background(), dstID, nil)
 	assert.ErrorIs(t, err, ErrInvalid)
 	_, err = e.svc.Preview(context.Background(), offID, []Item{{srcID, ok}})
-	assert.ErrorContains(t, err, "目标下载器不可用")
+	assert.ErrorIs(t, err, ErrTargetUnavailable)
+	assert.ErrorContains(t, err, "下载器未启用")
 	many := make([]Item, MaxItems+1)
 	for i := range many {
 		many[i] = Item{srcID, string(rune('a'+i%26)) + time.Duration(i).String()}
