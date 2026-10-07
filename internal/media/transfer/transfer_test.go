@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -239,8 +240,8 @@ func TestMove(t *testing.T) {
 }
 
 func TestMoveFallbacks(t *testing.T) {
-	oldNR, oldLink := noReplace, linkTmp
-	t.Cleanup(func() { noReplace, linkTmp = oldNR, oldLink })
+	oldNR, oldLink, oldRemove := noReplace, linkTmp, removeSrc
+	t.Cleanup(func() { noReplace, linkTmp, removeSrc = oldNR, oldLink, oldRemove })
 	dir := t.TempDir()
 	src := filepath.Join(dir, "a.mkv")
 
@@ -262,6 +263,30 @@ func TestMoveFallbacks(t *testing.T) {
 	assert.Equal(t, "video2", readFileT(t, filepath.Join(dir, "lib3", "a.mkv")))
 	_, err = os.Stat(src)
 	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// 源文件删不掉（例如下载目录只读）：三条路都撤回放进库里的那份，源文件留着，之后还能重试
+	removeSrc = func(string) error { return &os.PathError{Op: "remove", Err: syscall.EACCES} }
+	for i, nr := range []func(string, string) error{
+		oldNR,
+		func(string, string) error { return errNoReplaceUnsupported },
+		func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} },
+	} {
+		noReplace = nr
+		writeFile(t, src, "keep me")
+		dst := filepath.Join(dir, fmt.Sprintf("ro%d", i), "a.mkv")
+		_, err = Transfer(src, dst, models.MediaModeMove)
+		if i == 0 {
+			require.NoError(t, err, "同一个文件系统上改名不用另外删源文件")
+			writeFile(t, src, "keep me")
+			continue
+		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "已撤回")
+		_, statErr := os.Lstat(dst)
+		assert.ErrorIs(t, statErr, os.ErrNotExist, "库里不留下一份")
+		assert.Equal(t, "keep me", readFileT(t, src))
+	}
+	removeSrc = oldRemove
 
 	// 放过去之前目标出现了：哪条路都不覆盖
 	for _, nr := range []func(string, string) error{oldNR, func(string, string) error { return errNoReplaceUnsupported }} {

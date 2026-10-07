@@ -54,6 +54,8 @@ var (
 	link      = os.Link
 	linkTmp   = os.Link
 	noReplace = renameNoReplace
+	// removeSrc 删掉移动以后的源文件（测试里换成会失败的）
+	removeSrc = os.Remove
 )
 
 // Transfer 把源文件 src 按 mode 放到 dst（父目录不存在时建好）。dst 已经是这个文件时返回 AlreadyDone；
@@ -122,10 +124,7 @@ func move(src, dst string, srcInfo os.FileInfo) error {
 			return ErrTargetExists
 		}
 		if err == nil {
-			if rmErr := os.Remove(src); rmErr != nil {
-				return fmt.Errorf("已放到库里，但删除源文件失败: %w", rmErr)
-			}
-			return nil
+			return removeMoved(src, dst)
 		}
 	case !isCrossDevice(err):
 		return fmt.Errorf("移动失败: %w", err)
@@ -133,10 +132,23 @@ func move(src, dst string, srcInfo os.FileInfo) error {
 	if err := copyFile(src, dst, srcInfo); err != nil {
 		return err
 	}
-	if err := os.Remove(src); err != nil {
-		return fmt.Errorf("已复制到库里，但删除源文件失败: %w", err)
+	return removeMoved(src, dst)
+}
+
+// removeMoved 在 dst 放好以后删掉源文件。删不掉时（例如下载目录只读）撤回刚放进库里的那份，
+// 不在库里留下一份认不出来历的文件，改好权限以后重试还能整理。
+func removeMoved(src, dst string) error {
+	placed, statErr := os.Lstat(dst)
+	err := removeSrc(src)
+	if err == nil {
+		return nil
 	}
-	return nil
+	if statErr == nil {
+		if cur, cerr := os.Lstat(dst); cerr == nil && os.SameFile(cur, placed) {
+			_ = os.Remove(dst)
+		}
+	}
+	return fmt.Errorf("删除源文件失败，没有移动（放进库里的那份已撤回）: %w", err)
 }
 
 // existing 判断已经存在的目标是不是这次要放的文件。
