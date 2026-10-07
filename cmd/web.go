@@ -217,14 +217,17 @@ var webCmd = &cobra.Command{
 			background.Go(func() { runChatOpsChannelReloader(runtimeCtx, global.GlobalDB.DB, bs, callbackActions) })
 		}
 
-		wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
+		monitorNotifier := wireLoginReminderMonitor(mgr, store, siteRegistry, bs, userInfoService)
 		wireBrushMonitor(mgr, userInfoService)
 		wireTransferWorker(mgr, userInfoService)
 		wireReseedWorker(mgr, userInfoService, store)
 		wireCookieCloudWorker(mgr, store, siteRegistry)
 
 		srv := web.NewServer(store, mgr)
-		srv.SetMediaService(newMediaService(store))
+		mediaSvc := newMediaService(store)
+		srv.SetMediaService(mediaSvc)
+		organizer := newOrganizeService(store, mgr, mediaSvc, monitorNotifier)
+		srv.SetOrganizeService(organizer)
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
@@ -238,6 +241,9 @@ var webCmd = &cobra.Command{
 				runtimeCancel()
 				bootCancel()
 				background.Wait()
+				if organizer != nil {
+					organizer.Stop()
+				}
 			},
 			scheduler: mgr,
 			bs:        bs,
