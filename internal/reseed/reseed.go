@@ -638,7 +638,8 @@ func (s *Service) tried(ctx context.Context, hash, site string) bool {
 	case err != nil:
 		return true // 读不到就当尝试过，不冒险重复
 	}
-	return !(rec.State == models.ReseedFailed && rec.Retryable && s.cfg.Now().Sub(rec.UpdatedAt) >= models.ReseedRetryAfter)
+	retryNow := rec.State == models.ReseedFailed && rec.Retryable && s.cfg.Now().Sub(rec.UpdatedAt) >= models.ReseedRetryAfter
+	return !retryNow
 }
 
 // attempt 下载一个可辅种的种子，核对 info hash 与文件列表，通过就建任务；结果记进 ReseedRecord。
