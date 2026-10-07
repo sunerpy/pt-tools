@@ -102,7 +102,7 @@ Recognition uses the torrent name (and the site title as a subtitle when it diff
 | Periodic scan | Finished torrents in the downloaders are scanned at the interval, including ones pt-tools did not push. Up to 50 per round; torrents that already have records are skipped                       |
 | Manual        | The organise icon in the Status (状态) column of the task list (整理入库 on mobile cards); in the downloader web UI, select one finished torrent and click 整理入库, or use the right-click menu |
 
-Automatic organising and periodic scans only take torrents in the scope: downloaders, categories, tags and save paths (as the downloader sees them). An empty item means no limit; a filled one must match one of its values.
+Automatic organising and periodic scans only take torrents in the scope: downloaders, categories, tags and save paths (as the downloader sees them). An empty item means no limit; a filled one must match one of its values. Their automatic retries follow the current settings too: once the switch is turned off or the torrent is out of scope, they are not retried.
 
 Manual organising shows a preview first: the recognized title, the chosen library and where each file goes. When the match is wrong, enter a TMDB ID (choose movie or TV) or pick another library of the same type, click Preview again (重新预览), then organise. A torrent organised before keeps the title it was organised with (the preview says 沿用之前整理用的条目); to change it, enter a TMDB ID or delete its records first. Copying large files can take a while; the dialog waits 20 seconds, the work continues in the background and the result appears in the history.
 
