@@ -48,7 +48,9 @@ var TransferActiveStates = []string{TransferPending, TransferExported, TransferA
 // → 校验到 100% → 恢复目标 → 从源移除（不删数据）。状态持久化，进程重启后接着做。
 // 列的默认值一律是零值（GORM 新建时会把零值换成 default）。
 type TorrentTransferJob struct {
-	ID                 uint   `gorm:"primaryKey" json:"id"`
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Kind 是任务种类：空串是转移做种，reseed 是辅种（源与目标是同一台下载器，不移除任何种子）。
+	Kind               string `gorm:"size:16;not null;default:'';index" json:"kind"`
 	SourceDownloaderID uint   `gorm:"not null;index" json:"source_downloader_id"`
 	TargetDownloaderID uint   `gorm:"not null;index" json:"target_downloader_id"`
 	InfoHash           string `gorm:"size:64;not null;index" json:"info_hash"`
@@ -61,8 +63,11 @@ type TorrentTransferJob struct {
 	TargetSavePath string `gorm:"size:1024;default:''" json:"target_save_path"`
 	Category       string `gorm:"size:128;default:''" json:"category"`
 	Tags           string `gorm:"size:512;default:''" json:"tags"`
-	State          string `gorm:"size:32;not null;index" json:"state"`
-	Message        string `gorm:"size:1024;default:''" json:"message"`
+	// OwnerTag 是加入目标时带上的这个任务独有的标签（JobTag），恢复、校验、回滚、收尾前用它确认目标里的种子是这个任务加的；
+	// 加入之前写进库，任务结束后从下载器里去掉。空串是早期版本建的任务，按这一种任务的通用标签认。
+	OwnerTag string `gorm:"size:64;not null;default:''" json:"-"`
+	State    string `gorm:"size:32;not null;index" json:"state"`
+	Message  string `gorm:"size:1024;default:''" json:"message"`
 	// Progress 是最近一次看到的目标校验进度（0–1）。
 	Progress float64 `gorm:"not null;default:0" json:"progress"`
 	// RecheckIssued 表示已经让目标下载器开始校验。

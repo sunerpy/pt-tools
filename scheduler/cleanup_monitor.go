@@ -239,6 +239,7 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 		}
 	}
 
+	sharing := downloader.NewDataSharing(allTorrents, downloader.FilesOf(dl))
 	if cfg.CleanupDiskProtect && cfg.CleanupMinDiskSpaceGB > 0 {
 		diskInfo, err := dl.GetDiskInfo()
 		if err == nil {
@@ -246,7 +247,7 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 			if freeGB < cfg.CleanupMinDiskSpaceGB {
 				c.logger.Warnf("[自动删种] %s: 磁盘空间不足 (%.1f GB < %.1f GB)，启动紧急清理",
 					dlName, freeGB, cfg.CleanupMinDiskSpaceGB)
-				toDelete = c.emergencyCleanup(cfg, candidates, toDelete, freeGB)
+				toDelete = c.emergencyCleanup(cfg, sharing, candidates, toDelete, freeGB)
 			}
 		}
 	}
@@ -257,22 +258,40 @@ func (c *CleanupMonitor) processDownloader(cfg *models.SettingsGlobal, dl downlo
 		return
 	}
 
-	ids := make([]string, 0, len(toDelete))
-	for _, t := range toDelete {
-		ids = append(ids, t.ID)
-	}
-
-	c.logger.Infof("[自动删种] %s: 准备删除 %d 个种子", dlName, len(ids))
+	c.logger.Infof("[自动删种] %s: 准备删除 %d 个种子", dlName, len(toDelete))
 	for _, t := range toDelete {
 		seedTimeH := float64(t.SeedingTime) / 3600
 		c.logger.Infof("[自动删种] 删除: %s (做种%.1fh, 分享率%.2f, 上传速度%d KB/s)",
 			t.Name, seedTimeH, t.Ratio, t.UploadSpeed/1024)
 	}
 
-	if err := dl.RemoveTorrents(ids, cfg.CleanupRemoveData); err != nil {
-		c.logger.Errorf("[自动删种] %s: 批量删除失败: %v", dlName, err)
+	// 数据还被别的种子用着（如辅种与原种子共用同一份文件）的只删种子、保留数据，否则另一个种子就坏了
+	withData, keepData := toDelete, []downloader.Torrent(nil)
+	if cfg.CleanupRemoveData {
+		withData, keepData = sharing.KeepSharedData(toDelete)
+	}
+	deleted := make([]downloader.Torrent, 0, len(toDelete))
+	if len(withData) > 0 {
+		if err := dl.RemoveTorrents(torrentIDs(withData), cfg.CleanupRemoveData); err != nil {
+			c.logger.Errorf("[自动删种] %s: 批量删除失败: %v", dlName, err)
+		} else {
+			deleted = append(deleted, withData...)
+		}
+	}
+	if len(keepData) > 0 {
+		for _, t := range keepData {
+			c.logger.Infof("[自动删种] %s: %s 的数据还被别的种子用着，只删种子、保留数据", dlName, t.Name)
+		}
+		if err := dl.RemoveTorrents(torrentIDs(keepData), false); err != nil {
+			c.logger.Errorf("[自动删种] %s: 批量删除（保留数据）失败: %v", dlName, err)
+		} else {
+			deleted = append(deleted, keepData...)
+		}
+	}
+	if len(deleted) == 0 {
 		return
 	}
+	toDelete = deleted
 
 	c.updateDatabase(toDelete, dlName)
 	c.logger.Infof("[自动删种] %s: 成功删除 %d 个种子", dlName, len(toDelete))
@@ -503,7 +522,9 @@ func (c *CleanupMonitor) isFreeExpiredIncomplete(t downloader.Torrent) bool {
 	return err == nil
 }
 
-func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates, alreadyMarked []downloader.Torrent, currentFreeGB float64) []downloader.Torrent {
+// 数据还被别的种子用着时，删了也腾不出空间（只删种子、保留数据）：共用这份数据的种子都在候选里时整组一起挑、空间只算一次；
+// 其中有不能删的（受保护、不在管理范围）时整组不挑。sharing 由下载器里的全部种子建。
+func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, sharing *downloader.DataSharing, candidates, alreadyMarked []downloader.Torrent, currentFreeGB float64) []downloader.Torrent {
 	if !cfg.CleanupRemoveData {
 		// 只从下载器移除任务、不删数据文件，磁盘空间一点也不会释放；
 		// 继续按体积挑种子只会一轮轮删掉任务和做种状态，空间照样不够。
@@ -512,8 +533,25 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates
 	}
 
 	markedSet := make(map[string]struct{})
+	deleting := make(map[string]bool, len(alreadyMarked))
 	for _, t := range alreadyMarked {
 		markedSet[t.ID] = struct{}{}
+		deleting[downloader.TorrentKey(t)] = true
+	}
+	// freed 是删掉 t 能腾出的空间：数据还被不删的种子用着的不算；共用同一份数据的种子只算一个
+	//（同一目录下文件不同的平铺种子不是同一份数据，各算各的）
+	counted := map[string]bool{}
+	freed := func(t downloader.Torrent) float64 {
+		if sharing.Shares(t, deleting) {
+			return 0
+		}
+		for _, o := range sharing.Sharers(t) {
+			if counted[downloader.TorrentKey(o)] {
+				return 0
+			}
+		}
+		counted[downloader.TorrentKey(t)] = true
+		return float64(t.TotalSize)
 	}
 
 	type scored struct {
@@ -521,8 +559,10 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates
 		score   float64
 	}
 
+	candidateKeys := make(map[string]bool, len(candidates))
 	var extras []scored
 	for _, t := range candidates {
+		candidateKeys[downloader.TorrentKey(t)] = true
 		if _, ok := markedSet[t.ID]; ok {
 			continue
 		}
@@ -546,15 +586,36 @@ func (c *CleanupMonitor) emergencyCleanup(cfg *models.SettingsGlobal, candidates
 	// 按常规规则已经要删的种子也会释放空间，先算进去，免得再多删
 	var freedBytes float64
 	for _, t := range alreadyMarked {
-		freedBytes += float64(t.TotalSize)
+		freedBytes += freed(t)
 	}
 
 	for _, e := range extras {
 		if freedBytes >= neededBytes {
 			break
 		}
-		result = append(result, e.torrent)
-		freedBytes += float64(e.torrent.TotalSize)
+		if deleting[downloader.TorrentKey(e.torrent)] {
+			continue // 已经跟着共用数据的种子一起挑上了
+		}
+		group, ok := []downloader.Torrent{e.torrent}, true
+		for _, o := range sharing.Sharers(e.torrent) {
+			k := downloader.TorrentKey(o)
+			if deleting[k] {
+				continue
+			}
+			if !candidateKeys[k] {
+				ok = false
+				break
+			}
+			group = append(group, o)
+		}
+		if !ok {
+			continue
+		}
+		for _, g := range group {
+			deleting[downloader.TorrentKey(g)] = true
+			result = append(result, g)
+		}
+		freedBytes += freed(e.torrent)
 	}
 
 	freedGB := freedBytes / (1024 * 1024 * 1024)
@@ -630,4 +691,12 @@ func (c *CleanupMonitor) RunManual() (int, error) {
 	}
 	c.runOnce(cfg)
 	return 0, nil
+}
+
+func torrentIDs(ts []downloader.Torrent) []string {
+	ids := make([]string, 0, len(ts))
+	for _, t := range ts {
+		ids = append(ids, t.ID)
+	}
+	return ids
 }

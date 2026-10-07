@@ -146,3 +146,19 @@ func TestQbitReauthHonorsContext(t *testing.T) {
 		assert.True(t, c.IsHealthy(), "%s：调用方取消不算下载器出了问题", name)
 	}
 }
+
+// 去掉任务独有的标签：deleteTags 连标签列表里的一起删掉。
+func TestQbitRemoveTag(t *testing.T) {
+	var path, tags string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		path, tags = r.URL.Path, r.Form.Get("tags")
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.TagRemover = c
+	require.NoError(t, c.RemoveTag("abc", "pt-tools-reseed-12"))
+	assert.Equal(t, "/api/v2/torrents/deleteTags", path)
+	assert.Equal(t, "pt-tools-reseed-12", tags)
+}

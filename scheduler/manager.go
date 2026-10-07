@@ -45,6 +45,7 @@ type Manager struct {
 	brushMonitor         *BrushMonitor
 	deadTorrentMonitor   *DeadTorrentMonitor
 	transferWorker       *TransferWorker
+	reseedWorker         *ReseedWorker
 	eventCancel          func()
 	stopped              bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
@@ -498,6 +499,10 @@ func (m *Manager) StopAll() {
 		m.deadTorrentMonitor.Stop()
 		m.deadTorrentMonitor = nil
 	}
+	if m.reseedWorker != nil {
+		m.reseedWorker.Stop()
+		m.reseedWorker = nil
+	}
 	if m.transferWorker != nil {
 		m.transferWorker.Stop()
 		m.transferWorker = nil
@@ -696,6 +701,23 @@ func (m *Manager) GetTransferWorker() *TransferWorker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.transferWorker
+}
+
+// SetReseedWorker 登记辅种后台；替换旧实例时先停掉旧的。
+func (m *Manager) SetReseedWorker(w *ReseedWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reseedWorker != nil && m.reseedWorker != w {
+		m.reseedWorker.Stop()
+	}
+	m.reseedWorker = w
+}
+
+// GetReseedWorker 返回辅种后台（未接线时为 nil）。
+func (m *Manager) GetReseedWorker() *ReseedWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reseedWorker
 }
 
 // TransferDownloader 按下载器 ID 取管理器里的实例与配置（转移做种用）；下载器不存在、未启用或连不上时返回错误。

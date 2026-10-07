@@ -13,7 +13,7 @@ Tick torrents in the Downloader web UI (下载器 Web UI), from one or more down
 After Create N transfer jobs (建 N 个转移任务), the jobs run in the background, one at a time:
 
 1. Get the torrent file.
-2. Add the torrent to the target downloader paused, with the mapped save path and a `pt-tools-transfer` tag on top of its category and tags. This goes through the same entry point as pushing a torrent: the site seeding capacity limit still applies; the data is already on disk, so no disk space is reserved.
+2. Add the torrent to the target downloader paused, with the mapped save path and two tags on top of its category and tags: `pt-tools-transfer` and `pt-tools-transfer-<job number>`, which belongs to this job only. This goes through the same entry point as pushing a torrent: the site seeding capacity limit still applies; the data is already on disk, so no disk space is reserved.
 3. Let the target downloader check the data.
 4. Once the check reaches 100%, start seeding in the target downloader, then remove the torrent from the source downloader, keeping the data files. pt-tools confirms the target is still at 100% right before it starts seeding. The pt-tools records of the torrent on the source downloader move to the target downloader.
 
@@ -21,7 +21,7 @@ If the check stops short of 100% (the data is not at the target path, usually a 
 
 Each target downloader checks one transferred torrent at a time and the rest wait, so that many checks at once do not saturate the disk. After pt-tools restarts, each job continues from the step where it stopped.
 
-The `pt-tools-transfer` tag marks the torrents a transfer added: when the target downloader holds the same torrent without that tag (for example one you added yourself), the job fails and neither copy is touched.
+The `pt-tools-transfer-<job number>` tag marks the torrent this job added: when the target downloader holds the same torrent without that tag (for example one you added yourself, even with `pt-tools-transfer`), the job fails and neither copy is touched. When the job ends, qBittorrent deletes this tag (so it does not stay in the tag list) and `pt-tools-transfer` stays; in Transmission the label stays on the torrent.
 
 ## Jobs
 

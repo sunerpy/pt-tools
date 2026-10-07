@@ -219,6 +219,9 @@ func NewDBWithVersionAndHooks(
 		&TorrentTransferJob{},
 		&DownloaderPathMap{},
 		&TransferRule{},
+		// IYUU 辅种（M6）
+		&ReseedSetting{},
+		&ReseedRecord{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

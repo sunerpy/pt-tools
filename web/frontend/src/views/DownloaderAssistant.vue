@@ -178,7 +178,7 @@ async function deleteDead() {
   try {
     await ElMessageBox.confirm(
       removeData.value
-        ? `删除选中的 ${n} 个种子，并删除它们的数据文件（共 ${formatBytes(deadSize.value)}）？删除后无法恢复。`
+        ? `删除选中的 ${n} 个种子，并删除它们的数据文件（共 ${formatBytes(deadSize.value)}）？数据还被别的种子用着的只删种子。删除后无法恢复。`
         : `从下载器里删除选中的 ${n} 个种子？数据文件保留在磁盘上。`,
       "删除失效种子",
       {

@@ -172,3 +172,9 @@ func TestTransmissionEditTracker_HonorsContext(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 3*time.Second)
 }
+
+// Transmission 只能整份改写 labels，会盖掉同时进行的标签修改，所以不提供 TagRemover（任务标签留在种子上）。
+func TestTransmissionHasNoTagRemover(t *testing.T) {
+	_, ok := any(&TransmissionClient{}).(downloader.TagRemover)
+	assert.False(t, ok)
+}

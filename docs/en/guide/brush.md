@@ -44,7 +44,7 @@ Pushes go through the same entry point as RSS downloads, so the disk-space prote
 
 ## Removal rules
 
-A torrent is removed as soon as any rule matches. By default its data is deleted too (you can switch to removing the torrent from the downloader only):
+A torrent is removed as soon as any rule matches. By default its data is deleted too (you can switch to removing the torrent from the downloader only); when another torrent still uses the data (a [cross-seed](reseed.md) of it, for example), only the torrent is removed and the data stays:
 
 - **Seeded for N hours**: counted only for completed torrents.
 - **Ratio reaches N**.

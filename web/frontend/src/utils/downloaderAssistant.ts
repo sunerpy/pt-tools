@@ -12,6 +12,7 @@ export function deadReasonLabel(reason: AssistantDeadReason | string): string {
 /** 执行结果的一句话：成功几个、跳过几个、失败几个，跳过和失败各带上第一条原因 */
 export function applySummary(verb: string, res: AssistantApplyResult): string {
   const parts = [`${verb} ${res.done} 个`];
+  if (res.kept_data) parts.push(`其中 ${res.kept_data} 个的数据还被别的种子用着，只删了种子`);
   const first = (items: AssistantApplyResult["skipped"]) =>
     `（${items[0].name || items[0].hash}：${items[0].error}）`;
   if (res.skipped.length) parts.push(`跳过 ${res.skipped.length} 个${first(res.skipped)}`);

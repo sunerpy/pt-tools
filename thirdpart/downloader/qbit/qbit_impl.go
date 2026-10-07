@@ -1566,6 +1566,16 @@ func (q *QbitClient) SetTorrentTags(id, tags string) error {
 	return q.postForm("/api/v2/torrents/addTags", data)
 }
 
+// RemoveTag 删掉 pt-tools 加的、每个任务独有的标签：deleteTags 把它从所有种子和标签列表里一起删掉，id 不用。
+func (q *QbitClient) RemoveTag(_, tag string) error {
+	data := url.Values{}
+	data.Set("tags", tag)
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/deleteTags", data)
+}
+
 // SetTorrentSavePath 设置种子保存路径
 func (q *QbitClient) SetTorrentSavePath(id, path string) error {
 	data := url.Values{}

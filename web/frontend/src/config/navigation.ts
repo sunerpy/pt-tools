@@ -58,6 +58,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/downloader-assistant", label: "下载器助手", icon: "wrench" },
       /* 路线图 M5：画板没有这一页，沿用下载组的列表页样式 */
       { path: "/transfer", label: "转移做种", icon: "arrow-right-left" },
+      /* 路线图 M6：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/reseed", label: "IYUU 辅种", icon: "share-2" },
     ],
   },
   {

@@ -17,7 +17,7 @@ When a site deletes or replaces a torrent, the downloader can no longer announce
 
 Replies that mention the passkey, the user, the account, the ratio, a ban or the client do not count. They point to an account problem: the torrent still exists, and deleting it would lose its seeding history.
 
-Tick the torrents and click Delete selected (删除选中). By default the torrent is removed from the downloader and its data files stay on disk; tick Also delete data files (同时删除数据文件) to remove the files too, which cannot be undone. pt-tools reads the tracker status of each torrent again before deleting it and keeps the ones that work again.
+Tick the torrents and click Delete selected (删除选中). By default the torrent is removed from the downloader and its data files stay on disk; tick Also delete data files (同时删除数据文件) to remove the files too, which cannot be undone. When another torrent still uses the data (the same files [cross-seeded](reseed.md) on another site, for example), only the torrent is removed and the data stays; the result message says how many. pt-tools reads the tracker status of each torrent again before deleting it and keeps the ones that work again.
 
 qBittorrent is asked for the tracker status of each torrent in turn, so a scan can take tens of seconds when there are many torrents; Transmission returns all of them at once.
 

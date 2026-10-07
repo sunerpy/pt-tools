@@ -1907,6 +1907,8 @@ export interface AssistantApplyResult {
   done: number;
   skipped: AssistantItemError[];
   failed: AssistantItemError[];
+  /** 要删数据、但数据还被别的种子用着（如辅种），所以只删了种子的个数（算在 done 里） */
+  kept_data?: number;
 }
 
 /** 扫描检查了多少种子：scanned 小于 total 时说明种子太多，只检查了一部分 */
@@ -2088,4 +2090,73 @@ export const transferApi = {
     api.put<TransferRule>(`/api/transfer/rules/${id}`, data),
   deleteRule: (id: number) => api.delete<{ success: boolean }>(`/api/transfer/rules/${id}`),
   runRule: (id: number) => api.post<TransferRuleRunResult>(`/api/transfer/rules/${id}/run`, {}),
+};
+
+// ---------- IYUU 辅种（路线图 M6） ----------
+
+export interface ReseedSettings {
+  enabled: boolean;
+  has_token: boolean;
+  interval_hours: number;
+  downloader_ids: number[];
+  site_names: string[];
+  max_per_site_per_day: number;
+  last_run_at?: string;
+  last_result: string;
+  running: boolean;
+}
+
+export interface ReseedSettingsUpdate {
+  enabled: boolean;
+  /** 不传时保留原来的 token，空串清除 */
+  token?: string;
+  interval_hours: number;
+  downloader_ids: number[];
+  site_names: string[];
+  max_per_site_per_day: number;
+}
+
+export interface ReseedSiteMapItem {
+  sid: number;
+  iyuu_site: string;
+  nickname: string;
+  host: string;
+  site_name?: string;
+  configured: boolean;
+  selected: boolean;
+}
+
+export interface ReseedRecord {
+  id: number;
+  info_hash: string;
+  site_name: string;
+  torrent_id: string;
+  source_hash: string;
+  downloader_id: number;
+  name: string;
+  /** queued 时结果看任务；done / rolled_back / canceled 是任务记录清除后留下的结果 */
+  state: "queued" | "failed" | "done" | "rolled_back" | "canceled";
+  message: string;
+  job_id?: number;
+  job_state?: TransferState;
+  job_message?: string;
+  /** 记录指向的任务已经不在了，结果不知道 */
+  job_missing?: boolean;
+  created_at: string;
+  /** 最后一次尝试的时间 */
+  updated_at: string;
+}
+
+export const reseedApi = {
+  settings: () => api.get<ReseedSettings>("/api/reseed/settings"),
+  saveSettings: (data: ReseedSettingsUpdate) =>
+    api.put<ReseedSettings>("/api/reseed/settings", data),
+  sites: () => api.get<{ items: ReseedSiteMapItem[] }>("/api/reseed/sites"),
+  run: () => api.post<{ started: boolean }>("/api/reseed/run", {}),
+  records: () => api.get<{ items: ReseedRecord[] }>("/api/reseed/records"),
+  jobs: (status: "" | "active" | "finished" = "") =>
+    api.get<{ items: TransferJob[] }>(
+      `/api/reseed/jobs${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  clearFinished: () => api.delete<{ deleted: number }>("/api/reseed/jobs"),
 };

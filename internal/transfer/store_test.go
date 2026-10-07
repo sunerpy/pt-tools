@@ -16,15 +16,19 @@ func TestListJobs(t *testing.T) {
 	for _, st := range []string{models.TransferPending, models.TransferChecking, models.TransferDone, models.TransferFailed} {
 		require.NoError(t, e.db.Create(&models.TorrentTransferJob{InfoHash: st, State: st, TorrentData: []byte("x")}).Error)
 	}
-	all, err := e.svc.ListJobs(ctx, "")
+	require.NoError(t, e.db.Create(&models.TorrentTransferJob{Kind: models.JobKindReseed, InfoHash: "r", State: models.TransferDone}).Error)
+	reseed, err := e.svc.ListJobs(ctx, "", models.JobKindReseed)
+	require.NoError(t, err)
+	assert.Len(t, reseed, 1, "按种类分开列")
+	all, err := e.svc.ListJobs(ctx, "", models.JobKindTransfer)
 	require.NoError(t, err)
 	require.Len(t, all, 4)
 	assert.Equal(t, models.TransferFailed, all[0].State, "最新的在前")
 	assert.Empty(t, all[0].TorrentData, "列表不带种子文件")
-	active, err := e.svc.ListJobs(ctx, JobsActive)
+	active, err := e.svc.ListJobs(ctx, JobsActive, models.JobKindTransfer)
 	require.NoError(t, err)
 	assert.Len(t, active, 2)
-	finished, err := e.svc.ListJobs(ctx, JobsFinished)
+	finished, err := e.svc.ListJobs(ctx, JobsFinished, models.JobKindTransfer)
 	require.NoError(t, err)
 	assert.Len(t, finished, 2)
 }
