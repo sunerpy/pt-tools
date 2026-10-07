@@ -2089,3 +2089,67 @@ export const transferApi = {
   deleteRule: (id: number) => api.delete<{ success: boolean }>(`/api/transfer/rules/${id}`),
   runRule: (id: number) => api.post<TransferRuleRunResult>(`/api/transfer/rules/${id}/run`, {}),
 };
+
+// ---------- IYUU 辅种（路线图 M6） ----------
+
+export interface ReseedSettings {
+  enabled: boolean;
+  has_token: boolean;
+  interval_hours: number;
+  downloader_ids: number[];
+  site_names: string[];
+  max_per_site_per_day: number;
+  last_run_at?: string;
+  last_result: string;
+  running: boolean;
+}
+
+export interface ReseedSettingsUpdate {
+  enabled: boolean;
+  /** 不传时保留原来的 token，空串清除 */
+  token?: string;
+  interval_hours: number;
+  downloader_ids: number[];
+  site_names: string[];
+  max_per_site_per_day: number;
+}
+
+export interface ReseedSiteMapItem {
+  sid: number;
+  iyuu_site: string;
+  nickname: string;
+  host: string;
+  site_name?: string;
+  configured: boolean;
+  selected: boolean;
+}
+
+export interface ReseedRecord {
+  id: number;
+  info_hash: string;
+  site_name: string;
+  torrent_id: string;
+  source_hash: string;
+  downloader_id: number;
+  name: string;
+  state: "queued" | "failed";
+  message: string;
+  job_id?: number;
+  job_state?: TransferState;
+  job_message?: string;
+  created_at: string;
+}
+
+export const reseedApi = {
+  settings: () => api.get<ReseedSettings>("/api/reseed/settings"),
+  saveSettings: (data: ReseedSettingsUpdate) =>
+    api.put<ReseedSettings>("/api/reseed/settings", data),
+  sites: () => api.get<{ items: ReseedSiteMapItem[] }>("/api/reseed/sites"),
+  run: () => api.post<{ started: boolean }>("/api/reseed/run", {}),
+  records: () => api.get<{ items: ReseedRecord[] }>("/api/reseed/records"),
+  jobs: (status: "" | "active" | "finished" = "") =>
+    api.get<{ items: TransferJob[] }>(
+      `/api/reseed/jobs${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  clearFinished: () => api.delete<{ deleted: number }>("/api/reseed/jobs"),
+};

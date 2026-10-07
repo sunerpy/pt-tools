@@ -110,6 +110,12 @@ const router = createRouter({
       meta: { title: "转移做种" },
     },
     {
+      path: "/reseed",
+      name: "reseed",
+      component: () => import("@/views/Reseed.vue"),
+      meta: { title: "IYUU 辅种" },
+    },
+    {
       path: "/paused",
       name: "paused",
       component: () => import("@/views/PausedTorrents.vue"),
