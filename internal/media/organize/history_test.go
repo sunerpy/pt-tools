@@ -157,3 +157,22 @@ func TestReconcileLeavesCopies(t *testing.T) {
 	assert.Zero(t, e.svc.Reconcile(e.ctx), "复制的文件不删")
 	assert.True(t, exists(e.history()[0].TargetPath))
 }
+
+// 目录名里带 [tmdbid-…] 时也能删干净：方括号不能当成通配符
+func TestDeleteHistoryBracketedShowDir(t *testing.T) {
+	e := newEnv(t)
+	e.library(LibraryInput{
+		Name: "剧集", Kind: models.MediaKindTV, Path: e.tv, Scrape: true,
+		Template: "{{.Title}} ({{.Year}}) [tmdbid-{{.TMDBID}}]/Season {{pad .Season 2}}/{{.Title}} - {{.SeasonEpisode}}",
+	})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.addTorrent(tlouHash, tlouName, map[string]int{tlouName + "/The.Last.of.Us.S01E01.mkv": 2}, nil)
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: tlouHash})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created, res.Plan.Problem)
+	show := filepath.Join(e.tv, "最后生还者 (2023) [tmdbid-100088]")
+	require.True(t, exists(filepath.Join(show, "season01-poster.jpg")))
+	require.NoError(t, e.svc.DeleteHistory(e.ctx, e.history()[0].ID, true))
+	assert.False(t, exists(show), "季海报也删掉，剧集目录删干净")
+	assert.True(t, exists(e.tv))
+}

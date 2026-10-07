@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
@@ -142,12 +143,16 @@ func companions(target string) []string {
 	return []string{stem + ".nfo", stem + "-thumb.jpg", stem + "-poster.jpg", stem + "-fanart.jpg"}
 }
 
-// dirArtifacts 是刮削时写在目录里的文件：目录里不再有视频时一起删。
+var seasonPosterRe = regexp.MustCompile(`^season\d+-poster\.jpg$`)
+
+// dirArtifacts 是刮削时写在目录里的文件：目录里不再有视频时一起删。季海报按目录里的文件名找
+// （不用 Glob：目录名里常有 [tmdbid-…]，方括号会被当成通配符）。
 func dirArtifacts(dir string) []string {
 	out := []string{"poster.jpg", "fanart.jpg", "season.nfo", "tvshow.nfo", scrape.SeasonPosterName(0)}
-	if matches, _ := filepath.Glob(filepath.Join(dir, "season[0-9]*-poster.jpg")); len(matches) > 0 {
-		for _, m := range matches {
-			out = append(out, filepath.Base(m))
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() && seasonPosterRe.MatchString(e.Name()) {
+			out = append(out, e.Name())
 		}
 	}
 	return out
