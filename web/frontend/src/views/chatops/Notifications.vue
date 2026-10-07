@@ -14,6 +14,8 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
+import { OUTBOUND_CHANNELS, missingRequired, outboundChannel } from "@/utils/notifyChannels";
+
 /*
  * 通道类型的图标与色相：四个通道在卡片网格里必须一眼分得开，
  * 但只用语义色（info / ok / warn / primary），不引入这一页专属的调色板 ——
@@ -29,6 +31,12 @@ const channelTypeOptions = [
     icon: "message-circle",
     color: "var(--pt-warn)",
   },
+  ...OUTBOUND_CHANNELS.map((c) => ({
+    value: c.type,
+    label: c.label,
+    icon: c.icon,
+    color: c.color,
+  })),
 ];
 
 const router = useRouter();
@@ -86,6 +94,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   qq_onebot: "QQ (OneBot)",
   webhook: "Webhook",
   wecom_webhook: "WeCom Webhook",
+  ...Object.fromEntries(OUTBOUND_CHANNELS.map((c) => [c.type, c.label])),
 };
 
 /** 画板右端两枚视图钮（bi-layout-grid / bi-rows-3），偏好存本地 */
@@ -230,6 +239,14 @@ async function loadNotifications() {
   notifications.value = data;
 }
 
+/** 只出站通道的字段不在 newChannel 的初值里，按字段名读写 */
+function newField(key: string): string {
+  return String((newChannel.value as Record<string, unknown>)[key] ?? "");
+}
+function setNewField(key: string, v: string) {
+  (newChannel.value as Record<string, unknown>)[key] = v;
+}
+
 function openAddDialog() {
   newChannel.value = {
     channel_type: "telegram",
@@ -250,6 +267,14 @@ async function handleCreate() {
 
   if (newChannel.value.channel_type === "telegram" && !newChannel.value.bot_token) {
     ElMessage.warning("Telegram 通道需填写 Bot Token");
+    return;
+  }
+  const missing = missingRequired(
+    newChannel.value.channel_type,
+    newChannel.value as Record<string, unknown>,
+  );
+  if (missing) {
+    ElMessage.warning(`请填写${missing.label}`);
     return;
   }
 
@@ -669,6 +694,20 @@ function getChannelLabel(type: string) {
           <el-input v-model="newChannel.webhook_key" placeholder="企业微信群机器人的 key" />
           <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
         </el-form-item>
+
+        <!-- 只出站的通道：新建时只填必填项，其余在「设置」里补 -->
+        <template v-for="f in outboundChannel(newChannel.channel_type)?.fields ?? []" :key="f.key">
+          <el-form-item v-if="f.required" :label="f.label" required>
+            <el-input
+              :model-value="newField(f.key)"
+              :type="f.kind === 'password' ? 'password' : 'text'"
+              :show-password="f.kind === 'password'"
+              :placeholder="f.placeholder"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="(v: string) => setNewField(f.key, v)" />
+            <div v-if="f.tip" class="field-tip">{{ f.tip }}</div>
+          </el-form-item>
+        </template>
 
         <div v-if="newChannel.channel_type === 'qq_onebot'" class="pt-note">
           <PtIcon name="info" :size="14" class="pt-note__icon" />

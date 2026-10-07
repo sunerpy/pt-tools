@@ -7,6 +7,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { isLoopbackListenAddr } from "@/utils/listenAddr";
+import { OUTBOUND_CHANNELS, missingRequired, outboundChannel } from "@/utils/notifyChannels";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -18,6 +19,9 @@ const CHANNEL_META: Record<string, { label: string; icon: string; color: string 
   qq_onebot: { label: "QQ (OneBot)", icon: "message-square", color: "var(--pt-ok)" },
   webhook: { label: "Webhook", icon: "link", color: "var(--pt-p)" },
   wecom_webhook: { label: "WeCom Webhook", icon: "message-circle", color: "var(--pt-warn)" },
+  ...Object.fromEntries(
+    OUTBOUND_CHANNELS.map((c) => [c.type, { label: c.label, icon: c.icon, color: c.color }]),
+  ),
 };
 
 const route = useRoute();
@@ -136,7 +140,16 @@ const channelTypeMap = [
   { type: "qq_onebot", label: "QQ (OneBot)", must: "listen_addr" },
   { type: "webhook", label: "Webhook", must: "endpoint_url" },
   { type: "wecom_webhook", label: "WeCom Webhook", must: "webhook_key" },
-] as const;
+  ...OUTBOUND_CHANNELS.map((c) => ({
+    type: c.type,
+    label: c.label,
+    must: c.fields.find((f) => f.required)?.key ?? "",
+  })),
+];
+
+/* 只出站通道的字段按名字绑定：conf 始终是同一个 reactive 对象（resetConf 只删键、loadDetail 用 Object.assign） */
+const confText = conf as unknown as Record<string, string | undefined>;
+const confNum = conf as unknown as Record<string, number | undefined>;
 
 const credRules = computed<FormRules>(() => {
   switch (conf.channel_type) {
@@ -170,8 +183,14 @@ const credRules = computed<FormRules>(() => {
       return {
         webhook_key: [{ required: true, message: "请填写 Webhook Key", trigger: "blur" }],
       };
-    default:
-      return {};
+    default: {
+      const rules: FormRules = {};
+      for (const f of outboundChannel(conf.channel_type)?.fields ?? []) {
+        if (f.required)
+          rules[f.key] = [{ required: true, message: `请填写${f.label}`, trigger: "blur" }];
+      }
+      return rules;
+    }
   }
 });
 
@@ -289,6 +308,12 @@ async function handleSaveCredentials() {
   if (locked.value || !credFormRef.value) return;
   const valid = await credFormRef.value.validate().catch(() => false);
   if (!valid) return;
+  // 只出站的通道再按字段定义查一遍必填项（与新建对话框同一份规则）
+  const missing = missingRequired(conf.channel_type, conf as unknown as Record<string, unknown>);
+  if (missing) {
+    ElMessage.warning(`请填写${missing.label}`);
+    return;
+  }
 
   saving.value = true;
   try {
@@ -328,6 +353,13 @@ async function handleSaveCredentials() {
       case "wecom_webhook":
         payload.webhook_key = conf.webhook_key;
         break;
+      default: {
+        // 只出站的通道：字段来自 utils/notifyChannels，整份发出（没填的发空值，后端按空处理）
+        const sink = payload as unknown as Record<string, unknown>;
+        for (const f of outboundChannel(conf.channel_type)?.fields ?? []) {
+          sink[f.key] = f.kind === "number" ? (confNum[f.key] ?? 0) : (confText[f.key] ?? "");
+        }
+      }
     }
     await chatopsApi.notifications.update(conf.id, payload);
     ElMessage.success("已保存凭证");
@@ -689,6 +721,43 @@ function goBack() {
                 show-password
                 placeholder="企业微信群机器人的 key" />
               <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
+            </el-form-item>
+          </template>
+
+          <!-- 只出站的通道（Bark、Server 酱、ntfy、钉钉、飞书）：字段来自 utils/notifyChannels -->
+          <template v-if="outboundChannel(conf.channel_type)">
+            <el-form-item
+              v-for="f in outboundChannel(conf.channel_type)!.fields"
+              :key="f.key"
+              :label="f.label"
+              :prop="f.key">
+              <el-select
+                v-if="f.kind === 'select'"
+                v-model="confText[f.key]"
+                :placeholder="f.options?.[0]?.label"
+                clearable
+                :data-testid="`cred-${f.key}`">
+                <el-option
+                  v-for="o in f.options"
+                  :key="o.value"
+                  :label="o.label"
+                  :value="o.value" />
+              </el-select>
+              <el-input-number
+                v-else-if="f.kind === 'number'"
+                v-model="confNum[f.key]"
+                :min="f.min"
+                :max="f.max"
+                controls-position="right"
+                :data-testid="`cred-${f.key}`" />
+              <el-input
+                v-else
+                v-model="confText[f.key]"
+                :type="f.kind === 'password' ? 'password' : 'text'"
+                :show-password="f.kind === 'password'"
+                :placeholder="f.placeholder"
+                :data-testid="`cred-${f.key}`" />
+              <div v-if="f.tip" class="field-tip">{{ f.tip }}</div>
             </el-form-item>
           </template>
         </div>
