@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +26,8 @@ var (
 	ErrNotConfigured = errors.New("先填写 CookieCloud 服务地址、UUID 和密码")
 	// ErrBusy 表示另一次预览、导入或同步正在进行。
 	ErrBusy = errors.New("另一次 CookieCloud 导入正在进行，稍后再试")
+	// ErrSettingsChanged 表示读取期间设置被改了：这一次读到的是旧设置的数据，不写。
+	ErrSettingsChanged = errors.New("读取期间 CookieCloud 设置被修改了，这一次没有写入；请重新读取")
 )
 
 // Cipher 加解密密码（生产环境是 ConfigStore 的 EncryptCookie / DecryptCookie）。
@@ -61,6 +62,7 @@ type Config struct {
 }
 
 // Service 管理 CookieCloud 设置，预览、导入与定时同步站点 Cookie。解密只在本机做，Cookie 不缓存、不写日志。
+// runMu 让预览、导入、同步一次只有一个；saveMu 让保存设置不和「确认设置没变、写入 Cookie」交错。
 type Service struct {
 	cfg    Config
 	saveMu sync.Mutex
@@ -174,15 +176,14 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 	return s.Settings(ctx)
 }
 
-// normalizeServer 去掉空白和末尾的 /；不为空时必须是 http(s) 地址。
+// normalizeServer 去掉空白和末尾的 /；不为空时必须是 http(s) 地址（规则见 ParseServer）。
 func normalizeServer(raw string) (string, error) {
 	server := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if server == "" {
 		return "", nil
 	}
-	u, err := url.Parse(server)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-		return "", fmt.Errorf("%w：服务地址要以 http:// 或 https:// 开头", ErrInvalid)
+	if _, err := ParseServer(server); err != nil {
+		return "", fmt.Errorf("%w：%v", ErrInvalid, err)
 	}
 	return server, nil
 }
@@ -224,33 +225,41 @@ func (s *Service) RecordSync(ctx context.Context, at time.Time, summary string) 
 
 // ---------- 取数与匹配 ----------
 
+// loaded 是一次取数的结果，连同取数时用的设置（写入前用来确认设置没变）。
+type loaded struct {
+	matches []Match
+	sites   map[string]SiteState
+	domains int
+	from    models.CookieCloudSetting
+}
+
 // load 取回 CookieCloud 的数据并在本机解密，按 pt-tools 的站点挑出 Cookie。
-func (s *Service) load(ctx context.Context) ([]Match, map[string]SiteState, int, error) {
+func (s *Service) load(ctx context.Context) (loaded, error) {
 	r, err := s.row(ctx)
 	if err != nil {
-		return nil, nil, 0, err
+		return loaded{}, err
 	}
 	if r.ServerURL == "" || r.UUID == "" || r.PasswordEncrypted == "" {
-		return nil, nil, 0, ErrNotConfigured
+		return loaded{}, ErrNotConfigured
 	}
 	if s.cfg.Cipher == nil {
-		return nil, nil, 0, errors.New("没有可用的加密密钥，读不出密码")
+		return loaded{}, errors.New("没有可用的加密密钥，读不出密码")
 	}
 	password, err := s.cfg.Cipher.Decrypt(r.PasswordEncrypted)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("解密保存的密码失败: %w", err)
+		return loaded{}, fmt.Errorf("解密保存的密码失败: %w", err)
 	}
 	payload, err := Fetch(ctx, s.cfg.HTTP, r.ServerURL, r.UUID)
 	if err != nil {
-		return nil, nil, 0, err
+		return loaded{}, err
 	}
 	data, err := Decrypt(payload, r.UUID, password)
 	if err != nil {
-		return nil, nil, 0, err
+		return loaded{}, err
 	}
 	sites, err := s.cfg.Sites(ctx)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("读取站点失败: %w", err)
+		return loaded{}, fmt.Errorf("读取站点失败: %w", err)
 	}
 	byName := make(map[string]SiteState, len(sites))
 	list := make([]Site, 0, len(sites))
@@ -258,7 +267,20 @@ func (s *Service) load(ctx context.Context) ([]Match, map[string]SiteState, int,
 		byName[st.Name] = st
 		list = append(list, Site{Name: st.Name, BaseURL: st.BaseURL})
 	}
-	return MatchSites(data, list, s.cfg.Now()), byName, len(data.CookieData), nil
+	return loaded{matches: MatchSites(data, list, s.cfg.Now()), sites: byName, domains: len(data.CookieData), from: r}, nil
+}
+
+// sameSource 报告设置还是不是取数时那一份（地址、UUID、密码；定时同步还要求定时同步仍然打开）。调用时要持有 saveMu。
+func (s *Service) sameSource(ctx context.Context, from models.CookieCloudSetting, scheduled bool) error {
+	cur, err := s.row(ctx)
+	if err != nil {
+		return err
+	}
+	if cur.ServerURL != from.ServerURL || cur.UUID != from.UUID || cur.PasswordEncrypted != from.PasswordEncrypted ||
+		(scheduled && !cur.AutoSync) {
+		return ErrSettingsChanged
+	}
+	return nil
 }
 
 // PreviewItem 是一个能导入的站点：CookieCloud 里有对它的地址有效的 Cookie。不含 Cookie 的值。
@@ -284,13 +306,13 @@ func (s *Service) Preview(ctx context.Context) (Preview, error) {
 		return Preview{}, ErrBusy
 	}
 	defer s.runMu.Unlock()
-	matches, sites, domains, err := s.load(ctx)
+	got, err := s.load(ctx)
 	if err != nil {
 		return Preview{}, err
 	}
-	out := Preview{Items: make([]PreviewItem, 0, len(matches)), Domains: domains}
-	for _, m := range matches {
-		st := sites[m.Site]
+	out := Preview{Items: make([]PreviewItem, 0, len(got.matches)), Domains: got.domains}
+	for _, m := range got.matches {
+		st := got.sites[m.Site]
 		name := st.DisplayName
 		if name == "" {
 			name = m.Site
@@ -361,12 +383,13 @@ func (s *Service) Import(ctx context.Context, siteNames []string) (ImportResult,
 		return ImportResult{}, ErrBusy
 	}
 	defer s.runMu.Unlock()
-	matches, sites, _, err := s.load(ctx)
+	got, err := s.load(ctx)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	byName := make(map[string]Match, len(matches))
-	for _, m := range matches {
+	sites := got.sites
+	byName := make(map[string]Match, len(got.matches))
+	for _, m := range got.matches {
 		byName[m.Site] = m
 	}
 	res := newResult()
@@ -383,7 +406,7 @@ func (s *Service) Import(ctx context.Context, siteNames []string) (ImportResult,
 			res.Imported = append(res.Imported, n)
 		}
 	}
-	if err := s.apply(ctx, cookies, &res); err != nil {
+	if err := s.applyIfSame(ctx, got.from, false, cookies, &res); err != nil {
 		return ImportResult{}, err
 	}
 	s.cfg.Logger.Infof("[CookieCloud] 导入：%s", res.Summary())
@@ -396,14 +419,14 @@ func (s *Service) Sync(ctx context.Context) (ImportResult, error) {
 		return ImportResult{}, ErrBusy
 	}
 	defer s.runMu.Unlock()
-	matches, sites, _, err := s.load(ctx)
+	got, err := s.load(ctx)
 	if err != nil {
 		return ImportResult{}, err
 	}
 	res := newResult()
 	cookies := map[string]string{}
-	for _, m := range matches {
-		st := sites[m.Site]
+	for _, m := range got.matches {
+		st := got.sites[m.Site]
 		if !st.Enabled {
 			continue
 		}
@@ -414,17 +437,22 @@ func (s *Service) Sync(ctx context.Context) (ImportResult, error) {
 		cookies[m.Site] = m.Header
 		res.Imported = append(res.Imported, m.Site)
 	}
-	if err := s.apply(ctx, cookies, &res); err != nil {
+	if err := s.applyIfSame(ctx, got.from, true, cookies, &res); err != nil {
 		return ImportResult{}, err
 	}
 	s.cfg.Logger.Infof("[CookieCloud] 定时同步：%s", res.Summary())
 	return res, nil
 }
 
-// apply 写入 Cookie，把写不进去的站点从 Imported 挪到 Failed。
-func (s *Service) apply(ctx context.Context, cookies map[string]string, res *ImportResult) error {
+// applyIfSame 确认设置还是取数时那一份之后写入 Cookie（与保存设置互斥），把写不进去的站点从 Imported 挪到 Failed。
+func (s *Service) applyIfSame(ctx context.Context, from models.CookieCloudSetting, scheduled bool, cookies map[string]string, res *ImportResult) error {
 	if len(cookies) == 0 {
 		return nil
+	}
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	if err := s.sameSource(ctx, from, scheduled); err != nil {
+		return err
 	}
 	if s.cfg.Apply == nil {
 		return errors.New("没有可用的站点写入方式")

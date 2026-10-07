@@ -1,6 +1,7 @@
 package cookiecloud
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -237,7 +238,7 @@ func TestImport(t *testing.T) {
 func TestSync(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.configure(nil)
+	e.configure(func(u *SettingsUpdate) { u.AutoSync = true })
 	res, err := e.svc.Sync(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"hdsky"}, res.Imported, "example 没启用，不碰")
@@ -308,6 +309,7 @@ func TestNoCookieValuesInLogs(t *testing.T) {
 	require.NoError(t, err)
 	_, err = e.svc.Import(ctx, []string{"hdsky", "example"})
 	require.NoError(t, err)
+	e.configure(func(u *SettingsUpdate) { u.AutoSync = true })
 	_, err = e.svc.Sync(ctx)
 	require.NoError(t, err)
 	require.NotZero(t, e.logs.Len())
@@ -326,4 +328,77 @@ func TestSameCookie(t *testing.T) {
 	assert.False(t, SameCookie("a=1; b=2", "a=1"))
 	assert.False(t, SameCookie("a=1", "a=2"))
 	assert.True(t, SameCookie("", " ; "))
+}
+
+// 读取期间改了设置（换了账户、关了定时同步）：读到的是旧设置的数据，不写。
+func TestImportAbortsWhenSettingsChange(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.configure(func(u *SettingsUpdate) { u.AutoSync = true })
+	other := "other-pass"
+	e.svc.cfg.Sites = func(context.Context) ([]SiteState, error) {
+		// 取数和解密已经做完，这时用户保存了新密码
+		_, err := e.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e.srv.URL, UUID: vecUUID, Password: &other})
+		require.NoError(t, err)
+		return append([]SiteState(nil), e.sites...), nil
+	}
+	_, err := e.svc.Import(ctx, []string{"hdsky"})
+	assert.ErrorIs(t, err, ErrSettingsChanged)
+	assert.Empty(t, e.applied)
+
+	// 定时同步：读取期间关掉了定时同步
+	e2 := newEnv(t)
+	e2.configure(func(u *SettingsUpdate) { u.AutoSync = true })
+	e2.svc.cfg.Sites = func(context.Context) ([]SiteState, error) {
+		pw := vecPassword
+		_, err := e2.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e2.srv.URL, UUID: vecUUID, Password: &pw})
+		require.NoError(t, err)
+		return append([]SiteState(nil), e2.sites...), nil
+	}
+	_, err = e2.svc.Sync(ctx)
+	assert.ErrorIs(t, err, ErrSettingsChanged)
+	assert.Empty(t, e2.applied)
+}
+
+// 服务地址不能带查询参数或 #（否则 /get/{uuid} 落进查询或 # 里，请求会发到别的路径）；
+// 重定向不能降级到 http、不能换端口；响应超过上限时拒绝。明确写了 legacy 的不按 fixed 再试。
+func TestFetchHardening(t *testing.T) {
+	ctx := context.Background()
+	for _, bad := range []string{"http://x/admin#ignore", "http://x/admin?a=1", "http://x/?", "mailto:x@example.org", "http://u:p@x"} {
+		_, err := Fetch(ctx, nil, bad, "u")
+		assert.Error(t, err, bad)
+		_, err = normalizeServer(bad)
+		assert.ErrorIs(t, err, ErrInvalid, bad)
+	}
+
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.EscapedPath()
+		switch r.URL.Path {
+		case "/cc/get/port":
+			http.Redirect(w, r, "http://127.0.0.1:1"+r.URL.Path, http.StatusFound)
+		case "/cc/get/big":
+			_, _ = w.Write([]byte(`{"encrypted":"x"}`))
+			_, _ = w.Write(bytes.Repeat([]byte(" "), maxBodyBytes))
+		default:
+			_, _ = w.Write([]byte(`{"encrypted":"x"}`))
+		}
+	}))
+	defer srv.Close()
+	_, err := Fetch(ctx, srv.Client(), srv.URL+"/cc/", "a b")
+	require.NoError(t, err)
+	assert.Equal(t, "/cc/get/a%20b", got, "UUID 按路径的一段转义，接在服务地址的路径后面")
+	_, err = Fetch(ctx, srv.Client(), srv.URL+"/cc", "port")
+	assert.ErrorContains(t, err, "别的端口")
+	_, err = Fetch(ctx, srv.Client(), srv.URL+"/cc", "big")
+	assert.ErrorContains(t, err, "超过")
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, srv.URL+"/cc"+r.URL.Path, http.StatusFound) // 同一主机的 http 地址
+	}))
+	defer tlsSrv.Close()
+	_, err = Fetch(ctx, tlsSrv.Client(), tlsSrv.URL, "down")
+	assert.ErrorContains(t, err, "https 请求重定向到了 http")
+
+	_, err = Decrypt(Payload{Encrypted: vecFixed, CryptoType: CryptoLegacy}, vecUUID, vecPassword)
+	assert.ErrorIs(t, err, ErrDecrypt, "写明 legacy 的不按 fixed 再试")
 }

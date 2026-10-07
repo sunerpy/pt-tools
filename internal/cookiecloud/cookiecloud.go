@@ -64,18 +64,33 @@ type Payload struct {
 	CryptoType string `json:"crypto_type"`
 }
 
+// ParseServer 解析服务地址：必须是 http(s) 地址，不能带用户名密码、查询参数或 #，末尾的 / 去掉。
+func ParseServer(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" ||
+		u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, errors.New("CookieCloud 服务地址要以 http:// 或 https:// 开头，不能带用户名密码、查询参数或 #")
+	}
+	return u, nil
+}
+
 // Fetch 取回 uuid 的密文（不带密码，服务端不解密）。
 func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payload, error) {
-	server = strings.TrimRight(strings.TrimSpace(server), "/")
-	u, err := url.Parse(server)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return Payload{}, errors.New("CookieCloud 服务地址要以 http:// 或 https:// 开头")
+	u, err := ParseServer(server)
+	if err != nil {
+		return Payload{}, err
 	}
 	uuid = strings.TrimSpace(uuid)
 	if uuid == "" {
 		return Payload{}, errors.New("UUID 不能为空")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"/get/"+url.PathEscape(uuid), nil)
+	// 在服务地址的路径后面加 /get/{uuid}（UUID 按路径的一段转义）
+	raw := strings.TrimRight(u.EscapedPath(), "/") + "/get/" + url.PathEscape(uuid)
+	if u.Path, err = url.PathUnescape(raw); err != nil {
+		return Payload{}, errors.New("CookieCloud 服务地址的路径不对")
+	}
+	u.RawPath = raw
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return Payload{}, err
 	}
@@ -83,14 +98,20 @@ func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payloa
 	if httpc == nil {
 		httpc = &http.Client{Timeout: 30 * time.Second}
 	}
-	// 只跟随同一主机内的重定向（如 http 升到 https）：地址里带着 UUID，不带去别的主机
+	// 只跟随同一主机、同一端口内的重定向，http 可以升到 https、不能降级：地址里带着 UUID，不带去别处
 	c := *httpc
 	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("重定向次数太多")
 		}
-		if !strings.EqualFold(r.URL.Hostname(), via[0].URL.Hostname()) {
+		first := via[0].URL
+		switch {
+		case !strings.EqualFold(r.URL.Hostname(), first.Hostname()):
 			return errors.New("CookieCloud 服务把请求重定向到了别的主机，没有跟随")
+		case first.Scheme == "https" && r.URL.Scheme != "https":
+			return errors.New("CookieCloud 服务把 https 请求重定向到了 http，没有跟随")
+		case r.URL.Scheme == first.Scheme && effectivePort(r.URL) != effectivePort(first):
+			return errors.New("CookieCloud 服务把请求重定向到了别的端口，没有跟随")
 		}
 		return nil
 	}
@@ -104,9 +125,12 @@ func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payloa
 		return Payload{}, fmt.Errorf("连不上 CookieCloud 服务: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
 		return Payload{}, fmt.Errorf("读取 CookieCloud 响应失败: %w", err)
+	}
+	if len(body) > maxBodyBytes {
+		return Payload{}, fmt.Errorf("CookieCloud 的响应超过 %d MiB，没有读取", maxBodyBytes>>20)
 	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
@@ -121,13 +145,25 @@ func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payloa
 	return p, nil
 }
 
+// effectivePort 是地址的端口，没写时按 scheme 的默认端口。
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
+}
+
 // passphrase 是 md5(uuid + "-" + password) 十六进制的前 16 个字符。
 func passphrase(uuid, password string) string {
 	sum := md5.Sum([]byte(uuid + "-" + password))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// Decrypt 解密密文。cryptoType 为空时按 legacy；legacy 解不开、密文又不是 OpenSSL 格式时再按 fixed 试一次。
+// Decrypt 解密密文。cryptoType 为空（老服务端）时按 legacy，密文不是 OpenSSL 格式时再按 fixed 试一次；
+// 明确写了 legacy 的只按 legacy。
 func Decrypt(p Payload, uuid, password string) (Data, error) {
 	key := passphrase(strings.TrimSpace(uuid), password)
 	var plain []byte
@@ -135,7 +171,9 @@ func Decrypt(p Payload, uuid, password string) (Data, error) {
 	switch p.CryptoType {
 	case CryptoFixed:
 		plain, err = decryptFixed(p.Encrypted, key)
-	case "", CryptoLegacy:
+	case CryptoLegacy:
+		plain, err = decryptLegacy(p.Encrypted, key)
+	case "":
 		plain, err = decryptLegacy(p.Encrypted, key)
 		if errors.Is(err, errNotSalted) {
 			plain, err = decryptFixed(p.Encrypted, key)
