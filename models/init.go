@@ -222,6 +222,8 @@ func NewDBWithVersionAndHooks(
 		// IYUU 辅种（M6）
 		&ReseedSetting{},
 		&ReseedRecord{},
+		// CookieCloud 导入（M7）
+		&CookieCloudSetting{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
