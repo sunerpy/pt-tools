@@ -132,8 +132,8 @@ type MediaTransferHistory struct {
 	LibraryID      uint   `gorm:"not null;default:0;index" json:"library_id"`
 	SourcePath     string `gorm:"size:2048;not null;uniqueIndex" json:"source_path"`
 	// SaveRoot 是整理时种子保存目录在 pt-tools 里的路径：清理入库链接前确认它还在（下载目录没挂载时不清理）
-	SaveRoot string `gorm:"size:2048;not null;default:''" json:"-"`
-	TargetPath     string `gorm:"size:2048;not null;default:''" json:"target_path"`
+	SaveRoot   string `gorm:"size:2048;not null;default:''" json:"-"`
+	TargetPath string `gorm:"size:2048;not null;default:''" json:"target_path"`
 	// Extras 是一起整理的字幕与刮削写的文件（JSON 数组，带文件编号）：删除库里的文件时只删这些
 	Extras     string `gorm:"type:text;not null;default:''" json:"-"`
 	Mode       string `gorm:"size:16;not null;default:''" json:"mode"`
