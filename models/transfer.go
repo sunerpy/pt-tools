@@ -153,9 +153,9 @@ func matchPathPrefix(src, prefix string) (int, bool) {
 	return len(p), true
 }
 
-// isWindowsPath 报告路径是不是 Windows 写法：盘符（D:）或网络路径（\\server）。
+// isWindowsPath 报告路径是不是 Windows 写法：盘符（D:）、网络路径（\\server）或以 \ 开头的当前盘路径。
 func isWindowsPath(p string) bool {
-	if strings.HasPrefix(p, "\\\\") {
+	if strings.HasPrefix(p, "\\") {
 		return true
 	}
 	return len(p) >= 2 && p[1] == ':' && (p[0]|0x20) >= 'a' && (p[0]|0x20) <= 'z'

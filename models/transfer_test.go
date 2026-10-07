@@ -46,6 +46,14 @@ func TestMapTransferPath(t *testing.T) {
 	assert.False(t, ok, "Unix 路径区分大小写")
 	assert.Equal(t, "/Downloads/x", got)
 
+	// 当前盘根目录 \ 与不带盘符的 \Downloads 也是 Windows 写法
+	got, ok = MapTransferPath([]DownloaderPathMap{{SourcePrefix: `\`, TargetPrefix: "/mnt/c"}}, `\Downloads\A`)
+	assert.True(t, ok)
+	assert.Equal(t, "/mnt/c/Downloads/A", got)
+	got, ok = MapTransferPath([]DownloaderPathMap{{SourcePrefix: `\Downloads`, TargetPrefix: "/data"}}, `\downloads\a`)
+	assert.True(t, ok)
+	assert.Equal(t, "/data/a", got)
+
 	root := []DownloaderPathMap{{SourcePrefix: "/", TargetPrefix: "/mnt/nas"}}
 	got, ok = MapTransferPath(root, "/downloads/a")
 	assert.True(t, ok)
