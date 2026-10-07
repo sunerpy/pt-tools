@@ -59,6 +59,9 @@ type TorrentInfo struct {
 	CheckCount       int        `gorm:"default:0" json:"checkCount"`  // 进度检查次数
 	Seeders          int        `gorm:"default:0" json:"seeders"`
 	Leechers         int        `gorm:"default:0" json:"leechers"`
+	// IMDbID、DoubanID 是站点给的外部编号（详情页或接口里有时才有），媒体识别优先用它们
+	IMDbID   string `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
+	DoubanID string `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
 }
 
 // TorrentInfoArchive 种子信息归档表（存储超过保留期的记录）
@@ -100,6 +103,8 @@ type TorrentInfoArchive struct {
 	HasHR             bool       `json:"hasHR"`
 	HRSeedTimeH       int        `json:"hrSeedTimeH"`
 	CheckCount        int        `json:"checkCount"`
+	IMDbID            string     `gorm:"column:imdb_id;size:16;default:''" json:"imdbId"`
+	DoubanID          string     `gorm:"column:douban_id;size:16;default:''" json:"doubanId"`
 	ArchivedAt        time.Time  `gorm:"autoCreateTime" json:"archivedAt"`
 }
 

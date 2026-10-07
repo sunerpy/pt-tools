@@ -160,7 +160,7 @@ func TestBrushMonitor_AdmitsWithinLimits(t *testing.T) {
 	r.addItem(t, "1", func(i *v2.TorrentItem) { i.DiscountLevel = v2.DiscountNone }) // M-Team 式混入的普通种
 	r.addItem(t, "2", func(i *v2.TorrentItem) { i.HasHR = true })
 	r.addItem(t, "3", func(i *v2.TorrentItem) { i.Leechers = 10 })
-	r.addItem(t, "4", func(i *v2.TorrentItem) { i.Leechers = 90 })
+	r.addItem(t, "4", func(i *v2.TorrentItem) { i.Leechers = 90; i.IMDbID = "tt0111161"; i.DoubanID = "1292052" })
 	r.addItem(t, "5", func(i *v2.TorrentItem) { i.Leechers = 50 })
 
 	res, err := r.mon.RunTask(context.Background(), task.ID)
@@ -183,6 +183,9 @@ func TestBrushMonitor_AdmitsWithinLimits(t *testing.T) {
 	assert.EqualValues(t, 4*gib, p.Meta.SizeBytes)
 	assert.True(t, p.Meta.IsFree)
 	require.NotNil(t, p.Meta.FreeEndTime)
+	assert.Equal(t, "tt0111161", p.IMDbID, "搜索结果里的外部编号随推送带上")
+	assert.Equal(t, "1292052", p.DoubanID)
+	assert.Empty(t, r.pushes[1].IMDbID)
 
 	repo := models.NewBrushRepository(r.db.DB)
 	active, err := repo.ActiveTorrents(task.ID)
