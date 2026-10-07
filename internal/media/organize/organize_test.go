@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -393,7 +392,7 @@ func TestOrganizeCrossDevice(t *testing.T) {
 	e := newEnv(t)
 	a, _ := os.Stat(e.dlDir)
 	b, _ := os.Stat(lib)
-	if a.Sys().(*syscall.Stat_t).Dev == b.Sys().(*syscall.Stat_t).Dev {
+	if sameDevice(a, b) {
 		t.Skip("临时目录与 /dev/shm 在同一个文件系统")
 	}
 	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: lib})

@@ -86,7 +86,7 @@ func TestHardlinkCrossDevice(t *testing.T) {
 		t.Cleanup(func() { _ = os.RemoveAll(other) })
 		si, _ := os.Stat(filepath.Dir(src))
 		oi, _ := os.Stat(other)
-		if si.Sys().(*syscall.Stat_t).Dev == oi.Sys().(*syscall.Stat_t).Dev {
+		if sameDevice(si, oi) {
 			t.Skip("临时目录与 /dev/shm 在同一个文件系统")
 		}
 		_, err = Transfer(src, filepath.Join(other, "lib", "a.mkv"), models.MediaModeHardlink)
