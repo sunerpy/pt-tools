@@ -32,6 +32,7 @@ type fakeDL struct {
 	torrents map[string]*downloader.Torrent
 	files    map[string][]byte
 	removed  []string // "hash:removeData"
+	untagged []string // RemoveTag 的 "id:tag"
 	resumed  []string
 	recheck  []string
 	listErr  error
@@ -146,6 +147,22 @@ func (f *fakeDL) RemoveTorrent(id string, removeData bool) error {
 	}
 	delete(f.torrents, id)
 	f.removed = append(f.removed, id+map[bool]string{true: ":data", false: ":keep"}[removeData])
+	return nil
+}
+
+func (f *fakeDL) RemoveTag(id, tag string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.untagged = append(f.untagged, id+":"+tag)
+	if t, ok := f.torrents[id]; ok {
+		kept := []string{}
+		for _, x := range strings.Split(t.Tags, ",") {
+			if strings.TrimSpace(x) != tag {
+				kept = append(kept, x)
+			}
+		}
+		t.Tags = strings.Join(kept, ",")
+	}
 	return nil
 }
 
@@ -410,7 +427,7 @@ func TestTransferHappyPath(t *testing.T) {
 	assert.Equal(t, TransferSource, p.Source)
 	assert.Equal(t, "hdsky", p.SiteID)
 	assert.Equal(t, "movies", p.Category)
-	assert.Equal(t, "hdsky,4k,"+models.TransferTag, p.Tags, "原有标签加上转移标签")
+	assert.Equal(t, "hdsky,4k,"+models.TransferTag+","+models.JobTag(models.JobKindTransfer, id), p.Tags, "原有标签加上转移标签和任务独有的标签")
 	require.NotNil(t, j.Deadline)
 	assert.Equal(t, e.now.Add(30*time.Minute+512*time.Second), *j.Deadline, "30 分钟 + 10 GiB / 20 MiB/s")
 
@@ -733,8 +750,23 @@ func TestTransferOwnership(t *testing.T) {
 	e.svc.RunOnce(ctx)
 	e.svc.RunOnce(ctx)
 	require.Len(t, e.pushes, 1)
-	assert.Contains(t, e.pushes[0].Tags, models.TransferTag)
+	assert.Contains(t, e.pushes[0].Tags, models.JobTag(models.JobKindTransfer, id))
 	assert.Equal(t, models.TransferChecking, e.job(id).State)
+	assert.Equal(t, models.JobTag(models.JobKindTransfer, id), e.job(id).OwnerTag, "加入之前记下独有的标签")
+
+	// 重启前停在 adding：目标里的同 hash 种子只带通用标签（谁都能加），不是这个任务独有的标签：不接管
+	e1 := newEnv(t)
+	h1 := e1.seed(e1.src.fakeDL, "Movie.E", 1<<30, true)
+	e1.dst.put(downloader.Torrent{InfoHash: h1, Tags: models.TransferTag, State: downloader.TorrentPaused})
+	j1 := models.TorrentTransferJob{SourceDownloaderID: srcID, TargetDownloaderID: dstID, InfoHash: h1, State: models.TransferAdding, OwnerTag: "pt-tools-transfer-77"}
+	require.NoError(t, e1.db.Create(&j1).Error)
+	e1.svc.RunOnce(ctx)
+	got1 := e1.job(j1.ID)
+	assert.Equal(t, models.TransferFailed, got1.State)
+	assert.Contains(t, got1.Message, "pt-tools-transfer-77")
+	_, still1 := e1.dst.get(h1)
+	assert.True(t, still1, "只带通用标签的种子不动")
+	assert.Empty(t, e1.dst.removed)
 
 	// 重启前停在 adding：目标里有同 hash 的种子，但不是带标签加的
 	e2 := newEnv(t)
@@ -932,10 +964,57 @@ func TestTransferTransientErrors(t *testing.T) {
 	assert.Equal(t, models.TransferAdding, e3.job(j3.ID).State)
 }
 
-func TestWithTransferTag(t *testing.T) {
-	assert.Equal(t, models.TransferTag, withTransferTag(""))
-	assert.Equal(t, "a,"+models.TransferTag, withTransferTag("a"))
-	assert.Equal(t, "a, "+models.TransferTag, withTransferTag("a, "+models.TransferTag), "已经有就不重复加")
+func TestWithOwnerTags(t *testing.T) {
+	j := &models.TorrentTransferJob{ID: 7}
+	assert.Equal(t, models.TransferTag, withOwnerTags("", j), "早期版本的任务没有独有标签")
+	j.OwnerTag = models.JobTag(j.Kind, j.ID)
+	assert.Equal(t, "pt-tools-transfer-7", j.OwnerTag)
+	assert.Equal(t, "a,pt-tools-transfer,pt-tools-transfer-7", withOwnerTags("a", j))
+	assert.Equal(t, "a, pt-tools-transfer,pt-tools-transfer-7", withOwnerTags("a, "+models.TransferTag, j), "已经有就不重复加")
+	assert.Equal(t, "pt-tools-reseed-3", models.JobTag(models.JobKindReseed, 3))
+}
+
+// 任务结束后去掉独有的标签（完成的保留通用标签）；早期版本的任务没有独有标签，不动。
+func TestTransferDropsOwnerTag(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	h := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
+	id := e.create(Item{srcID, h})[0].ID
+	for range 3 {
+		e.svc.RunOnce(ctx)
+	}
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx)
+	e.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferDone, e.job(id).State, e.job(id).Message)
+	tag := models.JobTag(models.JobKindTransfer, id)
+	assert.Equal(t, []string{h + ":" + tag}, e.dst.untagged)
+	got, _ := e.dst.get(h)
+	assert.Equal(t, "hdsky,4k,"+models.TransferTag, got.Tags, "通用标签保留")
+
+	// 回滚：种子已从目标移除，标签也去掉
+	e2 := newEnv(t)
+	h2 := e2.seed(e2.src.fakeDL, "Movie.B", 1<<30, true)
+	id2 := e2.create(Item{srcID, h2})[0].ID
+	e2.dst.afterRecheck = func(t *downloader.Torrent) { t.Progress, t.IsCompleted = 0.2, false }
+	for range 3 {
+		e2.svc.RunOnce(ctx)
+	}
+	e2.dst.finishCheck(h2)
+	e2.now = e2.now.Add(10 * time.Minute)
+	e2.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferRolledBack, e2.job(id2).State, e2.job(id2).Message)
+	assert.Equal(t, []string{h2 + ":" + models.JobTag(models.JobKindTransfer, id2)}, e2.dst.untagged)
+
+	// 早期版本的任务（没有独有标签）结束时不去标签
+	e3 := newEnv(t)
+	h3 := e3.seed(e3.src.fakeDL, "Movie.C", 1<<30, true)
+	e3.dst.put(downloader.Torrent{InfoHash: h3, Tags: models.TransferTag, State: downloader.TorrentPaused, Progress: 1, IsCompleted: true})
+	j3 := models.TorrentTransferJob{SourceDownloaderID: srcID, TargetDownloaderID: dstID, InfoHash: h3, State: models.TransferVerified}
+	require.NoError(t, e3.db.Create(&j3).Error)
+	e3.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferDone, e3.job(j3.ID).State, e3.job(j3.ID).Message)
+	assert.Empty(t, e3.dst.untagged)
 }
 
 // 辅种任务：源与目标是同一台下载器，暂停加入（带 pt-tools-reseed 标签）、校验到 100% 才开始做种，不移除任何种子，
@@ -963,7 +1042,7 @@ func TestReseedJob(t *testing.T) {
 	p := e.pushes[0]
 	assert.True(t, p.ReuseExistingData)
 	assert.Equal(t, "/data/movies", p.SavePath)
-	assert.Equal(t, "hdsky,"+models.ReseedTag, p.Tags)
+	assert.Equal(t, "hdsky,"+models.ReseedTag+","+models.JobTag(models.JobKindReseed, j.ID), p.Tags)
 	assert.Equal(t, ReseedSource, p.Source)
 	e.svc.RunOnce(ctx) // 校验
 	e.dst.finishCheck(h)
@@ -996,5 +1075,5 @@ func TestReseedJob(t *testing.T) {
 	e2.svc.RunOnce(ctx)
 	got2 := e2.job(j2.ID)
 	assert.Equal(t, models.TransferFailed, got2.State)
-	assert.Contains(t, got2.Message, "不是辅种加的")
+	assert.Contains(t, got2.Message, "不是这个辅种任务加的")
 }

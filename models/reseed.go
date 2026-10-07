@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // ReseedTag 是辅种加进下载器时带上的标签：恢复、回滚、收尾前确认目标里的种子带着它，证明是辅种加的。
 const ReseedTag = "pt-tools-reseed"
@@ -11,12 +14,17 @@ const (
 	JobKindReseed   = "reseed"
 )
 
-// JobOwnerTag 是这一种任务加进下载器时带上的归属标签。
+// JobOwnerTag 是这一种任务加进下载器时带上的通用标签（显示与分类用）。
 func JobOwnerTag(kind string) string {
 	if kind == JobKindReseed {
 		return ReseedTag
 	}
 	return TransferTag
+}
+
+// JobTag 是任务 id 加进下载器时带上的独有标签（如 pt-tools-reseed-12）：通用标签谁都能加，证明不了种子是这个任务加的。
+func JobTag(kind string, id uint) string {
+	return JobOwnerTag(kind) + "-" + strconv.FormatUint(uint64(id), 10)
 }
 
 // ReseedSetting 是 IYUU 辅种的设置（只有一行，ID 为 1）。默认关闭；列的默认值一律是零值。

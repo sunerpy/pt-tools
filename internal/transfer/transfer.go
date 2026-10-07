@@ -489,6 +489,9 @@ func (s *Service) add(ctx context.Context, j *models.TorrentTransferJob) error {
 	if exists {
 		return s.fail(ctx, j, "目标下载器里已经有这个种子")
 	}
+	if j.OwnerTag == "" {
+		j.OwnerTag = models.JobTag(j.Kind, j.ID)
+	}
 	if err := s.moveTo(ctx, j, models.TransferAdding, "正在加入目标下载器"); err != nil {
 		return err
 	}
@@ -498,7 +501,7 @@ func (s *Service) add(ctx context.Context, j *models.TorrentTransferJob) error {
 		TorrentData:       j.TorrentData,
 		Title:             j.Name,
 		Category:          j.Category,
-		Tags:              withOwnerTag(j.Tags, j.Kind),
+		Tags:              withOwnerTags(j.Tags, j),
 		SavePath:          j.TargetSavePath,
 		DownloaderID:      j.TargetDownloaderID,
 		Source:            pushSource(j.Kind),
@@ -685,6 +688,9 @@ func (s *Service) moveTo(ctx context.Context, j *models.TorrentTransferJob, stat
 		j.State = from
 		return errSuperseded
 	}
+	if models.TransferStateFinal(state) && from != state && j.OwnerTag != "" {
+		s.dropOwnerTag(ctx, j)
+	}
 	return nil
 }
 
@@ -821,25 +827,38 @@ func stillChecking(t downloader.Torrent) bool {
 	return false
 }
 
-// notOurs 是目标里有同一个种子、却不是这次加的（没有归属标签）时的说明。
+// notOurs 是目标里有同一个种子、却不是这个任务加的（没有它的归属标签）时的说明。
 func notOurs(j *models.TorrentTransferJob) string {
 	if j.Kind == models.JobKindReseed {
-		return "下载器里已经有这个种子，但不是辅种加的（没有 " + models.ReseedTag + " 标签）；没有动它"
+		return "下载器里已经有这个种子，但不是这个辅种任务加的（没有 " + ownerTag(j) + " 标签）；没有动它"
 	}
-	return "目标下载器里已经有这个种子，但不是这次转移加的（没有 " + models.TransferTag + " 标签）；没有动它，源下载器里的种子也没动"
+	return "目标下载器里已经有这个种子，但不是这次转移加的（没有 " + ownerTag(j) + " 标签）；没有动它，源下载器里的种子也没动"
 }
 
-// owned 报告目标里的种子是不是这个任务加的（带这一种任务的归属标签）。
+// ownerTag 是证明归属用的标签：任务独有的标签；早期版本建的任务没有，用这一种任务的通用标签。
+func ownerTag(j *models.TorrentTransferJob) string {
+	if j.OwnerTag != "" {
+		return j.OwnerTag
+	}
+	return models.JobOwnerTag(j.Kind)
+}
+
+// owned 报告目标里的种子是不是这个任务加的（带它的归属标签）。
 func owned(j *models.TorrentTransferJob, t downloader.Torrent) bool {
-	return hasTag(t.Tags, models.JobOwnerTag(j.Kind))
+	return hasTag(t.Tags, ownerTag(j))
 }
 
-// withTransferTag 在原有标签后面加上 pt-tools-transfer。
-func withTransferTag(tags string) string { return withOwnerTag(tags, models.JobKindTransfer) }
+// withOwnerTags 在原有标签后面加上这一种任务的通用标签和任务独有的标签。
+func withOwnerTags(tags string, j *models.TorrentTransferJob) string {
+	tags = withTag(tags, models.JobOwnerTag(j.Kind))
+	if j.OwnerTag != "" {
+		tags = withTag(tags, j.OwnerTag)
+	}
+	return tags
+}
 
-// withOwnerTag 在原有标签后面加上这一种任务的归属标签。
-func withOwnerTag(tags, kind string) string {
-	tag := models.JobOwnerTag(kind)
+// withTag 在原有标签后面加上 tag（已经有就不重复加）。
+func withTag(tags, tag string) string {
 	if hasTag(tags, tag) {
 		return tags
 	}
@@ -847,6 +866,22 @@ func withOwnerTag(tags, kind string) string {
 		return tag
 	}
 	return tags + "," + tag
+}
+
+// dropOwnerTag 在任务结束后从目标下载器里去掉任务独有的标签（qBittorrent 的标签列表里不留下用过的任务标签）。
+// 做不到时只记日志：留下的标签不影响什么。
+func (s *Service) dropOwnerTag(ctx context.Context, j *models.TorrentTransferJob) {
+	target, _, err := s.cfg.Downloaders.TransferDownloader(ctx, j.TargetDownloaderID)
+	if err != nil {
+		return
+	}
+	r, ok := target.(downloader.TagRemover)
+	if !ok {
+		return
+	}
+	if err := r.RemoveTag(j.InfoHash, j.OwnerTag); err != nil {
+		s.cfg.Logger.Warnf("[转移做种] 任务 %d 已结束，去掉标签 %s 失败: %v", j.ID, j.OwnerTag, err)
+	}
 }
 
 // pushSource 是写进推送请求的来源。
