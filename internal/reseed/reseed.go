@@ -668,7 +668,7 @@ func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, sit
 		rec.State, rec.Message = models.ReseedFailed, why
 		s.saveRecord(ctx, &rec)
 	}
-	// 站点不可用、下载不到种子是暂时的：记为可重试，过一段时间再试
+	// 站点不可用、下载不到种子、读不到原种子的文件列表是暂时的：记为可重试，过一段时间再试
 	retryLater := func(why string) {
 		rec.Retryable = true
 		fail(why)
@@ -694,7 +694,8 @@ func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, sit
 	}
 	oldFiles, err := src.dl.GetTorrentFiles(src.torrent.ID)
 	if err != nil {
-		fail("读取原种子的文件列表失败: " + err.Error())
+		// 下载器暂时读不到（重启中、连不上）：还没核对，过一段时间再试
+		retryLater("读取原种子的文件列表失败: " + err.Error())
 		return
 	}
 	if same, why := SameFiles(newFiles, DownloaderFiles(oldFiles)); !same {
@@ -711,7 +712,11 @@ func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, sit
 			res.skip(SkipActive)
 			return
 		}
-		fail(err.Error())
+		if errors.Is(err, transfer.ErrInvalid) {
+			fail(err.Error())
+		} else {
+			retryLater("建辅种任务失败: " + err.Error()) // 写库失败等暂时的问题
+		}
 		return
 	}
 	res.Created++

@@ -621,3 +621,27 @@ func TestRecordsOrderByLastAttempt(t *testing.T) {
 	assert.Equal(t, "81", views[0].TorrentID, "刚重试过的在前面")
 	assert.Equal(t, models.ReseedQueued, views[0].State)
 }
+
+// 读不到原种子的文件列表（下载器暂时连不上）：还没核对，记为可重试，过 7 天再试。
+func TestRunRetriesWhenSourceFilesUnavailable(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("91", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 91, "info_hash": good})
+	files := e.dl.files[e.srcHash]
+	delete(e.dl.files, e.srcHash)
+	res, err := e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Failed)
+	var rec models.ReseedRecord
+	require.NoError(t, e.db.Where("torrent_id = ?", "91").First(&rec).Error)
+	assert.True(t, rec.Retryable)
+	assert.Contains(t, rec.Message, "读取原种子的文件列表失败")
+
+	e.dl.files[e.srcHash] = files
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "过了 7 天再试，这次读到了")
+}
