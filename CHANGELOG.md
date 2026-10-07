@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.11](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.10...v1.0.0-rc.11) (2026-10-07)
+
+
+### Features
+
+* **media:** 整理入库、刮削与媒体服务器 ([#634](https://github.com/sunerpy/pt-tools/issues/634)) ([2554e53](https://github.com/sunerpy/pt-tools/commit/2554e53a18ae7c576b34606e2245c351b3a87559))
+
+
+### Bug Fixes
+
+* **scheduler:** 配置重载与停止调度器之间的数据竞争 ([#636](https://github.com/sunerpy/pt-tools/issues/636)) ([1aed807](https://github.com/sunerpy/pt-tools/commit/1aed807548170354ea0fac559ce6775b4dee6ab6))
+
 ## [1.0.0-rc.10](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.9...v1.0.0-rc.10) (2026-10-07)
 
 
