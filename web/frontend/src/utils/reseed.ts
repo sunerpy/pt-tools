@@ -3,12 +3,24 @@ import { transferStateLabel } from "@/utils/transfer";
 
 type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
-/** 一条辅种记录的结果：没建成任务的是失败；建成的看任务状态 */
-export function reseedRecordResult(r: Pick<ReseedRecord, "state" | "job_state">): {
+/** 一条辅种记录的结果：没建成任务的是失败；建成的看任务状态（任务记录清除后看记录里留下的结果） */
+export function reseedRecordResult(
+  r: Pick<ReseedRecord, "state" | "job_state" | "job_missing">,
+): {
   label: string;
   tone: Tone;
 } {
-  if (r.state === "failed") return { label: "失败", tone: "dang" };
+  switch (r.state) {
+    case "failed":
+      return { label: "失败", tone: "dang" };
+    case "done":
+      return { label: "已辅种", tone: "ok" };
+    case "rolled_back":
+      return { label: "已撤回", tone: "warn" };
+    case "canceled":
+      return { label: "已取消", tone: "neutral" };
+  }
+  if (r.job_missing) return { label: "任务已删除", tone: "neutral" };
   switch (r.job_state) {
     case "source_removed":
       return { label: "已辅种", tone: "ok" };
@@ -30,9 +42,11 @@ export function reseedRecordMessage(r: Pick<ReseedRecord, "message" | "job_messa
   return r.message || r.job_message || "";
 }
 
-/** 记录对应的任务还没结束 */
-export function reseedRecordActive(r: Pick<ReseedRecord, "state" | "job_state">): boolean {
-  if (r.state !== "queued") return false;
+/** 记录对应的任务还没结束（任务已经不在了的不算） */
+export function reseedRecordActive(
+  r: Pick<ReseedRecord, "state" | "job_state" | "job_missing">,
+): boolean {
+  if (r.state !== "queued" || r.job_missing) return false;
   return !["source_removed", "rolled_back", "failed", "canceled"].includes(r.job_state ?? "");
 }
 

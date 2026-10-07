@@ -2134,12 +2134,17 @@ export interface ReseedRecord {
   source_hash: string;
   downloader_id: number;
   name: string;
-  state: "queued" | "failed";
+  /** queued 时结果看任务；done / rolled_back / canceled 是任务记录清除后留下的结果 */
+  state: "queued" | "failed" | "done" | "rolled_back" | "canceled";
   message: string;
   job_id?: number;
   job_state?: TransferState;
   job_message?: string;
+  /** 记录指向的任务已经不在了，结果不知道 */
+  job_missing?: boolean;
   created_at: string;
+  /** 最后一次尝试的时间 */
+  updated_at: string;
 }
 
 export const reseedApi = {

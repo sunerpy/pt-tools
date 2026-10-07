@@ -19,6 +19,11 @@ describe("reseed utils", () => {
     expect(reseedRecordResult({ state: "queued", job_state: "canceled" }).label).toBe("已取消");
     expect(reseedRecordResult({ state: "queued", job_state: "checking" }).label).toBe("校验中");
     expect(reseedRecordResult({ state: "queued" }).label).toBe("已建任务");
+    // 任务记录清除后留下的结果
+    expect(reseedRecordResult({ state: "done" })).toEqual({ label: "已辅种", tone: "ok" });
+    expect(reseedRecordResult({ state: "rolled_back" }).label).toBe("已撤回");
+    expect(reseedRecordResult({ state: "canceled" }).label).toBe("已取消");
+    expect(reseedRecordResult({ state: "queued", job_missing: true }).label).toBe("任务已删除");
   });
 
   it("tells messages and activity", () => {
@@ -27,6 +32,9 @@ describe("reseed utils", () => {
     expect(reseedRecordActive({ state: "queued", job_state: "checking" })).toBe(true);
     expect(reseedRecordActive({ state: "queued", job_state: "source_removed" })).toBe(false);
     expect(reseedRecordActive({ state: "failed" })).toBe(false);
+    expect(reseedRecordActive({ state: "done" })).toBe(false);
+    // 任务不在了不再轮询
+    expect(reseedRecordActive({ state: "queued", job_missing: true })).toBe(false);
   });
 
   it("describes site status", () => {

@@ -431,7 +431,7 @@ onBeforeUnmount(() => {
           <template #default="{ row }">{{ reseedRecordMessage(row) }}</template>
         </el-table-column>
         <el-table-column label="时间" width="120">
-          <template #default="{ row }">{{ formatShortDateTime(row.created_at) }}</template>
+          <template #default="{ row }">{{ formatShortDateTime(row.updated_at) }}</template>
         </el-table-column>
       </el-table>
       <div v-else class="rs-cards">
@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
           <template #meta>
             <span
               >{{ r.site_name }} · {{ r.torrent_id }} ·
-              {{ formatShortDateTime(r.created_at) }}</span
+              {{ formatShortDateTime(r.updated_at) }}</span
             >
             <span v-if="reseedRecordMessage(r)" class="rs-full">{{ reseedRecordMessage(r) }}</span>
           </template>
