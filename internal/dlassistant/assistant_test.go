@@ -281,6 +281,30 @@ func TestScanAndDeleteDeadTorrents(t *testing.T) {
 	assert.Len(t, res.Failed, 1, "读不到状态的不删")
 }
 
+// 要删数据时，数据还被别的种子用着的（如辅种）只删种子；一起删的共用数据的种子，最后一个连数据删。
+func TestDeleteDeadTorrentsKeepsSharedData(t *testing.T) {
+	f := newFake()
+	f.torrents = []downloader.Torrent{
+		{ID: "d1", InfoHash: "d1", Name: "dead shared", ContentPath: "/d/Movie"},
+		{ID: "live", InfoHash: "live", Name: "reseed", ContentPath: "/d/Movie"},
+		{ID: "d2", InfoHash: "d2", Name: "dead pair a", ContentPath: "/d/Show"},
+		{ID: "d3", InfoHash: "d3", Name: "dead pair b", ContentPath: "/d/Show"},
+	}
+	for _, id := range []string{"d1", "d2", "d3"} {
+		f.trackers[id] = []downloader.TorrentTracker{{URL: "https://tracker.hdsky.me/announce.php", Status: 4, Message: "Unregistered torrent"}}
+	}
+	res, err := DeleteDeadTorrents(context.Background(), f, []string{"d1", "d2", "d3"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, 3, res.Done)
+	assert.Equal(t, 2, res.KeptData)
+	assert.Equal(t, map[string]bool{"d1": false, "d2": false, "d3": true}, f.removed)
+
+	f.removed = map[string]bool{}
+	res, err = DeleteDeadTorrents(context.Background(), f, []string{"d1"}, false)
+	require.NoError(t, err)
+	assert.Zero(t, res.KeptData, "本来就不删数据")
+}
+
 func TestRedactTrackerMessage(t *testing.T) {
 	assert.Equal(t, "Unregistered torrent (passkey=*** authkey=***)", RedactTrackerMessage("Unregistered torrent (passkey=abc authkey=def)"))
 	assert.Equal(t, "see https://u3d.example/announce/*** now", RedactTrackerMessage("see https://u3d.example/announce/0123456789abcdef0123 now"))

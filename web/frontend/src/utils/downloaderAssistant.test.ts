@@ -11,6 +11,9 @@ describe("downloaderAssistant utils", () => {
 
   it("summarizes apply results", () => {
     expect(applySummary("删除", { done: 3, skipped: [], failed: [] })).toBe("删除 3 个");
+    expect(applySummary("删除", { done: 3, skipped: [], failed: [], kept_data: 1 })).toBe(
+      "删除 3 个，其中 1 个的数据还被别的种子用着，只删了种子",
+    );
     expect(
       applySummary("替换", {
         done: 1,

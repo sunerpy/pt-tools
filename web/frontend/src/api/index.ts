@@ -1907,6 +1907,8 @@ export interface AssistantApplyResult {
   done: number;
   skipped: AssistantItemError[];
   failed: AssistantItemError[];
+  /** 要删数据、但数据还被别的种子用着（如辅种），所以只删了种子的个数（算在 done 里） */
+  kept_data?: number;
 }
 
 /** 扫描检查了多少种子：scanned 小于 total 时说明种子太多，只检查了一部分 */

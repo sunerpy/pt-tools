@@ -61,6 +61,8 @@ type ApplyResult struct {
 	Done    int         `json:"done"`
 	Skipped []ItemError `json:"skipped"`
 	Failed  []ItemError `json:"failed"`
+	// KeptData 是删除时要求删数据、但数据还被别的种子用着（如辅种），所以只删了种子的个数（算在 Done 里）。
+	KeptData int `json:"kept_data,omitempty"`
 }
 
 func (r *ApplyResult) skip(hash, name, why string) {
@@ -453,6 +455,7 @@ func ScanDeadTorrents(ctx context.Context, dl downloader.Downloader, r *v2.Track
 }
 
 // DeleteDeadTorrents 删除选中的失效种子；删除前逐个重新读取 tracker 状态，已经恢复正常的不删。
+// 要求删数据时，数据还被别的种子用着的（如在别的站点辅种的同一份文件）只删种子、保留数据。
 func DeleteDeadTorrents(ctx context.Context, dl downloader.Downloader, hashes []string, removeData bool) (ApplyResult, error) {
 	res := newResult()
 	torrents, err := dl.GetAllTorrents()
@@ -460,6 +463,7 @@ func DeleteDeadTorrents(ctx context.Context, dl downloader.Downloader, hashes []
 		return res, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
 	byHash := indexTorrents(torrents)
+	removed := map[string]bool{} // 已经删掉的不算“别的种子”，共用数据的最后一个连数据删
 	seen := map[string]bool{}
 	for _, h := range hashes {
 		if err := ctx.Err(); err != nil {
@@ -486,9 +490,14 @@ func DeleteDeadTorrents(ctx context.Context, dl downloader.Downloader, hashes []
 			res.skip(hash, t.Name, "tracker 已经恢复正常，没有删除")
 			continue
 		}
-		if err := dl.RemoveTorrent(t.ID, removeData); err != nil {
+		withData := removeData && !downloader.SharesData(torrents, t, removed)
+		if err := dl.RemoveTorrent(t.ID, withData); err != nil {
 			res.fail(hash, t.Name, err)
 			continue
+		}
+		removed[downloader.TorrentKey(t)] = true
+		if removeData && !withData {
+			res.KeptData++
 		}
 		res.Done++
 	}
