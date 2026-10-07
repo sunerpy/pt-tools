@@ -164,7 +164,7 @@ func TestErrorsHideKey(t *testing.T) {
 	require.ErrorIs(t, err, ErrRateLimited)
 	f.status = http.StatusBadGateway
 	_, err = c.Search(context.Background(), KindMovie, "b", 0)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrUnavailable)
 	assert.Contains(t, err.Error(), "HTTP 502")
 	assert.NotContains(t, err.Error(), "SECRETKEY")
 
@@ -173,7 +173,7 @@ func TestErrorsHideKey(t *testing.T) {
 
 	f.srv.Close()
 	_, err = c.Search(context.Background(), KindMovie, "c", 0)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrUnavailable)
 	assert.NotContains(t, err.Error(), "SECRETKEY", "连接失败的错误里不带地址")
 }
 

@@ -44,6 +44,8 @@ var (
 	ErrUnauthorized = errors.New("TMDB API Key 无效")
 	ErrNotFound     = errors.New("TMDB 上没有这个条目")
 	ErrRateLimited  = errors.New("TMDB 请求太频繁，稍后再试")
+	// ErrUnavailable 表示连不上 TMDB，或 TMDB 回了其它错误（网络、代理、5xx）。
+	ErrUnavailable = errors.New("TMDB 暂时不能访问")
 )
 
 // Result 是一个电影或剧集条目（搜索、查找与详情共用）。
@@ -352,7 +354,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("请求 TMDB 失败: %w", err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
@@ -368,7 +370,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	case http.StatusTooManyRequests:
 		return ErrRateLimited
 	default:
-		return fmt.Errorf("TMDB 返回 HTTP %d", resp.StatusCode)
+		return fmt.Errorf("%w: HTTP %d", ErrUnavailable, resp.StatusCode)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("解析 TMDB 响应失败: %w", err)
