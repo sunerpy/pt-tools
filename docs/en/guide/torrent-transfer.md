@@ -13,13 +13,15 @@ Tick torrents in the Downloader web UI (下载器 Web UI), from one or more down
 After Create N transfer jobs (建 N 个转移任务), the jobs run in the background, one at a time:
 
 1. Get the torrent file.
-2. Add the torrent to the target downloader paused, with the mapped save path. This goes through the same entry point as pushing a torrent: the site seeding capacity limit still applies; the data is already on disk, so no disk space is reserved.
+2. Add the torrent to the target downloader paused, with the mapped save path and a `pt-tools-transfer` tag on top of its category and tags. This goes through the same entry point as pushing a torrent: the site seeding capacity limit still applies; the data is already on disk, so no disk space is reserved.
 3. Let the target downloader check the data.
-4. Once the check reaches 100%, start seeding in the target downloader, then remove the torrent from the source downloader, keeping the data files. The pt-tools record of the torrent moves to the target downloader.
+4. Once the check reaches 100%, start seeding in the target downloader, then remove the torrent from the source downloader, keeping the data files. pt-tools confirms the target is still at 100% right before it starts seeding. The pt-tools records of the torrent on the source downloader move to the target downloader.
 
 If the check stops short of 100% (the data is not at the target path, usually a wrong path mapping) or runs out of time (30 minutes plus the time to read all the data at 20 MiB/s), the torrent is removed from the target downloader with its data kept, the torrent in the source downloader is left alone, and the job is marked Rolled back (已回滚).
 
 Each target downloader checks one transferred torrent at a time and the rest wait, so that many checks at once do not saturate the disk. After pt-tools restarts, each job continues from the step where it stopped.
+
+The `pt-tools-transfer` tag marks the torrents a transfer added: when the target downloader holds the same torrent without that tag (for example one you added yourself), the job fails and neither copy is touched.
 
 ## Jobs
 
@@ -42,6 +44,7 @@ Torrent transfer → Jobs (任务) lists the latest 200 jobs with their state, c
 When two downloaders see the same data under different paths (for example two containers mount one disk at different folders), open Path mappings (路径映射), pick the source and target downloaders, add one line per folder, "path prefix in the source downloader → path prefix in the target downloader", and click Save (保存).
 
 - The longest matching prefix wins, compared by whole folders: `/data` does not match `/database`.
+- Windows paths (a drive letter or `\\` at the start) match regardless of case and with either `/` or `\`; Linux paths are case-sensitive.
 - When one side is a Windows path and the other a Linux path, the separators in the rest of the path follow the target.
 - Without a match, the target uses the same path.
 
