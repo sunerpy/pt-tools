@@ -58,4 +58,14 @@ func TestServerChan(t *testing.T) {
 
 	code = 40001
 	assert.ErrorContains(t, c.Send(context.Background(), notify.Notification{Title: "t"}), "code=40001")
+
+	// 真实服务对错误的 Key 回 HTTP 400 + JSON：报 code 与 message，不报整段响应
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"[AUTH]\u9519\u8bef\u7684Key","code":40001}`))
+	}))
+	defer bad.Close()
+	c.endpoint = bad.URL + "/SCTkey.send"
+	err := c.Send(context.Background(), notify.Notification{Title: "t"})
+	assert.EqualError(t, err, "Server 酱推送失败: code=40001, message=[AUTH]错误的Key")
 }

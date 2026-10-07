@@ -81,15 +81,16 @@ func (c *Channel) Send(ctx context.Context, n notify.Notification) error {
 		desp += "\n\n" + n.Link
 	}
 	body, err := outbound.PostJSON(ctx, c.endpoint, map[string]any{"title": title, "desp": desp})
-	if err != nil {
-		return fmt.Errorf("Server 酱推送失败: %w", err)
-	}
+	// SendKey 不对等错误也会带 HTTP 4xx：响应里有 code 时报 code 与 message，比整段响应好读
 	var res struct {
 		Code    *int   `json:"code"`
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(body, &res) == nil && res.Code != nil && *res.Code != 0 {
 		return fmt.Errorf("Server 酱推送失败: code=%d, message=%s", *res.Code, res.Message)
+	}
+	if err != nil {
+		return fmt.Errorf("Server 酱推送失败: %w", err)
 	}
 	return nil
 }

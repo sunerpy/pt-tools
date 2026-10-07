@@ -73,15 +73,16 @@ func (c *Channel) Send(ctx context.Context, n notify.Notification) error {
 		payload["sound"] = c.sound
 	}
 	body, err := outbound.PostJSON(ctx, c.server+"/push", payload)
-	if err != nil {
-		return fmt.Errorf("Bark 推送失败: %w", err)
-	}
+	// device_key 不对等错误也会带 HTTP 4xx：响应里有 code 时报 code 与 message
 	var res struct {
 		Code    *int   `json:"code"`
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(body, &res) == nil && res.Code != nil && *res.Code != 200 {
 		return fmt.Errorf("Bark 推送失败: code=%d, message=%s", *res.Code, res.Message)
+	}
+	if err != nil {
+		return fmt.Errorf("Bark 推送失败: %w", err)
 	}
 	return nil
 }
