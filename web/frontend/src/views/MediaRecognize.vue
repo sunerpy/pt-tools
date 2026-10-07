@@ -22,6 +22,7 @@ import PtPanel from "@/components/ui/PtPanel.vue";
 import PtRowCard from "@/components/ui/PtRowCard.vue";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
+import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import {
   MEDIA_LANGUAGES,
@@ -177,15 +178,14 @@ function itemTitle(it: TMDBItem): string {
 
 // ---- 手动纠正 ----
 const overrides = ref<MediaOverride[]>([]);
-const overridesFailed = ref(false);
+/* 加载中、失败都要留在页面上：失败时留着上次的行并写明是旧的，不能画成「还没有」 */
+const overridesDS = useDataState();
 
 async function loadOverrides() {
-  try {
-    overrides.value = (await mediaApi.overrides()) ?? [];
-    overridesFailed.value = false;
-  } catch {
-    overridesFailed.value = true;
-  }
+  const pending = overridesDS.run(() => mediaApi.overrides());
+  const data = await pending;
+  if (overridesDS.isStale(pending) || !data) return;
+  overrides.value = data;
 }
 
 async function removeOverride(o: MediaOverride) {
@@ -209,7 +209,7 @@ async function removeOverride(o: MediaOverride) {
 
 // ---- 识别词 ----
 const wordList = ref<MediaWordRule[]>([]);
-const wordsFailed = ref(false);
+const wordsDS = useDataState();
 const wordDialog = ref(false);
 const wordSaving = ref(false);
 const editingID = ref<number | null>(null);
@@ -225,12 +225,10 @@ const blankWord = (): MediaWordInput => ({
 const wordForm = ref<MediaWordInput>(blankWord());
 
 async function loadWords() {
-  try {
-    wordList.value = (await mediaApi.words()) ?? [];
-    wordsFailed.value = false;
-  } catch {
-    wordsFailed.value = true;
-  }
+  const pending = wordsDS.run(() => mediaApi.words());
+  const data = await pending;
+  if (wordsDS.isStale(pending) || !data) return;
+  wordList.value = data;
 }
 
 /** 接口只收这几个字段（严格解析）：不能把整条记录（带 id、时间）发回去 */
@@ -546,13 +544,24 @@ onMounted(refresh);
     </PtPanel>
 
     <PtPanel title="手动纠正" icon="pencil" :count="overrides.length">
+      <div
+        v-if="overrides.length && overridesDS.error.value"
+        class="pt-note pt-note--warn md-stale"
+        data-testid="media-overrides-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>刷新失败：{{ overridesDS.errorText.value }}。下面是上次读到的。</span>
+      </div>
       <PtDataState
         v-if="!overrides.length"
-        :state="overridesFailed ? 'error' : 'empty'"
-        :title="overridesFailed ? '' : '还没有纠正'"
+        :state="overridesDS.state.value"
+        :title="overridesDS.state.value === 'empty' ? '还没有纠正' : ''"
         :sub="
-          overridesFailed ? '没读到，点刷新重试' : '识别不对时，在识别预览里选候选或填 TMDB 编号'
-        " />
+          overridesDS.errorText.value ||
+          (overridesDS.state.value === 'empty'
+            ? '识别不对时，在识别预览里选候选或填 TMDB 编号'
+            : '')
+        "
+        data-testid="media-overrides-state" />
       <el-table
         v-else-if="!isMobile"
         :data="overrides"
@@ -614,11 +623,21 @@ onMounted(refresh);
         解析标题之前按顺序套用：屏蔽去掉文字，替换换成另一段文字；集数偏移在解析之后给集数加上偏移量（可为负），
         用于按总集数编号的剧集。纯文字不分大小写；勾选正则时按 Go 的正则写法。
       </p>
+      <div
+        v-if="wordList.length && wordsDS.error.value"
+        class="pt-note pt-note--warn md-stale"
+        data-testid="media-words-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>刷新失败：{{ wordsDS.errorText.value }}。下面是上次读到的。</span>
+      </div>
       <PtDataState
         v-if="!wordList.length"
-        :state="wordsFailed ? 'error' : 'empty'"
-        :title="wordsFailed ? '' : '还没有识别词'"
-        :sub="wordsFailed ? '没读到，点刷新重试' : '点右上角「添加」'" />
+        :state="wordsDS.state.value"
+        :title="wordsDS.state.value === 'empty' ? '还没有识别词' : ''"
+        :sub="
+          wordsDS.errorText.value || (wordsDS.state.value === 'empty' ? '点右上角「添加」' : '')
+        "
+        data-testid="media-words-state" />
       <el-table
         v-else-if="!isMobile"
         :data="wordList"
@@ -797,6 +816,10 @@ onMounted(refresh);
 
 .md-fail {
   margin-top: 16px;
+}
+
+.md-stale {
+  margin-bottom: 12px;
 }
 
 .md-result {

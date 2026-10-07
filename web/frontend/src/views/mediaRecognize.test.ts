@@ -344,4 +344,37 @@ describe("媒体识别", () => {
     expect(ui.warning).toHaveBeenCalledWith("集数偏移不能为 0");
     expect(api.createWord).not.toHaveBeenCalled();
   });
+
+  it("两个列表：加载中不写「还没有」；刷新失败时留着旧行并写明是旧的；第一次就失败时显示错误", async () => {
+    let resolveWords: (v: unknown) => void = () => {};
+    api.settings.mockResolvedValue({ has_tmdb_key: true, language: "zh-CN", proxy_url: "" });
+    api.overrides.mockRejectedValue(new Error("HTTP 502"));
+    api.words.mockReturnValue(new Promise((r) => (resolveWords = r)));
+    const Page = (await import("./MediaRecognize.vue")).default;
+    view = mountView(Page);
+    await vi.waitFor(() => expect(api.words).toHaveBeenCalled());
+    await flush();
+    expect(q("media-words-state")?.textContent).not.toContain("还没有识别词");
+    expect(q("media-words-state")?.textContent).toContain("加载中");
+    await vi.waitFor(() => expect(q("media-overrides-state")?.textContent).toContain("HTTP 502"));
+    expect(q("media-overrides-state")?.textContent).not.toContain("还没有纠正");
+
+    resolveWords([
+      {
+        id: 1,
+        kind: "block",
+        pattern: "[禁转]",
+        replacement: "",
+        offset: 0,
+        is_regex: false,
+        enabled: true,
+        note: "",
+      },
+    ]);
+    await vi.waitFor(() => expect(q("media-words")?.textContent).toContain("[禁转]"));
+    api.words.mockRejectedValue(new Error("HTTP 500"));
+    q("media-refresh")!.click();
+    await vi.waitFor(() => expect(q("media-words-stale")?.textContent).toContain("HTTP 500"));
+    expect(q("media-words")?.textContent, "旧行留着").toContain("[禁转]");
+  });
 });
