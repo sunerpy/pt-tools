@@ -338,8 +338,8 @@ func TestImportAbortsWhenSettingsChange(t *testing.T) {
 	other := "other-pass"
 	e.svc.cfg.Sites = func(context.Context) ([]SiteState, error) {
 		// 取数和解密已经做完，这时用户保存了新密码
-		_, err := e.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e.srv.URL, UUID: vecUUID, Password: &other})
-		require.NoError(t, err)
+		_, saveErr := e.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e.srv.URL, UUID: vecUUID, Password: &other})
+		require.NoError(t, saveErr)
 		return append([]SiteState(nil), e.sites...), nil
 	}
 	_, err := e.svc.Import(ctx, []string{"hdsky"})
@@ -351,8 +351,8 @@ func TestImportAbortsWhenSettingsChange(t *testing.T) {
 	e2.configure(func(u *SettingsUpdate) { u.AutoSync = true })
 	e2.svc.cfg.Sites = func(context.Context) ([]SiteState, error) {
 		pw := vecPassword
-		_, err := e2.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e2.srv.URL, UUID: vecUUID, Password: &pw})
-		require.NoError(t, err)
+		_, saveErr := e2.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e2.srv.URL, UUID: vecUUID, Password: &pw})
+		require.NoError(t, saveErr)
 		return append([]SiteState(nil), e2.sites...), nil
 	}
 	_, err = e2.svc.Sync(ctx)
