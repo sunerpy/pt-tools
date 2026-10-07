@@ -44,6 +44,7 @@ type Manager struct {
 	dailyReportJob       *DailyReportJob
 	brushMonitor         *BrushMonitor
 	deadTorrentMonitor   *DeadTorrentMonitor
+	transferWorker       *TransferWorker
 	eventCancel          func()
 	stopped              bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
@@ -497,6 +498,10 @@ func (m *Manager) StopAll() {
 		m.deadTorrentMonitor.Stop()
 		m.deadTorrentMonitor = nil
 	}
+	if m.transferWorker != nil {
+		m.transferWorker.Stop()
+		m.transferWorker = nil
+	}
 	if m.dailyReportJob != nil {
 		m.dailyReportJob.Stop()
 		m.dailyReportJob = nil
@@ -674,6 +679,42 @@ func (m *Manager) GetDeadTorrentMonitor() *DeadTorrentMonitor {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.deadTorrentMonitor
+}
+
+// SetTransferWorker 登记转移做种后台；替换旧实例时先停掉旧的。
+func (m *Manager) SetTransferWorker(w *TransferWorker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.transferWorker != nil && m.transferWorker != w {
+		m.transferWorker.Stop()
+	}
+	m.transferWorker = w
+}
+
+// GetTransferWorker 返回转移做种后台（未接线时为 nil）。
+func (m *Manager) GetTransferWorker() *TransferWorker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.transferWorker
+}
+
+// TransferDownloader 按下载器 ID 取管理器里的实例与配置（转移做种用）；下载器不存在、未启用或连不上时返回错误。
+func (m *Manager) TransferDownloader(ctx context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
+	if global.GlobalDB == nil {
+		return nil, models.DownloaderSetting{}, errors.New("数据库未初始化")
+	}
+	var ds models.DownloaderSetting
+	if err := global.GlobalDB.DB.WithContext(ctx).First(&ds, id).Error; err != nil {
+		return nil, ds, fmt.Errorf("下载器 %d 不存在: %w", id, err)
+	}
+	if !ds.Enabled {
+		return nil, ds, fmt.Errorf("下载器 %s 未启用", ds.Name)
+	}
+	dl, err := m.downloaderManager.GetDownloaderContext(ctx, ds.Name)
+	if err != nil {
+		return nil, ds, err
+	}
+	return dl, ds, nil
 }
 
 // SetBrushMonitor 登记刷流监控；替换旧实例时先停掉旧的。

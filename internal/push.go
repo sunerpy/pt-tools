@@ -36,6 +36,9 @@ type PushTorrentRequest struct {
 	Source string
 	// Meta 是调用方已经知道的种子信息（刷流从搜索结果里带来）；为空时不覆盖库里已有的值。
 	Meta *PushTorrentMeta
+	// ReuseExistingData 用于转移做种与辅种：数据已经在盘上。强制暂停添加（校验完才开始），
+	// 跳过磁盘预留，站点容量闸门照常；不写种子记录，成功后由调用方更新。
+	ReuseExistingData bool
 }
 
 // PushTorrentMeta 是推送时一并写进 TorrentInfo 的种子信息。H&R 与体积会被自动清理的 H&R 保护用到
@@ -132,20 +135,23 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 		updateCols = append(updateCols, "torrent_size", "has_hr", "hr_seed_time_h", "is_free", "free_level", "free_end_time")
 	}
 
-	err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
-		// 使用 upsert 创建或更新记录
-		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
-			DoUpdates: clause.AssignmentColumns(updateCols),
-		}).Create(torrentInfo).Error
-	})
-	if err != nil {
-		return nil, fmt.Errorf("保存种子记录失败: %w", err)
+	record := !req.ReuseExistingData
+	if record {
+		err = global.GlobalDB.WithTransaction(func(tx *gorm.DB) error {
+			// 使用 upsert 创建或更新记录
+			return tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
+				DoUpdates: clause.AssignmentColumns(updateCols),
+			}).Create(torrentInfo).Error
+		})
+		if err != nil {
+			return nil, fmt.Errorf("保存种子记录失败: %w", err)
+		}
 	}
 
 	// 构建添加选项
 	opts := downloader.AddTorrentOptions{
-		AddAtPaused: !dlSetting.AutoStart,
+		AddAtPaused: !dlSetting.AutoStart || req.ReuseExistingData,
 		SavePath:    req.SavePath,
 		Category:    req.Category,
 		Tags:        req.Tags,
@@ -160,7 +166,8 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	// gate           = effective_free - thisTorrentSize >= threshold
 	// 用全局互斥锁串行化整个 check + Reserve + push 临界区。
 	var pushTorrentSize int64
-	diskProtectOn := glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0
+	// 数据已经在盘上时不再占用空间，不走磁盘保护
+	diskProtectOn := record && glErr == nil && glOnly.CleanupDiskProtect && glOnly.CleanupMinDiskSpaceGB > 0
 	if diskProtectOn {
 		mu := PushMutex()
 		mu.Lock()
@@ -280,12 +287,14 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			GetDiskBudget().Release(pushTorrentSize)
 		}
 		// 更新推送失败状态
-		_ = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
-			Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
-			Updates(map[string]any{
-				"last_error":  err.Error(),
-				"retry_count": gorm.Expr("retry_count + 1"),
-			})
+		if record {
+			_ = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
+				Updates(map[string]any{
+					"last_error":  err.Error(),
+					"retry_count": gorm.Expr("retry_count + 1"),
+				})
+		}
 		return nil, fmt.Errorf("推送种子失败: %w", err)
 	}
 
@@ -295,12 +304,14 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			GetDiskBudget().Release(pushTorrentSize)
 		}
 		errMsg := fmt.Sprintf("%v", result.Message)
-		_ = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
-			Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
-			Updates(map[string]any{
-				"last_error":  errMsg,
-				"retry_count": gorm.Expr("retry_count + 1"),
-			})
+		if record {
+			_ = global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+				Where("site_name = ? AND torrent_id = ?", req.SiteID, req.TorrentID).
+				Updates(map[string]any{
+					"last_error":  errMsg,
+					"retry_count": gorm.Expr("retry_count + 1"),
+				})
+		}
 		return &PushTorrentResult{
 			Success:     false,
 			TorrentHash: torrentHash,
@@ -310,6 +321,12 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	// 推送成功的预留由 scheduler/cleanup_monitor 周期 Reset 归还，避免与
 	// downloader.GetIncompletePendingBytes 在 qBit 可见性窗口内双重计数
 	// （Issue #299 race，详见 disk_budget.go 顶部注释）。
+
+	if !record {
+		sLogger().Infof("[PushTorrent] 种子已暂停加入（复用已有数据）: site=%s, hash=%s, downloader=%s",
+			req.SiteID, torrentHash, dlSetting.Name)
+		return &PushTorrentResult{Success: true, TorrentHash: torrentHash}, nil
+	}
 
 	// 推送成功，更新数据库状态。下载器信息与 RSS 路径一致地写上：免费到期进度更新、
 	// 自动删种的「数据库」范围都按 downloader_name 找任务，缺了就管不到手动推送的种子。

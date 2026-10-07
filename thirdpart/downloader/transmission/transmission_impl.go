@@ -892,14 +892,7 @@ func (t *TransmissionClient) AddTorrentEx(torrentURL string, opt downloader.AddT
 	}
 
 	// Transmission 使用 labels 代替 category/tags
-	var labels []string
-	if opt.Category != "" {
-		labels = append(labels, opt.Category)
-	}
-	if opt.Tags != "" {
-		labels = append(labels, opt.Tags)
-	}
-	if len(labels) > 0 {
+	if labels := addLabels(opt.Category, opt.Tags); len(labels) > 0 {
 		args["labels"] = labels
 	}
 
@@ -960,14 +953,7 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 	}
 
 	// Transmission 使用 labels 代替 category/tags
-	var labels []string
-	if opt.Category != "" {
-		labels = append(labels, opt.Category)
-	}
-	if opt.Tags != "" {
-		labels = append(labels, opt.Tags)
-	}
-	if len(labels) > 0 {
+	if labels := addLabels(opt.Category, opt.Tags); len(labels) > 0 {
 		args["labels"] = labels
 	}
 
@@ -1077,6 +1063,21 @@ func normalizeTransmissionIDs(ids []string) []any {
 		normalized = append(normalized, trimmed)
 	}
 	return normalized
+}
+
+// addLabels 是加种时的 labels：分类在前，逗号分隔的标签逐个跟上，去掉空的和重复的。
+// Transmission 不接受带逗号的 label（labels cannot contain comma），所以不能把整串标签当成一个。
+func addLabels(category, tags string) []string {
+	labels := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, l := range append([]string{strings.TrimSpace(category)}, splitLabels(tags)...) {
+		if l == "" || seen[l] {
+			continue
+		}
+		seen[l] = true
+		labels = append(labels, l)
+	}
+	return labels
 }
 
 func splitLabels(tags string) []string {

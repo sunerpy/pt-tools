@@ -137,6 +137,10 @@ const BOARD_40 = [
 const NOT_ON_BOARD = {
   "views/BrushTasks.vue":
     "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗与种子抽屉都不在那张清点图里",
+  "views/TorrentTransfer.vue":
+    "转移做种页（路线图 M5）晚于画板 40 定稿：定时规则的编辑弹窗不在那张清点图里",
+  "components/downloader/TransferDialog.vue":
+    "「转移到其他下载器」（路线图 M5）晚于画板 40 定稿：下载器 Web UI 与任务列表的批量操作共用这个弹窗",
   "views/DynamicSiteSettings.vue":
     "动态站点两个弹窗：路由在 router/index.ts 里已注释掉，画板刻意不画（design-system.md 的说明）",
   "views/SiteList.vue#导入站点模板":

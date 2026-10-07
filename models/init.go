@@ -215,6 +215,10 @@ func NewDBWithVersionAndHooks(
 		&BrushTorrent{},
 		&BrushTorrentSample{},
 		&BrushDailyStat{},
+		// 转移做种（M5）
+		&TorrentTransferJob{},
+		&DownloaderPathMap{},
+		&TransferRule{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

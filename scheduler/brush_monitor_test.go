@@ -636,12 +636,14 @@ func TestBrushMonitor_StopCancelsManualRun(t *testing.T) {
 	}()
 	<-site.entered
 	r.mon.Stop()
+	// Stop 等的是这一轮本身（runs.Done 在 RunTask 的 defer 里）；RunTask 返回到协程写入 done 之间还隔着一步，
+	// 所以这里给一个短时限，而不是非阻塞地读（负载高时那一步会落在读之后）
 	select {
 	case err := <-done:
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
-	default:
-		t.Fatal("Stop 返回时手动运行还没退出")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop 之后手动运行没有退出")
 	}
 	_, err := r.mon.RunTask(context.Background(), task.ID)
 	assert.ErrorIs(t, err, ErrBrushStopped)

@@ -12,6 +12,7 @@ import {
 import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDetail.vue";
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
+import TransferDialog from "@/components/downloader/TransferDialog.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -203,6 +204,13 @@ const sortOptions = [
 ];
 
 const selectedCount = computed(() => selectedRows.value.length);
+/** 转移做种（路线图 M5）：勾选的种子按所在下载器和 info hash 交给转移对话框 */
+const transferDialogVisible = ref(false);
+const transferItems = computed(() =>
+  selectedRows.value
+    .filter((row) => row.info_hash)
+    .map((row) => ({ source_id: row.downloader_id, hash: row.info_hash })),
+);
 const torrentStateCounters = computed(() => {
   let downloading = 0;
   let seeding = 0;
@@ -1415,6 +1423,11 @@ async function batchAction(
   }
 }
 
+/** 转移任务建好后刷新一次列表：后台很快会把种子暂停加入目标下载器 */
+function onTransferCreated() {
+  void loadTorrents();
+}
+
 function openSetLocationDialog() {
   if (selectedCount.value === 0) {
     ElMessage.warning("请先选择任务");
@@ -2001,6 +2014,13 @@ function toggleSidebar() {
                 </el-button>
                 <el-button
                   size="small"
+                  :disabled="!transferItems.length"
+                  data-testid="hub-transfer"
+                  @click="transferDialogVisible = true">
+                  <PtIcon name="arrow-right-left" :size="13" /><span>转移到…</span>
+                </el-button>
+                <el-button
+                  size="small"
                   type="danger"
                   :loading="actionLoading"
                   :disabled="!selectedCanUse('delete')"
@@ -2307,6 +2327,11 @@ function toggleSidebar() {
         </div>
       </div>
     </div>
+
+    <TransferDialog
+      v-model="transferDialogVisible"
+      :items="transferItems"
+      @created="onTransferCreated" />
 
     <el-dialog
       v-model="locationDialogVisible"
