@@ -39,6 +39,8 @@ type fakeIYUU struct {
 	retryAfter int
 	reports    int
 	queries    int
+	// onReport 在 reportExisting 请求里调用（模拟这一轮运行中用户改了设置）
+	onReport func()
 }
 
 func (f *fakeIYUU) server(t *testing.T) *httptest.Server {
@@ -54,6 +56,9 @@ func (f *fakeIYUU) server(t *testing.T) *httptest.Server {
 			write(0, map[string]any{"sites": f.sites})
 		case "/reseed/sites/reportExisting":
 			f.reports++
+			if f.onReport != nil {
+				f.onReport()
+			}
 			write(0, map[string]any{"sid_sha1": "sum-" + strings.Join(r.PostForm["sid_list[]"], ",")})
 		case "/reseed/index/index":
 			f.queries++
@@ -498,4 +503,46 @@ func TestRunRetriesDownloadFailuresLater(t *testing.T) {
 	assert.Equal(t, models.ReseedQueued, recs[0].State)
 	assert.False(t, recs[0].Retryable)
 	assert.Equal(t, models.ReseedFailed, recs[1].State)
+}
+
+// 一轮运行中清除 token：旧设置不会把 token 和 sid_sha1 写回去，这一轮停下、不再用旧 token 查询。
+func TestRunTokenClearedMidRun(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(func(u *SettingsUpdate) { u.IntervalHours = 6 })
+	good := e.candidate("61", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 61, "info_hash": good})
+	empty := ""
+	e.iyuu.onReport = func() {
+		_, err := e.svc.SaveSettings(ctx, SettingsUpdate{Token: &empty, IntervalHours: 8})
+		assert.NoError(t, err)
+	}
+	res, err := e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, res.Stopped, "token 已清除或更换")
+	assert.Zero(t, e.iyuu.queries, "不再用旧 token 查询")
+	var row models.ReseedSetting
+	require.NoError(t, e.db.First(&row, 1).Error)
+	assert.Empty(t, row.TokenEncrypted, "旧设置不会把 token 写回来")
+	assert.Empty(t, row.SidSha1, "旧 token 的 sid_sha1 不写进缓存")
+	assert.Equal(t, 8, row.IntervalHours, "这一轮里保存的设置保留")
+	assert.False(t, row.Enabled)
+}
+
+// 保存设置只写配置项：上次运行结果和 sid_sha1 缓存不受影响（没换 token 时）。
+func TestSaveSettingsKeepsRunState(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	require.NoError(t, e.svc.RecordRun(ctx, e.now, "ok"))
+	require.NoError(t, e.db.Model(&models.ReseedSetting{}).Where("id = 1").
+		Updates(map[string]any{"sid_sha1": "s", "sid_key": "1", "sid_at": e.now}).Error)
+	got, err := e.svc.SaveSettings(ctx, SettingsUpdate{Enabled: true, IntervalHours: 6})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", got.LastResult)
+	assert.True(t, got.HasToken)
+	var row models.ReseedSetting
+	require.NoError(t, e.db.First(&row, 1).Error)
+	assert.Equal(t, "s", row.SidSha1, "没换 token 时缓存保留")
+	assert.Equal(t, 6, row.IntervalHours)
 }

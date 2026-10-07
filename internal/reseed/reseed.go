@@ -70,6 +70,9 @@ type Config struct {
 type Service struct {
 	cfg Config
 
+	// saveMu 让保存设置的“读出、校验、写入”不和另一次保存交错（开启时要有 token，不能读到之后被清掉）。
+	saveMu sync.Mutex
+
 	mu        sync.Mutex
 	sites     []iyuu.Site
 	sitesAt   time.Time
@@ -163,7 +166,8 @@ func view(r models.ReseedSetting) Settings {
 	return out
 }
 
-// SaveSettings 校验并保存设置。开启时必须有 token；换 token 时作废缓存的站点列表与 sid_sha1。
+// SaveSettings 校验并保存设置（token 以外的项全量保存）。开启时必须有 token；换 token 时作废缓存的站点列表与 sid_sha1。
+// 只写配置列：运行中的一轮会写上次运行结果和 sid_sha1 缓存，整行写回会把它们改回旧值。
 func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings, error) {
 	switch {
 	case u.IntervalHours != 0 && (u.IntervalHours < models.ReseedMinIntervalHours || u.IntervalHours > models.ReseedMaxIntervalHours):
@@ -171,54 +175,55 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 	case u.MaxPerSitePerDay < 0 || u.MaxPerSitePerDay > models.ReseedMaxPerSitePerDay:
 		return Settings{}, fmt.Errorf("%w：每站每天最多 %d 个", ErrInvalid, models.ReseedMaxPerSitePerDay)
 	}
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	r, err := s.row(ctx)
 	if err != nil {
 		return Settings{}, err
 	}
+	cols := map[string]any{
+		"enabled":              u.Enabled,
+		"interval_hours":       u.IntervalHours,
+		"max_per_site_per_day": u.MaxPerSitePerDay,
+		"downloader_ids":       encode(dedupeUints(u.DownloaderIDs)),
+		"site_names":           encode(dedupeStrings(u.SiteNames)),
+	}
+	tokenEnc := r.TokenEncrypted
 	if u.Token != nil {
-		token := strings.TrimSpace(*u.Token)
-		if token == "" {
-			r.TokenEncrypted = ""
-		} else {
+		tokenEnc = ""
+		if token := strings.TrimSpace(*u.Token); token != "" {
 			if s.cfg.Cipher == nil {
 				return Settings{}, errors.New("没有可用的加密密钥，不能保存 token")
 			}
-			enc, err := s.cfg.Cipher.Encrypt(token)
-			if err != nil {
+			if tokenEnc, err = s.cfg.Cipher.Encrypt(token); err != nil {
 				return Settings{}, fmt.Errorf("加密 token 失败: %w", err)
 			}
-			r.TokenEncrypted = enc
 		}
-		r.SidSha1, r.SidKey, r.SidAt = "", "", nil
+		cols["token_encrypted"] = tokenEnc
+		cols["sid_sha1"], cols["sid_key"], cols["sid_at"] = "", "", nil
+	}
+	if u.Enabled && tokenEnc == "" {
+		return Settings{}, fmt.Errorf("%w：开启辅种前要先填写 IYUU token", ErrInvalid)
+	}
+	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
+	if err := ensureRow(db); err != nil {
+		return Settings{}, fmt.Errorf("保存辅种设置失败: %w", err)
+	}
+	if err := db.Model(&models.ReseedSetting{}).Where("id = 1").Updates(cols).Error; err != nil {
+		return Settings{}, fmt.Errorf("保存辅种设置失败: %w", err)
+	}
+	if u.Token != nil {
 		s.mu.Lock()
 		s.sites, s.sitesAt, s.sitesFrom = nil, time.Time{}, ""
 		s.mu.Unlock()
 	}
-	if u.Enabled && r.TokenEncrypted == "" {
-		return Settings{}, fmt.Errorf("%w：开启辅种前要先填写 IYUU token", ErrInvalid)
-	}
-	r.ID = 1
-	r.Enabled = u.Enabled
-	r.IntervalHours = u.IntervalHours
-	r.MaxPerSitePerDay = u.MaxPerSitePerDay
-	r.DownloaderIDs = encode(dedupeUints(u.DownloaderIDs))
-	r.SiteNames = encode(dedupeStrings(u.SiteNames))
-	if err := s.saveRow(ctx, &r); err != nil {
-		return Settings{}, err
-	}
-	return view(r), nil
+	return s.Settings(ctx)
 }
 
-// saveRow 写入唯一的那一行设置（没有就建）。
-func (s *Service) saveRow(ctx context.Context, r *models.ReseedSetting) error {
-	r.ID = 1
-	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		UpdateAll: true,
-	}).Create(r).Error; err != nil {
-		return fmt.Errorf("保存辅种设置失败: %w", err)
-	}
-	return nil
+// ensureRow 建出唯一的那一行设置（已有时不动）。
+func ensureRow(db *gorm.DB) error {
+	var r models.ReseedSetting
+	return db.FirstOrCreate(&r, models.ReseedSetting{ID: 1}).Error
 }
 
 func (s *Service) token(ctx context.Context, r models.ReseedSetting) (string, error) {
@@ -255,8 +260,7 @@ func (s *Service) Due(ctx context.Context) bool {
 // RecordRun 记下这一轮的时间和结果。
 func (s *Service) RecordRun(ctx context.Context, at time.Time, summary string) error {
 	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
-	r := models.ReseedSetting{}
-	if err := db.FirstOrCreate(&r, models.ReseedSetting{ID: 1}).Error; err != nil {
+	if err := ensureRow(db); err != nil {
 		return fmt.Errorf("保存辅种设置失败: %w", err)
 	}
 	if err := db.Model(&models.ReseedSetting{}).Where("id = 1").
@@ -466,6 +470,14 @@ func (s *Service) Run(ctx context.Context) (RunResult, error) {
 			res.Stopped = "这一轮超过时限，已停下"
 			break
 		}
+		// token 在这一轮里被清除或更换时停下，不再用旧 token 发送 info hash
+		if cur, err := s.row(ctx); err != nil {
+			res.Errors = append(res.Errors, err.Error())
+			break
+		} else if cur.TokenEncrypted != r.TokenEncrypted {
+			res.Stopped = "IYUU token 已清除或更换，这一轮停下"
+			break
+		}
 		batch := hashes[start:min(start+iyuu.MaxBatch, len(hashes))]
 		found, err := s.query(ctx, client, batch, &sidSha1, &r, sids, &refreshed)
 		if err != nil {
@@ -537,7 +549,10 @@ func (s *Service) sidSha1(ctx context.Context, client *iyuu.Client, r *models.Re
 		return "", err
 	}
 	r.SidSha1, r.SidKey, r.SidAt = sum, key, &now
-	if err := s.saveRow(ctx, r); err != nil {
+	// 只写缓存列，并且只在 token 没换过时写：这一轮读出设置之后，token 可能已经被清除或更换
+	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Model(&models.ReseedSetting{}).
+		Where("id = 1 AND token_encrypted = ?", r.TokenEncrypted).
+		Updates(map[string]any{"sid_sha1": sum, "sid_key": key, "sid_at": now}).Error; err != nil {
 		s.cfg.Logger.Warnf("[辅种] 保存 sid_sha1 失败: %v", err)
 	}
 	return sum, nil
