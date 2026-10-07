@@ -92,6 +92,12 @@ const trChanged = computed(
     (previewed.value.from !== trFrom.value || previewed.value.to !== trTo.value),
 );
 const matchHashes = computed(() => [...new Set(matches.value.map((m) => m.hash))]);
+/** 替换后不是有效地址的条数：列出来但不能执行 */
+const invalidMatches = computed(() => matches.value.filter((m) => !m.id).length);
+/** 行的 key：能执行的用指纹，不能执行的没有指纹，用种子和原地址 */
+function matchKey(m: AssistantTrackerMatch): string {
+  return m.id || `${m.hash}|${m.old}`;
+}
 const trSelHashes = computed(
   () => new Set(matches.value.filter((m) => trSel.value.includes(m.id)).map((m) => m.hash)).size,
 );
@@ -586,24 +592,31 @@ onMounted(() => {
         v-else-if="!isMobile"
         :data="matches"
         class="pt-grid"
-        row-key="id"
+        :row-key="matchKey"
         @selection-change="(rows: AssistantTrackerMatch[]) => (trSel = rows.map((r) => r.id))">
-        <el-table-column type="selection" width="44" />
+        <el-table-column
+          type="selection"
+          width="44"
+          :selectable="(row: AssistantTrackerMatch) => !!row.id" />
         <el-table-column label="种子" min-width="200" class-name="pt-cell-strong">
           <template #default="{ row }">{{ row.name }}</template>
         </el-table-column>
         <el-table-column label="原地址 → 新地址" min-width="360">
           <template #default="{ row }">
             <div class="da-url"><span class="da-url__k">原</span>{{ row.old }}</div>
-            <div class="da-url da-url--new"><span class="da-url__k">新</span>{{ row.new }}</div>
+            <div v-if="row.error" class="da-url da-url--err">{{ row.error }}</div>
+            <div v-else class="da-url da-url--new">
+              <span class="da-url__k">新</span>{{ row.new }}
+            </div>
           </template>
         </el-table-column>
       </el-table>
       <div v-else class="da-cards">
-        <PtRowCard v-for="m in matches" :key="m.id">
+        <PtRowCard v-for="m in matches" :key="matchKey(m)">
           <template #lead>
             <el-checkbox
-              :model-value="trSel.includes(m.id)"
+              :model-value="!!m.id && trSel.includes(m.id)"
+              :disabled="!m.id"
               :aria-label="`选择 ${m.name}`"
               @update:model-value="
                 (v: string | number | boolean) => toggle(trSel, m.id, Boolean(v))
@@ -612,14 +625,18 @@ onMounted(() => {
           <template #title>{{ m.name }}</template>
           <template #meta>
             <span class="da-url da-row-full"><span class="da-url__k">原</span>{{ m.old }}</span>
-            <span class="da-url da-url--new da-row-full"
+            <span v-if="m.error" class="da-url da-url--err da-row-full">{{ m.error }}</span>
+            <span v-else class="da-url da-url--new da-row-full"
               ><span class="da-url__k">新</span>{{ m.new }}</span
             >
           </template>
         </PtRowCard>
       </div>
       <p v-if="matches.length" class="da-foot">
-        {{ matchHashes.length }} 个种子、{{ matches.length }} 个地址匹配。
+        {{ matchHashes.length }} 个种子、{{ matches.length }} 个地址匹配。<template
+          v-if="invalidMatches"
+          >其中 {{ invalidMatches }} 个替换后不是有效地址，不能执行。</template
+        >
       </p>
     </PtPanel>
 
@@ -752,6 +769,11 @@ onMounted(() => {
 
 .da-url--new {
   color: var(--pt-t1);
+}
+
+.da-url--err {
+  font-family: var(--pt-font-family);
+  color: var(--pt-dang);
 }
 
 .da-url__k {

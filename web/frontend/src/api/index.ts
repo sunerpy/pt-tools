@@ -1869,11 +1869,14 @@ export interface AssistantSiteTag {
 
 /** 下载器助手：要替换的 tracker 地址（已脱敏）。id 是这条「原地址 → 新地址」的指纹，执行时按它核对 */
 export interface AssistantTrackerMatch {
+  /** 这条「原地址 → 新地址」的指纹；替换后不是有效地址时为空，不能执行 */
   id: string;
   hash: string;
   name: string;
   old: string;
   new: string;
+  /** 替换后不是有效地址的原因 */
+  error?: string;
 }
 
 export type AssistantDeadReason = "unregistered" | "not_found";

@@ -244,6 +244,37 @@ describe("下载器助手", () => {
     expect(ui.confirm.mock.calls.at(-1)![0]).toContain("1 个地址（1 个种子）");
   });
 
+  it("替换 tracker：替换后不是有效地址的那条写明原因，不能勾选", async () => {
+    await mountPage();
+    await chooseTab("替换 Tracker");
+    setInput("da-tr-from", "https://old.hdsky.me");
+    setInput("da-tr-to", "ftp://x");
+    await flush();
+    api.previewTrackers.mockResolvedValue({
+      supported: true,
+      total: 1,
+      scanned: 1,
+      items: [
+        {
+          id: "",
+          hash: "aa",
+          name: "A",
+          old: "https://old.hdsky.me/announce.php?passkey=***",
+          new: "",
+          error: "替换后不是有效的 tracker 地址: ftp://x/announce.php?passkey=***",
+        },
+      ],
+    });
+    testid("da-tr-preview").click();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("替换后不是有效的 tracker 地址"),
+    );
+    expect(document.body.textContent).toContain("1 个替换后不是有效地址，不能执行");
+    const box = document.querySelector<HTMLInputElement>(".el-table__body .el-checkbox__original")!;
+    expect(box.disabled).toBe(true);
+    expect((testid("da-tr-apply") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("补站点标签：勾选后按站点提交", async () => {
     await mountPage();
     await chooseTab("补站点标签");
