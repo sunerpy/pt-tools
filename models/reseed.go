@@ -73,6 +73,10 @@ const (
 	ReseedQueued = "queued"
 	// ReseedFailed 是下载种子、核对 info hash 或文件列表失败；同一对不再尝试。
 	ReseedFailed = "failed"
+	// 下面几个是清除已结束的辅种任务时，写进记录里的任务结果（任务失败的记为 ReseedFailed）。
+	ReseedDone       = "done"
+	ReseedRolledBack = "rolled_back"
+	ReseedCanceled   = "canceled"
 )
 
 // ReseedRecord 记下对某个站点某个种子（info hash）的一次辅种尝试，同一对只尝试一次。

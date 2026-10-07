@@ -546,3 +546,78 @@ func TestSaveSettingsKeepsRunState(t *testing.T) {
 	assert.Equal(t, "s", row.SidSha1, "没换 token 时缓存保留")
 	assert.Equal(t, 6, row.IntervalHours)
 }
+
+// 清除已结束的辅种任务：任务结果先写进记录（记录不再指向任务，更新时间不变），没结束的任务和它的记录不动；
+// 记录指向的任务不在了时标出来，不当成还在进行。
+func TestClearFinishedJobs(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	a := e.candidate("71", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	b := e.candidate("72", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 71, "info_hash": a}, map[string]any{"sid": 1, "torrent_id": 72, "info_hash": b})
+	res, err := e.svc.Run(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Created)
+	var recs []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&recs).Error)
+	require.Len(t, recs, 2)
+	require.NotNil(t, recs[0].JobID)
+	require.NoError(t, e.db.Model(&models.TorrentTransferJob{}).Where("id = ?", *recs[0].JobID).
+		Updates(map[string]any{"state": models.TransferRolledBack, "message": "校验只到 20.0%"}).Error)
+
+	n, err := e.svc.ClearFinishedJobs(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	var after []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&after).Error)
+	assert.Equal(t, models.ReseedRolledBack, after[0].State)
+	assert.Equal(t, "校验只到 20.0%", after[0].Message)
+	assert.Nil(t, after[0].JobID)
+	assert.True(t, after[0].UpdatedAt.Equal(recs[0].UpdatedAt), "更新时间不变")
+	assert.Equal(t, models.ReseedQueued, after[1].State, "没结束的任务不动")
+	assert.NotNil(t, after[1].JobID)
+	var jobs int64
+	require.NoError(t, e.db.Model(&models.TorrentTransferJob{}).Count(&jobs).Error)
+	assert.EqualValues(t, 1, jobs)
+
+	// 任务被别的途径删掉了：标出来
+	require.NoError(t, e.db.Where("id = ?", *after[1].JobID).Delete(&models.TorrentTransferJob{}).Error)
+	views, err := e.svc.Records(ctx)
+	require.NoError(t, err)
+	byID := map[string]RecordView{}
+	for _, v := range views {
+		byID[v.TorrentID] = v
+	}
+	assert.True(t, byID["72"].JobMissing)
+	assert.False(t, byID["71"].JobMissing)
+	assert.Equal(t, models.ReseedRolledBack, byID["71"].State)
+}
+
+// 记录按最后一次尝试的时间排：7 天后重试的排在前面。
+func TestRecordsOrderByLastAttempt(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("81", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	data := e.site.data["81"]
+	delete(e.site.data, "81")
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 81, "info_hash": good})
+	_, err := e.svc.Run(ctx)
+	require.NoError(t, err)
+	e.now = e.now.Add(time.Hour)
+	other := e.candidate("82", map[string]int64{"a.mkv": 100})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 81, "info_hash": good}, map[string]any{"sid": 1, "torrent_id": 82, "info_hash": other})
+	_, err = e.svc.Run(ctx)
+	require.NoError(t, err)
+
+	e.site.data["81"] = data
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	_, err = e.svc.Run(ctx)
+	require.NoError(t, err)
+	views, err := e.svc.Records(ctx)
+	require.NoError(t, err)
+	require.Len(t, views, 2)
+	assert.Equal(t, "81", views[0].TorrentID, "刚重试过的在前面")
+	assert.Equal(t, models.ReseedQueued, views[0].State)
+}

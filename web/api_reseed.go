@@ -165,9 +165,14 @@ func (s *Server) apiReseedJobs(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"items": transferJobViews(r.Context(), jobs)})
 	case http.MethodDelete:
-		n, err := svc.ClearFinished(r.Context(), models.JobKindReseed)
+		// 由辅种服务来清：先把任务结果写进辅种记录，记录不会因为任务没了而一直显示进行中
+		_, rs, ok := s.reseedWorker(w)
+		if !ok {
+			return
+		}
+		n, err := rs.ClearFinishedJobs(r.Context())
 		if err != nil {
-			writeTransferError(w, err)
+			writeReseedError(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"deleted": n})

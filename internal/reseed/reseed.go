@@ -735,17 +735,18 @@ func (s *Service) saveRecord(ctx context.Context, rec *models.ReseedRecord) {
 
 // ---------- 记录 ----------
 
-// RecordView 是记录列表里的一项：记录加上任务的状态。
+// RecordView 是记录列表里的一项：记录加上任务的状态。JobMissing 表示记录指向的任务已经不在了（结果不知道）。
 type RecordView struct {
 	models.ReseedRecord
 	JobState   string `json:"job_state,omitempty"`
 	JobMessage string `json:"job_message,omitempty"`
+	JobMissing bool   `json:"job_missing,omitempty"`
 }
 
-// Records 返回最新的辅种记录。
+// Records 返回最近尝试的辅种记录（重试过的按最后一次尝试的时间排）。
 func (s *Service) Records(ctx context.Context) ([]RecordView, error) {
 	var recs []models.ReseedRecord
-	if err := s.cfg.DB.WithContext(ctx).Order("id DESC").Limit(maxRecordsListed).Find(&recs).Error; err != nil {
+	if err := s.cfg.DB.WithContext(ctx).Order("updated_at DESC, id DESC").Limit(maxRecordsListed).Find(&recs).Error; err != nil {
 		return nil, fmt.Errorf("读取辅种记录失败: %w", err)
 	}
 	ids := make([]uint, 0)
@@ -770,11 +771,62 @@ func (s *Service) Records(ctx context.Context) ([]RecordView, error) {
 		if r.JobID != nil {
 			if j, ok := jobs[*r.JobID]; ok {
 				v.JobState, v.JobMessage = j.State, j.Message
+			} else {
+				v.JobMissing = true
 			}
 		}
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// finalJobStates 是辅种任务结束时的状态。
+var finalJobStates = []string{models.TransferDone, models.TransferRolledBack, models.TransferFailed, models.TransferCanceled}
+
+// ClearFinishedJobs 删除已经结束的辅种任务，返回删除的条数。删除前把任务的结果写进引用它的辅种记录，
+// 记录不再指向任务；不改记录的更新时间（重试间隔和每天的上限按它算）。
+func (s *Service) ClearFinishedJobs(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var jobs []models.TorrentTransferJob
+		if err := tx.Omit("torrent_data").Where("kind = ? AND state IN ?", models.JobKindReseed, finalJobStates).
+			Find(&jobs).Error; err != nil {
+			return err
+		}
+		if len(jobs) == 0 {
+			return nil
+		}
+		ids := make([]uint, 0, len(jobs))
+		for _, j := range jobs {
+			ids = append(ids, j.ID)
+			state, msg := recordResult(j)
+			if err := tx.Model(&models.ReseedRecord{}).Where("job_id = ?", j.ID).
+				UpdateColumns(map[string]any{"state": state, "message": msg, "job_id": nil}).Error; err != nil {
+				return err
+			}
+		}
+		res := tx.Where("id IN ? AND state IN ?", ids, finalJobStates).Delete(&models.TorrentTransferJob{})
+		n = res.RowsAffected
+		return res.Error
+	})
+	if err != nil {
+		return 0, fmt.Errorf("清除已结束的辅种任务失败: %w", err)
+	}
+	return n, nil
+}
+
+// recordResult 是结束的辅种任务写进记录里的结果和说明。
+func recordResult(j models.TorrentTransferJob) (string, string) {
+	switch j.State {
+	case models.TransferDone:
+		return models.ReseedDone, j.Message
+	case models.TransferRolledBack:
+		return models.ReseedRolledBack, j.Message
+	case models.TransferCanceled:
+		return models.ReseedCanceled, j.Message
+	default:
+		return models.ReseedFailed, j.Message
+	}
 }
 
 // ---------- 小工具 ----------
