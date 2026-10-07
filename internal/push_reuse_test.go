@@ -40,7 +40,8 @@ func TestPushTorrent_ReuseExistingData(t *testing.T) {
 		func(_ []byte, o downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
 			got = o
 			return downloader.AddTorrentResult{Success: true, Hash: "h"}, nil
-		})
+		},
+	)
 	dlID := seedQbitDownloader(t, "http://127.0.0.1:9") // AutoStart = true
 
 	res, err := PushTorrentToDownloader(context.Background(), PushTorrentRequest{
