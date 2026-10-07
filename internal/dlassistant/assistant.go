@@ -463,6 +463,7 @@ func DeleteDeadTorrents(ctx context.Context, dl downloader.Downloader, hashes []
 		return res, fmt.Errorf("读取下载器种子失败: %w", err)
 	}
 	byHash := indexTorrents(torrents)
+	sharing := downloader.NewDataSharing(torrents, downloader.FilesOf(dl))
 	removed := map[string]bool{} // 已经删掉的不算“别的种子”，共用数据的最后一个连数据删
 	seen := map[string]bool{}
 	for _, h := range hashes {
@@ -490,7 +491,7 @@ func DeleteDeadTorrents(ctx context.Context, dl downloader.Downloader, hashes []
 			res.skip(hash, t.Name, "tracker 已经恢复正常，没有删除")
 			continue
 		}
-		withData := removeData && !downloader.SharesData(torrents, t, removed)
+		withData := removeData && !sharing.Shares(t, removed)
 		if err := dl.RemoveTorrent(t.ID, withData); err != nil {
 			res.fail(hash, t.Name, err)
 			continue

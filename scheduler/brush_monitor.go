@@ -424,6 +424,7 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 	for _, t := range byHash {
 		all = append(all, t)
 	}
+	sharing := downloader.NewDataSharing(all, downloader.FilesOf(dl))
 	removed := map[string]bool{} // 这一轮已删掉的（键见 downloader.TorrentKey）
 	for i := range rows {
 		bt := rows[i]
@@ -465,7 +466,7 @@ func (m *BrushMonitor) sampleAndRemove(task *models.BrushTask, dl downloader.Dow
 			continue
 		}
 		// 数据还被别的种子用着（如给它加的辅种）时只删种子、保留数据
-		withData := task.RemoveWithData && !downloader.SharesData(all, t, removed)
+		withData := task.RemoveWithData && !sharing.Shares(t, removed)
 		if task.RemoveWithData && !withData {
 			reason += "；数据还被别的种子用着，保留数据"
 		}

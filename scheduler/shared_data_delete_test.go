@@ -133,7 +133,7 @@ func TestEmergencyCleanup_SharedData(t *testing.T) {
 	candidates := []downloader.Torrent{marked, markedTwin, sharedBig, plain}
 
 	// 当前 60 GB，还差 60 GB：已选中的 30 GB + 和它共用数据的 0 GB + plain 50 GB
-	result := cm.emergencyCleanup(cfg, all, candidates, []downloader.Torrent{marked}, 60)
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing(all, nil), candidates, []downloader.Torrent{marked}, 60)
 	ids := map[string]bool{}
 	for _, r := range result {
 		ids[r.ID] = true
@@ -142,4 +142,30 @@ func TestEmergencyCleanup_SharedData(t *testing.T) {
 	assert.True(t, ids["mt"], "和要删的种子共用数据，可以一起删")
 	assert.True(t, ids["p"], "共用的那份只算一次，还不够，再删一个")
 	assert.True(t, ids["m"])
+}
+
+// 紧急清理：共用数据的两个种子都只是候选（常规规则都没选中）时，整组一起挑、空间只算一次；组里有受保护的就不挑。
+func TestEmergencyCleanup_PicksSharedGroup(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupMinDiskSpaceGB = 100 // 目标 120 GB
+
+	a := downloader.Torrent{ID: "a", InfoHash: "a", TotalSize: 80 << 30, ContentPath: "/d/A", State: downloader.TorrentPaused, Ratio: 9}
+	b := downloader.Torrent{ID: "b", InfoHash: "b", TotalSize: 80 << 30, ContentPath: "/d/A", State: downloader.TorrentSeeding}
+	result := cm.emergencyCleanup(cfg, downloader.NewDataSharing([]downloader.Torrent{a, b}, nil), []downloader.Torrent{a, b}, nil, 60)
+	ids := []string{}
+	for _, r := range result {
+		ids = append(ids, r.ID)
+	}
+	assert.ElementsMatch(t, []string{"a", "b"}, ids, "整组一起删才腾得出空间")
+
+	// 组里还有一个不在候选里（受保护或不在管理范围）：整组不挑，挑别的
+	keep := downloader.Torrent{ID: "k", InfoHash: "k", TotalSize: 80 << 30, ContentPath: "/d/A"}
+	c := downloader.Torrent{ID: "c", InfoHash: "c", TotalSize: 70 << 30, ContentPath: "/d/C", State: downloader.TorrentSeeding}
+	result = cm.emergencyCleanup(cfg, downloader.NewDataSharing([]downloader.Torrent{a, b, keep, c}, nil), []downloader.Torrent{a, b, c}, nil, 60)
+	ids = ids[:0]
+	for _, r := range result {
+		ids = append(ids, r.ID)
+	}
+	assert.Equal(t, []string{"c"}, ids)
 }

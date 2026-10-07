@@ -610,7 +610,7 @@ func dataNotShared(dl downloader.Downloader, taskID string) (bool, error) {
 	}
 	for _, t := range all {
 		if t.ID == taskID || strings.EqualFold(t.InfoHash, taskID) {
-			return !downloader.SharesData(all, t, nil), nil
+			return !downloader.NewDataSharing(all, downloader.FilesOf(dl)).Shares(t, nil), nil
 		}
 	}
 	return true, nil
