@@ -258,3 +258,21 @@ func TestCheckLibrary(t *testing.T) {
 	_, err = e.svc.CheckLibrary(e.ctx, LibraryCheckInput{Path: e.movies, Mode: "x"})
 	require.ErrorIs(t, err, ErrInvalid)
 }
+
+// 订阅问媒体服务器条目在不在：有一台说有就算有；没有启用的媒体服务器时是没有
+func TestInLibrary(t *testing.T) {
+	e := newEnv(t)
+	ok, err := e.svc.InLibrary(e.ctx, models.MediaKindMovie, 872585, "", "奥本海默")
+	require.NoError(t, err)
+	assert.False(t, ok, "没有媒体服务器")
+	emby := newFakeEmby(t)
+	key := "embykey"
+	_, err = e.svc.SaveServer(e.ctx, 0, ServerInput{Name: "Emby", Kind: models.MediaServerEmby, URL: emby.URL, Token: &key, Enabled: true})
+	require.NoError(t, err)
+	ok, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 872585, "", "奥本海默")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 1, "", "别的")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}

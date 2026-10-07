@@ -320,7 +320,7 @@ func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, 
 			return
 		}
 		if !in && s.cfg.Library != nil && !sub.Upgrade {
-			in, _ = s.cfg.Library.InLibrary(ctx, sub.MediaType, sub.TMDBID, sub.IMDbID)
+			in, _ = s.cfg.Library.InLibrary(ctx, sub.MediaType, sub.TMDBID, sub.IMDbID, sub.Title)
 		}
 		done = in
 	} else {

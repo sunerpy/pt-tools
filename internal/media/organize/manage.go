@@ -563,6 +563,32 @@ func (s *Service) serverClient(r models.MediaServer) (server.Client, error) {
 	return server.New(server.Config{Kind: r.Kind, URL: r.URL, Token: token, HTTPClient: s.cfg.ServerHTTP})
 }
 
+// InLibrary 问启用的媒体服务器条目是不是已经入库（订阅判断电影完成用）：有一台说有就算有；
+// 都问不到时返回最后一个错误。没有启用的媒体服务器时返回 false。
+func (s *Service) InLibrary(ctx context.Context, kind string, tmdbID int, imdbID, title string) (bool, error) {
+	var servers []models.MediaServer
+	if err := s.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&servers).Error; err != nil {
+		return false, fmt.Errorf("读取媒体服务器失败: %w", err)
+	}
+	var lastErr error
+	for _, srv := range servers {
+		c, err := s.serverClient(srv)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ok, err := c.Exists(ctx, server.Query{Kind: kind, TMDBID: tmdbID, IMDbID: imdbID, Title: title})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, lastErr
+}
+
 // serverPath 把 pt-tools 里的路径换成媒体服务器里看到的路径；配置了路径映射而路径不在映射里时第二个返回值为 false。
 func serverPath(r models.MediaServer, p string) (string, bool) {
 	if r.LocalPrefix == "" {

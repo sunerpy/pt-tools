@@ -41,7 +41,7 @@ type Searcher interface {
 	Search(ctx context.Context, q v2.MultiSiteSearchQuery) (*v2.MultiSiteSearchResult, error)
 }
 
-// SitesFunc 按站点名取共享的站点实例（下载种子文件用，与搜索、登录探测共用限速）；EnabledSites 是启用的站点名。
+// SitesFunc 按站点名取共享的站点实例（下载种子文件用，与搜索、登录探测共用限速）。
 type SitesFunc func(name string) (v2.Site, bool)
 
 // PushFunc 是推送入口（生产环境是 internal.PushTorrentToDownloader，磁盘与站点容量闸门都在里面）。
@@ -52,9 +52,9 @@ type Downloaders interface {
 	Get(ctx context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error)
 }
 
-// Library 报告条目在不在媒体服务器里（没有配媒体服务器时返回 false）。
+// Library 报告条目在不在媒体服务器里（没有配媒体服务器时返回 false；生产环境是 *organize.Service）。
 type Library interface {
-	InLibrary(ctx context.Context, kind string, tmdbID int, imdbID string) (bool, error)
+	InLibrary(ctx context.Context, kind string, tmdbID int, imdbID, title string) (bool, error)
 }
 
 // Organizer 是整理入库里洗版要用的两个动作（生产环境是 *organize.Service）。
