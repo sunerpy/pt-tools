@@ -96,7 +96,8 @@ func Apply(rules []models.MediaWordRule, title, subtitle string) Applied {
 	return out
 }
 
-// ApplyOffset 把合计的集数偏移加到解析结果上；减到 1 以下的集数当作没有。
+// ApplyOffset 把合计的集数偏移加到解析结果上。起始集减到 1 以下时整个范围当作没有（偏移配错了，
+// 不留下只有结束集的范围）；结束集减到 1 以下或不大于起始集时只去掉结束集。
 func (a Applied) ApplyOffset(m *meta.Meta) {
 	if a.Offset == 0 || m == nil {
 		return
@@ -112,7 +113,7 @@ func (a Applied) ApplyOffset(m *meta.Meta) {
 	}
 	m.Episode = shift(m.Episode)
 	m.EpisodeEnd = shift(m.EpisodeEnd)
-	if m.EpisodeEnd != 0 && m.EpisodeEnd <= m.Episode {
+	if m.Episode == 0 || m.EpisodeEnd <= m.Episode {
 		m.EpisodeEnd = 0
 	}
 }

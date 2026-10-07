@@ -54,8 +54,12 @@ func TestApply(t *testing.T) {
 
 	m = meta.Meta{Episode: 1, EpisodeEnd: 3}
 	Applied{Offset: -2}.ApplyOffset(&m)
-	assert.Equal(t, 0, m.Episode, "减到 0 以下的集数当作没有")
-	assert.Equal(t, 1, m.EpisodeEnd)
+	assert.Equal(t, meta.Meta{}, m, "起始集减到 1 以下：整个范围当作没有，不留下只有结束集的范围")
+
+	m = meta.Meta{Episode: 13, EpisodeEnd: 15}
+	Applied{Offset: -12}.ApplyOffset(&m)
+	assert.Equal(t, 1, m.Episode)
+	assert.Equal(t, 3, m.EpisodeEnd)
 
 	none := Apply(nil, " a ", " b ")
 	assert.Equal(t, "a", none.Title)
