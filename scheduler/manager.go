@@ -349,21 +349,41 @@ func (m *Manager) checkDownloaderHealthAsync(setting models.DownloaderSetting) {
 	}(setting)
 }
 
+// detach 持锁摘下一个监控（StopAll 以后返回 false），由调用方在锁外停掉旧的：
+// 旧监控的这一轮可能在等推送锁，而持推送锁的推送会回调 Manager 取 m.mu，持锁等它停下会互相卡住。
+func (m *Manager) detach(take func() func()) (stop func(), ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped {
+		return nil, false
+	}
+	return take(), true
+}
+
 func (m *Manager) initFreeEndMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
+	stopOld, ok := m.detach(func() func() {
+		old := m.freeEndMonitor
+		m.freeEndMonitor = nil
+		if old == nil {
+			return nil
+		}
+		return old.Stop
+	})
+	if !ok {
+		return // StopAll 以后不再起新的监控
+	}
+	if stopOld != nil {
+		stopOld()
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.stopped {
-		return // StopAll 以后不再起新的监控
+	if m.stopped || m.freeEndMonitor != nil {
+		return // StopAll 来过，或者同时进行的另一次重载已经换上了
 	}
-
-	if m.freeEndMonitor != nil {
-		m.freeEndMonitor.Stop()
-	}
-
 	m.freeEndMonitor = NewFreeEndMonitor(global.GlobalDB.DB, m.downloaderManager)
 	if err := m.freeEndMonitor.Start(); err != nil {
 		global.GetSlogger().Errorf("启动免费结束监控器失败: %v", err)
@@ -380,42 +400,63 @@ func (m *Manager) initFreeEndMonitor() {
 	})
 }
 
-// initCleanupMonitor 换上新的自动删种监控。持锁做：配置变更时的重载在别的 goroutine 里，会和 StopAll 同时进行。
+// initCleanupMonitor 换上新的自动删种监控。字段的读写持锁：配置变更时的重载在别的 goroutine 里，会和 StopAll 同时进行；
+// 旧的在锁外停（见 detach）。
 func (m *Manager) initCleanupMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopped {
+	stopOld, ok := m.detach(func() func() {
+		old := m.cleanupMonitor
+		m.cleanupMonitor = nil
+		if old == nil {
+			return nil
+		}
+		return old.Stop
+	})
+	if !ok {
 		return
 	}
-
-	if m.cleanupMonitor != nil {
-		m.cleanupMonitor.Stop()
+	if stopOld != nil {
+		stopOld()
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped || m.cleanupMonitor != nil {
+		return
+	}
 	m.cleanupMonitor = NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
 	if err := m.cleanupMonitor.Start(); err != nil {
 		global.GetSlogger().Errorf("启动自动删种监控器失败: %v", err)
 	}
 }
 
-// initPeerRatioMonitor 换上新的竞争度监控，持锁的原因同 initCleanupMonitor。
+// initPeerRatioMonitor 换上新的竞争度监控，做法同 initCleanupMonitor。
 func (m *Manager) initPeerRatioMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopped {
+	stopOld, ok := m.detach(func() func() {
+		old := m.peerRatioMonitor
+		m.peerRatioMonitor = nil
+		if old == nil {
+			return nil
+		}
+		return old.Stop
+	})
+	if !ok {
 		return
 	}
-
-	if m.peerRatioMonitor != nil {
-		m.peerRatioMonitor.Stop()
+	if stopOld != nil {
+		stopOld()
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped || m.peerRatioMonitor != nil {
+		return
+	}
 	m.peerRatioMonitor = NewPeerRatioMonitor(global.GlobalDB.DB, m.downloaderManager)
 	if err := m.peerRatioMonitor.Start(); err != nil {
 		global.GetSlogger().Errorf("启动竞争度监控器失败: %v", err)
@@ -501,44 +542,46 @@ func (m *Manager) StopAll() {
 	}
 	m.cancelJobsAndWait()
 	m.mu.Lock()
+	// 先全部摘下，解锁以后再停（见 detach）
+	var stops []func()
 	if m.freeEndMonitor != nil {
-		m.freeEndMonitor.Stop()
+		stops = append(stops, m.freeEndMonitor.Stop)
 		m.freeEndMonitor = nil
 	}
 	if m.cleanupMonitor != nil {
-		m.cleanupMonitor.Stop()
+		stops = append(stops, m.cleanupMonitor.Stop)
 		m.cleanupMonitor = nil
 	}
 	if m.peerRatioMonitor != nil {
-		m.peerRatioMonitor.Stop()
+		stops = append(stops, m.peerRatioMonitor.Stop)
 		m.peerRatioMonitor = nil
 	}
 	if m.brushMonitor != nil {
-		m.brushMonitor.Stop()
+		stops = append(stops, m.brushMonitor.Stop)
 		m.brushMonitor = nil
 	}
 	if m.deadTorrentMonitor != nil {
-		m.deadTorrentMonitor.Stop()
+		stops = append(stops, m.deadTorrentMonitor.Stop)
 		m.deadTorrentMonitor = nil
 	}
 	if m.reseedWorker != nil {
-		m.reseedWorker.Stop()
+		stops = append(stops, m.reseedWorker.Stop)
 		m.reseedWorker = nil
 	}
 	if m.transferWorker != nil {
-		m.transferWorker.Stop()
+		stops = append(stops, m.transferWorker.Stop)
 		m.transferWorker = nil
 	}
 	if m.dailyReportJob != nil {
-		m.dailyReportJob.Stop()
+		stops = append(stops, m.dailyReportJob.Stop)
 		m.dailyReportJob = nil
 	}
 	if m.attendanceMonitor != nil {
-		m.attendanceMonitor.Stop()
+		stops = append(stops, m.attendanceMonitor.Stop)
 		m.attendanceMonitor = nil
 	}
 	if m.loginReminderMonitor != nil {
-		m.loginReminderMonitor.Stop()
+		stops = append(stops, m.loginReminderMonitor.Stop)
 		m.loginReminderMonitor = nil
 	}
 	if m.eventCancel != nil {
@@ -546,6 +589,9 @@ func (m *Manager) StopAll() {
 		m.eventCancel = nil
 	}
 	m.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
 }
 
 // StartAll 按配置启动所有任务（不做停止），并记下用户要求运行任务。
