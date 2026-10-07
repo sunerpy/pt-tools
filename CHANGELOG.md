@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.7](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.6...v1.0.0-rc.7) (2026-10-07)
+
+
+### Features
+
+* **reseed:** IYUU 辅种 ([#626](https://github.com/sunerpy/pt-tools/issues/626)) ([37ab2b2](https://github.com/sunerpy/pt-tools/commit/37ab2b292f804341c430ce42b3215be096ead47d))
+
 ## [1.0.0-rc.6](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.5...v1.0.0-rc.6) (2026-10-07)
 
 
