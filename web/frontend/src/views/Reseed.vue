@@ -330,7 +330,8 @@ onBeforeUnmount(() => {
         </el-button>
       </el-form>
       <p class="rs-tip">
-        只辅种文件完全一样（路径和大小逐个相同）的种子；同一站点同一种子只尝试一次。
+        只辅种文件完全一样（路径和大小逐个相同）的种子；核对没通过的不再尝试，下载不到种子的过 7
+        天再试。
         <template v-if="settings?.last_run_at">
           上次运行 {{ formatShortDateTime(settings.last_run_at) }}：{{ settings.last_result }}
         </template>

@@ -25,7 +25,7 @@ The Sites (站点) tab lists the sites IYUU supports and their state in pt-tools
 
 1. Reads the finished torrents in the participating downloaders (except those in error or being checked) and sends their info hashes to IYUU in batches of 200.
 2. For each torrent IYUU finds, skips it when its site is not taking part, the downloader already has it, this torrent on this site was tried before, or the site has reached today's limit.
-3. Downloads the torrent file from the site (with the site's rate limit), checks that its info hash matches IYUU's, and checks that its file list is exactly the same as the original torrent's in the downloader (every file with the same path and size). A mismatch is recorded as failed and not tried again.
+3. Downloads the torrent file from the site (with the site's rate limit), checks that its info hash matches IYUU's, and checks that its file list is exactly the same as the original torrent's in the downloader (every file with the same path and size). A mismatch is recorded as failed and not tried again; a torrent that cannot be downloaded (the site is unavailable, for example) is also recorded as failed and tried again after 7 days.
 4. Adds a torrent that passes the checks to the same downloader, paused, with the original torrent's save path and the tags site ID plus `pt-tools-reseed`.
 5. Once the downloader checks it at 100%, the torrent starts seeding and pt-tools records it (site seeding capacity, free-period tracking and automatic cleanup all see it); below 100% it is removed from the downloader with the data kept, and the original torrent is not affected.
 
