@@ -72,7 +72,8 @@ async function save(clearPassword = false) {
       interval_hours: form.value.interval_hours,
     });
     if (s) fill(s);
-    // 设置变了，上次读到的可能是别的账户的数据：清掉，要重新读取才能导入
+    // 设置变了，上次读到的（以及还在路上的那次读取）可能是别的账户的数据：作废，要重新读取才能导入
+    previewEpoch++;
     preview.value = null;
     selected.value = [];
     ElMessage.success("已保存");
@@ -104,11 +105,14 @@ const items = computed(() => preview.value?.items ?? []);
 const selected = ref<string[]>([]);
 const importing = ref(false);
 const tableRef = ref<TableInstance>();
+/** 保存设置时加一：保存之前发出、之后才回来的读取结果不再用 */
+let previewEpoch = 0;
 
 async function loadPreview() {
+  const epoch = previewEpoch;
   const pending = previewDS.run(() => cookieCloudApi.preview());
   const data = await pending;
-  if (previewDS.isStale(pending)) return;
+  if (previewDS.isStale(pending) || epoch !== previewEpoch) return;
   if (data) {
     preview.value = data;
     selected.value = [];
