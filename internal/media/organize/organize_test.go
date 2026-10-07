@@ -652,3 +652,52 @@ func TestSubtitleRetryCopyAndMove(t *testing.T) {
 		})
 	}
 }
+
+// 移动时删不掉源文件（下载目录只读）：库里那份按复制记成已整理，写明源文件还在；再整理时认得这份、方式不变，可以连文件删除
+func TestMoveSourceKept(t *testing.T) {
+	if runtime.GOOS != "linux" || os.Geteuid() == 0 {
+		t.Skip("只在 Linux 上、不是 root 时测（root 删得掉只读目录里的文件）")
+	}
+	lib, err := os.MkdirTemp("/dev/shm", "pt-tools-lib-")
+	if err != nil {
+		t.Skipf("/dev/shm 不可写: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(lib) })
+	e := newEnv(t)
+	a, _ := os.Stat(e.dlDir)
+	b, _ := os.Stat(lib)
+	if sameDevice(a, b) {
+		t.Skip("临时目录与 /dev/shm 在同一个文件系统")
+	}
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: lib, Mode: models.MediaModeMove})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.addTorrent(oppHash, oppName, map[string]int{
+		oppName + "/" + oppName + ".mkv":     2,
+		oppName + "/" + oppName + ".chs.ass": 0,
+	}, func(t *downloader.Torrent) { t.State = downloader.TorrentPaused })
+	srcDir := filepath.Join(e.dlDir, oppName)
+	require.NoError(t, os.Chmod(srcDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(srcDir, 0o755) })
+
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Created, res.Plan.Problem)
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferDone, row.Status)
+	assert.Equal(t, models.MediaModeCopy, row.Mode, "库里这份是复制过去的")
+	assert.Contains(t, row.Message, "源文件留在下载目录里")
+	assert.True(t, exists(row.TargetPath))
+	assert.True(t, exists(filepath.Join(srcDir, oppName+".mkv")), "源文件还在")
+	assert.Len(t, decodeExtras(row.Extras), 1, "字幕也放好了、记下了")
+
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Done)
+	assert.Equal(t, models.MediaModeCopy, e.history()[0].Mode, "再整理时方式不变")
+
+	kept, err := e.svc.DeleteHistory(e.ctx, row.ID, true)
+	require.NoError(t, err)
+	assert.Empty(t, kept)
+	assert.False(t, exists(row.TargetPath), "按复制记下的可以连文件删")
+	assert.True(t, exists(filepath.Join(srcDir, oppName+".mkv")))
+}

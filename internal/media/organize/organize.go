@@ -65,6 +65,8 @@ type PlanItem struct {
 	meta     meta.Meta
 	row      *models.MediaTransferHistory
 	stillFor *tmdb.Season
+	// mode 是这个文件实际的整理方式，与计划不同时才有：移动时删不掉源文件，库里那份按硬链接或复制记
+	mode string
 }
 
 // Plan 是一个种子的整理计划，预览与执行共用。Problem 不为空时整个种子整理不了。
@@ -692,6 +694,9 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			continue
 		case ItemDone:
 			// 库里已经是这个文件：补上之前没整理成的字幕；没有记录时（例如记录被删了）补一条
+			if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.Mode != "" {
+				it.mode = it.row.Mode // 库里这份是当初按这个方式放的（媒体库后来换了方式、移动时留下了源文件也一样）
+			}
 			subs, msgs, added := s.transferSubtitles(it, p.Mode, rowExtras(it.row))
 			res.Messages = append(res.Messages, msgs...)
 			if it.row == nil || it.row.Status != models.MediaTransferDone || added > 0 || len(msgs) > 0 {
@@ -713,6 +718,11 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			continue
 		}
 		out, terr := transfer.Transfer(it.Source, it.Target, p.Mode)
+		var keptNote string
+		if kept := (*transfer.SourceKeptError)(nil); errors.As(terr, &kept) {
+			// 移动没做成，但库里已经放好了一份：按实际的方式（硬链接或复制）记成已整理，写明源文件还在
+			it.mode, keptNote, out, terr = kept.Mode, kept.Error(), transfer.Created, nil
+		}
 		if terr != nil {
 			status, retry := models.MediaTransferFailed, true
 			switch {
@@ -731,6 +741,9 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		}
 		fileID, _ := transfer.FileID(it.Target)
 		extras, msgs, _ := s.transferSubtitles(it, p.Mode, rowExtras(it.row))
+		if keptNote != "" {
+			msgs = append([]string{keptNote}, msgs...)
+		}
 		res.Messages = append(res.Messages, msgs...)
 		it.Status = ItemDone
 		s.record(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), extras))
@@ -766,6 +779,11 @@ func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([
 			continue
 		}
 		res, err := transfer.Transfer(sub.Source, sub.Target, mode)
+		if kept := (*transfer.SourceKeptError)(nil); errors.As(err, &kept) {
+			// 移动时删不掉源文件：库里这份字幕留着、照样记下，写明源文件还在
+			msgs = append(msgs, fmt.Sprintf("字幕 %s：%v", filepath.Base(sub.Source), err))
+			res, err = transfer.Created, nil
+		}
 		if err != nil {
 			msgs = append(msgs, fmt.Sprintf("字幕 %s：%v", filepath.Base(sub.Source), err))
 			continue
@@ -858,7 +876,7 @@ func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, st
 	now := s.cfg.Now()
 	row := models.MediaTransferHistory{
 		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, InfoHash: p.Hash, TaskID: p.TaskID,
-		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, SaveRoot: p.LocalPath, TargetPath: it.Target, Mode: p.Mode,
+		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, SaveRoot: p.LocalPath, TargetPath: it.Target, Mode: firstNonEmpty(it.mode, p.Mode),
 		Season: it.Season, Episode: it.Episode, EpisodeEnd: it.EpisodeEnd, Size: it.Size, Status: status,
 		Message: truncate(msg, 1024), Trigger: trigger, TargetFileID: fileID, CreatedAt: now, UpdatedAt: now,
 	}

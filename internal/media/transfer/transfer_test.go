@@ -264,27 +264,25 @@ func TestMoveFallbacks(t *testing.T) {
 	_, err = os.Stat(src)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
-	// 源文件删不掉（例如下载目录只读）：三条路都撤回放进库里的那份，源文件留着，之后还能重试
+	// 源文件删不掉（例如下载目录只读）：库里那份留着，按实际的方式（硬链接或复制）报给调用方，源文件也留着
 	removeSrc = func(string) error { return &os.PathError{Op: "remove", Err: syscall.EACCES} }
-	for i, nr := range []func(string, string) error{
-		oldNR,
-		func(string, string) error { return errNoReplaceUnsupported },
-		func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} },
+	for i, c := range []struct {
+		nr   func(string, string) error
+		kept string
+	}{
+		{func(string, string) error { return errNoReplaceUnsupported }, models.MediaModeHardlink},
+		{func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} }, models.MediaModeCopy},
 	} {
-		noReplace = nr
+		noReplace = c.nr
 		writeFile(t, src, "keep me")
 		dst := filepath.Join(dir, fmt.Sprintf("ro%d", i), "a.mkv")
 		_, err = Transfer(src, dst, models.MediaModeMove)
-		if i == 0 {
-			require.NoError(t, err, "同一个文件系统上改名不用另外删源文件")
-			writeFile(t, src, "keep me")
-			continue
-		}
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "已撤回")
-		_, statErr := os.Lstat(dst)
-		assert.ErrorIs(t, statErr, os.ErrNotExist, "库里不留下一份")
-		assert.Equal(t, "keep me", readFileT(t, src))
+		var kept *SourceKeptError
+		require.ErrorAs(t, err, &kept)
+		assert.Equal(t, c.kept, kept.Mode)
+		assert.ErrorIs(t, err, syscall.EACCES)
+		assert.Equal(t, "keep me", readFileT(t, dst), "库里那份留着")
+		assert.Equal(t, "keep me", readFileT(t, src), "源文件留着")
 	}
 	removeSrc = oldRemove
 

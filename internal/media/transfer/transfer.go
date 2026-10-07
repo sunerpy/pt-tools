@@ -124,7 +124,7 @@ func move(src, dst string, srcInfo os.FileInfo) error {
 			return ErrTargetExists
 		}
 		if err == nil {
-			return removeMoved(src, dst)
+			return removeMoved(src, models.MediaModeHardlink)
 		}
 	case !isCrossDevice(err):
 		return fmt.Errorf("移动失败: %w", err)
@@ -132,23 +132,32 @@ func move(src, dst string, srcInfo os.FileInfo) error {
 	if err := copyFile(src, dst, srcInfo); err != nil {
 		return err
 	}
-	return removeMoved(src, dst)
+	return removeMoved(src, models.MediaModeCopy)
 }
 
-// removeMoved 在 dst 放好以后删掉源文件。删不掉时（例如下载目录只读）撤回刚放进库里的那份，
-// 不在库里留下一份认不出来历的文件，改好权限以后重试还能整理。
-func removeMoved(src, dst string) error {
-	placed, statErr := os.Lstat(dst)
-	err := removeSrc(src)
-	if err == nil {
-		return nil
+// SourceKeptError 表示移动时文件已经放进库里，但删不掉源文件（例如下载目录只读）：库里这份按 Mode 算
+// （硬链接放过去的是硬链接，复制过去的是复制），源文件留在原处。调用方按 Mode 记下这份文件。
+type SourceKeptError struct {
+	Mode string
+	Err  error
+}
+
+func (e *SourceKeptError) Error() string {
+	how := "复制"
+	if e.Mode == models.MediaModeHardlink {
+		how = "硬链接"
 	}
-	if statErr == nil {
-		if cur, cerr := os.Lstat(dst); cerr == nil && os.SameFile(cur, placed) {
-			_ = os.Remove(dst)
-		}
+	return fmt.Sprintf("删不掉源文件，没有移动成：库里这份按%s放好了，源文件留在下载目录里（%v）", how, e.Err)
+}
+
+func (e *SourceKeptError) Unwrap() error { return e.Err }
+
+// removeMoved 在目标放好以后删掉源文件；删不掉时返回 SourceKeptError，库里那份留着。
+func removeMoved(src, kept string) error {
+	if err := removeSrc(src); err != nil {
+		return &SourceKeptError{Mode: kept, Err: err}
 	}
-	return fmt.Errorf("删除源文件失败，没有移动（放进库里的那份已撤回）: %w", err)
+	return nil
 }
 
 // existing 判断已经存在的目标是不是这次要放的文件。
