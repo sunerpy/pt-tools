@@ -109,11 +109,15 @@ type fakeDL struct {
 	torrents map[string]downloader.Torrent
 	files    map[string][]downloader.TorrentFile
 	listErr  error
+	getErr   error
 }
 
 func (f *fakeDL) GetTorrent(id string) (downloader.Torrent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return downloader.Torrent{}, f.getErr
+	}
 	for _, t := range f.torrents {
 		if t.ID == id || strings.EqualFold(t.InfoHash, id) {
 			return t, nil

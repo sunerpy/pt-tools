@@ -17,9 +17,9 @@ type job struct {
 	req     Request
 	dlName  string
 	trigger string
-	// retry 表示是到期的重试：第一次已经查过范围，不再查
-	retry bool
-	done  chan jobResult
+	// retryIDs 是到期重试时 retryDue 清掉了重试时间的记录：还没整理就出错时（例如下载器连不上）按退避恢复
+	retryIDs []uint
+	done     chan jobResult
 }
 
 type jobResult struct {
@@ -170,7 +170,7 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	if j.req.DownloaderID == 0 && j.dlName != "" {
 		_, setting, err := s.cfg.Downloaders.ByName(ctx, j.dlName)
 		if err != nil {
-			s.fail(j)
+			s.fail(ctx, j)
 			return nil, err
 		}
 		j.req.DownloaderID = setting.ID
@@ -179,7 +179,7 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	if j.trigger == models.MediaTriggerAuto || j.trigger == models.MediaTriggerScan {
 		ok, err := s.automated(ctx, j)
 		if err != nil {
-			s.fail(j)
+			s.fail(ctx, j)
 			return nil, err
 		}
 		if !ok {
@@ -190,7 +190,7 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	res, err := s.organize(ctx, j.req, j.trigger)
 	s.mu.Unlock()
 	if err != nil {
-		s.fail(j)
+		s.fail(ctx, j)
 		s.cfg.Logger.Warnf("[整理入库] 整理失败 (下载器 %d, %s): %v", j.req.DownloaderID, j.req.Hash, err)
 		return nil, err
 	}
@@ -222,18 +222,28 @@ func (s *Service) automated(ctx context.Context, j job) (bool, error) {
 	return scopeOf(set).match(req.DownloaderID, t), nil
 }
 
-// fail 记下退避：补查与扫描在退避期内不再排这个种子（手动整理不退避）。
-func (s *Service) fail(j job) {
-	if j.trigger == models.MediaTriggerManual {
+// fail 记下退避：补查与扫描在退避期内不再排这个种子（手动整理不退避）。到期重试的任务还没整理就出错时，
+// 把 retryDue 清掉的重试时间恢复成退避到期的时间（手动的过一个补查间隔），不然这些记录再也不会自动重试。
+func (s *Service) fail(ctx context.Context, j job) {
+	next := s.cfg.Now().Add(sweepInterval)
+	if j.trigger != models.MediaTriggerManual {
+		key := jobKey(j.req.DownloaderID, j.dlName, j.req.Hash)
+		s.qmu.Lock()
+		b := s.backoff[key]
+		b.fails++
+		b.next = s.cfg.Now().Add(min(time.Duration(1<<min(b.fails, 6))*sweepInterval, 12*time.Hour))
+		s.backoff[key] = b
+		next = b.next
+		s.qmu.Unlock()
+	}
+	if len(j.retryIDs) == 0 {
 		return
 	}
-	key := jobKey(j.req.DownloaderID, j.dlName, j.req.Hash)
-	s.qmu.Lock()
-	defer s.qmu.Unlock()
-	b := s.backoff[key]
-	b.fails++
-	b.next = s.cfg.Now().Add(min(time.Duration(1<<min(b.fails, 6))*sweepInterval, 12*time.Hour))
-	s.backoff[key] = b
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
+		Where("id IN ? AND status = ? AND next_retry_at IS NULL", j.retryIDs, models.MediaTransferFailed).
+		Update("next_retry_at", &next).Error; err != nil {
+		s.cfg.Logger.Warnf("[整理入库] 恢复重试时间失败: %v", err)
+	}
 }
 
 func (s *Service) clearBackoff(j job) {
@@ -345,7 +355,7 @@ func (s *Service) retryDue(ctx context.Context) {
 		if trigger == models.MediaTriggerManual && r.TMDBID > 0 {
 			req.MediaType, req.TMDBID, req.LibraryID = r.MediaType, r.TMDBID, r.LibraryID
 		}
-		if !s.enqueue(job{req: req, trigger: trigger, retry: true}) {
+		if !s.enqueue(job{req: req, trigger: trigger, retryIDs: ids}) {
 			next := s.cfg.Now().Add(tickInterval)
 			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", &next)
 		}

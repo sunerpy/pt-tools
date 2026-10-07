@@ -309,6 +309,33 @@ func TestJobKeyIgnoresNameWithID(t *testing.T) {
 	require.True(t, e.svc.enqueue(ev))
 	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: "abc"}, trigger: models.MediaTriggerAuto}))
 	assert.Len(t, e.svc.jobs, 1, "补查不重复排完成事件已经排上的种子")
-	e.svc.fail(ev)
+	e.svc.fail(e.ctx, ev)
 	assert.True(t, e.svc.backedOff(1, "abc"), "完成事件失败后，补查与扫描看得到退避")
+}
+
+// 到期重试还没整理就出错（下载器连不上）：重试时间按退避恢复，之后还会自动重试
+func TestRetryKeptOnDownloaderError(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	e.tmdb.setDown(false)
+
+	e.dl.getErr = assert.AnError
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx)
+	assert.Equal(t, 1, e.drain())
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferFailed, row.Status)
+	require.NotNil(t, row.NextRetryAt, "重试时间恢复了")
+	assert.True(t, row.NextRetryAt.After(e.Now()))
+
+	e.dl.getErr = nil
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx)
+	assert.Equal(t, 1, e.drain())
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
 }
