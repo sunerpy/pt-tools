@@ -344,6 +344,13 @@ onBeforeUnmount(() => {
       title="IYUU 站点"
       icon="globe"
       :count="sitesLoaded ? sites.length : undefined">
+      <div
+        v-if="sites.length && sitesDS.error.value"
+        class="pt-note pt-note--warn"
+        data-testid="rs-sites-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>刷新失败：{{ sitesDS.errorText.value }}。下面是上次读到的。</span>
+      </div>
       <PtDataState
         v-if="!sites.length"
         :state="settings?.has_token ? sitesDS.state.value : 'empty'"
@@ -399,6 +406,13 @@ onBeforeUnmount(() => {
       title="辅种记录"
       icon="list-checks"
       :count="recordsLoaded ? records.length : undefined">
+      <div
+        v-if="records.length && recordsDS.error.value"
+        class="pt-note pt-note--warn"
+        data-testid="rs-records-stale">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>刷新失败：{{ recordsDS.errorText.value }}。下面是上次读到的。</span>
+      </div>
       <PtDataState
         v-if="!records.length"
         :state="recordsDS.state.value"

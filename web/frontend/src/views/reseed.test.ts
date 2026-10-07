@@ -149,6 +149,41 @@ function setToken(v: string) {
 }
 
 describe("IYUU 辅种", () => {
+  it("刷新失败时留着上次的记录和站点，并写明是旧的", async () => {
+    await mountPage(settings({ has_token: true }));
+    api.records.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          info_hash: "a",
+          site_name: "hdsky",
+          torrent_id: "11",
+          source_hash: "s",
+          downloader_id: 1,
+          name: "Movie",
+          state: "done",
+          message: "",
+          created_at: "2026-10-07T10:00:00Z",
+          updated_at: "2026-10-07T10:00:00Z",
+        },
+      ],
+    });
+    await chooseTab("记录");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("已辅种"));
+    expect(document.querySelector("[data-testid=rs-records-stale]")).toBeNull();
+    api.records.mockRejectedValue(new Error("网络断了"));
+    testid("rs-refresh").click();
+    await vi.waitFor(() => expect(testid("rs-records-stale").textContent).toContain("网络断了"));
+    expect(document.body.textContent).toContain("已辅种");
+
+    await chooseTab("站点");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("hdsky.me"));
+    api.sites.mockRejectedValue(new Error("IYUU 超时"));
+    testid("rs-refresh").click();
+    await vi.waitFor(() => expect(testid("rs-sites-stale").textContent).toContain("IYUU 超时"));
+    expect(document.body.textContent).toContain("hdsky.me");
+  });
+
   it("没有 token 时提示并且不能运行；保存时带上新填的 token", async () => {
     await mountPage();
     expect(document.body.textContent).toContain("填写 IYUU token 后才能辅种");
