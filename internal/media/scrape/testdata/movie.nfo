@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>奥本海默</title>
+  <originaltitle>Oppenheimer</originaltitle>
+  <year>2023</year>
+  <premiered>2023-07-19</premiered>
+  <plot>「原子弹之父」罗伯特·奥本海默的故事 &amp; &lt;曼哈顿计划&gt;。</plot>
+  <runtime>181</runtime>
+  <ratings>
+    <rating name="themoviedb" max="10" default="true">
+      <value>8.1</value>
+    </rating>
+  </ratings>
+  <uniqueid type="tmdb" default="true">872585</uniqueid>
+  <uniqueid type="imdb">tt15398776</uniqueid>
+  <tmdbid>872585</tmdbid>
+  <imdbid>tt15398776</imdbid>
+  <genre>剧情</genre>
+  <genre>历史</genre>
+</movie>

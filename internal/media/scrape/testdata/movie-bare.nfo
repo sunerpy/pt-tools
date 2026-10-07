@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>Same</title>
+  <uniqueid type="tmdb" default="true">1</uniqueid>
+  <tmdbid>1</tmdbid>
+</movie>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { type TaskItem, type TaskListResponse, tasksApi, type TaskStatsResponse } from "@/api";
 import TransferDialog from "@/components/downloader/TransferDialog.vue";
+import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
@@ -136,6 +137,20 @@ const filters = ref({
   site: "",
 });
 const selectedIds = ref<number[]>([]);
+
+/** 整理入库（路线图 M10）：推送到下载器、记得下载器与 hash 的任务才能整理 */
+const organizeVisible = ref(false);
+const organizeTarget = ref<OrganizeTarget | null>(null);
+const canOrganize = (t: TaskItem) => Boolean(t.isPushed && t.downloaderId && t.torrentHash);
+function openOrganize(t: TaskItem) {
+  if (!canOrganize(t)) return;
+  organizeTarget.value = {
+    downloader_id: t.downloaderId as number,
+    hash: t.torrentHash,
+    name: t.title,
+  };
+  organizeVisible.value = true;
+}
 const transferItems = computed(() =>
   tasks.value
     .filter((t) => selectedIds.value.includes(t.id) && t.downloaderId && t.torrentHash)
@@ -691,7 +706,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           1376 下列宽合计原来 1184 > 表宽 1102，横滚 82：标题最小宽度 280 → 240，
           三列时间 150 → 124（换成「09-30 20:00」紧凑格式之后 150 是按旧的长格式留的），合计 1092。
         -->
-        <el-table-column label="标题" min-width="240" class-name="pt-cell-strong">
+        <el-table-column label="标题" min-width="216" class-name="pt-cell-strong">
           <template #default="{ row }">
             <div class="title-cell">
               <span class="title-text">{{ row.title || "-" }}</span>
@@ -770,11 +785,24 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="96" fixed="right">
+        <!-- 状态列多出 24 给「整理入库」图标钮，标题列最小宽度相应收 24，合计不变 -->
+        <el-table-column label="状态" width="120" fixed="right">
           <template #default="{ row }">
-            <PtStatusPill :tone="getStatusTone(row)" size="sm">
-              {{ getStatusText(row) }}
-            </PtStatusPill>
+            <span class="tl-status">
+              <PtStatusPill :tone="getStatusTone(row)" size="sm">
+                {{ getStatusText(row) }}
+              </PtStatusPill>
+              <el-tooltip v-if="canOrganize(row)" content="整理入库" placement="top">
+                <button
+                  type="button"
+                  class="pt-band__iconbtn tl-organize"
+                  :aria-label="`整理入库 ${row.title}`"
+                  :data-testid="`tl-organize-${row.id}`"
+                  @click="openOrganize(row)">
+                  <PtIcon name="folder-open" :size="14" />
+                </button>
+              </el-tooltip>
+            </span>
           </template>
         </el-table-column>
       </el-table>
@@ -822,6 +850,12 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
             </PtStatusPill>
           </template>
 
+          <template v-if="canOrganize(task)" #actions>
+            <el-button size="small" @click="openOrganize(task)">
+              <PtIcon name="folder-open" :size="13" /><span>整理入库</span>
+            </el-button>
+          </template>
+
           <template v-if="task.torrentSize > 0" #progress>
             <el-progress
               :percentage="Math.round(task.progress)"
@@ -861,6 +895,7 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       </el-button>
     </div>
     <TransferDialog v-model="transferDialogVisible" :items="transferItems" />
+    <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" />
 
     <!-- 页脚带 —— 画板 gfoot-518 1112×34：左口径说明，右分页 -->
     <div v-if="total > 0" class="pt-band--foot tl-foot">
@@ -951,6 +986,17 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
 }
 
 /* 画板 toolbar：搜索框 220×28 */
+.tl-status {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tl-organize {
+  width: 24px;
+  height: 24px;
+}
+
 .tl-q {
   flex: 0 0 auto;
   width: 220px;

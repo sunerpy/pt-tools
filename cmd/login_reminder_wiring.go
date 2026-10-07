@@ -110,16 +110,17 @@ func loginReminderFallback(store *core.ConfigStore, userInfo *v2.UserInfoService
 
 // wireLoginReminderMonitor 构造并启动登录提醒监控。userInfo 非空时探测经它进行（共用站点实例与限速器，
 // 顺带刷新用户统计）；为空（仓库初始化失败）时退回 resolver 每次新建站点实例。
+// 返回各监控共用的通知投递器（整理入库的入库通知也经它发）；数据库没就绪时返回 nil。
 func wireLoginReminderMonitor(
 	mgr *scheduler.Manager,
 	store *core.ConfigStore,
 	siteRegistry *v2.SiteRegistry,
 	bs *chatopsBootstrap,
 	userInfo *v2.UserInfoService,
-) {
+) *scheduler.MonitorNotifier {
 	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
 		global.GetSlogger().Warn("登录提醒监控器跳过初始化：数据库未就绪")
-		return
+		return nil
 	}
 	db := global.GlobalDB.DB
 
@@ -163,6 +164,7 @@ func wireLoginReminderMonitor(
 
 	wireDailyReportJob(mgr, store, userInfo, notifier)
 	wireDeadTorrentMonitor(mgr, store, notifier)
+	return notifier
 }
 
 // wireDeadTorrentMonitor 构造并启动失效种子定时扫描（只通知、默认关闭）：与登录提醒共用通知投递器。

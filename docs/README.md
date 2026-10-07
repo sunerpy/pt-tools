@@ -35,6 +35,7 @@
 
 ## 媒体
 
+- [整理入库](guide/media-library.md)：把下载完的电影与剧集按模板放进媒体库，刮削 NFO 与海报，通知 Emby、Jellyfin、Plex。
 - [媒体识别](guide/media-recognize.md)：解析种子标题、到 TMDB 找对应的电影或剧集，手动纠正与识别词。
 
 ## ChatOps 与通知

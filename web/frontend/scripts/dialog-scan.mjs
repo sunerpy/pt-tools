@@ -141,6 +141,12 @@ const NOT_ON_BOARD = {
     "转移做种页（路线图 M5）晚于画板 40 定稿：定时规则的编辑弹窗不在那张清点图里",
   "views/MediaRecognize.vue":
     "媒体识别页（路线图 M9）晚于画板 40 定稿：识别词的添加 / 编辑弹窗不在那张清点图里",
+  "views/MediaLibrary.vue":
+    "媒体库页（路线图 M10）晚于画板 40 定稿：媒体库、路径映射、媒体服务器的编辑弹窗不在那张清点图里",
+  "views/MediaHistory.vue":
+    "整理历史页（路线图 M10）晚于画板 40 定稿：删除记录（可连库里的文件一起删）的确认弹窗不在那张清点图里",
+  "components/media/OrganizeDialog.vue":
+    "「整理入库」（路线图 M10）晚于画板 40 定稿：任务列表与下载器 Web UI 共用这个弹窗",
   "components/downloader/TransferDialog.vue":
     "「转移到其他下载器」（路线图 M5）晚于画板 40 定稿：下载器 Web UI 与任务列表的批量操作共用这个弹窗",
   "views/DynamicSiteSettings.vue":

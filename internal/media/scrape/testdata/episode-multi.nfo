@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+  <title>当你迷失在黑暗中</title>
+  <showtitle>最后生还者</showtitle>
+  <season>1</season>
+  <episode>1</episode>
+  <plot>……</plot>
+  <aired>2023-01-15</aired>
+  <runtime>81</runtime>
+  <uniqueid type="tmdb" default="true">2181581</uniqueid>
+</episodedetails>
+<episodedetails>
+  <title>感染</title>
+  <showtitle>最后生还者</showtitle>
+  <season>1</season>
+  <episode>2</episode>
+  <aired>2023-01-22</aired>
+  <runtime>53</runtime>
+  <uniqueid type="tmdb" default="true">4071039</uniqueid>
+</episodedetails>
+<episodedetails>
+  <title>第 3 集</title>
+  <showtitle>最后生还者</showtitle>
+  <season>1</season>
+  <episode>3</episode>
+</episodedetails>

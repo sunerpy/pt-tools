@@ -13,6 +13,7 @@ import DownloaderTorrentDetail from "@/components/downloader/DownloaderTorrentDe
 import DownloaderTorrentTable from "@/components/downloader/DownloaderTorrentTable.vue";
 import DownloaderTorrentVirtualTable from "@/components/downloader/DownloaderTorrentVirtualTable.vue";
 import TransferDialog from "@/components/downloader/TransferDialog.vue";
+import OrganizeDialog, { type OrganizeTarget } from "@/components/media/OrganizeDialog.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtDataState from "@/components/ui/PtDataState.vue";
@@ -211,6 +212,23 @@ const transferItems = computed(() =>
     .filter((row) => row.info_hash)
     .map((row) => ({ source_id: row.downloader_id, hash: row.info_hash })),
 );
+/** 整理入库（路线图 M10）：一次整理一个下载完的种子（progress 是 0–100） */
+const organizeVisible = ref(false);
+const organizeTarget = ref<OrganizeTarget | null>(null);
+const organizeRow = computed(() =>
+  selectedRows.value.length === 1 && selectedRows.value[0].progress >= 100
+    ? selectedRows.value[0]
+    : null,
+);
+function openOrganize(row: DownloaderTorrentItem | null) {
+  if (!row) return;
+  organizeTarget.value = {
+    downloader_id: row.downloader_id,
+    hash: row.info_hash || row.task_id,
+    name: row.title,
+  };
+  organizeVisible.value = true;
+}
 const torrentStateCounters = computed(() => {
   let downloading = 0;
   let seeding = 0;
@@ -1564,9 +1582,14 @@ async function handleContextAction(payload: {
     | "recheck"
     | "detail"
     | "set_category"
-    | "set_tags";
+    | "set_tags"
+    | "organize";
   row: DownloaderTorrentItem;
 }) {
+  if (payload.action === "organize") {
+    openOrganize(payload.row);
+    return;
+  }
   if (payload.action === "detail") {
     await openDetail(payload.row);
     return;
@@ -2019,6 +2042,20 @@ function toggleSidebar() {
                   @click="transferDialogVisible = true">
                   <PtIcon name="arrow-right-left" :size="13" /><span>转移到…</span>
                 </el-button>
+                <el-tooltip
+                  content="一次整理一个下载完的种子"
+                  placement="top"
+                  :disabled="Boolean(organizeRow)">
+                  <span>
+                    <el-button
+                      size="small"
+                      :disabled="!organizeRow"
+                      data-testid="hub-organize"
+                      @click="openOrganize(organizeRow)">
+                      <PtIcon name="folder-open" :size="13" /><span>整理入库</span>
+                    </el-button>
+                  </span>
+                </el-tooltip>
                 <el-button
                   size="small"
                   type="danger"
@@ -2332,6 +2369,7 @@ function toggleSidebar() {
       v-model="transferDialogVisible"
       :items="transferItems"
       @created="onTransferCreated" />
+    <OrganizeDialog v-model="organizeVisible" :target="organizeTarget" />
 
     <el-dialog
       v-model="locationDialogVisible"

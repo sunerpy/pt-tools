@@ -120,6 +120,10 @@ home:
             link: /en/guide/reseed
       - name: Media
         items:
+          - title: Library organising
+            body: Hard-link finished movies and shows into your library with a naming template, write NFO files and artwork, ask Emby, Jellyfin or Plex to scan, and send a notification.
+            status: available
+            link: /en/guide/media-library
           - title: Media recognition
             body: Parse torrent titles and find the movie or TV show on TMDB; IMDb and Douban IDs from sites are recorded, and wrong matches can be corrected by hand or with recognition words.
             status: available

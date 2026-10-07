@@ -37,7 +37,8 @@ const emit = defineEmits<{
         | "recheck"
         | "detail"
         | "set_category"
-        | "set_tags";
+        | "set_tags"
+        | "organize";
       row: DownloaderTorrentItem;
     },
   ): void;
@@ -150,7 +151,8 @@ function emitContextAction(
     | "recheck"
     | "detail"
     | "set_category"
-    | "set_tags",
+    | "set_tags"
+    | "organize",
 ) {
   if (!contextRow.value) return;
   emit("context-action", { action, row: contextRow.value });
@@ -439,6 +441,8 @@ watch(
         <button type="button" @click="emitContextAction('resume')">开始</button>
         <button type="button" @click="emitContextAction('recheck')">复检</button>
         <div class="menu-divider" />
+        <div class="menu-group-title">媒体</div>
+        <button type="button" @click="emitContextAction('organize')">整理入库</button>
         <div class="menu-divider" />
         <div class="menu-group-title">分类/标签</div>
         <button type="button" @click="emitContextAction('set_category')">设置分类</button>

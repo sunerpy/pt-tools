@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,20 @@ type Result struct {
 	OriginalLanguage string  `json:"original_language,omitempty"`
 	IMDbID           string  `json:"imdb_id,omitempty"`
 	Seasons          int     `json:"seasons,omitempty"`
+	BackdropPath     string  `json:"backdrop_path,omitempty"`
+	// GenreIDs 是 TMDB 的类型编号（16 是动画）；Genres 是类型名称，只有详情里有
+	GenreIDs []int    `json:"genre_ids,omitempty"`
+	Genres   []string `json:"genres,omitempty"`
+	// Runtime 是片长（分钟）：电影是整部，剧集是一集，只有详情里有
+	Runtime int `json:"runtime,omitempty"`
+}
+
+// GenreAnimation 是 TMDB 的「动画」类型编号（电影与剧集相同）。
+const GenreAnimation = 16
+
+// IsAnimation 报告条目是不是动画。
+func (r Result) IsAnimation() bool {
+	return slices.Contains(r.GenreIDs, GenreAnimation)
 }
 
 // PosterURL 是海报图片地址（size 为空时用 w342）。
@@ -78,11 +93,13 @@ func PosterURL(path, size string) string {
 
 // Options 是客户端的选项。
 type Options struct {
-	APIKey   string
-	BaseURL  string // 为空时用 DefaultBaseURL
-	Language string // 为空时用 zh-CN
-	ProxyURL string // 为空时用环境变量里的代理
-	Cache    Cache  // 为空时不缓存
+	APIKey  string
+	BaseURL string // 为空时用 DefaultBaseURL
+	// ImageBaseURL 是图片地址（到 /t/p/ 为止）；为空时用 ImageBaseURL
+	ImageBaseURL string
+	Language     string // 为空时用 zh-CN
+	ProxyURL     string // 为空时用环境变量里的代理
+	Cache        Cache  // 为空时不缓存
 	// RatePerSecond 是每秒最多几个请求（为 0 时 8 个）；读缓存不算。Limiter 不为空时不用它。
 	RatePerSecond float64
 	// Limiter 不为空时用它限速：同一个服务建的多个客户端共用一份额度。
@@ -127,13 +144,14 @@ func NewHTTPClient(proxyURL string) (*http.Client, error) {
 
 // Client 是 TMDB 客户端。
 type Client struct {
-	base     string
-	key      string
-	bearer   bool
-	language string
-	http     *http.Client
-	cache    Cache
-	limiter  *rate.Limiter
+	base      string
+	imageBase string
+	key       string
+	bearer    bool
+	language  string
+	http      *http.Client
+	cache     Cache
+	limiter   *rate.Limiter
 }
 
 // New 建一个客户端。没有 API Key 时返回 ErrNoKey。
@@ -157,18 +175,23 @@ func New(o Options) (*Client, error) {
 	if lang == "" {
 		lang = "zh-CN"
 	}
+	imageBase := strings.TrimRight(strings.TrimSpace(o.ImageBaseURL), "/")
+	if imageBase == "" {
+		imageBase = strings.TrimRight(ImageBaseURL, "/")
+	}
 	limiter := o.Limiter
 	if limiter == nil {
 		limiter = NewLimiter(o.RatePerSecond)
 	}
 	return &Client{
-		base:     base,
-		key:      key,
-		bearer:   strings.HasPrefix(key, "eyJ"),
-		language: lang,
-		http:     hc,
-		cache:    o.Cache,
-		limiter:  limiter,
+		base:      base,
+		imageBase: imageBase + "/",
+		key:       key,
+		bearer:    strings.HasPrefix(key, "eyJ"),
+		language:  lang,
+		http:      hc,
+		cache:     o.Cache,
+		limiter:   limiter,
 	}, nil
 }
 
@@ -206,7 +229,15 @@ type rawItem struct {
 	OriginalLanguage string  `json:"original_language"`
 	IMDbID           string  `json:"imdb_id"`
 	NumberOfSeasons  int     `json:"number_of_seasons"`
-	ExternalIDs      struct {
+	BackdropPath     string  `json:"backdrop_path"`
+	GenreIDs         []int   `json:"genre_ids"`
+	Genres           []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"genres"`
+	Runtime        int   `json:"runtime"`
+	EpisodeRunTime []int `json:"episode_run_time"`
+	ExternalIDs    struct {
 		IMDbID string `json:"imdb_id"`
 	} `json:"external_ids"`
 }
@@ -215,6 +246,18 @@ func (r rawItem) result(kind string) Result {
 	out := Result{
 		ID: r.ID, MediaType: kind, Overview: r.Overview, PosterPath: r.PosterPath, Popularity: r.Popularity,
 		VoteAverage: r.VoteAverage, OriginalLanguage: r.OriginalLanguage, Seasons: r.NumberOfSeasons,
+		BackdropPath: r.BackdropPath, GenreIDs: r.GenreIDs, Runtime: r.Runtime,
+	}
+	for _, g := range r.Genres {
+		if !slices.Contains(out.GenreIDs, g.ID) {
+			out.GenreIDs = append(out.GenreIDs, g.ID)
+		}
+		if g.Name != "" {
+			out.Genres = append(out.Genres, g.Name)
+		}
+	}
+	if out.Runtime == 0 && len(r.EpisodeRunTime) > 0 {
+		out.Runtime = r.EpisodeRunTime[0]
 	}
 	if kind == KindTV {
 		out.Title, out.OriginalTitle, out.Date = r.Name, r.OriginalName, r.FirstAirDate
@@ -335,7 +378,8 @@ func (c *Client) details(ctx context.Context, kind string, id int, lang string) 
 
 // cached 读缓存；没有时调用 fetch，成功的结果写进缓存。
 func (c *Client) cached(ctx context.Context, key string, ttl time.Duration, out any, fetch func() (any, error)) error {
-	key = "tmdb:v1:" + key
+	// v2：结果多了类型、背景图与片长，v1 的缓存不再使用
+	key = "tmdb:v2:" + key
 	if c.cache != nil {
 		if b, ok := c.cache.Get(key); ok && json.Unmarshal(b, out) == nil {
 			return nil
