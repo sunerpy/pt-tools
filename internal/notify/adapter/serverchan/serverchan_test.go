@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/notify/adapter/outbound"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -41,31 +42,40 @@ func TestServerChan(t *testing.T) {
 	c.OnInbound(nil)
 	assert.Contains(t, notify.DefaultRegistry().Types(), Type)
 
+	var _ notify.ConfigChecker = c
+	assert.ErrorContains(t, c.CheckConfig(&models.NotificationConf{ConfigJSON: `{"send_key":"a/b"}`}), "格式不对")
+
+	// 请求发到官方地址（测试里改连到本地 TLS 收件端）
 	var got map[string]string
-	code := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var host string
+	status, resp := http.StatusOK, `{"code":0,"message":""}`
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host = r.Host + r.URL.Path
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &got)
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "message": "bad key"})
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(resp))
 	}))
 	defer srv.Close()
-	c.endpoint = srv.URL + "/SCTkey.send"
+	c.client = outbound.NewClient(outbound.Options{Divert: srv.Listener.Addr().String()})
 	long := strings.Repeat("长", 40)
 	require.NoError(t, c.Send(context.Background(), notify.Notification{Title: long, Text: "正文", Link: "https://x"}))
+	assert.Equal(t, "sctapi.ftqq.com/SCTkey.send", host)
 	assert.Equal(t, 32, len([]rune(got["title"])), "标题最多 32 个字")
 	assert.True(t, strings.HasPrefix(got["desp"], long), "完整标题放进正文")
 	assert.Contains(t, got["desp"], "https://x")
 
-	code = 40001
+	resp = `{"code":40001,"message":"bad key"}`
 	assert.ErrorContains(t, c.Send(context.Background(), notify.Notification{Title: "t"}), "code=40001")
 
-	// 真实服务对错误的 Key 回 HTTP 400 + JSON：报 code 与 message，不报整段响应
-	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"message":"[AUTH]\u9519\u8bef\u7684Key","code":40001}`))
-	}))
-	defer bad.Close()
-	c.endpoint = bad.URL + "/SCTkey.send"
+	// 真实服务对错误的 Key 回 HTTP 400 + JSON：报 code 与 message（回显的 SendKey 换成 ***），不报整段响应
+	status, resp = http.StatusBadRequest, `{"message":"[AUTH]\u9519\u8bef\u7684Key SCTkey","code":40001,"info":"SCTkey"}`
 	err := c.Send(context.Background(), notify.Notification{Title: "t"})
-	assert.EqualError(t, err, "Server 酱推送失败: code=40001, message=[AUTH]错误的Key")
+	assert.EqualError(t, err, "Server 酱推送失败: code=40001, message=[AUTH]错误的Key ***")
+
+	// 没有 code、或 HTTP 错误没有 JSON：算失败，错误里只有状态码
+	status, resp = http.StatusOK, `{}`
+	assert.ErrorContains(t, c.Send(context.Background(), notify.Notification{Title: "t"}), "响应里没有 code")
+	status, resp = http.StatusInternalServerError, `SCTkey`
+	assert.EqualError(t, c.Send(context.Background(), notify.Notification{Title: "t"}), "Server 酱推送失败: HTTP 500")
 }

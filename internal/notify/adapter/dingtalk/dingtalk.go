@@ -1,5 +1,6 @@
-// Package dingtalk 是钉钉群自定义机器人出站通道。加签时 timestamp 是毫秒，签名是以 secret 为 key 对
-// "timestamp\nsecret" 做 HmacSHA256 后 Base64，拼在 Webhook 地址后面（&timestamp=…&sign=…）；返回 errcode 非 0 算失败。
+// Package dingtalk 是钉钉群自定义机器人出站通道。Webhook 地址只能是 https://oapi.dingtalk.com/robot/send?access_token=…；
+// 加签时 timestamp 是毫秒，签名是以 secret 为 key 对 "timestamp\nsecret" 做 HmacSHA256 后 Base64，
+// 拼在 Webhook 地址后面（&timestamp=…&sign=…）；返回 errcode 为 0 才算成功。
 package dingtalk
 
 import (
@@ -23,12 +24,20 @@ import (
 // Type 是通道类型名。
 const Type = "dingtalk"
 
+// Host 与 Path 是钉钉自定义机器人的发送地址。
+const (
+	Host = "oapi.dingtalk.com"
+	Path = "/robot/send"
+)
+
 // Channel 是钉钉群机器人通道（只出站）。
 type Channel struct {
 	webhook string
+	token   string
 	secret  string
 	msgType string
 	now     func() time.Time
+	client  *outbound.Client // 为空时用 outbound.Default()
 }
 
 // Type 返回通道类型名。
@@ -50,7 +59,7 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 	if strings.TrimSpace(cfg.WebhookURL) == "" {
 		return errors.New("钉钉 webhook_url 为空")
 	}
-	u, err := outbound.HTTPURL(cfg.WebhookURL, "钉钉 Webhook 地址")
+	u, token, err := WebhookURL(cfg.WebhookURL)
 	if err != nil {
 		return err
 	}
@@ -61,11 +70,31 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 	if c.msgType != "markdown" && c.msgType != "text" {
 		return fmt.Errorf("钉钉 msg_type 无效: %s", c.msgType)
 	}
-	c.webhook, c.secret = u, strings.TrimSpace(cfg.Secret)
+	c.webhook, c.token, c.secret = u, token, strings.TrimSpace(cfg.Secret)
 	if c.now == nil {
 		c.now = time.Now
 	}
 	return nil
+}
+
+// CheckConfig 只检查配置、不发请求：保存配置前调用。
+func (c *Channel) CheckConfig(conf *models.NotificationConf) error {
+	return (&Channel{}).Init(context.Background(), conf)
+}
+
+// WebhookURL 校验钉钉 Webhook 地址：只能是 https://oapi.dingtalk.com/robot/send、带 access_token；
+// 返回规整后的地址与 access_token。
+func WebhookURL(raw string) (string, string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, Host) || u.Path != Path || u.User != nil || u.Fragment != "" {
+		return "", "", errors.New("钉钉 Webhook 地址要是 https://oapi.dingtalk.com/robot/send?access_token=… 的形式")
+	}
+	token := strings.TrimSpace(u.Query().Get("access_token"))
+	if token == "" {
+		return "", "", errors.New("钉钉 Webhook 地址里没有 access_token")
+	}
+	u.Host = Host
+	return u.String(), token, nil
 }
 
 // Sign 是钉钉加签：以 secret 为 key 对 "timestamp\nsecret" 做 HmacSHA256，再 Base64（拼进地址时再 URL 编码）。
@@ -82,7 +111,8 @@ func (c *Channel) endpoint() (string, error) {
 	}
 	u, err := url.Parse(c.webhook)
 	if err != nil {
-		return "", err
+		// 解析错误会带上整个地址（含 access_token），不往外传
+		return "", errors.New("钉钉 Webhook 地址格式不对")
 	}
 	ts := c.now().UnixMilli()
 	q := u.Query()
@@ -112,18 +142,22 @@ func (c *Channel) Send(ctx context.Context, n notify.Notification) error {
 	if err != nil {
 		return fmt.Errorf("钉钉推送失败: %w", err)
 	}
-	body, err := outbound.PostJSON(ctx, ep, payload)
-	if err != nil {
-		return fmt.Errorf("钉钉推送失败: %w", err)
-	}
+	resp, err := outbound.Use(c.client).PostJSON(ctx, outbound.Request{URL: ep, Payload: payload})
 	var res struct {
 		ErrCode *int   `json:"errcode"`
 		ErrMsg  string `json:"errmsg"`
 	}
-	if json.Unmarshal(body, &res) == nil && res.ErrCode != nil && *res.ErrCode != 0 {
-		return fmt.Errorf("钉钉推送失败: errcode=%d, errmsg=%s", *res.ErrCode, res.ErrMsg)
+	parsed := json.Unmarshal(resp.Body, &res) == nil && res.ErrCode != nil
+	switch {
+	case err == nil && parsed && *res.ErrCode == 0:
+		return nil
+	case parsed && *res.ErrCode != 0:
+		return fmt.Errorf("钉钉推送失败: errcode=%d, errmsg=%s", *res.ErrCode, outbound.Clean(res.ErrMsg, c.token, c.secret))
+	case err != nil:
+		return fmt.Errorf("钉钉推送失败: %w", err)
+	default:
+		return errors.New("钉钉推送失败: 响应里没有 errcode")
 	}
-	return nil
 }
 
 // SupportsInbound 恒为 false。

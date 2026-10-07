@@ -1,4 +1,4 @@
-// Package bark 是 Bark（iOS 推送）出站通道：POST {server}/push，JSON 里带 device_key。
+// Package bark 是 Bark（iOS 推送）出站通道：POST {server}/push，JSON 里带 device_key；返回 code 为 200 才算成功。
 package bark
 
 import (
@@ -21,25 +21,29 @@ const DefaultServer = "https://api.day.app"
 
 // Channel 是 Bark 通道（只出站）。
 type Channel struct {
-	server    string
-	deviceKey string
-	group     string
-	sound     string
+	server       string
+	deviceKey    string
+	group        string
+	sound        string
+	allowPrivate bool
+	client       *outbound.Client // 为空时用 outbound.Default()
 }
 
 // Type 返回通道类型名。
 func (c *Channel) Type() string { return Type }
 
-// Init 解析配置：device_key 必填；server 默认官方服务器；group、sound 可选。
+// Init 解析配置：device_key 必填；server 默认官方服务器；group、sound 可选；
+// allow_private 打开后才能用本机或内网的服务器。
 func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 	if conf == nil {
 		return errors.New("notification conf is nil")
 	}
 	var cfg struct {
-		ServerURL string `json:"server_url"`
-		DeviceKey string `json:"device_key"`
-		Group     string `json:"group"`
-		Sound     string `json:"sound"`
+		ServerURL    string `json:"server_url"`
+		DeviceKey    string `json:"device_key"`
+		Group        string `json:"group"`
+		Sound        string `json:"sound"`
+		AllowPrivate bool   `json:"allow_private"`
 	}
 	if err := outbound.Config(conf.ConfigJSON, &cfg, "Bark"); err != nil {
 		return err
@@ -52,12 +56,17 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 	if server == "" {
 		server = DefaultServer
 	}
-	s, err := outbound.HTTPURL(server, "Bark 服务器地址")
+	s, err := outbound.ServerURL(server, "Bark 服务器地址", cfg.AllowPrivate)
 	if err != nil {
 		return err
 	}
-	c.server, c.group, c.sound = s, strings.TrimSpace(cfg.Group), strings.TrimSpace(cfg.Sound)
+	c.server, c.group, c.sound, c.allowPrivate = s, strings.TrimSpace(cfg.Group), strings.TrimSpace(cfg.Sound), cfg.AllowPrivate
 	return nil
+}
+
+// CheckConfig 只检查配置、不发请求：保存配置前调用。
+func (c *Channel) CheckConfig(conf *models.NotificationConf) error {
+	return (&Channel{}).Init(context.Background(), conf)
 }
 
 // Send 推送一条通知。
@@ -72,19 +81,25 @@ func (c *Channel) Send(ctx context.Context, n notify.Notification) error {
 	if c.sound != "" {
 		payload["sound"] = c.sound
 	}
-	body, err := outbound.PostJSON(ctx, c.server+"/push", payload)
-	// device_key 不对等错误也会带 HTTP 4xx：响应里有 code 时报 code 与 message
+	resp, err := outbound.Use(c.client).PostJSON(ctx, outbound.Request{
+		URL: c.server + "/push", Payload: payload, AllowPrivate: c.allowPrivate,
+	})
+	// device_key 不对等错误也会带 HTTP 4xx：响应里有 code 时报 code 与 message（去掉 device_key）
 	var res struct {
 		Code    *int   `json:"code"`
 		Message string `json:"message"`
 	}
-	if json.Unmarshal(body, &res) == nil && res.Code != nil && *res.Code != 200 {
-		return fmt.Errorf("Bark 推送失败: code=%d, message=%s", *res.Code, res.Message)
+	parsed := json.Unmarshal(resp.Body, &res) == nil && res.Code != nil
+	switch {
+	case err == nil && parsed && *res.Code == 200:
+		return nil
+	case parsed && *res.Code != 200:
+		return fmt.Errorf("Bark 推送失败: code=%d, message=%s", *res.Code, outbound.Clean(res.Message, c.deviceKey))
+	case err != nil:
+		return fmt.Errorf("Bark 推送失败: %w%s", err, outbound.PrivateHint(err))
+	default:
+		return errors.New("Bark 推送失败: 响应里没有 code，服务器地址可能不是 Bark 服务器")
 	}
-	if err != nil {
-		return fmt.Errorf("Bark 推送失败: %w", err)
-	}
-	return nil
 }
 
 // SupportsInbound 恒为 false：Bark 只出站。

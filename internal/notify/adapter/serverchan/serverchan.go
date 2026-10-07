@@ -1,5 +1,5 @@
 // Package serverchan 是 Server 酱出站通道。SendKey 以 sctp 开头的是 Server 酱³（https://<uid>.push.ft07.com/send/<key>.send），
-// 其余按 Turbo 版（https://sctapi.ftqq.com/<key>.send）；POST JSON {title, desp}，返回 code 非 0 算失败。
+// 其余按 Turbo 版（https://sctapi.ftqq.com/<key>.send）；POST JSON {title, desp}，返回 code 为 0 才算成功。
 package serverchan
 
 import (
@@ -27,6 +27,8 @@ var sc3Key = regexp.MustCompile(`^sctp(\d+)t`)
 // Channel 是 Server 酱通道（只出站）。
 type Channel struct {
 	endpoint string
+	sendKey  string
+	client   *outbound.Client // 为空时用 outbound.Default()
 }
 
 // Type 返回通道类型名。
@@ -62,8 +64,13 @@ func (c *Channel) Init(_ context.Context, conf *models.NotificationConf) error {
 	if err != nil {
 		return err
 	}
-	c.endpoint = ep
+	c.endpoint, c.sendKey = ep, strings.TrimSpace(cfg.SendKey)
 	return nil
+}
+
+// CheckConfig 只检查配置、不发请求：保存配置前调用。
+func (c *Channel) CheckConfig(conf *models.NotificationConf) error {
+	return (&Channel{}).Init(context.Background(), conf)
 }
 
 // Send 推送一条通知：标题超过 32 个字时截断，完整标题放进正文第一行。
@@ -80,19 +87,25 @@ func (c *Channel) Send(ctx context.Context, n notify.Notification) error {
 	if n.Link != "" {
 		desp += "\n\n" + n.Link
 	}
-	body, err := outbound.PostJSON(ctx, c.endpoint, map[string]any{"title": title, "desp": desp})
-	// SendKey 不对等错误也会带 HTTP 4xx：响应里有 code 时报 code 与 message，比整段响应好读
+	resp, err := outbound.Use(c.client).PostJSON(ctx, outbound.Request{
+		URL: c.endpoint, Payload: map[string]any{"title": title, "desp": desp},
+	})
+	// SendKey 不对等错误也会带 HTTP 4xx：响应里有 code 时报 code 与 message（去掉 SendKey）
 	var res struct {
 		Code    *int   `json:"code"`
 		Message string `json:"message"`
 	}
-	if json.Unmarshal(body, &res) == nil && res.Code != nil && *res.Code != 0 {
-		return fmt.Errorf("Server 酱推送失败: code=%d, message=%s", *res.Code, res.Message)
-	}
-	if err != nil {
+	parsed := json.Unmarshal(resp.Body, &res) == nil && res.Code != nil
+	switch {
+	case err == nil && parsed && *res.Code == 0:
+		return nil
+	case parsed && *res.Code != 0:
+		return fmt.Errorf("Server 酱推送失败: code=%d, message=%s", *res.Code, outbound.Clean(res.Message, c.sendKey))
+	case err != nil:
 		return fmt.Errorf("Server 酱推送失败: %w", err)
+	default:
+		return errors.New("Server 酱推送失败: 响应里没有 code")
 	}
-	return nil
 }
 
 // SupportsInbound 恒为 false。
