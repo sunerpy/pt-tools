@@ -43,6 +43,7 @@ type Manager struct {
 	attendanceMonitor    *AttendanceMonitor
 	dailyReportJob       *DailyReportJob
 	brushMonitor         *BrushMonitor
+	deadTorrentMonitor   *DeadTorrentMonitor
 	eventCancel          func()
 	stopped              bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
@@ -492,6 +493,10 @@ func (m *Manager) StopAll() {
 		m.brushMonitor.Stop()
 		m.brushMonitor = nil
 	}
+	if m.deadTorrentMonitor != nil {
+		m.deadTorrentMonitor.Stop()
+		m.deadTorrentMonitor = nil
+	}
 	if m.dailyReportJob != nil {
 		m.dailyReportJob.Stop()
 		m.dailyReportJob = nil
@@ -652,6 +657,23 @@ func (m *Manager) SetDailyReportJob(job *DailyReportJob) {
 		m.dailyReportJob.Stop()
 	}
 	m.dailyReportJob = job
+}
+
+// SetDeadTorrentMonitor 登记失效种子定时扫描；替换旧实例时先停掉旧的。
+func (m *Manager) SetDeadTorrentMonitor(mon *DeadTorrentMonitor) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deadTorrentMonitor != nil && m.deadTorrentMonitor != mon {
+		m.deadTorrentMonitor.Stop()
+	}
+	m.deadTorrentMonitor = mon
+}
+
+// GetDeadTorrentMonitor 返回失效种子定时扫描（未接线时为 nil）。
+func (m *Manager) GetDeadTorrentMonitor() *DeadTorrentMonitor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deadTorrentMonitor
 }
 
 // SetBrushMonitor 登记刷流监控；替换旧实例时先停掉旧的。

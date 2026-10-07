@@ -122,6 +122,12 @@ type SettingsGlobal struct {
 	// 各安装错开发送时刻，不在同一分钟一起打通知接口。
 	DailyReportOffsetSeconds int `json:"-" gorm:"default:0"`
 
+	// 下载器助手的失效种子定时扫描：只通知、不删种。只经 ConfigStore.SaveDeadTorrentScanSettings 写。
+	// 间隔为 0 时按 24 小时。列的默认值都是零值（GORM 新建时会把零值换成 default）。
+	DeadTorrentScanEnabled    bool   `json:"dead_torrent_scan_enabled" gorm:"default:false"`
+	DeadTorrentScanIntervalH  int    `json:"dead_torrent_scan_interval_h" gorm:"default:0"`
+	DeadTorrentScanChannelIDs string `json:"dead_torrent_scan_channel_ids" gorm:"size:512;default:''"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

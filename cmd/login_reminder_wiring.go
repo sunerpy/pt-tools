@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/sunerpy/pt-tools/core"
@@ -161,6 +162,49 @@ func wireLoginReminderMonitor(
 	global.GetSlogger().Info("每日签到监控器已初始化并启动")
 
 	wireDailyReportJob(mgr, store, userInfo, notifier)
+	wireDeadTorrentMonitor(mgr, store, notifier)
+}
+
+// wireDeadTorrentMonitor 构造并启动失效种子定时扫描（只通知、默认关闭）：与登录提醒共用通知投递器。
+func wireDeadTorrentMonitor(mgr *scheduler.Manager, store *core.ConfigStore, notifier *scheduler.MonitorNotifier) {
+	if store == nil || global.GlobalDB == nil || global.GlobalDB.DB == nil {
+		global.GetSlogger().Warn("失效种子定时扫描跳过初始化：配置或数据库未就绪")
+		return
+	}
+	mon := scheduler.NewDeadTorrentMonitor(scheduler.DeadTorrentMonitorConfig{
+		Settings: func() (bool, time.Duration, []uint, error) {
+			s, err := store.DeadTorrentScanSettings()
+			return s.Enabled, time.Duration(s.IntervalHours) * time.Hour, s.ChannelIDs, err
+		},
+		Downloaders: deadTorrentDownloaders(mgr),
+		Notifier:    notifier,
+		Logger:      global.GetSlogger(),
+	})
+	mgr.SetDeadTorrentMonitor(mon)
+	mon.Start()
+	global.GetSlogger().Info("失效种子定时扫描已初始化")
+}
+
+// deadTorrentDownloaders 返回已启用的下载器实例；连不上的下载器放进错误列表，不影响其他下载器。
+func deadTorrentDownloaders(mgr *scheduler.Manager) func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error) {
+	return func(ctx context.Context) ([]scheduler.DeadTorrentDownloader, []error) {
+		var settings []models.DownloaderSetting
+		if err := global.GlobalDB.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&settings).Error; err != nil {
+			return nil, []error{fmt.Errorf("读取下载器失败: %w", err)}
+		}
+		dm := mgr.GetDownloaderManager()
+		out := make([]scheduler.DeadTorrentDownloader, 0, len(settings))
+		var errs []error
+		for _, s := range settings {
+			dl, err := dm.GetDownloaderContext(ctx, s.Name)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", s.Name, err))
+				continue
+			}
+			out = append(out, scheduler.DeadTorrentDownloader{Name: s.Name, DL: dl})
+		}
+		return out, errs
+	}
 }
 
 // wireDailyReportJob 构造并启动每日战报任务：与登录提醒共用通知投递器；用户数据仓库没起来时不启动。

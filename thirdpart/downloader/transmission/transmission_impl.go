@@ -288,14 +288,22 @@ func (t *TransmissionClient) createRequestWithContext(ctx context.Context, metho
 
 // doRequest 执行 RPC 请求
 func (t *TransmissionClient) doRequest(method string, args any) (*rpcResponse, error) {
+	return t.doRequestContext(context.Background(), method, args)
+}
+
+// doRequestContext 执行 RPC 请求；请求受 ctx 约束。
+func (t *TransmissionClient) doRequestContext(ctx context.Context, method string, args any) (*rpcResponse, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.client == nil {
 		return nil, fmt.Errorf("client is closed")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	req, err := t.createRequest(method, args)
+	req, err := t.createRequestWithContext(ctx, method, args)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +318,7 @@ func (t *TransmissionClient) doRequest(method string, args any) (*rpcResponse, e
 	if resp.StatusCode == http.StatusConflict {
 		t.sessionID = resp.Header.Get("X-Transmission-Session-Id")
 		// 重试请求
-		req, err = t.createRequest(method, args)
+		req, err = t.createRequestWithContext(ctx, method, args)
 		if err != nil {
 			return nil, err
 		}
@@ -1295,8 +1303,12 @@ func (t *TransmissionClient) GetTorrentTrackers(id string) ([]downloader.Torrent
 		return nil, downloader.ErrTorrentNotFound
 	}
 
-	trackers := make([]downloader.TorrentTracker, 0, len(getResp.Torrents[0].TrackerStats))
-	for _, tracker := range getResp.Torrents[0].TrackerStats {
+	return mapTrackerStats(getResp.Torrents[0].TrackerStats), nil
+}
+
+func mapTrackerStats(stats []transmissionTrackerStat) []downloader.TorrentTracker {
+	trackers := make([]downloader.TorrentTracker, 0, len(stats))
+	for _, tracker := range stats {
 		url := tracker.Announce
 		if url == "" {
 			url = tracker.Host
@@ -1311,8 +1323,7 @@ func (t *TransmissionClient) GetTorrentTrackers(id string) ([]downloader.Torrent
 			Message: tracker.LastAnnounceResult,
 		})
 	}
-
-	return trackers, nil
+	return trackers
 }
 
 func (t *TransmissionClient) GetDiskInfo() (downloader.DiskInfo, error) {

@@ -98,6 +98,12 @@ const router = createRouter({
       meta: { title: "刷流任务" },
     },
     {
+      path: "/downloader-assistant",
+      name: "downloader-assistant",
+      component: () => import("@/views/DownloaderAssistant.vue"),
+      meta: { title: "下载器助手" },
+    },
+    {
       path: "/paused",
       name: "paused",
       component: () => import("@/views/PausedTorrents.vue"),

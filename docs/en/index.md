@@ -102,6 +102,10 @@ home:
             body: Keep several save folders per downloader and choose one when you push a torrent.
             status: available
             link: /en/configuration
+          - title: Downloader assistant
+            body: Find dead torrents a site has deleted, tag torrents with their site by tracker and replace tracker addresses in bulk, each previewed first.
+            status: available
+            link: /en/guide/downloader-assistant
       - name: Notifications and ChatOps
         items:
           - title: Commands in QQ and Telegram

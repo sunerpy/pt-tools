@@ -54,6 +54,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
        */
       { path: "/downloader-hub", label: "下载器 Web UI", icon: "app-window" },
       { path: "/downloaders", label: "下载器设置", icon: "server" },
+      /* 路线图 M4：画板没有这一页，沿用下载组的列表页样式 */
+      { path: "/downloader-assistant", label: "下载器助手", icon: "wrench" },
     ],
   },
   {
