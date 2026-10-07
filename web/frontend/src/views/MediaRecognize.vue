@@ -110,6 +110,8 @@ async function testTMDB() {
 // ---- 识别预览 ----
 const input = ref({ title: "", subtitle: "", imdb: "" });
 const result = ref<MediaRecognizeResult | null>(null);
+/** 这一次识别失败的原因（页面里一直显示，直到下一次识别），旧的结果已经清掉 */
+const recognizeError = ref("");
 const recognizing = ref(false);
 const recognizedInput = ref({ title: "", subtitle: "" });
 const tags = computed(() => (result.value ? metaTags(result.value.meta) : []));
@@ -121,12 +123,15 @@ async function recognize() {
     ElMessage.warning("先填写标题");
     return;
   }
+  // 先清掉上一次的结果：失败时不能让旧标题的结果留在新标题下面
+  result.value = null;
+  recognizeError.value = "";
   recognizing.value = true;
   try {
     result.value = await mediaApi.recognize({ title, subtitle, imdb_id: input.value.imdb.trim() });
     recognizedInput.value = { title, subtitle };
   } catch (e) {
-    ElMessage.error(errText(e, "识别失败"));
+    recognizeError.value = errText(e, "识别失败");
   } finally {
     recognizing.value = false;
   }
@@ -416,6 +421,13 @@ onMounted(refresh);
         </el-button>
       </el-form>
 
+      <div
+        v-if="recognizeError"
+        class="pt-note pt-note--warn md-fail"
+        data-testid="media-recognize-error">
+        <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
+        <span>识别失败：{{ recognizeError }}。改一下标题或稍后再点「识别」。</span>
+      </div>
       <div v-if="result" class="md-result" data-testid="media-result">
         <div class="md-section">
           <div class="md-label">解析结果</div>
@@ -781,6 +793,10 @@ onMounted(refresh);
 
 .md-tip--top {
   margin: 0 0 12px;
+}
+
+.md-fail {
+  margin-top: 16px;
 }
 
 .md-result {

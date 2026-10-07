@@ -242,9 +242,18 @@ describe("媒体识别", () => {
     await vi.waitFor(() => expect(q("media-message")?.textContent).toContain("只做了标题解析"));
     expect(q("media-summary")!.textContent).toContain("没解析出名字");
 
-    api.recognize.mockRejectedValue(new Error("标题与副标题不能都为空"));
+    // 新一次识别失败：旧结果清掉，页面里写明原因（不只是一闪而过的提示）
+    api.recognize.mockRejectedValue(new Error("TMDB 暂时不能访问: HTTP 502"));
     q("media-recognize")!.click();
-    await vi.waitFor(() => expect(ui.error).toHaveBeenCalledWith("标题与副标题不能都为空"));
+    await vi.waitFor(() =>
+      expect(q("media-recognize-error")?.textContent).toContain("TMDB 暂时不能访问"),
+    );
+    expect(q("media-result")).toBeNull();
+
+    api.recognize.mockResolvedValue({ meta: {}, summary: "Y", source: "none" });
+    q("media-recognize")!.click();
+    await vi.waitFor(() => expect(q("media-result")).not.toBeNull());
+    expect(q("media-recognize-error")).toBeNull();
   });
 
   it("按 TMDB 编号纠正：没填编号时提示", async () => {
