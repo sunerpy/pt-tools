@@ -104,7 +104,7 @@ Recognition uses the torrent name (and the site title as a subtitle when it diff
 
 Automatic organising and periodic scans only take torrents in the scope: downloaders, categories, tags and save paths (as the downloader sees them). An empty item means no limit; a filled one must match one of its values.
 
-Manual organising shows a preview first: the recognized title, the chosen library and where each file goes. When the match is wrong, enter a TMDB ID (choose movie or TV) or pick another library of the same type, click Preview again (重新预览), then organise. Copying large files can take a while; the dialog waits 20 seconds, the work continues in the background and the result appears in the history.
+Manual organising shows a preview first: the recognized title, the chosen library and where each file goes. When the match is wrong, enter a TMDB ID (choose movie or TV) or pick another library of the same type, click Preview again (重新预览), then organise. A torrent organised before keeps the title it was organised with (the preview says 沿用之前整理用的条目); to change it, enter a TMDB ID or delete its records first. Copying large files can take a while; the dialog waits 20 seconds, the work continues in the background and the result appears in the history.
 
 Each file is organised once: repeated completion events or several triggers at the same time never organise it twice. When the library already has this file (the same inode, or a symbolic link to the source), it counts as done. When another file is at the target, it is not overwritten and the record says skipped.
 
