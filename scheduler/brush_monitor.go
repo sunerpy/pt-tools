@@ -631,6 +631,8 @@ func (m *BrushMonitor) admit(ctx context.Context, task *models.BrushTask, dl dow
 			SavePath:     task.SavePath,
 			DownloaderID: task.DownloaderID,
 			Source:       brushSource,
+			IMDbID:       it.IMDbID,
+			DoubanID:     it.DoubanID,
 			Meta: &ptinternal.PushTorrentMeta{
 				SizeBytes: size, HasHR: hasHR, HRSeedTimeH: hrHours,
 				IsFree: v2.IsFreeTorrent(it.DiscountLevel), FreeLevel: string(it.DiscountLevel), FreeEndTime: freeEnd,

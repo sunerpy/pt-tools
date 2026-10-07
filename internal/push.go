@@ -17,6 +17,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/transmission"
@@ -39,6 +40,9 @@ type PushTorrentRequest struct {
 	// ReuseExistingData 用于转移做种与辅种：数据已经在盘上。强制暂停添加（校验完才开始），
 	// 跳过磁盘预留，站点容量闸门照常；不写种子记录，成功后由调用方更新。
 	ReuseExistingData bool
+	// IMDbID、DoubanID 是调用方已经知道的外部编号（刷流、订阅从搜索结果带来）；为空的不覆盖库里已有的值。
+	IMDbID   string
+	DoubanID string
 }
 
 // PushTorrentMeta 是推送时一并写进 TorrentInfo 的种子信息。H&R 与体积会被自动清理的 H&R 保护用到
@@ -97,6 +101,8 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	if exists {
 		sLogger().Infof("[PushTorrent] 种子已存在于下载器中，跳过: site=%s, id=%s, hash=%s, downloader=%s",
 			req.SiteID, req.TorrentID, torrentHash, dlSetting.Name)
+		// 只更新已有的记录：没有记录说明不是经 pt-tools 推送的，不为编号新建一条
+		mergeTorrentExternalIDs(req.SiteID, req.TorrentID, req.IMDbID, req.DoubanID)
 		return &PushTorrentResult{
 			Success:     true,
 			Skipped:     true,
@@ -148,6 +154,8 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			return nil, fmt.Errorf("保存种子记录失败: %w", err)
 		}
 	}
+	// 外部编号不放进上面的更新列：不带编号的推送（手动、ChatOps）不能清掉已有的值
+	mergeTorrentExternalIDs(req.SiteID, req.TorrentID, req.IMDbID, req.DoubanID)
 
 	// 构建添加选项
 	opts := downloader.AddTorrentOptions{
@@ -417,4 +425,22 @@ func applySiteSpeedLimits(opts *downloader.AddTorrentOptions, siteName string) {
 	}
 	opts.UploadSpeedLimitKBs = site.UploadLimitKBs
 	opts.DownloadSpeedLimitKBs = site.DownloadLimitKBs
+}
+
+// mergeTorrentExternalIDs 把非空的外部编号写进已有的种子记录；没有记录时什么也不做（不为编号新建记录）。
+func mergeTorrentExternalIDs(siteID, torrentID, imdbID, doubanID string) {
+	updates := map[string]any{}
+	if id := v2.NormalizeIMDbID(imdbID); id != "" {
+		updates["imdb_id"] = id
+	}
+	if id := v2.NormalizeDoubanID(doubanID); id != "" {
+		updates["douban_id"] = id
+	}
+	if len(updates) == 0 || global.GlobalDB == nil {
+		return
+	}
+	if err := global.GlobalDB.DB.Model(&models.TorrentInfo{}).
+		Where("site_name = ? AND torrent_id = ?", siteID, torrentID).Updates(updates).Error; err != nil {
+		sLogger().Warnf("[PushTorrent] 写入外部编号失败: site=%s, id=%s: %v", siteID, torrentID, err)
+	}
 }

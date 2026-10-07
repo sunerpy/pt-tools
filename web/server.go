@@ -30,6 +30,7 @@ import (
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -44,6 +45,7 @@ type Server struct {
 	sessions    *sessionStore // sessionID -> username，并发安全
 	logins      *loginLimiter // 登录失败计数与口令校验并发上限
 	chatopsDeps *ChatOpsDeps
+	media       *recognize.Service   // 媒体识别（M9）；为空时接口回 503
 	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
 
 	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
@@ -165,6 +167,7 @@ func (s *Server) Serve(addr string) error {
 	s.registerTransferRoutes(mux)
 	s.registerReseedRoutes(mux)
 	s.registerCookieCloudRoutes(mux)
+	s.registerMediaRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))

@@ -2283,3 +2283,22 @@ func TestRescheduleMissingFutureTorrents_SchedulesUnseen(t *testing.T) {
 	assert.True(t, scheduled)
 	m.CancelTorrent(tor.ID)
 }
+
+// 归档时外部编号一并复制。
+func TestArchiveOldTorrents_KeepsExternalIDs(t *testing.T) {
+	fake := newSchedFakeDownloader("qb1")
+	m, db := newFreeEndMonitorWithFake(t, fake)
+	old := time.Now().AddDate(0, 0, -40)
+	ti := models.TorrentInfo{
+		SiteName: "s", TorrentID: "ext1", Title: "Old", IsCompleted: true, CreatedAt: old,
+		IMDbID: "tt0111161", DoubanID: "1292052",
+	}
+	require.NoError(t, db.DB.Create(&ti).Error)
+
+	m.archiveOldTorrents()
+
+	var got models.TorrentInfoArchive
+	require.NoError(t, db.DB.Where("torrent_id = ?", "ext1").First(&got).Error)
+	assert.Equal(t, "tt0111161", got.IMDbID)
+	assert.Equal(t, "1292052", got.DoubanID)
+}

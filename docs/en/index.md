@@ -118,6 +118,12 @@ home:
             body: Find torrents with the same data on other sites through IYUU, check their files and add them to the same downloader; they seed only after a 100% check.
             status: available
             link: /en/guide/reseed
+      - name: Media
+        items:
+          - title: Media recognition
+            body: Parse torrent titles and find the movie or TV show on TMDB; IMDb and Douban IDs from sites are recorded, and wrong matches can be corrected by hand or with recognition words.
+            status: available
+            link: /en/guide/media-recognize
       - name: Notifications and ChatOps
         items:
           - title: Commands in QQ and Telegram

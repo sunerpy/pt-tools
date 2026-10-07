@@ -461,6 +461,9 @@ type DetailParserConfig struct {
 	EndTimeSelector  string                   `json:"endTimeSelector,omitempty"`
 	SizeSelector     string                   `json:"sizeSelector,omitempty"`
 	SizeRegex        string                   `json:"sizeRegex,omitempty"`
+	// IMDbRegex、DoubanRegex 在详情页 HTML 里找外部编号（第一个分组是编号，取第一处匹配）；为空时用默认的链接格式。
+	IMDbRegex   string `json:"imdbRegex,omitempty"`
+	DoubanRegex string `json:"doubanRegex,omitempty"`
 }
 
 // DefaultDetailParserConfig returns default config for standard NexusPHP sites

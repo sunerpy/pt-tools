@@ -118,6 +118,12 @@ home:
             body: 用 IYUU 找出其他站点上数据相同的种子，核对文件后加进同一台下载器，校验到 100% 才开始做种。
             status: available
             link: /guide/reseed
+      - name: 媒体
+        items:
+          - title: 媒体识别
+            body: 解析种子标题，到 TMDB 找对应的电影或剧集；记下站点给的 IMDb 与豆瓣编号，识别不对时可以手动纠正，也可以加识别词。
+            status: available
+            link: /guide/media-recognize
       - name: 通知与 ChatOps
         items:
           - title: QQ 与 Telegram 命令

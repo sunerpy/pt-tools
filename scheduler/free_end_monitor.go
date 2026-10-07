@@ -876,6 +876,8 @@ func (m *FreeEndMonitor) archiveOldTorrents() {
 			TorrentSize:       t.TorrentSize,
 			DownloaderTaskID:  t.DownloaderTaskID,
 			CheckCount:        t.CheckCount,
+			IMDbID:            t.IMDbID,
+			DoubanID:          t.DoubanID,
 		}
 
 		err := m.db.Transaction(func(tx *gorm.DB) error {

@@ -224,6 +224,7 @@ var webCmd = &cobra.Command{
 		wireCookieCloudWorker(mgr, store, siteRegistry)
 
 		srv := web.NewServer(store, mgr)
+		srv.SetMediaService(newMediaService(store))
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}

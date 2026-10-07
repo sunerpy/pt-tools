@@ -212,6 +212,9 @@ type MTorrentTorrent struct {
 		MallSingleFree  *MallSingleFree        `json:"mallSingleFree,omitempty"`
 	} `json:"status"`
 	Category string `json:"category"`
+	// IMDb、Douban 是条目链接（或编号），用 NormalizeIMDbID、NormalizeDoubanID 规整
+	IMDb   string `json:"imdb"`
+	Douban string `json:"douban"`
 }
 
 // MTorrentUserInfo represents user info from M-Team API
@@ -494,6 +497,8 @@ func (d *MTorrentDriver) ParseSearch(res MTorrentResponse) ([]TorrentItem, error
 			Category:        getMTeamCategoryName(t.Category),
 			DiscountLevel:   discount,
 			DiscountEndTime: discountEndTime,
+			IMDbID:          NormalizeIMDbID(t.IMDb),
+			DoubanID:        NormalizeDoubanID(t.Douban),
 		}
 
 		// Parse upload time
@@ -1118,6 +1123,8 @@ func (d *MTorrentDriver) GetTorrentDetail(ctx context.Context, guid, _, _ string
 		SourceSite:      d.getSiteID(),
 		DiscountLevel:   discount,
 		DiscountEndTime: discountEndTime,
+		IMDbID:          NormalizeIMDbID(detail.IMDb),
+		DoubanID:        NormalizeDoubanID(detail.Douban),
 	}
 
 	if detail.SmallDescr != "" {

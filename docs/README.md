@@ -33,6 +33,10 @@
 - [转移做种](guide/torrent-transfer.md)：把种子搬到另一台下载器继续做种，路径映射与定时规则。
 - [IYUU 辅种](guide/reseed.md)：用 IYUU 找出其他站点上数据相同的种子，核对后加进同一台下载器。
 
+## 媒体
+
+- [媒体识别](guide/media-recognize.md)：解析种子标题、到 TMDB 找对应的电影或剧集，手动纠正与识别词。
+
 ## ChatOps 与通知
 
 - [ChatOps 快速开始](guide/chatops-quickstart.md)：通道选择、命令清单与配置入口。

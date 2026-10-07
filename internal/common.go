@@ -974,6 +974,14 @@ func downloadWorkerUnified(
 				}
 			}
 
+			// 外部编号：详情里有就写上（新建与重新检查的记录都写），没有时保留库里已有的值
+			if detail.IMDbID != "" {
+				torrent.IMDbID = detail.IMDbID
+			}
+			if detail.DoubanID != "" {
+				torrent.DoubanID = detail.DoubanID
+			}
+
 			shouldDownload := decision.ShouldDownload
 
 			if isFree {
@@ -996,7 +1004,7 @@ func downloadWorkerUnified(
 				// 使用 GORM 的 upsert 功能
 				err = tx.Clauses(clause.OnConflict{
 					Columns:   []clause.Column{{Name: "site_name"}, {Name: "torrent_id"}},
-					DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free", "download_source", "filter_rule_id"}),
+					DoUpdates: clause.AssignmentColumns([]string{"is_skipped", "free_level", "free_end_time", "title", "category", "tag", "last_check_time", "is_free", "download_source", "filter_rule_id", "imdb_id", "douban_id"}),
 				}).Create(torrent).Error
 				return err
 			})

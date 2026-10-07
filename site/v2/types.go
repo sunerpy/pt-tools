@@ -292,6 +292,10 @@ type TorrentItem struct {
 	DownloadURL string `json:"downloadUrl,omitempty"`
 	// Category is the torrent category
 	Category string `json:"category,omitempty"`
+	// IMDbID 是 IMDb 编号（tt 开头），站点给了时才有
+	IMDbID string `json:"imdbId,omitempty"`
+	// DoubanID 是豆瓣电影条目的数字编号，站点给了时才有
+	DoubanID string `json:"doubanId,omitempty"`
 }
 
 // IsFree returns true if the torrent is currently free
