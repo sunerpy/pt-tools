@@ -265,3 +265,50 @@ func TestRetryDueKeepsScheduleWhenQueueFull(t *testing.T) {
 	require.NotNil(t, row.NextRetryAt, "排不上时保留重试时间")
 	assert.Equal(t, e.now.Add(tickInterval), row.NextRetryAt.UTC(), "下一拍再试")
 }
+
+// 自动整理失败后的重试按现在的设置：自动整理关了、种子不在范围里时不整理
+func TestRetryFollowsCurrentAutomation(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerAuto}))
+	e.drain()
+	row := e.history()[0]
+	require.Equal(t, models.MediaTransferFailed, row.Status)
+	require.Equal(t, models.MediaTriggerAuto, row.Trigger)
+	require.NotNil(t, row.NextRetryAt)
+	e.tmdb.setDown(false)
+	due := func() {
+		t.Helper()
+		require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("1 = 1").Update("next_retry_at", e.Now()).Error)
+		e.svc.retryDue(e.ctx)
+		e.drain()
+	}
+
+	e.settings(SettingsInput{MinVideoMB: 1})
+	due()
+	assert.Equal(t, models.MediaTransferFailed, e.history()[0].Status, "自动整理关掉以后不再重试")
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"tv"}})
+	due()
+	assert.Equal(t, models.MediaTransferFailed, e.history()[0].Status, "不在范围里不重试")
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"movies"}})
+	due()
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+}
+
+// 完成事件带了下载器名字，补查与扫描只有编号：排队去重与退避用同一个键
+func TestJobKeyIgnoresNameWithID(t *testing.T) {
+	e := newEnv(t)
+	assert.Equal(t, jobKey(1, "", "ABC"), jobKey(1, "qb", "abc"))
+	assert.NotEqual(t, jobKey(0, "qb", "abc"), jobKey(0, "", "abc"), "只有名字时按名字")
+	ev := job{req: Request{DownloaderID: 1, Hash: "abc"}, dlName: "qb", trigger: models.MediaTriggerAuto}
+	require.True(t, e.svc.enqueue(ev))
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: "abc"}, trigger: models.MediaTriggerAuto}))
+	assert.Len(t, e.svc.jobs, 1, "补查不重复排完成事件已经排上的种子")
+	e.svc.fail(ev)
+	assert.True(t, e.svc.backedOff(1, "abc"), "完成事件失败后，补查与扫描看得到退避")
+}

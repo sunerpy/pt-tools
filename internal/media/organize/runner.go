@@ -45,7 +45,11 @@ const (
 	waitManual = 20 * time.Second
 )
 
+// jobKey 是排队去重与退避用的键：知道下载器编号时只用编号（完成事件带了名字，补查与扫描只有编号，要对得上）。
 func jobKey(dlID uint, dlName, hash string) string {
+	if dlID != 0 {
+		dlName = ""
+	}
 	return fmt.Sprintf("%d|%s|%s", dlID, dlName, strings.ToLower(strings.TrimSpace(hash)))
 }
 
@@ -171,8 +175,9 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 		}
 		j.req.DownloaderID = setting.ID
 	}
-	if !j.retry && (j.trigger == models.MediaTriggerAuto || j.trigger == models.MediaTriggerScan) {
-		ok, err := s.inScope(ctx, j.req)
+	// 自动与扫描触发的（包括它们失败后的重试）按现在的设置：对应的开关关了、种子不在范围里的不整理
+	if j.trigger == models.MediaTriggerAuto || j.trigger == models.MediaTriggerScan {
+		ok, err := s.automated(ctx, j)
 		if err != nil {
 			s.fail(j)
 			return nil, err
@@ -196,12 +201,16 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	return res, nil
 }
 
-// inScope 报告种子在不在自动整理与扫描的范围里。
-func (s *Service) inScope(ctx context.Context, req Request) (bool, error) {
+// automated 报告自动与扫描触发的整理现在还该不该做：自动整理或定期扫描（看触发方式）开着，种子在范围里。
+func (s *Service) automated(ctx context.Context, j job) (bool, error) {
 	set, err := s.Settings(ctx)
 	if err != nil {
 		return false, err
 	}
+	if (j.trigger == models.MediaTriggerAuto && !set.AutoEnabled) || (j.trigger == models.MediaTriggerScan && !set.ScanEnabled) {
+		return false, nil
+	}
+	req := j.req
 	dl, _, err := s.cfg.Downloaders.Get(ctx, req.DownloaderID)
 	if err != nil {
 		return false, err
