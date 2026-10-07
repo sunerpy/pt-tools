@@ -190,26 +190,17 @@ func isYear(tk string) bool {
 }
 
 // lastYearIndex 是名字区里最后一个像年份的词的位置：1917.2019、2001.A.Space.Odyssey.1968 这类名字里带数字的，
-// 年份是最后一个；返回 0 表示名字只有这一个数字（如 2012），当名字不当年份。
+// 年份是最后一个；它前面要有名字（中文名也算，如「满江红 2023」）。年份是第一个词时（如 2012）当名字不当年份，返回 -1。
 func lastYearIndex(tokens []string) int {
 	for j := len(tokens) - 1; j >= 0; j-- {
 		if !hasHan(tokens[j]) && isYear(tokens[j]) {
-			if latinBefore(tokens[:j]) {
+			if j > 0 {
 				return j
 			}
 			return -1
 		}
 	}
 	return -1
-}
-
-func latinBefore(tokens []string) bool {
-	for _, tk := range tokens {
-		if !hasHan(tk) {
-			return true
-		}
-	}
-	return false
 }
 
 func firstYear(tokens []string) int {
