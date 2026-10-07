@@ -7,7 +7,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { isLoopbackListenAddr } from "@/utils/listenAddr";
-import { OUTBOUND_CHANNELS, missingRequired, outboundChannel } from "@/utils/notifyChannels";
+import { OUTBOUND_CHANNELS, outboundChannel, outboundProblem } from "@/utils/notifyChannels";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -150,6 +150,7 @@ const channelTypeMap = [
 /* 只出站通道的字段按名字绑定：conf 始终是同一个 reactive 对象（resetConf 只删键、loadDetail 用 Object.assign） */
 const confText = conf as unknown as Record<string, string | undefined>;
 const confNum = conf as unknown as Record<string, number | undefined>;
+const confBool = conf as unknown as Record<string, boolean | undefined>;
 
 const credRules = computed<FormRules>(() => {
   switch (conf.channel_type) {
@@ -308,10 +309,10 @@ async function handleSaveCredentials() {
   if (locked.value || !credFormRef.value) return;
   const valid = await credFormRef.value.validate().catch(() => false);
   if (!valid) return;
-  // 只出站的通道再按字段定义查一遍必填项（与新建对话框同一份规则）
-  const missing = missingRequired(conf.channel_type, conf as unknown as Record<string, unknown>);
-  if (missing) {
-    ElMessage.warning(`请填写${missing.label}`);
+  // 只出站的通道再按字段定义查一遍必填项与格式（与新建对话框同一份规则；后端保存前还会再查）
+  const problem = outboundProblem(conf.channel_type, conf as unknown as Record<string, unknown>);
+  if (problem) {
+    ElMessage.warning(problem);
     return;
   }
 
@@ -357,7 +358,9 @@ async function handleSaveCredentials() {
         // 只出站的通道：字段来自 utils/notifyChannels，整份发出（没填的发空值，后端按空处理）
         const sink = payload as unknown as Record<string, unknown>;
         for (const f of outboundChannel(conf.channel_type)?.fields ?? []) {
-          sink[f.key] = f.kind === "number" ? (confNum[f.key] ?? 0) : (confText[f.key] ?? "");
+          if (f.kind === "number") sink[f.key] = confNum[f.key] ?? 0;
+          else if (f.kind === "switch") sink[f.key] = confBool[f.key] === true;
+          else sink[f.key] = (confText[f.key] ?? "").trim();
         }
       }
     }
@@ -731,8 +734,12 @@ function goBack() {
               :key="f.key"
               :label="f.label"
               :prop="f.key">
+              <el-switch
+                v-if="f.kind === 'switch'"
+                v-model="confBool[f.key]"
+                :data-testid="`cred-${f.key}`" />
               <el-select
-                v-if="f.kind === 'select'"
+                v-else-if="f.kind === 'select'"
                 v-model="confText[f.key]"
                 :placeholder="f.options?.[0]?.label"
                 clearable

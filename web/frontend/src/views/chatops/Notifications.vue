@@ -11,10 +11,15 @@ import PtTag from "@/components/ui/PtTag.vue";
 import { useDataState } from "@/composables/useDataState";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
-import { OUTBOUND_CHANNELS, missingRequired, outboundChannel } from "@/utils/notifyChannels";
+import {
+  OUTBOUND_CHANNELS,
+  outboundChannel,
+  outboundFieldKeys,
+  outboundProblem,
+} from "@/utils/notifyChannels";
 
 /*
  * 通道类型的图标与色相：四个通道在卡片网格里必须一眼分得开，
@@ -214,14 +219,27 @@ const stateSub = computed(() => {
 const addDialogVisible = ref(false);
 const submitting = ref(false);
 
-const newChannel = ref<Partial<NotificationConfig>>({
-  channel_type: "telegram",
-  name: "",
-  enabled: true,
-  bot_token: "",
-  endpoint_url: "",
-  webhook_key: "",
-});
+/** 新建表单的初值：只有通用字段与 Telegram / Webhook / 企业微信的必填项，只出站通道的字段按需写入 */
+function blankChannel(type = "telegram", name = ""): Partial<NotificationConfig> {
+  return {
+    channel_type: type,
+    name,
+    enabled: true,
+    bot_token: "",
+    endpoint_url: "",
+    webhook_key: "",
+  };
+}
+
+const newChannel = ref<Partial<NotificationConfig>>(blankChannel());
+
+/* 换类型时清掉上一个类型填的字段（只留名称）：钉钉和飞书都有 webhook_url，留着会带着错的地址创建 */
+watch(
+  () => newChannel.value.channel_type,
+  (type, prev) => {
+    if (type !== prev) newChannel.value = blankChannel(type, newChannel.value.name);
+  },
+);
 
 onMounted(async () => {
   await Promise.all([loadNotifications(), loadRecent()]);
@@ -240,23 +258,40 @@ async function loadNotifications() {
 }
 
 /** 只出站通道的字段不在 newChannel 的初值里，按字段名读写 */
-function newField(key: string): string {
-  return String((newChannel.value as Record<string, unknown>)[key] ?? "");
+function newField(key: string): unknown {
+  return (newChannel.value as Record<string, unknown>)[key];
 }
-function setNewField(key: string, v: string) {
+function setNewField(key: string, v: unknown) {
   (newChannel.value as Record<string, unknown>)[key] = v;
 }
 
 function openAddDialog() {
-  newChannel.value = {
-    channel_type: "telegram",
-    name: "",
-    enabled: true,
-    bot_token: "",
-    endpoint_url: "",
-    webhook_key: "",
-  };
+  newChannel.value = blankChannel();
   addDialogVisible.value = true;
+}
+
+/** 各类型新建时要发的字段：只发当前类型的，换过类型也不会把别的类型的值带进配置 */
+const CREATE_FIELDS: Record<string, (keyof NotificationConfig)[]> = {
+  telegram: ["bot_token"],
+  webhook: ["endpoint_url"],
+  wecom_webhook: ["webhook_key"],
+  qq_onebot: [],
+};
+
+function createBody(): Omit<NotificationConfig, "id"> {
+  const c = newChannel.value as Record<string, unknown>;
+  const type = newChannel.value.channel_type ?? "";
+  const body: Record<string, unknown> = {
+    channel_type: type,
+    name: newChannel.value.name,
+    enabled: newChannel.value.enabled,
+  };
+  const keys = outboundChannel(type) ? outboundFieldKeys(type) : (CREATE_FIELDS[type] ?? []);
+  for (const k of keys) {
+    const v = typeof c[k] === "string" ? (c[k] as string).trim() : c[k];
+    if (v !== undefined && v !== "") body[k] = v;
+  }
+  return body as unknown as Omit<NotificationConfig, "id">;
 }
 
 async function handleCreate() {
@@ -269,18 +304,18 @@ async function handleCreate() {
     ElMessage.warning("Telegram 通道需填写 Bot Token");
     return;
   }
-  const missing = missingRequired(
+  const problem = outboundProblem(
     newChannel.value.channel_type,
     newChannel.value as Record<string, unknown>,
   );
-  if (missing) {
-    ElMessage.warning(`请填写${missing.label}`);
+  if (problem) {
+    ElMessage.warning(problem);
     return;
   }
 
   submitting.value = true;
   try {
-    await chatopsApi.notifications.create(newChannel.value as Omit<NotificationConfig, "id">);
+    await chatopsApi.notifications.create(createBody());
     ElMessage.success("添加成功");
     addDialogVisible.value = false;
     await loadNotifications();
@@ -695,11 +730,37 @@ function getChannelLabel(type: string) {
           <div class="field-tip">群机器人地址里 <code>key=</code> 后面那一段</div>
         </el-form-item>
 
-        <!-- 只出站的通道：新建时只填必填项，其余在「设置」里补 -->
+        <!-- 只出站的通道：新建时就填全部字段，自建服务器的地址与鉴权不用等创建后再补 -->
         <template v-for="f in outboundChannel(newChannel.channel_type)?.fields ?? []" :key="f.key">
-          <el-form-item v-if="f.required" :label="f.label" required>
+          <el-form-item :label="f.label" :required="f.required">
+            <el-switch
+              v-if="f.kind === 'switch'"
+              :model-value="newField(f.key) === true"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="
+                (v: string | number | boolean) => setNewField(f.key, v === true)
+              " />
+            <el-select
+              v-else-if="f.kind === 'select'"
+              :model-value="newField(f.key) as string | undefined"
+              :placeholder="f.options?.[0]?.label"
+              clearable
+              style="width: 100%"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="(v: string) => setNewField(f.key, v)">
+              <el-option v-for="o in f.options" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+            <el-input-number
+              v-else-if="f.kind === 'number'"
+              :model-value="newField(f.key) as number | undefined"
+              :min="f.min"
+              :max="f.max"
+              controls-position="right"
+              :data-testid="`new-${f.key}`"
+              @update:model-value="(v: number | undefined) => setNewField(f.key, v ?? 0)" />
             <el-input
-              :model-value="newField(f.key)"
+              v-else
+              :model-value="String(newField(f.key) ?? '')"
               :type="f.kind === 'password' ? 'password' : 'text'"
               :show-password="f.kind === 'password'"
               :placeholder="f.placeholder"

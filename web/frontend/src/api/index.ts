@@ -1439,6 +1439,7 @@ export interface NotificationConfig {
   webhook_url?: string;
   secret?: string;
   msg_type?: string;
+  allow_private?: boolean;
 }
 
 const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
@@ -1478,6 +1479,7 @@ const NOTIFICATION_DYNAMIC_FIELDS = [
   "webhook_url",
   "secret",
   "msg_type",
+  "allow_private",
 ] as const;
 
 interface NotificationWireBody {
@@ -1539,6 +1541,8 @@ function unpackNotificationResponse(
   ]);
   // Fields that may come back as numbers (default_chat_id can be int64 OR string; ntfy priority).
   const numericFields = new Set(["default_chat_id", "priority"]);
+  // 只出站通道的开关（Bark、ntfy 的 allow_private）
+  const booleanFields = new Set(["allow_private"]);
   for (const key of Object.keys(raw) as (keyof typeof raw)[]) {
     if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
     if (key === "config_json") continue;
@@ -1548,6 +1552,8 @@ function unpackNotificationResponse(
     } else if (Array.isArray(v) && arrayFields.has(key as string)) {
       sink[key as string] = v;
     } else if (typeof v === "number" && numericFields.has(key as string)) {
+      sink[key as string] = v;
+    } else if (typeof v === "boolean" && booleanFields.has(key as string)) {
       sink[key as string] = v;
     }
   }
@@ -1560,6 +1566,8 @@ function unpackNotificationResponse(
       } else if (Array.isArray(v) && arrayFields.has(key)) {
         sink[key] = v;
       } else if (typeof v === "number" && numericFields.has(key)) {
+        sink[key] = v;
+      } else if (typeof v === "boolean" && booleanFields.has(key)) {
         sink[key] = v;
       }
     }

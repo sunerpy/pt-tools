@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { OUTBOUND_CHANNELS, missingRequired, outboundChannel } from "./notifyChannels";
+import {
+  OUTBOUND_CHANNELS,
+  outboundChannel,
+  outboundFieldKeys,
+  outboundProblem,
+} from "./notifyChannels";
 
 describe("notifyChannels", () => {
   it("lists the outbound channels with one required field each", () => {
@@ -17,11 +22,52 @@ describe("notifyChannels", () => {
     expect(outboundChannel("telegram")).toBeUndefined();
   });
 
+  it("自建服务器的通道有「允许内网地址」开关，其余没有", () => {
+    expect(outboundFieldKeys("bark")).toContain("allow_private");
+    expect(outboundFieldKeys("ntfy")).toContain("allow_private");
+    expect(outboundFieldKeys("dingtalk")).not.toContain("allow_private");
+    expect(outboundFieldKeys("telegram")).toEqual([]);
+  });
+
   it("finds the first missing required field", () => {
-    expect(missingRequired("bark", {})?.key).toBe("device_key");
-    expect(missingRequired("bark", { device_key: " " })?.key).toBe("device_key");
-    expect(missingRequired("bark", { device_key: "k" })).toBeUndefined();
-    expect(missingRequired("ntfy", { topic: "t" })).toBeUndefined();
-    expect(missingRequired("telegram", {})).toBeUndefined();
+    expect(outboundProblem("bark", {})).toBe("请填写Device Key");
+    expect(outboundProblem("bark", { device_key: " " })).toBe("请填写Device Key");
+    expect(outboundProblem("bark", { device_key: "k" })).toBeUndefined();
+    expect(outboundProblem("ntfy", { topic: "t" })).toBeUndefined();
+    expect(outboundProblem("telegram", {})).toBeUndefined();
+  });
+
+  it("按与后端相同的规则查格式", () => {
+    expect(outboundProblem("ntfy", { topic: "a.b" })).toContain("Topic 只能是");
+    expect(outboundProblem("ntfy", { topic: "t", server_url: "ftp://x" })).toContain("http://");
+    expect(outboundProblem("ntfy", { topic: "t", server_url: "https://u:p@x" })).toContain(
+      "用户名密码",
+    );
+    expect(outboundProblem("ntfy", { topic: "t", server_url: "http://192.168.1.2:8080/" })).toBe(
+      undefined,
+    );
+    expect(outboundProblem("bark", { device_key: "k", server_url: "https://x/?a=1" })).toContain(
+      "?",
+    );
+    expect(outboundProblem("serverchan", { send_key: "a/b" })).toBe("SendKey 格式不对");
+
+    const ding = "https://oapi.dingtalk.com/robot/send?access_token=abc";
+    expect(outboundProblem("dingtalk", { webhook_url: ding })).toBeUndefined();
+    expect(
+      outboundProblem("dingtalk", { webhook_url: "https://example.com/robot/send?access_token=a" }),
+    ).toContain("oapi.dingtalk.com");
+    expect(
+      outboundProblem("dingtalk", { webhook_url: "https://oapi.dingtalk.com/robot/send" }),
+    ).toContain("access_token");
+
+    expect(
+      outboundProblem("feishu", { webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/x" }),
+    ).toBe(undefined);
+    expect(
+      outboundProblem("feishu", {
+        webhook_url: "https://open.larksuite.com/open-apis/bot/v2/hook/x",
+      }),
+    ).toBe(undefined);
+    expect(outboundProblem("feishu", { webhook_url: ding })).toContain("open.feishu.cn");
   });
 });
