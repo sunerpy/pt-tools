@@ -274,9 +274,7 @@ onBeforeUnmount(() => {
               type="password"
               show-password
               autocomplete="off"
-              :placeholder="
-                settings?.has_token ? '已设置；要更换时填写新的' : '在 IYUU 的微信公众号里获取'
-              "
+              :placeholder="settings?.has_token ? '已设置；要更换时填写新的' : '按 IYUU 的说明获取'"
               data-testid="rs-token" />
             <el-button v-if="settings?.has_token" data-testid="rs-clear-token" @click="clearToken"
               >清除</el-button
