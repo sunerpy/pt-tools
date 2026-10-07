@@ -196,15 +196,21 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 	if err := s.cfg.DB.WithContext(ctx).Where("id = ?", row.LibraryID).Limit(1).Find(&lib).Error; err != nil || lib.ID == 0 {
 		return errors.Join(errs...)
 	}
+	var kept []extra
 	for _, e := range shared {
 		d := filepath.Dir(e.Target)
-		if !transfer.Within(lib.Path, d) || hasVideo(d) {
+		if !transfer.Within(lib.Path, d) {
+			continue
+		}
+		if hasVideo(d) {
+			kept = append(kept, e)
 			continue
 		}
 		if err := transfer.RemoveIfOurs(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
 			errs = append(errs, err)
 		}
 	}
+	s.handOver(ctx, row, kept)
 	dirs := []string{filepath.Dir(row.TargetPath)}
 	if sd := showDir(&lib, row.TargetPath); sd != "" && sd != dirs[0] {
 		dirs = append(dirs, sd)
@@ -215,6 +221,39 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// handOver 把目录里还有视频、这次没删的刮削文件转给这个目录里另一条已整理的记录，删到最后一个视频时还能删掉。
+func (s *Service) handOver(ctx context.Context, row models.MediaTransferHistory, kept []extra) {
+	if len(kept) == 0 {
+		return
+	}
+	var rows []models.MediaTransferHistory
+	if err := s.cfg.DB.WithContext(ctx).
+		Where("library_id = ? AND status = ? AND id <> ?", row.LibraryID, models.MediaTransferDone, row.ID).
+		Order("id").Find(&rows).Error; err != nil {
+		s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", err)
+		return
+	}
+	add := map[uint][]extra{}
+	for _, e := range kept {
+		d := filepath.Dir(e.Target)
+		for _, r := range rows {
+			if transfer.Within(d, r.TargetPath) {
+				add[r.ID] = append(add[r.ID], e)
+				break
+			}
+		}
+	}
+	for _, r := range rows {
+		if len(add[r.ID]) == 0 {
+			continue
+		}
+		b, _ := json.Marshal(mergeExtras(decodeExtras(r.Extras), add[r.ID]))
+		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", r.ID).Update("extras", string(b)).Error; err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 转交刮削文件失败: %v", err)
+		}
+	}
 }
 
 // Reconcile 用在打开了「删种时一并删除入库链接」时：种子已经不在下载器里、源文件也没了（连数据删掉了）的，

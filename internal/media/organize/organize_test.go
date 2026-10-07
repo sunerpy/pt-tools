@@ -570,3 +570,61 @@ func TestServerPathMappingMismatch(t *testing.T) {
 	require.NoError(t, e.db.First(&srv).Error)
 	assert.Contains(t, srv.LastError, "不在路径映射")
 }
+
+// 库里的文件被换掉了：不再说「已在库里」，记为跳过
+func TestReplacedLibraryFileIsNotDone(t *testing.T) {
+	e := newEnv(t)
+	e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: models.MediaModeCopy})
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	row := e.history()[0]
+	require.NoError(t, os.Remove(row.TargetPath))
+	require.NoError(t, os.WriteFile(row.TargetPath, []byte("another version"), 0o644))
+	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, ItemExists, p.Items[0].Status)
+	assert.Contains(t, p.Items[0].Message, "已经不是当初整理出的那个")
+	_, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, models.MediaTransferSkipped, e.history()[0].Status)
+	assert.Equal(t, "another version", readFile(t, row.TargetPath))
+}
+
+// 复制与移动方式下，之前整理好的字幕按记录认出来，没整理成的下次补上；移动以后源文件不在了也不挡
+func TestSubtitleRetryCopyAndMove(t *testing.T) {
+	for _, mode := range []string{models.MediaModeCopy, models.MediaModeMove} {
+		t.Run(mode, func(t *testing.T) {
+			e := newEnv(t)
+			e.library(LibraryInput{Name: "电影", Kind: models.MediaKindMovie, Path: e.movies, Mode: mode})
+			e.settings(SettingsInput{MinVideoMB: 1})
+			e.addTorrent(oppHash, oppName, map[string]int{
+				oppName + "/" + oppName + ".mkv":     2,
+				oppName + "/" + oppName + ".chs.ass": 0,
+				oppName + "/" + oppName + ".eng.srt": 0,
+			}, func(t *downloader.Torrent) { t.State = downloader.TorrentPaused })
+			dir := filepath.Join(e.movies, "奥本海默 (2023)")
+			blocked := filepath.Join(dir, "奥本海默 (2023) - 2160p BluRay HDR H.265.en.srt")
+			require.NoError(t, os.MkdirAll(dir, 0o755))
+			require.NoError(t, os.WriteFile(blocked, []byte("someone else"), 0o644))
+			res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+			require.NoError(t, err)
+			require.Equal(t, 1, res.Created, res.Plan.Problem)
+			assert.Contains(t, e.history()[0].Message, ".eng.srt")
+
+			require.NoError(t, os.Remove(blocked))
+			res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+			require.NoError(t, err)
+			require.Empty(t, res.Plan.Problem, "移动以后视频的源文件不在了，不当作路径映射错")
+			assert.True(t, exists(blocked), "补上了没整理成的字幕")
+			row := e.history()[0]
+			assert.Empty(t, row.Message, "两个字幕都在了")
+
+			res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+			require.NoError(t, err)
+			assert.Empty(t, res.Messages, "之前整理好的字幕按记录认出来，不再报「目标已存在」")
+			assert.Empty(t, e.history()[0].Message)
+		})
+	}
+}

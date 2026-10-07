@@ -234,3 +234,25 @@ func sql1(t *testing.T, e *env, q string) string {
 	require.NoError(t, e.db.Raw(q).Scan(&out).Error)
 	return out
 }
+
+// 两批整理到同一个剧集目录：先删第一批时目录级的刮削文件转给第二批，删到最后一批时一起删掉
+func TestDeleteHistoryHandsOverSharedFiles(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.addTorrent("8888888888888888888888888888888888888888", "The.Last.of.Us.S01E01.2160p.mkv", map[string]int{"The.Last.of.Us.S01E01.2160p.mkv": 2}, nil)
+	e.addTorrent("9999999999999999999999999999999999999999", "The.Last.of.Us.S01E02.2160p.mkv", map[string]int{"The.Last.of.Us.S01E02.2160p.mkv": 2}, nil)
+	for _, h := range []string{"8888888888888888888888888888888888888888", "9999999999999999999999999999999999999999"} {
+		res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: h})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Created, res.Plan.Problem)
+	}
+	show := filepath.Join(e.tv, "最后生还者 (2023)")
+	require.True(t, exists(filepath.Join(show, "tvshow.nfo")))
+	rows := e.history()
+	require.Len(t, rows, 2)
+	require.NoError(t, e.svc.DeleteHistory(e.ctx, rows[0].ID, true))
+	assert.True(t, exists(filepath.Join(show, "tvshow.nfo")), "还有第 2 集，目录级的文件留着")
+	require.NoError(t, e.svc.DeleteHistory(e.ctx, rows[1].ID, true))
+	assert.False(t, exists(show), "最后一集删掉时，转过来的目录级文件一起删，目录删干净")
+}

@@ -141,15 +141,62 @@ func (s *Service) plan(ctx context.Context, req Request) (*Plan, error) {
 	}
 	for i := range p.Items {
 		it := &p.Items[i]
-		if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.TargetPath != "" {
-			if _, statErr := os.Lstat(it.row.TargetPath); statErr == nil {
-				it.Status, it.Target = ItemDone, it.row.TargetPath
-				continue
-			}
+		if it.row != nil && it.row.Status == models.MediaTransferDone && ours(it.row) {
+			it.Status, it.Target = ItemDone, it.row.TargetPath
+			continue
 		}
 		it.Status = ItemFailed
 	}
 	return p, nil
+}
+
+// ours 报告记录里的目标还是不是当初整理出的那个文件：软链接看指向；其余看文件编号，硬链接也可以看和源文件是不是同一个。
+func ours(row *models.MediaTransferHistory) bool {
+	if row == nil || row.TargetPath == "" {
+		return false
+	}
+	info, err := os.Lstat(row.TargetPath)
+	if err != nil {
+		return false
+	}
+	if row.Mode == models.MediaModeSymlink {
+		to, err := os.Readlink(row.TargetPath)
+		return err == nil && filepath.Clean(to) == filepath.Clean(row.SourcePath)
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
+	if id, err := transfer.FileID(row.TargetPath); err == nil && row.TargetFileID != "" && id == row.TargetFileID {
+		return true
+	}
+	if row.Mode == models.MediaModeHardlink || row.Mode == "" {
+		src, err := os.Stat(row.SourcePath)
+		return err == nil && os.SameFile(src, info)
+	}
+	return false
+}
+
+// extraOurs 报告字幕还是不是当初整理出的那个：软链接看指向；其余看文件编号，硬链接也可以看和源文件是不是同一个。
+func extraOurs(e extra, mode string) bool {
+	info, err := os.Lstat(e.Target)
+	if err != nil {
+		return false
+	}
+	if mode == models.MediaModeSymlink {
+		to, err := os.Readlink(e.Target)
+		return err == nil && filepath.Clean(to) == filepath.Clean(e.Source)
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
+	if id, err := transfer.FileID(e.Target); err == nil && e.FileID != "" && id == e.FileID {
+		return true
+	}
+	if mode == models.MediaModeHardlink || mode == "" {
+		src, err := os.Stat(e.Source)
+		return err == nil && os.SameFile(src, info)
+	}
+	return false
 }
 
 // priorEntry 是之前整理这些文件时用的条目：先看已经整理好的记录，再看手动整理时指定过条目的记录。
@@ -239,9 +286,16 @@ func (s *Service) buildPlan(ctx context.Context, req Request) (*Plan, error) {
 	if err := s.loadRows(ctx, p); err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(p.Items[0].Source); err != nil {
-		p.Problem = fmt.Sprintf("pt-tools 里找不到 %s：下载器与 pt-tools 看到的路径不同时（例如在 Docker 里），在「路径映射」里添加对应关系", p.Items[0].Source)
-		return p, nil
+	// 看第一个还没整理好的文件在不在（整理好的跳过：移动整理以后源文件本来就不在了）
+	for _, it := range p.Items {
+		if it.row != nil && it.row.Status == models.MediaTransferDone && ours(it.row) {
+			continue
+		}
+		if _, err := os.Stat(it.Source); err != nil {
+			p.Problem = fmt.Sprintf("pt-tools 里找不到 %s：下载器与 pt-tools 看到的路径不同时（例如在 Docker 里），在「路径映射」里添加对应关系", it.Source)
+			return p, nil
+		}
+		break
 	}
 	if !s.recognize(ctx, p, req, t) {
 		return p, nil
@@ -547,7 +601,11 @@ func (s *Service) itemState(it *PlanItem) string {
 	if it.row != nil && it.row.Status == models.MediaTransferDone && it.row.TargetPath != "" {
 		if _, err := os.Lstat(it.row.TargetPath); err == nil {
 			it.Target = it.row.TargetPath
-			return ItemDone
+			if ours(it.row) {
+				return ItemDone
+			}
+			it.Message = "库里的文件已经不是当初整理出的那个（换成了别的文件或改过），不会覆盖"
+			return ItemExists
 		}
 	}
 	dstInfo, err := os.Lstat(it.Target)
@@ -634,7 +692,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			continue
 		case ItemDone:
 			// 库里已经是这个文件：补上之前没整理成的字幕；没有记录时（例如记录被删了）补一条
-			subs, msgs, added := s.transferSubtitles(it, p.Mode)
+			subs, msgs, added := s.transferSubtitles(it, p.Mode, rowExtras(it.row))
 			res.Messages = append(res.Messages, msgs...)
 			if it.row == nil || it.row.Status != models.MediaTransferDone || added > 0 || len(msgs) > 0 {
 				fileID := ""
@@ -672,7 +730,7 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			continue
 		}
 		fileID, _ := transfer.FileID(it.Target)
-		extras, msgs, _ := s.transferSubtitles(it, p.Mode)
+		extras, msgs, _ := s.transferSubtitles(it, p.Mode, rowExtras(it.row))
 		res.Messages = append(res.Messages, msgs...)
 		it.Status = ItemDone
 		s.record(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), extras))
@@ -697,11 +755,16 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 
 // transferSubtitles 用同样的方式整理字幕；失败的记在消息里（写进整理记录），不影响视频，下次整理时再试。
 // 返回整理好的字幕（含之前就在的）、失败的消息与这次新放进库的个数。
-func (s *Service) transferSubtitles(it *PlanItem, mode string) ([]extra, []string, int) {
+func (s *Service) transferSubtitles(it *PlanItem, mode string, prior []extra) ([]extra, []string, int) {
 	var out []extra
 	var msgs []string
 	added := 0
 	for _, sub := range it.Subtitles {
+		// 之前整理好的（复制与移动认不出来历，按记录里的文件编号认）
+		if i := slices.IndexFunc(prior, func(e extra) bool { return e.Kind == "" && e.Target == sub.Target }); i >= 0 && extraOurs(prior[i], mode) {
+			out = append(out, prior[i])
+			continue
+		}
 		res, err := transfer.Transfer(sub.Source, sub.Target, mode)
 		if err != nil {
 			msgs = append(msgs, fmt.Sprintf("字幕 %s：%v", filepath.Base(sub.Source), err))
