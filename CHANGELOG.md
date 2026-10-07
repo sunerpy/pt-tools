@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.9](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.8...v1.0.0-rc.9) (2026-10-07)
+
+
+### Features
+
+* **notify:** 新增 Bark、Server 酱、ntfy、钉钉、飞书通知通道 ([#630](https://github.com/sunerpy/pt-tools/issues/630)) ([730ee31](https://github.com/sunerpy/pt-tools/commit/730ee31a7721377b1bcbdd63bacd8bef5c25c480))
+
 ## [1.0.0-rc.8](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.7...v1.0.0-rc.8) (2026-10-07)
 
 
