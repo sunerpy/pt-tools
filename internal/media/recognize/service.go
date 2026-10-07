@@ -45,6 +45,8 @@ type Config struct {
 	Cipher Cipher
 	// BaseURL 是 TMDB 接口地址；为空时用官方地址（qa 构建可指向假服务）。
 	BaseURL string
+	// ImageBaseURL 是 TMDB 图片地址（到 /t/p/ 为止）；为空时用官方地址（qa 构建可指向假服务）。
+	ImageBaseURL string
 	// RatePerSecond 是 TMDB 请求的限速（为 0 时用客户端的默认值）。
 	RatePerSecond float64
 }
@@ -233,9 +235,20 @@ func (s *Service) client(ctx context.Context) (*tmdb.Client, error) {
 		return nil, err
 	}
 	return tmdb.New(tmdb.Options{
-		APIKey: key, BaseURL: s.cfg.BaseURL, Language: s.view(row).Language,
+		APIKey: key, BaseURL: s.cfg.BaseURL, ImageBaseURL: s.cfg.ImageBaseURL, Language: s.view(row).Language,
 		Cache: s.cache, Limiter: s.limiter, HTTPClient: hc,
 	})
+}
+
+// TMDB 按当前设置建 TMDB 客户端（整理入库时取详情、季详情与图片）；没有 API Key 时返回 tmdb.ErrNoKey。
+func (s *Service) TMDB(ctx context.Context) (*tmdb.Client, error) {
+	return s.client(ctx)
+}
+
+// Parse 套用启用的识别词后解析一个标题（整理入库时解析每个文件名）。
+func (s *Service) Parse(ctx context.Context, title, subtitle string) (meta.Meta, error) {
+	m, _, err := s.parse(ctx, Input{Title: title, Subtitle: subtitle})
+	return m, err
 }
 
 // TestTMDB 用当前设置访问一次 TMDB，确认 API Key 与代理可用。
@@ -366,7 +379,11 @@ func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb s
 			return err
 		}
 	}
-	if best := pick(m, cands); best != nil {
+	best := pick(m, cands)
+	if best == nil {
+		best = pickByOtherTitles(ctx, c, m, cands)
+	}
+	if best != nil {
 		res.Match, res.Source, res.Score = s.details(ctx, c, best.Result), SourceSearch, best.Score
 	}
 	if len(cands) > 5 {
@@ -408,6 +425,33 @@ func (s *Service) findOverride(ctx context.Context, m meta.Meta) (models.MediaOv
 		}
 	}
 	return models.MediaOverride{}, nil
+}
+
+// otherTitlesTop 是名字对不上时再看英文名与别名的候选数。
+const otherTitlesTop = 3
+
+// pickByOtherTitles 用 TMDB 的英文名与别名再比一次：种子名常用英文名或罗马音（Your Name、Sousou no Frieren），
+// 中文搜索结果里只有中文名与原名。只看排在前面的几个候选，名字要完全相同、总分过线才认。
+func pickByOtherTitles(ctx context.Context, c *tmdb.Client, m meta.Meta, cands []Candidate) *Candidate {
+	for i := range cands[:min(otherTitlesTop, len(cands))] {
+		titles, err := c.Titles(ctx, cands[i].MediaType, cands[i].ID)
+		if err != nil {
+			continue
+		}
+		for _, t := range titles {
+			alt := cands[i].Result
+			alt.Title, alt.OriginalTitle = t, ""
+			if titleScore(m, alt) < 1 {
+				continue
+			}
+			if sc := score(m, alt, i); sc >= AcceptScore {
+				out := cands[i]
+				out.Score = sc
+				return &out
+			}
+		}
+	}
+	return nil
 }
 
 // primaryKinds 是先搜的类型：剧集只搜剧集，电影先搜电影，类型不明时都搜。
