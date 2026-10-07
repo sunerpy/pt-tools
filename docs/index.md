@@ -110,6 +110,10 @@ home:
             body: 把下完的种子搬到另一台下载器继续做种，数据不动；校验到 100% 才从源下载器移除，也能按规则定时转移。
             status: available
             link: /guide/torrent-transfer
+          - title: IYUU 辅种
+            body: 用 IYUU 找出其他站点上数据相同的种子，核对文件后加进同一台下载器，校验到 100% 才开始做种。
+            status: available
+            link: /guide/reseed
       - name: 通知与 ChatOps
         items:
           - title: QQ 与 Telegram 命令

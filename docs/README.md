@@ -30,6 +30,7 @@
 - [数据统计与每日战报](guide/user-stats.md)：每日快照、增量口径、走势图与每日战报。
 - [下载器助手](guide/downloader-assistant.md)：失效种子、补站点标签、替换 tracker 与失效种子定时扫描。
 - [转移做种](guide/torrent-transfer.md)：把种子搬到另一台下载器继续做种，路径映射与定时规则。
+- [IYUU 辅种](guide/reseed.md)：用 IYUU 找出其他站点上数据相同的种子，核对后加进同一台下载器。
 
 ## ChatOps 与通知
 

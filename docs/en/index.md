@@ -110,6 +110,10 @@ home:
             body: Move finished torrents to another downloader and keep seeding without touching the data; the source copy goes only after a 100% check, and rules can do it on a schedule.
             status: available
             link: /en/guide/torrent-transfer
+          - title: IYUU cross-seeding
+            body: Find torrents with the same data on other sites through IYUU, check their files and add them to the same downloader; they seed only after a 100% check.
+            status: available
+            link: /en/guide/reseed
       - name: Notifications and ChatOps
         items:
           - title: Commands in QQ and Telegram
