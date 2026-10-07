@@ -2,12 +2,14 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -937,6 +939,66 @@ func (s *ConfigStore) ListSites() (map[models.SiteGroup]models.SiteConfig, error
 }
 
 // GetSiteConf 获取指定站点配置
+// SetSiteCookies 批量把 Cookie 写进站点并启用（CookieCloud 导入用），只改 Cookie 与启用两列，不动 RSS 等其他设置。
+// 站点必须已经存在、用 Cookie 登录；同时要 API Key 的站点必须已经填了 API Key。在一个事务里写完，写进去了就只发布一次配置变更。
+// 返回写不进去的站点和原因；数据库出错时返回错误，一个都不写。
+func (s *ConfigStore) SetSiteCookies(ctx context.Context, cookies map[models.SiteGroup]string) (map[models.SiteGroup]error, error) {
+	names := make([]string, 0, len(cookies))
+	for sg := range cookies {
+		names = append(names, string(sg))
+	}
+	sort.Strings(names)
+	failed := map[models.SiteGroup]error{}
+	written := 0
+	err := s.db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, n := range names {
+			sg := models.SiteGroup(n)
+			cookie := strings.TrimSpace(cookies[sg])
+			if cookie == "" {
+				failed[sg] = errors.New("Cookie 为空")
+				continue
+			}
+			var row models.SiteSetting
+			if err := tx.Where("name = ?", n).First(&row).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					failed[sg] = errors.New("pt-tools 里没有这个站点")
+					continue
+				}
+				return err
+			}
+			switch strings.ToLower(strings.TrimSpace(row.AuthMethod)) {
+			case "cookie":
+			case "cookie_and_api_key":
+				if strings.TrimSpace(row.APIKey) == "" {
+					failed[sg] = errors.New("这个站点还要 API Key，先在站点设置里填写")
+					continue
+				}
+			default:
+				failed[sg] = errors.New("这个站点不用 Cookie 登录")
+				continue
+			}
+			enc, err := s.EncryptCookie(cookie)
+			if err != nil {
+				return fmt.Errorf("加密 Cookie 失败: %w", err)
+			}
+			if err := tx.Model(&models.SiteSetting{}).Where("id = ?", row.ID).
+				Updates(map[string]any{"cookie_encrypted": enc, "cookie": "", "enabled": true}).Error; err != nil {
+				return err
+			}
+			written++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if written > 0 {
+		events.Publish(events.Event{Type: events.ConfigChanged, Version: time.Now().UnixNano(), Source: "sites", At: time.Now()})
+		sLogger().Infof("[站点配置已更新] 批量写入 %d 个站点的 Cookie", written)
+	}
+	return failed, nil
+}
+
 func (s *ConfigStore) GetSiteConf(name models.SiteGroup) (models.SiteConfig, error) {
 	var ss models.SiteSetting
 	if err := s.db.DB.Where("name = ?", string(name)).First(&ss).Error; err != nil {
