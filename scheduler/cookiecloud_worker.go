@@ -112,20 +112,11 @@ func (w *CookieCloudWorker) loop() {
 	}
 }
 
-// syncOnce 同步一次并记下结果。手动预览或导入正在进行时跳过，下一次再来。
+// syncOnce 同步一次（结果由 Sync 自己记进设置）。手动预览或导入正在进行时跳过，下一次再来。
 func (w *CookieCloudWorker) syncOnce() {
 	ctx, cancel := context.WithTimeout(w.root, cookieCloudRunTimeout)
 	defer cancel()
-	res, err := w.cfg.Service.Sync(ctx)
-	if errors.Is(err, cookiecloud.ErrBusy) || w.root.Err() != nil {
-		return
-	}
-	summary := res.Summary()
-	if err != nil {
-		summary = "同步失败：" + err.Error()
-		w.cfg.Logger.Warnf("[CookieCloud] %v", err)
-	}
-	if rerr := w.cfg.Service.RecordSync(ctx, w.cfg.Clock.Now(), summary); rerr != nil {
-		w.cfg.Logger.Warnf("[CookieCloud] 记录结果失败: %v", rerr)
+	if _, err := w.cfg.Service.Sync(ctx); err != nil && !errors.Is(err, cookiecloud.ErrBusy) && w.root.Err() == nil {
+		w.cfg.Logger.Warnf("[CookieCloud] 定时同步失败: %v", err)
 	}
 }

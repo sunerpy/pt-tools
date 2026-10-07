@@ -243,6 +243,11 @@ func (s *Service) load(ctx context.Context) (loaded, error) {
 	if err != nil {
 		return loaded{}, err
 	}
+	return s.loadFrom(ctx, r)
+}
+
+// loadFrom 按设置 r 取数、解密、匹配。
+func (s *Service) loadFrom(ctx context.Context, r models.CookieCloudSetting) (loaded, error) {
 	if r.ServerURL == "" || r.UUID == "" || r.PasswordEncrypted == "" {
 		return loaded{}, ErrNotConfigured
 	}
@@ -418,12 +423,39 @@ func (s *Service) Import(ctx context.Context, siteNames []string) (ImportResult,
 }
 
 // Sync 是定时同步：只更新已经启用、Cookie 有变化的站点，不启用新站点。
+// 结果（成功或失败）记进设置的「上次同步」：只在数据来源仍是这一次用的那份时记，换了来源的话新来源马上到期；
+// ctx 取消（程序退出）时不记。
 func (s *Service) Sync(ctx context.Context) (ImportResult, error) {
 	if !s.runMu.TryLock() {
 		return ImportResult{}, ErrBusy
 	}
 	defer s.runMu.Unlock()
-	got, err := s.load(ctx)
+	from, err := s.row(ctx)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	res, err := s.syncFrom(ctx, from)
+	if ctx.Err() == nil && !errors.Is(err, ErrSettingsChanged) {
+		summary := res.Summary()
+		if err != nil {
+			summary = "同步失败：" + err.Error()
+		}
+		if rerr := s.recordFor(ctx, from, summary); rerr != nil {
+			s.cfg.Logger.Warnf("[CookieCloud] 记录同步结果失败: %v", rerr)
+		}
+	}
+	return res, err
+}
+
+// recordFor 记下上次同步的时间与结果，只在数据来源仍是 from 那份时记。
+func (s *Service) recordFor(ctx context.Context, from models.CookieCloudSetting, summary string) error {
+	return s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Model(&models.CookieCloudSetting{}).
+		Where("id = 1 AND server_url = ? AND uuid = ? AND password_encrypted = ?", from.ServerURL, from.UUID, from.PasswordEncrypted).
+		Updates(map[string]any{"last_sync_at": s.cfg.Now(), "last_result": summary}).Error
+}
+
+func (s *Service) syncFrom(ctx context.Context, from models.CookieCloudSetting) (ImportResult, error) {
+	got, err := s.loadFrom(ctx, from)
 	if err != nil {
 		return ImportResult{}, err
 	}

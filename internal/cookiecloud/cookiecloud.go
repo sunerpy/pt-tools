@@ -104,15 +104,20 @@ func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payloa
 		if len(via) >= 5 {
 			return errors.New("重定向次数太多")
 		}
-		first := via[0].URL
+		// 主机与最初的地址比；scheme 与端口与上一跳比（http → https → http 这样的多跳降级也拦住）
+		first, prev := via[0].URL, via[len(via)-1].URL
+		upgraded := false
+		for _, v := range via {
+			upgraded = upgraded || v.URL.Scheme == "https"
+		}
 		switch {
 		case !strings.EqualFold(r.URL.Hostname(), first.Hostname()):
 			return errors.New("CookieCloud 服务把请求重定向到了别的主机，没有跟随")
-		case first.Scheme == "https" && r.URL.Scheme != "https":
+		case upgraded && r.URL.Scheme != "https":
 			return errors.New("CookieCloud 服务把 https 请求重定向到了 http，没有跟随")
-		case r.URL.Scheme == first.Scheme && effectivePort(r.URL) != effectivePort(first),
+		case r.URL.Scheme == prev.Scheme && effectivePort(r.URL) != effectivePort(prev),
 			// http 升到 https 只认标准端口 80 → 443
-			r.URL.Scheme != first.Scheme && (effectivePort(first) != "80" || effectivePort(r.URL) != "443"):
+			r.URL.Scheme != prev.Scheme && (effectivePort(prev) != "80" || effectivePort(r.URL) != "443"):
 			return errors.New("CookieCloud 服务把请求重定向到了别的端口，没有跟随")
 		}
 		return nil

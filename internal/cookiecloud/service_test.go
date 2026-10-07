@@ -249,6 +249,44 @@ func TestSync(t *testing.T) {
 	assert.Empty(t, res.Imported)
 	assert.Equal(t, []string{"hdsky"}, res.Unchanged)
 	assert.Equal(t, "1 个没有变化", res.Summary())
+	got, err := e.svc.Settings(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastSyncAt, "同步结果由 Sync 自己记下")
+	assert.Equal(t, "1 个没有变化", got.LastResult)
+
+	// 取数失败也记下
+	e.payloads = map[string]string{}
+	_, err = e.svc.Sync(ctx)
+	assert.ErrorIs(t, err, ErrNotFound)
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, got.LastResult, "同步失败")
+}
+
+// 定时同步进行中换了数据来源：旧来源的这一次不写 Cookie、也不记「上次同步」，新来源马上到期；
+// 记录只在来源没变时写。
+func TestSyncDoesNotRecordForOldSource(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.configure(func(u *SettingsUpdate) { u.AutoSync = true })
+	e.svc.cfg.Sites = func(context.Context) ([]SiteState, error) {
+		_, saveErr := e.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e.srv.URL, UUID: "new-uuid", AutoSync: true})
+		require.NoError(t, saveErr)
+		return append([]SiteState(nil), e.sites...), nil
+	}
+	_, err := e.svc.Sync(ctx)
+	assert.ErrorIs(t, err, ErrSettingsChanged)
+	got, err := e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, got.LastSyncAt)
+	assert.True(t, e.svc.Due(ctx), "新来源马上到期")
+
+	var stale models.CookieCloudSetting
+	stale.ServerURL, stale.UUID, stale.PasswordEncrypted = e.srv.URL, vecUUID, "enc:"+vecPassword
+	require.NoError(t, e.svc.recordFor(ctx, stale, "旧来源的结果"))
+	got, err = e.svc.Settings(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, got.LastResult, "来源变了，旧来源的结果不写")
 }
 
 func TestLoadErrors(t *testing.T) {
@@ -405,6 +443,18 @@ func TestFetchHardening(t *testing.T) {
 	defer up.Close()
 	_, err = Fetch(ctx, up.Client(), up.URL, "up")
 	assert.ErrorContains(t, err, "别的端口")
+	// https → 同一端口的 https → http：多跳里降到 http 也不跟随
+	var hop *httptest.Server
+	hop = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/get/hop" {
+			http.Redirect(w, r, hop.URL+"/again", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, srv.URL+"/cc/get/x", http.StatusFound)
+	}))
+	defer hop.Close()
+	_, err = Fetch(ctx, hop.Client(), hop.URL, "hop")
+	assert.ErrorContains(t, err, "https 请求重定向到了 http")
 
 	_, err = Decrypt(Payload{Encrypted: vecFixed, CryptoType: CryptoLegacy}, vecUUID, vecPassword)
 	assert.ErrorIs(t, err, ErrDecrypt, "写明 legacy 的不按 fixed 再试")
