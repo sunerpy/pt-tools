@@ -183,6 +183,26 @@ describe("整理入库弹窗", () => {
     expect((q("organize-run") as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("沿用之前整理用的条目时写明来源", async () => {
+    api.preview.mockResolvedValue({
+      ...plan,
+      source: "history",
+      items: [{ ...plan.items[0], status: "done" }],
+    });
+    api.libraries.mockResolvedValue([]);
+    const OrganizeDialog = (await import("./OrganizeDialog.vue")).default;
+    view = mountView(
+      defineComponent({
+        setup: () => () =>
+          h(OrganizeDialog, { modelValue: true, target: { downloader_id: 1, hash: "abc" } }),
+      }),
+    );
+    await vi.waitFor(() => expect(q("organize-match")).not.toBeNull());
+    expect(q("organize-match")!.textContent).toContain("沿用之前整理用的条目");
+    expect(q("organize-items")!.textContent).toContain("已在库里");
+    expect((q("organize-run") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("预览失败时写明原因", async () => {
     api.preview.mockRejectedValue(new Error("下载器「qb」里没有这个种子"));
     api.libraries.mockResolvedValue([]);

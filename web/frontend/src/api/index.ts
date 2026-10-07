@@ -2501,7 +2501,8 @@ export interface OrganizePlan {
   local_path: string;
   mapped: boolean;
   match?: TMDBItem;
-  source?: MediaRecognizeResult["source"] | "manual";
+  /** manual 是手动指定的条目，history 是沿用之前整理这些文件时用的条目 */
+  source?: MediaRecognizeResult["source"] | "manual" | "history";
   library?: MediaLibraryInput & { id: number };
   mode?: MediaMode;
   items: OrganizePlanItem[];

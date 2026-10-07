@@ -164,7 +164,7 @@ onMounted(load);
         row-key="id"
         class="pt-grid"
         data-testid="mh-table">
-        <el-table-column label="时间" width="110">
+        <el-table-column label="时间" width="124">
           <template #default="{ row }">{{ formatShortDateTime(row.updated_at) }}</template>
         </el-table-column>
         <el-table-column
@@ -275,7 +275,7 @@ onMounted(load);
       v-model="delDialog"
       class="pt-dialog"
       title="删除整理记录"
-      width="460px"
+      :width="isMobile ? '94%' : '460px'"
       align-center>
       <p class="mh-del-text">
         删除「{{

@@ -13,6 +13,7 @@ import {
 } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtStatusPill from "@/components/ui/PtStatusPill.vue";
+import { useIsMobile } from "@/composables/useIsMobile";
 import {
   itemStatus,
   mediaKindLabel,
@@ -34,6 +35,7 @@ const props = defineProps<{ target: OrganizeTarget | null }>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ done: [result: OrganizeResult] }>();
 
+const isMobile = useIsMobile();
 const errText = (e: unknown, fallback: string) => (e as Error)?.message || fallback;
 
 const plan = ref<OrganizePlan | null>(null);
@@ -42,6 +44,8 @@ const loadError = ref("");
 const running = ref(false);
 const result = ref<OrganizeResult | null>(null);
 const libraries = ref<MediaLibrary[]>([]);
+/** 海报从 TMDB 的图片服务器取：浏览器连不上时不留一块破图 */
+const posterFailed = ref(false);
 const override = ref<{ type: MediaKind; id: number | undefined; library: number | undefined }>({
   type: "movie",
   id: undefined,
@@ -68,6 +72,7 @@ async function preview() {
   loading.value = true;
   loadError.value = "";
   plan.value = null;
+  posterFailed.value = false;
   try {
     plan.value = await organizeApi.preview(req);
   } catch (e) {
@@ -101,6 +106,12 @@ const libraryOptions = computed(() =>
       l.kind === (override.value.id ? override.value.type : plan.value?.match?.media_type),
   ),
 );
+
+function planSource(source: NonNullable<OrganizePlan["source"]>): string {
+  if (source === "manual") return "手动指定";
+  if (source === "history") return "沿用之前整理用的条目";
+  return mediaSourceLabel(source);
+}
 
 /** 目标路径去掉媒体库目录，只留库里的相对路径 */
 function inLibrary(target?: string): string {
@@ -144,7 +155,8 @@ const resultText = computed(() => {
     v-model="visible"
     class="pt-dialog"
     title="整理入库"
-    width="760px"
+    :width="isMobile ? '94%' : '760px'"
+    append-to-body
     align-center
     data-testid="organize-dialog">
     <div class="od">
@@ -174,11 +186,12 @@ const resultText = computed(() => {
 
         <div v-if="plan.match" class="od__match" data-testid="organize-match">
           <img
-            v-if="plan.match.poster_path"
+            v-if="plan.match.poster_path && !posterFailed"
             class="od__poster"
             :src="posterURL(plan.match.poster_path, 'w92')"
             :alt="`${plan.match.title} 的海报`"
-            loading="lazy" />
+            loading="lazy"
+            @error="posterFailed = true" />
           <div class="od__match-body">
             <a
               class="od__title"
@@ -191,9 +204,7 @@ const resultText = computed(() => {
             <div class="od__meta">
               <span>{{ mediaKindLabel(plan.match.media_type) }}</span>
               <span>TMDB {{ plan.match.id }}</span>
-              <span v-if="plan.source">{{
-                plan.source === "manual" ? "手动指定" : mediaSourceLabel(plan.source)
-              }}</span>
+              <span v-if="plan.source">{{ planSource(plan.source) }}</span>
             </div>
             <div v-if="plan.library" class="od__meta" data-testid="organize-library">
               <span>媒体库：{{ plan.library.name }}</span>
@@ -405,6 +416,7 @@ const resultText = computed(() => {
 }
 
 .od__rel {
+  min-width: 0;
   overflow: hidden;
   font-size: 13px;
   color: var(--pt-t1);
@@ -414,6 +426,8 @@ const resultText = computed(() => {
 
 .od__target {
   display: flex;
+  min-width: 0;
+  overflow-wrap: anywhere;
   gap: 4px;
   align-items: center;
   padding-left: 4px;

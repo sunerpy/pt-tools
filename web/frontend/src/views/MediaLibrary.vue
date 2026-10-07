@@ -863,7 +863,7 @@ onMounted(refresh);
           prop="url"
           class-name="pt-cell-1line"
           show-overflow-tooltip />
-        <el-table-column label="刷新" width="130">
+        <el-table-column label="刷新" width="150">
           <template #default="{ row }">{{ refreshText(row.refresh_mode) }}</template>
         </el-table-column>
         <el-table-column
@@ -942,7 +942,7 @@ onMounted(refresh);
       v-model="libDialog"
       class="pt-dialog"
       :title="editingLibID ? '编辑媒体库' : '添加媒体库'"
-      width="640px"
+      :width="isMobile ? '94%' : '640px'"
       align-center>
       <el-form class="pt-form" label-position="top" @submit.prevent>
         <div class="ml-row">
@@ -1050,7 +1050,7 @@ onMounted(refresh);
       v-model="mapDialog"
       class="pt-dialog"
       :title="editingMapID ? '编辑路径映射' : '添加路径映射'"
-      width="520px"
+      :width="isMobile ? '94%' : '520px'"
       align-center>
       <el-form class="pt-form" label-position="top" @submit.prevent>
         <el-form-item label="下载器" required>
@@ -1092,7 +1092,7 @@ onMounted(refresh);
       v-model="serverDialog"
       class="pt-dialog"
       :title="editingServer ? '编辑媒体服务器' : '添加媒体服务器'"
-      width="560px"
+      :width="isMobile ? '94%' : '560px'"
       align-center>
       <el-form class="pt-form" label-position="top" @submit.prevent>
         <div class="ml-row">
@@ -1193,6 +1193,7 @@ onMounted(refresh);
   gap: 10px;
   align-items: center;
   font-size: 13px;
+  line-height: 1.6;
   color: var(--pt-t2);
 }
 
@@ -1264,12 +1265,13 @@ onMounted(refresh);
   padding: 0;
   list-style: none;
   font-size: 12px;
+  line-height: 1.6;
 }
 
 .ml-checks li {
   display: flex;
   gap: 6px;
-  align-items: flex-start;
+  align-items: center;
   word-break: break-all;
 }
 
