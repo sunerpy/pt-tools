@@ -56,20 +56,28 @@ watch(visible, async (open) => {
   if (!targets.value.some((d) => d.id === targetId.value)) targetId.value = targets.value[0]?.id;
 });
 
+/** 预览请求的序号：只认最新一次、并且目标没换过的结果 */
+let previewSeq = 0;
+
 async function runPreview() {
-  if (!targetId.value || !props.items.length) return;
+  const target = targetId.value;
+  if (!target || !props.items.length) return;
+  const seq = ++previewSeq;
   loading.value = true;
   error.value = "";
   try {
-    const res = await transferApi.preview(targetId.value, props.items);
+    const res = await transferApi.preview(target, props.items);
+    // 请求途中换了目标或又点了一次预览：这次的结果作废
+    if (seq !== previewSeq || target !== targetId.value) return;
     preview.value = res?.items ?? [];
-    previewedFor.value = targetId.value;
+    previewedFor.value = target;
   } catch (e) {
+    if (seq !== previewSeq) return;
     preview.value = [];
     previewedFor.value = undefined;
     error.value = (e as Error).message || "预览失败";
   } finally {
-    loading.value = false;
+    if (seq === previewSeq) loading.value = false;
   }
 }
 

@@ -151,4 +151,40 @@ describe("转移对话框", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("目标下载器不可用"));
     expect((testid("tr-create") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("预览进行中换了目标：旧目标的结果作废，要重新预览", async () => {
+    await mountDialog();
+    let resolve!: (v: unknown) => void;
+    api.preview.mockReturnValue(new Promise((r) => (resolve = r)));
+    testid("tr-preview").click();
+    await flush();
+    // 换成 qb-two
+    testid("tr-target").click();
+    await flush();
+    const opt = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+      (el) => el.textContent?.trim() === "qb-two",
+    )!;
+    opt.click();
+    await flush();
+    resolve({
+      items: [
+        {
+          source_id: 1,
+          source_name: "qb-src",
+          hash: "aa",
+          name: "Movie.A",
+          size: 1,
+          save_path: "/d",
+          target_path: "/d",
+          mapped: false,
+          source: "export",
+          ok: true,
+        },
+      ],
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("建 1 个转移任务");
+    expect((testid("tr-create") as HTMLButtonElement).disabled).toBe(true);
+  });
 });
