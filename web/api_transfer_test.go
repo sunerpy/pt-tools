@@ -129,6 +129,7 @@ func TestTransferAPI_PreviewAndJobs(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/transfer/preview", fmt.Sprintf(`{"target_id":%d}`, dst.ID)).Code)
 	assert.Equal(t, http.StatusBadGateway, serveAuthed(mux, http.MethodPost, "/api/transfer/preview", `{"target_id":99,"items":[{"source_id":1,"hash":"a"}]}`).Code)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/transfer/preview", `{`).Code)
+	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPost, "/api/transfer/preview", `{"target_id":0,"items":[{"source_id":1,"hash":"a"}]}`).Code, "没选目标是请求错误，不是下载器不可用")
 	assert.Equal(t, http.StatusMethodNotAllowed, serveAuthed(mux, http.MethodGet, "/api/transfer/preview", "").Code)
 
 	w = serveAuthed(mux, http.MethodPost, "/api/transfer/jobs", body)
@@ -191,6 +192,10 @@ func TestTransferAPI_PathMaps(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/transfer/path-maps", same).Code)
 	dup := fmt.Sprintf(`{"source_id":%d,"target_id":%d,"items":[{"source_prefix":"/a","target_prefix":"/b"},{"source_prefix":"/a/","target_prefix":"/c"}]}`, src.ID, dst.ID)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/transfer/path-maps", dup).Code)
+
+	for _, q := range []string{"", "?source_id=1", fmt.Sprintf("?source_id=%d&target_id=%d", src.ID, src.ID), "?source_id=x&target_id=2"} {
+		assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodGet, "/api/transfer/path-maps"+q, "").Code, q)
+	}
 
 	clear := fmt.Sprintf(`{"source_id":%d,"target_id":%d,"items":[]}`, src.ID, dst.ID)
 	w = serveAuthed(mux, http.MethodPut, "/api/transfer/path-maps", clear)

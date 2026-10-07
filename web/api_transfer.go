@@ -237,8 +237,12 @@ func (s *Server) apiTransferPathMaps(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		q := r.URL.Query()
-		src, _ := strconv.ParseUint(q.Get("source_id"), 10, 64)
-		dst, _ := strconv.ParseUint(q.Get("target_id"), 10, 64)
+		src, errSrc := strconv.ParseUint(q.Get("source_id"), 10, 64)
+		dst, errDst := strconv.ParseUint(q.Get("target_id"), 10, 64)
+		if errSrc != nil || errDst != nil || src == 0 || dst == 0 || src == dst {
+			http.Error(w, "要选两台不同的源下载器和目标下载器", http.StatusBadRequest)
+			return
+		}
 		maps, err := svc.ListPathMaps(r.Context(), uint(src), uint(dst))
 		if err != nil {
 			writeTransferError(w, err)
@@ -343,30 +347,15 @@ func (s *Server) apiTransferRuleDetail(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		rule, err := svc.GetRule(r.Context(), id)
+		ctx, cancel := context.WithTimeout(r.Context(), transferAPITimeout)
+		defer cancel()
+		// 与后台的定时运行轮流进行：同一时间只有一处在挑种子建任务
+		run, err := worker.RunRuleNow(ctx, id)
 		if err != nil {
 			writeTransferError(w, err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), transferAPITimeout)
-		defer cancel()
-		res, runErr := svc.RunRule(ctx, rule)
-		summary := res.Summary()
-		if runErr != nil {
-			summary = "运行失败：" + runErr.Error()
-		}
-		if err := svc.RecordRuleRun(ctx, id, svc.Now(), summary); err != nil {
-			writeTransferError(w, err)
-			return
-		}
-		if res.Created > 0 {
-			worker.Trigger()
-		}
-		resp := map[string]any{"result": res, "summary": summary}
-		if runErr != nil {
-			resp["error"] = runErr.Error()
-		}
-		writeJSON(w, resp)
+		writeJSON(w, run)
 	default:
 		http.Error(w, "未知的转移规则接口", http.StatusNotFound)
 	}
