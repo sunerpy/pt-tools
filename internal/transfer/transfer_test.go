@@ -34,6 +34,8 @@ type fakeDL struct {
 	resumed  []string
 	recheck  []string
 	listErr  error
+	// 下面几个不为空时对应的调用失败
+	removeErr, resumeErr, recheckErr, existsErr error
 	// afterRecheck 决定校验后的进度与状态（默认 1.0、暂停）
 	afterRecheck func(t *downloader.Torrent)
 }
@@ -93,6 +95,9 @@ func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
 }
 
 func (f *fakeDL) CheckTorrentExists(hash string) (bool, error) {
+	if f.existsErr != nil {
+		return false, f.existsErr
+	}
 	_, ok := f.get(hash)
 	return ok, nil
 }
@@ -100,6 +105,9 @@ func (f *fakeDL) CheckTorrentExists(hash string) (bool, error) {
 func (f *fakeDL) RecheckTorrent(id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.recheckErr != nil {
+		return f.recheckErr
+	}
 	f.recheck = append(f.recheck, id)
 	t := f.torrents[id]
 	t.State = downloader.TorrentChecking
@@ -118,6 +126,9 @@ func (f *fakeDL) finishCheck(hash string) {
 func (f *fakeDL) ResumeTorrent(id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.resumeErr != nil {
+		return f.resumeErr
+	}
 	f.resumed = append(f.resumed, id)
 	f.torrents[id].State = downloader.TorrentSeeding
 	return nil
@@ -126,6 +137,9 @@ func (f *fakeDL) ResumeTorrent(id string) error {
 func (f *fakeDL) RemoveTorrent(id string, removeData bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	if _, ok := f.torrents[id]; !ok {
 		return downloader.ErrTorrentNotFound
 	}
@@ -173,12 +187,14 @@ func (s *fakeSite) Download(_ context.Context, torrentID string) ([]byte, error)
 // ---------- 测试环境 ----------
 
 type env struct {
-	t        *testing.T
-	db       *gorm.DB
-	svc      *Service
-	src      *exporterDL
-	srcTR    *fakeDL // 不能导出（像 Transmission）
-	dst      *fakeDL
+	t     *testing.T
+	db    *gorm.DB
+	svc   *Service
+	src   *exporterDL
+	srcTR *fakeDL // 不能导出（像 Transmission）
+	dst   *fakeDL
+	// down 里的下载器 ID 暂时连不上
+	down     map[uint]bool
 	now      time.Time
 	pushes   []ptinternal.PushTorrentRequest
 	pushRes  *ptinternal.PushTorrentResult
@@ -202,7 +218,7 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.DownloaderPathMap{}, &models.TransferRule{}, &models.TorrentInfo{}))
 	e := &env{
-		t: t, db: db, src: &exporterDL{fakeDL: newFakeDL()}, srcTR: newFakeDL(), dst: newFakeDL(),
+		t: t, db: db, src: &exporterDL{fakeDL: newFakeDL()}, srcTR: newFakeDL(), dst: newFakeDL(), down: map[uint]bool{},
 		now: time.Date(2026, 10, 7, 10, 0, 0, 0, time.UTC), site: &fakeSite{data: map[string][]byte{}},
 	}
 	dls := map[uint]struct {
@@ -217,7 +233,7 @@ func newEnv(t *testing.T) *env {
 		DB: db,
 		Downloaders: DownloadersFunc(func(_ context.Context, id uint) (downloader.Downloader, models.DownloaderSetting, error) {
 			d, ok := dls[id]
-			if !ok {
+			if !ok || e.down[id] {
 				return nil, models.DownloaderSetting{}, errors.New("下载器未启用")
 			}
 			return d.dl, d.set, nil
@@ -819,4 +835,104 @@ func TestTransferQueuedOrUnknownAtFull(t *testing.T) {
 	e2.svc.RunOnce(ctx)
 	assert.Equal(t, models.TransferRolledBack, e2.job(id2).State, "到时限回滚")
 	assert.Empty(t, e2.src.removed)
+}
+
+// 下载器暂时连不上或调用失败：任务留在当前状态，写明原因，恢复后接着做；回滚与收尾失败时也不越过安全条件。
+func TestTransferTransientErrors(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	h := e.seed(e.src.fakeDL, "Movie.A", 1<<30, true)
+	id := e.create(Item{srcID, h})[0].ID
+	e.svc.RunOnce(ctx) // 导出
+
+	// 加入：目标连不上、检查目标失败
+	e.down[dstID] = true
+	e.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferExported, e.job(id).State)
+	assert.Contains(t, e.job(id).Message, "目标下载器不可用")
+	e.down[dstID] = false
+	e.dst.existsErr = errors.New("timeout")
+	e.svc.RunOnce(ctx)
+	assert.Contains(t, e.job(id).Message, "检查目标下载器失败")
+	e.dst.existsErr = nil
+	e.svc.RunOnce(ctx) // 加入
+	require.Equal(t, models.TransferChecking, e.job(id).State)
+
+	// 校验：目标连不上、读列表失败、发校验失败
+	e.down[dstID] = true
+	e.svc.RunOnce(ctx)
+	assert.Contains(t, e.job(id).Message, "目标下载器不可用")
+	e.down[dstID] = false
+	e.dst.listErr = errors.New("busy")
+	e.svc.RunOnce(ctx)
+	assert.Contains(t, e.job(id).Message, "读取目标下载器的种子失败")
+	e.dst.listErr = nil
+	e.dst.recheckErr = errors.New("busy")
+	e.svc.RunOnce(ctx)
+	assert.Contains(t, e.job(id).Message, "让目标校验失败")
+	e.dst.recheckErr = nil
+	e.svc.RunOnce(ctx) // 发校验
+	e.dst.finishCheck(h)
+	e.svc.RunOnce(ctx)
+	require.Equal(t, models.TransferVerified, e.job(id).State)
+
+	// 收尾：目标连不上、读目标失败、恢复失败、源连不上、读源失败、从源移除失败 —— 都留在 verified，下一轮再试
+	steps := []struct {
+		set, unset func()
+		want       string
+	}{
+		{func() { e.down[dstID] = true }, func() { e.down[dstID] = false }, "目标下载器不可用"},
+		{func() { e.dst.listErr = errors.New("busy") }, func() { e.dst.listErr = nil }, "读取目标下载器的种子失败"},
+		{func() { e.dst.resumeErr = errors.New("busy") }, func() { e.dst.resumeErr = nil }, "恢复目标里的种子失败"},
+		{func() { e.down[srcID] = true }, func() { e.down[srcID] = false }, "源下载器不可用"},
+		{func() { e.src.listErr = errors.New("busy") }, func() { e.src.listErr = nil }, "读取源下载器失败"},
+		{func() { e.src.removeErr = errors.New("busy") }, func() { e.src.removeErr = nil }, "从源移除失败"},
+	}
+	for _, st := range steps {
+		st.set()
+		e.svc.RunOnce(ctx)
+		st.unset()
+		assert.Equal(t, models.TransferVerified, e.job(id).State, st.want)
+		assert.Contains(t, e.job(id).Message, st.want)
+	}
+	e.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferDone, e.job(id).State)
+
+	// 回滚时从目标移除失败：留在 checking 下一轮再试，成功后才记为已回滚
+	e2 := newEnv(t)
+	h2 := e2.seed(e2.src.fakeDL, "Movie.B", 1<<30, true)
+	id2 := e2.create(Item{srcID, h2})[0].ID
+	for range 3 {
+		e2.svc.RunOnce(ctx)
+	}
+	e2.dst.afterRecheck = func(t *downloader.Torrent) { t.Progress, t.IsCompleted = 0.2, false }
+	e2.dst.finishCheck(h2)
+	e2.now = e2.now.Add(5 * time.Minute)
+	e2.dst.removeErr = errors.New("busy")
+	e2.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferChecking, e2.job(id2).State)
+	assert.Contains(t, e2.job(id2).Message, "从目标移除失败")
+	e2.dst.removeErr = nil
+	e2.svc.RunOnce(ctx)
+	assert.Equal(t, models.TransferRolledBack, e2.job(id2).State)
+
+	// 重启恢复：目标连不上、读目标失败
+	e3 := newEnv(t)
+	h3 := e3.seed(e3.src.fakeDL, "Movie.C", 1<<30, true)
+	j3 := models.TorrentTransferJob{SourceDownloaderID: srcID, TargetDownloaderID: dstID, InfoHash: h3, State: models.TransferAdding}
+	require.NoError(t, e3.db.Create(&j3).Error)
+	e3.down[dstID] = true
+	e3.svc.RunOnce(ctx)
+	assert.Contains(t, e3.job(j3.ID).Message, "目标下载器不可用")
+	e3.down[dstID] = false
+	e3.dst.listErr = errors.New("busy")
+	e3.svc.RunOnce(ctx)
+	assert.Contains(t, e3.job(j3.ID).Message, "检查目标下载器失败")
+	assert.Equal(t, models.TransferAdding, e3.job(j3.ID).State)
+}
+
+func TestWithTransferTag(t *testing.T) {
+	assert.Equal(t, models.TransferTag, withTransferTag(""))
+	assert.Equal(t, "a,"+models.TransferTag, withTransferTag("a"))
+	assert.Equal(t, "a, "+models.TransferTag, withTransferTag("a, "+models.TransferTag), "已经有就不重复加")
 }
