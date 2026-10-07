@@ -97,7 +97,13 @@ func TestOrganizeMovie(t *testing.T) {
 	assert.Equal(t, "奥本海默", r.Title)
 	assert.Equal(t, models.MediaTriggerManual, r.Trigger)
 	assert.NotEmpty(t, r.TargetFileID)
-	assert.Len(t, decodeExtras(r.Extras), 1)
+	kinds := map[string][]string{}
+	for _, e := range decodeExtras(r.Extras) {
+		kinds[e.Kind] = append(kinds[e.Kind], filepath.Base(e.Target))
+		assert.NotEmpty(t, e.FileID, "每个文件都记下文件编号")
+	}
+	assert.Equal(t, []string{"奥本海默 (2023) - 2160p BluRay HDR H.265.zh-CN.ass"}, kinds[""], "字幕")
+	assert.ElementsMatch(t, []string{"奥本海默 (2023) - 2160p BluRay HDR H.265.nfo", "poster.jpg", "fanart.jpg"}, kinds[extraMeta], "刮削写的文件")
 
 	notices := e.gotNotices()
 	require.Len(t, notices, 1)
@@ -507,4 +513,60 @@ func TestPlanWithoutTMDBKey(t *testing.T) {
 	p, err := e.svc.Preview(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
 	require.NoError(t, err)
 	assert.Equal(t, "没有填写 TMDB API Key：先在「媒体识别」里填写", p.Problem)
+}
+
+// 字幕没整理成时写进记录；之后再整理这个种子时补上
+func TestSubtitleRetriedOnNextRun(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	subTarget := filepath.Join(e.movies, "奥本海默 (2023)", "奥本海默 (2023) - 2160p BluRay HDR H.265.zh-CN.ass")
+	require.NoError(t, os.MkdirAll(filepath.Dir(subTarget), 0o755))
+	require.NoError(t, os.WriteFile(subTarget, []byte("someone else"), 0o644))
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferDone, row.Status)
+	assert.Contains(t, row.Message, "字幕", "字幕没整理成写进记录")
+
+	require.NoError(t, os.Remove(subTarget))
+	res, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Done)
+	assert.True(t, sameFile(t, filepath.Join(e.dlDir, oppName, oppName+".chs.ass"), subTarget), "再整理时补上字幕")
+	row = e.history()[0]
+	assert.Empty(t, row.Message)
+	assert.Len(t, func() []extra {
+		var subs []extra
+		for _, x := range decodeExtras(row.Extras) {
+			if x.Kind == "" {
+				subs = append(subs, x)
+			}
+		}
+		return subs
+	}(), 1)
+}
+
+// 配置了媒体服务器的路径映射、整理到的目录不在里面：不把本地路径发过去，写明原因
+func TestServerPathMappingMismatch(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	emby := newFakeEmby(t)
+	key := "embykey"
+	_, err := e.svc.SaveServer(e.ctx, 0, ServerInput{
+		Name: "Emby", Kind: models.MediaServerEmby, URL: emby.URL, Token: &key, Enabled: true, LocalPrefix: "/somewhere/else", ServerPrefix: "/data",
+	})
+	require.NoError(t, err)
+	e.oppenheimer()
+	res, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	assert.Empty(t, emby.got(), "不发本地路径")
+	assert.Contains(t, strings.Join(res.Messages, "\n"), "不在路径映射 /somewhere/else → /data 里")
+	var srv models.MediaServer
+	require.NoError(t, e.db.First(&srv).Error)
+	assert.Contains(t, srv.LastError, "不在路径映射")
 }

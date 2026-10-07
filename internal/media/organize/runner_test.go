@@ -225,3 +225,43 @@ func TestScopeMatch(t *testing.T) {
 	assert.False(t, scope{tags: []string{"other"}}.match(1, tr))
 	assert.False(t, scope{savePaths: []string{"/data/down"}}.match(1, tr), "按路径分段匹配")
 }
+
+// 别的下载器里同一个 hash 的整理记录不影响这个下载器的补查与扫描
+func TestSweepAndScanPerDownloader(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	set := e.settings(SettingsInput{AutoEnabled: true, ScanEnabled: true, MinVideoMB: 1})
+	e.oppenheimer()
+	require.NoError(t, e.db.Create(&models.MediaTransferHistory{DownloaderID: 2, InfoHash: oppHash, SourcePath: "/other/downloader/file.mkv", Status: models.MediaTransferDone}).Error)
+	pushed := true
+	dlID := uint(1)
+	after := set.AutoSince.Add(time.Minute)
+	opp := oppHash
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "s", TorrentID: "1", TorrentHash: &opp, IsPushed: &pushed, IsCompleted: true, CompletedAt: &after, DownloaderID: &dlID, DownloaderName: "qb", DownloaderTaskID: oppHash}).Error)
+	e.svc.sweep(e.ctx, set)
+	assert.Len(t, e.svc.jobs, 1, "补查只看这个下载器的记录")
+	e.drain()
+	require.NoError(t, e.db.Where("downloader_id = ? AND info_hash = ?", 1, oppHash).Delete(&models.MediaTransferHistory{}).Error)
+	e.svc.scan(e.ctx, set)
+	assert.Len(t, e.svc.jobs, 1, "扫描只看这个下载器的记录")
+}
+
+// 队列满了排不上时，失败记录的重试时间不会被清掉
+func TestRetryDueKeepsScheduleWhenQueueFull(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	for i := range jobQueueSize {
+		require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 9, Hash: time.Duration(i).String()}}))
+	}
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx)
+	var row models.MediaTransferHistory
+	require.NoError(t, e.db.First(&row).Error)
+	require.NotNil(t, row.NextRetryAt, "排不上时保留重试时间")
+	assert.Equal(t, e.now.Add(tickInterval), row.NextRetryAt.UTC(), "下一拍再试")
+}

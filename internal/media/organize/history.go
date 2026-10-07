@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -84,7 +83,13 @@ func (s *Service) History(ctx context.Context, q HistoryQuery) (HistoryPage, err
 	}
 	page.Items = make([]HistoryItem, 0, len(rows))
 	for _, r := range rows {
-		page.Items = append(page.Items, HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: len(decodeExtras(r.Extras))})
+		subs := 0
+		for _, e := range decodeExtras(r.Extras) {
+			if e.Kind == "" {
+				subs++
+			}
+		}
+		page.Items = append(page.Items, HistoryItem{MediaTransferHistory: r, LibraryName: names[r.LibraryID], Subtitles: subs})
 	}
 	return page, nil
 }
@@ -137,25 +142,15 @@ func (s *Service) DeleteHistory(ctx context.Context, id uint, files bool) error 
 	return nil
 }
 
-// companions 是和视频同名、刮削时写的文件。
-func companions(target string) []string {
-	stem := strings.TrimSuffix(target, filepath.Ext(target))
-	return []string{stem + ".nfo", stem + "-thumb.jpg", stem + "-poster.jpg", stem + "-fanart.jpg"}
-}
+var seasonPosterRe = regexp.MustCompile(`^season(\d+|-specials)-poster\.jpg$`)
 
-var seasonPosterRe = regexp.MustCompile(`^season\d+-poster\.jpg$`)
-
-// dirArtifacts 是刮削时写在目录里的文件：目录里不再有视频时一起删。季海报按目录里的文件名找
-// （不用 Glob：目录名里常有 [tmdbid-…]，方括号会被当成通配符）。
-func dirArtifacts(dir string) []string {
-	out := []string{"poster.jpg", "fanart.jpg", "season.nfo", "tvshow.nfo", scrape.SeasonPosterName(0)}
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if !e.IsDir() && seasonPosterRe.MatchString(e.Name()) {
-			out = append(out, e.Name())
-		}
+// isDirArtifact 报告文件名是不是刮削写在目录里的文件（海报、背景、tvshow.nfo、season.nfo、季海报）。
+func isDirArtifact(name string) bool {
+	switch name {
+	case "poster.jpg", "fanart.jpg", "tvshow.nfo", "season.nfo":
+		return true
 	}
-	return out
+	return seasonPosterRe.MatchString(name)
 }
 
 // hasVideo 报告目录里（含子目录）还有没有视频文件。读不了目录时当作有。
@@ -174,38 +169,50 @@ func hasVideo(dir string) bool {
 	return found || (err != nil && !errors.Is(err, os.ErrNotExist))
 }
 
-// removeLibraryFiles 删掉一条记录在库里整理出的文件（调用方持有 s.mu）。
+// removeLibraryFiles 删掉一条记录在库里整理出的文件（调用方持有 s.mu）：视频与字幕按文件编号或软链接指向确认；
+// 刮削写的文件只删记录里有、文件编号还对得上的，目录里的那几个要等目录里不再有视频时才删。最后删空目录。
 func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransferHistory) error {
 	if err := transfer.RemoveIfOurs(row.TargetPath, row.Mode, row.TargetFileID, row.SourcePath); err != nil {
 		return err
 	}
 	var errs []error
+	var shared []extra
 	for _, e := range decodeExtras(row.Extras) {
-		if err := transfer.RemoveIfOurs(e.Target, row.Mode, e.FileID, e.Source); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	for _, c := range companions(row.TargetPath) {
-		if err := os.Remove(c); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
+		switch {
+		case e.Kind == extraMeta && isDirArtifact(filepath.Base(e.Target)):
+			shared = append(shared, e)
+		case e.Kind == extraMeta:
+			// 刮削写的文件是普通文件：按文件编号确认（软链接方式整理的视频也一样）；改过或换掉的留着
+			if err := transfer.RemoveIfOurs(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+				errs = append(errs, err)
+			}
+		default:
+			if err := transfer.RemoveIfOurs(e.Target, row.Mode, e.FileID, e.Source); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+				errs = append(errs, err)
+			}
 		}
 	}
 	var lib models.MediaLibrary
 	if err := s.cfg.DB.WithContext(ctx).Where("id = ?", row.LibraryID).Limit(1).Find(&lib).Error; err != nil || lib.ID == 0 {
 		return errors.Join(errs...)
 	}
+	for _, e := range shared {
+		d := filepath.Dir(e.Target)
+		if !transfer.Within(lib.Path, d) || hasVideo(d) {
+			continue
+		}
+		if err := transfer.RemoveIfOurs(e.Target, models.MediaModeCopy, e.FileID, ""); err != nil && !errors.Is(err, transfer.ErrNotOurs) {
+			errs = append(errs, err)
+		}
+	}
 	dirs := []string{filepath.Dir(row.TargetPath)}
 	if sd := showDir(&lib, row.TargetPath); sd != "" && sd != dirs[0] {
 		dirs = append(dirs, sd)
 	}
 	for _, d := range dirs {
-		if !transfer.Within(lib.Path, d) || hasVideo(d) {
-			continue
+		if transfer.Within(lib.Path, d) {
+			transfer.RemoveEmptyDirs(d, lib.Path)
 		}
-		for _, name := range dirArtifacts(d) {
-			_ = os.Remove(filepath.Join(d, name))
-		}
-		transfer.RemoveEmptyDirs(d, lib.Path)
 	}
 	return errors.Join(errs...)
 }
@@ -247,6 +254,10 @@ func (s *Service) Reconcile(ctx context.Context) int {
 		}
 		for _, r := range list {
 			if present[r.InfoHash] {
+				continue
+			}
+			// 保存目录不在（例如下载目录没挂载）时认不出数据是不是真的删了，不动
+			if info, err := os.Stat(r.SaveRoot); r.SaveRoot == "" || err != nil || !info.IsDir() {
 				continue
 			}
 			if _, err := os.Lstat(r.SourcePath); !errors.Is(err, os.ErrNotExist) {

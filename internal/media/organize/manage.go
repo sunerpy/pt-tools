@@ -563,11 +563,10 @@ func (s *Service) serverClient(r models.MediaServer) (server.Client, error) {
 	return server.New(server.Config{Kind: r.Kind, URL: r.URL, Token: token, HTTPClient: s.cfg.ServerHTTP})
 }
 
-// serverPath 把 pt-tools 里的路径换成媒体服务器里看到的路径。
-func serverPath(r models.MediaServer, p string) string {
+// serverPath 把 pt-tools 里的路径换成媒体服务器里看到的路径；配置了路径映射而路径不在映射里时第二个返回值为 false。
+func serverPath(r models.MediaServer, p string) (string, bool) {
 	if r.LocalPrefix == "" {
-		return p
+		return p, true
 	}
-	out, _ := models.MapTransferPath([]models.DownloaderPathMap{{SourcePrefix: r.LocalPrefix, TargetPrefix: r.ServerPrefix}}, p)
-	return out
+	return models.MapTransferPath([]models.DownloaderPathMap{{SourcePrefix: r.LocalPrefix, TargetPrefix: r.ServerPrefix}}, p)
 }

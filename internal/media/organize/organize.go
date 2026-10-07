@@ -531,13 +531,14 @@ func (s *Service) planItems(ctx context.Context, p *Plan, subs []transfer.File) 
 		if it.Status == ItemFailed {
 			continue
 		}
+		// 先看库里是不是已经有了（有记录时目标换成记录里的），字幕跟着最终的目标走
+		it.Status = s.itemState(it)
 		counts := map[string]int{}
 		for _, sub := range matched[i] {
 			lang := transfer.SubtitleLang(sub.Rel) + strings.ToLower(path.Ext(sub.Rel))
 			counts[lang]++
 			it.Subtitles = append(it.Subtitles, SubtitlePlan{Source: sub.Path, Target: transfer.SubtitleTarget(it.Target, sub.Rel, counts[lang])})
 		}
-		it.Status = s.itemState(it)
 	}
 }
 
@@ -571,10 +572,38 @@ func (s *Service) Preview(ctx context.Context, req Request) (*Plan, error) {
 // retryDelays 是失败后第 1 到 5 次自动重试前的等待时间；之后不再自动重试。
 var retryDelays = []time.Duration{10 * time.Minute, 30 * time.Minute, time.Hour, 3 * time.Hour, 12 * time.Hour}
 
+// extra 是跟着一个视频整理或写出的文件：Kind 为空是字幕，meta 是刮削写的 NFO 与图片。
 type extra struct {
-	Source string `json:"source"`
+	Source string `json:"source,omitempty"`
 	Target string `json:"target"`
 	FileID string `json:"file_id,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+}
+
+const extraMeta = "meta"
+
+// mergeExtras 把新的项并进旧的：同一个目标用新的。
+func mergeExtras(old, add []extra) []extra {
+	out := append([]extra(nil), old...)
+	for _, a := range add {
+		replaced := false
+		for i := range out {
+			if out[i].Target == a.Target {
+				out[i], replaced = a, true
+			}
+		}
+		if !replaced {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func rowExtras(r *models.MediaTransferHistory) []extra {
+	if r == nil {
+		return nil
+	}
+	return decodeExtras(r.Extras)
 }
 
 // organize 按计划整理一个种子并写整理记录（调用方持有 s.mu）。
@@ -604,10 +633,18 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			s.record(ctx, p, it, trigger, models.MediaTransferSkipped, it.Message, false, "", nil)
 			continue
 		case ItemDone:
-			// 库里已经是这个文件；没有记录时（例如记录被删了）补一条
-			if it.row == nil || it.row.Status != models.MediaTransferDone {
-				fileID, _ := transfer.FileID(it.Target)
-				s.record(ctx, p, it, trigger, models.MediaTransferDone, "", false, fileID, nil)
+			// 库里已经是这个文件：补上之前没整理成的字幕；没有记录时（例如记录被删了）补一条
+			subs, msgs, added := s.transferSubtitles(it, p.Mode)
+			res.Messages = append(res.Messages, msgs...)
+			if it.row == nil || it.row.Status != models.MediaTransferDone || added > 0 || len(msgs) > 0 {
+				fileID := ""
+				if it.row != nil && it.row.Status == models.MediaTransferDone {
+					fileID = it.row.TargetFileID
+				}
+				if fileID == "" {
+					fileID, _ = transfer.FileID(it.Target)
+				}
+				s.record(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), subs))
 			}
 			res.Done++
 			continue
@@ -635,10 +672,10 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 			continue
 		}
 		fileID, _ := transfer.FileID(it.Target)
-		extras, msgs := s.transferSubtitles(it, p.Mode)
+		extras, msgs, _ := s.transferSubtitles(it, p.Mode)
 		res.Messages = append(res.Messages, msgs...)
 		it.Status = ItemDone
-		s.record(ctx, p, it, trigger, models.MediaTransferDone, "", false, fileID, extras)
+		s.record(ctx, p, it, trigger, models.MediaTransferDone, strings.Join(msgs, "；"), false, fileID, mergeExtras(rowExtras(it.row), extras))
 		if out == transfer.AlreadyDone {
 			res.Done++
 			continue
@@ -647,7 +684,9 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 		created = append(created, it)
 	}
 	if len(created) > 0 {
-		res.Messages = append(res.Messages, s.scrape(ctx, p, created)...)
+		msgs, written := s.scrape(ctx, p, created)
+		res.Messages = append(res.Messages, msgs...)
+		s.recordScraped(ctx, p, created, written)
 		res.Messages = append(res.Messages, s.refreshServers(ctx, p, created)...)
 		if msg := s.notify(ctx, p, created); msg != "" {
 			res.Messages = append(res.Messages, msg)
@@ -656,19 +695,72 @@ func (s *Service) organize(ctx context.Context, req Request, trigger string) (*R
 	return res, nil
 }
 
-// transferSubtitles 用同样的方式整理字幕；失败的只记在消息里，不影响视频。
-func (s *Service) transferSubtitles(it *PlanItem, mode string) ([]extra, []string) {
+// transferSubtitles 用同样的方式整理字幕；失败的记在消息里（写进整理记录），不影响视频，下次整理时再试。
+// 返回整理好的字幕（含之前就在的）、失败的消息与这次新放进库的个数。
+func (s *Service) transferSubtitles(it *PlanItem, mode string) ([]extra, []string, int) {
 	var out []extra
 	var msgs []string
+	added := 0
 	for _, sub := range it.Subtitles {
-		if _, err := transfer.Transfer(sub.Source, sub.Target, mode); err != nil {
+		res, err := transfer.Transfer(sub.Source, sub.Target, mode)
+		if err != nil {
 			msgs = append(msgs, fmt.Sprintf("字幕 %s：%v", filepath.Base(sub.Source), err))
 			continue
+		}
+		if res == transfer.Created {
+			added++
 		}
 		id, _ := transfer.FileID(sub.Target)
 		out = append(out, extra{Source: sub.Source, Target: sub.Target, FileID: id})
 	}
-	return out, msgs
+	return out, msgs, added
+}
+
+// recordScraped 把刮削写出的文件与文件编号记进对应视频的整理记录：和视频同名的记给这个视频，
+// 目录里的（海报、背景、tvshow.nfo、季海报与 season.nfo）记给这个目录里每个新整理的视频。删除时只删这些。
+func (s *Service) recordScraped(ctx context.Context, p *Plan, created []*PlanItem, written []string) {
+	if len(written) == 0 {
+		return
+	}
+	ids := make(map[string]string, len(written))
+	for _, w := range written {
+		if id, err := transfer.FileID(w); err == nil {
+			ids[w] = id
+		}
+	}
+	for _, it := range created {
+		if it.HistoryID == 0 {
+			continue
+		}
+		stem := strings.TrimSuffix(it.Target, filepath.Ext(it.Target))
+		dirs := []string{filepath.Dir(it.Target)}
+		if sd := showDir(p.Library, it.Target); sd != "" {
+			dirs = append(dirs, sd)
+		}
+		var add []extra
+		for _, w := range written {
+			id, ok := ids[w]
+			if !ok {
+				continue
+			}
+			own := strings.HasPrefix(w, stem+".") || strings.HasPrefix(w, stem+"-")
+			shared := isDirArtifact(filepath.Base(w)) && slices.Contains(dirs, filepath.Dir(w))
+			if own || shared {
+				add = append(add, extra{Target: w, FileID: id, Kind: extraMeta})
+			}
+		}
+		if len(add) == 0 {
+			continue
+		}
+		var row models.MediaTransferHistory
+		if err := s.cfg.DB.WithContext(ctx).Where("id = ?", it.HistoryID).Limit(1).Find(&row).Error; err != nil || row.ID == 0 {
+			continue
+		}
+		b, _ := json.Marshal(mergeExtras(decodeExtras(row.Extras), add))
+		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id = ?", row.ID).Update("extras", string(b)).Error; err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 记下刮削的文件失败 (%s): %v", it.Target, err)
+		}
+	}
 }
 
 // recordProblem 为整个种子整理不了的情况写记录：知道视频文件时每个文件一行，否则用种子的内容路径记一行。
@@ -703,7 +795,7 @@ func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, st
 	now := s.cfg.Now()
 	row := models.MediaTransferHistory{
 		DownloaderID: p.DownloaderID, DownloaderName: p.DownloaderName, InfoHash: p.Hash, TaskID: p.TaskID,
-		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, TargetPath: it.Target, Mode: p.Mode,
+		TorrentName: truncate(p.Name, 512), SourcePath: it.Source, SaveRoot: p.LocalPath, TargetPath: it.Target, Mode: p.Mode,
 		Season: it.Season, Episode: it.Episode, EpisodeEnd: it.EpisodeEnd, Size: it.Size, Status: status,
 		Message: truncate(msg, 1024), Trigger: trigger, TargetFileID: fileID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -734,7 +826,7 @@ func (s *Service) record(ctx context.Context, p *Plan, it *PlanItem, trigger, st
 	err := s.cfg.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "source_path"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"downloader_id", "downloader_name", "info_hash", "task_id", "torrent_name", "library_id", "target_path",
+			"downloader_id", "downloader_name", "info_hash", "task_id", "torrent_name", "library_id", "save_root", "target_path",
 			"extras", "mode", "media_type", "tmdb_id", "title", "year", "season", "episode", "episode_end", "size",
 			"status", "message", "attempts", "next_retry_at", "target_file_id", "trigger", "updated_at",
 		}),
@@ -776,10 +868,10 @@ func showDir(lib *models.MediaLibrary, target string) string {
 	return filepath.Join(lib.Path, segs[0])
 }
 
-// scrape 为这次新放进库的文件写 NFO 与图片（媒体库关了刮削时不写）。
-func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) []string {
+// scrape 为这次新放进库的文件写 NFO 与图片（媒体库关了刮削时不写）。返回出错的消息与写出的文件。
+func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) ([]string, []string) {
 	if !p.Library.Scrape {
-		return nil
+		return nil, nil
 	}
 	w := scrape.Writer{Overwrite: p.Library.ScrapeOverwrite}
 	if p.tmdbClient != nil {
@@ -811,7 +903,7 @@ func (s *Service) scrape(ctx context.Context, p *Plan, created []*PlanItem) []st
 	for _, e := range rep.Errors {
 		msgs = append(msgs, "刮削："+e)
 	}
-	return msgs
+	return msgs, rep.Written
 }
 
 // refreshDirs 是要通知媒体服务器扫描的目录：电影是文件所在目录，剧集是剧集目录（平铺时是文件所在目录）。
@@ -846,10 +938,20 @@ func (s *Service) refreshServers(ctx context.Context, p *Plan, created []*PlanIt
 				err = c.RefreshAll(ctx)
 			} else {
 				paths := make([]string, 0, len(dirs))
+				var unmapped []string
 				for _, d := range dirs {
-					paths = append(paths, serverPath(srv, d))
+					if sp, ok := serverPath(srv, d); ok {
+						paths = append(paths, sp)
+					} else {
+						unmapped = append(unmapped, d)
+					}
 				}
-				err = c.RefreshPaths(ctx, paths)
+				if len(paths) > 0 {
+					err = c.RefreshPaths(ctx, paths)
+				}
+				if err == nil && len(unmapped) > 0 {
+					err = fmt.Errorf("%s 不在路径映射 %s → %s 里，没有通知", strings.Join(unmapped, "、"), srv.LocalPrefix, srv.ServerPrefix)
+				}
 			}
 		}
 		now := s.cfg.Now()

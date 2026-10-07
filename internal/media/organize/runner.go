@@ -316,10 +316,17 @@ func (s *Service) retryDue(ctx context.Context) {
 			continue
 		}
 		seen[key] = true
-		// 先把重试时间清掉：这一轮排上了，失败时 record 会按次数重新算
-		s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
-			Where("downloader_id = ? AND info_hash = ? AND status = ?", r.DownloaderID, r.InfoHash, models.MediaTransferFailed).
-			Update("next_retry_at", nil)
+		// 先把重试时间清掉再排队：排上以后失败时 record 会按次数重新算；队列满了排不上时恢复成下一拍再试
+		pending := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
+			Where("downloader_id = ? AND info_hash = ? AND status = ? AND next_retry_at IS NOT NULL", r.DownloaderID, r.InfoHash, models.MediaTransferFailed)
+		var ids []uint
+		if err := pending.Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
+			continue
+		}
+		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", nil).Error; err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 清除重试时间失败: %v", err)
+			continue
+		}
 		trigger := r.Trigger
 		if trigger == "" {
 			trigger = models.MediaTriggerAuto
@@ -329,7 +336,10 @@ func (s *Service) retryDue(ctx context.Context) {
 		if trigger == models.MediaTriggerManual && r.TMDBID > 0 {
 			req.MediaType, req.TMDBID, req.LibraryID = r.MediaType, r.TMDBID, r.LibraryID
 		}
-		s.enqueue(job{req: req, trigger: trigger, retry: true})
+		if !s.enqueue(job{req: req, trigger: trigger, retry: true}) {
+			next := s.cfg.Now().Add(tickInterval)
+			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", &next)
+		}
 	}
 }
 
@@ -342,7 +352,7 @@ func (s *Service) sweep(ctx context.Context, set Settings) {
 	pushed := true
 	if err := s.cfg.DB.WithContext(ctx).
 		Where("is_pushed = ? AND is_completed = ? AND completed_at >= ? AND downloader_task_id != '' AND downloader_id IS NOT NULL", &pushed, true, *set.AutoSince).
-		Where("LOWER(COALESCE(torrent_hash, '')) NOT IN (SELECT info_hash FROM media_transfer_histories)").
+		Where("NOT EXISTS (SELECT 1 FROM media_transfer_histories h WHERE h.downloader_id = torrent_infos.downloader_id AND h.info_hash = LOWER(COALESCE(torrent_infos.torrent_hash, '')))").
 		Order("completed_at").Limit(maxPerRound).Find(&infos).Error; err != nil {
 		s.cfg.Logger.Warnf("[整理入库] 补查已完成的种子失败: %v", err)
 		return
@@ -392,7 +402,7 @@ func (s *Service) scan(ctx context.Context, set Settings) {
 			var have []string
 			batch := hashes[i:min(i+500, len(hashes))]
 			if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
-				Where("info_hash IN ?", batch).Distinct().Pluck("info_hash", &have).Error; err != nil {
+				Where("downloader_id = ? AND info_hash IN ?", ds.ID, batch).Distinct().Pluck("info_hash", &have).Error; err != nil {
 				s.cfg.Logger.Warnf("[整理入库] 读取整理记录失败: %v", err)
 				return
 			}

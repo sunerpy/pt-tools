@@ -176,3 +176,61 @@ func TestDeleteHistoryBracketedShowDir(t *testing.T) {
 	assert.False(t, exists(show), "季海报也删掉，剧集目录删干净")
 	assert.True(t, exists(e.tv))
 }
+
+// 删除记录并删除库里的文件时，只删 pt-tools 刮削时写的 NFO 与图片：用户自己放的海报留着，目录也留着
+func TestDeleteHistoryKeepsUserFiles(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	dir := filepath.Join(e.movies, "奥本海默 (2023)")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "poster.jpg"), []byte("my poster"), 0o644))
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	assert.Equal(t, "my poster", readFile(t, filepath.Join(dir, "poster.jpg")), "不覆盖时不动用户的海报")
+	row := e.history()[0]
+	require.NoError(t, e.svc.DeleteHistory(e.ctx, row.ID, true))
+	assert.False(t, exists(row.TargetPath))
+	assert.False(t, exists(filepath.Join(dir, "fanart.jpg")), "刮削写的背景删掉")
+	assert.False(t, exists(strings.TrimSuffix(row.TargetPath, ".mkv")+".nfo"), "刮削写的 NFO 删掉")
+	assert.Equal(t, "my poster", readFile(t, filepath.Join(dir, "poster.jpg")), "用户的海报留着")
+
+	// 刮削写的文件之后被换掉了：编号对不上，不删
+	e.oppenheimer()
+	_, err = e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	row = e.history()[0]
+	nfo := strings.TrimSuffix(row.TargetPath, ".mkv") + ".nfo"
+	require.NoError(t, os.Remove(nfo))
+	require.NoError(t, os.WriteFile(nfo, []byte("<movie>mine</movie>"), 0o644))
+	require.NoError(t, e.svc.DeleteHistory(e.ctx, row.ID, true))
+	assert.Equal(t, "<movie>mine</movie>", readFile(t, nfo))
+}
+
+func TestReconcileNeedsSaveRoot(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1, DeleteLinksOnRemove: true})
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	row := e.history()[0]
+	assert.Equal(t, e.dlDir, sql1(t, e, "SELECT save_root FROM media_transfer_histories"))
+	e.dl.remove(oppHash)
+	// 下载目录整个不在了（没挂载）：认不出数据是不是真的删了，不清理
+	require.NoError(t, os.Rename(e.dlDir, e.dlDir+".off"))
+	assert.Zero(t, e.svc.Reconcile(e.ctx))
+	assert.True(t, exists(row.TargetPath))
+	require.NoError(t, os.Rename(e.dlDir+".off", e.dlDir))
+	require.NoError(t, os.RemoveAll(filepath.Join(e.dlDir, oppName)))
+	assert.Equal(t, 1, e.svc.Reconcile(e.ctx))
+	assert.False(t, exists(row.TargetPath))
+}
+
+func sql1(t *testing.T, e *env, q string) string {
+	t.Helper()
+	var out string
+	require.NoError(t, e.db.Raw(q).Scan(&out).Error)
+	return out
+}
