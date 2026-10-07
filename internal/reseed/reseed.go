@@ -577,7 +577,7 @@ func (s *Service) todayCounts(ctx context.Context) (map[string]int, error) {
 		N        int
 	}
 	if err := s.cfg.DB.WithContext(ctx).Model(&models.ReseedRecord{}).Select("site_name, COUNT(*) AS n").
-		Where("created_at >= ?", start).Group("site_name").Scan(&rows).Error; err != nil {
+		Where("updated_at >= ?", start).Group("site_name").Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("统计今天的辅种失败: %w", err)
 	}
 	out := map[string]int{}
@@ -628,13 +628,17 @@ func (s *Service) handle(ctx context.Context, found map[string][]iyuu.Candidate,
 	}
 }
 
+// tried 报告这个站点的这个种子是不是已经尝试过、这次不该再试：暂时失败的过了 ReseedRetryAfter 可以再试。
 func (s *Service) tried(ctx context.Context, hash, site string) bool {
-	var n int64
-	if err := s.cfg.DB.WithContext(ctx).Model(&models.ReseedRecord{}).
-		Where("info_hash = ? AND site_name = ?", hash, site).Count(&n).Error; err != nil {
+	var rec models.ReseedRecord
+	err := s.cfg.DB.WithContext(ctx).Where("info_hash = ? AND site_name = ?", hash, site).First(&rec).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return false
+	case err != nil:
 		return true // 读不到就当尝试过，不冒险重复
 	}
-	return n > 0
+	return !(rec.State == models.ReseedFailed && rec.Retryable && s.cfg.Now().Sub(rec.UpdatedAt) >= models.ReseedRetryAfter)
 }
 
 // attempt 下载一个可辅种的种子，核对 info hash 与文件列表，通过就建任务；结果记进 ReseedRecord。
@@ -648,14 +652,19 @@ func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, sit
 		rec.State, rec.Message = models.ReseedFailed, why
 		s.saveRecord(ctx, &rec)
 	}
+	// 站点不可用、下载不到种子是暂时的：记为可重试，过一段时间再试
+	retryLater := func(why string) {
+		rec.Retryable = true
+		fail(why)
+	}
 	inst, ok := s.cfg.Sites(site)
 	if !ok {
-		fail("站点 " + site + " 不可用")
+		retryLater("站点 " + site + " 不可用")
 		return
 	}
 	data, err := inst.Download(ctx, c.TorrentID)
 	if err != nil {
-		fail("下载种子失败: " + err.Error())
+		retryLater("下载种子失败: " + err.Error())
 		return
 	}
 	if h, hashErr := qbit.ComputeTorrentHash(data); hashErr != nil || !strings.EqualFold(h, c.InfoHash) {
@@ -694,8 +703,16 @@ func (s *Service) attempt(ctx context.Context, src source, c iyuu.Candidate, sit
 	s.saveRecord(ctx, &rec)
 }
 
+// saveRecord 写入（或在重试时更新）这个站点这个种子的记录。
 func (s *Service) saveRecord(ctx context.Context, rec *models.ReseedRecord) {
-	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Create(rec).Error; err != nil {
+	now := s.cfg.Now()
+	rec.CreatedAt, rec.UpdatedAt = now, now
+	if err := s.cfg.DB.WithContext(context.WithoutCancel(ctx)).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "info_hash"}, {Name: "site_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"torrent_id", "source_hash", "downloader_id", "name", "state", "message", "retryable", "job_id", "updated_at",
+		}),
+	}).Create(rec).Error; err != nil {
 		s.cfg.Logger.Warnf("[辅种] 记录 %s@%s 失败: %v", rec.InfoHash, rec.SiteName, err)
 	}
 }

@@ -467,3 +467,35 @@ func TestFiles(t *testing.T) {
 	_, err = TorrentFiles(buf.Bytes())
 	assert.Error(t, err)
 }
+
+// 下载种子失败（站点暂时不可用等）7 天后可以再试；核对没通过的不再试。
+func TestRunRetriesDownloadFailuresLater(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.enable(nil)
+	good := e.candidate("51", map[string]int64{"a.mkv": 100, "sub/b.srt": 1})
+	data := e.site.data["51"]
+	delete(e.site.data, "51") // 站点暂时下载不到
+	bad := e.candidate("52", map[string]int64{"a.mkv": 100})
+	e.setResults(map[string]any{"sid": 1, "torrent_id": 51, "info_hash": good}, map[string]any{"sid": 1, "torrent_id": 52, "info_hash": bad})
+	res, err := e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Failed)
+
+	e.site.data["51"] = data
+	res, err = e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Skipped[SkipTried], "7 天之内不重试")
+
+	e.now = e.now.Add(8 * 24 * time.Hour)
+	res, err = e.svc.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created, "下载失败的过了 7 天再试，这次成功")
+	assert.Equal(t, 1, res.Skipped[SkipTried], "文件不一致的不再试")
+	var recs []models.ReseedRecord
+	require.NoError(t, e.db.Order("torrent_id").Find(&recs).Error)
+	require.Len(t, recs, 2, "重试更新原来那条记录")
+	assert.Equal(t, models.ReseedQueued, recs[0].State)
+	assert.False(t, recs[0].Retryable)
+	assert.Equal(t, models.ReseedFailed, recs[1].State)
+}

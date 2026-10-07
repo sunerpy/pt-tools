@@ -55,6 +55,8 @@ const (
 	ReseedMaxPerSitePerDay        = 500
 	// ReseedSidTTL 是 sid_sha1 的有效期。
 	ReseedSidTTL = 7 * 24 * time.Hour
+	// ReseedRetryAfter 是暂时失败（下载不到种子等）之后多久再试。
+	ReseedRetryAfter = 7 * 24 * time.Hour
 )
 
 // 辅种记录的结果。
@@ -71,15 +73,17 @@ type ReseedRecord struct {
 	InfoHash string `gorm:"size:64;not null;uniqueIndex:idx_reseed_hash_site" json:"info_hash"`
 	SiteName string `gorm:"size:64;not null;uniqueIndex:idx_reseed_hash_site;index" json:"site_name"`
 	// TorrentID 是站内种子 ID；SourceHash 是下载器里那个数据相同的种子。
-	TorrentID    string    `gorm:"size:128;default:''" json:"torrent_id"`
-	SourceHash   string    `gorm:"size:64;default:''" json:"source_hash"`
-	DownloaderID uint      `gorm:"not null;default:0" json:"downloader_id"`
-	Name         string    `gorm:"size:512;default:''" json:"name"`
-	State        string    `gorm:"size:32;not null;index" json:"state"`
-	Message      string    `gorm:"size:1024;default:''" json:"message"`
-	JobID        *uint     `gorm:"index" json:"job_id,omitempty"`
-	CreatedAt    time.Time `gorm:"index" json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	TorrentID    string `gorm:"size:128;default:''" json:"torrent_id"`
+	SourceHash   string `gorm:"size:64;default:''" json:"source_hash"`
+	DownloaderID uint   `gorm:"not null;default:0" json:"downloader_id"`
+	Name         string `gorm:"size:512;default:''" json:"name"`
+	State        string `gorm:"size:32;not null;index" json:"state"`
+	Message      string `gorm:"size:1024;default:''" json:"message"`
+	// Retryable 表示这次失败是暂时的（站点不可用、下载种子失败），过了 ReseedRetryAfter 可以再试；核对没通过的不再试。
+	Retryable bool      `gorm:"not null;default:false" json:"retryable"`
+	JobID     *uint     `gorm:"index" json:"job_id,omitempty"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time `gorm:"index" json:"updated_at"`
 }
 
 // TableName 指定表名。
