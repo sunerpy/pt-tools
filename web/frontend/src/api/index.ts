@@ -1425,6 +1425,21 @@ export interface NotificationConfig {
   headers?: string;
   webhook_key?: string;
   proxy_url?: string;
+  // 只出站的通道（Bark、Server 酱、ntfy、钉钉、飞书），字段见 utils/notifyChannels
+  server_url?: string;
+  device_key?: string;
+  group?: string;
+  sound?: string;
+  send_key?: string;
+  topic?: string;
+  token?: string;
+  username?: string;
+  password?: string;
+  priority?: number;
+  webhook_url?: string;
+  secret?: string;
+  msg_type?: string;
+  allow_private?: boolean;
 }
 
 const NOTIFICATION_BASE_FIELDS = new Set<keyof NotificationConfig>([
@@ -1451,6 +1466,20 @@ const NOTIFICATION_DYNAMIC_FIELDS = [
   "headers",
   "webhook_key",
   "proxy_url",
+  "server_url",
+  "device_key",
+  "group",
+  "sound",
+  "send_key",
+  "topic",
+  "token",
+  "username",
+  "password",
+  "priority",
+  "webhook_url",
+  "secret",
+  "msg_type",
+  "allow_private",
 ] as const;
 
 interface NotificationWireBody {
@@ -1510,8 +1539,10 @@ function unpackNotificationResponse(
     "admin_users",
     "allowed_users",
   ]);
-  // Fields that may come back as numbers (default_chat_id can be int64 OR string).
-  const numericFields = new Set(["default_chat_id"]);
+  // Fields that may come back as numbers (default_chat_id can be int64 OR string; ntfy priority).
+  const numericFields = new Set(["default_chat_id", "priority"]);
+  // 只出站通道的开关（Bark、ntfy 的 allow_private）
+  const booleanFields = new Set(["allow_private"]);
   for (const key of Object.keys(raw) as (keyof typeof raw)[]) {
     if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
     if (key === "config_json") continue;
@@ -1521,6 +1552,8 @@ function unpackNotificationResponse(
     } else if (Array.isArray(v) && arrayFields.has(key as string)) {
       sink[key as string] = v;
     } else if (typeof v === "number" && numericFields.has(key as string)) {
+      sink[key as string] = v;
+    } else if (typeof v === "boolean" && booleanFields.has(key as string)) {
       sink[key as string] = v;
     }
   }
@@ -1533,6 +1566,8 @@ function unpackNotificationResponse(
       } else if (Array.isArray(v) && arrayFields.has(key)) {
         sink[key] = v;
       } else if (typeof v === "number" && numericFields.has(key)) {
+        sink[key] = v;
+      } else if (typeof v === "boolean" && booleanFields.has(key)) {
         sink[key] = v;
       }
     }

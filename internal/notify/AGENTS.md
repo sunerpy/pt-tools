@@ -2,7 +2,7 @@
 
 ## Role
 
-This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, and WeCom webhook.
+This package provides transport-neutral notifications, channel factories, fan-out, dedupe, quiet hours, digesting, and durable retry. Supported production adapters are Telegram, QQ/OneBot, generic webhook, WeCom webhook, and the outbound-only Bark, ServerChan, ntfy, DingTalk, and Feishu adapters.
 
 ## Core Interface
 
@@ -32,7 +32,10 @@ internal/notify/
     ├── telegram/                # Inbound/outbound + callback actions
     ├── qq/                      # OneBot/NapCat inbound/outbound
     ├── webhook/                 # Stateless generic webhook
-    └── wecom/                   # WeCom webhook
+    ├── wecom/                   # WeCom webhook (sends through outbound/)
+    ├── bark/ serverchan/ ntfy/  # Outbound-only push services
+    ├── dingtalk/ feishu/        # Outbound-only group bots (official hosts only, optional signing)
+    └── outbound/                # Shared HTTP client for the outbound-only adapters (see below)
 ```
 
 ## Delivery Paths
@@ -48,10 +51,21 @@ Do not create a second live Telegram or QQ listener for outbox delivery: it can 
 
 Telegram `Healthy()` follows the latest `getUpdates` result (`pollHealthTransport`): telego retries a failing long poll internally without closing the updates channel, so transport-level results are the only signal. `runInbound` restarts the long poll with backoff if the updates channel closes while the poll context is alive.
 
+## Outbound-only Adapters
+
+Bark, ServerChan, ntfy, DingTalk, Feishu and WeCom send through `outbound.Client.PostJSON`:
+
+- The request is bound to the caller's `ctx`: a timed-out send is canceled, so it cannot arrive late and then be delivered again by the outbox.
+- No environment proxy, no redirects (a 3xx is a failure), responses capped at 64 KiB.
+- Every connection is checked after DNS (`net.Dialer.Control`): link-local (including `169.254.169.254`), multicast and reserved addresses are never dialed; loopback and private ranges only when the request sets `AllowPrivate` (the user's `allow_private` switch on Bark/ntfy). DingTalk and Feishu webhooks must be the official HTTPS hosts.
+- HTTP errors carry only the status code. Adapters pick whitelisted fields (`code`/`message`, `errcode`/`errmsg`) and pass them through `outbound.Clean` with the configured secrets. Success needs the explicit success field (Bark `code==200`, ServerChan `code==0`, DingTalk/WeCom `errcode==0`, Feishu `code==0` or legacy `StatusCode==0`, ntfy a message `id`); a missing field is a failure.
+- They implement `notify.ConfigChecker`; `NotificationService` calls it with the merged plaintext config before create/update, so a bad config is rejected with `ErrInvalidConf` (HTTP 400) instead of failing at hot reload.
+- Tests point official hosts at a local TLS server with `outbound.NewClient(outbound.Options{Divert: addr})`. The `qa` build reads the same divert from `PT_TOOLS_QA_NOTIFY_DIVERT`; release builds have no such switch.
+
 ## Adding an Adapter
 
 1. Implement the full `Channel` interface under `adapter/<type>`.
-2. Parse and validate only that adapter's decrypted `ConfigJSON` during `Init`.
+2. Parse and validate only that adapter's decrypted `ConfigJSON` during `Init`; implement `ConfigChecker` when that validation needs no I/O.
 3. Register a factory with `notify.RegisterChannel`.
 4. Add the production side-effect import in `cmd/root.go` or `cmd/web.go`.
 5. Test init failure, outbound success/error, health, inbound callback (if supported), and bounded `Close`.

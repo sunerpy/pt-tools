@@ -251,6 +251,22 @@ func TestChatops_MoreErrorBranches(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 	})
 
+	t.Run("create or update with invalid channel config is 400", func(t *testing.T) {
+		bad := fmt.Errorf("%w: Bark device_key 为空", app.ErrInvalidConf)
+		notif.createErr, notif.updateErr = bad, bad
+		defer func() { notif.createErr, notif.updateErr = nil, nil }()
+		resp := chatopsReq(t, srv, "POST", "/api/chatops/notifications", tok, map[string]any{
+			"channel_type": "bark", "name": "n", "config_json": map[string]any{},
+		})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		assert.Contains(t, string(body), "device_key 为空")
+		resp = chatopsReq(t, srv, "PUT", "/api/chatops/notifications/1", tok, map[string]any{"config_json": map[string]any{}})
+		resp.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
 	t.Run("update notification invalid id", func(t *testing.T) {
 		resp := chatopsReq(t, srv, "PUT", "/api/chatops/notifications/abc", tok, map[string]any{"name": "x"})
 		defer resp.Body.Close()

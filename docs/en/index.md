@@ -128,8 +128,12 @@ home:
             body: Push results sent to your chat app, with quiet hours, digests, retries and an hourly limit.
             status: available
             link: /en/guide/chatops-rss-notify
-          - title: WeCom and generic webhooks
-            body: Outbound channels that send notifications but cannot receive commands.
+          - title: More notification channels
+            body: WeCom, DingTalk and Feishu group bots, plus Bark, ServerChan and ntfy; they send notifications and do not take commands.
+            status: available
+            link: /en/guide/notify-channels
+          - title: Generic webhook
+            body: Sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like.
             status: experimental
             link: /en/guide/chatops-quickstart
       - name: Running it

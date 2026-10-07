@@ -56,6 +56,7 @@ func mapServiceErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, app.ErrConfNotFound) || errors.Is(err, gorm.ErrRecordNotFound):
 		writeChatopsErr(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, app.ErrInvalidReplyLang),
+		errors.Is(err, app.ErrInvalidConf),
 		errors.Is(err, app.ErrTooManyActiveCodes),
 		errors.Is(err, app.ErrCodeUsedOrExpired):
 		writeChatopsErr(w, http.StatusBadRequest, "invalid_argument", err.Error())

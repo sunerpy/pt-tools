@@ -31,6 +31,12 @@ type LinkStater interface {
 	LinkState() string
 }
 
+// ConfigChecker 由能在不做任何 I/O 的前提下检查配置的适配器实现，是可选能力：
+// 保存配置前调用，配置有误时直接拒绝保存，不等热重载时才失败。ConfigJSON 是明文。
+type ConfigChecker interface {
+	CheckConfig(conf *models.NotificationConf) error
+}
+
 type Channel interface {
 	Type() string
 	Init(ctx context.Context, conf *models.NotificationConf) error

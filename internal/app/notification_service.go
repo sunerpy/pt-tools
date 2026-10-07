@@ -157,10 +157,14 @@ type NotificationService interface {
 // ErrConfNotFound 当 conf id 不存在时返回。
 var ErrConfNotFound = errors.New("notification conf not found")
 
+// ErrInvalidConf 表示通道配置没通过适配器的检查：保存前就拦下，不等热重载时才失败。
+var ErrInvalidConf = errors.New("通道配置无效")
+
 type notificationService struct {
 	db          *gorm.DB
 	manager     NotifyManager
 	pushTimeout time.Duration
+	registry    *notify.Registry // 检查配置用；默认是 notify.DefaultRegistry()
 }
 
 // NewNotificationService 构造一个 NotificationService。pushTimeout 为同步投递的最长等待时间，
@@ -169,7 +173,23 @@ func NewNotificationService(db *gorm.DB, manager NotifyManager, pushTimeout time
 	if pushTimeout <= 0 {
 		pushTimeout = 5 * time.Second
 	}
-	return &notificationService{db: db, manager: manager, pushTimeout: pushTimeout}
+	return &notificationService{db: db, manager: manager, pushTimeout: pushTimeout, registry: notify.DefaultRegistry()}
+}
+
+// checkConf 用通道类型对应的适配器检查明文配置（不发请求）。类型没注册、或适配器不支持检查时放行。
+func (s *notificationService) checkConf(typ string, plain []byte) error {
+	ch, err := s.registry.Make(typ)
+	if err != nil {
+		return nil
+	}
+	checker, ok := ch.(notify.ConfigChecker)
+	if !ok {
+		return nil
+	}
+	if err := checker.CheckConfig(&models.NotificationConf{ChannelType: typ, ConfigJSON: string(plain)}); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidConf, err.Error())
+	}
+	return nil
 }
 
 func (s *notificationService) ListConfs(ctx context.Context) ([]NotificationConfDTO, error) {
@@ -240,6 +260,9 @@ func (s *notificationService) CreateConf(ctx context.Context, req CreateConfReq)
 	if len(req.ConfigJSON) == 0 {
 		return NotificationConfDTO{}, errors.New("config_json 不能为空")
 	}
+	if err := s.checkConf(req.ChannelType, req.ConfigJSON); err != nil {
+		return NotificationConfDTO{}, err
+	}
 
 	cipherStr, err := crypto.Encrypt([]byte(req.ConfigJSON))
 	if err != nil {
@@ -300,7 +323,8 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 	if req.QuietHoursEnd != nil {
 		updates["quiet_hours_end"] = *req.QuietHoursEnd
 	}
-	if len(req.ConfigJSON) > 0 {
+	// 改了配置或类型时，用合并后的配置按（新的）类型检查一遍再存
+	if req.ChannelType != nil || len(req.ConfigJSON) > 0 {
 		// 合并策略：解密 DB 现有配置 → 与 partial 新值 merge（新值覆盖、缺失键保留）→ 重新加密。
 		// 避免前端只发部分字段时把其他原有字段（admin_users / default_chat_id 等）覆盖掉。
 		var existingRow models.NotificationConf
@@ -324,23 +348,34 @@ func (s *notificationService) UpdateConf(ctx context.Context, id uint, req Updat
 			}
 		}
 
-		var newMap map[string]json.RawMessage
-		if perr := json.Unmarshal([]byte(req.ConfigJSON), &newMap); perr != nil {
-			return fmt.Errorf("解析新配置失败: %w", perr)
-		}
-		for k, v := range newMap {
-			existingMap[k] = v
+		if len(req.ConfigJSON) > 0 {
+			var newMap map[string]json.RawMessage
+			if perr := json.Unmarshal([]byte(req.ConfigJSON), &newMap); perr != nil {
+				return fmt.Errorf("解析新配置失败: %w", perr)
+			}
+			for k, v := range newMap {
+				existingMap[k] = v
+			}
 		}
 
 		merged, merr := json.Marshal(existingMap)
 		if merr != nil {
 			return fmt.Errorf("合并配置失败: %w", merr)
 		}
-		cipherStr, err := crypto.Encrypt(merged)
-		if err != nil {
-			return fmt.Errorf("加密通道配置失败: %w", err)
+		typ := existingRow.ChannelType
+		if req.ChannelType != nil {
+			typ = *req.ChannelType
 		}
-		updates["config_json"] = cipherStr
+		if err := s.checkConf(typ, merged); err != nil {
+			return err
+		}
+		if len(req.ConfigJSON) > 0 {
+			cipherStr, err := crypto.Encrypt(merged)
+			if err != nil {
+				return fmt.Errorf("加密通道配置失败: %w", err)
+			}
+			updates["config_json"] = cipherStr
+		}
 	}
 	if len(updates) == 0 {
 		return nil

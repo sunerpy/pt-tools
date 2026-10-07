@@ -34,7 +34,12 @@ import (
 	// Side-effect imports register notify channel adapters into the notify
 	// default registry during process init so that bootstrapChatOps can
 	// instantiate per-conf channel implementations.
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/bark"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/dingtalk"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/feishu"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/ntfy"
 	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/qq"
+	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/serverchan"
 	telegramadapter "github.com/sunerpy/pt-tools/internal/notify/adapter/telegram"
 	_ "github.com/sunerpy/pt-tools/internal/notify/adapter/wecom"
 )

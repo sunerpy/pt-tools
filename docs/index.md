@@ -128,8 +128,12 @@ home:
             body: 推送结果发送到聊天软件，支持静默时段、合并摘要、失败重试和每小时配额。
             status: available
             link: /guide/chatops-rss-notify
-          - title: 企业微信与通用 Webhook
-            body: 只能发送通知、不能接收命令的出站通道。
+          - title: 更多通知通道
+            body: 企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy；只发送通知，不接收命令。
+            status: available
+            link: /guide/notify-channels
+          - title: 通用 Webhook
+            body: 把通知以 JSON 发到自己的系统（HMAC 签名），接入 n8n、Zapier 等。
             status: experimental
             link: /guide/chatops-quickstart
       - name: 部署与维护

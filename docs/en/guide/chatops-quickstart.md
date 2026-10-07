@@ -21,12 +21,14 @@ Highlights:
 
 ## Supported channels
 
-| Channel                | Protocol                     | Inbound commands | Outbound notifications | Recommended for                                                                                  |
-| ---------------------- | ---------------------------- | :--------------: | :--------------------: | ------------------------------------------------------------------------------------------------ |
-| **QQ OneBot**          | OneBot v11 reverse WebSocket |        ✅        |           ✅           | People whose everyday chat app is QQ                                                             |
-| **Telegram**           | Bot API long polling         |        ✅        |           ✅           | People outside mainland China, or who need notifications over the open internet                  |
-| **WeCom group bot** ⚠️ | WeCom webhook                |        ❌        |    🧪 Experimental     | Outbound notifications only (alerts in a group); implemented but **not yet verified end to end** |
-| **Generic webhook** ⚠️ | HMAC-SHA256 HTTP             |        ❌        |    🧪 Experimental     | Custom integrations such as n8n or Zapier; implemented but **not yet verified end to end**       |
+| Channel                          | Protocol                     | Inbound commands | Outbound notifications | Recommended for                                                                                  |
+| -------------------------------- | ---------------------------- | :--------------: | :--------------------: | ------------------------------------------------------------------------------------------------ |
+| **QQ OneBot**                    | OneBot v11 reverse WebSocket |        ✅        |           ✅           | People whose everyday chat app is QQ                                                             |
+| **Telegram**                     | Bot API long polling         |        ✅        |           ✅           | People outside mainland China, or who need notifications over the open internet                  |
+| **WeCom group bot**              | WeCom webhook                |        ❌        |           ✅           | Outbound notifications (alerts in a group); see [More notification channels](notify-channels.md) |
+| **DingTalk / Feishu group bots** | Webhook (optional signing)   |        ❌        |           ✅           | Outbound notifications; see [More notification channels](notify-channels.md)                     |
+| **Bark / ServerChan / ntfy**     | Their push APIs              |        ❌        |           ✅           | Notifications on your phone; see [More notification channels](notify-channels.md)                |
+| **Generic webhook** ⚠️           | HMAC-SHA256 HTTP             |        ❌        |    🧪 Experimental     | Custom integrations such as n8n or Zapier; implemented but **not yet verified end to end**       |
 
 > Inbound commands (chat app → pt-tools) need a two-way connection; the webhook channels only push outbound.
 
@@ -44,7 +46,8 @@ Do you want to send commands to pt-tools from a chat app?
 │                  └── No → Use Telegram through a proxy
 │
 └── Only outbound notifications (events pushed to a group)?
-     ├── A WeCom group → set up the WeCom webhook
+     ├── A WeCom, DingTalk or Feishu group → the matching group bot (docs/en/guide/notify-channels.md)
+     ├── Your phone → Bark, ServerChan or ntfy (docs/en/guide/notify-channels.md)
      └── Your own system → set up the generic webhook
 ```
 

@@ -6,16 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/sunerpy/requests"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
+	"github.com/sunerpy/pt-tools/internal/notify/adapter/outbound"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -113,40 +110,14 @@ func TestWecom_Send_Failure(t *testing.T) {
 	assert.Equal(t, "markdown", payloadData["msgtype"])
 }
 
-var (
-	redirectMu     sync.Mutex
-	redirectTarget *url.URL
-	installOnce    sync.Once
-)
-
-func installRedirect() {
-	installOnce.Do(func() {
-		requests.DefaultSession().WithMiddleware(requests.MiddlewareFunc(
-			func(req *requests.Request, next requests.Handler) (*requests.Response, error) {
-				redirectMu.Lock()
-				target := redirectTarget
-				redirectMu.Unlock()
-				if target != nil && req.URL != nil {
-					req.URL.Scheme = target.Scheme
-					req.URL.Host = target.Host
-				}
-				return next(req)
-			},
-		))
-	})
-}
-
-func setRedirect(rawURL string) {
-	u, _ := url.Parse(rawURL)
-	redirectMu.Lock()
-	redirectTarget = u
-	redirectMu.Unlock()
-}
-
-func clearRedirect() {
-	redirectMu.Lock()
-	redirectTarget = nil
-	redirectMu.Unlock()
+// newWecomVia 建一个通道，请求仍发往企业微信的官方地址，但改连到本地 TLS 收件端 h。
+func newWecomVia(t *testing.T, configJSON string, h http.HandlerFunc) *WeComChannel {
+	t.Helper()
+	server := httptest.NewTLSServer(h)
+	t.Cleanup(server.Close)
+	ch := newWecom(t, configJSON)
+	ch.client = outbound.NewClient(outbound.Options{Divert: server.Listener.Addr().String()})
+	return ch
 }
 
 func newWecom(t *testing.T, configJSON string) *WeComChannel {
@@ -157,32 +128,26 @@ func newWecom(t *testing.T, configJSON string) *WeComChannel {
 }
 
 // TestWecom_Send_Markdown_RealRoundTrip drives the full Send → sendNotification
-// → httpclient.Post path against a local server, asserting the produced payload
+// → outbound.PostJSON path against a local server, asserting the produced payload
 // shape, the msgtype, and the webhook key that lands in the query string.
 func TestWecom_Send_Markdown_RealRoundTrip(t *testing.T) {
-	installRedirect()
-
 	var gotBody []byte
-	var gotPath, gotKey, gotContentType string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var gotHost, gotPath, gotKey, gotContentType string
+	ch := newWecomVia(t, `{"webhook_key":" KEY-abc ","msg_type":"markdown"}`, func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
-		gotPath = r.URL.Path
+		gotHost, gotPath = r.Host, r.URL.Path
 		gotKey = r.URL.Query().Get("key")
 		gotContentType = r.Header.Get("Content-Type")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
-	}))
-	defer server.Close()
-	setRedirect(server.URL)
-	defer clearRedirect()
-
-	ch := newWecom(t, `{"webhook_key":"KEY-abc","msg_type":"markdown"}`)
+	})
 	err := ch.Send(context.Background(), notify.Notification{
 		Title: "标题A",
 		Text:  "正文B",
 	})
 	require.NoError(t, err)
 
+	assert.Equal(t, "qyapi.weixin.qq.com", gotHost)
 	assert.Equal(t, "/cgi-bin/webhook/send", gotPath)
 	assert.Equal(t, "KEY-abc", gotKey)
 	assert.Equal(t, "application/json", gotContentType)
@@ -200,19 +165,12 @@ func TestWecom_Send_Markdown_RealRoundTrip(t *testing.T) {
 // TestWecom_Send_Text_RealRoundTrip verifies the text msgtype path produces a
 // text payload rather than markdown.
 func TestWecom_Send_Text_RealRoundTrip(t *testing.T) {
-	installRedirect()
-
 	var gotBody []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ch := newWecomVia(t, `{"webhook_key":"k","msg_type":"text"}`, func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"errcode":0}`))
-	}))
-	defer server.Close()
-	setRedirect(server.URL)
-	defer clearRedirect()
-
-	ch := newWecom(t, `{"webhook_key":"k","msg_type":"text"}`)
+	})
 	require.NoError(t, ch.Send(context.Background(), notify.Notification{Title: "T", Text: "Body"}))
 
 	var payload map[string]any
@@ -225,60 +183,55 @@ func TestWecom_Send_Text_RealRoundTrip(t *testing.T) {
 	assert.Contains(t, content, "Body")
 }
 
-// TestWecom_Send_4xxError checks that a 4xx provider response surfaces as an
-// error containing the status code and body.
+// HTTP 4xx 带着 JSON 时报 errcode 与 errmsg（回显的 key 换成 ***），不带 JSON 时只报状态码。
 func TestWecom_Send_4xxError(t *testing.T) {
-	installRedirect()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ch := newWecomVia(t, `{"webhook_key":"KEY-abc","msg_type":"markdown"}`, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"errcode":40001,"errmsg":"invalid key"}`))
-	}))
-	defer server.Close()
-	setRedirect(server.URL)
-	defer clearRedirect()
-
-	ch := newWecom(t, `{"webhook_key":"k","msg_type":"markdown"}`)
+		_, _ = w.Write([]byte(`{"errcode":40001,"errmsg":"invalid key KEY-abc"}`))
+	})
 	err := ch.Send(context.Background(), notify.Notification{Title: "X", Text: "Y"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "4xx")
-	assert.Contains(t, err.Error(), "invalid key")
+	assert.EqualError(t, err, "wecom webhook 返回错误: errcode=40001, errmsg=invalid key ***")
+
+	ch = newWecomVia(t, `{"webhook_key":"KEY-abc"}`, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`key=KEY-abc forbidden`))
+	})
+	err = ch.Send(context.Background(), notify.Notification{Title: "X", Text: "Y"})
+	assert.EqualError(t, err, "wecom webhook 请求失败: HTTP 403")
 }
 
 // TestWecom_Send_5xxError checks that a 5xx provider response surfaces as an
-// error.
+// error carrying only the status code.
 func TestWecom_Send_5xxError(t *testing.T) {
-	installRedirect()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ch := newWecomVia(t, `{"webhook_key":"k"}`, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`upstream down`))
-	}))
-	defer server.Close()
-	setRedirect(server.URL)
-	defer clearRedirect()
+	})
+	err := ch.Send(context.Background(), notify.Notification{Title: "X", Text: "Y"})
+	assert.EqualError(t, err, "wecom webhook 请求失败: HTTP 503")
+}
 
-	ch := newWecom(t, `{"webhook_key":"k"}`)
+// 连接失败时错误里不带地址：key 就在地址里。
+func TestWecom_Send_TransportErrorHidesKey(t *testing.T) {
+	server := httptest.NewTLSServer(http.NotFoundHandler())
+	addr := server.Listener.Addr().String()
+	server.Close()
+	ch := newWecom(t, `{"webhook_key":"KEY-abc"}`)
+	ch.client = outbound.NewClient(outbound.Options{Divert: addr})
 	err := ch.Send(context.Background(), notify.Notification{Title: "X", Text: "Y"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "5xx")
+	assert.Contains(t, err.Error(), "wecom webhook 请求失败")
+	assert.NotContains(t, err.Error(), "KEY-abc")
 }
 
 // TestWecom_Send_DefaultMsgType verifies an empty msg_type defaults to markdown
 // (both in Init and the sendNotification switch default branch).
 func TestWecom_Send_DefaultMsgType(t *testing.T) {
-	installRedirect()
-
 	var gotBody []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ch := newWecomVia(t, `{"webhook_key":"k"}`, func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-	setRedirect(server.URL)
-	defer clearRedirect()
-
-	ch := newWecom(t, `{"webhook_key":"k"}`)
+		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+	})
 	assert.Equal(t, "markdown", ch.msgType)
 	require.NoError(t, ch.Send(context.Background(), notify.Notification{Title: "T", Text: "B"}))
 
@@ -287,27 +240,24 @@ func TestWecom_Send_DefaultMsgType(t *testing.T) {
 	assert.Equal(t, "markdown", payload["msgtype"])
 }
 
-// 企业微信的业务错误以 HTTP 200 + 非零 errcode 返回，要当作发送失败，才会进入重试。
+// 企业微信的业务错误以 HTTP 200 + 非零 errcode 返回，要当作发送失败，才会进入重试；
+// 没有 errcode 的响应（空响应、代理的错误页）也算失败。
 func TestWecom_Send_BusinessErrorIsFailure(t *testing.T) {
-	installRedirect()
 	cases := []struct {
 		name, body, wantErr string
 	}{
 		{"invalid key", `{"errcode":93000,"errmsg":"invalid webhook url"}`, "errcode=93000"},
 		{"rate limited", `{"errcode":45009,"errmsg":"api freq out of limit"}`, "45009"},
 		{"not json", `<html>proxy error</html>`, "无法识别的响应"},
+		{"empty", ``, "无法识别的响应"},
+		{"no errcode", `{"errmsg":"ok"}`, "无法识别的响应"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			ch := newWecomVia(t, `{"webhook_key":"k"}`, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer server.Close()
-			setRedirect(server.URL)
-			defer clearRedirect()
-
-			ch := newWecom(t, `{"webhook_key":"k"}`)
+			})
 			err := ch.Send(context.Background(), notify.Notification{Title: "T", Text: "B"})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
@@ -315,7 +265,7 @@ func TestWecom_Send_BusinessErrorIsFailure(t *testing.T) {
 	}
 }
 
-// TestWecom_Init_Errors covers all Init validation branches.// TestWecom_Init_Errors covers all Init validation branches.
+// TestWecom_Init_Errors covers all Init validation branches.
 func TestWecom_Init_Errors(t *testing.T) {
 	t.Run("nil conf", func(t *testing.T) {
 		ch := &WeComChannel{}
@@ -333,14 +283,14 @@ func TestWecom_Init_Errors(t *testing.T) {
 
 	t.Run("empty webhook_key", func(t *testing.T) {
 		ch := &WeComChannel{}
-		err := ch.Init(context.Background(), &models.NotificationConf{ConfigJSON: `{"webhook_key":""}`})
+		err := ch.Init(context.Background(), &models.NotificationConf{ConfigJSON: `{"webhook_key":"  "}`})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "webhook_key")
 	})
 
 	t.Run("invalid msg_type", func(t *testing.T) {
 		ch := &WeComChannel{}
-		err := ch.Init(context.Background(), &models.NotificationConf{ConfigJSON: `{"webhook_key":"k","msg_type":"card"}`})
+		err := ch.CheckConfig(&models.NotificationConf{ConfigJSON: `{"webhook_key":"k","msg_type":"card"}`})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "msg_type")
 	})
@@ -354,6 +304,7 @@ func TestWecom_ChannelSurface(t *testing.T) {
 	assert.False(t, ch.SupportsInbound())
 	assert.True(t, ch.Healthy())
 	assert.NoError(t, ch.Close(context.Background()))
+	var _ notify.ConfigChecker = ch
 
 	// OnInbound is a no-op for a push-only channel; calling it must not panic
 	// nor register anything observable.
@@ -367,15 +318,4 @@ func TestWecom_Registered(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ch)
 	assert.Equal(t, "wecom_webhook", ch.Type())
-}
-
-// 无法识别的长响应只取前 200 字节写进错误，整页代理错误不会塞进日志和重试记录。
-func TestCheckWeComResult_TruncatesLongBody(t *testing.T) {
-	err := checkWeComResult([]byte(strings.Repeat("x", 300)))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), strings.Repeat("x", 200)+"...")
-	assert.NotContains(t, err.Error(), strings.Repeat("x", 201))
-
-	require.NoError(t, checkWeComResult([]byte("  ")), "空响应按成功处理")
-	require.NoError(t, checkWeComResult([]byte(`{"errcode":0,"errmsg":"ok"}`)))
 }
