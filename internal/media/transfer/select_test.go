@@ -34,6 +34,8 @@ func TestSelect(t *testing.T) {
 		{Rel: "[Group] Anime/[Group] Anime [NCOP01][1080p].mkv", Size: 120 * mb},
 		{Rel: "[Group] Anime/SPs/[Group] Anime [Menu01].mkv", Size: 120 * mb},
 		{Rel: "Trailer.Park.Boys.S01E01.mkv", Size: 500 * mb},
+		{Rel: "Show.S01.1080p/Sample/sample.chs.srt", Size: 0},
+		{Rel: "Show.S01.1080p/Extras/commentary.srt", Size: 0},
 	}
 	sel := Select(files, 0)
 	assert.Empty(t, sel.Disc)
@@ -58,6 +60,8 @@ func TestSelect(t *testing.T) {
 	assert.Contains(t, reasons["Show.S01.1080p/disc.iso"], "ISO")
 	assert.Contains(t, reasons["[Group] Anime/[Group] Anime [NCOP01][1080p].mkv"], "片头片尾")
 	assert.Contains(t, reasons["[Group] Anime/SPs/[Group] Anime [Menu01].mkv"], "SPs")
+	assert.Contains(t, reasons["Show.S01.1080p/Sample/sample.chs.srt"], "Sample", "花絮、样片目录里的字幕也不整理")
+	assert.Contains(t, reasons["Show.S01.1080p/Extras/commentary.srt"], "Extras")
 	assert.NotContains(t, reasons, "Show.S01.1080p/Show.nfo", "不是视频的文件不列出")
 
 	small := Select([]File{{Rel: "a.mkv", Size: 20 * mb}}, 10*mb)

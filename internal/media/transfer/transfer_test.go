@@ -127,13 +127,51 @@ func TestCopy(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(dir, "lib", "A", "*.part"))
 	assert.Empty(t, left, "不留临时文件")
 
-	out, err = Transfer(src, dst, models.MediaModeCopy)
-	require.NoError(t, err)
-	assert.Equal(t, AlreadyDone, out, "已经复制过（大小相同）")
-
-	writeFile(t, dst, "different size")
 	_, err = Transfer(src, dst, models.MediaModeCopy)
-	assert.ErrorIs(t, err, ErrTargetExists)
+	assert.ErrorIs(t, err, ErrTargetExists, "复制出的文件认不出是不是自己放的：目标已存在就不动，哪怕大小相同")
+	b, _ = os.ReadFile(dst)
+	assert.Equal(t, "video data", string(b))
+}
+
+func TestCopyWithoutHardlinkSupport(t *testing.T) {
+	oldLink, oldNR := linkTmp, noReplace
+	t.Cleanup(func() { linkTmp, noReplace = oldLink, oldNR })
+	linkTmp = func(string, string) error { return &os.LinkError{Op: "link", Err: syscall.EPERM} }
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.mkv")
+	writeFile(t, src, "video data")
+
+	// 文件系统不支持硬链接：用不覆盖的改名放到目标位置（Linux）或独占新建
+	out, err := Transfer(src, filepath.Join(dir, "lib1", "a.mkv"), models.MediaModeCopy)
+	require.NoError(t, err)
+	assert.Equal(t, Created, out)
+	assert.Equal(t, "video data", readFileT(t, filepath.Join(dir, "lib1", "a.mkv")))
+
+	noReplace = func(string, string) error { return errNoReplaceUnsupported }
+	out, err = Transfer(src, filepath.Join(dir, "lib2", "a.mkv"), models.MediaModeCopy)
+	require.NoError(t, err)
+	assert.Equal(t, Created, out, "改名也不支持时独占新建再复制")
+	assert.Equal(t, "video data", readFileT(t, filepath.Join(dir, "lib2", "a.mkv")))
+
+	// 放到目标位置之前目标出现了：两种方式都不覆盖
+	info, err := os.Stat(src)
+	require.NoError(t, err)
+	for _, nr := range []func(string, string) error{oldNR, func(string, string) error { return errNoReplaceUnsupported }} {
+		noReplace = nr
+		dst := filepath.Join(t.TempDir(), "a.mkv")
+		writeFile(t, dst, "someone else")
+		require.ErrorIs(t, copyFile(src, dst, info), ErrTargetExists)
+		assert.Equal(t, "someone else", readFileT(t, dst))
+		left, _ := filepath.Glob(filepath.Join(filepath.Dir(dst), "*.part"))
+		assert.Empty(t, left, "不留临时文件")
+	}
+}
+
+func readFileT(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	require.NoError(t, err)
+	return string(b)
 }
 
 func TestCopyRefusesClobberRace(t *testing.T) {
@@ -189,9 +227,12 @@ func TestMove(t *testing.T) {
 	_, err = os.Stat(src)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
-	out, err = Transfer(src, dst, models.MediaModeMove)
-	require.NoError(t, err)
-	assert.Equal(t, AlreadyDone, out, "移动过以后再来一次：源没了、目标在")
+	_, err = Transfer(src, dst, models.MediaModeMove)
+	require.ErrorIs(t, err, ErrSourceMissing, "源没了、目标在：认不出目标是不是自己移过去的，不当作完成")
+	writeFile(t, src, "again")
+	_, err = Transfer(src, dst, models.MediaModeMove)
+	require.ErrorIs(t, err, ErrTargetExists, "目标已存在时不覆盖")
+	assert.Equal(t, "video", readFileT(t, dst))
 
 	_, err = Transfer(filepath.Join(dir, "nope.mkv"), filepath.Join(dir, "lib", "nope.mkv"), models.MediaModeMove)
 	assert.ErrorIs(t, err, ErrSourceMissing)

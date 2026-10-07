@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// FileID 是文件所在卷的序列号与文件索引（同一个文件的硬链接相同）。软链接取链接本身。
+// FileID 是文件所在卷的序列号、文件索引、大小与修改时间（同一个文件的硬链接相同）。软链接取链接本身。
 func FileID(path string) (string, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -25,7 +25,8 @@ func FileID(path string) (string, error) {
 	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%x:%x%08x", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow), nil
+	return fmt.Sprintf("%x:%x%08x:%x%08x:%x%08x", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow,
+		info.FileSizeHigh, info.FileSizeLow, info.LastWriteTime.HighDateTime, info.LastWriteTime.LowDateTime), nil
 }
 
 func isCrossDevice(err error) bool {

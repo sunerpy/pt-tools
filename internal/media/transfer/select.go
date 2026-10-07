@@ -108,6 +108,9 @@ func Select(files []File, minSize int64) Selection {
 	}
 	for _, f := range files {
 		switch {
+		case IsSubtitle(f.Rel) && extraReason(f.Rel) != "":
+			// 花絮、样片目录里的字幕不跟着正片走
+			sel.Skipped = append(sel.Skipped, Skip{File: f, Reason: extraReason(f.Rel)})
 		case IsSubtitle(f.Rel):
 			sel.Subtitles = append(sel.Subtitles, f)
 		case strings.EqualFold(path.Ext(f.Rel), ".iso"):

@@ -22,6 +22,8 @@ var (
 	ErrSourceMissing = errors.New("源文件不存在")
 	// ErrBadMode 表示整理方式不认识。
 	ErrBadMode = errors.New("整理方式无效（可选 hardlink、copy、symlink、move）")
+	// ErrNotOurs 表示库里的文件已经不是当初整理出的那个（换成了别的文件、不是软链接），没有删除。
+	ErrNotOurs = errors.New("已经不是当初整理出的文件")
 )
 
 // Outcome 是一次整理的结果。
@@ -30,7 +32,8 @@ type Outcome int
 const (
 	// Created 表示这次新放进了库里。
 	Created Outcome = iota
-	// AlreadyDone 表示库里已经是这个文件（同一个 inode、指向源文件的软链接，或之前复制、移动过去的）。
+	// AlreadyDone 表示库里已经是这个文件（同一个 inode，或指向源文件的软链接）。复制与移动出的文件和源文件
+	// 不是同一个，认不出是不是自己放的，目标已存在时一律当作别人的文件。
 	AlreadyDone
 )
 
@@ -45,10 +48,13 @@ func NormalizeMode(mode string) (string, error) {
 	return "", fmt.Errorf("%w: %q", ErrBadMode, mode)
 }
 
-// link 与 rename 是 os.Link、os.Rename，测试里换成假的以覆盖跨文件系统的情况。
+// link、rename、linkTmp 与 noReplace 是实际的文件系统调用，测试里换成假的以覆盖跨文件系统、
+// 不支持硬链接的文件系统等情况。
 var (
-	link   = os.Link
-	rename = os.Rename
+	link      = os.Link
+	rename    = os.Rename
+	linkTmp   = os.Link
+	noReplace = renameNoReplace
 )
 
 // Transfer 把源文件 src 按 mode 放到 dst（父目录不存在时建好）。dst 已经是这个文件时返回 AlreadyDone；
@@ -119,19 +125,8 @@ func existing(src, dst, mode string, srcInfo os.FileInfo, srcErr error, dstInfo 
 				return AlreadyDone, nil
 			}
 		}
-	case models.MediaModeMove:
-		// 移动过去以后源文件就没了
-		if errors.Is(srcErr, os.ErrNotExist) && dstInfo.Mode().IsRegular() {
-			return AlreadyDone, nil
-		}
-		if srcErr == nil && os.SameFile(srcInfo, dstInfo) {
-			return AlreadyDone, nil
-		}
-	case models.MediaModeCopy:
-		// 之前复制过去的（复制完、记录没写上时进程退出了）：大小相同就当是同一份
-		if srcErr == nil && dstInfo.Mode().IsRegular() && dstInfo.Size() == srcInfo.Size() {
-			return AlreadyDone, nil
-		}
+	case models.MediaModeCopy, models.MediaModeMove:
+		// 复制、移动出的文件与源文件不是同一个：目标已存在时认不出是不是自己放的，当作别人的文件
 	default:
 		if srcErr == nil && os.SameFile(srcInfo, dstInfo) {
 			return AlreadyDone, nil
@@ -143,8 +138,9 @@ func existing(src, dst, mode string, srcInfo os.FileInfo, srcErr error, dstInfo 
 	return 0, ErrTargetExists
 }
 
-// copyFile 先复制到同目录的临时文件，写完、落盘后再改名，中途失败不会在库里留下半个文件。
-// 修改时间跟源文件一样（媒体服务器按它排「最近添加」）。
+// copyFile 先复制到同目录的临时文件，写完、落盘后再放到目标位置，中途失败不会在库里留下半个文件。
+// 放到目标位置时都不覆盖已有的文件：先用硬链接；文件系统不支持硬链接时用不覆盖的改名（Linux 的
+// RENAME_NOREPLACE）；也不支持时以独占方式新建目标再复制一遍。修改时间跟源文件一样（媒体服务器按它排「最近添加」）。
 func copyFile(src, dst string, srcInfo os.FileInfo) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -170,22 +166,51 @@ func copyFile(src, dst string, srcInfo os.FileInfo) error {
 		return fmt.Errorf("复制失败: %w", err)
 	}
 	_ = os.Chtimes(tmp, srcInfo.ModTime(), srcInfo.ModTime())
-	// 用硬链接放到目标位置：目标在这期间出现了也不会被覆盖；文件系统不支持硬链接时再改名
-	if err := os.Link(tmp, dst); err == nil {
-		_ = os.Remove(tmp)
+	defer os.Remove(tmp)
+	err = linkTmp(tmp, dst)
+	if err == nil {
 		return nil
-	} else if errors.Is(err, os.ErrExist) {
-		_ = os.Remove(tmp)
+	}
+	if errors.Is(err, os.ErrExist) {
 		return ErrTargetExists
 	}
-	if _, err := os.Lstat(dst); err == nil {
-		_ = os.Remove(tmp)
+	switch err := noReplace(tmp, dst); {
+	case err == nil:
+		return nil
+	case errors.Is(err, os.ErrExist):
+		return ErrTargetExists
+	case !errors.Is(err, errNoReplaceUnsupported):
+		return fmt.Errorf("复制完放到库里失败: %w", err)
+	}
+	return exclusiveCopy(tmp, dst, srcInfo)
+}
+
+// exclusiveCopy 以独占方式新建目标（已存在时返回 ErrTargetExists），把 tmp 复制进去；中途失败删掉这个新建的目标。
+func exclusiveCopy(tmp, dst string, srcInfo os.FileInfo) error {
+	in, err := os.Open(tmp)
+	if err != nil {
+		return fmt.Errorf("打开临时文件失败: %w", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, os.ErrExist) {
 		return ErrTargetExists
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("复制完改名失败: %w", err)
+	if err != nil {
+		return fmt.Errorf("建立目标文件失败: %w", err)
 	}
+	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Sync()
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(dst)
+		return fmt.Errorf("复制失败: %w", err)
+	}
+	_ = os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
 	return nil
 }
 
@@ -202,15 +227,15 @@ func RemoveIfOurs(dst, mode, fileID, src string) error {
 	if mode == models.MediaModeSymlink {
 		to, err := os.Readlink(dst)
 		if err != nil || filepath.Clean(to) != filepath.Clean(src) {
-			return fmt.Errorf("库里的 %s 已经不是指向源文件的软链接，没有删除", filepath.Base(dst))
+			return fmt.Errorf("%w：库里的 %s 不再是指向源文件的软链接，没有删除", ErrNotOurs, filepath.Base(dst))
 		}
 	} else {
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("库里的 %s 不是普通文件，没有删除", filepath.Base(dst))
+			return fmt.Errorf("%w：库里的 %s 不是普通文件，没有删除", ErrNotOurs, filepath.Base(dst))
 		}
 		id, err := FileID(dst)
 		if err != nil || fileID == "" || id != fileID {
-			return fmt.Errorf("库里的 %s 已经换成了别的文件，没有删除", filepath.Base(dst))
+			return fmt.Errorf("%w：库里的 %s 已经换成了别的文件或改过，没有删除", ErrNotOurs, filepath.Base(dst))
 		}
 	}
 	if err := os.Remove(dst); err != nil {
