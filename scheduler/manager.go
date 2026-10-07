@@ -31,7 +31,10 @@ type JobStatus struct {
 }
 
 type Manager struct {
-	mu                   sync.Mutex
+	mu sync.Mutex
+	// monMu 串行化换监控（配置重载）与 StopAll：换的时候要在 mu 外停旧监控（见 detach），
+	// 有了它，同时进行的两次重载不会让新旧两个监控一起跑，StopAll 也会等正在换的那次停完旧的再返回。
+	monMu                sync.Mutex
 	jobs                 map[string]*job
 	wg                   sync.WaitGroup
 	lastVersion          int64
@@ -349,8 +352,8 @@ func (m *Manager) checkDownloaderHealthAsync(setting models.DownloaderSetting) {
 	}(setting)
 }
 
-// detach 持锁摘下一个监控（StopAll 以后返回 false），由调用方在锁外停掉旧的：
-// 旧监控的这一轮可能在等推送锁，而持推送锁的推送会回调 Manager 取 m.mu，持锁等它停下会互相卡住。
+// detach 持 mu 摘下一个监控（StopAll 以后返回 false），由调用方在 mu 外停掉旧的（调用方持 monMu）：
+// 旧监控的这一轮可能在等推送锁，而持推送锁的推送会回调 Manager 取 mu，持 mu 等它停下会互相卡住。
 func (m *Manager) detach(take func() func()) (stop func(), ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -364,6 +367,8 @@ func (m *Manager) initFreeEndMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
 	stopOld, ok := m.detach(func() func() {
 		old := m.freeEndMonitor
 		m.freeEndMonitor = nil
@@ -381,8 +386,8 @@ func (m *Manager) initFreeEndMonitor() {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.stopped || m.freeEndMonitor != nil {
-		return // StopAll 来过，或者同时进行的另一次重载已经换上了
+	if m.stopped {
+		return // 停旧的时候 StopAll 来了（它在等 monMu）
 	}
 	m.freeEndMonitor = NewFreeEndMonitor(global.GlobalDB.DB, m.downloaderManager)
 	if err := m.freeEndMonitor.Start(); err != nil {
@@ -400,12 +405,14 @@ func (m *Manager) initFreeEndMonitor() {
 	})
 }
 
-// initCleanupMonitor 换上新的自动删种监控。字段的读写持锁：配置变更时的重载在别的 goroutine 里，会和 StopAll 同时进行；
-// 旧的在锁外停（见 detach）。
+// initCleanupMonitor 换上新的自动删种监控。配置变更时的重载在别的 goroutine 里，会和 StopAll 同时进行：
+// 整个过程持 monMu，字段的读写持 mu，旧的在 mu 外停（见 detach）。
 func (m *Manager) initCleanupMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
 	stopOld, ok := m.detach(func() func() {
 		old := m.cleanupMonitor
 		m.cleanupMonitor = nil
@@ -423,7 +430,7 @@ func (m *Manager) initCleanupMonitor() {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.stopped || m.cleanupMonitor != nil {
+	if m.stopped {
 		return
 	}
 	m.cleanupMonitor = NewCleanupMonitor(global.GlobalDB.DB, m.downloaderManager)
@@ -437,6 +444,8 @@ func (m *Manager) initPeerRatioMonitor() {
 	if global.GlobalDB == nil {
 		return
 	}
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
 	stopOld, ok := m.detach(func() func() {
 		old := m.peerRatioMonitor
 		m.peerRatioMonitor = nil
@@ -454,7 +463,7 @@ func (m *Manager) initPeerRatioMonitor() {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.stopped || m.peerRatioMonitor != nil {
+	if m.stopped {
 		return
 	}
 	m.peerRatioMonitor = NewPeerRatioMonitor(global.GlobalDB.DB, m.downloaderManager)
@@ -541,8 +550,11 @@ func (m *Manager) StopAll() {
 		ccw.Stop()
 	}
 	m.cancelJobsAndWait()
+	// 等正在换监控的那次停完旧的；之后再有重载看到 stopped 不会再起
+	m.monMu.Lock()
+	defer m.monMu.Unlock()
 	m.mu.Lock()
-	// 先全部摘下，解锁以后再停（见 detach）
+	// 先全部摘下，解锁 mu 以后再停（见 detach）
 	var stops []func()
 	if m.freeEndMonitor != nil {
 		stops = append(stops, m.freeEndMonitor.Stop)

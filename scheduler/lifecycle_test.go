@@ -160,3 +160,30 @@ func TestManager_InitMonitorsConcurrentWithStopAll(t *testing.T) {
 		m.mu.Unlock()
 	}
 }
+
+// 换监控的过程（持 monMu）还没完时，StopAll 等它完了再停，返回时不会有正在停的旧监控被漏掉
+func TestManager_StopAllWaitsForMonitorSwap(t *testing.T) {
+	setupLifecycleDB(t)
+	m := NewManager()
+	m.monMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		m.StopAll()
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("StopAll 没等正在换监控的那次")
+	case <-time.After(100 * time.Millisecond):
+	}
+	m.monMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("换完以后 StopAll 没有返回")
+	}
+	m.initCleanupMonitor()
+	m.mu.Lock()
+	assert.Nil(t, m.cleanupMonitor, "StopAll 以后不再起新的")
+	m.mu.Unlock()
+}
