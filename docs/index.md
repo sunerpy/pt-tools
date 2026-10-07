@@ -106,6 +106,10 @@ home:
             body: 找出站点已删除的失效种子、按 tracker 给种子补站点标签、批量替换 tracker 地址，都是先预览再执行。
             status: available
             link: /guide/downloader-assistant
+          - title: 转移做种
+            body: 把下完的种子搬到另一台下载器继续做种，数据不动；校验到 100% 才从源下载器移除，也能按规则定时转移。
+            status: available
+            link: /guide/torrent-transfer
       - name: 通知与 ChatOps
         items:
           - title: QQ 与 Telegram 命令

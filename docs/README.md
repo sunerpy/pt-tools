@@ -29,6 +29,7 @@
 - [刷流任务](guide/brush.md)：从站点的免费列表挑种做种、按规则删种，限额与收益统计，以及从 Vertex 迁移。
 - [数据统计与每日战报](guide/user-stats.md)：每日快照、增量口径、走势图与每日战报。
 - [下载器助手](guide/downloader-assistant.md)：失效种子、补站点标签、替换 tracker 与失效种子定时扫描。
+- [转移做种](guide/torrent-transfer.md)：把种子搬到另一台下载器继续做种，路径映射与定时规则。
 
 ## ChatOps 与通知
 

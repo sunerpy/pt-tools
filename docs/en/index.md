@@ -106,6 +106,10 @@ home:
             body: Find dead torrents a site has deleted, tag torrents with their site by tracker and replace tracker addresses in bulk, each previewed first.
             status: available
             link: /en/guide/downloader-assistant
+          - title: Torrent transfer
+            body: Move finished torrents to another downloader and keep seeding without touching the data; the source copy goes only after a 100% check, and rules can do it on a schedule.
+            status: available
+            link: /en/guide/torrent-transfer
       - name: Notifications and ChatOps
         items:
           - title: Commands in QQ and Telegram
