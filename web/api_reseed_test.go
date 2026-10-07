@@ -97,6 +97,12 @@ func TestReseedAPI_SettingsSitesRun(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"enabled":true}`).Code, "开启要先填 token")
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"interval_hours":999}`).Code)
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{`).Code)
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"enable":true}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "拼错的字段不能被当成没填")
+	assert.Contains(t, w.Body.String(), "enable")
+	w = serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"interval_hours":6} {"enabled":true}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "JSON 之后多出来的内容")
+	assert.Contains(t, w.Body.String(), "多余的内容")
 
 	w = serveAuthed(mux, http.MethodPut, "/api/reseed/settings", `{"enabled":true,"token":"secret-token","interval_hours":6,"site_names":["hdsky"]}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

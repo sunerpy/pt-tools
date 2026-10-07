@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -63,6 +65,22 @@ func writeReseedError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), status)
 }
 
+// decodeStrictBody 解析请求体，拒绝不认识的字段和 JSON 之后多出来的内容：设置是整份保存，
+// 拼错的字段会被当成没填，悄悄关掉辅种或者清空范围。
+func decodeStrictBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		http.Error(w, "请求格式错误: "+err.Error(), http.StatusBadRequest)
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		http.Error(w, "请求格式错误: JSON 之后还有多余的内容", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
 // apiReseedSettings handles GET / PUT /api/reseed/settings
 func (s *Server) apiReseedSettings(w http.ResponseWriter, r *http.Request) {
 	worker, svc, ok := s.reseedWorker(w)
@@ -79,7 +97,7 @@ func (s *Server) apiReseedSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, ReseedSettingsView{Settings: got, Running: worker.Running()})
 	case http.MethodPut:
 		var req reseed.SettingsUpdate
-		if !decodeAssistantBody(w, r, &req) {
+		if !decodeStrictBody(w, r, &req) {
 			return
 		}
 		got, err := svc.SaveSettings(r.Context(), req)
