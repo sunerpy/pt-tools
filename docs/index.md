@@ -120,6 +120,10 @@ home:
             link: /guide/reseed
       - name: 媒体
         items:
+          - title: 整理入库
+            body: 下载完的电影与剧集按模板硬链接进媒体库，写好 NFO 与海报，通知 Emby、Jellyfin、Plex 扫描，发入库通知。
+            status: available
+            link: /guide/media-library
           - title: 媒体识别
             body: 解析种子标题，到 TMDB 找对应的电影或剧集；记下站点给的 IMDb 与豆瓣编号，识别不对时可以手动纠正，也可以加识别词。
             status: available
