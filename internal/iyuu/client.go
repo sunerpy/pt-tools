@@ -146,11 +146,17 @@ func (c *Client) do(ctx context.Context, method, path string, form url.Values) (
 	if httpc == nil {
 		httpc = http.DefaultClient
 	}
-	resp, err := httpc.Do(req)
+	// 不跟随重定向：token 在自定义请求头里，跨域重定向时 Go 不会去掉它，跟过去就把 token 发给了别的地址
+	noRedirect := *httpc
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := noRedirect.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求 IYUU 失败: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return nil, fmt.Errorf("IYUU 返回了重定向（HTTP %d），为了不把 token 发到别的地址，没有跟随", resp.StatusCode)
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("读取 IYUU 响应失败: %w", err)

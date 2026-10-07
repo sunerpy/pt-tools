@@ -161,3 +161,25 @@ func TestClientErrors(t *testing.T) {
 	assert.ErrorContains(t, err, "不是 JSON")
 	assert.False(t, errors.Is(err, ErrNoToken))
 }
+
+// 不跟随重定向：token 在自定义请求头里，跟过去就会发给别的地址。
+func TestClientDoesNotFollowRedirects(t *testing.T) {
+	var leaked []string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = append(leaked, r.Header.Get("token"))
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"sites": []any{}}})
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := New("secret")
+	c.BaseURL = srv.URL
+	_, err := c.Sites(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "重定向")
+	assert.Empty(t, leaked, "token 没有发到重定向的地址")
+	assert.Nil(t, c.HTTP.CheckRedirect, "不改调用方的 http.Client")
+}
