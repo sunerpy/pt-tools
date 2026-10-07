@@ -398,7 +398,35 @@ func TestFetchHardening(t *testing.T) {
 	defer tlsSrv.Close()
 	_, err = Fetch(ctx, tlsSrv.Client(), tlsSrv.URL, "down")
 	assert.ErrorContains(t, err, "https 请求重定向到了 http")
+	// http 升到别的端口上的 https：不跟随
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, tlsSrv.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer up.Close()
+	_, err = Fetch(ctx, up.Client(), up.URL, "up")
+	assert.ErrorContains(t, err, "别的端口")
 
 	_, err = Decrypt(Payload{Encrypted: vecFixed, CryptoType: CryptoLegacy}, vecUUID, vecPassword)
 	assert.ErrorIs(t, err, ErrDecrypt, "写明 legacy 的不按 fixed 再试")
+}
+
+// 换了数据来源（地址、UUID 或密码）：上次同步的时间与结果清掉，定时同步按新来源马上到期。
+func TestSaveSettingsResetsScheduleOnNewSource(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.configure(func(u *SettingsUpdate) { u.AutoSync, u.IntervalHours = true, 24 })
+	require.NoError(t, e.svc.RecordSync(ctx, e.now, "更新了 1 个站点的 Cookie（hdsky）"))
+	assert.False(t, e.svc.Due(ctx))
+
+	// 只改间隔：保留
+	got, err := e.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e.srv.URL, UUID: vecUUID, AutoSync: true, IntervalHours: 12})
+	require.NoError(t, err)
+	assert.NotNil(t, got.LastSyncAt)
+	assert.False(t, e.svc.Due(ctx))
+
+	got, err = e.svc.SaveSettings(ctx, SettingsUpdate{ServerURL: e.srv.URL, UUID: "other-uuid", AutoSync: true, IntervalHours: 12})
+	require.NoError(t, err)
+	assert.Nil(t, got.LastSyncAt)
+	assert.Empty(t, got.LastResult)
+	assert.True(t, e.svc.Due(ctx), "新来源马上到期")
 }

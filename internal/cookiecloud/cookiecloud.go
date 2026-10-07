@@ -98,7 +98,7 @@ func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payloa
 	if httpc == nil {
 		httpc = &http.Client{Timeout: 30 * time.Second}
 	}
-	// 只跟随同一主机、同一端口内的重定向，http 可以升到 https、不能降级：地址里带着 UUID，不带去别处
+	// 只跟随同一主机、同一端口内的重定向；http 只能按标准端口升到 https（80 → 443），不能降级：地址里带着 UUID，不带去别处
 	c := *httpc
 	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
@@ -110,7 +110,9 @@ func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payloa
 			return errors.New("CookieCloud 服务把请求重定向到了别的主机，没有跟随")
 		case first.Scheme == "https" && r.URL.Scheme != "https":
 			return errors.New("CookieCloud 服务把 https 请求重定向到了 http，没有跟随")
-		case r.URL.Scheme == first.Scheme && effectivePort(r.URL) != effectivePort(first):
+		case r.URL.Scheme == first.Scheme && effectivePort(r.URL) != effectivePort(first),
+			// http 升到 https 只认标准端口 80 → 443
+			r.URL.Scheme != first.Scheme && (effectivePort(first) != "80" || effectivePort(r.URL) != "443"):
 			return errors.New("CookieCloud 服务把请求重定向到了别的端口，没有跟随")
 		}
 		return nil

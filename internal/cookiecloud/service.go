@@ -166,6 +166,10 @@ func (s *Service) SaveSettings(ctx context.Context, u SettingsUpdate) (Settings,
 	if u.AutoSync && (server == "" || uuid == "" || pwEnc == "") {
 		return Settings{}, fmt.Errorf("%w：打开定时同步前要填写服务地址、UUID 和密码", ErrInvalid)
 	}
+	// 换了数据来源：上次同步的时间与结果属于旧来源，清掉，定时同步按新来源马上到期
+	if server != r.ServerURL || uuid != r.UUID || pwEnc != r.PasswordEncrypted {
+		cols["last_sync_at"], cols["last_result"] = nil, ""
+	}
 	db := s.cfg.DB.WithContext(context.WithoutCancel(ctx))
 	if err := ensureRow(db); err != nil {
 		return Settings{}, fmt.Errorf("保存 CookieCloud 设置失败: %w", err)
