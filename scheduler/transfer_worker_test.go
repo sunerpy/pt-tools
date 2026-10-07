@@ -105,3 +105,39 @@ func TestTransferWorker_Lifecycle(t *testing.T) {
 	mgr.StopAll()
 	assert.Nil(t, mgr.GetTransferWorker())
 }
+
+// 「立即运行」与后台定时运行共用一把锁：后台正占着时「立即运行」等到 ctx 到期；放开后正常运行并记下结果。
+func TestTransferWorker_RunRuleNowSharesLock(t *testing.T) {
+	w, db, _ := newTransferWorkerForTest(t, time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC))
+	r := models.TransferRule{Name: "r", SourceDownloaderID: 1, TargetDownloaderID: 2}
+	require.NoError(t, db.Create(&r).Error)
+
+	require.True(t, w.lockRules(context.Background()))
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	_, err := w.RunRuleNow(ctx, r.ID)
+	cancel()
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "后台正在跑规则")
+	w.unlockRules()
+
+	run, err := w.RunRuleNow(context.Background(), r.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "符合条件 0 个，建了 0 个任务", run.Summary)
+	var got models.TransferRule
+	require.NoError(t, db.First(&got, r.ID).Error)
+	require.NotNil(t, got.LastRunAt)
+	assert.Equal(t, run.Summary, got.LastResult)
+
+	_, err = w.RunRuleNow(context.Background(), 999)
+	assert.ErrorIs(t, err, transfer.ErrRuleNotFound)
+
+	broken := models.TransferRule{Name: "broken", SourceDownloaderID: 9, TargetDownloaderID: 2}
+	require.NoError(t, db.Create(&broken).Error)
+	run, err = w.RunRuleNow(context.Background(), broken.ID)
+	require.NoError(t, err)
+	assert.Contains(t, run.RunError, "源下载器不可用")
+	assert.Contains(t, run.Summary, "运行失败")
+
+	var nilWorker *TransferWorker
+	_, err = nilWorker.RunRuleNow(context.Background(), r.ID)
+	assert.Error(t, err)
+}

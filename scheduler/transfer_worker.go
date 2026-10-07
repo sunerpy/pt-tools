@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -38,6 +39,15 @@ type TransferWorker struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	runMu   sync.Mutex // 同一时间只跑一轮
+	// rulesSem 让后台的定时运行与「立即运行」轮流跑规则：同一时间只有一处在挑种子建任务
+	rulesSem chan struct{}
+}
+
+// TransferRuleRun 是「立即运行」一条规则的结果；RunError 不为空表示这一轮没跑完（下载器不可用等）。
+type TransferRuleRun struct {
+	Result   transfer.RuleResult `json:"result"`
+	Summary  string              `json:"summary"`
+	RunError string              `json:"error,omitempty"`
 }
 
 // NewTransferWorker 构造后台，不启动。
@@ -51,7 +61,7 @@ func NewTransferWorker(cfg TransferWorkerConfig) *TransferWorker {
 	if cfg.Tick <= 0 {
 		cfg.Tick = transferTick
 	}
-	return &TransferWorker{cfg: cfg, trigger: make(chan struct{}, 1)}
+	return &TransferWorker{cfg: cfg, trigger: make(chan struct{}, 1), rulesSem: make(chan struct{}, 1)}
 }
 
 // Service 返回转移做种服务。
@@ -137,11 +147,55 @@ func (w *TransferWorker) RunOnce(ctx context.Context) (stepped, created int) {
 	return stepped, created
 }
 
+// lockRules 占住规则运行；ctx 先到期时返回 false。
+func (w *TransferWorker) lockRules(ctx context.Context) bool {
+	select {
+	case w.rulesSem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (w *TransferWorker) unlockRules() { <-w.rulesSem }
+
+// RunRuleNow 立即运行一条规则并记下结果；与后台的定时运行轮流进行，不会同时挑种子。
+func (w *TransferWorker) RunRuleNow(ctx context.Context, id uint) (TransferRuleRun, error) {
+	if w == nil || w.cfg.Service == nil {
+		return TransferRuleRun{}, errors.New("转移做种服务没有启动")
+	}
+	if !w.lockRules(ctx) {
+		return TransferRuleRun{}, ctx.Err()
+	}
+	defer w.unlockRules()
+	rule, err := w.cfg.Service.GetRule(ctx, id)
+	if err != nil {
+		return TransferRuleRun{}, err
+	}
+	res, runErr := w.cfg.Service.RunRule(ctx, rule)
+	out := TransferRuleRun{Result: res, Summary: res.Summary()}
+	if runErr != nil {
+		out.RunError = runErr.Error()
+		out.Summary = "运行失败：" + runErr.Error()
+	}
+	if err := w.cfg.Service.RecordRuleRun(ctx, id, w.cfg.Clock.Now(), out.Summary); err != nil {
+		return out, err
+	}
+	if res.Created > 0 {
+		w.Trigger()
+	}
+	return out, nil
+}
+
 // runRules 运行到期的规则，记下运行时间和结果。
 func (w *TransferWorker) runRules(ctx context.Context) int {
 	if w.cfg.DB == nil {
 		return 0
 	}
+	if !w.lockRules(ctx) {
+		return 0
+	}
+	defer w.unlockRules()
 	var rules []models.TransferRule
 	if err := w.cfg.DB.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&rules).Error; err != nil {
 		w.cfg.Logger.Warnf("[转移做种] 读取规则失败: %v", err)
