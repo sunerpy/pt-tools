@@ -164,6 +164,7 @@ func (s *Server) Serve(addr string) error {
 	s.registerDownloaderAssistantRoutes(mux)
 	s.registerTransferRoutes(mux)
 	s.registerReseedRoutes(mux)
+	s.registerCookieCloudRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))

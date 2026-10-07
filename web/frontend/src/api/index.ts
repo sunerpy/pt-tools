@@ -2147,6 +2147,62 @@ export interface ReseedRecord {
   updated_at: string;
 }
 
+// ---------- CookieCloud 导入（路线图 M7） ----------
+
+export interface CookieCloudSettings {
+  server_url: string;
+  uuid: string;
+  /** 密码只写不读，只说有没有设置 */
+  has_password: boolean;
+  auto_sync: boolean;
+  interval_hours: number;
+  last_sync_at?: string;
+  last_result: string;
+}
+
+export interface CookieCloudSettingsUpdate {
+  server_url: string;
+  uuid: string;
+  /** 不传时保留原来的密码，空串清除 */
+  password?: string;
+  auto_sync: boolean;
+  interval_hours: number;
+}
+
+/** CookieCloud 里有对这个站点的地址有效的 Cookie；不含 Cookie 的值 */
+export interface CookieCloudPreviewItem {
+  site: string;
+  site_name: string;
+  host: string;
+  cookie_names: string[];
+  /** 站点在 pt-tools 里已经启用 */
+  enabled: boolean;
+  /** 和 pt-tools 里现在的 Cookie 不同 */
+  changed: boolean;
+}
+
+export interface CookieCloudPreview {
+  items: CookieCloudPreviewItem[];
+  /** CookieCloud 里一共有多少个域名 */
+  domains: number;
+}
+
+export interface CookieCloudImportResult {
+  imported: string[];
+  unchanged: string[];
+  missing: string[];
+  failed: { site: string; error: string }[];
+}
+
+export const cookieCloudApi = {
+  settings: () => api.get<CookieCloudSettings>("/api/cookiecloud/settings"),
+  saveSettings: (data: CookieCloudSettingsUpdate) =>
+    api.put<CookieCloudSettings>("/api/cookiecloud/settings", data),
+  preview: () => api.post<CookieCloudPreview>("/api/cookiecloud/preview", {}),
+  import: (sites: string[]) =>
+    api.post<CookieCloudImportResult>("/api/cookiecloud/import", { sites }),
+};
+
 export const reseedApi = {
   settings: () => api.get<ReseedSettings>("/api/reseed/settings"),
   saveSettings: (data: ReseedSettingsUpdate) =>

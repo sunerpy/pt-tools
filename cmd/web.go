@@ -216,6 +216,7 @@ var webCmd = &cobra.Command{
 		wireBrushMonitor(mgr, userInfoService)
 		wireTransferWorker(mgr, userInfoService)
 		wireReseedWorker(mgr, userInfoService, store)
+		wireCookieCloudWorker(mgr, store, siteRegistry)
 
 		srv := web.NewServer(store, mgr)
 		if bs != nil {

@@ -66,6 +66,10 @@ home:
             body: Per-site checks and reminders, so you hear about a site before an inactive account is disabled.
             status: available
             link: /en/guide/site-login-monitoring
+          - title: CookieCloud import
+            body: Fetch the cookies your browser syncs to a self-hosted CookieCloud server, decrypt them on this machine and write them into the sites after a preview; scheduled sync is optional.
+            status: available
+            link: /en/guide/cookiecloud
       - name: Automatic RSS downloads
         items:
           - title: RSS subscriptions
@@ -152,7 +156,7 @@ home:
       - title: Add a downloader
         body: In Downloader settings (下载器设置), add qBittorrent or Transmission and check that it connects.
       - title: Sign in to your sites
-        body: Sync a cookie with the browser extension, or enter the site's API key or passkey.
+        body: Sync a cookie with the browser extension, import cookies from CookieCloud, or enter the site's API key or passkey.
       - title: Subscribe to RSS
         body: Add an RSS feed to a site and choose a downloader. Without filter rules, only freeleech torrents are downloaded.
 
@@ -275,9 +279,9 @@ Before a push it checks the downloader's free space and the site's seeding limit
 
 The statistics page totals each site's upload, ratio, seeding and progress to the next class; the site list shows how you sign in to each site, whether that still works, and how many days are left before the site's inactivity limit.
 
-Cookie sites sync in one click with the browser extension; sites such as M-Team use an API key, and Rousi Pro uses a passkey.
+Cookie sites sync in one click with the browser extension, or import from CookieCloud; sites such as M-Team use an API key, and Rousi Pro uses a passkey.
 
-[Supported sites](/en/sites) · [Cookies and API keys](/en/guide/get-cookie-apikey) · [Login status and key backup](/en/guide/site-login-monitoring)
+[Supported sites](/en/sites) · [Cookies and API keys](/en/guide/get-cookie-apikey) · [CookieCloud import](/en/guide/cookiecloud) · [Login status and key backup](/en/guide/site-login-monitoring)
 
 </SplitBlock>
 

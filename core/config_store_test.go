@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -1641,4 +1642,66 @@ func TestSetSiteEnabled_PropagatesDBErrors(t *testing.T) {
 
 	require.NoError(t, db.DB.Migrator().DropTable(&models.SiteSetting{}))
 	assert.Error(t, s.SetSiteEnabled(models.SiteGroup("springsunday"), false))
+}
+
+// 批量写 Cookie：只改 Cookie 与启用两列、不动 RSS；不能写的站点单独列出；写进去了只发布一次配置变更。
+func TestSetSiteCookies(t *testing.T) {
+	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	db := newTempDB(t)
+	s := NewConfigStore(db)
+	sites := []models.SiteSetting{
+		{Name: "hdsky", AuthMethod: "cookie", APIUrl: "https://hdsky.me/"},
+		{Name: "both", AuthMethod: "cookie_and_api_key", APIKey: "k"},
+		{Name: "nokey", AuthMethod: "cookie_and_api_key"},
+		{Name: "mteam", AuthMethod: "api_key", APIKey: "k", Enabled: true},
+	}
+	require.NoError(t, db.DB.Create(&sites).Error)
+	rss := models.RSSSubscription{SiteID: sites[0].ID, Name: "r", URL: "https://hdsky.me/rss", IntervalMinutes: 10}
+	require.NoError(t, db.DB.Create(&rss).Error)
+
+	_, ch, cancel := events.Subscribe(4)
+	defer cancel()
+	failed, err := s.SetSiteCookies(context.Background(), map[models.SiteGroup]string{
+		"hdsky": " uid=1; pass=2 ", "both": "a=1", "nokey": "a=1", "mteam": "a=1", "ghost": "a=1", "empty": " ",
+	})
+	require.NoError(t, err)
+	assert.Len(t, failed, 4)
+	for _, n := range []models.SiteGroup{"nokey", "mteam", "ghost", "empty"} {
+		assert.Contains(t, failed, n)
+	}
+	assert.Contains(t, failed["nokey"].Error(), "API Key")
+
+	sc, err := s.GetSiteConf("hdsky")
+	require.NoError(t, err)
+	assert.Equal(t, "uid=1; pass=2", sc.Cookie)
+	require.NotNil(t, sc.Enabled)
+	assert.True(t, *sc.Enabled)
+	var row models.SiteSetting
+	require.NoError(t, db.DB.Where("name = ?", "hdsky").First(&row).Error)
+	assert.Empty(t, row.Cookie, "只以密文落库")
+	assert.NotContains(t, row.CookieEncrypted, "pass=2")
+	var kept models.RSSSubscription
+	require.NoError(t, db.DB.First(&kept, rss.ID).Error, "RSS 不动（id 不变）")
+
+	select {
+	case e := <-ch:
+		assert.Equal(t, events.ConfigChanged, e.Type)
+	case <-time.After(time.Second):
+		t.Fatal("expected ConfigChanged event")
+	}
+	select {
+	case e := <-ch:
+		t.Fatalf("只发布一次，又收到 %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// 一个都没写进去：不发布
+	failed, err = s.SetSiteCookies(context.Background(), map[models.SiteGroup]string{"ghost": "a=1"})
+	require.NoError(t, err)
+	assert.Len(t, failed, 1)
+	select {
+	case e := <-ch:
+		t.Fatalf("没写进去却发布了 %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
 }

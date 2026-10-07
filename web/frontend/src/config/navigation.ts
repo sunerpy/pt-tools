@@ -38,6 +38,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { path: "/sites", label: "站点列表", icon: "globe", badge: "sites", rail: true },
       { path: "/supported-sites", label: "已支持站点", icon: "badge-check" },
+      /* 路线图 M7：画板没有这一页，沿用站点组列表页的样式 */
+      { path: "/cookiecloud", label: "CookieCloud 导入", icon: "cloud-download" },
     ],
   },
   {

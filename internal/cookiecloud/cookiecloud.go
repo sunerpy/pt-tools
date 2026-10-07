@@ -1,0 +1,258 @@
+// Package cookiecloud 从自建的 CookieCloud 服务取回加密的 Cookie，在本地解密，按站点地址挑出 pt-tools 已配置站点的 Cookie。
+//
+// 协议按 CookieCloud 的公开说明实现（GET {server}/get/{uuid} 取回 {encrypted, crypto_type}），只在本地解密，
+// 密码不发给服务端。两种加密：
+//   - legacy：CryptoJS 口令模式。口令是 md5(uuid + "-" + password) 十六进制的前 16 个字符；密文是 OpenSSL 格式
+//     base64("Salted__" + 8 字节 salt + 密文)，key 与 iv 由 EVP_BytesToKey(MD5, 口令, salt) 派生，AES-256-CBC + PKCS7。
+//   - aes-128-cbc-fixed（CookieCloud 0.3.0 起）：key 是上面那 16 个字符本身（AES-128），iv 是 16 个 0 字节，
+//     密文是标准 base64，CBC + PKCS7。
+package cookiecloud
+
+import (
+	"bytes"
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// 加密方式。
+const (
+	CryptoLegacy = "legacy"
+	CryptoFixed  = "aes-128-cbc-fixed"
+)
+
+const maxBodyBytes = 32 << 20
+
+var (
+	// ErrDecrypt 表示解不开：多半是 UUID 或密码不对。
+	ErrDecrypt = errors.New("解密失败：请检查 UUID 和密码")
+	// ErrNotFound 表示服务端没有这个 UUID 的数据。
+	ErrNotFound = errors.New("CookieCloud 服务上没有这个 UUID 的数据")
+)
+
+// Cookie 是 CookieCloud 存的一条 Cookie（浏览器 cookies 接口给的字段）。
+type Cookie struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Domain string `json:"domain"`
+	Path   string `json:"path"`
+	// HostOnly 为 true 时只对 Domain 这个主机名本身有效；没有这个字段时按 Domain 有没有前导点判断。
+	HostOnly *bool `json:"hostOnly,omitempty"`
+	// ExpirationDate 是过期时间（Unix 秒，可以带小数）；会话 Cookie 没有。
+	ExpirationDate *float64 `json:"expirationDate,omitempty"`
+}
+
+// Data 是解密后的内容：按域名分组的 Cookie。
+type Data struct {
+	CookieData map[string][]Cookie `json:"cookie_data"`
+}
+
+// Payload 是 /get/{uuid} 返回的密文。
+type Payload struct {
+	Encrypted  string `json:"encrypted"`
+	CryptoType string `json:"crypto_type"`
+}
+
+// ParseServer 解析服务地址：必须是 http(s) 地址，不能带用户名密码、查询参数或 #，末尾的 / 去掉。
+func ParseServer(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" ||
+		u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, errors.New("CookieCloud 服务地址要以 http:// 或 https:// 开头，不能带用户名密码、查询参数或 #")
+	}
+	return u, nil
+}
+
+// Fetch 取回 uuid 的密文（不带密码，服务端不解密）。
+func Fetch(ctx context.Context, httpc *http.Client, server, uuid string) (Payload, error) {
+	u, err := ParseServer(server)
+	if err != nil {
+		return Payload{}, err
+	}
+	uuid = strings.TrimSpace(uuid)
+	if uuid == "" {
+		return Payload{}, errors.New("UUID 不能为空")
+	}
+	// 在服务地址的路径后面加 /get/{uuid}（UUID 按路径的一段转义）
+	raw := strings.TrimRight(u.EscapedPath(), "/") + "/get/" + url.PathEscape(uuid)
+	if u.Path, err = url.PathUnescape(raw); err != nil {
+		return Payload{}, errors.New("CookieCloud 服务地址的路径不对")
+	}
+	u.RawPath = raw
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return Payload{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if httpc == nil {
+		httpc = &http.Client{Timeout: 30 * time.Second}
+	}
+	// 只跟随同一主机、同一端口内的重定向；http 只能按标准端口升到 https（80 → 443），不能降级：地址里带着 UUID，不带去别处
+	c := *httpc
+	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("重定向次数太多")
+		}
+		// 主机与最初的地址比；scheme 与端口与上一跳比（http → https → http 这样的多跳降级也拦住）
+		first, prev := via[0].URL, via[len(via)-1].URL
+		upgraded := false
+		for _, v := range via {
+			upgraded = upgraded || v.URL.Scheme == "https"
+		}
+		switch {
+		case !strings.EqualFold(r.URL.Hostname(), first.Hostname()):
+			return errors.New("CookieCloud 服务把请求重定向到了别的主机，没有跟随")
+		case upgraded && r.URL.Scheme != "https":
+			return errors.New("CookieCloud 服务把 https 请求重定向到了 http，没有跟随")
+		case r.URL.Scheme == prev.Scheme && effectivePort(r.URL) != effectivePort(prev),
+			// http 升到 https 只认标准端口 80 → 443
+			r.URL.Scheme != prev.Scheme && (effectivePort(prev) != "80" || effectivePort(r.URL) != "443"):
+			return errors.New("CookieCloud 服务把请求重定向到了别的端口，没有跟随")
+		}
+		return nil
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		// 错误里不带请求地址：地址里有 UUID
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return Payload{}, fmt.Errorf("连不上 CookieCloud 服务: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
+	if err != nil {
+		return Payload{}, fmt.Errorf("读取 CookieCloud 响应失败: %w", err)
+	}
+	if len(body) > maxBodyBytes {
+		return Payload{}, fmt.Errorf("CookieCloud 的响应超过 %d MiB，没有读取", maxBodyBytes>>20)
+	}
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return Payload{}, ErrNotFound
+	case resp.StatusCode != http.StatusOK:
+		return Payload{}, fmt.Errorf("CookieCloud 服务返回 HTTP %d", resp.StatusCode)
+	}
+	var p Payload
+	if err := json.Unmarshal(body, &p); err != nil || p.Encrypted == "" {
+		return Payload{}, errors.New("CookieCloud 的响应里没有密文")
+	}
+	return p, nil
+}
+
+// effectivePort 是地址的端口，没写时按 scheme 的默认端口。
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
+}
+
+// passphrase 是 md5(uuid + "-" + password) 十六进制的前 16 个字符。
+func passphrase(uuid, password string) string {
+	sum := md5.Sum([]byte(uuid + "-" + password))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// Decrypt 解密密文。cryptoType 为空（老服务端）时按 legacy，密文不是 OpenSSL 格式时再按 fixed 试一次；
+// 明确写了 legacy 的只按 legacy。
+func Decrypt(p Payload, uuid, password string) (Data, error) {
+	key := passphrase(strings.TrimSpace(uuid), password)
+	var plain []byte
+	var err error
+	switch p.CryptoType {
+	case CryptoFixed:
+		plain, err = decryptFixed(p.Encrypted, key)
+	case CryptoLegacy:
+		plain, err = decryptLegacy(p.Encrypted, key)
+	case "":
+		plain, err = decryptLegacy(p.Encrypted, key)
+		if errors.Is(err, errNotSalted) {
+			plain, err = decryptFixed(p.Encrypted, key)
+		}
+	default:
+		return Data{}, fmt.Errorf("不认识的加密方式 %q", p.CryptoType)
+	}
+	if err != nil {
+		return Data{}, ErrDecrypt
+	}
+	var d Data
+	if err := json.Unmarshal(plain, &d); err != nil {
+		return Data{}, ErrDecrypt
+	}
+	return d, nil
+}
+
+var errNotSalted = errors.New("not openssl salted format")
+
+func decryptLegacy(encrypted, pass string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encrypted))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < 16 || !bytes.Equal(raw[:8], []byte("Salted__")) {
+		return nil, errNotSalted
+	}
+	salt, data := raw[8:16], raw[16:]
+	key, iv := evpBytesToKey([]byte(pass), salt, 32, aes.BlockSize)
+	return cbcDecrypt(key, iv, data)
+}
+
+func decryptFixed(encrypted, pass string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encrypted))
+	if err != nil {
+		return nil, err
+	}
+	return cbcDecrypt([]byte(pass), make([]byte, aes.BlockSize), raw)
+}
+
+// evpBytesToKey 是 OpenSSL 的 EVP_BytesToKey（MD5，迭代 1 次）：D_i = MD5(D_{i-1} || password || salt)，拼到够长。
+func evpBytesToKey(password, salt []byte, keyLen, ivLen int) ([]byte, []byte) {
+	var out, prev []byte
+	for len(out) < keyLen+ivLen {
+		h := md5.New()
+		h.Write(prev)
+		h.Write(password)
+		h.Write(salt)
+		prev = h.Sum(nil)
+		out = append(out, prev...)
+	}
+	return out[:keyLen], out[keyLen : keyLen+ivLen]
+}
+
+func cbcDecrypt(key, iv, data []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data)%aes.BlockSize != 0 {
+		return nil, errors.New("密文长度不对")
+	}
+	out := make([]byte, len(data))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(out, data)
+	n := int(out[len(out)-1])
+	if n == 0 || n > aes.BlockSize || n > len(out) {
+		return nil, errors.New("填充不对")
+	}
+	for _, b := range out[len(out)-n:] {
+		if int(b) != n {
+			return nil, errors.New("填充不对")
+		}
+	}
+	return out[:len(out)-n], nil
+}
