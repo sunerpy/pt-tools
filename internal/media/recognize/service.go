@@ -325,7 +325,7 @@ func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb s
 			return err
 		}
 		if r := pickFound(m, found); r != nil {
-			res.Match, res.Source = r, SourceIMDb
+			res.Match, res.Source = s.details(ctx, c, *r), SourceIMDb
 			return nil
 		}
 	}
@@ -334,14 +334,22 @@ func (s *Service) match(ctx context.Context, c *tmdb.Client, m meta.Meta, imdb s
 		return err
 	}
 	if len(cands) > 0 && accepted(m, cands[0]) {
-		best := cands[0].Result
-		res.Match, res.Source, res.Score = &best, SourceSearch, cands[0].Score
+		res.Match, res.Source, res.Score = s.details(ctx, c, cands[0].Result), SourceSearch, cands[0].Score
 	}
 	if len(cands) > 5 {
 		cands = cands[:5]
 	}
 	res.Candidates = cands
 	return nil
+}
+
+// details 用详情补全匹配到的条目（搜索与查找结果里没有 IMDb 编号，中文简介为空时详情里有英文的）；
+// 取详情失败时用原来的结果。
+func (s *Service) details(ctx context.Context, c *tmdb.Client, r tmdb.Result) *tmdb.Result {
+	if d, err := c.Details(ctx, r.MediaType, r.ID); err == nil {
+		return d
+	}
+	return &r
 }
 
 // pickFound 从 IMDb 查找结果里取一个：剧集优先取剧集，其余优先取电影。

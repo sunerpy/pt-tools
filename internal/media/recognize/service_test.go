@@ -156,6 +156,8 @@ func TestRecognize(t *testing.T) {
 	require.NotNil(t, res.Match)
 	assert.Equal(t, SourceSearch, res.Source)
 	assert.Equal(t, 278, res.Match.ID)
+	assert.Equal(t, "tt0111161", res.Match.IMDbID, "认定后用详情补全（搜索结果里没有 IMDb 编号）")
+	assert.Equal(t, "希望让人自由。", res.Match.Overview)
 	assert.InDelta(t, 1.4, res.Score, 0.001, "名字相同 1 + 年份相同 0.25 + 类型 0.05 + 排第一 0.1")
 	require.NotEmpty(t, res.Candidates)
 	assert.Equal(t, 278, res.Candidates[0].ID)
@@ -179,11 +181,12 @@ func TestRecognize(t *testing.T) {
 	assert.Equal(t, SourceIMDb, res.Source)
 	assert.Equal(t, 278, res.Match.ID)
 
-	// 剧集按剧集搜：后面几季的年份晚于首播年份不扣分
+	// 剧集按剧集搜：后面几季的年份晚于首播年份不扣分；取不到详情时用搜索结果
 	res, err = s.Recognize(ctx, Input{Title: "Game.of.Thrones.S08E06.2019.1080p.WEB-DL"})
 	require.NoError(t, err)
 	require.NotNil(t, res.Match)
 	assert.Equal(t, 1399, res.Match.ID)
+	assert.Equal(t, "Game of Thrones", res.Match.OriginalTitle)
 	assert.Equal(t, tmdb.KindTV, res.Match.MediaType)
 
 	// TMDB 出错：解析结果照样返回，写明原因（搜过的名字读缓存，与 Key 无关，所以换一个没搜过的）
