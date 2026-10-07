@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { type TaskItem, type TaskListResponse, tasksApi, type TaskStatsResponse } from "@/api";
+import TransferDialog from "@/components/downloader/TransferDialog.vue";
 import PtIcon from "@/components/PtIcon";
 import PtBars from "@/components/ui/PtBars.vue";
 import PtBreakdown, { type BreakdownRow } from "@/components/ui/PtBreakdown.vue";
@@ -20,6 +21,8 @@ type Tone = "ok" | "warn" | "dang" | "info" | "primary" | "neutral";
 
 const isMobile = useIsMobile();
 const tasks = ref<TaskItem[]>([]);
+/** 转移做种（路线图 M5）：勾选的记录里已经推送到下载器的那些，按下载器和 info hash 交给转移对话框 */
+const transferDialogVisible = ref(false);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -133,6 +136,11 @@ const filters = ref({
   site: "",
 });
 const selectedIds = ref<number[]>([]);
+const transferItems = computed(() =>
+  tasks.value
+    .filter((t) => selectedIds.value.includes(t.id) && t.downloaderId && t.torrentHash)
+    .map((t) => ({ source_id: t.downloaderId as number, hash: t.torrentHash })),
+);
 
 // 站点列表（从任务中提取）
 const siteOptions = computed(() => {
@@ -841,10 +849,18 @@ function getDiscount(task: TaskItem): { text: string; tone: Tone } {
       <el-button size="small" @click="clearSelection">
         <PtIcon name="x" :size="14" /><span>取消选择</span>
       </el-button>
+      <el-button
+        size="small"
+        :disabled="!transferItems.length"
+        data-testid="tl-transfer"
+        @click="transferDialogVisible = true">
+        <PtIcon name="arrow-right-left" :size="14" /><span>转移到…</span>
+      </el-button>
       <el-button type="danger" plain size="small" @click="handleBatchDelete">
         <PtIcon name="trash-2" :size="14" /><span>删除 {{ selectedIds.length }} 条</span>
       </el-button>
     </div>
+    <TransferDialog v-model="transferDialogVisible" :items="transferItems" />
 
     <!-- 页脚带 —— 画板 gfoot-518 1112×34：左口径说明，右分页 -->
     <div v-if="total > 0" class="pt-band--foot tl-foot">

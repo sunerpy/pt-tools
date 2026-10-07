@@ -170,6 +170,8 @@ export interface TaskItem {
   pushTime: string;
   progress: number; // 下载进度 0-100
   torrentSize: number; // 种子大小（字节）
+  downloaderId?: number | null; // 推送到的下载器
+  downloaderName?: string;
 }
 
 export interface TaskListResponse {
@@ -1959,4 +1961,131 @@ export const downloaderAssistantApi = {
   getDeadScan: () => api.get<DeadTorrentScanSettings>("/api/downloader-assistant/dead-scan"),
   saveDeadScan: (data: DeadTorrentScanSettings) =>
     api.put<DeadTorrentScanSettings>("/api/downloader-assistant/dead-scan", data),
+};
+
+// ---------- 转移做种（路线图 M5） ----------
+
+export type TransferState =
+  | "pending"
+  | "exported"
+  | "adding"
+  | "checking"
+  | "verified"
+  | "source_removed"
+  | "rolled_back"
+  | "failed"
+  | "canceled";
+
+export interface TransferItem {
+  source_id: number;
+  hash: string;
+}
+
+export interface TransferPreviewItem {
+  source_id: number;
+  source_name: string;
+  hash: string;
+  name: string;
+  size: number;
+  save_path: string;
+  target_path: string;
+  /** 路径按映射换算过；为 false 时目标用同一个路径 */
+  mapped: boolean;
+  site_name?: string;
+  /** 种子文件从哪来：export 从源下载器导出、site 按 pt-tools 的记录从站点重新下载 */
+  source?: "export" | "site";
+  ok: boolean;
+  reason?: string;
+}
+
+export interface TransferJob {
+  id: number;
+  source_downloader_id: number;
+  target_downloader_id: number;
+  source_name: string;
+  target_name: string;
+  info_hash: string;
+  name: string;
+  total_size: number;
+  site_name: string;
+  source_save_path: string;
+  target_save_path: string;
+  state: TransferState;
+  message: string;
+  progress: number;
+  rule_id?: number;
+  final: boolean;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string;
+}
+
+export interface TransferPathMap {
+  id?: number;
+  source_downloader_id?: number;
+  target_downloader_id?: number;
+  source_prefix: string;
+  target_prefix: string;
+}
+
+export interface TransferRuleConfig {
+  name: string;
+  enabled: boolean;
+  source_downloader_id: number;
+  target_downloader_id: number;
+  category: string;
+  tag: string;
+  site_name: string;
+  min_seeding_hours: number;
+  max_per_run: number;
+  interval_min: number;
+}
+
+export interface TransferRule extends TransferRuleConfig {
+  id: number;
+  source_name: string;
+  target_name: string;
+  last_run_at?: string;
+  last_result: string;
+}
+
+export interface TransferRuleRunResult {
+  result: { matched: number; created: number; skipped?: string[] };
+  summary: string;
+  error?: string;
+}
+
+export const transferApi = {
+  preview: (targetId: number, items: TransferItem[]) =>
+    api.post<{ items: TransferPreviewItem[] }>("/api/transfer/preview", {
+      target_id: targetId,
+      items,
+    }),
+  create: (targetId: number, items: TransferItem[]) =>
+    api.post<{ created: TransferJob[]; skipped: TransferPreviewItem[] }>("/api/transfer/jobs", {
+      target_id: targetId,
+      items,
+    }),
+  jobs: (status: "" | "active" | "finished" = "") =>
+    api.get<{ items: TransferJob[] }>(
+      `/api/transfer/jobs${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  cancel: (id: number) => api.post<{ success: boolean }>(`/api/transfer/jobs/${id}/cancel`, {}),
+  clearFinished: () => api.delete<{ deleted: number }>("/api/transfer/jobs"),
+  pathMaps: (sourceId: number, targetId: number) =>
+    api.get<{ items: TransferPathMap[] }>(
+      `/api/transfer/path-maps?source_id=${sourceId}&target_id=${targetId}`,
+    ),
+  savePathMaps: (sourceId: number, targetId: number, items: TransferPathMap[]) =>
+    api.put<{ items: TransferPathMap[] }>("/api/transfer/path-maps", {
+      source_id: sourceId,
+      target_id: targetId,
+      items: items.map((m) => ({ source_prefix: m.source_prefix, target_prefix: m.target_prefix })),
+    }),
+  rules: () => api.get<{ items: TransferRule[] }>("/api/transfer/rules"),
+  createRule: (data: TransferRuleConfig) => api.post<TransferRule>("/api/transfer/rules", data),
+  updateRule: (id: number, data: TransferRuleConfig) =>
+    api.put<TransferRule>(`/api/transfer/rules/${id}`, data),
+  deleteRule: (id: number) => api.delete<{ success: boolean }>(`/api/transfer/rules/${id}`),
+  runRule: (id: number) => api.post<TransferRuleRunResult>(`/api/transfer/rules/${id}/run`, {}),
 };
