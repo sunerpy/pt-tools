@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   OUTBOUND_CHANNELS,
+  apiErrorDetail,
   outboundChannel,
   outboundFieldKeys,
   outboundProblem,
@@ -69,5 +70,18 @@ describe("notifyChannels", () => {
       }),
     ).toBe(undefined);
     expect(outboundProblem("feishu", { webhook_url: ding })).toContain("open.feishu.cn");
+  });
+
+  it("接口错误取 detail，不是 JSON 时用原文", () => {
+    const body = JSON.stringify({
+      error: "invalid_argument",
+      detail: "通道配置无效: ntfy topic …",
+    });
+    expect(apiErrorDetail(new Error(body), "添加失败")).toBe("通道配置无效: ntfy topic …");
+    expect(apiErrorDetail(new Error(JSON.stringify({ error: "boom" })), "x")).toBe("boom");
+    expect(apiErrorDetail(new Error("HTTP 502"), "x")).toBe("HTTP 502");
+    expect(apiErrorDetail(new Error(""), "添加失败")).toBe("添加失败");
+    expect(apiErrorDetail(undefined, "添加失败")).toBe("添加失败");
+    expect(apiErrorDetail(new Error("null"), "x")).toBe("null");
   });
 });

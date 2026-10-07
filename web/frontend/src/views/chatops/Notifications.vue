@@ -16,6 +16,7 @@ import { useRouter } from "vue-router";
 
 import {
   OUTBOUND_CHANNELS,
+  apiErrorDetail,
   outboundChannel,
   outboundFieldKeys,
   outboundProblem,
@@ -320,7 +321,8 @@ async function handleCreate() {
     addDialogVisible.value = false;
     await loadNotifications();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "添加失败");
+    // 配置没通过后端检查时，detail 写明哪一项不对
+    ElMessage.error(apiErrorDetail(e, "添加失败"));
   } finally {
     submitting.value = false;
   }

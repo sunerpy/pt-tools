@@ -7,7 +7,12 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import PtTag from "@/components/ui/PtTag.vue";
 import { useIsMobile } from "@/composables/useIsMobile";
 import { isLoopbackListenAddr } from "@/utils/listenAddr";
-import { OUTBOUND_CHANNELS, outboundChannel, outboundProblem } from "@/utils/notifyChannels";
+import {
+  OUTBOUND_CHANNELS,
+  apiErrorDetail,
+  outboundChannel,
+  outboundProblem,
+} from "@/utils/notifyChannels";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -368,7 +373,8 @@ async function handleSaveCredentials() {
     ElMessage.success("已保存凭证");
     await loadDetail();
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || "保存失败");
+    // 配置没通过后端检查时，detail 写明哪一项不对
+    ElMessage.error(apiErrorDetail(e, "保存失败"));
   } finally {
     saving.value = false;
   }

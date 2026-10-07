@@ -144,4 +144,17 @@ describe("新建通知通道", () => {
       bot_token: "123:abc",
     });
   });
+
+  it("后端拒绝时提示里只有原因，不是整段 JSON", async () => {
+    await openDialog();
+    fill("name-input", "Bark");
+    await pickType("bark");
+    fill("new-device_key", "k");
+    fill("new-server_url", "http://192.168.1.5");
+    const detail = "通道配置无效: Bark 服务器地址不能用：192.168.1.5 是本机或内网地址";
+    api.create.mockRejectedValue(new Error(JSON.stringify({ error: "invalid_argument", detail })));
+    buttonByText("创建通道").click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain(detail));
+    expect(document.body.textContent).not.toContain("invalid_argument");
+  });
 });

@@ -225,3 +225,19 @@ export function outboundProblem(
   }
   return undefined;
 }
+
+/** 接口错误的原因：ChatOps 接口回 {"error": "…", "detail": "…"}，取 detail；不是这个格式时用原文 */
+export function apiErrorDetail(e: unknown, fallback: string): string {
+  const raw = (e as Error | undefined)?.message || "";
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown; error?: unknown } | null;
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.detail === "string" && parsed.detail) return parsed.detail;
+      if (typeof parsed.error === "string" && parsed.error) return parsed.error;
+    }
+  } catch {
+    /* 不是 JSON：用原文 */
+  }
+  return raw;
+}
