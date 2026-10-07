@@ -189,7 +189,8 @@ func (s *Service) removeLibraryFiles(ctx context.Context, row models.MediaTransf
 	remove := func(target, mode, fileID, src string) error {
 		err := transfer.RemoveIfOurs(target, mode, fileID, src)
 		if errors.Is(err, transfer.ErrNotOurs) {
-			kept = append(kept, err.Error())
+			// 说明里只留「库里的 X 已经换成了别的文件或改过，没有删除」这一句
+			kept = append(kept, strings.TrimPrefix(err.Error(), transfer.ErrNotOurs.Error()+"："))
 			return nil
 		}
 		return err

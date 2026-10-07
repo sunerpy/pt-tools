@@ -104,6 +104,7 @@ func TestDeleteHistoryKeepsReplacedVideoRefusesMove(t *testing.T) {
 	kept, err := e.svc.DeleteHistory(e.ctx, row.ID, true)
 	require.NoError(t, err)
 	require.Len(t, kept, 1)
+	assert.True(t, strings.HasPrefix(kept[0], "库里的 "), kept[0])
 	assert.Contains(t, kept[0], "换成了别的文件")
 	assert.Equal(t, "replaced by user", readFile(t, row.TargetPath), "换掉的视频留着")
 	stem := strings.TrimSuffix(row.TargetPath, ".mkv")

@@ -196,9 +196,7 @@ describe("整理历史", () => {
     await mountPage();
     api.deleteHistory.mockResolvedValue({
       ok: true,
-      kept: [
-        "已经不是当初整理出的文件：库里的 最后生还者 - S01E01.mkv 已经换成了别的文件或改过，没有删除",
-      ],
+      kept: ["库里的 最后生还者 - S01E01.mkv 已经换成了别的文件或改过，没有删除"],
     });
     q("mh-del-4")!.click();
     await flush();
