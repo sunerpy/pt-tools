@@ -238,23 +238,58 @@ func TestMove(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSourceMissing)
 }
 
-func TestMoveCrossDeviceInjected(t *testing.T) {
+func TestMoveFallbacks(t *testing.T) {
+	oldNR, oldLink := noReplace, linkTmp
+	t.Cleanup(func() { noReplace, linkTmp = oldNR, oldLink })
 	dir := t.TempDir()
 	src := filepath.Join(dir, "a.mkv")
+
+	// 跨文件系统：复制过去再删源文件
 	writeFile(t, src, "video")
-	old := rename
-	t.Cleanup(func() { rename = old })
-	rename = func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} }
+	noReplace = func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} }
 	out, err := Transfer(src, filepath.Join(dir, "lib", "a.mkv"), models.MediaModeMove)
 	require.NoError(t, err)
 	assert.Equal(t, Created, out)
 	_, err = os.Stat(src)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
-	rename = func(string, string) error { return errors.New("boom") }
+	// 不支持不覆盖的改名：硬链接放过去再删源文件
+	writeFile(t, src, "video2")
+	noReplace = func(string, string) error { return errNoReplaceUnsupported }
+	out, err = Transfer(src, filepath.Join(dir, "lib3", "a.mkv"), models.MediaModeMove)
+	require.NoError(t, err)
+	assert.Equal(t, Created, out)
+	assert.Equal(t, "video2", readFileT(t, filepath.Join(dir, "lib3", "a.mkv")))
+	_, err = os.Stat(src)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// 放过去之前目标出现了：哪条路都不覆盖
+	for _, nr := range []func(string, string) error{oldNR, func(string, string) error { return errNoReplaceUnsupported }} {
+		noReplace = nr
+		writeFile(t, src, "mine")
+		dst := filepath.Join(t.TempDir(), "a.mkv")
+		writeFile(t, dst, "someone else")
+		info, statErr := os.Stat(src)
+		require.NoError(t, statErr)
+		require.ErrorIs(t, move(src, dst, info), ErrTargetExists)
+		assert.Equal(t, "someone else", readFileT(t, dst))
+		assert.Equal(t, "mine", readFileT(t, src), "源文件不动")
+	}
+
+	noReplace = func(string, string) error { return errors.New("boom") }
 	writeFile(t, src, "video")
 	_, err = Transfer(src, filepath.Join(dir, "lib2", "a.mkv"), models.MediaModeMove)
 	require.ErrorContains(t, err, "移动失败")
+}
+
+func TestRemoveEmptyDirsStopsAtSymlinkedDir(t *testing.T) {
+	lib := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(outside, "Season 1"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(lib, "Show")))
+	RemoveEmptyDirs(filepath.Join(lib, "Show", "Season 1"), lib)
+	_, err := os.Stat(filepath.Join(outside, "Season 1"))
+	require.NoError(t, err, "软链接指到库外的目录不删")
 }
 
 func TestTransferErrors(t *testing.T) {

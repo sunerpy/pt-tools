@@ -52,7 +52,6 @@ func NormalizeMode(mode string) (string, error) {
 // 不支持硬链接的文件系统等情况。
 var (
 	link      = os.Link
-	rename    = os.Rename
 	linkTmp   = os.Link
 	noReplace = renameNoReplace
 )
@@ -101,19 +100,43 @@ func Transfer(src, dst, mode string) (Outcome, error) {
 			return 0, err
 		}
 	case models.MediaModeMove:
-		if err := rename(src, dst); err != nil {
-			if !isCrossDevice(err) {
-				return 0, fmt.Errorf("移动失败: %w", err)
-			}
-			if err := copyFile(src, dst, srcInfo); err != nil {
-				return 0, err
-			}
-			if err := os.Remove(src); err != nil {
-				return 0, fmt.Errorf("已复制到库里，但删除源文件失败: %w", err)
-			}
+		if err := move(src, dst, srcInfo); err != nil {
+			return 0, err
 		}
 	}
 	return Created, nil
+}
+
+// move 把 src 移到 dst，不覆盖 dst：同一个文件系统上用不覆盖的改名；不支持时用硬链接放过去再删源文件；
+// 跨文件系统或不支持硬链接时复制过去（同样不覆盖）再删源文件。
+func move(src, dst string, srcInfo os.FileInfo) error {
+	err := noReplace(src, dst)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, os.ErrExist):
+		return ErrTargetExists
+	case errors.Is(err, errNoReplaceUnsupported):
+		err = linkTmp(src, dst)
+		if errors.Is(err, os.ErrExist) {
+			return ErrTargetExists
+		}
+		if err == nil {
+			if rmErr := os.Remove(src); rmErr != nil {
+				return fmt.Errorf("已放到库里，但删除源文件失败: %w", rmErr)
+			}
+			return nil
+		}
+	case !isCrossDevice(err):
+		return fmt.Errorf("移动失败: %w", err)
+	}
+	if err := copyFile(src, dst, srcInfo); err != nil {
+		return err
+	}
+	if err := os.Remove(src); err != nil {
+		return fmt.Errorf("已复制到库里，但删除源文件失败: %w", err)
+	}
+	return nil
 }
 
 // existing 判断已经存在的目标是不是这次要放的文件。
@@ -244,10 +267,18 @@ func RemoveIfOurs(dst, mode, fileID, src string) error {
 	return nil
 }
 
-// RemoveEmptyDirs 从 dir 往上删空目录，到 root 为止（root 本身不删）。
+// RemoveEmptyDirs 从 dir 往上删空目录，到 root 为止（root 本身不删）。目录的实际位置（解开软链接后）
+// 不在 root 的实际位置里时停下：库里有指到别处的目录软链接时，不去删库外的空目录。
 func RemoveEmptyDirs(dir, root string) {
 	root = filepath.Clean(root)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return
+	}
 	for d := filepath.Clean(dir); d != root && Within(root, d); d = filepath.Dir(d) {
+		if real, err := filepath.EvalSymlinks(d); err != nil || !Within(realRoot, real) {
+			return
+		}
 		entries, err := os.ReadDir(d)
 		if err != nil || len(entries) > 0 {
 			return
