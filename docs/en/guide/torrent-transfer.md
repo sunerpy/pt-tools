@@ -21,7 +21,7 @@ If the check stops short of 100% (the data is not at the target path, usually a 
 
 Each target downloader checks one transferred torrent at a time and the rest wait, so that many checks at once do not saturate the disk. After pt-tools restarts, each job continues from the step where it stopped.
 
-The `pt-tools-transfer-<job number>` tag marks the torrent this job added: when the target downloader holds the same torrent without that tag (for example one you added yourself, even with `pt-tools-transfer`), the job fails and neither copy is touched. When the job ends, this tag is removed from the downloader and `pt-tools-transfer` stays.
+The `pt-tools-transfer-<job number>` tag marks the torrent this job added: when the target downloader holds the same torrent without that tag (for example one you added yourself, even with `pt-tools-transfer`), the job fails and neither copy is touched. When the job ends, qBittorrent deletes this tag (so it does not stay in the tag list) and `pt-tools-transfer` stays; in Transmission the label stays on the torrent.
 
 ## Jobs
 

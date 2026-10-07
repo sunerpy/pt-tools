@@ -28,7 +28,7 @@ Configure it on the Rules → Auto cleanup (规则 → 自动清理) page of the
 | **Check interval (检查间隔（分钟）)**                  | 30 minutes | How often the cleanup runs; at least 5 minutes                 |
 | **Delete the data files too (删除时连数据文件一起删)** | On         | Whether a deleted torrent's downloaded data is deleted as well |
 
-When another torrent in the downloader still uses the data (a torrent added by [IYUU cross-seeding](reseed.md) uses the same files as the original torrent, for example), only the torrent is deleted and the data stays, even with Delete the data files too turned on, so that the other torrent keeps its data. pt-tools compares the paths where the torrents keep their data: the same path counts as shared. When all the torrents sharing the data are deleted together, the data is deleted as usual.
+When another torrent in the downloader still uses the data (a torrent added by [IYUU cross-seeding](reseed.md) uses the same files as the original torrent, for example), only the torrent is deleted and the data stays, even with Delete the data files too turned on, so that the other torrent keeps its data. pt-tools compares the paths where the torrents keep their data: the same path counts as shared (for a qBittorrent multi-file torrent without a subfolder it compares the files, and only a common file counts). When all the torrents sharing the data are deleted together, the data is deleted as usual.
 
 ### Management scope
 
@@ -83,7 +83,7 @@ Disk space protection works in **two ways**:
 
 > **Note**: emergency cleanup strictly respects the management scope. If the deletable torrents within the scope cannot free enough space, nothing outside the scope is deleted; push blocking then keeps new torrents out, so the disk fills no further.
 
-Emergency cleanup deletes extra torrents only when deleting the data files is turned on: removing a task from the downloader alone frees no disk space. When working out how much space is still missing, it counts the torrents the deletion conditions already selected, so it does not delete more than needed. A torrent whose data another torrent that stays still uses frees no space, so emergency cleanup does not pick it and does not count its size; data shared by several torrents is counted once.
+Emergency cleanup deletes extra torrents only when deleting the data files is turned on: removing a task from the downloader alone frees no disk space. When working out how much space is still missing, it counts the torrents the deletion conditions already selected, so it does not delete more than needed. Deleting one of several torrents that share data frees no space: when all of them can be deleted, emergency cleanup picks them together and counts the space once; when one of them is protected or outside the managed scope, it picks none of them.
 
 ### Protection rules
 
