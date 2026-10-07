@@ -28,6 +28,7 @@ pt-tools/
 │   ├── filter/             # RSS filter matcher chain
 │   ├── maintenance/        # Safe logs/staging/backups cleanup
 │   ├── mcp/                # Interface-only future MCP contract; no server runtime
+│   ├── media/              # Title parsing, recognition words, TMDB client, recognition service
 │   ├── notify/             # Channel registry/router/outbox/digest/adapters
 │   └── sitelogin/          # Login probe classification and dispatch
 ├── models/                 # GORM schema, schema migrations, presets, repositories
@@ -43,21 +44,22 @@ pt-tools/
 
 ## Where to Work
 
-| Task                         | Primary location                                             | Required follow-through                                                                                               |
-| ---------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| Add a PT site                | `site/v2/definitions/`                                       | Load the `pt-add-site` skill; add fixture coverage, update extension `KNOWN_SITES`, run `make check-sites`            |
-| Add a Cobra command          | `cmd/<name>.go`                                              | Register with the intended parent in `init()` and add `cmd/*_test.go`                                                 |
-| Add an HTTP endpoint         | `web/api_<feature>.go`                                       | Register in `Server.Serve()` or a dedicated `register*Routes` helper; wrap protected routes with `s.auth`             |
-| Add a ChatOps command        | `internal/chatops/commands/`                                 | Register a `chatops.CommandSpec`; use injected services and preserve audit/permission flow                            |
-| Add a notification channel   | `internal/notify/adapter/<type>/`                            | Implement `notify.Channel`, register its factory, wire production side-effect import, test inbound/outbound lifecycle |
-| Change runtime config        | `core/config_store.go`, `models/config_models.go`            | Preserve partial-update semantics, encryption, and `events.ConfigChanged` publication                                 |
-| Change DB schema             | `models/` + `models/schema_version.go`                       | Add `AutoMigrate` entry and a numbered migration when existing data needs transformation                              |
-| Change RSS pipeline          | `internal/common.go`, `internal/push.go`                     | Preserve downloader-selection, disk-budget, site-capacity, idempotency, and notification gates                        |
-| Change scheduler behavior    | `scheduler/`                                                 | Preserve managed-torrent boundaries, cancellation, monitor idempotency, and event debouncing                          |
-| Change site login monitoring | `internal/sitelogin/`, `scheduler/login_reminder_monitor.go` | Keep all I/O behind site/v2 or Cloak drivers and keep the shared per-site single-flight gate                          |
-| Change browser helper        | `tools/browser-extension/`                                   | Run extension typecheck/tests plus `make check-sites`                                                                 |
-| Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`      | Do not claim a transport/server exists; the current package is contract-only                                          |
-| Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths       | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`     |
+| Task                         | Primary location                                             | Required follow-through                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Add a PT site                | `site/v2/definitions/`                                       | Load the `pt-add-site` skill; add fixture coverage, update extension `KNOWN_SITES`, run `make check-sites`                        |
+| Add a Cobra command          | `cmd/<name>.go`                                              | Register with the intended parent in `init()` and add `cmd/*_test.go`                                                             |
+| Add an HTTP endpoint         | `web/api_<feature>.go`                                       | Register in `Server.Serve()` or a dedicated `register*Routes` helper; wrap protected routes with `s.auth`                         |
+| Add a ChatOps command        | `internal/chatops/commands/`                                 | Register a `chatops.CommandSpec`; use injected services and preserve audit/permission flow                                        |
+| Add a notification channel   | `internal/notify/adapter/<type>/`                            | Implement `notify.Channel`, register its factory, wire production side-effect import, test inbound/outbound lifecycle             |
+| Change runtime config        | `core/config_store.go`, `models/config_models.go`            | Preserve partial-update semantics, encryption, and `events.ConfigChanged` publication                                             |
+| Change DB schema             | `models/` + `models/schema_version.go`                       | Add `AutoMigrate` entry and a numbered migration when existing data needs transformation                                          |
+| Change RSS pipeline          | `internal/common.go`, `internal/push.go`                     | Preserve downloader-selection, disk-budget, site-capacity, idempotency, and notification gates                                    |
+| Change scheduler behavior    | `scheduler/`                                                 | Preserve managed-torrent boundaries, cancellation, monitor idempotency, and event debouncing                                      |
+| Change site login monitoring | `internal/sitelogin/`, `scheduler/login_reminder_monitor.go` | Keep all I/O behind site/v2 or Cloak drivers and keep the shared per-site single-flight gate                                      |
+| Change browser helper        | `tools/browser-extension/`                                   | Run extension typecheck/tests plus `make check-sites`                                                                             |
+| Change media recognition     | `internal/media/` (`meta`, `words`, `tmdb`, `recognize`)     | Add misparsed titles to `meta/testdata/corpus.json`; TMDB key and proxy stay encrypted and out of errors; tests use httptest only |
+| Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`      | Do not claim a transport/server exists; the current package is contract-only                                                      |
+| Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths       | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`                 |
 
 ## Runtime Wiring
 
