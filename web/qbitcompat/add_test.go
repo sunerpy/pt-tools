@@ -33,14 +33,18 @@ func hashOf(t *testing.T, data []byte) string {
 	return strings.ToLower(p.InfoHash)
 }
 
-// fakeSite 是已启用的站点：Download 记下要的编号，回一个种子文件。
+// fakeSite 是已启用的站点：Download 记下要的编号，回一个种子文件（fail 不为空时回它）。
 type fakeSite struct {
 	v2.Site
-	got []string
+	got  []string
+	fail error
 }
 
 func (f *fakeSite) Download(_ context.Context, id string) ([]byte, error) {
 	f.got = append(f.got, id)
+	if f.fail != nil {
+		return nil, f.fail
+	}
 	return torrentFile("site-"+id, "https://tracker.qa.example/announce.php?passkey=pk", ""), nil
 }
 

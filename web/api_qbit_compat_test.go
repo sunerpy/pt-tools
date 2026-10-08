@@ -55,3 +55,30 @@ func TestQbitCompatSettingsAPI(t *testing.T) {
 	assert.True(t, v.Listening)
 	assert.Equal(t, "127.0.0.1:18080", v.ListenAddr)
 }
+
+// 设置接口的错误：数据库没初始化回 503；设置、下载器或所有权表读不出来、存不进去时回 500
+func TestQbitCompatSettingsAPIErrors(t *testing.T) {
+	e := newAppEnv(t)
+	db := global.GlobalDB.DB
+	require.NoError(t, db.AutoMigrate(&models.QbitCompatSetting{}, &models.QbitCompatTorrent{}, &models.DownloaderSetting{}))
+	require.NoError(t, db.Create(&models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, IsDefault: true}).Error)
+	get := func() int { return e.do(appReq{method: http.MethodGet, path: "/api/qbit-compat", session: true}).Code }
+	put := func() int {
+		return e.do(appReq{method: http.MethodPut, path: "/api/qbit-compat", session: true, body: `{}`}).Code
+	}
+
+	require.NoError(t, db.Migrator().DropTable(&models.QbitCompatTorrent{}))
+	assert.Equal(t, http.StatusInternalServerError, get(), "所有权表读不出来")
+	require.NoError(t, db.Migrator().DropTable(&models.DownloaderSetting{}))
+	assert.Equal(t, http.StatusInternalServerError, get(), "下载器读不出来")
+	assert.Equal(t, http.StatusInternalServerError, put(), "存进去了，但状态读不出来")
+	require.NoError(t, db.Migrator().DropTable(&models.QbitCompatSetting{}))
+	assert.Equal(t, http.StatusInternalServerError, get(), "设置读不出来")
+	assert.Equal(t, http.StatusInternalServerError, put(), "设置存不进去")
+
+	prev := global.GlobalDB
+	global.GlobalDB = nil
+	t.Cleanup(func() { global.GlobalDB = prev })
+	assert.Equal(t, http.StatusServiceUnavailable, get())
+	assert.Equal(t, http.StatusServiceUnavailable, put())
+}

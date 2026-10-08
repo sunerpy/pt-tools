@@ -52,18 +52,28 @@ type fakeDL struct {
 	delay time.Duration
 	// listCalls 是 GetAllTorrents 被调用的次数，byCalls 是 GetTorrentsBy 的
 	listCalls, byCalls int
+	// failRead、failWrite 让读、写下载器的方法回这个错误（测错误路径）
+	failRead, failWrite error
+	// limit 是 GetSpeedLimit 回的限速
+	limit downloader.SpeedLimit
 }
 
 func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++
+	if f.failRead != nil {
+		return nil, f.failRead
+	}
 	return append([]downloader.Torrent(nil), f.torrents...), nil
 }
 
 func (f *fakeDL) GetTorrent(id string) (downloader.Torrent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRead != nil {
+		return downloader.Torrent{}, f.failRead
+	}
 	for _, t := range f.torrents {
 		if strings.EqualFold(t.InfoHash, id) || t.ID == id {
 			return t, nil
@@ -77,6 +87,9 @@ func (f *fakeDL) GetTorrentsBy(filter downloader.TorrentFilter) ([]downloader.To
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.byCalls++
+	if f.failRead != nil {
+		return nil, f.failRead
+	}
 	var out []downloader.Torrent
 	for _, t := range f.torrents {
 		if slices.ContainsFunc(filter.Hashes, func(h string) bool { return strings.EqualFold(h, t.InfoHash) }) {
@@ -105,17 +118,41 @@ func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
 func (f *fakeDL) GetTorrentTrackers(id string) ([]downloader.TorrentTracker, error) {
 	return f.trackers[id], nil
 }
-func (f *fakeDL) GetClientLabels() ([]string, error)                { return f.labels, nil }
-func (f *fakeDL) GetClientPaths() ([]string, error)                 { return f.paths, nil }
-func (f *fakeDL) GetClientStatus() (downloader.ClientStatus, error) { return f.status, nil }
-func (f *fakeDL) GetSpeedLimit() (downloader.SpeedLimit, error)     { return downloader.SpeedLimit{}, nil }
-func (f *fakeDL) GetClientFreeSpace(context.Context) (int64, error) { return f.free, nil }
+func (f *fakeDL) GetClientLabels() ([]string, error) { return f.labels, nil }
+
+func (f *fakeDL) GetClientPaths() ([]string, error) {
+	if f.failRead != nil {
+		return nil, f.failRead
+	}
+	return f.paths, nil
+}
+
+func (f *fakeDL) GetClientStatus() (downloader.ClientStatus, error) {
+	if f.failRead != nil {
+		return downloader.ClientStatus{}, f.failRead
+	}
+	return f.status, nil
+}
+
+func (f *fakeDL) GetSpeedLimit() (downloader.SpeedLimit, error) {
+	if f.failRead != nil {
+		return downloader.SpeedLimit{}, f.failRead
+	}
+	return f.limit, nil
+}
+
+func (f *fakeDL) GetClientFreeSpace(context.Context) (int64, error) {
+	if f.failRead != nil {
+		return 0, f.failRead
+	}
+	return f.free, nil
+}
 
 func (f *fakeDL) log(format string, args ...any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fmt.Sprintf(format, args...))
-	return nil
+	return f.failWrite
 }
 
 func (f *fakeDL) got() []string {
@@ -154,13 +191,15 @@ func (q fakeQB) CreateCategory(name, savePath string) error {
 type fakeAudit struct {
 	mu      sync.Mutex
 	entries []app.AuditEntry
+	// fail 让 Record 回这个错误（记下以后）
+	fail error
 }
 
 func (a *fakeAudit) Record(_ context.Context, e app.AuditEntry) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.entries = append(a.entries, e)
-	return nil
+	return a.fail
 }
 
 func (a *fakeAudit) all() []app.AuditEntry {
