@@ -80,10 +80,11 @@ Clients such as Claude Desktop only start a local program and talk to it over st
 
 - Tools that change your downloaders or subscriptions require `confirm=true`: the assistant has to ask you first.
 - `push_torrent` has pt-tools download the torrent file with its own site configuration and goes through the disk-space protection and the site seeding-capacity check as usual. It does not take magnet links and never requests any other address. Torrents pushed through MCP show the source `mcp_push` in the task list.
-- The data returned is the same as the [App API](../reference/app-api.md) returns: no cookies, passkeys, passwords, RSS addresses or download links.
+- The data returned is the same as the [App API](../reference/app-api.md) returns: no cookies, passkeys, passwords, RSS addresses or PT torrent download links, and downloader error messages have the downloader's address removed. `check_updates` returns the public GitHub release pages and asset addresses.
+- Invalid arguments (a missing required field, a value out of range, an unknown field) make the tool fail right away without calling pt-tools.
 
 ## Audit and security
 
 - `/mcp` only accepts API tokens, not a browser session: no token or a wrong one gets 401, a token without an MCP permission gets 403. Revoking a token takes effect immediately.
-- Every call of a tool that changes your downloaders or subscriptions is recorded under ChatOps → Audit log (操作审计), including the ones refused for a missing permission or confirmation: the channel is MCP, the command is the tool name and the user is the token ID.
+- Every call of a tool that changes your downloaders or subscriptions is recorded under ChatOps → Audit log (操作审计), including the ones refused for a missing permission, a missing confirmation or invalid arguments: the channel is MCP, the command is the tool name and the user is the token ID.
 - Over the internet, use HTTPS (for example behind a reverse proxy), or the token crosses the network in plain text. The reverse proxy has to keep the `Authorization` header.

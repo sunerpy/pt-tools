@@ -28,8 +28,9 @@ pt-tools 作为 [Model Context Protocol](https://modelcontextprotocol.io) Server
 ## 3. 选型：modelcontextprotocol/go-sdk
 
 - 官方 Go SDK，固定在 v1.8.0（`go.mod`）。
-- 用 `mcp.AddTool[In, Out]` 注册工具：参数结构体带 `jsonschema` 标签，SDK 生成输入 schema 并在调用前校验；取值固定的参数（状态、排序、媒体类型）另外写进 schema 的 `enum`。
-- 工具带注解：只读工具 `readOnlyHint`，删除 `destructiveHint`，客户端据此决定提醒的强度。
+- 参数结构体带 `jsonschema` 标签，由 jsonschema-go 生成输入 schema（必填、不收多余字段），取值固定的参数（状态、排序、媒体类型）另外写进 `enum`，数字参数写上 `minimum`、`maximum`。
+- 工具用未类型化的 `Server.AddTool` 注册：参数的校验（schema 与 `confirm`）在工具自己的处理函数里做，这样参数不对、没有确认被拒的写工具调用也进审计；校验过了再解到参数结构体。
+- 工具带注解：只读工具 `readOnlyHint`，删除 `destructiveHint`；访问 PT 站点、GitHub、TMDB 的工具（搜索、推送、检查更新、找片、添加订阅）`openWorldHint`。客户端据此决定提醒的强度。
 - 测试用 SDK 的内存传输逐个测工具，HTTP 层用 SDK 的 streamable HTTP 客户端走真实的 mux。
 
 ---
