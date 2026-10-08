@@ -54,6 +54,10 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodGet, "/favicon/{site}", r, s.appFavicon},
 		{http.MethodGet, "/torrents", r, s.appTorrents},
 		{http.MethodPost, "/torrents/actions", w, s.appTorrentActions},
+		// 搜索用 POST 传条件，但只读
+		{http.MethodPost, "/search", r, s.appSearch},
+		{http.MethodPost, "/push", w, s.appPush},
+		{http.MethodPost, "/sites/{site}/attend", w, s.appAttend},
 	}
 }
 

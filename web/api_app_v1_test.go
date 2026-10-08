@@ -156,7 +156,10 @@ func TestAppAPI_TokensCannotReachSessionAPIs(t *testing.T) {
 	assert.Equal(t, http.StatusFound, w.Code, "SPA 也只认 session")
 }
 
-// 路由表：每条都声明了权限范围；读是 GET + app:read，写是别的方法 + app:write；没有重复
+// 只读但用 POST 传条件的路由
+var appReadPosts = map[string]bool{"POST /search": true}
+
+// 路由表：每条都声明了权限范围；读是 GET（或者上面列出的只读 POST）+ app:read，写是别的方法 + app:write；没有重复
 func TestAppAPI_RouteTable(t *testing.T) {
 	srv := setupServer(t)
 	srv.mgr.StopAll()
@@ -166,7 +169,7 @@ func TestAppAPI_RouteTable(t *testing.T) {
 		require.False(t, seen[key], "重复的路由 %s", key)
 		seen[key] = true
 		require.NotNil(t, rt.Handler, key)
-		if rt.Method == http.MethodGet {
+		if rt.Method == http.MethodGet || appReadPosts[key] {
 			assert.Equal(t, apitoken.ScopeAppRead, rt.Scope, key)
 		} else {
 			assert.Equal(t, apitoken.ScopeAppWrite, rt.Scope, key)
