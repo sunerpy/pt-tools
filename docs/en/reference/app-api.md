@@ -98,12 +98,12 @@ Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST 
 ### GET /overview
 
 - `totals` adds up the enabled sites: `uploaded`, `downloaded`, `ratio`, `seeding`, `leeching`, `bonus`, `bonus_per_hour`, `seeding_size`, `site_count`, `unread_messages`.
-- `today` holds today's changes: `from`, `to`, `uploaded`, `downloaded`, `bonus`, with per-site changes in `sites`. They are counted the same way as in [Statistics](../guide/user-stats.md).
+- `today` holds today's changes: `from`, `to`, `uploaded`, `downloaded`, `bonus`, with per-site changes in `sites`. They are counted the same way as in [Statistics](../guide/user-stats.md). When today's changes cannot be computed, `today.error` gives the reason, and the zeros do not mean there was no traffic today.
 - `updated_at` is when the site statistics were last updated.
 
 ### GET /sites
 
-One item per site:
+The response is `{"items": [...], "user_error": "…"}`: `items` has one item per site; when your statistics on the sites cannot be read, `user_error` gives the reason and no item has `user`.
 
 | Field                             | Content                                                                                                                                                                                                                                                                                       |
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -169,7 +169,7 @@ Pushes one torrent to a downloader: pt-tools downloads the torrent file from the
 | `downloader_id`                          | The downloader to push to; when empty, the default downloader, or the first enabled one if there is no default                         |
 | `title`, `category`, `tags`, `save_path` | Optional: the title for the record (the name in the torrent file when empty), and the category, tags and save folder in the downloader |
 
-The response has `success`, `skipped` (the downloader already has this torrent), `message`, `info_hash`, `downloader_id` and `downloader`. When disk space protection or the site seeding capacity stops the push, `success` is `false` and `message` gives the reason, still with status 200; when the torrent file cannot be downloaded, the status is 502.
+The response has `success`, `skipped` (the downloader already has this torrent), `message`, `info_hash`, `downloader_id` and `downloader`. When disk space protection or the site seeding capacity stops the push, `success` is `false` and `message` gives the reason, still with status 200; when the torrent file cannot be downloaded, the status is 502. If the torrent was found by a search shortly before, its size, H&R, free status and free expiry from the search result are recorded with the task (H&R protection and free-expiry cleanup use them).
 
 ## Task list
 
