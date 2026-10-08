@@ -30,6 +30,7 @@ import (
 	"github.com/sunerpy/pt-tools/config"
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
@@ -47,10 +48,14 @@ type Server struct {
 	sessions    *sessionStore // sessionID -> username，并发安全
 	logins      *loginLimiter // 登录失败计数与口令校验并发上限
 	chatopsDeps *ChatOpsDeps
-	media       *recognize.Service   // 媒体识别（M9）；为空时接口回 503
-	organizer   *organize.Service    // 整理入库（M10）；为空时接口回 503
-	subscriber  *subscribe.Service   // 订阅（M11）；为空时接口回 503
-	qaHook      func(*http.ServeMux) // qa-build-only test hook installer
+	media       *recognize.Service // 媒体识别（M9）；为空时接口回 503
+	organizer   *organize.Service  // 整理入库（M10）；为空时接口回 503
+	subscriber  *subscribe.Service // 订阅（M11）；为空时接口回 503
+	// tokens 是 API 令牌（M12）；为空时令牌管理接口回 503，App API 只认 session
+	tokens *apitoken.Store
+	// appAudit 记下 API 令牌等非 session 主体经 App API 做的写操作（M12）
+	appAudit appAuditRecorder
+	qaHook   func(*http.ServeMux) // qa-build-only test hook installer
 
 	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
 	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
@@ -113,8 +118,34 @@ func (s *Server) ensureAdminFromEnv() {
 }
 
 func (s *Server) Serve(addr string) error {
-	mux := http.NewServeMux()
 	s.ensureAdminFromEnv()
+	handler := s.buildHandler()
+	// ReadTimeout 限制读完整个请求（含请求体）的时间，避免慢速发送长期占住连接；
+	// 不设 WriteTimeout：批量下载等响应可能较久。
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	s.lifecycleMu.Lock()
+	if s.shuttingDown {
+		// 关闭信号在 Serve 起来之前就到了：不再监听，否则进程收到信号后仍会一直运行
+		s.lifecycleMu.Unlock()
+		return nil
+	}
+	s.httpServer = srv
+	s.lifecycleMu.Unlock()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// buildHandler 建出完整的路由（接口、App API、SPA 与静态资源），Serve 与测试共用（远程接入的隧道以后也用它分发）。
+func (s *Server) buildHandler() http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("/login", s.loginHandler)
 	mux.HandleFunc("/logout", s.logoutHandler)
 	mux.HandleFunc("/api/ping", s.apiPing)
@@ -175,6 +206,8 @@ func (s *Server) Serve(addr string) error {
 	s.registerOrganizeRoutes(mux)
 	s.registerSubscribeRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
+	s.registerTokenRoutes(mux)
+	s.registerAppV1Routes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
 	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))
@@ -252,28 +285,7 @@ func (s *Server) Serve(addr string) error {
 		// Serve Vue SPA index.html
 		http.ServeFileFS(w, r, distFS, "index.html")
 	})
-	handler := logMiddleware(mux)
-	// ReadTimeout 限制读完整个请求（含请求体）的时间，避免慢速发送长期占住连接；
-	// 不设 WriteTimeout：批量下载等响应可能较久。
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       5 * time.Minute,
-		IdleTimeout:       2 * time.Minute,
-	}
-	s.lifecycleMu.Lock()
-	if s.shuttingDown {
-		// 关闭信号在 Serve 起来之前就到了：不再监听，否则进程收到信号后仍会一直运行
-		s.lifecycleMu.Unlock()
-		return nil
-	}
-	s.httpServer = srv
-	s.lifecycleMu.Unlock()
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
+	return logMiddleware(mux)
 }
 
 // Shutdown gracefully stops the underlying http.Server so Serve returns.

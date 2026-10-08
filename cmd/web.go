@@ -19,6 +19,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/chatops"
 	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
@@ -230,6 +231,8 @@ var webCmd = &cobra.Command{
 		srv.SetOrganizeService(organizer)
 		subscriber := newSubscribeService(runtimeCtx, mgr, mediaSvc, organizer, userInfoService, monitorNotifier)
 		srv.SetSubscribeService(subscriber)
+		// API 令牌与 App API（M12）：令牌做的写操作记进操作审计
+		srv.SetAPITokens(apitoken.New(global.GlobalDB.DB), app.NewAuditService(global.GlobalDB.DB))
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
