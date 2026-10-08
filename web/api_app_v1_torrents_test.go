@@ -101,21 +101,3 @@ func TestAppTorrentActions(t *testing.T) {
 	many += `]}`
 	assert.Equal(t, http.StatusBadRequest, appAsWith(srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", many, "app:write").Code, "最多 100 个")
 }
-
-// 令牌做的写操作记审计：种类、令牌编号、路由与结果；读操作与 session 不记
-func TestAppAPI_AuditsTokenWrites(t *testing.T) {
-	e := newAppEnv(t)
-	write := e.token("app:read", "app:write")
-	w := e.do(appReq{method: http.MethodPost, path: "/api/app/v1/torrents/actions", bearer: write, body: `{"action":"pause","targets":[]}`})
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	e.do(appReq{method: http.MethodGet, path: "/api/app/v1/meta", bearer: write})
-	e.do(appReq{method: http.MethodPost, path: "/api/app/v1/torrents/actions", session: true, body: `{"action":"pause","targets":[]}`})
-	entries := e.audit.all()
-	require.Len(t, entries, 1, "只记令牌做的写操作")
-	got := entries[0]
-	assert.Equal(t, "api_token", got.ChannelType)
-	assert.NotEmpty(t, got.ChannelUserID)
-	assert.Equal(t, "POST /api/app/v1/torrents/actions", got.Command)
-	assert.Equal(t, "error", got.Result)
-	assert.Zero(t, got.NotificationConfID)
-}

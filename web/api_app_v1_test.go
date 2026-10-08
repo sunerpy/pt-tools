@@ -247,3 +247,44 @@ func TestTokenAdminAPI(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "没有接上令牌库")
 }
+
+// 令牌的写请求记审计，结果用审计页认得的写法：处理成功 success，失败 error:http_<状态码>，权限范围不够 denied:scope。
+// 读请求、session 的写请求与没有主体的请求不记。
+func TestAppAPI_AuditsTokenWrites(t *testing.T) {
+	e := newAppEnv(t)
+	write := e.token(apitoken.ScopeAppRead, apitoken.ScopeAppWrite)
+	w := e.do(appReq{method: http.MethodPost, path: "/api/app/v1/torrents/actions", bearer: write, body: `{"action":"pause","targets":[]}`})
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	e.do(appReq{method: http.MethodGet, path: "/api/app/v1/meta", bearer: write})
+	e.do(appReq{method: http.MethodPost, path: "/api/app/v1/torrents/actions", session: true, body: `{"action":"pause","targets":[]}`})
+	e.do(appReq{method: http.MethodPost, path: "/api/app/v1/push", body: `{}`})
+	read := e.token(apitoken.ScopeAppRead)
+	require.Equal(t, http.StatusForbidden, e.do(appReq{method: http.MethodPost, path: "/api/app/v1/push", bearer: read, body: `{}`}).Code)
+	writeOnly := e.token(apitoken.ScopeAppWrite)
+	require.Equal(t, http.StatusForbidden, e.do(appReq{method: http.MethodGet, path: "/api/app/v1/meta", bearer: writeOnly}).Code)
+
+	entries := e.audit.all()
+	require.Len(t, entries, 2, "只记令牌的写请求")
+	got := entries[0]
+	assert.Equal(t, "api_token", got.ChannelType)
+	assert.NotEmpty(t, got.ChannelUserID)
+	assert.Equal(t, "POST /api/app/v1/torrents/actions", got.Command)
+	assert.Equal(t, "error:http_400", got.Result)
+	assert.Zero(t, got.NotificationConfID)
+	assert.Equal(t, "POST /api/app/v1/push", entries[1].Command)
+	assert.Equal(t, "denied:scope", entries[1].Result)
+	assert.NotEqual(t, got.ChannelUserID, entries[1].ChannelUserID, "记的是各自的令牌编号")
+
+	h := e.srv.appHandler(appRoute{http.MethodPost, "/probe", apitoken.ScopeAppWrite, func(w http.ResponseWriter, _ *http.Request) {
+		appJSON(w, map[string]bool{"ok": true})
+	}})
+	req := httptest.NewRequest(http.MethodPost, appPrefix+"/probe", nil)
+	req.Header.Set("Authorization", "Bearer "+write)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	entries = e.audit.all()
+	require.Len(t, entries, 3)
+	assert.Equal(t, "success", entries[2].Result)
+	assert.Equal(t, "POST /api/app/v1/probe", entries[2].Command)
+}

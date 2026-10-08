@@ -130,7 +130,7 @@ func (s *Server) appPrincipal(r *http.Request) (*middleware.Principal, int) {
 	return &middleware.Principal{Kind: middleware.KindAPIToken, ID: strconv.FormatUint(uint64(tok.ID), 10), Name: tok.Name, Scopes: tok.Scopes}, 0
 }
 
-// appHandler 包一条路由：解析主体、检查权限范围；非 session 主体的写操作处理完以后记审计。
+// appHandler 包一条路由：解析主体、检查权限范围；非 session 主体的写请求记审计（权限范围不够被拒的也记）。
 func (s *Server) appHandler(rt appRoute) http.Handler {
 	write := rt.Scope == apitoken.ScopeAppWrite
 	command := rt.Method + " " + appPrefix + rt.Path
@@ -144,30 +144,39 @@ func (s *Server) appHandler(rt appRoute) http.Handler {
 			}
 			return
 		}
+		audit := write && p.Kind != middleware.KindSession
 		if !p.Has(rt.Scope) {
 			appError(w, http.StatusForbidden, "forbidden", "令牌没有 "+rt.Scope+" 权限")
+			if audit {
+				s.recordAppWrite(r, p, command, "denied:scope", http.StatusForbidden, 0)
+			}
 			return
 		}
 		r = r.WithContext(middleware.WithPrincipal(r.Context(), p))
-		if !write || p.Kind == middleware.KindSession {
+		if !audit {
 			rt.Handler(w, r)
 			return
 		}
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		rt.Handler(rec, r)
-		s.recordAppWrite(r, p, command, rec.status, time.Since(start))
+		s.recordAppWrite(r, p, command, appAuditResult(rec.status), rec.status, time.Since(start))
 	})
 }
 
-// recordAppWrite 把非 session 主体做的写操作记进操作审计（不改表结构：NotificationConfID 为 0，ChannelType 是主体种类）。
-func (s *Server) recordAppWrite(r *http.Request, p *middleware.Principal, command string, status int, took time.Duration) {
+// appAuditResult 是写请求的审计结果，和 ChatOps 的审计同一套写法（审计页按冒号前那一段分档）：
+// 成功是 success，失败是 error:http_<状态码>。
+func appAuditResult(status int) string {
+	if status >= http.StatusBadRequest {
+		return "error:http_" + strconv.Itoa(status)
+	}
+	return "success"
+}
+
+// recordAppWrite 把非 session 主体的写请求记进操作审计（不改表结构：NotificationConfID 为 0，ChannelType 是主体种类）。
+func (s *Server) recordAppWrite(r *http.Request, p *middleware.Principal, command, result string, status int, took time.Duration) {
 	if s.appAudit == nil {
 		return
-	}
-	result := "ok"
-	if status >= http.StatusBadRequest {
-		result = "error"
 	}
 	e := app.AuditEntry{
 		ChannelType: p.Kind, ChannelUserID: p.ID, Command: command, Result: result, LatencyMs: took.Milliseconds(),
