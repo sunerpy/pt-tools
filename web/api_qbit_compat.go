@@ -36,7 +36,7 @@ type QbitCompatView struct {
 	FullControl  bool   `json:"full_control"`
 	// Downloader 是实际用的那台下载器的名字（没指定时是默认下载器）；没有可用的下载器时是空的
 	Downloader string `json:"downloader"`
-	// CompatTorrents 是经兼容入口加的种子数
+	// CompatTorrents 是经兼容入口加进实际用的那台下载器、还没经它删掉的种子数
 	CompatTorrents int64 `json:"compat_torrents"`
 }
 
@@ -56,8 +56,10 @@ func (s *Server) qbitCompatView(r *http.Request, row models.QbitCompatSetting) (
 		return v, err
 	}
 	v.Downloader = ds.Name
-	if err := db.Model(&models.TorrentInfo{}).Where("download_source = ?", qbitcompat.Source).Count(&v.CompatTorrents).Error; err != nil {
-		return v, err
+	if ds.ID != 0 {
+		if err := db.Model(&models.QbitCompatTorrent{}).Where("downloader_id = ?", ds.ID).Count(&v.CompatTorrents).Error; err != nil {
+			return v, err
+		}
 	}
 	return v, nil
 }

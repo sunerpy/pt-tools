@@ -18,7 +18,7 @@ import (
 // qB 兼容入口的设置接口：只认 session；读写下载器与完全控制；回监听状态与实际用的下载器
 func TestQbitCompatSettingsAPI(t *testing.T) {
 	e := newAppEnv(t)
-	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.QbitCompatSetting{}, &models.DownloaderSetting{}, &models.TorrentInfo{}))
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.QbitCompatSetting{}, &models.QbitCompatTorrent{}, &models.DownloaderSetting{}, &models.TorrentInfo{}))
 	def := models.DownloaderSetting{Name: "qb-default", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, IsDefault: true}
 	other := models.DownloaderSetting{Name: "tr", Type: "transmission", URL: "http://127.0.0.1:2", Enabled: true}
 	require.NoError(t, global.GlobalDB.DB.Create(&def).Error)

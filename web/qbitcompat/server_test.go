@@ -155,7 +155,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "t.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.APIToken{}, &models.QbitCompatSetting{}, &models.DownloaderSetting{}, &models.TorrentInfo{}))
+	require.NoError(t, db.AutoMigrate(&models.APIToken{}, &models.QbitCompatSetting{}, &models.QbitCompatTorrent{}, &models.DownloaderSetting{}, &models.TorrentInfo{}))
 	e := &env{t: t, db: db, audit: &fakeAudit{}, now: time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)}
 	e.dlSet = models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, IsDefault: true, AutoStart: true}
 	require.NoError(t, db.Create(&e.dlSet).Error)

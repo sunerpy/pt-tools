@@ -250,6 +250,7 @@ func NewDBWithVersionAndHooks(
 		// M12：API 令牌
 		&APIToken{},
 		&QbitCompatSetting{},
+		&QbitCompatTorrent{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

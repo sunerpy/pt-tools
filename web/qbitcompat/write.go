@@ -23,16 +23,17 @@ type selection struct {
 	denied int
 }
 
-// selectTargets 解析 hashes（| 分隔；all 是全部），按设置挑出能动的种子：完全控制打开时不限，否则只要经兼容入口加的。
+// selectTargets 解析 hashes（| 分隔；all 是全部），按设置挑出能动的种子：完全控制打开时不限，否则只要经兼容入口加进这台下载器的
+// （所有权表里有、并且不是后来又从别处加回来的，见 isOwned）。
 // 下载器里没有的 hash 不理（qB 也是这样）。
 func (s *Server) selectTargets(ctx context.Context, b *backend, param string) (selection, error) {
 	_, byHash, err := s.list(b)
 	if err != nil {
 		return selection{}, err
 	}
-	var compat map[string]bool
+	var owned map[string]time.Time
 	if !b.cfg.FullControl {
-		if compat, err = s.compatHashes(ctx); err != nil {
+		if owned, err = s.owned(ctx, b.setting.ID); err != nil {
 			return selection{}, err
 		}
 	}
@@ -42,7 +43,7 @@ func (s *Server) selectTargets(ctx context.Context, b *backend, param string) (s
 		if !ok {
 			return
 		}
-		if compat != nil && !compat[h] {
+		if !b.cfg.FullControl && !isOwned(owned, h, t) {
 			sel.denied++
 			return
 		}
@@ -119,7 +120,11 @@ func (s *Server) deleteTorrents(w http.ResponseWriter, r *http.Request, c *call)
 	_ = r.ParseForm()
 	withFiles := formBool(r.Form.Get("deleteFiles"))
 	s.mutate(w, r, c, "torrents/delete", map[string]any{"delete_files": withFiles}, func(b *backend, sel selection) error {
-		return b.dl.RemoveTorrents(sel.ids, withFiles)
+		if err := b.dl.RemoveTorrents(sel.ids, withFiles); err != nil {
+			return err
+		}
+		// 删掉了就不再归兼容入口：之后同一个种子从别处加回来，没有完全控制时动不了它
+		return s.disown(r.Context(), b.setting.ID, sel.hashes)
 	})
 }
 

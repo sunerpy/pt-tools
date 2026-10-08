@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -158,19 +159,46 @@ func (s *Server) updateSetting(ctx context.Context, mod func(*models.QbitCompatS
 	})
 }
 
-// compatHashes 是经兼容入口加进这台下载器的种子（小写的 info hash）。
-func (s *Server) compatHashes(ctx context.Context) (map[string]bool, error) {
-	var hashes []string
-	if err := s.deps.DB.WithContext(ctx).Model(&models.TorrentInfo{}).
-		Where("download_source = ? AND torrent_hash IS NOT NULL AND torrent_hash <> ''", Source).
-		Pluck("torrent_hash", &hashes).Error; err != nil {
+// ownedSkew 是下载器与 pt-tools 的时钟差容许值：种子的添加时间比记下所有权的时间还晚这么多，就是后来又从别处加回来的。
+const ownedSkew = time.Hour
+
+// owned 是经兼容入口加进这台下载器的种子（小写的 info hash → 记下的时间）。
+func (s *Server) owned(ctx context.Context, downloaderID uint) (map[string]time.Time, error) {
+	var rows []models.QbitCompatTorrent
+	if err := s.deps.DB.WithContext(ctx).Where("downloader_id = ?", downloaderID).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("读取兼容入口加的种子失败: %w", err)
 	}
-	out := make(map[string]bool, len(hashes))
-	for _, h := range hashes {
-		out[strings.ToLower(h)] = true
+	out := make(map[string]time.Time, len(rows))
+	for _, r := range rows {
+		out[strings.ToLower(r.InfoHash)] = r.CreatedAt
 	}
 	return out, nil
+}
+
+// isOwned：种子要在所有权表里，并且添加时间不晚于记下的时间（容许时钟差）；下载器不给添加时间时只看表。
+func isOwned(owned map[string]time.Time, hash string, t downloader.Torrent) bool {
+	at, ok := owned[hash]
+	if !ok {
+		return false
+	}
+	return t.DateAdded <= 0 || !time.Unix(t.DateAdded, 0).After(at.Add(ownedSkew))
+}
+
+// own 记下这台下载器上经兼容入口加进去的种子（再加一次时更新时间）。
+func (s *Server) own(ctx context.Context, downloaderID uint, hash string) error {
+	row := models.QbitCompatTorrent{DownloaderID: downloaderID, InfoHash: strings.ToLower(hash), CreatedAt: s.deps.Now()}
+	return s.deps.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "downloader_id"}, {Name: "info_hash"}},
+		DoUpdates: clause.AssignmentColumns([]string{"created_at"}),
+	}).Create(&row).Error
+}
+
+// disown 去掉这些种子的所有权（经兼容入口删掉以后）。
+func (s *Server) disown(ctx context.Context, downloaderID uint, hashes []string) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	return s.deps.DB.WithContext(ctx).Where("downloader_id = ? AND info_hash IN ?", downloaderID, hashes).Delete(&models.QbitCompatTorrent{}).Error
 }
 
 // record 写一条审计；写不进去只记日志。

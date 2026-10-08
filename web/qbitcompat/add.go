@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/app"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -225,6 +226,12 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 			msg = res.Message
 		}
 		return addOutcome{err: errors.New(msg)}
+	}
+	// 确实是这次加进去的才记所有权：原来就在下载器里的（Skipped）不归兼容入口
+	if !res.Skipped {
+		if oerr := s.own(ctx, b.setting.ID, hash); oerr != nil {
+			global.GetSlogger().Warnf("[qB 兼容] 记下种子 %s 失败: %v", hash, oerr)
+		}
 	}
 	return addOutcome{ok: true, skipped: res.Skipped}
 }
