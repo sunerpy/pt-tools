@@ -179,6 +179,8 @@ type AddTorrentResult struct {
 	Message any    // 消息（错误信息或成功信息）
 	ID      string // 种子ID（成功时返回）
 	Hash    string // 种子哈希
+	// Duplicate 是下载器里原来就有这个种子、这次没有新加（Transmission 的 torrent-duplicate；qBittorrent 这时回失败）
+	Duplicate bool
 }
 
 // TorrentFilter 种子过滤条件

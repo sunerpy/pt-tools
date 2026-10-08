@@ -344,6 +344,21 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 			Message:     errMsg,
 		}, nil
 	}
+	if result.Duplicate {
+		// 下载器说原来就有它（预检没查到：查询失败，或者刚好被别处加进去）：和预检查到时一样当作跳过，
+		// 不记成这次推送的（没有新加，归还预留）
+		if pushTorrentSize > 0 {
+			GetDiskBudget().Release(pushTorrentSize)
+		}
+		sLogger().Infof("[PushTorrent] 下载器里已有这个种子，跳过: site=%s, id=%s, hash=%s, downloader=%s",
+			req.SiteID, req.TorrentID, torrentHash, dlSetting.Name)
+		return &PushTorrentResult{
+			Success:     true,
+			Skipped:     true,
+			TorrentHash: torrentHash,
+			Message:     "种子已存在于下载器中",
+		}, nil
+	}
 	// 推送成功的预留由 scheduler/cleanup_monitor 周期 Reset 归还，避免与
 	// downloader.GetIncompletePendingBytes 在 qBit 可见性窗口内双重计数
 	// （Issue #299 race，详见 disk_budget.go 顶部注释）。

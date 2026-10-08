@@ -1896,6 +1896,7 @@ func TestTrAddTorrentEx(t *testing.T) {
 		assert.True(t, res.Success)
 		assert.Equal(t, "7", res.ID)
 		assert.Equal(t, "hh", res.Hash)
+		assert.False(t, res.Duplicate)
 	})
 
 	t.Run("duplicate", func(t *testing.T) {
@@ -1908,6 +1909,7 @@ func TestTrAddTorrentEx(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, res.Success)
 		assert.Equal(t, "dd", res.Hash)
+		assert.True(t, res.Duplicate, "原来就有：告诉调用方这次没有新加")
 	})
 
 	t.Run("rpc error", func(t *testing.T) {
@@ -1977,6 +1979,7 @@ func TestTrAddTorrentFileEx(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, res.Success)
 		assert.Equal(t, "dd", res.Hash)
+		assert.True(t, res.Duplicate, "原来就有：告诉调用方这次没有新加")
 	})
 
 	t.Run("rpc error", func(t *testing.T) {

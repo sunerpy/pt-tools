@@ -908,10 +908,11 @@ func (t *TransmissionClient) AddTorrentEx(torrentURL string, opt downloader.AddT
 
 	if addResp.TorrentDuplicate != nil {
 		return downloader.AddTorrentResult{
-			Success: true,
-			Message: "Torrent already exists",
-			ID:      fmt.Sprintf("%d", addResp.TorrentDuplicate.ID),
-			Hash:    addResp.TorrentDuplicate.HashString,
+			Success:   true,
+			Message:   "Torrent already exists",
+			ID:        fmt.Sprintf("%d", addResp.TorrentDuplicate.ID),
+			Hash:      addResp.TorrentDuplicate.HashString,
+			Duplicate: true,
 		}, nil
 	}
 
@@ -1020,10 +1021,11 @@ func (t *TransmissionClient) AddTorrentFileExContext(ctx context.Context, fileDa
 
 	if duplicate {
 		return downloader.AddTorrentResult{
-			Success: true,
-			Message: "Torrent already exists",
-			ID:      fmt.Sprintf("%d", torrentID),
-			Hash:    hashString,
+			Success:   true,
+			Message:   "Torrent already exists",
+			ID:        fmt.Sprintf("%d", torrentID),
+			Hash:      hashString,
+			Duplicate: true,
 		}, nil
 	}
 
