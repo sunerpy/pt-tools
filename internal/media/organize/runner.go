@@ -165,15 +165,45 @@ func (s *Service) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case j := <-s.jobs:
-			s.qmu.Lock()
-			delete(s.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.Hash))
-			s.qmu.Unlock()
-			res, err := s.runJob(ctx, j)
+			res, err := s.handle(ctx, j)
 			if j.done != nil {
 				j.done <- jobResult{res: res, err: err}
 			}
 		}
 	}
+}
+
+// handle 整理从队列里取出的一个任务：先从去重表里拿掉，整理完清掉它带的重试标记。
+func (s *Service) handle(ctx context.Context, j job) (*Result, error) {
+	s.qmu.Lock()
+	delete(s.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.Hash))
+	s.qmu.Unlock()
+	defer s.markRetrying(j.retryIDs, false)
+	return s.runJob(ctx, j)
+}
+
+// markRetrying 标上或清掉到期重试排上队的记录。
+func (s *Service) markRetrying(ids []uint, on bool) {
+	if len(ids) == 0 {
+		return
+	}
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	for _, id := range ids {
+		if on {
+			s.retrying[id] = true
+		} else {
+			delete(s.retrying, id)
+		}
+	}
+}
+
+// Retrying 报告一条失败的记录是不是正在重试：到期重试排上队以后、整理完以前，记录里的重试时间是空的，
+// 只看记录会以为它不再重试了。
+func (s *Service) Retrying(id uint) bool {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	return s.retrying[id]
 }
 
 // runJob 整理一个种子：自动与扫描触发的要在范围里；出错的进退避，下一轮补查或扫描时再试。
@@ -353,8 +383,11 @@ func (s *Service) retryDue(ctx context.Context) {
 		if err := pending.Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
 			continue
 		}
+		// 清掉重试时间以前先标上：清掉到整理完之间，别人（订阅）看记录也知道它还在重试
+		s.markRetrying(ids, true)
 		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", nil).Error; err != nil {
 			s.cfg.Logger.Warnf("[整理入库] 清除重试时间失败: %v", err)
+			s.markRetrying(ids, false)
 			continue
 		}
 		trigger := r.Trigger
@@ -372,6 +405,7 @@ func (s *Service) retryDue(ctx context.Context) {
 			next := s.cfg.Now().Add(tickInterval)
 			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
 				Where("id IN ? AND status = ? AND next_retry_at IS NULL", ids, models.MediaTransferFailed).Update("next_retry_at", &next)
+			s.markRetrying(ids, false)
 		}
 	}
 }

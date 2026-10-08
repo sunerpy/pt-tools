@@ -92,6 +92,8 @@ type Service struct {
 	qmu     sync.Mutex
 	queued  map[string]bool
 	backoff map[string]backoffState
+	// retrying 是到期重试排上队、还没整理完的记录（retryDue 先清掉了它们的重试时间，见 Retrying）
+	retrying map[uint]bool
 
 	runMu   sync.Mutex
 	running bool
@@ -108,10 +110,11 @@ func New(cfg Config) *Service {
 		cfg.Logger = zap.NewNop().Sugar()
 	}
 	return &Service{
-		cfg:     cfg,
-		jobs:    make(chan job, jobQueueSize),
-		queued:  map[string]bool{},
-		backoff: map[string]backoffState{},
+		cfg:      cfg,
+		jobs:     make(chan job, jobQueueSize),
+		queued:   map[string]bool{},
+		backoff:  map[string]backoffState{},
+		retrying: map[uint]bool{},
 	}
 }
 
