@@ -45,25 +45,26 @@ pt-tools/
 
 ## Where to Work
 
-| Task                         | Primary location                                               | Required follow-through                                                                                                                              |
-| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a PT site                | `site/v2/definitions/`                                         | Load the `pt-add-site` skill; add fixture coverage, update extension `KNOWN_SITES`, run `make check-sites`                                           |
-| Add a Cobra command          | `cmd/<name>.go`                                                | Register with the intended parent in `init()` and add `cmd/*_test.go`                                                                                |
-| Add an HTTP endpoint         | `web/api_<feature>.go`                                         | Register in `Server.Serve()` or a dedicated `register*Routes` helper; wrap protected routes with `s.auth`                                            |
-| Add an App API endpoint      | `web/api_app_v1*.go` (`appRoutes`)                             | Declare its scope in the route table; DTO without credentials or links plus an `assertNoSecrets` test; update `docs/reference/app-api.md` (zh/en)    |
-| Add a ChatOps command        | `internal/chatops/commands/`                                   | Register a `chatops.CommandSpec`; use injected services and preserve audit/permission flow                                                           |
-| Add a notification channel   | `internal/notify/adapter/<type>/`                              | Implement `notify.Channel`, register its factory, wire production side-effect import, test inbound/outbound lifecycle                                |
-| Change runtime config        | `core/config_store.go`, `models/config_models.go`              | Preserve partial-update semantics, encryption, and `events.ConfigChanged` publication                                                                |
-| Change DB schema             | `models/` + `models/schema_version.go`                         | Add `AutoMigrate` entry and a numbered migration when existing data needs transformation                                                             |
-| Change RSS pipeline          | `internal/common.go`, `internal/push.go`                       | Preserve downloader-selection, disk-budget, site-capacity, idempotency, and notification gates                                                       |
-| Change scheduler behavior    | `scheduler/`                                                   | Preserve managed-torrent boundaries, cancellation, monitor idempotency, and event debouncing                                                         |
-| Change site login monitoring | `internal/sitelogin/`, `scheduler/login_reminder_monitor.go`   | Keep all I/O behind site/v2 or Cloak drivers and keep the shared per-site single-flight gate                                                         |
-| Change browser helper        | `tools/browser-extension/`                                     | Run extension typecheck/tests plus `make check-sites`                                                                                                |
-| Change media recognition     | `internal/media/` (`meta`, `words`, `tmdb`, `recognize`)       | Add misparsed titles to `meta/testdata/corpus.json`; TMDB key and proxy stay encrypted and out of errors; tests use httptest only                    |
-| Change library organizing    | `internal/media/` (`transfer`, `scrape`, `server`, `organize`) | One history row per source file; never overwrite a foreign target; check file IDs before deleting library files; hardlink tests run in `t.TempDir()` |
-| Change subscriptions         | `internal/media/subscribe/`                                    | Push only through `internal.PushTorrentToDownloader`; RSS offers must not block; upgrades replace library files through organize `Retire` only       |
-| Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`        | Do not claim a transport/server exists; the current package is contract-only                                                                         |
-| Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths         | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`                                    |
+| Task                         | Primary location                                               | Required follow-through                                                                                                                                          |
+| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a PT site                | `site/v2/definitions/`                                         | Load the `pt-add-site` skill; add fixture coverage, update extension `KNOWN_SITES`, run `make check-sites`                                                       |
+| Add a Cobra command          | `cmd/<name>.go`                                                | Register with the intended parent in `init()` and add `cmd/*_test.go`                                                                                            |
+| Add an HTTP endpoint         | `web/api_<feature>.go`                                         | Register in `Server.Serve()` or a dedicated `register*Routes` helper; wrap protected routes with `s.auth`                                                        |
+| Change the qB entrance       | `web/qbitcompat/`                                              | Keep qB WebUI v2 field names/status codes (contract test against `testdata/qb_fields.json`), redact tracker passkeys, keep the compat-only write scope and audit |
+| Add an App API endpoint      | `web/api_app_v1*.go` (`appRoutes`)                             | Declare its scope in the route table; DTO without credentials or links plus an `assertNoSecrets` test; update `docs/reference/app-api.md` (zh/en)                |
+| Add a ChatOps command        | `internal/chatops/commands/`                                   | Register a `chatops.CommandSpec`; use injected services and preserve audit/permission flow                                                                       |
+| Add a notification channel   | `internal/notify/adapter/<type>/`                              | Implement `notify.Channel`, register its factory, wire production side-effect import, test inbound/outbound lifecycle                                            |
+| Change runtime config        | `core/config_store.go`, `models/config_models.go`              | Preserve partial-update semantics, encryption, and `events.ConfigChanged` publication                                                                            |
+| Change DB schema             | `models/` + `models/schema_version.go`                         | Add `AutoMigrate` entry and a numbered migration when existing data needs transformation                                                                         |
+| Change RSS pipeline          | `internal/common.go`, `internal/push.go`                       | Preserve downloader-selection, disk-budget, site-capacity, idempotency, and notification gates                                                                   |
+| Change scheduler behavior    | `scheduler/`                                                   | Preserve managed-torrent boundaries, cancellation, monitor idempotency, and event debouncing                                                                     |
+| Change site login monitoring | `internal/sitelogin/`, `scheduler/login_reminder_monitor.go`   | Keep all I/O behind site/v2 or Cloak drivers and keep the shared per-site single-flight gate                                                                     |
+| Change browser helper        | `tools/browser-extension/`                                     | Run extension typecheck/tests plus `make check-sites`                                                                                                            |
+| Change media recognition     | `internal/media/` (`meta`, `words`, `tmdb`, `recognize`)       | Add misparsed titles to `meta/testdata/corpus.json`; TMDB key and proxy stay encrypted and out of errors; tests use httptest only                                |
+| Change library organizing    | `internal/media/` (`transfer`, `scrape`, `server`, `organize`) | One history row per source file; never overwrite a foreign target; check file IDs before deleting library files; hardlink tests run in `t.TempDir()`             |
+| Change subscriptions         | `internal/media/subscribe/`                                    | Push only through `internal.PushTorrentToDownloader`; RSS offers must not block; upgrades replace library files through organize `Retire` only                   |
+| Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`        | Do not claim a transport/server exists; the current package is contract-only                                                                                     |
+| Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths         | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`                                                |
 
 ## Runtime Wiring
 
@@ -122,8 +123,9 @@ client free space
 ### API tokens and the App API
 
 - Requests have a principal: a browser session (all scopes) or an API token (`ptt_<id>_<secret>`, exact scopes `app:read`, `app:write`, `mcp:read`, `mcp:write`, `qbit:compat`). The database stores only the SHA-256 of the secret.
-- Tokens reach only `/api/app/v1/*` (later also `/mcp` and the qB-compatible port). Existing `/api/*`, ChatOps routes, token management and the SPA stay session-only through `s.auth`.
-- Token writes are audited into `ActionAudit` with `channel_type` `api_token`, the token ID as the user, and ChatOps' result vocabulary (`success`, `error:…`, `denied:…`).
+- Tokens reach only `/api/app/v1/*` and the qB-compatible entrance (`web/qbitcompat`, its own listener from `--qbit-compat-addr` / `PT_QBIT_COMPAT_ADDR`; later also `/mcp`). Existing `/api/*`, ChatOps routes, token management and the SPA stay session-only through `s.auth`.
+- Token writes are audited into `ActionAudit` with `channel_type` `api_token` (App API) or `qbit_compat` (qB entrance), the token ID as the user, and ChatOps' result vocabulary (`success`, `error:…`, `denied:…`).
+- The qB entrance pushes only through `internal.PushTorrentToDownloader`; links are accepted only when `TrackerResolver.ResolveDownloadURL` maps them to an enabled site (pt-tools downloads via site/v2, never the client's URL); magnets are refused; writes touch only torrents it added unless Full control is on.
 
 ### Notifications and ChatOps
 

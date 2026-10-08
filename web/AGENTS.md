@@ -23,6 +23,8 @@ web/
 ├── api_maintenance.go           # Authenticated cleanup preview/confirm
 ├── api_version.go / api_log_level.go / api_favicon.go / api_levels.go
 ├── api_tokens.go                # API token admin (/api/tokens), session only
+├── api_qbit_compat.go           # qB-compatible entrance settings (/api/qbit-compat), session only
+├── qbitcompat/                  # qB WebUI API v2 subset on its own port (M13): SID login with qbit:compat tokens
 ├── api_app_v1*.go               # App API v1: route table with scopes, principals, audit, DTOs
 ├── middleware/principal.go      # Request principal (session / api_token / remote_device), Bearer parsing
 ├── frontend/                    # Vue application source
@@ -74,6 +76,7 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 | `/api/filter-rules`, `/api/rss/*`                      | Filtering and RSS associations               |
 | `/api/chatops/*`                                       | Channels, bindings, audit, RSS delivery logs |
 | `/api/tokens`, `/api/app/v1/*`                         | API token admin; App API for tokens          |
+| `/api/qbit-compat`                                     | qB-compatible entrance settings and status   |
 | `/api/cloak/*`, `/api/extension-actions/*`             | Cloak and extension integration              |
 | `/api/maintenance/clean`                               | Preview/confirmed maintenance cleanup        |
 | `/api/version/*`                                       | Check/runtime metadata/self-upgrade          |
