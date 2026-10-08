@@ -161,11 +161,11 @@ The response:
 
 Pushes one torrent to a downloader: pt-tools downloads the torrent file from the site, then applies the same disk space protection and site seeding capacity checks as an RSS push.
 
-| Field                                    | Description                                                                                                    |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `site`, `torrent_id`                     | Required, taken from a search result                                                                           |
-| `downloader_id`                          | The downloader to push to; when empty, the default downloader, or the first enabled one if there is no default |
-| `title`, `category`, `tags`, `save_path` | Optional: the title for the record, and the category, tags and save folder in the downloader                   |
+| Field                                    | Description                                                                                                                            |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `site`, `torrent_id`                     | Required, taken from a search result                                                                                                   |
+| `downloader_id`                          | The downloader to push to; when empty, the default downloader, or the first enabled one if there is no default                         |
+| `title`, `category`, `tags`, `save_path` | Optional: the title for the record (the name in the torrent file when empty), and the category, tags and save folder in the downloader |
 
 The response has `success`, `skipped` (the downloader already has this torrent), `message`, `info_hash`, `downloader_id` and `downloader`. When disk space protection or the site seeding capacity stops the push, `success` is `false` and `message` gives the reason, still with status 200; when the torrent file cannot be downloaded, the status is 502.
 
