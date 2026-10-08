@@ -117,3 +117,21 @@ func TestCreateCategoryAndTags(t *testing.T) {
 	}
 	assert.Equal(t, []string{"POST /api/v2/torrents/createCategory success", "POST /api/v2/torrents/createTags success"}, cmds)
 }
+
+// qbittorrent-api 把布尔值写成 True/False（Python 的 str(True)）：qB 不分大小写，兼容入口也一样
+func TestBoolParamsCaseInsensitive(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	e.markCompat(hashMovie)
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/delete", url.Values{"hashes": {hashMovie}, "deleteFiles": {"True"}}, ck).Code)
+	assert.Equal(t, []string{"remove " + hashMovie + " data=true"}, e.dl.got())
+	names := func(reverse string) []string {
+		var out []string
+		for _, item := range decode[[]map[string]any](t, e.do(http.MethodGet, "/api/v2/torrents/info", url.Values{"sort": {"size"}, "reverse": {reverse}}, ck)) {
+			out = append(out, item["name"].(string))
+		}
+		return out
+	}
+	assert.Equal(t, names("true"), names("True"))
+	assert.Equal(t, "Dune.Part.Two.2024.2160p", names("TRUE")[0])
+}

@@ -206,6 +206,9 @@ func (s *Server) Addr() string {
 	return ""
 }
 
+// formBool 读布尔参数：qB 不分大小写，qbittorrent-api 发的是 Python 的 True/False。
+func formBool(v string) bool { return strings.EqualFold(strings.TrimSpace(v), "true") }
+
 // text 写纯文本回应（qB 的大多数接口回纯文本）。
 func text(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")

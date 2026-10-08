@@ -210,3 +210,22 @@ func TestAddAnyFieldName(t *testing.T) {
 	assert.Len(t, e.gotPushes(), 2)
 	assert.Equal(t, http.StatusUnsupportedMediaType, e.postAdd(ck, [][]byte{[]byte("bad")}, nil).Code)
 }
+
+// 添加时的 paused/stopped 也不分大小写（qbittorrent-api 发的是 True）
+func TestAddPausedCaseInsensitive(t *testing.T) {
+	e := newEnv(t)
+	e.withSites()
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	for i, v := range []string{"True", "TRUE", "false"} {
+		w := e.postAdd(ck, [][]byte{torrentFile(fmt.Sprintf("p%d", i), "https://qa.example/announce", "")}, map[string]string{"paused": v})
+		require.Equal(t, "Ok.", w.Body.String())
+	}
+	p := e.gotPushes()
+	require.Len(t, p, 3)
+	assert.True(t, p[0].AddPaused)
+	assert.True(t, p[1].AddPaused)
+	assert.False(t, p[2].AddPaused)
+	w := e.postAdd(ck, [][]byte{torrentFile("s", "https://qa.example/announce", "")}, map[string]string{"stopped": "True"})
+	require.Equal(t, "Ok.", w.Body.String())
+	assert.True(t, e.gotPushes()[3].AddPaused, "qB 5 的 stopped")
+}

@@ -48,7 +48,7 @@ func parseAddOptions(f url.Values) addOptions {
 	o := addOptions{
 		savePath: strings.TrimSpace(f.Get("savepath")), category: strings.TrimSpace(f.Get("category")),
 		rename: strings.TrimSpace(f.Get("rename")), tags: splitTags(f.Get("tags")),
-		paused: f.Get("paused") == "true" || f.Get("stopped") == "true",
+		paused: formBool(f.Get("paused")) || formBool(f.Get("stopped")),
 	}
 	// upLimit、dlLimit 是字节每秒；推送用 KB/s，不足 1 KB/s 的按 1 KB/s
 	toKBs := func(v string) int {

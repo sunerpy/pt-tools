@@ -286,7 +286,7 @@ func (s *Server) torrentsInfo(w http.ResponseWriter, r *http.Request, _ *call) {
 		out = append(out, t)
 	}
 	if key := q.Get("sort"); key != "" {
-		sortTorrents(out, key, q.Get("reverse") == "true")
+		sortTorrents(out, key, formBool(q.Get("reverse")))
 	}
 	out = page(out, q.Get("offset"), q.Get("limit"))
 	writeJSON(w, out)

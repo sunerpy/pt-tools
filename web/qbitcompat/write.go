@@ -115,7 +115,7 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request, c *call) {
 // deleteTorrents 是 torrents/delete（deleteFiles=true 时连数据一起删）。
 func (s *Server) deleteTorrents(w http.ResponseWriter, r *http.Request, c *call) {
 	_ = r.ParseForm()
-	withFiles := r.Form.Get("deleteFiles") == "true"
+	withFiles := formBool(r.Form.Get("deleteFiles"))
 	s.mutate(w, r, c, "torrents/delete", map[string]any{"delete_files": withFiles}, func(b *backend, sel selection) error {
 		return b.dl.RemoveTorrents(sel.ids, withFiles)
 	})
