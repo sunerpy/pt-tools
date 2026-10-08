@@ -1246,48 +1246,55 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	writeJSON(w, s.collectTransferStats(r.Context(), dm, records))
+}
+
+// transferProbeParallel 是同时探测几台下载器。
+const transferProbeParallel = 4
+
+// collectTransferStats 读这些下载器现在的传输状态与剩余空间，几台同时探测。取不到实例的那台不在结果里；
+// 取到实例但状态与剩余空间都读不出来的记 Reachable=false 与原因。ctx 结束时不再等还没回来的那几台
+// （它们的请求有各自的超时），已经读到的照常给。顺序和 records 一样。
+func (s *Server) collectTransferStats(ctx context.Context, dm *downloader.DownloaderManager, records []downloaderRecord) DownloaderTransferStatsResponse {
+	type probe struct {
+		i    int
+		item DownloaderTransferStatItem
+		ok   bool
+	}
+	results := make(chan probe, len(records))
+	sem := make(chan struct{}, transferProbeParallel)
+	for i, rec := range records {
+		go func() {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				results <- probe{i: i}
+				return
+			}
+			defer func() { <-sem }()
+			item, ok := s.probeTransfer(ctx, dm, rec)
+			results <- probe{i: i, item: item, ok: ok}
+		}()
+	}
+	got := make([]*DownloaderTransferStatItem, len(records))
+collect:
+	for range records {
+		select {
+		case p := <-results:
+			if p.ok {
+				got[p.i] = &p.item
+			}
+		case <-ctx.Done():
+			break collect
+		}
+	}
 	resp := DownloaderTransferStatsResponse{
 		Downloaders: make([]DownloaderTransferStatItem, 0, len(records)),
 	}
-
-	ctx := r.Context()
-	for _, rec := range records {
-		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
-		if dlErr != nil {
+	for _, item := range got {
+		if item == nil {
 			continue
 		}
-
-		item := DownloaderTransferStatItem{
-			DownloaderID:   rec.ID,
-			DownloaderName: rec.Name,
-			DownloaderType: rec.Type,
-		}
-
-		status, statusErr := dl.GetClientStatus()
-		if statusErr == nil {
-			item.UploadSpeed = status.UpSpeed
-			item.DownloadSpeed = status.DlSpeed
-			item.Uploaded = status.UpData
-			item.Downloaded = status.DlData
-			item.SessionUploaded = status.SessionUpData
-			item.SessionDownloaded = status.SessionDlData
-		}
-
-		freeSpace, fsErr := dl.GetClientFreeSpace(ctx)
-		if fsErr == nil {
-			item.FreeSpace = freeSpace
-		}
-
-		// 两个探测任一成功就算连得上：有的客户端（或权限配置）拿不到剩余空间，
-		// 但状态照样能回，那台机器是活的。两个都失败才是「这一轮没连上」。
-		item.Reachable = statusErr == nil || fsErr == nil
-		if !item.Reachable {
-			item.Error = statusErr.Error()
-		} else {
-			// 只在连得上的时候问版本，且问到就缓存 —— 断线的那台不必为这一格再等一次超时
-			item.ClientVersion = s.clientVersionOf(rec.ID, rec.URL, dl)
-		}
-
 		resp.TotalUploadSpeed += item.UploadSpeed
 		resp.TotalDownloadSpeed += item.DownloadSpeed
 		resp.TotalUploaded += item.Uploaded
@@ -1295,8 +1302,47 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		resp.TotalSessionUploaded += item.SessionUploaded
 		resp.TotalSessionDownloaded += item.SessionDownloaded
 		resp.TotalFreeSpace += item.FreeSpace
-		resp.Downloaders = append(resp.Downloaders, item)
+		resp.Downloaders = append(resp.Downloaders, *item)
+	}
+	return resp
+}
+
+// probeTransfer 读一台下载器的传输状态、剩余空间与版本；取不到实例时 ok 为假。
+func (s *Server) probeTransfer(ctx context.Context, dm *downloader.DownloaderManager, rec downloaderRecord) (DownloaderTransferStatItem, bool) {
+	dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
+	if dlErr != nil {
+		return DownloaderTransferStatItem{}, false
 	}
 
-	writeJSON(w, resp)
+	item := DownloaderTransferStatItem{
+		DownloaderID:   rec.ID,
+		DownloaderName: rec.Name,
+		DownloaderType: rec.Type,
+	}
+
+	status, statusErr := dl.GetClientStatus()
+	if statusErr == nil {
+		item.UploadSpeed = status.UpSpeed
+		item.DownloadSpeed = status.DlSpeed
+		item.Uploaded = status.UpData
+		item.Downloaded = status.DlData
+		item.SessionUploaded = status.SessionUpData
+		item.SessionDownloaded = status.SessionDlData
+	}
+
+	freeSpace, fsErr := dl.GetClientFreeSpace(ctx)
+	if fsErr == nil {
+		item.FreeSpace = freeSpace
+	}
+
+	// 两个探测任一成功就算连得上：有的客户端（或权限配置）拿不到剩余空间，
+	// 但状态照样能回，那台机器是活的。两个都失败才是「这一轮没连上」。
+	item.Reachable = statusErr == nil || fsErr == nil
+	if !item.Reachable {
+		item.Error = statusErr.Error()
+	} else {
+		// 只在连得上的时候问版本，且问到就缓存 —— 断线的那台不必为这一格再等一次超时
+		item.ClientVersion = s.clientVersionOf(rec.ID, rec.URL, dl)
+	}
+	return item, true
 }

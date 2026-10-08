@@ -59,6 +59,14 @@ func TestAppSubscriptions(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Equal(t, []int{1}, list[0].Progress.Missing)
 
+	// 订阅的消息里有推送失败时下载器给的错误：交出去时去掉下载器的地址
+	require.NoError(t, global.GlobalDB.DB.Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).
+		Update("message", `推送失败: Post "http://10.0.0.5:8080/api/v2/torrents/add": dial tcp 10.0.0.5:8080: connect: connection refused`).Error)
+	w = appAsWith(srv.appSubscriptions, http.MethodGet, "/api/app/v1/subscriptions", "", "app:read")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "10.0.0.5")
+	assert.Contains(t, w.Body.String(), "connection refused")
+
 	w = appWithID(srv.appSubscriptionDetail, http.MethodGet, "/api/app/v1/subscriptions/"+id, id, "")
 	require.Equal(t, http.StatusOK, w.Code)
 	assertNoSecrets(t, w.Body.Bytes())

@@ -49,5 +49,5 @@ make check
 以下设计文档只有中文，记录的是接口契约和后续方向，不表示相应能力已经发布：
 
 - [ChatOps / MCP / Agent 架构](../design/chatops-mcp-agent.md)
-- [MCP Server 接口契约](../design/phase4-mcp.md)
+- [MCP Server 设计](../design/phase4-mcp.md)
 - [AI Agent 设计](../design/phase5-agent.md)

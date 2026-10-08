@@ -20,6 +20,21 @@ pt-tools web --host 0.0.0.0 --port 8080
 
 Docker 镜像通过环境变量 `PT_HOST`、`PT_PORT` 设置这两项，其余环境变量见[安装](../guide/install.md)和[配置说明](../configuration.md)。
 
+## pt-tools mcp
+
+把运行中的 pt-tools 的 [MCP](../guide/mcp.md) 工具接到标准输入输出，给 Claude Desktop 这类只支持 stdio 的 MCP 客户端用。它连上 `--url` 指定的 pt-tools，把那里的工具原样转发；不打开数据库，也不启动调度器，所以可以放在客户端那台机器上运行。
+
+```bash
+PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
+```
+
+| 参数      | 说明                                                                                                               | 默认值                  |
+| --------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| `--url`   | pt-tools 的地址；只给主机与端口时补上 `/mcp`。不填时看环境变量 `PT_TOOLS_MCP_URL`                                  | `http://127.0.0.1:8080` |
+| `--token` | 有「MCP 读取」或「MCP 操作」权限的 API 令牌。不填时看环境变量 `PT_TOOLS_MCP_TOKEN`；放在命令行里会出现在进程列表中 | 无                      |
+
+连接成功时在标准错误输出一行提示，标准输出只用于 MCP 协议。
+
 ## pt-tools secret
 
 导出或导入用于加密站点 Cookie 和通知凭证的密钥。

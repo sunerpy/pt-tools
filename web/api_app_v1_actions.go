@@ -16,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
+	"github.com/sunerpy/pt-tools/web/middleware"
 )
 
 // App API v1 的搜索、推送与签到。
@@ -257,8 +258,11 @@ type AppPushResult struct {
 
 const appPushTimeout = 60 * time.Second
 
-// appPushSource 是 App 推送的种子记录的来源。
-const appPushSource = "app_push"
+// appPushSource 是 App 推送的种子记录的来源；经 MCP 的 push_torrent 推的记 mcpPushSource。
+const (
+	appPushSource = "app_push"
+	mcpPushSource = "mcp_push"
+)
 
 // appTorrentIDRe 是推送接受的种子编号：各站点的编号都是数字或短的字母数字串，有的站点驱动把它直接拼进下载地址，
 // 所以不收 &、/、空格之类的字符。
@@ -319,20 +323,24 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 			req.Title = parsed.Name
 		}
 	}
+	source := appPushSource
+	if p := middleware.PrincipalFrom(r.Context()); p != nil && p.Kind == middleware.KindMCP {
+		source = mcpPushSource
+	}
 	res, err := internal.PushTorrentToDownloader(ctx, internal.PushTorrentRequest{
 		SiteID: req.Site, TorrentID: req.TorrentID, TorrentData: data, Title: req.Title, Category: req.Category,
-		Tags: req.Tags, SavePath: req.SavePath, DownloaderID: dl.ID, Source: appPushSource, Meta: pushMeta(req.Site, req.TorrentID, data),
+		Tags: req.Tags, SavePath: req.SavePath, DownloaderID: dl.ID, Source: source, Meta: pushMeta(req.Site, req.TorrentID, data),
 	})
 	out := AppPushResult{DownloaderID: dl.ID, Downloader: dl.Name}
 	switch {
 	case err != nil:
-		out.Message = appRedact(err.Error())
+		out.Message = appRedactAddr(err.Error())
 	case res == nil || !res.Success:
 		if res != nil {
-			out.Message, out.InfoHash = appRedact(res.Message), res.TorrentHash
+			out.Message, out.InfoHash = appRedactAddr(res.Message), res.TorrentHash
 		}
 	default:
-		out.Success, out.Skipped, out.InfoHash, out.Message = true, res.Skipped, res.TorrentHash, appRedact(res.Message)
+		out.Success, out.Skipped, out.InfoHash, out.Message = true, res.Skipped, res.TorrentHash, appRedactAddr(res.Message)
 	}
 	if !out.Success {
 		appSetOutcome(r, "error:push_failed")

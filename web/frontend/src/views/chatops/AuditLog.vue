@@ -30,6 +30,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   api_token: "API 令牌",
   // qB 兼容入口的写请求与登录失败（web/qbitcompat）
   qbit_compat: "qB 兼容",
+  // MCP 写工具的调用（internal/mcp）
+  mcp: "MCP",
 };
 
 /*
@@ -43,6 +45,7 @@ const CHANNEL_SHORT: Record<string, string> = {
   wecom_webhook: "企业微信",
   api_token: "API 令牌",
   qbit_compat: "qB 兼容",
+  mcp: "MCP",
 };
 
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {

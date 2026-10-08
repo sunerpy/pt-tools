@@ -16,6 +16,8 @@ const (
 	KindSession      = "session"
 	KindAPIToken     = "api_token"
 	KindRemoteDevice = "remote_device"
+	// KindMCP 是经 /mcp 调工具的 API 令牌（工具在进程内调用 App API）
+	KindMCP = "mcp"
 )
 
 // Principal 是发起请求的主体。session 拥有全部权限范围；令牌与设备只有自己的。

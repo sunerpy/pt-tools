@@ -52,6 +52,7 @@
 - [API 令牌](guide/api-tokens.md)：给手机 App 与脚本用的令牌：权限、有效期、撤销与审计。
 - [App API](reference/app-api.md)：令牌能调用的接口：认证、约定、错误码与接口清单。
 - [qB 兼容入口](guide/qbit-compat.md)：让 MoviePilot、IYUU、autobrr、Sonarr/Radarr 把 pt-tools 当成 qBittorrent：开启、客户端怎么填、能做什么。
+- [MCP](guide/mcp.md)：让 Claude、Cursor、Cherry Studio 这类 AI 助手调用 pt-tools：令牌、客户端怎么填、工具清单与审计。
 
 ## 参考
 
@@ -65,7 +66,7 @@
 - [开发指南](development.md)：固定工具链、构建门禁、代码规范、站点定义与 fixture 测试。
 - [品牌标识](brand.md)：标志文件、变体选择、最小尺寸与留白规则。
 - [ChatOps / MCP / Agent 架构](design/chatops-mcp-agent.md)：能力分层、权限模型与当前实现边界。
-- [MCP Server 接口契约](design/phase4-mcp.md)：未来 MCP 工具、传输与安全边界。
+- [MCP Server 设计](design/phase4-mcp.md)：MCP 工具、传输与安全边界的设计记录（用法见 [MCP](guide/mcp.md)）。
 - [AI Agent 设计](design/phase5-agent.md)：未来 Agent 模式、接入路径与非目标。
 
 > [!NOTE]

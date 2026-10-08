@@ -36,6 +36,8 @@ type fakeDownloader struct {
 	trackerErr     error
 	addResult      downloader.AddTorrentResult
 	addErr         error
+	// statusBlock 不为空时 GetClientStatus 等它关掉才回（测请求结束时不再等）
+	statusBlock chan struct{}
 }
 
 func (f *fakeDownloader) Authenticate() error { return nil }
@@ -49,6 +51,9 @@ func (f *fakeDownloader) GetClientVersion() (string, error) {
 }
 
 func (f *fakeDownloader) GetClientStatus() (downloader.ClientStatus, error) {
+	if f.statusBlock != nil {
+		<-f.statusBlock
+	}
 	return f.status, f.statusErr
 }
 

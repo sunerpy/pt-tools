@@ -77,6 +77,9 @@ type Server struct {
 
 	// background 跟踪处理器派生的后台任务（如自动禁用不可用站点），测试据此等任务结束再清理临时目录。
 	background sync.WaitGroup
+
+	// checkUpdates 是 App API 的 /updates 查新版本用的（version.Checker；测试里换成假的，不访问 GitHub）
+	checkUpdates func(ctx context.Context, opts version.CheckOptions) (*version.VersionCheckResult, error)
 }
 
 // goBackground 在后台执行 fn，并计入 background。
@@ -96,6 +99,7 @@ func NewServer(store *core.ConfigStore, mgr *scheduler.Manager) *Server {
 		sessions:       newSessionStore(),
 		logins:         newLoginLimiter(),
 		clientVersions: map[string]string{},
+		checkUpdates:   version.GetChecker().CheckForUpdates,
 	}
 }
 
@@ -212,6 +216,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerTokenRoutes(mux)
 	s.registerQbitCompatRoutes(mux)
 	s.registerAppV1Routes(mux)
+	s.registerMCPRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
 	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))

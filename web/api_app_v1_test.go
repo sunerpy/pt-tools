@@ -18,6 +18,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/version"
 )
 
 type fakeAppAudit struct {
@@ -54,6 +55,10 @@ func newAppEnv(t *testing.T) *appEnv {
 	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.APIToken{}))
 	e := &appEnv{t: t, srv: srv, tokens: apitoken.New(global.GlobalDB.DB), audit: &fakeAppAudit{}}
 	srv.SetAPITokens(e.tokens, e.audit)
+	// 查新版本不访问 GitHub
+	srv.checkUpdates = func(context.Context, version.CheckOptions) (*version.VersionCheckResult, error) {
+		return &version.VersionCheckResult{CurrentVersion: "v1.0.0-test"}, nil
+	}
 	srv.sessions.put("sess-app", "admin")
 	e.handler = srv.buildHandler()
 	return e

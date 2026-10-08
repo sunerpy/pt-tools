@@ -50,6 +50,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | POST   | `/sites/{site}/attend`       | Operate    | Sign in now                                                                   |
 | GET    | `/favicon/{site}`            | Read       | Site icon                                                                     |
 | GET    | `/torrents`                  | Read       | Torrents in the downloaders                                                   |
+| GET    | `/downloaders`               | Read       | Downloaders with their current speed and free space                           |
 | POST   | `/torrents/actions`          | Operate    | Pause, resume and delete torrents                                             |
 | POST   | `/search`                    | Read       | Multi-site search                                                             |
 | POST   | `/push`                      | Operate    | Push a search result to a downloader                                          |
@@ -63,6 +64,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | POST   | `/subscriptions/{id}/search` | Operate    | Search now                                                                    |
 | DELETE | `/subscriptions/{id}`        | Operate    | Delete a subscription                                                         |
 | GET    | `/explore`                   | Read       | Explore: TMDB trending, popular and search                                    |
+| GET    | `/updates`                   | Read       | Whether a newer release exists                                                |
 
 Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST but needs only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
 
@@ -79,19 +81,25 @@ Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST 
     "overview",
     "sites",
     "torrents",
+    "downloaders",
     "tasks",
     "search",
     "push",
     "attendance",
     "brush",
     "media",
-    "subscriptions"
+    "subscriptions",
+    "updates"
   ],
   "principal": { "kind": "api_token", "name": "My phone", "scopes": ["app:read", "app:write"] }
 }
 ```
 
-`principal.kind` is `api_token` (a token) or `session` (a web sign-in); `scopes` are the caller's permissions, so a client can decide which actions to show.
+`principal.kind` is `api_token` (a token) or `session` (a web sign-in); `features` lists the feature groups of this version (earlier versions have no `downloaders` and `updates`); `scopes` are the caller's permissions, so a client can decide which actions to show.
+
+### GET /updates
+
+Whether a newer release exists: `current_version`, `has_update`, `new_releases` (each with `version`, `name`, `published_at`, `url` and `changelog`, plus `prerelease: true` for previews) and `checked_at`. With `include_prerelease=1` preview releases count too. The result is cached for a while instead of asking GitHub every time; it never upgrades. When it cannot check and has no earlier result it returns 502 (`upstream`).
 
 ## Overview and sites
 
@@ -120,7 +128,11 @@ Signs in to the site now and responds with the same object as `attendance` in `/
 
 The site icon shown in the web interface. The response is an image, not JSON.
 
-## Torrents in the downloaders
+## Downloaders
+
+### GET /downloaders
+
+The enabled downloaders: `id`, `name`, `type` (`qbittorrent` or `transmission`), `default`, `reachable` (status or free space could be read this time), `error` (why not), `version`, `upload_speed`, `download_speed`, `uploaded`, `downloaded` (the downloader's own totals) and `free_space`. No downloader address, username or password.
 
 ### GET /torrents
 

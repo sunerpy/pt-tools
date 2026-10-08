@@ -118,7 +118,7 @@ func (s *Server) appMediaHistory(w http.ResponseWriter, r *http.Request) {
 		out.Items = append(out.Items, AppMediaHistory{
 			ID: h.ID, MediaType: h.MediaType, TMDBID: h.TMDBID, Title: h.Title, Year: h.Year, Season: h.Season, Episode: h.Episode,
 			EpisodeEnd: h.EpisodeEnd, TorrentName: h.TorrentName, Library: h.LibraryName, TargetPath: h.TargetPath, Mode: h.Mode,
-			Size: h.Size, Status: h.Status, Message: appRedact(h.Message), CreatedAt: h.CreatedAt.Unix(),
+			Size: h.Size, Status: h.Status, Message: appRedactAddr(h.Message), CreatedAt: h.CreatedAt.Unix(),
 		})
 	}
 	appJSON(w, out)
@@ -190,7 +190,7 @@ func appSubscription(v subscribe.SubscriptionView) AppSubscription {
 	out := AppSubscription{
 		ID: sub.ID, MediaType: sub.MediaType, TMDBID: sub.TMDBID, Season: sub.Season, Title: sub.Title, OriginalTitle: sub.OriginalTitle,
 		Year: sub.Year, PosterPath: sub.PosterPath, Status: sub.Status, Upgrade: sub.Upgrade, Source: sub.Source,
-		TotalEpisodes: sub.TotalEpisodes, Message: appRedact(sub.Message), LastSearchAt: unixPtr(sub.LastSearchAt),
+		TotalEpisodes: sub.TotalEpisodes, Message: appRedactAddr(sub.Message), LastSearchAt: unixPtr(sub.LastSearchAt),
 		NextSearchAt: unixPtr(sub.NextSearchAt), CreatedAt: sub.CreatedAt.Unix(), Progress: AppProgress{Missing: []int{}},
 	}
 	if p := v.Progress; p != nil {
@@ -275,7 +275,7 @@ func (s *Server) appSubscriptionDetail(w http.ResponseWriter, r *http.Request) {
 	for _, t := range d.TorrentList {
 		out.Torrents = append(out.Torrents, AppSubscriptionTorrent{
 			Site: t.SiteName, TorrentID: t.TorrentID, Title: t.Title, Status: t.Status, Episode: t.Episode, EpisodeEnd: t.EpisodeEnd,
-			Complete: t.Complete, Size: t.SizeBytes, Message: appRedact(t.Message), CreatedAt: t.CreatedAt.Unix(),
+			Complete: t.Complete, Size: t.SizeBytes, Message: appRedactAddr(t.Message), CreatedAt: t.CreatedAt.Unix(),
 		})
 	}
 	appJSON(w, out)
@@ -357,7 +357,7 @@ func (s *Server) appSubscriptionSearch(w http.ResponseWriter, r *http.Request) {
 		appSubscribeError(w, err)
 		return
 	}
-	appJSON(w, map[string]string{"message": appRedact(msg)})
+	appJSON(w, map[string]string{"message": appRedactAddr(msg)})
 }
 
 func (s *Server) appSubscriptionDelete(w http.ResponseWriter, r *http.Request) {
