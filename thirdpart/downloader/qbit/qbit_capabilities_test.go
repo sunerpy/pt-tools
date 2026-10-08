@@ -202,3 +202,24 @@ func TestQbitCreateCategory(t *testing.T) {
 	status = http.StatusBadRequest
 	require.Error(t, c.CreateCategory("", ""))
 }
+
+// 按 ctx 添加种子文件：ctx 取消时请求跟着结束，不等下载器回应
+func TestQbitAddTorrentFileExContextCancels(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release) // 先放走处理函数，srv.Close 才不会等它
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.ContextAdder = c
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.AddTorrentFileExContext(ctx, []byte("d8:announce3:abc4:infod6:lengthi1e4:name1:a12:piece lengthi16384e6:pieces20:xxxxxxxxxxxxxxxxxxxxee"), downloader.AddTorrentOptions{})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second)
+}

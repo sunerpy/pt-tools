@@ -929,6 +929,11 @@ func (t *TransmissionClient) AddTorrentEx(torrentURL string, opt downloader.AddT
 
 // AddTorrentFileEx 添加种子文件到下载器（新接口）
 func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	return t.AddTorrentFileExContext(context.Background(), fileData, opt)
+}
+
+// AddTorrentFileExContext 同 AddTorrentFileEx，torrent-add 与随后的 torrent-set、torrent-start 都受 ctx 约束。
+func (t *TransmissionClient) AddTorrentFileExContext(ctx context.Context, fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
 	// Transmission 使用 base64 编码的种子文件
 	metainfo := base64.StdEncoding.EncodeToString(fileData)
 
@@ -957,7 +962,7 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 		args["labels"] = labels
 	}
 
-	resp, err := t.doRequest("torrent-add", args)
+	resp, err := t.doRequestContext(ctx, "torrent-add", args)
 	if err != nil {
 		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
 	}
@@ -991,7 +996,7 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 			setArgs["downloadLimit"] = dlBytes / 1024
 			setArgs["downloadLimited"] = true
 		}
-		if _, err := t.doRequest("torrent-set", setArgs); err != nil {
+		if _, err := t.doRequestContext(ctx, "torrent-set", setArgs); err != nil {
 			return downloader.AddTorrentResult{
 				Success: false,
 				Message: fmt.Sprintf("torrent added but failed to set speed limits: %v", err),
@@ -1002,7 +1007,7 @@ func (t *TransmissionClient) AddTorrentFileEx(fileData []byte, opt downloader.Ad
 
 		// 如果用户本来希望自动启动（opt.AddAtPaused=false），此时触发 start
 		if !opt.AddAtPaused {
-			if _, err := t.doRequest("torrent-start", map[string]any{"ids": []int{torrentID}}); err != nil {
+			if _, err := t.doRequestContext(ctx, "torrent-start", map[string]any{"ids": []int{torrentID}}); err != nil {
 				return downloader.AddTorrentResult{
 					Success: false,
 					Message: fmt.Sprintf("torrent added with limits but failed to start: %v", err),

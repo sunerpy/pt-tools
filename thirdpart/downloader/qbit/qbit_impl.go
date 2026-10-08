@@ -1336,6 +1336,11 @@ func (q *QbitClient) AddTorrentEx(torrentURL string, opt downloader.AddTorrentOp
 
 // AddTorrentFileEx 添加种子文件到下载器（新接口）
 func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	return q.AddTorrentFileExContext(context.Background(), fileData, opt)
+}
+
+// AddTorrentFileExContext 同 AddTorrentFileEx，上传请求受 ctx 约束：ctx 取消或超时时请求跟着结束。
+func (q *QbitClient) AddTorrentFileExContext(ctx context.Context, fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -1367,7 +1372,7 @@ func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrent
 		return downloader.AddTorrentResult{Success: false, Message: closeErr.Error()}, closeErr
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", uploadURL, body)
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, body)
 	if err != nil {
 		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
 	}

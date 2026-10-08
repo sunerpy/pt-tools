@@ -51,6 +51,12 @@ type CategoryCreator interface {
 	CreateCategory(name, savePath string) error
 }
 
+// ContextAdder 按 ctx 添加种子文件：ctx 取消或超时时，正在进行的请求跟着结束（qB 兼容入口的添加、关闭时要它）。
+// qBittorrent 与 Transmission 都实现；不实现的下载器只能用不可取消的 AddTorrentFileEx。
+type ContextAdder interface {
+	AddTorrentFileExContext(ctx context.Context, fileData []byte, opt AddTorrentOptions) (AddTorrentResult, error)
+}
+
 // BulkTrackerReader 一次读出全部种子的 tracker 列表（键是小写 info hash）。
 // Transmission 的 torrent-get 能一次带回 trackerStats；qBittorrent 只能逐个读，不实现。
 type BulkTrackerReader interface {

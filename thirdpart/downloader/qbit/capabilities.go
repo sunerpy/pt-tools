@@ -19,6 +19,7 @@ var (
 	_ downloader.TrackerReader     = (*QbitClient)(nil)
 	_ downloader.TorrentTagRemover = (*QbitClient)(nil)
 	_ downloader.CategoryCreator   = (*QbitClient)(nil)
+	_ downloader.ContextAdder      = (*QbitClient)(nil)
 )
 
 // RemoveTorrentTags 从这些种子上去掉标签（tags 逗号分隔；为空时去掉全部），别的种子不动。

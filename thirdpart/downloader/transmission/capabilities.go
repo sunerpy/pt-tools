@@ -13,6 +13,7 @@ var (
 	_ downloader.TrackerEditor     = (*TransmissionClient)(nil)
 	_ downloader.TrackerReader     = (*TransmissionClient)(nil)
 	_ downloader.BulkTrackerReader = (*TransmissionClient)(nil)
+	_ downloader.ContextAdder      = (*TransmissionClient)(nil)
 )
 
 // GetTorrentTrackersContext 读取一个种子的 tracker 列表；请求受 ctx 约束。
