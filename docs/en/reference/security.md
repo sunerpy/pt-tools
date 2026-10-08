@@ -37,6 +37,7 @@ The notification channel list never returns credentials; they are decrypted and 
 - A session with no requests for 30 days expires. At most 256 sessions are kept; beyond that the one unused for longest is dropped. Changing the password ends every other session on other browsers and devices; the session that made the change stays signed in.
 - After 10 failed sign-ins from one IP within 15 minutes (unknown usernames included), that IP cannot sign in for 15 minutes. Behind a reverse proxy pt-tools sees only the proxy's address, so failures from everyone behind it are counted together.
 - Apart from the sign-in page, static files and the health check `/api/ping`, every page and API requires you to be signed in. `/api/ping` returns only the status and the version.
+- The [App API](app-api.md) (`/api/app/v1/`) also accepts [API tokens](../guide/api-tokens.md). A token calls the App API with the permissions chosen when it was created; it cannot reach any other API or manage tokens. The database stores only the SHA-256 digest of each token.
 - The initial account is described in [Install](../guide/install.md); change its password the first time you sign in. If you forget it, reset it with `PT_ADMIN_RESET`, as described in [Configuration](../configuration.md).
 
 ## What it connects to
@@ -60,7 +61,7 @@ When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; 
 
 ## Deployment advice
 
-- Do not expose the web port directly to the internet. For remote access, put it behind a reverse proxy with HTTPS, or reach it over a VPN. The session cookie is not marked Secure, so over plain HTTP someone on the same network could capture it.
+- Do not expose the web port directly to the internet. For remote access, put it behind a reverse proxy with HTTPS, or reach it over a VPN. The session cookie is not marked Secure, so over plain HTTP someone on the same network could capture it, and the same goes for API tokens.
 - Back up `torrents.db` and `secret.key` together and encrypt the backup; see [Upgrades and backups](../guide/upgrade.md).
 - ChatOps runs commands only from accounts linked with a binding code, and QQ and Telegram channels also check the sender against the channel's allow lists first. At present every linked account has admin rights and can pause or delete torrents and manage subscriptions, so give binding codes only to people you trust. Every command is recorded in the audit log, with arguments such as tokens and passkeys redacted before they are written.
 
