@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,3 +164,27 @@ func TestHasScope(t *testing.T) {
 }
 
 func itoa(id uint) string { return strconv.FormatUint(uint64(id), 10) }
+
+// 上限在并发新建时也守得住：已有 49 个时同时来 8 个，只有 1 个成功，总数正好 50
+func TestCreateLimitConcurrent(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	for i := range maxTokens - 1 {
+		_, _, err := e.store.Create(ctx, CreateInput{Name: "t" + strconv.Itoa(i), Scopes: []string{ScopeAppRead}}, "admin")
+		require.NoError(t, err)
+	}
+	var wg sync.WaitGroup
+	var ok atomic.Int32
+	for range 8 {
+		wg.Go(func() {
+			if _, _, err := e.store.Create(ctx, CreateInput{Name: "并发", Scopes: []string{ScopeAppRead}}, "admin"); err == nil {
+				ok.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	var n int64
+	require.NoError(t, e.db.Model(&models.APIToken{}).Count(&n).Error)
+	assert.EqualValues(t, maxTokens, n)
+	assert.EqualValues(t, 1, ok.Load())
+}

@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -85,6 +86,8 @@ type Store struct {
 	db   *gorm.DB
 	now  func() time.Time
 	rand io.Reader
+	// createMu 让「数一数、再插入」成为一步，否则并发新建能越过上限。生产里只有一个 Store（cmd/web.go）。
+	createMu sync.Mutex
 }
 
 // New 建一个令牌库。
@@ -144,6 +147,8 @@ func (s *Store) Create(ctx context.Context, in CreateInput, by string) (Token, s
 	if in.ExpiresInDays < 0 || in.ExpiresInDays > maxDays {
 		return Token{}, "", fmt.Errorf("%w: 有效期要在 0（不过期）到 %d 天之间", ErrInvalid, maxDays)
 	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
 	var n int64
 	if err := s.db.WithContext(ctx).Model(&models.APIToken{}).Count(&n).Error; err != nil {
 		return Token{}, "", fmt.Errorf("读取令牌失败: %w", err)
