@@ -32,19 +32,33 @@ type session struct {
 }
 
 // sessions 是内存里的 SID 表：滑动 1 小时过期，最多 256 个，超出时淘汰最久没用的。重启以后客户端重新登录。
+// 会话没了（过期、被淘汰、登出、令牌失效）时在锁外调 onDrop。
 type sessions struct {
-	mu sync.Mutex
-	m  map[string]*session
+	mu     sync.Mutex
+	m      map[string]*session
+	onDrop func(sid string)
 }
 
-func newSessions() *sessions { return &sessions{m: map[string]*session{}} }
+func newSessions(onDrop func(sid string)) *sessions {
+	return &sessions{m: map[string]*session{}, onDrop: onDrop}
+}
+
+func (s *sessions) dropped(sids ...string) {
+	if s.onDrop == nil {
+		return
+	}
+	for _, sid := range sids {
+		s.onDrop(sid)
+	}
+}
 
 func (s *sessions) put(sid string, sess *session) {
+	var gone []string
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for k, v := range s.m {
 		if sess.seen.Sub(v.seen) > sessionTTL {
 			delete(s.m, k)
+			gone = append(gone, k)
 		}
 	}
 	for len(s.m) >= maxSession {
@@ -56,29 +70,37 @@ func (s *sessions) put(sid string, sess *session) {
 			}
 		}
 		delete(s.m, oldest)
+		gone = append(gone, oldest)
 	}
 	s.m[sid] = sess
+	s.mu.Unlock()
+	s.dropped(gone...)
 }
 
 func (s *sessions) get(sid string, now time.Time) (session, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	v, ok := s.m[sid]
 	if !ok {
+		s.mu.Unlock()
 		return session{}, false
 	}
 	if now.Sub(v.seen) > sessionTTL {
 		delete(s.m, sid)
+		s.mu.Unlock()
+		s.dropped(sid)
 		return session{}, false
 	}
 	v.seen = now
-	return *v, true
+	out := *v
+	s.mu.Unlock()
+	return out, true
 }
 
 func (s *sessions) drop(sid string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.m, sid)
+	s.mu.Unlock()
+	s.dropped(sid)
 }
 
 // loginLock 是登录失败的锁定：同一 IP 15 分钟内失败 5 次，锁 15 分钟。

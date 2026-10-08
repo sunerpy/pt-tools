@@ -88,10 +88,13 @@ func New(d Deps) *Server {
 	if d.Resolver == nil {
 		d.Resolver = v2.NewTrackerResolver()
 	}
-	return &Server{
-		deps: d, sessions: newSessions(), lock: newLoginLock(), observe: observeTimeout,
+	s := &Server{
+		deps: d, lock: newLoginLock(), observe: observeTimeout,
 		snaps: snapshots{m: map[uint]snapshot{}}, syncs: syncStates{m: map[string]*syncState{}},
 	}
+	// 会话没了（过期、被淘汰、登出、令牌失效）时一起丢掉它的 maindata 状态
+	s.sessions = newSessions(s.syncs.drop)
+	return s
 }
 
 // route 是一条接口：方法、处理函数、是否要登录。

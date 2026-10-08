@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -613,4 +615,94 @@ func TestMaindataIncremental(t *testing.T) {
 	stale := get(12345)
 	assert.Equal(t, true, stale["full_update"], "rid 对不上：全量")
 	assert.Len(t, stale["torrents"], 2)
+}
+
+// maindata 的状态跟着会话走：登出、令牌撤销、会话过期时一起丢掉；会话被淘汰（超过 maxSession）时也一样
+func TestMaindataStateFollowsSession(t *testing.T) {
+	e := newEnv(t)
+	states := func() (map[string]int, int) {
+		e.srv.syncs.mu.Lock()
+		defer e.srv.syncs.mu.Unlock()
+		out := map[string]int{}
+		for sid, st := range e.srv.syncs.m {
+			out[sid] = len(st.torrents)
+		}
+		return out, e.srv.syncs.total
+	}
+	plain := e.token(apitoken.ScopeQbitCompat)
+	a, b, c := e.login(plain), e.login(plain), e.login(e.token(apitoken.ScopeQbitCompat))
+	for _, ck := range []*http.Cookie{a, b, c} {
+		require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/sync/maindata", nil, ck).Code)
+	}
+	m, total := states()
+	assert.Equal(t, map[string]int{a.Value: 3, b.Value: 3, c.Value: 3}, m)
+	assert.Equal(t, 9, total)
+
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/auth/logout", url.Values{}, a).Code)
+	m, total = states()
+	assert.NotContains(t, m, a.Value, "登出")
+	assert.Equal(t, 6, total)
+
+	// c 用的是后建的那个令牌：撤销它，下一次请求时会话与状态一起丢掉
+	first, err := e.tokens.Verify(context.Background(), plain)
+	require.NoError(t, err)
+	toks, err := e.tokens.List(context.Background())
+	require.NoError(t, err)
+	for _, tk := range toks {
+		if tk.ID != first.ID {
+			require.NoError(t, e.tokens.Revoke(context.Background(), tk.ID))
+		}
+	}
+	require.Equal(t, http.StatusForbidden, e.do(http.MethodGet, "/api/v2/sync/maindata", nil, c).Code)
+	m, total = states()
+	assert.NotContains(t, m, c.Value, "令牌撤销")
+	assert.Equal(t, 3, total)
+
+	e.now = e.now.Add(sessionTTL + time.Minute)
+	require.Equal(t, http.StatusForbidden, e.do(http.MethodGet, "/api/v2/sync/maindata", nil, b).Code)
+	m, total = states()
+	assert.Empty(t, m, "会话过期")
+	assert.Equal(t, 0, total)
+
+	var dropped []string
+	ss := newSessions(func(sid string) { dropped = append(dropped, sid) })
+	start := time.Unix(1700000000, 0)
+	for i := range maxSession {
+		ss.put(fmt.Sprint(i), &session{seen: start.Add(time.Duration(i) * time.Second)})
+	}
+	ss.put("new", &session{seen: start.Add(time.Hour / 2)})
+	assert.Equal(t, []string{"0"}, dropped, "淘汰最久没用的会话时一起通知")
+}
+
+// 所有会话的状态一共最多记 maxSyncTorrents 个种子：超出时丢掉最久没用的；一个状态就超过上限时不记（那个会话每次拿全量）
+func TestSyncStatesBounded(t *testing.T) {
+	x := syncStates{m: map[string]*syncState{}}
+	state := func(n int) *syncState {
+		st := &syncState{torrents: make(map[string]qbTorrent, n)}
+		for i := range n {
+			st.torrents[fmt.Sprint(i)] = qbTorrent{}
+		}
+		return st
+	}
+	keys := func() []string { return slices.Sorted(maps.Keys(x.m)) }
+	assert.Nil(t, x.swap("a", state(15000)))
+	assert.Nil(t, x.swap("b", state(5000)))
+	assert.Equal(t, []string{"a", "b"}, keys())
+	assert.Equal(t, maxSyncTorrents, x.total)
+
+	x.swap("c", state(1))
+	assert.Equal(t, []string{"b", "c"}, keys(), "超出：丢掉最久没用的 a")
+	assert.Equal(t, 5001, x.total)
+
+	assert.NotNil(t, x.swap("b", state(6000)), "同一个会话换成新的状态")
+	assert.Equal(t, 6001, x.total)
+
+	assert.NotNil(t, x.swap("c", state(maxSyncTorrents+1)), "返回上一次的")
+	assert.Equal(t, []string{"b"}, keys(), "太大的状态不记，旧的也去掉")
+	assert.Equal(t, 6000, x.total)
+
+	x.drop("b")
+	x.drop("missing")
+	assert.Empty(t, keys())
+	assert.Equal(t, 0, x.total)
 }

@@ -620,42 +620,101 @@ func (s *Server) tags(w http.ResponseWriter, r *http.Request, _ *call) {
 	writeJSON(w, allTags(b, items))
 }
 
+// maxSyncTorrents 是所有会话的 maindata 状态里一共最多记多少个种子：超出时丢掉最久没用的会话的状态（那个会话下一次拿全量）；
+// 一台下载器的种子比这还多时不记状态，每次都给全量。状态占的内存因此有上限，和登录了多少个会话无关。
+const maxSyncTorrents = 20000
+
 // syncState 是一个会话上一次 maindata 给出去的全部状态：下一次 rid 对得上时只给它的增量（qB 的做法）。
+// 种子按 qbTorrent 原样存（字符串和快照共用），不展开成字段表。
 type syncState struct {
 	rid        int64
-	torrents   map[string]map[string]any
+	torrents   map[string]qbTorrent
 	categories map[string]categoryView
 	tags       []string
 	server     map[string]any
+	// used 是最近一次记下的顺序号（淘汰最久没用的）
+	used uint64
 }
 
-// syncStates 按会话（SID）记 syncState，最多 maxSession 个（和会话表一样）。
+// syncStates 按会话（SID）记 syncState：一共最多 maxSyncTorrents 个种子、maxSession 个会话；会话没了时跟着丢掉（drop）。
 type syncStates struct {
 	mu sync.Mutex
 	m  map[string]*syncState
+	// total 是所有状态里的种子个数
+	total int
+	seq   uint64
 }
 
-// swap 记下这个会话这次的状态，返回上一次的。
+// swap 记下这个会话这次的状态，返回上一次的（没有时是 nil）。
 func (x *syncStates) swap(sid string, cur *syncState) *syncState {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	prev := x.m[sid]
-	if prev == nil && len(x.m) >= maxSession {
-		for k := range x.m {
-			delete(x.m, k)
-			break
-		}
+	if prev != nil {
+		delete(x.m, sid)
+		x.total -= len(prev.torrents)
 	}
+	n := len(cur.torrents)
+	if n > maxSyncTorrents {
+		return prev
+	}
+	for len(x.m) > 0 && (x.total+n > maxSyncTorrents || len(x.m) >= maxSession) {
+		var oldest *syncState
+		var key string
+		for k, v := range x.m {
+			if oldest == nil || v.used < oldest.used {
+				oldest, key = v, k
+			}
+		}
+		delete(x.m, key)
+		x.total -= len(oldest.torrents)
+	}
+	x.seq++
+	cur.used = x.seq
 	x.m[sid] = cur
+	x.total += n
 	return prev
 }
 
-// fieldsOf 把种子换成字段表（增量按字段比较）。
-func fieldsOf(t qbTorrent) map[string]any {
-	b, _ := json.Marshal(t)
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	return m
+// drop 丢掉这个会话的状态（会话过期、被淘汰、登出或者令牌失效时）。
+func (x *syncStates) drop(sid string) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if prev, ok := x.m[sid]; ok {
+		delete(x.m, sid)
+		x.total -= len(prev.torrents)
+	}
+}
+
+// qbField 是 qbTorrent 的一个字段：下标与 JSON 名。
+type qbField struct {
+	index int
+	name  string
+}
+
+var qbTorrentFields = func() []qbField {
+	t := reflect.TypeFor[qbTorrent]()
+	out := make([]qbField, 0, t.NumField())
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		out = append(out, qbField{index: i, name: name})
+	}
+	return out
+}()
+
+// torrentDelta 是 cur 里与 prev 不同的字段（字段都是数字、布尔或字符串，直接比较）；一样时是 nil。
+func torrentDelta(prev, cur qbTorrent) map[string]any {
+	if prev == cur {
+		return nil
+	}
+	pv, cv := reflect.ValueOf(prev), reflect.ValueOf(cur)
+	out := map[string]any{}
+	for _, f := range qbTorrentFields {
+		if v := cv.Field(f.index); !v.Equal(pv.Field(f.index)) {
+			out[f.name] = v.Interface()
+		}
+	}
+	return out
 }
 
 // changed 是 cur 里与 prev 不同（或 prev 没有）的字段。
@@ -698,11 +757,11 @@ func (s *Server) maindata(w http.ResponseWriter, r *http.Request, c *call) {
 		server[k] = x
 	}
 	cur := &syncState{
-		rid: s.rid.Add(1), torrents: make(map[string]map[string]any, len(items)),
+		rid: s.rid.Add(1), torrents: make(map[string]qbTorrent, len(items)),
 		categories: s.allCategories(b, items), tags: allTags(b, items), server: server,
 	}
 	for _, t := range items {
-		cur.torrents[t.Hash] = fieldsOf(t)
+		cur.torrents[t.Hash] = t
 	}
 	prev := s.syncs.swap(c.sid, cur)
 	if prev == nil || reqRID == 0 || reqRID != prev.rid {
@@ -714,8 +773,14 @@ func (s *Server) maindata(w http.ResponseWriter, r *http.Request, c *call) {
 	}
 	out := map[string]any{"rid": cur.rid, "full_update": false}
 	torrents := map[string]any{}
-	for h, fields := range cur.torrents {
-		if d := changed(prev.torrents[h], fields); len(d) > 0 {
+	for h, t := range cur.torrents {
+		old, ok := prev.torrents[h]
+		if !ok {
+			// 新出现的种子给全部字段
+			torrents[h] = t
+			continue
+		}
+		if d := torrentDelta(old, t); len(d) > 0 {
 			torrents[h] = d
 		}
 	}
