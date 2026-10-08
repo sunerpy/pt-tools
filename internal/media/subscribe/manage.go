@@ -65,9 +65,9 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	out := Settings{
-		Enabled: row.Enabled, SearchIntervalHours: row.SearchIntervalHours, SearchSkipSites: decodeList(row.SearchSkipSites),
+		Enabled: row.Enabled, SearchIntervalHours: row.SearchIntervalHours, SearchSkipSites: orEmpty(decodeList(row.SearchSkipSites)),
 		DefaultProfileID: row.DefaultProfileID, DefaultDownloaderID: row.DefaultDownloaderID,
-		NotifyChannels: decodeIDs(row.NotifyChannels), UpgradeOld: row.UpgradeOld,
+		NotifyChannels: orEmpty(decodeIDs(row.NotifyChannels)), UpgradeOld: row.UpgradeOld,
 	}
 	if out.SearchIntervalHours <= 0 {
 		out.SearchIntervalHours = DefaultSearchIntervalHours
@@ -576,7 +576,7 @@ func (s *Service) Subscriptions(ctx context.Context, q SubscriptionQuery) ([]Sub
 	}
 	out := make([]SubscriptionView, 0, len(rows))
 	for i := range rows {
-		v := SubscriptionView{MediaSubscription: rows[i], Sites: decodeList(rows[i].Sites), Torrents: counts[rows[i].ID]}
+		v := SubscriptionView{MediaSubscription: rows[i], Sites: orEmpty(decodeList(rows[i].Sites)), Torrents: counts[rows[i].ID]}
 		if p, err := s.progress(ctx, &rows[i], false); err == nil {
 			v.Progress = p
 		}
@@ -595,7 +595,7 @@ func (s *Service) Subscription(ctx context.Context, id uint) (*SubscriptionDetai
 	if err := s.cfg.DB.WithContext(ctx).Where("subscription_id = ?", id).Order("id DESC").Find(&torrents).Error; err != nil {
 		return nil, fmt.Errorf("读取订阅的种子失败: %w", err)
 	}
-	d := &SubscriptionDetail{SubscriptionView: SubscriptionView{MediaSubscription: row, Sites: decodeList(row.Sites), Torrents: len(torrents)}, TorrentList: torrents}
+	d := &SubscriptionDetail{SubscriptionView: SubscriptionView{MediaSubscription: row, Sites: orEmpty(decodeList(row.Sites)), Torrents: len(torrents)}, TorrentList: orEmpty(torrents)}
 	if p, err := s.progress(ctx, &row, true); err == nil {
 		d.Progress = p
 	}

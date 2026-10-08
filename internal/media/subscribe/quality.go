@@ -58,6 +58,15 @@ func decodeList(raw string) []string {
 	return out
 }
 
+// orEmpty 把 nil 换成空切片：接口按数组返回，页面不用判 null。只用在返回给接口的视图上，
+// 内部的 nil 另有含义（例如订阅的站点为 nil 表示不限）。
+func orEmpty[T any](v []T) []T {
+	if v == nil {
+		return []T{}
+	}
+	return v
+}
+
 func encodeList(v []string) string {
 	if len(v) == 0 {
 		return ""
@@ -69,8 +78,8 @@ func encodeList(v []string) string {
 // profileOf 解开库里的质量档案。
 func profileOf(r models.MediaQualityProfile) Profile {
 	return Profile{
-		ID: r.ID, Name: r.Name, Resolutions: decodeList(r.Resolutions), Sources: decodeList(r.Sources), Codecs: decodeList(r.Codecs),
-		Remux: r.Remux, HDR: r.HDR, ChineseSubs: r.ChineseSubs, Free: r.Free, Groups: decodeList(r.Groups),
+		ID: r.ID, Name: r.Name, Resolutions: orEmpty(decodeList(r.Resolutions)), Sources: orEmpty(decodeList(r.Sources)), Codecs: orEmpty(decodeList(r.Codecs)),
+		Remux: r.Remux, HDR: r.HDR, ChineseSubs: r.ChineseSubs, Free: r.Free, Groups: orEmpty(decodeList(r.Groups)),
 		MinSizeGB: r.MinSizeGB, MaxSizeGB: r.MaxSizeGB, MinSeeders: r.MinSeeders, ExcludeHR: r.ExcludeHR,
 	}
 }
