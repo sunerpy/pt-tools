@@ -1,0 +1,19 @@
+package models
+
+import "time"
+
+// QbitCompatSetting 是 qB 兼容入口的设置（只有 ID 1 一行，路线图 M13）。监听地址不在这里：它是启动参数。
+type QbitCompatSetting struct {
+	ID uint `gorm:"primaryKey" json:"-"`
+	// DownloaderID 是兼容入口背后的下载器；0 表示默认下载器
+	DownloaderID uint `gorm:"not null;default:0" json:"downloader_id"`
+	// FullControl 打开后，写接口能动下载器里的全部种子；关着时只动经兼容入口加的
+	FullControl bool `gorm:"not null;default:false" json:"full_control"`
+	// Categories 是客户端用 createCategory 建的分类（JSON：名字 → 保存目录）；加种子时没给目录就用它
+	Categories string `gorm:"type:text;not null;default:''" json:"-"`
+	// Tags 是客户端用 createTags 建的标签（JSON 数组）
+	Tags      string    `gorm:"type:text;not null;default:''" json:"-"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (QbitCompatSetting) TableName() string { return "qbit_compat_settings" }
