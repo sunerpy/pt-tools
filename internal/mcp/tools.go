@@ -137,7 +137,7 @@ type listSubsIn struct {
 type addSubIn struct {
 	MediaType string `json:"media_type" jsonschema:"movie or tv"`
 	TMDBID    int    `json:"tmdb_id" jsonschema:"TMDB id from explore_media"`
-	Season    int    `json:"season,omitempty" jsonschema:"season number for tv (default 1)"`
+	Season    int    `json:"season,omitempty" jsonschema:"season number for tv; the latest season when omitted"`
 	Upgrade   bool   `json:"upgrade,omitempty" jsonschema:"keep looking for better releases after the first download"`
 	Confirm   bool   `json:"confirm" jsonschema:"must be true; ask the user before calling"`
 }
