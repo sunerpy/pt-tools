@@ -20,7 +20,7 @@ const isMobile = useIsMobile();
 const tokens = ref<ApiToken[]>([]);
 const ds = useDataState();
 
-/** 现在能选的权限范围：MCP 与 qB 兼容入口上线以后再加进来 */
+/** 现在能选的权限范围：MCP 上线以后再加进来 */
 const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] = [
   {
     value: "app:read",
@@ -28,6 +28,11 @@ const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] =
     hint: "概览、站点、种子、推送记录、搜索、刷流、整理历史与订阅",
   },
   { value: "app:write", label: "操作", hint: "暂停、继续、删除种子，推送种子，签到，管理订阅" },
+  {
+    value: "qbit:compat",
+    label: "qB 兼容",
+    hint: "登录 qB 兼容入口：MoviePilot、IYUU 这类只认 qBittorrent 的工具用",
+  },
 ];
 
 const EXPIRY: readonly { value: number; label: string }[] = [
