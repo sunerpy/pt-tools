@@ -894,15 +894,15 @@ func (s *Server) apiGlobal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[Config] 异步重载配置...")
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[Config] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -957,15 +957,15 @@ func (s *Server) apiQbit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[Qbit] 异步重载配置...")
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[Qbit] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1052,8 +1052,8 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		global.GetSlogger().Infof("[Site] 站点删除成功: name=%s", name)
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			// 刷新 UserInfoService 站点注册
 			if err := RefreshSiteRegistrations(s.store); err != nil {
 				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
@@ -1064,7 +1064,7 @@ func (s *Server) apiSites(w http.ResponseWriter, r *http.Request) {
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[Site] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1165,8 +1165,8 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		global.GetSlogger().Infof("[RSS] 站点配置保存成功: site=%s", name)
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			// 刷新 UserInfoService 站点注册，成功后再请求一次登录探测
 			if err := RefreshSiteRegistrations(s.store); err != nil {
 				global.GetSlogger().Warnf("[Site] 刷新站点注册失败: %v", err)
@@ -1179,7 +1179,7 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[RSS] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
 		// 删除单条 RSS：通过查询参数 id 指定
@@ -1213,15 +1213,15 @@ func (s *Server) apiSiteDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		global.GetSlogger().Infof("[RSS] RSS 删除成功: site=%s, rss_id=%d", name, rid)
-		// 异步重新加载并触发任务重启，让 API 快速返回
-		go func() {
+		// 异步重新加载并触发任务重启，让 API 快速返回（计入后台任务：测试等它结束再清理临时目录）
+		s.goBackground(func() {
 			cfg, _ := s.store.Load()
 			if cfg != nil {
 				global.GetSlogger().Info("[RSS] 异步重载配置...")
 				s.mgr.Reload(cfg)
 				global.GetSlogger().Info("[RSS] 配置重载完成")
 			}
-		}()
+		})
 		writeJSON(w, map[string]string{"status": "deleted"})
 	case http.MethodPut:
 		s.updateSiteCredential(w, r, sg)
