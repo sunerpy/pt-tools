@@ -2764,7 +2764,7 @@ export interface DoubanItem {
   media_type: "" | MediaKind;
   tmdb_id: number;
   subscription_id: number;
-  status: "subscribed" | "unmatched";
+  status: "subscribed" | "unmatched" | "removed";
   created_at: string;
 }
 

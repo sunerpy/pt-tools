@@ -357,6 +357,18 @@ describe("订阅", () => {
         created_at: "",
       },
       {
+        id: 3,
+        source_id: 5,
+        douban_id: "3",
+        title: "奥本海默",
+        year: 2023,
+        media_type: "movie",
+        tmdb_id: 872585,
+        subscription_id: 0,
+        status: "removed",
+        created_at: "",
+      },
+      {
         id: 2,
         source_id: 5,
         douban_id: "2",
@@ -372,6 +384,7 @@ describe("订阅", () => {
     q("ms-douban-items-5")!.click();
     await vi.waitFor(() => expect(q("douban-items")!.textContent).toContain("没找到条目"));
     expect(q("douban-items")!.textContent).toContain("沙丘2 (2024)");
+    expect(q("douban-items")!.textContent).toContain("订阅已删除");
   });
 
   it("读不到时写明原因", async () => {

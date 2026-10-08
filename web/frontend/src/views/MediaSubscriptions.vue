@@ -32,6 +32,7 @@ import { formatShortDateTime } from "@/utils/format";
 import { posterURL } from "@/utils/media";
 import {
   SUB_FILTERS,
+  doubanItemState,
   profileSummary,
   progressText,
   sourceLabel,
@@ -434,7 +435,7 @@ onMounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="" width="250" align="right">
+        <el-table-column label="" width="300" align="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'active'"
@@ -728,7 +729,7 @@ onMounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="" width="210" align="right">
+        <el-table-column label="" width="260" align="right">
           <template #default="{ row }">
             <el-button
               link
@@ -809,8 +810,8 @@ onMounted(() => {
           <span class="ms-item__title"
             >{{ it.title }}<template v-if="it.year"> ({{ it.year }})</template></span
           >
-          <PtStatusPill :tone="it.status === 'subscribed' ? 'ok' : 'warn'" size="sm">{{
-            it.status === "subscribed" ? "已订阅" : "没找到条目"
+          <PtStatusPill :tone="doubanItemState(it.status).tone" size="sm">{{
+            doubanItemState(it.status).label
           }}</PtStatusPill>
         </div>
       </div>

@@ -77,6 +77,17 @@ const TORRENT_STATUS: Record<SubscriptionTorrent["status"], { label: string; ton
   replaced: { label: "已替换", tone: "neutral" },
 };
 
+const DOUBAN_ITEM: Record<string, { label: string; tone: Tone }> = {
+  subscribed: { label: "已订阅", tone: "ok" },
+  removed: { label: "订阅已删除", tone: "neutral" },
+  unmatched: { label: "没找到条目", tone: "warn" },
+};
+
+/** 豆瓣想看里一个条目的结果：建了订阅、订阅后来删掉了（不会再建）、TMDB 上没找到。 */
+export function doubanItemState(status: string): { label: string; tone: Tone } {
+  return DOUBAN_ITEM[status] ?? { label: status, tone: "neutral" };
+}
+
 export function torrentStatus(status: string): { label: string; tone: Tone } {
   return (
     TORRENT_STATUS[status as SubscriptionTorrent["status"]] ?? { label: status, tone: "neutral" }
