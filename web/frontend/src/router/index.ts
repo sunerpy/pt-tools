@@ -32,6 +32,12 @@ const router = createRouter({
       meta: { title: "API 令牌" },
     },
     {
+      path: "/mcp",
+      name: "mcp",
+      component: () => import("@/views/McpAccess.vue"),
+      meta: { title: "MCP 接入" },
+    },
+    {
       path: "/cloak-config",
       name: "cloak-config",
       component: () => import("@/views/CloakBrowserConfig.vue"),
