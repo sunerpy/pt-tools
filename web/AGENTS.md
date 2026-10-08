@@ -22,7 +22,9 @@ web/
 ├── api_filter_rule.go / api_rss_filter.go
 ├── api_maintenance.go           # Authenticated cleanup preview/confirm
 ├── api_version.go / api_log_level.go / api_favicon.go / api_levels.go
-├── middleware/bearer.go         # Scoped bearer-token middleware building block
+├── api_tokens.go                # API token admin (/api/tokens), session only
+├── api_app_v1*.go               # App API v1: route table with scopes, principals, audit, DTOs
+├── middleware/principal.go      # Request principal (session / api_token / remote_device), Bearer parsing
 ├── frontend/                    # Vue application source
 └── static/                      # Built assets embedded by Go
 ```
@@ -35,7 +37,8 @@ web/
 - Browser sessions are in memory and intentionally expire on restart.
 - Default admin credentials come from `PT_ADMIN_USER`/`PT_ADMIN_PASS`; `PT_ADMIN_RESET=1` performs a startup reset.
 - Extension origins receive narrowly scoped CORS handling in `logMiddleware`.
-- ChatOps routes are registered only when dependencies were injected.
+- ChatOps routes are registered only when dependencies were injected, and are session-only like every other `/api/*` route.
+- API tokens (`internal/apitoken`) are accepted only by the App API (`/api/app/v1/*`). Token management (`/api/tokens`) and every other route stay session-only through `s.auth`; `TestAppAPI_TokensCannotReachSessionAPIs` pins this through the real mux.
 - `Shutdown(ctx)` must remain safe before/concurrent with `Serve`; a `Shutdown` that runs before `Serve` makes the later `Serve` return without listening.
 
 ## Adding a Route
@@ -43,7 +46,7 @@ web/
 1. Put handlers in `api_<feature>.go`.
 2. Register exact paths in `Server.Serve()` or a cohesive `register*Routes` helper.
 3. Register specific paths before catch-all prefixes such as `/api/sites/` and `/api/torrents/`.
-4. Wrap protected routes with `s.auth`; use bearer middleware only for an intentionally token-scoped surface.
+4. Wrap protected routes with `s.auth`. App API routes go in `appRoutes()` with a scope instead (`app:read` for reads, `app:write` for writes; `TestAppAPI_RouteTable` checks); never accept tokens on an `s.auth` route.
 5. Validate method, path values, JSON shape/unknown fields, and body limits.
 6. Return explicit status codes and stable JSON errors.
 7. Add `httptest` coverage through the real mux when routing precedence matters.
@@ -56,6 +59,8 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 - Credential changes go through `ConfigStore` encryption and then refresh registered site instances. Never return downloader passwords or AES keys.
 - Notification list DTOs redact `ConfigJSON`; the authenticated notification-detail endpoint intentionally decrypts it for editing. Do not cache, log, or expose that detail through other route classes.
 - Sanitized errors may be returned, but upstream response bodies and signed tracker URLs must not leak.
+- App API DTOs (`App*` types) carry no cookies, API keys, passkeys, passwords, RSS addresses or download/detail links; error text goes through `appRedact`. Every App handler test runs `assertNoSecrets` on its response.
+- Non-session writes on the App API are audited into `ActionAudit` (`channel_type` = principal kind, result `success` / `error:http_<status>` / `denied:scope`), using the same result vocabulary as ChatOps so the audit page can classify them.
 
 ## Important Route Families
 
@@ -68,6 +73,7 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 | `/api/v2/torrents/*`, `/api/torrents/*`, `/api/site/*` | Push/download/manage torrents                |
 | `/api/filter-rules`, `/api/rss/*`                      | Filtering and RSS associations               |
 | `/api/chatops/*`                                       | Channels, bindings, audit, RSS delivery logs |
+| `/api/tokens`, `/api/app/v1/*`                         | API token admin; App API for tokens          |
 | `/api/cloak/*`, `/api/extension-actions/*`             | Cloak and extension integration              |
 | `/api/maintenance/clean`                               | Preview/confirmed maintenance cleanup        |
 | `/api/version/*`                                       | Check/runtime metadata/self-upgrade          |
