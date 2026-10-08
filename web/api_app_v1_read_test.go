@@ -153,3 +153,24 @@ func TestAppFavicon(t *testing.T) {
 	srv.appFavicon(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// appRedact：错误信息里的凭证都要遮住（上游的回应体、tracker 地址、裸的 key=value、地址里的用户信息与路径里的长串），普通的说明不动
+func TestAppRedactCredentials(t *testing.T) {
+	for _, c := range []struct{ in, gone string }{
+		{`Get "https://tracker.example/announce.php?passkey=QAPASS123": EOF`, "QAPASS123"},
+		{`HTTPS://Tracker.Example/a?authkey=K9`, "K9"},
+		{`下载器回应 403: passkey=abcdef123 已失效`, "abcdef123"},
+		{`token=tok_live_x; sign=s1g`, "tok_live_x"},
+		{`token=tok_live_x; sign=s1g`, "s1g"},
+		{`udp://tracker.example:6969/announce/0123456789abcdef0123`, "0123456789abcdef0123"},
+		{`https://tracker.example/0123456789abcdefABCD/announce`, "0123456789abcdefABCD"},
+		{`连不上 http://admin:hunter2@127.0.0.1:8080/api/v2/auth/login`, "hunter2"},
+		{`回应体：{"rsskey":"R5Sk3y"}`, "R5Sk3y"},
+		{`apikey 是 a1b2c3d4e5f6a7b8c9d0e1f2a3b4`, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4"},
+	} {
+		got := appRedact(c.in)
+		assert.NotContains(t, got, c.gone, c.in)
+	}
+	assert.Equal(t, "下载器拒绝：磁盘空间不足（还剩 12 GB）", appRedact("下载器拒绝：磁盘空间不足（还剩 12 GB）"))
+	assert.Equal(t, "站点 hdsky 没有启用", appRedact("站点 hdsky 没有启用"))
+}
