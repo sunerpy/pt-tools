@@ -14,10 +14,52 @@ import (
 )
 
 var (
-	_ downloader.TorrentExporter = (*QbitClient)(nil)
-	_ downloader.TrackerEditor   = (*QbitClient)(nil)
-	_ downloader.TrackerReader   = (*QbitClient)(nil)
+	_ downloader.TorrentExporter   = (*QbitClient)(nil)
+	_ downloader.TrackerEditor     = (*QbitClient)(nil)
+	_ downloader.TrackerReader     = (*QbitClient)(nil)
+	_ downloader.TorrentTagRemover = (*QbitClient)(nil)
+	_ downloader.CategoryCreator   = (*QbitClient)(nil)
+	_ downloader.ContextAdder      = (*QbitClient)(nil)
 )
+
+// RemoveTorrentTags 从这些种子上去掉标签（tags 逗号分隔；为空时去掉全部），别的种子不动。
+func (q *QbitClient) RemoveTorrentTags(ids []string, tags string) error {
+	data := url.Values{}
+	data.Set("hashes", strings.Join(ids, "|"))
+	data.Set("tags", tags)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.postForm("/api/v2/torrents/removeTags", data)
+}
+
+// CreateCategory 建分类。qB 在分类已经有了（或名字不合法）时回 409：已经有了是常见情况，不算失败。
+func (q *QbitClient) CreateCategory(name, savePath string) error {
+	data := url.Values{}
+	data.Set("category", name)
+	data.Set("savePath", savePath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, q.baseURL+"/api/v2/torrents/createCategory", strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	resp, err := q.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("建分类失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	if !q.isSuccessStatus(resp.StatusCode) {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("建分类失败: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
 
 // GetTorrentTrackersContext 读取种子的 tracker 列表；请求受 ctx 约束，ctx 取消时一起取消。
 func (q *QbitClient) GetTorrentTrackersContext(ctx context.Context, id string) ([]downloader.TorrentTracker, error) {

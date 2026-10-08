@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /*
- * API 令牌（路线图 M12）：给手机 App 这类客户端用的令牌，走 /api/app/v1。新建时只显示一次明文；撤销立即生效。
+ * API 令牌（路线图 M12、M13）：给手机 App（走 /api/app/v1）与 qB 兼容入口用的令牌。新建时只显示一次明文；撤销立即生效。
  * 令牌访问不了网页的其他接口，那些仍然要登录。画板没有这一页，沿用媒体页的样式：页头 + 面板，手机上是行卡。
  */
 import { type ApiToken, type ApiTokenScope, tokensApi } from "@/api";
@@ -20,7 +20,7 @@ const isMobile = useIsMobile();
 const tokens = ref<ApiToken[]>([]);
 const ds = useDataState();
 
-/** 现在能选的权限范围：MCP 与 qB 兼容入口上线以后再加进来 */
+/** 现在能选的权限范围：MCP 上线以后再加进来 */
 const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] = [
   {
     value: "app:read",
@@ -28,6 +28,11 @@ const SCOPES: readonly { value: ApiTokenScope; label: string; hint: string }[] =
     hint: "概览、站点、种子、推送记录、搜索、刷流、整理历史与订阅",
   },
   { value: "app:write", label: "操作", hint: "暂停、继续、删除种子，推送种子，签到，管理订阅" },
+  {
+    value: "qbit:compat",
+    label: "qB 兼容",
+    hint: "登录 qB 兼容入口：MoviePilot、IYUU 这类只认 qBittorrent 的工具用",
+  },
 ];
 
 const EXPIRY: readonly { value: number; label: string }[] = [
@@ -146,7 +151,8 @@ onMounted(load);
 <template>
   <div class="pt-cards pt-cards--wide">
     <PtHeadSub
-      >给手机 App 这类客户端用的令牌：只能访问 App 接口，网页的其他功能仍然要登录</PtHeadSub
+      >给手机 App 与 qB 兼容入口这类客户端用的令牌：只能访问 App 接口与 qB
+      兼容入口，网页的其他功能仍然要登录</PtHeadSub
     >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="tk-refresh" @click="load">

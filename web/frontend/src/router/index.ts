@@ -158,6 +158,12 @@ const router = createRouter({
       meta: { title: "IYUU 辅种" },
     },
     {
+      path: "/qbit-compat",
+      name: "qbit-compat",
+      component: () => import("@/views/QbitCompat.vue"),
+      meta: { title: "qB 兼容入口" },
+    },
+    {
       path: "/paused",
       name: "paused",
       component: () => import("@/views/PausedTorrents.vue"),

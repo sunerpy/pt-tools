@@ -162,3 +162,64 @@ func TestQbitRemoveTag(t *testing.T) {
 	assert.Equal(t, "/api/v2/torrents/deleteTags", path)
 	assert.Equal(t, "pt-tools-reseed-12", tags)
 }
+
+// 从指定的种子上去掉标签：removeTags 只动这些种子（tags 为空时去掉全部）
+func TestQbitRemoveTorrentTags(t *testing.T) {
+	var path, hashes, tags string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		path, hashes, tags = r.URL.Path, r.Form.Get("hashes"), r.Form.Get("tags")
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.TorrentTagRemover = c
+	require.NoError(t, c.RemoveTorrentTags([]string{"aa", "bb"}, "x,y"))
+	assert.Equal(t, "/api/v2/torrents/removeTags", path)
+	assert.Equal(t, "aa|bb", hashes)
+	assert.Equal(t, "x,y", tags)
+}
+
+// 建分类：createCategory；已经有了（409）不算失败
+func TestQbitCreateCategory(t *testing.T) {
+	var path, name, save string
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		path, name, save = r.URL.Path, r.Form.Get("category"), r.Form.Get("savePath")
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.CategoryCreator = c
+	require.NoError(t, c.CreateCategory("sonarr", "/tv"))
+	assert.Equal(t, "/api/v2/torrents/createCategory", path)
+	assert.Equal(t, "sonarr", name)
+	assert.Equal(t, "/tv", save)
+	status = http.StatusConflict
+	require.NoError(t, c.CreateCategory("sonarr", "/tv"), "已经有了")
+	status = http.StatusBadRequest
+	require.Error(t, c.CreateCategory("", ""))
+}
+
+// 按 ctx 添加种子文件：ctx 取消时请求跟着结束，不等下载器回应
+func TestQbitAddTorrentFileExContextCancels(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release) // 先放走处理函数，srv.Close 才不会等它
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.ContextAdder = c
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.AddTorrentFileExContext(ctx, []byte("d8:announce3:abc4:infod6:lengthi1e4:name1:a12:piece lengthi16384e6:pieces20:xxxxxxxxxxxxxxxxxxxxee"), downloader.AddTorrentOptions{})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second)
+}

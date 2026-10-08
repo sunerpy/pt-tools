@@ -2873,3 +2873,25 @@ export const tokensApi = {
   create: (data: ApiTokenInput) => api.post<ApiTokenCreated>("/api/tokens", data),
   revoke: (id: number) => api.delete<{ ok: boolean }>(`/api/tokens/${id}`),
 };
+
+/** qB 兼容入口（路线图 M13）：监听地址是启动参数，这里只读 */
+export interface QbitCompatStatus {
+  listen_addr: string;
+  listening: boolean;
+  /** 0 表示默认下载器 */
+  downloader_id: number;
+  full_control: boolean;
+  /** 实际用的下载器名字；没有可用的下载器时是空的 */
+  downloader: string;
+  compat_torrents: number;
+}
+
+export interface QbitCompatInput {
+  downloader_id: number;
+  full_control: boolean;
+}
+
+export const qbitCompatApi = {
+  get: () => api.get<QbitCompatStatus>("/api/qbit-compat"),
+  save: (data: QbitCompatInput) => api.put<QbitCompatStatus>("/api/qbit-compat", data),
+};

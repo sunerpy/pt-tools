@@ -62,6 +62,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/transfer", label: "转移做种", icon: "arrow-right-left" },
       /* 路线图 M6：画板没有这一页，沿用下载组的列表页样式 */
       { path: "/reseed", label: "IYUU 辅种", icon: "share-2" },
+      { path: "/qbit-compat", label: "qB 兼容入口", icon: "door-open" },
     ],
   },
   {

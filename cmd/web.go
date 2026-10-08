@@ -231,8 +231,15 @@ var webCmd = &cobra.Command{
 		srv.SetOrganizeService(organizer)
 		subscriber := newSubscribeService(runtimeCtx, mgr, mediaSvc, organizer, userInfoService, monitorNotifier)
 		srv.SetSubscribeService(subscriber)
-		// API 令牌与 App API（M12）：令牌做的写操作记进操作审计
-		srv.SetAPITokens(apitoken.New(global.GlobalDB.DB), app.NewAuditService(global.GlobalDB.DB))
+		// API 令牌与 App API（M12）：令牌做的写操作记进操作审计；qB 兼容入口（M13）用同一个令牌库
+		tokens, appAudit := apitoken.New(global.GlobalDB.DB), app.NewAuditService(global.GlobalDB.DB)
+		srv.SetAPITokens(tokens, appAudit)
+		// 兼容入口先建好、交给关闭流程，等信号处理装好以后才开始监听（见下面的 listen）
+		var qbitCompatServer *compatServer
+		compatAddr := qbitCompatListenAddr()
+		if compatAddr != "" {
+			qbitCompatServer = newQbitCompat(global.GlobalDB.DB, srv, mgr, store, tokens, appAudit)
+		}
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
@@ -255,10 +262,17 @@ var webCmd = &cobra.Command{
 			bs:        bs,
 			srv:       srv,
 		}
+		if qbitCompatServer != nil {
+			plan.qbitCompat = qbitCompatServer
+		}
 		if dm := mgr.GetDownloaderManager(); dm != nil {
 			plan.downloaders = dm
 		}
 		shutdownDone := installShutdownHandler(plan)
+		// 信号处理装好以后才开始接请求：之前收到信号会直接退出，正在加的种子来不及收尾
+		if qbitCompatServer != nil {
+			qbitCompatServer.listen(compatAddr)
+		}
 
 		global.GetSlogger().Infof("Web 服务启动于 %s", addr)
 		go startVersionChecker()
@@ -295,6 +309,7 @@ func init() {
 	rootCmd.AddCommand(webCmd)
 	webCmd.Flags().StringVar(&host, "host", "0.0.0.0", "服务绑定主机")
 	webCmd.Flags().IntVar(&port, "port", 8080, "服务监听端口")
+	webCmd.Flags().StringVar(&qbitCompatAddr, "qbit-compat-addr", "", "qB 兼容入口的监听地址（如 0.0.0.0:8081）；不填时看环境变量 PT_QBIT_COMPAT_ADDR，都没有就不开")
 }
 
 func getRegisteredSitesFromRegistry(registry *v2.SiteRegistry) []models.RegisteredSite {
@@ -359,6 +374,10 @@ func startVersionChecker() {
 //
 // 原来只做第 4、5 步：RSS 任务、监控器和下载器都没停，热重载还可能在关闭途中把通道建回来。
 type shutdownPlan struct {
+	// qbitCompat 是 qB 兼容入口（M13，没开时为 nil）：最先关，免得后面关下载器时还有请求进来
+	qbitCompat interface {
+		Shutdown(ctx context.Context) error
+	}
 	stopBackground func()
 	scheduler      interface{ StopAll() }
 	downloaders    interface{ CloseAll() }
@@ -393,6 +412,13 @@ func runShutdown(ctx context.Context, plan shutdownPlan) {
 	step := plan.stepTimeout
 	if step <= 0 {
 		step = chatopsShutdownPerStep
+	}
+	if plan.qbitCompat != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, step)
+		if err := plan.qbitCompat.Shutdown(stepCtx); err != nil {
+			log.Warnf("qB 兼容入口关闭出现错误: %v", err)
+		}
+		cancel()
 	}
 	if plan.stopBackground != nil {
 		if !runBounded(ctx, step, plan.stopBackground) {

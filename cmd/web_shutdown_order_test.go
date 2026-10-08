@@ -74,6 +74,7 @@ func TestRunShutdown_StopsEverythingInOrder(t *testing.T) {
 	}
 
 	runShutdown(context.Background(), shutdownPlan{
+		qbitCompat:     recordingStopper{rec: rec, name: "qbit-compat"},
 		stopBackground: func() { rec.add("background") },
 		scheduler:      recordingStopper{rec: rec, name: "scheduler"},
 		downloaders:    recordingStopper{rec: rec, name: "downloaders"},
@@ -81,7 +82,8 @@ func TestRunShutdown_StopsEverythingInOrder(t *testing.T) {
 		srv:            recordingStopper{rec: rec, name: "http"},
 	})
 
-	assert.Equal(t, []string{"background", "scheduler", "downloaders", "channels", "http"}, rec.list())
+	assert.Equal(t, []string{"qbit-compat", "background", "scheduler", "downloaders", "channels", "http"}, rec.list(),
+		"qB 兼容入口最先关：后面关下载器时不再有推送进来")
 }
 
 // 某一步停不下来（比如 RSS 任务卡在下载器请求上）时按步骤时限放弃等待，后面的步骤照常执行。

@@ -28,6 +28,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   wecom_webhook: "企业微信",
   // App API 的令牌做的写请求（web/api_app_v1.go 的 recordAppWrite），不是消息通道
   api_token: "API 令牌",
+  // qB 兼容入口的写请求与登录失败（web/qbitcompat）
+  qbit_compat: "qB 兼容",
 };
 
 /*
@@ -40,6 +42,7 @@ const CHANNEL_SHORT: Record<string, string> = {
   webhook: "Webhook",
   wecom_webhook: "企业微信",
   api_token: "API 令牌",
+  qbit_compat: "qB 兼容",
 };
 
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {

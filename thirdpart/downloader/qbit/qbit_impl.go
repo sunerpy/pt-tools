@@ -1330,12 +1330,21 @@ func (q *QbitClient) AddTorrentEx(torrentURL string, opt downloader.AddTorrentOp
 			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
 	}
+	// 5.2 以前 torrents/add 一律回 200：Ok. 是加进去了，Fails. 是一个都没加（种子无效或已经在下载器里）
+	if strings.TrimSpace(string(bodyBytes)) == "Fails." {
+		return downloader.AddTorrentResult{Success: false, Message: "添加失败（种子无效或已经在下载器里）"}, fmt.Errorf("add failed")
+	}
 
 	return downloader.AddTorrentResult{Success: true, Message: "Torrent added successfully"}, nil
 }
 
 // AddTorrentFileEx 添加种子文件到下载器（新接口）
 func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	return q.AddTorrentFileExContext(context.Background(), fileData, opt)
+}
+
+// AddTorrentFileExContext 同 AddTorrentFileEx，上传请求受 ctx 约束：ctx 取消或超时时请求跟着结束。
+func (q *QbitClient) AddTorrentFileExContext(ctx context.Context, fileData []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -1367,7 +1376,7 @@ func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrent
 		return downloader.AddTorrentResult{Success: false, Message: closeErr.Error()}, closeErr
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", uploadURL, body)
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, body)
 	if err != nil {
 		return downloader.AddTorrentResult{Success: false, Message: err.Error()}, err
 	}
@@ -1421,6 +1430,10 @@ func (q *QbitClient) AddTorrentFileEx(fileData []byte, opt downloader.AddTorrent
 			Success: false,
 			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
+	}
+	// 5.2 以前 torrents/add 一律回 200：Ok. 是加进去了，Fails. 是一个都没加（种子无效或已经在下载器里）
+	if strings.TrimSpace(string(bodyBytes)) == "Fails." {
+		return downloader.AddTorrentResult{Success: false, Message: "添加失败（种子无效或已经在下载器里）"}, fmt.Errorf("add failed")
 	}
 
 	return downloader.AddTorrentResult{

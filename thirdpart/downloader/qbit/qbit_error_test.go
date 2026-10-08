@@ -1402,3 +1402,35 @@ func TestQbitCheckTorrentExists(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// 5.2 以前 torrents/add 一律回 200：Fails. 是一个都没加（种子无效或已经在下载器里），不能当成加进去了
+func TestQbitAdd_LegacyFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Fails."))
+	}))
+	defer srv.Close()
+
+	res, err := coverageTestClient(srv.URL, false).AddTorrentFileEx(fixtureTorrentBytes(), downloader.AddTorrentOptions{})
+	require.Error(t, err)
+	assert.False(t, res.Success)
+	res, err = coverageTestClient(srv.URL, false).AddTorrentEx("magnet:?x", downloader.AddTorrentOptions{})
+	require.Error(t, err)
+	assert.False(t, res.Success)
+}
+
+// 5.2 以前回 Ok. 是加进去了
+func TestQbitAdd_LegacyOk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Ok."))
+	}))
+	defer srv.Close()
+
+	res, err := coverageTestClient(srv.URL, false).AddTorrentFileEx(fixtureTorrentBytes(), downloader.AddTorrentOptions{})
+	require.NoError(t, err)
+	assert.True(t, res.Success)
+	res, err = coverageTestClient(srv.URL, false).AddTorrentEx("magnet:?x", downloader.AddTorrentOptions{})
+	require.NoError(t, err)
+	assert.True(t, res.Success)
+}

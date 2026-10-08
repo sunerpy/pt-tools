@@ -1,0 +1,842 @@
+package qbitcompat
+
+import (
+	"cmp"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/url"
+	"reflect"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/sunerpy/pt-tools/internal/dlassistant"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader"
+)
+
+// qB 用 8640000 秒（100 天）表示 ETA 无穷大。
+const etaInfinite = 8640000
+
+// qbTorrent 是 torrents/info 的一项，字段按 qB WebUI API v2。后端是 qB 时，接口里没有的字段取 qB 原样的值。
+type qbTorrent struct {
+	AddedOn           int64   `json:"added_on"`
+	AmountLeft        int64   `json:"amount_left"`
+	AutoTMM           bool    `json:"auto_tmm"`
+	Availability      float64 `json:"availability"`
+	Category          string  `json:"category"`
+	Completed         int64   `json:"completed"`
+	CompletionOn      int64   `json:"completion_on"`
+	ContentPath       string  `json:"content_path"`
+	DlLimit           int64   `json:"dl_limit"`
+	Dlspeed           int64   `json:"dlspeed"`
+	Downloaded        int64   `json:"downloaded"`
+	DownloadedSession int64   `json:"downloaded_session"`
+	ETA               int64   `json:"eta"`
+	FLPiecePrio       bool    `json:"f_l_piece_prio"`
+	ForceStart        bool    `json:"force_start"`
+	Hash              string  `json:"hash"`
+	IsPrivate         bool    `json:"isPrivate"`
+	LastActivity      int64   `json:"last_activity"`
+	MagnetURI         string  `json:"magnet_uri"`
+	MaxRatio          float64 `json:"max_ratio"`
+	MaxSeedingTime    int64   `json:"max_seeding_time"`
+	Name              string  `json:"name"`
+	NumComplete       int64   `json:"num_complete"`
+	NumIncomplete     int64   `json:"num_incomplete"`
+	NumLeechs         int64   `json:"num_leechs"`
+	NumSeeds          int64   `json:"num_seeds"`
+	Priority          int64   `json:"priority"`
+	Progress          float64 `json:"progress"`
+	Ratio             float64 `json:"ratio"`
+	RatioLimit        float64 `json:"ratio_limit"`
+	SavePath          string  `json:"save_path"`
+	SeedingTime       int64   `json:"seeding_time"`
+	SeedingTimeLimit  int64   `json:"seeding_time_limit"`
+	SeenComplete      int64   `json:"seen_complete"`
+	SeqDl             bool    `json:"seq_dl"`
+	Size              int64   `json:"size"`
+	State             string  `json:"state"`
+	SuperSeeding      bool    `json:"super_seeding"`
+	Tags              string  `json:"tags"`
+	TimeActive        int64   `json:"time_active"`
+	TotalSize         int64   `json:"total_size"`
+	Tracker           string  `json:"tracker"`
+	UpLimit           int64   `json:"up_limit"`
+	Uploaded          int64   `json:"uploaded"`
+	UploadedSession   int64   `json:"uploaded_session"`
+	Upspeed           int64   `json:"upspeed"`
+}
+
+// rawMap 是后端 qB 原样的字段（别的下载器没有）。
+func rawMap(t downloader.Torrent) map[string]any {
+	m, _ := t.Raw.(map[string]any)
+	return m
+}
+
+func rawInt(m map[string]any, key string, def int64) int64 {
+	if v, ok := m[key].(float64); ok {
+		return int64(v)
+	}
+	return def
+}
+
+func rawFloat(m map[string]any, key string, def float64) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return def
+}
+
+func rawBool(m map[string]any, key string) bool {
+	v, _ := m[key].(bool)
+	return v
+}
+
+// toQB 把下载器的种子换成 qB 的字段。tracker 地址里的 passkey 遮住，magnet 只留 xt 与 dn。
+// labels 为真时后端是 Transmission：分类是第一个 label，标签是其余的。
+func toQB(t downloader.Torrent, labels bool) qbTorrent {
+	raw := rawMap(t)
+	hash := strings.ToLower(t.InfoHash)
+	if hash == "" {
+		hash = strings.ToLower(t.ID)
+	}
+	completed := t.TotalSize - t.AmountLeft
+	if t.AmountLeft <= 0 {
+		completed = int64(float64(t.TotalSize) * t.Progress)
+	}
+	eta := t.ETA
+	if eta < 0 {
+		eta = etaInfinite
+	}
+	q := qbTorrent{
+		AddedOn: t.DateAdded, AmountLeft: max(t.AmountLeft, 0), Availability: t.Availability, Category: t.Category,
+		Completed: completed, CompletionOn: t.CompletionOn, ContentPath: t.ContentPath,
+		DlLimit: rawInt(raw, "dl_limit", -1), Dlspeed: t.DownloadSpeed, Downloaded: t.TotalDownloaded,
+		DownloadedSession: rawInt(raw, "downloaded_session", 0), ETA: eta,
+		FLPiecePrio: rawBool(raw, "f_l_piece_prio"), ForceStart: rawBool(raw, "force_start"), Hash: hash,
+		IsPrivate: true, LastActivity: rawInt(raw, "last_activity", 0), MagnetURI: magnetOf(hash, t.Name),
+		MaxRatio: rawFloat(raw, "max_ratio", -1), MaxSeedingTime: rawInt(raw, "max_seeding_time", -1), Name: t.Name,
+		NumComplete: rawInt(raw, "num_complete", -1), NumIncomplete: rawInt(raw, "num_incomplete", -1),
+		NumLeechs: int64(t.NumPeers), NumSeeds: int64(t.NumSeeds), Priority: rawInt(raw, "priority", 0),
+		Progress: t.Progress, Ratio: t.Ratio, RatioLimit: rawFloat(raw, "ratio_limit", -2), SavePath: t.SavePath,
+		SeedingTime: t.SeedingTime, SeedingTimeLimit: rawInt(raw, "seeding_time_limit", -2),
+		SeenComplete: rawInt(raw, "seen_complete", t.CompletionOn), SeqDl: rawBool(raw, "seq_dl"),
+		Size: rawInt(raw, "size", t.TotalSize), State: qbState(t), SuperSeeding: rawBool(raw, "super_seeding"),
+		Tags: t.Tags, TimeActive: rawInt(raw, "time_active", 0), TotalSize: rawInt(raw, "total_size", t.TotalSize),
+		Tracker: redactTracker(t.Tracker), UpLimit: rawInt(raw, "up_limit", -1), Uploaded: t.TotalUploaded,
+		UploadedSession: rawInt(raw, "uploaded_session", 0), Upspeed: t.UploadSpeed,
+	}
+	if v, ok := raw["auto_tmm"].(bool); ok {
+		q.AutoTMM = v
+	}
+	if v, ok := raw["isPrivate"].(bool); ok {
+		q.IsPrivate = v
+	}
+	// 所有权的标签（OwnerTag）不给客户端看
+	if labels {
+		category, tags := splitLabels(t)
+		q.Category, q.Tags = category, strings.Join(visibleTags(tags), ",")
+	} else if hasOwnerTag(t.Tags) {
+		q.Tags = strings.Join(visibleTags(splitTags(t.Tags)), ", ")
+	}
+	return q
+}
+
+// splitLabels 把 Transmission 的 labels 拆成分类（第一个）与标签（其余）。
+// 第一个 label 是 OwnerTag 时（加的时候没有分类与别的标签）它不算分类。
+func splitLabels(t downloader.Torrent) (string, []string) {
+	labels := splitTags(t.Tags)
+	if t.Category == OwnerTag {
+		return "", labels
+	}
+	if len(labels) > 0 && labels[0] == t.Category {
+		return t.Category, labels[1:]
+	}
+	return t.Category, labels
+}
+
+// joinLabels 拼回 Transmission 的 labels：分类在第一个。
+func joinLabels(category string, tags []string) string {
+	out := make([]string, 0, len(tags)+1)
+	if category != "" {
+		out = append(out, category)
+	}
+	for _, t := range tags {
+		if t != category && !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// usesLabels 报告后端是不是 Transmission（分类与标签都在 labels 里）。
+func usesLabels(b *backend) bool { return b.setting.Type == string(downloader.DownloaderTransmission) }
+
+// qbState 是 qB 的状态值。后端是 qB 时用它原样的状态（5.x 的 stopped* 换回 4.x 的 paused*，和报的版本一致）。
+func qbState(t downloader.Torrent) string {
+	if s, ok := rawMap(t)["state"].(string); ok && s != "" {
+		switch s {
+		case "stoppedDL":
+			return "pausedDL"
+		case "stoppedUP":
+			return "pausedUP"
+		}
+		return s
+	}
+	done := t.IsCompleted || t.Progress >= 1
+	pick := func(dl, up string) string {
+		if done {
+			return up
+		}
+		return dl
+	}
+	switch t.State {
+	case downloader.TorrentDownloading:
+		if t.DownloadSpeed > 0 {
+			return "downloading"
+		}
+		return "stalledDL"
+	case downloader.TorrentSeeding:
+		if t.UploadSpeed > 0 {
+			return "uploading"
+		}
+		return "stalledUP"
+	case downloader.TorrentPaused, downloader.TorrentStopped:
+		return pick("pausedDL", "pausedUP")
+	case downloader.TorrentQueued:
+		return pick("queuedDL", "queuedUP")
+	case downloader.TorrentChecking:
+		return pick("checkingDL", "checkingUP")
+	case downloader.TorrentError:
+		return "error"
+	}
+	return "unknown"
+}
+
+// matchFilter 是 torrents/info 的 filter（按 qB 的分组）。不认识的 filter 当成 all。
+func matchFilter(q qbTorrent, filter string) bool {
+	s := q.State
+	in := func(states ...string) bool { return slices.Contains(states, s) }
+	paused := in("pausedDL", "pausedUP")
+	active := q.Dlspeed > 0 || q.Upspeed > 0 || in("downloading", "uploading", "forcedDL", "forcedUP", "metaDL", "moving")
+	switch filter {
+	case "downloading":
+		return in("downloading", "metaDL", "forcedMetaDL", "stalledDL", "checkingDL", "pausedDL", "queuedDL", "forcedDL", "allocating")
+	case "seeding":
+		return in("uploading", "stalledUP", "checkingUP", "queuedUP", "forcedUP")
+	case "completed":
+		return in("uploading", "stalledUP", "checkingUP", "pausedUP", "queuedUP", "forcedUP")
+	case "paused", "stopped":
+		return paused
+	case "resumed", "running":
+		return !paused
+	case "active":
+		return active
+	case "inactive":
+		return !active
+	case "stalled":
+		return in("stalledUP", "stalledDL")
+	case "stalled_uploading":
+		return s == "stalledUP"
+	case "stalled_downloading":
+		return s == "stalledDL"
+	case "checking":
+		return in("checkingUP", "checkingDL", "checkingResumeData")
+	case "moving":
+		return s == "moving"
+	case "errored":
+		return in("error", "missingFiles")
+	}
+	return true
+}
+
+func magnetOf(hash, name string) string {
+	m := "magnet:?xt=urn:btih:" + hash
+	if name != "" {
+		m += "&dn=" + url.QueryEscape(name)
+	}
+	return m
+}
+
+// redactTracker 遮住 tracker 地址里的 passkey（查询串与路径里的长串）；客户端靠主机认站点，够用。
+func redactTracker(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return dlassistant.RedactTrackerURL(raw)
+}
+
+// redact 遮住要交给客户端的文本里的凭证（错误信息、tracker 回复）。
+func redact(s string) string { return dlassistant.RedactTrackerMessage(s) }
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// snapshotTTL 是读接口共用的种子列表快照的有效期：客户端常一两秒轮询一次 maindata 与 info，不用每次都去读下载器的全部种子。
+const snapshotTTL = 2 * time.Second
+
+// snapshot 是一台下载器的种子列表快照（只读，几个请求共用）。
+type snapshot struct {
+	at     time.Time
+	items  []qbTorrent
+	byHash map[string]downloader.Torrent
+}
+
+type snapshots struct {
+	mu sync.Mutex
+	m  map[uint]snapshot
+}
+
+// listCached 是读接口用的种子列表：快照还新时直接用，过期了再读一次（同时来的请求等这一次，不各读各的）。
+// 回来的切片与 map 是共用的，调用方不能改。
+func (s *Server) listCached(b *backend) ([]qbTorrent, map[string]downloader.Torrent, error) {
+	s.snaps.mu.Lock()
+	defer s.snaps.mu.Unlock()
+	if sn, ok := s.snaps.m[b.setting.ID]; ok && time.Since(sn.at) < snapshotTTL {
+		return sn.items, sn.byHash, nil
+	}
+	items, byHash, err := s.fetch(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.snaps.m[b.setting.ID] = snapshot{at: time.Now(), items: items, byHash: byHash}
+	return items, byHash, nil
+}
+
+// invalidate 让这台下载器的快照作废（写操作、添加以后）。
+func (s *Server) invalidate(downloaderID uint) {
+	s.snaps.mu.Lock()
+	defer s.snaps.mu.Unlock()
+	delete(s.snaps.m, downloaderID)
+}
+
+// fetch 读绑定下载器的全部种子，换成 qB 的字段；同时给出 hash → 下载器种子 的索引（写接口要用下载器自己的编号）。
+func (s *Server) fetch(b *backend) ([]qbTorrent, map[string]downloader.Torrent, error) {
+	all, err := b.dl.GetAllTorrents()
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]qbTorrent, 0, len(all))
+	byHash := make(map[string]downloader.Torrent, len(all))
+	labels := usesLabels(b)
+	for _, t := range all {
+		q := toQB(t, labels)
+		out = append(out, q)
+		byHash[q.Hash] = t
+	}
+	return out, byHash, nil
+}
+
+// torrentsInfo 是 GET /api/v2/torrents/info（filter、category、tag、sort、reverse、limit、offset、hashes）。
+func (s *Server) torrentsInfo(w http.ResponseWriter, r *http.Request, _ *call) {
+	b, ok := s.withBackend(w, r)
+	if !ok {
+		return
+	}
+	items, _, err := s.listCached(b)
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return
+	}
+	_ = r.ParseForm()
+	q := r.Form
+	filter := q.Get("filter")
+	var hashes map[string]bool
+	if h := strings.TrimSpace(q.Get("hashes")); h != "" && h != "all" {
+		hashes = splitHashes(h)
+	}
+	out := make([]qbTorrent, 0, len(items))
+	for _, t := range items {
+		if !matchFilter(t, filter) {
+			continue
+		}
+		if hashes != nil && !hashes[t.Hash] {
+			continue
+		}
+		if c, has := q["category"]; has && t.Category != c[0] {
+			continue
+		}
+		if tg, has := q["tag"]; has && !hasTag(t.Tags, tg[0]) {
+			continue
+		}
+		out = append(out, t)
+	}
+	if key := q.Get("sort"); key != "" {
+		sortTorrents(out, key, formBool(q.Get("reverse")))
+	}
+	out = page(out, q.Get("offset"), q.Get("limit"))
+	writeJSON(w, out)
+}
+
+func splitHashes(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, h := range strings.Split(s, "|") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			out[h] = true
+		}
+	}
+	return out
+}
+
+// hasTag：tag 为空时找没有标签的种子，否则逗号分隔的标签里要有它。
+func hasTag(tags, tag string) bool {
+	if tag == "" {
+		return strings.TrimSpace(tags) == ""
+	}
+	for _, t := range strings.Split(tags, ",") {
+		if strings.TrimSpace(t) == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// sortTorrents 按回应里的任意字段排序（qB 的 sort）：数字比大小、字符串比字典序、布尔假在前。
+func sortTorrents(list []qbTorrent, key string, reverse bool) {
+	vals := make([]map[string]any, len(list))
+	for i, t := range list {
+		b, _ := json.Marshal(t)
+		_ = json.Unmarshal(b, &vals[i])
+	}
+	idx := make([]int, len(list))
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortStableFunc(idx, func(a, b int) int {
+		c := compareAny(vals[a][key], vals[b][key])
+		if reverse {
+			return -c
+		}
+		return c
+	})
+	sorted := make([]qbTorrent, len(list))
+	for i, j := range idx {
+		sorted[i] = list[j]
+	}
+	copy(list, sorted)
+}
+
+func compareAny(a, b any) int {
+	switch x := a.(type) {
+	case float64:
+		y, _ := b.(float64)
+		return cmp.Compare(x, y)
+	case string:
+		y, _ := b.(string)
+		return strings.Compare(strings.ToLower(x), strings.ToLower(y))
+	case bool:
+		y, _ := b.(bool)
+		switch {
+		case x == y:
+			return 0
+		case !x:
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+// page 是 offset（小于 0 时从末尾数）与 limit。
+func page(list []qbTorrent, offsetStr, limitStr string) []qbTorrent {
+	offset, _ := strconv.Atoi(offsetStr)
+	if offset < 0 {
+		offset = max(len(list)+offset, 0)
+	}
+	if offset > len(list) {
+		offset = len(list)
+	}
+	list = list[offset:]
+	if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit < len(list) {
+		list = list[:limit]
+	}
+	return list
+}
+
+// find 按 hash 找种子（只查这一个，不读全部）；找不到时回 404（qB 的 Torrent hash was not found）。
+func (s *Server) find(w http.ResponseWriter, r *http.Request) (*backend, downloader.Torrent, bool) {
+	b, ok := s.withBackend(w, r)
+	if !ok {
+		return nil, downloader.Torrent{}, false
+	}
+	_ = r.ParseForm()
+	hash := strings.ToLower(strings.TrimSpace(r.Form.Get("hash")))
+	if hash == "" || len(hash) > 64 {
+		text(w, http.StatusNotFound, "Torrent hash was not found")
+		return nil, downloader.Torrent{}, false
+	}
+	t, err := b.dl.GetTorrent(hash)
+	if errors.Is(err, downloader.ErrTorrentNotFound) || (err == nil && !strings.EqualFold(t.InfoHash, hash) && !strings.EqualFold(t.ID, hash)) {
+		text(w, http.StatusNotFound, "Torrent hash was not found")
+		return nil, downloader.Torrent{}, false
+	}
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return nil, downloader.Torrent{}, false
+	}
+	return b, t, true
+}
+
+// properties 是 GET /api/v2/torrents/properties?hash=。
+func (s *Server) properties(w http.ResponseWriter, r *http.Request, _ *call) {
+	b, t, ok := s.find(w, r)
+	if !ok {
+		return
+	}
+	q := toQB(t, usesLabels(b))
+	completion := q.CompletionOn
+	if completion <= 0 {
+		completion = -1
+	}
+	writeJSON(w, map[string]any{
+		"hash": q.Hash, "name": q.Name, "save_path": q.SavePath, "creation_date": -1, "piece_size": -1, "comment": "",
+		"total_wasted": 0, "total_uploaded": q.Uploaded, "total_uploaded_session": q.UploadedSession,
+		"total_downloaded": q.Downloaded, "total_downloaded_session": q.DownloadedSession, "up_limit": q.UpLimit,
+		"dl_limit": q.DlLimit, "time_elapsed": q.TimeActive, "seeding_time": q.SeedingTime,
+		"nb_connections": q.NumSeeds + q.NumLeechs, "nb_connections_limit": -1, "share_ratio": q.Ratio,
+		"addition_date": q.AddedOn, "completion_date": completion, "created_by": "", "dl_speed_avg": 0,
+		"dl_speed": q.Dlspeed, "eta": q.ETA, "last_seen": q.SeenComplete, "peers": q.NumLeechs,
+		"peers_total": q.NumIncomplete, "pieces_have": -1, "pieces_num": -1, "reannounce": 0, "seeds": q.NumSeeds,
+		"seeds_total": q.NumComplete, "total_size": q.TotalSize, "up_speed_avg": 0, "up_speed": q.Upspeed,
+		"isPrivate": q.IsPrivate,
+	})
+}
+
+// files 是 GET /api/v2/torrents/files?hash=。
+func (s *Server) files(w http.ResponseWriter, r *http.Request, _ *call) {
+	b, t, ok := s.find(w, r)
+	if !ok {
+		return
+	}
+	files, err := b.dl.GetTorrentFiles(t.ID)
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return
+	}
+	out := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		out = append(out, map[string]any{
+			"index": f.Index, "name": f.Name, "size": f.Size, "progress": f.Progress, "priority": f.Priority,
+			"is_seed": f.Progress >= 1, "piece_range": []int{0, 0}, "availability": -1,
+		})
+	}
+	writeJSON(w, out)
+}
+
+// trackers 是 GET /api/v2/torrents/trackers?hash=：地址里的 passkey 遮住，tracker 回复也过一遍遮挡。
+func (s *Server) trackers(w http.ResponseWriter, r *http.Request, _ *call) {
+	b, t, ok := s.find(w, r)
+	if !ok {
+		return
+	}
+	trackers, err := b.dl.GetTorrentTrackers(t.ID)
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return
+	}
+	out := make([]map[string]any, 0, len(trackers))
+	for _, tr := range trackers {
+		out = append(out, map[string]any{
+			"url": redactTracker(tr.URL), "status": tr.Status, "tier": 0, "num_peers": tr.Peers, "num_seeds": tr.Seeds,
+			"num_leeches": tr.Leeches, "num_downloaded": -1, "msg": redact(tr.Message),
+		})
+	}
+	writeJSON(w, out)
+}
+
+// categoryView 是 torrents/categories 的一项。
+type categoryView struct {
+	Name     string `json:"name"`
+	SavePath string `json:"savePath"`
+}
+
+// allCategories 是分类：兼容入口记下的、下载器自己的、种子上用到的。
+func (s *Server) allCategories(b *backend, items []qbTorrent) map[string]categoryView {
+	out := map[string]categoryView{}
+	// qB 的 GetClientLabels 是它的分类；Transmission 的是标签，不算分类
+	if b.setting.Type == string(downloader.DownloaderQBittorrent) {
+		if labels, err := b.dl.GetClientLabels(); err == nil {
+			for _, l := range labels {
+				if l != "" {
+					out[l] = categoryView{Name: l}
+				}
+			}
+		}
+	}
+	for _, t := range items {
+		if t.Category != "" {
+			out[t.Category] = categoryView{Name: t.Category}
+		}
+	}
+	for name, path := range categoryMap(b.cfg) {
+		out[name] = categoryView{Name: name, SavePath: path}
+	}
+	return out
+}
+
+func allTags(b *backend, items []qbTorrent) []string {
+	seen := map[string]bool{}
+	for _, t := range visibleTags(tagList(b.cfg)) {
+		seen[t] = true
+	}
+	for _, t := range items {
+		for _, tag := range strings.Split(t.Tags, ",") {
+			if tag = strings.TrimSpace(tag); tag != "" {
+				seen[tag] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// categories 是 GET /api/v2/torrents/categories。
+func (s *Server) categories(w http.ResponseWriter, r *http.Request, _ *call) {
+	b, ok := s.withBackend(w, r)
+	if !ok {
+		return
+	}
+	items, _, err := s.listCached(b)
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return
+	}
+	writeJSON(w, s.allCategories(b, items))
+}
+
+// tags 是 GET /api/v2/torrents/tags。
+func (s *Server) tags(w http.ResponseWriter, r *http.Request, _ *call) {
+	b, ok := s.withBackend(w, r)
+	if !ok {
+		return
+	}
+	items, _, err := s.listCached(b)
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return
+	}
+	writeJSON(w, allTags(b, items))
+}
+
+// maxSyncTorrents 是所有会话的 maindata 状态里一共最多记多少个种子：超出时丢掉最久没用的会话的状态（那个会话下一次拿全量）；
+// 一台下载器的种子比这还多时不记状态，每次都给全量。状态占的内存因此有上限，和登录了多少个会话无关。
+const maxSyncTorrents = 20000
+
+// syncState 是一个会话上一次 maindata 给出去的全部状态：下一次 rid 对得上时只给它的增量（qB 的做法）。
+// 种子按 qbTorrent 原样存（字符串和快照共用），不展开成字段表。
+type syncState struct {
+	rid        int64
+	torrents   map[string]qbTorrent
+	categories map[string]categoryView
+	tags       []string
+	server     map[string]any
+	// used 是最近一次记下的顺序号（淘汰最久没用的）
+	used uint64
+}
+
+// syncStates 按会话（SID）记 syncState：一共最多 maxSyncTorrents 个种子、maxSession 个会话；会话没了时跟着丢掉（drop）。
+type syncStates struct {
+	mu sync.Mutex
+	m  map[string]*syncState
+	// total 是所有状态里的种子个数
+	total int
+	seq   uint64
+}
+
+// swap 记下这个会话这次的状态，返回上一次的（没有时是 nil）。
+func (x *syncStates) swap(sid string, cur *syncState) *syncState {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	prev := x.m[sid]
+	if prev != nil {
+		delete(x.m, sid)
+		x.total -= len(prev.torrents)
+	}
+	n := len(cur.torrents)
+	if n > maxSyncTorrents {
+		return prev
+	}
+	for len(x.m) > 0 && (x.total+n > maxSyncTorrents || len(x.m) >= maxSession) {
+		var oldest *syncState
+		var key string
+		for k, v := range x.m {
+			if oldest == nil || v.used < oldest.used {
+				oldest, key = v, k
+			}
+		}
+		delete(x.m, key)
+		x.total -= len(oldest.torrents)
+	}
+	x.seq++
+	cur.used = x.seq
+	x.m[sid] = cur
+	x.total += n
+	return prev
+}
+
+// drop 丢掉这个会话的状态（会话过期、被淘汰、登出或者令牌失效时）。
+func (x *syncStates) drop(sid string) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if prev, ok := x.m[sid]; ok {
+		delete(x.m, sid)
+		x.total -= len(prev.torrents)
+	}
+}
+
+// qbField 是 qbTorrent 的一个字段：下标与 JSON 名。
+type qbField struct {
+	index int
+	name  string
+}
+
+var qbTorrentFields = func() []qbField {
+	t := reflect.TypeFor[qbTorrent]()
+	out := make([]qbField, 0, t.NumField())
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		out = append(out, qbField{index: i, name: name})
+	}
+	return out
+}()
+
+// torrentDelta 是 cur 里与 prev 不同的字段（字段都是数字、布尔或字符串，直接比较）；一样时是 nil。
+func torrentDelta(prev, cur qbTorrent) map[string]any {
+	if prev == cur {
+		return nil
+	}
+	pv, cv := reflect.ValueOf(prev), reflect.ValueOf(cur)
+	out := map[string]any{}
+	for _, f := range qbTorrentFields {
+		if v := cv.Field(f.index); !v.Equal(pv.Field(f.index)) {
+			out[f.name] = v.Interface()
+		}
+	}
+	return out
+}
+
+// changed 是 cur 里与 prev 不同（或 prev 没有）的字段。
+func changed(prev, cur map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range cur {
+		if old, ok := prev[k]; !ok || !reflect.DeepEqual(old, v) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// maindata 是 GET /api/v2/sync/maindata。rid 是这个会话上一次回应的 rid 时只给增量：变了的种子只带变了的字段，
+// 另有 torrents_removed、分类与标签的增减、变了的 server_state；rid 为 0 或对不上时给全量（full_update）。
+func (s *Server) maindata(w http.ResponseWriter, r *http.Request, c *call) {
+	b, ok := s.withBackend(w, r)
+	if !ok {
+		return
+	}
+	items, _, err := s.listCached(b)
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+		return
+	}
+	_ = r.ParseForm()
+	reqRID, _ := strconv.ParseInt(r.Form.Get("rid"), 10, 64)
+	state := s.transfer(b)
+	if free, ferr := b.dl.GetClientFreeSpace(r.Context()); ferr == nil {
+		state["free_space_on_disk"] = free
+	}
+	// 建议客户端 5 秒刷新一次（qB 默认 1.5 秒），读接口的快照也只有 2 秒
+	state["queueing"], state["use_alt_speed_limits"], state["refresh_interval"] = false, false, 5000
+	server := map[string]any{}
+	for k, v := range state {
+		// 和种子的字段一样过一遍 JSON，增量比较时数字类型一致
+		bv, _ := json.Marshal(v)
+		var x any
+		_ = json.Unmarshal(bv, &x)
+		server[k] = x
+	}
+	cur := &syncState{
+		rid: s.rid.Add(1), torrents: make(map[string]qbTorrent, len(items)),
+		categories: s.allCategories(b, items), tags: allTags(b, items), server: server,
+	}
+	for _, t := range items {
+		cur.torrents[t.Hash] = t
+	}
+	prev := s.syncs.swap(c.sid, cur)
+	if prev == nil || reqRID == 0 || reqRID != prev.rid {
+		writeJSON(w, map[string]any{
+			"rid": cur.rid, "full_update": true, "torrents": cur.torrents, "categories": cur.categories,
+			"tags": cur.tags, "server_state": cur.server,
+		})
+		return
+	}
+	out := map[string]any{"rid": cur.rid, "full_update": false}
+	torrents := map[string]any{}
+	for h, t := range cur.torrents {
+		old, ok := prev.torrents[h]
+		if !ok {
+			// 新出现的种子给全部字段
+			torrents[h] = t
+			continue
+		}
+		if d := torrentDelta(old, t); len(d) > 0 {
+			torrents[h] = d
+		}
+	}
+	if len(torrents) > 0 {
+		out["torrents"] = torrents
+	}
+	var removed []string
+	for h := range prev.torrents {
+		if _, ok := cur.torrents[h]; !ok {
+			removed = append(removed, h)
+		}
+	}
+	if len(removed) > 0 {
+		slices.Sort(removed)
+		out["torrents_removed"] = removed
+	}
+	cats := map[string]categoryView{}
+	for name, v := range cur.categories {
+		if old, ok := prev.categories[name]; !ok || old != v {
+			cats[name] = v
+		}
+	}
+	if len(cats) > 0 {
+		out["categories"] = cats
+	}
+	var catsRemoved, tagsAdded, tagsRemoved []string
+	for name := range prev.categories {
+		if _, ok := cur.categories[name]; !ok {
+			catsRemoved = append(catsRemoved, name)
+		}
+	}
+	for _, t := range cur.tags {
+		if !slices.Contains(prev.tags, t) {
+			tagsAdded = append(tagsAdded, t)
+		}
+	}
+	for _, t := range prev.tags {
+		if !slices.Contains(cur.tags, t) {
+			tagsRemoved = append(tagsRemoved, t)
+		}
+	}
+	for key, list := range map[string][]string{"categories_removed": catsRemoved, "tags": tagsAdded, "tags_removed": tagsRemoved} {
+		if len(list) > 0 {
+			slices.Sort(list)
+			out[key] = list
+		}
+	}
+	if d := changed(prev.server, cur.server); len(d) > 0 {
+		out["server_state"] = d
+	}
+	writeJSON(w, out)
+}

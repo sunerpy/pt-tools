@@ -178,3 +178,37 @@ func TestTransmissionHasNoTagRemover(t *testing.T) {
 	_, ok := any(&TransmissionClient{}).(downloader.TagRemover)
 	assert.False(t, ok)
 }
+
+// 按 ctx 添加种子文件：ctx 取消时 torrent-add 跟着结束，不等下载器回应
+func TestTransmissionAddTorrentFileExContextCancels(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Transmission-Session-Id") != "sid" {
+			w.Header().Set("X-Transmission-Session-Id", "sid")
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var req struct {
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Method == "torrent-add" {
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": "success", "arguments": map[string]any{}})
+	}))
+	defer srv.Close()
+	defer close(release) // 先放走处理函数，srv.Close 才不会等它
+	c := newCapabilityClient(t, srv.URL)
+	var _ downloader.ContextAdder = c
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.AddTorrentFileExContext(ctx, []byte("x"), downloader.AddTorrentOptions{})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second)
+}

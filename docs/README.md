@@ -51,6 +51,7 @@
 
 - [API 令牌](guide/api-tokens.md)：给手机 App 与脚本用的令牌：权限、有效期、撤销与审计。
 - [App API](reference/app-api.md)：令牌能调用的接口：认证、约定、错误码与接口清单。
+- [qB 兼容入口](guide/qbit-compat.md)：让 MoviePilot、IYUU、autobrr、Sonarr/Radarr 把 pt-tools 当成 qBittorrent：开启、客户端怎么填、能做什么。
 
 ## 参考
 
