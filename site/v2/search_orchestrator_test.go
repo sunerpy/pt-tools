@@ -330,3 +330,21 @@ func TestSearchOrchestrator_GetSite(t *testing.T) {
 	assert.Equal(t, site, o.GetSite("s1"))
 	assert.Nil(t, o.GetSite("missing"))
 }
+
+// 订阅要站点上原样的标题：RawTitles 为真时不规整（默认照旧规整，缓存键也分开）
+func TestSearchOrchestrator_Search_RawTitles(t *testing.T) {
+	o := NewSearchOrchestrator(SearchOrchestratorConfig{})
+	o.RegisterSite(&mockSearchSite{id: "site1", name: "Site 1", items: []TorrentItem{
+		{ID: "1", Title: "Dune.Part.Two.2024.2160p.UHD.BluRay.x265-QA", SourceSite: "site1"},
+	}})
+	norm, err := o.Search(context.Background(), MultiSiteSearchQuery{SearchQuery: SearchQuery{Keyword: "dune"}})
+	require.NoError(t, err)
+	assert.NotEqual(t, "Dune.Part.Two.2024.2160p.UHD.BluRay.x265-QA", norm.Items[0].Title, "默认规整标题")
+	raw, err := o.Search(context.Background(), MultiSiteSearchQuery{SearchQuery: SearchQuery{Keyword: "dune"}, RawTitles: true})
+	require.NoError(t, err)
+	assert.Equal(t, "Dune.Part.Two.2024.2160p.UHD.BluRay.x265-QA", raw.Items[0].Title)
+
+	cache := NewSearchCache(SearchCacheConfig{TTL: time.Minute, MaxSize: 10})
+	assert.NotEqual(t, cache.hashQuery(MultiSiteSearchQuery{SearchQuery: SearchQuery{Keyword: "dune"}}),
+		cache.hashQuery(MultiSiteSearchQuery{SearchQuery: SearchQuery{Keyword: "dune"}, RawTitles: true}), "缓存键分开")
+}

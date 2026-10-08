@@ -57,22 +57,24 @@ Do you want to send commands to pt-tools from a chat app?
 
 Every command starts with `/` and is sent in the private chat. Commands are case-insensitive.
 
-| Command          | What it does                                                                                                     | Permission |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------- | ---------- |
-| `/help`          | Lists every available command and how to use it                                                                  | User       |
-| `/status`        | System status: speeds, disk space and the number of active tasks                                                 | User       |
-| `/version`       | The current version and the latest available one                                                                 | User       |
-| `/tasks`         | The RSS tasks and whether they are running                                                                       | User       |
-| `/sites`         | A summary of the configured sites (name, type)                                                                   | User       |
-| `/torrents`      | Lists the torrents of each downloader, a page at a time                                                          | User       |
-| `/pause <hash>`  | Pauses a torrent (a prefix of the hash is enough)                                                                | Admin      |
-| `/resume <hash>` | Resumes a torrent                                                                                                | Admin      |
-| `/delete <hash>` | Deletes a torrent, after a confirmation                                                                          | Admin      |
-| `/signin [site]` | Signs in now; without a site, signs in every site with automatic sign-in enabled that has no result today        | Admin      |
-| `/bind <code>`   | Links the current account to pt-tools with an 8-character binding code                                           | Anyone     |
-| `/unbind`        | Unlinks the current account                                                                                      | Admin      |
-| `/addrss`        | Adds an RSS subscription interactively (a text wizard, or one line: `/addrss site \| name \| URL \| downloader`) | Admin      |
-| `/delrss`        | Deletes an RSS subscription interactively (lists them first, then you choose one by name, ID or number)          | Admin      |
+| Command          | What it does                                                                                                                            | Permission |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `/help`          | Lists every available command and how to use it                                                                                         | User       |
+| `/status`        | System status: speeds, disk space and the number of active tasks                                                                        | User       |
+| `/version`       | The current version and the latest available one                                                                                        | User       |
+| `/tasks`         | The RSS tasks and whether they are running                                                                                              | User       |
+| `/sites`         | A summary of the configured sites (name, type)                                                                                          | User       |
+| `/torrents`      | Lists the torrents of each downloader, a page at a time                                                                                 | User       |
+| `/pause <hash>`  | Pauses a torrent (a prefix of the hash is enough)                                                                                       | Admin      |
+| `/resume <hash>` | Resumes a torrent                                                                                                                       | Admin      |
+| `/delete <hash>` | Deletes a torrent, after a confirmation                                                                                                 | Admin      |
+| `/signin [site]` | Signs in now; without a site, signs in every site with automatic sign-in enabled that has no result today                               | Admin      |
+| `/bind <code>`   | Links the current account to pt-tools with an 8-character binding code                                                                  | Anyone     |
+| `/unbind`        | Unlinks the current account                                                                                                             | Admin      |
+| `/addrss`        | Adds an RSS subscription interactively (a text wizard, or one line: `/addrss site \| name \| URL \| downloader`)                        | Admin      |
+| `/delrss`        | Deletes an RSS subscription interactively (lists them first, then you choose one by name, ID or number)                                 | Admin      |
+| `/sub <title>`   | Searches TMDB for a film or series; reply with a number to subscribe (add a season for series), see [subscriptions](media-subscribe.md) | Admin      |
+| `/subs`          | Lists your subscriptions and their progress                                                                                             | User       |
 
 > **Rate limit**: by default each user can send at most 10 commands a minute. Further commands are silently dropped, with no error reply, so nothing is revealed to the sender.
 

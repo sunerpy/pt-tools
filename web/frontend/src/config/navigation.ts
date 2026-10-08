@@ -65,9 +65,11 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
-    /* 路线图 M9 起的媒体自动化（M11 再加订阅、探索）：画板没有这一组，沿用列表页的样式 */
+    /* 路线图 M9–M11 的媒体自动化：画板没有这一组，沿用列表页的样式 */
     title: "媒体",
     items: [
+      { path: "/media/explore", label: "探索", icon: "compass" },
+      { path: "/media/subscriptions", label: "订阅", icon: "bookmark" },
       { path: "/media/library", label: "媒体库", icon: "folder-open" },
       { path: "/media/history", label: "整理历史", icon: "history" },
       { path: "/media/recognize", label: "媒体识别", icon: "scan" },

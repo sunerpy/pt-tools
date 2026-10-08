@@ -36,6 +36,8 @@ type MultiSiteSearchQuery struct {
 	MaxSizeBytes int64 `json:"maxSizeBytes,omitempty"`
 	// MinSizeBytes filters results by minimum size
 	MinSizeBytes int64 `json:"minSizeBytes,omitempty"`
+	// RawTitles 为真时不规整标题：订阅要按站点上原样的标题解析画质（规整会把 UHD 换成 2160p、x265 换成 H.265）
+	RawTitles bool `json:"rawTitles,omitempty"`
 }
 
 // MultiSiteSearchResult contains results from a multi-site search
@@ -132,8 +134,10 @@ func (o *SearchOrchestrator) Search(ctx context.Context, query MultiSiteSearchQu
 	results, errors := o.searchConcurrently(ctx, sitesToSearch, query.SearchQuery)
 
 	// Normalize titles
-	for i := range results {
-		results[i].Title = o.normalizer.NormalizeTitle(results[i].Title)
+	if !query.RawTitles {
+		for i := range results {
+			results[i].Title = o.normalizer.NormalizeTitle(results[i].Title)
+		}
 	}
 
 	// Apply filters

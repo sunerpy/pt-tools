@@ -25,10 +25,7 @@ func (e *env) drain() int {
 	for {
 		select {
 		case j := <-e.svc.jobs:
-			e.svc.qmu.Lock()
-			delete(e.svc.queued, jobKey(j.req.DownloaderID, j.dlName, j.req.Hash))
-			e.svc.qmu.Unlock()
-			_, _ = e.svc.runJob(e.ctx, j)
+			_, _ = e.svc.handle(e.ctx, j)
 			n++
 		default:
 			return n
@@ -183,7 +180,12 @@ func TestRetryDue(t *testing.T) {
 	assert.Zero(t, e.drain(), "还没到重试时间")
 	e.advance(11 * time.Minute)
 	e.svc.retryDue(e.ctx)
+	queued := e.history()
+	require.Len(t, queued, 1)
+	assert.Nil(t, queued[0].NextRetryAt, "排上队以后重试时间清掉了")
+	assert.True(t, e.svc.Retrying(queued[0].ID), "但还在重试")
 	assert.Equal(t, 1, e.drain())
+	assert.False(t, e.svc.Retrying(queued[0].ID), "整理完以后清掉")
 	rows := e.history()
 	require.Len(t, rows, 1)
 	assert.Equal(t, models.MediaTransferDone, rows[0].Status)
@@ -263,6 +265,7 @@ func TestRetryDueKeepsScheduleWhenQueueFull(t *testing.T) {
 	var row models.MediaTransferHistory
 	require.NoError(t, e.db.First(&row).Error)
 	require.NotNil(t, row.NextRetryAt, "排不上时保留重试时间")
+	assert.False(t, e.svc.Retrying(row.ID), "排不上时不算正在重试")
 	assert.Equal(t, e.now.Add(tickInterval), row.NextRetryAt.UTC(), "下一拍再试")
 }
 

@@ -1,6 +1,8 @@
 package organize
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,4 +259,40 @@ func TestCheckLibrary(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalid)
 	_, err = e.svc.CheckLibrary(e.ctx, LibraryCheckInput{Path: e.movies, Mode: "x"})
 	require.ErrorIs(t, err, ErrInvalid)
+}
+
+// 订阅问媒体服务器条目在不在：有一台说有就算有；没有启用的媒体服务器时是没有
+func TestInLibrary(t *testing.T) {
+	e := newEnv(t)
+	ok, err := e.svc.InLibrary(e.ctx, models.MediaKindMovie, 872585, "", "奥本海默")
+	require.NoError(t, err)
+	assert.False(t, ok, "没有媒体服务器")
+	emby := newFakeEmby(t)
+	key := "embykey"
+	_, err = e.svc.SaveServer(e.ctx, 0, ServerInput{Name: "Emby", Kind: models.MediaServerEmby, URL: emby.URL, Token: &key, Enabled: true})
+	require.NoError(t, err)
+	ok, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 872585, "", "奥本海默")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	ok, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 1, "", "别的")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// 连不上的媒体服务器写明错误；别的服务器有这部电影时照样算有
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
+	t.Cleanup(down.Close)
+	_, err = e.svc.SaveServer(e.ctx, 0, ServerInput{Name: "坏的", Kind: models.MediaServerJellyfin, URL: down.URL, Token: &key, Enabled: true})
+	require.NoError(t, err)
+	ok, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 1, "", "别的")
+	require.Error(t, err, "都没有、有一个出错时写明")
+	assert.False(t, ok)
+	ok, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 872585, "", "奥本海默")
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	sqlDB, err := e.db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	_, err = e.svc.InLibrary(e.ctx, models.MediaKindMovie, 1, "", "别的")
+	require.Error(t, err, "读不到媒体服务器")
 }

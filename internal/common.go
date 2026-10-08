@@ -868,6 +868,8 @@ func downloadWorkerUnified(
 				stats.detailFailed.Add(1)
 				continue
 			}
+			// 订阅也看 RSS 拉到的种子（不阻塞；对上了由订阅自己推送，和这里的过滤规则各管各的）
+			offerToSubscriptions(siteID, detail, item)
 			// 使用 v2.TorrentItem 的方法（此处传 0 给 sizeLimitGB，全局大小硬上限由 filter.Decide 统一检查，
 			// 避免过滤规则通道绕过全局限制）
 			canFinished := detail.CanbeFinished(gl.DownloadLimitEnabled, gl.DownloadSpeedLimit, 0)

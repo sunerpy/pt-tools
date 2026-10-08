@@ -228,6 +228,8 @@ var webCmd = &cobra.Command{
 		srv.SetMediaService(mediaSvc)
 		organizer := newOrganizeService(store, mgr, mediaSvc, monitorNotifier)
 		srv.SetOrganizeService(organizer)
+		subscriber := newSubscribeService(runtimeCtx, mgr, mediaSvc, organizer, userInfoService, monitorNotifier)
+		srv.SetSubscribeService(subscriber)
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
@@ -241,6 +243,7 @@ var webCmd = &cobra.Command{
 				runtimeCancel()
 				bootCancel()
 				background.Wait()
+				stopSubscribeService(subscriber)
 				if organizer != nil {
 					organizer.Stop()
 				}

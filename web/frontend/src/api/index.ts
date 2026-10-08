@@ -2608,6 +2608,225 @@ export const organizeApi = {
     ),
 };
 
+// ---- 订阅（路线图 M11） ----
+
+export type SubscriptionStatus = "active" | "paused" | "pending" | "done";
+export type SubscriptionSource = "manual" | "explore" | "douban" | "chatops";
+/** 空串不限；prefer 优先；require 必须有；avoid 不要（只有 Remux 与 HDR 有） */
+export type QualityPref = "" | "prefer" | "require" | "avoid";
+
+export interface SubscribeSettings {
+  enabled: boolean;
+  search_interval_hours: number;
+  search_skip_sites: string[];
+  default_profile_id: number;
+  default_downloader_id: number;
+  notify_channels: number[];
+  upgrade_old: "keep" | "delete";
+}
+
+export interface QualityProfile {
+  id: number;
+  name: string;
+  resolutions: string[];
+  sources: string[];
+  codecs: string[];
+  remux: QualityPref;
+  hdr: QualityPref;
+  chinese_subs: QualityPref;
+  free: QualityPref;
+  groups: string[];
+  min_size_gb: number;
+  max_size_gb: number;
+  min_seeders: number;
+  exclude_hr: boolean;
+}
+
+export type QualityProfileInput = Omit<QualityProfile, "id">;
+
+export interface QualityProfileList {
+  items: QualityProfile[];
+  resolutions: string[];
+  sources: string[];
+  codecs: string[];
+}
+
+export interface SubscriptionProgress {
+  total: number;
+  aired: number;
+  in_library: number;
+  downloading: number;
+  missing?: number[];
+  episodes?: {
+    number: number;
+    name?: string;
+    air_date?: string;
+    state: "library" | "downloading" | "missing" | "upcoming";
+  }[];
+}
+
+export interface Subscription {
+  id: number;
+  media_type: MediaKind;
+  tmdb_id: number;
+  season: number;
+  title: string;
+  original_title: string;
+  year: number;
+  imdb_id: string;
+  poster_path: string;
+  profile_id: number;
+  sites: string[];
+  downloader_id: number;
+  category: string;
+  tags: string;
+  save_path: string;
+  status: SubscriptionStatus;
+  upgrade: boolean;
+  source: SubscriptionSource;
+  douban_id: string;
+  total_episodes: number;
+  last_search_at?: string;
+  next_search_at?: string;
+  message: string;
+  created_at: string;
+  updated_at: string;
+  progress?: SubscriptionProgress;
+  torrents: number;
+}
+
+export interface SubscriptionTorrent {
+  id: number;
+  subscription_id: number;
+  site_name: string;
+  torrent_id: string;
+  info_hash: string;
+  title: string;
+  subtitle: string;
+  score: number;
+  episode: number;
+  episode_end: number;
+  complete: boolean;
+  size_bytes: number;
+  downloader_id: number;
+  has_hr: boolean;
+  adopted: boolean;
+  status: "downloading" | "done" | "failed" | "replaced";
+  message: string;
+  created_at: string;
+}
+
+export interface SubscriptionDetail extends Subscription {
+  torrent_list: SubscriptionTorrent[];
+}
+
+export interface SubscriptionInput {
+  media_type?: MediaKind;
+  tmdb_id?: number;
+  season?: number;
+  profile_id: number;
+  sites: string[];
+  downloader_id: number;
+  category: string;
+  tags: string;
+  save_path: string;
+  upgrade: boolean;
+  pending?: boolean;
+}
+
+export interface DoubanSource {
+  id: number;
+  user_id: string;
+  name: string;
+  enabled: boolean;
+  confirm: boolean;
+  profile_id: number;
+  last_fetch_at?: string;
+  next_fetch_at?: string;
+  failures: number;
+  last_error: string;
+  abnormal: boolean;
+  subscribed?: number;
+  unmatched?: number;
+}
+
+export type DoubanSourceInput = Pick<
+  DoubanSource,
+  "user_id" | "name" | "enabled" | "confirm" | "profile_id"
+>;
+
+export interface DoubanItem {
+  id: number;
+  source_id: number;
+  douban_id: string;
+  title: string;
+  year: number;
+  media_type: "" | MediaKind;
+  tmdb_id: number;
+  subscription_id: number;
+  status: "subscribed" | "unmatched" | "removed";
+  created_at: string;
+}
+
+export interface ExploreItem extends TMDBItem {
+  in_library: boolean;
+  subscribed: boolean;
+  subscription_id?: number;
+}
+
+export interface ExplorePage {
+  items: ExploreItem[];
+  page: number;
+  total_pages: number;
+}
+
+export const subscribeApi = {
+  settings: () => api.get<SubscribeSettings>("/api/media/subscribe/settings"),
+  saveSettings: (data: SubscribeSettings) =>
+    api.put<SubscribeSettings>("/api/media/subscribe/settings", data),
+  profiles: () => api.get<QualityProfileList>("/api/media/quality-profiles"),
+  createProfile: (data: QualityProfileInput) =>
+    api.post<QualityProfile>("/api/media/quality-profiles", data),
+  updateProfile: (id: number, data: QualityProfileInput) =>
+    api.put<QualityProfile>(`/api/media/quality-profiles/${id}`, data),
+  deleteProfile: (id: number) => api.delete<{ ok: boolean }>(`/api/media/quality-profiles/${id}`),
+  list: (q: { status?: string; q?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.status) params.set("status", q.status);
+    if (q.q) params.set("q", q.q);
+    const qs = params.toString();
+    return api.get<Subscription[]>(`/api/media/subscriptions${qs ? `?${qs}` : ""}`);
+  },
+  get: (id: number) => api.get<SubscriptionDetail>(`/api/media/subscriptions/${id}`),
+  create: (data: SubscriptionInput) => api.post<Subscription>("/api/media/subscriptions", data),
+  update: (id: number, data: SubscriptionInput) =>
+    api.put<Subscription>(`/api/media/subscriptions/${id}`, data),
+  remove: (id: number) => api.delete<{ ok: boolean }>(`/api/media/subscriptions/${id}`),
+  setStatus: (id: number, status: "active" | "paused") =>
+    api.post<Subscription>(`/api/media/subscriptions/${id}/status`, { status }),
+  search: (id: number) => api.post<{ message: string }>(`/api/media/subscriptions/${id}/search`),
+  doubanSources: () => api.get<DoubanSource[]>("/api/media/douban-sources"),
+  createDouban: (data: DoubanSourceInput) =>
+    api.post<DoubanSource>("/api/media/douban-sources", data),
+  updateDouban: (id: number, data: DoubanSourceInput) =>
+    api.put<DoubanSource>(`/api/media/douban-sources/${id}`, data),
+  deleteDouban: (id: number) => api.delete<{ ok: boolean }>(`/api/media/douban-sources/${id}`),
+  fetchDouban: (id: number) =>
+    api.post<{ created: number }>(`/api/media/douban-sources/${id}/fetch`),
+  doubanItems: (id: number) => api.get<DoubanItem[]>(`/api/media/douban-sources/${id}/items`),
+  explore: (q: {
+    kind: MediaKind;
+    list: "trending" | "popular" | "search";
+    page?: number;
+    q?: string;
+  }) => {
+    const params = new URLSearchParams({ kind: q.kind, list: q.list });
+    if (q.page) params.set("page", String(q.page));
+    if (q.q) params.set("q", q.q);
+    return api.get<ExplorePage>(`/api/media/explore?${params.toString()}`);
+  },
+};
+
 export const reseedApi = {
   settings: () => api.get<ReseedSettings>("/api/reseed/settings"),
   saveSettings: (data: ReseedSettingsUpdate) =>

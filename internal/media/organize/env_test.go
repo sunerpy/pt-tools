@@ -355,6 +355,12 @@ func newFakeEmby(t *testing.T) *fakeEmby {
 		switch r.URL.Path {
 		case "/System/Info":
 			_, _ = w.Write([]byte(`{"ServerName":"Emby","Version":"4.8"}`))
+		case "/Items":
+			if r.URL.Query().Get("SearchTerm") == "奥本海默" {
+				_, _ = w.Write([]byte(`{"Items":[{"ProviderIds":{"Tmdb":"872585"}}]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"Items":[]}`))
+			}
 		case "/Library/Media/Updated":
 			b, _ := io.ReadAll(r.Body)
 			f.mu.Lock()

@@ -240,6 +240,13 @@ func NewDBWithVersionAndHooks(
 		&MediaServer{},
 		&MediaOrganizeSetting{},
 		&MediaTransferHistory{},
+		// 订阅（M11）
+		&MediaQualityProfile{},
+		&MediaSubscription{},
+		&MediaSubscriptionTorrent{},
+		&MediaSubscribeSetting{},
+		&MediaDoubanSource{},
+		&MediaDoubanItem{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
