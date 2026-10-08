@@ -247,7 +247,7 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 	// 确实是这次加进去的才记所有权：原来就在下载器里的（Skipped）不归兼容入口
 	if !res.Skipped {
 		if oerr := s.own(ctx, b, hash); oerr != nil {
-			global.GetSlogger().Warnf("[qB 兼容] 记下种子 %s 失败: %v", hash, oerr)
+			global.GetSlogger().Warnf("[qB 兼容] 种子 %s 不记所有权（没打开完全控制时客户端改不了它）: %v", hash, oerr)
 		}
 	}
 	return addOutcome{ok: true, skipped: res.Skipped}

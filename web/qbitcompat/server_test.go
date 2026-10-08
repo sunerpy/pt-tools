@@ -25,6 +25,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -67,6 +68,18 @@ func (f *fakeDL) GetTorrent(id string) (downloader.Torrent, error) {
 		}
 	}
 	return downloader.Torrent{}, downloader.ErrTorrentNotFound
+}
+
+// list 让一个种子出现在下载器里（已经有了就不动）。
+func (f *fakeDL) list(t downloader.Torrent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, x := range f.torrents {
+		if strings.EqualFold(x.InfoHash, t.InfoHash) {
+			return
+		}
+	}
+	f.torrents = append(f.torrents, t)
 }
 
 func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
@@ -214,11 +227,18 @@ func newEnv(t *testing.T) *env {
 		},
 		Push: func(_ context.Context, req internal.PushTorrentRequest) (*internal.PushTorrentResult, error) {
 			e.mu.Lock()
-			defer e.mu.Unlock()
 			e.pushes = append(e.pushes, req)
+			e.mu.Unlock()
+			// 推送成功的种子出现在下载器里，添加时间是现在
+			if p, err := v2.ParseTorrent(req.TorrentData); err == nil {
+				h := strings.ToLower(p.InfoHash)
+				e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: p.Name, DateAdded: e.now.Unix()})
+			}
 			return &internal.PushTorrentResult{Success: true}, nil
 		},
 	})
+	// 加完以后只看一次下载器（等下载器列出种子的用例自己设）
+	e.srv.observe = 0
 	e.h = e.srv.Handler()
 	return e
 }

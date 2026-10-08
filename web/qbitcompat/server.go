@@ -76,6 +76,8 @@ type Server struct {
 	snaps    snapshots
 	syncs    syncStates
 	addr     atomic.Value // 监听地址，Status 用
+	// observe 是加完以后等下载器列出种子的时间（observeTimeout；测试里改短）
+	observe time.Duration
 }
 
 // New 建一个兼容入口。
@@ -87,7 +89,7 @@ func New(d Deps) *Server {
 		d.Resolver = v2.NewTrackerResolver()
 	}
 	return &Server{
-		deps: d, sessions: newSessions(), lock: newLoginLock(),
+		deps: d, sessions: newSessions(), lock: newLoginLock(), observe: observeTimeout,
 		snaps: snapshots{m: map[uint]snapshot{}}, syncs: syncStates{m: map[string]*syncState{}},
 	}
 }

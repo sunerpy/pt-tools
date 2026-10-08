@@ -14,6 +14,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -60,19 +61,65 @@ func TestOwnershipIsStrict(t *testing.T) {
 	assert.Len(t, e.dl.got(), 1, "不给添加时间：不认")
 }
 
-// 加的时候下载器还没列出这个种子：所有权先不带添加时间，第一次在下载器里看到它、添加时间就在加的那会儿时补上；
-// 补上以后只认这个时间。看到时添加时间离加的时候太远，是别处加的，不认
-func TestOwnershipBindsAddedTimeLater(t *testing.T) {
+// 所有权只认加完以后在下载器里看到的那一个：qB 是异步加的，过一会儿才列出来时等得到就记；一直看不到、或者下载器不给添加时间时不记，
+// 之后同一个种子出现在下载器里（比如删掉以后从别处加回来，添加时间就在加的那会儿）也不认；所有权表里没有添加时间的旧记录也不认
+func TestOwnershipNeedsObservedAdd(t *testing.T) {
 	e := newEnv(t)
+	e.withSites()
 	ck := e.login(e.token(apitoken.ScopeQbitCompat))
-	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashMovie, CreatedAt: time.Unix(1700000100, 0)}).Error)
-	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashDebian, CreatedAt: time.Unix(1700000000+2*3600, 0)}).Error)
+	ownedAt := func(h string) (int64, bool) {
+		var rows []models.QbitCompatTorrent
+		require.NoError(t, e.db.Where("info_hash = ?", h).Find(&rows).Error)
+		if len(rows) == 0 {
+			return 0, false
+		}
+		return rows[0].AddedAt, true
+	}
+	pushOnly := func(show func(h, name string)) {
+		e.srv.deps.Push = func(_ context.Context, req internal.PushTorrentRequest) (*internal.PushTorrentResult, error) {
+			if show != nil {
+				p, err := v2.ParseTorrent(req.TorrentData)
+				require.NoError(t, err)
+				show(strings.ToLower(p.InfoHash), p.Name)
+			}
+			return &internal.PushTorrentResult{Success: true}, nil
+		}
+	}
 
-	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {"all"}}, ck).Code)
-	assert.Equal(t, []string{"pause " + hashMovie}, e.dl.got(), "电影在加的那会儿出现：认；debian 的添加时间早了两个小时：不认")
-	var row models.QbitCompatTorrent
-	require.NoError(t, e.db.Where("info_hash = ?", hashMovie).First(&row).Error)
-	assert.EqualValues(t, 1700000100, row.AddedAt, "补上了添加时间")
+	// 过 50 毫秒才列出来：等得到，记下它的添加时间
+	e.srv.observe = 5 * time.Second
+	pushOnly(func(h, name string) {
+		time.AfterFunc(50*time.Millisecond, func() { e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name, DateAdded: 1700000500}) })
+	})
+	late := torrentFile("late", "https://qa.example/announce", "")
+	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{late}, nil).Body.String())
+	at, ok := ownedAt(hashOf(t, late))
+	assert.True(t, ok, "等到了")
+	assert.EqualValues(t, 1700000500, at)
+
+	// 一直看不到：不记；之后它出现在下载器里，添加时间就在加的那会儿，也动不了
+	e.srv.observe = 30 * time.Millisecond
+	pushOnly(nil)
+	unseen := torrentFile("unseen", "https://qa.example/announce", "")
+	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{unseen}, nil).Body.String(), "加进去了，客户端照样看到 Ok.")
+	h := hashOf(t, unseen)
+	_, ok = ownedAt(h)
+	assert.False(t, ok, "看不到：不记")
+	e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: "unseen", DateAdded: e.now.Unix()})
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {h}}, ck).Code)
+	assert.Empty(t, e.dl.got(), "不认")
+
+	// 看得到，但下载器不给添加时间：不记
+	pushOnly(func(h, name string) { e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name}) })
+	untimed := torrentFile("untimed", "https://qa.example/announce", "")
+	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{untimed}, nil).Body.String())
+	_, ok = ownedAt(hashOf(t, untimed))
+	assert.False(t, ok, "不给添加时间：不记")
+
+	// 没有添加时间的旧记录：不认
+	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashMovie, CreatedAt: time.Unix(1700000100, 0)}).Error)
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashMovie}}, ck).Code)
+	assert.Empty(t, e.dl.got(), "记录里没有添加时间：不认")
 }
 
 // 加成功了才记所有权（已经在下载器里的、推送失败的不记）；经兼容入口删掉以后所有权一起去掉
@@ -99,9 +146,8 @@ func TestOwnershipLifecycle(t *testing.T) {
 	require.Equal(t, "Fails.", e.postAdd(ck, [][]byte{torrentFile("blocked", "https://qa.example/announce", "")}, nil).Body.String())
 	assert.EqualValues(t, 1, owned(), "已经在的、没加成功的都不算")
 
-	// 加进去的那个出现在下载器里，删掉它
+	// 加进去的那个在下载器里（推送时就列出来了），删掉它
 	h := hashOf(t, added)
-	e.dl.torrents = append(e.dl.torrents, downloader.Torrent{ID: h, InfoHash: h, Name: "added", DateAdded: e.now.Unix()})
 	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/delete", url.Values{"hashes": {h}, "deleteFiles": {"false"}}, ck).Code)
 	assert.Equal(t, []string{"remove " + h + " data=false"}, e.dl.got())
 	assert.EqualValues(t, 0, owned(), "删掉以后所有权去掉")

@@ -44,15 +44,9 @@ func (s *Server) selectTargets(ctx context.Context, b *backend, param string) (s
 		if !ok {
 			return
 		}
-		if !b.cfg.FullControl {
-			ok, bind := isOwned(owned, h, t)
-			if !ok {
-				sel.denied++
-				return
-			}
-			if bind {
-				s.bindAdded(ctx, owned[h], t.DateAdded)
-			}
+		if !b.cfg.FullControl && !isOwned(owned, h, t) {
+			sel.denied++
+			return
 		}
 		sel.ids, sel.hashes, sel.torrents = append(sel.ids, t.ID), append(sel.hashes, h), append(sel.torrents, t)
 	}

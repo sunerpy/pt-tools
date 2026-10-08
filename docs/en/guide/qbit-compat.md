@@ -39,7 +39,7 @@ Add a qBittorrent downloader in the tool's settings:
   - Magnet links are not accepted.
   - Options: save folder, category, tags, add paused, rename and speed limits (the stricter of these and the site's limits applies).
 - **List torrents**: the torrent list, details, files, trackers, categories and tags cover every torrent in the downloader behind the entrance. Passkeys in tracker addresses are hidden.
-- **Change torrents**: pause, resume, delete (optionally with the data), change category, add and remove tags. By default only torrents the entrance added to this downloader can be changed (not ones that were already in the downloader when added, nor the same torrent re-added elsewhere after the entrance deleted it); with Full control on, every torrent in the downloader can. Torrents the client may not change are skipped: the client still sees success, and the audit log records a refusal.
+- **Change torrents**: pause, resume, delete (optionally with the data), change category, add and remove tags. By default only torrents the entrance added to this downloader can be changed (not ones that were already in the downloader when added, nor ones the downloader does not list within a few seconds of the add, nor the same torrent re-added elsewhere after the entrance deleted it); with Full control on, every torrent in the downloader can. Torrents the client may not change are skipped: the client still sees success, and the audit log records a refusal.
 
 It also works with Transmission behind it; torrent states, categories and tags are translated into qBittorrent's form.
 
