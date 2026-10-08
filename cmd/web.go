@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -235,7 +234,7 @@ var webCmd = &cobra.Command{
 		// API 令牌与 App API（M12）：令牌做的写操作记进操作审计；qB 兼容入口（M13）用同一个令牌库
 		tokens, appAudit := apitoken.New(global.GlobalDB.DB), app.NewAuditService(global.GlobalDB.DB)
 		srv.SetAPITokens(tokens, appAudit)
-		var qbitCompatServer *http.Server
+		var qbitCompatServer *compatServer
 		if compatAddr := qbitCompatListenAddr(); compatAddr != "" {
 			qbitCompatServer = startQbitCompat(compatAddr, global.GlobalDB.DB, srv, mgr, store, tokens, appAudit)
 		}

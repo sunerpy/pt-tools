@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,4 +44,30 @@ func TestStartQbitCompat(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
 	assert.Nil(t, startQbitCompat("256.0.0.1:99999", nil, web.NewServer(nil, nil), nil, nil, nil, nil))
+}
+
+// 关闭：先让进行中的请求停下（请求的上下文跟着结束），再关监听
+func TestQbitCompatShutdownCancelsRequests(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	srv := web.NewServer(nil, nil)
+	hs := startQbitCompat("127.0.0.1:0", nil, srv, nil, nil, nil, nil)
+	require.NotNil(t, hs)
+	ctxDone := make(chan struct{})
+	// 换一个会一直等到上下文结束的处理函数，模拟进行中的添加
+	hs.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		close(ctxDone)
+	})
+	go func() { _, _ = http.Get("http://" + srv.QbitCompatAddr() + "/api/v2/torrents/add") }()
+	time.Sleep(200 * time.Millisecond) // 等请求进到处理函数里（只是让它先到，不是等结果）
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	_ = hs.Shutdown(ctx)
+	select {
+	case <-ctxDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("进行中的请求没有被取消")
+	}
+	assert.Less(t, time.Since(start), 3*time.Second)
 }

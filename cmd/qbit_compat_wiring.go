@@ -55,8 +55,24 @@ func enabledSite(store *core.ConfigStore) func(id string) v2.Site {
 	}
 }
 
+// compatServer 是兼容入口的 HTTP 服务。关闭时先取消进行中请求的上下文（添加种子的循环、下载器请求跟着停），
+// 再等它们退出；等不到就强行断开连接，后面关下载器时不再有请求在用它们。
+type compatServer struct {
+	*http.Server
+	cancel context.CancelFunc
+}
+
+func (c *compatServer) Shutdown(ctx context.Context) error {
+	c.cancel()
+	err := c.Server.Shutdown(ctx)
+	if err != nil {
+		_ = c.Server.Close()
+	}
+	return err
+}
+
 // startQbitCompat 开兼容入口。监听失败只记日志，不影响 Web 服务；返回的 server 交给关闭流程（没开时是 nil）。
-func startQbitCompat(addr string, db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *core.ConfigStore, tokens *apitoken.Store, audit app.AuditService) *http.Server {
+func startQbitCompat(addr string, db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *core.ConfigStore, tokens *apitoken.Store, audit app.AuditService) *compatServer {
 	qc := qbitcompat.New(qbitcompat.Deps{
 		DB: db, Tokens: tokens, Audit: audit,
 		Instance: func(ctx context.Context, name string) (downloader.Downloader, error) {
@@ -77,9 +93,11 @@ func startQbitCompat(addr string, db *gorm.DB, srv *web.Server, mgr *scheduler.M
 	}
 	qc.SetAddr(ln.Addr().String())
 	srv.SetQbitCompat(qc)
-	hs := &http.Server{
+	base, cancel := context.WithCancel(context.Background())
+	hs := &compatServer{cancel: cancel, Server: &http.Server{
 		Handler: qc.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Minute, IdleTimeout: 2 * time.Minute,
-	}
+		BaseContext: func(net.Listener) context.Context { return base },
+	}}
 	go func() {
 		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			global.GetSlogger().Errorf("qB 兼容入口停止: %v", err)

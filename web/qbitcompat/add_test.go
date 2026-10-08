@@ -250,3 +250,33 @@ func TestAddCommentIDMustMatchExisting(t *testing.T) {
 	assert.Equal(t, "hash:"+hashOf(t, forged), p[0].TorrentID, "编号对得上、hash 不一样：不用 comment 的编号")
 	assert.Equal(t, "43", p[1].TorrentID, "hash 一样：就是这条记录")
 }
+
+// 请求的上下文结束了（超时、关闭）：剩下的种子不再处理
+func TestAddStopsWhenContextEnds(t *testing.T) {
+	e := newEnv(t)
+	e.withSites()
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for i := range 3 {
+		fw, err := mw.CreateFormFile("torrents", fmt.Sprintf("t%d.torrent", i))
+		require.NoError(t, err)
+		_, _ = fw.Write(torrentFile(fmt.Sprintf("c%d", i), "https://qa.example/announce", ""))
+	}
+	require.NoError(t, mw.Close())
+	ctx, cancel := context.WithCancel(context.Background())
+	e.srv.deps.Push = func(context.Context, internal.PushTorrentRequest) (*internal.PushTorrentResult, error) {
+		cancel() // 第一个推完，上下文就结束了
+		return &internal.PushTorrentResult{Success: true}, nil
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/add", &buf).WithContext(ctx)
+	req.RemoteAddr = "192.0.2.10:5000"
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(ck)
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	assert.Equal(t, "Ok.", w.Body.String(), "第一个加进去了")
+	last := e.audit.all()[len(e.audit.all())-1]
+	assert.EqualValues(t, 1, last.Args["added"])
+	assert.EqualValues(t, 2, last.Args["failed"], "后面两个没处理")
+}

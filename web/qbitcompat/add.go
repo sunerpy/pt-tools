@@ -122,10 +122,25 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request, c *call) {
 	for _, err := range fileErrs {
 		outcomes = append(outcomes, addOutcome{err: err})
 	}
+	// 每一个之前看一下上下文：超时或者 pt-tools 在关闭时，剩下的不再处理
+	stopped := func() (addOutcome, bool) {
+		if err := ctx.Err(); err != nil {
+			return addOutcome{err: fmt.Errorf("没有处理（请求已结束）: %w", err)}, true
+		}
+		return addOutcome{}, false
+	}
 	for _, data := range files {
+		if o, stop := stopped(); stop {
+			outcomes = append(outcomes, o)
+			continue
+		}
 		outcomes = append(outcomes, s.pushData(ctx, b, data, "", "", opts))
 	}
 	for _, l := range links {
+		if o, stop := stopped(); stop {
+			outcomes = append(outcomes, o)
+			continue
+		}
 		outcomes = append(outcomes, s.pushLink(ctx, b, l, opts))
 	}
 	s.recordAdd(r, c, outcomes, len(files)+len(fileErrs), len(links), opts)
