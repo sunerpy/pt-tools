@@ -46,6 +46,10 @@ func (s *Server) appRoutes() []appRoute {
 	r := apitoken.ScopeAppRead
 	return []appRoute{
 		{http.MethodGet, "/meta", r, s.appMeta},
+		{http.MethodGet, "/overview", r, s.appOverview},
+		{http.MethodGet, "/sites", r, s.appSites},
+		{http.MethodGet, "/tasks", r, s.appTasks},
+		{http.MethodGet, "/favicon/{site}", r, s.appFavicon},
 	}
 }
 
