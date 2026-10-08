@@ -983,6 +983,11 @@ function exportCsv() {
   color: var(--pt-t1);
 }
 
+/* 手机卡片的标题：App API 的命令是一长串路径，中间没有空格，不按字符折行会被截掉一截 */
+.pt-rowcard .cmd {
+  word-break: break-all;
+}
+
 .lat--slow {
   font-weight: 600;
   color: var(--pt-dang);
