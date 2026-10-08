@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -67,7 +68,7 @@ type addOutcome struct {
 	err         error
 }
 
-// add 是 POST /api/v2/torrents/add：种子文件（torrents，可以有多个）与链接（urls，一行一个）。
+// add 是 POST /api/v2/torrents/add：种子文件（multipart 里上传的文件，可以有多个）与链接（urls，一行一个）。
 // 种子文件直接用；链接只认能解析成已启用站点种子编号的，由 pt-tools 经站点下载（不请求客户端给的地址），磁力链接一律拒绝。
 // 都经 internal.PushTorrentToDownloader 推到绑定的下载器（磁盘空间保护、站点做种容量照常）。
 // 有一个加进去或者已经在下载器里就回 Ok.，全失败回 Fails.；只有不对的种子文件时回 415（qB 的行为）。
@@ -86,13 +87,16 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request, c *call) {
 	var files [][]byte
 	var fileErrs []error
 	if r.MultipartForm != nil {
-		for _, fh := range r.MultipartForm.File["torrents"] {
-			data, err := readPart(fh)
-			if err != nil {
-				fileErrs = append(fileErrs, err)
-				continue
+		// qB 收所有上传的文件，不看字段名：qbittorrent-api（MoviePilot 用的）拿文件名当字段名，不是 torrents
+		for _, field := range slices.Sorted(maps.Keys(r.MultipartForm.File)) {
+			for _, fh := range r.MultipartForm.File[field] {
+				data, err := readPart(fh)
+				if err != nil {
+					fileErrs = append(fileErrs, err)
+					continue
+				}
+				files = append(files, data)
 			}
-			files = append(files, data)
 		}
 	}
 	var links []string

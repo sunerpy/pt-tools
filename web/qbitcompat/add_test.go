@@ -66,7 +66,12 @@ func (e *env) postAdd(ck *http.Cookie, files [][]byte, fields map[string]string)
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	for i, f := range files {
-		fw, err := mw.CreateFormFile("torrents", fmt.Sprintf("t%d.torrent", i))
+		field := "torrents"
+		if e.fieldPerFile {
+			// qbittorrent-api（MoviePilot 用的）拿文件名当表单字段名；qB 收所有上传的文件，不看字段名
+			field = fmt.Sprintf("t%d.torrent", i)
+		}
+		fw, err := mw.CreateFormFile(field, fmt.Sprintf("t%d.torrent", i))
 		require.NoError(e.t, err)
 		_, _ = fw.Write(f)
 	}
@@ -191,4 +196,17 @@ func TestAddFailures(t *testing.T) {
 
 	big := e.postAdd(ck, [][]byte{bytes.Repeat([]byte("x"), maxAddBody+1)}, nil)
 	assert.Equal(t, http.StatusBadRequest, big.Code, "超过 32 MiB")
+}
+
+// 上传的字段名不是 torrents 时照样收（qbittorrent-api 拿文件名当字段名）；坏种子照样回 415
+func TestAddAnyFieldName(t *testing.T) {
+	e := newEnv(t)
+	e.withSites()
+	e.fieldPerFile = true
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	w := e.postAdd(ck, [][]byte{torrentFile("a", "https://qa.example/announce", ""), torrentFile("b", "https://qa.example/announce", "")}, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Ok.", w.Body.String())
+	assert.Len(t, e.gotPushes(), 2)
+	assert.Equal(t, http.StatusUnsupportedMediaType, e.postAdd(ck, [][]byte{[]byte("bad")}, nil).Code)
 }

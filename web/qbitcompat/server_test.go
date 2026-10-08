@@ -125,14 +125,16 @@ type env struct {
 	t  *testing.T
 	db *gorm.DB
 	// asTR 让后端当成 Transmission：没有 qB 的可选能力
-	asTR   bool
-	srv    *Server
-	h      http.Handler
-	dl     *fakeDL
-	tokens *apitoken.Store
-	audit  *fakeAudit
-	now    time.Time
-	dlSet  models.DownloaderSetting
+	asTR bool
+	// fieldPerFile 让 postAdd 拿文件名当上传字段名（qbittorrent-api 的做法）
+	fieldPerFile bool
+	srv          *Server
+	h            http.Handler
+	dl           *fakeDL
+	tokens       *apitoken.Store
+	audit        *fakeAudit
+	now          time.Time
+	dlSet        models.DownloaderSetting
 
 	mu     sync.Mutex
 	pushes []internal.PushTorrentRequest
