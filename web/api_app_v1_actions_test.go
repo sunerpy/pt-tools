@@ -121,6 +121,12 @@ func TestAppPush(t *testing.T) {
 	var untitled models.TorrentInfo
 	require.NoError(t, global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", "hdsky", "1").First(&untitled).Error)
 	assert.Equal(t, "hdsky-1", untitled.Title)
+	// 搜索结果里的体积、免费与免费到期一并记下：H&R 保护与免费到期清理要用
+	assert.EqualValues(t, int64(8)<<30, untitled.TorrentSize)
+	assert.True(t, untitled.IsFree)
+	assert.Equal(t, string(v2.DiscountFree), untitled.FreeLevel)
+	require.NotNil(t, untitled.FreeEndTime)
+	assert.WithinDuration(t, time.Now().Add(time.Hour), *untitled.FreeEndTime, 2*time.Minute)
 
 	for _, c := range []struct {
 		body string

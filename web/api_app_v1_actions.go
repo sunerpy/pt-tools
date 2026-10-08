@@ -15,6 +15,7 @@ import (
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
+	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
 )
 
 // App API v1 的搜索、推送与签到。
@@ -110,7 +111,7 @@ func (s *Server) appSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, it := range res.Items {
-		rememberDownhash(it)
+		rememberHit(it)
 		item := AppSearchItem{
 			Site: it.SourceSite, TorrentID: it.ID, Title: it.Title, Subtitle: it.Subtitle, InfoHash: it.InfoHash, Size: it.SizeBytes,
 			Seeders: it.Seeders, Leechers: it.Leechers, Snatched: it.Snatched, UploadedAt: it.UploadedAt, Category: it.Category, Tags: it.Tags,
@@ -132,61 +133,101 @@ func (s *Server) appSearch(w http.ResponseWriter, r *http.Request) {
 	appJSON(w, out)
 }
 
-// downhashes 记下 App 搜索结果里下载要带 downhash 的种子（HDDolby 这类站点）：搜索结果不把下载地址交给 App，
-// 推送时按站点与种子编号在这里找回来。只在内存里，1 小时过期，最多 2000 条。
-type downhashes struct {
+// appHits 记下 App 搜索到的种子（只在内存里，1 小时过期，最多 2000 条），推送时按站点与种子编号找回：
+//   - downhash：HDDolby 这类站点的下载要带它，搜索结果不把下载地址交给 App；
+//   - 体积、H&R、免费与免费到期：推送时一并写进种子记录，H&R 保护与免费到期清理要用。
+type appHits struct {
 	mu sync.Mutex
-	m  map[string]downhashEntry
+	m  map[string]appHit
 }
 
-type downhashEntry struct {
-	hash string
-	at   time.Time
+type appHit struct {
+	downhash string
+	size     int64
+	hasHR    bool
+	free     bool
+	level    string
+	freeEnd  time.Time
+	at       time.Time
 }
 
 const (
-	downhashTTL = time.Hour
-	downhashMax = 2000
+	appHitTTL = time.Hour
+	appHitMax = 2000
 )
 
-var appDownhashes = &downhashes{m: map[string]downhashEntry{}}
+var appSearchHits = &appHits{m: map[string]appHit{}}
 
-func rememberDownhash(it v2.TorrentItem) {
-	if it.DownloadURL == "" {
-		return
+func appHitKey(site, id string) string { return strings.ToLower(site) + "|" + id }
+
+func rememberHit(it v2.TorrentItem) {
+	h := appHit{
+		size: it.SizeBytes, hasHR: it.HasHR, free: it.IsFree(), level: string(it.DiscountLevel), freeEnd: it.DiscountEndTime,
 	}
-	u, err := url.Parse(it.DownloadURL)
-	if err != nil {
-		return
+	if it.DownloadURL != "" {
+		if u, err := url.Parse(it.DownloadURL); err == nil {
+			h.downhash = u.Query().Get("downhash")
+		}
 	}
-	h := u.Query().Get("downhash")
-	if h == "" {
-		return
-	}
-	appDownhashes.mu.Lock()
-	defer appDownhashes.mu.Unlock()
+	appSearchHits.mu.Lock()
+	defer appSearchHits.mu.Unlock()
 	now := time.Now()
-	if len(appDownhashes.m) >= downhashMax {
-		for k, e := range appDownhashes.m {
-			if now.Sub(e.at) > downhashTTL {
-				delete(appDownhashes.m, k)
+	if len(appSearchHits.m) >= appHitMax {
+		for k, e := range appSearchHits.m {
+			if now.Sub(e.at) > appHitTTL {
+				delete(appSearchHits.m, k)
 			}
 		}
-		if len(appDownhashes.m) >= downhashMax {
-			appDownhashes.m = map[string]downhashEntry{}
+		if len(appSearchHits.m) >= appHitMax {
+			appSearchHits.m = map[string]appHit{}
 		}
 	}
-	appDownhashes.m[strings.ToLower(it.SourceSite)+"|"+it.ID] = downhashEntry{hash: h, at: now}
+	h.at = now
+	appSearchHits.m[appHitKey(it.SourceSite, it.ID)] = h
 }
 
-func lookupDownhash(site, id string) string {
-	appDownhashes.mu.Lock()
-	defer appDownhashes.mu.Unlock()
-	e, ok := appDownhashes.m[strings.ToLower(site)+"|"+id]
-	if !ok || time.Since(e.at) > downhashTTL {
-		return ""
+func lookupHit(site, id string) (appHit, bool) {
+	appSearchHits.mu.Lock()
+	defer appSearchHits.mu.Unlock()
+	h, ok := appSearchHits.m[appHitKey(site, id)]
+	if !ok || time.Since(h.at) > appHitTTL {
+		return appHit{}, false
 	}
-	return e.hash
+	return h, true
+}
+
+// lookupDownhash 是推送时下载要带的 downhash（没有搜索过、或者站点不用它时是空的）。
+func lookupDownhash(site, id string) string {
+	h, _ := lookupHit(site, id)
+	return h.downhash
+}
+
+// pushMeta 是推送时写进种子记录的种子信息：按搜索结果取体积、H&R、免费与免费到期，站点定义开了 H&R 的也算 H&R。
+// 没有搜索过时返回 nil，不覆盖库里已有的值（和网页上的推送一样）。
+func pushMeta(site, id string, data []byte) *internal.PushTorrentMeta {
+	h, ok := lookupHit(site, id)
+	if !ok {
+		return nil
+	}
+	size := h.size
+	if size <= 0 {
+		if n, err := qbit.ComputeTorrentSize(data); err == nil {
+			size = n
+		}
+	}
+	hasHR, hours := h.hasHR, 0
+	if def, ok := v2.GetDefinitionRegistry().Get(site); ok {
+		hasHR = hasHR || def.HREnabled
+		if hasHR {
+			hours = def.CalcHRSeedTimeH(size)
+		}
+	}
+	meta := &internal.PushTorrentMeta{SizeBytes: size, HasHR: hasHR, HRSeedTimeH: hours, IsFree: h.free, FreeLevel: h.level}
+	if !h.freeEnd.IsZero() {
+		fe := h.freeEnd.UTC()
+		meta.FreeEndTime = &fe
+	}
+	return meta
 }
 
 // ---- 推送 ----
@@ -279,7 +320,7 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := internal.PushTorrentToDownloader(ctx, internal.PushTorrentRequest{
 		SiteID: req.Site, TorrentID: req.TorrentID, TorrentData: data, Title: req.Title, Category: req.Category,
-		Tags: req.Tags, SavePath: req.SavePath, DownloaderID: dl.ID, Source: appPushSource,
+		Tags: req.Tags, SavePath: req.SavePath, DownloaderID: dl.ID, Source: appPushSource, Meta: pushMeta(req.Site, req.TorrentID, data),
 	})
 	out := AppPushResult{DownloaderID: dl.ID, Downloader: dl.Name}
 	switch {
