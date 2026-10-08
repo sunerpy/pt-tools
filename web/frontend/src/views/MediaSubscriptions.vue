@@ -548,7 +548,7 @@ onMounted(() => {
               controls-position="right"
               data-testid="ms-interval" />
             <div class="field-tip">
-              每个订阅按这个间隔搜一次，另加最多 30 分钟的随机偏移；最少 6 小时，免得给站点添负担
+              每个订阅按这个间隔搜一次，另加最多 30 分钟的随机偏移；最少 6 小时，避免给站点添负担
             </div>
           </el-form-item>
           <el-form-item label="不参与主动搜索的站点">
