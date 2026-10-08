@@ -58,6 +58,8 @@ func writeSubscribeError(w http.ResponseWriter, err error) {
 		status = http.StatusBadRequest
 	case errors.Is(err, subscribe.ErrNotFound), errors.Is(err, tmdb.ErrNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, subscribe.ErrBusy):
+		status = http.StatusConflict
 	case errors.Is(err, tmdb.ErrRateLimited):
 		status = http.StatusTooManyRequests
 	case errors.Is(err, context.DeadlineExceeded):

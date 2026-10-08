@@ -27,6 +27,8 @@ import (
 var (
 	ErrInvalid  = errors.New("参数不对")
 	ErrNotFound = errors.New("没有这条记录")
+	// ErrBusy 是同一件事正在做（例如这个豆瓣来源正在拉取）
+	ErrBusy = errors.New("正在处理")
 )
 
 // Recognizer 是媒体识别（生产环境是 *recognize.Service）。
@@ -113,6 +115,10 @@ type Service struct {
 	offers chan Candidate
 	cache  parseCache
 
+	// doubanBusy 记下正在拉取的豆瓣来源：定时拉取与「立即拉取」不同时处理同一个来源
+	doubanMu   sync.Mutex
+	doubanBusy map[uint]bool
+
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -143,7 +149,7 @@ func New(cfg Config) *Service {
 	if cfg.DoubanBase == "" {
 		cfg.DoubanBase = "https://www.douban.com"
 	}
-	return &Service{cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}}
+	return &Service{cfg: cfg, offers: make(chan Candidate, offerQueue), cache: parseCache{m: map[string]parsed{}}, doubanBusy: map[uint]bool{}}
 }
 
 // Offer 把 RSS 拉到的种子交给订阅（不阻塞；队列满时丢掉，主动搜索还会找到）。

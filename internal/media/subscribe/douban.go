@@ -27,6 +27,7 @@ const (
 	doubanMaxBackoff   = 24 * time.Hour
 	doubanAlertAfter   = 3
 	doubanMaxBody      = 2 << 20
+	doubanMaxRedirects = 3
 	doubanItemsPerPull = 50
 )
 
@@ -165,13 +166,12 @@ func (s *Service) DoubanItems(ctx context.Context, id uint) ([]models.MediaDouba
 	return rows, nil
 }
 
-// FetchDouban 立即拉一次豆瓣来源，返回新建的订阅数。
+// FetchDouban 立即拉一次豆瓣来源，返回新建的订阅数。这个来源正在拉取时返回 ErrBusy。
 func (s *Service) FetchDouban(ctx context.Context, id uint) (int, error) {
-	src, err := s.doubanRow(ctx, id)
-	if err != nil {
+	if _, err := s.doubanRow(ctx, id); err != nil {
 		return 0, err
 	}
-	return s.pullDouban(ctx, &src)
+	return s.pullDouban(ctx, id)
 }
 
 // doubanDue 拉到期的豆瓣来源。
@@ -185,7 +185,9 @@ func (s *Service) doubanDue(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if n, err := s.pullDouban(ctx, &rows[i]); err != nil {
+		if n, err := s.pullDouban(ctx, rows[i].ID); errors.Is(err, ErrBusy) {
+			continue
+		} else if err != nil {
 			s.cfg.Logger.Warnf("[订阅] 拉取豆瓣想看失败 (%s): %v", rows[i].UserID, err)
 		} else if n > 0 {
 			s.cfg.Logger.Infof("[订阅] 豆瓣想看 (%s) 建了 %d 个订阅", rows[i].UserID, n)
@@ -244,7 +246,18 @@ func (s *Service) fetchDoubanFeed(ctx context.Context, uid string) ([]byte, erro
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; pt-tools)")
 	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml")
-	resp, err := s.cfg.HTTP.Do(req)
+	// 只跟同一个主机（同协议）里的跳转：跳到别的地址时当作失败，不去请求那个地址
+	client := *s.cfg.HTTP
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= doubanMaxRedirects {
+			return errors.New("豆瓣跳转次数太多")
+		}
+		if next.URL.Scheme != via[0].URL.Scheme || !strings.EqualFold(next.URL.Host, via[0].URL.Host) {
+			return fmt.Errorf("豆瓣跳转到了别的地址（%s），没有跟过去", next.URL.Host)
+		}
+		return nil
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		var ue *url.Error
 		if errors.As(err, &ue) {
@@ -263,9 +276,36 @@ func (s *Service) fetchDoubanFeed(ctx context.Context, uid string) ([]byte, erro
 	return body, nil
 }
 
+// claimDouban 占住一个豆瓣来源（正在拉取时返回假）；用完 releaseDouban。
+func (s *Service) claimDouban(id uint) bool {
+	s.doubanMu.Lock()
+	defer s.doubanMu.Unlock()
+	if s.doubanBusy[id] {
+		return false
+	}
+	s.doubanBusy[id] = true
+	return true
+}
+
+func (s *Service) releaseDouban(id uint) {
+	s.doubanMu.Lock()
+	delete(s.doubanBusy, id)
+	s.doubanMu.Unlock()
+}
+
 // pullDouban 拉一个豆瓣来源：新的想看对上 TMDB 条目后建订阅（已经订阅过的只记下）；对不上的记成没找到。
-// TMDB 暂时不能访问时整次算失败，之后再拉，不把条目记成没找到。
-func (s *Service) pullDouban(ctx context.Context, src *models.MediaDoubanSource) (int, error) {
+// TMDB 暂时不能访问时整次算失败，之后再拉，不把条目记成没找到。同一个来源同时只拉一次（正在拉时返回 ErrBusy），
+// 占住以后重新读来源，失败次数与通知过没有以库里的为准。
+func (s *Service) pullDouban(ctx context.Context, id uint) (int, error) {
+	if !s.claimDouban(id) {
+		return 0, fmt.Errorf("%w：这个豆瓣来源正在拉取，稍后再试", ErrBusy)
+	}
+	defer s.releaseDouban(id)
+	row, err := s.doubanRow(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	src := &row
 	created, err := s.pullDoubanOnce(ctx, src)
 	now := s.cfg.Now()
 	upd := map[string]any{"last_fetch_at": now, "updated_at": now}

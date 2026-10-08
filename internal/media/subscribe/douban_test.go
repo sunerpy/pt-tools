@@ -188,3 +188,82 @@ func TestDoubanNeedsTMDB(t *testing.T) {
 type noKeyRecognizer struct{ Recognizer }
 
 func (noKeyRecognizer) TMDB(context.Context) (*tmdb.Client, error) { return nil, tmdb.ErrNoKey }
+
+// 豆瓣跳到别的主机时不跟过去、记成失败；同一个主机里的跳转照常跟
+func TestDoubanRedirects(t *testing.T) {
+	e := newEnv(t)
+	var hit atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit.Store(true) }))
+	t.Cleanup(other.Close)
+	body, err := os.ReadFile("testdata/douban.xml")
+	require.NoError(t, err)
+	douban := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/feed/people/away/interests":
+			http.Redirect(w, r, other.URL+"/internal", http.StatusFound)
+		case "/feed/people/moved/interests":
+			http.Redirect(w, r, "/feed/people/qa/interests", http.StatusMovedPermanently)
+		case "/feed/people/qa/interests":
+			_, _ = w.Write(body)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(douban.Close)
+	e.svc.cfg.DoubanBase = douban.URL
+
+	away, err := e.svc.SaveDoubanSource(e.ctx, 0, DoubanSourceInput{UserID: "away", Enabled: true})
+	require.NoError(t, err)
+	_, err = e.svc.FetchDouban(e.ctx, away.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "跳转到了别的地址")
+	assert.False(t, hit.Load(), "没有请求跳转的地址")
+
+	moved, err := e.svc.SaveDoubanSource(e.ctx, 0, DoubanSourceInput{UserID: "moved", Enabled: true})
+	require.NoError(t, err)
+	_, err = e.svc.FetchDouban(e.ctx, moved.ID)
+	require.NoError(t, err)
+}
+
+// 同一个来源同时只拉一次：正在拉时「立即拉取」写明正在拉，定时拉取跳过它，被挡住的不算失败
+func TestDoubanPullIsExclusivePerSource(t *testing.T) {
+	e := newEnv(t)
+	body, err := os.ReadFile("testdata/douban.xml")
+	require.NoError(t, err)
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	e.svc.cfg.DoubanBase = srv.URL
+	src, err := e.svc.SaveDoubanSource(e.ctx, 0, DoubanSourceInput{UserID: "qa", Enabled: true})
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, ferr := e.svc.FetchDouban(e.ctx, src.ID)
+		done <- ferr
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("第一次拉取没有开始")
+	}
+	_, err = e.svc.FetchDouban(e.ctx, src.ID)
+	require.ErrorIs(t, err, ErrBusy)
+	e.svc.doubanDue(e.ctx)
+	close(release)
+	select {
+	case err = <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("第一次拉取没有结束")
+	}
+	assert.Len(t, started, 0, "被挡住的两次都没有去请求豆瓣")
+	row, err := e.svc.doubanRow(e.ctx, src.ID)
+	require.NoError(t, err)
+	assert.Zero(t, row.Failures, "被挡住的不算失败")
+}
