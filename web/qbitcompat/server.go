@@ -121,6 +121,7 @@ func (s *Server) routes() map[string]route {
 		"torrents/categories": {method: get, h: s.categories},
 		"torrents/tags":       {method: get, h: s.tags},
 
+		"torrents/add":            {method: post, h: s.add},
 		"torrents/pause":          {method: post, h: s.pause},
 		"torrents/stop":           {method: post, h: s.pause},
 		"torrents/resume":         {method: post, h: s.resume},
