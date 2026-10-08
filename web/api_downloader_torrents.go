@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -184,32 +185,30 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := 1
-	pageSize := 100
+	q := torrentQuery{Page: 1, PageSize: 100}
 	if p := r.URL.Query().Get("page"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil && v > 0 {
-			page = v
+			q.Page = v
 		}
 	}
 	if ps := r.URL.Query().Get("page_size"); ps != "" {
 		if v, err := strconv.Atoi(ps); err == nil {
 			if v == 0 {
-				pageSize = 0
+				q.PageSize = 0
 			} else if v > 0 && v <= 500 {
-				pageSize = v
+				q.PageSize = v
 			}
 		}
 	}
 
-	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
-	stateFilter := strings.TrimSpace(r.URL.Query().Get("state"))
+	q.Search = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	q.State = strings.TrimSpace(r.URL.Query().Get("state"))
 	downloaderIDStr := strings.TrimSpace(r.URL.Query().Get("downloader_id"))
-	sortBy := strings.TrimSpace(r.URL.Query().Get("sort_by"))
-	sortOrder := strings.TrimSpace(r.URL.Query().Get("sort_order"))
-	categoryFilter := strings.TrimSpace(r.URL.Query().Get("category"))
-	tagFilter := strings.TrimSpace(r.URL.Query().Get("tag"))
+	q.SortBy = strings.TrimSpace(r.URL.Query().Get("sort_by"))
+	q.SortOrder = strings.TrimSpace(r.URL.Query().Get("sort_order"))
+	q.Category = strings.TrimSpace(r.URL.Query().Get("category"))
+	q.Tag = strings.TrimSpace(r.URL.Query().Get("tag"))
 
-	var filterDownloaderID *uint
 	if downloaderIDStr != "" {
 		id64, err := strconv.ParseUint(downloaderIDStr, 10, 64)
 		if err != nil {
@@ -217,26 +216,42 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id := uint(id64)
-		filterDownloaderID = &id
+		q.DownloaderID = &id
 	}
 
-	records, err := s.listEnabledDownloaderRecords(filterDownloaderID)
+	resp, err := s.collectDownloaderTorrents(r.Context(), q)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	writeJSON(w, resp)
+}
+
+// torrentQuery 是聚合各下载器种子列表的筛选、排序与分页。Search 要先转成小写；PageSize 为 0 时不分页。
+type torrentQuery struct {
+	Page, PageSize               int
+	Search, State, Category, Tag string
+	DownloaderID                 *uint
+	SortBy, SortOrder            string
+}
+
+// collectDownloaderTorrents 取各启用下载器的种子，筛选、排序、分页；一台取不到时记进 Failures，不让整个列表失败。
+func (s *Server) collectDownloaderTorrents(ctx context.Context, q torrentQuery) (DownloaderTorrentsResponse, error) {
+	records, err := s.listEnabledDownloaderRecords(q.DownloaderID)
+	if err != nil {
+		return DownloaderTorrentsResponse{}, err
+	}
 
 	dm := s.getDownloaderManager()
 	if dm == nil {
-		http.Error(w, "下载器管理器未初始化", http.StatusInternalServerError)
-		return
+		return DownloaderTorrentsResponse{}, errors.New("下载器管理器未初始化")
 	}
 
 	items := make([]DownloaderTorrentItem, 0)
 	// 逐台记录失败而不是只打日志：不上报的话前端拿到的是一份静默缺料的列表
 	failures := make([]DownloaderFailure, 0)
 	for _, rec := range records {
-		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
+		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
 			global.GetSlogger().Warnf("[DownloaderTorrents] 获取下载器失败: name=%s, err=%v", rec.Name, dlErr)
 			failures = append(failures, DownloaderFailure{
@@ -255,17 +270,17 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, t := range torrents {
-			if stateFilter != "" && string(t.State) != stateFilter {
+			if q.State != "" && string(t.State) != q.State {
 				continue
 			}
 
-			if search != "" {
+			if q.Search != "" {
 				// 画板 18 的 q 写的是「搜索标题、分类、标签…」，所以分类与标签也要参与匹配：
 				// 只匹配标题时那句占位文字是在许一个做不到的承诺。
 				haystacks := []string{t.Name, t.InfoHash, rec.Name, t.Category, t.Tags}
 				hit := false
 				for _, h := range haystacks {
-					if h != "" && strings.Contains(strings.ToLower(h), search) {
+					if h != "" && strings.Contains(strings.ToLower(h), q.Search) {
 						hit = true
 						break
 					}
@@ -275,14 +290,14 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if categoryFilter != "" && t.Category != categoryFilter {
+			if q.Category != "" && t.Category != q.Category {
 				continue
 			}
 
-			if tagFilter != "" {
+			if q.Tag != "" {
 				tagFound := false
 				for _, tag := range strings.Split(t.Tags, ",") {
-					if strings.TrimSpace(tag) == tagFilter {
+					if strings.TrimSpace(tag) == q.Tag {
 						tagFound = true
 						break
 					}
@@ -322,6 +337,7 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sortOrder, sortBy := q.SortOrder, q.SortBy
 	if sortOrder != "asc" && sortOrder != "desc" {
 		sortOrder = "desc"
 	}
@@ -339,24 +355,24 @@ func (s *Server) apiDownloaderTorrents(w http.ResponseWriter, r *http.Request) {
 	total := len(items)
 	start := 0
 	end := total
-	if pageSize > 0 {
-		start = (page - 1) * pageSize
+	if q.PageSize > 0 {
+		start = (q.Page - 1) * q.PageSize
 		if start > total {
 			start = total
 		}
-		end = start + pageSize
+		end = start + q.PageSize
 		if end > total {
 			end = total
 		}
 	}
 
-	writeJSON(w, DownloaderTorrentsResponse{
+	return DownloaderTorrentsResponse{
 		Items:    items[start:end],
 		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
+		Page:     q.Page,
+		PageSize: q.PageSize,
 		Failures: failures,
-	})
+	}, nil
 }
 
 func (s *Server) apiDownloaderCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -561,22 +577,43 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	action := strings.TrimSpace(req.Action)
-	if action == "" {
+	if strings.TrimSpace(req.Action) == "" {
 		http.Error(w, "action 不能为空", http.StatusBadRequest)
 		return
 	}
 
+	resp, err := s.runTorrentActions(r.Context(), req)
+	if errors.Is(err, errUnsupportedAction) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+var errUnsupportedAction = errors.New("不支持的 action")
+
+// runTorrentActions 对一批种子做同一个操作（暂停、继续、删除、连数据删除、改保存目录、重新校验），按下载器分组，
+// 整批失败时逐个重试，返回每个种子的结果。不认识的操作返回 errUnsupportedAction。
+func (s *Server) runTorrentActions(ctx context.Context, req BatchTorrentActionRequest) (BatchTorrentActionResponse, error) {
+	action := strings.TrimSpace(req.Action)
+	switch action {
+	case "pause", "resume", "delete", "delete_with_files", "set_location", "recheck":
+	default:
+		return BatchTorrentActionResponse{}, errUnsupportedAction
+	}
+
 	dm := s.getDownloaderManager()
 	if dm == nil {
-		http.Error(w, "下载器管理器未初始化", http.StatusInternalServerError)
-		return
+		return BatchTorrentActionResponse{}, errors.New("下载器管理器未初始化")
 	}
 
 	records, err := s.getDownloaderRecordMap()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return BatchTorrentActionResponse{}, err
 	}
 
 	resp := BatchTorrentActionResponse{Results: make([]BatchTorrentActionResult, 0, len(req.Targets))}
@@ -600,7 +637,7 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		dl, dlErr := acquireDownloader(r.Context(), dm, rec.Name)
+		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
 			for _, target := range targets {
 				resp.FailedCount++
@@ -714,13 +751,10 @@ func (s *Server) apiDownloaderTorrentActions(w http.ResponseWriter, r *http.Requ
 					Success:        true,
 				})
 			}
-		default:
-			http.Error(w, "不支持的 action", http.StatusBadRequest)
-			return
 		}
 	}
 
-	writeJSON(w, resp)
+	return resp, nil
 }
 
 func (s *Server) apiAddDownloaderTorrent(w http.ResponseWriter, r *http.Request) {

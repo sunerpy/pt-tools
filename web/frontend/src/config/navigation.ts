@@ -96,6 +96,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { path: "/global", label: "全局设置", icon: "settings", rail: true },
       { path: "/cloak-config", label: "CloakBrowser", icon: "shield" },
+      { path: "/api-tokens", label: "API 令牌", icon: "id-card" },
       { path: "/logs", label: "运行日志", icon: "scroll-text" },
       { path: "/password", label: "修改密码", icon: "key-round" },
     ],

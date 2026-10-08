@@ -10,6 +10,7 @@ import (
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
 func TestSettingsValidation(t *testing.T) {
@@ -496,4 +497,23 @@ func TestDownloaderFor(t *testing.T) {
 	id, err = e.svc.downloaderFor(e.ctx, &models.MediaSubscription{DownloaderID: off.ID}, set)
 	require.NoError(t, err)
 	assert.Equal(t, second.ID, id, "订阅选的下载器停用了就用设置里的")
+}
+
+// 半价这类优惠也有结束时间，但不是免费到期：推送时不能写成免费到期，否则免费到期清理会删掉没下完的种子
+func TestPushNonFreeDiscountHasNoFreeEnd(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	p, err := e.svc.SaveProfile(e.ctx, 0, ProfileInput{Name: "好", Resolutions: []string{"2160p", "1080p"}})
+	require.NoError(t, err)
+	m := e.sub(SubscriptionInput{MediaType: models.MediaKindMovie, TMDBID: 693134, ProfileID: p.ID})
+	half := e.item("hdsky", "21", "Dune.Part.Two.2024.1080p.WEB-DL.H264-X", "沙丘2", 8, 50)
+	half.DiscountLevel, half.DiscountEndTime = v2.DiscountPercent50, e.Now().Add(time.Hour)
+	e.search.set(half)
+	_, err = e.svc.SearchNow(e.ctx, m.ID)
+	require.NoError(t, err)
+	pushes := e.gotPushes()
+	require.Len(t, pushes, 1)
+	require.NotNil(t, pushes[0].Meta)
+	assert.False(t, pushes[0].Meta.IsFree)
+	assert.Nil(t, pushes[0].Meta.FreeEndTime, "半价的结束时间不是免费到期")
 }

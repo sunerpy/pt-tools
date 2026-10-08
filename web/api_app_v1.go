@@ -1,0 +1,290 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
+	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/version"
+	"github.com/sunerpy/pt-tools/web/middleware"
+)
+
+// App API v1（路线图 M12）：给手机 App 用的版本化接口，/api/app/v1/*。
+//
+// 和现有 /api/* 不同，这里认两种主体：有效的 session cookie（网页登录，拥有全部权限范围），或者
+// `Authorization: Bearer ptt_…` 的 API 令牌（只有自己的权限范围）。每条路由在路由表里声明要的权限范围：
+// 没有主体回 401，权限范围不够回 403。返回的 DTO 只放 App 要的字段，不放 Cookie、API key、passkey、密码、
+// RSS 地址、下载链接与通知配置。令牌做的写操作记进操作审计（ChannelType 是 api_token）。
+
+const (
+	appPrefix = "/api/app/v1"
+	// AppRemoteAPILevel 是 App API 的兼容级别：不兼容的改动才加一，App 遇到不认识的级别时提示升级
+	AppRemoteAPILevel = 1
+	appMaxBody        = 1 << 20
+)
+
+// appAuditRecorder 记下一条操作审计（app.AuditService 实现了它）。
+type appAuditRecorder interface {
+	Record(ctx context.Context, e app.AuditEntry) error
+}
+
+// appRoute 是 App API 的一条路由。Path 不含 /api/app/v1 前缀，用 Go 1.22 的路由写法（可以带 {参数}）。
+type appRoute struct {
+	Method  string
+	Path    string
+	Scope   string
+	Handler http.HandlerFunc
+}
+
+// appRoutes 是 App API v1 的路由表。读接口要 app:read，写接口要 app:write。
+func (s *Server) appRoutes() []appRoute {
+	r, w := apitoken.ScopeAppRead, apitoken.ScopeAppWrite
+	return []appRoute{
+		{http.MethodGet, "/meta", r, s.appMeta},
+		{http.MethodGet, "/overview", r, s.appOverview},
+		{http.MethodGet, "/sites", r, s.appSites},
+		{http.MethodGet, "/tasks", r, s.appTasks},
+		{http.MethodGet, "/favicon/{site}", r, s.appFavicon},
+		{http.MethodGet, "/torrents", r, s.appTorrents},
+		{http.MethodPost, "/torrents/actions", w, s.appTorrentActions},
+		// 搜索用 POST 传条件，但只读
+		{http.MethodPost, "/search", r, s.appSearch},
+		{http.MethodPost, "/push", w, s.appPush},
+		{http.MethodPost, "/sites/{site}/attend", w, s.appAttend},
+		{http.MethodGet, "/brush/tasks", r, s.appBrushTasks},
+		{http.MethodGet, "/media/history", r, s.appMediaHistory},
+		{http.MethodGet, "/subscriptions", r, s.appSubscriptions},
+		{http.MethodGet, "/subscriptions/{id}", r, s.appSubscriptionDetail},
+		{http.MethodPost, "/subscriptions", w, s.appSubscriptionCreate},
+		{http.MethodPost, "/subscriptions/{id}/status", w, s.appSubscriptionSetStatus},
+		{http.MethodPost, "/subscriptions/{id}/search", w, s.appSubscriptionSearch},
+		{http.MethodDelete, "/subscriptions/{id}", w, s.appSubscriptionDelete},
+		{http.MethodGet, "/explore", r, s.appExplore},
+	}
+}
+
+func (s *Server) registerAppV1Routes(mux *http.ServeMux) {
+	routes := s.appRoutes()
+	for _, rt := range routes {
+		mux.Handle(rt.Method+" "+appPrefix+rt.Path, s.appHandler(rt))
+	}
+	// 兜底：路径对、方法不对回 405（带 Allow）；没有的接口回 JSON 的 404，不落到 SPA 的兜底（那会 302 到登录页）。
+	// 这个兜底不限方法，会压过 ServeMux 自己的 405，所以在这里判断。
+	mux.HandleFunc(appPrefix+"/", func(w http.ResponseWriter, r *http.Request) {
+		if allow := appAllowedMethods(routes, strings.TrimPrefix(r.URL.Path, appPrefix)); len(allow) > 0 {
+			w.Header().Set("Allow", strings.Join(allow, ", "))
+			appError(w, http.StatusMethodNotAllowed, "method_not_allowed", "这个接口只接受 "+strings.Join(allow, "、"))
+			return
+		}
+		appError(w, http.StatusNotFound, "not_found", "没有这个接口")
+	})
+}
+
+// appAllowedMethods 是路由表里路径对得上 path 的那些方法（排好序）；{参数} 段对得上任何非空的段。
+func appAllowedMethods(routes []appRoute, path string) []string {
+	segs := strings.Split(path, "/")
+	var out []string
+	for _, rt := range routes {
+		want := strings.Split(rt.Path, "/")
+		if len(want) != len(segs) {
+			continue
+		}
+		match := true
+		for i, w := range want {
+			if strings.HasPrefix(w, "{") && strings.HasSuffix(w, "}") {
+				if segs[i] == "" {
+					match = false
+				}
+			} else if w != segs[i] {
+				match = false
+			}
+			if !match {
+				break
+			}
+		}
+		if match && !slices.Contains(out, rt.Method) {
+			out = append(out, rt.Method)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// appError 写 App API 的错误：{"error": 代码, "message": 说明}。
+func appError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "message": message})
+}
+
+// appJSON 写 App API 的成功回应。
+func appJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// appDecode 严格解析请求体：最多 1 MiB，拒绝不认识的字段与 JSON 之后多出来的内容。
+func appDecode(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, appMaxBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		appError(w, http.StatusBadRequest, "invalid_body", "请求格式错误: "+err.Error())
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		appError(w, http.StatusBadRequest, "invalid_body", "请求格式错误: JSON 之后还有多余的内容")
+		return false
+	}
+	return true
+}
+
+// appNoBody 用在不带请求体的写接口：可以不带，或者带一个空对象；别的内容回 400。最多读 1 MiB。
+func appNoBody(w http.ResponseWriter, r *http.Request) bool {
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, appMaxBody))
+	if err != nil {
+		appError(w, http.StatusBadRequest, "invalid_body", "请求格式错误: "+err.Error())
+		return false
+	}
+	if t := strings.TrimSpace(string(b)); t != "" && t != "{}" {
+		appError(w, http.StatusBadRequest, "invalid_body", "这个接口不带请求体")
+		return false
+	}
+	return true
+}
+
+// appOutcomeKey 是请求上下文里放审计业务结果的位置（只在要记审计的写请求上有）。
+type appOutcomeKey struct{}
+
+// appSetOutcome 记下这次写请求的业务结果，例如推送被拦下、批量动作全失败：这些回应是 200，只看状态码会被记成 success。
+// 结果用审计的写法（error:…、denied:…）；状态码本身是失败时仍按状态码记。
+func appSetOutcome(r *http.Request, outcome string) {
+	if p, ok := r.Context().Value(appOutcomeKey{}).(*string); ok {
+		*p = outcome
+	}
+}
+
+// appPrincipal 解析请求的主体：有效的 session cookie 优先，其次是 Bearer 令牌。没有主体时返回 nil 与要回的状态码。
+func (s *Server) appPrincipal(r *http.Request) (*middleware.Principal, int) {
+	if c, err := r.Cookie("session"); err == nil {
+		if user, ok := s.sessions.lookup(c.Value); ok {
+			return &middleware.Principal{Kind: middleware.KindSession, ID: user}, 0
+		}
+	}
+	plain, ok := middleware.BearerToken(r)
+	if !ok || s.tokens == nil {
+		return nil, http.StatusUnauthorized
+	}
+	tok, err := s.tokens.Verify(r.Context(), plain)
+	if errors.Is(err, apitoken.ErrUnauthorized) {
+		return nil, http.StatusUnauthorized
+	}
+	if err != nil {
+		global.GetSlogger().Warnf("[App API] 校验令牌失败: %v", err)
+		return nil, http.StatusServiceUnavailable
+	}
+	return &middleware.Principal{Kind: middleware.KindAPIToken, ID: strconv.FormatUint(uint64(tok.ID), 10), Name: tok.Name, Scopes: tok.Scopes}, 0
+}
+
+// appHandler 包一条路由：解析主体、检查权限范围；非 session 主体的写请求记审计（权限范围不够被拒的也记）。
+func (s *Server) appHandler(rt appRoute) http.Handler {
+	write := rt.Scope == apitoken.ScopeAppWrite
+	command := rt.Method + " " + appPrefix + rt.Path
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, status := s.appPrincipal(r)
+		if p == nil {
+			if status == http.StatusUnauthorized {
+				appError(w, status, "unauthorized", "要登录，或者带上有效的 API 令牌（Authorization: Bearer）")
+			} else {
+				appError(w, status, "unavailable", "暂时不能校验令牌")
+			}
+			return
+		}
+		audit := write && p.Kind != middleware.KindSession
+		if !p.Has(rt.Scope) {
+			appError(w, http.StatusForbidden, "forbidden", "令牌没有 "+rt.Scope+" 权限")
+			if audit {
+				s.recordAppWrite(r, p, command, "denied:scope", http.StatusForbidden, 0)
+			}
+			return
+		}
+		r = r.WithContext(middleware.WithPrincipal(r.Context(), p))
+		if !audit {
+			rt.Handler(w, r)
+			return
+		}
+		outcome := new(string)
+		r = r.WithContext(context.WithValue(r.Context(), appOutcomeKey{}, outcome))
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rt.Handler(rec, r)
+		result := appAuditResult(rec.status)
+		if rec.status < http.StatusBadRequest && *outcome != "" {
+			result = *outcome
+		}
+		s.recordAppWrite(r, p, command, result, rec.status, time.Since(start))
+	})
+}
+
+// appAuditResult 是写请求的审计结果，和 ChatOps 的审计同一套写法（审计页按冒号前那一段分档）：
+// 成功是 success，失败是 error:http_<状态码>。
+func appAuditResult(status int) string {
+	if status >= http.StatusBadRequest {
+		return "error:http_" + strconv.Itoa(status)
+	}
+	return "success"
+}
+
+// recordAppWrite 把非 session 主体的写请求记进操作审计（不改表结构：NotificationConfID 为 0，ChannelType 是主体种类）。
+func (s *Server) recordAppWrite(r *http.Request, p *middleware.Principal, command, result string, status int, took time.Duration) {
+	if s.appAudit == nil {
+		return
+	}
+	e := app.AuditEntry{
+		ChannelType: p.Kind, ChannelUserID: p.ID, Command: command, Result: result, LatencyMs: took.Milliseconds(),
+		Args: map[string]any{"path": r.URL.Path, "status": status, "name": p.Name},
+	}
+	// 请求可能已经被取消：审计照样写
+	if err := s.appAudit.Record(context.WithoutCancel(r.Context()), e); err != nil {
+		global.GetSlogger().Warnf("[App API] 记审计失败: %v", err)
+	}
+}
+
+// AppMeta 是 GET /meta 的回应。
+type AppMeta struct {
+	Name           string        `json:"name"`
+	Version        string        `json:"version"`
+	RemoteAPILevel int           `json:"remote_api_level"`
+	Features       []string      `json:"features"`
+	Principal      AppPrincipalV `json:"principal"`
+}
+
+// AppPrincipalV 是调用者自己的主体（App 用来判断能不能显示写操作）。
+type AppPrincipalV struct {
+	Kind   string   `json:"kind"`
+	Name   string   `json:"name,omitempty"`
+	Scopes []string `json:"scopes"`
+}
+
+// appFeatures 是这个版本的 App API 提供的功能组。
+var appFeatures = []string{"overview", "sites", "torrents", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions"}
+
+func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
+	p := middleware.PrincipalFrom(r.Context())
+	scopes := p.Scopes
+	if p.Kind == middleware.KindSession {
+		scopes = apitoken.Scopes
+	}
+	appJSON(w, AppMeta{
+		Name: "pt-tools", Version: version.GetVersionInfo().Version, RemoteAPILevel: AppRemoteAPILevel, Features: appFeatures,
+		Principal: AppPrincipalV{Kind: p.Kind, Name: p.Name, Scopes: append([]string{}, scopes...)},
+	})
+}

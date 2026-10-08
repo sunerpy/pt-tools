@@ -47,6 +47,11 @@
 - [RSS 上新通知](guide/chatops-rss-notify.md)：通知模式、静默时段、digest、重试和配额。
 - [更多通知通道](guide/notify-channels.md)：企业微信、钉钉、飞书群机器人，以及 Bark、Server 酱、ntfy。
 
+## App 与接口
+
+- [API 令牌](guide/api-tokens.md)：给手机 App 与脚本用的令牌：权限、有效期、撤销与审计。
+- [App API](reference/app-api.md)：令牌能调用的接口：认证、约定、错误码与接口清单。
+
 ## 参考
 
 - [常见问题](faq.md)：下载器、认证、RSS、免费暂停与数据库排障。

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,14 +18,12 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/models"
-	"github.com/sunerpy/pt-tools/web/middleware"
 )
 
 // ==== merged from api_chatops_branches_test.go ====
@@ -56,13 +55,6 @@ func TestChatOpsValidationBranches(t *testing.T) {
 
 	t.Run("patch binding no fields", func(t *testing.T) {
 		resp := chatopsReq(t, srv, http.MethodPatch, "/api/chatops/bindings/1", tok, map[string]any{})
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	})
-
-	t.Run("create token missing kind", func(t *testing.T) {
-		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/tokens", tok,
-			map[string]any{"scope": "x"})
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	})
@@ -112,39 +104,6 @@ func TestChatOpsValidationBranches(t *testing.T) {
 			map[string]any{"conf_id": 1, "label": "l"})
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-	})
-
-	t.Run("create token ok", func(t *testing.T) {
-		resp := chatopsReq(t, srv, http.MethodPost, "/api/chatops/tokens", tok,
-			map[string]any{"kind": "bearer", "scope": "chatops:*", "ttl_s": 3600})
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-	})
-}
-
-// ==== merged from api_chatops_cov2_test.go ====
-func TestChatopsHandlers_NotWiredBranches(t *testing.T) {
-	h := &chatopsHandlers{deps: &ChatOpsDeps{}}
-
-	t.Run("createToken no admin store", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/chatops/tokens", nil)
-		h.createToken(w, req)
-		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-	})
-
-	t.Run("listTokens no admin store", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/chatops/tokens", nil)
-		h.listTokens(w, req)
-		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-	})
-
-	t.Run("deleteToken no admin store", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodDelete, "/api/chatops/tokens/1", nil)
-		h.deleteToken(w, req)
-		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	})
 }
 
@@ -196,16 +155,6 @@ func TestChatopsRSSNotify_InvalidID(t *testing.T) {
 	})
 }
 
-func TestChatopsDeleteToken_InvalidID(t *testing.T) {
-	store := newStubBotTokenStore()
-	h := &chatopsHandlers{deps: &ChatOpsDeps{TokenAdmin: store}}
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/chatops/tokens/abc", nil)
-	h.deleteToken(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
 func TestRegisterChatOpsIfWired(t *testing.T) {
 	t.Run("no deps registers nothing", func(t *testing.T) {
 		s := &Server{}
@@ -213,23 +162,30 @@ func TestRegisterChatOpsIfWired(t *testing.T) {
 		s.registerChatOpsIfWired(mux)
 	})
 
-	t.Run("with deps registers routes", func(t *testing.T) {
+	t.Run("with deps registers routes, session only", func(t *testing.T) {
 		s := &Server{sessions: newSessionStore()}
-		store := newStubBotTokenStore()
 		s.SetChatOpsDeps(&ChatOpsDeps{
 			NotificationSvc: &stubNotificationSvc{},
 			BindingSvc:      &stubBindingSvc{},
 			AuditSvc:        &stubAuditSvc{},
-			BotTokenStore:   store,
-			TokenAdmin:      store,
 		})
 		mux := http.NewServeMux()
 		s.registerChatOpsIfWired(mux)
 
+		// 带 Bearer 令牌、没有 session：一律 401（通知详情会解密通道凭证，令牌不能访问）
+		for _, path := range []string{"/api/chatops/notifications", "/api/chatops/notifications/1", "/api/chatops/audit"} {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer ptt_1_anything")
+			mux.ServeHTTP(w, req)
+			require.Equal(t, http.StatusUnauthorized, w.Code, path)
+		}
+		s.sessions.put("sess-chatops", "admin")
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/chatops/notifications", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: "sess-chatops"})
 		mux.ServeHTTP(w, req)
-		require.NotEqual(t, http.StatusNotFound, w.Code)
+		require.Equal(t, http.StatusOK, w.Code)
 	})
 }
 
@@ -387,37 +343,6 @@ func TestRevokeBinding_Cov(t *testing.T) {
 	})
 }
 
-func TestDeleteToken_Cov(t *testing.T) {
-	srv, _, store, cleanup := newTestChatOpsServer(t)
-	defer cleanup()
-	tok := store.registerValidToken("chatops:*")
-
-	created, _, err := store.CreateToken(nil, "bearer", "chatops:*", 0) //nolint:staticcheck
-	require.NoError(t, err)
-
-	t.Run("delete existing", func(t *testing.T) {
-		resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/tokens/"+itoaUint(created.ID), tok, nil)
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-	})
-
-	t.Run("delete missing maps error", func(t *testing.T) {
-		resp := chatopsReq(t, srv, http.MethodDelete, "/api/chatops/tokens/9999", tok, nil)
-		defer resp.Body.Close()
-		assert.NotEqual(t, http.StatusOK, resp.StatusCode)
-	})
-}
-
-func TestListTokens_Cov(t *testing.T) {
-	srv, _, store, cleanup := newTestChatOpsServer(t)
-	defer cleanup()
-	tok := store.registerValidToken("chatops:*")
-
-	resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/tokens", tok, nil)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-}
-
 func TestAuditStats_Cov(t *testing.T) {
 	srv, _, store, cleanup := newTestChatOpsServer(t)
 	defer cleanup()
@@ -533,32 +458,6 @@ func TestChatops_ServiceErrorBranches(t *testing.T) {
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 	})
-
-	t.Run("create token service error", func(t *testing.T) {
-		store.createFn = func(_, _ string, _ time.Duration) (TokenDTO, string, error) {
-			return TokenDTO{}, "", errors.New("boom")
-		}
-		defer func() { store.createFn = nil }()
-		resp := chatopsReq(t, srv, "POST", "/api/chatops/tokens", tok, map[string]any{"kind": "bearer"})
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	})
-
-	t.Run("list tokens error", func(t *testing.T) {
-		store.listErr = errors.New("boom")
-		defer func() { store.listErr = nil }()
-		resp := chatopsReq(t, srv, "GET", "/api/chatops/tokens", tok, nil)
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	})
-
-	t.Run("delete token error", func(t *testing.T) {
-		store.deleteFn = func(uint) error { return errors.New("boom") }
-		defer func() { store.deleteFn = nil }()
-		resp := chatopsReq(t, srv, "DELETE", "/api/chatops/tokens/7", tok, nil)
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	})
 }
 
 var _ = context.Background
@@ -583,14 +482,6 @@ func TestChatOpsErrorBranches(t *testing.T) {
 		defer resp.Body.Close()
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 		deps.AuditSvc.(*stubAuditSvc).statsErr = nil
-	})
-
-	t.Run("list tokens error", func(t *testing.T) {
-		store.listErr = app.ErrConfNotFound
-		resp := chatopsReq(t, srv, http.MethodGet, "/api/chatops/tokens", tok, nil)
-		defer resp.Body.Close()
-		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-		store.listErr = nil
 	})
 
 	t.Run("update notification error", func(t *testing.T) {
@@ -891,85 +782,40 @@ func (s *stubAuditSvc) Stats(ctx context.Context) (app.AuditStatsDTO, error) {
 
 func (s *stubAuditSvc) Prune(ctx context.Context) (int64, error) { return 0, nil }
 
-// stubBotTokenStore implements middleware.BotTokenStore + supports our own CRUD methods
-// for /api/chatops/tokens endpoints. We use a simple in-memory map keyed by plaintext
-// token (test only). Production wiring will use a real store; here we test only the route layer.
+// stubBotTokenStore 是测试夹具的鉴权桩：登记过的 Bearer 令牌才放行。生产里这些路由只认 session
+// （见 TestRegisterChatOpsIfWired），这里用令牌只是让请求写起来简单。
 type stubBotTokenStore struct {
-	tokens   map[uint]*models.BotToken
-	plainIdx map[string]*models.BotToken
-	nextID   uint
-	listResp []TokenDTO
-	listErr  error
-	createFn func(kind, scope string, ttl time.Duration) (TokenDTO, string, error)
-	deleteFn func(id uint) error
+	mu    sync.Mutex
+	valid map[string]bool
+	n     int
 }
 
 func newStubBotTokenStore() *stubBotTokenStore {
-	return &stubBotTokenStore{
-		tokens:   make(map[uint]*models.BotToken),
-		plainIdx: make(map[string]*models.BotToken),
-	}
+	return &stubBotTokenStore{valid: map[string]bool{}}
 }
 
-func (s *stubBotTokenStore) Lookup(ctx context.Context, plain string) (*models.BotToken, error) {
-	if t, ok := s.plainIdx[plain]; ok {
-		c := *t
-		return &c, nil
-	}
-	return nil, nil
+// registerValidToken 登记一个能用的令牌，返回明文。
+func (s *stubBotTokenStore) registerValidToken(string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.n++
+	tok := fmt.Sprintf("plain-%d", s.n)
+	s.valid[tok] = true
+	return tok
 }
 
-func (s *stubBotTokenStore) ListTokens(ctx context.Context) ([]TokenDTO, error) {
-	return s.listResp, s.listErr
-}
-
-func (s *stubBotTokenStore) CreateToken(ctx context.Context, kind, scope string, ttl time.Duration) (TokenDTO, string, error) {
-	if s.createFn != nil {
-		return s.createFn(kind, scope, ttl)
-	}
-	s.nextID++
-	id := s.nextID
-	plain := fmt.Sprintf("plain-%d", id)
-	hash, _ := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.MinCost)
-	tk := &models.BotToken{
-		ID:              id,
-		Kind:            kind,
-		CodeOrTokenHash: string(hash),
-		Scope:           scope,
-		CreatedAt:       time.Now(),
-	}
-	if ttl > 0 {
-		exp := time.Now().Add(ttl)
-		tk.ExpiresAt = &exp
-	}
-	s.tokens[id] = tk
-	s.plainIdx[plain] = tk
-	return TokenDTO{ID: id, Kind: kind, Scope: scope, CreatedAt: tk.CreatedAt, ExpiresAt: tk.ExpiresAt}, plain, nil
-}
-
-func (s *stubBotTokenStore) DeleteToken(ctx context.Context, id uint) error {
-	if s.deleteFn != nil {
-		return s.deleteFn(id)
-	}
-	tk, ok := s.tokens[id]
-	if !ok {
-		return errors.New("not found")
-	}
-	delete(s.tokens, id)
-	for k, v := range s.plainIdx {
-		if v == tk {
-			delete(s.plainIdx, k)
-			break
+func (s *stubBotTokenStore) auth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		s.mu.Lock()
+		ok := s.valid[tok]
+		s.mu.Unlock()
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
-	}
-	return nil
-}
-
-// helper: register a valid bearer token returning the plaintext.
-func (s *stubBotTokenStore) registerValidToken(scope string) string {
-	dto, plain, _ := s.CreateToken(context.Background(), "bearer", scope, time.Hour)
-	_ = dto
-	return plain
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ----- helpers -----
@@ -985,14 +831,10 @@ func newTestChatOpsServer(t *testing.T) (*httptest.Server, *ChatOpsDeps, *stubBo
 		NotificationSvc: notif,
 		BindingSvc:      bind,
 		AuditSvc:        audit,
-		BotTokenStore:   store,
-		TokenAdmin:      store,
 	}
 
 	mux := http.NewServeMux()
-	// Test wrapper: use plain RequireBearer (no session fallback) for clearer 401 semantics.
-	requireAuth := middleware.RequireBearer(store)
-	RegisterChatOpsRoutes(mux, deps, requireAuth)
+	RegisterChatOpsRoutes(mux, deps, store.auth)
 
 	srv := httptest.NewServer(mux)
 	return srv, deps, store, srv.Close
@@ -1049,9 +891,6 @@ func TestRegisterChatOpsRoutes_AllEndpoints(t *testing.T) {
 		{"DELETE", "/api/chatops/bindings/1", http.StatusNotFound},
 		{"PATCH", "/api/chatops/bindings/1", http.StatusNotFound},
 		{"GET", "/api/chatops/audit", http.StatusNotFound},
-		{"POST", "/api/chatops/tokens", http.StatusNotFound},
-		{"GET", "/api/chatops/tokens", http.StatusNotFound},
-		{"DELETE", "/api/chatops/tokens/1", http.StatusNotFound},
 	}
 
 	for _, tc := range cases {
@@ -1413,60 +1252,6 @@ func TestQueryAuditStats_Unauth(t *testing.T) {
 	srv, _, _, cleanup := newTestChatOpsServer(t)
 	defer cleanup()
 	resp := chatopsReq(t, srv, "GET", "/api/chatops/audit/stats", "", nil)
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	resp.Body.Close()
-}
-
-func TestTokens_CRUD(t *testing.T) {
-	srv, _, store, cleanup := newTestChatOpsServer(t)
-	defer cleanup()
-	tok := store.registerValidToken("chatops:*")
-
-	// Create
-	resp := chatopsReq(t, srv, "POST", "/api/chatops/tokens", tok, map[string]any{
-		"kind":  "bearer",
-		"scope": "chatops:read",
-		"ttl_s": 3600,
-	})
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var created struct {
-		Token TokenDTO `json:"token"`
-		Plain string   `json:"plaintext"`
-	}
-	decodeBody(t, resp, &created)
-	require.NotEmpty(t, created.Plain)
-	require.Equal(t, "bearer", created.Token.Kind)
-	require.Equal(t, "chatops:read", created.Token.Scope)
-
-	// Configure list response
-	store.listResp = []TokenDTO{created.Token}
-	resp = chatopsReq(t, srv, "GET", "/api/chatops/tokens", tok, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var listed []TokenDTO
-	decodeBody(t, resp, &listed)
-	require.GreaterOrEqual(t, len(listed), 1)
-
-	// Delete
-	resp = chatopsReq(t, srv, "DELETE", fmt.Sprintf("/api/chatops/tokens/%d", created.Token.ID), tok, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
-}
-
-func TestTokens_CreateInvalid(t *testing.T) {
-	srv, _, store, cleanup := newTestChatOpsServer(t)
-	defer cleanup()
-	tok := store.registerValidToken("chatops:*")
-
-	resp := chatopsReq(t, srv, "POST", "/api/chatops/tokens", tok, map[string]any{"kind": ""})
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	resp.Body.Close()
-}
-
-func TestTokens_Unauth(t *testing.T) {
-	srv, _, _, cleanup := newTestChatOpsServer(t)
-	defer cleanup()
-
-	resp := chatopsReq(t, srv, "GET", "/api/chatops/tokens", "", nil)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	resp.Body.Close()
 }

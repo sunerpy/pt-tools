@@ -24,6 +24,13 @@ import (
 // newSubscribeServer 起一个接好订阅服务的接口：TMDB 是本地假服务（肖申克的救赎、趋势列表）。没有搜索与推送：立即搜索回「搜索服务没有启动」。
 func newSubscribeServer(t *testing.T, opts ...func(*subscribe.Config)) *http.ServeMux {
 	t.Helper()
+	_, mux := newSubscribeEnv(t, opts...)
+	return mux
+}
+
+// newSubscribeEnv 同 newSubscribeServer，另外把服务本身也交出来（App API 的测试直接调处理函数）。
+func newSubscribeEnv(t *testing.T, opts ...func(*subscribe.Config)) (*Server, *http.ServeMux) {
+	t.Helper()
 	srv := setupServer(t)
 	srv.mgr.StopAll()
 	db := global.GlobalDB.DB
@@ -62,7 +69,7 @@ func newSubscribeServer(t *testing.T, opts ...func(*subscribe.Config)) *http.Ser
 	mux := http.NewServeMux()
 	srv.registerSubscribeRoutes(mux)
 	srv.sessions.put("sess-test", "admin")
-	return mux
+	return srv, mux
 }
 
 var subscribeRoutes = []struct{ method, path string }{

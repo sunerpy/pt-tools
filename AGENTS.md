@@ -19,6 +19,7 @@ pt-tools/
 ├── core/                   # Runtime initialization, ConfigStore, legacy migration
 ├── global/                 # Logger and DB singletons; keep usage bounded
 ├── internal/
+│   ├── apitoken/           # API tokens for the App API: create, verify (SHA-256 only), revoke
 │   ├── app/                # Application services (ChatOps, notification, RSS callbacks)
 │   ├── chatops/            # Command registry, permission chain, sessions, rate limits
 │   ├── cloakdriver/        # CloakBrowser Manager + CDP login-probe fallback
@@ -49,6 +50,7 @@ pt-tools/
 | Add a PT site                | `site/v2/definitions/`                                         | Load the `pt-add-site` skill; add fixture coverage, update extension `KNOWN_SITES`, run `make check-sites`                                           |
 | Add a Cobra command          | `cmd/<name>.go`                                                | Register with the intended parent in `init()` and add `cmd/*_test.go`                                                                                |
 | Add an HTTP endpoint         | `web/api_<feature>.go`                                         | Register in `Server.Serve()` or a dedicated `register*Routes` helper; wrap protected routes with `s.auth`                                            |
+| Add an App API endpoint      | `web/api_app_v1*.go` (`appRoutes`)                             | Declare its scope in the route table; DTO without credentials or links plus an `assertNoSecrets` test; update `docs/reference/app-api.md` (zh/en)    |
 | Add a ChatOps command        | `internal/chatops/commands/`                                   | Register a `chatops.CommandSpec`; use injected services and preserve audit/permission flow                                                           |
 | Add a notification channel   | `internal/notify/adapter/<type>/`                              | Implement `notify.Channel`, register its factory, wire production side-effect import, test inbound/outbound lifecycle                                |
 | Change runtime config        | `core/config_store.go`, `models/config_models.go`              | Preserve partial-update semantics, encryption, and `events.ConfigChanged` publication                                                                |
@@ -116,6 +118,12 @@ client free space
 ```
 
 `internal.PushMutex()` serializes check + reserve + push. The site seeding-capacity gate runs before the downloader mutation. Disk-space reads fail closed when protection is enabled. Failed pushes release reservations; cleanup resets stale reservations under the same mutex.
+
+### API tokens and the App API
+
+- Requests have a principal: a browser session (all scopes) or an API token (`ptt_<id>_<secret>`, exact scopes `app:read`, `app:write`, `mcp:read`, `mcp:write`, `qbit:compat`). The database stores only the SHA-256 of the secret.
+- Tokens reach only `/api/app/v1/*` (later also `/mcp` and the qB-compatible port). Existing `/api/*`, ChatOps routes, token management and the SPA stay session-only through `s.auth`.
+- Token writes are audited into `ActionAudit` with `channel_type` `api_token`, the token ID as the user, and ChatOps' result vocabulary (`success`, `error:…`, `denied:…`).
 
 ### Notifications and ChatOps
 

@@ -62,7 +62,7 @@ Phase 4 同时支持两种 transport：
 
 - **场景**：与 Web 服务同进程暴露，挂在 `/mcp` 路径下，给远端 Agent 调用。
 - **复用**：与 `web/server.go` 共享 `http.ServeMux` 与中间件链。
-- **鉴权**：必须经 T9 bearer token 中间件。
+- **鉴权**：必须带 API 令牌（`Authorization: Bearer`，令牌库见 M12 的 `internal/apitoken`），按 `mcp:read`、`mcp:write` 权限范围放行。
 
 实现切换由 cobra flag 决定：
 
@@ -261,15 +261,15 @@ pt-tools mcp --transport http --addr 0.0.0.0:8081    # 远端
 
 ## 6. 鉴权模型
 
-| 维度                        | 策略                                                                                               |
-| --------------------------- | -------------------------------------------------------------------------------------------------- |
-| 复用 T9 bearer token 中间件 | streamable-HTTP transport 必须带 `Authorization: Bearer <token>`                                   |
-| stdio transport             | 默认信任本地调用方；可选 `--require-token` flag 强制                                               |
-| Capability scopes           | Token 元数据中的 `scopes` 字段控制可调用工具集合                                                   |
-| 高危工具                    | `pause_torrent` / `delete_torrent` 要求 token 持有 `mutate:torrents` scope                         |
-| Auditing                    | 每次工具调用写入 `chatops_audit_logs`（与 chatops 共用），记录 token、tool、args 哈希、result code |
+| 维度              | 策略                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| API 令牌（M12）   | streamable-HTTP transport 必须带 `Authorization: Bearer <token>`                                  |
+| stdio transport   | 默认信任本地调用方；可选 `--require-token` flag 强制                                              |
+| Capability scopes | Token 元数据中的 `scopes` 字段控制可调用工具集合                                                  |
+| 高危工具          | `pause_torrent` / `delete_torrent` 要求 token 持有 `mcp:write` scope                              |
+| Auditing          | 写工具的调用写入操作审计（`action_audit`，与 ChatOps 共用，通道记为 `mcp`），记录令牌、工具与结果 |
 
-Token 与 scope 的具体定义在 T9（`web/middleware_bearer.go`）已落地；MCP server 仅复用。
+令牌与权限范围由 M12 的 `internal/apitoken` 定义；原先 T9 的 bearer 中间件（`web/middleware/bearer.go`）从未接上生产，已在 M12 删除。MCP server 复用令牌库，工具与权限范围的对应在 M14 定稿。
 
 ---
 

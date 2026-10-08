@@ -315,7 +315,11 @@ func (s *Server) apiFavicon(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "站点ID不能为空", http.StatusBadRequest)
 		return
 	}
+	s.serveSiteFavicon(w, r, siteID)
+}
 
+// serveSiteFavicon 回一个站点的图标：库里没有时按站点定义里的地址取一次（查询串 nofetch=1 时不取），取不到回占位图。
+func (s *Server) serveSiteFavicon(w http.ResponseWriter, r *http.Request, siteID string) {
 	if faviconService == nil {
 		initFaviconService()
 	}

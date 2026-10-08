@@ -26,6 +26,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   qq_onebot: "QQ (OneBot)",
   webhook: "Webhook",
   wecom_webhook: "企业微信",
+  // App API 的令牌做的写请求（web/api_app_v1.go 的 recordAppWrite），不是消息通道
+  api_token: "API 令牌",
 };
 
 /*
@@ -37,6 +39,7 @@ const CHANNEL_SHORT: Record<string, string> = {
   qq_onebot: "QQ",
   webhook: "Webhook",
   wecom_webhook: "企业微信",
+  api_token: "API 令牌",
 };
 
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {
@@ -95,7 +98,12 @@ const channelRows = computed<BreakdownRow[]>(() => {
   }
   return [...buckets.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([name, n]) => ({ key: name, label: name, value: n, tone: "info" as const }));
+    .map(([name, n]) => ({
+      key: name,
+      label: channelLabel(name),
+      value: n,
+      tone: "info" as const,
+    }));
 });
 
 /*
@@ -973,6 +981,11 @@ function exportCsv() {
 .cmd {
   font-family: var(--pt-font-mono);
   color: var(--pt-t1);
+}
+
+/* 手机卡片的标题：App API 的命令是一长串路径，中间没有空格，不按字符折行会被截掉一截 */
+.pt-rowcard .cmd {
+  word-break: break-all;
 }
 
 .lat--slow {

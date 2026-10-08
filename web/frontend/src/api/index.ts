@@ -2611,7 +2611,7 @@ export const organizeApi = {
 // ---- 订阅（路线图 M11） ----
 
 export type SubscriptionStatus = "active" | "paused" | "pending" | "done";
-export type SubscriptionSource = "manual" | "explore" | "douban" | "chatops";
+export type SubscriptionSource = "manual" | "explore" | "douban" | "chatops" | "app";
 /** 空串不限；prefer 优先；require 必须有；avoid 不要（只有 Remux 与 HDR 有） */
 export type QualityPref = "" | "prefer" | "require" | "avoid";
 
@@ -2839,4 +2839,37 @@ export const reseedApi = {
       `/api/reseed/jobs${status ? `?status=${encodeURIComponent(status)}` : ""}`,
     ),
   clearFinished: () => api.delete<{ deleted: number }>("/api/reseed/jobs"),
+};
+
+// ---- API 令牌（路线图 M12） ----
+
+export type ApiTokenScope = "app:read" | "app:write" | "mcp:read" | "mcp:write" | "qbit:compat";
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  scopes: ApiTokenScope[];
+  expires_at?: string;
+  last_used_at?: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface ApiTokenInput {
+  name: string;
+  scopes: ApiTokenScope[];
+  /** 0 表示不过期 */
+  expires_in_days: number;
+}
+
+export interface ApiTokenCreated {
+  token: ApiToken;
+  /** 明文只在新建时给这一次 */
+  plaintext: string;
+}
+
+export const tokensApi = {
+  list: () => api.get<ApiToken[]>("/api/tokens"),
+  create: (data: ApiTokenInput) => api.post<ApiTokenCreated>("/api/tokens", data),
+  revoke: (id: number) => api.delete<{ ok: boolean }>(`/api/tokens/${id}`),
 };

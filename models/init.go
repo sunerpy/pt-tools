@@ -247,6 +247,8 @@ func NewDBWithVersionAndHooks(
 		&MediaSubscribeSetting{},
 		&MediaDoubanSource{},
 		&MediaDoubanItem{},
+		// M12：API 令牌
+		&APIToken{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
