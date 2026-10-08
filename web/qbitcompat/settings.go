@@ -183,6 +183,7 @@ func (s *Server) owned(ctx context.Context, downloaderID uint) (map[string]model
 
 // isOwned 判断下载器里的这个种子是不是兼容入口加的那一个：所有权表里有它，并且下载器给的添加时间和记下的一样
 // （删掉以后从别处加回来的时间不一样）。下载器不给添加时间、记录里没有添加时间时都不认 —— 宁可不动，也不错删别人的。
+// 两种下载器的添加时间都只到秒，qBittorrent 也没有别的实例编号：在兼容入口以外删掉、又在同一秒里被别处加回来的，这里分不出来。
 func isOwned(owned map[string]models.QbitCompatTorrent, hash string, t downloader.Torrent) bool {
 	row, found := owned[hash]
 	return found && row.AddedAt > 0 && t.DateAdded == row.AddedAt
