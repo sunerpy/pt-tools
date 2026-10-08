@@ -375,11 +375,49 @@ func TestUpgradeSameTargetRetries(t *testing.T) {
 	require.NoError(t, e.db.Create(&skipped).Error)
 	e.svc.refresh(e.ctx)
 	assert.Equal(t, []uint{old.ID}, e.org.retired)
-	assert.Equal(t, []uint{skipped.ID}, e.org.retried)
+	assert.Equal(t, []uint{skipped.ID, old.ID}, e.org.retried, "新版本没整理成：把删掉的旧版本整理回来")
 	// 旧种子默认继续做种
 	links := e.linked(m.ID)
 	assert.Equal(t, models.MediaSubTorrentDone, links[0].Status)
 	assert.Empty(t, e.dl.removed)
+
+	// 这次整理成了：不再恢复旧版本，新种子入库
+	e.org.retryOK = true
+	require.NoError(t, e.db.Model(&old).Update("status", models.MediaTransferDone).Error)
+	e.org.retired, e.org.retried = nil, nil
+	e.svc.refresh(e.ctx)
+	assert.Equal(t, []uint{old.ID}, e.org.retired)
+	assert.Equal(t, []uint{skipped.ID}, e.org.retried)
+	assert.Equal(t, models.MediaSubTorrentDone, e.linkOf(m.ID, "72").Status)
+}
+
+// 下载种子文件期间订阅被暂停：推送前再看一眼，不推
+func TestPushRechecksSubscription(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	m := e.sub(SubscriptionInput{MediaType: models.MediaKindMovie, TMDBID: 693134})
+	e.search.set(e.item("hdsky", "p1", "Dune.Part.Two.2024.1080p.WEB-DL.H264-X", "", 8, 50))
+	e.site.onDownload = func(string) {
+		_, err := e.svc.SetStatus(e.ctx, m.ID, models.MediaSubPaused)
+		require.NoError(t, err)
+	}
+	msg, err := e.svc.SearchNow(e.ctx, m.ID)
+	require.NoError(t, err)
+	assert.Contains(t, msg, "暂停或删除")
+	assert.Empty(t, e.gotPushes())
+	assert.Empty(t, e.linked(m.ID))
+}
+
+// 订阅删掉以后还留着的种子记录（推送和删除撞上了）：刷新时清掉
+func TestRefreshDropsOrphanTorrents(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	orphan := models.MediaSubscriptionTorrent{SubscriptionID: 999, SiteName: "hdsky", TorrentID: "x", InfoHash: "h", Status: models.MediaSubTorrentDownloading, CreatedAt: e.Now()}
+	require.NoError(t, e.db.Create(&orphan).Error)
+	e.svc.refresh(e.ctx)
+	var n int64
+	require.NoError(t, e.db.Model(&models.MediaSubscriptionTorrent{}).Where("id = ?", orphan.ID).Count(&n).Error)
+	assert.Zero(t, n)
 }
 
 // 下载了订阅的资源时按设置发通知；剧集写明集

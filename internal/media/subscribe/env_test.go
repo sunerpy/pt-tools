@@ -118,9 +118,14 @@ func (f *fakeSearch) set(items ...v2.TorrentItem) {
 type fakeSite struct {
 	v2.Site
 	files map[string][]byte
+	// onDownload 在下载种子文件时调用（模拟下载期间订阅被暂停或删掉）
+	onDownload func(id string)
 }
 
 func (f *fakeSite) Download(_ context.Context, id string) ([]byte, error) {
+	if f.onDownload != nil {
+		f.onDownload(id)
+	}
 	if b, ok := f.files[id]; ok {
 		return b, nil
 	}
@@ -138,7 +143,9 @@ type fakeOrganizer struct {
 	retired  []uint
 	retried  []uint
 	retrying map[uint]bool
-	db       *gorm.DB
+	// retryOK 为真时重新整理把记录改成已整理（模拟整理成了）
+	retryOK bool
+	db      *gorm.DB
 }
 
 func (f *fakeOrganizer) setRetrying(id uint, on bool) {
@@ -166,7 +173,11 @@ func (f *fakeOrganizer) Retire(_ context.Context, id uint, reason string) ([]str
 func (f *fakeOrganizer) Retry(_ context.Context, id uint) (*organize.Result, error) {
 	f.mu.Lock()
 	f.retried = append(f.retried, id)
+	ok := f.retryOK
 	f.mu.Unlock()
+	if ok {
+		return &organize.Result{}, f.db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).Update("status", models.MediaTransferDone).Error
+	}
 	return &organize.Result{}, nil
 }
 

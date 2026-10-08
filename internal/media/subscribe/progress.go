@@ -207,21 +207,39 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 		return
 	}
 	sub, err := s.subRow(ctx, t.SubscriptionID)
+	if errors.Is(err, ErrNotFound) {
+		// 订阅已经删掉了（推送和删除撞上，删除以后才记下这个种子）：记录留着没有用
+		s.cfg.DB.WithContext(ctx).Delete(&models.MediaSubscriptionTorrent{}, t.ID)
+		return
+	}
 	if err != nil {
 		return
 	}
-	// 洗版的新版本和旧版本整理到同一个文件名时，整理记成「目标已有同名文件」：先删掉旧版本库里的那个文件再重试
+	// 洗版的新版本和旧版本整理到同一个文件名时，整理记成「目标已有同名文件」：先删掉旧版本库里的那个文件再重试；
+	// 新版本还是没整理成时把旧版本整理回来，库里不缺这个文件
 	if sub.Upgrade && s.cfg.Organizer != nil {
 		prof := s.profileFor(ctx, &sub, set)
 		score := s.versionPoints(ctx, prof, t.Title, t.Subtitle)
 		retried := false
 		for i := range hist {
 			h := &hist[i]
-			if h.Status == models.MediaTransferSkipped && s.freeTarget(ctx, &sub, h, t, prof, score) {
-				if _, rerr := s.cfg.Organizer.Retry(ctx, h.ID); rerr != nil {
-					s.cfg.Logger.Warnf("[订阅] 洗版后重新整理失败 (%s): %v", h.TorrentName, rerr)
+			if h.Status != models.MediaTransferSkipped {
+				continue
+			}
+			freed := s.freeTarget(ctx, &sub, h, t, prof, score)
+			if len(freed) == 0 {
+				continue
+			}
+			retried = true
+			_, rerr := s.cfg.Organizer.Retry(ctx, h.ID)
+			if rerr == nil && s.historyDone(ctx, h.ID) {
+				continue
+			}
+			s.cfg.Logger.Warnf("[订阅] 洗版后重新整理 %s 没有成功（%v），把旧版本整理回来", h.TorrentName, rerr)
+			for _, id := range freed {
+				if _, berr := s.cfg.Organizer.Retry(ctx, id); berr != nil {
+					s.cfg.Logger.Warnf("[订阅] 把旧版本整理回来失败 (记录 %d): %v", id, berr)
 				}
-				retried = true
 			}
 		}
 		if retried {
@@ -326,17 +344,17 @@ func (s *Service) baseline(ctx context.Context, p Profile, linked []models.Media
 	return best, has
 }
 
-// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件再重新整理；删了返回真。
-// 先删后整理，所以只删分数比新版本低的：同分的留着（同一个文件名，库里本来就只有一份）。
-func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription, skipped *models.MediaTransferHistory, t *models.MediaSubscriptionTorrent, prof Profile, score int) bool {
+// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件，返回删掉的记录（新版本没整理成时
+// 调用方把它们整理回来）。先删后整理，所以只删分数比新版本低的：同分的留着（同一个文件名，库里本来就只有一份）。
+func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription, skipped *models.MediaTransferHistory, t *models.MediaSubscriptionTorrent, prof Profile, score int) []uint {
 	if skipped.TargetPath == "" {
-		return false
+		return nil
 	}
 	vers, err := s.libraryVersions(ctx, sub)
 	if err != nil {
-		return false
+		return nil
 	}
-	freed := false
+	var freed []uint
 	for _, v := range vers {
 		o := v.row
 		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) || s.versionPoints(ctx, prof, v.title, v.subtitle) >= score {
@@ -346,9 +364,18 @@ func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription,
 			s.cfg.Logger.Warnf("[订阅] 洗版时删除旧版本失败 (%s): %v", o.TargetPath, err)
 			continue
 		}
-		freed = true
+		freed = append(freed, o.ID)
 	}
 	return freed
+}
+
+// historyDone 报告一条整理记录现在是不是已整理。
+func (s *Service) historyDone(ctx context.Context, id uint) bool {
+	var row models.MediaTransferHistory
+	if err := s.cfg.DB.WithContext(ctx).Select("status").Where("id = ?", id).Limit(1).Find(&row).Error; err != nil {
+		return false
+	}
+	return row.Status == models.MediaTransferDone
 }
 
 // replaceOlder 在洗版的新版本入库以后换掉旧版本：库里被新版本盖住、按现在的档案分数不比新版本高的文件

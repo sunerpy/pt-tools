@@ -389,6 +389,15 @@ func TestRetire(t *testing.T) {
 	got := e.history()[0]
 	assert.Equal(t, models.MediaTransferRemoved, got.Status)
 	assert.Contains(t, got.Message, "洗版")
+	// 换下来的版本还能重新整理回来（订阅洗版时新版本没整理成就这样恢复）
+	_, err = e.svc.Retry(e.ctx, row.ID)
+	require.NoError(t, err)
+	back := e.history()[0]
+	assert.Equal(t, models.MediaTransferDone, back.Status, back.Message)
+	assert.True(t, exists(row.TargetPath), "库里的文件放回来了")
+	kept, err = e.svc.Retire(e.ctx, row.ID, "洗版：换成了 X")
+	require.NoError(t, err)
+	assert.Empty(t, kept)
 	kept, err = e.svc.Retire(e.ctx, row.ID, "again")
 	require.NoError(t, err, "不是已整理的不动")
 	assert.Nil(t, kept)

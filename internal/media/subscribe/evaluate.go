@@ -429,6 +429,10 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 		fe := o.c.Item.DiscountEndTime.UTC()
 		freeEnd = &fe
 	}
+	// 下载种子文件可能要一会儿：推送前再看一眼，这期间订阅被暂停或删掉了就不推
+	if cur, cerr := s.subRow(ctx, sub.ID); cerr != nil || cur.Status != models.MediaSubActive {
+		return fmt.Sprintf("订阅已经暂停或删除，没有推送 %s", o.c.Item.Title)
+	}
 	res, err := s.cfg.Push(ctx, ptinternal.PushTorrentRequest{
 		SiteID: o.c.Site, TorrentID: o.c.Item.ID, TorrentData: data, Title: o.c.Item.Title,
 		Category: sub.Category, Tags: sub.Tags, SavePath: sub.SavePath, DownloaderID: dlID, Source: pushSource,
