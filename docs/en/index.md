@@ -120,6 +120,10 @@ home:
             link: /en/guide/reseed
       - name: Media
         items:
+          - title: Subscriptions
+            body: Subscribe to a film or a season, search your sites on a schedule and pick it up from RSS; quality profiles choose the release, missing episodes are filled in, upgrades swap in better releases, and a Douban wish list subscribes for you.
+            status: available
+            link: /en/guide/media-subscribe
           - title: Library organising
             body: Hard-link finished movies and shows into your library with a naming template, write NFO files and artwork, ask Emby, Jellyfin or Plex to scan, and send a notification.
             status: available

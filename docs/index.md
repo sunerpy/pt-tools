@@ -120,6 +120,10 @@ home:
             link: /guide/reseed
       - name: 媒体
         items:
+          - title: 订阅
+            body: 订阅电影或剧集的一季，定时到各站点搜索，RSS 里出现时也下载；按质量档案挑资源，剧集补缺的集，洗版换更好的版本，豆瓣想看自动建订阅。
+            status: available
+            link: /guide/media-subscribe
           - title: 整理入库
             body: 下载完的电影与剧集按模板硬链接进媒体库，写好 NFO 与海报，通知 Emby、Jellyfin、Plex 扫描，发入库通知。
             status: available

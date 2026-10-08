@@ -28,7 +28,7 @@ pt-tools/
 │   ├── filter/             # RSS filter matcher chain
 │   ├── maintenance/        # Safe logs/staging/backups cleanup
 │   ├── mcp/                # Interface-only future MCP contract; no server runtime
-│   ├── media/              # Title parsing, recognition, TMDB client; library organizing, scraping, media servers
+│   ├── media/              # Title parsing, recognition, TMDB client; library organizing, scraping, media servers; subscriptions
 │   ├── notify/             # Channel registry/router/outbox/digest/adapters
 │   └── sitelogin/          # Login probe classification and dispatch
 ├── models/                 # GORM schema, schema migrations, presets, repositories
@@ -59,6 +59,7 @@ pt-tools/
 | Change browser helper        | `tools/browser-extension/`                                     | Run extension typecheck/tests plus `make check-sites`                                                                                                |
 | Change media recognition     | `internal/media/` (`meta`, `words`, `tmdb`, `recognize`)       | Add misparsed titles to `meta/testdata/corpus.json`; TMDB key and proxy stay encrypted and out of errors; tests use httptest only                    |
 | Change library organizing    | `internal/media/` (`transfer`, `scrape`, `server`, `organize`) | One history row per source file; never overwrite a foreign target; check file IDs before deleting library files; hardlink tests run in `t.TempDir()` |
+| Change subscriptions         | `internal/media/subscribe/`                                    | Push only through `internal.PushTorrentToDownloader`; RSS offers must not block; upgrades replace library files through organize `Retire` only       |
 | Change future MCP design     | `internal/mcp/contract.go`, `docs/design/phase4-mcp.md`        | Do not claim a transport/server exists; the current package is contract-only                                                                         |
 | Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths         | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`                                    |
 
