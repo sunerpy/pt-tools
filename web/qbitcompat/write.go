@@ -178,7 +178,8 @@ func splitTags(s string) []string {
 // addTags 是 torrents/addTags：给的是原有标签加上新的（Transmission 的 labels 是整份改写，qB 的 addTags 只会新增，两边都对）。
 func (s *Server) addTags(w http.ResponseWriter, r *http.Request, c *call) {
 	_ = r.ParseForm()
-	tags := splitTags(r.Form.Get("tags"))
+	// OwnerTag 只由兼容入口加，客户端加不上
+	tags := visibleTags(splitTags(r.Form.Get("tags")))
 	if len(tags) == 0 {
 		text(w, http.StatusBadRequest, "Bad Request")
 		return
@@ -207,22 +208,39 @@ func (s *Server) addTags(w http.ResponseWriter, r *http.Request, c *call) {
 }
 
 // removeTags 是 torrents/removeTags（tags 为空时去掉全部标签）。qB 用 removeTags；Transmission 改写成剩下的标签，分类不动。
+// OwnerTag 去不掉：去掉全部标签时只去客户端看得到的。
 func (s *Server) removeTags(w http.ResponseWriter, r *http.Request, c *call) {
 	_ = r.ParseForm()
-	tags := splitTags(r.Form.Get("tags"))
+	given := splitTags(r.Form.Get("tags"))
+	all, tags := len(given) == 0, visibleTags(given)
 	s.mutate(w, r, c, "torrents/removeTags", map[string]any{"tags": tags}, func(b *backend, sel selection) error {
-		if tr, ok := b.dl.(downloader.TorrentTagRemover); ok && !usesLabels(b) {
-			return tr.RemoveTorrentTags(sel.ids, strings.Join(tags, ","))
+		if !all && len(tags) == 0 {
+			return nil
 		}
-		// Transmission：改写成剩下的标签，分类（第一个 label）留着
+		if tr, ok := b.dl.(downloader.TorrentTagRemover); ok && !usesLabels(b) {
+			remove := tags
+			if all {
+				remove = nil
+				for _, t := range sel.torrents {
+					for _, tag := range visibleTags(splitTags(t.Tags)) {
+						if !slices.Contains(remove, tag) {
+							remove = append(remove, tag)
+						}
+					}
+				}
+				if len(remove) == 0 {
+					return nil
+				}
+			}
+			return tr.RemoveTorrentTags(sel.ids, strings.Join(remove, ","))
+		}
+		// Transmission：改写成剩下的标签，分类（第一个 label）与 OwnerTag 留着
 		for i, id := range sel.ids {
 			category, current := splitLabels(sel.torrents[i])
 			var keep []string
-			if len(tags) > 0 {
-				for _, t := range current {
-					if !slices.Contains(tags, t) {
-						keep = append(keep, t)
-					}
+			for _, t := range current {
+				if t == OwnerTag || (!all && !slices.Contains(tags, t)) {
+					keep = append(keep, t)
 				}
 			}
 			if err := b.dl.SetTorrentTags(id, joinLabels(category, keep)); err != nil {
@@ -274,7 +292,7 @@ func (s *Server) createTags(w http.ResponseWriter, r *http.Request, c *call) {
 		text(w, http.StatusBadRequest, "Bad Request")
 		return
 	}
-	tags := splitTags(r.Form.Get("tags"))
+	tags := visibleTags(splitTags(r.Form.Get("tags")))
 	if len(tags) == 0 || len(tags) > 100 {
 		text(w, http.StatusBadRequest, "Bad Request")
 		return

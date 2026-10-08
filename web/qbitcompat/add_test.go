@@ -112,7 +112,7 @@ func TestAddTorrentFile(t *testing.T) {
 	require.Len(t, p, 2)
 	assert.Equal(t, "qasite", p[0].SiteID)
 	assert.Equal(t, "hash:"+hashOf(t, known), p[0].TorrentID, "上传的文件不信 comment 里的编号")
-	assert.Equal(t, "mp,4k,qasite", p[0].Tags, "追加站点标签")
+	assert.Equal(t, "mp,4k,qasite,"+OwnerTag, p[0].Tags, "追加站点标签")
 	assert.Equal(t, "radarr", p[0].Category)
 	assert.Equal(t, "/movies/radarr", p[0].SavePath, "没给目录：用分类记下的")
 	assert.True(t, p[0].AddPaused)
@@ -125,7 +125,7 @@ func TestAddTorrentFile(t *testing.T) {
 
 	assert.Empty(t, p[1].SiteID, "认不出站点")
 	assert.Equal(t, "hash:"+hashOf(t, unknown), p[1].TorrentID)
-	assert.Equal(t, "mp,4k", p[1].Tags)
+	assert.Equal(t, "mp,4k,"+OwnerTag, p[1].Tags)
 
 	a := e.audit.all()
 	require.Len(t, a, 1)
@@ -153,7 +153,7 @@ func TestAddURLs(t *testing.T) {
 	require.Len(t, p, 1)
 	assert.Equal(t, "qasite", p[0].SiteID)
 	assert.Equal(t, "77", p[0].TorrentID)
-	assert.Equal(t, "qasite", p[0].Tags)
+	assert.Equal(t, "qasite,"+OwnerTag, p[0].Tags)
 	a := e.audit.all()
 	require.Len(t, a, 1)
 	assert.Equal(t, "error:partial", a[0].Result)

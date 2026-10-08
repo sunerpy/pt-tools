@@ -228,10 +228,12 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 	if torrentID == "" {
 		torrentID = "hash:" + hash
 	}
-	tags := slices.Clone(o.tags)
+	tags := visibleTags(o.tags)
 	if siteID != "" && !slices.Contains(tags, siteID) {
 		tags = append(tags, siteID)
 	}
+	// 所有权的标签（见 OwnerTag）：原来就在下载器里的种子不会因为这次添加带上它
+	tags = append(tags, OwnerTag)
 	save := o.savePath
 	if save == "" && o.category != "" {
 		save = categoryMap(b.cfg)[o.category]

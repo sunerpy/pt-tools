@@ -245,10 +245,10 @@ func newEnv(t *testing.T) *env {
 			e.mu.Lock()
 			e.pushes = append(e.pushes, req)
 			e.mu.Unlock()
-			// 推送成功的种子出现在下载器里，添加时间是现在
+			// 推送成功的种子出现在下载器里：添加时间是现在，带着推送给的分类与标签
 			if p, err := v2.ParseTorrent(req.TorrentData); err == nil {
 				h := strings.ToLower(p.InfoHash)
-				e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: p.Name, DateAdded: e.now.Unix()})
+				e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: p.Name, DateAdded: e.now.Unix(), Category: req.Category, Tags: req.Tags})
 			}
 			return &internal.PushTorrentResult{Success: true}, nil
 		},
@@ -719,4 +719,33 @@ func TestSyncStatesBounded(t *testing.T) {
 	x.drop("missing")
 	assert.Empty(t, keys())
 	assert.Equal(t, 0, x.total)
+}
+
+// OwnerTag 不给客户端看：种子列表、maindata、标签列表里都没有，按它筛不出种子；Transmission 只有它一个 label 时不当分类
+func TestOwnerTagHidden(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	e.dl.torrents[1].Tags = "hdsky, " + OwnerTag + ", 4k"
+	require.NoError(t, e.db.Create(&models.QbitCompatSetting{ID: 1, Tags: `["` + OwnerTag + `","made"]`}).Error)
+
+	info := decode[[]map[string]any](t, e.do(http.MethodGet, "/api/v2/torrents/info", url.Values{"hashes": {hashMovie}}, ck))
+	require.Len(t, info, 1)
+	assert.Equal(t, "hdsky, 4k", info[0]["tags"])
+	assert.Empty(t, decode[[]map[string]any](t, e.do(http.MethodGet, "/api/v2/torrents/info", url.Values{"tag": {OwnerTag}}, ck)))
+	assert.Equal(t, []any{"4k", "hdsky", "made"}, decode[[]any](t, e.do(http.MethodGet, "/api/v2/torrents/tags", nil, ck)))
+	md := decode[map[string]any](t, e.do(http.MethodGet, "/api/v2/sync/maindata", nil, ck))
+	assert.NotContains(t, md["tags"], OwnerTag)
+	assert.Equal(t, "hdsky, 4k", md["torrents"].(map[string]any)[hashMovie].(map[string]any)["tags"])
+
+	tr := newEnv(t)
+	tr.asTR = true
+	tr.dlSet.Type = "transmission"
+	require.NoError(t, tr.db.Save(&tr.dlSet).Error)
+	tr.dl.torrents[2].Category, tr.dl.torrents[2].Tags = OwnerTag, OwnerTag
+	ck = tr.login(tr.token(apitoken.ScopeQbitCompat))
+	info = decode[[]map[string]any](t, tr.do(http.MethodGet, "/api/v2/torrents/info", url.Values{"hashes": {hashTR}}, ck))
+	require.Len(t, info, 1)
+	assert.Empty(t, info[0]["category"], "只有 OwnerTag 一个 label：不当分类")
+	assert.Empty(t, info[0]["tags"])
+	assert.NotContains(t, decode[map[string]any](t, tr.do(http.MethodGet, "/api/v2/torrents/categories", nil, ck)), OwnerTag)
 }

@@ -19,15 +19,18 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// markCompat 把种子记成经兼容入口加进这台下载器的（写接口默认只动这些）：记下下载器里它的添加时间。
+// markCompat 把种子记成经兼容入口加进这台下载器的（写接口默认只动这些）：记下下载器里它的添加时间，种子带上 OwnerTag。
 func (e *env) markCompat(hash string) {
 	e.t.Helper()
 	row := models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hash, CreatedAt: e.now}
-	for _, t := range e.dl.torrents {
+	e.dl.mu.Lock()
+	for i, t := range e.dl.torrents {
 		if strings.EqualFold(t.InfoHash, hash) {
 			row.AddedAt = t.DateAdded
+			e.dl.torrents[i].Tags = strings.Join(append(splitTags(t.Tags), OwnerTag), ",")
 		}
 	}
+	e.dl.mu.Unlock()
 	require.NoError(e.t, e.db.Create(&row).Error)
 }
 
@@ -53,8 +56,13 @@ func TestOwnershipIsStrict(t *testing.T) {
 	assert.Empty(t, e.dl.got(), "一个都不算兼容入口的")
 	assert.EqualValues(t, 3, e.audit.all()[0].Args["denied"])
 
-	// 添加时间对得上的才算；下载器不给添加时间的不算
+	// 添加时间对得上、但没带 OwnerTag：在兼容入口以外删掉、同一秒里被别处加回来的，不算
 	e.dl.torrents[2].DateAdded = 1700000000
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashTR}}, ck).Code)
+	assert.Empty(t, e.dl.got(), "同一秒里别处加回来的：不带 OwnerTag")
+
+	// 添加时间对得上、带着 OwnerTag 的才算；下载器不给添加时间的不算
+	e.dl.torrents[2].Tags = OwnerTag
 	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashTR}}, ck).Code)
 	assert.Equal(t, []string{"pause 7"}, e.dl.got())
 	e.dl.torrents[2].DateAdded = 0
@@ -76,12 +84,12 @@ func TestOwnershipNeedsObservedAdd(t *testing.T) {
 		}
 		return rows[0].AddedAt, true
 	}
-	pushOnly := func(show func(h, name string)) {
+	pushOnly := func(show func(h, name, tags string)) {
 		e.srv.deps.Push = func(_ context.Context, req internal.PushTorrentRequest) (*internal.PushTorrentResult, error) {
 			if show != nil {
 				p, err := v2.ParseTorrent(req.TorrentData)
 				require.NoError(t, err)
-				show(strings.ToLower(p.InfoHash), p.Name)
+				show(strings.ToLower(p.InfoHash), p.Name, req.Tags)
 			}
 			return &internal.PushTorrentResult{Success: true}, nil
 		}
@@ -89,8 +97,10 @@ func TestOwnershipNeedsObservedAdd(t *testing.T) {
 
 	// 过 50 毫秒才列出来：等得到，记下它的添加时间
 	e.srv.observe = 5 * time.Second
-	pushOnly(func(h, name string) {
-		time.AfterFunc(50*time.Millisecond, func() { e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name, DateAdded: 1700000500}) })
+	pushOnly(func(h, name, tags string) {
+		time.AfterFunc(50*time.Millisecond, func() {
+			e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name, DateAdded: 1700000500, Tags: tags})
+		})
 	})
 	late := torrentFile("late", "https://qa.example/announce", "")
 	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{late}, nil).Body.String())
@@ -106,16 +116,25 @@ func TestOwnershipNeedsObservedAdd(t *testing.T) {
 	h := hashOf(t, unseen)
 	_, ok = ownedAt(h)
 	assert.False(t, ok, "看不到：不记")
-	e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: "unseen", DateAdded: e.now.Unix()})
+	e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: "unseen", DateAdded: e.now.Unix(), Tags: OwnerTag})
 	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {h}}, ck).Code)
 	assert.Empty(t, e.dl.got(), "不认")
 
 	// 看得到，但下载器不给添加时间：不记
-	pushOnly(func(h, name string) { e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name}) })
+	pushOnly(func(h, name, tags string) { e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name, Tags: tags}) })
 	untimed := torrentFile("untimed", "https://qa.example/announce", "")
 	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{untimed}, nil).Body.String())
 	_, ok = ownedAt(hashOf(t, untimed))
 	assert.False(t, ok, "不给添加时间：不记")
+
+	// 看得到、给了添加时间，但没带这次加的 OwnerTag（原来就在下载器里，推送没看出来）：不记
+	pushOnly(func(h, name, _ string) {
+		e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: name, DateAdded: 1700000600})
+	})
+	untagged := torrentFile("untagged", "https://qa.example/announce", "")
+	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{untagged}, nil).Body.String())
+	_, ok = ownedAt(hashOf(t, untagged))
+	assert.False(t, ok, "没带 OwnerTag：不记")
 
 	// 没有添加时间的旧记录：不认
 	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashMovie, CreatedAt: time.Unix(1700000100, 0)}).Error)
@@ -137,7 +156,7 @@ func TestAddObservesBatchOnce(t *testing.T) {
 			p, err := v2.ParseTorrent(req.TorrentData)
 			require.NoError(t, err)
 			h := strings.ToLower(p.InfoHash)
-			e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: p.Name, DateAdded: 1700000900})
+			e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: p.Name, DateAdded: 1700000900, Tags: req.Tags})
 		}
 		return &internal.PushTorrentResult{Success: true}, nil
 	}
@@ -238,16 +257,24 @@ func TestWriteOperations(t *testing.T) {
 	post("/api/v2/torrents/setCategory", url.Values{"category": {"sonarr"}})
 	post("/api/v2/torrents/addTags", url.Values{"tags": {"4k, new"}})
 	post("/api/v2/torrents/removeTags", url.Values{"tags": {"hdsky"}})
+	// 去掉全部标签：只去客户端看得到的，OwnerTag 留着；只给了 OwnerTag 时什么都不去
+	post("/api/v2/torrents/removeTags", url.Values{"tags": {""}})
+	post("/api/v2/torrents/removeTags", url.Values{"tags": {OwnerTag}})
 	post("/api/v2/torrents/delete", url.Values{"deleteFiles": {"true"}})
 	assert.Equal(t, []string{
 		"createCategory sonarr=/tv",
 		"category " + hashMovie + "=sonarr",
-		"tags " + hashMovie + "=hdsky,4k,new",
+		"tags " + hashMovie + "=hdsky,4k," + OwnerTag + ",new",
 		"removeTags " + hashMovie + "=hdsky",
+		"removeTags " + hashMovie + "=hdsky,4k",
 		"remove " + hashMovie + " data=true",
 	}, e.dl.got())
-	assert.Equal(t, true, e.audit.all()[3].Args["delete_files"])
+	a := e.audit.all()
+	assert.Equal(t, true, a[len(a)-1].Args["delete_files"])
 	assert.Equal(t, http.StatusBadRequest, e.do(http.MethodPost, "/api/v2/torrents/addTags", url.Values{"hashes": {hashMovie}, "tags": {" , "}}, ck).Code)
+	// OwnerTag 客户端加不上、建不了
+	assert.Equal(t, http.StatusBadRequest, e.do(http.MethodPost, "/api/v2/torrents/addTags", url.Values{"hashes": {hashMovie}, "tags": {OwnerTag}}, ck).Code)
+	assert.Equal(t, http.StatusBadRequest, e.do(http.MethodPost, "/api/v2/torrents/createTags", url.Values{"tags": {OwnerTag}}, ck).Code)
 }
 
 // 后端是 Transmission：分类与标签都在 labels 里，第一个是分类、其余是标签。读出来的 tags 不含分类；
@@ -281,11 +308,12 @@ func TestWriteOperationsTransmission(t *testing.T) {
 	post("/api/v2/torrents/removeTags", url.Values{"tags": {""}})
 	post("/api/v2/torrents/setCategory", url.Values{"category": {"tv"}})
 	post("/api/v2/torrents/addTags", url.Values{"tags": {"x"}})
+	// 改写整份 labels 时 OwnerTag 一直留着
 	assert.Equal(t, []string{
-		"tags " + hashMovie + "=movies,4k",
-		"tags " + hashMovie + "=movies",
-		"tags " + hashMovie + "=tv,hdsky,4k",
-		"tags " + hashMovie + "=movies,hdsky,4k,x",
+		"tags " + hashMovie + "=movies,4k," + OwnerTag,
+		"tags " + hashMovie + "=movies," + OwnerTag,
+		"tags " + hashMovie + "=tv,hdsky,4k," + OwnerTag,
+		"tags " + hashMovie + "=movies,hdsky,4k," + OwnerTag + ",x",
 	}, e.dl.got(), "分类一直在第一个，标签不被改分类冲掉")
 }
 

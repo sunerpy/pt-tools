@@ -181,12 +181,24 @@ func (s *Server) owned(ctx context.Context, downloaderID uint) (map[string]model
 	return out, nil
 }
 
-// isOwned 判断下载器里的这个种子是不是兼容入口加的那一个：所有权表里有它，并且下载器给的添加时间和记下的一样
-// （删掉以后从别处加回来的时间不一样）。下载器不给添加时间、记录里没有添加时间时都不认 —— 宁可不动，也不错删别人的。
-// 两种下载器的添加时间都只到秒，qBittorrent 也没有别的实例编号：在兼容入口以外删掉、又在同一秒里被别处加回来的，这里分不出来。
+// OwnerTag 是经兼容入口加的种子在下载器里带的标签（Transmission 是 label）。添加时间只到秒：在兼容入口以外删掉、
+// 又在同一秒里被别处加回来的同一个种子，hash 与添加时间都对得上，靠它分辨（别处加的不带它）。
+// 兼容入口的接口里看不到它，客户端也加不上、去不掉；在下载器里手动去掉它以后，没打开完全控制时兼容入口不再动这个种子。
+const OwnerTag = "pt-tools-compat"
+
+// hasOwnerTag 报告下载器给的标签里有没有 OwnerTag。
+func hasOwnerTag(tags string) bool { return slices.Contains(splitTags(tags), OwnerTag) }
+
+// visibleTags 是去掉 OwnerTag 以后的标签（客户端看到的）。
+func visibleTags(tags []string) []string {
+	return slices.DeleteFunc(slices.Clone(tags), func(t string) bool { return t == OwnerTag })
+}
+
+// isOwned 判断下载器里的这个种子是不是兼容入口加的那一个：所有权表里有它，下载器给的添加时间和记下的一样
+// （删掉以后从别处加回来的时间不一样），并且带着 OwnerTag。下载器不给添加时间、记录里没有添加时间时都不认 —— 宁可不动，也不错删别人的。
 func isOwned(owned map[string]models.QbitCompatTorrent, hash string, t downloader.Torrent) bool {
 	row, found := owned[hash]
-	return found && row.AddedAt > 0 && t.DateAdded == row.AddedAt
+	return found && row.AddedAt > 0 && t.DateAdded == row.AddedAt && hasOwnerTag(t.Tags)
 }
 
 // ownAdded 记下这次确实加进去的种子的所有权：要在下载器里看到它、拿到下载器给的添加时间才记，之后只认这个添加时间的那一个。
@@ -209,6 +221,11 @@ func (s *Server) ownAdded(ctx context.Context, b *backend, hashes []string) {
 				delete(pending, h)
 				if t.DateAdded <= 0 {
 					global.GetSlogger().Warnf("[qB 兼容] 下载器不给种子 %s 的添加时间，不记所有权（没打开完全控制时客户端改不了它）", h)
+					continue
+				}
+				if !hasOwnerTag(t.Tags) {
+					// 没带这次加上的标签：不是这次加进去的那一个（原来就在下载器里）
+					global.GetSlogger().Warnf("[qB 兼容] 下载器里的种子 %s 没有标签 %s，不是这次加的，不记所有权", h, OwnerTag)
 					continue
 				}
 				if oerr := s.own(ctx, b.setting.ID, h, t.DateAdded); oerr != nil {

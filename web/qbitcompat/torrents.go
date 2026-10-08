@@ -135,16 +135,23 @@ func toQB(t downloader.Torrent, labels bool) qbTorrent {
 	if v, ok := raw["isPrivate"].(bool); ok {
 		q.IsPrivate = v
 	}
+	// 所有权的标签（OwnerTag）不给客户端看
 	if labels {
-		_, tags := splitLabels(t)
-		q.Tags = strings.Join(tags, ",")
+		category, tags := splitLabels(t)
+		q.Category, q.Tags = category, strings.Join(visibleTags(tags), ",")
+	} else if hasOwnerTag(t.Tags) {
+		q.Tags = strings.Join(visibleTags(splitTags(t.Tags)), ", ")
 	}
 	return q
 }
 
 // splitLabels 把 Transmission 的 labels 拆成分类（第一个）与标签（其余）。
+// 第一个 label 是 OwnerTag 时（加的时候没有分类与别的标签）它不算分类。
 func splitLabels(t downloader.Torrent) (string, []string) {
 	labels := splitTags(t.Tags)
+	if t.Category == OwnerTag {
+		return "", labels
+	}
 	if len(labels) > 0 && labels[0] == t.Category {
 		return t.Category, labels[1:]
 	}
@@ -574,7 +581,7 @@ func (s *Server) allCategories(b *backend, items []qbTorrent) map[string]categor
 
 func allTags(b *backend, items []qbTorrent) []string {
 	seen := map[string]bool{}
-	for _, t := range tagList(b.cfg) {
+	for _, t := range visibleTags(tagList(b.cfg)) {
 		seen[t] = true
 	}
 	for _, t := range items {
