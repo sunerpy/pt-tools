@@ -60,6 +60,8 @@ func enabledSite(store *core.ConfigStore) func(id string) v2.Site {
 type compatServer struct {
 	*http.Server
 	cancel context.CancelFunc
+	qc     *qbitcompat.Server
+	web    *web.Server
 }
 
 func (c *compatServer) Shutdown(ctx context.Context) error {
@@ -71,8 +73,8 @@ func (c *compatServer) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// startQbitCompat 开兼容入口。监听失败只记日志，不影响 Web 服务；返回的 server 交给关闭流程（没开时是 nil）。
-func startQbitCompat(addr string, db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *core.ConfigStore, tokens *apitoken.Store, audit app.AuditService) *compatServer {
+// newQbitCompat 建兼容入口的 HTTP 服务，还不监听（见 listen）。
+func newQbitCompat(db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *core.ConfigStore, tokens *apitoken.Store, audit app.AuditService) *compatServer {
 	qc := qbitcompat.New(qbitcompat.Deps{
 		DB: db, Tokens: tokens, Audit: audit,
 		Instance: func(ctx context.Context, name string) (downloader.Downloader, error) {
@@ -85,24 +87,37 @@ func startQbitCompat(addr string, db *gorm.DB, srv *web.Server, mgr *scheduler.M
 		Push: internal.PushTorrentToDownloader,
 		Site: enabledSite(store),
 	})
+	base, cancel := context.WithCancel(context.Background())
+	return &compatServer{cancel: cancel, qc: qc, web: srv, Server: &http.Server{
+		Handler: qc.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Minute, IdleTimeout: 2 * time.Minute,
+		BaseContext: func(net.Listener) context.Context { return base },
+	}}
+}
+
+// listen 在 addr 上开始监听。监听失败只记日志，不影响 Web 服务。已经在关闭（Shutdown 过）时 Serve 马上返回，监听跟着关掉。
+func (c *compatServer) listen(addr string) bool {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		global.GetSlogger().Errorf("qB 兼容入口监听 %s 失败，没有开启: %v", addr, err)
-		return nil
+		return false
 	}
-	qc.SetAddr(ln.Addr().String())
-	srv.SetQbitCompat(qc)
-	base, cancel := context.WithCancel(context.Background())
-	hs := &compatServer{cancel: cancel, Server: &http.Server{
-		Handler: qc.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Minute, IdleTimeout: 2 * time.Minute,
-		BaseContext: func(net.Listener) context.Context { return base },
-	}}
+	c.qc.SetAddr(ln.Addr().String())
+	c.web.SetQbitCompat(c.qc)
 	go func() {
-		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := c.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			global.GetSlogger().Errorf("qB 兼容入口停止: %v", err)
 		}
 	}()
 	global.GetSlogger().Infof("qB 兼容入口启动于 %s", ln.Addr())
-	return hs
+	return true
+}
+
+// startQbitCompat 建好兼容入口并开始监听；监听失败时是 nil。
+func startQbitCompat(addr string, db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *core.ConfigStore, tokens *apitoken.Store, audit app.AuditService) *compatServer {
+	c := newQbitCompat(db, srv, mgr, store, tokens, audit)
+	if !c.listen(addr) {
+		return nil
+	}
+	return c
 }

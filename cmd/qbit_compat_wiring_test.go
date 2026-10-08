@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -70,4 +71,23 @@ func TestQbitCompatShutdownCancelsRequests(t *testing.T) {
 		t.Fatal("进行中的请求没有被取消")
 	}
 	assert.Less(t, time.Since(start), 3*time.Second)
+}
+
+// 关闭流程先于监听开始（信号处理装好以后、开始监听之前就收到了信号）：listen 照样不报错，但不接请求，端口跟着关掉
+func TestQbitCompatListenAfterShutdown(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	srv := web.NewServer(nil, nil)
+	c := newQbitCompat(nil, srv, nil, nil, nil, nil)
+	require.NoError(t, c.Shutdown(context.Background()))
+	require.True(t, c.listen("127.0.0.1:0"))
+	addr := srv.QbitCompatAddr()
+	require.NotEmpty(t, addr)
+	assert.Eventually(t, func() bool {
+		conn, derr := net.DialTimeout("tcp", addr, time.Second)
+		if derr != nil {
+			return true
+		}
+		_ = conn.Close()
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "已经在关闭：不接请求")
 }
