@@ -63,6 +63,8 @@ type Library interface {
 type Organizer interface {
 	Retire(ctx context.Context, id uint, reason string) ([]string, error)
 	Retry(ctx context.Context, id uint) (*organize.Result, error)
+	// Retrying 报告失败的记录是不是正在重试（排上队以后记录里的重试时间是空的）
+	Retrying(id uint) bool
 }
 
 // Notice 是一条订阅的通知：下载了订阅的资源，或豆瓣想看拉取连续失败。

@@ -318,11 +318,12 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, pro
 			}
 			return "没有缺的集"
 		}
+		// 剧集各集的版本可能有好有差：整季包只要能让一集变好就换（比它好的集入库以后留着）
 		vers, err := s.libraryVersions(ctx, sub)
 		if err != nil {
 			return err.Error()
 		}
-		if base, _ := s.baseline(ctx, profile, linked, vers); len(packs) == 0 || packs[0].v.Score <= base {
+		if len(packs) == 0 || packs[0].v.Score <= s.episodeFloor(ctx, profile, vers, p.Total) {
 			return "洗版：没有比现在更好的整季包"
 		}
 		return s.pushOne(ctx, sub, packs[0], set)

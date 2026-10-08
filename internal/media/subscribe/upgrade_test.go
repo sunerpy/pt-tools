@@ -77,7 +77,14 @@ func TestUpgradePartialPackReplacesOnlyOrganizedEpisodes(t *testing.T) {
 	assert.Empty(t, e.org.retired, "第 2 集还在自动重试，先不换")
 	assert.Equal(t, models.MediaSubTorrentDownloading, e.linkOf(tv.ID, "b1").Status)
 
+	// 到期重试排上了队：记录里的重试时间先清掉了，整理服务知道它还在重试
 	require.NoError(t, e.db.Model(&failed).Update("next_retry_at", nil).Error)
+	e.org.setRetrying(failed.ID, true)
+	e.svc.refresh(e.ctx)
+	assert.Empty(t, e.org.retired, "排上队的重试还没整理完，先不换")
+	assert.Equal(t, models.MediaSubTorrentDownloading, e.linkOf(tv.ID, "b1").Status)
+
+	e.org.setRetrying(failed.ID, false)
 	e.svc.refresh(e.ctx)
 	assert.ElementsMatch(t, []uint{olds[0].ID, olds[2].ID}, e.org.retired, "只换整理成的第 1、3 集")
 	nb := e.linkOf(tv.ID, "b1")
@@ -236,6 +243,65 @@ func TestDeleteOldTorrentFailsClosed(t *testing.T) {
 	e.svc.refresh(e.ctx)
 	hrOld := e.linkOf(m.ID, "k2")
 	assert.Equal(t, models.MediaSubTorrentReplaced, hrOld.Status)
-	assert.Contains(t, hrOld.Message, "H&R", "没有种子记录也按推送时记下的 H&R 留着")
+	assert.Contains(t, hrOld.Message, "H&R", "推送时记下的 H&R 留着")
 	assert.Empty(t, e.dl.removed)
+
+	// 读不到种子记录时不删：不知道有没有 H&R
+	e3 := newEnv(t)
+	e3.enable(func(s *Settings) { s.UpgradeOld = models.MediaUpgradeDelete })
+	p3 := e3.profile4K()
+	m3 := e3.sub(SubscriptionInput{MediaType: models.MediaKindMovie, TMDBID: 693134, ProfileID: p3.ID, Upgrade: true})
+	e3.search.set(e3.item("hdsky", "n1", "Dune.Part.Two.2024.1080p.WEB-DL.H264-X", "", 8, 50))
+	_, err = e3.svc.SearchNow(e3.ctx, m3.ID)
+	require.NoError(t, err)
+	e3.organized(e3.hashOf("n1"), models.MediaKindMovie, 693134, 0, 0, "/lib/dune2/1080p.mkv")
+	e3.svc.refresh(e3.ctx)
+	require.NoError(t, e3.db.Where("site_name = ? AND torrent_id = ?", "hdsky", "n1").Delete(&models.TorrentInfo{}).Error)
+	e3.search.set(e3.item("hdsky", "n2", "Dune.Part.Two.2024.2160p.WEB-DL.H265-X", "", 20, 50))
+	_, err = e3.svc.SearchNow(e3.ctx, m3.ID)
+	require.NoError(t, err)
+	e3.organized(e3.hashOf("n2"), models.MediaKindMovie, 693134, 0, 0, "/lib/dune2/2160p.mkv")
+	e3.svc.refresh(e3.ctx)
+	gone := e3.linkOf(m3.ID, "n1")
+	assert.Equal(t, models.MediaSubTorrentReplaced, gone.Status)
+	assert.Contains(t, gone.Message, "找不到种子记录")
+	assert.Empty(t, e3.dl.removed)
+}
+
+// 剧集的版本有好有差（第 1 集已经是 2160p、后两集是 1080p）：整季包只要能让一集变好就下，入库以后每一集都达到目标、订阅完成
+func TestUpgradeMixedSeasonTakesPack(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	e.advance(60 * 24 * time.Hour)
+	p := e.profile4K()
+	tv := e.sub(SubscriptionInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2, ProfileID: p.ID, Upgrade: true})
+	e1 := e.libraryFile("e1", "The.Last.of.Us.S02E01.2160p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 1, 0, "/lib/tlou/s02e01.old.mkv")
+	e2 := e.libraryFile("e2", "The.Last.of.Us.S02E02.1080p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 2, 0, "/lib/tlou/s02e02.old.mkv")
+	e3 := e.libraryFile("e3", "The.Last.of.Us.S02E03.1080p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 3, 0, "/lib/tlou/s02e03.old.mkv")
+	e.search.set(e.item("hdsky", "m1", "The.Last.of.Us.S02.2160p.WEB-DL.H265-X", "", 30, 10))
+	msg, err := e.svc.SearchNow(e.ctx, tv.ID)
+	require.NoError(t, err)
+	require.Contains(t, msg, "下载了 The.Last.of.Us.S02.2160p", "后两集会变好")
+	for ep := 1; ep <= 3; ep++ {
+		e.organized(e.hashOf("m1"), models.MediaKindTV, 100088, 2, ep, fmt.Sprintf("/lib/tlou/s02e0%d.mkv", ep))
+	}
+	e.svc.refresh(e.ctx)
+	assert.ElementsMatch(t, []uint{e1.ID, e2.ID, e3.ID}, e.org.retired, "同分的第 1 集也换成新的，库里不留两份")
+	row := e.subRow(tv.ID)
+	assert.Equal(t, models.MediaSubDone, row.Status)
+	assert.Contains(t, row.Message, "达到了洗版的目标")
+
+	// 都已经是 2160p 时同分的整季包不下
+	e2nd := newEnv(t)
+	e2nd.enable(nil)
+	e2nd.advance(60 * 24 * time.Hour)
+	p2 := e2nd.profile4K()
+	tv2 := e2nd.sub(SubscriptionInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2, ProfileID: p2.ID, Upgrade: true})
+	for ep := 1; ep <= 3; ep++ {
+		e2nd.libraryFile(fmt.Sprintf("u%d", ep), fmt.Sprintf("The.Last.of.Us.S02E0%d.2160p.WEB-DL.H265-OLD", ep), models.MediaKindTV, 100088, 2, ep, 0, fmt.Sprintf("/lib/tlou/u%d.mkv", ep))
+	}
+	e2nd.search.set(e2nd.item("hdsky", "m2", "The.Last.of.Us.S02.2160p.WEB-DL.H265-X", "", 30, 10))
+	msg, err = e2nd.svc.SearchNow(e2nd.ctx, tv2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "洗版：没有比现在更好的整季包", msg)
 }

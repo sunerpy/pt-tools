@@ -15,6 +15,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
@@ -133,10 +134,26 @@ func torrentBytes(name string) []byte {
 }
 
 type fakeOrganizer struct {
-	mu      sync.Mutex
-	retired []uint
-	retried []uint
-	db      *gorm.DB
+	mu       sync.Mutex
+	retired  []uint
+	retried  []uint
+	retrying map[uint]bool
+	db       *gorm.DB
+}
+
+func (f *fakeOrganizer) setRetrying(id uint, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.retrying == nil {
+		f.retrying = map[uint]bool{}
+	}
+	f.retrying[id] = on
+}
+
+func (f *fakeOrganizer) Retrying(id uint) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.retrying[id]
 }
 
 func (f *fakeOrganizer) Retire(_ context.Context, id uint, reason string) ([]string, error) {
@@ -234,6 +251,14 @@ func newEnv(t *testing.T) *env {
 			e.pushes = append(e.pushes, req)
 			if e.pushRes != nil {
 				return e.pushRes, nil
+			}
+			// 和真的推送一样记下种子（删旧种子前要查它的 H&R）
+			info := models.TorrentInfo{SiteName: req.SiteID, TorrentID: req.TorrentID, Title: req.Title, DownloadSource: req.Source}
+			if req.Meta != nil {
+				info.HasHR = req.Meta.HasHR
+			}
+			if err := db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&info).Error; err != nil {
+				return nil, err
 			}
 			return &ptinternal.PushTorrentResult{Success: true}, nil
 		},

@@ -200,7 +200,7 @@ func (s *Service) historyOf(ctx context.Context, hash string) ([]models.MediaTra
 }
 
 // refreshTorrent 看订阅下载的一个种子整理得怎样：有文件入了库、别的文件也不再自动重试时标成已入库
-// （洗版时接着换掉旧版本）；过了 7 天还没入库的标成失败。
+// （洗版时接着换掉旧版本）；过了 7 天还没入库的标成失败。还要重试的：记录里有重试时间，或者整理服务说它排上队了。
 func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptionTorrent, set Settings) {
 	hist, err := s.historyOf(ctx, t.InfoHash)
 	if err != nil {
@@ -235,7 +235,7 @@ func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptio
 		switch {
 		case h.Status == models.MediaTransferDone:
 			done++
-		case h.Status == models.MediaTransferFailed && h.NextRetryAt != nil:
+		case h.Status == models.MediaTransferFailed && (h.NextRetryAt != nil || (s.cfg.Organizer != nil && s.cfg.Organizer.Retrying(h.ID))):
 			retrying = true
 		case h.Status == models.MediaTransferFailed || h.Status == models.MediaTransferSkipped:
 			notDone++
@@ -326,7 +326,7 @@ func (s *Service) baseline(ctx context.Context, p Profile, linked []models.Media
 	return best, has
 }
 
-// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件（分数要比新版本低）；删了返回真。
+// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件（分数不比新版本高的）；删了返回真。
 func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription, skipped *models.MediaTransferHistory, t *models.MediaSubscriptionTorrent, prof Profile, score int) bool {
 	if skipped.TargetPath == "" {
 		return false
@@ -338,7 +338,7 @@ func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription,
 	freed := false
 	for _, v := range vers {
 		o := v.row
-		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) || s.versionPoints(ctx, prof, v.title, v.subtitle) >= score {
+		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) || s.versionPoints(ctx, prof, v.title, v.subtitle) > score {
 			continue
 		}
 		if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {
@@ -350,8 +350,9 @@ func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription,
 	return freed
 }
 
-// replaceOlder 在洗版的新版本入库以后换掉旧版本：库里被新版本盖住、按现在的档案分数比新版本低的文件，
-// 按整理历史的删除规则删掉（不管是不是订阅下载的）；订阅下载的旧种子在库里的文件都换掉以后标成已替换，
+// replaceOlder 在洗版的新版本入库以后换掉旧版本：库里被新版本盖住、按现在的档案分数不比新版本高的文件
+// （同分的也换，库里不留两份），按整理历史的删除规则删掉（不管是不是订阅下载的）；比新版本好的留着。
+// 订阅下载的旧种子在库里的文件都换掉以后标成已替换，
 // 按设置继续做种或删除。剧集只算新种子真正整理进库的集：整季包有几集没整理成，那几集的旧版本留着；
 // 旧文件是几集的合集时，这几集新版本都有才换。
 func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscription, t *models.MediaSubscriptionTorrent, hist []models.MediaTransferHistory, set Settings) {
@@ -387,7 +388,7 @@ func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscriptio
 		}
 		for _, v := range vers {
 			o := v.row
-			if strings.EqualFold(o.InfoHash, t.InfoHash) || !covered(o.Episode, o.EpisodeEnd) || s.versionPoints(ctx, prof, v.title, v.subtitle) >= score {
+			if strings.EqualFold(o.InfoHash, t.InfoHash) || !covered(o.Episode, o.EpisodeEnd) || s.versionPoints(ctx, prof, v.title, v.subtitle) > score {
 				continue
 			}
 			if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {
@@ -400,7 +401,7 @@ func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscriptio
 		return
 	}
 	for _, p := range prev {
-		if p.ID == t.ID || s.versionPoints(ctx, prof, p.Title, p.Subtitle) >= score {
+		if p.ID == t.ID || s.versionPoints(ctx, prof, p.Title, p.Subtitle) > score {
 			continue
 		}
 		// 旧种子还有文件在库里（新版本没有那几集，或者删除没成功）时不算换下来，种子也不动
@@ -418,7 +419,7 @@ func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscriptio
 }
 
 // deleteOld 按设置删掉洗版换下来的旧种子（连数据）。拿不准时不删：下载器里原来就有的（不是订阅加进去的）、
-// 推送时知道有 H&R 要求的、种子记录里写着有 H&R 的、读不到种子记录的都留着。返回结果说明。
+// 推送时知道有 H&R 要求的、种子记录里写着有 H&R 的、读不到或找不到种子记录的都留着。返回结果说明。
 func (s *Service) deleteOld(ctx context.Context, p *models.MediaSubscriptionTorrent) string {
 	if p.Adopted {
 		return "旧种子不是订阅加进下载器的，留着"
@@ -429,6 +430,9 @@ func (s *Service) deleteOld(ctx context.Context, p *models.MediaSubscriptionTorr
 	var info models.TorrentInfo
 	if err := s.cfg.DB.WithContext(ctx).Where("site_name = ? AND torrent_id = ?", p.SiteName, p.TorrentID).Limit(1).Find(&info).Error; err != nil {
 		return "旧种子没有删（读不到种子记录）"
+	}
+	if info.ID == 0 {
+		return "旧种子没有删（找不到种子记录，不知道有没有 H&R 要求）"
 	}
 	if info.HasHR {
 		return "旧种子有 H&R 要求，留着做种"
@@ -444,6 +448,25 @@ func (s *Service) deleteOld(ctx context.Context, p *models.MediaSubscriptionTorr
 		return fmt.Sprintf("删除旧种子失败：%v", err)
 	}
 	return "旧种子连数据删掉了"
+}
+
+// episodeFloor 是这一季每一集现在的版本里最差的那一集的分数（一集有几个版本时按最好的算）：
+// 整季包要比它高，也就是至少有一集会变好；比新版本好的集入库以后也留着，不会变差。
+func (s *Service) episodeFloor(ctx context.Context, p Profile, vers []version, total int) int {
+	best := map[int]int{}
+	for _, v := range vers {
+		pts := s.versionPoints(ctx, p, v.title, v.subtitle)
+		for n := v.row.Episode; n > 0 && n <= max(v.row.EpisodeEnd, v.row.Episode); n++ {
+			best[n] = max(best[n], pts)
+		}
+	}
+	floor := -1
+	for n := 1; n <= total; n++ {
+		if floor < 0 || best[n] < floor {
+			floor = best[n]
+		}
+	}
+	return max(floor, 0)
 }
 
 // targetReached 报告库里的版本是不是达到了洗版的目标：电影是有一个文件达到，剧集是这一季的每一集都有达到的文件。
