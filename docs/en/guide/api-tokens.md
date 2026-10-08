@@ -1,6 +1,6 @@
 # API tokens
 
-API tokens are for clients such as a mobile app or a script: with a token a client can use the pt-tools App API (`/api/app/v1/`) without storing your web login password. A token cannot reach any other part of the web interface; those still require you to sign in.
+API tokens are for clients such as a mobile app or a script: with a token a client can use the pt-tools App API (`/api/app/v1/`) or sign in to the [qB-compatible entrance](qbit-compat.md) without storing your web login password. A token cannot reach any other part of the web interface; those still require you to sign in.
 
 Open System → API tokens (系统 → API 令牌).
 

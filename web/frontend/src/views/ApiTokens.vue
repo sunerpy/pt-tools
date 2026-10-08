@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /*
- * API 令牌（路线图 M12）：给手机 App 这类客户端用的令牌，走 /api/app/v1。新建时只显示一次明文；撤销立即生效。
+ * API 令牌（路线图 M12、M13）：给手机 App（走 /api/app/v1）与 qB 兼容入口用的令牌。新建时只显示一次明文；撤销立即生效。
  * 令牌访问不了网页的其他接口，那些仍然要登录。画板没有这一页，沿用媒体页的样式：页头 + 面板，手机上是行卡。
  */
 import { type ApiToken, type ApiTokenScope, tokensApi } from "@/api";
@@ -151,7 +151,8 @@ onMounted(load);
 <template>
   <div class="pt-cards pt-cards--wide">
     <PtHeadSub
-      >给手机 App 这类客户端用的令牌：只能访问 App 接口，网页的其他功能仍然要登录</PtHeadSub
+      >给手机 App 与 qB 兼容入口这类客户端用的令牌：只能访问 App 接口与 qB
+      兼容入口，网页的其他功能仍然要登录</PtHeadSub
     >
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="tk-refresh" @click="load">
