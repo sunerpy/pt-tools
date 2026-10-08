@@ -12,11 +12,12 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 - 没带令牌，或者令牌不对、已过期、已撤销：回 401。
 - 令牌没有接口要的权限：回 403。下文的「读取」是权限 `app:read`，「操作」是 `app:write`。
-- 令牌只能调用 App API。带着令牌请求网页的其他接口（设置、站点、下载器、通知通道、令牌管理等）一律回 401。
+- 令牌只能调用 App API：网页的其他接口（设置、站点、下载器、通知通道、令牌管理等）不认令牌，没有登录时回 401。
 
 ## 约定
 
 - 请求体与回应都是 JSON。请求体最多 1 MiB；有接口不认识的字段时回 400，不会忽略。
+- 不带请求体的写接口（签到、立即搜索、删除订阅）可以不带请求体，或者带 `{}`；带别的内容回 400。
 - 时间是 Unix 时间戳（秒）。大小、上传量与下载量的单位是字节，速度的单位是字节每秒，进度是 0 到 100 的百分数。
 - 分页的接口接受查询参数 `page`（从 1 开始）与 `page_size`（默认 20，上限见各接口），回应是 `{"items": [...], "total": 总数, "page": 页码, "page_size": 每页条数}`。
 - 兼容性：`GET /meta` 返回的 `remote_api_level` 现在是 1，只在有不兼容的改动时加一。新增接口或字段不算不兼容，客户端应忽略不认识的字段。
@@ -25,18 +26,19 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 出错时回应 `{"error": "代码", "message": "说明"}`。`message` 是写给人看的中文说明，客户端按 `error` 判断。
 
-| `error`                                                         | 状态码 | 含义                                      |
-| --------------------------------------------------------------- | ------ | ----------------------------------------- |
-| `invalid_body`                                                  | 400    | 请求体不是合法的 JSON，或者有不认识的字段 |
-| `invalid_argument`                                              | 400    | 参数不对，`message` 写明是哪一个          |
-| `unauthorized`                                                  | 401    | 没有带有效的令牌                          |
-| `forbidden`                                                     | 403    | 令牌没有这个权限                          |
-| `not_found`                                                     | 404    | 接口、站点或订阅不存在                    |
-| `busy`                                                          | 409    | 同一件事正在进行，例如这个站点正在签到    |
-| `rate_limited`                                                  | 429    | TMDB 限流，稍后再试                       |
-| `internal`                                                      | 500    | pt-tools 内部出错                         |
-| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502    | 搜索、下载种子文件、签到或访问 TMDB 失败  |
-| `unavailable`                                                   | 503    | 对应的服务没有启动                        |
+| `error`                                                         | 状态码 | 含义                                               |
+| --------------------------------------------------------------- | ------ | -------------------------------------------------- |
+| `invalid_body`                                                  | 400    | 请求体不是合法的 JSON，或者有不认识的字段          |
+| `invalid_argument`                                              | 400    | 参数不对，`message` 写明是哪一个                   |
+| `unauthorized`                                                  | 401    | 没有带有效的令牌                                   |
+| `forbidden`                                                     | 403    | 令牌没有这个权限                                   |
+| `not_found`                                                     | 404    | 接口、站点或订阅不存在                             |
+| `method_not_allowed`                                            | 405    | 接口存在，但不接受这个方法；`Allow` 头写明接受哪些 |
+| `busy`                                                          | 409    | 同一件事正在进行，例如这个站点正在签到             |
+| `rate_limited`                                                  | 429    | TMDB 限流，稍后再试                                |
+| `internal`                                                      | 500    | pt-tools 内部出错                                  |
+| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502    | 搜索、下载种子文件、签到或访问 TMDB 失败           |
+| `unavailable`                                                   | 503    | 对应的服务没有启动                                 |
 
 ## 接口一览
 
@@ -62,7 +64,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | DELETE | `/subscriptions/{id}`        | 操作 | 删除订阅                                     |
 | GET    | `/explore`                   | 读取 | 探索：TMDB 的热门、流行与搜索                |
 
-路径都省略了 `/api/app/v1` 前缀。搜索用 POST 传条件，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」。
+路径都省略了 `/api/app/v1` 前缀。搜索用 POST 传条件，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
 
 ## 基本信息
 
