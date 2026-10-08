@@ -9,7 +9,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/app"
-	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -35,8 +33,6 @@ var (
 	errUnknownURL     = errors.New("认不出是哪个已启用站点的种子链接")
 	errSiteDisabled   = errors.New("站点没有启用")
 )
-
-var numericID = regexp.MustCompile(`^\d+$`)
 
 // addOptions 是 torrents/add 的选项（字段名按 qB）。
 type addOptions struct {
@@ -205,7 +201,7 @@ func (s *Server) pushLink(ctx context.Context, b *backend, link string, o addOpt
 	return s.pushData(ctx, b, data, siteID, torrentID, o)
 }
 
-// pushData 推送一个种子文件。站点没给时按 tracker 认；编号没给时从 comment 里的详情页地址取，取不到用 hash:<info hash>。
+// pushData 推送一个种子文件。站点没给时按 tracker 认；编号没给时（上传的文件）用 hash:<info hash>。
 // 认出了站点时标签里追加站点 ID（站点标签），没给保存目录时用 createCategory 记下的分类目录。
 func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, torrentID string, o addOptions) addOutcome {
 	parsed, err := v2.ParseTorrent(data)
@@ -216,9 +212,8 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 	if siteID == "" {
 		siteID = s.siteOf(parsed)
 	}
-	if torrentID == "" {
-		torrentID = s.idFromComment(ctx, siteID, parsed.Comment, hash)
-	}
+	// 上传的种子文件内容由客户端给（comment 里的详情页地址也能随便写），编号一律用 hash:<info hash>，
+	// 不按 comment 里的编号去 upsert，免得盖掉站点上真有的那条记录
 	if torrentID == "" {
 		torrentID = "hash:" + hash
 	}
@@ -270,34 +265,6 @@ func (s *Server) siteOf(p *v2.ParsedTorrent) string {
 		}
 	}
 	return ""
-}
-
-// idFromComment 从种子 comment 里的详情页地址（details.php?id=）取编号，地址的主机要属于这个站点。
-// comment 是客户端上传的文件里写的：这个编号已经有记录、而记录的 info hash 不是这个种子时不用它，免得盖掉那条记录。
-func (s *Server) idFromComment(ctx context.Context, siteID, comment, hash string) string {
-	if siteID == "" {
-		return ""
-	}
-	u, err := url.Parse(strings.TrimSpace(comment))
-	if err != nil || u.Host == "" || !strings.HasSuffix(u.Path, "/details.php") {
-		return ""
-	}
-	if id, ok := s.deps.Resolver.Resolve(comment); !ok || id != siteID {
-		return ""
-	}
-	id := u.Query().Get("id")
-	if !numericID.MatchString(id) {
-		return ""
-	}
-	var existing []string
-	if err := s.deps.DB.WithContext(ctx).Model(&models.TorrentInfo{}).
-		Where("site_name = ? AND torrent_id = ?", siteID, id).Limit(1).Pluck("torrent_hash", &existing).Error; err != nil {
-		return ""
-	}
-	if len(existing) > 0 && !strings.EqualFold(existing[0], hash) {
-		return ""
-	}
-	return id
 }
 
 // recordAdd 记一条添加的审计：成功 success；有失败的 error:partial；全失败时按原因（denied:magnet、denied:url 或 error:add_failed）。

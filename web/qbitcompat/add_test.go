@@ -94,7 +94,7 @@ func (e *env) gotPushes() []internal.PushTorrentRequest {
 	return append([]internal.PushTorrentRequest(nil), e.pushes...)
 }
 
-// 上传种子文件：按 tracker 认站点、从 comment 的详情页地址取编号、追加站点标签；选项照 qB 的字段传下去；没给目录时用分类记下的目录
+// 上传种子文件：按 tracker 认站点、编号用 hash:<info hash>（comment 是客户端写的，不信）、追加站点标签；选项照 qB 的字段传下去；没给目录时用分类记下的目录
 func TestAddTorrentFile(t *testing.T) {
 	e := newEnv(t)
 	e.withSites()
@@ -111,7 +111,7 @@ func TestAddTorrentFile(t *testing.T) {
 	p := e.gotPushes()
 	require.Len(t, p, 2)
 	assert.Equal(t, "qasite", p[0].SiteID)
-	assert.Equal(t, "42", p[0].TorrentID, "编号取自 comment 里的详情页地址")
+	assert.Equal(t, "hash:"+hashOf(t, known), p[0].TorrentID, "上传的文件不信 comment 里的编号")
 	assert.Equal(t, "mp,4k,qasite", p[0].Tags, "追加站点标签")
 	assert.Equal(t, "radarr", p[0].Category)
 	assert.Equal(t, "/movies/radarr", p[0].SavePath, "没给目录：用分类记下的")
@@ -228,27 +228,6 @@ func TestAddPausedCaseInsensitive(t *testing.T) {
 	w := e.postAdd(ck, [][]byte{torrentFile("s", "https://qa.example/announce", "")}, map[string]string{"stopped": "True"})
 	require.Equal(t, "Ok.", w.Body.String())
 	assert.True(t, e.gotPushes()[3].AddPaused, "qB 5 的 stopped")
-}
-
-// 上传的种子 comment 由客户端写：编号对得上一条已有记录、但 info hash 不一样时不能用它（会盖掉那条记录），改用 hash:<info hash>
-func TestAddCommentIDMustMatchExisting(t *testing.T) {
-	e := newEnv(t)
-	e.withSites()
-	ck := e.login(e.token(apitoken.ScopeQbitCompat))
-	realHash := "ffffffffffffffffffffffffffffffffffffffff"
-	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "qasite", TorrentID: "42", TorrentHash: &realHash, Title: "真的 42"}).Error)
-
-	forged := torrentFile("forged", "https://qa.example/announce", "https://qa.example/details.php?id=42")
-	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{forged}, nil).Body.String())
-	same := torrentFile("same", "https://qa.example/announce", "https://qa.example/details.php?id=43")
-	h43 := hashOf(t, same)
-	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "qasite", TorrentID: "43", TorrentHash: &h43, Title: "43"}).Error)
-	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{same}, nil).Body.String())
-
-	p := e.gotPushes()
-	require.Len(t, p, 2)
-	assert.Equal(t, "hash:"+hashOf(t, forged), p[0].TorrentID, "编号对得上、hash 不一样：不用 comment 的编号")
-	assert.Equal(t, "43", p[1].TorrentID, "hash 一样：就是这条记录")
 }
 
 // 请求的上下文结束了（超时、关闭）：剩下的种子不再处理
