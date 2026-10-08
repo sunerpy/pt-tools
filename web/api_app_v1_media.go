@@ -341,6 +341,9 @@ func (s *Server) appSubscriptionSetStatus(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) appSubscriptionSearch(w http.ResponseWriter, r *http.Request) {
+	if !appNoBody(w, r) {
+		return
+	}
 	svc, ok := s.appSubscribeService(w)
 	if !ok {
 		return
@@ -358,6 +361,9 @@ func (s *Server) appSubscriptionSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) appSubscriptionDelete(w http.ResponseWriter, r *http.Request) {
+	if !appNoBody(w, r) {
+		return
+	}
 	svc, ok := s.appSubscribeService(w)
 	if !ok {
 		return

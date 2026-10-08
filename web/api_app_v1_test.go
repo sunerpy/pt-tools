@@ -337,3 +337,24 @@ func TestAppAPI_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Equal(t, http.StatusOK, e.do(appReq{method: http.MethodGet, path: "/api/app/v1/meta", bearer: read}).Code, "方法对的照常")
 }
+
+// 不带请求体的写接口：空的或 {} 可以，别的回 400；所有请求体最多 1 MiB
+func TestAppAPI_NoBodyEndpoints(t *testing.T) {
+	e := newAppEnv(t)
+	write := e.token(apitoken.ScopeAppRead, apitoken.ScopeAppWrite)
+	for _, p := range []struct{ method, path string }{
+		{http.MethodPost, "/api/app/v1/sites/nosuch/attend"},
+		{http.MethodPost, "/api/app/v1/subscriptions/1/search"},
+		{http.MethodDelete, "/api/app/v1/subscriptions/1"},
+	} {
+		w := e.do(appReq{method: p.method, path: p.path, bearer: write, body: `{"x":1}`})
+		require.Equal(t, http.StatusBadRequest, w.Code, p.path)
+		assert.Equal(t, "invalid_body", errorCode(t, w), p.path)
+		for _, ok := range []string{"", "{}", " {} \n"} {
+			assert.NotEqual(t, http.StatusBadRequest, e.do(appReq{method: p.method, path: p.path, bearer: write, body: ok}).Code, p.path+" body="+ok)
+		}
+	}
+	big := `{"keyword":"` + strings.Repeat("a", appMaxBody) + `"}`
+	w := e.do(appReq{method: http.MethodPost, path: "/api/app/v1/search", bearer: write, body: big})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

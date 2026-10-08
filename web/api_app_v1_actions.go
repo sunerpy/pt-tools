@@ -320,6 +320,9 @@ func appDownloaderFor(id uint) (models.DownloaderSetting, error) {
 // ---- 签到 ----
 
 func (s *Server) appAttend(w http.ResponseWriter, r *http.Request) {
+	if !appNoBody(w, r) {
+		return
+	}
 	name := strings.TrimSpace(r.PathValue("site"))
 	if global.GlobalDB == nil {
 		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")

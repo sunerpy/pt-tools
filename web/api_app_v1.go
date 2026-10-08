@@ -147,6 +147,20 @@ func appDecode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
+// appNoBody 用在不带请求体的写接口：可以不带，或者带一个空对象；别的内容回 400。最多读 1 MiB。
+func appNoBody(w http.ResponseWriter, r *http.Request) bool {
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, appMaxBody))
+	if err != nil {
+		appError(w, http.StatusBadRequest, "invalid_body", "请求格式错误: "+err.Error())
+		return false
+	}
+	if t := strings.TrimSpace(string(b)); t != "" && t != "{}" {
+		appError(w, http.StatusBadRequest, "invalid_body", "这个接口不带请求体")
+		return false
+	}
+	return true
+}
+
 // appOutcomeKey 是请求上下文里放审计业务结果的位置（只在要记审计的写请求上有）。
 type appOutcomeKey struct{}
 
