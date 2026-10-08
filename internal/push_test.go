@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -933,4 +934,46 @@ func TestPushTorrent_CompatOptions(t *testing.T) {
 	assert.False(t, captured[2].AddAtPaused, "下载器自动开始、调用方没要求暂停")
 	assert.Nil(t, captured[2].AdvanceOptions)
 	assert.Equal(t, 500, captured[2].UploadSpeedLimitKBs)
+}
+
+// ctxAdder 是支持按 ctx 添加的下载器（qB、Transmission 都是）：记下拿到的 ctx。
+type ctxAdder struct {
+	*sm.MockDownloader
+	got context.Context
+}
+
+func (c *ctxAdder) AddTorrentFileExContext(ctx context.Context, _ []byte, _ downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+	c.got = ctx
+	return downloader.AddTorrentResult{Success: true}, nil
+}
+
+// 下载器支持按 ctx 添加时，推送把调用方的 ctx 传下去（超时、关闭时的取消能让上传停下）
+func TestPushTorrent_UsesContextAdder(t *testing.T) {
+	_ = setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	GetDiskBudget().Reset()
+	t.Cleanup(func() { GetDiskBudget().Reset() })
+	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, AutoStart: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&ds).Error)
+	ctrl := gomock.NewController(t)
+	m := sm.NewMockDownloader(ctrl)
+	m.EXPECT().CheckTorrentExists(gomock.Any()).Return(false, nil).AnyTimes()
+	m.EXPECT().GetName().Return("qb").AnyTimes()
+	m.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	m.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(1)<<50, nil).AnyTimes()
+	m.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
+	m.EXPECT().GetAllTorrents().Return(nil, nil).AnyTimes()
+	m.EXPECT().Close().Return(nil).AnyTimes()
+	dl := &ctxAdder{MockDownloader: m}
+	t.Cleanup(SwapPushDownloaderFactory(func(models.DownloaderSetting) (downloader.Downloader, error) { return dl, nil }))
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	res, err := PushTorrentToDownloader(ctx, PushTorrentRequest{SiteID: "s", TorrentID: "1", TorrentData: makeSizedTorrentBytes(t, "ctx", gb), DownloaderID: ds.ID})
+	require.NoError(t, err)
+	require.True(t, res.Success, res.Message)
+	require.NotNil(t, dl.got)
+	dl1, ok1 := ctx.Deadline()
+	dl2, ok2 := dl.got.Deadline()
+	assert.True(t, ok1 && ok2 && dl1.Equal(dl2), "拿到的是调用方的 ctx")
 }

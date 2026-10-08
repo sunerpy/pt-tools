@@ -300,7 +300,13 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 	}
 
 	// 推送种子到下载器
-	result, err := dl.AddTorrentFileEx(req.TorrentData, opts)
+	// 下载器支持按 ctx 添加时用它：调用方的超时、关闭时的取消能让上传停下
+	var result downloader.AddTorrentResult
+	if ca, ok := dl.(downloader.ContextAdder); ok {
+		result, err = ca.AddTorrentFileExContext(ctx, req.TorrentData, opts)
+	} else {
+		result, err = dl.AddTorrentFileEx(req.TorrentData, opts)
+	}
 	if err != nil {
 		// 推送失败：归还预留配额，避免 budget 永久占用。
 		if pushTorrentSize > 0 {
