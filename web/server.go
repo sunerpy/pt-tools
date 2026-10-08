@@ -39,6 +39,7 @@ import (
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/utils"
 	"github.com/sunerpy/pt-tools/version"
+	"github.com/sunerpy/pt-tools/web/qbitcompat"
 )
 
 type Server struct {
@@ -55,7 +56,9 @@ type Server struct {
 	tokens *apitoken.Store
 	// appAudit 记下 API 令牌等非 session 主体经 App API 做的写操作（M12）
 	appAudit appAuditRecorder
-	qaHook   func(*http.ServeMux) // qa-build-only test hook installer
+	// qbitCompat 是 qB 兼容入口（M13，开了监听时才有），设置页用它显示监听地址
+	qbitCompat *qbitcompat.Server
+	qaHook     func(*http.ServeMux) // qa-build-only test hook installer
 
 	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
 	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
@@ -207,6 +210,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerSubscribeRoutes(mux)
 	s.registerExtensionActionRoutes(mux)
 	s.registerTokenRoutes(mux)
+	s.registerQbitCompatRoutes(mux)
 	s.registerAppV1Routes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
