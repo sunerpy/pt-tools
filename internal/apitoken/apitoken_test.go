@@ -188,3 +188,27 @@ func TestCreateLimitConcurrent(t *testing.T) {
 	assert.EqualValues(t, maxTokens, n)
 	assert.EqualValues(t, 1, ok.Load())
 }
+
+// Get：按编号复查令牌（qB 兼容入口的会话每次请求都查一次）。撤销、过期、不存在都是 ErrUnauthorized；也记最近一次使用
+func TestGet(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	tok, _, err := e.store.Create(ctx, CreateInput{Name: "qb", Scopes: []string{ScopeQbitCompat}, ExpiresInDays: 1}, "admin")
+	require.NoError(t, err)
+	got, err := e.store.Get(ctx, tok.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Has(ScopeQbitCompat))
+	assert.NotNil(t, got.LastUsedAt, "会话在用也算使用")
+
+	_, err = e.store.Get(ctx, 9999)
+	require.ErrorIs(t, err, ErrUnauthorized)
+
+	e.now = e.now.Add(25 * time.Hour)
+	_, err = e.store.Get(ctx, tok.ID)
+	require.ErrorIs(t, err, ErrUnauthorized, "过期")
+
+	e.now = e.now.Add(-25 * time.Hour)
+	require.NoError(t, e.store.Revoke(ctx, tok.ID))
+	_, err = e.store.Get(ctx, tok.ID)
+	require.ErrorIs(t, err, ErrUnauthorized, "撤销")
+}

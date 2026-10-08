@@ -231,6 +231,23 @@ func (s *Store) Verify(ctx context.Context, plain string) (Token, error) {
 	if row.ID == 0 || subtle.ConstantTimeCompare([]byte(hashOf(secret)), []byte(row.SecretHash)) != 1 {
 		return Token{}, ErrUnauthorized
 	}
+	return s.active(ctx, row)
+}
+
+// Get 按编号复查令牌：qB 兼容入口登录以后用会话，每次请求都要确认令牌还在、没过期。不存在、过期都是 ErrUnauthorized；也记最近一次使用。
+func (s *Store) Get(ctx context.Context, id uint) (Token, error) {
+	var row models.APIToken
+	if err := s.db.WithContext(ctx).Where("id = ?", id).Limit(1).Find(&row).Error; err != nil {
+		return Token{}, fmt.Errorf("读取令牌失败: %w", err)
+	}
+	if row.ID == 0 {
+		return Token{}, ErrUnauthorized
+	}
+	return s.active(ctx, row)
+}
+
+// active 检查过期，并按节流记下最近一次使用。
+func (s *Store) active(ctx context.Context, row models.APIToken) (Token, error) {
 	now := s.now().UTC()
 	if row.ExpiresAt != nil && !now.Before(*row.ExpiresAt) {
 		return Token{}, ErrUnauthorized
