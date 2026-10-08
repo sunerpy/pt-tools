@@ -94,10 +94,11 @@ func TestAppSites(t *testing.T) {
 	assertNoSecrets(t, w.Body.Bytes())
 	assert.NotContains(t, w.Body.String(), "pk-secret")
 	assert.NotContains(t, w.Body.String(), "ak-secret")
-	var sites []AppSite
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sites))
+	var list AppSiteList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.Empty(t, list.UserError)
 	names := map[string]AppSite{}
-	for _, s := range sites {
+	for _, s := range list.Items {
 		names[s.Name] = s
 	}
 	require.Contains(t, names, "hdsky")
@@ -173,4 +174,31 @@ func TestAppRedactCredentials(t *testing.T) {
 	}
 	assert.Equal(t, "下载器拒绝：磁盘空间不足（还剩 12 GB）", appRedact("下载器拒绝：磁盘空间不足（还剩 12 GB）"))
 	assert.Equal(t, "站点 hdsky 没有启用", appRedact("站点 hdsky 没有启用"))
+}
+
+// 读站点用户数据失败时照样列出站点，但写明用户数据没读到，不能让 App 当成从没同步过
+func TestAppSitesUserInfoFailure(t *testing.T) {
+	srv, _ := historyFixture(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.SiteLoginState{}, &models.SiteAttendanceLog{}))
+	require.NoError(t, global.GlobalDB.DB.Migrator().DropTable("user_info"))
+	w := appAs(srv.appSites, http.MethodGet, "/api/app/v1/sites")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assertNoSecrets(t, w.Body.Bytes())
+	var list AppSiteList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.NotEmpty(t, list.Items)
+	assert.NotEmpty(t, list.UserError)
+}
+
+// 今天的增量算不出来时写明原因，不能让 App 当成今天没有流量
+func TestAppOverviewDeltaFailure(t *testing.T) {
+	srv, repo := historyFixture(t)
+	saveOn(t, repo, "2026-10-06", "hdsky", 300, 30, 5)
+	require.NoError(t, global.GlobalDB.DB.Migrator().DropTable("user_info_daily_snapshot"))
+	w := appAs(srv.appOverview, http.MethodGet, "/api/app/v1/overview")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var ov AppOverview
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ov))
+	assert.NotEmpty(t, ov.Today.Error)
+	assert.EqualValues(t, 300, ov.Totals.Uploaded, "合计照常")
 }

@@ -69,7 +69,7 @@ type AppTotals struct {
 	UnreadMessages int     `json:"unread_messages"`
 }
 
-// AppDelta 是一段时间里的增量（站点数据历史，M2）。
+// AppDelta 是一段时间里的增量（站点数据历史，M2）。Error 不为空时增量没算出来，数字都是 0，不代表这段时间没有流量。
 type AppDelta struct {
 	From       string         `json:"from"`
 	To         string         `json:"to"`
@@ -77,6 +77,7 @@ type AppDelta struct {
 	Downloaded int64          `json:"downloaded"`
 	Bonus      float64        `json:"bonus"`
 	Sites      []AppSiteDelta `json:"sites"`
+	Error      string         `json:"error,omitempty"`
 }
 
 // AppSiteDelta 是一个站点的增量。
@@ -126,12 +127,19 @@ func (s *Server) appOverview(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			global.GetSlogger().Warnf("[App API] 计算今天的增量失败: %v", serr)
+			out.Today.Error = "计算今天的增量失败: " + appRedact(serr.Error())
 		}
 	}
 	appJSON(w, out)
 }
 
 // ---- 站点 ----
+
+// AppSiteList 是 GET /sites 的回应。UserError 不为空时站点上的用户数据没读到，各项都没有 user，不代表从没同步过。
+type AppSiteList struct {
+	Items     []AppSite `json:"items"`
+	UserError string    `json:"user_error,omitempty"`
+}
 
 // AppSite 是 GET /sites 的一项：站点、登录状态、今天的签到与站点上的用户数据。不含 Cookie、API key、passkey 与站点地址。
 type AppSite struct {
@@ -211,14 +219,17 @@ func (s *Server) appSites(w http.ResponseWriter, r *http.Request) {
 		logByName[l.SiteName] = l
 	}
 	users := map[string]v2.UserInfo{}
+	userErr := ""
 	if userInfoService != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		infos, uerr := userInfoService.GetAllUserInfo(ctx)
 		cancel()
-		if uerr == nil {
-			for _, u := range infos {
-				users[strings.ToLower(u.Site)] = u
-			}
+		if uerr != nil {
+			global.GetSlogger().Warnf("[App API] 读取站点用户数据失败: %v", uerr)
+			userErr = "读取站点用户数据失败: " + appRedact(uerr.Error())
+		}
+		for _, u := range infos {
+			users[strings.ToLower(u.Site)] = u
 		}
 	}
 	now := time.Now()
@@ -258,7 +269,7 @@ func (s *Server) appSites(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	appJSON(w, out)
+	appJSON(w, AppSiteList{Items: out, UserError: userErr})
 }
 
 // ---- RSS 推送记录 ----
