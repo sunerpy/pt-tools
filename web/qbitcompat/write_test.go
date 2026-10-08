@@ -22,6 +22,9 @@ func (e *env) markCompat(hash string) {
 	require.NoError(e.t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hash, CreatedAt: e.now}).Error)
 }
 
+// markCompatAt 同 markCompat（给 server_test 里的用例用，名字分开免得看错）。
+func (e *env) markCompatAt(hash string) { e.markCompat(hash) }
+
 // 所有权只认这台下载器上、确实经兼容入口加进去的：只有来源记录（没加成功、原来就在）不算；别的下载器上的不算；
 // 记下以后被删掉、又从别处加回来的（添加时间晚得多）不算
 func TestOwnershipIsStrict(t *testing.T) {

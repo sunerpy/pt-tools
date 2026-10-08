@@ -27,7 +27,7 @@ type selection struct {
 // （所有权表里有、并且不是后来又从别处加回来的，见 isOwned）。
 // 下载器里没有的 hash 不理（qB 也是这样）。
 func (s *Server) selectTargets(ctx context.Context, b *backend, param string) (selection, error) {
-	_, byHash, err := s.list(b)
+	_, byHash, err := s.fetch(b)
 	if err != nil {
 		return selection{}, err
 	}
@@ -78,6 +78,7 @@ func (s *Server) mutate(w http.ResponseWriter, r *http.Request, c *call, op stri
 		return
 	}
 	if len(sel.ids) > 0 {
+		defer s.invalidate(b.setting.ID)
 		if err := do(b, sel); err != nil {
 			s.recordWrite(r, c, op, "error:downloader", sel, extra)
 			text(w, http.StatusInternalServerError, redact(err.Error()))

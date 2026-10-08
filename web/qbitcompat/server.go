@@ -73,6 +73,7 @@ type Server struct {
 	sessions *sessions
 	lock     *loginLock
 	rid      atomic.Int64
+	snaps    snapshots
 	addr     atomic.Value // 监听地址，Status 用
 }
 
@@ -84,7 +85,7 @@ func New(d Deps) *Server {
 	if d.Resolver == nil {
 		d.Resolver = v2.NewTrackerResolver()
 	}
-	return &Server{deps: d, sessions: newSessions(), lock: newLoginLock()}
+	return &Server{deps: d, sessions: newSessions(), lock: newLoginLock(), snaps: snapshots{m: map[uint]snapshot{}}}
 }
 
 // route 是一条接口：方法、处理函数、是否要登录。

@@ -3,11 +3,14 @@ package qbitcompat
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sunerpy/pt-tools/internal/dlassistant"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -266,8 +269,46 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// list 取绑定下载器的全部种子，换成 qB 的字段；同时给出 hash → 下载器种子 的索引（写接口要用下载器自己的编号）。
-func (s *Server) list(b *backend) ([]qbTorrent, map[string]downloader.Torrent, error) {
+// snapshotTTL 是读接口共用的种子列表快照的有效期：客户端常一两秒轮询一次 maindata 与 info，不用每次都去读下载器的全部种子。
+const snapshotTTL = 2 * time.Second
+
+// snapshot 是一台下载器的种子列表快照（只读，几个请求共用）。
+type snapshot struct {
+	at     time.Time
+	items  []qbTorrent
+	byHash map[string]downloader.Torrent
+}
+
+type snapshots struct {
+	mu sync.Mutex
+	m  map[uint]snapshot
+}
+
+// listCached 是读接口用的种子列表：快照还新时直接用，过期了再读一次（同时来的请求等这一次，不各读各的）。
+// 回来的切片与 map 是共用的，调用方不能改。
+func (s *Server) listCached(b *backend) ([]qbTorrent, map[string]downloader.Torrent, error) {
+	s.snaps.mu.Lock()
+	defer s.snaps.mu.Unlock()
+	if sn, ok := s.snaps.m[b.setting.ID]; ok && time.Since(sn.at) < snapshotTTL {
+		return sn.items, sn.byHash, nil
+	}
+	items, byHash, err := s.fetch(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.snaps.m[b.setting.ID] = snapshot{at: time.Now(), items: items, byHash: byHash}
+	return items, byHash, nil
+}
+
+// invalidate 让这台下载器的快照作废（写操作、添加以后）。
+func (s *Server) invalidate(downloaderID uint) {
+	s.snaps.mu.Lock()
+	defer s.snaps.mu.Unlock()
+	delete(s.snaps.m, downloaderID)
+}
+
+// fetch 读绑定下载器的全部种子，换成 qB 的字段；同时给出 hash → 下载器种子 的索引（写接口要用下载器自己的编号）。
+func (s *Server) fetch(b *backend) ([]qbTorrent, map[string]downloader.Torrent, error) {
 	all, err := b.dl.GetAllTorrents()
 	if err != nil {
 		return nil, nil, err
@@ -289,7 +330,7 @@ func (s *Server) torrentsInfo(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	items, _, err := s.list(b)
+	items, _, err := s.listCached(b)
 	if err != nil {
 		text(w, http.StatusServiceUnavailable, redact(err.Error()))
 		return
@@ -409,7 +450,7 @@ func page(list []qbTorrent, offsetStr, limitStr string) []qbTorrent {
 	return list
 }
 
-// find 按 hash 找种子；找不到时回 404（qB 的 Torrent hash was not found）。
+// find 按 hash 找种子（只查这一个，不读全部）；找不到时回 404（qB 的 Torrent hash was not found）。
 func (s *Server) find(w http.ResponseWriter, r *http.Request) (*backend, downloader.Torrent, bool) {
 	b, ok := s.withBackend(w, r)
 	if !ok {
@@ -417,14 +458,17 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request) (*backend, downloa
 	}
 	_ = r.ParseForm()
 	hash := strings.ToLower(strings.TrimSpace(r.Form.Get("hash")))
-	_, byHash, err := s.list(b)
-	if err != nil {
-		text(w, http.StatusServiceUnavailable, redact(err.Error()))
+	if hash == "" || len(hash) > 64 {
+		text(w, http.StatusNotFound, "Torrent hash was not found")
 		return nil, downloader.Torrent{}, false
 	}
-	t, found := byHash[hash]
-	if hash == "" || !found {
+	t, err := b.dl.GetTorrent(hash)
+	if errors.Is(err, downloader.ErrTorrentNotFound) || (err == nil && !strings.EqualFold(t.InfoHash, hash) && !strings.EqualFold(t.ID, hash)) {
 		text(w, http.StatusNotFound, "Torrent hash was not found")
+		return nil, downloader.Torrent{}, false
+	}
+	if err != nil {
+		text(w, http.StatusServiceUnavailable, redact(err.Error()))
 		return nil, downloader.Torrent{}, false
 	}
 	return b, t, true
@@ -553,7 +597,7 @@ func (s *Server) categories(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	items, _, err := s.list(b)
+	items, _, err := s.listCached(b)
 	if err != nil {
 		text(w, http.StatusServiceUnavailable, redact(err.Error()))
 		return
@@ -567,7 +611,7 @@ func (s *Server) tags(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	items, _, err := s.list(b)
+	items, _, err := s.listCached(b)
 	if err != nil {
 		text(w, http.StatusServiceUnavailable, redact(err.Error()))
 		return
@@ -581,7 +625,7 @@ func (s *Server) maindata(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	items, _, err := s.list(b)
+	items, _, err := s.listCached(b)
 	if err != nil {
 		text(w, http.StatusServiceUnavailable, redact(err.Error()))
 		return
@@ -594,7 +638,8 @@ func (s *Server) maindata(w http.ResponseWriter, r *http.Request, _ *call) {
 	if free, ferr := b.dl.GetClientFreeSpace(r.Context()); ferr == nil {
 		state["free_space_on_disk"] = free
 	}
-	state["queueing"], state["use_alt_speed_limits"], state["refresh_interval"] = false, false, 1500
+	// 每次都是全量：建议客户端 5 秒刷新一次（qB 默认 1.5 秒），读接口的快照也只有 2 秒
+	state["queueing"], state["use_alt_speed_limits"], state["refresh_interval"] = false, false, 5000
 	writeJSON(w, map[string]any{
 		"rid": s.rid.Add(1), "full_update": true, "torrents": torrents, "categories": s.allCategories(b, items),
 		"tags": allTags(b, items), "server_state": state,

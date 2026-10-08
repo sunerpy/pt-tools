@@ -47,12 +47,26 @@ type fakeDL struct {
 	calls    []string
 	// delay 让暂停慢一点（测审计里的耗时）
 	delay time.Duration
+	// listCalls 是 GetAllTorrents 被调用的次数
+	listCalls int
 }
 
 func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listCalls++
 	return append([]downloader.Torrent(nil), f.torrents...), nil
+}
+
+func (f *fakeDL) GetTorrent(id string) (downloader.Torrent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.torrents {
+		if strings.EqualFold(t.InfoHash, id) || t.ID == id {
+			return t, nil
+		}
+	}
+	return downloader.Torrent{}, downloader.ErrTorrentNotFound
 }
 
 func (f *fakeDL) GetTorrentFiles(id string) ([]downloader.TorrentFile, error) {
@@ -513,4 +527,33 @@ func TestLoginLockBounded(t *testing.T) {
 	}
 	assert.LessOrEqual(t, len(l.m), maxLockIPs)
 	assert.Contains(t, l.m, fmt.Sprintf("ip-%d", maxLockIPs+499), "最新的留着")
+}
+
+// 读接口共用一份短时的快照：客户端高频轮询 maindata、info 时不会每次都去读下载器的全部种子；
+// 写操作用最新的列表，写完以后快照作废；单个种子的详情按 hash 查，不读全部
+func TestSnapshotForReads(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	calls := func() int {
+		e.dl.mu.Lock()
+		defer e.dl.mu.Unlock()
+		return e.dl.listCalls
+	}
+	for range 3 {
+		require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/sync/maindata", nil, ck).Code)
+		require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/torrents/info", nil, ck).Code)
+	}
+	assert.Equal(t, 1, calls(), "快照期内只读一次")
+	md := decode[map[string]any](t, e.do(http.MethodGet, "/api/v2/sync/maindata", nil, ck))
+	assert.EqualValues(t, 5000, md["server_state"].(map[string]any)["refresh_interval"], "建议客户端 5 秒刷新一次")
+
+	require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/torrents/properties", url.Values{"hash": {hashDebian}}, ck).Code)
+	require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/torrents/trackers", url.Values{"hash": {hashDebian}}, ck).Code)
+	assert.Equal(t, 1, calls(), "按 hash 查，不读全部")
+
+	e.markCompatAt(hashMovie)
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashMovie}}, ck).Code)
+	assert.Equal(t, 2, calls(), "写操作用最新的列表")
+	require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/torrents/info", nil, ck).Code)
+	assert.Equal(t, 3, calls(), "写完以后快照作废")
 }

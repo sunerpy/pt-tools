@@ -123,6 +123,7 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request, c *call) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), addTimeout)
 	defer cancel()
+	defer s.invalidate(b.setting.ID)
 	outcomes := make([]addOutcome, 0, total)
 	for _, err := range fileErrs {
 		outcomes = append(outcomes, addOutcome{err: err})
