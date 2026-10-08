@@ -66,7 +66,7 @@ func (c *compatServer) Shutdown(ctx context.Context) error {
 	c.cancel()
 	err := c.Server.Shutdown(ctx)
 	if err != nil {
-		_ = c.Server.Close()
+		_ = c.Close()
 	}
 	return err
 }
