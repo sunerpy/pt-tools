@@ -112,3 +112,26 @@ func TestProfileJSONRoundTrip(t *testing.T) {
 	assert.Empty(t, p.Groups)
 	assert.Empty(t, r.Groups, "空列表存成空串")
 }
+
+// 分辨率 > 来源 > 编码 > 加分：高一档胜过下面各项加起来的最大值
+func TestScoreLevelsDominate(t *testing.T) {
+	p := Profile{
+		Codecs: []string{"H.265", "H.264"}, Remux: models.MediaPrefPrefer, HDR: models.MediaPrefPrefer,
+		ChineseSubs: models.MediaPrefPrefer, Groups: []string{"FRDS"},
+	}
+	lowSrcAll := cand("A.2024.1080p.WEB-DL.REMUX.HDR.H265-FRDS", "A 中字", nil)
+	highSrcNone := cand("A.2024.1080p.BluRay.H264-X", "", nil)
+	require.True(t, lowSrcAll.Meta.Remux && len(lowSrcAll.Meta.HDR) > 0 && lowSrcAll.Meta.ChineseSubs, lowSrcAll.Meta)
+	a, b := p.Score(lowSrcAll, 1), p.Score(highSrcNone, 1)
+	require.Empty(t, a.Reject)
+	require.Empty(t, b.Reject)
+	assert.Greater(t, b.Score, a.Score, "来源高一档胜过编码与所有加分")
+
+	lowCodecAll := p.Score(cand("A.2024.1080p.BluRay.REMUX.HDR.H264-FRDS", "A 中字", nil), 1)
+	highCodecNone := p.Score(cand("A.2024.1080p.BluRay.H265-X", "", nil), 1)
+	assert.Greater(t, highCodecNone.Score, lowCodecAll.Score, "编码高一档胜过所有加分")
+
+	lowResAll := p.Score(cand("A.2024.720p.BluRay.REMUX.HDR.H265-FRDS", "A 中字", nil), 1)
+	highResNone := p.Score(cand("A.2024.1080p.DVD.H264-X", "", nil), 1)
+	assert.Greater(t, highResNone.Score, lowResAll.Score, "分辨率高一档胜过下面所有项")
+}

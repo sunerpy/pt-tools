@@ -19,11 +19,13 @@ var (
 	Codecs      = []string{"H.265", "AV1", "H.264", "VC-1", "MPEG-2", "XviD"}
 )
 
-// 打分的权重：分辨率 > 来源 > 编码，Remux、HDR、中字、偏好的制作组再各加一点。免费与做种数不计分，只在同分时排先后。
+// 打分的权重：分辨率 > 来源 > 编码 > 加分（Remux、HDR、中字、偏好的制作组）。每一级高一档都胜过下面各级加起来的最大值：
+// 加分合计最多 115 < 编码一档 200；编码最多 6 档 1200 + 115 < 来源一档 2000；来源最多 6 档 12000 + 1315 < 分辨率一档 20000。
+// 免费与做种数不计分，只在同分时排先后。
 const (
-	weightResolution = 1000
-	weightSource     = 100
-	weightCodec      = 10
+	weightResolution = 20000
+	weightSource     = 2000
+	weightCodec      = 200
 	bonusRemux       = 50
 	bonusChineseSubs = 30
 	bonusHDR         = 20
@@ -159,6 +161,11 @@ func (p Profile) Score(c Candidate, episodes int) Verdict {
 		}
 	}
 
+	return Verdict{Score: p.points(m)}
+}
+
+// points 是不看硬条件的分数：候选过了硬条件以后用它排先后，已有的版本（库里的、下载过的）按当前档案重算时也用它。
+func (p Profile) points(m meta.Meta) int {
 	resolutions, sources := p.Resolutions, p.Sources
 	if len(resolutions) == 0 {
 		resolutions = Resolutions
@@ -182,7 +189,7 @@ func (p Profile) Score(c Candidate, episodes int) Verdict {
 	if hasFold(p.Groups, m.Group) {
 		score += bonusGroup
 	}
-	return Verdict{Score: score}
+	return score
 }
 
 // wanted 检查 require（必须有）与 avoid（不要）。
