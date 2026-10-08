@@ -166,3 +166,22 @@ func TestAppAttend(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, call("nosuchsite"))
 	assert.Equal(t, http.StatusServiceUnavailable, call("hdsky"), "测试里没有签到服务")
 }
+
+// 不是免费的优惠（50%、2X）也有结束时间：不能写成免费到期，否则免费到期清理会删掉没下完的种子
+func TestAppPushMetaNonFreeDiscount(t *testing.T) {
+	end := time.Now().Add(time.Hour)
+	rememberHit(v2.TorrentItem{SourceSite: "qa-meta", ID: "1", SizeBytes: 100, DiscountLevel: v2.DiscountPercent50, DiscountEndTime: end})
+	m := pushMeta("qa-meta", "1", nil)
+	require.NotNil(t, m)
+	assert.False(t, m.IsFree)
+	assert.Nil(t, m.FreeEndTime, "半价的结束时间不是免费到期")
+	assert.Equal(t, string(v2.DiscountPercent50), m.FreeLevel)
+
+	rememberHit(v2.TorrentItem{SourceSite: "qa-meta", ID: "2", SizeBytes: 100, DiscountLevel: v2.DiscountFree, DiscountEndTime: end})
+	m = pushMeta("qa-meta", "2", nil)
+	require.NotNil(t, m)
+	assert.True(t, m.IsFree)
+	require.NotNil(t, m.FreeEndTime)
+	assert.WithinDuration(t, end, *m.FreeEndTime, time.Second)
+	assert.Nil(t, pushMeta("qa-meta", "3", nil), "没搜索过的不给")
+}
