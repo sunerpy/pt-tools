@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sunerpy/pt-tools/global"
@@ -71,13 +73,50 @@ func (s *Server) appRoutes() []appRoute {
 }
 
 func (s *Server) registerAppV1Routes(mux *http.ServeMux) {
-	for _, rt := range s.appRoutes() {
+	routes := s.appRoutes()
+	for _, rt := range routes {
 		mux.Handle(rt.Method+" "+appPrefix+rt.Path, s.appHandler(rt))
 	}
-	// 没有的接口回 JSON 的 404，不落到 SPA 的兜底（那会 302 到登录页）
+	// 兜底：路径对、方法不对回 405（带 Allow）；没有的接口回 JSON 的 404，不落到 SPA 的兜底（那会 302 到登录页）。
+	// 这个兜底不限方法，会压过 ServeMux 自己的 405，所以在这里判断。
 	mux.HandleFunc(appPrefix+"/", func(w http.ResponseWriter, r *http.Request) {
+		if allow := appAllowedMethods(routes, strings.TrimPrefix(r.URL.Path, appPrefix)); len(allow) > 0 {
+			w.Header().Set("Allow", strings.Join(allow, ", "))
+			appError(w, http.StatusMethodNotAllowed, "method_not_allowed", "这个接口只接受 "+strings.Join(allow, "、"))
+			return
+		}
 		appError(w, http.StatusNotFound, "not_found", "没有这个接口")
 	})
+}
+
+// appAllowedMethods 是路由表里路径对得上 path 的那些方法（排好序）；{参数} 段对得上任何非空的段。
+func appAllowedMethods(routes []appRoute, path string) []string {
+	segs := strings.Split(path, "/")
+	var out []string
+	for _, rt := range routes {
+		want := strings.Split(rt.Path, "/")
+		if len(want) != len(segs) {
+			continue
+		}
+		match := true
+		for i, w := range want {
+			if strings.HasPrefix(w, "{") && strings.HasSuffix(w, "}") {
+				if segs[i] == "" {
+					match = false
+				}
+			} else if w != segs[i] {
+				match = false
+			}
+			if !match {
+				break
+			}
+		}
+		if match && !slices.Contains(out, rt.Method) {
+			out = append(out, rt.Method)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // appError 写 App API 的错误：{"error": 代码, "message": 说明}。

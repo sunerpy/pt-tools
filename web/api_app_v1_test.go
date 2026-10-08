@@ -314,3 +314,26 @@ func TestAppAPI_AuditOutcome(t *testing.T) {
 	assert.Equal(t, "success", run("", http.StatusOK).Result)
 	assert.Equal(t, "error:http_409", run("error:all_failed", http.StatusConflict).Result, "状态码已经是失败时按状态码记")
 }
+
+// 路径对、方法不对回 405 并带 Allow；没有的路径才是 404
+func TestAppAPI_MethodNotAllowed(t *testing.T) {
+	e := newAppEnv(t)
+	read := e.token(apitoken.ScopeAppRead)
+	for _, c := range []struct {
+		method, path, allow string
+	}{
+		{http.MethodDelete, "/api/app/v1/meta", "GET"},
+		{http.MethodGet, "/api/app/v1/push", "POST"},
+		{http.MethodGet, "/api/app/v1/subscriptions/1/status", "POST"},
+		{http.MethodPut, "/api/app/v1/subscriptions/1", "DELETE, GET"},
+		{http.MethodPatch, "/api/app/v1/subscriptions", "GET, POST"},
+	} {
+		w := e.do(appReq{method: c.method, path: c.path, bearer: read})
+		require.Equal(t, http.StatusMethodNotAllowed, w.Code, c.method+" "+c.path)
+		assert.Equal(t, "method_not_allowed", errorCode(t, w))
+		assert.Equal(t, c.allow, w.Header().Get("Allow"), c.method+" "+c.path)
+	}
+	w := e.do(appReq{method: http.MethodGet, path: "/api/app/v1/nope", bearer: read})
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, e.do(appReq{method: http.MethodGet, path: "/api/app/v1/meta", bearer: read}).Code, "方法对的照常")
+}
