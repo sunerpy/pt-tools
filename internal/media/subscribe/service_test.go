@@ -165,6 +165,7 @@ func TestSearchMoviePushesBest(t *testing.T) {
 	q := e.search.queries
 	require.NotEmpty(t, q)
 	assert.Equal(t, []string{"hdsky", "ourbits"}, q[0].Sites, "不参与主动搜索的站点去掉")
+	assert.True(t, q[0].RawTitles, "要站点上原样的标题")
 
 	links := e.linked(m.ID)
 	require.Len(t, links, 1)

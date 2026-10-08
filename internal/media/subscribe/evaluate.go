@@ -192,7 +192,7 @@ func (s *Service) search(ctx context.Context, sub *models.MediaSubscription, set
 	var errs []string
 	for _, kw := range keywords(sub) {
 		sctx, cancel := context.WithTimeout(ctx, searchTimeout)
-		res, err := s.cfg.Search.Search(sctx, v2.MultiSiteSearchQuery{SearchQuery: v2.SearchQuery{Keyword: kw}, Sites: sites, Timeout: searchTimeout})
+		res, err := s.cfg.Search.Search(sctx, v2.MultiSiteSearchQuery{SearchQuery: v2.SearchQuery{Keyword: kw}, Sites: sites, Timeout: searchTimeout, RawTitles: true})
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("搜索「%s」失败：%v", kw, err))
