@@ -99,6 +99,16 @@ func TestDoubanPullCreatesSubscriptions(t *testing.T) {
 	subs, err = e.svc.Subscriptions(e.ctx, SubscriptionQuery{})
 	require.NoError(t, err)
 	assert.Len(t, subs, 1)
+	items, err = e.svc.DoubanItems(e.ctx, src.ID)
+	require.NoError(t, err)
+	var gone *models.MediaDoubanItem
+	for i := range items {
+		if items[i].SubscriptionID == 0 && items[i].TMDBID == 693134 {
+			gone = &items[i]
+		}
+	}
+	require.NotNil(t, gone, "删掉的订阅不再指着条目")
+	assert.Equal(t, models.MediaDoubanRemoved, gone.Status, "条目写明订阅删掉了，不再写已订阅")
 
 	// 删除来源：建过的订阅留着
 	require.NoError(t, e.svc.DeleteDoubanSource(e.ctx, src.ID))

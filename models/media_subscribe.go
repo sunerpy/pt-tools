@@ -186,6 +186,8 @@ func (MediaDoubanSource) TableName() string { return "media_douban_sources" }
 const (
 	MediaDoubanSubscribed = "subscribed"
 	MediaDoubanUnmatched  = "unmatched"
+	// MediaDoubanRemoved 是建的订阅被用户删掉了（不会再建回来）
+	MediaDoubanRemoved = "removed"
 )
 
 // MediaDoubanItem 是豆瓣想看里见过的条目：建过订阅的不再建（用户删掉订阅也不会再建回来），

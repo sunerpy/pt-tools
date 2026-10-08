@@ -46,7 +46,7 @@ type DoubanSourceInput struct {
 	ProfileID uint   `json:"profile_id"`
 }
 
-// DoubanSourceView 是豆瓣来源加上建过的订阅数与没找到条目的数。
+// DoubanSourceView 是豆瓣来源加上建过的订阅数（包括后来删掉的）与没找到条目的数。
 type DoubanSourceView struct {
 	models.MediaDoubanSource
 	Subscribed int `json:"subscribed"`
@@ -73,8 +73,8 @@ func (s *Service) DoubanSources(ctx context.Context) ([]DoubanSourceView, error)
 				continue
 			}
 			switch c.Status {
-			case models.MediaDoubanSubscribed:
-				v.Subscribed = c.N
+			case models.MediaDoubanSubscribed, models.MediaDoubanRemoved:
+				v.Subscribed += c.N
 			case models.MediaDoubanUnmatched:
 				v.Unmatched = c.N
 			}

@@ -530,6 +530,11 @@ func (s *Service) DeleteSubscription(ctx context.Context, id uint) error {
 		if err := tx.Where("subscription_id = ?", id).Delete(&models.MediaSubscriptionTorrent{}).Error; err != nil {
 			return fmt.Errorf("删除订阅的种子记录失败: %w", err)
 		}
+		// 豆瓣想看建的订阅：条目改成「订阅已删除」（之后拉取也不会再建）
+		if err := tx.Model(&models.MediaDoubanItem{}).Where("subscription_id = ?", id).
+			Updates(map[string]any{"status": models.MediaDoubanRemoved, "subscription_id": 0}).Error; err != nil {
+			return fmt.Errorf("更新豆瓣条目失败: %w", err)
+		}
 		if err := tx.Delete(&models.MediaSubscription{}, id).Error; err != nil {
 			return fmt.Errorf("删除订阅失败: %w", err)
 		}
