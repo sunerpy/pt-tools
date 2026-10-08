@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -619,8 +620,58 @@ func (s *Server) tags(w http.ResponseWriter, r *http.Request, _ *call) {
 	writeJSON(w, allTags(b, items))
 }
 
-// maindata 是 GET /api/v2/sync/maindata：每次都给全量（full_update），rid 递增，客户端照常能用。
-func (s *Server) maindata(w http.ResponseWriter, r *http.Request, _ *call) {
+// syncState 是一个会话上一次 maindata 给出去的全部状态：下一次 rid 对得上时只给它的增量（qB 的做法）。
+type syncState struct {
+	rid        int64
+	torrents   map[string]map[string]any
+	categories map[string]categoryView
+	tags       []string
+	server     map[string]any
+}
+
+// syncStates 按会话（SID）记 syncState，最多 maxSession 个（和会话表一样）。
+type syncStates struct {
+	mu sync.Mutex
+	m  map[string]*syncState
+}
+
+// swap 记下这个会话这次的状态，返回上一次的。
+func (x *syncStates) swap(sid string, cur *syncState) *syncState {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	prev := x.m[sid]
+	if prev == nil && len(x.m) >= maxSession {
+		for k := range x.m {
+			delete(x.m, k)
+			break
+		}
+	}
+	x.m[sid] = cur
+	return prev
+}
+
+// fieldsOf 把种子换成字段表（增量按字段比较）。
+func fieldsOf(t qbTorrent) map[string]any {
+	b, _ := json.Marshal(t)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+// changed 是 cur 里与 prev 不同（或 prev 没有）的字段。
+func changed(prev, cur map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range cur {
+		if old, ok := prev[k]; !ok || !reflect.DeepEqual(old, v) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// maindata 是 GET /api/v2/sync/maindata。rid 是这个会话上一次回应的 rid 时只给增量：变了的种子只带变了的字段，
+// 另有 torrents_removed、分类与标签的增减、变了的 server_state；rid 为 0 或对不上时给全量（full_update）。
+func (s *Server) maindata(w http.ResponseWriter, r *http.Request, c *call) {
 	b, ok := s.withBackend(w, r)
 	if !ok {
 		return
@@ -630,18 +681,90 @@ func (s *Server) maindata(w http.ResponseWriter, r *http.Request, _ *call) {
 		text(w, http.StatusServiceUnavailable, redact(err.Error()))
 		return
 	}
-	torrents := make(map[string]qbTorrent, len(items))
-	for _, t := range items {
-		torrents[t.Hash] = t
-	}
+	_ = r.ParseForm()
+	reqRID, _ := strconv.ParseInt(r.Form.Get("rid"), 10, 64)
 	state := s.transfer(b)
 	if free, ferr := b.dl.GetClientFreeSpace(r.Context()); ferr == nil {
 		state["free_space_on_disk"] = free
 	}
-	// 每次都是全量：建议客户端 5 秒刷新一次（qB 默认 1.5 秒），读接口的快照也只有 2 秒
+	// 建议客户端 5 秒刷新一次（qB 默认 1.5 秒），读接口的快照也只有 2 秒
 	state["queueing"], state["use_alt_speed_limits"], state["refresh_interval"] = false, false, 5000
-	writeJSON(w, map[string]any{
-		"rid": s.rid.Add(1), "full_update": true, "torrents": torrents, "categories": s.allCategories(b, items),
-		"tags": allTags(b, items), "server_state": state,
-	})
+	server := map[string]any{}
+	for k, v := range state {
+		// 和种子的字段一样过一遍 JSON，增量比较时数字类型一致
+		bv, _ := json.Marshal(v)
+		var x any
+		_ = json.Unmarshal(bv, &x)
+		server[k] = x
+	}
+	cur := &syncState{
+		rid: s.rid.Add(1), torrents: make(map[string]map[string]any, len(items)),
+		categories: s.allCategories(b, items), tags: allTags(b, items), server: server,
+	}
+	for _, t := range items {
+		cur.torrents[t.Hash] = fieldsOf(t)
+	}
+	prev := s.syncs.swap(c.sid, cur)
+	if prev == nil || reqRID == 0 || reqRID != prev.rid {
+		writeJSON(w, map[string]any{
+			"rid": cur.rid, "full_update": true, "torrents": cur.torrents, "categories": cur.categories,
+			"tags": cur.tags, "server_state": cur.server,
+		})
+		return
+	}
+	out := map[string]any{"rid": cur.rid, "full_update": false}
+	torrents := map[string]any{}
+	for h, fields := range cur.torrents {
+		if d := changed(prev.torrents[h], fields); len(d) > 0 {
+			torrents[h] = d
+		}
+	}
+	if len(torrents) > 0 {
+		out["torrents"] = torrents
+	}
+	var removed []string
+	for h := range prev.torrents {
+		if _, ok := cur.torrents[h]; !ok {
+			removed = append(removed, h)
+		}
+	}
+	if len(removed) > 0 {
+		slices.Sort(removed)
+		out["torrents_removed"] = removed
+	}
+	cats := map[string]categoryView{}
+	for name, v := range cur.categories {
+		if old, ok := prev.categories[name]; !ok || old != v {
+			cats[name] = v
+		}
+	}
+	if len(cats) > 0 {
+		out["categories"] = cats
+	}
+	var catsRemoved, tagsAdded, tagsRemoved []string
+	for name := range prev.categories {
+		if _, ok := cur.categories[name]; !ok {
+			catsRemoved = append(catsRemoved, name)
+		}
+	}
+	for _, t := range cur.tags {
+		if !slices.Contains(prev.tags, t) {
+			tagsAdded = append(tagsAdded, t)
+		}
+	}
+	for _, t := range prev.tags {
+		if !slices.Contains(cur.tags, t) {
+			tagsRemoved = append(tagsRemoved, t)
+		}
+	}
+	for key, list := range map[string][]string{"categories_removed": catsRemoved, "tags": tagsAdded, "tags_removed": tagsRemoved} {
+		if len(list) > 0 {
+			slices.Sort(list)
+			out[key] = list
+		}
+	}
+	if d := changed(prev.server, cur.server); len(d) > 0 {
+		out["server_state"] = d
+	}
+	writeJSON(w, out)
 }

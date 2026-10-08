@@ -557,3 +557,40 @@ func TestSnapshotForReads(t *testing.T) {
 	require.Equal(t, http.StatusOK, e.do(http.MethodGet, "/api/v2/torrents/info", nil, ck).Code)
 	assert.Equal(t, 3, calls(), "写完以后快照作废")
 }
+
+// sync/maindata 按 rid 给增量（qB 的做法）：rid 对得上时只给变了的字段、删掉的种子与分类标签的增减；rid 不对或者是 0 时给全量
+func TestMaindataIncremental(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	get := func(rid any) map[string]any {
+		t.Helper()
+		e.srv.invalidate(e.dlSet.ID) // 快照有 2 秒：测的是增量，不等快照过期
+		return decode[map[string]any](t, e.do(http.MethodGet, "/api/v2/sync/maindata", url.Values{"rid": {fmt.Sprint(rid)}}, ck))
+	}
+	full := get(0)
+	require.Equal(t, true, full["full_update"])
+	require.Len(t, full["torrents"], 3)
+	rid := full["rid"]
+
+	same := get(rid)
+	assert.Equal(t, false, same["full_update"])
+	assert.NotContains(t, same, "torrents", "什么都没变")
+	assert.NotContains(t, same, "torrents_removed")
+
+	e.dl.mu.Lock()
+	e.dl.torrents[0].Progress = 0.5
+	e.dl.torrents = e.dl.torrents[:2] // 去掉 Transmission 的那个
+	e.dl.torrents[1].Tags = "hdsky, 4k, new"
+	e.dl.mu.Unlock()
+	diff := get(same["rid"])
+	assert.Equal(t, false, diff["full_update"])
+	torrents := diff["torrents"].(map[string]any)
+	require.Len(t, torrents, 2)
+	assert.Equal(t, map[string]any{"progress": 0.5}, torrents[hashDebian], "只给变了的字段")
+	assert.Equal(t, []any{hashTR}, diff["torrents_removed"])
+	assert.Equal(t, []any{"new"}, diff["tags"], "新出现的标签")
+
+	stale := get(12345)
+	assert.Equal(t, true, stale["full_update"], "rid 对不上：全量")
+	assert.Len(t, stale["torrents"], 2)
+}

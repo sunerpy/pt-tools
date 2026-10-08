@@ -74,6 +74,7 @@ type Server struct {
 	lock     *loginLock
 	rid      atomic.Int64
 	snaps    snapshots
+	syncs    syncStates
 	addr     atomic.Value // 监听地址，Status 用
 }
 
@@ -85,7 +86,10 @@ func New(d Deps) *Server {
 	if d.Resolver == nil {
 		d.Resolver = v2.NewTrackerResolver()
 	}
-	return &Server{deps: d, sessions: newSessions(), lock: newLoginLock(), snaps: snapshots{m: map[uint]snapshot{}}}
+	return &Server{
+		deps: d, sessions: newSessions(), lock: newLoginLock(),
+		snaps: snapshots{m: map[uint]snapshot{}}, syncs: syncStates{m: map[string]*syncState{}},
+	}
 }
 
 // route 是一条接口：方法、处理函数、是否要登录。
@@ -100,6 +104,7 @@ type route struct {
 type call struct {
 	token    apitoken.Token
 	username string
+	sid      string
 	start    time.Time
 	audited  bool
 }
@@ -223,7 +228,7 @@ func (s *Server) authenticate(r *http.Request) (*call, int) {
 	if err != nil {
 		return nil, http.StatusServiceUnavailable
 	}
-	return &call{token: tok, username: sess.username}, 0
+	return &call{token: tok, username: sess.username, sid: ck.Value}, 0
 }
 
 // SetAddr 记下监听地址（Status 用）。
