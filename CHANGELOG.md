@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.15](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.14...v1.0.0-rc.15) (2026-10-08)
+
+
+### Features
+
+* **mcp:** MCP 接入（M14） ([#643](https://github.com/sunerpy/pt-tools/issues/643)) ([52af554](https://github.com/sunerpy/pt-tools/commit/52af554e8ed386d96feaed02ba242c08ff76b64d))
+
 ## [1.0.0-rc.14](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.13...v1.0.0-rc.14) (2026-10-08)
 
 
