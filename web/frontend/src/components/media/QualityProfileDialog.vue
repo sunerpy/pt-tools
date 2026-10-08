@@ -194,7 +194,7 @@ async function save() {
             data-testid="qp-seeders" />
         </el-form-item>
       </div>
-      <div class="field-tip">
+      <div class="field-tip qp-tip">
         体积剧集按每集算；RSS 里刚发布的种子不看做种数。免费、做种数只在分数相同时排先后。
       </div>
       <el-form-item label="H&R">
@@ -214,6 +214,11 @@ async function save() {
 </template>
 
 <style scoped>
+/* 这行说明夹在两行表单项之间：和下一项隔开，不贴着「H&R」 */
+.qp-tip {
+  margin-bottom: 16px;
+}
+
 .qp-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

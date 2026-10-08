@@ -271,6 +271,13 @@ onMounted(load);
   gap: 4px;
 }
 
+/* 标记压在海报上：状态色本身是半透明的，垫一层实色底，海报再花也看得清 */
+.ex-card__badges :deep(.pt-pill) {
+  --ex-tint: color-mix(in srgb, var(--pt-pill-c) 14%, transparent);
+  background: linear-gradient(var(--ex-tint), var(--ex-tint)), var(--pt-bg-surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+}
+
 .ex-card__body {
   display: flex;
   flex-direction: column;

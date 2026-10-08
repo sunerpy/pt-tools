@@ -996,6 +996,12 @@
     grid-template-columns: minmax(0, 1fr);
     padding: 0;
   }
+
+  /* 页头的操作在手机上落进卡片层、一个一行：压掉 Element 给相邻按钮的 margin-left: 12px，
+     不然第二个按钮往里缩、比第一个窄 */
+  .pt-cards > .el-button + .el-button {
+    margin-left: 0;
+  }
 }
 
 .pt-cards__full {
