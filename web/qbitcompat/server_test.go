@@ -503,3 +503,14 @@ func TestNoBackend(t *testing.T) {
 	_, err = SaveSettings(context.Background(), e.db, Settings{DownloaderID: 999})
 	require.ErrorIs(t, err, ErrInvalid)
 }
+
+// 登录锁定表有硬上限：满了以后淘汰最早的，不会无限长
+func TestLoginLockBounded(t *testing.T) {
+	l := newLoginLock()
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	for i := range maxLockIPs + 500 {
+		l.fail(fmt.Sprintf("ip-%d", i), now.Add(time.Duration(i)*time.Millisecond))
+	}
+	assert.LessOrEqual(t, len(l.m), maxLockIPs)
+	assert.Contains(t, l.m, fmt.Sprintf("ip-%d", maxLockIPs+499), "最新的留着")
+}

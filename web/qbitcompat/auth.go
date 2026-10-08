@@ -105,14 +105,25 @@ func (l *loginLock) locked(ip string, now time.Time) bool {
 func (l *loginLock) fail(ip string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.m) >= maxLockIPs {
-		for k, e := range l.m {
-			if now.Sub(e.windowStart) > loginWindow && !now.Before(e.lockedUntil) {
+	e, ok := l.m[ip]
+	if !ok && len(l.m) >= maxLockIPs {
+		for k, x := range l.m {
+			if now.Sub(x.windowStart) > loginWindow && !now.Before(x.lockedUntil) {
 				delete(l.m, k)
 			}
 		}
+		// 还是满的（大量来源同时在试）：淘汰最早开始计数的那个，表不会无限长
+		for len(l.m) >= maxLockIPs {
+			var oldest string
+			var at time.Time
+			for k, x := range l.m {
+				if oldest == "" || x.windowStart.Before(at) {
+					oldest, at = k, x.windowStart
+				}
+			}
+			delete(l.m, oldest)
+		}
 	}
-	e, ok := l.m[ip]
 	if !ok || now.Sub(e.windowStart) > loginWindow {
 		e = &lockEntry{windowStart: now}
 		l.m[ip] = e
