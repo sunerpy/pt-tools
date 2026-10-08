@@ -229,3 +229,24 @@ func TestAddPausedCaseInsensitive(t *testing.T) {
 	require.Equal(t, "Ok.", w.Body.String())
 	assert.True(t, e.gotPushes()[3].AddPaused, "qB 5 的 stopped")
 }
+
+// 上传的种子 comment 由客户端写：编号对得上一条已有记录、但 info hash 不一样时不能用它（会盖掉那条记录），改用 hash:<info hash>
+func TestAddCommentIDMustMatchExisting(t *testing.T) {
+	e := newEnv(t)
+	e.withSites()
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	realHash := "ffffffffffffffffffffffffffffffffffffffff"
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "qasite", TorrentID: "42", TorrentHash: &realHash, Title: "真的 42"}).Error)
+
+	forged := torrentFile("forged", "https://qa.example/announce", "https://qa.example/details.php?id=42")
+	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{forged}, nil).Body.String())
+	same := torrentFile("same", "https://qa.example/announce", "https://qa.example/details.php?id=43")
+	h43 := hashOf(t, same)
+	require.NoError(t, e.db.Create(&models.TorrentInfo{SiteName: "qasite", TorrentID: "43", TorrentHash: &h43, Title: "43"}).Error)
+	require.Equal(t, "Ok.", e.postAdd(ck, [][]byte{same}, nil).Body.String())
+
+	p := e.gotPushes()
+	require.Len(t, p, 2)
+	assert.Equal(t, "hash:"+hashOf(t, forged), p[0].TorrentID, "编号对得上、hash 不一样：不用 comment 的编号")
+	assert.Equal(t, "43", p[1].TorrentID, "hash 一样：就是这条记录")
+}

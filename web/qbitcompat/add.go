@@ -18,6 +18,7 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
 
@@ -195,7 +196,7 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 		siteID = s.siteOf(parsed)
 	}
 	if torrentID == "" {
-		torrentID = s.idFromComment(siteID, parsed.Comment)
+		torrentID = s.idFromComment(ctx, siteID, parsed.Comment, hash)
 	}
 	if torrentID == "" {
 		torrentID = "hash:" + hash
@@ -251,7 +252,8 @@ func (s *Server) siteOf(p *v2.ParsedTorrent) string {
 }
 
 // idFromComment 从种子 comment 里的详情页地址（details.php?id=）取编号，地址的主机要属于这个站点。
-func (s *Server) idFromComment(siteID, comment string) string {
+// comment 是客户端上传的文件里写的：这个编号已经有记录、而记录的 info hash 不是这个种子时不用它，免得盖掉那条记录。
+func (s *Server) idFromComment(ctx context.Context, siteID, comment, hash string) string {
 	if siteID == "" {
 		return ""
 	}
@@ -262,10 +264,19 @@ func (s *Server) idFromComment(siteID, comment string) string {
 	if id, ok := s.deps.Resolver.Resolve(comment); !ok || id != siteID {
 		return ""
 	}
-	if id := u.Query().Get("id"); numericID.MatchString(id) {
-		return id
+	id := u.Query().Get("id")
+	if !numericID.MatchString(id) {
+		return ""
 	}
-	return ""
+	var existing []string
+	if err := s.deps.DB.WithContext(ctx).Model(&models.TorrentInfo{}).
+		Where("site_name = ? AND torrent_id = ?", siteID, id).Limit(1).Pluck("torrent_hash", &existing).Error; err != nil {
+		return ""
+	}
+	if len(existing) > 0 && !strings.EqualFold(existing[0], hash) {
+		return ""
+	}
+	return id
 }
 
 // recordAdd 记一条添加的审计：成功 success；有失败的 error:partial；全失败时按原因（denied:magnet、denied:url 或 error:add_failed）。
