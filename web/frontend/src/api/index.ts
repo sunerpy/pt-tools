@@ -2611,7 +2611,7 @@ export const organizeApi = {
 // ---- 订阅（路线图 M11） ----
 
 export type SubscriptionStatus = "active" | "paused" | "pending" | "done";
-export type SubscriptionSource = "manual" | "explore" | "douban" | "chatops";
+export type SubscriptionSource = "manual" | "explore" | "douban" | "chatops" | "app";
 /** 空串不限；prefer 优先；require 必须有；avoid 不要（只有 Remux 与 HDR 有） */
 export type QualityPref = "" | "prefer" | "require" | "avoid";
 

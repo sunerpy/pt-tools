@@ -20,6 +20,8 @@ const (
 	MediaSubFromExplore = "explore"
 	MediaSubFromDouban  = "douban"
 	MediaSubFromChatOps = "chatops"
+	// MediaSubFromApp 是经 App API（M12）建的订阅
+	MediaSubFromApp = "app"
 )
 
 // 质量档案里「要不要」的取值：空串不限，prefer 优先，require 必须有，avoid 尽量不要（只用于 HDR）。

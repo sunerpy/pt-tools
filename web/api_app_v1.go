@@ -58,6 +58,15 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/search", r, s.appSearch},
 		{http.MethodPost, "/push", w, s.appPush},
 		{http.MethodPost, "/sites/{site}/attend", w, s.appAttend},
+		{http.MethodGet, "/brush/tasks", r, s.appBrushTasks},
+		{http.MethodGet, "/media/history", r, s.appMediaHistory},
+		{http.MethodGet, "/subscriptions", r, s.appSubscriptions},
+		{http.MethodGet, "/subscriptions/{id}", r, s.appSubscriptionDetail},
+		{http.MethodPost, "/subscriptions", w, s.appSubscriptionCreate},
+		{http.MethodPost, "/subscriptions/{id}/status", w, s.appSubscriptionSetStatus},
+		{http.MethodPost, "/subscriptions/{id}/search", w, s.appSubscriptionSearch},
+		{http.MethodDelete, "/subscriptions/{id}", w, s.appSubscriptionDelete},
+		{http.MethodGet, "/explore", r, s.appExplore},
 	}
 }
 
