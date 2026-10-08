@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -185,7 +186,7 @@ func TestSearchMoviePushesBest(t *testing.T) {
 
 func TestSearchRejectsAndErrors(t *testing.T) {
 	e := newEnv(t)
-	e.enable(nil)
+	e.enable(func(s *Settings) { s.NotifyChannels = []uint{3} })
 	p, err := e.svc.SaveProfile(e.ctx, 0, ProfileInput{Name: "只要 4K", Resolutions: []string{"2160p"}})
 	require.NoError(t, err)
 	m := e.sub(SubscriptionInput{MediaType: models.MediaKindMovie, TMDBID: 693134, ProfileID: p.ID})
@@ -206,6 +207,16 @@ func TestSearchRejectsAndErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, msg, "推送 Dune.Part.Two.2024.2160p.WEB-DL.H265-X 失败")
 	assert.Empty(t, e.linked(m.ID), "推送失败的不记下，下次还能再试")
+
+	// 磁盘空间、站点容量这些闸门拒绝时没有报错，只是没有成功：同样不记下、不通知
+	e.pushErr = nil
+	e.pushRes = &ptinternal.PushTorrentResult{Message: "磁盘空间不足 (有效 1.0 GB <= 10.0 GB)，暂停推送"}
+	msg, err = e.svc.SearchNow(e.ctx, m.ID)
+	require.NoError(t, err)
+	assert.Contains(t, msg, "推送 Dune.Part.Two.2024.2160p.WEB-DL.H265-X 失败：磁盘空间不足")
+	assert.Empty(t, e.linked(m.ID), "闸门拒绝的不记下")
+	assert.Empty(t, e.notices, "没有下载不通知")
+	e.pushRes = nil
 
 	_, err = e.svc.SetStatus(e.ctx, m.ID, models.MediaSubPaused)
 	require.NoError(t, err)

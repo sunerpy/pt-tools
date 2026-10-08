@@ -426,6 +426,14 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 	if err != nil {
 		return fmt.Sprintf("推送 %s 失败：%v", o.c.Item.Title, err)
 	}
+	// 磁盘空间、站点做种容量这些闸门拒绝时不报错，只是没有成功：和失败一样不记下，下次还能再试
+	if res == nil || !res.Success {
+		reason := "下载器没有接收"
+		if res != nil && res.Message != "" {
+			reason = res.Message
+		}
+		return fmt.Sprintf("推送 %s 失败：%s", o.c.Item.Title, reason)
+	}
 	now := s.cfg.Now()
 	row := models.MediaSubscriptionTorrent{
 		SubscriptionID: sub.ID, SiteName: o.c.Site, TorrentID: o.c.Item.ID, InfoHash: hash, Title: truncate(o.c.Item.Title, 512),

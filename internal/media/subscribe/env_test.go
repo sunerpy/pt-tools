@@ -185,6 +185,8 @@ type env struct {
 	now     time.Time
 	pushes  []ptinternal.PushTorrentRequest
 	pushErr error
+	// pushRes 不为空时假推送返回它（例如闸门拒绝、下载器里已经有）
+	pushRes *ptinternal.PushTorrentResult
 	notices []Notice
 }
 
@@ -230,6 +232,9 @@ func newEnv(t *testing.T) *env {
 				return nil, e.pushErr
 			}
 			e.pushes = append(e.pushes, req)
+			if e.pushRes != nil {
+				return e.pushRes, nil
+			}
 			return &ptinternal.PushTorrentResult{Success: true}, nil
 		},
 		Downloaders: fakeDLs{dl: e.dl}, Organizer: e.org, Now: e.Now,
