@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/app"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -63,7 +62,9 @@ func parseAddOptions(f url.Values) addOptions {
 // addOutcome 是一个种子的结果。
 type addOutcome struct {
 	ok, skipped bool
-	err         error
+	// hash 是加进去的种子的 info hash（小写）
+	hash string
+	err  error
 }
 
 // add 是 POST /api/v2/torrents/add：种子文件（multipart 里上传的文件，可以有多个）与链接（urls，一行一个）。
@@ -144,6 +145,16 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request, c *call) {
 			continue
 		}
 		outcomes = append(outcomes, s.pushLink(ctx, b, l, opts))
+	}
+	// 确实是这次加进去的才记所有权（原来就在下载器里的不归兼容入口）：全部推完以后整批一起等下载器列出来
+	var fresh []string
+	for _, o := range outcomes {
+		if o.ok && !o.skipped {
+			fresh = append(fresh, o.hash)
+		}
+	}
+	if len(fresh) > 0 {
+		s.ownAdded(ctx, b, fresh)
 	}
 	s.recordAdd(r, c, outcomes, len(files)+len(fileErrs), len(links), opts)
 
@@ -244,13 +255,7 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 		}
 		return addOutcome{err: errors.New(msg)}
 	}
-	// 确实是这次加进去的才记所有权：原来就在下载器里的（Skipped）不归兼容入口
-	if !res.Skipped {
-		if oerr := s.own(ctx, b, hash); oerr != nil {
-			global.GetSlogger().Warnf("[qB 兼容] 种子 %s 不记所有权（没打开完全控制时客户端改不了它）: %v", hash, oerr)
-		}
-	}
-	return addOutcome{ok: true, skipped: res.Skipped}
+	return addOutcome{ok: true, skipped: res.Skipped, hash: hash}
 }
 
 // siteOf 按种子里的 tracker 认站点；认不出时是空的。

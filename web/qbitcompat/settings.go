@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -159,10 +160,12 @@ func (s *Server) updateSetting(ctx context.Context, mod func(*models.QbitCompatS
 	})
 }
 
-// observeTimeout 是加完以后最多等多久让下载器列出这个种子（qBittorrent 是异步加的，一般几百毫秒内就能看到）。
+// observeTimeout 是一次添加以后一共最多等多久让下载器列出加进去的种子（qBittorrent 是异步加的，一般几百毫秒内就能看到）。
+// 整批一起查，每次一个请求，间隔从 observeFirst 起翻倍、最多 observeMaxStep。
 const (
 	observeTimeout = 5 * time.Second
-	observeStep    = 200 * time.Millisecond
+	observeFirst   = 100 * time.Millisecond
+	observeMaxStep = time.Second
 )
 
 // owned 是经兼容入口加进这台下载器的种子（小写的 info hash → 所有权）。
@@ -185,32 +188,64 @@ func isOwned(owned map[string]models.QbitCompatTorrent, hash string, t downloade
 	return found && row.AddedAt > 0 && t.DateAdded == row.AddedAt
 }
 
-// own 记下这台下载器上经兼容入口刚加进去的种子：要在下载器里看到它、拿到下载器给的添加时间才记，之后只认这个添加时间的那一个。
-// 等了 s.observe 还看不到、或者下载器不给添加时间时不记，回错误：没打开完全控制时客户端改不了它，但也不会错认之后从别处加的同一个种子。
-func (s *Server) own(ctx context.Context, b *backend, hash string) error {
-	hash = strings.ToLower(hash)
-	deadline := time.Now().Add(s.observe)
-	for {
-		if t, err := b.dl.GetTorrent(hash); err == nil && strings.EqualFold(t.InfoHash, hash) {
-			if t.DateAdded <= 0 {
-				return errors.New("下载器不给添加时间")
-			}
-			row := models.QbitCompatTorrent{DownloaderID: b.setting.ID, InfoHash: hash, AddedAt: t.DateAdded, CreatedAt: s.deps.Now()}
-			return s.deps.DB.WithContext(ctx).Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "downloader_id"}, {Name: "info_hash"}},
-				DoUpdates: clause.AssignmentColumns([]string{"added_at", "created_at"}),
-			}).Create(&row).Error
-		}
-		wait := min(observeStep, time.Until(deadline))
-		if wait <= 0 {
-			return fmt.Errorf("加完以后 %s 内下载器里看不到它", s.observe)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("等下载器列出它时请求结束: %w", ctx.Err())
-		case <-time.After(wait):
-		}
+// ownAdded 记下这次确实加进去的种子的所有权：要在下载器里看到它、拿到下载器给的添加时间才记，之后只认这个添加时间的那一个。
+// 整批一起等，一共最多 s.observe；到时还看不到、或者下载器不给添加时间的不记 —— 没打开完全控制时客户端改不了它们，
+// 但也不会错认之后从别处加的同一个种子。
+func (s *Server) ownAdded(ctx context.Context, b *backend, hashes []string) {
+	pending := map[string]bool{}
+	for _, h := range hashes {
+		pending[strings.ToLower(h)] = true
 	}
+	deadline := time.Now().Add(s.observe)
+	step := observeFirst
+	for len(pending) > 0 {
+		if found, err := b.dl.GetTorrentsBy(downloader.TorrentFilter{Hashes: slices.Sorted(maps.Keys(pending))}); err == nil {
+			for _, t := range found {
+				h := strings.ToLower(t.InfoHash)
+				if !pending[h] {
+					continue
+				}
+				delete(pending, h)
+				if t.DateAdded <= 0 {
+					global.GetSlogger().Warnf("[qB 兼容] 下载器不给种子 %s 的添加时间，不记所有权（没打开完全控制时客户端改不了它）", h)
+					continue
+				}
+				if oerr := s.own(ctx, b.setting.ID, h, t.DateAdded); oerr != nil {
+					global.GetSlogger().Warnf("[qB 兼容] 记下种子 %s 的所有权失败: %v", h, oerr)
+				}
+			}
+		}
+		wait := min(step, time.Until(deadline))
+		if len(pending) == 0 || wait <= 0 || !pause(ctx, wait) {
+			break
+		}
+		step = min(step*2, observeMaxStep)
+	}
+	if len(pending) > 0 {
+		global.GetSlogger().Warnf("[qB 兼容] 加完以后 %s 内下载器里看不到 %d 个种子，不记所有权（没打开完全控制时客户端改不了它们）: %s",
+			s.observe, len(pending), strings.Join(slices.Sorted(maps.Keys(pending)), ","))
+	}
+}
+
+// pause 等 d；ctx 先结束时回 false。
+func pause(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// own 记下一个种子的所有权与下载器给它的添加时间（同一个种子再经兼容入口加时更新）。
+func (s *Server) own(ctx context.Context, downloaderID uint, hash string, addedAt int64) error {
+	row := models.QbitCompatTorrent{DownloaderID: downloaderID, InfoHash: hash, AddedAt: addedAt, CreatedAt: s.deps.Now()}
+	return s.deps.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "downloader_id"}, {Name: "info_hash"}},
+		DoUpdates: clause.AssignmentColumns([]string{"added_at", "created_at"}),
+	}).Create(&row).Error
 }
 
 // disown 去掉这些种子的所有权（经兼容入口删掉以后）。

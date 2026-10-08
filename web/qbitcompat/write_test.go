@@ -2,6 +2,7 @@ package qbitcompat
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -120,6 +121,41 @@ func TestOwnershipNeedsObservedAdd(t *testing.T) {
 	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashMovie, CreatedAt: time.Unix(1700000100, 0)}).Error)
 	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashMovie}}, ck).Code)
 	assert.Empty(t, e.dl.got(), "记录里没有添加时间：不认")
+}
+
+// 一次加很多个：先全部推送，再整批一起等下载器列出来（一共最多 observe，不是每个都等，也不是每个种子查一次）；
+// 列出来的记所有权，到时还列不出来的不记
+func TestAddObservesBatchOnce(t *testing.T) {
+	e := newEnv(t)
+	e.withSites()
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	e.srv.observe = 300 * time.Millisecond
+	pushed := 0
+	e.srv.deps.Push = func(_ context.Context, req internal.PushTorrentRequest) (*internal.PushTorrentResult, error) {
+		pushed++
+		if pushed%2 == 0 {
+			p, err := v2.ParseTorrent(req.TorrentData)
+			require.NoError(t, err)
+			h := strings.ToLower(p.InfoHash)
+			e.dl.list(downloader.Torrent{ID: h, InfoHash: h, Name: p.Name, DateAdded: 1700000900})
+		}
+		return &internal.PushTorrentResult{Success: true}, nil
+	}
+	files := make([][]byte, maxAddItems)
+	for i := range files {
+		files[i] = torrentFile(fmt.Sprintf("batch%d", i), "https://qa.example/announce", "")
+	}
+	start := time.Now()
+	require.Equal(t, "Ok.", e.postAdd(ck, files, nil).Body.String())
+	assert.Less(t, time.Since(start), 3*time.Second, "整批一起等，不是每个等 300 毫秒")
+	assert.Equal(t, maxAddItems, pushed, "全部推送了")
+	var n int64
+	require.NoError(t, e.db.Model(&models.QbitCompatTorrent{}).Where("added_at = ?", 1700000900).Count(&n).Error)
+	assert.EqualValues(t, maxAddItems/2, n, "列出来的那一半记了所有权")
+	e.dl.mu.Lock()
+	defer e.dl.mu.Unlock()
+	assert.LessOrEqual(t, e.dl.byCalls, 4, "整批一起查：100、200 毫秒的间隔，300 毫秒内最多查 3 次")
+	assert.Zero(t, e.dl.listCalls, "不读全部种子")
 }
 
 // 加成功了才记所有权（已经在下载器里的、推送失败的不记）；经兼容入口删掉以后所有权一起去掉

@@ -50,8 +50,8 @@ type fakeDL struct {
 	calls    []string
 	// delay 让暂停慢一点（测审计里的耗时）
 	delay time.Duration
-	// listCalls 是 GetAllTorrents 被调用的次数
-	listCalls int
+	// listCalls 是 GetAllTorrents 被调用的次数，byCalls 是 GetTorrentsBy 的
+	listCalls, byCalls int
 }
 
 func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
@@ -70,6 +70,20 @@ func (f *fakeDL) GetTorrent(id string) (downloader.Torrent, error) {
 		}
 	}
 	return downloader.Torrent{}, downloader.ErrTorrentNotFound
+}
+
+// GetTorrentsBy 只按 hash 过滤（兼容入口只这样用）。
+func (f *fakeDL) GetTorrentsBy(filter downloader.TorrentFilter) ([]downloader.Torrent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byCalls++
+	var out []downloader.Torrent
+	for _, t := range f.torrents {
+		if slices.ContainsFunc(filter.Hashes, func(h string) bool { return strings.EqualFold(h, t.InfoHash) }) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 // list 让一个种子出现在下载器里（已经有了就不动）。
