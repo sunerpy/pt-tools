@@ -1,6 +1,6 @@
 # API tokens
 
-API tokens are for clients such as a mobile app or a script: with a token a client can use the pt-tools App API (`/api/app/v1/`) or sign in to the [qB-compatible entrance](qbit-compat.md) without storing your web login password. A token cannot reach any other part of the web interface; those still require you to sign in.
+API tokens are for clients such as a mobile app or a script: with a token a client can use the pt-tools App API (`/api/app/v1/`), sign in to the [qB-compatible entrance](qbit-compat.md), or let an AI assistant call pt-tools over [MCP](mcp.md), without storing your web login password. A token cannot reach any other part of the web interface; those still require you to sign in.
 
 Open System → API tokens (系统 → API 令牌).
 
@@ -14,8 +14,10 @@ Open System → API tokens (系统 → API 令牌).
 | Read (读取)             | Overview, sites, torrents in the downloaders, RSS push records, search, brush tasks, organise history, subscriptions and Explore                                |
 | Operate (操作)          | Pause, resume and delete torrents, push torrents, sign in to sites, create, pause, resume, search and delete subscriptions                                      |
 | qB compatible (qB 兼容) | Signing in to the [qB-compatible entrance](qbit-compat.md), for tools that only work with qBittorrent such as MoviePilot and IYUU; independent of the other two |
+| MCP read (MCP 读取)     | Read-only [MCP](mcp.md) tools for AI assistants: torrents, downloaders, site statistics, subscriptions and search                                               |
+| MCP write (MCP 操作)    | MCP tools that pause, resume, delete and push torrents and add subscriptions; the assistant has to ask you each time                                            |
 
-A token with only Operate cannot read anything, so clients such as the app usually need both; a token for the qB-compatible entrance needs only qB compatible. Validity can be 30 days, 90 days, 1 year or no expiry; an expired token stops working on its own. You can create up to 50 tokens.
+A token with only Operate cannot read anything, so clients such as the app usually need both; a token for the qB-compatible entrance needs only qB compatible; a token for an AI assistant needs MCP read, plus MCP write if it may change your downloaders. Validity can be 30 days, 90 days, 1 year or no expiry; an expired token stops working on its own. You can create up to 50 tokens.
 
 ## Using a token
 
@@ -31,7 +33,7 @@ See the [App API](../reference/app-api.md) for the endpoints.
 
 - The list shows each token's permissions, when it was last used and when it expires. Last used is updated at most once every 5 minutes.
 - Revoke (撤销) takes effect immediately: clients using that token are disconnected at once.
-- Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计), with the channel API token (API 令牌) and the token number as the triggering user (触发用户).
+- Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计), with the channel API token (API 令牌) and the token number as the triggering user (触发用户). Calls of MCP tools that change your downloaders or subscriptions are recorded there too, with the channel MCP; see [MCP](mcp.md#audit-and-security).
 
 ## Security
 

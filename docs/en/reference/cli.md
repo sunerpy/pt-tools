@@ -20,6 +20,21 @@ pt-tools web --host 0.0.0.0 --port 8080
 
 The Docker image sets both through the environment variables `PT_HOST` and `PT_PORT`; the other variables are listed in [Install](../guide/install.md) and [Configuration](../configuration.md).
 
+## pt-tools mcp
+
+Connects the [MCP](../guide/mcp.md) tools of a running pt-tools to standard input and output, for MCP clients that only speak stdio, such as Claude Desktop. It connects to the pt-tools given by `--url` and forwards its tools as they are. It opens no database and starts no scheduler, so it can run on the client's machine.
+
+```bash
+PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
+```
+
+| Option    | Meaning                                                                                                                                                                            | Default                 |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `--url`   | Address of pt-tools; `/mcp` is appended when only the host and port are given. When empty, the environment variable `PT_TOOLS_MCP_URL` is used                                     | `http://127.0.0.1:8080` |
+| `--token` | API token with MCP read (MCP 读取) or MCP write (MCP 操作). When empty, the environment variable `PT_TOOLS_MCP_TOKEN` is used; on the command line it shows up in the process list | None                    |
+
+Once connected it prints one line to standard error; standard output carries only the MCP protocol.
+
 ## pt-tools secret
 
 Exports or imports the key that encrypts site cookies and notification credentials.

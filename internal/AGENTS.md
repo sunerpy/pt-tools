@@ -20,7 +20,7 @@ internal/
 ├── crypto/                                        # AES-GCM key handling
 ├── events/                                        # In-process pub/sub
 ├── extension/                                     # Browser-extension pending actions
-└── mcp/                                           # Future interface contract only
+└── mcp/                                           # MCP tools, scope checks, audit
 ```
 
 ## Unified Site Contract
@@ -91,7 +91,7 @@ Do not call a downloader add method from new RSS/Web paths merely because the in
 
 ## MCP Status
 
-`internal/mcp/contract.go` enumerates future tools and JSON Schemas. It has no transport, authentication server, or tool dispatcher. Keep docs and code explicit about this distinction.
+`internal/mcp` defines the MCP tools on go-sdk (pinned v1.8.0): typed inputs with `jsonschema` tags, scope checks (`mcp:read` / `mcp:write`, exact), `confirm=true` for write tools, and audit of every write-tool call (`channel_type` `mcp`). Tools never touch the DB or downloaders: they call App API v1 through the `Backend` interface (`web.mcpBackend`). Transports live elsewhere: `/mcp` in `web/mcp.go` (stateless streamable HTTP, Bearer tokens only) and the stdio bridge `pt-tools mcp` in `cmd/mcp.go` (no DB, no scheduler). `ToolNames` is the authoritative list.
 
 ## Local Guides
 

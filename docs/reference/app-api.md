@@ -50,6 +50,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | POST   | `/sites/{site}/attend`       | 操作 | 立即签到                                     |
 | GET    | `/favicon/{site}`            | 读取 | 站点图标                                     |
 | GET    | `/torrents`                  | 读取 | 下载器里的种子                               |
+| GET    | `/downloaders`               | 读取 | 下载器与它们现在的速度、剩余空间             |
 | POST   | `/torrents/actions`          | 操作 | 暂停、继续、删除种子                         |
 | POST   | `/search`                    | 读取 | 多站搜索                                     |
 | POST   | `/push`                      | 操作 | 把搜索到的种子推送到下载器                   |
@@ -63,6 +64,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | POST   | `/subscriptions/{id}/search` | 操作 | 立即搜索                                     |
 | DELETE | `/subscriptions/{id}`        | 操作 | 删除订阅                                     |
 | GET    | `/explore`                   | 读取 | 探索：TMDB 的热门、流行与搜索                |
+| GET    | `/updates`                   | 读取 | 有没有新版本                                 |
 
 路径都省略了 `/api/app/v1` 前缀。搜索用 POST 传条件，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
 
@@ -79,19 +81,25 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
     "overview",
     "sites",
     "torrents",
+    "downloaders",
     "tasks",
     "search",
     "push",
     "attendance",
     "brush",
     "media",
-    "subscriptions"
+    "subscriptions",
+    "updates"
   ],
   "principal": { "kind": "api_token", "name": "我的手机", "scopes": ["app:read", "app:write"] }
 }
 ```
 
-`principal.kind` 是 `api_token`（令牌）或 `session`（网页登录）；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
+`principal.kind` 是 `api_token`（令牌）或 `session`（网页登录）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders` 与 `updates`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
+
+### GET /updates
+
+有没有新版本：`current_version`、`has_update`、`new_releases`（每项有 `version`、`name`、`published_at`、`url`、`changelog`，预览版另有 `prerelease: true`）、`checked_at`。带 `include_prerelease=1` 时也报预览版。结果缓存一段时间，不会每次都去问 GitHub；只看不升级。查不了、又没有上次的结果时回 502（`upstream`）。
 
 ## 概览与站点
 
@@ -120,7 +128,11 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 站点图标，与网页里显示的相同。回应是图片，不是 JSON。
 
-## 下载器里的种子
+## 下载器
+
+### GET /downloaders
+
+启用的下载器：`id`、`name`、`type`（`qbittorrent` 或 `transmission`）、`default`、`reachable`（这一次读到了状态或剩余空间）、`error`（读不到时的原因）、`version`、`upload_speed`、`download_speed`、`uploaded`、`downloaded`（下载器自己记的累计量）、`free_space`。没有下载器的地址、账号与密码。
 
 ### GET /torrents
 

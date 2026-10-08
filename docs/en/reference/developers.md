@@ -49,5 +49,5 @@ The writing conventions, the format of the home page's data and the screenshot p
 These design documents are in Chinese only. They record interface contracts and future directions; they do not mean a feature is released.
 
 - [ChatOps, MCP and agent architecture](../../design/chatops-mcp-agent.md)
-- [MCP server contract](../../design/phase4-mcp.md)
+- [MCP server design](../../design/phase4-mcp.md)
 - [AI agent design](../../design/phase5-agent.md)

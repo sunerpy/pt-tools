@@ -26,7 +26,8 @@ web/
 ├── api_qbit_compat.go           # qB-compatible entrance settings (/api/qbit-compat), session only
 ├── qbitcompat/                  # qB WebUI API v2 subset on its own port (M13): SID login with qbit:compat tokens
 ├── api_app_v1*.go               # App API v1: route table with scopes, principals, audit, DTOs
-├── middleware/principal.go      # Request principal (session / api_token / remote_device), Bearer parsing
+├── mcp.go                       # /mcp (M14): Bearer-token MCP endpoint; mcpBackend calls App API v1 routes in-process
+├── middleware/principal.go      # Request principal (session / api_token / mcp / remote_device), Bearer parsing
 ├── frontend/                    # Vue application source
 └── static/                      # Built assets embedded by Go
 ```
@@ -40,7 +41,7 @@ web/
 - Default admin credentials come from `PT_ADMIN_USER`/`PT_ADMIN_PASS`; `PT_ADMIN_RESET=1` performs a startup reset.
 - Extension origins receive narrowly scoped CORS handling in `logMiddleware`.
 - ChatOps routes are registered only when dependencies were injected, and are session-only like every other `/api/*` route.
-- API tokens (`internal/apitoken`) are accepted only by the App API (`/api/app/v1/*`). Token management (`/api/tokens`) and every other route stay session-only through `s.auth`; `TestAppAPI_TokensCannotReachSessionAPIs` pins this through the real mux.
+- API tokens (`internal/apitoken`) are accepted only by the App API (`/api/app/v1/*`), `/mcp` and the qB-compatible entrance. Token management (`/api/tokens`) and every other route stay session-only through `s.auth`; `TestAppAPI_TokensCannotReachSessionAPIs` pins this through the real mux.
 - `Shutdown(ctx)` must remain safe before/concurrent with `Serve`; a `Shutdown` that runs before `Serve` makes the later `Serve` return without listening.
 
 ## Adding a Route
@@ -75,7 +76,7 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 | `/api/v2/torrents/*`, `/api/torrents/*`, `/api/site/*` | Push/download/manage torrents                |
 | `/api/filter-rules`, `/api/rss/*`                      | Filtering and RSS associations               |
 | `/api/chatops/*`                                       | Channels, bindings, audit, RSS delivery logs |
-| `/api/tokens`, `/api/app/v1/*`                         | API token admin; App API for tokens          |
+| `/api/tokens`, `/api/app/v1/*`, `/mcp`                 | API token admin; App API and MCP for tokens  |
 | `/api/qbit-compat`                                     | qB-compatible entrance settings and status   |
 | `/api/cloak/*`, `/api/extension-actions/*`             | Cloak and extension integration              |
 | `/api/maintenance/clean`                               | Preview/confirmed maintenance cleanup        |
