@@ -10,7 +10,7 @@
 
 pt-tools 作为 [Model Context Protocol](https://modelcontextprotocol.io) Server，让外部 AI 助手与 IDE（Claude Desktop、Claude Code、Cursor、Cherry Studio 等）用标准协议调用 pt-tools 的能力。
 
-工具本身不碰数据库与下载器：每个工具在进程内调用 [App API v1](../reference/app-api.md) 的一条路由，返回 App API 的 JSON。这样字段、脱敏（没有 Cookie、Passkey、密码、RSS 地址与下载链接）、参数校验与推送闸门都只有一份实现，MCP 与手机 App 看到的是同一套数据。
+工具本身不碰数据库与下载器：每个工具在进程内调用 [App API v1](../reference/app-api.md) 的一条路由，返回 App API 的 JSON。这样字段、脱敏（没有 Cookie、Passkey、密码、RSS 地址与 PT 站点的种子下载链接，下载器的错误里去掉地址；`check_updates` 回的是 GitHub 上公开的发布地址）、参数校验与推送闸门都只有一份实现，MCP 与手机 App 看到的是同一套数据。
 
 ---
 
@@ -56,7 +56,7 @@ pt-tools 作为 [Model Context Protocol](https://modelcontextprotocol.io) Server
 | `list_tasks`               | `mcp:read`  | `GET /tasks`               | 列的是推送记录（RSS、订阅、App、MCP 推过的种子），不是 RSS 订阅配置                                                      |
 | `list_downloader_torrents` | `mcp:read`  | `GET /torrents`            | 不给 `downloader_id` 时列全部下载器；多了关键字与排序                                                                    |
 | `get_downloader_stats`     | `mcp:read`  | `GET /downloaders`（新增） | `downloader_id` 可选，不给时报全部；也用来查下载器编号                                                                   |
-| `search_torrents`          | `mcp:read`  | `POST /search`             | 结果只有站点与种子编号，没有下载链接；`limit` 在工具里截断                                                               |
+| `search_torrents`          | `mcp:read`  | `POST /search`             | 结果只有站点与种子编号，没有种子下载链接；`limit` 在工具里截断                                                           |
 | `get_site_userinfo`        | `mcp:read`  | `GET /sites`               | 去掉了 `refresh`：给的是缓存的数据（`updated_at` 写明时间）                                                              |
 | `check_updates`            | `mcp:read`  | `GET /updates`（新增）     | 无                                                                                                                       |
 | `explore_media`            | `mcp:read`  | `GET /explore`             | 新增：按片名找 TMDB 编号，或者看趋势、热门                                                                               |
