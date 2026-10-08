@@ -326,7 +326,8 @@ func (s *Service) baseline(ctx context.Context, p Profile, linked []models.Media
 	return best, has
 }
 
-// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件（分数不比新版本高的）；删了返回真。
+// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件再重新整理；删了返回真。
+// 先删后整理，所以只删分数比新版本低的：同分的留着（同一个文件名，库里本来就只有一份）。
 func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription, skipped *models.MediaTransferHistory, t *models.MediaSubscriptionTorrent, prof Profile, score int) bool {
 	if skipped.TargetPath == "" {
 		return false
@@ -338,7 +339,7 @@ func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription,
 	freed := false
 	for _, v := range vers {
 		o := v.row
-		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) || s.versionPoints(ctx, prof, v.title, v.subtitle) > score {
+		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) || s.versionPoints(ctx, prof, v.title, v.subtitle) >= score {
 			continue
 		}
 		if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {

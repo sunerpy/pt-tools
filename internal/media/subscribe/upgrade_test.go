@@ -305,3 +305,27 @@ func TestUpgradeMixedSeasonTakesPack(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "洗版：没有比现在更好的整季包", msg)
 }
+
+// 新旧版本整理成同一个文件名、分数一样：旧的留着，不先删了再赌新版本能整理进去
+func TestUpgradeSameTargetEqualScoreKeepsOld(t *testing.T) {
+	e := newEnv(t)
+	e.enable(nil)
+	e.advance(60 * 24 * time.Hour)
+	p := e.profile4K()
+	tv := e.sub(SubscriptionInput{MediaType: models.MediaKindTV, TMDBID: 100088, Season: 2, ProfileID: p.ID, Upgrade: true})
+	same := e.libraryFile("e1", "The.Last.of.Us.S02E01.2160p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 1, 0, "/lib/tlou/s02e01.mkv")
+	e.libraryFile("e2", "The.Last.of.Us.S02E02.1080p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 2, 0, "/lib/tlou/s02e02.old.mkv")
+	e.libraryFile("e3", "The.Last.of.Us.S02E03.1080p.WEB-DL.H265-OLD", models.MediaKindTV, 100088, 2, 3, 0, "/lib/tlou/s02e03.old.mkv")
+	e.search.set(e.item("hdsky", "q1", "The.Last.of.Us.S02.2160p.WEB-DL.H265-X", "", 30, 10))
+	msg, err := e.svc.SearchNow(e.ctx, tv.ID)
+	require.NoError(t, err)
+	require.Contains(t, msg, "下载了")
+	skipped := models.MediaTransferHistory{
+		InfoHash: e.hashOf("q1"), SourcePath: "/dl/q1/1", TargetPath: "/lib/tlou/s02e01.mkv", MediaType: models.MediaKindTV,
+		TMDBID: 100088, Season: 2, Episode: 1, Status: models.MediaTransferSkipped,
+	}
+	require.NoError(t, e.db.Create(&skipped).Error)
+	e.svc.refresh(e.ctx)
+	assert.NotContains(t, e.org.retired, same.ID, "同分的旧文件留着")
+	assert.Empty(t, e.org.retried)
+}
