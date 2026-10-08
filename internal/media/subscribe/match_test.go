@@ -27,6 +27,9 @@ func TestMatchMovie(t *testing.T) {
 	assert.True(t, ok("Totally.Different.2024.1080p.WEB-DL.x264-X", "", v2.TorrentItem{IMDbID: "tt15239678"}), "IMDb 编号对上就算")
 	assert.False(t, ok("Dune.Part.Two.2024.1080p.WEB-DL.x264-X", "", v2.TorrentItem{IMDbID: "tt0000001"}), "编号不同时名字对上也不算")
 	assert.False(t, ok("Dune.Part.Two.S01E01.2024.1080p.WEB-DL.x264-X", "", v2.TorrentItem{}), "剧集不算电影")
+	assert.False(t, ok("Dune.Part.Two.1080p.WEB-DL.x264-X", "", v2.TorrentItem{}), "没有年份、没有 IMDb 编号时认不准（同名的不同年份）")
+	assert.True(t, ok("Dune.Part.Two.1080p.WEB-DL.x264-X", "", v2.TorrentItem{IMDbID: "tt15239678"}), "没有年份时 IMDb 编号对上也算")
+	assert.True(t, ok("Dune.Part.Two.1080p.WEB-DL.x264-X", "沙丘2 2024 | 中字", v2.TorrentItem{}), "年份写在副标题里也算")
 }
 
 func TestMatchTV(t *testing.T) {

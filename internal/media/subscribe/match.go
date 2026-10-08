@@ -48,11 +48,13 @@ func newMatcher(sub models.MediaSubscription) matcher {
 }
 
 // match 报告候选种子是不是这个订阅要的，是时返回种子里的集（剧集）：
-// 两边都有 IMDb 编号时只看编号；否则解析出的中文名或英文名要和订阅的名字之一相同；电影年份差不超过 1 年；
-// 剧集要有季（只写了集的动画当作第 1 季），季对上，要么是整季包要么写了集。
+// 两边都有 IMDb 编号时只看编号；否则解析出的中文名或英文名要和订阅的名字之一相同；电影年份差不超过 1 年，
+// 只按名字对时种子要写了年份（同名的电影不同年份的多）；剧集要有季（只写了集的动画当作第 1 季），季对上，
+// 要么是整季包要么写了集。
 func (mt matcher) match(m meta.Meta, it v2.TorrentItem) (span, bool) {
 	imdb := v2.NormalizeIMDbID(it.IMDbID)
-	if imdb != "" && mt.sub.IMDbID != "" {
+	byID := imdb != "" && mt.sub.IMDbID != ""
+	if byID {
 		if !strings.EqualFold(imdb, mt.sub.IMDbID) {
 			return span{}, false
 		}
@@ -61,6 +63,9 @@ func (mt matcher) match(m meta.Meta, it v2.TorrentItem) (span, bool) {
 	}
 	if mt.sub.MediaType == models.MediaKindMovie {
 		if m.Type == meta.TypeTV {
+			return span{}, false
+		}
+		if !byID && m.Year == 0 && mt.sub.Year > 0 {
 			return span{}, false
 		}
 		if m.Year > 0 && mt.sub.Year > 0 && (m.Year-mt.sub.Year > 1 || mt.sub.Year-m.Year > 1) {
