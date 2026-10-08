@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -117,6 +119,58 @@ func (s *Server) withBackend(w http.ResponseWriter, r *http.Request) (*backend, 
 		return nil, false
 	}
 	return b, true
+}
+
+// saveCategory 记下一个分类（已有的更新保存目录）。
+func (s *Server) saveCategory(ctx context.Context, name, savePath string) error {
+	return s.updateSetting(ctx, func(row *models.QbitCompatSetting) {
+		m := categoryMap(*row)
+		m[name] = savePath
+		b, _ := json.Marshal(m)
+		row.Categories = string(b)
+	})
+}
+
+// saveTags 记下标签（去重，按名字排序）。
+func (s *Server) saveTags(ctx context.Context, tags []string) error {
+	return s.updateSetting(ctx, func(row *models.QbitCompatSetting) {
+		all := tagList(*row)
+		for _, t := range tags {
+			if !slices.Contains(all, t) {
+				all = append(all, t)
+			}
+		}
+		slices.Sort(all)
+		b, _ := json.Marshal(all)
+		row.Tags = string(b)
+	})
+}
+
+func (s *Server) updateSetting(ctx context.Context, mod func(*models.QbitCompatSetting)) error {
+	return s.deps.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row models.QbitCompatSetting
+		if err := tx.Where("id = ?", 1).Limit(1).Find(&row).Error; err != nil {
+			return err
+		}
+		row.ID = 1
+		mod(&row)
+		return tx.Save(&row).Error
+	})
+}
+
+// compatHashes 是经兼容入口加进这台下载器的种子（小写的 info hash）。
+func (s *Server) compatHashes(ctx context.Context) (map[string]bool, error) {
+	var hashes []string
+	if err := s.deps.DB.WithContext(ctx).Model(&models.TorrentInfo{}).
+		Where("download_source = ? AND torrent_hash IS NOT NULL AND torrent_hash <> ''", Source).
+		Pluck("torrent_hash", &hashes).Error; err != nil {
+		return nil, fmt.Errorf("读取兼容入口加的种子失败: %w", err)
+	}
+	out := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		out[strings.ToLower(h)] = true
+	}
+	return out, nil
 }
 
 // record 写一条审计；写不进去只记日志。

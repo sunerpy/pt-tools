@@ -3,6 +3,7 @@ package qbitcompat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -65,6 +66,43 @@ func (f *fakeDL) GetClientStatus() (downloader.ClientStatus, error) { return f.s
 func (f *fakeDL) GetSpeedLimit() (downloader.SpeedLimit, error)     { return downloader.SpeedLimit{}, nil }
 func (f *fakeDL) GetClientFreeSpace(context.Context) (int64, error) { return f.free, nil }
 
+func (f *fakeDL) log(format string, args ...any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf(format, args...))
+	return nil
+}
+
+func (f *fakeDL) got() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
+}
+
+func (f *fakeDL) PauseTorrents(ids []string) error { return f.log("pause %s", strings.Join(ids, ",")) }
+
+func (f *fakeDL) ResumeTorrents(ids []string) error {
+	return f.log("resume %s", strings.Join(ids, ","))
+}
+
+func (f *fakeDL) RemoveTorrents(ids []string, data bool) error {
+	return f.log("remove %s data=%t", strings.Join(ids, ","), data)
+}
+
+func (f *fakeDL) SetTorrentCategory(id, c string) error { return f.log("category %s=%s", id, c) }
+func (f *fakeDL) SetTorrentTags(id, tags string) error  { return f.log("tags %s=%s", id, tags) }
+
+// fakeQB 是后端为 qB 时的样子：多了 removeTags 与 createCategory 两个可选能力。
+type fakeQB struct{ *fakeDL }
+
+func (q fakeQB) RemoveTorrentTags(ids []string, tags string) error {
+	return q.log("removeTags %s=%s", strings.Join(ids, ","), tags)
+}
+
+func (q fakeQB) CreateCategory(name, savePath string) error {
+	return q.log("createCategory %s=%s", name, savePath)
+}
+
 type fakeAudit struct {
 	mu      sync.Mutex
 	entries []app.AuditEntry
@@ -84,8 +122,10 @@ func (a *fakeAudit) all() []app.AuditEntry {
 }
 
 type env struct {
-	t      *testing.T
-	db     *gorm.DB
+	t  *testing.T
+	db *gorm.DB
+	// asTR 让后端当成 Transmission：没有 qB 的可选能力
+	asTR   bool
 	srv    *Server
 	h      http.Handler
 	dl     *fakeDL
@@ -145,7 +185,12 @@ func newEnv(t *testing.T) *env {
 	e.tokens = apitoken.New(db)
 	e.srv = New(Deps{
 		DB: db, Tokens: e.tokens, Audit: e.audit, Now: func() time.Time { return e.now },
-		Instance: func(context.Context, string) (downloader.Downloader, error) { return e.dl, nil },
+		Instance: func(context.Context, string) (downloader.Downloader, error) {
+			if e.asTR {
+				return e.dl, nil
+			}
+			return fakeQB{e.dl}, nil
+		},
 		Push: func(_ context.Context, req internal.PushTorrentRequest) (*internal.PushTorrentResult, error) {
 			e.mu.Lock()
 			defer e.mu.Unlock()

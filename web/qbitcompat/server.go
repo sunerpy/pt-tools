@@ -120,6 +120,17 @@ func (s *Server) routes() map[string]route {
 		"torrents/trackers":   {method: get, h: s.trackers},
 		"torrents/categories": {method: get, h: s.categories},
 		"torrents/tags":       {method: get, h: s.tags},
+
+		"torrents/pause":          {method: post, h: s.pause},
+		"torrents/stop":           {method: post, h: s.pause},
+		"torrents/resume":         {method: post, h: s.resume},
+		"torrents/start":          {method: post, h: s.resume},
+		"torrents/delete":         {method: post, h: s.deleteTorrents},
+		"torrents/setCategory":    {method: post, h: s.setCategory},
+		"torrents/addTags":        {method: post, h: s.addTags},
+		"torrents/removeTags":     {method: post, h: s.removeTags},
+		"torrents/createCategory": {method: post, h: s.createCategory},
+		"torrents/createTags":     {method: post, h: s.createTags},
 	}
 }
 
