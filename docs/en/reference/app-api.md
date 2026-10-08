@@ -12,11 +12,12 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 - No token, or a token that is wrong, expired or revoked: 401.
 - A token without the permission the endpoint needs: 403. Below, Read is the permission `app:read` and Operate is `app:write`.
-- Tokens work only for the App API. A request with a token to any other part of the web interface (settings, sites, downloaders, notification channels, token management and so on) always gets 401.
+- Tokens work only for the App API: the rest of the web interface (settings, sites, downloaders, notification channels, token management and so on) does not accept them and responds with 401 without a sign-in.
 
 ## Conventions
 
 - Request bodies and responses are JSON. A request body is limited to 1 MiB; a field the endpoint does not know is rejected with 400 rather than ignored.
+- Operate endpoints without a body (sign in, search now, delete a subscription) accept no body or `{}`; anything else gets 400.
 - Times are Unix timestamps in seconds. Sizes and uploaded or downloaded amounts are in bytes, speeds in bytes per second, and progress is a percentage from 0 to 100.
 - Paged endpoints accept the query parameters `page` (starting at 1) and `page_size` (20 by default; each endpoint states its maximum) and respond with `{"items": [...], "total": count, "page": page, "page_size": size}`.
 - Compatibility: `remote_api_level` in `GET /meta` is currently 1 and goes up only for incompatible changes. New endpoints or fields are not incompatible changes, so clients should ignore fields they do not know.
@@ -25,18 +26,19 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 An error responds with `{"error": "code", "message": "explanation"}`. `message` is a human-readable explanation in Chinese; clients should act on `error`.
 
-| `error`                                                         | Status | Meaning                                                                     |
-| --------------------------------------------------------------- | ------ | --------------------------------------------------------------------------- |
-| `invalid_body`                                                  | 400    | The body is not valid JSON, or has a field that is unknown                  |
-| `invalid_argument`                                              | 400    | A parameter is wrong; `message` says which                                  |
-| `unauthorized`                                                  | 401    | No valid token                                                              |
-| `forbidden`                                                     | 403    | The token lacks this permission                                             |
-| `not_found`                                                     | 404    | The endpoint, site or subscription does not exist                           |
-| `busy`                                                          | 409    | The same thing is in progress, such as signing in to a site                 |
-| `rate_limited`                                                  | 429    | TMDB is rate limiting; try again later                                      |
-| `internal`                                                      | 500    | An internal error in pt-tools                                               |
-| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502    | Searching, downloading the torrent file, signing in or reaching TMDB failed |
-| `unavailable`                                                   | 503    | The service behind the endpoint is not running                              |
+| `error`                                                         | Status | Meaning                                                                                  |
+| --------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- |
+| `invalid_body`                                                  | 400    | The body is not valid JSON, or has a field that is unknown                               |
+| `invalid_argument`                                              | 400    | A parameter is wrong; `message` says which                                               |
+| `unauthorized`                                                  | 401    | No valid token                                                                           |
+| `forbidden`                                                     | 403    | The token lacks this permission                                                          |
+| `not_found`                                                     | 404    | The endpoint, site or subscription does not exist                                        |
+| `method_not_allowed`                                            | 405    | The endpoint exists but not with this method; the `Allow` header lists the accepted ones |
+| `busy`                                                          | 409    | The same thing is in progress, such as signing in to a site                              |
+| `rate_limited`                                                  | 429    | TMDB is rate limiting; try again later                                                   |
+| `internal`                                                      | 500    | An internal error in pt-tools                                                            |
+| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502    | Searching, downloading the torrent file, signing in or reaching TMDB failed              |
+| `unavailable`                                                   | 503    | The service behind the endpoint is not running                                           |
 
 ## Endpoints
 
@@ -62,7 +64,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | DELETE | `/subscriptions/{id}`        | Operate    | Delete a subscription                                                         |
 | GET    | `/explore`                   | Read       | Explore: TMDB trending, popular and search                                    |
 
-Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST but needs only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌).
+Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST but needs only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
 
 ## Basics
 
