@@ -55,6 +55,17 @@ func enabledSite(store *core.ConfigStore) func(id string) v2.Site {
 	}
 }
 
+// compatInstance 是兼容入口取下载器实例用的：从下载器管理器按名字取。
+func compatInstance(mgr *scheduler.Manager) func(ctx context.Context, name string) (downloader.Downloader, error) {
+	return func(ctx context.Context, name string) (downloader.Downloader, error) {
+		dm := mgr.GetDownloaderManager()
+		if dm == nil {
+			return nil, errors.New("下载器管理器没有初始化")
+		}
+		return dm.GetDownloaderContext(ctx, name)
+	}
+}
+
 // compatServer 是兼容入口的 HTTP 服务。关闭时先取消进行中请求的上下文（添加种子的循环、下载器请求跟着停），
 // 再等它们退出；等不到就强行断开连接，后面关下载器时不再有请求在用它们。
 type compatServer struct {
@@ -76,14 +87,7 @@ func (c *compatServer) Shutdown(ctx context.Context) error {
 // newQbitCompat 建兼容入口的 HTTP 服务，还不监听（见 listen）。
 func newQbitCompat(db *gorm.DB, srv *web.Server, mgr *scheduler.Manager, store *core.ConfigStore, tokens *apitoken.Store, audit app.AuditService) *compatServer {
 	qc := qbitcompat.New(qbitcompat.Deps{
-		DB: db, Tokens: tokens, Audit: audit,
-		Instance: func(ctx context.Context, name string) (downloader.Downloader, error) {
-			dm := mgr.GetDownloaderManager()
-			if dm == nil {
-				return nil, errors.New("下载器管理器没有初始化")
-			}
-			return dm.GetDownloaderContext(ctx, name)
-		},
+		DB: db, Tokens: tokens, Audit: audit, Instance: compatInstance(mgr),
 		Push: internal.PushTorrentToDownloader,
 		Site: enabledSite(store),
 	})

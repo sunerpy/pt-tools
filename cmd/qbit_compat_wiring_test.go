@@ -11,7 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
+	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/web"
 )
 
@@ -90,4 +93,58 @@ func TestQbitCompatListenAfterShutdown(t *testing.T) {
 		_ = conn.Close()
 		return false
 	}, 5*time.Second, 50*time.Millisecond, "已经在关闭：不接请求")
+}
+
+// 站点要已启用、搜索编排器里有它才给；没有这个站点、没启用、编排器没起来时都是 nil
+func TestEnabledSite(t *testing.T) {
+	db, err := core.NewTempDBDir(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "on", Enabled: true}).Error)
+	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "off", Enabled: false}).Error)
+	site := enabledSite(core.NewConfigStore(db))
+	assert.Nil(t, site("missing"))
+	assert.Nil(t, site("off"))
+	assert.Nil(t, site("on"), "编排器没起来")
+}
+
+// 下载器管理器没初始化、下载器不存在时都回错误
+func TestCompatInstance(t *testing.T) {
+	_, err := compatInstance(&scheduler.Manager{})(context.Background(), "qb")
+	require.ErrorContains(t, err, "没有初始化")
+	mgr := scheduler.NewManager()
+	t.Cleanup(mgr.StopAll)
+	_, err = compatInstance(mgr)(context.Background(), "missing")
+	require.Error(t, err)
+}
+
+// 关闭时等不到进行中的请求结束（处理函数不理会取消）：强行断开连接，不一直等
+func TestQbitCompatShutdownForcesClose(t *testing.T) {
+	global.InitLogger(zap.NewNop())
+	srv := web.NewServer(nil, nil)
+	hs := startQbitCompat("127.0.0.1:0", nil, srv, nil, nil, nil, nil)
+	require.NotNil(t, hs)
+	release, entered := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	hs.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(entered)
+		<-release
+	})
+	done := make(chan error, 1)
+	go func() {
+		resp, err := http.Get("http://" + srv.QbitCompatAddr() + "/api/v2/app/version")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		done <- err
+	}()
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, hs.Shutdown(ctx), "上下文已经结束：等不到请求结束")
+	select {
+	case err := <-done:
+		require.Error(t, err, "连接被强行断开")
+	case <-time.After(5 * time.Second):
+		t.Fatal("连接没有被断开")
+	}
 }
