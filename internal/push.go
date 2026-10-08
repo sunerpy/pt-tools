@@ -43,6 +43,13 @@ type PushTorrentRequest struct {
 	// IMDbID、DoubanID 是调用方已经知道的外部编号（刷流、订阅从搜索结果带来）；为空的不覆盖库里已有的值。
 	IMDbID   string
 	DoubanID string
+	// AddPaused 要求以暂停状态添加（qB 兼容入口的 paused/stopped）；下载器本身设成不自动开始时照样暂停。
+	AddPaused bool
+	// Rename 是加进下载器以后显示的名字（qB 的 rename；Transmission 没有这个选项，忽略）。
+	Rename string
+	// UpLimitKBs、DlLimitKBs 是调用方要的限速（KB/s，0 表示不限），和站点设置的限速取更严的。
+	UpLimitKBs int
+	DlLimitKBs int
 }
 
 // PushTorrentMeta 是推送时一并写进 TorrentInfo 的种子信息。H&R 与体积会被自动清理的 H&R 保护用到
@@ -159,14 +166,19 @@ func PushTorrentToDownloader(ctx context.Context, req PushTorrentRequest) (*Push
 
 	// 构建添加选项
 	opts := downloader.AddTorrentOptions{
-		AddAtPaused: !dlSetting.AutoStart || req.ReuseExistingData,
+		AddAtPaused: !dlSetting.AutoStart || req.ReuseExistingData || req.AddPaused,
 		SavePath:    req.SavePath,
 		Category:    req.Category,
 		Tags:        req.Tags,
 	}
+	if name := strings.TrimSpace(req.Rename); name != "" {
+		opts.AdvanceOptions = map[string]any{"rename": name}
+	}
 
-	// 按站点应用速度限制（从 SiteSetting 读取）
+	// 按站点应用速度限制（从 SiteSetting 读取），调用方另给了限速时取更严的
 	applySiteSpeedLimits(&opts, req.SiteID)
+	opts.UploadSpeedLimitKBs = stricterLimit(opts.UploadSpeedLimitKBs, req.UpLimitKBs)
+	opts.DownloadSpeedLimitKBs = stricterLimit(opts.DownloadSpeedLimitKBs, req.DlLimitKBs)
 
 	glOnly, glErr := core.NewConfigStore(global.GlobalDB).GetGlobalOnly()
 	// 磁盘保护预检（修复 Issue #299，与 internal/common.go 同步）：
@@ -425,6 +437,18 @@ func applySiteSpeedLimits(opts *downloader.AddTorrentOptions, siteName string) {
 	}
 	opts.UploadSpeedLimitKBs = site.UploadLimitKBs
 	opts.DownloadSpeedLimitKBs = site.DownloadLimitKBs
+}
+
+// stricterLimit 是两个限速（KB/s，0 表示不限）里更严的那个。
+func stricterLimit(a, b int) int {
+	switch {
+	case a <= 0:
+		return max(b, 0)
+	case b <= 0:
+		return a
+	default:
+		return min(a, b)
+	}
 }
 
 // mergeTorrentExternalIDs 把非空的外部编号写进已有的种子记录；没有记录时什么也不做（不为编号新建记录）。

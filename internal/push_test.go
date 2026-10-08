@@ -885,3 +885,52 @@ func TestApplySiteSpeedLimits(t *testing.T) {
 	assert.Equal(t, 100, opts.UploadSpeedLimitKBs)
 	assert.Equal(t, 200, opts.DownloadSpeedLimitKBs)
 }
+
+// qB 兼容入口要的推送选项：暂停添加、改名（qB 的 rename 经 AdvanceOptions 传下去）、调用方给的限速与站点限速取更严的
+func TestPushTorrent_CompatOptions(t *testing.T) {
+	_ = setupDB(t)
+	t.Cleanup(func() { global.GlobalDB = nil })
+	GetDiskBudget().Reset()
+	t.Cleanup(func() { GetDiskBudget().Reset() })
+	require.NoError(t, global.GlobalDB.DB.Create(&models.SiteSetting{Name: "springsunday", AuthMethod: "cookie", UploadLimitKBs: 500}).Error)
+	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, AutoStart: true}
+	require.NoError(t, global.GlobalDB.DB.Create(&ds).Error)
+
+	ctrl := gomock.NewController(t)
+	mockDl := sm.NewMockDownloader(ctrl)
+	mockDl.EXPECT().CheckTorrentExists(gomock.Any()).Return(false, nil).AnyTimes()
+	mockDl.EXPECT().GetName().Return("qb").AnyTimes()
+	mockDl.EXPECT().GetType().Return(downloader.DownloaderQBittorrent).AnyTimes()
+	mockDl.EXPECT().GetClientFreeSpace(gomock.Any()).Return(int64(1)<<50, nil).AnyTimes()
+	mockDl.EXPECT().GetIncompletePendingBytes(gomock.Any()).Return(int64(0), nil).AnyTimes()
+	mockDl.EXPECT().GetAllTorrents().Return(nil, nil).AnyTimes()
+	mockDl.EXPECT().Close().Return(nil).AnyTimes()
+	var captured []downloader.AddTorrentOptions
+	mockDl.EXPECT().AddTorrentFileEx(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ []byte, opt downloader.AddTorrentOptions) (downloader.AddTorrentResult, error) {
+			captured = append(captured, opt)
+			return downloader.AddTorrentResult{Success: true}, nil
+		}).AnyTimes()
+	t.Cleanup(SwapPushDownloaderFactory(func(models.DownloaderSetting) (downloader.Downloader, error) { return mockDl, nil }))
+
+	push := func(id string, req PushTorrentRequest) {
+		t.Helper()
+		req.SiteID, req.TorrentID, req.DownloaderID = "springsunday", id, ds.ID
+		req.TorrentData = makeSizedTorrentBytes(t, "compat-"+id, 1*gb)
+		res, err := PushTorrentToDownloader(context.Background(), req)
+		require.NoError(t, err)
+		require.True(t, res.Success, res.Message)
+	}
+	push("1", PushTorrentRequest{AddPaused: true, Rename: " 新名字 ", UpLimitKBs: 2000, DlLimitKBs: 300})
+	push("2", PushTorrentRequest{UpLimitKBs: 100})
+	push("3", PushTorrentRequest{})
+	require.Len(t, captured, 3)
+	assert.True(t, captured[0].AddAtPaused, "要求暂停添加")
+	assert.Equal(t, "新名字", captured[0].AdvanceOptions["rename"])
+	assert.Equal(t, 500, captured[0].UploadSpeedLimitKBs, "站点 500 比调用方的 2000 严")
+	assert.Equal(t, 300, captured[0].DownloadSpeedLimitKBs, "站点不限下载时用调用方的")
+	assert.Equal(t, 100, captured[1].UploadSpeedLimitKBs, "调用方的 100 比站点 500 严")
+	assert.False(t, captured[2].AddAtPaused, "下载器自动开始、调用方没要求暂停")
+	assert.Nil(t, captured[2].AdvanceOptions)
+	assert.Equal(t, 500, captured[2].UploadSpeedLimitKBs)
+}
