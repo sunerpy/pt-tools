@@ -10,9 +10,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/models"
+	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/web/middleware"
 )
 
@@ -201,4 +203,32 @@ func TestAppOverviewDeltaFailure(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ov))
 	assert.NotEmpty(t, ov.Today.Error)
 	assert.EqualValues(t, 300, ov.Totals.Uploaded, "合计照常")
+}
+
+// 站点数据服务没有启动：站点照样列出，user_error 写明原因
+func TestAppSitesWithoutUserInfoService(t *testing.T) {
+	srv, _ := historyFixture(t)
+	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.SiteLoginState{}, &models.SiteAttendanceLog{}))
+	prev := userInfoService
+	userInfoService = nil
+	t.Cleanup(func() { userInfoService = prev })
+	w := appAs(srv.appSites, http.MethodGet, "/api/app/v1/sites")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var list AppSiteList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.NotEmpty(t, list.Items)
+	assert.NotEmpty(t, list.UserError)
+}
+
+// 没有站点数据历史（内存仓库）：today.error 写明算不出增量
+func TestAppOverviewWithoutHistory(t *testing.T) {
+	srv, _ := historyFixture(t)
+	prev := userInfoService
+	userInfoService = v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: v2.NewInMemoryUserInfoRepo(), Logger: zap.NewNop()})
+	t.Cleanup(func() { userInfoService = prev })
+	w := appAs(srv.appOverview, http.MethodGet, "/api/app/v1/overview")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var ov AppOverview
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ov))
+	assert.NotEmpty(t, ov.Today.Error)
 }

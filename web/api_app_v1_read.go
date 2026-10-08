@@ -117,17 +117,17 @@ func (s *Server) appOverview(w http.ResponseWriter, r *http.Request) {
 		Today:     AppDelta{Sites: []AppSiteDelta{}},
 		UpdatedAt: stats.LastUpdate,
 	}
-	if repo, ok := userInfoService.History(); ok {
-		if sum, serr := v2.LoadDeltaSummary(ctx, repo, "today"); serr == nil {
-			sum = sum.Filter(enabled)
-			out.Today.From, out.Today.To = sum.From, sum.To
-			out.Today.Uploaded, out.Today.Downloaded, out.Today.Bonus = sum.TotalUploaded, sum.TotalDownloaded, sum.TotalBonus
-			for _, d := range sum.Sites {
-				out.Today.Sites = append(out.Today.Sites, AppSiteDelta{Site: d.Site, Uploaded: d.Uploaded, Downloaded: d.Downloaded, Bonus: d.Bonus})
-			}
-		} else {
-			global.GetSlogger().Warnf("[App API] 计算今天的增量失败: %v", serr)
-			out.Today.Error = "计算今天的增量失败: " + appRedact(serr.Error())
+	if repo, ok := userInfoService.History(); !ok {
+		out.Today.Error = "没有站点数据的历史，算不出今天的增量"
+	} else if sum, serr := v2.LoadDeltaSummary(ctx, repo, "today"); serr != nil {
+		global.GetSlogger().Warnf("[App API] 计算今天的增量失败: %v", serr)
+		out.Today.Error = "计算今天的增量失败: " + appRedact(serr.Error())
+	} else {
+		sum = sum.Filter(enabled)
+		out.Today.From, out.Today.To = sum.From, sum.To
+		out.Today.Uploaded, out.Today.Downloaded, out.Today.Bonus = sum.TotalUploaded, sum.TotalDownloaded, sum.TotalBonus
+		for _, d := range sum.Sites {
+			out.Today.Sites = append(out.Today.Sites, AppSiteDelta{Site: d.Site, Uploaded: d.Uploaded, Downloaded: d.Downloaded, Bonus: d.Bonus})
 		}
 	}
 	appJSON(w, out)
@@ -220,7 +220,9 @@ func (s *Server) appSites(w http.ResponseWriter, r *http.Request) {
 	}
 	users := map[string]v2.UserInfo{}
 	userErr := ""
-	if userInfoService != nil {
+	if userInfoService == nil {
+		userErr = "站点数据服务没有启动"
+	} else {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		infos, uerr := userInfoService.GetAllUserInfo(ctx)
 		cancel()
