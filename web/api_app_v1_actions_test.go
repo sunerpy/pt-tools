@@ -131,6 +131,10 @@ func TestAppPush(t *testing.T) {
 		{`{"site":"hdsky","torrent_id":"1","downloader_id":` + fmt.Sprint(off.ID) + `}`, http.StatusBadRequest},
 		{`{"site":"","torrent_id":"1"}`, http.StatusBadRequest},
 		{`{"site":"hdsky","torrent_id":"1","download_url":"http://evil/x.torrent"}`, http.StatusBadRequest},
+		// 种子编号只能是字母、数字与 ._-：有的站点驱动把它直接拼进下载地址
+		{`{"site":"hdsky","torrent_id":"1&passkey=x"}`, http.StatusBadRequest},
+		{`{"site":"hdsky","torrent_id":"../../logout.php"}`, http.StatusBadRequest},
+		{`{"site":"hdsky","torrent_id":"1 2"}`, http.StatusBadRequest},
 	} {
 		assert.Equal(t, c.want, appAsWith(srv.appPush, http.MethodPost, "/api/app/v1/push", c.body, "app:write").Code, c.body)
 	}

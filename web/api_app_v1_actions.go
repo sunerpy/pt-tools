@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -217,14 +218,18 @@ const appPushTimeout = 60 * time.Second
 // appPushSource 是 App 推送的种子记录的来源。
 const appPushSource = "app_push"
 
+// appTorrentIDRe 是推送接受的种子编号：各站点的编号都是数字或短的字母数字串，有的站点驱动把它直接拼进下载地址，
+// 所以不收 &、/、空格之类的字符。
+var appTorrentIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
 func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 	var req AppPushRequest
 	if !appDecode(w, r, &req) {
 		return
 	}
 	req.Site, req.TorrentID = strings.TrimSpace(req.Site), strings.TrimSpace(req.TorrentID)
-	if req.Site == "" || req.TorrentID == "" || len(req.Site) > 64 || len(req.TorrentID) > 128 {
-		appError(w, http.StatusBadRequest, "invalid_argument", "site 与 torrent_id 要填")
+	if req.Site == "" || len(req.Site) > 64 || !appTorrentIDRe.MatchString(req.TorrentID) {
+		appError(w, http.StatusBadRequest, "invalid_argument", "site 要填；torrent_id 要填，只能是字母、数字与 ._-")
 		return
 	}
 	if len(req.Title) > 512 || len(req.Category) > 128 || len(req.Tags) > 255 || len(req.SavePath) > 1024 {
