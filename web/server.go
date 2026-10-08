@@ -216,6 +216,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerTokenRoutes(mux)
 	s.registerQbitCompatRoutes(mux)
 	s.registerAppV1Routes(mux)
+	s.registerMCPRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
 	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))
