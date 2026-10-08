@@ -34,7 +34,10 @@ const totalPages = computed(() => data.value?.total_pages ?? 1);
 
 async function load() {
   if (list.value === "search" && !keyword.value.trim()) {
+    // 还在飞的趋势、热门请求作废：空跑一次 run，那些请求落地时就是过期的，不会写进列表
+    void ds.run(async () => null);
     data.value = null;
+    searched.value = "";
     return;
   }
   const q = list.value === "search" ? keyword.value.trim() : "";

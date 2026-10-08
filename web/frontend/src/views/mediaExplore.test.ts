@@ -136,6 +136,21 @@ describe("探索", () => {
     );
   });
 
+  it("切到搜索时还没回来的趋势请求不再写进列表", async () => {
+    await mountPage();
+    let resolve!: (v: unknown) => void;
+    api.explore.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    (q("ex-kind")!.querySelectorAll("input")[1] as HTMLInputElement).click();
+    await flush();
+    (q("ex-list")!.querySelectorAll("input")[2] as HTMLInputElement).click();
+    await flush();
+    resolve(page([{ ...dune, id: 1, media_type: "tv", title: "迟到的剧集" }]));
+    await flush();
+    await flush();
+    expect(q("ex-grid"), "空的搜索不显示迟到的结果").toBeNull();
+    expect(q("ex-state")!.textContent).toContain("输入名字搜索");
+  });
+
   it("订阅：打开弹窗，只发接口认的字段，订阅后刷新列表", async () => {
     await mountPage();
     api.create.mockResolvedValue({ id: 9, title: "沙丘2" });
