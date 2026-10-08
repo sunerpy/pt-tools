@@ -39,6 +39,18 @@ type TagRemover interface {
 	RemoveTag(id, tag string) error
 }
 
+// TorrentTagRemover 从指定的种子上去掉标签（逗号分隔；为空时去掉这些种子的全部标签），别的种子不动。
+// qBittorrent 用 torrents/removeTags；Transmission 只能整份改写 labels，调用方改用 SetTorrentTags。
+type TorrentTagRemover interface {
+	RemoveTorrentTags(ids []string, tags string) error
+}
+
+// CategoryCreator 在下载器里建一个分类（带保存目录）。qBittorrent 用 torrents/createCategory，
+// 已经有这个分类时不算失败；Transmission 没有分类，不实现。
+type CategoryCreator interface {
+	CreateCategory(name, savePath string) error
+}
+
 // BulkTrackerReader 一次读出全部种子的 tracker 列表（键是小写 info hash）。
 // Transmission 的 torrent-get 能一次带回 trackerStats；qBittorrent 只能逐个读，不实现。
 type BulkTrackerReader interface {

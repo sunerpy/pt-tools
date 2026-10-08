@@ -162,3 +162,43 @@ func TestQbitRemoveTag(t *testing.T) {
 	assert.Equal(t, "/api/v2/torrents/deleteTags", path)
 	assert.Equal(t, "pt-tools-reseed-12", tags)
 }
+
+// 从指定的种子上去掉标签：removeTags 只动这些种子（tags 为空时去掉全部）
+func TestQbitRemoveTorrentTags(t *testing.T) {
+	var path, hashes, tags string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		path, hashes, tags = r.URL.Path, r.Form.Get("hashes"), r.Form.Get("tags")
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.TorrentTagRemover = c
+	require.NoError(t, c.RemoveTorrentTags([]string{"aa", "bb"}, "x,y"))
+	assert.Equal(t, "/api/v2/torrents/removeTags", path)
+	assert.Equal(t, "aa|bb", hashes)
+	assert.Equal(t, "x,y", tags)
+}
+
+// 建分类：createCategory；已经有了（409）不算失败
+func TestQbitCreateCategory(t *testing.T) {
+	var path, name, save string
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		path, name, save = r.URL.Path, r.Form.Get("category"), r.Form.Get("savePath")
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+
+	c := coverageTestClient(srv.URL, false)
+	var _ downloader.CategoryCreator = c
+	require.NoError(t, c.CreateCategory("sonarr", "/tv"))
+	assert.Equal(t, "/api/v2/torrents/createCategory", path)
+	assert.Equal(t, "sonarr", name)
+	assert.Equal(t, "/tv", save)
+	status = http.StatusConflict
+	require.NoError(t, c.CreateCategory("sonarr", "/tv"), "已经有了")
+	status = http.StatusBadRequest
+	require.Error(t, c.CreateCategory("", ""))
+}
