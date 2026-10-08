@@ -292,6 +292,9 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 	default:
 		out.Success, out.Skipped, out.InfoHash, out.Message = true, res.Skipped, res.TorrentHash, appRedact(res.Message)
 	}
+	if !out.Success {
+		appSetOutcome(r, "error:push_failed")
+	}
 	appJSON(w, out)
 }
 

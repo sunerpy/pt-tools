@@ -157,6 +157,12 @@ func (s *Server) appTorrentActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := AppTorrentActionsResult{Succeeded: resp.SuccessCount, Failed: resp.FailedCount, Results: make([]AppTorrentActionResult, 0, len(resp.Results))}
+	switch {
+	case out.Failed > 0 && out.Succeeded == 0:
+		appSetOutcome(r, "error:all_failed")
+	case out.Failed > 0:
+		appSetOutcome(r, "error:partial")
+	}
 	for _, res := range resp.Results {
 		out.Results = append(out.Results, AppTorrentActionResult{DownloaderID: res.DownloaderID, TaskID: res.TaskID, Success: res.Success, Message: appRedact(res.Message)})
 	}

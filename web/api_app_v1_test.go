@@ -288,3 +288,29 @@ func TestAppAPI_AuditsTokenWrites(t *testing.T) {
 	assert.Equal(t, "success", entries[2].Result)
 	assert.Equal(t, "POST /api/app/v1/probe", entries[2].Command)
 }
+
+// 业务失败（HTTP 200 但推送被拦下、批量动作全失败）在审计里不能记成 success：处理函数写进去的结果优先
+func TestAppAPI_AuditOutcome(t *testing.T) {
+	e := newAppEnv(t)
+	write := e.token(apitoken.ScopeAppRead, apitoken.ScopeAppWrite)
+	run := func(outcome string, status int) app.AuditEntry {
+		h := e.srv.appHandler(appRoute{http.MethodPost, "/probe", apitoken.ScopeAppWrite, func(w http.ResponseWriter, r *http.Request) {
+			if outcome != "" {
+				appSetOutcome(r, outcome)
+			}
+			if status != http.StatusOK {
+				appError(w, status, "x", "x")
+				return
+			}
+			appJSON(w, map[string]bool{"ok": true})
+		}})
+		req := httptest.NewRequest(http.MethodPost, appPrefix+"/probe", nil)
+		req.Header.Set("Authorization", "Bearer "+write)
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		all := e.audit.all()
+		return all[len(all)-1]
+	}
+	assert.Equal(t, "error:all_failed", run("error:all_failed", http.StatusOK).Result)
+	assert.Equal(t, "success", run("", http.StatusOK).Result)
+	assert.Equal(t, "error:http_409", run("error:all_failed", http.StatusConflict).Result, "状态码已经是失败时按状态码记")
+}

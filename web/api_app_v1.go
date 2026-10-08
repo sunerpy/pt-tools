@@ -108,6 +108,17 @@ func appDecode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
+// appOutcomeKey 是请求上下文里放审计业务结果的位置（只在要记审计的写请求上有）。
+type appOutcomeKey struct{}
+
+// appSetOutcome 记下这次写请求的业务结果，例如推送被拦下、批量动作全失败：这些回应是 200，只看状态码会被记成 success。
+// 结果用审计的写法（error:…、denied:…）；状态码本身是失败时仍按状态码记。
+func appSetOutcome(r *http.Request, outcome string) {
+	if p, ok := r.Context().Value(appOutcomeKey{}).(*string); ok {
+		*p = outcome
+	}
+}
+
 // appPrincipal 解析请求的主体：有效的 session cookie 优先，其次是 Bearer 令牌。没有主体时返回 nil 与要回的状态码。
 func (s *Server) appPrincipal(r *http.Request) (*middleware.Principal, int) {
 	if c, err := r.Cookie("session"); err == nil {
@@ -157,10 +168,16 @@ func (s *Server) appHandler(rt appRoute) http.Handler {
 			rt.Handler(w, r)
 			return
 		}
+		outcome := new(string)
+		r = r.WithContext(context.WithValue(r.Context(), appOutcomeKey{}, outcome))
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		rt.Handler(rec, r)
-		s.recordAppWrite(r, p, command, appAuditResult(rec.status), rec.status, time.Since(start))
+		result := appAuditResult(rec.status)
+		if rec.status < http.StatusBadRequest && *outcome != "" {
+			result = *outcome
+		}
+		s.recordAppWrite(r, p, command, result, rec.status, time.Since(start))
 	})
 }
 
