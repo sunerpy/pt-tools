@@ -87,7 +87,7 @@ Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban us
 - Each item is looked up on TMDB by its name (and the original title Douban gives). For a series, the season written in the title is used (such as 第二季), otherwise season 1. Titles that already have a subscription are only recorded, not subscribed twice.
 - With Confirm first (先确认) on, the subscriptions it creates start as Pending (待确认) and only start searching after you click Confirm in the subscription list.
 - Items not found on TMDB are recorded as not found and not searched again; you can search and subscribe to them from the Explore page.
-- When you delete a subscription created from Douban, that item is not subscribed again; when an item disappears from Douban's RSS, the subscription it created is kept.
+- When you delete a subscription created from Douban, the item shows Subscription deleted (订阅已删除) and is not subscribed again; when an item disappears from Douban's RSS, the subscription it created is kept.
 - Failed fetches back off for 1, 2, 4… hours, up to 24 hours; after 3 failures in a row the source is marked Abnormal (异常) and one notification goes to the channels selected in the settings. Without a TMDB API key the whole fetch counts as failed, so no items are recorded as not found.
 - Fetch now (立即拉取) fetches right away (while the source is already being fetched, it asks you to try again later); Items (条目) lists the items seen and their results. Deleting a source keeps the subscriptions it created.
 
