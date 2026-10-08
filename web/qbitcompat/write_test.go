@@ -192,7 +192,11 @@ func TestCreateCategoryAndTags(t *testing.T) {
 	for _, a := range e.audit.all() {
 		cmds = append(cmds, a.Command+" "+a.Result)
 	}
-	assert.Equal(t, []string{"POST /api/v2/torrents/createCategory success", "POST /api/v2/torrents/createTags success"}, cmds)
+	assert.Equal(t, []string{
+		"POST /api/v2/torrents/createCategory error:http_400",
+		"POST /api/v2/torrents/createCategory success",
+		"POST /api/v2/torrents/createTags success",
+	}, cmds, "名字为空的那次也记")
 }
 
 // qbittorrent-api 把布尔值写成 True/False（Python 的 str(True)）：qB 不分大小写，兼容入口也一样
@@ -223,4 +227,26 @@ func TestWriteAuditLatency(t *testing.T) {
 	a := e.audit.all()
 	require.Len(t, a, 1)
 	assert.GreaterOrEqual(t, a[0].LatencyMs, int64(30))
+}
+
+// 写请求在半路失败（参数不对、没给种子、没有可用的下载器）也记审计；正常的只记一条
+func TestWriteFailuresAudited(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	require.Equal(t, http.StatusBadRequest, e.do(http.MethodPost, "/api/v2/torrents/createCategory", url.Values{"category": {""}}, ck).Code)
+	require.Equal(t, http.StatusBadRequest, e.do(http.MethodPost, "/api/v2/torrents/addTags", url.Values{"hashes": {"all"}}, ck).Code)
+	require.Equal(t, "Fails.", e.do(http.MethodPost, "/api/v2/torrents/add", url.Values{}, ck).Body.String())
+	require.NoError(t, e.db.Model(&models.DownloaderSetting{}).Where("id = ?", e.dlSet.ID).Update("enabled", false).Error)
+	require.Equal(t, http.StatusServiceUnavailable, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {"all"}}, ck).Code)
+
+	var got []string
+	for _, a := range e.audit.all() {
+		got = append(got, a.Command+" "+a.Result)
+	}
+	assert.Equal(t, []string{
+		"POST /api/v2/torrents/createCategory error:http_400",
+		"POST /api/v2/torrents/addTags error:http_400",
+		"POST /api/v2/torrents/add error:nothing_added",
+		"POST /api/v2/torrents/pause error:http_503",
+	}, got)
 }

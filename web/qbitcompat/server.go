@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -94,10 +95,23 @@ type route struct {
 }
 
 // call 是一次已登录的请求：令牌、会话里的用户名与开始处理的时间（审计记耗时）。
+// audited 在处理函数自己记过审计以后为真；写请求没记过时由 Handler 按状态码补一条。
 type call struct {
 	token    apitoken.Token
 	username string
 	start    time.Time
+	audited  bool
+}
+
+// statusWriter 记下回应的状态码（写请求在半路失败时按它补审计）。
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (s *Server) routes() map[string]route {
@@ -172,7 +186,20 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		c.start = start
-		rt.h(w, r, c)
+		if rt.method != http.MethodPost || name == "auth/logout" {
+			rt.h(w, r, c)
+			return
+		}
+		// 写请求：参数不对、没有可用的下载器这类半路返回的，处理函数来不及记审计，这里按状态码补一条
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		rt.h(sw, r, c)
+		if !c.audited {
+			result := "success"
+			if sw.status >= http.StatusBadRequest {
+				result = "error:http_" + strconv.Itoa(sw.status)
+			}
+			s.recordWrite(r, c, name, result, selection{}, nil)
+		}
 	})
 }
 

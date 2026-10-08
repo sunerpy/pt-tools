@@ -109,6 +109,11 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request, c *call) {
 	}
 	total := len(files) + len(fileErrs) + len(links)
 	if total == 0 || total > maxAddItems {
+		reason := "error:nothing_added"
+		if total > maxAddItems {
+			reason = "error:too_many"
+		}
+		s.recordWrite(r, c, "torrents/add", reason, selection{}, map[string]any{"files": len(files) + len(fileErrs), "urls": len(links)})
 		text(w, http.StatusOK, "Fails.")
 		return
 	}
@@ -296,6 +301,7 @@ func (s *Server) idFromComment(ctx context.Context, siteID, comment, hash string
 
 // recordAdd 记一条添加的审计：成功 success；有失败的 error:partial；全失败时按原因（denied:magnet、denied:url 或 error:add_failed）。
 func (s *Server) recordAdd(r *http.Request, c *call, outcomes []addOutcome, files, links int, o addOptions) {
+	c.audited = true
 	var added, skipped int
 	var reasons []string
 	policy := 0

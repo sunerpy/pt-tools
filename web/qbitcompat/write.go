@@ -94,6 +94,7 @@ func (s *Server) mutate(w http.ResponseWriter, r *http.Request, c *call, op stri
 
 // recordWrite 记一条写操作的审计：令牌编号、种子个数（20 个以内连 hash 一起）、跳过的个数。
 func (s *Server) recordWrite(r *http.Request, c *call, op, result string, sel selection, extra map[string]any) {
+	c.audited = true
 	args := map[string]any{"name": c.token.Name, "username": c.username, "count": len(sel.ids), "denied": sel.denied}
 	if len(sel.hashes) <= 20 {
 		args["hashes"] = sel.hashes
