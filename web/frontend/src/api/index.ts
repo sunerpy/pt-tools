@@ -2683,8 +2683,6 @@ export interface Subscription {
   save_path: string;
   status: SubscriptionStatus;
   upgrade: boolean;
-  best_score: number;
-  best_title: string;
   source: SubscriptionSource;
   douban_id: string;
   total_episodes: number;
@@ -2704,12 +2702,15 @@ export interface SubscriptionTorrent {
   torrent_id: string;
   info_hash: string;
   title: string;
+  subtitle: string;
   score: number;
   episode: number;
   episode_end: number;
   complete: boolean;
   size_bytes: number;
   downloader_id: number;
+  has_hr: boolean;
+  adopted: boolean;
   status: "downloading" | "done" | "failed" | "replaced";
   message: string;
   created_at: string;
