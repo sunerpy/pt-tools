@@ -137,6 +137,16 @@ func (s *Server) setCategory(w http.ResponseWriter, r *http.Request, c *call) {
 		return
 	}
 	s.mutate(w, r, c, "torrents/setCategory", map[string]any{"category": category}, func(b *backend, sel selection) error {
+		if usesLabels(b) {
+			// Transmission：分类是第一个 label，改写整份 labels，标签留着
+			for i, id := range sel.ids {
+				_, tags := splitLabels(sel.torrents[i])
+				if err := b.dl.SetTorrentTags(id, joinLabels(category, tags)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		if cc, ok := b.dl.(downloader.CategoryCreator); ok && category != "" {
 			if err := cc.CreateCategory(category, categoryMap(b.cfg)[category]); err != nil {
 				return err
@@ -172,6 +182,13 @@ func (s *Server) addTags(w http.ResponseWriter, r *http.Request, c *call) {
 	}
 	s.mutate(w, r, c, "torrents/addTags", map[string]any{"tags": tags}, func(b *backend, sel selection) error {
 		for i, id := range sel.ids {
+			if usesLabels(b) {
+				category, merged := splitLabels(sel.torrents[i])
+				if err := b.dl.SetTorrentTags(id, joinLabels(category, append(merged, tags...))); err != nil {
+					return err
+				}
+				continue
+			}
 			merged := splitTags(sel.torrents[i].Tags)
 			for _, t := range tags {
 				if !slices.Contains(merged, t) {
@@ -186,24 +203,26 @@ func (s *Server) addTags(w http.ResponseWriter, r *http.Request, c *call) {
 	})
 }
 
-// removeTags 是 torrents/removeTags（tags 为空时去掉全部标签）。qB 用 removeTags；Transmission 改写成剩下的标签。
+// removeTags 是 torrents/removeTags（tags 为空时去掉全部标签）。qB 用 removeTags；Transmission 改写成剩下的标签，分类不动。
 func (s *Server) removeTags(w http.ResponseWriter, r *http.Request, c *call) {
 	_ = r.ParseForm()
 	tags := splitTags(r.Form.Get("tags"))
 	s.mutate(w, r, c, "torrents/removeTags", map[string]any{"tags": tags}, func(b *backend, sel selection) error {
-		if tr, ok := b.dl.(downloader.TorrentTagRemover); ok {
+		if tr, ok := b.dl.(downloader.TorrentTagRemover); ok && !usesLabels(b) {
 			return tr.RemoveTorrentTags(sel.ids, strings.Join(tags, ","))
 		}
+		// Transmission：改写成剩下的标签，分类（第一个 label）留着
 		for i, id := range sel.ids {
+			category, current := splitLabels(sel.torrents[i])
 			var keep []string
 			if len(tags) > 0 {
-				for _, t := range splitTags(sel.torrents[i].Tags) {
+				for _, t := range current {
 					if !slices.Contains(tags, t) {
 						keep = append(keep, t)
 					}
 				}
 			}
-			if err := b.dl.SetTorrentTags(id, strings.Join(keep, ",")); err != nil {
+			if err := b.dl.SetTorrentTags(id, joinLabels(category, keep)); err != nil {
 				return err
 			}
 		}

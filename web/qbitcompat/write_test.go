@@ -135,21 +135,43 @@ func TestWriteOperations(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, e.do(http.MethodPost, "/api/v2/torrents/addTags", url.Values{"hashes": {hashMovie}, "tags": {" , "}}, ck).Code)
 }
 
-// 后端是 Transmission：去标签改写成剩下的标签；tags 为空时去掉全部；改分类不建分类
+// 后端是 Transmission：分类与标签都在 labels 里，第一个是分类、其余是标签。读出来的 tags 不含分类；
+// 改分类、加减标签都改写整份 labels，分类留在第一个，标签互不影响
 func TestWriteOperationsTransmission(t *testing.T) {
 	e := newEnv(t)
 	e.asTR = true
+	e.dlSet.Type = "transmission"
+	require.NoError(t, e.db.Save(&e.dlSet).Error)
+	e.dl.torrents[1].Raw = nil
+	e.dl.torrents[1].Category, e.dl.torrents[1].Tags = "movies", "movies,hdsky,4k"
 	ck := e.login(e.token(apitoken.ScopeQbitCompat))
 	e.markCompat(hashMovie)
-	for _, form := range []url.Values{
-		{"tags": {"hdsky"}},
-		{"tags": {""}},
-	} {
-		form.Set("hashes", hashMovie)
-		require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/removeTags", form, ck).Code)
+
+	var movie map[string]any
+	for _, item := range decode[[]map[string]any](t, e.do(http.MethodGet, "/api/v2/torrents/info", nil, ck)) {
+		if item["hash"] == hashMovie {
+			movie = item
+		}
 	}
-	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/setCategory", url.Values{"hashes": {hashMovie}, "category": {"tv"}}, ck).Code)
-	assert.Equal(t, []string{"tags " + hashMovie + "=4k", "tags " + hashMovie + "=", "category " + hashMovie + "=tv"}, e.dl.got())
+	require.NotNil(t, movie)
+	assert.Equal(t, "movies", movie["category"])
+	assert.Equal(t, "hdsky,4k", movie["tags"], "标签里不含分类")
+
+	post := func(path string, form url.Values) {
+		t.Helper()
+		form.Set("hashes", hashMovie)
+		require.Equal(t, http.StatusOK, e.do(http.MethodPost, path, form, ck).Code, path)
+	}
+	post("/api/v2/torrents/removeTags", url.Values{"tags": {"hdsky"}})
+	post("/api/v2/torrents/removeTags", url.Values{"tags": {""}})
+	post("/api/v2/torrents/setCategory", url.Values{"category": {"tv"}})
+	post("/api/v2/torrents/addTags", url.Values{"tags": {"x"}})
+	assert.Equal(t, []string{
+		"tags " + hashMovie + "=movies,4k",
+		"tags " + hashMovie + "=movies",
+		"tags " + hashMovie + "=tv,hdsky,4k",
+		"tags " + hashMovie + "=movies,hdsky,4k,x",
+	}, e.dl.got(), "分类一直在第一个，标签不被改分类冲掉")
 }
 
 // 建分类与标签：记在设置里，分类与标签列表里能看到；分类名为空 400；后端是 qB 时也在 qB 里建

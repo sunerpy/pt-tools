@@ -92,7 +92,8 @@ func rawBool(m map[string]any, key string) bool {
 }
 
 // toQB 把下载器的种子换成 qB 的字段。tracker 地址里的 passkey 遮住，magnet 只留 xt 与 dn。
-func toQB(t downloader.Torrent) qbTorrent {
+// labels 为真时后端是 Transmission：分类是第一个 label，标签是其余的。
+func toQB(t downloader.Torrent, labels bool) qbTorrent {
 	raw := rawMap(t)
 	hash := strings.ToLower(t.InfoHash)
 	if hash == "" {
@@ -130,8 +131,38 @@ func toQB(t downloader.Torrent) qbTorrent {
 	if v, ok := raw["isPrivate"].(bool); ok {
 		q.IsPrivate = v
 	}
+	if labels {
+		_, tags := splitLabels(t)
+		q.Tags = strings.Join(tags, ",")
+	}
 	return q
 }
+
+// splitLabels 把 Transmission 的 labels 拆成分类（第一个）与标签（其余）。
+func splitLabels(t downloader.Torrent) (string, []string) {
+	labels := splitTags(t.Tags)
+	if len(labels) > 0 && labels[0] == t.Category {
+		return t.Category, labels[1:]
+	}
+	return t.Category, labels
+}
+
+// joinLabels 拼回 Transmission 的 labels：分类在第一个。
+func joinLabels(category string, tags []string) string {
+	out := make([]string, 0, len(tags)+1)
+	if category != "" {
+		out = append(out, category)
+	}
+	for _, t := range tags {
+		if t != category && !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// usesLabels 报告后端是不是 Transmission（分类与标签都在 labels 里）。
+func usesLabels(b *backend) bool { return b.setting.Type == string(downloader.DownloaderTransmission) }
 
 // qbState 是 qB 的状态值。后端是 qB 时用它原样的状态（5.x 的 stopped* 换回 4.x 的 paused*，和报的版本一致）。
 func qbState(t downloader.Torrent) string {
@@ -243,8 +274,9 @@ func (s *Server) list(b *backend) ([]qbTorrent, map[string]downloader.Torrent, e
 	}
 	out := make([]qbTorrent, 0, len(all))
 	byHash := make(map[string]downloader.Torrent, len(all))
+	labels := usesLabels(b)
 	for _, t := range all {
-		q := toQB(t)
+		q := toQB(t, labels)
 		out = append(out, q)
 		byHash[q.Hash] = t
 	}
@@ -400,11 +432,11 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request) (*backend, downloa
 
 // properties 是 GET /api/v2/torrents/properties?hash=。
 func (s *Server) properties(w http.ResponseWriter, r *http.Request, _ *call) {
-	_, t, ok := s.find(w, r)
+	b, t, ok := s.find(w, r)
 	if !ok {
 		return
 	}
-	q := toQB(t)
+	q := toQB(t, usesLabels(b))
 	completion := q.CompletionOn
 	if completion <= 0 {
 		completion = -1
