@@ -266,6 +266,12 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 		appError(w, http.StatusBadGateway, "download_failed", "下载种子文件失败: "+appRedact(err.Error()))
 		return
 	}
+	// 没带标题：用种子文件里的名字，任务列表里不留没有标题的记录
+	if strings.TrimSpace(req.Title) == "" {
+		if parsed, perr := v2.ParseTorrent(data); perr == nil {
+			req.Title = parsed.Name
+		}
+	}
 	res, err := internal.PushTorrentToDownloader(ctx, internal.PushTorrentRequest{
 		SiteID: req.Site, TorrentID: req.TorrentID, TorrentData: data, Title: req.Title, Category: req.Category,
 		Tags: req.Tags, SavePath: req.SavePath, DownloaderID: dl.ID, Source: appPushSource,

@@ -117,6 +117,10 @@ func TestAppPush(t *testing.T) {
 	w = appAsWith(srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"1"}`, "app:write")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, []string{"dh-secret"}, site.hashes)
+	// 没带 title：记录里的标题取种子文件里的名字，任务列表不会出现没有标题的行
+	var untitled models.TorrentInfo
+	require.NoError(t, global.GlobalDB.DB.Where("site_name = ? AND torrent_id = ?", "hdsky", "1").First(&untitled).Error)
+	assert.Equal(t, "hdsky-1", untitled.Title)
 
 	for _, c := range []struct {
 		body string
