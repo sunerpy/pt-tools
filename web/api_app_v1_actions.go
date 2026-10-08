@@ -334,13 +334,13 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 	out := AppPushResult{DownloaderID: dl.ID, Downloader: dl.Name}
 	switch {
 	case err != nil:
-		out.Message = appRedact(err.Error())
+		out.Message = appRedactAddr(err.Error())
 	case res == nil || !res.Success:
 		if res != nil {
-			out.Message, out.InfoHash = appRedact(res.Message), res.TorrentHash
+			out.Message, out.InfoHash = appRedactAddr(res.Message), res.TorrentHash
 		}
 	default:
-		out.Success, out.Skipped, out.InfoHash, out.Message = true, res.Skipped, res.TorrentHash, appRedact(res.Message)
+		out.Success, out.Skipped, out.InfoHash, out.Message = true, res.Skipped, res.TorrentHash, appRedactAddr(res.Message)
 	}
 	if !out.Success {
 		appSetOutcome(r, "error:push_failed")

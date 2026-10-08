@@ -33,6 +33,9 @@ type AppDownloaderList struct {
 	Items []AppDownloader `json:"items"`
 }
 
+// appDownloadersTimeout 是 /downloaders 一共最多等多久（几台下载器同时探测，没回来的记成没有读到）。
+const appDownloadersTimeout = 20 * time.Second
+
 func (s *Server) appDownloaders(w http.ResponseWriter, r *http.Request) {
 	if global.GlobalDB == nil {
 		appError(w, http.StatusServiceUnavailable, "unavailable", "数据库没有初始化")
@@ -49,7 +52,9 @@ func (s *Server) appDownloaders(w http.ResponseWriter, r *http.Request) {
 	}
 	stats := map[uint]DownloaderTransferStatItem{}
 	if dm := s.getDownloaderManager(); dm != nil {
-		for _, it := range s.collectTransferStats(r.Context(), dm, records).Downloaders {
+		ctx, cancel := context.WithTimeout(r.Context(), appDownloadersTimeout)
+		defer cancel()
+		for _, it := range s.collectTransferStats(ctx, dm, records).Downloaders {
 			stats[it.DownloaderID] = it
 		}
 	}
@@ -57,10 +62,10 @@ func (s *Server) appDownloaders(w http.ResponseWriter, r *http.Request) {
 	for _, ds := range settings {
 		d := AppDownloader{ID: ds.ID, Name: ds.Name, Type: ds.Type, Default: ds.IsDefault}
 		if it, ok := stats[ds.ID]; ok {
-			d.Reachable, d.Error, d.Version = it.Reachable, appRedact(it.Error), it.ClientVersion
+			d.Reachable, d.Error, d.Version = it.Reachable, appRedactAddr(it.Error), it.ClientVersion
 			d.UploadSpeed, d.DownloadSpeed, d.Uploaded, d.Downloaded, d.FreeSpace = it.UploadSpeed, it.DownloadSpeed, it.Uploaded, it.Downloaded, it.FreeSpace
 		} else {
-			d.Error = "连不上这台下载器"
+			d.Error = "这一次没有读到这台下载器（连不上或超时）"
 		}
 		out.Items = append(out.Items, d)
 	}
@@ -72,7 +77,8 @@ func (s *Server) appUpdates(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	res, err := s.checkUpdates(ctx, version.CheckOptions{IncludePrerelease: r.URL.Query().Get("include_prerelease") == "1"})
-	if err != nil && res == nil {
+	// 查不了时 Checker 也给一个带 error 字段的结果：那不是检查的结论，一律回 502
+	if err != nil {
 		appError(w, http.StatusBadGateway, "upstream", "检查更新失败: "+appRedact(err.Error()))
 		return
 	}

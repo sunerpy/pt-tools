@@ -85,7 +85,7 @@ func (s *Server) appTorrents(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.collectDownloaderTorrents(r.Context(), q)
 	if err != nil {
-		appError(w, http.StatusInternalServerError, "internal", appRedact(err.Error()))
+		appError(w, http.StatusInternalServerError, "internal", appRedactAddr(err.Error()))
 		return
 	}
 	out := AppTorrentPage{Items: make([]AppTorrent, 0, len(resp.Items)), Total: resp.Total, Page: resp.Page, PageSize: resp.PageSize, Failures: []AppDownloaderFailure{}}
@@ -98,7 +98,7 @@ func (s *Server) appTorrents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	for _, f := range resp.Failures {
-		out.Failures = append(out.Failures, AppDownloaderFailure{DownloaderID: f.DownloaderID, Downloader: f.DownloaderName, Error: appRedact(f.Error)})
+		out.Failures = append(out.Failures, AppDownloaderFailure{DownloaderID: f.DownloaderID, Downloader: f.DownloaderName, Error: appRedactAddr(f.Error)})
 	}
 	appJSON(w, out)
 }
@@ -153,7 +153,7 @@ func (s *Server) appTorrentActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		appError(w, http.StatusInternalServerError, "internal", appRedact(err.Error()))
+		appError(w, http.StatusInternalServerError, "internal", appRedactAddr(err.Error()))
 		return
 	}
 	out := AppTorrentActionsResult{Succeeded: resp.SuccessCount, Failed: resp.FailedCount, Results: make([]AppTorrentActionResult, 0, len(resp.Results))}
@@ -164,7 +164,7 @@ func (s *Server) appTorrentActions(w http.ResponseWriter, r *http.Request) {
 		appSetOutcome(r, "error:partial")
 	}
 	for _, res := range resp.Results {
-		out.Results = append(out.Results, AppTorrentActionResult{DownloaderID: res.DownloaderID, TaskID: res.TaskID, Success: res.Success, Message: appRedact(res.Message)})
+		out.Results = append(out.Results, AppTorrentActionResult{DownloaderID: res.DownloaderID, TaskID: res.TaskID, Success: res.Success, Message: appRedactAddr(res.Message)})
 	}
 	appJSON(w, out)
 }

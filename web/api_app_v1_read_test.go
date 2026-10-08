@@ -108,7 +108,7 @@ func TestAppSites(t *testing.T) {
 	assert.NotEmpty(t, names["hdsky"].Login.Tier)
 }
 
-// RSS 推送记录：分页、按站点与关键字筛；错误信息去掉了地址里的查询串
+// RSS 推送记录：分页、按站点与关键字筛；错误信息里的地址整个去掉（推送失败的错误常带着下载器的内网地址）
 func TestAppTasks(t *testing.T) {
 	srv, _ := historyFixture(t)
 	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.TorrentInfo{}))
@@ -134,7 +134,7 @@ func TestAppTasks(t *testing.T) {
 
 	w = appAs(srv.appTasks, http.MethodGet, "/api/app/v1/tasks?q=Part.Two")
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "download.php?…")
+	assert.Contains(t, w.Body.String(), `推送失败: Get \"\u003c地址\u003e\": EOF`)
 	for _, q := range []string{"?page=0", "?page_size=101", "?page=x", "?q=" + strings.Repeat("x", 201)} {
 		assert.Equal(t, http.StatusBadRequest, appAs(srv.appTasks, http.MethodGet, "/api/app/v1/tasks"+q).Code, q)
 	}

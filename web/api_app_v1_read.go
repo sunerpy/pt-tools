@@ -38,6 +38,25 @@ func appRedact(s string) string {
 	return dlassistant.RedactTrackerMessage(s)
 }
 
+var (
+	// addrURLRe 是任意的绝对地址（下载器的地址也在里面）。
+	addrURLRe = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+`)
+	// addrDialRe、addrLookupRe 是 Go 网络错误里的「dial tcp 主机:端口:」与「lookup 主机 on DNS:」。
+	addrDialRe   = regexp.MustCompile(`\b(dial (?:tcp|udp)[46]?) [^\s]+?:(\s)`)
+	addrLookupRe = regexp.MustCompile(`\blookup [^\s:]+(?: on [^\s]+:\d+)?`)
+	// addrIPRe 是剩下的 IPv4 与带方括号的 IPv6（可以带端口）。
+	addrIPRe = regexp.MustCompile(`\[[0-9a-fA-F:.]+\](?::\d{1,5})?|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b`)
+)
+
+// appRedactAddr 在 appRedact 之外再去掉网络地址：下载器的错误常带着它的内网地址与端口（Go 的 HTTP、网络错误会带上完整的请求地址），
+// App 与 MCP 拿到的只说是什么错。
+func appRedactAddr(s string) string {
+	s = addrURLRe.ReplaceAllString(appRedact(s), "<地址>")
+	s = addrDialRe.ReplaceAllString(s, "$1 <地址>:$2")
+	s = addrLookupRe.ReplaceAllString(s, "lookup <地址>")
+	return addrIPRe.ReplaceAllString(s, "<地址>")
+}
+
 func unixPtr(t *time.Time) *int64 {
 	if t == nil || t.IsZero() {
 		return nil
@@ -370,7 +389,7 @@ func (s *Server) appTasks(w http.ResponseWriter, r *http.Request) {
 			Free: t.IsFree, FreeLevel: t.FreeLevel, FreeEndAt: unixPtr(t.FreeEndTime), HasHR: t.HasHR,
 			Pushed: t.IsPushed != nil && *t.IsPushed, PushedAt: unixPtr(t.PushTime), Downloader: t.DownloaderName,
 			Progress: t.Progress, Completed: t.IsCompleted, CompletedAt: unixPtr(t.CompletedAt), Source: t.DownloadSource,
-			Error: appRedact(t.LastError), CreatedAt: t.CreatedAt.Unix(),
+			Error: appRedactAddr(t.LastError), CreatedAt: t.CreatedAt.Unix(),
 		})
 	}
 	appJSON(w, out)
