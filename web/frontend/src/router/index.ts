@@ -86,6 +86,18 @@ const router = createRouter({
       meta: { title: "整理历史" },
     },
     {
+      path: "/media/explore",
+      name: "media-explore",
+      component: () => import("@/views/MediaExplore.vue"),
+      meta: { title: "探索" },
+    },
+    {
+      path: "/media/subscriptions",
+      name: "media-subscriptions",
+      component: () => import("@/views/MediaSubscriptions.vue"),
+      meta: { title: "订阅" },
+    },
+    {
       path: "/search",
       name: "search",
       component: () => import("@/views/TorrentSearch.vue"),

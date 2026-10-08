@@ -147,6 +147,15 @@ const NOT_ON_BOARD = {
     "整理历史页（路线图 M10）晚于画板 40 定稿：删除记录（可连库里的文件一起删）的确认弹窗不在那张清点图里",
   "components/media/OrganizeDialog.vue":
     "「整理入库」（路线图 M10）晚于画板 40 定稿：任务列表与下载器 Web UI 共用这个弹窗",
+  "views/MediaSubscriptions.vue":
+    "订阅页（路线图 M11）晚于画板 40 定稿：豆瓣想看的条目弹窗不在那张清点图里",
+  "components/media/SubscribeDialog.vue":
+    "「订阅」（路线图 M11）晚于画板 40 定稿：探索页与订阅页共用这个弹窗",
+  "components/media/SubscriptionDetailDialog.vue":
+    "订阅详情（路线图 M11）晚于画板 40 定稿：分集与下载过的种子",
+  "components/media/QualityProfileDialog.vue": "质量档案的添加与修改（路线图 M11）晚于画板 40 定稿",
+  "components/media/DoubanSourceDialog.vue":
+    "豆瓣想看来源的添加与修改（路线图 M11）晚于画板 40 定稿",
   "components/downloader/TransferDialog.vue":
     "「转移到其他下载器」（路线图 M5）晚于画板 40 定稿：下载器 Web UI 与任务列表的批量操作共用这个弹窗",
   "views/DynamicSiteSettings.vue":
