@@ -128,7 +128,8 @@ type AppSite struct {
 	User        *AppSiteUser      `json:"user,omitempty"`
 }
 
-// AppSiteLogin 是登录状态：Tier 是 ok / remind / warn / danger 之类的提醒档位，DaysRemaining 是离封号阈值还有几天。
+// AppSiteLogin 是登录状态：Tier 是提醒档位（none、30d、14d、7d、3d、banned-imminent，没有访问记录时是 unknown），
+// DaysRemaining 是离封号阈值还有几天。
 type AppSiteLogin struct {
 	Tier            string `json:"tier"`
 	DaysRemaining   int    `json:"days_remaining"`
