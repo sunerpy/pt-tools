@@ -177,6 +177,7 @@ async function loadOptions() {
 }
 
 async function saveSettings() {
+  if (!settings.value) return;
   savingSettings.value = true;
   try {
     const s = await subscribeApi.saveSettings(sform.value);
@@ -530,9 +531,11 @@ onMounted(() => {
     <PtPanel title="订阅设置" icon="sliders-horizontal">
       <div v-if="settingsFailed" class="pt-note pt-note--warn">
         <PtIcon name="triangle-alert" :size="14" class="pt-note__icon" />
-        <span>设置没读到，点刷新重试。</span>
+        <span v-if="settings">设置刷新失败，下面是上次读到的。</span>
+        <span v-else>设置没读到，读到以前不能修改，点刷新重试。</span>
       </div>
-      <el-form class="pt-form ms-form" label-position="top" @submit.prevent>
+      <!-- 读到设置以前表单是默认值：不能保存，避免盖掉真正的设置 -->
+      <el-form class="pt-form ms-form" label-position="top" :disabled="!settings" @submit.prevent>
         <el-form-item label="订阅">
           <div class="ms-switch">
             <el-switch v-model="sform.enabled" data-testid="ms-enabled" />
@@ -604,6 +607,7 @@ onMounted(() => {
         <el-button
           type="primary"
           :loading="savingSettings"
+          :disabled="!settings"
           data-testid="ms-save-settings"
           @click="saveSettings">
           <PtIcon v-if="!savingSettings" name="save" :size="14" /><span>保存</span>

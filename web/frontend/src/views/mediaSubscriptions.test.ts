@@ -165,8 +165,9 @@ const source = {
   unmatched: 1,
 };
 
-async function mountPage(opts: { listFail?: boolean } = {}) {
-  api.settings.mockResolvedValue(settings);
+async function mountPage(opts: { listFail?: boolean; settingsFail?: boolean } = {}) {
+  if (opts.settingsFail) api.settings.mockRejectedValue(new Error("读取设置失败"));
+  else api.settings.mockResolvedValue(settings);
   if (opts.listFail) api.list.mockRejectedValue(new Error("读取订阅失败"));
   else api.list.mockResolvedValue([movie, tv]);
   api.profiles.mockResolvedValue({
@@ -291,6 +292,16 @@ describe("订阅", () => {
     await vi.waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
     expect(api.saveSettings.mock.calls[0]![0]).toEqual({ ...settings, enabled: true });
     expect(ui.success).toHaveBeenCalledWith("已保存订阅设置");
+  });
+
+  it("设置没读到时不能保存，避免用默认值盖掉真正的设置", async () => {
+    await mountPage({ settingsFail: true });
+    expect(document.body.textContent).toContain("设置没读到");
+    const save = q("ms-save-settings") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    save.click();
+    await flush();
+    expect(api.saveSettings).not.toHaveBeenCalled();
   });
 
   it("质量档案：添加只发输入字段", async () => {
