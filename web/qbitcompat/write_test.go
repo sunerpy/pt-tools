@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -134,4 +135,16 @@ func TestBoolParamsCaseInsensitive(t *testing.T) {
 	}
 	assert.Equal(t, names("true"), names("True"))
 	assert.Equal(t, "Dune.Part.Two.2024.2160p", names("TRUE")[0])
+}
+
+// 审计记下写操作的耗时（审计页的「延迟」列）
+func TestWriteAuditLatency(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	e.markCompat(hashMovie)
+	e.dl.delay = 30 * time.Millisecond
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashMovie}}, ck).Code)
+	a := e.audit.all()
+	require.Len(t, a, 1)
+	assert.GreaterOrEqual(t, a[0].LatencyMs, int64(30))
 }

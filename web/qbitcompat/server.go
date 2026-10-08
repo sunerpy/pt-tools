@@ -93,10 +93,11 @@ type route struct {
 	public bool
 }
 
-// call 是一次已登录的请求：令牌与会话里的用户名。
+// call 是一次已登录的请求：令牌、会话里的用户名与开始处理的时间（审计记耗时）。
 type call struct {
 	token    apitoken.Token
 	username string
+	start    time.Time
 }
 
 func (s *Server) routes() map[string]route {
@@ -160,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 			rt.h(w, r, nil)
 			return
 		}
+		start := time.Now()
 		c, status := s.authenticate(r)
 		if c == nil {
 			if status == http.StatusForbidden {
@@ -169,6 +171,7 @@ func (s *Server) Handler() http.Handler {
 			}
 			return
 		}
+		c.start = start
 		rt.h(w, r, c)
 	})
 }

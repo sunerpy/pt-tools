@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -99,6 +100,7 @@ func (s *Server) recordWrite(r *http.Request, c *call, op, result string, sel se
 	maps.Copy(args, extra)
 	s.record(r, app.AuditEntry{
 		ChannelUserID: strconv.FormatUint(uint64(c.token.ID), 10), Command: "POST /api/v2/" + op, Result: result, Args: args,
+		LatencyMs: time.Since(c.start).Milliseconds(),
 	})
 }
 

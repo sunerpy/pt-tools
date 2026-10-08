@@ -45,6 +45,8 @@ type fakeDL struct {
 	status   downloader.ClientStatus
 	free     int64
 	calls    []string
+	// delay 让暂停慢一点（测审计里的耗时）
+	delay time.Duration
 }
 
 func (f *fakeDL) GetAllTorrents() ([]downloader.Torrent, error) {
@@ -79,7 +81,10 @@ func (f *fakeDL) got() []string {
 	return append([]string(nil), f.calls...)
 }
 
-func (f *fakeDL) PauseTorrents(ids []string) error { return f.log("pause %s", strings.Join(ids, ",")) }
+func (f *fakeDL) PauseTorrents(ids []string) error {
+	time.Sleep(f.delay)
+	return f.log("pause %s", strings.Join(ids, ","))
+}
 
 func (f *fakeDL) ResumeTorrents(ids []string) error {
 	return f.log("resume %s", strings.Join(ids, ","))

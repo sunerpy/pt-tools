@@ -296,6 +296,7 @@ func (s *Server) recordAdd(r *http.Request, c *call, outcomes []addOutcome, file
 	}
 	s.record(r, app.AuditEntry{
 		ChannelUserID: strconv.FormatUint(uint64(c.token.ID), 10), Command: "POST /api/v2/torrents/add", Result: result,
+		LatencyMs: time.Since(c.start).Milliseconds(),
 		Args: map[string]any{
 			"name": c.token.Name, "username": c.username, "files": files, "urls": links, "added": added, "skipped": skipped,
 			"failed": failed, "reasons": reasons, "category": o.category,
