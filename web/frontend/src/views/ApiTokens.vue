@@ -341,6 +341,22 @@ onMounted(load);
   gap: 6px;
 }
 
+/* 权限的说明在手机上要能折行：el-checkbox 默认不换行、高 32，长说明会冲出弹窗右边 */
+.tk-scope-list :deep(.el-checkbox) {
+  height: auto;
+  margin-right: 0;
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.tk-scope-list :deep(.el-checkbox__input) {
+  margin-top: 3px;
+}
+
+.tk-scope-list :deep(.el-checkbox__label) {
+  line-height: 20px;
+}
+
 .tk-hint {
   margin-left: 8px;
 }
