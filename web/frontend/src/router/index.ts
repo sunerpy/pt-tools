@@ -26,6 +26,12 @@ const router = createRouter({
       meta: { title: "全局设置" },
     },
     {
+      path: "/api-tokens",
+      name: "api-tokens",
+      component: () => import("@/views/ApiTokens.vue"),
+      meta: { title: "API 令牌" },
+    },
+    {
       path: "/cloak-config",
       name: "cloak-config",
       component: () => import("@/views/CloakBrowserConfig.vue"),

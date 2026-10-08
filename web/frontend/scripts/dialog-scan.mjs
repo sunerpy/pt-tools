@@ -135,6 +135,8 @@ const BOARD_40 = [
  * 这不是豁免：它同样会被打印出来给 owner 看。
  */
 const NOT_ON_BOARD = {
+  "views/ApiTokens.vue":
+    "API 令牌页（路线图 M12）晚于画板 40 定稿：新建令牌与只显示一次明文的弹窗不在那张清点图里",
   "views/BrushTasks.vue":
     "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗与种子抽屉都不在那张清点图里",
   "views/TorrentTransfer.vue":

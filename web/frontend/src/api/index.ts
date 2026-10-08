@@ -2840,3 +2840,36 @@ export const reseedApi = {
     ),
   clearFinished: () => api.delete<{ deleted: number }>("/api/reseed/jobs"),
 };
+
+// ---- API 令牌（路线图 M12） ----
+
+export type ApiTokenScope = "app:read" | "app:write" | "mcp:read" | "mcp:write" | "qbit:compat";
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  scopes: ApiTokenScope[];
+  expires_at?: string;
+  last_used_at?: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface ApiTokenInput {
+  name: string;
+  scopes: ApiTokenScope[];
+  /** 0 表示不过期 */
+  expires_in_days: number;
+}
+
+export interface ApiTokenCreated {
+  token: ApiToken;
+  /** 明文只在新建时给这一次 */
+  plaintext: string;
+}
+
+export const tokensApi = {
+  list: () => api.get<ApiToken[]>("/api/tokens"),
+  create: (data: ApiTokenInput) => api.post<ApiTokenCreated>("/api/tokens", data),
+  revoke: (id: number) => api.delete<{ ok: boolean }>(`/api/tokens/${id}`),
+};
