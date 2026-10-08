@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.13](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.12...v1.0.0-rc.13) (2026-10-08)
+
+
+### Features
+
+* **web:** API 令牌与 App API v1（M12） ([#639](https://github.com/sunerpy/pt-tools/issues/639)) ([853e5f7](https://github.com/sunerpy/pt-tools/commit/853e5f795e746cedaac66b96dc1382285f8b83d9))
+
 ## [1.0.0-rc.12](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.11...v1.0.0-rc.12) (2026-10-08)
 
 
