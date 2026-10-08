@@ -121,7 +121,12 @@ async function revoke(t: ApiToken) {
     await ElMessageBox.confirm(
       `撤销「${t.name}」以后，用这个令牌的客户端马上就连不上了。`,
       "撤销令牌",
-      { type: "warning", confirmButtonText: "撤销", cancelButtonText: "取消" },
+      {
+        type: "warning",
+        confirmButtonText: "撤销",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+      },
     );
   } catch {
     return;
