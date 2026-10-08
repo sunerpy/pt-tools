@@ -38,10 +38,10 @@ A torrent matches a subscription when:
 
 - both have an IMDb ID and the IDs are equal; when both have one, nothing else is compared;
 - otherwise the Chinese or English title parsed from the torrent equals the subscription's title, original title or one of its TMDB alternative titles (ignoring spaces, punctuation and case), with recognition words applied as usual;
-- for films, the years differ by one at most, and anything with seasons and episodes is not a film;
+- for films, the years differ by one at most; when only the names are compared, the torrent's title or subtitle must state a year, since many films share a name. Anything with seasons and episodes is not a film;
 - for series, the season matches; a multi-season pack containing the season also counts. Anime that only gives an episode number (such as `- 05`) counts as season 1.
 
-The chosen torrent goes through the same push as RSS: disk space protection and site seeding capacity still apply, and the torrent record shows the source Subscription (订阅). A torrent is pushed once per subscription; a failed push is not recorded, so the next search tries again.
+The chosen torrent goes through the same push as RSS: disk space protection and site seeding capacity still apply, and the torrent record shows the source Subscription (订阅). A torrent is pushed once per subscription; a failed push, including one stopped by disk space protection or site seeding capacity, is not recorded, so the next search tries again.
 
 ## Quality profiles
 
@@ -57,7 +57,7 @@ Add quality profiles under Quality profiles (质量档案) on the Subscriptions 
 | Minimum seeders (最少做种数)         | Only for searched torrents: seeder counts mean little for a torrent freshly published to RSS                                      |
 | No H&R (不要 H&R)                    | Rejects torrents with H&R requirements, including sites where every torrent has H&R                                               |
 
-Scoring: the requirements above are checked first, then releases are compared by resolution, then source, then codec, with a small bonus each for Remux, HDR, Chinese subtitles (when set to prefer) and preferred groups. On equal scores, free torrents come first when the profile prefers free, then more seeders, then the smaller size.
+Scoring: the requirements above are checked first, then releases are compared by resolution, then source, then codec; a better value in an earlier item always wins, whatever the later items are. Releases equal in all three get a small bonus each for Remux, HDR, Chinese subtitles (when set to prefer) and preferred groups. On equal scores, free torrents come first when the profile prefers free, then more seeders, then the smaller size.
 
 ## Series
 
@@ -65,17 +65,19 @@ A series' progress follows TMDB's episode list for the season: episodes that are
 
 - While the season airs, missing episodes are filled in one at a time, each with its highest-scoring release.
 - Once the season has finished airing, a season pack is downloaded when half or more of the episodes are missing, or when no single-episode release covers the missing ones. No season packs are taken while the season airs, since those are usually incomplete.
+- A downloaded torrent counts as organised once some of its files are in the library and the rest are no longer retried automatically; when a season pack leaves some episodes unorganised, the torrent says so, and those episodes count as missing for later searches.
 - A downloaded torrent that is still not organised after 7 days is marked failed; its episodes count as missing again and later searches look for them.
-- The subscription is done once the whole season has aired and every episode is in the library. A film is done once it is organised, or once a media server configured under Media library already has it.
+- The subscription is done once the whole season has aired and every episode is in the library. A film is done once it is organised, or once a media server configured under Media library already has it. A film subscription without upgrades does not download anything when the film is already in the library.
 
 ## Upgrades
 
-With upgrades on, a subscription keeps looking for higher-scoring releases after the first download until it reaches the first resolution and source in its profile (and Remux too when the profile prefers Remux). Without a ranked resolution and source in the profile, it stops after one download.
+With upgrades on, a subscription keeps looking for higher-scoring releases after the first download until the version in the library reaches the first resolution and source in its profile (and Remux too when the profile prefers Remux; for a series, every episode must reach it). Without a ranked resolution and source in the profile, it stops after one download.
 
+- Releases are compared with the current versions: the files already in the library for the title (including ones the subscription did not download) and the subscription's torrents that are downloading or organised. Their scores are recalculated with the current profile, so changing the profile keeps comparisons fair; failed downloads do not count.
 - Films: a higher-scoring release is downloaded when found; no new one is pushed while the previous one is still downloading.
-- Series: once the whole season has been downloaded, only season packs are considered, and only if they score higher than everything downloaded so far.
-- After the new release is organised, the old release's files are removed from the library by the rules for [deleting history records](media-library.md#organise-history): only files confirmed to be the ones pt-tools placed, and never moved files. The old record becomes Removed (已删除) and names the release that replaced it. When the old and new releases organise to the same file name, the old one is removed first and the new one is organised after it.
-- The old torrent follows the setting: keep seeding (the default), or delete it with its data (torrents with H&R requirements keep seeding).
+- Series: once the whole season is in the library, only season packs are considered, and only if they score higher than every current version.
+- After the new release is organised, the older files it covers and outscores are removed from the library by the rules for [deleting history records](media-library.md#organise-history): only files confirmed to be the ones pt-tools placed, and never moved files. The old record becomes Removed (已删除) and names the release that replaced it. For series, only the episodes the new torrent actually organised are replaced: when a season pack leaves some episodes unorganised, their old files stay, and an old file holding several episodes is replaced only when the new release has all of them. When the old and new releases organise to the same file name, the old one is removed first and the new one is organised after it.
+- Once none of an old subscription torrent's files remain in the library, it follows the setting: keep seeding (the default), or delete it with its data. Torrents that were already in the downloader when the subscription pushed them, and torrents with H&R requirements, are kept.
 
 ## Douban wish list
 
@@ -87,7 +89,7 @@ Under Douban wish list (豆瓣想看) on the Subscriptions page, add a Douban us
 - Items not found on TMDB are recorded as not found and not searched again; you can search and subscribe to them from the Explore page.
 - When you delete a subscription created from Douban, that item is not subscribed again; when an item disappears from Douban's RSS, the subscription it created is kept.
 - Failed fetches back off for 1, 2, 4… hours, up to 24 hours; after 3 failures in a row the source is marked Abnormal (异常) and one notification goes to the channels selected in the settings. Without a TMDB API key the whole fetch counts as failed, so no items are recorded as not found.
-- Fetch now (立即拉取) fetches right away; Items (条目) lists the items seen and their results. Deleting a source keeps the subscriptions it created.
+- Fetch now (立即拉取) fetches right away (while the source is already being fetched, it asks you to try again later); Items (条目) lists the items seen and their results. Deleting a source keeps the subscriptions it created.
 
 ## Notifications
 
