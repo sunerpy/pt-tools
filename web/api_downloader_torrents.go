@@ -1246,11 +1246,15 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	writeJSON(w, s.collectTransferStats(r.Context(), dm, records))
+}
+
+// collectTransferStats 读这些下载器现在的传输状态与剩余空间。取不到实例的那台不在结果里；
+// 取到实例但状态与剩余空间都读不出来的记 Reachable=false 与原因。
+func (s *Server) collectTransferStats(ctx context.Context, dm *downloader.DownloaderManager, records []downloaderRecord) DownloaderTransferStatsResponse {
 	resp := DownloaderTransferStatsResponse{
 		Downloaders: make([]DownloaderTransferStatItem, 0, len(records)),
 	}
-
-	ctx := r.Context()
 	for _, rec := range records {
 		dl, dlErr := acquireDownloader(ctx, dm, rec.Name)
 		if dlErr != nil {
@@ -1298,5 +1302,5 @@ func (s *Server) apiDownloaderTransferStats(w http.ResponseWriter, r *http.Reque
 		resp.Downloaders = append(resp.Downloaders, item)
 	}
 
-	writeJSON(w, resp)
+	return resp
 }
