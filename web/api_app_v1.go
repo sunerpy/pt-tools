@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,6 +27,7 @@ const (
 	appPrefix = "/api/app/v1"
 	// AppRemoteAPILevel 是 App API 的兼容级别：不兼容的改动才加一，App 遇到不认识的级别时提示升级
 	AppRemoteAPILevel = 1
+	appMaxBody        = 1 << 20
 )
 
 // appAuditRecorder 记下一条操作审计（app.AuditService 实现了它）。
@@ -43,13 +45,15 @@ type appRoute struct {
 
 // appRoutes 是 App API v1 的路由表。读接口要 app:read，写接口要 app:write。
 func (s *Server) appRoutes() []appRoute {
-	r := apitoken.ScopeAppRead
+	r, w := apitoken.ScopeAppRead, apitoken.ScopeAppWrite
 	return []appRoute{
 		{http.MethodGet, "/meta", r, s.appMeta},
 		{http.MethodGet, "/overview", r, s.appOverview},
 		{http.MethodGet, "/sites", r, s.appSites},
 		{http.MethodGet, "/tasks", r, s.appTasks},
 		{http.MethodGet, "/favicon/{site}", r, s.appFavicon},
+		{http.MethodGet, "/torrents", r, s.appTorrents},
+		{http.MethodPost, "/torrents/actions", w, s.appTorrentActions},
 	}
 }
 
@@ -74,6 +78,21 @@ func appError(w http.ResponseWriter, status int, code, message string) {
 func appJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// appDecode 严格解析请求体：最多 1 MiB，拒绝不认识的字段与 JSON 之后多出来的内容。
+func appDecode(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, appMaxBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		appError(w, http.StatusBadRequest, "invalid_body", "请求格式错误: "+err.Error())
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		appError(w, http.StatusBadRequest, "invalid_body", "请求格式错误: JSON 之后还有多余的内容")
+		return false
+	}
+	return true
 }
 
 // appPrincipal 解析请求的主体：有效的 session cookie 优先，其次是 Bearer 令牌。没有主体时返回 nil 与要回的状态码。
