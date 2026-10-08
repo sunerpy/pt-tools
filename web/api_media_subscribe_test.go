@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -15,11 +17,12 @@ import (
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/models"
 )
 
 // newSubscribeServer 起一个接好订阅服务的接口：TMDB 是本地假服务（肖申克的救赎、趋势列表）。没有搜索与推送：立即搜索回「搜索服务没有启动」。
-func newSubscribeServer(t *testing.T) *http.ServeMux {
+func newSubscribeServer(t *testing.T, opts ...func(*subscribe.Config)) *http.ServeMux {
 	t.Helper()
 	srv := setupServer(t)
 	srv.mgr.StopAll()
@@ -51,7 +54,11 @@ func newSubscribeServer(t *testing.T) *http.ServeMux {
 	key := mediaTestKey
 	_, err := rec.SaveSettings(context.Background(), recognize.SettingsInput{TMDBKey: &key})
 	require.NoError(t, err)
-	srv.SetSubscribeService(subscribe.New(subscribe.Config{DB: db, Recognizer: rec}))
+	cfg := subscribe.Config{DB: db, Recognizer: rec}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	srv.SetSubscribeService(subscribe.New(cfg))
 	mux := http.NewServeMux()
 	srv.registerSubscribeRoutes(mux)
 	srv.sessions.put("sess-test", "admin")
@@ -175,4 +182,78 @@ func TestSubscribeAPI_Flow(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodDelete, "/api/media/subscriptions/"+sid, "").Code)
 	assert.Equal(t, http.StatusOK, serveAuthed(mux, http.MethodDelete, "/api/media/quality-profiles/"+pid, "").Code)
+}
+
+// 豆瓣立即拉取：建订阅；来源不存在 404；路径里的编号不对 400
+func TestSubscribeAPI_DoubanFetch(t *testing.T) {
+	feed := `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>qa 的收藏</title>
+<item><title>想看肖申克的救赎</title><link>https://movie.douban.com/subject/1292052/</link>
+<description><![CDATA[<img src="x.jpg" title="The Shawshank Redemption" />]]></description></item></channel></rss>`
+	douban := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/feed/people/qa/interests" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(feed))
+	}))
+	t.Cleanup(douban.Close)
+	mux := newSubscribeServer(t, func(c *subscribe.Config) { c.DoubanBase = douban.URL })
+	w := serveAuthed(mux, http.MethodPost, "/api/media/douban-sources", `{"user_id":"qa","enabled":true,"confirm":true}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var src models.MediaDoubanSource
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &src))
+	did := strconv.Itoa(int(src.ID))
+	w = serveAuthed(mux, http.MethodPost, "/api/media/douban-sources/"+did+"/fetch", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"created":1}`, w.Body.String())
+	w = serveAuthed(mux, http.MethodGet, "/api/media/douban-sources/"+did+"/items", "")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"status":"subscribed"`)
+
+	for _, c := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodPost, "/api/media/douban-sources/99/fetch", "", http.StatusNotFound},
+		{http.MethodPost, "/api/media/douban-sources/x/fetch", "", http.StatusBadRequest},
+		{http.MethodGet, "/api/media/douban-sources/99/items", "", http.StatusNotFound},
+		{http.MethodGet, "/api/media/douban-sources/x/items", "", http.StatusBadRequest},
+		{http.MethodDelete, "/api/media/douban-sources/99", "", http.StatusNotFound},
+		{http.MethodDelete, "/api/media/douban-sources/x", "", http.StatusBadRequest},
+		{http.MethodPut, "/api/media/douban-sources/x", "{}", http.StatusBadRequest},
+		{http.MethodPut, "/api/media/subscriptions/x", "{}", http.StatusBadRequest},
+		{http.MethodPut, "/api/media/subscriptions/99", "{}", http.StatusNotFound},
+		{http.MethodPut, "/api/media/subscriptions/99", `{"bogus":1}`, http.StatusBadRequest},
+		{http.MethodDelete, "/api/media/subscriptions/x", "", http.StatusBadRequest},
+		{http.MethodDelete, "/api/media/subscriptions/99", "", http.StatusNotFound},
+		{http.MethodPost, "/api/media/subscriptions/x/status", `{"status":"paused"}`, http.StatusBadRequest},
+		{http.MethodPost, "/api/media/subscriptions/x/search", "", http.StatusBadRequest},
+		{http.MethodDelete, "/api/media/quality-profiles/x", "", http.StatusBadRequest},
+		{http.MethodPut, "/api/media/quality-profiles/x", "{}", http.StatusBadRequest},
+	} {
+		assert.Equal(t, c.want, serveAuthed(mux, c.method, c.path, c.body).Code, c.method+" "+c.path)
+	}
+}
+
+// 订阅接口的错误码：参数不对 400、找不到 404、正在处理 409、TMDB 限流 429、超时 504、TMDB 不能访问 502、其他 500
+func TestWriteSubscribeError(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want int
+	}{
+		{fmt.Errorf("%w: x", subscribe.ErrInvalid), http.StatusBadRequest},
+		{tmdb.ErrNoKey, http.StatusBadRequest},
+		{tmdb.ErrUnauthorized, http.StatusBadRequest},
+		{subscribe.ErrNotFound, http.StatusNotFound},
+		{tmdb.ErrNotFound, http.StatusNotFound},
+		{fmt.Errorf("%w：正在拉取", subscribe.ErrBusy), http.StatusConflict},
+		{tmdb.ErrRateLimited, http.StatusTooManyRequests},
+		{context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{tmdb.ErrUnavailable, http.StatusBadGateway},
+		{errors.New("boom"), http.StatusInternalServerError},
+	} {
+		w := httptest.NewRecorder()
+		writeSubscribeError(w, c.err)
+		assert.Equal(t, c.want, w.Code, c.err.Error())
+	}
 }

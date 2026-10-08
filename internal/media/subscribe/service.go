@@ -163,8 +163,8 @@ func (s *Service) Offer(site string, item v2.TorrentItem) {
 	}
 }
 
-// tickInterval 是后台循环的节拍。
-const tickInterval = time.Minute
+// tickInterval 是后台循环的节拍（测试里调短）。
+var tickInterval = time.Minute
 
 // Start 启动后台：处理 RSS 交来的种子，每分钟看一次到期的搜索、下载中的种子与豆瓣想看。
 func (s *Service) Start(ctx context.Context) {
