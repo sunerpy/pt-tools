@@ -99,10 +99,8 @@ func TestMCPEndpoint(t *testing.T) {
 
 // 命令：没给令牌时报错并写明去哪里建；地址不对时报错
 func TestMCPCommandArgs(t *testing.T) {
-	prevURL, prevToken, prevDiscard := mcpBridgeURL, mcpBridgeToken, mcpDiscardKey
-	t.Cleanup(func() { mcpBridgeURL, mcpBridgeToken, mcpDiscardKey = prevURL, prevToken, prevDiscard })
-	discarded := 0
-	mcpDiscardKey = func() error { discarded++; return nil }
+	prevURL, prevToken := mcpBridgeURL, mcpBridgeToken
+	t.Cleanup(func() { mcpBridgeURL, mcpBridgeToken = prevURL, prevToken })
 	t.Setenv("PT_TOOLS_MCP_URL", "")
 	t.Setenv("PT_TOOLS_MCP_TOKEN", "")
 	mcpBridgeURL, mcpBridgeToken = "", ""
@@ -114,5 +112,4 @@ func TestMCPCommandArgs(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http://")
 	assert.Equal(t, "b", firstNonEmpty(" ", "b", "c"))
-	assert.Equal(t, 2, discarded, "桥启动时先删掉本进程生成的密钥文件")
 }

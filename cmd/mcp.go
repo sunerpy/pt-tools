@@ -12,20 +12,17 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/sunerpy/pt-tools/internal/crypto"
 	"github.com/sunerpy/pt-tools/version"
 )
 
 // pt-tools mcp（路线图 M14）：stdio 到 HTTP 的 MCP 桥，给只支持 stdio 的客户端用。它连上正在运行的 pt-tools 的 /mcp，
 // 把那里的工具原样挂到本地 stdio 服务上转发。不打开数据库，也不启动调度器：pt-tools 只有一个进程在写。
+// 它也不碰加密密钥（密钥在第一次用到时才读取或生成），客户端那台机器上不会多出 ~/.pt-tools。
 
 var (
 	mcpBridgeURL   string
 	mcpBridgeToken string
 )
-
-// mcpDiscardKey 删掉本进程启动时新生成的密钥文件（测试里换掉，不动测试进程的密钥）。
-var mcpDiscardKey = crypto.DiscardGeneratedKey
 
 // mcpDefaultURL 是没给地址时连的 pt-tools。
 const mcpDefaultURL = "http://127.0.0.1:8080"
@@ -39,11 +36,6 @@ var mcpCmd = &cobra.Command{
 这个命令不打开数据库，也不启动调度器。`,
 	Example: `  PT_TOOLS_MCP_TOKEN=ptt_… pt-tools mcp --url http://192.168.1.10:8080`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		// 桥用不到加密密钥：进程启动时 ~/.pt-tools 里没有 secret.key 而新生成了一个的，删掉它，
-		// 客户端那台机器上不留一个和服务端无关的密钥（以后在这里启动 pt-tools 时它会被当成正常密钥）
-		if err := mcpDiscardKey(); err != nil {
-			fmt.Fprintf(os.Stderr, "pt-tools MCP：删除用不到的密钥文件失败: %v\n", err)
-		}
 		endpoint, err := mcpEndpoint(firstNonEmpty(mcpBridgeURL, os.Getenv("PT_TOOLS_MCP_URL"), mcpDefaultURL))
 		if err != nil {
 			return err

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 var (
@@ -25,18 +26,36 @@ var (
 	keyGenerated bool
 	// keyLoadErr 记录 secret.key 存在却无法使用的原因。这时不生成新密钥、也不覆盖原文件。
 	keyLoadErr error
+
+	// keyMu 与 keyLoaded：密钥在第一次用到时才读取或生成（Encrypt、Decrypt、ExportKey、KeyStatus），
+	// 不在包初始化时做。pt-tools mcp 这类用不到密钥的命令因此不碰 ~/.pt-tools，也不会生成一个和服务端无关的密钥。
+	keyMu     sync.Mutex
+	keyLoaded bool
 )
 
 type AESGCMEncryptor struct {
 	key []byte
 }
 
-func init() {
-	initKey()
+// ensureKey 第一次调用时读取或生成密钥，之后什么都不做。
+func ensureKey() {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	if !keyLoaded {
+		loadKeyLocked()
+	}
 }
 
+// initKey 重新读取或生成密钥（测试与 ResetForTest 用）。
 func initKey() {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	loadKeyLocked()
+}
+
+func loadKeyLocked() {
 	encryptor, keyFilePath, keyGenerated, keyLoadErr = nil, "", false, nil
+	keyLoaded = true
 
 	keyB64 := os.Getenv("PT_TOOLS_SECRET_KEY")
 	if keyB64 != "" {
@@ -123,12 +142,15 @@ func loadExistingKey(keyFile string) {
 // path 是密钥文件路径（用 PT_TOOLS_SECRET_KEY 时为空），generated 表示本次启动新生成了密钥文件，
 // err 非空表示密钥文件存在却无法使用。
 func KeyStatus() (path string, generated bool, err error) {
+	ensureKey()
 	return keyFilePath, keyGenerated, keyLoadErr
 }
 
 // DiscardGeneratedKey 删除本次启动新生成的密钥文件并停用它。启动检查发现库里已有旧密文时调用：
 // 新密钥解不开旧数据，留着它，下次启动就会被当成正常密钥使用。
 func DiscardGeneratedKey() error {
+	keyMu.Lock()
+	defer keyMu.Unlock()
 	if !keyGenerated || keyFilePath == "" {
 		return nil
 	}
@@ -139,6 +161,7 @@ func DiscardGeneratedKey() error {
 // Encrypt encrypts plaintext and returns base64-encoded "nonce|ciphertext|authtag"
 // All three components are packed into the base64 string for transport.
 func Encrypt(plain []byte) (cipherStr string, err error) {
+	ensureKey()
 	if encryptor == nil || len(encryptor.key) == 0 {
 		return "", errNoKey
 	}
@@ -173,6 +196,7 @@ func Encrypt(plain []byte) (cipherStr string, err error) {
 // Decrypt decodes base64 string and decrypts to plaintext.
 // Expects format: base64(nonce | ciphertext | authtag)
 func Decrypt(cipherStr string) (plain []byte, err error) {
+	ensureKey()
 	if encryptor == nil || len(encryptor.key) == 0 {
 		return nil, errNoKey
 	}
@@ -209,6 +233,7 @@ func Decrypt(cipherStr string) (plain []byte, err error) {
 }
 
 func ExportKey() ([]byte, error) {
+	ensureKey()
 	if encryptor == nil || len(encryptor.key) == 0 {
 		return nil, errNoKey
 	}
