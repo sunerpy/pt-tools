@@ -17,7 +17,7 @@ import (
 
 // pt-tools mcp（路线图 M14）：stdio 到 HTTP 的 MCP 桥，给只支持 stdio 的客户端用。它连上正在运行的 pt-tools 的 /mcp，
 // 把那里的工具原样挂到本地 stdio 服务上转发。不打开数据库，也不启动调度器：pt-tools 只有一个进程在写。
-// 它也不碰加密密钥（密钥在第一次用到时才读取或生成），客户端那台机器上不会多出 ~/.pt-tools。
+// 它也不碰加密密钥：crypto 包在 pt-tools mcp 进程启动时不读取也不生成 secret.key（crypto.skipKeyAtStart），客户端那台机器上不会多出 ~/.pt-tools。
 
 var (
 	mcpBridgeURL   string

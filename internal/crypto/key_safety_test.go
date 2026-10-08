@@ -148,3 +148,11 @@ func TestWriteNewKeyFile(t *testing.T) {
 
 	assert.Error(t, writeNewKeyFile(filepath.Join(dir, "no-such-dir", "secret.key"), "x"))
 }
+
+// pt-tools mcp（stdio 桥）启动时不读取也不生成密钥；别的命令照旧
+func TestSkipKeyAtStart(t *testing.T) {
+	assert.True(t, skipKeyAtStart([]string{"/usr/local/bin/pt-tools", "mcp", "--url", "http://x"}))
+	for _, args := range [][]string{{"pt-tools"}, {"pt-tools", "web"}, {"pt-tools", "secret", "export"}, {"crypto.test", "-test.run", "x"}} {
+		assert.False(t, skipKeyAtStart(args), args)
+	}
+}

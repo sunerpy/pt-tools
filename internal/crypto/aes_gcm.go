@@ -27,11 +27,25 @@ var (
 	// keyLoadErr 记录 secret.key 存在却无法使用的原因。这时不生成新密钥、也不覆盖原文件。
 	keyLoadErr error
 
-	// keyMu 与 keyLoaded：密钥在第一次用到时才读取或生成（Encrypt、Decrypt、ExportKey、KeyStatus），
-	// 不在包初始化时做。pt-tools mcp 这类用不到密钥的命令因此不碰 ~/.pt-tools，也不会生成一个和服务端无关的密钥。
+	// keyMu 与 keyLoaded：密钥在进程启动时读取或生成（见 init）；跳过了启动时加载的进程在第一次用到时再读取或生成
+	// （Encrypt、Decrypt、ExportKey、KeyStatus）。
 	keyMu     sync.Mutex
 	keyLoaded bool
 )
+
+func init() {
+	if skipKeyAtStart(os.Args) {
+		return
+	}
+	initKey()
+}
+
+// skipKeyAtStart 报告这个进程启动时要不要跳过读取或生成密钥：pt-tools mcp 是 stdio 到 HTTP 的桥，用不到密钥，
+// 不碰 ~/.pt-tools（客户端那台机器上不留一个和服务端无关的密钥）。别的命令照旧在启动时读取或生成：
+// ConfigStore 等处按 ~/.pt-tools/secret.key 文件在不在判断密钥能不能用。
+func skipKeyAtStart(args []string) bool {
+	return len(args) > 1 && args[1] == "mcp"
+}
 
 type AESGCMEncryptor struct {
 	key []byte
