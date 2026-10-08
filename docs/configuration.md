@@ -6,16 +6,17 @@
 
 通过环境变量可以配置 pt-tools 的运行参数，适用于 Docker 部署场景。
 
-| 变量             | 说明           | 默认值          | 示例               |
-| ---------------- | -------------- | --------------- | ------------------ |
-| `PT_HOST`        | Web 监听地址   | `0.0.0.0`       | `127.0.0.1`        |
-| `PT_PORT`        | Web 监听端口   | `8080`          | `8888`             |
-| `PT_ADMIN_USER`  | 管理员用户名   | `admin`         | `myadmin`          |
-| `PT_ADMIN_PASS`  | 管理员密码     | `adminadmin`    | `MySecurePass123`  |
-| `PT_ADMIN_RESET` | 重置管理员密码 | -               | `1` (启用)         |
-| `PUID`           | 容器用户 ID    | `1000`          | `1001`             |
-| `PGID`           | 容器组 ID      | `1000`          | `1001`             |
-| `TZ`             | 时区           | `Asia/Shanghai` | `America/New_York` |
+| 变量                  | 说明                                                      | 默认值          | 示例               |
+| --------------------- | --------------------------------------------------------- | --------------- | ------------------ |
+| `PT_HOST`             | Web 监听地址                                              | `0.0.0.0`       | `127.0.0.1`        |
+| `PT_PORT`             | Web 监听端口                                              | `8080`          | `8888`             |
+| `PT_ADMIN_USER`       | 管理员用户名                                              | `admin`         | `myadmin`          |
+| `PT_ADMIN_PASS`       | 管理员密码                                                | `adminadmin`    | `MySecurePass123`  |
+| `PT_ADMIN_RESET`      | 重置管理员密码                                            | -               | `1` (启用)         |
+| `PT_QBIT_COMPAT_ADDR` | [qB 兼容入口](guide/qbit-compat.md)的监听地址，不设时不开 | -               | `0.0.0.0:8081`     |
+| `PUID`                | 容器用户 ID                                               | `1000`          | `1001`             |
+| `PGID`                | 容器组 ID                                                 | `1000`          | `1001`             |
+| `TZ`                  | 时区                                                      | `Asia/Shanghai` | `America/New_York` |
 
 ### 环境变量使用示例
 

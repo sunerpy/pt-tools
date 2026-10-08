@@ -9,12 +9,13 @@ Open System → API tokens (系统 → API 令牌).
 1. Click New (新建), enter a name (for example "My phone"), and choose the permissions and how long the token stays valid.
 2. The dialog that opens shows the token itself, starting with `ptt_`. It is shown only this once: copy it into the client before closing the dialog. If you lose it, revoke it and create another.
 
-| Permission     | What it allows                                                                                                                   |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Read (读取)    | Overview, sites, torrents in the downloaders, RSS push records, search, brush tasks, organise history, subscriptions and Explore |
-| Operate (操作) | Pause, resume and delete torrents, push torrents, sign in to sites, create, pause, resume, search and delete subscriptions       |
+| Permission              | What it allows                                                                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Read (读取)             | Overview, sites, torrents in the downloaders, RSS push records, search, brush tasks, organise history, subscriptions and Explore                                |
+| Operate (操作)          | Pause, resume and delete torrents, push torrents, sign in to sites, create, pause, resume, search and delete subscriptions                                      |
+| qB compatible (qB 兼容) | Signing in to the [qB-compatible entrance](qbit-compat.md), for tools that only work with qBittorrent such as MoviePilot and IYUU; independent of the other two |
 
-A token with only Operate cannot read anything, so clients usually need both. Validity can be 30 days, 90 days, 1 year or no expiry; an expired token stops working on its own. You can create up to 50 tokens.
+A token with only Operate cannot read anything, so clients such as the app usually need both; a token for the qB-compatible entrance needs only qB compatible. Validity can be 30 days, 90 days, 1 year or no expiry; an expired token stops working on its own. You can create up to 50 tokens.
 
 ## Using a token
 

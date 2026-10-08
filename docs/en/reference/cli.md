@@ -12,10 +12,11 @@ Starts the web interface and the background jobs. Running `pt-tools` with no com
 pt-tools web --host 0.0.0.0 --port 8080
 ```
 
-| Option   | Meaning              | Default   |
-| -------- | -------------------- | --------- |
-| `--host` | Address to listen on | `0.0.0.0` |
-| `--port` | Port to listen on    | `8080`    |
+| Option               | Meaning                                                                                                                                                                                              | Default   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `--host`             | Address to listen on                                                                                                                                                                                 | `0.0.0.0` |
+| `--port`             | Port to listen on                                                                                                                                                                                    | `8080`    |
+| `--qbit-compat-addr` | Listen address of the [qB-compatible entrance](../guide/qbit-compat.md), such as `0.0.0.0:8081`; when empty, the environment variable `PT_QBIT_COMPAT_ADDR` is used, and without either it stays off | Off       |
 
 The Docker image sets both through the environment variables `PT_HOST` and `PT_PORT`; the other variables are listed in [Install](../guide/install.md) and [Configuration](../configuration.md).
 

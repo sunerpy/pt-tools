@@ -37,7 +37,7 @@
 - 30 天没有任何请求的会话自动失效；同时最多保留 256 个会话，超出时淘汰最久没用的那个。修改密码后，除发起修改的这个会话外，其他浏览器和设备上的会话全部失效。
 - 同一 IP 在 15 分钟内登录失败 10 次（含用户名不存在）后，这个 IP 暂停登录 15 分钟。部署在反向代理之后时，pt-tools 看到的都是代理的地址，失败次数会合并计算。
 - 除登录页、静态资源和健康检查接口 `/api/ping` 外，所有页面和接口都要求已登录。`/api/ping` 只返回运行状态和版本号。
-- [App API](app-api.md)（`/api/app/v1/`）另外接受 [API 令牌](../guide/api-tokens.md)。令牌按新建时选的权限调用 App API，访问不了其他接口，也不能管理令牌；库里只存令牌的 SHA-256 摘要。
+- [App API](app-api.md)（`/api/app/v1/`）与 [qB 兼容入口](../guide/qbit-compat.md)另外接受 [API 令牌](../guide/api-tokens.md)。令牌按新建时选的权限调用 App API，访问不了其他接口，也不能管理令牌；库里只存令牌的 SHA-256 摘要。
 - 初始账号见[安装](../guide/install.md)；首次登录后请立即修改密码。忘记密码时可以用 `PT_ADMIN_RESET` 重置，见[配置说明](../configuration.md)。
 
 ## 会主动连接哪些地址
@@ -57,6 +57,7 @@
 ## 会监听哪些端口
 
 - Web 界面和接口：默认 `8080`。
+- [qB 兼容入口](../guide/qbit-compat.md)：给了 `--qbit-compat-addr` 或 `PT_QBIT_COMPAT_ADDR` 时另外监听一个端口，用有「qB 兼容」权限的 API 令牌登录；该端口只在内网开放。
 - QQ OneBot 通道：启用后另外监听一个端口，供 NapCat 以反向 WebSocket 连接，例如 `0.0.0.0:6701` 的 `/onebot/v11/ws`。监听地址不是本机地址（127.0.0.1、localhost）时必须设置 Access Token，否则通道不会启动；该端口只在内网开放。
 
 ## 部署建议

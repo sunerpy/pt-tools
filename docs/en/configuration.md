@@ -6,16 +6,17 @@ This page describes every pt-tools setting in detail: environment variables, glo
 
 Environment variables set how pt-tools runs, which suits Docker deployments.
 
-| Variable         | Meaning                              | Default         | Example            |
-| ---------------- | ------------------------------------ | --------------- | ------------------ |
-| `PT_HOST`        | Address the web interface listens on | `0.0.0.0`       | `127.0.0.1`        |
-| `PT_PORT`        | Port the web interface listens on    | `8080`          | `8888`             |
-| `PT_ADMIN_USER`  | Admin user name                      | `admin`         | `myadmin`          |
-| `PT_ADMIN_PASS`  | Admin password                       | `adminadmin`    | `MySecurePass123`  |
-| `PT_ADMIN_RESET` | Resets the admin password            | -               | `1` (on)           |
-| `PUID`           | User ID inside the container         | `1000`          | `1001`             |
-| `PGID`           | Group ID inside the container        | `1000`          | `1001`             |
-| `TZ`             | Time zone                            | `Asia/Shanghai` | `America/New_York` |
+| Variable              | Meaning                                                                              | Default         | Example            |
+| --------------------- | ------------------------------------------------------------------------------------ | --------------- | ------------------ |
+| `PT_HOST`             | Address the web interface listens on                                                 | `0.0.0.0`       | `127.0.0.1`        |
+| `PT_PORT`             | Port the web interface listens on                                                    | `8080`          | `8888`             |
+| `PT_ADMIN_USER`       | Admin user name                                                                      | `admin`         | `myadmin`          |
+| `PT_ADMIN_PASS`       | Admin password                                                                       | `adminadmin`    | `MySecurePass123`  |
+| `PT_ADMIN_RESET`      | Resets the admin password                                                            | -               | `1` (on)           |
+| `PT_QBIT_COMPAT_ADDR` | Listen address of the [qB-compatible entrance](guide/qbit-compat.md); off when unset | -               | `0.0.0.0:8081`     |
+| `PUID`                | User ID inside the container                                                         | `1000`          | `1001`             |
+| `PGID`                | Group ID inside the container                                                        | `1000`          | `1001`             |
+| `TZ`                  | Time zone                                                                            | `Asia/Shanghai` | `America/New_York` |
 
 ### Using environment variables
 
