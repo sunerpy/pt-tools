@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,17 +17,23 @@ import (
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
-// markCompat 把种子记成经兼容入口加进这台下载器的（写接口默认只动这些）。
+// markCompat 把种子记成经兼容入口加进这台下载器的（写接口默认只动这些）：记下下载器里它的添加时间。
 func (e *env) markCompat(hash string) {
 	e.t.Helper()
-	require.NoError(e.t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hash, CreatedAt: e.now}).Error)
+	row := models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hash, CreatedAt: e.now}
+	for _, t := range e.dl.torrents {
+		if strings.EqualFold(t.InfoHash, hash) {
+			row.AddedAt = t.DateAdded
+		}
+	}
+	require.NoError(e.t, e.db.Create(&row).Error)
 }
 
 // markCompatAt 同 markCompat（给 server_test 里的用例用，名字分开免得看错）。
 func (e *env) markCompatAt(hash string) { e.markCompat(hash) }
 
-// 所有权只认这台下载器上、确实经兼容入口加进去的：只有来源记录（没加成功、原来就在）不算；别的下载器上的不算；
-// 记下以后被删掉、又从别处加回来的（添加时间晚得多）不算
+// 所有权只认这台下载器上、确实经兼容入口加进去的那一个：只有来源记录（没加成功、原来就在）不算；别的下载器上的不算；
+// 记下了下载器给的添加时间以后，只认添加时间一样的（删掉再从别处加回来的时间不一样）；下载器不给添加时间时不认（宁可不动）
 func TestOwnershipIsStrict(t *testing.T) {
 	e := newEnv(t)
 	ck := e.login(e.token(apitoken.ScopeQbitCompat))
@@ -35,14 +42,37 @@ func TestOwnershipIsStrict(t *testing.T) {
 	other := models.DownloaderSetting{Name: "other", Type: "qbittorrent", URL: "http://127.0.0.1:9", Enabled: true}
 	require.NoError(t, e.db.Create(&other).Error)
 	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: other.ID, InfoHash: hashDebian, CreatedAt: e.now}).Error)
-	// 记下的时间比种子的添加时间早一天：是后来从别处加回来的
-	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashTR, CreatedAt: time.Unix(1700000000, 0).Add(-24 * time.Hour)}).Error)
-	e.dl.torrents[2].DateAdded = 1700000000
+	// 记下的添加时间是 1700000000，下载器里这个种子的添加时间是 1700000060：是后来又加回来的
+	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashTR, AddedAt: 1700000000, CreatedAt: e.now}).Error)
+	e.dl.torrents[2].DateAdded = 1700000060
 
 	w := e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {"all"}}, ck)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Empty(t, e.dl.got(), "一个都不算兼容入口的")
 	assert.EqualValues(t, 3, e.audit.all()[0].Args["denied"])
+
+	// 添加时间对得上的才算；下载器不给添加时间的不算
+	e.dl.torrents[2].DateAdded = 1700000000
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashTR}}, ck).Code)
+	assert.Equal(t, []string{"pause 7"}, e.dl.got())
+	e.dl.torrents[2].DateAdded = 0
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {hashTR}}, ck).Code)
+	assert.Len(t, e.dl.got(), 1, "不给添加时间：不认")
+}
+
+// 加的时候下载器还没列出这个种子：所有权先不带添加时间，第一次在下载器里看到它、添加时间就在加的那会儿时补上；
+// 补上以后只认这个时间。看到时添加时间离加的时候太远，是别处加的，不认
+func TestOwnershipBindsAddedTimeLater(t *testing.T) {
+	e := newEnv(t)
+	ck := e.login(e.token(apitoken.ScopeQbitCompat))
+	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashMovie, CreatedAt: time.Unix(1700000100, 0)}).Error)
+	require.NoError(t, e.db.Create(&models.QbitCompatTorrent{DownloaderID: e.dlSet.ID, InfoHash: hashDebian, CreatedAt: time.Unix(1700000000+2*3600, 0)}).Error)
+
+	require.Equal(t, http.StatusOK, e.do(http.MethodPost, "/api/v2/torrents/pause", url.Values{"hashes": {"all"}}, ck).Code)
+	assert.Equal(t, []string{"pause " + hashMovie}, e.dl.got(), "电影在加的那会儿出现：认；debian 的添加时间早了两个小时：不认")
+	var row models.QbitCompatTorrent
+	require.NoError(t, e.db.Where("info_hash = ?", hashMovie).First(&row).Error)
+	assert.EqualValues(t, 1700000100, row.AddedAt, "补上了添加时间")
 }
 
 // 加成功了才记所有权（已经在下载器里的、推送失败的不记）；经兼容入口删掉以后所有权一起去掉

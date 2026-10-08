@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/app"
+	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
 
@@ -31,7 +32,7 @@ func (s *Server) selectTargets(ctx context.Context, b *backend, param string) (s
 	if err != nil {
 		return selection{}, err
 	}
-	var owned map[string]time.Time
+	var owned map[string]models.QbitCompatTorrent
 	if !b.cfg.FullControl {
 		if owned, err = s.owned(ctx, b.setting.ID); err != nil {
 			return selection{}, err
@@ -43,9 +44,15 @@ func (s *Server) selectTargets(ctx context.Context, b *backend, param string) (s
 		if !ok {
 			return
 		}
-		if !b.cfg.FullControl && !isOwned(owned, h, t) {
-			sel.denied++
-			return
+		if !b.cfg.FullControl {
+			ok, bind := isOwned(owned, h, t)
+			if !ok {
+				sel.denied++
+				return
+			}
+			if bind {
+				s.bindAdded(ctx, owned[h], t.DateAdded)
+			}
 		}
 		sel.ids, sel.hashes, sel.torrents = append(sel.ids, t.ID), append(sel.hashes, h), append(sel.torrents, t)
 	}

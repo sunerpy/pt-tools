@@ -159,37 +159,56 @@ func (s *Server) updateSetting(ctx context.Context, mod func(*models.QbitCompatS
 	})
 }
 
-// ownedSkew 是下载器与 pt-tools 的时钟差容许值：种子的添加时间比记下所有权的时间还晚这么多，就是后来又从别处加回来的。
-const ownedSkew = time.Hour
+// bindWindow 是还没记下添加时间的所有权第一次被用到时，下载器里的添加时间离记下所有权的时间最多差多少（两边的时钟差、下载器入队的延迟）。
+const bindWindow = 10 * time.Minute
 
-// owned 是经兼容入口加进这台下载器的种子（小写的 info hash → 记下的时间）。
-func (s *Server) owned(ctx context.Context, downloaderID uint) (map[string]time.Time, error) {
+// owned 是经兼容入口加进这台下载器的种子（小写的 info hash → 所有权）。
+func (s *Server) owned(ctx context.Context, downloaderID uint) (map[string]models.QbitCompatTorrent, error) {
 	var rows []models.QbitCompatTorrent
 	if err := s.deps.DB.WithContext(ctx).Where("downloader_id = ?", downloaderID).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("读取兼容入口加的种子失败: %w", err)
 	}
-	out := make(map[string]time.Time, len(rows))
+	out := make(map[string]models.QbitCompatTorrent, len(rows))
 	for _, r := range rows {
-		out[strings.ToLower(r.InfoHash)] = r.CreatedAt
+		out[strings.ToLower(r.InfoHash)] = r
 	}
 	return out, nil
 }
 
-// isOwned：种子要在所有权表里，并且添加时间不晚于记下的时间（容许时钟差）；下载器不给添加时间时只看表。
-func isOwned(owned map[string]time.Time, hash string, t downloader.Torrent) bool {
-	at, ok := owned[hash]
-	if !ok {
-		return false
+// isOwned 判断下载器里的这个种子是不是兼容入口加的那一个：记下了添加时间时要一样；还没记下时，添加时间要在记下所有权的时间前后
+// bindWindow 之内（这时 bind 为真，调用方把添加时间补上）。下载器不给添加时间时不认 —— 宁可不动，也不错删别人的。
+func isOwned(owned map[string]models.QbitCompatTorrent, hash string, t downloader.Torrent) (ok, bind bool) {
+	row, found := owned[hash]
+	if !found || t.DateAdded <= 0 {
+		return false, false
 	}
-	return t.DateAdded <= 0 || !time.Unix(t.DateAdded, 0).After(at.Add(ownedSkew))
+	if row.AddedAt > 0 {
+		return t.DateAdded == row.AddedAt, false
+	}
+	d := time.Unix(t.DateAdded, 0).Sub(row.CreatedAt)
+	if d < -bindWindow || d > bindWindow {
+		return false, false
+	}
+	return true, true
 }
 
-// own 记下这台下载器上经兼容入口加进去的种子（再加一次时更新时间）。
-func (s *Server) own(ctx context.Context, downloaderID uint, hash string) error {
-	row := models.QbitCompatTorrent{DownloaderID: downloaderID, InfoHash: strings.ToLower(hash), CreatedAt: s.deps.Now()}
+// bindAdded 补上所有权的添加时间（只补还没记的）。
+func (s *Server) bindAdded(ctx context.Context, row models.QbitCompatTorrent, addedAt int64) {
+	if err := s.deps.DB.WithContext(ctx).Model(&models.QbitCompatTorrent{}).
+		Where("id = ? AND added_at = 0", row.ID).Update("added_at", addedAt).Error; err != nil {
+		global.GetSlogger().Warnf("[qB 兼容] 记下种子 %s 的添加时间失败: %v", row.InfoHash, err)
+	}
+}
+
+// own 记下这台下载器上经兼容入口加进去的种子。下载器已经列出它时同时记下添加时间，否则留到第一次用到时补（见 isOwned）。
+func (s *Server) own(ctx context.Context, b *backend, hash string) error {
+	row := models.QbitCompatTorrent{DownloaderID: b.setting.ID, InfoHash: strings.ToLower(hash), CreatedAt: s.deps.Now()}
+	if t, err := b.dl.GetTorrent(row.InfoHash); err == nil && strings.EqualFold(t.InfoHash, row.InfoHash) && t.DateAdded > 0 {
+		row.AddedAt = t.DateAdded
+	}
 	return s.deps.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "downloader_id"}, {Name: "info_hash"}},
-		DoUpdates: clause.AssignmentColumns([]string{"created_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"added_at", "created_at"}),
 	}).Create(&row).Error
 }
 

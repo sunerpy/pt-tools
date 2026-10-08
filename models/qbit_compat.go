@@ -19,11 +19,14 @@ type QbitCompatSetting struct {
 func (QbitCompatSetting) TableName() string { return "qbit_compat_settings" }
 
 // QbitCompatTorrent 记下经 qB 兼容入口加进下载器的种子：没打开完全控制时，写接口只动这些。
-// 只在种子确实加进下载器（不是原来就在）以后才记，经兼容入口删掉时一起删；CreatedAt 用来认出后来又从别处加回来的同一个种子。
+// 只在种子确实加进下载器（不是原来就在）以后才记，经兼容入口删掉时一起删。
+// AddedAt 是下载器给这个种子的添加时间：只认添加时间一样的那一个（删掉以后从别处加回来的时间不一样）；
+// 加的时候下载器还没列出它时是 0，第一次看到、添加时间就在 CreatedAt 前后时补上。
 type QbitCompatTorrent struct {
 	ID           uint      `gorm:"primaryKey"`
 	DownloaderID uint      `gorm:"not null;uniqueIndex:idx_qbit_compat_owner"`
 	InfoHash     string    `gorm:"size:64;not null;uniqueIndex:idx_qbit_compat_owner"`
+	AddedAt      int64     `gorm:"not null;default:0"`
 	CreatedAt    time.Time `gorm:"not null"`
 }
 

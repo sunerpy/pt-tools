@@ -251,7 +251,7 @@ func (s *Server) pushData(ctx context.Context, b *backend, data []byte, siteID, 
 	}
 	// 确实是这次加进去的才记所有权：原来就在下载器里的（Skipped）不归兼容入口
 	if !res.Skipped {
-		if oerr := s.own(ctx, b.setting.ID, hash); oerr != nil {
+		if oerr := s.own(ctx, b, hash); oerr != nil {
 			global.GetSlogger().Warnf("[qB 兼容] 记下种子 %s 失败: %v", hash, oerr)
 		}
 	}
