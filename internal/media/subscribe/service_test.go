@@ -173,7 +173,6 @@ func TestSearchMoviePushesBest(t *testing.T) {
 	assert.Equal(t, models.MediaSubTorrentDownloading, links[0].Status)
 	assert.Equal(t, e.hashOf("12"), links[0].InfoHash)
 	row := e.subRow(m.ID)
-	assert.Equal(t, links[0].Score, row.BestScore)
 	assert.Contains(t, row.Message, "下载了")
 	require.NotNil(t, row.NextSearchAt)
 	assert.Equal(t, e.Now().Add(DefaultSearchIntervalHours*time.Hour), *row.NextSearchAt)

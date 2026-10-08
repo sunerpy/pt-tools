@@ -270,24 +270,34 @@ func (s *Service) evaluate(ctx context.Context, sub *models.MediaSubscription, c
 	})
 	downloading := slices.ContainsFunc(linked, func(t models.MediaSubscriptionTorrent) bool { return t.Status == models.MediaSubTorrentDownloading })
 	if sub.MediaType == models.MediaKindMovie {
-		if active && !sub.Upgrade {
-			return "已经下载过了"
+		vers, err := s.libraryVersions(ctx, sub)
+		if err != nil {
+			return err.Error()
 		}
-		if active && downloading {
+		if !sub.Upgrade {
+			if active {
+				return "已经下载过了"
+			}
+			if len(vers) > 0 {
+				return "库里已经有了"
+			}
+			return s.pushOne(ctx, sub, ok[0], set)
+		}
+		if downloading {
 			return "洗版：上一个版本还在下载"
 		}
-		best := ok[0]
-		if active && best.v.Score <= sub.BestScore {
+		// 现在的版本（库里的与订阅下载的）按当前档案重算：失败的下载不算，档案改过也能比
+		if base, has := s.baseline(ctx, profile, linked, vers); has && ok[0].v.Score <= base {
 			return "洗版：没有比现在更好的版本"
 		}
-		return s.pushOne(ctx, sub, best, set)
+		return s.pushOne(ctx, sub, ok[0], set)
 	}
-	return s.pickTV(ctx, sub, ok, linked, set)
+	return s.pickTV(ctx, sub, profile, ok, linked, set)
 }
 
 // pickTV 挑剧集的种子：这一季播完以后，缺一半以上或缺的集没有单集可补时下载整季包，否则一集一集补；
 // 洗版时（这一季都下载过了）只看比现在分数高的整季包。
-func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, ok []scored, linked []models.MediaSubscriptionTorrent, set Settings) string {
+func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, profile Profile, ok []scored, linked []models.MediaSubscriptionTorrent, set Settings) string {
 	p, err := s.progress(ctx, sub, false)
 	if err != nil {
 		return "读不到这一季的分集：" + err.Error()
@@ -308,7 +318,11 @@ func (s *Service) pickTV(ctx context.Context, sub *models.MediaSubscription, ok 
 			}
 			return "没有缺的集"
 		}
-		if len(packs) == 0 || packs[0].v.Score <= sub.BestScore {
+		vers, err := s.libraryVersions(ctx, sub)
+		if err != nil {
+			return err.Error()
+		}
+		if base, _ := s.baseline(ctx, profile, linked, vers); len(packs) == 0 || packs[0].v.Score <= base {
 			return "洗版：没有比现在更好的整季包"
 		}
 		return s.pushOne(ctx, sub, packs[0], set)
@@ -375,7 +389,7 @@ func (s *Service) downloaderFor(ctx context.Context, sub *models.MediaSubscripti
 	return ds.ID, nil
 }
 
-// pushOne 下载种子文件并推送到下载器，记下种子、更新订阅的最高分并发通知。返回结果说明（以「下载了」开头表示成功）。
+// pushOne 下载种子文件并推送到下载器，记下种子并发通知。返回结果说明（以「下载了」开头表示成功）。
 func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o scored, set Settings) string {
 	if s.cfg.Sites == nil || s.cfg.Push == nil {
 		return "推送服务没有启动"
@@ -437,19 +451,15 @@ func (s *Service) pushOne(ctx context.Context, sub *models.MediaSubscription, o 
 	now := s.cfg.Now()
 	row := models.MediaSubscriptionTorrent{
 		SubscriptionID: sub.ID, SiteName: o.c.Site, TorrentID: o.c.Item.ID, InfoHash: hash, Title: truncate(o.c.Item.Title, 512),
-		Score: o.v.Score, Episode: o.sp.Start, EpisodeEnd: o.sp.End, Complete: o.sp.Whole, SizeBytes: size, DownloaderID: dlID,
+		Subtitle: truncate(o.c.Item.Subtitle, 512), Score: o.v.Score, Episode: o.sp.Start, EpisodeEnd: o.sp.End, Complete: o.sp.Whole,
+		SizeBytes: size, DownloaderID: dlID, HasHR: hasHR, Adopted: res.Skipped,
 		Status: models.MediaSubTorrentDownloading, CreatedAt: now, UpdatedAt: now,
 	}
-	if res != nil && res.Skipped {
+	if res.Skipped {
 		row.Message = "下载器里已经有这个种子"
 	}
 	if err := s.cfg.DB.WithContext(ctx).Create(&row).Error; err != nil {
 		s.cfg.Logger.Warnf("[订阅] 记下订阅的种子失败: %v", err)
-	}
-	if o.v.Score > sub.BestScore {
-		sub.BestScore, sub.BestTitle = o.v.Score, truncate(o.c.Item.Title, 512)
-		s.cfg.DB.WithContext(ctx).Model(&models.MediaSubscription{}).Where("id = ?", sub.ID).
-			Updates(map[string]any{"best_score": sub.BestScore, "best_title": sub.BestTitle})
 	}
 	s.notify(ctx, sub, o, set)
 	return "下载了 " + o.c.Item.Title

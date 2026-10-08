@@ -94,12 +94,9 @@ type MediaSubscription struct {
 	SavePath     string `gorm:"size:1024;not null;default:''" json:"save_path"`
 	Status       string `gorm:"size:16;not null;default:'';index" json:"status"`
 	// Upgrade 是洗版：下载过以后还接着找分数更高的，档案里排第一的分辨率与来源都达到才停
-	Upgrade bool `gorm:"not null;default:false" json:"upgrade"`
-	// BestScore、BestTitle 是已经下载的资源里分数最高的那个
-	BestScore int    `gorm:"not null;default:0" json:"best_score"`
-	BestTitle string `gorm:"size:512;not null;default:''" json:"best_title"`
-	Source    string `gorm:"size:16;not null;default:''" json:"source"`
-	DoubanID  string `gorm:"column:douban_id;size:16;not null;default:''" json:"douban_id"`
+	Upgrade  bool   `gorm:"not null;default:false" json:"upgrade"`
+	Source   string `gorm:"size:16;not null;default:''" json:"source"`
+	DoubanID string `gorm:"column:douban_id;size:16;not null;default:''" json:"douban_id"`
 	// TotalEpisodes 是这一季的集数（来自 TMDB），电影为 0
 	TotalEpisodes int        `gorm:"not null;default:0" json:"total_episodes"`
 	LastSearchAt  *time.Time `json:"last_search_at,omitempty"`
@@ -120,17 +117,24 @@ type MediaSubscriptionTorrent struct {
 	TorrentID      string `gorm:"size:128;not null;uniqueIndex:idx_media_sub_torrent" json:"torrent_id"`
 	InfoHash       string `gorm:"size:64;not null;default:'';index" json:"info_hash"`
 	Title          string `gorm:"size:512;not null;default:''" json:"title"`
-	Score          int    `gorm:"not null;default:0" json:"score"`
+	// Subtitle 是站点上的副标题：洗版时按现在的档案重算分数要用（中字写在副标题里）
+	Subtitle string `gorm:"size:512;not null;default:''" json:"subtitle"`
+	// Score 是推送时按当时的档案打的分（档案改过以后比较版本时重算，不用这个）
+	Score int `gorm:"not null;default:0" json:"score"`
 	// Episode、EpisodeEnd 是种子里的集（剧集，单集时 EpisodeEnd 为 0）；整季包 Complete 为真
-	Episode      int       `gorm:"not null;default:0" json:"episode"`
-	EpisodeEnd   int       `gorm:"not null;default:0" json:"episode_end"`
-	Complete     bool      `gorm:"not null;default:false" json:"complete"`
-	SizeBytes    int64     `gorm:"not null;default:0" json:"size_bytes"`
-	DownloaderID uint      `gorm:"not null;default:0" json:"downloader_id"`
-	Status       string    `gorm:"size:16;not null;default:'';index" json:"status"`
-	Message      string    `gorm:"size:1024;not null;default:''" json:"message"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Episode      int   `gorm:"not null;default:0" json:"episode"`
+	EpisodeEnd   int   `gorm:"not null;default:0" json:"episode_end"`
+	Complete     bool  `gorm:"not null;default:false" json:"complete"`
+	SizeBytes    int64 `gorm:"not null;default:0" json:"size_bytes"`
+	DownloaderID uint  `gorm:"not null;default:0" json:"downloader_id"`
+	// HasHR 是推送时知道的 H&R 要求（站点整站有，或者这个种子有）：洗版删旧种子时留着做种
+	HasHR bool `gorm:"not null;default:false" json:"has_hr"`
+	// Adopted 是推送时下载器里已经有这个种子（不是订阅加进去的）：洗版时不删
+	Adopted   bool      `gorm:"not null;default:false" json:"adopted"`
+	Status    string    `gorm:"size:16;not null;default:'';index" json:"status"`
+	Message   string    `gorm:"size:1024;not null;default:''" json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (MediaSubscriptionTorrent) TableName() string { return "media_subscription_torrents" }

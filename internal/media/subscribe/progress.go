@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -187,34 +188,69 @@ func (s *Service) setTorrent(ctx context.Context, id uint, status, msg string) {
 	}
 }
 
-func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptionTorrent, set Settings) {
+func (s *Service) historyOf(ctx context.Context, hash string) ([]models.MediaTransferHistory, error) {
 	var hist []models.MediaTransferHistory
-	if t.InfoHash != "" {
-		if err := s.cfg.DB.WithContext(ctx).Where("info_hash = ?", strings.ToLower(t.InfoHash)).Find(&hist).Error; err != nil {
-			return
-		}
+	if hash == "" {
+		return nil, nil
 	}
-	done := slices.ContainsFunc(hist, func(h models.MediaTransferHistory) bool { return h.Status == models.MediaTransferDone })
+	if err := s.cfg.DB.WithContext(ctx).Where("info_hash = ?", strings.ToLower(hash)).Order("id").Find(&hist).Error; err != nil {
+		return nil, fmt.Errorf("读取整理记录失败: %w", err)
+	}
+	return hist, nil
+}
+
+// refreshTorrent 看订阅下载的一个种子整理得怎样：有文件入了库、别的文件也不再自动重试时标成已入库
+// （洗版时接着换掉旧版本）；过了 7 天还没入库的标成失败。
+func (s *Service) refreshTorrent(ctx context.Context, t *models.MediaSubscriptionTorrent, set Settings) {
+	hist, err := s.historyOf(ctx, t.InfoHash)
+	if err != nil {
+		return
+	}
 	sub, err := s.subRow(ctx, t.SubscriptionID)
 	if err != nil {
 		return
 	}
-	if done {
-		s.setTorrent(ctx, t.ID, models.MediaSubTorrentDone, "已整理入库")
-		if sub.Upgrade {
-			s.replaceOlder(ctx, &sub, t, set)
-		}
-		return
-	}
-	// 洗版的新版本和旧版本整理到同一个文件名时，整理记成「目标已有同名文件」：先删掉旧版本库里的文件再重试
-	if sub.Upgrade {
-		for _, h := range hist {
-			if h.Status == models.MediaTransferSkipped && s.freeTarget(ctx, &sub, &h, t) {
-				if _, err := s.cfg.Organizer.Retry(ctx, h.ID); err != nil {
-					s.cfg.Logger.Warnf("[订阅] 洗版后重新整理失败 (%s): %v", h.TorrentName, err)
+	// 洗版的新版本和旧版本整理到同一个文件名时，整理记成「目标已有同名文件」：先删掉旧版本库里的那个文件再重试
+	if sub.Upgrade && s.cfg.Organizer != nil {
+		prof := s.profileFor(ctx, &sub, set)
+		score := s.versionPoints(ctx, prof, t.Title, t.Subtitle)
+		retried := false
+		for i := range hist {
+			h := &hist[i]
+			if h.Status == models.MediaTransferSkipped && s.freeTarget(ctx, &sub, h, t, prof, score) {
+				if _, rerr := s.cfg.Organizer.Retry(ctx, h.ID); rerr != nil {
+					s.cfg.Logger.Warnf("[订阅] 洗版后重新整理失败 (%s): %v", h.TorrentName, rerr)
 				}
+				retried = true
 			}
 		}
+		if retried {
+			if hist, err = s.historyOf(ctx, t.InfoHash); err != nil {
+				return
+			}
+		}
+	}
+	done, notDone, retrying := 0, 0, false
+	for _, h := range hist {
+		switch {
+		case h.Status == models.MediaTransferDone:
+			done++
+		case h.Status == models.MediaTransferFailed && h.NextRetryAt != nil:
+			retrying = true
+		case h.Status == models.MediaTransferFailed || h.Status == models.MediaTransferSkipped:
+			notDone++
+		}
+	}
+	if done > 0 && !retrying {
+		msg := "已整理入库"
+		if notDone > 0 {
+			msg = fmt.Sprintf("已整理入库，%d 个文件没整理成", notDone)
+		}
+		s.setTorrent(ctx, t.ID, models.MediaSubTorrentDone, msg)
+		if sub.Upgrade {
+			s.replaceOlder(ctx, &sub, t, hist, set)
+		}
+		return
 	}
 	if s.cfg.Now().Sub(t.CreatedAt) > stuckAfter {
 		s.setTorrent(ctx, t.ID, models.MediaSubTorrentFailed, "7 天还没整理入库，这些集重新算缺的")
@@ -228,24 +264,81 @@ func (s *Service) sameMedia(ctx context.Context, sub *models.MediaSubscription) 
 		db = db.Where("season = ?", sub.Season)
 	}
 	var rows []models.MediaTransferHistory
-	if err := db.Find(&rows).Error; err != nil {
+	if err := db.Order("id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("读取整理记录失败: %w", err)
 	}
 	return rows, nil
 }
 
-// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的文件；删了返回真。
-func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription, skipped *models.MediaTransferHistory, t *models.MediaSubscriptionTorrent) bool {
-	if skipped.TargetPath == "" || s.cfg.Organizer == nil {
+// version 是这个条目现在库里的一个文件，带上打分用的标题：订阅下载的用站点上的标题与副标题，
+// 别的用种子名（没有时用源文件名）。
+type version struct {
+	row             models.MediaTransferHistory
+	title, subtitle string
+}
+
+// libraryVersions 是库里这个条目（剧集是这一季）已整理的文件，不管是不是订阅下载的。
+func (s *Service) libraryVersions(ctx context.Context, sub *models.MediaSubscription) ([]version, error) {
+	rows, err := s.sameMedia(ctx, sub)
+	if err != nil {
+		return nil, err
+	}
+	linked, err := s.torrents(ctx, sub.ID)
+	if err != nil {
+		return nil, err
+	}
+	byHash := map[string]models.MediaSubscriptionTorrent{}
+	for _, t := range linked {
+		if t.InfoHash != "" {
+			byHash[strings.ToLower(t.InfoHash)] = t
+		}
+	}
+	out := make([]version, 0, len(rows))
+	for _, r := range rows {
+		v := version{row: r, title: r.TorrentName}
+		if t, ok := byHash[strings.ToLower(r.InfoHash)]; ok {
+			v.title, v.subtitle = t.Title, t.Subtitle
+		} else if v.title == "" {
+			v.title = filepath.Base(r.SourcePath)
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// versionPoints 按现在的档案重算一个已有版本的分数（档案改过以后，推送时记下的分数没法比）。不看硬条件。
+func (s *Service) versionPoints(ctx context.Context, p Profile, title, subtitle string) int {
+	return p.points(s.parse(ctx, title, subtitle))
+}
+
+// baseline 是现在的版本按当前档案的最高分：下载中与已入库的订阅种子，加上库里这个条目已整理的文件。
+// 失败、已替换的不算。第二个返回值报告有没有现在的版本。
+func (s *Service) baseline(ctx context.Context, p Profile, linked []models.MediaSubscriptionTorrent, vers []version) (int, bool) {
+	best, has := 0, false
+	for _, t := range linked {
+		if t.Status == models.MediaSubTorrentDownloading || t.Status == models.MediaSubTorrentDone {
+			best, has = max(best, s.versionPoints(ctx, p, t.Title, t.Subtitle)), true
+		}
+	}
+	for _, v := range vers {
+		best, has = max(best, s.versionPoints(ctx, p, v.title, v.subtitle)), true
+	}
+	return best, has
+}
+
+// freeTarget 在洗版的新版本整理时撞上旧版本的同名文件时，删掉旧版本库里的那个文件（分数要比新版本低）；删了返回真。
+func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription, skipped *models.MediaTransferHistory, t *models.MediaSubscriptionTorrent, prof Profile, score int) bool {
+	if skipped.TargetPath == "" {
 		return false
 	}
-	old, err := s.sameMedia(ctx, sub)
+	vers, err := s.libraryVersions(ctx, sub)
 	if err != nil {
 		return false
 	}
 	freed := false
-	for _, o := range old {
-		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) {
+	for _, v := range vers {
+		o := v.row
+		if o.TargetPath != skipped.TargetPath || strings.EqualFold(o.InfoHash, t.InfoHash) || s.versionPoints(ctx, prof, v.title, v.subtitle) >= score {
 			continue
 		}
 		if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {
@@ -257,18 +350,44 @@ func (s *Service) freeTarget(ctx context.Context, sub *models.MediaSubscription,
 	return freed
 }
 
-// replaceOlder 在洗版的新版本入库以后，删掉这个条目旧版本在库里的文件，旧种子按设置继续做种或删除。
-// 剧集只换新种子包括的集（整季包换整季）：一集一集下载时，新的一集不会把前面的集当成旧版本。
-func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscription, t *models.MediaSubscriptionTorrent, set Settings) {
-	sp := spanOf(*t)
-	covered := func(start int) bool { return sub.MediaType == models.MediaKindMovie || sp.covers(start) }
+// replaceOlder 在洗版的新版本入库以后换掉旧版本：库里被新版本盖住、按现在的档案分数比新版本低的文件，
+// 按整理历史的删除规则删掉（不管是不是订阅下载的）；订阅下载的旧种子在库里的文件都换掉以后标成已替换，
+// 按设置继续做种或删除。剧集只算新种子真正整理进库的集：整季包有几集没整理成，那几集的旧版本留着；
+// 旧文件是几集的合集时，这几集新版本都有才换。
+func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscription, t *models.MediaSubscriptionTorrent, hist []models.MediaTransferHistory, set Settings) {
+	prof := s.profileFor(ctx, sub, set)
+	score := s.versionPoints(ctx, prof, t.Title, t.Subtitle)
+	got := map[int]bool{}
+	for _, h := range hist {
+		if h.Status == models.MediaTransferDone {
+			for n := h.Episode; n > 0 && n <= max(h.EpisodeEnd, h.Episode); n++ {
+				got[n] = true
+			}
+		}
+	}
+	covered := func(start, end int) bool {
+		if sub.MediaType == models.MediaKindMovie {
+			return true
+		}
+		if start <= 0 {
+			return false
+		}
+		for n := start; n <= max(end, start); n++ {
+			if !got[n] {
+				return false
+			}
+		}
+		return true
+	}
 	if s.cfg.Organizer != nil {
-		old, err := s.sameMedia(ctx, sub)
+		vers, err := s.libraryVersions(ctx, sub)
 		if err != nil {
+			s.cfg.Logger.Warnf("[订阅] 洗版时读取库里的版本失败: %v", err)
 			return
 		}
-		for _, o := range old {
-			if strings.EqualFold(o.InfoHash, t.InfoHash) || !covered(o.Episode) {
+		for _, v := range vers {
+			o := v.row
+			if strings.EqualFold(o.InfoHash, t.InfoHash) || !covered(o.Episode, o.EpisodeEnd) || s.versionPoints(ctx, prof, v.title, v.subtitle) >= score {
 				continue
 			}
 			if _, err := s.cfg.Organizer.Retire(ctx, o.ID, "洗版：换成了 "+t.Title); err != nil {
@@ -281,7 +400,13 @@ func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscriptio
 		return
 	}
 	for _, p := range prev {
-		if p.ID == t.ID || p.Score >= t.Score || (sub.MediaType == models.MediaKindTV && !sp.Whole && !covered(p.Episode)) {
+		if p.ID == t.ID || s.versionPoints(ctx, prof, p.Title, p.Subtitle) >= score {
+			continue
+		}
+		// 旧种子还有文件在库里（新版本没有那几集，或者删除没成功）时不算换下来，种子也不动
+		var left int64
+		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
+			Where("info_hash = ? AND status = ?", strings.ToLower(p.InfoHash), models.MediaTransferDone).Count(&left).Error; err != nil || left > 0 {
 			continue
 		}
 		msg := "洗版：换成了 " + t.Title
@@ -292,10 +417,20 @@ func (s *Service) replaceOlder(ctx context.Context, sub *models.MediaSubscriptio
 	}
 }
 
-// deleteOld 按设置删掉洗版换下来的旧种子（连数据）：有 H&R 要求的不删，留着做种。返回结果说明。
+// deleteOld 按设置删掉洗版换下来的旧种子（连数据）。拿不准时不删：下载器里原来就有的（不是订阅加进去的）、
+// 推送时知道有 H&R 要求的、种子记录里写着有 H&R 的、读不到种子记录的都留着。返回结果说明。
 func (s *Service) deleteOld(ctx context.Context, p *models.MediaSubscriptionTorrent) string {
+	if p.Adopted {
+		return "旧种子不是订阅加进下载器的，留着"
+	}
+	if p.HasHR {
+		return "旧种子有 H&R 要求，留着做种"
+	}
 	var info models.TorrentInfo
-	if err := s.cfg.DB.WithContext(ctx).Where("site_name = ? AND torrent_id = ?", p.SiteName, p.TorrentID).Limit(1).Find(&info).Error; err == nil && info.HasHR {
+	if err := s.cfg.DB.WithContext(ctx).Where("site_name = ? AND torrent_id = ?", p.SiteName, p.TorrentID).Limit(1).Find(&info).Error; err != nil {
+		return "旧种子没有删（读不到种子记录）"
+	}
+	if info.HasHR {
 		return "旧种子有 H&R 要求，留着做种"
 	}
 	if s.cfg.Downloaders == nil || p.InfoHash == "" {
@@ -311,9 +446,38 @@ func (s *Service) deleteOld(ctx context.Context, p *models.MediaSubscriptionTorr
 	return "旧种子连数据删掉了"
 }
 
+// targetReached 报告库里的版本是不是达到了洗版的目标：电影是有一个文件达到，剧集是这一季的每一集都有达到的文件。
+func (s *Service) targetReached(ctx context.Context, sub *models.MediaSubscription, prof Profile, total int) (bool, error) {
+	vers, err := s.libraryVersions(ctx, sub)
+	if err != nil {
+		return false, err
+	}
+	ok := map[int]bool{}
+	for _, v := range vers {
+		if !prof.TargetReached(s.parse(ctx, v.title, v.subtitle)) {
+			continue
+		}
+		if sub.MediaType == models.MediaKindMovie {
+			return true, nil
+		}
+		for n := v.row.Episode; n > 0 && n <= max(v.row.EpisodeEnd, v.row.Episode); n++ {
+			ok[n] = true
+		}
+	}
+	if sub.MediaType == models.MediaKindMovie || total <= 0 {
+		return false, nil
+	}
+	for n := 1; n <= total; n++ {
+		if !ok[n] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // checkDone 看订阅是不是完成了。
 func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, set Settings) {
-	done := false
+	done, total := false, 0
 	if sub.MediaType == models.MediaKindMovie {
 		in, err := s.movieInLibrary(ctx, sub)
 		if err != nil {
@@ -328,7 +492,7 @@ func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, 
 		if err != nil {
 			return
 		}
-		done = p.Total > 0 && p.Aired == p.Total && p.InLibrary == p.Total
+		done, total = p.Total > 0 && p.Aired == p.Total && p.InLibrary == p.Total, p.Total
 	}
 	if !done {
 		return
@@ -338,15 +502,9 @@ func (s *Service) checkDone(ctx context.Context, sub *models.MediaSubscription, 
 		msg = "这一季都入库了"
 	}
 	if sub.Upgrade {
-		// 洗版要等达到目标的那个版本入了库
-		best, err := s.torrents(ctx, sub.ID, models.MediaSubTorrentDone)
-		if err != nil {
-			return
-		}
-		profile := s.profileFor(ctx, sub, set)
-		if !slices.ContainsFunc(best, func(t models.MediaSubscriptionTorrent) bool {
-			return profile.TargetReached(s.parse(ctx, t.Title, ""))
-		}) {
+		// 洗版要等库里的版本达到目标
+		reached, err := s.targetReached(ctx, sub, s.profileFor(ctx, sub, set), total)
+		if err != nil || !reached {
 			return
 		}
 		msg += "，达到了洗版的目标"
