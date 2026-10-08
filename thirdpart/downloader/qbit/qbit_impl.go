@@ -1330,6 +1330,10 @@ func (q *QbitClient) AddTorrentEx(torrentURL string, opt downloader.AddTorrentOp
 			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
 	}
+	// 5.2 以前 torrents/add 一律回 200：Ok. 是加进去了，Fails. 是一个都没加（种子无效或已经在下载器里）
+	if strings.TrimSpace(string(bodyBytes)) == "Fails." {
+		return downloader.AddTorrentResult{Success: false, Message: "添加失败（种子无效或已经在下载器里）"}, fmt.Errorf("add failed")
+	}
 
 	return downloader.AddTorrentResult{Success: true, Message: "Torrent added successfully"}, nil
 }
@@ -1426,6 +1430,10 @@ func (q *QbitClient) AddTorrentFileExContext(ctx context.Context, fileData []byt
 			Success: false,
 			Message: fmt.Sprintf("upload failed with status code: %d, response: %s", resp.StatusCode, string(bodyBytes)),
 		}, fmt.Errorf("upload failed with status code: %d", resp.StatusCode)
+	}
+	// 5.2 以前 torrents/add 一律回 200：Ok. 是加进去了，Fails. 是一个都没加（种子无效或已经在下载器里）
+	if strings.TrimSpace(string(bodyBytes)) == "Fails." {
+		return downloader.AddTorrentResult{Success: false, Message: "添加失败（种子无效或已经在下载器里）"}, fmt.Errorf("add failed")
 	}
 
 	return downloader.AddTorrentResult{
