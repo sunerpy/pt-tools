@@ -139,13 +139,17 @@ func (e *errAPI) Error() string {
 // errConfirm 是写工具没有 confirm=true。
 var errConfirm = errors.New("这个工具会改动下载器或订阅：先向用户确认，再带上 confirm=true 调用")
 
-// spec 是一个工具的定义：名字、说明、是不是写工具、参数的取值范围（枚举）。
+// spec 是一个工具的定义：名字、说明、是不是写工具、参数的取值范围。
 type spec struct {
 	name, title, description string
 	write                    bool
 	// destructive 是会删东西的写工具（客户端据此提醒用户）
 	destructive bool
-	enums       map[string][]any
+	// openWorld 是会访问外部的工具（PT 站点、GitHub、TMDB），只碰 pt-tools 自己与下载器的不算
+	openWorld bool
+	// enums 是取值固定的参数；min、max 是数字参数的上下限（运行时按同一份 schema 校验）
+	enums    map[string][]any
+	min, max map[string]float64
 }
 
 // call 是工具的一次调用：要发给 App API 的请求、审计里记的参数，以及怎么处理回应（nil 时原样返回）。
@@ -155,59 +159,86 @@ type call struct {
 	shape func(out map[string]any) map[string]any
 }
 
-// register 注册一个工具：检查权限范围（写工具另要 confirm=true），在进程内调用 App API，把 JSON 回应原样交给客户端；
-// 写工具每次调用都记审计（被拒的也记）。
-func register[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, error)) {
+// toolSchema 是工具参数的 JSON Schema：按 In 的字段生成（必填、不收多余的字段），再加上取值范围与上下限。
+func toolSchema[In any](sp spec) *jsonschema.Schema {
 	schema, err := jsonschema.For[In](nil)
 	if err != nil {
 		panic(fmt.Sprintf("mcp: 工具 %s 的参数: %v", sp.name, err))
 	}
 	for field, values := range sp.enums {
-		if p := schema.Properties[field]; p != nil {
-			p.Enum = values
-		}
+		schema.Properties[field].Enum = values
 	}
-	ann := &sdk.ToolAnnotations{Title: sp.title, ReadOnlyHint: !sp.write, IdempotentHint: !sp.write}
+	for field, v := range sp.min {
+		schema.Properties[field].Minimum = &v
+	}
+	for field, v := range sp.max {
+		schema.Properties[field].Maximum = &v
+	}
+	return schema
+}
+
+// register 注册一个工具。参数的校验放在这里而不是交给 go-sdk：写工具每次调用都记审计，参数不对、没有确认被拒的也记。
+// 顺序是：取令牌、查权限范围、写工具看 confirm、按 schema 校验参数、换成 App API 的请求在进程内调用，把 JSON 回应交给客户端。
+func register[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, error)) {
+	schema := toolSchema[In](sp)
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		panic(fmt.Sprintf("mcp: 工具 %s 的参数: %v", sp.name, err))
+	}
+	ann := &sdk.ToolAnnotations{Title: sp.title, ReadOnlyHint: !sp.write, IdempotentHint: !sp.write, OpenWorldHint: &sp.openWorld}
 	if sp.write {
 		ann.DestructiveHint = &sp.destructive
 	}
-	closed := false
-	ann.OpenWorldHint = &closed
 	tool := &sdk.Tool{Name: sp.name, Title: sp.title, Description: sp.description, InputSchema: schema, Annotations: ann}
-	sdk.AddTool(s, tool, func(ctx context.Context, req *sdk.CallToolRequest, in In) (*sdk.CallToolResult, any, error) {
+	s.AddTool(tool, func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		start := time.Now()
 		c, ok := d.Caller(req)
 		if !ok {
-			return nil, nil, errors.New("没有 API 令牌")
+			return toolError(errors.New("没有 API 令牌")), nil
+		}
+		fail := func(result string, audit map[string]any, err error) (*sdk.CallToolResult, error) {
+			if sp.write {
+				d.record(ctx, c, sp.name, result, audit, start)
+			}
+			return toolError(err), nil
 		}
 		need := apitoken.ScopeMCPRead
 		if sp.write {
 			need = apitoken.ScopeMCPWrite
 		}
 		if !c.Has(need) {
-			if sp.write {
-				d.record(ctx, c, sp.name, "denied:scope", nil, start)
-			}
-			return nil, nil, fmt.Errorf("令牌没有 %s 权限", need)
+			return fail("denied:scope", nil, fmt.Errorf("令牌没有 %s 权限", need))
+		}
+		raw := json.RawMessage("{}")
+		if req.Params != nil && len(req.Params.Arguments) > 0 && string(req.Params.Arguments) != "null" {
+			raw = req.Params.Arguments
+		}
+		var args any
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return fail("error:invalid_argument", nil, fmt.Errorf("参数不是 JSON: %w", err))
+		}
+		if m, isObj := args.(map[string]any); sp.write && (!isObj || m["confirm"] != true) {
+			return fail("denied:confirm", nil, errConfirm)
+		}
+		if err := resolved.Validate(args); err != nil {
+			return fail("error:invalid_argument", nil, fmt.Errorf("参数不对: %w", err))
+		}
+		var in In
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return fail("error:invalid_argument", nil, fmt.Errorf("参数不对: %w", err))
 		}
 		cl, err := build(in)
 		if err != nil {
-			if sp.write {
-				result := "error:invalid_argument"
-				if errors.Is(err, errConfirm) {
-					result = "denied:confirm"
-				}
-				d.record(ctx, c, sp.name, result, nil, start)
+			result := "error:invalid_argument"
+			if errors.Is(err, errConfirm) {
+				result = "denied:confirm"
 			}
-			return nil, nil, err
+			return fail(result, nil, err)
 		}
 		cl.req.Write = sp.write
 		resp, err := d.Backend.Call(ctx, c, cl.req)
 		if err != nil {
-			if sp.write {
-				d.record(ctx, c, sp.name, "error:internal", cl.audit, start)
-			}
-			return nil, nil, err
+			return fail("error:internal", cl.audit, err)
 		}
 		if sp.write {
 			d.record(ctx, c, sp.name, outcome(resp), cl.audit, start)
@@ -215,17 +246,25 @@ func register[In any](s *sdk.Server, d *Deps, sp spec, build func(in In) (call, 
 		if resp.Status >= 400 {
 			e := &errAPI{Status: resp.Status}
 			_ = json.Unmarshal(resp.Body, e)
-			return nil, nil, e
+			return toolError(e), nil
 		}
 		out, err := asObject(resp.Body)
 		if err != nil {
-			return nil, nil, err
+			return toolError(err), nil
 		}
 		if cl.shape != nil {
 			out = cl.shape(out)
 		}
-		return nil, out, nil
+		text, _ := json.Marshal(out)
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(text)}}, StructuredContent: out}, nil
 	})
+}
+
+// toolError 是工具执行出错的结果（不是协议错误）：客户端与 AI 助手能看到原因。
+func toolError(err error) *sdk.CallToolResult {
+	res := &sdk.CallToolResult{}
+	res.SetError(err)
+	return res
 }
 
 // asObject 把 App API 的回应换成 JSON 对象（MCP 的 structuredContent 要是对象）：本来是数组的（比如订阅列表）放进 items。

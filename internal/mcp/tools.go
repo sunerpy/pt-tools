@@ -160,6 +160,7 @@ func torrentAction(action string, downloaderID uint, taskID string) (call, error
 func registerTools(s *sdk.Server, d *Deps) {
 	register(s, d, spec{
 		name: "list_tasks", title: "List fetched torrents",
+		min: map[string]float64{"page": 1, "page_size": 1}, max: map[string]float64{"page_size": 100},
 		description: "List torrents pt-tools fetched or pushed (RSS, subscriptions, app, MCP), newest first: site, size, free status, H&R, push state and download progress.",
 	}, func(in listTasksIn) (call, error) {
 		pushed := ""
@@ -172,6 +173,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 
 	register(s, d, spec{
 		name: "list_downloader_torrents", title: "List downloader torrents",
+		min: map[string]float64{"downloader_id": 1, "page": 1, "page_size": 1}, max: map[string]float64{"page_size": 200},
 		description: "List torrents in the user's downloaders (qBittorrent/Transmission), paginated. Each item has downloader_id and task_id for pause_torrent, resume_torrent and delete_torrent.",
 		enums: map[string][]any{
 			"state": {"downloading", "seeding", "paused", "stopped", "queued", "checking", "error"},
@@ -186,6 +188,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 
 	register(s, d, spec{
 		name: "get_downloader_stats", title: "Downloader statistics",
+		min:         map[string]float64{"downloader_id": 1},
 		description: "Show each enabled downloader: id, name, type, whether it is reachable, current upload and download speed, totals and free disk space.",
 	}, func(in downloaderStatsIn) (call, error) {
 		c := call{req: Request{Method: http.MethodGet, Path: "/downloaders"}}
@@ -199,7 +202,8 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
-		name: "search_torrents", title: "Search PT sites",
+		name: "search_torrents", title: "Search PT sites", openWorld: true,
+		min: map[string]float64{"min_seeders": 0, "limit": 1}, max: map[string]float64{"limit": 100},
 		description: "Search torrents on the user's enabled PT sites. Results have site and torrent_id (use them with push_torrent), size, seeders, free/discount status and H&R. No download links are returned.",
 	}, func(in searchIn) (call, error) {
 		kw := strings.TrimSpace(in.Keyword)
@@ -225,6 +229,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
+		min:  map[string]float64{"downloader_id": 1},
 		name: "pause_torrent", title: "Pause a torrent", write: true,
 		description: "Pause one torrent in a downloader. Changes the user's downloader: ask first and pass confirm=true.",
 	}, func(in torrentIn) (call, error) {
@@ -235,6 +240,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
+		min:  map[string]float64{"downloader_id": 1},
 		name: "resume_torrent", title: "Resume a torrent", write: true,
 		description: "Resume one paused torrent in a downloader. Changes the user's downloader: ask first and pass confirm=true.",
 	}, func(in torrentIn) (call, error) {
@@ -245,6 +251,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
+		min:  map[string]float64{"downloader_id": 1},
 		name: "delete_torrent", title: "Delete a torrent", write: true, destructive: true,
 		description: "Remove one torrent from a downloader, optionally deleting its files (remove_data). Cannot be undone: ask first and pass confirm=true.",
 	}, func(in deleteIn) (call, error) {
@@ -259,7 +266,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
-		name: "push_torrent", title: "Push a torrent to a downloader", write: true,
+		name: "push_torrent", title: "Push a torrent to a downloader", write: true, openWorld: true,
 		description: "Download a torrent through pt-tools' own site configuration and add it to a downloader, applying the disk-space and site-capacity checks. " +
 			"Give site and torrent_id from search_torrents, or the torrent's download URL on a configured site. Magnet links and other URLs are not accepted. " +
 			"Changes the user's downloader: ask first and pass confirm=true.",
@@ -309,7 +316,7 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
-		name: "check_updates", title: "Check for pt-tools updates",
+		name: "check_updates", title: "Check for pt-tools updates", openWorld: true,
 		description: "Check whether a newer pt-tools release exists. Read-only: never upgrades.",
 	}, func(in updatesIn) (call, error) {
 		pre := ""
@@ -320,7 +327,8 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
-		name: "explore_media", title: "Find movies and TV shows",
+		name: "explore_media", title: "Find movies and TV shows", openWorld: true,
+		min: map[string]float64{"page": 1}, max: map[string]float64{"page": 20},
 		description: "Search TMDB for a movie or TV show by title, or list trending/popular ones. Items have the TMDB id for add_subscription and say whether it is already in the library or subscribed.",
 		enums:       map[string][]any{"kind": {"movie", "tv"}, "list": {"trending", "popular"}},
 	}, func(in exploreIn) (call, error) {
@@ -341,7 +349,8 @@ func registerTools(s *sdk.Server, d *Deps) {
 	})
 
 	register(s, d, spec{
-		name: "add_subscription", title: "Subscribe to a movie or TV show", write: true,
+		name: "add_subscription", title: "Subscribe to a movie or TV show", write: true, openWorld: true,
+		min: map[string]float64{"tmdb_id": 1, "season": 0},
 		description: "Subscribe to a movie or a TV season by TMDB id (from explore_media): pt-tools then searches the user's sites and downloads it. " +
 			"Changes the user's setup: ask first and pass confirm=true.",
 		enums: map[string][]any{"media_type": {"movie", "tv"}},

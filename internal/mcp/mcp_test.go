@@ -378,3 +378,62 @@ func TestCallerRoundTrip(t *testing.T) {
 	_, ok = CallerFromRequest(nil)
 	assert.False(t, ok)
 }
+
+// 参数的校验在工具里做：写工具没带 confirm、带了多余的字段、取值不在范围里都不调用 App API，并且记审计；
+// 只读工具的参数不对也不调用（不记审计）；会访问站点、GitHub、TMDB 的工具标 openWorld
+func TestArgumentValidation(t *testing.T) {
+	e := newEnv(t)
+	cases := []struct {
+		tool   string
+		args   map[string]any
+		result string
+	}{
+		{"pause_torrent", map[string]any{"downloader_id": 1, "task_id": "abc"}, "denied:confirm"},
+		{"pause_torrent", map[string]any{"downloader_id": 1, "task_id": "abc", "confirm": true, "extra": 1}, "error:invalid_argument"},
+		{"delete_torrent", map[string]any{"downloader_id": 0, "task_id": "abc", "confirm": true}, "error:invalid_argument"},
+		{"add_subscription", map[string]any{"media_type": "book", "tmdb_id": 1, "confirm": true}, "error:invalid_argument"},
+		{"add_subscription", map[string]any{"media_type": "movie", "tmdb_id": -3, "confirm": true}, "error:invalid_argument"},
+	}
+	for i, c := range cases {
+		_, isErr, _ := e.call(c.tool, c.args)
+		assert.True(t, isErr, c.args)
+		a := e.audit.all()
+		require.Len(t, a, i+1, c.args)
+		assert.Equal(t, c.result, a[i].Result, c.args)
+		assert.Equal(t, c.tool, a[i].Command)
+	}
+	for _, args := range []map[string]any{
+		{"page_size": 500},
+		{"state": "flying"},
+		{"page": 0},
+	} {
+		_, isErr, _ := e.call("list_downloader_torrents", args)
+		assert.True(t, isErr, args)
+	}
+	_, isErr, _ := e.call("search_torrents", map[string]any{"keyword": "x", "limit": 1000})
+	assert.True(t, isErr)
+	assert.Empty(t, e.backend.got(), "参数不对的都没有调用 App API")
+	assert.Len(t, e.audit.all(), len(cases), "只读工具参数不对不记审计")
+
+	res, err := e.session.ListTools(context.Background(), nil)
+	require.NoError(t, err)
+	open := map[string]bool{}
+	for _, tool := range res.Tools {
+		open[tool.Name] = tool.Annotations.OpenWorldHint != nil && *tool.Annotations.OpenWorldHint
+	}
+	for _, name := range []string{"search_torrents", "push_torrent", "check_updates", "explore_media", "add_subscription"} {
+		assert.True(t, open[name], name)
+	}
+	for _, name := range []string{"list_tasks", "list_downloader_torrents", "pause_torrent", "delete_torrent", "get_site_userinfo"} {
+		assert.False(t, open[name], name)
+	}
+	schema, _ := json.Marshal(func() any {
+		for _, tool := range res.Tools {
+			if tool.Name == "list_downloader_torrents" {
+				return tool.InputSchema
+			}
+		}
+		return nil
+	}())
+	assert.Contains(t, string(schema), `"maximum":200`)
+}
