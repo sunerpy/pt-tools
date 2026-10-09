@@ -8,6 +8,8 @@ on:
     paths:
       - "apps/mobile/**"
       - "internal/remote/**"
+      - "go.mod"
+      - "go.sum"
       - "docs/reference/app-api-v1.yaml"
       - ".github/workflows/mobile.yml"
       - ".github/actions/setup-flutter/**"
@@ -16,6 +18,8 @@ on:
     paths:
       - "apps/mobile/**"
       - "internal/remote/**"
+      - "go.mod"
+      - "go.sum"
       - "docs/reference/app-api-v1.yaml"
       - ".github/workflows/mobile.yml"
       - ".github/actions/setup-flutter/**"
