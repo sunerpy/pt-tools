@@ -488,6 +488,16 @@ func TestStillValid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, GoAwayRevoked, th.stillValid(s))
 	assert.Equal(t, GoAwayPairingClosed, th.stillValid(&session{mode: ModePairing}))
+
+	// 配对会话只对握手时的那个窗口有效：换了新窗口，旧窗口的会话登记以后核对不过
+	_, err = th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	oldGen := th.pairings.openWindow()
+	assert.Empty(t, th.stillValid(&session{mode: ModePairing, pairGen: oldGen}))
+	_, err = th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	assert.Equal(t, GoAwayPairingClosed, th.stillValid(&session{mode: ModePairing, pairGen: oldGen}))
+	assert.Empty(t, th.stillValid(&session{mode: ModePairing, pairGen: th.pairings.openWindow()}))
 }
 
 // 关掉远程访问：全部会话收到 GOAWAY disabled，新连接握手不了；轮换主机密钥：全部会话收到 key_rotated，设备全部撤销

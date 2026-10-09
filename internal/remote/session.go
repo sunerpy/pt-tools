@@ -96,6 +96,8 @@ type session struct {
 	// peerKey 是设备的 X25519 公钥（握手里拿到的，已经认证过）
 	peerKey []byte
 	device  Device
+	// pairGen 是配对会话握手时的配对窗口编号：窗口换了以后这条会话的请求不再作数
+	pairGen uint64
 	epoch   uint64
 
 	ctx    context.Context
@@ -516,7 +518,7 @@ const (
 // servePair 处理配对：核对配对密钥，记下设备，回设备信息；之后会话用 GOAWAY paired 关掉，设备重连成正常会话。
 // 每个结果都记审计（还没有设备时设备编号是 0）。
 func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
-	if !s.h.pairings.open() {
+	if !s.h.pairings.isOpen(s.pairGen) {
 		s.h.audit(r.Context(), 0, "remote:pair", auditPairClosed)
 		writeJSONError(w, http.StatusGone, "pairing_closed", ErrPairingClosed.Error())
 		s.setCloseAfter(GoAwayPairingClosed)
@@ -538,7 +540,7 @@ func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
 	}
 	// 格式不对的密钥也算输错一次
 	secret, _ := DecodeKey(in.Secret)
-	dev, closedNow, err := s.h.pairings.redeem(secret, func(scopes []string) (Device, error) {
+	dev, closedNow, err := s.h.pairings.redeem(s.pairGen, secret, func(scopes []string) (Device, error) {
 		// 在配对窗口的锁里写设备表：取消窗口、换新窗口不会插到核对与写库之间
 		ctx, cancel := boundedContext(r.Context())
 		defer cancel()
@@ -579,7 +581,7 @@ func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
 // pairFailed 记下一次请求体或设备名不对的配对请求：计入窗口的失败次数（到 5 次窗口作废，配对会话全部关掉）并记审计。
 func (s *session) pairFailed(r *http.Request, result string) {
 	s.h.audit(r.Context(), 0, "remote:pair", result)
-	if s.h.pairings.fail() {
+	if s.h.pairings.fail(s.pairGen) {
 		s.setCloseAfter(GoAwayPairingClosed)
 		s.h.closePairingSessions(s)
 	}

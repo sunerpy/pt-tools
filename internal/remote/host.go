@@ -276,6 +276,7 @@ func (h *Host) handshake(raw MsgConn, via string) (*session, string) {
 		return nil, GoAwayDisabled
 	}
 	var dev *Device
+	var pairGen uint64
 	reserved := ""
 	conn, peer, hello, err := acceptHandshake(h.ctx, raw, st.keys, st.hostID, nil, func(peer []byte, _ ClientHello) HostHello {
 		lctx, cancel := context.WithTimeout(h.ctx, HandshakeTimeout)
@@ -288,9 +289,11 @@ func (h *Host) handshake(raw MsgConn, via string) (*session, string) {
 			return HostHello{Error: HelloBusy}
 		case d != nil:
 			dev = d
-		case !h.pairings.open():
-			return HostHello{Error: HelloNotPaired}
 		default:
+			// 记下这是哪一个窗口：窗口换了以后，这条配对会话的请求不再作数
+			if pairGen = h.pairings.openWindow(); pairGen == 0 {
+				return HostHello{Error: HelloNotPaired}
+			}
 			mode = ModePairing
 		}
 		// 名额在回第二条消息之前占好：总会话数与配对会话数都不会被并发的握手超过
@@ -311,6 +314,7 @@ func (h *Host) handshake(raw MsgConn, via string) (*session, string) {
 	if dev != nil {
 		s.device = *dev
 	}
+	s.pairGen = pairGen
 	return s, ""
 }
 
@@ -328,7 +332,7 @@ func (h *Host) stillValid(s *session) string {
 		return GoAwayDisabled
 	}
 	if s.mode == ModePairing {
-		if !h.pairings.open() {
+		if !h.pairings.isOpen(s.pairGen) {
 			return GoAwayPairingClosed
 		}
 		return ""
@@ -530,7 +534,7 @@ func (h *Host) StartPairing(_ context.Context, scopes []string, direct string) (
 	if d == "" && len(st.settings.Relays) == 0 {
 		return PairingTicket{}, fmt.Errorf("%w：先填直连地址或者 relay，App 才知道怎么连过来", ErrInvalid)
 	}
-	secret, expires, err := h.pairings.start(scopes)
+	secret, expires, _, err := h.pairings.start(scopes)
 	if err != nil {
 		return PairingTicket{}, err
 	}

@@ -41,79 +41,87 @@ func TestPairingStateMachine(t *testing.T) {
 		created++
 		return Device{ID: uint(created), Name: "手机", Scopes: scopes}, nil
 	}
-	assert.False(t, p.open())
+	assert.Zero(t, p.openWindow())
 	assert.Equal(t, PairingNone, p.status().State)
-	_, _, err := p.redeem(make([]byte, KeyLen), create)
+	_, _, err := p.redeem(1, make([]byte, KeyLen), create)
 	assert.ErrorIs(t, err, ErrPairingClosed)
 
-	secret, expires, err := p.start(ScopesRead)
+	secret, expires, gen, err := p.start(ScopesRead)
 	require.NoError(t, err)
 	assert.Equal(t, clk.now().Add(PairingTTL), expires)
-	assert.True(t, p.open())
+	assert.Equal(t, gen, p.openWindow())
+	assert.True(t, p.isOpen(gen))
 	st := p.status()
 	assert.Equal(t, PairingWaiting, st.State)
 	assert.Equal(t, ScopesRead, st.Scopes)
 
 	// 只能用一次：配对成功以后窗口关掉，同一个密钥再来是失效
-	dev, closedNow, err := p.redeem(secret, create)
+	dev, closedNow, err := p.redeem(gen, secret, create)
 	require.NoError(t, err)
 	assert.False(t, closedNow)
 	assert.Equal(t, ScopesRead, dev.Scopes)
-	assert.False(t, p.open())
+	assert.False(t, p.isOpen(gen))
 	st = p.status()
 	assert.Equal(t, PairingPaired, st.State)
 	require.NotNil(t, st.Device)
 	assert.Equal(t, dev.ID, st.Device.ID)
-	_, _, err = p.redeem(secret, create)
+	_, _, err = p.redeem(gen, secret, create)
 	assert.ErrorIs(t, err, ErrPairingClosed)
 	assert.Equal(t, 1, created)
 
 	// 写设备表失败：窗口继续等
-	secret, _, err = p.start(ScopesFull)
+	secret, _, gen, err = p.start(ScopesFull)
 	require.NoError(t, err)
-	_, _, err = p.redeem(secret, func([]string) (Device, error) { return Device{}, ErrInvalid })
+	_, _, err = p.redeem(gen, secret, func([]string) (Device, error) { return Device{}, ErrInvalid })
 	assert.ErrorIs(t, err, ErrInvalid)
-	assert.True(t, p.open())
+	assert.True(t, p.isOpen(gen))
 
 	// 输错 5 次作废：第 5 次报 closedNow，之后正确的密钥也没用了
 	for i := 0; i < MaxPairingFailures; i++ {
-		_, closed, rerr := p.redeem(bytes.Repeat([]byte{byte(i)}, KeyLen), create)
+		_, closed, rerr := p.redeem(gen, bytes.Repeat([]byte{byte(i)}, KeyLen), create)
 		assert.ErrorIs(t, rerr, ErrPairingSecret)
 		assert.Equal(t, i == MaxPairingFailures-1, closed, "第 %d 次", i+1)
 	}
-	assert.False(t, p.open())
-	_, _, err = p.redeem(secret, create)
+	assert.Zero(t, p.openWindow())
+	_, _, err = p.redeem(gen, secret, create)
 	assert.ErrorIs(t, err, ErrPairingClosed)
 	assert.Equal(t, PairingClosed, p.status().State)
 	assert.Equal(t, MaxPairingFailures, p.status().Failures)
 
-	// 格式不对的密钥也算输错
-	secret, _, err = p.start(ScopesFull)
+	// 格式不对的密钥、请求体或设备名不对（fail）都算失败
+	secret, _, gen, err = p.start(ScopesFull)
 	require.NoError(t, err)
-	_, _, err = p.redeem(nil, create)
+	_, _, err = p.redeem(gen, nil, create)
 	assert.ErrorIs(t, err, ErrPairingSecret)
-	assert.Equal(t, 1, p.status().Failures)
+	assert.False(t, p.fail(gen))
+	assert.Equal(t, 2, p.status().Failures)
 
 	// 过期
 	clk.add(PairingTTL)
-	assert.False(t, p.open())
-	_, _, err = p.redeem(secret, create)
+	assert.Zero(t, p.openWindow())
+	_, _, err = p.redeem(gen, secret, create)
 	assert.ErrorIs(t, err, ErrPairingClosed)
 	assert.Equal(t, PairingExpired, p.status().State)
 
-	// 新开的窗口替换旧的：旧的密钥不能用了
-	old, _, err := p.start(ScopesFull)
+	// 新开的窗口替换旧的：旧窗口的会话（旧编号）配对不了，旧编号上的失败也不计入新窗口
+	_, _, oldGen, err := p.start(ScopesFull)
 	require.NoError(t, err)
-	fresh, _, err := p.start(ScopesFull)
+	fresh, _, freshGen, err := p.start(ScopesFull)
 	require.NoError(t, err)
-	_, _, err = p.redeem(old, create)
-	assert.ErrorIs(t, err, ErrPairingSecret)
+	assert.NotEqual(t, oldGen, freshGen)
+	_, _, err = p.redeem(oldGen, fresh, create)
+	assert.ErrorIs(t, err, ErrPairingClosed, "旧窗口的会话拿着新窗口的密钥也不行")
+	for i := 0; i < MaxPairingFailures; i++ {
+		assert.False(t, p.fail(oldGen))
+	}
+	assert.Zero(t, p.status().Failures)
+	assert.True(t, p.isOpen(freshGen))
 
 	// 取消以后正确的密钥也失效，设备表不写
 	before := created
 	p.cancel()
-	assert.False(t, p.open())
-	_, _, err = p.redeem(fresh, create)
+	assert.Zero(t, p.openWindow())
+	_, _, err = p.redeem(freshGen, fresh, create)
 	assert.ErrorIs(t, err, ErrPairingClosed)
 	assert.Equal(t, before, created)
 }
@@ -121,37 +129,37 @@ func TestPairingStateMachine(t *testing.T) {
 // 写设备表的时候（拿着窗口的锁）握手照样能问窗口开没开，不被拖住
 func TestPairingOpenDoesNotWaitForRedeem(t *testing.T) {
 	p := newPairings(time.Now)
-	secret, _, err := p.start(ScopesFull)
+	secret, _, gen, err := p.start(ScopesFull)
 	require.NoError(t, err)
 	inCreate := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _, _ = p.redeem(secret, func(scopes []string) (Device, error) {
+		_, _, _ = p.redeem(gen, secret, func(scopes []string) (Device, error) {
 			close(inCreate)
 			<-release
 			return Device{ID: 1, Scopes: scopes}, nil
 		})
 	}()
 	<-inCreate
-	got := make(chan bool, 1)
-	go func() { got <- p.open() }()
+	got := make(chan uint64, 1)
+	go func() { got <- p.openWindow() }()
 	select {
-	case open := <-got:
-		assert.True(t, open)
+	case g := <-got:
+		assert.Equal(t, gen, g)
 	case <-time.After(time.Second):
-		t.Fatal("open 被写设备表拖住了")
+		t.Fatal("openWindow 被写设备表拖住了")
 	}
 	close(release)
 	<-done
-	assert.False(t, p.open(), "配对成功以后窗口关了")
+	assert.Zero(t, p.openWindow(), "配对成功以后窗口关了")
 }
 
 // 核对与写设备表在同一把锁里：同一个密钥并发提交，只有一次写设备表；写的时候取消要等它写完，之后窗口是已配对
 func TestPairingRedeemLinearized(t *testing.T) {
 	p := newPairings(time.Now)
-	secret, _, err := p.start(ScopesFull)
+	secret, _, gen, err := p.start(ScopesFull)
 	require.NoError(t, err)
 	var mu sync.Mutex
 	calls := 0
@@ -171,7 +179,7 @@ func TestPairingRedeemLinearized(t *testing.T) {
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			_, _, rerr := p.redeem(secret, create)
+			_, _, rerr := p.redeem(gen, secret, create)
 			results <- rerr
 		}()
 	}
