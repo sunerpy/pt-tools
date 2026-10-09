@@ -217,7 +217,7 @@ describe("远程访问", () => {
     });
     await vi.waitFor(() => expect(api.devices).toHaveBeenCalled());
     expect(ui.success).toHaveBeenCalledWith("「新手机」已配对");
-    // 用过的二维码淡下去，链接与复制按钮收起来
+    // 用过的二维码模糊掉，链接与复制按钮收起来
     expect(q("ra-pair-qr")!.querySelector("img")!.classList.contains("ra-qr--used")).toBe(true);
     expect(q("ra-link")).toBeNull();
     expect(q("ra-copy-link")).toBeNull();

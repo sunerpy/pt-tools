@@ -769,9 +769,9 @@ onBeforeUnmount(stopTimer);
   background: #fff;
 }
 
-/* 用过、过期、作废的二维码淡下去，免得被当成还能扫 */
+/* 用过、过期、作废的二维码模糊掉，免得被当成还能扫（不用 opacity：它压暗内容，见 paletteContrast.test.ts） */
 .ra-qr--used {
-  opacity: 0.2;
+  filter: blur(6px) grayscale(1);
 }
 
 .ra-pair__state {
