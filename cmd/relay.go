@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -28,6 +29,8 @@ var (
 	relayClientIPHeader string
 	relayTLSCert        string
 	relayTLSKey         string
+	// relayEnvErrs 是写错的 PT_TOOLS_RELAY_* 环境变量：注册参数时记下，运行时拒绝启动（不能悄悄退回默认值）
+	relayEnvErrs []error
 )
 
 var relayCmd = &cobra.Command{
@@ -53,10 +56,11 @@ func init() {
 	f := relayServeCmd.Flags()
 	f.StringVar(&relayListen, "listen", envOr("PT_TOOLS_RELAY_LISTEN", "0.0.0.0:8443"), "监听地址")
 	f.StringVar(&relayPublicURL, "public-url", os.Getenv("PT_TOOLS_RELAY_PUBLIC_URL"), "relay 对外的地址（ws:// 或 wss://），必填")
-	f.IntVar(&relayMaxStreams, "max-streams-per-host", envInt("PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST", relayserver.DefaultMaxStreamsPerHost), "每台主机同时打开的客户端流上限")
-	f.Int64Var(&relayDailyBytes, "daily-bytes-per-host", int64(envInt("PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST", 0)), "每台主机每天（00:00 UTC 重置）转发的字节上限，0 = 不限")
-	f.IntVar(&relayMaxConnPerIP, "max-conn-per-ip-per-min", envInt("PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN", relayserver.DefaultMaxConnPerIPPerMin), "每个 IP 每分钟新建连接的上限，负数 = 不限")
-	f.BoolVar(&relayDisabled, "disabled", os.Getenv("PT_TOOLS_RELAY_DISABLED") == "true", "暂停服务：所有连接以 4503 关闭")
+	errs := &relayEnvErrs
+	f.IntVar(&relayMaxStreams, "max-streams-per-host", int(envInt("PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST", relayserver.DefaultMaxStreamsPerHost, errs)), "每台主机同时打开的客户端流上限")
+	f.Int64Var(&relayDailyBytes, "daily-bytes-per-host", envInt("PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST", 0, errs), "每台主机每天（00:00 UTC 重置）转发的字节上限，0 = 不限")
+	f.IntVar(&relayMaxConnPerIP, "max-conn-per-ip-per-min", int(envInt("PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN", relayserver.DefaultMaxConnPerIPPerMin, errs)), "每个 IP 每分钟新建连接的上限，负数 = 不限")
+	f.BoolVar(&relayDisabled, "disabled", envBool("PT_TOOLS_RELAY_DISABLED", errs), "暂停服务：所有连接以 4503 关闭")
 	f.StringVar(&relayClientIPHeader, "client-ip-header", os.Getenv("PT_TOOLS_RELAY_CLIENT_IP_HEADER"), "从这个请求头取客户端 IP（放在反向代理之后时，例如 X-Real-IP）")
 	f.StringVar(&relayTLSCert, "tls-cert", os.Getenv("PT_TOOLS_RELAY_TLS_CERT"), "TLS 证书文件（不填时是明文，交给反向代理做 TLS）")
 	f.StringVar(&relayTLSKey, "tls-key", os.Getenv("PT_TOOLS_RELAY_TLS_KEY"), "TLS 私钥文件")
@@ -69,17 +73,44 @@ func envOr(key, def string) string {
 	return def
 }
 
-func envInt(key string, def int) int {
-	var n int
-	if v := os.Getenv(key); v != "" {
-		if _, err := fmt.Sscan(v, &n); err == nil {
-			return n
-		}
+// envInt 读整数环境变量（64 位）；没有设时是 def，写错时记进 errs 并返回 def。
+func envInt(key string, def int64, errs *[]error) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
 	}
-	return def
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("环境变量 %s=%q 不是整数", key, v))
+		return def
+	}
+	return n
+}
+
+// envBool 读布尔环境变量（true/false/1/0 等，大小写都认）；没有设时是 false，写错时记进 errs。
+func envBool(key string, errs *[]error) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("环境变量 %s=%q 不是 true 或 false", key, v))
+		return false
+	}
+	return b
 }
 
 func runRelay(ctx context.Context) error {
+	if len(relayEnvErrs) > 0 {
+		return errors.Join(relayEnvErrs...)
+	}
+	switch {
+	case relayMaxStreams < 0:
+		return errors.New("--max-streams-per-host 不能是负数")
+	case relayDailyBytes < 0:
+		return errors.New("--daily-bytes-per-host 不能是负数（0 = 不限）")
+	}
 	if relayPublicURL == "" {
 		return errors.New("要用 --public-url（或 PT_TOOLS_RELAY_PUBLIC_URL）给出 relay 对外的地址，例如 wss://relay.example.com")
 	}
