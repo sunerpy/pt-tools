@@ -173,6 +173,7 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 | `CLOSE`     | `0x12` | 双向         | ≥ 1 | 空，或 u16 关闭码（大端）加最多 123 字节原因 |
 
 - 流编号由 relay 分配。relay 把客户端发来的每条二进制消息装进 `DATA` 转给主机，把主机发来的 `DATA` 的内容原样发给客户端；任一端可以 `CLOSE`，relay 随后关掉客户端那条 WebSocket。主机的 `CLOSE` 排在它之前发来的 `DATA` 后面：relay 发完这些消息再关（主机常常发完 `GOAWAY` 马上关流）。
+- 主机在一个流上发出第一条 `DATA` 以前，客户端只能发一条不超过 4096 字节的消息（Noise 握手的第一条），多发或者太大以 4400 关掉。这条消息要等主机回话才计入每天的转发量；主机没回话就关掉的流不计，未认证的客户端耗不掉主机的额度。
 - 某个客户端一直不读时，relay 照常读主机连接，同一台主机别的流不受影响；跟不上的客户端以 4429 关掉。Go 版给每个客户端排队最多 64 条消息，排满即关；Cloudflare 版由运行时缓冲（Workers 的 WebSocket 没有发送完成的通知），发不出去时关。
 - 主机的连接断开（或者被同一个 hostId 的新连接替换）时，relay 以 4404 关掉这台主机的所有客户端连接：主机那边的会话已经随连接结束，留着客户端连接只会让 App 等到空闲超时。
 - 一条 relay 连接上主机最多同时接 16 个流，再来的 `OPEN` 直接回 `CLOSE` 4429。某个流排队的消息超过 64 条时主机关掉那个流，不拖住别的流。
@@ -201,7 +202,7 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 | 每 IP 每分钟新建连接 | 30                       | 30               | 以 4429 拒绝                                                                 |
 | 暂停服务             | `RELAY_DISABLED=true`    | `--disabled`     | 一律 4503                                                                    |
 
-每 IP 的计数里 IPv6 按 /64 合计（一台机器通常拿得到整个 /64），映射的 IPv4（`::ffff:a.b.c.d`）按 IPv4 计。每天转发量是两个方向 payload 字节的合计。Cloudflare 版用 `vars`（`MAX_STREAMS_PER_HOST`、`DAILY_BYTES_PER_HOST`、`MAX_CONN_PER_IP_PER_MIN`、`RELAY_DISABLED`）覆盖默认值，Go 版用同名的命令行参数。两者都有 `GET /healthz`，回 `{"ok":true,"version":"…","disabled":false}`。
+每 IP 的计数里 IPv6 按 /64 合计（一台机器通常拿得到整个 /64），映射的 IPv4（`::ffff:a.b.c.d`）按 IPv4 计。每天转发量是两个方向 payload 字节的合计（只算主机回过话的流）。Cloudflare 版用 `vars`（`MAX_STREAMS_PER_HOST`、`DAILY_BYTES_PER_HOST`、`MAX_CONN_PER_IP_PER_MIN`、`RELAY_DISABLED`）覆盖默认值，Go 版用同名的命令行参数。两者都有 `GET /healthz`，回 `{"ok":true,"version":"…","disabled":false}`。
 
 ### 实现
 
