@@ -53,6 +53,7 @@
 - [App API](reference/app-api.md)：令牌能调用的接口：认证、约定、错误码与接口清单。
 - [qB 兼容入口](guide/qbit-compat.md)：让 MoviePilot、IYUU、autobrr、Sonarr/Radarr 把 pt-tools 当成 qBittorrent：开启、客户端怎么填、能做什么。
 - [MCP](guide/mcp.md)：让 Claude、Cursor、Cherry Studio 这类 AI 助手调用 pt-tools：令牌、客户端怎么填、工具清单与审计。
+- [远程访问](guide/remote-access.md)：手机 App 扫码配对，经直连或 relay 连回 pt-tools：权限、设备管理、relay 能看到什么与审计。
 
 ## 参考
 
@@ -67,6 +68,7 @@
 - [品牌标识](brand.md)：标志文件、变体选择、最小尺寸与留白规则。
 - [ChatOps / MCP / Agent 架构](design/chatops-mcp-agent.md)：能力分层、权限模型与当前实现边界。
 - [MCP Server 设计](design/phase4-mcp.md)：MCP 工具、传输与安全边界的设计记录（用法见 [MCP](guide/mcp.md)）。
+- [远程访问协议](design/remote-access.md)：App 与 pt-tools 之间的配对链接、Noise 握手、隧道帧与 relay 的 v1 规范（用法见[远程访问](guide/remote-access.md)）。
 - [AI Agent 设计](design/phase5-agent.md)：未来 Agent 模式、接入路径与非目标。
 
 > [!NOTE]
@@ -82,14 +84,14 @@
 
 下表的站点路径都相对于 `https://firlab.app/pt-tools/`，例如 `/en/` 就是 `https://firlab.app/pt-tools/en/`。
 
-| 本目录中的路径                                                                                        | 站点路径                      | 说明                                                     |
-| ----------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------- |
-| `index.md`、`en/index.md`                                                                             | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」          |
-| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                      | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在 |
-| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`     | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录） |
-| `public/screens/`                                                                                     | `/screens/*.webp`             | 首页截图，见下文「截图」                                 |
-| `guide/images/`                                                                                       | 随页面发布                    | 页面引用的图片                                           |
-| `README.md`、`brand.md`、`design/webui-board-spec.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版           |
+| 本目录中的路径                                                                                                                   | 站点路径                      | 说明                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `index.md`、`en/index.md`                                                                                                        | `/`、`/en/`                   | 首页，文字在 frontmatter 里，见下文「首页数据」                                      |
+| `guide/`、`reference/`、`configuration.md`、`faq.md`、`sites.md`                                                                 | `/guide/*`、`/reference/*` 等 | 用户文档；`en/` 下同一路径是英文版，两种语言必须同时存在                             |
+| `development.md`、`design/chatops-mcp-agent.md`、`design/phase4-mcp.md`、`design/phase5-agent.md`                                | `/development`、`/design/*`   | 只有中文；英文站同一路径是同步脚本生成的指引页（不收录）                             |
+| `public/screens/`                                                                                                                | `/screens/*.webp`             | 首页截图，见下文「截图」                                                             |
+| `guide/images/`                                                                                                                  | 随页面发布                    | 页面引用的图片                                                                       |
+| `README.md`、`brand.md`、`design/webui-board-spec.md`、`design/remote-access.md`、`guide/chatops-mcp-agent-design.md`、`readme/` | 不发布                        | 仓库内资料；`readme/` 是根目录 README 的英文版；协议规范从用户文档以 GitHub 链接引用 |
 
 `web/frontend/public/logo.svg` 也会同步过去，作为站点图标。
 
