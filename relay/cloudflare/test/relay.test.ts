@@ -1,15 +1,17 @@
 // relay（Cloudflare 版）的单测：跑在 workerd 里（vitest-pool-workers），经 Worker 的 fetch 建 WebSocket。
 // 限额在 vitest.config.ts 里调小：每主机 2 个流、每天 4096 字节、每 IP 不限。
 // 线格式与 Go 版的一致性用 internal/remote/testdata/vectors.json 核对（同一份向量，App 也用它）。
-import { SELF } from "cloudflare:test";
+import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import vectors from "../../../internal/remote/testdata/vectors.json";
+import type { Env } from "../src/index";
 import {
   CLOSE,
   closePayload,
   encodeOuter,
   hostIdOf,
+  ipKey,
   OuterType,
   parseOuter,
   relayAuthMessage,
@@ -153,6 +155,18 @@ describe("线格式与 Go 版一致（vectors.json）", () => {
     expect(relayOrigin("http://[::1]:80/")).toBe("ws://[::1]");
   });
 
+  it("限流的键：IPv4 按地址，IPv6 按 /64，映射的 IPv4 当 IPv4", () => {
+    expect(ipKey("1.2.3.4")).toBe("1.2.3.4");
+    expect(ipKey("::ffff:1.2.3.4")).toBe("1.2.3.4");
+    expect(ipKey("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:DB8:1:2:bbbb:cccc:0:9")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(ipKey("::1")).toBe("0:0:0:0::/64");
+    expect(ipKey("fe80::1%eth0")).toBe("fe80:0:0:0::/64");
+    expect(ipKey("unknown")).toBe("unknown");
+    expect(ipKey("1:2:3")).toBe("1:2:3");
+  });
+
   it("CLOSE 的原因截在字符边界上", () => {
     const p = closePayload(4404, "长".repeat(60));
     expect(p.length).toBeLessThanOrEqual(2 + 123);
@@ -197,6 +211,23 @@ describe("relay", () => {
       encodeOuter({ type: OuterType.Close, stream: o.stream, payload: closePayload(4321, "bye") }),
     );
     expect(await c.closed).toBe(4321);
+  });
+
+  it("认证超时的闹钟只往前挪：不停有新的未认证连接时，早来的照样按时关掉", async () => {
+    const k = await newKey();
+    const stub = (env as unknown as Env).HOST_RELAY.get(
+      (env as unknown as Env).HOST_RELAY.idFromName(k.id),
+    );
+    const a = await open(`/v1/host/${k.id}`);
+    expect((await a.outer()).type).toBe(OuterType.Challenge);
+    const first = await runInDurableObject(stub, (_, state) => state.storage.getAlarm());
+    expect(first).not.toBeNull();
+    await new Promise((r) => setTimeout(r, 30));
+    const b = await open(`/v1/host/${k.id}`);
+    expect((await b.outer()).type).toBe(OuterType.Challenge);
+    expect(await runInDurableObject(stub, (_, state) => state.storage.getAlarm())).toBe(first);
+    a.ws.close(1000, "");
+    b.ws.close(1000, "");
   });
 
   it("主机 ping 回 pong", async () => {

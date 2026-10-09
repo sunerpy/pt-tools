@@ -184,3 +184,26 @@ export function relayOrigin(raw: string): string {
     (scheme === "ws" && port === "80") || (scheme === "wss" && port === "443") || port === "";
   return `${scheme}://${host}${isDefault ? "" : `:${port}`}`;
 }
+
+/**
+ * 限流按什么计：IPv4 按地址，IPv6 按 /64（一台机器通常拿得到整个 /64，按地址计等于不限），
+ * 映射的 IPv4（::ffff:a.b.c.d）当 IPv4。认不出来的原样返回。
+ */
+export function ipKey(raw: string): string {
+  const s = raw.trim().toLowerCase().split("%")[0]!;
+  if (!s.includes(":")) return s;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(s);
+  if (mapped) return mapped[1]!;
+  const halves = s.split("::");
+  if (halves.length > 2) return raw;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 1 ? fill !== 0 : fill < 1) return raw;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? fill : 0).fill("0"), ...tail];
+  if (groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return raw;
+  return `${groups
+    .slice(0, 4)
+    .map((g) => parseInt(g, 16).toString(16))
+    .join(":")}::/64`;
+}

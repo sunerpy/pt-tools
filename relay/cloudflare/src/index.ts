@@ -11,6 +11,7 @@ import {
   CLOSE,
   closePayload,
   encodeOuter,
+  ipKey,
   MAX_NOISE_MESSAGE,
   NONCE_LEN,
   OuterType,
@@ -91,7 +92,7 @@ export default {
 
     const lim = limits(env);
     if (lim.perIPPerMin >= 0) {
-      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const ip = ipKey(request.headers.get("CF-Connecting-IP") ?? "unknown");
       const limiter = env.IP_LIMITER.get(env.IP_LIMITER.idFromName(`ip:${ip}`));
       if (!(await limiter.allow(lim.perIPPerMin)))
         return rejectSocket(CLOSE.limited, "too many connections");
@@ -130,11 +131,15 @@ export class IPLimiter extends DurableObject<Env> {
   }
 }
 
-/** 连接上的附加信息（跨休眠保留，最大 16 KiB） */
+/**
+ * 连接上的附加信息（跨休眠保留，最大 16 KiB）。relay 关掉的连接改成 closed：关闭握手完成以前 getWebSockets() 还会列出它，
+ * 不能再算作主机、占着流的名额或者收转发的消息。
+ */
 type Attachment =
   | { t: "pending"; nonce: string; at: number; origin: string; host: string }
   | { t: "host"; epoch: number; host: string }
-  | { t: "client"; stream: number; epoch: number };
+  | { t: "client"; stream: number; epoch: number }
+  | { t: "closed" };
 
 interface Usage {
   day: string;
@@ -162,6 +167,16 @@ function safeClose(ws: WebSocket, code: number, reason: string): void {
   } catch {
     // 已经关了
   }
+}
+
+/** 标记成 closed 再关（见 Attachment） */
+function markClosed(ws: WebSocket, code: number, reason: string): void {
+  try {
+    ws.serializeAttachment({ t: "closed" } satisfies Attachment);
+  } catch {
+    // 已经关了
+  }
+  safeClose(ws, code, reason);
 }
 
 function safeSend(ws: WebSocket, data: ArrayBuffer | Uint8Array | string): boolean {
@@ -201,7 +216,10 @@ export class HostRelay extends DurableObject<Env> {
         host,
       } satisfies Attachment);
       server.send(encodeOuter({ type: OuterType.Challenge, stream: 0, payload: nonce }));
-      await this.ctx.storage.setAlarm(Date.now() + AUTH_TIMEOUT_MS);
+      // 闹钟只往前挪：不停有新的未认证连接时，早来的也要按时关掉
+      const deadline = Date.now() + AUTH_TIMEOUT_MS;
+      const cur = await this.ctx.storage.getAlarm();
+      if (cur === null || cur > deadline) await this.ctx.storage.setAlarm(deadline);
       return new Response(null, { status: 101, webSocket: client });
     }
     // 客户端
@@ -227,7 +245,7 @@ export class HostRelay extends DurableObject<Env> {
     if (
       !safeSend(hostWs, encodeOuter({ type: OuterType.Open, stream, payload: new Uint8Array() }))
     ) {
-      safeClose(server, CLOSE.hostOffline, "host offline");
+      this.closeClient(server, CLOSE.hostOffline, "host offline", false);
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -258,11 +276,37 @@ export class HostRelay extends DurableObject<Env> {
     return null;
   }
 
+  /** 下一个流编号：用到头以后从 1 重来，跳过还开着的 */
   private async nextStream(): Promise<number> {
-    const n = ((await this.ctx.storage.get<number>("nextStream")) ?? 0) + 1;
-    const stream = n > 0xffffffff ? 1 : n;
-    await this.ctx.storage.put("nextStream", stream);
-    return stream;
+    let n = (await this.ctx.storage.get<number>("nextStream")) ?? 0;
+    do {
+      n = n >= 0xffffffff ? 1 : n + 1;
+    } while (this.clientFor(n));
+    await this.ctx.storage.put("nextStream", n);
+    return n;
+  }
+
+  /**
+   * 关掉一个客户端流；notifyHost 为真时告诉它的主机（CLOSE），主机自己要求关的、主机已经不在的不用。
+   * 已经关过的只再关一次连接。
+   */
+  private closeClient(ws: WebSocket, code: number, reason: string, notifyHost: boolean): void {
+    const a = this.attachment(ws);
+    if (a?.t === "client" && notifyHost) {
+      const host = this.hostSocket();
+      const ha = host ? (this.attachment(host) as Attachment & { t: "host" }) : null;
+      if (host && ha && ha.epoch === a.epoch) {
+        safeSend(
+          host,
+          encodeOuter({
+            type: OuterType.Close,
+            stream: a.stream,
+            payload: closePayload(code, reason),
+          }),
+        );
+      }
+    }
+    markClosed(ws, code, reason);
   }
 
   private async nextEpoch(): Promise<number> {
@@ -300,7 +344,8 @@ export class HostRelay extends DurableObject<Env> {
       u.over = true;
       this.pendingBytes = 0;
       await this.ctx.storage.put("usage", u);
-      for (const ws of this.clients()) safeClose(ws, CLOSE.limited, "daily quota exceeded");
+      for (const ws of this.clients())
+        this.closeClient(ws, CLOSE.limited, "daily quota exceeded", true);
       return false;
     }
     if (this.pendingBytes >= USAGE_FLUSH_BYTES) {
@@ -337,22 +382,14 @@ export class HostRelay extends DurableObject<Env> {
       f.type !== OuterType.Auth ||
       !(await verifyRelayAuth(a.host, unb64(a.nonce), a.origin, f.payload))
     ) {
-      safeClose(ws, CLOSE.authFailed, "auth failed");
+      markClosed(ws, CLOSE.authFailed, "auth failed");
       return;
     }
     // 认证通过：替换同一个 hostId 的旧连接（旧的 4409，它的客户端 4404）
     const old = this.hostSocket();
     if (old) {
       const oldEpoch = (this.attachment(old) as Attachment & { t: "host" }).epoch;
-      old.serializeAttachment({
-        t: "pending",
-        nonce: "",
-        at: 0,
-        origin: "",
-        host: "",
-      } satisfies Attachment);
-      safeClose(old, CLOSE.replaced, "replaced by a newer connection");
-      for (const c of this.clients(oldEpoch)) safeClose(c, CLOSE.hostOffline, "host offline");
+      this.dropHost(old, oldEpoch, CLOSE.replaced, "replaced by a newer connection");
     }
     const epoch = await this.nextEpoch();
     ws.serializeAttachment({ t: "host", epoch, host: a.host } satisfies Attachment);
@@ -378,14 +415,14 @@ export class HostRelay extends DurableObject<Env> {
         const c = this.clientFor(f.stream);
         if (!c) return;
         if (!(await this.count(f.payload.length))) return;
-        if (!safeSend(c, f.payload)) safeClose(c, 1011, "write failed");
+        if (!safeSend(c, f.payload)) this.closeClient(c, 1011, "write failed", true);
         return;
       }
       case OuterType.Close: {
         const c = this.clientFor(f.stream);
         if (!c) return;
         const { code, reason } = parseClosePayload(f.payload);
-        safeClose(c, clientCloseCode(code), reason);
+        this.closeClient(c, clientCloseCode(code), reason, false);
         return;
       }
       default:
@@ -399,21 +436,21 @@ export class HostRelay extends DurableObject<Env> {
     message: ArrayBuffer | string,
   ): Promise<void> {
     if (typeof message === "string" || message.byteLength === 0) {
-      safeClose(ws, CLOSE.protocol, "binary only");
+      this.closeClient(ws, CLOSE.protocol, "binary only", true);
       return;
     }
     if (message.byteLength > MAX_NOISE_MESSAGE) {
-      safeClose(ws, CLOSE.tooBig, "message too big");
+      this.closeClient(ws, CLOSE.tooBig, "message too big", true);
       return;
     }
     const host = this.hostSocket();
     const ha = host ? (this.attachment(host) as Attachment & { t: "host" }) : null;
     if (!host || !ha || ha.epoch !== a.epoch) {
-      safeClose(ws, CLOSE.hostOffline, "host offline");
+      this.closeClient(ws, CLOSE.hostOffline, "host offline", false);
       return;
     }
     if (!(await this.count(message.byteLength))) {
-      safeClose(ws, CLOSE.limited, "daily quota exceeded");
+      this.closeClient(ws, CLOSE.limited, "daily quota exceeded", true);
       return;
     }
     if (
@@ -422,40 +459,24 @@ export class HostRelay extends DurableObject<Env> {
         encodeOuter({ type: OuterType.Data, stream: a.stream, payload: new Uint8Array(message) }),
       )
     ) {
-      safeClose(ws, CLOSE.hostOffline, "host offline");
+      this.closeClient(ws, CLOSE.hostOffline, "host offline", false);
     }
   }
 
   /** 关掉主机连接与它的客户端流（4404） */
   private dropHost(ws: WebSocket, epoch: number, code: number, reason: string): void {
-    ws.serializeAttachment({
-      t: "pending",
-      nonce: "",
-      at: 0,
-      origin: "",
-      host: "",
-    } satisfies Attachment);
-    safeClose(ws, code, reason);
-    for (const c of this.clients(epoch)) safeClose(c, CLOSE.hostOffline, "host offline");
+    markClosed(ws, code, reason);
+    for (const c of this.clients(epoch))
+      this.closeClient(c, CLOSE.hostOffline, "host offline", false);
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     const a = this.attachment(ws);
     if (a?.t === "host") {
-      for (const c of this.clients(a.epoch)) safeClose(c, CLOSE.hostOffline, "host offline");
+      this.dropHost(ws, a.epoch, 1000, "");
     } else if (a?.t === "client") {
-      const host = this.hostSocket();
-      const ha = host ? (this.attachment(host) as Attachment & { t: "host" }) : null;
-      if (host && ha && ha.epoch === a.epoch) {
-        safeSend(
-          host,
-          encodeOuter({
-            type: OuterType.Close,
-            stream: a.stream,
-            payload: closePayload(clientCloseCode(code), reason),
-          }),
-        );
-      }
+      // 客户端走了：把它的关闭码告诉主机
+      this.closeClient(ws, clientCloseCode(code), reason, true);
     }
     safeClose(ws, 1000, "");
     if (this.usage && this.pendingBytes > 0) {
@@ -474,8 +495,8 @@ export class HostRelay extends DurableObject<Env> {
     let next = 0;
     for (const ws of this.ctx.getWebSockets()) {
       const a = this.attachment(ws);
-      if (a?.t !== "pending" || a.at === 0) continue;
-      if (now - a.at >= AUTH_TIMEOUT_MS) safeClose(ws, CLOSE.authFailed, "auth timeout");
+      if (a?.t !== "pending") continue;
+      if (now - a.at >= AUTH_TIMEOUT_MS) markClosed(ws, CLOSE.authFailed, "auth timeout");
       else next = next === 0 ? a.at + AUTH_TIMEOUT_MS : Math.min(next, a.at + AUTH_TIMEOUT_MS);
     }
     if (next > 0) await this.ctx.storage.setAlarm(next);
