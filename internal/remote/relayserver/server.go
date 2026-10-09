@@ -71,7 +71,18 @@ type Server struct {
 	mu    sync.Mutex
 	hosts map[string]*hostConn
 
+	// usage 是每台主机（按 hostId）当天的转发量：主机重连、换连接都不清零；usageDay 换了一天时整张表清空
+	usageMu  sync.Mutex
+	usage    map[string]*usage
+	usageDay string
+
 	limiter *ipLimiter
+}
+
+// usage 是一台主机当天的转发量。
+type usage struct {
+	bytes int64
+	over  bool
 }
 
 // New 校验设置并建 relay。
@@ -94,7 +105,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	return &Server{
-		cfg: cfg, origin: origin, ctx: ctx, stop: stop, hosts: map[string]*hostConn{},
+		cfg: cfg, origin: origin, ctx: ctx, stop: stop, hosts: map[string]*hostConn{}, usage: map[string]*usage{},
 		limiter: newIPLimiter(cfg.MaxConnPerIPPerMin, time.Minute, cfg.Now),
 	}, nil
 }
@@ -193,16 +204,17 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close(remote.CloseAuthFailed, "auth failed")
 		return
 	}
+	// 先发 READY 再登记：登记以后才会有客户端的 OPEN，主机不会在 READY 之前收到别的帧
+	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterReady}); err != nil {
+		h.close(websocket.StatusInternalError, "")
+		return
+	}
 	s.mu.Lock()
 	old := s.hosts[hostID]
 	s.hosts[hostID] = h
 	s.mu.Unlock()
 	if old != nil {
 		old.close(remote.CloseReplaced, "replaced by a newer connection")
-	}
-	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterReady}); err != nil {
-		h.close(websocket.StatusInternalError, "")
-		return
 	}
 	s.cfg.Logger.Infof("[relay] 主机 %s 已连上（%s）", hostID, s.clientIP(r))
 	h.readLoop()
@@ -252,9 +264,6 @@ type hostConn struct {
 	mu      sync.Mutex
 	streams map[uint32]*clientConn
 	next    uint32
-	day     string
-	bytes   int64
-	over    bool
 }
 
 func (h *hostConn) authenticate() error {
@@ -327,32 +336,44 @@ func (h *hostConn) close(code websocket.StatusCode, reason string) {
 	})
 }
 
+// usageOf 是 hostId 当天的用量（调用方持有 usageMu）；到了新的一天（UTC）整张表清空。
+func (s *Server) usageOf(hostID string) *usage {
+	if day := s.cfg.Now().UTC().Format("2006-01-02"); day != s.usageDay {
+		s.usage, s.usageDay = map[string]*usage{}, day
+	}
+	u := s.usage[hostID]
+	if u == nil {
+		u = &usage{}
+		s.usage[hostID] = u
+	}
+	return u
+}
+
 // count 记下转发的字节；超过每天的上限时关掉这台主机的全部客户端流，并拒绝新的流，直到 00:00 UTC。
 func (h *hostConn) count(n int) bool {
 	limit := h.s.cfg.DailyBytesPerHost
 	if limit <= 0 {
 		return true
 	}
-	day := h.s.cfg.Now().UTC().Format("2006-01-02")
-	h.mu.Lock()
-	if h.day != day {
-		h.day, h.bytes, h.over = day, 0, false
-	}
-	h.bytes += int64(n)
-	tripped := !h.over && h.bytes > limit
+	h.s.usageMu.Lock()
+	u := h.s.usageOf(h.id)
+	u.bytes += int64(n)
+	tripped := !u.over && u.bytes > limit
 	if tripped {
-		h.over = true
+		u.over = true
 	}
-	over := h.over
-	var list []*clientConn
+	over := u.over
+	h.s.usageMu.Unlock()
 	if tripped {
+		h.mu.Lock()
+		list := make([]*clientConn, 0, len(h.streams))
 		for _, c := range h.streams {
 			list = append(list, c)
 		}
-	}
-	h.mu.Unlock()
-	for _, c := range list {
-		c.close(remote.CloseLimited, "daily quota exceeded")
+		h.mu.Unlock()
+		for _, c := range list {
+			c.close(remote.CloseLimited, "daily quota exceeded")
+		}
 	}
 	return !over
 }
@@ -361,13 +382,9 @@ func (h *hostConn) overQuota() bool {
 	if h.s.cfg.DailyBytesPerHost <= 0 {
 		return false
 	}
-	day := h.s.cfg.Now().UTC().Format("2006-01-02")
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.day != day {
-		h.day, h.bytes, h.over = day, 0, false
-	}
-	return h.over
+	h.s.usageMu.Lock()
+	defer h.s.usageMu.Unlock()
+	return h.s.usageOf(h.id).over
 }
 
 // openStream 为新的客户端分配流编号并通知主机；超出上限时返回关闭码。
@@ -384,7 +401,7 @@ func (h *hostConn) openStream(ws *websocket.Conn) (*clientConn, int, string) {
 		h.mu.Unlock()
 		return nil, remote.CloseLimited, "too many streams"
 	}
-	c := &clientConn{h: h, ws: ws, id: h.allocStream(), out: make(chan outMsg, clientQueue), done: make(chan struct{})}
+	c := newClientConn(h, ws, h.allocStream())
 	h.streams[c.id] = c
 	h.mu.Unlock()
 	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterOpen, Stream: c.id}); err != nil {
@@ -445,7 +462,7 @@ func (h *hostConn) readLoop() {
 			if !h.count(len(f.Payload)) {
 				continue
 			}
-			if !c.push(outMsg{data: f.Payload}) {
+			if !c.pushData(f.Payload) {
 				// 客户端读得太慢，排队满了：关掉它，不拖住别的流
 				c.close(remote.CloseLimited, "slow reader")
 			}
@@ -453,9 +470,7 @@ func (h *hostConn) readLoop() {
 			if c := h.stream(f.Stream); c != nil {
 				code, reason := remote.ParseClosePayload(f.Payload)
 				// 排在已经收到的 DATA 后面：先发完再关（例如 GOAWAY 之后马上关）
-				if !c.push(outMsg{close: true, code: clientCloseCode(code), reason: reason}) {
-					c.closeBy(clientCloseCode(code), reason, false)
-				}
+				c.pushClose(clientCloseCode(code), reason)
 			}
 		default:
 			h.close(remote.CloseProtocol, "unexpected frame")
@@ -489,11 +504,18 @@ type clientConn struct {
 	ws *websocket.Conn
 	id uint32
 
-	// out 是排队等发给客户端的消息，由 writeLoop 按顺序发出
-	out    chan outMsg
-	done   chan struct{}
-	once   sync.Once
-	closed atomic.Bool
+	// out 是排队等发给客户端的消息，由 writeLoop 按顺序发出：最多 clientQueue 条 DATA，多一格留给主机的 CLOSE。
+	// 只有主机的读循环往里放（pushData、pushClose），所以 queued 与 closing 不用加锁
+	out     chan outMsg
+	queued  atomic.Int32
+	closing bool
+	done    chan struct{}
+	once    sync.Once
+	closed  atomic.Bool
+}
+
+func newClientConn(h *hostConn, ws *websocket.Conn, id uint32) *clientConn {
+	return &clientConn{h: h, ws: ws, id: id, out: make(chan outMsg, clientQueue+1), done: make(chan struct{})}
 }
 
 // outMsg 是要发给客户端的一条消息，或者主机要求的关闭（发完排在前面的消息再关）。
@@ -504,17 +526,26 @@ type outMsg struct {
 	reason string
 }
 
-// push 把一条消息排进客户端的队列，不等；排满时返回 false。流已经关了时直接丢掉。
-func (c *clientConn) push(m outMsg) bool {
-	if c.closed.Load() {
+// pushData 把主机的一条 DATA 排进客户端的队列，不等；排满时返回 false。流已经关了、主机已经要求关时直接丢掉。
+func (c *clientConn) pushData(b []byte) bool {
+	if c.closed.Load() || c.closing {
 		return true
 	}
-	select {
-	case c.out <- m:
-		return true
-	default:
+	if c.queued.Load() >= clientQueue {
 		return false
 	}
+	c.queued.Add(1)
+	c.out <- outMsg{data: b}
+	return true
+}
+
+// pushClose 把主机的 CLOSE 排在已经收到的 DATA 后面（用预留的那一格）；只排一次。
+func (c *clientConn) pushClose(code int, reason string) {
+	if c.closed.Load() || c.closing {
+		return
+	}
+	c.closing = true
+	c.out <- outMsg{close: true, code: code, reason: reason}
 }
 
 // writeLoop 按顺序把排队的消息发给客户端；写不动（对端一直不读）时断开它。
@@ -528,6 +559,7 @@ func (c *clientConn) writeLoop() {
 				c.closeBy(m.code, m.reason, false)
 				return
 			}
+			c.queued.Add(-1)
 			ctx, cancel := context.WithTimeout(c.h.s.ctx, writeTimeout)
 			err := c.ws.Write(ctx, websocket.MessageBinary, m.data)
 			cancel()

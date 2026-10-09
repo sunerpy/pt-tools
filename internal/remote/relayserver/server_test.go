@@ -207,3 +207,46 @@ func TestHealthz(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 }
+
+// 队列满时主机的 CLOSE 用预留的那一格：排在 64 条 DATA 后面，之后这个流上的消息都丢掉
+func TestClientQueueCloseSlot(t *testing.T) {
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1"})
+	require.NoError(t, err)
+	defer s.Close()
+	h := &hostConn{s: s, streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	c := newClientConn(h, nil, 1)
+	for i := 0; i < clientQueue; i++ {
+		require.True(t, c.pushData([]byte{byte(i)}), i)
+	}
+	assert.False(t, c.pushData([]byte("x")), "第 65 条 DATA 排不进")
+	c.pushClose(4321, "bye")
+	require.Len(t, c.out, clientQueue+1)
+	c.pushClose(4000, "again")
+	assert.True(t, c.pushData([]byte("late")), "关闭排上以后的 DATA 丢掉")
+	assert.Len(t, c.out, clientQueue+1)
+	for i := 0; i < clientQueue; i++ {
+		m := <-c.out
+		assert.Equal(t, []byte{byte(i)}, m.data)
+	}
+	last := <-c.out
+	assert.True(t, last.close)
+	assert.Equal(t, 4321, last.code)
+}
+
+// 每天的用量按 hostId 记在 relay 上：换一条连接不清零，过了 00:00 UTC 重置
+func TestUsageByHostID(t *testing.T) {
+	now := time.Date(2026, 10, 9, 23, 0, 0, 0, time.UTC)
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1", DailyBytesPerHost: 10, Now: func() time.Time { return now }})
+	require.NoError(t, err)
+	defer s.Close()
+	a := &hostConn{s: s, id: "h1", streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	assert.True(t, a.count(8))
+	b := &hostConn{s: s, id: "h1", streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	assert.False(t, b.count(5), "同一个 hostId 的新连接接着算")
+	assert.True(t, b.overQuota())
+	other := &hostConn{s: s, id: "h2", streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	assert.False(t, other.overQuota())
+	now = now.Add(2 * time.Hour)
+	assert.False(t, b.overQuota(), "过了 00:00 UTC 重置")
+	assert.True(t, b.count(5))
+}

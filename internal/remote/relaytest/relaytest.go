@@ -482,6 +482,12 @@ func testDailyBytes(t *testing.T, tg Target) {
 	assert.Equal(t, remote.CloseLimited, code, "超额以后客户端流 4429")
 	c2 := connectClient(t, tg, h.keys.HostID())
 	assert.Equal(t, remote.CloseLimited, closeCode(t, c2), "超额以后新的客户端也 4429")
+	// 用量按 hostId 计：主机重连（替换旧连接）不清零
+	fresh := connectHost(t, tg, h.keys)
+	assert.Equal(t, remote.CloseReplaced, closeCode(t, h.ws))
+	h = fresh
+	c3 := connectClient(t, tg, h.keys.HostID())
+	assert.Equal(t, remote.CloseLimited, closeCode(t, c3), "主机重连以后照样 4429")
 	// 主机连接保持
 	ctx, cancel := context.WithTimeout(context.Background(), step)
 	defer cancel()
