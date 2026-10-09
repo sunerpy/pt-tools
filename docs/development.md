@@ -6,7 +6,7 @@
 
 | 依赖        | 版本要求 | 说明                                   |
 | ----------- | -------- | -------------------------------------- |
-| **Go**      | 1.26.7   | 后端开发语言；以 `go.mod` 为准         |
+| **Go**      | 1.26.9   | 后端开发语言；以 `go.mod` 为准         |
 | **Node.js** | 25.2.0   | 前端构建环境；以 `.node-version` 为准  |
 | **pnpm**    | 10.25.0  | 前端包管理器；以 `packageManager` 为准 |
 
@@ -16,8 +16,8 @@
 
 ```bash
 # Linux（下载官方归档）
-wget https://go.dev/dl/go1.26.7.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.26.7.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.9.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.26.9.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
 # macOS (使用 Homebrew)

@@ -1,6 +1,6 @@
 module github.com/sunerpy/pt-tools
 
-go 1.26.7
+go 1.26.9
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0

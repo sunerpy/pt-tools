@@ -8,7 +8,7 @@
 
 `pt-tools` is a Private Tracker automation service with a Cobra CLI, an authenticated Web UI, RSS download automation, multi-site search and statistics, downloader management, ChatOps/notification channels, login-expiry monitoring, and a companion browser extension.
 
-**Stack:** Go 1.26.7 | Cobra | stdlib `http.ServeMux` | GORM + SQLite/WAL | Zap | Vue 3 + Vite + Element Plus + Pinia | pnpm
+**Stack:** Go 1.26.9 | Cobra | stdlib `http.ServeMux` | GORM + SQLite/WAL | Zap | Vue 3 + Vite + Element Plus + Pinia | pnpm
 
 ## Repository Map
 
