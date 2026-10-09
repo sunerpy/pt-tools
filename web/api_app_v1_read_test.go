@@ -145,18 +145,20 @@ func TestAppTasks(t *testing.T) {
 // 站点图标：站点名不对 400；没有缓存、不去取时回占位图
 func TestAppFavicon(t *testing.T) {
 	srv, _ := historyFixture(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/x?nofetch=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/nosuchsite?nofetch=1", nil)
 	req.SetPathValue("site", "nosuchsite")
 	w := httptest.NewRecorder()
 	srv.appFavicon(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NotEmpty(t, w.Body.Bytes())
+	validateAppResponse(t, req, w)
 
-	req = httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/x", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/a%5Cb", nil)
 	req.SetPathValue("site", "a\\b")
 	w = httptest.NewRecorder()
 	srv.appFavicon(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	validateAppResponse(t, req, w)
 }
 
 // appRedact：错误信息里的凭证都要遮住（上游的回应体、tracker 地址、裸的 key=value、地址里的用户信息与路径里的长串），普通的说明不动
