@@ -189,6 +189,25 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 | `4429` | 超出限额                           |
 | `4503` | relay 暂停服务                     |
 
+客户端发文本消息以 4400 关闭，发超过 65535 字节的消息以 1009 关闭。暂停服务、hostId 不对、限流这几种情况，relay 先完成 WebSocket 握手再用对应的关闭码关掉，客户端能看到原因。
+
+### 限额（冻结）
+
+| 项目                 | 托管版（Cloudflare）默认 | 自建版（Go）默认 | 超额处理                                                                     |
+| -------------------- | ------------------------ | ---------------- | ---------------------------------------------------------------------------- |
+| 每主机并发客户端流   | 16                       | 16               | 新连接以 4429 关闭                                                           |
+| 每主机每天转发量     | 2 GiB                    | 不限（0）        | 关掉这台主机的全部客户端流，并以 4429 拒绝新的，直到 00:00 UTC；主机连接保持 |
+| 每 IP 每分钟新建连接 | 30                       | 30               | 以 4429 拒绝                                                                 |
+| 暂停服务             | `RELAY_DISABLED=true`    | `--disabled`     | 一律 4503                                                                    |
+
+每天转发量是两个方向 payload 字节的合计。Cloudflare 版用 `vars`（`MAX_STREAMS_PER_HOST`、`DAILY_BYTES_PER_HOST`、`MAX_CONN_PER_IP_PER_MIN`、`RELAY_DISABLED`）覆盖默认值，Go 版用同名的命令行参数。两者都有 `GET /healthz`，回 `{"ok":true,"version":"…","disabled":false}`。
+
+### 实现
+
+- Go 版：`internal/remote/relayserver`，命令 `pt-tools relay serve`（见[命令行](../reference/cli.md#pt-tools-relay-serve)）。
+- Cloudflare 版：`relay/cloudflare`，每个 hostId 一个 Durable Object，用 WebSocket Hibernation API 持有连接，主机的 `ping` 由自动应答回 `pong`；每个 IP 一个 Durable Object 计数。relay 的 origin 取 `PUBLIC_URL`，没有设置时按请求的地址推导。
+- 一致性测试：`internal/remote/relaytest`（Go 黑盒）。`go test` 对 Go 版跑；`relay/cloudflare/scripts/conformance.sh` 起三个 `wrangler dev` 实例（不同限额）对 Cloudflare 版跑同一套，并用真正的主机端经它走一遍配对与会话。
+
 ## 信任模型
 
 - relay 看得到 hostId、两端的 IP、连接时间与流量大小，看不到请求与回应的内容，也冒充不了主机（没有主机的 X25519 私钥完成不了握手）。

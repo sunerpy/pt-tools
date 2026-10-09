@@ -62,6 +62,7 @@
 - Web 界面和接口：默认 `8080`。[MCP](../guide/mcp.md) 的 `/mcp` 也在这个端口上；打开[远程访问](../guide/remote-access.md)以后，直连入口 `/remote/v1/stream` 也在这里（关着时回 404）。
 - [qB 兼容入口](../guide/qbit-compat.md)：给了 `--qbit-compat-addr` 或 `PT_QBIT_COMPAT_ADDR` 时另外监听一个端口，用有「qB 兼容」权限的 API 令牌登录；该端口只在内网开放。
 - QQ OneBot 通道：启用后另外监听一个端口，供 NapCat 以反向 WebSocket 连接，例如 `0.0.0.0:6701` 的 `/onebot/v11/ws`。监听地址不是本机地址（127.0.0.1、localhost）时必须设置 Access Token，否则通道不会启动；该端口只在内网开放。
+- 自建的 relay（[`pt-tools relay serve`](cli.md#pt-tools-relay-serve)）是单独的进程，监听 `--listen` 指定的端口；它要对公网开放，转发的内容是端到端加密的，自己不保存任何数据。
 
 ## 部署建议
 

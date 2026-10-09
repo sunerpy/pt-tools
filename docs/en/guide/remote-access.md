@@ -56,6 +56,34 @@ A relay only forwards traffic. When pt-tools connects to a relay it proves its h
 
 What a relay can see: this host's hostId, the IP addresses of the app and of pt-tools, when they connect and how much traffic they exchange. If that matters to you, use only the direct address, or run your own relay.
 
+### Run your own relay
+
+There are two implementations with the same protocol and behaviour (they pass the same conformance tests); pick either:
+
+**The relay built into pt-tools**: run it on a VPS or NAS with a public address. Where Cloudflare is slow or unreliable, a VPS in a nearby region works best.
+
+```bash
+pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
+```
+
+- `--public-url` is the address you enter in the app and in pt-tools, and it must match the address actually used (pt-tools signs against it).
+- Usually it sits behind a reverse proxy that terminates TLS (`wss://`) and forwards WebSocket connections; to limit by client IP, point `--client-ip-header` at the header the proxy sets. `--tls-cert` and `--tls-key` terminate TLS directly instead.
+- Docker: use the same image with `PT_MODE=relay` and `PT_TOOLS_RELAY_PUBLIC_URL`, for example `docker run -d -p 8443:8443 -e PT_MODE=relay -e PT_TOOLS_RELAY_PUBLIC_URL=wss://relay.example.com sunerpy/pt-tools`.
+- Options and limits are listed under [Command line](../reference/cli.md#pt-tools-relay-serve).
+
+**The Cloudflare version**: deploy it to your own Cloudflare account (Workers and Durable Objects; the free plan works). In the repository's `relay/cloudflare` folder:
+
+```bash
+pnpm install
+pnpm exec wrangler login
+pnpm exec wrangler deploy                              # served at https://pt-tools-relay.<your-subdomain>.workers.dev
+pnpm exec wrangler deploy --domain relay.example.com   # or on a domain of yours hosted on Cloudflare
+```
+
+Enter the same address, starting with `wss://`, in the app and in pt-tools. Limits live in the `vars` of `wrangler.jsonc`: phone connections per pt-tools at once (16 by default), bytes forwarded per day (2 GiB by default; the free plan's allowance is limited) and new connections per IP address per minute (30 by default).
+
+Both relays answer `GET /healthz`, which you can use to check that the service is up.
+
 ## Rotate the host keys
 
 Rotate host keys (轮换主机密钥), under Status, replaces the host keys and revokes every device: they remember the old host key and can no longer connect, so they need to be paired again. Use it only if you suspect the keys have leaked, for example when a backup of the database and `secret.key` got out.
