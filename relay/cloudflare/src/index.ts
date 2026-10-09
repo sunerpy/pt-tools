@@ -35,8 +35,14 @@ export interface Env {
 }
 
 const AUTH_TIMEOUT_MS = 10_000;
-/** 每日用量最多攒多少字节写一次存储（休眠时没写的部分会丢，按少算） */
-const USAGE_FLUSH_BYTES = 1 << 20;
+/**
+ * 每日用量先预留再用：存储里写的是「已经用的 + 一块」，用到预留的上限以前不再写。Durable Object 被逐出（休眠）时
+ * 内存里的准确数没了，读回来的是预留数，只会多算不会少算；还在内存里时 USAGE_SETTLE_MS 以后把准确数写回去。
+ */
+const USAGE_RESERVE_BYTES = 1 << 20;
+const USAGE_SETTLE_MS = 1_000;
+/** 每 IP 的计数窗口 */
+const IP_WINDOW_MS = 60_000;
 
 interface Limits {
   maxStreams: number;
@@ -114,20 +120,31 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-/** 每个 IP 一个：60 秒的窗口里最多 limit 次新建连接。被逐出以后计数从头开始（宽松一侧）。 */
+/**
+ * 每个 IP 一个：60 秒的窗口里最多 limit 次新建连接。计数写在存储里（被逐出、重新部署都不清零），
+ * 同一个对象里的存储操作是串行的；窗口结束时闹钟删掉记录。
+ */
 export class IPLimiter extends DurableObject<Env> {
-  private start = 0;
-  private count = 0;
-
   async allow(limit: number): Promise<boolean> {
     const now = Date.now();
-    if (now - this.start >= 60_000) {
-      this.start = now;
-      this.count = 0;
+    let w = await this.ctx.storage.get<{ start: number; count: number }>("w");
+    if (!w || now - w.start >= IP_WINDOW_MS) {
+      w = { start: now, count: 0 };
+      await this.ctx.storage.setAlarm(now + IP_WINDOW_MS);
     }
-    if (this.count >= limit) return false;
-    this.count++;
+    if (w.count >= limit) return false;
+    w.count++;
+    await this.ctx.storage.put("w", w);
     return true;
+  }
+
+  override async alarm(): Promise<void> {
+    const w = await this.ctx.storage.get<{ start: number }>("w");
+    if (w && Date.now() - w.start < IP_WINDOW_MS) {
+      await this.ctx.storage.setAlarm(w.start + IP_WINDOW_MS);
+      return;
+    }
+    await this.ctx.storage.deleteAll();
   }
 }
 
@@ -137,6 +154,7 @@ export class IPLimiter extends DurableObject<Env> {
  */
 type Attachment =
   | { t: "pending"; nonce: string; at: number; origin: string; host: string }
+  | { t: "authing"; at: number }
   | { t: "host"; epoch: number; host: string }
   | { t: "client"; stream: number; epoch: number }
   | { t: "closed" };
@@ -190,9 +208,11 @@ function safeSend(ws: WebSocket, data: ArrayBuffer | Uint8Array | string): boole
 
 /** 每个 hostId 一个：主机连接、它的客户端流、每日用量。 */
 export class HostRelay extends DurableObject<Env> {
-  /** 内存里没写进存储的用量（休眠时丢掉，按少算） */
-  private pendingBytes = 0;
+  /** 当天准确的用量（内存里）；reserved 是存储里写的预留数（不小于 usage.bytes） */
   private usage: Usage | null = null;
+  private reserved = 0;
+  /** 预留数比准确数多、还没写回准确数的时候为真（等闹钟） */
+  private unsettled = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -216,10 +236,7 @@ export class HostRelay extends DurableObject<Env> {
         host,
       } satisfies Attachment);
       server.send(encodeOuter({ type: OuterType.Challenge, stream: 0, payload: nonce }));
-      // 闹钟只往前挪：不停有新的未认证连接时，早来的也要按时关掉
-      const deadline = Date.now() + AUTH_TIMEOUT_MS;
-      const cur = await this.ctx.storage.getAlarm();
-      if (cur === null || cur > deadline) await this.ctx.storage.setAlarm(deadline);
+      await this.alarmBy(Date.now() + AUTH_TIMEOUT_MS);
       return new Response(null, { status: 101, webSocket: client });
     }
     // 客户端
@@ -309,19 +326,34 @@ export class HostRelay extends DurableObject<Env> {
     markClosed(ws, code, reason);
   }
 
-  private async nextEpoch(): Promise<number> {
-    const e = ((await this.ctx.storage.get<number>("epoch")) ?? 0) + 1;
-    await this.ctx.storage.put("epoch", e);
-    return e;
+  /** 新的 epoch：比所有还开着的连接上的都大（同步算出来，认证提升那一段不用等存储） */
+  private nextEpoch(): number {
+    let max = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = this.attachment(ws);
+      if ((a?.t === "host" || a?.t === "client") && a.epoch > max) max = a.epoch;
+    }
+    return max + 1;
+  }
+
+  /** 闹钟只往前挪：认证超时与用量写回共用一个闹钟 */
+  private async alarmBy(at: number): Promise<void> {
+    const cur = await this.ctx.storage.getAlarm();
+    if (cur === null || cur > at) await this.ctx.storage.setAlarm(at);
   }
 
   private async loadUsage(): Promise<Usage> {
     const day = utcDay();
-    if (!this.usage)
+    if (!this.usage) {
+      // 刚建的实例（或者休眠以后）：存储里的是预留数，当作已经用了这么多
       this.usage = (await this.ctx.storage.get<Usage>("usage")) ?? { day, bytes: 0, over: false };
+      this.reserved = this.usage.bytes;
+      this.unsettled = false;
+    }
     if (this.usage.day !== day) {
       this.usage = { day, bytes: 0, over: false };
-      this.pendingBytes = 0;
+      this.reserved = 0;
+      this.unsettled = false;
       await this.ctx.storage.put("usage", this.usage);
     }
     return this.usage;
@@ -329,7 +361,8 @@ export class HostRelay extends DurableObject<Env> {
 
   private async overQuota(lim: Limits): Promise<boolean> {
     if (lim.dailyBytes <= 0) return false;
-    return (await this.loadUsage()).over;
+    const u = await this.loadUsage();
+    return u.over || u.bytes > lim.dailyBytes;
   }
 
   /** 记下转发的字节；刚超额时关掉全部客户端流（4429），返回还能不能继续转发 */
@@ -339,20 +372,35 @@ export class HostRelay extends DurableObject<Env> {
     const u = await this.loadUsage();
     if (u.over) return false;
     u.bytes += n;
-    this.pendingBytes += n;
     if (u.bytes > lim.dailyBytes) {
       u.over = true;
-      this.pendingBytes = 0;
+      this.reserved = u.bytes;
+      this.unsettled = false;
       await this.ctx.storage.put("usage", u);
       for (const ws of this.clients())
         this.closeClient(ws, CLOSE.limited, "daily quota exceeded", true);
       return false;
     }
-    if (this.pendingBytes >= USAGE_FLUSH_BYTES) {
-      this.pendingBytes = 0;
-      await this.ctx.storage.put("usage", u);
+    if (u.bytes > this.reserved) {
+      // 用到预留的上限了：先把下一块预留写进存储再继续（一块不超过上限的 1/64，小限额时也不会一休眠就超额）
+      const chunk = Math.max(1, Math.min(USAGE_RESERVE_BYTES, Math.floor(lim.dailyBytes / 64)));
+      this.reserved = u.bytes + chunk;
+      await this.ctx.storage.put("usage", { day: u.day, bytes: this.reserved, over: false });
+      if (!this.unsettled) {
+        this.unsettled = true;
+        await this.alarmBy(Date.now() + USAGE_SETTLE_MS);
+      }
     }
     return true;
+  }
+
+  /** 还在内存里时把准确的用量写回去（替换预留数） */
+  private async settleUsage(): Promise<void> {
+    if (!this.usage || !this.unsettled) return;
+    this.unsettled = false;
+    if (this.usage.day !== utcDay()) return;
+    this.reserved = this.usage.bytes;
+    await this.ctx.storage.put("usage", this.usage);
   }
 
   override async webSocketMessage(ws: WebSocket, raw: ArrayBuffer | string): Promise<void> {
@@ -364,6 +412,9 @@ export class HostRelay extends DurableObject<Env> {
     switch (a.t) {
       case "pending":
         return this.onAuth(ws, a, message);
+      case "authing":
+        markClosed(ws, CLOSE.protocol, "unexpected message during auth");
+        return;
       case "host":
         return this.onHostMessage(ws, a, message);
       case "client":
@@ -377,21 +428,25 @@ export class HostRelay extends DurableObject<Env> {
     message: ArrayBuffer | string,
   ): Promise<void> {
     const f = typeof message === "string" ? null : parseOuter(new Uint8Array(message));
-    if (
-      !f ||
-      f.type !== OuterType.Auth ||
-      !(await verifyRelayAuth(a.host, unb64(a.nonce), a.origin, f.payload))
-    ) {
+    if (!f || f.type !== OuterType.Auth) {
       markClosed(ws, CLOSE.authFailed, "auth failed");
       return;
     }
-    // 认证通过：替换同一个 hostId 的旧连接（旧的 4409，它的客户端 4404）
+    // 验签要等（别的事件会插进来）：先改成 authing，验签期间这个连接再发来的消息按违反协议处理
+    ws.serializeAttachment({ t: "authing", at: a.at } satisfies Attachment);
+    const ok = await verifyRelayAuth(a.host, unb64(a.nonce), a.origin, f.payload);
+    if (this.attachment(ws)?.t !== "authing") return; // 等验签的时候关掉了（超时、违反协议）
+    if (!ok) {
+      markClosed(ws, CLOSE.authFailed, "auth failed");
+      return;
+    }
+    // 认证通过：下面这段同步执行，不会和别的连接的认证交错。替换同一个 hostId 的旧连接（旧的 4409，它的客户端 4404）
+    const epoch = this.nextEpoch();
     const old = this.hostSocket();
     if (old) {
       const oldEpoch = (this.attachment(old) as Attachment & { t: "host" }).epoch;
       this.dropHost(old, oldEpoch, CLOSE.replaced, "replaced by a newer connection");
     }
-    const epoch = await this.nextEpoch();
     ws.serializeAttachment({ t: "host", epoch, host: a.host } satisfies Attachment);
     safeSend(ws, encodeOuter({ type: OuterType.Ready, stream: 0, payload: new Uint8Array() }));
   }
@@ -415,7 +470,8 @@ export class HostRelay extends DurableObject<Env> {
         const c = this.clientFor(f.stream);
         if (!c) return;
         if (!(await this.count(f.payload.length))) return;
-        if (!safeSend(c, f.payload)) this.closeClient(c, 1011, "write failed", true);
+        // 发不出去（运行时的发送缓冲满了、连接已经断了）：按跟不上的客户端处理
+        if (!safeSend(c, f.payload)) this.closeClient(c, CLOSE.limited, "slow reader", true);
         return;
       }
       case OuterType.Close: {
@@ -479,27 +535,24 @@ export class HostRelay extends DurableObject<Env> {
       this.closeClient(ws, clientCloseCode(code), reason, true);
     }
     safeClose(ws, 1000, "");
-    if (this.usage && this.pendingBytes > 0) {
-      this.pendingBytes = 0;
-      await this.ctx.storage.put("usage", this.usage);
-    }
   }
 
   override async webSocketError(ws: WebSocket): Promise<void> {
     await this.webSocketClose(ws, 1011, "error");
   }
 
-  /** 认证超时：还没回 AUTH 的主机连接关掉 */
+  /** 闹钟：关掉认证超时的主机连接，把准确的用量写回去 */
   override async alarm(): Promise<void> {
+    await this.settleUsage();
     const now = Date.now();
     let next = 0;
     for (const ws of this.ctx.getWebSockets()) {
       const a = this.attachment(ws);
-      if (a?.t !== "pending") continue;
+      if (a?.t !== "pending" && a?.t !== "authing") continue;
       if (now - a.at >= AUTH_TIMEOUT_MS) markClosed(ws, CLOSE.authFailed, "auth timeout");
       else next = next === 0 ? a.at + AUTH_TIMEOUT_MS : Math.min(next, a.at + AUTH_TIMEOUT_MS);
     }
-    if (next > 0) await this.ctx.storage.setAlarm(next);
+    if (next > 0) await this.alarmBy(next);
   }
 }
 

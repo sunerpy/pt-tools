@@ -97,6 +97,30 @@ async function newKey() {
   return { kp, pub, id: await hostIdOf(pub) };
 }
 
+function hostStub(id: string) {
+  const ns = (env as unknown as Env).HOST_RELAY;
+  return ns.get(ns.idFromName(id));
+}
+
+/** 等连接关掉，超时返回 null */
+function closedWithin(c: Conn, ms: number): Promise<number | null> {
+  return Promise.race([c.closed, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+}
+
+async function signAuth(k: Awaited<ReturnType<typeof newKey>>, nonce: Uint8Array) {
+  const sig = new Uint8Array(
+    await crypto.subtle.sign(
+      { name: "Ed25519" },
+      k.kp.privateKey,
+      relayAuthMessage(k.id, nonce, ORIGIN),
+    ),
+  );
+  const auth = new Uint8Array(96);
+  auth.set(k.pub, 0);
+  auth.set(sig, 32);
+  return encodeOuter({ type: OuterType.Auth, stream: 0, payload: auth });
+}
+
 async function connectHost(
   key?: Awaited<ReturnType<typeof newKey>>,
   origin = ORIGIN,
@@ -230,6 +254,34 @@ describe("relay", () => {
     b.ws.close(1000, "");
   });
 
+  it("同一个连接发两次 AUTH：违反协议 4400，不会把自己当成旧连接替换掉", async () => {
+    const k = await newKey();
+    const conn = await open(`/v1/host/${k.id}`);
+    const ch = await conn.outer();
+    const auth = await signAuth(k, ch.payload);
+    conn.send(auth);
+    conn.send(auth);
+    expect(await closedWithin(conn, 5000)).toBe(CLOSE.protocol);
+  });
+
+  it("同一把密钥的两个连接同时认证：只留下一个主机，另一个 4409", async () => {
+    const k = await newKey();
+    const a = await open(`/v1/host/${k.id}`);
+    const b = await open(`/v1/host/${k.id}`);
+    const [cha, chb] = [await a.outer(), await b.outer()];
+    const [authA, authB] = [await signAuth(k, cha.payload), await signAuth(k, chb.payload)];
+    a.send(authA);
+    b.send(authB);
+    expect((await a.outer()).type).toBe(OuterType.Ready);
+    expect((await b.outer()).type).toBe(OuterType.Ready);
+    const [ca, cb] = await Promise.all([closedWithin(a, 3000), closedWithin(b, 3000)]);
+    expect([ca, cb].filter((c) => c === CLOSE.replaced)).toHaveLength(1);
+    const alive = ca === null ? a : b;
+    const c = await open(`/v1/client/${k.id}`);
+    expect((await alive.outer()).type).toBe(OuterType.Open);
+    c.ws.close(1000, "");
+  });
+
   it("主机 ping 回 pong", async () => {
     const h = await connectHost();
     h.conn.send("ping");
@@ -315,5 +367,38 @@ describe("relay", () => {
     let m = await h.conn.next();
     while (m !== null && typeof m !== "string") m = await h.conn.next();
     expect(m).toBe("pong");
+  });
+
+  it("每天的用量先写进存储再用：存储里的数不少于已经转发的，Durable Object 换了实例照样算", async () => {
+    const h = await connectHost();
+    const c = await open(`/v1/client/${h.id}`);
+    await h.conn.outer();
+    c.send(new Uint8Array(3000));
+    expect((await h.conn.outer()).type).toBe(OuterType.Data);
+    const stub = hostStub(h.id);
+    const stored = await runInDurableObject(stub, (_, state) =>
+      state.storage.get<{ bytes: number }>("usage"),
+    );
+    expect(stored?.bytes ?? 0).toBeGreaterThanOrEqual(3000);
+    // 休眠以后内存里的状态没了：只能从存储里读回来
+    await runInDurableObject(stub, (instance) => {
+      const o = instance as unknown as Record<string, unknown>;
+      for (const key of Object.keys(o))
+        if (key === "usage" || key === "reserved") o[key] = key === "usage" ? null : 0;
+    });
+    c.send(new Uint8Array(2000));
+    expect(await c.closed).toBe(CLOSE.limited);
+  });
+
+  it("每 IP 的计数写进存储：Durable Object 换了实例不清零", async () => {
+    const ns = (env as unknown as Env).IP_LIMITER;
+    const stub = ns.get(ns.idFromName("ip:persist-test"));
+    expect(await stub.allow(2)).toBe(true);
+    expect(await stub.allow(2)).toBe(true);
+    const w = await runInDurableObject(stub, (_, state) =>
+      state.storage.get<{ count: number }>("w"),
+    );
+    expect(w?.count).toBe(2);
+    expect(await stub.allow(2)).toBe(false);
   });
 });
