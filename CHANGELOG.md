@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.16](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.15...v1.0.0-rc.16) (2026-10-09)
+
+
+### Features
+
+* **remote:** 远程访问协议与主机端（M15） ([#645](https://github.com/sunerpy/pt-tools/issues/645)) ([3fb885e](https://github.com/sunerpy/pt-tools/commit/3fb885eca15bdb69cc681da3e59835744fd320f3))
+
+
+### Bug Fixes
+
+* **build:** Go 升到 1.26.9（标准库安全修复） ([#646](https://github.com/sunerpy/pt-tools/issues/646)) ([9b03686](https://github.com/sunerpy/pt-tools/commit/9b036862605d4f631edb461d9d384e9ec4bad709))
+
 ## [1.0.0-rc.15](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.14...v1.0.0-rc.15) (2026-10-08)
 
 
