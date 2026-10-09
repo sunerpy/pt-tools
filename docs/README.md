@@ -54,6 +54,7 @@
 - [qB 兼容入口](guide/qbit-compat.md)：让 MoviePilot、IYUU、autobrr、Sonarr/Radarr 把 pt-tools 当成 qBittorrent：开启、客户端怎么填、能做什么。
 - [MCP](guide/mcp.md)：让 Claude、Cursor、Cherry Studio 这类 AI 助手调用 pt-tools：令牌、客户端怎么填、工具清单与审计。
 - [远程访问](guide/remote-access.md)：手机 App 扫码配对，经直连或 relay 连回 pt-tools：权限、设备管理、relay 能看到什么与审计。
+- [手机 App](guide/mobile-app.md)：配对、连接方式、各页能做什么、隐私与常见问题。
 
 ## 参考
 
