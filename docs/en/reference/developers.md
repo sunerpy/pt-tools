@@ -4,7 +4,7 @@ This page covers building pt-tools from source, submitting a change and editing 
 
 ## Building from source
 
-The repository pins Go `1.26.7`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local checks:
+The repository pins Go `1.26.9`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local checks:
 
 ```bash
 git clone https://github.com/sunerpy/pt-tools.git
