@@ -365,18 +365,30 @@ func (h *hostConn) count(n int) bool {
 	over := u.over
 	var list []*clientConn
 	if tripped {
-		h.mu.Lock()
-		list = make([]*clientConn, 0, len(h.streams))
-		for _, c := range h.streams {
-			list = append(list, c)
+		// 用量按 hostId 记：这台主机现在登记的连接（可能刚替换了 h）上的流也一起关（锁的顺序 usageMu → s.mu → h.mu）
+		list = h.streamList()
+		h.s.mu.Lock()
+		cur := h.s.hosts[h.id]
+		h.s.mu.Unlock()
+		if cur != nil && cur != h {
+			list = append(list, cur.streamList()...)
 		}
-		h.mu.Unlock()
 	}
 	h.s.usageMu.Unlock()
 	for _, c := range list {
 		c.close(remote.CloseLimited, "daily quota exceeded")
 	}
 	return !over
+}
+
+func (h *hostConn) streamList() []*clientConn {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	list := make([]*clientConn, 0, len(h.streams))
+	for _, c := range h.streams {
+		list = append(list, c)
+	}
+	return list
 }
 
 func (h *hostConn) overQuota() bool {
@@ -472,7 +484,12 @@ func (h *hostConn) readLoop() {
 			if c == nil {
 				continue
 			}
-			if !c.fromHost(len(f.Payload)) {
+			forward, code := c.fromHost(len(f.Payload))
+			if code != 0 {
+				c.close(code, "wait for ACCEPT")
+				continue
+			}
+			if !forward {
 				continue
 			}
 			if !c.pushData(f.Payload) {
@@ -484,6 +501,10 @@ func (h *hostConn) readLoop() {
 				code, reason := remote.ParseClosePayload(f.Payload)
 				// 排在已经收到的 DATA 后面：先发完再关（例如 GOAWAY 之后马上关）
 				c.pushClose(clientCloseCode(code), reason)
+			}
+		case remote.OuterAccept:
+			if c := h.stream(f.Stream); c != nil {
+				c.accept()
 			}
 		default:
 			h.close(remote.CloseProtocol, "unexpected frame")
@@ -526,12 +547,14 @@ type clientConn struct {
 	once    sync.Once
 	closed  atomic.Bool
 
-	// 主机在这个流上发出第一条 DATA 以前（confirmed 为假），客户端只能发一条不超过 MaxUnconfirmed 的消息（sent），
-	// 它的字节数先记在 pending 里，等主机回话时才计入每天的转发量
-	confMu    sync.Mutex
-	confirmed bool
-	sent      bool
-	pending   int
+	// 主机发 ACCEPT 以前（accepted 为假），每个方向只能发一条不超过 MaxUnconfirmed 的消息（客户端的握手第一条、
+	// 主机拒绝握手的第二条），字节数先记在 pending 里；ACCEPT 时一起计入每天的转发量，没有 ACCEPT 就关掉的流不计
+	confMu        sync.Mutex
+	accepted      bool
+	clientSent    bool
+	hostSent      bool
+	clientPending int
+	hostPending   int
 }
 
 func newClientConn(h *hostConn, ws *websocket.Conn, id uint32) *clientConn {
@@ -546,16 +569,16 @@ type outMsg struct {
 	reason string
 }
 
-// fromClient 在转发客户端的一条消息之前调用：主机回话以前只放行第一条（不计量），之后计入每天的转发量。
+// fromClient 在转发客户端的一条消息之前调用：ACCEPT 以前只放行一条（不计量），之后计入每天的转发量。
 // 不放行时返回关闭码。
 func (c *clientConn) fromClient(n int) (bool, int, string) {
 	c.confMu.Lock()
-	if !c.confirmed {
+	if !c.accepted {
 		defer c.confMu.Unlock()
-		if c.sent || n > remote.MaxUnconfirmed {
+		if c.clientSent || n > remote.MaxUnconfirmed {
 			return false, remote.CloseProtocol, "wait for the host"
 		}
-		c.sent, c.pending = true, n
+		c.clientSent, c.clientPending = true, n
 		return true, 0, ""
 	}
 	c.confMu.Unlock()
@@ -565,16 +588,36 @@ func (c *clientConn) fromClient(n int) (bool, int, string) {
 	return true, 0, ""
 }
 
-// fromHost 在转发主机的一条 DATA 之前调用：第一条 DATA 确认这个流，连同客户端那条握手消息一起计入转发量。
-func (c *clientConn) fromHost(n int) bool {
+// fromHost 在转发主机的一条 DATA 之前调用：ACCEPT 以前只放行一条（拒绝握手的回话，不计量），之后计量。
+// 返回要不要转发，以及违反规则时的关闭码（不为 0 时关掉这个流）。
+func (c *clientConn) fromHost(n int) (bool, int) {
 	c.confMu.Lock()
-	if !c.confirmed {
-		c.confirmed = true
-		n += c.pending
-		c.pending = 0
+	if !c.accepted {
+		defer c.confMu.Unlock()
+		if c.hostSent || n > remote.MaxUnconfirmed {
+			return false, remote.CloseProtocol
+		}
+		c.hostSent, c.hostPending = true, n
+		return true, 0
 	}
 	c.confMu.Unlock()
-	return c.h.count(n)
+	return c.h.count(n), 0
+}
+
+// accept 是主机发了 ACCEPT：这个流的握手通过了，之前两个方向的那一条一起计入转发量。重复的忽略。
+func (c *clientConn) accept() {
+	c.confMu.Lock()
+	if c.accepted {
+		c.confMu.Unlock()
+		return
+	}
+	c.accepted = true
+	n := c.clientPending + c.hostPending
+	c.clientPending, c.hostPending = 0, 0
+	c.confMu.Unlock()
+	if n > 0 {
+		c.h.count(n)
+	}
 }
 
 // pushData 把主机的一条 DATA 排进客户端的队列，不等；排满时返回 false。流已经关了、主机已经要求关时直接丢掉。

@@ -7,7 +7,10 @@ export const OUTER_HEADER_LEN = 5;
 export const MAX_NOISE_MESSAGE = 65535;
 export const MAX_OUTER_FRAME = OUTER_HEADER_LEN + MAX_NOISE_MESSAGE;
 export const NONCE_LEN = 32;
-/** 主机在一个流上发出第一条 DATA 以前，客户端只能发一条消息（Noise 握手的第一条），不超过这么多字节，也不计入每天的转发量 */
+/**
+ * 主机发 ACCEPT 以前，一个流上每个方向只能发一条消息（客户端的 Noise 握手第一条、主机拒绝握手的回话），不超过这么多字节，
+ * 也不计量；没有 ACCEPT 就关掉的流不计入每天的转发量
+ */
 export const MAX_UNCONFIRMED = 4096;
 export const AUTH_PAYLOAD_LEN = 32 + 64;
 const MAX_CLOSE_REASON = 123;
@@ -21,6 +24,8 @@ export const enum OuterType {
   Open = 0x10,
   Data = 0x11,
   Close = 0x12,
+  /** 主机 → relay：这个流的握手通过了，从这里起计量 */
+  Accept = 0x13,
 }
 
 /** relay 用的 WebSocket 关闭码 */
@@ -65,6 +70,8 @@ function checkOuter(f: OuterFrame): string | null {
       }
       return null;
     }
+    case OuterType.Accept:
+      return f.stream !== 0 && n === 0 ? null : "ACCEPT";
     default:
       return "type";
   }

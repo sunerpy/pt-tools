@@ -119,6 +119,13 @@ func acceptHandshake(ctx context.Context, conn MsgConn, keys *HostKeys, hostID s
 		return nil, nil, HostHello{}, fmt.Errorf("%w: %v", ErrHandshake, err)
 	}
 	wctx, cancel := context.WithTimeout(ctx, HandshakeTimeout)
+	if a, ok := conn.(streamAccepter); ok && reply.Error == "" {
+		// 经 relay：握手通过了才发 ACCEPT（拒绝的握手不计入这台主机每天的转发量）
+		if err = a.Accept(wctx); err != nil {
+			cancel()
+			return nil, nil, HostHello{}, fmt.Errorf("%w: 写 ACCEPT: %v", ErrHandshake, err)
+		}
+	}
 	err = conn.WriteMsg(wctx, msg2)
 	cancel()
 	if err != nil {

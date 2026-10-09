@@ -201,6 +201,7 @@ func buildVectors(t *testing.T) vectors {
 		{Type: OuterData, Stream: 1, Payload: []byte{1, 2, 3}},
 		{Type: OuterClose, Stream: 1},
 		{Type: OuterClose, Stream: 0xfffffffe, Payload: ClosePayload(CloseLimited, "too many streams")},
+		{Type: OuterAccept, Stream: 7},
 	} {
 		enc, err := AppendOuter(nil, f)
 		require.NoError(t, err)
@@ -211,6 +212,8 @@ func buildVectors(t *testing.T) vectors {
 		{0x11, 0, 0, 0, 1},
 		{0x12, 0, 0, 0, 1, 9},
 		{0x03, 0, 0, 0, 1},
+		{0x13, 0, 0, 0, 0},
+		{0x13, 0, 0, 0, 1, 1},
 	}
 
 	nonce := rep(0x5a, NonceLen)

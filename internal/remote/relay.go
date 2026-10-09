@@ -461,6 +461,16 @@ func (s *relayStream) WriteMsg(ctx context.Context, b []byte) error {
 	return s.m.writeFrame(ctx, OuterFrame{Type: OuterData, Stream: s.id, Payload: b})
 }
 
+// Accept 告诉 relay 这个流的握手通过了（ACCEPT），和 DATA 走同一个写者，所以排在第二条握手消息前面。
+func (s *relayStream) Accept(ctx context.Context) error {
+	select {
+	case <-s.closed:
+		return errRelayClosed
+	default:
+	}
+	return s.m.writeFrame(ctx, OuterFrame{Type: OuterAccept, Stream: s.id})
+}
+
 // Close 关掉这个流并告诉 relay（relay 随后关掉客户端那条 WebSocket）。
 func (s *relayStream) Close(code int, reason string) {
 	s.closeOnce.Do(func() {

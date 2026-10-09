@@ -358,7 +358,10 @@ describe("relay", () => {
     const o = await h.conn.outer();
     c.send(new Uint8Array(3000));
     expect((await h.conn.outer()).type).toBe(OuterType.Data);
-    // 主机回话以后才开始计
+    // 主机 ACCEPT 以后才开始计
+    h.conn.send(
+      encodeOuter({ type: OuterType.Accept, stream: o.stream, payload: new Uint8Array() }),
+    );
     h.conn.send(
       encodeOuter({ type: OuterType.Data, stream: o.stream, payload: new Uint8Array(10) }),
     );
@@ -380,6 +383,9 @@ describe("relay", () => {
     const o = await h.conn.outer();
     c.send(new Uint8Array(1000));
     expect((await h.conn.outer()).type).toBe(OuterType.Data);
+    h.conn.send(
+      encodeOuter({ type: OuterType.Accept, stream: o.stream, payload: new Uint8Array() }),
+    );
     h.conn.send(
       encodeOuter({ type: OuterType.Data, stream: o.stream, payload: new Uint8Array(1000) }),
     );
@@ -421,6 +427,9 @@ describe("relay", () => {
     c.send(new Uint8Array(100));
     expect((await h.conn.outer()).type).toBe(OuterType.Data);
     h.conn.send(
+      encodeOuter({ type: OuterType.Accept, stream: o.stream, payload: new Uint8Array() }),
+    );
+    h.conn.send(
       encodeOuter({ type: OuterType.Data, stream: o.stream, payload: new Uint8Array(100) }),
     );
     await c.next();
@@ -436,6 +445,47 @@ describe("relay", () => {
     two.send(new Uint8Array(10));
     two.send(new Uint8Array(10));
     expect(await two.closed).toBe(CLOSE.protocol);
+  });
+
+  it("没有 ACCEPT 就关掉的流不计量（被拒绝的握手）；ACCEPT 以前主机的第二条 DATA 4400", async () => {
+    const h = await connectHost();
+    const accept = (stream: number) =>
+      h.conn.send(encodeOuter({ type: OuterType.Accept, stream, payload: new Uint8Array() }));
+    const data = (stream: number, n: number) =>
+      h.conn.send(encodeOuter({ type: OuterType.Data, stream, payload: new Uint8Array(n) }));
+    for (let i = 0; i < 2; i++) {
+      const r = await open(`/v1/client/${h.id}`);
+      const o = await h.conn.outer();
+      r.send(new Uint8Array(2000));
+      expect((await h.conn.outer()).type).toBe(OuterType.Data);
+      // 主机回一条（例如 not_paired）就关掉，没有 ACCEPT
+      data(o.stream, 2000);
+      expect(((await r.next()) as ArrayBuffer).byteLength).toBe(2000);
+      h.conn.send(
+        encodeOuter({ type: OuterType.Close, stream: o.stream, payload: closePayload(1000, "") }),
+      );
+      expect(await r.closed).toBe(1000);
+    }
+    // 前面合计 8000 字节都不算：ACCEPT 以后的 3000 字节照样转发
+    const c = await open(`/v1/client/${h.id}`);
+    const o = await h.conn.outer();
+    c.send(new Uint8Array(50));
+    expect((await h.conn.outer()).type).toBe(OuterType.Data);
+    accept(o.stream);
+    data(o.stream, 50);
+    await c.next();
+    c.send(new Uint8Array(3000));
+    const d = await h.conn.outer();
+    expect(d.type).toBe(OuterType.Data);
+    expect(d.payload.length).toBe(3000);
+    c.ws.close(1000, "");
+    expect((await h.conn.outer()).type).toBe(OuterType.Close);
+    // ACCEPT 以前主机的第二条 DATA：4400
+    const x = await open(`/v1/client/${h.id}`);
+    const ox = await h.conn.outer();
+    data(ox.stream, 5);
+    data(ox.stream, 5);
+    expect(await x.closed).toBe(CLOSE.protocol);
   });
 
   it("主机回话以前的第一条消息超过 4096 字节：4400", async () => {

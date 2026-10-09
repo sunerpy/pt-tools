@@ -187,6 +187,12 @@ func connectHost(t *testing.T, tg Target, keys *remote.HostKeys) *host {
 	return &host{t: t, ws: ws, keys: keys}
 }
 
+// accept 发 ACCEPT：这个流的握手通过了（之后两个方向不再限于一条消息，开始计量）。
+func (h *host) accept(stream uint32) {
+	h.t.Helper()
+	writeOuter(h.t, h.ws, remote.OuterFrame{Type: remote.OuterAccept, Stream: stream})
+}
+
 func (h *host) expect(typ remote.OuterType) remote.OuterFrame {
 	h.t.Helper()
 	f := readOuter(h.t, h.ws)
@@ -305,9 +311,11 @@ func testForward(t *testing.T, tg Target) {
 	assert.Equal(t, o1.Stream, f.Stream)
 	assert.Equal(t, "hello", string(f.Payload))
 
-	// 主机 → 客户端（主机在流上发出 DATA 以后，客户端的消息就不再限于一条、最大 65535 字节）
+	// 主机 → 客户端（ACCEPT 以后两个方向都不再限于一条、最大 65535 字节）
+	h.accept(o1.Stream)
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o1.Stream, Payload: []byte("world")})
 	assert.Equal(t, "world", string(clientRead(t, c1)))
+	h.accept(o2.Stream)
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o2.Stream, Payload: big})
 	assert.True(t, bytes.Equal(big, clientRead(t, c2)))
 	clientWrite(t, c2, big)
@@ -394,6 +402,8 @@ func testSlowReader(t *testing.T, tg Target) {
 	fast := connectClient(t, tg, h.keys.HostID())
 	fastOpen := h.expect(remote.OuterOpen)
 	_ = slow // 一直不读
+	h.accept(slowOpen.Stream)
+	h.accept(fastOpen.Stream)
 	// 灌 24 MiB 给不读的客户端：超过两边的 TCP 缓冲与 relay 的排队
 	frame, err := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterData, Stream: slowOpen.Stream, Payload: make([]byte, remote.MaxNoiseMessage)})
 	require.NoError(t, err)
@@ -417,7 +427,7 @@ func testSlowReader(t *testing.T, tg Target) {
 	}
 }
 
-// 主机在流上发出第一条 DATA 以前，客户端只能发一条不超过 4096 字节的消息（Noise 握手的第一条），多的或者大的 4400。
+// 主机发 ACCEPT 以前，每个方向只能发一条不超过 4096 字节的消息（客户端的 Noise 握手第一条、主机拒绝握手的回话），多的或者大的 4400。
 func testUnconfirmed(t *testing.T, tg Target) {
 	h := connectHost(t, tg, newKeys(t))
 	c := connectClient(t, tg, h.keys.HostID())
@@ -436,6 +446,16 @@ func testUnconfirmed(t *testing.T, tg Target) {
 	assert.Equal(t, remote.CloseProtocol, closeCode(t, big), "主机回话以前的大消息")
 	f = h.expect(remote.OuterClose)
 	assert.Equal(t, ob.Stream, f.Stream)
+
+	// 主机那边：ACCEPT 以前回一条（拒绝握手）可以，第二条 4400
+	r := connectClient(t, tg, h.keys.HostID())
+	or := h.expect(remote.OuterOpen)
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: or.Stream, Payload: []byte("not_paired")})
+	assert.Equal(t, "not_paired", string(clientRead(t, r)))
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: or.Stream, Payload: []byte("more")})
+	assert.Equal(t, remote.CloseProtocol, closeCode(t, r), "ACCEPT 以前主机的第二条")
+	f = h.expect(remote.OuterClose)
+	assert.Equal(t, or.Stream, f.Stream)
 }
 
 func testClientText(t *testing.T, tg Target) {
@@ -484,9 +504,19 @@ func testDailyBytes(t *testing.T, tg Target) {
 	h := connectHost(t, tg, newKeys(t))
 	c := connectClient(t, tg, h.keys.HostID())
 	o := h.expect(remote.OuterOpen)
-	// 握手：客户端一条、主机回一条以后，流上的转发量才开始计
+	// 被拒绝的握手（没有 ACCEPT 就关掉）不计量：两个方向各 4096 字节
+	rej := connectClient(t, tg, h.keys.HostID())
+	orj := h.expect(remote.OuterOpen)
+	clientWrite(t, rej, make([]byte, remote.MaxUnconfirmed))
+	h.expect(remote.OuterData)
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: orj.Stream, Payload: make([]byte, remote.MaxUnconfirmed)})
+	clientRead(t, rej)
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterClose, Stream: orj.Stream, Payload: remote.ClosePayload(1000, "")})
+	assert.Equal(t, 1000, closeCode(t, rej))
+	// 握手：客户端一条、主机 ACCEPT 以后回一条，流上的转发量从这里开始计
 	clientWrite(t, c, []byte("hi"))
 	h.expect(remote.OuterData)
+	h.accept(o.Stream)
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o.Stream, Payload: []byte("hi")})
 	clientRead(t, c)
 	chunk := make([]byte, 32<<10)

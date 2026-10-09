@@ -40,7 +40,8 @@ func (echoDispatcher) ServeRemote(w http.ResponseWriter, r *http.Request, p remo
 
 // RunHostInterop 用真正的主机端（internal/remote 的 Host 与它的 relay 客户端）经 relayURL 这台 relay 走完一遍：
 // 主机认证上线、扫码配对（配对会话）、设备会话里调用 App API、撤销以后会话收到 GOAWAY、之后连不上。
-func RunHostInterop(t *testing.T, relayURL string) {
+// NewHost 起一台真正的主机（internal/remote 的 Host，库在临时目录，App API 换成回显），打开远程访问并等它经 relayURL 上线。
+func NewHost(t *testing.T, relayURL string) *remote.Host {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "interop.db")), &gorm.Config{})
 	require.NoError(t, err)
@@ -57,6 +58,13 @@ func RunHostInterop(t *testing.T, relayURL string) {
 		ov, oerr := h.Overview(ctx)
 		return oerr == nil && len(ov.RelayStatus) == 1 && ov.RelayStatus[0].State == remote.RelayOnline
 	}, 20*time.Second, 50*time.Millisecond, "主机没有经 relay 上线")
+	return h
+}
+
+func RunHostInterop(t *testing.T, relayURL string) {
+	t.Helper()
+	h := NewHost(t, relayURL)
+	ctx := context.Background()
 
 	ticket, err := h.StartPairing(ctx, remote.ScopesRead, "")
 	require.NoError(t, err)

@@ -158,15 +158,18 @@ type Attachment =
   | { t: "authing"; at: number }
   | { t: "host"; epoch: number; host: string }
   /**
-   * confirmed：主机已经在这个流上发过 DATA。之前客户端只能发一条（sent），它的字节数记在 pending，确认时才计入用量
+   * accepted：主机发过 ACCEPT（握手通过）。之前每个方向只能发一条（clientSent、hostSent），字节数记在 *Pending，
+   * ACCEPT 时才计入用量；没有 ACCEPT 就关掉的流不计
    */
   | {
       t: "client";
       stream: number;
       epoch: number;
-      confirmed?: boolean;
-      sent?: boolean;
-      pending?: number;
+      accepted?: boolean;
+      clientSent?: boolean;
+      hostSent?: boolean;
+      clientPending?: number;
+      hostPending?: number;
     }
   | { t: "closed" };
 
@@ -488,13 +491,18 @@ export class HostRelay extends DurableObject<Env> {
         const c = this.clientFor(f.stream);
         if (!c) return;
         const ca = this.attachment(c) as Attachment & { t: "client" };
-        let n = f.payload.length;
-        if (!ca.confirmed) {
-          // 主机回话了：这个流确认了，连同客户端那条握手消息一起计量
-          n += ca.pending ?? 0;
-          c.serializeAttachment({ ...ca, confirmed: true, pending: 0 } satisfies Attachment);
-        }
-        if (!(await this.count(n))) return;
+        if (!ca.accepted) {
+          // ACCEPT 以前只放行一条（拒绝握手的回话），不计量
+          if (ca.hostSent || f.payload.length > MAX_UNCONFIRMED) {
+            this.closeClient(c, CLOSE.protocol, "wait for ACCEPT", true);
+            return;
+          }
+          c.serializeAttachment({
+            ...ca,
+            hostSent: true,
+            hostPending: f.payload.length,
+          } satisfies Attachment);
+        } else if (!(await this.count(f.payload.length))) return;
         // 发不出去（运行时的发送缓冲满了、连接已经断了）：按跟不上的客户端处理
         if (!safeSend(c, f.payload)) this.closeClient(c, CLOSE.limited, "slow reader", true);
         return;
@@ -504,6 +512,22 @@ export class HostRelay extends DurableObject<Env> {
         if (!c) return;
         const { code, reason } = parseClosePayload(f.payload);
         this.closeClient(c, clientCloseCode(code), reason, false);
+        return;
+      }
+      case OuterType.Accept: {
+        // 握手通过了：之前两个方向的那一条一起计量；重复的忽略
+        const c = this.clientFor(f.stream);
+        if (!c) return;
+        const ca = this.attachment(c) as Attachment & { t: "client" };
+        if (ca.accepted) return;
+        const n = (ca.clientPending ?? 0) + (ca.hostPending ?? 0);
+        c.serializeAttachment({
+          ...ca,
+          accepted: true,
+          clientPending: 0,
+          hostPending: 0,
+        } satisfies Attachment);
+        if (n > 0) await this.count(n);
         return;
       }
       default:
@@ -530,16 +554,16 @@ export class HostRelay extends DurableObject<Env> {
       this.closeClient(ws, CLOSE.hostOffline, "host offline", false);
       return;
     }
-    if (!a.confirmed) {
-      // 主机回话以前只放行一条不大的消息（Noise 握手的第一条），不计量：未认证的客户端耗不掉主机的额度
-      if (a.sent || message.byteLength > MAX_UNCONFIRMED) {
+    if (!a.accepted) {
+      // ACCEPT 以前只放行一条不大的消息（Noise 握手的第一条），不计量：未认证的客户端耗不掉主机的额度
+      if (a.clientSent || message.byteLength > MAX_UNCONFIRMED) {
         this.closeClient(ws, CLOSE.protocol, "wait for the host", true);
         return;
       }
       ws.serializeAttachment({
         ...a,
-        sent: true,
-        pending: message.byteLength,
+        clientSent: true,
+        clientPending: message.byteLength,
       } satisfies Attachment);
     } else if (!(await this.count(message.byteLength))) {
       this.closeClient(ws, CLOSE.limited, "daily quota exceeded", true);

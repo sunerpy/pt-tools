@@ -274,7 +274,7 @@ func readOuterFrame(t *testing.T, ctx context.Context, ws *websocket.Conn) remot
 	return f
 }
 
-// 主机回话以前客户端的消息不计入每天的转发量：未认证的客户端发垃圾耗不掉主机的额度
+// ACCEPT 以前的消息不计入每天的转发量：未认证的客户端发垃圾、被拒绝的握手都耗不掉主机的额度
 func TestUnconfirmedNotCounted(t *testing.T) {
 	_, u := start(t, Config{MaxConnPerIPPerMin: -1, DailyBytesPerHost: 10_000})
 	keys, err := remote.GenerateHostKeys(nil)
@@ -307,11 +307,88 @@ func TestUnconfirmedNotCounted(t *testing.T) {
 	require.NoError(t, c.WriteMsg(ctx, []byte("hi")))
 	for f := readOuterFrame(t, ctx, host); f.Type != remote.OuterData || f.Stream != open.Stream; f = readOuterFrame(t, ctx, host) {
 	}
+	writeHost(remote.OuterFrame{Type: remote.OuterAccept, Stream: open.Stream})
 	writeHost(remote.OuterFrame{Type: remote.OuterData, Stream: open.Stream, Payload: []byte("hi")})
 	_, err = c.ReadMsg(ctx)
 	require.NoError(t, err)
 	require.NoError(t, c.WriteMsg(ctx, make([]byte, 9000)))
 	f := readOuterFrame(t, ctx, host)
-	assert.Equal(t, remote.OuterData, f.Type, "前面 16000 字节的未确认消息不算，这条还在额度里")
+	assert.Equal(t, remote.OuterData, f.Type, "前面 16000 字节没有 ACCEPT 的消息不算，这条还在额度里")
 	assert.Len(t, f.Payload, 9000)
+}
+
+// wsPair 是一对连着的 WebSocket（测试里当客户端连接用）。
+func wsPair(t *testing.T) (server, client *websocket.Conn) {
+	t.Helper()
+	got := make(chan *websocket.Conn, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		got <- ws
+		<-r.Context().Done()
+	}))
+	t.Cleanup(ts.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http"), &websocket.DialOptions{HTTPClient: &http.Client{Transport: &http.Transport{Proxy: nil}}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.CloseNow() })
+	return <-got, c
+}
+
+// 超额时，这台主机现在登记的连接（刚替换了旧连接）上的流也要关：旧连接最后几条 DATA 让用量过线的情况
+func TestQuotaTripClosesCurrentHostStreams(t *testing.T) {
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1", DailyBytesPerHost: 10})
+	require.NoError(t, err)
+	defer s.Close()
+	old := &hostConn{s: s, id: "h1", streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	cur := &hostConn{s: s, id: "h1", streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	cur.closed.Store(true) // 不往主机写 CLOSE
+	s.hosts["h1"] = cur
+	srv, _ := wsPair(t)
+	c := newClientConn(cur, srv, 1)
+	cur.streams[1] = c
+	assert.False(t, old.count(11), "旧连接让用量过线")
+	assert.True(t, c.closed.Load(), "新连接上登记的流也关掉了")
+	assert.Empty(t, cur.streamList())
+	delete(s.hosts, "h1") // 没有真的主机连接，s.Close 不用关它
+}
+
+// 真正的主机拒绝握手（没有配对窗口、随便一把设备密钥，not_paired）时不发 ACCEPT，relay 不计量：
+// 反复用没配对的密钥连也耗不掉额度，之后照样能配对
+func TestRejectedHandshakesNotCounted(t *testing.T) {
+	_, u := start(t, Config{MaxConnPerIPPerMin: -1, DailyBytesPerHost: 3000})
+	h := relaytest.NewHost(t, u)
+	ctx := context.Background()
+	ov, err := h.Overview(ctx)
+	require.NoError(t, err)
+	hostKey, err := remote.DecodeKey(ov.HostKey)
+	require.NoError(t, err)
+	for i := 0; i < 20; i++ {
+		dev, gerr := remote.GenerateKeypair(nil)
+		require.NoError(t, gerr)
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		raw, derr := remote.DialRelay(cctx, u, ov.HostID, nil)
+		require.NoError(t, derr)
+		_, cerr := remote.Connect(cctx, raw, remote.ClientConfig{HostID: ov.HostID, HostKey: hostKey, Device: dev, Client: "intruder"})
+		cancel()
+		require.ErrorIs(t, cerr, remote.ErrNotPaired, "第 %d 次", i)
+	}
+	// 20 次握手一来一回合计超过 3000 字节，但都没有 ACCEPT：额度还在，配对照样成功
+	ticket, err := h.StartPairing(ctx, remote.ScopesRead, "")
+	require.NoError(t, err)
+	link, err := remote.ParseLink(ticket.Link)
+	require.NoError(t, err)
+	dev, err := remote.GenerateKeypair(nil)
+	require.NoError(t, err)
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	raw, err := remote.DialRelay(cctx, u, link.HostID, nil)
+	require.NoError(t, err)
+	pc, err := remote.Connect(cctx, raw, remote.ClientConfig{HostID: link.HostID, HostKey: link.HostKey, Device: dev, Client: "interop"})
+	require.NoError(t, err)
+	_, err = pc.Pair(cctx, link.Secret, "额度测试")
+	require.NoError(t, err)
 }
