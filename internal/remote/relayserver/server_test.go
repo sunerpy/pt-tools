@@ -392,3 +392,63 @@ func TestRejectedHandshakesNotCounted(t *testing.T) {
 	_, err = pc.Pair(cctx, link.Secret, "额度测试")
 	require.NoError(t, err)
 }
+
+// 主机一收到 READY，客户端就要找得到它：READY 写出以后、主机登记以前不能有空档（CI 上撞到过：客户端 4404，主机等不到 OPEN）
+func TestClientRightAfterReady(t *testing.T) {
+	ready := make(chan struct{})
+	testHookReady = func() {
+		close(ready)
+		time.Sleep(300 * time.Millisecond) // 把 READY 之后的那一段拉长
+	}
+	t.Cleanup(func() { testHookReady = nil })
+	_, u := start(t, Config{MaxConnPerIPPerMin: -1})
+	keys, err := remote.GenerateHostKeys(nil)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _ = authHostAsync(ctx, u, keys) }()
+	<-ready
+	c, err := remote.DialRelay(ctx, u, keys.HostID(), nil)
+	require.NoError(t, err)
+	defer c.Close(1000, "")
+	require.NoError(t, c.WriteMsg(ctx, []byte("hi")), "主机已经收到 READY，客户端不该被 4404")
+	_, err = c.ReadMsg(ctx)
+	require.NoError(t, err, "主机收到 OPEN 并回话")
+}
+
+// authHostAsync 认证一台主机，收到 OPEN 以后给那个流回一条 DATA（给 TestClientRightAfterReady 用）。
+func authHostAsync(ctx context.Context, u string, keys *remote.HostKeys) error {
+	ws, _, err := websocket.Dial(ctx, u+"/v1/host/"+keys.HostID(), nil)
+	if err != nil {
+		return err
+	}
+	defer ws.CloseNow()
+	ws.SetReadLimit(remote.MaxOuterFrame)
+	read := func() (remote.OuterFrame, error) {
+		_, b, rerr := ws.Read(ctx)
+		if rerr != nil {
+			return remote.OuterFrame{}, rerr
+		}
+		return remote.ParseOuter(b)
+	}
+	ch, err := read()
+	if err != nil {
+		return err
+	}
+	auth, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterAuth, Payload: keys.RelayAuth(ch.Payload, u)})
+	if err := ws.Write(ctx, websocket.MessageBinary, auth); err != nil {
+		return err
+	}
+	for {
+		f, err := read()
+		if err != nil {
+			return err
+		}
+		if f.Type == remote.OuterData {
+			reply, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterData, Stream: f.Stream, Payload: []byte("ok")})
+			if err := ws.Write(ctx, websocket.MessageBinary, reply); err != nil {
+				return err
+			}
+		}
+	}
+}

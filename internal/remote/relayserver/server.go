@@ -204,15 +204,32 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close(remote.CloseAuthFailed, "auth failed")
 		return
 	}
-	// 先发 READY 再登记：登记以后才会有客户端的 OPEN，主机不会在 READY 之前收到别的帧
-	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterReady}); err != nil {
-		h.close(websocket.StatusInternalError, "")
-		return
-	}
+	// 拿住写锁再登记、写 READY：登记以后来的客户端的 OPEN 排在 READY 后面，主机一收到 READY 客户端也就找得到它
+	h.writeMu.Lock()
 	s.mu.Lock()
 	old := s.hosts[hostID]
 	s.hosts[hostID] = h
 	s.mu.Unlock()
+	ready, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterReady})
+	err := h.writeLocked(websocket.MessageBinary, ready)
+	if testHookReady != nil {
+		testHookReady()
+	}
+	h.writeMu.Unlock()
+	if err != nil {
+		// READY 没写出去：换回旧连接（它还没关），这条连接上已经登记的流随它一起以 4404 关掉
+		s.mu.Lock()
+		if s.hosts[hostID] == h {
+			if old != nil {
+				s.hosts[hostID] = old
+			} else {
+				delete(s.hosts, hostID)
+			}
+		}
+		s.mu.Unlock()
+		h.close(websocket.StatusInternalError, "")
+		return
+	}
 	if old != nil {
 		old.close(remote.CloseReplaced, "replaced by a newer connection")
 	}
@@ -246,6 +263,9 @@ func (s *Server) serveClient(w http.ResponseWriter, r *http.Request) {
 	go c.writeLoop()
 	c.readLoop()
 }
+
+// testHookReady 在主机的 READY 写出以后、放开写锁以前调用（测试用：拉长 READY 前后的时序）。
+var testHookReady func()
 
 // errClosed 是连接已经关了。
 var errClosed = errors.New("连接已经关闭")
@@ -300,13 +320,21 @@ func (h *hostConn) write(typ websocket.MessageType, b []byte) error {
 	}
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
-	ctx, cancel := context.WithTimeout(h.s.ctx, writeTimeout)
-	defer cancel()
-	if err := h.ws.Write(ctx, typ, b); err != nil {
+	if err := h.writeLocked(typ, b); err != nil {
 		go h.close(websocket.StatusPolicyViolation, "write timeout")
 		return err
 	}
 	return nil
+}
+
+// writeLocked 写一条消息（调用方持有 writeMu）。
+func (h *hostConn) writeLocked(typ websocket.MessageType, b []byte) error {
+	if h.closed.Load() {
+		return errClosed
+	}
+	ctx, cancel := context.WithTimeout(h.s.ctx, writeTimeout)
+	defer cancel()
+	return h.ws.Write(ctx, typ, b)
 }
 
 func (h *hostConn) writeOuter(f remote.OuterFrame) error {
