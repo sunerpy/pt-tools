@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:pt_tools_app/src/remote/frames.dart';
 import 'package:pt_tools_app/src/remote/noise.dart';
 import 'package:pt_tools_app/src/remote/session.dart';
 import 'package:pt_tools_app/src/remote/tunnel_client.dart';
@@ -117,6 +118,22 @@ void main() {
       throwsA(isA<SessionClosedException>()),
     );
   });
+
+  for (final path in ['/end-first', '/body-first', '/double-head']) {
+    test('回应帧顺序不对（$path）：会话以协议错误结束，请求失败', () async {
+      final (s, _) = await _connect();
+      final req = s.request('GET', path);
+      if (path == '/double-head') {
+        // 第一个回应头照常交给调用方，第二个让会话结束
+        final resp = await req;
+        await expectLater(resp.body.toList(), throwsA(isA<FrameException>()));
+      } else {
+        await expectLater(req, throwsA(isA<FrameException>()));
+      }
+      await s.done.timeout(const Duration(seconds: 2));
+      expect(s.error, isA<FrameException>());
+    });
+  }
 
   test('主机拒绝握手：not_paired', () async {
     final (dev, host) = Pipe.pair();

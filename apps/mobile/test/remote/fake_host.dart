@@ -173,6 +173,13 @@ class FakeHost {
           Uint8List.fromList(utf8.encode('internal error')),
         ),
       );
+    } else if (path == '/end-first') {
+      write(Frame(FrameType.respEnd, id, Uint8List(0)));
+    } else if (path == '/body-first') {
+      write(Frame(FrameType.respBody, id, Uint8List.fromList([1])));
+    } else if (path == '/double-head') {
+      write(Frame.json(FrameType.respHead, id, {'status': 200}));
+      write(Frame.json(FrameType.respHead, id, {'status': 200}));
     } else if (path == '/goaway') {
       write(Frame.json(FrameType.goAway, 0, {'reason': 'revoked'}));
     } else if (path == '/remote/v1/pair') {

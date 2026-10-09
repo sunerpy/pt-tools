@@ -42,7 +42,17 @@ class HostNotifier extends AsyncNotifier<HostRecord?> {
   }
 }
 
-/// 到这台主机的连接（没有配对时为 null）。App 在前台时保持连接，见 AppLifecycle。
+/// App 在前台（PtToolsApp 的 AppLifecycleListener 更新）。v1 只在前台保持连接。
+final foregroundProvider = NotifierProvider<Foreground, bool>(Foreground.new);
+
+class Foreground extends Notifier<bool> {
+  @override
+  bool build() => true;
+
+  void set(bool foreground) => state = foreground;
+}
+
+/// 到这台主机的连接（没有配对时为 null）。前台时连着；到了后台断开，包括后台才读完主机记录或配对完成时新建的连接。
 final connectionProvider = Provider<HostConnection?>((ref) {
   final host = ref.watch(hostProvider.select((v) => v.value));
   if (host == null) return null;
@@ -52,7 +62,12 @@ final connectionProvider = Provider<HostConnection?>((ref) {
     channel: ref.read(channelFactoryProvider),
   );
   ref.onDispose(c.dispose);
-  c.start();
+  ref.listen(foregroundProvider, (_, fg) => fg ? c.start() : c.stop());
+  if (ref.read(foregroundProvider)) {
+    c.start();
+  } else {
+    c.stop();
+  }
   return c;
 });
 

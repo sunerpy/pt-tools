@@ -151,10 +151,10 @@ class _PtToolsAppState extends ConsumerState<PtToolsApp> {
   @override
   void initState() {
     super.initState();
-    // v1 只在前台保持连接：到了后台断开，回到前台重连
+    // v1 只在前台保持连接：到了后台断开，回到前台重连（见 connectionProvider）
     _life = AppLifecycleListener(
-      onResume: () => ref.read(connectionProvider)?.start(),
-      onHide: () => ref.read(connectionProvider)?.stop(),
+      onResume: () => ref.read(foregroundProvider.notifier).set(true),
+      onHide: () => ref.read(foregroundProvider.notifier).set(false),
     );
   }
 

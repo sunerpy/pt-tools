@@ -252,21 +252,26 @@ class RemoteSession {
     switch (f.type) {
       case FrameType.respHead:
         final c = _calls[f.id];
-        if (c == null || c.head.isCompleted) return;
+        if (c == null) return;
+        if (c.head.isCompleted) throw const FrameException('同一个请求收到了两个回应头');
         final head = ResponseHead.parse(f.payload);
         final body = StreamController<List<int>>(
           onCancel: () => _cancel(c, '读者不要了'),
         );
         c.body = body;
         c.head.complete(TunnelResponse(head.status, head.headers, body.stream));
+      // 回应体与 RESP_END 只能跟在回应头后面（编号不认识的是已经取消的请求，丢掉）
       case FrameType.respBody:
-        _calls[f.id]?.body?.add(Uint8List.fromList(f.payload));
+        final c = _calls[f.id];
+        if (c == null) return;
+        if (!c.head.isCompleted) throw const FrameException('回应体在回应头之前');
+        c.body?.add(Uint8List.fromList(f.payload));
       case FrameType.respEnd:
         final c = _calls[f.id];
-        if (c != null) {
-          _finish(c);
-          c.body?.close();
-        }
+        if (c == null) return;
+        if (!c.head.isCompleted) throw const FrameException('RESP_END 在回应头之前');
+        _finish(c);
+        c.body?.close();
       case FrameType.cancel:
         final c = _calls[f.id];
         if (c != null) {
