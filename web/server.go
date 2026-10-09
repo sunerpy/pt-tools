@@ -322,6 +322,9 @@ type statusRecorder struct {
 
 func (s *statusRecorder) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
 
+// Unwrap 让 http.ResponseController 与 WebSocket 找到底下的 ResponseWriter（远程访问的直连入口要 Hijack 连接）。
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
