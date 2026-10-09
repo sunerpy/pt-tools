@@ -7,7 +7,9 @@ require (
 	github.com/RomiChan/websocket v1.4.3-0.20251002072000-d3eb41798438
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
+	github.com/coder/websocket v1.8.15
 	github.com/fatih/color v1.19.0
+	github.com/flynn/noise v1.1.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang/mock v1.6.0
 	github.com/google/jsonschema-go v0.4.3
@@ -76,6 +78,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.23.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	modernc.org/libc v1.67.4 // indirect
