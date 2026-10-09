@@ -38,7 +38,7 @@ Behind a reverse proxy, the proxy has to forward WebSocket connections (the `Upg
 4. Click Create QR code (生成二维码) and scan it with the app.
 
 - The QR code works once and for 10 minutes, and stops working when you close the window. Only one QR code is valid at a time; creating a new one cancels the old one.
-- Five wrong pairing secrets also cancel the QR code.
+- Five failed pairing requests (a wrong pairing secret, or a malformed request from the app) also cancel the QR code.
 - A QR code is a temporary key: whoever has it can pair a device within 10 minutes. Do not share it or post a screenshot of it in a chat.
 - When pairing succeeds, the window shows the device's name, the device appears under Devices, and every enabled notification channel receives a New device paired (新设备已配对) message.
 

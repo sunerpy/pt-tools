@@ -7,6 +7,7 @@ import (
 	"io"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -59,8 +60,11 @@ type pairing struct {
 type pairings struct {
 	mu  sync.Mutex
 	cur *pairing
-	now func() time.Time
-	rng io.Reader
+	// openUntil 是还在等的窗口的到期时间（UnixNano，0 = 没有窗口）。握手只读它，不等 mu：
+	// redeem 会拿着 mu 写设备表，握手不能被一次慢的写库拖住
+	openUntil atomic.Int64
+	now       func() time.Time
+	rng       io.Reader
 }
 
 func newPairings(now func() time.Time) *pairings {
@@ -77,7 +81,16 @@ func (p *pairings) start(scopes []string) ([]byte, time.Time, error) {
 	defer p.mu.Unlock()
 	expires := p.now().Add(PairingTTL)
 	p.cur = &pairing{secret: secret, scopes: slices.Clone(scopes), expires: expires, state: PairingWaiting}
+	p.openUntil.Store(expires.UnixNano())
 	return secret[:], expires, nil
+}
+
+// setStateLocked 改当前窗口的状态；离开 waiting 时清掉 openUntil。
+func (p *pairings) setStateLocked(st PairingState) {
+	p.cur.state = st
+	if st != PairingWaiting {
+		p.openUntil.Store(0)
+	}
 }
 
 // waitingLocked 报告当前窗口还能不能配对；到期的顺手标成 expired。
@@ -87,17 +100,32 @@ func (p *pairings) waitingLocked() bool {
 		return false
 	}
 	if !p.now().Before(c.expires) {
-		c.state = PairingExpired
+		p.setStateLocked(PairingExpired)
 		return false
 	}
 	return true
 }
 
-// open 报告现在是不是在配对窗口里（握手时据此决定要不要接受不认识的设备）。
+// open 报告现在是不是在配对窗口里（握手时据此决定要不要接受不认识的设备）。不拿锁，见 openUntil。
 func (p *pairings) open() bool {
+	until := p.openUntil.Load()
+	return until != 0 && p.now().UnixNano() < until
+}
+
+// fail 记一次失败的配对请求（请求体或设备名不对）：和输错密钥一样计数，到 5 次窗口作废，这时返回 true。
+// 这样一个配对窗口里失败的请求（连同审计记录）最多 5 次。
+func (p *pairings) fail() (closedNow bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.waitingLocked()
+	if !p.waitingLocked() {
+		return false
+	}
+	p.cur.failures++
+	if p.cur.failures >= MaxPairingFailures {
+		p.setStateLocked(PairingClosed)
+		return true
+	}
+	return false
 }
 
 // redeem 核对配对密钥（常量时间比较），对了就在同一把锁里用 create 记下设备并关掉窗口。
@@ -113,7 +141,7 @@ func (p *pairings) redeem(secret []byte, create func(scopes []string) (Device, e
 	if len(secret) != KeyLen || subtle.ConstantTimeCompare(secret, c.secret[:]) != 1 {
 		c.failures++
 		if c.failures >= MaxPairingFailures {
-			c.state = PairingClosed
+			p.setStateLocked(PairingClosed)
 			return Device{}, true, ErrPairingSecret
 		}
 		return Device{}, false, ErrPairingSecret
@@ -123,7 +151,8 @@ func (p *pairings) redeem(secret []byte, create func(scopes []string) (Device, e
 		return Device{}, false, err
 	}
 	d := dev
-	c.state, c.device = PairingPaired, &d
+	c.device = &d
+	p.setStateLocked(PairingPaired)
 	return dev, false, nil
 }
 
@@ -132,7 +161,7 @@ func (p *pairings) cancel() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c := p.cur; c != nil && c.state == PairingWaiting {
-		c.state = PairingClosed
+		p.setStateLocked(PairingClosed)
 	}
 }
 

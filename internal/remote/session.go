@@ -516,17 +516,23 @@ const (
 // servePair 处理配对：核对配对密钥，记下设备，回设备信息；之后会话用 GOAWAY paired 关掉，设备重连成正常会话。
 // 每个结果都记审计（还没有设备时设备编号是 0）。
 func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
+	if !s.h.pairings.open() {
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairClosed)
+		writeJSONError(w, http.StatusGone, "pairing_closed", ErrPairingClosed.Error())
+		s.setCloseAfter(GoAwayPairingClosed)
+		return
+	}
 	var in pairRequest
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxPairBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil || !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
-		s.h.audit(r.Context(), 0, "remote:pair", auditPairBadBody)
+		s.pairFailed(r, auditPairBadBody)
 		writeJSONError(w, http.StatusBadRequest, "invalid_body", "请求格式错误")
 		return
 	}
 	name, err := NormalizeDeviceName(in.Name)
 	if err != nil {
-		s.h.audit(r.Context(), 0, "remote:pair", auditPairBadName)
+		s.pairFailed(r, auditPairBadName)
 		writeJSONError(w, http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
@@ -568,6 +574,15 @@ func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"device": dev})
 	s.setCloseAfter(GoAwayPaired)
+}
+
+// pairFailed 记下一次请求体或设备名不对的配对请求：计入窗口的失败次数（到 5 次窗口作废，配对会话全部关掉）并记审计。
+func (s *session) pairFailed(r *http.Request, result string) {
+	s.h.audit(r.Context(), 0, "remote:pair", result)
+	if s.h.pairings.fail() {
+		s.setCloseAfter(GoAwayPairingClosed)
+		s.h.closePairingSessions(s)
+	}
 }
 
 func (s *session) setCloseAfter(reason string) {

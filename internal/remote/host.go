@@ -109,7 +109,10 @@ func (h *Host) logf(format string, args ...any) { h.cfg.Logger.Warnf(format, arg
 
 func (h *Host) audit(ctx context.Context, deviceID uint, command, result string) {
 	if h.cfg.Audit != nil {
-		h.cfg.Audit(context.WithoutCancel(ctx), deviceID, command, result)
+		// 请求可能已经取消：审计照样写，但有上限
+		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+		defer cancel()
+		h.cfg.Audit(actx, deviceID, command, result)
 	}
 }
 
@@ -150,8 +153,9 @@ func (h *Host) applyLocked(set Settings, keys *HostKeys) {
 	}
 	if !set.Enabled || keys == nil {
 		if h.state.Swap(nil) != nil {
-			h.pairings.cancel()
+			// 先关会话（换状态与 takeAll 之间不夹别的等待），再关配对窗口（可能要等一次写设备表），最后断开 relay
 			shutdownAll(h.sessions.takeAll(), GoAwayDisabled)
+			h.pairings.cancel()
 			h.stopRelaysLocked(nil)
 		}
 		return
@@ -159,8 +163,8 @@ func (h *Host) applyLocked(set Settings, keys *HostKeys) {
 	st := &hostState{keys: keys, hostID: keys.HostID(), settings: set}
 	old := h.state.Swap(st)
 	if old != nil && old.hostID != st.hostID {
-		h.pairings.cancel()
 		shutdownAll(h.sessions.takeAll(), GoAwayKeyRotated)
+		h.pairings.cancel()
 	}
 	h.syncRelaysLocked(st)
 }
@@ -274,7 +278,9 @@ func (h *Host) handshake(raw MsgConn, via string) (*session, string) {
 	var dev *Device
 	reserved := ""
 	conn, peer, hello, err := acceptHandshake(h.ctx, raw, st.keys, st.hostID, nil, func(peer []byte, _ ClientHello) HostHello {
-		d, err := h.cfg.Store.ActiveDeviceByKey(h.ctx, peer)
+		lctx, cancel := context.WithTimeout(h.ctx, HandshakeTimeout)
+		d, err := h.cfg.Store.ActiveDeviceByKey(lctx, peer)
+		cancel()
 		mode := ModeDevice
 		switch {
 		case err != nil:
@@ -327,7 +333,9 @@ func (h *Host) stillValid(s *session) string {
 		}
 		return ""
 	}
-	d, err := h.cfg.Store.ActiveDeviceByKey(h.ctx, s.peerKey)
+	lctx, cancel := context.WithTimeout(h.ctx, HandshakeTimeout)
+	defer cancel()
+	d, err := h.cfg.Store.ActiveDeviceByKey(lctx, s.peerKey)
 	switch {
 	case err != nil:
 		return GoAwayShutdown
@@ -480,6 +488,8 @@ func (h *Host) RotateKeys(ctx context.Context) (Overview, error) {
 	ctx, cancel := boundedContext(ctx)
 	defer cancel()
 	h.mu.Lock()
+	// 先关配对窗口：正在写设备表的配对做完（它的设备随后被这次轮换撤销），之后不会再有设备按旧的主机密钥配对进来
+	h.pairings.cancel()
 	keys, err := h.cfg.Store.RotateHostKeys(ctx)
 	if err != nil {
 		h.mu.Unlock()
@@ -596,5 +606,7 @@ func (h *Host) RevokeDevice(ctx context.Context, id uint) (Device, error) {
 
 // DeleteDevice 删掉撤销了的设备的记录。
 func (h *Host) DeleteDevice(ctx context.Context, id uint) error {
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	return h.cfg.Store.DeleteDevice(ctx, id)
 }

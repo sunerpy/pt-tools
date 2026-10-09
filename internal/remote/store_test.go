@@ -118,6 +118,36 @@ func TestPairingStateMachine(t *testing.T) {
 	assert.Equal(t, before, created)
 }
 
+// 写设备表的时候（拿着窗口的锁）握手照样能问窗口开没开，不被拖住
+func TestPairingOpenDoesNotWaitForRedeem(t *testing.T) {
+	p := newPairings(time.Now)
+	secret, _, err := p.start(ScopesFull)
+	require.NoError(t, err)
+	inCreate := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = p.redeem(secret, func(scopes []string) (Device, error) {
+			close(inCreate)
+			<-release
+			return Device{ID: 1, Scopes: scopes}, nil
+		})
+	}()
+	<-inCreate
+	got := make(chan bool, 1)
+	go func() { got <- p.open() }()
+	select {
+	case open := <-got:
+		assert.True(t, open)
+	case <-time.After(time.Second):
+		t.Fatal("open 被写设备表拖住了")
+	}
+	close(release)
+	<-done
+	assert.False(t, p.open(), "配对成功以后窗口关了")
+}
+
 // 核对与写设备表在同一把锁里：同一个密钥并发提交，只有一次写设备表；写的时候取消要等它写完，之后窗口是已配对
 func TestPairingRedeemLinearized(t *testing.T) {
 	p := newPairings(time.Now)

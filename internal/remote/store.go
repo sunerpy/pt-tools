@@ -84,10 +84,9 @@ func NewStore(db *gorm.DB, cipher Cipher) *Store {
 	return &Store{db: db, cipher: cipher, now: time.Now}
 }
 
-// writeDB 是写库用的 DB：请求取消了也把写完成，不留半截。
-func (s *Store) writeDB(ctx context.Context) *gorm.DB {
-	return s.db.WithContext(context.WithoutCancel(ctx))
-}
+// writeDB 是写库用的 DB。用调用方给的 ctx：Host 给的是不随请求取消、但有上限的 ctx（boundedContext），
+// 这里不再去掉它的取消与期限，免得一次卡住的写永远不返回。
+func (s *Store) writeDB(ctx context.Context) *gorm.DB { return s.db.WithContext(ctx) }
 
 func (s *Store) row(ctx context.Context) (models.RemoteSetting, error) {
 	var r models.RemoteSetting
@@ -148,7 +147,7 @@ func NormalizeSettings(in Settings) (Settings, error) {
 	return out, nil
 }
 
-// SaveSettings 校验并保存设置。
+// SaveSettings 校验并保存设置，返回规整以后写进去的设置（不读回来：写成功以后不能因为读失败让调用方以为没写）。
 func (s *Store) SaveSettings(ctx context.Context, in Settings) (Settings, error) {
 	in, err := NormalizeSettings(in)
 	if err != nil {
@@ -166,7 +165,7 @@ func (s *Store) SaveSettings(ctx context.Context, in Settings) (Settings, error)
 	if err := db.Model(&models.RemoteSetting{}).Where("id = 1").Updates(cols).Error; err != nil {
 		return Settings{}, fmt.Errorf("保存远程访问设置失败: %w", err)
 	}
-	return s.Settings(ctx)
+	return in, nil
 }
 
 // HostKeys 读出主机密钥；还没有时 create 为真就生成一套存下来，否则返回 nil。

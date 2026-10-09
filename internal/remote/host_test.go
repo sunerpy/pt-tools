@@ -588,7 +588,37 @@ func TestPairingRequestLimits(t *testing.T) {
 	status, _, _ = rawRequest(t, c, 13, head, []byte(`{"secret":"x","name":"a\nb"}`))
 	assert.Equal(t, http.StatusBadRequest, status)
 	assert.Equal(t, "remote:pair denied:invalid_name", <-th.audits)
-	assert.Equal(t, 0, th.PairingStatus().Failures, "请求体与设备名不对不算输错")
+	assert.Equal(t, 2, th.PairingStatus().Failures, "请求体与设备名不对也计入失败次数")
+
+	// 再失败 3 次（任何一种），窗口作废，会话随后关掉；之后的请求也不再记审计
+	for i := 0; i < 3; i++ {
+		rawRequest(t, c, uint32(20+i), head, []byte(`not json`))
+		<-th.audits
+	}
+	wantGoAway(t, c, GoAwayPairingClosed)
+	assert.Equal(t, PairingClosed, th.PairingStatus().State)
+	select {
+	case a := <-th.audits:
+		t.Fatalf("窗口作废以后又记了审计: %s", a)
+	default:
+	}
+}
+
+// 窗口关了（这里是过期）以后配对会话里的请求直接 410，会话关掉
+func TestPairingRequestAfterWindowExpired(t *testing.T) {
+	clk := &fakeClock{t: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}
+	th := newTestHost(t, Settings{DirectURL: testDirect}, func(c *Config) { c.Now = clk.now })
+	_, err := th.StartPairing(context.Background(), ScopesFull, "")
+	require.NoError(t, err)
+	k, _ := GenerateKeypair(nil)
+	c, err := th.connect(t, k.Private, ViaDirect)
+	require.NoError(t, err)
+	clk.add(PairingTTL)
+	head, _ := json.Marshal(RequestHead{Method: "POST", Path: PairPath})
+	status, _, _ := rawRequest(t, c, 31, head, []byte(`not json`))
+	assert.Equal(t, http.StatusGone, status)
+	assert.Equal(t, "remote:pair denied:pairing_closed", <-th.audits)
+	wantGoAway(t, c, GoAwayPairingClosed)
 }
 
 // 第 5 次输错：当前与别的配对会话都收到 GOAWAY pairing_closed
