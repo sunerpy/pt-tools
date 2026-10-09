@@ -1,5 +1,6 @@
 // 界面测试：整个 App 对着内存里的假主机（罐头 App API）跑，中文界面。
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pt_tools_app/src/app/app.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
+import 'package:pt_tools_app/src/remote/bytes.dart';
 import 'package:pt_tools_app/src/remote/host_record.dart';
 import 'package:pt_tools_app/src/remote/noise.dart';
 import 'package:pt_tools_app/src/remote/session.dart';
@@ -74,9 +76,16 @@ final _torrents = {
   'failures': [],
 };
 
+/// 安全存储写不进去（例如 Keystore 出错）。
+class _BrokenStore extends MemoryHostStore {
+  @override
+  Future<void> save(HostRecord h) async => throw StateError('keystore 坏了');
+}
+
 class _World {
-  _World(this.scopes);
+  _World(this.scopes, {this.mode = 'device'});
   List<String> scopes;
+  final String mode;
   final hosts = <FakeHost>[];
   final requests = <String>[];
   late DhKey hostKey;
@@ -100,7 +109,7 @@ class _World {
 
   Future<MsgChannel> dial(Uri url, Duration timeout) async {
     final (dev, host) = Pipe.pair();
-    final fake = FakeHost(host, hostKey, _hostId, api: api);
+    final fake = FakeHost(host, hostKey, _hostId, mode: mode, api: api);
     hosts.add(fake);
     unawaited(fake.run());
     return dev;
@@ -111,13 +120,15 @@ Future<_World> _pumpApp(
   WidgetTester tester, {
   List<String> scopes = const ['app:read', 'app:write'],
   bool paired = true,
+  String mode = 'device',
+  HostStore? store,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
   addTearDown(tester.platformDispatcher.clearLocalesTestValue);
   tester.view.physicalSize = const Size(1170, 2532);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
-  final w = _World([...scopes]);
+  final w = _World([...scopes], mode: mode);
   late HostRecord rec;
   await tester.runAsync(() async {
     w.hostKey = await DhKey.generate();
@@ -138,7 +149,7 @@ Future<_World> _pumpApp(
       retry: (_, _) => null,
       overrides: [
         hostStoreProvider.overrideWithValue(
-          MemoryHostStore(paired ? rec : null),
+          store ?? MemoryHostStore(paired ? rec : null),
         ),
         channelFactoryProvider.overrideWithValue(w.dial),
         refreshIntervalProvider.overrideWithValue(const Duration(days: 1)),
@@ -208,6 +219,27 @@ void main() {
     await tester.tap(find.text('重新配对'));
     await _settle(tester);
     expect(find.text('配对 pt-tools'), findsOneWidget);
+  });
+
+  testWidgets('配对成功但存不进安全存储：提示到网页上撤销这台设备', (tester) async {
+    final w = await _pumpApp(
+      tester,
+      paired: false,
+      mode: 'pairing',
+      store: _BrokenStore(),
+    );
+    await _settle(tester);
+    final link =
+        'pttools://pair?v=1&h=$_hostId&k=${encodeKey(w.hostKey.publicKey)}'
+        '&s=${encodeKey(Uint8List(32))}&r=wss://relay.example.com';
+    await tester.enterText(find.byKey(const Key('pair-link')), link);
+    await tester.enterText(find.byKey(const Key('pair-name')), '测试手机');
+    await tester.tap(find.byKey(const Key('pair-submit')));
+    await _settle(tester, 12);
+    expect(find.byKey(const Key('pair-error')), findsOneWidget);
+    expect(find.textContaining('撤销「测试手机」'), findsOneWidget);
+    expect(find.textContaining('keystore 坏了'), findsOneWidget);
+    expect(find.text('配对 pt-tools'), findsOneWidget, reason: '还在配对页');
   });
 
   testWidgets('配对页：链接不对时说明原因', (tester) async {

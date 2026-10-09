@@ -8,7 +8,7 @@ The app runs on Android (no App Store release for iOS yet). The interface is in 
 
 1. In the pt-tools web UI, open System → Remote access, make sure remote access is on and a direct address or a relay is set, see [Turn on remote access](remote-access.md#turn-it-on).
 2. Click Add device, choose the permissions (full control or read-only) and generate the QR code. The QR code is valid for 10 minutes and works once.
-3. Open the app and tap Scan QR code, or copy the link from the web UI to the phone and paste it into Pairing link. Tapping a `pttools://pair?…` link on the phone opens the app with the link filled in.
+3. Open the app and tap Scan QR code, or copy the link from the web UI to the phone and paste it into Pairing link. Scan with the app itself, not the phone's camera or another scanner app: the QR code carries the pairing secret, and whoever reads it can pair.
 4. Enter a device name (shown in the web UI's device list) and tap Pair.
 
 After pairing, the window in the web UI shows that the device is paired and the app opens the overview. If the pairing window has expired, was used, or had too many wrong attempts, the app asks you to generate a new QR code in the web UI.

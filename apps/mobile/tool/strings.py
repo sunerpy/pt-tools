@@ -38,6 +38,7 @@ S = [
     ("pairWorking", "正在配对…", "Pairing…"),
     ("pairInvalidLink", "链接不对：{message}", "That link isn't valid: {message}"),
     ("pairUpgrade", "这个配对链接要更新版本的 App", "This pairing link needs a newer version of the app"),
+    ("pairSaveFailed", "主机已经记下了这台设备，但存进手机的安全存储时出错（{error}）：请在网页上撤销「{name}」，再重新配对。", "The host has added this device, but saving it to the phone's secure storage failed ({error}). Revoke \"{name}\" in the web UI, then pair again."),
     ("pairPrivacy", "连接是端到端加密的：经 relay 时 relay 只转发，看不到内容。这台设备的私钥只存在手机上。", "Connections are end-to-end encrypted: a relay only forwards traffic and cannot read it. This device's private key never leaves the phone."),
     ("scanTitle", "扫描配对二维码", "Scan the pairing QR code"),
     ("scanUnavailable", "这台设备不能扫码，请返回粘贴链接", "Scanning isn't available on this device. Go back and paste the link."),

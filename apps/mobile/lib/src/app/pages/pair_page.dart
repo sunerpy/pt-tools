@@ -85,7 +85,14 @@ class _PairPageState extends ConsumerState<PairPage> {
         channel: ref.read(channelFactoryProvider),
         client: appClientName,
       );
-      await ref.read(hostProvider.notifier).paired(host);
+      try {
+        await ref.read(hostProvider.notifier).paired(host);
+      } on Object catch (e) {
+        // 主机那边已经配对成功了，私钥却没存住：这条设备记录只能到网页上撤销
+        if (mounted) {
+          setState(() => _error = s.pairSaveFailed('$e', host.deviceName));
+        }
+      }
     } on PairingFailure catch (e) {
       if (mounted) setState(() => _error = e.message);
     } finally {

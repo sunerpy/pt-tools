@@ -52,17 +52,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       final host = ref.read(hostProvider);
       if (host.isLoading && !host.hasValue) return null;
       final paired = host.value != null;
-      // 用这个 App 打开的配对链接（pttools://pair?v=1&h=…）：路由拿到的是它的查询串
-      final q = state.uri.queryParameters;
-      if (!paired &&
-          state.matchedLocation != '/pair' &&
-          q.containsKey('h') &&
-          q.containsKey('s')) {
-        return Uri(
-          path: '/pair',
-          queryParameters: {'link': 'pttools://pair?${state.uri.query}'},
-        ).toString();
-      }
       final atPair = state.matchedLocation == '/pair';
       if (!paired && !atPair) return '/pair';
       if (paired && atPair) return '/';

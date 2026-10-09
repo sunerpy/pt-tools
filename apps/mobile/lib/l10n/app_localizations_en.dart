@@ -115,6 +115,11 @@ class SEn extends S {
       'This pairing link needs a newer version of the app';
 
   @override
+  String pairSaveFailed(String error, String name) {
+    return 'The host has added this device, but saving it to the phone\'s secure storage failed ($error). Revoke \"$name\" in the web UI, then pair again.';
+  }
+
+  @override
   String get pairPrivacy =>
       'Connections are end-to-end encrypted: a relay only forwards traffic and cannot read it. This device\'s private key never leaves the phone.';
 

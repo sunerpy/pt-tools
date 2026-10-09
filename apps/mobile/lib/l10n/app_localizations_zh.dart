@@ -112,6 +112,11 @@ class SZh extends S {
   String get pairUpgrade => '这个配对链接要更新版本的 App';
 
   @override
+  String pairSaveFailed(String error, String name) {
+    return '主机已经记下了这台设备，但存进手机的安全存储时出错（$error）：请在网页上撤销「$name」，再重新配对。';
+  }
+
+  @override
   String get pairPrivacy =>
       '连接是端到端加密的：经 relay 时 relay 只转发，看不到内容。这台设备的私钥只存在手机上。';
 

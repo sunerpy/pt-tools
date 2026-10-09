@@ -289,6 +289,12 @@ abstract class S {
   /// **'这个配对链接要更新版本的 App'**
   String get pairUpgrade;
 
+  /// No description provided for @pairSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机已经记下了这台设备，但存进手机的安全存储时出错（{error}）：请在网页上撤销「{name}」，再重新配对。'**
+  String pairSaveFailed(String error, String name);
+
   /// No description provided for @pairPrivacy.
   ///
   /// In zh, this message translates to:

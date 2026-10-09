@@ -28,13 +28,7 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- 配对链接 pttools://pair?... 用这个 App 打开 -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="pttools" android:host="pair"/>
-            </intent-filter>
+            <!-- 不注册 pttools:// 之类的自定义 scheme：别的 App 也能注册同一个 scheme，拿到链接里的配对密钥。配对只经 App 里扫码或粘贴 -->
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
