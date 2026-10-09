@@ -21,3 +21,6 @@ dist
 Dockerfile-*
 tmp
 __pycache__/
+
+# relay 的 Cloudflare 版：wrangler 的本地状态
+relay/cloudflare/.wrangler/
