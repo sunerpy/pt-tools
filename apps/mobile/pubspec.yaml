@@ -1,0 +1,35 @@
+name: pt_tools_app
+description: "pt-tools 的手机 App：扫码配对以后经直连或 relay 远程查看、管理 pt-tools。"
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.5
+  flutter: 3.47.7
+
+# 依赖固定精确版本（升级时改这里并提交 pubspec.lock）
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cryptography: 2.9.0
+  cupertino_icons: 1.0.9
+  flutter_riverpod: 3.4.3
+  flutter_secure_storage: 11.2.0
+  go_router: 18.0.2
+  http: 1.6.0
+  intl: any
+  mobile_scanner: 7.4.2
+  ptt_api:
+    path: packages/ptt_api
+  web_socket_channel: 3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true
