@@ -4,7 +4,7 @@
 
 ## 从源码构建
 
-仓库固定使用 Go `1.26.7`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地检查：
+仓库固定使用 Go `1.26.9`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地检查：
 
 ```bash
 git clone https://github.com/sunerpy/pt-tools.git

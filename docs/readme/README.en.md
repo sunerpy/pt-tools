@@ -116,7 +116,7 @@ Unpack it and run `pt-tools web --host 0.0.0.0 --port 8080`. There is no macOS b
 
 ### Build from source
 
-With Go `1.26.7`, Node.js `25.2.0` and pnpm `10.25.0`, run `make build-local`; see the [development guide](../development.md) (in Chinese).
+With Go `1.26.9`, Node.js `25.2.0` and pnpm `10.25.0`, run `make build-local`; see the [development guide](../development.md) (in Chinese).
 
 ## Quick start
 
@@ -157,7 +157,7 @@ Features, fixes and upgrade notes for each version are in [Releases](https://git
 
 ## Development
 
-The repository pins Go `1.26.7`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local gate:
+The repository pins Go `1.26.9`, Node.js `25.2.0` and pnpm `10.25.0`. After cloning, run the full local gate:
 
 ```bash
 make check

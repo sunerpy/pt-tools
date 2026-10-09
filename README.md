@@ -114,7 +114,7 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 
 ### 从源码构建
 
-需要 Go `1.26.7`、Node.js `25.2.0` 和 pnpm `10.25.0`，运行 `make build-local`，详见[开发指南](docs/development.md)。
+需要 Go `1.26.9`、Node.js `25.2.0` 和 pnpm `10.25.0`，运行 `make build-local`，详见[开发指南](docs/development.md)。
 
 ## 快速开始
 
@@ -155,7 +155,7 @@ irm https://raw.githubusercontent.com/sunerpy/pt-tools/main/scripts/install.ps1 
 
 ## 开发
 
-仓库固定使用 Go `1.26.7`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地门禁：
+仓库固定使用 Go `1.26.9`、Node.js `25.2.0` 和 pnpm `10.25.0`。克隆后运行完整的本地门禁：
 
 ```bash
 make check
