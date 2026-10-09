@@ -1,0 +1,91 @@
+# 远程访问 relay 的非发布 CI（路线图 M16）：Cloudflare 版的类型检查与单测（workerd 里跑），
+# 以及 Go 黑盒一致性测试对 wrangler dev 跑一遍（Go 版的一致性测试在 CI 的 Go Build & Test 里跑）。
+# 只测不部署：部署在 M18 加。
+name: Relay
+
+on:
+  pull_request:
+    branches: [main, v1.0.0-rc]
+    paths:
+      - "relay/**"
+      - "internal/remote/**"
+      - ".github/workflows/relay.yml"
+  push:
+    branches: [main, v1.0.0-rc]
+    paths:
+      - "relay/**"
+      - "internal/remote/**"
+      - ".github/workflows/relay.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Relay · Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: relay/cloudflare
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type Check
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+  conformance:
+    name: Relay · Conformance (wrangler dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".node-version"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install Dependencies
+        working-directory: relay/cloudflare
+        run: pnpm install --frozen-lockfile
+
+      - name: Conformance against wrangler dev
+        run: relay/cloudflare/scripts/conformance.sh
