@@ -54,7 +54,7 @@ pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 | `--tls-cert`, `--tls-key`   | TLS certificate and key files; without them the relay speaks plain WebSocket and leaves TLS to a reverse proxy                                                                                                                           | None           |
 | `--disabled`                | Pause the service: every connection is closed with 4503                                                                                                                                                                                  | off            |
 
-Each option can also come from an environment variable: `PT_TOOLS_RELAY_LISTEN`, `PT_TOOLS_RELAY_PUBLIC_URL`, `PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`, `PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`, `PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`, `PT_TOOLS_RELAY_CLIENT_IP_HEADER`, `PT_TOOLS_RELAY_TLS_CERT`, `PT_TOOLS_RELAY_TLS_KEY` and `PT_TOOLS_RELAY_DISABLED=true`. The Docker image runs it when `PT_MODE=relay` is set. `GET /healthz` returns the status and the version.
+Each option can also come from an environment variable: `PT_TOOLS_RELAY_LISTEN`, `PT_TOOLS_RELAY_PUBLIC_URL`, `PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`, `PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`, `PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`, `PT_TOOLS_RELAY_CLIENT_IP_HEADER`, `PT_TOOLS_RELAY_TLS_CERT`, `PT_TOOLS_RELAY_TLS_KEY` and `PT_TOOLS_RELAY_DISABLED=true`. A value that does not parse (a number that is not an integer, a switch that is not `true`/`false`) or a negative limit stops it from starting. The Docker image runs it when `PT_MODE=relay` is set. `GET /healthz` returns the status and the version.
 
 ## pt-tools secret
 

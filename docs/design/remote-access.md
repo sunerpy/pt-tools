@@ -173,7 +173,7 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 | `CLOSE`     | `0x12` | 双向         | ≥ 1 | 空，或 u16 关闭码（大端）加最多 123 字节原因 |
 
 - 流编号由 relay 分配。relay 把客户端发来的每条二进制消息装进 `DATA` 转给主机，把主机发来的 `DATA` 的内容原样发给客户端；任一端可以 `CLOSE`，relay 随后关掉客户端那条 WebSocket。主机的 `CLOSE` 排在它之前发来的 `DATA` 后面：relay 发完这些消息再关（主机常常发完 `GOAWAY` 马上关流）。
-- relay 给每个客户端排队等发的消息最多 64 条。某个客户端一直不读、排队满了时 relay 以 4429 关掉它，并照常读主机连接，同一台主机别的流不受影响。
+- 某个客户端一直不读时，relay 照常读主机连接，同一台主机别的流不受影响；跟不上的客户端以 4429 关掉。Go 版给每个客户端排队最多 64 条消息，排满即关；Cloudflare 版由运行时缓冲（Workers 的 WebSocket 没有发送完成的通知），发不出去时关。
 - 主机的连接断开（或者被同一个 hostId 的新连接替换）时，relay 以 4404 关掉这台主机的所有客户端连接：主机那边的会话已经随连接结束，留着客户端连接只会让 App 等到空闲超时。
 - 一条 relay 连接上主机最多同时接 16 个流，再来的 `OPEN` 直接回 `CLOSE` 4429。某个流排队的消息超过 64 条时主机关掉那个流，不拖住别的流。
 - 保活：主机每 30 秒发一条文本消息 `ping`，relay 回文本 `pong`（Cloudflare 的自动应答不用唤醒 Durable Object）。主机 90 秒没收到 relay 的任何消息就断开重连。
@@ -206,7 +206,7 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 ### 实现
 
 - Go 版：`internal/remote/relayserver`，命令 `pt-tools relay serve`（见[命令行](../reference/cli.md#pt-tools-relay-serve)）。
-- Cloudflare 版：`relay/cloudflare`，每个 hostId 一个 Durable Object，用 WebSocket Hibernation API 持有连接，主机的 `ping` 由自动应答回 `pong`；每个 IP 一个 Durable Object 计数。relay 的 origin 取 `PUBLIC_URL`，没有设置时按请求的地址推导。
+- Cloudflare 版：`relay/cloudflare`，每个 hostId 一个 Durable Object，用 WebSocket Hibernation API 持有连接，主机的 `ping` 由自动应答回 `pong`。每天的用量先预留再用：存储里写「已经用的加一块」（1 MiB，或上限的 1/64），Durable Object 被逐出时读回预留数，只会多算不会少算，还在内存里时一秒后写回准确数。每个 IP 一个 Durable Object 计数，计数写在存储里。relay 的 origin 取 `PUBLIC_URL`，没有设置时按请求的地址推导。
 - 一致性测试：`internal/remote/relaytest`（Go 黑盒）。`go test` 对 Go 版跑；`relay/cloudflare/scripts/conformance.sh` 起三个 `wrangler dev` 实例（不同限额）对 Cloudflare 版跑同一套，并用真正的主机端经它走一遍配对与会话。
 
 ## 信任模型

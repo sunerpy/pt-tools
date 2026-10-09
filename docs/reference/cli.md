@@ -54,7 +54,7 @@ pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 | `--tls-cert`、`--tls-key`   | TLS 证书与私钥文件；不填时是明文，交给反向代理做 TLS                                                                                    | 无             |
 | `--disabled`                | 暂停服务：所有连接以 4503 关闭                                                                                                          | 关             |
 
-每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本。
+每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`；值写错（数字不是整数、开关不是 `true`/`false`）或者限额是负数时不启动。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本。
 
 ## pt-tools secret
 
