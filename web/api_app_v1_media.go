@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -435,4 +436,41 @@ func (s *Server) appExplore(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	appJSON(w, out)
+}
+
+var (
+	appImageSizeRe = regexp.MustCompile(`^(?:w\d{2,4}|h\d{2,4}|original)$`)
+	appImageFileRe = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$`)
+)
+
+// appTMDBImage 是 GET /images/tmdb/{size}/{file}：pt-tools 按自己的 TMDB 图片地址与代理去取海报，
+// App 不直接连 TMDB（国内常常连不上，也不让 TMDB 看到这台手机）。file 是 poster_path 去掉开头的 /。
+func (s *Server) appTMDBImage(w http.ResponseWriter, r *http.Request) {
+	size, file := r.PathValue("size"), r.PathValue("file")
+	if !appImageSizeRe.MatchString(size) || !appImageFileRe.MatchString(file) {
+		appError(w, http.StatusBadRequest, "invalid_argument", "图片尺寸或文件名不对")
+		return
+	}
+	if s.media == nil {
+		appError(w, http.StatusServiceUnavailable, "unavailable", "媒体识别没有启动")
+		return
+	}
+	c, err := s.media.TMDB(r.Context())
+	if err != nil {
+		appSubscribeError(w, err)
+		return
+	}
+	b, err := c.Image(r.Context(), "/"+file, size)
+	switch {
+	case errors.Is(err, tmdb.ErrNotFound):
+		appError(w, http.StatusNotFound, "not_found", "TMDB 上没有这张图片")
+		return
+	case err != nil:
+		appError(w, http.StatusBadGateway, "upstream", "取 TMDB 图片失败: "+appRedactAddr(err.Error()))
+		return
+	}
+	w.Header().Set("Content-Type", http.DetectContentType(b))
+	// TMDB 的图片地址不变内容：让 App 缓存一天
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	_, _ = w.Write(b)
 }

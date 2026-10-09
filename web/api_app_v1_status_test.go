@@ -23,7 +23,7 @@ func TestAppDownloaders(t *testing.T) {
 	fake := &fakeDownloader{freSpace: 5 << 30}
 	srv, id := setupServerWithFakeDownloader(t, fake)
 	require.NoError(t, global.GlobalDB.DB.Create(&models.DownloaderSetting{Name: "gone", Type: "qbittorrent", URL: "http://admin:secret@127.0.0.1:9", Enabled: true}).Error)
-	w := appAs(srv.appDownloaders, http.MethodGet, "/api/app/v1/downloaders")
+	w := appAs(t, srv.appDownloaders, http.MethodGet, "/api/app/v1/downloaders")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.NotContains(t, w.Body.String(), "secret")
 	var out AppDownloaderList
@@ -39,7 +39,7 @@ func TestAppDownloaders(t *testing.T) {
 	prev := global.GlobalDB
 	global.GlobalDB = nil
 	t.Cleanup(func() { global.GlobalDB = prev })
-	assert.Equal(t, http.StatusServiceUnavailable, appAs(srv.appDownloaders, http.MethodGet, "/api/app/v1/downloaders").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appAs(t, srv.appDownloaders, http.MethodGet, "/api/app/v1/downloaders").Code)
 }
 
 // GET /updates：include_prerelease=1 时也报预览版；查不了（又没有上次的结果）时回 502
@@ -50,7 +50,7 @@ func TestAppUpdates(t *testing.T) {
 		got = opts
 		return &version.VersionCheckResult{CurrentVersion: "v1", HasUpdate: true}, nil
 	}
-	w := appAs(srv.appUpdates, http.MethodGet, "/api/app/v1/updates?include_prerelease=1")
+	w := appAs(t, srv.appUpdates, http.MethodGet, "/api/app/v1/updates?include_prerelease=1")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, got.IncludePrerelease)
 	assert.Contains(t, w.Body.String(), `"has_update":true`)
@@ -59,7 +59,7 @@ func TestAppUpdates(t *testing.T) {
 	srv.checkUpdates = func(context.Context, version.CheckOptions) (*version.VersionCheckResult, error) {
 		return &version.VersionCheckResult{CurrentVersion: "v1", Error: "连不上 GitHub"}, errors.New("连不上 GitHub")
 	}
-	assert.Equal(t, http.StatusBadGateway, appAs(srv.appUpdates, http.MethodGet, "/api/app/v1/updates").Code)
+	assert.Equal(t, http.StatusBadGateway, appAs(t, srv.appUpdates, http.MethodGet, "/api/app/v1/updates").Code)
 }
 
 // 下载器的错误常带着它的内网地址：App 与 MCP 拿到的错误里去掉地址、端口与主机名，只留是什么错

@@ -15,11 +15,13 @@ import (
 	"github.com/sunerpy/pt-tools/web/middleware"
 )
 
-func appAsWith(h http.HandlerFunc, method, target, body string, scopes ...string) *httptest.ResponseRecorder {
+func appAsWith(t testing.TB, h http.HandlerFunc, method, target, body string, scopes ...string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	req = req.WithContext(middleware.WithPrincipal(req.Context(), &middleware.Principal{Kind: middleware.KindAPIToken, ID: "1", Scopes: scopes}))
 	w := httptest.NewRecorder()
 	h(w, req)
+	validateAppResponse(t, req, w)
 	return w
 }
 
@@ -27,7 +29,7 @@ func appAsWith(h http.HandlerFunc, method, target, body string, scopes ...string
 func TestAppTorrents(t *testing.T) {
 	fake := &fakeDownloader{torrents: sampleTorrents()}
 	srv, dlID := setupServerWithFakeDownloader(t, fake)
-	w := appAs(srv.appTorrents, http.MethodGet, "/api/app/v1/torrents?sort=size&order=asc&page_size=1")
+	w := appAs(t, srv.appTorrents, http.MethodGet, "/api/app/v1/torrents?sort=size&order=asc&page_size=1")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assertNoSecrets(t, w.Body.Bytes())
 	var page AppTorrentPage
@@ -39,18 +41,18 @@ func TestAppTorrents(t *testing.T) {
 	assert.InDelta(t, 50, page.Items[0].Progress, 0.01, "进度按百分比")
 	assert.Empty(t, page.Failures)
 
-	w = appAs(srv.appTorrents, http.MethodGet, "/api/app/v1/torrents?q=beta&downloader_id="+strconv.Itoa(int(dlID)))
+	w = appAs(t, srv.appTorrents, http.MethodGet, "/api/app/v1/torrents?q=beta&downloader_id="+strconv.Itoa(int(dlID)))
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
 	require.Len(t, page.Items, 1)
 	assert.Equal(t, "Beta Show", page.Items[0].Title)
 
 	for _, q := range []string{"?sort=passkey", "?order=up", "?downloader_id=x", "?downloader_id=0", "?page_size=201"} {
-		assert.Equal(t, http.StatusBadRequest, appAs(srv.appTorrents, http.MethodGet, "/api/app/v1/torrents"+q).Code, q)
+		assert.Equal(t, http.StatusBadRequest, appAs(t, srv.appTorrents, http.MethodGet, "/api/app/v1/torrents"+q).Code, q)
 	}
 
 	fake.listErr = errors.New(`获取失败: Get "http://qb:8080/api?token=abc": EOF`)
-	w = appAs(srv.appTorrents, http.MethodGet, "/api/app/v1/torrents")
+	w = appAs(t, srv.appTorrents, http.MethodGet, "/api/app/v1/torrents")
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
 	require.Len(t, page.Failures, 1)
@@ -63,7 +65,7 @@ func TestAppTorrentActions(t *testing.T) {
 	srv, dlID := setupServerWithFakeDownloader(t, fake)
 	id := strconv.Itoa(int(dlID))
 	body := `{"action":"pause","targets":[{"downloader_id":` + id + `,"task_id":"t1"},{"downloader_id":999,"task_id":"t2"}]}`
-	w := appAsWith(srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", body, "app:write")
+	w := appAsWith(t, srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", body, "app:write")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var res AppTorrentActionsResult
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
@@ -73,7 +75,7 @@ func TestAppTorrentActions(t *testing.T) {
 
 	fake.batchRemoveErr = errors.New("batch")
 	fake.removeErr = errors.New("单个也失败")
-	w = appAsWith(srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions",
+	w = appAsWith(t, srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions",
 		`{"action":"delete_with_files","targets":[{"downloader_id":`+id+`,"task_id":"t1"}]}`, "app:write")
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
@@ -89,7 +91,7 @@ func TestAppTorrentActions(t *testing.T) {
 		`{"action":"pause"} {}`,
 		`not json`,
 	} {
-		assert.Equal(t, http.StatusBadRequest, appAsWith(srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", bad, "app:write").Code, bad)
+		assert.Equal(t, http.StatusBadRequest, appAsWith(t, srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", bad, "app:write").Code, bad)
 	}
 	many := `{"action":"pause","targets":[`
 	for i := range 101 {
@@ -99,5 +101,5 @@ func TestAppTorrentActions(t *testing.T) {
 		many += `{"downloader_id":1,"task_id":"t` + strconv.Itoa(i) + `"}`
 	}
 	many += `]}`
-	assert.Equal(t, http.StatusBadRequest, appAsWith(srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", many, "app:write").Code, "最多 100 个")
+	assert.Equal(t, http.StatusBadRequest, appAsWith(t, srv.appTorrentActions, http.MethodPost, "/api/app/v1/torrents/actions", many, "app:write").Code, "最多 100 个")
 }

@@ -71,6 +71,7 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/subscriptions/{id}/search", w, s.appSubscriptionSearch},
 		{http.MethodDelete, "/subscriptions/{id}", w, s.appSubscriptionDelete},
 		{http.MethodGet, "/explore", r, s.appExplore},
+		{http.MethodGet, "/images/tmdb/{size}/{file}", r, s.appTMDBImage},
 	}
 }
 

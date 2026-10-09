@@ -1,0 +1,1045 @@
+openapi: 3.0.3
+info:
+  title: pt-tools App API
+  version: "1"
+  description: |
+    给手机 App 和脚本用的接口（`/api/app/v1/*`），说明见 docs/reference/app-api.md。
+    这份描述是契约：web 包的测试用它校验真实 handler 的回应，App 的 Dart 模型由它生成（apps/mobile/packages/ptt_api）。
+    兼容规则：新增接口或字段不算不兼容，客户端忽略不认识的字段；不兼容的改动才把 `remote_api_level` 加一。
+servers:
+  - url: /api/app/v1
+security:
+  - bearer: []
+tags:
+  - name: App
+paths:
+  /meta:
+    get:
+      operationId: getMeta
+      tags: [App]
+      summary: 版本、兼容级别、功能组与调用者自己的权限
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppMeta" }
+        default: { $ref: "#/components/responses/Error" }
+  /updates:
+    get:
+      operationId: getUpdates
+      tags: [App]
+      summary: 有没有新版本
+      parameters:
+        - name: include_prerelease
+          in: query
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppUpdates" }
+        default: { $ref: "#/components/responses/Error" }
+  /overview:
+    get:
+      operationId: getOverview
+      tags: [App]
+      summary: 已启用站点的合计与今天的增量
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOverview" }
+        default: { $ref: "#/components/responses/Error" }
+  /sites:
+    get:
+      operationId: listSites
+      tags: [App]
+      summary: 站点、登录状态、今天的签到与站点上的用户数据
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSiteList" }
+        default: { $ref: "#/components/responses/Error" }
+  /sites/{site}/attend:
+    post:
+      operationId: attendSite
+      tags: [App]
+      summary: 立即签到
+      parameters:
+        - $ref: "#/components/parameters/Site"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSiteAttendance" }
+        default: { $ref: "#/components/responses/Error" }
+  /favicon/{site}:
+    get:
+      operationId: getFavicon
+      tags: [App]
+      summary: 站点图标（图片）
+      parameters:
+        - $ref: "#/components/parameters/Site"
+      responses:
+        "200":
+          description: 图片
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+  /images/tmdb/{size}/{file}:
+    get:
+      operationId: getTmdbImage
+      tags: [App]
+      summary: TMDB 图片（海报等），由 pt-tools 按自己的 TMDB 图片地址与代理去取
+      parameters:
+        - name: size
+          in: path
+          required: true
+          schema: { type: string, pattern: "^(w[0-9]{2,4}|h[0-9]{2,4}|original)$" }
+        - name: file
+          in: path
+          required: true
+          description: poster_path 去掉开头的 /
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]+\\.(jpg|jpeg|png|webp)$" }
+      responses:
+        "200":
+          description: 图片
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        default: { $ref: "#/components/responses/Error" }
+  /downloaders:
+    get:
+      operationId: listDownloaders
+      tags: [App]
+      summary: 启用的下载器与它们现在的速度、剩余空间
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppDownloaderList" }
+        default: { $ref: "#/components/responses/Error" }
+  /torrents:
+    get:
+      operationId: listTorrents
+      tags: [App]
+      summary: 下载器里的种子
+      parameters:
+        - name: downloader_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [downloading, seeding, paused, stopped, queued, checking, error]
+        - $ref: "#/components/parameters/Q"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              [
+                added_at,
+                completed_at,
+                title,
+                progress,
+                size,
+                ratio,
+                state,
+                upload_speed,
+                download_speed,
+                eta,
+                seeds,
+              ]
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc] }
+        - $ref: "#/components/parameters/Page"
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppTorrentPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /torrents/actions:
+    post:
+      operationId: torrentActions
+      tags: [App]
+      summary: 暂停、继续、删除种子
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppTorrentActionsRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppTorrentActionsResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /search:
+    post:
+      operationId: search
+      tags: [App]
+      summary: 多站搜索（只要读取权限）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppSearchRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSearchResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /push:
+    post:
+      operationId: push
+      tags: [App]
+      summary: 把搜索到的种子推送到下载器
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppPushRequest" }
+      responses:
+        "200":
+          description: OK（被拦下时 success 为 false）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppPushResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [App]
+      summary: 任务列表（推送记录）
+      parameters:
+        - name: site
+          in: query
+          schema: { type: string }
+        - $ref: "#/components/parameters/Q"
+        - name: pushed
+          in: query
+          schema: { type: string, enum: ["1"] }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize100"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppTaskPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /brush/tasks:
+    get:
+      operationId: listBrushTasks
+      tags: [App]
+      summary: 刷流任务
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppBrushTask" }
+        default: { $ref: "#/components/responses/Error" }
+  /media/history:
+    get:
+      operationId: listMediaHistory
+      tags: [App]
+      summary: 整理历史
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [done, failed, skipped, removed] }
+        - $ref: "#/components/parameters/Q"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize100"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppMediaHistoryPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions:
+    get:
+      operationId: listSubscriptions
+      tags: [App]
+      summary: 订阅列表
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, paused, pending, done] }
+        - $ref: "#/components/parameters/Q"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppSubscription" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSubscription
+      tags: [App]
+      summary: 新建订阅
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppSubscriptionCreate" }
+      responses:
+        "200":
+          description: 新建的订阅
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSubscription" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}:
+    get:
+      operationId: getSubscription
+      tags: [App]
+      summary: 订阅详情：每一集与下载过的种子
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSubscriptionDetail" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSubscription
+      tags: [App]
+      summary: 删除订阅（下载器里的种子与媒体库里的文件不动）
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOK" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/status:
+    post:
+      operationId: setSubscriptionStatus
+      tags: [App]
+      summary: 暂停或恢复订阅
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppSubscriptionStatus" }
+      responses:
+        "200":
+          description: 更新后的订阅
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppSubscription" }
+        default: { $ref: "#/components/responses/Error" }
+  /subscriptions/{id}/search:
+    post:
+      operationId: searchSubscription
+      tags: [App]
+      summary: 立即搜索一次
+      parameters:
+        - $ref: "#/components/parameters/SubscriptionID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppMessage" }
+        default: { $ref: "#/components/responses/Error" }
+  /explore:
+    get:
+      operationId: explore
+      tags: [App]
+      summary: 探索：TMDB 的热门、流行与搜索
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema: { type: string, enum: [movie, tv] }
+        - name: list
+          in: query
+          schema: { type: string, enum: [trending, popular, search] }
+        - $ref: "#/components/parameters/Q"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppExplorePage" }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: API 令牌（ptt_<id>_<secret>）。经远程访问配对的设备在隧道里调用，不带令牌。
+  parameters:
+    Site:
+      name: site
+      in: path
+      required: true
+      schema: { type: string }
+    SubscriptionID:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    Q:
+      name: q
+      in: query
+      schema: { type: string, maxLength: 100 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1 }
+    PageSize100:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100 }
+  responses:
+    Error:
+      description: 出错
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AppError" }
+  schemas:
+    AppError:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: invalid_body、invalid_argument、unauthorized、forbidden、not_found、method_not_allowed、busy、rate_limited、internal、search_failed、download_failed、attend_failed、upstream、unavailable 等
+        message: { type: string }
+    AppOK:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+    AppMessage:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+    AppMeta:
+      type: object
+      required: [name, version, remote_api_level, features, principal]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        remote_api_level: { type: integer }
+        features:
+          type: array
+          items: { type: string }
+        principal: { $ref: "#/components/schemas/AppPrincipal" }
+    AppPrincipal:
+      type: object
+      required: [kind, scopes]
+      properties:
+        kind: { type: string, description: "api_token、session 或 remote_device" }
+        name: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+    AppUpdates:
+      type: object
+      required: [current_version, has_update, checked_at]
+      properties:
+        current_version: { type: string }
+        has_update: { type: boolean }
+        new_releases:
+          type: array
+          items: { $ref: "#/components/schemas/AppRelease" }
+        changelog_url: { type: string }
+        has_more_releases: { type: boolean }
+        checked_at: { type: integer, format: int64 }
+        error: { type: string }
+    AppRelease:
+      type: object
+      required: [version, name, changelog, url, published_at]
+      properties:
+        version: { type: string }
+        name: { type: string }
+        changelog: { type: string }
+        url: { type: string }
+        published_at: { type: integer, format: int64 }
+        assets:
+          type: array
+          items: { $ref: "#/components/schemas/AppReleaseAsset" }
+        prerelease: { type: boolean }
+        prerelease_label: { type: string }
+    AppReleaseAsset:
+      type: object
+      required: [name, download_url, size]
+      properties:
+        name: { type: string }
+        download_url: { type: string }
+        size: { type: integer, format: int64 }
+    AppOverview:
+      type: object
+      required: [totals, today, updated_at]
+      properties:
+        totals: { $ref: "#/components/schemas/AppTotals" }
+        today: { $ref: "#/components/schemas/AppDelta" }
+        updated_at: { type: integer, format: int64 }
+    AppTotals:
+      type: object
+      required:
+        [
+          uploaded,
+          downloaded,
+          ratio,
+          seeding,
+          leeching,
+          bonus,
+          bonus_per_hour,
+          seeding_size,
+          site_count,
+          unread_messages,
+        ]
+      properties:
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        ratio: { type: number, format: double }
+        seeding: { type: integer }
+        leeching: { type: integer }
+        bonus: { type: number, format: double }
+        bonus_per_hour: { type: number, format: double }
+        seeding_size: { type: integer, format: int64 }
+        site_count: { type: integer }
+        unread_messages: { type: integer }
+    AppDelta:
+      type: object
+      required: [from, to, uploaded, downloaded, bonus, sites]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        bonus: { type: number, format: double }
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/AppSiteDelta" }
+        error: { type: string, description: 增量算不出来时的原因（这时的 0 不代表今天没有流量） }
+    AppSiteDelta:
+      type: object
+      required: [site, uploaded, downloaded, bonus]
+      properties:
+        site: { type: string }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        bonus: { type: number, format: double }
+    AppSiteList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppSite" }
+        user_error: { type: string }
+    AppSite:
+      type: object
+      required: [name, display_name, enabled, login, attendance]
+      properties:
+        name: { type: string }
+        display_name: { type: string }
+        enabled: { type: boolean }
+        login: { $ref: "#/components/schemas/AppSiteLogin" }
+        attendance: { $ref: "#/components/schemas/AppSiteAttendance" }
+        user: { $ref: "#/components/schemas/AppSiteUser" }
+    AppSiteLogin:
+      type: object
+      required: [tier, days_remaining]
+      properties:
+        tier: { type: string, description: "none、30d、14d、7d、3d、banned-imminent 或 unknown" }
+        days_remaining: { type: integer }
+        last_active_at: { type: integer, format: int64 }
+        last_probe_at: { type: integer, format: int64 }
+        last_probe_status: { type: string }
+    AppSiteAttendance:
+      type: object
+      required: [supported, enabled, day]
+      properties:
+        supported: { type: boolean }
+        enabled: { type: boolean }
+        day: { type: string }
+        status: { type: string, description: "pending、signed、already、failed 或 unsupported" }
+        message: { type: string }
+        last_attempt_at: { type: integer, format: int64 }
+    AppSiteUser:
+      type: object
+      required:
+        [
+          username,
+          uploaded,
+          downloaded,
+          ratio,
+          bonus,
+          seeding,
+          leeching,
+          unread_messages,
+          updated_at,
+        ]
+      properties:
+        username: { type: string }
+        level: { type: string }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        ratio: { type: number, format: double }
+        bonus: { type: number, format: double }
+        bonus_per_hour: { type: number, format: double }
+        seeding: { type: integer }
+        leeching: { type: integer }
+        seeding_size: { type: integer, format: int64 }
+        unread_messages: { type: integer }
+        hnr_unsatisfied: { type: integer }
+        updated_at: { type: integer, format: int64 }
+    AppDownloaderList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppDownloader" }
+    AppDownloader:
+      type: object
+      required:
+        [
+          id,
+          name,
+          type,
+          default,
+          reachable,
+          upload_speed,
+          download_speed,
+          uploaded,
+          downloaded,
+          free_space,
+        ]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        type: { type: string, description: "qbittorrent 或 transmission" }
+        default: { type: boolean }
+        reachable: { type: boolean }
+        error: { type: string }
+        version: { type: string }
+        upload_speed: { type: integer, format: int64 }
+        download_speed: { type: integer, format: int64 }
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        free_space: { type: integer, format: int64 }
+    AppTorrentPage:
+      type: object
+      required: [items, total, page, page_size, failures]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppTorrent" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        failures:
+          type: array
+          items: { $ref: "#/components/schemas/AppDownloaderFailure" }
+    AppTorrent:
+      type: object
+      required:
+        [
+          downloader_id,
+          downloader,
+          task_id,
+          info_hash,
+          title,
+          progress,
+          size,
+          state,
+          ratio,
+          seeds,
+          peers,
+          upload_speed,
+          download_speed,
+          eta,
+          added_at,
+          completed_at,
+        ]
+      properties:
+        downloader_id: { type: integer }
+        downloader: { type: string }
+        task_id: { type: string }
+        info_hash: { type: string }
+        title: { type: string }
+        progress: { type: number, format: double }
+        size: { type: integer, format: int64 }
+        state: { type: string }
+        ratio: { type: number, format: double }
+        seeds: { type: integer }
+        peers: { type: integer }
+        upload_speed: { type: integer, format: int64 }
+        download_speed: { type: integer, format: int64 }
+        eta: { type: integer, format: int64, description: 预计剩余秒数，-1 表示无法估计 }
+        added_at: { type: integer, format: int64 }
+        completed_at: { type: integer, format: int64 }
+        category: { type: string }
+        tags: { type: string }
+        save_path: { type: string }
+    AppDownloaderFailure:
+      type: object
+      required: [downloader_id, downloader, error]
+      properties:
+        downloader_id: { type: integer }
+        downloader: { type: string }
+        error: { type: string }
+    AppTorrentTarget:
+      type: object
+      required: [downloader_id, task_id]
+      properties:
+        downloader_id: { type: integer }
+        task_id: { type: string }
+    AppTorrentActionsRequest:
+      type: object
+      required: [action, targets]
+      additionalProperties: false
+      properties:
+        action: { type: string, enum: [pause, resume, delete, delete_with_files] }
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AppTorrentTarget" }
+    AppTorrentActionsResult:
+      type: object
+      required: [succeeded, failed, results]
+      properties:
+        succeeded: { type: integer }
+        failed: { type: integer }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/AppTorrentActionResult" }
+    AppTorrentActionResult:
+      type: object
+      required: [downloader_id, task_id, success]
+      properties:
+        downloader_id: { type: integer }
+        task_id: { type: string }
+        success: { type: boolean }
+        message: { type: string }
+    AppSearchRequest:
+      type: object
+      required: [keyword]
+      additionalProperties: false
+      properties:
+        keyword: { type: string, maxLength: 100 }
+        sites:
+          type: array
+          maxItems: 100
+          items: { type: string }
+        category: { type: string }
+        free_only: { type: boolean }
+        min_seeders: { type: integer, minimum: 0 }
+    AppSearchResult:
+      type: object
+      required: [items, total, sites, errors, duration_ms]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppSearchItem" }
+        total: { type: integer }
+        sites:
+          type: object
+          additionalProperties: { type: integer }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/AppSearchError" }
+        duration_ms: { type: integer, format: int64 }
+    AppSearchItem:
+      type: object
+      required: [site, torrent_id, title, size, seeders, leechers, free, has_hr]
+      properties:
+        site: { type: string }
+        torrent_id: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        info_hash: { type: string }
+        size: { type: integer, format: int64 }
+        seeders: { type: integer }
+        leechers: { type: integer }
+        snatched: { type: integer }
+        uploaded_at: { type: integer, format: int64 }
+        category: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        discount: { type: string }
+        discount_end_at: { type: integer, format: int64 }
+        free: { type: boolean }
+        has_hr: { type: boolean }
+        imdb_id: { type: string }
+        douban_id: { type: string }
+    AppSearchError:
+      type: object
+      required: [site, error]
+      properties:
+        site: { type: string }
+        error: { type: string }
+    AppPushRequest:
+      type: object
+      required: [site, torrent_id]
+      additionalProperties: false
+      properties:
+        site: { type: string }
+        torrent_id: { type: string }
+        downloader_id: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        tags: { type: string }
+        save_path: { type: string }
+    AppPushResult:
+      type: object
+      required: [success, skipped, downloader_id, downloader]
+      properties:
+        success: { type: boolean }
+        skipped: { type: boolean }
+        message: { type: string }
+        info_hash: { type: string }
+        downloader_id: { type: integer }
+        downloader: { type: string }
+    AppTaskPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppTask" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    AppTask:
+      type: object
+      required:
+        [id, site, torrent_id, title, size, free, has_hr, pushed, progress, completed, created_at]
+      properties:
+        id: { type: integer }
+        site: { type: string }
+        torrent_id: { type: string }
+        title: { type: string }
+        size: { type: integer, format: int64 }
+        category: { type: string }
+        tags: { type: string }
+        free: { type: boolean }
+        free_level: { type: string }
+        free_end_at: { type: integer, format: int64 }
+        has_hr: { type: boolean }
+        pushed: { type: boolean }
+        pushed_at: { type: integer, format: int64 }
+        downloader: { type: string }
+        progress: { type: number, format: double }
+        completed: { type: boolean }
+        completed_at: { type: integer, format: int64 }
+        source: { type: string }
+        error: { type: string }
+        created_at: { type: integer, format: int64 }
+    AppBrushStat:
+      type: object
+      required: [uploaded, downloaded, added, removed]
+      properties:
+        uploaded: { type: integer, format: int64 }
+        downloaded: { type: integer, format: int64 }
+        added: { type: integer }
+        removed: { type: integer }
+    AppBrushTask:
+      type: object
+      required:
+        [
+          id,
+          name,
+          enabled,
+          site,
+          site_enabled,
+          downloader,
+          active,
+          downloading,
+          active_size,
+          today,
+          total,
+        ]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        enabled: { type: boolean }
+        site: { type: string }
+        site_enabled: { type: boolean }
+        downloader: { type: string }
+        active: { type: integer }
+        downloading: { type: integer }
+        active_size: { type: integer, format: int64 }
+        today: { $ref: "#/components/schemas/AppBrushStat" }
+        total: { $ref: "#/components/schemas/AppBrushStat" }
+    AppMediaHistoryPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppMediaHistory" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    AppMediaHistory:
+      type: object
+      required: [id, media_type, tmdb_id, title, torrent_name, mode, size, status, created_at]
+      properties:
+        id: { type: integer }
+        media_type: { type: string }
+        tmdb_id: { type: integer }
+        title: { type: string }
+        year: { type: integer }
+        season: { type: integer }
+        episode: { type: integer }
+        episode_end: { type: integer }
+        torrent_name: { type: string }
+        library: { type: string }
+        target_path: { type: string }
+        mode: { type: string }
+        size: { type: integer, format: int64 }
+        status: { type: string }
+        message: { type: string }
+        created_at: { type: integer, format: int64 }
+    AppProgress:
+      type: object
+      required: [total, aired, in_library, downloading, missing]
+      properties:
+        total: { type: integer }
+        aired: { type: integer }
+        in_library: { type: integer }
+        downloading: { type: integer }
+        missing:
+          type: array
+          items: { type: integer }
+    AppSubscription:
+      type: object
+      required:
+        [id, media_type, tmdb_id, season, title, status, upgrade, source, progress, created_at]
+      properties:
+        id: { type: integer }
+        media_type: { type: string, description: "movie 或 tv" }
+        tmdb_id: { type: integer }
+        season: { type: integer }
+        title: { type: string }
+        original_title: { type: string }
+        year: { type: integer }
+        poster_path:
+          { type: string, description: "TMDB 的海报路径，经 /images/tmdb/{size}/{file} 取图" }
+        status: { type: string }
+        upgrade: { type: boolean }
+        source: { type: string }
+        total_episodes: { type: integer }
+        progress: { $ref: "#/components/schemas/AppProgress" }
+        message: { type: string }
+        last_search_at: { type: integer, format: int64 }
+        next_search_at: { type: integer, format: int64 }
+        created_at: { type: integer, format: int64 }
+    AppEpisode:
+      type: object
+      required: [number, state]
+      properties:
+        number: { type: integer }
+        name: { type: string }
+        air_date: { type: string }
+        state: { type: string, description: "library、downloading、missing 或 upcoming" }
+    AppSubscriptionTorrent:
+      type: object
+      required: [site, torrent_id, title, status, complete, size, created_at]
+      properties:
+        site: { type: string }
+        torrent_id: { type: string }
+        title: { type: string }
+        status: { type: string }
+        episode: { type: integer }
+        episode_end: { type: integer }
+        complete: { type: boolean }
+        size: { type: integer, format: int64 }
+        message: { type: string }
+        created_at: { type: integer, format: int64 }
+    AppSubscriptionDetail:
+      allOf:
+        - $ref: "#/components/schemas/AppSubscription"
+        - type: object
+          required: [episodes, torrents]
+          properties:
+            episodes:
+              type: array
+              items: { $ref: "#/components/schemas/AppEpisode" }
+            torrents:
+              type: array
+              items: { $ref: "#/components/schemas/AppSubscriptionTorrent" }
+    AppSubscriptionCreate:
+      type: object
+      required: [media_type, tmdb_id]
+      additionalProperties: false
+      properties:
+        media_type: { type: string, enum: [movie, tv] }
+        tmdb_id: { type: integer, minimum: 1 }
+        season: { type: integer, minimum: 0 }
+        profile_id: { type: integer, minimum: 0 }
+        upgrade: { type: boolean }
+    AppSubscriptionStatus:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [active, paused] }
+    AppExplorePage:
+      type: object
+      required: [items, page, total_pages]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AppExploreItem" }
+        page: { type: integer }
+        total_pages: { type: integer }
+    AppExploreItem:
+      type: object
+      required: [id, media_type, title, in_library, subscribed]
+      properties:
+        id: { type: integer }
+        media_type: { type: string }
+        title: { type: string }
+        original_title: { type: string }
+        year: { type: integer }
+        overview: { type: string }
+        poster_path: { type: string }
+        vote_average: { type: number, format: double }
+        in_library: { type: boolean }
+        subscribed: { type: boolean }
+        subscription_id: { type: integer }
