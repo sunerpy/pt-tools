@@ -210,14 +210,27 @@ func TestRelayEndToEnd(t *testing.T) {
 	assert.Len(t, body, 3*MaxFramePayload+7)
 	assert.Equal(t, 1, waitRelay(t, th, RelayOnline).Streams)
 
-	// 撤销：主机关掉这个流，relay 收到 CLOSE
+	// 撤销：会话收到 GOAWAY，这个流关掉（设备端收到 GOAWAY 也会自己关，谁先关都行）
 	_, err = th.RevokeDevice(context.Background(), d.ID)
 	require.NoError(t, err)
 	wantGoAway(t, c, GoAwayRevoked)
+	require.Eventually(t, func() bool { return relayStatusOf(t, th)[0].Streams == 0 }, 5*time.Second, 20*time.Millisecond)
+
+	// 设备端不理 GOAWAY（只握手、不读）：只能是主机给 relay 发 CLOSE 关掉这个流
+	d2, priv2 := th.addDevice(t, "平板", ScopesFull)
+	dk2, _ := KeypairFromPrivate(priv2)
+	raw2, err := DialRelay(ctx, relay.url(), th.keys.HostID(), nil)
+	require.NoError(t, err)
+	_, hello, err := dialHandshake(ctx, raw2, th.keys.HostID(), th.keys.Noise.Public, dk2, nil, ClientHello{})
+	require.NoError(t, err)
+	require.Equal(t, ModeDevice, hello.Mode)
+	require.Eventually(t, func() bool { return relayStatusOf(t, th)[0].Streams == 1 }, 5*time.Second, 20*time.Millisecond)
+	_, err = th.RevokeDevice(context.Background(), d2.ID)
+	require.NoError(t, err)
 	select {
 	case <-relay.closes:
 	case <-time.After(5 * time.Second):
-		t.Fatal("relay 没有收到 CLOSE")
+		t.Fatal("relay 没有收到主机的 CLOSE")
 	}
 	require.Eventually(t, func() bool { return relayStatusOf(t, th)[0].Streams == 0 }, 5*time.Second, 20*time.Millisecond)
 
