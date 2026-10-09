@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,8 @@ const (
 	writeTimeout = 30 * time.Second
 	// limiterMaxIPs 是限流表最多记的 IP 数
 	limiterMaxIPs = 65536
+	// clientQueue 是每个客户端排队等发出的消息数；排满说明它读得太慢，关掉它（4429），不拖住同一台主机别的流
+	clientQueue = 64
 )
 
 // Config 是 relay 的设置。
@@ -50,8 +53,8 @@ type Config struct {
 	MaxConnPerIPPerMin int
 	// Disabled 为真时所有连接以 4503 关闭
 	Disabled bool
-	// ClientIPHeader 不为空时从这个请求头取客户端 IP（放在反向代理之后时，例如 X-Forwarded-For 或 CF-Connecting-IP）；
-	// 只有确定请求都经过代理时才设，否则这个头可以随意伪造
+	// ClientIPHeader 不为空时从这个请求头取客户端 IP（放在反向代理之后时，例如 X-Real-IP 或 CF-Connecting-IP）；
+	// 头里有多个地址（X-Forwarded-For）时取最后一个，即代理追加的那个。只有确定请求都经过代理时才设，否则这个头可以随意伪造
 	ClientIPHeader string
 	Version        string
 	Logger         *zap.SugaredLogger
@@ -122,10 +125,14 @@ func (s *Server) Close() {
 	}
 }
 
+// clientIP 是客户端的地址：设了 ClientIPHeader 时取这个头最后一行的最后一个地址（代理追加在最后，前面的部分客户端可以随便写）。
 func (s *Server) clientIP(r *http.Request) string {
 	if s.cfg.ClientIPHeader != "" {
-		if v := strings.TrimSpace(strings.Split(r.Header.Get(s.cfg.ClientIPHeader), ",")[0]); v != "" {
-			return v
+		if vals := r.Header.Values(s.cfg.ClientIPHeader); len(vals) > 0 {
+			parts := strings.Split(vals[len(vals)-1], ",")
+			if v := strings.TrimSpace(parts[len(parts)-1]); v != "" {
+				return v
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -133,6 +140,23 @@ func (s *Server) clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// limitKey 是限流按什么计：IPv4 按地址，IPv6 按 /64（一台机器通常拿得到整个 /64，按地址计等于不限）。
+func limitKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.WithZone("").Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	p, err := a.Prefix(64)
+	if err != nil {
+		return ip
+	}
+	return p.String()
 }
 
 // accept 升级成 WebSocket；暂停服务、限流与 hostId 不对时接受以后马上用对应的关闭码关掉（客户端能看到原因）。
@@ -151,7 +175,7 @@ func (s *Server) accept(w http.ResponseWriter, r *http.Request, readLimit int64)
 	case !remote.ValidHostID(hostID):
 		_ = ws.Close(remote.CloseProtocol, "bad host id")
 		return nil, "", false
-	case !s.limiter.allow(s.clientIP(r)):
+	case !s.limiter.allow(limitKey(s.clientIP(r))):
 		_ = ws.Close(remote.CloseLimited, "too many connections")
 		return nil, "", false
 	}
@@ -207,6 +231,7 @@ func (s *Server) serveClient(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close(websocket.StatusCode(code), reason)
 		return
 	}
+	go c.writeLoop()
 	c.readLoop()
 }
 
@@ -296,7 +321,7 @@ func (h *hostConn) close(code websocket.StatusCode, reason string) {
 		h.streams = map[uint32]*clientConn{}
 		h.mu.Unlock()
 		for _, c := range list {
-			c.close(remote.CloseHostOffline, "host offline")
+			c.closeBy(remote.CloseHostOffline, "host offline", false)
 		}
 		go func() { _ = h.ws.Close(code, reason) }()
 	})
@@ -359,11 +384,7 @@ func (h *hostConn) openStream(ws *websocket.Conn) (*clientConn, int, string) {
 		h.mu.Unlock()
 		return nil, remote.CloseLimited, "too many streams"
 	}
-	h.next++
-	if h.next == 0 {
-		h.next = 1
-	}
-	c := &clientConn{h: h, ws: ws, id: h.next}
+	c := &clientConn{h: h, ws: ws, id: h.allocStream(), out: make(chan outMsg, clientQueue), done: make(chan struct{})}
 	h.streams[c.id] = c
 	h.mu.Unlock()
 	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterOpen, Stream: c.id}); err != nil {
@@ -371,6 +392,16 @@ func (h *hostConn) openStream(ws *websocket.Conn) (*clientConn, int, string) {
 		return nil, remote.CloseHostOffline, "host offline"
 	}
 	return c, 0, ""
+}
+
+// allocStream 分配下一个流编号（调用方持有 h.mu）：用到头以后从 1 重来，跳过还开着的。
+func (h *hostConn) allocStream() uint32 {
+	for {
+		h.next++
+		if h.next != 0 && h.streams[h.next] == nil {
+			return h.next
+		}
+	}
 }
 
 func (h *hostConn) stream(id uint32) *clientConn {
@@ -414,17 +445,31 @@ func (h *hostConn) readLoop() {
 			if !h.count(len(f.Payload)) {
 				continue
 			}
-			c.write(f.Payload)
+			if !c.push(outMsg{data: f.Payload}) {
+				// 客户端读得太慢，排队满了：关掉它，不拖住别的流
+				c.close(remote.CloseLimited, "slow reader")
+			}
 		case remote.OuterClose:
 			if c := h.stream(f.Stream); c != nil {
 				code, reason := remote.ParseClosePayload(f.Payload)
-				c.close(clientCloseCode(code), reason)
+				// 排在已经收到的 DATA 后面：先发完再关（例如 GOAWAY 之后马上关）
+				if !c.push(outMsg{close: true, code: clientCloseCode(code), reason: reason}) {
+					c.closeBy(clientCloseCode(code), reason, false)
+				}
 			}
 		default:
 			h.close(remote.CloseProtocol, "unexpected frame")
 			return
 		}
 	}
+}
+
+// closeStatus 是读出错时对端的关闭码；没有关闭帧时是 1000。
+func closeStatus(err error) uint16 {
+	if code := websocket.CloseStatus(err); code > 0 {
+		return uint16(code)
+	}
+	return uint16(websocket.StatusNormalClosure)
 }
 
 // clientCloseCode 把主机给的关闭码换成能发给客户端的（1000、1001、3000–4999 原样，别的换成 1000）。
@@ -444,30 +489,66 @@ type clientConn struct {
 	ws *websocket.Conn
 	id uint32
 
-	writeMu sync.Mutex
-	once    sync.Once
-	closed  atomic.Bool
+	// out 是排队等发给客户端的消息，由 writeLoop 按顺序发出
+	out    chan outMsg
+	done   chan struct{}
+	once   sync.Once
+	closed atomic.Bool
 }
 
-func (c *clientConn) write(b []byte) {
+// outMsg 是要发给客户端的一条消息，或者主机要求的关闭（发完排在前面的消息再关）。
+type outMsg struct {
+	data   []byte
+	close  bool
+	code   int
+	reason string
+}
+
+// push 把一条消息排进客户端的队列，不等；排满时返回 false。流已经关了时直接丢掉。
+func (c *clientConn) push(m outMsg) bool {
 	if c.closed.Load() {
-		return
+		return true
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	ctx, cancel := context.WithTimeout(c.h.s.ctx, writeTimeout)
-	defer cancel()
-	if err := c.ws.Write(ctx, websocket.MessageBinary, b); err != nil {
-		go c.close(int(websocket.StatusPolicyViolation), "write timeout")
+	select {
+	case c.out <- m:
+		return true
+	default:
+		return false
 	}
 }
 
-// close 关掉客户端连接；告诉主机这个流关了（主机已经断开时不用）。
-func (c *clientConn) close(code int, reason string) {
+// writeLoop 按顺序把排队的消息发给客户端；写不动（对端一直不读）时断开它。
+func (c *clientConn) writeLoop() {
+	for {
+		select {
+		case <-c.done:
+			return
+		case m := <-c.out:
+			if m.close {
+				c.closeBy(m.code, m.reason, false)
+				return
+			}
+			ctx, cancel := context.WithTimeout(c.h.s.ctx, writeTimeout)
+			err := c.ws.Write(ctx, websocket.MessageBinary, m.data)
+			cancel()
+			if err != nil {
+				c.close(int(websocket.StatusPolicyViolation), "write timeout")
+				return
+			}
+		}
+	}
+}
+
+// close 关掉客户端连接，并告诉主机这个流关了。
+func (c *clientConn) close(code int, reason string) { c.closeBy(code, reason, true) }
+
+// closeBy 关掉客户端连接；notifyHost 为真且主机还连着时告诉主机（主机自己要求关的、主机已经断开时不用）。可以重复调用。
+func (c *clientConn) closeBy(code int, reason string, notifyHost bool) {
 	c.once.Do(func() {
 		c.closed.Store(true)
+		close(c.done)
 		c.h.removeStream(c.id)
-		if !c.h.closed.Load() {
+		if notifyHost && !c.h.closed.Load() {
 			_ = c.h.writeOuter(remote.OuterFrame{Type: remote.OuterClose, Stream: c.id, Payload: remote.ClosePayload(uint16(code), reason)})
 		}
 		go func() { _ = c.ws.Close(websocket.StatusCode(code), reason) }()
@@ -481,7 +562,8 @@ func (c *clientConn) readLoop() {
 		typ, b, err := c.ws.Read(ctx)
 		cancel()
 		if err != nil {
-			c.close(int(websocket.StatusNormalClosure), "")
+			// 客户端走了：把它的关闭码（没有时 1000）告诉主机
+			c.close(clientCloseCode(closeStatus(err)), "")
 			return
 		}
 		if typ != websocket.MessageBinary || len(b) == 0 {

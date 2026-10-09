@@ -86,6 +86,7 @@ func Run(t *testing.T, tg Target) {
 		t.Run("host_disconnect", func(t *testing.T) { testHostDisconnect(t, tg) })
 		t.Run("replace", func(t *testing.T) { testReplace(t, tg) })
 		t.Run("stream_limit", func(t *testing.T) { testStreamLimit(t, tg) })
+		t.Run("slow_reader", func(t *testing.T) { testSlowReader(t, tg) })
 		t.Run("client_text", func(t *testing.T) { testClientText(t, tg) })
 		t.Run("client_too_big", func(t *testing.T) { testClientTooBig(t, tg) })
 		t.Run("host_bad_frame", func(t *testing.T) { testHostBadFrame(t, tg) })
@@ -320,8 +321,10 @@ func testForward(t *testing.T, tg Target) {
 	f = h.expect(remote.OuterClose)
 	assert.Equal(t, o1.Stream, f.Stream)
 
-	// 主机关掉一个流：客户端收到主机给的关闭码
+	// 主机发完最后一条 DATA 马上关掉流（例如 GOAWAY 之后）：客户端先收到那条 DATA，再收到主机给的关闭码
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o2.Stream, Payload: []byte("last")})
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterClose, Stream: o2.Stream, Payload: remote.ClosePayload(4321, "bye")})
+	assert.Equal(t, "last", string(clientRead(t, c2)))
 	assert.Equal(t, 4321, closeCode(t, c2))
 }
 
@@ -380,6 +383,37 @@ func testStreamLimit(t *testing.T, tg Target) {
 	h.expect(remote.OuterOpen)
 	clientWrite(t, again, []byte("ok"))
 	h.expect(remote.OuterData)
+}
+
+// 一个客户端一直不读：relay 不能因为写不动它而停下读主机连接，同一台主机别的流照常转发。
+func testSlowReader(t *testing.T, tg Target) {
+	h := connectHost(t, tg, newKeys(t))
+	slow := connectClient(t, tg, h.keys.HostID())
+	slowOpen := h.expect(remote.OuterOpen)
+	fast := connectClient(t, tg, h.keys.HostID())
+	fastOpen := h.expect(remote.OuterOpen)
+	_ = slow // 一直不读
+	// 灌 24 MiB 给不读的客户端：超过两边的 TCP 缓冲与 relay 的排队
+	frame, err := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterData, Stream: slowOpen.Stream, Payload: make([]byte, remote.MaxNoiseMessage)})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), step)
+	defer cancel()
+	for i := 0; i < 24<<20/remote.MaxNoiseMessage; i++ {
+		require.NoError(t, h.ws.Write(ctx, websocket.MessageBinary, frame), "relay 停下来不读主机连接了（第 %d 条）", i)
+	}
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: fastOpen.Stream, Payload: []byte("fast")})
+	assert.Equal(t, "fast", string(clientRead(t, fast)))
+	clientWrite(t, fast, []byte("up"))
+	for {
+		f := readOuter(t, h.ws)
+		if f.Type == remote.OuterData && f.Stream == fastOpen.Stream {
+			assert.Equal(t, "up", string(f.Payload))
+			break
+		}
+		// 不读的那个流可能已经被 relay 关掉（CLOSE）
+		require.Equal(t, remote.OuterClose, f.Type, "主机收到的帧")
+		require.Equal(t, slowOpen.Stream, f.Stream)
+	}
 }
 
 func testClientText(t *testing.T, tg Target) {

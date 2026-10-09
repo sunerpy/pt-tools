@@ -128,10 +128,39 @@ func TestClientIP(t *testing.T) {
 	r.Header.Set("X-Real-IP", "1.2.3.4")
 	assert.Equal(t, "10.0.0.2", s.clientIP(r), "没配置请求头时不认它")
 	s.cfg.ClientIPHeader = "X-Forwarded-For"
-	r.Header.Set("X-Forwarded-For", " 5.6.7.8 , 10.0.0.1")
+	// 代理把它看到的地址追加在最后；前面的部分是客户端自己写的，不能认
+	r.Header.Set("X-Forwarded-For", " 6.6.6.6 , 5.6.7.8 ")
 	assert.Equal(t, "5.6.7.8", s.clientIP(r))
+	r.Header.Add("X-Forwarded-For", "9.9.9.9")
+	assert.Equal(t, "9.9.9.9", s.clientIP(r), "有多行时取最后一行")
 	r.Header.Del("X-Forwarded-For")
 	assert.Equal(t, "10.0.0.2", s.clientIP(r), "头为空时退回对端地址")
+}
+
+// 限流的键：IPv4 按地址，IPv6 按 /64，映射的 IPv4 当 IPv4
+func TestLimitKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"1.2.3.4":                   "1.2.3.4",
+		"::ffff:1.2.3.4":            "1.2.3.4",
+		"2001:db8:1:2:aaaa::1":      "2001:db8:1:2::/64",
+		"2001:db8:1:2:bbbb:cccc::9": "2001:db8:1:2::/64",
+		"fe80::1%eth0":              "fe80::/64",
+		"not-an-ip":                 "not-an-ip",
+	} {
+		assert.Equal(t, want, limitKey(in), in)
+	}
+}
+
+// 流编号用到头以后从 1 重来，跳过还开着的
+func TestStreamIDWrap(t *testing.T) {
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1"})
+	require.NoError(t, err)
+	defer s.Close()
+	h := &hostConn{s: s, streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	h.streams[1] = &clientConn{h: h, id: 1}
+	h.next = ^uint32(0) - 1
+	assert.Equal(t, ^uint32(0), h.allocStream())
+	assert.Equal(t, uint32(2), h.allocStream(), "跳过 0 与还开着的 1")
 }
 
 func TestIPLimiter(t *testing.T) {
