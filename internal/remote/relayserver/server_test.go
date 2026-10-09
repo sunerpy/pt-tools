@@ -2,9 +2,11 @@ package relayserver
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -286,13 +288,22 @@ func TestUnconfirmedNotCounted(t *testing.T) {
 		b, _ := remote.AppendOuter(nil, f)
 		require.NoError(t, host.Write(ctx, websocket.MessageBinary, b))
 	}
+	// 两边同时关一个流时 relay 也可能告诉主机一声（CLOSE）：等别的帧时跳过 CLOSE
+	next := func(typ remote.OuterType) remote.OuterFrame {
+		for {
+			f := readOuterFrame(t, ctx, host)
+			if f.Type != remote.OuterClose || typ == remote.OuterClose {
+				require.Equal(t, typ, f.Type)
+				return f
+			}
+		}
+	}
 	for i := 0; i < 4; i++ {
 		g, gerr := remote.DialRelay(ctx, u, keys.HostID(), nil)
 		require.NoError(t, gerr)
-		open := readOuterFrame(t, ctx, host)
-		require.Equal(t, remote.OuterOpen, open.Type)
+		open := next(remote.OuterOpen)
 		require.NoError(t, g.WriteMsg(ctx, make([]byte, 4000)))
-		require.Equal(t, remote.OuterData, readOuterFrame(t, ctx, host).Type)
+		next(remote.OuterData)
 		// 主机解不开，关掉这个流
 		writeHost(remote.OuterFrame{Type: remote.OuterClose, Stream: open.Stream, Payload: remote.ClosePayload(1000, "")})
 		g.Close(1000, "")
@@ -300,20 +311,15 @@ func TestUnconfirmedNotCounted(t *testing.T) {
 	c, err := remote.DialRelay(ctx, u, keys.HostID(), nil)
 	require.NoError(t, err)
 	defer c.Close(1000, "")
-	var open remote.OuterFrame
-	for open.Type != remote.OuterOpen {
-		open = readOuterFrame(t, ctx, host)
-	}
+	open := next(remote.OuterOpen)
 	require.NoError(t, c.WriteMsg(ctx, []byte("hi")))
-	for f := readOuterFrame(t, ctx, host); f.Type != remote.OuterData || f.Stream != open.Stream; f = readOuterFrame(t, ctx, host) {
-	}
+	require.Equal(t, open.Stream, next(remote.OuterData).Stream)
 	writeHost(remote.OuterFrame{Type: remote.OuterAccept, Stream: open.Stream})
 	writeHost(remote.OuterFrame{Type: remote.OuterData, Stream: open.Stream, Payload: []byte("hi")})
 	_, err = c.ReadMsg(ctx)
 	require.NoError(t, err)
 	require.NoError(t, c.WriteMsg(ctx, make([]byte, 9000)))
-	f := readOuterFrame(t, ctx, host)
-	assert.Equal(t, remote.OuterData, f.Type, "前面 16000 字节没有 ACCEPT 的消息不算，这条还在额度里")
+	f := next(remote.OuterData) // 前面 16000 字节没有 ACCEPT 的消息不算，这条还在额度里
 	assert.Len(t, f.Payload, 9000)
 }
 
@@ -396,9 +402,10 @@ func TestRejectedHandshakesNotCounted(t *testing.T) {
 // 主机一收到 READY，客户端就要找得到它：READY 写出以后、主机登记以前不能有空档（CI 上撞到过：客户端 4404，主机等不到 OPEN）
 func TestClientRightAfterReady(t *testing.T) {
 	ready := make(chan struct{})
-	testHookReady = func() {
+	testHookReady = func(*hostConn) error {
 		close(ready)
 		time.Sleep(300 * time.Millisecond) // 把 READY 之后的那一段拉长
+		return nil
 	}
 	t.Cleanup(func() { testHookReady = nil })
 	_, u := start(t, Config{MaxConnPerIPPerMin: -1})
@@ -451,4 +458,50 @@ func authHostAsync(ctx context.Context, u string, keys *remote.HostKeys) error {
 			}
 		}
 	}
+}
+
+// 同一个 hostId 的两条新连接同时登记、READY 都没写出去：换回的是原来在线的主机，不是中间那条已经关掉的
+func TestPromoteRollbackUnderConcurrency(t *testing.T) {
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1"})
+	require.NoError(t, err)
+	defer s.Close()
+	conn := func() *hostConn {
+		srv, _ := wsPair(t)
+		return &hostConn{s: s, ws: srv, id: "h1", streams: map[uint32]*clientConn{}, done: make(chan struct{})}
+	}
+	online := conn()
+	s.hosts["h1"] = online
+	a, b := conn(), conn()
+	aIn := make(chan struct{})
+	releaseA, releaseB := make(chan struct{}), make(chan struct{})
+	testHookReady = func(h *hostConn) error {
+		switch h {
+		case a:
+			close(aIn)
+			<-releaseA // a 还在写 READY 的时候 b 也来登记
+		case b:
+			<-releaseB
+		}
+		return errors.New("READY 写不出去")
+	}
+	t.Cleanup(func() { testHookReady = nil })
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); assert.Error(t, s.promote(a)) }()
+	<-aIn
+	go func() { defer wg.Done(); assert.Error(t, s.promote(b)) }()
+	time.Sleep(100 * time.Millisecond)
+	// 先让 a 失败，再让 b 失败：不串行时 b 会把已经关掉的 a 换回来
+	close(releaseA)
+	time.Sleep(100 * time.Millisecond)
+	close(releaseB)
+	wg.Wait()
+	s.mu.Lock()
+	got := s.hosts["h1"]
+	s.mu.Unlock()
+	assert.Same(t, online, got, "换回原来的主机")
+	assert.False(t, online.closed.Load())
+	assert.True(t, a.closed.Load())
+	assert.True(t, b.closed.Load())
+	assert.Empty(t, s.promos, "登记锁用完就删")
 }

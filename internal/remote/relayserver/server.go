@@ -71,6 +71,10 @@ type Server struct {
 	mu    sync.Mutex
 	hosts map[string]*hostConn
 
+	// promos 是每个 hostId 的登记锁（promote 用），promoMu 保护这张表
+	promoMu sync.Mutex
+	promos  map[string]*promoLock
+
 	// usage 是每台主机（按 hostId）当天的转发量：主机重连、换连接都不清零；usageDay 换了一天时整张表清空
 	usageMu  sync.Mutex
 	usage    map[string]*usage
@@ -105,7 +109,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	return &Server{
-		cfg: cfg, origin: origin, ctx: ctx, stop: stop, hosts: map[string]*hostConn{}, usage: map[string]*usage{},
+		cfg: cfg, origin: origin, ctx: ctx, stop: stop, hosts: map[string]*hostConn{}, usage: map[string]*usage{}, promos: map[string]*promoLock{},
 		limiter: newIPLimiter(cfg.MaxConnPerIPPerMin, time.Minute, cfg.Now),
 	}, nil
 }
@@ -204,43 +208,85 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close(remote.CloseAuthFailed, "auth failed")
 		return
 	}
-	// 拿住写锁再登记、写 READY：登记以后来的客户端的 OPEN 排在 READY 后面，主机一收到 READY 客户端也就找得到它
-	h.writeMu.Lock()
-	s.mu.Lock()
-	old := s.hosts[hostID]
-	s.hosts[hostID] = h
-	s.mu.Unlock()
-	ready, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterReady})
-	err := h.writeLocked(websocket.MessageBinary, ready)
-	if testHookReady != nil {
-		testHookReady()
-	}
-	h.writeMu.Unlock()
-	if err != nil {
-		// READY 没写出去：换回旧连接（它还没关），这条连接上已经登记的流随它一起以 4404 关掉
-		s.mu.Lock()
-		if s.hosts[hostID] == h {
-			if old != nil {
-				s.hosts[hostID] = old
-			} else {
-				delete(s.hosts, hostID)
-			}
-		}
-		s.mu.Unlock()
-		h.close(websocket.StatusInternalError, "")
+	if err := s.promote(h); err != nil {
 		return
-	}
-	if old != nil {
-		old.close(remote.CloseReplaced, "replaced by a newer connection")
 	}
 	s.cfg.Logger.Infof("[relay] 主机 %s 已连上（%s）", hostID, s.clientIP(r))
 	h.readLoop()
+	// 先标成关闭再摘掉登记：promote 换回旧连接时看得到它已经关了
+	h.close(websocket.StatusNormalClosure, "")
 	s.mu.Lock()
 	if s.hosts[hostID] == h {
 		delete(s.hosts, hostID)
 	}
 	s.mu.Unlock()
-	h.close(websocket.StatusNormalClosure, "")
+}
+
+// promote 把认证过的 h 登记成它那个 hostId 的主机并写 READY，成功以后关掉被替换的旧连接（4409）。
+// 同一个 hostId 的登记串行进行（每个 hostId 一把锁，READY 最多写 30 秒，不占全局的锁）。
+// 拿住 h 的写锁再登记、写 READY：登记以后来的客户端的 OPEN 排在 READY 后面，主机一收到 READY 客户端也就找得到它。
+// READY 没写出去时换回原来的主机（还开着的话），h 与它上面已经登记的流一起关掉。
+func (s *Server) promote(h *hostConn) error {
+	unlock := s.lockHost(h.id)
+	defer unlock()
+	h.writeMu.Lock()
+	s.mu.Lock()
+	old := s.hosts[h.id]
+	s.hosts[h.id] = h
+	s.mu.Unlock()
+	ready, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterReady})
+	err := h.writeLocked(websocket.MessageBinary, ready)
+	if testHookReady != nil {
+		if herr := testHookReady(h); herr != nil {
+			err = herr
+		}
+	}
+	h.writeMu.Unlock()
+	if err != nil {
+		s.mu.Lock()
+		if s.hosts[h.id] == h {
+			if old != nil && !old.closed.Load() {
+				s.hosts[h.id] = old
+			} else {
+				delete(s.hosts, h.id)
+			}
+		}
+		s.mu.Unlock()
+		h.close(websocket.StatusInternalError, "")
+		return err
+	}
+	if old != nil {
+		old.close(remote.CloseReplaced, "replaced by a newer connection")
+	}
+	return nil
+}
+
+// lockHost 拿住 hostId 的登记锁，返回放开的函数；没有人等的锁随即删掉。
+func (s *Server) lockHost(id string) func() {
+	s.promoMu.Lock()
+	l := s.promos[id]
+	if l == nil {
+		l = &promoLock{}
+		s.promos[id] = l
+	}
+	l.refs++
+	s.promoMu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		s.promoMu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(s.promos, id)
+		}
+		s.promoMu.Unlock()
+	}
+}
+
+// promoLock 是一个 hostId 的登记锁（refs 是拿着或者在等的个数）。
+type promoLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 func (s *Server) serveClient(w http.ResponseWriter, r *http.Request) {
@@ -264,8 +310,8 @@ func (s *Server) serveClient(w http.ResponseWriter, r *http.Request) {
 	c.readLoop()
 }
 
-// testHookReady 在主机的 READY 写出以后、放开写锁以前调用（测试用：拉长 READY 前后的时序）。
-var testHookReady func()
+// testHookReady 在主机的 READY 写出以后、放开写锁以前调用（测试用：拉长 READY 前后的时序；返回错误时当成 READY 没写出去）。
+var testHookReady func(h *hostConn) error
 
 // errClosed 是连接已经关了。
 var errClosed = errors.New("连接已经关闭")
