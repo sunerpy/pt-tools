@@ -35,8 +35,6 @@ var (
 	ErrPairingClosed = errors.New("配对已经失效，请在网页上重新生成二维码")
 	// ErrPairingSecret 是配对密钥不对
 	ErrPairingSecret = errors.New("配对密钥不对")
-	// ErrPairingBusy 是另一台设备正在用这个配对窗口完成配对
-	ErrPairingBusy = errors.New("另一台设备正在配对，请稍后再试")
 )
 
 // PairingStatus 是配对窗口给网页看的状态。
@@ -50,27 +48,17 @@ type PairingStatus struct {
 }
 
 type pairing struct {
-	gen      uint64
 	secret   [KeyLen]byte
 	scopes   []string
 	expires  time.Time
 	failures int
-	// claimed 是有一个会话核对过密钥、正在写设备表
-	claimed bool
-	state   PairingState
-	device  *Device
-}
-
-// pairingClaim 是核对通过的配对：写好设备表以后调 complete，失败时调 release 让窗口继续等。
-type pairingClaim struct {
-	gen    uint64
-	scopes []string
+	state    PairingState
+	device   *Device
 }
 
 type pairings struct {
 	mu  sync.Mutex
 	cur *pairing
-	gen uint64
 	now func() time.Time
 	rng io.Reader
 }
@@ -87,9 +75,8 @@ func (p *pairings) start(scopes []string) ([]byte, time.Time, error) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.gen++
 	expires := p.now().Add(PairingTTL)
-	p.cur = &pairing{gen: p.gen, secret: secret, scopes: slices.Clone(scopes), expires: expires, state: PairingWaiting}
+	p.cur = &pairing{secret: secret, scopes: slices.Clone(scopes), expires: expires, state: PairingWaiting}
 	return secret[:], expires, nil
 }
 
@@ -113,44 +100,31 @@ func (p *pairings) open() bool {
 	return p.waitingLocked()
 }
 
-// claim 核对配对密钥（常量时间比较）。输错计数，到 5 次窗口作废。
-func (p *pairings) claim(secret []byte) (pairingClaim, error) {
+// redeem 核对配对密钥（常量时间比较），对了就在同一把锁里用 create 记下设备并关掉窗口。
+// 整个过程线性化：取消窗口、换新窗口要么发生在它之前（这次配对失败），要么在它之后（设备已经配对）。
+// 输错计数，到 5 次窗口作废，这时 closedNow 为真。create 失败时窗口照旧等着（没到期的话）。
+func (p *pairings) redeem(secret []byte, create func(scopes []string) (Device, error)) (dev Device, closedNow bool, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.waitingLocked() {
-		return pairingClaim{}, ErrPairingClosed
+		return Device{}, false, ErrPairingClosed
 	}
 	c := p.cur
-	if c.claimed {
-		return pairingClaim{}, ErrPairingBusy
-	}
 	if len(secret) != KeyLen || subtle.ConstantTimeCompare(secret, c.secret[:]) != 1 {
 		c.failures++
 		if c.failures >= MaxPairingFailures {
 			c.state = PairingClosed
+			return Device{}, true, ErrPairingSecret
 		}
-		return pairingClaim{}, ErrPairingSecret
+		return Device{}, false, ErrPairingSecret
 	}
-	c.claimed = true
-	return pairingClaim{gen: c.gen, scopes: slices.Clone(c.scopes)}, nil
-}
-
-// complete 记下配对成功的设备；窗口已经被换掉时什么也不做（设备照样配对成功）。
-func (p *pairings) complete(cl pairingClaim, d Device) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if c := p.cur; c != nil && c.gen == cl.gen {
-		c.claimed, c.state, c.device = false, PairingPaired, &d
+	dev, err = create(slices.Clone(c.scopes))
+	if err != nil {
+		return Device{}, false, err
 	}
-}
-
-// release 是写设备表失败：窗口继续等（没到期的话）。
-func (p *pairings) release(cl pairingClaim) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if c := p.cur; c != nil && c.gen == cl.gen {
-		c.claimed = false
-	}
+	d := dev
+	c.state, c.device = PairingPaired, &d
+	return dev, false, nil
 }
 
 // cancel 关掉配对窗口。

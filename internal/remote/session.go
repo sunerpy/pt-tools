@@ -77,8 +77,10 @@ type Dispatcher interface {
 
 // tunnelReq 是一个还没处理完的请求。
 type tunnelReq struct {
-	head       RequestHead
-	body       []byte
+	head RequestHead
+	body []byte
+	// limit 是这个请求体的上限：配对请求 4 KiB，别的 16 MiB
+	limit      int
 	dropped    bool // 已经回了 413，后面的请求体丢掉，等 REQ_END
 	dispatched bool
 	cancel     context.CancelFunc
@@ -207,8 +209,13 @@ func (s *session) onHead(f Frame) error {
 		s.reject(f.ID, status, code, msg)
 		return nil
 	}
+	limit := MaxRequestBody
+	if s.mode == ModePairing {
+		// 配对会话不需要知道配对密钥就能建立：请求体在收包时就按配对请求的上限截住，不让它占着 16 MiB 的额度
+		limit = maxPairBody
+	}
 	s.mu.Lock()
-	s.reqs[f.ID] = &tunnelReq{head: head}
+	s.reqs[f.ID] = &tunnelReq{head: head, limit: limit}
 	s.mu.Unlock()
 	return nil
 }
@@ -275,7 +282,7 @@ func (s *session) onBody(f Frame) {
 		s.mu.Unlock()
 		return
 	}
-	tooBig := len(r.body)+len(f.Payload) > MaxRequestBody || s.buffered+len(f.Payload) > maxSessionBuffered
+	tooBig := len(r.body)+len(f.Payload) > r.limit || s.buffered+len(f.Payload) > maxSessionBuffered
 	if tooBig {
 		s.buffered -= len(r.body)
 		r.body, r.dropped = nil, true
@@ -285,7 +292,7 @@ func (s *session) onBody(f Frame) {
 	}
 	s.mu.Unlock()
 	if tooBig {
-		s.reject(f.ID, http.StatusRequestEntityTooLarge, "body_too_large", fmt.Sprintf("请求体不能超过 %d MiB", MaxRequestBody>>20))
+		s.reject(f.ID, http.StatusRequestEntityTooLarge, "body_too_large", fmt.Sprintf("请求体不能超过 %d 字节", r.limit))
 	}
 }
 
@@ -495,49 +502,68 @@ type pairRequest struct {
 	Name   string `json:"name"`
 }
 
+// 配对结果的审计写法（和 App API 的审计一样：success、denied:…、error:…）。
+const (
+	auditPairOK         = "success"
+	auditPairBadBody    = "denied:invalid_body"
+	auditPairBadName    = "denied:invalid_name"
+	auditPairBadSecret  = "denied:secret"
+	auditPairClosed     = "denied:pairing_closed"
+	auditPairRejected   = "denied:rejected"
+	auditPairSaveFailed = "error:save_device"
+)
+
 // servePair 处理配对：核对配对密钥，记下设备，回设备信息；之后会话用 GOAWAY paired 关掉，设备重连成正常会话。
+// 每个结果都记审计（还没有设备时设备编号是 0）。
 func (s *session) servePair(w http.ResponseWriter, r *http.Request) {
 	var in pairRequest
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxPairBody))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
+	if err := dec.Decode(&in); err != nil || !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairBadBody)
 		writeJSONError(w, http.StatusBadRequest, "invalid_body", "请求格式错误")
 		return
 	}
 	name, err := NormalizeDeviceName(in.Name)
 	if err != nil {
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairBadName)
 		writeJSONError(w, http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 	// 格式不对的密钥也算输错一次
 	secret, _ := DecodeKey(in.Secret)
-	cl, err := s.h.pairings.claim(secret)
+	dev, closedNow, err := s.h.pairings.redeem(secret, func(scopes []string) (Device, error) {
+		// 在配对窗口的锁里写设备表：取消窗口、换新窗口不会插到核对与写库之间
+		ctx, cancel := boundedContext(r.Context())
+		defer cancel()
+		return s.h.cfg.Store.CreateDevice(ctx, name, s.peerKey, scopes)
+	})
 	switch {
 	case errors.Is(err, ErrPairingSecret):
-		s.h.audit(r.Context(), 0, "remote:pair", "denied:secret")
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairBadSecret)
 		writeJSONError(w, http.StatusUnauthorized, "invalid_secret", err.Error())
+		if closedNow {
+			// 输错到了上限：窗口作废，这条与别的配对会话都关掉
+			s.setCloseAfter(GoAwayPairingClosed)
+			s.h.closePairingSessions(s)
+		}
 		return
-	case errors.Is(err, ErrPairingBusy):
-		writeJSONError(w, http.StatusConflict, "busy", err.Error())
-		return
-	case err != nil:
+	case errors.Is(err, ErrPairingClosed):
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairClosed)
 		writeJSONError(w, http.StatusGone, "pairing_closed", err.Error())
 		s.setCloseAfter(GoAwayPairingClosed)
 		return
-	}
-	dev, err := s.h.cfg.Store.CreateDevice(r.Context(), name, s.peerKey, cl.scopes)
-	if err != nil {
-		s.h.pairings.release(cl)
-		if errors.Is(err, ErrInvalid) {
-			writeJSONError(w, http.StatusConflict, "rejected", err.Error())
-			return
-		}
+	case errors.Is(err, ErrInvalid):
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairRejected)
+		writeJSONError(w, http.StatusConflict, "rejected", err.Error())
+		return
+	case err != nil:
 		s.h.logf("[远程访问] 保存配对的设备失败: %v", err)
+		s.h.audit(r.Context(), 0, "remote:pair", auditPairSaveFailed)
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "保存设备失败")
 		return
 	}
-	s.h.pairings.complete(cl, dev)
-	s.h.audit(r.Context(), dev.ID, "remote:pair", "success")
+	s.h.audit(r.Context(), dev.ID, "remote:pair", auditPairOK)
 	s.h.paired(dev, s)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"device": dev})
@@ -562,6 +588,7 @@ func (s *session) shutdown(reason string) {
 		s.cancel()
 		s.raw.Close(1000, reason)
 		s.h.sessions.remove(s)
+		s.h.sessions.release(s.mode)
 		if s.mode == ModeDevice {
 			s.h.touch(s.device.ID, s.via)
 		}

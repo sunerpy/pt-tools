@@ -31,8 +31,10 @@ const (
 	relayHealthy = time.Minute
 	// streamQueue 是每个流排队等会话读取的消息数
 	streamQueue = 64
-	relayPing   = "ping"
-	relayPong   = "pong"
+	// ctrlQueue 是排队等发出的控制帧（CLOSE）数；堆满说明 relay 在不停地开流或者写不动了，断开重连
+	ctrlQueue = 64
+	relayPing = "ping"
+	relayPong = "pong"
 )
 
 // relay 的连接状态。
@@ -224,7 +226,9 @@ type relayMux struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	sem    chan struct{}
-	last   atomic.Int64 // 最近一次收到 relay 消息的时间（UnixNano）
+	// ctrl 是控制帧的发送队列，只有一个写者（不为每个 CLOSE 起一个 goroutine）
+	ctrl chan []byte
+	last atomic.Int64 // 最近一次收到 relay 消息的时间（UnixNano）
 
 	mu      sync.Mutex
 	streams map[uint32]*relayStream
@@ -232,7 +236,7 @@ type relayMux struct {
 
 func newRelayMux(c *relayClient, ws *websocket.Conn) *relayMux {
 	ctx, cancel := context.WithCancel(c.ctx)
-	m := &relayMux{c: c, ws: ws, ctx: ctx, cancel: cancel, sem: make(chan struct{}, 1), streams: map[uint32]*relayStream{}}
+	m := &relayMux{c: c, ws: ws, ctx: ctx, cancel: cancel, sem: make(chan struct{}, 1), ctrl: make(chan []byte, ctrlQueue), streams: map[uint32]*relayStream{}}
 	m.last.Store(time.Now().UnixNano())
 	return m
 }
@@ -258,6 +262,7 @@ func (m *relayMux) run() error {
 		}
 	}()
 	go m.keepalive()
+	go m.ctrlWriter()
 	for {
 		typ, b, err := m.ws.Read(m.ctx)
 		if err != nil {
@@ -370,13 +375,33 @@ func (m *relayMux) writeFrame(ctx context.Context, f OuterFrame) error {
 	return m.writeMsg(ctx, websocket.MessageBinary, b)
 }
 
-// sendClose 在后台发 CLOSE（不阻塞调用方）。
+// sendClose 把 CLOSE 排进控制帧队列（不阻塞调用方）；队列满了就断开这条 relay 连接。
 func (m *relayMux) sendClose(id uint32, code int, reason string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(m.ctx, relayWriteTimeout)
-		defer cancel()
-		_ = m.writeFrame(ctx, OuterFrame{Type: OuterClose, Stream: id, Payload: ClosePayload(uint16(code), reason)})
-	}()
+	b, err := AppendOuter(make([]byte, 0, OuterHeaderLen+2+len(reason)), OuterFrame{Type: OuterClose, Stream: id, Payload: ClosePayload(uint16(code), reason)})
+	if err != nil {
+		return
+	}
+	select {
+	case m.ctrl <- b:
+	default:
+		m.c.h.logf("[远程访问] relay %s 的控制帧堆满了（不停地开流或者写不动），断开重连", m.c.url)
+		m.cancel()
+	}
+}
+
+// ctrlWriter 是控制帧队列唯一的写者。
+func (m *relayMux) ctrlWriter() {
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case b := <-m.ctrl:
+			if err := m.writeMsg(m.ctx, websocket.MessageBinary, b); err != nil {
+				m.cancel()
+				return
+			}
+		}
+	}
 }
 
 func (m *relayMux) removeStream(id uint32) {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -346,4 +347,64 @@ func TestRelaySessionGoAway(t *testing.T) {
 	_, err = th.RotateKeys(context.Background())
 	require.NoError(t, err)
 	wantGoAway(t, c, GoAwayKeyRotated)
+}
+
+// 关掉远程访问与关闭主机：经 relay 的会话先收到 GOAWAY（disabled、shutdown），再断开 relay
+func TestRelayGoAwayBeforeDisconnect(t *testing.T) {
+	relay := newFakeRelay(t)
+	th := newTestHost(t, Settings{Relays: []string{relay.url()}})
+	_, priv := th.addDevice(t, "手机", ScopesFull)
+	waitRelay(t, th, RelayOnline)
+	dial := func() *Client {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		dk, _ := KeypairFromPrivate(priv)
+		raw, err := DialRelay(ctx, relay.url(), th.keys.HostID(), nil)
+		require.NoError(t, err)
+		c, err := Connect(ctx, raw, ClientConfig{HostID: th.keys.HostID(), HostKey: th.keys.Noise.Public, Device: dk})
+		require.NoError(t, err)
+		return c
+	}
+	c := dial()
+	_, err := th.UpdateSettings(context.Background(), Settings{Enabled: false, Relays: []string{relay.url()}})
+	require.NoError(t, err)
+	wantGoAway(t, c, GoAwayDisabled)
+
+	_, err = th.UpdateSettings(context.Background(), Settings{Enabled: true, Relays: []string{relay.url()}})
+	require.NoError(t, err)
+	waitRelay(t, th, RelayOnline)
+	c = dial()
+	th.Close()
+	wantGoAway(t, c, GoAwayShutdown)
+}
+
+// relay 不停地发超限的 OPEN：CLOSE 排队由一个写者发出，goroutine 不会跟着涨
+func TestRelayOpenFloodBounded(t *testing.T) {
+	relay := newFakeRelay(t)
+	th := newTestHost(t, Settings{Relays: []string{relay.url()}})
+	waitRelay(t, th, RelayOnline)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// 先占满 16 个流
+	for i := 0; i < MaxRelayStreams; i++ {
+		raw, err := DialRelay(ctx, relay.url(), th.keys.HostID(), nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { raw.Close(1000, "") })
+	}
+	require.Eventually(t, func() bool { return relayStatusOf(t, th)[0].Streams == MaxRelayStreams }, 5*time.Second, 20*time.Millisecond)
+	before := runtime.NumGoroutine()
+	relay.mu.Lock()
+	host := relay.host
+	relay.mu.Unlock()
+	require.NotNil(t, host)
+	// CLOSE 堆满时主机断开这条 relay 连接（之后的写会失败），这也是想要的保护
+	sent := 0
+	for i := 0; i < 500; i++ {
+		if relay.writeOuter(ctx, host, OuterFrame{Type: OuterOpen, Stream: uint32(10000 + i)}) != nil {
+			break
+		}
+		sent++
+	}
+	time.Sleep(300 * time.Millisecond) // 让主机把 OPEN 读完（数 goroutine 用，不是等某个结果）
+	assert.Less(t, runtime.NumGoroutine()-before, 40, "超限的 OPEN 不该各起一个 goroutine（发了 %d 个）", sent)
 }

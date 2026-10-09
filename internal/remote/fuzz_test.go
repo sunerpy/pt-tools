@@ -70,6 +70,10 @@ func FuzzSessionFrames(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
 		sink := &sinkConn{closed: make(chan struct{})}
 		cs := noise.UnsafeNewCipherState(cipherSuite, [32]byte{1}, 0)
+		// 和 serveConn 一样先占名额（shutdown 会还回去）
+		if !th.sessions.reserve(ModeDevice) {
+			t.Fatal("名额没有还回去")
+		}
 		s := newSession(th, newSecureConn(sink, cs, cs), sink, ViaDirect, ModeDevice, make([]byte, KeyLen), th.sessions.currentEpoch())
 		s.device = Device{ID: 1, Scopes: ScopesFull}
 		for len(in) >= 2 {

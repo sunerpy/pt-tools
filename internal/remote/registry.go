@@ -7,12 +7,38 @@ import (
 	"time"
 )
 
-// registry 记着所有活着的会话：按设备关会话、数在线设备、关闭时一起关。
+// registry 记着所有活着的会话：按设备关会话、数在线设备、关闭时一起关；会话名额也在这里占。
 type registry struct {
 	mu  sync.Mutex
 	all map[*session]struct{}
-	// epoch 每次 closeAll 加一：在那之前开始握手、之后才来登记的会话不收（握手用的是旧密钥或旧设置）
+	// epoch 每次 takeAll 加一：在那之前开始握手、之后才来登记的会话不收（握手用的是旧密钥或旧设置）
 	epoch uint64
+	// slots、pairingSlots 是占着的名额（握手成功、还没关掉的会话），握手回第二条消息之前占
+	slots, pairingSlots int
+}
+
+// reserve 为一条会话占名额：总数不超过 MaxSessions，配对会话不超过 maxPairingSessions。
+func (r *registry) reserve(mode string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.slots >= MaxSessions || (mode == ModePairing && r.pairingSlots >= maxPairingSessions) {
+		return false
+	}
+	r.slots++
+	if mode == ModePairing {
+		r.pairingSlots++
+	}
+	return true
+}
+
+// release 还回 reserve 占的名额。
+func (r *registry) release(mode string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.slots--
+	if mode == ModePairing {
+		r.pairingSlots--
+	}
 }
 
 func newRegistry() *registry { return &registry{all: map[*session]struct{}{}} }

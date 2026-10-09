@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -562,4 +563,133 @@ func TestOverview(t *testing.T) {
 	assert.Equal(t, "wss://relay.example.com", ov.DefaultRelay)
 	assert.Equal(t, StreamPath, ov.StreamPath)
 	assert.Empty(t, ov.RelayStatus)
+}
+
+// 配对会话的请求体在收包时就按 4 KiB 截住；JSON 之后多出内容回 400；每个结果都记审计
+func TestPairingRequestLimits(t *testing.T) {
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+	ctx := context.Background()
+	_, err := th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	k, _ := GenerateKeypair(nil)
+	c, err := th.connect(t, k.Private, ViaDirect)
+	require.NoError(t, err)
+	require.Equal(t, ModePairing, c.Mode())
+
+	head, _ := json.Marshal(RequestHead{Method: "POST", Path: PairPath})
+	status, _, _ := rawRequest(t, c, 11, head, bytes.Repeat([]byte{'a'}, maxPairBody+1))
+	assert.Equal(t, http.StatusRequestEntityTooLarge, status)
+
+	status, _, body := rawRequest(t, c, 12, head, []byte(`{"secret":"x","name":"a"}{"more":1}`))
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Contains(t, body, "invalid_body")
+	assert.Equal(t, "remote:pair denied:invalid_body", <-th.audits)
+
+	status, _, _ = rawRequest(t, c, 13, head, []byte(`{"secret":"x","name":"a\nb"}`))
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, "remote:pair denied:invalid_name", <-th.audits)
+	assert.Equal(t, 0, th.PairingStatus().Failures, "请求体与设备名不对不算输错")
+}
+
+// 第 5 次输错：当前与别的配对会话都收到 GOAWAY pairing_closed
+func TestPairingFifthFailureClosesSessions(t *testing.T) {
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+	ctx := context.Background()
+	_, err := th.StartPairing(ctx, ScopesFull, "")
+	require.NoError(t, err)
+	k1, _ := GenerateKeypair(nil)
+	k2, _ := GenerateKeypair(nil)
+	c1, err := th.connect(t, k1.Private, ViaDirect)
+	require.NoError(t, err)
+	c2, err := th.connect(t, k2.Private, ViaDirect)
+	require.NoError(t, err)
+	for i := 0; i < MaxPairingFailures; i++ {
+		_, perr := c1.Pair(ctx, bytes.Repeat([]byte{byte(i + 1)}, KeyLen), "x")
+		var pe *PairError
+		require.ErrorAs(t, perr, &pe)
+		assert.Equal(t, http.StatusUnauthorized, pe.Status)
+	}
+	wantGoAway(t, c1, GoAwayPairingClosed)
+	wantGoAway(t, c2, GoAwayPairingClosed)
+	assert.Equal(t, PairingClosed, th.PairingStatus().State)
+}
+
+// 配对会话的名额在握手时原子地占：并发的未知设备最多拿到 4 条配对会话
+func TestPairingSessionReservation(t *testing.T) {
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+	_, err := th.StartPairing(context.Background(), ScopesFull, "")
+	require.NoError(t, err)
+	const n = 12
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var pairing, busy int
+	var clients []*Client
+	for i := 0; i < n; i++ {
+		wg.Go(func() {
+			k, _ := GenerateKeypair(nil)
+			c, cerr := th.connect(t, k.Private, ViaDirect)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case cerr == nil && c.Mode() == ModePairing:
+				pairing++
+				clients = append(clients, c)
+			case cerr != nil && strings.Contains(cerr.Error(), HelloBusy):
+				busy++
+			}
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, maxPairingSessions, pairing)
+	assert.Equal(t, n-maxPairingSessions, busy)
+	// 关掉以后名额还回来
+	th.CancelPairing()
+	for _, c := range clients {
+		waitDone(t, c)
+	}
+	_, err = th.StartPairing(context.Background(), ScopesFull, "")
+	require.NoError(t, err)
+	k, _ := GenerateKeypair(nil)
+	require.Eventually(t, func() bool {
+		c, cerr := th.connect(t, k.Private, ViaDirect)
+		if cerr != nil {
+			return false
+		}
+		c.Close()
+		return true
+	}, 5*time.Second, 20*time.Millisecond)
+}
+
+// 请求已经取消（浏览器断开）时关掉远程访问：设置写进去了，运行时也照样关掉
+func TestDisableWithCanceledRequest(t *testing.T) {
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+	_, priv := th.addDevice(t, "手机", ScopesFull)
+	c, err := th.connect(t, priv, ViaDirect)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = th.UpdateSettings(ctx, Settings{Enabled: false, DirectURL: testDirect})
+	require.NoError(t, err)
+	wantGoAway(t, c, GoAwayDisabled)
+	assert.False(t, th.Enabled())
+
+	// 轮换与撤销同理
+	_, err = th.UpdateSettings(context.Background(), Settings{Enabled: true, DirectURL: testDirect})
+	require.NoError(t, err)
+	c, err = th.connect(t, priv, ViaDirect)
+	require.NoError(t, err)
+	_, err = th.RotateKeys(ctx)
+	require.NoError(t, err)
+	wantGoAway(t, c, GoAwayKeyRotated)
+}
+
+// 关掉以后才来登记的会话：stillValid 先看远程访问是不是还开着
+func TestStillValidWhenDisabled(t *testing.T) {
+	th := newTestHost(t, Settings{DirectURL: testDirect})
+	d, priv := th.addDevice(t, "手机", ScopesFull)
+	dk, _ := KeypairFromPrivate(priv)
+	s := &session{mode: ModeDevice, device: d, peerKey: dk.Public}
+	assert.Empty(t, th.stillValid(s))
+	th.state.Store(nil)
+	assert.Equal(t, GoAwayDisabled, th.stillValid(s))
 }

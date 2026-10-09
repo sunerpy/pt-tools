@@ -27,6 +27,8 @@ const (
 	closeWait = 5 * time.Second
 	// notifyTimeout 是发配对通知、写最近在线的上限
 	notifyTimeout = 5 * time.Second
+	// opTimeout 是网页上一次控制面操作（保存设置、轮换、改设备）的上限
+	opTimeout = 15 * time.Second
 )
 
 // ErrDisabled 是远程访问没有打开。
@@ -129,17 +131,30 @@ func (h *Host) reloadLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !set.Enabled {
+	var keys *HostKeys
+	if set.Enabled {
+		if keys, err = h.cfg.Store.HostKeys(ctx, true); err != nil {
+			return err
+		}
+	}
+	h.applyLocked(set, keys)
+	return nil
+}
+
+// applyLocked 让运行时与给定的设置、密钥一致，不再读库（写库已经成功时，运行时的失效不能因为读不到而跳过）。
+// 关掉：先给全部会话发 GOAWAY disabled（经 relay 的会话要靠 relay 连接送到），再断开 relay。
+// 主机密钥换了：全部会话发 GOAWAY key_rotated，relay 用新的 hostId 重连。
+func (h *Host) applyLocked(set Settings, keys *HostKeys) {
+	if h.closed {
+		return
+	}
+	if !set.Enabled || keys == nil {
 		if h.state.Swap(nil) != nil {
-			h.stopRelaysLocked(nil)
 			h.pairings.cancel()
 			shutdownAll(h.sessions.takeAll(), GoAwayDisabled)
+			h.stopRelaysLocked(nil)
 		}
-		return nil
-	}
-	keys, err := h.cfg.Store.HostKeys(ctx, true)
-	if err != nil {
-		return err
+		return
 	}
 	st := &hostState{keys: keys, hostID: keys.HostID(), settings: set}
 	old := h.state.Swap(st)
@@ -148,7 +163,11 @@ func (h *Host) reloadLocked(ctx context.Context) error {
 		shutdownAll(h.sessions.takeAll(), GoAwayKeyRotated)
 	}
 	h.syncRelaysLocked(st)
-	return nil
+}
+
+// boundedContext 是控制面操作用的 context：不随请求取消（写库以后的运行时失效必须做完），但有上限。
+func boundedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), opTimeout)
 }
 
 // Close 关掉主机：断开 relay 与全部会话（发 GOAWAY shutdown），最多等 5 秒。
@@ -160,10 +179,13 @@ func (h *Host) Close() {
 	}
 	h.closed = true
 	h.state.Store(nil)
-	h.stopRelaysLocked(nil)
 	h.mu.Unlock()
+	// 先发 GOAWAY shutdown（经 relay 的会话要靠 relay 连接送到），再断开 relay
 	list := h.sessions.takeAll()
 	shutdownAll(list, GoAwayShutdown)
+	h.mu.Lock()
+	h.stopRelaysLocked(nil)
+	h.mu.Unlock()
 	h.stop()
 	deadline := time.NewTimer(closeWait)
 	defer deadline.Stop()
@@ -220,11 +242,13 @@ func (h *Host) serveConn(raw MsgConn, via string) {
 	}
 	if !h.sessions.add(s) {
 		s.shutdown(h.staleReason())
+		close(s.done)
 		return
 	}
-	// 撤销、改权限、关配对窗口可能发生在握手与登记之间（那时还关不到这条会话），登记以后再核对一次
+	// 撤销、改权限、关配对窗口、关掉远程访问可能发生在握手与登记之间（那时还关不到这条会话），登记以后再核对一次
 	if reason := h.stillValid(s); reason != "" {
 		s.shutdown(reason)
+		close(s.done)
 		return
 	}
 	if s.mode == ModeDevice {
@@ -241,32 +265,39 @@ func (h *Host) handshake(raw MsgConn, via string) (*session, string) {
 		return nil, HelloBusy
 	}
 	defer func() { <-h.handshakes }()
+	// 先读 epoch 再读状态：关掉与轮换都是先换状态、再让 epoch 加一，这样读到旧状态的握手一定带着旧 epoch，登记时被拒
+	epoch := h.sessions.currentEpoch()
 	st := h.state.Load()
 	if st == nil {
 		return nil, GoAwayDisabled
 	}
-	epoch := h.sessions.currentEpoch()
 	var dev *Device
+	reserved := ""
 	conn, peer, hello, err := acceptHandshake(h.ctx, raw, st.keys, st.hostID, nil, func(peer []byte, _ ClientHello) HostHello {
-		if h.sessions.count() >= MaxSessions {
-			return HostHello{Error: HelloBusy}
-		}
 		d, err := h.cfg.Store.ActiveDeviceByKey(h.ctx, peer)
+		mode := ModeDevice
 		switch {
 		case err != nil:
 			h.logf("[远程访问] 查设备失败: %v", err)
 			return HostHello{Error: HelloBusy}
 		case d != nil:
 			dev = d
-			return HostHello{Mode: ModeDevice, Host: h.cfg.Version}
 		case !h.pairings.open():
 			return HostHello{Error: HelloNotPaired}
-		case len(h.sessions.matching(func(s *session) bool { return s.mode == ModePairing })) >= maxPairingSessions:
+		default:
+			mode = ModePairing
+		}
+		// 名额在回第二条消息之前占好：总会话数与配对会话数都不会被并发的握手超过
+		if !h.sessions.reserve(mode) {
 			return HostHello{Error: HelloBusy}
 		}
-		return HostHello{Mode: ModePairing, Host: h.cfg.Version}
+		reserved = mode
+		return HostHello{Mode: mode, Host: h.cfg.Version}
 	})
 	if err != nil {
+		if reserved != "" {
+			h.sessions.release(reserved)
+		}
 		h.cfg.Logger.Debugf("[远程访问] 握手没有完成（%s）: %v", via, err)
 		return nil, ""
 	}
@@ -287,6 +318,9 @@ func (h *Host) staleReason() string {
 
 // stillValid 核对登记好的会话还能不能用，不能用时返回 GOAWAY 的原因。
 func (h *Host) stillValid(s *session) string {
+	if h.state.Load() == nil {
+		return GoAwayDisabled
+	}
 	if s.mode == ModePairing {
 		if !h.pairings.open() {
 			return GoAwayPairingClosed
@@ -342,7 +376,7 @@ func (h *Host) touch(id uint, via string) {
 
 // paired 是配对完成：关掉别的配对会话（窗口已经用掉），发通知。
 func (h *Host) paired(d Device, keep *session) {
-	shutdownAll(h.sessions.matching(func(s *session) bool { return s != keep && s.mode == ModePairing }), GoAwayPairingClosed)
+	h.closePairingSessions(keep)
 	if h.cfg.OnPaired != nil {
 		h.background(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
@@ -350,6 +384,11 @@ func (h *Host) paired(d Device, keep *session) {
 			h.cfg.OnPaired(ctx, d)
 		})
 	}
+}
+
+// closePairingSessions 关掉 keep 以外的配对会话（窗口用掉、作废、取消或换了新的）。
+func (h *Host) closePairingSessions(keep *session) {
+	shutdownAll(h.sessions.matching(func(s *session) bool { return s != keep && s.mode == ModePairing }), GoAwayPairingClosed)
 }
 
 // closeDevice 关掉这台设备的全部会话。
@@ -412,38 +451,45 @@ func (h *Host) UpdateSettings(ctx context.Context, in Settings) (Overview, error
 	if err != nil {
 		return Overview{}, err
 	}
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	h.mu.Lock()
+	var keys *HostKeys
 	if in.Enabled {
-		if _, err = h.cfg.Store.HostKeys(ctx, true); err != nil {
+		if keys, err = h.cfg.Store.HostKeys(ctx, true); err != nil {
 			h.mu.Unlock()
 			return Overview{}, err
 		}
 	}
-	if _, err = h.cfg.Store.SaveSettings(ctx, in); err != nil {
+	saved, err := h.cfg.Store.SaveSettings(ctx, in)
+	if err != nil {
+		// 写没写进去不确定：关掉时宁可先让运行时也关掉
+		if !in.Enabled {
+			h.applyLocked(in, nil)
+		}
 		h.mu.Unlock()
 		return Overview{}, err
 	}
-	err = h.reloadLocked(ctx)
+	h.applyLocked(saved, keys)
 	h.mu.Unlock()
-	if err != nil {
-		return Overview{}, err
-	}
 	return h.Overview(ctx)
 }
 
 // RotateKeys 换一套主机密钥：撤销所有设备，断开全部会话，relay 用新的 hostId 重连。
 func (h *Host) RotateKeys(ctx context.Context) (Overview, error) {
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	h.mu.Lock()
-	if _, err := h.cfg.Store.RotateHostKeys(ctx); err != nil {
+	keys, err := h.cfg.Store.RotateHostKeys(ctx)
+	if err != nil {
 		h.mu.Unlock()
 		return Overview{}, err
 	}
-	err := h.reloadLocked(ctx)
-	h.mu.Unlock()
-	// 关着远程访问时 reload 不会断开会话（本来就没有），这里不用再关
-	if err != nil {
-		return Overview{}, err
+	// 新密钥已经提交：不再读库，直接用内存里的设置换掉运行时的密钥（关着远程访问时没有会话，什么也不用做）
+	if st := h.state.Load(); st != nil {
+		h.applyLocked(st.settings, keys)
 	}
+	h.mu.Unlock()
 	return h.Overview(ctx)
 }
 
@@ -479,7 +525,7 @@ func (h *Host) StartPairing(_ context.Context, scopes []string, direct string) (
 		return PairingTicket{}, err
 	}
 	// 旧窗口里连上来的配对会话跟着作废
-	shutdownAll(h.sessions.matching(func(s *session) bool { return s.mode == ModePairing }), GoAwayPairingClosed)
+	h.closePairingSessions(nil)
 	link := PairingLink{HostID: st.hostID, HostKey: st.keys.Noise.Public, Secret: secret, Relays: st.settings.Relays, Direct: d}
 	return PairingTicket{Link: link.String(), ExpiresAt: expires, Scopes: scopes, HostID: st.hostID}, nil
 }
@@ -490,7 +536,7 @@ func (h *Host) PairingStatus() PairingStatus { return h.pairings.status() }
 // CancelPairing 关掉配对窗口与窗口里的配对会话。
 func (h *Host) CancelPairing() {
 	h.pairings.cancel()
-	shutdownAll(h.sessions.matching(func(s *session) bool { return s.mode == ModePairing }), GoAwayPairingClosed)
+	h.closePairingSessions(nil)
 }
 
 // DeviceStatus 是设备列表里的一项：设备加上现在在不在线。
@@ -517,8 +563,14 @@ func (h *Host) Devices(ctx context.Context) ([]DeviceStatus, error) {
 
 // UpdateDevice 改设备的名字或权限；权限变了时立即断开这台设备的会话，重连以后按新权限。
 func (h *Host) UpdateDevice(ctx context.Context, id uint, name *string, scopes []string) (Device, error) {
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	d, changed, err := h.cfg.Store.UpdateDevice(ctx, id, name, scopes)
 	if err != nil {
+		// 参数不对、没有这台、已经撤销都发生在写库之前；别的错误时权限可能已经改了，宁可断开让它重连
+		if scopes != nil && !errors.Is(err, ErrInvalid) && !errors.Is(err, ErrDeviceNotFound) && !errors.Is(err, ErrDeviceRevoked) {
+			h.closeDevice(id, GoAwayScopeChanged)
+		}
 		return Device{}, err
 	}
 	if changed {
@@ -529,11 +581,16 @@ func (h *Host) UpdateDevice(ctx context.Context, id uint, name *string, scopes [
 
 // RevokeDevice 撤销设备并立即断开它的会话；之后它的握手会被拒绝。
 func (h *Host) RevokeDevice(ctx context.Context, id uint) (Device, error) {
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	d, err := h.cfg.Store.RevokeDevice(ctx, id)
+	if !errors.Is(err, ErrDeviceNotFound) {
+		// 写库以后读回失败时撤销可能已经生效：照样断开
+		h.closeDevice(id, GoAwayRevoked)
+	}
 	if err != nil {
 		return Device{}, err
 	}
-	h.closeDevice(id, GoAwayRevoked)
 	return d, nil
 }
 
