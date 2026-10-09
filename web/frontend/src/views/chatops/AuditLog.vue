@@ -32,6 +32,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   qbit_compat: "qB 兼容",
   // MCP 写工具的调用（internal/mcp）
   mcp: "MCP",
+  // 远程访问的设备经隧道做的写请求与配对（internal/remote）
+  remote_device: "远程设备",
 };
 
 /*
@@ -46,6 +48,7 @@ const CHANNEL_SHORT: Record<string, string> = {
   api_token: "API 令牌",
   qbit_compat: "qB 兼容",
   mcp: "MCP",
+  remote_device: "远程设备",
 };
 
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {

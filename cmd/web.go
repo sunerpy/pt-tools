@@ -243,6 +243,8 @@ var webCmd = &cobra.Command{
 		if bs != nil {
 			srv.SetChatOpsDeps(bs.Deps())
 		}
+		// 远程访问（M15）：设备只能经隧道调用 App API；默认关着，打开以后才有直连入口与 relay 连接
+		remoteHost := newRemoteHost(store, srv, monitorNotifier)
 		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {
 			maybeAutoStartReload(mgr, cfg)
@@ -264,6 +266,9 @@ var webCmd = &cobra.Command{
 		}
 		if qbitCompatServer != nil {
 			plan.qbitCompat = qbitCompatServer
+		}
+		if remoteHost != nil {
+			plan.remote = remoteHost
 		}
 		if dm := mgr.GetDownloaderManager(); dm != nil {
 			plan.downloaders = dm
@@ -378,6 +383,8 @@ type shutdownPlan struct {
 	qbitCompat interface {
 		Shutdown(ctx context.Context) error
 	}
+	// remote 是远程访问的主机端（M15）：和兼容入口一起先关（断开 relay 与设备会话），理由相同
+	remote         interface{ Close() }
 	stopBackground func()
 	scheduler      interface{ StopAll() }
 	downloaders    interface{ CloseAll() }
@@ -419,6 +426,11 @@ func runShutdown(ctx context.Context, plan shutdownPlan) {
 			log.Warnf("qB 兼容入口关闭出现错误: %v", err)
 		}
 		cancel()
+	}
+	if plan.remote != nil {
+		if !runBounded(ctx, step, plan.remote.Close) {
+			log.Warnf("关闭远程访问超时（%s），继续关闭", step)
+		}
 	}
 	if plan.stopBackground != nil {
 		if !runBounded(ctx, step, plan.stopBackground) {

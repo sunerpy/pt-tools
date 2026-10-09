@@ -251,6 +251,9 @@ func NewDBWithVersionAndHooks(
 		&APIToken{},
 		&QbitCompatSetting{},
 		&QbitCompatTorrent{},
+		// 远程访问（M15）
+		&RemoteSetting{},
+		&RemoteDevice{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

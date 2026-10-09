@@ -2895,3 +2895,80 @@ export const qbitCompatApi = {
   get: () => api.get<QbitCompatStatus>("/api/qbit-compat"),
   save: (data: QbitCompatInput) => api.put<QbitCompatStatus>("/api/qbit-compat", data),
 };
+
+// ---- 远程访问（路线图 M15） ----
+
+/** 设备的权限：只读是 app:read，完全控制是 app:read + app:write */
+export type RemoteScope = "app:read" | "app:write";
+
+export interface RemoteSettings {
+  enabled: boolean;
+  /** relay 地址（ws:// 或 wss://），最多 4 个 */
+  relays: string[];
+  /** App 直连用的地址（http:// 或 https://）；空的时候配对链接里不带 */
+  direct_url: string;
+}
+
+export interface RemoteRelayStatus {
+  url: string;
+  state: "connecting" | "online" | "offline";
+  error?: string;
+  since: string;
+  streams: number;
+}
+
+export interface RemoteOverview extends RemoteSettings {
+  /** 第一次打开远程访问以后才有 */
+  host_id?: string;
+  host_key?: string;
+  /** 构建时内置的托管 relay；没有时为空 */
+  default_relay?: string;
+  relay_status: RemoteRelayStatus[];
+  sessions: number;
+  stream_path: string;
+}
+
+export interface RemoteDevice {
+  id: number;
+  name: string;
+  scopes: RemoteScope[];
+  created_at: string;
+  last_seen_at?: string;
+  last_seen_via?: "direct" | "relay" | "";
+  revoked_at?: string;
+  online: boolean;
+  online_via?: "direct" | "relay";
+}
+
+export interface RemotePairing {
+  /** pttools://pair?…，里面有一次性的配对密钥：只在这里给一次 */
+  link: string;
+  expires_at: string;
+  scopes: RemoteScope[];
+  host_id: string;
+  /** 链接的二维码（SVG 文本） */
+  qr_svg: string;
+}
+
+export interface RemotePairingStatus {
+  state: "none" | "waiting" | "paired" | "expired" | "closed";
+  expires_at?: string;
+  scopes?: RemoteScope[];
+  failures: number;
+  device?: Omit<RemoteDevice, "online" | "online_via">;
+}
+
+export const remoteApi = {
+  get: () => api.get<RemoteOverview>("/api/remote"),
+  save: (data: RemoteSettings) => api.put<RemoteOverview>("/api/remote", data),
+  rotateKeys: () => api.post<RemoteOverview>("/api/remote/keys/rotate"),
+  startPairing: (data: { scopes: RemoteScope[]; direct_url: string }) =>
+    api.post<RemotePairing>("/api/remote/pairings", data),
+  pairingStatus: () => api.get<RemotePairingStatus>("/api/remote/pairings/current"),
+  cancelPairing: () => api.delete<RemotePairingStatus>("/api/remote/pairings/current"),
+  devices: () => api.get<RemoteDevice[]>("/api/remote/devices"),
+  updateDevice: (id: number, data: { name?: string; scopes?: RemoteScope[] }) =>
+    api.put<RemoteDevice>(`/api/remote/devices/${id}`, data),
+  revokeDevice: (id: number) => api.post<RemoteDevice>(`/api/remote/devices/${id}/revoke`),
+  deleteDevice: (id: number) => api.delete<{ ok: boolean }>(`/api/remote/devices/${id}`),
+};

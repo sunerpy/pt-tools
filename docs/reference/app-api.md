@@ -13,6 +13,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - 没带令牌，或者令牌不对、已过期、已撤销：回 401。
 - 令牌没有接口要的权限：回 403。下文的「读取」是权限 `app:read`，「操作」是 `app:write`。
 - 令牌只能调用 App API：网页的其他接口（设置、站点、下载器、通知通道、令牌管理等）不认令牌，没有登录时回 401。
+- 经[远程访问](../guide/remote-access.md)配对的设备在加密的隧道里调用这些接口，不带令牌；权限是配对时选的「完全控制」（读取与操作）或「只读」（读取）。隧道里只有 App API，网页的其他接口在那里不存在。
 
 ## 约定
 
@@ -95,7 +96,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 }
 ```
 
-`principal.kind` 是 `api_token`（令牌）或 `session`（网页登录）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders` 与 `updates`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
+`principal.kind` 是 `api_token`（令牌）、`session`（网页登录）或 `remote_device`（经远程访问配对的设备）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders` 与 `updates`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
 
 ### GET /updates
 

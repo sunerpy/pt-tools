@@ -13,6 +13,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - No token, or a token that is wrong, expired or revoked: 401.
 - A token without the permission the endpoint needs: 403. Below, Read is the permission `app:read` and Operate is `app:write`.
 - Tokens work only for the App API: the rest of the web interface (settings, sites, downloaders, notification channels, token management and so on) does not accept them and responds with 401 without a sign-in.
+- A device paired through [remote access](../guide/remote-access.md) calls these endpoints inside an encrypted tunnel, without a token; its permissions are the ones chosen when it was paired, Full control (Read and Operate) or Read only (Read). The tunnel carries only the App API; the rest of the web interface does not exist there.
 
 ## Conventions
 
@@ -95,7 +96,7 @@ Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST 
 }
 ```
 
-`principal.kind` is `api_token` (a token) or `session` (a web sign-in); `features` lists the feature groups of this version (earlier versions have no `downloaders` and `updates`); `scopes` are the caller's permissions, so a client can decide which actions to show.
+`principal.kind` is `api_token` (a token), `session` (a web sign-in) or `remote_device` (a device paired through remote access); `features` lists the feature groups of this version (earlier versions have no `downloaders` and `updates`); `scopes` are the caller's permissions, so a client can decide which actions to show.
 
 ### GET /updates
 

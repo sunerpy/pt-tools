@@ -27,6 +27,7 @@ web/
 ├── qbitcompat/                  # qB WebUI API v2 subset on its own port (M13): SID login with qbit:compat tokens
 ├── api_app_v1*.go               # App API v1: route table with scopes, principals, audit, DTOs
 ├── mcp.go                       # /mcp (M14): Bearer-token MCP endpoint; mcpBackend calls App API v1 routes in-process
+├── remote.go / api_remote.go    # Remote access (M15): /remote/v1/stream, device dispatcher (App API only), /api/remote* (session only)
 ├── middleware/principal.go      # Request principal (session / api_token / mcp / remote_device), Bearer parsing
 ├── frontend/                    # Vue application source
 └── static/                      # Built assets embedded by Go
@@ -42,6 +43,7 @@ web/
 - Extension origins receive narrowly scoped CORS handling in `logMiddleware`.
 - ChatOps routes are registered only when dependencies were injected, and are session-only like every other `/api/*` route.
 - API tokens (`internal/apitoken`) are accepted only by the App API (`/api/app/v1/*`), `/mcp` and the qB-compatible entrance. Token management (`/api/tokens`) and every other route stay session-only through `s.auth`; `TestAppAPI_TokensCannotReachSessionAPIs` pins this through the real mux.
+- Remote devices never pass through `buildHandler`: `RemoteDispatcher` mounts only the App API routes and puts the device principal under the unexported `remoteDeviceKey`, which `appPrincipal` checks first. `statusRecorder` must keep `Unwrap()` so the direct WebSocket entrance can hijack the connection through `logMiddleware`.
 - `Shutdown(ctx)` must remain safe before/concurrent with `Serve`; a `Shutdown` that runs before `Serve` makes the later `Serve` return without listening.
 
 ## Adding a Route
@@ -67,20 +69,21 @@ Go 1.22+ path patterns and `r.PathValue` are used for some ChatOps routes; do no
 
 ## Important Route Families
 
-| Prefix                                                 | Purpose                                      |
-| ------------------------------------------------------ | -------------------------------------------- |
-| `/api/sites`, `/api/sites/{name}`                      | Site config and credentials                  |
-| `/api/sites/{name}/login-state/*`                      | Probe/config/visit login monitoring          |
-| `/api/v2/search/*`, `/api/v2/userinfo/*`               | Multi-site search and statistics             |
-| `/api/downloaders*`, `/api/downloader-torrents*`       | Client settings and torrent hub              |
-| `/api/v2/torrents/*`, `/api/torrents/*`, `/api/site/*` | Push/download/manage torrents                |
-| `/api/filter-rules`, `/api/rss/*`                      | Filtering and RSS associations               |
-| `/api/chatops/*`                                       | Channels, bindings, audit, RSS delivery logs |
-| `/api/tokens`, `/api/app/v1/*`, `/mcp`                 | API token admin; App API and MCP for tokens  |
-| `/api/qbit-compat`                                     | qB-compatible entrance settings and status   |
-| `/api/cloak/*`, `/api/extension-actions/*`             | Cloak and extension integration              |
-| `/api/maintenance/clean`                               | Preview/confirmed maintenance cleanup        |
-| `/api/version/*`                                       | Check/runtime metadata/self-upgrade          |
+| Prefix                                                 | Purpose                                         |
+| ------------------------------------------------------ | ----------------------------------------------- |
+| `/api/sites`, `/api/sites/{name}`                      | Site config and credentials                     |
+| `/api/sites/{name}/login-state/*`                      | Probe/config/visit login monitoring             |
+| `/api/v2/search/*`, `/api/v2/userinfo/*`               | Multi-site search and statistics                |
+| `/api/downloaders*`, `/api/downloader-torrents*`       | Client settings and torrent hub                 |
+| `/api/v2/torrents/*`, `/api/torrents/*`, `/api/site/*` | Push/download/manage torrents                   |
+| `/api/filter-rules`, `/api/rss/*`                      | Filtering and RSS associations                  |
+| `/api/chatops/*`                                       | Channels, bindings, audit, RSS delivery logs    |
+| `/api/tokens`, `/api/app/v1/*`, `/mcp`                 | API token admin; App API and MCP for tokens     |
+| `/api/qbit-compat`                                     | qB-compatible entrance settings and status      |
+| `/api/remote*`, `/remote/v1/stream`                    | Remote access settings/devices; direct entrance |
+| `/api/cloak/*`, `/api/extension-actions/*`             | Cloak and extension integration                 |
+| `/api/maintenance/clean`                               | Preview/confirmed maintenance cleanup           |
+| `/api/version/*`                                       | Check/runtime metadata/self-upgrade             |
 
 ## Frontend
 

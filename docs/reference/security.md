@@ -19,7 +19,8 @@
 
 - 站点 Cookie；
 - 通知通道的凭证，例如 Telegram Bot Token 和 OneBot Access Token；
-- CloakBrowser 的访问令牌。
+- CloakBrowser 的访问令牌；
+- [远程访问](../guide/remote-access.md)的主机密钥。
 
 密钥在首次启动时自动生成；也可以通过环境变量 `PT_TOOLS_SECRET_KEY` 提供 base64 形式的密钥，它的优先级高于 `secret.key` 文件。
 
@@ -38,6 +39,7 @@
 - 同一 IP 在 15 分钟内登录失败 10 次（含用户名不存在）后，这个 IP 暂停登录 15 分钟。部署在反向代理之后时，pt-tools 看到的都是代理的地址，失败次数会合并计算。
 - 除登录页、静态资源和健康检查接口 `/api/ping` 外，所有页面和接口都要求已登录。`/api/ping` 只返回运行状态和版本号。
 - [App API](app-api.md)（`/api/app/v1/`）、[qB 兼容入口](../guide/qbit-compat.md)与 [MCP](../guide/mcp.md)（`/mcp`）另外接受 [API 令牌](../guide/api-tokens.md)。令牌按新建时选的权限调用它们，访问不了其他接口，也不能管理令牌；库里只存令牌的 SHA-256 摘要。`/mcp` 只认令牌，网页登录的会话用不了。
+- 经[远程访问](../guide/remote-access.md)配对的设备在加密隧道里调用 App API，权限是配对时选的「完全控制」或「只读」，访问不了其他接口；撤销或改权限以后它的连接立即断开。远程访问的设置与设备管理只认网页登录。
 - 初始账号见[安装](../guide/install.md)；首次登录后请立即修改密码。忘记密码时可以用 `PT_ADMIN_RESET` 重置，见[配置说明](../configuration.md)。
 
 ## 会主动连接哪些地址
@@ -49,6 +51,7 @@
 | 你启用的通知通道         | 发送通知；Telegram 使用长轮询接收命令                      |
 | GitHub（api.github.com） | 检查新版本；二进制部署升级时下载新版本                     |
 | CloakBrowser Manager     | 仅在你填好端点、token 和 Profile ID 后，作为登录探测的后备 |
+| 你填的 relay             | 仅在打开远程访问后：主动连接，转发手机 App 的加密连接      |
 
 [CloakBrowser 后备](../guide/site-login-monitoring.md#cloakbrowser-后备)会把站点 Cookie 交给你部署的 CloakBrowser，由它打开站点页面。
 
@@ -56,7 +59,7 @@
 
 ## 会监听哪些端口
 
-- Web 界面和接口：默认 `8080`。[MCP](../guide/mcp.md) 的 `/mcp` 也在这个端口上。
+- Web 界面和接口：默认 `8080`。[MCP](../guide/mcp.md) 的 `/mcp` 也在这个端口上；打开[远程访问](../guide/remote-access.md)以后，直连入口 `/remote/v1/stream` 也在这里（关着时回 404）。
 - [qB 兼容入口](../guide/qbit-compat.md)：给了 `--qbit-compat-addr` 或 `PT_QBIT_COMPAT_ADDR` 时另外监听一个端口，用有「qB 兼容」权限的 API 令牌登录；该端口只在内网开放。
 - QQ OneBot 通道：启用后另外监听一个端口，供 NapCat 以反向 WebSocket 连接，例如 `0.0.0.0:6701` 的 `/onebot/v11/ws`。监听地址不是本机地址（127.0.0.1、localhost）时必须设置 Access Token，否则通道不会启动；该端口只在内网开放。
 
@@ -65,6 +68,12 @@
 - 不要把 Web 端口直接暴露在公网上。需要远程访问时，放在启用 HTTPS 的反向代理之后，或通过 VPN 访问。会话 Cookie 没有 Secure 标记，它和 API 令牌在纯 HTTP 下都可能被同一网络中的他人截获。
 - 备份时把 `torrents.db` 和 `secret.key` 作为一个整体保存，并加密备份文件，见[升级与备份](../guide/upgrade.md)。
 - ChatOps 只执行用绑定码完成绑定的账号发来的命令，QQ 和 Telegram 通道还会先按通道里的名单过滤发送者。目前每个完成绑定的账号都拥有管理员权限，可以暂停、删除种子和管理订阅，所以绑定码只发给你信任的账号。每条命令都记入操作审计，审计中的 token、passkey 等参数在写入前脱敏。
+
+## 远程访问的信任模型
+
+- 手机 App 与 pt-tools 之间的内容用 Noise 协议端到端加密，直连与经 relay 都一样；在局域网的明文 HTTP 上也是加密的。
+- relay 看得到这台主机的 hostId、App 与 pt-tools 的 IP、连接的时间与流量大小，看不到内容，也冒充不了这台主机。
+- 配对二维码 10 分钟内有效、只能用一次，拿到它的人能配对成一台设备，权限是生成时选的。数据库与 `secret.key` 外流时，在「系统 → 远程访问」轮换主机密钥，所有设备都要重新配对。
 
 ## 自动化访问的风险
 

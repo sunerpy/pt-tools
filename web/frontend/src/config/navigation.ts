@@ -100,6 +100,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/api-tokens", label: "API 令牌", icon: "id-card" },
       /* 路线图 M14：画板没有这一页，沿用 qB 兼容入口页的样式 */
       { path: "/mcp", label: "MCP 接入", icon: "bot" },
+      /* 路线图 M15：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/remote", label: "远程访问", icon: "smartphone" },
       { path: "/logs", label: "运行日志", icon: "scroll-text" },
       { path: "/password", label: "修改密码", icon: "key-round" },
     ],

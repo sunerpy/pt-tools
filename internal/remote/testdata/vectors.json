@@ -1,0 +1,297 @@
+{
+  "_comment": "pt-tools 远程访问 v1 的测试向量（docs/design/remote-access.md）。二进制值都是十六进制；由 internal/remote 的 TestVectors 生成并核对，App 端用同一份文件。",
+  "protocol": "Noise_IK_25519_ChaChaPoly_BLAKE2s",
+  "host_ids": [
+    {
+      "ed25519_seed": "0000000000000000000000000000000000000000000000000000000000000000",
+      "ed25519_public": "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
+      "host_id": "copdsqhgjnkjc4rardm2bv2bmk"
+    },
+    {
+      "ed25519_seed": "0101010101010101010101010101010101010101010101010101010101010101",
+      "ed25519_public": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+      "host_id": "gr2q7gf5lh6pzfdnurnkvputhp"
+    },
+    {
+      "ed25519_seed": "4242424242424242424242424242424242424242424242424242424242424242",
+      "ed25519_public": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "host_id": "gcl6fxxcznfdjnjyidg3obno24"
+    }
+  ],
+  "links": [
+    {
+      "link": "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo\u0026r=wss%3A%2F%2Frelay.example.com\u0026d=http%3A%2F%2F192.168.1.10%3A8080",
+      "host_id": "ph5tr32bj27nk7zphjn2qf4z5v",
+      "host_key": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "secret": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "relays": [
+        "wss://relay.example.com"
+      ],
+      "direct": "http://192.168.1.10:8080"
+    },
+    {
+      "link": "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7s\u0026d=https%3A%2F%2Fpt.example.com%2Fpt-tools",
+      "host_id": "ph5tr32bj27nk7zphjn2qf4z5v",
+      "host_key": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "secret": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "relays": [],
+      "direct": "https://pt.example.com/pt-tools"
+    },
+    {
+      "link": "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw\u0026r=wss%3A%2F%2Fa.example.com%2Cws%3A%2F%2F10.0.0.2%3A9000%2Frelay",
+      "host_id": "ph5tr32bj27nk7zphjn2qf4z5v",
+      "host_key": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "secret": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "relays": [
+        "wss://a.example.com",
+        "ws://10.0.0.2:9000/relay"
+      ],
+      "direct": ""
+    }
+  ],
+  "invalid_links": [
+    "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo",
+    "pttools://pair?v=2\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo\u0026d=http%3A%2F%2Fa",
+    "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo\u0026d=ftp%3A%2F%2Fa",
+    "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo\u0026r=https%3A%2F%2Frelay",
+    "pttools://pair?v=1\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo\u0026h=ph5tr32bj27nk7zphjn2qf4z5v\u0026d=http%3A%2F%2Fa",
+    "pttools://pair?v=1\u0026h=short\u0026k=e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM\u0026s=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo\u0026d=http%3A%2F%2Fa",
+    "https://pair?v=1"
+  ],
+  "frames": [
+    {
+      "type": 1,
+      "id": 1,
+      "payload": "7b226d6574686f64223a22474554222c2270617468223a222f6170692f6170702f76312f6d657461222c2268656164657273223a7b22416363657074223a226170706c69636174696f6e2f6a736f6e227d7d",
+      "encoded": "01000000017b226d6574686f64223a22474554222c2270617468223a222f6170692f6170702f76312f6d657461222c2268656164657273223a7b22416363657074223a226170706c69636174696f6e2f6a736f6e227d7d"
+    },
+    {
+      "type": 2,
+      "id": 1,
+      "payload": "68656c6c6f",
+      "encoded": "020000000168656c6c6f"
+    },
+    {
+      "type": 3,
+      "id": 1,
+      "payload": "",
+      "encoded": "0300000001"
+    },
+    {
+      "type": 4,
+      "id": 16909060,
+      "payload": "",
+      "encoded": "0401020304"
+    },
+    {
+      "type": 17,
+      "id": 1,
+      "payload": "7b22737461747573223a3230307d",
+      "encoded": "11000000017b22737461747573223a3230307d"
+    },
+    {
+      "type": 18,
+      "id": 1,
+      "payload": "7b7d",
+      "encoded": "12000000017b7d"
+    },
+    {
+      "type": 19,
+      "id": 1,
+      "payload": "",
+      "encoded": "1300000001"
+    },
+    {
+      "type": 32,
+      "id": 0,
+      "payload": "70",
+      "encoded": "200000000070"
+    },
+    {
+      "type": 33,
+      "id": 0,
+      "payload": "70",
+      "encoded": "210000000070"
+    },
+    {
+      "type": 48,
+      "id": 0,
+      "payload": "7b22726561736f6e223a227265766f6b6564227d",
+      "encoded": "30000000007b22726561736f6e223a227265766f6b6564227d"
+    }
+  ],
+  "invalid_frames": [
+    "01000000",
+    "01000000007b7d",
+    "0200000001",
+    "030000000178",
+    "2000000001",
+    "3000000000",
+    "7f00000001"
+  ],
+  "outer_frames": [
+    {
+      "type": 1,
+      "stream": 0,
+      "payload": "0707070707070707070707070707070707070707070707070707070707070707",
+      "encoded": "01000000000707070707070707070707070707070707070707070707070707070707070707"
+    },
+    {
+      "type": 3,
+      "stream": 0,
+      "payload": "",
+      "encoded": "0300000000"
+    },
+    {
+      "type": 16,
+      "stream": 1,
+      "payload": "",
+      "encoded": "1000000001"
+    },
+    {
+      "type": 17,
+      "stream": 1,
+      "payload": "010203",
+      "encoded": "1100000001010203"
+    },
+    {
+      "type": 18,
+      "stream": 1,
+      "payload": "",
+      "encoded": "1200000001"
+    },
+    {
+      "type": 18,
+      "stream": 4294967294,
+      "payload": "114d746f6f206d616e792073747265616d73",
+      "encoded": "12fffffffe114d746f6f206d616e792073747265616d73"
+    }
+  ],
+  "invalid_outer_frames": [
+    "1000000000",
+    "1100000001",
+    "120000000109",
+    "0300000001"
+  ],
+  "relay_auth": {
+    "ed25519_seed": "1010101010101010101010101010101010101010101010101010101010101010",
+    "host_id": "ph5tr32bj27nk7zphjn2qf4z5v",
+    "nonce": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "origin": "wss://relay.example.com",
+    "message": "70742d746f6f6c732d72656c61792d763170683574723332626a32376e6b377a70686a6e327166347a35765a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a7773733a2f2f72656c61792e6578616d706c652e636f6d",
+    "auth": "5c9c6df261c9cb840475776aaefcd944b405328fab28f9b3a95ef40490d3de84bd160058978f1570b5bd5ee851b2714abf5c002956d305f75b1e660060d13897a8c703bf996d18d90cfe90da9e45f5c623cfc64c25d7ef9f1e41d7a989325e05"
+  },
+  "session": {
+    "host_id": "ph5tr32bj27nk7zphjn2qf4z5v",
+    "prologue": "70742d746f6f6c732d72656d6f74652d763170683574723332626a32376e6b377a70686a6e327166347a3576",
+    "host_ed25519_seed": "1010101010101010101010101010101010101010101010101010101010101010",
+    "host_static": "1111111111111111111111111111111111111111111111111111111111111111",
+    "host_static_public": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+    "device_static": "2121212121212121212121212121212121212121212121212121212121212121",
+    "device_static_public": "7d34a4815fa6b982535e60af3bd9b49556816080f1641ff81d2b7c8ae8268a44",
+    "device_ephemeral": "3131313131313131313131313131313131313131313131313131313131313131",
+    "host_ephemeral": "4141414141414141414141414141414141414141414141414141414141414141",
+    "messages": [
+      {
+        "from": "device",
+        "kind": "handshake",
+        "payload": "{\"v\":1,\"client\":\"pt-tools-app/1.0.0\"}",
+        "ciphertext": "04f5f29162c31a8defa18e6e742224ee806fc1718a278be859ba5620402b8f3ae9abc9ea56187afdd4a652cc6d0c0b85bc64473798a3e3661da5d44b83f6c2a79c813419fb3d1ba7ee23bbd7cf8737233c1a276d8b591fc2eb242ae63cc5a5d6e084038ecf48cd724f9b76494558d5cbcf1f259b603c08719fce7fc06765088993ecafc71a"
+      },
+      {
+        "from": "host",
+        "kind": "handshake",
+        "payload": "{\"v\":1,\"mode\":\"device\",\"host\":\"v1.0.0\"}",
+        "ciphertext": "7a1a4e709bf085ac494aba0469b9b1eda0ab1f78b16aabb79ffeda90623e8522ca20ce2b496657de23d3bdc7e6942cd780668eab6ffc58fce67a092d67b65319517718573e278a7def4ec6cfb33e501ce8981aa0a96ec7"
+      },
+      {
+        "from": "device",
+        "kind": "frame",
+        "frame": {
+          "type": 1,
+          "id": 1,
+          "payload": "7b226d6574686f64223a22474554222c2270617468223a222f6170692f6170702f76312f6d657461227d",
+          "encoded": "01000000017b226d6574686f64223a22474554222c2270617468223a222f6170692f6170702f76312f6d657461227d"
+        },
+        "ciphertext": "387fb8a57ac341b40596f71a2e9006a1e1979dfd104ab18cca56282b2f2afe6fa44f0ffb47b5244694dbc1605893f510b359ee90a60511c11b7aae7e3338a3"
+      },
+      {
+        "from": "device",
+        "kind": "frame",
+        "frame": {
+          "type": 3,
+          "id": 1,
+          "payload": "",
+          "encoded": "0300000001"
+        },
+        "ciphertext": "feab100e698ba40973ee4345ef0f5b08a0efeb19a0"
+      },
+      {
+        "from": "host",
+        "kind": "frame",
+        "frame": {
+          "type": 17,
+          "id": 1,
+          "payload": "7b22737461747573223a3230302c2268656164657273223a7b22436f6e74656e742d54797065223a226170706c69636174696f6e2f6a736f6e3b20636861727365743d7574662d38227d7d",
+          "encoded": "11000000017b22737461747573223a3230302c2268656164657273223a7b22436f6e74656e742d54797065223a226170706c69636174696f6e2f6a736f6e3b20636861727365743d7574662d38227d7d"
+        },
+        "ciphertext": "c3ef21768a1cbdc0f61244df5745a009367ad06edf1e4f6e3ecd27865991ad9ec6db1f299d0383f398cbb30bec898fa11ff2982d34aacbb1ea0cd368a3d041656414520704b0eaf9dcdcacc8f6a1095c320b57a03c8002816cbae17925e93929"
+      },
+      {
+        "from": "host",
+        "kind": "frame",
+        "frame": {
+          "type": 18,
+          "id": 1,
+          "payload": "7b226e616d65223a2270742d746f6f6c73227d",
+          "encoded": "12000000017b226e616d65223a2270742d746f6f6c73227d"
+        },
+        "ciphertext": "a0738ceecbdc66fc90213b13fc7c992be0617bb7cb5245e58e6d5b478dcddf1486ad046e8dc4904e"
+      },
+      {
+        "from": "host",
+        "kind": "frame",
+        "frame": {
+          "type": 19,
+          "id": 1,
+          "payload": "",
+          "encoded": "1300000001"
+        },
+        "ciphertext": "d8b6bb2e08620a48edec6f0ea9e6cb15d3e8d2f365"
+      },
+      {
+        "from": "device",
+        "kind": "frame",
+        "frame": {
+          "type": 32,
+          "id": 0,
+          "payload": "",
+          "encoded": "2000000000"
+        },
+        "ciphertext": "06ee804195db59ef6de5bae9f7fbca3e27d8db057c"
+      },
+      {
+        "from": "host",
+        "kind": "frame",
+        "frame": {
+          "type": 33,
+          "id": 0,
+          "payload": "",
+          "encoded": "2100000000"
+        },
+        "ciphertext": "c8191584667c66e5172fc5e48f236c746e41946224"
+      },
+      {
+        "from": "host",
+        "kind": "frame",
+        "frame": {
+          "type": 48,
+          "id": 0,
+          "payload": "7b22726561736f6e223a227265766f6b6564227d",
+          "encoded": "30000000007b22726561736f6e223a227265766f6b6564227d"
+        },
+        "ciphertext": "b6938a60cdafb1b4587307264d810eef39dbc82f5cf7200d2fc03ad4e07ac93e768ddfb5ab4247066d"
+      }
+    ]
+  }
+}

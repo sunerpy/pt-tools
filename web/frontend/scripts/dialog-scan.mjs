@@ -137,6 +137,8 @@ const BOARD_40 = [
 const NOT_ON_BOARD = {
   "views/ApiTokens.vue":
     "API 令牌页（路线图 M12）晚于画板 40 定稿：新建令牌与只显示一次明文的弹窗不在那张清点图里",
+  "views/RemoteAccess.vue":
+    "远程访问页（路线图 M15）晚于画板 40 定稿：添加设备（二维码与倒计时）的弹窗不在那张清点图里",
   "views/BrushTasks.vue":
     "刷流任务页（路线图 M3）晚于画板 40 定稿：任务编辑弹窗与种子抽屉都不在那张清点图里",
   "views/TorrentTransfer.vue":

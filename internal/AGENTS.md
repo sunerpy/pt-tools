@@ -20,7 +20,8 @@ internal/
 ├── crypto/                                        # AES-GCM key handling
 ├── events/                                        # In-process pub/sub
 ├── extension/                                     # Browser-extension pending actions
-└── mcp/                                           # MCP tools, scope checks, audit
+├── mcp/                                           # MCP tools, scope checks, audit
+└── remote/                                        # Remote access host: pairing, Noise IK, tunnel, relay client
 ```
 
 ## Unified Site Contract
@@ -88,6 +89,10 @@ Do not call a downloader add method from new RSS/Web paths merely because the in
 ## Maintenance Boundary
 
 `maintenance.Cleaner` is whitelist-based. It may manage rotated logs, staged torrent files, and old backups only. Preserve path containment, symlink/redline checks, and dry-run behavior.
+
+## Remote Access
+
+`internal/remote` is the host side of remote access (wire format v1 in `docs/design/remote-access.md`, vectors in `testdata/`). A session is a Noise_IK_25519_ChaChaPoly_BLAKE2s channel (the device initiates; prologue binds `pt-tools-remote-v1` and the hostId) carried by the direct WebSocket `/remote/v1/stream` or a relay stream. Each transport message holds one tunnel frame; requests are buffered until `REQ_END` and dispatched through the `Dispatcher` interface (`web.Server.RemoteDispatcher`), which only mounts App API v1. Pairing is one window at a time (32-byte secret, 10 minutes, one use, 5 failures) and only pairing sessions may call `POST /remote/v1/pair`. Host keys are stored encrypted through the `Cipher` given to `Store` (ConfigStore's AES key). Revoking a device, changing its scopes, turning remote access off and rotating host keys close the affected sessions with `GOAWAY`; a session registered after one of these changes is re-checked (`stillValid`). `client.go` is the Go device side for tests, QA and interop.
 
 ## MCP Status
 

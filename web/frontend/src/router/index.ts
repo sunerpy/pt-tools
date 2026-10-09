@@ -38,6 +38,12 @@ const router = createRouter({
       meta: { title: "MCP 接入" },
     },
     {
+      path: "/remote",
+      name: "remote",
+      component: () => import("@/views/RemoteAccess.vue"),
+      meta: { title: "远程访问" },
+    },
+    {
       path: "/cloak-config",
       name: "cloak-config",
       component: () => import("@/views/CloakBrowserConfig.vue"),

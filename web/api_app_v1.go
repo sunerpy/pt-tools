@@ -20,10 +20,10 @@ import (
 
 // App API v1（路线图 M12）：给手机 App 用的版本化接口，/api/app/v1/*。
 //
-// 和现有 /api/* 不同，这里认两种主体：有效的 session cookie（网页登录，拥有全部权限范围），或者
-// `Authorization: Bearer ptt_…` 的 API 令牌（只有自己的权限范围）。每条路由在路由表里声明要的权限范围：
+// 和现有 /api/* 不同，这里认三种主体：有效的 session cookie（网页登录，拥有全部权限范围），
+// `Authorization: Bearer ptt_…` 的 API 令牌（只有自己的权限范围），以及经远程访问隧道来的设备（M15，只有配对时给的权限范围）。每条路由在路由表里声明要的权限范围：
 // 没有主体回 401，权限范围不够回 403。返回的 DTO 只放 App 要的字段，不放 Cookie、API key、passkey、密码、
-// RSS 地址、下载链接与通知配置。令牌做的写操作记进操作审计（ChannelType 是 api_token）。
+// RSS 地址、下载链接与通知配置。令牌与远程设备做的写操作记进操作审计（ChannelType 是 api_token 或 remote_device）。
 
 const (
 	appPrefix = "/api/app/v1"
@@ -174,8 +174,12 @@ func appSetOutcome(r *http.Request, outcome string) {
 	}
 }
 
-// appPrincipal 解析请求的主体：有效的 session cookie 优先，其次是 Bearer 令牌。没有主体时返回 nil 与要回的状态码。
+// appPrincipal 解析请求的主体：远程访问隧道里的请求是那台设备（分发器放进 context，HTTP 伪造不了）；
+// 别的请求有效的 session cookie 优先，其次是 Bearer 令牌。没有主体时返回 nil 与要回的状态码。
 func (s *Server) appPrincipal(r *http.Request) (*middleware.Principal, int) {
+	if p := remotePrincipal(r); p != nil {
+		return p, 0
+	}
 	if c, err := r.Cookie("session"); err == nil {
 		if user, ok := s.sessions.lookup(c.Value); ok {
 			return &middleware.Principal{Kind: middleware.KindSession, ID: user}, 0

@@ -10,6 +10,9 @@
 vendor/
 *.pb.go
 
+# 远程访问协议的测试向量：vectors.json 由 TestVectors 生成并逐字节核对，noise_ik_vectors.json 摘自公开测试向量，内容不改
+internal/remote/testdata/
+
 # Release-please-owned metadata — DO NOT reformat
 changelog/
 CHANGELOG.md
