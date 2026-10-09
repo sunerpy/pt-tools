@@ -7,6 +7,8 @@ export const OUTER_HEADER_LEN = 5;
 export const MAX_NOISE_MESSAGE = 65535;
 export const MAX_OUTER_FRAME = OUTER_HEADER_LEN + MAX_NOISE_MESSAGE;
 export const NONCE_LEN = 32;
+/** 主机在一个流上发出第一条 DATA 以前，客户端只能发一条消息（Noise 握手的第一条），不超过这么多字节，也不计入每天的转发量 */
+export const MAX_UNCONFIRMED = 4096;
 export const AUTH_PAYLOAD_LEN = 32 + 64;
 const MAX_CLOSE_REASON = 123;
 const RELAY_AUTH_CONTEXT = "pt-tools-relay-v1";

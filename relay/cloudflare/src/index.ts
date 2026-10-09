@@ -13,6 +13,7 @@ import {
   encodeOuter,
   ipKey,
   MAX_NOISE_MESSAGE,
+  MAX_UNCONFIRMED,
   NONCE_LEN,
   OuterType,
   parseClosePayload,
@@ -156,7 +157,17 @@ type Attachment =
   | { t: "pending"; nonce: string; at: number; origin: string; host: string }
   | { t: "authing"; at: number }
   | { t: "host"; epoch: number; host: string }
-  | { t: "client"; stream: number; epoch: number }
+  /**
+   * confirmed：主机已经在这个流上发过 DATA。之前客户端只能发一条（sent），它的字节数记在 pending，确认时才计入用量
+   */
+  | {
+      t: "client";
+      stream: number;
+      epoch: number;
+      confirmed?: boolean;
+      sent?: boolean;
+      pending?: number;
+    }
   | { t: "closed" };
 
 interface Usage {
@@ -435,12 +446,20 @@ export class HostRelay extends DurableObject<Env> {
     // 验签要等（别的事件会插进来）：先改成 authing，验签期间这个连接再发来的消息按违反协议处理
     ws.serializeAttachment({ t: "authing", at: a.at } satisfies Attachment);
     const ok = await verifyRelayAuth(a.host, unb64(a.nonce), a.origin, f.payload);
-    if (this.attachment(ws)?.t !== "authing") return; // 等验签的时候关掉了（超时、违反协议）
+    // 等验签的时候关掉了（超时、违反协议、断开）：什么也不动
+    if (this.attachment(ws)?.t !== "authing" || ws.readyState !== WebSocket.OPEN) return;
     if (!ok) {
       markClosed(ws, CLOSE.authFailed, "auth failed");
       return;
     }
-    // 认证通过：下面这段同步执行，不会和别的连接的认证交错。替换同一个 hostId 的旧连接（旧的 4409，它的客户端 4404）
+    // 认证通过：下面这段同步执行，不会和别的连接的认证交错。先确认 READY 发得出去，再替换同一个 hostId 的旧连接
+    // （旧的 4409，它的客户端 4404）
+    if (
+      !safeSend(ws, encodeOuter({ type: OuterType.Ready, stream: 0, payload: new Uint8Array() }))
+    ) {
+      markClosed(ws, CLOSE.authFailed, "gone");
+      return;
+    }
     const epoch = this.nextEpoch();
     const old = this.hostSocket();
     if (old) {
@@ -448,7 +467,6 @@ export class HostRelay extends DurableObject<Env> {
       this.dropHost(old, oldEpoch, CLOSE.replaced, "replaced by a newer connection");
     }
     ws.serializeAttachment({ t: "host", epoch, host: a.host } satisfies Attachment);
-    safeSend(ws, encodeOuter({ type: OuterType.Ready, stream: 0, payload: new Uint8Array() }));
   }
 
   private async onHostMessage(
@@ -469,7 +487,14 @@ export class HostRelay extends DurableObject<Env> {
       case OuterType.Data: {
         const c = this.clientFor(f.stream);
         if (!c) return;
-        if (!(await this.count(f.payload.length))) return;
+        const ca = this.attachment(c) as Attachment & { t: "client" };
+        let n = f.payload.length;
+        if (!ca.confirmed) {
+          // 主机回话了：这个流确认了，连同客户端那条握手消息一起计量
+          n += ca.pending ?? 0;
+          c.serializeAttachment({ ...ca, confirmed: true, pending: 0 } satisfies Attachment);
+        }
+        if (!(await this.count(n))) return;
         // 发不出去（运行时的发送缓冲满了、连接已经断了）：按跟不上的客户端处理
         if (!safeSend(c, f.payload)) this.closeClient(c, CLOSE.limited, "slow reader", true);
         return;
@@ -505,7 +530,18 @@ export class HostRelay extends DurableObject<Env> {
       this.closeClient(ws, CLOSE.hostOffline, "host offline", false);
       return;
     }
-    if (!(await this.count(message.byteLength))) {
+    if (!a.confirmed) {
+      // 主机回话以前只放行一条不大的消息（Noise 握手的第一条），不计量：未认证的客户端耗不掉主机的额度
+      if (a.sent || message.byteLength > MAX_UNCONFIRMED) {
+        this.closeClient(ws, CLOSE.protocol, "wait for the host", true);
+        return;
+      }
+      ws.serializeAttachment({
+        ...a,
+        sent: true,
+        pending: message.byteLength,
+      } satisfies Attachment);
+    } else if (!(await this.count(message.byteLength))) {
       this.closeClient(ws, CLOSE.limited, "daily quota exceeded", true);
       return;
     }
@@ -533,6 +569,9 @@ export class HostRelay extends DurableObject<Env> {
     } else if (a?.t === "client") {
       // 客户端走了：把它的关闭码告诉主机
       this.closeClient(ws, clientCloseCode(code), reason, true);
+    } else if (a?.t === "pending" || a?.t === "authing") {
+      // 认证中的主机连接断了：标成 closed，正在验签的那一段看到以后不会再替换在线的主机
+      markClosed(ws, 1000, "");
     }
     safeClose(ws, 1000, "");
   }

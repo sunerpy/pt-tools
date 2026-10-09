@@ -355,9 +355,14 @@ describe("relay", () => {
   it("每天的转发量（这里是 4096 字节）：超额以后客户端流 4429，新的客户端也 4429，主机连接还在", async () => {
     const h = await connectHost();
     const c = await open(`/v1/client/${h.id}`);
-    await h.conn.outer();
+    const o = await h.conn.outer();
     c.send(new Uint8Array(3000));
     expect((await h.conn.outer()).type).toBe(OuterType.Data);
+    // 主机回话以后才开始计
+    h.conn.send(
+      encodeOuter({ type: OuterType.Data, stream: o.stream, payload: new Uint8Array(10) }),
+    );
+    await c.next();
     c.send(new Uint8Array(3000));
     expect(await c.closed).toBe(CLOSE.limited);
     const c2 = await open(`/v1/client/${h.id}`);
@@ -372,8 +377,14 @@ describe("relay", () => {
   it("每天的用量先写进存储再用：存储里的数不少于已经转发的，Durable Object 换了实例照样算", async () => {
     const h = await connectHost();
     const c = await open(`/v1/client/${h.id}`);
-    await h.conn.outer();
-    c.send(new Uint8Array(3000));
+    const o = await h.conn.outer();
+    c.send(new Uint8Array(1000));
+    expect((await h.conn.outer()).type).toBe(OuterType.Data);
+    h.conn.send(
+      encodeOuter({ type: OuterType.Data, stream: o.stream, payload: new Uint8Array(1000) }),
+    );
+    await c.next();
+    c.send(new Uint8Array(1000));
     expect((await h.conn.outer()).type).toBe(OuterType.Data);
     const stub = hostStub(h.id);
     const stored = await runInDurableObject(stub, (_, state) =>
@@ -388,6 +399,69 @@ describe("relay", () => {
     });
     c.send(new Uint8Array(2000));
     expect(await c.closed).toBe(CLOSE.limited);
+  });
+
+  it("主机回话以前：客户端只能发一条不超过 4096 字节的消息，而且不计入每天的转发量", async () => {
+    const h = await connectHost();
+    // 两个未确认的流各发 3000 字节（合计超过 4096 的额度），主机解不开、关掉
+    for (let i = 0; i < 2; i++) {
+      const g = await open(`/v1/client/${h.id}`);
+      const o = await h.conn.outer();
+      g.send(new Uint8Array(3000));
+      expect((await h.conn.outer()).type).toBe(OuterType.Data);
+      h.conn.send(
+        encodeOuter({ type: OuterType.Close, stream: o.stream, payload: closePayload(1000, "") }),
+      );
+      expect(await g.closed).toBe(1000);
+    }
+    // 正常的流照样能用：握手一来一回以后再发 3000 字节
+    const c = await open(`/v1/client/${h.id}`);
+    const o = await h.conn.outer();
+    expect(o.type).toBe(OuterType.Open);
+    c.send(new Uint8Array(100));
+    expect((await h.conn.outer()).type).toBe(OuterType.Data);
+    h.conn.send(
+      encodeOuter({ type: OuterType.Data, stream: o.stream, payload: new Uint8Array(100) }),
+    );
+    await c.next();
+    c.send(new Uint8Array(3000));
+    const d = await h.conn.outer();
+    expect(d.type).toBe(OuterType.Data);
+    expect(d.payload.length).toBe(3000);
+    c.ws.close(1000, "");
+    expect((await h.conn.outer()).type).toBe(OuterType.Close);
+    // 回话以前的第二条、太大的第一条：4400
+    const two = await open(`/v1/client/${h.id}`);
+    await h.conn.outer();
+    two.send(new Uint8Array(10));
+    two.send(new Uint8Array(10));
+    expect(await two.closed).toBe(CLOSE.protocol);
+  });
+
+  it("主机回话以前的第一条消息超过 4096 字节：4400", async () => {
+    const h = await connectHost();
+    const big = await open(`/v1/client/${h.id}`);
+    await h.conn.outer();
+    big.send(new Uint8Array(4097));
+    expect(await big.closed).toBe(CLOSE.protocol);
+  });
+
+  it("认证还在验签时连接断开：不会替换在线的主机", async () => {
+    const k = await newKey();
+    const online = await connectHost(k);
+    expect(online.ready).toBe(true);
+    const c = await open(`/v1/client/${k.id}`);
+    expect((await online.conn.outer()).type).toBe(OuterType.Open);
+    const late = await open(`/v1/host/${k.id}`);
+    const ch = await late.outer();
+    late.send(await signAuth(k, ch.payload));
+    late.ws.close(1000, "");
+    await late.closed;
+    // 在线的主机与它的客户端都还在
+    expect(await closedWithin(online.conn, 500)).toBeNull();
+    expect(await closedWithin(c, 100)).toBeNull();
+    c.send(new Uint8Array(5));
+    expect((await online.conn.outer()).type).toBe(OuterType.Data);
   });
 
   it("每 IP 的计数写进存储：Durable Object 换了实例不清零", async () => {
