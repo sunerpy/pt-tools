@@ -20,6 +20,9 @@ const (
 	MaxOuterFrame = OuterHeaderLen + MaxNoiseMessage
 	// NonceLen 是 relay 认证质询的长度
 	NonceLen = 32
+	// MaxUnconfirmed 是主机在一个流上发出第一条 DATA 以前，客户端那一条消息（Noise 握手的第一条）的上限；
+	// 这之前客户端只能发这一条，relay 也不把它计入每天的转发量（要等主机回话才算），未认证的客户端耗不掉主机的额度
+	MaxUnconfirmed = 4096
 	// AuthPayloadLen 是 AUTH 的长度：Ed25519 公钥加签名
 	AuthPayloadLen = ed25519.PublicKeySize + ed25519.SignatureSize
 	// maxCloseReason 是 CLOSE 原因的上限（和 WebSocket 关闭原因一样是 123 字节）

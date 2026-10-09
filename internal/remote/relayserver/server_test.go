@@ -250,3 +250,68 @@ func TestUsageByHostID(t *testing.T) {
 	assert.False(t, b.overQuota(), "过了 00:00 UTC 重置")
 	assert.True(t, b.count(5))
 }
+
+// authHost 以 keys 连上 relay（u）并认证。
+func authHost(t *testing.T, ctx context.Context, u string, keys *remote.HostKeys) *websocket.Conn {
+	t.Helper()
+	ws, _, err := websocket.Dial(ctx, u+"/v1/host/"+keys.HostID(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	ws.SetReadLimit(remote.MaxOuterFrame)
+	ch := readOuterFrame(t, ctx, ws)
+	auth, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterAuth, Payload: keys.RelayAuth(ch.Payload, u)})
+	require.NoError(t, ws.Write(ctx, websocket.MessageBinary, auth))
+	require.Equal(t, remote.OuterReady, readOuterFrame(t, ctx, ws).Type)
+	return ws
+}
+
+func readOuterFrame(t *testing.T, ctx context.Context, ws *websocket.Conn) remote.OuterFrame {
+	t.Helper()
+	_, b, err := ws.Read(ctx)
+	require.NoError(t, err)
+	f, err := remote.ParseOuter(b)
+	require.NoError(t, err)
+	return f
+}
+
+// 主机回话以前客户端的消息不计入每天的转发量：未认证的客户端发垃圾耗不掉主机的额度
+func TestUnconfirmedNotCounted(t *testing.T) {
+	_, u := start(t, Config{MaxConnPerIPPerMin: -1, DailyBytesPerHost: 10_000})
+	keys, err := remote.GenerateHostKeys(nil)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	host := authHost(t, ctx, u, keys)
+	writeHost := func(f remote.OuterFrame) {
+		b, _ := remote.AppendOuter(nil, f)
+		require.NoError(t, host.Write(ctx, websocket.MessageBinary, b))
+	}
+	for i := 0; i < 4; i++ {
+		g, gerr := remote.DialRelay(ctx, u, keys.HostID(), nil)
+		require.NoError(t, gerr)
+		open := readOuterFrame(t, ctx, host)
+		require.Equal(t, remote.OuterOpen, open.Type)
+		require.NoError(t, g.WriteMsg(ctx, make([]byte, 4000)))
+		require.Equal(t, remote.OuterData, readOuterFrame(t, ctx, host).Type)
+		// 主机解不开，关掉这个流
+		writeHost(remote.OuterFrame{Type: remote.OuterClose, Stream: open.Stream, Payload: remote.ClosePayload(1000, "")})
+		g.Close(1000, "")
+	}
+	c, err := remote.DialRelay(ctx, u, keys.HostID(), nil)
+	require.NoError(t, err)
+	defer c.Close(1000, "")
+	var open remote.OuterFrame
+	for open.Type != remote.OuterOpen {
+		open = readOuterFrame(t, ctx, host)
+	}
+	require.NoError(t, c.WriteMsg(ctx, []byte("hi")))
+	for f := readOuterFrame(t, ctx, host); f.Type != remote.OuterData || f.Stream != open.Stream; f = readOuterFrame(t, ctx, host) {
+	}
+	writeHost(remote.OuterFrame{Type: remote.OuterData, Stream: open.Stream, Payload: []byte("hi")})
+	_, err = c.ReadMsg(ctx)
+	require.NoError(t, err)
+	require.NoError(t, c.WriteMsg(ctx, make([]byte, 9000)))
+	f := readOuterFrame(t, ctx, host)
+	assert.Equal(t, remote.OuterData, f.Type, "前面 16000 字节的未确认消息不算，这条还在额度里")
+	assert.Len(t, f.Payload, 9000)
+}

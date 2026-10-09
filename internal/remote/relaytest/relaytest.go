@@ -87,6 +87,7 @@ func Run(t *testing.T, tg Target) {
 		t.Run("replace", func(t *testing.T) { testReplace(t, tg) })
 		t.Run("stream_limit", func(t *testing.T) { testStreamLimit(t, tg) })
 		t.Run("slow_reader", func(t *testing.T) { testSlowReader(t, tg) })
+		t.Run("unconfirmed", func(t *testing.T) { testUnconfirmed(t, tg) })
 		t.Run("client_text", func(t *testing.T) { testClientText(t, tg) })
 		t.Run("client_too_big", func(t *testing.T) { testClientTooBig(t, tg) })
 		t.Run("host_bad_frame", func(t *testing.T) { testHostBadFrame(t, tg) })
@@ -296,23 +297,23 @@ func testForward(t *testing.T, tg Target) {
 	assert.NotZero(t, o1.Stream)
 	assert.Greater(t, o2.Stream, o1.Stream, "流编号递增")
 
-	// 客户端 → 主机：每条二进制消息装进 DATA，内容不变（最大 65535 字节）
+	// 客户端 → 主机：每条二进制消息装进 DATA，内容不变（第一条是握手消息）
 	big := make([]byte, remote.MaxNoiseMessage)
 	_, _ = rand.Read(big)
 	clientWrite(t, c1, []byte("hello"))
 	f := h.expect(remote.OuterData)
 	assert.Equal(t, o1.Stream, f.Stream)
 	assert.Equal(t, "hello", string(f.Payload))
-	clientWrite(t, c2, big)
-	f = h.expect(remote.OuterData)
-	assert.Equal(t, o2.Stream, f.Stream)
-	assert.True(t, bytes.Equal(big, f.Payload))
 
-	// 主机 → 客户端
+	// 主机 → 客户端（主机在流上发出 DATA 以后，客户端的消息就不再限于一条、最大 65535 字节）
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o1.Stream, Payload: []byte("world")})
 	assert.Equal(t, "world", string(clientRead(t, c1)))
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o2.Stream, Payload: big})
 	assert.True(t, bytes.Equal(big, clientRead(t, c2)))
+	clientWrite(t, c2, big)
+	f = h.expect(remote.OuterData)
+	assert.Equal(t, o2.Stream, f.Stream)
+	assert.True(t, bytes.Equal(big, f.Payload))
 	// 不认识的流上的 DATA 忽略
 	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: 0x7fffffff, Payload: []byte("x")})
 
@@ -416,6 +417,27 @@ func testSlowReader(t *testing.T, tg Target) {
 	}
 }
 
+// 主机在流上发出第一条 DATA 以前，客户端只能发一条不超过 4096 字节的消息（Noise 握手的第一条），多的或者大的 4400。
+func testUnconfirmed(t *testing.T, tg Target) {
+	h := connectHost(t, tg, newKeys(t))
+	c := connectClient(t, tg, h.keys.HostID())
+	o := h.expect(remote.OuterOpen)
+	clientWrite(t, c, make([]byte, remote.MaxUnconfirmed))
+	f := h.expect(remote.OuterData)
+	assert.Equal(t, o.Stream, f.Stream)
+	clientWrite(t, c, []byte("second"))
+	assert.Equal(t, remote.CloseProtocol, closeCode(t, c), "主机回话以前的第二条消息")
+	f = h.expect(remote.OuterClose)
+	assert.Equal(t, o.Stream, f.Stream)
+
+	big := connectClient(t, tg, h.keys.HostID())
+	ob := h.expect(remote.OuterOpen)
+	clientWrite(t, big, make([]byte, remote.MaxUnconfirmed+1))
+	assert.Equal(t, remote.CloseProtocol, closeCode(t, big), "主机回话以前的大消息")
+	f = h.expect(remote.OuterClose)
+	assert.Equal(t, ob.Stream, f.Stream)
+}
+
 func testClientText(t *testing.T, tg Target) {
 	h := connectHost(t, tg, newKeys(t))
 	c := connectClient(t, tg, h.keys.HostID())
@@ -462,8 +484,13 @@ func testDailyBytes(t *testing.T, tg Target) {
 	h := connectHost(t, tg, newKeys(t))
 	c := connectClient(t, tg, h.keys.HostID())
 	o := h.expect(remote.OuterOpen)
+	// 握手：客户端一条、主机回一条以后，流上的转发量才开始计
+	clientWrite(t, c, []byte("hi"))
+	h.expect(remote.OuterData)
+	writeOuter(t, h.ws, remote.OuterFrame{Type: remote.OuterData, Stream: o.Stream, Payload: []byte("hi")})
+	clientRead(t, c)
 	chunk := make([]byte, 32<<10)
-	sent := int64(0)
+	sent := int64(4)
 	var code int
 	for sent <= tg.DailyBytesPerHost+int64(len(chunk)) {
 		ctx, cancel := context.WithTimeout(context.Background(), step)

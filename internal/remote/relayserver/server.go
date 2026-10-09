@@ -363,17 +363,18 @@ func (h *hostConn) count(n int) bool {
 		u.over = true
 	}
 	over := u.over
-	h.s.usageMu.Unlock()
+	var list []*clientConn
 	if tripped {
 		h.mu.Lock()
-		list := make([]*clientConn, 0, len(h.streams))
+		list = make([]*clientConn, 0, len(h.streams))
 		for _, c := range h.streams {
 			list = append(list, c)
 		}
 		h.mu.Unlock()
-		for _, c := range list {
-			c.close(remote.CloseLimited, "daily quota exceeded")
-		}
+	}
+	h.s.usageMu.Unlock()
+	for _, c := range list {
+		c.close(remote.CloseLimited, "daily quota exceeded")
 	}
 	return !over
 }
@@ -388,26 +389,38 @@ func (h *hostConn) overQuota() bool {
 }
 
 // openStream 为新的客户端分配流编号并通知主机；超出上限时返回关闭码。
+// 额度检查与登记在同一段锁里（usageMu → h.mu，和 count 超额时取流列表的顺序一样），超额那一刻之后登记的流一定会被拒绝。
 func (h *hostConn) openStream(ws *websocket.Conn) (*clientConn, int, string) {
-	if h.overQuota() {
-		return nil, remote.CloseLimited, "daily quota exceeded"
+	c, code, reason := h.register(ws)
+	if c == nil {
+		return nil, code, reason
 	}
-	h.mu.Lock()
-	if h.closed.Load() {
-		h.mu.Unlock()
-		return nil, remote.CloseHostOffline, "host offline"
-	}
-	if len(h.streams) >= h.s.cfg.MaxStreamsPerHost {
-		h.mu.Unlock()
-		return nil, remote.CloseLimited, "too many streams"
-	}
-	c := newClientConn(h, ws, h.allocStream())
-	h.streams[c.id] = c
-	h.mu.Unlock()
 	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterOpen, Stream: c.id}); err != nil {
 		h.removeStream(c.id)
 		return nil, remote.CloseHostOffline, "host offline"
 	}
+	return c, 0, ""
+}
+
+// register 检查额度与流上限并登记新的流（锁只在这里面持有，通知主机在锁外）。
+func (h *hostConn) register(ws *websocket.Conn) (*clientConn, int, string) {
+	if h.s.cfg.DailyBytesPerHost > 0 {
+		h.s.usageMu.Lock()
+		defer h.s.usageMu.Unlock()
+		if h.s.usageOf(h.id).over {
+			return nil, remote.CloseLimited, "daily quota exceeded"
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed.Load() {
+		return nil, remote.CloseHostOffline, "host offline"
+	}
+	if len(h.streams) >= h.s.cfg.MaxStreamsPerHost {
+		return nil, remote.CloseLimited, "too many streams"
+	}
+	c := newClientConn(h, ws, h.allocStream())
+	h.streams[c.id] = c
 	return c, 0, ""
 }
 
@@ -459,7 +472,7 @@ func (h *hostConn) readLoop() {
 			if c == nil {
 				continue
 			}
-			if !h.count(len(f.Payload)) {
+			if !c.fromHost(len(f.Payload)) {
 				continue
 			}
 			if !c.pushData(f.Payload) {
@@ -512,6 +525,13 @@ type clientConn struct {
 	done    chan struct{}
 	once    sync.Once
 	closed  atomic.Bool
+
+	// 主机在这个流上发出第一条 DATA 以前（confirmed 为假），客户端只能发一条不超过 MaxUnconfirmed 的消息（sent），
+	// 它的字节数先记在 pending 里，等主机回话时才计入每天的转发量
+	confMu    sync.Mutex
+	confirmed bool
+	sent      bool
+	pending   int
 }
 
 func newClientConn(h *hostConn, ws *websocket.Conn, id uint32) *clientConn {
@@ -524,6 +544,37 @@ type outMsg struct {
 	close  bool
 	code   int
 	reason string
+}
+
+// fromClient 在转发客户端的一条消息之前调用：主机回话以前只放行第一条（不计量），之后计入每天的转发量。
+// 不放行时返回关闭码。
+func (c *clientConn) fromClient(n int) (bool, int, string) {
+	c.confMu.Lock()
+	if !c.confirmed {
+		defer c.confMu.Unlock()
+		if c.sent || n > remote.MaxUnconfirmed {
+			return false, remote.CloseProtocol, "wait for the host"
+		}
+		c.sent, c.pending = true, n
+		return true, 0, ""
+	}
+	c.confMu.Unlock()
+	if !c.h.count(n) {
+		return false, remote.CloseLimited, "daily quota exceeded"
+	}
+	return true, 0, ""
+}
+
+// fromHost 在转发主机的一条 DATA 之前调用：第一条 DATA 确认这个流，连同客户端那条握手消息一起计入转发量。
+func (c *clientConn) fromHost(n int) bool {
+	c.confMu.Lock()
+	if !c.confirmed {
+		c.confirmed = true
+		n += c.pending
+		c.pending = 0
+	}
+	c.confMu.Unlock()
+	return c.h.count(n)
 }
 
 // pushData 把主机的一条 DATA 排进客户端的队列，不等；排满时返回 false。流已经关了、主机已经要求关时直接丢掉。
@@ -602,8 +653,8 @@ func (c *clientConn) readLoop() {
 			c.close(remote.CloseProtocol, "binary only")
 			return
 		}
-		if !c.h.count(len(b)) {
-			c.close(remote.CloseLimited, "daily quota exceeded")
+		if ok, code, reason := c.fromClient(len(b)); !ok {
+			c.close(code, reason)
 			return
 		}
 		if err := c.h.writeOuter(remote.OuterFrame{Type: remote.OuterData, Stream: c.id, Payload: b}); err != nil {
