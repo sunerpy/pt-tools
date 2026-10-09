@@ -34,6 +34,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
+	"github.com/sunerpy/pt-tools/internal/remote"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -58,7 +59,9 @@ type Server struct {
 	appAudit appAuditRecorder
 	// qbitCompat 是 qB 兼容入口（M13，开了监听时才有），设置页用它显示监听地址
 	qbitCompat *qbitcompat.Server
-	qaHook     func(*http.ServeMux) // qa-build-only test hook installer
+	// remote 是远程访问的主机端（M15）；为空时直连入口 404，设置接口回 503
+	remote *remote.Host
+	qaHook func(*http.ServeMux) // qa-build-only test hook installer
 
 	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
 	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
@@ -150,7 +153,8 @@ func (s *Server) Serve(addr string) error {
 	return nil
 }
 
-// buildHandler 建出完整的路由（接口、App API、SPA 与静态资源），Serve 与测试共用（远程接入的隧道以后也用它分发）。
+// buildHandler 建出完整的路由（接口、App API、SPA 与静态资源），Serve 与测试共用。
+// 远程访问的隧道不经这里分发：它只挂 App API 的路由（见 RemoteDispatcher）。
 func (s *Server) buildHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", s.loginHandler)
@@ -217,6 +221,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerQbitCompatRoutes(mux)
 	s.registerAppV1Routes(mux)
 	s.registerMCPRoutes(mux)
+	s.registerRemoteRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
 	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))

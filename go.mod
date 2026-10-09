@@ -32,6 +32,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/gorm v1.31.2
 	moul.io/zapgorm2 v1.3.0
+	rsc.io/qr v0.2.0
 )
 
 require (
