@@ -75,6 +75,11 @@ mainRunServer() {
     # 以目标用户运行应用（使用 exec 切换，避免启动残留 PID 1）
     HOST=${PT_HOST:-0.0.0.0}
     PORT=${PT_PORT:-8080}
+    # PT_MODE=relay：运行远程访问的 relay（只做转发，不读写 /app/.pt-tools）；参数从 PT_TOOLS_RELAY_* 环境变量读，
+    # 例如 PT_TOOLS_RELAY_PUBLIC_URL=wss://relay.example.com、PT_TOOLS_RELAY_LISTEN=0.0.0.0:8443
+    if [ "${PT_MODE:-web}" = "relay" ]; then
+        exec gosu "$PUID:$PGID" "$@" relay serve
+    fi
     exec gosu "$PUID:$PGID" "$@" web --host "$HOST" --port "$PORT"
 }
 if [ "$#" -ne 1 ] && [ "$#" -ne 0 ]; then

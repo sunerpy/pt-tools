@@ -40,11 +40,11 @@ func init() {
 	initKey()
 }
 
-// skipKeyAtStart 报告这个进程启动时要不要跳过读取或生成密钥：pt-tools mcp 是 stdio 到 HTTP 的桥，用不到密钥，
-// 不碰 ~/.pt-tools（客户端那台机器上不留一个和服务端无关的密钥）。别的命令照旧在启动时读取或生成：
-// ConfigStore 等处按 ~/.pt-tools/secret.key 文件在不在判断密钥能不能用。
+// skipKeyAtStart 报告这个进程启动时要不要跳过读取或生成密钥：pt-tools mcp 是 stdio 到 HTTP 的桥，pt-tools relay
+// 是只做转发的 relay，都用不到密钥，不碰 ~/.pt-tools（那台机器上不留一个和 pt-tools 本身无关的密钥）。
+// 别的命令照旧在启动时读取或生成：ConfigStore 等处按 ~/.pt-tools/secret.key 文件在不在判断密钥能不能用。
 func skipKeyAtStart(args []string) bool {
-	return len(args) > 1 && args[1] == "mcp"
+	return len(args) > 1 && (args[1] == "mcp" || args[1] == "relay")
 }
 
 type AESGCMEncryptor struct {
