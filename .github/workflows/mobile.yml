@@ -1,0 +1,160 @@
+# 手机 App（apps/mobile，路线图 M17）的非发布 CI：生成代码与文案没有漂移、格式、静态检查、单测、对 Go 测试主机的直连与 relay 互通，
+# 以及未签名的 debug APK 与 iOS（不签名）能构建。只测不发布：发布在 M18 的 mobile-release.yml。
+name: Mobile
+
+on:
+  pull_request:
+    branches: [main, v1.0.0-rc]
+    paths:
+      - "apps/mobile/**"
+      - "internal/remote/**"
+      - "docs/reference/app-api-v1.yaml"
+      - ".github/workflows/mobile.yml"
+  push:
+    branches: [main, v1.0.0-rc]
+    paths:
+      - "apps/mobile/**"
+      - "internal/remote/**"
+      - "docs/reference/app-api-v1.yaml"
+      - ".github/workflows/mobile.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  test:
+    name: Mobile · Analyze & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java (openapi-generator)
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Generated code and strings are up to date
+        run: |
+          tool/gen_api.sh
+          python3 tool/strings.py
+          flutter gen-l10n
+          dart format lib/l10n > /dev/null
+          git diff --exit-code -- packages/ptt_api lib/l10n
+
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Interop with the Go host (direct and relay)
+        run: |
+          (cd ../.. && go build -o "$RUNNER_TEMP/testhost" ./internal/remote/testhost)
+          "$RUNNER_TEMP/testhost" -info "$RUNNER_TEMP/testhost.json" > "$RUNNER_TEMP/testhost.log" 2>&1 &
+          echo "TESTHOST_PID=$!" >> "$GITHUB_ENV"
+          if ! timeout 60 sh -c 'until [ -f "$1" ]; do sleep 1; done' _ "$RUNNER_TEMP/testhost.json"; then
+            cat "$RUNNER_TEMP/testhost.log"
+            exit 1
+          fi
+          PTT_TESTHOST="$RUNNER_TEMP/testhost.json" flutter test test/interop
+
+      - name: Stop the Go host
+        if: always()
+        run: if [ -n "${TESTHOST_PID:-}" ]; then kill "$TESTHOST_PID" || true; fi
+
+  android:
+    name: Mobile · Android (debug APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Build debug APK (unsigned)
+        run: |
+          flutter pub get
+          flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pt-tools-app-debug-apk
+          path: apps/mobile/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
+
+  ios:
+    name: Mobile · iOS (no codesign)
+    runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Build iOS (no codesign)
+        run: |
+          flutter pub get
+          flutter build ios --no-codesign
