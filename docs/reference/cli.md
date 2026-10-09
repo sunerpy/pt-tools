@@ -35,6 +35,27 @@ PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
 
 连接成功时在标准错误输出一行提示，标准输出只用于 MCP 协议。
 
+## pt-tools relay serve
+
+运行[远程访问](../guide/remote-access.md)的 relay：手机 App 与 pt-tools 都连到它，由它转发加密以后的连接，看不到内容。适合放在有公网地址的 VPS 或 NAS 上自己部署。它不打开数据库，也不读写 `~/.pt-tools`。
+
+```bash
+pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
+```
+
+| 参数                        | 说明                                                                                                                                    | 默认值         |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `--public-url`              | relay 对外的地址（`ws://` 或 `wss://`），App 与 pt-tools 里填的就是它；主机按它签名，必须和实际访问的地址一致。必填                     | 无             |
+| `--listen`                  | 监听地址                                                                                                                                | `0.0.0.0:8443` |
+| `--max-streams-per-host`    | 每台 pt-tools 同时连着的手机连接上限，多的以 4429 关闭                                                                                  | `16`           |
+| `--daily-bytes-per-host`    | 每台 pt-tools 每天（00:00 UTC 重置）转发的字节上限，两个方向合计；超额以后它的手机连接全部断开，直到重置。`0` 表示不限                  | `0`            |
+| `--max-conn-per-ip-per-min` | 每个 IP 每分钟新建连接的上限，负数表示不限                                                                                              | `30`           |
+| `--client-ip-header`        | 从这个请求头取客户端 IP（放在反向代理之后时，例如 `X-Real-IP`）；头里有多个地址时取最后一个（代理追加的）。只有确定请求都经过代理时才设 | 无             |
+| `--tls-cert`、`--tls-key`   | TLS 证书与私钥文件；不填时是明文，交给反向代理做 TLS                                                                                    | 无             |
+| `--disabled`                | 暂停服务：所有连接以 4503 关闭                                                                                                          | 关             |
+
+每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`；值写错（数字不是整数、开关不是 `true`/`false`），或者 `--max-streams-per-host`、`--daily-bytes-per-host` 是负数时不启动（`--max-conn-per-ip-per-min` 的负数仍表示不限）。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本。
+
 ## pt-tools secret
 
 导出或导入用于加密站点 Cookie 和通知凭证的密钥。

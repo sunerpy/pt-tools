@@ -35,6 +35,27 @@ PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
 
 Once connected it prints one line to standard error; standard output carries only the MCP protocol.
 
+## pt-tools relay serve
+
+Runs a relay for [remote access](../guide/remote-access.md): the mobile app and pt-tools both connect to it and it forwards their encrypted connections without being able to read them. Run it yourself on a VPS or NAS with a public address. It opens no database and does not read or write `~/.pt-tools`.
+
+```bash
+pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
+```
+
+| Option                      | Meaning                                                                                                                                                                                                                                  | Default        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `--public-url`              | The relay's public address (`ws://` or `wss://`), the one you enter in the app and in pt-tools; hosts sign against it, so it must match the address actually used. Required                                                              | None           |
+| `--listen`                  | Listen address                                                                                                                                                                                                                           | `0.0.0.0:8443` |
+| `--max-streams-per-host`    | How many phone connections one pt-tools may have at once; extra ones are closed with 4429                                                                                                                                                | `16`           |
+| `--daily-bytes-per-host`    | Bytes forwarded per pt-tools per day (reset at 00:00 UTC), both directions together; over the limit its phone connections close until the reset. `0` means no limit                                                                      | `0`            |
+| `--max-conn-per-ip-per-min` | New connections per IP address per minute; a negative value means no limit                                                                                                                                                               | `30`           |
+| `--client-ip-header`        | Take the client IP from this request header (behind a reverse proxy, for example `X-Real-IP`); when the header lists several addresses, the last one (added by the proxy) counts. Set it only when every request comes through the proxy | None           |
+| `--tls-cert`, `--tls-key`   | TLS certificate and key files; without them the relay speaks plain WebSocket and leaves TLS to a reverse proxy                                                                                                                           | None           |
+| `--disabled`                | Pause the service: every connection is closed with 4503                                                                                                                                                                                  | off            |
+
+Each option can also come from an environment variable: `PT_TOOLS_RELAY_LISTEN`, `PT_TOOLS_RELAY_PUBLIC_URL`, `PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`, `PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`, `PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`, `PT_TOOLS_RELAY_CLIENT_IP_HEADER`, `PT_TOOLS_RELAY_TLS_CERT`, `PT_TOOLS_RELAY_TLS_KEY` and `PT_TOOLS_RELAY_DISABLED=true`. A value that does not parse (a number that is not an integer, a switch that is not `true`/`false`), or a negative `--max-streams-per-host` or `--daily-bytes-per-host`, stops it from starting; a negative `--max-conn-per-ip-per-min` still means no limit. The Docker image runs it when `PT_MODE=relay` is set. `GET /healthz` returns the status and the version.
+
 ## pt-tools secret
 
 Exports or imports the key that encrypts site cookies and notification credentials.

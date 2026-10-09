@@ -1,0 +1,25 @@
+// pt-tools 远程访问的 relay（Cloudflare 版）。自己部署：pnpm install && pnpm exec wrangler deploy，
+// 地址是 https://pt-tools-relay.<你的子域>.workers.dev（App 与 pt-tools 里填 wss://…）；要用自己的域名就加 --domain relay.example.com。
+// 限额用 vars 覆盖（字符串）：MAX_STREAMS_PER_HOST、DAILY_BYTES_PER_HOST（0 = 不限）、MAX_CONN_PER_IP_PER_MIN（负数 = 不限）、RELAY_DISABLED。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pt-tools-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "durable_objects": {
+    "bindings": [
+      { "name": "HOST_RELAY", "class_name": "HostRelay" },
+      { "name": "IP_LIMITER", "class_name": "IPLimiter" },
+    ],
+  },
+  // 免费计划的 Durable Object 只能用 SQLite 存储
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HostRelay", "IPLimiter"] }],
+  "vars": {
+    "MAX_STREAMS_PER_HOST": "16",
+    "DAILY_BYTES_PER_HOST": "2147483648",
+    "MAX_CONN_PER_IP_PER_MIN": "30",
+    "RELAY_DISABLED": "false",
+    "RELAY_VERSION": "dev",
+  },
+  "observability": { "enabled": true },
+}

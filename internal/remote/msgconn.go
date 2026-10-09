@@ -11,6 +11,12 @@ import (
 )
 
 // MsgConn 是按消息收发的连接，每条消息是一条 Noise 消息：直连时是一条 WebSocket，经 relay 时是 relay 连接里的一个流。
+// streamAccepter 是能告诉 relay「这个流的握手通过了」的连接（relay 里的流）：握手通过以后、发第二条握手消息以前调用，
+// relay 从这里起计量（docs/design/remote-access.md 的 ACCEPT）。直连没有这一步。
+type streamAccepter interface {
+	Accept(ctx context.Context) error
+}
+
 type MsgConn interface {
 	// ReadMsg 读下一条消息。ctx 结束时连接会被关掉
 	ReadMsg(ctx context.Context) ([]byte, error)

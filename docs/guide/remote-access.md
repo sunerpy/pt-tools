@@ -56,6 +56,34 @@ relay 是一个只做转发的服务。pt-tools 连上 relay 时用主机密钥�
 
 relay 能看到的是：这台主机的 hostId、App 与 pt-tools 的 IP、连接的时间与流量大小。介意这些的话，只用直连，或者用自己部署的 relay。
 
+### 自己部署 relay
+
+relay 有两种实现，协议与行为一样（同一套一致性测试），任选一种：
+
+**pt-tools 自带的 relay**：放在有公网地址的 VPS 或 NAS 上。在国内访问 Cloudflare 慢或不稳定时，放在香港等近的地区的 VPS 上效果最好。
+
+```bash
+pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
+```
+
+- `--public-url` 是 App 与 pt-tools 里填的地址，必须和实际访问的一致（pt-tools 按它签名）。
+- 一般放在反向代理之后，由代理做 TLS（`wss://`），代理要转发 WebSocket；要按客户端 IP 限流时用 `--client-ip-header` 指定代理写的头。也可以用 `--tls-cert`、`--tls-key` 直接做 TLS。
+- Docker：用同一个镜像，设 `PT_MODE=relay` 与 `PT_TOOLS_RELAY_PUBLIC_URL`，例如 `docker run -d -p 8443:8443 -e PT_MODE=relay -e PT_TOOLS_RELAY_PUBLIC_URL=wss://relay.example.com sunerpy/pt-tools`。
+- 参数与限额见[命令行](../reference/cli.md#pt-tools-relay-serve)。
+
+**Cloudflare 版**：部署在你自己的 Cloudflare 账号下（Workers 与 Durable Objects，免费计划可用）。在仓库的 `relay/cloudflare` 目录里：
+
+```bash
+pnpm install
+pnpm exec wrangler login
+pnpm exec wrangler deploy                              # 地址是 https://pt-tools-relay.<你的子域>.workers.dev
+pnpm exec wrangler deploy --domain relay.example.com   # 或者用自己托管在 Cloudflare 上的域名
+```
+
+App 与 pt-tools 里填 `wss://` 开头的同一个地址。限额在 `wrangler.jsonc` 的 `vars` 里改：每台 pt-tools 同时的手机连接（默认 16）、每天的转发量（默认 2 GiB，免费计划的额度有限）、每个 IP 每分钟的新连接（默认 30）。
+
+两种 relay 都提供 `GET /healthz`，可以用来确认服务在线。
+
 ## 轮换主机密钥
 
 「状态」下面的「轮换主机密钥」会换一套主机密钥，并撤销所有设备：它们记着旧的主机公钥，已经连不上了，要重新扫码配对。只在怀疑密钥泄露时用，例如数据库与 `secret.key` 的备份外流。

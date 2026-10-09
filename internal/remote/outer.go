@@ -20,6 +20,9 @@ const (
 	MaxOuterFrame = OuterHeaderLen + MaxNoiseMessage
 	// NonceLen 是 relay 认证质询的长度
 	NonceLen = 32
+	// MaxUnconfirmed 是主机发 ACCEPT 以前，一个流上每个方向那一条消息的上限：客户端的 Noise 握手第一条、主机拒绝握手的第二条。
+	// 这之前每个方向只能发一条，relay 不计量；没有 ACCEPT 就关掉的流（握手被拒绝、解不开）不计入每天的转发量
+	MaxUnconfirmed = 4096
 	// AuthPayloadLen 是 AUTH 的长度：Ed25519 公钥加签名
 	AuthPayloadLen = ed25519.PublicKeySize + ed25519.SignatureSize
 	// maxCloseReason 是 CLOSE 原因的上限（和 WebSocket 关闭原因一样是 123 字节）
@@ -45,6 +48,8 @@ const (
 	OuterData OuterType = 0x11
 	// OuterClose 是关掉一个流，两个方向都有；内容可以是空，或者 u16 关闭码加 UTF-8 原因
 	OuterClose OuterType = 0x12
+	// OuterAccept 是主机告诉 relay 这个流的握手通过了（会话种类 device 或 pairing），不带内容；relay 从这里起计入每天的转发量
+	OuterAccept OuterType = 0x13
 )
 
 // relay 用的 WebSocket 关闭码（4000–4999 是应用自定义）。
@@ -93,6 +98,10 @@ func checkOuter(f OuterFrame) error {
 	case OuterClose:
 		if f.Stream == 0 || n == 1 || n > 2+maxCloseReason || (n > 2 && !utf8.Valid(f.Payload[2:])) {
 			return fmt.Errorf("%w: CLOSE 要有流编号，内容是空或者关闭码加最多 %d 字节的原因", ErrOuter, maxCloseReason)
+		}
+	case OuterAccept:
+		if f.Stream == 0 || n != 0 {
+			return fmt.Errorf("%w: ACCEPT 要有流编号、不带内容", ErrOuter)
 		}
 	default:
 		return fmt.Errorf("%w: 不认识的类型 0x%02x", ErrOuter, byte(f.Type))

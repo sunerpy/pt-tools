@@ -62,6 +62,7 @@ When `HTTP_PROXY` or `HTTPS_PROXY` is set, these requests go through the proxy; 
 - The web interface and API: `8080` by default. The [MCP](../guide/mcp.md) endpoint `/mcp` is on this port too, and so is the direct entrance of [remote access](../guide/remote-access.md), `/remote/v1/stream`, once remote access is on (404 while it is off).
 - The [qB-compatible entrance](../guide/qbit-compat.md): with `--qbit-compat-addr` or `PT_QBIT_COMPAT_ADDR` set, a second port where clients sign in with an API token that has the qB compatible permission. Open the port only on your local network.
 - The QQ OneBot channel: once enabled, a second port that NapCat connects to over a reverse WebSocket, for example `/onebot/v11/ws` on `0.0.0.0:6701`. When the listen address is not a loopback address (127.0.0.1, localhost) an access token is required, otherwise the channel does not start. Open the port only on your local network.
+- A self-hosted relay ([`pt-tools relay serve`](cli.md#pt-tools-relay-serve)) is a separate process listening on the port given by `--listen`. It has to be reachable from the internet; what it forwards is end-to-end encrypted and it stores no data of its own.
 
 ## Deployment advice
 

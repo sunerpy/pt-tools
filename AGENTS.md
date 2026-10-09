@@ -31,9 +31,11 @@ pt-tools/
 │   ├── mcp/                # MCP tools, scope checks and audit; tools call App API v1 in-process
 │   ├── media/              # Title parsing, recognition, TMDB client; library organizing, scraping, media servers; subscriptions
 │   ├── notify/             # Channel registry/router/outbox/digest/adapters
-│   ├── remote/             # Remote access: pairing, Noise IK sessions, tunnel frames, relay client, host
+│   ├── remote/             # Remote access: pairing, Noise IK sessions, tunnel frames, relay client, host;
+│   │                       #   relayserver/ (Go relay, `pt-tools relay serve`), relaytest/ (relay conformance suite)
 │   └── sitelogin/          # Login probe classification and dispatch
 ├── models/                 # GORM schema, schema migrations, presets, repositories
+├── relay/cloudflare/       # Remote-access relay on Cloudflare Workers + Durable Objects (TypeScript, own pnpm lock)
 ├── scheduler/              # RSS jobs and free-end/cleanup/peer/login monitors
 ├── site/v2/                # Site definitions, drivers, search and user-info services
 ├── thirdpart/downloader/   # qBittorrent/Transmission interface and implementations
@@ -66,6 +68,7 @@ pt-tools/
 | Change subscriptions         | `internal/media/subscribe/`                                    | Push only through `internal.PushTorrentToDownloader`; RSS offers must not block; upgrades replace library files through organize `Retire` only                                                                                                                                                                                                                                  |
 | Change MCP tools             | `internal/mcp/`, `web/mcp.go`, `cmd/mcp.go`                    | Tools call App API v1 through `mcpBackend` (never the DB or downloaders); write tools need `mcp:write` + `confirm=true` and are audited; keep `ToolNames`, `web/frontend/src/config/mcp.ts` and `docs/guide/mcp.md` in sync (`TestMCPToolListsInSync`)                                                                                                                          |
 | Change remote access         | `internal/remote/`, `web/remote.go`, `web/api_remote.go`       | Keep the wire format equal to `docs/design/remote-access.md` and `internal/remote/testdata/vectors.json` (regenerate with `-update` only for an intended protocol change; the App checks the same file); devices reach only App API v1 through `RemoteDispatcher`; keep pairing one-time/10 min/5 failures and close sessions on revoke, scope change, disable and key rotation |
+| Change the relay             | `internal/remote/relayserver/`, `relay/cloudflare/`            | Keep both implementations behaviourally identical: change `internal/remote/relaytest` first, then make the Go relay (`go test ./internal/remote/relayserver`) and the Worker (`relay/cloudflare/scripts/conformance.sh` against `wrangler dev`, plus `pnpm test`) pass it; limits and close codes are frozen in `docs/design/remote-access.md`                                  |
 | Change user docs / docs site | `docs/` (Chinese) and `docs/en/` (English), same paths         | Update both languages, check UI labels and defaults against the code, run `make docs-check`; see `docs/README.md`                                                                                                                                                                                                                                                               |
 
 ## Runtime Wiring

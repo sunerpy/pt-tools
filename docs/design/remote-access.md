@@ -171,8 +171,12 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 | `OPEN`      | `0x10` | relay → 主机 | ≥ 1 | 空：有一个新的客户端连接                     |
 | `DATA`      | `0x11` | 双向         | ≥ 1 | 一条 Noise 消息，1 到 65535 字节             |
 | `CLOSE`     | `0x12` | 双向         | ≥ 1 | 空，或 u16 关闭码（大端）加最多 123 字节原因 |
+| `ACCEPT`    | `0x13` | 主机 → relay | ≥ 1 | 空：这个流的握手通过了，relay 从这里起计量   |
 
-- 流编号由 relay 分配。relay 把客户端发来的每条二进制消息装进 `DATA` 转给主机，把主机发来的 `DATA` 的内容原样发给客户端；任一端可以 `CLOSE`，relay 随后关掉客户端那条 WebSocket。
+- 流编号由 relay 分配。relay 把客户端发来的每条二进制消息装进 `DATA` 转给主机，把主机发来的 `DATA` 的内容原样发给客户端；任一端可以 `CLOSE`，relay 随后关掉客户端那条 WebSocket。主机的 `CLOSE` 排在它之前发来的 `DATA` 后面：relay 发完这些消息再关（主机常常发完 `GOAWAY` 马上关流）。
+- 握手通过（会话种类是 `device` 或 `pairing`）以后、发第二条握手消息以前，主机在这个流上发 `ACCEPT`；拒绝的握手（`not_paired`、`busy` 等）不发。直连没有这一步。
+- `ACCEPT` 以前每个方向只能发一条不超过 4096 字节的消息（客户端的握手第一条、主机拒绝握手的回话），多发或者太大时 relay 以 4400 关掉这个流。这两条在 `ACCEPT` 时计入每天的转发量；没有 `ACCEPT` 就关掉的流不计，未认证、未配对的客户端耗不掉主机的额度。
+- 某个客户端一直不读时，relay 照常读主机连接，同一台主机别的流不受影响；跟不上的客户端以 4429 关掉。Go 版给每个客户端排队最多 64 条消息，排满即关；Cloudflare 版由运行时缓冲（Workers 的 WebSocket 没有发送完成的通知），发不出去时关。
 - 主机的连接断开（或者被同一个 hostId 的新连接替换）时，relay 以 4404 关掉这台主机的所有客户端连接：主机那边的会话已经随连接结束，留着客户端连接只会让 App 等到空闲超时。
 - 一条 relay 连接上主机最多同时接 16 个流，再来的 `OPEN` 直接回 `CLOSE` 4429。某个流排队的消息超过 64 条时主机关掉那个流，不拖住别的流。
 - 保活：主机每 30 秒发一条文本消息 `ping`，relay 回文本 `pong`（Cloudflare 的自动应答不用唤醒 Durable Object）。主机 90 秒没收到 relay 的任何消息就断开重连。
@@ -188,6 +192,25 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 | `4409` | 同一个 hostId 的新连接替换了旧连接 |
 | `4429` | 超出限额                           |
 | `4503` | relay 暂停服务                     |
+
+客户端发文本消息以 4400 关闭，发超过 65535 字节的消息以 1009 关闭。暂停服务、hostId 不对、限流这几种情况，relay 先完成 WebSocket 握手再用对应的关闭码关掉，客户端能看到原因。
+
+### 限额（冻结）
+
+| 项目                 | 托管版（Cloudflare）默认 | 自建版（Go）默认 | 超额处理                                                                     |
+| -------------------- | ------------------------ | ---------------- | ---------------------------------------------------------------------------- |
+| 每主机并发客户端流   | 16                       | 16               | 新连接以 4429 关闭                                                           |
+| 每主机每天转发量     | 2 GiB                    | 不限（0）        | 关掉这台主机的全部客户端流，并以 4429 拒绝新的，直到 00:00 UTC；主机连接保持 |
+| 每 IP 每分钟新建连接 | 30                       | 30               | 以 4429 拒绝                                                                 |
+| 暂停服务             | `RELAY_DISABLED=true`    | `--disabled`     | 一律 4503                                                                    |
+
+每 IP 的计数里 IPv6 按 /64 合计（一台机器通常拿得到整个 /64），映射的 IPv4（`::ffff:a.b.c.d`）按 IPv4 计。每天转发量是两个方向 payload 字节的合计（只算主机发过 `ACCEPT` 的流）。Cloudflare 版用 `vars`（`MAX_STREAMS_PER_HOST`、`DAILY_BYTES_PER_HOST`、`MAX_CONN_PER_IP_PER_MIN`、`RELAY_DISABLED`）覆盖默认值，Go 版用同名的命令行参数。两者都有 `GET /healthz`，回 `{"ok":true,"version":"…","disabled":false}`。
+
+### 实现
+
+- Go 版：`internal/remote/relayserver`，命令 `pt-tools relay serve`（见[命令行](../reference/cli.md#pt-tools-relay-serve)）。
+- Cloudflare 版：`relay/cloudflare`，每个 hostId 一个 Durable Object，用 WebSocket Hibernation API 持有连接，主机的 `ping` 由自动应答回 `pong`。每天的用量先预留再用：存储里写「已经用的加一块」（1 MiB，或上限的 1/64），Durable Object 被逐出时读回预留数，只会多算不会少算，还在内存里时一秒后写回准确数。每个 IP 一个 Durable Object 计数，计数写在存储里。relay 的 origin 取 `PUBLIC_URL`，没有设置时按请求的地址推导。
+- 一致性测试：`internal/remote/relaytest`（Go 黑盒）。`go test` 对 Go 版跑；`relay/cloudflare/scripts/conformance.sh` 起三个 `wrangler dev` 实例（不同限额）对 Cloudflare 版跑同一套，并用真正的主机端经它走一遍配对与会话。
 
 ## 信任模型
 
