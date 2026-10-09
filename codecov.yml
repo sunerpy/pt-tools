@@ -10,3 +10,6 @@ ignore:
   - "**/*_test.go"
   - "**/internal/cloakdriver/**"
   - "**/version/**"
+  # relay 的一致性测试工具：只被别的包的测试调用（relayserver 的测试、对 wrangler dev 的 TestExternalRelay），
+  # 覆盖率按被测的包统计，算在这里永远是 0
+  - "internal/remote/relaytest/**"
