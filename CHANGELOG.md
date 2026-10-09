@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.17](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.16...v1.0.0-rc.17) (2026-10-09)
+
+
+### Features
+
+* **remote:** relay 的 Go 自建版与 Cloudflare 版（M16） ([#648](https://github.com/sunerpy/pt-tools/issues/648)) ([9ce0421](https://github.com/sunerpy/pt-tools/commit/9ce0421ce08cf1941f2254b68a9cb65839420d95))
+
 ## [1.0.0-rc.16](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.15...v1.0.0-rc.16) (2026-10-09)
 
 
