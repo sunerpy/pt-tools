@@ -6,6 +6,11 @@
 	<string>扫描 pt-tools 网页上的配对二维码</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>直连同一个局域网里的 pt-tools</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

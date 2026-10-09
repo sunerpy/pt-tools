@@ -3,10 +3,12 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- usesCleartextTraffic：直连地址可以是 http://（局域网），内容由 Noise 加密。dart:io 的 socket 本来就不受这个策略管，写上是为了以后换成平台网络栈时不出问题 -->
     <application
         android:label="pt-tools"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
