@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
@@ -439,8 +440,12 @@ func (s *Server) appExplore(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	appImageSizeRe = regexp.MustCompile(`^(?:w\d{2,4}|h\d{2,4}|original)$`)
+	// 只给海报尺寸，不给原图（原图可能有好几 MB）
+	appImageSizeRe = regexp.MustCompile(`^(?:w92|w154|w185|w342|w500|w780)$`)
 	appImageFileRe = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$`)
+	// 同时最多取这么多张图（每张最多读进 10 MiB 内存），排队超过 appImageWait 回 503
+	appImageSlots = make(chan struct{}, 4)
+	appImageWait  = 10 * time.Second
 )
 
 // appTMDBImage 是 GET /images/tmdb/{size}/{file}：pt-tools 按自己的 TMDB 图片地址与代理去取海报，
@@ -458,6 +463,18 @@ func (s *Server) appTMDBImage(w http.ResponseWriter, r *http.Request) {
 	c, err := s.media.TMDB(r.Context())
 	if err != nil {
 		appSubscribeError(w, err)
+		return
+	}
+	wait := time.NewTimer(appImageWait)
+	defer wait.Stop()
+	select {
+	case appImageSlots <- struct{}{}:
+		defer func() { <-appImageSlots }()
+	case <-wait.C:
+		w.Header().Set("Retry-After", "5")
+		appError(w, http.StatusServiceUnavailable, "busy", "取图片的请求太多，稍后再试")
+		return
+	case <-r.Context().Done():
 		return
 	}
 	b, err := c.Image(r.Context(), "/"+file, size)

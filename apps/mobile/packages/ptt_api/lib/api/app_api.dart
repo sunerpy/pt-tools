@@ -458,6 +458,7 @@ class AppApi {
   /// Parameters:
   ///
   /// * [String] size (required):
+  ///   海报尺寸（不提供原图）
   ///
   /// * [String] file (required):
   ///   poster_path 去掉开头的 /
@@ -494,6 +495,7 @@ class AppApi {
   /// Parameters:
   ///
   /// * [String] size (required):
+  ///   海报尺寸（不提供原图）
   ///
   /// * [String] file (required):
   ///   poster_path 去掉开头的 /

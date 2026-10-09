@@ -220,7 +220,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 参数 `status`（`active`、`paused`、`pending`、`done`）与 `q`（关键字）。每项有：
 
 - `id`、`media_type`（`movie` 或 `tv`）、`tmdb_id`、`season`、`title`、`original_title`、`year`、`total_episodes`；
-- `poster_path`：TMDB 的海报路径，经 `GET /images/tmdb/w342/<去掉开头 / 的路径>` 取图（`w342` 可以换成 TMDB 支持的其他尺寸），见下文；
+- `poster_path`：TMDB 的海报路径，经 `GET /images/tmdb/w342/<去掉开头 / 的路径>` 取图（`w342` 也可以换成下文列出的其他尺寸），见下文；
 - `status`、`upgrade`（是否洗版）、`source`（`manual`、`explore`、`douban`、`chatops`、`app`）、`message`、`last_search_at`、`next_search_at`、`created_at`；
 - `progress`：`total`、`aired`、`in_library`、`downloading` 与 `missing`（缺的集号）。
 
@@ -268,4 +268,4 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 ### GET /images/tmdb/{size}/{file}
 
-TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是 `w92` 到 `w780`、`original` 这类 TMDB 支持的尺寸。pt-tools 按「媒体识别」里设置的图片地址与代理去取，回应是图片，带一天的缓存头；客户端因此不用直接连 TMDB（国内常常连不上）。没有填写 TMDB API Key 时回 400，TMDB 上没有这张图时回 404，取不到时回 502（`upstream`）。
+TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报尺寸 `w92`、`w154`、`w185`、`w342`、`w500`、`w780` 之一（不提供原图，原图可能有好几 MB）。pt-tools 按「媒体识别」里设置的图片地址与代理去取，回应是图片，带一天的缓存头；客户端因此不用直接连 TMDB（国内常常连不上）。没有填写 TMDB API Key 时回 400，TMDB 上没有这张图时回 404，取不到时回 502（`upstream`）。pt-tools 同时最多取 4 张图，排队超过 10 秒回 503（`busy`，带 `Retry-After`）。

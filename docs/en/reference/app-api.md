@@ -220,7 +220,7 @@ Organise history, most recently updated first. Parameters: `status` (`done`, `fa
 Parameters: `status` (`active`, `paused`, `pending`, `done`) and `q` (keyword). Each item has:
 
 - `id`, `media_type` (`movie` or `tv`), `tmdb_id`, `season`, `title`, `original_title`, `year`, `total_episodes`;
-- `poster_path`: the TMDB poster path; fetch the image with `GET /images/tmdb/w342/<the path without its leading />` (`w342` can be any other size TMDB offers), see below;
+- `poster_path`: the TMDB poster path; fetch the image with `GET /images/tmdb/w342/<the path without its leading />` (`w342` can also be one of the other sizes listed below), see below;
 - `status`, `upgrade` (whether to upgrade quality), `source` (`manual`, `explore`, `douban`, `chatops`, `app`), `message`, `last_search_at`, `next_search_at`, `created_at`;
 - `progress`: `total`, `aired`, `in_library`, `downloading` and `missing` (the missing episode numbers).
 
@@ -268,4 +268,4 @@ The response has `items`, `page` and `total_pages`. Each item has `id` (the TMDB
 
 ### GET /images/tmdb/{size}/{file}
 
-A TMDB image: `file` is `poster_path` without its leading `/`, and `size` is one of the sizes TMDB offers, such as `w92` to `w780` or `original`. pt-tools fetches it with the image address and proxy set under Media recognition and responds with the image and a one-day cache header, so clients never contact TMDB directly. Without a TMDB API key it responds with 400, when TMDB has no such image with 404, and when the image can't be fetched with 502 (`upstream`).
+A TMDB image: `file` is `poster_path` without its leading `/`, and `size` is one of the poster sizes `w92`, `w154`, `w185`, `w342`, `w500` and `w780` (originals aren't offered, they can be several MB). pt-tools fetches it with the image address and proxy set under Media recognition and responds with the image and a one-day cache header, so clients never contact TMDB directly. Without a TMDB API key it responds with 400, when TMDB has no such image with 404, and when the image can't be fetched with 502 (`upstream`). pt-tools fetches at most 4 images at a time; a request that waits longer than 10 seconds gets 503 (`busy`, with `Retry-After`).

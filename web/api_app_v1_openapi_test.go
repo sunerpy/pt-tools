@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 
@@ -34,7 +33,7 @@ var appSpec = sync.OnceValues(func() (routers.Router, error) {
 	return legacy.NewRouter(doc)
 })
 
-// validateAppResponse 用契约校验一个 App API 回应：状态码有定义、JSON 的内容合乎 schema（图片不看内容）。
+// validateAppResponse 用契约校验一个 App API 回应：状态码有定义，Content-Type 是契约里写的，内容合乎 schema（图片按二进制，只核对类型）。
 func validateAppResponse(t testing.TB, req *http.Request, w *httptest.ResponseRecorder) {
 	t.Helper()
 	router, err := appSpec()
@@ -52,9 +51,6 @@ func validateAppResponse(t testing.TB, req *http.Request, w *httptest.ResponseRe
 		Header:                 w.Header(),
 		Body:                   io.NopCloser(bytes.NewReader(w.Body.Bytes())),
 		Options:                &openapi3filter.Options{IncludeResponseStatus: true},
-	}
-	if !strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
-		in.Options.ExcludeResponseBody = true
 	}
 	assert.NoError(t, openapi3filter.ValidateResponse(context.Background(), in), "%s %s 的回应（%d）不合契约：%s", req.Method, req.URL.Path, w.Code, w.Body.String())
 }

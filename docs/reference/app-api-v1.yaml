@@ -102,7 +102,8 @@ paths:
         - name: size
           in: path
           required: true
-          schema: { type: string, pattern: "^(w[0-9]{2,4}|h[0-9]{2,4}|original)$" }
+          description: 海报尺寸（不提供原图）
+          schema: { type: string, enum: [w92, w154, w185, w342, w500, w780] }
         - name: file
           in: path
           required: true

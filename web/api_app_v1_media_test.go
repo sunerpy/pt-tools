@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -175,6 +176,10 @@ func TestAppTMDBImage(t *testing.T) {
 		req = req.WithContext(middleware.WithPrincipal(req.Context(), &middleware.Principal{Kind: middleware.KindAPIToken, ID: "1", Scopes: []string{"app:read"}}))
 		w := httptest.NewRecorder()
 		srv.appTMDBImage(w, req)
+		// 文件名带 / 的请求在契约里没有对应的路由（经 mux 的真实请求也到不了这里），只看状态码
+		if !strings.Contains(file, "/") {
+			validateAppResponse(t, req, w)
+		}
 		return w
 	}
 	// 没有媒体识别服务：503
@@ -201,9 +206,28 @@ func TestAppTMDBImage(t *testing.T) {
 		{"w342", "missing.jpg", http.StatusNotFound},
 		{"w342", "text.jpg", http.StatusBadGateway},
 		{"x9", "poster.png", http.StatusBadRequest},
+		{"original", "poster.png", http.StatusBadRequest},
+		{"h632", "poster.png", http.StatusBadRequest},
 		{"w342", "../etc.png", http.StatusBadRequest},
 		{"w342", "a.gif", http.StatusBadRequest},
 	} {
 		assert.Equal(t, c.want, call(c.size, c.file).Code, c.size+"/"+c.file)
 	}
+
+	// 同时取图的名额用完：排队超时回 503 busy，名额还回来以后照常
+	oldWait := appImageWait
+	appImageWait = 20 * time.Millisecond
+	t.Cleanup(func() { appImageWait = oldWait })
+	for range cap(appImageSlots) {
+		appImageSlots <- struct{}{}
+	}
+	w = call("w342", "poster.png")
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), `"busy"`)
+	assert.Equal(t, "5", w.Header().Get("Retry-After"))
+	for range cap(appImageSlots) {
+		<-appImageSlots
+	}
+	assert.Equal(t, http.StatusOK, call("w342", "poster.png").Code)
+	assert.Empty(t, appImageSlots, "取完图名额还回去了")
 }
