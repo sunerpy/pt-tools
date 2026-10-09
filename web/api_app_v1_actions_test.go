@@ -161,6 +161,7 @@ func TestAppAttend(t *testing.T) {
 		req.SetPathValue("site", site)
 		w := httptest.NewRecorder()
 		srv.appAttend(w, req)
+		validateAppResponse(t, req, w)
 		return w.Code
 	}
 	assert.Equal(t, http.StatusNotFound, call("nosuchsite"))

@@ -55,6 +55,19 @@ func validateAppResponse(t testing.TB, req *http.Request, w *httptest.ResponseRe
 	assert.NoError(t, openapi3filter.ValidateResponse(context.Background(), in), "%s %s 的回应（%d）不合契约：%s", req.Method, req.URL.Path, w.Code, w.Body.String())
 }
 
+// validateRoutedAppResponse 同 validateAppResponse，但契约里没有的地址（测试自己挂的路由、故意写错的地址与方法）跳过。
+func validateRoutedAppResponse(t testing.TB, req *http.Request, w *httptest.ResponseRecorder) {
+	t.Helper()
+	router, err := appSpec()
+	require.NoError(t, err, "读 docs/reference/app-api-v1.yaml")
+	r := req.Clone(context.Background())
+	r.Body = http.NoBody
+	if _, _, err := router.FindRoute(r); err != nil {
+		return
+	}
+	validateAppResponse(t, req, w)
+}
+
 // 路由表里的每条 App API 都在契约里，契约里也没有多出来的接口
 func TestAppOpenAPICoversRoutes(t *testing.T) {
 	loader := openapi3.NewLoader()

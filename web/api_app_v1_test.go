@@ -91,6 +91,9 @@ func (e *appEnv) do(q appReq) *httptest.ResponseRecorder {
 	}
 	w := httptest.NewRecorder()
 	e.handler.ServeHTTP(w, req)
+	if strings.HasPrefix(q.path, appPrefix) {
+		validateRoutedAppResponse(e.t, req, w)
+	}
 	return w
 }
 

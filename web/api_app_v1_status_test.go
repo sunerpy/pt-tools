@@ -94,6 +94,7 @@ func TestAppDownloadersStopsWhenRequestEnds(t *testing.T) {
 	srv.appDownloaders(w, req)
 	assert.Less(t, time.Since(start), 3*time.Second)
 	require.Equal(t, http.StatusOK, w.Code)
+	validateAppResponse(t, req, w)
 	var out AppDownloaderList
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
 	require.Len(t, out.Items, 1)
