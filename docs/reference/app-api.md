@@ -28,19 +28,19 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 出错时回应 `{"error": "代码", "message": "说明"}`。`message` 是写给人看的中文说明，客户端按 `error` 判断。
 
-| `error`                                                         | 状态码 | 含义                                               |
-| --------------------------------------------------------------- | ------ | -------------------------------------------------- |
-| `invalid_body`                                                  | 400    | 请求体不是合法的 JSON，或者有不认识的字段          |
-| `invalid_argument`                                              | 400    | 参数不对，`message` 写明是哪一个                   |
-| `unauthorized`                                                  | 401    | 没有带有效的令牌                                   |
-| `forbidden`                                                     | 403    | 令牌没有这个权限                                   |
-| `not_found`                                                     | 404    | 接口、站点或订阅不存在                             |
-| `method_not_allowed`                                            | 405    | 接口存在，但不接受这个方法；`Allow` 头写明接受哪些 |
-| `busy`                                                          | 409    | 同一件事正在进行，例如这个站点正在签到             |
-| `rate_limited`                                                  | 429    | TMDB 限流，稍后再试                                |
-| `internal`                                                      | 500    | pt-tools 内部出错                                  |
-| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502    | 搜索、下载种子文件、签到或访问 TMDB 失败           |
-| `unavailable`                                                   | 503    | 对应的服务没有启动                                 |
+| `error`                                                         | 状态码   | 含义                                                                                     |
+| --------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `invalid_body`                                                  | 400      | 请求体不是合法的 JSON，或者有不认识的字段                                                |
+| `invalid_argument`                                              | 400      | 参数不对，`message` 写明是哪一个                                                         |
+| `unauthorized`                                                  | 401      | 没有带有效的令牌                                                                         |
+| `forbidden`                                                     | 403      | 令牌没有这个权限                                                                         |
+| `not_found`                                                     | 404      | 接口、站点或订阅不存在                                                                   |
+| `method_not_allowed`                                            | 405      | 接口存在，但不接受这个方法；`Allow` 头写明接受哪些                                       |
+| `busy`                                                          | 409、503 | 同一件事正在进行（409，例如这个站点正在签到）；取图片的请求太多（503，带 `Retry-After`） |
+| `rate_limited`                                                  | 429      | TMDB 限流，稍后再试                                                                      |
+| `internal`                                                      | 500      | pt-tools 内部出错                                                                        |
+| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502      | 搜索、下载种子文件、签到或访问 TMDB 失败                                                 |
+| `unavailable`                                                   | 503      | 对应的服务没有启动                                                                       |
 
 ## 接口一览
 

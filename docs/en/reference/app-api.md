@@ -28,19 +28,19 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 
 An error responds with `{"error": "code", "message": "explanation"}`. `message` is a human-readable explanation in Chinese; clients should act on `error`.
 
-| `error`                                                         | Status | Meaning                                                                                  |
-| --------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `invalid_body`                                                  | 400    | The body is not valid JSON, or has a field that is unknown                               |
-| `invalid_argument`                                              | 400    | A parameter is wrong; `message` says which                                               |
-| `unauthorized`                                                  | 401    | No valid token                                                                           |
-| `forbidden`                                                     | 403    | The token lacks this permission                                                          |
-| `not_found`                                                     | 404    | The endpoint, site or subscription does not exist                                        |
-| `method_not_allowed`                                            | 405    | The endpoint exists but not with this method; the `Allow` header lists the accepted ones |
-| `busy`                                                          | 409    | The same thing is in progress, such as signing in to a site                              |
-| `rate_limited`                                                  | 429    | TMDB is rate limiting; try again later                                                   |
-| `internal`                                                      | 500    | An internal error in pt-tools                                                            |
-| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502    | Searching, downloading the torrent file, signing in or reaching TMDB failed              |
-| `unavailable`                                                   | 503    | The service behind the endpoint is not running                                           |
+| `error`                                                         | Status   | Meaning                                                                                                              |
+| --------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `invalid_body`                                                  | 400      | The body is not valid JSON, or has a field that is unknown                                                           |
+| `invalid_argument`                                              | 400      | A parameter is wrong; `message` says which                                                                           |
+| `unauthorized`                                                  | 401      | No valid token                                                                                                       |
+| `forbidden`                                                     | 403      | The token lacks this permission                                                                                      |
+| `not_found`                                                     | 404      | The endpoint, site or subscription does not exist                                                                    |
+| `method_not_allowed`                                            | 405      | The endpoint exists but not with this method; the `Allow` header lists the accepted ones                             |
+| `busy`                                                          | 409, 503 | The same thing is in progress (409, such as signing in to a site); too many image requests (503, with `Retry-After`) |
+| `rate_limited`                                                  | 429      | TMDB is rate limiting; try again later                                                                               |
+| `internal`                                                      | 500      | An internal error in pt-tools                                                                                        |
+| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading the torrent file, signing in or reaching TMDB failed                                          |
+| `unavailable`                                                   | 503      | The service behind the endpoint is not running                                                                       |
 
 ## Endpoints
 
