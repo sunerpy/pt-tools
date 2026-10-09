@@ -10,6 +10,7 @@ on:
       - "internal/remote/**"
       - "docs/reference/app-api-v1.yaml"
       - ".github/workflows/mobile.yml"
+      - ".github/actions/setup-flutter/**"
   push:
     branches: [main, v1.0.0-rc]
     paths:
@@ -17,6 +18,7 @@ on:
       - "internal/remote/**"
       - "docs/reference/app-api-v1.yaml"
       - ".github/workflows/mobile.yml"
+      - ".github/actions/setup-flutter/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,9 +26,6 @@ concurrency:
 
 permissions:
   contents: read
-
-env:
-  FLUTTER_VERSION: 3.47.7
 
 jobs:
   test:
@@ -49,11 +48,7 @@ jobs:
           java-version: "21"
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+        uses: ./.github/actions/setup-flutter
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -86,6 +81,7 @@ jobs:
           (cd ../.. && go build -o "$RUNNER_TEMP/testhost" ./internal/remote/testhost)
           "$RUNNER_TEMP/testhost" -info "$RUNNER_TEMP/testhost.json" > "$RUNNER_TEMP/testhost.log" 2>&1 &
           echo "TESTHOST_PID=$!" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2016 # $1 是给里面那个 sh 的
           if ! timeout 60 sh -c 'until [ -f "$1" ]; do sleep 1; done' _ "$RUNNER_TEMP/testhost.json"; then
             cat "$RUNNER_TEMP/testhost.log"
             exit 1
@@ -116,11 +112,7 @@ jobs:
           java-version: "21"
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+        uses: ./.github/actions/setup-flutter
 
       - name: Build debug APK (unsigned)
         run: |
@@ -148,11 +140,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+        uses: ./.github/actions/setup-flutter
 
       - name: Build iOS (no codesign)
         run: |
