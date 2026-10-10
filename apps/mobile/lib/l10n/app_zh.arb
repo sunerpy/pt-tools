@@ -1,0 +1,393 @@
+{
+  "@@locale": "zh",
+  "appTitle": "pt-tools",
+  "retry": "重试",
+  "cancel": "取消",
+  "paste": "粘贴",
+  "actions": "操作",
+  "empty": "没有内容",
+  "errorPrefix": "出错了：{message}",
+  "@errorPrefix": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "navOverview": "概览",
+  "navTorrents": "种子",
+  "navSearch": "搜索",
+  "navMedia": "媒体",
+  "navMore": "更多",
+  "connConnecting": "正在连接…",
+  "connOnline": "已连上",
+  "connFailed": "连不上：{message}",
+  "@connFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "connRevoked": "这台设备被撤销了，请重新配对",
+  "connKeyRotated": "主机的密钥换了，请重新配对",
+  "connDisabled": "主机关掉了远程访问",
+  "connOffline": "未连接",
+  "repair": "重新配对",
+  "viaDirect": "直连",
+  "viaRelay": "relay",
+  "pairTitle": "配对 pt-tools",
+  "pairIntro": "在 pt-tools 网页上打开「系统 → 远程访问 → 添加设备」，扫二维码，或者把链接粘贴到下面。",
+  "pairScan": "扫码",
+  "pairLinkLabel": "配对链接",
+  "pairNameLabel": "设备名",
+  "pairNameDefault": "我的手机",
+  "pairButton": "配对",
+  "pairWorking": "正在配对…",
+  "pairInvalidLink": "链接不对：{message}",
+  "@pairInvalidLink": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "pairUpgrade": "这个配对链接要更新版本的 App",
+  "pairSaveFailed": "主机已经记下了这台设备，但存进手机的安全存储时出错（{error}）：请在网页上撤销「{name}」，再重新配对。",
+  "@pairSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "pairPrivacy": "连接是端到端加密的：经 relay 时 relay 只转发，看不到内容。这台设备的私钥只存在手机上。",
+  "scanTitle": "扫描配对二维码",
+  "scanUnavailable": "这台设备不能扫码，请返回粘贴链接",
+  "hostVersion": "pt-tools {version}",
+  "@hostVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "apiLevelMismatch": "主机的 App API 级别是 {level}，这个 App 认得 {supported}，请升级",
+  "@apiLevelMismatch": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      },
+      "supported": {
+        "type": "int"
+      }
+    }
+  },
+  "kpiUploaded": "上传",
+  "kpiDownloaded": "下载",
+  "kpiRatio": "分享率",
+  "kpiBonus": "魔力",
+  "perHour": "每小时 {value}",
+  "@perHour": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "kpiSeeding": "做种",
+  "kpiUnread": "站内信未读",
+  "siteCount": "{count} 个站点",
+  "@siteCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "todayTitle": "今天",
+  "todayError": "今天的增量算不出来：{message}",
+  "@todayError": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "todayBySite": "各站点",
+  "downloadersTitle": "下载器",
+  "downloaderUnreachable": "连不上",
+  "freeSpace": "剩余 {size}",
+  "@freeSpace": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "updatedAt": "站点数据更新于 {time}",
+  "@updatedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "torrentsAll": "全部",
+  "stateDownloading": "下载中",
+  "stateSeeding": "做种中",
+  "statePaused": "已暂停",
+  "stateStopped": "已停止",
+  "stateQueued": "排队中",
+  "stateChecking": "校验中",
+  "stateError": "出错",
+  "searchTorrentsHint": "按标题筛选",
+  "noTorrents": "下载器里没有种子",
+  "actionPause": "暂停",
+  "actionResume": "继续",
+  "actionDelete": "删除",
+  "deleteTitle": "删除这个种子？",
+  "deleteWithFiles": "连同已下载的数据一起删除",
+  "actionDone": "成功 {ok} 个，失败 {failed} 个",
+  "@actionDone": {
+    "placeholders": {
+      "ok": {
+        "type": "int"
+      },
+      "failed": {
+        "type": "int"
+      }
+    }
+  },
+  "torrentFailures": "有 {count} 个下载器没有读到，列表不完整",
+  "@torrentFailures": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "etaLabel": "剩余 {eta}",
+  "@etaLabel": {
+    "placeholders": {
+      "eta": {
+        "type": "String"
+      }
+    }
+  },
+  "searchHint": "搜索站点上的种子",
+  "searchIntro": "输入关键字，在所有启用的站点上一起搜",
+  "searchFreeOnly": "只看免费",
+  "searchNoResults": "没有找到",
+  "searchSites": "{count} 个站点 · {ms} ms",
+  "@searchSites": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "ms": {
+        "type": "int"
+      }
+    }
+  },
+  "searchErrors": "{count} 个站点出错",
+  "@searchErrors": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pushTitle": "推送到下载器",
+  "pushDefault": "默认下载器",
+  "pushOk": "已推送到 {downloader}",
+  "@pushOk": {
+    "placeholders": {
+      "downloader": {
+        "type": "String"
+      }
+    }
+  },
+  "pushSkipped": "下载器里已经有这个种子",
+  "pushBlocked": "没有推送：{message}",
+  "@pushBlocked": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "defaultBadge": "默认",
+  "free": "免费",
+  "hr": "H&R",
+  "tabSubscriptions": "订阅",
+  "tabHistory": "最近入库",
+  "tabExplore": "探索",
+  "noSubscriptions": "没有订阅；可以在「探索」里订阅",
+  "noHistory": "没有整理记录",
+  "subActive": "订阅中",
+  "subPaused": "已暂停",
+  "subPending": "等待中",
+  "subDone": "已完成",
+  "subUpgrade": "洗版",
+  "subProgress": "已入库 {inLibrary}/{aired} 集",
+  "@subProgress": {
+    "placeholders": {
+      "inLibrary": {
+        "type": "int"
+      },
+      "aired": {
+        "type": "int"
+      }
+    }
+  },
+  "subMissing": "缺 {list}",
+  "@subMissing": {
+    "placeholders": {
+      "list": {
+        "type": "String"
+      }
+    }
+  },
+  "subPause": "暂停订阅",
+  "subResume": "恢复订阅",
+  "subSearchNow": "立即搜索",
+  "subDelete": "删除订阅",
+  "subDeleteConfirm": "删除这个订阅？下载器里的种子与媒体库里的文件不动。",
+  "subNextSearch": "下次搜索 {time}",
+  "@subNextSearch": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "episodesTitle": "剧集",
+  "epLibrary": "已入库",
+  "epDownloading": "下载中",
+  "epMissing": "缺",
+  "epUpcoming": "未播出",
+  "subTorrentsTitle": "下载过的种子",
+  "exploreMovie": "电影",
+  "exploreTv": "剧集",
+  "exploreTrending": "热门",
+  "explorePopular": "流行",
+  "exploreSearchHint": "搜索电影或剧集",
+  "subscribe": "订阅",
+  "subscribed": "已订阅",
+  "inLibrary": "已入库",
+  "subscribeOk": "已订阅 {title}",
+  "@subscribeOk": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "moreSites": "站点",
+  "moreTasks": "任务",
+  "moreBrush": "刷流",
+  "moreDownloaders": "下载器",
+  "moreSettings": "连接与设备",
+  "siteDisabled": "未启用",
+  "disabledSites": "未启用的站点（{count}）",
+  "@disabledSites": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noEnabledSites": "没有启用的站点",
+  "movieNotInLibrary": "未入库",
+  "loginDays": "离封号还有 {days} 天",
+  "@loginDays": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "loginUnknown": "没有访问记录",
+  "attend": "签到",
+  "attendOk": "签到完成",
+  "attendSigned": "今天已签到",
+  "attendFailed": "签到失败",
+  "attendPending": "今天未签到",
+  "attendUnsupported": "不支持签到",
+  "unreadMessages": "{count} 条未读",
+  "@unreadMessages": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "siteUserError": "站点上的用户数据没读到：{message}",
+  "@siteUserError": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "noTasks": "没有推送记录",
+  "taskPushed": "已推送",
+  "taskNotPushed": "未推送",
+  "taskCompleted": "已完成",
+  "noBrush": "没有刷流任务",
+  "brushDisabled": "已停用",
+  "brushActive": "在刷 {count} 个",
+  "@brushActive": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "brushToday": "今天 ↑{up} ↓{down}",
+  "@brushToday": {
+    "placeholders": {
+      "up": {
+        "type": "String"
+      },
+      "down": {
+        "type": "String"
+      }
+    }
+  },
+  "brushTotal": "累计 ↑{up} ↓{down}",
+  "@brushTotal": {
+    "placeholders": {
+      "up": {
+        "type": "String"
+      },
+      "down": {
+        "type": "String"
+      }
+    }
+  },
+  "noDownloaders": "没有启用的下载器",
+  "settingsConnection": "连接",
+  "settingsVia": "方式",
+  "settingsEndpoint": "地址",
+  "settingsHost": "主机",
+  "settingsReconnect": "重新连接",
+  "settingsDevice": "这台设备",
+  "settingsPairedAt": "配对于 {time}",
+  "@settingsPairedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsScopes": "权限",
+  "scopeFull": "完全控制",
+  "scopeRead": "只读",
+  "settingsForget": "忘掉这台主机",
+  "forgetConfirm": "忘掉以后要重新扫码配对。主机上的设备记录不会删除，需要的话在网页上撤销。"
+}

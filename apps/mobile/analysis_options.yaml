@@ -1,0 +1,17 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    # 由 docs/reference/app-api-v1.yaml 生成（tool/gen_api.sh），不手改
+    - packages/ptt_api/**
+    - lib/l10n/app_localizations*.dart
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+
+linter:
+  rules:
+    prefer_single_quotes: true
+    always_declare_return_types: true
+    unawaited_futures: true

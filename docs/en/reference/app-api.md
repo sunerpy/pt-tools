@@ -22,24 +22,25 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - Times are Unix timestamps in seconds. Sizes and uploaded or downloaded amounts are in bytes, speeds in bytes per second, and progress is a percentage from 0 to 100.
 - Paged endpoints accept the query parameters `page` (starting at 1) and `page_size` (20 by default; each endpoint states its maximum) and respond with `{"items": [...], "total": count, "page": page, "page_size": size}`.
 - Compatibility: `remote_api_level` in `GET /meta` is currently 1 and goes up only for incompatible changes. New endpoints or fields are not incompatible changes, so clients should ignore fields they do not know.
+- Contract: the machine-readable description is [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/main/docs/reference/app-api-v1.yaml) (OpenAPI 3.0) in the repository. pt-tools' tests check every endpoint's real responses against it, and the mobile app's Dart models are generated from it.
 
 ## Errors
 
 An error responds with `{"error": "code", "message": "explanation"}`. `message` is a human-readable explanation in Chinese; clients should act on `error`.
 
-| `error`                                                         | Status | Meaning                                                                                  |
-| --------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `invalid_body`                                                  | 400    | The body is not valid JSON, or has a field that is unknown                               |
-| `invalid_argument`                                              | 400    | A parameter is wrong; `message` says which                                               |
-| `unauthorized`                                                  | 401    | No valid token                                                                           |
-| `forbidden`                                                     | 403    | The token lacks this permission                                                          |
-| `not_found`                                                     | 404    | The endpoint, site or subscription does not exist                                        |
-| `method_not_allowed`                                            | 405    | The endpoint exists but not with this method; the `Allow` header lists the accepted ones |
-| `busy`                                                          | 409    | The same thing is in progress, such as signing in to a site                              |
-| `rate_limited`                                                  | 429    | TMDB is rate limiting; try again later                                                   |
-| `internal`                                                      | 500    | An internal error in pt-tools                                                            |
-| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502    | Searching, downloading the torrent file, signing in or reaching TMDB failed              |
-| `unavailable`                                                   | 503    | The service behind the endpoint is not running                                           |
+| `error`                                                         | Status   | Meaning                                                                                                              |
+| --------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `invalid_body`                                                  | 400      | The body is not valid JSON, or has a field that is unknown                                                           |
+| `invalid_argument`                                              | 400      | A parameter is wrong; `message` says which                                                                           |
+| `unauthorized`                                                  | 401      | No valid token                                                                                                       |
+| `forbidden`                                                     | 403      | The token lacks this permission                                                                                      |
+| `not_found`                                                     | 404      | The endpoint, site or subscription does not exist                                                                    |
+| `method_not_allowed`                                            | 405      | The endpoint exists but not with this method; the `Allow` header lists the accepted ones                             |
+| `busy`                                                          | 409, 503 | The same thing is in progress (409, such as signing in to a site); too many image requests (503, with `Retry-After`) |
+| `rate_limited`                                                  | 429      | TMDB is rate limiting; try again later                                                                               |
+| `internal`                                                      | 500      | An internal error in pt-tools                                                                                        |
+| `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading the torrent file, signing in or reaching TMDB failed                                          |
+| `unavailable`                                                   | 503      | The service behind the endpoint is not running                                                                       |
 
 ## Endpoints
 
@@ -65,6 +66,7 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | POST   | `/subscriptions/{id}/search` | Operate    | Search now                                                                    |
 | DELETE | `/subscriptions/{id}`        | Operate    | Delete a subscription                                                         |
 | GET    | `/explore`                   | Read       | Explore: TMDB trending, popular and search                                    |
+| GET    | `/images/tmdb/{size}/{file}` | Read       | A TMDB image (poster), fetched by pt-tools                                    |
 | GET    | `/updates`                   | Read       | Whether a newer release exists                                                |
 
 Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST but needs only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
@@ -218,7 +220,7 @@ Organise history, most recently updated first. Parameters: `status` (`done`, `fa
 Parameters: `status` (`active`, `paused`, `pending`, `done`) and `q` (keyword). Each item has:
 
 - `id`, `media_type` (`movie` or `tv`), `tmdb_id`, `season`, `title`, `original_title`, `year`, `total_episodes`;
-- `poster_path`: the TMDB poster path; the image address is `https://image.tmdb.org/t/p/w342` followed by this path (`w342` can be any other size TMDB offers);
+- `poster_path`: the TMDB poster path; fetch the image with `GET /images/tmdb/w342/<the path without its leading />` (`w342` can also be one of the other sizes listed below), see below;
 - `status`, `upgrade` (whether to upgrade quality), `source` (`manual`, `explore`, `douban`, `chatops`, `app`), `message`, `last_search_at`, `next_search_at`, `created_at`;
 - `progress`: `total`, `aired`, `in_library`, `downloading` and `missing` (the missing episode numbers).
 
@@ -263,3 +265,7 @@ Deletes the subscription and responds with `{"ok": true}`. Torrents in the downl
 | `page`    | Starting at 1; trending and popular go up to 20 pages, search has one page |
 
 The response has `items`, `page` and `total_pages`. Each item has `id` (the TMDB ID), `media_type`, `title`, `original_title`, `year`, `overview`, `poster_path`, `vote_average`, `in_library`, `subscribed` and `subscription_id`.
+
+### GET /images/tmdb/{size}/{file}
+
+A TMDB image: `file` is `poster_path` without its leading `/`, and `size` is one of the poster sizes `w92`, `w154`, `w185`, `w342`, `w500` and `w780` (originals aren't offered, they can be several MB). pt-tools fetches it with the image address and proxy set under Media recognition and responds with the image and a one-day cache header, so clients never contact TMDB directly. Without a TMDB API key it responds with 400, when TMDB has no such image with 404, and when the image can't be fetched with 502 (`upstream`). pt-tools fetches at most 4 images at a time; a request that waits longer than 10 seconds gets 503 (`busy`, with `Retry-After`).

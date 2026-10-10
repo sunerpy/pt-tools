@@ -64,7 +64,7 @@ func setupAppSearch(t *testing.T) (*Server, *pushSite) {
 // 搜索：只回站点与种子编号，没有详情、下载、磁力链接；只搜启用的站点；指定的站点都没启用时不搜
 func TestAppSearch(t *testing.T) {
 	srv, _ := setupAppSearch(t)
-	w := appAsWith(srv.appSearch, http.MethodPost, "/api/app/v1/search", `{"keyword":"Dune"}`, "app:read")
+	w := appAsWith(t, srv.appSearch, http.MethodPost, "/api/app/v1/search", `{"keyword":"Dune"}`, "app:read")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assertNoSecrets(t, w.Body.Bytes())
 	assert.NotContains(t, w.Body.String(), "dh-secret")
@@ -79,13 +79,13 @@ func TestAppSearch(t *testing.T) {
 	assert.NotZero(t, it.DiscountEndAt)
 	assert.Equal(t, "dh-secret", lookupDownhash("hdsky", "1"), "下载要的 downhash 留在服务端")
 
-	w = appAsWith(srv.appSearch, http.MethodPost, "/api/app/v1/search", `{"keyword":"Off","sites":["disabledsite"]}`, "app:read")
+	w = appAsWith(t, srv.appSearch, http.MethodPost, "/api/app/v1/search", `{"keyword":"Off","sites":["disabledsite"]}`, "app:read")
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
 	assert.Empty(t, res.Items, "指定的站点都没启用：不搜，也不退回到搜所有站点")
 
 	for _, bad := range []string{`{"keyword":""}`, `{"keyword":"` + strings.Repeat("长", 101) + `"}`, `{"keyword":"x","min_seeders":-1}`, `{"keyword":"x","url":"y"}`} {
-		assert.Equal(t, http.StatusBadRequest, appAsWith(srv.appSearch, http.MethodPost, "/api/app/v1/search", bad, "app:read").Code, bad)
+		assert.Equal(t, http.StatusBadRequest, appAsWith(t, srv.appSearch, http.MethodPost, "/api/app/v1/search", bad, "app:read").Code, bad)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestAppPush(t *testing.T) {
 	ds := models.DownloaderSetting{Name: "qb", Type: "qbittorrent", URL: "http://127.0.0.1:1", Enabled: true, IsDefault: true}
 	require.NoError(t, global.GlobalDB.DB.Create(&ds).Error)
 
-	w := appAsWith(srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"2","title":"Dune 2","category":"movies"}`, "app:write")
+	w := appAsWith(t, srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"2","title":"Dune 2","category":"movies"}`, "app:write")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var res AppPushResult
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
@@ -113,8 +113,8 @@ func TestAppPush(t *testing.T) {
 	assert.Equal(t, "movies", info.Category)
 
 	// 搜索时记下了 downhash：推送按它下载
-	appAsWith(srv.appSearch, http.MethodPost, "/api/app/v1/search", `{"keyword":"Dune"}`, "app:read")
-	w = appAsWith(srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"1"}`, "app:write")
+	appAsWith(t, srv.appSearch, http.MethodPost, "/api/app/v1/search", `{"keyword":"Dune"}`, "app:read")
+	w = appAsWith(t, srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"1"}`, "app:write")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, []string{"dh-secret"}, site.hashes)
 	// 没带 title：记录里的标题取种子文件里的名字，任务列表不会出现没有标题的行
@@ -142,11 +142,11 @@ func TestAppPush(t *testing.T) {
 		{`{"site":"hdsky","torrent_id":"../../logout.php"}`, http.StatusBadRequest},
 		{`{"site":"hdsky","torrent_id":"1 2"}`, http.StatusBadRequest},
 	} {
-		assert.Equal(t, c.want, appAsWith(srv.appPush, http.MethodPost, "/api/app/v1/push", c.body, "app:write").Code, c.body)
+		assert.Equal(t, c.want, appAsWith(t, srv.appPush, http.MethodPost, "/api/app/v1/push", c.body, "app:write").Code, c.body)
 	}
 
 	dl.addResult = downloader.AddTorrentResult{Success: false, Message: "下载器拒绝"}
-	w = appAsWith(srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"3"}`, "app:write")
+	w = appAsWith(t, srv.appPush, http.MethodPost, "/api/app/v1/push", `{"site":"hdsky","torrent_id":"3"}`, "app:write")
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
 	assert.False(t, res.Success)
@@ -161,6 +161,7 @@ func TestAppAttend(t *testing.T) {
 		req.SetPathValue("site", site)
 		w := httptest.NewRecorder()
 		srv.appAttend(w, req)
+		validateAppResponse(t, req, w)
 		return w.Code
 	}
 	assert.Equal(t, http.StatusNotFound, call("nosuchsite"))

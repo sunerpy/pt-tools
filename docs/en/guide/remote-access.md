@@ -2,7 +2,7 @@
 
 Remote access lets the pt-tools mobile app show your torrents, site statistics and subscriptions while you are away from home, and, with the permissions you grant, pause, delete and push torrents or manage subscriptions. You pair a phone by scanning a QR code in the web interface; from then on the app reaches this pt-tools through a direct address or through a relay. The connection is end-to-end encrypted: a relay only forwards it and cannot read it.
 
-Remote access is off by default. It is separate from [API tokens](api-tokens.md): tokens are for scripts and MCP clients, and you keep their plain text yourself; a paired device connects with keys created during pairing, needs no token, and does not require you to open the pt-tools port to the internet.
+For using the app, see [Mobile app](mobile-app.md). Remote access is off by default. It is separate from [API tokens](api-tokens.md): tokens are for scripts and MCP clients, and you keep their plain text yourself; a paired device connects with keys created during pairing, needs no token, and does not require you to open the pt-tools port to the internet.
 
 ## How it works
 

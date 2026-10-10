@@ -23,6 +23,12 @@ release-please-config.json
 # Lockfiles
 **/buf.lock
 Cargo.lock
+apps/mobile/pubspec.lock
+
+# 手机 App：生成的代码与文案（tool/gen_api.sh、tool/strings.py 生成，CI 检查漂移），Xcode 管的 iOS 工程
+apps/mobile/packages/ptt_api/
+apps/mobile/lib/l10n/
+apps/mobile/ios/
 
 # Build output
 dist/

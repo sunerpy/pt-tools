@@ -1,0 +1,17 @@
+#
+# AUTO-GENERATED FILE, DO NOT MODIFY!
+#
+
+name: 'ptt_api'
+version: '1.0.0'
+description: 'pt-tools App API v1 client (generated from docs/reference/app-api-v1.yaml)'
+homepage: 'https://github.com/sunerpy/pt-tools'
+environment:
+  sdk: '>=2.17.0 <4.0.0'
+dependencies:
+  collection: '>=1.17.0 <2.0.0'
+  http: '>=0.13.0 <2.0.0'
+  intl: any
+  meta: '>=1.1.8 <2.0.0'
+dev_dependencies:
+  test: '>=1.21.6 <1.22.0'

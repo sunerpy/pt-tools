@@ -1,0 +1,42 @@
+# 安装固定版本的 Flutter SDK：从官方存储下载归档，按 sha256 核对后解压，加进 PATH。
+# 不用 subosito/flutter-action：它内部的 actions/cache 没有固定到 SHA，本仓库的 Actions 策略不允许（嵌套的 action 也算）。
+# 升级 Flutter：改 version 与下面的 sha256，取自 https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json
+# 与 releases_macos.json 里对应版本的 sha256。
+name: Set up Flutter
+description: Install the pinned Flutter SDK from the official archive, verified by sha256
+
+runs:
+  using: composite
+  steps:
+    - name: Download and verify the Flutter SDK
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=3.47.7
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64)
+            archive="stable/linux/flutter_linux_${version}-stable.tar.xz"
+            sha256=af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230 ;;
+          macOS-ARM64)
+            archive="stable/macos/flutter_macos_arm64_${version}-stable.zip"
+            sha256=dd9da574c3168460550117eb0e8dd0313ae934fabf64a82a6d557fff5fd1422e ;;
+          macOS-X64)
+            archive="stable/macos/flutter_macos_${version}-stable.zip"
+            sha256=17d39b000a5d0681e3f7b61a105a36f6f31dd41ab9073f625fd466f38035f901 ;;
+          *)
+            echo "::error title=Flutter::没有 $RUNNER_OS-$RUNNER_ARCH 的 Flutter 归档"
+            exit 1 ;;
+        esac
+        dir="$RUNNER_TOOL_CACHE/flutter-sdk/$version"
+        file="$RUNNER_TEMP/$(basename "$archive")"
+        curl -fsSL --retry 3 -o "$file" "https://storage.googleapis.com/flutter_infra_release/releases/$archive"
+        echo "$sha256  $file" | shasum -a 256 -c -
+        mkdir -p "$dir"
+        case "$file" in
+          *.tar.xz) tar -xJf "$file" -C "$dir" ;;
+          *.zip) unzip -q "$file" -d "$dir" ;;
+        esac
+        rm -f "$file"
+        echo "$dir/flutter/bin" >> "$GITHUB_PATH"
+        "$dir/flutter/bin/flutter" config --no-analytics > /dev/null
+        "$dir/flutter/bin/flutter" --version

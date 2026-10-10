@@ -22,24 +22,25 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 - 时间是 Unix 时间戳（秒）。大小、上传量与下载量的单位是字节，速度的单位是字节每秒，进度是 0 到 100 的百分数。
 - 分页的接口接受查询参数 `page`（从 1 开始）与 `page_size`（默认 20，上限见各接口），回应是 `{"items": [...], "total": 总数, "page": 页码, "page_size": 每页条数}`。
 - 兼容性：`GET /meta` 返回的 `remote_api_level` 现在是 1，只在有不兼容的改动时加一。新增接口或字段不算不兼容，客户端应忽略不认识的字段。
+- 契约：机器可读的描述是仓库里的 [app-api-v1.yaml](https://github.com/sunerpy/pt-tools/blob/main/docs/reference/app-api-v1.yaml)（OpenAPI 3.0）。pt-tools 的测试用它核对每个接口的真实回应，手机 App 的 Dart 模型也由它生成。
 
 ## 错误
 
 出错时回应 `{"error": "代码", "message": "说明"}`。`message` 是写给人看的中文说明，客户端按 `error` 判断。
 
-| `error`                                                         | 状态码 | 含义                                               |
-| --------------------------------------------------------------- | ------ | -------------------------------------------------- |
-| `invalid_body`                                                  | 400    | 请求体不是合法的 JSON，或者有不认识的字段          |
-| `invalid_argument`                                              | 400    | 参数不对，`message` 写明是哪一个                   |
-| `unauthorized`                                                  | 401    | 没有带有效的令牌                                   |
-| `forbidden`                                                     | 403    | 令牌没有这个权限                                   |
-| `not_found`                                                     | 404    | 接口、站点或订阅不存在                             |
-| `method_not_allowed`                                            | 405    | 接口存在，但不接受这个方法；`Allow` 头写明接受哪些 |
-| `busy`                                                          | 409    | 同一件事正在进行，例如这个站点正在签到             |
-| `rate_limited`                                                  | 429    | TMDB 限流，稍后再试                                |
-| `internal`                                                      | 500    | pt-tools 内部出错                                  |
-| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502    | 搜索、下载种子文件、签到或访问 TMDB 失败           |
-| `unavailable`                                                   | 503    | 对应的服务没有启动                                 |
+| `error`                                                         | 状态码   | 含义                                                                                     |
+| --------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `invalid_body`                                                  | 400      | 请求体不是合法的 JSON，或者有不认识的字段                                                |
+| `invalid_argument`                                              | 400      | 参数不对，`message` 写明是哪一个                                                         |
+| `unauthorized`                                                  | 401      | 没有带有效的令牌                                                                         |
+| `forbidden`                                                     | 403      | 令牌没有这个权限                                                                         |
+| `not_found`                                                     | 404      | 接口、站点或订阅不存在                                                                   |
+| `method_not_allowed`                                            | 405      | 接口存在，但不接受这个方法；`Allow` 头写明接受哪些                                       |
+| `busy`                                                          | 409、503 | 同一件事正在进行（409，例如这个站点正在签到）；取图片的请求太多（503，带 `Retry-After`） |
+| `rate_limited`                                                  | 429      | TMDB 限流，稍后再试                                                                      |
+| `internal`                                                      | 500      | pt-tools 内部出错                                                                        |
+| `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502      | 搜索、下载种子文件、签到或访问 TMDB 失败                                                 |
+| `unavailable`                                                   | 503      | 对应的服务没有启动                                                                       |
 
 ## 接口一览
 
@@ -65,6 +66,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | POST   | `/subscriptions/{id}/search` | 操作 | 立即搜索                                     |
 | DELETE | `/subscriptions/{id}`        | 操作 | 删除订阅                                     |
 | GET    | `/explore`                   | 读取 | 探索：TMDB 的热门、流行与搜索                |
+| GET    | `/images/tmdb/{size}/{file}` | 读取 | TMDB 图片（海报），由 pt-tools 去取          |
 | GET    | `/updates`                   | 读取 | 有没有新版本                                 |
 
 路径都省略了 `/api/app/v1` 前缀。搜索用 POST 传条件，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
@@ -218,7 +220,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 参数 `status`（`active`、`paused`、`pending`、`done`）与 `q`（关键字）。每项有：
 
 - `id`、`media_type`（`movie` 或 `tv`）、`tmdb_id`、`season`、`title`、`original_title`、`year`、`total_episodes`；
-- `poster_path`：TMDB 的海报路径，图片地址是 `https://image.tmdb.org/t/p/w342` 接上这个路径（`w342` 可以换成 TMDB 支持的其他尺寸）；
+- `poster_path`：TMDB 的海报路径，经 `GET /images/tmdb/w342/<去掉开头 / 的路径>` 取图（`w342` 也可以换成下文列出的其他尺寸），见下文；
 - `status`、`upgrade`（是否洗版）、`source`（`manual`、`explore`、`douban`、`chatops`、`app`）、`message`、`last_search_at`、`next_search_at`、`created_at`；
 - `progress`：`total`、`aired`、`in_library`、`downloading` 与 `missing`（缺的集号）。
 
@@ -263,3 +265,7 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `page` | 从 1 开始，热门与流行最多 20 页；搜索只有一页                         |
 
 回应有 `items`、`page`、`total_pages`。每项有 `id`（TMDB 编号）、`media_type`、`title`、`original_title`、`year`、`overview`、`poster_path`、`vote_average`、`in_library`（已入库）、`subscribed` 与 `subscription_id`。
+
+### GET /images/tmdb/{size}/{file}
+
+TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报尺寸 `w92`、`w154`、`w185`、`w342`、`w500`、`w780` 之一（不提供原图，原图可能有好几 MB）。pt-tools 按「媒体识别」里设置的图片地址与代理去取，回应是图片，带一天的缓存头；客户端因此不用直接连 TMDB（国内常常连不上）。没有填写 TMDB API Key 时回 400，TMDB 上没有这张图时回 404，取不到时回 502（`upstream`）。pt-tools 同时最多取 4 张图，排队超过 10 秒回 503（`busy`，带 `Retry-After`）。

@@ -19,11 +19,13 @@ import (
 )
 
 // appAs 用一个令牌主体调处理函数（路由与鉴权另有测试）。
-func appAs(h http.HandlerFunc, method, target string) *httptest.ResponseRecorder {
+func appAs(t testing.TB, h http.HandlerFunc, method, target string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(method, target, nil)
 	req = req.WithContext(middleware.WithPrincipal(req.Context(), &middleware.Principal{Kind: middleware.KindAPIToken, ID: "1", Scopes: []string{"app:read"}}))
 	w := httptest.NewRecorder()
 	h(w, req)
+	validateAppResponse(t, req, w)
 	return w
 }
 
@@ -70,7 +72,7 @@ func TestAppOverview(t *testing.T) {
 	saveOn(t, repo, "2026-10-06", "hdsky", 300, 30, 5)
 	saveOn(t, repo, "2026-10-06", "disabledsite", 999, 999, 999)
 	repo.SetClock(func() time.Time { return time.Date(2026, 10, 6, 20, 0, 0, 0, time.UTC) }, time.UTC)
-	w := appAs(srv.appOverview, http.MethodGet, "/api/app/v1/overview")
+	w := appAs(t, srv.appOverview, http.MethodGet, "/api/app/v1/overview")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assertNoSecrets(t, w.Body.Bytes())
 	var ov AppOverview
@@ -82,7 +84,7 @@ func TestAppOverview(t *testing.T) {
 	prev := userInfoService
 	userInfoService = nil
 	t.Cleanup(func() { userInfoService = prev })
-	assert.Equal(t, http.StatusServiceUnavailable, appAs(srv.appOverview, http.MethodGet, "/api/app/v1/overview").Code)
+	assert.Equal(t, http.StatusServiceUnavailable, appAs(t, srv.appOverview, http.MethodGet, "/api/app/v1/overview").Code)
 }
 
 // 站点：名字、登录状态、签到与用户数据；没有 Cookie、passkey 与地址
@@ -91,7 +93,7 @@ func TestAppSites(t *testing.T) {
 	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.SiteLoginState{}, &models.SiteAttendanceLog{}))
 	saveOn(t, repo, "2026-10-06", "hdsky", 300, 30, 5)
 	require.NoError(t, global.GlobalDB.DB.Model(&models.SiteSetting{}).Where("name = ?", "hdsky").Updates(map[string]any{"passkey": "pk-secret", "api_key": "ak-secret"}).Error)
-	w := appAs(srv.appSites, http.MethodGet, "/api/app/v1/sites")
+	w := appAs(t, srv.appSites, http.MethodGet, "/api/app/v1/sites")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assertNoSecrets(t, w.Body.Bytes())
 	assert.NotContains(t, w.Body.String(), "pk-secret")
@@ -121,7 +123,7 @@ func TestAppTasks(t *testing.T) {
 		}
 		require.NoError(t, global.GlobalDB.DB.Create(&row).Error)
 	}
-	w := appAs(srv.appTasks, http.MethodGet, "/api/app/v1/tasks?site=hdsky&q=Dune&page_size=1")
+	w := appAs(t, srv.appTasks, http.MethodGet, "/api/app/v1/tasks?site=hdsky&q=Dune&page_size=1")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assertNoSecrets(t, w.Body.Bytes())
 	assert.NotContains(t, w.Body.String(), "pk-secret")
@@ -132,29 +134,31 @@ func TestAppTasks(t *testing.T) {
 	assert.Equal(t, "Dune.Part.One.2021.2160p", page.Items[0].Title, "新的在前")
 	assert.True(t, page.Items[0].Pushed)
 
-	w = appAs(srv.appTasks, http.MethodGet, "/api/app/v1/tasks?q=Part.Two")
+	w = appAs(t, srv.appTasks, http.MethodGet, "/api/app/v1/tasks?q=Part.Two")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `推送失败: Get \"\u003c地址\u003e\": EOF`)
 	for _, q := range []string{"?page=0", "?page_size=101", "?page=x", "?q=" + strings.Repeat("x", 201)} {
-		assert.Equal(t, http.StatusBadRequest, appAs(srv.appTasks, http.MethodGet, "/api/app/v1/tasks"+q).Code, q)
+		assert.Equal(t, http.StatusBadRequest, appAs(t, srv.appTasks, http.MethodGet, "/api/app/v1/tasks"+q).Code, q)
 	}
 }
 
 // 站点图标：站点名不对 400；没有缓存、不去取时回占位图
 func TestAppFavicon(t *testing.T) {
 	srv, _ := historyFixture(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/x?nofetch=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/nosuchsite?nofetch=1", nil)
 	req.SetPathValue("site", "nosuchsite")
 	w := httptest.NewRecorder()
 	srv.appFavicon(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NotEmpty(t, w.Body.Bytes())
+	validateAppResponse(t, req, w)
 
-	req = httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/x", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/app/v1/favicon/a%5Cb", nil)
 	req.SetPathValue("site", "a\\b")
 	w = httptest.NewRecorder()
 	srv.appFavicon(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	validateAppResponse(t, req, w)
 }
 
 // appRedact：错误信息里的凭证都要遮住（上游的回应体、tracker 地址、裸的 key=value、地址里的用户信息与路径里的长串），普通的说明不动
@@ -183,7 +187,7 @@ func TestAppSitesUserInfoFailure(t *testing.T) {
 	srv, _ := historyFixture(t)
 	require.NoError(t, global.GlobalDB.DB.AutoMigrate(&models.SiteLoginState{}, &models.SiteAttendanceLog{}))
 	require.NoError(t, global.GlobalDB.DB.Migrator().DropTable("user_info"))
-	w := appAs(srv.appSites, http.MethodGet, "/api/app/v1/sites")
+	w := appAs(t, srv.appSites, http.MethodGet, "/api/app/v1/sites")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assertNoSecrets(t, w.Body.Bytes())
 	var list AppSiteList
@@ -197,7 +201,7 @@ func TestAppOverviewDeltaFailure(t *testing.T) {
 	srv, repo := historyFixture(t)
 	saveOn(t, repo, "2026-10-06", "hdsky", 300, 30, 5)
 	require.NoError(t, global.GlobalDB.DB.Migrator().DropTable("user_info_daily_snapshot"))
-	w := appAs(srv.appOverview, http.MethodGet, "/api/app/v1/overview")
+	w := appAs(t, srv.appOverview, http.MethodGet, "/api/app/v1/overview")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var ov AppOverview
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ov))
@@ -212,7 +216,7 @@ func TestAppSitesWithoutUserInfoService(t *testing.T) {
 	prev := userInfoService
 	userInfoService = nil
 	t.Cleanup(func() { userInfoService = prev })
-	w := appAs(srv.appSites, http.MethodGet, "/api/app/v1/sites")
+	w := appAs(t, srv.appSites, http.MethodGet, "/api/app/v1/sites")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var list AppSiteList
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
@@ -226,7 +230,7 @@ func TestAppOverviewWithoutHistory(t *testing.T) {
 	prev := userInfoService
 	userInfoService = v2.NewUserInfoService(v2.UserInfoServiceConfig{Repo: v2.NewInMemoryUserInfoRepo(), Logger: zap.NewNop()})
 	t.Cleanup(func() { userInfoService = prev })
-	w := appAs(srv.appOverview, http.MethodGet, "/api/app/v1/overview")
+	w := appAs(t, srv.appOverview, http.MethodGet, "/api/app/v1/overview")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var ov AppOverview
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ov))
