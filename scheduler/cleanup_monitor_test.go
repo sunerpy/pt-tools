@@ -475,6 +475,7 @@ func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
 		TorrentID:   "t1",
 		TorrentHash: &hash,
 		FreeEndTime: &expired,
+		IsFree:      true,
 		IsPushed:    &pushed,
 		Title:       "Test",
 	}
@@ -486,6 +487,31 @@ func TestShouldDelete_FreeExpiredIncomplete(t *testing.T) {
 	// Given: completed torrent with expired free → should NOT delete
 	t2 := downloader.Torrent{ID: "2", InfoHash: hash, Progress: 1.0, State: downloader.TorrentSeeding}
 	assert.False(t, cm.shouldDelete(cfg, t2))
+}
+
+// 过滤规则下载的半价种子：以前 RSS 把半价的结束时间记成了 free_end_time，库里留着这样的记录；
+// 「删除免费到期未完成的种子」只认免费的，不删它（开了删除数据时连数据一起删）
+func TestShouldDelete_FreeExpiredSkipsNonFree(t *testing.T) {
+	cm := newTestCleanupMonitor(t)
+	cfg := baseCfg()
+	cfg.CleanupDelFreeExpired = true
+
+	ended := time.Now().Add(-1 * time.Hour)
+	hash := "half-price-hash"
+	pushed := true
+	require.NoError(t, cm.db.Create(&models.TorrentInfo{
+		SiteName:    "testsite",
+		TorrentID:   "t1",
+		TorrentHash: &hash,
+		FreeEndTime: &ended,
+		FreeLevel:   "PERCENT_50",
+		IsFree:      false,
+		IsPushed:    &pushed,
+		Title:       "Half Price",
+	}).Error)
+
+	t1 := downloader.Torrent{ID: "1", InfoHash: hash, Progress: 0.4, State: downloader.TorrentDownloading}
+	assert.False(t, cm.shouldDelete(cfg, t1))
 }
 
 func TestShouldDelete_FreeExpiredDisabled(t *testing.T) {
@@ -926,6 +952,7 @@ func TestShouldDelete_FreeExpiredBypassesAndOr(t *testing.T) {
 		TorrentID:   "t1",
 		TorrentHash: &hash,
 		FreeEndTime: &expired,
+		IsFree:      true,
 		IsPushed:    &pushed,
 		Title:       "Free Expired",
 	}).Error)
