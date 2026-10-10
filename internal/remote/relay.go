@@ -165,10 +165,14 @@ const maxRetryAfter = 5 * time.Minute
 // parseRetryAfter 读 Retry-After 的秒数写法（HTTP 日期写法不认，当成没有）。
 func parseRetryAfter(v string) time.Duration {
 	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil || n <= 0 {
+	switch {
+	case errors.Is(err, strconv.ErrRange) && n > 0, err == nil && n >= int(maxRetryAfter/time.Second):
+		// 先按秒封顶再换成 Duration：很大的数乘以 time.Second 会溢出
+		return maxRetryAfter
+	case err != nil || n <= 0:
 		return 0
 	}
-	return min(time.Duration(n)*time.Second, maxRetryAfter)
+	return time.Duration(n) * time.Second
 }
 
 // relayRetry 是断开以后等多久再连，以及下一次的退避（r 是 [0,1) 的随机数）：

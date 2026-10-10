@@ -62,6 +62,9 @@ func TestRelayRetryAfter(t *testing.T) {
 
 	assert.Equal(t, 5*time.Second, parseRetryAfter(" 5 "))
 	assert.Equal(t, maxRetryAfter, parseRetryAfter("86400"))
+	assert.Equal(t, maxRetryAfter, parseRetryAfter("92233720369"), "乘以 time.Second 会溢出的值")
+	assert.Equal(t, maxRetryAfter, parseRetryAfter("99999999999999999999"), "超出 int 的值")
+	assert.Equal(t, time.Duration(0), parseRetryAfter("-99999999999999999999"))
 	assert.Equal(t, time.Duration(0), parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT"))
 	assert.Equal(t, time.Duration(0), parseRetryAfter("-3"))
 	assert.Equal(t, "503", busy.Error())
