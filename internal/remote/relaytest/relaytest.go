@@ -74,6 +74,7 @@ func Run(t *testing.T, tg Target) {
 	switch tg.Profile {
 	case ProfileMain:
 		t.Run("healthz", func(t *testing.T) { testHealthz(t, tg, false) })
+		t.Run("ready", func(t *testing.T) { testReady(t, tg, "") })
 		t.Run("not_found", func(t *testing.T) { testNotFound(t, tg) })
 		t.Run("bad_host_id", func(t *testing.T) { testBadHostID(t, tg) })
 		t.Run("auth_ok", func(t *testing.T) { testAuthOK(t, tg) })
@@ -98,6 +99,7 @@ func Run(t *testing.T, tg Target) {
 		t.Run("per_ip", func(t *testing.T) { testPerIP(t, tg) })
 	case ProfileDisabled:
 		t.Run("healthz", func(t *testing.T) { testHealthz(t, tg, true) })
+		t.Run("ready", func(t *testing.T) { testReady(t, tg, "disabled") })
 		t.Run("disabled", func(t *testing.T) { testDisabled(t, tg) })
 	default:
 		t.Fatalf("不认识的 Profile %q", tg.Profile)
@@ -249,6 +251,21 @@ func testHealthz(t *testing.T, tg Target, wantDisabled bool) {
 	assert.True(t, body.OK)
 	assert.NotEmpty(t, body.Version)
 	assert.Equal(t, wantDisabled, body.Disabled)
+}
+
+// testReady：接新连接时 200 {"status":"ready"}；不接时 503 {"status":"unready","reason":…}（wantReason 不为空）。
+func testReady(t *testing.T, tg Target, wantReason string) {
+	resp := httpGet(t, tg.httpURL()+"/ready")
+	defer resp.Body.Close()
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	if wantReason == "" {
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, map[string]string{"status": "ready"}, body)
+		return
+	}
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.Equal(t, map[string]string{"status": "unready", "reason": wantReason}, body)
 }
 
 func testNotFound(t *testing.T, tg Target) {
