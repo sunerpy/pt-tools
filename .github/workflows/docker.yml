@@ -247,6 +247,7 @@ jobs:
             TAG=${{ inputs.tag_name }}
             BUILD_TIME=${{ steps.buildmeta.outputs.build_time }}
             COMMIT_ID=${{ steps.buildmeta.outputs.commit_id }}
+            RELAY_URL=${{ secrets.PT_TOOLS_RELAY_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
