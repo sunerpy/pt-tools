@@ -8,8 +8,9 @@
 # 两种触发都只在受保护的 main 或 v1.0.0-rc 上。
 # GitHub Environment「hosted-relay」（部署分支限定为 main 与 v1.0.0-rc，可以加审批）里的 secret：RELAY_SSH_HOST、RELAY_SSH_USER、
 # RELAY_SSH_KEY（部署用的私钥）、RELAY_SSH_KNOWN_HOSTS（服务器的主机密钥，ssh-keyscan 的结果，不接受陌生主机）。
-# 变量：RELAY_HOSTNAME（对外的主机名，App 与 pt-tools 里填 wss://<它>），可选 RELAY_IMAGE（默认 sunerpy/pt-tools）、RELAY_PORT（服务器上 relay 听的本机端口，
-# 默认 8443，反向代理把 WebSocket 转到这里）、RELAY_DRAIN_GRACE（默认 5s）、RELAY_CLIENT_IP_HEADER（反向代理写客户端 IP 的头，例如 X-Real-IP）、
+# 变量：RELAY_HOSTNAME（对外的主机名，App 与 pt-tools 里填 wss://<它>），可选 RELAY_IMAGE（默认 sunerpy/pt-tools）、RELAY_PORT（服务器上 relay 听的端口，
+# 默认 8443，反向代理把 WebSocket 转到这里）、RELAY_BIND（这个端口绑定的地址，默认 127.0.0.1；ALB 这类从别的机器连过来时填服务器的私网地址）、
+# RELAY_DRAIN_GRACE（默认 5s）、RELAY_CLIENT_IP_HEADER（反向代理写客户端 IP 的头，例如 X-Real-IP；AWS ALB 用 X-Forwarded-For）、
 # RELAY_SSH_PORT（默认 22）、RELAY_MAX_CONNECTIONS 与 RELAY_DAILY_BYTES_PER_HOST（不设时用 relay 的默认值）。
 name: Relay Deploy
 
@@ -87,6 +88,7 @@ jobs:
           RELAY_HOSTNAME: ${{ vars.RELAY_HOSTNAME }}
           RELAY_IMAGE: ${{ vars.RELAY_IMAGE }}
           RELAY_PORT: ${{ vars.RELAY_PORT }}
+          RELAY_BIND: ${{ vars.RELAY_BIND }}
           RELAY_DRAIN_GRACE: ${{ vars.RELAY_DRAIN_GRACE }}
           RELAY_CLIENT_IP_HEADER: ${{ vars.RELAY_CLIENT_IP_HEADER }}
           RELAY_SSH_PORT: ${{ vars.RELAY_SSH_PORT }}
@@ -109,6 +111,8 @@ jobs:
           [[ "$image" =~ ^[a-z0-9]([a-z0-9._/:-]*[a-z0-9])?$ ]] || fail "vars.RELAY_IMAGE '${image}' is not an image name"
           port=${RELAY_PORT:-8443}
           [[ "$port" =~ ^[0-9]{1,5}$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "vars.RELAY_PORT '${port}' is not a port"
+          bind=${RELAY_BIND:-127.0.0.1}
+          [[ "$bind" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "vars.RELAY_BIND '${bind}' is not an IPv4 address"
           grace=${RELAY_DRAIN_GRACE:-5s}
           [[ "$grace" =~ ^[0-9]{1,3}s$ ]] || fail "vars.RELAY_DRAIN_GRACE '${grace}' is not like 5s"
           header=${RELAY_CLIENT_IP_HEADER:-}
@@ -125,6 +129,7 @@ jobs:
           {
             echo "image=$image"
             echo "port=$port"
+            echo "bind=$bind"
             echo "grace=$grace"
             echo "header=$header"
             echo "ssh_port=$ssh_port"
@@ -193,6 +198,7 @@ jobs:
           DIR: ${{ steps.ssh.outputs.dir }}
           IMAGE: ${{ steps.img.outputs.ref }}
           PORT: ${{ steps.cfg.outputs.port }}
+          BIND: ${{ steps.cfg.outputs.bind }}
           GRACE: ${{ steps.cfg.outputs.grace }}
           HEADER: ${{ steps.cfg.outputs.header }}
           SSH_PORT: ${{ steps.cfg.outputs.ssh_port }}
@@ -204,7 +210,7 @@ jobs:
           RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
         run: |
           set -euo pipefail
-          args=(bash -s -- --image "$IMAGE" --public-url "wss://$RELAY_HOSTNAME" --port "$PORT" --drain-grace "$GRACE" --expect-version "$TAG" --keep-previous)
+          args=(bash -s -- --image "$IMAGE" --public-url "wss://$RELAY_HOSTNAME" --port "$PORT" --bind "$BIND" --drain-grace "$GRACE" --expect-version "$TAG" --keep-previous)
           [ -z "$HEADER" ] || args+=(--client-ip-header "$HEADER")
           [ -z "$MAX_CONNECTIONS" ] || args+=(--max-connections "$MAX_CONNECTIONS")
           [ -z "$DAILY_BYTES" ] || args+=(--daily-bytes-per-host "$DAILY_BYTES")
