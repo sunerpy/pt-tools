@@ -434,6 +434,11 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 			Find(&pend).Error; err != nil || len(pend) == 0 {
 			continue
 		}
+		// 读到到期以后，触发这次重试的那条被别的整理改写了（成功了、或者写了新的退避）：不排。
+		// 它还是读到时的样子，后面 claimLease 逐条核对的就是到期的状态
+		if !unchanged(pend, r) {
+			continue
+		}
 		ids := make([]uint, 0, len(pend))
 		for _, p := range pend {
 			ids = append(ids, p.ID)
@@ -463,6 +468,16 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 			s.markRetrying(ids, false)
 		}
 	}
+}
+
+// unchanged 报告 rows（这个种子仍在失败、有重试时间的记录）里还有 due 这一条，重试时间也没变。
+func unchanged(rows []models.MediaTransferHistory, due models.MediaTransferHistory) bool {
+	for _, r := range rows {
+		if r.ID == due.ID {
+			return r.NextRetryAt != nil && due.NextRetryAt != nil && r.NextRetryAt.Equal(*due.NextRetryAt)
+		}
+	}
+	return false
 }
 
 // errLeaseLost 表示读到待重试的记录以后，有记录被别的整理改写了（成功了、或者写了新的退避）
