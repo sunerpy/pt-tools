@@ -134,9 +134,8 @@ func (c *relayClient) run() {
 			backoff = relayBackoffMin
 		}
 		c.setStatus(RelayOffline, err)
-		c.h.cfg.Logger.Infof("[远程访问] relay %s 断开，%s 后重连: %v", c.url, backoff, err)
-		// 抖动 ±20%，很多主机同时断开时不会一起重连
-		wait := time.Duration(float64(backoff) * (0.8 + 0.4*rand.Float64()))
+		wait, next := relayRetry(err, backoff, rand.Float64())
+		c.h.cfg.Logger.Infof("[远程访问] relay %s 断开，%s 后重连: %v", c.url, wait.Round(100*time.Millisecond), err)
 		t := time.NewTimer(wait)
 		select {
 		case <-t.C:
@@ -144,8 +143,24 @@ func (c *relayClient) run() {
 			t.Stop()
 			return
 		}
-		backoff = min(backoff*2, relayBackoffMax)
+		backoff = next
 	}
+}
+
+// relayRetry 是断开以后等多久再连，以及下一次的退避（r 是 [0,1) 的随机数）：
+//   - relay 重启（1012）：退避回到最短，在 1–5 秒里随机等，很多主机同时断开时分散开重连；
+//   - relay 太忙（1013）：至少等 10–20 秒，退避照常翻倍；
+//   - 别的：按退避等（抖动 ±20%），退避翻倍，最长一分钟。
+func relayRetry(err error, backoff time.Duration, r float64) (wait, next time.Duration) {
+	jittered := time.Duration(float64(backoff) * (0.8 + 0.4*r))
+	next = min(backoff*2, relayBackoffMax)
+	switch websocket.CloseStatus(err) {
+	case websocket.StatusServiceRestart:
+		return time.Second + time.Duration(r*float64(4*time.Second)), relayBackoffMin
+	case websocket.StatusTryAgainLater:
+		return max(jittered, 10*time.Second+time.Duration(r*float64(10*time.Second))), next
+	}
+	return jittered, next
 }
 
 // connectOnce 连一次 relay：认证，然后转发流，直到连接断开。
