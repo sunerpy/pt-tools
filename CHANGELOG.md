@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.19](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.18...v1.0.0-rc.19) (2026-10-10)
+
+
+### Features
+
+* **relay:** 健康检查、监控、连接数上限与平滑重启 ([#652](https://github.com/sunerpy/pt-tools/issues/652)) ([99765e1](https://github.com/sunerpy/pt-tools/commit/99765e1000b0bc688258cd25f722c20cdbd153e0))
+
 ## [1.0.0-rc.18](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.17...v1.0.0-rc.18) (2026-10-10)
 
 
