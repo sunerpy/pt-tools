@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,26 +31,57 @@ func TestRelayServeValidation(t *testing.T) {
 	assert.ErrorContains(t, runRelay(context.Background()), "--tls-key")
 }
 
-// relay serve 起来以后 /healthz 能访问，ctx 结束以后退出
+// relay serve 起来以后 /healthz、/ready、/metrics 能访问；ctx 结束以后先排空（/ready 回 503 draining），
+// 过了 --drain-grace 以 1012 关掉连着的主机，然后退出
 func TestRelayServeRuns(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())
 	setRelayFlags(t, addr, "ws://"+addr, "", "")
+	oldGrace, oldMetrics := relayDrainGrace, relayMetrics
+	t.Cleanup(func() { relayDrainGrace, relayMetrics = oldGrace, oldMetrics })
+	relayDrainGrace, relayMetrics = 2*time.Second, true
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runRelay(ctx) }()
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 2 * time.Second}
-	require.Eventually(t, func() bool {
-		resp, err := client.Get("http://" + addr + "/healthz")
-		if err != nil {
-			return false
+	status := func(path string) int {
+		resp, gerr := client.Get("http://" + addr + path)
+		if gerr != nil {
+			return 0
 		}
 		resp.Body.Close()
-		return resp.StatusCode == http.StatusOK
-	}, 10*time.Second, 50*time.Millisecond)
+		return resp.StatusCode
+	}
+	require.Eventually(t, func() bool { return status("/healthz") == http.StatusOK }, 10*time.Second, 50*time.Millisecond)
+	assert.Equal(t, http.StatusOK, status("/ready"))
+	assert.Equal(t, http.StatusOK, status("/metrics"))
+	// 连着的主机（只连上、还没认证）：停的时候收到 1012
+	dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dcancel()
+	ws, _, err := websocket.Dial(dctx, "ws://"+addr+"/v1/host/"+strings.Repeat("a", 26), &websocket.DialOptions{HTTPClient: client})
+	require.NoError(t, err)
+	defer ws.CloseNow()
+	closed := make(chan websocket.StatusCode, 1)
+	go func() {
+		for {
+			if _, _, err := ws.Read(dctx); err != nil {
+				closed <- websocket.CloseStatus(err)
+				return
+			}
+		}
+	}()
+	t0 := time.Now()
 	cancel()
+	require.Eventually(t, func() bool { return status("/ready") == http.StatusServiceUnavailable }, 2*time.Second, 20*time.Millisecond, "排空时 /ready 回 503")
+	select {
+	case code := <-closed:
+		assert.Equal(t, websocket.StatusServiceRestart, code)
+		assert.GreaterOrEqual(t, time.Since(t0), 2*time.Second, "等过了 --drain-grace 才关")
+	case <-time.After(10 * time.Second):
+		t.Fatal("没有收到 1012")
+	}
 	select {
 	case err := <-done:
 		assert.NoError(t, err)
@@ -61,8 +94,10 @@ func TestRelayCommandRegistered(t *testing.T) {
 	c, _, err := rootCmd.Find([]string{"relay", "serve"})
 	require.NoError(t, err)
 	assert.Equal(t, "serve", c.Name())
-	assert.NotNil(t, c.Flags().Lookup("public-url"))
-	assert.NotNil(t, c.Flags().Lookup("daily-bytes-per-host"))
+	for _, name := range []string{"public-url", "daily-bytes-per-host", "max-connections", "drain-grace", "metrics"} {
+		assert.NotNil(t, c.Flags().Lookup(name), name)
+	}
+	assert.Equal(t, "true", c.Flags().Lookup("metrics").DefValue, "默认提供 /metrics")
 }
 
 func TestRelayEnvDefaults(t *testing.T) {
@@ -77,10 +112,18 @@ func TestRelayEnvDefaults(t *testing.T) {
 	require.Len(t, errs, 1, "写错的值要记下来，运行时报错")
 	assert.ErrorContains(t, errs[0], "PT_TOOLS_RELAY_X")
 	t.Setenv("PT_TOOLS_RELAY_B", "TRUE")
-	assert.True(t, envBool("PT_TOOLS_RELAY_B", &errs))
+	assert.True(t, envBool("PT_TOOLS_RELAY_B", false, &errs))
 	t.Setenv("PT_TOOLS_RELAY_B", "yes")
-	assert.False(t, envBool("PT_TOOLS_RELAY_B", &errs))
+	assert.True(t, envBool("PT_TOOLS_RELAY_B", true, &errs), "写错时返回默认值")
 	assert.Len(t, errs, 2)
+	assert.True(t, envBool("PT_TOOLS_RELAY_NOT_SET", true, &errs), "没有设时是默认值")
+	t.Setenv("PT_TOOLS_RELAY_D", "1m30s")
+	assert.Equal(t, 90*time.Second, envDuration("PT_TOOLS_RELAY_D", 0, &errs))
+	assert.Equal(t, 5*time.Second, envDuration("PT_TOOLS_RELAY_NOT_SET", 5*time.Second, &errs))
+	t.Setenv("PT_TOOLS_RELAY_D", "5")
+	assert.Equal(t, time.Duration(0), envDuration("PT_TOOLS_RELAY_D", 0, &errs), "没有单位不认")
+	require.Len(t, errs, 3)
+	assert.ErrorContains(t, errs[2], "PT_TOOLS_RELAY_D")
 	assert.Equal(t, "d", envOr("PT_TOOLS_RELAY_NOT_SET", "d"))
 }
 
@@ -96,4 +139,11 @@ func TestRelayServeRejectsBadConfig(t *testing.T) {
 	t.Cleanup(func() { relayDailyBytes = oldDaily })
 	relayDailyBytes = -1
 	assert.ErrorContains(t, runRelay(context.Background()), "--daily-bytes-per-host")
+	relayDailyBytes = 0
+	oldGrace := relayDrainGrace
+	t.Cleanup(func() { relayDrainGrace = oldGrace })
+	for _, d := range []time.Duration{-time.Second, 6 * time.Minute} {
+		relayDrainGrace = d
+		assert.ErrorContains(t, runRelay(context.Background()), "--drain-grace", d)
+	}
 }
