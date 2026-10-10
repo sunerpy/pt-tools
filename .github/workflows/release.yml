@@ -647,19 +647,20 @@ jobs:
 
   deploy-relay:
     name: Deploy the hosted relay
-    needs: [release-please, publish-release]
-    # 发布以后的副作用：把托管 relay 升级到这个版本的镜像（relay-deploy.yml，经 ssh 在自己的服务器上跑 scripts/deploy-relay.sh）。
-    # vars.DEPLOY_RELAY 为 'true' 时才部署（默认不部署：要先配好服务器与 RELAY_SSH_* secret）；预发版另要 vars.DEPLOY_RELAY_PRERELEASE 为 'true'。
+    needs: [release-please, docker, publish-release]
+    # 发布以后的副作用：把托管 relay 升级到这次推送的镜像（按 digest；relay-deploy.yml 经 ssh 在自己的服务器上跑 scripts/deploy-relay.sh）。
+    # vars.DEPLOY_RELAY 为 'true' 时才部署（默认不部署：要先配好服务器与 hosted-relay Environment 里的 RELAY_SSH_* secret）；
+    # 预发版另要 vars.DEPLOY_RELAY_PRERELEASE 为 'true'。不传仓库的 secret：部署用的 secret 只放在 hosted-relay Environment 里。
     if: >-
       needs.publish-release.result == 'success' &&
       vars.DEPLOY_RELAY == 'true' &&
       (needs.release-please.outputs.prerelease == 'false' || vars.DEPLOY_RELAY_PRERELEASE == 'true')
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/relay-deploy.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
+      digest: ${{ needs.docker.outputs.digest }}
 
   telegram-announce:
     name: Announce to Telegram

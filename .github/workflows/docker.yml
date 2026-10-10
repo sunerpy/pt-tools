@@ -48,6 +48,10 @@ on:
         required: false
         default: false
         type: boolean
+    outputs:
+      digest:
+        description: "Manifest digest of the pushed image (the same in every registry)"
+        value: ${{ jobs.docker.outputs.digest }}
   workflow_dispatch:
     inputs:
       ref:
