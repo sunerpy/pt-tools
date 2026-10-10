@@ -264,11 +264,13 @@ func TestMetrics(t *testing.T) {
 	_, got, err := client.Read(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "hello", string(got))
-	m = metrics(t, u)
+	// 字节在写完以后才计（转发的 goroutine 里），对端可能先收到：等计数到位
+	require.Eventually(t, func() bool {
+		m = metrics(t, u)
+		return m[`pt_relay_bytes_total{direction="to_host"}`] == 3 && m[`pt_relay_bytes_total{direction="to_client"}`] == 5
+	}, 5*time.Second, 10*time.Millisecond, "转发字节：发给主机 3、发给客户端 5")
 	assert.Equal(t, int64(1), m["pt_relay_auth_failures_total"])
 	assert.Equal(t, int64(1), m[`pt_relay_closed_total{code="4401"}`])
-	assert.Equal(t, int64(3), m[`pt_relay_bytes_total{direction="to_host"}`])
-	assert.Equal(t, int64(5), m[`pt_relay_bytes_total{direction="to_client"}`])
 	assert.Equal(t, int64(1), m["pt_relay_hosts"])
 	assert.Equal(t, int64(1), m["pt_relay_clients"])
 
