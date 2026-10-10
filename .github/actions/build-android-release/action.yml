@@ -1,0 +1,102 @@
+# 构建并校验 App 的 release APK（mobile-release.yml 的 PR 验证与正式构建共用）：装 Java 与 Flutter，按 ABI 拆分构建并签名，
+# apksigner 校验每个 APK 的签名证书，改名并生成 checksums.txt，放进 upload/。
+# 这个 action 不读任何 secret：keystore 与口令经输入传进来；keystore-path 为空时现生成一把只用这一次的测试密钥（产物文件名带 -test-signed，不能发布）。
+name: Build Android release
+description: Build, sign and verify the split release APKs of the mobile app
+
+inputs:
+  version:
+    description: "App 版本（文件名用）"
+    required: true
+  keystore-path:
+    description: "keystore 文件；为空时用现生成的测试密钥"
+    required: false
+    default: ""
+  store-password:
+    description: "keystore 口令"
+    required: false
+    default: ""
+  key-alias:
+    description: "密钥别名"
+    required: false
+    default: ""
+  key-password:
+    description: "密钥口令"
+    required: false
+    default: ""
+  expected-cert:
+    description: "签名证书的 SHA-256（apksigner 的写法，小写十六进制）；不为空时每个 APK 都要是它"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Java
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - name: Set up Flutter
+      uses: ./.github/actions/setup-flutter
+
+    - name: Build split release APKs
+      shell: bash
+      working-directory: apps/mobile
+      env:
+        KEYSTORE: ${{ inputs.keystore-path }}
+        STORE_PASSWORD: ${{ inputs.store-password }}
+        KEY_ALIAS: ${{ inputs.key-alias }}
+        KEY_PASSWORD: ${{ inputs.key-password }}
+      run: |
+        set -euo pipefail
+        if [ -z "$KEYSTORE" ]; then
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/test-signing.jks" STORE_PASSWORD=test-only KEY_ALIAS=test-only KEY_PASSWORD=test-only
+          rm -f "$KEYSTORE"
+          keytool -genkeypair -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -alias "$KEY_ALIAS" -keyalg RSA -keysize 3072 -validity 30 -dname "CN=pt-tools test signing (not for release)" >/dev/null
+          echo "signing with a throwaway test key"
+        fi
+        export ANDROID_KEYSTORE_PATH=$KEYSTORE ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD ANDROID_KEY_ALIAS=$KEY_ALIAS ANDROID_KEY_PASSWORD=$KEY_PASSWORD
+        flutter pub get
+        flutter build apk --release --split-per-abi
+
+    - name: Verify signatures and stage assets
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        TEST_SIGNED: ${{ inputs.keystore-path == '' }}
+        EXPECTED_CERT: ${{ inputs.expected-cert }}
+      run: |
+        set -euo pipefail
+        # 只挑正式版的 build-tools（跳过 rc、preview）
+        tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+        apksigner="$ANDROID_HOME/build-tools/$tools/apksigner"
+        echo "apksigner from build-tools $tools"
+        rm -rf upload
+        mkdir -p upload
+        suffix=""
+        [ "$TEST_SIGNED" != true ] || suffix="-test-signed"
+        for abi in arm64-v8a armeabi-v7a x86_64; do
+          src="apps/mobile/build/app/outputs/flutter-apk/app-$abi-release.apk"
+          [ -f "$src" ] || { echo "::error title=Mobile release::missing $src"; exit 1; }
+          certs=$("$apksigner" verify --print-certs "$src")
+          # 不同版本的 apksigner 写法不同（Signer #1 …、Signer (minSdkVersion=…) …），只认证书的 SHA-256；签名人只能是同一张证书
+          digests=$(printf '%s\n' "$certs" | sed -n 's/^Signer.* certificate SHA-256 digest: *//p' | sort -u)
+          if [ -z "$digests" ] || [ "$(printf '%s\n' "$digests" | wc -l)" -ne 1 ]; then
+            echo "::error title=Mobile release::$src: expected exactly one signing certificate"
+            printf '%s\n' "$certs"
+            exit 1
+          fi
+          if [ -n "$EXPECTED_CERT" ] && [ "$digests" != "$EXPECTED_CERT" ]; then
+            echo "::error title=Mobile release::$src is signed by $digests, not the expected certificate"
+            exit 1
+          fi
+          cp "$src" "upload/pt-tools-app-$VERSION-$abi$suffix.apk"
+          echo "$abi: $digests"
+        done
+        (cd upload && sha256sum ./*.apk | sed 's# \./# #' >checksums.txt)
+        ls -l upload
+        cat upload/checksums.txt
