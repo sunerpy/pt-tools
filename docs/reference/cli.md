@@ -43,18 +43,21 @@ PT_TOOLS_MCP_TOKEN=ptt_1_xxxxxxxx pt-tools mcp --url http://192.168.1.10:8080
 pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 ```
 
-| 参数                        | 说明                                                                                                                                    | 默认值         |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `--public-url`              | relay 对外的地址（`ws://` 或 `wss://`），App 与 pt-tools 里填的就是它；主机按它签名，必须和实际访问的地址一致。必填                     | 无             |
-| `--listen`                  | 监听地址                                                                                                                                | `0.0.0.0:8443` |
-| `--max-streams-per-host`    | 每台 pt-tools 同时连着的手机连接上限，多的以 4429 关闭                                                                                  | `16`           |
-| `--daily-bytes-per-host`    | 每台 pt-tools 每天（00:00 UTC 重置）转发的字节上限，两个方向合计；超额以后它的手机连接全部断开，直到重置。`0` 表示不限                  | `0`            |
-| `--max-conn-per-ip-per-min` | 每个 IP 每分钟新建连接的上限，负数表示不限                                                                                              | `30`           |
-| `--client-ip-header`        | 从这个请求头取客户端 IP（放在反向代理之后时，例如 `X-Real-IP`）；头里有多个地址时取最后一个（代理追加的）。只有确定请求都经过代理时才设 | 无             |
-| `--tls-cert`、`--tls-key`   | TLS 证书与私钥文件；不填时是明文，交给反向代理做 TLS                                                                                    | 无             |
-| `--disabled`                | 暂停服务：所有连接以 4503 关闭                                                                                                          | 关             |
+| 参数                        | 说明                                                                                                                                                                       | 默认值         |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `--public-url`              | relay 对外的地址（`ws://` 或 `wss://`），App 与 pt-tools 里填的就是它；主机按它签名，必须和实际访问的地址一致。必填                                                        | 无             |
+| `--listen`                  | 监听地址                                                                                                                                                                   | `0.0.0.0:8443` |
+| `--max-streams-per-host`    | 每台 pt-tools 同时连着的手机连接上限，多的以 4429 关闭                                                                                                                     | `16`           |
+| `--daily-bytes-per-host`    | 每台 pt-tools 每天（00:00 UTC 重置）转发的字节上限，两个方向合计；超额以后它的手机连接全部断开，直到重置。`0` 表示不限                                                     | `0`            |
+| `--max-conn-per-ip-per-min` | 每个 IP 每分钟新建连接的上限，负数表示不限                                                                                                                                 | `30`           |
+| `--client-ip-header`        | 从这个请求头取客户端 IP（放在反向代理之后时，例如 `X-Real-IP`）；头里有多个地址时取最后一个（代理追加的）。只有确定请求都经过代理时才设                                    | 无             |
+| `--tls-cert`、`--tls-key`   | TLS 证书与私钥文件；不填时是明文，交给反向代理做 TLS                                                                                                                       | 无             |
+| `--disabled`                | 暂停服务：所有连接以 4503 关闭                                                                                                                                             | 关             |
+| `--max-connections`         | 同时连着的连接上限（pt-tools 与手机合计），满了新连接回 HTTP 503，已经连着的不受影响；负数表示不限                                                                         | `10000`        |
+| `--drain-grace`             | 收到 SIGTERM 以后先不接新连接（`/ready` 回 503），等这么久再关掉所有连接（关闭码 1012，pt-tools 与 App 几秒内重连）。前面有负载均衡按 `/ready` 摘流量时设几秒，最长 5 分钟 | `0s`           |
+| `--metrics`                 | 提供 `GET /metrics`（Prometheus 文本，只有聚合的计数，没有 hostId 与 IP）；`--metrics=false` 关掉                                                                          | 开             |
 
-每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`；值写错（数字不是整数、开关不是 `true`/`false`），或者 `--max-streams-per-host`、`--daily-bytes-per-host` 是负数时不启动（`--max-conn-per-ip-per-min` 的负数仍表示不限）。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本。
+每个参数也可以用环境变量给出：`PT_TOOLS_RELAY_LISTEN`、`PT_TOOLS_RELAY_PUBLIC_URL`、`PT_TOOLS_RELAY_MAX_STREAMS_PER_HOST`、`PT_TOOLS_RELAY_DAILY_BYTES_PER_HOST`、`PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN`、`PT_TOOLS_RELAY_CLIENT_IP_HEADER`、`PT_TOOLS_RELAY_TLS_CERT`、`PT_TOOLS_RELAY_TLS_KEY`、`PT_TOOLS_RELAY_DISABLED=true`、`PT_TOOLS_RELAY_MAX_CONNECTIONS`、`PT_TOOLS_RELAY_DRAIN_GRACE`（例如 `5s`）、`PT_TOOLS_RELAY_METRICS=false`；值写错（数字不是整数、开关不是 `true`/`false`、时长没有单位），或者 `--max-streams-per-host`、`--daily-bytes-per-host` 是负数、`--drain-grace` 超出 0 到 5 分钟时不启动（`--max-conn-per-ip-per-min`、`--max-connections` 的负数仍表示不限）。Docker 镜像设 `PT_MODE=relay` 时运行它。`GET /healthz` 返回运行状态与版本；`GET /ready` 在接新连接时回 200，排空、满了、暂停服务时回 503，健康检查用它。
 
 ## pt-tools secret
 
