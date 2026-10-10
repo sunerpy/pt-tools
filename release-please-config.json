@@ -14,6 +14,7 @@
       "draft": true,
       "force-tag-creation": true,
       "changelog-path": "CHANGELOG.md",
+      "exclude-paths": ["apps/mobile", "relay/cloudflare"],
       "extra-files": [
         {
           "type": "json",
