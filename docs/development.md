@@ -650,24 +650,25 @@ Edge 商店发布需要仓库 Secrets：
 
 ### 部署托管 relay
 
-托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
+托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。负载均衡器从别的机器连过来时（例如 AWS ALB），用 `--bind`（workflow 里是变量 `RELAY_BIND`）把端口绑到服务器的私网地址，安全组只放行负载均衡器；客户端 IP 取负载均衡器写的头（ALB 是 `X-Forwarded-For`，relay 取最后一个地址），`/metrics` 不要对外，在负载均衡器上挡掉。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
 
 `Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器。runner 中途丢失时服务器上停在待收尾的状态，下一次部署会拒绝，要登录服务器用下面的 `--finalize` 或 `--rollback` 收尾。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
 
 部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main` 与 `v1.0.0-rc`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
 
-| 名称                                                  | 放在哪里                 | 用途                                                                                      |
-| ----------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
-| `DEPLOY_RELAY`                                        | 仓库变量                 | 为 `true` 时发版以后部署；默认不部署                                                      |
-| `DEPLOY_RELAY_PRERELEASE`                             | 仓库变量                 | 为 `true` 时预览版（RC）也部署；默认只部署稳定版                                          |
-| `RELAY_HOSTNAME`                                      | 变量                     | 对外的主机名，App 与 pt-tools 里填 `wss://<它>`                                           |
-| `RELAY_IMAGE`、`RELAY_PORT`、`RELAY_DRAIN_GRACE`      | 变量                     | 镜像（默认 `sunerpy/pt-tools`）、服务器上听的本机端口（默认 8443）、排空时间（默认 `5s`） |
-| `RELAY_CLIENT_IP_HEADER`                              | 变量                     | 反向代理写客户端 IP 的头（例如 `X-Real-IP`），按 IP 限流时设                              |
-| `RELAY_MAX_CONNECTIONS`、`RELAY_DAILY_BYTES_PER_HOST` | 变量                     | 连接数上限、每台 pt-tools 每天的转发量；不设时用 relay 的默认值                           |
-| `RELAY_SSH_PORT`                                      | 变量                     | 服务器的 ssh 端口，默认 22                                                                |
-| `RELAY_SSH_HOST`、`RELAY_SSH_USER`                    | `hosted-relay` 的 secret | 服务器的地址与部署用户（要能用 docker）                                                   |
-| `RELAY_SSH_KEY`                                       | `hosted-relay` 的 secret | 部署用的 ssh 私钥（只给这一个用途）                                                       |
-| `RELAY_SSH_KNOWN_HOSTS`                               | `hosted-relay` 的 secret | 服务器的主机密钥（`ssh-keyscan -p <端口> <主机>` 的输出），不接受陌生主机                 |
+| 名称                                                  | 放在哪里                 | 用途                                                                                       |
+| ----------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| `DEPLOY_RELAY`                                        | 仓库变量                 | 为 `true` 时发版以后部署；默认不部署                                                       |
+| `DEPLOY_RELAY_PRERELEASE`                             | 仓库变量                 | 为 `true` 时预览版（RC）也部署；默认只部署稳定版                                           |
+| `RELAY_HOSTNAME`                                      | 变量                     | 对外的主机名，App 与 pt-tools 里填 `wss://<它>`                                            |
+| `RELAY_IMAGE`、`RELAY_PORT`、`RELAY_DRAIN_GRACE`      | 变量                     | 镜像（默认 `sunerpy/pt-tools`）、服务器上听的端口（默认 8443）、排空时间（默认 `5s`）      |
+| `RELAY_BIND`                                          | 变量                     | 端口绑定的地址，默认 `127.0.0.1`；负载均衡器在别的机器上时填服务器的私网地址               |
+| `RELAY_CLIENT_IP_HEADER`                              | 变量                     | 反向代理写客户端 IP 的头（例如 `X-Real-IP`，AWS ALB 是 `X-Forwarded-For`），按 IP 限流时设 |
+| `RELAY_MAX_CONNECTIONS`、`RELAY_DAILY_BYTES_PER_HOST` | 变量                     | 连接数上限、每台 pt-tools 每天的转发量；不设时用 relay 的默认值                            |
+| `RELAY_SSH_PORT`                                      | 变量                     | 服务器的 ssh 端口，默认 22                                                                 |
+| `RELAY_SSH_HOST`、`RELAY_SSH_USER`                    | `hosted-relay` 的 secret | 服务器的地址与部署用户（要能用 docker）                                                    |
+| `RELAY_SSH_KEY`                                       | `hosted-relay` 的 secret | 部署用的 ssh 私钥（只给这一个用途）                                                        |
+| `RELAY_SSH_KNOWN_HOSTS`                               | `hosted-relay` 的 secret | 服务器的主机密钥（`ssh-keyscan -p <端口> <主机>` 的输出），不接受陌生主机                  |
 
 「变量」可以是仓库变量，也可以放在 `hosted-relay` 里。在服务器上手动部署、收尾或回滚也用同一个脚本：
 
