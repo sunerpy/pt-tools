@@ -67,7 +67,7 @@ func init() {
 	f.IntVar(&relayMaxConnPerIP, "max-conn-per-ip-per-min", int(envInt("PT_TOOLS_RELAY_MAX_CONN_PER_IP_PER_MIN", relayserver.DefaultMaxConnPerIPPerMin, errs)), "每个 IP 每分钟新建连接的上限，负数 = 不限")
 	f.BoolVar(&relayDisabled, "disabled", envBool("PT_TOOLS_RELAY_DISABLED", false, errs), "暂停服务：所有连接以 4503 关闭")
 	f.IntVar(&relayMaxConns, "max-connections", int(envInt("PT_TOOLS_RELAY_MAX_CONNECTIONS", relayserver.DefaultMaxConnections, errs)), "同时连着的连接上限（主机加客户端），满了新连接回 503；负数 = 不限")
-	f.DurationVar(&relayDrainGrace, "drain-grace", envDuration("PT_TOOLS_RELAY_DRAIN_GRACE", 0, errs), "收到 SIGTERM 以后先不接新连接、等这么久再关掉所有连接（前面有负载均衡按 /ready 摘流量时设几秒）")
+	f.DurationVar(&relayDrainGrace, "drain-grace", envDuration("PT_TOOLS_RELAY_DRAIN_GRACE", 0, errs), "收到 SIGTERM 以后先不接新连接、等这么久再关掉所有连接（前面有负载均衡按 /ready 摘流量时设几秒；在 Docker 里要让 docker stop 的等待时间比它多几秒）")
 	f.BoolVar(&relayMetrics, "metrics", envBool("PT_TOOLS_RELAY_METRICS", true, errs), "提供 GET /metrics（Prometheus 文本，只有聚合的计数）")
 	f.StringVar(&relayClientIPHeader, "client-ip-header", os.Getenv("PT_TOOLS_RELAY_CLIENT_IP_HEADER"), "从这个请求头取客户端 IP（放在反向代理之后时，例如 X-Real-IP）")
 	f.StringVar(&relayTLSCert, "tls-cert", os.Getenv("PT_TOOLS_RELAY_TLS_CERT"), "TLS 证书文件（不填时是明文，交给反向代理做 TLS）")

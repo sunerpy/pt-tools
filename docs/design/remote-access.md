@@ -180,7 +180,7 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 - 主机的连接断开（或者被同一个 hostId 的新连接替换）时，relay 以 4404 关掉这台主机的所有客户端连接：主机那边的会话已经随连接结束，留着客户端连接只会让 App 等到空闲超时。
 - 一条 relay 连接上主机最多同时接 16 个流，再来的 `OPEN` 直接回 `CLOSE` 4429。某个流排队的消息超过 64 条时主机关掉那个流，不拖住别的流。
 - 保活：主机每 30 秒发一条文本消息 `ping`，relay 回文本 `pong`（Cloudflare 的自动应答不用唤醒 Durable Object）。主机 90 秒没收到 relay 的任何消息就断开重连。
-- 断开以后主机按指数退避重连：1 秒起，每次翻倍，最长 60 秒，加 ±20% 的抖动；连上满 60 秒以后下次从 1 秒重新开始。relay 以 1012 关（重启）时退避回到 1 秒，在 1–5 秒里随机等一会儿再连，很多主机同时断开时分散开；以 1013 关（太忙）时至少等 10–20 秒。
+- 断开以后主机按指数退避重连：1 秒起，每次翻倍，最长 60 秒，加 ±20% 的抖动；连上满 60 秒以后下次从 1 秒重新开始。relay 以 1012 关（重启）时退避回到 1 秒，在 1–5 秒里随机等一会儿再连，很多主机同时断开时分散开；以 1013 关（太忙）时至少等 10–20 秒；升级前回 503（满了、排空中）时至少等它给的 `Retry-After`（最多听 5 分钟），再加最多一半的抖动。
 
 ### 关闭码
 
@@ -213,7 +213,7 @@ relay 的 origin 是 `scheme://主机[:端口]`：小写，去掉默认端口（
 
 - `GET /ready`（两种实现都有，在一致性测试里）：接新连接时回 200 `{"status":"ready"}`；不接时回 503 `{"status":"unready","reason":"…"}`，原因是 `draining`（排空中）、`full`（连接数到了上限）或 `disabled`（暂停服务）。负载均衡与健康检查按它摘流量；`/healthz` 只说明进程活着。
 - 同时连接数上限（Go 版，`--max-connections`，默认 10000，负数不限）：主机（包括还在认证的）与客户端都算。满了的时候新连接在升级之前回 503 `{"error":"full"}`，已有的连接不受影响。Cloudflare 版由平台扩容，没有这一项。
-- 排空与停止（Go 版）：收到 SIGTERM 以后先不接新连接（`/ready` 与新连接回 503 `draining`），等 `--drain-grace`（默认 0），再以 1012 关掉所有主机与客户端连接，等关闭帧发出去（最多 1 秒）以后退出。
+- 排空与停止（Go 版）：收到 SIGTERM 以后先不接新连接（`/ready` 与新连接回 503 `draining`），等 `--drain-grace`（默认 0），再以 1012 关掉所有主机（包括还在认证、正在登记的）与客户端连接，等关闭帧发出去（最多 1 秒）以后退出。在 Docker 里，`docker stop` 的等待时间要比 `--drain-grace` 多几秒。
 - `GET /metrics`（Go 版，`--metrics=false` 关掉）：Prometheus 文本格式，只有聚合的计数，没有 hostId 与 IP：`pt_relay_ready`、`pt_relay_draining`、`pt_relay_connections`、`pt_relay_connection_limit`、`pt_relay_host_connections`、`pt_relay_hosts`、`pt_relay_clients`、`pt_relay_rejected_total{reason}`（`full`、`draining`、`rate_limited`、`disabled`）、`pt_relay_closed_total{code}`（relay 发出的关闭码）、`pt_relay_bytes_total{direction}`（`to_host`、`to_client`）、`pt_relay_auth_failures_total`，以及 `go_goroutines`、`go_memstats_heap_inuse_bytes`。
 
 ### 实现
