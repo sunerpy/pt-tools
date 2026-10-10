@@ -14,6 +14,12 @@ import (
 )
 
 func TestSLoggerFallbackAndGlobal(t *testing.T) {
+	// InitLogger 只生效一次：这里清空的全局 logger 要还回去，不然之后走 global.GetSlogger() 的测试会空指针
+	orig := global.GlobalLogger
+	if orig == nil {
+		orig = zap.NewNop()
+	}
+	t.Cleanup(func() { global.GlobalLogger = orig })
 	// fallback when global logger is nil
 	global.GlobalLogger = nil
 	if sLogger() == nil {
