@@ -201,6 +201,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PT_TOOLS_RELAY_URL: ${{ secrets.PT_TOOLS_RELAY_URL }}
 
       # 断言恰好四个归档，名称与迁移前逐字节一致。
       - name: Assert archive set
@@ -222,6 +223,26 @@ jobs:
             exit 1
           fi
           ls -l upload/archives
+
+      # 默认 relay：secret 设了时，归档里的二进制要认得它（pt-tools version 显示 configured），否则这个 job 失败，draft 不发布。
+      - name: Assert the default relay is built in
+        shell: bash
+        env:
+          PT_TOOLS_RELAY_URL: ${{ secrets.PT_TOOLS_RELAY_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PT_TOOLS_RELAY_URL" ]; then
+            echo "PT_TOOLS_RELAY_URL is not set: this build has no default relay"
+            exit 0
+          fi
+          dir=$(mktemp -d)
+          tar -xzf dist/pt-tools-linux-amd64.tar.gz -C "$dir"
+          state=$("$dir/pt-tools" version | sed -n 's/^Default relay: //p')
+          if [ "$state" != configured ]; then
+            echo "::error title=Default relay::the linux-amd64 binary reports '${state:-no Default relay line}', not 'configured'"
+            exit 1
+          fi
+          echo "default relay is built in"
 
       - name: Upload archives for checksum aggregation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -623,6 +644,22 @@ jobs:
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
           ZIP_FILE: pt-tools-helper.zip
         run: bash .github/scripts/edge-publish.sh
+
+  deploy-relay:
+    name: Deploy the hosted relay
+    needs: [release-please, publish-release]
+    # 发布以后的副作用：把托管 relay 升级到这个版本的镜像（relay-deploy.yml，经 ssh 在自己的服务器上跑 scripts/deploy-relay.sh）。
+    # vars.DEPLOY_RELAY 为 'true' 时才部署（默认不部署：要先配好服务器与 RELAY_SSH_* secret）；预发版另要 vars.DEPLOY_RELAY_PRERELEASE 为 'true'。
+    if: >-
+      needs.publish-release.result == 'success' &&
+      vars.DEPLOY_RELAY == 'true' &&
+      (needs.release-please.outputs.prerelease == 'false' || vars.DEPLOY_RELAY_PRERELEASE == 'true')
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/relay-deploy.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
 
   telegram-announce:
     name: Announce to Telegram
