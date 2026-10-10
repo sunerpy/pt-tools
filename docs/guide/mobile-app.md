@@ -4,6 +4,10 @@ pt-tools 的手机 App 在外面也能看概览、种子、站点与订阅，并
 
 App 支持 Android（iOS 暂不上架）。界面有中文与英文，跟随手机的语言。
 
+## 安装
+
+Android 安装包发布在 [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) 里以 `mobile-v` 开头的版本中，按手机的 CPU 架构分开：大多数手机用 `arm64-v8a`，较老的 32 位手机用 `armeabi-v7a`。下载以后在手机上打开安装，第一次要在系统设置里允许浏览器或文件管理器「安装未知应用」。同一个版本里的 `checksums.txt` 是各安装包的 SHA-256，可以用来核对下载是否完整。
+
 ## 配对
 
 1. 在 pt-tools 网页上打开「系统 → 远程访问」，确认远程访问已开启，填好直连地址或 relay，见[打开远程访问](remote-access.md#打开远程访问)。
