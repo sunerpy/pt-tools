@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import PtIcon from "@/components/PtIcon";
 import { ElLink } from "element-plus";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 import { useIsMobile } from "@/composables/useIsMobile";
+import { useVersionStore } from "@/stores/version";
 
 const STORAGE_KEY = "pt_tools_v2_banner_dismissed_v1";
-const visible = ref(false);
+const notDismissed = ref(false);
+// 只给从 v1 升级上来的库显示（后端看有没有 v2 迁移的记录）：全新安装没有要说明的「升级」
+const versionStore = useVersionStore();
+const visible = computed(
+  () => notDismissed.value && versionStore.versionInfo?.upgraded_from_v1 === true,
+);
 
 /*
  * 窄屏默认收起正文，点「详情」就地展开 —— 不是隐藏。
@@ -22,15 +28,15 @@ onMounted(() => {
   try {
     const dismissed = window.localStorage.getItem(STORAGE_KEY);
     if (dismissed !== "1") {
-      visible.value = true;
+      notDismissed.value = true;
     }
   } catch {
-    visible.value = true;
+    notDismissed.value = true;
   }
 });
 
 function dismiss() {
-  visible.value = false;
+  notDismissed.value = false;
   try {
     window.localStorage.setItem(STORAGE_KEY, "1");
   } catch {
