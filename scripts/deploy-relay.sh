@@ -52,7 +52,14 @@ done
 
 [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "--name 不对：$name"
 [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "--port 不对：$port"
-[[ "$bind" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "--bind 要是 IPv4 地址：$bind"
+# valid_ipv4：四段十进制，每段 0–255、不带前导 0（Docker 不认 010 这类写法；在停旧容器以前就拒绝写错的地址）
+valid_ipv4() {
+  local IFS=. o
+  [[ "$1" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] || return 1
+  # shellcheck disable=SC2086 # 按 . 拆成四段
+  for o in $1; do [ "$o" -le 255 ] || return 1; done
+}
+valid_ipv4 "$bind" || die "--bind 要是 IPv4 地址：$bind"
 [[ "$ready_timeout" =~ ^[0-9]+$ ]] || die "--ready-timeout 是秒数"
 command -v docker >/dev/null || die "这台机器上没有 docker"
 command -v curl >/dev/null || die "这台机器上没有 curl"

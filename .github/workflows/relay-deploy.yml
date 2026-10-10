@@ -112,7 +112,11 @@ jobs:
           port=${RELAY_PORT:-8443}
           [[ "$port" =~ ^[0-9]{1,5}$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "vars.RELAY_PORT '${port}' is not a port"
           bind=${RELAY_BIND:-127.0.0.1}
-          [[ "$bind" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fail "vars.RELAY_BIND '${bind}' is not an IPv4 address"
+          [[ "$bind" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] || fail "vars.RELAY_BIND '${bind}' is not an IPv4 address"
+          IFS=. read -r -a octets <<<"$bind"
+          for o in "${octets[@]}"; do
+            [ "$o" -le 255 ] || fail "vars.RELAY_BIND '${bind}' is not an IPv4 address"
+          done
           grace=${RELAY_DRAIN_GRACE:-5s}
           [[ "$grace" =~ ^[0-9]{1,3}s$ ]] || fail "vars.RELAY_DRAIN_GRACE '${grace}' is not like 5s"
           header=${RELAY_CLIENT_IP_HEADER:-}
