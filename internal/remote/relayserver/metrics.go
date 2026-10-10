@@ -26,7 +26,7 @@ const (
 
 var rejectNames = [rejectReasons]string{"full", "draining", "rate_limited", "disabled"}
 
-// closeCodes 是 /metrics 里单独计数的关闭码（relay 自己发出的，或者转给对端的）；别的记作 other，标签的取值是固定的。
+// closeCodes 是 /metrics 里单独计数的关闭码（relay 发起关闭时用的，包括转给对端的）；别的记作 other，标签的取值是固定的。
 var closeCodes = [...]int{
 	int(websocket.StatusNormalClosure), int(websocket.StatusGoingAway), int(websocket.StatusPolicyViolation),
 	int(websocket.StatusInternalError), int(websocket.StatusServiceRestart), int(websocket.StatusTryAgainLater),
@@ -96,7 +96,7 @@ func (s *Server) serveMetrics(w http.ResponseWriter, _ *http.Request) {
 		closed = append(closed, fmt.Sprintf(`pt_relay_closed_total{code="%d"} %d`, c, s.stats.closed[i].Load()))
 	}
 	closed = append(closed, fmt.Sprintf(`pt_relay_closed_total{code="other"} %d`, s.stats.closed[len(closeCodes)].Load()))
-	metric("pt_relay_closed_total", "counter", "WebSocket connections the relay closed, by close code.", closed...)
+	metric("pt_relay_closed_total", "counter", "WebSocket closes the relay initiated, by close code (counted when the close starts, whether or not the peer still receives the frame).", closed...)
 
 	metric("pt_relay_bytes_total", "counter", "Bytes forwarded between clients and hosts (WebSocket message payloads).",
 		fmt.Sprintf(`pt_relay_bytes_total{direction="to_host"} %d`, s.stats.toHost.Load()),
