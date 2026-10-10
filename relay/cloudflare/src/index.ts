@@ -88,6 +88,13 @@ export default {
         disabled: disabled(env),
       });
     }
+    // 负载均衡、监控用：接新连接时 200；暂停服务时 503（Cloudflare 自己扩容，没有连接数上限与排空）
+    if (url.pathname === "/ready" && request.method === "GET") {
+      if (disabled(env)) {
+        return Response.json({ status: "unready", reason: "disabled" }, { status: 503 });
+      }
+      return Response.json({ status: "ready" });
+    }
     const m = /^\/v1\/(host|client)\/([^/]+)$/.exec(url.pathname);
     if (!m || request.method !== "GET") return new Response("not found", { status: 404 });
     if ((request.headers.get("Upgrade") ?? "").toLowerCase() !== "websocket") {

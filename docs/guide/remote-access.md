@@ -69,6 +69,8 @@ pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 - `--public-url` 是 App 与 pt-tools 里填的地址，必须和实际访问的一致（pt-tools 按它签名）。
 - 一般放在反向代理之后，由代理做 TLS（`wss://`），代理要转发 WebSocket；要按客户端 IP 限流时用 `--client-ip-header` 指定代理写的头。也可以用 `--tls-cert`、`--tls-key` 直接做 TLS。
 - Docker：用同一个镜像，设 `PT_MODE=relay` 与 `PT_TOOLS_RELAY_PUBLIC_URL`，例如 `docker run -d -p 8443:8443 -e PT_MODE=relay -e PT_TOOLS_RELAY_PUBLIC_URL=wss://relay.example.com sunerpy/pt-tools`。
+- 健康检查用 `GET /ready`：接新连接时回 200，排空、连接数满了、暂停服务时回 503。监控可以抓 `GET /metrics`（Prometheus 文本，只有连接数、拒绝数、关闭码、转发字节这些聚合的计数）。
+- 重启或升级时（`docker stop` 发 SIGTERM），relay 先不接新连接，再以 1012 关掉所有连接；pt-tools 收到 1012 以后在 1–5 秒里重连，App 也会自动重连。前面有负载均衡按 `/ready` 摘流量时，用 `--drain-grace` 留几秒；这时 `docker stop` 的等待时间（`-t`，默认 10 秒；Compose 是 `stop_grace_period`）要比它多几秒。
 - 参数与限额见[命令行](../reference/cli.md#pt-tools-relay-serve)。
 
 **Cloudflare 版**：部署在你自己的 Cloudflare 账号下（Workers 与 Durable Objects，免费计划可用）。在仓库的 `relay/cloudflare` 目录里：
@@ -82,7 +84,7 @@ pnpm exec wrangler deploy --domain relay.example.com   # 或者用自己托管�
 
 App 与 pt-tools 里填 `wss://` 开头的同一个地址。限额在 `wrangler.jsonc` 的 `vars` 里改：每台 pt-tools 同时的手机连接（默认 16）、每天的转发量（默认 2 GiB，免费计划的额度有限）、每个 IP 每分钟的新连接（默认 30）。
 
-两种 relay 都提供 `GET /healthz`，可以用来确认服务在线。
+两种 relay 都提供 `GET /healthz`（进程在线）与 `GET /ready`（接不接新连接），可以用来确认服务在线。
 
 ## 轮换主机密钥
 

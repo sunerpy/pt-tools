@@ -69,6 +69,8 @@ pt-tools relay serve --listen 0.0.0.0:8443 --public-url wss://relay.example.com
 - `--public-url` is the address you enter in the app and in pt-tools, and it must match the address actually used (pt-tools signs against it).
 - Usually it sits behind a reverse proxy that terminates TLS (`wss://`) and forwards WebSocket connections; to limit by client IP, point `--client-ip-header` at the header the proxy sets. `--tls-cert` and `--tls-key` terminate TLS directly instead.
 - Docker: use the same image with `PT_MODE=relay` and `PT_TOOLS_RELAY_PUBLIC_URL`, for example `docker run -d -p 8443:8443 -e PT_MODE=relay -e PT_TOOLS_RELAY_PUBLIC_URL=wss://relay.example.com sunerpy/pt-tools`.
+- For health checks use `GET /ready`: it returns 200 while the relay accepts new connections and 503 while it is draining, full or paused. Monitoring can scrape `GET /metrics` (Prometheus text with aggregate counts only: connections, refusals, close codes, bytes forwarded).
+- On a restart or upgrade (`docker stop` sends SIGTERM) the relay stops accepting new connections and then closes every connection with 1012; pt-tools reconnects within 1–5 seconds of a 1012 and the app reconnects on its own. When a load balancer drains by `/ready`, leave it a few seconds with `--drain-grace`, and give `docker stop` a few seconds more than that (`-t`, 10 seconds by default; `stop_grace_period` in Compose).
 - Options and limits are listed under [Command line](../reference/cli.md#pt-tools-relay-serve).
 
 **The Cloudflare version**: deploy it to your own Cloudflare account (Workers and Durable Objects; the free plan works). In the repository's `relay/cloudflare` folder:
@@ -82,7 +84,7 @@ pnpm exec wrangler deploy --domain relay.example.com   # or on a domain of yours
 
 Enter the same address, starting with `wss://`, in the app and in pt-tools. Limits live in the `vars` of `wrangler.jsonc`: phone connections per pt-tools at once (16 by default), bytes forwarded per day (2 GiB by default; the free plan's allowance is limited) and new connections per IP address per minute (30 by default).
 
-Both relays answer `GET /healthz`, which you can use to check that the service is up.
+Both relays answer `GET /healthz` (the process is up) and `GET /ready` (it accepts new connections), which you can use to check the service.
 
 ## Rotate the host keys
 
