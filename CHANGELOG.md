@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.20](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.19...v1.0.0-rc.20) (2026-10-10)
+
+
+### Features
+
+* **release:** 发布与部署流水线（M18） ([#654](https://github.com/sunerpy/pt-tools/issues/654)) ([2aa2685](https://github.com/sunerpy/pt-tools/commit/2aa268584624418c2f0d94c09286f63b85e06dda))
+
 ## [1.0.0-rc.19](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.18...v1.0.0-rc.19) (2026-10-10)
 
 
