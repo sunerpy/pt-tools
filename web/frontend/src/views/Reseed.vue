@@ -222,7 +222,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="rs-page">
+  <div class="rs-page pt-cards pt-cards--wide">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="rs-refresh" @click="refresh">
@@ -470,12 +470,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.rs-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .rs-form {
   max-width: 640px;
 }

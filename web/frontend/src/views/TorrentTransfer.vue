@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tf-page">
+  <div class="tf-page pt-cards pt-cards--wide">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="tf-refresh" @click="refresh">
@@ -700,12 +700,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.tf-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .tf-bar {
   display: flex;
   flex-wrap: wrap;
