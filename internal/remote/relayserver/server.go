@@ -205,8 +205,9 @@ func (s *Server) Close() {
 	for _, p := range pending {
 		s.closePending(p, websocket.StatusServiceRestart, "relay restarting")
 	}
+	// 等关闭握手，也等占着名额的 handler 都返回（和 Close 交错、自己发现在停的连接也在这里面）
 	deadline := time.Now().Add(closeWait)
-	for s.closing.Load() > 0 && time.Now().Before(deadline) {
+	for (s.closing.Load() > 0 || s.conns.Load() > 0) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	s.stop()
@@ -219,7 +220,8 @@ func (s *Server) closingNow() bool {
 	return s.closingAll
 }
 
-// pendingHost 是还在认证的主机连接：认证失败（4401）与 Close（1012）谁先谁关。
+// pendingHost 是一条主机 WebSocket 的关闭权：从认证到登记完成都在 s.pending 里（Close 看得到它），
+// 认证失败（4401）、Close（1012）、hostConn 自己关，谁先谁关，只关一次、只计一次。
 type pendingHost struct {
 	ws   *websocket.Conn
 	once sync.Once
@@ -339,17 +341,16 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h := &hostConn{s: s, ws: ws, id: hostID, streams: map[uint32]*clientConn{}, done: make(chan struct{})}
 	p := &pendingHost{ws: ws}
+	h := &hostConn{s: s, ws: ws, wc: p, id: hostID, streams: map[uint32]*clientConn{}, done: make(chan struct{})}
 	s.mu.Lock()
 	s.pending[p] = struct{}{}
 	s.mu.Unlock()
-	err := h.authenticate()
-	s.mu.Lock()
-	delete(s.pending, p)
-	closing := s.closingAll
-	s.mu.Unlock()
-	if err != nil {
+	if err := h.authenticate(); err != nil {
+		s.mu.Lock()
+		delete(s.pending, p)
+		closing := s.closingAll
+		s.mu.Unlock()
 		if closing {
 			// relay 在停（Close 以 1012 关了它，读才出错）：不算认证失败
 			s.closePending(p, websocket.StatusServiceRestart, "relay restarting")
@@ -378,13 +379,15 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 // 同一个 hostId 的登记串行进行（每个 hostId 一把锁，READY 最多写 30 秒，不占全局的锁）。
 // 拿住 h 的写锁再登记、写 READY：登记以后来的客户端的 OPEN 排在 READY 后面，主机一收到 READY 客户端也就找得到它。
 // READY 没写出去时换回原来的主机（还开着的话），h 与它上面已经登记的流一起关掉。
+// Close 与登记交错时：登记前已经在停，就不登记，直接 1012；READY 写完（或者没写出去）以后发现在停，新旧两条连接与它们的客户端都以 1012 关，
+// 不换回旧连接、不发 4409（Close 拿主机列表时看到的可能只是其中一条）。
 func (s *Server) promote(h *hostConn) error {
 	unlock := s.lockHost(h.id)
 	defer unlock()
 	h.writeMu.Lock()
 	s.mu.Lock()
+	delete(s.pending, h.wc)
 	if s.closingAll {
-		// Close 已经拿了主机列表：不再登记，直接以 1012 关
 		s.mu.Unlock()
 		h.writeMu.Unlock()
 		h.closeAll(websocket.StatusServiceRestart, "relay restarting")
@@ -401,16 +404,24 @@ func (s *Server) promote(h *hostConn) error {
 		}
 	}
 	h.writeMu.Unlock()
-	if err != nil {
-		s.mu.Lock()
-		if s.hosts[h.id] == h {
-			if old != nil && !old.closed.Load() {
-				s.hosts[h.id] = old
-			} else {
-				delete(s.hosts, h.id)
-			}
+	s.mu.Lock()
+	closing := s.closingAll
+	if (err != nil || closing) && s.hosts[h.id] == h {
+		if !closing && old != nil && !old.closed.Load() {
+			s.hosts[h.id] = old
+		} else {
+			delete(s.hosts, h.id)
 		}
-		s.mu.Unlock()
+	}
+	s.mu.Unlock()
+	switch {
+	case closing:
+		h.closeAll(websocket.StatusServiceRestart, "relay restarting")
+		if old != nil {
+			old.closeAll(websocket.StatusServiceRestart, "relay restarting")
+		}
+		return errClosed
+	case err != nil:
 		h.close(websocket.StatusInternalError, "")
 		return err
 	}
@@ -440,6 +451,16 @@ func (s *Server) lockHost(id string) func() {
 		}
 		s.promoMu.Unlock()
 	}
+}
+
+// promoRefs 是 hostId 的登记锁现在被拿着加在等的个数（测试用）。
+func (s *Server) promoRefs(id string) int {
+	s.promoMu.Lock()
+	defer s.promoMu.Unlock()
+	if l := s.promos[id]; l != nil {
+		return l.refs
+	}
+	return 0
 }
 
 // promoLock 是一个 hostId 的登记锁（refs 是拿着或者在等的个数）。
@@ -490,6 +511,8 @@ var errClosed = errors.New("连接已经关闭")
 type hostConn struct {
 	s  *Server
 	ws *websocket.Conn
+	// wc 是这条 WebSocket 的关闭权（和认证阶段共用一个，Close 与认证、登记交错时只关一次）
+	wc *pendingHost
 	id string
 
 	writeMu sync.Mutex
@@ -585,7 +608,10 @@ func (h *hostConn) shut(code websocket.StatusCode, reason string, clientCode int
 		for _, c := range list {
 			c.closeBy(clientCode, clientReason, false)
 		}
-		h.s.closeWS(h.ws, code, reason)
+		if h.wc == nil {
+			h.wc = &pendingHost{ws: h.ws}
+		}
+		h.s.closePending(h.wc, code, reason)
 	})
 }
 

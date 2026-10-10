@@ -365,3 +365,76 @@ func TestClientDuringCloseGetsServiceRestart(t *testing.T) {
 	assert.Equal(t, websocket.StatusServiceRestart, readClose(t, ctx, ws))
 	s.Close()
 }
+
+// 认证通过、还没登记（等着同一个 hostId 的登记锁）的主机：Close 照样看得到它，以 1012 关，只关一次、只计一次
+func TestCloseDuringPromotion(t *testing.T) {
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1", MaxConnPerIPPerMin: -1})
+	require.NoError(t, err)
+	ts := httptest.NewUnstartedServer(nil)
+	u := "ws://" + ts.Listener.Addr().String()
+	s.cfg.PublicURL, s.origin = u, u
+	ts.Config.Handler = s.Handler()
+	ts.Start()
+	t.Cleanup(ts.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	keys := newHostKeys(t)
+	unlock := s.lockHost(keys.HostID()) // 卡住登记
+	code, ws, _ := dialStatus(t, ctx, u+"/v1/host/"+keys.HostID())
+	require.Equal(t, http.StatusSwitchingProtocols, code)
+	ch := readOuterFrame(t, ctx, ws)
+	auth, _ := remote.AppendOuter(nil, remote.OuterFrame{Type: remote.OuterAuth, Payload: keys.RelayAuth(ch.Payload, u)})
+	require.NoError(t, ws.Write(ctx, websocket.MessageBinary, auth))
+	require.Eventually(t, func() bool { return s.promoRefs(keys.HostID()) == 2 }, 5*time.Second, 5*time.Millisecond, "登记在等锁")
+	got := make(chan websocket.StatusCode, 1)
+	go func() { got <- readClose(t, ctx, ws) }()
+	closed := make(chan struct{})
+	go func() { s.Close(); close(closed) }()
+	select {
+	case c := <-got:
+		assert.Equal(t, websocket.StatusServiceRestart, c, "登记还卡着的时候就收到 1012")
+	case <-ctx.Done():
+		t.Fatal("没有收到关闭")
+	}
+	unlock()
+	<-closed
+	assert.Equal(t, int64(1), s.stats.closed[closeIndex(int(websocket.StatusServiceRestart))].Load(), "只计一次")
+}
+
+// 正在替换旧主机（新连接已经登记、READY 刚写完）时 Close：新旧两条连接与旧连接上的客户端都收到 1012，不是 4409 / 4404
+func TestCloseDuringReplace(t *testing.T) {
+	srv, u := start(t, Config{MaxConnPerIPPerMin: -1})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	keys := newHostKeys(t)
+	old := authHost(t, ctx, u, keys)
+	_, client, _ := dialStatus(t, ctx, u+"/v1/client/"+keys.HostID())
+	require.Equal(t, remote.OuterOpen, readOuterFrame(t, ctx, old).Type)
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	testHookReady = func(*hostConn) error {
+		close(entered)
+		<-release
+		return nil
+	}
+	t.Cleanup(func() { testHookReady = nil })
+	results := make(chan websocket.StatusCode, 3)
+	go func() { results <- readClose(t, ctx, old) }()
+	go func() { results <- readClose(t, ctx, client) }()
+	newer := authHost(t, ctx, u, keys) // READY 已经写出，登记的后半段卡在钩子里
+	<-entered
+	go func() { results <- readClose(t, ctx, newer) }()
+	closed := make(chan struct{})
+	go func() { srv.Close(); close(closed) }()
+	time.Sleep(50 * time.Millisecond) // 让 Close 先拿主机列表（这时登记的是新连接）
+	close(release)
+	<-closed
+	for range 3 {
+		select {
+		case c := <-results:
+			assert.Equal(t, websocket.StatusServiceRestart, c)
+		case <-ctx.Done():
+			t.Fatal("没有收到关闭")
+		}
+	}
+}

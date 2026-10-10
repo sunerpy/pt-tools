@@ -42,14 +42,16 @@ type stats struct {
 	authFailures atomic.Int64
 }
 
-func (st *stats) closedWith(code int) {
+func (st *stats) closedWith(code int) { st.closed[closeIndex(code)].Add(1) }
+
+// closeIndex 是关闭码在计数里的位置（不在固定集合里的是最后一个 other）。
+func closeIndex(code int) int {
 	for i, c := range closeCodes {
 		if c == code {
-			st.closed[i].Add(1)
-			return
+			return i
 		}
 	}
-	st.closed[len(closeCodes)].Add(1)
+	return len(closeCodes)
 }
 
 // serveMetrics 是 GET /metrics：Prometheus 文本格式（0.0.4），手写，不引入依赖。
