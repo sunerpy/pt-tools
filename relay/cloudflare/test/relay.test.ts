@@ -5,7 +5,7 @@ import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import vectors from "../../../internal/remote/testdata/vectors.json";
-import type { Env } from "../src/index";
+import worker, { type Env } from "../src/index";
 import {
   CLOSE,
   closePayload,
@@ -204,6 +204,18 @@ describe("relay", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, version: "test", disabled: false });
     expect((await SELF.fetch(`${BASE}/v1/other/x`)).status).toBe(404);
+  });
+
+  it("ready：接新连接时 200，暂停服务时 503 disabled", async () => {
+    const res = await SELF.fetch(`${BASE}/ready`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ready" });
+    const off = await worker.fetch(new Request(`${BASE}/ready`), {
+      ...env,
+      RELAY_DISABLED: "true",
+    } as Env);
+    expect(off.status).toBe(503);
+    expect(await off.json()).toEqual({ status: "unready", reason: "disabled" });
   });
 
   it("不是 WebSocket 升级回 426；hostId 不对 4400", async () => {
