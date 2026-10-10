@@ -23,7 +23,7 @@ func TestFreeEndMonitor_DoesNotCloseSharedDownloader(t *testing.T) {
 	past := time.Now().Add(-time.Minute)
 	pushed := true
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "1", Title: "T", PauseOnFreeEnd: true, IsPushed: &pushed,
+		SiteName: "s", TorrentID: "1", Title: "T", PauseOnFreeEnd: true, IsFree: true, IsPushed: &pushed,
 		FreeEndTime: &past, DownloaderTaskID: "task-1", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -44,7 +44,7 @@ func TestFreeEndMonitor_ConcurrentHandlingProcessesOnce(t *testing.T) {
 
 	past := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "c", Title: "C", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "c", Title: "C", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &past, DownloaderTaskID: "task-c", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -122,7 +122,7 @@ func TestRescheduleMissingFutureTorrents_ReachesBeyondFirstBatch(t *testing.T) {
 	ids := make([]uint, 0, total)
 	for i := range total {
 		tor := models.TorrentInfo{
-			SiteName: "s", TorrentID: fmt.Sprintf("f%d", i), Title: "F", PauseOnFreeEnd: true,
+			SiteName: "s", TorrentID: fmt.Sprintf("f%d", i), Title: "F", PauseOnFreeEnd: true, IsFree: true,
 			FreeEndTime: &future, DownloaderTaskID: fmt.Sprintf("task-f%d", i), DownloaderName: "qb1",
 		}
 		require.NoError(t, db.DB.Create(&tor).Error)

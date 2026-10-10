@@ -159,8 +159,8 @@ func (m *FreeEndMonitor) Stop() {
 func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 	var torrents []models.TorrentInfo
 	err := m.db.Where(
-		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND downloader_task_id != ''",
-		true, false, false,
+		"pause_on_free_end = ? AND is_free = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND downloader_task_id != ''",
+		true, true, false, false,
 	).Find(&torrents).Error
 	if err != nil {
 		return fmt.Errorf("查询待监控种子失败: %w", err)
@@ -185,7 +185,8 @@ func (m *FreeEndMonitor) loadPendingTasksFromDB() error {
 }
 
 func (m *FreeEndMonitor) ScheduleTorrent(torrent models.TorrentInfo) {
-	if !torrent.PauseOnFreeEnd {
+	// 只管免费的种子：半价、2X 这类优惠结束时不暂停也不删（以前 RSS 把它们的结束时间也记成了免费到期）
+	if !torrent.PauseOnFreeEnd || !torrent.IsFree {
 		return
 	}
 	if torrent.FreeEndTime == nil {
@@ -416,8 +417,8 @@ func (m *FreeEndMonitor) checkAndProcessExpiredTorrents() {
 	cutoff := now.Add(m.advanceDuration())
 
 	err := m.db.Where(
-		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time <= ? AND downloader_task_id != ''",
-		true, false, false, cutoff,
+		"pause_on_free_end = ? AND is_free = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time <= ? AND downloader_task_id != ''",
+		true, true, false, false, cutoff,
 	).Find(&torrents).Error
 	if err != nil {
 		global.GetSlogger().Errorf("查询已过期种子失败: %v", err)
@@ -457,8 +458,8 @@ func (m *FreeEndMonitor) rescheduleMissingFutureTorrents(cutoff time.Time) {
 	// bounds a restart-time mass load without dropping any torrent permanently.
 	// 已在内存里预约过的种子在 SQL 里排除：否则前 50 条都已预约时，每一批都只拿到它们，后面的永远补不上。
 	query := m.db.Where(
-		"pause_on_free_end = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time > ? AND downloader_task_id != ''",
-		true, false, false, cutoff,
+		"pause_on_free_end = ? AND is_free = ? AND is_paused_by_system = ? AND is_completed = ? AND free_end_time IS NOT NULL AND free_end_time > ? AND downloader_task_id != ''",
+		true, true, false, false, cutoff,
 	)
 	if pending := m.pendingTaskIDs(); len(pending) > 0 {
 		query = query.Where("id NOT IN ?", pending)
