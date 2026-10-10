@@ -640,6 +640,66 @@ Edge 商店发布需要仓库 Secrets：
 
 仓库变量 `PUBLISH_EDGE=false` 可在发布链验收时跳过商店提交；变量缺失或不是 `false` 时保持默认发布行为。Edge 提交不影响已经通过资产门禁并公开的 GitHub Release，但除「前一次 submission 仍在审核」之外的 API 或包错误仍会让该 job 失败，需单独排查。
 
+## 托管 relay 与手机 App 的发版
+
+### 默认 relay 地址
+
+发版构建内置托管 relay 的地址（网页「远程访问」里因此会出现「填入托管 relay」）：`.goreleaser.yaml` 与 `Dockerfile` 从仓库 Secret `PT_TOOLS_RELAY_URL`（`wss://` 开头）读入 `internal/remote.DefaultRelayURL`，没设时为空。地址随二进制公开，不是秘密；放在 Secret 里只是为了不进仓库、不改代码就能换。
+
+`pt-tools version` 的 `Default relay:` 一行显示 `configured`、`none` 或 `invalid`（不打印地址）。`Release` workflow 在 GoReleaser 之后检查 linux-amd64 归档：Secret 设了却不是 `configured` 时这个 job 失败，draft 不发布。
+
+### 部署托管 relay
+
+托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
+
+`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器。runner 中途丢失时服务器上停在待收尾的状态，下一次部署会拒绝，要登录服务器用下面的 `--finalize` 或 `--rollback` 收尾。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
+
+部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main` 与 `v1.0.0-rc`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
+
+| 名称                                                  | 放在哪里                 | 用途                                                                                      |
+| ----------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
+| `DEPLOY_RELAY`                                        | 仓库变量                 | 为 `true` 时发版以后部署；默认不部署                                                      |
+| `DEPLOY_RELAY_PRERELEASE`                             | 仓库变量                 | 为 `true` 时预览版（RC）也部署；默认只部署稳定版                                          |
+| `RELAY_HOSTNAME`                                      | 变量                     | 对外的主机名，App 与 pt-tools 里填 `wss://<它>`                                           |
+| `RELAY_IMAGE`、`RELAY_PORT`、`RELAY_DRAIN_GRACE`      | 变量                     | 镜像（默认 `sunerpy/pt-tools`）、服务器上听的本机端口（默认 8443）、排空时间（默认 `5s`） |
+| `RELAY_CLIENT_IP_HEADER`                              | 变量                     | 反向代理写客户端 IP 的头（例如 `X-Real-IP`），按 IP 限流时设                              |
+| `RELAY_MAX_CONNECTIONS`、`RELAY_DAILY_BYTES_PER_HOST` | 变量                     | 连接数上限、每台 pt-tools 每天的转发量；不设时用 relay 的默认值                           |
+| `RELAY_SSH_PORT`                                      | 变量                     | 服务器的 ssh 端口，默认 22                                                                |
+| `RELAY_SSH_HOST`、`RELAY_SSH_USER`                    | `hosted-relay` 的 secret | 服务器的地址与部署用户（要能用 docker）                                                   |
+| `RELAY_SSH_KEY`                                       | `hosted-relay` 的 secret | 部署用的 ssh 私钥（只给这一个用途）                                                       |
+| `RELAY_SSH_KNOWN_HOSTS`                               | `hosted-relay` 的 secret | 服务器的主机密钥（`ssh-keyscan -p <端口> <主机>` 的输出），不接受陌生主机                 |
+
+「变量」可以是仓库变量，也可以放在 `hosted-relay` 里。在服务器上手动部署、收尾或回滚也用同一个脚本：
+
+```bash
+bash scripts/deploy-relay.sh --image sunerpy/pt-tools:v1.0.0-rc.19 --public-url wss://relay.example.com --client-ip-header X-Real-IP
+bash scripts/deploy-relay.sh --finalize    # 用 --keep-previous 部署过、检查通过以后删掉旧容器
+bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署时删掉新容器）
+```
+
+### 手机 App 发版
+
+App 不经过 release-please（`release-please-config.json` 的根包排除了 `apps/mobile` 与 `relay/cloudflare`，只改它们的提交不会让 pt-tools 发版）。先改 `apps/mobile/pubspec.yaml` 的 `version`（例如 `1.0.0+1`，`+` 后面的构建号每次递增），合入以后手动运行 `Mobile Release`（只在受保护的 `main`、`v1.0.0-rc` 上），`version` 填 `1.0.0`：
+
+1. 构建按 CPU 架构拆分的 release APK（arm64-v8a、armeabi-v7a、x86_64），用 Environment `mobile-release` 里的 keystore 签名，`apksigner` 核对每个 APK 都是同一张证书，并且正式发版时必须是变量 `ANDROID_CERT_SHA256` 给的那张；生成 `checksums.txt` 与构建来源证明；
+2. `dry_run` 为真时只上传成 workflow artifact；否则建 draft Release `mobile-v1.0.0`，说明取上一个 `mobile-v*` 以来 `apps/mobile` 的提交，上传、核对资产以后再公开。任一步失败都停在 draft，修好以后用同一个版本重跑会接着发（只接同一个提交上的 draft）。
+
+PR 改到这个 workflow 或 Android 工程时只跑验证：用现生成的密钥构建一遍，不碰任何 secret、没有写权限（产物文件名带 `-test-signed`，不能发布）。
+
+| 名称                                                                     | 放在哪里                   | 用途                                                                            |
+| ------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------- |
+| `ANDROID_KEYSTORE_BASE64`                                                | `mobile-release` 的 secret | keystore 文件的 base64（`base64 -w0 release.jks`）                              |
+| `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` | `mobile-release` 的 secret | keystore 口令、密钥别名与密钥口令                                               |
+| `ANDROID_CERT_SHA256`                                                    | 变量                       | 签名证书的 SHA-256（`apksigner verify --print-certs` 的写法），正式发版必须设好 |
+
+`mobile-release` 的部署分支同样限定为 `main` 与 `v1.0.0-rc`。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`：
+
+```bash
+keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias pttools -keyalg RSA -keysize 4096 -validity 10000
+```
+
+本机构建签名的 release APK：设好 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 以后在 `apps/mobile` 里运行 `flutter build apk --release --split-per-abi`；没有设时 release 构建用 debug 签名，只能自己装着试。
+
 ---
 
 如有开发相关问题，欢迎在 [GitHub Discussions](https://github.com/sunerpy/pt-tools/discussions) 讨论。

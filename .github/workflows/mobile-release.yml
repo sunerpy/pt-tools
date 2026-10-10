@@ -1,0 +1,292 @@
+# 手机 App 的发版（路线图 M18）：不经过 release-please，也不复用 pt-tools 的发版控制器，与 pt-tools 的发版互不阻塞。
+#
+# 手动触发（只在受保护的 main 或 v1.0.0-rc 上）：
+#   1. 校验 version 与 apps/mobile/pubspec.yaml 一致，tag mobile-v<version> 还不存在（同一提交上没发完的 draft 可以接着发）；
+#   2. 构建按 ABI 拆分的 release APK，用 GitHub Environment「mobile-release」里的 keystore 签名，apksigner 校验每个 APK 的证书
+#      （正式发版必须设变量 ANDROID_CERT_SHA256 并与之一致），生成 checksums.txt 与构建来源证明；
+#   3. dry_run 为真时只上传成 workflow artifact；否则建 draft release mobile-v<version>，上传、核对资产清单以后再发布，
+#      任一步失败都停在 draft，修好以后同一个版本重跑会接着发。
+# PR 改到这个文件或 Android 工程时只跑 verify：用现生成的测试密钥构建一遍，不碰任何 secret，也没有写权限与 OIDC。
+#
+# Environment「mobile-release」里的 secret：ANDROID_KEYSTORE_BASE64（keystore 文件的 base64）、ANDROID_KEYSTORE_PASSWORD、
+# ANDROID_KEY_ALIAS、ANDROID_KEY_PASSWORD；变量 ANDROID_CERT_SHA256：签名证书的 SHA-256（apksigner 的写法）。
+# 这个 Environment 的部署分支限定为 main 与 v1.0.0-rc（在仓库设置里配），PR 拿不到这些 secret。
+name: Mobile Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "App 版本 X.Y.Z 或 X.Y.Z-rc.N（与 apps/mobile/pubspec.yaml 的 version 一致，不含 +构建号）"
+        required: true
+        type: string
+      dry_run:
+        description: "只构建、签名与上传 artifact，不建 tag 与 release"
+        required: true
+        type: boolean
+        default: true
+  pull_request:
+    branches: [main, v1.0.0-rc]
+    paths:
+      - ".github/workflows/mobile-release.yml"
+      - ".github/actions/build-android-release/**"
+      - ".github/actions/setup-flutter/**"
+      - "apps/mobile/android/**"
+      - "apps/mobile/pubspec.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  # PR：只验证流程能走通。没有 secret、没有写权限、没有 OIDC
+  verify:
+    name: Mobile Release · Verify (test-signed)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*$/\1/p' apps/mobile/pubspec.yaml)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "::error title=Mobile release::pubspec version '$version' is not X.Y.Z or X.Y.Z-rc.N"; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Build, sign and verify (throwaway key)
+        uses: ./.github/actions/build-android-release
+        with:
+          version: ${{ steps.meta.outputs.version }}
+
+      - name: Upload test-signed APKs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pt-tools-app-${{ steps.meta.outputs.version }}-test-signed
+          path: upload
+          if-no-files-found: error
+          retention-days: 3
+
+  build:
+    name: Mobile Release · Build and sign
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # 签名密钥只放在这个 Environment 里（部署分支限定为 main 与 v1.0.0-rc）
+    environment: mobile-release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Require a protected branch
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          case "$RUN_REF" in
+          refs/heads/main | refs/heads/v1.0.0-rc) ;;
+          *)
+            echo "::error title=Mobile release::release only from main or v1.0.0-rc, not ${RUN_REF}"
+            exit 1
+            ;;
+          esac
+          if [ "$REF_PROTECTED" != true ]; then
+            echo "::error title=Mobile release::${RUN_REF} is not protected"
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the version
+        id: meta
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          EXPECTED_CERT: ${{ vars.ANDROID_CERT_SHA256 }}
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "::error title=Mobile release::$*"
+            exit 1
+          }
+          pub=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*$/\1/p' apps/mobile/pubspec.yaml)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || fail "version '$VERSION' is not X.Y.Z or X.Y.Z-rc.N"
+          [ "$VERSION" = "$pub" ] || fail "version $VERSION does not match apps/mobile/pubspec.yaml ($pub)"
+          if [ "$DRY_RUN" != true ]; then
+            [ "$HAS_KEYSTORE" = true ] || fail "the mobile-release environment has no ANDROID_KEYSTORE_BASE64; a release must be signed with the release key"
+            [[ "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]] || fail "set vars.ANDROID_CERT_SHA256 (lowercase hex SHA-256 of the signing certificate) before a release"
+            # draft release 公开以前没有 tag：tag 已经存在说明这个版本发过了（或者被手动建了），不覆盖
+            set +e
+            git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/mobile-v$VERSION" >/dev/null
+            rc=$?
+            set -e
+            [ "$rc" -eq 2 ] || fail "tag mobile-v$VERSION already exists (or the lookup failed: $rc)"
+          fi
+          prerelease=false
+          [[ "$VERSION" == *-* ]] && prerelease=true
+          {
+            echo "version=$VERSION"
+            echo "dry_run=$DRY_RUN"
+            echo "prerelease=$prerelease"
+          } >>"$GITHUB_OUTPUT"
+
+      # 没有 keystore 时（只允许 dry run）用现生成的测试密钥
+      - name: Decode the signing key
+        id: key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "path=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/release.jks"
+          echo "path=$RUNNER_TEMP/release.jks" >>"$GITHUB_OUTPUT"
+
+      - name: Build, sign and verify
+        uses: ./.github/actions/build-android-release
+        with:
+          version: ${{ steps.meta.outputs.version }}
+          keystore-path: ${{ steps.key.outputs.path }}
+          store-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          expected-cert: ${{ steps.key.outputs.path != '' && vars.ANDROID_CERT_SHA256 || '' }}
+
+      - name: Remove the signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Attest build provenance
+        if: steps.key.outputs.path != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: upload/*.apk
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pt-tools-app-${{ steps.meta.outputs.version }}
+          path: upload
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Mobile Release · Publish
+    needs: build
+    if: needs.build.outputs.dry_run == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download APKs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pt-tools-app-${{ needs.build.outputs.version }}
+          path: upload
+
+      # 测试签名的包不能发布（build 只在没有 keystore 的 dry run 里用测试密钥，这里再拦一次）
+      - name: Refuse test-signed packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find upload -name '*-test-signed.apk' | grep -q .; then
+            echo "::error title=Mobile release::test-signed packages cannot be published"
+            exit 1
+          fi
+
+      - name: Write the release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          prev=$(git tag --list 'mobile-v*' --sort=-v:refname | head -1)
+          range=${prev:+$prev..}HEAD
+          {
+            echo "## pt-tools App $VERSION"
+            echo
+            echo "Android 安装包（按 CPU 架构分开，大多数手机用 arm64-v8a）。用法见 [手机 App](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/guide/mobile-app.md)。"
+            echo
+            echo "### 改动${prev:+（自 $prev 以来）}"
+            echo
+            git log --no-merges --pretty='- %s (%h)' "$range" -- apps/mobile | head -100
+            echo
+            echo "校验：checksums.txt 是各 APK 的 SHA-256；构建来源证明见本仓库的 Attestations。"
+          } >notes.md
+          cat notes.md
+
+      # 同一个版本：已经公开的不动；同一提交上的 draft 接着发（覆盖资产）；别的提交上的 draft 不碰
+      - name: Create or resume the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          tag="mobile-v$VERSION"
+          if state=$(gh release view "$tag" --json isDraft,targetCommitish --jq '"\(.isDraft) \(.targetCommitish)"' 2>/dev/null); then
+            if [ "$state" != "true $GITHUB_SHA" ]; then
+              echo "::error title=Mobile release::$tag already exists ($state); only an unpublished draft on $GITHUB_SHA can be resumed"
+              exit 1
+            fi
+            gh release edit "$tag" --notes-file notes.md
+            gh release upload "$tag" upload/* --clobber
+            echo "resumed the draft $tag"
+          else
+            flags=(--draft --target "$GITHUB_SHA" --title "pt-tools App $VERSION" --notes-file notes.md)
+            [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+            gh release create "$tag" "${flags[@]}" upload/*
+          fi
+
+      - name: Check the assets and publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected=$(find upload -maxdepth 1 -type f -printf '%f\n' | sort)
+          actual=$(gh release view "mobile-v$VERSION" --json assets --jq '.assets[].name' | sort)
+          if [ "$expected" != "$actual" ]; then
+            echo "::error title=Mobile release::assets differ from the build; the release stays a draft"
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
+          gh release edit "mobile-v$VERSION" --draft=false
+          echo "published mobile-v$VERSION"

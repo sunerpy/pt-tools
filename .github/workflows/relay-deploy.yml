@@ -1,0 +1,268 @@
+# 托管 relay 的部署（路线图 M18）：把自己服务器上的 relay 容器升级到某个已经公开的版本的 pt-tools 镜像。
+# 部署脚本取自这个 workflow 所在的受保护提交（不是要部署的 tag），经 ssh 在服务器上跑：拉镜像（按 digest）→ 旧容器排空并以 1012 关 →
+# 起新容器 → /ready 与版本核对；旧容器先留着，从外面检查通过以后再删。部署做完却没有收尾（外面检查没过、收尾失败、
+# 这期间 workflow 被取消）时换回旧容器。runner 中途丢失时服务器上停在待收尾的状态，下一次部署会拒绝，要登录服务器
+# 用 scripts/deploy-relay.sh --finalize 或 --rollback 收尾。
+#
+# release.yml 发布成功以后调用（vars.DEPLOY_RELAY 为 'true' 时，带上这次推送的镜像 digest）；也可以手动触发，dry_run 只做检查、不连服务器。
+# 两种触发都只在受保护的 main 或 v1.0.0-rc 上。
+# GitHub Environment「hosted-relay」（部署分支限定为 main 与 v1.0.0-rc，可以加审批）里的 secret：RELAY_SSH_HOST、RELAY_SSH_USER、
+# RELAY_SSH_KEY（部署用的私钥）、RELAY_SSH_KNOWN_HOSTS（服务器的主机密钥，ssh-keyscan 的结果，不接受陌生主机）。
+# 变量：RELAY_HOSTNAME（对外的主机名，App 与 pt-tools 里填 wss://<它>），可选 RELAY_IMAGE（默认 sunerpy/pt-tools）、RELAY_PORT（服务器上 relay 听的本机端口，
+# 默认 8443，反向代理把 WebSocket 转到这里）、RELAY_DRAIN_GRACE（默认 5s）、RELAY_CLIENT_IP_HEADER（反向代理写客户端 IP 的头，例如 X-Real-IP）、
+# RELAY_SSH_PORT（默认 22）、RELAY_MAX_CONNECTIONS 与 RELAY_DAILY_BYTES_PER_HOST（不设时用 relay 的默认值）。
+name: Relay Deploy
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "要部署的 pt-tools 版本（已经公开的 release）"
+        required: true
+        type: string
+      digest:
+        description: "这次发布推送的镜像 digest（sha256:…）；不给时按 tag 现查"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "只检查，不连服务器"
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要部署的 pt-tools 版本（已经公开的 release，例如 v1.0.0-rc.19）"
+        required: true
+        type: string
+      dry_run:
+        description: "只检查，不连服务器"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Relay Deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: hosted-relay
+    steps:
+      # workflow_call 时 github.ref 是调用方的 ref：同样要是受保护的发布分支
+      - name: Require a protected branch
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          case "$RUN_REF" in
+          refs/heads/main | refs/heads/v1.0.0-rc) ;;
+          *)
+            echo "::error title=Relay deploy::deploy only from main or v1.0.0-rc, not ${RUN_REF}"
+            exit 1
+            ;;
+          esac
+          if [ "$REF_PROTECTED" != true ]; then
+            echo "::error title=Relay deploy::${RUN_REF} is not protected"
+            exit 1
+          fi
+
+      # 参数会拼进远端的命令行：先按白名单校验，之后再用 printf %q 转义
+      - name: Check inputs and settings
+        id: cfg
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          DIGEST: ${{ inputs.digest }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RELAY_HOSTNAME: ${{ vars.RELAY_HOSTNAME }}
+          RELAY_IMAGE: ${{ vars.RELAY_IMAGE }}
+          RELAY_PORT: ${{ vars.RELAY_PORT }}
+          RELAY_DRAIN_GRACE: ${{ vars.RELAY_DRAIN_GRACE }}
+          RELAY_CLIENT_IP_HEADER: ${{ vars.RELAY_CLIENT_IP_HEADER }}
+          RELAY_SSH_PORT: ${{ vars.RELAY_SSH_PORT }}
+          RELAY_MAX_CONNECTIONS: ${{ vars.RELAY_MAX_CONNECTIONS }}
+          RELAY_DAILY_BYTES_PER_HOST: ${{ vars.RELAY_DAILY_BYTES_PER_HOST }}
+          HAS_HOST: ${{ secrets.RELAY_SSH_HOST != '' }}
+          HAS_USER: ${{ secrets.RELAY_SSH_USER != '' }}
+          HAS_KEY: ${{ secrets.RELAY_SSH_KEY != '' }}
+          HAS_KNOWN_HOSTS: ${{ secrets.RELAY_SSH_KNOWN_HOSTS != '' }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "::error title=Relay deploy::$*"
+            exit 1
+          }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || fail "tag '$TAG' is not vX.Y.Z or vX.Y.Z-rc.N"
+          [[ -z "$DIGEST" || "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "digest '$DIGEST' is not sha256:<64 hex>"
+          [[ "$RELAY_HOSTNAME" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || fail "vars.RELAY_HOSTNAME '${RELAY_HOSTNAME}' is not a host name"
+          image=${RELAY_IMAGE:-sunerpy/pt-tools}
+          [[ "$image" =~ ^[a-z0-9]([a-z0-9._/:-]*[a-z0-9])?$ ]] || fail "vars.RELAY_IMAGE '${image}' is not an image name"
+          port=${RELAY_PORT:-8443}
+          [[ "$port" =~ ^[0-9]{1,5}$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "vars.RELAY_PORT '${port}' is not a port"
+          grace=${RELAY_DRAIN_GRACE:-5s}
+          [[ "$grace" =~ ^[0-9]{1,3}s$ ]] || fail "vars.RELAY_DRAIN_GRACE '${grace}' is not like 5s"
+          header=${RELAY_CLIENT_IP_HEADER:-}
+          [[ -z "$header" || "$header" =~ ^[A-Za-z0-9-]+$ ]] || fail "vars.RELAY_CLIENT_IP_HEADER '${header}' is not a header name"
+          [[ -z "$RELAY_MAX_CONNECTIONS" || "$RELAY_MAX_CONNECTIONS" =~ ^-?[0-9]{1,9}$ ]] || fail "vars.RELAY_MAX_CONNECTIONS '${RELAY_MAX_CONNECTIONS}' is not an integer"
+          [[ -z "$RELAY_DAILY_BYTES_PER_HOST" || "$RELAY_DAILY_BYTES_PER_HOST" =~ ^[0-9]{1,18}$ ]] || fail "vars.RELAY_DAILY_BYTES_PER_HOST '${RELAY_DAILY_BYTES_PER_HOST}' is not a byte count"
+          ssh_port=${RELAY_SSH_PORT:-22}
+          [[ "$ssh_port" =~ ^[0-9]{1,5}$ ]] && [ "$ssh_port" -ge 1 ] && [ "$ssh_port" -le 65535 ] || fail "vars.RELAY_SSH_PORT '${ssh_port}' is not a port"
+          if [ "$DRY_RUN" != true ]; then
+            for s in HAS_HOST HAS_USER HAS_KEY HAS_KNOWN_HOSTS; do
+              [ "${!s}" = true ] || fail "secret RELAY_SSH_${s#HAS_} is not set in the hosted-relay environment"
+            done
+          fi
+          {
+            echo "image=$image"
+            echo "port=$port"
+            echo "grace=$grace"
+            echo "header=$header"
+            echo "ssh_port=$ssh_port"
+            echo "max_connections=$RELAY_MAX_CONNECTIONS"
+            echo "daily_bytes=$RELAY_DAILY_BYTES_PER_HOST"
+          } >>"$GITHUB_OUTPUT"
+
+      # 只部署已经公开的 release；镜像按 digest 拉（tag 之后被改写也不会部署别的字节）
+      - name: Check the release and resolve the image digest
+        id: img
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          DIGEST: ${{ inputs.digest }}
+          IMAGE: ${{ steps.cfg.outputs.image }}
+        run: |
+          set -euo pipefail
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null) ||
+            { echo "::error title=Relay deploy::$TAG is not a release of $GITHUB_REPOSITORY"; exit 1; }
+          [ "$draft" = false ] || { echo "::error title=Relay deploy::$TAG is still a draft"; exit 1; }
+          digest=$DIGEST
+          if [ -z "$digest" ]; then
+            digest=$(docker buildx imagetools inspect "$IMAGE:$TAG" | sed -n 's/^Digest:[[:space:]]*//p' | head -1)
+          fi
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error title=Relay deploy::could not resolve the digest of $IMAGE:$TAG"; exit 1; }
+          docker buildx imagetools inspect "$IMAGE@$digest" >/dev/null
+          echo "ref=$IMAGE@$digest" >>"$GITHUB_OUTPUT"
+          echo "deploying $IMAGE:$TAG as $IMAGE@$digest"
+
+      # 部署脚本取自这个 workflow 所在的受保护提交
+      - name: Checkout the deploy script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/deploy-relay.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Check the script
+        shell: bash
+        run: bash -n scripts/deploy-relay.sh
+
+      - name: Prepare SSH
+        if: ${{ !inputs.dry_run }}
+        id: ssh
+        shell: bash
+        env:
+          RELAY_SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
+          RELAY_SSH_KNOWN_HOSTS: ${{ secrets.RELAY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/relay-ssh"
+          rm -rf "$dir"
+          mkdir -m 700 "$dir"
+          umask 077
+          printf '%s\n' "$RELAY_SSH_KEY" >"$dir/key"
+          printf '%s\n' "$RELAY_SSH_KNOWN_HOSTS" >"$dir/known_hosts"
+          echo "dir=$dir" >>"$GITHUB_OUTPUT"
+
+      # 新容器起来、本机核对通过以后旧容器还留着（--keep-previous），等下一步从外面检查
+      - name: Deploy over SSH
+        id: deploy
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          DIR: ${{ steps.ssh.outputs.dir }}
+          IMAGE: ${{ steps.img.outputs.ref }}
+          PORT: ${{ steps.cfg.outputs.port }}
+          GRACE: ${{ steps.cfg.outputs.grace }}
+          HEADER: ${{ steps.cfg.outputs.header }}
+          SSH_PORT: ${{ steps.cfg.outputs.ssh_port }}
+          MAX_CONNECTIONS: ${{ steps.cfg.outputs.max_connections }}
+          DAILY_BYTES: ${{ steps.cfg.outputs.daily_bytes }}
+          TAG: ${{ inputs.tag }}
+          RELAY_HOSTNAME: ${{ vars.RELAY_HOSTNAME }}
+          RELAY_SSH_HOST: ${{ secrets.RELAY_SSH_HOST }}
+          RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          args=(bash -s -- --image "$IMAGE" --public-url "wss://$RELAY_HOSTNAME" --port "$PORT" --drain-grace "$GRACE" --expect-version "$TAG" --keep-previous)
+          [ -z "$HEADER" ] || args+=(--client-ip-header "$HEADER")
+          [ -z "$MAX_CONNECTIONS" ] || args+=(--max-connections "$MAX_CONNECTIONS")
+          [ -z "$DAILY_BYTES" ] || args+=(--daily-bytes-per-host "$DAILY_BYTES")
+          ssh -i "$DIR/key" -p "$SSH_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$DIR/known_hosts" -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' "${args[@]}")" <scripts/deploy-relay.sh
+
+      # 从外面再看一次：反向代理、TLS 与新容器都通才收尾（删掉旧容器）
+      - name: Check the public endpoint, then finalize
+        id: finish
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          DIR: ${{ steps.ssh.outputs.dir }}
+          SSH_PORT: ${{ steps.cfg.outputs.ssh_port }}
+          TAG: ${{ inputs.tag }}
+          RELAY_HOSTNAME: ${{ vars.RELAY_HOSTNAME }}
+          RELAY_SSH_HOST: ${{ secrets.RELAY_SSH_HOST }}
+          RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          url="https://$RELAY_HOSTNAME"
+          # shellcheck disable=SC2016 # $1 是给里面那个 sh 的
+          if ! timeout 120 sh -c 'until curl -fsS "$1/ready" | grep -q "\"status\":\"ready\""; do sleep 3; done' _ "$url"; then
+            echo "::error title=Relay deploy::$url/ready did not report ready within 120s"
+            exit 1
+          fi
+          version=$(curl -fsS "$url/healthz" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p') || version=""
+          if [ "$version" != "$TAG" ]; then
+            echo "::error title=Relay deploy::$url/healthz reports version '${version}', not $TAG"
+            exit 1
+          fi
+          ssh -i "$DIR/key" -p "$SSH_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$DIR/known_hosts" -o ConnectTimeout=20 \
+            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' bash -s -- --finalize)" <scripts/deploy-relay.sh
+          echo "$url is ready and runs $TAG"
+
+      # 部署做完了却没有收尾：外面检查没过、收尾失败，或者这期间 workflow 被取消（always() 在取消以后也会跑）
+      - name: Roll back an unfinished deployment
+        if: ${{ always() && steps.deploy.outcome == 'success' && steps.finish.outcome != 'success' }}
+        shell: bash
+        env:
+          DIR: ${{ steps.ssh.outputs.dir }}
+          PORT: ${{ steps.cfg.outputs.port }}
+          SSH_PORT: ${{ steps.cfg.outputs.ssh_port }}
+          RELAY_SSH_HOST: ${{ secrets.RELAY_SSH_HOST }}
+          RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
+        run: |
+          set -euo pipefail
+          if ! ssh -i "$DIR/key" -p "$SSH_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$DIR/known_hosts" -o ConnectTimeout=20 \
+            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' bash -s -- --rollback --port "$PORT")" <scripts/deploy-relay.sh; then
+            echo "::error title=Relay deploy::rollback failed; check the server"
+            exit 1
+          fi
+          echo "::warning title=Relay deploy::the deployment was not finalized and has been rolled back"
+
+      - name: Remove the SSH key
+        if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/relay-ssh"

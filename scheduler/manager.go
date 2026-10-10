@@ -51,7 +51,9 @@ type Manager struct {
 	reseedWorker         *ReseedWorker
 	cookieCloudWorker    *CookieCloudWorker
 	eventCancel          func()
-	stopped              bool
+	// eventDone 在处理配置变更的协程退出时关闭：StopAll 等它，停下以后不会再有一次 Reload 在跑
+	eventDone chan struct{}
+	stopped   bool
 	// jobsWanted / jobsPaused 记录用户在调度器里点的「启动 / 停止所有任务」：
 	// 手动启动后配置变更照常重启任务；手动停止后配置变更不再把任务拉起来，直到再次手动启动。
 	jobsWanted bool
@@ -67,7 +69,9 @@ func NewManager() *Manager {
 	id, ch, cancel := events.Subscribe(64)
 	_ = id
 	m.eventCancel = cancel
+	m.eventDone = make(chan struct{})
 	go func() {
+		defer close(m.eventDone)
 		defer cancel()
 		var pendingVersion int64
 		var timer *time.Timer
@@ -545,7 +549,17 @@ func (m *Manager) StopAll() {
 	// CookieCloud 同步写完 Cookie 后会回调 Manager（取登录探测），要在锁外停，否则停止时互相等待
 	ccw := m.cookieCloudWorker
 	m.cookieCloudWorker = nil
+	// 先退掉配置变更的订阅，并等正在处理的那一次（可能在 Reload）做完：之后不会再有任务被它拉起来，
+	// 也不会在调用方（例如测试换回 global.GlobalDB）以后还读全局状态。等的时候不拿锁，Reload 要用 mu 与 monMu
+	if m.eventCancel != nil {
+		m.eventCancel()
+		m.eventCancel = nil
+	}
+	done := m.eventDone
 	m.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 	if ccw != nil {
 		ccw.Stop()
 	}
@@ -595,10 +609,6 @@ func (m *Manager) StopAll() {
 	if m.loginReminderMonitor != nil {
 		stops = append(stops, m.loginReminderMonitor.Stop)
 		m.loginReminderMonitor = nil
-	}
-	if m.eventCancel != nil {
-		m.eventCancel()
-		m.eventCancel = nil
 	}
 	m.mu.Unlock()
 	for _, stop := range stops {

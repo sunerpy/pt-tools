@@ -22,6 +22,8 @@ ARG BUILD_ENV
 ARG TAG=unknown
 ARG BUILD_TIME=unknown
 ARG COMMIT_ID=unknown
+# 托管 relay 的地址（docker.yml 从 secret PT_TOOLS_RELAY_URL 传进来；地址随二进制公开，build-arg 会出现在镜像历史里），没给时为空
+ARG RELAY_URL=""
 ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 ARG TARGETARCH
 ARG GOPROXY
@@ -68,7 +70,8 @@ RUN --mount=type=bind,source=.,target=/context,ro set -eux; \
     go build -ldflags="-s -w \
       -X github.com/sunerpy/pt-tools/version.Version=${TAG} \
       -X github.com/sunerpy/pt-tools/version.BuildTime=${BUILD_TIME} \
-      -X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID}" \
+      -X github.com/sunerpy/pt-tools/version.CommitID=${COMMIT_ID} \
+      -X github.com/sunerpy/pt-tools/internal/remote.DefaultRelayURL=${RELAY_URL}" \
       -mod=readonly -o pt-tools; \
   fi; \
   if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends upx-ucl || true; fi; \
