@@ -83,8 +83,9 @@ runs:
           src="apps/mobile/build/app/outputs/flutter-apk/app-$abi-release.apk"
           [ -f "$src" ] || { echo "::error title=Mobile release::missing $src"; exit 1; }
           certs=$("$apksigner" verify --print-certs "$src")
-          # 不同版本的 apksigner 写法不同（Signer #1 …、Signer (minSdkVersion=…) …），只认证书的 SHA-256；签名人只能是同一张证书
-          digests=$(printf '%s\n' "$certs" | sed -n 's/^Signer.* certificate SHA-256 digest: *//p' | sort -u)
+          # 不同版本的 apksigner 写法不同（「Signer #1 certificate SHA-256 digest: …」「V2 Signer: certificate SHA-256 digest: …」），
+          # 只认证书的 SHA-256；各个签名方案列出的必须是同一张证书
+          digests=$(printf '%s\n' "$certs" | sed -n 's/^.*[Ss]igner.*certificate SHA-256 digest:[[:space:]]*//p' | sort -u)
           if [ -z "$digests" ] || [ "$(printf '%s\n' "$digests" | wc -l)" -ne 1 ]; then
             echo "::error title=Mobile release::$src: expected exactly one signing certificate"
             printf '%s\n' "$certs"
