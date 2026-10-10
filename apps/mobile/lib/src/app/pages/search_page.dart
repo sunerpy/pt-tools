@@ -31,6 +31,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Future<void> _search() async {
     final kw = _q.text.trim();
     if (kw.isEmpty) return;
+    final s = S.of(context);
     FocusScope.of(context).unfocus();
     setState(() {
       _busy = true;
@@ -42,7 +43,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           .search(AppSearchRequest(keyword: kw, freeOnly: _freeOnly));
       setState(() => _result = r);
     } on Object catch (e) {
-      setState(() => _error = describeError(e));
+      setState(() => _error = describeError(e, s));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -119,7 +120,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       messenger.showSnackBar(SnackBar(content: Text(msg)));
     } on Object catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text(s.errorPrefix(describeError(e)))),
+        SnackBar(content: Text(s.errorPrefix(describeError(e, s)))),
       );
     }
   }

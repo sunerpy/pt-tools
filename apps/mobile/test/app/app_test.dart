@@ -90,6 +90,9 @@ class _World {
   final requests = <String>[];
   late DhKey hostKey;
 
+  /// 种子列表回 502（下载器连不上）
+  bool failTorrents = false;
+
   Object? api(String method, String path) {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
@@ -97,7 +100,13 @@ class _World {
       '/api/app/v1/meta' => _meta(scopes),
       '/api/app/v1/overview' => _overview,
       '/api/app/v1/downloaders' => {'items': []},
-      '/api/app/v1/torrents' => _torrents,
+      '/api/app/v1/torrents' =>
+        failTorrents
+            ? const ApiReply(502, {
+                'error': 'downloader_unavailable',
+                'message': '下载器 qb 连不上',
+              })
+            : _torrents,
       '/api/app/v1/torrents/actions' => {
         'succeeded': 1,
         'failed': 0,
@@ -219,6 +228,37 @@ void main() {
     await tester.tap(find.text('重新配对'));
     await _settle(tester);
     expect(find.text('配对 pt-tools'), findsOneWidget);
+  });
+
+  testWidgets('撤销以后种子页刷新：说明要重新配对，不显示原始异常、不给重试', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await tester.tap(find.text('种子'));
+    await _settle(tester);
+    expect(find.text('Some.Movie.2026.1080p'), findsOneWidget);
+    await tester.runAsync(() => w.hosts.last.goAway('revoked'));
+    await _settle(tester);
+    // 测试里定时刷新是一天一次，这里直接让种子列表重读
+    ProviderScope.containerOf(tester.element(find.byType(PtToolsApp)))
+        .invalidate(torrentsProvider);
+    await _settle(tester);
+    expect(find.textContaining('Exception occurred'), findsNothing);
+    expect(find.textContaining('出错了'), findsNothing);
+    expect(find.text('这台设备被撤销了，请重新配对'), findsNWidgets(2), reason: '连接条与页面里各一处');
+    expect(find.text('重试'), findsNothing);
+  });
+
+  testWidgets('其他错误照旧：带「出错了」与重试', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await tester.tap(find.text('种子'));
+    await _settle(tester);
+    w.failTorrents = true;
+    ProviderScope.containerOf(tester.element(find.byType(PtToolsApp)))
+        .invalidate(torrentsProvider);
+    await _settle(tester);
+    expect(find.text('出错了：下载器 qb 连不上'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
   });
 
   testWidgets('配对成功但存不进安全存储：提示到网页上撤销这台设备', (tester) async {

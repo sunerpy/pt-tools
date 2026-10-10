@@ -47,6 +47,13 @@ class Pipe implements MsgChannel {
   }
 }
 
+/// 罐头回应要带别的状态（例如 502）时用它包一下。
+class ApiReply {
+  const ApiReply(this.status, this.body);
+  final int status;
+  final Object body;
+}
+
 /// 假主机：握手以后按请求路径回应。
 class FakeHost {
   FakeHost(
@@ -134,13 +141,16 @@ class FakeHost {
     final path = req['path'] as String;
     final canned = api?.call(req['method'] as String, path);
     if (canned != null) {
+      final (status, body) = canned is ApiReply
+          ? (canned.status, canned.body)
+          : (200, canned);
       write(
         Frame.json(FrameType.respHead, id, {
-          'status': 200,
+          'status': status,
           'headers': {'Content-Type': 'application/json'},
         }),
       );
-      write(Frame.json(FrameType.respBody, id, canned));
+      write(Frame.json(FrameType.respBody, id, body));
       write(Frame(FrameType.respEnd, id, Uint8List(0)));
       return;
     }

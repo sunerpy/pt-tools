@@ -1,9 +1,14 @@
 // 页面里通用的小部件：加载与出错、空状态、数值卡片、站点图标、海报、连接条。
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ptt_api/api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../remote/connection.dart';
+import '../../remote/frames.dart';
+import '../../remote/session.dart';
 import '../../remote/transport.dart';
 import '../providers.dart';
 import 'tunnel_image.dart';
@@ -26,7 +31,7 @@ class AsyncBody<T> extends StatelessWidget {
     return switch (value) {
       AsyncData(:final value) => data(value),
       AsyncError(:final error) when !value.isLoading => ErrorState(
-        message: describeError(error),
+        message: describeError(error, S.of(context)),
         onRetry: onRetry,
       ),
       _ when value.hasValue => data(value.requireValue),
@@ -35,33 +40,79 @@ class AsyncBody<T> extends StatelessWidget {
   }
 }
 
-class ErrorState extends StatelessWidget {
+/// 出错的说明与重试。设备被撤销、主机换了密钥或关掉了远程访问时只说明连接的状态：
+/// 不是这一页出错，重试也没有用（连接条上有「重新配对」）。
+class ErrorState extends ConsumerWidget {
   const ErrorState({super.key, required this.message, required this.onRetry});
   final String message;
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final s = S.of(context);
+    final problem = connectionProblem(
+      s,
+      ref.watch(connectionStatusProvider).value,
+    );
     return ListView(
       // 可以下拉刷新
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(32),
       children: [
         Icon(
-          Icons.cloud_off,
+          problem == null ? Icons.cloud_off : Icons.link_off,
           size: 48,
           color: Theme.of(context).colorScheme.outline,
         ),
         const SizedBox(height: 12),
-        Text(s.errorPrefix(message), textAlign: TextAlign.center),
-        const SizedBox(height: 12),
-        Center(
-          child: FilledButton.tonal(onPressed: onRetry, child: Text(s.retry)),
-        ),
+        Text(problem ?? s.errorPrefix(message), textAlign: TextAlign.center),
+        if (problem == null) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: FilledButton.tonal(onPressed: onRetry, child: Text(s.retry)),
+          ),
+        ],
       ],
     );
   }
+}
+
+/// 连接停在要重新配对或主机关掉了远程访问时的说明；其他状态为 null。
+String? connectionProblem(S s, ConnectionStatus? st) => switch (st?.state) {
+  LinkState.revoked =>
+    st!.goAway == GoAwayReason.keyRotated ? s.connKeyRotated : s.connRevoked,
+  LinkState.disabled => s.connDisabled,
+  _ => null,
+};
+
+/// 把接口的错误写成给人看的一句话（App API 的错误是 {"error","message"}）。
+/// 连接上的异常被生成的客户端包成「Exception occurred: GET /torrents」，原因在内层异常里。
+String describeError(Object e, S s) {
+  if (e is ApiException) {
+    final inner = e.innerException;
+    if (inner != null) return describeError(inner, s);
+    final body = e.message;
+    if (body != null && body.isNotEmpty) {
+      try {
+        final v = jsonDecode(body);
+        if (v is Map && v['message'] is String) return v['message'] as String;
+      } on FormatException {
+        // 不是 JSON，原样给
+      }
+      return body;
+    }
+    return 'HTTP ${e.code}';
+  }
+  if (e is HandshakeException && e.notPaired) return s.connRevoked;
+  if (e is SessionClosedException) {
+    return switch (e.goAway) {
+      GoAwayReason.revoked => s.connRevoked,
+      GoAwayReason.keyRotated => s.connKeyRotated,
+      GoAwayReason.disabled => s.connDisabled,
+      _ => e.message,
+    };
+  }
+  return e.toString().replaceFirst(RegExp(r'^[A-Za-z]+Exception: '), '');
 }
 
 class EmptyState extends StatelessWidget {
@@ -247,11 +298,15 @@ class ConnectionBanner extends ConsumerWidget {
         null,
       ),
       LinkState.revoked => (
-        st.goAway == 'key_rotated' ? s.connKeyRotated : s.connRevoked,
+        connectionProblem(s, st)!,
         scheme.errorContainer,
         s.repair,
       ),
-      LinkState.disabled => (s.connDisabled, scheme.tertiaryContainer, null),
+      LinkState.disabled => (
+        connectionProblem(s, st)!,
+        scheme.tertiaryContainer,
+        null,
+      ),
       LinkState.failed => (
         s.connFailed(st.message ?? ''),
         scheme.errorContainer,
