@@ -97,8 +97,9 @@ type Server struct {
 
 	limiter *ipLimiter
 
-	// draining 为真时不接新连接（Drain、Close）
+	// draining 为真时不接新连接（Drain、Close）；admitMu 让「看排空 + 占名额」与「置排空」不交错
 	draining atomic.Bool
+	admitMu  sync.Mutex
 	// conns 是占着名额的连接数（hostConns + clientConns）
 	conns, hostConns, clientConns atomic.Int64
 	// closing 是还在做关闭握手的连接数（Close 等它们的关闭帧发出去）
@@ -157,15 +158,15 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// ready 是现在接不接新连接，不接时给原因（draining、disabled、full）。
+// ready 是现在接不接新连接，不接时给原因（draining、full、disabled；顺序和新连接实际遇到的一样：先排空、再名额、升级以后才是暂停服务）。
 func (s *Server) ready() (bool, string) {
 	switch {
 	case s.draining.Load():
 		return false, "draining"
-	case s.cfg.Disabled:
-		return false, "disabled"
 	case s.cfg.MaxConnections > 0 && s.conns.Load() >= int64(s.cfg.MaxConnections):
 		return false, "full"
+	case s.cfg.Disabled:
+		return false, "disabled"
 	}
 	return true, ""
 }
@@ -182,12 +183,16 @@ func (s *Server) serveReady(w http.ResponseWriter, _ *http.Request) {
 }
 
 // Drain 让 relay 不再接新连接（/ready 回 503，新连接在升级前回 503），已有的连接不动。用于先从负载均衡上摘下来再停。
-func (s *Server) Drain() { s.draining.Store(true) }
+func (s *Server) Drain() {
+	s.admitMu.Lock()
+	s.draining.Store(true)
+	s.admitMu.Unlock()
+}
 
 // Close 不再接新连接，主机（包括还在认证的）与客户端都以 1012（relay 重启）关掉，等关闭握手（最多 closeWait），
 // 最后取消所有读写。顺序不能反：coder/websocket 的读在 ctx 取消时直接断开连接，关闭帧就发不出去了。
 func (s *Server) Close() {
-	s.draining.Store(true)
+	s.Drain()
 	s.mu.Lock()
 	s.closingAll = true
 	hosts := make([]*hostConn, 0, len(s.hosts))
@@ -244,16 +249,20 @@ func (s *Server) closeWS(ws *websocket.Conn, code websocket.StatusCode, reason s
 // admit 在升级前给一个连接占名额（n 是主机或客户端的计数）：排空中或者满了时回 503（带 Retry-After），不占名额。
 // 返回放开名额的函数；不接时返回 nil。
 func (s *Server) admit(w http.ResponseWriter, n *atomic.Int64) func() {
+	s.admitMu.Lock()
 	if s.draining.Load() {
+		s.admitMu.Unlock()
 		s.reject(w, rejectDraining)
 		return nil
 	}
 	if total := s.conns.Add(1); s.cfg.MaxConnections > 0 && total > int64(s.cfg.MaxConnections) {
 		s.conns.Add(-1)
+		s.admitMu.Unlock()
 		s.reject(w, rejectFull)
 		return nil
 	}
 	n.Add(1)
+	s.admitMu.Unlock()
 	return func() {
 		n.Add(-1)
 		s.conns.Add(-1)
@@ -344,6 +353,12 @@ func (s *Server) serveHost(w http.ResponseWriter, r *http.Request) {
 	p := &pendingHost{ws: ws}
 	h := &hostConn{s: s, ws: ws, wc: p, id: hostID, streams: map[uint32]*clientConn{}, done: make(chan struct{})}
 	s.mu.Lock()
+	if s.closingAll {
+		// 占到名额以后、登记以前 Close 拿了列表：它看不到这条连接，这里自己以 1012 关
+		s.mu.Unlock()
+		s.closePending(p, websocket.StatusServiceRestart, "relay restarting")
+		return
+	}
 	s.pending[p] = struct{}{}
 	s.mu.Unlock()
 	if err := h.authenticate(); err != nil {
@@ -413,7 +428,15 @@ func (s *Server) promote(h *hostConn) error {
 			delete(s.hosts, h.id)
 		}
 	}
+	if err == nil && !closing && old != nil {
+		// 在锁里关旧连接（锁的顺序 s.mu → h.mu）：Close 拿列表要么在这之前（那时 closing 已经为真），要么在这之后（旧连接已经关了），
+		// 不会有旧连接既不在 hosts 里、也还没关的时候
+		old.close(remote.CloseReplaced, "replaced by a newer connection")
+	}
 	s.mu.Unlock()
+	if testHookReplaced != nil {
+		testHookReplaced(h)
+	}
 	switch {
 	case closing:
 		h.closeAll(websocket.StatusServiceRestart, "relay restarting")
@@ -424,9 +447,6 @@ func (s *Server) promote(h *hostConn) error {
 	case err != nil:
 		h.close(websocket.StatusInternalError, "")
 		return err
-	}
-	if old != nil {
-		old.close(remote.CloseReplaced, "replaced by a newer connection")
 	}
 	return nil
 }
@@ -489,6 +509,10 @@ func (s *Server) serveClient(w http.ResponseWriter, r *http.Request) {
 		c, code, reason = h.openStream(ws)
 	}
 	if c == nil {
+		if code == 0 {
+			// openStream 已经关了
+			return
+		}
 		if code == remote.CloseHostOffline && (closing || s.closingNow()) {
 			// 和 Close 交错：主机是因为 relay 在停才不在的
 			code, reason = int(websocket.StatusServiceRestart), "relay restarting"
@@ -503,6 +527,12 @@ func (s *Server) serveClient(w http.ResponseWriter, r *http.Request) {
 
 // testHookReady 在主机的 READY 写出以后、放开写锁以前调用（测试用：拉长 READY 前后的时序；返回错误时当成 READY 没写出去）。
 var testHookReady func(h *hostConn) error
+
+// testHookReplaced 在登记完成（换掉旧连接）、放开 s.mu 以后调用（测试用）。
+var testHookReplaced func(h *hostConn)
+
+// testHookOpen 在客户端的流登记以后、给主机发 OPEN 以前调用（测试用）。
+var testHookOpen func(c *clientConn)
 
 // errClosed 是连接已经关了。
 var errClosed = errors.New("连接已经关闭")
@@ -679,16 +709,25 @@ func (h *hostConn) overQuota() bool {
 	return h.s.usageOf(h.id).over
 }
 
-// openStream 为新的客户端分配流编号并通知主机；超出上限时返回关闭码。
+// openStream 为新的客户端分配流编号并通知主机；没有登记上时返回关闭码（调用方关连接），
+// 登记了但 OPEN 发不出去时它自己关掉流，返回的关闭码是 0。
 // 额度检查与登记在同一段锁里（usageMu → h.mu，和 count 超额时取流列表的顺序一样），超额那一刻之后登记的流一定会被拒绝。
 func (h *hostConn) openStream(ws *websocket.Conn) (*clientConn, int, string) {
 	c, code, reason := h.register(ws)
 	if c == nil {
 		return nil, code, reason
 	}
+	if testHookOpen != nil {
+		testHookOpen(c)
+	}
 	if err := h.writeOuter(remote.OuterFrame{Type: remote.OuterOpen, Stream: c.id}); err != nil {
-		h.removeStream(c.id)
-		return nil, remote.CloseHostOffline, "host offline"
+		// 流已经登记了：由 c 自己关（once），和主机断开、Close 交错时只关一次、只计一次
+		code, reason := remote.CloseHostOffline, "host offline"
+		if h.s.closingNow() {
+			code, reason = int(websocket.StatusServiceRestart), "relay restarting"
+		}
+		c.closeBy(code, reason, false)
+		return nil, 0, ""
 	}
 	return c, 0, ""
 }

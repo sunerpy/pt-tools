@@ -438,3 +438,55 @@ func TestCloseDuringReplace(t *testing.T) {
 		}
 	}
 }
+
+// /ready 的原因按新连接实际遇到的顺序：排空、名额、暂停服务
+func TestReadyReasonOrder(t *testing.T) {
+	s, err := New(Config{PublicURL: "ws://127.0.0.1:1", Disabled: true, MaxConnections: 1})
+	require.NoError(t, err)
+	defer s.Close()
+	_, why := s.ready()
+	assert.Equal(t, "disabled", why)
+	s.conns.Store(1)
+	_, why = s.ready()
+	assert.Equal(t, "full", why, "满了的时候新连接在升级前就是 503 full")
+	s.conns.Store(0)
+	s.Drain()
+	_, why = s.ready()
+	assert.Equal(t, "draining", why)
+}
+
+// 流登记以后、OPEN 发出以前遇到 Close：客户端收到 1012，只关一次、只计一次（主机一条加客户端一条）
+func TestOpenRacesClose(t *testing.T) {
+	srv, u := start(t, Config{MaxConnPerIPPerMin: -1})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	keys := newHostKeys(t)
+	host := authHost(t, ctx, u, keys)
+	hostClosed := make(chan websocket.StatusCode, 1)
+	go func() { hostClosed <- readClose(t, ctx, host) }()
+	testHookOpen = func(c *clientConn) {
+		srv.mu.Lock()
+		srv.closingAll = true
+		srv.mu.Unlock()
+		c.h.closeAll(websocket.StatusServiceRestart, "relay restarting")
+	}
+	t.Cleanup(func() { testHookOpen = nil })
+	code, client, _ := dialStatus(t, ctx, u+"/v1/client/"+keys.HostID())
+	require.Equal(t, http.StatusSwitchingProtocols, code)
+	assert.Equal(t, websocket.StatusServiceRestart, readClose(t, ctx, client))
+	assert.Equal(t, websocket.StatusServiceRestart, <-hostClosed)
+	assert.Equal(t, int64(2), srv.stats.closed[closeIndex(int(websocket.StatusServiceRestart))].Load(), "主机与客户端各一次")
+}
+
+// 占到名额以后、登记进 pending 以前 Close 已经开始：主机自己以 1012 关
+func TestHostAdmittedDuringClose(t *testing.T) {
+	srv, u := start(t, Config{MaxConnPerIPPerMin: -1})
+	srv.mu.Lock()
+	srv.closingAll = true // Close 已经拿了列表，排空还没置上的那一瞬间
+	srv.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	code, ws, _ := dialStatus(t, ctx, u+"/v1/host/"+newHostKeys(t).HostID())
+	require.Equal(t, http.StatusSwitchingProtocols, code)
+	assert.Equal(t, websocket.StatusServiceRestart, readClose(t, ctx, ws))
+}
