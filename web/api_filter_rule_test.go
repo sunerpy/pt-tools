@@ -1422,3 +1422,34 @@ func TestUpdateFilterRule_Paths(t *testing.T) {
 
 	_ = global.GlobalDB
 }
+
+// 新建规则时不勾「要求免费」、不勾「启用」要原样存下：两列的默认是 true，GORM 建记录时会把 false 写成默认值
+func TestCreateFilterRule_KeepsFalseFlags(t *testing.T) {
+	server, cleanup := setupFilterRuleTestServer(t)
+	defer cleanup()
+
+	create := func(name string, requireFree, enabled bool) FilterRuleResponse {
+		body, _ := json.Marshal(FilterRuleRequest{Name: name, Pattern: "Movie", RequireFree: requireFree, Enabled: enabled})
+		w := httptest.NewRecorder()
+		server.createFilterRule(w, httptest.NewRequest(http.MethodPost, "/api/filter-rules", bytes.NewReader(body)))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp FilterRuleResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp
+	}
+	stored := func(id uint) models.FilterRule {
+		var r models.FilterRule
+		require.NoError(t, global.GlobalDB.DB.First(&r, id).Error)
+		return r
+	}
+
+	off := create("半价也下", false, false)
+	assert.False(t, off.RequireFree)
+	assert.False(t, off.Enabled)
+	assert.False(t, stored(off.ID).RequireFree, "不要求免费")
+	assert.False(t, stored(off.ID).Enabled, "没启用")
+
+	on := create("只要免费", true, true)
+	assert.True(t, stored(on.ID).RequireFree)
+	assert.True(t, stored(on.ID).Enabled)
+}
