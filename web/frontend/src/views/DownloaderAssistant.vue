@@ -314,7 +314,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="da-page pt-cards pt-cards--wide">
+  <div class="pt-cards pt-cards--wide">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-select

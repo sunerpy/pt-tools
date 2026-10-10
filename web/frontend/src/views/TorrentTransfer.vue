@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tf-page pt-cards pt-cards--wide">
+  <div class="pt-cards pt-cards--wide">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="tf-refresh" @click="refresh">

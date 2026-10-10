@@ -222,7 +222,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="rs-page pt-cards pt-cards--wide">
+  <div class="pt-cards pt-cards--wide">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-button data-testid="rs-refresh" @click="refresh">
