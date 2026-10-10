@@ -2,6 +2,7 @@ package organize
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -176,14 +177,15 @@ func TestRetryDue(t *testing.T) {
 	require.Contains(t, res.Plan.Problem, "识别失败")
 	e.tmdb.setDown(false)
 
-	e.svc.retryDue(e.ctx)
+	e.svc.retryDue(e.ctx, e.currentSettings())
 	assert.Zero(t, e.drain(), "还没到重试时间")
 	e.advance(11 * time.Minute)
-	e.svc.retryDue(e.ctx)
+	e.svc.retryDue(e.ctx, e.currentSettings())
 	queued := e.history()
 	require.Len(t, queued, 1)
-	assert.Nil(t, queued[0].NextRetryAt, "排上队以后重试时间清掉了")
-	assert.True(t, e.svc.Retrying(queued[0].ID), "但还在重试")
+	require.NotNil(t, queued[0].NextRetryAt, "排上队以后记录里留着租约到期的时间：整理以前重启也不丢")
+	assert.Equal(t, e.Now().Add(retryLease).Truncate(time.Second), queued[0].NextRetryAt.UTC())
+	assert.True(t, e.svc.Retrying(queued[0].ID), "还在重试")
 	assert.Equal(t, 1, e.drain())
 	assert.False(t, e.svc.Retrying(queued[0].ID), "整理完以后清掉")
 	rows := e.history()
@@ -261,7 +263,7 @@ func TestRetryDueKeepsScheduleWhenQueueFull(t *testing.T) {
 		require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 9, Hash: time.Duration(i).String()}}))
 	}
 	e.advance(11 * time.Minute)
-	e.svc.retryDue(e.ctx)
+	e.svc.retryDue(e.ctx, e.currentSettings())
 	var row models.MediaTransferHistory
 	require.NoError(t, e.db.First(&row).Error)
 	require.NotNil(t, row.NextRetryAt, "排不上时保留重试时间")
@@ -286,7 +288,7 @@ func TestRetryFollowsCurrentAutomation(t *testing.T) {
 	due := func() {
 		t.Helper()
 		require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("1 = 1").Update("next_retry_at", e.Now()).Error)
-		e.svc.retryDue(e.ctx)
+		e.svc.retryDue(e.ctx, e.currentSettings())
 		e.drain()
 	}
 
@@ -329,7 +331,7 @@ func TestRetryKeptOnDownloaderError(t *testing.T) {
 
 	e.dl.getErr = assert.AnError
 	e.advance(11 * time.Minute)
-	e.svc.retryDue(e.ctx)
+	e.svc.retryDue(e.ctx, e.currentSettings())
 	assert.Equal(t, 1, e.drain())
 	row := e.history()[0]
 	assert.Equal(t, models.MediaTransferFailed, row.Status)
@@ -338,7 +340,7 @@ func TestRetryKeptOnDownloaderError(t *testing.T) {
 
 	e.dl.getErr = nil
 	e.advance(11 * time.Minute)
-	e.svc.retryDue(e.ctx)
+	e.svc.retryDue(e.ctx, e.currentSettings())
 	assert.Equal(t, 1, e.drain())
 	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
 }
@@ -354,7 +356,7 @@ func TestRetryDueWhenAlreadyQueued(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerScan}))
 	e.advance(11 * time.Minute)
-	e.svc.retryDue(e.ctx)
+	e.svc.retryDue(e.ctx, e.currentSettings())
 	row := e.history()[0]
 	require.NotNil(t, row.NextRetryAt, "没排上，重试时间留着")
 	assert.True(t, row.NextRetryAt.After(e.Now()))
@@ -362,4 +364,108 @@ func TestRetryDueWhenAlreadyQueued(t *testing.T) {
 	e.dl.getErr = assert.AnError
 	e.drain()
 	assert.NotNil(t, e.history()[0].NextRetryAt, "排着的那个任务出错也不丢")
+}
+
+// restart 模拟 pt-tools 重启：队列与「正在重试」这些内存里的状态都没了，库还是那个
+func (e *env) restart() {
+	e.t.Helper()
+	e.svc = New(Config{DB: e.db, Cipher: fakeCipher{}, Recognizer: e.rec, Downloaders: e.dls, Now: e.Now})
+}
+
+// 到期重试排上队以后、整理以前重启：记录里的重试时间是租约到期的时间，过了租约还会自动重试（以前清空了就再也不试）
+func TestRetrySurvivesRestartBeforeOrganize(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	e.tmdb.setDown(false)
+
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	e.restart() // 排上的任务没来得及整理
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "租约没到期以前不重排")
+	e.advance(retryLease + time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+	assert.Nil(t, e.history()[0].NextRetryAt)
+}
+
+// 自动整理关着时，到期的自动整理失败记录不排队、保持到期；打开以后下一拍就重试（以前关着的那一次就把重试时间清掉了）
+func TestRetryWaitsWhileAutomationOff(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerAuto}))
+	e.drain()
+	e.tmdb.setDown(false)
+
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.advance(11 * time.Minute)
+	before := e.history()[0].NextRetryAt
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "自动整理关着不排队")
+	require.NotNil(t, e.history()[0].NextRetryAt, "重试时间还在")
+	assert.Equal(t, before.UTC(), e.history()[0].NextRetryAt.UTC())
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	assert.Equal(t, models.MediaTransferDone, e.history()[0].Status)
+}
+
+// 到期重试时种子不在自动整理范围里：不整理，过一阵再看（范围可能会改），不是一直清空不再试
+func TestRetryOutOfScopeTriesLater(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	require.True(t, e.svc.enqueue(job{req: Request{DownloaderID: 1, Hash: oppHash}, trigger: models.MediaTriggerAuto}))
+	e.drain()
+	e.tmdb.setDown(false)
+
+	e.settings(SettingsInput{AutoEnabled: true, MinVideoMB: 1, Categories: []string{"tv"}})
+	e.advance(11 * time.Minute)
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferFailed, row.Status)
+	require.NotNil(t, row.NextRetryAt)
+	assert.Equal(t, e.Now().Add(retryOutOfScope).UTC(), row.NextRetryAt.UTC())
+}
+
+// 到期重试整理完了，但这一次没有改写某条记录（例如它的文件已经不在种子里）：租约清掉，不会每隔一个租约就重试一次
+func TestRetryClearsLeaseOnRowsTheRunDidNotTouch(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.oppenheimer()
+	due := e.Now()
+	stale := models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Gone.2023.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &due, Trigger: models.MediaTriggerManual,
+	}
+	require.NoError(t, e.db.Create(&stale).Error)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Equal(t, 1, e.drain())
+	var got models.MediaTransferHistory
+	require.NoError(t, e.db.First(&got, stale.ID).Error)
+	assert.Equal(t, models.MediaTransferFailed, got.Status)
+	assert.Nil(t, got.NextRetryAt, "这一次没有改写的记录不再重试")
+}
+
+func (e *env) currentSettings() Settings {
+	e.t.Helper()
+	set, err := e.svc.Settings(e.ctx)
+	require.NoError(e.t, err)
+	return set
 }

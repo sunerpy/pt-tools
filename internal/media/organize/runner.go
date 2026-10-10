@@ -17,8 +17,10 @@ type job struct {
 	req     Request
 	dlName  string
 	trigger string
-	// retryIDs 是到期重试时 retryDue 清掉了重试时间的记录：还没整理就出错时（例如下载器连不上）按退避恢复
+	// retryIDs 是到期重试排上队的记录，lease 是 retryDue 给它们写的重试时间（租约）：整理会改写它们；还没整理就出错时按退避改，
+	// 整理完了却没改写的清掉；租约没被改写时说明这次重试没做完（例如中途重启），租约到期以后还会再试
 	retryIDs []uint
+	lease    time.Time
 	done     chan jobResult
 }
 
@@ -43,6 +45,11 @@ const (
 	maxPerRound = 50
 	// waitManual 是手动整理等结果的时长：复制大文件时先回，整理在后台继续
 	waitManual = 20 * time.Second
+	// retryLease 是到期重试排上队时写进记录的重试时间：整理以前 pt-tools 重启了，过了这个时间还会再试
+	// （不和 retryDelays 里的任何一档相同，整理写的重试时间不会恰好等于它）
+	retryLease = 45 * time.Minute
+	// retryOutOfScope 是到期重试时种子不在自动整理范围里：过这么久再看（范围可能改了）
+	retryOutOfScope = 6 * time.Hour
 )
 
 // jobKey 是排队去重与退避用的键：知道下载器编号时只用编号（完成事件带了名字，补查与扫描只有编号，要对得上）。
@@ -218,12 +225,18 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	}
 	// 自动与扫描触发的（包括它们失败后的重试）按现在的设置：对应的开关关了、种子不在范围里的不整理
 	if j.trigger == models.MediaTriggerAuto || j.trigger == models.MediaTriggerScan {
-		ok, err := s.automated(ctx, j)
+		st, err := s.automated(ctx, j)
 		if err != nil {
 			s.fail(ctx, j)
 			return nil, err
 		}
-		if !ok {
+		switch st {
+		case automationOff:
+			// 开关在排队以后关了：重试记录回到「到期」，retryDue 在开关关着时不排它们，打开以后接着试
+			s.releaseLease(ctx, j, s.cfg.Now())
+			return nil, nil
+		case outOfScope:
+			s.releaseLease(ctx, j, s.cfg.Now().Add(retryOutOfScope))
 			return nil, nil
 		}
 	}
@@ -235,6 +248,8 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 		s.cfg.Logger.Warnf("[整理入库] 整理失败 (下载器 %d, %s): %v", j.req.DownloaderID, j.req.Hash, err)
 		return nil, err
 	}
+	// 这次整理没有改写的重试记录（例如它的文件已经不在种子里）不再重试
+	s.releaseLease(ctx, j, time.Time{})
 	s.clearBackoff(j)
 	if res.Created > 0 {
 		s.cfg.Logger.Infof("[整理入库] %s：新入库 %d 个文件", res.Plan.Name, res.Created)
@@ -242,29 +257,62 @@ func (s *Service) runJob(ctx context.Context, j job) (*Result, error) {
 	return res, nil
 }
 
+// automation 是自动与扫描触发的整理现在该不该做。
+type automation int
+
+const (
+	inScope       automation = iota
+	automationOff            // 自动整理或定期扫描（看触发方式）关着
+	outOfScope               // 开着，但种子不在范围里
+)
+
 // automated 报告自动与扫描触发的整理现在还该不该做：自动整理或定期扫描（看触发方式）开着，种子在范围里。
-func (s *Service) automated(ctx context.Context, j job) (bool, error) {
+func (s *Service) automated(ctx context.Context, j job) (automation, error) {
 	set, err := s.Settings(ctx)
 	if err != nil {
-		return false, err
+		return automationOff, err
 	}
-	if (j.trigger == models.MediaTriggerAuto && !set.AutoEnabled) || (j.trigger == models.MediaTriggerScan && !set.ScanEnabled) {
-		return false, nil
+	if switchedOff(set, j.trigger) {
+		return automationOff, nil
 	}
 	req := j.req
 	dl, _, err := s.cfg.Downloaders.Get(ctx, req.DownloaderID)
 	if err != nil {
-		return false, err
+		return automationOff, err
 	}
 	t, err := dl.GetTorrent(req.Hash)
 	if err != nil {
-		return false, err
+		return automationOff, err
 	}
-	return scopeOf(set).match(req.DownloaderID, t), nil
+	if !scopeOf(set).match(req.DownloaderID, t) {
+		return outOfScope, nil
+	}
+	return inScope, nil
+}
+
+// switchedOff 报告这种触发方式对应的开关（自动整理、定期扫描）关着；手动的没有开关。
+func switchedOff(set Settings, trigger string) bool {
+	return (trigger == models.MediaTriggerAuto && !set.AutoEnabled) || (trigger == models.MediaTriggerScan && !set.ScanEnabled)
+}
+
+// releaseLease 把还停在租约上的重试记录（这次没被整理改写的）改成 next；next 为零值时清空，不再自动重试。
+func (s *Service) releaseLease(ctx context.Context, j job, next time.Time) {
+	if len(j.retryIDs) == 0 || j.lease.IsZero() {
+		return
+	}
+	var v any
+	if !next.IsZero() {
+		v = &next
+	}
+	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
+		Where("id IN ? AND status = ? AND next_retry_at = ?", j.retryIDs, models.MediaTransferFailed, j.lease).
+		Update("next_retry_at", v).Error; err != nil {
+		s.cfg.Logger.Warnf("[整理入库] 更新重试时间失败: %v", err)
+	}
 }
 
 // fail 记下退避：补查与扫描在退避期内不再排这个种子（手动整理不退避）。到期重试的任务还没整理就出错时，
-// 把 retryDue 清掉的重试时间恢复成退避到期的时间（手动的过一个补查间隔），不然这些记录再也不会自动重试。
+// 还停在租约上的重试记录改成退避到期的时间（手动的过一个补查间隔）。
 func (s *Service) fail(ctx context.Context, j job) {
 	next := s.cfg.Now().Add(sweepInterval)
 	if j.trigger != models.MediaTriggerManual {
@@ -277,14 +325,7 @@ func (s *Service) fail(ctx context.Context, j job) {
 		next = b.next
 		s.qmu.Unlock()
 	}
-	if len(j.retryIDs) == 0 {
-		return
-	}
-	if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
-		Where("id IN ? AND status = ? AND next_retry_at IS NULL", j.retryIDs, models.MediaTransferFailed).
-		Update("next_retry_at", &next).Error; err != nil {
-		s.cfg.Logger.Warnf("[整理入库] 恢复重试时间失败: %v", err)
-	}
+	s.releaseLease(ctx, j, next)
 }
 
 func (s *Service) clearBackoff(j job) {
@@ -344,7 +385,7 @@ func (s *Service) loop(ctx context.Context) {
 			s.cfg.Logger.Warnf("[整理入库] %v", err)
 			continue
 		}
-		s.retryDue(ctx)
+		s.retryDue(ctx, set)
 		if set.AutoEnabled && now.Sub(lastSweep) >= sweepInterval {
 			lastSweep = now
 			s.sweep(ctx, set)
@@ -360,8 +401,10 @@ func (s *Service) loop(ctx context.Context) {
 	}
 }
 
-// retryDue 把到了重试时间的失败记录所在的种子排进队列（沿用原来的触发方式）。
-func (s *Service) retryDue(ctx context.Context) {
+// retryDue 把到了重试时间的失败记录所在的种子排进队列（沿用原来的触发方式）。对应的开关（自动整理、定期扫描）关着时
+// 不排，记录保持到期，打开以后的下一拍就重试。排上的记录的重试时间改成租约到期的时间（不是清空）：整理会改写它，
+// 整理以前 pt-tools 重启了，过了租约还会再试。
+func (s *Service) retryDue(ctx context.Context, set Settings) {
 	var rows []models.MediaTransferHistory
 	if err := s.cfg.DB.WithContext(ctx).
 		Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", models.MediaTransferFailed, s.cfg.Now()).
@@ -376,38 +419,54 @@ func (s *Service) retryDue(ctx context.Context) {
 			continue
 		}
 		seen[key] = true
-		// 先把重试时间清掉再排队：排上以后失败时 record 会按次数重新算；队列满了排不上时恢复成下一拍再试
+		trigger := r.Trigger
+		if trigger == "" {
+			trigger = models.MediaTriggerAuto
+		}
+		if switchedOff(set, trigger) {
+			continue
+		}
 		pending := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
 			Where("downloader_id = ? AND info_hash = ? AND status = ? AND next_retry_at IS NOT NULL", r.DownloaderID, r.InfoHash, models.MediaTransferFailed)
 		var ids []uint
 		if err := pending.Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
 			continue
 		}
-		// 清掉重试时间以前先标上：清掉到整理完之间，别人（订阅）看记录也知道它还在重试
-		s.markRetrying(ids, true)
-		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", nil).Error; err != nil {
-			s.cfg.Logger.Warnf("[整理入库] 清除重试时间失败: %v", err)
-			s.markRetrying(ids, false)
+		// 这个进程里已经排上、还没整理完的不重复排（租约比整理慢的大文件复制短时会到期）
+		if s.anyRetrying(ids) {
 			continue
 		}
-		trigger := r.Trigger
-		if trigger == "" {
-			trigger = models.MediaTriggerAuto
+		lease := s.cfg.Now().Add(retryLease).Truncate(time.Second)
+		s.markRetrying(ids, true)
+		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", &lease).Error; err != nil {
+			s.cfg.Logger.Warnf("[整理入库] 写重试租约失败: %v", err)
+			s.markRetrying(ids, false)
+			continue
 		}
 		req := Request{DownloaderID: r.DownloaderID, Hash: firstNonEmpty(r.TaskID, r.InfoHash)}
 		// 失败是在手动指定条目以后的（记录里有条目），重试沿用这个条目
 		if trigger == models.MediaTriggerManual && r.TMDBID > 0 {
 			req.MediaType, req.TMDBID, req.LibraryID = r.MediaType, r.TMDBID, r.LibraryID
 		}
-		// 没排上（队列满了，或者这个种子已经在队列里、那个任务不带这些记录）时，恢复成下一拍再看；
-		// 只恢复还空着的：那个任务已经写了记录的不覆盖
-		if s.put(job{req: req, trigger: trigger, retryIDs: ids}) != queueAdded {
-			next := s.cfg.Now().Add(tickInterval)
-			s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
-				Where("id IN ? AND status = ? AND next_retry_at IS NULL", ids, models.MediaTransferFailed).Update("next_retry_at", &next)
+		j := job{req: req, trigger: trigger, retryIDs: ids, lease: lease}
+		// 没排上（队列满了，或者这个种子已经在队列里、那个任务不带这些记录）时，还停在租约上的改成下一拍再看
+		if s.put(j) != queueAdded {
+			s.releaseLease(ctx, j, s.cfg.Now().Add(tickInterval))
 			s.markRetrying(ids, false)
 		}
 	}
+}
+
+// anyRetrying 报告这些记录里有没有已经排上队、还没整理完的。
+func (s *Service) anyRetrying(ids []uint) bool {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	for _, id := range ids {
+		if s.retrying[id] {
+			return true
+		}
+	}
+	return false
 }
 
 // sweep 补查：pt-tools 推送的、打开自动整理以后下载完成的、还没有整理记录的种子（完成事件可能丢了）。
