@@ -650,9 +650,9 @@ Edge 商店发布需要仓库 Secrets：
 
 ### 部署托管 relay
 
-托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。
+托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
 
-`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删，不通过就换回旧容器。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
+`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器。runner 中途丢失时服务器上停在待收尾的状态，下一次部署会拒绝，要登录服务器用下面的 `--finalize` 或 `--rollback` 收尾。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
 
 部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main` 与 `v1.0.0-rc`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
 
@@ -674,7 +674,7 @@ Edge 商店发布需要仓库 Secrets：
 ```bash
 bash scripts/deploy-relay.sh --image sunerpy/pt-tools:v1.0.0-rc.19 --public-url wss://relay.example.com --client-ip-header X-Real-IP
 bash scripts/deploy-relay.sh --finalize    # 用 --keep-previous 部署过、检查通过以后删掉旧容器
-bash scripts/deploy-relay.sh --rollback    # 换回旧容器
+bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署时删掉新容器）
 ```
 
 ### 手机 App 发版
