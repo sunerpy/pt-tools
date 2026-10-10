@@ -10,7 +10,8 @@
 #
 # 部署：拉镜像 → 停旧容器（docker stop：relay 先不接新连接，等 drain-grace，再以 1012 关掉所有连接，pt-tools 几秒内重连）并改名成 <name>-previous
 # → 用原来的名字起新容器（PT_MODE=relay，只听 127.0.0.1:<端口>，前面的反向代理做 TLS 并把 WebSocket 转过来）→ 等 /ready 回 200、/healthz 的版本对。
-# 这一段里任何一步失败、或者脚本被中断（包括 ssh 断开），都删掉新容器、把旧容器原样起回来，以失败退出。
+# 这一段里任何一步失败、或者脚本被中断（包括 ssh 断开，在下一次写输出失败时发现），都删掉新容器、把旧容器原样起回来，以失败退出。
+# 第一次部署（还没有 <name>）时 <name>-previous 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
 # 成功以后默认删掉旧容器；--keep-previous 时留着（停着的），等调用方从外面检查完再 --finalize 或 --rollback。
 # 上一次部署没有收尾（还有 <name>-previous）时拒绝再部署，先 --finalize 或 --rollback。
 # --no-pull 用本机已有的镜像（自己构建的、或者离线的服务器）。
@@ -40,7 +41,7 @@ while [ $# -gt 0 ]; do
   --keep-previous) keep_previous=1; shift ;;
   --finalize) mode=finalize; shift ;;
   --rollback) mode=rollback; shift ;;
-  -h | --help) sed -n '2,16p' "${BASH_SOURCE[0]}"; exit 0 ;;
+  -h | --help) sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 0 ;;
   *) die "不认识的参数 $1" ;;
   esac
 done
@@ -51,37 +52,47 @@ done
 command -v docker >/dev/null || die "这台机器上没有 docker"
 command -v curl >/dev/null || die "这台机器上没有 curl"
 previous="$name-previous"
+# 第一次部署时占住 <name>-previous 的空容器（docker create，不会启动）带着这个标签
+placeholder_label=pt-tools.relay.placeholder
 
 exists() { docker inspect "$1" >/dev/null 2>&1; }
+placeholder() { [ "$(docker inspect -f "{{index .Config.Labels \"$placeholder_label\"}}" "$1" 2>/dev/null)" = true ]; }
+# up：<name> 在跑，而且没有被重启策略拉起来过
+up() { [ "$(docker inspect -f '{{.State.Running}} {{.RestartCount}}' "$name" 2>/dev/null)" = "true 0" ]; }
 
-# wait_ready 等 127.0.0.1:<端口> 的 /ready 回 200（最多 ready_timeout 秒）；容器退出了、或者被重启策略拉起来过就算失败
+# wait_ready 等 127.0.0.1:<端口> 的 /ready 回 200（最多 ready_timeout 秒）；容器退出了、或者被重启过就算失败（就绪的那一刻也查）
 wait_ready() {
   local deadline=$((SECONDS + ready_timeout))
   until curl -fsS --noproxy '*' -o /dev/null "http://127.0.0.1:$port/ready" 2>/dev/null; do
-    if [ "$SECONDS" -ge "$deadline" ]; then
-      return 1
-    fi
-    if [ "$(docker inspect -f '{{.State.Running}} {{.RestartCount}}' "$name" 2>/dev/null)" != "true 0" ]; then
+    if [ "$SECONDS" -ge "$deadline" ] || ! up; then
       return 1
     fi
     sleep 1
   done
+  up
 }
 
-# restore 删掉（新的）<name>，把 <name>-previous 改回原名起来；就绪时返回 0
+# restore 删掉（新的）<name>，把 <name>-previous 改回原名起来；就绪时返回 0，restored 记下它的镜像。
+# <name>-previous 是第一次部署的占位容器时把它也删掉（回到没有部署过的样子），返回 0，restored 为空
 restore() {
+  restored=""
   docker rm -f "$name" >/dev/null 2>&1 || true
   exists "$previous" || return 1
+  if placeholder "$previous"; then
+    docker rm "$previous" >/dev/null
+    return
+  fi
   docker rename "$previous" "$name"
   docker start "$name" >/dev/null
-  wait_ready
+  wait_ready || return 1
+  restored=$(docker inspect -f '{{.Config.Image}}' "$name")
 }
 
 case "$mode" in
 finalize)
   if exists "$previous"; then
     docker rm "$previous" >/dev/null
-    echo "deploy-relay: 删掉了旧容器 $previous"
+    echo "deploy-relay: 删掉了 $previous"
   else
     echo "deploy-relay: 没有要删的旧容器"
   fi
@@ -89,11 +100,13 @@ finalize)
   ;;
 rollback)
   exists "$previous" || die "没有 $previous，换不回去"
-  if restore; then
-    echo "deploy-relay: 已经换回旧容器（$(docker inspect -f '{{.Config.Image}}' "$name")）"
-    exit 0
+  restore || die "没有换回去（旧容器起来了但没有就绪，或者 docker 报错），请登录服务器检查"
+  if [ -n "$restored" ]; then
+    echo "deploy-relay: 已经换回旧容器（$restored）"
+  else
+    echo "deploy-relay: 撤掉了第一次部署的容器，这台机器上现在没有 relay"
   fi
-  die "旧容器起来了但没有就绪，请登录服务器检查"
+  exit 0
   ;;
 esac
 
@@ -131,44 +144,57 @@ docker image inspect "$image" >/dev/null 2>&1 || die "本机没有镜像 $image"
 
 # 从停旧容器到新容器核对完：出错、被中断都换回旧容器。stage 记着走到哪一步，回滚按它来：
 #   1 = 正在停旧容器（它还叫 <name>）：把它重新起来；
-#   2 = 旧容器已经改名成 <name>-previous（新容器可能已经叫 <name>）：删掉新的，把旧的改回原名起来。
+#   2 = 旧容器已经改名成 <name>-previous（第一次部署时是占位容器；新容器可能已经叫 <name>）：删掉新的，把旧的改回原名起来。
+# ssh 断开以后写输出会失败（SIGPIPE）：回滚时不再写得出去，也要做完。
 stage=0
 abort() {
   local rc=$?
+  set +e
+  trap '' PIPE
   trap - ERR HUP INT TERM EXIT
   case "$stage" in
   0) exit "$rc" ;;
   1)
-    echo "deploy-relay: 停旧容器时中断了，把它重新起来" >&2
-    docker start "$name" >/dev/null 2>&1 || true
-    if wait_ready; then
-      echo "deploy-relay: 旧容器已经重新起来（$(docker inspect -f '{{.Config.Image}}' "$name")）" >&2
-    else
-      echo "deploy-relay: 旧容器没有就绪，请登录服务器检查" >&2
+    # docker rename 已经做完、还没走到 stage=2 时，旧容器已经叫 <name>-previous：按 2 处理
+    if ! exists "$previous"; then
+      echo "deploy-relay: 停旧容器时中断了，把它重新起来" >&2
+      docker start "$name" >/dev/null 2>&1
+      if wait_ready; then
+        echo "deploy-relay: 旧容器已经重新起来（$(docker inspect -f '{{.Config.Image}}' "$name")）" >&2
+      else
+        echo "deploy-relay: 旧容器没有就绪，请登录服务器检查" >&2
+      fi
+      exit 1
     fi
-    exit 1
     ;;
   esac
   echo "deploy-relay: 部署没有完成，日志：" >&2
-  docker logs --tail 30 "$name" 2>&1 | sed 's/^/  /' >&2 || true
+  docker logs --tail 30 "$name" 2>&1 | sed 's/^/  /' >&2
   if restore; then
-    echo "deploy-relay: 已经换回原来的容器（$(docker inspect -f '{{.Config.Image}}' "$name")）" >&2
+    if [ -n "$restored" ]; then
+      echo "deploy-relay: 已经换回原来的容器（$restored）" >&2
+    else
+      echo "deploy-relay: 这是第一次部署，删掉了新容器" >&2
+    fi
   elif exists "$name"; then
     echo "deploy-relay: 原来的容器起来了但没有就绪，请登录服务器检查" >&2
   else
-    echo "deploy-relay: 这是第一次部署，没有可以换回的容器" >&2
+    echo "deploy-relay: 没有可以起来的旧容器，请登录服务器检查（docker ps -a）" >&2
   fi
   exit 1
 }
-trap abort ERR HUP INT TERM EXIT
+trap abort ERR HUP INT TERM PIPE EXIT
 
 if exists "$name"; then
   echo "deploy-relay: 停止旧容器（$(docker inspect -f '{{.Config.Image}}' "$name")，排空 $drain_grace）"
   stage=1
   docker stop -t "$stop_timeout" "$name" >/dev/null
   docker rename "$name" "$previous"
+  stage=2
+else
+  stage=2
+  docker create --name "$previous" --label "$placeholder_label=true" "$image" >/dev/null
 fi
-stage=2
 
 echo "deploy-relay: 启动新容器"
 docker run "${run_args[@]}" "$image" >/dev/null
@@ -185,13 +211,12 @@ if [ -n "$expect_version" ]; then
   fi
 fi
 
+# 这一行写不出去（ssh 已经断开）时同样换回旧容器；写出去以后不再回滚
+echo "deploy-relay: 完成：$name 运行 $image，听 127.0.0.1:$port，对外地址 $public_url"
 stage=0
-trap - ERR HUP INT TERM EXIT
+trap - ERR HUP INT TERM PIPE EXIT
 if [ "$keep_previous" = 1 ]; then
-  if exists "$previous"; then
-    echo "deploy-relay: 旧容器留作 $previous（停着），外面检查完以后 --finalize 或 --rollback"
-  fi
+  echo "deploy-relay: $previous 留着（停着），外面检查完以后 --finalize 或 --rollback"
 else
   docker rm "$previous" >/dev/null 2>&1 || true
 fi
-echo "deploy-relay: 完成：$name 运行 $image，听 127.0.0.1:$port，对外地址 $public_url"
