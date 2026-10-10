@@ -4,8 +4,8 @@
 #
 #   deploy-relay.sh --image sunerpy/pt-tools@sha256:… --public-url wss://relay.example.com --expect-version v1.0.0-rc.19 \
 #     [--port 8443] [--bind 127.0.0.1] [--name pt-tools-relay] [--drain-grace 5s] [--client-ip-header X-Real-IP] \
-#     [--max-connections N] [--daily-bytes-per-host N] [--ready-timeout 60] [--no-pull] [--keep-previous]
-#   deploy-relay.sh --finalize [--name pt-tools-relay]   # 外面检查通过：删掉留着的旧容器
+#     [--max-connections N] [--daily-bytes-per-host N] [--ready-timeout 60] [--no-pull] [--keep-previous [--pending-timeout 900]]
+#   deploy-relay.sh --finalize [--name pt-tools-relay] [--image <部署时的 --image>]   # 外面检查通过：删掉留着的旧容器
 #   deploy-relay.sh --rollback [--name pt-tools-relay] [--ready-timeout 60]   # 外面检查没过：换回旧容器
 #
 # --bind 是容器端口发布到的地址：默认 127.0.0.1（反向代理在同一台机器上）；负载均衡器从别的机器连过来时（例如 AWS ALB）填这台机器的私网地址。
@@ -16,12 +16,18 @@
 # 这一段里任何一步失败、或者脚本被中断（包括 ssh 断开，在下一次写输出失败时发现），都删掉新容器、把旧容器原样起回来，以失败退出。
 # 第一次部署（还没有 <name>）时 <name>-previous 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
 # 成功以后默认删掉旧容器；--keep-previous 时留着（停着的），等调用方从外面检查完再 --finalize 或 --rollback。
+# --keep-previous 时另起一个看门狗（脱离 ssh 会话，日志在 /tmp/deploy-relay-<name>.watchdog.<uid>.log）：--pending-timeout 秒（默认 900，0 不起）
+# 以后还没有收尾就换回旧容器，调用方中途丢了（例如 runner 没了）也不会一直停在待收尾。它只认这次部署的两个容器（按容器 ID），
+# 收尾、回滚过或者又部署过就什么都不做；服务器在这期间重启时看门狗也不在了，要手动收尾。
+# --finalize 给了 --image 时先核对 <name> 跑的是这个镜像：看门狗已经换回旧容器时失败，不报告收尾成功。
+# --rollback 时没有 <name>-previous、<name> 在跑：没有待收尾的部署（已经收尾，或者看门狗已经换回），以 3 退出。
 # 上一次部署没有收尾（还有 <name>-previous）时拒绝再部署，先 --finalize 或 --rollback。
+# 同一个 <name> 上的部署、收尾、回滚与看门狗依次来（flock /tmp/deploy-relay-<name>.lock，最多等 300 秒）。
 # --no-pull 用本机已有的镜像（自己构建的、或者离线的服务器）。
 set -euo pipefail
 
 mode=deploy image="" public_url="" port=8443 bind=127.0.0.1 name=pt-tools-relay drain_grace=5s client_ip_header=""
-max_connections="" daily_bytes="" expect_version="" ready_timeout=60 pull=1 keep_previous=0
+max_connections="" daily_bytes="" expect_version="" ready_timeout=60 pull=1 keep_previous=0 pending_timeout=900
 
 die() {
   echo "deploy-relay: $*" >&2
@@ -43,9 +49,10 @@ while [ $# -gt 0 ]; do
   --ready-timeout) ready_timeout=${2:?}; shift 2 ;;
   --no-pull) pull=0; shift ;;
   --keep-previous) keep_previous=1; shift ;;
+  --pending-timeout) pending_timeout=${2:?}; shift 2 ;;
   --finalize) mode=finalize; shift ;;
   --rollback) mode=rollback; shift ;;
-  -h | --help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+  -h | --help) sed -n '2,26p' "${BASH_SOURCE[0]}"; exit 0 ;;
   *) die "不认识的参数 $1" ;;
   esac
 done
@@ -61,11 +68,20 @@ valid_ipv4() {
 }
 valid_ipv4 "$bind" || die "--bind 要是 IPv4 地址：$bind"
 [[ "$ready_timeout" =~ ^[0-9]+$ ]] || die "--ready-timeout 是秒数"
+[[ "$pending_timeout" =~ ^[0-9]+$ ]] || die "--pending-timeout 是秒数（0 不起看门狗）"
 command -v docker >/dev/null || die "这台机器上没有 docker"
 command -v curl >/dev/null || die "这台机器上没有 curl"
+command -v flock >/dev/null || die "这台机器上没有 flock（util-linux）"
+watchdog=0
+if [ "$mode" = deploy ] && [ "$keep_previous" = 1 ] && [ "$pending_timeout" -gt 0 ]; then
+  watchdog=1
+  command -v setsid >/dev/null || die "这台机器上没有 setsid（util-linux），起不了看门狗；不要看门狗时加 --pending-timeout 0"
+fi
 previous="$name-previous"
 # 第一次部署时占住 <name>-previous 的空容器（docker create，不会启动）带着这个标签
 placeholder_label=pt-tools.relay.placeholder
+lock_file=/tmp/deploy-relay-$name.lock lock_wait=300
+watchdog_log=/tmp/deploy-relay-$name.watchdog.$(id -u).log
 
 exists() { docker inspect "$1" >/dev/null 2>&1; }
 placeholder() { [ "$(docker inspect -f "{{index .Config.Labels \"$placeholder_label\"}}" "$1" 2>/dev/null)" = true ]; }
@@ -107,8 +123,55 @@ restore() {
   restored=$(docker inspect -f '{{.Config.Image}}' "$name")
 }
 
+# take_lock 拿 lock_file 上的排它锁（fd 9，进程退出时自己放开）；锁文件谁都能读，换了用户部署也能拿
+take_lock() {
+  [ -e "$lock_file" ] || (umask 022 && : >>"$lock_file") 2>/dev/null || true
+  exec 9<"$lock_file" || return 1
+  flock -w "$lock_wait" 9
+}
+
+log() { echo "$(date '+%F %T') 看门狗（$name）：$*"; }
+
+# pending：<name> 与 <name>-previous 还是这次部署的两个容器（new_id、prev_id），就是还没有收尾
+pending() {
+  [ "$(docker inspect -f '{{.Id}}' "$name" 2>/dev/null)" = "$new_id" ] &&
+    [ "$(docker inspect -f '{{.Id}}' "$previous" 2>/dev/null)" = "$prev_id" ]
+}
+
+# watchdog 在 --keep-previous 部署成功以后脱离 ssh 会话跑（setsid，见下面起它的地方）：pending_timeout 秒以后还没有收尾就换回旧容器。
+# 先不拿锁看一眼：已经收尾的不用等锁（之后的部署可能正拿着它）；要换回时拿着锁再核对一次
+watchdog() {
+  log "$pending_timeout 秒内没有 --finalize 或 --rollback 就换回旧容器（$name ${new_id:0:12}，$previous ${prev_id:0:12}）"
+  sleep "$pending_timeout"
+  if pending && ! take_lock; then
+    log "等不到锁（$lock_file），没有换回，请登录服务器检查"
+    return 1
+  fi
+  if ! pending; then
+    log "这次部署已经收尾、回滚过或者又部署过，不用换回"
+    return 0
+  fi
+  log "到时间了还没有收尾，换回旧容器"
+  if ! restore; then
+    log "没有换回去（旧容器起来了但没有就绪，或者 docker 报错），请登录服务器检查"
+    return 1
+  fi
+  if [ -n "$restored" ]; then
+    log "已经换回旧容器（$restored）"
+  else
+    log "撤掉了第一次部署的容器，这台机器上现在没有 relay"
+  fi
+}
+
+take_lock || die "另一个 deploy-relay 正在操作 $name，$lock_wait 秒内没有等到（$lock_file）"
+
 case "$mode" in
 finalize)
+  if [ -n "$image" ]; then
+    running=$(docker inspect -f '{{.Config.Image}}' "$name" 2>/dev/null) || running=""
+    [ "$running" = "$image" ] ||
+      die "$name 跑的是 ${running:-（没有这个容器）}，不是 $image：这次部署已经不在了（例如看门狗到时间换回了旧容器），没有收尾"
+  fi
   if exists "$previous"; then
     docker rm "$previous" >/dev/null
     echo "deploy-relay: 删掉了 $previous"
@@ -118,7 +181,14 @@ finalize)
   exit 0
   ;;
 rollback)
-  exists "$previous" || die "没有 $previous，换不回去"
+  if ! exists "$previous"; then
+    # 已经收尾，或者看门狗已经换回：没有要回滚的，以 3 退出（调用方当成提示，不是失败）
+    if [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = true ]; then
+      echo "deploy-relay: 没有待收尾的部署（没有 $previous），$name 在跑 $(docker inspect -f '{{.Config.Image}}' "$name")，不用回滚"
+      exit 3
+    fi
+    die "没有 $previous，换不回去"
+  fi
   restore || die "没有换回去（旧容器起来了但没有就绪，或者 docker 报错），请登录服务器检查"
   if [ -n "$restored" ]; then
     echo "deploy-relay: 已经换回旧容器（$restored）"
@@ -142,6 +212,9 @@ if [ -z "$expect_version" ] && [[ "$image" != *@* ]]; then
 fi
 if exists "$previous"; then
   die "上一次部署没有收尾（还有 $previous）：先用 --finalize（新容器没问题）或 --rollback（换回旧容器）"
+fi
+if [ "$watchdog" = 1 ]; then
+  { : >>"$watchdog_log"; } 2>/dev/null || die "看门狗的日志写不进去：$watchdog_log"
 fi
 
 grace_s=${drain_grace%s}
@@ -230,11 +303,23 @@ if [ -n "$expect_version" ]; then
   fi
 fi
 
+# 看门狗在还能回滚的时候起（这里出错就换回旧容器），不留下一个没有看门狗的待收尾状态。
+# 它不能拿着 ssh 会话的输入输出（ssh 会等它）和这里的锁（fd 9，收尾会一直等它）
+if [ "$watchdog" = 1 ]; then
+  new_id=$(docker inspect -f '{{.Id}}' "$name")
+  prev_id=$(docker inspect -f '{{.Id}}' "$previous")
+  setsid bash -c "$(declare -p name previous placeholder_label ready_timeout lock_file lock_wait pending_timeout new_id prev_id)
+$(declare -f exists placeholder up endpoint wait_ready restore take_lock log pending watchdog)
+watchdog" </dev/null >>"$watchdog_log" 2>&1 9<&- &
+fi
+
 # 这一行写不出去（ssh 已经断开）时同样换回旧容器；写出去以后不再回滚
 echo "deploy-relay: 完成：$name 运行 $image，听 $bind:$port，对外地址 $public_url"
 stage=0
 trap - ERR HUP INT TERM PIPE EXIT
-if [ "$keep_previous" = 1 ]; then
+if [ "$watchdog" = 1 ]; then
+  echo "deploy-relay: $previous 留着（停着），外面检查完以后 --finalize 或 --rollback；$pending_timeout 秒内都没有就自动换回（日志 $watchdog_log）"
+elif [ "$keep_previous" = 1 ]; then
   echo "deploy-relay: $previous 留着（停着），外面检查完以后 --finalize 或 --rollback"
 else
   docker rm "$previous" >/dev/null 2>&1 || true
