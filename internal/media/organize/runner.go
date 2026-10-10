@@ -207,8 +207,8 @@ func (s *Service) markRetrying(ids []uint, on bool) {
 	}
 }
 
-// Retrying 报告一条失败的记录是不是正在重试：到期重试排上队以后、整理完以前，记录里的重试时间是空的，
-// 只看记录会以为它不再重试了。
+// Retrying 报告一条失败的记录是不是正在重试：到期重试排上队以后、整理完以前，记录里的重试时间是租约到期的时间，
+// 只看记录会以为它要等到那时才重试。
 func (s *Service) Retrying(id uint) bool {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
