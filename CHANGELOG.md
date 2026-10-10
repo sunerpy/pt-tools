@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.21](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.20...v1.0.0-rc.21) (2026-10-10)
+
+
+### Features
+
+* **deploy:** 托管 relay 可以放在负载均衡器后面（--bind） ([#656](https://github.com/sunerpy/pt-tools/issues/656)) ([d7049ff](https://github.com/sunerpy/pt-tools/commit/d7049ff9d99a19f75630d0a4ba25a9505040b142))
+
 ## [1.0.0-rc.20](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.19...v1.0.0-rc.20) (2026-10-10)
 
 
