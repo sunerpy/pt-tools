@@ -3,11 +3,13 @@ package organize
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
@@ -468,4 +470,67 @@ func (e *env) currentSettings() Settings {
 	set, err := e.svc.Settings(e.ctx)
 	require.NoError(e.t, err)
 	return set
+}
+
+// raceAfterPendingRead 在 retryDue 读完这个种子待重试的记录以后、写租约以前，模拟一次同时进行的整理改写记录
+func (e *env) raceAfterPendingRead(write func(db *gorm.DB)) {
+	e.t.Helper()
+	fired := false
+	require.NoError(e.t, e.db.Callback().Query().After("gorm:query").Register("qa:race-after-pending", func(tx *gorm.DB) {
+		if fired || tx.Statement.Table != "media_transfer_histories" || !strings.Contains(tx.Statement.SQL.String(), "info_hash") {
+			return
+		}
+		fired = true
+		write(e.db.Session(&gorm.Session{NewDB: true}))
+	}))
+	e.t.Cleanup(func() { _ = e.db.Callback().Query().Remove("qa:race-after-pending") })
+}
+
+// 读到待重试以后、写租约以前，同时进行的整理已经整理成功：不给它写租约（成功的记录不会显示「自动重试」），也不再排一次
+func TestRetryDueSkipsRowsOrganizedMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	id := e.history()[0].ID
+	e.advance(11 * time.Minute)
+
+	e.raceAfterPendingRead(func(db *gorm.DB) {
+		require.NoError(t, db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).
+			Updates(map[string]any{"status": models.MediaTransferDone, "next_retry_at": nil, "attempts": 0}).Error)
+	})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "已经整理好了，不再排")
+	assert.False(t, e.svc.Retrying(id))
+	row := e.history()[0]
+	assert.Equal(t, models.MediaTransferDone, row.Status)
+	assert.Nil(t, row.NextRetryAt, "成功的记录没有重试时间")
+}
+
+// 同时进行的整理又失败了、写了新的退避：保留它，不改成租约、不马上再试一次
+func TestRetryDueKeepsBackoffWrittenMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1})
+	e.tmdb.setDown(true)
+	e.oppenheimer()
+	_, err := e.svc.Organize(e.ctx, Request{DownloaderID: 1, Hash: oppHash})
+	require.NoError(t, err)
+	id := e.history()[0].ID
+	e.advance(11 * time.Minute)
+
+	next := e.Now().Add(30 * time.Minute)
+	e.raceAfterPendingRead(func(db *gorm.DB) {
+		require.NoError(t, db.Model(&models.MediaTransferHistory{}).Where("id = ?", id).
+			Updates(map[string]any{"next_retry_at": &next, "attempts": 2}).Error)
+	})
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.Zero(t, e.drain(), "新的退避没到期，不排")
+	row := e.history()[0]
+	require.NotNil(t, row.NextRetryAt)
+	assert.Equal(t, next.UTC(), row.NextRetryAt.UTC(), "新的退避没被租约盖掉")
+	assert.Equal(t, 2, row.Attempts)
 }

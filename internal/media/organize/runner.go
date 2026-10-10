@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/sunerpy/pt-tools/internal/events"
 	"github.com/sunerpy/pt-tools/models"
 )
@@ -426,11 +428,15 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 		if switchedOff(set, trigger) {
 			continue
 		}
-		pending := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).
-			Where("downloader_id = ? AND info_hash = ? AND status = ? AND next_retry_at IS NOT NULL", r.DownloaderID, r.InfoHash, models.MediaTransferFailed)
-		var ids []uint
-		if err := pending.Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
+		var pend []models.MediaTransferHistory
+		if err := s.cfg.DB.WithContext(ctx).Select("id", "next_retry_at").
+			Where("downloader_id = ? AND info_hash = ? AND status = ? AND next_retry_at IS NOT NULL", r.DownloaderID, r.InfoHash, models.MediaTransferFailed).
+			Find(&pend).Error; err != nil || len(pend) == 0 {
 			continue
+		}
+		ids := make([]uint, 0, len(pend))
+		for _, p := range pend {
+			ids = append(ids, p.ID)
 		}
 		// 这个进程里已经排上、还没整理完的不重复排（租约比整理慢的大文件复制短时会到期）
 		if s.anyRetrying(ids) {
@@ -438,8 +444,10 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 		}
 		lease := s.cfg.Now().Add(retryLease).Truncate(time.Second)
 		s.markRetrying(ids, true)
-		if err := s.cfg.DB.WithContext(ctx).Model(&models.MediaTransferHistory{}).Where("id IN ?", ids).Update("next_retry_at", &lease).Error; err != nil {
-			s.cfg.Logger.Warnf("[整理入库] 写重试租约失败: %v", err)
+		if claimed, err := s.claimLease(ctx, pend, lease); err != nil || !claimed {
+			if err != nil {
+				s.cfg.Logger.Warnf("[整理入库] 写重试租约失败: %v", err)
+			}
 			s.markRetrying(ids, false)
 			continue
 		}
@@ -455,6 +463,32 @@ func (s *Service) retryDue(ctx context.Context, set Settings) {
 			s.markRetrying(ids, false)
 		}
 	}
+}
+
+// errLeaseLost 表示读到待重试的记录以后，有记录被别的整理改写了（成功了、或者写了新的退避）
+var errLeaseLost = errors.New("记录在领租约以前被改写了")
+
+// claimLease 在一个事务里把读到的这些记录的重试时间换成租约：每条都还是读到时的状态（失败、同一个重试时间）才换，
+// 有一条被同时进行的整理改写了就整个不领（返回 false），这一拍不排，下一拍按新的状态再看。
+func (s *Service) claimLease(ctx context.Context, rows []models.MediaTransferHistory, lease time.Time) (bool, error) {
+	err := s.cfg.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, r := range rows {
+			res := tx.Model(&models.MediaTransferHistory{}).
+				Where("id = ? AND status = ? AND next_retry_at = ?", r.ID, models.MediaTransferFailed, r.NextRetryAt).
+				Update("next_retry_at", &lease)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return errLeaseLost
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errLeaseLost) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // anyRetrying 报告这些记录里有没有已经排上队、还没整理完的。
