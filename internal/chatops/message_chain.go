@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
@@ -75,6 +76,24 @@ type AuditRecorder interface {
 	Record(ctx context.Context, e AuditEntry) error
 }
 
+// AssistantHandler 接管绑定用户的非命令消息（内置 AI 助手，路线图 M19）。Handle 只登记、立即返回：
+// 回答由助手在后台经 Replier 异步发出，不在入站路径上等模型（Telegram 的长轮询是同步调用 Process 的）。
+type AssistantHandler interface {
+	// Enabled 报告现在要不要把非命令消息交给助手（助手启用、ChatOps 开关打开）。
+	Enabled(ctx context.Context) bool
+	// Handle 处理一条非命令消息，返回立即回复（可以为空）与审计结果。
+	Handle(ctx context.Context, msg InboundAssistantMessage) (Reply, string)
+}
+
+// InboundAssistantMessage 是交给助手的一条消息：原始入站消息（回复要用）与绑定信息。
+type InboundAssistantMessage struct {
+	Msg notify.InboundMessage
+	Src Source
+}
+
+// assistantRef 包一层，好放进 atomic.Pointer（链在通道启动以后才接上助手）。
+type assistantRef struct{ h AssistantHandler }
+
 // MessageChain dispatches inbound messages through the permission gate per
 // plan T22 (binding → allowed → command parse → session → registry →
 // ratelimit → admin check → handler).
@@ -88,6 +107,16 @@ type MessageChain struct {
 	replier     Replier
 	now         func() time.Time
 	logf        func(format string, args ...any)
+	assistant   atomic.Pointer[assistantRef]
+}
+
+// SetAssistant 接上内置 AI 助手（nil 摘掉）：之后绑定用户的非命令消息交给它。可以在通道运行中调用。
+func (mc *MessageChain) SetAssistant(h AssistantHandler) {
+	if h == nil {
+		mc.assistant.Store(nil)
+		return
+	}
+	mc.assistant.Store(&assistantRef{h: h})
 }
 
 // SetLogf 注入日志函数，用于记录审计写入失败。
@@ -177,6 +206,17 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	}
 
 	if cmdName == "" {
+		if ref := mc.assistant.Load(); ref != nil && ref.h.Enabled(ctx) {
+			// 消息原文不进审计（可能很长、也可能带私事）；工具调用由助手另记
+			if !mc.rateLimiter.Allow(msg.ChannelType, msg.ChannelUserID, "assistant") {
+				mc.recordAudit(ctx, msg, binding.ConfID, "assistant", nil, "denied:rate_limit", start)
+				return nil
+			}
+			reply, result := ref.h.Handle(ctx, InboundAssistantMessage{Msg: msg, Src: src})
+			mc.recordAudit(ctx, msg, binding.ConfID, "assistant", nil, result, start)
+			mc.tryReply(ctx, msg, reply)
+			return nil
+		}
 		mc.recordAudit(ctx, msg, binding.ConfID, "", nil, "user_message_hinted", start)
 		mc.tryReply(ctx, msg, Reply{
 			Text: "🤖 我只识别命令消息（以 / 开头）。\n\n发送 /help 查看支持的命令清单。",
