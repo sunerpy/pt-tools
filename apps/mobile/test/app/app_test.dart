@@ -5,7 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:pt_tools_app/src/app/app.dart';
+import 'package:pt_tools_app/src/app/pages/assistant_page.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
 import 'package:pt_tools_app/src/remote/bytes.dart';
@@ -156,6 +158,12 @@ class _World {
   /// 接下来几次读会话回 502
   int detailFailures = 0;
 
+  /// 设了以后长轮询一直等着它（模拟主机上没有新事件）
+  Completer<void>? holdEvents;
+
+  /// 设了以后发消息等着它才回
+  Completer<void>? holdSend;
+
   Object? api(String method, String path) {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
@@ -207,12 +215,29 @@ class _World {
           detailFailures++;
           return {'events': [], 'reset': true, 'last': 0, 'running': true};
         }(),
+      '/api/app/v1/assistant/conversations/7/events' when holdEvents != null =>
+        holdEvents!.future.then<Object?>(
+          (_) => {'events': [], 'reset': false, 'last': 100, 'running': false},
+        ),
       '/api/app/v1/assistant/conversations/7/events' => {
         'events': [],
         'reset': false,
         'last': 100,
         'running': !approved,
       },
+      '/api/app/v1/assistant/conversations/7/messages' =>
+        (holdSend?.future ?? Future<void>.value()).then<Object?>(
+          (_) => {
+            'run_id': 'r2',
+            'message': {
+              'id': 3,
+              'role': 'user',
+              'content': '再问一句',
+              'run_id': 'r2',
+              'created_at': _at,
+            },
+          },
+        ),
       '/api/app/v1/assistant/confirmations/9' => () {
         approved = true;
         return (_assistantDetail('approved')['confirmations'] as List).first;
@@ -444,6 +469,54 @@ void main() {
         .toList();
     expect(polls.length, greaterThanOrEqualTo(2), reason: '长轮询接着读');
     expect(polls.last, contains('after=100'), reason: '从重读到的 last_seq 接着读');
+  });
+
+  testWidgets('AI 助手：离开页面时取消进行中的长轮询（主机收到 CANCEL）', (tester) async {
+    final w = await _pumpApp(tester);
+    w.holdEvents = Completer<void>();
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    final host = w.hosts.last;
+    final poll = host.requests.lastWhere(
+      (r) =>
+          (r['path'] as String).contains('/assistant/conversations/7/events'),
+    );
+    expect(host.cancelled, isNot(contains(poll['id'])), reason: '还在等');
+    GoRouter.of(tester.element(find.byType(AssistantPage))).go('/more');
+    await _settle(tester);
+    expect(find.byType(AssistantPage), findsNothing);
+    expect(host.cancelled, contains(poll['id']), reason: '关页面时取消长轮询');
+    w.holdEvents!.complete();
+  });
+
+  testWidgets('AI 助手：发送中不能开新对话，回应回来以后落在原来的会话上', (tester) async {
+    final w = await _pumpApp(tester);
+    w.approved = true;
+    w.holdSend = Completer<void>();
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    IconButton newChat() => tester.widget<IconButton>(
+      find.widgetWithIcon(IconButton, Icons.add_comment_outlined),
+    );
+    expect(newChat().onPressed, isNotNull);
+    await tester.enterText(find.byKey(const Key('assistant-input')), '再问一句');
+    await tester.tap(find.byKey(const Key('assistant-send')));
+    await _settle(tester);
+    expect(
+      w.requests,
+      contains('POST /api/app/v1/assistant/conversations/7/messages'),
+    );
+    expect(newChat().onPressed, isNull, reason: '发送请求还没回来');
+    w.holdSend!.complete();
+    await _settle(tester);
+    expect(find.text('再问一句'), findsOneWidget);
+    expect(find.text('暂停 abc'), findsOneWidget, reason: '还是原来的会话');
   });
 
   testWidgets('AI 助手：主机没启用时更多里没有入口', (tester) async {

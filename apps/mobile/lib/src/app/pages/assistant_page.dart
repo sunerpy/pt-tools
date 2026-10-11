@@ -269,14 +269,15 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           AppAssistantCreate(message: text),
         );
         _input.clear();
-        if (res != null) await _open(res.conversation.id);
+        if (res != null && mounted) await _open(res.conversation.id);
       } else {
         final res = await _api.sendAssistantMessage(
           conv,
           AppAssistantSend(text: text),
         );
         _input.clear();
-        if (res != null && mounted) {
+        // 回应到的时候已经不在这个会话上了（例如会话被删、回到了空白）：不再写进页面
+        if (res != null && mounted && _conv == conv) {
           setState(() {
             _upsertMessage(res.message);
             // 事件可能先到、这次运行都结束了：见过这次运行就不再改状态
@@ -347,7 +348,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           IconButton(
             tooltip: s.assistantNew,
             icon: const Icon(Icons.add_comment_outlined),
-            onPressed: _running ? null : _newChat,
+            // 发送中也不能换：回应回来时要落在发出它的会话上
+            onPressed: _running || _sending ? null : _newChat,
           ),
         ],
       ),
