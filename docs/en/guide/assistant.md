@@ -1,6 +1,6 @@
 # AI assistant
 
-pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web or in notification channels (Telegram, QQ), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader or add subscriptions. Every action that changes something waits for you to confirm it.
+pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web, in the mobile app or in notification channels (Telegram, QQ), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader or add subscriptions. Every action that changes something waits for you to confirm it.
 
 The assistant runs inside pt-tools. It calls the same tools as [MCP](mcp.md), executed through the [App API](../reference/app-api.md), so it sees the same data with the same redaction as the app. Any OpenAI-compatible Chat Completions endpoint works, as long as the model supports tool calling (function calling).
 
@@ -74,6 +74,15 @@ With **Notification channels (ChatOps)** turned on in **System → AI assistant 
 - Only admin bindings can run actions; for other bindings the assistant does not get those tools. Today every completed binding is an admin, see [ChatOps quick start](chatops-quickstart.md).
 - Messages to the assistant are recorded in the action audit with the command `assistant` (without the text); executed actions get their own entry with the channel "AI assistant" and the user `chatops:<binding id>`.
 - Replies in notification channels are plain text; long answers are sent as several messages (up to 4; anything beyond that is left out).
+
+## In the app
+
+**More → AI assistant** in the mobile app works like the web page: it opens the latest conversation, shows the answer as it is generated, and shows a confirmation card before an action that changes something.
+
+- Only devices paired with full control get **Confirm** and **Deny**; on a read-only device the assistant does not get the action tools and can only look things up.
+- Conversations created in the app are visible only on that device, and web conversations do not appear in the app.
+- When the host has not enabled the AI assistant, **More** does not show it.
+- For the endpoints, see [App API](../reference/app-api.md#ai-assistant).
 
 ## Privacy and security
 

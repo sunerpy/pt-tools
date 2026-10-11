@@ -33,6 +33,7 @@ After pairing, the window in the web UI shows that the device is paired and the 
 | Torrents                   | Torrents in your downloaders, filtered by state or title; pause, resume, delete (with a confirmation, optionally with the data)                          |
 | Search                     | Search all enabled sites and send a result to a downloader (with the usual disk-space and seeding-capacity checks)                                       |
 | Media                      | Subscriptions (progress, missing episodes, search now, pause, delete), recently added items, and Explore (trending, popular, search, subscribe directly) |
+| More → AI assistant        | Chat with the AI assistant built into pt-tools; devices with full control can confirm actions, see [AI assistant](assistant.md#in-the-app)               |
 | More → Sites               | Login status (days left before the inactivity limit), today's check-in, user data and unread messages; check in now                                      |
 | More → Tasks, Brush        | Send history, and brush tasks with their active torrents and totals                                                                                      |
 | More → Downloaders         | Downloader speeds, free space and versions                                                                                                               |
