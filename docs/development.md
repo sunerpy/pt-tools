@@ -680,7 +680,7 @@ bash scripts/deploy-relay.sh --finalize    # 用 --keep-previous 部署过、检
 bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署时删掉新容器）
 ```
 
-`--finalize --image <部署时的 --image>` 先核对 `<name>` 跑的是这个镜像，不是时失败、不删旧容器。`--rollback` 时没有 `<name>-previous`、`<name>` 正常在跑，说明没有待收尾的部署（已经收尾，或者看门狗已经换回），以 3 退出并打印正在跑的镜像。
+`--finalize --image <部署时的 --image>` 先核对这次部署仍待收尾（还有 `<name>-previous`）、`<name>` 跑的是这个镜像，不是时失败、不删旧容器（同一个镜像重新部署时，看门狗换回的旧容器镜像也一样，只看镜像分不出来）。`--rollback` 时没有 `<name>-previous`、`<name>` 正常在跑，说明没有待收尾的部署（已经收尾，或者看门狗已经换回），以 3 退出并打印正在跑的镜像。
 
 ### 手机 App 发版
 

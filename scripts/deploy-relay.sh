@@ -19,7 +19,8 @@
 # --keep-previous 时另起一个看门狗（脱离 ssh 会话，日志在 /tmp/deploy-relay-<name>.watchdog.<uid>.log）：--pending-timeout 秒（默认 900，0 不起）
 # 以后还没有收尾就换回旧容器，调用方中途丢了（例如 runner 没了）也不会一直停在待收尾。它只认这次部署的两个容器（按容器 ID），
 # 收尾、回滚过或者又部署过就什么都不做；服务器在这期间重启时看门狗也不在了，要手动收尾。
-# --finalize 给了 --image 时先核对 <name> 跑的是这个镜像：看门狗已经换回旧容器时失败，不报告收尾成功。
+# --finalize 给了 --image 时先核对这次部署还待收尾（还有 <name>-previous）、<name> 跑的是这个镜像：看门狗已经换回旧容器时失败，
+# 不报告收尾成功（同一个镜像重新部署时只看镜像分不出来）。
 # --rollback 时没有 <name>-previous、<name> 在跑：没有待收尾的部署（已经收尾，或者看门狗已经换回），以 3 退出。
 # 上一次部署没有收尾（还有 <name>-previous）时拒绝再部署，先 --finalize 或 --rollback。
 # 同一个 <name> 上的部署、收尾、回滚与看门狗依次来（flock /tmp/deploy-relay-<name>.lock，最多等 300 秒）。
@@ -52,7 +53,7 @@ while [ $# -gt 0 ]; do
   --pending-timeout) pending_timeout=${2:?}; shift 2 ;;
   --finalize) mode=finalize; shift ;;
   --rollback) mode=rollback; shift ;;
-  -h | --help) sed -n '2,26p' "${BASH_SOURCE[0]}"; exit 0 ;;
+  -h | --help) sed -n '2,27p' "${BASH_SOURCE[0]}"; exit 0 ;;
   *) die "不认识的参数 $1" ;;
   esac
 done
@@ -168,6 +169,8 @@ take_lock || die "另一个 deploy-relay 正在操作 $name，$lock_wait 秒内�
 case "$mode" in
 finalize)
   if [ -n "$image" ]; then
+    exists "$previous" ||
+      die "没有 $previous：这次部署已经不在待收尾（例如看门狗到时间换回了旧容器），没有收尾"
     running=$(docker inspect -f '{{.Config.Image}}' "$name" 2>/dev/null) || running=""
     [ "$running" = "$image" ] ||
       die "$name 跑的是 ${running:-（没有这个容器）}，不是 $image：这次部署已经不在了（例如看门狗到时间换回了旧容器），没有收尾"
