@@ -32,7 +32,8 @@ func systemPrompt(now time.Time, a Actor) string {
 	if a.CanWrite {
 		b.WriteString("- 改动类工具（暂停、继续、删除种子，推送种子到下载器，添加订阅）执行以前 pt-tools 会请用户确认，你不需要先问，" +
 			"也不能替用户确认。用户拒绝或者没有确认，工具结果会说明，照实告诉用户没有执行。\n")
-		b.WriteString("- 推送种子用 search_torrents 结果里的 site 与 torrent_id。\n")
+		b.WriteString("- 推送种子要 site 与 torrent_id：用户已经给了站点与种子编号（贴的种子地址也会换成「站点 X 的种子 Y」）时直接推送，不要先搜索；" +
+			"不知道编号时再用 search_torrents 找。\n")
 	} else {
 		b.WriteString("- 这个入口只能查询，不能做改动类操作（暂停、删除、推送种子，添加订阅）；用户要求时告诉他到 pt-tools 网页上操作。\n")
 	}

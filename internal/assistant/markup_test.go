@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -36,4 +37,14 @@ func TestToolMarkupHold(t *testing.T) {
 		assert.Equal(t, c.want, markupHold(c.in), c.in)
 	}
 	assert.Equal(t, "回答。\n\n", cutToolMarkup("回答。\n\n<｜DSML｜function_calls"))
+}
+
+// 用户给了站点与种子编号（或者贴了地址）时直接推送：2026-10-11 真实验收里 DeepSeek 照「用 search_torrents 结果里的编号」
+// 先拿编号当关键词搜，搜不到就不推了。
+func TestSystemPromptPushesGivenIDs(t *testing.T) {
+	now := time.Date(2026, 10, 11, 22, 0, 0, 0, time.Local)
+	p := systemPrompt(now, admin)
+	assert.Contains(t, p, "直接推送")
+	assert.Contains(t, p, "不要先搜索")
+	assert.NotContains(t, systemPrompt(now, Actor{Owner: "token:1", Entry: "app"}), "直接推送", "只读的入口没有推送")
 }
