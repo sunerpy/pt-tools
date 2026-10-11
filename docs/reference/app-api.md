@@ -41,33 +41,44 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | `internal`                                                      | 500      | pt-tools 内部出错                                                                        |
 | `search_failed`、`download_failed`、`attend_failed`、`upstream` | 502      | 搜索、下载种子文件、签到或访问 TMDB 失败                                                 |
 | `unavailable`                                                   | 503      | 对应的服务没有启动                                                                       |
+| `assistant_disabled`、`decided`                                 | 409      | AI 助手没有启用；这个待确认操作已经有了结论                                              |
+| `too_many`                                                      | 429      | AI 助手同时在回答的问题太多                                                              |
 
 ## 接口一览
 
-| 方法   | 路径                         | 权限 | 用途                                         |
-| ------ | ---------------------------- | ---- | -------------------------------------------- |
-| GET    | `/meta`                      | 读取 | 版本、兼容级别、功能组与调用者自己的权限     |
-| GET    | `/overview`                  | 读取 | 已启用站点的合计与今天的增量                 |
-| GET    | `/sites`                     | 读取 | 站点、登录状态、今天的签到与站点上的用户数据 |
-| POST   | `/sites/{site}/attend`       | 操作 | 立即签到                                     |
-| GET    | `/favicon/{site}`            | 读取 | 站点图标                                     |
-| GET    | `/torrents`                  | 读取 | 下载器里的种子                               |
-| GET    | `/downloaders`               | 读取 | 下载器与它们现在的速度、剩余空间             |
-| POST   | `/torrents/actions`          | 操作 | 暂停、继续、删除种子                         |
-| POST   | `/search`                    | 读取 | 多站搜索                                     |
-| POST   | `/push`                      | 操作 | 把搜索到的种子推送到下载器                   |
-| GET    | `/tasks`                     | 读取 | 任务列表（推送记录）                         |
-| GET    | `/brush/tasks`               | 读取 | 刷流任务                                     |
-| GET    | `/media/history`             | 读取 | 整理历史                                     |
-| GET    | `/subscriptions`             | 读取 | 订阅列表                                     |
-| GET    | `/subscriptions/{id}`        | 读取 | 订阅详情：每一集与下载过的种子               |
-| POST   | `/subscriptions`             | 操作 | 新建订阅                                     |
-| POST   | `/subscriptions/{id}/status` | 操作 | 暂停或恢复订阅                               |
-| POST   | `/subscriptions/{id}/search` | 操作 | 立即搜索                                     |
-| DELETE | `/subscriptions/{id}`        | 操作 | 删除订阅                                     |
-| GET    | `/explore`                   | 读取 | 探索：TMDB 的热门、流行与搜索                |
-| GET    | `/images/tmdb/{size}/{file}` | 读取 | TMDB 图片（海报），由 pt-tools 去取          |
-| GET    | `/updates`                   | 读取 | 有没有新版本                                 |
+| 方法   | 路径                                     | 权限 | 用途                                         |
+| ------ | ---------------------------------------- | ---- | -------------------------------------------- |
+| GET    | `/meta`                                  | 读取 | 版本、兼容级别、功能组与调用者自己的权限     |
+| GET    | `/overview`                              | 读取 | 已启用站点的合计与今天的增量                 |
+| GET    | `/sites`                                 | 读取 | 站点、登录状态、今天的签到与站点上的用户数据 |
+| POST   | `/sites/{site}/attend`                   | 操作 | 立即签到                                     |
+| GET    | `/favicon/{site}`                        | 读取 | 站点图标                                     |
+| GET    | `/torrents`                              | 读取 | 下载器里的种子                               |
+| GET    | `/downloaders`                           | 读取 | 下载器与它们现在的速度、剩余空间             |
+| POST   | `/torrents/actions`                      | 操作 | 暂停、继续、删除种子                         |
+| POST   | `/search`                                | 读取 | 多站搜索                                     |
+| POST   | `/push`                                  | 操作 | 把搜索到的种子推送到下载器                   |
+| GET    | `/tasks`                                 | 读取 | 任务列表（推送记录）                         |
+| GET    | `/brush/tasks`                           | 读取 | 刷流任务                                     |
+| GET    | `/media/history`                         | 读取 | 整理历史                                     |
+| GET    | `/subscriptions`                         | 读取 | 订阅列表                                     |
+| GET    | `/subscriptions/{id}`                    | 读取 | 订阅详情：每一集与下载过的种子               |
+| POST   | `/subscriptions`                         | 操作 | 新建订阅                                     |
+| POST   | `/subscriptions/{id}/status`             | 操作 | 暂停或恢复订阅                               |
+| POST   | `/subscriptions/{id}/search`             | 操作 | 立即搜索                                     |
+| DELETE | `/subscriptions/{id}`                    | 操作 | 删除订阅                                     |
+| GET    | `/explore`                               | 读取 | 探索：TMDB 的热门、流行与搜索                |
+| GET    | `/images/tmdb/{size}/{file}`             | 读取 | TMDB 图片（海报），由 pt-tools 去取          |
+| GET    | `/updates`                               | 读取 | 有没有新版本                                 |
+| GET    | `/assistant/status`                      | 读取 | AI 助手启用没有、用的模型、能不能确认        |
+| GET    | `/assistant/conversations`               | 读取 | AI 助手的会话                                |
+| POST   | `/assistant/conversations`               | 读取 | 新建会话，可以接着发第一条消息               |
+| GET    | `/assistant/conversations/{id}`          | 读取 | 一个会话的消息与待确认操作                   |
+| DELETE | `/assistant/conversations/{id}`          | 读取 | 删除会话                                     |
+| POST   | `/assistant/conversations/{id}/messages` | 读取 | 发消息，在后台开始回答                       |
+| POST   | `/assistant/conversations/{id}/cancel`   | 读取 | 停止回答                                     |
+| GET    | `/assistant/conversations/{id}/events`   | 读取 | 长轮询会话的进度                             |
+| POST   | `/assistant/confirmations/{id}`          | 操作 | 确认或拒绝一个改动类操作                     |
 
 路径都省略了 `/api/app/v1` 前缀。搜索用 POST 传条件，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
 
@@ -269,3 +280,54 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 ### GET /images/tmdb/{size}/{file}
 
 TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报尺寸 `w92`、`w154`、`w185`、`w342`、`w500`、`w780` 之一（不提供原图，原图可能有好几 MB）。pt-tools 按「媒体识别」里设置的图片地址与代理去取，回应是图片，带一天的缓存头；客户端因此不用直接连 TMDB（国内常常连不上）。没有填写 TMDB API Key 时回 400，TMDB 上没有这张图时回 404，取不到时回 502（`upstream`）。pt-tools 同时最多取 4 张图，排队超过 10 秒回 503（`busy`，带 `Retry-After`）。
+
+## AI 助手
+
+这一组接口对应网页上的「AI 助手」，用法见 [AI 助手](../guide/assistant.md)。设置（接哪家大模型、API Key）只能在网页上改，这里没有。会话按调用者分开：每个令牌、每台配对的设备只看得到自己建的会话，网页登录看到的是网页上的会话。对话本身只要「读取」权限；模型要做改动类操作时，只有带「操作」权限的调用者能确认（只读的调用者，模型拿不到这些工具）。时间是 RFC 3339 格式的字符串。
+
+### GET /assistant/status
+
+回应 `enabled`（启用了，而且接口地址与模型都配好了）、`model`、`can_confirm`（调用者能不能确认改动类操作）、`chatops`。不含 API Key 与接口地址。主机的版本没有这一组接口时，`GET /meta` 的 `features` 里没有 `assistant`。
+
+### GET /assistant/conversations
+
+调用者自己的会话，最近更新的在前，最多 100 个。每项有 `id`、`title`、`entry`（在哪里建的：`web`、`app`、`chatops`）、`running`、`created_at`、`updated_at`。
+
+### POST /assistant/conversations
+
+`{"title": "…", "message": "…"}`，两项都可选。只建会话时回 201；带了 `message` 时接着发这一条，回 202，`run` 里有这次运行的 `run_id` 与落库的用户消息。没有启用 AI 助手时回 409（`assistant_disabled`），这时也不留下空会话。
+
+### GET /assistant/conversations/{id}
+
+会话本身的字段，加上：
+
+- `messages`：最近 200 条消息，按先后排。每条有 `id`、`run_id`、`role`（`user`、`assistant`、`tool`、`notice`）、`content`、`created_at`；助手的消息带 `tool_calls`（`id`、`name`、`arguments`、`write`），工具结果带 `tool_name`、`tool_call_id`、`is_error`。`notice` 是 pt-tools 自己的提示（已停止、出错、到了步数上限）。
+- `confirmations`：待确认操作，`id`、`run_id`、`tool_call_id`、`tool`、`summary`（给人看的一句话）、`arguments`、`status`（`pending`、`approved`、`denied`、`expired`）、`decided_by`、`decided_at`、`expires_at`、`created_at`。按 `run_id` 与 `tool_call_id` 对上消息里的调用。
+- `run_id`、`partial`：进行中的运行与它到现在的回答文字；`last_seq`：从这里接着读事件。
+
+### POST /assistant/conversations/{id}/messages
+
+`{"text": "…"}`，最多 4000 个字。回 202，带这次运行的 `run_id` 与落库的用户消息。同一个会话正在回答时回 409（`busy`）。
+
+### POST /assistant/conversations/{id}/cancel
+
+停止会话进行中的回答，回应 `{"ok": true}`；没有在回答时什么也不做。正在等确认的操作作废，不执行。
+
+### GET /assistant/conversations/{id}/events
+
+长轮询：`after` 是上次读到的序号（会话详情的 `last_seq`，或者上一页的 `last`），`wait` 是没有事件时最多等几秒（默认与上限都是 25）。回应 `events`、`reset`、`last`、`running`。`reset` 为真时中间的事件丢了（或者 pt-tools 重启过），重新读会话，从它的 `last_seq` 接着读。
+
+每个事件有 `seq`、`type`、`at`，按种类带：
+
+| `type`         | 内容                                                       |
+| -------------- | ---------------------------------------------------------- |
+| `run_started`  | `run_id`                                                   |
+| `delta`        | `text`：回答的一段文字；`replace` 为真时是到现在的全部文字 |
+| `message`      | `message`：落库的一条消息（字段同会话详情）                |
+| `tool_started` | `tool`：开始执行的工具调用                                 |
+| `confirmation` | `confirmation`：建好的待确认操作，或者有了结论             |
+| `run_finished` | `status`（`done`、`canceled`、`failed`），失败时带 `error` |
+
+### POST /assistant/confirmations/{id}
+
+`{"approve": true}` 确认执行，`{"approve": false}` 拒绝。要「操作」权限。回应是有了结论的待确认操作；已经有结论的（别处先点了、已经超时或作废）回 409（`decided`）。确认与拒绝都记在操作审计里；执行的操作另记一条，通道是「AI 助手」，触发用户是 `token:<令牌编号>` 或 `device:<设备编号>`。

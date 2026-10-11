@@ -30,6 +30,19 @@ part 'auth/http_bearer_auth.dart';
 
 part 'api/app_api.dart';
 
+part 'model/app_assistant_confirmation.dart';
+part 'model/app_assistant_conversation.dart';
+part 'model/app_assistant_conversation_detail.dart';
+part 'model/app_assistant_create.dart';
+part 'model/app_assistant_create_result.dart';
+part 'model/app_assistant_decide.dart';
+part 'model/app_assistant_event.dart';
+part 'model/app_assistant_event_page.dart';
+part 'model/app_assistant_message.dart';
+part 'model/app_assistant_send.dart';
+part 'model/app_assistant_send_result.dart';
+part 'model/app_assistant_status.dart';
+part 'model/app_assistant_tool_call.dart';
 part 'model/app_brush_stat.dart';
 part 'model/app_brush_task.dart';
 part 'model/app_delta.dart';

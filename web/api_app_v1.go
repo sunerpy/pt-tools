@@ -72,6 +72,16 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodDelete, "/subscriptions/{id}", w, s.appSubscriptionDelete},
 		{http.MethodGet, "/explore", r, s.appExplore},
 		{http.MethodGet, "/images/tmdb/{size}/{file}", r, s.appTMDBImage},
+		// AI 助手（M19）：对话只要 app:read（改动类操作要另外确认）；确认要 app:write
+		{http.MethodGet, "/assistant/status", r, s.appAssistantStatus},
+		{http.MethodGet, "/assistant/conversations", r, s.appAssistantConversations},
+		{http.MethodPost, "/assistant/conversations", r, s.appAssistantConversationCreate},
+		{http.MethodGet, "/assistant/conversations/{id}", r, s.appAssistantConversation},
+		{http.MethodDelete, "/assistant/conversations/{id}", r, s.appAssistantConversationDelete},
+		{http.MethodPost, "/assistant/conversations/{id}/messages", r, s.appAssistantSend},
+		{http.MethodPost, "/assistant/conversations/{id}/cancel", r, s.appAssistantCancel},
+		{http.MethodGet, "/assistant/conversations/{id}/events", r, s.appAssistantEvents},
+		{http.MethodPost, "/assistant/confirmations/{id}", w, s.appAssistantDecide},
 	}
 }
 
@@ -282,7 +292,7 @@ type AppPrincipalV struct {
 }
 
 // appFeatures 是这个版本的 App API 提供的功能组。
-var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates"}
+var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant"}
 
 func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
 	p := middleware.PrincipalFrom(r.Context())

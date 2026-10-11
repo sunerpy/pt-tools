@@ -183,6 +183,32 @@ class ApiClient {
           return valueString == 'true' || valueString == '1';
         case 'DateTime':
           return value is DateTime ? value : DateTime.tryParse(value);
+        case 'AppAssistantConfirmation':
+          return AppAssistantConfirmation.fromJson(value);
+        case 'AppAssistantConversation':
+          return AppAssistantConversation.fromJson(value);
+        case 'AppAssistantConversationDetail':
+          return AppAssistantConversationDetail.fromJson(value);
+        case 'AppAssistantCreate':
+          return AppAssistantCreate.fromJson(value);
+        case 'AppAssistantCreateResult':
+          return AppAssistantCreateResult.fromJson(value);
+        case 'AppAssistantDecide':
+          return AppAssistantDecide.fromJson(value);
+        case 'AppAssistantEvent':
+          return AppAssistantEvent.fromJson(value);
+        case 'AppAssistantEventPage':
+          return AppAssistantEventPage.fromJson(value);
+        case 'AppAssistantMessage':
+          return AppAssistantMessage.fromJson(value);
+        case 'AppAssistantSend':
+          return AppAssistantSend.fromJson(value);
+        case 'AppAssistantSendResult':
+          return AppAssistantSendResult.fromJson(value);
+        case 'AppAssistantStatus':
+          return AppAssistantStatus.fromJson(value);
+        case 'AppAssistantToolCall':
+          return AppAssistantToolCall.fromJson(value);
         case 'AppBrushStat':
           return AppBrushStat.fromJson(value);
         case 'AppBrushTask':
