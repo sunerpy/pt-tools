@@ -233,6 +233,7 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 			return RunFailed, describeError(err, set.llm.APIKey)
 		}
 		s.emitDelta(r, rs, "", true)
+		out.content = stripToolMarkup(out.content)
 		// 服务回显了收到的 Key（恶意或配错的兼容服务）也不让它进库、事件与工具参数
 		out.content, out.reasoning = scrub(out.content), scrub(out.reasoning)
 		calls := make([]pendingCall, 0, len(out.calls))
@@ -335,10 +336,11 @@ func safeCut(s string) int {
 
 func (s *Service) emitDelta(r *run, rs *redactedStream, chunk string, final bool) {
 	rs.full.WriteString(chunk)
-	full := rs.full.String()
+	// 漏进正文的工具调用标记不发；末尾可能是标记开头的一段也先不发
+	full := cutToolMarkup(rs.full.String())
 	cut := len(full)
 	if !final {
-		cut = safeCut(full)
+		cut = min(safeCut(full), markupHold(full))
 	}
 	part := full[:cut]
 	if rs.scrub != nil {

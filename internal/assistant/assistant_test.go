@@ -905,3 +905,28 @@ func TestEchoedPlainKeyNeverStreamed(t *testing.T) {
 	assert.NotContains(t, e.messages(conv)[1].Content, "qa_k-")
 	assert.Contains(t, e.messages(conv)[1].Content, "你的 Key 是 ***")
 }
+
+// DeepSeek 经部分 OpenAI 兼容网关（2026-10-11 验收时的 deepseek.v3.2）会把自己的工具调用标记漏进正文：
+// 网关已经把调用解析成 tool_calls，正文末尾还剩「<｜DSML｜function_calls」。这一段不发增量、不落库、不回传给模型。
+func TestLeakedToolMarkupStripped(t *testing.T) {
+	e := newEnv(t)
+	first := call("call_1", "list_tasks", `{"page":1}`)
+	first.text = "我来看看最近抓了什么。\n\n<｜DSML｜function_calls"
+	e.llm.push(first, reply{text: "找到 1 个种子。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "最近抓了什么种子")
+	fin, all := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	for _, ev := range all {
+		switch ev.Type {
+		case EventDelta:
+			assert.NotContains(t, ev.Text, "｜", "增量里不该出现标记的任何一段")
+		case EventMessage:
+			assert.NotContains(t, ev.Message.Content, "DSML")
+		}
+	}
+	msgs := e.messages(conv)
+	assert.Equal(t, "我来看看最近抓了什么。", msgs[1].Content)
+	second := e.llm.requests()[1]
+	assert.Equal(t, "我来看看最近抓了什么。", second.Messages[2]["content"], "回传给模型的也是去掉标记的")
+}
