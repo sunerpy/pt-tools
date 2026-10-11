@@ -141,9 +141,9 @@ func TestChatOpsConfirmationByReply(t *testing.T) {
 	approved := 0
 	for _, r := range results {
 		switch r {
-		case "confirm:approved":
+		case "success":
 			approved++
-		case "confirm:decided", "denied:busy":
+		case "denied:decided", "denied:busy":
 		default:
 			t.Errorf("意外的结果 %s", r)
 		}
@@ -165,7 +165,7 @@ func TestChatOpsOtherTextDenies(t *testing.T) {
 	h.Handle(ctx, inbound("删掉 abc", true))
 	rp.waitFor(t, "需要你确认")
 	r, result := h.Handle(ctx, inbound("算了，先看看下载器", true))
-	assert.Equal(t, "confirm:denied", result)
+	assert.Equal(t, "denied:user", result, "审计结果用 success / denied:* / error:* 的写法")
 	assert.Contains(t, r.Text, "已取消")
 	rp.waitFor(t, "没有删。")
 	assert.Empty(t, e.backend.writes())
@@ -212,10 +212,8 @@ func TestChatOpsNewChatAndSwitch(t *testing.T) {
 }
 
 func TestChatOpsEventText(t *testing.T) {
-	long := strings.Repeat("长", chatopsReplyRunes+10)
-	got := chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "assistant", Content: "## 标题\n" + long}}, "")
-	assert.True(t, strings.HasPrefix(got, "标题\n"))
-	assert.Contains(t, got, "到网页上的 AI 助手里看完整的回答")
+	got := chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "assistant", Content: "## 标题\n**粗**"}}, "")
+	assert.Equal(t, "标题\n粗", got)
 	assert.Empty(t, chatopsEventText(Event{Type: EventMessage, Message: &MessageView{
 		Role: "assistant", Content: "我查一下", ToolCalls: []ToolCallView{{ID: "c1", Name: "list_tasks"}},
 	}}, ""), "带工具调用的中间消息不发")
@@ -228,4 +226,69 @@ func TestChatOpsEventText(t *testing.T) {
 	assert.True(t, isYes(" OK. "))
 	assert.True(t, isYes("确认！"))
 	assert.False(t, isYes("确认一下这个是什么"))
+}
+
+func TestSplitReply(t *testing.T) {
+	assert.Equal(t, []string{"短"}, splitReply("短"))
+	line := strings.Repeat("字", 100) + "\n"
+	long := strings.Repeat(line, 50) // 5050 个字
+	parts := splitReply(long)
+	require.Len(t, parts, 2)
+	for _, p := range parts {
+		assert.LessOrEqual(t, len([]rune(p)), chatopsReplyRunes)
+		assert.False(t, strings.HasSuffix(p, "\n"))
+	}
+	assert.Equal(t, strings.ReplaceAll(long, "\n", ""), strings.ReplaceAll(strings.Join(parts, ""), "\n", ""), "分开以后内容不少")
+	huge := strings.Repeat("字", chatopsReplyRunes*chatopsReplyParts+100)
+	parts = splitReply(huge)
+	require.Len(t, parts, chatopsReplyParts)
+	assert.Contains(t, parts[len(parts)-1], "后面的省略了")
+}
+
+// 开了新会话以后，旧会话里还在跑的回答结束（更新了旧会话的时间）也不会把下一条消息带回旧会话
+func TestChatOpsNewChatSticksWhileOldRunFinishes(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	block := make(chan struct{})
+	e.llm.push(reply{text: "旧的回答", block: block}, reply{text: "新的回答"})
+	ctx := context.Background()
+	_, result := h.Handle(ctx, inbound("旧问题", true))
+	require.Equal(t, "success", result)
+	<-e.llm.started
+	old, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	require.NoError(t, h.NewChat(ctx, inbound("", true).Src))
+	close(block)
+	rp.waitFor(t, "旧的回答")
+	require.Eventually(t, func() bool { return !e.svc.isRunning(old.ID) }, 5*time.Second, 10*time.Millisecond)
+	_, result = h.Handle(ctx, inbound("新问题", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "新的回答")
+	cur, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
+	assert.NotEqual(t, old.ID, cur.ID)
+	second := e.llm.requests()[1].Messages
+	for _, m := range second {
+		assert.NotEqual(t, "旧问题", m["content"], "新会话不带旧上下文")
+	}
+}
+
+// 第一次同时到的两条消息只建一个会话
+func TestChatOpsConcurrentFirstMessagesShareOneConversation(t *testing.T) {
+	e, h, _ := chatopsEnv(t)
+	block := make(chan struct{})
+	defer close(block)
+	e.llm.push(reply{text: "想想", block: block})
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	results := make([]string, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, results[i] = h.Handle(ctx, inbound("你好", true))
+		}()
+	}
+	wg.Wait()
+	assert.ElementsMatch(t, []string{"success", "denied:busy"}, results)
+	var n int64
+	require.NoError(t, e.db.Model(&models.AssistantConversation{}).Where("owner = ?", "chatops:3").Count(&n).Error)
+	assert.Equal(t, int64(1), n)
 }

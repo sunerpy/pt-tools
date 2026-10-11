@@ -73,7 +73,7 @@ With **Notification channels (ChatOps)** turned on in **System → AI assistant 
 - Before an action that changes something, the assistant sends "Please confirm: …". Reply "yes" (or "ok", "confirm", 确认) to run it; any other reply cancels the action. If the confirmation wait passes, it does not run and you get a timeout notice.
 - Only admin bindings can run actions; for other bindings the assistant does not get those tools. Today every completed binding is an admin, see [ChatOps quick start](chatops-quickstart.md).
 - Messages to the assistant are recorded in the action audit with the command `assistant` (without the text); executed actions get their own entry with the channel "AI assistant" and the user `chatops:<binding id>`.
-- Replies in notification channels are plain text; long answers are cut short, and the full answer is in the web AI assistant (the binding's conversation is in the list there).
+- Replies in notification channels are plain text; long answers are sent as several messages (up to 4; anything beyond that is left out).
 
 ## Privacy and security
 

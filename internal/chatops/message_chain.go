@@ -206,7 +206,8 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 	}
 
 	if cmdName == "" {
-		if ref := mc.assistant.Load(); ref != nil && ref.h.Enabled(ctx) {
+		// 按钮回调（RSS 通知的下载 / 忽略）由通道自己处理，不当成和助手说话
+		if ref := mc.assistant.Load(); ref != nil && !msg.IsCallback && ref.h.Enabled(ctx) {
 			// 消息原文不进审计（可能很长、也可能带私事）；工具调用由助手另记
 			if !mc.rateLimiter.Allow(msg.ChannelType, msg.ChannelUserID, "assistant") {
 				mc.recordAudit(ctx, msg, binding.ConfID, "assistant", nil, "denied:rate_limit", start)

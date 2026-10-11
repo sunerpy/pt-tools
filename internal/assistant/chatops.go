@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
+	"sync"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/chatops"
@@ -26,15 +26,32 @@ type ChatOpsReplier interface {
 type ChatOpsHandler struct {
 	svc     *Service
 	replier ChatOpsReplier
+	// locks 是每个属主一把锁：找滚动会话（没有就建）与发消息要一起做，同时到的两条消息不会各建一个会话
+	locksMu sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 // NewChatOpsHandler 建处理器。
 func NewChatOpsHandler(svc *Service, replier ChatOpsReplier) *ChatOpsHandler {
-	return &ChatOpsHandler{svc: svc, replier: replier}
+	return &ChatOpsHandler{svc: svc, replier: replier, locks: map[string]*sync.Mutex{}}
 }
 
-// 一条 ChatOps 回复的字数上限（Telegram 一条消息最多 4096 个字符）。
-const chatopsReplyRunes = 3500
+func (h *ChatOpsHandler) ownerLock(owner string) *sync.Mutex {
+	h.locksMu.Lock()
+	defer h.locksMu.Unlock()
+	l := h.locks[owner]
+	if l == nil {
+		l = &sync.Mutex{}
+		h.locks[owner] = l
+	}
+	return l
+}
+
+// 一条 ChatOps 回复的字数上限（Telegram 一条消息最多 4096 个字符）；更长的回答分几条发，最多 chatopsReplyParts 条。
+const (
+	chatopsReplyRunes = 3500
+	chatopsReplyParts = 4
+)
 
 // Enabled 报告助手启用了、接口配好了、ChatOps 开关也打开了。
 func (h *ChatOpsHandler) Enabled(ctx context.Context) bool {
@@ -59,8 +76,11 @@ func (h *ChatOpsHandler) actor(msg notify.InboundMessage, src chatops.Source) Ac
 		if text == "" || h.replier == nil {
 			return
 		}
-		if err := h.replier.Reply(ctx, msg, chatops.Reply{Text: text}); err != nil {
-			global.GetSlogger().Warnf("[AI 助手] ChatOps 回复失败 conf=%d: %v", msg.SourceConfID, err)
+		for _, part := range splitReply(text) {
+			if err := h.replier.Reply(ctx, msg, chatops.Reply{Text: part}); err != nil {
+				global.GetSlogger().Warnf("[AI 助手] ChatOps 回复失败 conf=%d: %v", msg.SourceConfID, err)
+				return
+			}
 		}
 	}
 	return a
@@ -99,18 +119,21 @@ func (h *ChatOpsHandler) Handle(ctx context.Context, in chatops.InboundAssistant
 		_, err := h.svc.Decide(ctx, a, pc.ID, approve)
 		switch {
 		case errors.Is(err, ErrDecided):
-			return chatReply(tr(lang, "这个操作已经处理过了。", "That action was already handled.")), "confirm:decided"
+			return chatReply(tr(lang, "这个操作已经处理过了。", "That action was already handled.")), "denied:decided"
 		case errors.Is(err, ErrForbidden):
 			return chatReply(tr(lang, "这个绑定不能确认改动类操作。", "This binding cannot confirm changes.")), "denied:not_admin"
 		case err != nil:
 			return chatReply(tr(lang, "处理确认失败，稍后再试", "could not handle the confirmation")), "error:confirm"
 		case approve:
-			return chatReply(tr(lang, "已确认，正在执行。", "Confirmed, running it.")), "confirm:approved"
+			return chatReply(tr(lang, "已确认，正在执行。", "Confirmed, running it.")), "success"
 		default:
 			return chatReply(tr(lang, "已取消这个操作。要问别的，等这次回答结束再发。",
-				"Canceled. Send your next question after this answer finishes.")), "confirm:denied"
+				"Canceled. Send your next question after this answer finishes.")), "denied:user"
 		}
 	}
+	l := h.ownerLock(a.Owner)
+	l.Lock()
+	defer l.Unlock()
 	conv, ok, err := h.svc.LatestConversation(ctx, a)
 	if err == nil && !ok {
 		conv, err = h.svc.CreateConversation(ctx, a, "")
@@ -139,7 +162,11 @@ func (h *ChatOpsHandler) NewChat(ctx context.Context, src chatops.Source) error 
 	if !h.Enabled(ctx) {
 		return errors.New(tr(src.ReplyLang, "AI 助手没有启用，或者没有接到通知渠道", "the AI assistant is not enabled for notification channels"))
 	}
-	_, err := h.svc.CreateConversation(ctx, Actor{Owner: chatopsOwner(src), Entry: models.AssistantEntryChatOps}, "")
+	owner := chatopsOwner(src)
+	l := h.ownerLock(owner)
+	l.Lock()
+	defer l.Unlock()
+	_, err := h.svc.CreateConversation(ctx, Actor{Owner: owner, Entry: models.AssistantEntryChatOps}, "")
 	return err
 }
 
@@ -153,7 +180,7 @@ func chatopsEventText(ev Event, lang string) string {
 		}
 		switch {
 		case m.Role == models.AssistantRoleAssistant && len(m.ToolCalls) == 0 && strings.TrimSpace(m.Content) != "":
-			return clip(plainText(m.Content))
+			return plainText(m.Content)
 		case m.Role == models.AssistantRoleNotice:
 			return m.Content
 		}
@@ -187,10 +214,24 @@ func plainText(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// clip 把太长的回答截到 chatopsReplyRunes 个字以内。
-func clip(s string) string {
-	if utf8.RuneCountInString(s) <= chatopsReplyRunes {
-		return s
+// splitReply 把太长的回答分成几条（每条不超过 chatopsReplyRunes 个字，尽量在换行处分），最多 chatopsReplyParts 条，
+// 再多的省略并注明。
+func splitReply(s string) []string {
+	var parts []string
+	rest := []rune(s)
+	for len(rest) > chatopsReplyRunes && len(parts) < chatopsReplyParts-1 {
+		cut := chatopsReplyRunes
+		for i := chatopsReplyRunes; i > chatopsReplyRunes/2; i-- {
+			if rest[i-1] == '\n' {
+				cut = i
+				break
+			}
+		}
+		parts = append(parts, strings.TrimRight(string(rest[:cut]), "\n"))
+		rest = rest[cut:]
 	}
-	return string([]rune(s)[:chatopsReplyRunes]) + "\n…（太长了，到网页上的 AI 助手里看完整的回答）"
+	if len(rest) > chatopsReplyRunes {
+		rest = append(rest[:chatopsReplyRunes:chatopsReplyRunes], []rune("\n…（回答太长，后面的省略了）")...)
+	}
+	return append(parts, strings.TrimRight(string(rest), "\n"))
 }

@@ -37,7 +37,7 @@ func boundChain(t *testing.T) *chainFixture {
 // 助手启用时，绑定用户的非命令消息交给它：只记一条命令为 assistant 的审计（不带原文），立即回复照发。
 func TestProcess_NonCommandGoesToAssistant(t *testing.T) {
 	f := boundChain(t)
-	a := &stubAssistant{enabled: true, reply: Reply{Text: "已确认，正在执行。"}, result: "confirm:approved"}
+	a := &stubAssistant{enabled: true, reply: Reply{Text: "已确认，正在执行。"}, result: "success"}
 	f.chain.SetAssistant(a)
 
 	require.NoError(t, f.chain.Process(context.Background(), mkMsg("确认")))
@@ -48,7 +48,7 @@ func TestProcess_NonCommandGoesToAssistant(t *testing.T) {
 	entries := f.audit.snapshot()
 	require.Len(t, entries, 1)
 	assert.Equal(t, "assistant", entries[0].Command)
-	assert.Equal(t, "confirm:approved", entries[0].Result)
+	assert.Equal(t, "success", entries[0].Result)
 	assert.Empty(t, entries[0].Args, "消息原文不进审计")
 	assert.Equal(t, "assistant", f.rl.lastCmd)
 	reply, ok := f.replier.lastReply()
@@ -100,4 +100,15 @@ func TestProcess_AssistantOnlyForBoundNonCommands(t *testing.T) {
 	require.NoError(t, f.chain.Process(context.Background(), mkMsg("你好")))
 	assert.Empty(t, a.got)
 	assert.Equal(t, "denied:not_bound", lastResult(f.audit.snapshot()))
+}
+
+// 按钮回调（RSS 通知的下载、忽略）不交给助手
+func TestProcess_CallbackNotForwardedToAssistant(t *testing.T) {
+	f := boundChain(t)
+	a := &stubAssistant{enabled: true}
+	f.chain.SetAssistant(a)
+	msg := mkMsg("dl:12")
+	msg.IsCallback, msg.CallbackData = true, "dl:12"
+	require.NoError(t, f.chain.Process(context.Background(), msg))
+	assert.Empty(t, a.got)
 }
