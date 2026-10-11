@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.24](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.23...v1.0.0-rc.24) (2026-10-11)
+
+
+### Features
+
+* **assistant:** App 里的 AI 助手 ([#665](https://github.com/sunerpy/pt-tools/issues/665)) ([73bbae4](https://github.com/sunerpy/pt-tools/commit/73bbae466da1a294199bbbaa133e647c0bb38d2f))
+* **assistant:** 内置 AI 助手（核心与网页） ([#662](https://github.com/sunerpy/pt-tools/issues/662)) ([7d4eb79](https://github.com/sunerpy/pt-tools/commit/7d4eb794e7d7e2efab48f2b8c3017f3b07e0c211))
+* **assistant:** 通知渠道里的 AI 助手 ([#664](https://github.com/sunerpy/pt-tools/issues/664)) ([42d2a42](https://github.com/sunerpy/pt-tools/commit/42d2a4241cdf746edcc3f38f532bf4d73835106d))
+
+
+### Bug Fixes
+
+* **assistant:** 兼容 DeepSeek 经 OpenAI 兼容网关时的工具调用 ([#666](https://github.com/sunerpy/pt-tools/issues/666)) ([160fab7](https://github.com/sunerpy/pt-tools/commit/160fab709ae518e4887b77445869532c2b88c437))
+
 ## [1.0.0-rc.23](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.22...v1.0.0-rc.23) (2026-10-11)
 
 
