@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1452,4 +1453,38 @@ func TestCreateFilterRule_KeepsFalseFlags(t *testing.T) {
 	on := create("只要免费", true, true)
 	assert.True(t, stored(on.ID).RequireFree)
 	assert.True(t, stored(on.ID).Enabled)
+}
+
+// 第二次写失败时整个不建：不留下一条存反了的规则，同名的还能再建
+func TestCreateFilterRule_FalseFlagsWriteIsAtomic(t *testing.T) {
+	server, cleanup := setupFilterRuleTestServer(t)
+	defer cleanup()
+
+	db := global.GlobalDB.DB
+	failing := true
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("qa:fail-filter-rule-update", func(tx *gorm.DB) {
+		if failing && tx.Statement.Table == "filter_rules" {
+			_ = tx.AddError(errors.New("磁盘写满了"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove("qa:fail-filter-rule-update") })
+
+	post := func() *httptest.ResponseRecorder {
+		body, _ := json.Marshal(FilterRuleRequest{Name: "半价也下", Pattern: "Movie", RequireFree: false, Enabled: true})
+		w := httptest.NewRecorder()
+		server.createFilterRule(w, httptest.NewRequest(http.MethodPost, "/api/filter-rules", bytes.NewReader(body)))
+		return w
+	}
+	w := post()
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var n int64
+	require.NoError(t, db.Model(&models.FilterRule{}).Where("name = ?", "半价也下").Count(&n).Error)
+	assert.Zero(t, n, "失败时不留下规则")
+
+	failing = false
+	w = post()
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var r models.FilterRule
+	require.NoError(t, db.Where("name = ?", "半价也下").First(&r).Error)
+	assert.False(t, r.RequireFree)
 }

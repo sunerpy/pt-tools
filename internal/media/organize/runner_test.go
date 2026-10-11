@@ -2,6 +2,7 @@ package organize
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -570,4 +571,54 @@ func TestRetryDueKeepsBackoffWrittenBeforePendingRead(t *testing.T) {
 	require.NotNil(t, row.NextRetryAt)
 	assert.Equal(t, next.UTC(), row.NextRetryAt.UTC(), "新的退避没被租约盖掉")
 	assert.Equal(t, 2, row.Attempts)
+}
+
+// 开关关着的触发方式的到期记录很多（超过一轮的名额）时，不能一直挡住后面能做的重试
+func TestRetryDueSkipsSwitchedOffRowsBeyondTheRoundLimit(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1}) // 自动整理关着
+	e.oppenheimer()
+	due := e.Now().Add(-time.Hour)
+	for i := range maxPerRound + 5 {
+		require.NoError(t, e.db.Create(&models.MediaTransferHistory{
+			DownloaderID: 1, InfoHash: fmt.Sprintf("%040d", i), SourcePath: filepath.Join(e.dlDir, fmt.Sprintf("auto-%d.mkv", i)),
+			Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &due, Trigger: models.MediaTriggerAuto,
+		}).Error)
+	}
+	later := e.Now().Add(-time.Minute)
+	manual := models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Oppenheimer.2023.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &later, Trigger: models.MediaTriggerManual,
+	}
+	require.NoError(t, e.db.Create(&manual).Error)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.True(t, e.svc.Retrying(manual.ID), "手动整理失败的那条排上了")
+	assert.Equal(t, 1, e.drain())
+	var autoDue int64
+	require.NoError(t, e.db.Model(&models.MediaTransferHistory{}).Where("trigger = ? AND next_retry_at = ?", models.MediaTriggerAuto, due).Count(&autoDue).Error)
+	assert.Equal(t, int64(maxPerRound+5), autoDue, "关着的那些保持到期")
+}
+
+// 同一个种子里先到期的记录是关着的触发方式、后面还有手动的：手动的照样重试
+func TestRetryDueMixedTriggersOnOneTorrent(t *testing.T) {
+	e := newEnv(t)
+	e.defaultLibraries()
+	e.settings(SettingsInput{MinVideoMB: 1}) // 自动整理关着
+	e.oppenheimer()
+	early, later := e.Now().Add(-time.Hour), e.Now().Add(-time.Minute)
+	require.NoError(t, e.db.Create(&models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Extra.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &early, Trigger: models.MediaTriggerAuto,
+	}).Error)
+	manual := models.MediaTransferHistory{
+		DownloaderID: 1, InfoHash: oppHash, TaskID: oppHash, SourcePath: filepath.Join(e.dlDir, "Oppenheimer.2023.mkv"),
+		Status: models.MediaTransferFailed, Attempts: 1, NextRetryAt: &later, Trigger: models.MediaTriggerManual,
+	}
+	require.NoError(t, e.db.Create(&manual).Error)
+
+	e.svc.retryDue(e.ctx, e.currentSettings())
+	assert.True(t, e.svc.Retrying(manual.ID), "手动的那条排上了")
+	assert.Equal(t, 1, e.drain())
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"gorm.io/gorm"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal"
@@ -225,17 +226,22 @@ func (s *Server) createFilterRule(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 	}
 
-	if err := filterDB.Create(rule); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// require_free 与 enabled 的列默认是 true：GORM 建记录时把 false 当成没给、写成默认值，不勾的要再写一次
-	if !req.RequireFree || !req.Enabled {
-		if err := global.GlobalDB.DB.Model(rule).Updates(map[string]any{"require_free": req.RequireFree, "enabled": req.Enabled}).Error; err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	// require_free 与 enabled 的列默认是 true：GORM 建记录时把 false 当成没给、写成默认值，不勾的在同一个事务里再写一次
+	if err := global.GlobalDB.DB.Transaction(func(tx *gorm.DB) error {
+		if err := models.NewFilterRuleDB(&models.TorrentDB{DB: tx}).Create(rule); err != nil {
+			return err
+		}
+		if req.RequireFree && req.Enabled {
+			return nil
+		}
+		if err := tx.Model(rule).Updates(map[string]any{"require_free": req.RequireFree, "enabled": req.Enabled}).Error; err != nil {
+			return err
 		}
 		rule.RequireFree, rule.Enabled = req.RequireFree, req.Enabled
+		return nil
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	global.GetSlogger().Infof("[FilterRule] 创建过滤规则: name=%s, pattern=%s, type=%s", req.Name, req.Pattern, req.PatternType)
