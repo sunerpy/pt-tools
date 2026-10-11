@@ -6,6 +6,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/assistant"
+	chatopscmds "github.com/sunerpy/pt-tools/internal/chatops/commands"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/version"
 	"github.com/sunerpy/pt-tools/web"
@@ -25,4 +26,15 @@ func newAssistantService(ctx context.Context, store *core.ConfigStore, srv *web.
 		global.GetSlogger().Warnf("[AI 助手] 启动失败: %v", err)
 	}
 	return svc
+}
+
+// wireAssistantChatOps 把通知渠道里绑定用户的非命令消息交给助手，并接上 /newchat。回复经运行中的通道异步发出。
+// 助手或 ChatOps 没起来时什么也不做（非命令消息照旧回「只识别命令」）。
+func wireAssistantChatOps(svc *assistant.Service, bs *chatopsBootstrap) {
+	if svc == nil || bs == nil || bs.chain == nil || bs.manager == nil {
+		return
+	}
+	h := assistant.NewChatOpsHandler(svc, bs.manager)
+	bs.chain.SetAssistant(h)
+	chatopscmds.SetAssistant(h)
 }

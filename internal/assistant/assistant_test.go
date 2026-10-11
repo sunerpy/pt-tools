@@ -756,6 +756,12 @@ func TestNotifyGetsAnswersAndConfirmations(t *testing.T) {
 	_, err = e.svc.Decide(context.Background(), a, pc.ID, true)
 	require.NoError(t, err)
 	e.waitRun(a, conv, res.RunID)
+	// run_finished 先进事件流、再交给 Notify：等 Notify 也收到
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got) > 0 && got[len(got)-1].Type == EventRunFinished
+	}, 5*time.Second, 10*time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
 	var kinds []string

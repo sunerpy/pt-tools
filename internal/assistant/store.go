@@ -164,13 +164,14 @@ func (s *Service) CreateConversation(ctx context.Context, a Actor, title string)
 	return s.conversationView(c), nil
 }
 
-// LatestConversation 是属主最近的会话（ChatOps 的滚动会话）；没有时 ok 为假。
+// LatestConversation 是属主最近建的会话（ChatOps 的滚动会话）；没有时 ok 为假。按建的先后（编号）选，不按更新时间：
+// 开了新会话以后，旧会话里还在跑的回答结束时会更新旧会话的时间，下一条消息也不能回到旧会话。
 func (s *Service) LatestConversation(ctx context.Context, a Actor) (ConversationView, bool, error) {
 	if !a.valid() {
 		return ConversationView{}, false, ErrNotFound
 	}
 	var rows []models.AssistantConversation
-	if err := s.db(ctx).Where("owner = ?", a.Owner).Order("updated_at desc, id desc").Limit(1).Find(&rows).Error; err != nil {
+	if err := s.db(ctx).Where("owner = ?", a.Owner).Order("id desc").Limit(1).Find(&rows).Error; err != nil {
 		return ConversationView{}, false, fmt.Errorf("读取会话失败: %w", err)
 	}
 	if len(rows) == 0 {

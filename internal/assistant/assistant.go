@@ -234,6 +234,18 @@ func (s *Service) isRunning(conv uint) bool {
 	return s.runs[conv] != nil
 }
 
+// ownerBusy 报告属主有没有进行中的运行（不管哪个会话）。
+func (s *Service) ownerBusy(owner string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.runs {
+		if r.actor.Owner == owner {
+			return true
+		}
+	}
+	return false
+}
+
 // activeRun 是会话进行中的运行（没有时为 nil）。
 func (s *Service) activeRun(conv uint) *run {
 	s.mu.Lock()

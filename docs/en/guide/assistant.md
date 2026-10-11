@@ -1,6 +1,6 @@
 # AI assistant
 
-pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask in plain language about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader or add subscriptions. Every action that changes something waits for you to confirm it.
+pt-tools has a built-in AI assistant. Once it is connected to a language model you can ask, on the web or in notification channels (Telegram, QQ), about your site statistics, your downloaders and the torrents pt-tools fetched, and have it search for torrents, push them to a downloader or add subscriptions. Every action that changes something waits for you to confirm it.
 
 The assistant runs inside pt-tools. It calls the same tools as [MCP](mcp.md), executed through the [App API](../reference/app-api.md), so it sees the same data with the same redaction as the app. Any OpenAI-compatible Chat Completions endpoint works, as long as the model supports tool calling (function calling).
 
@@ -63,6 +63,17 @@ Before pausing, resuming or deleting a torrent, pushing a torrent to a downloade
 - An action counts once: two pages confirming at the same moment, or a confirmation racing the timeout, produce exactly one decision, and the action runs at most once.
 - Stopping the answer or restarting pt-tools voids every confirmation still waiting.
 - Executed actions are recorded in **ChatOps → Action audit**: the channel is "AI assistant", the command is the tool name, and the user is the conversation's owner (`web:<username>` on the web). Torrents pushed by the assistant show `assistant_push` as their source in the task list.
+
+## In notification channels
+
+With **Notification channels (ChatOps)** turned on in **System → AI assistant settings**, messages from bound Telegram and QQ accounts that are not commands (do not start with `/`) go to the AI assistant; commands stay commands.
+
+- Each binding keeps using one conversation, so earlier turns are part of the context; send `/newchat` to start a new one (after the previous answer finishes).
+- The answer is generated in the background and sent when it is ready. A binding gets one answer at a time: a message sent while the previous question is still being answered gets a "still answering" reply.
+- Before an action that changes something, the assistant sends "Please confirm: …". Reply "yes" (or "ok", "confirm", 确认) to run it; any other reply cancels the action. If the confirmation wait passes, it does not run and you get a timeout notice.
+- Only admin bindings can run actions; for other bindings the assistant does not get those tools. Today every completed binding is an admin, see [ChatOps quick start](chatops-quickstart.md).
+- Messages to the assistant are recorded in the action audit with the command `assistant` (without the text); executed actions get their own entry with the channel "AI assistant" and the user `chatops:<binding id>`.
+- Replies in notification channels are plain text; long answers are sent as several messages (up to 4; anything beyond that is left out).
 
 ## Privacy and security
 

@@ -75,8 +75,11 @@ Every command starts with `/` and is sent in the private chat. Commands are case
 | `/delrss`        | Deletes an RSS subscription interactively (lists them first, then you choose one by name, ID or number)                                 | Admin      |
 | `/sub <title>`   | Searches TMDB for a film or series; reply with a number to subscribe (add a season for series), see [subscriptions](media-subscribe.md) | Admin      |
 | `/subs`          | Lists your subscriptions and their progress                                                                                             | User       |
+| `/newchat`       | Starts a new AI assistant conversation; later messages carry no earlier context, see [AI assistant](assistant.md)                       | User       |
 
 > **Rate limit**: by default each user can send at most 10 commands a minute. Further commands are silently dropped, with no error reply, so nothing is revealed to the sender.
+
+> **AI assistant**: with **Notification channels (ChatOps)** turned on in **System → AI assistant settings**, messages that do not start with `/` go to the AI assistant, and actions run only after you reply "yes", see [AI assistant](assistant.md#in-notification-channels). Otherwise such messages only get the "commands only" hint.
 
 > [!IMPORTANT]
 > At present **every linked account has admin rights**: the commands marked Admin in the table are available to every linked account. Give binding codes only to accounts you trust, and revoke a binding under ChatOps → ChatOps binding (ChatOps 绑定) when it is no longer needed.

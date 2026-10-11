@@ -248,6 +248,7 @@ var webCmd = &cobra.Command{
 		// 内置 AI 助手（M19）：设置在网页上，默认关着
 		assistantSvc := newAssistantService(runtimeCtx, store, srv)
 		srv.SetAssistantService(assistantSvc)
+		wireAssistantChatOps(assistantSvc, bs)
 		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {
 			maybeAutoStartReload(mgr, cfg)
