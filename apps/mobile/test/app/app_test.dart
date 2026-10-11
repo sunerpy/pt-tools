@@ -150,6 +150,12 @@ class _World {
   /// 确认过了没有
   bool approved = false;
 
+  /// 接下来几次长轮询回 reset（每回一次，下一次读会话先失败一次）
+  int eventsReset = 0;
+
+  /// 接下来几次读会话回 502
+  int detailFailures = 0;
+
   Object? api(String method, String path) {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
@@ -185,9 +191,22 @@ class _World {
           'updated_at': _at,
         },
       ],
+      '/api/app/v1/assistant/conversations/7' when detailFailures > 0 => () {
+        detailFailures--;
+        return const ApiReply(502, {
+          'error': 'unavailable',
+          'message': '主机在重启',
+        });
+      }(),
       '/api/app/v1/assistant/conversations/7' => _assistantDetail(
         approved ? 'approved' : 'pending',
       ),
+      '/api/app/v1/assistant/conversations/7/events' when eventsReset > 0 =>
+        () {
+          eventsReset--;
+          detailFailures++;
+          return {'events': [], 'reset': true, 'last': 0, 'running': true};
+        }(),
       '/api/app/v1/assistant/conversations/7/events' => {
         'events': [],
         'reset': false,
@@ -403,6 +422,28 @@ void main() {
     expect(find.text('暂停种子：下载器 1，任务 abc'), findsOneWidget);
     expect(find.text('确认执行'), findsNothing);
     expect(find.text('这台设备只能查询：改动类操作要在网页上确认。'), findsOneWidget);
+  });
+
+  testWidgets('AI 助手：要求重读时会话一时读不到，过一会儿再读并接着长轮询', (tester) async {
+    final w = await _pumpApp(tester);
+    w.eventsReset = 1;
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    expect(find.text('主机在重启'), findsOneWidget, reason: '重读失败时显示原因');
+    await tester.pump(const Duration(seconds: 3));
+    await _settle(tester);
+    expect(find.text('主机在重启'), findsNothing, reason: '再读成功以后错误消失');
+    expect(find.text('暂停 abc'), findsOneWidget);
+    const detail = 'GET /api/app/v1/assistant/conversations/7';
+    expect(w.requests.where((r) => r == detail), hasLength(3));
+    final polls = w.requests
+        .where((r) => r.contains('/assistant/conversations/7/events'))
+        .toList();
+    expect(polls.length, greaterThanOrEqualTo(2), reason: '长轮询接着读');
+    expect(polls.last, contains('after=100'), reason: '从重读到的 last_seq 接着读');
   });
 
   testWidgets('AI 助手：主机没启用时更多里没有入口', (tester) async {

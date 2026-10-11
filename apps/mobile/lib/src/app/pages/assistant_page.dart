@@ -106,8 +106,28 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
   Future<void> _open(int id) async {
     _stopPolling();
     final gen = _generation;
-    final d = await _api.getAssistantConversation(id);
-    if (!mounted || gen != _generation || d == null) return;
+    final AppAssistantConversationDetail? got;
+    try {
+      got = await _api.getAssistantConversation(id);
+    } on Object catch (e) {
+      if (!mounted || gen != _generation) return;
+      if (e is ApiException && e.code == 404) {
+        // 会话已经删了（网页上删的，或者过了保留期）：回到空白
+        _newChat();
+        setState(() => _loading = false);
+        return;
+      }
+      // 隧道断了一下、主机在重启：显示错误，过一会儿再读，长轮询跟着接上
+      setState(() {
+        _loading = false;
+        _error = describeError(e, S.of(context));
+      });
+      await _sleep(const Duration(seconds: 3));
+      if (mounted && gen == _generation) unawaited(_open(id));
+      return;
+    }
+    if (!mounted || gen != _generation || got == null) return;
+    final d = got;
     setState(() {
       _conv = d.id;
       _title = d.title;
