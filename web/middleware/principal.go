@@ -18,12 +18,14 @@ const (
 	KindRemoteDevice = "remote_device"
 	// KindMCP 是经 /mcp 调工具的 API 令牌（工具在进程内调用 App API）
 	KindMCP = "mcp"
+	// KindAssistant 是内置 AI 助手（经进程内的 MCP 工具调用 App API），ID 是会话属主，例如 web:admin、chatops:3
+	KindAssistant = "assistant"
 )
 
 // Principal 是发起请求的主体。session 拥有全部权限范围；令牌与设备只有自己的。
 type Principal struct {
 	Kind string
-	// ID 是 session 的用户名、令牌编号或设备编号
+	// ID 是 session 的用户名、令牌编号、设备编号，或者 AI 助手会话的属主
 	ID string
 	// Name 是令牌或设备的名字
 	Name   string

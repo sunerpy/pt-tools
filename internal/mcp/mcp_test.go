@@ -437,3 +437,31 @@ func TestArgumentValidation(t *testing.T) {
 	}())
 	assert.Contains(t, string(schema), `"maximum":200`)
 }
+
+// 内置 AI 助手调工具：审计记在它自己的通道下，触发用户是会话的属主而不是令牌编号
+func TestAuditChannelAndSubjectForAssistant(t *testing.T) {
+	backend, audit := &fakeBackend{}, &fakeAudit{}
+	caller := Caller{Kind: KindAssistant, Subject: "web:admin", Name: "AI 助手", Scopes: []string{apitoken.ScopeMCPRead, apitoken.ScopeMCPWrite}}
+	srv := NewServer(Deps{
+		Backend: backend, Audit: audit, Version: "v1.0.0-test", Channel: KindAssistant,
+		Caller: func(*sdk.CallToolRequest) (Caller, bool) { return caller, true },
+	})
+	ct, st := sdk.NewInMemoryTransports()
+	ctx := context.Background()
+	ss, err := srv.Connect(ctx, st, nil)
+	require.NoError(t, err)
+	defer func() { _ = ss.Close() }()
+	cs, err := sdk.NewClient(&sdk.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "pause_torrent", Arguments: map[string]any{"downloader_id": 1, "task_id": "h1", "confirm": true}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	entries := audit.all()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "assistant", entries[0].ChannelType)
+	assert.Equal(t, "web:admin", entries[0].ChannelUserID)
+	assert.Equal(t, "pause_torrent", entries[0].Command)
+	assert.Equal(t, "success", entries[0].Result)
+}

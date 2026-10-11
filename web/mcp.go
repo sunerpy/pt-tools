@@ -50,6 +50,16 @@ func (s *Server) mcpHandler() http.Handler {
 	return auth.RequireBearerToken(s.verifyMCPToken, &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(requireMCPScope(streamable))
 }
 
+// AssistantToolServer 是内置 AI 助手一次运行用的 MCP 服务：和 /mcp 同一套工具，调用方固定是 c（Kind 为 mcp.KindAssistant，
+// 属主在 Subject），审计通道是 assistant。助手经内存传输连上它，运行结束时关掉。
+func (s *Server) AssistantToolServer(c mcp.Caller) *sdk.Server {
+	return mcp.NewServer(mcp.Deps{
+		Backend: &mcpBackend{routes: s.mcpRoutes()}, Audit: s.appAudit, ResolveURL: v2.NewTrackerResolver().ResolveDownloadURL,
+		Version: version.GetVersionInfo().Version, Channel: mcp.KindAssistant,
+		Caller: func(*sdk.CallToolRequest) (mcp.Caller, bool) { return c, true },
+	})
+}
+
 // verifyMCPToken 校验 Bearer 令牌：不对回 auth.ErrInvalidToken（401）。
 func (s *Server) verifyMCPToken(ctx context.Context, plain string, _ *http.Request) (*auth.TokenInfo, error) {
 	if s.tokens == nil {
@@ -120,6 +130,9 @@ func (b *mcpBackend) Call(ctx context.Context, c mcp.Caller, req mcp.Request) (m
 		scopes = append(scopes, apitoken.ScopeAppWrite)
 	}
 	p := &middleware.Principal{Kind: middleware.KindMCP, ID: strconv.FormatUint(uint64(c.TokenID), 10), Name: c.Name, Scopes: scopes}
+	if c.Kind == mcp.KindAssistant {
+		p.Kind, p.ID = middleware.KindAssistant, c.Subject
+	}
 	outcome := new(string)
 	ctx = context.WithValue(middleware.WithPrincipal(ctx, p), appOutcomeKey{}, outcome)
 	r, err := http.NewRequestWithContext(ctx, req.Method, req.Path, body)
