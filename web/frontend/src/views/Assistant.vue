@@ -605,6 +605,14 @@ onBeforeUnmount(closeStream);
   overflow-y: auto;
 }
 
+/* 手机上页头的两个按钮落进卡片层：消息区再矮一些，输入框不用往下翻就看得到 */
+@media (max-width: 768px) {
+  .as-msgs {
+    min-height: 240px;
+    max-height: calc(100vh - 430px);
+  }
+}
+
 .as-row {
   display: flex;
 }

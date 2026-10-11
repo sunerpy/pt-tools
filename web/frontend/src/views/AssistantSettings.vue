@@ -289,7 +289,9 @@ onMounted(load);
 </template>
 
 <style scoped>
+/* el-form-item 的内容区是横排的：说明文字占满一行，落在控件下面 */
 .ass-tip {
+  flex-basis: 100%;
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.6;
@@ -311,6 +313,7 @@ onMounted(load);
 
 .ass-keyrow {
   display: flex;
+  flex-basis: 100%;
   gap: 8px;
   align-items: center;
   margin-top: 6px;

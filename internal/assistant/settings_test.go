@@ -104,10 +104,10 @@ func TestStatusAndDisabled(t *testing.T) {
 func TestTestSettings(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.llm.push(reply{text: "OK"})
+	e.llm.push(reply{text: "OK " + testKey})
 	res, err := e.svc.TestSettings(ctx, SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
 	require.NoError(t, err)
-	assert.Equal(t, "OK", res.Reply)
+	assert.Equal(t, "OK ***", res.Reply, "回显的 Key 也换掉")
 	assert.Equal(t, "fake-model", res.Model)
 	req := e.llm.requests()[0]
 	assert.False(t, req.Stream)
