@@ -150,6 +150,10 @@ home:
             body: Sends notifications as JSON to your own system (HMAC-signed), for n8n, Zapier and the like.
             status: experimental
             link: /en/guide/chatops-quickstart
+          - title: AI assistant
+            body: Connect an OpenAI-compatible model to query data, search and push torrents and add subscriptions in plain language; every change waits for your confirmation.
+            status: available
+            link: /en/guide/assistant
       - name: Running it
         items:
           - title: Browser extension
@@ -253,24 +257,20 @@ home:
       - name: Notification channels and GitHub
         sends: Notifications and version checks
         detail: Notifications go only to the channels you enable; checking for updates and upgrading the binary reach GitHub Releases.
+      - name: AI model provider
+        sends: The conversation and the data its tools return
+        detail: Contacted only once the AI assistant is enabled, and only the provider you chose; cookies, passkeys and passwords are never given to the model.
 
   roadmap:
     title: Roadmap
     intro: Designed but not released. The design documents record contracts; they do not mean a feature is available.
     items:
-      - title: MCP server
-        body: Queries and confirmed actions for AI assistants over the Model Context Protocol. Only the interface contract exists today; there is no server.
-        status: planned
-      - title: AI agent
-        body: Multi-step tasks on top of ChatOps, with every write confirmed by you.
-        status: planned
       - title: Verifying WeCom and generic webhooks
         body: Both outbound channels are implemented; they leave Experimental once they have been verified end to end.
         status: planned
     notPlanned:
       title: Deliberately not built
       items:
-        - A chat bot or language model inside pt-tools, or calls to a language model service
         - An AI mode that writes without asking you first
         - Upgrades, restarts or other destructive actions exposed over MCP
 ---

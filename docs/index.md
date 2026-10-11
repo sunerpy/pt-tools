@@ -150,6 +150,10 @@ home:
             body: 把通知以 JSON 发到自己的系统（HMAC 签名），接入 n8n、Zapier 等。
             status: experimental
             link: /guide/chatops-quickstart
+          - title: AI 助手
+            body: 接一个 OpenAI 兼容的大模型，用自然语言查数据、搜索与推送种子、添加订阅；改动类操作每次都要你确认。
+            status: available
+            link: /guide/assistant
       - name: 部署与维护
         items:
           - title: 浏览器扩展
@@ -253,24 +257,20 @@ home:
       - name: 通知通道与 GitHub
         sends: 通知内容与版本查询
         detail: 启用通知后，消息只发给你配置的通道；检查更新和升级二进制时访问 GitHub Releases。
+      - name: AI 模型服务
+        sends: 对话内容与工具查到的数据
+        detail: 启用 AI 助手以后才连接，只发给你选的服务商；Cookie、Passkey 与密码不会交给模型。
 
   roadmap:
     title: 路线图
     intro: 正在设计、尚未发布的能力。设计文档记录的是接口契约，并不表示功能已经可用。
     items:
-      - title: MCP Server
-        body: 通过 MCP 协议向 AI 助手提供查询与需要确认的操作；目前只有接口契约，没有服务端实现。
-        status: planned
-      - title: AI Agent
-        body: 在 ChatOps 之上处理需要多步判断的任务，每一步写操作都由用户确认。
-        status: planned
       - title: 企业微信与通用 Webhook 验证
         body: 这两个出站通道已经实现，完成端到端验证后才会从「实验性」改为正式支持。
         status: planned
     notPlanned:
       title: 有意不做的事
       items:
-        - 在 pt-tools 进程里内置聊天机器人或语言模型，或直接调用语言模型服务
         - 不经用户确认就自动执行写操作的 AI 模式
         - 通过 MCP 开放升级、重启服务这类破坏性操作
 ---
