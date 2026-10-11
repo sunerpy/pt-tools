@@ -70,6 +70,113 @@ class AppApi {
     return null;
   }
 
+  /// 停止会话进行中的回答（没有时什么也不做）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> cancelAssistantRunWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations/{id}/cancel'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 停止会话进行中的回答（没有时什么也不做）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<AppOK?> cancelAssistantRun(int id, { Future<void>? abortTrigger, }) async {
+    final response = await cancelAssistantRunWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
+    
+    }
+    return null;
+  }
+
+  /// 新建会话；带了 message 时接着发这一条（回 202 与这次运行）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppAssistantCreate] appAssistantCreate (required):
+  Future<Response> createAssistantConversationWithHttpInfo(AppAssistantCreate appAssistantCreate, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appAssistantCreate;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 新建会话；带了 message 时接着发这一条（回 202 与这次运行）
+  ///
+  /// Parameters:
+  ///
+  /// * [AppAssistantCreate] appAssistantCreate (required):
+  Future<AppAssistantCreateResult?> createAssistantConversation(AppAssistantCreate appAssistantCreate, { Future<void>? abortTrigger, }) async {
+    final response = await createAssistantConversationWithHttpInfo(appAssistantCreate, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantCreateResult',) as AppAssistantCreateResult;
+    
+    }
+    return null;
+  }
+
   /// 新建订阅
   ///
   /// Note: This method returns the HTTP [Response].
@@ -118,6 +225,118 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppSubscription',) as AppSubscription;
+    
+    }
+    return null;
+  }
+
+  /// 确认或拒绝一个待确认的改动类操作（要 app:write；已经有结论的回 409）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppAssistantDecide] appAssistantDecide (required):
+  Future<Response> decideAssistantConfirmationWithHttpInfo(int id, AppAssistantDecide appAssistantDecide, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/confirmations/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appAssistantDecide;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 确认或拒绝一个待确认的改动类操作（要 app:write；已经有结论的回 409）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppAssistantDecide] appAssistantDecide (required):
+  Future<AppAssistantConfirmation?> decideAssistantConfirmation(int id, AppAssistantDecide appAssistantDecide, { Future<void>? abortTrigger, }) async {
+    final response = await decideAssistantConfirmationWithHttpInfo(id, appAssistantDecide, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantConfirmation',) as AppAssistantConfirmation;
+    
+    }
+    return null;
+  }
+
+  /// 删除会话连同消息与待确认记录（正在回答的回 409）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> deleteAssistantConversationWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'DELETE',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 删除会话连同消息与待确认记录（正在回答的回 409）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<AppOK?> deleteAssistantConversation(int id, { Future<void>? abortTrigger, }) async {
+    final response = await deleteAssistantConversationWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
     
     }
     return null;
@@ -248,6 +467,178 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppExplorePage',) as AppExplorePage;
+    
+    }
+    return null;
+  }
+
+  /// 一个会话：最近的消息、待确认操作与接着读事件的位置
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<Response> getAssistantConversationWithHttpInfo(int id, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations/{id}'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 一个会话：最近的消息、待确认操作与接着读事件的位置
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  Future<AppAssistantConversationDetail?> getAssistantConversation(int id, { Future<void>? abortTrigger, }) async {
+    final response = await getAssistantConversationWithHttpInfo(id, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantConversationDetail',) as AppAssistantConversationDetail;
+    
+    }
+    return null;
+  }
+
+  /// 长轮询会话的事件：after 以后有事件马上回，没有时最多等 wait 秒
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] after:
+  ///   上次读到的序号（会话详情的 last_seq，或者上一页的 last）
+  ///
+  /// * [int] wait:
+  ///   没有事件时最多等几秒，默认与上限都是 25
+  Future<Response> getAssistantEventsWithHttpInfo(int id, { int? after, int? wait, Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations/{id}/events'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (after != null) {
+      queryParams.addAll(_queryParams('', 'after', after));
+    }
+    if (wait != null) {
+      queryParams.addAll(_queryParams('', 'wait', wait));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 长轮询会话的事件：after 以后有事件马上回，没有时最多等 wait 秒
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [int] after:
+  ///   上次读到的序号（会话详情的 last_seq，或者上一页的 last）
+  ///
+  /// * [int] wait:
+  ///   没有事件时最多等几秒，默认与上限都是 25
+  Future<AppAssistantEventPage?> getAssistantEvents(int id, { int? after, int? wait, Future<void>? abortTrigger, }) async {
+    final response = await getAssistantEventsWithHttpInfo(id, after: after, wait: wait, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantEventPage',) as AppAssistantEventPage;
+    
+    }
+    return null;
+  }
+
+  /// AI 助手启用没有、用的模型、调用者能不能确认改动类操作（不含 Key 与接口地址）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  Future<Response> getAssistantStatusWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/status';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// AI 助手启用没有、用的模型、调用者能不能确认改动类操作（不含 Key 与接口地址）
+  Future<AppAssistantStatus?> getAssistantStatus({ Future<void>? abortTrigger, }) async {
+    final response = await getAssistantStatusWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantStatus',) as AppAssistantStatus;
     
     }
     return null;
@@ -567,6 +958,54 @@ class AppApi {
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppUpdates',) as AppUpdates;
     
+    }
+    return null;
+  }
+
+  /// 调用者自己的 AI 助手会话（最近的在前，最多 100 个）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  Future<Response> listAssistantConversationsWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 调用者自己的 AI 助手会话（最近的在前，最多 100 个）
+  Future<List<AppAssistantConversation>?> listAssistantConversations({ Future<void>? abortTrigger, }) async {
+    final response = await listAssistantConversationsWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AppAssistantConversation>') as List)
+        .cast<AppAssistantConversation>()
+        .toList(growable: false);
+
     }
     return null;
   }
@@ -1193,6 +1632,64 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppMessage',) as AppMessage;
+    
+    }
+    return null;
+  }
+
+  /// 发一条消息并在后台开始回答（同一个会话同时只有一次运行，另一个回 409）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppAssistantSend] appAssistantSend (required):
+  Future<Response> sendAssistantMessageWithHttpInfo(int id, AppAssistantSend appAssistantSend, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/assistant/conversations/{id}/messages'
+      .replaceAll('{id}', id.toString());
+
+    // ignore: prefer_final_locals
+    Object? postBody = appAssistantSend;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 发一条消息并在后台开始回答（同一个会话同时只有一次运行，另一个回 409）
+  ///
+  /// Parameters:
+  ///
+  /// * [int] id (required):
+  ///
+  /// * [AppAssistantSend] appAssistantSend (required):
+  Future<AppAssistantSendResult?> sendAssistantMessage(int id, AppAssistantSend appAssistantSend, { Future<void>? abortTrigger, }) async {
+    final response = await sendAssistantMessageWithHttpInfo(id, appAssistantSend, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppAssistantSendResult',) as AppAssistantSendResult;
     
     }
     return null;

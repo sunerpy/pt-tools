@@ -553,4 +553,70 @@ class SEn extends S {
   @override
   String get forgetConfirm =>
       'You\'ll need to scan again to pair. The device record stays on the host; revoke it in the web UI if needed.';
+
+  @override
+  String get moreAssistant => 'AI assistant';
+
+  @override
+  String get assistantTitle => 'AI assistant';
+
+  @override
+  String get assistantNew => 'New conversation';
+
+  @override
+  String get assistantHint => 'Ask something';
+
+  @override
+  String get assistantSend => 'Send';
+
+  @override
+  String get assistantStop => 'Stop';
+
+  @override
+  String get assistantEmpty =>
+      'Try: \"How are my sites doing?\", \"How many torrents are downloading?\", \"Search for Dune 2160p\"';
+
+  @override
+  String get assistantDisabled =>
+      'The AI assistant is off. Turn it on in pt-tools under System → AI assistant settings.';
+
+  @override
+  String get assistantThinking => 'Thinking…';
+
+  @override
+  String get assistantWaitConfirm => 'Waiting for you to confirm…';
+
+  @override
+  String assistantTool(String name) {
+    return 'Running $name…';
+  }
+
+  @override
+  String get assistantApprove => 'Confirm';
+
+  @override
+  String get assistantDeny => 'Deny';
+
+  @override
+  String get assistantPending => 'Needs confirmation';
+
+  @override
+  String get assistantApproved => 'Confirmed';
+
+  @override
+  String get assistantDenied => 'Denied';
+
+  @override
+  String get assistantExpired => 'Expired';
+
+  @override
+  String get assistantReadOnly =>
+      'This device is read-only: confirm changes in the web UI.';
+
+  @override
+  String get assistantDecided => 'That action was already handled';
+
+  @override
+  String get assistantPrivacy =>
+      'The conversation and tool results are sent to the chosen model provider';
 }

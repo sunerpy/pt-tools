@@ -1050,6 +1050,126 @@ abstract class S {
   /// In zh, this message translates to:
   /// **'忘掉以后要重新扫码配对。主机上的设备记录不会删除，需要的话在网页上撤销。'**
   String get forgetConfirm;
+
+  /// No description provided for @moreAssistant.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 助手'**
+  String get moreAssistant;
+
+  /// No description provided for @assistantTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 助手'**
+  String get assistantTitle;
+
+  /// No description provided for @assistantNew.
+  ///
+  /// In zh, this message translates to:
+  /// **'新对话'**
+  String get assistantNew;
+
+  /// No description provided for @assistantHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'问点什么'**
+  String get assistantHint;
+
+  /// No description provided for @assistantSend.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送'**
+  String get assistantSend;
+
+  /// No description provided for @assistantStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止'**
+  String get assistantStop;
+
+  /// No description provided for @assistantEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'可以问：「我的站点数据怎么样」「下载器现在有多少在下载」「搜一下 沙丘 2160p」'**
+  String get assistantEmpty;
+
+  /// No description provided for @assistantDisabled.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 助手没有启用：在 pt-tools 网页的「系统 → AI 助手设置」里打开。'**
+  String get assistantDisabled;
+
+  /// No description provided for @assistantThinking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在思考…'**
+  String get assistantThinking;
+
+  /// No description provided for @assistantWaitConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'等你确认上面的操作…'**
+  String get assistantWaitConfirm;
+
+  /// No description provided for @assistantTool.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在执行 {name}…'**
+  String assistantTool(String name);
+
+  /// No description provided for @assistantApprove.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认执行'**
+  String get assistantApprove;
+
+  /// No description provided for @assistantDeny.
+  ///
+  /// In zh, this message translates to:
+  /// **'拒绝'**
+  String get assistantDeny;
+
+  /// No description provided for @assistantPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'等你确认'**
+  String get assistantPending;
+
+  /// No description provided for @assistantApproved.
+  ///
+  /// In zh, this message translates to:
+  /// **'已确认'**
+  String get assistantApproved;
+
+  /// No description provided for @assistantDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'已拒绝'**
+  String get assistantDenied;
+
+  /// No description provided for @assistantExpired.
+  ///
+  /// In zh, this message translates to:
+  /// **'已过期'**
+  String get assistantExpired;
+
+  /// No description provided for @assistantReadOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台设备只能查询：改动类操作要在网页上确认。'**
+  String get assistantReadOnly;
+
+  /// No description provided for @assistantDecided.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个操作已经处理过了'**
+  String get assistantDecided;
+
+  /// No description provided for @assistantPrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话与工具结果会发给所选的模型服务商'**
+  String get assistantPrivacy;
 }
 
 class _SDelegate extends LocalizationsDelegate<S> {

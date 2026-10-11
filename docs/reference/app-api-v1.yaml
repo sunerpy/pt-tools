@@ -398,6 +398,154 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppExplorePage" }
         default: { $ref: "#/components/responses/Error" }
+  /assistant/status:
+    get:
+      operationId: getAssistantStatus
+      tags: [App]
+      summary: AI 助手启用没有、用的模型、调用者能不能确认改动类操作（不含 Key 与接口地址）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantStatus" }
+        default: { $ref: "#/components/responses/Error" }
+  /assistant/conversations:
+    get:
+      operationId: listAssistantConversations
+      tags: [App]
+      summary: 调用者自己的 AI 助手会话（最近的在前，最多 100 个）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AppAssistantConversation" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createAssistantConversation
+      tags: [App]
+      summary: 新建会话；带了 message 时接着发这一条（回 202 与这次运行）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppAssistantCreate" }
+      responses:
+        "201":
+          description: 新建的会话
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantCreateResult" }
+        "202":
+          description: 新建的会话与开始的运行
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantCreateResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /assistant/conversations/{id}:
+    get:
+      operationId: getAssistantConversation
+      tags: [App]
+      summary: 一个会话：最近的消息、待确认操作与接着读事件的位置
+      parameters:
+        - $ref: "#/components/parameters/AssistantID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantConversationDetail" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteAssistantConversation
+      tags: [App]
+      summary: 删除会话连同消息与待确认记录（正在回答的回 409）
+      parameters:
+        - $ref: "#/components/parameters/AssistantID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOK" }
+        default: { $ref: "#/components/responses/Error" }
+  /assistant/conversations/{id}/messages:
+    post:
+      operationId: sendAssistantMessage
+      tags: [App]
+      summary: 发一条消息并在后台开始回答（同一个会话同时只有一次运行，另一个回 409）
+      parameters:
+        - $ref: "#/components/parameters/AssistantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppAssistantSend" }
+      responses:
+        "202":
+          description: 开始的运行与落库的用户消息
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantSendResult" }
+        default: { $ref: "#/components/responses/Error" }
+  /assistant/conversations/{id}/cancel:
+    post:
+      operationId: cancelAssistantRun
+      tags: [App]
+      summary: 停止会话进行中的回答（没有时什么也不做）
+      parameters:
+        - $ref: "#/components/parameters/AssistantID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOK" }
+        default: { $ref: "#/components/responses/Error" }
+  /assistant/conversations/{id}/events:
+    get:
+      operationId: getAssistantEvents
+      tags: [App]
+      summary: 长轮询会话的事件：after 以后有事件马上回，没有时最多等 wait 秒
+      parameters:
+        - $ref: "#/components/parameters/AssistantID"
+        - name: after
+          in: query
+          description: 上次读到的序号（会话详情的 last_seq，或者上一页的 last）
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: wait
+          in: query
+          description: 没有事件时最多等几秒，默认与上限都是 25
+          schema: { type: integer, minimum: 0, maximum: 25 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantEventPage" }
+        default: { $ref: "#/components/responses/Error" }
+  /assistant/confirmations/{id}:
+    post:
+      operationId: decideAssistantConfirmation
+      tags: [App]
+      summary: 确认或拒绝一个待确认的改动类操作（要 app:write；已经有结论的回 409）
+      parameters:
+        - $ref: "#/components/parameters/AssistantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppAssistantDecide" }
+      responses:
+        "200":
+          description: 有了结论的待确认操作
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppAssistantConfirmation" }
+        default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -411,6 +559,11 @@ components:
       required: true
       schema: { type: string }
     SubscriptionID:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    AssistantID:
       name: id
       in: path
       required: true
@@ -440,7 +593,7 @@ components:
       properties:
         error:
           type: string
-          description: invalid_body、invalid_argument、unauthorized、forbidden、not_found、method_not_allowed、busy、rate_limited、internal、search_failed、download_failed、attend_failed、upstream、unavailable 等
+          description: invalid_body、invalid_argument、unauthorized、forbidden、not_found、method_not_allowed、busy、rate_limited、internal、search_failed、download_failed、attend_failed、upstream、unavailable、assistant_disabled、decided、too_many 等
         message: { type: string }
     AppOK:
       type: object
@@ -1044,3 +1197,145 @@ components:
         in_library: { type: boolean }
         subscribed: { type: boolean }
         subscription_id: { type: integer }
+    AppAssistantStatus:
+      type: object
+      required: [enabled, model, can_confirm, chatops]
+      properties:
+        enabled: { type: boolean, description: "启用了而且接口地址与模型都配好了" }
+        model: { type: string, description: "没启用时为空" }
+        can_confirm: { type: boolean, description: "调用者能不能确认改动类操作（有 app:write）" }
+        chatops: { type: boolean, description: "通知渠道里的非命令消息交不交给助手" }
+    AppAssistantConversation:
+      type: object
+      required: [id, title, entry, running, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        entry: { type: string, description: "web、app 或 chatops：在哪里建的" }
+        running: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AppAssistantToolCall:
+      type: object
+      required: [id, name, arguments]
+      properties:
+        id: { type: string }
+        name: { type: string, description: "工具名（与 MCP 的工具相同）" }
+        arguments: { type: string, description: "规范化、脱敏以后的参数（JSON 文本）" }
+        write: { type: boolean, description: "改动类操作（要确认）" }
+    AppAssistantMessage:
+      type: object
+      required: [id, role, content, created_at]
+      properties:
+        id: { type: integer }
+        run_id: { type: string }
+        role: { type: string, enum: [user, assistant, tool, notice] }
+        content: { type: string, description: "脱敏以后的文字；tool 是工具返回的 JSON 文本" }
+        tool_calls:
+          type: array
+          items: { $ref: "#/components/schemas/AppAssistantToolCall" }
+        tool_name: { type: string }
+        tool_call_id: { type: string }
+        is_error: { type: boolean }
+        created_at: { type: string, format: date-time }
+    AppAssistantConfirmation:
+      type: object
+      required: [id, run_id, tool_call_id, tool, summary, arguments, status, expires_at, created_at]
+      properties:
+        id: { type: integer }
+        run_id: { type: string }
+        tool_call_id: { type: string }
+        tool: { type: string }
+        summary:
+          { type: string, description: "给人看的一句话，例如「暂停种子：下载器 1，任务 abc」" }
+        arguments: { type: object, additionalProperties: true }
+        status: { type: string, enum: [pending, approved, denied, expired] }
+        decided_by:
+          type: string
+          description: "属主，或者 timeout、cancel、restart、shutdown"
+        decided_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    AppAssistantConversationDetail:
+      type: object
+      required:
+        [id, title, entry, running, created_at, updated_at, messages, confirmations, last_seq]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        entry: { type: string }
+        running: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/AppAssistantMessage" }
+        confirmations:
+          type: array
+          items: { $ref: "#/components/schemas/AppAssistantConfirmation" }
+        run_id: { type: string, description: "进行中的运行" }
+        partial: { type: string, description: "进行中的运行到现在的回答文字" }
+        last_seq:
+          type: integer
+          format: int64
+          description: "读事件的 after：从它接着读不会漏"
+    AppAssistantEvent:
+      type: object
+      required: [seq, type, at]
+      properties:
+        seq: { type: integer, format: int64 }
+        type:
+          type: string
+          enum: [run_started, delta, message, tool_started, confirmation, run_finished]
+        run_id: { type: string }
+        text: { type: string, description: "delta 的文字" }
+        replace: { type: boolean, description: "为真时 text 是到现在的全部回答文字，整段替换" }
+        message: { $ref: "#/components/schemas/AppAssistantMessage" }
+        tool: { $ref: "#/components/schemas/AppAssistantToolCall" }
+        confirmation: { $ref: "#/components/schemas/AppAssistantConfirmation" }
+        status:
+          { type: string, enum: [done, canceled, failed], description: "run_finished 的结束状态" }
+        error: { type: string }
+        at: { type: string, format: date-time }
+    AppAssistantEventPage:
+      type: object
+      required: [events, reset, last, running]
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/AppAssistantEvent" }
+        reset:
+          type: boolean
+          description: "中间的事件丢了（或者 pt-tools 重启过）：重新读会话，从它的 last_seq 接着读"
+        last: { type: integer, format: int64, description: "下次读的 after" }
+        running: { type: boolean }
+    AppAssistantSendResult:
+      type: object
+      required: [run_id, message]
+      properties:
+        run_id: { type: string }
+        message: { $ref: "#/components/schemas/AppAssistantMessage" }
+    AppAssistantCreateResult:
+      type: object
+      required: [conversation]
+      properties:
+        conversation: { $ref: "#/components/schemas/AppAssistantConversation" }
+        run: { $ref: "#/components/schemas/AppAssistantSendResult" }
+    AppAssistantCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        title: { type: string, maxLength: 200 }
+        message: { type: string, maxLength: 4000 }
+    AppAssistantSend:
+      type: object
+      required: [text]
+      additionalProperties: false
+      properties:
+        text: { type: string, minLength: 1, maxLength: 4000 }
+    AppAssistantDecide:
+      type: object
+      required: [approve]
+      additionalProperties: false
+      properties:
+        approve: { type: boolean, description: "true 确认执行，false 拒绝" }

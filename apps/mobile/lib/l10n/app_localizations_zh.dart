@@ -546,4 +546,66 @@ class SZh extends S {
 
   @override
   String get forgetConfirm => '忘掉以后要重新扫码配对。主机上的设备记录不会删除，需要的话在网页上撤销。';
+
+  @override
+  String get moreAssistant => 'AI 助手';
+
+  @override
+  String get assistantTitle => 'AI 助手';
+
+  @override
+  String get assistantNew => '新对话';
+
+  @override
+  String get assistantHint => '问点什么';
+
+  @override
+  String get assistantSend => '发送';
+
+  @override
+  String get assistantStop => '停止';
+
+  @override
+  String get assistantEmpty => '可以问：「我的站点数据怎么样」「下载器现在有多少在下载」「搜一下 沙丘 2160p」';
+
+  @override
+  String get assistantDisabled => 'AI 助手没有启用：在 pt-tools 网页的「系统 → AI 助手设置」里打开。';
+
+  @override
+  String get assistantThinking => '正在思考…';
+
+  @override
+  String get assistantWaitConfirm => '等你确认上面的操作…';
+
+  @override
+  String assistantTool(String name) {
+    return '正在执行 $name…';
+  }
+
+  @override
+  String get assistantApprove => '确认执行';
+
+  @override
+  String get assistantDeny => '拒绝';
+
+  @override
+  String get assistantPending => '等你确认';
+
+  @override
+  String get assistantApproved => '已确认';
+
+  @override
+  String get assistantDenied => '已拒绝';
+
+  @override
+  String get assistantExpired => '已过期';
+
+  @override
+  String get assistantReadOnly => '这台设备只能查询：改动类操作要在网页上确认。';
+
+  @override
+  String get assistantDecided => '这个操作已经处理过了';
+
+  @override
+  String get assistantPrivacy => '对话与工具结果会发给所选的模型服务商';
 }

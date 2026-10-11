@@ -5,7 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:pt_tools_app/src/app/app.dart';
+import 'package:pt_tools_app/src/app/pages/assistant_page.dart';
 import 'package:pt_tools_app/src/app/providers.dart';
 import 'package:pt_tools_app/src/app/storage.dart';
 import 'package:pt_tools_app/src/remote/bytes.dart';
@@ -21,9 +23,60 @@ Map<String, Object?> _meta(List<String> scopes) => {
   'name': 'pt-tools',
   'version': 'v1.0.0-test',
   'remote_api_level': 1,
-  'features': ['overview'],
+  'features': ['overview', 'assistant'],
   'principal': {'kind': 'remote_device', 'name': '测试手机', 'scopes': scopes},
 };
+
+const _at = '2026-10-11T08:00:00Z';
+
+/// AI 助手：一个会话，最后一条是要确认的暂停（确认以后变 approved）。
+Map<String, Object?> _assistantDetail(String status) => {
+  'id': 7,
+  'title': '暂停那个种子',
+  'entry': 'app',
+  'running': status == 'pending',
+  'created_at': _at,
+  'updated_at': _at,
+  'run_id': status == 'pending' ? 'r1' : null,
+  'last_seq': 100,
+  'messages': [
+    {
+      'id': 1,
+      'role': 'user',
+      'content': '暂停 abc',
+      'run_id': 'r1',
+      'created_at': _at,
+    },
+    {
+      'id': 2,
+      'role': 'assistant',
+      'content': '**好的**，暂停这个种子。',
+      'run_id': 'r1',
+      'created_at': _at,
+      'tool_calls': [
+        {
+          'id': 'c1',
+          'name': 'pause_torrent',
+          'arguments': '{"task_id":"abc"}',
+          'write': true,
+        },
+      ],
+    },
+  ],
+  'confirmations': [
+    {
+      'id': 9,
+      'run_id': 'r1',
+      'tool_call_id': 'c1',
+      'tool': 'pause_torrent',
+      'summary': '暂停种子：下载器 1，任务 abc',
+      'arguments': {'task_id': 'abc'},
+      'status': status,
+      'expires_at': _at,
+      'created_at': _at,
+    },
+  ],
+}..removeWhere((k, v) => v == null);
 
 final _overview = {
   'totals': {
@@ -93,6 +146,24 @@ class _World {
   /// 种子列表回 502（下载器连不上）
   bool failTorrents = false;
 
+  /// AI 助手启用没有
+  bool assistantEnabled = true;
+
+  /// 确认过了没有
+  bool approved = false;
+
+  /// 接下来几次长轮询回 reset（每回一次，下一次读会话先失败一次）
+  int eventsReset = 0;
+
+  /// 接下来几次读会话回 502
+  int detailFailures = 0;
+
+  /// 设了以后长轮询一直等着它（模拟主机上没有新事件）
+  Completer<void>? holdEvents;
+
+  /// 设了以后发消息等着它才回
+  Completer<void>? holdSend;
+
   Object? api(String method, String path) {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
@@ -112,6 +183,65 @@ class _World {
         'failed': 0,
         'results': [],
       },
+      '/api/app/v1/assistant/status' => {
+        'enabled': assistantEnabled,
+        'model': assistantEnabled ? 'deepseek-flash' : '',
+        'can_confirm': assistantEnabled && scopes.contains('app:write'),
+        'chatops': false,
+      },
+      '/api/app/v1/assistant/conversations' => [
+        {
+          'id': 7,
+          'title': '暂停那个种子',
+          'entry': 'app',
+          'running': !approved,
+          'created_at': _at,
+          'updated_at': _at,
+        },
+      ],
+      '/api/app/v1/assistant/conversations/7' when detailFailures > 0 => () {
+        detailFailures--;
+        return const ApiReply(502, {
+          'error': 'unavailable',
+          'message': '主机在重启',
+        });
+      }(),
+      '/api/app/v1/assistant/conversations/7' => _assistantDetail(
+        approved ? 'approved' : 'pending',
+      ),
+      '/api/app/v1/assistant/conversations/7/events' when eventsReset > 0 =>
+        () {
+          eventsReset--;
+          detailFailures++;
+          return {'events': [], 'reset': true, 'last': 0, 'running': true};
+        }(),
+      '/api/app/v1/assistant/conversations/7/events' when holdEvents != null =>
+        holdEvents!.future.then<Object?>(
+          (_) => {'events': [], 'reset': false, 'last': 100, 'running': false},
+        ),
+      '/api/app/v1/assistant/conversations/7/events' => {
+        'events': [],
+        'reset': false,
+        'last': 100,
+        'running': !approved,
+      },
+      '/api/app/v1/assistant/conversations/7/messages' =>
+        (holdSend?.future ?? Future<void>.value()).then<Object?>(
+          (_) => {
+            'run_id': 'r2',
+            'message': {
+              'id': 3,
+              'role': 'user',
+              'content': '再问一句',
+              'run_id': 'r2',
+              'created_at': _at,
+            },
+          },
+        ),
+      '/api/app/v1/assistant/confirmations/9' => () {
+        approved = true;
+        return (_assistantDetail('approved')['confirmations'] as List).first;
+      }(),
       _ => null,
     };
   }
@@ -125,12 +255,25 @@ class _World {
   }
 }
 
+/// 读主机记录要等 [gate]（模拟冷启动时安全存储读得慢）。
+class _SlowHostStore extends MemoryHostStore {
+  _SlowHostStore(super.host, this.gate);
+  final Future<void> gate;
+
+  @override
+  Future<HostRecord?> load() async {
+    await gate;
+    return super.load();
+  }
+}
+
 Future<_World> _pumpApp(
   WidgetTester tester, {
   List<String> scopes = const ['app:read', 'app:write'],
   bool paired = true,
   String mode = 'device',
   HostStore? store,
+  Future<void>? hostLoaded,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
   addTearDown(tester.platformDispatcher.clearLocalesTestValue);
@@ -158,7 +301,10 @@ Future<_World> _pumpApp(
       retry: (_, _) => null,
       overrides: [
         hostStoreProvider.overrideWithValue(
-          store ?? MemoryHostStore(paired ? rec : null),
+          store ??
+              (hostLoaded != null
+                  ? _SlowHostStore(paired ? rec : null, hostLoaded)
+                  : MemoryHostStore(paired ? rec : null)),
         ),
         channelFactoryProvider.overrideWithValue(w.dial),
         refreshIntervalProvider.overrideWithValue(const Duration(days: 1)),
@@ -280,6 +426,135 @@ void main() {
     expect(find.textContaining('撤销「测试手机」'), findsOneWidget);
     expect(find.textContaining('keystore 坏了'), findsOneWidget);
     expect(find.text('配对 pt-tools'), findsOneWidget, reason: '还在配对页');
+  });
+
+  testWidgets('AI 助手：更多里有入口，打开最近的会话，确认卡片点「确认执行」发确认', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    expect(find.byKey(const Key('more-assistant')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    expect(find.text('暂停 abc'), findsOneWidget);
+    expect(find.text('好的，暂停这个种子。'), findsOneWidget, reason: '回答按纯文本显示');
+    expect(find.text('暂停种子：下载器 1，任务 abc'), findsOneWidget);
+    expect(find.text('等你确认'), findsOneWidget);
+    expect(find.text('等你确认上面的操作…'), findsOneWidget);
+    await tester.tap(find.text('确认执行'));
+    await _settle(tester);
+    expect(w.requests, contains('POST /api/app/v1/assistant/confirmations/9'));
+    expect(find.text('已确认'), findsOneWidget);
+    expect(find.text('确认执行'), findsNothing);
+    expect(
+      w.requests.where((r) => r.contains('/assistant/conversations/7/events')),
+      isNotEmpty,
+      reason: '长轮询事件',
+    );
+  });
+
+  testWidgets('AI 助手：只读设备看得到确认卡片，但没有确认按钮', (tester) async {
+    await _pumpApp(tester, scopes: const ['app:read']);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    expect(find.text('暂停种子：下载器 1，任务 abc'), findsOneWidget);
+    expect(find.text('确认执行'), findsNothing);
+    expect(find.text('这台设备只能查询：改动类操作要在网页上确认。'), findsOneWidget);
+  });
+
+  testWidgets('AI 助手：要求重读时会话一时读不到，过一会儿再读并接着长轮询', (tester) async {
+    final w = await _pumpApp(tester);
+    w.eventsReset = 1;
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    expect(find.text('主机在重启'), findsOneWidget, reason: '重读失败时显示原因');
+    await tester.pump(const Duration(seconds: 3));
+    await _settle(tester);
+    expect(find.text('主机在重启'), findsNothing, reason: '再读成功以后错误消失');
+    expect(find.text('暂停 abc'), findsOneWidget);
+    const detail = 'GET /api/app/v1/assistant/conversations/7';
+    expect(w.requests.where((r) => r == detail), hasLength(3));
+    final polls = w.requests
+        .where((r) => r.contains('/assistant/conversations/7/events'))
+        .toList();
+    expect(polls.length, greaterThanOrEqualTo(2), reason: '长轮询接着读');
+    expect(polls.last, contains('after=100'), reason: '从重读到的 last_seq 接着读');
+  });
+
+  testWidgets('AI 助手：离开页面时取消进行中的长轮询（主机收到 CANCEL）', (tester) async {
+    final w = await _pumpApp(tester);
+    w.holdEvents = Completer<void>();
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    final host = w.hosts.last;
+    final poll = host.requests.lastWhere(
+      (r) =>
+          (r['path'] as String).contains('/assistant/conversations/7/events'),
+    );
+    expect(host.cancelled, isNot(contains(poll['id'])), reason: '还在等');
+    GoRouter.of(tester.element(find.byType(AssistantPage))).go('/more');
+    await _settle(tester);
+    expect(find.byType(AssistantPage), findsNothing);
+    expect(host.cancelled, contains(poll['id']), reason: '关页面时取消长轮询');
+    w.holdEvents!.complete();
+  });
+
+  testWidgets('AI 助手：发送中不能开新对话，回应回来以后落在原来的会话上', (tester) async {
+    final w = await _pumpApp(tester);
+    w.approved = true;
+    w.holdSend = Completer<void>();
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    IconButton newChat() => tester.widget<IconButton>(
+      find.widgetWithIcon(IconButton, Icons.add_comment_outlined),
+    );
+    expect(newChat().onPressed, isNotNull);
+    await tester.enterText(find.byKey(const Key('assistant-input')), '再问一句');
+    await tester.tap(find.byKey(const Key('assistant-send')));
+    await _settle(tester);
+    expect(
+      w.requests,
+      contains('POST /api/app/v1/assistant/conversations/7/messages'),
+    );
+    expect(newChat().onPressed, isNull, reason: '发送请求还没回来');
+    w.holdSend!.complete();
+    await _settle(tester);
+    expect(find.text('再问一句'), findsOneWidget);
+    expect(find.text('暂停 abc'), findsOneWidget, reason: '还是原来的会话');
+  });
+
+  testWidgets('AI 助手：冷启动直接打开这一页时等主机记录读出来再读会话', (tester) async {
+    tester.platformDispatcher.defaultRouteNameTestValue = '/more/assistant';
+    addTearDown(tester.platformDispatcher.clearDefaultRouteNameTestValue);
+    final loaded = Completer<void>();
+    await _pumpApp(tester, hostLoaded: loaded.future);
+    await _settle(tester);
+    expect(find.byType(AssistantPage), findsOneWidget);
+    expect(find.textContaining('Null check'), findsNothing);
+    loaded.complete();
+    await _settle(tester);
+    expect(find.text('暂停 abc'), findsOneWidget, reason: '主机记录读出来以后打开最近的会话');
+  });
+
+  testWidgets('AI 助手：主机没启用时更多里没有入口', (tester) async {
+    final w = await _pumpApp(tester);
+    w.assistantEnabled = false;
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    expect(find.byKey(const Key('more-assistant')), findsNothing);
   });
 
   testWidgets('配对页：链接不对时说明原因', (tester) async {

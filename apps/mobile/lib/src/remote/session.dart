@@ -53,6 +53,13 @@ class ResponseAbortedException implements Exception {
   String toString() => 'ResponseAbortedException: $reason';
 }
 
+/// 调用方取消了请求（[RemoteSession.request] 的 abort 完成了）。
+class RequestCanceledException implements Exception {
+  const RequestCanceledException();
+  @override
+  String toString() => 'RequestCanceledException: 请求已取消';
+}
+
 /// 隧道上的一个回应：状态、回应头（小写名字）与回应体。
 class TunnelResponse {
   TunnelResponse(this.status, this.headers, this.body);
@@ -336,11 +343,14 @@ class RemoteSession {
   }
 
   /// 发一个请求，等到回应头。[path] 是以 / 开头的路径，可以带查询串。回应体要读完或者取消，否则一直占着一个名额。
+  /// [abort] 完成时取消这个请求：给主机发 CANCEL、让出名额；回应头还没到时抛 [RequestCanceledException]，
+  /// 正在读回应体时回应体出这个错。
   Future<TunnelResponse> request(
     String method,
     String path, {
     Map<String, String> headers = const {},
     List<int>? body,
+    Future<void>? abort,
   }) async {
     if (closed) throw _error ?? const SessionClosedException('会话已经结束');
     if (body != null && body.length > maxRequestBody) {
@@ -388,7 +398,21 @@ class RemoteSession {
       _finish(c);
       rethrow;
     }
+    if (abort != null) unawaited(abort.then((_) => _abort(c)));
     return c.head.future;
+  }
+
+  /// 调用方不要这个请求了（已经结束的不管）。
+  void _abort(_Call c) {
+    if (!identical(_calls[c.id], c)) return;
+    _cancel(c, '调用方取消');
+    const err = RequestCanceledException();
+    if (!c.head.isCompleted) c.head.completeError(err);
+    final body = c.body;
+    if (body != null && !body.isClosed) {
+      body.addError(err);
+      unawaited(body.close());
+    }
   }
 
   /// 配对会话里提交配对密钥与设备名。成功时返回主机记下的设备（JSON），之后主机会以 GOAWAY paired 关掉这条会话。

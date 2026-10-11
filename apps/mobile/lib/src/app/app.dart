@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../l10n/app_localizations.dart';
+import 'pages/assistant_page.dart';
 import 'pages/brush_page.dart';
 import 'pages/downloaders_page.dart';
 import 'pages/home_shell.dart';
@@ -107,6 +108,10 @@ final routerProvider = Provider<GoRouter>((ref) {
                 builder: (_, _) => const MorePage(),
                 routes: [
                   GoRoute(path: 'sites', builder: (_, _) => const SitesPage()),
+                  GoRoute(
+                    path: 'assistant',
+                    builder: (_, _) => const AssistantPage(),
+                  ),
                   GoRoute(path: 'tasks', builder: (_, _) => const TasksPage()),
                   GoRoute(path: 'brush', builder: (_, _) => const BrushPage()),
                   GoRoute(

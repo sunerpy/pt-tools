@@ -122,6 +122,16 @@ final canWriteProvider = Provider<bool>((ref) {
   return ref.watch(hostProvider).value?.canWrite ?? false;
 });
 
+/// AI 助手的状态；主机的版本没有这个功能时为 null（App API 的 features 里没有 assistant）。
+final assistantStatusProvider = FutureProvider.autoDispose<AppAssistantStatus?>(
+  (ref) async {
+    ref.watch(onlineEpochProvider);
+    final meta = await ref.watch(metaProvider.future);
+    if (!meta.features.contains('assistant')) return null;
+    return requireApi(ref).getAssistantStatus();
+  },
+);
+
 final overviewProvider = FutureProvider.autoDispose<AppOverview>((ref) async {
   ref.watch(onlineEpochProvider);
   return _need(await requireApi(ref).getOverview());

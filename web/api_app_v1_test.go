@@ -165,7 +165,14 @@ func TestAppAPI_TokensCannotReachSessionAPIs(t *testing.T) {
 }
 
 // 只读但用 POST 传条件的路由
-var appReadPosts = map[string]bool{"POST /search": true}
+var appReadPosts = map[string]bool{
+	"POST /search": true,
+	// AI 助手的对话只动调用者自己的会话：只要 app:read；改动类操作另要确认（POST /assistant/confirmations/{id} 要 app:write）
+	"POST /assistant/conversations":               true,
+	"DELETE /assistant/conversations/{id}":        true,
+	"POST /assistant/conversations/{id}/messages": true,
+	"POST /assistant/conversations/{id}/cancel":   true,
+}
 
 // 路由表：每条都声明了权限范围；读是 GET（或者上面列出的只读 POST）+ app:read，写是别的方法 + app:write；没有重复
 func TestAppAPI_RouteTable(t *testing.T) {

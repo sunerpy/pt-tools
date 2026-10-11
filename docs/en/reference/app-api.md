@@ -41,33 +41,44 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | `internal`                                                      | 500      | An internal error in pt-tools                                                                                        |
 | `search_failed`, `download_failed`, `attend_failed`, `upstream` | 502      | Searching, downloading the torrent file, signing in or reaching TMDB failed                                          |
 | `unavailable`                                                   | 503      | The service behind the endpoint is not running                                                                       |
+| `assistant_disabled`, `decided`                                 | 409      | The AI assistant is not enabled; this pending action has already been decided                                        |
+| `too_many`                                                      | 429      | The AI assistant is answering too many questions at once                                                             |
 
 ## Endpoints
 
-| Method | Path                         | Permission | Purpose                                                                       |
-| ------ | ---------------------------- | ---------- | ----------------------------------------------------------------------------- |
-| GET    | `/meta`                      | Read       | Version, compatibility level, feature groups and the caller's own permissions |
-| GET    | `/overview`                  | Read       | Totals across enabled sites and today's changes                               |
-| GET    | `/sites`                     | Read       | Sites, login status, today's sign-in and your statistics on each site         |
-| POST   | `/sites/{site}/attend`       | Operate    | Sign in now                                                                   |
-| GET    | `/favicon/{site}`            | Read       | Site icon                                                                     |
-| GET    | `/torrents`                  | Read       | Torrents in the downloaders                                                   |
-| GET    | `/downloaders`               | Read       | Downloaders with their current speed and free space                           |
-| POST   | `/torrents/actions`          | Operate    | Pause, resume and delete torrents                                             |
-| POST   | `/search`                    | Read       | Multi-site search                                                             |
-| POST   | `/push`                      | Operate    | Push a search result to a downloader                                          |
-| GET    | `/tasks`                     | Read       | Task list (push records)                                                      |
-| GET    | `/brush/tasks`               | Read       | Brush tasks                                                                   |
-| GET    | `/media/history`             | Read       | Organise history                                                              |
-| GET    | `/subscriptions`             | Read       | Subscriptions                                                                 |
-| GET    | `/subscriptions/{id}`        | Read       | A subscription with its episodes and downloaded torrents                      |
-| POST   | `/subscriptions`             | Operate    | Create a subscription                                                         |
-| POST   | `/subscriptions/{id}/status` | Operate    | Pause or resume a subscription                                                |
-| POST   | `/subscriptions/{id}/search` | Operate    | Search now                                                                    |
-| DELETE | `/subscriptions/{id}`        | Operate    | Delete a subscription                                                         |
-| GET    | `/explore`                   | Read       | Explore: TMDB trending, popular and search                                    |
-| GET    | `/images/tmdb/{size}/{file}` | Read       | A TMDB image (poster), fetched by pt-tools                                    |
-| GET    | `/updates`                   | Read       | Whether a newer release exists                                                |
+| Method | Path                                     | Permission | Purpose                                                                       |
+| ------ | ---------------------------------------- | ---------- | ----------------------------------------------------------------------------- |
+| GET    | `/meta`                                  | Read       | Version, compatibility level, feature groups and the caller's own permissions |
+| GET    | `/overview`                              | Read       | Totals across enabled sites and today's changes                               |
+| GET    | `/sites`                                 | Read       | Sites, login status, today's sign-in and your statistics on each site         |
+| POST   | `/sites/{site}/attend`                   | Operate    | Sign in now                                                                   |
+| GET    | `/favicon/{site}`                        | Read       | Site icon                                                                     |
+| GET    | `/torrents`                              | Read       | Torrents in the downloaders                                                   |
+| GET    | `/downloaders`                           | Read       | Downloaders with their current speed and free space                           |
+| POST   | `/torrents/actions`                      | Operate    | Pause, resume and delete torrents                                             |
+| POST   | `/search`                                | Read       | Multi-site search                                                             |
+| POST   | `/push`                                  | Operate    | Push a search result to a downloader                                          |
+| GET    | `/tasks`                                 | Read       | Task list (push records)                                                      |
+| GET    | `/brush/tasks`                           | Read       | Brush tasks                                                                   |
+| GET    | `/media/history`                         | Read       | Organise history                                                              |
+| GET    | `/subscriptions`                         | Read       | Subscriptions                                                                 |
+| GET    | `/subscriptions/{id}`                    | Read       | A subscription with its episodes and downloaded torrents                      |
+| POST   | `/subscriptions`                         | Operate    | Create a subscription                                                         |
+| POST   | `/subscriptions/{id}/status`             | Operate    | Pause or resume a subscription                                                |
+| POST   | `/subscriptions/{id}/search`             | Operate    | Search now                                                                    |
+| DELETE | `/subscriptions/{id}`                    | Operate    | Delete a subscription                                                         |
+| GET    | `/explore`                               | Read       | Explore: TMDB trending, popular and search                                    |
+| GET    | `/images/tmdb/{size}/{file}`             | Read       | A TMDB image (poster), fetched by pt-tools                                    |
+| GET    | `/updates`                               | Read       | Whether a newer release exists                                                |
+| GET    | `/assistant/status`                      | Read       | Whether the AI assistant is on, its model, and whether you can confirm        |
+| GET    | `/assistant/conversations`               | Read       | Your AI assistant conversations                                               |
+| POST   | `/assistant/conversations`               | Read       | Create a conversation, optionally sending the first message                   |
+| GET    | `/assistant/conversations/{id}`          | Read       | A conversation's messages and pending actions                                 |
+| DELETE | `/assistant/conversations/{id}`          | Read       | Delete a conversation                                                         |
+| POST   | `/assistant/conversations/{id}/messages` | Read       | Send a message; the answer is generated in the background                     |
+| POST   | `/assistant/conversations/{id}/cancel`   | Read       | Stop the answer                                                               |
+| GET    | `/assistant/conversations/{id}/events`   | Read       | Long-poll a conversation's progress                                           |
+| POST   | `/assistant/confirmations/{id}`          | Operate    | Confirm or deny an action                                                     |
 
 Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST but needs only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
 
@@ -269,3 +280,54 @@ The response has `items`, `page` and `total_pages`. Each item has `id` (the TMDB
 ### GET /images/tmdb/{size}/{file}
 
 A TMDB image: `file` is `poster_path` without its leading `/`, and `size` is one of the poster sizes `w92`, `w154`, `w185`, `w342`, `w500` and `w780` (originals aren't offered, they can be several MB). pt-tools fetches it with the image address and proxy set under Media recognition and responds with the image and a one-day cache header, so clients never contact TMDB directly. Without a TMDB API key it responds with 400, when TMDB has no such image with 404, and when the image can't be fetched with 502 (`upstream`). pt-tools fetches at most 4 images at a time; a request that waits longer than 10 seconds gets 503 (`busy`, with `Retry-After`).
+
+## AI assistant
+
+These endpoints match the web page AI assistant; see [AI assistant](../guide/assistant.md). Its settings (which model, the API key) can only be changed on the web, not here. Conversations are kept per caller: each token and each paired device sees only the conversations it created, and a signed-in web session sees the web conversations. Chatting needs only Read; when the model wants to change something, only a caller with Operate can confirm it (for a Read-only caller the model does not get those tools). Times are RFC 3339 strings.
+
+### GET /assistant/status
+
+Responds with `enabled` (turned on, with an endpoint and a model configured), `model`, `can_confirm` (whether the caller can confirm actions) and `chatops`. It never contains the API key or the endpoint. On a host without these endpoints, `features` in `GET /meta` has no `assistant`.
+
+### GET /assistant/conversations
+
+The caller's own conversations, most recently updated first, at most 100. Each has `id`, `title`, `entry` (where it was created: `web`, `app` or `chatops`), `running`, `created_at` and `updated_at`.
+
+### POST /assistant/conversations
+
+`{"title": "…", "message": "…"}`, both optional. Creating only a conversation responds with 201; with `message` it also sends that message and responds with 202, where `run` has the run's `run_id` and the stored user message. If the AI assistant is not enabled it responds with 409 (`assistant_disabled`) and leaves no empty conversation behind.
+
+### GET /assistant/conversations/{id}
+
+The conversation's own fields, plus:
+
+- `messages`: the latest 200 messages, oldest first. Each has `id`, `run_id`, `role` (`user`, `assistant`, `tool` or `notice`), `content` and `created_at`; assistant messages carry `tool_calls` (`id`, `name`, `arguments`, `write`), tool results carry `tool_name`, `tool_call_id` and `is_error`. A `notice` is pt-tools' own note (stopped, failed, step limit reached).
+- `confirmations`: pending actions with `id`, `run_id`, `tool_call_id`, `tool`, `summary` (one readable sentence), `arguments`, `status` (`pending`, `approved`, `denied` or `expired`), `decided_by`, `decided_at`, `expires_at` and `created_at`. Match them to the calls in the messages by `run_id` and `tool_call_id`.
+- `run_id` and `partial`: the run in progress and its answer so far; `last_seq`: read events from here.
+
+### POST /assistant/conversations/{id}/messages
+
+`{"text": "…"}`, up to 4000 characters. Responds with 202, the run's `run_id` and the stored user message. If the conversation is already answering it responds with 409 (`busy`).
+
+### POST /assistant/conversations/{id}/cancel
+
+Stops the answer in progress and responds with `{"ok": true}`; does nothing when nothing is running. An action waiting for confirmation is voided and does not run.
+
+### GET /assistant/conversations/{id}/events
+
+Long polling: `after` is the last sequence number you read (`last_seq` from the conversation, or `last` from the previous page), and `wait` is how many seconds to wait when there are no events (default and maximum 25). Responds with `events`, `reset`, `last` and `running`. When `reset` is true, events in between were lost (or pt-tools restarted): read the conversation again and continue from its `last_seq`.
+
+Every event has `seq`, `type` and `at`, and depending on its type:
+
+| `type`         | Contents                                                                    |
+| -------------- | --------------------------------------------------------------------------- |
+| `run_started`  | `run_id`                                                                    |
+| `delta`        | `text`: a piece of the answer; with `replace` true, the whole answer so far |
+| `message`      | `message`: a stored message (fields as in the conversation)                 |
+| `tool_started` | `tool`: the tool call that started                                          |
+| `confirmation` | `confirmation`: a new pending action, or its decision                       |
+| `run_finished` | `status` (`done`, `canceled` or `failed`), with `error` on failure          |
+
+### POST /assistant/confirmations/{id}
+
+`{"approve": true}` confirms, `{"approve": false}` denies. Needs Operate. Responds with the decided action; one that already has a decision (decided elsewhere first, timed out or voided) gets 409 (`decided`). Confirming and denying are recorded in the audit log; the executed action gets its own entry with the channel AI assistant and the user `token:<token id>` or `device:<device id>`.

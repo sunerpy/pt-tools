@@ -5,11 +5,13 @@
 //   PTT_TESTHOST=/tmp/testhost.json flutter test test/interop
 //
 // 没有 PTT_TESTHOST 时跳过（CI 的 mobile.yml 会起测试主机）。
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:ptt_api/api.dart';
 import 'package:pt_tools_app/src/remote/connection.dart';
 import 'package:pt_tools_app/src/remote/host_record.dart';
@@ -136,6 +138,48 @@ void main() {
         isA<HandshakeException>().having((e) => e.notPaired, 'notPaired', true),
       ),
     );
+  });
+
+  test('取消进行中的请求：主机收到 CANCEL 就取消处理函数，会话照常可用', () async {
+    final ticket = await _control(control, '/pair?scopes=full');
+    final host = await pairWithLink(
+      PairingLink.parse(ticket['link'] as String),
+      'Dart 取消',
+    );
+    final conn = HostConnection(
+      HostRecord.fromJson({...host.toJson(), 'relays': <String>[]}),
+    );
+    addTearDown(conn.dispose);
+    conn.start();
+    await _until(conn, LinkState.online);
+    Future<Map<String, dynamic>> waits() =>
+        _control(control, '/waits', method: 'GET');
+    Future<void> until(String key, int want) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while ((await waits())[key] as int < want) {
+        if (DateTime.now().isAfter(deadline)) fail('$key 没到 $want');
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+
+    final before = await waits();
+    final abort = Completer<void>();
+    final pending = conn.client.send(
+      http.AbortableRequest(
+        'GET',
+        Uri.parse('https://pt-tools/api/app/v1/wait'),
+        abortTrigger: abort.future,
+      ),
+    );
+    await until('waiting', (before['waiting'] as int) + 1);
+    abort.complete();
+    await expectLater(pending, throwsA(isA<http.RequestAbortedException>()));
+    await until('canceled', (before['canceled'] as int) + 1);
+    final r = await conn.client.get(
+      Uri.parse('https://pt-tools/api/app/v1/sites'),
+    );
+    expect(r.statusCode, 200, reason: '同一条会话照常可用');
+    expect(conn.status.state, LinkState.online);
   });
 
   test('只有 relay 的链接也能配对；配对窗口关了以后 not_paired', () async {

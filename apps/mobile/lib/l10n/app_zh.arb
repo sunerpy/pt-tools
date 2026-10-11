@@ -389,5 +389,32 @@
   "scopeFull": "完全控制",
   "scopeRead": "只读",
   "settingsForget": "忘掉这台主机",
-  "forgetConfirm": "忘掉以后要重新扫码配对。主机上的设备记录不会删除，需要的话在网页上撤销。"
+  "forgetConfirm": "忘掉以后要重新扫码配对。主机上的设备记录不会删除，需要的话在网页上撤销。",
+  "moreAssistant": "AI 助手",
+  "assistantTitle": "AI 助手",
+  "assistantNew": "新对话",
+  "assistantHint": "问点什么",
+  "assistantSend": "发送",
+  "assistantStop": "停止",
+  "assistantEmpty": "可以问：「我的站点数据怎么样」「下载器现在有多少在下载」「搜一下 沙丘 2160p」",
+  "assistantDisabled": "AI 助手没有启用：在 pt-tools 网页的「系统 → AI 助手设置」里打开。",
+  "assistantThinking": "正在思考…",
+  "assistantWaitConfirm": "等你确认上面的操作…",
+  "assistantTool": "正在执行 {name}…",
+  "@assistantTool": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "assistantApprove": "确认执行",
+  "assistantDeny": "拒绝",
+  "assistantPending": "等你确认",
+  "assistantApproved": "已确认",
+  "assistantDenied": "已拒绝",
+  "assistantExpired": "已过期",
+  "assistantReadOnly": "这台设备只能查询：改动类操作要在网页上确认。",
+  "assistantDecided": "这个操作已经处理过了",
+  "assistantPrivacy": "对话与工具结果会发给所选的模型服务商"
 }

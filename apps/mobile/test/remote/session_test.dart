@@ -88,6 +88,70 @@ void main() {
     s.close();
   });
 
+  test('调用方取消：回应头没到时抛 RequestAbortedException，主机收到 CANCEL，名额让出来', () async {
+    final (s, fake) = await _connect();
+    final abort = Completer<void>();
+    final aborted = TunnelClient(s).send(
+      http.AbortableRequest(
+        'GET',
+        Uri.parse('https://tunnel/wait'),
+        abortTrigger: abort.future,
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(fake.requests.length, 1);
+    final waits = [for (var i = 0; i < 15; i++) s.request('GET', '/wait')];
+    final queued = s.request('GET', '/x');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(fake.requests.length, 16, reason: '第 17 个还在排队');
+    abort.complete();
+    await expectLater(aborted, throwsA(isA<http.RequestAbortedException>()));
+    final r = await queued;
+    expect(r.status, 200, reason: '取消让出的名额给了排队的请求');
+    expect(fake.cancelled, [fake.requests.first['id']]);
+    s.close();
+    for (final w in waits) {
+      await expectLater(w, throwsA(isA<SessionClosedException>()));
+    }
+  });
+
+  test('调用方取消：正在读回应体时回应体出 RequestAbortedException', () async {
+    final (s, fake) = await _connect();
+    final abort = Completer<void>();
+    final resp = await TunnelClient(s).send(
+      http.AbortableRequest(
+        'GET',
+        Uri.parse('https://tunnel/hang'),
+        abortTrigger: abort.future,
+      ),
+    );
+    final body = expectLater(
+      resp.stream.toList(),
+      throwsA(isA<http.RequestAbortedException>()),
+    );
+    abort.complete();
+    await body;
+    expect(fake.cancelled, [fake.requests.single['id']]);
+    s.close();
+  });
+
+  test('调用方取消：请求已经结束以后再取消什么也不做', () async {
+    final (s, fake) = await _connect();
+    final abort = Completer<void>();
+    final resp = await TunnelClient(s).send(
+      http.AbortableRequest(
+        'GET',
+        Uri.parse('https://tunnel/api/app/v1/meta'),
+        abortTrigger: abort.future,
+      ),
+    );
+    expect(await resp.stream.bytesToString(), contains('/api/app/v1/meta'));
+    abort.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(fake.cancelled, isEmpty);
+    s.close();
+  });
+
   test('主机中止回应：回应体出错', () async {
     final (s, _) = await _connect();
     final resp = await s.request('GET', '/abort');
