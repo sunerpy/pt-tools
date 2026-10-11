@@ -23,7 +23,7 @@ func TestSettingsDefaultsAndKeyIsWriteOnly(t *testing.T) {
 
 	got, err = svc.SaveSettings(ctx, SettingsInput{
 		Enabled: true, Provider: "deepseek", BaseURL: " https://api.deepseek.com/ ", Model: "deepseek-flash",
-		APIKey: ptr("sk-abc"), ProxyURL: ptr("http://user:pw@127.0.0.1:7890"), ChatOps: true,
+		APIKey: ptr("sk-abcdef12"), ProxyURL: ptr("http://user:pw@127.0.0.1:7890"), ChatOps: true,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "https://api.deepseek.com", got.BaseURL)
@@ -32,7 +32,7 @@ func TestSettingsDefaultsAndKeyIsWriteOnly(t *testing.T) {
 	assert.Equal(t, DefaultRetentionDays, got.RetentionDays)
 	var row models.AssistantSetting
 	require.NoError(t, svc.cfg.DB.First(&row).Error)
-	assert.Equal(t, "enc:sk-abc", row.APIKeyEncrypted, "Key 加密保存")
+	assert.Equal(t, "enc:sk-abcdef12", row.APIKeyEncrypted, "Key 加密保存")
 	assert.Equal(t, "enc:http://user:pw@127.0.0.1:7890", row.ProxyEncrypted)
 
 	// 不给 Key、原样提交打了码的代理：都不改
@@ -53,7 +53,7 @@ func TestSettingsDefaultsAndKeyIsWriteOnly(t *testing.T) {
 	assert.Equal(t, 0, got.RetentionDays, "没给保留天数不改")
 
 	// 空串清除
-	_, err = svc.SaveSettings(ctx, SettingsInput{BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen3", APIKey: ptr("sk-x")})
+	_, err = svc.SaveSettings(ctx, SettingsInput{BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen3", APIKey: ptr("sk-x123456")})
 	require.NoError(t, err)
 	got, err = svc.SaveSettings(ctx, SettingsInput{BaseURL: "http://127.0.0.1:11434/v1", Model: "qwen3", APIKey: ptr(""), ProxyURL: ptr("")})
 	require.NoError(t, err)
@@ -72,6 +72,7 @@ func TestSettingsValidation(t *testing.T) {
 		{BaseURL: "https://x/v1?key=1", Model: "m"},
 		{BaseURL: "https://x", Model: "has space"},
 		{BaseURL: "https://x", Model: "m", APIKey: ptr("sk x")},
+		{BaseURL: "https://x", Model: "m", APIKey: ptr("short")},
 		{BaseURL: "https://x", Model: "m", ProxyURL: ptr("ftp://p")},
 		{BaseURL: "https://x", Model: "m", MaxSteps: 21},
 		{BaseURL: "https://x", Model: "m", ConfirmMinutes: 61},

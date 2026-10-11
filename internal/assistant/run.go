@@ -239,7 +239,7 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 		stored := make([]storedCall, 0, len(out.calls))
 		writes := make([]bool, 0, len(out.calls))
 		for _, c := range out.calls {
-			pc := s.normalize(c.id, c.name, scrub(c.args))
+			pc := s.normalize(scrub(c.id), scrub(c.name), scrub(c.args))
 			write, known := tb.known(pc.name)
 			if !known && pc.invalid == "" {
 				pc.invalid = "没有这个工具：" + pc.name
@@ -312,9 +312,9 @@ type redactedStream struct {
 	scrub func(string) string
 }
 
-// keyScrubber 把这次运行用的 API Key 原样换成 ***（Key 太短时不换，免得误伤正常文字）。
+// keyScrubber 把这次运行用的 API Key 原样换成 ***（设置要求 Key 至少 minKeyLen 个字符；更短的只能是旧数据，不换，免得误伤正常文字）。
 func keyScrubber(key string) func(string) string {
-	if len(key) < 8 {
+	if len(key) < minKeyLen {
 		return func(s string) string { return s }
 	}
 	return func(s string) string { return strings.ReplaceAll(s, key, "***") }

@@ -23,8 +23,10 @@ const (
 	maxConfirmMinutes     = 60
 	maxRetentionDays      = 3650
 	maxKeyLen             = 512
-	maxModelLen           = 128
-	maxBaseURLLen         = 512
+	// minKeyLen 是 API Key 的最短长度：回答里回显的 Key 按原文替换，太短的串会误伤正常文字
+	minKeyLen     = 8
+	maxModelLen   = 128
+	maxBaseURLLen = 512
 )
 
 // Settings 是界面上看到的设置：API Key 只写不读（只回有没有），代理地址里的密码换成 ***。
@@ -193,8 +195,9 @@ func (s *Service) merged(stored models.AssistantSetting, in SettingsInput) (mode
 		switch {
 		case key == "":
 			row.APIKeyEncrypted = ""
-		case len(key) > maxKeyLen || hasSpace(key):
-			return row, fmt.Errorf("%w: API Key 格式不对", ErrInvalid)
+		case len(key) < minKeyLen || len(key) > maxKeyLen || hasSpace(key):
+			return row, fmt.Errorf("%w: API Key 格式不对（%d 到 %d 个字符，不能有空格；本机的 Ollama 不要 Key 就留空）",
+				ErrInvalid, minKeyLen, maxKeyLen)
 		default:
 			enc, err := s.cfg.Cipher.Encrypt(key)
 			if err != nil {

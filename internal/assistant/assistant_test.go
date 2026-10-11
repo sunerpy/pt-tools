@@ -814,7 +814,10 @@ func TestEchoedKeyNeverStored(t *testing.T) {
 	e.llm.push(reply{
 		reasoning: "Key 是 " + testKey,
 		text:      "你的 Key 是 " + testKey + " 呀",
-		calls:     []replyCall{{id: "c1", name: "pause_torrent", args: `{"downloader_id":1,"task_id":"` + testKey + `"}`}},
+		calls: []replyCall{
+			{id: "c1", name: "pause_torrent", args: `{"downloader_id":1,"task_id":"` + testKey + `"}`},
+			{id: testKey, name: "list_tasks" + testKey, args: `{}`},
+		},
 	}, reply{text: "好了"})
 	conv := e.conversation(admin)
 	res := e.send(admin, conv, "回显")

@@ -36,6 +36,10 @@ func TestTextKeepsIDsButMasksCredentials(t *testing.T) {
 		"token=abc123 与 password=hunter2":              "token=*** 与 password=***",
 		"我的 key 是 sk-proj-abcdefghijklmnop1234 别外传":    "我的 key 是 *** 别外传",
 		"令牌 ptt_12_abcdefghijklmnopqrstuv":             "令牌 ***",
+		"我的 passkey 0123456789abcdef0123456789abcdef":  "我的 passkey ***",
+		"v2 的 " + strings.Repeat("ab", 32):             "v2 的 " + strings.Repeat("ab", 32),
+		"令牌 AbCdEfGhIjKlMnOpQrStUvWxYz":                "令牌 ***",
+		"标题 The.Matrix.1999.2160p.UHD.BluRay":          "标题 The.Matrix.1999.2160p.UHD.BluRay",
 	}
 	for in, want := range cases {
 		if got := Text(in); got != want {

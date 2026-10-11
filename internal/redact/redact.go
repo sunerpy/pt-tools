@@ -22,6 +22,10 @@ var (
 	secretParamRe = regexp.MustCompile(`(?i)\b(passkey|authkey|torrent_pass|credential|token|apikey|api_key|sign|secret|rsskey|key)=([^&\s"'<>(),;]+)`)
 	// apiKeyRe 是常见格式的 API Key（sk-…）与 pt-tools 自己的 API 令牌（ptt_<编号>_<密钥>）。
 	apiKeyRe = regexp.MustCompile(`\b(?:sk|pk|rk|ak)-[A-Za-z0-9_-]{16,}|\bptt_\d+_[A-Za-z0-9]{16,}`)
+	// longRe 是单独的 24 位以上的字母数字长串：passkey、令牌多是这个样子。
+	longRe = regexp.MustCompile(`\b[A-Za-z0-9]{24,}\b`)
+	// infoHashRe 是种子的 info hash（v1 是 40 位、v2 是 64 位十六进制）：下载器里种子的编号，要原样留着。
+	infoHashRe = regexp.MustCompile(`^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$`)
 )
 
 // Credentials 去掉地址的用户信息与整段查询串，遮 JSON 与 key=value 形式的凭证字段。不碰别的长串：
@@ -40,10 +44,17 @@ func Secrets(s string) string {
 }
 
 // Text 是 AI 助手里用户写的文字与模型的回答：遮地址里的用户信息、查询串与像密钥的路径段，key=value 形式的凭证，
-// 以及常见格式的 API Key；不遮单独的长串 —— 种子的 info hash、任务编号要原样留着，用户才能指着它说「暂停这个」。
+// 常见格式的 API Key，以及单独的长串；只有种子的 info hash（40 或 64 位十六进制）原样留着 —— 它是下载器里种子的编号，
+// 用户要能指着它说「暂停这个」。NexusPHP 的 passkey 是 32 位，照样遮。
 func Text(s string) string {
 	s = textURLRe.ReplaceAllStringFunc(s, dlassistant.RedactTrackerURL)
 	s = Credentials(s)
 	s = secretParamRe.ReplaceAllString(s, "$1=***")
-	return apiKeyRe.ReplaceAllString(s, "***")
+	s = apiKeyRe.ReplaceAllString(s, "***")
+	return longRe.ReplaceAllStringFunc(s, func(m string) string {
+		if infoHashRe.MatchString(m) {
+			return m
+		}
+		return "***"
+	})
 }
