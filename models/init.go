@@ -254,6 +254,11 @@ func NewDBWithVersionAndHooks(
 		// 远程访问（M15）
 		&RemoteSetting{},
 		&RemoteDevice{},
+		// AI 助手（M19）
+		&AssistantSetting{},
+		&AssistantConversation{},
+		&AssistantMessage{},
+		&AssistantConfirmation{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}
