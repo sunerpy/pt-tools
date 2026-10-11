@@ -102,6 +102,8 @@ type fakeLLM struct {
 	reqs    []llmRequest
 	// started 在每个请求开始回答时收到一个值
 	started chan struct{}
+	// strictArgs 为真时像部分兼容网关那样校验历史里工具调用的参数：不是 JSON 对象就回 400
+	strictArgs bool
 }
 
 func newFakeLLM(t *testing.T) *fakeLLM {
@@ -109,6 +111,28 @@ func newFakeLLM(t *testing.T) *fakeLLM {
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+func (f *fakeLLM) strict() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.strictArgs = true
+}
+
+// badArgs 是请求历史里参数不是 JSON 对象的工具调用（没有时为空）。
+func badArgs(req llmRequest) string {
+	for _, m := range req.Messages {
+		calls, _ := m["tool_calls"].([]any)
+		for _, c := range calls {
+			fn, _ := c.(map[string]any)["function"].(map[string]any)
+			args, _ := fn["arguments"].(string)
+			var obj map[string]any
+			if json.Unmarshal([]byte(args), &obj) != nil || obj == nil {
+				return args
+			}
+		}
+	}
+	return ""
 }
 
 func (f *fakeLLM) push(rs ...reply) {
@@ -145,13 +169,18 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 	req.Auth, req.Raw = r.Header.Get("Authorization"), string(raw)
 	f.mu.Lock()
 	f.reqs = append(f.reqs, req)
+	rejected := f.strictArgs && badArgs(req) != ""
 	var rep reply
 	ok := len(f.replies) > 0
-	if ok {
+	if ok && !rejected {
 		rep, f.replies = f.replies[0], f.replies[1:]
 	}
 	f.mu.Unlock()
 	f.started <- struct{}{}
+	if rejected {
+		http.Error(w, `{"error":{"message":"invalid tool_call arguments JSON"}}`, http.StatusBadRequest)
+		return
+	}
 	if !ok {
 		http.Error(w, `{"error":{"message":"no more replies"}}`, http.StatusInternalServerError)
 		return

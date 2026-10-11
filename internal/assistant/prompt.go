@@ -80,7 +80,7 @@ func assistantParam(content, reasoning string, calls []storedCall) openai.ChatCo
 	for _, c := range calls {
 		p.ToolCalls = append(p.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
 			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-				ID: c.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: c.Name, Arguments: c.Arguments},
+				ID: c.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: c.Name, Arguments: replayArgs(c.Arguments)},
 			},
 		})
 	}
@@ -88,6 +88,16 @@ func assistantParam(content, reasoning string, calls []storedCall) openai.ChatCo
 		p.SetExtraFields(map[string]any{"reasoning_content": reasoning})
 	}
 	return openai.ChatCompletionMessageParamUnion{OfAssistant: &p}
+}
+
+// replayArgs 是回传给模型的工具参数：不是 JSON 对象的（模型自己写坏的）换成 {}。部分兼容网关会校验历史里的参数，
+// 坏 JSON 会让这个会话以后的每次请求都失败；这次调用的结果已经告诉模型参数不对。
+func replayArgs(args string) string {
+	var obj map[string]any
+	if json.Unmarshal([]byte(args), &obj) != nil || obj == nil {
+		return "{}"
+	}
+	return args
 }
 
 // interrupted 是中断的运行没留下结果的工具调用交给模型的结果。
