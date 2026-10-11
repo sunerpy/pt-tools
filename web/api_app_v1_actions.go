@@ -258,10 +258,11 @@ type AppPushResult struct {
 
 const appPushTimeout = 60 * time.Second
 
-// appPushSource 是 App 推送的种子记录的来源；经 MCP 的 push_torrent 推的记 mcpPushSource。
+// appPushSource 是 App 推送的种子记录的来源；经 MCP 的 push_torrent 推的记 mcpPushSource，内置 AI 助手推的记 assistantPushSource。
 const (
-	appPushSource = "app_push"
-	mcpPushSource = "mcp_push"
+	appPushSource       = "app_push"
+	mcpPushSource       = "mcp_push"
+	assistantPushSource = "assistant_push"
 )
 
 // appTorrentIDRe 是推送接受的种子编号：各站点的编号都是数字或短的字母数字串，有的站点驱动把它直接拼进下载地址，
@@ -324,8 +325,13 @@ func (s *Server) appPush(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	source := appPushSource
-	if p := middleware.PrincipalFrom(r.Context()); p != nil && p.Kind == middleware.KindMCP {
-		source = mcpPushSource
+	if p := middleware.PrincipalFrom(r.Context()); p != nil {
+		switch p.Kind {
+		case middleware.KindMCP:
+			source = mcpPushSource
+		case middleware.KindAssistant:
+			source = assistantPushSource
+		}
 	}
 	res, err := internal.PushTorrentToDownloader(ctx, internal.PushTorrentRequest{
 		SiteID: req.Site, TorrentID: req.TorrentID, TorrentData: data, Title: req.Title, Category: req.Category,

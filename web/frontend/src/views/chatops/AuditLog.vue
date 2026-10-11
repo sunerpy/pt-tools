@@ -34,6 +34,8 @@ const CHANNEL_LABELS: Record<string, string> = {
   mcp: "MCP",
   // 远程访问的设备经隧道做的写请求与配对（internal/remote）
   remote_device: "远程设备",
+  // 内置 AI 助手执行的写工具（internal/assistant，经 internal/mcp 记），触发用户是会话的属主
+  assistant: "AI 助手",
 };
 
 /*
@@ -49,6 +51,7 @@ const CHANNEL_SHORT: Record<string, string> = {
   qbit_compat: "qB 兼容",
   mcp: "MCP",
   remote_device: "远程设备",
+  assistant: "AI 助手",
 };
 
 const RESULT_TONES: Record<string, "ok" | "warn" | "dang" | "neutral"> = {

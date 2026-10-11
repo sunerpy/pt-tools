@@ -28,11 +28,26 @@ import (
 // ChannelType 是 MCP 写工具在操作审计里的通道。
 const ChannelType = "mcp"
 
-// Caller 是调用工具的 API 令牌。
+// KindAssistant 是内置 AI 助手（internal/assistant）：它在进程内连一个 MCP 服务调工具，审计记在这个通道下。
+const KindAssistant = "assistant"
+
+// Caller 是调用工具的一方：/mcp 上是 API 令牌；内置 AI 助手是会话的属主（Kind 为 KindAssistant，没有令牌编号）。
 type Caller struct {
 	TokenID uint
 	Name    string
 	Scopes  []string
+	// Kind 为空是 /mcp 的 API 令牌；KindAssistant 是内置 AI 助手（Backend 据此选 App API 的主体种类）
+	Kind string
+	// Subject 是审计里的触发用户，例如 web:admin、chatops:3、device:2；为空时用令牌编号
+	Subject string
+}
+
+// auditUser 是审计里的触发用户。
+func (c Caller) auditUser() string {
+	if c.Subject != "" {
+		return c.Subject
+	}
+	return strconv.FormatUint(uint64(c.TokenID), 10)
 }
 
 // Has 报告令牌有没有这个权限范围（精确匹配）。
@@ -104,8 +119,10 @@ type Deps struct {
 	ResolveURL func(rawURL string) (site, torrentID string, ok bool)
 	// Version 是 pt-tools 的版本（initialize 时报给客户端）
 	Version string
-	// Caller 从工具请求里取令牌，默认 CallerFromRequest（测试里换掉）
+	// Caller 从工具请求里取令牌，默认 CallerFromRequest（测试里换掉；内置 AI 助手固定成这次运行的属主）
 	Caller func(req *sdk.CallToolRequest) (Caller, bool)
+	// Channel 是写工具在操作审计里的通道，为空时是 ChannelType（mcp）
+	Channel string
 }
 
 // NewServer 建 MCP 服务，注册全部工具。
@@ -302,8 +319,12 @@ func (d *Deps) record(ctx context.Context, c Caller, tool, result string, args m
 	for k, v := range args {
 		all[k] = v
 	}
+	channel := d.Channel
+	if channel == "" {
+		channel = ChannelType
+	}
 	e := app.AuditEntry{
-		ChannelType: ChannelType, ChannelUserID: strconv.FormatUint(uint64(c.TokenID), 10), Command: tool, Result: result,
+		ChannelType: channel, ChannelUserID: c.auditUser(), Command: tool, Result: result,
 		Args: all, LatencyMs: time.Since(start).Milliseconds(),
 	}
 	if err := d.Audit.Record(context.WithoutCancel(ctx), e); err != nil {

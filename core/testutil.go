@@ -28,6 +28,10 @@ func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 		&models.SiteTemplate{},
 		&models.FilterRule{},
 		&models.RSSFilterAssociation{},
+		&models.AssistantSetting{},
+		&models.AssistantConversation{},
+		&models.AssistantMessage{},
+		&models.AssistantConfirmation{},
 	); err != nil {
 		return nil, err
 	}

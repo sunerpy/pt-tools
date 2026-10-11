@@ -31,6 +31,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/apitoken"
+	"github.com/sunerpy/pt-tools/internal/assistant"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
@@ -61,7 +62,9 @@ type Server struct {
 	qbitCompat *qbitcompat.Server
 	// remote 是远程访问的主机端（M15）；为空时直连入口 404，设置接口回 503
 	remote *remote.Host
-	qaHook func(*http.ServeMux) // qa-build-only test hook installer
+	// assistant 是内置 AI 助手（M19）；为空时接口回 503
+	assistant *assistant.Service
+	qaHook    func(*http.ServeMux) // qa-build-only test hook installer
 
 	// lifecycleMu 保护 httpServer 与 shuttingDown：关闭信号可能在 Serve 起来之前到达，
 	// 两者分别在信号处理 goroutine 与 Serve 所在 goroutine 里读写。
@@ -222,6 +225,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.registerAppV1Routes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerRemoteRoutes(mux)
+	s.registerAssistantRoutes(mux)
 	// CloakBrowser-Manager 接入配置 + 连接测试（v2 / T10）
 	mux.HandleFunc("/api/cloak/config", s.auth(s.apiCloakConfig))
 	mux.HandleFunc("/api/cloak/test", s.auth(s.apiCloakTest))

@@ -31,6 +31,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { path: "/userinfo", label: "用户统计", icon: "gauge", rail: true },
       { path: "/userinfo/export", label: "数据导出", icon: "file-down" },
+      /* 路线图 M19：画板没有这一页 */
+      { path: "/assistant", label: "AI 助手", icon: "sparkles" },
     ],
   },
   {
@@ -102,6 +104,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { path: "/mcp", label: "MCP 接入", icon: "bot" },
       /* 路线图 M15：画板没有这一页，沿用 qB 兼容入口页的样式 */
       { path: "/remote", label: "远程访问", icon: "smartphone" },
+      /* 路线图 M19：画板没有这一页，沿用 qB 兼容入口页的样式 */
+      { path: "/assistant/settings", label: "AI 助手设置", icon: "sliders-horizontal" },
       { path: "/logs", label: "运行日志", icon: "scroll-text" },
       { path: "/password", label: "修改密码", icon: "key-round" },
     ],
@@ -161,6 +165,8 @@ export const RAIL_FOOT_ITEM: NavItem | undefined = NAV_ITEMS.find((i) => i.path 
 const ROUTE_NAME_TO_NAV: Record<string, string> = {
   userinfo: "/userinfo",
   "userinfo-export": "/userinfo/export",
+  assistant: "/assistant",
+  "assistant-settings": "/assistant/settings",
   sites: "/sites",
   "site-detail": "/sites",
   "supported-sites": "/supported-sites",

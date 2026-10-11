@@ -21,6 +21,8 @@ internal/
 ├── events/                                        # In-process pub/sub
 ├── extension/                                     # Browser-extension pending actions
 ├── mcp/                                           # MCP tools, scope checks, audit
+├── assistant/                                     # Built-in AI assistant: runs, confirmations, events, retention
+├── redact/                                        # Credential masking for text leaving pt-tools
 └── remote/                                        # Remote access host: pairing, Noise IK, tunnel, relay client
 ```
 
@@ -97,6 +99,10 @@ Do not call a downloader add method from new RSS/Web paths merely because the in
 ## MCP Status
 
 `internal/mcp` defines the MCP tools on go-sdk (pinned v1.8.0): typed inputs with `jsonschema` tags, scope checks (`mcp:read` / `mcp:write`, exact), `confirm=true` for write tools, and audit of every write-tool call (`channel_type` `mcp`). Tools never touch the DB or downloaders: they call App API v1 through the `Backend` interface (`web.mcpBackend`). Transports live elsewhere: `/mcp` in `web/mcp.go` (stateless streamable HTTP, Bearer tokens only) and the stdio bridge `pt-tools mcp` in `cmd/mcp.go` (no DB, no scheduler). `ToolNames` is the authoritative list.
+
+## AI Assistant
+
+`internal/assistant` is the only owner of assistant runs, pending confirmations and conversation retention. A run calls an OpenAI-compatible Chat Completions endpoint through `openai.NewChatCompletionService` (not `openai.NewClient`, which reads `OPENAI_*` environment variables) and gets its tools from a fresh `internal/mcp` server per run (`Config.Tools`, i.e. `web.Server.AssistantToolServer`) over in-memory transports; the caller is `mcp.Caller{Kind: KindAssistant, Subject: <owner>}`, audited under channel `assistant`. Write tools are offered without `confirm`; each write becomes an `AssistantConfirmation` decided only by `UPDATE … WHERE status='pending'` (`RowsAffected == 1` wins: user, timeout, cancel and shutdown all go through `decide`), and the run executes once with `confirm=true` only when the stored status is `approved`. Owners are namespaced (`web:`, `token:`, `device:`, `chatops:`) and every query filters by owner. Stored and streamed text passes `internal/redact`; pasted torrent URLs and `push_torrent.torrent_url` are resolved to site + torrent ID before the model or the database sees them. Reasoning content is stored only to be sent back to the model (thinking modes with tools require it) and is never exposed. `Close` cancels runs and expires pending confirmations; `Start` expires the ones left by a restart.
 
 ## Local Guides
 
