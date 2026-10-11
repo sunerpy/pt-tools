@@ -5,7 +5,7 @@
 //	PTT_TESTHOST=/tmp/testhost.json flutter test test/interop
 //
 // 控制接口（只监听本机）：POST /control/pair?scopes=full|read 开配对窗口并返回链接，GET /control/devices，
-// POST /control/devices/{id}/revoke，POST /control/devices/{id}/scopes?scopes=read|full。只在测试与 CI 里用。
+// POST /control/devices/{id}/revoke，POST /control/devices/{id}/scopes?scopes=read|full，GET /control/waits。只在测试与 CI 里用。
 package main
 
 import (
@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,12 +46,20 @@ func (plainCipher) Decrypt(c string) (string, error) {
 	return strings.TrimPrefix(c, "enc:"), nil
 }
 
-// appAPI 是固定的 App API：/meta 按设备回主体与权限，/echo 原样回请求体，别的回路径、方法、设备与连接方式。
-type appAPI struct{}
+// appAPI 是固定的 App API：/meta 按设备回主体与权限，/echo 原样回请求体，/wait 一直等到请求被取消（App 发 CANCEL），
+// 别的回路径、方法、设备与连接方式。
+type appAPI struct {
+	// waiting、canceled 是 /wait 开始等的次数与被取消的次数（控制接口 GET /control/waits 读）
+	waiting, canceled *atomic.Int64
+}
 
-func (appAPI) ServeRemote(w http.ResponseWriter, r *http.Request, p remote.Peer) {
+func (a appAPI) ServeRemote(w http.ResponseWriter, r *http.Request, p remote.Peer) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.URL.Path {
+	case "/api/app/v1/wait":
+		a.waiting.Add(1)
+		<-r.Context().Done()
+		a.canceled.Add(1)
 	case "/api/app/v1/meta":
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name": "pt-tools", "version": "testhost", "remote_api_level": 1, "features": []string{"overview"},
@@ -114,7 +123,8 @@ func run(ctx context.Context, infoPath string) error {
 	if err = db.AutoMigrate(&models.RemoteSetting{}, &models.RemoteDevice{}); err != nil {
 		return err
 	}
-	host := remote.New(remote.Config{Store: remote.NewStore(db, plainCipher{}), Dispatcher: appAPI{}, Version: "testhost"})
+	api := appAPI{waiting: new(atomic.Int64), canceled: new(atomic.Int64)}
+	host := remote.New(remote.Config{Store: remote.NewStore(db, plainCipher{}), Dispatcher: api, Version: "testhost"})
 	defer host.Close()
 
 	hl, haddr, err := listen(ctx)
@@ -127,7 +137,7 @@ func run(ctx context.Context, infoPath string) error {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/remote/v1/stream", host)
-	registerControl(mux, host)
+	registerControl(mux, host, api)
 	go func() { _ = (&http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}).Serve(hl) }()
 
 	// 等主机经 relay 上线，再写地址文件（测试读到文件就可以开始）
@@ -166,7 +176,7 @@ func scopesOf(r *http.Request) []string {
 	return remote.ScopesFull
 }
 
-func registerControl(mux *http.ServeMux, host *remote.Host) {
+func registerControl(mux *http.ServeMux, host *remote.Host, api appAPI) {
 	reply := func(w http.ResponseWriter, v any, err error) {
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
@@ -183,6 +193,9 @@ func registerControl(mux *http.ServeMux, host *remote.Host) {
 	mux.HandleFunc("POST /control/pair", func(w http.ResponseWriter, r *http.Request) {
 		t, err := host.StartPairing(r.Context(), scopesOf(r), "")
 		reply(w, t, err)
+	})
+	mux.HandleFunc("GET /control/waits", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, map[string]int64{"waiting": api.waiting.Load(), "canceled": api.canceled.Load()}, nil)
 	})
 	mux.HandleFunc("GET /control/devices", func(w http.ResponseWriter, r *http.Request) {
 		list, err := host.Devices(r.Context())

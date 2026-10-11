@@ -70,7 +70,7 @@ class FakeHost {
   final String mode;
   final String? error;
 
-  /// App API 的罐头回应：返回 null 时按默认（回显路径）处理
+  /// App API 的罐头回应：返回 null 时按默认（回显路径）处理；返回 Future 时等它完成再回（模拟长轮询、慢接口）
   final Object? Function(String method, String path)? api;
   late CipherState send;
   late CipherState recv;
@@ -140,20 +140,40 @@ class FakeHost {
     final req = requests.firstWhere((r) => r['id'] == id);
     final path = req['path'] as String;
     final canned = api?.call(req['method'] as String, path);
-    if (canned != null) {
-      final (status, body) = canned is ApiReply
-          ? (canned.status, canned.body)
-          : (200, canned);
-      write(
-        Frame.json(FrameType.respHead, id, {
-          'status': status,
-          'headers': {'Content-Type': 'application/json'},
+    if (canned is Future<Object?>) {
+      unawaited(
+        canned.then((v) {
+          if (v != null && !cancelled.contains(id)) _reply(id, v);
         }),
       );
-      write(Frame.json(FrameType.respBody, id, body));
-      write(Frame(FrameType.respEnd, id, Uint8List(0)));
       return;
     }
+    if (canned != null) {
+      _reply(id, canned);
+      return;
+    }
+    if (path == '/wait') {
+      // 一直不回（等 CANCEL）
+      return;
+    }
+    _respondBuiltin(id, req, path);
+  }
+
+  void _reply(int id, Object canned) {
+    final (status, body) = canned is ApiReply
+        ? (canned.status, canned.body)
+        : (200, canned);
+    write(
+      Frame.json(FrameType.respHead, id, {
+        'status': status,
+        'headers': {'Content-Type': 'application/json'},
+      }),
+    );
+    write(Frame.json(FrameType.respBody, id, body));
+    write(Frame(FrameType.respEnd, id, Uint8List(0)));
+  }
+
+  void _respondBuiltin(int id, Map<String, dynamic> req, String path) {
     if (path == '/echo') {
       final body = bodies[id]!.takeBytes();
       write(
