@@ -905,3 +905,90 @@ func TestEchoedPlainKeyNeverStreamed(t *testing.T) {
 	assert.NotContains(t, e.messages(conv)[1].Content, "qa_k-")
 	assert.Contains(t, e.messages(conv)[1].Content, "你的 Key 是 ***")
 }
+
+// DeepSeek 经部分 OpenAI 兼容网关（2026-10-11 验收时的 deepseek.v3.2）会把自己的工具调用标记漏进正文：
+// 网关已经把调用解析成 tool_calls，正文末尾还剩「<｜DSML｜function_calls」。这一段不发增量、不落库、不回传给模型。
+func TestLeakedToolMarkupStripped(t *testing.T) {
+	e := newEnv(t)
+	first := call("call_1", "list_tasks", `{"page":1}`)
+	first.text = "我来看看最近抓了什么。\n\n<｜DSML｜function_calls"
+	e.llm.push(first, reply{text: "找到 1 个种子。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "最近抓了什么种子")
+	fin, all := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	// 按界面的做法拼增量（Replace 时整段换掉，消息到了清空），每一段都不该带标记
+	var partials []string
+	partial := ""
+	for _, ev := range all {
+		switch ev.Type {
+		case EventDelta:
+			assert.NotContains(t, ev.Text, "｜", "增量里不该出现标记的任何一段")
+			if ev.Replace {
+				partial = ev.Text
+			} else {
+				partial += ev.Text
+			}
+		case EventMessage:
+			assert.NotContains(t, ev.Message.Content, "DSML")
+			if partial != "" {
+				partials = append(partials, partial)
+			}
+			partial = ""
+		}
+	}
+	require.NotEmpty(t, partials)
+	assert.Equal(t, "我来看看最近抓了什么。\n\n", partials[0], "流式显示的正文停在标记前面，一个字也不少")
+	msgs := e.messages(conv)
+	assert.Equal(t, "我来看看最近抓了什么。", msgs[1].Content)
+	second := e.llm.requests()[1]
+	assert.Equal(t, "我来看看最近抓了什么。", second.Messages[2]["content"], "回传给模型的也是去掉标记的")
+}
+
+// Key 里正好有工具调用标记的开头（设置只要求 8 到 512 个字符、没有空格）：先按原文换掉 Key 再截标记，
+// Key 的前半段不能漏进落库的回答、回传与任何事件（流式时末尾可能是 Key 开头的一段也先不发）。
+func TestKeyContainingMarkupNeverLeaks(t *testing.T) {
+	e := newEnv(t)
+	odd := "qa_k-AB<｜DSML｜rest-0123"
+	_, err := e.svc.SaveSettings(context.Background(), SettingsInput{
+		Enabled: true, BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model", APIKey: &odd,
+	})
+	require.NoError(t, err)
+	e.llm.push(reply{text: "你的 Key 是 " + odd + " 对吧？"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "回显")
+	_, all := e.waitRun(admin, conv, res.RunID)
+	for _, ev := range all {
+		if ev.Type == EventDelta {
+			assert.NotContains(t, ev.Text, "qa_k-AB", "增量")
+		}
+		if ev.Type == EventMessage {
+			assert.NotContains(t, ev.Message.Content, "qa_k-AB", "消息事件")
+		}
+	}
+	assert.Equal(t, "你的 Key 是 *** 对吧？", e.messages(conv)[1].Content)
+}
+
+// 模型给的工具参数不是 JSON（2026-10-11 验收时 deepseek.v3-v1:0 回了 {"keyword": "Fake", "limit": 20)）：当工具错误交回模型；
+// 回传的这次调用参数换成 {}。部分兼容网关会校验历史里的参数，坏 JSON 会让这个会话以后的每次请求都回 400。
+func TestInvalidToolArgumentsReplayedAsEmptyObject(t *testing.T) {
+	e := newEnv(t)
+	e.llm.strict()
+	e.llm.push(call("call_1", "search_torrents", `{"keyword": "Fake", "limit": 20)`), reply{text: "参数写错了。"}, reply{text: "不客气。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "搜一下 Fake")
+	fin, _ := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	msgs := e.messages(conv)
+	require.Equal(t, []string{"user", "assistant", "tool", "assistant"}, roles(msgs))
+	assert.True(t, msgs[2].IsError)
+	assert.Contains(t, msgs[2].Content, "参数不是 JSON 对象")
+	assert.Contains(t, msgs[1].ToolCalls, `"limit\": 20)`, "界面上照样看得到模型给的原样参数")
+	second := e.llm.requests()[1]
+	fn := second.Messages[2]["tool_calls"].([]any)[0].(map[string]any)["function"].(map[string]any)
+	assert.Equal(t, "{}", fn["arguments"])
+	// 同一个会话接着问：历史里的这次调用照样能回传
+	res = e.send(admin, conv, "谢谢")
+	fin, _ = e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+}

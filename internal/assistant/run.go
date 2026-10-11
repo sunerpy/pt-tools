@@ -222,7 +222,7 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 	msgs := append([]openai.ChatCompletionMessageParamUnion{openai.SystemMessage(systemPrompt(s.now(), r.actor))}, hist...)
 	scrub := keyScrubber(set.llm.APIKey)
 	for range set.maxSteps {
-		rs := &redactedStream{scrub: scrub}
+		rs := &redactedStream{scrub: scrub, key: set.llm.APIKey}
 		out, err := s.complete(r.ctx, chat, set.llm.Model, msgs, tb.defs, func(chunk string) {
 			s.emitDelta(r, rs, chunk, false)
 		})
@@ -233,8 +233,9 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 			return RunFailed, describeError(err, set.llm.APIKey)
 		}
 		s.emitDelta(r, rs, "", true)
-		// 服务回显了收到的 Key（恶意或配错的兼容服务）也不让它进库、事件与工具参数
+		// 服务回显了收到的 Key（恶意或配错的兼容服务）也不让它进库、事件与工具参数；先按原文换掉 Key，再截工具调用标记
 		out.content, out.reasoning = scrub(out.content), scrub(out.reasoning)
+		out.content = stripToolMarkup(out.content)
 		calls := make([]pendingCall, 0, len(out.calls))
 		stored := make([]storedCall, 0, len(out.calls))
 		writes := make([]bool, 0, len(out.calls))
@@ -310,6 +311,8 @@ type redactedStream struct {
 	full  strings.Builder
 	sent  string
 	scrub func(string) string
+	// key 是这次运行用的 API Key：末尾可能是它开头的一段先不发
+	key string
 }
 
 // keyScrubber 把这次运行用的 API Key 原样换成 ***（设置要求 Key 至少 minKeyLen 个字符；更短的只能是旧数据，不换，免得误伤正常文字）。
@@ -333,20 +336,34 @@ func safeCut(s string) int {
 	return i
 }
 
+// keyHold 是可以先发的长度：末尾可能是 Key 开头的一段先不发（Key 还没收全，换不掉）。和 keyScrubber 一样，太短的 Key 不管。
+func keyHold(s, key string) int {
+	if len(key) < minKeyLen {
+		return len(s)
+	}
+	for n := min(len(key)-1, len(s)); n > 0; n-- {
+		if strings.HasSuffix(s, key[:n]) {
+			return len(s) - n
+		}
+	}
+	return len(s)
+}
+
 func (s *Service) emitDelta(r *run, rs *redactedStream, chunk string, final bool) {
 	rs.full.WriteString(chunk)
 	full := rs.full.String()
+	if rs.scrub != nil {
+		// 先按原文换掉 Key，再截工具调用标记、通用脱敏（顺序反了，Key 可能被截断或改写，原文就对不上了）
+		full = rs.scrub(full)
+	}
+	// 漏进正文的工具调用标记不发
+	full = cutToolMarkup(full)
 	cut := len(full)
 	if !final {
-		cut = safeCut(full)
+		// 末尾还可能变的一段先不发：ASCII 串（地址与长串）、可能是标记开头的、可能是 Key 开头的
+		cut = min(safeCut(full), markupHold(full), keyHold(full, rs.key))
 	}
-	part := full[:cut]
-	if rs.scrub != nil {
-		// 先按原文换掉 Key 再通用脱敏（顺序反了，通用规则改写一部分以后原文就对不上了）；
-		// 末尾还在变长的 ASCII 串不在 part 里，Key 不会被切成两半
-		part = rs.scrub(part)
-	}
-	red := redact.Text(part)
+	red := redact.Text(full[:cut])
 	if red == rs.sent {
 		return
 	}

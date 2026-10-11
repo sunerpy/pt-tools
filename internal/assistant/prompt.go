@@ -32,7 +32,8 @@ func systemPrompt(now time.Time, a Actor) string {
 	if a.CanWrite {
 		b.WriteString("- 改动类工具（暂停、继续、删除种子，推送种子到下载器，添加订阅）执行以前 pt-tools 会请用户确认，你不需要先问，" +
 			"也不能替用户确认。用户拒绝或者没有确认，工具结果会说明，照实告诉用户没有执行。\n")
-		b.WriteString("- 推送种子用 search_torrents 结果里的 site 与 torrent_id。\n")
+		b.WriteString("- 推送种子要 site 与 torrent_id：用户已经给了站点与种子编号（贴的种子地址也会换成「站点 X 的种子 Y」）时直接推送，不要先搜索；" +
+			"不知道编号时再用 search_torrents 找。\n")
 	} else {
 		b.WriteString("- 这个入口只能查询，不能做改动类操作（暂停、删除、推送种子，添加订阅）；用户要求时告诉他到 pt-tools 网页上操作。\n")
 	}
@@ -80,7 +81,7 @@ func assistantParam(content, reasoning string, calls []storedCall) openai.ChatCo
 	for _, c := range calls {
 		p.ToolCalls = append(p.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
 			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-				ID: c.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: c.Name, Arguments: c.Arguments},
+				ID: c.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: c.Name, Arguments: replayArgs(c.Arguments)},
 			},
 		})
 	}
@@ -88,6 +89,16 @@ func assistantParam(content, reasoning string, calls []storedCall) openai.ChatCo
 		p.SetExtraFields(map[string]any{"reasoning_content": reasoning})
 	}
 	return openai.ChatCompletionMessageParamUnion{OfAssistant: &p}
+}
+
+// replayArgs 是回传给模型的工具参数：不是 JSON 对象的（模型自己写坏的）换成 {}。部分兼容网关会校验历史里的参数，
+// 坏 JSON 会让这个会话以后的每次请求都失败；这次调用的结果已经告诉模型参数不对。
+func replayArgs(args string) string {
+	var obj map[string]any
+	if json.Unmarshal([]byte(args), &obj) != nil || obj == nil {
+		return "{}"
+	}
+	return args
 }
 
 // interrupted 是中断的运行没留下结果的工具调用交给模型的结果。
