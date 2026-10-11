@@ -15,10 +15,21 @@ class MorePage extends ConsumerWidget {
     final st = ref.watch(connectionStatusProvider).value;
     final unread =
         ref.watch(overviewProvider).value?.totals.unreadMessages ?? 0;
+    // 主机启用了 AI 助手才显示入口（主机的版本没有这个功能时也不显示）
+    final assistant =
+        ref.watch(assistantStatusProvider).value?.enabled ?? false;
     return Scaffold(
       appBar: AppBar(title: Text(s.navMore)),
       body: ListView(
         children: [
+          if (assistant)
+            ListTile(
+              key: const Key('more-assistant'),
+              leading: const Icon(Icons.smart_toy_outlined),
+              title: Text(s.moreAssistant),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.go('/more/assistant'),
+            ),
           ListTile(
             leading: const Icon(Icons.public),
             title: Text(s.moreSites),

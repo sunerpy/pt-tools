@@ -21,9 +21,60 @@ Map<String, Object?> _meta(List<String> scopes) => {
   'name': 'pt-tools',
   'version': 'v1.0.0-test',
   'remote_api_level': 1,
-  'features': ['overview'],
+  'features': ['overview', 'assistant'],
   'principal': {'kind': 'remote_device', 'name': '测试手机', 'scopes': scopes},
 };
+
+const _at = '2026-10-11T08:00:00Z';
+
+/// AI 助手：一个会话，最后一条是要确认的暂停（确认以后变 approved）。
+Map<String, Object?> _assistantDetail(String status) => {
+  'id': 7,
+  'title': '暂停那个种子',
+  'entry': 'app',
+  'running': status == 'pending',
+  'created_at': _at,
+  'updated_at': _at,
+  'run_id': status == 'pending' ? 'r1' : null,
+  'last_seq': 100,
+  'messages': [
+    {
+      'id': 1,
+      'role': 'user',
+      'content': '暂停 abc',
+      'run_id': 'r1',
+      'created_at': _at,
+    },
+    {
+      'id': 2,
+      'role': 'assistant',
+      'content': '**好的**，暂停这个种子。',
+      'run_id': 'r1',
+      'created_at': _at,
+      'tool_calls': [
+        {
+          'id': 'c1',
+          'name': 'pause_torrent',
+          'arguments': '{"task_id":"abc"}',
+          'write': true,
+        },
+      ],
+    },
+  ],
+  'confirmations': [
+    {
+      'id': 9,
+      'run_id': 'r1',
+      'tool_call_id': 'c1',
+      'tool': 'pause_torrent',
+      'summary': '暂停种子：下载器 1，任务 abc',
+      'arguments': {'task_id': 'abc'},
+      'status': status,
+      'expires_at': _at,
+      'created_at': _at,
+    },
+  ],
+}..removeWhere((k, v) => v == null);
 
 final _overview = {
   'totals': {
@@ -93,6 +144,12 @@ class _World {
   /// 种子列表回 502（下载器连不上）
   bool failTorrents = false;
 
+  /// AI 助手启用没有
+  bool assistantEnabled = true;
+
+  /// 确认过了没有
+  bool approved = false;
+
   Object? api(String method, String path) {
     requests.add('$method $path');
     final p = Uri.parse(path).path;
@@ -112,6 +169,35 @@ class _World {
         'failed': 0,
         'results': [],
       },
+      '/api/app/v1/assistant/status' => {
+        'enabled': assistantEnabled,
+        'model': assistantEnabled ? 'deepseek-flash' : '',
+        'can_confirm': assistantEnabled && scopes.contains('app:write'),
+        'chatops': false,
+      },
+      '/api/app/v1/assistant/conversations' => [
+        {
+          'id': 7,
+          'title': '暂停那个种子',
+          'entry': 'app',
+          'running': !approved,
+          'created_at': _at,
+          'updated_at': _at,
+        },
+      ],
+      '/api/app/v1/assistant/conversations/7' => _assistantDetail(
+        approved ? 'approved' : 'pending',
+      ),
+      '/api/app/v1/assistant/conversations/7/events' => {
+        'events': [],
+        'reset': false,
+        'last': 100,
+        'running': !approved,
+      },
+      '/api/app/v1/assistant/confirmations/9' => () {
+        approved = true;
+        return (_assistantDetail('approved')['confirmations'] as List).first;
+      }(),
       _ => null,
     };
   }
@@ -280,6 +366,52 @@ void main() {
     expect(find.textContaining('撤销「测试手机」'), findsOneWidget);
     expect(find.textContaining('keystore 坏了'), findsOneWidget);
     expect(find.text('配对 pt-tools'), findsOneWidget, reason: '还在配对页');
+  });
+
+  testWidgets('AI 助手：更多里有入口，打开最近的会话，确认卡片点「确认执行」发确认', (tester) async {
+    final w = await _pumpApp(tester);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    expect(find.byKey(const Key('more-assistant')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    expect(find.text('暂停 abc'), findsOneWidget);
+    expect(find.text('好的，暂停这个种子。'), findsOneWidget, reason: '回答按纯文本显示');
+    expect(find.text('暂停种子：下载器 1，任务 abc'), findsOneWidget);
+    expect(find.text('等你确认'), findsOneWidget);
+    expect(find.text('等你确认上面的操作…'), findsOneWidget);
+    await tester.tap(find.text('确认执行'));
+    await _settle(tester);
+    expect(w.requests, contains('POST /api/app/v1/assistant/confirmations/9'));
+    expect(find.text('已确认'), findsOneWidget);
+    expect(find.text('确认执行'), findsNothing);
+    expect(
+      w.requests.where((r) => r.contains('/assistant/conversations/7/events')),
+      isNotEmpty,
+      reason: '长轮询事件',
+    );
+  });
+
+  testWidgets('AI 助手：只读设备看得到确认卡片，但没有确认按钮', (tester) async {
+    await _pumpApp(tester, scopes: const ['app:read']);
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await _settle(tester);
+    expect(find.text('暂停种子：下载器 1，任务 abc'), findsOneWidget);
+    expect(find.text('确认执行'), findsNothing);
+    expect(find.text('这台设备只能查询：改动类操作要在网页上确认。'), findsOneWidget);
+  });
+
+  testWidgets('AI 助手：主机没启用时更多里没有入口', (tester) async {
+    final w = await _pumpApp(tester);
+    w.assistantEnabled = false;
+    await _settle(tester);
+    await tester.tap(find.text('更多'));
+    await _settle(tester);
+    expect(find.byKey(const Key('more-assistant')), findsNothing);
   });
 
   testWidgets('配对页：链接不对时说明原因', (tester) async {
