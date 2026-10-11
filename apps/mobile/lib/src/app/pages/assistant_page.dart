@@ -60,10 +60,18 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
 
   AppApi get _api => ref.read(apiProvider)!;
 
+  /// 读过会话列表了没有（App API 客户端有了以后读一次）
+  bool _started = false;
+
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    // 冷启动直接打开这一页（例如网页版刷新）时主机记录可能还没读出来：等 App API 客户端有了再读
+    ref.listenManual<AppApi?>(apiProvider, (_, api) {
+      if (api == null || _started) return;
+      _started = true;
+      unawaited(_load());
+    }, fireImmediately: true);
   }
 
   @override

@@ -255,12 +255,25 @@ class _World {
   }
 }
 
+/// 读主机记录要等 [gate]（模拟冷启动时安全存储读得慢）。
+class _SlowHostStore extends MemoryHostStore {
+  _SlowHostStore(super.host, this.gate);
+  final Future<void> gate;
+
+  @override
+  Future<HostRecord?> load() async {
+    await gate;
+    return super.load();
+  }
+}
+
 Future<_World> _pumpApp(
   WidgetTester tester, {
   List<String> scopes = const ['app:read', 'app:write'],
   bool paired = true,
   String mode = 'device',
   HostStore? store,
+  Future<void>? hostLoaded,
 }) async {
   tester.platformDispatcher.localesTestValue = const [Locale('zh')];
   addTearDown(tester.platformDispatcher.clearLocalesTestValue);
@@ -288,7 +301,10 @@ Future<_World> _pumpApp(
       retry: (_, _) => null,
       overrides: [
         hostStoreProvider.overrideWithValue(
-          store ?? MemoryHostStore(paired ? rec : null),
+          store ??
+              (hostLoaded != null
+                  ? _SlowHostStore(paired ? rec : null, hostLoaded)
+                  : MemoryHostStore(paired ? rec : null)),
         ),
         channelFactoryProvider.overrideWithValue(w.dial),
         refreshIntervalProvider.overrideWithValue(const Duration(days: 1)),
@@ -517,6 +533,19 @@ void main() {
     await _settle(tester);
     expect(find.text('再问一句'), findsOneWidget);
     expect(find.text('暂停 abc'), findsOneWidget, reason: '还是原来的会话');
+  });
+
+  testWidgets('AI 助手：冷启动直接打开这一页时等主机记录读出来再读会话', (tester) async {
+    tester.platformDispatcher.defaultRouteNameTestValue = '/more/assistant';
+    addTearDown(tester.platformDispatcher.clearDefaultRouteNameTestValue);
+    final loaded = Completer<void>();
+    await _pumpApp(tester, hostLoaded: loaded.future);
+    await _settle(tester);
+    expect(find.byType(AssistantPage), findsOneWidget);
+    expect(find.textContaining('Null check'), findsNothing);
+    loaded.complete();
+    await _settle(tester);
+    expect(find.text('暂停 abc'), findsOneWidget, reason: '主机记录读出来以后打开最近的会话');
   });
 
   testWidgets('AI 助手：主机没启用时更多里没有入口', (tester) async {
