@@ -314,7 +314,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="da-page">
+  <div class="pt-cards pt-cards--wide">
     <PtHeadSub>{{ headSub }}</PtHeadSub>
     <Teleport to="#pt-head-acts" :disabled="isMobile">
       <el-select
@@ -693,12 +693,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.da-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .da-dl {
   width: 180px;
 }

@@ -1130,6 +1130,8 @@ export interface VersionInfo {
   version: string;
   build_time: string;
   commit_id: string;
+  /** 这个库是从 v1 升级上来的（有 v2 迁移的记录）：只有这样才显示「v2.0 升级完成」的说明 */
+  upgraded_from_v1?: boolean;
 }
 
 export interface ReleaseAsset {

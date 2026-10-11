@@ -98,7 +98,7 @@ class _SiteTileState extends ConsumerState<_SiteTile> {
       ref.invalidate(sitesProvider);
     } on Object catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text(s.errorPrefix(describeError(e)))),
+        SnackBar(content: Text(s.errorPrefix(describeError(e, s)))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);

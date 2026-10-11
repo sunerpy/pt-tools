@@ -26,7 +26,7 @@ class SubscriptionPage extends ConsumerWidget {
       if (msg != null) messenger.showSnackBar(SnackBar(content: Text(msg)));
     } on Object catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text(s.errorPrefix(describeError(e)))),
+        SnackBar(content: Text(s.errorPrefix(describeError(e, s)))),
       );
     }
     ref.invalidate(subscriptionProvider(id));

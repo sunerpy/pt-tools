@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sunerpy/pt-tools/core"
+	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/version"
 )
 
@@ -17,12 +20,27 @@ func (s *Server) apiPing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "ok", "version": version.GetVersionInfo().Version})
 }
 
+// versionResponse 是版本信息，加上这个库是不是从 v1 升级上来的：网页只给升级上来的用户显示「v2.0 升级完成」的说明
+type versionResponse struct {
+	version.VersionInfo
+	UpgradedFromV1 bool `json:"upgraded_from_v1"`
+}
+
 func (s *Server) apiVersion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, version.GetVersionInfo())
+	writeJSON(w, versionResponse{VersionInfo: version.GetVersionInfo(), UpgradedFromV1: upgradedFromV1()})
+}
+
+// upgradedFromV1 报告库里有没有 v2 迁移（架构版本 10）的记录：只有从 v1 升级上来的库才跑过这次迁移，全新安装直接记成最新版本
+func upgradedFromV1() bool {
+	if global.GlobalDB == nil || global.GlobalDB.DB == nil {
+		return false
+	}
+	_, ok := models.GetMigrationState(global.GlobalDB.DB, core.V2BroadcastSchemaVersion)
+	return ok
 }
 
 func (s *Server) apiVersionCheck(w http.ResponseWriter, r *http.Request) {

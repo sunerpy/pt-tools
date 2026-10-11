@@ -954,9 +954,9 @@ func downloadWorkerUnified(
 				if len(item.Categories) > 0 {
 					cat = strings.Join(item.Categories, "/")
 				}
-				// 使用 v2.TorrentItem 的方法获取 FreeLevel 和 FreeEndTime
+				// 使用 v2.TorrentItem 的方法获取 FreeLevel 和 FreeEndTime（免费到期只记免费的）
 				freeLevel := detail.GetFreeLevel()
-				freeEndTime := detail.GetFreeEndTime()
+				freeEndTime := freeEndForRecord(isFree, detail.GetFreeEndTime())
 				torrent = &models.TorrentInfo{
 					SiteName:       string(siteName),
 					TorrentID:      item.GUID,
@@ -1247,6 +1247,15 @@ func sanitizeTitle(title string) string {
 	// 替换连续空格为单个空格
 	sanitized = strings.Join(strings.Fields(sanitized), " ")
 	return strings.TrimSpace(sanitized)
+}
+
+// freeEndForRecord 是写进种子记录的免费到期时间：只有免费（FREE、2XFREE）的结束时间才算。半价、2X 这类优惠也有结束时间，
+// 记下来的话，免费结束暂停与「删除免费到期未完成的种子」会在优惠结束时处理一个本来就不要求免费的种子。没有结束时间时也不记。
+func freeEndForRecord(isFree bool, end *time.Time) *time.Time {
+	if !isFree || end == nil || end.IsZero() {
+		return nil
+	}
+	return end
 }
 
 // FetchAndDownloadFreeRSSUnified 使用 UnifiedPTSite 接口获取并下载免费 RSS 种子
@@ -1565,7 +1574,7 @@ func downloadWorker[T models.ResType](
 					SiteName:       string(siteName),
 					TorrentID:      item.GUID,
 					FreeLevel:      detail.GetFreeLevel(),
-					FreeEndTime:    detail.GetFreeEndTime(),
+					FreeEndTime:    freeEndForRecord(isFree, detail.GetFreeEndTime()),
 					Title:          title,
 					Category:       cat,
 					Tag:            rssCfg.Tag,

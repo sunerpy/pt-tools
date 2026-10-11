@@ -101,7 +101,7 @@ func TestHandleFreeEnded_PauseSuccessMarksPaused(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ps1", Title: "PS", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "ps1", Title: "PS", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-ps", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -165,7 +165,7 @@ func TestUpdateAllMonitoredProgress_MarksCompleted(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "mc", Title: "MC", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "mc", Title: "MC", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-mc", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -184,7 +184,7 @@ func TestUpdateAllMonitoredProgress_GetTorrentGenericError(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ge", Title: "GE", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "ge", Title: "GE", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-ge", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -212,7 +212,7 @@ func TestRescheduleMissingFutureTorrents_SkipsAlreadyPending(t *testing.T) {
 
 	future := time.Now().Add(2 * time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "rsp", Title: "RSP", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "rsp", Title: "RSP", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-rsp", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -233,7 +233,7 @@ func TestScheduleTorrent_AlreadyPendingIgnored(t *testing.T) {
 
 	future := time.Now().Add(2 * time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "sp", Title: "SP", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "sp", Title: "SP", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-sp", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -340,7 +340,7 @@ func TestLoadPendingTasksFromDB_QueryError(t *testing.T) {
 func TestHandleFreeEndedTorrent_LockAcquireError(t *testing.T) {
 	m := closedFreeEndMonitor(t)
 	future := time.Now().Add(time.Hour)
-	tor := models.TorrentInfo{Title: "T", PauseOnFreeEnd: true, FreeEndTime: &future, DownloaderTaskID: "x"}
+	tor := models.TorrentInfo{Title: "T", PauseOnFreeEnd: true, IsFree: true, FreeEndTime: &future, DownloaderTaskID: "x"}
 	tor.ID = 5
 	require.NotPanics(t, func() { m.handleFreeEndedTorrent(tor) })
 }
@@ -373,7 +373,7 @@ func TestHandleFreeEnded_AutoDelete(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ad1", Title: "AutoDel", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "ad1", Title: "AutoDel", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-del", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -405,7 +405,7 @@ func TestHandleFreeEnded_AutoDelete_NotFoundTolerated(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ad2", Title: "AutoDelNF", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "ad2", Title: "AutoDelNF", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-nf", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -432,7 +432,7 @@ func TestHandleFreeEnded_AutoDelete_RealError_Retries(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ad3", Title: "AutoDelErr", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "ad3", Title: "AutoDelErr", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-err", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -452,7 +452,7 @@ func TestHandleFreeEnded_GetDownloaderError_Retries(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "gd1", Title: "NoDL", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "gd1", Title: "NoDL", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-x", DownloaderName: "missing",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -472,7 +472,7 @@ func TestHandleFreeEnded_CheckCompletionError_Retries(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "cc1", Title: "CheckErr", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "cc1", Title: "CheckErr", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-cc", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -496,7 +496,7 @@ func TestHandleFreeEnded_PauseError_Retries(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "pe1", Title: "PauseErr", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "pe1", Title: "PauseErr", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-pe", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -515,7 +515,7 @@ func TestHandleFreeEnded_AlreadyProcessed_Skips(t *testing.T) {
 
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "ap1", Title: "Already", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "ap1", Title: "Already", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-ap", DownloaderName: "qb1",
 		IsPausedBySystem: true, // already paused → processing lock RowsAffected==0
 	}
@@ -536,7 +536,7 @@ func TestExportedTestHandleFreeEndedTorrent(t *testing.T) {
 	}
 	freeEnd := time.Now().Add(-time.Minute)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "w1", Title: "Wrapper", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "w1", Title: "Wrapper", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-w", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -594,7 +594,7 @@ func TestUpdateAllMonitored_MarksRemovedWhenNotFound(t *testing.T) {
 
 	freeEnd := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "mm1", Title: "MonRemoved", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "mm1", Title: "MonRemoved", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &freeEnd, DownloaderTaskID: "task-gone", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -680,7 +680,7 @@ func TestLoadPendingTasksFromDB_FuturePastSplit(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	futureTor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "fut", Title: "Future", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "fut", Title: "Future", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-future", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&futureTor).Error)
@@ -706,7 +706,7 @@ func TestLoadPendingTasksFromDB_PastDueFires(t *testing.T) {
 
 	past := time.Now().Add(-time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "past", Title: "Past", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "past", Title: "Past", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &past, DownloaderTaskID: "task-past", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -790,7 +790,7 @@ func TestUpdateAllMonitored_MarksCompleted(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "mon1", Title: "MonDone", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "mon1", Title: "MonDone", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-mon", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -811,7 +811,7 @@ func TestScheduleTaskLocked_PastDeadlineFires(t *testing.T) {
 
 	past := time.Now().Add(-time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "imm", Title: "Imm", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "imm", Title: "Imm", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &past, DownloaderTaskID: "task-imm", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -996,6 +996,7 @@ func TestFreeEndMonitor_ScheduleTorrent_SkipConditions(t *testing.T) {
 			name: "FreeEndTime is nil",
 			torrent: models.TorrentInfo{
 				PauseOnFreeEnd:   true,
+				IsFree:           true,
 				FreeEndTime:      nil,
 				DownloaderTaskID: "hash",
 			},
@@ -1004,6 +1005,7 @@ func TestFreeEndMonitor_ScheduleTorrent_SkipConditions(t *testing.T) {
 			name: "DownloaderTaskID is empty",
 			torrent: models.TorrentInfo{
 				PauseOnFreeEnd:   true,
+				IsFree:           true,
 				FreeEndTime:      ptrTime(time.Now().Add(1 * time.Hour)),
 				DownloaderTaskID: "",
 			},
@@ -1038,6 +1040,7 @@ func TestFreeEndMonitor_CancelTorrent(t *testing.T) {
 		TorrentID:        "12345",
 		Title:            "Test Torrent",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEndTime,
 		DownloaderTaskID: "test-hash-123",
 	}
@@ -1150,6 +1153,7 @@ func TestFreeEndMonitor_UpdateAllMonitoredProgress(t *testing.T) {
 		TorrentID:        "12345",
 		Title:            "Test Progress Update",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEndTime,
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
@@ -1311,6 +1315,7 @@ func TestFreeEndMonitor_LoadPendingTasksFromDB(t *testing.T) {
 		TorrentID:        "pending",
 		Title:            "Pending Torrent",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEndTime,
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
@@ -1428,6 +1433,7 @@ func TestFreeEndMonitor_MarkRetry(t *testing.T) {
 		TorrentID:        "mark-retry",
 		Title:            "Mark Retry Test",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEndTime,
 		DownloaderTaskID: "test-hash",
 	}
@@ -1528,6 +1534,7 @@ func TestFreeEndMonitor_UpdateProgress_DoesNotMarkCompletedOnNoiseStates(t *test
 				TorrentID:        "tid-" + state,
 				Title:            "noise-" + state,
 				PauseOnFreeEnd:   true,
+				IsFree:           true,
 				FreeEndTime:      &freeEndTime,
 				DownloaderTaskID: "test-hash-123",
 				DownloaderName:   "test-qbit",
@@ -1566,6 +1573,7 @@ func TestFreeEndMonitor_UpdateProgress_MarksCompletedOnSeedingStates(t *testing.
 				TorrentID:        "tid-seed-" + state,
 				Title:            "seed-" + state,
 				PauseOnFreeEnd:   true,
+				IsFree:           true,
 				FreeEndTime:      &freeEndTime,
 				DownloaderTaskID: "test-hash-123",
 				DownloaderName:   "test-qbit",
@@ -1604,6 +1612,7 @@ func TestFreeEndMonitor_PeriodicCheck_RescheduleMissingFutureTorrents(t *testing
 		TorrentID:        "future-1",
 		Title:            "future-pending",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEndTime,
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
@@ -1643,13 +1652,13 @@ func TestFreeEndMonitor_ScheduleTorrent_LogsSkipReason(t *testing.T) {
 
 	freeEnd := time.Now().Add(1 * time.Hour)
 
-	monitor.ScheduleTorrent(models.TorrentInfo{ID: 100, Title: "missing-task-id", PauseOnFreeEnd: true, FreeEndTime: &freeEnd, DownloaderTaskID: ""})
+	monitor.ScheduleTorrent(models.TorrentInfo{ID: 100, Title: "missing-task-id", PauseOnFreeEnd: true, IsFree: true, FreeEndTime: &freeEnd, DownloaderTaskID: ""})
 	monitor.mu.Lock()
 	_, scheduled := monitor.pendingTasks[100]
 	monitor.mu.Unlock()
 	require.False(t, scheduled, "torrent without DownloaderTaskID must not be scheduled")
 
-	monitor.ScheduleTorrent(models.TorrentInfo{ID: 101, Title: "missing-free-end", PauseOnFreeEnd: true, FreeEndTime: nil, DownloaderTaskID: "x"})
+	monitor.ScheduleTorrent(models.TorrentInfo{ID: 101, Title: "missing-free-end", PauseOnFreeEnd: true, IsFree: true, FreeEndTime: nil, DownloaderTaskID: "x"})
 	monitor.mu.Lock()
 	_, scheduled = monitor.pendingTasks[101]
 	monitor.mu.Unlock()
@@ -1713,6 +1722,7 @@ func TestScheduleTask_AdvanceShiftsDelay(t *testing.T) {
 		TorrentID:        "advance-shift",
 		Title:            "Advance Shift",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEnd,
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
@@ -1753,6 +1763,7 @@ func TestCheckExpired_AdvancedCutoff(t *testing.T) {
 			TorrentID:        "near-end",
 			Title:            "Near End",
 			PauseOnFreeEnd:   true,
+			IsFree:           true,
 			FreeEndTime:      &freeEnd,
 			DownloaderTaskID: "test-hash-123",
 			DownloaderName:   "test-qbit",
@@ -1782,6 +1793,7 @@ func TestCheckExpired_AdvancedCutoff(t *testing.T) {
 			TorrentID:        "still-future",
 			Title:            "Still Future",
 			PauseOnFreeEnd:   true,
+			IsFree:           true,
 			FreeEndTime:      &freeEnd,
 			DownloaderTaskID: "test-hash-123",
 			DownloaderName:   "test-qbit",
@@ -1812,6 +1824,7 @@ func TestBackwardCompat_AdvanceZero(t *testing.T) {
 		TorrentID:        "compat-expired",
 		Title:            "Compat Expired",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &expired,
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
@@ -1824,6 +1837,7 @@ func TestBackwardCompat_AdvanceZero(t *testing.T) {
 		TorrentID:        "compat-future",
 		Title:            "Compat Future",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &future,
 		DownloaderTaskID: "test-hash-456",
 		DownloaderName:   "test-qbit",
@@ -1857,6 +1871,7 @@ func TestAdvanceLargerThanFreeWindow_Immediate(t *testing.T) {
 		TorrentID:        "advance-overflow",
 		Title:            "Advance Overflow",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEnd,
 		DownloaderTaskID: "test-hash-123",
 		DownloaderName:   "test-qbit",
@@ -1896,6 +1911,7 @@ func TestMarkRetry_NotDoubleAdvanced(t *testing.T) {
 		TorrentID:        "retry-no-double",
 		Title:            "Retry No Double",
 		PauseOnFreeEnd:   true,
+		IsFree:           true,
 		FreeEndTime:      &freeEnd,
 		DownloaderTaskID: "test-hash",
 	}
@@ -1951,6 +1967,7 @@ func TestPauseReason_TextByAdvance(t *testing.T) {
 			TorrentID:        "reason-advance",
 			Title:            "Reason Advance",
 			PauseOnFreeEnd:   true,
+			IsFree:           true,
 			FreeEndTime:      &freeEnd,
 			DownloaderTaskID: "test-hash-123",
 			DownloaderName:   "test-qbit",
@@ -1980,6 +1997,7 @@ func TestPauseReason_TextByAdvance(t *testing.T) {
 			TorrentID:        "reason-exact",
 			Title:            "Reason Exact",
 			PauseOnFreeEnd:   true,
+			IsFree:           true,
 			FreeEndTime:      &freeEnd,
 			DownloaderTaskID: "test-hash-123",
 			DownloaderName:   "test-qbit",
@@ -2016,6 +2034,7 @@ func TestRescheduleMissingFutureTorrents_MultipleWithAdvance(t *testing.T) {
 			TorrentID:        fmt.Sprintf("future-%d", i),
 			Title:            fmt.Sprintf("future-%d", i),
 			PauseOnFreeEnd:   true,
+			IsFree:           true,
 			FreeEndTime:      &freeEnd,
 			DownloaderTaskID: "test-hash-123",
 			DownloaderName:   "test-qbit",
@@ -2063,6 +2082,7 @@ func TestRescheduleMissingFutureTorrents_RespectsBatchLimit(t *testing.T) {
 			TorrentID:        fmt.Sprintf("batch-%d", i),
 			Title:            fmt.Sprintf("batch-%d", i),
 			PauseOnFreeEnd:   true,
+			IsFree:           true,
 			FreeEndTime:      &freeEnd,
 			DownloaderTaskID: "test-hash-123",
 			DownloaderName:   "test-qbit",
@@ -2127,7 +2147,7 @@ func TestCancelTorrent_RemovesPending(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "c1", Title: "Cancel", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "c1", Title: "Cancel", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-cancel", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -2150,7 +2170,7 @@ func TestMarkRemovedFromDownloader_ClearsTask(t *testing.T) {
 	fm, db := newFreeEndMonitorWithFake(t, fake)
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "rm", Title: "T", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "rm", Title: "T", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-rm", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -2213,7 +2233,7 @@ func TestMarkRetry_SchedulesWhenUnderMax(t *testing.T) {
 
 	future := time.Now().Add(time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "retry-sched", Title: "T", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "retry-sched", Title: "T", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-r", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -2252,7 +2272,7 @@ func TestCheckAndProcessExpiredTorrents_FiresPast(t *testing.T) {
 
 	past := time.Now().Add(-time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "exp1", Title: "Exp", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "exp1", Title: "Exp", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &past, DownloaderTaskID: "task-exp", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)
@@ -2271,7 +2291,7 @@ func TestRescheduleMissingFutureTorrents_SchedulesUnseen(t *testing.T) {
 
 	future := time.Now().Add(2 * time.Hour)
 	tor := models.TorrentInfo{
-		SiteName: "s", TorrentID: "future1", Title: "Fut", PauseOnFreeEnd: true,
+		SiteName: "s", TorrentID: "future1", Title: "Fut", PauseOnFreeEnd: true, IsFree: true,
 		FreeEndTime: &future, DownloaderTaskID: "task-f", DownloaderName: "qb1",
 	}
 	require.NoError(t, db.DB.Create(&tor).Error)

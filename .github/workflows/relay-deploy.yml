@@ -1,8 +1,8 @@
 # 托管 relay 的部署（路线图 M18）：把自己服务器上的 relay 容器升级到某个已经公开的版本的 pt-tools 镜像。
 # 部署脚本取自这个 workflow 所在的受保护提交（不是要部署的 tag），经 ssh 在服务器上跑：拉镜像（按 digest）→ 旧容器排空并以 1012 关 →
 # 起新容器 → /ready 与版本核对；旧容器先留着，从外面检查通过以后再删。部署做完却没有收尾（外面检查没过、收尾失败、
-# 这期间 workflow 被取消）时换回旧容器。runner 中途丢失时服务器上停在待收尾的状态，下一次部署会拒绝，要登录服务器
-# 用 scripts/deploy-relay.sh --finalize 或 --rollback 收尾。
+# 这期间 workflow 被取消）时换回旧容器。runner 中途丢失时由服务器上的看门狗收场：部署以后 900 秒还没有收尾就换回旧容器
+# （服务器在这期间重启时看门狗也不在了，要登录服务器用 scripts/deploy-relay.sh --finalize 或 --rollback 收尾）。
 #
 # release.yml 发布成功以后调用（vars.DEPLOY_RELAY 为 'true' 时，带上这次推送的镜像 digest）；也可以手动触发，dry_run 只做检查、不连服务器。
 # 两种触发都只在受保护的 main 或 v1.0.0-rc 上。
@@ -193,7 +193,8 @@ jobs:
           printf '%s\n' "$RELAY_SSH_KNOWN_HOSTS" >"$dir/known_hosts"
           echo "dir=$dir" >>"$GITHUB_OUTPUT"
 
-      # 新容器起来、本机核对通过以后旧容器还留着（--keep-previous），等下一步从外面检查
+      # 新容器起来、本机核对通过以后旧容器还留着（--keep-previous），等下一步从外面检查。
+      # 服务器上的看门狗在 900 秒以后还没有收尾时换回旧容器（runner 中途丢了的时候）；后面两步正常要不了 3 分钟
       - name: Deploy over SSH
         id: deploy
         if: ${{ !inputs.dry_run }}
@@ -214,7 +215,7 @@ jobs:
           RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
         run: |
           set -euo pipefail
-          args=(bash -s -- --image "$IMAGE" --public-url "wss://$RELAY_HOSTNAME" --port "$PORT" --bind "$BIND" --drain-grace "$GRACE" --expect-version "$TAG" --keep-previous)
+          args=(bash -s -- --image "$IMAGE" --public-url "wss://$RELAY_HOSTNAME" --port "$PORT" --bind "$BIND" --drain-grace "$GRACE" --expect-version "$TAG" --keep-previous --pending-timeout 900)
           [ -z "$HEADER" ] || args+=(--client-ip-header "$HEADER")
           [ -z "$MAX_CONNECTIONS" ] || args+=(--max-connections "$MAX_CONNECTIONS")
           [ -z "$DAILY_BYTES" ] || args+=(--daily-bytes-per-host "$DAILY_BYTES")
@@ -222,13 +223,15 @@ jobs:
             -o UserKnownHostsFile="$DIR/known_hosts" -o ConnectTimeout=20 -o ServerAliveInterval=15 \
             "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' "${args[@]}")" <scripts/deploy-relay.sh
 
-      # 从外面再看一次：反向代理、TLS 与新容器都通才收尾（删掉旧容器）
+      # 从外面再看一次：反向代理、TLS 与新容器都通才收尾（删掉旧容器）。收尾时核对服务器上跑的还是这次的镜像：
+      # 看门狗已经换回旧容器时收尾失败，不报告部署成功
       - name: Check the public endpoint, then finalize
         id: finish
         if: ${{ !inputs.dry_run }}
         shell: bash
         env:
           DIR: ${{ steps.ssh.outputs.dir }}
+          IMAGE: ${{ steps.img.outputs.ref }}
           SSH_PORT: ${{ steps.cfg.outputs.ssh_port }}
           TAG: ${{ inputs.tag }}
           RELAY_HOSTNAME: ${{ vars.RELAY_HOSTNAME }}
@@ -249,10 +252,11 @@ jobs:
           fi
           ssh -i "$DIR/key" -p "$SSH_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$DIR/known_hosts" -o ConnectTimeout=20 \
-            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' bash -s -- --finalize)" <scripts/deploy-relay.sh
+            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' bash -s -- --finalize --image "$IMAGE")" <scripts/deploy-relay.sh
           echo "$url is ready and runs $TAG"
 
-      # 部署做完了却没有收尾：外面检查没过、收尾失败，或者这期间 workflow 被取消（always() 在取消以后也会跑）
+      # 部署做完了却没有收尾：外面检查没过、收尾失败，或者这期间 workflow 被取消（always() 在取消以后也会跑）。
+      # 脚本以 3 退出是没有待收尾的部署：收尾其实已经做完（之后这一步被取消、ssh 没有带回结果），或者看门狗已经换回
       - name: Roll back an unfinished deployment
         if: ${{ always() && steps.deploy.outcome == 'success' && steps.finish.outcome != 'success' }}
         shell: bash
@@ -264,13 +268,18 @@ jobs:
           RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
         run: |
           set -euo pipefail
-          if ! ssh -i "$DIR/key" -p "$SSH_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+          rc=0
+          ssh -i "$DIR/key" -p "$SSH_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$DIR/known_hosts" -o ConnectTimeout=20 \
-            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' bash -s -- --rollback --port "$PORT")" <scripts/deploy-relay.sh; then
+            "$RELAY_SSH_USER@$RELAY_SSH_HOST" "$(printf '%q ' bash -s -- --rollback --port "$PORT")" <scripts/deploy-relay.sh || rc=$?
+          case "$rc" in
+          0) echo "::warning title=Relay deploy::the deployment was not finalized and has been rolled back" ;;
+          3) echo "::notice title=Relay deploy::nothing to roll back: the deployment was already finalized or rolled back (see the log above for what the server runs)" ;;
+          *)
             echo "::error title=Relay deploy::rollback failed; check the server"
             exit 1
-          fi
-          echo "::warning title=Relay deploy::the deployment was not finalized and has been rolled back"
+            ;;
+          esac
 
       - name: Remove the SSH key
         if: always()

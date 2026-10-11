@@ -650,9 +650,11 @@ Edge 商店发布需要仓库 Secrets：
 
 ### 部署托管 relay
 
-托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。负载均衡器从别的机器连过来时（例如 AWS ALB），用 `--bind`（workflow 里是变量 `RELAY_BIND`）把端口绑到服务器的私网地址，安全组只放行负载均衡器；客户端 IP 取负载均衡器写的头（ALB 是 `X-Forwarded-For`，relay 取最后一个地址），`/metrics` 不要对外，在负载均衡器上挡掉。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。
+托管 relay 跑在自己的服务器上：Docker 里的 `pt-tools relay serve`（镜像 `PT_MODE=relay`），只听 `127.0.0.1:<端口>`，前面的反向代理做 TLS 并把 WebSocket 转过来（`/ready`、`/healthz`、`/metrics` 也经它）。负载均衡器从别的机器连过来时（例如 AWS ALB），用 `--bind`（workflow 里是变量 `RELAY_BIND`）把端口绑到服务器的私网地址，安全组只放行负载均衡器；客户端 IP 取负载均衡器写的头（ALB 是 `X-Forwarded-For`，relay 取最后一个地址），`/metrics` 不要对外，在负载均衡器上挡掉。`scripts/deploy-relay.sh` 在服务器上完成一次升级：拉镜像 → 旧容器排空并以 1012 关、改名成 `<name>-previous` → 起新容器 → 核对 `/ready` 与版本（容器被重启过也算失败）。这一段里出错或者被中断（包括 ssh 断开）都会换回旧容器；上一次部署没有收尾时拒绝再部署。第一次部署时 `<name>-previous` 是一个不会启动的占位容器，回滚就是删掉新容器、回到没有部署过的样子。同一个容器名上的部署、收尾、回滚与看门狗用 `flock` 排队（锁文件 `/tmp/deploy-relay-<name>.lock`），服务器上要有 util-linux 的 `flock` 与 `setsid`。
 
-`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器。runner 中途丢失时服务器上停在待收尾的状态，下一次部署会拒绝，要登录服务器用下面的 `--finalize` 或 `--rollback` 收尾。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
+用 `--keep-previous` 部署时，脚本退出以前另起一个脱离 ssh 会话的看门狗：`--pending-timeout` 秒（默认 900，`0` 不起）以后这次部署仍然没有收尾，就换回旧容器（第一次部署时删掉新容器与占位容器）。它按容器 ID 只认这次部署的两个容器，已经收尾、回滚过或者又部署过就什么都不做；日志在 `/tmp/deploy-relay-<name>.watchdog.<uid>.log`。服务器在这期间重启时看门狗也不在了，要手动收尾。
+
+`Release` 公开以后，`Deploy the hosted relay` job 调用 `relay-deploy.yml`：确认这个 tag 已经公开发布，按这次推送的镜像 digest 部署（部署脚本取自 workflow 所在的受保护提交，不取自 tag），旧容器先留着，从外面检查 `https://<RELAY_HOSTNAME>/ready` 与版本通过以后才删。部署做完却没有收尾（外面检查没过、收尾失败、这期间 workflow 被取消）时，最后一步换回旧容器；收尾在服务器上其实已经做完（之后这一步被取消、ssh 没有带回结果）时，这一步只给提示，不报失败。收尾时核对服务器上跑的仍是这次的镜像，看门狗已经换回旧容器时收尾失败。runner 中途丢失时由看门狗在 900 秒以后换回旧容器。也可以在受保护的 `main`、`v1.0.0-rc` 上手动运行 `Relay Deploy`，`dry_run` 只做检查、不连服务器。
 
 部署用的 secret 放在 GitHub Environment `hosted-relay` 里，并在仓库设置里把这个 Environment 的部署分支限定为 `main` 与 `v1.0.0-rc`（需要的话再加审批）；`release.yml` 不把仓库的 secret 传给它。
 
@@ -677,6 +679,8 @@ bash scripts/deploy-relay.sh --image sunerpy/pt-tools:v1.0.0-rc.19 --public-url 
 bash scripts/deploy-relay.sh --finalize    # 用 --keep-previous 部署过、检查通过以后删掉旧容器
 bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署时删掉新容器）
 ```
+
+`--finalize --image <部署时的 --image>` 先核对 `<name>` 跑的是这个镜像，不是时失败、不删旧容器。`--rollback` 时没有 `<name>-previous`、`<name>` 正常在跑，说明没有待收尾的部署（已经收尾，或者看门狗已经换回），以 3 退出并打印正在跑的镜像。
 
 ### 手机 App 发版
 

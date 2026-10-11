@@ -1,6 +1,5 @@
 // 全局状态：配对过的主机、连接、App API 客户端与各页面的数据。
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ptt_api/api.dart';
@@ -216,24 +215,6 @@ final exploreProvider = FutureProvider.autoDispose
         await requireApi(ref).explore(query.kind, list: query.list, q: query.q),
       );
     });
-
-/// 把接口的错误写成给人看的一句话（App API 的错误是 {"error","message"}）。
-String describeError(Object e) {
-  if (e is ApiException) {
-    final body = e.message;
-    if (body != null && body.isNotEmpty) {
-      try {
-        final v = jsonDecode(body);
-        if (v is Map && v['message'] is String) return v['message'] as String;
-      } on FormatException {
-        // 不是 JSON，原样给
-      }
-      return body;
-    }
-    return 'HTTP ${e.code}';
-  }
-  return e.toString().replaceFirst(RegExp(r'^[A-Za-z]+Exception: '), '');
-}
 
 /// 便于测试替换的定时刷新间隔。
 final refreshIntervalProvider = Provider<Duration>(
