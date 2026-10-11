@@ -245,6 +245,9 @@ var webCmd = &cobra.Command{
 		}
 		// 远程访问（M15）：设备只能经隧道调用 App API；默认关着，打开以后才有直连入口与 relay 连接
 		remoteHost := newRemoteHost(store, srv, monitorNotifier)
+		// 内置 AI 助手（M19）：设置在网页上，默认关着
+		assistantSvc := newAssistantService(runtimeCtx, store, srv)
+		srv.SetAssistantService(assistantSvc)
 		wireQATestHooks(srv, bs)
 		if cfg, _ := store.Load(); cfg != nil {
 			maybeAutoStartReload(mgr, cfg)
@@ -269,6 +272,9 @@ var webCmd = &cobra.Command{
 		}
 		if remoteHost != nil {
 			plan.remote = remoteHost
+		}
+		if assistantSvc != nil {
+			plan.assistant = assistantSvc
 		}
 		if dm := mgr.GetDownloaderManager(); dm != nil {
 			plan.downloaders = dm
@@ -370,6 +376,7 @@ func startVersionChecker() {
 }
 
 // shutdownPlan 是收到 SIGINT/SIGTERM 之后依次执行的关闭步骤，每一步都有时限：
+//  0. qB 兼容入口、远程访问、AI 助手：先关，之后不再有推送与工具调用进来
 //  1. stopBackground：取消 runtime 与 boot context，等 RSS 重试、通道热重载这些后台 goroutine 退出，
 //     之后不会再有人往通知通道里发、也不会再把通道重建起来
 //  2. scheduler：停掉 RSS 任务与各个监控器
@@ -384,7 +391,12 @@ type shutdownPlan struct {
 		Shutdown(ctx context.Context) error
 	}
 	// remote 是远程访问的主机端（M15）：和兼容入口一起先关（断开 relay 与设备会话），理由相同
-	remote         interface{ Close() }
+	remote interface{ Close() }
+	// assistant 是内置 AI 助手（M19）：入口都关了以后停掉进行中的回答（含关掉 MCP 会话、待确认标成过期），
+	// 免得后面关下载器时还有工具调用
+	assistant interface {
+		Close(ctx context.Context) error
+	}
 	stopBackground func()
 	scheduler      interface{ StopAll() }
 	downloaders    interface{ CloseAll() }
@@ -431,6 +443,13 @@ func runShutdown(ctx context.Context, plan shutdownPlan) {
 		if !runBounded(ctx, step, plan.remote.Close) {
 			log.Warnf("关闭远程访问超时（%s），继续关闭", step)
 		}
+	}
+	if plan.assistant != nil {
+		stepCtx, cancel := context.WithTimeout(ctx, step)
+		if err := plan.assistant.Close(stepCtx); err != nil {
+			log.Warnf("AI 助手关闭出现错误: %v", err)
+		}
+		cancel()
 	}
 	if plan.stopBackground != nil {
 		if !runBounded(ctx, step, plan.stopBackground) {
