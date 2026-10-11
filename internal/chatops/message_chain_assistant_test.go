@@ -111,4 +111,6 @@ func TestProcess_CallbackNotForwardedToAssistant(t *testing.T) {
 	msg.IsCallback, msg.CallbackData = true, "dl:12"
 	require.NoError(t, f.chain.Process(context.Background(), msg))
 	assert.Empty(t, a.got)
+	_, replied := f.replier.lastReply()
+	assert.False(t, replied, "按钮回调不再回「只识别命令」")
 }

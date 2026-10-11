@@ -218,6 +218,10 @@ func (mc *MessageChain) Process(ctx context.Context, msg notify.InboundMessage) 
 			mc.tryReply(ctx, msg, reply)
 			return nil
 		}
+		if msg.IsCallback {
+			// 按钮回调的动作通道已经做了（RSS 的下载、忽略），这里不再回「只识别命令」
+			return nil
+		}
 		mc.recordAudit(ctx, msg, binding.ConfID, "", nil, "user_message_hinted", start)
 		mc.tryReply(ctx, msg, Reply{
 			Text: "🤖 我只识别命令消息（以 / 开头）。\n\n发送 /help 查看支持的命令清单。",

@@ -68,8 +68,8 @@ Before pausing, resuming or deleting a torrent, pushing a torrent to a downloade
 
 With **Notification channels (ChatOps)** turned on in **System → AI assistant settings**, messages from bound Telegram and QQ accounts that are not commands (do not start with `/`) go to the AI assistant; commands stay commands.
 
-- Each binding keeps using one conversation, so earlier turns are part of the context; send `/newchat` to start a new one.
-- The answer is generated in the background and sent when it is ready; a message sent while the previous question is still being answered gets a "still answering" reply.
+- Each binding keeps using one conversation, so earlier turns are part of the context; send `/newchat` to start a new one (after the previous answer finishes).
+- The answer is generated in the background and sent when it is ready. A binding gets one answer at a time: a message sent while the previous question is still being answered gets a "still answering" reply.
 - Before an action that changes something, the assistant sends "Please confirm: …". Reply "yes" (or "ok", "confirm", 确认) to run it; any other reply cancels the action. If the confirmation wait passes, it does not run and you get a timeout notice.
 - Only admin bindings can run actions; for other bindings the assistant does not get those tools. Today every completed binding is an admin, see [ChatOps quick start](chatops-quickstart.md).
 - Messages to the assistant are recorded in the action audit with the command `assistant` (without the text); executed actions get their own entry with the channel "AI assistant" and the user `chatops:<binding id>`.

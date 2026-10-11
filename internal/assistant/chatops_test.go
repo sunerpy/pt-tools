@@ -229,10 +229,10 @@ func TestChatOpsEventText(t *testing.T) {
 }
 
 func TestSplitReply(t *testing.T) {
-	assert.Equal(t, []string{"短"}, splitReply("短"))
+	assert.Equal(t, []string{"短"}, splitReply("短", ""))
 	line := strings.Repeat("字", 100) + "\n"
 	long := strings.Repeat(line, 50) // 5050 个字
-	parts := splitReply(long)
+	parts := splitReply(long, "")
 	require.Len(t, parts, 2)
 	for _, p := range parts {
 		assert.LessOrEqual(t, len([]rune(p)), chatopsReplyRunes)
@@ -240,12 +240,17 @@ func TestSplitReply(t *testing.T) {
 	}
 	assert.Equal(t, strings.ReplaceAll(long, "\n", ""), strings.ReplaceAll(strings.Join(parts, ""), "\n", ""), "分开以后内容不少")
 	huge := strings.Repeat("字", chatopsReplyRunes*chatopsReplyParts+100)
-	parts = splitReply(huge)
+	parts = splitReply(huge, "")
 	require.Len(t, parts, chatopsReplyParts)
 	assert.Contains(t, parts[len(parts)-1], "后面的省略了")
+	for _, p := range parts {
+		assert.LessOrEqual(t, len([]rune(p)), chatopsReplyRunes, "注明的话也算在字数里")
+	}
+	parts = splitReply(huge, "en")
+	assert.Contains(t, parts[len(parts)-1], "the rest is left out")
 }
 
-// 开了新会话以后，旧会话里还在跑的回答结束（更新了旧会话的时间）也不会把下一条消息带回旧会话
+// 旧回答在跑时不能开新对话；开了新会话以后，旧会话的时间再被更新也不会把下一条消息带回旧会话
 func TestChatOpsNewChatSticksWhileOldRunFinishes(t *testing.T) {
 	e, h, rp := chatopsEnv(t)
 	block := make(chan struct{})
@@ -255,10 +260,16 @@ func TestChatOpsNewChatSticksWhileOldRunFinishes(t *testing.T) {
 	require.Equal(t, "success", result)
 	<-e.llm.started
 	old, _, _ := e.svc.LatestConversation(ctx, chatopsAdmin)
-	require.NoError(t, h.NewChat(ctx, inbound("", true).Src))
+	// 旧回答还在跑：不能开新对话，也不能在别的会话里再起一次运行（回「确认」会认错待确认）
+	assert.ErrorContains(t, h.NewChat(ctx, inbound("", true).Src), "还没结束")
+	_, result = h.Handle(ctx, inbound("插一句", true))
+	assert.Equal(t, "denied:busy", result)
 	close(block)
 	rp.waitFor(t, "旧的回答")
 	require.Eventually(t, func() bool { return !e.svc.isRunning(old.ID) }, 5*time.Second, 10*time.Millisecond)
+	require.NoError(t, h.NewChat(ctx, inbound("", true).Src))
+	// 旧会话结束时更新了时间，也不会把下一条消息带回旧会话
+	e.svc.touch(ctx, old.ID, "")
 	_, result = h.Handle(ctx, inbound("新问题", true))
 	require.Equal(t, "success", result)
 	rp.waitFor(t, "新的回答")

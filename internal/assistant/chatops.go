@@ -76,7 +76,7 @@ func (h *ChatOpsHandler) actor(msg notify.InboundMessage, src chatops.Source) Ac
 		if text == "" || h.replier == nil {
 			return
 		}
-		for _, part := range splitReply(text) {
+		for _, part := range splitReply(text, lang) {
 			if err := h.replier.Reply(ctx, msg, chatops.Reply{Text: part}); err != nil {
 				global.GetSlogger().Warnf("[AI 助手] ChatOps 回复失败 conf=%d: %v", msg.SourceConfID, err)
 				return
@@ -134,6 +134,11 @@ func (h *ChatOpsHandler) Handle(ctx context.Context, in chatops.InboundAssistant
 	l := h.ownerLock(a.Owner)
 	l.Lock()
 	defer l.Unlock()
+	// 一个绑定同时只有一次运行（不管哪个会话）：通知渠道里回「确认」认的是最近那一个待确认，
+	// 两次运行各挂一个待确认时会认错
+	if h.svc.ownerBusy(a.Owner) {
+		return chatReply(tr(lang, "上一个问题还在回答，等它说完再问。", "Still answering the previous question.")), "denied:busy"
+	}
 	conv, ok, err := h.svc.LatestConversation(ctx, a)
 	if err == nil && !ok {
 		conv, err = h.svc.CreateConversation(ctx, a, "")
@@ -166,6 +171,11 @@ func (h *ChatOpsHandler) NewChat(ctx context.Context, src chatops.Source) error 
 	l := h.ownerLock(owner)
 	l.Lock()
 	defer l.Unlock()
+	if h.svc.ownerBusy(owner) {
+		return errors.New(tr(src.ReplyLang,
+			"上一个回答还没结束：等它说完再开新对话（在等确认的话，回复「取消」就结束了）",
+			"the previous answer is still running; wait for it (reply \"cancel\" if it is waiting for a confirmation)"))
+	}
 	_, err := h.svc.CreateConversation(ctx, Actor{Owner: owner, Entry: models.AssistantEntryChatOps}, "")
 	return err
 }
@@ -215,8 +225,8 @@ func plainText(s string) string {
 }
 
 // splitReply 把太长的回答分成几条（每条不超过 chatopsReplyRunes 个字，尽量在换行处分），最多 chatopsReplyParts 条，
-// 再多的省略并注明。
-func splitReply(s string) []string {
+// 再多的省略并注明（注明的话也算在字数里）。
+func splitReply(s, lang string) []string {
 	var parts []string
 	rest := []rune(s)
 	for len(rest) > chatopsReplyRunes && len(parts) < chatopsReplyParts-1 {
@@ -231,7 +241,8 @@ func splitReply(s string) []string {
 		rest = rest[cut:]
 	}
 	if len(rest) > chatopsReplyRunes {
-		rest = append(rest[:chatopsReplyRunes:chatopsReplyRunes], []rune("\n…（回答太长，后面的省略了）")...)
+		note := []rune(tr(lang, "\n…（回答太长，后面的省略了）", "\n… (the answer is too long; the rest is left out)"))
+		rest = append(rest[:chatopsReplyRunes-len(note):chatopsReplyRunes-len(note)], note...)
 	}
 	return append(parts, strings.TrimRight(string(rest), "\n"))
 }
