@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.23](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.22...v1.0.0-rc.23) (2026-10-11)
+
+
+### Bug Fixes
+
+* 到期重试不被关着的开关挤占、过滤规则建立原子化、relay 收尾核对待收尾 ([#660](https://github.com/sunerpy/pt-tools/issues/660)) ([08a8397](https://github.com/sunerpy/pt-tools/commit/08a839757b4c12af2ebeb91a084748dce22cea6a))
+
 ## [1.0.0-rc.22](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.21...v1.0.0-rc.22) (2026-10-11)
 
 
