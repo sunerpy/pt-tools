@@ -2974,3 +2974,162 @@ export const remoteApi = {
   revokeDevice: (id: number) => api.post<RemoteDevice>(`/api/remote/devices/${id}/revoke`),
   deleteDevice: (id: number) => api.delete<{ ok: boolean }>(`/api/remote/devices/${id}`),
 };
+
+// AI 助手（路线图 M19）：设置只在网页上改（API Key 只写不读）；对话的进度经 SSE 推给页面
+export interface AssistantSettings {
+  enabled: boolean;
+  /** 界面上选的服务商预设（deepseek、openai、custom 等） */
+  provider: string;
+  base_url: string;
+  model: string;
+  has_api_key: boolean;
+  /** 密码换成了 *** */
+  proxy_url: string;
+  chatops: boolean;
+  max_steps: number;
+  confirm_minutes: number;
+  /** 0 表示不清理 */
+  retention_days: number;
+}
+
+/** 保存设置的参数：api_key、proxy_url 不给时不改，给空串时清除；换了接口地址又没给新 Key 时存着的 Key 清掉 */
+export interface AssistantSettingsInput {
+  enabled: boolean;
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key?: string;
+  proxy_url?: string;
+  chatops: boolean;
+  max_steps: number;
+  confirm_minutes: number;
+  retention_days?: number;
+}
+
+export interface AssistantStatus {
+  enabled: boolean;
+  model: string;
+  can_confirm: boolean;
+  chatops: boolean;
+}
+
+export interface AssistantTestResult {
+  model: string;
+  reply: string;
+  latency_ms: number;
+}
+
+export interface AssistantConversation {
+  id: number;
+  title: string;
+  entry: "web" | "app" | "chatops" | string;
+  running: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistantToolCall {
+  id: string;
+  name: string;
+  /** 规范化脱敏以后的参数（JSON 文本） */
+  arguments: string;
+  write?: boolean;
+}
+
+export type AssistantRole = "user" | "assistant" | "tool" | "notice";
+
+export interface AssistantMessage {
+  id: number;
+  run_id?: string;
+  role: AssistantRole;
+  content: string;
+  tool_calls?: AssistantToolCall[];
+  tool_name?: string;
+  tool_call_id?: string;
+  is_error?: boolean;
+  created_at: string;
+}
+
+export type AssistantConfirmStatus = "pending" | "approved" | "denied" | "expired";
+
+export interface AssistantConfirmation {
+  id: number;
+  run_id: string;
+  tool_call_id: string;
+  tool: string;
+  summary: string;
+  arguments: Record<string, unknown>;
+  status: AssistantConfirmStatus;
+  /** 属主，或者 timeout、cancel、restart、shutdown */
+  decided_by?: string;
+  decided_at?: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface AssistantConversationDetail extends AssistantConversation {
+  messages: AssistantMessage[];
+  confirmations: AssistantConfirmation[];
+  run_id?: string;
+  partial?: string;
+  /** 读事件的 after：从它接着读不会漏 */
+  last_seq: number;
+}
+
+export type AssistantEventType =
+  | "run_started"
+  | "delta"
+  | "message"
+  | "tool_started"
+  | "confirmation"
+  | "run_finished"
+  | "reset";
+
+export interface AssistantEvent {
+  seq: number;
+  type: AssistantEventType;
+  run_id?: string;
+  text?: string;
+  /** 为真时 text 是到现在的全部回答文字，整段替换 */
+  replace?: boolean;
+  message?: AssistantMessage;
+  tool?: AssistantToolCall;
+  confirmation?: AssistantConfirmation;
+  /** run_finished：done、canceled、failed */
+  status?: "done" | "canceled" | "failed";
+  error?: string;
+  at?: string;
+  /** reset：重新读会话以后从这里接着读 */
+  last?: number;
+}
+
+export interface AssistantSendResult {
+  run_id: string;
+  message: AssistantMessage;
+}
+
+export const assistantApi = {
+  settings: () => api.get<AssistantSettings>("/api/assistant/settings"),
+  saveSettings: (data: AssistantSettingsInput) =>
+    api.put<AssistantSettings>("/api/assistant/settings", data),
+  testSettings: (data: AssistantSettingsInput) =>
+    api.post<AssistantTestResult>("/api/assistant/settings/test", data),
+  status: () => api.get<AssistantStatus>("/api/assistant/status"),
+  conversations: () => api.get<AssistantConversation[]>("/api/assistant/conversations"),
+  create: (data: { title?: string; message?: string }) =>
+    api.post<{ conversation: AssistantConversation; run?: AssistantSendResult }>(
+      "/api/assistant/conversations",
+      data,
+    ),
+  conversation: (id: number) =>
+    api.get<AssistantConversationDetail>(`/api/assistant/conversations/${id}`),
+  remove: (id: number) => api.delete<{ ok: boolean }>(`/api/assistant/conversations/${id}`),
+  send: (id: number, text: string) =>
+    api.post<AssistantSendResult>(`/api/assistant/conversations/${id}/messages`, { text }),
+  cancel: (id: number) => api.post<{ ok: boolean }>(`/api/assistant/conversations/${id}/cancel`),
+  decide: (id: number, approve: boolean) =>
+    api.post<AssistantConfirmation>(`/api/assistant/confirmations/${id}`, { approve }),
+  /** SSE 地址：浏览器断线重连时自己带 Last-Event-ID */
+  eventsURL: (id: number, after: number) =>
+    `/api/assistant/conversations/${id}/events?after=${after}`,
+};

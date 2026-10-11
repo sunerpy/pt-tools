@@ -20,6 +20,18 @@ const router = createRouter({
       meta: { title: "数据导出" },
     },
     {
+      path: "/assistant",
+      name: "assistant",
+      component: () => import("@/views/Assistant.vue"),
+      meta: { title: "AI 助手" },
+    },
+    {
+      path: "/assistant/settings",
+      name: "assistant-settings",
+      component: () => import("@/views/AssistantSettings.vue"),
+      meta: { title: "AI 助手设置" },
+    },
+    {
       path: "/global",
       name: "global",
       component: () => import("@/views/GlobalSettings.vue"),
