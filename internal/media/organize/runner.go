@@ -292,6 +292,18 @@ func (s *Service) automated(ctx context.Context, j job) (automation, error) {
 	return inScope, nil
 }
 
+// switchedOffTriggers 是现在对应开关关着的触发方式（记录里没写触发方式的算自动整理）。
+func switchedOffTriggers(set Settings) []string {
+	var off []string
+	if !set.AutoEnabled {
+		off = append(off, models.MediaTriggerAuto, "")
+	}
+	if !set.ScanEnabled {
+		off = append(off, models.MediaTriggerScan)
+	}
+	return off
+}
+
 // switchedOff 报告这种触发方式对应的开关（自动整理、定期扫描）关着；手动的没有开关。
 func switchedOff(set Settings, trigger string) bool {
 	return (trigger == models.MediaTriggerAuto && !set.AutoEnabled) || (trigger == models.MediaTriggerScan && !set.ScanEnabled)
@@ -407,10 +419,15 @@ func (s *Service) loop(ctx context.Context) {
 // 不排，记录保持到期，打开以后的下一拍就重试。排上的记录的重试时间改成租约到期的时间（不是清空）：整理会改写它，
 // 整理以前 pt-tools 重启了，过了租约还会再试。
 func (s *Service) retryDue(ctx context.Context, set Settings) {
+	q := s.cfg.DB.WithContext(ctx).
+		Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", models.MediaTransferFailed, s.cfg.Now())
+	// 开关关着的触发方式（没写触发方式的按自动整理）在查询里就去掉：它们保持到期，不占这一轮的名额，
+	// 否则一轮取满的都是关着的，后面能做的重试一直轮不到
+	if off := switchedOffTriggers(set); len(off) > 0 {
+		q = q.Where("`trigger` NOT IN ?", off)
+	}
 	var rows []models.MediaTransferHistory
-	if err := s.cfg.DB.WithContext(ctx).
-		Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", models.MediaTransferFailed, s.cfg.Now()).
-		Order("next_retry_at").Limit(maxPerRound).Find(&rows).Error; err != nil {
+	if err := q.Order("next_retry_at").Limit(maxPerRound).Find(&rows).Error; err != nil {
 		s.cfg.Logger.Warnf("[整理入库] 读取待重试的记录失败: %v", err)
 		return
 	}
