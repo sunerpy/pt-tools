@@ -30,6 +30,7 @@ import {
   CONFIRM_TONES,
   decidedByText,
   renderAnswer,
+  renderPartial,
   toolLabel,
 } from "@/utils/assistant";
 import { formatShortDateTime } from "@/utils/format";
@@ -175,10 +176,16 @@ async function send() {
       const id = currentId.value;
       const res = await assistantApi.send(id, text);
       input.value = "";
-      // 先把这条消息放上去（事件流里的同一条按编号去重）
+      // 先把这条消息放上去（事件流里的同一条按编号去重）。事件流可能比这个回应先到、连 run_finished 都到了：
+      // 这次运行的 run_started 已经处理过（runId 对上）就不再改运行状态，免得卡在「回答中」
       if (chat.value && currentId.value === id) {
         const others = chat.value.messages.filter((m) => m.id !== res.message.id);
-        chat.value = { ...chat.value, messages: [...others, res.message], running: true };
+        const seen = chat.value.runId === res.run_id;
+        chat.value = {
+          ...chat.value,
+          messages: [...others, res.message].sort((a, b) => a.id - b.id),
+          ...(seen ? {} : { running: true, runId: res.run_id }),
+        };
       }
       await scrollToBottom();
     }
@@ -269,9 +276,17 @@ async function scrollToBottom() {
 
 function confirmNote(c: AssistantConfirmation): string {
   if (c.status === "pending") return `${formatShortDateTime(c.expires_at)} 以前有效`;
-  const why = c.status === "expired" ? decidedByText(c) : "";
-  return why ? `${CONFIRM_LABELS[c.status]}：${why}` : CONFIRM_LABELS[c.status];
+  if (c.status === "expired") return decidedByText(c);
+  return c.decided_at ? formatShortDateTime(c.decided_at) : "";
 }
+
+/** 这次运行有没有在等确认（等的时候提示「等你确认」，不是「正在思考」） */
+const waitingConfirm = computed(
+  () =>
+    !!chat.value?.confirmations.some(
+      (c) => c.status === "pending" && c.run_id === chat.value?.runId,
+    ),
+);
 
 const canConfirm = computed(() => status.value?.can_confirm ?? false);
 
@@ -417,7 +432,9 @@ onBeforeUnmount(closeStream);
                       <span class="as-confirm__summary">{{ cv.confirmation.summary }}</span>
                     </div>
                     <div class="as-confirm__foot">
-                      <span class="as-confirm__note">{{ confirmNote(cv.confirmation) }}</span>
+                      <span v-if="confirmNote(cv.confirmation)" class="as-confirm__note">{{
+                        confirmNote(cv.confirmation)
+                      }}</span>
                       <template v-if="cv.confirmation.status === 'pending' && canConfirm">
                         <el-button
                           size="small"
@@ -448,10 +465,16 @@ onBeforeUnmount(closeStream);
           <div v-if="running" class="as-row" data-testid="as-live">
             <div class="as-answer">
               <!-- eslint-disable-next-line vue/no-v-html -->
-              <div v-if="chat?.partial" class="as-md" v-html="renderAnswer(chat.partial)" />
+              <div v-if="chat?.partial" class="as-md" v-html="renderPartial(chat.partial)" />
               <div class="as-typing" aria-live="polite">
                 <PtIcon name="loader-circle" :size="13" class="as-spin" aria-hidden="true" />
-                <span>{{ chat?.tool ? `正在${toolLabel(chat.tool.name)}…` : "正在思考…" }}</span>
+                <span>{{
+                  waitingConfirm
+                    ? "等你确认上面的操作…"
+                    : chat?.tool
+                      ? `正在${toolLabel(chat.tool.name)}…`
+                      : "正在思考…"
+                }}</span>
               </div>
             </div>
           </div>

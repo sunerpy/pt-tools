@@ -57,8 +57,8 @@ func (s *Service) Send(ctx context.Context, a Actor, convID uint, text string) (
 	if a.Entry == models.AssistantEntryChatOps && !set.chatOps {
 		return SendResult{}, ErrDisabled
 	}
-	if _, err = s.conversation(ctx, a, convID); err != nil {
-		return SendResult{}, err
+	if !a.valid() {
+		return SendResult{}, ErrNotFound
 	}
 	r := &run{id: newRunID(), conv: convID, actor: a, decided: make(chan struct{}, 1)}
 	r.ctx, r.cancel = context.WithCancelCause(context.Background())
@@ -79,6 +79,16 @@ func (s *Service) Send(ctx context.Context, a Actor, convID uint, text string) (
 	s.mu.Unlock()
 	if err != nil {
 		r.cancel(nil)
+		// 别人的会话一律当作不存在：忙不忙也不告诉
+		if _, cerr := s.conversation(ctx, a, convID); cerr != nil {
+			return SendResult{}, cerr
+		}
+		return SendResult{}, err
+	}
+	// 登记以后再查会话：登记着运行的会话删不掉（beginPurge 会拒），登记以前删掉的这里查不到
+	if _, err = s.conversation(ctx, a, convID); err != nil {
+		s.release(r)
+		s.wg.Done()
 		return SendResult{}, err
 	}
 	s.hub.publish(convID, Event{Type: EventRunStarted, RunID: r.id, At: s.now()})
@@ -210,8 +220,9 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 		return RunFailed, err.Error()
 	}
 	msgs := append([]openai.ChatCompletionMessageParamUnion{openai.SystemMessage(systemPrompt(s.now(), r.actor))}, hist...)
+	scrub := keyScrubber(set.llm.APIKey)
 	for range set.maxSteps {
-		rs := &redactedStream{}
+		rs := &redactedStream{scrub: scrub}
 		out, err := s.complete(r.ctx, chat, set.llm.Model, msgs, tb.defs, func(chunk string) {
 			s.emitDelta(r, rs, chunk, false)
 		})
@@ -221,11 +232,14 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 			}
 			return RunFailed, describeError(err, set.llm.APIKey)
 		}
+		s.emitDelta(r, rs, "", true)
+		// 服务回显了收到的 Key（恶意或配错的兼容服务）也不让它进库、事件与工具参数
+		out.content, out.reasoning = scrub(out.content), scrub(out.reasoning)
 		calls := make([]pendingCall, 0, len(out.calls))
 		stored := make([]storedCall, 0, len(out.calls))
 		writes := make([]bool, 0, len(out.calls))
 		for _, c := range out.calls {
-			pc := s.normalize(c.id, c.name, c.args)
+			pc := s.normalize(c.id, c.name, scrub(c.args))
 			write, known := tb.known(pc.name)
 			if !known && pc.invalid == "" {
 				pc.invalid = "没有这个工具：" + pc.name
@@ -233,7 +247,7 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 			calls, writes = append(calls, pc), append(writes, write)
 			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write})
 		}
-		content, reasoning := redact.Secrets(out.content), redact.Credentials(out.reasoning)
+		content, reasoning := redact.Text(out.content), redact.Credentials(out.reasoning)
 		am := models.AssistantMessage{Role: models.AssistantRoleAssistant, Content: content, Reasoning: reasoning}
 		if len(stored) > 0 {
 			buf, _ := json.Marshal(stored)
@@ -290,11 +304,20 @@ func (s *Service) toolStarted(r *run, pc pendingCall, write bool) {
 	s.hub.publish(r.conv, Event{Type: EventToolStarted, RunID: r.id, Tool: &v, At: s.now()})
 }
 
-// redactedStream 让流式的文字增量也过脱敏：攒着全文，每次只发脱敏以后新多出来的部分；末尾还可能变长的一段
+// redactedStream 让流式的文字增量也过脱敏（redact.Text，和落库的回答同一个函数）：攒着全文，每次只发脱敏以后新多出来的部分；末尾还可能变长的一段
 // （最后一个 ASCII 词，地址与长串都在里面）先不发。脱敏改了已经发出去的部分时整段替换。
 type redactedStream struct {
-	full strings.Builder
-	sent string
+	full  strings.Builder
+	sent  string
+	scrub func(string) string
+}
+
+// keyScrubber 把这次运行用的 API Key 原样换成 ***（Key 太短时不换，免得误伤正常文字）。
+func keyScrubber(key string) func(string) string {
+	if len(key) < 8 {
+		return func(s string) string { return s }
+	}
+	return func(s string) string { return strings.ReplaceAll(s, key, "***") }
 }
 
 // safeCut 是可以先发的长度：去掉末尾连着的非空白 ASCII 字符。
@@ -317,7 +340,10 @@ func (s *Service) emitDelta(r *run, rs *redactedStream, chunk string, final bool
 	if !final {
 		cut = safeCut(full)
 	}
-	red := redact.Secrets(full[:cut])
+	red := redact.Text(full[:cut])
+	if rs.scrub != nil {
+		red = rs.scrub(red)
+	}
 	if red == rs.sent {
 		return
 	}

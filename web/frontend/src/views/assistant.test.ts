@@ -307,6 +307,42 @@ describe("AI 助手对话页", () => {
     await vi.waitFor(() => expect(api.cancel).toHaveBeenCalledWith(8));
   });
 
+  it("发消息的回应比事件流的 run_finished 晚到：不再卡在「回答中」", async () => {
+    api.conversations.mockResolvedValue([conv]);
+    api.conversation.mockResolvedValue(detail());
+    await mountPage();
+    await vi.waitFor(() => expect(q("as-answer")).not.toBeNull());
+    const es = lastES();
+    let resolveSend!: (v: unknown) => void;
+    api.send.mockReturnValue(new Promise((r) => (resolveSend = r)));
+    const box = q("as-input")!;
+    const ta = (
+      box.tagName === "TEXTAREA" ? box : box.querySelector("textarea")!
+    ) as HTMLTextAreaElement;
+    ta.value = "快问快答";
+    ta.dispatchEvent(new Event("input"));
+    await flush();
+    q("as-send")!.click();
+    await vi.waitFor(() => expect(api.send).toHaveBeenCalled());
+    const user = { id: 3, role: "user", content: "快问快答", run_id: "r9", created_at: "" };
+    es.emit({ seq: 501, type: "run_started", run_id: "r9" });
+    es.emit({ seq: 502, type: "message", run_id: "r9", message: user });
+    es.emit({
+      seq: 503,
+      type: "message",
+      run_id: "r9",
+      message: { id: 4, role: "assistant", content: "答", run_id: "r9", created_at: "" },
+    });
+    es.emit({ seq: 504, type: "run_finished", run_id: "r9", status: "done" });
+    await flush();
+    resolveSend({ run_id: "r9", message: user });
+    await flush();
+    await flush();
+    expect(q("as-live")).toBeNull();
+    expect(q("as-send")).not.toBeNull();
+    expect(q("as-stop")).toBeNull();
+  });
+
   it("事件流说要重新读（reset）：重新读会话再接着读", async () => {
     api.conversations.mockResolvedValue([conv]);
     api.conversation.mockResolvedValue(detail());

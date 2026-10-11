@@ -13,6 +13,7 @@ import {
   chatStateFrom,
   providerOf,
   renderAnswer,
+  renderPartial,
 } from "./assistant";
 
 function msg(over: Partial<AssistantMessage>): AssistantMessage {
@@ -55,6 +56,11 @@ describe("renderAnswer", () => {
     expect(a.getAttribute("href")).toBe("https://example.com");
     expect(a.getAttribute("target")).toBe("_blank");
     expect(a.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+  });
+
+  it("流到一半的「文字 + 换行 + -」不当成标题", () => {
+    expect(renderPartial("**结果**：\n-")).not.toContain("<h2");
+    expect(renderPartial("**结果**：\n- 第一项")).toContain("<li>");
   });
 
   it("javascript: 链接不留", () => {

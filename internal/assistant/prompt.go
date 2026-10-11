@@ -46,7 +46,8 @@ func systemPrompt(now time.Time, a Actor) string {
 // urlRe 是文字里的网址。
 var urlRe = regexp.MustCompile(`(?i)\bhttps?://[^\s"'<>]+`)
 
-// userText 处理用户写的文字：认得出的种子下载地址换成「站点 X 的种子 Y」，其余的过 redact.Secrets。
+// userText 处理用户写的文字：认得出的种子下载地址换成「站点 X 的种子 Y」，其余的过 redact.Text
+// （遮地址里的凭证与 key=value 形式的凭证，info hash 这类编号原样留着）。
 // 换过的文字就是落库、下发与交给模型的同一份：passkey 不出 pt-tools。
 func (s *Service) userText(text string) string {
 	if s.cfg.ResolveURL != nil {
@@ -58,7 +59,7 @@ func (s *Service) userText(text string) string {
 			return u
 		})
 	}
-	return redact.Secrets(text)
+	return redact.Text(text)
 }
 
 // storedCall 是落库的一个工具调用。

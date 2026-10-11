@@ -135,6 +135,14 @@ export function renderAnswer(text: string): string {
   });
 }
 
+/**
+ * 进行中的回答：最后一行只有 - 或 = 时先不算进去 —— 流到一半的「文字\n-」会被当成 Setext 标题，
+ * 下一段一到又变回列表，画面跳一下。
+ */
+export function renderPartial(text: string): string {
+  return renderAnswer(text.replace(/\n[ \t]*[-=]+[ \t]*$/, ""));
+}
+
 /** 页面上一个会话的状态：读会话得到，之后按事件归并。 */
 export interface ChatState {
   messages: AssistantMessage[];

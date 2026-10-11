@@ -1,6 +1,7 @@
 package redact
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,4 +25,24 @@ func TestCredentialsKeepsLongIDs(t *testing.T) {
 	assert.Contains(t, out, hash)
 	assert.NotContains(t, out, "passkey=x")
 	assert.NotContains(t, Secrets(in), hash)
+}
+
+func TestTextKeepsIDsButMasksCredentials(t *testing.T) {
+	hash := "abcdef0123456789abcdef0123456789abcdef01"
+	cases := map[string]string{
+		"暂停 " + hash: "暂停 " + hash,
+		"https://x.example/dl?passkey=SECRETSECRET 结束": "https://x.example/dl?… 结束",
+		"https://u:p@x.example/a":                      "https://***@x.example/a",
+		"token=abc123 与 password=hunter2":              "token=*** 与 password=***",
+		"我的 key 是 sk-proj-abcdefghijklmnop1234 别外传":    "我的 key 是 *** 别外传",
+		"令牌 ptt_12_abcdefghijklmnopqrstuv":             "令牌 ***",
+	}
+	for in, want := range cases {
+		if got := Text(in); got != want {
+			t.Errorf("Text(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := Text("https://x.example/rss/0123456789abcdef0123456789abcdef/feed"); strings.Contains(got, "0123456789abcdef0123456789abcdef") {
+		t.Errorf("路径里像密钥的段落要遮：%q", got)
+	}
 }

@@ -253,7 +253,7 @@ func (s *Service) ping(ctx context.Context, c llmConfig) (TestResult, error) {
 		out.Model = c.Model
 	}
 	if len(res.Choices) > 0 {
-		out.Reply = truncate(redact.Secrets(strings.TrimSpace(res.Choices[0].Message.Content)), 200)
+		out.Reply = truncate(redact.Text(strings.TrimSpace(res.Choices[0].Message.Content)), 200)
 	}
 	return out, nil
 }

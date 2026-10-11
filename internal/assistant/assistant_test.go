@@ -784,3 +784,97 @@ func TestChatOpsNeedsSwitch(t *testing.T) {
 	_, err := e.svc.Send(context.Background(), a, conv, "你好")
 	assert.ErrorIs(t, err, ErrDisabled, "ChatOps 开关没开")
 }
+
+func TestUserTypedTaskIDReachesTool(t *testing.T) {
+	e := newEnv(t)
+	e.svc.confirmUnit = time.Minute
+	hash := "abcdef0123456789abcdef0123456789abcdef01"
+	e.llm.push(call("c1", "pause_torrent", `{"downloader_id":1,"task_id":"`+hash+`"}`), reply{text: "好了"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "暂停 "+hash+"，我的 key 是 sk-proj-abcdefghijklmnop1234")
+	events, _ := e.until(admin, conv, 0, pendingConfirmation)
+	c := *events[len(events)-1].Confirmation
+	assert.Equal(t, "暂停种子：下载器 1，任务 "+hash, c.Summary, "info hash 是编号，不当成密钥遮掉")
+	user := e.messages(conv)[0].Content
+	assert.Contains(t, user, hash)
+	assert.NotContains(t, user, "sk-proj-abcdefghijklmnop1234", "常见格式的 API Key 要遮")
+	assert.Contains(t, e.llm.requests()[0].Messages[1]["content"], hash)
+	_, err := e.svc.Decide(context.Background(), admin, c.ID, true)
+	require.NoError(t, err)
+	e.waitRun(admin, conv, res.RunID)
+	w := e.backend.writes()
+	require.Len(t, w, 1)
+	targets := w[0].Body.(map[string]any)["targets"].([]map[string]any)
+	assert.Equal(t, hash, targets[0]["task_id"])
+}
+
+func TestEchoedKeyNeverStored(t *testing.T) {
+	e := newEnv(t)
+	e.svc.confirmUnit = time.Minute
+	e.llm.push(reply{
+		reasoning: "Key 是 " + testKey,
+		text:      "你的 Key 是 " + testKey + " 呀",
+		calls:     []replyCall{{id: "c1", name: "pause_torrent", args: `{"downloader_id":1,"task_id":"` + testKey + `"}`}},
+	}, reply{text: "好了"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "回显")
+	events, _ := e.until(admin, conv, 0, pendingConfirmation)
+	c := *events[len(events)-1].Confirmation
+	_, err := e.svc.Decide(context.Background(), admin, c.ID, true)
+	require.NoError(t, err)
+	_, all := e.waitRun(admin, conv, res.RunID)
+	buf, _ := json.Marshal(all)
+	assert.NotContains(t, string(buf), testKey, "事件里没有 Key")
+	for _, m := range e.messages(conv) {
+		assert.NotContains(t, m.Content+m.ToolCalls+m.Reasoning, testKey)
+	}
+	var confs []models.AssistantConfirmation
+	require.NoError(t, e.db.Find(&confs).Error)
+	for _, cf := range confs {
+		assert.NotContains(t, cf.Arguments, testKey)
+	}
+	buf, _ = json.Marshal(e.backend.requests())
+	assert.NotContains(t, string(buf), testKey, "工具参数里也没有")
+	buf, _ = json.Marshal(e.audit.all())
+	assert.NotContains(t, string(buf), testKey)
+}
+
+func TestSendToDeletedConversation(t *testing.T) {
+	e := newEnv(t)
+	conv := e.conversation(admin)
+	require.NoError(t, e.db.Delete(&models.AssistantConversation{}, conv).Error)
+	_, err := e.svc.Send(context.Background(), admin, conv, "你好")
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.False(t, e.svc.isRunning(conv), "查不到会话时不留下运行")
+	var n int64
+	require.NoError(t, e.db.Model(&models.AssistantMessage{}).Where("conversation_id = ?", conv).Count(&n).Error)
+	assert.Zero(t, n, "不留孤儿消息")
+}
+
+func TestBusyIsHiddenFromOtherOwners(t *testing.T) {
+	e := newEnv(t)
+	block := make(chan struct{})
+	defer close(block)
+	e.llm.push(reply{text: "慢慢想", block: block})
+	conv := e.conversation(admin)
+	e.send(admin, conv, "问题")
+	<-e.llm.started
+	other := Actor{Owner: "token:5", Entry: models.AssistantEntryApp}
+	_, err := e.svc.Send(context.Background(), other, conv, "偷看")
+	assert.ErrorIs(t, err, ErrNotFound, "别人的会话忙不忙也不告诉")
+	assert.True(t, e.svc.isRunning(conv))
+}
+
+func TestCloseIsBoundedWhenDeadlinePassed(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, db.Create(&models.AssistantConfirmation{ConversationID: 1, Status: "pending"}).Error)
+	svc := New(Config{DB: db, Cipher: plainCipher{}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	require.NoError(t, svc.Close(ctx))
+	assert.Less(t, time.Since(start), 2*time.Second)
+	var row models.AssistantConfirmation
+	require.NoError(t, db.First(&row).Error)
+	assert.Equal(t, models.AssistantConfirmExpired, row.Status, "时限过了也给一秒把待确认标成过期")
+}

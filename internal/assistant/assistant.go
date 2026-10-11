@@ -181,9 +181,21 @@ func (s *Service) Close(ctx context.Context) error {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		err = fmt.Errorf("等 AI 助手的运行退出超时: %w", ctx.Err())
+		// 时限到的同一刻可能刚好都退出了（没有运行时 Wait 立即返回）：再给一点点时间
+		select {
+		case <-done:
+		case <-time.After(20 * time.Millisecond):
+			err = fmt.Errorf("等 AI 助手的运行退出超时: %w", ctx.Err())
+		}
 	}
-	if e := s.expirePending(context.WithoutCancel(ctx), "shutdown"); e != nil && err == nil {
+	// 最后标过期：调用方的时限还没到就用它；已经到了再给一秒（不让关机的单步时限失效）
+	ectx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ectx, cancel = context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+	}
+	if e := s.expirePending(ectx, "shutdown"); e != nil && err == nil {
 		err = e
 	}
 	return err
