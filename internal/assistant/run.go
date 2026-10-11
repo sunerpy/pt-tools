@@ -340,10 +340,13 @@ func (s *Service) emitDelta(r *run, rs *redactedStream, chunk string, final bool
 	if !final {
 		cut = safeCut(full)
 	}
-	red := redact.Text(full[:cut])
+	part := full[:cut]
 	if rs.scrub != nil {
-		red = rs.scrub(red)
+		// 先按原文换掉 Key 再通用脱敏（顺序反了，通用规则改写一部分以后原文就对不上了）；
+		// 末尾还在变长的 ASCII 串不在 part 里，Key 不会被切成两半
+		part = rs.scrub(part)
 	}
+	red := redact.Text(part)
 	if red == rs.sent {
 		return
 	}

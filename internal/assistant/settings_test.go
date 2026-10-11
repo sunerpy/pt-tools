@@ -104,12 +104,18 @@ func TestStatusAndDisabled(t *testing.T) {
 func TestTestSettings(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.llm.push(reply{text: "OK " + testKey})
-	res, err := e.svc.TestSettings(ctx, SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	// Key 里有一段长串：通用脱敏只遮那一段，要先按原文整个换掉，否则前缀「qa_k-」会漏出来
+	plainKey := "qa_k-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	e.llm.push(reply{text: "OK " + plainKey})
+	res, err := e.svc.TestSettings(ctx, SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model", APIKey: &plainKey})
 	require.NoError(t, err)
 	assert.Equal(t, "OK ***", res.Reply, "回显的 Key 也换掉")
+	e.llm.push(reply{text: "OK"})
+	res, err = e.svc.TestSettings(ctx, SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.NoError(t, err)
+	assert.Equal(t, "OK", res.Reply)
 	assert.Equal(t, "fake-model", res.Model)
-	req := e.llm.requests()[0]
+	req := e.llm.requests()[1]
 	assert.False(t, req.Stream)
 	assert.Equal(t, "Bearer "+testKey, req.Auth, "没给 Key 时用存着的")
 
@@ -117,7 +123,7 @@ func TestTestSettings(t *testing.T) {
 	e.llm.push(reply{text: "OK"})
 	_, err = e.svc.TestSettings(ctx, SettingsInput{BaseURL: e.llm.srv.URL + "/other", Model: "fake-model"})
 	require.NoError(t, err)
-	assert.Empty(t, e.llm.requests()[1].Auth)
+	assert.Empty(t, e.llm.requests()[2].Auth)
 
 	e.llm.push(reply{status: 404, body: "model not found"})
 	_, err = e.svc.TestSettings(ctx, SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "nope", APIKey: ptr("sk-new-key-000000000000")})

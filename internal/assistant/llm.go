@@ -253,7 +253,8 @@ func (s *Service) ping(ctx context.Context, c llmConfig) (TestResult, error) {
 		out.Model = c.Model
 	}
 	if len(res.Choices) > 0 {
-		out.Reply = truncate(keyScrubber(c.APIKey)(redact.Text(strings.TrimSpace(res.Choices[0].Message.Content))), 200)
+		// 先按原文换掉 Key，再通用脱敏：通用规则先改写了 Key 的一部分，原文就对不上了
+		out.Reply = truncate(redact.Text(keyScrubber(c.APIKey)(strings.TrimSpace(res.Choices[0].Message.Content))), 200)
 	}
 	return out, nil
 }

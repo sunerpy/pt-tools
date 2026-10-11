@@ -881,3 +881,21 @@ func TestCloseIsBoundedWhenDeadlinePassed(t *testing.T) {
 	require.NoError(t, db.First(&row).Error)
 	assert.Equal(t, models.AssistantConfirmExpired, row.Status, "时限过了也给一秒把待确认标成过期")
 }
+
+func TestEchoedPlainKeyNeverStreamed(t *testing.T) {
+	e := newEnv(t)
+	// Key 里有一段长串：流式增量也要先按原文整个换掉，再通用脱敏
+	plainKey := "qa_k-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	_, err := e.svc.SaveSettings(context.Background(), SettingsInput{
+		Enabled: true, BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model", APIKey: &plainKey,
+	})
+	require.NoError(t, err)
+	e.llm.push(reply{text: "你的 Key 是 " + plainKey + " 对吧？我记下了 " + plainKey + "。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "回显")
+	_, all := e.waitRun(admin, conv, res.RunID)
+	buf, _ := json.Marshal(all)
+	assert.NotContains(t, string(buf), "qa_k-")
+	assert.NotContains(t, e.messages(conv)[1].Content, "qa_k-")
+	assert.Contains(t, e.messages(conv)[1].Content, "你的 Key 是 ***")
+}
