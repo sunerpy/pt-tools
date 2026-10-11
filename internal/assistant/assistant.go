@@ -106,6 +106,8 @@ type Service struct {
 
 	// confirmUnit 是确认等待的单位（一分钟；测试里调小）
 	confirmUnit time.Duration
+	// firstClean 是启动以后第一次清理的延迟（一分钟；测试里调小）
+	firstClean time.Duration
 }
 
 // 运行的上限。
@@ -126,6 +128,7 @@ func New(cfg Config) *Service {
 	return &Service{
 		cfg: cfg, hub: newHub(cfg.Now()),
 		runs: map[uint]*run{}, purging: map[uint]bool{}, stop: make(chan struct{}), confirmUnit: time.Minute,
+		firstClean: time.Minute,
 	}
 }
 
@@ -191,7 +194,7 @@ func (s *Service) loop() {
 	defer s.wg.Done()
 	sweep := time.NewTicker(10 * time.Minute)
 	defer sweep.Stop()
-	clean := time.NewTimer(time.Minute)
+	clean := time.NewTimer(s.firstClean)
 	defer clean.Stop()
 	for {
 		select {
