@@ -8,6 +8,8 @@ The app runs on Android (no App Store release for iOS yet). The interface is in 
 
 Android packages are published on [GitHub Releases](https://github.com/sunerpy/pt-tools/releases) under versions starting with `mobile-v`, one per CPU architecture: most phones need `arm64-v8a`, older 32-bit phones `armeabi-v7a`. Open the downloaded file on the phone to install it; the first time, allow the browser or file manager to install unknown apps in the system settings. The `checksums.txt` in the same release lists the SHA-256 of each package so you can check the download.
 
+Versions with `-rc` are previews and are marked Pre-release. Previews and stable versions are signed with the same key, so a newer version installs over the old one and keeps the paired hosts. If you installed a test build from CI, uninstall it first.
+
 ## Pairing
 
 1. In the pt-tools web UI, open System → Remote access, make sure remote access is on and a direct address or a relay is set, see [Turn on remote access](remote-access.md#turn-it-on).
