@@ -23,6 +23,7 @@ func (s *Server) registerAssistantRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/assistant/settings", s.auth(s.apiAssistantSettingsGet))
 	mux.HandleFunc("PUT /api/assistant/settings", s.auth(s.apiAssistantSettingsPut))
 	mux.HandleFunc("POST /api/assistant/settings/test", s.auth(s.apiAssistantSettingsTest))
+	mux.HandleFunc("POST /api/assistant/settings/models", s.auth(s.apiAssistantSettingsModels))
 	mux.HandleFunc("GET /api/assistant/status", s.auth(s.apiAssistantStatus))
 	mux.HandleFunc("GET /api/assistant/conversations", s.auth(s.apiAssistantConversations))
 	mux.HandleFunc("POST /api/assistant/conversations", s.auth(s.apiAssistantConversationCreate))
@@ -121,6 +122,24 @@ func (s *Server) apiAssistantSettingsTest(w http.ResponseWriter, r *http.Request
 		return
 	}
 	got, err := svc.TestSettings(r.Context(), in)
+	if err != nil {
+		writeAIError(w, err)
+		return
+	}
+	writeJSON(w, got)
+}
+
+// apiAssistantSettingsModels 按输入读服务商的模型列表（GET {接口地址}/models），给设置页的模型下拉框。Key 的规则同测试连接。
+func (s *Server) apiAssistantSettingsModels(w http.ResponseWriter, r *http.Request) {
+	svc, ok := s.assistantService(w)
+	if !ok {
+		return
+	}
+	var in assistant.SettingsInput
+	if !decodeStrictBody(w, r, &in) {
+		return
+	}
+	got, err := svc.ListModels(r.Context(), in)
 	if err != nil {
 		writeAIError(w, err)
 		return

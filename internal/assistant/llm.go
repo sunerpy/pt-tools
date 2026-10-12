@@ -60,18 +60,37 @@ func newHTTPClient(proxy string) (*http.Client, error) {
 // chatService 建 Chat Completions 客户端。不经 openai.NewClient：它会读 OPENAI_API_KEY、OPENAI_BASE_URL 等环境变量，
 // 这里只用设置里的地址与 Key。
 func (s *Service) chatService(c llmConfig) (openai.ChatCompletionService, error) {
+	opts, err := s.clientOptions(c)
+	if err != nil {
+		return openai.ChatCompletionService{}, err
+	}
+	return openai.NewChatCompletionService(opts...), nil
+}
+
+// modelService 建读模型列表（GET /models）的客户端，地址、代理与 Key 同 chatService。
+func (s *Service) modelService(c llmConfig) (openai.ModelService, error) {
+	opts, err := s.clientOptions(c)
+	if err != nil {
+		return openai.ModelService{}, err
+	}
+	return openai.NewModelService(opts...), nil
+}
+
+// clientOptions 是调模型服务的公共选项：设置里的地址、代理（没填用环境变量）与 Key（没有就不带）。
+func (s *Service) clientOptions(c llmConfig) ([]option.RequestOption, error) {
 	hc := s.cfg.HTTPClient
 	if hc == nil {
 		var err error
 		if hc, err = newHTTPClient(c.Proxy); err != nil {
-			return openai.ChatCompletionService{}, err
+			return nil, err
 		}
 	}
-	opts := []option.RequestOption{option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc), option.WithMaxRetries(1)}
+	// 重试两次：免费层（例如 Groq 每分钟 8K token）调工具多时容易 429，SDK 按服务商给的 Retry-After 等
+	opts := []option.RequestOption{option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc), option.WithMaxRetries(2)}
 	if c.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(c.APIKey))
 	}
-	return openai.NewChatCompletionService(opts...), nil
+	return opts, nil
 }
 
 // describeError 把调模型的错误换成给人看的一句话：不带 Key、请求头与完整地址。
@@ -97,13 +116,16 @@ func describeError(err error, key string) string {
 			detail = http.StatusText(apiErr.StatusCode)
 		}
 		msg = fmt.Sprintf("模型服务回 %d：%s", apiErr.StatusCode, detail)
-		switch apiErr.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
+		switch {
+		case locationBlocked(detail):
+			// Google AI Studio 对中国大陆、香港的 IP 回 400 User location is not supported
+			msg += "（这个服务商不对你所在的地区开放：在「代理地址」里填一个能访问它的代理）"
+		case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
 			msg += "（检查 API Key）"
-		case http.StatusNotFound:
+		case apiErr.StatusCode == http.StatusNotFound:
 			msg += "（检查接口地址与模型名）"
-		case http.StatusTooManyRequests:
-			msg += "（请求太多或额度用完了）"
+		case apiErr.StatusCode == http.StatusTooManyRequests:
+			msg += "（请求太快或者免费额度用完了" + retryAfter(apiErr.Response) + "；也可以换个模型或服务商）"
 		}
 	case errors.As(err, &urlErr):
 		msg = "连不上模型服务：" + urlErr.Err.Error()
@@ -114,6 +136,28 @@ func describeError(err error, key string) string {
 		msg = strings.ReplaceAll(msg, key, "***")
 	}
 	return redact.Secrets(msg)
+}
+
+// locationBlocked 是服务商说所在地区不能用（Gemini API：User location is not supported for the API use）。
+func locationBlocked(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "location is not supported") || strings.Contains(d, "unsupported_country") ||
+		strings.Contains(d, "country, region, or territory not supported")
+}
+
+// retryAfter 是 429 回应建议等多久（Retry-After 的秒数），说成「，约 N 秒后再试」；没有或读不懂时为空。
+func retryAfter(res *http.Response) string {
+	if res == nil {
+		return ""
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After")))
+	if err != nil || n <= 0 {
+		return ""
+	}
+	if n >= 120 {
+		return fmt.Sprintf("，约 %d 分钟后再试", (n+59)/60)
+	}
+	return fmt.Sprintf("，约 %d 秒后再试", n)
 }
 
 // completion 是模型一次回答：文字、推理内容与工具调用。

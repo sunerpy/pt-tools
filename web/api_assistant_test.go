@@ -43,6 +43,11 @@ func (f *fakeChatLLM) push(r ...fakeChatReply) {
 }
 
 func (f *fakeChatLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"fake","object":"model","created":1,"owned_by":"t"},{"id":"text-embedding-3-small","object":"model","created":1,"owned_by":"t"}]}`)
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
 	f.bodies = append(f.bodies, string(body))
@@ -179,6 +184,7 @@ func TestAssistantAPI_RequiresSessionAndService(t *testing.T) {
 		{http.MethodGet, "/api/assistant/settings"},
 		{http.MethodPut, "/api/assistant/settings"},
 		{http.MethodPost, "/api/assistant/settings/test"},
+		{http.MethodPost, "/api/assistant/settings/models"},
 		{http.MethodGet, "/api/assistant/status"},
 		{http.MethodGet, "/api/assistant/conversations"},
 		{http.MethodPost, "/api/assistant/conversations"},
@@ -223,6 +229,13 @@ func TestAssistantAPI_SettingsKeyIsWriteOnly(t *testing.T) {
 	res = e.do(http.MethodGet, "/api/assistant/status", "")
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, assistant.Status{Enabled: true, Model: "fake", CanConfirm: true}, readJSON[assistant.Status](t, res))
+
+	// 模型列表：去掉不能对话的；没填接口地址回 400
+	res = e.do(http.MethodPost, "/api/assistant/settings/models", fmt.Sprintf(`{"base_url":%q}`, got["base_url"]))
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, assistant.ModelList{Models: []string{"fake"}, Total: 2}, readJSON[assistant.ModelList](t, res))
+	res = e.do(http.MethodPost, "/api/assistant/settings/models", `{}`)
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }
 
 func TestAssistantAPI_ChatWithToolsAndConfirmation(t *testing.T) {
