@@ -153,6 +153,35 @@ func TestRetryAfterPrefersMilliseconds(t *testing.T) {
 	require.True(t, errors.As(err, &te), err)
 	assert.Contains(t, te.Message, "约 90 秒后再试")
 	assert.Len(t, e.llm.requests(), 1, "按毫秒值算要等 90 秒：不重试")
+
+	// Retry-After-Ms: 0 也算数：SDK 马上重试两次，提示里不说要等
+	now := reply{status: http.StatusTooManyRequests, body: "Rate limit reached", header: map[string]string{
+		"Retry-After-Ms": "0", "Retry-After": "90",
+	}}
+	e.llm.push(now, now, now)
+	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.True(t, errors.As(err, &te), err)
+	assert.NotContains(t, te.Message, "后再试")
+	assert.Len(t, e.llm.requests(), 4, "要等 0 毫秒：马上重试两次")
+
+	// 负数跳过、看 Retry-After（SDK 也这样）
+	e.llm.push(reply{status: http.StatusTooManyRequests, body: "Rate limit reached", header: map[string]string{
+		"Retry-After-Ms": "-5", "Retry-After": "90",
+	}})
+	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "约 90 秒后再试")
+	assert.Len(t, e.llm.requests(), 5, "要等 90 秒：不重试")
+}
+
+// 有的服务商把原因写在顶层的 message（硅基流动 2026-10-12 实测：{"code":30014,"data":null,"message":"Token is invalid."}）。
+func TestTopLevelErrorMessageIsReadable(t *testing.T) {
+	e := newEnv(t)
+	e.llm.push(reply{status: http.StatusUnauthorized, raw: `{"code":30014,"data":null,"message":"Token is invalid."}`})
+	_, err := e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	var te *TestError
+	require.True(t, errors.As(err, &te), err)
+	assert.Equal(t, "模型服务回 401：Token is invalid.（检查 API Key）", te.Message)
 }
 
 // Google AI Studio 有的错误回应包在数组里（[{"error":{…}}]，2026-10-12 实测 503 high demand）：照样读出原因；503 提示过一会儿再试。
@@ -187,4 +216,14 @@ func TestGoogleQuotaErrorsCarryTheWait(t *testing.T) {
 	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
 	require.True(t, errors.As(err, &te), err)
 	assert.Contains(t, te.Message, "约 31 秒后再试")
+
+	// 头里的 Retry-After 读不懂：SDK 当没说，照样按正文补上
+	quota.raw = `{"error":{"code":429,"message":"Quota exceeded.","details":[{"retryDelay":"48s"}]}}`
+	quota.header = map[string]string{"Retry-After": "soon"}
+	e.llm.push(quota)
+	before := len(e.llm.requests())
+	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "约 48 秒后再试")
+	assert.Len(t, e.llm.requests(), before+1, "要等 48 秒：不重试")
 }

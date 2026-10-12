@@ -2,7 +2,6 @@ package assistant
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -158,7 +157,7 @@ func describeError(err error, key string) string {
 }
 
 // normalizeErrorResponse 让 SDK 认得出 Google AI Studio 的错误回应：错误体包在数组里（[{"error":{…}}]）时取第一个；
-// 429 不带 Retry-After、但写了要等多久（RetryInfo 的 retryDelay，或者正文里的「retry in 48.4s」）时补上 Retry-After，
+// 429 的头里没有 SDK 认得的等待时间、但正文写了要等多久（RetryInfo 的 retryDelay，或者「retry in 48.4s」）时补上 Retry-After，
 // SDK 按它决定重不重试（超过 maxRetryWait 就不重试），describeError 按它说要等多久。成功的回应原样放过（不读流式的正文）。
 func normalizeErrorResponse(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 	res, err := next(req)
@@ -174,7 +173,7 @@ func normalizeErrorResponse(req *http.Request, next option.MiddlewareNext) (*htt
 				raw = items[0]
 			}
 		}
-		if res.StatusCode == http.StatusTooManyRequests && res.Header.Get("Retry-After") == "" && res.Header.Get("Retry-After-Ms") == "" {
+		if _, said := retryWait(res.Header); res.StatusCode == http.StatusTooManyRequests && !said {
 			if secs := retryDelayIn(raw); secs > 0 {
 				res.Header.Set("Retry-After", strconv.Itoa(secs))
 			}
@@ -219,8 +218,8 @@ func retryDelayIn(raw []byte) int {
 	return 0
 }
 
-// bodyMessage 从错误回应体里读原因：SDK 只认 {"error":{"message"}}，Google AI Studio 有的错误包在数组里
-// （[{"error":{"message"}}]），也有只带 {"message"} 的。读不出来时为空。
+// bodyMessage 读错误体顶层的 message：SDK 只认 {"error":{"message"}}，硅基流动写成 {"code":30014,"message":"Token is invalid."}
+// （2026-10-12 实测）。包在数组里的已经由 normalizeErrorResponse 拆开了。读不出来时为空。
 func bodyMessage(res *http.Response) string {
 	if res == nil || res.Body == nil {
 		return ""
@@ -229,22 +228,13 @@ func bodyMessage(res *http.Response) string {
 	if err != nil {
 		return ""
 	}
-	type wrapped struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
+	var body struct {
 		Message string `json:"message"`
 	}
-	pick := func(w wrapped) string { return strings.TrimSpace(cmp.Or(w.Error.Message, w.Message)) }
-	var one wrapped
-	if json.Unmarshal(raw, &one) == nil {
-		return pick(one)
+	if json.Unmarshal(raw, &body) != nil {
+		return ""
 	}
-	var many []wrapped
-	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
-		return pick(many[0])
-	}
-	return ""
+	return strings.TrimSpace(body.Message)
 }
 
 // locationBlocked 是服务商说所在地区不能用（Gemini API：User location is not supported for the API use）。
@@ -261,23 +251,48 @@ func keyRejected(detail string) bool {
 		strings.Contains(d, "api_key_invalid")
 }
 
-// retryAfter 是 429 回应建议等多久，说成「，约 N 秒后再试」。和 SDK 决定要不要重试时的顺序一样：先 Retry-After-Ms，
-// 再 Retry-After（秒数或 HTTP 日期）；没有或读不懂时为空。
+// maxReportedWait 是提示里最多说要等多久：服务商给的数大得离谱时不溢出
+const maxReportedWait = 24 * time.Hour
+
+// retryWait 是回应头要求等多久，读法和 SDK 决定重不重试时一样（openai-go v3.76.0 的 parseRetryAfterHeader）：
+// 先 Retry-After-Ms，再 Retry-After（秒数或 RFC 1123 日期）；空的、读不懂的、负数的跳过、看下一个；0 也算数（SDK 马上重试）。
+// said 为 false 是没说。
+func retryWait(h http.Header) (wait time.Duration, said bool) {
+	for _, r := range [...]struct {
+		name string
+		unit time.Duration
+	}{{"Retry-After-Ms", time.Millisecond}, {"Retry-After", time.Second}} {
+		v := h.Get(r.name)
+		if v == "" {
+			continue
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 1) {
+			return maxReportedWait, true
+		}
+		if err == nil {
+			if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+				continue
+			}
+			return time.Duration(math.Min(f*float64(r.unit), float64(maxReportedWait))), true
+		}
+		if r.unit == time.Second {
+			if at, err := time.Parse(time.RFC1123, v); err == nil {
+				return min(max(time.Until(at), 0), maxReportedWait), true
+			}
+		}
+	}
+	return 0, false
+}
+
+// retryAfter 是 429 回应要等多久，说成「，约 N 秒后再试」（retryWait 读的）；没说、或者说不用等时为空。
 func retryAfter(res *http.Response) string {
 	if res == nil {
 		return ""
 	}
-	n := 0
-	if ms, err := strconv.ParseFloat(strings.TrimSpace(res.Header.Get("Retry-After-Ms")), 64); err == nil && ms > 0 {
-		n = int(math.Ceil(ms / 1000))
-	} else if v := strings.TrimSpace(res.Header.Get("Retry-After")); v != "" {
-		if secs, err := strconv.ParseFloat(v, 64); err == nil {
-			n = int(math.Ceil(secs))
-		} else if at, err := http.ParseTime(v); err == nil {
-			n = int(math.Ceil(time.Until(at).Seconds()))
-		}
-	}
-	if n <= 0 {
+	wait, said := retryWait(res.Header)
+	n := int(math.Ceil(wait.Seconds()))
+	if !said || n <= 0 {
 		return ""
 	}
 	if n >= 120 {

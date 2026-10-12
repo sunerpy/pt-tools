@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1030,4 +1031,44 @@ func TestThoughtSignatureRoundTrips(t *testing.T) {
 	assert.NotContains(t, string(buf), sig, "详情里没有签名")
 	buf, _ = json.Marshal(all)
 	assert.NotContains(t, string(buf), sig, "事件里没有签名")
+}
+
+// 服务回显收到的 Key 时可能用 \u 转义写（原文替换认不出来）：工具参数里有的，不执行、参数不留；extra_content 里有的（转义或原文），
+// 整个不要（思考签名改不得）。库里、事件里、之后的请求里都没有 Key。
+func TestEscapedKeyInToolCallsNeverStored(t *testing.T) {
+	e := newEnv(t)
+	key := "qa-key-0123456789abcdef"
+	_, err := e.svc.SaveSettings(context.Background(), SettingsInput{
+		Enabled: true, BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model", APIKey: &key,
+	})
+	require.NoError(t, err)
+	var b strings.Builder
+	for _, r := range key {
+		fmt.Fprintf(&b, `\u%04x`, r)
+	}
+	esc := b.String()
+	e.llm.push(reply{calls: []replyCall{
+		{id: "call_1", name: "search_torrents", args: `{"keyword":"` + esc + `"}`, extra: `{"google":{"thought_signature":"` + esc + `"}}`},
+		{id: "call_2", name: "list_tasks", args: `{"page":1}`, extra: `{"google":{"thought_signature":"sig-` + key + `"}}`},
+	}}, reply{text: "好的。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "搜一下")
+	fin, all := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+
+	msgs := e.messages(conv)
+	require.Equal(t, []string{"user", "assistant", "tool", "tool", "assistant"}, roles(msgs))
+	assert.True(t, msgs[2].IsError)
+	assert.Contains(t, msgs[2].Content, "参数里有 API Key")
+	assert.False(t, msgs[3].IsError, "另一个调用照常执行")
+	for _, m := range msgs {
+		for _, v := range []string{m.Content, m.Reasoning, m.ToolCalls} {
+			assert.False(t, jsonMentions(v, key) || strings.Contains(v, esc), "库里有 Key：%s", v)
+		}
+	}
+	buf, _ := json.Marshal(all)
+	assert.False(t, jsonMentions(string(buf), key) || strings.Contains(string(buf), esc), "事件里有 Key")
+	next, _ := json.Marshal(e.llm.requests()[1].Messages)
+	assert.False(t, jsonMentions(string(next), key) || strings.Contains(string(next), esc), "交回模型的请求里有 Key")
+	assert.NotContains(t, string(next), "extra_content", "有 Key 的签名整个不要")
 }

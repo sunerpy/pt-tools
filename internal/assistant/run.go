@@ -240,13 +240,18 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 		stored := make([]storedCall, 0, len(out.calls))
 		writes := make([]bool, 0, len(out.calls))
 		for _, c := range out.calls {
-			pc := s.normalize(scrub(c.id), scrub(c.name), scrub(c.args))
+			args := scrub(c.args)
+			pc := s.normalize(scrub(c.id), scrub(c.name), args)
+			if jsonMentions(args, set.llm.APIKey) {
+				// 参数里还有用 \u 转义写的 Key（原文替换认不出来）：不执行，参数也不留
+				pc.args, pc.display, pc.invalid = map[string]any{}, "{}", "参数里有 API Key，没有执行"
+			}
 			write, known := tb.known(pc.name)
 			if !known && pc.invalid == "" {
 				pc.invalid = "没有这个工具：" + pc.name
 			}
 			calls, writes = append(calls, pc), append(writes, write)
-			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write, Extra: rawExtra(scrub(c.extra))})
+			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write, Extra: rawExtra(c.extra, set.llm.APIKey)})
 		}
 		content, reasoning := redact.Text(out.content), redact.Credentials(out.reasoning)
 		am := models.AssistantMessage{Role: models.AssistantRoleAssistant, Content: content, Reasoning: reasoning}
@@ -305,12 +310,34 @@ func (s *Service) toolStarted(r *run, pc pendingCall, write bool) {
 	s.hub.publish(r.conv, Event{Type: EventToolStarted, RunID: r.id, Tool: &v, At: s.now()})
 }
 
-// rawExtra 是工具调用的 extra_content（不是合法 JSON 就不要）。
-func rawExtra(s string) json.RawMessage {
-	if s == "" || !json.Valid([]byte(s)) {
+// rawExtra 是工具调用的 extra_content，原样留着回传（思考签名不透明，改不得）：不是合法 JSON 的不要；里面有 Key 的
+// （原文或者用转义写的）整个不要，免得 Key 进库。
+func rawExtra(s, key string) json.RawMessage {
+	if s == "" || !json.Valid([]byte(s)) || jsonMentions(s, key) {
 		return nil
 	}
 	return json.RawMessage(s)
+}
+
+// jsonMentions 报告 JSON 里有没有哪个字符串（键或值，解码以后的）含有 Key：服务商用 \u 转义写的 Key 按原文替换认不出来。
+// 不是合法 JSON 时看到出错的地方为止。和 keyScrubber 一样，太短的 Key 不管。
+func jsonMentions(raw, key string) bool {
+	if len(key) < minKeyLen {
+		return false
+	}
+	if strings.Contains(raw, key) {
+		return true
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		if v, ok := tok.(string); ok && strings.Contains(v, key) {
+			return true
+		}
+	}
 }
 
 // redactedStream 让流式的文字增量也过脱敏（redact.Text，和落库的回答同一个函数）：攒着全文，每次只发脱敏以后新多出来的部分；末尾还可能变长的一段
