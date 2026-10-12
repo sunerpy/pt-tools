@@ -14,17 +14,17 @@ pt-tools 内置一个 AI 助手。接上一个大模型以后，可以在网页�
 4. 点「测试连接」：pt-tools 发一条很短的消息，显示模型的回答与用时。
 5. 打开「启用 AI 助手」，保存。
 
-| 服务商                 | 接口地址                                                  | 模型                                                               |
-| ---------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
-| DeepSeek               | `https://api.deepseek.com`                                | `deepseek-flash`、`deepseek-v4-pro`                                |
-| 通义千问（阿里云百炼） | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`、`qwen3.8-flash`、`qwen3.8-max`                     |
-| Kimi（月之暗面）       | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`、`kimi-k3`                                             |
-| 硅基流动               | `https://api.siliconflow.cn/v1`                           | 点「获取模型列表」选                                               |
-| Google AI Studio       | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.8-flash`、`gemini-3.5-flash-lite`、`gemini-2.5-flash` 等 |
-| Groq                   | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`、`openai/gpt-oss-120b`、`openai/gpt-oss-20b`    |
-| OpenRouter             | `https://openrouter.ai/api/v1`                            | 点「获取模型列表」选                                               |
-| Ollama（自己部署）     | `http://<Ollama 所在主机>:11434/v1`                       | `ollama list` 里的模型名，不要 API Key                             |
-| OpenAI                 | `https://api.openai.com/v1`                               | `gpt-6.1-sol` 等                                                   |
+| 服务商                 | 接口地址                                                  | 模型                                                             |
+| ---------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| DeepSeek               | `https://api.deepseek.com`                                | `deepseek-flash`、`deepseek-v4-pro`                              |
+| 通义千问（阿里云百炼） | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`、`qwen3.8-flash`、`qwen3.8-max`                   |
+| Kimi（月之暗面）       | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`、`kimi-k3`                                           |
+| 硅基流动               | `https://api.siliconflow.cn/v1`                           | 点「获取模型列表」选                                             |
+| Google AI Studio       | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-flash-latest`、`gemini-3.8-flash`、`gemini-3.5-flash` 等 |
+| Groq                   | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`、`openai/gpt-oss-120b`、`openai/gpt-oss-20b`  |
+| OpenRouter             | `https://openrouter.ai/api/v1`                            | 点「获取模型列表」选                                             |
+| Ollama（自己部署）     | `http://<Ollama 所在主机>:11434/v1`                       | `ollama list` 里的模型名，不要 API Key                           |
+| OpenAI                 | `https://api.openai.com/v1`                               | `gpt-6.1-sol` 等                                                 |
 
 表里的模型名是 2026 年 10 月各家文档上的，以服务商控制台为准。
 
@@ -118,6 +118,10 @@ pt-tools 内置一个 AI 助手。接上一个大模型以后，可以在网页�
 **测试连接回 429**：请求太快或者免费额度用完了。服务商要求等 20 秒以内时，pt-tools 等一等再试，最多两次；要等得更久就不再试，直接提示大概要等多久。到服务商控制台看额度，或者换个模型、服务商。
 
 **测试连接回 400，说 User location is not supported**：这个服务商不对你所在的地区开放（Google AI Studio 不对中国大陆与香港开放）。在「代理」里填一个能访问它的代理。
+
+**回 503，说 This model is currently experiencing high demand**：服务商的这个模型这会儿太忙（Google AI Studio 的新模型常见），过一会儿再试，或者换一个模型，例如 `gemini-flash-latest`。
+
+**回 404，说模型对新用户不再开放**：服务商列表里还有这个模型，但新申请的 Key 用不了（例如 `gemini-2.5-flash`），换一个更新的模型。
 
 **获取模型列表是空的，或者没有想要的模型**：列表按名字去掉了嵌入、语音、图像这类模型，留下的也不保证都支持工具调用，选好以后点「测试连接」看看。服务商没列出来的模型可以直接输入模型名。
 

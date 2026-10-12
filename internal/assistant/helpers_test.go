@@ -59,10 +59,11 @@ type reply struct {
 	text      string
 	reasoning string
 	calls     []replyCall
-	// status 不为 0 时回这个状态码，错误信息是 body，回应头加上 header
+	// status 不为 0 时回这个状态码，错误信息是 body，回应头加上 header；raw 不为空时原样回它
 	status int
 	body   string
 	header map[string]string
+	raw    string
 	// block 不为 nil 时先发一段文字，再等它关上或者请求被取消
 	block chan struct{}
 }
@@ -201,6 +202,10 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(rep.status)
+		if rep.raw != "" {
+			_, _ = w.Write([]byte(rep.raw))
+			return
+		}
 		buf, _ := json.Marshal(map[string]any{"error": map[string]any{"message": rep.body, "type": "invalid_request_error"}})
 		_, _ = w.Write(buf)
 		return

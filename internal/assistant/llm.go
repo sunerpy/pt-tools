@@ -1,10 +1,12 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -120,6 +122,9 @@ func describeError(err error, key string) string {
 			}
 		}
 		if detail == "" {
+			detail = bodyMessage(apiErr.Response)
+		}
+		if detail == "" {
 			detail = http.StatusText(apiErr.StatusCode)
 		}
 		msg = fmt.Sprintf("模型服务回 %d：%s", apiErr.StatusCode, detail)
@@ -132,6 +137,9 @@ func describeError(err error, key string) string {
 			msg += "（检查 API Key）"
 		case apiErr.StatusCode == http.StatusNotFound:
 			msg += "（检查接口地址与模型名）"
+		case apiErr.StatusCode == http.StatusServiceUnavailable:
+			// Google AI Studio：This model is currently experiencing high demand
+			msg += "（服务商这会儿太忙，过一会儿再试，或者换个模型）"
 		case apiErr.StatusCode == http.StatusTooManyRequests:
 			msg += "（请求太快或者免费额度用完了" + retryAfter(apiErr.Response) + "；也可以换个模型或服务商）"
 		}
@@ -144,6 +152,34 @@ func describeError(err error, key string) string {
 		msg = strings.ReplaceAll(msg, key, "***")
 	}
 	return redact.Secrets(msg)
+}
+
+// bodyMessage 从错误回应体里读原因：SDK 只认 {"error":{"message"}}，Google AI Studio 有的错误包在数组里
+// （[{"error":{"message"}}]），也有只带 {"message"} 的。读不出来时为空。
+func bodyMessage(res *http.Response) string {
+	if res == nil || res.Body == nil {
+		return ""
+	}
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	if err != nil {
+		return ""
+	}
+	type wrapped struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Message string `json:"message"`
+	}
+	pick := func(w wrapped) string { return strings.TrimSpace(cmp.Or(w.Error.Message, w.Message)) }
+	var one wrapped
+	if json.Unmarshal(raw, &one) == nil {
+		return pick(one)
+	}
+	var many []wrapped
+	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
+		return pick(many[0])
+	}
+	return ""
 }
 
 // locationBlocked 是服务商说所在地区不能用（Gemini API：User location is not supported for the API use）。

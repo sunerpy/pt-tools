@@ -70,12 +70,13 @@ export const ASSISTANT_PROVIDERS: readonly AssistantProvider[] = [
     key: "google",
     label: "Google AI Studio（Gemini）",
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+    // 2026-10-12 用真实 Key 核对：gemini-flash-latest 跟着最新的 Flash 走；gemini-2.5-* 对新用户已经不开放
     models: [
+      "gemini-flash-latest",
       "gemini-3.8-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.1-flash-lite",
-      "gemini-2.5-flash",
-      "gemini-2.5-pro",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-flash-lite-latest",
     ],
     consoleURL: "https://aistudio.google.com/apikey",
     free: "Gemini 的 Flash 等模型有免费额度，每分钟、每天限次数。",

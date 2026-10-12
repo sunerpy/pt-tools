@@ -18,6 +18,7 @@ func TestChatModelsKeepsChatModelsOnly(t *testing.T) {
 		"models/gemini-3.8-flash", "models/text-embedding-004", "models/gemini-2.5-flash-preview-tts",
 		"models/imagen-4.0-generate-001", "models/gemma-3-27b-it", "models/gemini-3.8-flash", "models/aqa",
 		"models/veo-3.0-generate-001", "models/gemini-live-2.5-flash", "models/gemini-2.5-flash-image",
+		"models/gemini-nano-banana-2.1",
 	}, "")
 	assert.Equal(t, []string{"gemini-3.8-flash", "gemma-3-27b-it"}, got)
 
@@ -152,4 +153,17 @@ func TestRetryAfterPrefersMilliseconds(t *testing.T) {
 	require.True(t, errors.As(err, &te), err)
 	assert.Contains(t, te.Message, "约 90 秒后再试")
 	assert.Len(t, e.llm.requests(), 1, "按毫秒值算要等 90 秒：不重试")
+}
+
+// Google AI Studio 有的错误回应包在数组里（[{"error":{…}}]，2026-10-12 实测 503 high demand）：照样读出原因；503 提示过一会儿再试。
+func TestArrayWrappedErrorsAreReadable(t *testing.T) {
+	e := newEnv(t)
+	busy := reply{status: http.StatusServiceUnavailable, raw: `[{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}]`}
+	e.llm.push(busy, busy, busy)
+	_, err := e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	var te *TestError
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "模型服务回 503")
+	assert.Contains(t, te.Message, "high demand")
+	assert.Contains(t, te.Message, "过一会儿再试")
 }

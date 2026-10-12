@@ -62,10 +62,10 @@ var notChat = []string{
 	"dall-e", "image", "imagen", "veo", "sora", "lyria", "moderation", "guard", "babbage", "davinci",
 }
 
-// googleNotText 是 Google AI Studio 的 Gemini 与 Gemma 里不是文本对话的（同 Voltip 的 usable_models）。
+// googleNotText 是 Google AI Studio 的 Gemini 与 Gemma 里不是文本对话的（同 Voltip 的 usable_models；Nano Banana 是生成图像的）。
 var googleNotText = []string{
 	"embedding", "-tts", "-image", "-live", "native-audio", "transcribe", "robotics", "computer-use",
-	"imagen", "veo", "lyria", "omni", "aqa",
+	"imagen", "veo", "lyria", "omni", "aqa", "banana",
 }
 
 // chatModels 整理服务商列出的模型编号：Google AI Studio 写成 models/gemini-…，去掉前缀，只留 Gemini 与 Gemma 的文本模型；

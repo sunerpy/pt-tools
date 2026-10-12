@@ -14,17 +14,17 @@ Open **System → AI assistant settings**:
 4. Click **Test connection**: pt-tools sends a very short message and shows the model's reply and the latency.
 5. Turn on **Enable AI assistant** and save.
 
-| Provider                    | Endpoint                                                  | Models                                                                     |
-| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------- |
-| DeepSeek                    | `https://api.deepseek.com`                                | `deepseek-flash`, `deepseek-v4-pro`                                        |
-| Qwen (Alibaba Model Studio) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`                             |
-| Kimi (Moonshot AI)          | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`, `kimi-k3`                                                     |
-| SiliconFlow                 | `https://api.siliconflow.cn/v1`                           | Pick one with **Fetch models**                                             |
-| Google AI Studio            | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-flash` and others |
-| Groq                        | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`            |
-| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Pick one with **Fetch models**                                             |
-| Ollama (self-hosted)        | `http://<Ollama host>:11434/v1`                           | A name from `ollama list`; no API key                                      |
-| OpenAI                      | `https://api.openai.com/v1`                               | `gpt-6.1-sol` and others                                                   |
+| Provider                    | Endpoint                                                  | Models                                                                   |
+| --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| DeepSeek                    | `https://api.deepseek.com`                                | `deepseek-flash`, `deepseek-v4-pro`                                      |
+| Qwen (Alibaba Model Studio) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`                           |
+| Kimi (Moonshot AI)          | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`, `kimi-k3`                                                   |
+| SiliconFlow                 | `https://api.siliconflow.cn/v1`                           | Pick one with **Fetch models**                                           |
+| Google AI Studio            | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-flash-latest`, `gemini-3.8-flash`, `gemini-3.5-flash` and others |
+| Groq                        | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`          |
+| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Pick one with **Fetch models**                                           |
+| Ollama (self-hosted)        | `http://<Ollama host>:11434/v1`                           | A name from `ollama list`; no API key                                    |
+| OpenAI                      | `https://api.openai.com/v1`                               | `gpt-6.1-sol` and others                                                 |
 
 The model names are the ones in each provider's documentation in October 2026; the provider's console is authoritative.
 
@@ -118,6 +118,10 @@ With **Notification channels (ChatOps)** turned on in **System → AI assistant 
 **Test connection returns 429**: requests are too fast or the free tier is used up. When the provider asks to wait 20 seconds or less, pt-tools waits and tries again, at most twice; when it asks for longer, pt-tools does not retry and says roughly how long to wait. Check your quota in the provider's console, or switch to another model or provider.
 
 **Test connection returns 400 saying User location is not supported**: the provider does not serve your region (Google AI Studio does not serve mainland China or Hong Kong). Set a proxy that can reach it.
+
+**It returns 503 saying This model is currently experiencing high demand**: that model is too busy right now (common for new Google AI Studio models). Try again later, or switch to another model such as `gemini-flash-latest`.
+
+**It returns 404 saying the model is no longer available to new users**: the provider still lists the model, but new keys cannot use it (for example `gemini-2.5-flash`). Pick a newer model.
 
 **Fetch models returns nothing, or not the model you want**: the list leaves out embedding, speech, image and similar models by name, and the models left are not all guaranteed to support tool calling: pick one and click **Test connection**. You can type the name of a model the provider does not list.
 
