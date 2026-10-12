@@ -4,7 +4,8 @@ UPX_VERSION = 4.2.4
 UPX_DIR = upx-$(UPX_VERSION)-amd64_linux
 UPX_BIN = $(UPX_DIR)/upx
 PROJECT_ROOT = $(abspath .)
-GIT_TAG = $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+# 只认服务端的 v* tag：手机 App 的 mobile-v* 也在同一条历史上
+GIT_TAG = $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0")
 NEW_TAG = $(shell echo $(GIT_TAG) | awk -F. -v OFS=. '{print $$1, $$2, $$3+1}')
 
 # Docker 镜像仓库

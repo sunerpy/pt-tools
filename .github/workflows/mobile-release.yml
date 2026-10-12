@@ -269,7 +269,8 @@ jobs:
             gh release upload "$tag" upload/* --clobber
             echo "resumed the draft $tag"
           else
-            flags=(--draft --target "$GITHUB_SHA" --title "pt-tools App $VERSION" --notes-file notes.md)
+            # App 的 Release 永远不当 Latest：安装脚本和稳定版的下载链接都按 releases/latest 找服务端的资产
+            flags=(--draft --latest=false --target "$GITHUB_SHA" --title "pt-tools App $VERSION" --notes-file notes.md)
             [ "$PRERELEASE" = true ] && flags+=(--prerelease)
             gh release create "$tag" "${flags[@]}" upload/*
           fi
@@ -288,5 +289,5 @@ jobs:
             diff <(echo "$expected") <(echo "$actual") || true
             exit 1
           fi
-          gh release edit "mobile-v$VERSION" --draft=false
+          gh release edit "mobile-v$VERSION" --draft=false --latest=false
           echo "published mobile-v$VERSION"
