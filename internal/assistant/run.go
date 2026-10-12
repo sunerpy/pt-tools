@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -319,25 +321,39 @@ func rawExtra(s, key string) json.RawMessage {
 	return json.RawMessage(s)
 }
 
-// jsonMentions 报告 JSON 里有没有哪个字符串（键或值，解码以后的）含有 Key：服务商用 \u 转义写的 Key 按原文替换认不出来。
-// 不是合法 JSON 时看到出错的地方为止。和 keyScrubber 一样，太短的 Key 不管。
+// jsonMentions 报告 JSON 文本里有没有 Key，原文或者用转义写的（\u0071、\/ 这类，按原文替换认不出来）：整段的转义都还原了再找，
+// 不是合法 JSON（出错的地方后面还有）也找得到。和 keyScrubber 一样，太短的 Key 不管。
 func jsonMentions(raw, key string) bool {
 	if len(key) < minKeyLen {
 		return false
 	}
-	if strings.Contains(raw, key) {
-		return true
-	}
-	dec := json.NewDecoder(strings.NewReader(raw))
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return false
+	return strings.Contains(raw, key) || strings.Contains(jsonUnescape(raw), key)
+}
+
+// jsonEscape 是 JSON 字符串里的一个转义：\uXXXX，或者反斜杠加一个字符
+var jsonEscape = regexp.MustCompile(`\\(u[0-9a-fA-F]{4}|.)`)
+
+// jsonUnescape 把文本里的 JSON 转义都还原（从左到右，\\ 是一个反斜杠），不管它在不在字符串里、JSON 合不合法。
+func jsonUnescape(s string) string {
+	return jsonEscape.ReplaceAllStringFunc(s, func(m string) string {
+		switch m[1] {
+		case 'u':
+			n, _ := strconv.ParseUint(m[2:], 16, 32)
+			return string(rune(n))
+		case 'b':
+			return "\b"
+		case 'f':
+			return "\f"
+		case 'n':
+			return "\n"
+		case 'r':
+			return "\r"
+		case 't':
+			return "\t"
+		default:
+			return m[1:]
 		}
-		if v, ok := tok.(string); ok && strings.Contains(v, key) {
-			return true
-		}
-	}
+	})
 }
 
 // redactedStream 让流式的文字增量也过脱敏（redact.Text，和落库的回答同一个函数）：攒着全文，每次只发脱敏以后新多出来的部分；末尾还可能变长的一段

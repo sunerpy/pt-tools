@@ -1050,6 +1050,8 @@ func TestEscapedKeyInToolCallsNeverStored(t *testing.T) {
 	e.llm.push(reply{calls: []replyCall{
 		{id: "call_1", name: "search_torrents", args: `{"keyword":"` + esc + `"}`, extra: `{"google":{"thought_signature":"` + esc + `"}}`},
 		{id: "call_2", name: "list_tasks", args: `{"page":1}`, extra: `{"google":{"thought_signature":"sig-` + key + `"}}`},
+		// 不是合法 JSON，转义的 Key 在出错的地方后面
+		{id: "call_3", name: "search_torrents", args: `{"limit":oops,"keyword":"` + esc + `"}`},
 	}}, reply{text: "好的。"})
 	conv := e.conversation(admin)
 	res := e.send(admin, conv, "搜一下")
@@ -1057,18 +1059,43 @@ func TestEscapedKeyInToolCallsNeverStored(t *testing.T) {
 	require.Equal(t, RunDone, fin.Status, fin.Error)
 
 	msgs := e.messages(conv)
-	require.Equal(t, []string{"user", "assistant", "tool", "tool", "assistant"}, roles(msgs))
+	require.Equal(t, []string{"user", "assistant", "tool", "tool", "tool", "assistant"}, roles(msgs))
 	assert.True(t, msgs[2].IsError)
 	assert.Contains(t, msgs[2].Content, "参数里有 API Key")
 	assert.False(t, msgs[3].IsError, "另一个调用照常执行")
+	assert.Contains(t, msgs[4].Content, "参数里有 API Key", "不是合法 JSON 的也认得出")
+	// 参数是 JSON 里的字符串：存起来、发出去时又转义了一层，所以多还原一层再找
+	leaks := func(v string) bool {
+		inner := jsonUnescape(v)
+		return jsonMentions(v, key) || jsonMentions(inner, key) || strings.Contains(v, esc) || strings.Contains(inner, esc)
+	}
 	for _, m := range msgs {
 		for _, v := range []string{m.Content, m.Reasoning, m.ToolCalls} {
-			assert.False(t, jsonMentions(v, key) || strings.Contains(v, esc), "库里有 Key：%s", v)
+			assert.False(t, leaks(v), "库里有 Key：%s", v)
 		}
 	}
 	buf, _ := json.Marshal(all)
-	assert.False(t, jsonMentions(string(buf), key) || strings.Contains(string(buf), esc), "事件里有 Key")
+	assert.False(t, leaks(string(buf)), "事件里有 Key")
 	next, _ := json.Marshal(e.llm.requests()[1].Messages)
-	assert.False(t, jsonMentions(string(next), key) || strings.Contains(string(next), esc), "交回模型的请求里有 Key")
+	assert.False(t, leaks(string(next)), "交回模型的请求里有 Key")
 	assert.NotContains(t, string(next), "extra_content", "有 Key 的签名整个不要")
+}
+
+func TestJSONMentions(t *testing.T) {
+	key := "qa-key/0123456789"
+	for _, c := range []struct {
+		raw  string
+		want bool
+	}{
+		{`{"a":"qa-key/0123456789"}`, true},
+		{`{"a":"\u0071\u0061-key\/0123456789"}`, true},
+		{`{"a":"x\nqa-key\/0123456789\t"}`, true},
+		{`{"limit":oops,"keyword":"qa-k\u0065y\/0123456789"}`, true},
+		{`{"a":"\\u0071a-key/0123456789"}`, false}, // 转义的是反斜杠：值是字面的 \u0071a-key…，不是 Key
+		{`{"a":"qa-key","b":"/0123456789"}`, false},
+		{`not json`, false},
+	} {
+		assert.Equal(t, c.want, jsonMentions(c.raw, key), c.raw)
+	}
+	assert.False(t, jsonMentions(`{"a":"short"}`, "short"), "太短的 Key 不管")
 }
