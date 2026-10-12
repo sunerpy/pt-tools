@@ -1098,4 +1098,15 @@ func TestJSONMentions(t *testing.T) {
 		assert.Equal(t, c.want, jsonMentions(c.raw, key), c.raw)
 	}
 	assert.False(t, jsonMentions(`{"a":"short"}`, "short"), "太短的 Key 不管")
+
+	// Key 里有 BMP 以外的字符：JSON 写成一对代理，和 encoding/json 一样合成一个字符
+	emoji := "😀abcdefg"
+	assert.True(t, jsonMentions(`{"keyword":"\ud83d\ude00abcdefg"}`, emoji))
+	assert.True(t, jsonMentions(`{"keyword":"\uD83D\uDE00abcdefg","limit":oops}`, emoji))
+	var decoded map[string]string
+	require.NoError(t, json.Unmarshal([]byte(`{"keyword":"\ud83d\ude00abcdefg"}`), &decoded))
+	assert.Equal(t, emoji, decoded["keyword"], "encoding/json 也是这样解的")
+	assert.Equal(t, "\uFFFDabcdefg", jsonUnescape(`\ud83dabcdefg`), "落单的代理是 U+FFFD")
+	require.NoError(t, json.Unmarshal([]byte("{\"keyword\":\"a\xffb\"}"), &decoded))
+	assert.Equal(t, decoded["keyword"], jsonUnescape("a\xffb"), "不是 UTF-8 的字节和 encoding/json 一样换成 U+FFFD")
 }

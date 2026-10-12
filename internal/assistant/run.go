@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/openai/openai-go/v3"
@@ -330,14 +331,20 @@ func jsonMentions(raw, key string) bool {
 	return strings.Contains(raw, key) || strings.Contains(jsonUnescape(raw), key)
 }
 
-// jsonEscape 是 JSON 字符串里的一个转义：\uXXXX，或者反斜杠加一个字符
-var jsonEscape = regexp.MustCompile(`\\(u[0-9a-fA-F]{4}|.)`)
+// jsonEscape 是 JSON 字符串里的一个转义：一对代理（\uD83D\uDE00）、\uXXXX，或者反斜杠加一个字符
+var jsonEscape = regexp.MustCompile(`\\(u[dD][89abAB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|.)`)
 
-// jsonUnescape 把文本里的 JSON 转义都还原（从左到右，\\ 是一个反斜杠），不管它在不在字符串里、JSON 合不合法。
+// jsonUnescape 把文本里的 JSON 转义都还原，和 encoding/json 一样（从左到右，\\ 是一个反斜杠；一对代理合成一个字符，落单的代理
+// 与不是 UTF-8 的字节都是 U+FFFD），不管它在不在字符串里、JSON 合不合法。
 func jsonUnescape(s string) string {
-	return jsonEscape.ReplaceAllStringFunc(s, func(m string) string {
+	return jsonEscape.ReplaceAllStringFunc(string([]rune(s)), func(m string) string {
 		switch m[1] {
 		case 'u':
+			if len(m) == len(`\uD83D\uDE00`) {
+				hi, _ := strconv.ParseUint(m[2:6], 16, 32)
+				lo, _ := strconv.ParseUint(m[8:], 16, 32)
+				return string(utf16.DecodeRune(rune(hi), rune(lo)))
+			}
 			n, _ := strconv.ParseUint(m[2:], 16, 32)
 			return string(rune(n))
 		case 'b':
