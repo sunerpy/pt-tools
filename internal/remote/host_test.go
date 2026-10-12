@@ -134,6 +134,7 @@ func TestPairingExpiredInSession(t *testing.T) {
 	k, _ := GenerateKeypair(nil)
 	c, err := th.connect(t, k.Private, ViaDirect)
 	require.NoError(t, err)
+	waitPairingServing(t, c)
 	clk.add(PairingTTL + time.Second)
 	_, err = c.Pair(ctx, link.Secret, "迟到的手机")
 	var pe *PairError
@@ -272,6 +273,15 @@ func rawRequest(t *testing.T, c *Client, id uint32, head, body []byte) (int, htt
 		t.Fatal("没有等到回应")
 	}
 	return 0, nil, ""
+}
+
+// waitPairingServing 等主机登记好配对会话、开始服务。握手完成以后主机才登记会话，在这之前拨快时钟，
+// 会话在登记时就被关掉，等不到要测的回应。配对会话对别的路径回 403（不算输错），回来了就说明已经在服务。
+func waitPairingServing(t *testing.T, c *Client) {
+	t.Helper()
+	probe, _ := json.Marshal(RequestHead{Method: "GET", Path: "/api/app/v1/status"})
+	status, _, _ := rawRequest(t, c, 1<<30, probe, nil)
+	require.Equal(t, http.StatusForbidden, status)
 }
 
 // 同时最多 16 个请求，第 17 个直接回 429；设备取消请求以后处理函数的 ctx 结束，名额空出来
@@ -552,6 +562,8 @@ func TestHostClose(t *testing.T) {
 	_, priv := th.addDevice(t, "手机", ScopesFull)
 	c, err := th.connect(t, priv, ViaDirect)
 	require.NoError(t, err)
+	// 握手完成以后主机才登记会话：等登记好再关，不然它不在要发 GOAWAY shutdown 的名单里
+	require.Eventually(t, func() bool { return th.sessions.count() == 1 }, 5*time.Second, 10*time.Millisecond)
 	th.Close()
 	wantGoAway(t, c, GoAwayShutdown)
 	assert.False(t, th.Enabled())
@@ -623,6 +635,7 @@ func TestPairingRequestAfterWindowExpired(t *testing.T) {
 	k, _ := GenerateKeypair(nil)
 	c, err := th.connect(t, k.Private, ViaDirect)
 	require.NoError(t, err)
+	waitPairingServing(t, c)
 	clk.add(PairingTTL)
 	head, _ := json.Marshal(RequestHead{Method: "POST", Path: PairPath})
 	status, _, _ := rawRequest(t, c, 31, head, []byte(`not json`))
