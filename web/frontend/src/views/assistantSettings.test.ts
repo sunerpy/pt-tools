@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type MountedView, mountView } from "@/test-mount";
 
-const api = vi.hoisted(() => ({ settings: vi.fn(), saveSettings: vi.fn(), testSettings: vi.fn() }));
+const api = vi.hoisted(() => ({
+  settings: vi.fn(),
+  saveSettings: vi.fn(),
+  testSettings: vi.fn(),
+  listModels: vi.fn(),
+}));
 const ui = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -134,5 +139,65 @@ describe("AI 助手设置", () => {
     const input = (url.tagName === "INPUT" ? url : url.querySelector("input")!) as HTMLInputElement;
     expect(input.value).toBe("https://api.deepseek.com");
     expect(document.body.textContent).toContain("没有 Key");
+  });
+
+  it("选了有免费额度的服务商：写明免费额度、隐私、要不要代理，给申请 Key 的链接", async () => {
+    await mountPage(
+      saved({
+        provider: "google",
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        model: "gemini-3.8-flash",
+      }),
+    );
+    expect(q("ass-free")!.textContent).toContain("免费额度");
+    expect(q("ass-free")!.textContent).toContain("以服务商的页面为准");
+    expect(q("ass-privacy")!.textContent).toContain("Google");
+    expect(q("ass-proxy-hint")!.textContent).toContain("代理");
+    const link = q("ass-console") as HTMLAnchorElement;
+    expect(link.href).toBe("https://aistudio.google.com/apikey");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toContain("noopener");
+  });
+
+  it("DeepSeek 没有免费额度这一条，也不提示代理，只给申请 Key 的链接", async () => {
+    await mountPage();
+    expect(q("ass-free")).toBeNull();
+    expect(q("ass-proxy-hint")).toBeNull();
+    expect((q("ass-console") as HTMLAnchorElement).href).toBe(
+      "https://platform.deepseek.com/api_keys",
+    );
+  });
+
+  it("获取模型列表：按表单里的值请求，读到的模型并进下拉框（常用的在前）", async () => {
+    await mountPage();
+    api.listModels.mockResolvedValue({ models: ["deepseek-flash", "deepseek-other"], total: 5 });
+    q("ass-list-models")!.click();
+    await vi.waitFor(() => expect(api.listModels).toHaveBeenCalledTimes(1));
+    const body = api.listModels.mock.calls[0]![0];
+    expect(body).toMatchObject({ base_url: "https://api.deepseek.com" });
+    expect(body).not.toHaveProperty("api_key");
+    await vi.waitFor(() => expect(q("ass-listed")!.textContent).toContain("服务商列出 5 个模型"));
+    expect(q("ass-listed")!.textContent).toContain("2");
+    const sel = q("ass-model")!;
+    (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+    // 服务商下拉框的选项也在页面上：只看最后打开的那个（模型）下拉框
+    const items = () => {
+      const menus = document.querySelectorAll(".el-select-dropdown");
+      return [...(menus[menus.length - 1]?.querySelectorAll(".el-select-dropdown__item") ?? [])];
+    };
+    await vi.waitFor(() => expect(items().length).toBe(3));
+    expect(items().map((o) => o.textContent?.trim())).toEqual([
+      "deepseek-flash",
+      "deepseek-v4-pro",
+      "deepseek-other",
+    ]);
+  });
+
+  it("获取模型列表失败：写出原因", async () => {
+    await mountPage();
+    api.listModels.mockRejectedValue(new Error("模型服务回 401：bad key（检查 API Key）"));
+    q("ass-list-models")!.click();
+    await vi.waitFor(() => expect(q("ass-listed")!.textContent).toContain("检查 API Key"));
+    expect(q("ass-listed")!.className).toContain("ass-tip--warn");
   });
 });

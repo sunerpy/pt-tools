@@ -11,6 +11,7 @@ import {
   argsText,
   chatItems,
   chatStateFrom,
+  ASSISTANT_PROVIDERS,
   providerOf,
   renderAnswer,
   renderPartial,
@@ -208,5 +209,18 @@ describe("其余", () => {
   it("不认识的服务商当成「其他」", () => {
     expect(providerOf("deepseek").baseURL).toBe("https://api.deepseek.com");
     expect(providerOf("nope").key).toBe("custom");
+    // 有免费额度的两家（M20）：地址与 Groq、Google 的 OpenAI 兼容接口一致，都要代理
+    expect(providerOf("groq").baseURL).toBe("https://api.groq.com/openai/v1");
+    expect(providerOf("google").baseURL).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+    );
+    expect(providerOf("google").needsProxy).toBe(true);
+    expect(providerOf("google").privacy).toContain("Google");
+    // 要 Key 的服务商都给申请 Key 的 https 页面；预设的常用模型不重复
+    for (const p of ASSISTANT_PROVIDERS) {
+      if (p.key === "custom" || p.noKey) continue;
+      expect(p.consoleURL, p.key).toMatch(/^https:\/\//);
+      expect(new Set(p.models).size, p.key).toBe(p.models.length);
+    }
   });
 });
