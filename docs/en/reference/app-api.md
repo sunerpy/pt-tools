@@ -103,13 +103,14 @@ Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST 
     "brush",
     "media",
     "subscriptions",
-    "updates"
+    "updates",
+    "assistant"
   ],
   "principal": { "kind": "api_token", "name": "My phone", "scopes": ["app:read", "app:write"] }
 }
 ```
 
-`principal.kind` is `api_token` (a token), `session` (a web sign-in) or `remote_device` (a device paired through remote access); `features` lists the feature groups of this version (earlier versions have no `downloaders` and `updates`); `scopes` are the caller's permissions, so a client can decide which actions to show.
+`principal.kind` is `api_token` (a token), `session` (a web sign-in) or `remote_device` (a device paired through remote access); `features` lists the feature groups of this version (earlier versions have no `downloaders`, `updates` or `assistant`); `scopes` are the caller's permissions, so a client can decide which actions to show.
 
 ### GET /updates
 
