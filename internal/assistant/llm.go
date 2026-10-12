@@ -160,21 +160,21 @@ func keyRejected(detail string) bool {
 		strings.Contains(d, "api_key_invalid")
 }
 
-// retryAfter 是 429 回应建议等多久，说成「，约 N 秒后再试」：Retry-After 是秒数或 HTTP 日期，也认 Retry-After-Ms；
-// 没有或读不懂时为空。
+// retryAfter 是 429 回应建议等多久，说成「，约 N 秒后再试」。和 SDK 决定要不要重试时的顺序一样：先 Retry-After-Ms，
+// 再 Retry-After（秒数或 HTTP 日期）；没有或读不懂时为空。
 func retryAfter(res *http.Response) string {
 	if res == nil {
 		return ""
 	}
 	n := 0
-	if v := strings.TrimSpace(res.Header.Get("Retry-After")); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil {
-			n = secs
+	if ms, err := strconv.ParseFloat(strings.TrimSpace(res.Header.Get("Retry-After-Ms")), 64); err == nil && ms > 0 {
+		n = int(math.Ceil(ms / 1000))
+	} else if v := strings.TrimSpace(res.Header.Get("Retry-After")); v != "" {
+		if secs, err := strconv.ParseFloat(v, 64); err == nil {
+			n = int(math.Ceil(secs))
 		} else if at, err := http.ParseTime(v); err == nil {
 			n = int(math.Ceil(time.Until(at).Seconds()))
 		}
-	} else if ms, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After-Ms"))); err == nil {
-		n = (ms + 999) / 1000
 	}
 	if n <= 0 {
 		return ""

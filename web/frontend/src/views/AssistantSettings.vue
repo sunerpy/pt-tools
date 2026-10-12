@@ -20,7 +20,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { ASSISTANT_PROVIDERS, providerOf } from "@/utils/assistant";
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 const ds = useDataState();
 const saved = ref<AssistantSettings | null>(null);
@@ -142,6 +142,17 @@ async function test() {
     testing.value = false;
   }
 }
+
+// 改了接口地址：读到的列表是旧地址的，丢掉；还没回来的也作废
+watch(
+  () => form.value.base_url,
+  () => {
+    listSeq++;
+    listing.value = false;
+    fetched.value = [];
+    listed.value = null;
+  },
+);
 
 async function listModels() {
   const seq = ++listSeq;

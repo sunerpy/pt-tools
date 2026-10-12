@@ -140,3 +140,16 @@ func TestLongRetryAfterIsReportedInsteadOfWaited(t *testing.T) {
 	require.True(t, errors.As(err, &te), err)
 	assert.Regexp(t, `约 4\d 秒后再试`, te.Message)
 }
+
+// SDK 先看 Retry-After-Ms 再看 Retry-After：提示的等待时间要和它用的同一个。
+func TestRetryAfterPrefersMilliseconds(t *testing.T) {
+	e := newEnv(t)
+	e.llm.push(reply{status: http.StatusTooManyRequests, body: "Rate limit reached", header: map[string]string{
+		"Retry-After-Ms": "90000", "Retry-After": "1",
+	}})
+	_, err := e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	var te *TestError
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "约 90 秒后再试")
+	assert.Len(t, e.llm.requests(), 1, "按毫秒值算要等 90 秒：不重试")
+}
