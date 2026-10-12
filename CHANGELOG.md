@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.25](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.24...v1.0.0-rc.25) (2026-10-12)
+
+
+### Features
+
+* **assistant:** 服务商加 Groq 与 Google AI Studio，支持获取模型列表 ([#668](https://github.com/sunerpy/pt-tools/issues/668)) ([916a101](https://github.com/sunerpy/pt-tools/commit/916a101e896c1e05c33e52427fa893f1e8ad56e9))
+
 ## [1.0.0-rc.24](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.23...v1.0.0-rc.24) (2026-10-11)
 
 
