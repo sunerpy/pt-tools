@@ -684,10 +684,10 @@ bash scripts/deploy-relay.sh --rollback    # 换回旧容器（第一次部署�
 
 ### 手机 App 发版
 
-App 不经过 release-please（`release-please-config.json` 的根包排除了 `apps/mobile` 与 `relay/cloudflare`，只改它们的提交不会让 pt-tools 发版）。先改 `apps/mobile/pubspec.yaml` 的 `version`（例如 `1.0.0+1`，`+` 后面的构建号每次递增），合入以后手动运行 `Mobile Release`（只在受保护的 `main`、`v1.0.0-rc` 上），`version` 填 `1.0.0`：
+App 不经过 release-please（`release-please-config.json` 的根包排除了 `apps/mobile` 与 `relay/cloudflare`，只改它们的提交不会让 pt-tools 发版）。先改 `apps/mobile/pubspec.yaml` 的 `version`（例如 `1.0.0+1`，`+` 后面的构建号每次递增：Android 只看它决定能不能覆盖安装，只改 `rc.N` 或去掉 `-rc` 不算），合入以后手动运行 `Mobile Release`（只在受保护的 `main`、`v1.0.0-rc` 上），`version` 填 `1.0.0`；预览版写成 `1.0.0-rc.1`，发成 Pre-release：
 
 1. 构建按 CPU 架构拆分的 release APK（arm64-v8a、armeabi-v7a、x86_64），用 Environment `mobile-release` 里的 keystore 签名，`apksigner` 核对每个 APK 都是同一张证书，并且正式发版时必须是变量 `ANDROID_CERT_SHA256` 给的那张；生成 `checksums.txt` 与构建来源证明；
-2. `dry_run` 为真时只上传成 workflow artifact；否则建 draft Release `mobile-v1.0.0`，说明取上一个 `mobile-v*` 以来 `apps/mobile` 的提交，上传、核对资产以后再公开。任一步失败都停在 draft，修好以后用同一个版本重跑会接着发（只接同一个提交上的 draft）。
+2. `dry_run` 为真时只上传成 workflow artifact；否则建 draft Release `mobile-v1.0.0`，说明取上一个 `mobile-v*` 以来 `apps/mobile` 的提交，上传、核对资产以后再公开。任一步失败都停在 draft，修好以后用同一个版本重跑会接着发（只接同一个提交上的 draft）。App 的 Release 不会成为 Latest：安装脚本与稳定版的下载链接按 `releases/latest` 找服务端的资产；本地 `make` 取版本号时也只认 `v*` 的 tag。
 
 PR 改到这个 workflow 或 Android 工程时只跑验证：用现生成的密钥构建一遍，不碰任何 secret、没有写权限（产物文件名带 `-test-signed`，不能发布）。
 
@@ -697,7 +697,7 @@ PR 改到这个 workflow 或 Android 工程时只跑验证：用现生成的密�
 | `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` | `mobile-release` 的 secret | keystore 口令、密钥别名与密钥口令                                               |
 | `ANDROID_CERT_SHA256`                                                    | 变量                       | 签名证书的 SHA-256（`apksigner verify --print-certs` 的写法），正式发版必须设好 |
 
-`mobile-release` 的部署分支同样限定为 `main` 与 `v1.0.0-rc`。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`：
+`mobile-release` 的部署分支同样限定为 `main` 与 `v1.0.0-rc`。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
 
 ```bash
 keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias pttools -keyalg RSA -keysize 4096 -validity 10000
