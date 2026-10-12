@@ -103,13 +103,14 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
     "brush",
     "media",
     "subscriptions",
-    "updates"
+    "updates",
+    "assistant"
   ],
   "principal": { "kind": "api_token", "name": "我的手机", "scopes": ["app:read", "app:write"] }
 }
 ```
 
-`principal.kind` 是 `api_token`（令牌）、`session`（网页登录）或 `remote_device`（经远程访问配对的设备）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders` 与 `updates`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
+`principal.kind` 是 `api_token`（令牌）、`session`（网页登录）或 `remote_device`（经远程访问配对的设备）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders`、`updates` 与 `assistant`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
 
 ### GET /updates
 
