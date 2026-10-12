@@ -349,6 +349,7 @@ func TestRelaySessionGoAway(t *testing.T) {
 		require.NoError(t, err)
 		c, err := Connect(ctx, raw, ClientConfig{HostID: th.keys.HostID(), HostKey: th.keys.Noise.Public, Device: dk})
 		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, waitServing(t, c))
 		return c
 	}
 	c := dial()
@@ -376,6 +377,7 @@ func TestRelayGoAwayBeforeDisconnect(t *testing.T) {
 		require.NoError(t, err)
 		c, err := Connect(ctx, raw, ClientConfig{HostID: th.keys.HostID(), HostKey: th.keys.Noise.Public, Device: dk})
 		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, waitServing(t, c))
 		return c
 	}
 	c := dial()
