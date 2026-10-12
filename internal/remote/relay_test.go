@@ -349,8 +349,7 @@ func TestRelaySessionGoAway(t *testing.T) {
 		require.NoError(t, err)
 		c, err := Connect(ctx, raw, ClientConfig{HostID: th.keys.HostID(), HostKey: th.keys.Noise.Public, Device: dk})
 		require.NoError(t, err)
-		// 握手完成以后主机才登记会话：等登记好再改权限、轮换密钥，不然这条会话不在要关的名单里
-		require.Eventually(t, func() bool { return th.sessions.count() == 1 }, 5*time.Second, 10*time.Millisecond)
+		require.Equal(t, http.StatusOK, waitServing(t, c))
 		return c
 	}
 	c := dial()
@@ -378,8 +377,7 @@ func TestRelayGoAwayBeforeDisconnect(t *testing.T) {
 		require.NoError(t, err)
 		c, err := Connect(ctx, raw, ClientConfig{HostID: th.keys.HostID(), HostKey: th.keys.Noise.Public, Device: dk})
 		require.NoError(t, err)
-		// 握手完成以后主机才登记会话：等登记好再关，不然这条会话不在要发 GOAWAY 的名单里，relay 先断了
-		require.Eventually(t, func() bool { return th.sessions.count() == 1 }, 5*time.Second, 10*time.Millisecond)
+		require.Equal(t, http.StatusOK, waitServing(t, c))
 		return c
 	}
 	c := dial()
