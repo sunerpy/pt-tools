@@ -13,7 +13,10 @@ import type {
 import DOMPurify from "dompurify";
 import { Marked } from "marked";
 
-/** 服务商预设：选了以后填好接口地址与常用模型（2026-10 按各家文档核对过）。模型可以手填。 */
+/**
+ * 服务商预设：选了以后填好接口地址与常用模型；模型也可以手填，或者点「获取模型列表」从服务商读。
+ * 地址、模型与申请 Key 的页面 2026-10 按各家文档核对过（Groq、Google AI Studio 2026-10-12）；免费额度会变，界面上写明以服务商页面为准。
+ */
 export interface AssistantProvider {
   key: string;
   label: string;
@@ -22,6 +25,14 @@ export interface AssistantProvider {
   /** 不要 API Key（本机的 Ollama） */
   noKey?: boolean;
   hint?: string;
+  /** 申请 API Key 的页面 */
+  consoleURL?: string;
+  /** 免费额度的一句话 */
+  free?: string;
+  /** 隐私上要知道的，例如免费层的内容可能被拿去改进产品 */
+  privacy?: string;
+  /** 从中国大陆访问一般要代理 */
+  needsProxy?: boolean;
 }
 
 export const ASSISTANT_PROVIDERS: readonly AssistantProvider[] = [
@@ -30,21 +41,66 @@ export const ASSISTANT_PROVIDERS: readonly AssistantProvider[] = [
     label: "DeepSeek",
     baseURL: "https://api.deepseek.com",
     models: ["deepseek-flash", "deepseek-v4-pro"],
+    consoleURL: "https://platform.deepseek.com/api_keys",
   },
   {
     key: "qwen",
     label: "通义千问（阿里云百炼）",
     baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     models: ["qwen3.7-plus", "qwen3.8-flash", "qwen3.8-max"],
+    consoleURL: "https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key",
+    free: "新开通的账号每个模型各有一份免费额度，用完开始计费；在百炼控制台给模型打开「免费额度用完即停」就不会多花钱。",
   },
   {
     key: "kimi",
     label: "Kimi（月之暗面）",
     baseURL: "https://api.moonshot.cn/v1",
     models: ["kimi-k2.6", "kimi-k3"],
+    consoleURL: "https://platform.moonshot.cn/console/api-keys",
   },
-  { key: "siliconflow", label: "硅基流动", baseURL: "https://api.siliconflow.cn/v1", models: [] },
-  { key: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", models: [] },
+  {
+    key: "siliconflow",
+    label: "硅基流动",
+    baseURL: "https://api.siliconflow.cn/v1",
+    models: [],
+    consoleURL: "https://cloud.siliconflow.cn/account/ak",
+    free: "模型广场里标着「免费」的模型可以免费用，有限速。",
+  },
+  {
+    key: "google",
+    label: "Google AI Studio（Gemini）",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+    // 2026-10-12 用真实 Key 核对：gemini-3.5-flash-lite 网页与通知渠道里调工具、确认推送都跑通，回得快；
+    // gemini-flash-latest 跟着最新的 Flash 走，忙的时候慢、会回 503；gemini-2.5-* 对新用户已经不开放
+    models: [
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest",
+      "gemini-3.8-flash",
+      "gemini-3.6-flash",
+      "gemini-flash-lite-latest",
+    ],
+    consoleURL: "https://aistudio.google.com/apikey",
+    free: "Gemini 的 Flash 等模型有免费额度，每分钟、每天限次数；有的模型每分钟只有几次，一个问题要调好几次工具时会碰到限流，等一会儿再问。",
+    privacy: "免费层的对话内容可能被 Google 用来改进产品。",
+    needsProxy: true,
+  },
+  {
+    key: "groq",
+    label: "Groq",
+    baseURL: "https://api.groq.com/openai/v1",
+    models: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+    consoleURL: "https://console.groq.com/keys",
+    free: "这几个模型免费，每个每天约 1000 次请求、20 万 token；每分钟只有 8000 token，要调好几次工具的问题可能要多等一会儿。",
+    needsProxy: true,
+  },
+  {
+    key: "openrouter",
+    label: "OpenRouter",
+    baseURL: "https://openrouter.ai/api/v1",
+    models: [],
+    consoleURL: "https://openrouter.ai/settings/keys",
+    free: "名字带 :free 的模型免费，每天有次数上限。",
+  },
   {
     key: "ollama",
     label: "Ollama（自己部署）",
@@ -58,6 +114,8 @@ export const ASSISTANT_PROVIDERS: readonly AssistantProvider[] = [
     label: "OpenAI",
     baseURL: "https://api.openai.com/v1",
     models: ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"],
+    consoleURL: "https://platform.openai.com/api-keys",
+    needsProxy: true,
   },
   { key: "custom", label: "其他（OpenAI 兼容接口）", baseURL: "", models: [] },
 ];

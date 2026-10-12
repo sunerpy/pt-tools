@@ -1,13 +1,17 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +31,8 @@ const (
 	// headerTimeout 是等模型服务回应头的上限（思考模式开头要想一会儿）
 	headerTimeout = 2 * time.Minute
 	pingTimeout   = time.Minute
+	// maxRetryWait 是 429 时最多等多久再试（测试连接与获取模型列表总共只有 pingTimeout）
+	maxRetryWait = 20 * time.Second
 )
 
 // newHTTPClient 建调模型用的 http.Client：走 proxy，为空时用环境变量里的代理。不设整体超时（流式回答可能很久），
@@ -60,18 +66,42 @@ func newHTTPClient(proxy string) (*http.Client, error) {
 // chatService 建 Chat Completions 客户端。不经 openai.NewClient：它会读 OPENAI_API_KEY、OPENAI_BASE_URL 等环境变量，
 // 这里只用设置里的地址与 Key。
 func (s *Service) chatService(c llmConfig) (openai.ChatCompletionService, error) {
+	opts, err := s.clientOptions(c)
+	if err != nil {
+		return openai.ChatCompletionService{}, err
+	}
+	return openai.NewChatCompletionService(opts...), nil
+}
+
+// modelService 建读模型列表（GET /models）的客户端，地址、代理与 Key 同 chatService。
+func (s *Service) modelService(c llmConfig) (openai.ModelService, error) {
+	opts, err := s.clientOptions(c)
+	if err != nil {
+		return openai.ModelService{}, err
+	}
+	return openai.NewModelService(opts...), nil
+}
+
+// clientOptions 是调模型服务的公共选项：设置里的地址、代理（没填用环境变量）与 Key（没有就不带）。
+func (s *Service) clientOptions(c llmConfig) ([]option.RequestOption, error) {
 	hc := s.cfg.HTTPClient
 	if hc == nil {
 		var err error
 		if hc, err = newHTTPClient(c.Proxy); err != nil {
-			return openai.ChatCompletionService{}, err
+			return nil, err
 		}
 	}
-	opts := []option.RequestOption{option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc), option.WithMaxRetries(1)}
+	// 重试两次：免费层（例如 Groq 每分钟 8K token）调工具多时容易 429，SDK 按服务商给的 Retry-After 等；
+	// 服务商要等的超过 maxRetryWait 时不在这里干等，直接回 429（describeError 说要等多久）
+	opts := []option.RequestOption{
+		option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc),
+		option.WithMaxRetries(2), option.WithMaxRetryDelay(maxRetryWait),
+		option.WithMiddleware(normalizeErrorResponse),
+	}
 	if c.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(c.APIKey))
 	}
-	return openai.NewChatCompletionService(opts...), nil
+	return opts, nil
 }
 
 // describeError 把调模型的错误换成给人看的一句话：不带 Key、请求头与完整地址。
@@ -94,16 +124,26 @@ func describeError(err error, key string) string {
 			}
 		}
 		if detail == "" {
+			detail = bodyMessage(apiErr.Response)
+		}
+		if detail == "" {
 			detail = http.StatusText(apiErr.StatusCode)
 		}
 		msg = fmt.Sprintf("模型服务回 %d：%s", apiErr.StatusCode, detail)
-		switch apiErr.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
+		switch {
+		case locationBlocked(detail):
+			// Google AI Studio 对中国大陆、香港的 IP 回 400 User location is not supported
+			msg += "（这个服务商不对你所在的地区开放：在「代理地址」里填一个能访问它的代理）"
+		case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden || keyRejected(detail):
+			// Google AI Studio 对不对的 Key 回 400 Please pass a valid API key
 			msg += "（检查 API Key）"
-		case http.StatusNotFound:
+		case apiErr.StatusCode == http.StatusNotFound:
 			msg += "（检查接口地址与模型名）"
-		case http.StatusTooManyRequests:
-			msg += "（请求太多或额度用完了）"
+		case apiErr.StatusCode == http.StatusServiceUnavailable:
+			// Google AI Studio：This model is currently experiencing high demand
+			msg += "（服务商这会儿太忙，过一会儿再试，或者换个模型）"
+		case apiErr.StatusCode == http.StatusTooManyRequests:
+			msg += "（请求太快或者免费额度用完了" + retryAfter(apiErr.Response) + "；也可以换个模型或服务商）"
 		}
 	case errors.As(err, &urlErr):
 		msg = "连不上模型服务：" + urlErr.Err.Error()
@@ -116,6 +156,151 @@ func describeError(err error, key string) string {
 	return redact.Secrets(msg)
 }
 
+// normalizeErrorResponse 让 SDK 认得出 Google AI Studio 的错误回应：错误体包在数组里（[{"error":{…}}]）时取第一个；
+// 429 的头里没有 SDK 认得的等待时间、但正文写了要等多久（RetryInfo 的 retryDelay，或者「retry in 48.4s」）时补上 Retry-After，
+// SDK 按它决定重不重试（超过 maxRetryWait 就不重试），describeError 按它说要等多久。成功的回应原样放过（不读流式的正文）。
+func normalizeErrorResponse(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+	res, err := next(req)
+	if err != nil || res == nil || res.StatusCode < 400 || res.Body == nil {
+		return res, err
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	_ = res.Body.Close()
+	if rerr == nil {
+		if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '[' {
+			var items []json.RawMessage
+			if json.Unmarshal(t, &items) == nil && len(items) > 0 {
+				raw = items[0]
+			}
+		}
+		if _, said := retryWait(res.Header); res.StatusCode == http.StatusTooManyRequests && !said {
+			if secs := retryDelayIn(raw); secs > 0 {
+				res.Header.Set("Retry-After", strconv.Itoa(secs))
+			}
+		}
+	}
+	res.Body = io.NopCloser(bytes.NewReader(raw))
+	res.ContentLength = int64(len(raw))
+	return res, nil
+}
+
+// retryInText 是错误正文里写的要等多久（Gemini：Please retry in 48.434155456s.）
+var retryInText = regexp.MustCompile(`(?i)retry in ([0-9]+(?:\.[0-9]+)?)\s*s`)
+
+// retryDelayIn 是错误体里写的要等多久（秒，向上取整）：Google 的 RetryInfo（"retryDelay":"48s"），或者正文里的 retry in。
+func retryDelayIn(raw []byte) int {
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+			Details []struct {
+				RetryDelay string `json:"retryDelay"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return 0
+	}
+	secs := func(v string) int {
+		f, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(v), "s"), 64)
+		if err != nil || f <= 0 {
+			return 0
+		}
+		return int(math.Ceil(f))
+	}
+	for _, d := range body.Error.Details {
+		if n := secs(d.RetryDelay); n > 0 {
+			return n
+		}
+	}
+	if m := retryInText.FindStringSubmatch(body.Error.Message); m != nil {
+		return secs(m[1])
+	}
+	return 0
+}
+
+// bodyMessage 读错误体顶层的 message：SDK 只认 {"error":{"message"}}，硅基流动写成 {"code":30014,"message":"Token is invalid."}
+// （2026-10-12 实测）。包在数组里的已经由 normalizeErrorResponse 拆开了。读不出来时为空。
+func bodyMessage(res *http.Response) string {
+	if res == nil || res.Body == nil {
+		return ""
+	}
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	if err != nil {
+		return ""
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return ""
+	}
+	return strings.TrimSpace(body.Message)
+}
+
+// locationBlocked 是服务商说所在地区不能用（Gemini API：User location is not supported for the API use）。
+func locationBlocked(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "location is not supported") || strings.Contains(d, "unsupported_country") ||
+		strings.Contains(d, "country, region, or territory not supported")
+}
+
+// keyRejected 是服务商说 Key 不对（有的不回 401，例如 Google AI Studio 回 400）。
+func keyRejected(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "api key") && (strings.Contains(d, "valid") || strings.Contains(d, "incorrect")) ||
+		strings.Contains(d, "api_key_invalid")
+}
+
+// maxReportedWait 是提示里最多说要等多久：服务商给的数大得离谱时不溢出
+const maxReportedWait = 24 * time.Hour
+
+// retryWait 是回应头要求等多久，读法和 SDK 决定重不重试时一样（openai-go v3.76.0 的 parseRetryAfterHeader）：
+// 先 Retry-After-Ms，再 Retry-After（秒数或 RFC 1123 日期）；空的、读不懂的、负数的跳过、看下一个；0 也算数（SDK 马上重试）。
+// said 为 false 是没说。
+func retryWait(h http.Header) (wait time.Duration, said bool) {
+	for _, r := range [...]struct {
+		name string
+		unit time.Duration
+	}{{"Retry-After-Ms", time.Millisecond}, {"Retry-After", time.Second}} {
+		v := h.Get(r.name)
+		if v == "" {
+			continue
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 1) {
+			return maxReportedWait, true
+		}
+		if err == nil {
+			if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+				continue
+			}
+			return time.Duration(math.Min(f*float64(r.unit), float64(maxReportedWait))), true
+		}
+		if r.unit == time.Second {
+			if at, err := time.Parse(time.RFC1123, v); err == nil {
+				return min(max(time.Until(at), 0), maxReportedWait), true
+			}
+		}
+	}
+	return 0, false
+}
+
+// retryAfter 是 429 回应要等多久，说成「，约 N 秒后再试」（retryWait 读的）；没说、或者说不用等时为空。
+func retryAfter(res *http.Response) string {
+	if res == nil {
+		return ""
+	}
+	wait, said := retryWait(res.Header)
+	n := int(math.Ceil(wait.Seconds()))
+	if !said || n <= 0 {
+		return ""
+	}
+	if n >= 120 {
+		return fmt.Sprintf("，约 %d 分钟后再试", (n+59)/60)
+	}
+	return fmt.Sprintf("，约 %d 秒后再试", n)
+}
+
 // completion 是模型一次回答：文字、推理内容与工具调用。
 type completion struct {
 	content   string
@@ -125,7 +310,12 @@ type completion struct {
 
 type rawCall struct {
 	id, name, args string
+	// extra 是这个调用带的 extra_content（原样 JSON）：Gemini 3 的思考签名在这里，之后的请求要原样带回去
+	extra string
 }
+
+// maxExtraBytes 是一个工具调用的 extra_content 最多存多大
+const maxExtraBytes = 16 << 10
 
 // accumulator 拼流式回答。不用 openai.ChatCompletionAccumulator：它碰到各片 id 不一致、工具调用没有 index 的
 // OpenAI 兼容服务会丢内容。
@@ -160,6 +350,11 @@ func (a *accumulator) add(chunk openai.ChatCompletionChunk) (delta string) {
 		c := a.calls[pos]
 		if c.id == "" {
 			c.id = tc.ID
+		}
+		if f, ok := tc.JSON.ExtraFields["extra_content"]; ok && c.extra == "" {
+			if raw := strings.TrimSpace(f.Raw()); raw != "" && raw != "null" && len(raw) <= maxExtraBytes && json.Valid([]byte(raw)) {
+				c.extra = raw
+			}
 		}
 		if n := tc.Function.Name; n != "" && n != c.name {
 			c.name += n

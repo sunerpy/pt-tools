@@ -3019,6 +3019,12 @@ export interface AssistantTestResult {
   latency_ms: number;
 }
 
+/** 服务商 GET /models 列出的、能拿来对话的模型（total 是去掉不能对话的之前的数量） */
+export interface AssistantModelList {
+  models: string[];
+  total: number;
+}
+
 export interface AssistantConversation {
   id: number;
   title: string;
@@ -3114,6 +3120,8 @@ export const assistantApi = {
     api.put<AssistantSettings>("/api/assistant/settings", data),
   testSettings: (data: AssistantSettingsInput) =>
     api.post<AssistantTestResult>("/api/assistant/settings/test", data),
+  listModels: (data: AssistantSettingsInput) =>
+    api.post<AssistantModelList>("/api/assistant/settings/models", data),
   status: () => api.get<AssistantStatus>("/api/assistant/status"),
   conversations: () => api.get<AssistantConversation[]>("/api/assistant/conversations"),
   create: (data: { title?: string; message?: string }) =>

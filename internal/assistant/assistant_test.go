@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -991,4 +992,121 @@ func TestInvalidToolArgumentsReplayedAsEmptyObject(t *testing.T) {
 	res = e.send(admin, conv, "谢谢")
 	fin, _ = e.waitRun(admin, conv, res.RunID)
 	require.Equal(t, RunDone, fin.Status, fin.Error)
+}
+
+// Gemini 3 经 OpenAI 兼容接口调工具时，tool_calls 里带 extra_content.google.thought_signature，之后的请求要原样带回去，
+// 否则回 400「Function call is missing a thought_signature」（2026-10-12 用真实 Key 实测）。签名不出现在详情与事件里。
+func TestThoughtSignatureRoundTrips(t *testing.T) {
+	e := newEnv(t)
+	const sig = "c2lnbmF0dXJlLWZyb20tZ2VtaW5pLTEyMzQ1Njc4OTA="
+	first := reply{calls: []replyCall{{id: "call_1", name: "list_tasks", args: `{"page":1}`, extra: `{"google":{"thought_signature":"` + sig + `"}}`}}}
+	e.llm.push(first, reply{text: "找到 1 个种子。"}, reply{text: "不客气。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "最近抓了什么")
+	fin, all := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	signed := func(req llmRequest) bool {
+		for _, m := range req.Messages {
+			calls, _ := m["tool_calls"].([]any)
+			for _, c := range calls {
+				extra, _ := c.(map[string]any)["extra_content"].(map[string]any)
+				google, _ := extra["google"].(map[string]any)
+				if google["thought_signature"] == sig {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	assert.True(t, signed(e.llm.requests()[1]), "这次运行里的下一次请求带回签名")
+
+	res = e.send(admin, conv, "谢谢")
+	fin, _ = e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	assert.True(t, signed(e.llm.requests()[2]), "同一个会话接着问：历史里的调用照样带着签名")
+
+	d, err := e.svc.Conversation(context.Background(), admin, conv)
+	require.NoError(t, err)
+	buf, _ := json.Marshal(d)
+	assert.NotContains(t, string(buf), sig, "详情里没有签名")
+	buf, _ = json.Marshal(all)
+	assert.NotContains(t, string(buf), sig, "事件里没有签名")
+}
+
+// 服务回显收到的 Key 时可能用 \u 转义写（原文替换认不出来）：工具参数里有的，不执行、参数不留；extra_content 里有的（转义或原文），
+// 整个不要（思考签名改不得）。库里、事件里、之后的请求里都没有 Key。
+func TestEscapedKeyInToolCallsNeverStored(t *testing.T) {
+	e := newEnv(t)
+	key := "qa-key-0123456789abcdef"
+	_, err := e.svc.SaveSettings(context.Background(), SettingsInput{
+		Enabled: true, BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model", APIKey: &key,
+	})
+	require.NoError(t, err)
+	var b strings.Builder
+	for _, r := range key {
+		fmt.Fprintf(&b, `\u%04x`, r)
+	}
+	esc := b.String()
+	e.llm.push(reply{calls: []replyCall{
+		{id: "call_1", name: "search_torrents", args: `{"keyword":"` + esc + `"}`, extra: `{"google":{"thought_signature":"` + esc + `"}}`},
+		{id: "call_2", name: "list_tasks", args: `{"page":1}`, extra: `{"google":{"thought_signature":"sig-` + key + `"}}`},
+		// 不是合法 JSON，转义的 Key 在出错的地方后面
+		{id: "call_3", name: "search_torrents", args: `{"limit":oops,"keyword":"` + esc + `"}`},
+	}}, reply{text: "好的。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "搜一下")
+	fin, all := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+
+	msgs := e.messages(conv)
+	require.Equal(t, []string{"user", "assistant", "tool", "tool", "tool", "assistant"}, roles(msgs))
+	assert.True(t, msgs[2].IsError)
+	assert.Contains(t, msgs[2].Content, "参数里有 API Key")
+	assert.False(t, msgs[3].IsError, "另一个调用照常执行")
+	assert.Contains(t, msgs[4].Content, "参数里有 API Key", "不是合法 JSON 的也认得出")
+	// 参数是 JSON 里的字符串：存起来、发出去时又转义了一层，所以多还原一层再找
+	leaks := func(v string) bool {
+		inner := jsonUnescape(v)
+		return jsonMentions(v, key) || jsonMentions(inner, key) || strings.Contains(v, esc) || strings.Contains(inner, esc)
+	}
+	for _, m := range msgs {
+		for _, v := range []string{m.Content, m.Reasoning, m.ToolCalls} {
+			assert.False(t, leaks(v), "库里有 Key：%s", v)
+		}
+	}
+	buf, _ := json.Marshal(all)
+	assert.False(t, leaks(string(buf)), "事件里有 Key")
+	next, _ := json.Marshal(e.llm.requests()[1].Messages)
+	assert.False(t, leaks(string(next)), "交回模型的请求里有 Key")
+	assert.NotContains(t, string(next), "extra_content", "有 Key 的签名整个不要")
+}
+
+func TestJSONMentions(t *testing.T) {
+	key := "qa-key/0123456789"
+	for _, c := range []struct {
+		raw  string
+		want bool
+	}{
+		{`{"a":"qa-key/0123456789"}`, true},
+		{`{"a":"\u0071\u0061-key\/0123456789"}`, true},
+		{`{"a":"x\nqa-key\/0123456789\t"}`, true},
+		{`{"limit":oops,"keyword":"qa-k\u0065y\/0123456789"}`, true},
+		{`{"a":"\\u0071a-key/0123456789"}`, false}, // 转义的是反斜杠：值是字面的 \u0071a-key…，不是 Key
+		{`{"a":"qa-key","b":"/0123456789"}`, false},
+		{`not json`, false},
+	} {
+		assert.Equal(t, c.want, jsonMentions(c.raw, key), c.raw)
+	}
+	assert.False(t, jsonMentions(`{"a":"short"}`, "short"), "太短的 Key 不管")
+
+	// Key 里有 BMP 以外的字符：JSON 写成一对代理，和 encoding/json 一样合成一个字符
+	emoji := "😀abcdefg"
+	assert.True(t, jsonMentions(`{"keyword":"\ud83d\ude00abcdefg"}`, emoji))
+	assert.True(t, jsonMentions(`{"keyword":"\uD83D\uDE00abcdefg","limit":oops}`, emoji))
+	var decoded map[string]string
+	require.NoError(t, json.Unmarshal([]byte(`{"keyword":"\ud83d\ude00abcdefg"}`), &decoded))
+	assert.Equal(t, emoji, decoded["keyword"], "encoding/json 也是这样解的")
+	assert.Equal(t, "\uFFFDabcdefg", jsonUnescape(`\ud83dabcdefg`), "落单的代理是 U+FFFD")
+	require.NoError(t, json.Unmarshal([]byte("{\"keyword\":\"a\xffb\"}"), &decoded))
+	assert.Equal(t, decoded["keyword"], jsonUnescape("a\xffb"), "不是 UTF-8 的字节和 encoding/json 一样换成 U+FFFD")
 }

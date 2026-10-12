@@ -69,6 +69,8 @@ type storedCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 	Write     bool   `json:"write,omitempty"`
+	// Extra 是模型给这个调用带的 extra_content（Gemini 3 的思考签名），只回传给模型，详情与事件里没有
+	Extra json.RawMessage `json:"extra,omitempty"`
 }
 
 // assistantParam 是交给模型的一条助手消息：工具调用的参数是规范化以后的；有推理内容时按 reasoning_content 回传
@@ -79,11 +81,14 @@ func assistantParam(content, reasoning string, calls []storedCall) openai.ChatCo
 		p.Content.OfString = openai.String(content)
 	}
 	for _, c := range calls {
-		p.ToolCalls = append(p.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-				ID: c.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: c.Name, Arguments: replayArgs(c.Arguments)},
-			},
-		})
+		tc := openai.ChatCompletionMessageFunctionToolCallParam{
+			ID: c.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: c.Name, Arguments: replayArgs(c.Arguments)},
+		}
+		if len(c.Extra) > 0 {
+			// Gemini 3：调用的思考签名不带回去会回 400「Function call is missing a thought_signature」
+			tc.SetExtraFields(map[string]any{"extra_content": c.Extra})
+		}
+		p.ToolCalls = append(p.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: &tc})
 	}
 	if reasoning != "" {
 		p.SetExtraFields(map[string]any{"reasoning_content": reasoning})

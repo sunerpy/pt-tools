@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /*
  * AI 助手设置（路线图 M19）：服务商、接口地址、模型、API Key（只写不读）、代理，ChatOps 开关与几项上限。
- * 任何 OpenAI 兼容的接口都能接；选了预设会填好地址与常用模型，模型也可以手填。
+ * 任何 OpenAI 兼容的接口都能接；选了预设会填好地址与常用模型，模型也可以手填，或者「获取模型列表」从服务商读
+ * （M20：参照 Voltip，预设写明免费额度、申请 Key 的页面、隐私与要不要代理）。
  * 换了接口地址又没填新 Key 时，后端会清掉存着的 Key（Key 不会发到保存它时以外的地址），这里提前写明。
  * 画板没有这一页，沿用 qB 兼容入口页的形状：左边设置、右边说明。
  */
@@ -19,7 +20,7 @@ import PtStatusPill from "@/components/ui/PtStatusPill.vue";
 import { useDataState } from "@/composables/useDataState";
 import { ASSISTANT_PROVIDERS, providerOf } from "@/utils/assistant";
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 const ds = useDataState();
 const saved = ref<AssistantSettings | null>(null);
@@ -43,11 +44,20 @@ const testing = ref(false);
 const tested = ref<{ ok: true; res: AssistantTestResult } | { ok: false; msg: string } | null>(
   null,
 );
+const listing = ref(false);
+/** 从服务商读到的模型（换服务商时清空） */
+const fetched = ref<string[]>([]);
+/** 每发一次「获取模型列表」或换服务商加一：晚到的回应对不上就丢掉 */
+let listSeq = 0;
+const listed = ref<{ ok: true; total: number; count: number } | { ok: false; msg: string } | null>(
+  null,
+);
 
 const provider = computed(() => providerOf(form.value.provider));
 /** 存着 Key，而且没有点「清除」 */
 const hasKey = computed(() => !!saved.value?.has_api_key && !clearKey.value);
-const modelOptions = computed(() => provider.value.models);
+/** 预设的常用模型在前，读到的在后，去重 */
+const modelOptions = computed(() => [...new Set([...provider.value.models, ...fetched.value])]);
 /** 换了接口地址又没填新 Key：保存时存着的 Key 会被清掉 */
 const keyWillDrop = computed(
   () =>
@@ -85,6 +95,10 @@ async function load() {
 /** 选了预设：填地址与第一个常用模型（「其他」不动已经填的） */
 function applyProvider(key: string) {
   const p = providerOf(key);
+  listSeq++;
+  listing.value = false;
+  fetched.value = [];
+  listed.value = null;
   if (p.key === "custom") return;
   form.value.base_url = p.baseURL;
   form.value.model = p.models[0] ?? "";
@@ -129,6 +143,34 @@ async function test() {
   }
 }
 
+// 改了接口地址：读到的列表是旧地址的，丢掉；还没回来的也作废
+watch(
+  () => form.value.base_url,
+  () => {
+    listSeq++;
+    listing.value = false;
+    fetched.value = [];
+    listed.value = null;
+  },
+);
+
+async function listModels() {
+  const seq = ++listSeq;
+  listing.value = true;
+  listed.value = null;
+  try {
+    const res = await assistantApi.listModels(input());
+    if (seq !== listSeq) return;
+    fetched.value = res.models;
+    listed.value = { ok: true, total: res.total, count: res.models.length };
+  } catch (e) {
+    if (seq !== listSeq) return;
+    listed.value = { ok: false, msg: errText(e, "读不到模型列表") };
+  } finally {
+    if (seq === listSeq) listing.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -160,6 +202,33 @@ onMounted(load);
                 :label="p.label" />
             </el-select>
             <div v-if="provider.hint" class="ass-tip">{{ provider.hint }}</div>
+            <div
+              v-if="provider.free || provider.privacy || provider.needsProxy || provider.consoleURL"
+              class="ass-provider"
+              data-testid="ass-provider-info">
+              <div v-if="provider.free" class="ass-tip ass-tip--row" data-testid="ass-free">
+                <PtStatusPill tone="ok" size="sm">免费额度</PtStatusPill>
+                <span>{{ provider.free }}额度会调整，以服务商的页面为准。</span>
+              </div>
+              <div v-if="provider.privacy" class="ass-tip" data-testid="ass-privacy">
+                {{ provider.privacy }}
+              </div>
+              <div
+                v-if="provider.needsProxy"
+                class="ass-tip ass-tip--warn"
+                data-testid="ass-proxy-hint">
+                从中国大陆访问一般要代理：在下面的「代理」里填一个能访问它的地址。
+              </div>
+              <a
+                v-if="provider.consoleURL"
+                class="ass-link"
+                :href="provider.consoleURL"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="ass-console"
+                >去申请 API Key <PtIcon name="external-link" :size="12"
+              /></a>
+            </div>
           </el-form-item>
           <el-form-item label="接口地址">
             <el-input
@@ -168,15 +237,34 @@ onMounted(load);
               data-testid="ass-base-url" />
           </el-form-item>
           <el-form-item label="模型">
-            <el-select
-              v-model="form.model"
-              filterable
-              allow-create
-              default-first-option
-              placeholder="选一个，或者直接输入模型名"
-              data-testid="ass-model">
-              <el-option v-for="m in modelOptions" :key="m" :value="m" :label="m" />
-            </el-select>
+            <div class="ass-modelrow">
+              <el-select
+                v-model="form.model"
+                class="ass-modelrow__select"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="选一个，或者直接输入模型名"
+                data-testid="ass-model">
+                <el-option v-for="m in modelOptions" :key="m" :value="m" :label="m" />
+              </el-select>
+              <el-button :loading="listing" data-testid="ass-list-models" @click="listModels">
+                <PtIcon name="cloud-download" :size="14" /><span>获取模型列表</span>
+              </el-button>
+            </div>
+            <div
+              v-if="listed"
+              class="ass-tip"
+              :class="{ 'ass-tip--warn': !listed.ok }"
+              data-testid="ass-listed">
+              <template v-if="listed.ok"
+                >服务商列出 {{ listed.total }} 个模型，去掉嵌入、语音、图像这类以后
+                {{ listed.count }}
+                个放进了下拉框。按名字筛的，不保证每个都能用：要支持工具调用（function
+                calling），选好以后点「测试连接」看看。</template
+              >
+              <template v-else>{{ listed.msg }}</template>
+            </div>
           </el-form-item>
           <el-form-item label="API Key">
             <el-input
@@ -309,6 +397,46 @@ onMounted(load);
 
 .ass-tip--warn {
   color: var(--pt-warn);
+}
+
+.ass-tip--row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.ass-provider {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ass-link {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  width: fit-content;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--pt-p);
+  text-decoration: none;
+}
+
+.ass-link:hover {
+  text-decoration: underline;
+}
+
+.ass-modelrow {
+  display: flex;
+  flex-basis: 100%;
+  gap: 8px;
+  align-items: center;
+}
+
+.ass-modelrow__select {
+  flex: 1;
+  min-width: 0;
 }
 
 .ass-keyrow {

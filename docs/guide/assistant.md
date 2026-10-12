@@ -8,28 +8,45 @@ pt-tools 内置一个 AI 助手。接上一个大模型以后，可以在网页�
 
 打开「系统 → AI 助手设置」：
 
-1. 选服务商。选了预设会填好接口地址与常用模型，模型也可以直接输入。
+1. 选服务商。选了预设会填好接口地址与常用模型；服务商下面写着有没有免费额度、要不要代理，「去申请 API Key」打开服务商申请 Key 的页面。
 2. 填 API Key。
-3. 点「测试连接」：pt-tools 发一条很短的消息，显示模型的回答与用时。
-4. 打开「启用 AI 助手」，保存。
+3. 选模型：点「获取模型列表」，pt-tools 用填好的地址与 Key 读服务商的模型列表，放进下拉框；也可以直接输入模型名。要选支持工具调用（function calling）的模型。
+4. 点「测试连接」：pt-tools 发一条很短的消息，显示模型的回答与用时。
+5. 打开「启用 AI 助手」，保存。
 
-| 服务商                 | 接口地址                                            | 模型                                           |
-| ---------------------- | --------------------------------------------------- | ---------------------------------------------- |
-| DeepSeek               | `https://api.deepseek.com`                          | `deepseek-flash`、`deepseek-v4-pro`            |
-| 通义千问（阿里云百炼） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.7-plus`、`qwen3.8-flash`、`qwen3.8-max` |
-| Kimi（月之暗面）       | `https://api.moonshot.cn/v1`                        | `kimi-k2.6`、`kimi-k3`                         |
-| 硅基流动               | `https://api.siliconflow.cn/v1`                     | 按控制台里的模型名填                           |
-| OpenRouter             | `https://openrouter.ai/api/v1`                      | 按控制台里的模型名填                           |
-| Ollama（自己部署）     | `http://<Ollama 所在主机>:11434/v1`                 | `ollama list` 里的模型名，不要 API Key         |
-| OpenAI                 | `https://api.openai.com/v1`                         | `gpt-6.1-sol` 等                               |
+| 服务商                 | 接口地址                                                  | 模型                                                                  |
+| ---------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
+| DeepSeek               | `https://api.deepseek.com`                                | `deepseek-flash`、`deepseek-v4-pro`                                   |
+| 通义千问（阿里云百炼） | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`、`qwen3.8-flash`、`qwen3.8-max`                        |
+| Kimi（月之暗面）       | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`、`kimi-k3`                                                |
+| 硅基流动               | `https://api.siliconflow.cn/v1`                           | 点「获取模型列表」选                                                  |
+| Google AI Studio       | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.5-flash-lite`、`gemini-flash-latest`、`gemini-3.8-flash` 等 |
+| Groq                   | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`、`openai/gpt-oss-120b`、`openai/gpt-oss-20b`       |
+| OpenRouter             | `https://openrouter.ai/api/v1`                            | 点「获取模型列表」选                                                  |
+| Ollama（自己部署）     | `http://<Ollama 所在主机>:11434/v1`                       | `ollama list` 里的模型名，不要 API Key                                |
+| OpenAI                 | `https://api.openai.com/v1`                               | `gpt-6.1-sol` 等                                                      |
 
 表里的模型名是 2026 年 10 月各家文档上的，以服务商控制台为准。
 
 - 接口地址填到 `/chat/completions` 之前，不带查询参数。
 - API Key 加密保存，只能改、不能读出来。换了接口地址又没填新 Key 时，保存会清掉存着的 Key：Key 只发给保存它时的那个地址。
-- 代理留空时用环境变量 `HTTP_PROXY`、`HTTPS_PROXY`；也可以单独填 `http://`、`https://` 或 `socks5://` 代理。
+- 代理留空时用环境变量 `HTTP_PROXY`、`HTTPS_PROXY`；也可以单独填 `http://`、`https://` 或 `socks5://` 代理。获取模型列表、测试连接与对话都走这个代理。从中国大陆访问 Google AI Studio、Groq、OpenAI 一般要代理：Google AI Studio 对中国大陆与香港的地址回 `User location is not supported`。
 - pt-tools 在 Docker 里、Ollama 在宿主机上时，地址要写宿主机的地址，不是 `127.0.0.1`。
 - DeepSeek 等模型的思考模式会返回推理内容。pt-tools 把它存下来，只在后面的请求里回传给模型（带工具的请求要求回传），不在任何入口显示。
+
+### 用免费额度
+
+自己申请一个 Key，就能用这些服务商每天的免费额度。额度会调整，以服务商的页面为准：
+
+| 服务商                 | 免费额度（2026 年 10 月）                                                    | 要知道的                                                        |
+| ---------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Google AI Studio       | Gemini 的 Flash 等模型有免费额度，每分钟、每天限次数；有的模型每分钟只有几次 | 免费层的对话内容可能被 Google 用来改进产品；要代理              |
+| Groq                   | 表里的三个模型免费，每个每天约 1000 次请求、20 万 token，每分钟 8000 token   | 每分钟的 token 少，要调好几次工具的问题会多等一会儿；一般要代理 |
+| 通义千问（阿里云百炼） | 新开通的账号每个模型各有一份免费额度，用完开始计费                           | 在百炼控制台给模型打开「免费额度用完即停」就不会多花钱          |
+| 硅基流动               | 模型广场里标着「免费」的模型可以免费用，有限速                               | 选支持工具调用的模型                                            |
+| OpenRouter             | 名字带 `:free` 的模型免费，每天有次数上限                                    | 选支持工具调用的模型                                            |
+
+小模型调工具常常不可靠。回答总是不调工具、编工具名或者参数写错时，换一个大一点的模型。
 
 设置里还有三个上限：
 
@@ -98,7 +115,15 @@ pt-tools 内置一个 AI 助手。接上一个大模型以后，可以在网页�
 
 **测试连接回 404**：接口地址或模型名不对。OpenAI 的地址要带 `/v1`。
 
-**测试连接回 429**：请求太多或者额度用完了，到服务商控制台看。
+**测试连接回 429**：请求太快或者免费额度用完了。服务商要求等 20 秒以内时，pt-tools 等一等再试，最多两次；要等得更久就不再试，直接提示大概要等多久。到服务商控制台看额度，或者换个模型、服务商。
+
+**测试连接回 400，说 User location is not supported**：这个服务商不对你所在的地区开放（Google AI Studio 不对中国大陆与香港开放）。在「代理」里填一个能访问它的代理。
+
+**回 503，说 This model is currently experiencing high demand**：服务商的这个模型这会儿太忙（Google AI Studio 的新模型常见），过一会儿再试，或者换一个模型，例如 `gemini-flash-latest`。
+
+**回 404，说模型对新用户不再开放**：服务商列表里还有这个模型，但新申请的 Key 用不了（例如 `gemini-2.5-flash`），换一个更新的模型。
+
+**获取模型列表是空的，或者没有想要的模型**：列表按名字去掉了嵌入、语音、图像这类模型，留下的也不保证都支持工具调用，选好以后点「测试连接」看看。服务商没列出来的模型可以直接输入模型名。
 
 **助手说「没有这个工具」**：模型自己编了一个工具名，换个说法再问，或者换一个工具调用更可靠的模型。
 

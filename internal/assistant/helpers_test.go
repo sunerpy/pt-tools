@@ -59,14 +59,17 @@ type reply struct {
 	text      string
 	reasoning string
 	calls     []replyCall
-	// status 不为 0 时回这个状态码，错误信息是 body
+	// status 不为 0 时回这个状态码，错误信息是 body，回应头加上 header；raw 不为空时原样回它
 	status int
 	body   string
+	header map[string]string
+	raw    string
 	// block 不为 nil 时先发一段文字，再等它关上或者请求被取消
 	block chan struct{}
 }
 
-type replyCall struct{ id, name, args string }
+// replyCall 是一个工具调用；extra 不为空时作为 extra_content 放进这个调用的第一个分片（Gemini 的思考签名就在这里）。
+type replyCall struct{ id, name, args, extra string }
 
 // llmRequest 是假模型服务收到的一个请求。
 type llmRequest struct {
@@ -104,6 +107,11 @@ type fakeLLM struct {
 	started chan struct{}
 	// strictArgs 为真时像部分兼容网关那样校验历史里工具调用的参数：不是 JSON 对象就回 400
 	strictArgs bool
+	// models 是 GET /models 回的模型编号；modelAuths 是这个接口收到的 Authorization
+	models     []string
+	modelAuths []string
+	// modelStatus 不为 0 时 GET /models 回这个状态码
+	modelStatus int
 }
 
 func newFakeLLM(t *testing.T) *fakeLLM {
@@ -159,6 +167,10 @@ func chunkJSON(delta map[string]any, finish string) string {
 }
 
 func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+		f.serveModels(w, r)
+		return
+	}
 	if !strings.HasSuffix(r.URL.Path, "/chat/completions") {
 		http.NotFound(w, r)
 		return
@@ -186,8 +198,15 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rep.status != 0 {
+		for k, v := range rep.header {
+			w.Header().Set(k, v)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(rep.status)
+		if rep.raw != "" {
+			_, _ = w.Write([]byte(rep.raw))
+			return
+		}
 		buf, _ := json.Marshal(map[string]any{"error": map[string]any{"message": rep.body, "type": "invalid_request_error"}})
 		_, _ = w.Write(buf)
 		return
@@ -223,9 +242,11 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for i, c := range rep.calls {
-		send(chunkJSON(map[string]any{"tool_calls": []any{map[string]any{
-			"index": i, "id": c.id, "type": "function", "function": map[string]any{"name": c.name, "arguments": ""},
-		}}}, ""))
+		head := map[string]any{"index": i, "id": c.id, "type": "function", "function": map[string]any{"name": c.name, "arguments": ""}}
+		if c.extra != "" {
+			head["extra_content"] = json.RawMessage(c.extra)
+		}
+		send(chunkJSON(map[string]any{"tool_calls": []any{head}}, ""))
 		half := len(c.args) / 2
 		for _, part := range []string{c.args[:half], c.args[half:]} {
 			send(chunkJSON(map[string]any{"tool_calls": []any{map[string]any{"index": i, "function": map[string]any{"arguments": part}}}}, ""))
@@ -237,6 +258,25 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	send(chunkJSON(map[string]any{}, finish))
 	send("[DONE]")
+}
+
+func (f *fakeLLM) serveModels(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.modelAuths = append(f.modelAuths, r.Header.Get("Authorization"))
+	ids, status := append([]string(nil), f.models...), f.modelStatus
+	f.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	if status != 0 {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided: sk-test-key-0123456789abcdef","type":"invalid_request_error"}}`))
+		return
+	}
+	data := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		data = append(data, map[string]any{"id": id, "object": "model", "created": 1, "owned_by": "test"})
+	}
+	buf, _ := json.Marshal(map[string]any{"object": "list", "data": data})
+	_, _ = w.Write(buf)
 }
 
 // fakeBackend 是假的 App API：记下工具发来的请求，按路径回罐头 JSON。

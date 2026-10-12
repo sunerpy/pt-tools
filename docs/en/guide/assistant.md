@@ -8,28 +8,45 @@ The assistant runs inside pt-tools. It calls the same tools as [MCP](mcp.md), ex
 
 Open **System → AI assistant settings**:
 
-1. Pick a provider. A preset fills in the endpoint and common models; you can also type a model name.
+1. Pick a provider. A preset fills in the endpoint and common models. Below the provider the page says whether it has a free tier and whether it needs a proxy, and **Get an API key** opens the provider's key page.
 2. Enter the API key.
-3. Click **Test connection**: pt-tools sends a very short message and shows the model's reply and the latency.
-4. Turn on **Enable AI assistant** and save.
+3. Pick a model: **Fetch models** reads the provider's model list with the endpoint and key you entered and puts it in the dropdown; you can also type a model name. Pick a model that supports tool calling (function calling).
+4. Click **Test connection**: pt-tools sends a very short message and shows the model's reply and the latency.
+5. Turn on **Enable AI assistant** and save.
 
-| Provider                    | Endpoint                                            | Models                                         |
-| --------------------------- | --------------------------------------------------- | ---------------------------------------------- |
-| DeepSeek                    | `https://api.deepseek.com`                          | `deepseek-flash`, `deepseek-v4-pro`            |
-| Qwen (Alibaba Model Studio) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max` |
-| Kimi (Moonshot AI)          | `https://api.moonshot.cn/v1`                        | `kimi-k2.6`, `kimi-k3`                         |
-| SiliconFlow                 | `https://api.siliconflow.cn/v1`                     | The model name from its console                |
-| OpenRouter                  | `https://openrouter.ai/api/v1`                      | The model name from its console                |
-| Ollama (self-hosted)        | `http://<Ollama host>:11434/v1`                     | A name from `ollama list`; no API key          |
-| OpenAI                      | `https://api.openai.com/v1`                         | `gpt-6.1-sol` and others                       |
+| Provider                    | Endpoint                                                  | Models                                                                        |
+| --------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| DeepSeek                    | `https://api.deepseek.com`                                | `deepseek-flash`, `deepseek-v4-pro`                                           |
+| Qwen (Alibaba Model Studio) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`                                |
+| Kimi (Moonshot AI)          | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`, `kimi-k3`                                                        |
+| SiliconFlow                 | `https://api.siliconflow.cn/v1`                           | Pick one with **Fetch models**                                                |
+| Google AI Studio            | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.5-flash-lite`, `gemini-flash-latest`, `gemini-3.8-flash` and others |
+| Groq                        | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`               |
+| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Pick one with **Fetch models**                                                |
+| Ollama (self-hosted)        | `http://<Ollama host>:11434/v1`                           | A name from `ollama list`; no API key                                         |
+| OpenAI                      | `https://api.openai.com/v1`                               | `gpt-6.1-sol` and others                                                      |
 
 The model names are the ones in each provider's documentation in October 2026; the provider's console is authoritative.
 
 - The endpoint is everything before `/chat/completions`, without query parameters.
 - The API key is stored encrypted and can be replaced but never read back. If you change the endpoint without entering a new key, saving clears the stored key: a key is only ever sent to the endpoint it was saved with.
-- With the proxy left empty pt-tools uses the `HTTP_PROXY` and `HTTPS_PROXY` environment variables; you can also set an `http://`, `https://` or `socks5://` proxy.
+- With the proxy left empty pt-tools uses the `HTTP_PROXY` and `HTTPS_PROXY` environment variables; you can also set an `http://`, `https://` or `socks5://` proxy. Fetching models, testing the connection and chatting all go through it. From mainland China, Google AI Studio, Groq and OpenAI usually need a proxy: Google AI Studio answers `User location is not supported` to addresses in mainland China and Hong Kong.
 - When pt-tools runs in Docker and Ollama on the host, use the host's address, not `127.0.0.1`.
 - Thinking modes (DeepSeek and others) return reasoning content. pt-tools stores it and sends it back to the model in later requests (requests with tools require that), and never shows it in any entry point.
+
+### Using free tiers
+
+With a key of your own you can use these providers' daily free tiers. The tiers change; the provider's pages are authoritative:
+
+| Provider                    | Free tier (October 2026)                                                                                                     | Good to know                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Google AI Studio            | Gemini Flash and other models are free within per-minute and per-day request limits; some allow only a few requests a minute | Content on the free tier may be used by Google to improve its products; needs a proxy               |
+| Groq                        | The three models in the table are free, each about 1,000 requests and 200K tokens a day and 8,000 tokens a minute            | Few tokens per minute, so questions that need several tool calls wait longer; usually needs a proxy |
+| Qwen (Alibaba Model Studio) | A new account gets a free quota for each model; usage beyond it is billed                                                    | Turn on the free-quota-only switch for the model in the Model Studio console to avoid charges       |
+| SiliconFlow                 | Models marked free in its model square are free, with rate limits                                                            | Pick a model that supports tool calling                                                             |
+| OpenRouter                  | Models whose name ends in `:free` are free, with a daily request limit                                                       | Pick a model that supports tool calling                                                             |
+
+Small models are often unreliable at tool calling. If answers never call tools, invent tool names or get the arguments wrong, switch to a larger model.
 
 The settings also have three limits:
 
@@ -98,7 +115,15 @@ With **Notification channels (ChatOps)** turned on in **System → AI assistant 
 
 **Test connection returns 404**: the endpoint or the model name is wrong. OpenAI's endpoint needs `/v1`.
 
-**Test connection returns 429**: too many requests or no credit left; check the provider's console.
+**Test connection returns 429**: requests are too fast or the free tier is used up. When the provider asks to wait 20 seconds or less, pt-tools waits and tries again, at most twice; when it asks for longer, pt-tools does not retry and says roughly how long to wait. Check your quota in the provider's console, or switch to another model or provider.
+
+**Test connection returns 400 saying User location is not supported**: the provider does not serve your region (Google AI Studio does not serve mainland China or Hong Kong). Set a proxy that can reach it.
+
+**It returns 503 saying This model is currently experiencing high demand**: that model is too busy right now (common for new Google AI Studio models). Try again later, or switch to another model such as `gemini-flash-latest`.
+
+**It returns 404 saying the model is no longer available to new users**: the provider still lists the model, but new keys cannot use it (for example `gemini-2.5-flash`). Pick a newer model.
+
+**Fetch models returns nothing, or not the model you want**: the list leaves out embedding, speech, image and similar models by name, and the models left are not all guaranteed to support tool calling: pick one and click **Test connection**. You can type the name of a model the provider does not list.
 
 **The assistant says a tool does not exist**: the model made up a tool name. Rephrase, or use a model that is better at tool calling.
 

@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/openai/openai-go/v3"
@@ -240,13 +243,18 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 		stored := make([]storedCall, 0, len(out.calls))
 		writes := make([]bool, 0, len(out.calls))
 		for _, c := range out.calls {
-			pc := s.normalize(scrub(c.id), scrub(c.name), scrub(c.args))
+			args := scrub(c.args)
+			pc := s.normalize(scrub(c.id), scrub(c.name), args)
+			if jsonMentions(args, set.llm.APIKey) {
+				// 参数里还有用 \u 转义写的 Key（原文替换认不出来）：不执行，参数也不留
+				pc.args, pc.display, pc.invalid = map[string]any{}, "{}", "参数里有 API Key，没有执行"
+			}
 			write, known := tb.known(pc.name)
 			if !known && pc.invalid == "" {
 				pc.invalid = "没有这个工具：" + pc.name
 			}
 			calls, writes = append(calls, pc), append(writes, write)
-			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write})
+			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write, Extra: rawExtra(c.extra, set.llm.APIKey)})
 		}
 		content, reasoning := redact.Text(out.content), redact.Credentials(out.reasoning)
 		am := models.AssistantMessage{Role: models.AssistantRoleAssistant, Content: content, Reasoning: reasoning}
@@ -303,6 +311,56 @@ func (s *Service) runCall(r *run, tb *toolbox, set effective, pc pendingCall, wr
 func (s *Service) toolStarted(r *run, pc pendingCall, write bool) {
 	v := ToolCallView{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write}
 	s.hub.publish(r.conv, Event{Type: EventToolStarted, RunID: r.id, Tool: &v, At: s.now()})
+}
+
+// rawExtra 是工具调用的 extra_content，原样留着回传（思考签名不透明，改不得）：不是合法 JSON 的不要；里面有 Key 的
+// （原文或者用转义写的）整个不要，免得 Key 进库。
+func rawExtra(s, key string) json.RawMessage {
+	if s == "" || !json.Valid([]byte(s)) || jsonMentions(s, key) {
+		return nil
+	}
+	return json.RawMessage(s)
+}
+
+// jsonMentions 报告 JSON 文本里有没有 Key，原文或者用转义写的（\u0071、\/ 这类，按原文替换认不出来）：整段的转义都还原了再找，
+// 不是合法 JSON（出错的地方后面还有）也找得到。和 keyScrubber 一样，太短的 Key 不管。
+func jsonMentions(raw, key string) bool {
+	if len(key) < minKeyLen {
+		return false
+	}
+	return strings.Contains(raw, key) || strings.Contains(jsonUnescape(raw), key)
+}
+
+// jsonEscape 是 JSON 字符串里的一个转义：一对代理（\uD83D\uDE00）、\uXXXX，或者反斜杠加一个字符
+var jsonEscape = regexp.MustCompile(`\\(u[dD][89abAB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|.)`)
+
+// jsonUnescape 把文本里的 JSON 转义都还原，和 encoding/json 一样（从左到右，\\ 是一个反斜杠；一对代理合成一个字符，落单的代理
+// 与不是 UTF-8 的字节都是 U+FFFD），不管它在不在字符串里、JSON 合不合法。
+func jsonUnescape(s string) string {
+	return jsonEscape.ReplaceAllStringFunc(string([]rune(s)), func(m string) string {
+		switch m[1] {
+		case 'u':
+			if len(m) == len(`\uD83D\uDE00`) {
+				hi, _ := strconv.ParseUint(m[2:6], 16, 32)
+				lo, _ := strconv.ParseUint(m[8:], 16, 32)
+				return string(utf16.DecodeRune(rune(hi), rune(lo)))
+			}
+			n, _ := strconv.ParseUint(m[2:], 16, 32)
+			return string(rune(n))
+		case 'b':
+			return "\b"
+		case 'f':
+			return "\f"
+		case 'n':
+			return "\n"
+		case 'r':
+			return "\r"
+		case 't':
+			return "\t"
+		default:
+			return m[1:]
+		}
+	})
 }
 
 // redactedStream 让流式的文字增量也过脱敏（redact.Text，和落库的回答同一个函数）：攒着全文，每次只发脱敏以后新多出来的部分；末尾还可能变长的一段
