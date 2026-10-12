@@ -167,3 +167,24 @@ func TestArrayWrappedErrorsAreReadable(t *testing.T) {
 	assert.Contains(t, te.Message, "high demand")
 	assert.Contains(t, te.Message, "过一会儿再试")
 }
+
+// Google 的免费层额度用完时回 429，不带 Retry-After，等多久写在错误里（RetryInfo 的 retryDelay，或者「Please retry in 48.4s」）：
+// 照样按它决定重不重试，并说要等多久。
+func TestGoogleQuotaErrorsCarryTheWait(t *testing.T) {
+	e := newEnv(t)
+	quota := reply{status: http.StatusTooManyRequests, raw: `[{"error":{"code":429,"message":"You exceeded your current quota.\nPlease retry in 48.434155456s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"48s"}]}}]`}
+	e.llm.push(quota)
+	_, err := e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	var te *TestError
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "exceeded your current quota")
+	assert.Contains(t, te.Message, "约 48 秒后再试")
+	assert.Len(t, e.llm.requests(), 1, "要等 48 秒：不在这里干等")
+
+	// 只有正文里写着要等多久
+	quota.raw = `{"error":{"code":429,"message":"Quota exceeded. Please retry in 30.5s.","status":"RESOURCE_EXHAUSTED"}}`
+	e.llm.push(quota)
+	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "约 31 秒后再试")
+}

@@ -992,3 +992,42 @@ func TestInvalidToolArgumentsReplayedAsEmptyObject(t *testing.T) {
 	fin, _ = e.waitRun(admin, conv, res.RunID)
 	require.Equal(t, RunDone, fin.Status, fin.Error)
 }
+
+// Gemini 3 经 OpenAI 兼容接口调工具时，tool_calls 里带 extra_content.google.thought_signature，之后的请求要原样带回去，
+// 否则回 400「Function call is missing a thought_signature」（2026-10-12 用真实 Key 实测）。签名不出现在详情与事件里。
+func TestThoughtSignatureRoundTrips(t *testing.T) {
+	e := newEnv(t)
+	const sig = "c2lnbmF0dXJlLWZyb20tZ2VtaW5pLTEyMzQ1Njc4OTA="
+	first := reply{calls: []replyCall{{id: "call_1", name: "list_tasks", args: `{"page":1}`, extra: `{"google":{"thought_signature":"` + sig + `"}}`}}}
+	e.llm.push(first, reply{text: "找到 1 个种子。"}, reply{text: "不客气。"})
+	conv := e.conversation(admin)
+	res := e.send(admin, conv, "最近抓了什么")
+	fin, all := e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	signed := func(req llmRequest) bool {
+		for _, m := range req.Messages {
+			calls, _ := m["tool_calls"].([]any)
+			for _, c := range calls {
+				extra, _ := c.(map[string]any)["extra_content"].(map[string]any)
+				google, _ := extra["google"].(map[string]any)
+				if google["thought_signature"] == sig {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	assert.True(t, signed(e.llm.requests()[1]), "这次运行里的下一次请求带回签名")
+
+	res = e.send(admin, conv, "谢谢")
+	fin, _ = e.waitRun(admin, conv, res.RunID)
+	require.Equal(t, RunDone, fin.Status, fin.Error)
+	assert.True(t, signed(e.llm.requests()[2]), "同一个会话接着问：历史里的调用照样带着签名")
+
+	d, err := e.svc.Conversation(context.Background(), admin, conv)
+	require.NoError(t, err)
+	buf, _ := json.Marshal(d)
+	assert.NotContains(t, string(buf), sig, "详情里没有签名")
+	buf, _ = json.Marshal(all)
+	assert.NotContains(t, string(buf), sig, "事件里没有签名")
+}

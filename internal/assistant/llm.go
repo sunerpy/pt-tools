@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +97,7 @@ func (s *Service) clientOptions(c llmConfig) ([]option.RequestOption, error) {
 	opts := []option.RequestOption{
 		option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc),
 		option.WithMaxRetries(2), option.WithMaxRetryDelay(maxRetryWait),
+		option.WithMiddleware(normalizeErrorResponse),
 	}
 	if c.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(c.APIKey))
@@ -152,6 +155,68 @@ func describeError(err error, key string) string {
 		msg = strings.ReplaceAll(msg, key, "***")
 	}
 	return redact.Secrets(msg)
+}
+
+// normalizeErrorResponse 让 SDK 认得出 Google AI Studio 的错误回应：错误体包在数组里（[{"error":{…}}]）时取第一个；
+// 429 不带 Retry-After、但写了要等多久（RetryInfo 的 retryDelay，或者正文里的「retry in 48.4s」）时补上 Retry-After，
+// SDK 按它决定重不重试（超过 maxRetryWait 就不重试），describeError 按它说要等多久。成功的回应原样放过（不读流式的正文）。
+func normalizeErrorResponse(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+	res, err := next(req)
+	if err != nil || res == nil || res.StatusCode < 400 || res.Body == nil {
+		return res, err
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	_ = res.Body.Close()
+	if rerr == nil {
+		if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '[' {
+			var items []json.RawMessage
+			if json.Unmarshal(t, &items) == nil && len(items) > 0 {
+				raw = items[0]
+			}
+		}
+		if res.StatusCode == http.StatusTooManyRequests && res.Header.Get("Retry-After") == "" && res.Header.Get("Retry-After-Ms") == "" {
+			if secs := retryDelayIn(raw); secs > 0 {
+				res.Header.Set("Retry-After", strconv.Itoa(secs))
+			}
+		}
+	}
+	res.Body = io.NopCloser(bytes.NewReader(raw))
+	res.ContentLength = int64(len(raw))
+	return res, nil
+}
+
+// retryInText 是错误正文里写的要等多久（Gemini：Please retry in 48.434155456s.）
+var retryInText = regexp.MustCompile(`(?i)retry in ([0-9]+(?:\.[0-9]+)?)\s*s`)
+
+// retryDelayIn 是错误体里写的要等多久（秒，向上取整）：Google 的 RetryInfo（"retryDelay":"48s"），或者正文里的 retry in。
+func retryDelayIn(raw []byte) int {
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+			Details []struct {
+				RetryDelay string `json:"retryDelay"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return 0
+	}
+	secs := func(v string) int {
+		f, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(v), "s"), 64)
+		if err != nil || f <= 0 {
+			return 0
+		}
+		return int(math.Ceil(f))
+	}
+	for _, d := range body.Error.Details {
+		if n := secs(d.RetryDelay); n > 0 {
+			return n
+		}
+	}
+	if m := retryInText.FindStringSubmatch(body.Error.Message); m != nil {
+		return secs(m[1])
+	}
+	return 0
 }
 
 // bodyMessage 从错误回应体里读原因：SDK 只认 {"error":{"message"}}，Google AI Studio 有的错误包在数组里
@@ -230,7 +295,12 @@ type completion struct {
 
 type rawCall struct {
 	id, name, args string
+	// extra 是这个调用带的 extra_content（原样 JSON）：Gemini 3 的思考签名在这里，之后的请求要原样带回去
+	extra string
 }
+
+// maxExtraBytes 是一个工具调用的 extra_content 最多存多大
+const maxExtraBytes = 16 << 10
 
 // accumulator 拼流式回答。不用 openai.ChatCompletionAccumulator：它碰到各片 id 不一致、工具调用没有 index 的
 // OpenAI 兼容服务会丢内容。
@@ -265,6 +335,11 @@ func (a *accumulator) add(chunk openai.ChatCompletionChunk) (delta string) {
 		c := a.calls[pos]
 		if c.id == "" {
 			c.id = tc.ID
+		}
+		if f, ok := tc.JSON.ExtraFields["extra_content"]; ok && c.extra == "" {
+			if raw := strings.TrimSpace(f.Raw()); raw != "" && raw != "null" && len(raw) <= maxExtraBytes && json.Valid([]byte(raw)) {
+				c.extra = raw
+			}
 		}
 		if n := tc.Function.Name; n != "" && n != c.name {
 			c.name += n

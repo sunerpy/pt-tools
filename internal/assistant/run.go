@@ -246,7 +246,7 @@ func (s *Service) drive(r *run, set effective) (string, string) {
 				pc.invalid = "没有这个工具：" + pc.name
 			}
 			calls, writes = append(calls, pc), append(writes, write)
-			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write})
+			stored = append(stored, storedCall{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write, Extra: rawExtra(scrub(c.extra))})
 		}
 		content, reasoning := redact.Text(out.content), redact.Credentials(out.reasoning)
 		am := models.AssistantMessage{Role: models.AssistantRoleAssistant, Content: content, Reasoning: reasoning}
@@ -303,6 +303,14 @@ func (s *Service) runCall(r *run, tb *toolbox, set effective, pc pendingCall, wr
 func (s *Service) toolStarted(r *run, pc pendingCall, write bool) {
 	v := ToolCallView{ID: pc.id, Name: pc.name, Arguments: pc.display, Write: write}
 	s.hub.publish(r.conv, Event{Type: EventToolStarted, RunID: r.id, Tool: &v, At: s.now()})
+}
+
+// rawExtra 是工具调用的 extra_content（不是合法 JSON 就不要）。
+func rawExtra(s string) json.RawMessage {
+	if s == "" || !json.Valid([]byte(s)) {
+		return nil
+	}
+	return json.RawMessage(s)
 }
 
 // redactedStream 让流式的文字增量也过脱敏（redact.Text，和落库的回答同一个函数）：攒着全文，每次只发脱敏以后新多出来的部分；末尾还可能变长的一段

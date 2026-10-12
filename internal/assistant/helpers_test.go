@@ -68,7 +68,8 @@ type reply struct {
 	block chan struct{}
 }
 
-type replyCall struct{ id, name, args string }
+// replyCall 是一个工具调用；extra 不为空时作为 extra_content 放进这个调用的第一个分片（Gemini 的思考签名就在这里）。
+type replyCall struct{ id, name, args, extra string }
 
 // llmRequest 是假模型服务收到的一个请求。
 type llmRequest struct {
@@ -241,9 +242,11 @@ func (f *fakeLLM) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for i, c := range rep.calls {
-		send(chunkJSON(map[string]any{"tool_calls": []any{map[string]any{
-			"index": i, "id": c.id, "type": "function", "function": map[string]any{"name": c.name, "arguments": ""},
-		}}}, ""))
+		head := map[string]any{"index": i, "id": c.id, "type": "function", "function": map[string]any{"name": c.name, "arguments": ""}}
+		if c.extra != "" {
+			head["extra_content"] = json.RawMessage(c.extra)
+		}
+		send(chunkJSON(map[string]any{"tool_calls": []any{head}}, ""))
 		half := len(c.args) / 2
 		for _, part := range []string{c.args[:half], c.args[half:]} {
 			send(chunkJSON(map[string]any{"tool_calls": []any{map[string]any{"index": i, "function": map[string]any{"arguments": part}}}}, ""))
