@@ -1,7 +1,7 @@
 name: pt_tools_app
 description: "pt-tools 的手机 App：扫码配对以后经直连或 relay 远程查看、管理 pt-tools。"
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.0-rc.1+1
 
 environment:
   sdk: ^3.13.5
