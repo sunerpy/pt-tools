@@ -700,7 +700,7 @@ PR 改到这个 workflow 或 Android 工程时只跑验证：用现生成的密�
 `mobile-release` 的部署分支同样限定为 `main` 与 `v1.0.0-rc`。生成一次 keystore 并妥善备份（丢了以后新版本装不上旧版本之上），再用 `apksigner verify --print-certs` 读出证书的 SHA-256 填进 `ANDROID_CERT_SHA256`。别名别用项目名这类日志里常见的词：secret 的值在 Actions 日志里会被换成 `***`。
 
 ```bash
-keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias pttools -keyalg RSA -keysize 4096 -validity 10000
+keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias ptt-app-signing -keyalg RSA -keysize 4096 -validity 10000
 ```
 
 本机构建签名的 release APK：设好 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 以后在 `apps/mobile` 里运行 `flutter build apk --release --split-per-abi`；没有设时 release 构建用 debug 签名，只能自己装着试。
