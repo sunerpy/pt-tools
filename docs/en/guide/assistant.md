@@ -14,17 +14,17 @@ Open **System → AI assistant settings**:
 4. Click **Test connection**: pt-tools sends a very short message and shows the model's reply and the latency.
 5. Turn on **Enable AI assistant** and save.
 
-| Provider                    | Endpoint                                                  | Models                                                                   |
-| --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| DeepSeek                    | `https://api.deepseek.com`                                | `deepseek-flash`, `deepseek-v4-pro`                                      |
-| Qwen (Alibaba Model Studio) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`                           |
-| Kimi (Moonshot AI)          | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`, `kimi-k3`                                                   |
-| SiliconFlow                 | `https://api.siliconflow.cn/v1`                           | Pick one with **Fetch models**                                           |
-| Google AI Studio            | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-flash-latest`, `gemini-3.8-flash`, `gemini-3.5-flash` and others |
-| Groq                        | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`          |
-| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Pick one with **Fetch models**                                           |
-| Ollama (self-hosted)        | `http://<Ollama host>:11434/v1`                           | A name from `ollama list`; no API key                                    |
-| OpenAI                      | `https://api.openai.com/v1`                               | `gpt-6.1-sol` and others                                                 |
+| Provider                    | Endpoint                                                  | Models                                                                        |
+| --------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| DeepSeek                    | `https://api.deepseek.com`                                | `deepseek-flash`, `deepseek-v4-pro`                                           |
+| Qwen (Alibaba Model Studio) | `https://dashscope.aliyuncs.com/compatible-mode/v1`       | `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`                                |
+| Kimi (Moonshot AI)          | `https://api.moonshot.cn/v1`                              | `kimi-k2.6`, `kimi-k3`                                                        |
+| SiliconFlow                 | `https://api.siliconflow.cn/v1`                           | Pick one with **Fetch models**                                                |
+| Google AI Studio            | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.5-flash-lite`, `gemini-flash-latest`, `gemini-3.8-flash` and others |
+| Groq                        | `https://api.groq.com/openai/v1`                          | `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`               |
+| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Pick one with **Fetch models**                                                |
+| Ollama (self-hosted)        | `http://<Ollama host>:11434/v1`                           | A name from `ollama list`; no API key                                         |
+| OpenAI                      | `https://api.openai.com/v1`                               | `gpt-6.1-sol` and others                                                      |
 
 The model names are the ones in each provider's documentation in October 2026; the provider's console is authoritative.
 
@@ -38,13 +38,13 @@ The model names are the ones in each provider's documentation in October 2026; t
 
 With a key of your own you can use these providers' daily free tiers. The tiers change; the provider's pages are authoritative:
 
-| Provider                    | Free tier (October 2026)                                                                                          | Good to know                                                                                        |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Google AI Studio            | Gemini Flash and other models are free within per-minute and per-day request limits                               | Content on the free tier may be used by Google to improve its products; needs a proxy               |
-| Groq                        | The three models in the table are free, each about 1,000 requests and 200K tokens a day and 8,000 tokens a minute | Few tokens per minute, so questions that need several tool calls wait longer; usually needs a proxy |
-| Qwen (Alibaba Model Studio) | A new account gets a free quota for each model; usage beyond it is billed                                         | Turn on the free-quota-only switch for the model in the Model Studio console to avoid charges       |
-| SiliconFlow                 | Models marked free in its model square are free, with rate limits                                                 | Pick a model that supports tool calling                                                             |
-| OpenRouter                  | Models whose name ends in `:free` are free, with a daily request limit                                            | Pick a model that supports tool calling                                                             |
+| Provider                    | Free tier (October 2026)                                                                                                     | Good to know                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Google AI Studio            | Gemini Flash and other models are free within per-minute and per-day request limits; some allow only a few requests a minute | Content on the free tier may be used by Google to improve its products; needs a proxy               |
+| Groq                        | The three models in the table are free, each about 1,000 requests and 200K tokens a day and 8,000 tokens a minute            | Few tokens per minute, so questions that need several tool calls wait longer; usually needs a proxy |
+| Qwen (Alibaba Model Studio) | A new account gets a free quota for each model; usage beyond it is billed                                                    | Turn on the free-quota-only switch for the model in the Model Studio console to avoid charges       |
+| SiliconFlow                 | Models marked free in its model square are free, with rate limits                                                            | Pick a model that supports tool calling                                                             |
+| OpenRouter                  | Models whose name ends in `:free` are free, with a daily request limit                                                       | Pick a model that supports tool calling                                                             |
 
 Small models are often unreliable at tool calling. If answers never call tools, invent tool names or get the arguments wrong, switch to a larger model.
 
