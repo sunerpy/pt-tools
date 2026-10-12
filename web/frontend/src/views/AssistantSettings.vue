@@ -47,6 +47,8 @@ const tested = ref<{ ok: true; res: AssistantTestResult } | { ok: false; msg: st
 const listing = ref(false);
 /** 从服务商读到的模型（换服务商时清空） */
 const fetched = ref<string[]>([]);
+/** 每发一次「获取模型列表」或换服务商加一：晚到的回应对不上就丢掉 */
+let listSeq = 0;
 const listed = ref<{ ok: true; total: number; count: number } | { ok: false; msg: string } | null>(
   null,
 );
@@ -93,6 +95,8 @@ async function load() {
 /** 选了预设：填地址与第一个常用模型（「其他」不动已经填的） */
 function applyProvider(key: string) {
   const p = providerOf(key);
+  listSeq++;
+  listing.value = false;
   fetched.value = [];
   listed.value = null;
   if (p.key === "custom") return;
@@ -140,16 +144,19 @@ async function test() {
 }
 
 async function listModels() {
+  const seq = ++listSeq;
   listing.value = true;
   listed.value = null;
   try {
     const res = await assistantApi.listModels(input());
+    if (seq !== listSeq) return;
     fetched.value = res.models;
     listed.value = { ok: true, total: res.total, count: res.models.length };
   } catch (e) {
+    if (seq !== listSeq) return;
     listed.value = { ok: false, msg: errText(e, "读不到模型列表") };
   } finally {
-    listing.value = false;
+    if (seq === listSeq) listing.value = false;
   }
 }
 
@@ -240,9 +247,10 @@ onMounted(load);
               :class="{ 'ass-tip--warn': !listed.ok }"
               data-testid="ass-listed">
               <template v-if="listed.ok"
-                >服务商列出 {{ listed.total }} 个模型，能拿来对话的
-                {{ listed.count }} 个已经放进下拉框；要支持工具调用（function
-                calling）的模型才能用。</template
+                >服务商列出 {{ listed.total }} 个模型，去掉嵌入、语音、图像这类以后
+                {{ listed.count }}
+                个放进了下拉框。按名字筛的，不保证每个都能用：要支持工具调用（function
+                calling），选好以后点「测试连接」看看。</template
               >
               <template v-else>{{ listed.msg }}</template>
             </div>

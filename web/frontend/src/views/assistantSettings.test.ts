@@ -200,4 +200,35 @@ describe("AI 助手设置", () => {
     await vi.waitFor(() => expect(q("ass-listed")!.textContent).toContain("检查 API Key"));
     expect(q("ass-listed")!.className).toContain("ass-tip--warn");
   });
+
+  it("获取模型列表还没回来就换了服务商：晚到的结果不写进新服务商的下拉框", async () => {
+    await mountPage();
+    let resolve!: (v: { models: string[]; total: number }) => void;
+    api.listModels.mockReturnValue(new Promise((r) => (resolve = r)));
+    q("ass-list-models")!.click();
+    await vi.waitFor(() => expect(api.listModels).toHaveBeenCalledTimes(1));
+    const sel = q("ass-provider")!;
+    (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+    const groq = await vi.waitFor(() => {
+      const el = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+        (o) => o.textContent?.trim() === "Groq",
+      );
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    groq.click();
+    await vi.waitFor(() => expect(q("ass-console")!.getAttribute("href")).toContain("groq.com"));
+    resolve({ models: ["deepseek-late"], total: 1 });
+    await flush();
+    await flush();
+    expect(q("ass-listed")).toBeNull();
+    const msel = q("ass-model")!;
+    (msel.querySelector<HTMLElement>(".el-select__wrapper") ?? msel).click();
+    const items = () => {
+      const menus = document.querySelectorAll(".el-select-dropdown");
+      return [...(menus[menus.length - 1]?.querySelectorAll(".el-select-dropdown__item") ?? [])];
+    };
+    await vi.waitFor(() => expect(items().length).toBeGreaterThan(0));
+    expect(items().map((o) => o.textContent?.trim())).not.toContain("deepseek-late");
+  });
 });

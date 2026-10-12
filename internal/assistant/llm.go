@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,6 +28,8 @@ const (
 	// headerTimeout 是等模型服务回应头的上限（思考模式开头要想一会儿）
 	headerTimeout = 2 * time.Minute
 	pingTimeout   = time.Minute
+	// maxRetryWait 是 429 时最多等多久再试（测试连接与获取模型列表总共只有 pingTimeout）
+	maxRetryWait = 20 * time.Second
 )
 
 // newHTTPClient 建调模型用的 http.Client：走 proxy，为空时用环境变量里的代理。不设整体超时（流式回答可能很久），
@@ -85,8 +88,12 @@ func (s *Service) clientOptions(c llmConfig) ([]option.RequestOption, error) {
 			return nil, err
 		}
 	}
-	// 重试两次：免费层（例如 Groq 每分钟 8K token）调工具多时容易 429，SDK 按服务商给的 Retry-After 等
-	opts := []option.RequestOption{option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc), option.WithMaxRetries(2)}
+	// 重试两次：免费层（例如 Groq 每分钟 8K token）调工具多时容易 429，SDK 按服务商给的 Retry-After 等；
+	// 服务商要等的超过 maxRetryWait 时不在这里干等，直接回 429（describeError 说要等多久）
+	opts := []option.RequestOption{
+		option.WithBaseURL(c.BaseURL), option.WithHTTPClient(hc),
+		option.WithMaxRetries(2), option.WithMaxRetryDelay(maxRetryWait),
+	}
 	if c.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(c.APIKey))
 	}
@@ -153,13 +160,23 @@ func keyRejected(detail string) bool {
 		strings.Contains(d, "api_key_invalid")
 }
 
-// retryAfter 是 429 回应建议等多久（Retry-After 的秒数），说成「，约 N 秒后再试」；没有或读不懂时为空。
+// retryAfter 是 429 回应建议等多久，说成「，约 N 秒后再试」：Retry-After 是秒数或 HTTP 日期，也认 Retry-After-Ms；
+// 没有或读不懂时为空。
 func retryAfter(res *http.Response) string {
 	if res == nil {
 		return ""
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After")))
-	if err != nil || n <= 0 {
+	n := 0
+	if v := strings.TrimSpace(res.Header.Get("Retry-After")); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil {
+			n = secs
+		} else if at, err := http.ParseTime(v); err == nil {
+			n = int(math.Ceil(time.Until(at).Seconds()))
+		}
+	} else if ms, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After-Ms"))); err == nil {
+		n = (ms + 999) / 1000
+	}
+	if n <= 0 {
 		return ""
 	}
 	if n >= 120 {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,10 @@ func TestChatModelsKeepsChatModelsOnly(t *testing.T) {
 		"tts-1", "has space", "", "  qwen/qwen3.8-27b  ", "BAAI/bge-reranker-v2-m3",
 	}, "")
 	assert.Equal(t, []string{"openai/gpt-oss-120b", "qwen/qwen3.8-27b"}, got)
+
+	// OpenAI：gpt-audio 支持 Chat Completions 与工具调用，要留着；babbage、davinci 只有旧的 Completions，gpt-realtime 只走 Realtime 接口
+	got = chatModels("https://api.openai.com/v1", []string{"gpt-audio", "babbage-002", "davinci-002", "gpt-realtime", "gpt-6-luna"}, "")
+	assert.Equal(t, []string{"gpt-6-luna", "gpt-audio"}, got)
 
 	// 编号里回显了 Key 的不要；太长的不要
 	long := string(make([]byte, maxModelLen+1))
@@ -114,4 +119,24 @@ func TestDescribeErrorRecognizesKeyErrorsWithout401(t *testing.T) {
 	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
 	require.True(t, errors.As(err, &te), err)
 	assert.NotContains(t, te.Message, "检查 API Key", "别的 400 不说是 Key 的问题")
+}
+
+// 服务商要等很久（Retry-After 超过 20 秒）时不在这里干等：不重试，直接说要等多久（测试连接、获取模型列表只有 1 分钟）。
+func TestLongRetryAfterIsReportedInsteadOfWaited(t *testing.T) {
+	e := newEnv(t)
+	e.llm.push(reply{status: http.StatusTooManyRequests, body: "Rate limit reached", header: map[string]string{"Retry-After": "90"}})
+	start := time.Now()
+	_, err := e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	var te *TestError
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "约 90 秒后再试")
+	assert.Len(t, e.llm.requests(), 1, "要等的比上限长：不重试")
+	assert.Less(t, time.Since(start), 10*time.Second)
+
+	// Retry-After 也可以是 HTTP 日期
+	at := time.Now().Add(45 * time.Second).UTC().Format(http.TimeFormat)
+	e.llm.push(reply{status: http.StatusTooManyRequests, body: "Rate limit reached", header: map[string]string{"Retry-After": at}})
+	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.True(t, errors.As(err, &te), err)
+	assert.Regexp(t, `约 4\d 秒后再试`, te.Message)
 }

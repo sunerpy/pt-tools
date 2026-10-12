@@ -115,11 +115,11 @@ With **Notification channels (ChatOps)** turned on in **System → AI assistant 
 
 **Test connection returns 404**: the endpoint or the model name is wrong. OpenAI's endpoint needs `/v1`.
 
-**Test connection returns 429**: requests are too fast or the free tier is used up. pt-tools retries twice, waiting as long as the provider asks, and then says roughly how long to wait; check your quota in the provider's console, or switch to another model or provider.
+**Test connection returns 429**: requests are too fast or the free tier is used up. When the provider asks to wait 20 seconds or less, pt-tools waits and tries again, at most twice; when it asks for longer, pt-tools does not retry and says roughly how long to wait. Check your quota in the provider's console, or switch to another model or provider.
 
 **Test connection returns 400 saying User location is not supported**: the provider does not serve your region (Google AI Studio does not serve mainland China or Hong Kong). Set a proxy that can reach it.
 
-**Fetch models returns nothing, or not the model you want**: the list leaves out embedding, speech, image and other models that cannot chat. You can type the name of a model the provider does not list.
+**Fetch models returns nothing, or not the model you want**: the list leaves out embedding, speech, image and similar models by name, and the models left are not all guaranteed to support tool calling: pick one and click **Test connection**. You can type the name of a model the provider does not list.
 
 **The assistant says a tool does not exist**: the model made up a tool name. Rephrase, or use a model that is better at tool calling.
 
