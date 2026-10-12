@@ -101,3 +101,17 @@ func TestDescribeErrorForRateLimitsWithRetryAfter(t *testing.T) {
 	assert.Contains(t, te.Message, "1 秒")
 	assert.Len(t, e.llm.requests(), 3, "一次请求加两次重试")
 }
+
+// Google AI Studio 对不对的 Key 回 400「Please pass a valid API key」，不是 401：照样提示检查 Key。
+func TestDescribeErrorRecognizesKeyErrorsWithout401(t *testing.T) {
+	e := newEnv(t)
+	e.llm.push(reply{status: http.StatusBadRequest, body: "Please pass a valid API key."})
+	_, err := e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	var te *TestError
+	require.True(t, errors.As(err, &te), err)
+	assert.Contains(t, te.Message, "检查 API Key")
+	e.llm.push(reply{status: http.StatusBadRequest, body: "max_tokens is too large"})
+	_, err = e.svc.TestSettings(context.Background(), SettingsInput{BaseURL: e.llm.srv.URL + "/v1", Model: "fake-model"})
+	require.True(t, errors.As(err, &te), err)
+	assert.NotContains(t, te.Message, "检查 API Key", "别的 400 不说是 Key 的问题")
+}

@@ -120,7 +120,8 @@ func describeError(err error, key string) string {
 		case locationBlocked(detail):
 			// Google AI Studio 对中国大陆、香港的 IP 回 400 User location is not supported
 			msg += "（这个服务商不对你所在的地区开放：在「代理地址」里填一个能访问它的代理）"
-		case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
+		case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden || keyRejected(detail):
+			// Google AI Studio 对不对的 Key 回 400 Please pass a valid API key
 			msg += "（检查 API Key）"
 		case apiErr.StatusCode == http.StatusNotFound:
 			msg += "（检查接口地址与模型名）"
@@ -143,6 +144,13 @@ func locationBlocked(detail string) bool {
 	d := strings.ToLower(detail)
 	return strings.Contains(d, "location is not supported") || strings.Contains(d, "unsupported_country") ||
 		strings.Contains(d, "country, region, or territory not supported")
+}
+
+// keyRejected 是服务商说 Key 不对（有的不回 401，例如 Google AI Studio 回 400）。
+func keyRejected(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "api key") && (strings.Contains(d, "valid") || strings.Contains(d, "incorrect")) ||
+		strings.Contains(d, "api_key_invalid")
 }
 
 // retryAfter 是 429 回应建议等多久（Retry-After 的秒数），说成「，约 N 秒后再试」；没有或读不懂时为空。
