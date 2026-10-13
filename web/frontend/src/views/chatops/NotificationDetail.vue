@@ -376,7 +376,8 @@ async function handleSaveCredentials() {
         payload.headers = conf.headers ?? "";
         payload.method = conf.method || "POST";
         payload.content_type = conf.content_type || "json";
-        payload.body_template = conf.body_template ?? "";
+        // GET 不带请求体：编辑框只是禁用、还留着原来的模板（切回别的方法时不丢），保存时发空的
+        payload.body_template = webhookBody.value;
         break;
       case "wecom_webhook":
         payload.webhook_key = conf.webhook_key;
@@ -473,6 +474,8 @@ const headersError = computed(() =>
   conf.channel_type === "webhook" && !parseHeadersText(conf.headers).ok ? HEADERS_ERROR : "",
 );
 const isGet = computed(() => (conf.method || "POST") === "GET");
+/** 实际生效的请求体模板：GET 时是空的（后端不许 GET 带请求体模板） */
+const webhookBody = computed(() => (isGet.value ? "" : (conf.body_template ?? "")));
 /** 套用预设以后提示这类服务的地址一般长什么样 */
 const presetHint = ref("");
 const whEvents = ref<{ type: string; name: string }[]>([]);
@@ -531,7 +534,7 @@ async function runPreview() {
       endpoint_url: conf.endpoint_url,
       content_type: conf.content_type || "json",
       headers: headers.value,
-      body_template: conf.body_template ?? "",
+      body_template: webhookBody.value,
     });
     if (seq !== whSeq) return;
     whPreview.result = res;

@@ -65,6 +65,20 @@ async function pickPreset(label: string) {
   item.click();
 }
 
+// 方法下拉框：选项只有名字（POST、GET…），按整段文字找
+async function pickOption(id: string, label: string) {
+  const sel = q(id)!;
+  (sel.querySelector<HTMLElement>(".el-select__wrapper") ?? sel).click();
+  const item = await vi.waitFor(() => {
+    const el = [...document.querySelectorAll<HTMLElement>(".el-select-dropdown__item")].find(
+      (o) => o.textContent?.trim() === label,
+    );
+    expect(el).toBeTruthy();
+    return el!;
+  });
+  item.click();
+}
+
 async function mountDetail(over: Record<string, unknown> = {}) {
   api.get.mockResolvedValue({
     id: 7,
@@ -164,6 +178,30 @@ describe("Webhook 的请求", () => {
       content_type: "text",
       body_template: "{{.title}}\n\n{{.text}}",
     });
+  });
+
+  it("已有请求体模板时改成 GET：预览与保存都按不带请求体发；没保存前切回来模板还在", async () => {
+    await mountDetail({ body_template: '{"a": {{json .title}}}' });
+    await vi.waitFor(() => expect(field("wh-body").value).toBe('{"a": {{json .title}}}'));
+    await pickOption("wh-method", "GET");
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenLastCalledWith(
+        expect.objectContaining({ method: "GET", body_template: "" }),
+      ),
+    );
+    await pickOption("wh-method", "POST");
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenLastCalledWith(
+        expect.objectContaining({ method: "POST", body_template: '{"a": {{json .title}}}' }),
+      ),
+    );
+    expect(field("wh-body").value).toBe('{"a": {{json .title}}}');
+
+    await pickOption("wh-method", "GET");
+    await vi.waitFor(() => expect(buttonByText("保存凭证").disabled).toBe(false));
+    buttonByText("保存凭证").click();
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+    expect(api.update.mock.calls[0]![1]).toMatchObject({ method: "GET", body_template: "" });
   });
 
   it("GET 不带请求体：格式、预设与请求体都不能改", async () => {
