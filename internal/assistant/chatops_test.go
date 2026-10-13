@@ -240,28 +240,6 @@ func TestChatOpsEventText(t *testing.T) {
 	assert.False(t, isYes("确认一下这个是什么"))
 }
 
-func TestSplitReply(t *testing.T) {
-	assert.Equal(t, []string{"短"}, splitReply("短", ""))
-	line := strings.Repeat("字", 100) + "\n"
-	long := strings.Repeat(line, 50) // 5050 个字
-	parts := splitReply(long, "")
-	require.Len(t, parts, 2)
-	for _, p := range parts {
-		assert.LessOrEqual(t, len([]rune(p)), chatopsReplyRunes)
-		assert.False(t, strings.HasSuffix(p, "\n"))
-	}
-	assert.Equal(t, strings.ReplaceAll(long, "\n", ""), strings.ReplaceAll(strings.Join(parts, ""), "\n", ""), "分开以后内容不少")
-	huge := strings.Repeat("字", chatopsReplyRunes*chatopsReplyParts+100)
-	parts = splitReply(huge, "")
-	require.Len(t, parts, chatopsReplyParts)
-	assert.Contains(t, parts[len(parts)-1], "后面的省略了")
-	for _, p := range parts {
-		assert.LessOrEqual(t, len([]rune(p)), chatopsReplyRunes, "注明的话也算在字数里")
-	}
-	parts = splitReply(huge, "en")
-	assert.Contains(t, parts[len(parts)-1], "the rest is left out")
-}
-
 // 旧回答在跑时不能开新对话；开了新会话以后，旧会话的时间再被更新也不会把下一条消息带回旧会话
 func TestChatOpsNewChatSticksWhileOldRunFinishes(t *testing.T) {
 	e, h, rp := chatopsEnv(t)

@@ -53,12 +53,6 @@ func (h *ChatOpsHandler) ownerLock(owner string) *sync.Mutex {
 	return l
 }
 
-// 一条 ChatOps 回复的字数上限（Telegram 一条消息最多 4096 个字符）；更长的回答分几条发，最多 chatopsReplyParts 条。
-const (
-	chatopsReplyRunes = 3500
-	chatopsReplyParts = 4
-)
-
 // Enabled 报告助手启用了、接口配好了、ChatOps 开关也打开了。
 func (h *ChatOpsHandler) Enabled(ctx context.Context) bool {
 	if h == nil || h.svc == nil {
@@ -84,7 +78,7 @@ func (h *ChatOpsHandler) actor(msg notify.InboundMessage, src chatops.Source) Ac
 		}
 		// 先套模板再分条：模板拿到的是整个回答，加的开头、结尾只出现一次
 		text = h.templates.ApplyText(notify.NewEvent(notify.EventAssistantReply, time.Now(), fields), text)
-		for _, part := range splitReply(text, lang) {
+		for _, part := range chatops.SplitReply(text, lang) {
 			if err := h.replier.Reply(ctx, msg, chatops.Reply{Text: part}); err != nil {
 				global.GetSlogger().Warnf("[AI 助手] ChatOps 回复失败 conf=%d: %v", msg.SourceConfID, err)
 				return
@@ -237,27 +231,4 @@ func plainText(s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// splitReply 把太长的回答分成几条（每条不超过 chatopsReplyRunes 个字，尽量在换行处分），最多 chatopsReplyParts 条，
-// 再多的省略并注明（注明的话也算在字数里）。
-func splitReply(s, lang string) []string {
-	var parts []string
-	rest := []rune(s)
-	for len(rest) > chatopsReplyRunes && len(parts) < chatopsReplyParts-1 {
-		cut := chatopsReplyRunes
-		for i := chatopsReplyRunes; i > chatopsReplyRunes/2; i-- {
-			if rest[i-1] == '\n' {
-				cut = i
-				break
-			}
-		}
-		parts = append(parts, strings.TrimRight(string(rest[:cut]), "\n"))
-		rest = rest[cut:]
-	}
-	if len(rest) > chatopsReplyRunes {
-		note := []rune(tr(lang, "\n…（回答太长，后面的省略了）", "\n… (the answer is too long; the rest is left out)"))
-		rest = append(rest[:chatopsReplyRunes-len(note):chatopsReplyRunes-len(note)], note...)
-	}
-	return append(parts, strings.TrimRight(string(rest), "\n"))
 }

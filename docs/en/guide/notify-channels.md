@@ -160,7 +160,7 @@ Examples: mark the replies that did not work, list only the downloaders `/status
 {{if eq .kind "answer"}}🤖 {{end}}{{.text}}
 ```
 
-The assistant's answer goes through the template before it is split into several messages (up to 4 when it is long), so a header or footer the template adds appears once. The body of a command or assistant reply can be up to 64 KB; the other limits are the same as for notifications, and a reply whose template fails or renders empty is sent with the built-in text.
+A long reply is sent as several messages: up to 3,500 characters each and at most 4 of them, with a note when the rest is left out; buttons go with the last one. The assistant's answer, too, goes through the template before it is split, so a header or footer the template adds appears once. The body of a command or assistant reply can be up to 64 KB; the other limits are the same as for notifications, and a reply whose template fails or renders empty is sent with the built-in text.
 
 ## Custom webhook
 

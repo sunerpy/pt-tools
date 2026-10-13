@@ -339,6 +339,7 @@ func auditArgs(command string, args []string) []string {
 }
 
 // tryReply 套用消息模板以后发出回复。command 是这条回复对应的命令（不带 /），给 reply.other 用。
+// 模板写出来的回复可能很长：超过一条消息的上限时分几条发（见 SplitReply），按钮跟在最后一条上；一条发不出去就不再发后面的。
 func (mc *MessageChain) tryReply(ctx context.Context, msg notify.InboundMessage, command string, reply Reply) {
 	if mc.replier == nil || reply.SilentDrop {
 		return
@@ -346,7 +347,22 @@ func (mc *MessageChain) tryReply(ctx context.Context, msg notify.InboundMessage,
 	if reply.Text == "" && len(reply.Buttons) == 0 {
 		return
 	}
-	_ = mc.replier.Reply(ctx, msg, mc.applyTemplate(command, reply))
+	reply = mc.applyTemplate(command, reply)
+	if reply.Text == "" {
+		_ = mc.replier.Reply(ctx, msg, reply)
+		return
+	}
+	parts := SplitReply(reply.Text, "")
+	for i, part := range parts {
+		r := reply
+		r.Text = part
+		if i < len(parts)-1 {
+			r.Buttons = nil
+		}
+		if err := mc.replier.Reply(ctx, msg, r); err != nil {
+			return
+		}
+	}
 }
 
 // applyTemplate 按回复的事件（没有时是 reply.other）套用正文模板；模板出错或渲染为空时保留内置文字，按钮原样保留。

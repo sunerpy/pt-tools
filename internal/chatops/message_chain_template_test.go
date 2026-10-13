@@ -3,6 +3,7 @@ package chatops
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,4 +105,29 @@ func TestMessageChainSessionReplyTemplate(t *testing.T) {
 	r, ok := f.replier.lastReply()
 	require.True(t, ok)
 	assert.Equal(t, "[session:sub_pick] 已订阅", r.Text)
+}
+
+// 模板写出来的回复超过一条消息的上限（Telegram 最多 4096 个字符）：分几条发，按钮只跟在最后一条上。
+func TestMessageChainSplitsLongTemplatedReply(t *testing.T) {
+	f := newChain(t, CommandSpec{Name: "pause", Handler: func(context.Context, []string, Source) (Reply, error) {
+		return Reply{Text: "已暂停 abc", Buttons: [][]Button{{{Text: "恢复", CallbackData: "resume:abc"}}}}, nil
+	}})
+	f.bindings.exists = true
+	f.bindings.binding = BindingInfo{ID: 1, ConfID: 7, Allowed: true}
+	set := notify.NewTemplates(nil)
+	line := strings.Repeat("x", 99) + "\n"
+	set.Replace([]notify.TemplateSource{{EventType: notify.EventReplyOther, Text: strings.Repeat(line, 50) + "{{.text}}"}})
+	f.chain.SetTemplates(set)
+
+	require.NoError(t, f.chain.Process(context.Background(), mkMsg("/pause abc")))
+	f.replier.mu.Lock()
+	replies := append([]Reply(nil), f.replier.replies...)
+	f.replier.mu.Unlock()
+	require.Len(t, replies, 2, "5000 多个字分两条")
+	for _, r := range replies {
+		assert.LessOrEqual(t, len([]rune(r.Text)), ReplyRunes)
+	}
+	assert.Nil(t, replies[0].Buttons)
+	assert.Equal(t, [][]Button{{{Text: "恢复", CallbackData: "resume:abc"}}}, replies[1].Buttons)
+	assert.True(t, strings.HasSuffix(replies[1].Text, "已暂停 abc"))
 }
