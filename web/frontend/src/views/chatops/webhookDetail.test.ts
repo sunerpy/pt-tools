@@ -118,6 +118,9 @@ describe("Webhook 的请求", () => {
         "POST https://example.com/hook\nContent-Type: application/json",
       ),
     );
+    // 提示里的模板写法原样显示（写在模板里的 {{…}} 曾被格式化工具改成 {{ urlquery.site }}）
+    expect(document.body.textContent).toContain("?site={{urlquery .site}}");
+    expect(document.body.textContent).toContain("{{json .title}}");
 
     await pickPreset("Discord");
     await vi.waitFor(() => expect(field("wh-body").value).toContain('{"content":'));

@@ -466,6 +466,9 @@ function goBack() {
 }
 
 /* ---- Webhook 的请求（M21）：方法、格式、请求体模板、预设，按事件的示例数据预览 ---- */
+/* 模板写法的例子放在脚本里：直接写进模板的 {{…}}（即使加了 v-pre）会被格式化工具当成 Vue 插值改写 */
+const URL_TEMPLATE_EXAMPLE = "?site={{urlquery .site}}";
+const JSON_EXAMPLE = "{{json .title}}";
 const headersError = computed(() =>
   conf.channel_type === "webhook" && !parseHeadersText(conf.headers).ok ? HEADERS_ERROR : "",
 );
@@ -828,7 +831,7 @@ const previewText = computed(() => {
                   placeholder="https://example.com/notify"
                   data-testid="wh-url" />
                 <div class="field-tip">
-                  路径和查询里可以写模板，例如 <code v-pre>?site={{ urlquery.site }}</code
+                  路径和查询里可以写模板，例如 <code>{{ URL_TEMPLATE_EXAMPLE }}</code
                   >；主机名不能写模板
                 </div>
                 <div v-if="presetHint" class="field-tip" data-testid="wh-preset-hint">
@@ -903,7 +906,7 @@ const previewText = computed(() => {
                 data-testid="wh-body" />
               <div class="field-tip">
                 Go 模板，变量与函数和「消息模板」页一样；文字放进 JSON 时用
-                <code v-pre>{{ json.title }}</code
+                <code>{{ JSON_EXAMPLE }}</code
                 >。GET 请求不带请求体
               </div>
             </el-form-item>
