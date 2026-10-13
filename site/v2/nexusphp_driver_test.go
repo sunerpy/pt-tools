@@ -2007,3 +2007,70 @@ func TestNexusPHPDriver_DefaultLastAccess(t *testing.T) {
 	label = "加入日期"
 	assert.Zero(t, get(newDef(nil, []string{"uploaded"})).LastAccess)
 }
+
+// #332：定义里没写实际上传 / 下载的站点，在用户详情页「传输」一行按通用写法取；写了的照旧只按自己的。
+func TestNexusPHPDriver_DefaultTrueTransfer(t *testing.T) {
+	transfer := `<strong>上传量</strong>: 1.50 TB <strong>下载量</strong>: 500.00 GB <strong>实际上传量</strong>: 1.20 TB <strong>实际下载量</strong>: 300.00 GB`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(`<html><body><table>
+				<tr><td class="rowhead">传输</td><td class="rowfollow">` + transfer + `</td></tr>
+			</table></body></html>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	newDef := func(selectors map[string]FieldSelector) *SiteDefinition {
+		base := map[string]FieldSelector{
+			"id":   {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+			"name": {Selector: []string{"a[href*='userdetails.php']"}},
+		}
+		fields := []string{}
+		for k, v := range selectors {
+			base[k] = v
+			fields = append(fields, k)
+		}
+		return &SiteDefinition{
+			ID: "npdef", Name: "NPDef", Schema: SchemaNexusPHP,
+			UserInfo: &UserInfoConfig{
+				Process: []UserInfoProcess{
+					{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+					{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: fields},
+				},
+				Selectors: base,
+			},
+		}
+	}
+	get := func(def *SiteDefinition) UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+
+	info := get(newDef(nil))
+	assert.Equal(t, parseSize("1.20 TB"), info.TrueUploaded)
+	assert.Equal(t, parseSize("300.00 GB"), info.TrueDownloaded)
+
+	// 繁体、「真实」的写法也认
+	transfer = `<b>真實上傳量</b>：900.00 GB <b>真實下載量</b>：&nbsp;100.00 GB`
+	info = get(newDef(nil))
+	assert.Equal(t, parseSize("900.00 GB"), info.TrueUploaded)
+	assert.Equal(t, parseSize("100.00 GB"), info.TrueDownloaded)
+
+	// 定义自己写了 trueUploaded（这里故意写取不到的）：不用通用写法；trueDownloaded 没写的照样取
+	own := newDef(map[string]FieldSelector{"trueUploaded": {Selector: []string{"#nope"}, Filters: []Filter{{Name: "parseSize"}}}})
+	info = get(own)
+	assert.Zero(t, info.TrueUploaded)
+	assert.Equal(t, parseSize("100.00 GB"), info.TrueDownloaded)
+
+	// 没有这两项的页面：都是 0
+	transfer = `<strong>上传量</strong>: 1.50 TB <strong>下载量</strong>: 500.00 GB`
+	info = get(newDef(nil))
+	assert.Zero(t, info.TrueUploaded)
+	assert.Zero(t, info.TrueDownloaded)
+}

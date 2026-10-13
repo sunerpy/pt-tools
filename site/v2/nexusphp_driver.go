@@ -1183,7 +1183,49 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		}
 	}
 
+	// 同样，定义里没写实际上传 / 下载的站点，在用户详情页「传输」一行按通用写法找（#332：PTtime 等页面上有、定义里没写的站点）。
+	if strings.Contains(reqURL, "userdetails.php") {
+		for _, def := range defaultTrueTransferSelectors {
+			if _, declared := uiConfig.Selectors[def.field]; declared {
+				continue
+			}
+			if v := d.extractFieldValue(res.Document, def.selector); v != "" && v != "0" {
+				result[def.field] = v
+			}
+		}
+	}
+
 	return result, nil
+}
+
+// transferRows 是 NexusPHP 用户详情页「传输」一行的几种写法
+var transferRows = []string{
+	"td.rowhead:contains('传输') + td",
+	"td.rowhead:contains('傳輸') + td",
+	"td.rowhead:contains('傳送') + td",
+}
+
+// defaultTrueTransferSelectors 是「传输」一行里实际（真实）上传、下载量的通用写法：标签后面跟着冒号和大小。
+var defaultTrueTransferSelectors = []struct {
+	field    string
+	selector FieldSelector
+}{
+	{"trueUploaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`(?:实际上传量|實際上傳量|实际上传|實際上傳|真实上传量|真實上傳量|真实上传|真實上傳)(?:</strong>|</b>)?(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTP]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
+	{"trueDownloaded", FieldSelector{
+		Selector: transferRows,
+		Attr:     "html",
+		Filters: []Filter{
+			{Name: "regex", Args: []any{`(?:实际下载量|實際下載量|实际下载|實際下載|真实下载量|真實下載量|真实下载|真實下載)(?:</strong>|</b>)?(?:[\s:：\x{00a0}]|&nbsp;)*([\d.,]+\s*[KMGTP]?i?B)`}},
+			{Name: "parseSize"},
+		},
+	}},
 }
 
 // defaultLastAccessSelector 是 NexusPHP 用户详情页「最近动向 / 上次访问」一行的通用写法（简繁与英文界面）。
