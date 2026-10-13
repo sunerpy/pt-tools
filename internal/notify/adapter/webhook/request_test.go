@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -287,4 +288,89 @@ func TestPreview(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalid)
 	_, err = Preview(PreviewInput{Type: notify.EventTest, EndpointURL: "https://example.com/", BodyTemplate: "{{.nope}}"})
 	assert.ErrorIs(t, err, tmpl.ErrInvalid)
+}
+
+// 按响应内容判断成败：很多服务出错也回 200，错误写在响应里
+func TestCheckResponse(t *testing.T) {
+	check := func(src string, status int, body string) error {
+		t.Helper()
+		r, err := compile(&Config{EndpointURL: "https://example.com/hook", SuccessTemplate: src})
+		require.NoError(t, err, src)
+		return r.checkResponse(status, []byte(body))
+	}
+	// 没写成功条件：只看状态码（调用方判过 2xx）
+	r, err := compile(&Config{EndpointURL: "https://example.com/hook"})
+	require.NoError(t, err)
+	assert.NoError(t, r.checkResponse(200, []byte(`{"code":500}`)))
+
+	assert.NoError(t, check(`{{eq .json.code 200}}`, 200, `{"code":200,"msg":"ok"}`))
+	assert.ErrorIs(t, check(`{{eq .json.code 200}}`, 200, `{"code":500,"msg":"token 错误"}`), errResponseRejected)
+	assert.NoError(t, check(`  TRUE `, 200, ``), "true 不分大小写、去掉空白")
+	assert.NoError(t, check(`{{eq .body "ok"}}`, 200, `ok`))
+	assert.NoError(t, check(`{{gt .json.id 0}}`, 200, `{"id": 12, "title": "x"}`))
+	assert.NoError(t, check(`{{eq .json.data.ok true}}`, 200, `{"data":{"ok":true}}`), "嵌套字段")
+	assert.NoError(t, check(`{{eq .status 201}}`, 201, ``))
+
+	// 自己写的失败原因带进错误里（截到 200 个字）
+	err = check(`{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`, 200, `{"code":40001,"msg":"invalid token"}`)
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.Contains(t, err.Error(), "invalid token")
+	err = check(`{{.body}}`, 200, strings.Repeat("长", 500))
+	assert.Less(t, len([]rune(err.Error())), 260)
+
+	// 响应不是 JSON：取字段得零值，判断为不成功；算不出来的也算失败
+	assert.ErrorIs(t, check(`{{eq .json.code 0}}`, 200, `<html>busy</html>`), errResponseRejected)
+	err = check(`{{lt .body 1}}`, 200, `x`)
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.Contains(t, err.Error(), "算不出来")
+}
+
+func TestWebhook_SuccessTemplateOnSend(t *testing.T) {
+	var reply string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(reply))
+	}))
+	t.Cleanup(srv.Close)
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL,
+		"success_template": `{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`,
+	})
+	reply = `{"code":0}`
+	require.NoError(t, w.Send(context.Background(), sampleNotification(notify.EventTest)))
+	reply = `{"code":1,"msg":"quota exceeded"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "quota exceeded")
+
+	// 成功条件写错（没有这个函数）：保存前就被拒
+	assert.ErrorContains(t, checkConfig(map[string]any{"endpoint_url": srv.URL, "success_template": `{{nope .json}}`}), "成功条件")
+}
+
+func TestPreviewSuccessTemplate(t *testing.T) {
+	in := PreviewInput{
+		Type: notify.EventTest, EndpointURL: "https://example.com/hook",
+		SuccessTemplate: `{{eq .json.code 200}}`, SampleResponse: `{"code":200}`,
+	}
+	out, err := Preview(in)
+	require.NoError(t, err)
+	require.NotNil(t, out.Success)
+	assert.True(t, *out.Success)
+
+	in.SampleResponse = `{"code":500}`
+	out, err = Preview(in)
+	require.NoError(t, err)
+	assert.False(t, *out.Success)
+	assert.Contains(t, out.SuccessReason, "不满足成功条件")
+
+	in.SampleResponse, in.SampleStatus = `{"code":200}`, 302
+	out, err = Preview(in)
+	require.NoError(t, err)
+	assert.False(t, *out.Success, "状态码不是 2xx 就不看成功条件")
+	assert.Contains(t, out.SuccessReason, "302")
+
+	// 没写成功条件：不给 success
+	out, err = Preview(PreviewInput{Type: notify.EventTest, EndpointURL: "https://example.com/hook"})
+	require.NoError(t, err)
+	assert.Nil(t, out.Success)
 }

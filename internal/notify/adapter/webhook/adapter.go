@@ -33,6 +33,9 @@ type Config struct {
 	ContentType string `json:"content_type,omitempty"`
 	// BodyTemplate 是请求体模板（Go 模板，变量见消息模板的事件目录）；空着发原来的固定 JSON
 	BodyTemplate string `json:"body_template,omitempty"`
+	// SuccessTemplate 是按响应判断成败的模板（可选）：2xx 以后再用它算一遍，结果是 true 才算送到，
+	// 别的结果（false、空、或者自己写的原因）算失败。变量：status、body、json（响应是 JSON 时解出来的值）
+	SuccessTemplate string `json:"success_template,omitempty"`
 }
 
 // Headers 是自定义请求头。旧版编辑页把它存成了 JSON 文本（"{\"A\":\"b\"}"），两种写法都认。
@@ -194,6 +197,11 @@ func (w *WebhookChannel) Send(ctx context.Context, n notify.Notification) error 
 	if !resp.IsSuccess() {
 		w.logger.Warnf("webhook returned status: %d", resp.StatusCode())
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode())
+	}
+	// 写了成功条件的，再按响应内容判断（很多服务出错也回 200，错误写在响应里）
+	if err := w.req.checkResponse(resp.StatusCode(), resp.Bytes()); err != nil {
+		w.logger.Warnf("webhook response rejected: %v", err)
+		return err
 	}
 
 	return nil
