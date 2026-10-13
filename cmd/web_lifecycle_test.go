@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -57,6 +58,9 @@ var errShutdown = errors.New("shutdown boom")
 // Close fails, so installShutdownHandler's bs.Shutdown error-log branch runs on
 // SIGTERM.
 func TestInstallShutdownHandler_ShutdownErrorsLogged(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上进程发不了 SIGTERM 给自己（os.Process.Signal 只支持 Kill）")
+	}
 	global.InitLogger(zap.NewNop())
 	bs := &chatopsBootstrap{channels: map[uint]notify.Channel{1: &closeRecordingChannel{closeErr: errShutdown}}}
 	done := installShutdownHandler(shutdownPlan{bs: bs})
@@ -72,6 +76,9 @@ func TestInstallShutdownHandler_ShutdownErrorsLogged(t *testing.T) {
 // its signal trap, then unwinds cleanly when every step is nil after a SIGTERM
 // is delivered (all nil-guard branches taken).
 func TestInstallShutdownHandler_NilServerAndBootstrap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上进程发不了 SIGTERM 给自己（os.Process.Signal 只支持 Kill）")
+	}
 	global.InitLogger(zap.NewNop())
 	done := installShutdownHandler(shutdownPlan{})
 

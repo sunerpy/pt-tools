@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -185,6 +186,8 @@ func TestSecretImportAtomicWrite(t *testing.T) {
 
 	stat, err := os.Stat(keyPath)
 	require.NoError(t, err)
-	perms := stat.Mode().Perm()
-	assert.Equal(t, perms, os.FileMode(0o600))
+	if runtime.GOOS != "windows" {
+		// Windows 上的权限位只有只读一项，0o600 读出来是 0o666
+		assert.Equal(t, os.FileMode(0o600), stat.Mode().Perm())
+	}
 }
