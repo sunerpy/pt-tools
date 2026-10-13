@@ -1424,7 +1424,11 @@ components:
       type: object
       required: [key, name, desc]
       properties:
-        key: { type: string, description: "notify（通知）、reply（ChatOps 命令回复）或 assistant（AI 助手回复）" }
+        key:
+          {
+            type: string,
+            description: "notify（通知）、reply（ChatOps 命令回复）或 assistant（AI 助手回复）",
+          }
         name: { type: string }
         desc: { type: string }
     AppTemplateVar:
@@ -1442,7 +1446,19 @@ components:
     AppTemplate:
       type: object
       required:
-        [type, group, name, desc, no_title, vars, sample_title, sample_text, title, text, customized]
+        [
+          type,
+          group,
+          name,
+          desc,
+          no_title,
+          vars,
+          sample_title,
+          sample_text,
+          title,
+          text,
+          customized,
+        ]
       properties:
         type: { type: string }
         group: { type: string }

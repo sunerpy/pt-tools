@@ -79,8 +79,12 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
 | POST   | `/assistant/conversations/{id}/cancel`   | 读取 | 停止回答                                     |
 | GET    | `/assistant/conversations/{id}/events`   | 读取 | 长轮询会话的进度                             |
 | POST   | `/assistant/confirmations/{id}`          | 操作 | 确认或拒绝一个改动类操作                     |
+| GET    | `/templates`                             | 读取 | 消息模板：事件、变量与现在的模板             |
+| POST   | `/templates/preview`                     | 读取 | 用示例数据渲染一份模板                       |
+| PUT    | `/templates/{type}`                      | 操作 | 保存一种事件的模板                           |
+| DELETE | `/templates/{type}`                      | 操作 | 恢复默认                                     |
 
-路径都省略了 `/api/app/v1` 前缀。搜索用 POST 传条件，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
+路径都省略了 `/api/app/v1` 前缀。搜索与模板预览用 POST 传内容，但只要「读取」权限。令牌调用「操作」接口（包括因为权限不够被拒的）都记在「ChatOps → 操作审计」里，通道是「API 令牌」；推送被拦下、批量动作有失败时，即使回应是 200 也记为出错。
 
 ## 基本信息
 
@@ -104,13 +108,14 @@ curl -H "Authorization: Bearer $PTT_TOKEN" https://pt-tools.example.com/api/app/
     "media",
     "subscriptions",
     "updates",
-    "assistant"
+    "assistant",
+    "templates"
   ],
   "principal": { "kind": "api_token", "name": "我的手机", "scopes": ["app:read", "app:write"] }
 }
 ```
 
-`principal.kind` 是 `api_token`（令牌）、`session`（网页登录）或 `remote_device`（经远程访问配对的设备）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders`、`updates` 与 `assistant`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
+`principal.kind` 是 `api_token`（令牌）、`session`（网页登录）或 `remote_device`（经远程访问配对的设备）；`features` 是这个版本提供的功能组，较早的版本没有 `downloaders`、`updates`、`assistant` 与 `templates`；`scopes` 是调用者的权限，客户端可以据此决定显示哪些操作。
 
 ### GET /updates
 
@@ -332,3 +337,27 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 ### POST /assistant/confirmations/{id}
 
 `{"approve": true}` 确认执行，`{"approve": false}` 拒绝。要「操作」权限。回应是有了结论的待确认操作；已经有结论的（别处先点了、已经超时或作废）回 409（`decided`）。确认与拒绝都记在操作审计里；执行的操作另记一条，通道是「AI 助手」，触发用户是 `token:<令牌编号>` 或 `device:<设备编号>`。
+
+## 消息模板
+
+这一组接口对应网页上的「ChatOps → 消息模板」，写法见[消息模板](../guide/notify-channels.md#消息模板)。模板对所有通道生效，改了就影响之后发出的每一条通知与回复，所以保存与恢复默认要「操作」权限；令牌与设备的改动都记在操作审计里。主机的版本没有这一组接口时，`GET /meta` 的 `features` 里没有 `templates`。
+
+### GET /templates
+
+回应 `groups`、`common_vars`、`events`：
+
+- `groups`：事件的组，`key` 是 `notify`（通知）、`reply`（ChatOps 命令回复）或 `assistant`（AI 助手回复），另有 `name`、`desc`。
+- `common_vars`：每种事件都有的变量。变量有 `key`、`type`（`string`、`int`、`float`、`bool`、`list`）、`desc`、`sample`（示例值写成的文字）；列表没有示例，每一项的字段在 `item` 里。
+- `events`：每种事件一项，`type`、`group`、`name`、`desc`、`no_title`（只有正文）、`vars`、`sample_title` 与 `sample_text`（不改时发出去的样子）、`title` 与 `text`（现在的模板，空着的一项用内置文字）、`customized`、`updated_at`（自定义的时间，秒级时间戳）。
+
+### POST /templates/preview
+
+`{"type": "rss.matched", "title": "…", "text": "…"}`，用这种事件的示例数据渲染，不保存。回应 `{"title": "…", "text": "…"}`（只有正文的事件 `title` 是空的）。模板写得不对时回 400（`invalid_argument`），`message` 写明第几行哪里不对；没有这种事件时回 404。
+
+### PUT /templates/{type}
+
+`{"title": "…", "text": "…"}`，保存前按预览一样校验，不对时回 400；两项都空等于恢复默认。只有正文的事件填了标题也回 400。回应是保存以后的这种事件（字段同 `events` 的一项）。
+
+### DELETE /templates/{type}
+
+恢复成内置文字，回应 `{"ok": true}`；没有这种事件时回 404。
