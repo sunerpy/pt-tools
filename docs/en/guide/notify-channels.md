@@ -124,3 +124,28 @@ Functions: the comparisons `eq`, `ne`, `lt`, `le`, `gt` and `ge` (integers and d
 Saving renders the template once with sample data: a misspelled variable or a syntax error is not saved, and the message says which line is wrong. So that templates cannot slow notifications down, there are a few limits: `range` only loops over list variables, at most two levels deep, and a two-level loop can only hold a few simple actions; a template can declare up to 64 variables; a template can be up to 8 KB; a rendered title up to 1 KB and a body up to 16 KB; `printf` widths and precisions go up to 256, without the `*` and `[n]` forms; a function's arguments together, and its result, can be up to 64 KB, and all the function calls in one render can handle up to 4 MB in total. If rendering still fails when sending, or produces nothing, that notification goes out with the built-in text, so a broken template never stops notifications.
 
 Templates change notifications only, not the replies to ChatOps commands or from the AI assistant. Telegram messages are sent as plain text, so HTML or Markdown in a template shows up as written.
+
+## Custom webhook
+
+The generic Webhook channel sends notifications to your own services, such as n8n, Home Assistant, Discord, Slack, Gotify or PushPlus. In the channel's settings, the "Request" part lets you change:
+
+- Method: POST (default), PUT, PATCH or GET. GET has no body.
+- Body format: JSON (default), plain text, form, or custom (put `Content-Type` in the headers). When the headers contain `Content-Type`, the header wins.
+- Body template: the same syntax and variables as [message templates](#message-templates), plus `channel` (the channel name). The title and text are the ones after message templates. To put text into JSON, use the `json` function, which adds the quotes and escapes:
+
+  ```text
+  {"content": {{json .title}}, "site": {{json .site}}}
+  ```
+
+- Presets: Discord, Slack, Gotify, PushPlus, Home Assistant, n8n (every variable flattened into one JSON object), plain text and form. A preset only fills in a starting point that you can edit, and shows what that service's address usually looks like. For PushPlus, replace "你的 token" in the body with your own token.
+- Address: the path and query can contain a template too; the host name cannot, and the rendered address must keep the scheme and host written in the template. For example:
+
+  ```text
+  https://example.com/hook?site={{urlquery .site}}
+  ```
+
+With an empty body template, the channel sends the fixed JSON: `event_type` (always `notification`), `title`, `text`, `link`, `payload`, and `event` (the event `type`, its `time`, and all of its variables in `fields`). `event` is new in this version and the other fields are unchanged: receivers that read fields are not affected, and receivers that compare the whole body need updating.
+
+A webhook receives every kind of notification, so saving renders the templates once with the sample data of each event: a misspelled variable, or a JSON body that does not render to valid JSON, is not saved, and the message names the event and the line. Variables that only some events have are empty or 0 in the others. "Preview with sample data" lets you pick an event and see the rendered request without sending it.
+
+With an HMAC secret, the `X-PT-Signature` header is the Base64-encoded HMAC-SHA256 of the body actually sent. Only a 2xx response counts as delivered; any other status, including a 3xx that is not followed to a new address, is retried under the notification retry rules. This channel is meant for your own services and may reach loopback and private addresses. Error messages and logs leave out the query part of the address and the body.
