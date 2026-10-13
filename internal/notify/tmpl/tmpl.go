@@ -1,6 +1,7 @@
 // Package tmpl 是通知的模板引擎：Go 的 text/template，加上一组受控的函数与防护。
-// 用户写的模板在通知管线里执行，所以要保证它跑得完、输出有限：源码、输出与函数的中间结果都有上限，不能定义子模板，
-// range 只能遍历声明为列表的变量，整份模板按最坏情况算的迭代次数也有上限，一次渲染里所有函数处理的字节数合计也有上限。
+// 用户写的模板在通知管线里执行，所以要保证它很快跑完、输出有限：源码、输出与函数的中间结果都有上限，不能定义子模板，
+// range 只能遍历声明为列表的变量，整份模板按最坏情况算的执行步数与声明的变量个数有上限，
+// 一次渲染里所有函数处理的字节数合计也有上限。
 package tmpl
 
 import (
@@ -34,8 +35,11 @@ const (
 	MaxList = 100
 	// MaxRangeDepth 是 range 最多嵌套几层
 	MaxRangeDepth = 2
-	// MaxCost 是整份模板按最坏情况算的迭代次数上限
-	MaxCost = 20000
+	// MaxCost 是整份模板按最坏情况算的执行步数上限：每个节点、每条命令、每个参数各算一步，range 的循环体按 MaxList 遍算。
+	// 内置函数（len、slice、and、or、not）、取字段、取变量每一步都很快，不另外计量，靠它限住总的步数。
+	MaxCost = 200000
+	// MaxVars 是一份模板最多声明几个变量：取变量要从最近声明的一个往回找，变量越多每一步越慢
+	MaxVars = 64
 )
 
 // Limit 是这种用途的输出上限（字节）。
@@ -85,7 +89,8 @@ func Parse(src string, kind Kind, lists map[string]bool) (*Template, error) {
 	if len(t.Templates()) != 1 || t.Tree == nil {
 		return nil, invalid("不支持 define、block：模板里只能有一段")
 	}
-	if _, err := cost(t.Tree, t.Root, 0, lists); err != nil {
+	c := &checker{tree: t.Tree, lists: lists}
+	if _, err := c.cost(t.Root, 0); err != nil {
 		return nil, err
 	}
 	return &Template{t: t, kind: kind}, nil
@@ -139,63 +144,118 @@ func (w *capWriter) Write(p []byte) (int, error) {
 	return w.b.Write(p)
 }
 
-// cost 是一段节点按最坏情况算的迭代次数：每个 range 按 MaxList 项计，成本是 MaxList×(1+循环体)，
-// if、with 的各个分支与 range 的 else 都计入。同时检查 range 的对象与嵌套层数、拒绝 {{template}}。
-func cost(tree *parse.Tree, list *parse.ListNode, depth int, lists map[string]bool) (int, error) {
+// checker 检查解析出来的模板：range 的对象与嵌套层数、不许 {{template}}、按最坏情况算的执行步数、声明的变量个数。
+type checker struct {
+	tree  *parse.Tree
+	lists map[string]bool
+	vars  int
+}
+
+// cost 是一段节点按最坏情况算的执行步数：每个节点算一步，加上它的管道的步数；range 是 MaxList×(1+循环体)，
+// if、with 的各个分支与 range 的 else 都计入。
+func (c *checker) cost(list *parse.ListNode, depth int) (int, error) {
 	if list == nil {
 		return 0, nil
 	}
 	total := 0
 	for _, n := range list.Nodes {
+		total++
 		switch n := n.(type) {
+		case *parse.ActionNode:
+			s, err := c.pipe(n, n.Pipe)
+			if err != nil {
+				return 0, err
+			}
+			total += s
 		case *parse.RangeNode:
 			if depth+1 > MaxRangeDepth {
-				return 0, invalid("%srange 最多嵌套 %d 层", at(tree, n), MaxRangeDepth)
+				return 0, invalid("%srange 最多嵌套 %d 层", at(c.tree, n), MaxRangeDepth)
 			}
-			if !rangesOverList(n.Pipe, lists) {
-				return 0, invalid("%srange 只能遍历列表变量（%s），不能遍历数字、函数结果或别的变量", at(tree, n), listNames(lists))
+			if !rangesOverList(n.Pipe, c.lists) {
+				return 0, invalid("%srange 只能遍历列表变量（%s），不能遍历数字、函数结果或别的变量", at(c.tree, n), listNames(c.lists))
 			}
-			body, err := cost(tree, n.List, depth+1, lists)
+			s, err := c.pipe(n, n.Pipe)
 			if err != nil {
 				return 0, err
 			}
-			els, err := cost(tree, n.ElseList, depth, lists)
+			body, err := c.cost(n.List, depth+1)
 			if err != nil {
 				return 0, err
 			}
-			total += MaxList*(1+body) + els
+			els, err := c.cost(n.ElseList, depth)
+			if err != nil {
+				return 0, err
+			}
+			total += s + MaxList*(1+body) + els
 		case *parse.IfNode:
-			c, err := branchCost(tree, &n.BranchNode, depth, lists)
+			s, err := c.branch(n, &n.BranchNode, depth)
 			if err != nil {
 				return 0, err
 			}
-			total += c
+			total += s
 		case *parse.WithNode:
-			c, err := branchCost(tree, &n.BranchNode, depth, lists)
+			s, err := c.branch(n, &n.BranchNode, depth)
 			if err != nil {
 				return 0, err
 			}
-			total += c
+			total += s
 		case *parse.TemplateNode:
-			return 0, invalid("%s不支持 template：模板里只能有一段", at(tree, n))
+			return 0, invalid("%s不支持 template：模板里只能有一段", at(c.tree, n))
 		}
 		if total > MaxCost {
-			return 0, invalid("%s循环太多：按每个列表 %d 项算，最坏要迭代 %d 次以上（上限 %d）", at(tree, n), MaxList, total, MaxCost)
+			return 0, invalid("%s模板太复杂：按每个列表 %d 项算，最坏要执行 %d 步以上（上限 %d）", at(c.tree, n), MaxList, total, MaxCost)
 		}
 	}
 	return total, nil
 }
 
-func branchCost(tree *parse.Tree, b *parse.BranchNode, depth int, lists map[string]bool) (int, error) {
-	body, err := cost(tree, b.List, depth, lists)
+func (c *checker) branch(n parse.Node, b *parse.BranchNode, depth int) (int, error) {
+	s, err := c.pipe(n, b.Pipe)
 	if err != nil {
 		return 0, err
 	}
-	els, err := cost(tree, b.ElseList, depth, lists)
+	body, err := c.cost(b.List, depth)
 	if err != nil {
 		return 0, err
 	}
-	return body + els, nil
+	els, err := c.cost(b.ElseList, depth)
+	if err != nil {
+		return 0, err
+	}
+	return s + body + els, nil
+}
+
+// pipe 是一个管道的步数：每个声明、每条命令、每个参数各算一步，括号里的子管道按它自己算。同时数声明的变量。
+func (c *checker) pipe(n parse.Node, p *parse.PipeNode) (int, error) {
+	if p == nil {
+		return 0, nil
+	}
+	if c.vars += len(p.Decl); c.vars > MaxVars {
+		return 0, invalid("%s变量太多：一份模板最多声明 %d 个变量", at(c.tree, n), MaxVars)
+	}
+	steps := len(p.Decl)
+	for _, cmd := range p.Cmds {
+		steps++
+		for _, a := range cmd.Args {
+			s, err := c.arg(n, a)
+			if err != nil {
+				return 0, err
+			}
+			steps += s
+		}
+	}
+	return steps, nil
+}
+
+func (c *checker) arg(n, a parse.Node) (int, error) {
+	switch a := a.(type) {
+	case *parse.PipeNode:
+		return c.pipe(n, a)
+	case *parse.ChainNode:
+		s, err := c.arg(n, a.Node)
+		return 1 + s, err
+	}
+	return 1, nil
 }
 
 // rangesOverList 报告 range 的管道是不是恰好一个以列表变量结尾的字段链（.items、$.items、$x.items）。

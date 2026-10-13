@@ -123,9 +123,13 @@ func TestRejected(t *testing.T) {
 		`{{range .site}}{{end}}`:                 "range 只能遍历列表变量",
 		`{{range .items | len}}{{end}}`:          "range 只能遍历列表变量",
 		`{{range .items}}{{range $.items}}{{range $.items}}{{end}}{{end}}{{end}}`: "最多嵌套 2 层",
-		// 两个并排的两层空 range：100×(1+100)×2 = 20200 > 20000
-		`{{range .items}}{{range $.items}}{{end}}{{end}}{{range .items}}{{range $.items}}{{end}}{{end}}`:                            "循环太多",
-		`{{if .free}}{{range .items}}{{range $.items}}{{end}}{{end}}{{else}}{{range .items}}{{range $.items}}{{end}}{{end}}{{end}}`: "循环太多",
+		// 两层循环里 20 个动作：内层 3+100×(1+60) = 6103，外层 3+100×(1+6103) = 610403 > 200000
+		`{{range .items}}{{range $.items}}` + strings.Repeat(`{{.site}}`, 20) + `{{end}}{{end}}`: "模板太复杂",
+		// 只有一个分支会执行，但两个分支都按最坏情况计入：各 130403 步
+		`{{if .free}}` + nested4 + `{{else}}` + nested4 + `{{end}}`: "模板太复杂",
+		// 内置函数、取字段这些不另外计量的步骤也算步数
+		`{{range .items}}{{range $.items}}` + strings.Repeat(`{{if len $.items}}{{end}}`, 300) + `{{end}}{{end}}`: "模板太复杂",
+		`{{$z := 1}}` + strings.Repeat(`{{$a := 1}}`, MaxVars):                                                    "变量太多",
 		`{{.nope`:     "第 1 行",
 		`{{nope .x}}`: "没有这个函数：nope",
 	}
@@ -135,10 +139,19 @@ func TestRejected(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalid)
 		assert.Contains(t, err.Error(), want, src)
 	}
-	// 一个两层嵌套（10100）可以
-	_, err := Parse(`{{range .items}}{{range $.items}}{{end}}{{end}}`, Text, lists)
-	assert.NoError(t, err)
+	// 一个空的两层嵌套（10403 步）、一个分支里的 nested4（130403 步）、MaxVars 个变量都可以
+	for _, src := range []string{
+		`{{range .items}}{{range $.items}}{{end}}{{end}}`,
+		`{{if .free}}` + nested4 + `{{end}}`,
+		strings.Repeat(`{{$a := 1}}`, MaxVars),
+	} {
+		_, err := Parse(src, Text, lists)
+		assert.NoError(t, err, src)
+	}
 }
+
+// nested4 是两层循环里 4 个动作：内层 3+100×(1+12) = 1303 步，外层 3+100×(1+1303) = 130403 步
+const nested4 = `{{range .items}}{{range $.items}}{{.site}}{{.site}}{{.site}}{{.site}}{{end}}{{end}}`
 
 func TestExecuteErrors(t *testing.T) {
 	// 变量名写错：Check 报出来，Execute 按零值

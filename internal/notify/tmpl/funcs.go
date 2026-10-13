@@ -16,7 +16,8 @@ import (
 // funcs 是模板能用的函数，b 是这一次渲染的工作量预算（解析时传 nil：那时只用到函数名，见 Template.exec）。
 // eq/ne/lt/le/gt/ge 换成认数字的版本（整数与浮点数可以直接比），printf 限制宽度与精度，
 // call 不让用（数据里没有函数，留着只会让人困惑）；内置的 print、println、html、js、urlquery 会把所有参数连成一串，
-// 也换成有上限的版本。处理文字与列表的函数都按参数与结果的大小扣同一份预算。
+// 也换成有上限的版本；内置的 index 按 key 取 map 时要散列整个 key，换成记账的版本。
+// 处理文字与列表的函数都按参数与结果的大小扣同一份预算。没换的内置函数（len、slice、and、or、not）每次都是 O(1)。
 func funcs(b *budget) template.FuncMap {
 	return template.FuncMap{
 		"json":      b.toJSON,
@@ -39,6 +40,7 @@ func funcs(b *budget) template.FuncMap {
 		"html":      b.concat(template.HTMLEscaper),
 		"js":        b.concat(template.JSEscaper),
 		"urlquery":  b.concat(template.URLQueryEscaper),
+		"index":     b.index,
 		"eq":        b.eq,
 		"ne":        b.compare(ne),
 		"lt":        b.compare(orderBy(func(c int) bool { return c < 0 })),
@@ -211,6 +213,58 @@ func (b *budget) eq(x any, ys ...any) (bool, error) {
 		return false, err
 	}
 	return eq(x, ys...)
+}
+
+// index 和内置的一样：列表与字符串按整数下标取，map 按 key 取（没有这个 key 时是零值）。
+// 按 key 取 map 要先散列整个 key，长 key 也要逐字节看，所以先按各个下标的大小扣预算。
+func (b *budget) index(item any, keys ...any) (any, error) {
+	if err := b.args(keys...); err != nil {
+		return nil, err
+	}
+	v := reflect.ValueOf(item)
+	for _, k := range keys {
+		if v = indirect(v); !v.IsValid() {
+			return nil, errors.New("index of nil")
+		}
+		switch v.Kind() {
+		case reflect.Array, reflect.Slice, reflect.String:
+			i, ok := toIntExact(k)
+			if !ok {
+				return nil, fmt.Errorf("cannot index slice/array with type %T", k)
+			}
+			if i < 0 || i >= int64(v.Len()) {
+				return nil, fmt.Errorf("index out of range: %d", i)
+			}
+			v = v.Index(int(i))
+		case reflect.Map:
+			kv := reflect.ValueOf(k)
+			if !kv.IsValid() || !kv.Type().AssignableTo(v.Type().Key()) {
+				return nil, fmt.Errorf("value has type %T; should be %s", k, v.Type().Key())
+			}
+			if x := v.MapIndex(kv); x.IsValid() {
+				v = x
+			} else {
+				v = reflect.Zero(v.Type().Elem())
+			}
+		default:
+			return nil, fmt.Errorf("can't index item of type %s", v.Type())
+		}
+	}
+	if !v.IsValid() {
+		return nil, nil
+	}
+	return v.Interface(), nil
+}
+
+// indirect 去掉接口与指针的外壳；nil 时返回无效值。
+func indirect(v reflect.Value) reflect.Value {
+	for v.IsValid() && (v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer) {
+		if v.IsNil() {
+			return reflect.Value{}
+		}
+		v = v.Elem()
+	}
+	return v
 }
 
 // toJSON 是值的 JSON 写法（字符串带引号、转义好），用在请求体里：{"content": {{json .text}}}。
