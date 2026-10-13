@@ -44,7 +44,7 @@ func TestCmdExitDispatch(t *testing.T) {
 	}
 	switch target {
 	case "run_invalid_mode":
-		_ = os.Remove("/tmp/pt-tools.lock")
+		_ = os.Remove(runLockPath())
 		c := &cobra.Command{}
 		c.Flags().String("mode", "bogus", "")
 		_ = c.Flags().Set("mode", "bogus")
@@ -128,7 +128,7 @@ type cmdErr string
 func (e cmdErr) Error() string { return string(e) }
 
 func runLockHeldSubprocess() {
-	l, err := utils.NewLocker("/tmp/pt-tools.lock")
+	l, err := utils.NewLocker(runLockPath())
 	if err != nil {
 		os.Exit(3)
 	}

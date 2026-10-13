@@ -30,7 +30,7 @@ func TestRunCmdFunc_PersistentSignalExit(t *testing.T) {
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
 		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1,
 	}))
-	_ = os.Remove("/tmp/pt-tools.lock")
+	_ = os.Remove(runLockPath())
 
 	guard := make(chan os.Signal, 4)
 	signal.Notify(guard, syscall.SIGTERM)
@@ -73,7 +73,7 @@ func TestRunCmdFunc_SingleSuccess(t *testing.T) {
 	}))
 
 	// Remove any stale lock so Lock() succeeds in this process.
-	_ = os.Remove("/tmp/pt-tools.lock")
+	_ = os.Remove(runLockPath())
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("mode", "single", "")
