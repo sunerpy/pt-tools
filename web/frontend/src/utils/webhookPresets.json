@@ -1,0 +1,83 @@
+[
+  {
+    "key": "raw",
+    "label": "原样 JSON",
+    "desc": "不写请求体模板，发 pt-tools 固定的 JSON：title、text、link，加上 event（事件类型、时间与全部变量）",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "",
+    "url_hint": ""
+  },
+  {
+    "key": "discord",
+    "label": "Discord",
+    "desc": "频道设置里「整合 → Webhook」生成的地址",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "{\"content\": {{print \"**\" .title \"**\\n\" .text | truncate 1900 | json}}}",
+    "url_hint": "https://discord.com/api/webhooks/<id>/<token>"
+  },
+  {
+    "key": "slack",
+    "label": "Slack",
+    "desc": "Slack App 的 Incoming Webhook 地址",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "{\"text\": {{print \"*\" .title \"*\\n\" .text | json}}}",
+    "url_hint": "https://hooks.slack.com/services/<…>"
+  },
+  {
+    "key": "gotify",
+    "label": "Gotify",
+    "desc": "应用令牌写在地址的 token 参数里",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "{\"title\": {{json .title}}, \"message\": {{json .text}}, \"priority\": 5}",
+    "url_hint": "https://<你的 Gotify>/message?token=<应用令牌>"
+  },
+  {
+    "key": "pushplus",
+    "label": "PushPlus",
+    "desc": "把请求体里的「你的 token」换成 PushPlus 的 token",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "{\"token\": \"你的 token\", \"title\": {{json .title}}, \"content\": {{json .text}}, \"template\": \"txt\"}",
+    "url_hint": "https://www.pushplus.plus/send"
+  },
+  {
+    "key": "homeassistant",
+    "label": "Home Assistant",
+    "desc": "自动化里用 Webhook 触发器，webhook_id 写在地址里",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "{\"event\": {{json .event}}, \"title\": {{json .title}}, \"message\": {{json .text}}}",
+    "url_hint": "http://<Home Assistant 地址>:8123/api/webhook/<webhook_id>"
+  },
+  {
+    "key": "n8n",
+    "label": "n8n / 完整事件",
+    "desc": "把所有变量拍平成一个 JSON 对象（别的事件的变量是空值），方便在 n8n 这类工具里按字段取",
+    "method": "POST",
+    "content_type": "json",
+    "body_template": "{{json .}}",
+    "url_hint": "https://<你的 n8n>/webhook/<路径>"
+  },
+  {
+    "key": "text",
+    "label": "纯文本",
+    "desc": "请求体是标题、空一行、正文",
+    "method": "POST",
+    "content_type": "text",
+    "body_template": "{{.title}}\n\n{{.text}}",
+    "url_hint": ""
+  },
+  {
+    "key": "form",
+    "label": "表单",
+    "desc": "application/x-www-form-urlencoded：值用 urlquery 编码",
+    "method": "POST",
+    "content_type": "form",
+    "body_template": "event={{urlquery .event}}&title={{urlquery .title}}&text={{urlquery .text}}",
+    "url_hint": ""
+  }
+]

@@ -1,3 +1,5 @@
+import { headersToText, parseHeadersText } from "@/utils/webhook";
+
 const BASE_URL = "";
 
 interface ApiOptions extends RequestInit {
@@ -1424,7 +1426,12 @@ export interface NotificationConfig {
   allowed_qq_users?: string;
   endpoint_url?: string;
   hmac_secret?: string;
+  /** Webhook 的自定义请求头：表单里是 JSON 文本，提交时转成对象（utils/webhook） */
   headers?: string;
+  /** Webhook 的请求方法、请求体格式与请求体模板（M21） */
+  method?: string;
+  content_type?: string;
+  body_template?: string;
   webhook_key?: string;
   proxy_url?: string;
   // 只出站的通道（Bark、Server 酱、ntfy、钉钉、飞书），字段见 utils/notifyChannels
@@ -1466,6 +1473,9 @@ const NOTIFICATION_DYNAMIC_FIELDS = [
   "endpoint_url",
   "hmac_secret",
   "headers",
+  "method",
+  "content_type",
+  "body_template",
   "webhook_key",
   "proxy_url",
   "server_url",
@@ -1512,6 +1522,11 @@ function packNotificationBody(
       hasDynamic = true;
     }
   }
+  // 请求头在表单里是 JSON 文本，后端要对象；解析不了的原样发出，由后端回 400 写明原因
+  if (typeof config.headers === "string") {
+    const parsed = parseHeadersText(config.headers);
+    if (parsed.ok) config.headers = parsed.value;
+  }
   if (hasDynamic || includeEmpty) {
     body.config_json = config;
   }
@@ -1549,7 +1564,9 @@ function unpackNotificationResponse(
     if (NOTIFICATION_BASE_FIELDS.has(key as keyof NotificationConfig)) continue;
     if (key === "config_json") continue;
     const v = raw[key];
-    if (typeof v === "string") {
+    if (key === "headers") {
+      sink[key] = headersToText(v);
+    } else if (typeof v === "string") {
       sink[key as string] = v;
     } else if (Array.isArray(v) && arrayFields.has(key as string)) {
       sink[key as string] = v;
@@ -1563,7 +1580,10 @@ function unpackNotificationResponse(
     const cfg = raw.config_json as Record<string, unknown>;
     for (const key of NOTIFICATION_DYNAMIC_FIELDS) {
       const v = cfg[key];
-      if (typeof v === "string") {
+      if (key === "headers") {
+        // 对象写成 JSON 文本给编辑框；不然对象会被丢掉，保存时再把原来的请求头覆盖掉
+        if (v !== undefined) sink[key] = headersToText(v);
+      } else if (typeof v === "string") {
         sink[key] = v;
       } else if (Array.isArray(v) && arrayFields.has(key)) {
         sink[key] = v;
@@ -1655,6 +1675,24 @@ export interface NotifyTemplateInput {
   text: string;
 }
 
+/** Webhook 请求的预览输入（M21）：和通道配置的同名字段一样，type 是用哪种事件的示例数据 */
+export interface WebhookPreviewInput {
+  type: string;
+  method: string;
+  endpoint_url: string;
+  content_type: string;
+  headers: Record<string, string>;
+  body_template: string;
+}
+
+/** 按示例数据渲染出来的请求：只渲染、不发送，不含签名 */
+export interface WebhookPreviewResult {
+  method: string;
+  url: string;
+  content_type: string;
+  body: string;
+}
+
 export const chatopsApi = {
   templates: {
     list: () => api.get<NotifyTemplateCatalog>("/api/chatops/templates"),
@@ -1664,6 +1702,10 @@ export const chatopsApi = {
       api.delete<{ success: boolean }>(`/api/chatops/templates/${encodeURIComponent(type)}`),
     preview: (type: string, data: NotifyTemplateInput) =>
       api.post<NotifyTemplateInput>("/api/chatops/templates/preview", { type, ...data }),
+  },
+  webhook: {
+    preview: (data: WebhookPreviewInput) =>
+      api.post<WebhookPreviewResult>("/api/chatops/webhook/preview", data),
   },
   notifications: {
     list: async () => {
