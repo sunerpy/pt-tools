@@ -9,7 +9,9 @@ import {
   createLock,
   normalizeSchedule,
   pickSites,
+  problemsOf,
   pushFingerprint,
+  runHadProblems,
   runSync,
 } from "./scheduled-sync";
 
@@ -130,7 +132,7 @@ describe("pickSites", () => {
 });
 
 describe("runSync", () => {
-  it("只推 Cookie 有变化的站点；没有 Cookie 的不算失败", async () => {
+  it("只推 Cookie 有变化的站点；浏览器里没有可用 Cookie 的站点不推，按名字记在 missing 里", async () => {
     const h = harness({
       schedule: { allSites: true },
       enabled: ["hdsky", "hdtime", "ourbits"],
@@ -139,7 +141,13 @@ describe("runSync", () => {
     h.hashes.hdtime = await pushFingerprint("http://pt.example", "b=2");
     const run = await runSync(h.deps, "schedule");
     expect(h.pushed).toEqual(["hdsky"]);
-    expect(run.ptTools).toEqual({ synced: ["hdsky"], unchanged: 1, failed: [] });
+    expect(run.ptTools).toEqual({
+      synced: ["hdsky"],
+      unchanged: 1,
+      failed: [],
+      missing: ["ourbits"],
+    });
+    expect(problemsOf(run)).toContain("ourbits");
     expect(h.hashes.hdsky).toBe(await pushFingerprint("http://pt.example/", "a=1"));
     expect(run.cookieCloud.skipped).toBeTruthy();
 
@@ -147,6 +155,44 @@ describe("runSync", () => {
     const again = await runSync(h.deps, "schedule");
     expect(h.pushed).toEqual(["hdsky"]);
     expect(again.ptTools.unchanged).toBe(2);
+    expect(again.ptTools.missing).toEqual(["ourbits"]);
+  });
+
+  it("勾选了的站点都没有 Cookie 时也有结果：不是 0/0/0 的「成功」", async () => {
+    const h = harness({ autoSync: { hdsky: true, hdtime: true }, cookies: {} });
+    const run = await runSync(h.deps, "manual");
+    expect(h.pushed).toEqual([]);
+    expect(run.ptTools.synced).toEqual([]);
+    expect(run.ptTools.failed).toEqual([]);
+    expect(run.ptTools.missing).toEqual(["hdsky", "hdtime"]);
+    const problems = problemsOf(run);
+    expect(problems).toContain("hdsky");
+    expect(problems).toContain("hdtime");
+    // 「立即同步一次」不提示成功
+    expect(runHadProblems(run)).toBe(true);
+  });
+
+  it("runHadProblems：全部顺利时才算成功；没连上、没有要同步的站点也不算", async () => {
+    const ok = harness({ autoSync: { hdsky: true }, cookies: { hdsky: "a=1" } });
+    expect(runHadProblems(await runSync(ok.deps, "manual"))).toBe(false);
+    // 再跑一次没有变化，也算顺利
+    expect(runHadProblems(await runSync(ok.deps, "manual"))).toBe(false);
+
+    const off = harness({ connected: false, autoSync: { hdsky: true }, cookies: { hdsky: "a=1" } });
+    expect(runHadProblems(await runSync(off.deps, "manual"))).toBe(true);
+
+    const none = harness({});
+    const run = await runSync(none.deps, "manual");
+    expect(run.ptTools.skipped).toBeTruthy();
+    expect(runHadProblems(run)).toBe(true);
+
+    const failed = harness({
+      autoSync: { hdsky: true },
+      cookies: { hdsky: "a=1" },
+      pushError: { hdsky: new Error("HTTP 500") },
+    });
+    expect(runHadProblems(await runSync(failed.deps, "manual"))).toBe(true);
+    expect(runHadProblems(null)).toBe(false);
   });
 
   it("没连上 pt-tools 时跳过；「全部站点」不会推 pt-tools 里没启用的站点", async () => {
@@ -245,6 +291,38 @@ describe("runSync", () => {
     expect(bad.ccState?.lastError).toBe("连不上");
     expect(bad.ccState?.lastErrorAt).toBe("2026-10-14T00:00:00.000Z");
     expect(bad.pushed).toEqual(["hdsky"]);
+  });
+
+  it("problemsOf：全部顺利时为空；推失败、没有 Cookie、CookieCloud 出错各占一行；旧结果没有 missing 也能读", async () => {
+    const ok = harness({ autoSync: { hdsky: true }, cookies: { hdsky: "a=1" } });
+    expect(problemsOf(await runSync(ok.deps, "schedule"))).toBe("");
+    expect(problemsOf(null)).toBe("");
+
+    const problems = problemsOf({
+      at: "2026-10-14T00:00:00.000Z",
+      trigger: "schedule",
+      ptTools: {
+        synced: [],
+        unchanged: 0,
+        failed: [{ siteId: "hdsky", error: "HTTP 500" }],
+        missing: ["agsvpt", "xingyunge"],
+      },
+      cookieCloud: { uploaded: false, domains: 0, cookies: 0, error: "连不上" },
+    }).split("\n");
+    expect(problems).toHaveLength(3);
+    expect(problems[0]).toContain("HTTP 500");
+    expect(problems[1]).toContain("agsvpt, xingyunge");
+    expect(problems[2]).toContain("连不上");
+
+    // 这一版以前存下的结果没有 missing
+    expect(
+      problemsOf({
+        at: "2026-10-14T00:00:00.000Z",
+        trigger: "schedule",
+        ptTools: { synced: ["hdsky"], unchanged: 0, failed: [] },
+        cookieCloud: { uploaded: false, domains: 0, cookies: 0 },
+      }),
+    ).toBe("");
   });
 
   it("指纹带着 pt-tools 的地址：换了实例以后 Cookie 没变也会重新推", async () => {

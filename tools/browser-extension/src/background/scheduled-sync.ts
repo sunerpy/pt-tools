@@ -3,7 +3,8 @@
  *
  * pt-tools：只推 Cookie 有变化的站点（按上次推送的指纹判断，指纹带着 pt-tools 的地址，见 pushFingerprint）。
  * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器，没变的不推。「全部站点」只推 pt-tools 里
- * 已经启用的站点，不替用户启用新站点；单独打开了「自动同步」的站点照旧算在里面。
+ * 已经启用的站点，不替用户启用新站点；单独打开了「自动同步」的站点照旧算在里面。浏览器里没有可用 Cookie 的站点不推，
+ * 按站点记在结果的 missing 里（结果里列出来，也会发通知），不悄悄跳过。
  * 推 Cookie 的各条路共用一把锁（withPushLock）：读 Cookie、比指纹、推送、记指纹在锁里一起做。
  * CookieCloud：Cookie 与目标都没变时不传（见 modules/cookiecloud/upload）。
  *
@@ -127,7 +128,8 @@ async function syncPtTools(
   deps: ScheduledSyncDeps,
   schedule: SyncSchedule,
 ): Promise<SyncRunSummary["ptTools"]> {
-  const out: SyncRunSummary["ptTools"] = { synced: [], unchanged: 0, failed: [] };
+  const missing: string[] = [];
+  const out: SyncRunSummary["ptTools"] = { synced: [], unchanged: 0, failed: [], missing };
   const baseUrl = await deps.ptTools();
   if (!baseUrl) {
     out.skipped = t("sync.skipNotConnected");
@@ -185,6 +187,8 @@ async function syncPtTools(
       out.unchanged += 1;
     } else if (outcome === "pushed") {
       out.synced.push(site.id);
+    } else {
+      missing.push(site.id);
     }
   }
   return out;
@@ -216,6 +220,42 @@ async function syncCookieCloud(deps: ScheduledSyncDeps): Promise<SyncRunSummary[
     });
     return { uploaded: false, domains: 0, cookies: 0, error: text };
   }
+}
+
+/** problemsOf 是一轮同步里要用户处理的问题（通知与弹窗的提示用），没有问题时为空串。 */
+export function problemsOf(run: SyncRunSummary | null): string {
+  if (!run) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (run.ptTools.error) {
+    parts.push(run.ptTools.error);
+  }
+  if (run.ptTools.failed.length > 0) {
+    parts.push(
+      t(
+        "sync.problemPtTools",
+        run.ptTools.failed.length,
+        run.ptTools.failed.map((f) => f.error).join("; "),
+      ),
+    );
+  }
+  const missing = run.ptTools.missing ?? [];
+  if (missing.length > 0) {
+    parts.push(t("sync.problemMissing", missing.length, missing.join(", ")));
+  }
+  if (run.cookieCloud.error) {
+    parts.push(t("sync.problemCookieCloud", run.cookieCloud.error));
+  }
+  return parts.join("\n");
+}
+
+/**
+ * runHadProblems 判断「立即同步一次」以后该不该说「已经同步了」：pt-tools 这边没同步（没连上、登录过期、没有要同步的站点），
+ * 或者有站点没同步上、没有可用的 Cookie、CookieCloud 出错时为 true。
+ */
+export function runHadProblems(run: SyncRunSummary | null): boolean {
+  return run !== null && (Boolean(run.ptTools.skipped) || problemsOf(run) !== "");
 }
 
 /** runSync 跑一轮：先 pt-tools，再 CookieCloud；两边互不影响。 */

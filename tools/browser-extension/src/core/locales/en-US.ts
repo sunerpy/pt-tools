@@ -216,6 +216,8 @@ export default {
   "error.extensionPageOnly": "This can only be done from the extension popup",
   "sync.problemTitle": "Scheduled cookie sync had problems",
   "sync.problemPtTools": "pt-tools: {0} site(s) failed ({1})",
+  "sync.problemMissing":
+    "pt-tools: {0} site(s) have no usable cookie in this browser and were not synced ({1}); sign in to them in the browser first",
   "sync.problemCookieCloud": "CookieCloud: {0}",
   "sync.enabledSitesFailed":
     "Could not read the pt-tools site list, so this run synced only the sites with “Auto-sync cookies” on: {0}",
@@ -233,9 +235,13 @@ export default {
   "schedule.runNow": "Sync now",
   "schedule.saved": "Schedule saved",
   "schedule.ran": "Sync finished",
+  "schedule.ranWithProblems": "Sync finished with problems; see the result below",
   "schedule.lastRun": "Last run: {0}",
   "schedule.never": "Not run yet",
-  "schedule.summaryPt": "pt-tools: {0} synced, {1} unchanged, {2} failed",
+  "schedule.summaryPt":
+    "pt-tools: {0} synced, {1} unchanged, {2} without a usable cookie, {3} failed",
+  "schedule.summaryPtMissing":
+    "· No usable cookie in this browser (signed out, incomplete or expired), not synced: {0}",
   "schedule.summaryPtSkipped": "pt-tools: {0}",
   "schedule.summaryCc": "CookieCloud: uploaded {1} cookies for {0} domains",
   "schedule.summaryCcUnchanged": "CookieCloud: no changes",

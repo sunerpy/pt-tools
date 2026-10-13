@@ -77,6 +77,7 @@ import {
   type ScheduledSyncDeps,
   createLock,
   normalizeSchedule,
+  problemsOf,
   pushFingerprint,
   runSync,
 } from "./scheduled-sync";
@@ -727,30 +728,6 @@ const scheduledSyncDeps: ScheduledSyncDeps = {
   errorText,
   now: () => new Date(),
 };
-
-/** problemsOf 是一轮同步里出的问题（给通知用），没有问题时为空串。 */
-function problemsOf(run: SyncRunSummary | null): string {
-  if (!run) {
-    return "";
-  }
-  const parts: string[] = [];
-  if (run.ptTools.error) {
-    parts.push(run.ptTools.error);
-  }
-  if (run.ptTools.failed.length > 0) {
-    parts.push(
-      t(
-        "sync.problemPtTools",
-        run.ptTools.failed.length,
-        run.ptTools.failed.map((f) => f.error).join("; "),
-      ),
-    );
-  }
-  if (run.cookieCloud.error) {
-    parts.push(t("sync.problemCookieCloud", run.cookieCloud.error));
-  }
-  return parts.join("\n");
-}
 
 let syncInFlight: Promise<SyncRunSummary> | null = null;
 
