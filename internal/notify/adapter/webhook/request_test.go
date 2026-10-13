@@ -315,8 +315,10 @@ func TestCheckResponse(t *testing.T) {
 	err = check(`{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`, 200, `{"code":40001,"msg":"invalid token"}`)
 	require.ErrorIs(t, err, errResponseRejected)
 	assert.Contains(t, err.Error(), "invalid token")
-	err = check(`{{.body}}`, 200, strings.Repeat("长", 500))
-	assert.Less(t, len([]rune(err.Error())), 260)
+	// 不在 checkResponse 里截短（先去凭证再截，见 scrubError）
+	err = check(`{{.body}}`, 200, strings.Repeat("长", 300))
+	assert.Contains(t, err.Error(), strings.Repeat("长", 300))
+	assert.Less(t, len([]rune(scrubError(err, nil).Error())), maxReasonRunes+2)
 
 	// 响应不是 JSON：取字段得零值，判断为不成功；算不出来的也算失败
 	assert.ErrorIs(t, check(`{{eq .json.code 0}}`, 200, `<html>busy</html>`), errResponseRejected)
@@ -445,4 +447,24 @@ func TestWebhook_FailureReasonShortSecret(t *testing.T) {
 	err = w.Send(context.Background(), sampleNotification(notify.EventTest))
 	require.ErrorIs(t, err, errResponseRejected)
 	assert.Contains(t, err.Error(), "quota 1 left", "普通的短查询参数不触发")
+}
+
+// 凭证正好横跨截断处：先去凭证再截短，截下来的半截凭证不会漏出去
+func TestWebhook_FailureReasonSecretAcrossCut(t *testing.T) {
+	var echo string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(echo))
+	}))
+	t.Cleanup(srv.Close)
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL + "/hook",
+		"headers":          map[string]string{"X-Key": "LONGSECRETVALUE1"},
+		"success_template": `{{.json.msg}}`,
+	})
+	prefix := "webhook 响应不满足成功条件："
+	pad := strings.Repeat("x", maxReasonRunes-len([]rune(prefix))-4)
+	echo = `{"msg":"` + pad + `LONGSECRETVALUE1 tail"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.NotContains(t, err.Error(), "LONG")
 }

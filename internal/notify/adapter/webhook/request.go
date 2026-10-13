@@ -141,10 +141,18 @@ func (r *request) checkResponse(status int, body []byte) error {
 	case out == "" || strings.EqualFold(out, "false"):
 		return errResponseRejected
 	}
-	if runes := []rune(out); len(runes) > 200 {
-		out = string(runes[:200]) + "…"
-	}
+	// 不在这里截短：凭证可能正好横跨截断处，要先去掉凭证再截（scrubError、Preview 里做）
 	return fmt.Errorf("%w：%s", errResponseRejected, out)
+}
+
+// maxReasonRunes 是失败原因最多显示多少个字符
+const maxReasonRunes = 240
+
+func truncateReason(s string) string {
+	if runes := []rune(s); len(runes) > maxReasonRunes {
+		return string(runes[:maxReasonRunes]) + "…"
+	}
+	return s
 }
 
 // responseData 是成功条件的数据：status、body（最多 maxResponseBody 字节），以及响应是 JSON 时解出来的 json
@@ -253,7 +261,7 @@ func scrubError(err error, secrets []secretValue) error {
 			return errReasonHidden
 		}
 	}
-	msg = redact.Secrets(msg)
+	msg = truncateReason(redact.Secrets(msg))
 	if errors.Is(err, errResponseRejected) {
 		return &scrubbedError{msg: msg, err: errResponseRejected}
 	}
@@ -490,7 +498,7 @@ func Preview(in PreviewInput) (*PreviewResult, error) {
 		ok := err == nil
 		res.Success = &ok
 		if !ok {
-			res.SuccessReason = err.Error()
+			res.SuccessReason = truncateReason(err.Error())
 		}
 	}
 	return res, nil
