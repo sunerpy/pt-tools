@@ -1175,7 +1175,45 @@ func (d *NexusPHPDriver) executeProcess(ctx context.Context, uiConfig *UserInfoC
 		}
 	}
 
+	// 定义里没写 lastAccessAt 的站点，在用户详情页上按 NexusPHP 的通用写法找「最近动向」：
+	// 保号探测靠它判断最近一次访问，取不到就报解析失败（AGSVPT、星陨阁等十几个站点都是这样）。
+	if !declaresLastAccess(uiConfig) && strings.Contains(reqURL, "userdetails.php") {
+		if v := d.extractFieldValue(res.Document, defaultLastAccessSelector); v != "" && v != "0" {
+			result["lastAccessAt"] = v
+		}
+	}
+
 	return result, nil
+}
+
+// defaultLastAccessSelector 是 NexusPHP 用户详情页「最近动向 / 上次访问」一行的通用写法（简繁与英文界面）。
+var defaultLastAccessSelector = FieldSelector{
+	Selector: []string{
+		"td.rowhead:contains('最近动向') + td",
+		"td.rowhead:contains('最近動向') + td",
+		"td.rowhead:contains('最后活动') + td",
+		"td.rowhead:contains('最後活動') + td",
+		"td.rowhead:contains('最后访问') + td",
+		"td.rowhead:contains('最後訪問') + td",
+		"td.rowhead:contains('上次访问') + td",
+		"td.rowhead:contains('上次訪問') + td",
+		"td.rowhead:contains('Last access') + td",
+		"td.rowhead:contains('Last seen') + td",
+	},
+	Filters: []Filter{
+		{Name: "regex", Args: []any{`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`}},
+		{Name: "parseTime"},
+	},
+}
+
+// declaresLastAccess 报告站点定义自己有没有写最近访问时间的选择器（写了就不用通用写法）。
+func declaresLastAccess(uiConfig *UserInfoConfig) bool {
+	if uiConfig == nil {
+		return false
+	}
+	_, a := uiConfig.Selectors["lastAccessAt"]
+	_, b := uiConfig.Selectors["lastAccess"]
+	return a || b
 }
 
 // extractFieldValue extracts a field value from the document using the selector config

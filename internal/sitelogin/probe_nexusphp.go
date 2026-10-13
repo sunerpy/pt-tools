@@ -31,6 +31,15 @@ func classifyNexusPHPResult(info v2.UserInfo, err error, clock Clock, source Pro
 			}
 			return result, nil
 		}
+		// 登录后的页面取到了用户名，只是页面上没有「最近动向」：会话是好的，而这次取用户信息本身就是一次访问
+		// （NexusPHP 每次登录后的请求都更新最近访问时间），所以按这次探测的时间记，不报解析失败。
+		if strings.TrimSpace(info.Username) != "" {
+			result.Status = OK
+			access := now.UTC()
+			result.LastAccessAt = &access
+			result.Diagnostic = "页面上没有找到「最近动向」，按这次探测访问的时间记"
+			return result, nil
+		}
 		result.Status = PARSE_ERROR
 		result.Diagnostic = "driver returned UserInfo with zero LastAccess at " + now.UTC().Format(time.RFC3339)
 		return result, nil

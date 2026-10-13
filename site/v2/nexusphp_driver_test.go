@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -1941,4 +1942,68 @@ func TestNexusPHPDriver_ParseDownload(t *testing.T) {
 	// nil doc + empty body -> error
 	_, err = d.ParseDownload(NexusPHPResponse{})
 	assert.ErrorIs(t, err, ErrParseError)
+}
+
+// 定义里没写 lastAccessAt 的站点：在用户详情页上按通用写法找「最近动向」（保号探测靠它，取不到就报解析失败）。
+// 定义自己写了就用它的，不叠加通用写法。
+func TestNexusPHPDriver_DefaultLastAccess(t *testing.T) {
+	page := func(label string) string {
+		return `<html><body><table>
+			<tr><td class="rowhead">上传量</td><td>1.50 TB</td></tr>
+			<tr><td class="rowhead">` + label + `</td><td class="rowfollow">2026-10-12 08:30:00 (1分钟前)</td></tr>
+		</table></body></html>`
+	}
+	label := "最近动向"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(page(label)))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	newDef := func(selectors map[string]FieldSelector, fields []string) *SiteDefinition {
+		base := map[string]FieldSelector{
+			"id":   {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+			"name": {Selector: []string{"a[href*='userdetails.php']"}},
+		}
+		for k, v := range selectors {
+			base[k] = v
+		}
+		return &SiteDefinition{
+			ID: "npdef", Name: "NPDef", Schema: SchemaNexusPHP, TimezoneOffset: "+0800",
+			UserInfo: &UserInfoConfig{
+				Process: []UserInfoProcess{
+					{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+					{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: fields},
+				},
+				Selectors: base,
+			},
+		}
+	}
+	get := func(def *SiteDefinition) UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+	want := time.Date(2026, 10, 12, 8, 30, 0, 0, time.FixedZone("CST", 8*3600)).Unix()
+
+	for _, l := range []string{"最近动向", "上次访问", "最後活動", "Last access"} {
+		label = l
+		info := get(newDef(nil, []string{"uploaded"}))
+		assert.Equal(t, want, info.LastAccess, l)
+	}
+
+	// 定义自己写了 lastAccessAt：只按它取（这里故意写一个取不到的选择器）
+	label = "最近动向"
+	own := newDef(map[string]FieldSelector{"lastAccessAt": {Selector: []string{"#nope"}, Filters: []Filter{{Name: "parseTime"}}}}, []string{"lastAccessAt"})
+	assert.Zero(t, get(own).LastAccess)
+
+	// 页面上没有这一行：还是 0
+	label = "加入日期"
+	assert.Zero(t, get(newDef(nil, []string{"uploaded"})).LastAccess)
 }

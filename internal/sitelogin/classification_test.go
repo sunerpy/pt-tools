@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
@@ -40,4 +41,22 @@ func TestClassifyMTorrentError_DriverSentinels(t *testing.T) {
 	assert.Equal(t, KEY_ERROR, classifyMTorrentError(v2.ErrInvalidCredentials).Status)
 	assert.Equal(t, RATE_LIMITED, classifyMTorrentError(fmt.Errorf("HTTP 429: %w", v2.ErrRateLimited)).Status)
 	assert.Equal(t, NETWORK_ERROR, classifyMTorrentError(fmt.Errorf("%w: EOF", v2.ErrNetworkError)).Status)
+}
+
+// 登录后的页面取到了用户名、只是没有「最近动向」：会话是好的，按这次探测的时间记最近访问，不报解析失败。
+// 连用户名都没有时照旧是解析失败（多半不是登录后的页面）。
+func TestClassifyNexusPHPResult_NoLastAccessButLoggedIn(t *testing.T) {
+	now := time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(now)
+	res, err := classifyNexusPHPResult(v2.UserInfo{Username: "someone"}, nil, clock, ProbeSourceHTTPCookie)
+	require.NoError(t, err)
+	assert.Equal(t, OK, res.Status)
+	require.NotNil(t, res.LastAccessAt)
+	assert.Equal(t, now, *res.LastAccessAt)
+	assert.Contains(t, res.Diagnostic, "最近动向")
+
+	res, err = classifyNexusPHPResult(v2.UserInfo{}, nil, clock, ProbeSourceHTTPCookie)
+	require.NoError(t, err)
+	assert.Equal(t, PARSE_ERROR, res.Status)
+	assert.Nil(t, res.LastAccessAt)
 }
