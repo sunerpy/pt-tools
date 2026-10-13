@@ -89,6 +89,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "ChatOps",
     items: [
       { path: "/chatops/notifications", label: "消息通知", icon: "bell", rail: true },
+      { path: "/chatops/templates", label: "消息模板", icon: "file-text" },
       { path: "/chatops/bindings", label: "ChatOps 绑定", icon: "link" },
       { path: "/chatops/audit", label: "操作审计", icon: "shield-check" },
       { path: "/chatops/rss-notifications", label: "RSS 通知日志", icon: "rss" },
@@ -179,6 +180,7 @@ const ROUTE_NAME_TO_NAV: Record<string, string> = {
   cleanup: "/cleanup",
   notifications: "/chatops/notifications",
   "notification-detail": "/chatops/notifications",
+  "notify-templates": "/chatops/templates",
   bindings: "/chatops/bindings",
   "audit-log": "/chatops/audit",
   "rss-notifications": "/chatops/rss-notifications",

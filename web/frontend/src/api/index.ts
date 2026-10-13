@@ -1622,7 +1622,49 @@ export interface RSSNotificationLog {
   updated_at: string;
 }
 
+/** 消息模板的一个变量（路线图 M21）。列表的每一项是对象，字段在 item 里。 */
+export interface NotifyTemplateVar {
+  key: string;
+  type: "string" | "int" | "float" | "bool" | "list";
+  desc: string;
+  sample?: unknown;
+  item?: NotifyTemplateVar[];
+}
+
+/** 一种事件：说明、变量、内置标题与正文的示例，以及当前的模板（没有自定义时 title、text 为空）。 */
+export interface NotifyTemplateView {
+  type: string;
+  name: string;
+  desc: string;
+  vars: NotifyTemplateVar[];
+  sample_title: string;
+  sample_text: string;
+  title: string;
+  text: string;
+  customized: boolean;
+  updated_at?: string;
+}
+
+export interface NotifyTemplateCatalog {
+  common_vars: NotifyTemplateVar[];
+  events: NotifyTemplateView[];
+}
+
+export interface NotifyTemplateInput {
+  title: string;
+  text: string;
+}
+
 export const chatopsApi = {
+  templates: {
+    list: () => api.get<NotifyTemplateCatalog>("/api/chatops/templates"),
+    save: (type: string, data: NotifyTemplateInput) =>
+      api.put<NotifyTemplateView>(`/api/chatops/templates/${encodeURIComponent(type)}`, data),
+    reset: (type: string) =>
+      api.delete<{ success: boolean }>(`/api/chatops/templates/${encodeURIComponent(type)}`),
+    preview: (type: string, data: NotifyTemplateInput) =>
+      api.post<NotifyTemplateInput>("/api/chatops/templates/preview", { type, ...data }),
+  },
   notifications: {
     list: async () => {
       const raw = await api.get<(NotificationConfig & { config_json?: unknown })[]>(
