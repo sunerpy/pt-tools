@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/notify/tmpl"
+	"github.com/sunerpy/pt-tools/internal/redact"
 )
 
 // 请求体的格式（Config.ContentType）
@@ -160,6 +162,95 @@ func responseData(status int, body []byte) map[string]any {
 	}
 	return map[string]any{"status": int64(status), "body": string(body), "json": parsed}
 }
+
+// credentialKey 认出请求体里放凭证的字段名（token、key、secret、password、sign 一类）
+var credentialKey = regexp.MustCompile(`(?i)(token|key|secret|passw|pwd|auth|sign|credential|cookie|session)`)
+
+// sensitiveValues 是这次请求里可能是凭证的值：地址查询的每个值与较长的路径段（Discord 这类把 token 放在路径里）、
+// 自定义请求头的值、HMAC Secret，以及请求体里字段名像凭证的值（JSON 的任意一层与表单）。对方的响应把它们回显时要去掉。
+func sensitiveValues(r *rendered, cfg *Config) []string {
+	var out []string
+	add := func(v string) {
+		if v = strings.TrimSpace(v); len(v) >= 4 {
+			out = append(out, v)
+		}
+	}
+	if u, err := url.Parse(r.URL); err == nil {
+		for _, vs := range u.Query() {
+			for _, v := range vs {
+				add(v)
+			}
+		}
+		for _, seg := range strings.Split(u.Path, "/") {
+			if len(seg) >= 16 {
+				add(seg)
+			}
+		}
+	}
+	for _, v := range cfg.Headers {
+		add(v)
+		// 「Bearer xxx」「Basic xxx」：对方多半只回显后面那一段
+		for _, f := range strings.Fields(v) {
+			switch strings.ToLower(f) {
+			case "bearer", "basic", "token", "digest":
+				continue
+			}
+			add(f)
+		}
+	}
+	add(cfg.HMACSecret)
+	var v any
+	if json.Unmarshal(r.Body, &v) == nil {
+		collectCredentials(v, "", add)
+	} else if form, err := url.ParseQuery(string(r.Body)); err == nil {
+		for k, vs := range form {
+			if credentialKey.MatchString(k) {
+				for _, x := range vs {
+					add(x)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func collectCredentials(v any, key string, add func(string)) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			collectCredentials(e, k, add)
+		}
+	case []any:
+		for _, e := range x {
+			collectCredentials(e, key, add)
+		}
+	case string:
+		if credentialKey.MatchString(key) {
+			add(x)
+		}
+	}
+}
+
+// scrubError 把错误里出现的凭证值换成 ***，再按通用规则（redact.Secrets）去掉看起来像凭证的内容。
+func scrubError(err error, secrets []string) error {
+	msg := err.Error()
+	for _, s := range secrets {
+		msg = strings.ReplaceAll(msg, s, "***")
+	}
+	msg = redact.Secrets(msg)
+	if errors.Is(err, errResponseRejected) {
+		return &scrubbedError{msg: msg, err: errResponseRejected}
+	}
+	return errors.New(msg)
+}
+
+type scrubbedError struct {
+	msg string
+	err error
+}
+
+func (e *scrubbedError) Error() string { return e.msg }
+func (e *scrubbedError) Unwrap() error { return e.err }
 
 // normalizeJSON 把 json.Number 换成 int64（整数）或 float64，其余原样（逐层处理对象与数组）。
 func normalizeJSON(v any) any {

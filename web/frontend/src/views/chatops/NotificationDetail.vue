@@ -485,8 +485,9 @@ const whPreview = reactive({
   type: "rss.matched",
   result: null as WebhookPreviewResult | null,
   error: "",
-  /** 拿来试成功条件的一份响应（不保存） */
+  /** 拿来试成功条件的一份响应与它的状态码（不保存） */
   sampleResponse: "",
+  sampleStatus: 200,
 });
 /** 每次预览换一个序号：晚到的旧响应作废 */
 let whSeq = 0;
@@ -542,6 +543,7 @@ async function runPreview() {
       body_template: webhookBody.value,
       success_template: conf.success_template ?? "",
       sample_response: whPreview.sampleResponse,
+      sample_status: whPreview.sampleStatus || 200,
     });
     if (seq !== whSeq) return;
     whPreview.result = res;
@@ -565,6 +567,7 @@ watch(
     conf.headers,
     whPreview.type,
     whPreview.sampleResponse,
+    whPreview.sampleStatus,
   ],
   () => {
     clearTimeout(whTimer);
@@ -573,10 +576,10 @@ watch(
 );
 onBeforeUnmount(() => clearTimeout(whTimer));
 
-/** 按示例响应算出的成败：没写成功条件或没填示例响应时不显示 */
+/** 按示例响应算出的成败：写了成功条件就显示（空响应也是一种响应） */
 const successNote = computed(() => {
   const r = whPreview.result;
-  if (!r || r.success === undefined || !whPreview.sampleResponse.trim()) return null;
+  if (!r || r.success === undefined) return null;
   return r.success
     ? { ok: true, text: "按这份响应：算发送成功" }
     : { ok: false, text: `按这份响应：算发送失败（${r.success_reason || "不满足成功条件"}）` };
@@ -965,6 +968,16 @@ const previewText = computed(() => {
               </div>
             </el-form-item>
             <el-form-item v-if="conf.success_template?.trim()" label="拿一份响应试试（不保存）">
+              <div class="wh-sample-status">
+                <span class="wh-sample-status__label">状态码</span>
+                <el-input-number
+                  v-model="whPreview.sampleStatus"
+                  :min="100"
+                  :max="599"
+                  size="small"
+                  controls-position="right"
+                  data-testid="wh-sample-status" />
+              </div>
               <el-input
                 v-model="whPreview.sampleResponse"
                 type="textarea"
@@ -1194,6 +1207,18 @@ const previewText = computed(() => {
 .wh-preview__error {
   font-size: var(--pt-fz-sm);
   color: var(--pt-dang);
+}
+
+.wh-sample-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.wh-sample-status__label {
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
 }
 
 .wh-success-note {

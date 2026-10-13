@@ -127,6 +127,7 @@ describe("Webhook 的请求", () => {
         body_template: "",
         success_template: "",
         sample_response: "",
+        sample_status: 200,
       }),
     );
     await vi.waitFor(() =>
@@ -239,6 +240,26 @@ describe("Webhook 的请求", () => {
       success_template: expect.stringContaining("eq .json.code 200"),
     });
     expect(api.update.mock.calls[0]![1]).not.toHaveProperty("sample_response");
+
+    // 状态码随预览一起发；空响应也显示试算结果
+    const status = field("wh-sample-status") as HTMLInputElement;
+    status.value = "201";
+    status.dispatchEvent(new Event("input"));
+    status.dispatchEvent(new Event("change"));
+    typeInto("wh-sample-response", "");
+    api.preview.mockResolvedValue({
+      method: "POST",
+      url: "https://example.com/hook",
+      content_type: "application/json",
+      body: "{}",
+      success: true,
+    });
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sample_status: 201, sample_response: "" }),
+      ),
+    );
+    await vi.waitFor(() => expect(q("wh-success-note")!.textContent).toContain("算发送成功"));
   });
 
   it("GET 不带请求体：格式、预设与请求体都不能改", async () => {

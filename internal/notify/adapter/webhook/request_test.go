@@ -374,3 +374,51 @@ func TestPreviewSuccessTemplate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, out.Success)
 }
+
+// 对方的响应把我们发过去的凭证回显出来（地址查询、路径里的 token、请求头、请求体里的 token 字段、HMAC Secret）：
+// 成功条件拿它当失败原因时，写进错误、日志与重试记录以前都要去掉。
+func TestWebhook_FailureReasonHidesEchoedSecrets(t *testing.T) {
+	var echo string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(echo))
+	}))
+	t.Cleanup(srv.Close)
+	pathToken := "AbCdEfGhIjKlMnOpQrStUvWx"
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL + "/api/webhooks/123/" + pathToken + "?token=S3CRET-Q",
+		"headers":          map[string]string{"Authorization": "Bearer S3CRET-H"},
+		"hmac_secret":      "S3CRET-M",
+		"body_template":    `{"token": "S3CRET-B", "content": {{json .title}}}`,
+		"success_template": `{{if eq .json.code 0}}true{{else}}{{.json.msg}}{{end}}`,
+	})
+	echo = `{"code":1,"msg":"bad: S3CRET-Q S3CRET-H S3CRET-B S3CRET-M ` + pathToken + ` pt-tools 测试通知"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errResponseRejected)
+	for _, secret := range []string{"S3CRET-Q", "S3CRET-H", "S3CRET-B", "S3CRET-M", pathToken} {
+		assert.NotContains(t, err.Error(), secret)
+	}
+	assert.Contains(t, err.Error(), "pt-tools 测试通知", "不是凭证的内容照样留着")
+}
+
+// 响应只读前 64 KiB（对方回几百 MB 也不会都读进内存）；不跟随跳转。
+func TestWebhook_ResponseCapAndNoRedirect(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/big", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", 4<<20)))
+	})
+	mux.HandleFunc("/moved", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ok", http.StatusFound)
+	})
+	mux.HandleFunc("/ok", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	w := channelFor(t, map[string]any{"endpoint_url": srv.URL + "/big", "success_template": `{{eq (len .body) 65536}}`})
+	require.NoError(t, w.Send(context.Background(), sampleNotification(notify.EventTest)))
+
+	w = channelFor(t, map[string]any{"endpoint_url": srv.URL + "/moved"})
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "302")
+}
