@@ -218,6 +218,7 @@ export default {
   "sync.problemPtTools": "pt-tools: {0} site(s) failed ({1})",
   "sync.problemMissing":
     "pt-tools: {0} site(s) have no usable cookie in this browser and were not synced ({1}); sign in to them in the browser first",
+  "sync.problemSkipped": "pt-tools was not synced this run: {0}",
   "sync.problemCookieCloud": "CookieCloud: {0}",
   "sync.enabledSitesFailed":
     "Could not read the pt-tools site list, so this run synced only the sites with “Auto-sync cookies” on: {0}",

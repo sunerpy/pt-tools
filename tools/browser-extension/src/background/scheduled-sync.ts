@@ -188,7 +188,7 @@ async function syncPtTools(
     } else if (outcome === "pushed") {
       out.synced.push(site.id);
     } else {
-      missing.push(site.id);
+      missing.push(site.name);
     }
   }
   return out;
@@ -222,12 +222,18 @@ async function syncCookieCloud(deps: ScheduledSyncDeps): Promise<SyncRunSummary[
   }
 }
 
-/** problemsOf 是一轮同步里要用户处理的问题（通知与弹窗的提示用），没有问题时为空串。 */
+/**
+ * problemsOf 是一轮同步里要用户处理的问题（通知与弹窗的提示用），没有问题时为空串：pt-tools 这一轮没有同步
+ * （没连上、登录过期、没有要同步的站点）、读不到站点列表、站点没同步上、没有可用的 Cookie、CookieCloud 出错。
+ */
 export function problemsOf(run: SyncRunSummary | null): string {
   if (!run) {
     return "";
   }
   const parts: string[] = [];
+  if (run.ptTools.skipped) {
+    parts.push(t("sync.problemSkipped", run.ptTools.skipped));
+  }
   if (run.ptTools.error) {
     parts.push(run.ptTools.error);
   }
@@ -250,12 +256,9 @@ export function problemsOf(run: SyncRunSummary | null): string {
   return parts.join("\n");
 }
 
-/**
- * runHadProblems 判断「立即同步一次」以后该不该说「已经同步了」：pt-tools 这边没同步（没连上、登录过期、没有要同步的站点），
- * 或者有站点没同步上、没有可用的 Cookie、CookieCloud 出错时为 true。
- */
+/** runHadProblems 判断「立即同步一次」以后该不该说「已经同步了」：problemsOf 有内容时为 true。 */
 export function runHadProblems(run: SyncRunSummary | null): boolean {
-  return run !== null && (Boolean(run.ptTools.skipped) || problemsOf(run) !== "");
+  return problemsOf(run) !== "";
 }
 
 /** runSync 跑一轮：先 pt-tools，再 CookieCloud；两边互不影响。 */

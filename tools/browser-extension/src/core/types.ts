@@ -101,7 +101,7 @@ export interface SyncRunSummary {
     unchanged: number;
     failed: Array<{ siteId: string; error: string }>;
     /**
-     * missing 是要同步、但浏览器里没有可用 Cookie 的站点（没登录、Cookie 不全或过期了），这些站点没有推。
+     * missing 是要同步、但浏览器里没有可用 Cookie 的站点名（KnownSite.name；没登录、Cookie 不全或过期了），这些站点没有推。
      * 这一项以前存下的结果里没有，读的时候按空列表算。
      */
     missing?: string[];

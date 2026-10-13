@@ -132,7 +132,7 @@ describe("pickSites", () => {
 });
 
 describe("runSync", () => {
-  it("只推 Cookie 有变化的站点；浏览器里没有可用 Cookie 的站点不推，按名字记在 missing 里", async () => {
+  it("只推 Cookie 有变化的站点；浏览器里没有可用 Cookie 的站点不推，按站点名记在 missing 里", async () => {
     const h = harness({
       schedule: { allSites: true },
       enabled: ["hdsky", "hdtime", "ourbits"],
@@ -145,9 +145,9 @@ describe("runSync", () => {
       synced: ["hdsky"],
       unchanged: 1,
       failed: [],
-      missing: ["ourbits"],
+      missing: ["OURBITS"],
     });
-    expect(problemsOf(run)).toContain("ourbits");
+    expect(problemsOf(run)).toContain("OURBITS");
     expect(h.hashes.hdsky).toBe(await pushFingerprint("http://pt.example/", "a=1"));
     expect(run.cookieCloud.skipped).toBeTruthy();
 
@@ -155,7 +155,7 @@ describe("runSync", () => {
     const again = await runSync(h.deps, "schedule");
     expect(h.pushed).toEqual(["hdsky"]);
     expect(again.ptTools.unchanged).toBe(2);
-    expect(again.ptTools.missing).toEqual(["ourbits"]);
+    expect(again.ptTools.missing).toEqual(["OURBITS"]);
   });
 
   it("勾选了的站点都没有 Cookie 时也有结果：不是 0/0/0 的「成功」", async () => {
@@ -164,12 +164,25 @@ describe("runSync", () => {
     expect(h.pushed).toEqual([]);
     expect(run.ptTools.synced).toEqual([]);
     expect(run.ptTools.failed).toEqual([]);
-    expect(run.ptTools.missing).toEqual(["hdsky", "hdtime"]);
+    expect(run.ptTools.missing).toEqual(["HDSKY", "HDTIME"]);
     const problems = problemsOf(run);
-    expect(problems).toContain("hdsky");
-    expect(problems).toContain("hdtime");
+    expect(problems).toContain("HDSKY");
+    expect(problems).toContain("HDTIME");
     // 「立即同步一次」不提示成功
     expect(runHadProblems(run)).toBe(true);
+  });
+
+  it("pt-tools 这一轮没有同步（登录过期、没连上、没有要同步的站点）也算问题：定时的会发通知", async () => {
+    const expired = harness({ schedule: { allSites: true }, enabled: new AuthExpiredError() });
+    const run = await runSync(expired.deps, "schedule");
+    expect(run.ptTools.skipped).toBeTruthy();
+    expect(problemsOf(run)).toContain(run.ptTools.skipped as string);
+
+    const off = harness({ connected: false, autoSync: { hdsky: true } });
+    expect(problemsOf(await runSync(off.deps, "schedule"))).not.toBe("");
+
+    const none = harness({});
+    expect(problemsOf(await runSync(none.deps, "schedule"))).not.toBe("");
   });
 
   it("runHadProblems：全部顺利时才算成功；没连上、没有要同步的站点也不算", async () => {
@@ -305,13 +318,13 @@ describe("runSync", () => {
         synced: [],
         unchanged: 0,
         failed: [{ siteId: "hdsky", error: "HTTP 500" }],
-        missing: ["agsvpt", "xingyunge"],
+        missing: ["AGSVPT", "XingYunGe"],
       },
       cookieCloud: { uploaded: false, domains: 0, cookies: 0, error: "连不上" },
     }).split("\n");
     expect(problems).toHaveLength(3);
     expect(problems[0]).toContain("HTTP 500");
-    expect(problems[1]).toContain("agsvpt, xingyunge");
+    expect(problems[1]).toContain("AGSVPT, XingYunGe");
     expect(problems[2]).toContain("连不上");
 
     // 这一版以前存下的结果没有 missing

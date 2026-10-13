@@ -210,6 +210,7 @@ export default {
   "sync.problemPtTools": "pt-tools：{0} 个站点没同步上（{1}）",
   "sync.problemMissing":
     "pt-tools：{0} 个站点在浏览器里没有可用的 Cookie，没有同步（{1}），请先在浏览器里登录",
+  "sync.problemSkipped": "pt-tools 这一轮没有同步：{0}",
   "sync.problemCookieCloud": "CookieCloud：{0}",
   "sync.enabledSitesFailed":
     "读不到 pt-tools 的站点列表，这一轮只同步了单独打开「自动同步 Cookie」的站点：{0}",
