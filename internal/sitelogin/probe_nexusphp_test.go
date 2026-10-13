@@ -246,3 +246,19 @@ func TestProbeNexusPHPUnknown(t *testing.T) {
 		assert.Contains(t, res.Diagnostic, "未配置或已失效")
 	})
 }
+
+// HTTP 主通道：NexusPHP 有用户名没最近动向时按探测时间记；HDDolby 同样的结果照旧是解析失败。
+func TestHTTPTransportNexusPHPAccessFallback(t *testing.T) {
+	now := time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
+	site := &fakeSite{info: v2.UserInfo{Username: "someone"}}
+
+	res, err := HTTPTransport{}.FetchUserInfo(context.Background(), &v2.SiteDefinition{Schema: v2.SchemaNexusPHP}, site, newProbeClock(now))
+	require.NoError(t, err)
+	assert.Equal(t, OK, res.Status)
+	require.NotNil(t, res.LastAccessAt)
+	assert.Equal(t, now, *res.LastAccessAt)
+
+	res, err = HTTPTransport{}.FetchUserInfo(context.Background(), &v2.SiteDefinition{Schema: v2.SchemaHDDolby}, site, newProbeClock(now))
+	require.NoError(t, err)
+	assert.Equal(t, PARSE_ERROR, res.Status)
+}

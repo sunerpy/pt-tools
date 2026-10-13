@@ -66,6 +66,20 @@ func classifyNexusPHPResult(info v2.UserInfo, err error, clock Clock, source Pro
 	return result, nil
 }
 
+// withNexusPHPAccessFallback 只用于 NexusPHP（HDDolby、Rousi 走各自的 API，不用它）：
+// 登录后的页面取到了用户名，只是页面上没有「最近动向」时，会话是好的，而这次取用户信息本身就是一次访问
+// （NexusPHP 每次登录后的请求都更新最近访问时间），所以按这次探测的时间记，不报解析失败。
+func withNexusPHPAccessFallback(result *ProbeResult, info v2.UserInfo, err error, clock Clock) *ProbeResult {
+	if result == nil || err != nil || result.Status != PARSE_ERROR || info.LastAccess != 0 || strings.TrimSpace(info.Username) == "" {
+		return result
+	}
+	access := clock.Now().UTC()
+	result.Status = OK
+	result.LastAccessAt = &access
+	result.Diagnostic = "页面上没有找到「最近动向」，按这次探测访问的时间记"
+	return result
+}
+
 func isChallengeError(err error) bool {
 	if err == nil {
 		return false

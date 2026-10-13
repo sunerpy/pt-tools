@@ -378,6 +378,7 @@ async function handleSaveCredentials() {
         payload.content_type = conf.content_type || "json";
         // GET 不带请求体：编辑框只是禁用、还留着原来的模板（切回别的方法时不丢），保存时发空的
         payload.body_template = webhookBody.value;
+        payload.success_template = conf.success_template ?? "";
         break;
       case "wecom_webhook":
         payload.webhook_key = conf.webhook_key;
@@ -470,6 +471,7 @@ function goBack() {
 /* 模板写法的例子放在脚本里：直接写进模板的 {{…}}（即使加了 v-pre）会被格式化工具当成 Vue 插值改写 */
 const URL_TEMPLATE_EXAMPLE = "?site={{urlquery .site}}";
 const JSON_EXAMPLE = "{{json .title}}";
+const SUCCESS_EXAMPLE = "{{eq .json.code 0}}";
 const headersError = computed(() =>
   conf.channel_type === "webhook" && !parseHeadersText(conf.headers).ok ? HEADERS_ERROR : "",
 );
@@ -483,6 +485,9 @@ const whPreview = reactive({
   type: "rss.matched",
   result: null as WebhookPreviewResult | null,
   error: "",
+  /** 拿来试成功条件的一份响应与它的状态码（不保存） */
+  sampleResponse: "",
+  sampleStatus: 200,
 });
 /** 每次预览换一个序号：晚到的旧响应作废 */
 let whSeq = 0;
@@ -516,6 +521,7 @@ async function applyPreset(key: string) {
   conf.method = p.method;
   conf.content_type = p.content_type;
   conf.body_template = p.body_template;
+  conf.success_template = p.success_template;
   presetHint.value = p.url_hint ? `${p.label} 的地址一般是 ${p.url_hint}` : "";
 }
 
@@ -535,6 +541,9 @@ async function runPreview() {
       content_type: conf.content_type || "json",
       headers: headers.value,
       body_template: webhookBody.value,
+      success_template: conf.success_template ?? "",
+      sample_response: whPreview.sampleResponse,
+      sample_status: whPreview.sampleStatus || 200,
     });
     if (seq !== whSeq) return;
     whPreview.result = res;
@@ -554,8 +563,11 @@ watch(
     conf.method,
     conf.content_type,
     conf.body_template,
+    conf.success_template,
     conf.headers,
     whPreview.type,
+    whPreview.sampleResponse,
+    whPreview.sampleStatus,
   ],
   () => {
     clearTimeout(whTimer);
@@ -563,6 +575,15 @@ watch(
   },
 );
 onBeforeUnmount(() => clearTimeout(whTimer));
+
+/** 按示例响应算出的成败：写了成功条件就显示（空响应也是一种响应） */
+const successNote = computed(() => {
+  const r = whPreview.result;
+  if (!r || r.success === undefined) return null;
+  return r.success
+    ? { ok: true, text: "按这份响应：算发送成功" }
+    : { ok: false, text: `按这份响应：算发送失败（${r.success_reason || "不满足成功条件"}）` };
+});
 
 const previewText = computed(() => {
   const r = whPreview.result;
@@ -931,6 +952,47 @@ const previewText = computed(() => {
                 previewText
               }}</pre>
             </div>
+            <el-form-item label="成功条件（可选）">
+              <el-input
+                v-model="conf.success_template"
+                type="textarea"
+                :rows="2"
+                class="wh-body"
+                placeholder="留空时只看状态码：2xx 算成功"
+                data-testid="wh-success" />
+              <div class="field-tip">
+                很多服务出错也回 200、错误写在响应里：在这里按响应判断，结果是 true 才算送到，例如
+                <code>{{ SUCCESS_EXAMPLE }}</code
+                >。变量：<code>.status</code>、<code>.body</code>、<code>.json</code>（响应是 JSON
+                时）； 结果不是 true 时当作失败原因
+              </div>
+            </el-form-item>
+            <el-form-item v-if="conf.success_template?.trim()" label="拿一份响应试试（不保存）">
+              <div class="wh-sample-status">
+                <span class="wh-sample-status__label">状态码</span>
+                <el-input-number
+                  v-model="whPreview.sampleStatus"
+                  :min="100"
+                  :max="599"
+                  size="small"
+                  controls-position="right"
+                  data-testid="wh-sample-status" />
+              </div>
+              <el-input
+                v-model="whPreview.sampleResponse"
+                type="textarea"
+                :rows="2"
+                class="wh-body"
+                placeholder='{"code": 0, "msg": "ok"}'
+                data-testid="wh-sample-response" />
+              <div
+                v-if="successNote"
+                class="wh-success-note"
+                :class="successNote.ok ? 'wh-success-note--ok' : 'wh-success-note--bad'"
+                data-testid="wh-success-note">
+                {{ successNote.text }}
+              </div>
+            </el-form-item>
           </template>
 
           <!-- WeCom -->
@@ -1144,6 +1206,31 @@ const previewText = computed(() => {
 
 .wh-preview__error {
   font-size: var(--pt-fz-sm);
+  color: var(--pt-dang);
+}
+
+.wh-sample-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.wh-sample-status__label {
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-t2);
+}
+
+.wh-success-note {
+  margin-top: 6px;
+  font-size: var(--pt-fz-sm);
+}
+
+.wh-success-note--ok {
+  color: var(--pt-ok);
+}
+
+.wh-success-note--bad {
   color: var(--pt-dang);
 }
 

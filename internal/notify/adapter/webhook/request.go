@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/notify/tmpl"
+	"github.com/sunerpy/pt-tools/internal/redact"
 )
 
 // 请求体的格式（Config.ContentType）
@@ -53,6 +56,8 @@ type request struct {
 	origin  *url.URL
 	// body 为空时发固定 JSON
 	body *tmpl.Template
+	// success 不为空时按响应内容判断成败
+	success *tmpl.Template
 }
 
 // rendered 是渲染好的一次请求。ContentType 是要发的 Content-Type 头（GET 且请求头里没写时为空）。
@@ -104,7 +109,198 @@ func compile(cfg *Config) (*request, error) {
 	if err := r.compileURL(strings.TrimSpace(cfg.EndpointURL)); err != nil {
 		return nil, err
 	}
+	if src := cfg.SuccessTemplate; strings.TrimSpace(src) != "" {
+		p, err := tmpl.Parse(src, tmpl.Title, nil)
+		if err != nil {
+			return nil, fmt.Errorf("成功条件：%w", err)
+		}
+		r.success = p
+	}
 	return r, nil
+}
+
+// maxResponseBody 是判断成败时看的响应长度上限：再长的只看前面这些
+const maxResponseBody = 64 << 10
+
+// errResponseRejected 包着「响应不满足成功条件」：和 HTTP 状态码不对一样算发送失败、按通知的重试规则再试
+var errResponseRejected = errors.New("webhook 响应不满足成功条件")
+
+// checkResponse 按成功条件判断一次响应：没写成功条件时只看状态码（调用方已经判过 2xx）。
+// 模板的结果去掉首尾空白以后是 true（不分大小写）才算成功；false、空串算失败，别的内容当作失败的原因。
+func (r *request) checkResponse(status int, body []byte) error {
+	if r.success == nil {
+		return nil
+	}
+	out, err := r.success.Execute(responseData(status, body))
+	if err != nil {
+		return fmt.Errorf("%w：成功条件算不出来（%v）", errResponseRejected, err)
+	}
+	out = strings.TrimSpace(out)
+	switch {
+	case strings.EqualFold(out, "true"):
+		return nil
+	case out == "" || strings.EqualFold(out, "false"):
+		return errResponseRejected
+	}
+	// 不在这里截短：凭证可能正好横跨截断处，要先去掉凭证再截（scrubError、Preview 里做）
+	return fmt.Errorf("%w：%s", errResponseRejected, out)
+}
+
+// maxReasonRunes 是失败原因最多显示多少个字符
+const maxReasonRunes = 240
+
+func truncateReason(s string) string {
+	if runes := []rune(s); len(runes) > maxReasonRunes {
+		return string(runes[:maxReasonRunes]) + "…"
+	}
+	return s
+}
+
+// responseData 是成功条件的数据：status、body（最多 maxResponseBody 字节），以及响应是 JSON 时解出来的 json
+// （数字是整数时为 int64，否则 float64，和事件变量的写法一样；不是 JSON 时是空对象，取字段得零值）。
+func responseData(status int, body []byte) map[string]any {
+	if len(body) > maxResponseBody {
+		body = body[:maxResponseBody]
+	}
+	var parsed any = map[string]any{}
+	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err == nil && !dec.More() {
+		parsed = normalizeJSON(v)
+	}
+	return map[string]any{"status": int64(status), "body": string(body), "json": parsed}
+}
+
+// credentialKey 认出请求体里放凭证的字段名（token、key、secret、password、sign 一类）
+var credentialKey = regexp.MustCompile(`(?i)(token|key|secret|passw|pwd|auth|sign|credential|cookie|session)`)
+
+// secretValue 是这次请求里可能是凭证的一个值。credential 表示它来自凭证的位置（请求头、HMAC Secret、
+// 字段名像凭证的查询参数与请求体字段、较长的路径段），不是普通的查询参数。
+type secretValue struct {
+	value      string
+	credential bool
+}
+
+// sensitiveValues 是这次请求里可能是凭证的值：地址查询的每个值与较长的路径段（Discord 这类把 token 放在路径里）、
+// 自定义请求头的值、HMAC Secret，以及请求体里字段名像凭证的值（JSON 的任意一层与表单）。对方的响应把它们回显时要去掉。
+func sensitiveValues(r *rendered, cfg *Config) []secretValue {
+	var out []secretValue
+	add := func(v string, credential bool) {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, secretValue{value: v, credential: credential})
+		}
+	}
+	if u, err := url.Parse(r.URL); err == nil {
+		for k, vs := range u.Query() {
+			for _, v := range vs {
+				add(v, credentialKey.MatchString(k))
+			}
+		}
+		for _, seg := range strings.Split(u.Path, "/") {
+			if len(seg) >= 16 {
+				add(seg, true)
+			}
+		}
+	}
+	for _, v := range cfg.Headers {
+		add(v, true)
+		// 「Bearer xxx」「Basic xxx」：对方多半只回显后面那一段
+		for _, f := range strings.Fields(v) {
+			switch strings.ToLower(f) {
+			case "bearer", "basic", "token", "digest":
+				continue
+			}
+			add(f, true)
+		}
+	}
+	add(cfg.HMACSecret, true)
+	var v any
+	if json.Unmarshal(r.Body, &v) == nil {
+		collectCredentials(v, "", func(s string) { add(s, true) })
+	} else if form, err := url.ParseQuery(string(r.Body)); err == nil {
+		for k, vs := range form {
+			if credentialKey.MatchString(k) {
+				for _, x := range vs {
+					add(x, true)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func collectCredentials(v any, key string, add func(string)) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			collectCredentials(e, k, add)
+		}
+	case []any:
+		for _, e := range x {
+			collectCredentials(e, key, add)
+		}
+	case string:
+		if credentialKey.MatchString(key) {
+			add(x)
+		}
+	}
+}
+
+// errReasonHidden 是失败原因里认不准有没有凭证时给的固定说法
+var errReasonHidden = fmt.Errorf("%w（对方返回的原因里可能有凭证，不显示）", errResponseRejected)
+
+// scrubError 把错误里出现的凭证值换成 ***，再按通用规则（redact.Secrets）去掉看起来像凭证的内容。
+// 太短的凭证（不到 4 个字符）没法放心地替换（会误伤原因里的普通文字），原因里出现它时整段不显示。
+func scrubError(err error, secrets []secretValue) error {
+	msg := err.Error()
+	// 长的先换：两个凭证互相包含时（ABCDEFGH 与 ABCDEFGHIJKL），先换短的会留下长的后半截
+	secrets = slices.Clone(secrets)
+	slices.SortStableFunc(secrets, func(a, b secretValue) int { return len(b.value) - len(a.value) })
+	for _, s := range secrets {
+		switch {
+		case len(s.value) >= 4:
+			msg = strings.ReplaceAll(msg, s.value, "***")
+		case s.credential && strings.Contains(msg, s.value):
+			return errReasonHidden
+		}
+	}
+	msg = truncateReason(redact.Secrets(msg))
+	if errors.Is(err, errResponseRejected) {
+		return &scrubbedError{msg: msg, err: errResponseRejected}
+	}
+	return errors.New(msg)
+}
+
+type scrubbedError struct {
+	msg string
+	err error
+}
+
+func (e *scrubbedError) Error() string { return e.msg }
+func (e *scrubbedError) Unwrap() error { return e.err }
+
+// normalizeJSON 把 json.Number 换成 int64（整数）或 float64，其余原样（逐层处理对象与数组）。
+func normalizeJSON(v any) any {
+	switch x := v.(type) {
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return i
+		}
+		f, _ := x.Float64()
+		return f
+	case map[string]any:
+		for k, e := range x {
+			x[k] = normalizeJSON(e)
+		}
+		return x
+	case []any:
+		for i, e := range x {
+			x[i] = normalizeJSON(e)
+		}
+		return x
+	}
+	return v
 }
 
 // compileURL 检查地址。地址里可以写模板，但只能写在路径与查询里：第一个 {{ 要在主机名后面的 / 之后，
@@ -247,6 +443,10 @@ type PreviewInput struct {
 	ContentType  string  `json:"content_type"`
 	Headers      Headers `json:"headers"`
 	BodyTemplate string  `json:"body_template"`
+	// SuccessTemplate 是成功条件；SampleResponse、SampleStatus（默认 200）是拿来试它的一份响应
+	SuccessTemplate string `json:"success_template"`
+	SampleResponse  string `json:"sample_response"`
+	SampleStatus    int    `json:"sample_status"`
 }
 
 // PreviewResult 是按示例数据渲染出来的请求（只渲染、不发送，不含签名）。ContentType 按发送时的规则算。
@@ -255,6 +455,9 @@ type PreviewResult struct {
 	URL         string `json:"url"`
 	ContentType string `json:"content_type"`
 	Body        string `json:"body"`
+	// Success 是按示例响应算出的成败（写了成功条件时才有），SuccessReason 是失败的原因
+	Success       *bool  `json:"success,omitempty"`
+	SuccessReason string `json:"success_reason,omitempty"`
 }
 
 // ErrUnknownEvent 是预览时给了不认识的事件类型
@@ -269,11 +472,12 @@ func Preview(in PreviewInput) (*PreviewResult, error) {
 		return nil, invalid("请先填地址")
 	}
 	r, err := compile(&Config{
-		EndpointURL:  in.EndpointURL,
-		Method:       in.Method,
-		ContentType:  in.ContentType,
-		Headers:      in.Headers,
-		BodyTemplate: in.BodyTemplate,
+		EndpointURL:     in.EndpointURL,
+		Method:          in.Method,
+		ContentType:     in.ContentType,
+		Headers:         in.Headers,
+		BodyTemplate:    in.BodyTemplate,
+		SuccessTemplate: in.SuccessTemplate,
 	})
 	if err != nil {
 		return nil, err
@@ -282,5 +486,24 @@ func Preview(in PreviewInput) (*PreviewResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PreviewResult{Method: out.Method, URL: out.URL, ContentType: out.ContentType, Body: string(out.Body)}, nil
+	res := &PreviewResult{Method: out.Method, URL: out.URL, ContentType: out.ContentType, Body: string(out.Body)}
+	if r.success != nil {
+		status := in.SampleStatus
+		if status == 0 {
+			status = 200
+		}
+		// 和发送时一样：先看状态码，2xx 才用成功条件
+		var err error
+		if status < 200 || status >= 300 {
+			err = fmt.Errorf("webhook returned status %d", status)
+		} else {
+			err = r.checkResponse(status, []byte(in.SampleResponse))
+		}
+		ok := err == nil
+		res.Success = &ok
+		if !ok {
+			res.SuccessReason = truncateReason(err.Error())
+		}
+	}
+	return res, nil
 }

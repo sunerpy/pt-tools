@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -1941,4 +1942,135 @@ func TestNexusPHPDriver_ParseDownload(t *testing.T) {
 	// nil doc + empty body -> error
 	_, err = d.ParseDownload(NexusPHPResponse{})
 	assert.ErrorIs(t, err, ErrParseError)
+}
+
+// 定义里没写 lastAccessAt 的站点：在用户详情页上按通用写法找「最近动向」（保号探测靠它，取不到就报解析失败）。
+// 定义自己写了就用它的，不叠加通用写法。
+func TestNexusPHPDriver_DefaultLastAccess(t *testing.T) {
+	page := func(label string) string {
+		return `<html><body><table>
+			<tr><td class="rowhead">上传量</td><td>1.50 TB</td></tr>
+			<tr><td class="rowhead">` + label + `</td><td class="rowfollow">2026-10-12 08:30:00 (1分钟前)</td></tr>
+		</table></body></html>`
+	}
+	label := "最近动向"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(page(label)))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	newDef := func(selectors map[string]FieldSelector, fields []string) *SiteDefinition {
+		base := map[string]FieldSelector{
+			"id":   {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+			"name": {Selector: []string{"a[href*='userdetails.php']"}},
+		}
+		for k, v := range selectors {
+			base[k] = v
+		}
+		return &SiteDefinition{
+			ID: "npdef", Name: "NPDef", Schema: SchemaNexusPHP, TimezoneOffset: "+0800",
+			UserInfo: &UserInfoConfig{
+				Process: []UserInfoProcess{
+					{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+					{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: fields},
+				},
+				Selectors: base,
+			},
+		}
+	}
+	get := func(def *SiteDefinition) UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+	want := time.Date(2026, 10, 12, 8, 30, 0, 0, time.FixedZone("CST", 8*3600)).Unix()
+
+	for _, l := range []string{"最近动向", "上次访问", "最後活動", "Last access"} {
+		label = l
+		info := get(newDef(nil, []string{"uploaded"}))
+		assert.Equal(t, want, info.LastAccess, l)
+	}
+
+	// 定义自己写了 lastAccessAt：只按它取（这里故意写一个取不到的选择器）
+	label = "最近动向"
+	own := newDef(map[string]FieldSelector{"lastAccessAt": {Selector: []string{"#nope"}, Filters: []Filter{{Name: "parseTime"}}}}, []string{"lastAccessAt"})
+	assert.Zero(t, get(own).LastAccess)
+
+	// 页面上没有这一行：还是 0
+	label = "加入日期"
+	assert.Zero(t, get(newDef(nil, []string{"uploaded"})).LastAccess)
+}
+
+// #332：定义里没写实际上传 / 下载的站点，在用户详情页「传输」一行按通用写法取；写了的照旧只按自己的。
+func TestNexusPHPDriver_DefaultTrueTransfer(t *testing.T) {
+	transfer := `<strong>上传量</strong>: 1.50 TB <strong>下载量</strong>: 500.00 GB <strong>实际上传量</strong>: 1.20 TB <strong>实际下载量</strong>: 300.00 GB`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "userdetails.php") {
+			_, _ = w.Write([]byte(`<html><body><table>
+				<tr><td class="rowhead">传输</td><td class="rowfollow">` + transfer + `</td></tr>
+			</table></body></html>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body><a href="userdetails.php?id=123">MyName</a></body></html>`))
+	}))
+	defer server.Close()
+
+	newDef := func(selectors map[string]FieldSelector) *SiteDefinition {
+		base := map[string]FieldSelector{
+			"id":   {Selector: []string{"a[href*='userdetails.php']"}, Attr: "href", Filters: []Filter{{Name: "querystring", Args: []any{"id"}}}},
+			"name": {Selector: []string{"a[href*='userdetails.php']"}},
+		}
+		fields := []string{}
+		for k, v := range selectors {
+			base[k] = v
+			fields = append(fields, k)
+		}
+		return &SiteDefinition{
+			ID: "npdef", Name: "NPDef", Schema: SchemaNexusPHP,
+			UserInfo: &UserInfoConfig{
+				Process: []UserInfoProcess{
+					{RequestConfig: RequestConfig{URL: "/index.php", ResponseType: "document"}, Fields: []string{"id", "name"}},
+					{RequestConfig: RequestConfig{URL: "/userdetails.php", ResponseType: "document"}, Assertion: map[string]string{"id": "params.id"}, Fields: fields},
+				},
+				Selectors: base,
+			},
+		}
+	}
+	get := func(def *SiteDefinition) UserInfo {
+		t.Helper()
+		d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "c=1"})
+		d.SetSiteDefinition(def)
+		info, err := d.GetUserInfo(context.Background())
+		require.NoError(t, err)
+		return info
+	}
+
+	info := get(newDef(nil))
+	assert.Equal(t, parseSize("1.20 TB"), info.TrueUploaded)
+	assert.Equal(t, parseSize("300.00 GB"), info.TrueDownloaded)
+
+	// 繁体、「真实」的写法也认
+	transfer = `<b>真實上傳量</b>：900.00 GB <b>真實下載量</b>：&nbsp;100.00 GB`
+	info = get(newDef(nil))
+	assert.Equal(t, parseSize("900.00 GB"), info.TrueUploaded)
+	assert.Equal(t, parseSize("100.00 GB"), info.TrueDownloaded)
+
+	// 定义自己写了 trueUploaded（这里故意写取不到的）：不用通用写法；trueDownloaded 没写的照样取
+	own := newDef(map[string]FieldSelector{"trueUploaded": {Selector: []string{"#nope"}, Filters: []Filter{{Name: "parseSize"}}}})
+	info = get(own)
+	assert.Zero(t, info.TrueUploaded)
+	assert.Equal(t, parseSize("100.00 GB"), info.TrueDownloaded)
+
+	// 没有这两项的页面：都是 0
+	transfer = `<strong>上传量</strong>: 1.50 TB <strong>下载量</strong>: 500.00 GB`
+	info = get(newDef(nil))
+	assert.Zero(t, info.TrueUploaded)
+	assert.Zero(t, info.TrueDownloaded)
 }

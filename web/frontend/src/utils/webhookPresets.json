@@ -6,7 +6,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "",
-    "url_hint": ""
+    "url_hint": "",
+    "success_template": ""
   },
   {
     "key": "discord",
@@ -15,7 +16,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "{\"content\": {{print \"**\" .title \"**\\n\" .text | truncate 1900 | json}}}",
-    "url_hint": "https://discord.com/api/webhooks/<id>/<token>"
+    "url_hint": "https://discord.com/api/webhooks/<id>/<token>",
+    "success_template": ""
   },
   {
     "key": "slack",
@@ -24,7 +26,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "{\"text\": {{print \"*\" .title \"*\\n\" .text | json}}}",
-    "url_hint": "https://hooks.slack.com/services/<…>"
+    "url_hint": "https://hooks.slack.com/services/<…>",
+    "success_template": "{{eq .body \"ok\"}}"
   },
   {
     "key": "gotify",
@@ -33,7 +36,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "{\"title\": {{json .title}}, \"message\": {{json .text}}, \"priority\": 5}",
-    "url_hint": "https://<你的 Gotify>/message?token=<应用令牌>"
+    "url_hint": "https://<你的 Gotify>/message?token=<应用令牌>",
+    "success_template": "{{gt .json.id 0}}"
   },
   {
     "key": "pushplus",
@@ -42,7 +46,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "{\"token\": \"你的 token\", \"title\": {{json .title}}, \"content\": {{json .text}}, \"template\": \"txt\"}",
-    "url_hint": "https://www.pushplus.plus/send"
+    "url_hint": "https://www.pushplus.plus/send",
+    "success_template": "{{if eq .json.code 200}}true{{else}}{{.json.msg}}{{end}}"
   },
   {
     "key": "homeassistant",
@@ -51,7 +56,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "{\"event\": {{json .event}}, \"title\": {{json .title}}, \"message\": {{json .text}}}",
-    "url_hint": "http://<Home Assistant 地址>:8123/api/webhook/<webhook_id>"
+    "url_hint": "http://<Home Assistant 地址>:8123/api/webhook/<webhook_id>",
+    "success_template": ""
   },
   {
     "key": "n8n",
@@ -60,7 +66,8 @@
     "method": "POST",
     "content_type": "json",
     "body_template": "{{json .}}",
-    "url_hint": "https://<你的 n8n>/webhook/<路径>"
+    "url_hint": "https://<你的 n8n>/webhook/<路径>",
+    "success_template": ""
   },
   {
     "key": "text",
@@ -69,7 +76,8 @@
     "method": "POST",
     "content_type": "text",
     "body_template": "{{.title}}\n\n{{.text}}",
-    "url_hint": ""
+    "url_hint": "",
+    "success_template": ""
   },
   {
     "key": "form",
@@ -78,6 +86,7 @@
     "method": "POST",
     "content_type": "form",
     "body_template": "event={{urlquery .event}}&title={{urlquery .title}}&text={{urlquery .text}}",
-    "url_hint": ""
+    "url_hint": "",
+    "success_template": ""
   }
 ]

@@ -336,3 +336,32 @@ func TestAllSites_FixtureCoverage(t *testing.T) {
 		})
 	}
 }
+
+// 保号探测要最近访问时间：NexusPHP 站点要么自己写 lastAccessAt 选择器（并在某一步的 Fields 里），
+// 要么有一步取 userdetails.php（驱动在那一页上按通用写法找「最近动向」）。两样都没有，探测就只能退回按本次访问时间记。
+func TestNexusPHPDefinitionsProvideLastAccess(t *testing.T) {
+	for _, def := range v2.GetDefinitionRegistry().GetAll() {
+		if def.Schema != v2.SchemaNexusPHP || def.UserInfo == nil || def.Unavailable {
+			continue
+		}
+		t.Run(def.ID, func(t *testing.T) {
+			_, declared := def.UserInfo.Selectors["lastAccessAt"]
+			inFields, userdetails := false, false
+			for _, p := range def.UserInfo.Process {
+				if strings.Contains(p.RequestConfig.URL, "userdetails.php") {
+					userdetails = true
+				}
+				for _, f := range p.Fields {
+					if f == "lastAccessAt" {
+						inFields = true
+					}
+				}
+			}
+			if declared {
+				assert.True(t, inFields, "写了 lastAccessAt 选择器，但没有哪一步的 Fields 带上它")
+				return
+			}
+			assert.True(t, userdetails, "没有 lastAccessAt 选择器，也没有取 userdetails.php 的一步")
+		})
+	}
+}

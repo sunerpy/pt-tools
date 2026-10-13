@@ -14,6 +14,8 @@ export interface WebhookPreset {
   body_template: string;
   /** 这类服务的地址一般长什么样；空的时候不提示 */
   url_hint: string;
+  /** 这类服务的成功响应怎么认（可选）：很多服务出错也回 200，错误写在响应里 */
+  success_template: string;
 }
 
 export const WEBHOOK_PRESETS: WebhookPreset[] = presets;
