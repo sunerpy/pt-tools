@@ -1558,9 +1558,16 @@ func TestFilterRulePurposeRoundTrip(t *testing.T) {
 	require.Equal(t, http.StatusOK, gw.Code)
 	assert.Contains(t, gw.Body.String(), `"purpose":"both"`)
 
-	// 库里是空值的老规则（v7 以前的数据）按 download 返回
-	require.NoError(t, global.GlobalDB.DB.Model(&models.FilterRule{}).Where("id = ?", def.ID).Update("purpose", "").Error)
-	gw = httptest.NewRecorder()
-	server.getFilterRule(gw, httptest.NewRequest(http.MethodGet, "/api/filter-rules/1", nil), def.ID)
-	assert.Contains(t, gw.Body.String(), `"purpose":"download"`)
+	// 库里是空值（v7 以前的数据）或不认识的值的老规则，和过滤时一样按 download 返回；前端原样回传也是合法的
+	for _, stored := range []string{"", "legacy"} {
+		require.NoError(t, global.GlobalDB.DB.Model(&models.FilterRule{}).Where("id = ?", def.ID).Update("purpose", stored).Error)
+		gw = httptest.NewRecorder()
+		server.getFilterRule(gw, httptest.NewRequest(http.MethodGet, "/api/filter-rules/1", nil), def.ID)
+		var got FilterRuleResponse
+		require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &got))
+		assert.Equal(t, "download", got.Purpose, stored)
+		w, back := update(def.ID, FilterRuleRequest{Name: got.Name, Pattern: got.Pattern, Enabled: !got.Enabled, Purpose: got.Purpose})
+		require.Equal(t, http.StatusOK, w.Code, stored)
+		assert.Equal(t, "download", back.Purpose)
+	}
 }

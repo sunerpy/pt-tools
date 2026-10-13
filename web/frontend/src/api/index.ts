@@ -550,7 +550,11 @@ export const filterRulesApi = {
   get: (id: number) => api.get<FilterRule>(`/api/filter-rules/${id}`),
   create: (data: Omit<FilterRule, "id" | "created_at" | "updated_at">) =>
     api.post<FilterRule>("/api/filter-rules", data),
-  update: (id: number, data: Partial<FilterRule>) =>
+  /**
+   * 整条替换：仅免费、启用、大小、站点与 RSS 范围没给就按 false / 0 / 不限存，
+   * 只有名称、模式、匹配范围、优先级与用途空着时保留原值。所以要发完整的规则。
+   */
+  update: (id: number, data: FilterRule) =>
     request<FilterRule>(`/api/filter-rules/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),

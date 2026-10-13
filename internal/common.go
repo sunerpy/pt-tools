@@ -807,11 +807,11 @@ func downloadWorkerUnified(
 		filterSvc = filter.NewFilterService(global.GlobalDB.DB)
 	}
 
-	// 检查 RSS 是否有关联的过滤规则
+	// 检查 RSS 是否关联了下载规则：只关联了通知规则时，下载照旧按没有规则处理（免费种子走免费通道）
 	hasAssociatedRules := false
 	if filterSvc != nil && rssCfg.ID != 0 {
 		rules, err := filterSvc.GetRulesForRSS(rssCfg.ID)
-		if err == nil && len(rules) > 0 {
+		if err == nil && filter.HasRulesFor(rules, filter.PurposeDownload) {
 			hasAssociatedRules = true
 			sLogger().Infof("RSS %s 关联了 %d 个过滤规则", rssCfg.Name, len(rules))
 		}
@@ -1472,11 +1472,11 @@ func downloadWorker[T models.ResType](
 		filterSvc = filter.NewFilterService(global.GlobalDB.DB)
 	}
 
-	// 检查 RSS 是否有关联的过滤规则
+	// 检查 RSS 是否关联了下载规则：只关联了通知规则时，下载照旧按没有规则处理（免费种子走免费通道）
 	hasAssociatedRules := false
 	if filterSvc != nil && rssCfg.ID != 0 {
 		rules, err := filterSvc.GetRulesForRSS(rssCfg.ID)
-		if err == nil && len(rules) > 0 {
+		if err == nil && filter.HasRulesFor(rules, filter.PurposeDownload) {
 			hasAssociatedRules = true
 			sLogger().Infof("RSS %s 关联了 %d 个过滤规则", rssCfg.Name, len(rules))
 		}
