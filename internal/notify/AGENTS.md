@@ -45,6 +45,12 @@ internal/notify/
 - `OutboxWorker` retries due rows at bounded backoff and marks exhausted rows dead.
 - RSS delivery adds a separate idempotency row in `RSSNotificationLog`, applies quota/quiet-hour policy, and may use `DigestBuffer` before sending.
 
+## Events and Message Templates (M21)
+
+- Every business notification carries `Notification.Event` (`event.go`): type, time and typed variables. Producers build it only with `NewEvent(type, at, fields)`; it keeps only the variables declared in the catalog (`events.go`), converts numbers by the declared kind (`int` → int64, `float` → float64, never by the JSON literal) and caps lists at 100 entries (`items_more`). `Event.UnmarshalJSON` runs the same normalization, so the outbox, `RSSNotificationLog` and `MonitorNotificationLog` retries render exactly like the live send.
+- `Templates` (`templates.go`) holds the global per-event templates loaded from `models.NotificationTemplate`; `Apply` re-renders title/text and keeps the built-in text when there is no template, rendering fails, or the result is empty. It runs in `cmd`'s `liveNotifyManager.Send` and in `OutboxWorker.sendViaNewChannel`; ChatOps replies are never templated.
+- `tmpl/` is the sandbox around `text/template`: no `define`/`template`/`block`, `range` only over catalog list variables, at most two levels and a static worst-case budget of 20000 iterations (Go 1.22+ ranges over integers, so this is the only bound), number-aware comparisons, a width-capped `printf`, source and output caps. Keep these when adding functions.
+
 ## Stateful Adapter Warning
 
 Do not create a second live Telegram or QQ listener for outbox delivery: it can collide on polling, ports, or connection ownership. Outbox retries go through the production live-channel manager (`OutboxWorker.SetLiveSender`); the factory path is only a fallback for stateless webhook adapters and decrypts `ConfigJSON` first. Changes here require explicit lifecycle tests.

@@ -68,3 +68,59 @@ Server 酱的标题最多 32 个字，超出时截短，完整标题放在正文
 | 优先级（可选）                    | 1 最低、5 最高，0 用服务器的默认值               |
 
 公共服务器 `ntfy.sh` 上的 topic 没有密码，知道名字的人都能订阅：起一个不好猜的名字，或者用自建服务器并开启访问控制。
+
+## 消息模板
+
+每种通知的标题和正文都可以改成自己的写法，所有通知通道（QQ、Telegram、群机器人、Bark 等）都按它发。在「ChatOps → 消息模板」里选一种事件，填「标题模板」或「正文模板」，点「保存」。空着的一项用内置文字；点「恢复默认」回到内置的写法。
+
+模板用 Go 模板的写法：变量写成 `.site` 这样，放在两对花括号里，换成变量的值；`if` 是条件，`range` 遍历列表。页面上的「变量」列出这种事件能用的全部变量，点一下插到光标处；「预览（示例数据）」按示例数据实时渲染；「内置的样子」是不改时发出去的内容。
+
+例：RSS 命中过滤规则时只发一行；签到结果只列没签上的站点。
+
+```text
+{{.site}}｜{{.torrent_title}}｜{{.size}}{{if .free}}｜免费，还剩 {{.free_remaining}}{{end}}
+```
+
+```text
+{{.day}} 签到：成功 {{.signed}}，失败 {{.failed}}
+{{range .items}}{{if eq .status "failed"}}· {{.site}}：{{.message}}
+{{end}}{{end}}
+```
+
+每种事件都有的变量：`event`（事件类型）、`event_name`（事件名称）、`time`（本地时间，形如 `2026-10-12 08:00:00`）、`timestamp`（秒级时间戳）、`title`、`text`（内置的标题与正文，可以在自己的模板里接着用）。各事件的主要变量：
+
+| 事件                                       | 主要变量                                                                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `rss.new` RSS 新种子                       | `site`、`rss`、`torrent_title`、`torrent_id`、`link`、`published`                                                          |
+| `rss.matched` RSS 命中过滤规则             | 同上，再加 `subtitle`、`size`、`size_bytes`、`free`、`free_end`、`free_remaining`、`rule`、`seeders`、`leechers`、`has_hr` |
+| `rss.digest` RSS 合并通知                  | `count`，`items`（每项 `title`、`site`、`torrent_title`、`torrent_id`）                                                    |
+| `subscribe.downloaded` 订阅下载            | `subscription`、`media_type`、`year`、`season`、`episodes`、`torrent_title`、`site`、`quality`、`poster`                   |
+| `subscribe.douban_failed` 豆瓣想看拉取失败 | `source`、`fails`、`error`                                                                                                 |
+| `media.organized` 入库                     | `name`、`media_type`、`episodes`、`files`、`quality`、`library`、`torrent`、`poster`                                       |
+| `site.login_expiring` 站点即将被封号       | `site`、`tier`、`days_remaining`、`last_active`、`days_since_active`、`access_stale`                                       |
+| `site.probe_failed` 站点探测失败           | `site`、`status`、`status_label`、`since`、`advice`、`diagnosis`                                                           |
+| `site.probe_recovered` 站点探测恢复        | `site`、`probed_at`                                                                                                        |
+| `site.login_test` 登录提醒测试             | `site`、`tier`、`days_remaining`、`last_active`                                                                            |
+| `attendance.daily` 签到结果                | `day`、`signed`、`failed`，`items`（每项 `site`、`status`、`status_label`、`message`）                                     |
+| `report.daily` 每日战报                    | `day`、`uploaded`、`downloaded`、`uploaded_bytes`、`downloaded_bytes`、`bonus`，`items`（各站点）                          |
+| `downloader.dead_torrents` 失效种子        | `downloader`、`count`、`size`、`size_bytes`，`items`（每项 `name`、`size`、`size_bytes`）                                  |
+| `remote.paired` 新设备配对                 | `device`、`permission`                                                                                                     |
+| `test` 通道测试                            | `channel`                                                                                                                  |
+
+每日战报的变量只有合计与各站点；登录异常、签到、刷流几段在 `text` 里。列表最多 100 项，省略的条数在 `items_more` 里。
+
+能用的函数：比较 `eq`、`ne`、`lt`、`le`、`gt`、`ge`（整数与小数可以直接比），`default`（为空时用默认值），`truncate`（按字符截断，截掉了补「…」），`contains`、`hasPrefix`、`hasSuffix`，`replace`、`upper`、`lower`、`trim`，`bytes`（字节数写成 `15.00 GB`），`date`（按 Go 的版式写时间），`printf`，`json`（写成 JSON 字面量）。写法举例：
+
+```text
+{{if gt .seeders 10}}热门{{end}}
+{{.rule | default "无"}}
+{{.text | truncate 100}}
+{{if contains "2160p" .torrent_title}}4K{{end}}
+{{bytes .size_bytes}}
+{{date "01-02 15:04" .timestamp}}
+{{printf "%.1f" .bonus}}
+```
+
+保存时会用示例数据渲染一遍：变量名写错、模板语法不对时不会保存，并写明第几行哪里不对。为了不拖慢通知，有几条限制：`range` 只能遍历列表变量，最多嵌套两层；模板最长 8 KB；渲染出来的标题最长 1 KB、正文最长 16 KB。发送时万一渲染出错或结果是空的，这条通知照内置文字发，不会因为模板写坏而发不出去。
+
+模板只改通知，不改 ChatOps 命令和 AI 助手的回复。Telegram 按纯文本发，模板里写的 HTML、Markdown 标记会原样显示。

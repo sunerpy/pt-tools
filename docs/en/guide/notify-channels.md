@@ -68,3 +68,59 @@ ServerChan titles are limited to 32 characters; a longer title is shortened and 
 | Priority (optional)                              | 1 lowest, 5 highest, 0 for the server default                           |
 
 Topics on the public `ntfy.sh` server have no password, and anyone who knows the name can subscribe: pick a name that is hard to guess, or use your own server with access control.
+
+## Message templates
+
+You can write your own title and body for each kind of notification, and every notification channel (QQ, Telegram, the group bots, Bark and the others) sends it that way. In ChatOps → Message templates (消息模板), pick an event, fill in Title template (标题模板) or Body template (正文模板), and click Save (保存). A field left empty uses the built-in text; Restore default (恢复默认) goes back to the built-in wording.
+
+Templates use Go template syntax: a variable is written like `.site` inside two pairs of curly braces and is replaced by its value; `if` is a condition and `range` loops over a list. Variables (变量) on the page lists every variable the event has, and clicking one inserts it at the cursor; Preview (预览（示例数据）) renders the template with sample data as you type; Built-in (内置的样子) shows what is sent when you change nothing.
+
+Examples: a single line for an RSS item that matches a filter rule, and an attendance summary that lists only the sites that failed.
+
+```text
+{{.site}} | {{.torrent_title}} | {{.size}}{{if .free}} | free, {{.free_remaining}} left{{end}}
+```
+
+```text
+{{.day}} sign-in: {{.signed}} done, {{.failed}} failed
+{{range .items}}{{if eq .status "failed"}}· {{.site}}: {{.message}}
+{{end}}{{end}}
+```
+
+Every event has these variables: `event` (event type), `event_name` (event name), `time` (local time such as `2026-10-12 08:00:00`), `timestamp` (Unix seconds), `title` and `text` (the built-in title and body, which your template can reuse). The main variables of each event:
+
+| Event                                                   | Main variables                                                                                                                 |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `rss.new` new RSS item                                  | `site`, `rss`, `torrent_title`, `torrent_id`, `link`, `published`                                                              |
+| `rss.matched` RSS item matched a filter rule            | the same, plus `subtitle`, `size`, `size_bytes`, `free`, `free_end`, `free_remaining`, `rule`, `seeders`, `leechers`, `has_hr` |
+| `rss.digest` combined RSS notification                  | `count`, `items` (each with `title`, `site`, `torrent_title`, `torrent_id`)                                                    |
+| `subscribe.downloaded` subscription download            | `subscription`, `media_type`, `year`, `season`, `episodes`, `torrent_title`, `site`, `quality`, `poster`                       |
+| `subscribe.douban_failed` Douban wish list fetch failed | `source`, `fails`, `error`                                                                                                     |
+| `media.organized` organized into the library            | `name`, `media_type`, `episodes`, `files`, `quality`, `library`, `torrent`, `poster`                                           |
+| `site.login_expiring` site account about to be disabled | `site`, `tier`, `days_remaining`, `last_active`, `days_since_active`, `access_stale`                                           |
+| `site.probe_failed` site probe failed                   | `site`, `status`, `status_label`, `since`, `advice`, `diagnosis`                                                               |
+| `site.probe_recovered` site probe recovered             | `site`, `probed_at`                                                                                                            |
+| `site.login_test` login reminder test                   | `site`, `tier`, `days_remaining`, `last_active`                                                                                |
+| `attendance.daily` sign-in results                      | `day`, `signed`, `failed`, `items` (each with `site`, `status`, `status_label`, `message`)                                     |
+| `report.daily` daily report                             | `day`, `uploaded`, `downloaded`, `uploaded_bytes`, `downloaded_bytes`, `bonus`, `items` (per site)                             |
+| `downloader.dead_torrents` dead torrents                | `downloader`, `count`, `size`, `size_bytes`, `items` (each with `name`, `size`, `size_bytes`)                                  |
+| `remote.paired` new device paired                       | `device`, `permission`                                                                                                         |
+| `test` channel test                                     | `channel`                                                                                                                      |
+
+The daily report's variables cover the totals and the per-site figures; the login problems, sign-in and brushing parts are only in `text`. Lists hold at most 100 entries; the number left out is in `items_more`.
+
+Functions: the comparisons `eq`, `ne`, `lt`, `le`, `gt` and `ge` (integers and decimals compare directly), `default` (a fallback for empty values), `truncate` (cuts to a number of characters and adds "…"), `contains`, `hasPrefix`, `hasSuffix`, `replace`, `upper`, `lower`, `trim`, `bytes` (writes a byte count as `15.00 GB`), `date` (formats a time with a Go layout), `printf` and `json` (writes a JSON literal). Examples:
+
+```text
+{{if gt .seeders 10}}popular{{end}}
+{{.rule | default "none"}}
+{{.text | truncate 100}}
+{{if contains "2160p" .torrent_title}}4K{{end}}
+{{bytes .size_bytes}}
+{{date "01-02 15:04" .timestamp}}
+{{printf "%.1f" .bonus}}
+```
+
+Saving renders the template once with sample data: a misspelled variable or a syntax error is not saved, and the message says which line is wrong. So that templates cannot slow notifications down, there are a few limits: `range` only loops over list variables, at most two levels deep; a template can be up to 8 KB; a rendered title up to 1 KB and a body up to 16 KB. If rendering still fails when sending, or produces nothing, that notification goes out with the built-in text, so a broken template never stops notifications.
+
+Templates change notifications only, not the replies to ChatOps commands or from the AI assistant. Telegram messages are sent as plain text, so HTML or Markdown in a template shows up as written.
