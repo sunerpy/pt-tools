@@ -79,8 +79,12 @@ An error responds with `{"error": "code", "message": "explanation"}`. `message` 
 | POST   | `/assistant/conversations/{id}/cancel`   | Read       | Stop the answer                                                               |
 | GET    | `/assistant/conversations/{id}/events`   | Read       | Long-poll a conversation's progress                                           |
 | POST   | `/assistant/confirmations/{id}`          | Operate    | Confirm or deny an action                                                     |
+| GET    | `/templates`                             | Read       | Message templates: events, variables and the current templates                |
+| POST   | `/templates/preview`                     | Read       | Render a template with sample data                                            |
+| PUT    | `/templates/{type}`                      | Operate    | Save the template for an event                                                |
+| DELETE | `/templates/{type}`                      | Operate    | Restore the default                                                           |
 
-Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST but needs only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
+Paths leave out the `/api/app/v1` prefix. Search and the template preview send their content with POST but need only Read. Every call a token makes to an Operate endpoint, including calls refused for lack of permission, is recorded under ChatOps → Audit log (操作审计) with the channel API token (API 令牌); a push that was stopped and batch actions with failures are recorded as errors even though the response is 200.
 
 ## Basics
 
@@ -104,13 +108,14 @@ Paths leave out the `/api/app/v1` prefix. Search sends its conditions with POST 
     "media",
     "subscriptions",
     "updates",
-    "assistant"
+    "assistant",
+    "templates"
   ],
   "principal": { "kind": "api_token", "name": "My phone", "scopes": ["app:read", "app:write"] }
 }
 ```
 
-`principal.kind` is `api_token` (a token), `session` (a web sign-in) or `remote_device` (a device paired through remote access); `features` lists the feature groups of this version (earlier versions have no `downloaders`, `updates` or `assistant`); `scopes` are the caller's permissions, so a client can decide which actions to show.
+`principal.kind` is `api_token` (a token), `session` (a web sign-in) or `remote_device` (a device paired through remote access); `features` lists the feature groups of this version (earlier versions have no `downloaders`, `updates`, `assistant` or `templates`); `scopes` are the caller's permissions, so a client can decide which actions to show.
 
 ### GET /updates
 
@@ -332,3 +337,27 @@ Every event has `seq`, `type` and `at`, and depending on its type:
 ### POST /assistant/confirmations/{id}
 
 `{"approve": true}` confirms, `{"approve": false}` denies. Needs Operate. Responds with the decided action; one that already has a decision (decided elsewhere first, timed out or voided) gets 409 (`decided`). Confirming and denying are recorded in the audit log; the executed action gets its own entry with the channel AI assistant and the user `token:<token id>` or `device:<device id>`.
+
+## Message templates
+
+These endpoints match ChatOps → Message templates (消息模板) on the web; the syntax is described in [Message templates](../guide/notify-channels.md#message-templates). A template applies to every channel and changes every notification and reply sent after it is saved, so saving and restoring the default need Operate, and only callers with Operate get the template source; changes made by tokens and devices are recorded in the audit log. Anything that looks like a credential is masked in the sample values, the built-in text and preview results. On a host without these endpoints, `features` in `GET /meta` has no `templates`.
+
+### GET /templates
+
+Responds with `groups`, `common_vars` and `events`:
+
+- `groups`: the event groups. `key` is `notify` (notifications), `reply` (ChatOps command replies) or `assistant` (AI assistant replies), with a `name` and a `desc`.
+- `common_vars`: the variables every event has. A variable has a `key`, a `type` (`string`, `int`, `float`, `bool` or `list`), a `desc` and a `sample` (the sample value written as text); a list has no sample, and the fields of each item are in `item`.
+- `events`: one entry per event with `type`, `group`, `name`, `desc`, `no_title` (body only), `vars`, `sample_title` and `sample_text` (what is sent when nothing is changed), `title` and `text` (the current templates; an empty one uses the built-in text; only callers with Operate get them, a read-only caller gets them empty and can tell from `customized` whether there is one), `customized` and `updated_at` (when it was customized, as a Unix timestamp in seconds).
+
+### POST /templates/preview
+
+`{"type": "rss.matched", "title": "…", "text": "…"}` renders the template with the event's sample data and saves nothing. Responds with `{"title": "…", "text": "…"}` (`title` is empty for a body-only event). A template that is not right gets 400 (`invalid_argument`) with a `message` naming the line and the problem; an unknown event gets 404.
+
+### PUT /templates/{type}
+
+`{"title": "…", "text": "…"}` is checked the same way as a preview before it is saved and gets 400 when it is not right; leaving both empty restores the default. A title for a body-only event also gets 400. Responds with the event as saved (the same fields as an entry of `events`).
+
+### DELETE /templates/{type}
+
+Restores the built-in text and responds with `{"ok": true}`; an unknown event gets 404.
