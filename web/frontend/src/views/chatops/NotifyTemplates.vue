@@ -490,6 +490,11 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
   font-size: 13px;
   line-height: 1.6;
   color: var(--pt-t1);
+}
+
+/* 标题与正文按原样换行（通知是纯文本） */
+.nt-preview__title,
+.nt-preview__text {
   white-space: pre-wrap;
   word-break: break-word;
 }
