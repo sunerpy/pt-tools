@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.27](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.26...v1.0.0-rc.27) (2026-10-13)
+
+
+### Features
+
+* **app-api:** 在 App API 里管理消息模板 ([#685](https://github.com/sunerpy/pt-tools/issues/685)) ([30ed23a](https://github.com/sunerpy/pt-tools/commit/30ed23a3a66b4d8fbfef1f92eaabe79ee43ade9d))
+* **chatops:** ChatOps 命令回复与 AI 助手回复可以套用消息模板 ([#684](https://github.com/sunerpy/pt-tools/issues/684)) ([9d3ed66](https://github.com/sunerpy/pt-tools/commit/9d3ed662bdabc6c1d7f81cddcd92da7adadc7123))
+* **extension:** 定时同步 Cookie，并可加密上传到 CookieCloud ([#686](https://github.com/sunerpy/pt-tools/issues/686)) ([9e3db1c](https://github.com/sunerpy/pt-tools/commit/9e3db1c6fdbd45d6817d811f79d730704594ccc6))
+* **notify:** Webhook 可以按响应内容判断成败 ([#683](https://github.com/sunerpy/pt-tools/issues/683)) ([5a5734d](https://github.com/sunerpy/pt-tools/commit/5a5734d30a62634153b62fe0e57620ed1f43f8f2))
+
+
+### Bug Fixes
+
+* **extension:** 定时同步把没有可用 Cookie 的站点按名字报出来 ([#688](https://github.com/sunerpy/pt-tools/issues/688)) ([baaa57b](https://github.com/sunerpy/pt-tools/commit/baaa57b8361e905b9109347230ad1509179a74a1))
+* **sitelogin:** 没写最近动向选择器的 NexusPHP 站点不再报解析失败 ([#680](https://github.com/sunerpy/pt-tools/issues/680)) ([c9afa5b](https://github.com/sunerpy/pt-tools/commit/c9afa5bff949b859261db320a13aa5e6d4ec99a6))
+* **site:** NexusPHP 用户详情页的实际上传、下载量按通用写法取 ([#682](https://github.com/sunerpy/pt-tools/issues/682)) ([0972481](https://github.com/sunerpy/pt-tools/commit/097248113d4b6df8546cda383c8921918f9f5ff8))
+* **site:** 上游 NexusPHP 做种汇总的条数解析成 0，补 gtkpw 做种体积的全流程测试（[#332](https://github.com/sunerpy/pt-tools/issues/332)） ([5bd0fff](https://github.com/sunerpy/pt-tools/commit/5bd0fffab312b837263e7dccea0ec415ac3cac48))
+* **site:** 上游 NexusPHP 做种汇总的条数解析成 0（[#332](https://github.com/sunerpy/pt-tools/issues/332)） ([#687](https://github.com/sunerpy/pt-tools/issues/687)) ([5bd0fff](https://github.com/sunerpy/pt-tools/commit/5bd0fffab312b837263e7dccea0ec415ac3cac48))
+* **web:** 过滤规则的用途经接口存取，列表加一列用途 ([#678](https://github.com/sunerpy/pt-tools/issues/678)) ([e93f040](https://github.com/sunerpy/pt-tools/commit/e93f04099dd8628629f57a79eeefcaaf96591f01))
+
 ## [1.0.0-rc.26](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.25...v1.0.0-rc.26) (2026-10-13)
 
 
