@@ -212,17 +212,29 @@ func TestChatOpsNewChatAndSwitch(t *testing.T) {
 }
 
 func TestChatOpsEventText(t *testing.T) {
-	got := chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "assistant", Content: "## 标题\n**粗**"}}, "")
+	got, fields := chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "assistant", Content: "## 标题\n**粗**"}}, "")
 	assert.Equal(t, "标题\n粗", got)
-	assert.Empty(t, chatopsEventText(Event{Type: EventMessage, Message: &MessageView{
+	assert.Equal(t, map[string]any{"kind": "answer"}, fields)
+	got, _ = chatopsEventText(Event{Type: EventMessage, Message: &MessageView{
 		Role: "assistant", Content: "我查一下", ToolCalls: []ToolCallView{{ID: "c1", Name: "list_tasks"}},
-	}}, ""), "带工具调用的中间消息不发")
-	assert.Empty(t, chatopsEventText(Event{Type: EventDelta, Text: "增量"}, ""))
-	assert.Equal(t, "已停止回答。", chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "notice", Content: "已停止回答。"}}, ""))
-	en := chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
-		Status: "pending", Summary: "x", ExpiresAt: time.Now(),
+	}}, "")
+	assert.Empty(t, got, "带工具调用的中间消息不发")
+	got, _ = chatopsEventText(Event{Type: EventDelta, Text: "增量"}, "")
+	assert.Empty(t, got)
+	got, fields = chatopsEventText(Event{Type: EventMessage, Message: &MessageView{Role: "notice", Content: "已停止回答。"}}, "")
+	assert.Equal(t, "已停止回答。", got)
+	assert.Equal(t, map[string]any{"kind": "notice"}, fields)
+	expires := time.Date(2026, 10, 12, 8, 10, 0, 0, time.Local)
+	en, fields := chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
+		Status: "pending", Summary: "x", ExpiresAt: expires,
 	}}, "en")
 	assert.Contains(t, en, "Please confirm: x")
+	assert.Equal(t, map[string]any{"kind": "confirm", "summary": "x", "expires": "08:10"}, fields)
+	got, fields = chatopsEventText(Event{Type: EventConfirmation, Confirmation: &ConfirmationView{
+		Status: "expired", DecidedBy: decidedByTimeout, Summary: "x",
+	}}, "")
+	assert.Equal(t, "确认超时，没有执行：x", got)
+	assert.Equal(t, map[string]any{"kind": "timeout", "summary": "x"}, fields)
 	assert.True(t, isYes(" OK. "))
 	assert.True(t, isYes("确认！"))
 	assert.False(t, isYes("确认一下这个是什么"))
@@ -302,4 +314,35 @@ func TestChatOpsConcurrentFirstMessagesShareOneConversation(t *testing.T) {
 	var n int64
 	require.NoError(t, e.db.Model(&models.AssistantConversation{}).Where("owner = ?", "chatops:3").Count(&n).Error)
 	assert.Equal(t, int64(1), n)
+}
+
+// 发到通知渠道以前按 assistant.reply 套用模板：先套再分条，模板加的结尾只出现一次（在最后一条里）；
+// 即时答复带着 kind=status 的事件，由 MessageChain 套用。
+func TestChatOpsAppliesAssistantTemplate(t *testing.T) {
+	e, h, rp := chatopsEnv(t)
+	set := notify.NewTemplates(nil)
+	set.Replace([]notify.TemplateSource{{
+		EventType: notify.EventAssistantReply,
+		Text:      "{{if eq .kind \"answer\"}}🤖 {{.text}}\n—— 来自 AI 助手{{else}}{{.text}}{{end}}",
+	}})
+	h.SetTemplates(set)
+	ctx := context.Background()
+
+	line := strings.Repeat("字", 99) + "\n"
+	long := strings.Repeat(line, 50) // 5000 个字：分两条发
+	e.llm.push(reply{text: long})
+	_, result := h.Handle(ctx, inbound("说点长的", true))
+	require.Equal(t, "success", result)
+	rp.waitFor(t, "—— 来自 AI 助手")
+	sent := rp.texts()
+	require.Len(t, sent, 2)
+	assert.True(t, strings.HasPrefix(sent[0], "🤖 字"), "开头在第一条")
+	assert.NotContains(t, sent[0], "来自 AI 助手")
+	assert.True(t, strings.HasSuffix(sent[1], "—— 来自 AI 助手"), "结尾只在最后一条")
+
+	r := chatReply("上一个问题还在回答，等它说完再问。")
+	require.NotNil(t, r.Event)
+	assert.Equal(t, notify.EventAssistantReply, r.Event.Type)
+	assert.Equal(t, "status", r.Event.Fields["kind"])
+	assert.Equal(t, "上一个问题还在回答，等它说完再问。", set.ApplyText(r.Event, r.Text), "status 走模板的 else 分支")
 }

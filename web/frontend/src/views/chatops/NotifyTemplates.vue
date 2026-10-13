@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /*
- * 消息模板（路线图 M21）：按事件改通知的标题与正文，所有通知通道都按它发（Go 模板，写法是 {{.site}}）。
- * 左边是事件列表，右边是编辑：变量表点一下插到光标处，改了以后用示例数据实时预览。
+ * 消息模板（路线图 M21、M22）：按事件改通知的标题与正文，所有通知通道都按它发（Go 模板，写法是 {{.site}}）；
+ * ChatOps 命令回复与 AI 助手回复也能改，它们只有正文。
+ * 左边是按组列出的事件，右边是编辑：变量表点一下插到光标处，改了以后用示例数据实时预览。
  * 保存前后端用示例数据渲染一遍，写错的变量名、不合规的循环会被拒并写明原因；空着的一项用内置文字。
- * 手机上没有左栏，事件在编辑卡顶上的下拉框里选。
+ * 手机上没有左栏，事件在编辑卡顶上的下拉框里选（按组分开）。
  */
 import {
   chatopsApi,
@@ -50,6 +51,26 @@ const dirty = computed(
     !!current.value &&
     (form.value.title !== current.value.title || form.value.text !== current.value.text),
 );
+/** 命令回复与助手回复只有正文：不显示标题框、标题变量与预览里的标题 */
+const noTitle = computed(() => !!current.value?.no_title);
+
+/** 按组排好的事件，组的顺序以目录给的为准；没有事件的组不显示 */
+const grouped = computed(() => {
+  const cat = catalog.value;
+  if (!cat) return [];
+  const groups = cat.groups?.length ? cat.groups : [{ key: "notify", name: "通知", desc: "" }];
+  return groups
+    .map((g) => ({ ...g, events: cat.events.filter((e) => (e.group || "notify") === g.key) }))
+    .filter((g) => g.events.length > 0);
+});
+
+const visibleVars = computed<NotifyTemplateVar[]>(() => {
+  if (!catalog.value || !current.value) return [];
+  const common = noTitle.value
+    ? catalog.value.common_vars.filter((v) => v.key !== "title")
+    : catalog.value.common_vars;
+  return [...common, ...current.value.vars];
+});
 
 const TYPE_LABELS: Record<NotifyTemplateVar["type"], string> = {
   string: "文字",
@@ -170,7 +191,9 @@ async function save() {
     const v = await chatopsApi.templates.save(type, { ...form.value });
     replaceView(v);
     if (currentType.value === type) form.value = { title: v.title, text: v.text };
-    ElMessage.success(v.customized ? "已保存" : "两项都空着：已恢复默认");
+    ElMessage.success(
+      v.customized ? "已保存" : v.no_title ? "正文空着：已恢复默认" : "两项都空着：已恢复默认",
+    );
   } catch (e) {
     ElMessage.error(apiErrorDetail(e, "保存失败"));
   } finally {
@@ -182,11 +205,15 @@ async function reset() {
   const v = current.value;
   if (!v) return;
   try {
-    await ElMessageBox.confirm(`「${v.name}」恢复成内置的标题与正文？`, "恢复默认", {
-      confirmButtonText: "恢复默认",
-      cancelButtonText: "取消",
-      type: "warning",
-    });
+    await ElMessageBox.confirm(
+      `「${v.name}」恢复成内置的${v.no_title ? "正文" : "标题与正文"}？`,
+      "恢复默认",
+      {
+        confirmButtonText: "恢复默认",
+        cancelButtonText: "取消",
+        type: "warning",
+      },
+    );
   } catch {
     return;
   }
@@ -233,7 +260,10 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
 
 <template>
   <div class="pt-cards pt-cards--side">
-    <PtHeadSub>按事件改通知的标题与正文，所有通知通道都按它发；空着的一项用内置文字</PtHeadSub>
+    <PtHeadSub
+      >按事件改通知、ChatOps 命令回复与 AI
+      助手回复的文字，所有通知通道都按它发；空着的一项用内置文字</PtHeadSub
+    >
 
     <PtDataState
       v-if="!catalog"
@@ -249,23 +279,32 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
         icon="bell"
         :count="catalog.events.length"
         data-testid="nt-events">
-        <ul class="nt-list">
-          <li v-for="e in catalog.events" :key="e.type">
-            <button
-              type="button"
-              class="nt-item"
-              :class="{ 'is-active': e.type === currentType }"
-              :aria-current="e.type === currentType ? 'true' : undefined"
-              :data-testid="`nt-event-${e.type}`"
-              @click="select(e.type)">
-              <span class="nt-item__name">{{ e.name }}</span>
-              <span class="nt-item__meta">
-                <code>{{ e.type }}</code>
-                <PtStatusPill v-if="e.customized" tone="primary" size="sm">已自定义</PtStatusPill>
-              </span>
-            </button>
-          </li>
-        </ul>
+        <section
+          v-for="g in grouped"
+          :key="g.key"
+          class="nt-group"
+          :aria-label="g.name"
+          :data-testid="`nt-group-${g.key}`">
+          <h3 class="nt-group__name">{{ g.name }}</h3>
+          <p v-if="g.desc" class="nt-group__desc">{{ g.desc }}</p>
+          <ul class="nt-list">
+            <li v-for="e in g.events" :key="e.type">
+              <button
+                type="button"
+                class="nt-item"
+                :class="{ 'is-active': e.type === currentType }"
+                :aria-current="e.type === currentType ? 'true' : undefined"
+                :data-testid="`nt-event-${e.type}`"
+                @click="select(e.type)">
+                <span class="nt-item__name">{{ e.name }}</span>
+                <span class="nt-item__meta">
+                  <code>{{ e.type }}</code>
+                  <PtStatusPill v-if="e.customized" tone="primary" size="sm">已自定义</PtStatusPill>
+                </span>
+              </button>
+            </li>
+          </ul>
+        </section>
       </PtPanel>
 
       <PtPanel v-if="current" :title="current.name" icon="file-text" data-testid="nt-editor">
@@ -285,16 +324,18 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
           aria-label="选择事件"
           data-testid="nt-event-select"
           @change="select">
-          <el-option
-            v-for="e in catalog.events"
-            :key="e.type"
-            :value="e.type"
-            :label="e.customized ? `${e.name}（已自定义）` : e.name" />
+          <el-option-group v-for="g in grouped" :key="g.key" :label="g.name">
+            <el-option
+              v-for="e in g.events"
+              :key="e.type"
+              :value="e.type"
+              :label="e.customized ? `${e.name}（已自定义）` : e.name" />
+          </el-option-group>
         </el-select>
         <p class="nt-desc">{{ current.desc }}</p>
 
         <el-form class="pt-form" label-position="top" @submit.prevent>
-          <el-form-item label="标题模板">
+          <el-form-item v-if="!noTitle" label="标题模板">
             <el-input
               ref="titleRef"
               v-model="form.title"
@@ -317,7 +358,7 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
         <h3 class="nt-sub">预览（示例数据）</h3>
         <div v-if="preview" class="nt-preview" data-testid="nt-preview">
           <template v-if="preview.ok">
-            <div class="nt-preview__title">{{ preview.title }}</div>
+            <div v-if="!noTitle" class="nt-preview__title">{{ preview.title }}</div>
             <div class="nt-preview__text">{{ preview.text }}</div>
           </template>
           <div v-else class="nt-preview__error" role="alert" data-testid="nt-preview-error">
@@ -332,7 +373,7 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
           >
         </h3>
         <ul class="nt-vars" data-testid="nt-vars">
-          <li v-for="v in [...catalog.common_vars, ...current.vars]" :key="v.key" class="nt-var">
+          <li v-for="v in visibleVars" :key="v.key" class="nt-var">
             <button
               type="button"
               class="nt-var__code"
@@ -374,7 +415,7 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
 
         <h3 class="nt-sub">内置的样子</h3>
         <div class="nt-preview nt-preview--builtin" data-testid="nt-builtin">
-          <div class="nt-preview__title">{{ current.sample_title }}</div>
+          <div v-if="!noTitle" class="nt-preview__title">{{ current.sample_title }}</div>
           <div class="nt-preview__text">{{ current.sample_text }}</div>
         </div>
 
@@ -401,6 +442,28 @@ onBeforeUnmount(() => clearTimeout(previewTimer));
 </template>
 
 <style scoped>
+.nt-group + .nt-group {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pt-border);
+}
+
+.nt-group__name {
+  margin: 0 0 2px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pt-t2);
+}
+
+.nt-group__desc {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--pt-t3);
+}
+
 .nt-list {
   display: flex;
   flex-direction: column;

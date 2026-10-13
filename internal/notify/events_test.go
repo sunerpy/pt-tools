@@ -13,12 +13,16 @@ import (
 	"github.com/sunerpy/pt-tools/internal/notify/tmpl"
 )
 
-// 事件目录自身一致：类型不重复；同一个变量名在各事件里种类一样（零值才统一）；不和公共变量重名；
-// 列表有字段说明，也有对应的 items_more；示例的种类和声明的一致。
+// 事件目录自身一致：类型不重复；组是认识的，只有通知有标题；同一个变量名在各事件里种类一样（零值才统一）；
+// 不和公共变量重名；列表有字段说明，也有对应的 items_more；示例的种类和声明的一致。
 func TestEventCatalogConsistent(t *testing.T) {
 	common := map[string]bool{}
 	for _, v := range CommonVars {
 		common[v.Key] = true
+	}
+	groups := map[string]bool{}
+	for _, g := range Groups {
+		groups[g.Key] = true
 	}
 	kinds := map[string]VarType{}
 	seen := map[string]bool{}
@@ -26,7 +30,13 @@ func TestEventCatalogConsistent(t *testing.T) {
 		require.False(t, seen[spec.Type], "重复的事件 %s", spec.Type)
 		seen[spec.Type] = true
 		require.NotEmpty(t, spec.Name, spec.Type)
-		require.NotEmpty(t, spec.SampleTitle, spec.Type)
+		require.True(t, groups[spec.Group], "%s 的组 %q 不认识", spec.Type, spec.Group)
+		require.Equal(t, spec.Group != GroupNotify, spec.NoTitle, "%s：只有通知有标题", spec.Type)
+		if spec.NoTitle {
+			require.Empty(t, spec.SampleTitle, spec.Type)
+		} else {
+			require.NotEmpty(t, spec.SampleTitle, spec.Type)
+		}
 		require.NotEmpty(t, spec.SampleText, spec.Type)
 		keys := map[string]bool{}
 		for _, v := range spec.Vars {
@@ -168,4 +178,48 @@ func TestDataHasZeroValuesForOtherEvents(t *testing.T) {
 	assert.Equal(t, "通道测试", d["event_name"])
 	assert.Equal(t, "2026-10-12 08:00:00", d["time"])
 	assert.Equal(t, title, d["title"])
+}
+
+// 零值按组分：命令回复拿不到通知才有的变量（变量名写错会被查出来），通知拿不到回复的变量；公共变量各组都有，
+// Webhook 的变量只在通知组。
+func TestDataZeroValuesPerGroup(t *testing.T) {
+	ev, _, text := SampleEvent(EventReplyStatus)
+	d := ev.Data("", text)
+	assert.NotContains(t, d, "torrent_title")
+	assert.NotContains(t, d, "channel")
+	assert.Contains(t, d, "downloader", "同一组别的回复的变量是零值")
+	assert.Equal(t, "", d["downloader"])
+	assert.Equal(t, text, d["text"])
+	assert.Equal(t, "/status 状态概览", d["event_name"])
+
+	_, err := RenderSample(EventReplyStatus, tmpl.Reply, "{{.torrent_title}}")
+	assert.ErrorContains(t, err, "没有这个变量：torrent_title")
+
+	n, title, ntext := SampleEvent(EventRSSMatched)
+	nd := n.Data(title, ntext)
+	assert.NotContains(t, nd, "kind")
+	assert.NotContains(t, nd, "command")
+	assert.Contains(t, nd, "channel")
+
+	a, _, atext := SampleEvent(EventAssistantReply)
+	ad := a.Data("", atext)
+	assert.Equal(t, "answer", ad["kind"])
+	assert.NotContains(t, ad, "command")
+}
+
+func TestEventGroupHelpers(t *testing.T) {
+	assert.True(t, IsNotifyEvent(EventRSSMatched))
+	assert.False(t, IsNotifyEvent(EventReplyOther))
+	assert.False(t, IsNotifyEvent(EventAssistantReply))
+	assert.False(t, IsNotifyEvent("nope"))
+	assert.Equal(t, tmpl.Text, TextKind(EventRSSMatched))
+	assert.Equal(t, tmpl.Reply, TextKind(EventReplyStatus))
+	assert.Equal(t, tmpl.Reply, TextKind(EventAssistantReply))
+	assert.Equal(t, tmpl.Text, TextKind("nope"))
+	for _, spec := range Events {
+		if spec.Group == GroupNotify {
+			continue
+		}
+		assert.True(t, spec.NoTitle, spec.Type)
+	}
 }

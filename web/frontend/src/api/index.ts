@@ -1658,11 +1658,23 @@ export interface NotifyTemplateVar {
   item?: NotifyTemplateVar[];
 }
 
-/** 一种事件：说明、变量、内置标题与正文的示例，以及当前的模板（没有自定义时 title、text 为空）。 */
-export interface NotifyTemplateView {
-  type: string;
+/** 事件的组：notify（通知）、reply（ChatOps 命令回复）、assistant（AI 助手回复）。 */
+export interface NotifyTemplateGroup {
+  key: string;
   name: string;
   desc: string;
+}
+
+/**
+ * 一种事件：所在的组、说明、变量、内置标题与正文的示例，以及当前的模板（没有自定义时 title、text 为空）。
+ * no_title 的事件（命令回复、助手回复）只有正文。
+ */
+export interface NotifyTemplateView {
+  type: string;
+  group: string;
+  name: string;
+  desc: string;
+  no_title?: boolean;
   vars: NotifyTemplateVar[];
   sample_title: string;
   sample_text: string;
@@ -1673,6 +1685,7 @@ export interface NotifyTemplateView {
 }
 
 export interface NotifyTemplateCatalog {
+  groups: NotifyTemplateGroup[];
   common_vars: NotifyTemplateVar[];
   events: NotifyTemplateView[];
 }

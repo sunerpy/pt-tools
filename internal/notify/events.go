@@ -2,6 +2,8 @@ package notify
 
 import (
 	"time"
+
+	"github.com/sunerpy/pt-tools/internal/notify/tmpl"
 )
 
 // 事件类型。生产者用这些常量经 NewEvent 建事件；消息模板按它们一种一套。
@@ -43,11 +45,14 @@ type Var struct {
 	Item   []Var   `json:"item,omitempty"`
 }
 
-// EventSpec 是一种事件：名称、说明、专有变量，以及界面上展示的内置标题与正文的示例（按 Sample 生成的样子）。
+// EventSpec 是一种事件：所在的组、名称、说明、专有变量，以及界面上展示的内置标题与正文的示例（按 Sample 生成的样子）。
+// NoTitle 的事件（ChatOps 命令回复、AI 助手回复）只有正文，没有标题模板。
 type EventSpec struct {
 	Type        string `json:"type"`
+	Group       string `json:"group"`
 	Name        string `json:"name"`
 	Desc        string `json:"desc"`
+	NoTitle     bool   `json:"no_title,omitempty"`
 	Vars        []Var  `json:"vars"`
 	SampleTitle string `json:"sample_title"`
 	SampleText  string `json:"sample_text"`
@@ -72,8 +77,8 @@ func more(desc string) Var {
 	return Var{Key: "items_more", Type: VarInt, Desc: desc + "（列表最多 100 项）", Sample: int64(0)}
 }
 
-// Events 是事件目录。改这里要同时改对应生产者（events_test 核对两边的变量一致）。
-var Events = []EventSpec{
+// notifyEvents 是通知组的事件（发到所有通知通道，Webhook 收到的也是这些）。改这里要同时改对应生产者。
+var notifyEvents = []EventSpec{
 	{
 		Type: EventRSSNew, Name: "RSS 新种子", Desc: "RSS 拉到新种子（通知方式选了「全部」）",
 		Vars: []Var{
@@ -302,23 +307,33 @@ var (
 	specByType = map[string]*EventSpec{}
 	// listVars 是可以 range 的变量名（目录里声明为列表的）
 	listVars = map[string]bool{}
-	// zeroData 是所有事件的全部变量的零值
-	zeroData = map[string]any{}
+	// zeroData 按组放这一组所有事件的全部变量的零值，加上公共变量（通知组还有 Webhook 的变量）
+	zeroData = map[string]map[string]any{}
 )
 
 func init() {
 	for i := range Events {
 		spec := &Events[i]
 		specByType[spec.Type] = spec
+		z := zeroData[spec.Group]
+		if z == nil {
+			z = map[string]any{}
+			zeroData[spec.Group] = z
+		}
 		for _, v := range spec.Vars {
 			if v.Type == VarList {
 				listVars[v.Key] = true
 			}
-			zeroData[v.Key] = zeroOf(v.Type)
+			z[v.Key] = zeroOf(v.Type)
 		}
 	}
-	for _, v := range append(append([]Var{}, CommonVars...), WebhookVars...) {
-		zeroData[v.Key] = zeroOf(v.Type)
+	for _, z := range zeroData {
+		for _, v := range CommonVars {
+			z[v.Key] = zeroOf(v.Type)
+		}
+	}
+	for _, v := range WebhookVars {
+		zeroData[GroupNotify][v.Key] = zeroOf(v.Type)
 	}
 }
 
@@ -338,6 +353,21 @@ func zeroOf(t VarType) any {
 
 // Spec 是事件类型的说明，不认识的类型返回 nil。
 func Spec(typ string) *EventSpec { return specByType[typ] }
+
+// IsNotifyEvent 报告这种事件是不是通知（Webhook 只会收到通知）。
+func IsNotifyEvent(typ string) bool {
+	spec := specByType[typ]
+	return spec != nil && spec.Group == GroupNotify
+}
+
+// TextKind 是这种事件的正文模板的种类：ChatOps 命令回复与 AI 助手回复的正文可能很长（助手的回答最多分 4 条发），
+// 输出上限比通知的正文大。
+func TextKind(typ string) tmpl.Kind {
+	if spec := specByType[typ]; spec != nil && spec.Group != GroupNotify {
+		return tmpl.Reply
+	}
+	return tmpl.Text
+}
 
 // ListVars 是可以 range 的变量名。
 func ListVars() map[string]bool { return listVars }

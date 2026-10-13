@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 type Button struct {
@@ -46,6 +48,9 @@ type Reply struct {
 	// Failed 表示命令没做成（参数不对、服务不可用、执行出错），Text 里写了原因。
 	// 处理器照常返回 nil error 让回复发出去，审计据此记为失败而不是 success。
 	Failed bool
+	// Event 是这条回复的结构化数据（几个查询命令与 AI 助手的回复才有），按它套用消息模板；Text 是内置的文字。
+	// 没有时由 MessageChain 按 reply.other（命令名与做成了没有）套用。
+	Event *notify.Event
 }
 
 type CommandReply = Reply

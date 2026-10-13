@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/chatops"
@@ -26,6 +27,8 @@ type ChatOpsReplier interface {
 type ChatOpsHandler struct {
 	svc     *Service
 	replier ChatOpsReplier
+	// templates 是消息模板：发到通知渠道以前按 assistant.reply 套用（为 nil 时用内置文字）
+	templates *notify.Templates
 	// locks 是每个属主一把锁：找滚动会话（没有就建）与发消息要一起做，同时到的两条消息不会各建一个会话
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex
@@ -35,6 +38,9 @@ type ChatOpsHandler struct {
 func NewChatOpsHandler(svc *Service, replier ChatOpsReplier) *ChatOpsHandler {
 	return &ChatOpsHandler{svc: svc, replier: replier, locks: map[string]*sync.Mutex{}}
 }
+
+// SetTemplates 接上消息模板（在接到 ChatOps 以前调用）。
+func (h *ChatOpsHandler) SetTemplates(t *notify.Templates) { h.templates = t }
 
 func (h *ChatOpsHandler) ownerLock(owner string) *sync.Mutex {
 	h.locksMu.Lock()
@@ -72,10 +78,12 @@ func (h *ChatOpsHandler) actor(msg notify.InboundMessage, src chatops.Source) Ac
 	a := Actor{Owner: chatopsOwner(src), Entry: models.AssistantEntryChatOps, Name: name, CanWrite: src.PtAdmin}
 	lang := src.ReplyLang
 	a.Notify = func(ctx context.Context, ev Event) {
-		text := chatopsEventText(ev, lang)
+		text, fields := chatopsEventText(ev, lang)
 		if text == "" || h.replier == nil {
 			return
 		}
+		// 先套模板再分条：模板拿到的是整个回答，加的开头、结尾只出现一次
+		text = h.templates.ApplyText(notify.NewEvent(notify.EventAssistantReply, time.Now(), fields), text)
 		for _, part := range splitReply(text, lang) {
 			if err := h.replier.Reply(ctx, msg, chatops.Reply{Text: part}); err != nil {
 				global.GetSlogger().Warnf("[AI 助手] ChatOps 回复失败 conf=%d: %v", msg.SourceConfID, err)
@@ -105,7 +113,10 @@ func isYes(text string) bool {
 	return yesWords[t]
 }
 
-func chatReply(text string) chatops.Reply { return chatops.Reply{Text: text} }
+// chatReply 是收到消息时的即时答复（assistant.reply 的 status），由 MessageChain 套用模板以后发出。
+func chatReply(text string) chatops.Reply {
+	return chatops.Reply{Text: text, Event: notify.NewEvent(notify.EventAssistantReply, time.Now(), map[string]any{"kind": "status"})}
+}
 
 // Handle 处理一条非命令消息。返回立即回复与审计结果。
 func (h *ChatOpsHandler) Handle(ctx context.Context, in chatops.InboundAssistantMessage) (chatops.Reply, string) {
@@ -180,35 +191,39 @@ func (h *ChatOpsHandler) NewChat(ctx context.Context, src chatops.Source) error 
 	return err
 }
 
-// chatopsEventText 是一个事件在通知渠道里发的文字：最终回答、pt-tools 的提示、要确认的操作与确认超时；别的不发。
-func chatopsEventText(ev Event, lang string) string {
+// chatopsEventText 是一个事件在通知渠道里发的文字与 assistant.reply 的变量：最终回答、pt-tools 的提示、
+// 要确认的操作与确认超时；别的不发（文字为空）。
+func chatopsEventText(ev Event, lang string) (string, map[string]any) {
 	switch ev.Type {
 	case EventMessage:
 		m := ev.Message
 		if m == nil {
-			return ""
+			return "", nil
 		}
 		switch {
 		case m.Role == models.AssistantRoleAssistant && len(m.ToolCalls) == 0 && strings.TrimSpace(m.Content) != "":
-			return plainText(m.Content)
+			return plainText(m.Content), map[string]any{"kind": "answer"}
 		case m.Role == models.AssistantRoleNotice:
-			return m.Content
+			return m.Content, map[string]any{"kind": "notice"}
 		}
 	case EventConfirmation:
 		c := ev.Confirmation
 		if c == nil {
-			return ""
+			return "", nil
 		}
 		switch {
 		case c.Status == models.AssistantConfirmPending:
+			expires := c.ExpiresAt.Local().Format("15:04")
 			return tr(lang,
-				fmt.Sprintf("需要你确认：%s\n回复「确认」执行，回复别的内容取消（%s 以前有效）。", c.Summary, c.ExpiresAt.Local().Format("15:04")),
-				fmt.Sprintf("Please confirm: %s\nReply \"yes\" to run it; anything else cancels (valid until %s).", c.Summary, c.ExpiresAt.Local().Format("15:04")))
+					fmt.Sprintf("需要你确认：%s\n回复「确认」执行，回复别的内容取消（%s 以前有效）。", c.Summary, expires),
+					fmt.Sprintf("Please confirm: %s\nReply \"yes\" to run it; anything else cancels (valid until %s).", c.Summary, expires)),
+				map[string]any{"kind": "confirm", "summary": c.Summary, "expires": expires}
 		case c.Status == models.AssistantConfirmExpired && c.DecidedBy == decidedByTimeout:
-			return tr(lang, "确认超时，没有执行："+c.Summary, "Confirmation timed out, not run: "+c.Summary)
+			return tr(lang, "确认超时，没有执行："+c.Summary, "Confirmation timed out, not run: "+c.Summary),
+				map[string]any{"kind": "timeout", "summary": c.Summary}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // plainText 去掉回答里常见的 Markdown 记号（通知渠道按纯文本发）。
