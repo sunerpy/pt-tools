@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -253,6 +254,9 @@ var errReasonHidden = fmt.Errorf("%w（对方返回的原因里可能有凭证�
 // 太短的凭证（不到 4 个字符）没法放心地替换（会误伤原因里的普通文字），原因里出现它时整段不显示。
 func scrubError(err error, secrets []secretValue) error {
 	msg := err.Error()
+	// 长的先换：两个凭证互相包含时（ABCDEFGH 与 ABCDEFGHIJKL），先换短的会留下长的后半截
+	secrets = slices.Clone(secrets)
+	slices.SortStableFunc(secrets, func(a, b secretValue) int { return len(b.value) - len(a.value) })
 	for _, s := range secrets {
 		switch {
 		case len(s.value) >= 4:

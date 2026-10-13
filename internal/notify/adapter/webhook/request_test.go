@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -467,4 +468,13 @@ func TestWebhook_FailureReasonSecretAcrossCut(t *testing.T) {
 	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
 	require.ErrorIs(t, err, errResponseRejected)
 	assert.NotContains(t, err.Error(), "LONG")
+}
+
+// 两个凭证互相包含：先换长的，短的那个换完不会留下长凭证的后半截
+func TestScrubErrorOverlappingSecrets(t *testing.T) {
+	err := fmt.Errorf("%w：echo ABCDEFGHIJKLMNOPQRSTUV and ABCDEFGH", errResponseRejected)
+	got := scrubError(err, []secretValue{{value: "ABCDEFGH", credential: true}, {value: "ABCDEFGHIJKLMNOPQRSTUV", credential: true}})
+	assert.ErrorIs(t, got, errResponseRejected)
+	assert.NotContains(t, got.Error(), "IJKL")
+	assert.NotContains(t, got.Error(), "ABCD")
 }
