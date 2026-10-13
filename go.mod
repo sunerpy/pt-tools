@@ -5,8 +5,8 @@ go 1.26.9
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/RomiChan/websocket v1.4.3-0.20251002072000-d3eb41798438
-	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
-	github.com/chromedp/chromedp v0.16.0
+	github.com/chromedp/cdproto v0.157.8
+	github.com/chromedp/chromedp v0.21.0
 	github.com/coder/websocket v1.8.15
 	github.com/fatih/color v1.19.0
 	github.com/flynn/noise v1.1.0
@@ -18,10 +18,11 @@ require (
 	github.com/mmcdole/gofeed v1.5.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/mymmrac/telego v1.12.1
+	github.com/openai/openai-go/v3 v3.76.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/sunerpy/requests v0.2.0
-	github.com/tidwall/gjson v1.19.0
+	github.com/tidwall/gjson v1.19.1
 	github.com/wdvxdr1123/ZeroBot v1.8.2
 	github.com/zeebo/bencode v1.0.0
 	go.uber.org/zap v1.28.0
@@ -44,7 +45,6 @@ require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
-	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fumiama/orbyte v0.0.0-20251002065953-3bb358367eb5 // indirect
@@ -52,9 +52,6 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
-	github.com/gobwas/httphead v0.1.0 // indirect
-	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grbit/go-json v0.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -68,7 +65,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
-	github.com/openai/openai-go/v3 v3.76.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
