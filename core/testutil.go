@@ -32,6 +32,7 @@ func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 		&models.AssistantConversation{},
 		&models.AssistantMessage{},
 		&models.AssistantConfirmation{},
+		&models.NotificationTemplate{},
 	); err != nil {
 		return nil, err
 	}

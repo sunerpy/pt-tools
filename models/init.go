@@ -259,6 +259,8 @@ func NewDBWithVersionAndHooks(
 		&AssistantConversation{},
 		&AssistantMessage{},
 		&AssistantConfirmation{},
+		// 消息模板（M21）
+		&NotificationTemplate{},
 	); err != nil {
 		return nil, fmt.Errorf("自动迁移失败: %w", err)
 	}

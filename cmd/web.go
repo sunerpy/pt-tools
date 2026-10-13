@@ -626,6 +626,12 @@ func bootstrapChatOps(
 	auditSvc := app.NewAuditService(db)
 	bindingSvc := app.NewBindingService(db, chatopsBindingCreator)
 	liveManager := newLiveNotifyManager(nil)
+	// 全局消息模板：库里的先读进来，保存与恢复默认时由 TemplateService 整体替换
+	liveManager.templates = notify.NewTemplates(chatopsLogger().Warnf)
+	templateSvc := app.NewTemplateService(db, liveManager.templates)
+	if err := templateSvc.Load(ctx); err != nil {
+		chatopsLogger().Warnf("读取消息模板失败，先用内置文字: %v", err)
+	}
 	notifSvc := app.NewNotificationService(db, liveManager, chatopsPushTimeout)
 	taskSvc := app.NewTaskService(mgr)
 	siteSvc := app.NewSiteService(store, nil)
@@ -634,6 +640,7 @@ func bootstrapChatOps(
 	outbox := notify.NewOutboxWorker(db, registry, chatopsOutboxInterval)
 	// 重试经运行中的通道投递：按配置另建实例会抢 QQ 端口、和 Telegram 长轮询抢更新，库里的配置也是密文
 	outbox.SetLiveSender(outboxLiveSender{m: liveManager})
+	outbox.SetTemplates(liveManager.templates)
 	outbox.Start(ctx)
 
 	rateLimiter := chatops.NewRateLimiter()
@@ -675,6 +682,7 @@ func bootstrapChatOps(
 		NotificationSvc: notifSvc,
 		BindingSvc:      bindingSvc,
 		AuditSvc:        auditSvc,
+		TemplateSvc:     templateSvc,
 	}
 
 	return &chatopsBootstrap{
@@ -808,6 +816,8 @@ func (s *chatopsRSSWizardService) ListNotificationChannels(ctx context.Context) 
 type liveNotifyManager struct {
 	mu       sync.RWMutex
 	channels map[uint]notify.Channel
+	// templates 是全局消息模板：业务通知发出前在这里套用（ChatOps 的回复不套）
+	templates *notify.Templates
 }
 
 func newLiveNotifyManager(channels map[uint]notify.Channel) *liveNotifyManager {
@@ -872,14 +882,15 @@ func (m *liveNotifyManager) Send(ctx context.Context, confID uint, n app.Notific
 	if !ok || ch == nil {
 		return fmt.Errorf("通知通道未运行 conf_id=%d", confID)
 	}
-	if err := ch.Send(ctx, notify.Notification{
+	if err := ch.Send(ctx, m.templates.Apply(notify.Notification{
+		Event:        n.Event,
 		Title:        n.Title,
 		Text:         n.Text,
 		SourceConfID: n.SourceConfID,
 		UserID:       n.UserID,
 		Targets:      n.Targets,
 		Buttons:      n.Buttons,
-	}); err != nil {
+	})); err != nil {
 		chatopsLogger().Warnf("实时通知投递失败 conf_id=%d type=%s: %v", confID, ch.Type(), err)
 		return err
 	}
@@ -892,6 +903,7 @@ type outboxLiveSender struct{ m *liveNotifyManager }
 
 func (s outboxLiveSender) Send(ctx context.Context, confID uint, n notify.Notification) error {
 	return s.m.Send(ctx, confID, app.Notification{
+		Event:        n.Event,
 		Title:        n.Title,
 		Text:         n.Text,
 		SourceConfID: confID,
