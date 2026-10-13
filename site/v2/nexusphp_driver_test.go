@@ -1483,6 +1483,48 @@ func TestNexusPHPDriver_ParseSeedingStatus_PipeFormat(t *testing.T) {
 	assert.Greater(t, size, int64(0))
 }
 
+// upstreamSeedingPage 按上游 NexusPHP（xiaomlove/nexusphp）public/getusertorrentlistajax.php 的输出拼出
+// type=seeding 那一页：先是「<b>条数</b>条记录 | 总大小：体积」的汇总，再是分页条和当前页（每页 100 条）的表格。
+// 汇总里的条数和体积是全部做种的合计，表格只有当前页。
+func upstreamSeedingPage(summary string) string {
+	row := `<tr><td class="rowfollow nowrap" valign="middle" style='padding: 0px'><a href="torrents.php?allsec=1&amp;cat=401"><img src="pic/cattrans.gif" alt="Movies" /></a></td>
+<td class="rowfollow" width="100%" align="left"><a href="details.php?id=101&amp;hit=1" title="Demo.2025.1080p"><b>Demo.2025.1080p</b></a><br />演示</td>
+<td class="rowfollow nowrap" align="center">2025-01-01<br/>12:00:00</td><td class="rowfollow" align="center">1.23<br />GB</td>
+<td class="rowfollow" align="center">10</td><td class="rowfollow" align="center">0</td><td class="rowfollow" align="center">2.00<br />GB</td>
+<td class="rowfollow" align="center">1.23<br />GB</td><td class="rowfollow" align="center">1.626</td><td class="rowfollow" align="center">3天</td>
+<td class="rowfollow" align="center">qBittorrent 5.0<br/>51413</td><td class="rowfollow" align="center"><span class="nowrap">192.0.2.1</span></td><td class="rowfollow" align="center"></td></tr>
+`
+	return `<br/><div style="display: flex;justify-content: space-between"><div>` + summary + `</div><div></div></div>` +
+		`<p align="center" class='nexus-pagination'><b>1</b> <a href="getusertorrentlistajax.php?page=1">2</a></p>` +
+		`<table border="1" cellspacing="0" cellpadding="5" width="100%"><tr><td class="colhead" style="padding: 0px">类型</td><td class="colhead" align="center">标题</td>` +
+		`<td class="colhead" align="center">发布时间</td><td class="colhead" align="center"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td></tr>` +
+		row + row + "</table>\n"
+}
+
+func TestNexusPHPDriver_ParseSeedingStatus_UpstreamSummary(t *testing.T) {
+	// 上游三种语言包的 text_record / text_total_size（lang/{chs,cht,en}/lang_getusertorrentlistajax.php）。
+	tb := 2.756
+	want := int64(tb * 1024 * 1024 * 1024 * 1024)
+	cases := map[string]string{
+		"chs": `<b>101</b> 条记录 | 总大小：2.756 TB`,
+		"cht": `<b>101</b>條記錄 | 總大小：2.756 TB`,
+		"en":  `<b>101</b> records | Total size: 2.756 TB`,
+	}
+	for name, summary := range cases {
+		t.Run(name, func(t *testing.T) {
+			html := upstreamSeedingPage(summary)
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			require.NoError(t, err)
+			d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
+			seeding, size, err := d.ParseSeedingStatus(NexusPHPResponse{Document: doc, RawBody: []byte(html)})
+			require.NoError(t, err)
+			// 用汇总的合计，不是当前页两行的累加
+			assert.Equal(t, 101, seeding)
+			assert.Equal(t, want, size)
+		})
+	}
+}
+
 func TestNexusPHPDriver_ParseSeedingStatus_NilDoc(t *testing.T) {
 	d := NewNexusPHPDriver(NexusPHPDriverConfig{BaseURL: "https://x.com"})
 	_, _, err := d.ParseSeedingStatus(NexusPHPResponse{})

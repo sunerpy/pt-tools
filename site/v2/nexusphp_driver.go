@@ -1954,8 +1954,9 @@ func (d *NexusPHPDriver) ParseSeedingStatus(res NexusPHPResponse) (seeding int, 
 		text := strings.TrimSpace(divSeeding.First().Text())
 		parts := strings.Split(text, "|")
 		if len(parts) >= 2 {
-			// Parse seeding count from first part
-			seeding = int(parseFloat(strings.TrimSpace(parts[0])))
+			// Parse seeding count from first part. Upstream NexusPHP puts the record label after the
+			// number ("94 条记录 | 总大小：2.756 TB", "94 records | Total size: ..."), so take the number only.
+			seeding = int(parseFloat(extractNumber(parts[0])))
 			// Parse seeding size from second part
 			seedingSize = parseSize(strings.TrimSpace(parts[1]))
 			if DebugUserInfo {
