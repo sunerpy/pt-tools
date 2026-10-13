@@ -40,10 +40,11 @@ type TemplateView struct {
 	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 }
 
-// TemplateCatalog 是消息模板页要的全部数据。
+// TemplateCatalog 是消息模板页要的全部数据：事件的组（通知、ChatOps 命令回复、AI 助手回复）、公共变量与各事件。
 type TemplateCatalog struct {
-	CommonVars []notify.Var   `json:"common_vars"`
-	Events     []TemplateView `json:"events"`
+	Groups     []notify.EventGroup `json:"groups"`
+	CommonVars []notify.Var        `json:"common_vars"`
+	Events     []TemplateView      `json:"events"`
 }
 
 // TemplateService 管全局消息模板：读写数据库，并把内存里的模板集（发送前套用的那份）换成最新的。
@@ -104,7 +105,7 @@ func (s *templateService) List(ctx context.Context) (TemplateCatalog, error) {
 	if err != nil {
 		return TemplateCatalog{}, err
 	}
-	out := TemplateCatalog{CommonVars: notify.CommonVars, Events: make([]TemplateView, 0, len(notify.Events))}
+	out := TemplateCatalog{Groups: notify.Groups, CommonVars: notify.CommonVars, Events: make([]TemplateView, 0, len(notify.Events))}
 	for _, spec := range notify.Events {
 		out.Events = append(out.Events, view(spec, rows[spec.Type]))
 	}
@@ -121,16 +122,25 @@ func view(spec notify.EventSpec, row models.NotificationTemplate) TemplateView {
 	return v
 }
 
-// check 用示例数据渲染一遍标题与正文模板：写错了返回 tmpl.ErrInvalid。
+// check 用示例数据渲染一遍标题与正文模板：写错了返回 tmpl.ErrInvalid。只有正文的事件（命令回复、助手回复）不收标题。
 func check(eventType string, in TemplateInput) (TemplatePreview, error) {
-	if notify.Spec(eventType) == nil {
+	spec := notify.Spec(eventType)
+	if spec == nil {
 		return TemplatePreview{}, fmt.Errorf("%w：%s", ErrUnknownEvent, eventType)
 	}
-	title, err := notify.RenderSample(eventType, tmpl.Title, in.Title)
-	if err != nil {
-		return TemplatePreview{}, fmt.Errorf("%w（标题）：%s", tmpl.ErrInvalid, strings.TrimPrefix(err.Error(), tmpl.ErrInvalid.Error()+": "))
+	var title string
+	if spec.NoTitle {
+		if strings.TrimSpace(in.Title) != "" {
+			return TemplatePreview{}, fmt.Errorf("%w：%s只有正文，没有标题", tmpl.ErrInvalid, spec.Name)
+		}
+	} else {
+		var err error
+		title, err = notify.RenderSample(eventType, tmpl.Title, in.Title)
+		if err != nil {
+			return TemplatePreview{}, fmt.Errorf("%w（标题）：%s", tmpl.ErrInvalid, strings.TrimPrefix(err.Error(), tmpl.ErrInvalid.Error()+": "))
+		}
 	}
-	text, err := notify.RenderSample(eventType, tmpl.Text, in.Text)
+	text, err := notify.RenderSample(eventType, notify.TextKind(eventType), in.Text)
 	if err != nil {
 		return TemplatePreview{}, fmt.Errorf("%w（正文）：%s", tmpl.ErrInvalid, strings.TrimPrefix(err.Error(), tmpl.ErrInvalid.Error()+": "))
 	}

@@ -51,6 +51,7 @@ const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${i
 function event(over: Record<string, unknown> = {}) {
   return {
     type: "rss.matched",
+    group: "notify",
     name: "RSS 命中过滤规则",
     desc: "RSS 的种子命中了过滤规则",
     vars: [
@@ -68,9 +69,26 @@ function event(over: Record<string, unknown> = {}) {
 
 function catalog() {
   return {
-    common_vars: [{ key: "title", type: "string", desc: "内置的标题" }],
+    groups: [
+      { key: "notify", name: "通知", desc: "发到所有通知通道的通知" },
+      { key: "reply", name: "ChatOps 命令回复", desc: "发命令时的回复，只有正文" },
+      { key: "assistant", name: "AI 助手回复", desc: "" },
+    ],
+    common_vars: [
+      { key: "title", type: "string", desc: "内置的标题" },
+      { key: "text", type: "string", desc: "内置的正文" },
+    ],
     events: [
       event(),
+      event({
+        type: "reply.status",
+        group: "reply",
+        name: "/status 状态概览",
+        no_title: true,
+        vars: [{ key: "running", type: "int", desc: "运行中的任务数", sample: 2 }],
+        sample_title: "",
+        sample_text: "状态概览",
+      }),
       event({
         type: "rss.digest",
         name: "RSS 合并通知",
@@ -232,5 +250,49 @@ describe("消息模板", () => {
     q("nt-event-rss.digest")!.click();
     await vi.waitFor(() => expect(q("nt-editor")!.textContent).toContain("RSS 合并通知"));
     expect(field("nt-text").value).toBe("");
+  });
+});
+
+describe("命令回复与助手回复", () => {
+  it("事件按组列出：没有事件的组不显示", async () => {
+    await mountPage();
+    const groups = [...document.querySelectorAll<HTMLElement>('[data-testid^="nt-group-"]')];
+    expect(groups.map((g) => g.dataset.testid)).toEqual(["nt-group-notify", "nt-group-reply"]);
+    expect(q("nt-group-notify")!.textContent).toContain("RSS 命中过滤规则");
+    expect(q("nt-group-notify")!.textContent).toContain("RSS 合并通知");
+    expect(q("nt-group-reply")!.textContent).toContain("ChatOps 命令回复");
+    expect(q("nt-group-reply")!.textContent).toContain("/status 状态概览");
+  });
+
+  it("只有正文的回复：没有标题框、标题变量与预览里的标题，保存只交正文", async () => {
+    await mountPage();
+    q("nt-event-reply.status")!.click();
+    await flush();
+    expect(q("nt-editor")!.textContent).toContain("/status 状态概览");
+    expect(q("nt-title")).toBeNull();
+    expect(q("nt-var-title")).toBeNull();
+    expect(q("nt-var-text")).not.toBeNull();
+    expect(q("nt-var-running")).not.toBeNull();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenLastCalledWith("reply.status", { title: "", text: "" }),
+    );
+    await vi.waitFor(() => expect(q("nt-preview")!.textContent).toContain("预览正文"));
+    expect(q("nt-preview")!.textContent).not.toContain("预览标题");
+    expect(q("nt-builtin")!.textContent).toContain("状态概览");
+
+    typeInto("nt-text", "{{.running}} 个任务在跑");
+    await flush();
+    api.save.mockResolvedValue({
+      ...event({ type: "reply.status", group: "reply", no_title: true }),
+      text: "{{.running}} 个任务在跑",
+      customized: true,
+    });
+    q("nt-save")!.click();
+    await vi.waitFor(() =>
+      expect(api.save).toHaveBeenCalledWith("reply.status", {
+        title: "",
+        text: "{{.running}} 个任务在跑",
+      }),
+    );
   });
 });

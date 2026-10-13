@@ -49,14 +49,19 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Data 是渲染模板用的数据：先放好所有事件的全部变量的零值（Webhook 收到别的事件时不会打出 <no value>），
-// 再放这个事件的变量与公共变量。title、text 是内置的标题与正文。
+// Data 是渲染模板用的数据：先放好同一组所有事件的全部变量的零值（Webhook 收到别的通知时不会打出 <no value>），
+// 再放这个事件的变量与公共变量。title、text 是内置的标题与正文。目录里没有的事件类型按通知组算。
 func (e *Event) Data(title, text string) map[string]any {
-	d := maps.Clone(zeroData)
+	group := GroupNotify
+	spec := specByType[e.Type]
+	if spec != nil {
+		group = spec.Group
+	}
+	d := maps.Clone(zeroData[group])
 	maps.Copy(d, e.Fields)
 	d["event"] = e.Type
 	d["event_name"] = e.Type
-	if spec := specByType[e.Type]; spec != nil {
+	if spec != nil {
 		d["event_name"] = spec.Name
 	}
 	at := e.Time

@@ -26,6 +26,8 @@ const (
 	Body
 	// URL 是 Webhook 的地址
 	URL
+	// Reply 是 ChatOps 命令回复与 AI 助手回复的正文（助手的回答可能很长）
+	Reply
 )
 
 const (
@@ -49,7 +51,7 @@ func (k Kind) Limit() int {
 		return 1 << 10
 	case Text:
 		return 16 << 10
-	case Body:
+	case Body, Reply:
 		return 64 << 10
 	default:
 		return 4 << 10

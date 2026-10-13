@@ -120,3 +120,38 @@ func TestTemplateServicePreviewAndLoad(t *testing.T) {
 	m := sampleNotification(notify.EventRSSMatched)
 	assert.Equal(t, m, set.Apply(m))
 }
+
+// 命令回复与助手回复只有正文：填了标题被拒；正文按回复的上限校验，保存以后 ApplyText 用得上；目录里带着组。
+func TestTemplateServiceReplyEvents(t *testing.T) {
+	svc, set, _ := newTemplateSvc(t)
+	ctx := context.Background()
+
+	cat, err := svc.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, cat.Groups, 3)
+	assert.Equal(t, notify.GroupNotify, cat.Groups[0].Key)
+	groups := map[string]int{}
+	for _, e := range cat.Events {
+		groups[e.Group]++
+	}
+	assert.Positive(t, groups[notify.GroupReply])
+	assert.Equal(t, 1, groups[notify.GroupAssistant])
+
+	_, err = svc.Save(ctx, notify.EventReplyStatus, TemplateInput{Title: "x", Text: "{{.text}}"})
+	assert.ErrorIs(t, err, tmpl.ErrInvalid)
+	assert.ErrorContains(t, err, "只有正文，没有标题")
+	_, err = svc.Preview(notify.EventReplyStatus, TemplateInput{Text: "{{.torrent_title}}"})
+	assert.ErrorContains(t, err, "没有这个变量：torrent_title", "通知才有的变量在回复里查得出来")
+
+	p, err := svc.Preview(notify.EventReplyStatus, TemplateInput{Text: "{{range .items}}{{.name}};{{end}}"})
+	require.NoError(t, err)
+	assert.Equal(t, "", p.Title)
+	assert.Equal(t, "家里的 qB;NAS 的 TR;", p.Text)
+
+	v, err := svc.Save(ctx, notify.EventAssistantReply, TemplateInput{Text: "🤖 {{.text}}"})
+	require.NoError(t, err)
+	assert.True(t, v.Customized)
+	assert.True(t, v.NoTitle)
+	ev, _, text := notify.SampleEvent(notify.EventAssistantReply)
+	assert.Equal(t, "🤖 "+text, set.ApplyText(ev, text))
+}

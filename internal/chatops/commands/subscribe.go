@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 // SubscribeService 是 /sub、/subs 用到的订阅能力。订阅服务比 ChatOps 晚建，用 SetSubscribeService 单独登记。
@@ -184,8 +185,14 @@ func subsHandler(ctx context.Context, _ []string, src chatops.Source) (chatops.R
 	if err != nil {
 		return errReply(src.ReplyLang, "读取订阅失败: %v", "list subscriptions failed: %v", err), nil
 	}
+	shown := lines[:min(len(lines), maxSubLines)]
+	items := make([]map[string]any, 0, len(shown))
+	for _, l := range shown {
+		items = append(items, map[string]any{"title": l.Title, "status": l.Status, "progress": l.Progress})
+	}
+	fields := map[string]any{"count": len(lines), "items": items, "items_more": len(lines) - len(shown)}
 	if len(lines) == 0 {
-		return okReply(tr(src.ReplyLang, "还没有订阅，发送 /sub 关键词 订阅", "no subscriptions yet, send /sub <title>")), nil
+		return eventReply(tr(src.ReplyLang, "还没有订阅，发送 /sub 关键词 订阅", "no subscriptions yet, send /sub <title>"), notify.EventReplySubs, fields), nil
 	}
 	var b strings.Builder
 	for i, l := range lines {
@@ -199,5 +206,5 @@ func subsHandler(ctx context.Context, _ []string, src chatops.Source) (chatops.R
 		}
 		b.WriteString("\n")
 	}
-	return okReply(strings.TrimRight(b.String(), "\n")), nil
+	return eventReply(strings.TrimRight(b.String(), "\n"), notify.EventReplySubs, fields), nil
 }

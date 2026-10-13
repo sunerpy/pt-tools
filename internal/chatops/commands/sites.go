@@ -8,6 +8,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 func init() {
@@ -38,20 +39,29 @@ func sitesHandler(ctx context.Context, args []string, src chatops.Source) (chato
 		var b strings.Builder
 		fmt.Fprintf(&b, "Site: %s\nUser: %s\nUploaded: %s\nDownloaded: %s\nRatio: %s\nBonus: %s\nClass: %s",
 			info.SiteName, info.Username, info.Uploaded, info.Downloaded, info.Ratio, info.Bonus, info.Class)
-		return chatops.Reply{Text: wrapMono(b.String())}, nil
+		return eventReply(wrapMono(b.String()), notify.EventReplySiteInfo, map[string]any{
+			"site": info.SiteName, "user": info.Username, "uploaded": info.Uploaded, "downloaded": info.Downloaded,
+			"uploaded_bytes": info.UploadedBytes, "downloaded_bytes": info.DownloadedBytes,
+			"ratio": info.RatioValue, "bonus": info.BonusValue, "class": info.Class,
+		}), nil
 	}
 
 	sites, err := svc.Site.ListSites(ctx)
 	if err != nil {
 		return errReply(src.ReplyLang, "查询站点失败: %v", "list sites failed: %v", err), nil
 	}
+	items := make([]map[string]any, 0, len(sites))
+	for _, s := range sites {
+		items = append(items, map[string]any{"name": s.Name, "status": s.Status, "enabled": s.Enabled})
+	}
+	fields := map[string]any{"count": len(sites), "items": items}
 	if len(sites) == 0 {
-		return okReply(tr(src.ReplyLang, "未配置站点", "no sites configured")), nil
+		return eventReply(tr(src.ReplyLang, "未配置站点", "no sites configured"), notify.EventReplySites, fields), nil
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, tr(src.ReplyLang, "站点（%d）\n", "Sites (%d)\n"), len(sites))
 	for _, s := range sites {
 		fmt.Fprintf(&b, "[%s] %s\n", s.Status, s.Name)
 	}
-	return okReply(strings.TrimRight(b.String(), "\n")), nil
+	return eventReply(strings.TrimRight(b.String(), "\n"), notify.EventReplySites, fields), nil
 }

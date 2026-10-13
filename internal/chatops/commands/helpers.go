@@ -3,8 +3,10 @@ package commands
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sunerpy/pt-tools/internal/chatops"
+	"github.com/sunerpy/pt-tools/internal/notify"
 )
 
 func tr(lang, zh, en string) string {
@@ -21,6 +23,12 @@ func errReply(lang, zh, en string, args ...any) chatops.Reply {
 
 func okReply(text string) chatops.Reply {
 	return chatops.Reply{Text: text}
+}
+
+// eventReply 是带结构化数据的回复：text 是内置文字，fields 是 typ 这种回复事件的变量（见 notify 的 reply.* 事件），
+// 发出去以前按消息模板套用。
+func eventReply(text, typ string, fields map[string]any) chatops.Reply {
+	return chatops.Reply{Text: text, Event: notify.NewEvent(typ, time.Now(), fields)}
 }
 
 func formatBytes(n int64) string {

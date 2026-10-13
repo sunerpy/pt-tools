@@ -59,7 +59,7 @@ func (t *Templates) Replace(srcs []TemplateSource) {
 			}
 		}
 		if strings.TrimSpace(s.Text) != "" {
-			if p, err := tmpl.Parse(s.Text, tmpl.Text, ListVars()); err == nil {
+			if p, err := tmpl.Parse(s.Text, TextKind(s.EventType), ListVars()); err == nil {
 				c.text = p
 			} else {
 				t.logf("[消息模板] %s 的正文模板不能用，改用内置正文: %v", s.EventType, err)
@@ -77,31 +77,44 @@ func (t *Templates) Replace(srcs []TemplateSource) {
 // Apply 按 n.Event 的类型套用模板，重新生成标题与正文；没有事件、没有模板、渲染出错或结果为空时保留原来的。
 // 按钮等其余字段原样保留。
 func (t *Templates) Apply(n Notification) Notification {
-	if t == nil || n.Event == nil {
-		return n
+	n.Title, n.Text = t.render(n.Event, n.Title, n.Text)
+	return n
+}
+
+// ApplyText 按事件类型套用正文模板，给只有正文的 ChatOps 命令回复与 AI 助手回复用：
+// 没有事件、没有模板、渲染出错或结果为空时返回 text。
+func (t *Templates) ApplyText(ev *Event, text string) string {
+	_, text = t.render(ev, "", text)
+	return text
+}
+
+func (t *Templates) render(ev *Event, title, text string) (string, string) {
+	if t == nil || ev == nil {
+		return title, text
 	}
 	t.mu.RLock()
-	c, ok := t.set[n.Event.Type]
+	c, ok := t.set[ev.Type]
 	t.mu.RUnlock()
 	if !ok {
-		return n
+		return title, text
 	}
-	data := n.Event.Data(n.Title, n.Text)
+	data := ev.Data(title, text)
+	outTitle, outText := title, text
 	if c.title != nil {
 		if s, err := c.title.Execute(data); err != nil {
-			t.warn(n.Event.Type, "标题", err)
+			t.warn(ev.Type, "标题", err)
 		} else if strings.TrimSpace(s) != "" {
-			n.Title = s
+			outTitle = s
 		}
 	}
 	if c.text != nil {
 		if s, err := c.text.Execute(data); err != nil {
-			t.warn(n.Event.Type, "正文", err)
+			t.warn(ev.Type, "正文", err)
 		} else if strings.TrimSpace(s) != "" {
-			n.Text = s
+			outText = s
 		}
 	}
-	return n
+	return outTitle, outText
 }
 
 func (t *Templates) warn(typ, part string, err error) {
