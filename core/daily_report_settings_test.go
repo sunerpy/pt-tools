@@ -11,7 +11,7 @@ import (
 
 func newDailyReportStore(t *testing.T) *ConfigStore {
 	t.Helper()
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.AutoMigrate(&models.NotificationConf{}))
 	store := NewConfigStore(db)
@@ -92,7 +92,7 @@ func TestConfigStore_EnabledSiteNames(t *testing.T) {
 
 // 全局设置行还不存在：读回默认值、偏移为 0、保存时提示先初始化；表坏了时如实报错。
 func TestDailyReportSettings_EdgeCases(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.AutoMigrate(&models.NotificationConf{}))
 	store := NewConfigStore(db)

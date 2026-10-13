@@ -48,6 +48,8 @@ func NewHost(t *testing.T, relayURL string) *remote.Host {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
+	// 先登记的清理后执行：主机关掉以后再关库。Windows 上开着的库文件删不掉，t.TempDir() 的清理会失败（#542）
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&models.RemoteSetting{}, &models.RemoteDevice{}))
 	h := remote.New(remote.Config{Store: remote.NewStore(db, plainCipher{}), Dispatcher: echoDispatcher{}, Version: "interop"})
 	t.Cleanup(h.Close)

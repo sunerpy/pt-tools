@@ -68,6 +68,7 @@ func setupV8MigrationDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("创建 v8 测试数据库失败: %v", err)
 	}
+	t.Cleanup(func() { closeTestGorm(db) })
 	if err := db.AutoMigrate(&SchemaVersion{}, &SiteSetting{}); err != nil {
 		t.Fatalf("迁移 v8 基础表失败: %v", err)
 	}

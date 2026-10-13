@@ -13,7 +13,7 @@ import (
 )
 
 func TestWithTransaction_Success(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	err = db.WithTransaction(func(tx *gorm.DB) error {
 		return tx.Create(&models.TorrentInfo{SiteName: "cmct", TorrentID: "t1"}).Error
@@ -25,14 +25,14 @@ func TestWithTransaction_Success(t *testing.T) {
 }
 
 func TestWithTransaction_Error(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	e := db.WithTransaction(func(tx *gorm.DB) error { return fmt.Errorf("txerr") })
 	require.Error(t, e)
 }
 
 func TestGetAllTorrents_AfterInsert(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	ti := &models.TorrentInfo{SiteName: "cmct", TorrentID: "insert-1"}
 	require.NoError(t, db.UpsertTorrent(ti))
@@ -61,7 +61,7 @@ func TestTorrentInfo_GetExpired(t *testing.T) {
 }
 
 func TestTorrentDB_CRUDAndQueries(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	ti := &models.TorrentInfo{SiteName: "cmct", TorrentID: "guid-x"}
 	h := "deadbeef"

@@ -32,7 +32,7 @@ func TestApiVersionReportsUpgradeFromV1(t *testing.T) {
 	global.GlobalDB = nil
 	assert.Equal(t, false, get()["upgraded_from_v1"], "没有库时当成全新安装")
 
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	resp := get()

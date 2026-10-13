@@ -63,7 +63,7 @@ func emptyFeedServer(t *testing.T) *httptest.Server {
 
 func seedGlobalWithDownloadDir(t *testing.T) {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{

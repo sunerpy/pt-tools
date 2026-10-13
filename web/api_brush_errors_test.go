@@ -105,7 +105,7 @@ func TestBrushAPI_RunNotFoundAndStopped(t *testing.T) {
 	path := createBrushTask(t, mux, "a", ds.ID)
 
 	// 监控用另一套空库：接口先查到了任务，运行时却读不到（等同于两步之间被删）
-	other, err := core.NewTempDBDir(t.TempDir())
+	other, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if sqlDB, err := other.DB.DB(); err == nil {

@@ -97,7 +97,7 @@ func TestQbitCompatListenAfterShutdown(t *testing.T) {
 
 // 站点要已启用、搜索编排器里有它才给；没有这个站点、没启用、编排器没起来时都是 nil
 func TestEnabledSite(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "on", Enabled: true}).Error)
 	require.NoError(t, db.DB.Create(&models.SiteSetting{Name: "off", Enabled: false}).Error)

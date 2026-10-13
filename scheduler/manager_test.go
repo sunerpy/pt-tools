@@ -61,7 +61,7 @@ func (s *procRSSStub) SendTorrentToDownloader(_ context.Context, _ models.RSSCon
 }
 
 func TestProcessRSSUnified_FetchThenSendSucceeds(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -83,7 +83,7 @@ func TestProcessRSSUnified_FetchThenSendSucceeds(t *testing.T) {
 }
 
 func TestProcessRSSUnified_SendErrorSurfaced(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -113,7 +113,7 @@ func TestExecuteTaskUnified_LogsErrorNoPanic(t *testing.T) {
 }
 
 func TestStartAll_ValidSiteRegistersJob(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -138,7 +138,7 @@ func TestStartAll_ValidSiteRegistersJob(t *testing.T) {
 }
 
 func TestStartAll_SkipsSampleRSS(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -163,7 +163,7 @@ func TestStartAll_SkipsSampleRSS(t *testing.T) {
 var errSendBoom = &schedGenericErr{"send boom"}
 
 func TestInitDownloaderManager_RegistersHealthyAndMapsSite(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -189,7 +189,7 @@ func TestInitDownloaderManager_RegistersHealthyAndMapsSite(t *testing.T) {
 }
 
 func TestReload_FullStartupWaitsForExistingJobs(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -222,7 +222,7 @@ func TestReload_FullStartupWaitsForExistingJobs(t *testing.T) {
 }
 
 func TestRunRSSJobLegacy_RunsAndStops(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -247,7 +247,7 @@ func TestRunRSSJobLegacy_RunsAndStops(t *testing.T) {
 }
 
 func TestInitFreeEndMonitor_RegisteredSchedulerCallback(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -272,7 +272,7 @@ func TestInitFreeEndMonitor_RegisteredSchedulerCallback(t *testing.T) {
 }
 
 func TestReload_DefaultDownloaderPingFails(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -325,7 +325,7 @@ func (s *unifiedSiteStub) SendTorrentToDownloader(_ context.Context, _ models.RS
 }
 
 func TestInitFreeEndMonitor_WiresMonitors(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -342,7 +342,7 @@ func TestGetFreeEndMonitor_NilBeforeInit(t *testing.T) {
 }
 
 func TestSetGetLoginReminderMonitor(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 
@@ -360,7 +360,7 @@ func TestSetGetLoginReminderMonitor(t *testing.T) {
 }
 
 func TestRunRSSJobUnified_RunsAndStops(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -388,7 +388,7 @@ func TestRunRSSJobUnified_RunsAndStops(t *testing.T) {
 }
 
 func TestProcessRSSUnified_SendError(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -407,7 +407,7 @@ func TestProcessRSSUnified_SendError(t *testing.T) {
 // Observed via the mutex-guarded GetFreeEndMonitor() (not the unsynchronized
 // LastVersion()) to stay race-free under -race.
 func TestManager_EventReload_TriggersReload(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -433,7 +433,7 @@ func TestManager_EventReload_TriggersReload(t *testing.T) {
 
 // === Event-driven reload: stale version ignored ===
 func TestManager_EventReload_IgnoresStaleVersion(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -460,7 +460,7 @@ func TestManager_EventReload_IgnoresStaleVersion(t *testing.T) {
 }
 
 func TestInitMonitors_ReplaceExisting(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -485,7 +485,7 @@ func TestInitMonitors_ReplaceExisting(t *testing.T) {
 }
 
 func TestReload_QbitNotConfiguredWarnPaths(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -510,7 +510,7 @@ func newTestManager(t *testing.T) *Manager {
 }
 
 func TestManager_StartStopAll(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	s := core.NewConfigStore(db)
 	m := newTestManager(t)
@@ -671,7 +671,7 @@ func TestGetInterval_DefaultsAndGlobal(t *testing.T) {
 	d := getInterval(models.RSSConfig{IntervalMinutes: 0})
 	require.Equal(t, 10*time.Minute, d)
 	// read from global when available
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	_ = core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DefaultIntervalMinutes: 3, DownloadDir: t.TempDir()})
@@ -682,7 +682,7 @@ func TestGetInterval_DefaultsAndGlobal(t *testing.T) {
 }
 
 func TestReload_StartAndStopAll_WithValidConfig(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -711,7 +711,7 @@ func TestReload_StartAndStopAll_WithValidConfig(t *testing.T) {
 }
 
 func TestManager_Reload_StartAllBranches(t *testing.T) {
-	db, _ := core.NewTempDBDir(t.TempDir())
+	db, _ := core.OpenTestDB(t)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
 	store := core.NewConfigStore(db)
@@ -767,7 +767,7 @@ func (s *rssSiteStub) Context() context.Context { return context.Background() }
 
 func TestRunRSSJob_WithStub(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -863,7 +863,7 @@ func TestInitDownloaderManager(t *testing.T) {
 	// 不应该 panic
 
 	// 测试有 GlobalDB 的情况
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -876,7 +876,7 @@ func TestInitDownloaderManager(t *testing.T) {
 
 // TestInitDownloaderManager_WithDownloaderSettings 测试带下载器配置的初始化
 func TestInitDownloaderManager_WithDownloaderSettings(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -900,7 +900,7 @@ func TestInitDownloaderManager_WithDownloaderSettings(t *testing.T) {
 
 // TestInitDownloaderManager_WithTransmissionSettings 测试 Transmission 配置
 func TestInitDownloaderManager_WithTransmissionSettings(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -924,7 +924,7 @@ func TestInitDownloaderManager_WithTransmissionSettings(t *testing.T) {
 
 // TestInitDownloaderManager_WithUnknownType 测试未知下载器类型
 func TestInitDownloaderManager_WithUnknownType(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -949,7 +949,7 @@ func TestInitDownloaderManager_WithUnknownType(t *testing.T) {
 
 // TestInitDownloaderManager_DisabledDownloader 测试禁用的下载器
 func TestInitDownloaderManager_DisabledDownloader(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1013,7 +1013,7 @@ func TestTransmissionDownloaderConfig_GetType(t *testing.T) {
 
 // TestStartAll_WithMTEAM 测试 StartAll 处理 MTEAM 站点
 func TestStartAll_WithMTEAM(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1041,7 +1041,7 @@ func TestStartAll_WithMTEAM(t *testing.T) {
 
 // TestStartAll_WithHDSKY 测试 StartAll 处理 HDSKY 站点
 func TestStartAll_WithHDSKY(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1068,7 +1068,7 @@ func TestStartAll_WithHDSKY(t *testing.T) {
 
 // TestStartAll_WithCMCT 测试 StartAll 处理 CMCT 站点
 func TestStartAll_WithCMCT(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1095,7 +1095,7 @@ func TestStartAll_WithCMCT(t *testing.T) {
 
 // TestStartAll_WithUnknownSite 测试 StartAll 处理未知站点
 func TestStartAll_WithUnknownSite(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1120,7 +1120,7 @@ func TestStartAll_WithUnknownSite(t *testing.T) {
 
 // TestStartAll_WithSkippedRSS 测试 StartAll 跳过应该跳过的 RSS
 func TestStartAll_WithSkippedRSS(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1145,7 +1145,7 @@ func TestStartAll_WithSkippedRSS(t *testing.T) {
 
 // TestStartAll_WithDisabledSite 测试 StartAll 跳过禁用的站点
 func TestStartAll_WithDisabledSite(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1170,7 +1170,7 @@ func TestStartAll_WithDisabledSite(t *testing.T) {
 
 // TestStartAll_AllSiteTypes 测试 StartAll 处理所有站点类型
 func TestStartAll_AllSiteTypes(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1209,7 +1209,7 @@ func TestStartAll_AllSiteTypes(t *testing.T) {
 
 // TestExecuteTask 测试 executeTask 函数
 func TestExecuteTask(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1226,7 +1226,7 @@ func TestExecuteTask(t *testing.T) {
 
 // TestProcessRSS 测试 processRSS 函数
 func TestProcessRSS(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1240,7 +1240,7 @@ func TestProcessRSS(t *testing.T) {
 }
 
 func TestInitDownloaderManager_MapsSiteDownloader(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1256,7 +1256,7 @@ func TestInitDownloaderManager_MapsSiteDownloader(t *testing.T) {
 }
 
 func TestInitCleanupMonitor_And_PeerRatio_Wire(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1304,7 +1304,7 @@ func TestManager_Start_DuplicateIgnored(t *testing.T) {
 }
 
 func TestManager_StartAll_ValidSiteStartsJob(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1326,7 +1326,7 @@ func TestManager_StartAll_ValidSiteStartsJob(t *testing.T) {
 }
 
 func TestInitDownloaderManager_LoadsEnabledConfigs(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1348,7 +1348,7 @@ func TestInitDownloaderManager_LoadsEnabledConfigs(t *testing.T) {
 }
 
 func TestProcessRSSUnified_SendErrorSurfaces(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1365,7 +1365,7 @@ func TestProcessRSSUnified_SendErrorSurfaces(t *testing.T) {
 }
 
 func TestManager_Reload_FullStartupWithHealthyDownloader(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -1396,7 +1396,7 @@ func TestManager_Reload_FullStartupWithHealthyDownloader(t *testing.T) {
 }
 
 func TestManager_Reload_NoDefaultDownloader(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())

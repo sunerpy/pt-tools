@@ -165,6 +165,7 @@ func newCloakTestServer(t *testing.T) (*Server, *core.ConfigStore, func()) {
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	keyDir := filepath.Join(homeDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
 	keyFile := filepath.Join(keyDir, "secret.key")

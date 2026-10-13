@@ -12,7 +12,11 @@ import (
 )
 
 func TestNewDB_InitializesAndMigrates(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	lg := zapgorm2.Logger{ZapLogger: zap.NewNop()}
 	db, err := NewDB(lg)
 	if err != nil {
@@ -29,7 +33,11 @@ func TestTorrentInfo_GetExpired_IsExpiredFlag(t *testing.T) {
 }
 
 func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 
 	backup := func(db *gorm.DB, table string) (string, error) { return "backup/" + table, nil }
 	enc := func(plain string) (string, error) { return "enc:" + plain, nil }

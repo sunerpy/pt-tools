@@ -70,7 +70,7 @@ func TestHardlinkCrossDevice(t *testing.T) {
 	t.Run("injected", func(t *testing.T) {
 		old := link
 		t.Cleanup(func() { link = old })
-		link = func(string, string) error { return &os.LinkError{Op: "link", Err: syscall.EXDEV} }
+		link = func(string, string) error { return &os.LinkError{Op: "link", Err: errXDev} }
 		_, err := Transfer(src, filepath.Join(t.TempDir(), "x", "a.mkv"), models.MediaModeHardlink)
 		require.ErrorIs(t, err, ErrCrossDevice)
 		assert.Contains(t, err.Error(), "同一个分区")
@@ -247,7 +247,7 @@ func TestMoveFallbacks(t *testing.T) {
 
 	// 跨文件系统：复制过去再删源文件
 	writeFile(t, src, "video")
-	noReplace = func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} }
+	noReplace = func(string, string) error { return &os.LinkError{Op: "rename", Err: errXDev} }
 	out, err := Transfer(src, filepath.Join(dir, "lib", "a.mkv"), models.MediaModeMove)
 	require.NoError(t, err)
 	assert.Equal(t, Created, out)
@@ -271,7 +271,7 @@ func TestMoveFallbacks(t *testing.T) {
 		kept string
 	}{
 		{func(string, string) error { return errNoReplaceUnsupported }, models.MediaModeHardlink},
-		{func(string, string) error { return &os.LinkError{Op: "rename", Err: syscall.EXDEV} }, models.MediaModeCopy},
+		{func(string, string) error { return &os.LinkError{Op: "rename", Err: errXDev} }, models.MediaModeCopy},
 	} {
 		noReplace = c.nr
 		writeFile(t, src, "keep me")
@@ -329,7 +329,12 @@ func TestTransferErrors(t *testing.T) {
 	blocker := filepath.Join(dir, "file")
 	writeFile(t, blocker, "x")
 	_, err = Transfer(src, filepath.Join(blocker, "sub", "a.mkv"), "")
-	assert.ErrorContains(t, err, "检查目标失败", "路径中间有一级是文件")
+	want := "检查目标失败"
+	if runtime.GOOS == "windows" {
+		// Windows 上路径中间有一级是文件时报「找不到路径」，算作目标不存在，到建目录那一步才失败
+		want = "建立目录失败"
+	}
+	assert.ErrorContains(t, err, want, "路径中间有一级是文件")
 
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		return

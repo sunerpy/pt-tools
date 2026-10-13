@@ -353,7 +353,7 @@ func (s *siteFail) Context() context.Context { return context.Background() }
 
 func TestFetchRSS_NoEnclosuresAndDetailFail(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -389,7 +389,7 @@ func (s *rssSiteStub) Context() context.Context { return context.Background() }
 
 func TestFetchAndDownloadFreeRSS_Basic(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -433,7 +433,7 @@ func (s *linkURLSiteStub) Context() context.Context { return context.Background(
 // item 不再被静默丢弃，torrentURL 回退使用 item.Link。
 func TestFetchAndDownloadFreeRSS_FallbackToLink(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -490,7 +490,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { re
 
 func TestProcessTorrentsWithDBUpdate_ContinueOnErrors(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -536,7 +536,7 @@ func TestProcessTorrentsWithDBUpdate_ContinueOnErrors(t *testing.T) {
 
 func TestProcessTorrentsWithDBUpdate_Basic(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -552,7 +552,7 @@ func TestProcessTorrentsWithDBUpdate_Basic(t *testing.T) {
 
 func TestProcessTorrentsWithDBUpdate_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -563,7 +563,7 @@ func TestProcessTorrentsWithDBUpdate_EmptyDir(t *testing.T) {
 
 func TestDownloadWorker_DisabledSite(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -582,7 +582,7 @@ func TestDownloadWorker_DisabledSite(t *testing.T) {
 
 func TestDownloadWorker_ChannelClosedEarly(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -598,7 +598,7 @@ func TestDownloadWorker_ChannelClosedEarly(t *testing.T) {
 
 func TestDownloadWorker_Table(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -706,7 +706,7 @@ func TestFetchRSS_Errors(t *testing.T) {
 		t.Fatalf("expected error when db nil")
 	}
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -728,7 +728,7 @@ func TestFetchRSS_Errors(t *testing.T) {
 }
 
 func TestFetchRSS_WithGomock(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	if err != nil {
 		t.Fatalf("db: %v", err)
 	}
@@ -2376,7 +2376,7 @@ func (n *noopPT) SendTorrentToDownloader(ctx context.Context, rssCfg models.RSSC
 func (n *noopPT) Context() context.Context { return context.Background() }
 
 func TestProcessTorrentsWithDBUpdate_NoFail(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db

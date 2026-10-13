@@ -46,7 +46,7 @@ func TestSaveDeadTorrentScanSettings_Validation(t *testing.T) {
 	require.NoError(t, store.SaveDeadTorrentScanSettings(DeadTorrentScanSettings{Enabled: false, IntervalHours: 24, ChannelIDs: []uint{off.ID}}), "关闭时可以留着停用的通道")
 
 	empty := NewConfigStore(func() *models.TorrentDB {
-		db, err := NewTempDBDir(t.TempDir())
+		db, err := OpenTestDB(t)
 		require.NoError(t, err)
 		return db
 	}())

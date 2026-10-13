@@ -24,7 +24,7 @@ import (
 // and genTorrentsWithRSS returns cleanly.
 func TestRunCmdFunc_PersistentSignalExit(t *testing.T) {
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
@@ -65,7 +65,7 @@ func TestRunCmdFunc_PersistentSignalExit(t *testing.T) {
 // reached on error, so the happy path returns normally.
 func TestRunCmdFunc_SingleSuccess(t *testing.T) {
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{

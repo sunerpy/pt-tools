@@ -434,7 +434,7 @@ func TestFetchUnified_DBNil(t *testing.T) {
 }
 
 func TestFetchUnified_BlankDownloadDir(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())

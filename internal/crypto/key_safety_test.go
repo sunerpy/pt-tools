@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ func useTempHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	t.Cleanup(func() {
 		t.Setenv("PT_TOOLS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
@@ -49,6 +51,9 @@ func TestInitKey_InvalidFileIsNotOverwritten(t *testing.T) {
 }
 
 func TestInitKey_UnreadableFileIsNotOverwritten(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上 chmod 只改只读属性，文件照样读得出")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root 不受文件权限限制")
 	}
@@ -118,6 +123,9 @@ func TestDiscardGeneratedKey_KeepsExistingFile(t *testing.T) {
 
 // 检查时文件不存在、创建时却已存在（这里用悬空的符号链接模拟别处同时写入）：不覆盖，按已有文件处理。
 func TestInitKey_CreateRaceDoesNotOverwrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("靠 O_EXCL 遇到悬空符号链接时失败来模拟，这是 POSIX 的语义")
+	}
 	home := useTempHome(t)
 	dir := filepath.Join(home, ".pt-tools")
 	require.NoError(t, os.MkdirAll(dir, 0o700))

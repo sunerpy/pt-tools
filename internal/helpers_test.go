@@ -80,7 +80,7 @@ func makeTorrentFile(t *testing.T, dir string) (string, string) {
 func setupDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -329,7 +329,7 @@ func seedQbitDownloader(t *testing.T, url string) uint {
 }
 
 func setupFactoryTestDB(t *testing.T) func() {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -355,7 +355,7 @@ func nexusDetailServer(t *testing.T) *httptest.Server {
 
 func setupUnifiedDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -366,7 +366,7 @@ func setupUnifiedDB(t *testing.T) *models.TorrentDB {
 func boolPtrUS(b bool) *bool { return &b }
 
 func setupTestDB(t *testing.T) func() {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db

@@ -121,11 +121,12 @@ func TestPathMapsCRUD(t *testing.T) {
 
 	m, err := e.svc.SavePathMap(e.ctx, 0, PathMapInput{DownloaderID: 1, DownloaderPrefix: "/data/tv", LocalPrefix: "/mnt/tv/"})
 	require.NoError(t, err)
-	assert.Equal(t, "/mnt/tv", m.LocalPrefix)
+	// pt-tools 里的路径按本机的分隔符整理（Windows 上是 \mnt\tv），下载器里的路径原样保存
+	assert.Equal(t, filepath.FromSlash("/mnt/tv"), m.LocalPrefix)
 	local, ok, err := e.svc.localPath(e.ctx, 1, "/data/tv/Show/S01E01.mkv")
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, "/mnt/tv/Show/S01E01.mkv", local)
+	assert.Equal(t, filepath.FromSlash("/mnt/tv/Show/S01E01.mkv"), local)
 	local, ok, err = e.svc.localPath(e.ctx, 1, "/other/x.mkv")
 	require.NoError(t, err)
 	assert.False(t, ok)

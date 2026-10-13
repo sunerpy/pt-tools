@@ -48,7 +48,7 @@ func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
 	// temp DB (incl. chatops + userinfo tables) so bootstrapChatOps succeeds
 	// and the bs != nil wiring branch is exercised.
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.AutoMigrate(
 		&models.NotificationConf{},

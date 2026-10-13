@@ -14,6 +14,7 @@ func setupV10MigrationDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "v10.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&SchemaVersion{}, &SiteSetting{}))
 	require.NoError(t, db.Create(&SchemaVersion{Version: 10, Description: "test v10", AppVersion: "test"}).Error)
 	rows := []SiteSetting{
@@ -90,6 +91,7 @@ func TestMigrationV10ToV11RollsBackOnEncryptFailure(t *testing.T) {
 func TestMigrationV10ToV11NoPlaintextNeedsNoHooks(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "empty.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	sm := NewSchemaManager(db, "test")
 	require.NoError(t, sm.migrateV10ToV11(db), "no site_settings table")
 

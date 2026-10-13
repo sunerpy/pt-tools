@@ -45,6 +45,7 @@ func setupV9MigrationDB(t *testing.T) (*gorm.DB, map[string]*time.Time) {
 	if err != nil {
 		t.Fatalf("创建 v9 测试数据库失败: %v", err)
 	}
+	t.Cleanup(func() { closeTestGorm(db) })
 	if err := db.AutoMigrate(&SchemaVersion{}, &v9SiteLoginState{}); err != nil {
 		t.Fatalf("迁移 v9 基础表失败: %v", err)
 	}

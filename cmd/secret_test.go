@@ -15,9 +15,8 @@ import (
 
 func TestSecretExportImportRoundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	keyDir := filepath.Join(tmpDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
@@ -73,9 +72,9 @@ func TestSecretImportRefusesOverwriteWithoutForce(t *testing.T) {
 		w.WriteString(encoded + "\n")
 	}()
 
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	t.Setenv("USERPROFILE", tmpDir)
 
 	err = runSecretImport(false)
 	assert.Error(t, err)
@@ -108,9 +107,9 @@ func TestSecretImportInvalidLength(t *testing.T) {
 		w.WriteString(encoded + "\n")
 	}()
 
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	t.Setenv("USERPROFILE", tmpDir)
 
 	err = runSecretImport(false)
 	assert.Error(t, err)
@@ -119,9 +118,8 @@ func TestSecretImportInvalidLength(t *testing.T) {
 
 func TestSecretExportSize(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	keyDir := filepath.Join(tmpDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
@@ -173,9 +171,9 @@ func TestSecretImportAtomicWrite(t *testing.T) {
 		w.WriteString(encoded + "\n")
 	}()
 
-	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	t.Setenv("USERPROFILE", tmpDir)
 
 	err = runSecretImport(true)
 	require.NoError(t, err)

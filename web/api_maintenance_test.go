@@ -23,6 +23,7 @@ func setupMaintenanceServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	work := filepath.Join(home, models.WorkDir)
 	for _, d := range []string{"logs", "downloads", "backups"} {

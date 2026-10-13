@@ -69,7 +69,7 @@ func TestLoginReminderResolver_Resolve_Success(t *testing.T) {
 	global.InitLogger(zap.NewNop())
 	t.Setenv("PT_TOOLS_SECRET_KEY", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
 
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	store := core.NewConfigStore(db)
