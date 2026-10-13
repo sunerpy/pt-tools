@@ -32,6 +32,8 @@ type FilterRuleRequest struct {
 	SiteID      *uint  `json:"site_id"`
 	RSSID       *uint  `json:"rss_id"`
 	Priority    int    `json:"priority"`
+	// Purpose 是规则用途：download（下载，默认）、notify（只用于命中规则的通知）、both。更新时空着表示不改
+	Purpose string `json:"purpose"`
 }
 
 // FilterRuleResponse 过滤规则响应结构
@@ -48,6 +50,7 @@ type FilterRuleResponse struct {
 	SiteID      *uint  `json:"site_id"`
 	RSSID       *uint  `json:"rss_id"`
 	Priority    int    `json:"priority"`
+	Purpose     string `json:"purpose"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -212,6 +215,12 @@ func (s *Server) createFilterRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	purpose, ok := rulePurpose(req.Purpose)
+	if !ok {
+		http.Error(w, errRulePurpose, http.StatusBadRequest)
+		return
+	}
+
 	rule := &models.FilterRule{
 		Name:        req.Name,
 		Pattern:     req.Pattern,
@@ -224,6 +233,7 @@ func (s *Server) createFilterRule(w http.ResponseWriter, r *http.Request) {
 		SiteID:      req.SiteID,
 		RSSID:       req.RSSID,
 		Priority:    priority,
+		Purpose:     purpose,
 	}
 
 	// require_free 与 enabled 的列默认是 true：GORM 建记录时把 false 当成没给、写成默认值，不勾的在同一个事务里再写一次
@@ -323,6 +333,16 @@ func (s *Server) updateFilterRule(w http.ResponseWriter, r *http.Request, id uin
 			return
 		}
 		rule.MatchField = matchField
+	}
+
+	// 更新用途：空着表示不改（老版本的前端不发这个字段）
+	if req.Purpose != "" {
+		purpose, ok := rulePurpose(req.Purpose)
+		if !ok {
+			http.Error(w, errRulePurpose, http.StatusBadRequest)
+			return
+		}
+		rule.Purpose = purpose
 	}
 
 	rule.RequireFree = req.RequireFree
@@ -663,11 +683,29 @@ func validatePattern(patternType models.PatternType, pattern string) error {
 	return err
 }
 
+// errRulePurpose 是规则用途不对时的提示
+const errRulePurpose = "规则用途只能是 download（下载）、notify（通知）或 both（两者）"
+
+// rulePurpose 检查规则用途：空着是 download（和库里的默认值、过滤时对空值的理解一致）。
+func rulePurpose(v string) (string, bool) {
+	switch p := strings.TrimSpace(v); p {
+	case "":
+		return string(filter.PurposeDownload), true
+	case string(filter.PurposeDownload), string(filter.PurposeNotify), "both":
+		return p, true
+	}
+	return "", false
+}
+
 // toFilterRuleResponse 转换为响应格式
 func toFilterRuleResponse(rule models.FilterRule) FilterRuleResponse {
 	matchField := string(rule.MatchField)
 	if matchField == "" {
 		matchField = string(models.MatchFieldBoth)
+	}
+	purpose, ok := rulePurpose(rule.Purpose)
+	if !ok {
+		purpose = rule.Purpose
 	}
 	return FilterRuleResponse{
 		ID:          rule.ID,
@@ -682,6 +720,7 @@ func toFilterRuleResponse(rule models.FilterRule) FilterRuleResponse {
 		SiteID:      rule.SiteID,
 		RSSID:       rule.RSSID,
 		Priority:    rule.Priority,
+		Purpose:     purpose,
 		CreatedAt:   rule.CreatedAt.Format("2006-01-02 15:04:05"),
 		UpdatedAt:   rule.UpdatedAt.Format("2006-01-02 15:04:05"),
 	}

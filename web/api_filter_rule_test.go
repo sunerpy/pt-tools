@@ -1488,3 +1488,79 @@ func TestCreateFilterRule_FalseFlagsWriteIsAtomic(t *testing.T) {
 	require.NoError(t, db.Where("name = ?", "半价也下").First(&r).Error)
 	assert.False(t, r.RequireFree)
 }
+
+// #556：规则用途经接口存取。新建时空着是 download；更新时空着不改；不认识的值回 400；列表与详情都带上用途。
+func TestFilterRulePurposeRoundTrip(t *testing.T) {
+	server, cleanup := setupFilterRuleTestServer(t)
+	defer cleanup()
+
+	create := func(req FilterRuleRequest) (*httptest.ResponseRecorder, FilterRuleResponse) {
+		t.Helper()
+		body, _ := json.Marshal(req)
+		w := httptest.NewRecorder()
+		server.createFilterRule(w, httptest.NewRequest(http.MethodPost, "/api/filter-rules", bytes.NewReader(body)))
+		var resp FilterRuleResponse
+		if w.Code == http.StatusOK {
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		}
+		return w, resp
+	}
+	update := func(id uint, req FilterRuleRequest) (*httptest.ResponseRecorder, FilterRuleResponse) {
+		t.Helper()
+		body, _ := json.Marshal(req)
+		w := httptest.NewRecorder()
+		server.updateFilterRule(w, httptest.NewRequest(http.MethodPut, "/api/filter-rules/"+strconv.Itoa(int(id)), bytes.NewReader(body)), id)
+		var resp FilterRuleResponse
+		if w.Code == http.StatusOK {
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		}
+		return w, resp
+	}
+
+	w, def := create(FilterRuleRequest{Name: "默认用途", Pattern: "a", Enabled: true})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "download", def.Purpose, "空着是下载")
+
+	w, notify := create(FilterRuleRequest{Name: "通知用", Pattern: "b", Enabled: true, Purpose: "notify"})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "notify", notify.Purpose)
+	stored, err := models.NewFilterRuleDB(global.GlobalDB).GetByID(notify.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "notify", stored.Purpose, "存进库里")
+
+	w, _ = create(FilterRuleRequest{Name: "乱写", Pattern: "c", Enabled: true, Purpose: "everything"})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "规则用途只能是")
+
+	// 改成 both；之后不带用途的更新（老前端）不改它
+	w, both := update(notify.ID, FilterRuleRequest{Name: "通知用", Pattern: "b", Enabled: true, Purpose: "both"})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "both", both.Purpose)
+	w, kept := update(notify.ID, FilterRuleRequest{Name: "通知用", Pattern: "b", Enabled: true})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "both", kept.Purpose)
+	w, _ = update(notify.ID, FilterRuleRequest{Name: "通知用", Pattern: "b", Enabled: true, Purpose: "x"})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// 列表与详情
+	lw := httptest.NewRecorder()
+	server.listFilterRules(lw, httptest.NewRequest(http.MethodGet, "/api/filter-rules", nil))
+	require.Equal(t, http.StatusOK, lw.Code)
+	var list []FilterRuleResponse
+	require.NoError(t, json.Unmarshal(lw.Body.Bytes(), &list))
+	byName := map[string]string{}
+	for _, r := range list {
+		byName[r.Name] = r.Purpose
+	}
+	assert.Equal(t, map[string]string{"默认用途": "download", "通知用": "both"}, byName)
+	gw := httptest.NewRecorder()
+	server.getFilterRule(gw, httptest.NewRequest(http.MethodGet, "/api/filter-rules/1", nil), notify.ID)
+	require.Equal(t, http.StatusOK, gw.Code)
+	assert.Contains(t, gw.Body.String(), `"purpose":"both"`)
+
+	// 库里是空值的老规则（v7 以前的数据）按 download 返回
+	require.NoError(t, global.GlobalDB.DB.Model(&models.FilterRule{}).Where("id = ?", def.ID).Update("purpose", "").Error)
+	gw = httptest.NewRecorder()
+	server.getFilterRule(gw, httptest.NewRequest(http.MethodGet, "/api/filter-rules/1", nil), def.ID)
+	assert.Contains(t, gw.Body.String(), `"purpose":"download"`)
+}

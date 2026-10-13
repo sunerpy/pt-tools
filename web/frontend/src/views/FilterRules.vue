@@ -87,6 +87,7 @@ const ruleFree = ref("");
 const RULE_COLS_KEY = "pt-tools-rules-cols-v1";
 
 const OPTIONAL_RULE_COLS = [
+  { key: "purpose", label: "用途" },
   { key: "scope", label: "匹配范围" },
   { key: "priority", label: "优先级" },
   { key: "free", label: "仅免费" },
@@ -126,7 +127,17 @@ const ruleColShown = (key: OptionalRuleCol) => !hiddenRuleCols.value.has(key);
 
 /** 导出当前筛选出的这批规则（画板 bar-64 的 bi-file-down） */
 function exportCsv() {
-  const head = ["名称", "匹配模式", "类型", "匹配范围", "优先级", "仅免费", "大小范围", "启用"];
+  const head = [
+    "名称",
+    "匹配模式",
+    "类型",
+    "用途",
+    "匹配范围",
+    "优先级",
+    "仅免费",
+    "大小范围",
+    "启用",
+  ];
   const lines = [head.join(",")];
   for (const r of visibleRules.value) {
     const size =
@@ -135,6 +146,7 @@ function exportCsv() {
       r.name,
       r.pattern,
       r.pattern_type,
+      getPurposeLabel(r.purpose),
       r.match_field ?? "title",
       String(r.priority ?? 0),
       r.require_free ? "是" : "否",
@@ -421,7 +433,8 @@ function openAddDialog() {
 
 function openEditDialog(rule: FilterRule) {
   editMode.value = true;
-  form.value = { ...rule };
+  // 老接口不返回 purpose：按下载显示，不让下拉框停在「选择用途」
+  form.value = { ...rule, purpose: rule.purpose || "download" };
   selectedRssId.value = undefined;
   showDialog.value = true;
 }
@@ -535,6 +548,13 @@ const SHORT_TYPE: Record<string, string> = {
 
 function getShortTypeLabel(type: string) {
   return SHORT_TYPE[type] ?? getPatternTypeLabel(type);
+}
+
+/** 规则用途（#556）：老接口不返回、库里是空值的都按下载 */
+function getPurposeLabel(purpose: string | undefined) {
+  if (purpose === "notify") return "通知";
+  if (purpose === "both") return "下载与通知";
+  return "下载";
 }
 
 function getMatchFieldLabel(field: string | undefined) {
@@ -708,6 +728,12 @@ function decisionText(decision: string | undefined): string {
           <template #default="{ row }">{{ getShortTypeLabel(row.pattern_type) }}</template>
         </el-table-column>
 
+        <el-table-column v-if="ruleColShown('purpose')" label="用途" width="100">
+          <template #default="{ row }">
+            <span :data-testid="`rule-purpose-${row.id}`">{{ getPurposeLabel(row.purpose) }}</span>
+          </template>
+        </el-table-column>
+
         <el-table-column
           v-if="ruleColShown('scope')"
           label="匹配范围"
@@ -815,6 +841,10 @@ function decisionText(decision: string | undefined): string {
               桌面那一列早已改成纯文本「是」，手机上没道理反而更响。
             -->
             <PtTag v-if="rule.require_free">仅免费</PtTag>
+            <!-- 用途和「仅免费」一样：默认的「下载」不画，只有通知、两者才标出来 -->
+            <PtTag v-if="rule.purpose === 'notify' || rule.purpose === 'both'">
+              {{ getPurposeLabel(rule.purpose) }}
+            </PtTag>
             <code class="pattern pattern--row">{{ rule.pattern }}</code>
           </template>
 
