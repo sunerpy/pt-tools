@@ -22,12 +22,21 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("USERPROFILE", home)
 	// 密钥在包初始化时已按原来的家目录读过；换了家目录要重新读（没有就在临时目录里生成），否则 ConfigStore 找不到 secret.key
 	crypto.ResetForTest()
-	_, _ = InitRuntime()
+	// 初始化只跑一次（sync.Once）：第一次就出错时后面的测试拿到的都是 nil，所以在这里检查
+	if _, err := InitRuntime(); err != nil {
+		fmt.Fprintln(os.Stderr, "初始化运行时失败:", err)
+		_ = os.RemoveAll(home)
+		os.Exit(1)
+	}
+	// 记下这次初始化打开的库：测试会把 global.GlobalDB 换成自己的库，结束时要关的是这一个
+	runtimeDB := global.GlobalDB
 	code := m.Run()
-	if global.GlobalDB != nil {
-		CloseDB(global.GlobalDB)
+	if runtimeDB != nil {
+		CloseDB(runtimeDB)
 	}
 	_ = config.CloseLogFiles()
-	_ = os.RemoveAll(home)
+	if err := os.RemoveAll(home); err != nil {
+		fmt.Fprintln(os.Stderr, "删除临时家目录失败:", err)
+	}
 	os.Exit(code)
 }

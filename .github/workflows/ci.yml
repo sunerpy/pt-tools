@@ -306,11 +306,8 @@ jobs:
           persist-credentials: false
 
       # 发布产物含 windows/amd64 与 windows/arm64，均由 GoReleaser 在 Linux 上
-      # 交叉编译产出，故这里用交叉编译守住「Windows 目标能编译」这条线。
-      # 原生 windows-latest runner 唯一独有的价值是跑测试，但本仓库测试套件
-      # 尚未 Windows-clean：t.TempDir 清理时 SQLite 句柄未关闭、日志轮转与
-      # keyring 行为差异、符号链接需要特权等，跨 16 个包约 330 个失败。
-      # 该测试债单独一轮处理，不在本次 CI/发布线标准化范围内。
+      # 交叉编译产出，故这里用交叉编译守住「Windows 目标能编译」这条线（arm64 只有这里覆盖）。
+      # 原生 Windows 上的测试在下面的 go-test-windows（#542）。
       - name: Create embed placeholder
         run: make embed-placeholder
 
