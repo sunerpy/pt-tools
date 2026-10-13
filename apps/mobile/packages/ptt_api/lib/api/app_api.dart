@@ -1378,6 +1378,51 @@ class AppApi {
     return null;
   }
 
+  /// 消息模板：事件的组、公共变量与各事件的变量、内置文字的样子与现在的模板
+  ///
+  /// Note: This method returns the HTTP [Response].
+  Future<Response> listTemplatesWithHttpInfo({ Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/templates';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 消息模板：事件的组、公共变量与各事件的变量、内置文字的样子与现在的模板
+  Future<AppTemplateCatalog?> listTemplates({ Future<void>? abortTrigger, }) async {
+    final response = await listTemplatesWithHttpInfo(abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTemplateCatalog',) as AppTemplateCatalog;
+    
+    }
+    return null;
+  }
+
   /// 下载器里的种子
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1477,6 +1522,59 @@ class AppApi {
     return null;
   }
 
+  /// 用示例数据渲染一份模板（不保存；模板不对时回 400 并写明哪里不对）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [AppTemplatePreviewInput] appTemplatePreviewInput (required):
+  Future<Response> previewTemplateWithHttpInfo(AppTemplatePreviewInput appTemplatePreviewInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/templates/preview';
+
+    // ignore: prefer_final_locals
+    Object? postBody = appTemplatePreviewInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 用示例数据渲染一份模板（不保存；模板不对时回 400 并写明哪里不对）
+  ///
+  /// Parameters:
+  ///
+  /// * [AppTemplatePreviewInput] appTemplatePreviewInput (required):
+  Future<AppTemplatePreview?> previewTemplate(AppTemplatePreviewInput appTemplatePreviewInput, { Future<void>? abortTrigger, }) async {
+    final response = await previewTemplateWithHttpInfo(appTemplatePreviewInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTemplatePreview',) as AppTemplatePreview;
+    
+    }
+    return null;
+  }
+
   /// 把搜索到的种子推送到下载器
   ///
   /// Note: This method returns the HTTP [Response].
@@ -1525,6 +1623,122 @@ class AppApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppPushResult',) as AppPushResult;
+    
+    }
+    return null;
+  }
+
+  /// 恢复默认（要 app:write）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] type (required):
+  ///   事件类型，例如 rss.matched、reply.status、assistant.reply
+  Future<Response> resetTemplateWithHttpInfo(String type, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/templates/{type}'
+      .replaceAll('{type}', type);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'DELETE',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 恢复默认（要 app:write）
+  ///
+  /// Parameters:
+  ///
+  /// * [String] type (required):
+  ///   事件类型，例如 rss.matched、reply.status、assistant.reply
+  Future<AppOK?> resetTemplate(String type, { Future<void>? abortTrigger, }) async {
+    final response = await resetTemplateWithHttpInfo(type, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppOK',) as AppOK;
+    
+    }
+    return null;
+  }
+
+  /// 保存一种事件的模板（要 app:write；先用示例数据校验，不对时回 400；两项都空等于恢复默认）
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] type (required):
+  ///   事件类型，例如 rss.matched、reply.status、assistant.reply
+  ///
+  /// * [AppTemplateInput] appTemplateInput (required):
+  Future<Response> saveTemplateWithHttpInfo(String type, AppTemplateInput appTemplateInput, { Future<void>? abortTrigger, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/templates/{type}'
+      .replaceAll('{type}', type);
+
+    // ignore: prefer_final_locals
+    Object? postBody = appTemplateInput;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'PUT',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+      abortTrigger: abortTrigger,
+    );
+  }
+
+  /// 保存一种事件的模板（要 app:write；先用示例数据校验，不对时回 400；两项都空等于恢复默认）
+  ///
+  /// Parameters:
+  ///
+  /// * [String] type (required):
+  ///   事件类型，例如 rss.matched、reply.status、assistant.reply
+  ///
+  /// * [AppTemplateInput] appTemplateInput (required):
+  Future<AppTemplate?> saveTemplate(String type, AppTemplateInput appTemplateInput, { Future<void>? abortTrigger, }) async {
+    final response = await saveTemplateWithHttpInfo(type, appTemplateInput, abortTrigger: abortTrigger,);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AppTemplate',) as AppTemplate;
     
     }
     return null;

@@ -61,6 +61,13 @@ lib/model/app_subscription_status.dart
 lib/model/app_subscription_torrent.dart
 lib/model/app_task.dart
 lib/model/app_task_page.dart
+lib/model/app_template.dart
+lib/model/app_template_catalog.dart
+lib/model/app_template_group.dart
+lib/model/app_template_input.dart
+lib/model/app_template_preview.dart
+lib/model/app_template_preview_input.dart
+lib/model/app_template_var.dart
 lib/model/app_torrent.dart
 lib/model/app_torrent_action_result.dart
 lib/model/app_torrent_actions_request.dart

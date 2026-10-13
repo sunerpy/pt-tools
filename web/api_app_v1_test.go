@@ -172,6 +172,8 @@ var appReadPosts = map[string]bool{
 	"DELETE /assistant/conversations/{id}":        true,
 	"POST /assistant/conversations/{id}/messages": true,
 	"POST /assistant/conversations/{id}/cancel":   true,
+	// 模板预览只渲染示例数据，不保存
+	"POST /templates/preview": true,
 }
 
 // 路由表：每条都声明了权限范围；读是 GET（或者上面列出的只读 POST）+ app:read，写是别的方法 + app:write；没有重复

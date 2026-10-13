@@ -546,6 +546,67 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppAssistantConfirmation" }
         default: { $ref: "#/components/responses/Error" }
+  /templates:
+    get:
+      operationId: listTemplates
+      tags: [App]
+      summary: 消息模板：事件的组、公共变量与各事件的变量、内置文字的样子与现在的模板
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppTemplateCatalog" }
+        default: { $ref: "#/components/responses/Error" }
+  /templates/preview:
+    post:
+      operationId: previewTemplate
+      tags: [App]
+      summary: 用示例数据渲染一份模板（不保存；模板不对时回 400 并写明哪里不对）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppTemplatePreviewInput" }
+      responses:
+        "200":
+          description: 渲染出来的标题与正文
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppTemplatePreview" }
+        default: { $ref: "#/components/responses/Error" }
+  /templates/{type}:
+    put:
+      operationId: saveTemplate
+      tags: [App]
+      summary: 保存一种事件的模板（要 app:write；先用示例数据校验，不对时回 400；两项都空等于恢复默认）
+      parameters:
+        - $ref: "#/components/parameters/TemplateType"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppTemplateInput" }
+      responses:
+        "200":
+          description: 保存以后的这种事件
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppTemplate" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: resetTemplate
+      tags: [App]
+      summary: 恢复默认（要 app:write）
+      parameters:
+        - $ref: "#/components/parameters/TemplateType"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppOK" }
+        default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -568,6 +629,12 @@ components:
       in: path
       required: true
       schema: { type: integer, minimum: 1 }
+    TemplateType:
+      name: type
+      in: path
+      required: true
+      description: 事件类型，例如 rss.matched、reply.status、assistant.reply
+      schema: { type: string }
     Q:
       name: q
       in: query
@@ -1339,3 +1406,98 @@ components:
       additionalProperties: false
       properties:
         approve: { type: boolean, description: "true 确认执行，false 拒绝" }
+    AppTemplateCatalog:
+      type: object
+      required: [groups, common_vars, events]
+      properties:
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/AppTemplateGroup" }
+        common_vars:
+          type: array
+          description: 每种事件都有的变量
+          items: { $ref: "#/components/schemas/AppTemplateVar" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/AppTemplate" }
+    AppTemplateGroup:
+      type: object
+      required: [key, name, desc]
+      properties:
+        key:
+          {
+            type: string,
+            description: "notify（通知）、reply（ChatOps 命令回复）或 assistant（AI 助手回复）",
+          }
+        name: { type: string }
+        desc: { type: string }
+    AppTemplateVar:
+      type: object
+      required: [key, type, desc]
+      properties:
+        key: { type: string }
+        type: { type: string, enum: [string, int, float, bool, list] }
+        desc: { type: string }
+        sample: { type: string, description: "示例值写成的文字；列表没有" }
+        item:
+          type: array
+          description: 列表每一项的字段
+          items: { $ref: "#/components/schemas/AppTemplateVar" }
+    AppTemplate:
+      type: object
+      required:
+        [
+          type,
+          group,
+          name,
+          desc,
+          no_title,
+          vars,
+          sample_title,
+          sample_text,
+          title,
+          text,
+          customized,
+        ]
+      properties:
+        type: { type: string }
+        group: { type: string }
+        name: { type: string }
+        desc: { type: string }
+        no_title: { type: boolean, description: "只有正文（ChatOps 命令回复与 AI 助手回复）" }
+        vars:
+          type: array
+          items: { $ref: "#/components/schemas/AppTemplateVar" }
+        sample_title: { type: string, description: 内置标题的样子 }
+        sample_text: { type: string, description: 内置正文的样子 }
+        title:
+          {
+            type: string,
+            description: "标题模板，空着用内置标题；只给有 app:write 的调用者，只读的调用者是空的",
+          }
+        text:
+          {
+            type: string,
+            description: "正文模板，空着用内置正文；只给有 app:write 的调用者，只读的调用者是空的",
+          }
+        customized: { type: boolean }
+        updated_at: { type: integer, format: int64, description: 自定义的时间（秒级时间戳） }
+    AppTemplateInput:
+      type: object
+      description: 空着的一项用内置文字；每份模板最长 8 KB（UTF-8 字节）。只有正文的事件不收标题
+      properties:
+        title: { type: string }
+        text: { type: string }
+    AppTemplatePreviewInput:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        text: { type: string }
+    AppTemplatePreview:
+      type: object
+      required: [title, text]
+      properties:
+        title: { type: string }
+        text: { type: string }

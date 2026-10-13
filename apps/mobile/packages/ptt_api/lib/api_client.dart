@@ -287,6 +287,20 @@ class ApiClient {
           return AppTask.fromJson(value);
         case 'AppTaskPage':
           return AppTaskPage.fromJson(value);
+        case 'AppTemplate':
+          return AppTemplate.fromJson(value);
+        case 'AppTemplateCatalog':
+          return AppTemplateCatalog.fromJson(value);
+        case 'AppTemplateGroup':
+          return AppTemplateGroup.fromJson(value);
+        case 'AppTemplateInput':
+          return AppTemplateInput.fromJson(value);
+        case 'AppTemplatePreview':
+          return AppTemplatePreview.fromJson(value);
+        case 'AppTemplatePreviewInput':
+          return AppTemplatePreviewInput.fromJson(value);
+        case 'AppTemplateVar':
+          return AppTemplateVar.fromJson(value);
         case 'AppTorrent':
           return AppTorrent.fromJson(value);
         case 'AppTorrentActionResult':
