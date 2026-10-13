@@ -37,6 +37,8 @@ type OutboxWorker struct {
 	live LiveSender
 	// decrypt 解密 NotificationConf.ConfigJSON，只在没有 live 时的回退路径使用。
 	decrypt func(string) (string, error)
+	// templates 是全局消息模板，只在没有 live 时的回退路径套用（live 路径由 LiveSender 自己套）。
+	templates *Templates
 
 	startOnce sync.Once
 	mu        sync.Mutex
@@ -54,6 +56,9 @@ func (w *OutboxWorker) SetLiveSender(s LiveSender) { w.live = s }
 
 // SetConfigDecrypter 设置回退路径解密 ConfigJSON 的函数。须在 Start 之前调用。
 func (w *OutboxWorker) SetConfigDecrypter(fn func(string) (string, error)) { w.decrypt = fn }
+
+// SetTemplates 设置回退路径套用的全局消息模板。须在 Start 之前调用。
+func (w *OutboxWorker) SetTemplates(t *Templates) { w.templates = t }
 
 // NewOutboxWorker creates a worker. interval defaults to 10s when <= 0.
 func NewOutboxWorker(db *gorm.DB, registry *Registry, interval time.Duration) *OutboxWorker {
@@ -211,7 +216,7 @@ func (w *OutboxWorker) sendViaNewChannel(ctx context.Context, conf models.Notifi
 		return err
 	}
 	defer func() { _ = ch.Close(ctx) }()
-	return ch.Send(ctx, n)
+	return ch.Send(ctx, w.templates.Apply(n))
 }
 
 func (w *OutboxWorker) markFailure(ctx context.Context, row models.NotificationOutbox, now time.Time, cause error) error {

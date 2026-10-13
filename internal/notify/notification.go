@@ -9,6 +9,8 @@ type Button struct {
 }
 
 type Notification struct {
+	// Event 是这条通知对应的事件（消息模板与 Webhook 请求体用）；没有时照内置的标题与正文发。
+	Event             *Event            `json:"event,omitempty"`
 	Title             string            `json:"title"`
 	Text              string            `json:"text"`
 	Image             string            `json:"image,omitempty"`
