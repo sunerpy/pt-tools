@@ -266,6 +266,14 @@ func TestRenderBudget(t *testing.T) {
 	assert.ErrorContains(t, err, "函数处理的内容太多")
 	_, err = exec(b64k+`{{range .items}}{{range $.items}}{{$x := upper $b}}{{end}}{{end}}`, full)
 	assert.ErrorContains(t, err, "函数处理的内容太多")
+	// index 按 key 查 map 要散列整个 key（第 3 轮评审）：按 key 的大小扣预算；在循环里重复几百次在解析时就超过步数
+	_, err = exec(b64k+`{{range .items}}{{range $.items}}{{if index $ $b}}{{end}}{{end}}{{end}}`, full)
+	assert.ErrorContains(t, err, "函数处理的内容太多")
+	_, err = Parse(b64k+`{{range .items}}{{range $.items}}`+strings.Repeat(`{{if index $ $b}}{{end}}`, 300)+`{{end}}{{end}}`, Text, lists)
+	assert.ErrorContains(t, err, "模板太复杂")
+	out0, err := exec(`{{index $ "site"}} {{index .items 1 | len}} {{index "ab" 1}} {{index $ "nope"}}`, full)
+	require.NoError(t, err)
+	assert.Equal(t, "hdtime 2 98 <no value>", out0, "和内置的 index 一样")
 
 	// 正常的两层循环用不了多少
 	out, err := exec(`{{range .items}}{{range $.items}}{{if eq .site $.site}}{{end}}{{if contains .site $.text}}{{end}}{{end}}{{end}}ok`, full)
