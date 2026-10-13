@@ -100,6 +100,11 @@ export interface SyncRunSummary {
     synced: string[];
     unchanged: number;
     failed: Array<{ siteId: string; error: string }>;
+    /**
+     * missing 是要同步、但浏览器里没有可用 Cookie 的站点名（KnownSite.name；没登录、Cookie 不全或过期了），这些站点没有推。
+     * 这一项以前存下的结果里没有，读的时候按空列表算。
+     */
+    missing?: string[];
     /** skipped 是这次没同步 pt-tools 的原因（没连上、没有要同步的站点） */
     skipped?: string;
     /** error 是这一轮同步了、但没能照设置做全的原因（例如读不到 pt-tools 的站点列表） */

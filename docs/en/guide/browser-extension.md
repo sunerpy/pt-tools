@@ -34,8 +34,9 @@ Scheduled sync (定时同步) in Global Settings syncs on an interval (10–1440
 - By default it syncs only the sites with Auto-sync Cookie turned on. With Sync every site enabled in pt-tools (同步 pt-tools 里已启用的全部站点) ticked, every cookie site already enabled in pt-tools is synced. A scheduled sync never enables a new site for you.
 - Only sites whose cookies changed are pushed: every push makes pt-tools refresh the site and check its sign-in once, so unchanged cookies are not pushed again. Choosing Sync always pushes.
 - With CookieCloud below turned on, the same run also uploads to CookieCloud.
-- The result of each run is shown under the settings, and the extension shows a system notification when a run has a problem the previous one did not have (for example the pt-tools sign-in expired or a site could not be pushed).
-- Sync now (立即同步一次) runs once right away with the same rules.
+- Sites that should be synced but have no usable cookie in this browser (signed out, incomplete or expired) are not pushed, and the result lists them by name. Sign in to them in the browser and the next run syncs them.
+- The result of each run is shown under the settings, and the extension shows a system notification when a run has a problem the previous one did not have (for example the pt-tools sign-in expired, a site could not be pushed, or a site has no usable cookie).
+- Sync now (立即同步一次) runs once right away with the same rules. When a site was not synced, has no usable cookie, or pt-tools is not connected, the message says the run had problems; the result below has the details.
 
 ### Syncing to CookieCloud
 

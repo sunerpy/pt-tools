@@ -5,6 +5,7 @@
  */
 import { computed, onMounted, reactive, ref } from "vue";
 
+import { runHadProblems } from "../../background/scheduled-sync";
 import { t } from "../../core/i18n";
 import { createMessage, sendToBackground } from "../../core/messages";
 import type {
@@ -108,8 +109,13 @@ function saveSchedule(): Promise<void> {
 
 function runNow(): Promise<void> {
   return run(async () => {
-    apply(await request<"RUN_SYNC_NOW", SyncSettingsView>("RUN_SYNC_NOW", {}));
-    toast.success(t("schedule.ran"));
+    const next = await request<"RUN_SYNC_NOW", SyncSettingsView>("RUN_SYNC_NOW", {});
+    apply(next);
+    if (runHadProblems(next.lastRun)) {
+      toast.warning(t("schedule.ranWithProblems"));
+    } else {
+      toast.success(t("schedule.ran"));
+    }
   });
 }
 
@@ -187,16 +193,20 @@ function formatTime(iso: string | null): string {
 function runLines(run: SyncRunSummary): string[] {
   const lines: string[] = [];
   const pt = run.ptTools;
+  const missing = pt.missing ?? [];
   lines.push(
     pt.skipped
       ? t("schedule.summaryPtSkipped", pt.skipped)
-      : t("schedule.summaryPt", pt.synced.length, pt.unchanged, pt.failed.length),
+      : t("schedule.summaryPt", pt.synced.length, pt.unchanged, missing.length, pt.failed.length),
   );
   if (pt.error) {
     lines.push(pt.error);
   }
   for (const f of pt.failed) {
     lines.push(`· ${f.siteId}: ${f.error}`);
+  }
+  if (missing.length > 0) {
+    lines.push(t("schedule.summaryPtMissing", missing.join(", ")));
   }
   const c = run.cookieCloud;
   if (c.error) {

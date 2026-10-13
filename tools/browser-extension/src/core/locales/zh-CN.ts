@@ -208,6 +208,9 @@ export default {
   "error.extensionPageOnly": "这个操作只能在扩展的弹窗里做",
   "sync.problemTitle": "Cookie 定时同步出了问题",
   "sync.problemPtTools": "pt-tools：{0} 个站点没同步上（{1}）",
+  "sync.problemMissing":
+    "pt-tools：{0} 个站点在浏览器里没有可用的 Cookie，没有同步（{1}），请先在浏览器里登录",
+  "sync.problemSkipped": "pt-tools 这一轮没有同步：{0}",
   "sync.problemCookieCloud": "CookieCloud：{0}",
   "sync.enabledSitesFailed":
     "读不到 pt-tools 的站点列表，这一轮只同步了单独打开「自动同步 Cookie」的站点：{0}",
@@ -225,9 +228,12 @@ export default {
   "schedule.runNow": "立即同步一次",
   "schedule.saved": "已保存定时同步的设置",
   "schedule.ran": "已经同步了一次",
+  "schedule.ranWithProblems": "同步了一次，但有问题，见下方的结果",
   "schedule.lastRun": "上次：{0}",
   "schedule.never": "还没有同步过",
-  "schedule.summaryPt": "pt-tools：同步 {0} 个，没有变化 {1} 个，失败 {2} 个",
+  "schedule.summaryPt":
+    "pt-tools：同步 {0} 个，没有变化 {1} 个，没有可用 Cookie {2} 个，失败 {3} 个",
+  "schedule.summaryPtMissing": "· 浏览器里没有可用的 Cookie（没登录、不全或过期了），没有同步：{0}",
   "schedule.summaryPtSkipped": "pt-tools：{0}",
   "schedule.summaryCc": "CookieCloud：上传了 {0} 个域名的 {1} 条 Cookie",
   "schedule.summaryCcUnchanged": "CookieCloud：没有变化",
