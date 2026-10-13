@@ -538,7 +538,9 @@ func (m *SessionManager) IsSessionValid(siteID string) bool {
 	session.mu.RLock()
 	defer session.mu.RUnlock()
 
-	if !session.ExpiresAt.IsZero() && time.Now().After(session.ExpiresAt) {
+	// 到了过期时间就算失效（含正好等于）：InvalidateSession 把过期时间设成「现在」，时钟粒度粗的系统上
+	// 紧接着读到的时间可能和它一样（#542）
+	if !session.ExpiresAt.IsZero() && !time.Now().Before(session.ExpiresAt) {
 		return false
 	}
 

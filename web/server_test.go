@@ -1624,7 +1624,7 @@ func TestServer_APIs(t *testing.T) {
 		rr := httptest.NewRecorder()
 		// enable autostart to hit reload path
 		require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true, AutoStart: true}))
-		body := bytes.NewBufferString(`{"download_dir":"` + t.TempDir() + `","default_interval_minutes":5}`)
+		body := bytes.NewBufferString(`{"download_dir":` + jsonPath(t.TempDir()) + `,"default_interval_minutes":5}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/global", body)
 		srv.apiGlobal(rr, req)
 		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)

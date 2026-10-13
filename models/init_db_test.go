@@ -25,6 +25,7 @@ func TestNewDB_InitializesAndMigrates(t *testing.T) {
 	if db == nil || db.DB == nil {
 		t.Fatalf("db nil")
 	}
+	t.Cleanup(func() { closeTestGorm(db.DB) })
 }
 
 func TestTorrentInfo_GetExpired_IsExpiredFlag(t *testing.T) {
@@ -46,6 +47,7 @@ func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
 	tdb, err := NewDBWithVersionAndHooks(zapNopGormLogger(), "2.0.0", backup, enc, dec)
 	require.NoError(t, err)
 	require.NotNil(t, tdb)
+	t.Cleanup(func() { closeTestGorm(tdb.DB) })
 
 	require.NoError(t, tdb.UpsertTorrent(&TorrentInfo{SiteName: "hdsky", TorrentID: "abc", IsFree: true}))
 	got, err := tdb.GetTorrentBySiteAndID("hdsky", "abc")

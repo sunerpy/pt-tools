@@ -11,6 +11,8 @@ func TestLocker_LockUnlock(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "lockfile")
 	l, err := NewLocker(f)
 	require.NoError(t, err)
+	// Windows 上打开着的文件删不掉，t.TempDir() 的清理会失败
+	t.Cleanup(func() { _ = l.File().Close() })
 	require.NoError(t, l.Lock())
 	require.NoError(t, l.Unlock())
 	require.NotNil(t, l.File())

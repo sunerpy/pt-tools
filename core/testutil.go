@@ -44,10 +44,11 @@ func CloseDB(db *models.TorrentDB) {
 	}
 }
 
-// NewTempDBDir creates a temporary sqlite db under the given directory and migrates schema
+// NewTempDBDir creates a temporary sqlite db under the given directory and migrates schema.
+// 测试库不像正式库那样只开一个连接，几个连接同时写时等锁（最多 10 秒），不立刻报 database is locked。
 func NewTempDBDir(dir string) (*models.TorrentDB, error) {
 	dbFile := filepath.Join(dir, "torrents.db")
-	db, err := gorm.Open(sqlite.Open("file:"+dbFile), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+dbFile+"?_pragma=busy_timeout(10000)"), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}

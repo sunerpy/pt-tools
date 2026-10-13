@@ -83,7 +83,10 @@ func TestInitKey_ReportsGeneratedKey(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, ".pt-tools", "secret.key"), path)
 	info, statErr := os.Stat(path)
 	require.NoError(t, statErr)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		// Windows 上的权限位只有只读一项，0o600 读出来是 0o666
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 
 	// 第二次启动读到的是已有文件，不再算新生成
 	initKey()

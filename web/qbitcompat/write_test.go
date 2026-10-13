@@ -166,7 +166,8 @@ func TestAddObservesBatchOnce(t *testing.T) {
 	}
 	start := time.Now()
 	require.Equal(t, "Ok.", e.postAdd(ck, files, nil).Body.String())
-	assert.Less(t, time.Since(start), 3*time.Second, "整批一起等，不是每个等 300 毫秒")
+	// 每个都等的话，列不出来的那一半（25 个）每个要等满 300 毫秒，一共 7.5 秒；整批一起等只等一次
+	assert.Less(t, time.Since(start), time.Duration(maxAddItems/2)*e.srv.observe, "整批一起等，不是每个等 300 毫秒")
 	assert.Equal(t, maxAddItems, pushed, "全部推送了")
 	var n int64
 	require.NoError(t, e.db.Model(&models.QbitCompatTorrent{}).Where("added_at = ?", 1700000900).Count(&n).Error)

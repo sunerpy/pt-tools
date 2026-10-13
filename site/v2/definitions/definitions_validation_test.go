@@ -259,8 +259,10 @@ func findDefinitionsDir(t *testing.T) string {
 		"../../../site/v2/definitions",
 	}
 
+	// 按本机的分隔符比（Windows 上是 site\v2\definitions）
+	suffix := filepath.FromSlash("site/v2/definitions")
 	wd, _ := os.Getwd()
-	if strings.HasSuffix(wd, "site/v2/definitions") {
+	if strings.HasSuffix(wd, suffix) {
 		return wd
 	}
 
@@ -269,12 +271,12 @@ func findDefinitionsDir(t *testing.T) string {
 		if err != nil {
 			continue
 		}
-		if strings.HasSuffix(abs, "site/v2/definitions") {
+		if strings.HasSuffix(abs, suffix) {
 			if _, err := os.Stat(abs); err == nil {
 				return abs
 			}
 		}
-		full := filepath.Join(abs, "site/v2/definitions")
+		full := filepath.Join(abs, suffix)
 		if _, err := os.Stat(full); err == nil {
 			return full
 		}
