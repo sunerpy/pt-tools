@@ -166,10 +166,15 @@ func TestCDPLoadPageAndExtractSendsInjectedCookies(t *testing.T) {
 	cookies, err := http.ParseCookie("c_secure_uid=93012; c_secure_pass=abc")
 	require.NoError(t, err)
 	target := srv.URL + "/userdetails.php?id=93012"
-	require.NoError(t, sess.InjectCookies(sess.TaskContext(), target, cookies))
+	// 和探测驱动一样：注入与打开页面各用一个从 TaskContext 派生的超时 ctx，前一个取消了标签页也要还在
+	injectCtx, injectCancel := context.WithTimeout(sess.TaskContext(), 10*time.Second)
+	require.NoError(t, sess.InjectCookies(injectCtx, target, cookies))
+	injectCancel()
 
+	navCtx, navCancel := context.WithTimeout(sess.TaskContext(), 10*time.Second)
+	defer navCancel()
 	var html string
-	require.NoError(t, sess.LoadPageAndExtract(sess.TaskContext(), target, "#info", func(h string) error {
+	require.NoError(t, sess.LoadPageAndExtract(navCtx, target, "#info", func(h string) error {
 		html = h
 		return nil
 	}))
