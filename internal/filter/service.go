@@ -14,18 +14,33 @@ type Purpose string
 const (
 	PurposeDownload Purpose = "download"
 	PurposeNotify   Purpose = "notify"
+	PurposeBoth     Purpose = "both"
 )
 
-// purposeMatches 判断规则的 purpose 字段是否覆盖目标用途。
-// 空字符串视为遗留下载规则（向后兼容）。"both" 同时覆盖两个轴。
+// NormalizePurpose 把库里的 purpose 写成三种之一：空串（v7 以前的规则）和不认识的值都按下载规则算。
+func NormalizePurpose(p string) Purpose {
+	switch Purpose(p) {
+	case PurposeNotify, PurposeBoth:
+		return Purpose(p)
+	}
+	return PurposeDownload
+}
+
+// purposeMatches 判断规则的 purpose 字段是否覆盖目标用途。"both" 同时覆盖两个轴。
 func purposeMatches(rulePurpose string, want Purpose) bool {
-	if rulePurpose == "" {
-		rulePurpose = string(PurposeDownload)
+	p := NormalizePurpose(rulePurpose)
+	return p == PurposeBoth || p == want
+}
+
+// HasRulesFor 报告 rules 里有没有覆盖 want 这个用途的规则。
+// 下载决策里「RSS 关联了规则」只看下载规则：只关联了通知规则的 RSS，免费种子照旧按免费通道下载。
+func HasRulesFor(rules []models.FilterRule, want Purpose) bool {
+	for i := range rules {
+		if purposeMatches(rules[i].Purpose, want) {
+			return true
+		}
 	}
-	if rulePurpose == "both" {
-		return true
-	}
-	return rulePurpose == string(want)
+	return false
 }
 
 // MatchInput represents the input fields for matching against filter rules.
@@ -435,13 +450,27 @@ const (
 	SourceNone         = ""
 )
 
-// hasAssociatedRules reports whether the given RSS has any filter rule associated.
+// hasAssociatedRules reports whether the given RSS has an enabled download rule
+// (purpose download or both) associated. Notification-only rules do not count:
+// they never approve a download, so they must not close the free channel either.
 // It must be called without holding s.mu; it takes the read lock internally.
 func (s *filterService) hasAssociatedRules(rssID uint) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	ids, ok := s.rssRules[rssID]
-	return ok && len(ids) > 0
+	ids := s.rssRules[rssID]
+	if len(ids) == 0 {
+		return false
+	}
+	associated := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		associated[id] = true
+	}
+	for i := range s.rules {
+		if associated[s.rules[i].ID] && purposeMatches(s.rules[i].Purpose, PurposeDownload) {
+			return true
+		}
+	}
+	return false
 }
 
 // Decide implements the FilterMode-aware decision tree. Order of checks:
