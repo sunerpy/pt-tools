@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.26](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.25...v1.0.0-rc.26) (2026-10-13)
+
+
+### Features
+
+* **chatops:** 消息模板：按事件自定义通知的标题与正文 ([#673](https://github.com/sunerpy/pt-tools/issues/673)) ([92bcbff](https://github.com/sunerpy/pt-tools/commit/92bcbff2df3bb2410abbd86d3fc6e3c5129922c2))
+* **chatops:** 自定义 Webhook 请求：方法、格式、请求体模板与预设 ([#676](https://github.com/sunerpy/pt-tools/issues/676)) ([f9ee075](https://github.com/sunerpy/pt-tools/commit/f9ee075207bb9fc31c7c26f2290a08fbf58cbf99))
+
 ## [1.0.0-rc.25](https://github.com/sunerpy/pt-tools/compare/v1.0.0-rc.24...v1.0.0-rc.25) (2026-10-12)
 
 
