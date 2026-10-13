@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -173,7 +174,7 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 		}
 	}
 
-	title, text, err := j.buildReport(ctx, today, enabledSites)
+	title, text, fields, err := j.buildReport(ctx, today, enabledSites)
 	if err != nil {
 		j.cfg.Logger.Warnf("生成每日战报失败: %v", err)
 		return
@@ -186,6 +187,7 @@ func (j *DailyReportJob) RunOnce(ctx context.Context) {
 		Title:    title,
 		Text:     text,
 		ConfIDs:  channels,
+		Event:    notify.NewEvent(notify.EventReportDaily, now, fields),
 	}); err != nil {
 		j.cfg.Logger.Warnf("写入每日战报失败: %v", err)
 		return
@@ -263,14 +265,15 @@ func formatBonus(v float64) string {
 	return fmt.Sprintf("+%.0f", v)
 }
 
-// buildReport 生成当天的战报；enabled 不为 nil 时只算其中的站点。
-func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled map[string]bool) (string, string, error) {
+// buildReport 生成当天的战报与事件变量；enabled 不为 nil 时只算其中的站点。
+func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled map[string]bool) (string, string, map[string]any, error) {
 	sum, err := v2.LoadDeltaSummary(ctx, j.cfg.History, "today")
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	sum = sum.Filter(enabled)
 	title := fmt.Sprintf("📊 每日战报 %s", today)
+	fields := map[string]any{"day": today}
 	var b strings.Builder
 
 	switch {
@@ -281,9 +284,12 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 	default:
 		fmt.Fprintf(&b, "今日合计：上传 %s · 下载 %s · 魔力 %s",
 			utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded), formatBonus(sum.TotalBonus))
+		fields["uploaded"], fields["downloaded"] = utils.FormatBytes(sum.TotalUploaded), utils.FormatBytes(sum.TotalDownloaded)
+		fields["uploaded_bytes"], fields["downloaded_bytes"], fields["bonus"] = sum.TotalUploaded, sum.TotalDownloaded, sum.TotalBonus
 		sites := append([]v2.SiteDelta(nil), sum.Sites...)
 		sort.SliceStable(sites, func(a, c int) bool { return sites[a].Uploaded > sites[c].Uploaded })
 		var negative []string
+		var items []map[string]any
 		shown := 0
 		for _, d := range sites {
 			if d.Negative {
@@ -292,6 +298,10 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 			if !d.HasBaseline {
 				continue
 			}
+			items = append(items, map[string]any{
+				"site": siteDisplayName(d.Site), "uploaded": utils.FormatBytes(d.Uploaded), "downloaded": utils.FormatBytes(d.Downloaded),
+				"uploaded_bytes": d.Uploaded, "downloaded_bytes": d.Downloaded, "bonus": d.Bonus,
+			})
 			if shown == dailyReportMaxSites {
 				continue
 			}
@@ -299,6 +309,7 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 			fmt.Fprintf(&b, "\n· %s：上传 %s · 下载 %s · 魔力 %s", siteDisplayName(d.Site),
 				utils.FormatBytes(d.Uploaded), utils.FormatBytes(d.Downloaded), formatBonus(d.Bonus))
 		}
+		fields["items"] = items
 		if rest := countWithBaseline(sites) - shown; rest > 0 {
 			fmt.Fprintf(&b, "\n· 其余 %d 个站点省略", rest)
 		}
@@ -318,7 +329,7 @@ func (j *DailyReportJob) buildReport(ctx context.Context, today string, enabled 
 		b.WriteString("\n")
 		b.WriteString(strings.Join(lines, "\n"))
 	}
-	return title, b.String(), nil
+	return title, b.String(), fields, nil
 }
 
 func countWithBaseline(sites []v2.SiteDelta) int {

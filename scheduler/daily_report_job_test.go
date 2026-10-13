@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -160,6 +161,18 @@ func TestDailyReport_Content(t *testing.T) {
 	assert.Contains(t, text, "成功 1")
 	assert.Contains(t, text, "失败 1")
 	assert.Contains(t, text, "回退")
+	// 事件变量：合计与各站点（只拆这两段，登录异常、签到在 text 里）
+	var p monitorNotifyPayload
+	require.NoError(t, json.Unmarshal([]byte(rows[0].PayloadJSON), &p))
+	require.NotNil(t, p.Event)
+	assert.Equal(t, notify.EventReportDaily, p.Event.Type)
+	assert.Equal(t, "2026-10-06", p.Event.Fields["day"])
+	assert.Equal(t, "5.00 GiB", p.Event.Fields["uploaded"])
+	assert.Equal(t, 5*gib, p.Event.Fields["uploaded_bytes"])
+	assert.Equal(t, float64(600), p.Event.Fields["bonus"], "魔力两个站都涨了：500 + 100")
+	items := p.Event.Fields["items"].([]any)
+	require.NotEmpty(t, items)
+	assert.Equal(t, "HDSky", items[0].(map[string]any)["site"])
 }
 
 func TestDailyReport_NoDataStillReports(t *testing.T) {

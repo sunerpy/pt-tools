@@ -35,7 +35,7 @@ func remoteTestDB(t *testing.T) *gorm.DB {
 func TestRemotePairedNotifier(t *testing.T) {
 	db := remoteTestDB(t)
 	require.NoError(t, db.Create(&models.NotificationConf{Name: "tg", ChannelType: "telegram", Enabled: true}).Error)
-	n := scheduler.NewMonitorNotifier(db, scheduler.MonitorSenderFunc(func(context.Context, uint, string, string) error { return nil }), nil, nil)
+	n := scheduler.NewMonitorNotifier(db, scheduler.MonitorSenderFunc(func(context.Context, uint, scheduler.MonitorMessage) error { return nil }), nil, nil)
 	notify := remotePairedNotifier(n)
 	require.NotNil(t, notify)
 	notify(context.Background(), remote.Device{ID: 3, Name: "我的手机", Scopes: remote.ScopesRead})
@@ -48,6 +48,10 @@ func TestRemotePairedNotifier(t *testing.T) {
 	assert.Contains(t, rows[0].PayloadJSON, "新设备已配对")
 	assert.Contains(t, rows[0].PayloadJSON, "我的手机")
 	assert.Contains(t, rows[0].PayloadJSON, "只读")
+	// 事件变量：设备名与权限
+	assert.Contains(t, rows[0].PayloadJSON, `"type":"remote.paired"`)
+	assert.Contains(t, rows[0].PayloadJSON, `"device":"我的手机"`)
+	assert.Contains(t, rows[0].PayloadJSON, `"permission":"只读"`)
 	assert.Contains(t, pairedText(remote.Device{Name: "平板", Scopes: remote.ScopesFull}), "完全控制")
 	assert.Nil(t, remotePairedNotifier(nil), "没有投递器时不发")
 }

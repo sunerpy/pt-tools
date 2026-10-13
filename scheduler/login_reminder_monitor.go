@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -938,6 +939,9 @@ func (m *LoginReminderMonitor) SendTestReminder(ctx context.Context, siteName st
 		Text:        fmt.Sprintf("这是一条测试提醒。当前判定活跃 %s，剩余 %d 天 (tier=%s)。若你收到此消息，说明该站点的通知通道配置正常。", effectiveStr, daysRemaining, tier),
 		ConfIDs:     decodeChannelIDs(state.NotificationChannelIDs),
 		BypassQuiet: true,
+		Event: notify.NewEvent(notify.EventLoginTest, now, map[string]any{
+			"site": site.Name, "tier": fmt.Sprint(tier), "days_remaining": daysRemaining, "last_active": localTime(effective),
+		}),
 	}
 	inserted, err := m.notifier.Enqueue(ctx, entry)
 	if err != nil {
@@ -1006,6 +1010,10 @@ func (m *LoginReminderMonitor) evaluateReminder(ctx context.Context, setting mod
 		Text:        text,
 		ConfIDs:     decodeChannelIDs(state.NotificationChannelIDs),
 		BypassQuiet: tierAllowsImmediateOverride(tier),
+		Event: notify.NewEvent(notify.EventLoginExpiring, now, map[string]any{
+			"site": setting.Name, "tier": fmt.Sprint(tier), "days_remaining": daysRemaining, "last_active": localTime(effective),
+			"days_since_active": daysSinceActive, "access_stale": state.AccessStaleSince != nil,
+		}),
 	}
 
 	m.logger.Infow("login_reminder_route_started",
@@ -1068,6 +1076,7 @@ func (m *LoginReminderMonitor) evaluateProbeNotices(ctx context.Context, setting
 			Title:    fmt.Sprintf("[pt-tools] 站点 %s 探测已恢复", setting.Name),
 			Text:     fmt.Sprintf("最近一次探测成功（%s），登录状态已恢复正常。", probedAt),
 			ConfIDs:  channels,
+			Event:    notify.NewEvent(notify.EventProbeRecovered, m.clock.Now(), map[string]any{"site": setting.Name, "probed_at": localTimePtr(state.LastProbeAt)}),
 		}
 		if m.notifier.Enabled() {
 			if _, err := m.notifier.Enqueue(ctx, entry); err != nil {
@@ -1106,8 +1115,10 @@ func (m *LoginReminderMonitor) evaluateProbeNotices(ctx context.Context, setting
 	}
 	text := fmt.Sprintf("状态：%s（%s），自 %s 起持续失败。%s",
 		probeStatusLabel(status), status, first.UTC().Format(time.RFC3339), advice)
+	diagnosis := ""
 	if diag := strings.TrimSpace(state.LastProbeError); diag != "" {
-		text += "\n诊断：" + truncateRunes(diag, 200)
+		diagnosis = truncateRunes(diag, 200)
+		text += "\n诊断：" + diagnosis
 	}
 	entry := MonitorNotifyEntry{
 		Source:   loginNotifySource,
@@ -1117,6 +1128,10 @@ func (m *LoginReminderMonitor) evaluateProbeNotices(ctx context.Context, setting
 		Title:    fmt.Sprintf("[pt-tools] 站点 %s 探测失败", setting.Name),
 		Text:     text,
 		ConfIDs:  channels,
+		Event: notify.NewEvent(notify.EventProbeFailed, now, map[string]any{
+			"site": setting.Name, "status": string(status), "status_label": probeStatusLabel(status),
+			"since": localTime(first), "advice": advice, "diagnosis": diagnosis,
+		}),
 	}
 	if m.notifier.Enabled() {
 		if _, err := m.notifier.Enqueue(ctx, entry); err != nil {
@@ -1322,4 +1337,19 @@ func (m *LoginReminderMonitor) loadOrInitState(siteName string) (*models.SiteLog
 		return nil, err
 	}
 	return repo.GetLoginState(siteName)
+}
+
+// localTime 是给消息模板的本地时间写法（2006-01-02 15:04:05）；零值是空串。
+func localTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format(time.DateTime)
+}
+
+func localTimePtr(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return localTime(*t)
 }

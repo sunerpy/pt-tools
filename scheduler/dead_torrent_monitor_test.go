@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -60,6 +62,15 @@ func TestDeadTorrentMonitor_NotifiesNewDeadTorrentsOnce(t *testing.T) {
 	assert.Contains(t, rows[0].PayloadJSON, "qb 里有 1 个种子")
 	assert.Contains(t, rows[0].PayloadJSON, "种子 aa")
 	assert.NotContains(t, rows[0].PayloadJSON, "正常")
+	var p monitorNotifyPayload
+	require.NoError(t, json.Unmarshal([]byte(rows[0].PayloadJSON), &p))
+	require.NotNil(t, p.Event)
+	assert.Equal(t, notify.EventDeadTorrents, p.Event.Type)
+	assert.Equal(t, "qb", p.Event.Fields["downloader"])
+	assert.Equal(t, int64(1), p.Event.Fields["count"])
+	items := p.Event.Fields["items"].([]any)
+	require.Len(t, items, 1)
+	assert.Equal(t, "种子 aa", items[0].(map[string]any)["name"])
 
 	assert.Equal(t, 0, mon.RunOnce(context.Background()), "同一批失效种子不再通知")
 	assert.Len(t, next(), 1)

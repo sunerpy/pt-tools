@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -244,6 +245,19 @@ func TestAttendance_DailySummaryOnceWhenAllDone(t *testing.T) {
 	assert.Contains(t, text, "签到成功")
 	assert.Contains(t, text, "pthome")
 	assert.Contains(t, text, "失败")
+	// 事件变量：汇总数与各站点
+	ev := rig.sender.lastEventOf()
+	require.NotNil(t, ev)
+	assert.Equal(t, notify.EventAttendanceDaily, ev.Type)
+	assert.Equal(t, "2026-10-05", ev.Fields["day"])
+	assert.Equal(t, int64(1), ev.Fields["signed"])
+	assert.Equal(t, int64(1), ev.Fields["failed"])
+	items := ev.Fields["items"].([]any)
+	require.Len(t, items, 2)
+	assert.Equal(t, "hdtime", items[0].(map[string]any)["site"])
+	assert.Equal(t, "signed", items[0].(map[string]any)["status"])
+	assert.Equal(t, "failed", items[1].(map[string]any)["status"])
+	assert.Contains(t, items[1].(map[string]any)["message"], "502")
 
 	rig.at("10:00")
 	rig.mon.RunOnce(ctx)

@@ -106,7 +106,7 @@ func (r *rssNotifier) NotifyNewItem(ctx context.Context, ev RSSItemEvent) error 
 			RSSID: ev.RSS.ID, SiteName: ev.SiteName, TorrentID: ev.TorrentID,
 			Kind: "all", ConfID: cid,
 			PayloadJSON: string(payloadJSON),
-			Title:       payload.Title, Text: payload.Text,
+			Title:       payload.Title, Text: payload.Text, Event: payload.Event,
 		})
 	}
 	return nil
@@ -157,7 +157,7 @@ func (r *rssNotifier) NotifyFilteredItem(ctx context.Context, ev RSSFilteredEven
 			RSSID: ev.RSS.ID, SiteName: ev.SiteName, TorrentID: ev.TorrentID,
 			Kind: "filtered", ConfID: cid, MatchedRuleID: ruleID,
 			PayloadJSON: string(payloadJSON),
-			Title:       payload.Title, Text: payload.Text,
+			Title:       payload.Title, Text: payload.Text, Event: payload.Event,
 		})
 	}
 	return nil
@@ -173,6 +173,7 @@ type dispatchSpec struct {
 	PayloadJSON   string
 	Title         string
 	Text          string
+	Event         *notify.Event
 }
 
 func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
@@ -218,11 +219,13 @@ func (r *rssNotifier) tryDispatch(ctx context.Context, sp dispatchSpec) error {
 			LogID: row.ID,
 			Title: sp.Title,
 			Text:  sp.Text,
+			Event: sp.Event,
 		})
 		return nil
 	}
 
 	err := r.notifySvc.Push(ctx, Notification{
+		Event: sp.Event,
 		Title: sp.Title, Text: sp.Text,
 		SourceConfID: sp.ConfID,
 		Buttons:      rssItemButtons(row.ID),
@@ -285,9 +288,11 @@ func NewRSSDigestFlush(db *gorm.DB, notifySvc NotificationServiceForRSS, logf fu
 		n := Notification{SourceConfID: confID}
 		if len(eligible) == 1 {
 			n.Title, n.Text = eligible[0].Title, eligible[0].Text
+			n.Event = eligible[0].Event
 			n.Buttons = rssItemButtons(eligible[0].LogID)
 		} else {
 			n.Title, n.Text = notify.CombineDigest(eligible)
+			n.Event = digestEvent(eligible)
 		}
 		err := notifySvc.Push(ctx, n)
 		now := time.Now()
@@ -360,9 +365,11 @@ func parseConfIDs(s string) ([]uint, error) {
 	return ids, nil
 }
 
+// renderedNotice 是存进 RSSNotificationLog.PayloadJSON 的内容：内置的标题、正文与事件（重试时照样带着事件）。
 type renderedNotice struct {
 	Title string
 	Text  string
+	Event *notify.Event `json:"event,omitempty"`
 }
 
 func renderAllPayload(ev RSSItemEvent) renderedNotice {
@@ -380,7 +387,32 @@ func renderAllPayload(ev RSSItemEvent) renderedNotice {
 		"🆕 [%s] %s\n\n📅 %s\n🔗 %s",
 		ev.SiteName, title, pubStr, ev.FeedItem.Link,
 	)
-	return renderedNotice{Title: title, Text: text}
+	return renderedNotice{Title: title, Text: text, Event: notify.NewEvent(notify.EventRSSNew, time.Now(), map[string]any{
+		"site": ev.SiteName, "rss": rssName(ev.RSS), "torrent_title": title, "torrent_id": ev.TorrentID,
+		"link": ev.FeedItem.Link, "published": pubStr,
+	})}
+}
+
+func rssName(rss *models.RSSConfig) string {
+	if rss == nil {
+		return ""
+	}
+	return rss.Name
+}
+
+// digestEvent 是多条合并成一条时的事件：每一条的内置标题，加上它自己事件里的站点与种子。
+func digestEvent(items []notify.DigestItem) *notify.Event {
+	list := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		item := map[string]any{"title": it.Title}
+		if it.Event != nil {
+			for _, k := range []string{"site", "torrent_title", "torrent_id"} {
+				item[k] = it.Event.Fields[k]
+			}
+		}
+		list = append(list, item)
+	}
+	return notify.NewEvent(notify.EventRSSDigest, time.Now(), map[string]any{"count": len(items), "items": list})
 }
 
 func renderFilteredPayload(ev RSSFilteredEvent) renderedNotice {
@@ -406,7 +438,21 @@ func renderFilteredPayload(ev RSSFilteredEvent) renderedNotice {
 		ev.SiteName, title,
 		formatBytesRSS(t.SizeBytes), freeLine, ruleLine, t.URL,
 	)
-	return renderedNotice{Title: title, Text: text}
+	fields := map[string]any{
+		"site": ev.SiteName, "rss": rssName(ev.RSS), "torrent_title": title, "torrent_id": ev.TorrentID,
+		"subtitle": t.Subtitle, "size": formatBytesRSS(t.SizeBytes), "size_bytes": t.SizeBytes, "free": t.IsFree(),
+		"link": t.URL, "seeders": t.Seeders, "leechers": t.Leechers, "has_hr": t.HasHR,
+	}
+	if ev.Rule != nil {
+		fields["rule"] = ev.Rule.Name
+	}
+	if t.IsFree() {
+		if end := t.GetFreeEndTime(); end != nil {
+			fields["free_end"] = end.Local().Format(time.DateTime)
+			fields["free_remaining"] = formatRemaining(*end)
+		}
+	}
+	return renderedNotice{Title: title, Text: text, Event: notify.NewEvent(notify.EventRSSMatched, time.Now(), fields)}
 }
 
 func formatBytesRSS(b int64) string {

@@ -23,14 +23,21 @@ import (
 // 不能换成 Push：Push 在 live 发送失败后转写 outbox 并返回 nil，而 outbox 用 registry.Make 新建通道实例，
 // 发不了 QQ / Telegram 这类有状态通道，日志行也会被误记为已送达。
 type MonitorSender interface {
-	Send(ctx context.Context, confID uint, title, text string) error
+	Send(ctx context.Context, confID uint, msg MonitorMessage) error
+}
+
+// MonitorMessage 是一条要发的监控通知：内置的标题与正文，加上事件（消息模板用；旧的日志行没有）。
+type MonitorMessage struct {
+	Title string
+	Text  string
+	Event *notify.Event
 }
 
 // MonitorSenderFunc 让普通函数实现 MonitorSender。
-type MonitorSenderFunc func(ctx context.Context, confID uint, title, text string) error
+type MonitorSenderFunc func(ctx context.Context, confID uint, msg MonitorMessage) error
 
-func (f MonitorSenderFunc) Send(ctx context.Context, confID uint, title, text string) error {
-	return f(ctx, confID, title, text)
+func (f MonitorSenderFunc) Send(ctx context.Context, confID uint, msg MonitorMessage) error {
+	return f(ctx, confID, msg)
 }
 
 // MonitorNotifyEntry 是一次「决定发送」。同一个 (Source, Subject, Kind, EventKey) 重复写入不会重复发送。
@@ -45,11 +52,14 @@ type MonitorNotifyEntry struct {
 	ConfIDs []uint
 	// BypassQuiet 为 true 时不受通道静默时段限制（封号前最后一天、测试提醒）。
 	BypassQuiet bool
+	// Event 是这条通知对应的事件，随内容一起存进日志行，重试时也带着（消息模板用）。
+	Event *notify.Event
 }
 
 type monitorNotifyPayload struct {
-	Title string `json:"title"`
-	Text  string `json:"text"`
+	Title string        `json:"title"`
+	Text  string        `json:"text"`
+	Event *notify.Event `json:"event,omitempty"`
 }
 
 const (
@@ -104,7 +114,7 @@ func (n *MonitorNotifier) Enqueue(ctx context.Context, e MonitorNotifyEntry) (in
 	if err != nil {
 		return 0, err
 	}
-	payload, err := json.Marshal(monitorNotifyPayload{Title: e.Title, Text: e.Text})
+	payload, err := json.Marshal(monitorNotifyPayload{Title: e.Title, Text: e.Text, Event: e.Event})
 	if err != nil {
 		return 0, fmt.Errorf("序列化通知内容失败: %w", err)
 	}
@@ -251,7 +261,7 @@ func (n *MonitorNotifier) deliverRow(ctx context.Context, row models.MonitorNoti
 		return fmt.Errorf("解析通知内容失败: %w", err)
 	}
 
-	sendErr := n.sender.Send(ctx, conf.ID, payload.Title, payload.Text)
+	sendErr := n.sender.Send(ctx, conf.ID, MonitorMessage(payload))
 	attempts := row.Attempts + 1
 	if sendErr == nil {
 		n.finishRow(ctx, row.ID, map[string]any{

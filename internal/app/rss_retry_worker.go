@@ -111,6 +111,7 @@ func (w *RSSRetryWorker) attemptOne(ctx context.Context, row *models.RSSNotifica
 		return
 	}
 	err := w.notifySvc.Push(ctx, Notification{
+		Event:        payload.Event,
 		Title:        payload.Title,
 		Text:         payload.Text,
 		SourceConfID: row.NotificationConfID,

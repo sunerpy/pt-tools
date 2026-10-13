@@ -48,7 +48,7 @@ func organizeNotifier(n *scheduler.MonitorNotifier) organize.Notifier {
 		}
 		_, err := n.Enqueue(ctx, scheduler.MonitorNotifyEntry{
 			Source: "media", Subject: subject, Kind: "organized", EventKey: no.Key,
-			Title: no.Title, Text: no.Text, ConfIDs: no.ChannelIDs,
+			Title: no.Title, Text: no.Text, ConfIDs: no.ChannelIDs, Event: no.Event,
 		})
 		return err
 	}

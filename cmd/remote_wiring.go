@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/apitoken"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/remote"
 	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/version"
@@ -48,6 +50,7 @@ func remotePairedNotifier(n *scheduler.MonitorNotifier) func(context.Context, re
 		_, err := n.Enqueue(ctx, scheduler.MonitorNotifyEntry{
 			Source: "remote", Subject: id, Kind: "paired", EventKey: id,
 			Title: "新设备已配对", Text: pairedText(d),
+			Event: notify.NewEvent(notify.EventRemotePaired, time.Now(), map[string]any{"device": d.Name, "permission": pairedPermission(d)}),
 		})
 		if err != nil {
 			global.GetSlogger().Warnf("[远程访问] 写配对通知失败: %v", err)
@@ -57,9 +60,13 @@ func remotePairedNotifier(n *scheduler.MonitorNotifier) func(context.Context, re
 
 // pairedText 是配对通知的正文。
 func pairedText(d remote.Device) string {
-	perm := "只读"
+	return fmt.Sprintf("设备「%s」已经配对，权限：%s。如果不是你本人操作，请在「系统 → 远程访问」撤销这台设备。", d.Name, pairedPermission(d))
+}
+
+// pairedPermission 是配对时给的权限的说法。
+func pairedPermission(d remote.Device) string {
 	if slices.Contains(d.Scopes, apitoken.ScopeAppWrite) {
-		perm = "完全控制"
+		return "完全控制"
 	}
-	return fmt.Sprintf("设备「%s」已经配对，权限：%s。如果不是你本人操作，请在「系统 → 远程访问」撤销这台设备。", d.Name, perm)
+	return "只读"
 }

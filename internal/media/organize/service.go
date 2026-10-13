@@ -21,6 +21,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -61,6 +62,8 @@ type Notice struct {
 	Title      string
 	Text       string
 	ChannelIDs []uint
+	// Event 是这条通知对应的事件（消息模板用）
+	Event *notify.Event
 }
 
 // Notifier 发入库通知（生产环境写 MonitorNotificationLog，由现有的投递器发出）。

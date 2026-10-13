@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -467,19 +468,33 @@ func (m *AttendanceMonitor) maybeNotifySummary(ctx context.Context, repo *models
 		byName[row.SiteName] = row
 	}
 	var b strings.Builder
+	items := make([]map[string]any, 0, len(sites))
+	signed, failed := 0, 0
 	for _, site := range sites {
 		row, ok := byName[site.Name]
 		if !ok || !row.Done() {
 			return
 		}
 		fmt.Fprintf(&b, "· %s：%s", site.Name, attendanceStatusLabels[row.Status])
+		message := ""
 		switch {
 		case row.Status == models.AttendanceSigned && row.Message != "":
-			fmt.Fprintf(&b, "（%s）", truncateRunes(row.Message, 60))
+			message = truncateRunes(row.Message, 60)
+			fmt.Fprintf(&b, "（%s）", message)
 		case row.LastError != "" && row.Status != models.AttendanceSigned && row.Status != models.AttendanceAlready:
-			fmt.Fprintf(&b, "（%s）", truncateRunes(row.LastError, 80))
+			message = truncateRunes(row.LastError, 80)
+			fmt.Fprintf(&b, "（%s）", message)
 		}
 		b.WriteString("\n")
+		switch row.Status {
+		case models.AttendanceSigned, models.AttendanceAlready:
+			signed++
+		case models.AttendanceFailed:
+			failed++
+		}
+		items = append(items, map[string]any{
+			"site": site.Name, "status": row.Status, "status_label": attendanceStatusLabels[row.Status], "message": message,
+		})
 	}
 	entry := MonitorNotifyEntry{
 		Source:   attendanceNotifySource,
@@ -488,6 +503,9 @@ func (m *AttendanceMonitor) maybeNotifySummary(ctx context.Context, repo *models
 		EventKey: day,
 		Title:    fmt.Sprintf("[pt-tools] %s 签到结果", day),
 		Text:     strings.TrimRight(b.String(), "\n"),
+		Event: notify.NewEvent(notify.EventAttendanceDaily, m.clock.Now(), map[string]any{
+			"day": day, "signed": signed, "failed": failed, "items": items,
+		}),
 	}
 	if _, err := m.notifier.Enqueue(ctx, entry); err != nil {
 		m.logger.Warnw("attendance_summary_enqueue_failed", "err", err)

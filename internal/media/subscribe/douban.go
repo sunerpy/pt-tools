@@ -16,6 +16,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/media/meta"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -437,6 +438,9 @@ func (s *Service) notifyDouban(ctx context.Context, src *models.MediaDoubanSourc
 		Channels: set.NotifyChannels, Kind: NoticeDoubanAbnormal, Subject: "douban|" + src.UserID,
 		EventKey: fmt.Sprintf("douban-%d-%d", src.ID, s.cfg.Now().Unix()/3600),
 		Title:    "豆瓣想看拉取失败", Body: fmt.Sprintf("%s：连续 %d 次没拉到（%v），之后按退避继续重试", name, fails, cause),
+		Event: notify.NewEvent(notify.EventDoubanFailed, s.cfg.Now(), map[string]any{
+			"source": name, "fails": fails, "error": fmt.Sprint(cause),
+		}),
 	}
 	if err := s.cfg.Notify(ctx, n); err != nil {
 		s.cfg.Logger.Warnf("[订阅] 发通知失败: %v", err)

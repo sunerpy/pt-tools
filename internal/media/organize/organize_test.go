@@ -14,6 +14,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -113,6 +114,15 @@ func TestOrganizeMovie(t *testing.T) {
 	assert.Contains(t, notices[0].Text, "画质：2160p BluRay HDR H.265")
 	assert.Contains(t, notices[0].Text, "媒体库：电影")
 	assert.Contains(t, notices[0].Text, "海报：https://image.tmdb.org/t/p/w500/opp.jpg")
+	require.NotNil(t, notices[0].Event)
+	assert.Equal(t, notify.EventMediaOrganized, notices[0].Event.Type)
+	f := notices[0].Event.Fields
+	assert.Equal(t, "奥本海默 (2023)", f["name"])
+	assert.Equal(t, "movie", f["media_type"])
+	assert.Equal(t, "2160p BluRay HDR H.265", f["quality"])
+	assert.Equal(t, "电影", f["library"])
+	assert.Equal(t, "https://image.tmdb.org/t/p/w500/opp.jpg", f["poster"])
+	assert.IsType(t, int64(0), f["files"])
 
 	paths := emby.got()
 	require.Len(t, paths, 1)
