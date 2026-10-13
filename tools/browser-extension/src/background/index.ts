@@ -9,6 +9,9 @@ import {
   getAutoSyncMap,
   getConnection,
   getLastSyncMap,
+  getLastSyncRun,
+  getSyncHashMap,
+  getSyncSchedule,
   getTabStatus,
   getTabStatusMap,
   remove,
@@ -19,7 +22,10 @@ import {
   setAutoSync,
   setConnection,
   setLastSync,
+  setLastSyncRun,
   setLastVisit,
+  setSyncHash,
+  setSyncSchedule,
   setTabStatus,
   updateConnection,
 } from "../core/storage";
@@ -27,19 +33,35 @@ import type {
   CapturedPage,
   CollectionSession,
   KnownSiteStatus,
+  MessageSender,
   PtToolsConnection,
   SiteDetectedPayload,
   SiteInfo,
   StatusPayload,
+  SyncRunSummary,
+  SyncSchedule,
+  SyncSettingsView,
   TabSiteStatus,
   UnknownSiteStatus,
 } from "../core/types";
 import {
   PtToolsApiClient,
+  PtToolsApiError,
   checkCookieHealth,
   fetchWithTimeout,
   friendlyErrorMessage,
 } from "../modules/sync";
+import {
+  EMPTY_COOKIECLOUD_STATE,
+  cookieCloudView,
+  getCookieCloudConfig,
+  getCookieCloudState,
+  mergeCookieCloudInput,
+  setCookieCloudConfig,
+  setCookieCloudState,
+  testCookieCloud,
+  uploadToCookieCloud,
+} from "../modules/cookiecloud";
 import type { SiteLoginStateRecord } from "../modules/sync";
 import { autoCollect } from "../modules/collector/auto-collector";
 import { extractDomain, matchKnownSite } from "../utils";
@@ -48,6 +70,14 @@ import {
   createPendingActionPoller,
   isPendingActionArray,
 } from "./pending-actions";
+import {
+  AuthExpiredError,
+  DEFAULT_SYNC_SCHEDULE,
+  type ScheduledSyncDeps,
+  normalizeSchedule,
+  runSync,
+  sha256Hex,
+} from "./scheduled-sync";
 import { createTabGenerations } from "./tab-generation";
 
 interface MessageResponse<T> {
@@ -298,7 +328,14 @@ async function upsertCapturedPage(page: CapturedPage): Promise<void> {
   await publishStatus();
 }
 
-async function syncKnownSite(site: KnownSite): Promise<void> {
+/**
+ * syncKnownSite 把站点的 Cookie 推给 pt-tools，返回推了没有。skipUnchanged 时（自动同步）和上次推过的一样就不推：
+ * 每推一次 pt-tools 都会启用站点、刷新站点实例、做一次登录探测并重载调度器。手动同步总是推。
+ */
+async function syncKnownSite(
+  site: KnownSite,
+  opts: { skipUnchanged?: boolean } = {},
+): Promise<boolean> {
   if (site.syncField !== "cookie") {
     throw new Error(t("error.authSyncUnsupported", site.name, site.syncField));
   }
@@ -314,13 +351,20 @@ async function syncKnownSite(site: KnownSite): Promise<void> {
     throw new Error(t("error.cookieMissingCannotSync", site.name));
   }
 
+  const hash = await sha256Hex(health.cookieString);
+  if (opts.skipUnchanged && (await getSyncHashMap())[site.id] === hash) {
+    return false;
+  }
+
   const api = new PtToolsApiClient(baseUrl);
   await api.syncSiteCredential(site, health.cookieString);
 
   const syncedAt = new Date().toISOString();
   await setLastSync(site.id, syncedAt);
+  await setSyncHash(site.id, hash);
   // 请求期间用户可能在设置页换了地址：只在地址没变时更新连接状态，不把请求前读到的旧 connection 整个写回
   await updateConnection(baseUrl, { connected: true, lastSync: syncedAt });
+  return true;
 }
 
 async function maybeAutoSyncByDomain(domain: string): Promise<void> {
@@ -346,7 +390,9 @@ async function maybeAutoSyncByDomain(domain: string): Promise<void> {
   autoSyncThrottle.set(matched.id, now);
 
   try {
-    await syncKnownSite(matched);
+    if (!(await syncKnownSite(matched, { skipUnchanged: true }))) {
+      return;
+    }
     logger.info("Auto-sync completed", { siteId: matched.id });
     notifyAutoSync("success", matched.name, t("notification.autoSyncSuccessBody", matched.name));
     const [activeTab, map] = await Promise.all([getActiveTab(), getTabStatusMap()]);
@@ -593,6 +639,238 @@ onMessage("SYNC_COOKIES", async ({ baseUrl, username, password }) => {
   await publishStatus();
   return connection;
 });
+
+// ---- 定时同步与 CookieCloud（M22） ----
+// 逻辑在 ./scheduled-sync 与 modules/cookiecloud；这里接 chrome API、存储与网络。
+
+const SYNC_ALARM_NAME = "pt-tools-cookie-sync";
+
+async function getSchedule(): Promise<SyncSchedule> {
+  return normalizeSchedule((await getSyncSchedule()) ?? DEFAULT_SYNC_SCHEDULE);
+}
+
+/** applySyncSchedule 按设置建或删定时同步的 alarm；间隔没变时不重建（不打乱已经排好的下一次）。 */
+async function applySyncSchedule(schedule: SyncSchedule): Promise<void> {
+  const existing = await chrome.alarms.get(SYNC_ALARM_NAME);
+  if (!schedule.enabled) {
+    if (existing) {
+      await chrome.alarms.clear(SYNC_ALARM_NAME);
+    }
+    return;
+  }
+  if (existing?.periodInMinutes === schedule.intervalMinutes) {
+    return;
+  }
+  await chrome.alarms.create(SYNC_ALARM_NAME, {
+    delayInMinutes: schedule.intervalMinutes,
+    periodInMinutes: schedule.intervalMinutes,
+  });
+}
+
+function asAuthExpired(error: unknown): unknown {
+  return error instanceof PtToolsApiError && error.code === "auth_required"
+    ? new AuthExpiredError()
+    : error;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? friendlyErrorMessage(error.message) : String(error);
+}
+
+const scheduledSyncDeps: ScheduledSyncDeps = {
+  sites: KNOWN_SITES,
+  getSchedule,
+  getAutoSyncMap,
+  getHashMap: getSyncHashMap,
+  ptTools: async () => {
+    const connection = await getConnection();
+    const baseUrl = connection.baseUrl?.trim();
+    return connection.connected && baseUrl ? baseUrl : null;
+  },
+  enabledSites: async (baseUrl) => {
+    try {
+      const sites = await new PtToolsApiClient(baseUrl).getSites();
+      return sites.filter((site) => site.enabled).map((site) => site.name.toLowerCase());
+    } catch (error: unknown) {
+      throw asAuthExpired(error);
+    }
+  },
+  readCookie: async (site) => {
+    const health = await checkCookieHealth(site);
+    return health.status === "valid" || health.status === "expiring" ? health.cookieString : "";
+  },
+  pushCookie: async (baseUrl, site, cookie) => {
+    try {
+      await new PtToolsApiClient(baseUrl).syncSiteCredential(site, cookie);
+    } catch (error: unknown) {
+      throw asAuthExpired(error);
+    }
+  },
+  recordPushed: async (siteId, hash, at) => {
+    await setSyncHash(siteId, hash);
+    await setLastSync(siteId, at);
+  },
+  authExpired: async (baseUrl) => {
+    await updateConnection(baseUrl, { connected: false });
+    await clearPollAlarm();
+  },
+  getCookieCloudConfig,
+  getCookieCloudState,
+  saveCookieCloudState: setCookieCloudState,
+  upload: uploadToCookieCloud,
+  errorText,
+  now: () => new Date(),
+};
+
+/** problemsOf 是一轮同步里出的问题（给通知用），没有问题时为空串。 */
+function problemsOf(run: SyncRunSummary | null): string {
+  if (!run) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (run.ptTools.failed.length > 0) {
+    parts.push(
+      t(
+        "sync.problemPtTools",
+        run.ptTools.failed.length,
+        run.ptTools.failed.map((f) => f.error).join("; "),
+      ),
+    );
+  }
+  if (run.cookieCloud.error) {
+    parts.push(t("sync.problemCookieCloud", run.cookieCloud.error));
+  }
+  return parts.join("\n");
+}
+
+let syncInFlight: Promise<SyncRunSummary> | null = null;
+
+/** runScheduledSync 跑一轮定时同步（同一时间只跑一轮），记下结果；出了和上一轮不一样的问题时发一条通知。 */
+function runScheduledSync(trigger: SyncRunSummary["trigger"]): Promise<SyncRunSummary> {
+  if (syncInFlight) {
+    return syncInFlight;
+  }
+  syncInFlight = (async () => {
+    try {
+      const previous = await getLastSyncRun();
+      const summary = await runSync(scheduledSyncDeps, trigger);
+      await setLastSyncRun(summary);
+      const problems = problemsOf(summary);
+      if (trigger === "schedule" && problems && problems !== problemsOf(previous)) {
+        notifySyncProblem(problems);
+      }
+      return summary;
+    } finally {
+      syncInFlight = null;
+    }
+  })();
+  return syncInFlight;
+}
+
+function notifySyncProblem(body: string): void {
+  if (typeof chrome === "undefined" || !chrome.notifications?.create) {
+    return;
+  }
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: t("sync.problemTitle"),
+    message: body,
+    priority: 1,
+  });
+}
+
+/** requireExtensionPage 拒绝网页里的内容脚本发来的设置类消息：这些只在扩展的弹窗里改。 */
+function requireExtensionPage(sender: MessageSender): void {
+  if (sender.tabId !== undefined) {
+    throw new Error(t("error.extensionPageOnly"));
+  }
+}
+
+async function syncSettingsView(): Promise<SyncSettingsView> {
+  const [schedule, cfg, state, lastRun] = await Promise.all([
+    getSchedule(),
+    getCookieCloudConfig(),
+    getCookieCloudState(),
+    getLastSyncRun(),
+  ]);
+  return { schedule, cookieCloud: cookieCloudView(cfg, state), lastRun };
+}
+
+onMessage("GET_SYNC_SETTINGS", async (_payload, sender) => {
+  requireExtensionPage(sender);
+  return syncSettingsView();
+});
+
+onMessage("SAVE_SYNC_SCHEDULE", async (payload, sender) => {
+  requireExtensionPage(sender);
+  const schedule = normalizeSchedule(payload);
+  await setSyncSchedule(schedule);
+  await applySyncSchedule(schedule);
+  return syncSettingsView();
+});
+
+onMessage("RUN_SYNC_NOW", async (_payload, sender) => {
+  requireExtensionPage(sender);
+  await runScheduledSync("manual");
+  return syncSettingsView();
+});
+
+onMessage("SAVE_COOKIECLOUD", async (payload, sender) => {
+  requireExtensionPage(sender);
+  const current = await getCookieCloudConfig();
+  const next = mergeCookieCloudInput(payload, current);
+  await setCookieCloudConfig(next);
+  const changed =
+    next.serverUrl !== current.serverUrl ||
+    next.uuid !== current.uuid ||
+    next.password !== current.password ||
+    next.cryptoType !== current.cryptoType;
+  if (changed) {
+    // 换了服务地址、UUID、密码或加密方式：下一次定时同步重新上传
+    const state = (await getCookieCloudState()) ?? EMPTY_COOKIECLOUD_STATE;
+    await setCookieCloudState({ ...state, lastDigest: null, lastTarget: null });
+  }
+  return syncSettingsView();
+});
+
+onMessage("TEST_COOKIECLOUD", async (_payload, sender) => {
+  requireExtensionPage(sender);
+  return testCookieCloud(await getCookieCloudConfig());
+});
+
+onMessage("UPLOAD_COOKIECLOUD", async (payload, sender) => {
+  requireExtensionPage(sender);
+  const cfg = await getCookieCloudConfig();
+  const state = await getCookieCloudState();
+  try {
+    const { result, state: next } = await uploadToCookieCloud(cfg, state, {
+      force: true,
+      overwrite: payload?.overwrite === true,
+    });
+    await setCookieCloudState(next);
+    return { result, settings: await syncSettingsView() };
+  } catch (error: unknown) {
+    await setCookieCloudState({
+      ...(state ?? EMPTY_COOKIECLOUD_STATE),
+      lastError: errorText(error),
+      lastErrorAt: new Date().toISOString(),
+    });
+    throw error;
+  }
+});
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== SYNC_ALARM_NAME) {
+      return;
+    }
+    void runScheduledSync("schedule").catch((error: unknown) => {
+      logger.warn("scheduled sync failed", error);
+    });
+  });
+}
+// ---- end 定时同步与 CookieCloud ----
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   void (async () => {
@@ -850,6 +1128,7 @@ void (async () => {
   } else {
     await clearPollAlarm();
   }
+  await applySyncSchedule(await getSchedule());
   void STORAGE_KEYS.batchTabQueue;
   await remove(LEGACY_POLL_SINCE_KEY);
   const tab = await getActiveTab();

@@ -656,6 +656,12 @@ export const STORAGE_KEYS = {
   lastSyncMap: "pt_tools_last_sync_map",
   lastVisitMap: "pt_tools_last_visit_map",
   batchTabQueue: "pt_tools_batch_tab_queue",
+  // 定时同步与 CookieCloud（M22）
+  syncSchedule: "pt_tools_sync_schedule",
+  syncHashMap: "pt_tools_sync_hash_map",
+  syncRun: "pt_tools_sync_run",
+  cookieCloudConfig: "pt_tools_cookiecloud_config",
+  cookieCloudState: "pt_tools_cookiecloud_state",
 } as const;
 
 /**

@@ -1,5 +1,11 @@
 import { STORAGE_KEYS } from "./constants";
-import type { CollectionSession, PtToolsConnection, TabSiteStatus } from "./types";
+import type {
+  CollectionSession,
+  PtToolsConnection,
+  SyncRunSummary,
+  SyncSchedule,
+  TabSiteStatus,
+} from "./types";
 
 const DEFAULT_CONNECTION: PtToolsConnection = {
   baseUrl: "http://localhost:8080",
@@ -207,4 +213,34 @@ export async function setLastVisit(siteId: string, ts: number | string): Promise
     ...map,
     [siteId]: iso,
   }));
+}
+
+// ---- 定时同步与 CookieCloud（M22） ----
+
+export async function getSyncSchedule(): Promise<SyncSchedule | null> {
+  return get<SyncSchedule>(STORAGE_KEYS.syncSchedule);
+}
+
+export async function setSyncSchedule(schedule: SyncSchedule): Promise<void> {
+  await updateKey<SyncSchedule>(STORAGE_KEYS.syncSchedule, () => schedule);
+}
+
+/** getSyncHashMap 是各站点上次推给 pt-tools 的 Cookie 的指纹（SHA-256，不是 Cookie 本身）。 */
+export async function getSyncHashMap(): Promise<Record<string, string>> {
+  return (await get<Record<string, string>>(STORAGE_KEYS.syncHashMap)) ?? {};
+}
+
+export async function setSyncHash(siteId: string, hash: string): Promise<void> {
+  await updateKey<Record<string, string>>(STORAGE_KEYS.syncHashMap, (map) => ({
+    ...map,
+    [siteId]: hash,
+  }));
+}
+
+export async function getLastSyncRun(): Promise<SyncRunSummary | null> {
+  return get<SyncRunSummary>(STORAGE_KEYS.syncRun);
+}
+
+export async function setLastSyncRun(run: SyncRunSummary): Promise<void> {
+  await updateKey<SyncRunSummary>(STORAGE_KEYS.syncRun, () => run);
 }
