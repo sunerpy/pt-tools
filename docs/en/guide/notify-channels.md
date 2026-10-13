@@ -71,7 +71,7 @@ Topics on the public `ntfy.sh` server have no password, and anyone who knows the
 
 ## Message templates
 
-You can write your own title and body for each kind of notification, and every notification channel (QQ, Telegram, the group bots, Bark and the others) sends it that way. In ChatOps → Message templates (消息模板), pick an event, fill in Title template (标题模板) or Body template (正文模板), and click Save (保存). A field left empty uses the built-in text; Restore default (恢复默认) goes back to the built-in wording.
+You can write your own title and body for each kind of notification, and every notification channel (QQ, Telegram, the group bots, Bark and the others) sends it that way. In ChatOps → Message templates (消息模板), pick an event, fill in Title template (标题模板) or Body template (正文模板), and click Save (保存). A field left empty uses the built-in text; Restore default (恢复默认) goes back to the built-in wording. Replies to ChatOps commands and the messages the AI assistant sends in a channel can be changed too; see [Command and AI assistant replies](#command-and-ai-assistant-replies) below.
 
 Templates use Go template syntax: a variable is written like `.site` inside two pairs of curly braces and is replaced by its value; `if` is a condition and `range` loops over a list. Variables (变量) on the page lists every variable the event has, and clicking one inserts it at the cursor; Preview (预览（示例数据）) renders the template with sample data as you type; Built-in (内置的样子) shows what is sent when you change nothing.
 
@@ -123,7 +123,44 @@ Functions: the comparisons `eq`, `ne`, `lt`, `le`, `gt` and `ge` (integers and d
 
 Saving renders the template once with sample data: a misspelled variable or a syntax error is not saved, and the message says which line is wrong. So that templates cannot slow notifications down, there are a few limits: `range` only loops over list variables, at most two levels deep, and a two-level loop can only hold a few simple actions; a template can declare up to 64 variables; a template can be up to 8 KB; a rendered title up to 1 KB and a body up to 16 KB; `printf` widths and precisions go up to 256, without the `*` and `[n]` forms; a function's arguments together, and its result, can be up to 64 KB, and all the function calls in one render can handle up to 4 MB in total. If rendering still fails when sending, or produces nothing, that notification goes out with the built-in text, so a broken template never stops notifications.
 
-Templates change notifications only, not the replies to ChatOps commands or from the AI assistant. Telegram messages are sent as plain text, so HTML or Markdown in a template shows up as written.
+Telegram messages are sent as plain text, so HTML or Markdown in a template shows up as written.
+
+### Command and AI assistant replies
+
+What pt-tools replies when you send a command in Telegram, QQ and the other channels, and the messages the AI assistant sends there, can be rewritten with templates as well. They are in the ChatOps command replies (ChatOps 命令回复) and AI assistant replies (AI 助手回复) groups on the Message templates page and have a body template only. A reply goes back only to the channel the message came from, so a webhook never receives it; one template applies to every binding, whatever its reply language.
+
+| Event                          | Used for                                                                                                                 | Main variables                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reply.status` status overview | `/status`                                                                                                                | `tasks`, `running`, `items` (each downloader: `name`, `type`, `healthy`)                                                                                                          |
+| `reply.torrents` torrent list  | `/torrents <downloader>`                                                                                                 | `downloader`, `total`, `items` (up to 20: `name`, `state`, `progress`, `size`, `size_bytes`), `items_more`                                                                        |
+| `reply.sites` site list        | `/sites`                                                                                                                 | `count`, `items` (`name`, `status`, `enabled`)                                                                                                                                    |
+| `reply.site_info` user info    | `/sites <site>`                                                                                                          | `site`, `user`, `uploaded`, `downloaded`, `uploaded_bytes`, `downloaded_bytes`, `ratio`, `bonus`, `class`                                                                         |
+| `reply.tasks` RSS jobs         | `/tasks`                                                                                                                 | `count`, `running`, `items` (`site`, `rss`, `state`)                                                                                                                              |
+| `reply.signin` sign-in         | `/signin`                                                                                                                | `signed`, `failed`, `items` (`site`, `status`, `status_label`, `message`)                                                                                                         |
+| `reply.version` version        | `/version`                                                                                                               | `version`, `build`, `commit`, `update_checked`, `has_update`, `latest`                                                                                                            |
+| `reply.help` command list      | `/help`                                                                                                                  | `items` (`name`, `description`, `admin`)                                                                                                                                          |
+| `reply.subs` subscriptions     | `/subs`                                                                                                                  | `count`, `items` (up to 20: `title`, `status`, `progress`), `items_more`                                                                                                          |
+| `reply.other` other replies    | everything else: results of the other commands, failed commands, and the not bound / not allowed / unknown command hints | `command` (the command name without `/`), `ok` (whether it worked)                                                                                                                |
+| `assistant.reply` AI assistant | messages from the AI assistant                                                                                           | `kind` (`answer`, `notice`, `confirm` for an action to confirm, `timeout` for a confirmation that timed out, `status` for the immediate reply to a message), `summary`, `expires` |
+
+The common variable `text` is the built-in reply, and `event`, `time` and the rest work as usual; replies have no title, so `title` is empty. When a command does not work (bad arguments, a service that is not available, an error), the reply uses `reply.other` with `ok` set to false, including the query commands above.
+
+Examples: mark the replies that did not work, list only the downloaders `/status` cannot reach, and put "🤖" in front of the assistant's answers while leaving its other messages alone.
+
+```text
+{{if not .ok}}❌ {{end}}{{.text}}
+```
+
+```text
+{{.running}}/{{.tasks}} RSS jobs running{{range .items}}{{if not .healthy}}
+⚠️ {{.name}} is unreachable{{end}}{{end}}
+```
+
+```text
+{{if eq .kind "answer"}}🤖 {{end}}{{.text}}
+```
+
+The assistant's answer goes through the template before it is split into several messages (up to 4 when it is long), so a header or footer the template adds appears once. The body of a command or assistant reply can be up to 64 KB; the other limits are the same as for notifications, and a reply whose template fails or renders empty is sent with the built-in text.
 
 ## Custom webhook
 
