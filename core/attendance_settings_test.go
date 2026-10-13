@@ -11,7 +11,7 @@ import (
 
 // M1c：签到开关只写这一列；保存站点配置（整行读出再写回）不会把它清掉。
 func TestSetSiteAttendanceEnabled_SurvivesSiteConfigSave(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	enabled := true
@@ -36,7 +36,7 @@ func TestSetSiteAttendanceEnabled_SurvivesSiteConfigSave(t *testing.T) {
 
 // M1c：签到时间窗默认 08:00–10:00；只接受 HH:MM 且开始早于结束；保存全局设置不会改动它。
 func TestAttendanceWindow_DefaultsAndValidation(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 
@@ -66,7 +66,7 @@ func TestAttendanceWindow_DefaultsAndValidation(t *testing.T) {
 }
 
 func TestAttendanceSettings_StoredValuesAndErrors(t *testing.T) {
-	db, err := NewTempDBDir(t.TempDir())
+	db, err := OpenTestDB(t)
 	require.NoError(t, err)
 	s := NewConfigStore(db)
 	require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 10}))

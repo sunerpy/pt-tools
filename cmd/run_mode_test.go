@@ -12,7 +12,7 @@ import (
 )
 
 func TestRunSingle_Path(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	store := core.NewConfigStore(db)
@@ -21,7 +21,7 @@ func TestRunSingle_Path(t *testing.T) {
 }
 
 func TestRunPersistent_EarlyReturn(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	// empty download dir triggers early return path

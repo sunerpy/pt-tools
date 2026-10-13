@@ -72,7 +72,7 @@ func migrateChatOpsTablesForTest(t *testing.T, db *models.TorrentDB) {
 // TestCmdWeb_StartsWithDisabledChatOps verifies that bootstrapChatOps runs
 // cleanly when no NotificationConf rows exist (disabled chatops).
 func TestCmdWeb_StartsWithDisabledChatOps(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	migrateChatOpsTablesForTest(t, db)
 	global.GlobalDB = db
@@ -105,7 +105,7 @@ func TestCmdWeb_StartsWithDisabledChatOps(t *testing.T) {
 // the failure must be logged and the channel marked disabled, never panic
 // or block the boot.
 func TestCmdWeb_StartsWithEnabledTelegramConf_NoCrash(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	migrateChatOpsTablesForTest(t, db)
 	global.GlobalDB = db

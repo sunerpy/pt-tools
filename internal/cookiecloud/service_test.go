@@ -57,6 +57,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.CookieCloudSetting{}))
 	e := &env{
 		t: t, db: db, now: time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC),

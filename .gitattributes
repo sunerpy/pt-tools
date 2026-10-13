@@ -1,0 +1,8 @@
+# 文本文件在任何系统上都按 LF 检出。Windows 上的 git 默认把 LF 换成 CRLF，
+# 测试逐字节比对的样本（testdata、golden、协议向量）就对不上了（#542）。
+* text=auto eol=lf
+
+# Windows 的脚本保留 CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

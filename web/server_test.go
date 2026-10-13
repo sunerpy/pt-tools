@@ -664,7 +664,11 @@ func TestApiFilterRuleHits(t *testing.T) {
 // 日志目录还不存在时（一条日志都没写过）要回空清单而不是 500。
 func TestApiLogFiles_MissingDir(t *testing.T) {
 	srv := setupServer(t)
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 
 	w := httptest.NewRecorder()
 	srv.apiLogFiles(w, httptest.NewRequest(http.MethodGet, "/api/logs/files", nil))
@@ -694,6 +698,7 @@ func TestApiLogFiles_BothBranchesReturnSameShape(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
 			if tc.makeDir {
 				require.NoError(t, os.MkdirAll(filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory), 0o755))
 			}
@@ -722,6 +727,7 @@ func TestApiLogFiles_ListsRotated(t *testing.T) {
 	srv := setupServer(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
@@ -947,6 +953,7 @@ func TestApiStopStartAll(t *testing.T) {
 func TestApiLogs_Error(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	srv := &Server{}
 
 	w := httptest.NewRecorder()
@@ -1433,7 +1440,7 @@ func TestApiSites_DeleteError(t *testing.T) {
 
 // ==== merged from server_test.go ====
 func setupServer(t *testing.T) *Server {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -1478,6 +1485,7 @@ func writeWebTestSecretKey(t *testing.T) {
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	keyDir := filepath.Join(homeDir, ".pt-tools")
 	require.NoError(t, os.MkdirAll(keyDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(keyDir, "secret.key"), []byte(strings.Repeat("b", 64)), 0o600))
@@ -1616,7 +1624,7 @@ func TestServer_APIs(t *testing.T) {
 		rr := httptest.NewRecorder()
 		// enable autostart to hit reload path
 		require.NoError(t, s.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true, AutoStart: true}))
-		body := bytes.NewBufferString(`{"download_dir":"` + t.TempDir() + `","default_interval_minutes":5}`)
+		body := bytes.NewBufferString(`{"download_dir":` + jsonPath(t.TempDir()) + `,"default_interval_minutes":5}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/global", body)
 		srv.apiGlobal(rr, req)
 		assert.True(t, rr.Code == http.StatusOK || rr.Code == 0)
@@ -1719,7 +1727,7 @@ func TestServer_APIs(t *testing.T) {
 	})
 	t.Run("start all cfg not ready", func(t *testing.T) {
 		// use isolated DB and seed empty download dir to trigger BadRequest
-		db, _ := core.NewTempDBDir(t.TempDir())
+		db, _ := core.OpenTestDB(t)
 		store := core.NewConfigStore(db)
 		_ = db.DB.Create(&models.SettingsGlobal{DownloadDir: ""}).Error
 		srv2 := NewServer(store, newTestManager(t))
@@ -1791,6 +1799,7 @@ func TestServer_APIs(t *testing.T) {
 	t.Run("logs no file", func(t *testing.T) {
 		// change home dir env to non-existent path to trigger error
 		t.Setenv("HOME", t.TempDir()+"/noexist")
+		t.Setenv("USERPROFILE", t.TempDir()+"/noexist")
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
 		srv.apiLogs(rr, req)
@@ -1800,6 +1809,7 @@ func TestServer_APIs(t *testing.T) {
 		// prepare large log file under HOME/pt-tools/logs/all.log
 		home := t.TempDir()
 		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
 		p := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 		require.NoError(t, os.MkdirAll(p, 0o755))
 		f := filepath.Join(p, "all.log")
@@ -1895,7 +1905,7 @@ func TestServer_APIs(t *testing.T) {
 		assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
 	})
 	t.Run("start all success when ready", func(t *testing.T) {
-		db, _ := core.NewTempDBDir(t.TempDir())
+		db, _ := core.OpenTestDB(t)
 		store := core.NewConfigStore(db)
 		_ = store.SaveGlobalSettings(models.SettingsGlobal{DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1, DefaultEnabled: true})
 		srv2 := NewServer(store, newTestManager(t))
@@ -1907,7 +1917,7 @@ func TestServer_APIs(t *testing.T) {
 }
 
 func TestServe_RootRedirectAndStatic(t *testing.T) {
-	db, _ := core.NewTempDBDir(t.TempDir())
+	db, _ := core.OpenTestDB(t)
 	global.InitLogger(zap.NewNop())
 	srv := NewServer(core.NewConfigStore(db), newTestManager(t))
 	mux := http.NewServeMux()
@@ -2208,7 +2218,7 @@ func TestLoginHandler_MethodNotAllowed(t *testing.T) {
 // TestLoginHandler_AutoCreateAdmin 测试自动创建管理员
 func TestLoginHandler_AutoCreateAdmin(t *testing.T) {
 	// 使用新的数据库，确保没有管理员
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	srv := NewServer(core.NewConfigStore(db), newTestManager(t))
@@ -2424,6 +2434,7 @@ func TestApiLogFiles_BaseFilesAreNotRotated(t *testing.T) {
 	srv := setupServer(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	dir := filepath.Join(home, models.WorkDir, config.DefaultZapConfig.Directory)
 	require.NoError(t, os.MkdirAll(dir, 0o755))

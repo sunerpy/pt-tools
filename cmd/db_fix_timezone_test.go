@@ -21,7 +21,7 @@ import (
 func prepareRuntimeDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	return db

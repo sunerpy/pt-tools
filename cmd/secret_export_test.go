@@ -14,6 +14,7 @@ import (
 func TestRunSecretExport_Success(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	// crypto.ExportKey reads the process key; force it to load from a fresh
 	// key file by clearing the env override and writing a hex-encoded key.
 	t.Setenv("PT_TOOLS_SECRET_KEY", "0123456789abcdef0123456789abcdef")

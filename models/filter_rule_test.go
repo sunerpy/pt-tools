@@ -24,6 +24,7 @@ func setupFilterRuleTestDB(t *testing.T) (*TorrentDB, func()) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 
 	// Migrate the FilterRule table
 	err = db.AutoMigrate(&FilterRule{})

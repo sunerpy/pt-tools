@@ -10,7 +10,7 @@ import (
 )
 
 func TestTaskCmd_BasicUsage(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	// just invoke Run path

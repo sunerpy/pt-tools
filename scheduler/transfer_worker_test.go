@@ -23,6 +23,7 @@ func newTransferWorkerForTest(t *testing.T, now time.Time) (*TransferWorker, *go
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "w.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.TorrentTransferJob{}, &models.DownloaderPathMap{}, &models.TransferRule{}, &models.TorrentInfo{}))
 	src, dst := newSchedFakeDownloader("src"), newSchedFakeDownloader("dst")
 	clock := sitelogin.NewFakeClock(now)

@@ -161,7 +161,7 @@ func TestOrganizeAPI_SettingsLibrariesMapsServers(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"error"`)
 
-	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":"`+e.library+`","enabled":true}`)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var lib organize.LibraryView
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &lib))
@@ -173,10 +173,10 @@ func TestOrganizeAPI_SettingsLibrariesMapsServers(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"effective_template"`)
 
-	w = serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":"`+e.dlDir+`"}`)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":`+jsonPath(e.dlDir)+`}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, http.StatusBadRequest, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":5,"downloader_prefix":"/x","local_prefix":"/y"}`).Code)
-	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/check", `{"path":"`+e.library+`"}`)
+	w = serveAuthed(e.mux, http.MethodPost, "/api/media/libraries/check", `{"path":`+jsonPath(e.library)+`}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"name":"库目录可写","ok":true`)
 
@@ -210,7 +210,7 @@ func TestOrganizeAPI_SettingsLibrariesMapsServers(t *testing.T) {
 
 func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 	e := newOrganizeServer(t)
-	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":"`+e.library+`","enabled":true}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/libraries", `{"name":"电影","kind":"movie","path":`+jsonPath(e.library)+`,"enabled":true}`).Code)
 	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPut, "/api/media/organize/settings", `{"min_video_mb":1}`).Code)
 
 	// 没有路径映射：找不到文件
@@ -218,7 +218,7 @@ func TestOrganizeAPI_PreviewOrganizeHistory(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "路径映射")
 
-	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":"`+e.dlDir+`"}`).Code)
+	require.Equal(t, http.StatusOK, serveAuthed(e.mux, http.MethodPost, "/api/media/path-maps", `{"downloader_id":1,"downloader_prefix":"/downloads","local_prefix":`+jsonPath(e.dlDir)+`}`).Code)
 	w = serveAuthed(e.mux, http.MethodPost, "/api/media/organize/preview", `{"downloader_id":1,"hash":"hash1"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var plan organize.Plan

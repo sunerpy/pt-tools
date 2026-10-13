@@ -29,6 +29,7 @@ import (
 func TestCookieCloudWorker_SyncsWhenDue(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.CookieCloudSetting{}))
 	hits := make(chan string, 10)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +94,7 @@ func encryptFixedForTest(t *testing.T, uuid, password string, plain []byte) stri
 func TestCookieCloudWorker_StopAllWhileApplying(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "c.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.CookieCloudSetting{}))
 	enc := encryptFixedForTest(t, "u1", "pw", []byte(`{"cookie_data":{"hdsky.me":[{"name":"uid","value":"1","domain":".hdsky.me","path":"/"}]}}`))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

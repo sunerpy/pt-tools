@@ -68,7 +68,7 @@ func TestBuildLoginStateResponse_EffectiveSourceNoneWithoutData(t *testing.T) {
 
 // M1a 问题 4：扩展随凭证同步上报的 last_visit_at 只前进不后退，非法值被忽略，扩展实际发送的毫秒格式也能解析。
 func TestRecordExtensionVisit_OnlyMovesForward(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.AutoMigrate(&models.SiteLoginState{}))
 	prev := global.GlobalDB

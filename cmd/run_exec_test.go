@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -23,14 +24,19 @@ import (
 // terminate; repeated SIGTERMs then reach runCmdFunc's handler, cancel its ctx,
 // and genTorrentsWithRSS returns cleanly.
 func TestRunCmdFunc_PersistentSignalExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows 上进程发不了 SIGTERM 给自己（os.Process.Signal 只支持 Kill）：持续运行的 runCmdFunc 停不下来，
+		// 还会一直拿着单实例锁，让后面的测试以为已有实例在运行
+		t.Skip("Windows 上没法给自己发 SIGTERM")
+	}
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
 		DownloadDir: t.TempDir(), DefaultIntervalMinutes: 1,
 	}))
-	_ = os.Remove("/tmp/pt-tools.lock")
+	_ = os.Remove(runLockPath())
 
 	guard := make(chan os.Signal, 4)
 	signal.Notify(guard, syscall.SIGTERM)
@@ -65,7 +71,7 @@ func TestRunCmdFunc_PersistentSignalExit(t *testing.T) {
 // reached on error, so the happy path returns normally.
 func TestRunCmdFunc_SingleSuccess(t *testing.T) {
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{
@@ -73,7 +79,7 @@ func TestRunCmdFunc_SingleSuccess(t *testing.T) {
 	}))
 
 	// Remove any stale lock so Lock() succeeds in this process.
-	_ = os.Remove("/tmp/pt-tools.lock")
+	_ = os.Remove(runLockPath())
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("mode", "single", "")

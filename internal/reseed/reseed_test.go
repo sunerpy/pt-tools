@@ -160,6 +160,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "r.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	require.NoError(t, db.AutoMigrate(&models.ReseedSetting{}, &models.ReseedRecord{}, &models.TorrentTransferJob{},
 		&models.TorrentInfo{}, &models.DownloaderSetting{}, &models.DownloaderPathMap{}, &models.TransferRule{}))
 	require.NoError(t, db.Create(&models.DownloaderSetting{ID: 1, Name: "qb", Type: "qbittorrent", URL: "http://x", Enabled: true}).Error)

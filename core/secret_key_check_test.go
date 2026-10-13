@@ -21,6 +21,7 @@ func keyTestHome(t *testing.T, keyFileContent []byte) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	if keyFileContent != nil {
 		dir := filepath.Join(home, ".pt-tools")

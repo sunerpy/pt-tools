@@ -834,7 +834,7 @@ func TestScheduleTaskLocked_PastDeadlineFires(t *testing.T) {
 
 func setupTestDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())

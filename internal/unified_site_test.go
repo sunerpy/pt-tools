@@ -29,7 +29,7 @@ import (
 )
 
 func TestUnifiedSiteImpl_CMCT_IsEnabledAndFields(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -63,7 +63,7 @@ func TestUnifiedSiteImpl_CMCT_IsEnabledAndFields(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_CMCT_DownloadTorrentAndContext(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -87,7 +87,7 @@ func TestUnifiedSiteImpl_CMCT_DownloadTorrentAndContext(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_CMCT_SendTorrentToDownloader(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -347,7 +347,7 @@ func TestGetTorrentDetails_Disabled(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_HDSKY_IsEnabledAndFields(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -382,7 +382,7 @@ func TestUnifiedSiteImpl_HDSKY_IsEnabledAndFields(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_HDSKY_DownloadTorrent(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -403,7 +403,7 @@ func TestUnifiedSiteImpl_HDSKY_DownloadTorrent(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_HDSKY_ContextGetter(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -416,7 +416,7 @@ func TestUnifiedSiteImpl_HDSKY_ContextGetter(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_HDSKY_SendTorrentToDownloader(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.InitLogger(zap.NewNop())
 	global.GlobalDB = db
@@ -478,7 +478,7 @@ func TestUnifiedSiteImpl_HDSKY_SendTorrentToDownloader(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_MTEAM_DownloadTorrentAndContext(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -502,7 +502,7 @@ func TestUnifiedSiteImpl_MTEAM_DownloadTorrentAndContext(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_MTEAM_IsEnabled(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -515,7 +515,7 @@ func TestUnifiedSiteImpl_MTEAM_IsEnabled(t *testing.T) {
 }
 
 func TestUnifiedSiteImpl_MTEAM_SendTorrentToDownloader_WithStub(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -579,7 +579,7 @@ func TestUnifiedSiteImpl_MTEAM_SendTorrentToDownloader_WithStub(t *testing.T) {
 
 // TestNewUnifiedSiteImpl_MTEAM 测试创建 UnifiedSiteImpl for MTEAM
 func TestNewUnifiedSiteImpl_MTEAM(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -592,7 +592,7 @@ func TestNewUnifiedSiteImpl_MTEAM(t *testing.T) {
 
 // TestUnifiedSiteImpl_MTEAM_MaxRetries 测试最大重试次数
 func TestUnifiedSiteImpl_MTEAM_MaxRetries(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())
@@ -603,7 +603,7 @@ func TestUnifiedSiteImpl_MTEAM_MaxRetries(t *testing.T) {
 
 // TestUnifiedSiteImpl_MTEAM_RetryDelay 测试重试延迟
 func TestUnifiedSiteImpl_MTEAM_RetryDelay(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())

@@ -29,6 +29,7 @@ func setupServiceTestDB(t *testing.T) (*gorm.DB, func()) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 
 	err = db.AutoMigrate(&models.FilterRule{})
 	require.NoError(t, err)
@@ -786,6 +787,7 @@ func setupServiceTestDBWithAssociations(t *testing.T) (*gorm.DB, func()) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 
 	err = db.AutoMigrate(&models.FilterRule{}, &models.RSSSubscription{}, &models.RSSFilterAssociation{})
 	require.NoError(t, err)

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"sync"
 	"syscall"
 	"testing"
@@ -37,6 +38,9 @@ func freeTCPPort(t *testing.T) int {
 // tears everything down and Serve returns. Version checking is pointed at a
 // blackhole proxy so no real external network egress occurs.
 func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 上进程发不了 SIGTERM 给自己（os.Process.Signal 只支持 Kill）")
+	}
 	// Blackhole any outbound version-check HTTP so the background goroutine
 	// fails fast instead of reaching GitHub.
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
@@ -48,7 +52,7 @@ func TestWebCmdRun_StartAndGracefulShutdown(t *testing.T) {
 	// temp DB (incl. chatops + userinfo tables) so bootstrapChatOps succeeds
 	// and the bs != nil wiring branch is exercised.
 	_, _ = core.InitRuntime()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	require.NoError(t, db.DB.AutoMigrate(
 		&models.NotificationConf{},

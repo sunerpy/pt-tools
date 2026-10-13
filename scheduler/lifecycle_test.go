@@ -31,7 +31,7 @@ func TestManager_StopWaitsForJobStartedJustBefore(t *testing.T) {
 
 func setupLifecycleDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())

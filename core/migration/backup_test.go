@@ -171,6 +171,7 @@ func TestDumpTableJSONNonExistentTable(t *testing.T) {
 func TestDumpTableJSON_DefaultDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)

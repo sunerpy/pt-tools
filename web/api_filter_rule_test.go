@@ -74,6 +74,7 @@ func TestApiSiteTemplateImport_CookieEncryptError(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.SiteTemplate{}, &models.SiteSetting{}))
 	t.Setenv("PT_TOOLS_SECRET_KEY", "")
 	t.Setenv("HOME", t.TempDir()+"/nonexistent-home")
+	t.Setenv("USERPROFILE", t.TempDir()+"/nonexistent-home")
 
 	tpl := models.SiteTemplateExport{Name: "encfail", AuthMethod: "cookie", BaseURL: "https://e.example.com"}
 	tplBytes, _ := json.Marshal(tpl)
@@ -650,6 +651,7 @@ func setupFilterRuleTestServer(t *testing.T) (*Server, func()) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 
 	// Migrate tables
 	err = db.AutoMigrate(&models.FilterRule{}, &models.TorrentInfo{}, &models.SiteSetting{})

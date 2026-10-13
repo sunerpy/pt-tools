@@ -95,6 +95,7 @@ func newTestDB(t testing.TB) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.Join(t.TempDir(), "remote.db")), &gorm.Config{})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 	// 和生产一样只用一条连接（models 里 SQLite 是单连接、串行写）
 	sqlDB, err := db.DB()
 	require.NoError(t, err)

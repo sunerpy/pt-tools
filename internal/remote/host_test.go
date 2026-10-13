@@ -375,7 +375,18 @@ func TestRequestBodyLimits(t *testing.T) {
 	assert.Equal(t, http.StatusOK, statusOf(a))
 	assert.Len(t, th.disp.last().Body, 9<<20)
 
-	// 处理完以后额度还回来了
+	// 处理完以后额度还回来了。回应头先到，额度在处理函数返回以后才还，先等它还回来（慢的机器上会差一拍，#542）
+	require.Eventually(t, func() bool {
+		for _, s := range th.sessions.matching(func(*session) bool { return true }) {
+			s.mu.Lock()
+			n := s.buffered
+			s.mu.Unlock()
+			if n != 0 {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 5*time.Millisecond, "请求处理完以后额度没有还回来")
 	ok := register(204)
 	sendBody(204, 9<<20)
 	require.NoError(t, c.conn.WriteFrame(ctx, Frame{Type: FrameReqEnd, ID: 204}))

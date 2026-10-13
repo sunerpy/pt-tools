@@ -12,7 +12,11 @@ import (
 )
 
 func TestNewDB_InitializesAndMigrates(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 	lg := zapgorm2.Logger{ZapLogger: zap.NewNop()}
 	db, err := NewDB(lg)
 	if err != nil {
@@ -21,6 +25,7 @@ func TestNewDB_InitializesAndMigrates(t *testing.T) {
 	if db == nil || db.DB == nil {
 		t.Fatalf("db nil")
 	}
+	t.Cleanup(func() { closeTestGorm(db.DB) })
 }
 
 func TestTorrentInfo_GetExpired_IsExpiredFlag(t *testing.T) {
@@ -29,7 +34,11 @@ func TestTorrentInfo_GetExpired_IsExpiredFlag(t *testing.T) {
 }
 
 func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	{
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 
 	backup := func(db *gorm.DB, table string) (string, error) { return "backup/" + table, nil }
 	enc := func(plain string) (string, error) { return "enc:" + plain, nil }
@@ -38,6 +47,7 @@ func TestNewDBWithVersionAndHooks_PersistsTorrent(t *testing.T) {
 	tdb, err := NewDBWithVersionAndHooks(zapNopGormLogger(), "2.0.0", backup, enc, dec)
 	require.NoError(t, err)
 	require.NotNil(t, tdb)
+	t.Cleanup(func() { closeTestGorm(tdb.DB) })
 
 	require.NoError(t, tdb.UpsertTorrent(&TorrentInfo{SiteName: "hdsky", TorrentID: "abc", IsFree: true}))
 	got, err := tdb.GetTorrentBySiteAndID("hdsky", "abc")

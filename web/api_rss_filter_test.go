@@ -78,7 +78,7 @@ func TestApiRSSFilterAssociation_Router(t *testing.T) {
 func setupTestDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	global.InitLogger(zap.NewNop())

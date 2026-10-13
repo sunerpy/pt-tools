@@ -572,7 +572,7 @@ func TestAddrssShortcutInvalidShowsExample(t *testing.T) {
 
 func setupAddrssGlobalDB(t *testing.T) *models.TorrentDB {
 	t.Helper()
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	prev := global.GlobalDB
 	global.GlobalDB = db

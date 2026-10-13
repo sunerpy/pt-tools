@@ -24,6 +24,7 @@ func setupRSSFilterAssociationTestDB(t *testing.T) (*gorm.DB, func()) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { closeTestGorm(db) })
 
 	// Migrate the required tables
 	err = db.AutoMigrate(&FilterRule{}, &RSSSubscription{}, &RSSFilterAssociation{})

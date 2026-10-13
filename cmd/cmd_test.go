@@ -15,7 +15,7 @@ import (
 )
 
 func setupCmdTest(t *testing.T) {
-	db, err := core.NewTempDBDir(t.TempDir())
+	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
 	global.GlobalDB = db
 }
@@ -37,7 +37,8 @@ func TestRootHasWebSubcommand(t *testing.T) {
 
 func TestConfigInit_CreatesDirs(t *testing.T) {
 	home := t.TempDir()
-	os.Setenv("HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, models.WorkDir)
 	require.NoError(t, chekcAndInitDownloadPath(dir))
 	// verify created paths
@@ -54,7 +55,7 @@ func TestVersionCmd_Prints(t *testing.T) {
 
 func TestRunCmdFunc_ModeSwitchAndInvalid(t *testing.T) {
 	dir := t.TempDir()
-	db, err := core.NewTempDBDir(dir)
+	db, err := core.OpenTestDBIn(t, dir)
 	require.NoError(t, err)
 	global.GlobalDB = db
 	require.NoError(t, core.NewConfigStore(db).SaveGlobalSettings(models.SettingsGlobal{DownloadDir: dir, DefaultIntervalMinutes: 1, DefaultEnabled: true}))
@@ -83,6 +84,7 @@ func TestBackupCmd_Run(t *testing.T) {
 func TestInitConfigAndDBFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	initConfigAndDBFile(&cobra.Command{}, []string{})
 }
 
