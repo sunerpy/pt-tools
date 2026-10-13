@@ -52,6 +52,7 @@ import {
   friendlyErrorMessage,
 } from "../modules/sync";
 import {
+  CookieCloudError,
   EMPTY_COOKIECLOUD_STATE,
   cookieCloudView,
   getCookieCloudConfig,
@@ -856,6 +857,14 @@ onMessage("UPLOAD_COOKIECLOUD", async (payload, sender) => {
       lastError: errorText(error),
       lastErrorAt: new Date().toISOString(),
     });
+    if (
+      error instanceof CookieCloudError &&
+      error.code === "decrypt" &&
+      payload?.overwrite !== true
+    ) {
+      // 让弹窗问用户要不要覆盖（改过密码时）；不是错误，不抛
+      return { needsOverwrite: true, message: error.message, settings: await syncSettingsView() };
+    }
     throw error;
   }
 });

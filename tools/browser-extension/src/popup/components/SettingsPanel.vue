@@ -4,6 +4,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { t } from "../../core/i18n";
 import CookieStatus from "./CookieStatus.vue";
 import SiteLoginStatusPanel from "./SiteLoginStatusPanel.vue";
+import SyncSettings from "./SyncSettings.vue";
 import type { KnownSiteStatus, PtToolsConnection } from "../../core/types";
 
 const props = defineProps<{
@@ -213,6 +214,8 @@ function cancelBatchSync(): void {
         打开站点页面可保号（含 M-Team 等 API Key 站点，保号需浏览器登录）。
       </p>
     </div>
+
+    <SyncSettings />
 
     <div class="update-section">
       <button

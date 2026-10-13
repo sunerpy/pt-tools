@@ -2,6 +2,7 @@
  * CookieCloud 设置与上传状态的存储（chrome.storage.local，只由 background 写）。
  * 密码和 CookieCloud 扩展一样存在扩展的本地存储里；弹窗只拿得到「有没有设置」，拿不到密码本身。
  */
+import { t } from "../../core/i18n";
 import { STORAGE_KEYS } from "../../core/constants";
 import { get, updateKey } from "../../core/storage";
 import type { CookieCloudSettingsView } from "../../core/types";
@@ -62,14 +63,14 @@ export function cookieCloudView(
  */
 export function mergeCookieCloudInput(raw: unknown, current: CookieCloudConfig): CookieCloudConfig {
   if (typeof raw !== "object" || raw === null) {
-    throw new CookieCloudError("not_configured", "设置的格式不对");
+    throw new CookieCloudError("not_configured", t("cc.err.badSettings"));
   }
   const v = raw as Record<string, unknown>;
   const str = (x: unknown): string => (typeof x === "string" ? x.trim() : "");
   const serverUrl = str(v.serverUrl);
   const uuid = str(v.uuid);
   if (serverUrl.length > MAX_FIELD || uuid.length > MAX_FIELD) {
-    throw new CookieCloudError("invalid_server", "服务地址或 UUID 太长");
+    throw new CookieCloudError("invalid_server", t("cc.err.tooLong"));
   }
   if (serverUrl) {
     parseServer(serverUrl);
@@ -77,14 +78,14 @@ export function mergeCookieCloudInput(raw: unknown, current: CookieCloudConfig):
   let password = current.password;
   if (v.password !== undefined) {
     if (typeof v.password !== "string" || v.password.length > MAX_PASSWORD) {
-      throw new CookieCloudError("not_configured", "密码的格式不对");
+      throw new CookieCloudError("not_configured", t("cc.err.badPassword"));
     }
     password = v.password;
   }
   const cryptoType = v.cryptoType === CRYPTO_LEGACY ? CRYPTO_LEGACY : CRYPTO_FIXED;
   const enabled = v.enabled === true;
   if (enabled && (!serverUrl || !uuid || !password)) {
-    throw new CookieCloudError("not_configured", "打开上传以前先填写服务地址、用户 KEY（UUID）和密码");
+    throw new CookieCloudError("not_configured", t("cc.err.notConfigured"));
   }
   return { enabled, serverUrl, uuid, password, cryptoType };
 }

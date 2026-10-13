@@ -2,7 +2,15 @@
  * 把 PT 站点的 Cookie 上传到 CookieCloud：读浏览器里的 Cookie → 取回服务端已有的数据并解密 → 合并 → 加密 → 上传。
  * 服务端已有的数据解不开（UUID 或密码不对）时停下，不覆盖。同一时间只有一次上传在跑。
  */
-import { type CookieCloudCrypto, CRYPTO_FIXED, DecryptError, decrypt, encrypt, passphrase } from "./crypto";
+import { t } from "../../core/i18n";
+import {
+  type CookieCloudCrypto,
+  CRYPTO_FIXED,
+  DecryptError,
+  decrypt,
+  encrypt,
+  passphrase,
+} from "./crypto";
 import { CookieCloudError, fetchPayload, parseServer, pushPayload } from "./client";
 import {
   type CookieCloudData,
@@ -62,7 +70,7 @@ export interface UploadResult {
 
 function assertConfigured(cfg: CookieCloudConfig): void {
   if (!cfg.serverUrl.trim() || !cfg.uuid.trim() || !cfg.password) {
-    throw new CookieCloudError("not_configured", "先填写 CookieCloud 的服务地址、用户 KEY（UUID）和密码");
+    throw new CookieCloudError("not_configured", t("cc.err.notConfigured"));
   }
   parseServer(cfg.serverUrl);
 }
@@ -90,16 +98,13 @@ async function readExisting(cfg: CookieCloudConfig, key: string): Promise<Cookie
     plain = await decrypt(existing.encrypted, key, existing.crypto_type);
   } catch (error: unknown) {
     if (error instanceof DecryptError) {
-      throw new CookieCloudError(
-        "decrypt",
-        "服务端已有这个 UUID 的数据，但用填写的密码解不开：为了不把它覆盖掉，没有上传。请检查密码，或者换一个 UUID",
-      );
+      throw new CookieCloudError("decrypt", t("cc.err.decrypt"));
     }
     throw error;
   }
   const data = parseCookieData(plain);
   if (!data) {
-    throw new CookieCloudError("decrypt", "服务端这个 UUID 的数据不是 CookieCloud 的格式，没有上传");
+    throw new CookieCloudError("decrypt", t("cc.err.notCookieCloud"));
   }
   return data;
 }

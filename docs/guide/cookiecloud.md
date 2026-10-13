@@ -4,7 +4,7 @@
 
 ## 开始前
 
-- 需要一个在用的 CookieCloud：浏览器装了 CookieCloud 扩展，并同步到你自己的服务端。
+- 需要一个在用的 CookieCloud 服务端：浏览器装了 CookieCloud 扩展并同步到它，或者用 PT Tools Helper 扩展上传（见[浏览器扩展](browser-extension.md#同步到-cookiecloud)，不用另装 CookieCloud 扩展）。
 - 在扩展里能看到服务器地址、用户 KEY（UUID）和端对端加密密码，pt-tools 里填同样的三项。
 - pt-tools 只从服务端取回加密的数据（`GET <服务地址>/get/<UUID>`），用密码在本机解密；密码不发给 CookieCloud 服务端。
 - 密码用与站点 Cookie 相同的密钥加密保存在本机；页面和接口都不显示它，只显示「已设置」。

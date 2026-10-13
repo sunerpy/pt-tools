@@ -4,6 +4,7 @@
  *   POST {服务地址}/update      ← {uuid, encrypted, crypto_type}，成功回 {"action": "done"}
  * 只发密文，密码不出浏览器。不跟随重定向：地址里带着 UUID，不带去别处。
  */
+import { t } from "../../core/i18n";
 import { fetchWithTimeout } from "../sync/http";
 import { PtToolsApiError } from "../sync/errors";
 
@@ -45,7 +46,7 @@ export function parseServer(raw: string): URL {
   try {
     url = new URL(raw.trim());
   } catch {
-    throw new CookieCloudError("invalid_server", "服务地址要以 http:// 或 https:// 开头");
+    throw new CookieCloudError("invalid_server", t("cc.err.invalidServer"));
   }
   if (
     (url.protocol !== "http:" && url.protocol !== "https:") ||
@@ -57,10 +58,7 @@ export function parseServer(raw: string): URL {
     raw.includes("?") ||
     raw.includes("#")
   ) {
-    throw new CookieCloudError(
-      "invalid_server",
-      "服务地址要以 http:// 或 https:// 开头，不能带用户名密码、查询参数或 #",
-    );
+    throw new CookieCloudError("invalid_server", t("cc.err.invalidServer"));
   }
   url.pathname = url.pathname.replace(/\/+$/, "");
   return url;
@@ -79,21 +77,21 @@ async function request(url: string, init: RequestInit): Promise<Response> {
     response = await fetchWithTimeout(url, { ...init, redirect: "manual", timeoutMs: TIMEOUT_MS });
   } catch (error: unknown) {
     if (error instanceof PtToolsApiError && error.code === "timeout") {
-      throw new CookieCloudError("timeout", "连接 CookieCloud 服务超时");
+      throw new CookieCloudError("timeout", t("cc.err.timeout"));
     }
-    throw new CookieCloudError("network", "连不上 CookieCloud 服务");
+    throw new CookieCloudError("network", t("cc.err.network"));
   }
   if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
-    throw new CookieCloudError(
-      "redirect",
-      "CookieCloud 服务把请求重定向到了别处，没有跟随：请填写最终的服务地址",
-    );
+    throw new CookieCloudError("redirect", t("cc.err.redirect"));
   }
   return response;
 }
 
 /** fetchPayload 取回 uuid 的密文；服务端还没有这个 UUID 的数据时返回 null。 */
-export async function fetchPayload(server: string, uuid: string): Promise<CookieCloudPayload | null> {
+export async function fetchPayload(
+  server: string,
+  uuid: string,
+): Promise<CookieCloudPayload | null> {
   const response = await request(endpoint(server, "get", uuid.trim()), {
     method: "GET",
     headers: { Accept: "application/json" },
@@ -103,13 +101,13 @@ export async function fetchPayload(server: string, uuid: string): Promise<Cookie
     return null;
   }
   if (!response.ok) {
-    throw new CookieCloudError("http", `CookieCloud 服务返回 HTTP ${response.status}`, response.status);
+    throw new CookieCloudError("http", t("cc.err.http", response.status), response.status);
   }
   let body: unknown;
   try {
     body = JSON.parse(await response.text());
   } catch {
-    throw new CookieCloudError("bad_response", "CookieCloud 的响应不是 JSON");
+    throw new CookieCloudError("bad_response", t("cc.err.notJson"));
   }
   const encrypted = (body as { encrypted?: unknown } | null)?.encrypted;
   if (typeof encrypted !== "string" || encrypted === "") {
@@ -134,7 +132,7 @@ export async function pushPayload(
     body: JSON.stringify({ uuid: uuid.trim(), encrypted, crypto_type: cryptoType }),
   });
   if (!response.ok) {
-    throw new CookieCloudError("http", `CookieCloud 服务返回 HTTP ${response.status}`, response.status);
+    throw new CookieCloudError("http", t("cc.err.http", response.status), response.status);
   }
   const text = await response.text();
   let action: unknown;
@@ -144,6 +142,6 @@ export async function pushPayload(
     action = undefined;
   }
   if (action !== "done") {
-    throw new CookieCloudError("bad_response", "CookieCloud 服务没有确认保存");
+    throw new CookieCloudError("bad_response", t("cc.err.notSaved"));
   }
 }

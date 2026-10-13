@@ -49,7 +49,12 @@ function cookie(name: string, value: string, domain: string): chrome.cookies.Coo
 
 beforeEach(() => {
   server = { store: new Map(), requests: [] };
-  jar = { "hdsky.me": [cookie("c_secure_uid", "1", ".hdsky.me"), cookie("c_secure_pass", "p", ".hdsky.me")] };
+  jar = {
+    "hdsky.me": [
+      cookie("c_secure_uid", "1", ".hdsky.me"),
+      cookie("c_secure_pass", "p", ".hdsky.me"),
+    ],
+  };
   vi.stubGlobal("chrome", {
     cookies: { getAll: vi.fn(async ({ domain }: { domain: string }) => jar[domain] ?? []) },
   });
@@ -60,7 +65,10 @@ beforeEach(() => {
       const body = init.body ? (JSON.parse(String(init.body)) as unknown) : undefined;
       server.requests.push({ method: init.method ?? "GET", url: url.toString(), body });
       if (server.redirect) {
-        return new Response(null, { status: 302, headers: { Location: "https://elsewhere.example/" } });
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://elsewhere.example/" },
+        });
       }
       if (server.status) {
         return new Response("boom", { status: server.status });
@@ -73,7 +81,9 @@ beforeEach(() => {
       const m = /^\/cookie\/get\/(.+)$/.exec(url.pathname);
       if (m) {
         const hit = server.store.get(decodeURIComponent(m[1]));
-        return hit ? new Response(JSON.stringify(hit), { status: 200 }) : new Response("Not Found", { status: 404 });
+        return hit
+          ? new Response(JSON.stringify(hit), { status: 200 })
+          : new Response("Not Found", { status: 404 });
       }
       return new Response("Not Found", { status: 404 });
     }),
@@ -93,13 +103,19 @@ async function stored(): Promise<ReturnType<typeof parseCookieData>> {
 describe("上传到 CookieCloud", () => {
   it("第一次上传：只放 PT 站点域名下的 Cookie，服务端解得开", async () => {
     jar["unrelated.example"] = [cookie("sid", "x", "unrelated.example")];
-    const { result, state } = await uploadToCookieCloud(CFG, null, { force: false, now: () => NOW });
+    const { result, state } = await uploadToCookieCloud(CFG, null, {
+      force: false,
+      now: () => NOW,
+    });
     expect(result).toEqual({ uploaded: true, domains: 1, cookies: 2 });
     expect(state.lastUploadAt).toBe(NOW.toISOString());
     expect(state.lastDigest).toMatch(/^[0-9a-f]{64}$/);
     const data = await stored();
     expect(Object.keys(data!.cookie_data)).toEqual(["hdsky.me"]);
-    expect(data!.cookie_data["hdsky.me"].map((c) => c.name)).toEqual(["c_secure_uid", "c_secure_pass"]);
+    expect(data!.cookie_data["hdsky.me"].map((c) => c.name)).toEqual([
+      "c_secure_uid",
+      "c_secure_pass",
+    ]);
     expect(data!.update_time).toBe(NOW.toISOString());
     const update = server.requests.find((r) => r.method === "POST");
     expect(update!.url).toBe("https://cc.example/cookie/update");
@@ -117,20 +133,32 @@ describe("上传到 CookieCloud", () => {
       },
       local_storage_data: { "other.example": { k: "v" } },
     };
-    server.store.set(CFG.uuid, { encrypted: await encrypt(JSON.stringify(before), KEY, "legacy"), crypto_type: "legacy" });
+    server.store.set(CFG.uuid, {
+      encrypted: await encrypt(JSON.stringify(before), KEY, "legacy"),
+      crypto_type: "legacy",
+    });
     await uploadToCookieCloud(CFG, null, { force: true, now: () => NOW });
     const data = await stored();
     expect(Object.keys(data!.cookie_data).sort()).toEqual(["hdsky.me", "other.example"]);
-    expect(data!.cookie_data["hdsky.me"].map((c) => c.name)).toEqual(["c_secure_uid", "c_secure_pass"]);
+    expect(data!.cookie_data["hdsky.me"].map((c) => c.name)).toEqual([
+      "c_secure_uid",
+      "c_secure_pass",
+    ]);
     expect(data!.local_storage_data).toEqual({ "other.example": { k: "v" } });
     // 按设置里的加密方式重新加密
     expect(server.store.get(CFG.uuid)!.crypto_type).toBe("aes-128-cbc-fixed");
   });
 
   it("服务端已有的数据解不开：不上传，原来的数据不动", async () => {
-    const other = await encrypt('{"cookie_data":{}}', passphrase(CFG.uuid, "别人的密码"), "aes-128-cbc-fixed");
+    const other = await encrypt(
+      '{"cookie_data":{}}',
+      passphrase(CFG.uuid, "别人的密码"),
+      "aes-128-cbc-fixed",
+    );
     server.store.set(CFG.uuid, { encrypted: other, crypto_type: "aes-128-cbc-fixed" });
-    await expect(uploadToCookieCloud(CFG, null, { force: true })).rejects.toMatchObject({ code: "decrypt" });
+    await expect(uploadToCookieCloud(CFG, null, { force: true })).rejects.toMatchObject({
+      code: "decrypt",
+    });
     expect(server.store.get(CFG.uuid)!.encrypted).toBe(other);
     expect(server.requests.some((r) => r.method === "POST")).toBe(false);
   });
@@ -161,14 +189,20 @@ describe("上传到 CookieCloud", () => {
   });
 
   it("没填完整、地址不对、重定向、HTTP 出错时抛出能看懂的错误", async () => {
-    await expect(uploadToCookieCloud({ ...CFG, password: "" }, null, { force: true })).rejects.toMatchObject({
+    await expect(
+      uploadToCookieCloud({ ...CFG, password: "" }, null, { force: true }),
+    ).rejects.toMatchObject({
       code: "not_configured",
     });
-    await expect(uploadToCookieCloud({ ...CFG, serverUrl: "ftp://cc.example" }, null, { force: true })).rejects.toMatchObject({
+    await expect(
+      uploadToCookieCloud({ ...CFG, serverUrl: "ftp://cc.example" }, null, { force: true }),
+    ).rejects.toMatchObject({
       code: "invalid_server",
     });
     server.redirect = true;
-    await expect(uploadToCookieCloud(CFG, null, { force: true })).rejects.toMatchObject({ code: "redirect" });
+    await expect(uploadToCookieCloud(CFG, null, { force: true })).rejects.toMatchObject({
+      code: "redirect",
+    });
     server.redirect = false;
     server.status = 500;
     const err = await uploadToCookieCloud(CFG, null, { force: true }).catch((e: unknown) => e);
@@ -182,8 +216,14 @@ describe("测试 CookieCloud", () => {
   it("没有数据、解得开、解不开", async () => {
     expect(await testCookieCloud(CFG)).toEqual({ status: "empty", domains: 0, updatedAt: null });
     await uploadToCookieCloud(CFG, null, { force: true, now: () => NOW });
-    expect(await testCookieCloud(CFG)).toEqual({ status: "ok", domains: 1, updatedAt: NOW.toISOString() });
-    await expect(testCookieCloud({ ...CFG, password: "wrong" })).rejects.toMatchObject({ code: "decrypt" });
+    expect(await testCookieCloud(CFG)).toEqual({
+      status: "ok",
+      domains: 1,
+      updatedAt: NOW.toISOString(),
+    });
+    await expect(testCookieCloud({ ...CFG, password: "wrong" })).rejects.toMatchObject({
+      code: "decrypt",
+    });
     // 测试不写东西：只有上面那次上传
     expect(server.requests.filter((r) => r.method === "POST")).toHaveLength(1);
   });
@@ -193,7 +233,13 @@ describe("工具函数", () => {
   it("服务地址：去掉末尾的 /，拒绝带查询参数、# 或用户名密码的", () => {
     expect(parseServer("https://cc.example/cookie/").toString()).toBe("https://cc.example/cookie");
     expect(parseServer("http://10.0.0.2:8088").toString()).toBe("http://10.0.0.2:8088/");
-    for (const bad of ["cc.example", "https://cc.example/?a=1", "https://cc.example/#x", "https://u:p@cc.example", "javascript:alert(1)"]) {
+    for (const bad of [
+      "cc.example",
+      "https://cc.example/?a=1",
+      "https://cc.example/#x",
+      "https://u:p@cc.example",
+      "javascript:alert(1)",
+    ]) {
       expect(() => parseServer(bad), bad).toThrow(CookieCloudError);
     }
   });

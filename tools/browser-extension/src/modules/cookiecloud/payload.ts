@@ -112,7 +112,10 @@ export function parseCookieData(plain: string): CookieCloudData | null {
   }
   const data = value as Record<string, unknown>;
   const cookieData = data.cookie_data;
-  if (cookieData !== undefined && (typeof cookieData !== "object" || cookieData === null || Array.isArray(cookieData))) {
+  if (
+    cookieData !== undefined &&
+    (typeof cookieData !== "object" || cookieData === null || Array.isArray(cookieData))
+  ) {
     return null;
   }
   return { ...data, cookie_data: (cookieData as Record<string, CookieCloudCookie[]>) ?? {} };

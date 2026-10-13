@@ -8,13 +8,22 @@
  *
  * 依赖都从外面传进来（chrome API、存储、网络），这里只有挑站点与判断的逻辑，好测。
  */
+import { t } from "../core/i18n";
 import type { KnownSite } from "../core/constants";
 import type { SyncRunSummary, SyncSchedule } from "../core/types";
-import type { CookieCloudConfig, CookieCloudState, UploadResult } from "../modules/cookiecloud/upload";
+import type {
+  CookieCloudConfig,
+  CookieCloudState,
+  UploadResult,
+} from "../modules/cookiecloud/upload";
 
 export const MIN_SYNC_INTERVAL = 10;
 export const MAX_SYNC_INTERVAL = 1440;
-export const DEFAULT_SYNC_SCHEDULE: SyncSchedule = { enabled: false, intervalMinutes: 60, allSites: false };
+export const DEFAULT_SYNC_SCHEDULE: SyncSchedule = {
+  enabled: false,
+  intervalMinutes: 60,
+  allSites: false,
+};
 
 /** normalizeSchedule 把弹窗传来的设置整理成合法的值（间隔按分钟取整并夹在范围里）。 */
 export function normalizeSchedule(raw: unknown): SyncSchedule {
@@ -30,7 +39,9 @@ export function normalizeSchedule(raw: unknown): SyncSchedule {
 }
 
 export async function sha256Hex(text: string): Promise<string> {
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  const hash = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+  );
   return Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -86,11 +97,14 @@ export function pickSites(
   );
 }
 
-async function syncPtTools(deps: ScheduledSyncDeps, schedule: SyncSchedule): Promise<SyncRunSummary["ptTools"]> {
+async function syncPtTools(
+  deps: ScheduledSyncDeps,
+  schedule: SyncSchedule,
+): Promise<SyncRunSummary["ptTools"]> {
   const out: SyncRunSummary["ptTools"] = { synced: [], unchanged: 0, failed: [] };
   const baseUrl = await deps.ptTools();
   if (!baseUrl) {
-    out.skipped = "没有连上 pt-tools";
+    out.skipped = t("sync.skipNotConnected");
     return out;
   }
   const autoSync = await deps.getAutoSyncMap();
@@ -101,7 +115,7 @@ async function syncPtTools(deps: ScheduledSyncDeps, schedule: SyncSchedule): Pro
     } catch (error: unknown) {
       if (error instanceof AuthExpiredError) {
         await deps.authExpired(baseUrl);
-        out.skipped = "pt-tools 的登录过期了，请在扩展设置里重新连接";
+        out.skipped = t("sync.skipAuthExpired");
         return out;
       }
       // 读不到站点列表时只同步单独打开了「自动同步」的站点
@@ -110,7 +124,7 @@ async function syncPtTools(deps: ScheduledSyncDeps, schedule: SyncSchedule): Pro
   }
   const sites = pickSites(deps.sites, schedule, autoSync, enabled);
   if (sites.length === 0) {
-    out.skipped = "没有要同步的站点";
+    out.skipped = t("sync.skipNoSites");
     return out;
   }
   const hashes = await deps.getHashMap();
@@ -131,7 +145,7 @@ async function syncPtTools(deps: ScheduledSyncDeps, schedule: SyncSchedule): Pro
     } catch (error: unknown) {
       if (error instanceof AuthExpiredError) {
         await deps.authExpired(baseUrl);
-        out.failed.push({ siteId: site.id, error: "pt-tools 的登录过期了，请在扩展设置里重新连接" });
+        out.failed.push({ siteId: site.id, error: t("sync.skipAuthExpired") });
         break;
       }
       out.failed.push({ siteId: site.id, error: deps.errorText(error) });
@@ -143,7 +157,7 @@ async function syncPtTools(deps: ScheduledSyncDeps, schedule: SyncSchedule): Pro
 async function syncCookieCloud(deps: ScheduledSyncDeps): Promise<SyncRunSummary["cookieCloud"]> {
   const cfg = await deps.getCookieCloudConfig();
   if (!cfg.enabled) {
-    return { uploaded: false, domains: 0, cookies: 0, skipped: "没有打开" };
+    return { uploaded: false, domains: 0, cookies: 0, skipped: t("sync.skipCookieCloudOff") };
   }
   const state = await deps.getCookieCloudState();
   try {

@@ -9,7 +9,10 @@ const S = [
   10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
 ];
 
-const K = Array.from({ length: 64 }, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) >>> 0);
+const K = Array.from(
+  { length: 64 },
+  (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) >>> 0,
+);
 
 /** md5 返回 16 字节的摘要。 */
 export function md5(data: Uint8Array): Uint8Array<ArrayBuffer> {
