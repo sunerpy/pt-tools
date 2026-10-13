@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { chatopsApi, type NotificationConfig } from "@/api";
+import { chatopsApi, type NotificationConfig, type WebhookPreviewResult } from "@/api";
 import PtIcon from "@/components/PtIcon";
 import PtHeadSub from "@/components/ui/PtHeadSub.vue";
 import PtPanel from "@/components/ui/PtPanel.vue";
@@ -13,9 +13,16 @@ import {
   outboundChannel,
   outboundProblem,
 } from "@/utils/notifyChannels";
+import {
+  HEADERS_ERROR,
+  WEBHOOK_FORMATS,
+  WEBHOOK_METHODS,
+  WEBHOOK_PRESETS,
+  parseHeadersText,
+} from "@/utils/webhook";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 /* 图标与色相与通道列表页保持同一套：同一个通道在两个页面必须长一个样 */
@@ -115,6 +122,12 @@ const toastCopy: { kind: string; tone: "ok" | "warn" | "dang"; text: string; whe
     when: "打开这一页时读不到通道详情 —— 后端有原话时直接显示原话",
   },
   { kind: "失败", tone: "dang", text: "无效的通道 ID", when: "地址里的通道 ID 不是有效的数字" },
+  {
+    kind: "提示",
+    tone: "warn",
+    text: "请求头要是 JSON 对象，键和值都是文字",
+    when: "Webhook 的请求头不是这个格式时保存凭证 —— 不会提交",
+  },
 ];
 
 /** 画板 head 88 的 sub（11.5/400 t3）：这条记录的身份 —— ID 与通道类型 */
@@ -259,6 +272,7 @@ async function loadDetail() {
       tgForm.default_chat_id_text = dcid != null && dcid !== "" ? String(dcid) : "";
     }
     loaded.value = true;
+    if (conf.channel_type === "webhook") void loadWebhookEvents();
   } catch (e: unknown) {
     if (seq !== loadSeq) return;
     ElMessage.error((e as Error).message || "加载详情失败");
@@ -320,6 +334,10 @@ async function handleSaveCredentials() {
     ElMessage.warning(problem);
     return;
   }
+  if (headersError.value) {
+    ElMessage.warning("请求头要是 JSON 对象，键和值都是文字");
+    return;
+  }
 
   saving.value = true;
   try {
@@ -354,7 +372,11 @@ async function handleSaveCredentials() {
       case "webhook":
         payload.endpoint_url = conf.endpoint_url;
         payload.hmac_secret = conf.hmac_secret;
-        payload.headers = conf.headers;
+        // 请求头是编辑框里的 JSON 文本，api 层转成对象；空着就是清掉
+        payload.headers = conf.headers ?? "";
+        payload.method = conf.method || "POST";
+        payload.content_type = conf.content_type || "json";
+        payload.body_template = conf.body_template ?? "";
         break;
       case "wecom_webhook":
         payload.webhook_key = conf.webhook_key;
@@ -442,6 +464,108 @@ async function handleTest() {
 function goBack() {
   router.push("/chatops/notifications");
 }
+
+/* ---- Webhook 的请求（M21）：方法、格式、请求体模板、预设，按事件的示例数据预览 ---- */
+const headersError = computed(() =>
+  conf.channel_type === "webhook" && !parseHeadersText(conf.headers).ok ? HEADERS_ERROR : "",
+);
+const isGet = computed(() => (conf.method || "POST") === "GET");
+/** 套用预设以后提示这类服务的地址一般长什么样 */
+const presetHint = ref("");
+const whEvents = ref<{ type: string; name: string }[]>([]);
+const whPreview = reactive({
+  type: "rss.matched",
+  result: null as WebhookPreviewResult | null,
+  error: "",
+});
+/** 每次预览换一个序号：晚到的旧响应作废 */
+let whSeq = 0;
+let whTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function loadWebhookEvents() {
+  if (whEvents.value.length) return;
+  try {
+    const cat = await chatopsApi.templates.list();
+    whEvents.value = cat.events.map((e) => ({ type: e.type, name: e.name }));
+  } catch {
+    // 事件列表读不到时只能按默认的那一种预览
+  }
+}
+
+async function applyPreset(key: string) {
+  const p = WEBHOOK_PRESETS.find((x) => x.key === key);
+  if (!p) return;
+  const cur = conf.body_template ?? "";
+  if (cur.trim() !== "" && cur !== p.body_template) {
+    try {
+      await ElMessageBox.confirm("用预设替换现在的请求体模板？", "套用预设", {
+        type: "warning",
+        confirmButtonText: "替换",
+        cancelButtonText: "取消",
+      });
+    } catch {
+      return;
+    }
+  }
+  conf.method = p.method;
+  conf.content_type = p.content_type;
+  conf.body_template = p.body_template;
+  presetHint.value = p.url_hint ? `${p.label} 的地址一般是 ${p.url_hint}` : "";
+}
+
+async function runPreview() {
+  const seq = ++whSeq;
+  const headers = parseHeadersText(conf.headers);
+  if (!headers.ok || !conf.endpoint_url?.trim()) {
+    whPreview.result = null;
+    whPreview.error = headers.ok ? "先填 Endpoint URL 才能预览" : HEADERS_ERROR;
+    return;
+  }
+  try {
+    const res = await chatopsApi.webhook.preview({
+      type: whPreview.type,
+      method: conf.method || "POST",
+      endpoint_url: conf.endpoint_url,
+      content_type: conf.content_type || "json",
+      headers: headers.value,
+      body_template: conf.body_template ?? "",
+    });
+    if (seq !== whSeq) return;
+    whPreview.result = res;
+    whPreview.error = "";
+  } catch (e: unknown) {
+    if (seq !== whSeq) return;
+    whPreview.result = null;
+    whPreview.error = apiErrorDetail(e, "预览失败");
+  }
+}
+
+watch(
+  () => [
+    loaded.value,
+    conf.channel_type,
+    conf.endpoint_url,
+    conf.method,
+    conf.content_type,
+    conf.body_template,
+    conf.headers,
+    whPreview.type,
+  ],
+  () => {
+    clearTimeout(whTimer);
+    if (loaded.value && conf.channel_type === "webhook") whTimer = setTimeout(runPreview, 400);
+  },
+);
+onBeforeUnmount(() => clearTimeout(whTimer));
+
+const previewText = computed(() => {
+  const r = whPreview.result;
+  if (!r) return "";
+  const head = r.content_type
+    ? `${r.method} ${r.url}\nContent-Type: ${r.content_type}`
+    : `${r.method} ${r.url}`;
+  return r.body ? `${head}\n\n${r.body}` : head;
+});
 </script>
 
 <template>
@@ -699,8 +823,17 @@ function goBack() {
           <template v-if="conf.channel_type === 'webhook'">
             <div class="field-row">
               <el-form-item label="Endpoint URL" prop="endpoint_url">
-                <el-input v-model="conf.endpoint_url" placeholder="https://example.com/notify" />
-                <div class="field-tip">pt-tools 会向这个地址 POST JSON</div>
+                <el-input
+                  v-model="conf.endpoint_url"
+                  placeholder="https://example.com/notify"
+                  data-testid="wh-url" />
+                <div class="field-tip">
+                  路径和查询里可以写模板，例如 <code v-pre>?site={{ urlquery.site }}</code
+                  >；主机名不能写模板
+                </div>
+                <div v-if="presetHint" class="field-tip" data-testid="wh-preset-hint">
+                  {{ presetHint }}
+                </div>
               </el-form-item>
               <el-form-item label="HMAC Secret">
                 <el-input
@@ -711,14 +844,87 @@ function goBack() {
                 <div class="field-tip">填了会给请求体签名，接收端可校验来源</div>
               </el-form-item>
             </div>
-            <el-form-item label="自定义 Headers（JSON）">
+            <el-form-item label="自定义 Headers（JSON）" :error="headersError">
               <el-input
                 v-model="conf.headers"
                 type="textarea"
                 :rows="3"
-                placeholder='{"Authorization": "Bearer xxx"}' />
-              <div class="field-tip">JSON 对象格式，随请求一起发送</div>
+                placeholder='{"Authorization": "Bearer xxx"}'
+                data-testid="wh-headers" />
+              <div class="field-tip">JSON 对象，键和值都是文字，随请求一起发送</div>
             </el-form-item>
+
+            <div class="field-head">请求</div>
+            <div class="field-row">
+              <el-form-item label="请求方法">
+                <el-select v-model="conf.method" placeholder="POST" data-testid="wh-method">
+                  <el-option v-for="m in WEBHOOK_METHODS" :key="m" :label="m" :value="m" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="请求体格式">
+                <el-select
+                  v-model="conf.content_type"
+                  placeholder="JSON"
+                  :disabled="isGet"
+                  data-testid="wh-format">
+                  <el-option
+                    v-for="f in WEBHOOK_FORMATS"
+                    :key="f.value"
+                    :label="f.label"
+                    :value="f.value" />
+                </el-select>
+              </el-form-item>
+            </div>
+            <el-form-item label="套用预设">
+              <el-select
+                :model-value="''"
+                placeholder="选一个常用服务，填进下面的方法、格式与请求体"
+                :disabled="isGet"
+                data-testid="wh-preset"
+                @change="applyPreset">
+                <el-option
+                  v-for="p in WEBHOOK_PRESETS"
+                  :key="p.key"
+                  :label="p.label"
+                  :value="p.key">
+                  <span>{{ p.label }}</span>
+                  <span class="wh-preset__desc">{{ p.desc }}</span>
+                </el-option>
+              </el-select>
+            </el-form-item>
+            <el-form-item label="请求体模板">
+              <el-input
+                v-model="conf.body_template"
+                type="textarea"
+                :rows="6"
+                class="wh-body"
+                :disabled="isGet"
+                placeholder="留空时发固定的 JSON：title、text、link，加上 event（事件类型、时间与变量）"
+                data-testid="wh-body" />
+              <div class="field-tip">
+                Go 模板，变量与函数和「消息模板」页一样；文字放进 JSON 时用
+                <code v-pre>{{ json.title }}</code
+                >。GET 请求不带请求体
+              </div>
+            </el-form-item>
+            <div class="wh-preview">
+              <div class="wh-preview__head">
+                <span class="wh-preview__label">按示例数据预览</span>
+                <el-select
+                  v-model="whPreview.type"
+                  size="small"
+                  class="wh-preview__event"
+                  data-testid="wh-preview-event">
+                  <el-option v-for="e in whEvents" :key="e.type" :label="e.name" :value="e.type" />
+                </el-select>
+              </div>
+              <div v-if="whPreview.error" class="wh-preview__error" data-testid="wh-preview-error">
+                {{ whPreview.error }}
+              </div>
+              <pre v-else-if="whPreview.result" class="wh-preview__req" data-testid="wh-preview">{{
+                previewText
+              }}</pre>
+            </div>
           </template>
 
           <!-- WeCom -->
@@ -894,6 +1100,62 @@ function goBack() {
 </template>
 
 <style scoped>
+/* Webhook 的请求（M21）：预设说明跟在名称后面，请求体模板与预览用等宽字 */
+.wh-preset__desc {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--pt-t3);
+}
+
+.wh-body :deep(textarea) {
+  font-family: var(--pt-font-mono);
+  font-size: 12px;
+}
+
+.wh-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: var(--pt-space-4);
+}
+
+.wh-preview__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wh-preview__label {
+  font-size: var(--pt-fz-sm);
+  font-weight: 600;
+  color: var(--pt-t1);
+}
+
+.wh-preview__event {
+  width: 200px;
+}
+
+.wh-preview__error {
+  font-size: var(--pt-fz-sm);
+  color: var(--pt-dang);
+}
+
+.wh-preview__req {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--pt-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--pt-t1);
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--pt-bg-surface-muted);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--pt-r-md);
+}
+
 /* 提示文案卡：一行一条，左胶囊右场景 */
 .msg-card {
   max-width: 700px;
