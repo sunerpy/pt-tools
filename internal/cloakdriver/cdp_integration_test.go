@@ -6,7 +6,9 @@ package cloakdriver
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,4 +139,46 @@ func TestCDPCookieInjectionFromCookieHeader(t *testing.T) {
 	}
 	assert.Equal(t, "93012", byName["c_secure_uid"])
 	assert.Equal(t, "abc", byName["c_secure_pass"])
+}
+
+// 打开页面、等选择器出现、取整页 HTML，并且请求带上注入的 Cookie：探测驱动走的就是这条路
+// （chromedp v0.21 换成泛型接口以后 Navigate、WaitVisible、OuterHTML 都改了写法）。
+func TestCDPLoadPageAndExtractSendsInjectedCookies(t *testing.T) {
+	cdpURL := cdpURLOrSkip(t)
+	gotCookie := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/favicon.ico" {
+			http.NotFound(w, r)
+			return
+		}
+		gotCookie <- r.Header.Get("Cookie")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><div id="info">用户 93012</div></body></html>`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sess, err := NewCDPSession(ctx, cdpURL)
+	require.NoError(t, err)
+	defer sess.Close()
+
+	cookies, err := http.ParseCookie("c_secure_uid=93012; c_secure_pass=abc")
+	require.NoError(t, err)
+	target := srv.URL + "/userdetails.php?id=93012"
+	// 和探测驱动一样：注入与打开页面各用一个从 TaskContext 派生的超时 ctx，前一个取消了标签页也要还在
+	injectCtx, injectCancel := context.WithTimeout(sess.TaskContext(), 10*time.Second)
+	require.NoError(t, sess.InjectCookies(injectCtx, target, cookies))
+	injectCancel()
+
+	navCtx, navCancel := context.WithTimeout(sess.TaskContext(), 10*time.Second)
+	defer navCancel()
+	var html string
+	require.NoError(t, sess.LoadPageAndExtract(navCtx, target, "#info", func(h string) error {
+		html = h
+		return nil
+	}))
+	assert.Contains(t, html, `<div id="info">用户 93012</div>`)
+	cookie := <-gotCookie
+	assert.True(t, strings.Contains(cookie, "c_secure_uid=93012") && strings.Contains(cookie, "c_secure_pass=abc"), cookie)
 }
