@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -166,8 +168,69 @@ func TestGTKPW_Fixtures_NoSecrets(t *testing.T) {
 		"userdetails": gtkpwUserdetailsFixture,
 		"mybonus":     gtkpwMyBonusFixture,
 		"detail":      gtkpwDetailFixture,
+		"seeding":     gtkpwSeedingFixture,
 	}
 	for name, data := range fixtures {
 		t.Run(name, func(t *testing.T) { RequireNoSecrets(t, name, data) })
 	}
+}
+
+// gtkpwSeedingFixture 是 getusertorrentlistajax.php?type=seeding 那一页。gtkpw 跑的是上游 NexusPHP
+// （登录页页脚「reads and … writes of Redis and … ram」与 xiaomlove/nexusphp include/functions.php 的 stdfoot 一致），
+// 所以按上游 public/getusertorrentlistajax.php 与 lang/chs 语言包的输出拼出：汇总是全部做种的合计，
+// 表格只是当前页（每页 100 条），这里只放两行。
+const gtkpwSeedingFixture = `<br/><div style="display: flex;justify-content: space-between"><div><b>101</b> 条记录 | 总大小：2.756 TB</div><div></div></div><p align="center" class='nexus-pagination'><b>1</b> <a href="getusertorrentlistajax.php?page=1">2</a></p>
+<table border="1" cellspacing="0" cellpadding="5" width="100%"><tr><td class="colhead" style="padding: 0px">类型</td><td class="colhead" align="center">标题</td><td class="colhead" align="center">发布时间</td><td class="colhead" align="center"><img class="size" src="pic/trans.gif" alt="size" title="大小" /></td><td class="colhead" align="center"><img class="seeders" src="pic/trans.gif" alt="seeders" title="种子数" /></td><td class="colhead" align="center"><img class="leechers" src="pic/trans.gif" alt="leechers" title="下载数" /></td><td class="colhead" align="center">上传</td><td class="colhead" align="center">下载</td><td class="colhead" align="center">分享率</td><td class="colhead" align="center">做种时间</td><td class="colhead" align="center">行为</td></tr>
+<tr><td class="rowfollow nowrap" valign="middle" style='padding: 0px'><a href="torrents.php?allsec=1&amp;cat=401"><img src="pic/cattrans.gif" alt="Movies" title="Movies" /></a></td>
+<td class="rowfollow" width="100%" align="left"><a href="details.php?id=45429&amp;hit=1" title="12.Angry.Men.1957.BluRay.1080p-DEMO"><b>12.Angry.Men.1957.BluRay.1080p-DEMO</b></a><br />演示标题 / Demo</td>
+<td class="rowfollow nowrap" align="center">2025-05-14<br/>03:00:00</td><td class="rowfollow" align="center">11.87<br />GB</td><td class="rowfollow" align="center">127</td><td class="rowfollow" align="center">0</td><td class="rowfollow" align="center">20.00<br />GB</td><td class="rowfollow" align="center">11.87<br />GB</td><td class="rowfollow" align="center">1.685</td><td class="rowfollow" align="center">30天</td><td class="rowfollow" align="center"></td></tr>
+<tr><td class="rowfollow nowrap" valign="middle" style='padding: 0px'><a href="torrents.php?allsec=1&amp;cat=402"><img src="pic/cattrans.gif" alt="TV" title="TV" /></a></td>
+<td class="rowfollow" width="100%" align="left"><a href="details.php?id=45430&amp;hit=1" title="GTKPW.Demo2.Series-DEMO"><b>GTKPW.Demo2.Series-DEMO</b></a><br />演示标题2 / Demo2</td>
+<td class="rowfollow nowrap" align="center">2026-05-13<br/>12:00:00</td><td class="rowfollow" align="center">2.34<br />GB</td><td class="rowfollow" align="center">9</td><td class="rowfollow" align="center">2</td><td class="rowfollow" align="center">1.00<br />GB</td><td class="rowfollow" align="center">2.34<br />GB</td><td class="rowfollow" align="center">0.427</td><td class="rowfollow" align="center">1天</td><td class="rowfollow" align="center"></td></tr>
+</table>
+<p align="center" class='nexus-pagination'><b>1</b> <a href="getusertorrentlistajax.php?page=1">2</a></p>
+`
+
+// TestGTKPW_GetUserInfo_SeedingSize 走 GetUserInfo 全流程（#332）：gtkpw 的定义没有 seedingSize 选择器，
+// 做种体积来自 getusertorrentlistajax.php?type=seeding 的汇总，取的是全部做种的合计，不是当前页的累加。
+func TestGTKPW_GetUserInfo_SeedingSize(t *testing.T) {
+	def := getGTKPWDef(t)
+	_, hasSeedingSize := def.UserInfo.Selectors["seedingSize"]
+	require.False(t, hasSeedingSize, "gtkpw 的做种体积应该走 getusertorrentlistajax.php")
+
+	var mu sync.Mutex
+	var seedingQuery url.Values
+	page := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/index.php", page(gtkpwIndexFixture))
+	mux.HandleFunc("/userdetails.php", page(gtkpwUserdetailsFixture))
+	mux.HandleFunc("/mybonus.php", page(gtkpwMyBonusFixture))
+	mux.HandleFunc("/getusertorrentlistajax.php", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seedingQuery = r.URL.Query()
+		mu.Unlock()
+		_, _ = w.Write([]byte(gtkpwSeedingFixture))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	driver := v2.NewNexusPHPDriver(v2.NexusPHPDriverConfig{BaseURL: server.URL, Cookie: "test_cookie=1", Selectors: def.Selectors})
+	driver.SetSiteDefinition(def)
+
+	info, err := driver.GetUserInfo(context.Background())
+	require.NoError(t, err)
+
+	mu.Lock()
+	query := seedingQuery
+	mu.Unlock()
+	require.NotNil(t, query, "没有请求 getusertorrentlistajax.php")
+	assert.Equal(t, "7283", query.Get("userid"))
+	assert.Equal(t, "seeding", query.Get("type"))
+
+	tb := 2.756
+	assert.Equal(t, "7283", info.UserID)
+	assert.Equal(t, int64(tb*1024*1024*1024*1024), info.SeederSize)
+	assert.Equal(t, 12, info.Seeding, "做种数以首页为准")
 }
