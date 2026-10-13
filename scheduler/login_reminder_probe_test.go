@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -96,6 +97,13 @@ func TestProbeFailureNotice_NonSessionFailureNotifiesOnceAfter24h(t *testing.T) 
 	title, text := rec.lastMessage()
 	assert.Contains(t, title, "探测失败")
 	assert.Contains(t, text, "网络错误")
+	ev := rec.lastEventOf()
+	require.NotNil(t, ev)
+	assert.Equal(t, notify.EventProbeFailed, ev.Type)
+	assert.Equal(t, "HDSKY", ev.Fields["site"])
+	assert.Equal(t, "网络错误", ev.Fields["status_label"])
+	assert.NotEmpty(t, ev.Fields["since"])
+	assert.Contains(t, ev.Fields["advice"], "自动重试")
 }
 
 // 问题 2：凭证类失败立即提醒，之后 24 小时内不重复，满 24 小时再提醒一次。
@@ -149,6 +157,11 @@ func TestProbeFailureNotice_RecoveryNotifiedOnce(t *testing.T) {
 	assert.Equal(t, int32(2), rec.count.Load(), "recovery is notified exactly once")
 	title, _ := rec.lastMessage()
 	assert.Contains(t, title, "探测已恢复")
+	ev := rec.lastEventOf()
+	require.NotNil(t, ev)
+	assert.Equal(t, notify.EventProbeRecovered, ev.Type)
+	assert.Equal(t, "HDSKY", ev.Fields["site"])
+	assert.NotEmpty(t, ev.Fields["probed_at"])
 	st := loadState(t, m, "HDSKY")
 	assert.Nil(t, st.LastFailureNotifiedAt)
 	assert.Nil(t, st.FirstFailureAt)

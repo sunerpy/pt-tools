@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/subscribe"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 )
@@ -134,14 +136,15 @@ func (noTMDB) TMDB(context.Context) (*tmdb.Client, error) { return nil, tmdb.Err
 // 订阅的通知写进监控通知日志：来源 media，海报地址接在正文后面，主题截到 64 字节
 func TestSubscribeNotifierEnqueues(t *testing.T) {
 	db := organizeTestDB(t)
-	n := scheduler.NewMonitorNotifier(db, scheduler.MonitorSenderFunc(func(context.Context, uint, string, string) error { return nil }), nil, nil)
+	n := scheduler.NewMonitorNotifier(db, scheduler.MonitorSenderFunc(func(context.Context, uint, scheduler.MonitorMessage) error { return nil }), nil, nil)
 	conf := models.NotificationConf{Name: "tg", ChannelType: "telegram", Enabled: true}
 	require.NoError(t, db.Create(&conf).Error)
-	notify := subscribeNotifier(n)
-	require.NotNil(t, notify)
-	require.NoError(t, notify(context.Background(), subscribe.Notice{
+	send := subscribeNotifier(n)
+	require.NotNil(t, send)
+	ev := notify.NewEvent(notify.EventSubscribeDownloaded, time.Now(), map[string]any{"subscription": "沙丘2 (2024)", "site": "hdtime"})
+	require.NoError(t, send(context.Background(), subscribe.Notice{
 		Channels: []uint{conf.ID}, Kind: subscribe.NoticeDownloaded, Subject: strings.Repeat("s", 80), EventKey: "k1",
-		Title: "订阅下载：沙丘2 (2024)", Body: "种子：x", ImageURL: "https://image.tmdb.org/t/p/w500/p.jpg",
+		Title: "订阅下载：沙丘2 (2024)", Body: "种子：x", ImageURL: "https://image.tmdb.org/t/p/w500/p.jpg", Event: ev,
 	}))
 	var rows []models.MonitorNotificationLog
 	require.NoError(t, db.Find(&rows).Error)
@@ -149,4 +152,6 @@ func TestSubscribeNotifierEnqueues(t *testing.T) {
 	assert.Equal(t, "media", rows[0].Source)
 	assert.Len(t, rows[0].Subject, 64)
 	assert.Equal(t, subscribe.NoticeDownloaded, rows[0].Kind)
+	assert.Contains(t, rows[0].PayloadJSON, `"type":"subscribe.downloaded"`, "事件一起写进日志行")
+	assert.Contains(t, rows[0].PayloadJSON, `"subscription":"沙丘2 (2024)"`)
 }

@@ -13,6 +13,7 @@ import (
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader/qbit"
@@ -499,15 +500,20 @@ func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o s
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "种子：%s\n站点：%s", o.c.Item.Title, o.c.Site)
+	episodes := ""
 	switch {
 	case o.sp.Whole:
-		b.WriteString("\n整季")
+		episodes = "整季"
 	case o.sp.Start > 0 && o.sp.End > o.sp.Start:
-		fmt.Fprintf(&b, "\n第 %d–%d 集", o.sp.Start, o.sp.End)
+		episodes = fmt.Sprintf("第 %d–%d 集", o.sp.Start, o.sp.End)
 	case o.sp.Start > 0:
-		fmt.Fprintf(&b, "\n第 %d 集", o.sp.Start)
+		episodes = fmt.Sprintf("第 %d 集", o.sp.Start)
 	}
-	if q := strings.TrimSpace(strings.Join([]string{o.c.Meta.Resolution, o.c.Meta.Source, o.c.Meta.VideoCodec}, " ")); q != "" {
+	if episodes != "" {
+		b.WriteString("\n" + episodes)
+	}
+	q := strings.TrimSpace(strings.Join([]string{o.c.Meta.Resolution, o.c.Meta.Source, o.c.Meta.VideoCodec}, " "))
+	if q != "" {
 		fmt.Fprintf(&b, "\n质量：%s", q)
 	}
 	n := Notice{
@@ -517,6 +523,10 @@ func (s *Service) notify(ctx context.Context, sub *models.MediaSubscription, o s
 	if sub.PosterPath != "" {
 		n.ImageURL = tmdb.PosterURL(sub.PosterPath, "w500")
 	}
+	n.Event = notify.NewEvent(notify.EventSubscribeDownloaded, s.cfg.Now(), map[string]any{
+		"subscription": title, "media_type": sub.MediaType, "year": sub.Year, "season": sub.Season, "episodes": episodes,
+		"torrent_title": o.c.Item.Title, "site": o.c.Site, "quality": q, "poster": n.ImageURL,
+	})
 	if err := s.cfg.Notify(ctx, n); err != nil {
 		s.cfg.Logger.Warnf("[订阅] 发通知失败: %v", err)
 	}

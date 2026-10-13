@@ -225,6 +225,12 @@ const router = createRouter({
       meta: { title: "通知通道详情" },
     },
     {
+      path: "/chatops/templates",
+      name: "notify-templates",
+      component: () => import("@/views/chatops/NotifyTemplates.vue"),
+      meta: { title: "消息模板" },
+    },
+    {
       path: "/chatops/bindings",
       name: "bindings",
       component: () => import("@/views/chatops/Bindings.vue"),

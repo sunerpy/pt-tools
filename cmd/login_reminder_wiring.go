@@ -26,8 +26,8 @@ func loginReminderSender(bs *chatopsBootstrap) scheduler.MonitorSender {
 		return nil
 	}
 	svc := bs.deps.NotificationSvc
-	return scheduler.MonitorSenderFunc(func(ctx context.Context, confID uint, title, text string) error {
-		return svc.PushSync(ctx, app.Notification{Title: title, Text: text, SourceConfID: confID})
+	return scheduler.MonitorSenderFunc(func(ctx context.Context, confID uint, msg scheduler.MonitorMessage) error {
+		return svc.PushSync(ctx, app.Notification{Event: msg.Event, Title: msg.Title, Text: msg.Text, SourceConfID: confID})
 	})
 }
 

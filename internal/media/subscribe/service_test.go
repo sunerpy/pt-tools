@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ptinternal "github.com/sunerpy/pt-tools/internal"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
@@ -437,6 +438,16 @@ func TestNotifyOnDownload(t *testing.T) {
 	assert.Contains(t, n.Body, "第 1 集")
 	assert.Contains(t, n.Body, "2160p")
 	assert.True(t, strings.HasSuffix(n.ImageURL, "/w500/tlou.jpg"))
+	require.NotNil(t, n.Event)
+	assert.Equal(t, notify.EventSubscribeDownloaded, n.Event.Type)
+	f := n.Event.Fields
+	assert.Equal(t, "最后生还者 (2025) 第 2 季", f["subscription"])
+	assert.Equal(t, "tv", f["media_type"])
+	assert.Equal(t, int64(2), f["season"])
+	assert.Equal(t, "第 1 集", f["episodes"])
+	assert.Equal(t, "hdsky", f["site"])
+	assert.Contains(t, f["quality"], "2160p")
+	assert.Equal(t, n.ImageURL, f["poster"])
 }
 
 // 下载中的种子 7 天还没入库：标成失败，这些集重新算缺的

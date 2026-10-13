@@ -173,7 +173,7 @@ func TestRegisterChatOpsIfWired(t *testing.T) {
 		s.registerChatOpsIfWired(mux)
 
 		// 带 Bearer 令牌、没有 session：一律 401（通知详情会解密通道凭证，令牌不能访问）
-		for _, path := range []string{"/api/chatops/notifications", "/api/chatops/notifications/1", "/api/chatops/audit"} {
+		for _, path := range []string{"/api/chatops/notifications", "/api/chatops/notifications/1", "/api/chatops/audit", "/api/chatops/templates"} {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Header.Set("Authorization", "Bearer ptt_1_anything")

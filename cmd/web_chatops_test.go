@@ -205,6 +205,32 @@ func TestOutboxLiveSender_ForwardsToLiveChannel(t *testing.T) {
 	require.Error(t, sender.Send(context.Background(), 9, notify.Notification{Text: "x"}), "通道没在运行时返回错误，留给 outbox 退避重试")
 }
 
+// 业务通知发出前套用全局消息模板，事件一起交给通道（Webhook 请求体要用）；ChatOps 的回复不套模板。
+func TestLiveNotifyManager_AppliesTemplates(t *testing.T) {
+	ch := &stubNotifyChannel{}
+	m := newLiveNotifyManager(map[uint]notify.Channel{5: ch})
+	m.templates = notify.NewTemplates(nil)
+	m.templates.Replace([]notify.TemplateSource{{EventType: notify.EventTest, Title: "测试 · {{.channel}}"}})
+	ev, title, text := notify.SampleEvent(notify.EventTest)
+	require.NoError(t, m.Send(context.Background(), 5, app.Notification{Event: ev, Title: title, Text: text, SourceConfID: 5}))
+	require.Len(t, ch.recorded, 1)
+	assert.Equal(t, "测试 · 我的 Telegram", ch.recorded[0].Title)
+	assert.Equal(t, text, ch.recorded[0].Text, "只配了标题")
+	assert.Same(t, ev, ch.recorded[0].Event)
+
+	// outbox 重试经 outboxLiveSender，事件一起带过去，照样套模板
+	require.NoError(t, outboxLiveSender{m: m}.Send(context.Background(), 5, notify.Notification{Event: ev, Title: title, Text: text}))
+	require.Len(t, ch.recorded, 2)
+	assert.Equal(t, "测试 · 我的 Telegram", ch.recorded[1].Title)
+	assert.Same(t, ev, ch.recorded[1].Event)
+
+	// 回复不是业务通知：原样发
+	require.NoError(t, m.Reply(context.Background(), notify.InboundMessage{SourceConfID: 5, ChatID: "1"}, chatops.Reply{Text: "{{.channel}}"}))
+	require.Len(t, ch.recorded, 3)
+	assert.Equal(t, "{{.channel}}", ch.recorded[2].Text)
+	assert.Nil(t, ch.recorded[2].Event)
+}
+
 func TestLiveNotifyManager_SetChannels_NilResets(t *testing.T) {
 	m := newLiveNotifyManager(map[uint]notify.Channel{1: &stubNotifyChannel{}})
 	m.SetChannels(nil)

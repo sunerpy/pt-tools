@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
@@ -501,17 +502,24 @@ type captureSender struct {
 	lastConf  uint
 	lastTitle string
 	lastText  string
+	lastEvent *notify.Event
 }
 
-func (c *captureSender) Send(_ context.Context, confID uint, title, text string) error {
+func (c *captureSender) Send(_ context.Context, confID uint, msg MonitorMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.err != nil {
 		return c.err
 	}
 	c.count.Add(1)
-	c.lastConf, c.lastTitle, c.lastText = confID, title, text
+	c.lastConf, c.lastTitle, c.lastText, c.lastEvent = confID, msg.Title, msg.Text, msg.Event
 	return nil
+}
+
+func (c *captureSender) lastEventOf() *notify.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastEvent
 }
 
 func (c *captureSender) lastMessage() (string, string) {
@@ -878,6 +886,11 @@ func TestSendTestReminderRoutesWithoutMutatingReminderState(t *testing.T) {
 	assert.Equal(t, "[pt-tools][测试] 站点 HDSKY 登录提醒", title)
 	assert.Contains(t, text, "这是一条测试提醒")
 	assert.Contains(t, text, "tier=none")
+	ev := recorder.lastEventOf()
+	require.NotNil(t, ev)
+	assert.Equal(t, notify.EventLoginTest, ev.Type)
+	assert.Equal(t, "HDSKY", ev.Fields["site"])
+	assert.Equal(t, "none", ev.Fields["tier"])
 
 	var after models.SiteLoginState
 	require.NoError(t, db.Where("site_name = ?", "HDSKY").First(&after).Error)
@@ -1126,6 +1139,12 @@ func TestReminderMessageContainsLoginSuggestion(t *testing.T) {
 	for _, phrase := range []string{"建议", "访问", "浏览", "页面", "刷新", lastAccessAt.Format(time.RFC3339)} {
 		assert.Contains(t, notificationText, phrase)
 	}
+	ev := recorder.lastEventOf()
+	require.NotNil(t, ev)
+	assert.Equal(t, notify.EventLoginExpiring, ev.Type)
+	assert.Equal(t, lastAccessAt.Local().Format(time.DateTime), ev.Fields["last_active"])
+	assert.Equal(t, false, ev.Fields["access_stale"])
+	assert.IsType(t, int64(0), ev.Fields["days_remaining"])
 }
 
 func TestEffectiveLastActiveV1Compat(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -167,6 +168,11 @@ func TestDoubanBackoffAndAlert(t *testing.T) {
 	require.Len(t, e.notices, 1, "异常只通知一次")
 	assert.Equal(t, NoticeDoubanAbnormal, e.notices[0].Kind)
 	assert.Contains(t, e.notices[0].Body, "QA：连续 3 次")
+	require.NotNil(t, e.notices[0].Event)
+	assert.Equal(t, notify.EventDoubanFailed, e.notices[0].Event.Type)
+	assert.Equal(t, "QA", e.notices[0].Event.Fields["source"])
+	assert.Equal(t, int64(3), e.notices[0].Event.Fields["fails"])
+	assert.NotEmpty(t, e.notices[0].Event.Fields["error"])
 
 	fail.Store(false)
 	e.svc.doubanDue(e.ctx)

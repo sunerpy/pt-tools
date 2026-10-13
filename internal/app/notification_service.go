@@ -30,6 +30,8 @@ func publishNotificationConfigChanged() {
 // Notification 是 NotificationService 与 NotifyManager 之间传递的最小消息载荷。
 // TODO(T15): 替换为 internal/notify 包内的 notify.Notification 完整结构。
 type Notification struct {
+	// Event 是这条通知对应的事件（消息模板与 Webhook 请求体用）；没有时照内置的标题与正文发。
+	Event        *notify.Event     `json:"event,omitempty"`
 	Title        string            `json:"title"`
 	Text         string            `json:"text"`
 	SourceConfID uint              `json:"source_conf_id,omitempty"`
@@ -428,6 +430,7 @@ func (s *notificationService) TestConf(ctx context.Context, id uint) error {
 		}
 	}
 	return s.PushSync(ctx, Notification{
+		Event:        notify.NewEvent(notify.EventTest, time.Now(), map[string]any{"channel": row.Name}),
 		Title:        "pt-tools 测试通知",
 		Text:         "如果你看到此消息，说明通道配置正常。",
 		SourceConfID: row.ID,

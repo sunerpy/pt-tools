@@ -10,6 +10,8 @@ type ChatOpsDeps struct {
 	NotificationSvc app.NotificationService
 	BindingSvc      app.BindingService
 	AuditSvc        app.AuditService
+	// TemplateSvc 是全局消息模板（M21）；为 nil 时模板接口回 503
+	TemplateSvc app.TemplateService
 }
 
 func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth func(http.Handler) http.Handler) {
@@ -28,6 +30,11 @@ func RegisterChatOpsRoutes(mux *http.ServeMux, deps *ChatOpsDeps, requireAuth fu
 	mux.Handle("PUT /api/chatops/notifications/{id}", wrap(h.updateNotification))
 	mux.Handle("DELETE /api/chatops/notifications/{id}", wrap(h.deleteNotification))
 	mux.Handle("POST /api/chatops/notifications/{id}/test", wrap(h.testNotification))
+
+	mux.Handle("GET /api/chatops/templates", wrap(h.listTemplates))
+	mux.Handle("POST /api/chatops/templates/preview", wrap(h.previewTemplate))
+	mux.Handle("PUT /api/chatops/templates/{type}", wrap(h.saveTemplate))
+	mux.Handle("DELETE /api/chatops/templates/{type}", wrap(h.resetTemplate))
 
 	mux.Handle("GET /api/chatops/bindings", wrap(h.listBindings))
 	mux.Handle("POST /api/chatops/bindings/issue-code", wrap(h.issueBindCode))

@@ -210,7 +210,7 @@ type slowSender struct {
 	sent  []uint
 }
 
-func (s *slowSender) Send(_ context.Context, confID uint, _, _ string) error {
+func (s *slowSender) Send(_ context.Context, confID uint, _ MonitorMessage) error {
 	s.sent = append(s.sent, confID)
 	s.clock.Advance(s.step)
 	return nil

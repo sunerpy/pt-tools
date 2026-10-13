@@ -19,6 +19,7 @@ import (
 
 	"github.com/sunerpy/pt-tools/internal/crypto"
 	"github.com/sunerpy/pt-tools/internal/events"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 )
 
@@ -386,6 +387,11 @@ func TestTestConf_TelegramWithDefaultChatID(t *testing.T) {
 	svc := NewNotificationService(db, mgr, 0)
 	require.NoError(t, svc.TestConf(context.Background(), row.ID))
 	assert.Contains(t, mgr.calls, row.ID)
+	// 测试通知带着 test 事件，变量 channel 是通道名
+	require.Len(t, mgr.sent, 1)
+	require.NotNil(t, mgr.sent[0].Event)
+	assert.Equal(t, notify.EventTest, mgr.sent[0].Event.Type)
+	assert.Equal(t, "tg", mgr.sent[0].Event.Fields["channel"])
 }
 
 func TestTestConf_QQWithAdminUsers(t *testing.T) {
@@ -535,6 +541,7 @@ func setupTestKey(t *testing.T) {
 type mockNotifyManager struct {
 	mu        sync.Mutex
 	calls     []uint
+	sent      []Notification
 	delay     time.Duration
 	returnErr error
 }
@@ -542,6 +549,7 @@ type mockNotifyManager struct {
 func (m *mockNotifyManager) Send(ctx context.Context, confID uint, n Notification) error {
 	m.mu.Lock()
 	m.calls = append(m.calls, confID)
+	m.sent = append(m.sent, n)
 	delay := m.delay
 	retErr := m.returnErr
 	m.mu.Unlock()

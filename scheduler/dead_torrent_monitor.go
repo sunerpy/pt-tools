@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sunerpy/pt-tools/internal/dlassistant"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/sitelogin"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -211,11 +212,13 @@ func (m *DeadTorrentMonitor) notify(ctx context.Context, dlName string, dead []d
 	sum := sha1.Sum([]byte(strings.Join(hashes, ",")))
 	var total int64
 	lines := make([]string, 0, deadTorrentListMax+1)
+	items := make([]map[string]any, 0, len(dead))
 	for i, d := range dead {
 		total += d.Size
 		if i < deadTorrentListMax {
 			lines = append(lines, "· "+d.Name)
 		}
+		items = append(items, map[string]any{"name": d.Name, "size": utils.FormatBytes(d.Size), "size_bytes": d.Size})
 	}
 	if len(dead) > deadTorrentListMax {
 		lines = append(lines, fmt.Sprintf("· 其余 %d 个省略", len(dead)-deadTorrentListMax))
@@ -231,6 +234,9 @@ func (m *DeadTorrentMonitor) notify(ctx context.Context, dlName string, dead []d
 		Title:    "下载器助手：发现失效种子",
 		Text:     text,
 		ConfIDs:  channels,
+		Event: notify.NewEvent(notify.EventDeadTorrents, m.cfg.Clock.Now(), map[string]any{
+			"downloader": dlName, "count": len(dead), "size": utils.FormatBytes(total), "size_bytes": total, "items": items,
+		}),
 	})
 	switch {
 	case err != nil:

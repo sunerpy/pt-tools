@@ -19,6 +19,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/scrape"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
 	"github.com/sunerpy/pt-tools/internal/media/transfer"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
 )
@@ -1097,6 +1098,7 @@ func (s *Service) notify(ctx context.Context, p *Plan, created []*PlanItem) stri
 	}
 	n := Notice{Key: fmt.Sprintf("%s:%d", p.Hash, created[0].HistoryID), ChannelIDs: settings.NotifyChannels}
 	n.Title, n.Text = noticeText(p, created)
+	n.Event = noticeEvent(s.cfg.Now(), p, created)
 	if err := s.cfg.Notify(ctx, n); err != nil {
 		return "入库通知没有发出：" + err.Error()
 	}
@@ -1104,6 +1106,28 @@ func (s *Service) notify(ctx context.Context, p *Plan, created []*PlanItem) stri
 }
 
 // noticeText 是入库通知的标题与正文：条目、季集、画质、媒体库、来源种子，最后是海报地址。
+// noticeEvent 是入库通知的事件变量，和 noticeText 用同样的数据。
+func noticeEvent(at time.Time, p *Plan, created []*PlanItem) *notify.Event {
+	m := p.Match
+	name := m.Title
+	if m.Year > 0 {
+		name = fmt.Sprintf("%s (%d)", m.Title, m.Year)
+	}
+	episodes := ""
+	if m.MediaType == tmdb.KindTV {
+		eps := make([]string, 0, len(created))
+		for _, it := range created {
+			eps = append(eps, transfer.SeasonEpisode(it.Season, it.Episode, it.EpisodeEnd))
+		}
+		episodes = strings.Join(eps, "、")
+	}
+	return notify.NewEvent(notify.EventMediaOrganized, at, map[string]any{
+		"name": name, "media_type": m.MediaType, "episodes": episodes, "files": len(created),
+		"quality": vars(m, created[0].meta, p.meta).Quality, "library": p.Library.Name, "torrent": p.Name,
+		"poster": tmdb.PosterURL(m.PosterPath, "w500"),
+	})
+}
+
 func noticeText(p *Plan, created []*PlanItem) (string, string) {
 	m := p.Match
 	name := m.Title

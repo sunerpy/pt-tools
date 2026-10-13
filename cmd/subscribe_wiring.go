@@ -182,7 +182,7 @@ func subscribeNotifier(n *scheduler.MonitorNotifier) subscribe.Notifier {
 		}
 		_, err := n.Enqueue(ctx, scheduler.MonitorNotifyEntry{
 			Source: "media", Subject: subject, Kind: no.Kind, EventKey: no.EventKey,
-			Title: no.Title, Text: text, ConfIDs: no.Channels,
+			Title: no.Title, Text: text, ConfIDs: no.Channels, Event: no.Event,
 		})
 		return err
 	}

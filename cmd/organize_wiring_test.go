@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,7 @@ import (
 	"github.com/sunerpy/pt-tools/core"
 	"github.com/sunerpy/pt-tools/global"
 	"github.com/sunerpy/pt-tools/internal/media/organize"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	"github.com/sunerpy/pt-tools/scheduler"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -96,13 +98,14 @@ func TestOrganizeDownloaders(t *testing.T) {
 func TestOrganizeNotifier(t *testing.T) {
 	db := organizeTestDB(t)
 	assert.Nil(t, organizeNotifier(nil), "没有投递器时不发")
-	n := scheduler.NewMonitorNotifier(db, scheduler.MonitorSenderFunc(func(context.Context, uint, string, string) error { return nil }), nil, nil)
+	n := scheduler.NewMonitorNotifier(db, scheduler.MonitorSenderFunc(func(context.Context, uint, scheduler.MonitorMessage) error { return nil }), nil, nil)
 	conf := models.NotificationConf{Name: "tg", ChannelType: "telegram", Enabled: true}
 	require.NoError(t, db.Create(&conf).Error)
-	notify := organizeNotifier(n)
-	require.NotNil(t, notify)
-	require.NoError(t, notify(context.Background(), organize.Notice{Key: "abc:1", Title: "入库：奥本海默 (2023)", Text: "电影", ChannelIDs: []uint{conf.ID}}))
-	require.NoError(t, notify(context.Background(), organize.Notice{Key: "abc:1", Title: "入库：奥本海默 (2023)", Text: "电影", ChannelIDs: []uint{conf.ID}}))
+	send := organizeNotifier(n)
+	require.NotNil(t, send)
+	ev := notify.NewEvent(notify.EventMediaOrganized, time.Now(), map[string]any{"name": "奥本海默 (2023)", "files": 1})
+	require.NoError(t, send(context.Background(), organize.Notice{Key: "abc:1", Title: "入库：奥本海默 (2023)", Text: "电影", ChannelIDs: []uint{conf.ID}, Event: ev}))
+	require.NoError(t, send(context.Background(), organize.Notice{Key: "abc:1", Title: "入库：奥本海默 (2023)", Text: "电影", ChannelIDs: []uint{conf.ID}, Event: ev}))
 	var rows []models.MonitorNotificationLog
 	require.NoError(t, db.Find(&rows).Error)
 	require.Len(t, rows, 1, "同一批只写一行")
@@ -111,6 +114,8 @@ func TestOrganizeNotifier(t *testing.T) {
 	assert.Equal(t, conf.ID, rows[0].NotificationConfID)
 	assert.Equal(t, "abc", rows[0].Subject)
 	assert.Equal(t, "abc:1", rows[0].EventKey)
+	assert.Contains(t, rows[0].PayloadJSON, `"type":"media.organized"`, "事件一起写进日志行")
+	assert.Contains(t, rows[0].PayloadJSON, `"files":1`)
 }
 
 type organizeFakeDL struct {

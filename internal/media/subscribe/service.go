@@ -18,6 +18,7 @@ import (
 	"github.com/sunerpy/pt-tools/internal/media/organize"
 	"github.com/sunerpy/pt-tools/internal/media/recognize"
 	"github.com/sunerpy/pt-tools/internal/media/tmdb"
+	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/models"
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 	"github.com/sunerpy/pt-tools/thirdpart/downloader"
@@ -76,6 +77,8 @@ type Notice struct {
 	Title    string
 	Body     string
 	ImageURL string
+	// Event 是这条通知对应的事件（消息模板用）
+	Event *notify.Event
 }
 
 // 通知的种类。
