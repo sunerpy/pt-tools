@@ -422,3 +422,27 @@ func TestWebhook_ResponseCapAndNoRedirect(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "302")
 }
+
+// 太短的凭证（Bearer abc 里的 abc）没法放心替换：原因里出现它时整段不显示；普通的短查询参数（v=1）不算凭证
+func TestWebhook_FailureReasonShortSecret(t *testing.T) {
+	var echo string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(echo))
+	}))
+	t.Cleanup(srv.Close)
+	w := channelFor(t, map[string]any{
+		"endpoint_url":     srv.URL + "/hook?v=1",
+		"headers":          map[string]string{"Authorization": "Bearer abc"},
+		"success_template": `{{.json.msg}}`,
+	})
+	echo = `{"msg":"token abc is invalid"}`
+	err := w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.NotContains(t, err.Error(), "abc")
+	assert.Contains(t, err.Error(), "不显示")
+
+	echo = `{"msg":"quota 1 left"}`
+	err = w.Send(context.Background(), sampleNotification(notify.EventTest))
+	require.ErrorIs(t, err, errResponseRejected)
+	assert.Contains(t, err.Error(), "quota 1 left", "普通的短查询参数不触发")
+}

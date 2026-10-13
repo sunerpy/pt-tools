@@ -166,47 +166,54 @@ func responseData(status int, body []byte) map[string]any {
 // credentialKey 认出请求体里放凭证的字段名（token、key、secret、password、sign 一类）
 var credentialKey = regexp.MustCompile(`(?i)(token|key|secret|passw|pwd|auth|sign|credential|cookie|session)`)
 
+// secretValue 是这次请求里可能是凭证的一个值。credential 表示它来自凭证的位置（请求头、HMAC Secret、
+// 字段名像凭证的查询参数与请求体字段、较长的路径段），不是普通的查询参数。
+type secretValue struct {
+	value      string
+	credential bool
+}
+
 // sensitiveValues 是这次请求里可能是凭证的值：地址查询的每个值与较长的路径段（Discord 这类把 token 放在路径里）、
 // 自定义请求头的值、HMAC Secret，以及请求体里字段名像凭证的值（JSON 的任意一层与表单）。对方的响应把它们回显时要去掉。
-func sensitiveValues(r *rendered, cfg *Config) []string {
-	var out []string
-	add := func(v string) {
-		if v = strings.TrimSpace(v); len(v) >= 4 {
-			out = append(out, v)
+func sensitiveValues(r *rendered, cfg *Config) []secretValue {
+	var out []secretValue
+	add := func(v string, credential bool) {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, secretValue{value: v, credential: credential})
 		}
 	}
 	if u, err := url.Parse(r.URL); err == nil {
-		for _, vs := range u.Query() {
+		for k, vs := range u.Query() {
 			for _, v := range vs {
-				add(v)
+				add(v, credentialKey.MatchString(k))
 			}
 		}
 		for _, seg := range strings.Split(u.Path, "/") {
 			if len(seg) >= 16 {
-				add(seg)
+				add(seg, true)
 			}
 		}
 	}
 	for _, v := range cfg.Headers {
-		add(v)
+		add(v, true)
 		// 「Bearer xxx」「Basic xxx」：对方多半只回显后面那一段
 		for _, f := range strings.Fields(v) {
 			switch strings.ToLower(f) {
 			case "bearer", "basic", "token", "digest":
 				continue
 			}
-			add(f)
+			add(f, true)
 		}
 	}
-	add(cfg.HMACSecret)
+	add(cfg.HMACSecret, true)
 	var v any
 	if json.Unmarshal(r.Body, &v) == nil {
-		collectCredentials(v, "", add)
+		collectCredentials(v, "", func(s string) { add(s, true) })
 	} else if form, err := url.ParseQuery(string(r.Body)); err == nil {
 		for k, vs := range form {
 			if credentialKey.MatchString(k) {
 				for _, x := range vs {
-					add(x)
+					add(x, true)
 				}
 			}
 		}
@@ -231,11 +238,20 @@ func collectCredentials(v any, key string, add func(string)) {
 	}
 }
 
+// errReasonHidden 是失败原因里认不准有没有凭证时给的固定说法
+var errReasonHidden = fmt.Errorf("%w（对方返回的原因里可能有凭证，不显示）", errResponseRejected)
+
 // scrubError 把错误里出现的凭证值换成 ***，再按通用规则（redact.Secrets）去掉看起来像凭证的内容。
-func scrubError(err error, secrets []string) error {
+// 太短的凭证（不到 4 个字符）没法放心地替换（会误伤原因里的普通文字），原因里出现它时整段不显示。
+func scrubError(err error, secrets []secretValue) error {
 	msg := err.Error()
 	for _, s := range secrets {
-		msg = strings.ReplaceAll(msg, s, "***")
+		switch {
+		case len(s.value) >= 4:
+			msg = strings.ReplaceAll(msg, s.value, "***")
+		case s.credential && strings.Contains(msg, s.value):
+			return errReasonHidden
+		}
 	}
 	msg = redact.Secrets(msg)
 	if errors.Is(err, errResponseRejected) {
