@@ -3,7 +3,9 @@ package tmpl
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,4 +219,73 @@ func TestIntermediateLimits(t *testing.T) {
 	for src, want := range ok {
 		assert.Equal(t, want, render(t, src, Body), src)
 	}
+}
+
+// withItems 是 data()，列表换成 n 项（真实通知的列表最多 MaxList 项）
+func withItems(n int) map[string]any {
+	d := data()
+	items := make([]any, n)
+	for i := range items {
+		items[i] = map[string]any{"site": fmt.Sprintf("s%d", i), "size_bytes": int64(i)}
+	}
+	d["items"] = items
+	return d
+}
+
+// 一次渲染里所有函数共用一份工作量预算：单个函数的上限管不到循环，两层 range 里每次都对 64 KiB 的变量调函数，
+// 没有这份预算一次渲染就要分配上 G。预算按每次渲染算，同一个模板可以同时渲染。
+func TestRenderBudget(t *testing.T) {
+	const b64k = `{{$b := replace " " (printf "%256s" "") (printf "%256s" "")}}`
+	full := withItems(MaxList)
+	exec := func(src string, d map[string]any) (string, error) {
+		t.Helper()
+		tp, err := Parse(src, Text, lists)
+		require.NoError(t, err, src)
+		return tp.Execute(d)
+	}
+
+	// 第 2 轮评审给的写法：每次 split 都要建 65536 项的列表，100×100 次
+	_, err := exec(b64k+`{{range .items}}{{range $.items}}{{$x := split "" $b}}{{end}}{{end}}x`, full)
+	assert.ErrorIs(t, err, ErrInvalid)
+	assert.ErrorContains(t, err, "函数处理的内容太多")
+	// 不写输出的比较也算：每次比较两个 64 KiB 的字符串
+	_, err = exec(b64k+`{{$c := printf "%s" $b}}{{range .items}}{{range $.items}}{{if eq $b $c}}{{end}}{{end}}{{end}}`, full)
+	assert.ErrorContains(t, err, "函数处理的内容太多")
+	_, err = exec(b64k+`{{range .items}}{{range $.items}}{{$x := upper $b}}{{end}}{{end}}`, full)
+	assert.ErrorContains(t, err, "函数处理的内容太多")
+
+	// 正常的两层循环用不了多少
+	out, err := exec(`{{range .items}}{{range $.items}}{{if eq .site $.site}}{{end}}{{if contains .site $.text}}{{end}}{{end}}{{end}}ok`, full)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", out)
+
+	// 一次渲染用掉一大半预算（20 次 upper，每次 128 KiB），渲染两次都行：预算不跨渲染
+	tp, err := Parse(b64k+`{{range .items}}{{$x := upper $b}}{{end}}ok`, Text, lists)
+	require.NoError(t, err)
+	for range 2 {
+		got, rerr := tp.Execute(withItems(20))
+		require.NoError(t, rerr)
+		assert.Equal(t, "ok", got)
+	}
+
+	// 同一个模板同时渲染（-race 检查）
+	tp, err = Parse(`{{range .items}}{{upper .site}}{{end}}`, Text, lists)
+	require.NoError(t, err)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, rerr := tp.Execute(data())
+			assert.NoError(t, rerr)
+			assert.Equal(t, "AB", got)
+		}()
+	}
+	wg.Wait()
+
+	// 解析时绑定的函数没有预算，被调用就报错
+	upper, ok := funcs(nil)["upper"].(func(any) (string, error))
+	require.True(t, ok)
+	_, err = upper("x")
+	assert.ErrorIs(t, err, errNoBudget)
 }

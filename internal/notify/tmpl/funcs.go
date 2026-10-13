@@ -13,37 +13,38 @@ import (
 	"unicode/utf8"
 )
 
-// funcs 是模板能用的函数。eq/ne/lt/le/gt/ge 换成认数字的版本（整数与浮点数可以直接比），
-// printf 限制宽度与精度，call 不让用（数据里没有函数，留着只会让人困惑）。
-// 内置的 print、println、html、js、urlquery 会把所有参数连成一串，换成限制了参数合计与结果长度的版本。
-func funcs() template.FuncMap {
+// funcs 是模板能用的函数，b 是这一次渲染的工作量预算（解析时传 nil：那时只用到函数名，见 Template.exec）。
+// eq/ne/lt/le/gt/ge 换成认数字的版本（整数与浮点数可以直接比），printf 限制宽度与精度，
+// call 不让用（数据里没有函数，留着只会让人困惑）；内置的 print、println、html、js、urlquery 会把所有参数连成一串，
+// 也换成有上限的版本。处理文字与列表的函数都按参数与结果的大小扣同一份预算。
+func funcs(b *budget) template.FuncMap {
 	return template.FuncMap{
-		"json":      toJSON,
+		"json":      b.toJSON,
 		"default":   dflt,
-		"truncate":  truncate,
-		"upper":     func(s any) (string, error) { return capped(strings.ToUpper(str(s))) },
-		"lower":     func(s any) (string, error) { return capped(strings.ToLower(str(s))) },
-		"trim":      func(s any) string { return strings.TrimSpace(str(s)) },
-		"replace":   replace,
-		"contains":  func(sub string, s any) bool { return strings.Contains(str(s), sub) },
-		"hasPrefix": func(p string, s any) bool { return strings.HasPrefix(str(s), p) },
-		"hasSuffix": func(p string, s any) bool { return strings.HasSuffix(str(s), p) },
-		"join":      join,
-		"split":     func(sep string, s any) []string { return strings.Split(str(s), sep) },
+		"truncate":  b.truncate,
+		"upper":     b.convert(strings.ToUpper),
+		"lower":     b.convert(strings.ToLower),
+		"trim":      b.convert(strings.TrimSpace),
+		"replace":   b.replace,
+		"contains":  b.test(strings.Contains),
+		"hasPrefix": b.test(strings.HasPrefix),
+		"hasSuffix": b.test(strings.HasSuffix),
+		"join":      b.join,
+		"split":     b.split,
 		"bytes":     humanBytes,
-		"date":      date,
-		"printf":    safePrintf,
-		"print":     bounded(fmt.Sprint),
-		"println":   bounded(fmt.Sprintln),
-		"html":      bounded(template.HTMLEscaper),
-		"js":        bounded(template.JSEscaper),
-		"urlquery":  bounded(template.URLQueryEscaper),
-		"eq":        eq,
-		"ne":        ne,
-		"lt":        func(a, b any) (bool, error) { return order(a, b, func(c int) bool { return c < 0 }) },
-		"le":        func(a, b any) (bool, error) { return order(a, b, func(c int) bool { return c <= 0 }) },
-		"gt":        func(a, b any) (bool, error) { return order(a, b, func(c int) bool { return c > 0 }) },
-		"ge":        func(a, b any) (bool, error) { return order(a, b, func(c int) bool { return c >= 0 }) },
+		"date":      b.date,
+		"printf":    b.printf,
+		"print":     b.concat(fmt.Sprint),
+		"println":   b.concat(fmt.Sprintln),
+		"html":      b.concat(template.HTMLEscaper),
+		"js":        b.concat(template.JSEscaper),
+		"urlquery":  b.concat(template.URLQueryEscaper),
+		"eq":        b.eq,
+		"ne":        b.compare(ne),
+		"lt":        b.compare(orderBy(func(c int) bool { return c < 0 })),
+		"le":        b.compare(orderBy(func(c int) bool { return c <= 0 })),
+		"gt":        b.compare(orderBy(func(c int) bool { return c > 0 })),
+		"ge":        b.compare(orderBy(func(c int) bool { return c >= 0 })),
 		"call":      func(...any) (string, error) { return "", errors.New("不支持 call") },
 	}
 }
@@ -59,44 +60,78 @@ func str(v any) string {
 	return fmt.Sprint(v)
 }
 
-// maxIntermediate 是会让结果变长的函数的结果上限，也是把参数连成一串的函数的参数合计上限。
-// 函数的结果还能交给别的函数、同一个长字符串还能作为参数写很多遍，最终输出的上限管不到这些中间结果：
-// 没有这一条，replace、printf、html 这类可以先造出几百 G 的字符串。和最大的输出上限（请求体）一样大。
-const maxIntermediate = 64 << 10
+const (
+	// maxIntermediate 是一个函数的结果上限，也是把参数连成一串的函数的参数合计上限：
+	// 函数的结果还能交给别的函数、同一个长字符串还能作为参数写很多遍，最终输出的上限管不到这些中间结果。
+	// 和最大的输出上限（请求体）一样大。
+	maxIntermediate = 64 << 10
+	// maxWork 是一次渲染里所有函数合计能处理的字节数（参数加结果）。单个函数的上限管不到循环：
+	// 两层 range 里每次都对一个 64 KiB 的变量调函数，一次渲染就要处理几个 G。
+	maxWork = 4 << 20
+	// elemOverhead 是列表与对象的每一项另算的字节数（字符串头的大小）：拆出很多个短字符串也占内存。
+	elemOverhead = 16
+)
 
 var (
 	errTooLongResult = fmt.Errorf("结果太长：一个函数的结果最多 %d 字节", maxIntermediate)
 	errTooLongArgs   = fmt.Errorf("参数太长：一个函数的参数合计最多 %d 字节", maxIntermediate)
+	errTooMuchWork   = fmt.Errorf("函数处理的内容太多：一次渲染里所有函数的参数与结果合计最多 %d 字节", maxWork)
+	errNoBudget      = errors.New("模板函数只能在渲染时调用")
 )
 
-func capped(s string) (string, error) {
+// budget 是一次渲染的工作量预算，这次渲染里的所有函数共用；每次渲染都重新建一份。
+type budget struct{ left int }
+
+func newBudget() *budget { return &budget{left: maxWork} }
+
+// spend 扣掉 n 字节，不够就报错。没有预算（解析时绑定的函数被调用了）也报错。
+func (b *budget) spend(n int) error {
+	if b == nil {
+		return errNoBudget
+	}
+	if n > b.left {
+		b.left = 0
+		return errTooMuchWork
+	}
+	b.left -= n
+	return nil
+}
+
+// args 在调用之前按参数的大小扣预算。
+func (b *budget) args(vs ...any) error {
+	n := 0
+	for _, v := range vs {
+		n += argSize(v)
+	}
+	return b.spend(n)
+}
+
+// result 在调用之后按结果的大小扣预算，并检查一个结果的上限。
+func (b *budget) result(s string, err error) (string, error) {
+	if err != nil {
+		return "", err
+	}
 	if len(s) > maxIntermediate {
 		return "", errTooLongResult
+	}
+	if err := b.spend(len(s)); err != nil {
+		return "", err
 	}
 	return s, nil
 }
 
-// bounded 给把参数连成一串的函数（print、html 这些）加上限：先查参数合计，再查结果。
-func bounded(f func(...any) string) func(...any) (string, error) {
-	return func(args ...any) (string, error) {
-		if err := checkArgs(args); err != nil {
-			return "", err
-		}
-		return capped(f(args...))
-	}
-}
-
-func checkArgs(args []any) error {
+// argsSize 是参数合计的大小，超过一次调用的上限就报错。
+func argsSize(args []any) (int, error) {
 	size := 0
 	for _, a := range args {
 		if size += argSize(a); size > maxIntermediate {
-			return errTooLongArgs
+			return 0, errTooLongArgs
 		}
 	}
-	return nil
+	return size, nil
 }
 
-// argSize 估算值写成文字有多长：字符串按字节数，列表与对象按各项之和，数字、真假值按 24 字节。
+// argSize 估算值有多大：字符串按字节数，列表与对象按各项之和、每项另加 elemOverhead，数字、真假值按 24 字节。
 func argSize(v any) int {
 	if v == nil {
 		return 0
@@ -111,38 +146,110 @@ func argSize(v any) int {
 	case reflect.Slice, reflect.Array:
 		n := 0
 		for i := range r.Len() {
-			n += 1 + argSize(r.Index(i).Interface())
+			n += elemOverhead + argSize(r.Index(i).Interface())
 		}
 		return n
 	case reflect.Map:
 		n := 0
 		for it := r.MapRange(); it.Next(); {
-			n += 2 + argSize(it.Key().Interface()) + argSize(it.Value().Interface())
+			n += elemOverhead + argSize(it.Key().Interface()) + argSize(it.Value().Interface())
 		}
 		return n
 	}
 	return 24
 }
 
+// concat 是把参数连成一串的函数（print、html 这些）：参数合计与结果都有上限。
+func (b *budget) concat(f func(...any) string) func(...any) (string, error) {
+	return func(args ...any) (string, error) {
+		size, err := argsSize(args)
+		if err != nil {
+			return "", err
+		}
+		if err := b.spend(size); err != nil {
+			return "", err
+		}
+		return b.result(f(args...), nil)
+	}
+}
+
+// convert 是 upper、lower、trim。
+func (b *budget) convert(f func(string) string) func(any) (string, error) {
+	return func(s any) (string, error) {
+		if err := b.args(s); err != nil {
+			return "", err
+		}
+		return b.result(f(str(s)), nil)
+	}
+}
+
+// test 是 contains、hasPrefix、hasSuffix：模板里先写要找的，再写在哪里找（{{if contains "2160p" .torrent_title}}）。
+func (b *budget) test(f func(s, sub string) bool) func(string, any) (bool, error) {
+	return func(sub string, s any) (bool, error) {
+		if err := b.args(sub, s); err != nil {
+			return false, err
+		}
+		return f(str(s), sub), nil
+	}
+}
+
+// compare 给比较记账：比较两个长字符串也要逐字节看。
+func (b *budget) compare(f func(x, y any) (bool, error)) func(x, y any) (bool, error) {
+	return func(x, y any) (bool, error) {
+		if err := b.args(x, y); err != nil {
+			return false, err
+		}
+		return f(x, y)
+	}
+}
+
+func (b *budget) eq(x any, ys ...any) (bool, error) {
+	if err := b.args(x); err != nil {
+		return false, err
+	}
+	if err := b.args(ys...); err != nil {
+		return false, err
+	}
+	return eq(x, ys...)
+}
+
 // toJSON 是值的 JSON 写法（字符串带引号、转义好），用在请求体里：{"content": {{json .text}}}。
-func toJSON(v any) (string, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
+func (b *budget) toJSON(v any) (string, error) {
+	if err := b.args(v); err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
 		return "", err
 	}
-	return capped(strings.TrimSuffix(b.String(), "\n"))
+	return b.result(strings.TrimSuffix(buf.String(), "\n"), nil)
 }
 
 // replace 把 s 里的 old 全部换成 repl；先算出结果多长，超过上限就不做（old 为空时每个字符之间都插一份 repl）。
-func replace(old, repl string, s any) (string, error) {
+func (b *budget) replace(old, repl string, s any) (string, error) {
+	if err := b.args(old, repl, s); err != nil {
+		return "", err
+	}
 	text := str(s)
 	n := strings.Count(text, old)
 	if size := len(text) + n*(len(repl)-len(old)); size > maxIntermediate {
 		return "", errTooLongResult
 	}
-	return strings.ReplaceAll(text, old, repl), nil
+	return b.result(strings.ReplaceAll(text, old, repl), nil)
+}
+
+// split 按 sep 拆成列表；列表的每一项也按 elemOverhead 记账（按空串拆，每个字符都是一项）。
+func (b *budget) split(sep string, s any) ([]string, error) {
+	if err := b.args(sep, s); err != nil {
+		return nil, err
+	}
+	text := str(s)
+	if err := b.spend(elemOverhead * (strings.Count(text, sep) + 1)); err != nil {
+		return nil, err
+	}
+	return strings.Split(text, sep), nil
 }
 
 // dflt 是 default：值为空（nil、空串、0、false、空列表）时用 def。写法：{{.rule | default "无"}}。
@@ -174,27 +281,33 @@ func empty(v any) bool {
 }
 
 // truncate 按字符截断，截掉了就补「…」。写法：{{.text | truncate 100}}。
-func truncate(n, s any) (string, error) {
+func (b *budget) truncate(n, s any) (string, error) {
 	limit, ok := toInt(n)
 	if !ok || limit < 0 {
 		return "", fmt.Errorf("truncate 的长度要是非负整数，给的是 %v", n)
+	}
+	if err := b.args(s); err != nil {
+		return "", err
 	}
 	text := str(s)
 	if utf8.RuneCountInString(text) <= int(limit) {
 		return text, nil
 	}
 	runes := []rune(text)
-	return string(runes[:limit]) + "…", nil
+	return b.result(string(runes[:limit])+"…", nil)
 }
 
 // join 把列表的各项用 sep 连起来。
-func join(sep string, list any) (string, error) {
+func (b *budget) join(sep string, list any) (string, error) {
 	if list == nil {
 		return "", nil
 	}
 	r := reflect.ValueOf(list)
 	if r.Kind() != reflect.Slice && r.Kind() != reflect.Array {
 		return "", fmt.Errorf("join 要的是列表，给的是 %T", list)
+	}
+	if err := b.args(sep, list); err != nil {
+		return "", err
 	}
 	parts := make([]string, r.Len())
 	size := 0
@@ -207,7 +320,7 @@ func join(sep string, list any) (string, error) {
 			return "", errTooLongResult
 		}
 	}
-	return strings.Join(parts, sep), nil
+	return b.result(strings.Join(parts, sep), nil)
 }
 
 // humanBytes 把字节数写成「15.00 GB」（和 RSS 通知里的写法一样）。
@@ -229,17 +342,24 @@ func humanBytes(v any) (string, error) {
 }
 
 // date 按 Go 的版式写时间：v 是秒级时间戳，或者 RFC3339 / 「2006-01-02 15:04:05」写法的时间。写法：{{date "01-02 15:04" .timestamp}}。
-func date(layout string, v any) (string, error) {
+func (b *budget) date(layout string, v any) (string, error) {
+	if err := b.args(layout); err != nil {
+		return "", err
+	}
+	return b.result(formatDate(layout, v))
+}
+
+func formatDate(layout string, v any) (string, error) {
 	switch t := v.(type) {
 	case time.Time:
-		return capped(t.Local().Format(layout))
+		return t.Local().Format(layout), nil
 	case string:
 		if t == "" {
 			return "", nil
 		}
 		for _, l := range []string{time.RFC3339Nano, time.DateTime} {
 			if at, err := time.ParseInLocation(l, t, time.Local); err == nil {
-				return capped(at.Local().Format(layout))
+				return at.Local().Format(layout), nil
 			}
 		}
 		return "", fmt.Errorf("date 读不懂这个时间：%q", t)
@@ -248,7 +368,7 @@ func date(layout string, v any) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("date 要的是时间戳或时间，给的是 %v", v)
 	}
-	return capped(time.Unix(int64(sec), 0).Local().Format(layout))
+	return time.Unix(int64(sec), 0).Local().Format(layout), nil
 }
 
 // maxFmtWidth 是 printf 的宽度与精度上限：不然 %999999999d 一下就要分配上 G 的内存
@@ -289,15 +409,19 @@ func checkFormat(format string) error {
 	return nil
 }
 
-// safePrintf 是限制了宽度与精度、参数合计与结果长度的 printf。
-func safePrintf(format string, args ...any) (string, error) {
+// printf 限制了宽度与精度、参数合计与结果长度。
+func (b *budget) printf(format string, args ...any) (string, error) {
 	if err := checkFormat(format); err != nil {
 		return "", err
 	}
-	if err := checkArgs(args); err != nil {
+	size, err := argsSize(args)
+	if err != nil {
 		return "", err
 	}
-	return capped(fmt.Sprintf(format, args...))
+	if err := b.spend(len(format) + size); err != nil {
+		return "", err
+	}
+	return b.result(fmt.Sprintf(format, args...), nil)
 }
 
 // eq 认数字：两边都是数字时按数值比（整数与浮点数可以比）；其他按同类比较。和内置的一样，可以给多个候选：eq .x 1 2 3。
@@ -320,6 +444,10 @@ func eq(a any, bs ...any) (bool, error) {
 func ne(a, b any) (bool, error) {
 	ok, err := equal(a, b)
 	return !ok, err
+}
+
+func orderBy(ok func(int) bool) func(a, b any) (bool, error) {
+	return func(a, b any) (bool, error) { return order(a, b, ok) }
 }
 
 func equal(a, b any) (bool, error) {

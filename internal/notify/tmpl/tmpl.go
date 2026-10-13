@@ -1,6 +1,6 @@
 // Package tmpl 是通知的模板引擎：Go 的 text/template，加上一组受控的函数与防护。
 // 用户写的模板在通知管线里执行，所以要保证它跑得完、输出有限：源码、输出与函数的中间结果都有上限，不能定义子模板，
-// range 只能遍历声明为列表的变量，整份模板按最坏情况算的迭代次数也有上限。
+// range 只能遍历声明为列表的变量，整份模板按最坏情况算的迭代次数也有上限，一次渲染里所有函数处理的字节数合计也有上限。
 package tmpl
 
 import (
@@ -78,7 +78,7 @@ func Parse(src string, kind Kind, lists map[string]bool) (*Template, error) {
 	if len(src) > MaxSource {
 		return nil, invalid("模板太长：最多 %d 字节", MaxSource)
 	}
-	t, err := template.New(name).Funcs(funcs()).Option("missingkey=zero").Parse(src)
+	t, err := template.New(name).Funcs(funcs(nil)).Option("missingkey=zero").Parse(src)
 	if err != nil {
 		return nil, invalid("%s", cleanErr(err))
 	}
@@ -96,19 +96,24 @@ const name = "模板"
 
 // Execute 渲染模板：变量缺了按零值处理（数据里已经放好所有事件的全部变量，正常不会缺）。
 func (t *Template) Execute(data any) (string, error) {
-	return t.exec(t.t, data)
+	return t.exec(data, false)
 }
 
 // Check 渲染一遍，变量名写错时报错：保存与预览用（示例数据里有全部变量）。
 func (t *Template) Check(data any) (string, error) {
-	c, err := t.t.Clone()
+	return t.exec(data, true)
+}
+
+// exec 每次都在模板的副本上绑定一份新的函数：函数共用这一次渲染的工作量预算。副本共用解析树，同一个模板可以同时渲染。
+func (t *Template) exec(data any, strict bool) (string, error) {
+	x, err := t.t.Clone()
 	if err != nil {
 		return "", invalid("%s", cleanErr(err))
 	}
-	return t.exec(c.Option("missingkey=error"), data)
-}
-
-func (t *Template) exec(x *template.Template, data any) (string, error) {
+	x.Funcs(funcs(newBudget()))
+	if strict {
+		x.Option("missingkey=error")
+	}
 	w := &capWriter{max: t.kind.Limit()}
 	if err := x.Execute(w, data); err != nil {
 		if errors.Is(err, errTooLong) {
