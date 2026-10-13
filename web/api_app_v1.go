@@ -82,6 +82,11 @@ func (s *Server) appRoutes() []appRoute {
 		{http.MethodPost, "/assistant/conversations/{id}/cancel", r, s.appAssistantCancel},
 		{http.MethodGet, "/assistant/conversations/{id}/events", r, s.appAssistantEvents},
 		{http.MethodPost, "/assistant/confirmations/{id}", w, s.appAssistantDecide},
+		// 消息模板（M22）：预览用 POST 传模板，但只读
+		{http.MethodGet, "/templates", r, s.appTemplates},
+		{http.MethodPost, "/templates/preview", r, s.appTemplatePreview},
+		{http.MethodPut, "/templates/{type}", w, s.appTemplateSave},
+		{http.MethodDelete, "/templates/{type}", w, s.appTemplateReset},
 	}
 }
 
@@ -292,7 +297,7 @@ type AppPrincipalV struct {
 }
 
 // appFeatures 是这个版本的 App API 提供的功能组。
-var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant"}
+var appFeatures = []string{"overview", "sites", "torrents", "downloaders", "tasks", "search", "push", "attendance", "brush", "media", "subscriptions", "updates", "assistant", "templates"}
 
 func (s *Server) appMeta(w http.ResponseWriter, r *http.Request) {
 	p := middleware.PrincipalFrom(r.Context())
