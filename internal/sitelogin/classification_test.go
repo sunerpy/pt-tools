@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	v2 "github.com/sunerpy/pt-tools/site/v2"
 )
@@ -40,4 +41,32 @@ func TestClassifyMTorrentError_DriverSentinels(t *testing.T) {
 	assert.Equal(t, KEY_ERROR, classifyMTorrentError(v2.ErrInvalidCredentials).Status)
 	assert.Equal(t, RATE_LIMITED, classifyMTorrentError(fmt.Errorf("HTTP 429: %w", v2.ErrRateLimited)).Status)
 	assert.Equal(t, NETWORK_ERROR, classifyMTorrentError(fmt.Errorf("%w: EOF", v2.ErrNetworkError)).Status)
+}
+
+// 登录后的页面取到了用户名、只是没有「最近动向」：只有 NexusPHP 按这次探测的时间记最近访问；
+// HDDolby、Rousi 走各自的 API，缺了最近访问照旧是解析失败；连用户名都没有时 NexusPHP 也是解析失败。
+func TestClassifyUserInfo_NoLastAccessButLoggedIn(t *testing.T) {
+	now := time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(now)
+	named := v2.UserInfo{Username: "someone"}
+
+	res := ClassifyUserInfo(&v2.SiteDefinition{Schema: v2.SchemaNexusPHP}, named, nil, clock)
+	assert.Equal(t, OK, res.Status)
+	require.NotNil(t, res.LastAccessAt)
+	assert.Equal(t, now, *res.LastAccessAt)
+	assert.Contains(t, res.Diagnostic, "最近动向")
+
+	for _, schema := range []v2.Schema{v2.SchemaHDDolby, v2.SchemaRousi} {
+		res = ClassifyUserInfo(&v2.SiteDefinition{Schema: schema}, named, nil, clock)
+		assert.Equal(t, PARSE_ERROR, res.Status, schema)
+		assert.Nil(t, res.LastAccessAt, schema)
+	}
+
+	res = ClassifyUserInfo(&v2.SiteDefinition{Schema: v2.SchemaNexusPHP}, v2.UserInfo{}, nil, clock)
+	assert.Equal(t, PARSE_ERROR, res.Status)
+	assert.Nil(t, res.LastAccessAt)
+
+	// 出错时不兜底（例如会话过期）
+	res = ClassifyUserInfo(&v2.SiteDefinition{Schema: v2.SchemaNexusPHP}, named, v2.ErrSessionExpired, clock)
+	assert.Equal(t, SESSION_EXPIRED, res.Status)
 }

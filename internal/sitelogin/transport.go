@@ -29,7 +29,11 @@ func (HTTPTransport) FetchUserInfo(ctx context.Context, def *v2.SiteDefinition, 
 	}
 
 	switch def.Schema {
-	case v2.SchemaNexusPHP, v2.SchemaHDDolby:
+	case v2.SchemaNexusPHP:
+		info, err := site.GetUserInfo(ctx)
+		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
+		return withNexusPHPAccessFallback(result, info, err, clock), nil
+	case v2.SchemaHDDolby:
 		return ProbeNexusPHP(ctx, site, clock, ProbeSourceHTTPCookie)
 	case v2.SchemaRousi:
 		return ProbeNexusPHP(ctx, site, clock, ProbeSourceHTTPAPIKey)
@@ -50,7 +54,10 @@ func ClassifyUserInfo(def *v2.SiteDefinition, info v2.UserInfo, err error, clock
 		return &ProbeResult{Status: UNKNOWN, Diagnostic: "nil site definition"}
 	}
 	switch def.Schema {
-	case v2.SchemaNexusPHP, v2.SchemaHDDolby:
+	case v2.SchemaNexusPHP:
+		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
+		return withNexusPHPAccessFallback(result, info, err, clock)
+	case v2.SchemaHDDolby:
 		result, _ := classifyNexusPHPResult(info, err, clock, ProbeSourceHTTPCookie)
 		return result
 	case v2.SchemaRousi:
