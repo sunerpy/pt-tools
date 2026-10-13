@@ -42,7 +42,7 @@
 pt-tools 不在浏览器能直接访问的地方（例如浏览器在公司、pt-tools 在家里的 NAS），或者别的工具也要用这些 Cookie 时，可以让扩展把 Cookie 加密以后上传到你自己的 [CookieCloud](https://github.com/easychen/CookieCloud) 服务端，pt-tools 再从那里取回，见 [CookieCloud 导入](cookiecloud.md)。不用另装 CookieCloud 扩展。
 
 1. 在「全局设置」的「CookieCloud」里填写服务地址、用户 KEY（UUID）和端对端加密密码，选加密方式（推荐 `aes-128-cbc-fixed`），点「保存」。第一次保存时浏览器会请你授权扩展访问这个服务地址。
-2. 点「测试」：能连上、服务端还没有数据或者已有的数据解得开，都会提示。
+2. 点「测试」：会提示能不能连上，以及服务端是没有数据、还是已有的数据解得开。
 3. 点「立即上传」上传一次；勾选「定时同步时上传到 CookieCloud」后，定时同步每一轮都会上传（Cookie 没变化时不传）。
 4. 在 pt-tools 的「站点 → CookieCloud 导入」里填同样的服务地址、UUID 和密码。
 
