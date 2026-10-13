@@ -52,7 +52,9 @@ func TestCmdExitDispatch(t *testing.T) {
 	case "completion_unsupported":
 		completionCmd.Run(completionCmd, []string{"fish"})
 	case "initconfig_home_error":
+		// Windows 上 os.UserHomeDir 读 USERPROFILE
 		os.Unsetenv("HOME")
+		os.Unsetenv("USERPROFILE")
 		initConfigAndDBFile(&cobra.Command{}, nil)
 	case "run_flag_error_special":
 		fn := runCmd.FlagErrorFunc()

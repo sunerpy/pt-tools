@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -23,6 +24,11 @@ import (
 // terminate; repeated SIGTERMs then reach runCmdFunc's handler, cancel its ctx,
 // and genTorrentsWithRSS returns cleanly.
 func TestRunCmdFunc_PersistentSignalExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows 上进程发不了 SIGTERM 给自己（os.Process.Signal 只支持 Kill）：持续运行的 runCmdFunc 停不下来，
+		// 还会一直拿着单实例锁，让后面的测试以为已有实例在运行
+		t.Skip("Windows 上没法给自己发 SIGTERM")
+	}
 	_, _ = core.InitRuntime()
 	db, err := core.OpenTestDB(t)
 	require.NoError(t, err)
