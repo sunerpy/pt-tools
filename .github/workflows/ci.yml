@@ -338,6 +338,51 @@ jobs:
           GOARCH: amd64
         run: go vet ./...
 
+  # 原生 Windows 测试（#542）：发布产物含 windows/amd64 与 windows/arm64，交叉编译只能证明编得过，
+  # 这里在 windows-latest 上把测试真跑一遍。Windows 上打开着的文件删不掉、符号链接要特权、
+  # 没有 POSIX 权限位，测试要按这些差异写。不加 -race：Windows runner 默认没有 cgo 工具链。
+  go-test-windows:
+    name: Go Test (Windows)
+    needs: frontend-build
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download Frontend Dist
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frontend-dist
+          path: web/static/dist
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Run Tests
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./... -count=1 -timeout 30m 2>&1 | tee go-test-windows.log
+
+      - name: Summarize failures
+        if: failure()
+        shell: bash
+        run: grep -E '^(--- FAIL|FAIL|panic:)' go-test-windows.log | sort | uniq | head -400
+
+      - name: Upload Test Log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: go-test-windows-log
+          path: go-test-windows.log
+          retention-days: 7
+
   ci-success:
     name: CI Success
     needs:
