@@ -340,7 +340,7 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 
 ## 消息模板
 
-这一组接口对应网页上的「ChatOps → 消息模板」，写法见[消息模板](../guide/notify-channels.md#消息模板)。模板对所有通道生效，改了就影响之后发出的每一条通知与回复，所以保存与恢复默认要「操作」权限；令牌与设备的改动都记在操作审计里。主机的版本没有这一组接口时，`GET /meta` 的 `features` 里没有 `templates`。
+这一组接口对应网页上的「ChatOps → 消息模板」，写法见[消息模板](../guide/notify-channels.md#消息模板)。模板对所有通道生效，改了就影响之后发出的每一条通知与回复，所以保存与恢复默认要「操作」权限，模板的原文也只给有「操作」权限的调用者；令牌与设备的改动都记在操作审计里。示例值、内置文字的样子与预览的结果里像凭证的内容会被遮住。主机的版本没有这一组接口时，`GET /meta` 的 `features` 里没有 `templates`。
 
 ### GET /templates
 
@@ -348,7 +348,7 @@ TMDB 的图片：`file` 是 `poster_path` 去掉开头的 `/`，`size` 是海报
 
 - `groups`：事件的组，`key` 是 `notify`（通知）、`reply`（ChatOps 命令回复）或 `assistant`（AI 助手回复），另有 `name`、`desc`。
 - `common_vars`：每种事件都有的变量。变量有 `key`、`type`（`string`、`int`、`float`、`bool`、`list`）、`desc`、`sample`（示例值写成的文字）；列表没有示例，每一项的字段在 `item` 里。
-- `events`：每种事件一项，`type`、`group`、`name`、`desc`、`no_title`（只有正文）、`vars`、`sample_title` 与 `sample_text`（不改时发出去的样子）、`title` 与 `text`（现在的模板，空着的一项用内置文字）、`customized`、`updated_at`（自定义的时间，秒级时间戳）。
+- `events`：每种事件一项，`type`、`group`、`name`、`desc`、`no_title`（只有正文）、`vars`、`sample_title` 与 `sample_text`（不改时发出去的样子）、`title` 与 `text`（现在的模板，空着的一项用内置文字；只给有「操作」权限的调用者，只读的调用者拿到的是空的，看 `customized` 知道有没有自定义）、`customized`、`updated_at`（自定义的时间，秒级时间戳）。
 
 ### POST /templates/preview
 

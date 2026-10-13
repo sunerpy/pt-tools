@@ -1470,8 +1470,16 @@ components:
           items: { $ref: "#/components/schemas/AppTemplateVar" }
         sample_title: { type: string, description: 内置标题的样子 }
         sample_text: { type: string, description: 内置正文的样子 }
-        title: { type: string, description: 标题模板，空着用内置标题 }
-        text: { type: string, description: 正文模板，空着用内置正文 }
+        title:
+          {
+            type: string,
+            description: "标题模板，空着用内置标题；只给有 app:write 的调用者，只读的调用者是空的",
+          }
+        text:
+          {
+            type: string,
+            description: "正文模板，空着用内置正文；只给有 app:write 的调用者，只读的调用者是空的",
+          }
         customized: { type: boolean }
         updated_at: { type: integer, format: int64, description: 自定义的时间（秒级时间戳） }
     AppTemplateInput:

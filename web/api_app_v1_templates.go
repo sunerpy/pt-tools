@@ -7,13 +7,17 @@ import (
 	"strconv"
 
 	"github.com/sunerpy/pt-tools/global"
+	"github.com/sunerpy/pt-tools/internal/apitoken"
 	"github.com/sunerpy/pt-tools/internal/app"
 	"github.com/sunerpy/pt-tools/internal/notify"
 	"github.com/sunerpy/pt-tools/internal/notify/tmpl"
+	"github.com/sunerpy/pt-tools/web/middleware"
 )
 
 // App API 的消息模板（路线图 M22）：读目录与当前模板、保存、恢复默认、用示例数据预览。和网页上的「消息模板」是同一份：
 // 通知、ChatOps 命令回复、AI 助手回复三组事件，保存前用示例数据校验。读与预览要 app:read，保存与恢复默认要 app:write。
+// 模板的原文（title、text）是管理用的配置，里面写了什么都有可能，只给有 app:write 的调用者（编辑要用，按写的样子给）；
+// 只读的调用者拿到的这两项是空的。示例值、内置文字的样子与预览的结果经 appRedact 遮住像凭证的内容。
 
 // AppTemplateGroup 是事件的一组：notify（通知）、reply（ChatOps 命令回复）、assistant（AI 助手回复）。
 type AppTemplateGroup struct {
@@ -32,7 +36,7 @@ type AppTemplateVar struct {
 }
 
 // AppTemplate 是一种事件与它现在的模板；没有自定义时 title、text 是空的，发的是内置文字（sample_title、sample_text 是它的样子）。
-// no_title 的事件只有正文。
+// title、text 只给有 app:write 的调用者，只读的调用者看 customized 知道有没有自定义。no_title 的事件只有正文。
 type AppTemplate struct {
 	Type        string           `json:"type"`
 	Group       string           `json:"group"`
@@ -81,7 +85,7 @@ func appTemplateVars(vars []notify.Var) []AppTemplateVar {
 		if v.Type == notify.VarList {
 			av.Item = appTemplateVars(v.Item)
 		} else {
-			av.Sample = appSampleText(v.Sample)
+			av.Sample = appRedact(appSampleText(v.Sample))
 		}
 		out = append(out, av)
 	}
@@ -102,10 +106,14 @@ func appSampleText(v any) string {
 	}
 }
 
-func appTemplateView(v app.TemplateView) AppTemplate {
+// appTemplateView 是给 App 的一种事件；withSource 为 false 时不带模板原文。
+func appTemplateView(v app.TemplateView, withSource bool) AppTemplate {
 	out := AppTemplate{
 		Type: v.Type, Group: v.Group, Name: v.Name, Desc: v.Desc, NoTitle: v.NoTitle, Vars: appTemplateVars(v.Vars),
-		SampleTitle: v.SampleTitle, SampleText: v.SampleText, Title: v.Title, Text: v.Text, Customized: v.Customized,
+		SampleTitle: appRedact(v.SampleTitle), SampleText: appRedact(v.SampleText), Customized: v.Customized,
+	}
+	if withSource {
+		out.Title, out.Text = v.Title, v.Text
 	}
 	if v.UpdatedAt != nil {
 		out.UpdatedAt = v.UpdatedAt.Unix()
@@ -153,8 +161,9 @@ func (s *Server) appTemplates(w http.ResponseWriter, r *http.Request) {
 	for _, g := range cat.Groups {
 		out.Groups = append(out.Groups, AppTemplateGroup{Key: g.Key, Name: g.Name, Desc: g.Desc})
 	}
+	withSource := middleware.PrincipalFrom(r.Context()).Has(apitoken.ScopeAppWrite)
 	for _, v := range cat.Events {
-		out.Events = append(out.Events, appTemplateView(v))
+		out.Events = append(out.Events, appTemplateView(v, withSource))
 	}
 	appJSON(w, out)
 }
@@ -173,7 +182,7 @@ func (s *Server) appTemplateSave(w http.ResponseWriter, r *http.Request) {
 		appTemplateError(w, err)
 		return
 	}
-	appJSON(w, appTemplateView(v))
+	appJSON(w, appTemplateView(v, true))
 }
 
 func (s *Server) appTemplateReset(w http.ResponseWriter, r *http.Request) {
@@ -205,5 +214,5 @@ func (s *Server) appTemplatePreview(w http.ResponseWriter, r *http.Request) {
 		appTemplateError(w, err)
 		return
 	}
-	appJSON(w, AppTemplatePreview{Title: p.Title, Text: p.Text})
+	appJSON(w, AppTemplatePreview{Title: appRedact(p.Title), Text: appRedact(p.Text)})
 }

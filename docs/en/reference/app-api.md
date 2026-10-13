@@ -340,7 +340,7 @@ Every event has `seq`, `type` and `at`, and depending on its type:
 
 ## Message templates
 
-These endpoints match ChatOps → Message templates (消息模板) on the web; the syntax is described in [Message templates](../guide/notify-channels.md#message-templates). A template applies to every channel and changes every notification and reply sent after it is saved, so saving and restoring the default need Operate, and changes made by tokens and devices are recorded in the audit log. On a host without these endpoints, `features` in `GET /meta` has no `templates`.
+These endpoints match ChatOps → Message templates (消息模板) on the web; the syntax is described in [Message templates](../guide/notify-channels.md#message-templates). A template applies to every channel and changes every notification and reply sent after it is saved, so saving and restoring the default need Operate, and only callers with Operate get the template source; changes made by tokens and devices are recorded in the audit log. Anything that looks like a credential is masked in the sample values, the built-in text and preview results. On a host without these endpoints, `features` in `GET /meta` has no `templates`.
 
 ### GET /templates
 
@@ -348,7 +348,7 @@ Responds with `groups`, `common_vars` and `events`:
 
 - `groups`: the event groups. `key` is `notify` (notifications), `reply` (ChatOps command replies) or `assistant` (AI assistant replies), with a `name` and a `desc`.
 - `common_vars`: the variables every event has. A variable has a `key`, a `type` (`string`, `int`, `float`, `bool` or `list`), a `desc` and a `sample` (the sample value written as text); a list has no sample, and the fields of each item are in `item`.
-- `events`: one entry per event with `type`, `group`, `name`, `desc`, `no_title` (body only), `vars`, `sample_title` and `sample_text` (what is sent when nothing is changed), `title` and `text` (the current templates; an empty one uses the built-in text), `customized` and `updated_at` (when it was customized, as a Unix timestamp in seconds).
+- `events`: one entry per event with `type`, `group`, `name`, `desc`, `no_title` (body only), `vars`, `sample_title` and `sample_text` (what is sent when nothing is changed), `title` and `text` (the current templates; an empty one uses the built-in text; only callers with Operate get them, a read-only caller gets them empty and can tell from `customized` whether there is one), `customized` and `updated_at` (when it was customized, as a Unix timestamp in seconds).
 
 ### POST /templates/preview
 

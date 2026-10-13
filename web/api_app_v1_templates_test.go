@@ -164,3 +164,31 @@ func TestAppTemplatesUnavailable(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Equal(t, "unavailable", errorCode(t, w))
 }
+
+// 模板原文只给有 app:write 的调用者：只读的令牌看得到有自定义，拿不到原文；预览的结果遮住像凭证的内容
+func TestAppTemplatesSourceOnlyForWriters(t *testing.T) {
+	e, _ := newTemplateAppEnv(t)
+	read := e.token(apitoken.ScopeAppRead)
+	write := e.token(apitoken.ScopeAppRead, apitoken.ScopeAppWrite)
+	secret := "https://pt.example/download.php?id=1&passkey=0123456789abcdef0123456789abcdef"
+	w := e.do(appReq{method: http.MethodPut, path: "/api/app/v1/templates/rss.new", bearer: write, body: `{"text":"{{.text}} ` + secret + `"}`})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	w = e.do(appReq{method: http.MethodGet, path: "/api/app/v1/templates", bearer: read})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "0123456789abcdef0123456789abcdef")
+	var cat AppTemplateCatalog
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &cat))
+	v := findTemplate(t, cat, notify.EventRSSNew)
+	assert.True(t, v.Customized)
+	assert.Empty(t, v.Text, "只读的调用者拿不到原文")
+
+	w = e.do(appReq{method: http.MethodGet, path: "/api/app/v1/templates", bearer: write})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &cat))
+	assert.Equal(t, "{{.text}} "+secret, findTemplate(t, cat, notify.EventRSSNew).Text, "能改的调用者按写的样子拿到")
+
+	w = e.do(appReq{method: http.MethodPost, path: "/api/app/v1/templates/preview", bearer: read, body: `{"type":"rss.new","text":"{{.text}} ` + secret + `"}`})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "0123456789abcdef0123456789abcdef", "预览的结果遮住像凭证的内容")
+}

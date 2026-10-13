@@ -46,10 +46,10 @@ class AppTemplate {
   /// 内置正文的样子
   String sampleText;
 
-  /// 标题模板，空着用内置标题
+  /// 标题模板，空着用内置标题；只给有 app:write 的调用者，只读的调用者是空的
   String title;
 
-  /// 正文模板，空着用内置正文
+  /// 正文模板，空着用内置正文；只给有 app:write 的调用者，只读的调用者是空的
   String text;
 
   bool customized;
