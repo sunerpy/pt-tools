@@ -394,6 +394,7 @@ jobs:
         format-check,
         extension-build,
         cross-compile,
+        go-test-windows,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
